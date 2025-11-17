@@ -1306,6 +1306,19 @@ list( REMOVE_ITEM GAME_NONPCH_SOURCES ${PCH_SOURCES} )
 
 add_executable( ${PROJECT_NAME} WIN32 MACOSX_BUNDLE ${GAME_SOURCES} )
 
+get_property(_raze_pk3_targets GLOBAL PROPERTY RAZE_PK3_TARGETS)
+if(_raze_pk3_targets)
+	add_dependencies(${PROJECT_NAME} ${_raze_pk3_targets})
+	get_property(_raze_pk3_files GLOBAL PROPERTY RAZE_PK3_FILES)
+	foreach(_pk3 ${_raze_pk3_files})
+		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				"${COMPILE_OUTPUT_DIRECTORY}/${_pk3}"
+				"$<TARGET_FILE_DIR:${PROJECT_NAME}>/${_pk3}"
+			COMMENT "Copying ${_pk3} to runtime output directory")
+	endforeach()
+endif()
+
 target_precompile_headers( ${PROJECT_NAME} PRIVATE g_pch.h )
 
 #set_source_files_properties( ${FASTMATH_SOURCES} PROPERTIES COMPILE_FLAGS ${DEM_FASTMATH_FLAG} )

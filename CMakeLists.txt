@@ -97,16 +97,9 @@ function( add_pk3 PK3_NAME PK3_DIR )
 	# Generate target name. Just use "pk3" for main pk3 target.
 	string( REPLACE "." "_" PK3_TARGET ${PK3_NAME} )
 
-	if( NOT COMPILE_OUTPUT_OLDSTYLE )
-		add_custom_command( OUTPUT ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME}
-			COMMAND zipdir -udf ${PK3_ZIPDIR_OPTIONS} ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME} ${PK3_DIR}
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME} $<TARGET_FILE_DIR:${PROJECT_NAME}>/${PK3_NAME}
-			DEPENDS zipdir )
-	else()
-		add_custom_command( OUTPUT ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME}
-			COMMAND zipdir -udf ${PK3_ZIPDIR_OPTIONS} ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME} ${PK3_DIR}
-			DEPENDS zipdir )
-	endif()
+	add_custom_command( OUTPUT ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME}
+		COMMAND zipdir -udf ${PK3_ZIPDIR_OPTIONS} ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME} ${PK3_DIR}
+		DEPENDS zipdir )
 	# Create a list of source files for this PK3, for use in the IDE
 	# Phase 1: Create a list of all source files for this PK3 archive, except
 	#  for a couple of strife image file names that confuse CMake.
@@ -132,6 +125,8 @@ function( add_pk3 PK3_NAME PK3_DIR )
 		COMMAND ${CMAKE_COMMAND} -E touch $<TARGET_FILE:zipdir>
 		DEPENDS ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME}
 		SOURCES ${PK3_SRCS})
+	set_property(GLOBAL APPEND PROPERTY RAZE_PK3_TARGETS ${PK3_TARGET})
+	set_property(GLOBAL APPEND PROPERTY RAZE_PK3_FILES ${PK3_NAME})
 	# Phase 3: Assign source files to a nice folder structure in the IDE
 	assort_pk3_source_folder("Source Files" ${PK3_DIR})
 	# Phase 4: Add the resulting PK3 to the install target.
