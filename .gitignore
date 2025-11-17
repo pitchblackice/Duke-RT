@@ -6,3 +6,4 @@ build-vs2019/
 *.AppImage
 .DS_Store
 raze-crash.log
+/vcpkg_installed

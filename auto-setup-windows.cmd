@@ -100,21 +100,16 @@ cmake -A x64 -S .. -B . ^
 	-DVCPKG_INSTALLED_DIR=./vcpkg_installed/
 cmake --build . --config RelWithDebInfo -- -maxcpucount -verbosity:minimal
 
-set "ZMUSIC_DLL=.\zmusic\build\source\Release\zmusiclite.dll"
-if exist "%ZMUSIC_DLL%" (
-	if not exist RelWithDebInfo mkdir RelWithDebInfo
-	copy /Y "%ZMUSIC_DLL%" RelWithDebInfo >nul
+echo === Installing vcpkg dependencies for x64-windows ===
+.\vcpkg\vcpkg.exe install --triplet x64-windows
+if errorlevel 1 (
+	echo vcpkg install failed.
+	exit /b 1
 )
 
-set "OPENAL_DLL=.\vcpkg\buildtrees\openal-soft\x64-windows-rel\OpenAL32.dll"
-if exist "%OPENAL_DLL%" (
-	if not exist RelWithDebInfo mkdir RelWithDebInfo
-	copy /Y "%OPENAL_DLL%" RelWithDebInfo >nul
-)
-
-set "DEP_BIN_DIR=..\vcpkg_installed\x64-windows\bin"
+set "DEP_BIN_DIR=.\zmusic\build\source\Release\"
 set "DEP_BIN_DEBUG_DIR=..\vcpkg_installed\x64-windows\debug\bin"
-set "DEP_DLLS=FLAC.dll libmp3lame.dll mpg123.dll ogg.dll opus.dll out123.dll sndfile.dll syn123.dll vorbis.dll vorbisenc.dll vorbisfile.dll zlib1.dll"
+set "DEP_DLLS=FLAC.dll libmp3lame.dll mpg123.dll ogg.dll opus.dll out123.dll sndfile.dll syn123.dll vorbis.dll vorbisenc.dll vorbisfile.dll zlib1.dll zmusiclite.dll"
 if not exist RelWithDebInfo mkdir RelWithDebInfo
 for %%D in (%DEP_DLLS%) do (
 	if exist "%DEP_BIN_DIR%\%%D" (
@@ -122,6 +117,15 @@ for %%D in (%DEP_DLLS%) do (
 	) else if exist "%DEP_BIN_DEBUG_DIR%\%%D" (
 		copy /Y "%DEP_BIN_DEBUG_DIR%\%%D" RelWithDebInfo >nul
 	)
+)
+
+echo === Copying OpenAL DLL ===
+pwd
+ls
+set "OPENAL_DLL=.\vcpkg\packages\openal-soft_x64-windows\bin\OpenAL32.dll"
+if exist "%OPENAL_DLL%" (
+	if not exist RelWithDebInfo mkdir RelWithDebInfo
+	copy /Y "%OPENAL_DLL%" RelWithDebInfo >nul
 )
 
 rem -- If successful, show the build
