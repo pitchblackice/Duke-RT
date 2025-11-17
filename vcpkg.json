@@ -35,13 +35,16 @@
             "name": "libvpx",
             "platform": "!windows & static"
         },
-	{
+    	{
             "name": "gtk3",
             "platform": "!windows & !osx & static"
-	},
-	{
+    	},
+    	{
             "name": "glib",
             "platform": "!windows & !osx & static"
-	}
+    	},
+        {
+            "name": "openal-soft"
+        }
     ]
 }

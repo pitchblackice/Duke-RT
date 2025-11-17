@@ -49,17 +49,40 @@ goto aftercopyright
 
 :aftercopyright
 
-setlocal enableextensions
+setlocal enableextensions enabledelayedexpansion
+
+rem Work around modern CMake disallowing LOCATION lookups inside old ports (yasm)
+set "VCPKG_CMAKE_CONFIGURE_OPTIONS=-DCMAKE_POLICY_DEFAULT_CMP0026=OLD"
+set "VCPKG_KEEP_ENV_VARS=VCPKG_CMAKE_CONFIGURE_OPTIONS"
 
 rem -- Always operate within the build folder
 if not exist "%~dp0\build" mkdir "%~dp0\build"
 pushd "%~dp0\build"
 
-if exist vcpkg if exist vcpkg\* git -C ./vcpkg pull
-if not exist vcpkg git clone https://github.com/microsoft/vcpkg
+set "VCPKG_ROOT=%CD%\vcpkg"
+set "PATH=%VCPKG_ROOT%;%PATH%"
+set "VCPKG_OVERLAY_PORTS=%~dp0vcpkg-overlays"
 
-if exist zmusic if exist vcpkg\* git -C ./zmusic pull
-if not exist zmusic git clone https://github.com/zdoom/zmusic
+if exist vcpkg (
+	git -C ./vcpkg pull
+) else (
+	git clone https://github.com/microsoft/vcpkg
+)
+git -C ./vcpkg checkout 74e6536215718009aae747d86d84b78376bf9e09
+
+if not exist vcpkg\vcpkg.exe (
+	call .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+	if errorlevel 1 (
+		echo Failed to bootstrap vcpkg.
+		exit /b 1
+	)
+)
+
+if exist zmusic (
+	git -C ./zmusic pull
+) else (
+	git clone https://github.com/zdoom/zmusic
+)
 
 if not exist "%~dp0\build\zmusic\build" mkdir "%~dp0\build\zmusic\build"
 if not exist "%~dp0\build\vcpkg_installed" mkdir "%~dp0\build\vcpkg_installed"
@@ -67,16 +90,39 @@ if not exist "%~dp0\build\vcpkg_installed" mkdir "%~dp0\build\vcpkg_installed"
 cmake -A x64 -S ./zmusic -B ./zmusic/build ^
 	-DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake ^
 	-DVCPKG_LIBSNDFILE=1 ^
-	-DVCPKG_INSTALLLED_DIR=../vcpkg_installed/
+	-DVCPKG_INSTALLED_DIR=../vcpkg_installed/
 cmake --build ./zmusic/build --config Release -- -maxcpucount -verbosity:minimal
 
 cmake -A x64 -S .. -B . ^
 	-DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake ^
 	-DZMUSIC_INCLUDE_DIR=./zmusic/include ^
 	-DZMUSIC_LIBRARIES=./zmusic/build/source/Release/zmusiclite.lib ^
-	-DVCPKG_INSTALLLED_DIR=./vcpkg_installed/
+	-DVCPKG_INSTALLED_DIR=./vcpkg_installed/
 cmake --build . --config RelWithDebInfo -- -maxcpucount -verbosity:minimal
+
+set "ZMUSIC_DLL=.\zmusic\build\source\Release\zmusiclite.dll"
+if exist "%ZMUSIC_DLL%" (
+	if not exist RelWithDebInfo mkdir RelWithDebInfo
+	copy /Y "%ZMUSIC_DLL%" RelWithDebInfo >nul
+)
+
+set "OPENAL_DLL=.\vcpkg\buildtrees\openal-soft\x64-windows-rel\OpenAL32.dll"
+if exist "%OPENAL_DLL%" (
+	if not exist RelWithDebInfo mkdir RelWithDebInfo
+	copy /Y "%OPENAL_DLL%" RelWithDebInfo >nul
+)
+
+set "DEP_BIN_DIR=..\vcpkg_installed\x64-windows\bin"
+set "DEP_BIN_DEBUG_DIR=..\vcpkg_installed\x64-windows\debug\bin"
+set "DEP_DLLS=FLAC.dll libmp3lame.dll mpg123.dll ogg.dll opus.dll out123.dll sndfile.dll syn123.dll vorbis.dll vorbisenc.dll vorbisfile.dll zlib1.dll"
+if not exist RelWithDebInfo mkdir RelWithDebInfo
+for %%D in (%DEP_DLLS%) do (
+	if exist "%DEP_BIN_DIR%\%%D" (
+		copy /Y "%DEP_BIN_DIR%\%%D" RelWithDebInfo >nul
+	) else if exist "%DEP_BIN_DEBUG_DIR%\%%D" (
+		copy /Y "%DEP_BIN_DEBUG_DIR%\%%D" RelWithDebInfo >nul
+	)
+)
 
 rem -- If successful, show the build
 if not errorlevel 1 if exist RelWithDebInfo\raze.exe explorer.exe RelWithDebInfo
-
