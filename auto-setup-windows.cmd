@@ -51,6 +51,12 @@ goto aftercopyright
 
 setlocal enableextensions enabledelayedexpansion
 
+set "PROJECT_ROOT=%~dp0"
+set "WINDOWS_RUNTIME_DLL_DIR=%PROJECT_ROOT%bin\windows\runtime-deps"
+if not exist "%PROJECT_ROOT%bin" mkdir "%PROJECT_ROOT%bin"
+if not exist "%PROJECT_ROOT%bin\windows" mkdir "%PROJECT_ROOT%bin\windows"
+if not exist "%WINDOWS_RUNTIME_DLL_DIR%" mkdir "%WINDOWS_RUNTIME_DLL_DIR%"
+
 rem Work around modern CMake disallowing LOCATION lookups inside old ports (yasm)
 set "VCPKG_CMAKE_CONFIGURE_OPTIONS=-DCMAKE_POLICY_DEFAULT_CMP0026=OLD"
 set "VCPKG_KEEP_ENV_VARS=VCPKG_CMAKE_CONFIGURE_OPTIONS"
@@ -62,6 +68,10 @@ pushd "%~dp0\build"
 set "VCPKG_ROOT=%CD%\vcpkg"
 set "PATH=%VCPKG_ROOT%;%PATH%"
 set "VCPKG_OVERLAY_PORTS=%~dp0vcpkg-overlays"
+
+echo ===========================
+echo === Bootstrapping vcpkg ===
+echo ===========================
 
 if exist vcpkg (
 	git -C ./vcpkg pull
@@ -77,6 +87,32 @@ if not exist vcpkg\vcpkg.exe (
 		exit /b 1
 	)
 )
+
+echo =====================================
+echo === Install and copying OpenAL ===
+echo =====================================
+
+.\vcpkg\vcpkg.exe install --triplet x64-windows
+if errorlevel 1 (
+	echo vcpkg install failed.
+	exit /b 1
+)
+
+set "OPENAL_DLL=.\vcpkg\packages\openal-soft_x64-windows\bin\OpenAL32.dll"
+if exist "%OPENAL_DLL%" (
+	if not exist RelWithDebInfo mkdir RelWithDebInfo
+	copy /Y "%OPENAL_DLL%" "RelWithDebInfo\OpenAL32.dll" >nul
+	copy /Y "%OPENAL_DLL%" "%WINDOWS_RUNTIME_DLL_DIR%\OpenAL32.dll" >nul
+)
+set "OPENAL_PDB=.\vcpkg\packages\openal-soft_x64-windows\bin\OpenAL32.pdb"
+if exist "%OPENAL_PDB%" (
+	copy /Y "%OPENAL_PDB%" "RelWithDebInfo\OpenAL32.pdb" >nul
+	copy /Y "%OPENAL_PDB%" "%WINDOWS_RUNTIME_DLL_DIR%\OpenAL32.pdb" >nul
+)
+
+echo =======================
+echo === Build ZMusic ===
+echo =======================
 
 if exist zmusic (
 	git -C ./zmusic pull
@@ -100,32 +136,32 @@ cmake -A x64 -S .. -B . ^
 	-DVCPKG_INSTALLED_DIR=./vcpkg_installed/
 cmake --build . --config RelWithDebInfo -- -maxcpucount -verbosity:minimal
 
-echo === Installing vcpkg dependencies for x64-windows ===
-.\vcpkg\vcpkg.exe install --triplet x64-windows
-if errorlevel 1 (
-	echo vcpkg install failed.
-	exit /b 1
-)
+echo =============================================
+echo === Copy ZMusic and audio-related DLLs ===
+echo =============================================
 
-set "DEP_BIN_DIR=.\zmusic\build\source\Release\"
+set "DEP_BIN_DIR=..\vcpkg_installed\x64-windows\bin"
 set "DEP_BIN_DEBUG_DIR=..\vcpkg_installed\x64-windows\debug\bin"
-set "DEP_DLLS=FLAC.dll libmp3lame.dll mpg123.dll ogg.dll opus.dll out123.dll sndfile.dll syn123.dll vorbis.dll vorbisenc.dll vorbisfile.dll zlib1.dll zmusiclite.dll"
+set "DEP_DLLS=FLAC.dll FLAC.pdb libmp3lame.dll libmp3lame.pdb mpg123.dll mpg123.pdb ogg.dll ogg.pdb opus.dll opus.pdb out123.dll out123.pdb sndfile.dll sndfile.pdb syn123.dll syn123.pdb vorbis.dll vorbis.pdb vorbisenc.dll vorbisenc.pdb vorbisfile.dll vorbisfile.pdb zlib1.dll zlib1.pdb zmusiclite.dll zmusiclite.pdb"
 if not exist RelWithDebInfo mkdir RelWithDebInfo
 for %%D in (%DEP_DLLS%) do (
-	if exist "%DEP_BIN_DIR%\%%D" (
-		copy /Y "%DEP_BIN_DIR%\%%D" RelWithDebInfo >nul
-	) else if exist "%DEP_BIN_DEBUG_DIR%\%%D" (
-		copy /Y "%DEP_BIN_DEBUG_DIR%\%%D" RelWithDebInfo >nul
+	set "SRC="
+	if exist "%DEP_BIN_DEBUG_DIR%\%%D" (
+		set "SRC=%DEP_BIN_DEBUG_DIR%\%%D"
+	) else if exist "%DEP_BIN_DIR%\%%D" (
+		set "SRC=%DEP_BIN_DIR%\%%D"
+	)
+	if defined SRC (
+		copy /Y "!SRC!" "RelWithDebInfo\%%D" >nul
+		copy /Y "!SRC!" "%WINDOWS_RUNTIME_DLL_DIR%\%%D" >nul
 	)
 )
 
-echo === Copying OpenAL DLL ===
-pwd
-ls
-set "OPENAL_DLL=.\vcpkg\packages\openal-soft_x64-windows\bin\OpenAL32.dll"
-if exist "%OPENAL_DLL%" (
+set "ZMUSIC_DLL=.\zmusic\build\source\Release\zmusiclite.dll"
+if exist "%ZMUSIC_DLL%" (
 	if not exist RelWithDebInfo mkdir RelWithDebInfo
-	copy /Y "%OPENAL_DLL%" RelWithDebInfo >nul
+	copy /Y "%ZMUSIC_DLL%" "RelWithDebInfo\zmusiclite.dll" >nul
+	copy /Y "%ZMUSIC_DLL%" "%WINDOWS_RUNTIME_DLL_DIR%\zmusiclite.dll" >nul
 )
 
 rem -- If successful, show the build

@@ -7,3 +7,4 @@ build-vs2019/
 .DS_Store
 raze-crash.log
 /vcpkg_installed
+/bin/windows/runtime-deps

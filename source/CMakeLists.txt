@@ -1328,6 +1328,24 @@ endif()
 
 target_link_libraries( ${PROJECT_NAME} ${PROJECT_LIBRARIES} ${ZMUSIC_LIBRARIES} lzma )
 
+if( WIN32 )
+	set( RAZE_RUNTIME_DLL_DIR "${CMAKE_SOURCE_DIR}/bin/windows/runtime-deps" CACHE PATH "Directory containing prebaked runtime DLLs to stage beside raze.exe." )
+	if( EXISTS "${RAZE_RUNTIME_DLL_DIR}" )
+		file(GLOB RAZE_RUNTIME_DLLS LIST_DIRECTORIES FALSE "${RAZE_RUNTIME_DLL_DIR}/*.dll" "${RAZE_RUNTIME_DLL_DIR}/*.pdb")
+		if( RAZE_RUNTIME_DLLS )
+			foreach(_dll IN LISTS RAZE_RUNTIME_DLLS)
+				add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+					COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+					COMMENT "Copying runtime dependency ${_dll}" VERBATIM)
+			endforeach()
+		else()
+			message(STATUS "No runtime DLLs found under ${RAZE_RUNTIME_DLL_DIR}; Visual Studio debugging may require running auto-setup-windows.cmd first.")
+		endif()
+	else()
+		message(STATUS "Runtime dependency directory ${RAZE_RUNTIME_DLL_DIR} not found; skipping DLL copy step.")
+	endif()
+endif()
+
 include_directories(
 	BEFORE
 	${CMAKE_CURRENT_SOURCE_DIR}
