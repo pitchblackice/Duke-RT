@@ -1338,7 +1338,11 @@ if (HAVE_NRI)
 	else()
 		find_program(RAZE_DXC_EXECUTABLE NAMES dxc REQUIRED)
 	endif()
-	set(RAZE_NRI_COMMON_SHADER_ARGS -HV 2021 -Wno-for-redefinition -I "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders")
+	set(RAZE_NRI_COMMON_SHADER_ARGS
+		-HV 2021
+		-Wno-for-redefinition
+		-I "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders"
+		-I "${CMAKE_SOURCE_DIR}/libraries/NRIFramework/External/NRI/Include")
 	add_custom_command(
 		OUTPUT
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.dxil"

@@ -13,25 +13,25 @@ struct PSInput
 float4 main(PSInput input) : SV_Target0
 {
 	float4 texel = float4(1.0, 1.0, 1.0, 1.0);
-	if ((Flags & NRI2D_FLAG_TEXTURED) != 0)
+	if ((gNri2DConstants.Flags & NRI2D_FLAG_TEXTURED) != 0)
 	{
 		texel = InputTexture.Sample(InputSampler, input.TexCoord);
 	}
 
-	if ((Flags & NRI2D_FLAG_ALPHA_FROM_RED) != 0)
+	if ((gNri2DConstants.Flags & NRI2D_FLAG_ALPHA_FROM_RED) != 0)
 	{
 		float alpha = max(texel.a, texel.r);
 		texel = float4(1.0, 1.0, 1.0, alpha);
 	}
 
-	if ((Flags & NRI2D_FLAG_INVERT) != 0)
+	if ((gNri2DConstants.Flags & NRI2D_FLAG_INVERT) != 0)
 	{
 		texel.rgb = 1.0 - texel.rgb;
 	}
 
 	float4 color = texel * input.Color;
-	color.rgb = color.rgb * ObjectColor.rgb + AddColor.rgb;
-	color.a *= ObjectColor.a;
-	color *= ScreenFade;
+	color.rgb = color.rgb * gNri2DConstants.ObjectColor.rgb + gNri2DConstants.AddColor.rgb;
+	color.a *= gNri2DConstants.ObjectColor.a;
+	color *= gNri2DConstants.ScreenFade;
 	return saturate(color);
 }

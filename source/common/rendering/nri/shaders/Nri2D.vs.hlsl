@@ -19,7 +19,7 @@ VSOutput main(VSInput input)
 	VSOutput output;
 
 	float4 p = NriTransformPosition(float3(input.Position.x, input.Position.z, input.Position.y));
-	float2 ndc = float2(p.x * InvViewportSize.x * 2.0 - 1.0, 1.0 - p.y * InvViewportSize.y * 2.0);
+	float2 ndc = float2(p.x * gNri2DConstants.InvViewportSize.x * 2.0 - 1.0, 1.0 - p.y * gNri2DConstants.InvViewportSize.y * 2.0);
 
 	output.Position = float4(ndc, p.z, 1.0);
 	output.TexCoord = NriTransformTexcoord(input.TexCoord);
