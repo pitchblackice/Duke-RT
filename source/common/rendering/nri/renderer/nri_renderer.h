@@ -22,6 +22,10 @@ public:
 	bool Initialize();
 	void Shutdown();
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
+	void ResetHistory();
+	void PrintStatus() const;
+	bool IsPathTracingSupported() const { return mPathTracingSupported; }
+	const char* GetAvailabilityReason() const;
 
 private:
 	enum class FrameTextureSlot : uint32_t
@@ -80,8 +84,10 @@ private:
 	bool DispatchComposition();
 	bool DispatchUpscaleChain();
 	bool DispatchFinal();
+	bool CheckPathTracingSupport();
 	void UpdatePerFrameState(HWDrawInfo& di);
 	void LogBridgeStats(const nri_scene::SceneDebugStats& stats);
+	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
 
 	void DestroyCachedTextures();
@@ -103,6 +109,7 @@ private:
 	nri::Pipeline* GetPipeline(PipelineSlot slot) const { return mPipelines[(size_t)slot]; }
 	NRIUpscalerKind GetSelectedUpscalerKind() const;
 	NRIUpscalerKind ResolveUpscalerKind(bool logFallback);
+	NRIUpscalerKind GetResolvedUpscalerKindForStatus() const;
 	nri::UpscalerMode GetSelectedUpscalerMode() const;
 	bool IsUpscalerSupported(NRIUpscalerKind kind) const;
 	void FillMatrix(float* outMatrix, const VSMatrix& matrix) const;
@@ -161,8 +168,10 @@ private:
 	float mGroundColor[3] = { 0.08f, 0.08f, 0.08f };
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
+	bool mPathTracingSupported = true;
 	bool mResetHistory = true;
 	bool mUseUpscaledInFinal = false;
+	bool mHasLoggedFallback = false;
 	int mLastUpscalerRequest = -1;
 	NRIUpscalerKind mLastUpscalerResolved = NRIUpscalerKind::Off;
 	FrameTextureSlot mHistoryInputSlot = FrameTextureSlot::TaaHistoryPing;

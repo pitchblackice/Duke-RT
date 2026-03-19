@@ -47,6 +47,9 @@ public:
 	FTexture* WipeEndScreen() override;
 	TArray<uint8_t> GetScreenshotBuffer(int& pitch, ESSType& color_type, float& gamma) override;
 	bool FlipSavePic() const override { return false; }
+	void PrintPathTracingCaps() const;
+	void PrintPathTracingStatus() const;
+	void ResetPathTracingHistory();
 
 private:
 	using PFN_nriEnumerateAdapters = nri::Result(NRI_CALL*)(nri::AdapterDesc*, uint32_t&);

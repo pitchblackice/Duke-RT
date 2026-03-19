@@ -1,15 +1,18 @@
 #include "nri_portal_bridge.h"
 
+#include "c_cvars.h"
 #include "hw_portal.h"
 #include "image.h"
 #include "textures.h"
 #include "v_video.h"
 
+#include <algorithm>
+
+CVAR(Int, nri_ptportaldepth, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 namespace
 {
 	using namespace nri_scene;
-
-	constexpr int NRI_MAX_PORTAL_CAPTURE_DEPTH = 2;
 	thread_local int gPortalCaptureDepth = 0;
 
 	struct CaptureState
@@ -50,6 +53,9 @@ namespace
 		outView.stats.mirrorSurfaces += source.stats.mirrorSurfaces;
 		outView.stats.skySurfaces += source.stats.skySurfaces;
 		outView.stats.modelDrawItems += source.stats.modelDrawItems;
+		outView.stats.voxelProxyDrawItems += source.stats.voxelProxyDrawItems;
+		outView.stats.unsupportedModelDrawItems += source.stats.unsupportedModelDrawItems;
+		outView.stats.portalCapturesSkipped += source.stats.portalCapturesSkipped;
 	}
 
 	void UpdateSkyColor(float* outColor, FGameTexture* texture, PalEntry fallback)
@@ -128,10 +134,31 @@ namespace
 		}
 	}
 
+	unsigned int CountCapturablePortals(HWDrawInfo& di)
+	{
+		unsigned int count = 0;
+		for (HWPortal* portal : di.Portals)
+		{
+			if (ShouldCapturePortal(portal))
+			{
+				count++;
+			}
+		}
+
+		return count;
+	}
+
 	void CapturePortalsRecursive(HWDrawInfo& di, SceneView& outView, CaptureState& state)
 	{
-		if (gPortalCaptureDepth >= NRI_MAX_PORTAL_CAPTURE_DEPTH || state.renderState == nullptr)
+		const int maxDepth = std::max(0, std::min((int)nri_ptportaldepth, 8));
+		if (state.renderState == nullptr)
 		{
+			return;
+		}
+
+		if (gPortalCaptureDepth >= maxDepth)
+		{
+			outView.stats.portalCapturesSkipped += CountCapturablePortals(di);
 			return;
 		}
 

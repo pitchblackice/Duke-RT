@@ -20,6 +20,7 @@
 #include <fstream>
 
 EXTERN_CVAR(String, nri_api)
+EXTERN_CVAR(Int, nri_ptportaldepth)
 
 namespace
 {
@@ -47,6 +48,17 @@ namespace
 		const uint32_t remainder = value % alignment;
 		return remainder == 0 ? value : value + alignment - remainder;
 	}
+
+	static NRIRenderDevice* GetActiveNRIRenderDevice()
+	{
+		if (screen == nullptr || screen->Backend() != 4)
+		{
+			Printf("The NRI backend is not active.\n");
+			return nullptr;
+		}
+
+		return static_cast<NRIRenderDevice*>(screen);
+	}
 }
 
 extern "C" nri::Result NRI_CALL nriGetInterface(const nri::Device& device, const char* interfaceName, size_t interfaceSize, void* interfacePtr)
@@ -59,6 +71,30 @@ extern "C" void NRI_CALL nriDestroyDevice(nri::Device* device)
 	if (gNriDestroyDeviceForwarder != nullptr)
 	{
 		gNriDestroyDeviceForwarder(device);
+	}
+}
+
+CCMD(nri_ptcaps)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingCaps();
+	}
+}
+
+CCMD(nri_ptstatus)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingStatus();
+	}
+}
+
+CCMD(nri_ptreset)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->ResetPathTracingHistory();
 	}
 }
 
@@ -343,6 +379,62 @@ TArray<uint8_t> NRIRenderDevice::GetScreenshotBuffer(int& pitch, ESSType& color_
 	return buffer;
 }
 
+void NRIRenderDevice::PrintPathTracingCaps() const
+{
+	if (mDevice == nullptr)
+	{
+		Printf("NRI PT capabilities are unavailable because the device is not initialized.\n");
+		return;
+	}
+
+	const nri::DeviceDesc& deviceDesc = mCore.GetDeviceDesc(*mDevice);
+	Printf("NRI PT caps: api=%s shader_model=%u.%u ray_tracing_tier=%u texture2D_max=%u root_constants=%u root_descriptors=%u descriptor_sets=%u\n",
+		(const char*)nri_api,
+		deviceDesc.shaderModel / 10,
+		deviceDesc.shaderModel % 10,
+		deviceDesc.tiers.rayTracing,
+		deviceDesc.dimensions.texture2DMaxDim,
+		deviceDesc.pipelineLayout.rootConstantMaxSize,
+		deviceDesc.pipelineLayout.rootDescriptorMaxNum,
+		deviceDesc.pipelineLayout.descriptorSetMaxNum);
+	Printf("NRI PT upscalers: NIS=%s DLSS-SR=%s DLRR=%s portal_depth=%d\n",
+		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::NIS) ? "yes" : "no",
+		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLSR) ? "yes" : "no",
+		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLRR) ? "yes" : "no",
+		(int)nri_ptportaldepth);
+
+	if (mRenderer != nullptr)
+	{
+		Printf("NRI PT availability: %s", mRenderer->IsPathTracingSupported() ? "available" : "raster-fallback");
+		if (!mRenderer->IsPathTracingSupported())
+		{
+			Printf(" (%s)", mRenderer->GetAvailabilityReason());
+		}
+		Printf("\n");
+	}
+}
+
+void NRIRenderDevice::PrintPathTracingStatus() const
+{
+	PrintPathTracingCaps();
+	if (mRenderer != nullptr)
+	{
+		mRenderer->PrintStatus();
+	}
+}
+
+void NRIRenderDevice::ResetPathTracingHistory()
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT history reset is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->ResetHistory();
+	Printf("NRI PT history reset requested.\n");
+}
+
 void NRIRenderDevice::LogStartup()
 {
 	if (mLoggedStartup || mDevice == nullptr)
@@ -358,6 +450,12 @@ void NRIRenderDevice::LogStartup()
 	Printf("NRI graphics API: %s\n", (const char*)nri_api);
 	Printf("Max. texture size: %u\n", deviceDesc.dimensions.texture2DMaxDim);
 	Printf("Root constant limit: %u\n", deviceDesc.pipelineLayout.rootConstantMaxSize);
+	Printf("Shader model: %u.%u\n", deviceDesc.shaderModel / 10, deviceDesc.shaderModel % 10);
+	Printf("Ray tracing tier: %u\n", deviceDesc.tiers.rayTracing);
+	Printf("Upscaler support: NIS=%s DLSS-SR=%s DLRR=%s\n",
+		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::NIS) ? "yes" : "no",
+		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLSR) ? "yes" : "no",
+		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLRR) ? "yes" : "no");
 
 	mLoggedStartup = true;
 }

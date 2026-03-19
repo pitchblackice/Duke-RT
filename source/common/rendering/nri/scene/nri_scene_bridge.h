@@ -34,7 +34,10 @@ struct SceneDebugStats
 	unsigned int mirrorSurfaces = 0;
 	unsigned int skySurfaces = 0;
 	unsigned int portalViews = 0;
+	unsigned int portalCapturesSkipped = 0;
 	unsigned int modelDrawItems = 0;
+	unsigned int voxelProxyDrawItems = 0;
+	unsigned int unsupportedModelDrawItems = 0;
 };
 
 struct MaterialRef

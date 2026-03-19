@@ -411,6 +411,12 @@ namespace
 
 			stats.modelDrawItems++;
 
+			if (sprite->modelframe > 0)
+			{
+				stats.unsupportedModelDrawItems++;
+				continue;
+			}
+
 			if (sprite->modelframe >= 0 || sprite->voxel == nullptr || sprite->voxel->model == nullptr)
 			{
 				continue;
@@ -440,6 +446,8 @@ namespace
 				}
 				outSprites.push_back(std::move(surface));
 			}
+
+			stats.voxelProxyDrawItems++;
 		}
 	}
 }

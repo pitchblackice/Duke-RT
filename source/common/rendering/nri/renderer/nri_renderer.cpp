@@ -92,6 +92,19 @@ namespace
 		}
 	}
 
+	static const char* GetUpscalerModeName(nri::UpscalerMode mode)
+	{
+		switch (mode)
+		{
+		case nri::UpscalerMode::ULTRA_QUALITY: return "ultra_quality";
+		case nri::UpscalerMode::QUALITY: return "quality";
+		case nri::UpscalerMode::BALANCED: return "balanced";
+		case nri::UpscalerMode::PERFORMANCE: return "performance";
+		case nri::UpscalerMode::ULTRA_PERFORMANCE: return "ultra_performance";
+		default: return "native";
+		}
+	}
+
 	static nri::UpscalerType ToUpscalerType(NRIUpscalerKind kind)
 	{
 		switch (kind)
@@ -181,6 +194,11 @@ bool NRIRenderer::Initialize()
 		return false;
 	}
 
+	if (!CheckPathTracingSupport())
+	{
+		return true;
+	}
+
 	if (mPipelineLayout != nullptr)
 	{
 		return true;
@@ -230,6 +248,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	if ((drawmode != DM_MAINVIEW && drawmode != DM_OFFSCREEN) || portal || mFrameBuffer == nullptr ||
 		mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)
 	{
+		return false;
+	}
+
+	if (!mPathTracingSupported)
+	{
+		LogFallback(GetAvailabilityReason());
 		return false;
 	}
 
@@ -312,6 +336,16 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	LogBridgeStats(sceneView.stats);
+	if (sceneView.stats.unsupportedModelDrawItems > 0)
+	{
+		LogFallback("generic GLDL_MODELS content is unsupported in the PT bridge; using raster fallback for this view.");
+		if (preserveHistory)
+		{
+			restoreHistory();
+		}
+		return false;
+	}
+
 	Copy3(sceneView.skyColor, mSkyColor);
 	Copy3(sceneView.groundColor, mGroundColor);
 
@@ -374,6 +408,119 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	return success;
+}
+
+void NRIRenderer::ResetHistory()
+{
+	mResetHistory = true;
+	mHasPreviousCameraState = false;
+}
+
+void NRIRenderer::PrintStatus() const
+{
+	const NRIUpscalerKind requested = GetSelectedUpscalerKind();
+	const NRIUpscalerKind resolved = GetResolvedUpscalerKindForStatus();
+
+	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
+	if (!mPathTracingSupported)
+	{
+		Printf(" (%s)", GetAvailabilityReason());
+	}
+	Printf("\n");
+	Printf("NRI PT frame: index=%u render=%ux%u output=%ux%u prev_camera=%s reset_history=%s\n",
+		mFrameIndex,
+		mRenderWidth,
+		mRenderHeight,
+		mOutputWidth,
+		mOutputHeight,
+		mHasPreviousCameraState ? "yes" : "no",
+		mResetHistory ? "yes" : "no");
+	Printf("NRI PT features: denoise=%s validation=%s upscaler=%s->%s mode=%s render_scale=%.3f sharpness=%.3f\n",
+		nri_denoise ? "on" : "off",
+		nri_validation ? "on" : "off",
+		GetUpscalerName(requested),
+		GetUpscalerName(resolved),
+		GetUpscalerModeName(GetSelectedUpscalerMode()),
+		(float)nri_renderscale,
+		(float)nri_sharpness);
+
+	if (mHasLoggedStats)
+	{
+		const auto& stats = mLastStats;
+		Printf("NRI PT last scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
+			stats.wallDrawItems,
+			stats.flatDrawItems,
+			stats.spriteDrawItems,
+			stats.translucentDrawItems,
+			stats.modelDrawItems,
+			stats.voxelProxyDrawItems,
+			stats.unsupportedModelDrawItems,
+			stats.mirrorSurfaces,
+			stats.skySurfaces,
+			stats.portalViews,
+			stats.portalCapturesSkipped,
+			stats.triangleEstimate,
+			stats.materialRefs);
+	}
+	else
+	{
+		Printf("NRI PT last scene: no translated PT scene has been captured yet.\n");
+	}
+}
+
+const char* NRIRenderer::GetAvailabilityReason() const
+{
+	if (mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
+	{
+		return "renderer device is not initialized";
+	}
+
+	const nri::DeviceDesc& deviceDesc = mFrameBuffer->mCore.GetDeviceDesc(*mFrameBuffer->mDevice);
+	if (deviceDesc.tiers.rayTracing == 0)
+	{
+		return "required ray tracing capability is unavailable on this device/API";
+	}
+
+	if (deviceDesc.pipelineLayout.rootConstantMaxSize < sizeof(NRITraceConstants) ||
+		deviceDesc.pipelineLayout.rootDescriptorMaxNum < 5 ||
+		deviceDesc.pipelineLayout.descriptorSetMaxNum < 4)
+	{
+		return "device pipeline layout limits are below the NRI PT backend requirements";
+	}
+
+	return "path tracing is unavailable";
+}
+
+bool NRIRenderer::CheckPathTracingSupport()
+{
+	mPathTracingSupported = mFrameBuffer != nullptr && mFrameBuffer->mDevice != nullptr;
+	if (!mPathTracingSupported)
+	{
+		return false;
+	}
+
+	const nri::DeviceDesc& deviceDesc = mFrameBuffer->mCore.GetDeviceDesc(*mFrameBuffer->mDevice);
+	if (deviceDesc.tiers.rayTracing == 0 ||
+		deviceDesc.pipelineLayout.rootConstantMaxSize < sizeof(NRITraceConstants) ||
+		deviceDesc.pipelineLayout.rootDescriptorMaxNum < 5 ||
+		deviceDesc.pipelineLayout.descriptorSetMaxNum < 4)
+	{
+		mPathTracingSupported = false;
+		LogFallback(GetAvailabilityReason());
+	}
+
+	return mPathTracingSupported;
+}
+
+void NRIRenderer::LogFallback(const char* reason)
+{
+	if (mHasLoggedFallback)
+	{
+		return;
+	}
+
+	Printf(TEXTCOLOR_ORANGE "NRI PT fallback: %s\n", reason != nullptr ? reason : "unknown reason");
+	mHasLoggedFallback = true;
 }
 
 bool NRIRenderer::CreatePipelineLayout()
@@ -1377,15 +1524,18 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 {
 	if (!mHasLoggedStats || StatsDiffer(mLastStats, stats))
 	{
-		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u mirrors=%u skies=%u portal_views=%u approx_tris=%u materials=%u\n",
+		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
 			stats.wallDrawItems,
 			stats.flatDrawItems,
 			stats.spriteDrawItems,
 			stats.translucentDrawItems,
 			stats.modelDrawItems,
+			stats.voxelProxyDrawItems,
+			stats.unsupportedModelDrawItems,
 			stats.mirrorSurfaces,
 			stats.skySurfaces,
 			stats.portalViews,
+			stats.portalCapturesSkipped,
 			stats.triangleEstimate,
 			stats.materialRefs);
 		mLastStats = stats;
@@ -1543,6 +1693,43 @@ NRIUpscalerKind NRIRenderer::GetSelectedUpscalerKind() const
 	case 2: return NRIUpscalerKind::DLSR;
 	case 3: return NRIUpscalerKind::DLRR;
 	}
+}
+
+NRIUpscalerKind NRIRenderer::GetResolvedUpscalerKindForStatus() const
+{
+	const NRIUpscalerKind requested = GetSelectedUpscalerKind();
+
+	switch (requested)
+	{
+	case NRIUpscalerKind::DLRR:
+		if (!IsUpscalerSupported(NRIUpscalerKind::DLRR))
+		{
+			return
+				IsUpscalerSupported(NRIUpscalerKind::DLSR) ? NRIUpscalerKind::DLSR :
+				IsUpscalerSupported(NRIUpscalerKind::NIS) ? NRIUpscalerKind::NIS :
+				NRIUpscalerKind::Off;
+		}
+		break;
+
+	case NRIUpscalerKind::DLSR:
+		if (!IsUpscalerSupported(NRIUpscalerKind::DLSR))
+		{
+			return IsUpscalerSupported(NRIUpscalerKind::NIS) ? NRIUpscalerKind::NIS : NRIUpscalerKind::Off;
+		}
+		break;
+
+	case NRIUpscalerKind::NIS:
+		if (!IsUpscalerSupported(NRIUpscalerKind::NIS))
+		{
+			return NRIUpscalerKind::Off;
+		}
+		break;
+
+	default:
+		break;
+	}
+
+	return requested;
 }
 
 nri::UpscalerMode NRIRenderer::GetSelectedUpscalerMode() const
