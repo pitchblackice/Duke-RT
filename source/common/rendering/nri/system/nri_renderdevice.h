@@ -13,6 +13,7 @@ class NRIHardwareVertexBuffer;
 class NRIHardwareIndexBuffer;
 class FCanvasTexture;
 class FTexture;
+class NRIRenderer;
 
 class NRIRenderDevice : public SystemBaseFrameBuffer
 {
@@ -35,6 +36,7 @@ public:
 	void SetSaveBuffers(bool yes) override;
 	void ImageTransitionScene(bool unknown) override;
 	void SetActiveRenderTarget() override;
+	bool RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal) override;
 
 	IHardwareTexture* CreateHardwareTexture(int numchannels) override;
 	IVertexBuffer* CreateVertexBuffer() override;
@@ -82,8 +84,10 @@ private:
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
+	friend class NRIRenderer;
 
 	std::unique_ptr<NRIRenderState> mRenderState;
+	std::unique_ptr<NRIRenderer> mRenderer;
 	void* mNriModule = nullptr;
 	PFN_nriEnumerateAdapters mEnumerateAdapters = nullptr;
 	PFN_nriCreateDevice mCreateDeviceFn = nullptr;
@@ -92,6 +96,7 @@ private:
 
 	nri::CoreInterface mCore = {};
 	nri::HelperInterface mHelper = {};
+	nri::RayTracingInterface mRayTracing = {};
 	nri::StreamerInterface mStreamer = {};
 	nri::SwapChainInterface mSwapChainInterface = {};
 	nri::Device* mDevice = nullptr;

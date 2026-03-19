@@ -1,5 +1,6 @@
 #include "nri_renderdevice.h"
 
+#include "../renderer/nri_renderer.h"
 #include "../renderer/nri_renderstate.h"
 #include "nri_hwbuffer.h"
 #include "nri_hwtexture.h"
@@ -50,6 +51,7 @@ NRIRenderDevice::NRIRenderDevice(void* hMonitor, bool fullscreen)
 {
 	vendorstring = "NRI";
 	glslversion = 6.6f;
+	mRenderer = std::make_unique<NRIRenderer>(this);
 }
 
 NRIRenderDevice::~NRIRenderDevice()
@@ -57,6 +59,11 @@ NRIRenderDevice::~NRIRenderDevice()
 	WaitForCommands(true);
 	DestroyRenderResources();
 	DestroySwapChain();
+
+	if (mRenderer != nullptr)
+	{
+		mRenderer->Shutdown();
+	}
 
 	if (mCommandBuffer != nullptr)
 	{
@@ -118,6 +125,10 @@ void NRIRenderDevice::InitializeState()
 	}
 
 	LogStartup();
+	if (mRenderer != nullptr && !mRenderer->Initialize())
+	{
+		Printf(TEXTCOLOR_RED "NRI path tracing renderer initialization failed.\n");
+	}
 	mInitialized = true;
 }
 
@@ -248,6 +259,16 @@ void NRIRenderDevice::SetActiveRenderTarget()
 	mActiveTarget = mUsingSaveTarget ? &mSaveTarget : mCurrentPresentTarget;
 }
 
+bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal)
+{
+	if (!mInitialized || mRenderer == nullptr)
+	{
+		return false;
+	}
+
+	return mRenderer->RenderScene(di, drawmode, portal);
+}
+
 IHardwareTexture* NRIRenderDevice::CreateHardwareTexture(int numchannels)
 {
 	return new NRIHardwareTexture(this, numchannels);
@@ -374,7 +395,7 @@ bool NRIRenderDevice::CreateDevice()
 	creationDesc.adapterDesc = &adapters[0];
 	creationDesc.enableGraphicsAPIValidation = false;
 	creationDesc.enableNRIValidation = false;
-	creationDesc.disableVKRayTracing = true;
+	creationDesc.disableVKRayTracing = false;
 	creationDesc.disableD3D12EnhancedBarriers = false;
 	creationDesc.vkBindingOffsets = {};
 
@@ -386,6 +407,7 @@ bool NRIRenderDevice::CreateDevice()
 
 	if (mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::CoreInterface), &mCore) != nri::Result::SUCCESS ||
 		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::HelperInterface), &mHelper) != nri::Result::SUCCESS ||
+		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::RayTracingInterface), &mRayTracing) != nri::Result::SUCCESS ||
 		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::StreamerInterface), &mStreamer) != nri::Result::SUCCESS ||
 		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::SwapChainInterface), &mSwapChainInterface) != nri::Result::SUCCESS)
 	{
@@ -565,6 +587,9 @@ bool NRIRenderDevice::CreateRenderResources()
 	poolDesc.descriptorSetMaxNum = 4096;
 	poolDesc.samplerMaxNum = 8;
 	poolDesc.textureMaxNum = 4096;
+	poolDesc.storageTextureMaxNum = 64;
+	poolDesc.structuredBufferMaxNum = 64;
+	poolDesc.accelerationStructureMaxNum = 8;
 
 	if (mCore.CreateDescriptorPool(*mDevice, poolDesc, mDescriptorPool) != nri::Result::SUCCESS)
 	{
@@ -872,6 +897,12 @@ void NRIRenderDevice::DestroyTextureResource(NRITextureResource& resource)
 		resource.colorAttachmentView = nullptr;
 	}
 
+	if (resource.storageView != nullptr)
+	{
+		mCore.DestroyDescriptor(resource.storageView);
+		resource.storageView = nullptr;
+	}
+
 	if (resource.shaderView != nullptr)
 	{
 		mCore.DestroyDescriptor(resource.shaderView);
@@ -890,6 +921,7 @@ void NRIRenderDevice::DestroyTextureResource(NRITextureResource& resource)
 	resource.width = 0;
 	resource.height = 0;
 	resource.format = nri::Format::UNKNOWN;
+	resource.usage = nri::TextureUsageBits::NONE;
 	resource.state = {};
 }
 
@@ -914,6 +946,16 @@ bool NRIRenderDevice::CreateTextureViews(NRITextureResource& resource)
 	if (resource.textureSet == nullptr)
 	{
 		return false;
+	}
+
+	if (((uint32_t)resource.usage & (uint32_t)nri::TextureUsageBits::SHADER_RESOURCE_STORAGE) != 0)
+	{
+		nri::TextureViewDesc storageViewDesc = shaderViewDesc;
+		storageViewDesc.type = nri::TextureView::STORAGE_TEXTURE;
+		if (mCore.CreateTextureView(storageViewDesc, resource.storageView) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
 	}
 
 	nri::TextureViewDesc colorViewDesc = shaderViewDesc;
@@ -944,6 +986,7 @@ bool NRIRenderDevice::CreateOwnedTexture(NRITextureResource& resource, uint32_t 
 	resource.width = width;
 	resource.height = height;
 	resource.format = format;
+	resource.usage = usage;
 	resource.owned = true;
 	resource.state = {};
 	return CreateTextureViews(resource);

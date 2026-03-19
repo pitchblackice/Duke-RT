@@ -3,6 +3,7 @@
 #include "NRI.h"
 #include "Extensions/NRIDeviceCreation.h"
 #include "Extensions/NRIHelper.h"
+#include "Extensions/NRIRayTracing.h"
 #include "Extensions/NRIStreamer.h"
 #include "Extensions/NRISwapChain.h"
 
@@ -23,12 +24,14 @@ struct NRITextureResource
 {
 	nri::Texture* texture = nullptr;
 	nri::Descriptor* shaderView = nullptr;
+	nri::Descriptor* storageView = nullptr;
 	nri::Descriptor* colorAttachmentView = nullptr;
 	nri::DescriptorSet* textureSet = nullptr;
 	nri::AccessLayoutStage state = {};
 	uint32_t width = 0;
 	uint32_t height = 0;
 	nri::Format format = nri::Format::UNKNOWN;
+	nri::TextureUsageBits usage = nri::TextureUsageBits::NONE;
 	bool owned = false;
 };
 
@@ -77,6 +80,21 @@ inline nri::AccessLayoutStage NRIColorAttachmentState()
 inline nri::AccessLayoutStage NRIShaderResourceState()
 {
 	return { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::FRAGMENT_SHADER };
+}
+
+inline nri::AccessLayoutStage NRIComputeShaderResourceState()
+{
+	return { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
+}
+
+inline nri::AccessLayoutStage NRIAccelerationStructureBuildInputState()
+{
+	return { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::ACCELERATION_STRUCTURE };
+}
+
+inline nri::AccessLayoutStage NRIComputeStorageState()
+{
+	return { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::Layout::GENERAL, nri::StageBits::COMPUTE_SHADER };
 }
 
 inline nri::AccessLayoutStage NRICopySourceState()

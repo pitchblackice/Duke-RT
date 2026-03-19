@@ -633,6 +633,7 @@ file(GLOB NRI_SHADER_FILES
 	common/rendering/nri/shaders/*.cfg
 	common/rendering/nri/shaders/*.hlsl
 	common/rendering/nri/shaders/*.hlsli
+	common/rendering/nri/shaders/Include/*.hlsli
 )
 
 
@@ -920,6 +921,11 @@ set (NRI_SOURCES
 	common/rendering/nri/system/nri_hwbuffer.cpp
 	common/rendering/nri/system/nri_hwtexture.cpp
 	common/rendering/nri/renderer/nri_renderstate.cpp
+	common/rendering/nri/renderer/nri_resources.cpp
+	common/rendering/nri/renderer/nri_renderer.cpp
+	common/rendering/nri/scene/nri_scene_bridge.cpp
+	common/rendering/nri/scene/nri_geometry_bridge.cpp
+	common/rendering/nri/scene/nri_material_bridge.cpp
 )
 
 if (HAVE_GLES2)
@@ -1349,15 +1355,30 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${RAZE_NRI_SHADER_OUTPUT_DIR}"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T vs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T ps_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T vs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T ps_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_6 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceOpaque.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -fspv-extension=SPV_KHR_ray_query -T cs_6_6 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceOpaque.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Composition.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Composition.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
 		DEPENDS
 			${NRI_SHADER_FILES}
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceOpaque.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Composition.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
 		VERBATIM)
 	add_custom_target(raze_nri_shaders ALL
 		DEPENDS
@@ -1365,6 +1386,12 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv"
 		SOURCES ${NRI_SHADER_FILES}
 		VERBATIM)
 	set_target_properties(raze_nri_shaders PROPERTIES FOLDER "Shaders")
