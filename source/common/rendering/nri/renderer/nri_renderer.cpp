@@ -16,11 +16,12 @@ CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+EXTERN_CVAR(String, nri_api)
 
 namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
-	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 7;
+	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 11;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 12;
 	constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
 	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
@@ -77,6 +78,28 @@ namespace
 		case nri::UpscalerMode::BALANCED: return 1.0f / 1.7f;
 		case nri::UpscalerMode::PERFORMANCE: return 0.5f;
 		case nri::UpscalerMode::ULTRA_PERFORMANCE: return 1.0f / 3.0f;
+		}
+	}
+
+	static const char* GetUpscalerName(NRIUpscalerKind kind)
+	{
+		switch (kind)
+		{
+		case NRIUpscalerKind::NIS: return "NIS";
+		case NRIUpscalerKind::DLSR: return "DLSS-SR";
+		case NRIUpscalerKind::DLRR: return "DLRR";
+		default: return "off";
+		}
+	}
+
+	static nri::UpscalerType ToUpscalerType(NRIUpscalerKind kind)
+	{
+		switch (kind)
+		{
+		case NRIUpscalerKind::NIS: return nri::UpscalerType::NIS;
+		case NRIUpscalerKind::DLSR: return nri::UpscalerType::DLSR;
+		case NRIUpscalerKind::DLRR: return nri::UpscalerType::DLRR;
+		default: return nri::UpscalerType::NIS;
 		}
 	}
 
@@ -289,6 +312,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	LogBridgeStats(sceneView.stats);
+	Copy3(sceneView.skyColor, mSkyColor);
+	Copy3(sceneView.groundColor, mGroundColor);
 
 	nri_scene::GeometryData geometry;
 	nri_scene::BuildGeometry(sceneView, geometry);
@@ -540,7 +565,7 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		return false;
 	}
 
-	const NRIUpscalerKind upscalerKind = GetSelectedUpscalerKind();
+	const NRIUpscalerKind upscalerKind = ResolveUpscalerKind(false);
 	float renderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
 	if (upscalerKind == NRIUpscalerKind::DLSR || upscalerKind == NRIUpscalerKind::DLRR)
 	{
@@ -880,6 +905,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+	Copy3(mSkyColor, constants.SkyColor);
+	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
 
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse), NRIComputeStorageState());
@@ -975,6 +1002,8 @@ bool NRIRenderer::DispatchComposition()
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
+	Copy3(mSkyColor, constants.SkyColor);
+	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
 
 	NRITextureResource& diffuse = nri_denoise ? GetFrameTexture(FrameTextureSlot::DenoisedDiffuse) : GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
@@ -1014,7 +1043,7 @@ bool NRIRenderer::DispatchComposition()
 
 bool NRIRenderer::DispatchUpscaleChain()
 {
-	const NRIUpscalerKind kind = GetSelectedUpscalerKind();
+	const NRIUpscalerKind kind = ResolveUpscalerKind(true);
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
@@ -1218,18 +1247,38 @@ bool NRIRenderer::DispatchFinal()
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
+	Copy3(mSkyColor, constants.SkyColor);
+	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
 
 	NRITextureResource& history = GetFrameTexture(mHistoryOutputSlot);
 	NRITextureResource& upscaled = GetFrameTexture(mUpscaledInputSlot);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Composed), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Validation), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(history, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(upscaled, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
 
 	mFrameInputDescriptors.fill(GetFrameTexture(FrameTextureSlot::Composed).shaderView);
 	mFrameInputDescriptors[0] = history.shaderView;
+	mFrameInputDescriptors[1] = GetFrameTexture(FrameTextureSlot::Motion).shaderView;
+	mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
+	mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
+	mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
+	mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors[6] = upscaled.shaderView;
+	mFrameInputDescriptors[7] = GetFrameTexture(FrameTextureSlot::Validation).shaderView;
+	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).shaderView;
+	mFrameInputDescriptors[9] = GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo).shaderView;
+	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).shaderView;
 	UpdateFrameTextureSet();
 
 	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::PreFinal).storageView);
@@ -1328,11 +1377,15 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 {
 	if (!mHasLoggedStats || StatsDiffer(mLastStats, stats))
 	{
-		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u approx_tris=%u materials=%u\n",
+		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u mirrors=%u skies=%u portal_views=%u approx_tris=%u materials=%u\n",
 			stats.wallDrawItems,
 			stats.flatDrawItems,
 			stats.spriteDrawItems,
 			stats.translucentDrawItems,
+			stats.modelDrawItems,
+			stats.mirrorSurfaces,
+			stats.skySurfaces,
+			stats.portalViews,
 			stats.triangleEstimate,
 			stats.materialRefs);
 		mLastStats = stats;
@@ -1416,6 +1469,68 @@ void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureR
 		mFrameBuffer->mRayTracing.DestroyAccelerationStructure(resource.accelerationStructure);
 		resource.accelerationStructure = nullptr;
 	}
+}
+
+bool NRIRenderer::IsUpscalerSupported(NRIUpscalerKind kind) const
+{
+	if (kind == NRIUpscalerKind::Off || mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
+	{
+		return kind == NRIUpscalerKind::Off;
+	}
+
+	return mFrameBuffer->mUpscaler.IsUpscalerSupported(*mFrameBuffer->mDevice, ToUpscalerType(kind));
+}
+
+NRIUpscalerKind NRIRenderer::ResolveUpscalerKind(bool logFallback)
+{
+	const NRIUpscalerKind requested = GetSelectedUpscalerKind();
+	NRIUpscalerKind resolved = requested;
+
+	switch (requested)
+	{
+	case NRIUpscalerKind::DLRR:
+		if (!IsUpscalerSupported(NRIUpscalerKind::DLRR))
+		{
+			resolved =
+				IsUpscalerSupported(NRIUpscalerKind::DLSR) ? NRIUpscalerKind::DLSR :
+				IsUpscalerSupported(NRIUpscalerKind::NIS) ? NRIUpscalerKind::NIS :
+				NRIUpscalerKind::Off;
+		}
+		break;
+
+	case NRIUpscalerKind::DLSR:
+		if (!IsUpscalerSupported(NRIUpscalerKind::DLSR))
+		{
+			resolved =
+				IsUpscalerSupported(NRIUpscalerKind::NIS) ? NRIUpscalerKind::NIS :
+				NRIUpscalerKind::Off;
+		}
+		break;
+
+	case NRIUpscalerKind::NIS:
+		if (!IsUpscalerSupported(NRIUpscalerKind::NIS))
+		{
+			resolved = NRIUpscalerKind::Off;
+		}
+		break;
+
+	default:
+		break;
+	}
+
+	if (logFallback &&
+		(requested != resolved) &&
+		(mLastUpscalerRequest != (int)nri_upscaler || mLastUpscalerResolved != resolved))
+	{
+		Printf("NRI upscaler fallback: requested %s is unavailable on %s, using %s\n",
+			GetUpscalerName(requested),
+			(const char*)nri_api,
+			GetUpscalerName(resolved));
+		mLastUpscalerRequest = (int)nri_upscaler;
+		mLastUpscalerResolved = resolved;
+	}
+
+	return resolved;
 }
 
 NRIUpscalerKind NRIRenderer::GetSelectedUpscalerKind() const

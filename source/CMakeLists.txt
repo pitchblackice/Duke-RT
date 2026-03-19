@@ -926,6 +926,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_renderer.cpp
 	common/rendering/nri/renderer/nri_upscaler.cpp
 	common/rendering/nri/scene/nri_scene_bridge.cpp
+	common/rendering/nri/scene/nri_portal_bridge.cpp
 	common/rendering/nri/scene/nri_geometry_bridge.cpp
 	common/rendering/nri/scene/nri_material_bridge.cpp
 	../libraries/ShaderMake/ShaderMake/ShaderBlob.cpp

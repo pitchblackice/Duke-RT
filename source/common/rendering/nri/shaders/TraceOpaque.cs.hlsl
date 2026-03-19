@@ -10,13 +10,26 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 
 	const uint2 pixelPos = dispatchThreadId.xy;
-	const float3 rayDirection = GeneratePrimaryRay(pixelPos);
-	const HitData hit = TracePrimary(gTraceConstants.CameraPos, rayDirection);
+	float3 visibleRayDirection = GeneratePrimaryRay(pixelPos);
+	float3 rayOrigin = gTraceConstants.CameraPos;
+	HitData hit = (HitData)0;
+	[loop]
+	for (uint bounce = 0; bounce < 3; ++bounce)
+	{
+		hit = TracePrimary(rayOrigin, visibleRayDirection);
+		if (!hit.hit || !IsMirrorMaterial(hit.materialIndex))
+		{
+			break;
+		}
+
+		rayOrigin = hit.position + hit.normal * 0.05;
+		visibleRayDirection = reflect(visibleRayDirection, hit.normal);
+	}
 
 	float4 color = 0.0;
 	if (!hit.hit)
 	{
-		color = float4(GetMissColor(rayDirection), 1.0);
+		color = float4(GetMissColor(visibleRayDirection), 1.0);
 		gMotionOutput[pixelPos] = 0.0;
 		gViewZOutput[pixelPos] = 0.0;
 		gNormalRoughnessOutput[pixelPos] = 0.0;
@@ -40,7 +53,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float lambert = max(dot(hit.normal, gTraceConstants.LightDirection), 0.0);
 		const float lighting = 0.20 + shadow * lambert * 0.80;
 		const float3 diffuse = albedo.rgb * lighting;
-		const float3 halfVector = normalize(gTraceConstants.LightDirection - rayDirection);
+		const float3 halfVector = normalize(gTraceConstants.LightDirection - visibleRayDirection);
 		const float specularTerm = pow(max(dot(hit.normal, halfVector), 0.0), 32.0) * shadow;
 		const float hitDistance = saturate(hit.distance / 4096.0);
 		const float3 specular = albedo.rgb * specularTerm * 0.2;

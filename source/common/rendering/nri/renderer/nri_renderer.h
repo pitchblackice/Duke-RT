@@ -102,7 +102,9 @@ private:
 	const NRITextureResource& GetFrameTexture(FrameTextureSlot slot) const { return mFrameTextures[(size_t)slot]; }
 	nri::Pipeline* GetPipeline(PipelineSlot slot) const { return mPipelines[(size_t)slot]; }
 	NRIUpscalerKind GetSelectedUpscalerKind() const;
+	NRIUpscalerKind ResolveUpscalerKind(bool logFallback);
 	nri::UpscalerMode GetSelectedUpscalerMode() const;
+	bool IsUpscalerSupported(NRIUpscalerKind kind) const;
 	void FillMatrix(float* outMatrix, const VSMatrix& matrix) const;
 
 	NRIRenderDevice* mFrameBuffer = nullptr;
@@ -130,7 +132,7 @@ private:
 	NRINrdContext mNrd;
 	NRIUpscalerContext mUpscaler;
 	nri_scene::SceneDebugStats mLastStats = {};
-	std::array<nri::Descriptor*, 7> mFrameInputDescriptors = {};
+	std::array<nri::Descriptor*, 11> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 12> mOutputDescriptors = {};
 	uint32_t mFrameIndex = 0;
 	uint32_t mRenderWidth = 0;
@@ -155,10 +157,14 @@ private:
 	float mPreviousViewToClip[16] = {};
 	float mCurrentWorldToView[16] = {};
 	float mPreviousWorldToView[16] = {};
+	float mSkyColor[3] = { 0.38f, 0.48f, 0.65f };
+	float mGroundColor[3] = { 0.08f, 0.08f, 0.08f };
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
 	bool mResetHistory = true;
 	bool mUseUpscaledInFinal = false;
+	int mLastUpscalerRequest = -1;
+	NRIUpscalerKind mLastUpscalerResolved = NRIUpscalerKind::Off;
 	FrameTextureSlot mHistoryInputSlot = FrameTextureSlot::TaaHistoryPing;
 	FrameTextureSlot mHistoryOutputSlot = FrameTextureSlot::TaaHistoryPong;
 	FrameTextureSlot mUpscaledInputSlot = FrameTextureSlot::Upscaled;

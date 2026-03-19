@@ -15,6 +15,11 @@ struct HitData
 	uint materialIndex;
 };
 
+MaterialData GetMaterialData(uint materialIndex)
+{
+	return gMaterials[min(materialIndex, max(gTraceConstants.MaterialCount, 1u) - 1u)];
+}
+
 float3 GeneratePrimaryRay(uint2 pixelPos)
 {
 	float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
@@ -46,7 +51,7 @@ float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward,
 
 float4 SampleSurfaceColor(uint materialIndex, float2 uv)
 {
-	MaterialData material = gMaterials[min(materialIndex, gTraceConstants.MaterialCount - 1)];
+	MaterialData material = GetMaterialData(materialIndex);
 	float4 color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearClamp, uv, 0.0);
 
 	if ((material.flags & MATERIAL_FLAG_INDEXED) != 0)
@@ -58,6 +63,11 @@ float4 SampleSurfaceColor(uint materialIndex, float2 uv)
 
 	color.rgb *= material.lightLevel;
 	return color;
+}
+
+bool IsMirrorMaterial(uint materialIndex)
+{
+	return (GetMaterialData(materialIndex).flags & MATERIAL_FLAG_MIRROR) != 0;
 }
 
 HitData TracePrimary(float3 origin, float3 direction)

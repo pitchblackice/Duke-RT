@@ -13,6 +13,11 @@
 
 #define MATERIAL_FLAG_INDEXED 1
 #define MATERIAL_FLAG_FULLBRIGHT 2
+#define MATERIAL_FLAG_FLAT 4
+#define MATERIAL_FLAG_SPRITE 8
+#define MATERIAL_FLAG_MIRROR 16
+#define MATERIAL_FLAG_SKY 32
+#define MATERIAL_FLAG_PORTAL 64
 
 struct NRITraceConstants
 {
@@ -92,6 +97,10 @@ Texture2D<float4> gNormalRoughnessInput : register(t3, space2);
 Texture2D<float4> gBaseColorInput : register(t4, space2);
 Texture2D<float4> gComposedInput : register(t5, space2);
 Texture2D<float4> gUpscaledInput : register(t6, space2);
+Texture2D<float4> gValidationInput : register(t7, space2);
+Texture2D<float4> gGuideDiffuseInput : register(t8, space2);
+Texture2D<float4> gGuideSpecularInput : register(t9, space2);
+Texture2D<float4> gGuideSpecHitInput : register(t10, space2);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gTraceOutput, u, 0, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gComposedOutput, u, 1, SET_OUTPUTS);

@@ -224,6 +224,8 @@ public:
 	void ClearClipper(HWDrawInfo *di, Clipper *clipper);
 	virtual bool NeedDepthBuffer() { return true; }
 	virtual void DrawContents(HWDrawInfo* di, FRenderState& state);
+	virtual bool SetupForSceneCapture(HWDrawInfo* di, FRenderState& rstate) { return Setup(di, rstate, di->mClipper); }
+	virtual void ShutdownAfterSceneCapture(HWDrawInfo* di, FRenderState& rstate) { Shutdown(di, rstate); }
 	virtual bool Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *clipper) = 0;
 	virtual void Shutdown(HWDrawInfo *di, FRenderState &rstate) {}
 };
