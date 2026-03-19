@@ -920,12 +920,22 @@ set (NRI_SOURCES
 	common/rendering/nri/system/nri_renderdevice.cpp
 	common/rendering/nri/system/nri_hwbuffer.cpp
 	common/rendering/nri/system/nri_hwtexture.cpp
+	common/rendering/nri/renderer/nri_nrd.cpp
 	common/rendering/nri/renderer/nri_renderstate.cpp
 	common/rendering/nri/renderer/nri_resources.cpp
 	common/rendering/nri/renderer/nri_renderer.cpp
+	common/rendering/nri/renderer/nri_upscaler.cpp
 	common/rendering/nri/scene/nri_scene_bridge.cpp
 	common/rendering/nri/scene/nri_geometry_bridge.cpp
 	common/rendering/nri/scene/nri_material_bridge.cpp
+	../libraries/ShaderMake/ShaderMake/ShaderBlob.cpp
+	../libraries/NRD/Source/Wrapper.cpp
+	../libraries/NRD/Source/InstanceImpl.cpp
+	../libraries/NRD/Source/Reblur.cpp
+	../libraries/NRD/Source/Relax.cpp
+	../libraries/NRD/Source/Sigma.cpp
+	../libraries/NRD/Source/Reference.cpp
+	../libraries/NRD/Source/Timer.cpp
 )
 
 if (HAVE_GLES2)
@@ -1336,7 +1346,28 @@ list( REMOVE_ITEM GAME_NONPCH_SOURCES ${PCH_SOURCES} )
 add_executable( ${PROJECT_NAME} WIN32 MACOSX_BUNDLE ${GAME_SOURCES} )
 
 if (HAVE_NRI)
-	set(RAZE_NRI_SHADER_OUTPUT_DIR "${COMPILE_OUTPUT_DIRECTORY}/nri_shaders")
+	add_compile_definitions(
+		NRD_NORMAL_ENCODING=2
+		NRD_ROUGHNESS_ENCODING=1
+		NRD_SUPPORTS_VIEWPORT_OFFSET=0
+		NRD_SUPPORTS_CHECKERBOARD=0
+		NRD_SUPPORTS_HISTORY_CONFIDENCE=0
+		NRD_SUPPORTS_DISOCCLUSION_THRESHOLD_MIX=0
+		NRD_SUPPORTS_BASECOLOR_METALNESS=1
+		NRD_SUPPORTS_ANTIFIREFLY=0
+		REBLUR_PERFORMANCE_MODE=0
+		NRD_EMBEDS_DXBC_SHADERS=1
+		NRD_EMBEDS_DXIL_SHADERS=1
+		NRD_EMBEDS_SPIRV_SHADERS=1
+		SPIRV_SREG_OFFSET=0
+		SPIRV_BREG_OFFSET=2
+		SPIRV_UREG_OFFSET=3
+		SPIRV_TREG_OFFSET=20
+	)
+endif()
+
+if (HAVE_NRI)
+	set(RAZE_NRI_SHADER_OUTPUT_DIR "${COMPILE_OUTPUT_DIRECTORY}/shaders/nri")
 	if (DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/Bin/dxc.exe")
 		set(RAZE_DXC_EXECUTABLE "$ENV{VULKAN_SDK}/Bin/dxc.exe" CACHE FILEPATH "DXC executable used for NRI shader compilation." FORCE)
 	elseif (DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/Bin32/dxc.exe")
@@ -1359,6 +1390,12 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${RAZE_NRI_SHADER_OUTPUT_DIR}"
@@ -1370,6 +1407,12 @@ if (HAVE_NRI)
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -fspv-extension=SPV_KHR_ray_query -T cs_6_6 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceOpaque.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Composition.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Composition.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Taa.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Taa.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssBefore.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssBefore.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssAfter.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssAfter.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
 		DEPENDS
@@ -1378,6 +1421,9 @@ if (HAVE_NRI)
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceOpaque.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Composition.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Taa.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssBefore.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssAfter.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
 		VERBATIM)
 	add_custom_target(raze_nri_shaders ALL
@@ -1390,6 +1436,12 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv"
 		SOURCES ${NRI_SHADER_FILES}
@@ -1511,6 +1563,11 @@ include_directories(
 	launcher
 	../libraries/ZVulkan/include
 	../libraries/NRIFramework/External/NRI/Include
+	../libraries/NRIFramework/External/MathLib
+	../libraries/ShaderMake
+	../libraries/NRD/Include
+	../libraries/NRD/Integration
+	../libraries/NRD/_Shaders
 	../libraries/ZWidget/include
 	../libraries/webp/include
 	${SYSTEM_SOURCES_DIR}

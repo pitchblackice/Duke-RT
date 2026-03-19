@@ -6,6 +6,7 @@
 #include "Extensions/NRIRayTracing.h"
 #include "Extensions/NRIStreamer.h"
 #include "Extensions/NRISwapChain.h"
+#include "Extensions/NRIUpscaler.h"
 
 #include <vector>
 

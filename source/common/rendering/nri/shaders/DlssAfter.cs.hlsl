@@ -10,16 +10,5 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const uint2 pixelPos = dispatchThreadId.xy;
 	const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
-	float4 composed = 0.0;
-
-	if ((gTraceConstants.Flags & 0x2u) != 0)
-	{
-		composed = gUpscaledInput.SampleLevel(gLinearClamp, uv, 0.0);
-	}
-	else
-	{
-		composed = gHistoryInput.SampleLevel(gLinearClamp, uv, 0.0);
-	}
-
-	gFinalOutput[pixelPos] = float4(saturate(composed.rgb), 1.0);
+	gFinalOutput[pixelPos] = float4(saturate(gUpscaledInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
 }

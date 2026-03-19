@@ -9,6 +9,7 @@ namespace nri_scene
 struct SceneVertex
 {
 	float position[3] = {};
+	float prevPosition[3] = {};
 	float uv[2] = {};
 };
 

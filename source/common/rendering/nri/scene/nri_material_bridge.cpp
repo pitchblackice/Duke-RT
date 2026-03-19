@@ -134,6 +134,11 @@ void BuildMaterials(const SceneView& sceneView, MaterialBridgeData& outMaterials
 		AppendSurfaceMaterial(flat.material, textureLookup, outMaterials);
 	}
 
+	for (const SurfaceRef& sprite : sceneView.opaqueSprites)
+	{
+		AppendSurfaceMaterial(sprite.material, textureLookup, outMaterials);
+	}
+
 	BuildPaletteLookup(outMaterials);
 }
 }

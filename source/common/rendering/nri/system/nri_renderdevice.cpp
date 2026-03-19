@@ -23,6 +23,9 @@ EXTERN_CVAR(String, nri_api)
 
 namespace
 {
+	static nri::Result(NRI_CALL* gNriGetInterfaceForwarder)(const nri::Device&, const char*, size_t, void*) = nullptr;
+	static void (NRI_CALL* gNriDestroyDeviceForwarder)(nri::Device*) = nullptr;
+
 	template<typename T>
 	static T NRIFlags(T a, T b)
 	{
@@ -43,6 +46,19 @@ namespace
 
 		const uint32_t remainder = value % alignment;
 		return remainder == 0 ? value : value + alignment - remainder;
+	}
+}
+
+extern "C" nri::Result NRI_CALL nriGetInterface(const nri::Device& device, const char* interfaceName, size_t interfaceSize, void* interfacePtr)
+{
+	return gNriGetInterfaceForwarder != nullptr ? gNriGetInterfaceForwarder(device, interfaceName, interfaceSize, interfacePtr) : nri::Result::FAILURE;
+}
+
+extern "C" void NRI_CALL nriDestroyDevice(nri::Device* device)
+{
+	if (gNriDestroyDeviceForwarder != nullptr)
+	{
+		gNriDestroyDeviceForwarder(device);
 	}
 }
 
@@ -100,6 +116,9 @@ NRIRenderDevice::~NRIRenderDevice()
 		FreeLibrary((HMODULE)mNriModule);
 		mNriModule = nullptr;
 	}
+
+	gNriDestroyDeviceForwarder = nullptr;
+	gNriGetInterfaceForwarder = nullptr;
 }
 
 void NRIRenderDevice::Update()
@@ -376,6 +395,8 @@ bool NRIRenderDevice::LoadNRI()
 		return false;
 	}
 
+	gNriDestroyDeviceForwarder = mDestroyDeviceFn;
+	gNriGetInterfaceForwarder = mGetInterfaceFn;
 	mNriModule = module;
 	return true;
 }
@@ -409,7 +430,8 @@ bool NRIRenderDevice::CreateDevice()
 		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::HelperInterface), &mHelper) != nri::Result::SUCCESS ||
 		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::RayTracingInterface), &mRayTracing) != nri::Result::SUCCESS ||
 		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::StreamerInterface), &mStreamer) != nri::Result::SUCCESS ||
-		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::SwapChainInterface), &mSwapChainInterface) != nri::Result::SUCCESS)
+		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::SwapChainInterface), &mSwapChainInterface) != nri::Result::SUCCESS ||
+		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::UpscalerInterface), &mUpscaler) != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "Failed to retrieve NRI interfaces.\n");
 		return false;

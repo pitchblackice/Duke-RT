@@ -14,6 +14,7 @@ class NRIHardwareIndexBuffer;
 class FCanvasTexture;
 class FTexture;
 class NRIRenderer;
+class NRIUpscalerContext;
 
 class NRIRenderDevice : public SystemBaseFrameBuffer
 {
@@ -85,6 +86,7 @@ private:
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
 	friend class NRIRenderer;
+	friend class NRIUpscalerContext;
 
 	std::unique_ptr<NRIRenderState> mRenderState;
 	std::unique_ptr<NRIRenderer> mRenderer;
@@ -99,6 +101,7 @@ private:
 	nri::RayTracingInterface mRayTracing = {};
 	nri::StreamerInterface mStreamer = {};
 	nri::SwapChainInterface mSwapChainInterface = {};
+	nri::UpscalerInterface mUpscaler = {};
 	nri::Device* mDevice = nullptr;
 	nri::Queue* mGraphicsQueue = nullptr;
 	nri::SwapChain* mSwapChain = nullptr;

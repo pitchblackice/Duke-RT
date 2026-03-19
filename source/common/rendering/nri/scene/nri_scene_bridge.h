@@ -16,6 +16,7 @@ enum MaterialFlags : uint32_t
 	MaterialFlag_Indexed = 1u << 0,
 	MaterialFlag_Fullbright = 1u << 1,
 	MaterialFlag_Flat = 1u << 2,
+	MaterialFlag_Sprite = 1u << 3,
 };
 
 struct SceneDebugStats
@@ -38,10 +39,16 @@ struct MaterialRef
 	uint32_t flags = MaterialFlag_None;
 };
 
+struct CapturedVertex
+{
+	float position[3] = {};
+	float prevPosition[3] = {};
+	float uv[2] = {};
+};
+
 struct SurfaceRef
 {
-	const FFlatVertex* vertices = nullptr;
-	uint32_t vertexCount = 0;
+	std::vector<CapturedVertex> vertices;
 	MaterialRef material;
 };
 
@@ -50,6 +57,7 @@ struct SceneView
 	HWDrawInfo* drawInfo = nullptr;
 	std::vector<SurfaceRef> opaqueWalls;
 	std::vector<SurfaceRef> opaqueFlats;
+	std::vector<SurfaceRef> opaqueSprites;
 	SceneDebugStats stats;
 };
 

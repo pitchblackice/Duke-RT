@@ -10,10 +10,20 @@
 #include <cstring>
 
 CVAR(Int, nri_ptdebug, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_upscaler, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
+	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 7;
+	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 12;
+	constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
+	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
 
 	template<typename T>
 	static T NRIFlags(T a, T b)
@@ -51,22 +61,52 @@ namespace
 		return (value + 7u) / 8u;
 	}
 
+	static float Clamp01(float value)
+	{
+		return std::max(0.0f, std::min(value, 1.0f));
+	}
+
+	static float GetUpscalerRenderScale(nri::UpscalerMode mode)
+	{
+		switch (mode)
+		{
+		default:
+		case nri::UpscalerMode::NATIVE: return 1.0f;
+		case nri::UpscalerMode::ULTRA_QUALITY: return 1.0f / 1.3f;
+		case nri::UpscalerMode::QUALITY: return 1.0f / 1.5f;
+		case nri::UpscalerMode::BALANCED: return 1.0f / 1.7f;
+		case nri::UpscalerMode::PERFORMANCE: return 0.5f;
+		case nri::UpscalerMode::ULTRA_PERFORMANCE: return 1.0f / 3.0f;
+		}
+	}
+
 	struct NRITraceConstants
 	{
 		float CameraPos[3] = {};
-		uint32_t OutputWidth = 0;
+		uint32_t RenderWidth = 0;
 		float CameraForward[3] = {};
-		uint32_t OutputHeight = 0;
+		uint32_t RenderHeight = 0;
 		float CameraRight[3] = {};
 		float TanHalfFovX = 1.0f;
 		float CameraUp[3] = {};
 		float TanHalfFovY = 1.0f;
+		float PrevCameraPos[3] = {};
+		uint32_t DisplayWidth = 0;
+		float PrevCameraForward[3] = {};
+		uint32_t DisplayHeight = 0;
+		float PrevCameraRight[3] = {};
+		float PrevTanHalfFovX = 1.0f;
+		float PrevCameraUp[3] = {};
+		float PrevTanHalfFovY = 1.0f;
 		float LightDirection[3] = { 0.3f, 0.85f, -0.4f };
 		uint32_t PrimitiveCount = 0;
 		float SkyColor[3] = { 0.38f, 0.48f, 0.65f };
 		uint32_t DebugMode = 0;
 		float GroundColor[3] = { 0.08f, 0.08f, 0.08f };
 		uint32_t MaterialCount = 0;
+		uint32_t FrameIndex = 0;
+		uint32_t Flags = 0;
+		float Padding[2] = {};
 	};
 
 	static void Normalize3(float v[3])
@@ -88,6 +128,17 @@ namespace
 	{
 		return memcmp(&a, &b, sizeof(a)) != 0;
 	}
+
+	static void Copy3(const float* src, float* dst)
+	{
+		std::memcpy(dst, src, sizeof(float) * 3);
+	}
+
+	static void Copy2(const float* src, float* dst)
+	{
+		std::memcpy(dst, src, sizeof(float) * 2);
+	}
+
 }
 
 NRIRenderer::NRIRenderer(NRIRenderDevice* frameBuffer)
@@ -122,28 +173,21 @@ void NRIRenderer::Shutdown()
 		return;
 	}
 
+	mNrd.Shutdown();
+	mUpscaler.Shutdown(*mFrameBuffer);
 	DestroyAccelerationStructures();
 	DestroySceneBuffers();
-	DestroyOutputTextures();
+	DestroyFrameTextures();
 	mFrameBuffer->DestroyTextureResource(mPaletteTexture);
 	DestroyCachedTextures();
 
-	if (mTracePipeline != nullptr)
+	for (nri::Pipeline*& pipeline : mPipelines)
 	{
-		mFrameBuffer->mCore.DestroyPipeline(mTracePipeline);
-		mTracePipeline = nullptr;
-	}
-
-	if (mCompositionPipeline != nullptr)
-	{
-		mFrameBuffer->mCore.DestroyPipeline(mCompositionPipeline);
-		mCompositionPipeline = nullptr;
-	}
-
-	if (mFinalPipeline != nullptr)
-	{
-		mFrameBuffer->mCore.DestroyPipeline(mFinalPipeline);
-		mFinalPipeline = nullptr;
+		if (pipeline != nullptr)
+		{
+			mFrameBuffer->mCore.DestroyPipeline(pipeline);
+			pipeline = nullptr;
+		}
 	}
 
 	if (mPipelineLayout != nullptr)
@@ -154,19 +198,93 @@ void NRIRenderer::Shutdown()
 
 	mSamplerSet = nullptr;
 	mSceneTextureSet = nullptr;
+	mFrameTextureSet = nullptr;
 	mOutputSet = nullptr;
 }
 
 bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 {
-	if (drawmode != DM_MAINVIEW || portal || mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)
+	if ((drawmode != DM_MAINVIEW && drawmode != DM_OFFSCREEN) || portal || mFrameBuffer == nullptr ||
+		mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)
 	{
 		return false;
 	}
 
+	const bool preserveHistory = drawmode != DM_MAINVIEW;
+	uint32_t savedFrameIndex = mFrameIndex;
+	float savedCurrentCameraPos[3] = {};
+	float savedCurrentCameraForward[3] = {};
+	float savedCurrentCameraRight[3] = {};
+	float savedCurrentCameraUp[3] = {};
+	float savedPreviousCameraPos[3] = {};
+	float savedPreviousCameraForward[3] = {};
+	float savedPreviousCameraRight[3] = {};
+	float savedPreviousCameraUp[3] = {};
+	float savedCurrentJitter[2] = {};
+	float savedPreviousJitter[2] = {};
+	float savedCurrentViewToClip[16] = {};
+	float savedPreviousViewToClip[16] = {};
+	float savedCurrentWorldToView[16] = {};
+	float savedPreviousWorldToView[16] = {};
+	float savedCurrentTanHalfFovX = mCurrentTanHalfFovX;
+	float savedCurrentTanHalfFovY = mCurrentTanHalfFovY;
+	float savedPreviousTanHalfFovX = mPreviousTanHalfFovX;
+	float savedPreviousTanHalfFovY = mPreviousTanHalfFovY;
+	bool savedHasPreviousCameraState = mHasPreviousCameraState;
+	bool savedResetHistory = mResetHistory;
+	if (preserveHistory)
+	{
+		Copy3(mCurrentCameraPos, savedCurrentCameraPos);
+		Copy3(mCurrentCameraForward, savedCurrentCameraForward);
+		Copy3(mCurrentCameraRight, savedCurrentCameraRight);
+		Copy3(mCurrentCameraUp, savedCurrentCameraUp);
+		Copy3(mPreviousCameraPos, savedPreviousCameraPos);
+		Copy3(mPreviousCameraForward, savedPreviousCameraForward);
+		Copy3(mPreviousCameraRight, savedPreviousCameraRight);
+		Copy3(mPreviousCameraUp, savedPreviousCameraUp);
+		Copy2(mCurrentJitter, savedCurrentJitter);
+		Copy2(mPreviousJitter, savedPreviousJitter);
+		std::memcpy(savedCurrentViewToClip, mCurrentViewToClip, sizeof(savedCurrentViewToClip));
+		std::memcpy(savedPreviousViewToClip, mPreviousViewToClip, sizeof(savedPreviousViewToClip));
+		std::memcpy(savedCurrentWorldToView, mCurrentWorldToView, sizeof(savedCurrentWorldToView));
+		std::memcpy(savedPreviousWorldToView, mPreviousWorldToView, sizeof(savedPreviousWorldToView));
+	}
+
+	auto restoreHistory = [this, &savedCurrentCameraPos, &savedCurrentCameraForward, &savedCurrentCameraRight, &savedCurrentCameraUp,
+		&savedPreviousCameraPos, &savedPreviousCameraForward, &savedPreviousCameraRight, &savedPreviousCameraUp, &savedCurrentJitter, &savedPreviousJitter,
+		&savedCurrentViewToClip, &savedPreviousViewToClip, &savedCurrentWorldToView, &savedPreviousWorldToView, savedFrameIndex, savedCurrentTanHalfFovX,
+		savedCurrentTanHalfFovY, savedPreviousTanHalfFovX, savedPreviousTanHalfFovY, savedHasPreviousCameraState, savedResetHistory]()
+	{
+		mFrameIndex = savedFrameIndex;
+		Copy3(savedCurrentCameraPos, mCurrentCameraPos);
+		Copy3(savedCurrentCameraForward, mCurrentCameraForward);
+		Copy3(savedCurrentCameraRight, mCurrentCameraRight);
+		Copy3(savedCurrentCameraUp, mCurrentCameraUp);
+		Copy3(savedPreviousCameraPos, mPreviousCameraPos);
+		Copy3(savedPreviousCameraForward, mPreviousCameraForward);
+		Copy3(savedPreviousCameraRight, mPreviousCameraRight);
+		Copy3(savedPreviousCameraUp, mPreviousCameraUp);
+		Copy2(savedCurrentJitter, mCurrentJitter);
+		Copy2(savedPreviousJitter, mPreviousJitter);
+		std::memcpy(mCurrentViewToClip, savedCurrentViewToClip, sizeof(mCurrentViewToClip));
+		std::memcpy(mPreviousViewToClip, savedPreviousViewToClip, sizeof(mPreviousViewToClip));
+		std::memcpy(mCurrentWorldToView, savedCurrentWorldToView, sizeof(mCurrentWorldToView));
+		std::memcpy(mPreviousWorldToView, savedPreviousWorldToView, sizeof(mPreviousWorldToView));
+		mCurrentTanHalfFovX = savedCurrentTanHalfFovX;
+		mCurrentTanHalfFovY = savedCurrentTanHalfFovY;
+		mPreviousTanHalfFovX = savedPreviousTanHalfFovX;
+		mPreviousTanHalfFovY = savedPreviousTanHalfFovY;
+		mHasPreviousCameraState = savedHasPreviousCameraState;
+		mResetHistory = savedResetHistory;
+	};
+
 	nri_scene::SceneView sceneView;
 	if (!nri_scene::CaptureScene(di, sceneView))
 	{
+		if (preserveHistory)
+		{
+			restoreHistory();
+		}
 		return false;
 	}
 
@@ -176,6 +294,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::BuildGeometry(sceneView, geometry);
 	if (geometry.primitives.empty())
 	{
+		if (preserveHistory)
+		{
+			restoreHistory();
+		}
 		return false;
 	}
 
@@ -183,18 +305,50 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::BuildMaterials(sceneView, materialBridge);
 	std::vector<nri_scene::MaterialData> gpuMaterials;
 
-	if (!Initialize() ||
-		!EnsureOutputTextures(mFrameBuffer->mActiveTarget->width, mFrameBuffer->mActiveTarget->height) ||
-		!EnsurePaletteTexture(materialBridge) ||
-		!EnsureSceneTextures(materialBridge, gpuMaterials) ||
-		!UploadSceneBuffers(geometry, gpuMaterials) ||
-		!BuildAccelerationStructures(geometry) ||
-		!DispatchPathTracing(di, geometry, gpuMaterials))
+	const bool ready =
+		Initialize() &&
+		EnsureFrameResources(mFrameBuffer->mActiveTarget->width, mFrameBuffer->mActiveTarget->height);
+	if (!ready)
 	{
+		if (preserveHistory)
+		{
+			restoreHistory();
+		}
 		return false;
 	}
 
-	return true;
+	UpdatePerFrameState(di);
+	if (preserveHistory)
+	{
+		mResetHistory = true;
+	}
+
+	const bool success =
+		EnsurePaletteTexture(materialBridge) &&
+		EnsureSceneTextures(materialBridge, gpuMaterials) &&
+		UploadSceneBuffers(geometry, gpuMaterials) &&
+		BuildAccelerationStructures(geometry) &&
+		DispatchFrameGraph(di, geometry, gpuMaterials, drawmode);
+
+	if (success)
+	{
+		if (!preserveHistory)
+		{
+			mFrameIndex++;
+			mHasPreviousCameraState = true;
+			mResetHistory = false;
+		}
+		else
+		{
+			restoreHistory();
+		}
+	}
+	else if (preserveHistory)
+	{
+		restoreHistory();
+	}
+
+	return success;
 }
 
 bool NRIRenderer::CreatePipelineLayout()
@@ -211,13 +365,19 @@ bool NRIRenderer::CreatePipelineLayout()
 	sceneTextureRange.descriptorType = nri::DescriptorType::TEXTURE;
 	sceneTextureRange.shaderStages = NRIComputeStage();
 
+	nri::DescriptorRangeDesc inputRange = {};
+	inputRange.baseRegisterIndex = 0;
+	inputRange.descriptorNum = NRI_INPUT_DESCRIPTOR_NUM;
+	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
+	inputRange.shaderStages = NRIComputeStage();
+
 	nri::DescriptorRangeDesc outputRange = {};
 	outputRange.baseRegisterIndex = 0;
-	outputRange.descriptorNum = 3;
+	outputRange.descriptorNum = NRI_OUTPUT_DESCRIPTOR_NUM;
 	outputRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
 	outputRange.shaderStages = NRIComputeStage();
 
-	nri::DescriptorSetDesc descriptorSets[3] = {};
+	nri::DescriptorSetDesc descriptorSets[4] = {};
 	descriptorSets[0].registerSpace = 0;
 	descriptorSets[0].ranges = &samplerRange;
 	descriptorSets[0].rangeNum = 1;
@@ -225,8 +385,11 @@ bool NRIRenderer::CreatePipelineLayout()
 	descriptorSets[1].ranges = &sceneTextureRange;
 	descriptorSets[1].rangeNum = 1;
 	descriptorSets[2].registerSpace = 2;
-	descriptorSets[2].ranges = &outputRange;
+	descriptorSets[2].ranges = &inputRange;
 	descriptorSets[2].rangeNum = 1;
+	descriptorSets[3].registerSpace = 3;
+	descriptorSets[3].ranges = &outputRange;
+	descriptorSets[3].rangeNum = 1;
 
 	nri::RootConstantDesc rootConstant = {};
 	rootConstant.registerIndex = 0;
@@ -258,12 +421,54 @@ bool NRIRenderer::CreatePipelineLayout()
 	return mFrameBuffer->mCore.CreatePipelineLayout(*mFrameBuffer->mDevice, desc, mPipelineLayout) == nri::Result::SUCCESS;
 }
 
+bool NRIRenderer::CreatePipelines()
+{
+	auto createPipeline = [this](const char* fileName, PipelineSlot slot)
+	{
+		std::vector<uint8_t> shaderBlob;
+		if (!mFrameBuffer->LoadShaderBlob(fileName, shaderBlob))
+		{
+			return false;
+		}
+
+		nri::ShaderDesc shader = {};
+		shader.stage = nri::StageBits::COMPUTE_SHADER;
+		shader.bytecode = shaderBlob.data();
+		shader.size = shaderBlob.size();
+		shader.entryPointName = "main";
+
+		nri::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.pipelineLayout = mPipelineLayout;
+		pipelineDesc.shader = shader;
+		return mFrameBuffer->mCore.CreateComputePipeline(*mFrameBuffer->mDevice, pipelineDesc, mPipelines[(size_t)slot]) == nri::Result::SUCCESS;
+	};
+
+	const bool d3d12 = mFrameBuffer->GetSelectedAPI() == nri::GraphicsAPI::D3D12;
+	const char* suffix = d3d12 ? "dxil" : "spirv";
+
+	FString trace = FStringf("TraceOpaque.cs.%s", suffix);
+	FString composition = FStringf("Composition.cs.%s", suffix);
+	FString taa = FStringf("Taa.cs.%s", suffix);
+	FString dlssBefore = FStringf("DlssBefore.cs.%s", suffix);
+	FString dlssAfter = FStringf("DlssAfter.cs.%s", suffix);
+	FString final = FStringf("Final.cs.%s", suffix);
+
+	return
+		createPipeline(trace.GetChars(), PipelineSlot::TraceOpaque) &&
+		createPipeline(composition.GetChars(), PipelineSlot::Composition) &&
+		createPipeline(taa.GetChars(), PipelineSlot::Taa) &&
+		createPipeline(dlssBefore.GetChars(), PipelineSlot::DlssBefore) &&
+		createPipeline(dlssAfter.GetChars(), PipelineSlot::DlssAfter) &&
+		createPipeline(final.GetChars(), PipelineSlot::Final);
+}
+
 bool NRIRenderer::AllocateDescriptorSets()
 {
 	return
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 0, &mSamplerSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 1, &mSceneTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 2, &mOutputSet, 1, 0) == nri::Result::SUCCESS;
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 2, &mFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mOutputSet, 1, 0) == nri::Result::SUCCESS;
 }
 
 bool NRIRenderer::UpdateSamplerSet()
@@ -283,84 +488,112 @@ bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& des
 	nri::UpdateDescriptorRangeDesc update = {};
 	update.descriptorSet = mSceneTextureSet;
 	update.rangeIndex = 0;
-	update.descriptors = descriptors.data();
+	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(descriptors.data());
 	update.descriptorNum = (uint32_t)descriptors.size();
+	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	return true;
+}
+
+bool NRIRenderer::UpdateFrameTextureSet()
+{
+	const nri::Descriptor* descriptors[NRI_INPUT_DESCRIPTOR_NUM] = {};
+	for (size_t i = 0; i < NRI_INPUT_DESCRIPTOR_NUM; ++i)
+	{
+		descriptors[i] = mFrameInputDescriptors[i];
+	}
+
+	nri::UpdateDescriptorRangeDesc update = {};
+	update.descriptorSet = mFrameTextureSet;
+	update.rangeIndex = 0;
+	update.descriptors = descriptors;
+	update.descriptorNum = NRI_INPUT_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
 	return true;
 }
 
 bool NRIRenderer::UpdateOutputSet()
 {
-	const nri::Descriptor* descriptors[3] = { mTraceTexture.storageView, mComposedTexture.storageView, mFinalTexture.storageView };
+	const nri::Descriptor* descriptors[NRI_OUTPUT_DESCRIPTOR_NUM] = {};
+	for (size_t i = 0; i < NRI_OUTPUT_DESCRIPTOR_NUM; ++i)
+	{
+		descriptors[i] = mOutputDescriptors[i];
+	}
+
 	nri::UpdateDescriptorRangeDesc update = {};
 	update.descriptorSet = mOutputSet;
 	update.rangeIndex = 0;
 	update.descriptors = descriptors;
-	update.descriptorNum = 3;
+	update.descriptorNum = NRI_OUTPUT_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
 	return true;
 }
 
-bool NRIRenderer::CreatePipelines()
+bool NRIRenderer::CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format)
 {
-	auto createPipeline = [this](const char* fileName, nri::Pipeline*& outPipeline)
-	{
-		std::vector<uint8_t> shaderBlob;
-		if (!mFrameBuffer->LoadShaderBlob(fileName, shaderBlob))
-		{
-			return false;
-		}
-
-		nri::ShaderDesc shader = {};
-		shader.stage = nri::StageBits::COMPUTE_SHADER;
-		shader.bytecode = shaderBlob.data();
-		shader.size = shaderBlob.size();
-		shader.entryPointName = "main";
-
-		nri::ComputePipelineDesc pipelineDesc = {};
-		pipelineDesc.pipelineLayout = mPipelineLayout;
-		pipelineDesc.shader = shader;
-		return mFrameBuffer->mCore.CreateComputePipeline(*mFrameBuffer->mDevice, pipelineDesc, outPipeline) == nri::Result::SUCCESS;
-	};
-
-	const bool d3d12 = mFrameBuffer->GetSelectedAPI() == nri::GraphicsAPI::D3D12;
-	return
-		createPipeline(d3d12 ? "TraceOpaque.cs.dxil" : "TraceOpaque.cs.spirv", mTracePipeline) &&
-		createPipeline(d3d12 ? "Composition.cs.dxil" : "Composition.cs.spirv", mCompositionPipeline) &&
-		createPipeline(d3d12 ? "Final.cs.dxil" : "Final.cs.spirv", mFinalPipeline);
+	return mFrameBuffer->CreateOwnedTexture(GetFrameTexture(slot), width, height, format, NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE));
 }
 
-bool NRIRenderer::EnsureOutputTextures(uint32_t width, uint32_t height)
+bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight)
 {
-	if (width == 0 || height == 0)
+	if (outputWidth == 0 || outputHeight == 0)
 	{
 		return false;
 	}
 
+	const NRIUpscalerKind upscalerKind = GetSelectedUpscalerKind();
+	float renderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
+	if (upscalerKind == NRIUpscalerKind::DLSR || upscalerKind == NRIUpscalerKind::DLRR)
+	{
+		renderScale = GetUpscalerRenderScale(GetSelectedUpscalerMode());
+	}
+
+	const uint32_t renderWidth = std::max(1u, (uint32_t)std::lround((double)outputWidth * renderScale));
+	const uint32_t renderHeight = std::max(1u, (uint32_t)std::lround((double)outputHeight * renderScale));
+
 	const bool upToDate =
-		mTraceTexture.texture != nullptr &&
-		mTraceTexture.width == width &&
-		mTraceTexture.height == height &&
-		mComposedTexture.width == width &&
-		mComposedTexture.height == height &&
-		mFinalTexture.width == width &&
-		mFinalTexture.height == height;
+		mRenderWidth == renderWidth &&
+		mRenderHeight == renderHeight &&
+		mOutputWidth == outputWidth &&
+		mOutputHeight == outputHeight &&
+		GetFrameTexture(FrameTextureSlot::Final).texture != nullptr;
 
 	if (upToDate)
 	{
 		return true;
 	}
 
-	DestroyOutputTextures();
+	mNrd.Shutdown();
+	DestroyFrameTextures();
+	mRenderWidth = renderWidth;
+	mRenderHeight = renderHeight;
+	mOutputWidth = outputWidth;
+	mOutputHeight = outputHeight;
+	mResetHistory = true;
 
-	if (!mFrameBuffer->CreateOwnedTexture(mTraceTexture, width, height, nri::Format::RGBA16_SFLOAT, NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE)) ||
-		!mFrameBuffer->CreateOwnedTexture(mComposedTexture, width, height, nri::Format::RGBA16_SFLOAT, NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE)) ||
-		!mFrameBuffer->CreateOwnedTexture(mFinalTexture, width, height, nri::Format::BGRA8_UNORM, NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE)))
-	{
-		return false;
-	}
+	const nri::Format colorFormat = nri::Format::RGBA16_SFLOAT;
+	const nri::Format finalFormat = nri::Format::BGRA8_UNORM;
 
-	return UpdateOutputSet();
+	return
+		CreateFrameTexture(FrameTextureSlot::ViewZ, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::Motion, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::NormalRoughness, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::BaseColorMetalness, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::UnfilteredDiffuse, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::UnfilteredSpecular, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::DenoisedDiffuse, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::DenoisedSpecular, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::Composed, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::ComposedSpecViewZ, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::TaaHistoryPing, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::TaaHistoryPong, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::Validation, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::DlssSpecularAlbedo, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::DlssSpecularHitDistance, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::DlssNormalRoughness, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::Upscaled, outputWidth, outputHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::PreFinal, outputWidth, outputHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::Final, outputWidth, outputHeight, finalFormat);
 }
 
 bool NRIRenderer::EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials)
@@ -478,15 +711,11 @@ bool NRIRenderer::UploadSceneBuffers(const nri_scene::GeometryData& geometry, co
 {
 	DestroySceneBuffers();
 
-	if (!CreateStructuredBuffer(mVertexBuffer, geometry.vertices.data(), geometry.vertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) ||
-		!CreateStructuredBuffer(mIndexBuffer, geometry.indices.data(), geometry.indices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) ||
-		!CreateStructuredBuffer(mPrimitiveBuffer, geometry.primitives.data(), geometry.primitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) ||
-		!CreateStructuredBuffer(mMaterialBuffer, materials.data(), materials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()))
-	{
-		return false;
-	}
-
-	return true;
+	return
+		CreateStructuredBuffer(mVertexBuffer, geometry.vertices.data(), geometry.vertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
+		CreateStructuredBuffer(mIndexBuffer, geometry.indices.data(), geometry.indices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
+		CreateStructuredBuffer(mPrimitiveBuffer, geometry.primitives.data(), geometry.primitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
+		CreateStructuredBuffer(mMaterialBuffer, materials.data(), materials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess());
 }
 
 bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geometry)
@@ -601,109 +830,498 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 	return true;
 }
 
-bool NRIRenderer::DispatchPathTracing(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
+bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int)
 {
-	NRITraceConstants constants = {};
-	constants.CameraPos[0] = di.VPUniforms.mCameraPos.X;
-	constants.CameraPos[1] = di.VPUniforms.mCameraPos.Y;
-	constants.CameraPos[2] = di.VPUniforms.mCameraPos.Z;
-	constants.OutputWidth = mFinalTexture.width;
-	constants.OutputHeight = mFinalTexture.height;
-	constants.PrimitiveCount = (uint32_t)geometry.primitives.size();
-	constants.MaterialCount = (uint32_t)materials.size();
-	constants.DebugMode = (uint32_t)nri_ptdebug;
+	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
+	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
+	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
+	mUseUpscaledInFinal = false;
 
-	VSMatrix inverseView;
-	if (!di.VPUniforms.mViewMatrix.inverseMatrix(inverseView))
+	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
 		return false;
 	}
 
-	float origin[4] = {};
-	float rightPoint[4] = {};
-	float upPoint[4] = {};
-	float forwardPoint[4] = {};
-	TransformPoint(inverseView, 0.0f, 0.0f, 0.0f, origin);
-	TransformPoint(inverseView, 1.0f, 0.0f, 0.0f, rightPoint);
-	TransformPoint(inverseView, 0.0f, 1.0f, 0.0f, upPoint);
-	TransformPoint(inverseView, 0.0f, 0.0f, -1.0f, forwardPoint);
-
-	for (int i = 0; i < 3; ++i)
+	if (nri_denoise && !DispatchDenoiser())
 	{
-		constants.CameraRight[i] = rightPoint[i] - origin[i];
-		constants.CameraUp[i] = upPoint[i] - origin[i];
-		constants.CameraForward[i] = forwardPoint[i] - origin[i];
+		return false;
 	}
 
-	Normalize3(constants.CameraRight);
-	Normalize3(constants.CameraUp);
-	Normalize3(constants.CameraForward);
+	if (!DispatchComposition() || !DispatchUpscaleChain() || !DispatchFinal())
+	{
+		return false;
+	}
+
+	CopyFinalToActiveTarget();
+	return true;
+}
+
+bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
+{
+	NRITraceConstants constants = {};
+	Copy3(mCurrentCameraPos, constants.CameraPos);
+	Copy3(mCurrentCameraForward, constants.CameraForward);
+	Copy3(mCurrentCameraRight, constants.CameraRight);
+	Copy3(mCurrentCameraUp, constants.CameraUp);
+	Copy3(mPreviousCameraPos, constants.PrevCameraPos);
+	Copy3(mPreviousCameraForward, constants.PrevCameraForward);
+	Copy3(mPreviousCameraRight, constants.PrevCameraRight);
+	Copy3(mPreviousCameraUp, constants.PrevCameraUp);
+	constants.RenderWidth = mRenderWidth;
+	constants.RenderHeight = mRenderHeight;
+	constants.DisplayWidth = mOutputWidth;
+	constants.DisplayHeight = mOutputHeight;
+	constants.TanHalfFovX = mCurrentTanHalfFovX;
+	constants.TanHalfFovY = mCurrentTanHalfFovY;
+	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
+	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
+	constants.PrimitiveCount = (uint32_t)geometry.primitives.size();
+	constants.MaterialCount = (uint32_t)materials.size();
+	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.FrameIndex = mFrameIndex;
+	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 	Normalize3(constants.LightDirection);
 
-	const float tanHalfFovX = tanf((float)di.Viewpoint.FieldOfView.Radians() * 0.5f);
-	constants.TanHalfFovX = tanHalfFovX;
-	constants.TanHalfFovY = tanHalfFovX * ((float)mFinalTexture.height / (float)mFinalTexture.width);
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredSpecular), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeStorageState());
 
-	mFrameBuffer->TransitionTexture(mTraceTexture, NRIComputeStorageState());
-	mFrameBuffer->TransitionTexture(mComposedTexture, NRIComputeStorageState());
-	mFrameBuffer->TransitionTexture(mFinalTexture, NRIComputeStorageState());
+	const nri::Descriptor* defaultInput = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
+	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+	UpdateFrameTextureSet();
 
-	auto setBindings = [this, &constants]()
+	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
+	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+	mOutputDescriptors[0] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).storageView;
+	mOutputDescriptors[3] = GetFrameTexture(FrameTextureSlot::Motion).storageView;
+	mOutputDescriptors[4] = GetFrameTexture(FrameTextureSlot::ViewZ).storageView;
+	mOutputDescriptors[5] = GetFrameTexture(FrameTextureSlot::NormalRoughness).storageView;
+	mOutputDescriptors[6] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).storageView;
+	mOutputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).storageView;
+	UpdateOutputSet();
+
+	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
+	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mOutputSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::TraceOpaque));
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+	return true;
+}
+
+bool NRIRenderer::DispatchDenoiser()
+{
+	if (!mNrd.EnsureReady(*mFrameBuffer->mDevice, mRenderWidth, mRenderHeight, 1))
 	{
+		return false;
+	}
+
+	mNrd.NewFrame();
+
+	NRINrdDispatchDesc desc = {};
+	desc.commandBuffer = mFrameBuffer->mCommandBuffer;
+	desc.motion = &GetFrameTexture(FrameTextureSlot::Motion);
+	desc.viewZ = &GetFrameTexture(FrameTextureSlot::ViewZ);
+	desc.normalRoughness = &GetFrameTexture(FrameTextureSlot::NormalRoughness);
+	desc.baseColorMetalness = &GetFrameTexture(FrameTextureSlot::BaseColorMetalness);
+	desc.unfilteredDiffuse = &GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
+	desc.unfilteredSpecular = &GetFrameTexture(FrameTextureSlot::UnfilteredSpecular);
+	desc.diffuse = &GetFrameTexture(FrameTextureSlot::DenoisedDiffuse);
+	desc.specular = &GetFrameTexture(FrameTextureSlot::DenoisedSpecular);
+	desc.validation = &GetFrameTexture(FrameTextureSlot::Validation);
+	desc.resourceWidth = mRenderWidth;
+	desc.resourceHeight = mRenderHeight;
+	desc.frameIndex = mFrameIndex;
+	Copy2(mCurrentJitter, desc.cameraJitter);
+	Copy2(mPreviousJitter, desc.cameraJitterPrev);
+	std::memcpy(desc.viewToClipMatrix, mCurrentViewToClip, sizeof(desc.viewToClipMatrix));
+	std::memcpy(desc.viewToClipMatrixPrev, mPreviousViewToClip, sizeof(desc.viewToClipMatrixPrev));
+	std::memcpy(desc.worldToViewMatrix, mCurrentWorldToView, sizeof(desc.worldToViewMatrix));
+	std::memcpy(desc.worldToViewMatrixPrev, mPreviousWorldToView, sizeof(desc.worldToViewMatrixPrev));
+	desc.resetHistory = mResetHistory;
+	desc.enableValidation = nri_validation;
+	return mNrd.Denoise(desc);
+}
+
+bool NRIRenderer::DispatchComposition()
+{
+	NRITraceConstants constants = {};
+	Copy3(mCurrentCameraPos, constants.CameraPos);
+	Copy3(mCurrentCameraForward, constants.CameraForward);
+	Copy3(mCurrentCameraRight, constants.CameraRight);
+	Copy3(mCurrentCameraUp, constants.CameraUp);
+	Copy3(mPreviousCameraPos, constants.PrevCameraPos);
+	Copy3(mPreviousCameraForward, constants.PrevCameraForward);
+	Copy3(mPreviousCameraRight, constants.PrevCameraRight);
+	Copy3(mPreviousCameraUp, constants.PrevCameraUp);
+	constants.RenderWidth = mRenderWidth;
+	constants.RenderHeight = mRenderHeight;
+	constants.DisplayWidth = mOutputWidth;
+	constants.DisplayHeight = mOutputHeight;
+	constants.TanHalfFovX = mCurrentTanHalfFovX;
+	constants.TanHalfFovY = mCurrentTanHalfFovY;
+	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
+	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
+	constants.FrameIndex = mFrameIndex;
+	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+	constants.DebugMode = (uint32_t)nri_ptdebug;
+	Normalize3(constants.LightDirection);
+
+	NRITextureResource& diffuse = nri_denoise ? GetFrameTexture(FrameTextureSlot::DenoisedDiffuse) : GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
+	NRITextureResource& specular = nri_denoise ? GetFrameTexture(FrameTextureSlot::DenoisedSpecular) : GetFrameTexture(FrameTextureSlot::UnfilteredSpecular);
+	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
+
+	mFrameBuffer->TransitionTexture(diffuse, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(specular, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(composed, NRIComputeStorageState());
+
+	const nri::Descriptor* defaultInput = composed.shaderView;
+	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+	mFrameInputDescriptors[5] = diffuse.shaderView;
+	mFrameInputDescriptors[6] = specular.shaderView;
+	UpdateFrameTextureSet();
+
+	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
+	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+	mOutputDescriptors[1] = composed.storageView;
+	UpdateOutputSet();
+
+	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
+	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mOutputSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Composition));
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+	return true;
+}
+
+bool NRIRenderer::DispatchUpscaleChain()
+{
+	const NRIUpscalerKind kind = GetSelectedUpscalerKind();
+	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
+	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
+	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
+
+	if (kind == NRIUpscalerKind::Off || kind == NRIUpscalerKind::NIS)
+	{
+		NRITraceConstants constants = {};
+		constants.RenderWidth = mRenderWidth;
+		constants.RenderHeight = mRenderHeight;
+		constants.DisplayWidth = mOutputWidth;
+		constants.DisplayHeight = mOutputHeight;
+		constants.FrameIndex = mFrameIndex;
+		constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+
+		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
+
+		const nri::Descriptor* defaultInput = composed.shaderView;
+		mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+		mFrameInputDescriptors[0] = historyInput.shaderView;
+		mFrameInputDescriptors[1] = GetFrameTexture(FrameTextureSlot::Motion).shaderView;
+		mFrameInputDescriptors[5] = composed.shaderView;
+		UpdateFrameTextureSet();
+
+		const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
+		mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+		mOutputDescriptors[7] = historyOutput.storageView;
+		UpdateOutputSet();
+
 		mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 		mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
 		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
 		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mOutputSet, nri::BindPoint::COMPUTE });
-	};
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mOutputSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Taa));
+		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+	}
 
-	const nri::DispatchDesc dispatchDesc = { GetDispatchSize(mFinalTexture.width), GetDispatchSize(mFinalTexture.height), 1 };
+	if (kind == NRIUpscalerKind::Off)
+	{
+		mUseUpscaledInFinal = false;
+		return true;
+	}
 
-	setBindings();
-	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *mTracePipeline);
-	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, dispatchDesc);
+	if (kind == NRIUpscalerKind::NIS)
+	{
+		mFrameBuffer->TransitionTexture(historyOutput, NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Upscaled), NRIComputeStorageState());
+		if (!mUpscaler.EnsureReady(*mFrameBuffer, kind, nri::UpscalerMode::QUALITY, mOutputWidth, mOutputHeight))
+		{
+			return false;
+		}
 
-	nri::TextureBarrierDesc traceBarrier = {};
-	traceBarrier.texture = mTraceTexture.texture;
-	traceBarrier.before = NRIComputeStorageState();
-	traceBarrier.after = NRIComputeStorageState();
-	traceBarrier.mipNum = 1;
-	traceBarrier.layerNum = 1;
-	traceBarrier.planes = nri::PlaneBits::COLOR;
-	nri::BarrierDesc traceBarrierDesc = {};
-	traceBarrierDesc.textures = &traceBarrier;
-	traceBarrierDesc.textureNum = 1;
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, traceBarrierDesc);
+		NRIUpscalerDispatchDesc desc = {};
+		desc.commandBuffer = mFrameBuffer->mCommandBuffer;
+		desc.input = &historyOutput;
+		desc.output = &GetFrameTexture(FrameTextureSlot::Upscaled);
+		desc.currentWidth = mRenderWidth;
+		desc.currentHeight = mRenderHeight;
+		Copy2(mCurrentJitter, desc.cameraJitter);
+		desc.sharpness = Clamp01((float)nri_sharpness);
+		desc.resetHistory = mResetHistory;
+		if (!mUpscaler.Dispatch(*mFrameBuffer, kind, desc))
+		{
+			return false;
+		}
 
-	setBindings();
-	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *mCompositionPipeline);
-	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, dispatchDesc);
+		mUseUpscaledInFinal = true;
+		mUpscaledInputSlot = FrameTextureSlot::Upscaled;
+		return true;
+	}
 
-	nri::TextureBarrierDesc composedBarrier = {};
-	composedBarrier.texture = mComposedTexture.texture;
-	composedBarrier.before = NRIComputeStorageState();
-	composedBarrier.after = NRIComputeStorageState();
-	composedBarrier.mipNum = 1;
-	composedBarrier.layerNum = 1;
-	composedBarrier.planes = nri::PlaneBits::COLOR;
-	nri::BarrierDesc composedBarrierDesc = {};
-	composedBarrierDesc.textures = &composedBarrier;
-	composedBarrierDesc.textureNum = 1;
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, composedBarrierDesc);
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Composed), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeStorageState());
 
-	setBindings();
-	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *mFinalPipeline);
-	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, dispatchDesc);
+	const nri::Descriptor* defaultInput = composed.shaderView;
+	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+	mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
+	mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
+	UpdateFrameTextureSet();
 
-	mFrameBuffer->TransitionTexture(mFinalTexture, NRICopySourceState());
-	mFrameBuffer->TransitionTexture(*mFrameBuffer->mActiveTarget, NRICopyDestinationState());
-	mFrameBuffer->mCore.CmdCopyTexture(*mFrameBuffer->mCommandBuffer, *mFrameBuffer->mActiveTarget->texture, nullptr, *mFinalTexture.texture, nullptr);
+	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
+	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+	mOutputDescriptors[9] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).storageView;
+	mOutputDescriptors[10] = GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo).storageView;
+	mOutputDescriptors[11] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).storageView;
+	UpdateOutputSet();
+
+	{
+		NRITraceConstants constants = {};
+		constants.RenderWidth = mRenderWidth;
+		constants.RenderHeight = mRenderHeight;
+		constants.DisplayWidth = mOutputWidth;
+		constants.DisplayHeight = mOutputHeight;
+		constants.FrameIndex = mFrameIndex;
+		constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+		mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
+		mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mOutputSet, nri::BindPoint::COMPUTE });
+	}
+	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::DlssBefore));
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Upscaled), NRIComputeStorageState());
+
+	if (!mUpscaler.EnsureReady(*mFrameBuffer, kind, GetSelectedUpscalerMode(), mOutputWidth, mOutputHeight))
+	{
+		return false;
+	}
+
+	NRIUpscalerDispatchDesc upscalerDesc = {};
+	upscalerDesc.commandBuffer = mFrameBuffer->mCommandBuffer;
+	upscalerDesc.input = &GetFrameTexture(FrameTextureSlot::Composed);
+	upscalerDesc.output = &GetFrameTexture(FrameTextureSlot::Upscaled);
+	upscalerDesc.motion = &GetFrameTexture(FrameTextureSlot::Motion);
+	upscalerDesc.depth = &GetFrameTexture(FrameTextureSlot::ViewZ);
+	upscalerDesc.normalRoughness = &GetFrameTexture(FrameTextureSlot::NormalRoughness);
+	upscalerDesc.diffuseAlbedo = &GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo);
+	upscalerDesc.specularAlbedo = &GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo);
+	upscalerDesc.specularHitDistance = &GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance);
+	upscalerDesc.currentWidth = mRenderWidth;
+	upscalerDesc.currentHeight = mRenderHeight;
+	Copy2(mCurrentJitter, upscalerDesc.cameraJitter);
+	std::memcpy(upscalerDesc.viewToClipMatrix, mCurrentViewToClip, sizeof(upscalerDesc.viewToClipMatrix));
+	std::memcpy(upscalerDesc.worldToViewMatrix, mCurrentWorldToView, sizeof(upscalerDesc.worldToViewMatrix));
+	upscalerDesc.sharpness = Clamp01((float)nri_sharpness);
+	upscalerDesc.resetHistory = mResetHistory;
+	if (!mUpscaler.Dispatch(*mFrameBuffer, kind, upscalerDesc))
+	{
+		return false;
+	}
+
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Upscaled), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), NRIComputeStorageState());
+
+	mFrameInputDescriptors.fill(GetFrameTexture(FrameTextureSlot::Composed).shaderView);
+	mFrameInputDescriptors[6] = GetFrameTexture(FrameTextureSlot::Upscaled).shaderView;
+	UpdateFrameTextureSet();
+
+	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::PreFinal).storageView);
+	mOutputDescriptors[2] = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
+	UpdateOutputSet();
+
+	{
+		NRITraceConstants constants = {};
+		constants.RenderWidth = mRenderWidth;
+		constants.RenderHeight = mRenderHeight;
+		constants.DisplayWidth = mOutputWidth;
+		constants.DisplayHeight = mOutputHeight;
+		constants.FrameIndex = mFrameIndex;
+		constants.Flags = NRI_FLAG_USE_UPSCALED | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
+		mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
+		mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mOutputSet, nri::BindPoint::COMPUTE });
+	}
+	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::DlssAfter));
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mOutputWidth), GetDispatchSize(mOutputHeight), 1 });
+
+	mUseUpscaledInFinal = true;
+	mUpscaledInputSlot = FrameTextureSlot::PreFinal;
 	return true;
+}
+
+bool NRIRenderer::DispatchFinal()
+{
+	NRITraceConstants constants = {};
+	Copy3(mCurrentCameraPos, constants.CameraPos);
+	Copy3(mCurrentCameraForward, constants.CameraForward);
+	Copy3(mCurrentCameraRight, constants.CameraRight);
+	Copy3(mCurrentCameraUp, constants.CameraUp);
+	Copy3(mPreviousCameraPos, constants.PrevCameraPos);
+	Copy3(mPreviousCameraForward, constants.PrevCameraForward);
+	Copy3(mPreviousCameraRight, constants.PrevCameraRight);
+	Copy3(mPreviousCameraUp, constants.PrevCameraUp);
+	constants.RenderWidth = mRenderWidth;
+	constants.RenderHeight = mRenderHeight;
+	constants.DisplayWidth = mOutputWidth;
+	constants.DisplayHeight = mOutputHeight;
+	constants.TanHalfFovX = mCurrentTanHalfFovX;
+	constants.TanHalfFovY = mCurrentTanHalfFovY;
+	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
+	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
+	constants.FrameIndex = mFrameIndex;
+	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u);
+	constants.DebugMode = (uint32_t)nri_ptdebug;
+	Normalize3(constants.LightDirection);
+
+	NRITextureResource& history = GetFrameTexture(mHistoryOutputSlot);
+	NRITextureResource& upscaled = GetFrameTexture(mUpscaledInputSlot);
+	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
+	mFrameBuffer->TransitionTexture(history, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(upscaled, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
+
+	mFrameInputDescriptors.fill(GetFrameTexture(FrameTextureSlot::Composed).shaderView);
+	mFrameInputDescriptors[0] = history.shaderView;
+	mFrameInputDescriptors[6] = upscaled.shaderView;
+	UpdateFrameTextureSet();
+
+	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::PreFinal).storageView);
+	mOutputDescriptors[2] = final.storageView;
+	UpdateOutputSet();
+
+	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
+	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mOutputSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Final));
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mOutputWidth), GetDispatchSize(mOutputHeight), 1 });
+	return true;
+}
+
+void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
+{
+	if (mHasPreviousCameraState)
+	{
+		Copy3(mCurrentCameraPos, mPreviousCameraPos);
+		Copy3(mCurrentCameraForward, mPreviousCameraForward);
+		Copy3(mCurrentCameraRight, mPreviousCameraRight);
+		Copy3(mCurrentCameraUp, mPreviousCameraUp);
+		mPreviousTanHalfFovX = mCurrentTanHalfFovX;
+		mPreviousTanHalfFovY = mCurrentTanHalfFovY;
+		Copy2(mCurrentJitter, mPreviousJitter);
+		std::memcpy(mPreviousViewToClip, mCurrentViewToClip, sizeof(mPreviousViewToClip));
+		std::memcpy(mPreviousWorldToView, mCurrentWorldToView, sizeof(mPreviousWorldToView));
+	}
+
+	VSMatrix inverseView;
+	if (!di.VPUniforms.mViewMatrix.inverseMatrix(inverseView))
+	{
+		std::memset(mCurrentCameraPos, 0, sizeof(mCurrentCameraPos));
+		std::memset(mCurrentCameraForward, 0, sizeof(mCurrentCameraForward));
+		std::memset(mCurrentCameraRight, 0, sizeof(mCurrentCameraRight));
+		std::memset(mCurrentCameraUp, 0, sizeof(mCurrentCameraUp));
+		mCurrentCameraForward[1] = 1.0f;
+		mCurrentCameraRight[0] = 1.0f;
+		mCurrentCameraUp[2] = 1.0f;
+	}
+	else
+	{
+		float origin[4] = {};
+		float rightPoint[4] = {};
+		float upPoint[4] = {};
+		float forwardPoint[4] = {};
+		TransformPoint(inverseView, 0.0f, 0.0f, 0.0f, origin);
+		TransformPoint(inverseView, 1.0f, 0.0f, 0.0f, rightPoint);
+		TransformPoint(inverseView, 0.0f, 1.0f, 0.0f, upPoint);
+		TransformPoint(inverseView, 0.0f, 0.0f, -1.0f, forwardPoint);
+
+		for (int i = 0; i < 3; ++i)
+		{
+			mCurrentCameraPos[i] = origin[i];
+			mCurrentCameraRight[i] = rightPoint[i] - origin[i];
+			mCurrentCameraUp[i] = upPoint[i] - origin[i];
+			mCurrentCameraForward[i] = forwardPoint[i] - origin[i];
+		}
+
+		Normalize3(mCurrentCameraRight);
+		Normalize3(mCurrentCameraUp);
+		Normalize3(mCurrentCameraForward);
+	}
+
+	const float tanHalfFovX = tanf((float)di.Viewpoint.FieldOfView.Radians() * 0.5f);
+	mCurrentTanHalfFovX = tanHalfFovX;
+	mCurrentTanHalfFovY = tanHalfFovX * ((float)mRenderHeight / std::max(1.0f, (float)mRenderWidth));
+	mCurrentJitter[0] = 0.0f;
+	mCurrentJitter[1] = 0.0f;
+	FillMatrix(mCurrentViewToClip, di.VPUniforms.mProjectionMatrix);
+	FillMatrix(mCurrentWorldToView, di.VPUniforms.mViewMatrix);
+
+	if (!mHasPreviousCameraState)
+	{
+		Copy3(mCurrentCameraPos, mPreviousCameraPos);
+		Copy3(mCurrentCameraForward, mPreviousCameraForward);
+		Copy3(mCurrentCameraRight, mPreviousCameraRight);
+		Copy3(mCurrentCameraUp, mPreviousCameraUp);
+		mPreviousTanHalfFovX = mCurrentTanHalfFovX;
+		mPreviousTanHalfFovY = mCurrentTanHalfFovY;
+		Copy2(mCurrentJitter, mPreviousJitter);
+		std::memcpy(mPreviousViewToClip, mCurrentViewToClip, sizeof(mPreviousViewToClip));
+		std::memcpy(mPreviousWorldToView, mCurrentWorldToView, sizeof(mPreviousWorldToView));
+	}
 }
 
 void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
@@ -722,6 +1340,14 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 	}
 }
 
+void NRIRenderer::CopyFinalToActiveTarget()
+{
+	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
+	mFrameBuffer->TransitionTexture(final, NRICopySourceState());
+	mFrameBuffer->TransitionTexture(*mFrameBuffer->mActiveTarget, NRICopyDestinationState());
+	mFrameBuffer->mCore.CmdCopyTexture(*mFrameBuffer->mCommandBuffer, *mFrameBuffer->mActiveTarget->texture, nullptr, *final.texture, nullptr);
+}
+
 void NRIRenderer::DestroyCachedTextures()
 {
 	for (auto& texture : mTextureCache)
@@ -731,11 +1357,16 @@ void NRIRenderer::DestroyCachedTextures()
 	mTextureCache.clear();
 }
 
-void NRIRenderer::DestroyOutputTextures()
+void NRIRenderer::DestroyFrameTextures()
 {
-	mFrameBuffer->DestroyTextureResource(mTraceTexture);
-	mFrameBuffer->DestroyTextureResource(mComposedTexture);
-	mFrameBuffer->DestroyTextureResource(mFinalTexture);
+	for (auto& texture : mFrameTextures)
+	{
+		mFrameBuffer->DestroyTextureResource(texture);
+	}
+	mRenderWidth = 0;
+	mRenderHeight = 0;
+	mOutputWidth = 0;
+	mOutputHeight = 0;
 }
 
 void NRIRenderer::DestroySceneBuffers()
@@ -785,4 +1416,35 @@ void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureR
 		mFrameBuffer->mRayTracing.DestroyAccelerationStructure(resource.accelerationStructure);
 		resource.accelerationStructure = nullptr;
 	}
+}
+
+NRIUpscalerKind NRIRenderer::GetSelectedUpscalerKind() const
+{
+	switch ((int)nri_upscaler)
+	{
+	default:
+	case 0: return NRIUpscalerKind::Off;
+	case 1: return NRIUpscalerKind::NIS;
+	case 2: return NRIUpscalerKind::DLSR;
+	case 3: return NRIUpscalerKind::DLRR;
+	}
+}
+
+nri::UpscalerMode NRIRenderer::GetSelectedUpscalerMode() const
+{
+	switch ((int)nri_upscalermode)
+	{
+	default:
+	case 0: return nri::UpscalerMode::NATIVE;
+	case 1: return nri::UpscalerMode::ULTRA_QUALITY;
+	case 2: return nri::UpscalerMode::QUALITY;
+	case 3: return nri::UpscalerMode::BALANCED;
+	case 4: return nri::UpscalerMode::PERFORMANCE;
+	case 5: return nri::UpscalerMode::ULTRA_PERFORMANCE;
+	}
+}
+
+void NRIRenderer::FillMatrix(float* outMatrix, const VSMatrix& matrix) const
+{
+	const_cast<VSMatrix&>(matrix).copy(outMatrix);
 }

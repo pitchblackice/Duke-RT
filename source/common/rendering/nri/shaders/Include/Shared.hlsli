@@ -5,7 +5,8 @@
 
 #define SET_SAMPLERS 0
 #define SET_SCENE_TEXTURES 1
-#define SET_OUTPUTS 2
+#define SET_INPUTS 2
+#define SET_OUTPUTS 3
 #define SET_ROOT 4
 
 #define MAX_SCENE_TEXTURES 256
@@ -16,24 +17,36 @@
 struct NRITraceConstants
 {
 	float3 CameraPos;
-	uint OutputWidth;
+	uint RenderWidth;
 	float3 CameraForward;
-	uint OutputHeight;
+	uint RenderHeight;
 	float3 CameraRight;
 	float TanHalfFovX;
 	float3 CameraUp;
 	float TanHalfFovY;
+	float3 PrevCameraPos;
+	uint DisplayWidth;
+	float3 PrevCameraForward;
+	uint DisplayHeight;
+	float3 PrevCameraRight;
+	float PrevTanHalfFovX;
+	float3 PrevCameraUp;
+	float PrevTanHalfFovY;
 	float3 LightDirection;
 	uint PrimitiveCount;
 	float3 SkyColor;
 	uint DebugMode;
 	float3 GroundColor;
 	uint MaterialCount;
+	uint FrameIndex;
+	uint Flags;
+	float2 Padding;
 };
 
 struct SceneVertex
 {
 	float3 position;
+	float3 prevPosition;
 	float2 uv;
 };
 
@@ -72,8 +85,25 @@ SamplerState gLinearClamp : register(s0, space0);
 Texture2D<float4> gPaletteLookup : register(t0, space1);
 Texture2D<float4> gSceneTextures[MAX_SCENE_TEXTURES] : register(t1, space1);
 
+Texture2D<float4> gHistoryInput : register(t0, space2);
+Texture2D<float4> gMotionInput : register(t1, space2);
+Texture2D<float4> gViewZInput : register(t2, space2);
+Texture2D<float4> gNormalRoughnessInput : register(t3, space2);
+Texture2D<float4> gBaseColorInput : register(t4, space2);
+Texture2D<float4> gComposedInput : register(t5, space2);
+Texture2D<float4> gUpscaledInput : register(t6, space2);
+
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gTraceOutput, u, 0, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gComposedOutput, u, 1, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gFinalOutput, u, 2, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gMotionOutput, u, 3, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gViewZOutput, u, 4, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gNormalRoughnessOutput, u, 5, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gBaseColorOutput, u, 6, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gHistoryOutput, u, 7, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gUpscaledOutput, u, 8, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gGuideDiffuseOutput, u, 9, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gGuideSpecularOutput, u, 10, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gGuideSpecHitOutput, u, 11, SET_OUTPUTS);
 
 #endif

@@ -1,11 +1,14 @@
 #pragma once
 
+#include "nri_nrd.h"
 #include "nri_resources.h"
+#include "nri_upscaler.h"
 
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_material_bridge.h"
 #include "../scene/nri_scene_bridge.h"
 
+#include <array>
 #include <vector>
 
 class NRIRenderDevice;
@@ -21,6 +24,42 @@ public:
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
 
 private:
+	enum class FrameTextureSlot : uint32_t
+	{
+		ViewZ,
+		Motion,
+		NormalRoughness,
+		BaseColorMetalness,
+		UnfilteredDiffuse,
+		UnfilteredSpecular,
+		DenoisedDiffuse,
+		DenoisedSpecular,
+		Composed,
+		ComposedSpecViewZ,
+		TaaHistoryPing,
+		TaaHistoryPong,
+		Validation,
+		DlssDiffuseAlbedo,
+		DlssSpecularAlbedo,
+		DlssSpecularHitDistance,
+		DlssNormalRoughness,
+		Upscaled,
+		PreFinal,
+		Final,
+		Count
+	};
+
+	enum class PipelineSlot : uint32_t
+	{
+		TraceOpaque,
+		Composition,
+		Taa,
+		DlssBefore,
+		DlssAfter,
+		Final,
+		Count
+	};
+
 	struct CachedTexture
 	{
 		uint64_t key = 0;
@@ -30,16 +69,23 @@ private:
 	bool CreatePipelineLayout();
 	bool CreatePipelines();
 	bool AllocateDescriptorSets();
-	bool EnsureOutputTextures(uint32_t width, uint32_t height);
+	bool EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight);
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
 	bool EnsureSceneTextures(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials);
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool BuildAccelerationStructures(const nri_scene::GeometryData& geometry);
-	bool DispatchPathTracing(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
+	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
+	bool DispatchTraceOpaque(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
+	bool DispatchDenoiser();
+	bool DispatchComposition();
+	bool DispatchUpscaleChain();
+	bool DispatchFinal();
+	void UpdatePerFrameState(HWDrawInfo& di);
 	void LogBridgeStats(const nri_scene::SceneDebugStats& stats);
+	void CopyFinalToActiveTarget();
 
 	void DestroyCachedTextures();
-	void DestroyOutputTextures();
+	void DestroyFrameTextures();
 	void DestroySceneBuffers();
 	void DestroyAccelerationStructures();
 	void DestroyBufferResource(NRIBufferResource& resource);
@@ -49,21 +95,26 @@ private:
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
 	bool UpdateSamplerSet();
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors);
+	bool UpdateFrameTextureSet();
 	bool UpdateOutputSet();
+	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
+	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) { return mFrameTextures[(size_t)slot]; }
+	const NRITextureResource& GetFrameTexture(FrameTextureSlot slot) const { return mFrameTextures[(size_t)slot]; }
+	nri::Pipeline* GetPipeline(PipelineSlot slot) const { return mPipelines[(size_t)slot]; }
+	NRIUpscalerKind GetSelectedUpscalerKind() const;
+	nri::UpscalerMode GetSelectedUpscalerMode() const;
+	void FillMatrix(float* outMatrix, const VSMatrix& matrix) const;
 
 	NRIRenderDevice* mFrameBuffer = nullptr;
 	nri::PipelineLayout* mPipelineLayout = nullptr;
-	nri::Pipeline* mTracePipeline = nullptr;
-	nri::Pipeline* mCompositionPipeline = nullptr;
-	nri::Pipeline* mFinalPipeline = nullptr;
+	std::array<nri::Pipeline*, (size_t)PipelineSlot::Count> mPipelines = {};
 	nri::DescriptorSet* mSamplerSet = nullptr;
 	nri::DescriptorSet* mSceneTextureSet = nullptr;
+	nri::DescriptorSet* mFrameTextureSet = nullptr;
 	nri::DescriptorSet* mOutputSet = nullptr;
 
 	NRITextureResource mPaletteTexture;
-	NRITextureResource mTraceTexture;
-	NRITextureResource mComposedTexture;
-	NRITextureResource mFinalTexture;
+	std::array<NRITextureResource, (size_t)FrameTextureSlot::Count> mFrameTextures = {};
 
 	NRIBufferResource mVertexBuffer;
 	NRIBufferResource mIndexBuffer;
@@ -76,6 +127,39 @@ private:
 	NRIAccelerationStructureResource mTopLevelAS;
 
 	std::vector<CachedTexture> mTextureCache;
+	NRINrdContext mNrd;
+	NRIUpscalerContext mUpscaler;
 	nri_scene::SceneDebugStats mLastStats = {};
+	std::array<nri::Descriptor*, 7> mFrameInputDescriptors = {};
+	std::array<nri::Descriptor*, 12> mOutputDescriptors = {};
+	uint32_t mFrameIndex = 0;
+	uint32_t mRenderWidth = 0;
+	uint32_t mRenderHeight = 0;
+	uint32_t mOutputWidth = 0;
+	uint32_t mOutputHeight = 0;
+	float mCurrentCameraPos[3] = {};
+	float mCurrentCameraForward[3] = {};
+	float mCurrentCameraRight[3] = {};
+	float mCurrentCameraUp[3] = {};
+	float mPreviousCameraPos[3] = {};
+	float mPreviousCameraForward[3] = {};
+	float mPreviousCameraRight[3] = {};
+	float mPreviousCameraUp[3] = {};
+	float mCurrentTanHalfFovX = 1.0f;
+	float mCurrentTanHalfFovY = 1.0f;
+	float mPreviousTanHalfFovX = 1.0f;
+	float mPreviousTanHalfFovY = 1.0f;
+	float mCurrentJitter[2] = {};
+	float mPreviousJitter[2] = {};
+	float mCurrentViewToClip[16] = {};
+	float mPreviousViewToClip[16] = {};
+	float mCurrentWorldToView[16] = {};
+	float mPreviousWorldToView[16] = {};
 	bool mHasLoggedStats = false;
+	bool mHasPreviousCameraState = false;
+	bool mResetHistory = true;
+	bool mUseUpscaledInFinal = false;
+	FrameTextureSlot mHistoryInputSlot = FrameTextureSlot::TaaHistoryPing;
+	FrameTextureSlot mHistoryOutputSlot = FrameTextureSlot::TaaHistoryPong;
+	FrameTextureSlot mUpscaledInputSlot = FrameTextureSlot::Upscaled;
 };

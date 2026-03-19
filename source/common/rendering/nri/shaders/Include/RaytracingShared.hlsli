@@ -17,7 +17,7 @@ struct HitData
 
 float3 GeneratePrimaryRay(uint2 pixelPos)
 {
-	float2 resolution = float2(gTraceConstants.OutputWidth, gTraceConstants.OutputHeight);
+	float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 	float2 uv = ((float2)pixelPos + 0.5) / resolution;
 	float2 ndc = uv * 2.0 - 1.0;
 	ndc.y = -ndc.y;
@@ -28,6 +28,20 @@ float3 GeneratePrimaryRay(uint2 pixelPos)
 		ndc.y * gTraceConstants.TanHalfFovY * gTraceConstants.CameraUp;
 
 	return normalize(ray);
+}
+
+float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp, float tanHalfFovX, float tanHalfFovY)
+{
+	float3 relative = worldPos - cameraPos;
+	float viewZ = dot(relative, cameraForward);
+	if (viewZ <= 0.001)
+	{
+		return float2(-1.0, -1.0);
+	}
+
+	float ndcX = dot(relative, cameraRight) / max(viewZ * tanHalfFovX, 1e-5);
+	float ndcY = dot(relative, cameraUp) / max(viewZ * tanHalfFovY, 1e-5);
+	return float2(ndcX * 0.5 + 0.5, 0.5 - ndcY * 0.5);
 }
 
 float4 SampleSurfaceColor(uint materialIndex, float2 uv)
