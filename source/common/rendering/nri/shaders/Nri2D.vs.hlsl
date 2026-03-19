@@ -4,14 +4,12 @@ struct VSInput
 {
 	float3 Position : POSITION;
 	float2 TexCoord : TEXCOORD0;
-	float4 Color : COLOR0;
 };
 
 struct VSOutput
 {
 	float4 Position : SV_Position;
 	float2 TexCoord : TEXCOORD0;
-	float4 Color : COLOR0;
 };
 
 VSOutput main(VSInput input)
@@ -23,6 +21,5 @@ VSOutput main(VSInput input)
 
 	output.Position = float4(ndc, p.z, 1.0);
 	output.TexCoord = NriTransformTexcoord(input.TexCoord);
-	output.Color = input.Color;
 	return output;
 }

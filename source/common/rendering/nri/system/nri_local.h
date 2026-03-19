@@ -44,6 +44,7 @@ struct NRIShaderConstants
 
 	float ObjectColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	float AddColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float VertexColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
 	float ModelMatrix[16] = {
 		1.0f, 0.0f, 0.0f, 0.0f,

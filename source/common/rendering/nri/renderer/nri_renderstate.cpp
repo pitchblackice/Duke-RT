@@ -560,6 +560,11 @@ void NRIRenderState::FillShaderConstants(NRIShaderConstants& constants) const
 	constants.AddColor[2] = mStreamData.uAddColor.b;
 	constants.AddColor[3] = mStreamData.uAddColor.a;
 
+	constants.VertexColor[0] = mStreamData.uVertexColor.X;
+	constants.VertexColor[1] = mStreamData.uVertexColor.Y;
+	constants.VertexColor[2] = mStreamData.uVertexColor.Z;
+	constants.VertexColor[3] = mStreamData.uVertexColor.W;
+
 	std::memcpy(constants.ModelMatrix, mModelMatrix.get(), sizeof(constants.ModelMatrix));
 	std::memcpy(constants.TexMatrix, mTextureMatrix.get(), sizeof(constants.TexMatrix));
 }

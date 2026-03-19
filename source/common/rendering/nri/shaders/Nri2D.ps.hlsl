@@ -7,7 +7,6 @@ struct PSInput
 {
 	float4 Position : SV_Position;
 	float2 TexCoord : TEXCOORD0;
-	float4 Color : COLOR0;
 };
 
 float4 main(PSInput input) : SV_Target0
@@ -29,7 +28,7 @@ float4 main(PSInput input) : SV_Target0
 		texel.rgb = 1.0 - texel.rgb;
 	}
 
-	float4 color = texel * input.Color;
+	float4 color = texel * gNri2DConstants.VertexColor;
 	color.rgb = color.rgb * gNri2DConstants.ObjectColor.rgb + gNri2DConstants.AddColor.rgb;
 	color.a *= gNri2DConstants.ObjectColor.a;
 	color *= gNri2DConstants.ScreenFade;

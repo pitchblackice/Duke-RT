@@ -11,6 +11,7 @@ struct Nri2DConstants
 
 	float4 ObjectColor;
 	float4 AddColor;
+	float4 VertexColor;
 
 	float4x4 ModelMatrix;
 	float4x4 TexMatrix;
