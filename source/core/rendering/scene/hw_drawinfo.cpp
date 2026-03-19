@@ -722,6 +722,11 @@ void HWDrawInfo::DrawScene(int drawmode, bool portal)
 	}
 
 	CreateScene(portal);
+	if (screen->RenderPathTracedScene(*this, drawmode, portal))
+	{
+		return;
+	}
+
 	auto& RenderState = *screen->RenderState();
 
 	RenderState.SetDepthMask(true);
