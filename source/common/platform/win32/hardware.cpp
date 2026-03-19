@@ -47,6 +47,9 @@
 #ifdef HAVE_VULKAN
 #include "win32vulkanvideo.h"
 #endif
+#ifdef HAVE_NRI
+#include "win32nrivideo.h"
+#endif
 #include "engineerrors.h"
 #include "i_system.h"
 #include "i_mainwindow.h"
@@ -90,6 +93,13 @@ void I_InitGraphics ()
 		// are the active app. Huh?
 	}
 
+#ifdef HAVE_NRI
+	if (V_GetBackend() == 4)
+	{
+		Video = new Win32NRIVideo();
+	}
+	else
+#endif
 #ifdef HAVE_VULKAN
 	if (V_GetBackend() == 1)
 	{

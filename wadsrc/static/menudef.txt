@@ -1683,6 +1683,7 @@ OptionValue PreferBackend
 	0, "$OPTVAL_OPENGL"
 	1, "$OPTVAL_VULKAN"
 	2, "$OPTVAL_OPENGLES"
+	4, "$OPTVAL_NRI"
 }
 
 OptionMenu VideoModeMenu protected
@@ -2165,4 +2166,3 @@ OptionMenu "EngineCredits3"
 	StaticText "Ryan Gordon       Stephen Anthony   tueidj           ", 0
 	StaticText "Pär \"Parkar\" Karlsson", 0
 }
-

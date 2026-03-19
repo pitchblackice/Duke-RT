@@ -420,6 +420,10 @@ if (HAVE_VULKAN)
 	set (PLAT_WIN32_SOURCES ${PLAT_WIN32_SOURCES} common/platform/win32/win32vulkanvideo.cpp )
 endif()
 
+if (HAVE_NRI)
+	set (PLAT_WIN32_SOURCES ${PLAT_WIN32_SOURCES} common/platform/win32/win32nrivideo.cpp )
+endif()
+
 # todo: implement an actual crash catcher for ARM
 # for now this is purely experimental
 if (NOT ${TARGET_ARCHITECTURE} MATCHES "arm" )
@@ -599,6 +603,8 @@ file( GLOB HEADER_FILES
 	common/rendering/vulkan/renderer/*.h
 	common/rendering/vulkan/shaders/*.h
 	common/rendering/vulkan/textures/*.h
+	common/rendering/nri/system/*.h
+	common/rendering/nri/renderer/*.h
 	common/scripting/core/*h
 	common/scripting/vm/*h
 	common/scripting/jit/*h
@@ -621,6 +627,12 @@ file( GLOB HEADER_FILES
 	core/models/*.h
 	core/textures/formats/*.h
 	core/vmstubs.cpp
+)
+
+file(GLOB NRI_SHADER_FILES
+	common/rendering/nri/shaders/*.cfg
+	common/rendering/nri/shaders/*.hlsl
+	common/rendering/nri/shaders/*.hlsli
 )
 
 
@@ -901,6 +913,11 @@ set (VULKAN_SOURCES
 	common/rendering/vulkan/textures/vk_renderbuffers.cpp
 	common/rendering/vulkan/textures/vk_texture.cpp
 	common/rendering/vulkan/textures/vk_framebuffer.cpp
+)
+
+set (NRI_SOURCES
+	common/rendering/nri/system/nri_renderdevice.cpp
+	common/rendering/nri/renderer/nri_renderstate.cpp
 )
 
 if (HAVE_GLES2)
@@ -1246,6 +1263,10 @@ else()
 	set( NOT_COMPILED_SOURCE_FILES ${NOT_COMPILED_SOURCE_FILES} ${VM_JIT_SOURCES} )
 endif()
 
+if (HAVE_NRI)
+	set( PCH_SOURCES ${PCH_SOURCES} ${NRI_SOURCES} )
+endif()
+
 set( GAME_SOURCES
 	${HEADER_FILES}
 	${NOT_COMPILED_SOURCE_FILES}
@@ -1305,6 +1326,17 @@ set( GAME_NONPCH_SOURCES ${GAME_SOURCES} )
 list( REMOVE_ITEM GAME_NONPCH_SOURCES ${PCH_SOURCES} )
 
 add_executable( ${PROJECT_NAME} WIN32 MACOSX_BUNDLE ${GAME_SOURCES} )
+
+if (HAVE_NRI)
+	set(RAZE_NRI_SHADER_OUTPUT_DIR "${COMPILE_OUTPUT_DIRECTORY}/nri_shaders")
+	add_custom_target(raze_nri_shaders ALL
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${RAZE_NRI_SHADER_OUTPUT_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders" "${RAZE_NRI_SHADER_OUTPUT_DIR}"
+		SOURCES ${NRI_SHADER_FILES}
+		VERBATIM)
+	set_target_properties(raze_nri_shaders PROPERTIES FOLDER "Shaders")
+	add_dependencies(${PROJECT_NAME} raze_nri_shaders)
+endif()
 
 get_property(_raze_pk3_targets GLOBAL PROPERTY RAZE_PK3_TARGETS)
 if(_raze_pk3_targets)
@@ -1587,6 +1619,9 @@ source_group("Common\\Rendering\\Hardware Renderer\\Postprocessing" REGULAR_EXPR
 source_group("Common\\Rendering\\OpenGL Loader" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/gl_load/.+")
 source_group("Common\\Rendering\\OpenGL Backend" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/gl/.+")
 source_group("Common\\Rendering\\GLES Backend" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/gles/.+")
+source_group("Common\\Rendering\\NRI Renderer\\System" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/system/.+")
+source_group("Common\\Rendering\\NRI Renderer\\Renderer" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/renderer/.+")
+source_group("Common\\Rendering\\NRI Renderer\\Shaders" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/.+")
 source_group("Common\\Rendering\\Vulkan Renderer\\System" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/vulkan/system/.+")
 source_group("Common\\Rendering\\Vulkan Renderer\\Renderer" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/vulkan/renderer/.+")
 source_group("Common\\Rendering\\Vulkan Renderer\\Shaders" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/vulkan/shaders/.+")

@@ -231,6 +231,16 @@ endif()
 
 option (HAVE_VULKAN "Enable Vulkan support" ON)
 option (HAVE_GLES2 "Enable GLES2 support" ON)
+if (WIN32)
+	set(_raze_have_nri_default ON)
+else()
+	set(_raze_have_nri_default OFF)
+endif()
+option (HAVE_NRI "Enable the NRI backend shell" ${_raze_have_nri_default})
+set(RAZE_NRIFRAMEWORK_DIR "${CMAKE_SOURCE_DIR}/libraries/NRIFramework" CACHE PATH "Path to the vendored NRIFramework checkout.")
+set(RAZE_NRD_DIR "${CMAKE_SOURCE_DIR}/libraries/NRD" CACHE PATH "Path to the vendored NRD checkout.")
+set(RAZE_SHARC_DIR "${CMAKE_SOURCE_DIR}/libraries/SHARC" CACHE PATH "Path to the vendored SHARC checkout.")
+set(RAZE_SHADERMAKE_DIR "${CMAKE_SOURCE_DIR}/libraries/ShaderMake" CACHE PATH "Path to the vendored ShaderMake checkout.")
 
 # no, we're not using external asmjit for now, we made too many modifications to our's.
 # if the asmjit author uses our changes then we'll update this.
@@ -255,6 +265,10 @@ if( MSVC )
 
 	if ( HAVE_GLES2 )
 		set( ALL_C_FLAGS "${ALL_C_FLAGS} /DHAVE_GLES2" )
+	endif()
+
+	if ( HAVE_NRI )
+		set( ALL_C_FLAGS "${ALL_C_FLAGS} /DHAVE_NRI" )
 	endif()
 
 	# Use SSE 2 as minimum always as the true color drawers needs it for __vectorcall
@@ -312,6 +326,10 @@ else()
 
 	if ( HAVE_GLES2 )
 		set( ALL_C_FLAGS "${ALL_C_FLAGS} -DHAVE_GLES2" )
+	endif()
+
+	if ( HAVE_NRI )
+		set( ALL_C_FLAGS "${ALL_C_FLAGS} -DHAVE_NRI" )
 	endif()
 
 	if ( UNIX )

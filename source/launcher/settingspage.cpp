@@ -35,6 +35,9 @@ SettingsPage::SettingsPage(LauncherWindow* launcher, int* autoloadflags) : Widge
 	VulkanCheckbox = new CheckboxLabel(this);
 	OpenGLCheckbox = new CheckboxLabel(this);
 	GLESCheckbox = new CheckboxLabel(this);
+#ifdef HAVE_NRI
+	NRICheckbox = new CheckboxLabel(this);
+#endif
 #endif
 
 	FullscreenCheckbox->SetChecked(vid_fullscreen);
@@ -52,9 +55,25 @@ SettingsPage::SettingsPage(LauncherWindow* launcher, int* autoloadflags) : Widge
 	OpenGLCheckbox->SetRadioStyle(true);
 	VulkanCheckbox->SetRadioStyle(true);
 	GLESCheckbox->SetRadioStyle(true);
-	OpenGLCheckbox->FuncChanged = [this](bool on) { if (on) { VulkanCheckbox->SetChecked(false); GLESCheckbox->SetChecked(false); }};
-	VulkanCheckbox->FuncChanged = [this](bool on) { if (on) { OpenGLCheckbox->SetChecked(false); GLESCheckbox->SetChecked(false); }};
-	GLESCheckbox->FuncChanged = [this](bool on) { if (on) { VulkanCheckbox->SetChecked(false); OpenGLCheckbox->SetChecked(false); }};
+	OpenGLCheckbox->FuncChanged = [this](bool on) { if (on) { VulkanCheckbox->SetChecked(false); GLESCheckbox->SetChecked(false);
+#ifdef HAVE_NRI
+		NRICheckbox->SetChecked(false);
+#endif
+	}};
+	VulkanCheckbox->FuncChanged = [this](bool on) { if (on) { OpenGLCheckbox->SetChecked(false); GLESCheckbox->SetChecked(false);
+#ifdef HAVE_NRI
+		NRICheckbox->SetChecked(false);
+#endif
+	}};
+	GLESCheckbox->FuncChanged = [this](bool on) { if (on) { VulkanCheckbox->SetChecked(false); OpenGLCheckbox->SetChecked(false);
+#ifdef HAVE_NRI
+		NRICheckbox->SetChecked(false);
+#endif
+	}};
+#ifdef HAVE_NRI
+	NRICheckbox->SetRadioStyle(true);
+	NRICheckbox->FuncChanged = [this](bool on) { if (on) { VulkanCheckbox->SetChecked(false); OpenGLCheckbox->SetChecked(false); GLESCheckbox->SetChecked(false); }};
+#endif
 	switch (vid_preferbackend)
 	{
 	case 0:
@@ -66,6 +85,11 @@ SettingsPage::SettingsPage(LauncherWindow* launcher, int* autoloadflags) : Widge
 	case 2:
 		GLESCheckbox->SetChecked(true);
 		break;
+#ifdef HAVE_NRI
+	case 4:
+		NRICheckbox->SetChecked(true);
+		break;
+#endif
 	}
 #endif
 
@@ -132,6 +156,9 @@ void SettingsPage::Save()
 	if (OpenGLCheckbox->GetChecked()) v = 0;
 	else if (VulkanCheckbox->GetChecked()) v = 1;
 	else if (GLESCheckbox->GetChecked()) v = 2;
+#ifdef HAVE_NRI
+	else if (NRICheckbox->GetChecked()) v = 4;
+#endif
 	if (v != vid_preferbackend) vid_preferbackend = v;
 #endif
 }
@@ -155,6 +182,9 @@ void SettingsPage::UpdateLanguage()
 	VulkanCheckbox->SetText(GStrings.GetString("OPTVAL_VULKAN"));
 	OpenGLCheckbox->SetText(GStrings.GetString("OPTVAL_OPENGL"));
 	GLESCheckbox->SetText(GStrings.GetString("OPTVAL_OPENGLES"));
+#ifdef HAVE_NRI
+	NRICheckbox->SetText(GStrings.GetString("OPTVAL_NRI"));
+#endif
 #endif
 }
 
@@ -204,6 +234,10 @@ void SettingsPage::OnGeometryChanged()
 
 	GLESCheckbox->SetFrameGeometry(x, y, 190.0, GLESCheckbox->GetPreferredHeight());
 	y += GLESCheckbox->GetPreferredHeight();
+#ifdef HAVE_NRI
+	NRICheckbox->SetFrameGeometry(x, y, 190.0, NRICheckbox->GetPreferredHeight());
+	y += NRICheckbox->GetPreferredHeight();
+#endif
 #endif
 
 	if (!hideLanguage)
