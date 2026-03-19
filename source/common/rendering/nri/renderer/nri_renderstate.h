@@ -1,11 +1,19 @@
 #pragma once
 
+#include "../system/nri_local.h"
 #include "hwrenderer/data/hw_renderstate.h"
+
+#include <unordered_map>
+#include <vector>
+
+class NRIHardwareVertexBuffer;
+class NRIHardwareIndexBuffer;
+class NRIRenderDevice;
 
 class NRIRenderState : public FRenderState
 {
 public:
-	NRIRenderState();
+	explicit NRIRenderState(NRIRenderDevice* fb);
 
 	void ClearScreen() override;
 	void Draw(int dt, int index, int count, bool apply = true) override;
@@ -26,4 +34,80 @@ public:
 	void EnableMultisampling(bool on) override;
 	void EnableLineSmooth(bool on) override;
 	void EnableDrawBuffers(int count, bool apply = false) override;
+
+	void BeginFrame();
+	void EndFrame();
+
+private:
+	struct PipelineKey
+	{
+		uint32_t blendOp = 0;
+		uint32_t srcBlend = 0;
+		uint32_t dstBlend = 0;
+		uint32_t topology = 0;
+		uint32_t format = 0;
+		uint32_t colorMask = 0;
+		uint64_t vertexLayout = 0;
+
+		bool operator==(const PipelineKey& other) const
+		{
+			return blendOp == other.blendOp &&
+				srcBlend == other.srcBlend &&
+				dstBlend == other.dstBlend &&
+				topology == other.topology &&
+				format == other.format &&
+				colorMask == other.colorMask &&
+				vertexLayout == other.vertexLayout;
+		}
+	};
+
+	struct PipelineKeyHash
+	{
+		size_t operator()(const PipelineKey& key) const
+		{
+			return (size_t)key.blendOp ^
+				((size_t)key.srcBlend << 8) ^
+				((size_t)key.dstBlend << 16) ^
+				((size_t)key.topology << 24) ^
+				((size_t)key.format << 32) ^
+				((size_t)key.colorMask << 40) ^
+				(key.vertexLayout << 48);
+		}
+	};
+
+	struct StreamedBuffer
+	{
+		nri::Buffer* buffer = nullptr;
+		uint64_t offset = 0;
+		uint32_t stride = 0;
+		uint64_t generation = 0;
+	};
+
+	void Apply(int dt, bool indexed, int firstIndex, int count);
+	StreamedBuffer StreamVertices(NRIHardwareVertexBuffer* vertexBuffer);
+	StreamedBuffer StreamIndices(NRIHardwareIndexBuffer* indexBuffer, uint32_t firstIndex, uint32_t count);
+	nri::Pipeline* GetPipeline(int dt);
+	void BeginRenderingIfNeeded();
+	void EndRendering();
+	void FillShaderConstants(NRIShaderConstants& constants) const;
+	NRISamplerMode GetSamplerMode() const;
+
+	NRIRenderDevice* mFrameBuffer = nullptr;
+	std::unordered_map<PipelineKey, nri::Pipeline*, PipelineKeyHash> mPipelines;
+	StreamedBuffer mLastVertexStream;
+	StreamedBuffer mLastIndexStream;
+	NRIHardwareVertexBuffer* mLastVertexBuffer = nullptr;
+	NRIHardwareIndexBuffer* mLastIndexBuffer = nullptr;
+	int mViewportX = 0;
+	int mViewportY = 0;
+	int mViewportWidth = 0;
+	int mViewportHeight = 0;
+	int mScissorX = -1;
+	int mScissorY = -1;
+	int mScissorWidth = -1;
+	int mScissorHeight = -1;
+	int mColorMask = 0xF;
+	int mClearTargets = CT_Color;
+	bool mRendering = false;
+	bool mNeedsClear = true;
 };

@@ -1,0 +1,90 @@
+#pragma once
+
+#include "NRI.h"
+#include "Extensions/NRIDeviceCreation.h"
+#include "Extensions/NRIHelper.h"
+#include "Extensions/NRIStreamer.h"
+#include "Extensions/NRISwapChain.h"
+
+#include <vector>
+
+class NRIHardwareTexture;
+
+enum class NRISamplerMode : uint8_t
+{
+	ClampLinear,
+	WrapLinear,
+	ClampPoint,
+	WrapPoint,
+	Count
+};
+
+struct NRITextureResource
+{
+	nri::Texture* texture = nullptr;
+	nri::Descriptor* shaderView = nullptr;
+	nri::Descriptor* colorAttachmentView = nullptr;
+	nri::DescriptorSet* textureSet = nullptr;
+	nri::AccessLayoutStage state = {};
+	uint32_t width = 0;
+	uint32_t height = 0;
+	nri::Format format = nri::Format::UNKNOWN;
+	bool owned = false;
+};
+
+struct NRIShaderConstants
+{
+	float InvViewportSize[2] = { 1.0f, 1.0f };
+	uint32_t Flags = 0;
+	float ScreenFade = 1.0f;
+
+	float ObjectColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	float AddColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+	float ModelMatrix[16] = {
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f
+	};
+	float TexMatrix[16] = {
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f
+	};
+};
+
+enum NRI2DShaderFlags : uint32_t
+{
+	NRI2D_Textured = 1u << 0,
+	NRI2D_AlphaFromRed = 1u << 1,
+	NRI2D_Invert = 1u << 2,
+};
+
+struct NRISwapChainImage
+{
+	NRITextureResource target;
+	nri::Fence* acquireSemaphore = nullptr;
+	nri::Fence* releaseSemaphore = nullptr;
+};
+
+inline nri::AccessLayoutStage NRIColorAttachmentState()
+{
+	return { nri::AccessBits::COLOR_ATTACHMENT, nri::Layout::COLOR_ATTACHMENT, nri::StageBits::COLOR_ATTACHMENT };
+}
+
+inline nri::AccessLayoutStage NRIShaderResourceState()
+{
+	return { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::FRAGMENT_SHADER };
+}
+
+inline nri::AccessLayoutStage NRICopySourceState()
+{
+	return { nri::AccessBits::COPY_SOURCE, nri::Layout::COPY_SOURCE, nri::StageBits::COPY };
+}
+
+inline nri::AccessLayoutStage NRICopyDestinationState()
+{
+	return { nri::AccessBits::COPY_DESTINATION, nri::Layout::COPY_DESTINATION, nri::StageBits::COPY };
+}

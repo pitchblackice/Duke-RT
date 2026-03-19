@@ -917,6 +917,8 @@ set (VULKAN_SOURCES
 
 set (NRI_SOURCES
 	common/rendering/nri/system/nri_renderdevice.cpp
+	common/rendering/nri/system/nri_hwbuffer.cpp
+	common/rendering/nri/system/nri_hwtexture.cpp
 	common/rendering/nri/renderer/nri_renderstate.cpp
 )
 
@@ -1329,9 +1331,36 @@ add_executable( ${PROJECT_NAME} WIN32 MACOSX_BUNDLE ${GAME_SOURCES} )
 
 if (HAVE_NRI)
 	set(RAZE_NRI_SHADER_OUTPUT_DIR "${COMPILE_OUTPUT_DIRECTORY}/nri_shaders")
-	add_custom_target(raze_nri_shaders ALL
+	if (DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/Bin/dxc.exe")
+		set(RAZE_DXC_EXECUTABLE "$ENV{VULKAN_SDK}/Bin/dxc.exe" CACHE FILEPATH "DXC executable used for NRI shader compilation." FORCE)
+	elseif (DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/Bin32/dxc.exe")
+		set(RAZE_DXC_EXECUTABLE "$ENV{VULKAN_SDK}/Bin32/dxc.exe" CACHE FILEPATH "DXC executable used for NRI shader compilation." FORCE)
+	else()
+		find_program(RAZE_DXC_EXECUTABLE NAMES dxc REQUIRED)
+	endif()
+	set(RAZE_NRI_COMMON_SHADER_ARGS -HV 2021 -Wno-for-redefinition -I "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders")
+	add_custom_command(
+		OUTPUT
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.spirv"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${RAZE_NRI_SHADER_OUTPUT_DIR}"
-		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders" "${RAZE_NRI_SHADER_OUTPUT_DIR}"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T vs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T ps_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T vs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T ps_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
+		DEPENDS
+			${NRI_SHADER_FILES}
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
+		VERBATIM)
+	add_custom_target(raze_nri_shaders ALL
+		DEPENDS
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.spirv"
 		SOURCES ${NRI_SHADER_FILES}
 		VERBATIM)
 	set_target_properties(raze_nri_shaders PROPERTIES FOLDER "Shaders")
@@ -1450,6 +1479,7 @@ include_directories(
 	common/scripting/backend
 	launcher
 	../libraries/ZVulkan/include
+	../libraries/NRIFramework/External/NRI/Include
 	../libraries/ZWidget/include
 	../libraries/webp/include
 	${SYSTEM_SOURCES_DIR}
