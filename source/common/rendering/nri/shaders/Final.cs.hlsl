@@ -696,7 +696,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 15)
 	{
-		composed = float4(saturate(gComposedInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		if ((gTraceConstants.Flags & 0x2u) != 0)
+		{
+			composed = float4(saturate(gUpscaledInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		}
+		else
+		{
+			composed = float4(saturate(gComposedInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		}
 	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
