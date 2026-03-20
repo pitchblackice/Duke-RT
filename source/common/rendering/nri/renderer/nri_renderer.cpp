@@ -1292,6 +1292,8 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
 	NRITraceConstants constants = {};
+	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
+	const bool directSceneTrace = !nri_ptbootstrap || bootstrapMode == 11u || bootstrapMode == 12u;
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
@@ -1313,7 +1315,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
-	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
+	constants.BootstrapMode = bootstrapMode;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -1341,7 +1343,10 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
+	if (!directSceneTrace && mTopLevelAS.descriptor != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
+	}
 	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
