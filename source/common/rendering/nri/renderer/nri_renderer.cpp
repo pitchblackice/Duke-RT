@@ -923,6 +923,8 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.TanHalfFovY = mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
+	constants.PrimitiveCount = mPrimitiveBuffer.stride != 0 ? (uint32_t)(mPrimitiveBuffer.size / mPrimitiveBuffer.stride) : 0u;
+	constants.MaterialCount = mMaterialBuffer.stride != 0 ? (uint32_t)(mMaterialBuffer.size / mMaterialBuffer.stride) : 0u;
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = NRI_FLAG_BOOTSTRAP_VIEW | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
