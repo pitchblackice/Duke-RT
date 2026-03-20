@@ -260,6 +260,8 @@ void NRIRenderer::Shutdown()
 	mSceneTextureSet = nullptr;
 	mFrameTextureSet = nullptr;
 	mOutputSet = nullptr;
+	mTaaFrameTextureSet = nullptr;
+	mTaaOutputSet = nullptr;
 }
 
 bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
@@ -757,7 +759,9 @@ bool NRIRenderer::AllocateDescriptorSets()
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 0, &mSamplerSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 1, &mSceneTextureSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 2, &mFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mOutputSet, 1, 0) == nri::Result::SUCCESS;
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mOutputSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 2, &mTaaFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mTaaOutputSet, 1, 0) == nri::Result::SUCCESS;
 }
 
 bool NRIRenderer::UpdateSamplerSet()
@@ -790,16 +794,21 @@ bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& des
 
 bool NRIRenderer::UpdateFrameTextureSet()
 {
-	const nri::Descriptor* descriptors[NRI_INPUT_DESCRIPTOR_NUM] = {};
+	return UpdateFrameTextureSet(mFrameTextureSet, mFrameInputDescriptors);
+}
+
+bool NRIRenderer::UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 11>& descriptors)
+{
+	const nri::Descriptor* rawDescriptors[NRI_INPUT_DESCRIPTOR_NUM] = {};
 	for (size_t i = 0; i < NRI_INPUT_DESCRIPTOR_NUM; ++i)
 	{
-		descriptors[i] = mFrameInputDescriptors[i];
+		rawDescriptors[i] = descriptors[i];
 	}
 
 	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = mFrameTextureSet;
+	update.descriptorSet = set;
 	update.rangeIndex = 0;
-	update.descriptors = descriptors;
+	update.descriptors = rawDescriptors;
 	update.descriptorNum = NRI_INPUT_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
 	return true;
@@ -807,16 +816,21 @@ bool NRIRenderer::UpdateFrameTextureSet()
 
 bool NRIRenderer::UpdateOutputSet()
 {
-	const nri::Descriptor* descriptors[NRI_OUTPUT_DESCRIPTOR_NUM] = {};
+	return UpdateOutputSet(mOutputSet, mOutputDescriptors);
+}
+
+bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 12>& descriptors)
+{
+	const nri::Descriptor* rawDescriptors[NRI_OUTPUT_DESCRIPTOR_NUM] = {};
 	for (size_t i = 0; i < NRI_OUTPUT_DESCRIPTOR_NUM; ++i)
 	{
-		descriptors[i] = mOutputDescriptors[i];
+		rawDescriptors[i] = descriptors[i];
 	}
 
 	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = mOutputSet;
+	update.descriptorSet = set;
 	update.rangeIndex = 0;
-	update.descriptors = descriptors;
+	update.descriptors = rawDescriptors;
 	update.descriptorNum = NRI_OUTPUT_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
 	return true;
@@ -1516,20 +1530,22 @@ bool NRIRenderer::DispatchUpscaleChain()
 		}
 
 		const nri::Descriptor* defaultInput = composed.shaderView;
-		mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
-		mFrameInputDescriptors[0] = historyInput.shaderView;
-		mFrameInputDescriptors[1] = GetFrameTexture(FrameTextureSlot::Motion).shaderView;
-		mFrameInputDescriptors[5] = composed.shaderView;
-		UpdateFrameTextureSet();
+		std::array<nri::Descriptor*, 11> taaInputDescriptors = {};
+		taaInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+		taaInputDescriptors[0] = historyInput.shaderView;
+		taaInputDescriptors[1] = GetFrameTexture(FrameTextureSlot::Motion).shaderView;
+		taaInputDescriptors[5] = composed.shaderView;
+		UpdateFrameTextureSet(mTaaFrameTextureSet, taaInputDescriptors);
 
 		const nri::Descriptor* defaultOutput = historyOutput.storageView;
-		mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+		std::array<nri::Descriptor*, 12> taaOutputDescriptors = {};
+		taaOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
 		if (nri_ptdebug == 15)
 		{
-			mOutputDescriptors[1] = composed.storageView;
+			taaOutputDescriptors[1] = composed.storageView;
 		}
-		mOutputDescriptors[7] = historyOutput.storageView;
-		UpdateOutputSet();
+		taaOutputDescriptors[7] = historyOutput.storageView;
+		UpdateOutputSet(mTaaOutputSet, taaOutputDescriptors);
 
 		mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 		mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
@@ -1543,8 +1559,8 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
 		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
 		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mOutputSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mTaaFrameTextureSet, nri::BindPoint::COMPUTE });
+		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mTaaOutputSet, nri::BindPoint::COMPUTE });
 		mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Taa));
 		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
 	}

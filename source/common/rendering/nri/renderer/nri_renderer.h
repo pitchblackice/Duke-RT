@@ -106,7 +106,9 @@ private:
 	bool UpdateSamplerSet();
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors);
 	bool UpdateFrameTextureSet();
+	bool UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 11>& descriptors);
 	bool UpdateOutputSet();
+	bool UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 12>& descriptors);
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) { return mFrameTextures[(size_t)slot]; }
 	const NRITextureResource& GetFrameTexture(FrameTextureSlot slot) const { return mFrameTextures[(size_t)slot]; }
@@ -125,6 +127,8 @@ private:
 	nri::DescriptorSet* mSceneTextureSet = nullptr;
 	nri::DescriptorSet* mFrameTextureSet = nullptr;
 	nri::DescriptorSet* mOutputSet = nullptr;
+	nri::DescriptorSet* mTaaFrameTextureSet = nullptr;
+	nri::DescriptorSet* mTaaOutputSet = nullptr;
 
 	NRITextureResource mPaletteTexture;
 	std::array<NRITextureResource, (size_t)FrameTextureSlot::Count> mFrameTextures = {};
