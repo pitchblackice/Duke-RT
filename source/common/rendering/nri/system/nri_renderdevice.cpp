@@ -289,37 +289,6 @@ void NRIRenderDevice::Draw2D()
 		return;
 	}
 
-	static bool logged2DDiagnostics = false;
-	if (!logged2DDiagnostics)
-	{
-		Printf("NRI 2D diagnostic: commands=%d vertices=%d indices=%d size=%dx%d\n",
-			twod->mData.Size(),
-			twod->mVertices.Size(),
-			twod->mIndices.Size(),
-			twod->GetWidth(),
-			twod->GetHeight());
-
-		const int commandCount = std::min<int>(twod->mData.Size(), 8);
-		for (int i = 0; i < commandCount; ++i)
-		{
-			const auto& cmd = twod->mData[i];
-			Printf("NRI 2D command[%d]: special=%d type=%d texture=%s valid=%s indexed=%s drawmode=%d flags=0x%x verts=%d idx=%d tex_size=%dx%d\n",
-				i,
-				(int)cmd.isSpecial,
-				(int)cmd.mType,
-				cmd.mTexture != nullptr ? "yes" : "no",
-				(cmd.mTexture != nullptr && cmd.mTexture->isValid()) ? "yes" : "no",
-				(cmd.mFlags & F2DDrawer::DTF_Indexed) != 0 ? "yes" : "no",
-				(int)cmd.mDrawMode,
-				(unsigned int)cmd.mFlags,
-				cmd.mVertCount,
-				cmd.mIndexCount,
-				cmd.mTexture != nullptr ? cmd.mTexture->GetDisplayWidth() : 0,
-				cmd.mTexture != nullptr ? cmd.mTexture->GetDisplayHeight() : 0);
-		}
-		logged2DDiagnostics = true;
-	}
-
 	::Draw2D(twod, *mRenderState);
 }
 
@@ -523,28 +492,17 @@ bool NRIRenderDevice::LoadNRI()
 		return true;
 	}
 
-	FString localPath = progdir;
-	localPath << "NRI.dll";
-
 	HMODULE module = LoadLibraryA("NRI.dll");
 	if (module == nullptr)
 	{
+		FString localPath = progdir;
+		localPath << "NRI.dll";
 		module = LoadLibraryA(localPath.GetChars());
 	}
 
 	if (module == nullptr)
 	{
-		char currentDirectory[MAX_PATH] = {};
-		GetCurrentDirectoryA((DWORD)std::size(currentDirectory), currentDirectory);
-		const DWORD searchPathAttributes = GetFileAttributesA("NRI.dll");
-		const DWORD localPathAttributes = GetFileAttributesA(localPath.GetChars());
 		Printf(TEXTCOLOR_RED "Failed to load NRI.dll.\n");
-		Printf(TEXTCOLOR_RED "NRI load diagnostic: cwd=%s progdir=%s search_exists=%s local_path=%s local_exists=%s\n",
-			currentDirectory,
-			progdir.GetChars(),
-			searchPathAttributes != INVALID_FILE_ATTRIBUTES ? "yes" : "no",
-			localPath.GetChars(),
-			localPathAttributes != INVALID_FILE_ATTRIBUTES ? "yes" : "no");
 		return false;
 	}
 
@@ -1276,9 +1234,7 @@ const void* NRIRenderDevice::GetPixelShaderBytecode(size_t& size) const
 
 nri::GraphicsAPI NRIRenderDevice::GetSelectedAPI() const
 {
-	// Temporary debugging override: always start the NRI backend on Vulkan
-	// so archived config cannot silently route startup through D3D12.
-	return nri::GraphicsAPI::VK;
+	return FString((const char*)nri_api).CompareNoCase("d3d12") == 0 ? nri::GraphicsAPI::D3D12 : nri::GraphicsAPI::VK;
 }
 
 NRISamplerMode NRIRenderDevice::GetSamplerMode(int clampMode) const

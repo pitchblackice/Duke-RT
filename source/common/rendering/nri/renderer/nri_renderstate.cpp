@@ -4,7 +4,6 @@
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
 #include "hw_material.h"
-#include "printf.h"
 #include "textures.h"
 
 #include <cstring>
@@ -281,26 +280,12 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 	nri::DescriptorSet* textureSet = mFrameBuffer->mWhiteTextureSet;
 	if (mTextureEnabled && mMaterial.mMaterial != nullptr)
 	{
-		static bool loggedTextureBinding = false;
 		MaterialLayerInfo* layer = nullptr;
 		auto* hwTexture = static_cast<NRIHardwareTexture*>(mMaterial.mMaterial->GetLayer(0, mMaterial.mTranslation, &layer));
 		if (hwTexture != nullptr && layer != nullptr && layer->layerTexture != nullptr)
 		{
 			hwTexture->EnsureTexture(layer->layerTexture, mMaterial.mTranslation, layer->scaleFlags);
 			textureSet = hwTexture->GetResource().textureSet;
-			if (!loggedTextureBinding)
-			{
-				const auto& resource = hwTexture->GetResource();
-				Printf("NRI 2D texture bind: layer_tex=%p size=%ux%u format=%u shader_view=%p texture_set=%p textured_flag=%s\n",
-					layer->layerTexture,
-					resource.width,
-					resource.height,
-					(unsigned int)resource.format,
-					resource.shaderView,
-					resource.textureSet,
-					(constants.Flags & NRI2D_Textured) != 0 ? "yes" : "no");
-				loggedTextureBinding = true;
-			}
 		}
 	}
 
