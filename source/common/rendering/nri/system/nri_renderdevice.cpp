@@ -161,6 +161,9 @@ void NRIRenderDevice::Update()
 {
 	if (mInitialized && mFrameBegun)
 	{
+		SetActiveRenderTarget();
+		Draw2D();
+		twod->Clear();
 		mRenderState->EndFrame();
 		EndFrameAndPresent();
 	}
