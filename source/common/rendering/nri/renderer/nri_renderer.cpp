@@ -1567,6 +1567,10 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
+		if (nri_ptdebug == 15)
+		{
+			mFrameBuffer->TransitionTexture(composed, NRIComputeStorageState());
+		}
 
 		const nri::Descriptor* taaInputs[3] = {
 			historyInput.shaderView,
@@ -1580,7 +1584,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		taaInputUpdate.descriptorNum = (uint32_t)std::size(taaInputs);
 		mFrameBuffer->mCore.UpdateDescriptorRanges(&taaInputUpdate, 1);
 
-		const nri::Descriptor* taaOutputs[1] = { historyOutput.storageView };
+		const nri::Descriptor* taaOutputs[1] = { (nri_ptdebug == 15) ? composed.storageView : historyOutput.storageView };
 		nri::UpdateDescriptorRangeDesc taaOutputUpdate = {};
 		taaOutputUpdate.descriptorSet = mTaaOutputSet;
 		taaOutputUpdate.rangeIndex = 0;
