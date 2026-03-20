@@ -675,15 +675,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 10)
 	{
-		composed = float4(saturate(gGuideDiffuseInput[pixelPos].rgb), 1.0);
+		composed = float4(saturate(gGuideDiffuseInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 11)
 	{
-		composed = float4(saturate(gGuideSpecularInput[pixelPos].rgb), 1.0);
+		composed = float4(saturate(gGuideSpecularInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 12)
 	{
-		const float hitMetric = saturate(gGuideSpecHitInput[pixelPos].w);
+		const float hitMetric = saturate(gGuideSpecHitInput.SampleLevel(gLinearClamp, uv, 0.0).w);
 		composed = float4(hitMetric.xxx, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 13)
