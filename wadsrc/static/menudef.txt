@@ -1107,6 +1107,7 @@ OptionMenu "VideoOptions" protected
 
 	Submenu "$OPTMNU_HUD", "HUDOptions"
 	Submenu "$RENDER_OPTIONS", "RenderOptions"
+	Submenu "NRI Renderer", "NRIOptions"
 	Submenu "$AUTOMAPMNU_TITLE", "AutomapOptions"
 	Submenu "$GLMNU_POSTPROCESS", "PostProcessMenu"
 	Submenu "$GLTEXMNU_TITLE", "GLTextureGLOptions"
@@ -1159,6 +1160,33 @@ OptionMenu "VideoOptions" protected
 	StaticText " "
 	Option "$GLPREFMNU_MULTISAMPLE", 			gl_multisample,					"Multisample"
 
+}
+
+OptionMenu "NRIOptions" protected
+{
+	Title "NRI Renderer"
+
+	StaticText "Backend / API"
+	Option "Preferred Rendering API",			"vid_preferbackend",			"PreferBackend"
+	Option "NRI Graphics API",					"nri_api",						"NRIAPI"
+	StaticText "Backend and API changes require a restart."
+	StaticText ""
+
+	StaticText "Runtime"
+	Option "Denoiser",							"nri_denoise",					"OnOff"
+	Option "Validation",						"nri_validation",				"OnOff"
+	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"
+	Option "Upscaler Mode",						"nri_upscalermode",				"NRIUpscalerMode"
+	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2
+	Slider "Sharpness",							"nri_sharpness",				0.0, 1.0, 0.05, 2
+	Slider "Portal Depth",						"nri_ptportaldepth",			0, 6, 1, 0
+	Option "PT Debug View",						"nri_ptdebug",					"NRIPTDebug"
+	StaticText ""
+
+	StaticText "Commands"
+	Command "Print PT Caps",					"nri_ptcaps"
+	Command "Print PT Status",					"nri_ptstatus"
+	Command "Reset PT History",					"nri_ptreset"
 }
 
 OptionValue "DitherModes"
@@ -1684,6 +1712,50 @@ OptionValue PreferBackend
 	1, "$OPTVAL_VULKAN"
 	2, "$OPTVAL_OPENGLES"
 	4, "$OPTVAL_NRI"
+}
+
+OptionString NRIAPI
+{
+	"vulkan", "$OPTVAL_VULKAN"
+	"d3d12", "D3D12"
+}
+
+OptionValue NRIUpscaler
+{
+	0, "$OPTVAL_OFF"
+	1, "NIS"
+	2, "DLSS-SR"
+	3, "DLRR"
+}
+
+OptionValue NRIUpscalerMode
+{
+	0, "Native"
+	1, "Ultra Quality"
+	2, "Quality"
+	3, "Balanced"
+	4, "Performance"
+	5, "Ultra Performance"
+}
+
+OptionValue NRIPTDebug
+{
+	0, "Lit"
+	1, "Surface Normals"
+	2, "UV"
+	3, "Material ID"
+	4, "Primitive ID"
+	5, "Motion Vectors"
+	6, "View Z"
+	7, "Base Color"
+	8, "Normal Roughness"
+	9, "Validation"
+	10, "Raw Diffuse"
+	11, "Raw Specular"
+	12, "Hit Distance"
+	13, "History"
+	14, "Upscaled Input"
+	15, "Composed PT"
 }
 
 OptionMenu VideoModeMenu protected
