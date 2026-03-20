@@ -1522,7 +1522,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameInputDescriptors[5] = composed.shaderView;
 		UpdateFrameTextureSet();
 
-		const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
+		const nri::Descriptor* defaultOutput = historyOutput.storageView;
 		mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
 		if (nri_ptdebug == 15)
 		{
