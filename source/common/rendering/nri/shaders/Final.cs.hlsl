@@ -211,6 +211,31 @@ float3 BootstrapCapturedSceneBaseColor(float2 uv)
 	return saturate(SampleSurfaceColor(hit.materialIndex, hit.uv).rgb);
 }
 
+float3 BootstrapCapturedSceneLit(float2 uv)
+{
+	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	if (gTraceConstants.PrimitiveCount == 0u)
+	{
+		return color;
+	}
+
+	const float3 rayDir = BootstrapGenerateRay(uv);
+	const HitData hit = TraceBootstrapGeometry(gTraceConstants.CameraPos, rayDir);
+	if (!hit.hit)
+	{
+		return GetMissColor(rayDir);
+	}
+
+	const float4 albedo = SampleSurfaceColor(hit.materialIndex, hit.uv);
+	const float lambert = max(dot(hit.normal, gTraceConstants.LightDirection), 0.0);
+	const float lighting = 0.20 + lambert * 0.80;
+	float3 diffuse = albedo.rgb * lighting;
+	const float3 halfVector = normalize(gTraceConstants.LightDirection - rayDir);
+	const float specularTerm = pow(max(dot(hit.normal, halfVector), 0.0), 32.0);
+	const float3 specular = albedo.rgb * specularTerm * 0.2;
+	return saturate(diffuse + specular);
+}
+
 float3 BootstrapHashColor(uint index)
 {
 	const float seed = (float)(index + 1u);
@@ -675,9 +700,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
-		const float3 diffuse = gGuideDiffuseInput.SampleLevel(gLinearClamp, uv, 0.0).rgb;
-		const float3 specular = gGuideSpecularInput.SampleLevel(gLinearClamp, uv, 0.0).rgb;
-		composed = float4(saturate(diffuse + specular), 1.0);
+		composed = float4(BootstrapCapturedSceneLit(uv), 1.0);
 	}
 	else if ((gTraceConstants.Flags & 0x2u) != 0)
 	{
