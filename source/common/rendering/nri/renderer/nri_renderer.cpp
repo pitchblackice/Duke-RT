@@ -1521,6 +1521,10 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
+		if (nri_ptdebug == 15)
+		{
+			mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), NRIComputeStorageState());
+		}
 
 		const nri::Descriptor* defaultInput = composed.shaderView;
 		mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
