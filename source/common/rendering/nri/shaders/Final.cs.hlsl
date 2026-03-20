@@ -673,6 +673,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		composed = float4(saturate(gComposedInput[pixelPos].rgb), 1.0);
 	}
+	else if ((gTraceConstants.Flags & 0x8u) != 0)
+	{
+		const float3 diffuse = gGuideDiffuseInput.SampleLevel(gLinearClamp, uv, 0.0).rgb;
+		const float3 specular = gGuideSpecularInput.SampleLevel(gLinearClamp, uv, 0.0).rgb;
+		composed = float4(saturate(diffuse + specular), 1.0);
+	}
 	else if ((gTraceConstants.Flags & 0x2u) != 0)
 	{
 		composed = gUpscaledInput.SampleLevel(gLinearClamp, uv, 0.0);

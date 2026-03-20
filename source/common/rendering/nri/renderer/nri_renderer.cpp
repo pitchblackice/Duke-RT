@@ -30,6 +30,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
 	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
 	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
+	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
 
 	template<typename T>
 	static T NRIFlags(T a, T b)
@@ -1247,8 +1248,7 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 
 bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int)
 {
-	static bool sLoggedDenoiserBypass = false;
-	static bool sLoggedTemporalBypass = false;
+	static bool sLoggedRawTraceBypass = false;
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
@@ -1272,19 +1272,14 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return true;
 	}
 
-	if (nri_denoise && !sLoggedDenoiserBypass)
+	if (!sLoggedRawTraceBypass)
 	{
-		Printf("NRI denoiser bypass: using raw PT outputs until NRD gameplay integration is stabilized.\n");
-		sLoggedDenoiserBypass = true;
+		Printf("NRI frame-graph bypass: presenting raw TraceOpaque output until composition integration is stabilized.\n");
+		sLoggedRawTraceBypass = true;
 	}
 
-	if (!sLoggedTemporalBypass)
-	{
-		Printf("NRI temporal bypass: presenting raw composed PT output until TAA/upscale integration is stabilized.\n");
-		sLoggedTemporalBypass = true;
-	}
-
-	if (!DispatchComposition() || !DispatchUpscaleChain() || !DispatchFinal())
+	mUseUpscaledInFinal = false;
+	if (!DispatchFinal())
 	{
 		return false;
 	}
@@ -1642,6 +1637,8 @@ bool NRIRenderer::DispatchUpscaleChain()
 bool NRIRenderer::DispatchFinal()
 {
 	NRITraceConstants constants = {};
+	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
+	const bool presentRawTrace = !nri_ptbootstrap || bootstrapMode >= 13u;
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
@@ -1659,9 +1656,12 @@ bool NRIRenderer::DispatchFinal()
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
 	constants.FrameIndex = mFrameIndex;
-	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u);
+	constants.Flags =
+		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u) |
+		(presentRawTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
-	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
+	constants.BootstrapMode = bootstrapMode;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
