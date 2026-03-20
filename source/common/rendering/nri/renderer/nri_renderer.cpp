@@ -339,12 +339,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	LogBridgeStats(sceneView.stats);
 	if (sceneView.stats.unsupportedModelDrawItems > 0)
 	{
-		LogFallback("generic GLDL_MODELS content is unsupported in the PT bridge; using raster fallback for this view.");
-		if (preserveHistory)
-		{
-			restoreHistory();
-		}
-		return false;
+		LogFallback("generic GLDL_MODELS content is unsupported in the PT bridge; rendering the supported PT scene without those model draws.");
 	}
 
 	Copy3(sceneView.skyColor, mSkyColor);
