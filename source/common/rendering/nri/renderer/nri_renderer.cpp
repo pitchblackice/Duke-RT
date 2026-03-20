@@ -1410,6 +1410,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Composed), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), NRIComputeStorageState());
 
 	const nri::Descriptor* defaultInput = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
@@ -1514,7 +1515,7 @@ bool NRIRenderer::DispatchComposition()
 	mFrameBuffer->TransitionTexture(specular, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(composed, NRIComputeStorageState());
 
-	const nri::Descriptor* defaultInput = composed.shaderView;
+	const nri::Descriptor* defaultInput = diffuse.shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
 	mFrameInputDescriptors[5] = diffuse.shaderView;
 	mFrameInputDescriptors[6] = specular.shaderView;
