@@ -1344,6 +1344,13 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
+		if (nri_ptdebug == 15)
+		{
+			CopyTexture(GetFrameTexture(FrameTextureSlot::Composed), GetFrameTexture(FrameTextureSlot::Final));
+			CopyFinalToActiveTarget();
+			return true;
+		}
+
 		if (!DispatchUpscaleChain())
 		{
 			return false;
