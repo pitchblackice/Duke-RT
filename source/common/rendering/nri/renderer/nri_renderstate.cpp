@@ -253,8 +253,6 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 		return;
 	}
 
-	BeginRenderingIfNeeded();
-
 	NRIShaderConstants constants = {};
 	FillShaderConstants(constants);
 
@@ -284,10 +282,14 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 		auto* hwTexture = static_cast<NRIHardwareTexture*>(mMaterial.mMaterial->GetLayer(0, mMaterial.mTranslation, &layer));
 		if (hwTexture != nullptr && layer != nullptr && layer->layerTexture != nullptr)
 		{
+			// Lazy texture uploads use the helper upload path and can submit work immediately,
+			// so they must happen before we open a rendering scope on the current command buffer.
 			hwTexture->EnsureTexture(layer->layerTexture, mMaterial.mTranslation, layer->scaleFlags);
 			textureSet = hwTexture->GetResource().textureSet;
 		}
 	}
+
+	BeginRenderingIfNeeded();
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::GRAPHICS, *mFrameBuffer->mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetViewports(*mFrameBuffer->mCommandBuffer, &viewport, 1);
