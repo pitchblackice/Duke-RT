@@ -17,6 +17,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float checker = fmod(floor(uv.x * 16.0) + floor(uv.y * 16.0), 2.0);
 		const float3 color = lerp(float3(0.1, 0.8, 0.2), float3(0.95, 0.15, 0.75), checker);
 		gHistoryOutput[pixelPos] = float4(color, 1.0);
+		gComposedOutput[pixelPos] = float4(color, 1.0);
 		return;
 	}
 

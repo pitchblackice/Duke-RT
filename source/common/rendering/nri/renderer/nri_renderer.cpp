@@ -1510,6 +1510,10 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
+		if (nri_ptdebug == 15)
+		{
+			mFrameBuffer->TransitionTexture(composed, NRIComputeStorageState());
+		}
 
 		const nri::Descriptor* defaultInput = composed.shaderView;
 		mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
@@ -1520,6 +1524,10 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 		const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
 		mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+		if (nri_ptdebug == 15)
+		{
+			mOutputDescriptors[1] = composed.storageView;
+		}
 		mOutputDescriptors[7] = historyOutput.storageView;
 		UpdateOutputSet();
 
