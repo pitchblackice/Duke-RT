@@ -482,17 +482,28 @@ bool NRIRenderDevice::LoadNRI()
 		return true;
 	}
 
+	FString localPath = progdir;
+	localPath << "NRI.dll";
+
 	HMODULE module = LoadLibraryA("NRI.dll");
 	if (module == nullptr)
 	{
-		FString localPath = progdir;
-		localPath << "NRI.dll";
 		module = LoadLibraryA(localPath.GetChars());
 	}
 
 	if (module == nullptr)
 	{
+		char currentDirectory[MAX_PATH] = {};
+		GetCurrentDirectoryA((DWORD)std::size(currentDirectory), currentDirectory);
+		const DWORD searchPathAttributes = GetFileAttributesA("NRI.dll");
+		const DWORD localPathAttributes = GetFileAttributesA(localPath.GetChars());
 		Printf(TEXTCOLOR_RED "Failed to load NRI.dll.\n");
+		Printf(TEXTCOLOR_RED "NRI load diagnostic: cwd=%s progdir=%s search_exists=%s local_path=%s local_exists=%s\n",
+			currentDirectory,
+			progdir.GetChars(),
+			searchPathAttributes != INVALID_FILE_ATTRIBUTES ? "yes" : "no",
+			localPath.GetChars(),
+			localPathAttributes != INVALID_FILE_ATTRIBUTES ? "yes" : "no");
 		return false;
 	}
 
