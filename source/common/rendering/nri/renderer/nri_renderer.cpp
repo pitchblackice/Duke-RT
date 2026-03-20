@@ -1801,6 +1801,7 @@ bool NRIRenderer::DispatchFinal()
 	NRITextureResource& history = GetFrameTexture(mHistoryOutputSlot);
 	NRITextureResource& upscaled = GetFrameTexture(mUpscaledInputSlot);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
+	const int debugMode = nri_ptdebug;
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
@@ -1829,6 +1830,18 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).shaderView;
 	mFrameInputDescriptors[9] = GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo).shaderView;
 	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).shaderView;
+	if (debugMode == 10)
+	{
+		mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).shaderView;
+	}
+	else if (debugMode == 11)
+	{
+		mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo).shaderView;
+	}
+	else if (debugMode == 12)
+	{
+		mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).shaderView;
+	}
 	UpdateFrameTextureSet();
 
 	mOutputDescriptors.fill(final.storageView);
