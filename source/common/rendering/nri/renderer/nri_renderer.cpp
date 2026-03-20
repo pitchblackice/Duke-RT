@@ -454,7 +454,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		gpuMaterials = materialBridge.materials;
 	}
 	const bool buffersReady = texturesReady && UploadSceneBuffers(geometry, gpuMaterials);
-	const bool accelerationReady = (bootstrapCapturedDiagnostics || bootstrapCapturedFlat || bootstrapCapturedBaseColor) ? true : (buffersReady && BuildAccelerationStructures(geometry));
+	const bool accelerationReady = bootstrapCapturedDiagnostics ? true : (buffersReady && BuildAccelerationStructures(geometry));
 	bool dispatched = false;
 	if (bootstrapCapturedDiagnostics)
 	{
