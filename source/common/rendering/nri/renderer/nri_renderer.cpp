@@ -1520,7 +1520,7 @@ bool NRIRenderer::DispatchComposition()
 	mFrameInputDescriptors[6] = specular.shaderView;
 	UpdateFrameTextureSet();
 
-	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
+	const nri::Descriptor* defaultOutput = composed.storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
 	mOutputDescriptors[1] = composed.storageView;
 	UpdateOutputSet();
