@@ -264,7 +264,7 @@ float3 BootstrapCapturedPoints(uint2 pixelPos)
 
 float3 BootstrapSceneSignature(float2 uv)
 {
-	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	float3 color = float3(0.03, 0.04, 0.07);
 	if (gTraceConstants.PrimitiveCount == 0u)
 	{
 		return float3(0.85, 0.1, 0.1);
@@ -272,21 +272,55 @@ float3 BootstrapSceneSignature(float2 uv)
 
 	const PrimitiveData primitive = gPrimitives[0];
 	const SceneVertex v0 = gVertices[primitive.indices.x];
-	const float3 signature = saturate(
-		abs(v0.position) * 0.0025 +
-		float3((float)primitive.indices.x, (float)primitive.indices.y, (float)primitive.indices.z) * 0.013);
+	const float primitiveNorm = saturate((float)gTraceConstants.PrimitiveCount / 1024.0);
+	const float materialNorm = saturate((float)gTraceConstants.MaterialCount / 256.0);
+	const float3 indexNorm = frac(float3((float)primitive.indices.x, (float)primitive.indices.y, (float)primitive.indices.z) * 0.013);
+	const float3 positionNorm = abs(v0.position) / (abs(v0.position) + 256.0);
+	const float3 normalNorm = primitive.normal * 0.5 + 0.5;
+	const float flagsNorm = saturate((float)(primitive.flags & 255u) / 255.0);
+	const float3 header = lerp(float3(0.08, 0.1, 0.14), float3(0.95, 0.85, 0.25), step(frac(uv.x * 24.0), primitiveNorm));
 
-	if (uv.x < 0.33)
+	if (uv.y < 0.18)
 	{
-		color = lerp(float3(0.08, 0.08, 0.08), signature, step(frac(uv.y * 16.0), saturate((float)gTraceConstants.PrimitiveCount / 512.0)));
+		color = header;
 	}
-	else if (uv.x < 0.66)
+	else if (uv.y < 0.36)
 	{
-		color = lerp(float3(0.08, 0.08, 0.08), signature.bgr, step(frac(uv.y * 16.0), saturate((float)primitive.materialIndex / 64.0)));
+		const float lane = floor(uv.x * 3.0);
+		if (lane < 1.0)
+		{
+			color = lerp(float3(0.06, 0.06, 0.08), float3(0.2, 0.95, 0.35), step(frac(uv.y * 22.0), primitiveNorm));
+		}
+		else if (lane < 2.0)
+		{
+			color = lerp(float3(0.06, 0.06, 0.08), float3(0.22, 0.55, 0.98), step(frac(uv.y * 22.0), materialNorm));
+		}
+		else
+		{
+			color = lerp(float3(0.06, 0.06, 0.08), float3(0.95, 0.3, 0.2), step(frac(uv.y * 22.0), flagsNorm));
+		}
+	}
+	else if (uv.y < 0.68)
+	{
+		const float lane = floor(uv.x * 3.0);
+		if (lane < 1.0)
+		{
+			color = positionNorm;
+		}
+		else if (lane < 2.0)
+		{
+			color = indexNorm;
+		}
+		else
+		{
+			color = normalNorm;
+		}
 	}
 	else
 	{
-		color = signature;
+		const float2 tileUv = frac(uv * 12.0);
+		const float tileMask = step(tileUv.x, primitiveNorm) * step(tileUv.y, materialNorm);
+		color = lerp(float3(0.03, 0.03, 0.05), normalNorm.bgr * 0.85 + 0.15, tileMask);
 	}
 
 	return saturate(color);
@@ -294,7 +328,8 @@ float3 BootstrapSceneSignature(float2 uv)
 
 float3 BootstrapRawVertexScatter(uint2 pixelPos)
 {
-	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
+	float3 color = float3(0.02, 0.025, 0.04);
 	const uint vertexCount = min(gTraceConstants.PrimitiveCount * 3u, 192u);
 	if (vertexCount == 0u)
 	{
@@ -311,24 +346,39 @@ float3 BootstrapRawVertexScatter(uint2 pixelPos)
 		maxPos = max(maxPos, pos);
 	}
 
-	const float2 pixel = (float2)pixelPos + 0.5;
+	const float2 gridSize = float2(24.0, 14.0);
+	const float2 cell = floor(uv * gridSize);
+	float occupancy = 0.0;
+	float3 accum = 0.0;
 	[loop]
 	for (uint vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
 	{
 		const float2 normPos = BootstrapNormalizeToBounds(gVertices[vertexIndex].position.xz, minPos, maxPos);
-		const float2 plotPos = float2(normPos.x, 1.0 - normPos.y) * float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
-		if (length(plotPos - pixel) <= 2.0)
+		const float2 vertexCell = floor(float2(normPos.x, 1.0 - normPos.y) * gridSize);
+		if (all(abs(vertexCell - cell) < 0.5))
 		{
-			color = BootstrapHashColor(vertexIndex);
+			occupancy += 1.0;
+			accum += BootstrapHashColor(vertexIndex);
 		}
 	}
+
+	const float2 cellUv = frac(uv * gridSize);
+	const float gridLine = step(cellUv.x, 0.06) + step(cellUv.y, 0.06);
+	if (occupancy > 0.0)
+	{
+		const float3 cellColor = accum / occupancy;
+		const float intensity = saturate(occupancy / 4.0);
+		color = lerp(cellColor * 0.4, cellColor, intensity);
+	}
+	color = lerp(color, float3(0.9, 0.92, 0.96), saturate(gridLine * 0.45));
 
 	return saturate(color);
 }
 
 float3 BootstrapRawPrimitiveScatter(uint2 pixelPos)
 {
-	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
+	float3 color = float3(0.025, 0.02, 0.045);
 	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 128u);
 	if (primitiveCount == 0u)
 	{
@@ -346,19 +396,33 @@ float3 BootstrapRawPrimitiveScatter(uint2 pixelPos)
 		maxPos = max(maxPos, c);
 	}
 
-	const float2 pixel = (float2)pixelPos + 0.5;
+	const float2 gridSize = float2(20.0, 12.0);
+	const float2 cell = floor(uv * gridSize);
+	float occupancy = 0.0;
+	float3 accum = 0.0;
 	[loop]
 	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 	{
 		const PrimitiveData primitive = gPrimitives[primitiveIndex];
 		const float2 c = (gVertices[primitive.indices.x].position.xz + gVertices[primitive.indices.y].position.xz + gVertices[primitive.indices.z].position.xz) / 3.0;
 		const float2 normPos = BootstrapNormalizeToBounds(c, minPos, maxPos);
-		const float2 plotPos = float2(normPos.x, 1.0 - normPos.y) * float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
-		if (length(plotPos - pixel) <= 2.5)
+		const float2 primitiveCell = floor(float2(normPos.x, 1.0 - normPos.y) * gridSize);
+		if (all(abs(primitiveCell - cell) < 0.5))
 		{
-			color = BootstrapHashColor(primitiveIndex);
+			occupancy += 1.0;
+			accum += BootstrapHashColor(primitiveIndex);
 		}
 	}
+
+	const float2 cellUv = frac(uv * gridSize);
+	const float gridLine = step(cellUv.x, 0.06) + step(cellUv.y, 0.06);
+	if (occupancy > 0.0)
+	{
+		const float3 cellColor = accum / occupancy;
+		const float intensity = saturate(occupancy / 3.0);
+		color = lerp(cellColor * 0.35, cellColor * 1.1, intensity);
+	}
+	color = lerp(color, float3(0.95, 0.95, 0.98), saturate(gridLine * 0.45));
 
 	return saturate(color);
 }
