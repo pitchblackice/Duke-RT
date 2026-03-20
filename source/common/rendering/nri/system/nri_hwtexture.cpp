@@ -1,6 +1,8 @@
 #include "nri_hwtexture.h"
 
 #include "nri_renderdevice.h"
+#include "image.h"
+#include "printf.h"
 #include "textures.h"
 
 NRIHardwareTexture::NRIHardwareTexture(NRIRenderDevice* fb, int numchannels)
@@ -61,6 +63,8 @@ unsigned int NRIHardwareTexture::CreateTexture(unsigned char* buffer, int w, int
 
 void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags)
 {
+	static int sTextureUploadLogCount = 0;
+
 	if (tex == nullptr)
 	{
 		return;
@@ -88,6 +92,25 @@ void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags
 	}
 
 	CreateTextureResource((uint32_t)texBuffer.mWidth, (uint32_t)texBuffer.mHeight, nri::Format::BGRA8_UNORM, nri::TextureUsageBits::SHADER_RESOURCE);
+	if (sTextureUploadLogCount < 32)
+	{
+		auto* image = tex->GetImage();
+		Printf("NRI texture upload[%d]: ptr=%p size=%dx%d src=%dx%d rowPitch=%u translation=%d flags=0x%x lump=%d image=%s imageId=%d content=%llu\n",
+			sTextureUploadLogCount,
+			texBuffer.mBuffer,
+			texBuffer.mWidth,
+			texBuffer.mHeight,
+			tex->GetWidth(),
+			tex->GetHeight(),
+			(uint32_t)texBuffer.mWidth * 4u,
+			translation,
+			flags,
+			tex->GetSourceLump(),
+			image != nullptr ? "yes" : "no",
+			image != nullptr ? image->GetId() : -1,
+			(unsigned long long)texBuffer.mContentId);
+		sTextureUploadLogCount++;
+	}
 	UploadTextureData(texBuffer.mBuffer, (uint32_t)texBuffer.mWidth, (uint32_t)texBuffer.mHeight, nri::Format::BGRA8_UNORM, (uint32_t)texBuffer.mWidth * 4u);
 	mContentId = texBuffer.mContentId;
 }

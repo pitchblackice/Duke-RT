@@ -1139,11 +1139,20 @@ bool NRIRenderDevice::CreateOwnedTexture(NRITextureResource& resource, uint32_t 
 
 bool NRIRenderDevice::UploadTextureData(NRITextureResource& resource, const void* data, uint32_t width, uint32_t height, uint32_t rowPitch)
 {
+	if (data == nullptr || width == 0 || height == 0 || rowPitch == 0)
+	{
+		return false;
+	}
+
+	const uint32_t slicePitch = rowPitch * height;
+	std::vector<uint8_t> uploadCopy(slicePitch);
+	memcpy(uploadCopy.data(), data, slicePitch);
+
 	nri::TextureSubresourceUploadDesc subresource = {};
-	subresource.slices = data;
+	subresource.slices = uploadCopy.data();
 	subresource.sliceNum = 1;
 	subresource.rowPitch = rowPitch;
-	subresource.slicePitch = rowPitch * height;
+	subresource.slicePitch = slicePitch;
 
 	nri::TextureUploadDesc uploadDesc = {};
 	uploadDesc.subresources = &subresource;
