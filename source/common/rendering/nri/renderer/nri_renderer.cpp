@@ -1294,7 +1294,8 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 		if (nri_ptdebug == 15)
 		{
-			mUseUpscaledInFinal = false;
+			mUseUpscaledInFinal = true;
+			mUpscaledInputSlot = FrameTextureSlot::PreFinal;
 			if (!DispatchFinal())
 			{
 				return false;
