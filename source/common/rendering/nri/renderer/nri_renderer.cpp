@@ -1680,7 +1680,7 @@ bool NRIRenderer::DispatchFinal()
 {
 	NRITraceConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
-	const bool presentRawTrace = !nri_ptbootstrap || bootstrapMode >= 13u;
+	const bool presentRawTrace = (!nri_ptbootstrap && !mUseUpscaledInFinal) || bootstrapMode >= 13u;
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
