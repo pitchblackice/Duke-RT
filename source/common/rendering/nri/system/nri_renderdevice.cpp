@@ -1224,7 +1224,9 @@ const void* NRIRenderDevice::GetPixelShaderBytecode(size_t& size) const
 
 nri::GraphicsAPI NRIRenderDevice::GetSelectedAPI() const
 {
-	return FString((const char*)nri_api).CompareNoCase("d3d12") == 0 ? nri::GraphicsAPI::D3D12 : nri::GraphicsAPI::VK;
+	// Temporary debugging override: always start the NRI backend on Vulkan
+	// so archived config cannot silently route startup through D3D12.
+	return nri::GraphicsAPI::VK;
 }
 
 NRISamplerMode NRIRenderDevice::GetSamplerMode(int clampMode) const

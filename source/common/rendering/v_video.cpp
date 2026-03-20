@@ -138,10 +138,9 @@ CUSTOM_CVAR(String, nri_api, "vulkan", CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_N
 
 int V_GetBackend()
 {
-	int v = vid_preferbackend;
-	if (v == 3) vid_preferbackend = v = 2;
-	else if (v < 0 || v > 4) v = 0;
-	return v;
+	// Temporary debugging override: always start on the NRI backend
+	// so archived config cannot silently route startup through another renderer.
+	return 4;
 }
 
 
