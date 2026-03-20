@@ -547,7 +547,7 @@ bool NRIRenderer::CreatePipelineLayout()
 {
 	nri::DescriptorRangeDesc samplerRange = {};
 	samplerRange.baseRegisterIndex = 0;
-	samplerRange.descriptorNum = 1;
+	samplerRange.descriptorNum = 2;
 	samplerRange.descriptorType = nri::DescriptorType::SAMPLER;
 	samplerRange.shaderStages = NRIComputeStage();
 
@@ -665,12 +665,15 @@ bool NRIRenderer::AllocateDescriptorSets()
 
 bool NRIRenderer::UpdateSamplerSet()
 {
-	const nri::Descriptor* descriptor = mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampLinear];
+	const nri::Descriptor* descriptors[2] = {
+		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapLinear],
+		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampLinear]
+	};
 	nri::UpdateDescriptorRangeDesc update = {};
 	update.descriptorSet = mSamplerSet;
 	update.rangeIndex = 0;
-	update.descriptors = &descriptor;
-	update.descriptorNum = 1;
+	update.descriptors = descriptors;
+	update.descriptorNum = 2;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
 	return true;
 }

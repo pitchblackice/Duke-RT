@@ -52,7 +52,7 @@ float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward,
 float4 SampleSurfaceColor(uint materialIndex, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex);
-	float4 color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearClamp, uv, 0.0);
+	float4 color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
 
 	if ((material.flags & MATERIAL_FLAG_INDEXED) != 0)
 	{

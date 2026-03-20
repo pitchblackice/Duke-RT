@@ -87,7 +87,8 @@ StructuredBuffer<uint> gIndices : register(t2, space4);
 StructuredBuffer<PrimitiveData> gPrimitives : register(t3, space4);
 StructuredBuffer<MaterialData> gMaterials : register(t4, space4);
 
-SamplerState gLinearClamp : register(s0, space0);
+SamplerState gLinearWrap : register(s0, space0);
+SamplerState gLinearClamp : register(s1, space0);
 Texture2D<float4> gPaletteLookup : register(t0, space1);
 Texture2D<float4> gSceneTextures[MAX_SCENE_TEXTURES] : register(t1, space1);
 
