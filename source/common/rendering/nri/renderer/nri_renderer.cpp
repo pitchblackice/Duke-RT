@@ -1292,18 +1292,6 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
-		if (nri_ptdebug == 15)
-		{
-			mUseUpscaledInFinal = true;
-			mUpscaledInputSlot = FrameTextureSlot::PreFinal;
-			if (!DispatchFinal())
-			{
-				return false;
-			}
-			CopyFinalToActiveTarget();
-			return true;
-		}
-
 		if (!DispatchFinal())
 		{
 			return false;
@@ -1506,6 +1494,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
+	NRITextureResource& preFinal = GetFrameTexture(FrameTextureSlot::PreFinal);
 
 	if (kind == NRIUpscalerKind::Off || kind == NRIUpscalerKind::NIS)
 	{
@@ -1521,10 +1510,6 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
-		if (nri_ptdebug == 15)
-		{
-			mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), NRIComputeStorageState());
-		}
 
 		const nri::Descriptor* defaultInput = composed.shaderView;
 		mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
@@ -1560,7 +1545,33 @@ bool NRIRenderer::DispatchUpscaleChain()
 	{
 		if (temporalOnly)
 		{
-			CopyTexture(historyOutput, GetFrameTexture(FrameTextureSlot::PreFinal));
+			if (mRenderWidth == mOutputWidth && mRenderHeight == mOutputHeight)
+			{
+				CopyTexture(historyOutput, preFinal);
+			}
+			else
+			{
+				mFrameBuffer->TransitionTexture(historyOutput, NRIComputeShaderResourceState());
+				mFrameBuffer->TransitionTexture(preFinal, NRIComputeStorageState());
+				if (!mUpscaler.EnsureReady(*mFrameBuffer, NRIUpscalerKind::NIS, nri::UpscalerMode::QUALITY, mOutputWidth, mOutputHeight))
+				{
+					return false;
+				}
+
+				NRIUpscalerDispatchDesc desc = {};
+				desc.commandBuffer = mFrameBuffer->mCommandBuffer;
+				desc.input = &historyOutput;
+				desc.output = &preFinal;
+				desc.currentWidth = mRenderWidth;
+				desc.currentHeight = mRenderHeight;
+				Copy2(mCurrentJitter, desc.cameraJitter);
+				desc.sharpness = 0.0f;
+				desc.resetHistory = mResetHistory;
+				if (!mUpscaler.Dispatch(*mFrameBuffer, NRIUpscalerKind::NIS, desc))
+				{
+					return false;
+				}
+			}
 		}
 		mUseUpscaledInFinal = temporalOnly;
 		if (temporalOnly)
@@ -1764,10 +1775,6 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
 	mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
 	mFrameInputDescriptors[5] = presentRawTrace ? (mUseUpscaledInFinal ? upscaled.shaderView : GetFrameTexture(FrameTextureSlot::Composed).shaderView) : GetFrameTexture(FrameTextureSlot::Composed).shaderView;
-	if (nri_ptdebug == 15 && mUseUpscaledInFinal)
-	{
-		mFrameInputDescriptors[5] = upscaled.shaderView;
-	}
 	mFrameInputDescriptors[6] = upscaled.shaderView;
 	mFrameInputDescriptors[7] = GetFrameTexture(FrameTextureSlot::Validation).shaderView;
 	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView;
