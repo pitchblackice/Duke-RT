@@ -572,7 +572,23 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	if (gTraceConstants.BootstrapMode == 11)
 	{
-		gFinalOutput[pixelPos] = float4(saturate(gGuideDiffuseInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		const float3 diffuse = saturate(gGuideDiffuseInput.SampleLevel(gLinearClamp, uv, 0.0).rgb);
+		const float3 baseColor = saturate(gBaseColorInput.SampleLevel(gLinearClamp, uv, 0.0).rgb);
+		const float viewZ = abs(gViewZInput.SampleLevel(gLinearClamp, uv, 0.0).x);
+		float3 diagnostic = diffuse;
+		if (viewZ > 0.001)
+		{
+			diagnostic += float3(0.0, 0.2, 0.0);
+		}
+		if (dot(baseColor, baseColor) > 1e-5)
+		{
+			diagnostic += float3(0.2, 0.0, 0.0);
+		}
+		if (dot(diffuse, diffuse) > 1e-5)
+		{
+			diagnostic += float3(0.0, 0.0, 0.2);
+		}
+		gFinalOutput[pixelPos] = float4(saturate(diagnostic), 1.0);
 		return;
 	}
 
