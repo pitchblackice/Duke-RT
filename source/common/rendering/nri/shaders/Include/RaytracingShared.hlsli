@@ -61,6 +61,8 @@ float4 SampleSurfaceColor(uint materialIndex, float2 uv)
 		color = gPaletteLookup.SampleLevel(gLinearClamp, paletteUv, 0.0);
 	}
 
+	color.rgb = color.bgr;
+
 	color.rgb *= material.lightLevel;
 	return color;
 }
