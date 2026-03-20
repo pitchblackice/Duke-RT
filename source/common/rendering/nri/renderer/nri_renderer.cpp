@@ -189,7 +189,7 @@ namespace
 
 	static uint32_t GetBootstrapMode()
 	{
-		return (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 6));
+		return (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 10));
 	}
 
 }
@@ -276,7 +276,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	const bool bootstrapSimpleView = nri_ptbootstrap && bootstrapMode <= 3u;
-	const bool bootstrapCapturedScene = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 5u;
+	const bool bootstrapCapturedDiagnostics = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 7u;
+	const bool bootstrapCapturedFlat = nri_ptbootstrap && bootstrapMode == 8u;
+	const bool bootstrapCapturedBaseColor = nri_ptbootstrap && bootstrapMode == 9u;
 
 	const bool preserveHistory = drawmode != DM_MAINVIEW;
 	uint32_t savedFrameIndex = mFrameIndex;
@@ -431,9 +433,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::BuildMaterials(sceneView, materialBridge);
 	std::vector<nri_scene::MaterialData> gpuMaterials;
 
-	const bool paletteReady = bootstrapCapturedScene ? true : EnsurePaletteTexture(materialBridge);
-	const bool texturesReady = bootstrapCapturedScene ? UseFallbackSceneTextures() : (paletteReady && EnsureSceneTextures(materialBridge, gpuMaterials));
-	if (bootstrapCapturedScene)
+	const bool needsFallbackMaterials = bootstrapCapturedDiagnostics || bootstrapCapturedFlat;
+	const bool needsRealTextures = !nri_ptbootstrap || bootstrapCapturedBaseColor || bootstrapMode >= 10u;
+	const bool paletteReady = needsRealTextures ? EnsurePaletteTexture(materialBridge) : true;
+	const bool texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures() : (needsRealTextures ? (paletteReady && EnsureSceneTextures(materialBridge, gpuMaterials)) : true);
+	if (needsFallbackMaterials)
 	{
 		gpuMaterials = materialBridge.materials;
 		for (auto& material : gpuMaterials)
@@ -445,9 +449,25 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			material.alpha = 1.0f;
 		}
 	}
+	else if (!needsRealTextures)
+	{
+		gpuMaterials = materialBridge.materials;
+	}
 	const bool buffersReady = texturesReady && UploadSceneBuffers(geometry, gpuMaterials);
-	const bool accelerationReady = buffersReady && BuildAccelerationStructures(geometry);
-	const bool dispatched = accelerationReady && DispatchFrameGraph(di, geometry, gpuMaterials, drawmode);
+	const bool accelerationReady = (bootstrapCapturedDiagnostics || bootstrapCapturedFlat || bootstrapCapturedBaseColor) ? true : (buffersReady && BuildAccelerationStructures(geometry));
+	bool dispatched = false;
+	if (bootstrapCapturedDiagnostics)
+	{
+		mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
+		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
+		mUpscaledInputSlot = FrameTextureSlot::Composed;
+		mUseUpscaledInFinal = false;
+		dispatched = buffersReady && DispatchBootstrapView();
+	}
+	else
+	{
+		dispatched = accelerationReady && DispatchFrameGraph(di, geometry, gpuMaterials, drawmode);
+	}
 	const bool success = paletteReady && texturesReady && buffersReady && accelerationReady && dispatched;
 
 	if (!paletteReady)
@@ -468,11 +488,16 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 	else if (!dispatched)
 	{
-		LogFallback("PT frame graph dispatch failed.");
+		LogFallback(bootstrapCapturedDiagnostics ? "PT bootstrap captured-scene diagnostic dispatch failed." : "PT frame graph dispatch failed.");
 	}
 
 	if (success)
 	{
+		if (bootstrapCapturedDiagnostics)
+		{
+			CopyFinalToActiveTarget();
+		}
+
 		if (!preserveHistory)
 		{
 			mFrameIndex++;
@@ -941,6 +966,22 @@ bool NRIRenderer::DispatchBootstrapView()
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	if (mVertexBuffer.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	}
+	if (mIndexBuffer.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	}
+	if (mPrimitiveBuffer.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	}
+	if (mMaterialBuffer.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	}
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });

@@ -164,6 +164,182 @@ float3 BootstrapTexturedQuad(float2 uv)
 	return saturate(texel);
 }
 
+float3 BootstrapHashColor(uint index)
+{
+	const float seed = (float)(index + 1u);
+	return saturate(float3(frac(seed * 0.173), frac(seed * 0.347), frac(seed * 0.613)));
+}
+
+bool BootstrapProjectPoint(float3 worldPos, out float2 screenPos, out float viewZ)
+{
+	const float3 relative = worldPos - gTraceConstants.CameraPos;
+	viewZ = dot(relative, gTraceConstants.CameraForward);
+	if (viewZ <= 0.001)
+	{
+		screenPos = 0.0;
+		return false;
+	}
+
+	const float ndcX = dot(relative, gTraceConstants.CameraRight) / max(viewZ * gTraceConstants.TanHalfFovX, 1e-5);
+	const float ndcY = dot(relative, gTraceConstants.CameraUp) / max(viewZ * gTraceConstants.TanHalfFovY, 1e-5);
+	const float2 uv = float2(ndcX * 0.5 + 0.5, 0.5 - ndcY * 0.5);
+	screenPos = uv * float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
+	return all(uv >= float2(-0.2, -0.2)) && all(uv <= float2(1.2, 1.2));
+}
+
+float BootstrapDistanceToSegment(float2 p, float2 a, float2 b)
+{
+	const float2 ab = b - a;
+	const float denom = max(dot(ab, ab), 1e-5);
+	const float t = saturate(dot(p - a, ab) / denom);
+	return length((a + ab * t) - p);
+}
+
+bool BootstrapProjectPrimitive(uint primitiveIndex, out float2 p0, out float2 p1, out float2 p2, out float3 worldCenter)
+{
+	const PrimitiveData primitive = gPrimitives[min(primitiveIndex, gTraceConstants.PrimitiveCount - 1u)];
+	const SceneVertex v0 = gVertices[primitive.indices.x];
+	const SceneVertex v1 = gVertices[primitive.indices.y];
+	const SceneVertex v2 = gVertices[primitive.indices.z];
+	float z0 = 0.0;
+	float z1 = 0.0;
+	float z2 = 0.0;
+	const bool ok0 = BootstrapProjectPoint(v0.position, p0, z0);
+	const bool ok1 = BootstrapProjectPoint(v1.position, p1, z1);
+	const bool ok2 = BootstrapProjectPoint(v2.position, p2, z2);
+	worldCenter = (v0.position + v1.position + v2.position) / 3.0;
+	return ok0 && ok1 && ok2;
+}
+
+bool BootstrapBarycentrics2D(float2 p, float2 a, float2 b, float2 c, out float3 bary)
+{
+	const float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+	if (abs(area) < 1e-5)
+	{
+		bary = 0.0;
+		return false;
+	}
+
+	bary.x = ((b.x - p.x) * (c.y - p.y) - (b.y - p.y) * (c.x - p.x)) / area;
+	bary.y = ((c.x - p.x) * (a.y - p.y) - (c.y - p.y) * (a.x - p.x)) / area;
+	bary.z = 1.0 - bary.x - bary.y;
+	return all(bary >= -0.001) && all(bary <= 1.001);
+}
+
+float3 BootstrapCapturedPoints(uint2 pixelPos)
+{
+	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const float2 pixel = (float2)pixelPos + 0.5;
+	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 96u);
+	[loop]
+	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+	{
+		const PrimitiveData primitive = gPrimitives[primitiveIndex];
+		const uint indices[3] = { primitive.indices.x, primitive.indices.y, primitive.indices.z };
+		[unroll]
+		for (uint i = 0; i < 3; ++i)
+		{
+			float2 projectedPoint = 0.0;
+			float viewZ = 0.0;
+			if (!BootstrapProjectPoint(gVertices[indices[i]].position, projectedPoint, viewZ))
+			{
+				continue;
+			}
+
+			if (length(projectedPoint - pixel) <= 2.0)
+			{
+				color = BootstrapHashColor(indices[i]);
+			}
+		}
+	}
+
+	return saturate(color);
+}
+
+float3 BootstrapPrimitiveCentroids(uint2 pixelPos)
+{
+	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const float2 pixel = (float2)pixelPos + 0.5;
+	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 128u);
+	[loop]
+	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+	{
+		float2 p0 = 0.0;
+		float2 p1 = 0.0;
+		float2 p2 = 0.0;
+		float3 center = 0.0;
+		float2 centroidPos = 0.0;
+		if (!BootstrapProjectPrimitive(primitiveIndex, p0, p1, p2, center))
+		{
+			continue;
+		}
+
+		centroidPos = (p0 + p1 + p2) / 3.0;
+		if (length(centroidPos - pixel) <= 2.5)
+		{
+			color = BootstrapHashColor(primitiveIndex);
+		}
+	}
+
+	return saturate(color);
+}
+
+float3 BootstrapWireframe(uint2 pixelPos)
+{
+	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const float2 pixel = (float2)pixelPos + 0.5;
+	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 48u);
+	[loop]
+	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+	{
+		float2 p0 = 0.0;
+		float2 p1 = 0.0;
+		float2 p2 = 0.0;
+		float3 center = 0.0;
+		if (!BootstrapProjectPrimitive(primitiveIndex, p0, p1, p2, center))
+		{
+			continue;
+		}
+
+		const float edgeDist = min(BootstrapDistanceToSegment(pixel, p0, p1), min(BootstrapDistanceToSegment(pixel, p1, p2), BootstrapDistanceToSegment(pixel, p2, p0)));
+		if (edgeDist <= 1.0)
+		{
+			color = BootstrapHashColor(primitiveIndex);
+		}
+	}
+
+	return saturate(color);
+}
+
+float3 BootstrapFirstTriangle(uint2 pixelPos)
+{
+	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const float2 pixel = (float2)pixelPos + 0.5;
+	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 128u);
+	[loop]
+	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+	{
+		float2 p0 = 0.0;
+		float2 p1 = 0.0;
+		float2 p2 = 0.0;
+		float3 center = 0.0;
+		if (!BootstrapProjectPrimitive(primitiveIndex, p0, p1, p2, center))
+		{
+			continue;
+		}
+
+		float3 bary = 0.0;
+		if (BootstrapBarycentrics2D(pixel, p0, p1, p2, bary))
+		{
+			const float edge = min(bary.x, min(bary.y, bary.z));
+			color = lerp(BootstrapHashColor(primitiveIndex), float3(1.0, 1.0, 1.0), step(edge, 0.03));
+		}
+		return saturate(color);
+	}
+
+	return saturate(color);
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -190,6 +366,22 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else if (gTraceConstants.BootstrapMode == 3)
 		{
 			color = BootstrapTexturedQuad(uv);
+		}
+		else if (gTraceConstants.BootstrapMode == 4)
+		{
+			color = BootstrapCapturedPoints(pixelPos);
+		}
+		else if (gTraceConstants.BootstrapMode == 5)
+		{
+			color = BootstrapPrimitiveCentroids(pixelPos);
+		}
+		else if (gTraceConstants.BootstrapMode == 6)
+		{
+			color = BootstrapWireframe(pixelPos);
+		}
+		else if (gTraceConstants.BootstrapMode == 7)
+		{
+			color = BootstrapFirstTriangle(pixelPos);
 		}
 		gFinalOutput[pixelPos] = float4(saturate(color), 1.0);
 		return;
