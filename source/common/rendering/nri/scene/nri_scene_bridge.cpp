@@ -136,14 +136,20 @@ namespace
 		}
 	}
 
+	bool IsEffectivelyOpaque(const FRenderStyle& style, float alpha)
+	{
+		return alpha >= 0.999f &&
+			style.BlendOp == STYLEOP_Add &&
+			style.SrcAlpha == STYLEALPHA_Src &&
+			style.DestAlpha == STYLEALPHA_InvSrc &&
+			style.Flags == 0;
+	}
+
 	bool IsOpaqueSurface(const HWWall& wall)
 	{
 		return wall.texture != nullptr &&
 			wall.vertcount >= 3 &&
-			wall.alpha >= 0.999f &&
-			wall.RenderStyle.BlendOp == STYLEOP_Add &&
-			wall.RenderStyle.SrcAlpha == STYLEALPHA_One &&
-			wall.RenderStyle.DestAlpha == STYLEALPHA_Zero;
+			IsEffectivelyOpaque(wall.RenderStyle, wall.alpha);
 	}
 
 	bool IsSkyWall(const HWWall& wall)
@@ -172,11 +178,9 @@ namespace
 	{
 		return flat.texture != nullptr &&
 			flat.vertcount >= 3 &&
-			flat.alpha >= 0.999f &&
+			IsEffectivelyOpaque(flat.RenderStyle, flat.alpha) &&
 			flat.Sprite == nullptr &&
-			flat.RenderStyle.BlendOp == STYLEOP_Add &&
-			flat.RenderStyle.SrcAlpha == STYLEALPHA_One &&
-			flat.RenderStyle.DestAlpha == STYLEALPHA_Zero;
+			true;
 	}
 
 	bool IsSkyFlat(const HWFlat& flat)
@@ -361,10 +365,7 @@ namespace
 	{
 		return sprite.texture != nullptr &&
 			sprite.modelframe == 0 &&
-			sprite.alpha >= 0.999f &&
-			sprite.RenderStyle.BlendOp == STYLEOP_Add &&
-			sprite.RenderStyle.SrcAlpha == STYLEALPHA_One &&
-			sprite.RenderStyle.DestAlpha == STYLEALPHA_Zero;
+			IsEffectivelyOpaque(sprite.RenderStyle, sprite.alpha);
 	}
 
 	void CaptureFacingSprites(HWDrawInfo& di, HWDrawList& list, std::vector<SurfaceRef>& outSprites)
