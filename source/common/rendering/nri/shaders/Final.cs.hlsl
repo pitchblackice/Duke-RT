@@ -1,4 +1,5 @@
 #include "Include/Shared.hlsli"
+#include "Include/RaytracingShared.hlsli"
 
 float3 BootstrapPattern(float2 uv, float3 cameraForward, float3 skyColor, float3 groundColor, uint frameIndex)
 {
@@ -162,6 +163,52 @@ float3 BootstrapTexturedQuad(float2 uv)
 	texel = lerp(texel, float3(1.0, 1.0, 1.0), saturate(gridMask));
 	texel *= 0.8 + 0.2 * sin((surfaceUv.x + surfaceUv.y + gTraceConstants.FrameIndex * 0.01) * 12.0);
 	return saturate(texel);
+}
+
+float3 BootstrapGenerateRay(float2 uv)
+{
+	const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+	return normalize(
+		gTraceConstants.CameraForward +
+		ndc.x * gTraceConstants.TanHalfFovX * gTraceConstants.CameraRight +
+		ndc.y * gTraceConstants.TanHalfFovY * gTraceConstants.CameraUp);
+}
+
+float3 BootstrapCapturedSceneFlat(float2 uv)
+{
+	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	if (gTraceConstants.PrimitiveCount == 0u)
+	{
+		return color;
+	}
+
+	const float3 rayDir = BootstrapGenerateRay(uv);
+	const HitData hit = TraceBootstrapGeometry(gTraceConstants.CameraPos, rayDir);
+	if (!hit.hit)
+	{
+		return color;
+	}
+
+	const float primitiveHash = (float)(hit.primitiveIndex % 31u) / 30.0;
+	return float3(frac(primitiveHash * 1.7), frac(primitiveHash * 2.3), frac(primitiveHash * 3.1));
+}
+
+float3 BootstrapCapturedSceneBaseColor(float2 uv)
+{
+	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	if (gTraceConstants.PrimitiveCount == 0u)
+	{
+		return color;
+	}
+
+	const float3 rayDir = BootstrapGenerateRay(uv);
+	const HitData hit = TraceBootstrapGeometry(gTraceConstants.CameraPos, rayDir);
+	if (!hit.hit)
+	{
+		return color;
+	}
+
+	return saturate(SampleSurfaceColor(hit.materialIndex, hit.uv).rgb);
 }
 
 float3 BootstrapHashColor(uint index)
@@ -566,35 +613,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			color = BootstrapFirstTriangle(pixelPos);
 		}
+		else if (gTraceConstants.BootstrapMode == 11)
+		{
+			color = BootstrapCapturedSceneFlat(uv);
+		}
+		else if (gTraceConstants.BootstrapMode == 12)
+		{
+			color = BootstrapCapturedSceneBaseColor(uv);
+		}
 		gFinalOutput[pixelPos] = float4(saturate(color), 1.0);
-		return;
-	}
-
-	if (gTraceConstants.BootstrapMode == 11)
-	{
-		const float3 diffuse = saturate(gGuideDiffuseInput.SampleLevel(gLinearClamp, uv, 0.0).rgb);
-		const float3 baseColor = saturate(gBaseColorInput.SampleLevel(gLinearClamp, uv, 0.0).rgb);
-		const float viewZ = abs(gViewZInput.SampleLevel(gLinearClamp, uv, 0.0).x);
-		float3 diagnostic = diffuse;
-		if (viewZ > 0.001)
-		{
-			diagnostic += float3(0.0, 0.2, 0.0);
-		}
-		if (dot(baseColor, baseColor) > 1e-5)
-		{
-			diagnostic += float3(0.2, 0.0, 0.0);
-		}
-		if (dot(diffuse, diffuse) > 1e-5)
-		{
-			diagnostic += float3(0.0, 0.0, 0.2);
-		}
-		gFinalOutput[pixelPos] = float4(saturate(diagnostic), 1.0);
-		return;
-	}
-
-	if (gTraceConstants.BootstrapMode == 12)
-	{
-		gFinalOutput[pixelPos] = float4(saturate(gBaseColorInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
 		return;
 	}
 

@@ -276,6 +276,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	const bool bootstrapSimpleView = nri_ptbootstrap && bootstrapMode <= 3u;
+	const bool bootstrapCapturedView = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 12u;
 	const bool bootstrapCapturedDiagnostics = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 10u;
 	const bool bootstrapCapturedFlat = nri_ptbootstrap && bootstrapMode == 11u;
 	const bool bootstrapCapturedBaseColor = nri_ptbootstrap && bootstrapMode == 12u;
@@ -454,9 +455,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		gpuMaterials = materialBridge.materials;
 	}
 	const bool buffersReady = texturesReady && UploadSceneBuffers(geometry, gpuMaterials);
-	const bool accelerationReady = bootstrapCapturedDiagnostics ? true : (buffersReady && BuildAccelerationStructures(geometry));
+	const bool accelerationReady = bootstrapCapturedView ? true : (buffersReady && BuildAccelerationStructures(geometry));
 	bool dispatched = false;
-	if (bootstrapCapturedDiagnostics)
+	if (bootstrapCapturedView)
 	{
 		mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
@@ -488,12 +489,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 	else if (!dispatched)
 	{
-		LogFallback(bootstrapCapturedDiagnostics ? "PT bootstrap captured-scene diagnostic dispatch failed." : "PT frame graph dispatch failed.");
+		LogFallback(bootstrapCapturedView ? "PT bootstrap captured-scene dispatch failed." : "PT frame graph dispatch failed.");
 	}
 
 	if (success)
 	{
-		if (bootstrapCapturedDiagnostics)
+		if (bootstrapCapturedView)
 		{
 			CopyFinalToActiveTarget();
 		}
