@@ -45,7 +45,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 12)
 	{
-		const float hitMetric = saturate(gGuideSpecHitInput[pixelPos].x / 4096.0);
+		const float hitMetric = saturate(gGuideSpecHitInput[pixelPos].w);
 		composed = float4(hitMetric.xxx, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 13)
@@ -55,6 +55,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else if (gTraceConstants.DebugMode == 14)
 	{
 		composed = float4(saturate(gUpscaledInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+	}
+	else if (gTraceConstants.DebugMode == 15)
+	{
+		composed = float4(saturate(gComposedInput[pixelPos].rgb), 1.0);
 	}
 	else if ((gTraceConstants.Flags & 0x2u) != 0)
 	{
