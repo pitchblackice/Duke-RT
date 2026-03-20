@@ -1278,7 +1278,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedRawTraceBypass)
 		{
-			Printf("NRI frame-graph bypass: presenting TraceOpaque through Final passthrough until composition integration is stabilized.\n");
+			Printf("NRI frame-graph bypass: presenting TraceOpaque through direct Final output until composition integration is stabilized.\n");
 			sLoggedRawTraceBypass = true;
 		}
 
@@ -1286,12 +1286,6 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		{
 			return false;
 		}
-
-		NRITextureResource& preFinal = GetFrameTexture(FrameTextureSlot::PreFinal);
-		NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
-		mFrameBuffer->TransitionTexture(preFinal, NRICopySourceState());
-		mFrameBuffer->TransitionTexture(final, NRICopyDestinationState());
-		mFrameBuffer->mCore.CmdCopyTexture(*mFrameBuffer->mCommandBuffer, *final.texture, nullptr, *preFinal.texture, nullptr);
 		CopyFinalToActiveTarget();
 		return true;
 	}
@@ -1672,7 +1666,6 @@ bool NRIRenderer::DispatchFinal()
 	NRITraceConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool presentRawTrace = !nri_ptbootstrap || bootstrapMode >= 13u;
-	const bool rawTracePassthrough = presentRawTrace && !nri_ptbootstrap;
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
@@ -1704,7 +1697,6 @@ bool NRIRenderer::DispatchFinal()
 
 	NRITextureResource& history = GetFrameTexture(mHistoryOutputSlot);
 	NRITextureResource& upscaled = GetFrameTexture(mUpscaledInputSlot);
-	NRITextureResource& preFinal = GetFrameTexture(FrameTextureSlot::PreFinal);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
@@ -1719,15 +1711,7 @@ bool NRIRenderer::DispatchFinal()
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(history, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(upscaled, NRIComputeShaderResourceState());
-	if (rawTracePassthrough)
-	{
-		mFrameBuffer->TransitionTexture(final, NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(preFinal, NRIComputeStorageState());
-	}
-	else
-	{
-		mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
-	}
+	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
 
 	mFrameInputDescriptors.fill(GetFrameTexture(FrameTextureSlot::Composed).shaderView);
 	mFrameInputDescriptors[0] = history.shaderView;
@@ -1735,7 +1719,7 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
 	mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
 	mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
-	mFrameInputDescriptors[5] = rawTracePassthrough ? final.shaderView : (presentRawTrace ? GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView : GetFrameTexture(FrameTextureSlot::Composed).shaderView);
+	mFrameInputDescriptors[5] = presentRawTrace ? GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView : GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors[6] = upscaled.shaderView;
 	mFrameInputDescriptors[7] = GetFrameTexture(FrameTextureSlot::Validation).shaderView;
 	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView;
@@ -1743,8 +1727,8 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	UpdateFrameTextureSet();
 
-	mOutputDescriptors.fill(preFinal.storageView);
-	mOutputDescriptors[2] = rawTracePassthrough ? preFinal.storageView : final.storageView;
+	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::PreFinal).storageView);
+	mOutputDescriptors[2] = final.storageView;
 	UpdateOutputSet();
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
