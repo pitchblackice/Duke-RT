@@ -1294,7 +1294,13 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 		if (nri_ptdebug == 15)
 		{
-			CopyTextureToActiveTarget(GetFrameTexture(FrameTextureSlot::PreFinal));
+			mUseUpscaledInFinal = true;
+			mUpscaledInputSlot = mHistoryOutputSlot;
+			if (!DispatchFinal())
+			{
+				return false;
+			}
+			CopyFinalToActiveTarget();
 			return true;
 		}
 
