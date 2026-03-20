@@ -70,6 +70,83 @@ bool IsMirrorMaterial(uint materialIndex)
 	return (GetMaterialData(materialIndex).flags & MATERIAL_FLAG_MIRROR) != 0;
 }
 
+bool IntersectPrimitiveTriangle(float3 origin, float3 direction, uint primitiveIndex, out float hitT, out float3 barycentrics)
+{
+	hitT = 0.0;
+	barycentrics = 0.0;
+	const PrimitiveData primitive = gPrimitives[min(primitiveIndex, gTraceConstants.PrimitiveCount - 1u)];
+	const SceneVertex v0 = gVertices[primitive.indices.x];
+	const SceneVertex v1 = gVertices[primitive.indices.y];
+	const SceneVertex v2 = gVertices[primitive.indices.z];
+	const float3 edge1 = v1.position - v0.position;
+	const float3 edge2 = v2.position - v0.position;
+	const float3 p = cross(direction, edge2);
+	const float det = dot(edge1, p);
+	if (abs(det) < 1e-5)
+	{
+		return false;
+	}
+
+	const float invDet = 1.0 / det;
+	const float3 t = origin - v0.position;
+	const float u = dot(t, p) * invDet;
+	if (u < 0.0 || u > 1.0)
+	{
+		return false;
+	}
+
+	const float3 q = cross(t, edge1);
+	const float v = dot(direction, q) * invDet;
+	if (v < 0.0 || (u + v) > 1.0)
+	{
+		return false;
+	}
+
+	const float candidateT = dot(edge2, q) * invDet;
+	if (candidateT <= 0.001)
+	{
+		return false;
+	}
+
+	hitT = candidateT;
+	barycentrics = float3(1.0 - u - v, u, v);
+	return true;
+}
+
+HitData TraceBootstrapGeometry(float3 origin, float3 direction)
+{
+	HitData bestHit = (HitData)0;
+	bestHit.distance = 1e30;
+
+	[loop]
+	for (uint primitiveIndex = 0; primitiveIndex < gTraceConstants.PrimitiveCount; ++primitiveIndex)
+	{
+		float hitT = 0.0;
+		float3 barycentrics = 0.0;
+		if (!IntersectPrimitiveTriangle(origin, direction, primitiveIndex, hitT, barycentrics))
+		{
+			continue;
+		}
+
+		if (hitT >= bestHit.distance)
+		{
+			continue;
+		}
+
+		const PrimitiveData primitive = gPrimitives[primitiveIndex];
+		bestHit.hit = true;
+		bestHit.primitiveIndex = primitiveIndex;
+		bestHit.barycentrics = barycentrics.yz;
+		bestHit.distance = hitT;
+		bestHit.position = origin + direction * hitT;
+		bestHit.normal = normalize(primitive.normal);
+		bestHit.uv = primitive.uv0 * barycentrics.x + primitive.uv1 * barycentrics.y + primitive.uv2 * barycentrics.z;
+		bestHit.materialIndex = primitive.materialIndex;
+	}
+
+	return bestHit;
+}
+
 HitData TracePrimary(float3 origin, float3 direction)
 {
 	HitData hitData = (HitData)0;

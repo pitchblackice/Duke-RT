@@ -12,18 +12,27 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 pixelPos = dispatchThreadId.xy;
 	float3 visibleRayDirection = GeneratePrimaryRay(pixelPos);
 	float3 rayOrigin = gTraceConstants.CameraPos;
+	const uint bootstrapMode = gTraceConstants.BootstrapMode;
+	const bool bootstrapSceneDirect = bootstrapMode == 4 || bootstrapMode == 5;
 	HitData hit = (HitData)0;
-	[loop]
-	for (uint bounce = 0; bounce < 3; ++bounce)
+	if (bootstrapSceneDirect)
 	{
-		hit = TracePrimary(rayOrigin, visibleRayDirection);
-		if (!hit.hit || !IsMirrorMaterial(hit.materialIndex))
+		hit = TraceBootstrapGeometry(rayOrigin, visibleRayDirection);
+	}
+	else
+	{
+		[loop]
+		for (uint bounce = 0; bounce < 3; ++bounce)
 		{
-			break;
-		}
+			hit = TracePrimary(rayOrigin, visibleRayDirection);
+			if (!hit.hit || !IsMirrorMaterial(hit.materialIndex))
+			{
+				break;
+			}
 
-		rayOrigin = hit.position + hit.normal * 0.05;
-		visibleRayDirection = reflect(visibleRayDirection, hit.normal);
+			rayOrigin = hit.position + hit.normal * 0.05;
+			visibleRayDirection = reflect(visibleRayDirection, hit.normal);
+		}
 	}
 
 	float4 color = 0.0;
@@ -50,7 +59,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 
 		const float hitDistance = saturate(hit.distance / 4096.0);
-		const uint bootstrapMode = gTraceConstants.BootstrapMode;
 		const bool bootstrapFlat = bootstrapMode == 4;
 		const bool bootstrapBaseColor = bootstrapMode == 5;
 		float4 albedo = 1.0;
