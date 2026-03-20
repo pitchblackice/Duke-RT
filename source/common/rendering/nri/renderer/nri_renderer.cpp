@@ -1,5 +1,6 @@
 #include "nri_renderer.h"
 
+#include "nri_renderstate.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
@@ -1549,6 +1550,7 @@ void NRIRenderer::CopyFinalToActiveTarget()
 	mFrameBuffer->TransitionTexture(final, NRICopySourceState());
 	mFrameBuffer->TransitionTexture(*mFrameBuffer->mActiveTarget, NRICopyDestinationState());
 	mFrameBuffer->mCore.CmdCopyTexture(*mFrameBuffer->mCommandBuffer, *mFrameBuffer->mActiveTarget->texture, nullptr, *final.texture, nullptr);
+	mFrameBuffer->mRenderState->NotifyExternalTargetWrite();
 }
 
 void NRIRenderer::DestroyCachedTextures()

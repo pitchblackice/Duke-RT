@@ -223,6 +223,13 @@ void NRIRenderState::EndFrame()
 	EndRendering();
 }
 
+void NRIRenderState::NotifyExternalTargetWrite()
+{
+	// The PT path can populate the active target without going through BeginRenderingIfNeeded().
+	// Subsequent translucent/HUD raster work must treat that target as already initialized.
+	mNeedsClear = false;
+}
+
 void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 {
 	if (mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)

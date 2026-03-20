@@ -37,6 +37,7 @@ public:
 
 	void BeginFrame();
 	void EndFrame();
+	void NotifyExternalTargetWrite();
 
 private:
 	struct PipelineKey
