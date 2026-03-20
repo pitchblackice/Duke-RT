@@ -1278,8 +1278,13 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedRawTraceBypass)
 		{
-			Printf("NRI frame-graph bypass: presenting TraceOpaque through direct Final output until composition integration is stabilized.\n");
+			Printf("NRI frame-graph bypass: presenting Composition through Final until temporal/upscale integration is stabilized.\n");
 			sLoggedRawTraceBypass = true;
+		}
+
+		if (!DispatchComposition())
+		{
+			return false;
 		}
 
 		if (!DispatchFinal())
@@ -1343,6 +1348,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), NRIComputeStorageState());
 
 	const nri::Descriptor* defaultInput = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
@@ -1351,10 +1357,6 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
 	mOutputDescriptors[0] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).storageView;
-	if (directSceneTrace)
-	{
-		mOutputDescriptors[2] = GetFrameTexture(FrameTextureSlot::Final).storageView;
-	}
 	mOutputDescriptors[3] = GetFrameTexture(FrameTextureSlot::Motion).storageView;
 	mOutputDescriptors[4] = GetFrameTexture(FrameTextureSlot::ViewZ).storageView;
 	mOutputDescriptors[5] = GetFrameTexture(FrameTextureSlot::NormalRoughness).storageView;
@@ -1711,6 +1713,7 @@ bool NRIRenderer::DispatchFinal()
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(history, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(upscaled, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), presentRawTrace ? NRIComputeShaderResourceState() : NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
 
 	mFrameInputDescriptors.fill(GetFrameTexture(FrameTextureSlot::Composed).shaderView);
@@ -1719,7 +1722,7 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
 	mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
 	mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
-	mFrameInputDescriptors[5] = presentRawTrace ? GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView : GetFrameTexture(FrameTextureSlot::Composed).shaderView;
+	mFrameInputDescriptors[5] = presentRawTrace ? GetFrameTexture(FrameTextureSlot::PreFinal).shaderView : GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors[6] = upscaled.shaderView;
 	mFrameInputDescriptors[7] = GetFrameTexture(FrameTextureSlot::Validation).shaderView;
 	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView;
@@ -1866,9 +1869,14 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 void NRIRenderer::CopyFinalToActiveTarget()
 {
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
-	mFrameBuffer->TransitionTexture(final, NRICopySourceState());
+	CopyTextureToActiveTarget(final);
+}
+
+void NRIRenderer::CopyTextureToActiveTarget(NRITextureResource& source)
+{
+	mFrameBuffer->TransitionTexture(source, NRICopySourceState());
 	mFrameBuffer->TransitionTexture(*mFrameBuffer->mActiveTarget, NRICopyDestinationState());
-	mFrameBuffer->mCore.CmdCopyTexture(*mFrameBuffer->mCommandBuffer, *mFrameBuffer->mActiveTarget->texture, nullptr, *final.texture, nullptr);
+	mFrameBuffer->mCore.CmdCopyTexture(*mFrameBuffer->mCommandBuffer, *mFrameBuffer->mActiveTarget->texture, nullptr, *source.texture, nullptr);
 	mFrameBuffer->mRenderState->NotifyExternalTargetWrite();
 }
 
