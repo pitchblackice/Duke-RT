@@ -176,6 +176,13 @@ namespace
 		std::memcpy(dst, src, sizeof(float) * 2);
 	}
 
+	static void RemapToPTSpace(const float* src, float* dst)
+	{
+		dst[0] = src[0];
+		dst[1] = src[2];
+		dst[2] = src[1];
+	}
+
 }
 
 NRIRenderer::NRIRenderer(NRIRenderDevice* frameBuffer)
@@ -1505,9 +1512,9 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 		std::memset(mCurrentCameraForward, 0, sizeof(mCurrentCameraForward));
 		std::memset(mCurrentCameraRight, 0, sizeof(mCurrentCameraRight));
 		std::memset(mCurrentCameraUp, 0, sizeof(mCurrentCameraUp));
-		mCurrentCameraForward[1] = 1.0f;
+		mCurrentCameraForward[2] = -1.0f;
 		mCurrentCameraRight[0] = 1.0f;
-		mCurrentCameraUp[2] = 1.0f;
+		mCurrentCameraUp[1] = 1.0f;
 	}
 	else
 	{
@@ -1520,13 +1527,31 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 		TransformPoint(inverseView, 0.0f, 1.0f, 0.0f, upPoint);
 		TransformPoint(inverseView, 0.0f, 0.0f, -1.0f, forwardPoint);
 
-		for (int i = 0; i < 3; ++i)
-		{
-			mCurrentCameraPos[i] = origin[i];
-			mCurrentCameraRight[i] = rightPoint[i] - origin[i];
-			mCurrentCameraUp[i] = upPoint[i] - origin[i];
-			mCurrentCameraForward[i] = forwardPoint[i] - origin[i];
-		}
+		const float cameraPos[3] = {
+			di.VPUniforms.mCameraPos[0],
+			di.VPUniforms.mCameraPos[1],
+			di.VPUniforms.mCameraPos[2]
+		};
+		const float rightDelta[3] = {
+			rightPoint[0] - origin[0],
+			rightPoint[1] - origin[1],
+			rightPoint[2] - origin[2]
+		};
+		const float upDelta[3] = {
+			upPoint[0] - origin[0],
+			upPoint[1] - origin[1],
+			upPoint[2] - origin[2]
+		};
+		const float forwardDelta[3] = {
+			forwardPoint[0] - origin[0],
+			forwardPoint[1] - origin[1],
+			forwardPoint[2] - origin[2]
+		};
+
+		RemapToPTSpace(cameraPos, mCurrentCameraPos);
+		RemapToPTSpace(rightDelta, mCurrentCameraRight);
+		RemapToPTSpace(upDelta, mCurrentCameraUp);
+		RemapToPTSpace(forwardDelta, mCurrentCameraForward);
 
 		Normalize3(mCurrentCameraRight);
 		Normalize3(mCurrentCameraUp);
