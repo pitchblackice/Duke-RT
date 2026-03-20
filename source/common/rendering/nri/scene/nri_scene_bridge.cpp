@@ -10,6 +10,7 @@
 #include "texturemanager.h"
 #include "textures.h"
 #include "v_video.h"
+#include <windows.h>
 
 namespace
 {
@@ -521,7 +522,14 @@ namespace nri_scene
 {
 bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor)
 {
-	return TryGetAverageTextureColorRecursive(texture, outColor, 0);
+	__try
+	{
+		return TryGetAverageTextureColorRecursive(texture, outColor, 0);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return false;
+	}
 }
 
 SceneDebugStats CollectDebugStats(HWDrawInfo& di)
