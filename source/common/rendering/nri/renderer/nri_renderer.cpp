@@ -282,6 +282,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const bool bootstrapCapturedDiagnostics = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 10u;
 	const bool bootstrapCapturedFlat = nri_ptbootstrap && bootstrapMode == 11u;
 	const bool bootstrapCapturedBaseColor = nri_ptbootstrap && bootstrapMode == 12u;
+	const bool rawTraceDirectScene = !nri_ptbootstrap;
 
 	const bool preserveHistory = drawmode != DM_MAINVIEW;
 	uint32_t savedFrameIndex = mFrameIndex;
@@ -457,7 +458,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		gpuMaterials = materialBridge.materials;
 	}
 	const bool buffersReady = texturesReady && UploadSceneBuffers(geometry, gpuMaterials);
-	const bool accelerationReady = bootstrapCapturedView ? true : (buffersReady && BuildAccelerationStructures(geometry));
+	const bool accelerationReady = (bootstrapCapturedView || rawTraceDirectScene) ? true : (buffersReady && BuildAccelerationStructures(geometry));
 	bool dispatched = false;
 	if (bootstrapCapturedView)
 	{

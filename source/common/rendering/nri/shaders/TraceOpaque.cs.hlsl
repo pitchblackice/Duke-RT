@@ -14,10 +14,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float3 rayOrigin = gTraceConstants.CameraPos;
 	const uint bootstrapMode = gTraceConstants.BootstrapMode;
 	const bool bootstrapSceneDirect = bootstrapMode == 11 || bootstrapMode == 12;
+	const bool directSceneTrace = bootstrapSceneDirect || ((gTraceConstants.Flags & 0x8u) != 0);
 	const bool bootstrapFlat = bootstrapMode == 11;
 	const bool bootstrapBaseColor = bootstrapMode == 12;
 	HitData hit = (HitData)0;
-	if (bootstrapSceneDirect)
+	if (directSceneTrace)
 	{
 		hit = TraceBootstrapGeometry(rayOrigin, visibleRayDirection);
 	}
@@ -91,7 +92,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			}
 			else
 			{
-				const float shadow = ComputeSunShadow(hit.position, hit.normal);
+				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal);
 				const float lambert = max(dot(hit.normal, gTraceConstants.LightDirection), 0.0);
 				const float lighting = 0.20 + shadow * lambert * 0.80;
 				diffuse = albedo.rgb * lighting;
