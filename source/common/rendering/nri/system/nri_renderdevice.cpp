@@ -298,6 +298,25 @@ void NRIRenderDevice::Draw2D()
 			twod->mIndices.Size(),
 			twod->GetWidth(),
 			twod->GetHeight());
+
+		const int commandCount = std::min<int>(twod->mData.Size(), 8);
+		for (int i = 0; i < commandCount; ++i)
+		{
+			const auto& cmd = twod->mData[i];
+			Printf("NRI 2D command[%d]: special=%d type=%d texture=%s valid=%s indexed=%s drawmode=%d flags=0x%x verts=%d idx=%d tex_size=%dx%d\n",
+				i,
+				(int)cmd.isSpecial,
+				(int)cmd.mType,
+				cmd.mTexture != nullptr ? "yes" : "no",
+				(cmd.mTexture != nullptr && cmd.mTexture->isValid()) ? "yes" : "no",
+				(cmd.mFlags & F2DDrawer::DTF_Indexed) != 0 ? "yes" : "no",
+				(int)cmd.mDrawMode,
+				(unsigned int)cmd.mFlags,
+				cmd.mVertCount,
+				cmd.mIndexCount,
+				cmd.mTexture != nullptr ? cmd.mTexture->GetDisplayWidth() : 0,
+				cmd.mTexture != nullptr ? cmd.mTexture->GetDisplayHeight() : 0);
+		}
 		logged2DDiagnostics = true;
 	}
 
