@@ -1292,6 +1292,12 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
+		if (nri_ptdebug == 15)
+		{
+			CopyTextureToActiveTarget(GetFrameTexture(FrameTextureSlot::PreFinal));
+			return true;
+		}
+
 		if (!DispatchFinal())
 		{
 			return false;
