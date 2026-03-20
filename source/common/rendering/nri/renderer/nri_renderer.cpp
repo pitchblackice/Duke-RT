@@ -1534,10 +1534,14 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 	if (kind == NRIUpscalerKind::Off)
 	{
+		if (temporalOnly)
+		{
+			CopyTexture(historyOutput, GetFrameTexture(FrameTextureSlot::PreFinal));
+		}
 		mUseUpscaledInFinal = temporalOnly;
 		if (temporalOnly)
 		{
-			mUpscaledInputSlot = mHistoryOutputSlot;
+			mUpscaledInputSlot = FrameTextureSlot::PreFinal;
 		}
 		return true;
 	}
@@ -1883,6 +1887,13 @@ void NRIRenderer::CopyFinalToActiveTarget()
 {
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
 	CopyTextureToActiveTarget(final);
+}
+
+void NRIRenderer::CopyTexture(NRITextureResource& source, NRITextureResource& destination)
+{
+	mFrameBuffer->TransitionTexture(source, NRICopySourceState());
+	mFrameBuffer->TransitionTexture(destination, NRICopyDestinationState());
+	mFrameBuffer->mCore.CmdCopyTexture(*mFrameBuffer->mCommandBuffer, *destination.texture, nullptr, *source.texture, nullptr);
 }
 
 void NRIRenderer::CopyTextureToActiveTarget(NRITextureResource& source)
