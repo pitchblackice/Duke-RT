@@ -1245,6 +1245,8 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 {
 	static bool sLoggedDenoiserBypass = false;
 	static bool sLoggedTemporalBypass = false;
+	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
+	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
@@ -1253,6 +1255,17 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
 		return false;
+	}
+
+	if (bootstrapRawTracePresent)
+	{
+		if (!DispatchFinal())
+		{
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		return true;
 	}
 
 	if (nri_denoise && !sLoggedDenoiserBypass)

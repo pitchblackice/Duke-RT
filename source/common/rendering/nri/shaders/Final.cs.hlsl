@@ -570,6 +570,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
+	if (gTraceConstants.BootstrapMode == 11)
+	{
+		gFinalOutput[pixelPos] = float4(saturate(gGuideDiffuseInput[pixelPos].rgb), 1.0);
+		return;
+	}
+
+	if (gTraceConstants.BootstrapMode == 12)
+	{
+		gFinalOutput[pixelPos] = float4(saturate(gBaseColorInput[pixelPos].rgb), 1.0);
+		return;
+	}
+
 	if (gTraceConstants.DebugMode == 5)
 	{
 		const float2 motion = gMotionInput[pixelPos].xy / max(float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight), 1.0);
