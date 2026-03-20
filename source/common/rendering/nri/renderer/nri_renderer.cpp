@@ -1047,7 +1047,7 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 	desc.structureStride = stride;
 	desc.usage = usage;
 
-	if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
+	if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE_UPLOAD, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
 	{
 		return false;
 	}
@@ -1066,11 +1066,36 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 		return false;
 	}
 
-	nri::BufferUploadDesc uploadDesc = {};
-	uploadDesc.data = data;
-	uploadDesc.buffer = resource.buffer;
-	uploadDesc.after = after;
-	return mFrameBuffer->mHelper.UploadData(*mFrameBuffer->mGraphicsQueue, nullptr, 0, &uploadDesc, 1) == nri::Result::SUCCESS;
+	if (data != nullptr && size != 0)
+	{
+		void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, 0, desc.size);
+		if (mapped == nullptr)
+		{
+			return false;
+		}
+
+		std::memcpy(mapped, data, (size_t)size);
+		if (desc.size > size)
+		{
+			std::memset(static_cast<uint8_t*>(mapped) + size, 0, (size_t)(desc.size - size));
+		}
+		mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
+	}
+
+	if (mFrameBuffer->mCommandBuffer != nullptr && after.access != nri::AccessBits::NONE)
+	{
+		nri::BufferBarrierDesc barrier = {};
+		barrier.buffer = resource.buffer;
+		barrier.before = {};
+		barrier.after = after;
+
+		nri::BarrierDesc barrierDesc = {};
+		barrierDesc.buffers = &barrier;
+		barrierDesc.bufferNum = 1;
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+	}
+
+	return true;
 }
 
 bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage)
