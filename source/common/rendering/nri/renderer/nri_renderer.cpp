@@ -1611,39 +1611,11 @@ bool NRIRenderer::DispatchUpscaleChain()
 	{
 		if (temporalOnly)
 		{
-			if (mRenderWidth == mOutputWidth && mRenderHeight == mOutputHeight)
-			{
-				CopyTexture(historyOutput, preFinal);
-			}
-			else
-			{
-				mFrameBuffer->TransitionTexture(historyOutput, NRIComputeShaderResourceState());
-				mFrameBuffer->TransitionTexture(preFinal, NRIComputeStorageState());
-				if (!mUpscaler.EnsureReady(*mFrameBuffer, NRIUpscalerKind::NIS, nri::UpscalerMode::QUALITY, mOutputWidth, mOutputHeight))
-				{
-					return false;
-				}
-
-				NRIUpscalerDispatchDesc desc = {};
-				desc.commandBuffer = mFrameBuffer->mCommandBuffer;
-				desc.input = &historyOutput;
-				desc.output = &preFinal;
-				desc.currentWidth = mRenderWidth;
-				desc.currentHeight = mRenderHeight;
-				Copy2(mCurrentJitter, desc.cameraJitter);
-				desc.sharpness = 0.0f;
-				desc.resetHistory = mResetHistory;
-				if (!mUpscaler.Dispatch(*mFrameBuffer, NRIUpscalerKind::NIS, desc))
-				{
-					return false;
-				}
-			}
+			mUseUpscaledInFinal = false;
+			mUpscaledInputSlot = FrameTextureSlot::Composed;
+			return true;
 		}
-		mUseUpscaledInFinal = temporalOnly;
-		if (temporalOnly)
-		{
-			mUpscaledInputSlot = FrameTextureSlot::PreFinal;
-		}
+		mUseUpscaledInFinal = false;
 		return true;
 	}
 
