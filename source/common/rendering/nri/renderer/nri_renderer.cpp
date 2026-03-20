@@ -1252,6 +1252,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	static bool sLoggedRawTraceBypass = false;
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
+	const bool rawTraceDirectPresent = !nri_ptbootstrap;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
@@ -1267,6 +1268,18 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		if (!DispatchFinal())
 		{
 			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (rawTraceDirectPresent)
+	{
+		if (!sLoggedRawTraceBypass)
+		{
+			Printf("NRI frame-graph bypass: presenting TraceOpaque output directly until final/composition integration is stabilized.\n");
+			sLoggedRawTraceBypass = true;
 		}
 
 		CopyFinalToActiveTarget();
@@ -1334,6 +1347,10 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
 	mOutputDescriptors[0] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).storageView;
+	if (directSceneTrace)
+	{
+		mOutputDescriptors[2] = GetFrameTexture(FrameTextureSlot::Final).storageView;
+	}
 	mOutputDescriptors[3] = GetFrameTexture(FrameTextureSlot::Motion).storageView;
 	mOutputDescriptors[4] = GetFrameTexture(FrameTextureSlot::ViewZ).storageView;
 	mOutputDescriptors[5] = GetFrameTexture(FrameTextureSlot::NormalRoughness).storageView;

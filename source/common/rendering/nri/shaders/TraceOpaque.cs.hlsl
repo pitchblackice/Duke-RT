@@ -31,6 +31,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gNormalRoughnessOutput[pixelPos] = 0.0;
 		gBaseColorOutput[pixelPos] = float4(probe, 1.0);
 		gGuideSpecularOutput[pixelPos] = 0.0;
+		gFinalOutput[pixelPos] = float4(probe, 1.0);
 		return;
 	}
 
@@ -149,4 +150,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 
 	gTraceOutput[pixelPos] = color;
+	if (directSceneTrace && !bootstrapFlat && !bootstrapBaseColor)
+	{
+		gFinalOutput[pixelPos] = float4(saturate(color.rgb), 1.0);
+	}
 }
