@@ -329,6 +329,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::SceneView sceneView;
 	if (!nri_scene::CaptureScene(di, sceneView))
 	{
+		LogFallback("PT scene capture failed.");
 		if (preserveHistory)
 		{
 			restoreHistory();
@@ -349,6 +350,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::BuildGeometry(sceneView, geometry);
 	if (geometry.primitives.empty())
 	{
+		LogFallback("PT scene capture produced no supported opaque geometry.");
 		if (preserveHistory)
 		{
 			restoreHistory();
@@ -365,6 +367,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		EnsureFrameResources(mFrameBuffer->mActiveTarget->width, mFrameBuffer->mActiveTarget->height);
 	if (!ready)
 	{
+		LogFallback("PT frame resources or pipelines failed to initialize.");
 		if (preserveHistory)
 		{
 			restoreHistory();
@@ -378,12 +381,33 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mResetHistory = true;
 	}
 
-	const bool success =
-		EnsurePaletteTexture(materialBridge) &&
-		EnsureSceneTextures(materialBridge, gpuMaterials) &&
-		UploadSceneBuffers(geometry, gpuMaterials) &&
-		BuildAccelerationStructures(geometry) &&
-		DispatchFrameGraph(di, geometry, gpuMaterials, drawmode);
+	const bool paletteReady = EnsurePaletteTexture(materialBridge);
+	const bool texturesReady = paletteReady && EnsureSceneTextures(materialBridge, gpuMaterials);
+	const bool buffersReady = texturesReady && UploadSceneBuffers(geometry, gpuMaterials);
+	const bool accelerationReady = buffersReady && BuildAccelerationStructures(geometry);
+	const bool dispatched = accelerationReady && DispatchFrameGraph(di, geometry, gpuMaterials, drawmode);
+	const bool success = paletteReady && texturesReady && buffersReady && accelerationReady && dispatched;
+
+	if (!paletteReady)
+	{
+		LogFallback("PT palette texture upload failed.");
+	}
+	else if (!texturesReady)
+	{
+		LogFallback("PT material texture upload failed.");
+	}
+	else if (!buffersReady)
+	{
+		LogFallback("PT scene buffer upload failed.");
+	}
+	else if (!accelerationReady)
+	{
+		LogFallback("PT acceleration structure build failed.");
+	}
+	else if (!dispatched)
+	{
+		LogFallback("PT frame graph dispatch failed.");
+	}
 
 	if (success)
 	{

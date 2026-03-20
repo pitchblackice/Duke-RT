@@ -9,15 +9,18 @@ namespace
 {
 	bool TryMemcpyTexturePixels(void* dst, const void* src, size_t size)
 	{
-		__try
-		{
-			memcpy(dst, src, size);
-			return true;
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
+		if (dst == nullptr || src == nullptr || size == 0)
 		{
 			return false;
 		}
+
+		SIZE_T bytesRead = 0;
+		if (ReadProcessMemory(GetCurrentProcess(), src, dst, size, &bytesRead) && bytesRead == size)
+		{
+			return true;
+		}
+
+		return false;
 	}
 }
 
