@@ -170,6 +170,12 @@ float3 BootstrapHashColor(uint index)
 	return saturate(float3(frac(seed * 0.173), frac(seed * 0.347), frac(seed * 0.613)));
 }
 
+float2 BootstrapNormalizeToBounds(float2 value, float2 minValue, float2 maxValue)
+{
+	const float2 span = max(maxValue - minValue, 1e-3.xx);
+	return (value - minValue) / span;
+}
+
 bool BootstrapProjectPoint(float3 worldPos, out float2 screenPos, out float viewZ)
 {
 	const float3 relative = worldPos - gTraceConstants.CameraPos;
@@ -250,6 +256,107 @@ float3 BootstrapCapturedPoints(uint2 pixelPos)
 			{
 				color = BootstrapHashColor(indices[i]);
 			}
+		}
+	}
+
+	return saturate(color);
+}
+
+float3 BootstrapSceneSignature(float2 uv)
+{
+	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	if (gTraceConstants.PrimitiveCount == 0u)
+	{
+		return float3(0.85, 0.1, 0.1);
+	}
+
+	const PrimitiveData primitive = gPrimitives[0];
+	const SceneVertex v0 = gVertices[primitive.indices.x];
+	const float3 signature = saturate(
+		abs(v0.position) * 0.0025 +
+		float3((float)primitive.indices.x, (float)primitive.indices.y, (float)primitive.indices.z) * 0.013);
+
+	if (uv.x < 0.33)
+	{
+		color = lerp(float3(0.08, 0.08, 0.08), signature, step(frac(uv.y * 16.0), saturate((float)gTraceConstants.PrimitiveCount / 512.0)));
+	}
+	else if (uv.x < 0.66)
+	{
+		color = lerp(float3(0.08, 0.08, 0.08), signature.bgr, step(frac(uv.y * 16.0), saturate((float)primitive.materialIndex / 64.0)));
+	}
+	else
+	{
+		color = signature;
+	}
+
+	return saturate(color);
+}
+
+float3 BootstrapRawVertexScatter(uint2 pixelPos)
+{
+	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const uint vertexCount = min(gTraceConstants.PrimitiveCount * 3u, 192u);
+	if (vertexCount == 0u)
+	{
+		return float3(0.85, 0.1, 0.1);
+	}
+
+	float2 minPos = float2(1e20, 1e20);
+	float2 maxPos = float2(-1e20, -1e20);
+	[loop]
+	for (uint vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
+	{
+		const float2 pos = gVertices[vertexIndex].position.xz;
+		minPos = min(minPos, pos);
+		maxPos = max(maxPos, pos);
+	}
+
+	const float2 pixel = (float2)pixelPos + 0.5;
+	[loop]
+	for (uint vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
+	{
+		const float2 normPos = BootstrapNormalizeToBounds(gVertices[vertexIndex].position.xz, minPos, maxPos);
+		const float2 plotPos = float2(normPos.x, 1.0 - normPos.y) * float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
+		if (length(plotPos - pixel) <= 2.0)
+		{
+			color = BootstrapHashColor(vertexIndex);
+		}
+	}
+
+	return saturate(color);
+}
+
+float3 BootstrapRawPrimitiveScatter(uint2 pixelPos)
+{
+	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 128u);
+	if (primitiveCount == 0u)
+	{
+		return float3(0.85, 0.1, 0.1);
+	}
+
+	float2 minPos = float2(1e20, 1e20);
+	float2 maxPos = float2(-1e20, -1e20);
+	[loop]
+	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+	{
+		const PrimitiveData primitive = gPrimitives[primitiveIndex];
+		const float2 c = (gVertices[primitive.indices.x].position.xz + gVertices[primitive.indices.y].position.xz + gVertices[primitive.indices.z].position.xz) / 3.0;
+		minPos = min(minPos, c);
+		maxPos = max(maxPos, c);
+	}
+
+	const float2 pixel = (float2)pixelPos + 0.5;
+	[loop]
+	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+	{
+		const PrimitiveData primitive = gPrimitives[primitiveIndex];
+		const float2 c = (gVertices[primitive.indices.x].position.xz + gVertices[primitive.indices.y].position.xz + gVertices[primitive.indices.z].position.xz) / 3.0;
+		const float2 normPos = BootstrapNormalizeToBounds(c, minPos, maxPos);
+		const float2 plotPos = float2(normPos.x, 1.0 - normPos.y) * float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
+		if (length(plotPos - pixel) <= 2.5)
+		{
+			color = BootstrapHashColor(primitiveIndex);
 		}
 	}
 
@@ -369,17 +476,29 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else if (gTraceConstants.BootstrapMode == 4)
 		{
-			color = BootstrapCapturedPoints(pixelPos);
+			color = BootstrapSceneSignature(uv);
 		}
 		else if (gTraceConstants.BootstrapMode == 5)
 		{
-			color = BootstrapPrimitiveCentroids(pixelPos);
+			color = BootstrapRawVertexScatter(pixelPos);
 		}
 		else if (gTraceConstants.BootstrapMode == 6)
 		{
-			color = BootstrapWireframe(pixelPos);
+			color = BootstrapRawPrimitiveScatter(pixelPos);
 		}
 		else if (gTraceConstants.BootstrapMode == 7)
+		{
+			color = BootstrapCapturedPoints(pixelPos);
+		}
+		else if (gTraceConstants.BootstrapMode == 8)
+		{
+			color = BootstrapPrimitiveCentroids(pixelPos);
+		}
+		else if (gTraceConstants.BootstrapMode == 9)
+		{
+			color = BootstrapWireframe(pixelPos);
+		}
+		else if (gTraceConstants.BootstrapMode == 10)
 		{
 			color = BootstrapFirstTriangle(pixelPos);
 		}

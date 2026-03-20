@@ -189,7 +189,7 @@ namespace
 
 	static uint32_t GetBootstrapMode()
 	{
-		return (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 10));
+		return (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 13));
 	}
 
 }
@@ -276,9 +276,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	const bool bootstrapSimpleView = nri_ptbootstrap && bootstrapMode <= 3u;
-	const bool bootstrapCapturedDiagnostics = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 7u;
-	const bool bootstrapCapturedFlat = nri_ptbootstrap && bootstrapMode == 8u;
-	const bool bootstrapCapturedBaseColor = nri_ptbootstrap && bootstrapMode == 9u;
+	const bool bootstrapCapturedDiagnostics = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 10u;
+	const bool bootstrapCapturedFlat = nri_ptbootstrap && bootstrapMode == 11u;
+	const bool bootstrapCapturedBaseColor = nri_ptbootstrap && bootstrapMode == 12u;
 
 	const bool preserveHistory = drawmode != DM_MAINVIEW;
 	uint32_t savedFrameIndex = mFrameIndex;
@@ -434,7 +434,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	std::vector<nri_scene::MaterialData> gpuMaterials;
 
 	const bool needsFallbackMaterials = bootstrapCapturedDiagnostics || bootstrapCapturedFlat;
-	const bool needsRealTextures = !nri_ptbootstrap || bootstrapCapturedBaseColor || bootstrapMode >= 10u;
+	const bool needsRealTextures = !nri_ptbootstrap || bootstrapCapturedBaseColor || bootstrapMode >= 13u;
 	const bool paletteReady = needsRealTextures ? EnsurePaletteTexture(materialBridge) : true;
 	const bool texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures() : (needsRealTextures ? (paletteReady && EnsureSceneTextures(materialBridge, gpuMaterials)) : true);
 	if (needsFallbackMaterials)

@@ -13,7 +13,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float3 visibleRayDirection = GeneratePrimaryRay(pixelPos);
 	float3 rayOrigin = gTraceConstants.CameraPos;
 	const uint bootstrapMode = gTraceConstants.BootstrapMode;
-	const bool bootstrapSceneDirect = bootstrapMode == 8 || bootstrapMode == 9;
+	const bool bootstrapSceneDirect = bootstrapMode == 11 || bootstrapMode == 12;
 	HitData hit = (HitData)0;
 	if (bootstrapSceneDirect)
 	{
@@ -59,8 +59,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 
 		const float hitDistance = saturate(hit.distance / 4096.0);
-		const bool bootstrapFlat = bootstrapMode == 8;
-		const bool bootstrapBaseColor = bootstrapMode == 9;
+		const bool bootstrapFlat = bootstrapMode == 11;
+		const bool bootstrapBaseColor = bootstrapMode == 12;
 		float4 albedo = 1.0;
 		float3 diffuse = 0.0;
 		float3 specular = 0.0;
