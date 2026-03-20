@@ -285,7 +285,10 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 			// Lazy texture uploads use the helper upload path and can submit work immediately,
 			// so they must happen before we open a rendering scope on the current command buffer.
 			hwTexture->EnsureTexture(layer->layerTexture, mMaterial.mTranslation, layer->scaleFlags);
-			textureSet = hwTexture->GetResource().textureSet;
+			if (hwTexture->GetResource().textureSet != nullptr)
+			{
+				textureSet = hwTexture->GetResource().textureSet;
+			}
 		}
 	}
 

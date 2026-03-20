@@ -1,7 +1,25 @@
 #include "nri_hwtexture.h"
 
 #include "nri_renderdevice.h"
+#include "printf.h"
 #include "textures.h"
+#include <windows.h>
+
+namespace
+{
+	bool TryMemcpyTexturePixels(void* dst, const void* src, size_t size)
+	{
+		__try
+		{
+			memcpy(dst, src, size);
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
+}
 
 NRIHardwareTexture::NRIHardwareTexture(NRIRenderDevice* fb, int numchannels)
 	: mFrameBuffer(fb), mChannels(numchannels)
@@ -61,6 +79,8 @@ unsigned int NRIHardwareTexture::CreateTexture(unsigned char* buffer, int w, int
 
 void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags)
 {
+	static int sUploadFailureLogCount = 0;
+
 	if (tex == nullptr)
 	{
 		return;
@@ -87,8 +107,27 @@ void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags
 		return;
 	}
 
+	const size_t uploadSize = (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u;
+	std::vector<uint8_t> uploadPixels(uploadSize);
+	if (!TryMemcpyTexturePixels(uploadPixels.data(), texBuffer.mBuffer, uploadSize))
+	{
+		if (sUploadFailureLogCount < 16)
+		{
+			Printf(TEXTCOLOR_RED "NRI texture upload skipped: invalid source buffer (lump=%d size=%dx%d translation=%d flags=0x%x image=%s content=%llu).\n",
+				tex->GetSourceLump(),
+				texBuffer.mWidth,
+				texBuffer.mHeight,
+				translation,
+				flags,
+				tex->GetImage() != nullptr ? "yes" : "no",
+				(unsigned long long)texBuffer.mContentId);
+			sUploadFailureLogCount++;
+		}
+		return;
+	}
+
 	CreateTextureResource((uint32_t)texBuffer.mWidth, (uint32_t)texBuffer.mHeight, nri::Format::BGRA8_UNORM, nri::TextureUsageBits::SHADER_RESOURCE);
-	UploadTextureData(texBuffer.mBuffer, (uint32_t)texBuffer.mWidth, (uint32_t)texBuffer.mHeight, nri::Format::BGRA8_UNORM, (uint32_t)texBuffer.mWidth * 4u);
+	UploadTextureData(uploadPixels.data(), (uint32_t)texBuffer.mWidth, (uint32_t)texBuffer.mHeight, nri::Format::BGRA8_UNORM, (uint32_t)texBuffer.mWidth * 4u);
 	mContentId = texBuffer.mContentId;
 }
 
