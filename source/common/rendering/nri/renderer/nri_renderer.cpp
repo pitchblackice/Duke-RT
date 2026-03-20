@@ -1025,6 +1025,7 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 
 bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int)
 {
+	static bool sLoggedDenoiserBypass = false;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
@@ -1035,9 +1036,10 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return false;
 	}
 
-	if (nri_denoise && !DispatchDenoiser())
+	if (nri_denoise && !sLoggedDenoiserBypass)
 	{
-		return false;
+		Printf("NRI denoiser bypass: using raw PT outputs until NRD gameplay integration is stabilized.\n");
+		sLoggedDenoiserBypass = true;
 	}
 
 	if (!DispatchComposition() || !DispatchUpscaleChain() || !DispatchFinal())
@@ -1174,8 +1176,8 @@ bool NRIRenderer::DispatchComposition()
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
 
-	NRITextureResource& diffuse = nri_denoise ? GetFrameTexture(FrameTextureSlot::DenoisedDiffuse) : GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
-	NRITextureResource& specular = nri_denoise ? GetFrameTexture(FrameTextureSlot::DenoisedSpecular) : GetFrameTexture(FrameTextureSlot::UnfilteredSpecular);
+	NRITextureResource& diffuse = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
+	NRITextureResource& specular = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular);
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 
 	mFrameBuffer->TransitionTexture(diffuse, NRIComputeShaderResourceState());
