@@ -7,6 +7,7 @@
 #include "v_video.h"
 
 #include <algorithm>
+#include <cstdint>
 
 CVAR(Int, nri_ptportaldepth, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -19,6 +20,12 @@ namespace
 	{
 		FRenderState* renderState = nullptr;
 	};
+
+	bool IsUsableGameTexturePointer(FGameTexture* texture)
+	{
+		const intptr_t value = (intptr_t)texture;
+		return value > 0x10000 && value != -1;
+	}
 
 	void TranslateSurface(SurfaceRef& surface, const float delta[3])
 	{
@@ -60,7 +67,7 @@ namespace
 
 	void UpdateSkyColor(float* outColor, FGameTexture* texture, PalEntry fallback)
 	{
-		if (!TryGetAverageTextureColor(texture, outColor))
+		if (!IsUsableGameTexturePointer(texture) || !TryGetAverageTextureColor(texture, outColor))
 		{
 			outColor[0] = fallback.r / 255.0f;
 			outColor[1] = fallback.g / 255.0f;
