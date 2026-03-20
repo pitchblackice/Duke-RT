@@ -1335,7 +1335,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedRawTraceBypass)
 		{
-			Printf("NRI frame-graph bypass: presenting Composition through TAA and Final until upscale integration is stabilized.\n");
+			Printf("NRI frame-graph bypass: presenting Composition directly until Final/temporal integration is stabilized.\n");
 			sLoggedRawTraceBypass = true;
 		}
 
@@ -1344,22 +1344,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
-		if (nri_ptdebug == 15)
-		{
-			CopyTexture(GetFrameTexture(FrameTextureSlot::Composed), GetFrameTexture(FrameTextureSlot::Final));
-			CopyFinalToActiveTarget();
-			return true;
-		}
-
-		if (!DispatchUpscaleChain())
-		{
-			return false;
-		}
-
-		if (!DispatchFinal())
-		{
-			return false;
-		}
+		CopyTexture(GetFrameTexture(FrameTextureSlot::Composed), GetFrameTexture(FrameTextureSlot::Final));
 		CopyFinalToActiveTarget();
 		return true;
 	}
