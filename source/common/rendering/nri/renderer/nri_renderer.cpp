@@ -1698,7 +1698,7 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
 	mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
 	mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
-	mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
+	mFrameInputDescriptors[5] = presentRawTrace ? GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView : GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors[6] = upscaled.shaderView;
 	mFrameInputDescriptors[7] = GetFrameTexture(FrameTextureSlot::Validation).shaderView;
 	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView;
