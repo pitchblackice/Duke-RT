@@ -1344,6 +1344,19 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
+		const int debugMode = nri_ptdebug;
+		if (debugMode >= 10 && debugMode <= 12)
+		{
+			mUseUpscaledInFinal = false;
+			if (!DispatchFinal())
+			{
+				return false;
+			}
+
+			CopyFinalToActiveTarget();
+			return true;
+		}
+
 		CopyTexture(GetFrameTexture(FrameTextureSlot::Composed), GetFrameTexture(FrameTextureSlot::Final));
 		CopyFinalToActiveTarget();
 		return true;
