@@ -11,10 +11,6 @@ struct PSInput
 
 float4 main(PSInput input) : SV_Target0
 {
-	// Temporary diagnostic: if the NRI 2D pixel shader is executing at all,
-	// the screen should show magenta regardless of draw state or texture bindings.
-	return float4(1.0, 0.0, 1.0, 1.0);
-
 	float4 texel = float4(1.0, 1.0, 1.0, 1.0);
 	if ((gNri2DConstants.Flags & NRI2D_FLAG_TEXTURED) != 0)
 	{
