@@ -1175,6 +1175,7 @@ OptionMenu "NRIOptions" protected
 	StaticText "Runtime"
 	Option "Bootstrap View",						"nri_ptbootstrap",				"OnOff"
 	Option "Bootstrap Mode",						"nri_ptbootstrapmode",			"NRIPTBootstrapMode"
+	Slider "Bootstrap Mode Index",				"nri_ptbootstrapmode",			0, 13, 1, 0
 	Option "Denoiser",							"nri_denoise",					"OnOff"
 	Option "Validation",						"nri_validation",				"OnOff"
 	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"

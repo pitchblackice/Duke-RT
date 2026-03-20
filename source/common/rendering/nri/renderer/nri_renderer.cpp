@@ -1759,10 +1759,10 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 			forwardPoint[2] - origin[2]
 		};
 
-		RemapToPTSpace(cameraPos, mCurrentCameraPos);
-		RemapToPTSpace(rightDelta, mCurrentCameraRight);
-		RemapToPTSpace(upDelta, mCurrentCameraUp);
-		RemapToPTSpace(forwardDelta, mCurrentCameraForward);
+		Copy3(cameraPos, mCurrentCameraPos);
+		Copy3(rightDelta, mCurrentCameraRight);
+		Copy3(upDelta, mCurrentCameraUp);
+		Copy3(forwardDelta, mCurrentCameraForward);
 
 		Normalize3(mCurrentCameraRight);
 		Normalize3(mCurrentCameraUp);
