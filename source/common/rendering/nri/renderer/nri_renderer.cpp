@@ -1026,6 +1026,7 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int)
 {
 	static bool sLoggedDenoiserBypass = false;
+	static bool sLoggedTemporalBypass = false;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
@@ -1040,6 +1041,12 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		Printf("NRI denoiser bypass: using raw PT outputs until NRD gameplay integration is stabilized.\n");
 		sLoggedDenoiserBypass = true;
+	}
+
+	if (!sLoggedTemporalBypass)
+	{
+		Printf("NRI temporal bypass: presenting raw composed PT output until TAA/upscale integration is stabilized.\n");
+		sLoggedTemporalBypass = true;
 	}
 
 	if (!DispatchComposition() || !DispatchUpscaleChain() || !DispatchFinal())

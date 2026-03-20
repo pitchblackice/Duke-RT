@@ -62,7 +62,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else
 	{
-		composed = gHistoryInput.SampleLevel(gLinearClamp, uv, 0.0);
+		composed = gComposedInput[pixelPos];
 	}
 
 	gFinalOutput[pixelPos] = float4(saturate(composed.rgb), 1.0);
