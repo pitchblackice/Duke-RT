@@ -26,6 +26,7 @@ namespace
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 11;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 12;
+	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
 	constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
 	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
 	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
@@ -641,7 +642,7 @@ bool NRIRenderer::CreatePipelineLayout()
 {
 	nri::DescriptorRangeDesc samplerRange = {};
 	samplerRange.baseRegisterIndex = 0;
-	samplerRange.descriptorNum = 2;
+	samplerRange.descriptorNum = NRI_SAMPLER_DESCRIPTOR_NUM;
 	samplerRange.descriptorType = nri::DescriptorType::SAMPLER;
 	samplerRange.shaderStages = NRIComputeStage();
 
@@ -759,15 +760,17 @@ bool NRIRenderer::AllocateDescriptorSets()
 
 bool NRIRenderer::UpdateSamplerSet()
 {
-	const nri::Descriptor* descriptors[2] = {
+	const nri::Descriptor* descriptors[NRI_SAMPLER_DESCRIPTOR_NUM] = {
 		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapLinear],
-		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampLinear]
+		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampLinear],
+		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapPoint],
+		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampPoint]
 	};
 	nri::UpdateDescriptorRangeDesc update = {};
 	update.descriptorSet = mSamplerSet;
 	update.rangeIndex = 0;
 	update.descriptors = descriptors;
-	update.descriptorNum = 2;
+	update.descriptorNum = NRI_SAMPLER_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
 	return true;
 }

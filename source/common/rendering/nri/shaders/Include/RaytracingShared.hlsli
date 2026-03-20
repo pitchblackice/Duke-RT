@@ -52,13 +52,22 @@ float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward,
 float4 SampleSurfaceColor(uint materialIndex, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex);
-	float4 color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
+	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
+	float4 color = 0.0;
+	if (indexed)
+	{
+		color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointWrap, uv, 0.0);
+	}
+	else
+	{
+		color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
+	}
 
-	if ((material.flags & MATERIAL_FLAG_INDEXED) != 0)
+	if (indexed)
 	{
 		float paletteValue = saturate(color.r) * 255.0;
 		float2 paletteUv = float2((paletteValue + 0.5) / 256.0, ((float)material.paletteIndex + 0.5) / 256.0);
-		color = gPaletteLookup.SampleLevel(gLinearClamp, paletteUv, 0.0);
+		color = gPaletteLookup.SampleLevel(gPointClamp, paletteUv, 0.0);
 	}
 
 	color.rgb = color.bgr;
