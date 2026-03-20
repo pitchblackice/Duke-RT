@@ -1502,6 +1502,24 @@ if( WIN32 )
 	else()
 		message(STATUS "Runtime dependency directory ${RAZE_RUNTIME_DLL_DIR} not found; skipping DLL copy step.")
 	endif()
+
+	if( HAVE_NRI )
+		set( RAZE_NRI_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../NRD-Sample/_Bin/Release" CACHE PATH "Directory containing NRI/NRD runtime DLLs to stage beside raze.exe." )
+		if( EXISTS "${RAZE_NRI_RUNTIME_DIR}" )
+			file(GLOB RAZE_NRI_RUNTIME_DLLS LIST_DIRECTORIES FALSE "${RAZE_NRI_RUNTIME_DIR}/*.dll" )
+			if( RAZE_NRI_RUNTIME_DLLS )
+				foreach(_dll IN LISTS RAZE_NRI_RUNTIME_DLLS)
+					add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+						COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+						COMMENT "Copying NRI runtime dependency ${_dll}" VERBATIM)
+				endforeach()
+			else()
+				message(STATUS "No NRI runtime DLLs found under ${RAZE_NRI_RUNTIME_DIR}; Visual Studio debugging may require staging NRI/NRD runtimes manually.")
+			endif()
+		else()
+			message(STATUS "NRI runtime dependency directory ${RAZE_NRI_RUNTIME_DIR} not found; skipping NRI DLL copy step.")
+		endif()
+	endif()
 endif()
 
 include_directories(
