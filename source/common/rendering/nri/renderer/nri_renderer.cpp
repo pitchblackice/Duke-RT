@@ -1754,7 +1754,7 @@ bool NRIRenderer::DispatchFinal()
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(history, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(upscaled, NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), presentRawTrace ? NRIComputeShaderResourceState() : NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
 
 	mFrameInputDescriptors.fill(GetFrameTexture(FrameTextureSlot::Composed).shaderView);
@@ -1775,7 +1775,7 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	UpdateFrameTextureSet();
 
-	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::PreFinal).storageView);
+	mOutputDescriptors.fill(final.storageView);
 	mOutputDescriptors[2] = final.storageView;
 	UpdateOutputSet();
 
