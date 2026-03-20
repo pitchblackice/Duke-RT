@@ -60,37 +60,12 @@ namespace
 
 	void UpdateSkyColor(float* outColor, FGameTexture* texture, PalEntry fallback)
 	{
-		if (texture == nullptr || texture->GetTexture() == nullptr)
+		if (!TryGetAverageTextureColor(texture, outColor))
 		{
 			outColor[0] = fallback.r / 255.0f;
 			outColor[1] = fallback.g / 255.0f;
 			outColor[2] = fallback.b / 255.0f;
-			return;
 		}
-
-		FTextureBuffer texBuffer = texture->GetTexture()->CreateTexBuffer(0, CTF_ProcessData);
-		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
-		{
-			outColor[0] = fallback.r / 255.0f;
-			outColor[1] = fallback.g / 255.0f;
-			outColor[2] = fallback.b / 255.0f;
-			return;
-		}
-
-		double sum[3] = {};
-		const size_t pixelCount = (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight;
-		for (size_t i = 0; i < pixelCount; ++i)
-		{
-			const uint8_t* pixel = texBuffer.mBuffer + i * 4u;
-			sum[0] += pixel[2];
-			sum[1] += pixel[1];
-			sum[2] += pixel[0];
-		}
-
-		const double scale = pixelCount > 0 ? 1.0 / (255.0 * (double)pixelCount) : 0.0;
-		outColor[0] = (float)(sum[0] * scale);
-		outColor[1] = (float)(sum[1] * scale);
-		outColor[2] = (float)(sum[2] * scale);
 	}
 
 	void MergeSkyFromPortals(HWDrawInfo& di, SceneView& outView)

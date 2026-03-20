@@ -10,6 +10,8 @@ class FGameTexture;
 
 namespace nri_scene
 {
+bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor);
+
 enum MaterialFlags : uint32_t
 {
 	MaterialFlag_None = 0,

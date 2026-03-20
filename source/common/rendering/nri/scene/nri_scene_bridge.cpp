@@ -6,6 +6,7 @@
 #include "hw_voxels.h"
 #include "image.h"
 #include "model_kvx.h"
+#include "skyboxtexture.h"
 #include "texturemanager.h"
 #include "textures.h"
 #include "v_video.h"
@@ -26,6 +27,86 @@ namespace
 		vertex.uv[0] = source.u;
 		vertex.uv[1] = source.v;
 		return vertex;
+	}
+
+	bool TryComputeAverageColorFromBaseTexture(FTexture* baseTexture, float* outColor)
+	{
+		if (baseTexture == nullptr || baseTexture->GetImage() == nullptr)
+		{
+			return false;
+		}
+
+		FTextureBuffer texBuffer = baseTexture->CreateTexBuffer(0, CTF_ProcessData);
+		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+		{
+			return false;
+		}
+
+		double sum[3] = {};
+		const size_t pixelCount = (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight;
+		for (size_t i = 0; i < pixelCount; ++i)
+		{
+			const uint8_t* pixel = texBuffer.mBuffer + i * 4u;
+			sum[0] += pixel[2];
+			sum[1] += pixel[1];
+			sum[2] += pixel[0];
+		}
+
+		const double scale = pixelCount > 0 ? 1.0 / (255.0 * (double)pixelCount) : 0.0;
+		outColor[0] = (float)(sum[0] * scale);
+		outColor[1] = (float)(sum[1] * scale);
+		outColor[2] = (float)(sum[2] * scale);
+		return true;
+	}
+
+	bool TryGetAverageTextureColorRecursive(FGameTexture* texture, float* outColor, int depth)
+	{
+		if (texture == nullptr || depth > 4)
+		{
+			return false;
+		}
+
+		auto* baseTexture = texture->GetTexture();
+		if (baseTexture == nullptr)
+		{
+			return false;
+		}
+
+		if (TryComputeAverageColorFromBaseTexture(baseTexture, outColor))
+		{
+			return true;
+		}
+
+		auto* skybox = dynamic_cast<FSkyBox*>(baseTexture);
+		if (skybox == nullptr)
+		{
+			return false;
+		}
+
+		float accumulated[3] = {};
+		int sampledFaces = 0;
+		for (int i = 0; i < 6; ++i)
+		{
+			float faceColor[3] = {};
+			if (TryGetAverageTextureColorRecursive(skybox->GetSkyFace(i), faceColor, depth + 1))
+			{
+				accumulated[0] += faceColor[0];
+				accumulated[1] += faceColor[1];
+				accumulated[2] += faceColor[2];
+				sampledFaces++;
+			}
+		}
+
+		if (sampledFaces > 0)
+		{
+			const float invCount = 1.0f / sampledFaces;
+			outColor[0] = accumulated[0] * invCount;
+			outColor[1] = accumulated[1] * invCount;
+			outColor[2] = accumulated[2] * invCount;
+			return true;
+		}
+
+		return TryGetAverageTextureColorRecursive(skybox->previous, outColor, depth + 1);
 	}
 
 	unsigned int CountDrawListItems(HWDrawInfo& di, DrawListType type)
@@ -242,24 +323,7 @@ namespace
 				stats.skySurfaces++;
 				if (flat->texture != nullptr)
 				{
-					FTextureBuffer texBuffer = flat->texture->GetTexture()->CreateTexBuffer(0, CTF_ProcessData);
-					if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
-					{
-						double sum[3] = {};
-						const size_t pixelCount = (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight;
-						for (size_t i = 0; i < pixelCount; ++i)
-						{
-							const uint8_t* pixel = texBuffer.mBuffer + i * 4u;
-							sum[0] += pixel[2];
-							sum[1] += pixel[1];
-							sum[2] += pixel[0];
-						}
-
-						const double scale = pixelCount > 0 ? 1.0 / (255.0 * (double)pixelCount) : 0.0;
-						outView.skyColor[0] = (float)(sum[0] * scale);
-						outView.skyColor[1] = (float)(sum[1] * scale);
-						outView.skyColor[2] = (float)(sum[2] * scale);
-					}
+					TryGetAverageTextureColor(flat->texture, outView.skyColor);
 				}
 				continue;
 			}
@@ -454,6 +518,11 @@ namespace
 
 namespace nri_scene
 {
+bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor)
+{
+	return TryGetAverageTextureColorRecursive(texture, outColor, 0);
+}
+
 SceneDebugStats CollectDebugStats(HWDrawInfo& di)
 {
 	SceneDebugStats stats = {};
