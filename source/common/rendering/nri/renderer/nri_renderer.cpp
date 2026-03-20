@@ -1339,6 +1339,20 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			sLoggedRawTraceBypass = true;
 		}
 
+		if (nri_ptdebug == 10)
+		{
+			CopyTexture(GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse), GetFrameTexture(FrameTextureSlot::Final));
+			CopyFinalToActiveTarget();
+			return true;
+		}
+
+		if (nri_ptdebug == 11)
+		{
+			CopyTexture(GetFrameTexture(FrameTextureSlot::UnfilteredSpecular), GetFrameTexture(FrameTextureSlot::Final));
+			CopyFinalToActiveTarget();
+			return true;
+		}
+
 		if (!DispatchComposition())
 		{
 			return false;
