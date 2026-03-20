@@ -39,7 +39,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else
 	{
 		const float4 albedo = SampleSurfaceColor(hit.materialIndex, hit.uv);
-		const float4 surfaceNormal = float4(hit.normal, 0.08);
+		const float roughness = 0.08;
+		const float materialID = 0.0;
 		const float currentViewZ = dot(hit.position - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
 		const float2 prevUv = ProjectWorldToUv(hit.position, gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward, gTraceConstants.PrevCameraRight, gTraceConstants.PrevCameraUp, gTraceConstants.PrevTanHalfFovX, gTraceConstants.PrevTanHalfFovY);
 		const float2 currentUv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
@@ -59,7 +60,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float3 specular = albedo.rgb * specularTerm * 0.2;
 		gMotionOutput[pixelPos] = float4(motion, 0.0, 1.0);
 		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
-		gNormalRoughnessOutput[pixelPos] = surfaceNormal;
+		gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
 		gBaseColorOutput[pixelPos] = float4(albedo.rgb, 1.0);
 		gGuideSpecularOutput[pixelPos] = float4(specular, hitDistance);
 

@@ -29,7 +29,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 8)
 	{
-		composed = float4(gNormalRoughnessInput[pixelPos].xyz * 0.5 + 0.5, 1.0);
+		composed = float4(NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos]).xyz * 0.5 + 0.5, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 9)
 	{

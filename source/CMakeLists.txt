@@ -1380,6 +1380,7 @@ if (HAVE_NRI)
 		-HV 2021
 		-Wno-for-redefinition
 		-I "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders"
+		-I "${CMAKE_SOURCE_DIR}/libraries/NRD/Shaders"
 		-I "${CMAKE_SOURCE_DIR}/libraries/NRIFramework/External/NRI/Include")
 	add_custom_command(
 		OUTPUT

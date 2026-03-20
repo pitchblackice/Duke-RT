@@ -2,6 +2,7 @@
 #define RAZE_NRI_PT_SHARED_HLSLI
 
 #include "NRI.hlsl"
+#include "NRD.hlsli"
 
 #define SET_SAMPLERS 0
 #define SET_SCENE_TEXTURES 1
