@@ -73,7 +73,16 @@ namespace
 			return false;
 		}
 
-		auto* baseTexture = texture->GetTexture();
+		FTexture* baseTexture = nullptr;
+		__try
+		{
+			baseTexture = texture->GetTexture();
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+
 		if (baseTexture == nullptr)
 		{
 			return false;
@@ -95,7 +104,15 @@ namespace
 		for (int i = 0; i < 6; ++i)
 		{
 			float faceColor[3] = {};
-			FGameTexture* skyFace = skybox->GetSkyFace(i);
+			FGameTexture* skyFace = nullptr;
+			__try
+			{
+				skyFace = skybox->GetSkyFace(i);
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				skyFace = nullptr;
+			}
 			if (TryGetAverageTextureColorRecursive(skyFace, faceColor, depth + 1))
 			{
 				accumulated[0] += faceColor[0];
@@ -114,7 +131,16 @@ namespace
 			return true;
 		}
 
-		return TryGetAverageTextureColorRecursive(skybox->previous, outColor, depth + 1);
+		FGameTexture* previous = nullptr;
+		__try
+		{
+			previous = skybox->previous;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			previous = nullptr;
+		}
+		return TryGetAverageTextureColorRecursive(previous, outColor, depth + 1);
 	}
 
 	unsigned int CountDrawListItems(HWDrawInfo& di, DrawListType type)
