@@ -572,13 +572,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	if (gTraceConstants.BootstrapMode == 11)
 	{
-		gFinalOutput[pixelPos] = float4(saturate(gGuideDiffuseInput[pixelPos].rgb), 1.0);
+		gFinalOutput[pixelPos] = float4(saturate(gGuideDiffuseInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
 		return;
 	}
 
 	if (gTraceConstants.BootstrapMode == 12)
 	{
-		gFinalOutput[pixelPos] = float4(saturate(gBaseColorInput[pixelPos].rgb), 1.0);
+		gFinalOutput[pixelPos] = float4(saturate(gBaseColorInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
 		return;
 	}
 
