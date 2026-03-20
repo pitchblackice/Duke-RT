@@ -1174,6 +1174,7 @@ OptionMenu "NRIOptions" protected
 
 	StaticText "Runtime"
 	Option "Bootstrap View",						"nri_ptbootstrap",				"OnOff"
+	Option "Bootstrap Mode",						"nri_ptbootstrapmode",			"NRIPTBootstrapMode"
 	Option "Denoiser",							"nri_denoise",					"OnOff"
 	Option "Validation",						"nri_validation",				"OnOff"
 	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"
@@ -1758,6 +1759,12 @@ OptionValue NRIPTDebug
 	13, "History"
 	14, "Upscaled Input"
 	15, "Composed PT"
+}
+
+OptionValue NRIPTBootstrapMode
+{
+	0, "Pattern"
+	1, "Analytic Plane"
 }
 
 OptionMenu VideoModeMenu protected

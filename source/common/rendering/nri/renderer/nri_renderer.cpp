@@ -18,6 +18,7 @@ CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptbootstrapmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 
 namespace
@@ -503,6 +504,10 @@ void NRIRenderer::PrintStatus() const
 		GetUpscalerModeName(GetSelectedUpscalerMode()),
 		(float)nri_renderscale,
 		(float)nri_sharpness);
+	if (nri_ptbootstrap)
+	{
+		Printf("NRI PT bootstrap mode: %d\n", (int)nri_ptbootstrapmode);
+	}
 
 	if (mHasLoggedStats)
 	{
@@ -869,6 +874,7 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.TanHalfFovY = mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
+	constants.MaterialCount = (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 1));
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = NRI_FLAG_BOOTSTRAP_VIEW | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
