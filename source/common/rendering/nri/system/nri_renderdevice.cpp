@@ -267,6 +267,18 @@ void NRIRenderDevice::Draw2D()
 		return;
 	}
 
+	static bool logged2DDiagnostics = false;
+	if (!logged2DDiagnostics)
+	{
+		Printf("NRI 2D diagnostic: commands=%d vertices=%d indices=%d size=%dx%d\n",
+			twod->mData.Size(),
+			twod->mVertices.Size(),
+			twod->mIndices.Size(),
+			twod->GetWidth(),
+			twod->GetHeight());
+		logged2DDiagnostics = true;
+	}
+
 	::Draw2D(twod, *mRenderState);
 }
 
