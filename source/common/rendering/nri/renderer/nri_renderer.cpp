@@ -1739,9 +1739,9 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 		TransformPoint(inverseView, 0.0f, 0.0f, -1.0f, forwardPoint);
 
 		const float cameraPos[3] = {
-			di.VPUniforms.mCameraPos[0],
-			di.VPUniforms.mCameraPos[1],
-			di.VPUniforms.mCameraPos[2]
+			origin[0],
+			origin[1],
+			origin[2]
 		};
 		const float rightDelta[3] = {
 			rightPoint[0] - origin[0],
