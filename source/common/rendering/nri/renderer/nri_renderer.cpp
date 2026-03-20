@@ -1314,7 +1314,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.MaterialCount = (uint32_t)materials.size();
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.FrameIndex = mFrameIndex;
-	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u);
 	constants.BootstrapMode = bootstrapMode;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
