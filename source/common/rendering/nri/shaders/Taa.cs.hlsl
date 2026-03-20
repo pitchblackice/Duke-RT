@@ -41,13 +41,16 @@ NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gHistoryOutput, u, 0, 1)
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-	if (dispatchThreadId.x >= gTraceConstants.RenderWidth || dispatchThreadId.y >= gTraceConstants.RenderHeight)
+	uint width = 0;
+	uint height = 0;
+	gComposedInput.GetDimensions(width, height);
+	if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
 	{
 		return;
 	}
 
 	const uint2 pixelPos = dispatchThreadId.xy;
-	const float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+	const float2 resolution = float2(width, height);
 	const float2 uv = ((float2)pixelPos + 0.5) / resolution;
 
 	if (gTraceConstants.DebugMode == 15)
