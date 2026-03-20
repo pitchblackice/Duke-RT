@@ -30,7 +30,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gViewZOutput[pixelPos] = 0.0;
 		gNormalRoughnessOutput[pixelPos] = 0.0;
 		gBaseColorOutput[pixelPos] = float4(probe, 1.0);
+		gGuideDiffuseOutput[pixelPos] = float4(probe, 1.0);
 		gGuideSpecularOutput[pixelPos] = 0.0;
+		gGuideSpecHitOutput[pixelPos] = 0.0;
 		gFinalOutput[pixelPos] = float4(probe, 1.0);
 		return;
 	}
@@ -67,7 +69,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gViewZOutput[pixelPos] = float4(1.0, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
 			gBaseColorOutput[pixelPos] = float4(sentinel, 1.0);
+			gGuideDiffuseOutput[pixelPos] = float4(sentinel, 1.0);
 			gGuideSpecularOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
+			gGuideSpecHitOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
 		}
 		else
 		{
@@ -76,7 +80,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gViewZOutput[pixelPos] = 0.0;
 			gNormalRoughnessOutput[pixelPos] = 0.0;
 			gBaseColorOutput[pixelPos] = 0.0;
+			gGuideDiffuseOutput[pixelPos] = 0.0;
 			gGuideSpecularOutput[pixelPos] = 0.0;
+			gGuideSpecHitOutput[pixelPos] = 0.0;
 		}
 	}
 	else
@@ -123,7 +129,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
 		gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
 		gBaseColorOutput[pixelPos] = float4(bootstrapFlat ? diffuse : albedo.rgb, 1.0);
+		gGuideDiffuseOutput[pixelPos] = float4(diffuse, 1.0);
 		gGuideSpecularOutput[pixelPos] = float4(specular, hitDistance);
+		gGuideSpecHitOutput[pixelPos] = float4(specular, hitDistance);
 
 		if (gTraceConstants.DebugMode == 1)
 		{
