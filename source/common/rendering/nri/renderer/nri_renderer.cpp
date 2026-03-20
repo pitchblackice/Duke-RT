@@ -1347,6 +1347,23 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		const int debugMode = nri_ptdebug;
 		if (debugMode >= 10 && debugMode <= 12)
 		{
+			FrameTextureSlot probeSlot = FrameTextureSlot::DlssDiffuseAlbedo;
+			if (debugMode == 11)
+			{
+				probeSlot = FrameTextureSlot::DlssSpecularAlbedo;
+			}
+			else if (debugMode == 12)
+			{
+				probeSlot = FrameTextureSlot::DlssSpecularHitDistance;
+			}
+
+			CopyTexture(GetFrameTexture(probeSlot), GetFrameTexture(FrameTextureSlot::Final));
+			CopyFinalToActiveTarget();
+			return true;
+		}
+
+		if (debugMode == 13 || debugMode == 14 || debugMode == 15)
+		{
 			mUseUpscaledInFinal = false;
 			if (!DispatchFinal())
 			{
