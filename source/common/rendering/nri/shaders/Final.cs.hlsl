@@ -21,32 +21,37 @@ float3 BootstrapPattern(float2 uv, float3 cameraForward, float3 skyColor, float3
 
 float3 BootstrapPlane(float2 uv)
 {
+	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
 	const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+	const float3 planeNormal = normalize(gTraceConstants.CameraUp);
+	const float3 planeRight = normalize(gTraceConstants.CameraRight);
+	const float3 planeForward = normalize(cross(planeNormal, planeRight));
+	const float3 planePoint = gTraceConstants.CameraPos - planeNormal * 96.0;
 	float3 rayDir = normalize(
 		gTraceConstants.CameraForward +
 		ndc.x * gTraceConstants.TanHalfFovX * gTraceConstants.CameraRight +
 		ndc.y * gTraceConstants.TanHalfFovY * gTraceConstants.CameraUp);
-
-	float3 color = lerp(gTraceConstants.GroundColor * 0.5, gTraceConstants.SkyColor, saturate(rayDir.y * 0.5 + 0.5));
-	const float planeY = 0.0;
-	if (rayDir.y < -0.0001)
+	const float denom = dot(rayDir, planeNormal);
+	if (abs(denom) > 0.0001)
 	{
-		const float t = (planeY - gTraceConstants.CameraPos.y) / rayDir.y;
+		const float t = dot(planePoint - gTraceConstants.CameraPos, planeNormal) / denom;
 		if (t > 0.0)
 		{
 			const float3 hitPos = gTraceConstants.CameraPos + rayDir * t;
-			const float checker = fmod(floor(hitPos.x * 0.125) + floor(hitPos.z * 0.125), 2.0);
-			const float gridX = step(frac(abs(hitPos.x) * 0.125), 0.035);
-			const float gridZ = step(frac(abs(hitPos.z) * 0.125), 0.035);
+			const float localX = dot(hitPos - planePoint, planeRight);
+			const float localZ = dot(hitPos - planePoint, planeForward);
+			const float checker = fmod(floor(localX * 0.125) + floor(localZ * 0.125), 2.0);
+			const float gridX = step(frac(abs(localX) * 0.125), 0.035);
+			const float gridZ = step(frac(abs(localZ) * 0.125), 0.035);
 			const float gridMask = saturate(gridX + gridZ);
 			const float3 warm = float3(0.62, 0.43, 0.24);
 			const float3 cool = float3(0.22, 0.24, 0.28);
 			float3 base = lerp(cool, warm, checker);
 			const float distanceFade = saturate(1.0 / (1.0 + t * 0.03));
-			const float stripe = 0.5 + 0.5 * sin(hitPos.x * 0.05 + gTraceConstants.FrameIndex * 0.02);
+			const float stripe = 0.5 + 0.5 * sin(localX * 0.05 + gTraceConstants.FrameIndex * 0.02);
 			base = lerp(base, base.bgr, stripe * 0.15);
 			base = lerp(base, float3(0.98, 0.96, 0.9), gridMask * 0.85);
-			const float sun = saturate(dot(normalize(float3(0.0, 1.0, 0.0)), normalize(gTraceConstants.LightDirection))) * 0.35 + 0.65;
+			const float sun = saturate(dot(planeNormal, normalize(gTraceConstants.LightDirection))) * 0.35 + 0.65;
 			color = base * distanceFade * sun;
 		}
 	}
