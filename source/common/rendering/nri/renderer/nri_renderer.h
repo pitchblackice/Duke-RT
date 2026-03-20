@@ -91,6 +91,7 @@ private:
 	void LogBridgeStats(const nri_scene::SceneDebugStats& stats);
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
+	void CopyTextureToActiveTarget(NRITextureResource& source);
 
 	void DestroyCachedTextures();
 	void DestroyFrameTextures();

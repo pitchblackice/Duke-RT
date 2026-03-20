@@ -1278,11 +1278,16 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedRawTraceBypass)
 		{
-			Printf("NRI frame-graph bypass: presenting Composition through Final until temporal/upscale integration is stabilized.\n");
+			Printf("NRI frame-graph bypass: presenting Composition through TAA and Final until upscale integration is stabilized.\n");
 			sLoggedRawTraceBypass = true;
 		}
 
 		if (!DispatchComposition())
+		{
+			return false;
+		}
+
+		if (!DispatchUpscaleChain())
 		{
 			return false;
 		}
@@ -1484,7 +1489,8 @@ bool NRIRenderer::DispatchComposition()
 
 bool NRIRenderer::DispatchUpscaleChain()
 {
-	const NRIUpscalerKind kind = ResolveUpscalerKind(true);
+	const bool temporalOnly = !nri_ptbootstrap;
+	const NRIUpscalerKind kind = temporalOnly ? NRIUpscalerKind::Off : ResolveUpscalerKind(true);
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
@@ -1528,7 +1534,11 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 	if (kind == NRIUpscalerKind::Off)
 	{
-		mUseUpscaledInFinal = false;
+		mUseUpscaledInFinal = temporalOnly;
+		if (temporalOnly)
+		{
+			mUpscaledInputSlot = mHistoryOutputSlot;
+		}
 		return true;
 	}
 
@@ -1725,7 +1735,7 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
 	mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
 	mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
-	mFrameInputDescriptors[5] = presentRawTrace ? GetFrameTexture(FrameTextureSlot::PreFinal).shaderView : GetFrameTexture(FrameTextureSlot::Composed).shaderView;
+	mFrameInputDescriptors[5] = presentRawTrace ? (mUseUpscaledInFinal ? upscaled.shaderView : GetFrameTexture(FrameTextureSlot::Composed).shaderView) : GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors[6] = upscaled.shaderView;
 	mFrameInputDescriptors[7] = GetFrameTexture(FrameTextureSlot::Validation).shaderView;
 	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView;
