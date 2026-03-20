@@ -38,7 +38,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else
 	{
-		const float4 albedo = SampleSurfaceColor(hit.materialIndex, hit.uv);
 		const float roughness = 0.08;
 		const float materialID = 0.0;
 		const float currentViewZ = dot(hit.position - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
@@ -50,18 +49,40 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			motion = (prevUv - currentUv) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 		}
 
-		const float shadow = ComputeSunShadow(hit.position, hit.normal);
-		const float lambert = max(dot(hit.normal, gTraceConstants.LightDirection), 0.0);
-		const float lighting = 0.20 + shadow * lambert * 0.80;
-		const float3 diffuse = albedo.rgb * lighting;
-		const float3 halfVector = normalize(gTraceConstants.LightDirection - visibleRayDirection);
-		const float specularTerm = pow(max(dot(hit.normal, halfVector), 0.0), 32.0) * shadow;
 		const float hitDistance = saturate(hit.distance / 4096.0);
-		const float3 specular = albedo.rgb * specularTerm * 0.2;
+		const uint bootstrapMode = gTraceConstants.BootstrapMode;
+		const bool bootstrapFlat = bootstrapMode == 4;
+		const bool bootstrapBaseColor = bootstrapMode == 5;
+		float4 albedo = 1.0;
+		float3 diffuse = 0.0;
+		float3 specular = 0.0;
+		if (bootstrapFlat)
+		{
+			const float primitiveHash = (float)(hit.primitiveIndex % 31u) / 30.0;
+			diffuse = float3(frac(primitiveHash * 1.7), frac(primitiveHash * 2.3), frac(primitiveHash * 3.1));
+		}
+		else
+		{
+			albedo = SampleSurfaceColor(hit.materialIndex, hit.uv);
+			if (bootstrapBaseColor)
+			{
+				diffuse = albedo.rgb;
+			}
+			else
+			{
+				const float shadow = ComputeSunShadow(hit.position, hit.normal);
+				const float lambert = max(dot(hit.normal, gTraceConstants.LightDirection), 0.0);
+				const float lighting = 0.20 + shadow * lambert * 0.80;
+				diffuse = albedo.rgb * lighting;
+				const float3 halfVector = normalize(gTraceConstants.LightDirection - visibleRayDirection);
+				const float specularTerm = pow(max(dot(hit.normal, halfVector), 0.0), 32.0) * shadow;
+				specular = albedo.rgb * specularTerm * 0.2;
+			}
+		}
 		gMotionOutput[pixelPos] = float4(motion, 0.0, 1.0);
 		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
 		gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
-		gBaseColorOutput[pixelPos] = float4(albedo.rgb, 1.0);
+		gBaseColorOutput[pixelPos] = float4(bootstrapFlat ? diffuse : albedo.rgb, 1.0);
 		gGuideSpecularOutput[pixelPos] = float4(specular, hitDistance);
 
 		if (gTraceConstants.DebugMode == 1)

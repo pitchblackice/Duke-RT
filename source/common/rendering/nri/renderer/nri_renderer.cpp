@@ -146,7 +146,8 @@ namespace
 		uint32_t MaterialCount = 0;
 		uint32_t FrameIndex = 0;
 		uint32_t Flags = 0;
-		float Padding[2] = {};
+		uint32_t BootstrapMode = 0;
+		float Padding[1] = {};
 	};
 
 	static void Normalize3(float v[3])
@@ -184,6 +185,11 @@ namespace
 		dst[0] = src[0];
 		dst[1] = src[2];
 		dst[2] = src[1];
+	}
+
+	static uint32_t GetBootstrapMode()
+	{
+		return (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 6));
 	}
 
 }
@@ -268,6 +274,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		return false;
 	}
 
+	const uint32_t bootstrapMode = GetBootstrapMode();
+	const bool bootstrapSimpleView = nri_ptbootstrap && bootstrapMode <= 3u;
+	const bool bootstrapCapturedScene = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 5u;
+
 	const bool preserveHistory = drawmode != DM_MAINVIEW;
 	uint32_t savedFrameIndex = mFrameIndex;
 	float savedCurrentCameraPos[3] = {};
@@ -336,6 +346,55 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mResetHistory = savedResetHistory;
 	};
 
+	const bool ready =
+		Initialize() &&
+		EnsureFrameResources(mFrameBuffer->mActiveTarget->width, mFrameBuffer->mActiveTarget->height);
+	if (!ready)
+	{
+		LogFallback("PT frame resources or pipelines failed to initialize.");
+		if (preserveHistory)
+		{
+			restoreHistory();
+		}
+		return false;
+	}
+
+	UpdatePerFrameState(di);
+	if (preserveHistory)
+	{
+		mResetHistory = true;
+	}
+
+	if (bootstrapSimpleView)
+	{
+		mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
+		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
+		mUpscaledInputSlot = FrameTextureSlot::Composed;
+		mUseUpscaledInFinal = false;
+		if (!DispatchBootstrapView())
+		{
+			LogFallback("PT bootstrap view dispatch failed.");
+			if (preserveHistory)
+			{
+				restoreHistory();
+			}
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		if (!preserveHistory)
+		{
+			++mFrameIndex;
+			mHasPreviousCameraState = true;
+			mResetHistory = false;
+		}
+		else
+		{
+			restoreHistory();
+		}
+		return true;
+	}
+
 	nri_scene::SceneView sceneView;
 	if (!nri_scene::CaptureScene(di, sceneView))
 	{
@@ -372,57 +431,20 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::BuildMaterials(sceneView, materialBridge);
 	std::vector<nri_scene::MaterialData> gpuMaterials;
 
-	const bool ready =
-		Initialize() &&
-		EnsureFrameResources(mFrameBuffer->mActiveTarget->width, mFrameBuffer->mActiveTarget->height);
-	if (!ready)
+	const bool paletteReady = bootstrapCapturedScene ? true : EnsurePaletteTexture(materialBridge);
+	const bool texturesReady = bootstrapCapturedScene ? UseFallbackSceneTextures() : (paletteReady && EnsureSceneTextures(materialBridge, gpuMaterials));
+	if (bootstrapCapturedScene)
 	{
-		LogFallback("PT frame resources or pipelines failed to initialize.");
-		if (preserveHistory)
+		gpuMaterials = materialBridge.materials;
+		for (auto& material : gpuMaterials)
 		{
-			restoreHistory();
+			material.textureIndex = 0;
+			material.paletteIndex = 0;
+			material.flags = 0;
+			material.lightLevel = 1.0f;
+			material.alpha = 1.0f;
 		}
-		return false;
 	}
-
-	UpdatePerFrameState(di);
-	if (preserveHistory)
-	{
-		mResetHistory = true;
-	}
-
-	if (nri_ptbootstrap)
-	{
-		mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
-		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
-		mUpscaledInputSlot = FrameTextureSlot::Composed;
-		mUseUpscaledInFinal = false;
-		if (!DispatchBootstrapView())
-		{
-			LogFallback("PT bootstrap view dispatch failed.");
-			if (preserveHistory)
-			{
-				restoreHistory();
-			}
-			return false;
-		}
-
-		CopyFinalToActiveTarget();
-		if (!preserveHistory)
-		{
-			++mFrameIndex;
-			mHasPreviousCameraState = true;
-			mResetHistory = false;
-		}
-		else
-		{
-			restoreHistory();
-		}
-		return true;
-	}
-
-	const bool paletteReady = EnsurePaletteTexture(materialBridge);
-	const bool texturesReady = paletteReady && EnsureSceneTextures(materialBridge, gpuMaterials);
 	const bool buffersReady = texturesReady && UploadSceneBuffers(geometry, gpuMaterials);
 	const bool accelerationReady = buffersReady && BuildAccelerationStructures(geometry);
 	const bool dispatched = accelerationReady && DispatchFrameGraph(di, geometry, gpuMaterials, drawmode);
@@ -480,6 +502,7 @@ void NRIRenderer::PrintStatus() const
 {
 	const NRIUpscalerKind requested = GetSelectedUpscalerKind();
 	const NRIUpscalerKind resolved = GetResolvedUpscalerKindForStatus();
+	const uint32_t bootstrapMode = GetBootstrapMode();
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -506,7 +529,7 @@ void NRIRenderer::PrintStatus() const
 		(float)nri_sharpness);
 	if (nri_ptbootstrap)
 	{
-		Printf("NRI PT bootstrap mode: %d\n", (int)nri_ptbootstrapmode);
+		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
 	}
 
 	if (mHasLoggedStats)
@@ -857,6 +880,7 @@ bool NRIRenderer::EnsurePaletteTexture(const nri_scene::MaterialBridgeData& mate
 
 bool NRIRenderer::DispatchBootstrapView()
 {
+	const uint32_t bootstrapMode = GetBootstrapMode();
 	NRITraceConstants constants = {};
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
@@ -874,10 +898,10 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.TanHalfFovY = mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
-	constants.MaterialCount = (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 1));
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = NRI_FLAG_BOOTSTRAP_VIEW | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.BootstrapMode = bootstrapMode;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -963,6 +987,13 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::MaterialBridgeData& mater
 		}
 	}
 
+	return UpdateSceneTextureSet(descriptors);
+}
+
+bool NRIRenderer::UseFallbackSceneTextures()
+{
+	std::vector<nri::Descriptor*> descriptors(1 + NRI_MAX_SCENE_TEXTURES, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
+	descriptors[0] = mFrameBuffer->mWhiteTexture->GetResource().shaderView;
 	return UpdateSceneTextureSet(descriptors);
 }
 
@@ -1201,6 +1232,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -1298,6 +1330,7 @@ bool NRIRenderer::DispatchComposition()
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -1543,6 +1576,7 @@ bool NRIRenderer::DispatchFinal()
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);

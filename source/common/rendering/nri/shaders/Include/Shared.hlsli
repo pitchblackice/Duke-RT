@@ -46,7 +46,8 @@ struct NRITraceConstants
 	uint MaterialCount;
 	uint FrameIndex;
 	uint Flags;
-	float2 Padding;
+	uint BootstrapMode;
+	float Padding;
 };
 
 struct SceneVertex

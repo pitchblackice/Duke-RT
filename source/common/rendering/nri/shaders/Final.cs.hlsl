@@ -59,6 +59,111 @@ float3 BootstrapPlane(float2 uv)
 	return saturate(color);
 }
 
+bool IntersectTriangle(float3 rayOrigin, float3 rayDir, float3 v0, float3 v1, float3 v2, out float outT, out float3 outBarycentrics)
+{
+	outT = 0.0;
+	outBarycentrics = 0.0;
+	const float3 edge1 = v1 - v0;
+	const float3 edge2 = v2 - v0;
+	const float3 p = cross(rayDir, edge2);
+	const float det = dot(edge1, p);
+	if (abs(det) < 1e-5)
+	{
+		return false;
+	}
+
+	const float invDet = 1.0 / det;
+	const float3 t = rayOrigin - v0;
+	const float u = dot(t, p) * invDet;
+	if (u < 0.0 || u > 1.0)
+	{
+		return false;
+	}
+
+	const float3 q = cross(t, edge1);
+	const float v = dot(rayDir, q) * invDet;
+	if (v < 0.0 || (u + v) > 1.0)
+	{
+		return false;
+	}
+
+	const float hitT = dot(edge2, q) * invDet;
+	if (hitT <= 0.0)
+	{
+		return false;
+	}
+
+	outT = hitT;
+	outBarycentrics = float3(1.0 - u - v, u, v);
+	return true;
+}
+
+float3 BootstrapTriangle(float2 uv)
+{
+	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+	const float3 rayDir = normalize(
+		gTraceConstants.CameraForward +
+		ndc.x * gTraceConstants.TanHalfFovX * gTraceConstants.CameraRight +
+		ndc.y * gTraceConstants.TanHalfFovY * gTraceConstants.CameraUp);
+
+	const float3 center = gTraceConstants.CameraPos + gTraceConstants.CameraForward * 256.0;
+	const float3 v0 = center + gTraceConstants.CameraUp * 72.0;
+	const float3 v1 = center - gTraceConstants.CameraRight * 80.0 - gTraceConstants.CameraUp * 56.0;
+	const float3 v2 = center + gTraceConstants.CameraRight * 80.0 - gTraceConstants.CameraUp * 56.0;
+	float hitT = 0.0;
+	float3 bary = 0.0;
+	if (IntersectTriangle(gTraceConstants.CameraPos, rayDir, v0, v1, v2, hitT, bary))
+	{
+		color = bary;
+		const float edge = min(bary.x, min(bary.y, bary.z));
+		color = lerp(color, float3(1.0, 1.0, 1.0), step(edge, 0.04));
+	}
+
+	return saturate(color);
+}
+
+float3 BootstrapTexturedQuad(float2 uv)
+{
+	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
+	const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+	const float3 rayDir = normalize(
+		gTraceConstants.CameraForward +
+		ndc.x * gTraceConstants.TanHalfFovX * gTraceConstants.CameraRight +
+		ndc.y * gTraceConstants.TanHalfFovY * gTraceConstants.CameraUp);
+
+	const float3 center = gTraceConstants.CameraPos + gTraceConstants.CameraForward * 320.0 + gTraceConstants.CameraUp * 12.0;
+	const float3 quadRight = gTraceConstants.CameraRight * 128.0;
+	const float3 quadUp = gTraceConstants.CameraUp * 96.0;
+	const float3 v0 = center - quadRight + quadUp;
+	const float3 v1 = center - quadRight - quadUp;
+	const float3 v2 = center + quadRight - quadUp;
+	const float3 v3 = center + quadRight + quadUp;
+
+	float hitT = 0.0;
+	float3 bary = 0.0;
+	float2 surfaceUv = 0.0;
+	if (IntersectTriangle(gTraceConstants.CameraPos, rayDir, v0, v1, v2, hitT, bary))
+	{
+		surfaceUv = float2(bary.z, bary.y + bary.z);
+	}
+	else if (IntersectTriangle(gTraceConstants.CameraPos, rayDir, v0, v2, v3, hitT, bary))
+	{
+		surfaceUv = float2(bary.y + bary.z, bary.z);
+	}
+	else
+	{
+		return saturate(color);
+	}
+
+	const float checker = fmod(floor(surfaceUv.x * 8.0) + floor(surfaceUv.y * 8.0), 2.0);
+	float3 texel = lerp(float3(0.15, 0.18, 0.72), float3(0.95, 0.78, 0.18), checker);
+	const float gridMask = step(frac(surfaceUv.x * 8.0), 0.04) + step(frac(surfaceUv.y * 8.0), 0.04);
+	texel = lerp(texel, float3(1.0, 1.0, 1.0), saturate(gridMask));
+	texel *= 0.8 + 0.2 * sin((surfaceUv.x + surfaceUv.y + gTraceConstants.FrameIndex * 0.01) * 12.0);
+	return saturate(texel);
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -74,9 +179,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if ((gTraceConstants.Flags & 0x4u) != 0)
 	{
 		float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
-		if (gTraceConstants.MaterialCount == 1)
+		if (gTraceConstants.BootstrapMode == 1)
 		{
 			color = BootstrapPlane(uv);
+		}
+		else if (gTraceConstants.BootstrapMode == 2)
+		{
+			color = BootstrapTriangle(uv);
+		}
+		else if (gTraceConstants.BootstrapMode == 3)
+		{
+			color = BootstrapTexturedQuad(uv);
 		}
 		gFinalOutput[pixelPos] = float4(saturate(color), 1.0);
 		return;

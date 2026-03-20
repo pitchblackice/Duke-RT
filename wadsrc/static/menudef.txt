@@ -1765,6 +1765,11 @@ OptionValue NRIPTBootstrapMode
 {
 	0, "Pattern"
 	1, "Analytic Plane"
+	2, "Triangle"
+	3, "Textured Quad"
+	4, "Scene Flat"
+	5, "Scene Base Color"
+	6, "Full PT"
 }
 
 OptionMenu VideoModeMenu protected
