@@ -13,6 +13,10 @@
 #include "v_draw.h"
 #include "version.h"
 #include "hwrenderer/data/hw_viewpointbuffer.h"
+#include "flatvertices.h"
+#include "hw_skydome.h"
+#include "hw_lightbuffer.h"
+#include "hw_bonebuffer.h"
 
 #include <windows.h>
 
@@ -109,6 +113,18 @@ NRIRenderDevice::NRIRenderDevice(void* hMonitor, bool fullscreen)
 NRIRenderDevice::~NRIRenderDevice()
 {
 	WaitForCommands(true);
+
+	delete mVertexData;
+	mVertexData = nullptr;
+	delete mSkyData;
+	mSkyData = nullptr;
+	delete mViewpoints;
+	mViewpoints = nullptr;
+	delete mLights;
+	mLights = nullptr;
+	delete mBones;
+	mBones = nullptr;
+
 	DestroyRenderResources();
 	DestroySwapChain();
 
@@ -181,6 +197,12 @@ void NRIRenderDevice::InitializeState()
 		mInitialized = false;
 		return;
 	}
+
+	mVertexData = new FFlatVertexBuffer(GetWidth(), GetHeight(), mPipelineNbr);
+	mSkyData = new FSkyVertexBuffer;
+	mViewpoints = new HWViewpointBuffer(mPipelineNbr);
+	mLights = new FLightBuffer(mPipelineNbr);
+	mBones = new BoneBuffer(mPipelineNbr);
 
 	LogStartup();
 	if (mRenderer != nullptr && !mRenderer->Initialize())
