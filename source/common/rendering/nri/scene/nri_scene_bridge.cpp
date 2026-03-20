@@ -16,6 +16,12 @@ namespace
 {
 	using namespace nri_scene;
 
+	bool IsUsableGameTexturePointer(FGameTexture* texture)
+	{
+		const intptr_t value = (intptr_t)texture;
+		return value > 0x10000 && value != -1;
+	}
+
 	CapturedVertex MakeCapturedVertex(const FFlatVertex& source)
 	{
 		CapturedVertex vertex = {};
@@ -62,7 +68,7 @@ namespace
 
 	bool TryGetAverageTextureColorRecursive(FGameTexture* texture, float* outColor, int depth)
 	{
-		if (texture == nullptr || depth > 4)
+		if (!IsUsableGameTexturePointer(texture) || depth > 4)
 		{
 			return false;
 		}
@@ -89,7 +95,8 @@ namespace
 		for (int i = 0; i < 6; ++i)
 		{
 			float faceColor[3] = {};
-			if (TryGetAverageTextureColorRecursive(skybox->GetSkyFace(i), faceColor, depth + 1))
+			FGameTexture* skyFace = skybox->GetSkyFace(i);
+			if (TryGetAverageTextureColorRecursive(skyFace, faceColor, depth + 1))
 			{
 				accumulated[0] += faceColor[0];
 				accumulated[1] += faceColor[1];
