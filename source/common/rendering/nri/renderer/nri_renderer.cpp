@@ -1345,24 +1345,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		}
 
 		const int debugMode = nri_ptdebug;
-		if (debugMode >= 10 && debugMode <= 12)
-		{
-			FrameTextureSlot probeSlot = FrameTextureSlot::DlssDiffuseAlbedo;
-			if (debugMode == 11)
-			{
-				probeSlot = FrameTextureSlot::DlssSpecularAlbedo;
-			}
-			else if (debugMode == 12)
-			{
-				probeSlot = FrameTextureSlot::DlssSpecularHitDistance;
-			}
-
-			CopyTexture(GetFrameTexture(probeSlot), GetFrameTexture(FrameTextureSlot::Final));
-			CopyFinalToActiveTarget();
-			return true;
-		}
-
-		if (debugMode == 13 || debugMode == 14 || debugMode == 15)
+		if (debugMode >= 10 && debugMode <= 15)
 		{
 			mUseUpscaledInFinal = false;
 			if (!DispatchFinal())
@@ -1818,7 +1801,6 @@ bool NRIRenderer::DispatchFinal()
 	NRITextureResource& history = GetFrameTexture(mHistoryOutputSlot);
 	NRITextureResource& upscaled = GetFrameTexture(mUpscaledInputSlot);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
-	const int debugMode = nri_ptdebug;
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
@@ -1847,17 +1829,13 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).shaderView;
 	mFrameInputDescriptors[9] = GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo).shaderView;
 	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).shaderView;
-	if (debugMode == 10)
+	if (constants.DebugMode == 10)
 	{
-		mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).shaderView;
+		mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView;
 	}
-	else if (debugMode == 11)
+	else if (constants.DebugMode == 11)
 	{
-		mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo).shaderView;
-	}
-	else if (debugMode == 12)
-	{
-		mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).shaderView;
+		mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	}
 	UpdateFrameTextureSet();
 
