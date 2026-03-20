@@ -17,6 +17,7 @@ CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 
 namespace
@@ -26,6 +27,7 @@ namespace
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 12;
 	constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
 	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
+	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
 
 	template<typename T>
 	static T NRIFlags(T a, T b)
@@ -388,6 +390,36 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mResetHistory = true;
 	}
 
+	if (nri_ptbootstrap)
+	{
+		mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
+		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
+		mUpscaledInputSlot = FrameTextureSlot::Composed;
+		mUseUpscaledInFinal = false;
+		if (!DispatchBootstrapView())
+		{
+			LogFallback("PT bootstrap view dispatch failed.");
+			if (preserveHistory)
+			{
+				restoreHistory();
+			}
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		if (!preserveHistory)
+		{
+			++mFrameIndex;
+			mHasPreviousCameraState = true;
+			mResetHistory = false;
+		}
+		else
+		{
+			restoreHistory();
+		}
+		return true;
+	}
+
 	const bool paletteReady = EnsurePaletteTexture(materialBridge);
 	const bool texturesReady = paletteReady && EnsureSceneTextures(materialBridge, gpuMaterials);
 	const bool buffersReady = texturesReady && UploadSceneBuffers(geometry, gpuMaterials);
@@ -462,7 +494,8 @@ void NRIRenderer::PrintStatus() const
 		mOutputHeight,
 		mHasPreviousCameraState ? "yes" : "no",
 		mResetHistory ? "yes" : "no");
-	Printf("NRI PT features: denoise=%s validation=%s upscaler=%s->%s mode=%s render_scale=%.3f sharpness=%.3f\n",
+	Printf("NRI PT features: bootstrap=%s denoise=%s validation=%s upscaler=%s->%s mode=%s render_scale=%.3f sharpness=%.3f\n",
+		nri_ptbootstrap ? "on" : "off",
 		nri_denoise ? "on" : "off",
 		nri_validation ? "on" : "off",
 		GetUpscalerName(requested),
@@ -815,6 +848,76 @@ bool NRIRenderer::EnsurePaletteTexture(const nri_scene::MaterialBridgeData& mate
 	}
 
 	return mFrameBuffer->UploadTextureData(mPaletteTexture, materials.paletteLookup.data(), materials.paletteWidth, materials.paletteHeight, materials.paletteWidth * 4u);
+}
+
+bool NRIRenderer::DispatchBootstrapView()
+{
+	NRITraceConstants constants = {};
+	Copy3(mCurrentCameraPos, constants.CameraPos);
+	Copy3(mCurrentCameraForward, constants.CameraForward);
+	Copy3(mCurrentCameraRight, constants.CameraRight);
+	Copy3(mCurrentCameraUp, constants.CameraUp);
+	Copy3(mPreviousCameraPos, constants.PrevCameraPos);
+	Copy3(mPreviousCameraForward, constants.PrevCameraForward);
+	Copy3(mPreviousCameraRight, constants.PrevCameraRight);
+	Copy3(mPreviousCameraUp, constants.PrevCameraUp);
+	constants.RenderWidth = mRenderWidth;
+	constants.RenderHeight = mRenderHeight;
+	constants.DisplayWidth = mOutputWidth;
+	constants.DisplayHeight = mOutputHeight;
+	constants.TanHalfFovX = mCurrentTanHalfFovX;
+	constants.TanHalfFovY = mCurrentTanHalfFovY;
+	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
+	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
+	constants.FrameIndex = mFrameIndex;
+	constants.Flags = NRI_FLAG_BOOTSTRAP_VIEW | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
+	constants.DebugMode = (uint32_t)nri_ptdebug;
+	Copy3(mSkyColor, constants.SkyColor);
+	Copy3(mGroundColor, constants.GroundColor);
+	Normalize3(constants.LightDirection);
+
+	NRITextureResource& history = GetFrameTexture(mHistoryOutputSlot);
+	NRITextureResource& upscaled = GetFrameTexture(FrameTextureSlot::Composed);
+	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
+	mFrameBuffer->TransitionTexture(history, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Composed), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Validation), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(upscaled, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
+
+	mFrameInputDescriptors.fill(GetFrameTexture(FrameTextureSlot::Composed).shaderView);
+	mFrameInputDescriptors[0] = history.shaderView;
+	mFrameInputDescriptors[1] = GetFrameTexture(FrameTextureSlot::Motion).shaderView;
+	mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
+	mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
+	mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
+	mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
+	mFrameInputDescriptors[6] = upscaled.shaderView;
+	mFrameInputDescriptors[7] = GetFrameTexture(FrameTextureSlot::Validation).shaderView;
+	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView;
+	mFrameInputDescriptors[9] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
+	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
+	UpdateFrameTextureSet();
+
+	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::PreFinal).storageView);
+	mOutputDescriptors[2] = final.storageView;
+	UpdateOutputSet();
+
+	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
+	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mOutputSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Final));
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mOutputWidth), GetDispatchSize(mOutputHeight), 1 });
+	return true;
 }
 
 bool NRIRenderer::EnsureSceneTextures(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials)

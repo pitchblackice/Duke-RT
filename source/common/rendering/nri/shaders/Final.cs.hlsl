@@ -12,6 +12,27 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
 	float4 composed = 0.0;
 
+	if ((gTraceConstants.Flags & 0x4u) != 0)
+	{
+		const float2 centered = uv * 2.0 - 1.0;
+		const float aspect = (float)gTraceConstants.DisplayWidth / max((float)gTraceConstants.DisplayHeight, 1.0);
+		float2 gridUv = float2(centered.x * aspect, centered.y);
+		float3 color = lerp(gTraceConstants.GroundColor, gTraceConstants.SkyColor, saturate(uv.y));
+		color = lerp(color, abs(normalize(gTraceConstants.CameraForward)) * 0.75 + 0.1, 0.35);
+
+		const float borderMask = step(0.96, max(abs(centered.x), abs(centered.y)));
+		const float crossMask = step(abs(gridUv.x), 0.01) + step(abs(gridUv.y), 0.01);
+		const float gridMask = step(frac((gridUv.x + 8.0) * 8.0), 0.02) + step(frac((gridUv.y + 8.0) * 8.0), 0.02);
+		const float framePulse = ((gTraceConstants.FrameIndex & 31u) < 16u) ? 1.0 : 0.35;
+
+		color = lerp(color, float3(0.02, 0.02, 0.02), saturate(gridMask * 0.35));
+		color = lerp(color, float3(1.0, 1.0, 1.0), saturate(crossMask));
+		color = lerp(color, float3(framePulse, 0.25, 1.0 - framePulse * 0.5), borderMask);
+
+		gFinalOutput[pixelPos] = float4(saturate(color), 1.0);
+		return;
+	}
+
 	if (gTraceConstants.DebugMode == 5)
 	{
 		const float2 motion = gMotionInput[pixelPos].xy / max(float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight), 1.0);

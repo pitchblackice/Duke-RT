@@ -1173,6 +1173,7 @@ OptionMenu "NRIOptions" protected
 	StaticText ""
 
 	StaticText "Runtime"
+	Option "Bootstrap View",						"nri_ptbootstrap",				"OnOff"
 	Option "Denoiser",							"nri_denoise",					"OnOff"
 	Option "Validation",						"nri_validation",				"OnOff"
 	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"

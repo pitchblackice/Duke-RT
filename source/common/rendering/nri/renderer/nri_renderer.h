@@ -74,6 +74,7 @@ private:
 	bool CreatePipelines();
 	bool AllocateDescriptorSets();
 	bool EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight);
+	bool DispatchBootstrapView();
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
 	bool EnsureSceneTextures(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials);
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
