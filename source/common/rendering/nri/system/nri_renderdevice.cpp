@@ -29,12 +29,14 @@
 
 #include <algorithm>
 #include <fstream>
+#include <string>
 
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Int, nri_ptdebug)
 EXTERN_CVAR(Bool, nri_validation)
 EXTERN_CVAR(Bool, nri_apivalidation)
+EXTERN_CVAR(Bool, nri_dred)
 EXTERN_CVAR(Bool, vid_vsync)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
@@ -87,6 +89,7 @@ namespace
 {
 	static nri::Result(NRI_CALL* gNriGetInterfaceForwarder)(const nri::Device&, const char*, size_t, void*) = nullptr;
 	static void (NRI_CALL* gNriDestroyDeviceForwarder)(nri::Device*) = nullptr;
+	using PFN_D3D12_GET_DEBUG_INTERFACE = HRESULT(WINAPI*)(REFIID, void**);
 
 	template<typename T>
 	static T NRIFlags(T a, T b)
@@ -129,6 +132,170 @@ namespace
 		case DXGI_ERROR_INVALID_CALL: return "DXGI_ERROR_INVALID_CALL";
 		default: return "unknown";
 		}
+	}
+
+	static PFN_D3D12_GET_DEBUG_INTERFACE GetD3D12GetDebugInterfaceFn()
+	{
+		static PFN_D3D12_GET_DEBUG_INTERFACE sFn = nullptr;
+		static bool sLoaded = false;
+		if (!sLoaded)
+		{
+			HMODULE module = GetModuleHandleW(L"d3d12.dll");
+			if (module == nullptr)
+			{
+				module = LoadLibraryW(L"d3d12.dll");
+			}
+
+			if (module != nullptr)
+			{
+				sFn = reinterpret_cast<PFN_D3D12_GET_DEBUG_INTERFACE>(GetProcAddress(module, "D3D12GetDebugInterface"));
+			}
+
+			sLoaded = true;
+		}
+
+		return sFn;
+	}
+
+	static std::string NarrowWideString(const wchar_t* text)
+	{
+		if (text == nullptr || *text == L'\0')
+		{
+			return {};
+		}
+
+		const int required = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
+		if (required <= 1)
+		{
+			return {};
+		}
+
+		std::string result((size_t)required, '\0');
+		WideCharToMultiByte(CP_UTF8, 0, text, -1, result.data(), required, nullptr, nullptr);
+		result.pop_back();
+		return result;
+	}
+
+	static std::string GetDredDebugName(const char* ansiName, const wchar_t* wideName)
+	{
+		if (ansiName != nullptr && *ansiName != '\0')
+		{
+			return ansiName;
+		}
+
+		std::string wide = NarrowWideString(wideName);
+		return wide.empty() ? std::string("(unnamed)") : wide;
+	}
+
+	static const char* GetD3D12AutoBreadcrumbOpName(D3D12_AUTO_BREADCRUMB_OP op)
+	{
+		switch (op)
+		{
+		case D3D12_AUTO_BREADCRUMB_OP_SETMARKER: return "SetMarker";
+		case D3D12_AUTO_BREADCRUMB_OP_BEGINEVENT: return "BeginEvent";
+		case D3D12_AUTO_BREADCRUMB_OP_ENDEVENT: return "EndEvent";
+		case D3D12_AUTO_BREADCRUMB_OP_DRAWINSTANCED: return "DrawInstanced";
+		case D3D12_AUTO_BREADCRUMB_OP_DRAWINDEXEDINSTANCED: return "DrawIndexedInstanced";
+		case D3D12_AUTO_BREADCRUMB_OP_EXECUTEINDIRECT: return "ExecuteIndirect";
+		case D3D12_AUTO_BREADCRUMB_OP_DISPATCH: return "Dispatch";
+		case D3D12_AUTO_BREADCRUMB_OP_COPYBUFFERREGION: return "CopyBufferRegion";
+		case D3D12_AUTO_BREADCRUMB_OP_COPYTEXTUREREGION: return "CopyTextureRegion";
+		case D3D12_AUTO_BREADCRUMB_OP_COPYRESOURCE: return "CopyResource";
+		case D3D12_AUTO_BREADCRUMB_OP_COPYTILES: return "CopyTiles";
+		case D3D12_AUTO_BREADCRUMB_OP_RESOLVESUBRESOURCE: return "ResolveSubresource";
+		case D3D12_AUTO_BREADCRUMB_OP_CLEARRENDERTARGETVIEW: return "ClearRenderTargetView";
+		case D3D12_AUTO_BREADCRUMB_OP_CLEARUNORDEREDACCESSVIEW: return "ClearUnorderedAccessView";
+		case D3D12_AUTO_BREADCRUMB_OP_CLEARDEPTHSTENCILVIEW: return "ClearDepthStencilView";
+		case D3D12_AUTO_BREADCRUMB_OP_RESOURCEBARRIER: return "ResourceBarrier";
+		case D3D12_AUTO_BREADCRUMB_OP_EXECUTEBUNDLE: return "ExecuteBundle";
+		case D3D12_AUTO_BREADCRUMB_OP_PRESENT: return "Present";
+		case D3D12_AUTO_BREADCRUMB_OP_RESOLVEQUERYDATA: return "ResolveQueryData";
+		case D3D12_AUTO_BREADCRUMB_OP_BEGINSUBMISSION: return "BeginSubmission";
+		case D3D12_AUTO_BREADCRUMB_OP_ENDSUBMISSION: return "EndSubmission";
+		case D3D12_AUTO_BREADCRUMB_OP_BUILDRAYTRACINGACCELERATIONSTRUCTURE: return "BuildRayTracingAS";
+		case D3D12_AUTO_BREADCRUMB_OP_COPYRAYTRACINGACCELERATIONSTRUCTURE: return "CopyRayTracingAS";
+		case D3D12_AUTO_BREADCRUMB_OP_DISPATCHRAYS: return "DispatchRays";
+		case D3D12_AUTO_BREADCRUMB_OP_SETPIPELINESTATE1: return "SetPipelineState1";
+		case D3D12_AUTO_BREADCRUMB_OP_BARRIER: return "Barrier";
+		case D3D12_AUTO_BREADCRUMB_OP_BEGIN_COMMAND_LIST: return "BeginCommandList";
+		case D3D12_AUTO_BREADCRUMB_OP_DISPATCHGRAPH: return "DispatchGraph";
+		case D3D12_AUTO_BREADCRUMB_OP_SETPROGRAM: return "SetProgram";
+		default: return "Other";
+		}
+	}
+
+	static const char* GetD3D12DredAllocationTypeName(D3D12_DRED_ALLOCATION_TYPE type)
+	{
+		switch (type)
+		{
+		case D3D12_DRED_ALLOCATION_TYPE_COMMAND_QUEUE: return "CommandQueue";
+		case D3D12_DRED_ALLOCATION_TYPE_COMMAND_ALLOCATOR: return "CommandAllocator";
+		case D3D12_DRED_ALLOCATION_TYPE_PIPELINE_STATE: return "PipelineState";
+		case D3D12_DRED_ALLOCATION_TYPE_COMMAND_LIST: return "CommandList";
+		case D3D12_DRED_ALLOCATION_TYPE_FENCE: return "Fence";
+		case D3D12_DRED_ALLOCATION_TYPE_DESCRIPTOR_HEAP: return "DescriptorHeap";
+		case D3D12_DRED_ALLOCATION_TYPE_HEAP: return "Heap";
+		case D3D12_DRED_ALLOCATION_TYPE_QUERY_HEAP: return "QueryHeap";
+		case D3D12_DRED_ALLOCATION_TYPE_COMMAND_SIGNATURE: return "CommandSignature";
+		case D3D12_DRED_ALLOCATION_TYPE_PIPELINE_LIBRARY: return "PipelineLibrary";
+		case D3D12_DRED_ALLOCATION_TYPE_RESOURCE: return "Resource";
+		case D3D12_DRED_ALLOCATION_TYPE_PASS: return "Pass";
+		case D3D12_DRED_ALLOCATION_TYPE_COMMAND_POOL: return "CommandPool";
+		case D3D12_DRED_ALLOCATION_TYPE_COMMAND_RECORDER: return "CommandRecorder";
+		case D3D12_DRED_ALLOCATION_TYPE_STATE_OBJECT: return "StateObject";
+		case D3D12_DRED_ALLOCATION_TYPE_METACOMMAND: return "MetaCommand";
+		case D3D12_DRED_ALLOCATION_TYPE_SCHEDULINGGROUP: return "SchedulingGroup";
+		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_ENCODER: return "VideoEncoder";
+		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_ENCODER_HEAP: return "VideoEncoderHeap";
+		default: return "Other";
+		}
+	}
+
+	static void ConfigureD3D12Dred()
+	{
+		if (!nri_dred)
+		{
+			return;
+		}
+
+		const auto getDebugInterface = GetD3D12GetDebugInterfaceFn();
+		if (getDebugInterface == nullptr)
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED setup failed: D3D12GetDebugInterface is unavailable.\n");
+			return;
+		}
+
+		ID3D12DeviceRemovedExtendedDataSettings1* settings1 = nullptr;
+		if (SUCCEEDED(getDebugInterface(IID_PPV_ARGS(&settings1))) && settings1 != nullptr)
+		{
+			settings1->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+			settings1->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+			settings1->SetBreadcrumbContextEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+			settings1->Release();
+			return;
+		}
+
+		ID3D12DeviceRemovedExtendedDataSettings* settings = nullptr;
+		if (SUCCEEDED(getDebugInterface(IID_PPV_ARGS(&settings))) && settings != nullptr)
+		{
+			settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+			settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+			settings->Release();
+			return;
+		}
+
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED setup failed: DRED settings interfaces are unavailable.\n");
+	}
+
+	template<typename T>
+	static void SetNriDebugName(const nri::CoreInterface& core, T* object, const char* name)
+	{
+		if (object == nullptr || name == nullptr || *name == '\0' || core.SetDebugName == nullptr)
+		{
+			return;
+		}
+
+		core.SetDebugName(reinterpret_cast<nri::Object*>(object), name);
 	}
 
 	static void LogD3D12DeviceRemovedReason(const nri::CoreInterface& core, nri::Device* device, const char* context)
@@ -712,11 +879,7 @@ void NRIRenderDevice::BeginFrame()
 	if (acquireResult != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "NRI failed to acquire swapchain image.\n");
-		if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
-		{
-			LogD3D12DeviceRemovedReason(mCore, mDevice, "AcquireNextTexture");
-			LogD3D12InfoQueueMessages(mCore, mDevice, "AcquireNextTexture");
-		}
+		LogD3D12FailureDiagnostics("AcquireNextTexture");
 		return;
 	}
 
@@ -1425,6 +1588,12 @@ bool NRIRenderDevice::LoadNRI()
 
 bool NRIRenderDevice::CreateDevice()
 {
+	mLoggedD3D12FailureDred = false;
+	if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
+	{
+		ConfigureD3D12Dred();
+	}
+
 	nri::AdapterDesc adapters[8] = {};
 	uint32_t adapterCount = (uint32_t)std::size(adapters);
 	const nri::Result enumerateResult = mEnumerateAdapters(adapters, adapterCount);
@@ -1489,6 +1658,8 @@ bool NRIRenderDevice::CreateDevice()
 		Printf(TEXTCOLOR_RED "Failed to create NRI queue objects.\n");
 		return false;
 	}
+	SetNriDebugName(mCore, mGraphicsQueue, "Raze.GraphicsQueue");
+	SetNriDebugName(mCore, mFrameFence, "Raze.FrameFence");
 
 	if (!CreateQueuedFrames())
 	{
@@ -1497,6 +1668,8 @@ bool NRIRenderDevice::CreateDevice()
 	}
 
 	nri::StreamerDesc streamerDesc = {};
+	streamerDesc.constantBufferMemoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
+	streamerDesc.constantBufferSize = 1024 * 1024;
 	streamerDesc.dynamicBufferMemoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
 	streamerDesc.dynamicBufferDesc = {};
 	streamerDesc.dynamicBufferDesc.usage = NRIFlags(nri::BufferUsageBits::VERTEX_BUFFER, nri::BufferUsageBits::INDEX_BUFFER);
@@ -1506,8 +1679,157 @@ bool NRIRenderDevice::CreateDevice()
 		Printf(TEXTCOLOR_RED "Failed to create NRI streamer.\n");
 		return false;
 	}
+	SetNriDebugName(mCore, mStreamerInstance, "Raze.Streamer");
 
 	return true;
+}
+
+void NRIRenderDevice::LogD3D12FailureDiagnostics(const char* context)
+{
+	if (GetSelectedAPI() != nri::GraphicsAPI::D3D12)
+	{
+		return;
+	}
+
+	LogD3D12DeviceRemovedReason(mCore, mDevice, context);
+	LogD3D12InfoQueueMessages(mCore, mDevice, context);
+
+	if (mLoggedD3D12FailureDred || !nri_dred)
+	{
+		return;
+	}
+
+	mLoggedD3D12FailureDred = true;
+
+	const auto getDebugInterface = GetD3D12GetDebugInterfaceFn();
+	if (getDebugInterface == nullptr)
+	{
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: D3D12GetDebugInterface is unavailable.\n",
+			context != nullptr ? context : "unknown");
+		return;
+	}
+
+	ID3D12DeviceRemovedExtendedData1* dred = nullptr;
+	const HRESULT dredHr = getDebugInterface(IID_PPV_ARGS(&dred));
+	if (FAILED(dredHr) || dred == nullptr)
+	{
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: failed to query ID3D12DeviceRemovedExtendedData1 (%s, 0x%08X).\n",
+			context != nullptr ? context : "unknown",
+			GetDxgiErrorName(dredHr),
+			(unsigned)dredHr);
+		return;
+	}
+
+	D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 breadcrumbs = {};
+	const HRESULT breadcrumbsHr = dred->GetAutoBreadcrumbsOutput1(&breadcrumbs);
+	if (SUCCEEDED(breadcrumbsHr))
+	{
+		const D3D12_AUTO_BREADCRUMB_NODE1* node = breadcrumbs.pHeadAutoBreadcrumbNode;
+		if (node == nullptr)
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumbs after %s: none.\n",
+				context != nullptr ? context : "unknown");
+		}
+		else
+		{
+			uint32_t nodeIndex = 0;
+			for (; node != nullptr && nodeIndex < 6; node = node->pNext, ++nodeIndex)
+			{
+				const std::string commandListName = GetDredDebugName(node->pCommandListDebugNameA, node->pCommandListDebugNameW);
+				const std::string queueName = GetDredDebugName(node->pCommandQueueDebugNameA, node->pCommandQueueDebugNameW);
+				const uint32_t breadcrumbCount = node->BreadcrumbCount;
+				const uint32_t completedValue = node->pLastBreadcrumbValue != nullptr ? *node->pLastBreadcrumbValue : 0;
+				Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u] after %s: cmdlist=%s queue=%s completed=%u/%u contexts=%u\n",
+					nodeIndex,
+					context != nullptr ? context : "unknown",
+					commandListName.c_str(),
+					queueName.c_str(),
+					completedValue,
+					breadcrumbCount,
+					node->BreadcrumbContextsCount);
+
+				if (node->pCommandHistory != nullptr && breadcrumbCount != 0)
+				{
+					const uint32_t windowCenter = (std::min)(completedValue, breadcrumbCount - 1);
+					const uint32_t start = windowCenter > 2 ? windowCenter - 2 : 0;
+					const uint32_t end = (std::min)(breadcrumbCount, start + 5);
+					for (uint32_t i = start; i < end; ++i)
+					{
+						const char* marker = i == completedValue ? " <last_completed>" : "";
+						Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u].op[%u]: %s%s\n",
+							nodeIndex,
+							i,
+							GetD3D12AutoBreadcrumbOpName(node->pCommandHistory[i]),
+							marker);
+					}
+				}
+
+				if (node->pBreadcrumbContexts != nullptr && node->BreadcrumbContextsCount != 0)
+				{
+					const uint32_t contextCount = (std::min)(node->BreadcrumbContextsCount, 6u);
+					for (uint32_t i = 0; i < contextCount; ++i)
+					{
+						const D3D12_DRED_BREADCRUMB_CONTEXT& breadcrumbContext = node->pBreadcrumbContexts[i];
+						const std::string breadcrumbText = NarrowWideString(breadcrumbContext.pContextString);
+						Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u].context[%u]: index=%u text=%s\n",
+							nodeIndex,
+							i,
+							breadcrumbContext.BreadcrumbIndex,
+							breadcrumbText.empty() ? "(empty)" : breadcrumbText.c_str());
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumbs after %s: GetAutoBreadcrumbsOutput1 failed (%s, 0x%08X).\n",
+			context != nullptr ? context : "unknown",
+			GetDxgiErrorName(breadcrumbsHr),
+			(unsigned)breadcrumbsHr);
+	}
+
+	D3D12_DRED_PAGE_FAULT_OUTPUT1 pageFault = {};
+	const HRESULT pageFaultHr = dred->GetPageFaultAllocationOutput1(&pageFault);
+	if (SUCCEEDED(pageFaultHr))
+	{
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED page fault after %s: VA=0x%llX\n",
+			context != nullptr ? context : "unknown",
+			(unsigned long long)pageFault.PageFaultVA);
+
+		const D3D12_DRED_ALLOCATION_NODE1* allocation = pageFault.pHeadExistingAllocationNode;
+		uint32_t allocationIndex = 0;
+		for (; allocation != nullptr && allocationIndex < 8; allocation = allocation->pNext, ++allocationIndex)
+		{
+			const std::string objectName = GetDredDebugName(allocation->ObjectNameA, allocation->ObjectNameW);
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED existing_allocation[%u]: type=%s name=%s object=%p\n",
+				allocationIndex,
+				GetD3D12DredAllocationTypeName(allocation->AllocationType),
+				objectName.c_str(),
+				allocation->pObject);
+		}
+
+		allocation = pageFault.pHeadRecentFreedAllocationNode;
+		allocationIndex = 0;
+		for (; allocation != nullptr && allocationIndex < 8; allocation = allocation->pNext, ++allocationIndex)
+		{
+			const std::string objectName = GetDredDebugName(allocation->ObjectNameA, allocation->ObjectNameW);
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED recent_freed[%u]: type=%s name=%s object=%p\n",
+				allocationIndex,
+				GetD3D12DredAllocationTypeName(allocation->AllocationType),
+				objectName.c_str(),
+				allocation->pObject);
+		}
+	}
+	else
+	{
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED page fault after %s: GetPageFaultAllocationOutput1 failed (%s, 0x%08X).\n",
+			context != nullptr ? context : "unknown",
+			GetDxgiErrorName(pageFaultHr),
+			(unsigned)pageFaultHr);
+	}
+
+	dred->Release();
 }
 
 bool NRIRenderDevice::CreateSwapChain()
@@ -1537,6 +1859,7 @@ bool NRIRenderDevice::CreateSwapChain()
 		Printf(TEXTCOLOR_RED "Failed to create NRI swapchain.\n");
 		return false;
 	}
+	SetNriDebugName(mCore, mSwapChain, "Raze.SwapChain");
 
 	uint32_t textureCount = 0;
 	nri::Texture* const* textures = mSwapChainInterface.GetSwapChainTextures(*mSwapChain, textureCount);
@@ -1556,6 +1879,8 @@ bool NRIRenderDevice::CreateSwapChain()
 		auto& image = mSwapChainImages[i];
 		image.target.texture = textures[i];
 		image.target.owned = false;
+		const std::string imageName = "Raze.SwapChainImage[" + std::to_string(i) + "]";
+		SetNriDebugName(mCore, image.target.texture, imageName.c_str());
 
 		const nri::TextureDesc& desc = mCore.GetTextureDesc(*textures[i]);
 		image.target.width = desc.width;
@@ -1574,6 +1899,10 @@ bool NRIRenderDevice::CreateSwapChain()
 		{
 			return false;
 		}
+		const std::string acquireFenceName = "Raze.SwapChainAcquire[" + std::to_string(i) + "]";
+		const std::string releaseFenceName = "Raze.SwapChainRelease[" + std::to_string(i) + "]";
+		SetNriDebugName(mCore, image.acquireSemaphore, acquireFenceName.c_str());
+		SetNriDebugName(mCore, image.releaseSemaphore, releaseFenceName.c_str());
 	}
 
 	Printf("NRI swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s texture_override=%d flag_override=%s wait_present=%s size=%ux%u\n",
@@ -1595,14 +1924,20 @@ bool NRIRenderDevice::CreateQueuedFrames()
 	DestroyQueuedFrames();
 
 	mQueuedFrames.resize(QueuedFrameCount);
-	for (QueuedFrame& queuedFrame : mQueuedFrames)
+	for (size_t i = 0; i < mQueuedFrames.size(); ++i)
 	{
+		QueuedFrame& queuedFrame = mQueuedFrames[i];
 		if (mCore.CreateCommandAllocator(*mGraphicsQueue, queuedFrame.commandAllocator) != nri::Result::SUCCESS ||
 			mCore.CreateCommandBuffer(*queuedFrame.commandAllocator, queuedFrame.commandBuffer) != nri::Result::SUCCESS)
 		{
 			DestroyQueuedFrames();
 			return false;
 		}
+
+		const std::string allocatorName = "Raze.QueuedFrameAllocator[" + std::to_string(i) + "]";
+		const std::string commandBufferName = "Raze.QueuedFrameCommandBuffer[" + std::to_string(i) + "]";
+		SetNriDebugName(mCore, queuedFrame.commandAllocator, allocatorName.c_str());
+		SetNriDebugName(mCore, queuedFrame.commandBuffer, commandBufferName.c_str());
 	}
 
 	SelectQueuedFrame(0);
@@ -1932,11 +2267,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 	if (submitResult != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "NRI QueueSubmit failed with result '%s'.\n", GetNriResultName(submitResult));
-		if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
-		{
-			LogD3D12DeviceRemovedReason(mCore, mDevice, "QueueSubmit");
-			LogD3D12InfoQueueMessages(mCore, mDevice, "QueueSubmit");
-		}
+		LogD3D12FailureDiagnostics("QueueSubmit");
 	}
 
 	mStreamer.EndStreamerFrame(*mStreamerInstance);
@@ -1963,11 +2294,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 	{
 		mHasPresentedSwapChainFrame = false;
 		Printf(TEXTCOLOR_RED "NRI QueuePresent failed with result '%s'.\n", GetNriResultName(presentResult));
-		if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
-		{
-			LogD3D12DeviceRemovedReason(mCore, mDevice, "QueuePresent");
-			LogD3D12InfoQueueMessages(mCore, mDevice, "QueuePresent");
-		}
+		LogD3D12FailureDiagnostics("QueuePresent");
 	}
 	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())
 	{

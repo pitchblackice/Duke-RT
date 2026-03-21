@@ -145,6 +145,7 @@ private:
 	bool BeginCommandList(const char* reason, bool waitForSlotReuse = false);
 	bool EnsureSwapChainSize();
 	void EndFrameAndPresent();
+	void LogD3D12FailureDiagnostics(const char* context);
 	void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc) override;
 	void CopyScreenToBuffer(int width, int height, uint8_t* buffer) override;
 	void TransitionTexture(NRITextureResource& texture, nri::AccessLayoutStage after);
@@ -245,6 +246,7 @@ private:
 	bool mCommandBufferOpen = false;
 	bool mInitialized = false;
 	bool mLoggedStartup = false;
+	bool mLoggedD3D12FailureDred = false;
 	FrameBoundaryDebugStats mLastFrameBoundaryStats;
 	FrameSequenceEntry mFrameSequenceHistory[FrameSequenceHistorySize] = {};
 	uint32_t mFrameSequenceWriteIndex = 0;
