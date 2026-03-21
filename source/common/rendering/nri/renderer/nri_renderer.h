@@ -180,6 +180,7 @@ private:
 	uint32_t mRenderHeight = 0;
 	uint32_t mOutputWidth = 0;
 	uint32_t mOutputHeight = 0;
+	nri::Format mOutputFormat = nri::Format::UNKNOWN;
 	float mCurrentCameraPos[3] = {};
 	float mCurrentCameraForward[3] = {};
 	float mCurrentCameraRight[3] = {};

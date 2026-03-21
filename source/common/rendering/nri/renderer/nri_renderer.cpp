@@ -1005,12 +1005,17 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 
 	const uint32_t renderWidth = std::max(1u, (uint32_t)std::lround((double)outputWidth * renderScale));
 	const uint32_t renderHeight = std::max(1u, (uint32_t)std::lround((double)outputHeight * renderScale));
+	const nri::Format outputFormat =
+		(mFrameBuffer->mActiveTarget != nullptr && mFrameBuffer->mActiveTarget->format != nri::Format::UNKNOWN)
+		? mFrameBuffer->mActiveTarget->format
+		: nri::Format::BGRA8_UNORM;
 
 	const bool upToDate =
 		mRenderWidth == renderWidth &&
 		mRenderHeight == renderHeight &&
 		mOutputWidth == outputWidth &&
 		mOutputHeight == outputHeight &&
+		mOutputFormat == outputFormat &&
 		GetFrameTexture(FrameTextureSlot::Final).texture != nullptr;
 
 	if (upToDate)
@@ -1024,11 +1029,12 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	mRenderHeight = renderHeight;
 	mOutputWidth = outputWidth;
 	mOutputHeight = outputHeight;
+	mOutputFormat = outputFormat;
 	mResetHistory = true;
 
 	const nri::Format colorFormat = nri::Format::RGBA16_SFLOAT;
 	const nri::Format normalRoughnessFormat = nri::Format::R10_G10_B10_A2_UNORM;
-	const nri::Format finalFormat = nri::Format::BGRA8_UNORM;
+	const nri::Format finalFormat = outputFormat;
 
 	return
 		CreateFrameTexture(FrameTextureSlot::ViewZ, renderWidth, renderHeight, colorFormat) &&
@@ -2370,6 +2376,7 @@ void NRIRenderer::DestroyFrameTextures()
 	mRenderHeight = 0;
 	mOutputWidth = 0;
 	mOutputHeight = 0;
+	mOutputFormat = nri::Format::UNKNOWN;
 }
 
 void NRIRenderer::DestroySceneBuffers()

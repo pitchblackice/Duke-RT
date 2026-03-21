@@ -2055,6 +2055,15 @@ bool NRIRenderDevice::CreateTextureViews(NRITextureResource& resource)
 	if ((usage & (uint32_t)nri::TextureUsageBits::SHADER_RESOURCE_STORAGE) != 0)
 	{
 		nri::TextureViewDesc storageViewDesc = shaderViewDesc;
+		if (resource.format == nri::Format::BGRA8_SRGB)
+		{
+			storageViewDesc.format = nri::Format::BGRA8_UNORM;
+		}
+		else if (resource.format == nri::Format::RGBA8_SRGB)
+		{
+			// Match NRD-Sample: UAVs use the non-sRGB twin of the underlying texture format.
+			storageViewDesc.format = nri::Format::RGBA8_UNORM;
+		}
 		storageViewDesc.type = nri::TextureView::STORAGE_TEXTURE;
 		if (mCore.CreateTextureView(storageViewDesc, resource.storageView) != nri::Result::SUCCESS)
 		{
