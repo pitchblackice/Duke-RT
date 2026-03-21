@@ -49,6 +49,7 @@ public:
 	bool FlipSavePic() const override { return false; }
 	void PrintPathTracingCaps() const;
 	void PrintPathTracingStatus() const;
+	void PrintPathTracingBuffers() const;
 	void ResetPathTracingHistory();
 
 private:

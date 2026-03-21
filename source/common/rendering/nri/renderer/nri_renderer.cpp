@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 CVAR(Int, nri_ptdebug, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -68,6 +69,32 @@ namespace
 	static uint32_t GetDispatchSize(uint32_t value)
 	{
 		return (value + 7u) / 8u;
+	}
+
+	static uint64_t GetGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride)
+	{
+		uint64_t newCapacity = std::max<uint64_t>(requiredSize, stride);
+		if (currentCapacity >= newCapacity && currentCapacity != 0)
+		{
+			return currentCapacity;
+		}
+
+		if (currentCapacity != 0)
+		{
+			newCapacity = std::max(newCapacity, currentCapacity);
+			while (newCapacity < requiredSize)
+			{
+				const uint64_t doubled = newCapacity <= std::numeric_limits<uint64_t>::max() / 2 ? newCapacity * 2 : std::numeric_limits<uint64_t>::max();
+				if (doubled <= newCapacity)
+				{
+					newCapacity = requiredSize;
+					break;
+				}
+				newCapacity = doubled;
+			}
+		}
+
+		return std::max<uint64_t>(newCapacity, stride);
 	}
 
 	static float Clamp01(float value)
@@ -607,6 +634,59 @@ void NRIRenderer::PrintStatus() const
 	{
 		Printf("NRI PT last scene: no translated PT scene has been captured yet.\n");
 	}
+
+	PrintSceneBufferStatus();
+}
+
+void NRIRenderer::PrintSceneBufferStatus() const
+{
+	const auto printBuffer = [](const NRIBufferResource& resource, const SceneBufferDebugStats& stats)
+	{
+		const uint64_t usedItems = resource.stride != 0 ? resource.usedSize / resource.stride : 0;
+		const uint64_t capacityItems = resource.stride != 0 ? resource.size / resource.stride : 0;
+		Printf("NRI PT %s buffer: used=%llu/%llu bytes items=%llu/%llu uploads=%u grows=%u overwrites=%u last_frame_bytes=%llu last_frame_grows=%u last_frame_overwrites=%u peak_used=%llu\n",
+			stats.label,
+			(unsigned long long)resource.usedSize,
+			(unsigned long long)resource.size,
+			(unsigned long long)usedItems,
+			(unsigned long long)capacityItems,
+			stats.uploadCount,
+			stats.growthCount,
+			stats.overwriteCount,
+			(unsigned long long)stats.bytesUploadedLastFrame,
+			stats.growEventsLastFrame,
+			stats.overwriteEventsLastFrame,
+			(unsigned long long)stats.peakUsedBytes);
+	};
+
+	const uint64_t totalUsed = mVertexBuffer.usedSize + mIndexBuffer.usedSize + mPrimitiveBuffer.usedSize + mMaterialBuffer.usedSize;
+	const uint64_t totalCapacity = mVertexBuffer.size + mIndexBuffer.size + mPrimitiveBuffer.size + mMaterialBuffer.size;
+	const uint64_t lastFrameUploadBytes =
+		mVertexBufferStats.bytesUploadedLastFrame +
+		mIndexBufferStats.bytesUploadedLastFrame +
+		mPrimitiveBufferStats.bytesUploadedLastFrame +
+		mMaterialBufferStats.bytesUploadedLastFrame;
+	const uint32_t lastFrameGrowEvents =
+		mVertexBufferStats.growEventsLastFrame +
+		mIndexBufferStats.growEventsLastFrame +
+		mPrimitiveBufferStats.growEventsLastFrame +
+		mMaterialBufferStats.growEventsLastFrame;
+	const uint32_t lastFrameOverwriteEvents =
+		mVertexBufferStats.overwriteEventsLastFrame +
+		mIndexBufferStats.overwriteEventsLastFrame +
+		mPrimitiveBufferStats.overwriteEventsLastFrame +
+		mMaterialBufferStats.overwriteEventsLastFrame;
+
+	Printf("NRI PT scene buffers: used=%llu capacity=%llu last_frame_upload=%llu last_frame_grows=%u last_frame_overwrites=%u\n",
+		(unsigned long long)totalUsed,
+		(unsigned long long)totalCapacity,
+		(unsigned long long)lastFrameUploadBytes,
+		lastFrameGrowEvents,
+		lastFrameOverwriteEvents);
+	printBuffer(mVertexBuffer, mVertexBufferStats);
+	printBuffer(mIndexBuffer, mIndexBufferStats);
+	printBuffer(mPrimitiveBuffer, mPrimitiveBufferStats);
+	printBuffer(mMaterialBuffer, mMaterialBufferStats);
 }
 
 const char* NRIRenderer::GetAvailabilityReason() const
@@ -1015,8 +1095,8 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.TanHalfFovY = mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
-	constants.PrimitiveCount = mPrimitiveBuffer.stride != 0 ? (uint32_t)(mPrimitiveBuffer.size / mPrimitiveBuffer.stride) : 0u;
-	constants.MaterialCount = mMaterialBuffer.stride != 0 ? (uint32_t)(mMaterialBuffer.size / mMaterialBuffer.stride) : 0u;
+	constants.PrimitiveCount = mPrimitiveBuffer.stride != 0 ? (uint32_t)(mPrimitiveBuffer.usedSize / mPrimitiveBuffer.stride) : 0u;
+	constants.MaterialCount = mMaterialBuffer.stride != 0 ? (uint32_t)(mMaterialBuffer.usedSize / mMaterialBuffer.stride) : 0u;
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = NRI_FLAG_BOOTSTRAP_VIEW | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
@@ -1149,6 +1229,7 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 	}
 
 	resource.size = desc.size;
+	resource.usedSize = size;
 	resource.stride = stride;
 
 	nri::BufferViewDesc viewDesc = {};
@@ -1194,6 +1275,89 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 	return true;
 }
 
+bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after)
+{
+	const uint64_t requiredSize = std::max<uint64_t>(size, stride);
+	const bool needsGrowth =
+		resource.buffer == nullptr ||
+		resource.shaderView == nullptr ||
+		resource.stride != stride ||
+		resource.size < requiredSize;
+
+	stats.bytesUploadedLastFrame = size;
+	stats.growEventsLastFrame = 0;
+	stats.overwriteEventsLastFrame = 0;
+	stats.uploadCount++;
+	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
+
+	if (needsGrowth)
+	{
+		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
+		DestroyBufferResource(resource);
+
+		nri::BufferDesc desc = {};
+		desc.size = std::max<uint64_t>(grownSize, stride);
+		desc.structureStride = stride;
+		desc.usage = usage;
+
+		if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE_UPLOAD, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
+
+		resource.size = desc.size;
+		resource.usedSize = size;
+		resource.stride = stride;
+
+		nri::BufferViewDesc viewDesc = {};
+		viewDesc.buffer = resource.buffer;
+		viewDesc.type = nri::BufferView::STRUCTURED_BUFFER;
+		viewDesc.offset = 0;
+		viewDesc.size = nri::WHOLE_SIZE;
+		viewDesc.structureStride = stride;
+		if (mFrameBuffer->mCore.CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
+
+		stats.growthCount++;
+		stats.growEventsLastFrame = 1;
+	}
+	else
+	{
+		resource.usedSize = size;
+		stats.overwriteCount++;
+		stats.overwriteEventsLastFrame = 1;
+	}
+
+	if (data != nullptr && size != 0)
+	{
+		void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, 0, resource.size);
+		if (mapped == nullptr)
+		{
+			return false;
+		}
+
+		std::memcpy(mapped, data, (size_t)size);
+		mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
+	}
+
+	if (mFrameBuffer->mCommandBuffer != nullptr && after.access != nri::AccessBits::NONE)
+	{
+		nri::BufferBarrierDesc barrier = {};
+		barrier.buffer = resource.buffer;
+		barrier.before = {};
+		barrier.after = after;
+
+		nri::BarrierDesc barrierDesc = {};
+		barrierDesc.buffers = &barrier;
+		barrierDesc.bufferNum = 1;
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+	}
+
+	return true;
+}
+
 bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage)
 {
 	DestroyBufferResource(resource);
@@ -1208,6 +1372,7 @@ bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t 
 	}
 
 	resource.size = desc.size;
+	resource.usedSize = size;
 	resource.stride = stride;
 	return true;
 }
@@ -1215,14 +1380,24 @@ bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t 
 bool NRIRenderer::UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
 	Clocker clock(NriPTSceneBuffers);
-
-	DestroySceneBuffers();
+	mVertexBufferStats.bytesUploadedLastFrame = 0;
+	mVertexBufferStats.growEventsLastFrame = 0;
+	mVertexBufferStats.overwriteEventsLastFrame = 0;
+	mIndexBufferStats.bytesUploadedLastFrame = 0;
+	mIndexBufferStats.growEventsLastFrame = 0;
+	mIndexBufferStats.overwriteEventsLastFrame = 0;
+	mPrimitiveBufferStats.bytesUploadedLastFrame = 0;
+	mPrimitiveBufferStats.growEventsLastFrame = 0;
+	mPrimitiveBufferStats.overwriteEventsLastFrame = 0;
+	mMaterialBufferStats.bytesUploadedLastFrame = 0;
+	mMaterialBufferStats.growEventsLastFrame = 0;
+	mMaterialBufferStats.overwriteEventsLastFrame = 0;
 
 	return
-		CreateStructuredBuffer(mVertexBuffer, geometry.vertices.data(), geometry.vertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
-		CreateStructuredBuffer(mIndexBuffer, geometry.indices.data(), geometry.indices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
-		CreateStructuredBuffer(mPrimitiveBuffer, geometry.primitives.data(), geometry.primitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
-		CreateStructuredBuffer(mMaterialBuffer, materials.data(), materials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess());
+		EnsureStructuredBuffer(mVertexBuffer, mVertexBufferStats, geometry.vertices.data(), geometry.vertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
+		EnsureStructuredBuffer(mIndexBuffer, mIndexBufferStats, geometry.indices.data(), geometry.indices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
+		EnsureStructuredBuffer(mPrimitiveBuffer, mPrimitiveBufferStats, geometry.primitives.data(), geometry.primitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
+		EnsureStructuredBuffer(mMaterialBuffer, mMaterialBufferStats, materials.data(), materials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess());
 }
 
 bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geometry)
@@ -1961,8 +2136,8 @@ bool NRIRenderer::DispatchFinal()
 	constants.TanHalfFovY = mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
-	constants.PrimitiveCount = mPrimitiveBuffer.stride != 0 ? (uint32_t)(mPrimitiveBuffer.size / mPrimitiveBuffer.stride) : 0u;
-	constants.MaterialCount = mMaterialBuffer.stride != 0 ? (uint32_t)(mMaterialBuffer.size / mMaterialBuffer.stride) : 0u;
+	constants.PrimitiveCount = mPrimitiveBuffer.stride != 0 ? (uint32_t)(mPrimitiveBuffer.usedSize / mPrimitiveBuffer.stride) : 0u;
+	constants.MaterialCount = mMaterialBuffer.stride != 0 ? (uint32_t)(mMaterialBuffer.usedSize / mMaterialBuffer.stride) : 0u;
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags =
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
@@ -2228,6 +2403,7 @@ void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)
 	}
 
 	resource.size = 0;
+	resource.usedSize = 0;
 	resource.stride = 0;
 }
 

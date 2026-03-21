@@ -94,6 +94,14 @@ CCMD(nri_ptstatus)
 	}
 }
 
+CCMD(nri_ptbuffers)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingBuffers();
+	}
+}
+
 CCMD(nri_ptreset)
 {
 	if (auto* frameBuffer = GetActiveNRIRenderDevice())
@@ -445,6 +453,15 @@ void NRIRenderDevice::PrintPathTracingStatus() const
 	if (mRenderer != nullptr)
 	{
 		mRenderer->PrintStatus();
+	}
+}
+
+void NRIRenderDevice::PrintPathTracingBuffers() const
+{
+	PrintPathTracingCaps();
+	if (mRenderer != nullptr)
+	{
+		mRenderer->PrintSceneBufferStatus();
 	}
 }
 

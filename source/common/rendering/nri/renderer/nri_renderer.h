@@ -24,6 +24,7 @@ public:
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
 	void ResetHistory();
 	void PrintStatus() const;
+	void PrintSceneBufferStatus() const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	const char* GetAvailabilityReason() const;
 
@@ -72,6 +73,18 @@ private:
 		NRITextureResource resource;
 	};
 
+	struct SceneBufferDebugStats
+	{
+		const char* label = "";
+		uint32_t growthCount = 0;
+		uint32_t overwriteCount = 0;
+		uint32_t uploadCount = 0;
+		uint32_t growEventsLastFrame = 0;
+		uint32_t overwriteEventsLastFrame = 0;
+		uint64_t bytesUploadedLastFrame = 0;
+		uint64_t peakUsedBytes = 0;
+	};
+
 	bool CreatePipelineLayout();
 	bool CreateTaaPipelineLayout();
 	bool CreatePipelines();
@@ -107,6 +120,7 @@ private:
 	void DestroyAccelerationStructureResource(NRIAccelerationStructureResource& resource);
 
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
+	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
 	bool UpdateSamplerSet();
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors);
@@ -147,6 +161,10 @@ private:
 	NRIBufferResource mMaterialBuffer;
 	NRIBufferResource mInstanceBuffer;
 	NRIBufferResource mScratchBuffer;
+	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
+	SceneBufferDebugStats mIndexBufferStats = { "Index" };
+	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };
+	SceneBufferDebugStats mMaterialBufferStats = { "Material" };
 
 	NRIAccelerationStructureResource mBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
