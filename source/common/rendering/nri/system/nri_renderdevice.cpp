@@ -1818,16 +1818,23 @@ void NRIRenderDevice::LogD3D12FailureDiagnostics(const char* context)
 
 	mLoggedD3D12FailureDred = true;
 
-	const auto getDebugInterface = GetD3D12GetDebugInterfaceFn();
-	if (getDebugInterface == nullptr)
+	if (mDevice == nullptr || mCore.GetDeviceNativeObject == nullptr)
 	{
-		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: D3D12GetDebugInterface is unavailable.\n",
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: native D3D12 device is unavailable.\n",
+			context != nullptr ? context : "unknown");
+		return;
+	}
+
+	auto* d3d12Device = static_cast<ID3D12Device*>(mCore.GetDeviceNativeObject(mDevice));
+	if (d3d12Device == nullptr)
+	{
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: native D3D12 device query returned null.\n",
 			context != nullptr ? context : "unknown");
 		return;
 	}
 
 	ID3D12DeviceRemovedExtendedData2* dred2 = nullptr;
-	if (SUCCEEDED(getDebugInterface(IID_PPV_ARGS(&dred2))) && dred2 != nullptr)
+	if (SUCCEEDED(d3d12Device->QueryInterface(IID_PPV_ARGS(&dred2))) && dred2 != nullptr)
 	{
 		const D3D12_DRED_DEVICE_STATE deviceState = dred2->GetDeviceState();
 		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: using interface v2, device_state=%u.\n",
@@ -1879,7 +1886,7 @@ void NRIRenderDevice::LogD3D12FailureDiagnostics(const char* context)
 	}
 
 	ID3D12DeviceRemovedExtendedData1* dred1 = nullptr;
-	if (SUCCEEDED(getDebugInterface(IID_PPV_ARGS(&dred1))) && dred1 != nullptr)
+	if (SUCCEEDED(d3d12Device->QueryInterface(IID_PPV_ARGS(&dred1))) && dred1 != nullptr)
 	{
 		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: using interface v1.\n",
 			context != nullptr ? context : "unknown");
@@ -1929,7 +1936,7 @@ void NRIRenderDevice::LogD3D12FailureDiagnostics(const char* context)
 	}
 
 	ID3D12DeviceRemovedExtendedData* dred = nullptr;
-	const HRESULT dredHr = getDebugInterface(IID_PPV_ARGS(&dred));
+	const HRESULT dredHr = d3d12Device->QueryInterface(IID_PPV_ARGS(&dred));
 	if (FAILED(dredHr) || dred == nullptr)
 	{
 		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: failed to query interfaces v2/v1/v0 (last=%s, 0x%08X).\n",
