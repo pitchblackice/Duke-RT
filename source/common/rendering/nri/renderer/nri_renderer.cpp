@@ -68,6 +68,11 @@ namespace
 		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
 	}
 
+	static nri::AccessStage NRIComputeAccelerationStructureReadAccess()
+	{
+		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::COMPUTE_SHADER };
+	}
+
 	static uint32_t GetDispatchSize(uint32_t value)
 	{
 		return (value + 7u) / 8u;
@@ -1546,7 +1551,7 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 	nri::BufferBarrierDesc tlasBarrier = {};
 	tlasBarrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*mTopLevelAS.accelerationStructure);
 	tlasBarrier.before = NRIAccelerationStructureWriteAccess();
-	tlasBarrier.after = NRIComputeShaderResourceAccess();
+	tlasBarrier.after = NRIComputeAccelerationStructureReadAccess();
 
 	nri::BufferBarrierDesc sceneBarriers[2] = {};
 	sceneBarriers[0].buffer = mVertexBuffer.buffer;
