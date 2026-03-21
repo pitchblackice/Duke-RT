@@ -64,8 +64,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float specularMax = max(specularRgb.r, max(specularRgb.g, specularRgb.b));
 		const float hitMask = step(1e-4, rawSpecular.a);
 		const float boosted = saturate(specularMax * 64.0);
-		color = lerp(float3(0.0, 0.0, 0.0), float3(0.08, 0.16, 0.55), hitMask);
-		color = lerp(color, float3(1.0, 1.0, 1.0), boosted);
+		const float base = hitMask * 0.18;
+		color = (base + boosted).xxx;
 	}
 	else
 	if (gTraceConstants.DebugMode == 12u)
