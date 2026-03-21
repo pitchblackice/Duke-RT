@@ -404,6 +404,35 @@ namespace
 		Printf(TEXTCOLOR_RED "NRI D3D12 DRED setup failed: DRED settings interfaces are unavailable.\n");
 	}
 
+	static void ConfigureD3D12InfoQueue(const nri::CoreInterface& core, nri::Device* device)
+	{
+		if (!nri_apivalidation || device == nullptr || core.GetDeviceNativeObject == nullptr)
+		{
+			return;
+		}
+
+		auto* d3d12Device = static_cast<ID3D12Device*>(core.GetDeviceNativeObject(device));
+		if (d3d12Device == nullptr)
+		{
+			return;
+		}
+
+		ID3D12InfoQueue* infoQueue = nullptr;
+		if (FAILED(d3d12Device->QueryInterface(IID_PPV_ARGS(&infoQueue))) || infoQueue == nullptr)
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 debug layer is enabled, but ID3D12InfoQueue is unavailable.\n");
+			return;
+		}
+
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, FALSE);
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, FALSE);
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, FALSE);
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_INFO, FALSE);
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_MESSAGE, FALSE);
+		Printf("NRI D3D12 info queue configured: debugger breaks disabled while API validation is on.\n");
+		infoQueue->Release();
+	}
+
 	template<typename T>
 	static void SetNriDebugName(const nri::CoreInterface& core, T* object, const char* name)
 	{
@@ -1768,6 +1797,7 @@ bool NRIRenderDevice::CreateDevice()
 		Printf(TEXTCOLOR_RED "Failed to retrieve NRI interfaces.\n");
 		return false;
 	}
+	ConfigureD3D12InfoQueue(mCore, mDevice);
 
 	if (mCore.GetQueue(*mDevice, nri::QueueType::GRAPHICS, 0, mGraphicsQueue) != nri::Result::SUCCESS ||
 		mCore.CreateFence(*mDevice, 0, mFrameFence) != nri::Result::SUCCESS)
