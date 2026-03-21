@@ -1531,6 +1531,15 @@ if( WIN32 )
 			else()
 				message(STATUS "No NRI runtime DLLs found under ${RAZE_NRI_RUNTIME_DIR}; Visual Studio debugging may require staging NRI/NRD runtimes manually.")
 			endif()
+
+			set( RAZE_NRI_AGILITY_RUNTIME_DIR "${RAZE_NRI_RUNTIME_DIR}/AgilitySDK" )
+			if( EXISTS "${RAZE_NRI_AGILITY_RUNTIME_DIR}" )
+				add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+					COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${RAZE_NRI_AGILITY_RUNTIME_DIR}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/AgilitySDK"
+					COMMENT "Copying NRI AgilitySDK runtime ${RAZE_NRI_AGILITY_RUNTIME_DIR}" VERBATIM)
+			else()
+				message(STATUS "NRI AgilitySDK directory ${RAZE_NRI_AGILITY_RUNTIME_DIR} not found; D3D12 backend initialization may fail without it.")
+			endif()
 		else()
 			message(STATUS "NRI runtime dependency directory ${RAZE_NRI_RUNTIME_DIR} not found; skipping NRI DLL copy step.")
 		endif()

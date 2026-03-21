@@ -4,6 +4,7 @@
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
 #include "hw_material.h"
+#include "printf.h"
 #include "textures.h"
 
 #include <cstring>
@@ -485,8 +486,13 @@ nri::Pipeline* NRIRenderState::GetPipeline(int dt)
 	pipelineDesc.shaderNum = 2;
 
 	nri::Pipeline* pipeline = nullptr;
-	if (mFrameBuffer->mCore.CreateGraphicsPipeline(*mFrameBuffer->mDevice, pipelineDesc, pipeline) != nri::Result::SUCCESS)
+	const nri::Result result = mFrameBuffer->mCore.CreateGraphicsPipeline(*mFrameBuffer->mDevice, pipelineDesc, pipeline);
+	if (result != nri::Result::SUCCESS)
 	{
+		Printf(TEXTCOLOR_RED "NRI 2D graphics pipeline creation failed for target format %u with %u vertex attributes (result=%d).\n",
+			(uint32_t)mFrameBuffer->mActiveTarget->format,
+			(uint32_t)vertexBuffer->GetAttributeCount(),
+			(int)result);
 		return nullptr;
 	}
 

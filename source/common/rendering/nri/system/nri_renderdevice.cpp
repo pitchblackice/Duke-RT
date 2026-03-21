@@ -22,6 +22,10 @@
 
 #include <windows.h>
 
+#ifdef ERROR
+#undef ERROR
+#endif
+
 #include <algorithm>
 #include <fstream>
 
@@ -144,6 +148,8 @@ namespace
 	{
 		switch (result)
 		{
+		case nri::Result::INVALID_SDK:
+			return "invalid_sdk";
 		case nri::Result::SUCCESS:
 			return "success";
 		case nri::Result::FAILURE:
@@ -160,6 +166,48 @@ namespace
 			return "out_of_date";
 		default:
 			return "other";
+		}
+	}
+
+	static const char* GetNriMessageTypeName(nri::Message messageType)
+	{
+		switch (messageType)
+		{
+		case nri::Message::INFO:
+			return "info";
+		case nri::Message::WARNING:
+			return "warning";
+		case nri::Message::ERROR:
+			return "error";
+		default:
+			return "other";
+		}
+	}
+
+	static const char* GetNriVendorName(nri::Vendor vendor)
+	{
+		switch (vendor)
+		{
+		case nri::Vendor::NVIDIA:
+			return "NVIDIA";
+		case nri::Vendor::AMD:
+			return "AMD";
+		case nri::Vendor::INTEL:
+			return "Intel";
+		default:
+			return "Unknown";
+		}
+	}
+
+	static void NRI_CALL NriMessageCallback(nri::Message messageType, const char* file, uint32_t line, const char* message, void*)
+	{
+		if (file != nullptr && *file != '\0')
+		{
+			Printf("NRI %s: %s (%s:%u)\n", GetNriMessageTypeName(messageType), message, file, line);
+		}
+		else
+		{
+			Printf("NRI %s: %s\n", GetNriMessageTypeName(messageType), message);
 		}
 	}
 
@@ -513,11 +561,6 @@ void NRIRenderDevice::BeginFrame()
 		mLastFrameBoundaryStats.waitForPresentResult = waitForPresentResult;
 	}
 
-	if (!BeginCommandList(false))
-	{
-		return;
-	}
-
 	mAcquireSemaphoreIndex = mSwapChainImages.empty() ? 0 : (uint32_t)(mFrameIndex % mSwapChainImages.size());
 	mLastFrameBoundaryStats.acquireSemaphoreIndex = mAcquireSemaphoreIndex;
 
@@ -560,6 +603,11 @@ void NRIRenderDevice::BeginFrame()
 	mHasAcquiredSwapChainImage = true;
 	mCurrentPresentTarget = &mSwapChainImages[mCurrentSwapChainImage].target;
 	mActiveTarget = mUsingSaveTarget ? &mSaveTarget : mCurrentPresentTarget;
+	if (!BeginCommandList(false))
+	{
+		ResetFrameTracking(false);
+		return;
+	}
 	mRenderState->BeginFrame();
 
 	if (mViewpoints != nullptr)
@@ -1142,24 +1190,48 @@ bool NRIRenderDevice::CreateDevice()
 {
 	nri::AdapterDesc adapters[8] = {};
 	uint32_t adapterCount = (uint32_t)std::size(adapters);
-	if (mEnumerateAdapters(adapters, adapterCount) != nri::Result::SUCCESS || adapterCount == 0)
+	const nri::Result enumerateResult = mEnumerateAdapters(adapters, adapterCount);
+	if (enumerateResult != nri::Result::SUCCESS || adapterCount == 0)
 	{
-		Printf(TEXTCOLOR_RED "Failed to enumerate NRI adapters.\n");
+		Printf(TEXTCOLOR_RED "Failed to enumerate NRI adapters (result=%s, count=%u).\n", GetNriResultName(enumerateResult), adapterCount);
 		return false;
+	}
+
+	for (uint32_t i = 0; i < adapterCount; ++i)
+	{
+		const auto& adapter = adapters[i];
+		const double videoMemoryGiB = (double)adapter.videoMemorySize / (1024.0 * 1024.0 * 1024.0);
+		const double sharedMemoryGiB = (double)adapter.sharedSystemMemorySize / (1024.0 * 1024.0 * 1024.0);
+		Printf("NRI adapter[%u]: %s (vendor=%s, video=%.2f GiB, shared=%.2f GiB, graphicsQueues=%u)\n",
+			i,
+			adapter.name,
+			GetNriVendorName(adapter.vendor),
+			videoMemoryGiB,
+			sharedMemoryGiB,
+			adapter.queueNum[(uint32_t)nri::QueueType::GRAPHICS]);
 	}
 
 	nri::DeviceCreationDesc creationDesc = {};
 	creationDesc.graphicsAPI = GetSelectedAPI();
 	creationDesc.adapterDesc = &adapters[0];
+	creationDesc.callbackInterface.MessageCallback = &NriMessageCallback;
 	creationDesc.enableGraphicsAPIValidation = false;
 	creationDesc.enableNRIValidation = false;
 	creationDesc.disableVKRayTracing = false;
 	creationDesc.disableD3D12EnhancedBarriers = false;
 	creationDesc.vkBindingOffsets = {};
 
-	if (mCreateDeviceFn(creationDesc, mDevice) != nri::Result::SUCCESS)
+	const nri::Result createResult = mCreateDeviceFn(creationDesc, mDevice);
+	if (createResult != nri::Result::SUCCESS)
 	{
-		Printf(TEXTCOLOR_RED "Failed to create NRI device for API '%s'.\n", (const char*)nri_api);
+		Printf(TEXTCOLOR_RED "Failed to create NRI device for API '%s' using adapter '%s' (result=%s).\n",
+			(const char*)nri_api,
+			adapters[0].name,
+			GetNriResultName(createResult));
+		if (createResult == nri::Result::INVALID_SDK)
+		{
+			Printf(TEXTCOLOR_RED "NRI reported INVALID_SDK. Check that raze.exe exports D3D12SDKVersion/D3D12SDKPath and that an AgilitySDK runtime directory is staged beside the executable.\n");
+		}
 		return false;
 	}
 
@@ -1252,6 +1324,7 @@ bool NRIRenderDevice::CreateSwapChain()
 		image.target.width = desc.width;
 		image.target.height = desc.height;
 		image.target.format = desc.format;
+		image.target.usage = desc.usage;
 		image.target.state = { nri::AccessBits::NONE, nri::Layout::PRESENT, nri::StageBits::NONE };
 
 		if (!CreateTextureViews(image.target))
@@ -1816,6 +1889,7 @@ void NRIRenderDevice::DestroyTextureResource(NRITextureResource& resource)
 
 bool NRIRenderDevice::CreateTextureViews(NRITextureResource& resource)
 {
+	const uint32_t usage = (uint32_t)resource.usage;
 	nri::TextureViewDesc shaderViewDesc = {};
 	shaderViewDesc.texture = resource.texture;
 	shaderViewDesc.type = nri::TextureView::TEXTURE;
@@ -1826,18 +1900,21 @@ bool NRIRenderDevice::CreateTextureViews(NRITextureResource& resource)
 	shaderViewDesc.readonlyPlanes = nri::PlaneBits::COLOR;
 	shaderViewDesc.components = { nri::ComponentSwizzle::IDENTITY, nri::ComponentSwizzle::IDENTITY, nri::ComponentSwizzle::IDENTITY, nri::ComponentSwizzle::IDENTITY };
 
-	if (mCore.CreateTextureView(shaderViewDesc, resource.shaderView) != nri::Result::SUCCESS)
+	if ((usage & (uint32_t)nri::TextureUsageBits::SHADER_RESOURCE) != 0)
 	{
-		return false;
+		if (mCore.CreateTextureView(shaderViewDesc, resource.shaderView) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
+
+		resource.textureSet = CreateTextureSet(resource.shaderView);
+		if (resource.textureSet == nullptr)
+		{
+			return false;
+		}
 	}
 
-	resource.textureSet = CreateTextureSet(resource.shaderView);
-	if (resource.textureSet == nullptr)
-	{
-		return false;
-	}
-
-	if (((uint32_t)resource.usage & (uint32_t)nri::TextureUsageBits::SHADER_RESOURCE_STORAGE) != 0)
+	if ((usage & (uint32_t)nri::TextureUsageBits::SHADER_RESOURCE_STORAGE) != 0)
 	{
 		nri::TextureViewDesc storageViewDesc = shaderViewDesc;
 		storageViewDesc.type = nri::TextureView::STORAGE_TEXTURE;
@@ -1847,9 +1924,15 @@ bool NRIRenderDevice::CreateTextureViews(NRITextureResource& resource)
 		}
 	}
 
-	nri::TextureViewDesc colorViewDesc = shaderViewDesc;
-	colorViewDesc.type = nri::TextureView::COLOR_ATTACHMENT;
-	mCore.CreateTextureView(colorViewDesc, resource.colorAttachmentView);
+	if ((usage & (uint32_t)nri::TextureUsageBits::COLOR_ATTACHMENT) != 0)
+	{
+		nri::TextureViewDesc colorViewDesc = shaderViewDesc;
+		colorViewDesc.type = nri::TextureView::COLOR_ATTACHMENT;
+		if (mCore.CreateTextureView(colorViewDesc, resource.colorAttachmentView) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
+	}
 
 	return true;
 }

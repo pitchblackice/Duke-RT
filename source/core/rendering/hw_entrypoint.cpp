@@ -59,6 +59,22 @@ float GlobalFogDensity = 350.f;
 TArray<PortalDesc> allPortals;
 void Draw2D(F2DDrawer* drawer, FRenderState& state);
 
+static bool HasRequiredHWSceneBuffers()
+{
+	if (screen == nullptr)
+	{
+		return false;
+	}
+
+	if (screen->mVertexData != nullptr && screen->mLights != nullptr && screen->mViewpoints != nullptr)
+	{
+		return true;
+	}
+
+	Printf(TEXTCOLOR_RED "Hardware scene buffers are unavailable on backend '%s'; skipping scene render.\n", screen->DeviceName());
+	return false;
+}
+
 CVARD(Bool, hw_hightile, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "enable/disable hightile texture rendering")
 bool hw_int_useindexedcolortextures;
 CUSTOM_CVARD(Bool, hw_useindexedcolortextures, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "enable/disable indexed color texture rendering")
@@ -268,6 +284,11 @@ void RenderToSavePic(FRenderViewpoint& vp, FileWriter* file, int width, int heig
 	// we must be sure the GPU finished reading from the buffer before we fill it with new data.
 	screen->WaitForCommands(false);
 
+	if (!HasRequiredHWSceneBuffers())
+	{
+		return;
+	}
+
 	// Switch to render buffers dimensioned for the savepic
 	screen->SetSaveBuffers(true);
 	screen->ImageTransitionScene(true);
@@ -325,6 +346,11 @@ void render_drawrooms(DCoreActor* playersprite, const DVector3& position, sector
 	// Get this before everything else
 	FRenderViewpoint r_viewpoint = SetupViewpoint(playersprite, position, sectindex(sect), angles, fov);
 	r_viewpoint.TicFrac = !cl_capfps ? interpfrac : 1.;
+
+	if (!HasRequiredHWSceneBuffers())
+	{
+		return;
+	}
 
 	screen->mLights->Clear();
 	screen->mViewpoints->Clear();
