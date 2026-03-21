@@ -721,6 +721,14 @@ void HWDrawInfo::DrawScene(int drawmode, bool portal)
 		ssao_portals_available--;
 	}
 
+	if (screen->ShouldSkipSceneBuildForPathTracedScene(drawmode, portal))
+	{
+		if (screen->RenderPathTracedScene(*this, drawmode, portal))
+		{
+			return;
+		}
+	}
+
 	CreateScene(portal);
 	if (screen->RenderPathTracedScene(*this, drawmode, portal))
 	{

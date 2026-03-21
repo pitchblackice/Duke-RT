@@ -91,8 +91,17 @@ void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags
 
 	if (tex->isHardwareCanvas())
 	{
+		if (mFrameBuffer != nullptr)
+		{
+			mFrameBuffer->Note2DTextureEnsure(true);
+		}
 		EnsureCanvas(tex);
 		return;
+	}
+
+	if (mFrameBuffer != nullptr)
+	{
+		mFrameBuffer->Note2DTextureEnsure(false);
 	}
 
 	FTextureBuffer texBuffer = tex->CreateTexBuffer(translation, flags | CTF_ProcessData);
@@ -107,13 +116,26 @@ void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags
 		mResource.height == (uint32_t)texBuffer.mHeight &&
 		mResource.format == nri::Format::BGRA8_UNORM)
 	{
+		if (mFrameBuffer != nullptr)
+		{
+			mFrameBuffer->Note2DTextureCacheHit();
+		}
 		return;
+	}
+
+	if (mFrameBuffer != nullptr)
+	{
+		mFrameBuffer->Note2DTextureCacheMiss();
 	}
 
 	const size_t uploadSize = (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u;
 	std::vector<uint8_t> uploadPixels(uploadSize);
 	if (!TryMemcpyTexturePixels(uploadPixels.data(), texBuffer.mBuffer, uploadSize))
 	{
+		if (mFrameBuffer != nullptr)
+		{
+			mFrameBuffer->Note2DTextureUploadAttempt((uint64_t)uploadSize, false);
+		}
 		if (sUploadFailureLogCount < 16)
 		{
 			Printf(TEXTCOLOR_RED "NRI texture upload skipped: invalid source buffer (lump=%d size=%dx%d translation=%d flags=0x%x image=%s content=%llu).\n",
@@ -200,17 +222,27 @@ void NRIHardwareTexture::CreateTextureResource(uint32_t width, uint32_t height, 
 		return;
 	}
 
+	const bool recreated = mResource.texture != nullptr;
 	mFrameBuffer->DestroyTextureResource(mResource);
-	mFrameBuffer->CreateOwnedTexture(mResource, width, height, format, usage);
+	if (mFrameBuffer->CreateOwnedTexture(mResource, width, height, format, usage))
+	{
+		mFrameBuffer->Note2DTextureResourceCreate(recreated);
+	}
 }
 
-void NRIHardwareTexture::UploadTextureData(const void* data, uint32_t width, uint32_t height, nri::Format format, uint32_t rowPitch)
+bool NRIHardwareTexture::UploadTextureData(const void* data, uint32_t width, uint32_t height, nri::Format format, uint32_t rowPitch)
 {
 	if (mFrameBuffer == nullptr || mResource.texture == nullptr || data == nullptr)
 	{
-		return;
+		return false;
 	}
 
-	mFrameBuffer->UploadTextureData(mResource, data, width, height, rowPitch);
-	mResource.format = format;
+	const uint64_t bytes = (uint64_t)rowPitch * (uint64_t)height;
+	const bool success = mFrameBuffer->UploadTextureData(mResource, data, width, height, rowPitch);
+	mFrameBuffer->Note2DTextureUploadAttempt(bytes, success);
+	if (success)
+	{
+		mResource.format = format;
+	}
+	return success;
 }

@@ -28,7 +28,7 @@ public:
 
 private:
 	void CreateTextureResource(uint32_t width, uint32_t height, nri::Format format, nri::TextureUsageBits usage);
-	void UploadTextureData(const void* data, uint32_t width, uint32_t height, nri::Format format, uint32_t rowPitch);
+	bool UploadTextureData(const void* data, uint32_t width, uint32_t height, nri::Format format, uint32_t rowPitch);
 
 	NRIRenderDevice* mFrameBuffer = nullptr;
 	NRITextureResource mResource;

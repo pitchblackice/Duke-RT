@@ -51,6 +51,7 @@ public:
 	void PrintPathTracingStatus() const;
 	void PrintPathTracingBuffers() const;
 	void ResetPathTracingHistory();
+	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
 
 private:
 	struct FrameBoundaryDebugStats
@@ -65,6 +66,29 @@ private:
 		uint32_t acquireSemaphoreIndex = 0;
 		bool sanityModeEnabled = false;
 		bool sanityFrameUsed = false;
+	};
+
+	struct Texture2DDebugStats
+	{
+		uint64_t frameNumber = 0;
+		uint32_t ensureCalls = 0;
+		uint32_t canvasEnsures = 0;
+		uint32_t cacheHits = 0;
+		uint32_t cacheMisses = 0;
+		uint32_t uploadAttempts = 0;
+		uint32_t uploadFailures = 0;
+		uint32_t resourceCreates = 0;
+		uint32_t resourceRecreates = 0;
+		uint64_t uploadedBytes = 0;
+		uint64_t totalEnsureCalls = 0;
+		uint64_t totalCanvasEnsures = 0;
+		uint64_t totalCacheHits = 0;
+		uint64_t totalCacheMisses = 0;
+		uint64_t totalUploadAttempts = 0;
+		uint64_t totalUploadFailures = 0;
+		uint64_t totalResourceCreates = 0;
+		uint64_t totalResourceRecreates = 0;
+		uint64_t totalUploadedBytes = 0;
 	};
 
 	using PFN_nriEnumerateAdapters = nri::Result(NRI_CALL*)(nri::AdapterDesc*, uint32_t&);
@@ -101,6 +125,13 @@ private:
 	nri::DescriptorSet* CreateTextureSet(nri::Descriptor* shaderView);
 	bool RenderPathTracingSanityFrame();
 	void PrintFrameBoundaryStatus() const;
+	void Print2DTextureStatus() const;
+	void Reset2DTextureFrameStats();
+	void Note2DTextureEnsure(bool canvas);
+	void Note2DTextureCacheHit();
+	void Note2DTextureCacheMiss();
+	void Note2DTextureUploadAttempt(uint64_t bytes, bool success);
+	void Note2DTextureResourceCreate(bool recreated);
 	void ResetFrameTracking();
 
 	friend class NRIHardwareTexture;
@@ -153,4 +184,5 @@ private:
 	bool mInitialized = false;
 	bool mLoggedStartup = false;
 	FrameBoundaryDebugStats mLastFrameBoundaryStats;
+	Texture2DDebugStats mTexture2DDebugStats;
 };

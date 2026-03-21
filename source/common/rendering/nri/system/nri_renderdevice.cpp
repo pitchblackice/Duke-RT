@@ -295,6 +295,7 @@ void NRIRenderDevice::BeginFrame()
 		return;
 	}
 
+	Reset2DTextureFrameStats();
 	mLastFrameBoundaryStats.frameNumber++;
 	mLastFrameBoundaryStats.waitMs = 0.0;
 	mLastFrameBoundaryStats.acquireMs = 0.0;
@@ -448,6 +449,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 	return mRenderer->RenderScene(di, drawmode, portal);
 }
 
+bool NRIRenderDevice::ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const
+{
+	return !!nri_ptsanity && drawmode == DM_MAINVIEW && !portal;
+}
+
 bool NRIRenderDevice::RenderPathTracingSanityFrame()
 {
 	if (mCommandBuffer == nullptr || mActiveTarget == nullptr || mActiveTarget->colorAttachmentView == nullptr)
@@ -570,6 +576,7 @@ void NRIRenderDevice::PrintPathTracingStatus() const
 {
 	PrintPathTracingCaps();
 	PrintFrameBoundaryStatus();
+	Print2DTextureStatus();
 	if (mRenderer != nullptr)
 	{
 		mRenderer->PrintStatus();
@@ -580,6 +587,7 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 {
 	PrintPathTracingCaps();
 	PrintFrameBoundaryStatus();
+	Print2DTextureStatus();
 	if (mRenderer != nullptr)
 	{
 		mRenderer->PrintSceneBufferStatus();
@@ -600,6 +608,96 @@ void NRIRenderDevice::PrintFrameBoundaryStatus() const
 		GetNriResultName(stats.acquireResult),
 		stats.swapChainImageIndex,
 		stats.acquireSemaphoreIndex);
+}
+
+void NRIRenderDevice::Print2DTextureStatus() const
+{
+	const auto& stats = mTexture2DDebugStats;
+	Printf("NRI 2D textures: frame=%llu ensure=%u canvas=%u hits=%u misses=%u uploads=%u failures=%u create=%u recreate=%u bytes=%llu total_bytes=%llu\n",
+		(unsigned long long)stats.frameNumber,
+		stats.ensureCalls,
+		stats.canvasEnsures,
+		stats.cacheHits,
+		stats.cacheMisses,
+		stats.uploadAttempts,
+		stats.uploadFailures,
+		stats.resourceCreates,
+		stats.resourceRecreates,
+		(unsigned long long)stats.uploadedBytes,
+		(unsigned long long)stats.totalUploadedBytes);
+	Printf("NRI 2D totals: ensures=%llu canvas=%llu hits=%llu misses=%llu uploads=%llu failures=%llu create=%llu recreate=%llu\n",
+		(unsigned long long)stats.totalEnsureCalls,
+		(unsigned long long)stats.totalCanvasEnsures,
+		(unsigned long long)stats.totalCacheHits,
+		(unsigned long long)stats.totalCacheMisses,
+		(unsigned long long)stats.totalUploadAttempts,
+		(unsigned long long)stats.totalUploadFailures,
+		(unsigned long long)stats.totalResourceCreates,
+		(unsigned long long)stats.totalResourceRecreates);
+}
+
+void NRIRenderDevice::Reset2DTextureFrameStats()
+{
+	mTexture2DDebugStats.frameNumber++;
+	mTexture2DDebugStats.ensureCalls = 0;
+	mTexture2DDebugStats.canvasEnsures = 0;
+	mTexture2DDebugStats.cacheHits = 0;
+	mTexture2DDebugStats.cacheMisses = 0;
+	mTexture2DDebugStats.uploadAttempts = 0;
+	mTexture2DDebugStats.uploadFailures = 0;
+	mTexture2DDebugStats.resourceCreates = 0;
+	mTexture2DDebugStats.resourceRecreates = 0;
+	mTexture2DDebugStats.uploadedBytes = 0;
+}
+
+void NRIRenderDevice::Note2DTextureEnsure(bool canvas)
+{
+	mTexture2DDebugStats.ensureCalls++;
+	mTexture2DDebugStats.totalEnsureCalls++;
+	if (canvas)
+	{
+		mTexture2DDebugStats.canvasEnsures++;
+		mTexture2DDebugStats.totalCanvasEnsures++;
+	}
+}
+
+void NRIRenderDevice::Note2DTextureCacheHit()
+{
+	mTexture2DDebugStats.cacheHits++;
+	mTexture2DDebugStats.totalCacheHits++;
+}
+
+void NRIRenderDevice::Note2DTextureCacheMiss()
+{
+	mTexture2DDebugStats.cacheMisses++;
+	mTexture2DDebugStats.totalCacheMisses++;
+}
+
+void NRIRenderDevice::Note2DTextureUploadAttempt(uint64_t bytes, bool success)
+{
+	mTexture2DDebugStats.uploadAttempts++;
+	mTexture2DDebugStats.totalUploadAttempts++;
+	mTexture2DDebugStats.uploadedBytes += bytes;
+	mTexture2DDebugStats.totalUploadedBytes += bytes;
+	if (!success)
+	{
+		mTexture2DDebugStats.uploadFailures++;
+		mTexture2DDebugStats.totalUploadFailures++;
+	}
+}
+
+void NRIRenderDevice::Note2DTextureResourceCreate(bool recreated)
+{
+	if (recreated)
+	{
+		mTexture2DDebugStats.resourceRecreates++;
+		mTexture2DDebugStats.totalResourceRecreates++;
+	}
+	else
+	{
+		mTexture2DDebugStats.resourceCreates++;
+		mTexture2DDebugStats.totalResourceCreates++;
+	}
 }
 
 void NRIRenderDevice::ResetPathTracingHistory()
