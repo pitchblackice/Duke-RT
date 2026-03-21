@@ -576,6 +576,7 @@ void NRIRenderDevice::PrintPathTracingStatus() const
 {
 	PrintPathTracingCaps();
 	PrintFrameBoundaryStatus();
+	PrintFrameSequenceStatus();
 	Print2DTextureStatus();
 	if (mRenderer != nullptr)
 	{
@@ -587,6 +588,7 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 {
 	PrintPathTracingCaps();
 	PrintFrameBoundaryStatus();
+	PrintFrameSequenceStatus();
 	Print2DTextureStatus();
 	if (mRenderer != nullptr)
 	{
@@ -608,6 +610,53 @@ void NRIRenderDevice::PrintFrameBoundaryStatus() const
 		GetNriResultName(stats.acquireResult),
 		stats.swapChainImageIndex,
 		stats.acquireSemaphoreIndex);
+}
+
+void NRIRenderDevice::PrintFrameSequenceStatus() const
+{
+	bool anyValid = false;
+	FString line = "NRI PT frame sequence:";
+	for (uint32_t i = 0; i < FrameSequenceHistorySize; ++i)
+	{
+		const uint32_t index = (mFrameSequenceWriteIndex + i) % FrameSequenceHistorySize;
+		const FrameSequenceEntry& entry = mFrameSequenceHistory[index];
+		if (!entry.valid)
+		{
+			continue;
+		}
+
+		anyValid = true;
+		line.AppendFormat(" [f%llu a%u@s%u -> p%u@s%u fence=%llu %s]",
+			(unsigned long long)entry.frameNumber,
+			entry.acquiredImageIndex,
+			entry.acquireSemaphoreIndex,
+			entry.presentedImageIndex,
+			entry.releaseSemaphoreIndex,
+			(unsigned long long)entry.submittedFenceValue,
+			entry.sanityFrameUsed ? "sanity" : "normal");
+	}
+
+	if (!anyValid)
+	{
+		line << " none";
+	}
+
+	Printf("%s\n", line.GetChars());
+}
+
+void NRIRenderDevice::RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue)
+{
+	FrameSequenceEntry& entry = mFrameSequenceHistory[mFrameSequenceWriteIndex];
+	entry = {};
+	entry.frameNumber = mLastFrameBoundaryStats.frameNumber;
+	entry.submittedFenceValue = submittedFenceValue;
+	entry.acquiredImageIndex = mLastFrameBoundaryStats.swapChainImageIndex;
+	entry.acquireSemaphoreIndex = mLastFrameBoundaryStats.acquireSemaphoreIndex;
+	entry.presentedImageIndex = mCurrentSwapChainImage;
+	entry.releaseSemaphoreIndex = releaseSemaphoreIndex;
+	entry.sanityFrameUsed = mLastFrameBoundaryStats.sanityFrameUsed;
+	entry.valid = true;
+	mFrameSequenceWriteIndex = (mFrameSequenceWriteIndex + 1) % FrameSequenceHistorySize;
 }
 
 void NRIRenderDevice::Print2DTextureStatus() const
@@ -1122,7 +1171,8 @@ void NRIRenderDevice::EndFrameAndPresent()
 
 	const nri::FenceSubmitDesc waitFence = { mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, 0, nri::StageBits::COLOR_ATTACHMENT };
 	const nri::FenceSubmitDesc releaseFence = { mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore, 0, nri::StageBits::NONE };
-	const nri::FenceSubmitDesc frameFence = { mFrameFence, ++mSubmittedFenceValue, nri::StageBits::NONE };
+	const uint64_t submittedFenceValue = ++mSubmittedFenceValue;
+	const nri::FenceSubmitDesc frameFence = { mFrameFence, submittedFenceValue, nri::StageBits::NONE };
 	const nri::FenceSubmitDesc signalFences[] = { releaseFence, frameFence };
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
 
@@ -1143,6 +1193,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		ScopedNriTiming presentTiming(NriPTQueuePresent, mLastFrameBoundaryStats.presentMs);
 		mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
 	}
+	RecordFrameSequence(mCurrentSwapChainImage, submittedFenceValue);
 	ResetFrameTracking();
 }
 

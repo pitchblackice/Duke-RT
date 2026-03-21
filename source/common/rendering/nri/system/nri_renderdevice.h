@@ -54,6 +54,20 @@ public:
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
 
 private:
+	static constexpr uint32_t FrameSequenceHistorySize = 8;
+
+	struct FrameSequenceEntry
+	{
+		uint64_t frameNumber = 0;
+		uint64_t submittedFenceValue = 0;
+		uint32_t acquiredImageIndex = 0;
+		uint32_t acquireSemaphoreIndex = 0;
+		uint32_t presentedImageIndex = 0;
+		uint32_t releaseSemaphoreIndex = 0;
+		bool sanityFrameUsed = false;
+		bool valid = false;
+	};
+
 	struct FrameBoundaryDebugStats
 	{
 		uint64_t frameNumber = 0;
@@ -125,7 +139,9 @@ private:
 	nri::DescriptorSet* CreateTextureSet(nri::Descriptor* shaderView);
 	bool RenderPathTracingSanityFrame();
 	void PrintFrameBoundaryStatus() const;
+	void PrintFrameSequenceStatus() const;
 	void Print2DTextureStatus() const;
+	void RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue);
 	void Reset2DTextureFrameStats();
 	void Note2DTextureEnsure(bool canvas);
 	void Note2DTextureCacheHit();
@@ -184,5 +200,7 @@ private:
 	bool mInitialized = false;
 	bool mLoggedStartup = false;
 	FrameBoundaryDebugStats mLastFrameBoundaryStats;
+	FrameSequenceEntry mFrameSequenceHistory[FrameSequenceHistorySize] = {};
+	uint32_t mFrameSequenceWriteIndex = 0;
 	Texture2DDebugStats mTexture2DDebugStats;
 };
