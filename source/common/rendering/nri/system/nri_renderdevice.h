@@ -34,6 +34,7 @@ public:
 	FRenderState* RenderState() override;
 	void Draw2D() override;
 	void WaitForCommands(bool finish) override;
+	void SetVSync(bool vsync) override;
 	void SetSaveBuffers(bool yes) override;
 	void ImageTransitionScene(bool unknown) override;
 	void SetActiveRenderTarget() override;
@@ -157,6 +158,7 @@ private:
 	bool RenderPathTracingSanityFrame();
 	void PrintFrameBoundaryStatus() const;
 	void PrintFrameSequenceStatus() const;
+	void PrintSwapChainStatus() const;
 	void Print2DTextureStatus() const;
 	void RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue);
 	void Reset2DTextureFrameStats();
@@ -165,6 +167,8 @@ private:
 	void Note2DTextureCacheMiss();
 	void Note2DTextureUploadAttempt(uint64_t bytes, bool success);
 	void Note2DTextureResourceCreate(bool recreated);
+	void NoteSwapChainAcquire(uint32_t imageIndex);
+	void NoteSwapChainPresent(uint32_t imageIndex);
 	uint32_t GetQueuedFrameIndex(uint64_t frameIndex) const;
 	void SelectQueuedFrame(uint32_t queuedFrameIndex);
 	void ResetFrameTracking();
@@ -212,6 +216,11 @@ private:
 	std::vector<uint8_t> mVertexShaderBlob;
 	std::vector<uint8_t> mPixelShaderBlob;
 	FString mDeviceName = "NRI";
+	nri::SwapChainBits mSwapChainFlags = nri::SwapChainBits::NONE;
+	uint8_t mSwapChainQueuedFrameNum = 0;
+	uint8_t mSwapChainTextureCount = 0;
+	uint64_t mObservedSwapChainAcquireMask = 0;
+	uint64_t mObservedSwapChainPresentMask = 0;
 	uint64_t mFrameIndex = 0;
 	uint64_t mSubmittedFenceValue = 0;
 	bool mFrameBegun = false;

@@ -27,6 +27,7 @@
 
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
+EXTERN_CVAR(Bool, vid_vsync)
 CVAR(Bool, nri_ptsanity, false, 0)
 
 namespace
@@ -115,6 +116,87 @@ namespace
 		default:
 			return "other";
 		}
+	}
+
+	static uint32_t CountSetBits(uint64_t mask)
+	{
+		uint32_t count = 0;
+		while (mask != 0)
+		{
+			count += (uint32_t)(mask & 1ull);
+			mask >>= 1;
+		}
+		return count;
+	}
+
+	static FString DescribeSwapChainFlags(nri::SwapChainBits flags)
+	{
+		if (flags == nri::SwapChainBits::NONE)
+		{
+			return "NONE";
+		}
+
+		FString description;
+		const auto appendFlag = [&description](const char* text)
+		{
+			if (!description.IsEmpty())
+			{
+				description << "|";
+			}
+			description << text;
+		};
+
+		if (((uint8_t)flags & (uint8_t)nri::SwapChainBits::VSYNC) != 0)
+		{
+			appendFlag("VSYNC");
+		}
+
+		if (((uint8_t)flags & (uint8_t)nri::SwapChainBits::ALLOW_TEARING) != 0)
+		{
+			appendFlag("ALLOW_TEARING");
+		}
+
+		if (((uint8_t)flags & (uint8_t)nri::SwapChainBits::WAITABLE) != 0)
+		{
+			appendFlag("WAITABLE");
+		}
+
+		if (((uint8_t)flags & (uint8_t)nri::SwapChainBits::ALLOW_LOW_LATENCY) != 0)
+		{
+			appendFlag("ALLOW_LOW_LATENCY");
+		}
+
+		return description;
+	}
+
+	static FString DescribeSwapChainImageMask(uint64_t mask, uint32_t textureCount)
+	{
+		if (textureCount == 0)
+		{
+			return "none";
+		}
+
+		FString description;
+		for (uint32_t i = 0; i < textureCount; ++i)
+		{
+			if ((mask & (1ull << i)) == 0)
+			{
+				continue;
+			}
+
+			if (!description.IsEmpty())
+			{
+				description << ",";
+			}
+			description.AppendFormat("%u", i);
+		}
+
+		if (description.IsEmpty())
+		{
+			description = "none";
+		}
+
+		return description;
 	}
 }
 
@@ -318,7 +400,7 @@ void NRIRenderDevice::BeginFrame()
 		return;
 	}
 
-	mAcquireSemaphoreIndex = mSwapChainImages.empty() ? 0 : (uint32_t)(mSubmittedFenceValue % mSwapChainImages.size());
+	mAcquireSemaphoreIndex = mSwapChainImages.empty() ? 0 : (uint32_t)(mFrameIndex % mSwapChainImages.size());
 	mLastFrameBoundaryStats.acquireSemaphoreIndex = mAcquireSemaphoreIndex;
 
 	nri::Result acquireResult = nri::Result::FAILURE;
@@ -328,6 +410,10 @@ void NRIRenderDevice::BeginFrame()
 	}
 	mLastFrameBoundaryStats.acquireResult = acquireResult;
 	mLastFrameBoundaryStats.swapChainImageIndex = mCurrentSwapChainImage;
+	if (acquireResult == nri::Result::SUCCESS)
+	{
+		NoteSwapChainAcquire(mCurrentSwapChainImage);
+	}
 	if (acquireResult == nri::Result::OUT_OF_DATE)
 	{
 		if (!EnsureSwapChainSize())
@@ -341,6 +427,10 @@ void NRIRenderDevice::BeginFrame()
 		}
 		mLastFrameBoundaryStats.acquireResult = acquireResult;
 		mLastFrameBoundaryStats.swapChainImageIndex = mCurrentSwapChainImage;
+		if (acquireResult == nri::Result::SUCCESS)
+		{
+			NoteSwapChainAcquire(mCurrentSwapChainImage);
+		}
 	}
 
 	if (acquireResult != nri::Result::SUCCESS)
@@ -374,6 +464,22 @@ void NRIRenderDevice::Draw2D()
 	}
 
 	::Draw2D(twod, *mRenderState);
+}
+
+void NRIRenderDevice::SetVSync(bool vsync)
+{
+	Super::SetVSync(vsync);
+
+	if (!mInitialized || mDevice == nullptr || mGraphicsQueue == nullptr)
+	{
+		return;
+	}
+
+	WaitForCommands(true);
+	if (!CreateSwapChain())
+	{
+		Printf(TEXTCOLOR_RED "NRI failed to recreate swapchain after vsync change.\n");
+	}
 }
 
 void NRIRenderDevice::WaitForCommands(bool finish)
@@ -579,6 +685,7 @@ void NRIRenderDevice::PrintPathTracingStatus() const
 	PrintPathTracingCaps();
 	PrintFrameBoundaryStatus();
 	PrintFrameSequenceStatus();
+	PrintSwapChainStatus();
 	Print2DTextureStatus();
 	if (mRenderer != nullptr)
 	{
@@ -591,6 +698,7 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 	PrintPathTracingCaps();
 	PrintFrameBoundaryStatus();
 	PrintFrameSequenceStatus();
+	PrintSwapChainStatus();
 	Print2DTextureStatus();
 	if (mRenderer != nullptr)
 	{
@@ -649,6 +757,24 @@ void NRIRenderDevice::PrintFrameSequenceStatus() const
 	}
 
 	Printf("%s\n", line.GetChars());
+}
+
+void NRIRenderDevice::PrintSwapChainStatus() const
+{
+	const FString flagText = DescribeSwapChainFlags(mSwapChainFlags);
+	const FString acquiredImages = DescribeSwapChainImageMask(mObservedSwapChainAcquireMask, mSwapChainTextureCount);
+	const FString presentedImages = DescribeSwapChainImageMask(mObservedSwapChainPresentMask, mSwapChainTextureCount);
+	Printf("NRI PT swapchain: textures=%u queued_frames=%u vsync=%s flags=%s acquire_seen=%u/%u [%s] present_seen=%u/%u [%s]\n",
+		(uint32_t)mSwapChainTextureCount,
+		(uint32_t)mSwapChainQueuedFrameNum,
+		vid_vsync ? "on" : "off",
+		flagText.GetChars(),
+		CountSetBits(mObservedSwapChainAcquireMask),
+		(uint32_t)mSwapChainTextureCount,
+		acquiredImages.GetChars(),
+		CountSetBits(mObservedSwapChainPresentMask),
+		(uint32_t)mSwapChainTextureCount,
+		presentedImages.GetChars());
 }
 
 void NRIRenderDevice::RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue)
@@ -758,6 +884,22 @@ void NRIRenderDevice::Note2DTextureResourceCreate(bool recreated)
 	}
 }
 
+void NRIRenderDevice::NoteSwapChainAcquire(uint32_t imageIndex)
+{
+	if (imageIndex < 64)
+	{
+		mObservedSwapChainAcquireMask |= (1ull << imageIndex);
+	}
+}
+
+void NRIRenderDevice::NoteSwapChainPresent(uint32_t imageIndex)
+{
+	if (imageIndex < 64)
+	{
+		mObservedSwapChainPresentMask |= (1ull << imageIndex);
+	}
+}
+
 void NRIRenderDevice::ResetPathTracingHistory()
 {
 	if (mRenderer == nullptr)
@@ -788,6 +930,11 @@ void NRIRenderDevice::LogStartup()
 	Printf("Shader model: %u.%u\n", deviceDesc.shaderModel / 10, deviceDesc.shaderModel % 10);
 	Printf("Ray tracing tier: %u\n", deviceDesc.tiers.rayTracing);
 	Printf("NRI queued frames: %u\n", (uint32_t)mQueuedFrames.size());
+	Printf("NRI swapchain policy: textures=%u queued_frames=%u vsync=%s flags=%s\n",
+		(uint32_t)mSwapChainTextureCount,
+		(uint32_t)mSwapChainQueuedFrameNum,
+		vid_vsync ? "on" : "off",
+		DescribeSwapChainFlags(mSwapChainFlags).GetChars());
 	Printf("Upscaler support: NIS=%s DLSS-SR=%s DLRR=%s\n",
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::NIS) ? "yes" : "no",
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLSR) ? "yes" : "no",
@@ -917,7 +1064,8 @@ bool NRIRenderDevice::CreateSwapChain()
 	swapChainDesc.height = height;
 	swapChainDesc.textureNum = 3;
 	swapChainDesc.format = nri::SwapChainFormat::BT709_G22_8BIT;
-	swapChainDesc.flags = nri::SwapChainBits::NONE;
+	swapChainDesc.flags = vid_vsync ? nri::SwapChainBits::VSYNC : nri::SwapChainBits::ALLOW_TEARING;
+	swapChainDesc.queuedFrameNum = QueuedFrameCount;
 
 	if (mSwapChainInterface.CreateSwapChain(*mDevice, swapChainDesc, mSwapChain) != nri::Result::SUCCESS)
 	{
@@ -928,6 +1076,11 @@ bool NRIRenderDevice::CreateSwapChain()
 	uint32_t textureCount = 0;
 	nri::Texture* const* textures = mSwapChainInterface.GetSwapChainTextures(*mSwapChain, textureCount);
 	mSwapChainImages.resize(textureCount);
+	mSwapChainFlags = swapChainDesc.flags;
+	mSwapChainQueuedFrameNum = swapChainDesc.queuedFrameNum;
+	mSwapChainTextureCount = (uint8_t)(std::min<uint32_t>)(textureCount, 255u);
+	mObservedSwapChainAcquireMask = 0;
+	mObservedSwapChainPresentMask = 0;
 
 	for (uint32_t i = 0; i < textureCount; ++i)
 	{
@@ -952,6 +1105,14 @@ bool NRIRenderDevice::CreateSwapChain()
 			return false;
 		}
 	}
+
+	Printf("NRI swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s size=%ux%u\n",
+		(uint32_t)mSwapChainTextureCount,
+		(uint32_t)mSwapChainQueuedFrameNum,
+		vid_vsync ? "on" : "off",
+		DescribeSwapChainFlags(mSwapChainFlags).GetChars(),
+		width,
+		height);
 
 	return true;
 }
@@ -978,6 +1139,11 @@ bool NRIRenderDevice::CreateQueuedFrames()
 void NRIRenderDevice::DestroySwapChain()
 {
 	ResetFrameTracking();
+	mSwapChainFlags = nri::SwapChainBits::NONE;
+	mSwapChainQueuedFrameNum = 0;
+	mSwapChainTextureCount = 0;
+	mObservedSwapChainAcquireMask = 0;
+	mObservedSwapChainPresentMask = 0;
 
 	for (auto& image : mSwapChainImages)
 	{
@@ -1266,6 +1432,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		ScopedNriTiming presentTiming(NriPTQueuePresent, mLastFrameBoundaryStats.presentMs);
 		mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
 	}
+	NoteSwapChainPresent(mCurrentSwapChainImage);
 	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())
 	{
 		QueuedFrame& queuedFrame = mQueuedFrames[mCurrentQueuedFrameIndex];
