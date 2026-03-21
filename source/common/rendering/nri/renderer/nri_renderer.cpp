@@ -31,6 +31,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
 	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
 	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
+	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
 
 	template<typename T>
 	static T NRIFlags(T a, T b)
@@ -1434,7 +1435,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mOutputDescriptors[5] = GetFrameTexture(FrameTextureSlot::NormalRoughness).storageView;
 	mOutputDescriptors[6] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).storageView;
 	mOutputDescriptors[9] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).storageView;
-	mOutputDescriptors[10] = GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo).storageView;
+	mOutputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).storageView;
 	mOutputDescriptors[11] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).storageView;
 	UpdateOutputSet();
 
@@ -1567,14 +1568,21 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot)
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
+	const bool combineSecondary = !nri_ptbootstrap && inputSlot == FrameTextureSlot::UnfilteredDiffuse;
+	NRITextureResource& secondary = GetFrameTexture(combineSecondary ? FrameTextureSlot::UnfilteredSpecular : inputSlot);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
+	if (combineSecondary)
+	{
+		constants.Flags |= NRI_FLAG_RAW_PRESENT_ADD_SECONDARY;
+	}
 
 	mFrameBuffer->TransitionTexture(input, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(secondary, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
 
 	const nri::Descriptor* inputs[3] = {
 		input.shaderView,
-		input.shaderView,
+		secondary.shaderView,
 		input.shaderView
 	};
 	nri::UpdateDescriptorRangeDesc inputUpdate = {};
