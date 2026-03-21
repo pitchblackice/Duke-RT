@@ -265,6 +265,7 @@ public:
 	virtual void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc) {}
 	virtual bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const { return false; }
 	virtual bool RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal) { return false; }
+	virtual bool HasActiveSceneFrame() const { return true; }
 	virtual void SetActiveRenderTarget() {}
 
 	// Screen wiping

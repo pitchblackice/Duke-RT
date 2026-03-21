@@ -1549,59 +1549,24 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return true;
 	}
 
-	const int debugMode = nri_ptdebug;
-	if (rawTraceDirectPresent && debugMode >= 10 && debugMode <= 12)
-	{
-		mUseUpscaledInFinal = false;
-		FrameTextureSlot debugSlot = FrameTextureSlot::UnfilteredDiffuse;
-		switch (debugMode)
-		{
-		default:
-		case 10: debugSlot = FrameTextureSlot::UnfilteredDiffuse; break;
-		case 11: debugSlot = FrameTextureSlot::UnfilteredSpecular; break;
-		case 12: debugSlot = FrameTextureSlot::ViewZ; break;
-		}
-
-		if (!DispatchRawPresent(debugSlot))
-		{
-			return false;
-		}
-
-		CopyFinalToActiveTarget();
-		return true;
-	}
-
 	if (rawTraceDirectPresent)
 	{
 		if (!sLoggedRawTraceBypass)
 		{
-			Printf("NRI frame-graph bypass: presenting composed output through dedicated final present pass until shared Final/temporal integration is stabilized.\n");
+			Printf("NRI frame-graph bypass: presenting composed output through the shared Final pass while the direct present detour stays disabled.\n");
 			sLoggedRawTraceBypass = true;
 		}
 
-		if (debugMode == 15)
+		if (!DispatchComposition())
 		{
-			if (!DispatchComposition())
-			{
-				return false;
-			}
-
-			if (!DispatchRawPresent(FrameTextureSlot::Composed))
-			{
-				return false;
-			}
+			return false;
 		}
-		else
-		{
-			if (!DispatchComposition())
-			{
-				return false;
-			}
 
-			if (!DispatchRawPresent(FrameTextureSlot::Composed))
-			{
-				return false;
-			}
+		mUpscaledInputSlot = FrameTextureSlot::Composed;
+		mUseUpscaledInFinal = false;
+		if (!DispatchFinal())
+		{
+			return false;
 		}
 
 		CopyFinalToActiveTarget();

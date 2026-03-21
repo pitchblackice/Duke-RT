@@ -41,6 +41,7 @@ public:
 	void SetActiveRenderTarget() override;
 	void PostProcessScene(bool swscene, int fixedcm, float flash, const std::function<void()> &afterBloomDrawEndScene2D) override;
 	bool RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal) override;
+	bool HasActiveSceneFrame() const override;
 
 	IHardwareTexture* CreateHardwareTexture(int numchannels) override;
 	IVertexBuffer* CreateVertexBuffer() override;

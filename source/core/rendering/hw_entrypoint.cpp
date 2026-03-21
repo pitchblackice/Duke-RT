@@ -68,7 +68,13 @@ static bool HasRequiredHWSceneBuffers()
 
 	if (screen->mVertexData != nullptr && screen->mLights != nullptr && screen->mViewpoints != nullptr)
 	{
-		return true;
+		if (screen->HasActiveSceneFrame())
+		{
+			return true;
+		}
+
+		Printf(TEXTCOLOR_RED "Hardware scene frame is unavailable on backend '%s'; skipping scene render.\n", screen->DeviceName());
+		return false;
 	}
 
 	Printf(TEXTCOLOR_RED "Hardware scene buffers are unavailable on backend '%s'; skipping scene render.\n", screen->DeviceName());

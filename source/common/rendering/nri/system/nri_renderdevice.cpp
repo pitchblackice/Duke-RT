@@ -32,6 +32,7 @@
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Int, nri_ptdebug)
+EXTERN_CVAR(Bool, nri_validation)
 EXTERN_CVAR(Bool, vid_vsync)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
@@ -802,6 +803,7 @@ void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::func
 bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal)
 {
 	static bool sLoggedFirstSceneAttempt = false;
+	static bool sLoggedFrameShellSkip = false;
 
 	if (!mInitialized)
 	{
@@ -825,12 +827,30 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 		return RenderPathTracingSanityFrame();
 	}
 
+	if (!mUsingSaveTarget && (!mFrameBegun || mCommandBuffer == nullptr || mActiveTarget == nullptr))
+	{
+		if (nri_ptdebug > 0 && !sLoggedFrameShellSkip)
+		{
+			Printf(TEXTCOLOR_ORANGE "NRI skipping raster fallback because the onscreen frame shell is unavailable (frame_begun=%s command_buffer=%s active_target=%s).\n",
+				mFrameBegun ? "true" : "false",
+				mCommandBuffer != nullptr ? "yes" : "no",
+				mActiveTarget != nullptr ? "yes" : "no");
+			sLoggedFrameShellSkip = true;
+		}
+		return true;
+	}
+
 	if (mRenderer == nullptr)
 	{
 		return false;
 	}
 
 	return mRenderer->RenderScene(di, drawmode, portal);
+}
+
+bool NRIRenderDevice::HasActiveSceneFrame() const
+{
+	return mInitialized && mFrameBegun && mCommandBuffer != nullptr && mActiveTarget != nullptr;
 }
 
 bool NRIRenderDevice::ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const
@@ -1320,8 +1340,8 @@ bool NRIRenderDevice::CreateDevice()
 	creationDesc.graphicsAPI = GetSelectedAPI();
 	creationDesc.adapterDesc = &adapters[0];
 	creationDesc.callbackInterface.MessageCallback = &NriMessageCallback;
-	creationDesc.enableGraphicsAPIValidation = false;
-	creationDesc.enableNRIValidation = false;
+	creationDesc.enableGraphicsAPIValidation = !!nri_validation;
+	creationDesc.enableNRIValidation = !!nri_validation;
 	creationDesc.disableVKRayTracing = false;
 	creationDesc.disableD3D12EnhancedBarriers = false;
 	creationDesc.vkBindingOffsets = {};
