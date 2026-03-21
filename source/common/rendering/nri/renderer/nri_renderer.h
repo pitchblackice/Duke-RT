@@ -58,6 +58,7 @@ private:
 		TraceOpaque,
 		Composition,
 		Taa,
+		RawPresent,
 		DlssBefore,
 		DlssAfter,
 		Final,
@@ -85,6 +86,7 @@ private:
 	bool DispatchTraceOpaque(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool DispatchDenoiser();
 	bool DispatchComposition();
+	bool DispatchRawPresent(FrameTextureSlot inputSlot);
 	bool DispatchUpscaleChain();
 	bool DispatchFinal();
 	bool CheckPathTracingSupport();

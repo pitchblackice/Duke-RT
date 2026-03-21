@@ -37,6 +37,24 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
+	if (directSceneTrace && !bootstrapFlat && !bootstrapBaseColor && gTraceConstants.DebugMode == 10)
+	{
+		const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+		const float checker = fmod(floor(uv.x * 16.0) + floor(uv.y * 16.0), 2.0);
+		const float3 probe = lerp(float3(0.05, 0.2, 0.05), float3(0.05, 1.0, 0.05), checker);
+		gTraceOutput[pixelPos] = float4(probe, 1.0);
+		gComposedOutput[pixelPos] = float4(probe, 1.0);
+		gMotionOutput[pixelPos] = 0.0;
+		gViewZOutput[pixelPos] = 0.0;
+		gNormalRoughnessOutput[pixelPos] = 0.0;
+		gBaseColorOutput[pixelPos] = float4(probe, 1.0);
+		gGuideDiffuseOutput[pixelPos] = float4(probe, 1.0);
+		gGuideSpecularOutput[pixelPos] = 0.0;
+		gGuideSpecHitOutput[pixelPos] = 0.0;
+		gFinalOutput[pixelPos] = float4(probe, 1.0);
+		return;
+	}
+
 	HitData hit = (HitData)0;
 	if (directSceneTrace)
 	{

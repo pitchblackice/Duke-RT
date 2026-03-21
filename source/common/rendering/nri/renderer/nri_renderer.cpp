@@ -783,6 +783,7 @@ bool NRIRenderer::CreatePipelines()
 	FString trace = FStringf("TraceOpaque.cs.%s", suffix);
 	FString composition = FStringf("Composition.cs.%s", suffix);
 	FString taa = FStringf("Taa.cs.%s", suffix);
+	FString rawPresent = FStringf("RawPresent.cs.%s", suffix);
 	FString dlssBefore = FStringf("DlssBefore.cs.%s", suffix);
 	FString dlssAfter = FStringf("DlssAfter.cs.%s", suffix);
 	FString final = FStringf("Final.cs.%s", suffix);
@@ -791,6 +792,7 @@ bool NRIRenderer::CreatePipelines()
 		createPipeline(trace.GetChars(), PipelineSlot::TraceOpaque, mPipelineLayout) &&
 		createPipeline(composition.GetChars(), PipelineSlot::Composition, mPipelineLayout) &&
 		createPipeline(taa.GetChars(), PipelineSlot::Taa, mTaaPipelineLayout) &&
+		createPipeline(rawPresent.GetChars(), PipelineSlot::RawPresent, mTaaPipelineLayout) &&
 		createPipeline(dlssBefore.GetChars(), PipelineSlot::DlssBefore, mPipelineLayout) &&
 		createPipeline(dlssAfter.GetChars(), PipelineSlot::DlssAfter, mPipelineLayout) &&
 		createPipeline(final.GetChars(), PipelineSlot::Final, mPipelineLayout);
@@ -1331,33 +1333,37 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return true;
 	}
 
+	const int debugMode = nri_ptdebug;
+	if (rawTraceDirectPresent && debugMode >= 10 && debugMode <= 12)
+	{
+		FrameTextureSlot probeSlot = FrameTextureSlot::PreFinal;
+		if (debugMode == 11)
+		{
+			probeSlot = FrameTextureSlot::UnfilteredDiffuse;
+		}
+		else if (debugMode == 12)
+		{
+			probeSlot = FrameTextureSlot::UnfilteredSpecular;
+		}
+
+		CopyTexture(GetFrameTexture(probeSlot), GetFrameTexture(FrameTextureSlot::Final));
+		CopyFinalToActiveTarget();
+		return true;
+	}
+
 	if (rawTraceDirectPresent)
 	{
 		if (!sLoggedRawTraceBypass)
 		{
-			Printf("NRI frame-graph bypass: presenting Composition directly until Final/temporal integration is stabilized.\n");
+			Printf("NRI frame-graph bypass: presenting raw diffuse through dedicated present pass until composition/final integration is stabilized.\n");
 			sLoggedRawTraceBypass = true;
 		}
 
-		if (!DispatchComposition())
+		if (!DispatchRawPresent(FrameTextureSlot::UnfilteredDiffuse))
 		{
 			return false;
 		}
 
-		const int debugMode = nri_ptdebug;
-		if (debugMode >= 10 && debugMode <= 15)
-		{
-			mUseUpscaledInFinal = false;
-			if (!DispatchFinal())
-			{
-				return false;
-			}
-
-			CopyFinalToActiveTarget();
-			return true;
-		}
-
-		CopyTexture(GetFrameTexture(FrameTextureSlot::Composed), GetFrameTexture(FrameTextureSlot::Final));
 		CopyFinalToActiveTarget();
 		return true;
 	}
@@ -1510,7 +1516,7 @@ bool NRIRenderer::DispatchComposition()
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
 	constants.FrameIndex = mFrameIndex;
-	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (!nri_ptbootstrap ? NRI_FLAG_PRESENT_RAW_TRACE : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	Copy3(mSkyColor, constants.SkyColor);
@@ -1552,6 +1558,51 @@ bool NRIRenderer::DispatchComposition()
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Composition));
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+	return true;
+}
+
+bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot)
+{
+	NRITraceConstants constants = {};
+	constants.RenderWidth = mRenderWidth;
+	constants.RenderHeight = mRenderHeight;
+	constants.DisplayWidth = mOutputWidth;
+	constants.DisplayHeight = mOutputHeight;
+	constants.FrameIndex = mFrameIndex;
+	constants.DebugMode = (uint32_t)nri_ptdebug;
+
+	NRITextureResource& input = GetFrameTexture(inputSlot);
+	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
+
+	mFrameBuffer->TransitionTexture(input, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
+
+	const nri::Descriptor* inputs[3] = {
+		input.shaderView,
+		input.shaderView,
+		input.shaderView
+	};
+	nri::UpdateDescriptorRangeDesc inputUpdate = {};
+	inputUpdate.descriptorSet = mTaaFrameTextureSet;
+	inputUpdate.rangeIndex = 0;
+	inputUpdate.descriptors = inputs;
+	inputUpdate.descriptorNum = (uint32_t)std::size(inputs);
+	mFrameBuffer->mCore.UpdateDescriptorRanges(&inputUpdate, 1);
+
+	const nri::Descriptor* outputs[1] = { final.storageView };
+	nri::UpdateDescriptorRangeDesc outputUpdate = {};
+	outputUpdate.descriptorSet = mTaaOutputSet;
+	outputUpdate.rangeIndex = 0;
+	outputUpdate.descriptors = outputs;
+	outputUpdate.descriptorNum = (uint32_t)std::size(outputs);
+	mFrameBuffer->mCore.UpdateDescriptorRanges(&outputUpdate, 1);
+
+	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mTaaPipelineLayout);
+	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mTaaFrameTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mTaaOutputSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::RawPresent));
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mOutputWidth), GetDispatchSize(mOutputHeight), 1 });
 	return true;
 }
 

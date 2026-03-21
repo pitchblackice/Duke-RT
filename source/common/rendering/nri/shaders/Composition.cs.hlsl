@@ -20,5 +20,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const float4 diffuse = gComposedInput[pixelPos];
 	const float4 specular = gUpscaledInput[pixelPos];
+	if ((gTraceConstants.Flags & 0x8u) != 0)
+	{
+		gComposedOutput[pixelPos] = float4(saturate(diffuse.rgb), 1.0);
+		return;
+	}
+
 	gComposedOutput[pixelPos] = float4(saturate(diffuse.rgb + specular.rgb), 1.0);
 }
