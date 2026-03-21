@@ -159,6 +159,58 @@ namespace
 			(unsigned)hr);
 	}
 
+	static void LogD3D12InfoQueueMessages(const nri::CoreInterface& core, nri::Device* device, const char* context)
+	{
+		if (device == nullptr || core.GetDeviceNativeObject == nullptr)
+		{
+			return;
+		}
+
+		auto* d3d12Device = static_cast<ID3D12Device*>(core.GetDeviceNativeObject(device));
+		if (d3d12Device == nullptr)
+		{
+			return;
+		}
+
+		ID3D12InfoQueue* infoQueue = nullptr;
+		if (FAILED(d3d12Device->QueryInterface(IID_PPV_ARGS(&infoQueue))) || infoQueue == nullptr)
+		{
+			return;
+		}
+
+		const UINT64 messageCount = infoQueue->GetNumStoredMessagesAllowedByRetrievalFilter();
+		if (messageCount == 0)
+		{
+			infoQueue->Release();
+			return;
+		}
+
+		const UINT64 start = messageCount > 16 ? messageCount - 16 : 0;
+		for (UINT64 i = start; i < messageCount; ++i)
+		{
+			SIZE_T messageSize = 0;
+			if (FAILED(infoQueue->GetMessage(i, nullptr, &messageSize)) || messageSize == 0)
+			{
+				continue;
+			}
+
+			std::vector<uint8_t> storage(messageSize);
+			auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+			if (FAILED(infoQueue->GetMessage(i, message, &messageSize)))
+			{
+				continue;
+			}
+
+			Printf(TEXTCOLOR_RED "NRI D3D12 info queue after %s [%u]: %s\n",
+				context != nullptr ? context : "unknown",
+				(unsigned)message->ID,
+				message->pDescription != nullptr ? message->pDescription : "(no description)");
+		}
+
+		infoQueue->ClearStoredMessages();
+		infoQueue->Release();
+	}
+
 	static NRIRenderDevice* GetActiveNRIRenderDevice()
 	{
 		if (screen == nullptr || screen->Backend() != 4)
@@ -662,6 +714,7 @@ void NRIRenderDevice::BeginFrame()
 		if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
 		{
 			LogD3D12DeviceRemovedReason(mCore, mDevice, "AcquireNextTexture");
+			LogD3D12InfoQueueMessages(mCore, mDevice, "AcquireNextTexture");
 		}
 		return;
 	}
@@ -1881,6 +1934,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
 		{
 			LogD3D12DeviceRemovedReason(mCore, mDevice, "QueueSubmit");
+			LogD3D12InfoQueueMessages(mCore, mDevice, "QueueSubmit");
 		}
 	}
 
@@ -1911,6 +1965,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
 		{
 			LogD3D12DeviceRemovedReason(mCore, mDevice, "QueuePresent");
+			LogD3D12InfoQueueMessages(mCore, mDevice, "QueuePresent");
 		}
 	}
 	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())
