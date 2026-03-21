@@ -243,6 +243,13 @@ float3 BootstrapCapturedSceneLit(float2 uv)
 	return saturate(diffuse + specular);
 }
 
+uint2 ResolvePresentSamplePos(uint2 pixelPos)
+{
+	const uint2 inputSize = uint2(max(gTraceConstants.RenderWidth, 1u), max(gTraceConstants.RenderHeight, 1u));
+	const uint2 outputSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
+	return min((pixelPos * inputSize) / outputSize, inputSize - 1u);
+}
+
 float3 BootstrapHashColor(uint index)
 {
 	const float seed = (float)(index + 1u);
@@ -600,6 +607,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const uint2 pixelPos = dispatchThreadId.xy;
 	const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
+	const uint2 samplePos = ResolvePresentSamplePos(pixelPos);
 	float4 composed = 0.0;
 
 	if ((gTraceConstants.Flags & 0x4u) != 0)
@@ -682,37 +690,37 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 10)
 	{
-		composed = float4(saturate(gComposedInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 11)
 	{
-		composed = float4(saturate(gComposedInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 12)
 	{
-		const float viewZ = abs(gViewZInput.SampleLevel(gLinearClamp, uv, 0.0).x);
+		const float viewZ = abs(gViewZInput.Load(int3(samplePos, 0)).x);
 		const float hitMetric = saturate(viewZ / 4096.0);
 		composed = float4(hitMetric.xxx, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 13)
 	{
-		composed = float4(saturate(gHistoryInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		composed = float4(saturate(gHistoryInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 14)
 	{
-		composed = float4(saturate(gUpscaledInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		composed = float4(saturate(gUpscaledInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 15)
 	{
-		composed = float4(saturate(gComposedInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
-		composed = float4(saturate(gComposedInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
+		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if ((gTraceConstants.Flags & 0x2u) != 0)
 	{
-		composed = gUpscaledInput.SampleLevel(gLinearClamp, uv, 0.0);
+		composed = gUpscaledInput.Load(int3(samplePos, 0));
 	}
 	else
 	{
