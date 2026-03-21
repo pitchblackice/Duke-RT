@@ -509,6 +509,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		gpuMaterials = materialBridge.materials;
 	}
 	const bool buffersReady = texturesReady && UploadSceneBuffers(geometry, gpuMaterials);
+	if (texturesReady)
+	{
+		PrepareSceneTextureInputsForCompute();
+	}
 	const bool accelerationReady = (bootstrapCapturedView || rawTraceDirectScene) ? true : (buffersReady && BuildAccelerationStructures(geometry));
 	bool dispatched = false;
 	if (bootstrapCapturedView)
@@ -985,6 +989,32 @@ bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri:
 bool NRIRenderer::CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format)
 {
 	return mFrameBuffer->CreateOwnedTexture(GetFrameTexture(slot), width, height, format, NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE));
+}
+
+void NRIRenderer::PrepareSceneTextureInputsForCompute()
+{
+	if (mFrameBuffer == nullptr)
+	{
+		return;
+	}
+
+	if (mPaletteTexture.texture != nullptr)
+	{
+		mFrameBuffer->TransitionTexture(mPaletteTexture, NRIComputeShaderResourceState());
+	}
+
+	if (mFrameBuffer->mWhiteTexture != nullptr)
+	{
+		mFrameBuffer->TransitionTexture(mFrameBuffer->mWhiteTexture->GetResource(), NRIComputeShaderResourceState());
+	}
+
+	for (auto& entry : mTextureCache)
+	{
+		if (entry.resource.texture != nullptr)
+		{
+			mFrameBuffer->TransitionTexture(entry.resource, NRIComputeShaderResourceState());
+		}
+	}
 }
 
 bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight)
