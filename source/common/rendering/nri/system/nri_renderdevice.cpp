@@ -34,6 +34,7 @@ EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Int, nri_ptdebug)
 EXTERN_CVAR(Bool, nri_validation)
+EXTERN_CVAR(Bool, nri_apivalidation)
 EXTERN_CVAR(Bool, vid_vsync)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
@@ -1451,7 +1452,7 @@ bool NRIRenderDevice::CreateDevice()
 	creationDesc.graphicsAPI = GetSelectedAPI();
 	creationDesc.adapterDesc = &adapters[0];
 	creationDesc.callbackInterface.MessageCallback = &NriMessageCallback;
-	creationDesc.enableGraphicsAPIValidation = !!nri_validation;
+	creationDesc.enableGraphicsAPIValidation = !!nri_apivalidation;
 	creationDesc.enableNRIValidation = !!nri_validation;
 	creationDesc.disableVKRayTracing = false;
 	creationDesc.disableD3D12EnhancedBarriers = false;

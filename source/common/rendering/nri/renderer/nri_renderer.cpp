@@ -19,6 +19,7 @@ CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_apivalidation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptbootstrapmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
@@ -602,10 +603,11 @@ void NRIRenderer::PrintStatus() const
 		mOutputHeight,
 		mHasPreviousCameraState ? "yes" : "no",
 		mResetHistory ? "yes" : "no");
-	Printf("NRI PT features: bootstrap=%s denoise=%s validation=%s upscaler=%s->%s mode=%s render_scale=%.3f sharpness=%.3f\n",
+	Printf("NRI PT features: bootstrap=%s denoise=%s validation=%s api_validation=%s upscaler=%s->%s mode=%s render_scale=%.3f sharpness=%.3f\n",
 		nri_ptbootstrap ? "on" : "off",
 		nri_denoise ? "on" : "off",
 		nri_validation ? "on" : "off",
+		nri_apivalidation ? "on" : "off",
 		GetUpscalerName(requested),
 		GetUpscalerName(resolved),
 		GetUpscalerModeName(GetSelectedUpscalerMode()),
