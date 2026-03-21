@@ -148,6 +148,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	gTraceOutput[pixelPos] = color;
 	if (directSceneTrace && !bootstrapFlat && !bootstrapBaseColor)
 	{
-		gFinalOutput[pixelPos] = float4(saturate(color.rgb), 1.0);
+		gFinalOutput[pixelPos] = saturate(color.rgb);
 	}
 }

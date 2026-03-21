@@ -36,7 +36,7 @@ Texture2D<float4> gInputTexture : register(t0, space0);
 Texture2D<float4> gUnused1 : register(t1, space0);
 Texture2D<float4> gUnused2 : register(t2, space0);
 
-NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gOutputTexture, u, 0, 1);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float3>, gOutputTexture, u, 0, 1);
 
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -51,5 +51,5 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 outputSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
 	const uint2 samplePos = min((pixelPos * inputSize) / outputSize, inputSize - 1u);
 	const float3 color = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
-	gOutputTexture[pixelPos] = float4(color, 1.0);
+	gOutputTexture[pixelPos] = color;
 }

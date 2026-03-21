@@ -661,7 +661,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			color = BootstrapCapturedSceneBaseColor(uv);
 		}
-		gFinalOutput[pixelPos] = float4(saturate(color), 1.0);
+		gFinalOutput[pixelPos] = saturate(color);
 		return;
 	}
 
@@ -727,5 +727,5 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		composed = gComposedInput[pixelPos];
 	}
 
-	gFinalOutput[pixelPos] = float4(saturate(composed.rgb), 1.0);
+	gFinalOutput[pixelPos] = saturate(composed.rgb);
 }
