@@ -51,6 +51,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 outputSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
 	const uint2 samplePos = min((pixelPos * inputSize) / outputSize, inputSize - 1u);
 	float3 color = gInputTexture.Load(int3(samplePos, 0)).rgb;
+	if (gTraceConstants.DebugMode == 11u)
+	{
+		const float specularMax = max(color.r, max(color.g, color.b));
+		color = saturate(color * 32.0 + specularMax.xxx * 8.0);
+	}
+	else
 	if (gTraceConstants.DebugMode == 12u)
 	{
 		const float viewZ = abs(color.x);
