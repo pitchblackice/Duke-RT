@@ -68,7 +68,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else
 	{
-		const float roughness = 0.08;
+		const float roughness = 0.22;
 		const float materialID = 0.0;
 		const float currentViewZ = dot(hit.position - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
 		const float2 prevUv = ProjectWorldToUv(hit.position, gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward, gTraceConstants.PrevCameraRight, gTraceConstants.PrevCameraUp, gTraceConstants.PrevTanHalfFovX, gTraceConstants.PrevTanHalfFovY);
@@ -98,12 +98,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			else
 			{
 				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal);
-				const float lambert = max(dot(hit.normal, gTraceConstants.LightDirection), 0.0);
+				const float3 viewDir = normalize(-visibleRayDirection);
+				const float3 lightDir = normalize(gTraceConstants.LightDirection);
+				const float lambert = max(dot(hit.normal, lightDir), 0.0);
 				const float lighting = 0.20 + shadow * lambert * 0.80;
 				diffuse = albedo.rgb * lighting;
-				const float3 halfVector = normalize(gTraceConstants.LightDirection - visibleRayDirection);
-				const float specularTerm = pow(max(dot(hit.normal, halfVector), 0.0), 32.0) * shadow;
-				specular = albedo.rgb * specularTerm * 0.2;
+				const float3 halfVector = normalize(lightDir + viewDir);
+				const float ndoth = max(dot(hit.normal, halfVector), 0.0);
+				const float vdoth = max(dot(viewDir, halfVector), 0.0);
+				const float fresnel = pow(1.0 - vdoth, 5.0);
+				const float3 dielectricF0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, 0.12);
+				const float3 specularColor = lerp(dielectricF0, float3(1.0, 1.0, 1.0), fresnel);
+				const float specularTerm = pow(ndoth, 12.0) * shadow * (0.5 + 0.5 * lambert);
+				specular = specularColor * specularTerm * 0.85;
 			}
 		}
 		gMotionOutput[pixelPos] = float4(motion, 0.0, 1.0);
