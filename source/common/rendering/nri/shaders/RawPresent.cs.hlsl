@@ -53,8 +53,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float3 color = gInputTexture.Load(int3(samplePos, 0)).rgb;
 	if (gTraceConstants.DebugMode == 11u)
 	{
-		const float specularMax = max(color.r, max(color.g, color.b));
-		color = saturate(color * 32.0 + specularMax.xxx * 8.0);
+		const float4 rawSpecular = gInputTexture.Load(int3(samplePos, 0));
+		const float3 specularRgb = rawSpecular.bgr;
+		const float specularMax = max(specularRgb.r, max(specularRgb.g, specularRgb.b));
+		const float hitMask = step(1e-4, rawSpecular.a);
+		const float boosted = saturate(specularMax * 64.0);
+		color = lerp(float3(0.0, 0.0, 0.0), float3(0.08, 0.16, 0.55), hitMask);
+		color = lerp(color, float3(1.0, 1.0, 1.0), boosted);
 	}
 	else
 	if (gTraceConstants.DebugMode == 12u)

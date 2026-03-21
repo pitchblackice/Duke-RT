@@ -1359,11 +1359,16 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedRawTraceBypass)
 		{
-			Printf("NRI frame-graph bypass: presenting raw diffuse through dedicated present pass until composition/final integration is stabilized.\n");
+			Printf("NRI frame-graph bypass: presenting composed output through dedicated present pass until final/temporal integration is stabilized.\n");
 			sLoggedRawTraceBypass = true;
 		}
 
-		if (!DispatchRawPresent(FrameTextureSlot::UnfilteredDiffuse))
+		if (!DispatchComposition())
+		{
+			return false;
+		}
+
+		if (!DispatchRawPresent(FrameTextureSlot::Composed))
 		{
 			return false;
 		}
