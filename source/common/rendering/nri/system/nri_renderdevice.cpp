@@ -29,6 +29,51 @@ EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Bool, vid_vsync)
 CVAR(Bool, nri_ptsanity, false, 0)
+CVAR(Bool, nri_ptwaitpresent, true, 0)
+
+namespace
+{
+	static constexpr int DefaultSwapChainTextureCount = 3;
+	static NRIRenderDevice* GetActiveNRIRenderDevice();
+}
+
+CUSTOM_CVAR(Int, nri_ptswaptextures, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self == 1)
+	{
+		self = 2;
+	}
+	else if (self > 8)
+	{
+		self = 8;
+	}
+
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->SetVSync(vid_vsync);
+	}
+}
+
+CUSTOM_CVAR(Int, nri_ptswapflags, -1, 0)
+{
+	if (self < -1)
+	{
+		self = -1;
+	}
+	else if (self > 3)
+	{
+		self = 3;
+	}
+
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->SetVSync(vid_vsync);
+	}
+}
 
 namespace
 {
@@ -218,6 +263,46 @@ namespace
 
 		return description;
 	}
+
+	static uint8_t GetRequestedSwapChainTextureCount()
+	{
+		if (nri_ptswaptextures > 0)
+		{
+			return (uint8_t)nri_ptswaptextures;
+		}
+
+		return DefaultSwapChainTextureCount;
+	}
+
+	static nri::SwapChainBits GetRequestedSwapChainFlags()
+	{
+		switch ((int)nri_ptswapflags)
+		{
+		case 0:
+			return nri::SwapChainBits::NONE;
+		case 1:
+			return nri::SwapChainBits::ALLOW_TEARING;
+		case 2:
+			return nri::SwapChainBits::VSYNC;
+		case 3:
+			return NRIFlags(nri::SwapChainBits::VSYNC, nri::SwapChainBits::ALLOW_TEARING);
+		default:
+			return vid_vsync ? nri::SwapChainBits::VSYNC : nri::SwapChainBits::ALLOW_TEARING;
+		}
+	}
+
+	static const char* DescribeSwapChainFlagOverride()
+	{
+		switch ((int)nri_ptswapflags)
+		{
+		case -1: return "default";
+		case 0: return "NONE";
+		case 1: return "ALLOW_TEARING";
+		case 2: return "VSYNC";
+		case 3: return "VSYNC|ALLOW_TEARING";
+		default: return "invalid";
+		}
+	}
 }
 
 extern "C" nri::Result NRI_CALL nriGetInterface(const nri::Device& device, const char* interfaceName, size_t interfaceSize, void* interfacePtr)
@@ -391,10 +476,12 @@ void NRIRenderDevice::BeginFrame()
 	mLastFrameBoundaryStats.frameNumber++;
 	mLastFrameBoundaryStats.frameIndex = mFrameIndex;
 	mLastFrameBoundaryStats.waitMs = 0.0;
+	mLastFrameBoundaryStats.waitForPresentMs = 0.0;
 	mLastFrameBoundaryStats.acquireMs = 0.0;
 	mLastFrameBoundaryStats.submitMs = 0.0;
 	mLastFrameBoundaryStats.presentMs = 0.0;
 	mLastFrameBoundaryStats.submittedFenceValue = 0;
+	mLastFrameBoundaryStats.waitForPresentResult = nri::Result::SUCCESS;
 	mLastFrameBoundaryStats.acquireResult = nri::Result::FAILURE;
 	mLastFrameBoundaryStats.presentResult = nri::Result::FAILURE;
 	mCurrentQueuedFrameIndex = GetQueuedFrameIndex(mFrameIndex);
@@ -414,6 +501,16 @@ void NRIRenderDevice::BeginFrame()
 	if (!EnsureSwapChainSize())
 	{
 		return;
+	}
+
+	if (nri_ptwaitpresent && mHasPresentedSwapChainFrame && mSwapChain != nullptr)
+	{
+		nri::Result waitForPresentResult = nri::Result::FAILURE;
+		{
+			ScopedNriTiming waitPresentTiming(NriPTWaitPresent, mLastFrameBoundaryStats.waitForPresentMs);
+			waitForPresentResult = mSwapChainInterface.WaitForPresent(*mSwapChain);
+		}
+		mLastFrameBoundaryStats.waitForPresentResult = waitForPresentResult;
 	}
 
 	if (!BeginCommandList(false))
@@ -522,11 +619,15 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 		return;
 	}
 
-	const uint32_t queuedFrameIndex = mCurrentQueuedFrameIndex < mQueuedFrames.size() ? mCurrentQueuedFrameIndex : 0;
-	const QueuedFrame& queuedFrame = mQueuedFrames[queuedFrameIndex];
-	if (queuedFrame.hasSubmittedWork && queuedFrame.lastSubmittedFenceValue != 0)
+	if (mFrameIndex < mQueuedFrames.size())
 	{
-		mCore.Wait(*mFrameFence, queuedFrame.lastSubmittedFenceValue);
+		return;
+	}
+
+	const uint64_t recycleFenceValue = 1 + mFrameIndex - mQueuedFrames.size();
+	if (recycleFenceValue != 0)
+	{
+		mCore.Wait(*mFrameFence, recycleFenceValue);
 	}
 }
 
@@ -731,16 +832,18 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 void NRIRenderDevice::PrintFrameBoundaryStatus() const
 {
 	const auto& stats = mLastFrameBoundaryStats;
-	Printf("NRI PT frame boundary: frame=%llu frame_index=%llu qframe=%u sanity_mode=%s last_frame=%s wait=%2.3f acquire=%2.3f submit=%2.3f present=%2.3f acquire_result=%s present_result=%s image=%u sem_index=%u submit_fence=%llu\n",
+	Printf("NRI PT frame boundary: frame=%llu frame_index=%llu qframe=%u sanity_mode=%s last_frame=%s wait=%2.3f wait_present=%2.3f acquire=%2.3f submit=%2.3f present=%2.3f wait_present_result=%s acquire_result=%s present_result=%s image=%u sem_index=%u submit_fence=%llu\n",
 		(unsigned long long)stats.frameNumber,
 		(unsigned long long)stats.frameIndex,
 		stats.queuedFrameIndex,
 		stats.sanityModeEnabled ? "on" : "off",
 		stats.sanityFrameUsed ? "clear-only" : "normal",
 		stats.waitMs,
+		stats.waitForPresentMs,
 		stats.acquireMs,
 		stats.submitMs,
 		stats.presentMs,
+		GetNriResultName(stats.waitForPresentResult),
 		GetNriResultName(stats.acquireResult),
 		GetNriResultName(stats.presentResult),
 		stats.swapChainImageIndex,
@@ -791,11 +894,14 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 	const FString acquireCounts = DescribeSwapChainImageCounts(mSwapChainAcquireCounts);
 	const FString presentCounts = DescribeSwapChainImageCounts(mSwapChainPresentCounts);
 	const FString abandonCounts = DescribeSwapChainImageCounts(mSwapChainAbandonCounts);
-	Printf("NRI PT swapchain: textures=%u queued_frames=%u vsync=%s flags=%s acquire_seen=%u/%u [%s] present_seen=%u/%u [%s]\n",
+	Printf("NRI PT swapchain: textures=%u queued_frames=%u vsync=%s flags=%s texture_override=%d flag_override=%s wait_present=%s acquire_seen=%u/%u [%s] present_seen=%u/%u [%s]\n",
 		(uint32_t)mSwapChainTextureCount,
 		(uint32_t)mSwapChainQueuedFrameNum,
 		vid_vsync ? "on" : "off",
 		flagText.GetChars(),
+		(int)nri_ptswaptextures,
+		DescribeSwapChainFlagOverride(),
+		nri_ptwaitpresent ? "on" : "off",
 		CountSetBits(mObservedSwapChainAcquireMask),
 		(uint32_t)mSwapChainTextureCount,
 		acquiredImages.GetChars(),
@@ -1112,9 +1218,9 @@ bool NRIRenderDevice::CreateSwapChain()
 	swapChainDesc.queue = mGraphicsQueue;
 	swapChainDesc.width = width;
 	swapChainDesc.height = height;
-	swapChainDesc.textureNum = 3;
+	swapChainDesc.textureNum = GetRequestedSwapChainTextureCount();
 	swapChainDesc.format = nri::SwapChainFormat::BT709_G22_8BIT;
-	swapChainDesc.flags = vid_vsync ? nri::SwapChainBits::VSYNC : nri::SwapChainBits::ALLOW_TEARING;
+	swapChainDesc.flags = GetRequestedSwapChainFlags();
 	swapChainDesc.queuedFrameNum = QueuedFrameCount;
 
 	if (mSwapChainInterface.CreateSwapChain(*mDevice, swapChainDesc, mSwapChain) != nri::Result::SUCCESS)
@@ -1134,6 +1240,7 @@ bool NRIRenderDevice::CreateSwapChain()
 	mSwapChainAcquireCounts.assign(textureCount, 0);
 	mSwapChainPresentCounts.assign(textureCount, 0);
 	mSwapChainAbandonCounts.assign(textureCount, 0);
+	mHasPresentedSwapChainFrame = false;
 
 	for (uint32_t i = 0; i < textureCount; ++i)
 	{
@@ -1159,11 +1266,14 @@ bool NRIRenderDevice::CreateSwapChain()
 		}
 	}
 
-	Printf("NRI swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s size=%ux%u\n",
+	Printf("NRI swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s texture_override=%d flag_override=%s wait_present=%s size=%ux%u\n",
 		(uint32_t)mSwapChainTextureCount,
 		(uint32_t)mSwapChainQueuedFrameNum,
 		vid_vsync ? "on" : "off",
 		DescribeSwapChainFlags(mSwapChainFlags).GetChars(),
+		(int)nri_ptswaptextures,
+		DescribeSwapChainFlagOverride(),
+		nri_ptwaitpresent ? "on" : "off",
 		width,
 		height);
 
@@ -1200,6 +1310,7 @@ void NRIRenderDevice::DestroySwapChain()
 	mSwapChainAcquireCounts.clear();
 	mSwapChainPresentCounts.clear();
 	mSwapChainAbandonCounts.clear();
+	mHasPresentedSwapChainFrame = false;
 
 	for (auto& image : mSwapChainImages)
 	{
@@ -1494,9 +1605,11 @@ void NRIRenderDevice::EndFrameAndPresent()
 	if (presentResult == nri::Result::SUCCESS)
 	{
 		NoteSwapChainPresent(mCurrentSwapChainImage);
+		mHasPresentedSwapChainFrame = true;
 	}
 	else
 	{
+		mHasPresentedSwapChainFrame = false;
 		Printf(TEXTCOLOR_RED "NRI QueuePresent failed with result '%s'.\n", GetNriResultName(presentResult));
 	}
 	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())

@@ -87,10 +87,12 @@ private:
 		uint64_t frameNumber = 0;
 		uint64_t frameIndex = 0;
 		double waitMs = 0.0;
+		double waitForPresentMs = 0.0;
 		double acquireMs = 0.0;
 		double submitMs = 0.0;
 		double presentMs = 0.0;
 		uint64_t submittedFenceValue = 0;
+		nri::Result waitForPresentResult = nri::Result::FAILURE;
 		nri::Result acquireResult = nri::Result::FAILURE;
 		nri::Result presentResult = nri::Result::FAILURE;
 		uint32_t queuedFrameIndex = 0;
@@ -232,6 +234,7 @@ private:
 	bool mFrameBegun = false;
 	bool mUsingSaveTarget = false;
 	bool mHasAcquiredSwapChainImage = false;
+	bool mHasPresentedSwapChainFrame = false;
 	uint32_t mCurrentSwapChainImage = 0;
 	uint32_t mCurrentQueuedFrameIndex = 0;
 	uint32_t mAcquireSemaphoreIndex = 0;
