@@ -238,16 +238,133 @@ namespace
 		case D3D12_DRED_ALLOCATION_TYPE_QUERY_HEAP: return "QueryHeap";
 		case D3D12_DRED_ALLOCATION_TYPE_COMMAND_SIGNATURE: return "CommandSignature";
 		case D3D12_DRED_ALLOCATION_TYPE_PIPELINE_LIBRARY: return "PipelineLibrary";
+		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_DECODER: return "VideoDecoder";
+		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_PROCESSOR: return "VideoProcessor";
 		case D3D12_DRED_ALLOCATION_TYPE_RESOURCE: return "Resource";
 		case D3D12_DRED_ALLOCATION_TYPE_PASS: return "Pass";
+		case D3D12_DRED_ALLOCATION_TYPE_CRYPTOSESSION: return "CryptoSession";
+		case D3D12_DRED_ALLOCATION_TYPE_CRYPTOSESSIONPOLICY: return "CryptoSessionPolicy";
+		case D3D12_DRED_ALLOCATION_TYPE_PROTECTEDRESOURCESESSION: return "ProtectedResourceSession";
+		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_DECODER_HEAP: return "VideoDecoderHeap";
 		case D3D12_DRED_ALLOCATION_TYPE_COMMAND_POOL: return "CommandPool";
 		case D3D12_DRED_ALLOCATION_TYPE_COMMAND_RECORDER: return "CommandRecorder";
 		case D3D12_DRED_ALLOCATION_TYPE_STATE_OBJECT: return "StateObject";
 		case D3D12_DRED_ALLOCATION_TYPE_METACOMMAND: return "MetaCommand";
 		case D3D12_DRED_ALLOCATION_TYPE_SCHEDULINGGROUP: return "SchedulingGroup";
+		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_MOTION_ESTIMATOR: return "VideoMotionEstimator";
+		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_MOTION_VECTOR_HEAP: return "VideoMotionVectorHeap";
+		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_EXTENSION_COMMAND: return "VideoExtensionCommand";
 		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_ENCODER: return "VideoEncoder";
 		case D3D12_DRED_ALLOCATION_TYPE_VIDEO_ENCODER_HEAP: return "VideoEncoderHeap";
 		default: return "Other";
+		}
+	}
+
+	static void LogD3D12DredBreadcrumbWindow(const D3D12_AUTO_BREADCRUMB_OP* history, uint32_t breadcrumbCount, uint32_t completedValue, uint32_t nodeIndex)
+	{
+		if (history == nullptr || breadcrumbCount == 0)
+		{
+			return;
+		}
+
+		const uint32_t clampedCompleted = (std::min)(completedValue, breadcrumbCount - 1);
+		const uint32_t start = clampedCompleted > 2 ? clampedCompleted - 2 : 0;
+		const uint32_t end = (std::min)(breadcrumbCount, start + 5);
+		for (uint32_t i = start; i < end; ++i)
+		{
+			const char* marker = i == clampedCompleted ? " <last_completed>" : "";
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u].op[%u]: %s%s\n",
+				nodeIndex,
+				i,
+				GetD3D12AutoBreadcrumbOpName(history[i]),
+				marker);
+		}
+	}
+
+	static void LogD3D12DredBreadcrumbNodes(const D3D12_AUTO_BREADCRUMB_NODE* head, const char* context)
+	{
+		uint32_t nodeIndex = 0;
+		for (const D3D12_AUTO_BREADCRUMB_NODE* node = head; node != nullptr && nodeIndex < 6; node = node->pNext, ++nodeIndex)
+		{
+			const std::string commandListName = GetDredDebugName(node->pCommandListDebugNameA, node->pCommandListDebugNameW);
+			const std::string queueName = GetDredDebugName(node->pCommandQueueDebugNameA, node->pCommandQueueDebugNameW);
+			const uint32_t breadcrumbCount = node->BreadcrumbCount;
+			const uint32_t completedValue = node->pLastBreadcrumbValue != nullptr ? *node->pLastBreadcrumbValue : 0;
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u] after %s: cmdlist=%s queue=%s completed=%u/%u\n",
+				nodeIndex,
+				context != nullptr ? context : "unknown",
+				commandListName.c_str(),
+				queueName.c_str(),
+				completedValue,
+				breadcrumbCount);
+
+			LogD3D12DredBreadcrumbWindow(node->pCommandHistory, breadcrumbCount, completedValue, nodeIndex);
+		}
+	}
+
+	static void LogD3D12DredBreadcrumbNodes1(const D3D12_AUTO_BREADCRUMB_NODE1* head, const char* context)
+	{
+		uint32_t nodeIndex = 0;
+		for (const D3D12_AUTO_BREADCRUMB_NODE1* node = head; node != nullptr && nodeIndex < 6; node = node->pNext, ++nodeIndex)
+		{
+			const std::string commandListName = GetDredDebugName(node->pCommandListDebugNameA, node->pCommandListDebugNameW);
+			const std::string queueName = GetDredDebugName(node->pCommandQueueDebugNameA, node->pCommandQueueDebugNameW);
+			const uint32_t breadcrumbCount = node->BreadcrumbCount;
+			const uint32_t completedValue = node->pLastBreadcrumbValue != nullptr ? *node->pLastBreadcrumbValue : 0;
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u] after %s: cmdlist=%s queue=%s completed=%u/%u contexts=%u\n",
+				nodeIndex,
+				context != nullptr ? context : "unknown",
+				commandListName.c_str(),
+				queueName.c_str(),
+				completedValue,
+				breadcrumbCount,
+				node->BreadcrumbContextsCount);
+
+			LogD3D12DredBreadcrumbWindow(node->pCommandHistory, breadcrumbCount, completedValue, nodeIndex);
+
+			if (node->pBreadcrumbContexts != nullptr && node->BreadcrumbContextsCount != 0)
+			{
+				const uint32_t contextCount = (std::min)(node->BreadcrumbContextsCount, 6u);
+				for (uint32_t i = 0; i < contextCount; ++i)
+				{
+					const D3D12_DRED_BREADCRUMB_CONTEXT& breadcrumbContext = node->pBreadcrumbContexts[i];
+					const std::string breadcrumbText = NarrowWideString(breadcrumbContext.pContextString);
+					Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u].context[%u]: index=%u text=%s\n",
+						nodeIndex,
+						i,
+						breadcrumbContext.BreadcrumbIndex,
+						breadcrumbText.empty() ? "(empty)" : breadcrumbText.c_str());
+				}
+			}
+		}
+	}
+
+	static void LogD3D12DredAllocationNodes(const D3D12_DRED_ALLOCATION_NODE* head, const char* label)
+	{
+		uint32_t allocationIndex = 0;
+		for (const D3D12_DRED_ALLOCATION_NODE* allocation = head; allocation != nullptr && allocationIndex < 8; allocation = allocation->pNext, ++allocationIndex)
+		{
+			const std::string objectName = GetDredDebugName(allocation->ObjectNameA, allocation->ObjectNameW);
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED %s[%u]: type=%s name=%s\n",
+				label,
+				allocationIndex,
+				GetD3D12DredAllocationTypeName(allocation->AllocationType),
+				objectName.c_str());
+		}
+	}
+
+	static void LogD3D12DredAllocationNodes1(const D3D12_DRED_ALLOCATION_NODE1* head, const char* label)
+	{
+		uint32_t allocationIndex = 0;
+		for (const D3D12_DRED_ALLOCATION_NODE1* allocation = head; allocation != nullptr && allocationIndex < 8; allocation = allocation->pNext, ++allocationIndex)
+		{
+			const std::string objectName = GetDredDebugName(allocation->ObjectNameA, allocation->ObjectNameW);
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED %s[%u]: type=%s name=%s object=%p\n",
+				label,
+				allocationIndex,
+				GetD3D12DredAllocationTypeName(allocation->AllocationType),
+				objectName.c_str(),
+				allocation->pObject);
 		}
 	}
 
@@ -1709,121 +1826,157 @@ void NRIRenderDevice::LogD3D12FailureDiagnostics(const char* context)
 		return;
 	}
 
-	ID3D12DeviceRemovedExtendedData1* dred = nullptr;
+	ID3D12DeviceRemovedExtendedData2* dred2 = nullptr;
+	if (SUCCEEDED(getDebugInterface(IID_PPV_ARGS(&dred2))) && dred2 != nullptr)
+	{
+		const D3D12_DRED_DEVICE_STATE deviceState = dred2->GetDeviceState();
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: using interface v2, device_state=%u.\n",
+			context != nullptr ? context : "unknown",
+			(unsigned)deviceState);
+
+		D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 breadcrumbs = {};
+		const HRESULT breadcrumbsHr = dred2->GetAutoBreadcrumbsOutput1(&breadcrumbs);
+		if (SUCCEEDED(breadcrumbsHr))
+		{
+			if (breadcrumbs.pHeadAutoBreadcrumbNode == nullptr)
+			{
+				Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumbs after %s: none.\n",
+					context != nullptr ? context : "unknown");
+			}
+			else
+			{
+				LogD3D12DredBreadcrumbNodes1(breadcrumbs.pHeadAutoBreadcrumbNode, context);
+			}
+		}
+		else
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumbs after %s: GetAutoBreadcrumbsOutput1 failed (%s, 0x%08X).\n",
+				context != nullptr ? context : "unknown",
+				GetDxgiErrorName(breadcrumbsHr),
+				(unsigned)breadcrumbsHr);
+		}
+
+		D3D12_DRED_PAGE_FAULT_OUTPUT1 pageFault = {};
+		const HRESULT pageFaultHr = dred2->GetPageFaultAllocationOutput1(&pageFault);
+		if (SUCCEEDED(pageFaultHr))
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED page fault after %s: VA=0x%llX\n",
+				context != nullptr ? context : "unknown",
+				(unsigned long long)pageFault.PageFaultVA);
+			LogD3D12DredAllocationNodes1(pageFault.pHeadExistingAllocationNode, "existing_allocation");
+			LogD3D12DredAllocationNodes1(pageFault.pHeadRecentFreedAllocationNode, "recent_freed");
+		}
+		else
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED page fault after %s: GetPageFaultAllocationOutput1 failed (%s, 0x%08X).\n",
+				context != nullptr ? context : "unknown",
+				GetDxgiErrorName(pageFaultHr),
+				(unsigned)pageFaultHr);
+		}
+
+		dred2->Release();
+		return;
+	}
+
+	ID3D12DeviceRemovedExtendedData1* dred1 = nullptr;
+	if (SUCCEEDED(getDebugInterface(IID_PPV_ARGS(&dred1))) && dred1 != nullptr)
+	{
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: using interface v1.\n",
+			context != nullptr ? context : "unknown");
+
+		D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 breadcrumbs = {};
+		const HRESULT breadcrumbsHr = dred1->GetAutoBreadcrumbsOutput1(&breadcrumbs);
+		if (SUCCEEDED(breadcrumbsHr))
+		{
+			if (breadcrumbs.pHeadAutoBreadcrumbNode == nullptr)
+			{
+				Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumbs after %s: none.\n",
+					context != nullptr ? context : "unknown");
+			}
+			else
+			{
+				LogD3D12DredBreadcrumbNodes1(breadcrumbs.pHeadAutoBreadcrumbNode, context);
+			}
+		}
+		else
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumbs after %s: GetAutoBreadcrumbsOutput1 failed (%s, 0x%08X).\n",
+				context != nullptr ? context : "unknown",
+				GetDxgiErrorName(breadcrumbsHr),
+				(unsigned)breadcrumbsHr);
+		}
+
+		D3D12_DRED_PAGE_FAULT_OUTPUT1 pageFault = {};
+		const HRESULT pageFaultHr = dred1->GetPageFaultAllocationOutput1(&pageFault);
+		if (SUCCEEDED(pageFaultHr))
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED page fault after %s: VA=0x%llX\n",
+				context != nullptr ? context : "unknown",
+				(unsigned long long)pageFault.PageFaultVA);
+			LogD3D12DredAllocationNodes1(pageFault.pHeadExistingAllocationNode, "existing_allocation");
+			LogD3D12DredAllocationNodes1(pageFault.pHeadRecentFreedAllocationNode, "recent_freed");
+		}
+		else
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 DRED page fault after %s: GetPageFaultAllocationOutput1 failed (%s, 0x%08X).\n",
+				context != nullptr ? context : "unknown",
+				GetDxgiErrorName(pageFaultHr),
+				(unsigned)pageFaultHr);
+		}
+
+		dred1->Release();
+		return;
+	}
+
+	ID3D12DeviceRemovedExtendedData* dred = nullptr;
 	const HRESULT dredHr = getDebugInterface(IID_PPV_ARGS(&dred));
 	if (FAILED(dredHr) || dred == nullptr)
 	{
-		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: failed to query ID3D12DeviceRemovedExtendedData1 (%s, 0x%08X).\n",
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: failed to query interfaces v2/v1/v0 (last=%s, 0x%08X).\n",
 			context != nullptr ? context : "unknown",
 			GetDxgiErrorName(dredHr),
 			(unsigned)dredHr);
 		return;
 	}
 
-	D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 breadcrumbs = {};
-	const HRESULT breadcrumbsHr = dred->GetAutoBreadcrumbsOutput1(&breadcrumbs);
+	Printf(TEXTCOLOR_RED "NRI D3D12 DRED after %s: using interface v0.\n",
+		context != nullptr ? context : "unknown");
+
+	D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT breadcrumbs = {};
+	const HRESULT breadcrumbsHr = dred->GetAutoBreadcrumbsOutput(&breadcrumbs);
 	if (SUCCEEDED(breadcrumbsHr))
 	{
-		const D3D12_AUTO_BREADCRUMB_NODE1* node = breadcrumbs.pHeadAutoBreadcrumbNode;
-		if (node == nullptr)
+		if (breadcrumbs.pHeadAutoBreadcrumbNode == nullptr)
 		{
 			Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumbs after %s: none.\n",
 				context != nullptr ? context : "unknown");
 		}
 		else
 		{
-			uint32_t nodeIndex = 0;
-			for (; node != nullptr && nodeIndex < 6; node = node->pNext, ++nodeIndex)
-			{
-				const std::string commandListName = GetDredDebugName(node->pCommandListDebugNameA, node->pCommandListDebugNameW);
-				const std::string queueName = GetDredDebugName(node->pCommandQueueDebugNameA, node->pCommandQueueDebugNameW);
-				const uint32_t breadcrumbCount = node->BreadcrumbCount;
-				const uint32_t completedValue = node->pLastBreadcrumbValue != nullptr ? *node->pLastBreadcrumbValue : 0;
-				Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u] after %s: cmdlist=%s queue=%s completed=%u/%u contexts=%u\n",
-					nodeIndex,
-					context != nullptr ? context : "unknown",
-					commandListName.c_str(),
-					queueName.c_str(),
-					completedValue,
-					breadcrumbCount,
-					node->BreadcrumbContextsCount);
-
-				if (node->pCommandHistory != nullptr && breadcrumbCount != 0)
-				{
-					const uint32_t windowCenter = (std::min)(completedValue, breadcrumbCount - 1);
-					const uint32_t start = windowCenter > 2 ? windowCenter - 2 : 0;
-					const uint32_t end = (std::min)(breadcrumbCount, start + 5);
-					for (uint32_t i = start; i < end; ++i)
-					{
-						const char* marker = i == completedValue ? " <last_completed>" : "";
-						Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u].op[%u]: %s%s\n",
-							nodeIndex,
-							i,
-							GetD3D12AutoBreadcrumbOpName(node->pCommandHistory[i]),
-							marker);
-					}
-				}
-
-				if (node->pBreadcrumbContexts != nullptr && node->BreadcrumbContextsCount != 0)
-				{
-					const uint32_t contextCount = (std::min)(node->BreadcrumbContextsCount, 6u);
-					for (uint32_t i = 0; i < contextCount; ++i)
-					{
-						const D3D12_DRED_BREADCRUMB_CONTEXT& breadcrumbContext = node->pBreadcrumbContexts[i];
-						const std::string breadcrumbText = NarrowWideString(breadcrumbContext.pContextString);
-						Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumb[%u].context[%u]: index=%u text=%s\n",
-							nodeIndex,
-							i,
-							breadcrumbContext.BreadcrumbIndex,
-							breadcrumbText.empty() ? "(empty)" : breadcrumbText.c_str());
-					}
-				}
-			}
+			LogD3D12DredBreadcrumbNodes(breadcrumbs.pHeadAutoBreadcrumbNode, context);
 		}
 	}
 	else
 	{
-		Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumbs after %s: GetAutoBreadcrumbsOutput1 failed (%s, 0x%08X).\n",
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED breadcrumbs after %s: GetAutoBreadcrumbsOutput failed (%s, 0x%08X).\n",
 			context != nullptr ? context : "unknown",
 			GetDxgiErrorName(breadcrumbsHr),
 			(unsigned)breadcrumbsHr);
 	}
 
-	D3D12_DRED_PAGE_FAULT_OUTPUT1 pageFault = {};
-	const HRESULT pageFaultHr = dred->GetPageFaultAllocationOutput1(&pageFault);
+	D3D12_DRED_PAGE_FAULT_OUTPUT pageFault = {};
+	const HRESULT pageFaultHr = dred->GetPageFaultAllocationOutput(&pageFault);
 	if (SUCCEEDED(pageFaultHr))
 	{
 		Printf(TEXTCOLOR_RED "NRI D3D12 DRED page fault after %s: VA=0x%llX\n",
 			context != nullptr ? context : "unknown",
 			(unsigned long long)pageFault.PageFaultVA);
-
-		const D3D12_DRED_ALLOCATION_NODE1* allocation = pageFault.pHeadExistingAllocationNode;
-		uint32_t allocationIndex = 0;
-		for (; allocation != nullptr && allocationIndex < 8; allocation = allocation->pNext, ++allocationIndex)
-		{
-			const std::string objectName = GetDredDebugName(allocation->ObjectNameA, allocation->ObjectNameW);
-			Printf(TEXTCOLOR_RED "NRI D3D12 DRED existing_allocation[%u]: type=%s name=%s object=%p\n",
-				allocationIndex,
-				GetD3D12DredAllocationTypeName(allocation->AllocationType),
-				objectName.c_str(),
-				allocation->pObject);
-		}
-
-		allocation = pageFault.pHeadRecentFreedAllocationNode;
-		allocationIndex = 0;
-		for (; allocation != nullptr && allocationIndex < 8; allocation = allocation->pNext, ++allocationIndex)
-		{
-			const std::string objectName = GetDredDebugName(allocation->ObjectNameA, allocation->ObjectNameW);
-			Printf(TEXTCOLOR_RED "NRI D3D12 DRED recent_freed[%u]: type=%s name=%s object=%p\n",
-				allocationIndex,
-				GetD3D12DredAllocationTypeName(allocation->AllocationType),
-				objectName.c_str(),
-				allocation->pObject);
-		}
+		LogD3D12DredAllocationNodes(pageFault.pHeadExistingAllocationNode, "existing_allocation");
+		LogD3D12DredAllocationNodes(pageFault.pHeadRecentFreedAllocationNode, "recent_freed");
 	}
 	else
 	{
-		Printf(TEXTCOLOR_RED "NRI D3D12 DRED page fault after %s: GetPageFaultAllocationOutput1 failed (%s, 0x%08X).\n",
+		Printf(TEXTCOLOR_RED "NRI D3D12 DRED page fault after %s: GetPageFaultAllocationOutput failed (%s, 0x%08X).\n",
 			context != nullptr ? context : "unknown",
 			GetDxgiErrorName(pageFaultHr),
 			(unsigned)pageFaultHr);
