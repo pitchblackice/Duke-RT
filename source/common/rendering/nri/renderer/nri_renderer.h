@@ -59,6 +59,7 @@ private:
 		Composition,
 		Taa,
 		RawPresent,
+		FinalPresent,
 		DlssBefore,
 		DlssAfter,
 		Final,
@@ -87,6 +88,7 @@ private:
 	bool DispatchDenoiser();
 	bool DispatchComposition();
 	bool DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlot secondarySlot = FrameTextureSlot::Count);
+	bool DispatchFinalPresent(FrameTextureSlot inputSlot);
 	bool DispatchUpscaleChain();
 	bool DispatchFinal();
 	bool CheckPathTracingSupport();
@@ -131,6 +133,8 @@ private:
 	nri::DescriptorSet* mSceneTextureSet = nullptr;
 	nri::DescriptorSet* mFrameTextureSet = nullptr;
 	nri::DescriptorSet* mOutputSet = nullptr;
+	nri::DescriptorSet* mCompositionFrameTextureSet = nullptr;
+	nri::DescriptorSet* mCompositionOutputSet = nullptr;
 	nri::DescriptorSet* mTaaFrameTextureSet = nullptr;
 	nri::DescriptorSet* mTaaOutputSet = nullptr;
 
