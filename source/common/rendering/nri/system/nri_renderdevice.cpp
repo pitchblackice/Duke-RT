@@ -520,6 +520,11 @@ void NRIRenderDevice::BeginFrame()
 		return;
 	}
 
+	if (mFrameBegun)
+	{
+		return;
+	}
+
 	Reset2DTextureFrameStats();
 	mLastFrameBoundaryStats.frameNumber++;
 	mLastFrameBoundaryStats.frameIndex = mFrameIndex;
@@ -603,7 +608,7 @@ void NRIRenderDevice::BeginFrame()
 	mHasAcquiredSwapChainImage = true;
 	mCurrentPresentTarget = &mSwapChainImages[mCurrentSwapChainImage].target;
 	mActiveTarget = mUsingSaveTarget ? &mSaveTarget : mCurrentPresentTarget;
-	if (!BeginCommandList(false))
+	if (!BeginCommandList("BeginFrame", false))
 	{
 		ResetFrameTracking(false);
 		return;
@@ -1590,7 +1595,7 @@ void NRIRenderDevice::DestroyRenderResources()
 	}
 }
 
-bool NRIRenderDevice::BeginCommandList(bool waitForSlotReuse)
+bool NRIRenderDevice::BeginCommandList(const char* reason, bool waitForSlotReuse)
 {
 	if (mDescriptorPool == nullptr || mQueuedFrames.empty())
 	{
@@ -1600,6 +1605,16 @@ bool NRIRenderDevice::BeginCommandList(bool waitForSlotReuse)
 	SelectQueuedFrame(mCurrentQueuedFrameIndex);
 	if (mCommandAllocator == nullptr || mCommandBuffer == nullptr)
 	{
+		return false;
+	}
+
+	if (mCommandBufferOpen)
+	{
+		Printf(TEXTCOLOR_RED "NRI BeginCommandList blocked: command buffer already open (reason=%s queued_frame=%u frame_index=%llu frame_begun=%s).\n",
+			reason != nullptr ? reason : "unknown",
+			(unsigned)mCurrentQueuedFrameIndex,
+			(unsigned long long)mFrameIndex,
+			mFrameBegun ? "true" : "false");
 		return false;
 	}
 
@@ -1613,7 +1628,17 @@ bool NRIRenderDevice::BeginCommandList(bool waitForSlotReuse)
 	}
 
 	mCore.ResetCommandAllocator(*mCommandAllocator);
-	return mCore.BeginCommandBuffer(*mCommandBuffer, mDescriptorPool) == nri::Result::SUCCESS;
+	const bool success = mCore.BeginCommandBuffer(*mCommandBuffer, mDescriptorPool) == nri::Result::SUCCESS;
+	mCommandBufferOpen = success;
+	if (!success)
+	{
+		Printf(TEXTCOLOR_RED "NRI BeginCommandList failed (reason=%s queued_frame=%u frame_index=%llu frame_begun=%s).\n",
+			reason != nullptr ? reason : "unknown",
+			(unsigned)mCurrentQueuedFrameIndex,
+			(unsigned long long)mFrameIndex,
+			mFrameBegun ? "true" : "false");
+	}
+	return success;
 }
 
 bool NRIRenderDevice::EnsureSwapChainSize()
@@ -1646,6 +1671,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 
 	TransitionTexture(*mCurrentPresentTarget, { nri::AccessBits::NONE, nri::Layout::PRESENT, nri::StageBits::NONE });
 	mCore.EndCommandBuffer(*mCommandBuffer);
+	mCommandBufferOpen = false;
 
 	const nri::FenceSubmitDesc waitFence = { mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, 0, nri::StageBits::COLOR_ATTACHMENT };
 	const nri::FenceSubmitDesc releaseFence = { mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore, 0, nri::StageBits::NONE };
@@ -1741,7 +1767,7 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 		mRenderState->EndFrame();
 	}
 
-	if (!BeginCommandList(!mFrameBegun))
+	if (!BeginCommandList("CopyScreenToBuffer", !mFrameBegun))
 	{
 		memset(buffer, 0, (size_t)width * (size_t)height * 3);
 		return;
@@ -1774,6 +1800,7 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 
 	mCore.CmdReadbackTextureToBuffer(*mCommandBuffer, *readbackBuffer, layout, *source->texture, region);
 	mCore.EndCommandBuffer(*mCommandBuffer);
+	mCommandBufferOpen = false;
 
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
 	nri::Fence* readbackFence = nullptr;
@@ -2007,21 +2034,31 @@ bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination
 		return false;
 	}
 
+	const bool useActiveFrameCommandBuffer = mFrameBegun && mCommandBuffer != nullptr;
 	if (mFrameBegun)
 	{
 		mRenderState->EndFrame();
 	}
 
-	if (!BeginCommandList(!mFrameBegun))
+	if (!useActiveFrameCommandBuffer && !BeginCommandList("CopyCurrentTargetToTexture", true))
 	{
 		return false;
 	}
 
+	const nri::AccessLayoutStage sourceStateBeforeCopy = source->state;
 	TransitionTexture(*source, NRICopySourceState());
 	TransitionTexture(destination, NRICopyDestinationState());
 	mCore.CmdCopyTexture(*mCommandBuffer, *destination.texture, nullptr, *source->texture, nullptr);
+	TransitionTexture(*source, sourceStateBeforeCopy);
 	TransitionTexture(destination, NRIShaderResourceState());
+
+	if (useActiveFrameCommandBuffer)
+	{
+		return true;
+	}
+
 	mCore.EndCommandBuffer(*mCommandBuffer);
+	mCommandBufferOpen = false;
 
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
 	nri::Fence* copyFence = nullptr;
@@ -2123,6 +2160,7 @@ void NRIRenderDevice::ResetFrameTracking(bool presentedAcquiredImage)
 	}
 
 	mFrameBegun = false;
+	mCommandBufferOpen = false;
 	mCurrentPresentTarget = nullptr;
 	mActiveTarget = nullptr;
 	mHasAcquiredSwapChainImage = false;

@@ -139,7 +139,7 @@ private:
 	void DestroySwapChain();
 	bool CreateRenderResources();
 	void DestroyRenderResources();
-	bool BeginCommandList(bool waitForSlotReuse = false);
+	bool BeginCommandList(const char* reason, bool waitForSlotReuse = false);
 	bool EnsureSwapChainSize();
 	void EndFrameAndPresent();
 	void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc) override;
@@ -238,6 +238,7 @@ private:
 	uint32_t mCurrentSwapChainImage = 0;
 	uint32_t mCurrentQueuedFrameIndex = 0;
 	uint32_t mAcquireSemaphoreIndex = 0;
+	bool mCommandBufferOpen = false;
 	bool mInitialized = false;
 	bool mLoggedStartup = false;
 	FrameBoundaryDebugStats mLastFrameBoundaryStats;
