@@ -32,6 +32,8 @@ struct NRITraceConstants
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
 
+static const uint NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
+
 Texture2D<float4> gInputTexture : register(t0, space0);
 Texture2D<float4> gUnused1 : register(t1, space0);
 Texture2D<float4> gUnused2 : register(t2, space0);
@@ -51,6 +53,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 outputSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
 	const uint2 samplePos = min((pixelPos * inputSize) / outputSize, inputSize - 1u);
 	float3 color = gInputTexture.Load(int3(samplePos, 0)).rgb;
+	if ((gTraceConstants.Flags & NRI_FLAG_RAW_PRESENT_ADD_SECONDARY) != 0u)
+	{
+		color += gUnused1.Load(int3(samplePos, 0)).rgb;
+	}
 	if (gTraceConstants.DebugMode == 11u)
 	{
 		const float4 rawSpecular = gInputTexture.Load(int3(samplePos, 0));
