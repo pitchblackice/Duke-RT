@@ -765,18 +765,21 @@ bool NRIRenderer::CreatePipelineLayout()
 	sceneTextureRange.descriptorNum = 1 + NRI_MAX_SCENE_TEXTURES;
 	sceneTextureRange.descriptorType = nri::DescriptorType::TEXTURE;
 	sceneTextureRange.shaderStages = NRIComputeStage();
+	sceneTextureRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::DescriptorRangeDesc inputRange = {};
 	inputRange.baseRegisterIndex = 0;
 	inputRange.descriptorNum = NRI_INPUT_DESCRIPTOR_NUM;
 	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
 	inputRange.shaderStages = NRIComputeStage();
+	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::DescriptorRangeDesc outputRange = {};
 	outputRange.baseRegisterIndex = 0;
 	outputRange.descriptorNum = NRI_OUTPUT_DESCRIPTOR_NUM;
 	outputRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
 	outputRange.shaderStages = NRIComputeStage();
+	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::DescriptorSetDesc descriptorSets[4] = {};
 	descriptorSets[0].registerSpace = 0;
@@ -785,12 +788,15 @@ bool NRIRenderer::CreatePipelineLayout()
 	descriptorSets[1].registerSpace = 1;
 	descriptorSets[1].ranges = &sceneTextureRange;
 	descriptorSets[1].rangeNum = 1;
+	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 	descriptorSets[2].registerSpace = 2;
 	descriptorSets[2].ranges = &inputRange;
 	descriptorSets[2].rangeNum = 1;
+	descriptorSets[2].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 	descriptorSets[3].registerSpace = 3;
 	descriptorSets[3].ranges = &outputRange;
 	descriptorSets[3].rangeNum = 1;
+	descriptorSets[3].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::RootConstantDesc rootConstant = {};
 	rootConstant.registerIndex = 0;
@@ -829,20 +835,24 @@ bool NRIRenderer::CreateTaaPipelineLayout()
 	inputRange.descriptorNum = 3;
 	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
 	inputRange.shaderStages = NRIComputeStage();
+	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::DescriptorRangeDesc outputRange = {};
 	outputRange.baseRegisterIndex = 0;
 	outputRange.descriptorNum = 1;
 	outputRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
 	outputRange.shaderStages = NRIComputeStage();
+	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::DescriptorSetDesc descriptorSets[2] = {};
 	descriptorSets[0].registerSpace = 0;
 	descriptorSets[0].ranges = &inputRange;
 	descriptorSets[0].rangeNum = 1;
+	descriptorSets[0].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 	descriptorSets[1].registerSpace = 1;
 	descriptorSets[1].ranges = &outputRange;
 	descriptorSets[1].rangeNum = 1;
+	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::RootConstantDesc rootConstant = {};
 	rootConstant.registerIndex = 0;
