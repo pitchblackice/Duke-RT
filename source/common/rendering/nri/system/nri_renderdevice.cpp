@@ -97,6 +97,13 @@ namespace
 		return (nri::StageBits)((uint32_t)nri::StageBits::VERTEX_SHADER | (uint32_t)nri::StageBits::FRAGMENT_SHADER);
 	}
 
+	static nri::StageBits NRISwapChainAcquireWaitStages()
+	{
+		// Raze first touches the acquired swapchain image as a copy destination in
+		// PostProcessScene() before HUD color-attachment work begins.
+		return (nri::StageBits)((uint32_t)nri::StageBits::COPY | (uint32_t)nri::StageBits::COLOR_ATTACHMENT);
+	}
+
 	static uint32_t AlignUp(uint32_t value, uint32_t alignment)
 	{
 		if (alignment <= 1)
@@ -1796,7 +1803,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 	mCore.EndCommandBuffer(*mCommandBuffer);
 	mCommandBufferOpen = false;
 
-	const nri::FenceSubmitDesc waitFence = { mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, 0, nri::StageBits::COLOR_ATTACHMENT };
+	const nri::FenceSubmitDesc waitFence = { mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, 0, NRISwapChainAcquireWaitStages() };
 	const nri::FenceSubmitDesc releaseFence = { mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore, 0, nri::StageBits::NONE };
 	const uint64_t submittedFenceValue = 1 + mFrameIndex;
 	mSubmittedFenceValue = submittedFenceValue;
