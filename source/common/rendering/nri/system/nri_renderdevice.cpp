@@ -404,6 +404,41 @@ namespace
 		Printf(TEXTCOLOR_RED "NRI D3D12 DRED setup failed: DRED settings interfaces are unavailable.\n");
 	}
 
+	static void ConfigureD3D12DebugLayer()
+	{
+		if (!nri_apivalidation)
+		{
+			return;
+		}
+
+		const auto getDebugInterface = GetD3D12GetDebugInterfaceFn();
+		if (getDebugInterface == nullptr)
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 API validation requested, but D3D12GetDebugInterface is unavailable.\n");
+			return;
+		}
+
+		ID3D12Debug* debug = nullptr;
+		if (FAILED(getDebugInterface(IID_PPV_ARGS(&debug))) || debug == nullptr)
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 API validation requested, but ID3D12Debug is unavailable.\n");
+			return;
+		}
+
+		debug->EnableDebugLayer();
+
+		ID3D12Debug1* debug1 = nullptr;
+		if (SUCCEEDED(debug->QueryInterface(IID_PPV_ARGS(&debug1))) && debug1 != nullptr)
+		{
+			debug1->SetEnableGPUBasedValidation(FALSE);
+			debug1->SetEnableSynchronizedCommandQueueValidation(FALSE);
+			debug1->Release();
+		}
+
+		debug->Release();
+		Printf("NRI D3D12 debug layer enabled for API validation.\n");
+	}
+
 	static void ConfigureD3D12InfoQueue(const nri::CoreInterface& core, nri::Device* device)
 	{
 		if (!nri_apivalidation || device == nullptr || core.GetDeviceNativeObject == nullptr)
@@ -1737,6 +1772,7 @@ bool NRIRenderDevice::CreateDevice()
 	mLoggedD3D12FailureDred = false;
 	if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
 	{
+		ConfigureD3D12DebugLayer();
 		ConfigureD3D12Dred();
 	}
 
@@ -1772,6 +1808,11 @@ bool NRIRenderDevice::CreateDevice()
 	creationDesc.disableVKRayTracing = false;
 	creationDesc.disableD3D12EnhancedBarriers = false;
 	creationDesc.vkBindingOffsets = {};
+	Printf("NRI CreateDevice config: api=%s nri_validation=%s api_validation=%s dred=%s\n",
+		(const char*)nri_api,
+		nri_validation ? "on" : "off",
+		nri_apivalidation ? "on" : "off",
+		nri_dred ? "on" : "off");
 
 	const nri::Result createResult = mCreateDeviceFn(creationDesc, mDevice);
 	if (createResult != nri::Result::SUCCESS)
