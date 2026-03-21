@@ -55,11 +55,23 @@ public:
 
 private:
 	static constexpr uint32_t FrameSequenceHistorySize = 8;
+	static constexpr uint32_t QueuedFrameCount = 3;
+
+	struct QueuedFrame
+	{
+		nri::CommandAllocator* commandAllocator = nullptr;
+		nri::CommandBuffer* commandBuffer = nullptr;
+		uint64_t lastSubmittedFenceValue = 0;
+		uint64_t lastSubmittedFrameIndex = 0;
+		bool hasSubmittedWork = false;
+	};
 
 	struct FrameSequenceEntry
 	{
 		uint64_t frameNumber = 0;
+		uint64_t frameIndex = 0;
 		uint64_t submittedFenceValue = 0;
+		uint32_t queuedFrameIndex = 0;
 		uint32_t acquiredImageIndex = 0;
 		uint32_t acquireSemaphoreIndex = 0;
 		uint32_t presentedImageIndex = 0;
@@ -71,11 +83,14 @@ private:
 	struct FrameBoundaryDebugStats
 	{
 		uint64_t frameNumber = 0;
+		uint64_t frameIndex = 0;
 		double waitMs = 0.0;
 		double acquireMs = 0.0;
 		double submitMs = 0.0;
 		double presentMs = 0.0;
+		uint64_t submittedFenceValue = 0;
 		nri::Result acquireResult = nri::Result::FAILURE;
+		uint32_t queuedFrameIndex = 0;
 		uint32_t swapChainImageIndex = 0;
 		uint32_t acquireSemaphoreIndex = 0;
 		bool sanityModeEnabled = false;
@@ -113,11 +128,13 @@ private:
 	void LogStartup();
 	bool LoadNRI();
 	bool CreateDevice();
+	bool CreateQueuedFrames();
 	bool CreateSwapChain();
+	void DestroyQueuedFrames();
 	void DestroySwapChain();
 	bool CreateRenderResources();
 	void DestroyRenderResources();
-	bool BeginCommandList();
+	bool BeginCommandList(bool waitForSlotReuse = false);
 	bool EnsureSwapChainSize();
 	void EndFrameAndPresent();
 	void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc) override;
@@ -148,6 +165,8 @@ private:
 	void Note2DTextureCacheMiss();
 	void Note2DTextureUploadAttempt(uint64_t bytes, bool success);
 	void Note2DTextureResourceCreate(bool recreated);
+	uint32_t GetQueuedFrameIndex(uint64_t frameIndex) const;
+	void SelectQueuedFrame(uint32_t queuedFrameIndex);
 	void ResetFrameTracking();
 
 	friend class NRIHardwareTexture;
@@ -183,6 +202,7 @@ private:
 	nri::DescriptorSet* mSamplerSets[(size_t)NRISamplerMode::Count] = {};
 
 	std::vector<NRISwapChainImage> mSwapChainImages;
+	std::vector<QueuedFrame> mQueuedFrames;
 	NRITextureResource mSaveTarget;
 	NRITextureResource* mActiveTarget = nullptr;
 	NRITextureResource* mCurrentPresentTarget = nullptr;
@@ -192,10 +212,12 @@ private:
 	std::vector<uint8_t> mVertexShaderBlob;
 	std::vector<uint8_t> mPixelShaderBlob;
 	FString mDeviceName = "NRI";
+	uint64_t mFrameIndex = 0;
 	uint64_t mSubmittedFenceValue = 0;
 	bool mFrameBegun = false;
 	bool mUsingSaveTarget = false;
 	uint32_t mCurrentSwapChainImage = 0;
+	uint32_t mCurrentQueuedFrameIndex = 0;
 	uint32_t mAcquireSemaphoreIndex = 0;
 	bool mInitialized = false;
 	bool mLoggedStartup = false;

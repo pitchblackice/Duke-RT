@@ -194,17 +194,7 @@ NRIRenderDevice::~NRIRenderDevice()
 		mRenderer->Shutdown();
 	}
 
-	if (mCommandBuffer != nullptr)
-	{
-		mCore.DestroyCommandBuffer(mCommandBuffer);
-		mCommandBuffer = nullptr;
-	}
-
-	if (mCommandAllocator != nullptr)
-	{
-		mCore.DestroyCommandAllocator(mCommandAllocator);
-		mCommandAllocator = nullptr;
-	}
+	DestroyQueuedFrames();
 
 	if (mFrameFence != nullptr)
 	{
@@ -297,15 +287,20 @@ void NRIRenderDevice::BeginFrame()
 
 	Reset2DTextureFrameStats();
 	mLastFrameBoundaryStats.frameNumber++;
+	mLastFrameBoundaryStats.frameIndex = mFrameIndex;
 	mLastFrameBoundaryStats.waitMs = 0.0;
 	mLastFrameBoundaryStats.acquireMs = 0.0;
 	mLastFrameBoundaryStats.submitMs = 0.0;
 	mLastFrameBoundaryStats.presentMs = 0.0;
+	mLastFrameBoundaryStats.submittedFenceValue = 0;
 	mLastFrameBoundaryStats.acquireResult = nri::Result::FAILURE;
+	mCurrentQueuedFrameIndex = GetQueuedFrameIndex(mFrameIndex);
+	mLastFrameBoundaryStats.queuedFrameIndex = mCurrentQueuedFrameIndex;
 	mLastFrameBoundaryStats.swapChainImageIndex = 0;
 	mLastFrameBoundaryStats.acquireSemaphoreIndex = 0;
 	mLastFrameBoundaryStats.sanityModeEnabled = !!nri_ptsanity;
 	mLastFrameBoundaryStats.sanityFrameUsed = false;
+	SelectQueuedFrame(mCurrentQueuedFrameIndex);
 
 	{
 		ScopedNriTiming waitTiming(NriPTFrameWait, mLastFrameBoundaryStats.waitMs);
@@ -318,7 +313,7 @@ void NRIRenderDevice::BeginFrame()
 		return;
 	}
 
-	if (!BeginCommandList())
+	if (!BeginCommandList(false))
 	{
 		return;
 	}
@@ -394,9 +389,16 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 		return;
 	}
 
-	if (mFrameFence != nullptr && mSubmittedFenceValue != 0)
+	if (mFrameFence == nullptr || mQueuedFrames.empty())
 	{
-		mCore.Wait(*mFrameFence, mSubmittedFenceValue);
+		return;
+	}
+
+	const uint32_t queuedFrameIndex = mCurrentQueuedFrameIndex < mQueuedFrames.size() ? mCurrentQueuedFrameIndex : 0;
+	const QueuedFrame& queuedFrame = mQueuedFrames[queuedFrameIndex];
+	if (queuedFrame.hasSubmittedWork && queuedFrame.lastSubmittedFenceValue != 0)
+	{
+		mCore.Wait(*mFrameFence, queuedFrame.lastSubmittedFenceValue);
 	}
 }
 
@@ -599,8 +601,10 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 void NRIRenderDevice::PrintFrameBoundaryStatus() const
 {
 	const auto& stats = mLastFrameBoundaryStats;
-	Printf("NRI PT frame boundary: frame=%llu sanity_mode=%s last_frame=%s wait=%2.3f acquire=%2.3f submit=%2.3f present=%2.3f acquire_result=%s image=%u sem_index=%u\n",
+	Printf("NRI PT frame boundary: frame=%llu frame_index=%llu qframe=%u sanity_mode=%s last_frame=%s wait=%2.3f acquire=%2.3f submit=%2.3f present=%2.3f acquire_result=%s image=%u sem_index=%u submit_fence=%llu\n",
 		(unsigned long long)stats.frameNumber,
+		(unsigned long long)stats.frameIndex,
+		stats.queuedFrameIndex,
 		stats.sanityModeEnabled ? "on" : "off",
 		stats.sanityFrameUsed ? "clear-only" : "normal",
 		stats.waitMs,
@@ -609,7 +613,8 @@ void NRIRenderDevice::PrintFrameBoundaryStatus() const
 		stats.presentMs,
 		GetNriResultName(stats.acquireResult),
 		stats.swapChainImageIndex,
-		stats.acquireSemaphoreIndex);
+		stats.acquireSemaphoreIndex,
+		(unsigned long long)stats.submittedFenceValue);
 }
 
 void NRIRenderDevice::PrintFrameSequenceStatus() const
@@ -626,8 +631,10 @@ void NRIRenderDevice::PrintFrameSequenceStatus() const
 		}
 
 		anyValid = true;
-		line.AppendFormat(" [f%llu a%u@s%u -> p%u@s%u fence=%llu %s]",
+		line.AppendFormat(" [f%llu i%llu q%u a%u@s%u -> p%u@s%u fence=%llu %s]",
 			(unsigned long long)entry.frameNumber,
+			(unsigned long long)entry.frameIndex,
+			entry.queuedFrameIndex,
 			entry.acquiredImageIndex,
 			entry.acquireSemaphoreIndex,
 			entry.presentedImageIndex,
@@ -649,7 +656,9 @@ void NRIRenderDevice::RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64
 	FrameSequenceEntry& entry = mFrameSequenceHistory[mFrameSequenceWriteIndex];
 	entry = {};
 	entry.frameNumber = mLastFrameBoundaryStats.frameNumber;
+	entry.frameIndex = mLastFrameBoundaryStats.frameIndex;
 	entry.submittedFenceValue = submittedFenceValue;
+	entry.queuedFrameIndex = mLastFrameBoundaryStats.queuedFrameIndex;
 	entry.acquiredImageIndex = mLastFrameBoundaryStats.swapChainImageIndex;
 	entry.acquireSemaphoreIndex = mLastFrameBoundaryStats.acquireSemaphoreIndex;
 	entry.presentedImageIndex = mCurrentSwapChainImage;
@@ -778,6 +787,7 @@ void NRIRenderDevice::LogStartup()
 	Printf("Root constant limit: %u\n", deviceDesc.pipelineLayout.rootConstantMaxSize);
 	Printf("Shader model: %u.%u\n", deviceDesc.shaderModel / 10, deviceDesc.shaderModel % 10);
 	Printf("Ray tracing tier: %u\n", deviceDesc.tiers.rayTracing);
+	Printf("NRI queued frames: %u\n", (uint32_t)mQueuedFrames.size());
 	Printf("Upscaler support: NIS=%s DLSS-SR=%s DLRR=%s\n",
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::NIS) ? "yes" : "no",
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLSR) ? "yes" : "no",
@@ -862,11 +872,15 @@ bool NRIRenderDevice::CreateDevice()
 	}
 
 	if (mCore.GetQueue(*mDevice, nri::QueueType::GRAPHICS, 0, mGraphicsQueue) != nri::Result::SUCCESS ||
-		mCore.CreateFence(*mDevice, 0, mFrameFence) != nri::Result::SUCCESS ||
-		mCore.CreateCommandAllocator(*mGraphicsQueue, mCommandAllocator) != nri::Result::SUCCESS ||
-		mCore.CreateCommandBuffer(*mCommandAllocator, mCommandBuffer) != nri::Result::SUCCESS)
+		mCore.CreateFence(*mDevice, 0, mFrameFence) != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "Failed to create NRI queue objects.\n");
+		return false;
+	}
+
+	if (!CreateQueuedFrames())
+	{
+		Printf(TEXTCOLOR_RED "Failed to create NRI queued frame resources.\n");
 		return false;
 	}
 
@@ -874,7 +888,7 @@ bool NRIRenderDevice::CreateDevice()
 	streamerDesc.dynamicBufferMemoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
 	streamerDesc.dynamicBufferDesc = {};
 	streamerDesc.dynamicBufferDesc.usage = NRIFlags(nri::BufferUsageBits::VERTEX_BUFFER, nri::BufferUsageBits::INDEX_BUFFER);
-	streamerDesc.queuedFrameNum = 1;
+	streamerDesc.queuedFrameNum = QueuedFrameCount;
 	if (mStreamer.CreateStreamer(*mDevice, streamerDesc, mStreamerInstance) != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "Failed to create NRI streamer.\n");
@@ -942,6 +956,25 @@ bool NRIRenderDevice::CreateSwapChain()
 	return true;
 }
 
+bool NRIRenderDevice::CreateQueuedFrames()
+{
+	DestroyQueuedFrames();
+
+	mQueuedFrames.resize(QueuedFrameCount);
+	for (QueuedFrame& queuedFrame : mQueuedFrames)
+	{
+		if (mCore.CreateCommandAllocator(*mGraphicsQueue, queuedFrame.commandAllocator) != nri::Result::SUCCESS ||
+			mCore.CreateCommandBuffer(*queuedFrame.commandAllocator, queuedFrame.commandBuffer) != nri::Result::SUCCESS)
+		{
+			DestroyQueuedFrames();
+			return false;
+		}
+	}
+
+	SelectQueuedFrame(0);
+	return true;
+}
+
 void NRIRenderDevice::DestroySwapChain()
 {
 	ResetFrameTracking();
@@ -980,6 +1013,30 @@ void NRIRenderDevice::DestroySwapChain()
 		mSwapChainInterface.DestroySwapChain(mSwapChain);
 		mSwapChain = nullptr;
 	}
+}
+
+void NRIRenderDevice::DestroyQueuedFrames()
+{
+	mCommandAllocator = nullptr;
+	mCommandBuffer = nullptr;
+	mCurrentQueuedFrameIndex = 0;
+
+	for (QueuedFrame& queuedFrame : mQueuedFrames)
+	{
+		if (queuedFrame.commandBuffer != nullptr)
+		{
+			mCore.DestroyCommandBuffer(queuedFrame.commandBuffer);
+			queuedFrame.commandBuffer = nullptr;
+		}
+
+		if (queuedFrame.commandAllocator != nullptr)
+		{
+			mCore.DestroyCommandAllocator(queuedFrame.commandAllocator);
+			queuedFrame.commandAllocator = nullptr;
+		}
+	}
+
+	mQueuedFrames.clear();
 }
 
 bool NRIRenderDevice::CreateRenderResources()
@@ -1127,11 +1184,26 @@ void NRIRenderDevice::DestroyRenderResources()
 	}
 }
 
-bool NRIRenderDevice::BeginCommandList()
+bool NRIRenderDevice::BeginCommandList(bool waitForSlotReuse)
 {
-	if (mCommandAllocator == nullptr || mCommandBuffer == nullptr || mDescriptorPool == nullptr)
+	if (mDescriptorPool == nullptr || mQueuedFrames.empty())
 	{
 		return false;
+	}
+
+	SelectQueuedFrame(mCurrentQueuedFrameIndex);
+	if (mCommandAllocator == nullptr || mCommandBuffer == nullptr)
+	{
+		return false;
+	}
+
+	if (waitForSlotReuse && mFrameFence != nullptr)
+	{
+		QueuedFrame& queuedFrame = mQueuedFrames[mCurrentQueuedFrameIndex];
+		if (queuedFrame.hasSubmittedWork && queuedFrame.lastSubmittedFenceValue != 0)
+		{
+			mCore.Wait(*mFrameFence, queuedFrame.lastSubmittedFenceValue);
+		}
 	}
 
 	mCore.ResetCommandAllocator(*mCommandAllocator);
@@ -1172,6 +1244,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 	const nri::FenceSubmitDesc waitFence = { mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, 0, nri::StageBits::COLOR_ATTACHMENT };
 	const nri::FenceSubmitDesc releaseFence = { mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore, 0, nri::StageBits::NONE };
 	const uint64_t submittedFenceValue = ++mSubmittedFenceValue;
+	mLastFrameBoundaryStats.submittedFenceValue = submittedFenceValue;
 	const nri::FenceSubmitDesc frameFence = { mFrameFence, submittedFenceValue, nri::StageBits::NONE };
 	const nri::FenceSubmitDesc signalFences[] = { releaseFence, frameFence };
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
@@ -1193,8 +1266,16 @@ void NRIRenderDevice::EndFrameAndPresent()
 		ScopedNriTiming presentTiming(NriPTQueuePresent, mLastFrameBoundaryStats.presentMs);
 		mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
 	}
+	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())
+	{
+		QueuedFrame& queuedFrame = mQueuedFrames[mCurrentQueuedFrameIndex];
+		queuedFrame.lastSubmittedFenceValue = submittedFenceValue;
+		queuedFrame.lastSubmittedFrameIndex = mFrameIndex;
+		queuedFrame.hasSubmittedWork = true;
+	}
 	RecordFrameSequence(mCurrentSwapChainImage, submittedFenceValue);
 	ResetFrameTracking();
+	mFrameIndex++;
 }
 
 void NRIRenderDevice::RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc)
@@ -1241,7 +1322,7 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 		mRenderState->EndFrame();
 	}
 
-	if (!BeginCommandList())
+	if (!BeginCommandList(!mFrameBegun))
 	{
 		memset(buffer, 0, (size_t)width * (size_t)height * 3);
 		return;
@@ -1494,7 +1575,7 @@ bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination
 		mRenderState->EndFrame();
 	}
 
-	if (!BeginCommandList())
+	if (!BeginCommandList(!mFrameBegun))
 	{
 		return false;
 	}
@@ -1597,4 +1678,25 @@ void NRIRenderDevice::ResetFrameTracking()
 	mCurrentPresentTarget = nullptr;
 	mActiveTarget = nullptr;
 	mCurrentSwapChainImage = 0;
+}
+
+uint32_t NRIRenderDevice::GetQueuedFrameIndex(uint64_t frameIndex) const
+{
+	return mQueuedFrames.empty() ? 0 : (uint32_t)(frameIndex % mQueuedFrames.size());
+}
+
+void NRIRenderDevice::SelectQueuedFrame(uint32_t queuedFrameIndex)
+{
+	if (mQueuedFrames.empty())
+	{
+		mCurrentQueuedFrameIndex = 0;
+		mCommandAllocator = nullptr;
+		mCommandBuffer = nullptr;
+		return;
+	}
+
+	mCurrentQueuedFrameIndex = queuedFrameIndex % (uint32_t)mQueuedFrames.size();
+	QueuedFrame& queuedFrame = mQueuedFrames[mCurrentQueuedFrameIndex];
+	mCommandAllocator = queuedFrame.commandAllocator;
+	mCommandBuffer = queuedFrame.commandBuffer;
 }
