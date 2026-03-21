@@ -51,6 +51,11 @@ glcycle_t Dirty;
 glcycle_t drawcalls;
 glcycle_t twoD, Flush3D;
 glcycle_t MTWait, WTTotal;
+glcycle_t NriPTAll, NriPTInitialize, NriPTFrameResources, NriPTUpdateState;
+glcycle_t NriPTSceneCapture, NriPTGeometryBuild, NriPTMaterialBuild;
+glcycle_t NriPTPaletteUpload, NriPTSceneTextures, NriPTSceneBuffers, NriPTAcceleration;
+glcycle_t NriPTBootstrapDispatch, NriPTFrameGraph, NriPTTraceOpaque, NriPTDenoiser;
+glcycle_t NriPTComposition, NriPTRawPresent, NriPTFinalPresent, NriPTUpscale, NriPTFinal, NriPTCopyFinal;
 int vertexcount, flatvertices, flatprimitives;
 
 int rendered_lines,rendered_flats,rendered_sprites,render_vertexsplit,render_texsplit,rendered_decals, rendered_portals, rendered_commandbuffers;
@@ -75,6 +80,27 @@ void ResetProfilingData()
 	drawcalls.Reset();
 	MTWait.Reset();
 	WTTotal.Reset();
+	NriPTAll.Reset();
+	NriPTInitialize.Reset();
+	NriPTFrameResources.Reset();
+	NriPTUpdateState.Reset();
+	NriPTSceneCapture.Reset();
+	NriPTGeometryBuild.Reset();
+	NriPTMaterialBuild.Reset();
+	NriPTPaletteUpload.Reset();
+	NriPTSceneTextures.Reset();
+	NriPTSceneBuffers.Reset();
+	NriPTAcceleration.Reset();
+	NriPTBootstrapDispatch.Reset();
+	NriPTFrameGraph.Reset();
+	NriPTTraceOpaque.Reset();
+	NriPTDenoiser.Reset();
+	NriPTComposition.Reset();
+	NriPTRawPresent.Reset();
+	NriPTFinalPresent.Reset();
+	NriPTUpscale.Reset();
+	NriPTFinal.Reset();
+	NriPTCopyFinal.Reset();
 
 	flatvertices=flatprimitives=vertexcount=0;
 	render_texsplit=render_vertexsplit=rendered_lines=rendered_flats=rendered_sprites=rendered_decals=rendered_portals = 0;
@@ -106,6 +132,34 @@ static void AppendRenderTimes(FString &str)
 		twoD.TimeMS(), Flush3D.TimeMS() - twoD.TimeMS(),
 		MTWait.TimeMS() + Bsp.TimeMS(), MTWait.TimeMS(), WTTotal.TimeMS(), WTTotal.TimeMS() - setupwall - SetupFlat.TimeMS() - SetupSprite.TimeMS(),
 		All.TimeMS() + Finish.TimeMS(), RenderAll.TimeMS(),	ProcessAll.TimeMS(), PortalAll.TimeMS(), drawcalls.TimeMS(), PostProcess.TimeMS(), Finish.TimeMS());
+
+	if (NriPTAll.TimeMS() > 0.0)
+	{
+		str.AppendFormat(
+			"NRI PT: Total=%2.3f Init=%2.3f Res=%2.3f State=%2.3f Capture=%2.3f Geo=%2.3f Mats=%2.3f Palette=%2.3f Textures=%2.3f Buffers=%2.3f AS=%2.3f Bootstrap=%2.3f Graph=%2.3f Copy=%2.3f\n"
+			"        Trace=%2.3f Denoise=%2.3f Compose=%2.3f Upscale=%2.3f Final=%2.3f RawPresent=%2.3f FinalPresent=%2.3f\n",
+			NriPTAll.TimeMS(),
+			NriPTInitialize.TimeMS(),
+			NriPTFrameResources.TimeMS(),
+			NriPTUpdateState.TimeMS(),
+			NriPTSceneCapture.TimeMS(),
+			NriPTGeometryBuild.TimeMS(),
+			NriPTMaterialBuild.TimeMS(),
+			NriPTPaletteUpload.TimeMS(),
+			NriPTSceneTextures.TimeMS(),
+			NriPTSceneBuffers.TimeMS(),
+			NriPTAcceleration.TimeMS(),
+			NriPTBootstrapDispatch.TimeMS(),
+			NriPTFrameGraph.TimeMS(),
+			NriPTCopyFinal.TimeMS(),
+			NriPTTraceOpaque.TimeMS(),
+			NriPTDenoiser.TimeMS(),
+			NriPTComposition.TimeMS(),
+			NriPTUpscale.TimeMS(),
+			NriPTFinal.TimeMS(),
+			NriPTRawPresent.TimeMS(),
+			NriPTFinalPresent.TimeMS());
+	}
 }
 
 static void AppendRenderStats(FString &out)
@@ -208,4 +262,3 @@ void  checkBenchActive()
 	FStat *stat = FStat::FindStat("rendertimes");
 	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats);
 }
-

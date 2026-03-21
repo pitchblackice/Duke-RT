@@ -3,6 +3,7 @@
 #include "nri_renderstate.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
+#include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
 #include "printf.h"
 
@@ -209,6 +210,8 @@ NRIRenderer::~NRIRenderer()
 
 bool NRIRenderer::Initialize()
 {
+	Clocker clock(NriPTInitialize);
+
 	if (mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
 	{
 		return false;
@@ -285,6 +288,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		LogFallback(GetAvailabilityReason());
 		return false;
 	}
+
+	Clocker totalClock(NriPTAll);
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	const bool bootstrapSimpleView = nri_ptbootstrap && bootstrapMode <= 3u;
@@ -412,14 +417,17 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	nri_scene::SceneView sceneView;
-	if (!nri_scene::CaptureScene(di, sceneView))
 	{
-		LogFallback("PT scene capture failed.");
-		if (preserveHistory)
+		Clocker clock(NriPTSceneCapture);
+		if (!nri_scene::CaptureScene(di, sceneView))
 		{
-			restoreHistory();
+			LogFallback("PT scene capture failed.");
+			if (preserveHistory)
+			{
+				restoreHistory();
+			}
+			return false;
 		}
-		return false;
 	}
 
 	LogBridgeStats(sceneView.stats);
@@ -432,7 +440,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	Copy3(sceneView.groundColor, mGroundColor);
 
 	nri_scene::GeometryData geometry;
-	nri_scene::BuildGeometry(sceneView, geometry);
+	{
+		Clocker clock(NriPTGeometryBuild);
+		nri_scene::BuildGeometry(sceneView, geometry);
+	}
 	if (geometry.primitives.empty())
 	{
 		LogFallback("PT scene capture produced no supported opaque geometry.");
@@ -444,7 +455,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	nri_scene::MaterialBridgeData materialBridge;
-	nri_scene::BuildMaterials(sceneView, materialBridge);
+	{
+		Clocker clock(NriPTMaterialBuild);
+		nri_scene::BuildMaterials(sceneView, materialBridge);
+	}
 	std::vector<nri_scene::MaterialData> gpuMaterials;
 
 	const bool needsFallbackMaterials = bootstrapCapturedDiagnostics || bootstrapCapturedFlat;
@@ -895,6 +909,8 @@ bool NRIRenderer::CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint
 
 bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight)
 {
+	Clocker clock(NriPTFrameResources);
+
 	if (outputWidth == 0 || outputHeight == 0)
 	{
 		return false;
@@ -959,6 +975,8 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 
 bool NRIRenderer::EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials)
 {
+	Clocker clock(NriPTPaletteUpload);
+
 	if (mPaletteTexture.texture != nullptr &&
 		mPaletteTexture.width == materials.paletteWidth &&
 		mPaletteTexture.height == materials.paletteHeight)
@@ -977,6 +995,8 @@ bool NRIRenderer::EnsurePaletteTexture(const nri_scene::MaterialBridgeData& mate
 
 bool NRIRenderer::DispatchBootstrapView()
 {
+	Clocker clock(NriPTBootstrapDispatch);
+
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	NRITraceConstants constants = {};
 	Copy3(mCurrentCameraPos, constants.CameraPos);
@@ -1067,6 +1087,8 @@ bool NRIRenderer::DispatchBootstrapView()
 
 bool NRIRenderer::EnsureSceneTextures(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials)
 {
+	Clocker clock(NriPTSceneTextures);
+
 	outGpuMaterials = materials.materials;
 	std::vector<nri::Descriptor*> descriptors(1 + NRI_MAX_SCENE_TEXTURES, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
 	descriptors[0] = mPaletteTexture.shaderView;
@@ -1192,6 +1214,8 @@ bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t 
 
 bool NRIRenderer::UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
+	Clocker clock(NriPTSceneBuffers);
+
 	DestroySceneBuffers();
 
 	return
@@ -1203,6 +1227,8 @@ bool NRIRenderer::UploadSceneBuffers(const nri_scene::GeometryData& geometry, co
 
 bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geometry)
 {
+	Clocker clock(NriPTAcceleration);
+
 	DestroyAccelerationStructures();
 
 	nri::BottomLevelGeometryDesc blasGeometry = {};
@@ -1315,6 +1341,8 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 
 bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int)
 {
+	Clocker clock(NriPTFrameGraph);
+
 	static bool sLoggedRawTraceBypass = false;
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
@@ -1417,6 +1445,8 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
+	Clocker clock(NriPTTraceOpaque);
+
 	NRITraceConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool directSceneTrace = !nri_ptbootstrap || bootstrapMode == 11u || bootstrapMode == 12u;
@@ -1495,6 +1525,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 
 bool NRIRenderer::DispatchDenoiser()
 {
+	Clocker clock(NriPTDenoiser);
+
 	if (!mNrd.EnsureReady(*mFrameBuffer->mDevice, mRenderWidth, mRenderHeight, 1))
 	{
 		return false;
@@ -1529,6 +1561,8 @@ bool NRIRenderer::DispatchDenoiser()
 
 bool NRIRenderer::DispatchComposition()
 {
+	Clocker clock(NriPTComposition);
+
 	NRITraceConstants constants = {};
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
@@ -1594,6 +1628,8 @@ bool NRIRenderer::DispatchComposition()
 
 bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlot secondarySlot)
 {
+	Clocker clock(NriPTRawPresent);
+
 	NRITraceConstants constants = {};
 	constants.RenderWidth = mRenderWidth;
 	constants.RenderHeight = mRenderHeight;
@@ -1646,6 +1682,8 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 
 bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 {
+	Clocker clock(NriPTFinalPresent);
+
 	NRITraceConstants constants = {};
 	constants.RenderWidth = mRenderWidth;
 	constants.RenderHeight = mRenderHeight;
@@ -1691,6 +1729,8 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 
 bool NRIRenderer::DispatchUpscaleChain()
 {
+	Clocker clock(NriPTUpscale);
+
 	const bool temporalOnly = !nri_ptbootstrap;
 	const NRIUpscalerKind kind = temporalOnly ? NRIUpscalerKind::Off : ResolveUpscalerKind(true);
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
@@ -1900,6 +1940,8 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 bool NRIRenderer::DispatchFinal()
 {
+	Clocker clock(NriPTFinal);
+
 	NRITraceConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool presentRawTrace = (!nri_ptbootstrap && !mUseUpscaledInFinal) || bootstrapMode >= 13u;
@@ -1998,6 +2040,8 @@ bool NRIRenderer::DispatchFinal()
 
 void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 {
+	Clocker clock(NriPTUpdateState);
+
 	if (mHasPreviousCameraState)
 	{
 		Copy3(mCurrentCameraPos, mPreviousCameraPos);
@@ -2111,6 +2155,8 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 
 void NRIRenderer::CopyFinalToActiveTarget()
 {
+	Clocker clock(NriPTCopyFinal);
+
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
 	CopyTextureToActiveTarget(final);
 }
