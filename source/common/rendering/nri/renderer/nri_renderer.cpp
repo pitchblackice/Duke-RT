@@ -1336,17 +1336,12 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const int debugMode = nri_ptdebug;
 	if (rawTraceDirectPresent && debugMode >= 10 && debugMode <= 12)
 	{
-		FrameTextureSlot probeSlot = FrameTextureSlot::PreFinal;
-		if (debugMode == 11)
+		mUseUpscaledInFinal = false;
+		if (!DispatchFinal())
 		{
-			probeSlot = FrameTextureSlot::UnfilteredDiffuse;
-		}
-		else if (debugMode == 12)
-		{
-			probeSlot = FrameTextureSlot::UnfilteredSpecular;
+			return false;
 		}
 
-		CopyTexture(GetFrameTexture(probeSlot), GetFrameTexture(FrameTextureSlot::Final));
 		CopyFinalToActiveTarget();
 		return true;
 	}
@@ -1516,7 +1511,7 @@ bool NRIRenderer::DispatchComposition()
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
 	constants.FrameIndex = mFrameIndex;
-	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (!nri_ptbootstrap ? NRI_FLAG_PRESENT_RAW_TRACE : 0u);
+	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	Copy3(mSkyColor, constants.SkyColor);

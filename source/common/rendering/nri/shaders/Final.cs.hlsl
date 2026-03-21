@@ -676,22 +676,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else if (gTraceConstants.DebugMode == 10)
 	{
 		composed = float4(saturate(gComposedInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
-		if (pixelPos.x < gTraceConstants.DisplayWidth / 4 || pixelPos.y < gTraceConstants.DisplayHeight / 4)
-			composed.rgb = float3(0.0, 1.0, 0.0);
 	}
 	else if (gTraceConstants.DebugMode == 11)
 	{
 		composed = float4(saturate(gComposedInput.SampleLevel(gLinearClamp, uv, 0.0).rgb), 1.0);
-		if (pixelPos.x < gTraceConstants.DisplayWidth / 4 || pixelPos.y < gTraceConstants.DisplayHeight / 4)
-			composed.rgb = float3(0.0, 0.7, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 12)
 	{
 		const float viewZ = abs(gViewZInput.SampleLevel(gLinearClamp, uv, 0.0).x);
 		const float hitMetric = saturate(viewZ / 4096.0);
 		composed = float4(hitMetric.xxx, 1.0);
-		if (pixelPos.x < gTraceConstants.DisplayWidth / 4 || pixelPos.y < gTraceConstants.DisplayHeight / 4)
-			composed.rgb = float3(1.0, 0.85, 0.0);
 	}
 	else if (gTraceConstants.DebugMode == 13)
 	{

@@ -9,22 +9,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 
 	const uint2 pixelPos = dispatchThreadId.xy;
-	if (gTraceConstants.DebugMode == 15)
-	{
-		const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
-		const float checker = fmod(floor(uv.x * 16.0) + floor(uv.y * 16.0), 2.0);
-		const float3 color = lerp(float3(0.15, 0.85, 0.25), float3(0.95, 0.2, 0.8), checker);
-		gComposedOutput[pixelPos] = float4(color, 1.0);
-		return;
-	}
-
 	const float4 diffuse = gComposedInput[pixelPos];
 	const float4 specular = gUpscaledInput[pixelPos];
-	if ((gTraceConstants.Flags & 0x8u) != 0)
-	{
-		gComposedOutput[pixelPos] = float4(saturate(diffuse.rgb), 1.0);
-		return;
-	}
-
 	gComposedOutput[pixelPos] = float4(saturate(diffuse.rgb + specular.rgb), 1.0);
 }
