@@ -37,7 +37,9 @@ public:
 	void SetVSync(bool vsync) override;
 	void SetSaveBuffers(bool yes) override;
 	void ImageTransitionScene(bool unknown) override;
+	void SetSceneRenderTarget(bool useSSAO) override;
 	void SetActiveRenderTarget() override;
+	void PostProcessScene(bool swscene, int fixedcm, float flash, const std::function<void()> &afterBloomDrawEndScene2D) override;
 	bool RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal) override;
 
 	IHardwareTexture* CreateHardwareTexture(int numchannels) override;
@@ -212,6 +214,7 @@ private:
 
 	std::vector<NRISwapChainImage> mSwapChainImages;
 	std::vector<QueuedFrame> mQueuedFrames;
+	NRITextureResource mSceneTarget;
 	NRITextureResource mSaveTarget;
 	NRITextureResource* mActiveTarget = nullptr;
 	NRITextureResource* mCurrentPresentTarget = nullptr;

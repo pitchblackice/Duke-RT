@@ -31,6 +31,7 @@
 
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
+EXTERN_CVAR(Int, nri_ptdebug)
 EXTERN_CVAR(Bool, vid_vsync)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
@@ -556,7 +557,11 @@ void NRIRenderDevice::BeginFrame()
 		return;
 	}
 
-	if (nri_ptwaitpresent && mHasPresentedSwapChainFrame && mSwapChain != nullptr)
+	const bool waitableSwapChain = ((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::WAITABLE) != 0;
+	const bool allowWaitForPresent =
+		GetSelectedAPI() == nri::GraphicsAPI::VK ||
+		(GetSelectedAPI() == nri::GraphicsAPI::D3D12 && waitableSwapChain);
+	if (nri_ptwaitpresent && allowWaitForPresent && mHasPresentedSwapChainFrame && mSwapChain != nullptr)
 	{
 		nri::Result waitForPresentResult = nri::Result::FAILURE;
 		{
@@ -706,17 +711,112 @@ void NRIRenderDevice::ImageTransitionScene(bool)
 {
 }
 
+void NRIRenderDevice::SetSceneRenderTarget(bool)
+{
+	if (!mInitialized)
+	{
+		return;
+	}
+
+	if (mUsingSaveTarget)
+	{
+		mRenderState->EndFrame();
+		mActiveTarget = &mSaveTarget;
+		return;
+	}
+
+	if (mCurrentPresentTarget == nullptr)
+	{
+		return;
+	}
+
+	if (mSceneTarget.texture == nullptr ||
+		mSceneTarget.width != mCurrentPresentTarget->width ||
+		mSceneTarget.height != mCurrentPresentTarget->height ||
+		mSceneTarget.format != mCurrentPresentTarget->format)
+	{
+		DestroyTextureResource(mSceneTarget);
+		if (!CreateOwnedTexture(mSceneTarget,
+			mCurrentPresentTarget->width,
+			mCurrentPresentTarget->height,
+			mCurrentPresentTarget->format,
+			NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::COLOR_ATTACHMENT)))
+		{
+			Printf(TEXTCOLOR_RED "NRI failed to create the scene render target.\n");
+			mActiveTarget = mCurrentPresentTarget;
+			return;
+		}
+	}
+
+	mRenderState->EndFrame();
+	mActiveTarget = &mSceneTarget;
+}
+
 void NRIRenderDevice::SetActiveRenderTarget()
 {
 	mRenderState->EndFrame();
 	mActiveTarget = mUsingSaveTarget ? &mSaveTarget : mCurrentPresentTarget;
 }
 
+void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::function<void()> &afterBloomDrawEndScene2D)
+{
+	static bool sLoggedScenePostProcessCopy = false;
+
+	if (!mInitialized)
+	{
+		if (afterBloomDrawEndScene2D)
+		{
+			afterBloomDrawEndScene2D();
+		}
+		return;
+	}
+
+	if (!mUsingSaveTarget && !swscene && mCommandBuffer != nullptr &&
+		mCurrentPresentTarget != nullptr && mSceneTarget.texture != nullptr && mActiveTarget == &mSceneTarget)
+	{
+		if (nri_ptdebug > 0 && !sLoggedScenePostProcessCopy)
+		{
+			Printf("NRI scene postprocess: copying scene target %ux%u to the present target before 2D composition.\n",
+				mSceneTarget.width,
+				mSceneTarget.height);
+			sLoggedScenePostProcessCopy = true;
+		}
+		mRenderState->EndFrame();
+		TransitionTexture(mSceneTarget, NRICopySourceState());
+		TransitionTexture(*mCurrentPresentTarget, NRICopyDestinationState());
+		mCore.CmdCopyTexture(*mCommandBuffer, *mCurrentPresentTarget->texture, nullptr, *mSceneTarget.texture, nullptr);
+		mActiveTarget = mCurrentPresentTarget;
+		mRenderState->NotifyExternalTargetWrite();
+	}
+	else
+	{
+		SetActiveRenderTarget();
+	}
+
+	if (afterBloomDrawEndScene2D)
+	{
+		afterBloomDrawEndScene2D();
+	}
+}
+
 bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal)
 {
+	static bool sLoggedFirstSceneAttempt = false;
+
 	if (!mInitialized)
 	{
 		return false;
+	}
+
+	if (nri_ptdebug > 0 && !sLoggedFirstSceneAttempt)
+	{
+		Printf("NRI RenderPathTracedScene: drawmode=%d portal=%s active_target=%s size=%ux%u\n",
+			drawmode,
+			portal ? "yes" : "no",
+			mActiveTarget == &mSceneTarget ? "scene" : (mActiveTarget == mCurrentPresentTarget ? "present" : (mActiveTarget == &mSaveTarget ? "save" : "other")),
+			mActiveTarget != nullptr ? mActiveTarget->width : 0,
+			mActiveTarget != nullptr ? mActiveTarget->height : 0);
+		sLoggedFirstSceneAttempt = true;
 	}
 
 	if (nri_ptsanity && drawmode == DM_MAINVIEW && !portal)
@@ -1567,6 +1667,7 @@ void NRIRenderDevice::DestroyRenderResources()
 	mWhiteTextureSet = nullptr;
 
 	DestroyTextureResource(mSaveTarget);
+	DestroyTextureResource(mSceneTarget);
 
 	if (mPipelineLayout != nullptr)
 	{
@@ -1663,6 +1764,8 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 
 void NRIRenderDevice::EndFrameAndPresent()
 {
+	static int sLoggedPresentCount = 0;
+
 	if (!mFrameBegun || mCommandBuffer == nullptr || mCurrentPresentTarget == nullptr)
 	{
 		ResetFrameTracking();
@@ -1705,6 +1808,14 @@ void NRIRenderDevice::EndFrameAndPresent()
 	{
 		NoteSwapChainPresent(mCurrentSwapChainImage);
 		mHasPresentedSwapChainFrame = true;
+		if (nri_ptdebug > 0 && sLoggedPresentCount < 4)
+		{
+			Printf("NRI present: frame_index=%llu image=%u queued_frame=%u\n",
+				(unsigned long long)mFrameIndex,
+				mCurrentSwapChainImage,
+				mCurrentQueuedFrameIndex);
+			sLoggedPresentCount++;
+		}
 	}
 	else
 	{
