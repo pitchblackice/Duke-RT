@@ -77,6 +77,7 @@ private:
 		uint32_t acquireSemaphoreIndex = 0;
 		uint32_t presentedImageIndex = 0;
 		uint32_t releaseSemaphoreIndex = 0;
+		nri::Result presentResult = nri::Result::FAILURE;
 		bool sanityFrameUsed = false;
 		bool valid = false;
 	};
@@ -91,6 +92,7 @@ private:
 		double presentMs = 0.0;
 		uint64_t submittedFenceValue = 0;
 		nri::Result acquireResult = nri::Result::FAILURE;
+		nri::Result presentResult = nri::Result::FAILURE;
 		uint32_t queuedFrameIndex = 0;
 		uint32_t swapChainImageIndex = 0;
 		uint32_t acquireSemaphoreIndex = 0;
@@ -160,7 +162,7 @@ private:
 	void PrintFrameSequenceStatus() const;
 	void PrintSwapChainStatus() const;
 	void Print2DTextureStatus() const;
-	void RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue);
+	void RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue, nri::Result presentResult);
 	void Reset2DTextureFrameStats();
 	void Note2DTextureEnsure(bool canvas);
 	void Note2DTextureCacheHit();
@@ -169,9 +171,10 @@ private:
 	void Note2DTextureResourceCreate(bool recreated);
 	void NoteSwapChainAcquire(uint32_t imageIndex);
 	void NoteSwapChainPresent(uint32_t imageIndex);
+	void NoteSwapChainAbandon(uint32_t imageIndex);
 	uint32_t GetQueuedFrameIndex(uint64_t frameIndex) const;
 	void SelectQueuedFrame(uint32_t queuedFrameIndex);
-	void ResetFrameTracking();
+	void ResetFrameTracking(bool presentedAcquiredImage = false);
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
@@ -221,10 +224,14 @@ private:
 	uint8_t mSwapChainTextureCount = 0;
 	uint64_t mObservedSwapChainAcquireMask = 0;
 	uint64_t mObservedSwapChainPresentMask = 0;
+	std::vector<uint64_t> mSwapChainAcquireCounts;
+	std::vector<uint64_t> mSwapChainPresentCounts;
+	std::vector<uint64_t> mSwapChainAbandonCounts;
 	uint64_t mFrameIndex = 0;
 	uint64_t mSubmittedFenceValue = 0;
 	bool mFrameBegun = false;
 	bool mUsingSaveTarget = false;
+	bool mHasAcquiredSwapChainImage = false;
 	uint32_t mCurrentSwapChainImage = 0;
 	uint32_t mCurrentQueuedFrameIndex = 0;
 	uint32_t mAcquireSemaphoreIndex = 0;

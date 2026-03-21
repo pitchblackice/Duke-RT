@@ -198,6 +198,26 @@ namespace
 
 		return description;
 	}
+
+	static FString DescribeSwapChainImageCounts(const std::vector<uint64_t>& counts)
+	{
+		if (counts.empty())
+		{
+			return "none";
+		}
+
+		FString description;
+		for (size_t i = 0; i < counts.size(); ++i)
+		{
+			if (i != 0)
+			{
+				description << " ";
+			}
+			description.AppendFormat("%u:%llu", (uint32_t)i, (unsigned long long)counts[i]);
+		}
+
+		return description;
+	}
 }
 
 extern "C" nri::Result NRI_CALL nriGetInterface(const nri::Device& device, const char* interfaceName, size_t interfaceSize, void* interfacePtr)
@@ -376,6 +396,7 @@ void NRIRenderDevice::BeginFrame()
 	mLastFrameBoundaryStats.presentMs = 0.0;
 	mLastFrameBoundaryStats.submittedFenceValue = 0;
 	mLastFrameBoundaryStats.acquireResult = nri::Result::FAILURE;
+	mLastFrameBoundaryStats.presentResult = nri::Result::FAILURE;
 	mCurrentQueuedFrameIndex = GetQueuedFrameIndex(mFrameIndex);
 	mLastFrameBoundaryStats.queuedFrameIndex = mCurrentQueuedFrameIndex;
 	mLastFrameBoundaryStats.swapChainImageIndex = 0;
@@ -439,6 +460,7 @@ void NRIRenderDevice::BeginFrame()
 		return;
 	}
 
+	mHasAcquiredSwapChainImage = true;
 	mCurrentPresentTarget = &mSwapChainImages[mCurrentSwapChainImage].target;
 	mActiveTarget = mUsingSaveTarget ? &mSaveTarget : mCurrentPresentTarget;
 	mRenderState->BeginFrame();
@@ -709,7 +731,7 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 void NRIRenderDevice::PrintFrameBoundaryStatus() const
 {
 	const auto& stats = mLastFrameBoundaryStats;
-	Printf("NRI PT frame boundary: frame=%llu frame_index=%llu qframe=%u sanity_mode=%s last_frame=%s wait=%2.3f acquire=%2.3f submit=%2.3f present=%2.3f acquire_result=%s image=%u sem_index=%u submit_fence=%llu\n",
+	Printf("NRI PT frame boundary: frame=%llu frame_index=%llu qframe=%u sanity_mode=%s last_frame=%s wait=%2.3f acquire=%2.3f submit=%2.3f present=%2.3f acquire_result=%s present_result=%s image=%u sem_index=%u submit_fence=%llu\n",
 		(unsigned long long)stats.frameNumber,
 		(unsigned long long)stats.frameIndex,
 		stats.queuedFrameIndex,
@@ -720,6 +742,7 @@ void NRIRenderDevice::PrintFrameBoundaryStatus() const
 		stats.submitMs,
 		stats.presentMs,
 		GetNriResultName(stats.acquireResult),
+		GetNriResultName(stats.presentResult),
 		stats.swapChainImageIndex,
 		stats.acquireSemaphoreIndex,
 		(unsigned long long)stats.submittedFenceValue);
@@ -739,7 +762,7 @@ void NRIRenderDevice::PrintFrameSequenceStatus() const
 		}
 
 		anyValid = true;
-		line.AppendFormat(" [f%llu i%llu q%u a%u@s%u -> p%u@s%u fence=%llu %s]",
+		line.AppendFormat(" [f%llu i%llu q%u a%u@s%u -> p%u@s%u fence=%llu pres=%s %s]",
 			(unsigned long long)entry.frameNumber,
 			(unsigned long long)entry.frameIndex,
 			entry.queuedFrameIndex,
@@ -748,6 +771,7 @@ void NRIRenderDevice::PrintFrameSequenceStatus() const
 			entry.presentedImageIndex,
 			entry.releaseSemaphoreIndex,
 			(unsigned long long)entry.submittedFenceValue,
+			GetNriResultName(entry.presentResult),
 			entry.sanityFrameUsed ? "sanity" : "normal");
 	}
 
@@ -764,6 +788,9 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 	const FString flagText = DescribeSwapChainFlags(mSwapChainFlags);
 	const FString acquiredImages = DescribeSwapChainImageMask(mObservedSwapChainAcquireMask, mSwapChainTextureCount);
 	const FString presentedImages = DescribeSwapChainImageMask(mObservedSwapChainPresentMask, mSwapChainTextureCount);
+	const FString acquireCounts = DescribeSwapChainImageCounts(mSwapChainAcquireCounts);
+	const FString presentCounts = DescribeSwapChainImageCounts(mSwapChainPresentCounts);
+	const FString abandonCounts = DescribeSwapChainImageCounts(mSwapChainAbandonCounts);
 	Printf("NRI PT swapchain: textures=%u queued_frames=%u vsync=%s flags=%s acquire_seen=%u/%u [%s] present_seen=%u/%u [%s]\n",
 		(uint32_t)mSwapChainTextureCount,
 		(uint32_t)mSwapChainQueuedFrameNum,
@@ -775,9 +802,13 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 		CountSetBits(mObservedSwapChainPresentMask),
 		(uint32_t)mSwapChainTextureCount,
 		presentedImages.GetChars());
+	Printf("NRI PT swapchain counts: acquire=[%s] present=[%s] abandoned=[%s]\n",
+		acquireCounts.GetChars(),
+		presentCounts.GetChars(),
+		abandonCounts.GetChars());
 }
 
-void NRIRenderDevice::RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue)
+void NRIRenderDevice::RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue, nri::Result presentResult)
 {
 	FrameSequenceEntry& entry = mFrameSequenceHistory[mFrameSequenceWriteIndex];
 	entry = {};
@@ -789,6 +820,7 @@ void NRIRenderDevice::RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64
 	entry.acquireSemaphoreIndex = mLastFrameBoundaryStats.acquireSemaphoreIndex;
 	entry.presentedImageIndex = mCurrentSwapChainImage;
 	entry.releaseSemaphoreIndex = releaseSemaphoreIndex;
+	entry.presentResult = presentResult;
 	entry.sanityFrameUsed = mLastFrameBoundaryStats.sanityFrameUsed;
 	entry.valid = true;
 	mFrameSequenceWriteIndex = (mFrameSequenceWriteIndex + 1) % FrameSequenceHistorySize;
@@ -890,6 +922,11 @@ void NRIRenderDevice::NoteSwapChainAcquire(uint32_t imageIndex)
 	{
 		mObservedSwapChainAcquireMask |= (1ull << imageIndex);
 	}
+
+	if (imageIndex < mSwapChainAcquireCounts.size())
+	{
+		mSwapChainAcquireCounts[imageIndex]++;
+	}
 }
 
 void NRIRenderDevice::NoteSwapChainPresent(uint32_t imageIndex)
@@ -897,6 +934,19 @@ void NRIRenderDevice::NoteSwapChainPresent(uint32_t imageIndex)
 	if (imageIndex < 64)
 	{
 		mObservedSwapChainPresentMask |= (1ull << imageIndex);
+	}
+
+	if (imageIndex < mSwapChainPresentCounts.size())
+	{
+		mSwapChainPresentCounts[imageIndex]++;
+	}
+}
+
+void NRIRenderDevice::NoteSwapChainAbandon(uint32_t imageIndex)
+{
+	if (imageIndex < mSwapChainAbandonCounts.size())
+	{
+		mSwapChainAbandonCounts[imageIndex]++;
 	}
 }
 
@@ -1081,6 +1131,9 @@ bool NRIRenderDevice::CreateSwapChain()
 	mSwapChainTextureCount = (uint8_t)(std::min<uint32_t>)(textureCount, 255u);
 	mObservedSwapChainAcquireMask = 0;
 	mObservedSwapChainPresentMask = 0;
+	mSwapChainAcquireCounts.assign(textureCount, 0);
+	mSwapChainPresentCounts.assign(textureCount, 0);
+	mSwapChainAbandonCounts.assign(textureCount, 0);
 
 	for (uint32_t i = 0; i < textureCount; ++i)
 	{
@@ -1144,6 +1197,9 @@ void NRIRenderDevice::DestroySwapChain()
 	mSwapChainTextureCount = 0;
 	mObservedSwapChainAcquireMask = 0;
 	mObservedSwapChainPresentMask = 0;
+	mSwapChainAcquireCounts.clear();
+	mSwapChainPresentCounts.clear();
+	mSwapChainAbandonCounts.clear();
 
 	for (auto& image : mSwapChainImages)
 	{
@@ -1409,7 +1465,8 @@ void NRIRenderDevice::EndFrameAndPresent()
 
 	const nri::FenceSubmitDesc waitFence = { mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, 0, nri::StageBits::COLOR_ATTACHMENT };
 	const nri::FenceSubmitDesc releaseFence = { mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore, 0, nri::StageBits::NONE };
-	const uint64_t submittedFenceValue = ++mSubmittedFenceValue;
+	const uint64_t submittedFenceValue = 1 + mFrameIndex;
+	mSubmittedFenceValue = submittedFenceValue;
 	mLastFrameBoundaryStats.submittedFenceValue = submittedFenceValue;
 	const nri::FenceSubmitDesc frameFence = { mFrameFence, submittedFenceValue, nri::StageBits::NONE };
 	const nri::FenceSubmitDesc signalFences[] = { releaseFence, frameFence };
@@ -1428,11 +1485,20 @@ void NRIRenderDevice::EndFrameAndPresent()
 	}
 
 	mStreamer.EndStreamerFrame(*mStreamerInstance);
+	nri::Result presentResult = nri::Result::FAILURE;
 	{
 		ScopedNriTiming presentTiming(NriPTQueuePresent, mLastFrameBoundaryStats.presentMs);
-		mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
+		presentResult = mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
 	}
-	NoteSwapChainPresent(mCurrentSwapChainImage);
+	mLastFrameBoundaryStats.presentResult = presentResult;
+	if (presentResult == nri::Result::SUCCESS)
+	{
+		NoteSwapChainPresent(mCurrentSwapChainImage);
+	}
+	else
+	{
+		Printf(TEXTCOLOR_RED "NRI QueuePresent failed with result '%s'.\n", GetNriResultName(presentResult));
+	}
 	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())
 	{
 		QueuedFrame& queuedFrame = mQueuedFrames[mCurrentQueuedFrameIndex];
@@ -1440,8 +1506,8 @@ void NRIRenderDevice::EndFrameAndPresent()
 		queuedFrame.lastSubmittedFrameIndex = mFrameIndex;
 		queuedFrame.hasSubmittedWork = true;
 	}
-	RecordFrameSequence(mCurrentSwapChainImage, submittedFenceValue);
-	ResetFrameTracking();
+	RecordFrameSequence(mCurrentSwapChainImage, submittedFenceValue, presentResult);
+	ResetFrameTracking(presentResult == nri::Result::SUCCESS);
 	mFrameIndex++;
 }
 
@@ -1524,9 +1590,16 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 	mCore.EndCommandBuffer(*mCommandBuffer);
 
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
+	nri::Fence* readbackFence = nullptr;
+	if (mCore.CreateFence(*mDevice, 0, readbackFence) != nri::Result::SUCCESS)
+	{
+		mCore.DestroyBuffer(readbackBuffer);
+		memset(buffer, 0, (size_t)width * (size_t)height * 3);
+		return;
+	}
 	nri::FenceSubmitDesc frameFence = {};
-	frameFence.fence = mFrameFence;
-	frameFence.value = ++mSubmittedFenceValue;
+	frameFence.fence = readbackFence;
+	frameFence.value = 1;
 
 	nri::QueueSubmitDesc submitDesc = {};
 	submitDesc.commandBuffers = commandBuffers;
@@ -1534,7 +1607,7 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 	submitDesc.signalFences = &frameFence;
 	submitDesc.signalFenceNum = 1;
 	mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
-	mCore.Wait(*mFrameFence, mSubmittedFenceValue);
+	mCore.Wait(*readbackFence, frameFence.value);
 
 	const uint8_t* pixels = (const uint8_t*)mCore.MapBuffer(*readbackBuffer, 0, slicePitch);
 	for (int y = 0; y < height; ++y)
@@ -1551,6 +1624,7 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 	}
 
 	mCore.UnmapBuffer(*readbackBuffer);
+	mCore.DestroyFence(readbackFence);
 	mCore.DestroyBuffer(readbackBuffer);
 }
 
@@ -1754,9 +1828,14 @@ bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination
 	mCore.EndCommandBuffer(*mCommandBuffer);
 
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
+	nri::Fence* copyFence = nullptr;
+	if (mCore.CreateFence(*mDevice, 0, copyFence) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
 	nri::FenceSubmitDesc frameFence = {};
-	frameFence.fence = mFrameFence;
-	frameFence.value = ++mSubmittedFenceValue;
+	frameFence.fence = copyFence;
+	frameFence.value = 1;
 
 	nri::QueueSubmitDesc submitDesc = {};
 	submitDesc.commandBuffers = commandBuffers;
@@ -1764,7 +1843,8 @@ bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination
 	submitDesc.signalFences = &frameFence;
 	submitDesc.signalFenceNum = 1;
 	mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
-	mCore.Wait(*mFrameFence, mSubmittedFenceValue);
+	mCore.Wait(*copyFence, frameFence.value);
+	mCore.DestroyFence(copyFence);
 	return true;
 }
 
@@ -1839,11 +1919,17 @@ nri::DescriptorSet* NRIRenderDevice::CreateTextureSet(nri::Descriptor* shaderVie
 	return set;
 }
 
-void NRIRenderDevice::ResetFrameTracking()
+void NRIRenderDevice::ResetFrameTracking(bool presentedAcquiredImage)
 {
+	if (mHasAcquiredSwapChainImage && !presentedAcquiredImage)
+	{
+		NoteSwapChainAbandon(mCurrentSwapChainImage);
+	}
+
 	mFrameBegun = false;
 	mCurrentPresentTarget = nullptr;
 	mActiveTarget = nullptr;
+	mHasAcquiredSwapChainImage = false;
 	mCurrentSwapChainImage = 0;
 }
 
