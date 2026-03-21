@@ -21,6 +21,7 @@
 #include "hw_bonebuffer.h"
 
 #include <windows.h>
+#include <d3d12.h>
 
 #ifdef ERROR
 #undef ERROR
@@ -113,6 +114,49 @@ namespace
 
 		const uint32_t remainder = value % alignment;
 		return remainder == 0 ? value : value + alignment - remainder;
+	}
+
+	static const char* GetDxgiErrorName(HRESULT hr)
+	{
+		switch (hr)
+		{
+		case S_OK: return "S_OK";
+		case DXGI_ERROR_DEVICE_HUNG: return "DXGI_ERROR_DEVICE_HUNG";
+		case DXGI_ERROR_DEVICE_REMOVED: return "DXGI_ERROR_DEVICE_REMOVED";
+		case DXGI_ERROR_DEVICE_RESET: return "DXGI_ERROR_DEVICE_RESET";
+		case DXGI_ERROR_DRIVER_INTERNAL_ERROR: return "DXGI_ERROR_DRIVER_INTERNAL_ERROR";
+		case DXGI_ERROR_INVALID_CALL: return "DXGI_ERROR_INVALID_CALL";
+		default: return "unknown";
+		}
+	}
+
+	static void LogD3D12DeviceRemovedReason(const nri::CoreInterface& core, nri::Device* device, const char* context)
+	{
+		if (device == nullptr || core.GetDeviceNativeObject == nullptr)
+		{
+			return;
+		}
+
+		auto* d3d12Device = static_cast<ID3D12Device*>(core.GetDeviceNativeObject(device));
+		if (d3d12Device == nullptr)
+		{
+			return;
+		}
+
+		const HRESULT hr = d3d12Device->GetDeviceRemovedReason();
+		if (hr == S_OK)
+		{
+			Printf(TEXTCOLOR_RED "NRI D3D12 removed reason after %s: %s (0x%08X).\n",
+				context != nullptr ? context : "unknown",
+				GetDxgiErrorName(hr),
+				(unsigned)hr);
+			return;
+		}
+
+		Printf(TEXTCOLOR_RED "NRI D3D12 removed reason after %s: %s (0x%08X).\n",
+			context != nullptr ? context : "unknown",
+			GetDxgiErrorName(hr),
+			(unsigned)hr);
 	}
 
 	static NRIRenderDevice* GetActiveNRIRenderDevice()
@@ -615,11 +659,18 @@ void NRIRenderDevice::BeginFrame()
 	if (acquireResult != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "NRI failed to acquire swapchain image.\n");
+		if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
+		{
+			LogD3D12DeviceRemovedReason(mCore, mDevice, "AcquireNextTexture");
+		}
 		return;
 	}
 
 	mHasAcquiredSwapChainImage = true;
 	mCurrentPresentTarget = &mSwapChainImages[mCurrentSwapChainImage].target;
+	// Match NRD-Sample's swapchain handling: each acquired image re-enters command recording
+	// with unknown local state and must be explicitly transitioned before first use.
+	mCurrentPresentTarget->state = {};
 	mActiveTarget = mUsingSaveTarget ? &mSaveTarget : mCurrentPresentTarget;
 	if (!BeginCommandList("BeginFrame", false))
 	{
@@ -1457,7 +1508,7 @@ bool NRIRenderDevice::CreateSwapChain()
 		image.target.height = desc.height;
 		image.target.format = desc.format;
 		image.target.usage = desc.usage;
-		image.target.state = { nri::AccessBits::NONE, nri::Layout::PRESENT, nri::StageBits::NONE };
+		image.target.state = {};
 
 		if (!CreateTextureViews(image.target))
 		{
@@ -1819,9 +1870,18 @@ void NRIRenderDevice::EndFrameAndPresent()
 	submitDesc.commandBufferNum = 1;
 	submitDesc.signalFences = signalFences;
 	submitDesc.signalFenceNum = 2;
+	nri::Result submitResult = nri::Result::FAILURE;
 	{
 		ScopedNriTiming submitTiming(NriPTQueueSubmit, mLastFrameBoundaryStats.submitMs);
-		mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+		submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+	}
+	if (submitResult != nri::Result::SUCCESS)
+	{
+		Printf(TEXTCOLOR_RED "NRI QueueSubmit failed with result '%s'.\n", GetNriResultName(submitResult));
+		if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
+		{
+			LogD3D12DeviceRemovedReason(mCore, mDevice, "QueueSubmit");
+		}
 	}
 
 	mStreamer.EndStreamerFrame(*mStreamerInstance);
@@ -1848,6 +1908,10 @@ void NRIRenderDevice::EndFrameAndPresent()
 	{
 		mHasPresentedSwapChainFrame = false;
 		Printf(TEXTCOLOR_RED "NRI QueuePresent failed with result '%s'.\n", GetNriResultName(presentResult));
+		if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
+		{
+			LogD3D12DeviceRemovedReason(mCore, mDevice, "QueuePresent");
+		}
 	}
 	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())
 	{
