@@ -50,6 +50,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 inputSize = uint2(max(gTraceConstants.RenderWidth, 1u), max(gTraceConstants.RenderHeight, 1u));
 	const uint2 outputSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
 	const uint2 samplePos = min((pixelPos * inputSize) / outputSize, inputSize - 1u);
-	const float3 color = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
+	float3 color = gInputTexture.Load(int3(samplePos, 0)).rgb;
+	if (gTraceConstants.DebugMode == 12u)
+	{
+		const float viewZ = abs(color.x);
+		const float normalized = saturate(viewZ / 4096.0);
+		color = normalized.xxx;
+	}
+	else
+	{
+		color = saturate(color);
+	}
 	gOutputTexture[pixelPos] = float4(color, 1.0);
 }

@@ -1337,7 +1337,16 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	if (rawTraceDirectPresent && debugMode >= 10 && debugMode <= 12)
 	{
 		mUseUpscaledInFinal = false;
-		if (!DispatchFinal())
+		FrameTextureSlot debugSlot = FrameTextureSlot::UnfilteredDiffuse;
+		switch (debugMode)
+		{
+		default:
+		case 10: debugSlot = FrameTextureSlot::UnfilteredDiffuse; break;
+		case 11: debugSlot = FrameTextureSlot::UnfilteredSpecular; break;
+		case 12: debugSlot = FrameTextureSlot::ViewZ; break;
+		}
+
+		if (!DispatchRawPresent(debugSlot))
 		{
 			return false;
 		}
