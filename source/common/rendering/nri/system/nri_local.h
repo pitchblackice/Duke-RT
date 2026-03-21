@@ -91,7 +91,7 @@ inline nri::AccessLayoutStage NRIComputeShaderResourceState()
 
 inline nri::AccessLayoutStage NRIAccelerationStructureBuildInputState()
 {
-	return { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::ACCELERATION_STRUCTURE };
+	return { nri::AccessBits::SHADER_RESOURCE, nri::Layout::SHADER_RESOURCE, nri::StageBits::NONE };
 }
 
 inline nri::AccessLayoutStage NRIComputeStorageState()
