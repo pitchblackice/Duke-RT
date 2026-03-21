@@ -54,6 +54,7 @@ glcycle_t MTWait, WTTotal;
 glcycle_t NriPTAll, NriPTInitialize, NriPTFrameResources, NriPTUpdateState;
 glcycle_t NriPTSceneCapture, NriPTGeometryBuild, NriPTMaterialBuild;
 glcycle_t NriPTPaletteUpload, NriPTSceneTextures, NriPTSceneBuffers, NriPTAcceleration;
+glcycle_t NriPTFrameWait, NriPTAcquireSwap, NriPTQueueSubmit, NriPTQueuePresent;
 glcycle_t NriPTBootstrapDispatch, NriPTFrameGraph, NriPTTraceOpaque, NriPTDenoiser;
 glcycle_t NriPTComposition, NriPTRawPresent, NriPTFinalPresent, NriPTUpscale, NriPTFinal, NriPTCopyFinal;
 int vertexcount, flatvertices, flatprimitives;
@@ -91,6 +92,10 @@ void ResetProfilingData()
 	NriPTSceneTextures.Reset();
 	NriPTSceneBuffers.Reset();
 	NriPTAcceleration.Reset();
+	NriPTFrameWait.Reset();
+	NriPTAcquireSwap.Reset();
+	NriPTQueueSubmit.Reset();
+	NriPTQueuePresent.Reset();
 	NriPTBootstrapDispatch.Reset();
 	NriPTFrameGraph.Reset();
 	NriPTTraceOpaque.Reset();
@@ -137,7 +142,7 @@ static void AppendRenderTimes(FString &str)
 	{
 		str.AppendFormat(
 			"NRI PT: Total=%2.3f Init=%2.3f Res=%2.3f State=%2.3f Capture=%2.3f Geo=%2.3f Mats=%2.3f Palette=%2.3f Textures=%2.3f Buffers=%2.3f AS=%2.3f Bootstrap=%2.3f Graph=%2.3f Copy=%2.3f\n"
-			"        Trace=%2.3f Denoise=%2.3f Compose=%2.3f Upscale=%2.3f Final=%2.3f RawPresent=%2.3f FinalPresent=%2.3f\n",
+			"        Wait=%2.3f Acquire=%2.3f Submit=%2.3f Present=%2.3f Trace=%2.3f Denoise=%2.3f Compose=%2.3f Upscale=%2.3f Final=%2.3f RawPresent=%2.3f FinalPresent=%2.3f\n",
 			NriPTAll.TimeMS(),
 			NriPTInitialize.TimeMS(),
 			NriPTFrameResources.TimeMS(),
@@ -152,6 +157,10 @@ static void AppendRenderTimes(FString &str)
 			NriPTBootstrapDispatch.TimeMS(),
 			NriPTFrameGraph.TimeMS(),
 			NriPTCopyFinal.TimeMS(),
+			NriPTFrameWait.TimeMS(),
+			NriPTAcquireSwap.TimeMS(),
+			NriPTQueueSubmit.TimeMS(),
+			NriPTQueuePresent.TimeMS(),
 			NriPTTraceOpaque.TimeMS(),
 			NriPTDenoiser.TimeMS(),
 			NriPTComposition.TimeMS(),

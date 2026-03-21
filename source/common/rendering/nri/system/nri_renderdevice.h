@@ -53,6 +53,20 @@ public:
 	void ResetPathTracingHistory();
 
 private:
+	struct FrameBoundaryDebugStats
+	{
+		uint64_t frameNumber = 0;
+		double waitMs = 0.0;
+		double acquireMs = 0.0;
+		double submitMs = 0.0;
+		double presentMs = 0.0;
+		nri::Result acquireResult = nri::Result::FAILURE;
+		uint32_t swapChainImageIndex = 0;
+		uint32_t acquireSemaphoreIndex = 0;
+		bool sanityModeEnabled = false;
+		bool sanityFrameUsed = false;
+	};
+
 	using PFN_nriEnumerateAdapters = nri::Result(NRI_CALL*)(nri::AdapterDesc*, uint32_t&);
 	using PFN_nriCreateDevice = nri::Result(NRI_CALL*)(const nri::DeviceCreationDesc&, nri::Device*&);
 	using PFN_nriDestroyDevice = void (NRI_CALL*)(nri::Device*);
@@ -85,6 +99,8 @@ private:
 	NRISamplerMode GetSamplerMode(int clampMode) const;
 	nri::DescriptorSet* GetSamplerSet(NRISamplerMode mode) const;
 	nri::DescriptorSet* CreateTextureSet(nri::Descriptor* shaderView);
+	bool RenderPathTracingSanityFrame();
+	void PrintFrameBoundaryStatus() const;
 	void ResetFrameTracking();
 
 	friend class NRIHardwareTexture;
@@ -136,4 +152,5 @@ private:
 	uint32_t mAcquireSemaphoreIndex = 0;
 	bool mInitialized = false;
 	bool mLoggedStartup = false;
+	FrameBoundaryDebugStats mLastFrameBoundaryStats;
 };

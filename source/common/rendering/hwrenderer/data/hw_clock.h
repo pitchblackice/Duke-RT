@@ -16,6 +16,7 @@ extern glcycle_t MTWait, WTTotal;
 extern glcycle_t NriPTAll, NriPTInitialize, NriPTFrameResources, NriPTUpdateState;
 extern glcycle_t NriPTSceneCapture, NriPTGeometryBuild, NriPTMaterialBuild;
 extern glcycle_t NriPTPaletteUpload, NriPTSceneTextures, NriPTSceneBuffers, NriPTAcceleration;
+extern glcycle_t NriPTFrameWait, NriPTAcquireSwap, NriPTQueueSubmit, NriPTQueuePresent;
 extern glcycle_t NriPTBootstrapDispatch, NriPTFrameGraph, NriPTTraceOpaque, NriPTDenoiser;
 extern glcycle_t NriPTComposition, NriPTRawPresent, NriPTFinalPresent, NriPTUpscale, NriPTFinal, NriPTCopyFinal;
 

@@ -12,6 +12,8 @@
 #include "v_2ddrawer.h"
 #include "v_draw.h"
 #include "version.h"
+#include "hw_drawinfo.h"
+#include "hwrenderer/data/hw_clock.h"
 #include "hwrenderer/data/hw_viewpointbuffer.h"
 #include "flatvertices.h"
 #include "hw_skydome.h"
@@ -25,6 +27,7 @@
 
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
+CVAR(Bool, nri_ptsanity, false, 0)
 
 namespace
 {
@@ -62,6 +65,56 @@ namespace
 		}
 
 		return static_cast<NRIRenderDevice*>(screen);
+	}
+
+	class ScopedNriTiming
+	{
+	public:
+		ScopedNriTiming(glcycle_t& aggregate, double& outputMs)
+			: mAggregate(aggregate), mOutputMs(outputMs)
+		{
+			mOutputMs = 0.0;
+			mAggregate.Clock();
+			mTimer.ResetAndClock();
+		}
+
+		~ScopedNriTiming()
+		{
+			mTimer.Unclock();
+			mOutputMs = mTimer.TimeMS();
+			mAggregate.Unclock();
+		}
+
+		ScopedNriTiming(const ScopedNriTiming&) = delete;
+		ScopedNriTiming& operator=(const ScopedNriTiming&) = delete;
+
+	private:
+		glcycle_t& mAggregate;
+		double& mOutputMs;
+		cycle_t mTimer;
+	};
+
+	static const char* GetNriResultName(nri::Result result)
+	{
+		switch (result)
+		{
+		case nri::Result::SUCCESS:
+			return "success";
+		case nri::Result::FAILURE:
+			return "failure";
+		case nri::Result::INVALID_ARGUMENT:
+			return "invalid_argument";
+		case nri::Result::OUT_OF_MEMORY:
+			return "out_of_memory";
+		case nri::Result::UNSUPPORTED:
+			return "unsupported";
+		case nri::Result::DEVICE_LOST:
+			return "device_lost";
+		case nri::Result::OUT_OF_DATE:
+			return "out_of_date";
+		default:
+			return "other";
+		}
 	}
 }
 
@@ -242,7 +295,21 @@ void NRIRenderDevice::BeginFrame()
 		return;
 	}
 
-	WaitForCommands(false);
+	mLastFrameBoundaryStats.frameNumber++;
+	mLastFrameBoundaryStats.waitMs = 0.0;
+	mLastFrameBoundaryStats.acquireMs = 0.0;
+	mLastFrameBoundaryStats.submitMs = 0.0;
+	mLastFrameBoundaryStats.presentMs = 0.0;
+	mLastFrameBoundaryStats.acquireResult = nri::Result::FAILURE;
+	mLastFrameBoundaryStats.swapChainImageIndex = 0;
+	mLastFrameBoundaryStats.acquireSemaphoreIndex = 0;
+	mLastFrameBoundaryStats.sanityModeEnabled = !!nri_ptsanity;
+	mLastFrameBoundaryStats.sanityFrameUsed = false;
+
+	{
+		ScopedNriTiming waitTiming(NriPTFrameWait, mLastFrameBoundaryStats.waitMs);
+		WaitForCommands(false);
+	}
 	SetViewportRects(nullptr);
 
 	if (!EnsureSwapChainSize())
@@ -256,7 +323,15 @@ void NRIRenderDevice::BeginFrame()
 	}
 
 	mAcquireSemaphoreIndex = mSwapChainImages.empty() ? 0 : (uint32_t)(mSubmittedFenceValue % mSwapChainImages.size());
-	nri::Result acquireResult = mSwapChainInterface.AcquireNextTexture(*mSwapChain, *mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, mCurrentSwapChainImage);
+	mLastFrameBoundaryStats.acquireSemaphoreIndex = mAcquireSemaphoreIndex;
+
+	nri::Result acquireResult = nri::Result::FAILURE;
+	{
+		ScopedNriTiming acquireTiming(NriPTAcquireSwap, mLastFrameBoundaryStats.acquireMs);
+		acquireResult = mSwapChainInterface.AcquireNextTexture(*mSwapChain, *mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, mCurrentSwapChainImage);
+	}
+	mLastFrameBoundaryStats.acquireResult = acquireResult;
+	mLastFrameBoundaryStats.swapChainImageIndex = mCurrentSwapChainImage;
 	if (acquireResult == nri::Result::OUT_OF_DATE)
 	{
 		if (!EnsureSwapChainSize())
@@ -264,7 +339,12 @@ void NRIRenderDevice::BeginFrame()
 			return;
 		}
 
-		acquireResult = mSwapChainInterface.AcquireNextTexture(*mSwapChain, *mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, mCurrentSwapChainImage);
+		{
+			ScopedNriTiming reacquireTiming(NriPTAcquireSwap, mLastFrameBoundaryStats.acquireMs);
+			acquireResult = mSwapChainInterface.AcquireNextTexture(*mSwapChain, *mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, mCurrentSwapChainImage);
+		}
+		mLastFrameBoundaryStats.acquireResult = acquireResult;
+		mLastFrameBoundaryStats.swapChainImageIndex = mCurrentSwapChainImage;
 	}
 
 	if (acquireResult != nri::Result::SUCCESS)
@@ -349,12 +429,51 @@ void NRIRenderDevice::SetActiveRenderTarget()
 
 bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal)
 {
-	if (!mInitialized || mRenderer == nullptr)
+	if (!mInitialized)
+	{
+		return false;
+	}
+
+	if (nri_ptsanity && drawmode == DM_MAINVIEW && !portal)
+	{
+		mLastFrameBoundaryStats.sanityFrameUsed = true;
+		return RenderPathTracingSanityFrame();
+	}
+
+	if (mRenderer == nullptr)
 	{
 		return false;
 	}
 
 	return mRenderer->RenderScene(di, drawmode, portal);
+}
+
+bool NRIRenderDevice::RenderPathTracingSanityFrame()
+{
+	if (mCommandBuffer == nullptr || mActiveTarget == nullptr || mActiveTarget->colorAttachmentView == nullptr)
+	{
+		return false;
+	}
+
+	mRenderState->EndFrame();
+	PrepareTargetForRendering(*mActiveTarget, true);
+
+	nri::AttachmentDesc colorAttachment = {};
+	colorAttachment.descriptor = mActiveTarget->colorAttachmentView;
+	colorAttachment.loadOp = nri::LoadOp::CLEAR;
+	colorAttachment.storeOp = nri::StoreOp::STORE;
+	colorAttachment.clearValue.color.f.x = mSceneClearColor[0];
+	colorAttachment.clearValue.color.f.y = mSceneClearColor[1];
+	colorAttachment.clearValue.color.f.z = mSceneClearColor[2];
+	colorAttachment.clearValue.color.f.w = mSceneClearColor[3];
+
+	nri::RenderingDesc renderingDesc = {};
+	renderingDesc.colors = &colorAttachment;
+	renderingDesc.colorNum = 1;
+	mCore.CmdBeginRendering(*mCommandBuffer, renderingDesc);
+	mCore.CmdEndRendering(*mCommandBuffer);
+	mRenderState->NotifyExternalTargetWrite();
+	return true;
 }
 
 IHardwareTexture* NRIRenderDevice::CreateHardwareTexture(int numchannels)
@@ -450,6 +569,7 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 void NRIRenderDevice::PrintPathTracingStatus() const
 {
 	PrintPathTracingCaps();
+	PrintFrameBoundaryStatus();
 	if (mRenderer != nullptr)
 	{
 		mRenderer->PrintStatus();
@@ -459,10 +579,27 @@ void NRIRenderDevice::PrintPathTracingStatus() const
 void NRIRenderDevice::PrintPathTracingBuffers() const
 {
 	PrintPathTracingCaps();
+	PrintFrameBoundaryStatus();
 	if (mRenderer != nullptr)
 	{
 		mRenderer->PrintSceneBufferStatus();
 	}
+}
+
+void NRIRenderDevice::PrintFrameBoundaryStatus() const
+{
+	const auto& stats = mLastFrameBoundaryStats;
+	Printf("NRI PT frame boundary: frame=%llu sanity_mode=%s last_frame=%s wait=%2.3f acquire=%2.3f submit=%2.3f present=%2.3f acquire_result=%s image=%u sem_index=%u\n",
+		(unsigned long long)stats.frameNumber,
+		stats.sanityModeEnabled ? "on" : "off",
+		stats.sanityFrameUsed ? "clear-only" : "normal",
+		stats.waitMs,
+		stats.acquireMs,
+		stats.submitMs,
+		stats.presentMs,
+		GetNriResultName(stats.acquireResult),
+		stats.swapChainImageIndex,
+		stats.acquireSemaphoreIndex);
 }
 
 void NRIRenderDevice::ResetPathTracingHistory()
@@ -898,10 +1035,16 @@ void NRIRenderDevice::EndFrameAndPresent()
 	submitDesc.commandBufferNum = 1;
 	submitDesc.signalFences = signalFences;
 	submitDesc.signalFenceNum = 2;
-	mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+	{
+		ScopedNriTiming submitTiming(NriPTQueueSubmit, mLastFrameBoundaryStats.submitMs);
+		mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+	}
 
 	mStreamer.EndStreamerFrame(*mStreamerInstance);
-	mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
+	{
+		ScopedNriTiming presentTiming(NriPTQueuePresent, mLastFrameBoundaryStats.presentMs);
+		mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
+	}
 	ResetFrameTracking();
 }
 
