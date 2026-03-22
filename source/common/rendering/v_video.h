@@ -82,6 +82,8 @@ extern int DisplayWidth, DisplayHeight;
 
 void V_UpdateModeSize (int width, int height);
 void V_OutputResized (int width, int height);
+int V_GetBackend();
+const char* V_GetStartupNriAPI();
 
 EXTERN_CVAR(Bool, vid_fullscreen)
 EXTERN_CVAR(Int, win_x)

@@ -136,12 +136,54 @@ CUSTOM_CVAR(String, nri_api, "vulkan", CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_N
 	}
 }
 
+static const char* GetStartupSetOverride(const char* name)
+{
+	if (Args == nullptr || name == nullptr || *name == '\0')
+	{
+		return nullptr;
+	}
+
+	const char* value = nullptr;
+	for (int i = 1; i + 2 < Args->NumArgs(); ++i)
+	{
+		const char* arg = Args->GetArg(i);
+		if (arg == nullptr || stricmp(arg, "+set") != 0)
+		{
+			continue;
+		}
+
+		const char* key = Args->GetArg(i + 1);
+		const char* candidate = Args->GetArg(i + 2);
+		if (key == nullptr || candidate == nullptr)
+		{
+			continue;
+		}
+
+		if (stricmp(key, name) == 0)
+		{
+			value = candidate;
+		}
+	}
+
+	return value;
+}
+
 int V_GetBackend()
 {
 	int v = vid_preferbackend;
+	if (const char* override = GetStartupSetOverride("vid_preferbackend"))
+	{
+		v = (int)strtol(override, nullptr, 0);
+	}
 	if (v == 3) vid_preferbackend = v = 2;
 	else if (v < 0 || v > 4) v = 0;
 	return v;
+}
+
+const char* V_GetStartupNriAPI()
+{
+	const char* api = GetStartupSetOverride("nri_api");
+	return (api != nullptr && *api != '\0') ? api : (const char*)nri_api;
 }
 
 

@@ -1034,9 +1034,7 @@ void NRIRenderDevice::BeginFrame()
 	}
 
 	const bool waitableSwapChain = ((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::WAITABLE) != 0;
-	const bool allowWaitForPresent =
-		GetSelectedAPI() == nri::GraphicsAPI::VK ||
-		(GetSelectedAPI() == nri::GraphicsAPI::D3D12 && waitableSwapChain);
+	const bool allowWaitForPresent = waitableSwapChain;
 	if (nri_ptwaitpresent && allowWaitForPresent && mHasPresentedSwapChainFrame && mSwapChain != nullptr)
 	{
 		nri::Result waitForPresentResult = nri::Result::FAILURE;
@@ -1788,11 +1786,12 @@ void NRIRenderDevice::LogStartup()
 	}
 
 	const nri::DeviceDesc& deviceDesc = mCore.GetDeviceDesc(*mDevice);
-	mDeviceName = FStringf("NRI (%s) - %s", (const char*)nri_api, deviceDesc.adapterDesc.name);
+	const char* startupApi = V_GetStartupNriAPI();
+	mDeviceName = FStringf("NRI (%s) - %s", startupApi, deviceDesc.adapterDesc.name);
 	vendorstring = mDeviceName.GetChars();
 
 	Printf("NRI device: " TEXTCOLOR_ORANGE "%s\n", deviceDesc.adapterDesc.name);
-	Printf("NRI graphics API: %s\n", (const char*)nri_api);
+	Printf("NRI graphics API: %s\n", startupApi);
 	Printf("Max. texture size: %u\n", deviceDesc.dimensions.texture2DMaxDim);
 	Printf("Root constant limit: %u\n", deviceDesc.pipelineLayout.rootConstantMaxSize);
 	Printf("Shader model: %u.%u\n", deviceDesc.shaderModel / 10, deviceDesc.shaderModel % 10);
@@ -1898,8 +1897,9 @@ bool NRIRenderDevice::CreateDevice()
 	creationDesc.disableVKRayTracing = false;
 	creationDesc.disableD3D12EnhancedBarriers = false;
 	creationDesc.vkBindingOffsets = {};
+	const char* startupApi = V_GetStartupNriAPI();
 	Printf("NRI CreateDevice config: api=%s nri_validation=%s api_validation=%s dred=%s\n",
-		(const char*)nri_api,
+		startupApi,
 		nri_validation ? "on" : "off",
 		nri_apivalidation ? "on" : "off",
 		nri_dred ? "on" : "off");
@@ -1908,7 +1908,7 @@ bool NRIRenderDevice::CreateDevice()
 	if (createResult != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "Failed to create NRI device for API '%s' using adapter '%s' (result=%s).\n",
-			(const char*)nri_api,
+			startupApi,
 			adapters[0].name,
 			GetNriResultName(createResult));
 		if (createResult == nri::Result::INVALID_SDK)
@@ -3054,7 +3054,7 @@ const void* NRIRenderDevice::GetPixelShaderBytecode(size_t& size) const
 
 nri::GraphicsAPI NRIRenderDevice::GetSelectedAPI() const
 {
-	return FString((const char*)nri_api).CompareNoCase("d3d12") == 0 ? nri::GraphicsAPI::D3D12 : nri::GraphicsAPI::VK;
+	return FString(V_GetStartupNriAPI()).CompareNoCase("d3d12") == 0 ? nri::GraphicsAPI::D3D12 : nri::GraphicsAPI::VK;
 }
 
 NRISamplerMode NRIRenderDevice::GetSamplerMode(int clampMode) const
