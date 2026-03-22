@@ -1271,6 +1271,11 @@ bool NRIRenderer::UseFallbackSceneTextures()
 
 bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after)
 {
+	if (resource.buffer != nullptr || resource.shaderView != nullptr)
+	{
+		mFrameBuffer->WaitForCommands(true);
+	}
+
 	DestroyBufferResource(resource);
 
 	nri::BufferDesc desc = {};
@@ -1348,6 +1353,10 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 	if (needsGrowth)
 	{
 		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
+		if (resource.buffer != nullptr || resource.shaderView != nullptr)
+		{
+			mFrameBuffer->WaitForCommands(true);
+		}
 		DestroyBufferResource(resource);
 
 		nri::BufferDesc desc = {};
@@ -1415,6 +1424,11 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 
 bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage)
 {
+	if (resource.buffer != nullptr)
+	{
+		mFrameBuffer->WaitForCommands(true);
+	}
+
 	DestroyBufferResource(resource);
 
 	nri::BufferDesc desc = {};
@@ -1458,6 +1472,14 @@ bool NRIRenderer::UploadSceneBuffers(const nri_scene::GeometryData& geometry, co
 bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geometry)
 {
 	Clocker clock(NriPTAcceleration);
+
+	if (mBottomLevelAS.accelerationStructure != nullptr ||
+		mTopLevelAS.accelerationStructure != nullptr ||
+		mInstanceBuffer.buffer != nullptr ||
+		mScratchBuffer.buffer != nullptr)
+	{
+		mFrameBuffer->WaitForCommands(true);
+	}
 
 	DestroyAccelerationStructures();
 
