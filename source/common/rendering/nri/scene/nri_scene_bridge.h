@@ -17,7 +17,6 @@ enum class SurfaceSourceType : uint32_t
 {
 	Unknown = 0,
 	DrawListWall,
-	SupplementalOneSidedWall,
 	MirrorWall,
 	FloorFlat,
 	CeilingFlat,
@@ -35,7 +34,6 @@ enum MaterialFlags : uint32_t
 	MaterialFlag_Mirror = 1u << 4,
 	MaterialFlag_Sky = 1u << 5,
 	MaterialFlag_Portal = 1u << 6,
-	MaterialFlag_TwoSidedWall = 1u << 7,
 };
 
 struct SurfaceProvenance

@@ -22,12 +22,7 @@ MaterialData GetMaterialData(uint materialIndex)
 
 float3 ResolveHitNormal(uint materialIndex, float3 geometricNormal, float3 rayDirection)
 {
-	const MaterialData material = GetMaterialData(materialIndex);
 	float3 normal = normalize(geometricNormal);
-	if ((material.flags & MATERIAL_FLAG_TWO_SIDED_WALL) != 0 && dot(normal, rayDirection) > 0.0)
-	{
-		normal = -normal;
-	}
 	return normal;
 }
 

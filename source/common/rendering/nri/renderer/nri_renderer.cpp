@@ -307,7 +307,6 @@ namespace
 		switch (sourceType)
 		{
 		case nri_scene::SurfaceSourceType::DrawListWall: return "draw_list_wall";
-		case nri_scene::SurfaceSourceType::SupplementalOneSidedWall: return "supplemental_one_sided_wall";
 		case nri_scene::SurfaceSourceType::MirrorWall: return "mirror_wall";
 		case nri_scene::SurfaceSourceType::FloorFlat: return "floor_flat";
 		case nri_scene::SurfaceSourceType::CeilingFlat: return "ceiling_flat";
@@ -904,7 +903,7 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bo
 	}
 
 	const uint32_t flags = result.primitiveFlags;
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s two_sided_wall=%s\n",
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		result.provenance.sectorIndex,
@@ -924,8 +923,7 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bo
 		(flags & nri_scene::MaterialFlag_Sprite) != 0 ? "yes" : "no",
 		(flags & nri_scene::MaterialFlag_Mirror) != 0 ? "yes" : "no",
 		(flags & nri_scene::MaterialFlag_Sky) != 0 ? "yes" : "no",
-		(flags & nri_scene::MaterialFlag_Portal) != 0 ? "yes" : "no",
-		(flags & nri_scene::MaterialFlag_TwoSidedWall) != 0 ? "yes" : "no");
+		(flags & nri_scene::MaterialFlag_Portal) != 0 ? "yes" : "no");
 	mLastLoggedSurfaceProbe = result;
 }
 
@@ -944,7 +942,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 	}
 
 	const uint32_t flags = mLastSurfaceProbe.primitiveFlags;
-	Printf("NRI PT surface probe: source=%s drawlist=%s sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x two_sided_wall=%s\n",
+	Printf("NRI PT surface probe: source=%s drawlist=%s sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
 		mLastSurfaceProbe.provenance.sectorIndex,
@@ -958,8 +956,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		mLastSurfaceProbe.position[0],
 		mLastSurfaceProbe.position[1],
 		mLastSurfaceProbe.position[2],
-		flags,
-		(flags & nri_scene::MaterialFlag_TwoSidedWall) != 0 ? "yes" : "no");
+		flags);
 }
 
 const char* NRIRenderer::GetAvailabilityReason() const

@@ -10,7 +10,6 @@
 #include "texturemanager.h"
 #include "textures.h"
 #include "v_video.h"
-#include <unordered_set>
 #include <windows.h>
 
 namespace
@@ -224,16 +223,6 @@ namespace
 		}
 	}
 
-	uint32_t GetWallMaterialFlags(const HWWall& wall)
-	{
-		uint32_t flags = MaterialFlag_None;
-		if (wall.Sprite == nullptr && wall.seg != nullptr && !wall.seg->twoSided())
-		{
-			flags |= MaterialFlag_TwoSidedWall;
-		}
-		return flags;
-	}
-
 	SurfaceProvenance MakeWallProvenance(const walltype* seg, SurfaceSourceType sourceType, uint32_t drawListType, int actorIndex, uint32_t materialFlags)
 	{
 		SurfaceProvenance provenance = {};
@@ -373,7 +362,7 @@ namespace
 			}
 
 			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, GetWallMaterialFlags(*wall));
+			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, MaterialFlag_None);
 			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::DrawListWall, drawListType, GetOwnerActorIndex(*wall), surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
 			surface.vertices.reserve(wall->vertcount);
@@ -389,108 +378,6 @@ namespace
 
 			outWalls.push_back(std::move(surface));
 		}
-	}
-
-	void ClearPendingPortals(HWDrawInfo& di)
-	{
-		HWPortal* portal = nullptr;
-		while (di.Portals.Pop(portal) && portal != nullptr)
-		{
-			delete portal;
-		}
-	}
-
-	void CollectCapturedOneSidedWallSegs(HWDrawInfo& di, std::unordered_set<const walltype*>& outSegs)
-	{
-		for (int listIndex : {
-			GLDL_PLAINWALLS,
-			GLDL_MASKEDWALLS,
-			GLDL_MASKEDWALLSS,
-			GLDL_MASKEDWALLSD,
-			GLDL_MASKEDWALLSV,
-			GLDL_MASKEDWALLSH,
-			GLDL_TRANSLUCENTBORDER })
-		{
-			for (auto* wall : di.drawlists[listIndex].walls)
-			{
-				if (wall == nullptr || !IsOpaqueSurface(*wall) || IsSkyWall(*wall) || IsPortalSourceWall(*wall))
-				{
-					continue;
-				}
-
-				if (wall->Sprite == nullptr && wall->seg != nullptr && !wall->seg->twoSided())
-				{
-					outSegs.insert(wall->seg);
-				}
-			}
-		}
-	}
-
-	void CaptureSupplementalOneSidedWalls(HWDrawInfo& di, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats)
-	{
-		std::unordered_set<const walltype*> capturedSegs;
-		CollectCapturedOneSidedWallSegs(di, capturedSegs);
-
-		HWDrawInfo* tempDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
-		for (auto& frontSector : sector)
-		{
-			for (auto& wal : frontSector.walls)
-			{
-				if (wal.twoSided() || wal.portalflags != 0)
-				{
-					continue;
-				}
-
-				if (capturedSegs.find(&wal) != capturedSegs.end())
-				{
-					continue;
-				}
-
-				HWWall tempWall;
-				tempWall.Process(tempDi, &wal, &frontSector, nullptr);
-				ClearPendingPortals(*tempDi);
-			}
-		}
-
-		for (auto* wall : tempDi->drawlists[GLDL_PLAINWALLS].walls)
-		{
-			if (wall == nullptr || !IsOpaqueSurface(*wall) || IsSkyWall(*wall) || IsPortalSourceWall(*wall))
-			{
-				continue;
-			}
-
-			if (wall->Sprite != nullptr || wall->seg == nullptr || wall->seg->twoSided())
-			{
-				continue;
-			}
-
-			if (capturedSegs.find(wall->seg) != capturedSegs.end())
-			{
-				continue;
-			}
-
-			wall->MakeVertices(tempDi, false);
-			if (wall->vertcount < 3)
-			{
-				continue;
-			}
-
-			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, GetWallMaterialFlags(*wall));
-			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::SupplementalOneSidedWall, UINT32_MAX, GetOwnerActorIndex(*wall), surface.material.flags);
-			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
-			surface.vertices.reserve(wall->vertcount);
-			for (uint32_t i = 0; i < wall->vertcount; ++i)
-			{
-				surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
-			}
-
-			outWalls.push_back(std::move(surface));
-			capturedSegs.insert(wall->seg);
-		}
-
-		ClearPendingPortals(*tempDi);
-		tempDi->EndDrawInfo();
 	}
 
 	void CaptureMirrorBorders(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats)
@@ -783,7 +670,6 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSD], GLDL_MASKEDWALLSD, outView.opaqueWalls, outView.stats);
 	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSV], GLDL_MASKEDWALLSV, outView.opaqueWalls, outView.stats);
 	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSH], GLDL_MASKEDWALLSH, outView.opaqueWalls, outView.stats);
-	CaptureSupplementalOneSidedWalls(di, outView.opaqueWalls, outView.stats);
 	CaptureMirrorBorders(di, di.drawlists[GLDL_TRANSLUCENTBORDER], GLDL_TRANSLUCENTBORDER, outView.opaqueWalls, outView.stats);
 
 	CaptureFlats(di, di.drawlists[GLDL_PLAINFLATS], GLDL_PLAINFLATS, outView.opaqueFlats, outView.stats, outView);
