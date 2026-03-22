@@ -1605,15 +1605,19 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	Clocker clock(NriPTFrameGraph);
 
 	static bool sLoggedPhaseBCompositionPath = false;
+	static bool sLoggedPhaseFDenoiserPath = false;
+	static bool sLoggedPhaseFDenoiserFallback = false;
 	static bool sLoggedRawTraceBypass = false;
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
 	const bool useCompositionPresent = !nri_ptbootstrap && (nri_ptdebug == 0 || nri_ptdebug == 15);
-	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPresent;
+	const bool useValidationPresent = !nri_ptbootstrap && nri_ptdebug == 9;
+	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPresent && !useValidationPresent;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
 	mUseUpscaledInFinal = false;
+	mUseDenoisedCompositionInputs = false;
 
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
@@ -1631,12 +1635,50 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return true;
 	}
 
+	if (useValidationPresent)
+	{
+		if (!DispatchDenoiser())
+		{
+			return false;
+		}
+
+		if (!DispatchRawPresent(FrameTextureSlot::Validation))
+		{
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		return true;
+	}
+
 	if (useCompositionPresent)
 	{
 		if (!sLoggedPhaseBCompositionPath)
 		{
 			Printf("NRI Phase B: ptdebug 0/15 now routes through Composition and the minimal FinalPresent presenter.\n");
 			sLoggedPhaseBCompositionPath = true;
+		}
+
+		if (nri_denoise)
+		{
+			if (!sLoggedPhaseFDenoiserPath)
+			{
+				Printf("NRI Phase F: ptdebug 0/15 now routes through NRD before Composition when nri_denoise is enabled.\n");
+				sLoggedPhaseFDenoiserPath = true;
+			}
+
+			if (!DispatchDenoiser())
+			{
+				if (!sLoggedPhaseFDenoiserFallback)
+				{
+					Printf(TEXTCOLOR_ORANGE "NRI Phase F: NRD dispatch failed in the composition path; falling back to raw trace inputs for this frame.\n");
+					sLoggedPhaseFDenoiserFallback = true;
+				}
+			}
+			else
+			{
+				mUseDenoisedCompositionInputs = true;
+			}
 		}
 
 		if (!DispatchComposition())
@@ -1841,8 +1883,10 @@ bool NRIRenderer::DispatchComposition()
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
 
-	NRITextureResource& diffuse = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
-	NRITextureResource& specular = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular);
+	const FrameTextureSlot diffuseSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::UnfilteredDiffuse;
+	const FrameTextureSlot specularSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedSpecular : FrameTextureSlot::UnfilteredSpecular;
+	NRITextureResource& diffuse = GetFrameTexture(diffuseSlot);
+	NRITextureResource& specular = GetFrameTexture(specularSlot);
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 
 	mFrameBuffer->TransitionTexture(diffuse, NRIComputeShaderResourceState());

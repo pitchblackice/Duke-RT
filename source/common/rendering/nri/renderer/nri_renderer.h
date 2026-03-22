@@ -207,6 +207,7 @@ private:
 	bool mPathTracingSupported = true;
 	bool mResetHistory = true;
 	bool mUseUpscaledInFinal = false;
+	bool mUseDenoisedCompositionInputs = false;
 	bool mHasLoggedFallback = false;
 	int mLastUpscalerRequest = -1;
 	NRIUpscalerKind mLastUpscalerResolved = NRIUpscalerKind::Off;
