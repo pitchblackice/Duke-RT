@@ -996,7 +996,6 @@ void NRIRenderDevice::BeginFrame()
 	if (nri_pttraceframes > 0)
 	{
 		mTraceThisFrame = true;
-		nri_pttraceframes = nri_pttraceframes - 1;
 	}
 
 	Reset2DTextureFrameStats();
@@ -2621,12 +2620,15 @@ void NRIRenderDevice::EndFrameAndPresent()
 		queuedFrame.hasSubmittedWork = true;
 	}
 	RecordFrameSequence(mCurrentSwapChainImage, submittedFenceValue, presentResult);
-	if (mTraceThisFrame)
+	const bool tracedGameplayFrame = mTraceThisFrame && (mLastFrameBoundaryStats.pathTracedSceneRendered || mLastFrameBoundaryStats.postProcessInvoked);
+	if (tracedGameplayFrame)
 	{
 		PrintFrameBoundaryStatus();
 		PrintSwapChainStatus();
 		PrintFrameShellStatus();
 		Print2DTextureStatus();
+		const int remainingTraceFrames = (int)nri_pttraceframes - 1;
+		nri_pttraceframes = remainingTraceFrames > 0 ? remainingTraceFrames : 0;
 	}
 	ResetFrameTracking(presentResult == nri::Result::SUCCESS);
 	mFrameIndex++;
