@@ -1183,6 +1183,8 @@ OptionMenu "NRIOptions" protected
 	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2
 	Slider "Sharpness",							"nri_sharpness",				0.0, 1.0, 0.05, 2
 	Slider "Portal Depth",						"nri_ptportaldepth",			0, 6, 1, 0
+	Slider "Light Bounces",						"nri_ptlightbounces",			0, 4, 1, 0
+	Slider "Mirror Bounces",					"nri_ptmirrorbounces",			0, 8, 1, 0
 	Option "PT Debug View",						"nri_ptdebug",					"NRIPTDebug"
 	Slider "PT Debug Index",					"nri_ptdebug",					0, 15, 1, 0
 	StaticText ""
