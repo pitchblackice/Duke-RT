@@ -55,7 +55,7 @@ namespace
 
 	static nri::AccessStage NRIAccelerationStructureBuildInputAccess()
 	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
+		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::ALL_SHADERS };
 	}
 
 	static nri::AccessStage NRIAccelerationStructureWriteAccess()
