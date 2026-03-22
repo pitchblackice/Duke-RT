@@ -1628,7 +1628,9 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
 	const bool useCompositionPresent = !nri_ptbootstrap && (nri_ptdebug == 0 || nri_ptdebug == 15);
 	const bool useValidationPresent = !nri_ptbootstrap && nri_ptdebug == 9;
-	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPresent && !useValidationPresent;
+	const bool useFinalDebugPresent = !nri_ptbootstrap &&
+		((nri_ptdebug >= 5 && nri_ptdebug <= 8) || nri_ptdebug == 13 || nri_ptdebug == 14);
+	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPresent && !useValidationPresent && !useFinalDebugPresent;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
@@ -1711,6 +1713,17 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return true;
 	}
 
+	if (useFinalDebugPresent)
+	{
+		if (!DispatchFinalPresent(FrameTextureSlot::UnfilteredDiffuse))
+		{
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		return true;
+	}
+
 	if (rawTraceDirectPresent)
 	{
 		if (!sLoggedRawTraceBypass)
@@ -1719,12 +1732,8 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			sLoggedRawTraceBypass = true;
 		}
 
-		FrameTextureSlot rawPresentSlot = FrameTextureSlot::PreFinal;
-		if (nri_ptdebug == 10)
-		{
-			rawPresentSlot = FrameTextureSlot::UnfilteredDiffuse;
-		}
-		else if (nri_ptdebug == 11 || nri_ptdebug == 12)
+		FrameTextureSlot rawPresentSlot = FrameTextureSlot::UnfilteredDiffuse;
+		if (nri_ptdebug == 11 || nri_ptdebug == 12)
 		{
 			rawPresentSlot = FrameTextureSlot::UnfilteredSpecular;
 		}
