@@ -91,9 +91,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else
 		{
 			albedo = SampleSurfaceColor(hit.materialIndex, hit.uv);
+			const MaterialData material = GetMaterialData(hit.materialIndex);
+			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
 			if (bootstrapBaseColor)
 			{
 				diffuse = albedo.rgb;
+			}
+			else if (fullbright)
+			{
+				diffuse = albedo.rgb;
+				specular = 0.0;
 			}
 			else
 			{
