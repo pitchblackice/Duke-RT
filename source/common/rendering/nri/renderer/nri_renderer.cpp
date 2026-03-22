@@ -1396,6 +1396,13 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 
 	if (data != nullptr && size != 0)
 	{
+		if (!needsGrowth)
+		{
+			// Scene buffers are reused persistent DEVICE_UPLOAD allocations. Fence before
+			// overwriting them so prior queued frames cannot read partially updated data.
+			mFrameBuffer->WaitForCommands(true);
+		}
+
 		void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, 0, resource.size);
 		if (mapped == nullptr)
 		{

@@ -2512,9 +2512,7 @@ bool NRIRenderDevice::BeginCommandList(const char* reason, bool waitForSlotReuse
 	}
 
 	mCore.ResetCommandAllocator(*mCommandAllocator);
-	// Match NRD-Sample: persistent descriptor sets live in the descriptor pool,
-	// but ordinary per-frame command recording begins without rebinding that pool.
-	const bool success = mCore.BeginCommandBuffer(*mCommandBuffer, nullptr) == nri::Result::SUCCESS;
+	const bool success = mCore.BeginCommandBuffer(*mCommandBuffer, mDescriptorPool) == nri::Result::SUCCESS;
 	mCommandBufferOpen = success;
 	if (!success)
 	{
