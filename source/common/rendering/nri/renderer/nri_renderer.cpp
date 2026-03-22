@@ -1631,18 +1631,11 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedRawTraceBypass)
 		{
-			Printf("NRI frame-graph bypass: presenting composed output through the shared Final pass while the direct present detour stays disabled.\n");
+			Printf("NRI frame-graph bypass: presenting raw TraceOpaque output through the direct present path until composition integration is stabilized.\n");
 			sLoggedRawTraceBypass = true;
 		}
 
-		if (!DispatchComposition())
-		{
-			return false;
-		}
-
-		mUpscaledInputSlot = FrameTextureSlot::Composed;
-		mUseUpscaledInFinal = false;
-		if (!DispatchFinal())
+		if (!DispatchRawPresent(FrameTextureSlot::PreFinal))
 		{
 			return false;
 		}
