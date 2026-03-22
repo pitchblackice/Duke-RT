@@ -2714,8 +2714,6 @@ void NRIRenderDevice::DestroyTextureResource(NRITextureResource& resource)
 		resource.shaderView = nullptr;
 	}
 
-	resource.textureSet = nullptr;
-
 	if (resource.owned && resource.texture != nullptr)
 	{
 		mCore.DestroyTexture(resource.texture);
@@ -2750,10 +2748,23 @@ bool NRIRenderDevice::CreateTextureViews(NRITextureResource& resource)
 			return false;
 		}
 
-		resource.textureSet = CreateTextureSet(resource.shaderView);
 		if (resource.textureSet == nullptr)
 		{
-			return false;
+			resource.textureSet = CreateTextureSet(resource.shaderView);
+			if (resource.textureSet == nullptr)
+			{
+				return false;
+			}
+		}
+		else
+		{
+			const nri::Descriptor* descriptor = resource.shaderView;
+			nri::UpdateDescriptorRangeDesc updateDesc = {};
+			updateDesc.descriptorSet = resource.textureSet;
+			updateDesc.rangeIndex = 0;
+			updateDesc.descriptors = &descriptor;
+			updateDesc.descriptorNum = 1;
+			mCore.UpdateDescriptorRanges(&updateDesc, 1);
 		}
 	}
 

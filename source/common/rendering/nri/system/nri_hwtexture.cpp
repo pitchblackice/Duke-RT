@@ -128,6 +128,11 @@ void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags
 		mFrameBuffer->Note2DTextureCacheMiss();
 	}
 
+	if (mResource.texture != nullptr)
+	{
+		mFrameBuffer->WaitForCommands(true);
+	}
+
 	const size_t uploadSize = (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u;
 	std::vector<uint8_t> uploadPixels(uploadSize);
 	if (!TryMemcpyTexturePixels(uploadPixels.data(), texBuffer.mBuffer, uploadSize))
@@ -223,6 +228,10 @@ void NRIHardwareTexture::CreateTextureResource(uint32_t width, uint32_t height, 
 	}
 
 	const bool recreated = mResource.texture != nullptr;
+	if (recreated)
+	{
+		mFrameBuffer->WaitForCommands(true);
+	}
 	mFrameBuffer->DestroyTextureResource(mResource);
 	if (mFrameBuffer->CreateOwnedTexture(mResource, width, height, format, usage))
 	{
