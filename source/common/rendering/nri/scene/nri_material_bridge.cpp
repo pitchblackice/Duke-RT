@@ -27,6 +27,17 @@ namespace
 		return lightLevel / 255.0f;
 	}
 
+	uint64_t Fnv1a64(const uint8_t* data, size_t size)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		for (size_t i = 0; i < size; ++i)
+		{
+			hash ^= (uint64_t)data[i];
+			hash *= 1099511628211ull;
+		}
+		return hash;
+	}
+
 	uint64_t MakeTextureKey(FGameTexture* texture, bool indexed)
 	{
 		return (uint64_t)(uintptr_t)texture ^ (indexed ? 1ull : 0ull);
@@ -52,6 +63,7 @@ namespace
 				upload.width = (uint32_t)texBuffer.mWidth;
 				upload.height = (uint32_t)texBuffer.mHeight;
 				upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight);
+				upload.key = Fnv1a64(upload.pixels.data(), upload.pixels.size());
 			}
 		}
 		else
@@ -62,7 +74,14 @@ namespace
 				upload.width = (uint32_t)texBuffer.mWidth;
 				upload.height = (uint32_t)texBuffer.mHeight;
 				upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
+				upload.key = texBuffer.mContentId != 0 ? texBuffer.mContentId : Fnv1a64(upload.pixels.data(), upload.pixels.size());
 			}
+		}
+
+		if (upload.width != 0 && upload.height != 0)
+		{
+			upload.key ^= ((uint64_t)upload.width << 32) | (uint64_t)upload.height;
+			upload.key ^= indexed ? (1ull << 63) : 0ull;
 		}
 
 		return upload;

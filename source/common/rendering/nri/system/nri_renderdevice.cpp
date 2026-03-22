@@ -2267,6 +2267,7 @@ bool NRIRenderDevice::CreateRenderResources()
 	textureRange.descriptorNum = 1;
 	textureRange.descriptorType = nri::DescriptorType::TEXTURE;
 	textureRange.shaderStages = NRIShaderStages();
+	textureRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::DescriptorSetDesc descriptorSets[2] = {};
 	descriptorSets[0].registerSpace = 0;
@@ -2275,6 +2276,7 @@ bool NRIRenderDevice::CreateRenderResources()
 	descriptorSets[1].registerSpace = 1;
 	descriptorSets[1].ranges = &textureRange;
 	descriptorSets[1].rangeNum = 1;
+	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::RootConstantDesc rootConstant = {};
 	rootConstant.registerIndex = 0;
