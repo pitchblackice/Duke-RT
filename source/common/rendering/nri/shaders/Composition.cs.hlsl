@@ -28,11 +28,5 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const float3 diffuse = SanitizeColor(gComposedInput.Load(int3(pixelPos, 0)).rgb);
 	const float3 specular = SanitizeColor(gUpscaledInput.Load(int3(pixelPos, 0)).rgb);
-	if (gTraceConstants.DebugMode == 0u)
-	{
-		gComposedOutput[pixelPos] = float4(saturate(diffuse), 1.0);
-		return;
-	}
-
 	gComposedOutput[pixelPos] = float4(saturate(diffuse + specular), 1.0);
 }

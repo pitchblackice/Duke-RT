@@ -1602,10 +1602,12 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 {
 	Clocker clock(NriPTFrameGraph);
 
+	static bool sLoggedPhaseBCompositionPath = false;
 	static bool sLoggedRawTraceBypass = false;
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
-	const bool rawTraceDirectPresent = !nri_ptbootstrap;
+	const bool useCompositionPresent = !nri_ptbootstrap && (nri_ptdebug == 0 || nri_ptdebug == 15);
+	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPresent;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
@@ -1627,11 +1629,33 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return true;
 	}
 
+	if (useCompositionPresent)
+	{
+		if (!sLoggedPhaseBCompositionPath)
+		{
+			Printf("NRI Phase B: ptdebug 0/15 now routes through Composition and the minimal FinalPresent presenter.\n");
+			sLoggedPhaseBCompositionPath = true;
+		}
+
+		if (!DispatchComposition())
+		{
+			return false;
+		}
+
+		if (!DispatchFinalPresent(FrameTextureSlot::Composed))
+		{
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		return true;
+	}
+
 	if (rawTraceDirectPresent)
 	{
 		if (!sLoggedRawTraceBypass)
 		{
-			Printf("NRI frame-graph bypass: presenting raw TraceOpaque output through the direct present path until composition integration is stabilized.\n");
+			Printf("NRI frame-graph bypass: presenting raw TraceOpaque output through the direct present path for non-composition debug views.\n");
 			sLoggedRawTraceBypass = true;
 		}
 
