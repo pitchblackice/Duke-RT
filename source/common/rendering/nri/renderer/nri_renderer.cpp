@@ -117,6 +117,11 @@ namespace
 		return (uint32_t)std::max(0, std::min(value, (int)maxValue));
 	}
 
+	static uint32_t PackTraceBounceCounts(uint32_t lightBounceCount, uint32_t mirrorBounceCount)
+	{
+		return (lightBounceCount & 0xffffu) | ((mirrorBounceCount & 0xffffu) << 16);
+	}
+
 	static float GetUpscalerRenderScale(nri::UpscalerMode mode)
 	{
 		switch (mode)
@@ -193,9 +198,8 @@ namespace
 		uint32_t FrameIndex = 0;
 		uint32_t Flags = 0;
 		uint32_t BootstrapMode = 0;
-		uint32_t LightBounceCount = 0;
-		uint32_t MirrorBounceCount = 0;
-		float Padding[2] = {};
+		uint32_t BounceCounts = 0;
+		float Padding[1] = {};
 	};
 
 	static void Normalize3(float v[3])
@@ -1779,8 +1783,9 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u);
 	constants.BootstrapMode = bootstrapMode;
-	constants.LightBounceCount = ClampTraceBounceCount((int)nri_ptlightbounces, 4u);
-	constants.MirrorBounceCount = ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u);
+	constants.BounceCounts = PackTraceBounceCounts(
+		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
+		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u));
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);

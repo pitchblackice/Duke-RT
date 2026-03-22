@@ -47,9 +47,8 @@ struct NRITraceConstants
 	uint FrameIndex;
 	uint Flags;
 	uint BootstrapMode;
-	uint LightBounceCount;
-	uint MirrorBounceCount;
-	float2 Padding;
+	uint BounceCounts;
+	float Padding;
 };
 
 struct SceneVertex

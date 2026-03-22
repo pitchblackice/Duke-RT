@@ -49,6 +49,16 @@ float3 SampleCosineHemisphere(float3 normal, inout uint rngState)
 	return normalize(tangent * x + bitangent * y + normal * z);
 }
 
+uint GetLightBounceCount()
+{
+	return gTraceConstants.BounceCounts & 0xffffu;
+}
+
+uint GetMirrorBounceCount()
+{
+	return (gTraceConstants.BounceCounts >> 16) & 0xffffu;
+}
+
 float3 EvaluateSunDiffuse(float3 albedo, float3 normal, float3 lightDir, float shadow)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
@@ -146,7 +156,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else
 	{
 		[loop]
-		for (uint bounce = 0u; bounce < max(gTraceConstants.MirrorBounceCount, 1u); ++bounce)
+		for (uint bounce = 0u; bounce < max(GetMirrorBounceCount(), 1u); ++bounce)
 		{
 			hit = TracePrimary(rayOrigin, visibleRayDirection);
 			if (!hit.hit || !IsMirrorMaterial(hit.materialIndex))
@@ -230,9 +240,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float3 viewDir = normalize(-visibleRayDirection);
 				diffuse = EvaluateSunDiffuse(albedo.rgb, hit.normal, lightDir, shadow);
 				specular = EvaluateSunSpecular(albedo.rgb, hit.normal, viewDir, lightDir, shadow);
-				if (!directSceneTrace && gTraceConstants.LightBounceCount > 0u)
+				const uint lightBounceCount = GetLightBounceCount();
+				if (!directSceneTrace && lightBounceCount > 0u)
 				{
-					diffuse += TraceIndirectDiffuse(hit, albedo, pixelPos, gTraceConstants.FrameIndex, gTraceConstants.LightBounceCount);
+					diffuse += TraceIndirectDiffuse(hit, albedo, pixelPos, gTraceConstants.FrameIndex, lightBounceCount);
 				}
 			}
 
