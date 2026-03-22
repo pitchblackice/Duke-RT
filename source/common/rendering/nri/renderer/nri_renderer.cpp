@@ -24,6 +24,8 @@ CVAR(Bool, nri_dred, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptbootstrapmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptlightbounces, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptmirrorbounces, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 
 namespace
@@ -110,6 +112,11 @@ namespace
 		return std::max(0.0f, std::min(value, 1.0f));
 	}
 
+	static uint32_t ClampTraceBounceCount(int value, uint32_t maxValue)
+	{
+		return (uint32_t)std::max(0, std::min(value, (int)maxValue));
+	}
+
 	static float GetUpscalerRenderScale(nri::UpscalerMode mode)
 	{
 		switch (mode)
@@ -186,7 +193,9 @@ namespace
 		uint32_t FrameIndex = 0;
 		uint32_t Flags = 0;
 		uint32_t BootstrapMode = 0;
-		float Padding[1] = {};
+		uint32_t LightBounceCount = 0;
+		uint32_t MirrorBounceCount = 0;
+		float Padding[2] = {};
 	};
 
 	static void Normalize3(float v[3])
@@ -621,7 +630,10 @@ void NRIRenderer::PrintStatus() const
 		GetUpscalerModeName(GetSelectedUpscalerMode()),
 		(float)nri_renderscale,
 		(float)nri_sharpness);
-	Printf("NRI PT tracing: direct_scene_fallback=%s\n", nri_ptdirectscene ? "on" : "off");
+	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u\n",
+		nri_ptdirectscene ? "on" : "off",
+		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
+		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u));
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
@@ -1767,6 +1779,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u);
 	constants.BootstrapMode = bootstrapMode;
+	constants.LightBounceCount = ClampTraceBounceCount((int)nri_ptlightbounces, 4u);
+	constants.MirrorBounceCount = ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);

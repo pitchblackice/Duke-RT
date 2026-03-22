@@ -35,6 +35,92 @@ float3 SampleSunDirection(float3 lightDir, uint2 pixelPos, uint frameIndex)
 	return normalize(lightDir * cosTheta + tangent * (cos(phi) * sinTheta) + bitangent * (sin(phi) * sinTheta));
 }
 
+float3 SampleCosineHemisphere(float3 normal, inout uint rngState)
+{
+	const float u1 = RandomFloat01(rngState);
+	const float u2 = RandomFloat01(rngState);
+	const float r = sqrt(u1);
+	const float phi = 6.28318530718 * u2;
+	const float x = r * cos(phi);
+	const float y = r * sin(phi);
+	const float z = sqrt(saturate(1.0 - u1));
+	const float3 tangent = BuildOrthonormalTangent(normal);
+	const float3 bitangent = normalize(cross(normal, tangent));
+	return normalize(tangent * x + bitangent * y + normal * z);
+}
+
+float3 EvaluateSunDiffuse(float3 albedo, float3 normal, float3 lightDir, float shadow)
+{
+	const float lambert = max(dot(normal, lightDir), 0.0);
+	const float lighting = 0.20 + shadow * lambert * 0.80;
+	return albedo * lighting;
+}
+
+float3 EvaluateSunSpecular(float3 albedo, float3 normal, float3 viewDir, float3 lightDir, float shadow)
+{
+	const float lambert = max(dot(normal, lightDir), 0.0);
+	const float3 halfVector = normalize(lightDir + viewDir);
+	const float ndoth = max(dot(normal, halfVector), 0.0);
+	const float vdoth = max(dot(viewDir, halfVector), 0.0);
+	const float fresnel = pow(1.0 - vdoth, 5.0);
+	const float3 dielectricF0 = lerp(float3(0.04, 0.04, 0.04), albedo, 0.12);
+	const float3 specularColor = lerp(dielectricF0, float3(1.0, 1.0, 1.0), fresnel);
+	const float specularTerm = pow(ndoth, 12.0) * shadow * (0.5 + 0.5 * lambert);
+	return specularColor * specularTerm * 0.85;
+}
+
+float3 TraceIndirectDiffuse(HitData surfaceHit, float4 surfaceAlbedo, uint2 pixelPos, uint frameIndex, uint bounceCount)
+{
+	if (bounceCount == 0u)
+	{
+		return 0.0;
+	}
+
+	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u ^ 0x9e3779b9u;
+	float3 throughput = surfaceAlbedo.rgb;
+	float3 indirectRadiance = 0.0;
+	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
+	float3 direction = SampleCosineHemisphere(surfaceHit.normal, rngState);
+
+	[loop]
+	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
+	{
+		const HitData bounceHit = TracePrimary(origin, direction);
+		if (!bounceHit.hit)
+		{
+			indirectRadiance += throughput * GetMissColor(direction);
+			break;
+		}
+
+		const MaterialData bounceMaterial = GetMaterialData(bounceHit.materialIndex);
+		if ((bounceMaterial.flags & (MATERIAL_FLAG_MIRROR | MATERIAL_FLAG_PORTAL)) != 0)
+		{
+			break;
+		}
+
+		const float4 bounceAlbedo = SampleSurfaceColor(bounceHit.materialIndex, bounceHit.uv);
+		if ((bounceMaterial.flags & MATERIAL_FLAG_FULLBRIGHT) != 0)
+		{
+			indirectRadiance += throughput * bounceAlbedo.rgb;
+			break;
+		}
+
+		const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce + 1u, bounce * 3u + 1u), frameIndex + bounce + 1u);
+		const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
+		indirectRadiance += throughput * EvaluateSunDiffuse(bounceAlbedo.rgb, bounceHit.normal, bounceLightDir, bounceShadow);
+		throughput *= bounceAlbedo.rgb * 0.65;
+		if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01)
+		{
+			break;
+		}
+
+		origin = bounceHit.position + bounceHit.normal * 0.05;
+		direction = SampleCosineHemisphere(bounceHit.normal, rngState);
+	}
+
+	return indirectRadiance;
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -60,7 +146,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else
 	{
 		[loop]
-		for (uint bounce = 0; bounce < 3; ++bounce)
+		for (uint bounce = 0u; bounce < max(gTraceConstants.MirrorBounceCount, 1u); ++bounce)
 		{
 			hit = TracePrimary(rayOrigin, visibleRayDirection);
 			if (!hit.hit || !IsMirrorMaterial(hit.materialIndex))
@@ -142,17 +228,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
 				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir);
 				const float3 viewDir = normalize(-visibleRayDirection);
-				const float lambert = max(dot(hit.normal, lightDir), 0.0);
-				const float lighting = 0.20 + shadow * lambert * 0.80;
-				diffuse = albedo.rgb * lighting;
-				const float3 halfVector = normalize(lightDir + viewDir);
-				const float ndoth = max(dot(hit.normal, halfVector), 0.0);
-				const float vdoth = max(dot(viewDir, halfVector), 0.0);
-				const float fresnel = pow(1.0 - vdoth, 5.0);
-				const float3 dielectricF0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, 0.12);
-				const float3 specularColor = lerp(dielectricF0, float3(1.0, 1.0, 1.0), fresnel);
-				const float specularTerm = pow(ndoth, 12.0) * shadow * (0.5 + 0.5 * lambert);
-				specular = specularColor * specularTerm * 0.85;
+				diffuse = EvaluateSunDiffuse(albedo.rgb, hit.normal, lightDir, shadow);
+				specular = EvaluateSunSpecular(albedo.rgb, hit.normal, viewDir, lightDir, shadow);
+				if (!directSceneTrace && gTraceConstants.LightBounceCount > 0u)
+				{
+					diffuse += TraceIndirectDiffuse(hit, albedo, pixelPos, gTraceConstants.FrameIndex, gTraceConstants.LightBounceCount);
+				}
 			}
 
 			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
