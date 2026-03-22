@@ -41,6 +41,18 @@ EXTERN_CVAR(Bool, vid_vsync)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
 
+CUSTOM_CVAR(Int, nri_pttraceframes, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 600)
+	{
+		self = 600;
+	}
+}
+
 namespace
 {
 	static constexpr int DefaultSwapChainTextureCount = 3;
@@ -805,6 +817,7 @@ namespace
 		default: return "invalid";
 		}
 	}
+
 }
 
 extern "C" nri::Result NRI_CALL nriGetInterface(const nri::Device& device, const char* interfaceName, size_t interfaceSize, void* interfacePtr)
@@ -979,6 +992,13 @@ void NRIRenderDevice::BeginFrame()
 		return;
 	}
 
+	mTraceThisFrame = false;
+	if (nri_pttraceframes > 0)
+	{
+		mTraceThisFrame = true;
+		nri_pttraceframes = nri_pttraceframes - 1;
+	}
+
 	Reset2DTextureFrameStats();
 	mLastFrameBoundaryStats.frameNumber++;
 	mLastFrameBoundaryStats.frameIndex = mFrameIndex;
@@ -997,6 +1017,10 @@ void NRIRenderDevice::BeginFrame()
 	mLastFrameBoundaryStats.acquireSemaphoreIndex = 0;
 	mLastFrameBoundaryStats.sanityModeEnabled = !!nri_ptsanity;
 	mLastFrameBoundaryStats.sanityFrameUsed = false;
+	mLastFrameBoundaryStats.sceneTargetSelected = false;
+	mLastFrameBoundaryStats.pathTracedSceneRendered = false;
+	mLastFrameBoundaryStats.sceneCopiedToPresent = false;
+	mLastFrameBoundaryStats.postProcessInvoked = false;
 	SelectQueuedFrame(mCurrentQueuedFrameIndex);
 
 	{
@@ -1179,6 +1203,7 @@ void NRIRenderDevice::SetSceneRenderTarget(bool)
 	{
 		mRenderState->EndFrame();
 		mActiveTarget = &mSaveTarget;
+		mLastFrameBoundaryStats.sceneTargetSelected = false;
 		return;
 	}
 
@@ -1201,18 +1226,21 @@ void NRIRenderDevice::SetSceneRenderTarget(bool)
 		{
 			Printf(TEXTCOLOR_RED "NRI failed to create the scene render target.\n");
 			mActiveTarget = mCurrentPresentTarget;
+			mLastFrameBoundaryStats.sceneTargetSelected = false;
 			return;
 		}
 	}
 
 	mRenderState->EndFrame();
 	mActiveTarget = &mSceneTarget;
+	mLastFrameBoundaryStats.sceneTargetSelected = true;
 }
 
 void NRIRenderDevice::SetActiveRenderTarget()
 {
 	mRenderState->EndFrame();
 	mActiveTarget = mUsingSaveTarget ? &mSaveTarget : mCurrentPresentTarget;
+	mLastFrameBoundaryStats.sceneTargetSelected = (mActiveTarget == &mSceneTarget);
 }
 
 void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::function<void()> &afterBloomDrawEndScene2D)
@@ -1227,6 +1255,8 @@ void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::func
 		}
 		return;
 	}
+
+	mLastFrameBoundaryStats.postProcessInvoked = true;
 
 	if (!mUsingSaveTarget && !swscene && mCommandBuffer != nullptr &&
 		mCurrentPresentTarget != nullptr && mSceneTarget.texture != nullptr && mActiveTarget == &mSceneTarget)
@@ -1244,6 +1274,7 @@ void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::func
 		mCore.CmdCopyTexture(*mCommandBuffer, *mCurrentPresentTarget->texture, nullptr, *mSceneTarget.texture, nullptr);
 		mActiveTarget = mCurrentPresentTarget;
 		mRenderState->NotifyExternalTargetWrite();
+		mLastFrameBoundaryStats.sceneCopiedToPresent = true;
 	}
 	else
 	{
@@ -1301,7 +1332,9 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 		return false;
 	}
 
-	return mRenderer->RenderScene(di, drawmode, portal);
+	const bool rendered = mRenderer->RenderScene(di, drawmode, portal);
+	mLastFrameBoundaryStats.pathTracedSceneRendered = mLastFrameBoundaryStats.pathTracedSceneRendered || rendered;
+	return rendered;
 }
 
 bool NRIRenderDevice::HasActiveSceneFrame() const
@@ -1438,6 +1471,7 @@ void NRIRenderDevice::PrintPathTracingStatus() const
 	PrintFrameBoundaryStatus();
 	PrintFrameSequenceStatus();
 	PrintSwapChainStatus();
+	PrintFrameShellStatus();
 	Print2DTextureStatus();
 	if (mRenderer != nullptr)
 	{
@@ -1451,6 +1485,7 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 	PrintFrameBoundaryStatus();
 	PrintFrameSequenceStatus();
 	PrintSwapChainStatus();
+	PrintFrameShellStatus();
 	Print2DTextureStatus();
 	if (mRenderer != nullptr)
 	{
@@ -1541,6 +1576,55 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 		acquireCounts.GetChars(),
 		presentCounts.GetChars(),
 		abandonCounts.GetChars());
+}
+
+const char* NRIRenderDevice::DescribeTextureTarget(const NRITextureResource* target) const
+{
+	if (target == nullptr)
+	{
+		return "null";
+	}
+
+	if (target == mCurrentPresentTarget)
+	{
+		return "present";
+	}
+
+	if (target == &mSceneTarget)
+	{
+		return "scene";
+	}
+
+	if (target == &mSaveTarget)
+	{
+		return "save";
+	}
+
+	return "other";
+}
+
+void NRIRenderDevice::PrintFrameShellStatus() const
+{
+	const auto& stats = mLastFrameBoundaryStats;
+	const NRITextureResource* activeTarget = mActiveTarget != nullptr ? mActiveTarget : mCurrentPresentTarget;
+	Printf("NRI PT frame shell: active=%s present=%s frame_begun=%s cmd_open=%s scene_selected=%s pt_rendered=%s postprocess=%s scene_copy=%s active_state=(a=%u l=%u s=0x%x) present_state=(a=%u l=%u s=0x%x) scene_state=(a=%u l=%u s=0x%x)\n",
+		DescribeTextureTarget(activeTarget),
+		DescribeTextureTarget(mCurrentPresentTarget),
+		mFrameBegun ? "yes" : "no",
+		mCommandBufferOpen ? "yes" : "no",
+		stats.sceneTargetSelected ? "yes" : "no",
+		stats.pathTracedSceneRendered ? "yes" : "no",
+		stats.postProcessInvoked ? "yes" : "no",
+		stats.sceneCopiedToPresent ? "yes" : "no",
+		activeTarget != nullptr ? (uint32_t)activeTarget->state.access : 0u,
+		activeTarget != nullptr ? (uint32_t)activeTarget->state.layout : 0u,
+		activeTarget != nullptr ? (uint32_t)activeTarget->state.stages : 0u,
+		mCurrentPresentTarget != nullptr ? (uint32_t)mCurrentPresentTarget->state.access : 0u,
+		mCurrentPresentTarget != nullptr ? (uint32_t)mCurrentPresentTarget->state.layout : 0u,
+		mCurrentPresentTarget != nullptr ? (uint32_t)mCurrentPresentTarget->state.stages : 0u,
+		mSceneTarget.texture != nullptr ? (uint32_t)mSceneTarget.state.access : 0u,
+		mSceneTarget.texture != nullptr ? (uint32_t)mSceneTarget.state.layout : 0u,
+		mSceneTarget.texture != nullptr ? (uint32_t)mSceneTarget.state.stages : 0u);
 }
 
 void NRIRenderDevice::RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue, nri::Result presentResult)
@@ -2537,6 +2621,13 @@ void NRIRenderDevice::EndFrameAndPresent()
 		queuedFrame.hasSubmittedWork = true;
 	}
 	RecordFrameSequence(mCurrentSwapChainImage, submittedFenceValue, presentResult);
+	if (mTraceThisFrame)
+	{
+		PrintFrameBoundaryStatus();
+		PrintSwapChainStatus();
+		PrintFrameShellStatus();
+		Print2DTextureStatus();
+	}
 	ResetFrameTracking(presentResult == nri::Result::SUCCESS);
 	mFrameIndex++;
 }

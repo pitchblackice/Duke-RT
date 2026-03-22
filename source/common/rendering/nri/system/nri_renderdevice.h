@@ -103,6 +103,10 @@ private:
 		uint32_t acquireSemaphoreIndex = 0;
 		bool sanityModeEnabled = false;
 		bool sanityFrameUsed = false;
+		bool sceneTargetSelected = false;
+		bool pathTracedSceneRendered = false;
+		bool sceneCopiedToPresent = false;
+		bool postProcessInvoked = false;
 	};
 
 	struct Texture2DDebugStats
@@ -167,7 +171,9 @@ private:
 	void PrintFrameBoundaryStatus() const;
 	void PrintFrameSequenceStatus() const;
 	void PrintSwapChainStatus() const;
+	void PrintFrameShellStatus() const;
 	void Print2DTextureStatus() const;
+	const char* DescribeTextureTarget(const NRITextureResource* target) const;
 	void RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue, nri::Result presentResult);
 	void Reset2DTextureFrameStats();
 	void Note2DTextureEnsure(bool canvas);
@@ -251,4 +257,5 @@ private:
 	FrameSequenceEntry mFrameSequenceHistory[FrameSequenceHistorySize] = {};
 	uint32_t mFrameSequenceWriteIndex = 0;
 	Texture2DDebugStats mTexture2DDebugStats;
+	bool mTraceThisFrame = false;
 };
