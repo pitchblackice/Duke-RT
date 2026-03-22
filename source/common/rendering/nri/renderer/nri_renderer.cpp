@@ -23,6 +23,7 @@ CVAR(Bool, nri_apivalidation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_dred, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptbootstrapmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 
 namespace
@@ -331,7 +332,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const bool bootstrapCapturedDiagnostics = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 10u;
 	const bool bootstrapCapturedFlat = nri_ptbootstrap && bootstrapMode == 11u;
 	const bool bootstrapCapturedBaseColor = nri_ptbootstrap && bootstrapMode == 12u;
-	const bool rawTraceDirectScene = !nri_ptbootstrap;
+	const bool rawTraceDirectScene = !nri_ptbootstrap && nri_ptdirectscene;
 
 	const bool preserveHistory = drawmode != DM_MAINVIEW;
 	uint32_t savedFrameIndex = mFrameIndex;
@@ -620,6 +621,7 @@ void NRIRenderer::PrintStatus() const
 		GetUpscalerModeName(GetSelectedUpscalerMode()),
 		(float)nri_renderscale,
 		(float)nri_sharpness);
+	Printf("NRI PT tracing: direct_scene_fallback=%s\n", nri_ptdirectscene ? "on" : "off");
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
@@ -1700,7 +1702,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 
 	NRITraceConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
-	const bool directSceneTrace = !nri_ptbootstrap || bootstrapMode == 11u || bootstrapMode == 12u;
+	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
