@@ -3,7 +3,18 @@
 #include "hw_renderstate.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
+
+namespace
+{
+	std::atomic<uint64_t> gNextNriHardwareBufferId{ 1 };
+}
+
+NRIHardwareBuffer::NRIHardwareBuffer()
+	: mObjectId(gNextNriHardwareBufferId.fetch_add(1, std::memory_order_relaxed))
+{
+}
 
 void NRIHardwareBuffer::SetData(size_t size, const void* data, BufferUsageType)
 {

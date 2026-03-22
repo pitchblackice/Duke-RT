@@ -336,7 +336,9 @@ NRIRenderState::StreamedBuffer NRIRenderState::StreamVertices(NRIHardwareVertexB
 		return {};
 	}
 
-	if (mLastVertexBuffer == vertexBuffer && mLastVertexStream.generation == vertexBuffer->Generation())
+	if (mLastVertexBuffer == vertexBuffer &&
+		mLastVertexStream.objectId == vertexBuffer->ObjectId() &&
+		mLastVertexStream.generation == vertexBuffer->Generation())
 	{
 		return mLastVertexStream;
 	}
@@ -353,6 +355,7 @@ NRIRenderState::StreamedBuffer NRIRenderState::StreamVertices(NRIHardwareVertexB
 	mLastVertexStream.buffer = bufferOffset.buffer;
 	mLastVertexStream.offset = bufferOffset.offset;
 	mLastVertexStream.stride = (uint32_t)vertexBuffer->GetStride();
+	mLastVertexStream.objectId = vertexBuffer->ObjectId();
 	mLastVertexStream.generation = vertexBuffer->Generation();
 	return mLastVertexStream;
 }
@@ -364,7 +367,9 @@ NRIRenderState::StreamedBuffer NRIRenderState::StreamIndices(NRIHardwareIndexBuf
 		return {};
 	}
 
-	if (mLastIndexBuffer == indexBuffer && mLastIndexStream.generation == indexBuffer->Generation())
+	if (mLastIndexBuffer == indexBuffer &&
+		mLastIndexStream.objectId == indexBuffer->ObjectId() &&
+		mLastIndexStream.generation == indexBuffer->Generation())
 	{
 		return mLastIndexStream;
 	}
@@ -381,6 +386,7 @@ NRIRenderState::StreamedBuffer NRIRenderState::StreamIndices(NRIHardwareIndexBuf
 	mLastIndexStream.buffer = bufferOffset.buffer;
 	mLastIndexStream.offset = bufferOffset.offset;
 	mLastIndexStream.stride = 4;
+	mLastIndexStream.objectId = indexBuffer->ObjectId();
 	mLastIndexStream.generation = indexBuffer->Generation();
 	return mLastIndexStream;
 }

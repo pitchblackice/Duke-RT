@@ -8,6 +8,8 @@
 class NRIHardwareBuffer : virtual public IBuffer
 {
 public:
+	NRIHardwareBuffer();
+
 	void SetData(size_t size, const void* data, BufferUsageType type) override;
 	void SetSubData(size_t offset, size_t size, const void* data) override;
 	void* Lock(unsigned int size) override;
@@ -19,11 +21,13 @@ public:
 	const uint8_t* Data() const { return mStorage.empty() ? nullptr : mStorage.data(); }
 	uint8_t* Data() { return mStorage.empty() ? nullptr : mStorage.data(); }
 	uint64_t Generation() const { return mGeneration; }
+	uint64_t ObjectId() const { return mObjectId; }
 
 protected:
 	std::vector<uint8_t> mStorage;
 	bool mLocked = false;
 	uint64_t mGeneration = 1;
+	uint64_t mObjectId = 0;
 };
 
 class NRIHardwareVertexBuffer final : public IVertexBuffer, public NRIHardwareBuffer

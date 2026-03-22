@@ -82,6 +82,7 @@ private:
 		uint64_t offset = 0;
 		uint32_t stride = 0;
 		uint64_t generation = 0;
+		uint64_t objectId = 0;
 	};
 
 	void Apply(int dt, bool indexed, int firstIndex, int count);
