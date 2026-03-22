@@ -40,6 +40,13 @@ Texture2D<float4> gUnused2 : register(t2, space0);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float3>, gOutputTexture, u, 0, 1);
 
+float3 ToneMapDebugRadiance(float3 value)
+{
+	value = max(value, 0.0);
+	value *= 4.0;
+	return value / (1.0 + value);
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -60,19 +67,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (gTraceConstants.DebugMode == 11u)
 	{
 		const float4 rawSpecular = gInputTexture.Load(int3(samplePos, 0));
-		const float3 specularRgb = rawSpecular.bgr;
-		const float specularMax = max(specularRgb.r, max(specularRgb.g, specularRgb.b));
-		const float hitMask = step(1e-4, rawSpecular.a);
-		const float boosted = saturate(specularMax * 64.0);
-		const float base = hitMask * 0.18;
-		color = (base + boosted).xxx;
+		color = ToneMapDebugRadiance(rawSpecular.rgb);
 	}
 	else
 	if (gTraceConstants.DebugMode == 12u)
 	{
-		const float viewZ = abs(color.x);
-		const float normalized = saturate(viewZ / 4096.0);
-		color = normalized.xxx;
+		const float normalizedHitDistance = saturate(gInputTexture.Load(int3(samplePos, 0)).a);
+		color = normalizedHitDistance.xxx;
 	}
 	else
 	{

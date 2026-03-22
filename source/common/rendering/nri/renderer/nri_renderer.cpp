@@ -1659,7 +1659,17 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			sLoggedRawTraceBypass = true;
 		}
 
-		if (!DispatchRawPresent(FrameTextureSlot::PreFinal))
+		FrameTextureSlot rawPresentSlot = FrameTextureSlot::PreFinal;
+		if (nri_ptdebug == 10)
+		{
+			rawPresentSlot = FrameTextureSlot::UnfilteredDiffuse;
+		}
+		else if (nri_ptdebug == 11 || nri_ptdebug == 12)
+		{
+			rawPresentSlot = FrameTextureSlot::UnfilteredSpecular;
+		}
+
+		if (!DispatchRawPresent(rawPresentSlot))
 		{
 			return false;
 		}
