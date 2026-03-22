@@ -20,6 +20,17 @@ MaterialData GetMaterialData(uint materialIndex)
 	return gMaterials[min(materialIndex, max(gTraceConstants.MaterialCount, 1u) - 1u)];
 }
 
+float3 ResolveHitNormal(uint materialIndex, float3 geometricNormal, float3 rayDirection)
+{
+	const MaterialData material = GetMaterialData(materialIndex);
+	float3 normal = normalize(geometricNormal);
+	if ((material.flags & MATERIAL_FLAG_TWO_SIDED_WALL) != 0 && dot(normal, rayDirection) > 0.0)
+	{
+		normal = -normal;
+	}
+	return normal;
+}
+
 float3 GeneratePrimaryRay(uint2 pixelPos)
 {
 	float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
@@ -148,7 +159,7 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 		bestHit.barycentrics = barycentrics.yz;
 		bestHit.distance = hitT;
 		bestHit.position = origin + direction * hitT;
-		bestHit.normal = normalize(primitive.normal);
+		bestHit.normal = ResolveHitNormal(primitive.materialIndex, primitive.normal, direction);
 		bestHit.uv = primitive.uv0 * barycentrics.x + primitive.uv1 * barycentrics.y + primitive.uv2 * barycentrics.z;
 		bestHit.materialIndex = primitive.materialIndex;
 	}
@@ -184,7 +195,7 @@ HitData TracePrimary(float3 origin, float3 direction)
 	hitData.barycentrics = bary;
 	hitData.distance = rayQuery.CommittedRayT();
 	hitData.position = origin + direction * hitData.distance;
-	hitData.normal = normalize(primitive.normal);
+	hitData.normal = ResolveHitNormal(primitive.materialIndex, primitive.normal, direction);
 	hitData.uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
 	hitData.materialIndex = primitive.materialIndex;
 	return hitData;
