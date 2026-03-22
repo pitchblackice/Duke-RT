@@ -4,6 +4,7 @@
 #include "hw_drawinfo.h"
 #include "hw_drawstructs.h"
 
+#include <cstdint>
 #include <vector>
 
 class FGameTexture;
@@ -11,6 +12,18 @@ class FGameTexture;
 namespace nri_scene
 {
 bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor);
+
+enum class SurfaceSourceType : uint32_t
+{
+	Unknown = 0,
+	DrawListWall,
+	SupplementalOneSidedWall,
+	MirrorWall,
+	FloorFlat,
+	CeilingFlat,
+	FacingSprite,
+	VoxelProxySprite,
+};
 
 enum MaterialFlags : uint32_t
 {
@@ -23,6 +36,18 @@ enum MaterialFlags : uint32_t
 	MaterialFlag_Sky = 1u << 5,
 	MaterialFlag_Portal = 1u << 6,
 	MaterialFlag_TwoSidedWall = 1u << 7,
+};
+
+struct SurfaceProvenance
+{
+	SurfaceSourceType sourceType = SurfaceSourceType::Unknown;
+	int32_t sectorIndex = -1;
+	int32_t wallIndex = -1;
+	int32_t nextSectorIndex = -1;
+	int32_t actorIndex = -1;
+	uint32_t drawListType = UINT32_MAX;
+	uint32_t cstat = 0;
+	uint32_t materialFlags = 0;
 };
 
 struct SceneDebugStats
@@ -63,6 +88,7 @@ struct SurfaceRef
 {
 	std::vector<CapturedVertex> vertices;
 	MaterialRef material;
+	SurfaceProvenance provenance;
 };
 
 struct SceneView

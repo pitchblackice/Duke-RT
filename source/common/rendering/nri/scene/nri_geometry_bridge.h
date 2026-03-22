@@ -29,6 +29,7 @@ struct GeometryData
 	std::vector<SceneVertex> vertices;
 	std::vector<uint32_t> indices;
 	std::vector<PrimitiveData> primitives;
+	std::vector<SurfaceProvenance> primitiveProvenance;
 };
 
 void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry);

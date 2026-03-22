@@ -8,6 +8,7 @@
 #include "../scene/nri_material_bridge.h"
 #include "../scene/nri_scene_bridge.h"
 
+#include <cstdint>
 #include <array>
 #include <vector>
 
@@ -85,6 +86,19 @@ private:
 		uint64_t peakUsedBytes = 0;
 	};
 
+	struct SurfaceProbeResult
+	{
+		bool valid = false;
+		bool hit = false;
+		uint32_t primitiveIndex = UINT32_MAX;
+		uint32_t materialIndex = UINT32_MAX;
+		uint32_t primitiveFlags = 0;
+		float distance = 0.0f;
+		float position[3] = {};
+		float normal[3] = {};
+		nri_scene::SurfaceProvenance provenance = {};
+	};
+
 	bool CreatePipelineLayout();
 	bool CreateTaaPipelineLayout();
 	bool CreatePipelines();
@@ -107,6 +121,8 @@ private:
 	bool CheckPathTracingSupport();
 	void UpdatePerFrameState(HWDrawInfo& di);
 	void LogBridgeStats(const nri_scene::SceneDebugStats& stats);
+	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
+	void PrintSurfaceProbeStatus() const;
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
 	void CopyTexture(NRITextureResource& source, NRITextureResource& destination);
@@ -209,6 +225,8 @@ private:
 	bool mUseUpscaledInFinal = false;
 	bool mUseDenoisedCompositionInputs = false;
 	bool mHasLoggedFallback = false;
+	SurfaceProbeResult mLastSurfaceProbe = {};
+	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastUpscalerRequest = -1;
 	NRIUpscalerKind mLastUpscalerResolved = NRIUpscalerKind::Off;
 	FrameTextureSlot mHistoryInputSlot = FrameTextureSlot::TaaHistoryPing;

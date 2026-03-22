@@ -23,6 +23,21 @@ namespace
 		return value > 0x10000 && value != -1;
 	}
 
+	int GetOwnerActorIndex(const HWWall& wall)
+	{
+		return wall.Sprite != nullptr && wall.Sprite->ownerActor != nullptr ? wall.Sprite->ownerActor->GetIndex() : -1;
+	}
+
+	int GetOwnerActorIndex(const HWFlat& flat)
+	{
+		return flat.Sprite != nullptr && flat.Sprite->ownerActor != nullptr ? flat.Sprite->ownerActor->GetIndex() : -1;
+	}
+
+	int GetOwnerActorIndex(const HWSprite& sprite)
+	{
+		return sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr ? sprite.Sprite->ownerActor->GetIndex() : -1;
+	}
+
 	CapturedVertex MakeCapturedVertex(const FFlatVertex& source)
 	{
 		CapturedVertex vertex = {};
@@ -219,6 +234,52 @@ namespace
 		return flags;
 	}
 
+	SurfaceProvenance MakeWallProvenance(const walltype* seg, SurfaceSourceType sourceType, uint32_t drawListType, int actorIndex, uint32_t materialFlags)
+	{
+		SurfaceProvenance provenance = {};
+		provenance.sourceType = sourceType;
+		provenance.actorIndex = actorIndex;
+		provenance.drawListType = drawListType;
+		provenance.materialFlags = materialFlags;
+		if (seg != nullptr)
+		{
+			provenance.sectorIndex = seg->sector;
+			provenance.wallIndex = wall.IndexOf(seg);
+			provenance.nextSectorIndex = seg->nextsector;
+			provenance.cstat = (uint32_t)seg->cstat;
+		}
+		return provenance;
+	}
+
+	SurfaceProvenance MakeFlatProvenance(const HWFlat& flat, uint32_t drawListType, uint32_t materialFlags)
+	{
+		SurfaceProvenance provenance = {};
+		provenance.sourceType = flat.plane == plane_ceiling ? SurfaceSourceType::CeilingFlat : SurfaceSourceType::FloorFlat;
+		provenance.actorIndex = GetOwnerActorIndex(flat);
+		provenance.drawListType = drawListType;
+		provenance.materialFlags = materialFlags;
+		if (flat.sec != nullptr)
+		{
+			provenance.sectorIndex = sector.IndexOf(flat.sec);
+			provenance.cstat = flat.plane == plane_ceiling ? (uint32_t)flat.sec->ceilingstat : (uint32_t)flat.sec->floorstat;
+		}
+		return provenance;
+	}
+
+	SurfaceProvenance MakeSpriteProvenance(const HWSprite& sprite, SurfaceSourceType sourceType, uint32_t drawListType, uint32_t materialFlags)
+	{
+		SurfaceProvenance provenance = {};
+		provenance.sourceType = sourceType;
+		provenance.actorIndex = GetOwnerActorIndex(sprite);
+		provenance.drawListType = drawListType;
+		provenance.materialFlags = materialFlags;
+		if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr && sprite.Sprite->ownerActor->spr.sectp != nullptr)
+		{
+			provenance.sectorIndex = sector.IndexOf(sprite.Sprite->ownerActor->spr.sectp);
+		}
+		return provenance;
+	}
+
 	bool IsOpaqueSurface(const HWFlat& flat)
 	{
 		return flat.texture != nullptr &&
@@ -285,7 +346,7 @@ namespace
 		return material;
 	}
 
-	void CaptureWalls(HWDrawInfo& di, HWDrawList& list, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats)
+	void CaptureWalls(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats)
 	{
 		for (auto* wall : list.walls)
 		{
@@ -313,6 +374,7 @@ namespace
 
 			SurfaceRef surface = {};
 			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, GetWallMaterialFlags(*wall));
+			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::DrawListWall, drawListType, GetOwnerActorIndex(*wall), surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
 			surface.vertices.reserve(wall->vertcount);
 			for (uint32_t i = 0; i < wall->vertcount; ++i)
@@ -415,6 +477,7 @@ namespace
 
 			SurfaceRef surface = {};
 			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, GetWallMaterialFlags(*wall));
+			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::SupplementalOneSidedWall, UINT32_MAX, GetOwnerActorIndex(*wall), surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
 			surface.vertices.reserve(wall->vertcount);
 			for (uint32_t i = 0; i < wall->vertcount; ++i)
@@ -430,7 +493,7 @@ namespace
 		tempDi->EndDrawInfo();
 	}
 
-	void CaptureMirrorBorders(HWDrawInfo& di, HWDrawList& list, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats)
+	void CaptureMirrorBorders(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats)
 	{
 		for (auto* wall : list.walls)
 		{
@@ -447,6 +510,7 @@ namespace
 
 			SurfaceRef surface = {};
 			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, MaterialFlag_Mirror);
+			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::MirrorWall, drawListType, GetOwnerActorIndex(*wall), surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
 			surface.vertices.reserve(wall->vertcount);
 			for (uint32_t i = 0; i < wall->vertcount; ++i)
@@ -459,7 +523,7 @@ namespace
 		}
 	}
 
-	void CaptureFlats(HWDrawInfo& di, HWDrawList& list, std::vector<SurfaceRef>& outFlats, SceneDebugStats& stats, SceneView& outView)
+	void CaptureFlats(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outFlats, SceneDebugStats& stats, SceneView& outView)
 	{
 		for (auto* flat : list.flats)
 		{
@@ -491,6 +555,7 @@ namespace
 
 			SurfaceRef surface = {};
 			surface.material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, MaterialFlag_Flat);
+			surface.provenance = MakeFlatProvenance(*flat, drawListType, surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer(flat->vertindex);
 			surface.vertices.reserve((uint32_t)flat->vertcount);
 			for (int i = 0; i < flat->vertcount; ++i)
@@ -514,7 +579,7 @@ namespace
 			IsEffectivelyOpaque(sprite.RenderStyle, sprite.alpha);
 	}
 
-	void CaptureFacingSprites(HWDrawInfo& di, HWDrawList& list, std::vector<SurfaceRef>& outSprites)
+	void CaptureFacingSprites(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outSprites)
 	{
 		for (auto* sprite : list.sprites)
 		{
@@ -541,6 +606,7 @@ namespace
 
 			SurfaceRef surface = {};
 			surface.material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite);
+			surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::FacingSprite, drawListType, surface.material.flags);
 			surface.vertices.reserve(4);
 			for (uint32_t i = 0; i < 4; ++i)
 			{
@@ -602,7 +668,7 @@ namespace
 		}
 	}
 
-	void CaptureModelSprites(HWDrawList& list, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
+	void CaptureModelSprites(HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
 	{
 		static const int faces[6][4] = {
 			{ 0, 1, 2, 3 },
@@ -649,6 +715,7 @@ namespace
 			{
 				SurfaceRef surface = {};
 				surface.material = MakeMaterialRef(voxelTexture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite);
+				surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
 				surface.vertices.reserve(4);
 				AddVoxelFace(sprite->rotmat, extents, face, surface);
 				if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
@@ -710,21 +777,21 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 	outView.drawInfo = &di;
 	outView.stats = CollectDebugStats(di);
 
-	CaptureWalls(di, di.drawlists[GLDL_PLAINWALLS], outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLS], outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSS], outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSD], outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSV], outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSH], outView.opaqueWalls, outView.stats);
+	CaptureWalls(di, di.drawlists[GLDL_PLAINWALLS], GLDL_PLAINWALLS, outView.opaqueWalls, outView.stats);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLS], GLDL_MASKEDWALLS, outView.opaqueWalls, outView.stats);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSS], GLDL_MASKEDWALLSS, outView.opaqueWalls, outView.stats);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSD], GLDL_MASKEDWALLSD, outView.opaqueWalls, outView.stats);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSV], GLDL_MASKEDWALLSV, outView.opaqueWalls, outView.stats);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSH], GLDL_MASKEDWALLSH, outView.opaqueWalls, outView.stats);
 	CaptureSupplementalOneSidedWalls(di, outView.opaqueWalls, outView.stats);
-	CaptureMirrorBorders(di, di.drawlists[GLDL_TRANSLUCENTBORDER], outView.opaqueWalls, outView.stats);
+	CaptureMirrorBorders(di, di.drawlists[GLDL_TRANSLUCENTBORDER], GLDL_TRANSLUCENTBORDER, outView.opaqueWalls, outView.stats);
 
-	CaptureFlats(di, di.drawlists[GLDL_PLAINFLATS], outView.opaqueFlats, outView.stats, outView);
-	CaptureFlats(di, di.drawlists[GLDL_MASKEDFLATS], outView.opaqueFlats, outView.stats, outView);
-	CaptureFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], outView.opaqueFlats, outView.stats, outView);
+	CaptureFlats(di, di.drawlists[GLDL_PLAINFLATS], GLDL_PLAINFLATS, outView.opaqueFlats, outView.stats, outView);
+	CaptureFlats(di, di.drawlists[GLDL_MASKEDFLATS], GLDL_MASKEDFLATS, outView.opaqueFlats, outView.stats, outView);
+	CaptureFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats, outView.stats, outView);
 
-	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], outView.opaqueSprites);
-	CaptureModelSprites(di.drawlists[GLDL_MODELS], outView.opaqueSprites, outView.stats);
+	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
+	CaptureModelSprites(di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
 	CapturePortalViews(di, outView);
 
 	for (const auto& wall : outView.opaqueWalls)

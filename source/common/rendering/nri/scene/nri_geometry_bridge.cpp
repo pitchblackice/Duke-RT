@@ -53,7 +53,7 @@ namespace
 		outNormal[2] = nz / length;
 	}
 
-	void AppendTriangle(const SceneVertex& v0, const SceneVertex& v1, const SceneVertex& v2, uint32_t materialIndex, uint32_t flags, GeometryData& outGeometry)
+	void AppendTriangle(const SceneVertex& v0, const SceneVertex& v1, const SceneVertex& v2, uint32_t materialIndex, uint32_t flags, const SurfaceProvenance& provenance, GeometryData& outGeometry)
 	{
 		const uint32_t vertexBase = (uint32_t)outGeometry.vertices.size();
 		outGeometry.vertices.push_back(v0);
@@ -78,6 +78,7 @@ namespace
 		primitive.flags = flags;
 		ComputeNormal(v0, v1, v2, primitive.normal);
 		outGeometry.primitives.push_back(primitive);
+		outGeometry.primitiveProvenance.push_back(provenance);
 	}
 }
 
@@ -99,7 +100,7 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 		SceneVertex root = MakeVertex(wall.vertices[0]);
 		for (uint32_t i = 1; i + 1 < wall.vertices.size(); ++i)
 		{
-			AppendTriangle(root, MakeVertex(wall.vertices[i]), MakeVertex(wall.vertices[i + 1]), materialIndex, wall.material.flags, outGeometry);
+			AppendTriangle(root, MakeVertex(wall.vertices[i]), MakeVertex(wall.vertices[i + 1]), materialIndex, wall.material.flags, wall.provenance, outGeometry);
 		}
 
 		materialIndex++;
@@ -115,7 +116,7 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 
 		for (uint32_t i = 0; i + 2 < flat.vertices.size(); i += 3)
 		{
-			AppendTriangle(MakeVertex(flat.vertices[i]), MakeVertex(flat.vertices[i + 1]), MakeVertex(flat.vertices[i + 2]), materialIndex, flat.material.flags, outGeometry);
+			AppendTriangle(MakeVertex(flat.vertices[i]), MakeVertex(flat.vertices[i + 1]), MakeVertex(flat.vertices[i + 2]), materialIndex, flat.material.flags, flat.provenance, outGeometry);
 		}
 
 		materialIndex++;
@@ -132,7 +133,7 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 		SceneVertex root = MakeVertex(sprite.vertices[0]);
 		for (uint32_t i = 1; i + 1 < sprite.vertices.size(); ++i)
 		{
-			AppendTriangle(root, MakeVertex(sprite.vertices[i]), MakeVertex(sprite.vertices[i + 1]), materialIndex, sprite.material.flags, outGeometry);
+			AppendTriangle(root, MakeVertex(sprite.vertices[i]), MakeVertex(sprite.vertices[i + 1]), materialIndex, sprite.material.flags, sprite.provenance, outGeometry);
 		}
 
 		materialIndex++;

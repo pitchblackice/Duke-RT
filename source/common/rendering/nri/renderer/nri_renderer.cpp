@@ -26,6 +26,7 @@ CVAR(Int, nri_ptbootstrapmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 
 namespace
@@ -242,6 +243,99 @@ namespace
 	static uint32_t GetBootstrapMode()
 	{
 		return (uint32_t)std::max(0, std::min((int)nri_ptbootstrapmode, 13));
+	}
+
+	static bool IntersectProbeTriangle(const nri_scene::SceneVertex& v0, const nri_scene::SceneVertex& v1, const nri_scene::SceneVertex& v2, const float origin[3], const float direction[3], float& outT)
+	{
+		outT = 0.0f;
+		const float edge1[3] = {
+			v1.position[0] - v0.position[0],
+			v1.position[1] - v0.position[1],
+			v1.position[2] - v0.position[2]
+		};
+		const float edge2[3] = {
+			v2.position[0] - v0.position[0],
+			v2.position[1] - v0.position[1],
+			v2.position[2] - v0.position[2]
+		};
+		const float p[3] = {
+			direction[1] * edge2[2] - direction[2] * edge2[1],
+			direction[2] * edge2[0] - direction[0] * edge2[2],
+			direction[0] * edge2[1] - direction[1] * edge2[0]
+		};
+		const float det = edge1[0] * p[0] + edge1[1] * p[1] + edge1[2] * p[2];
+		if (fabsf(det) < 1e-5f)
+		{
+			return false;
+		}
+
+		const float invDet = 1.0f / det;
+		const float t[3] = {
+			origin[0] - v0.position[0],
+			origin[1] - v0.position[1],
+			origin[2] - v0.position[2]
+		};
+		const float u = (t[0] * p[0] + t[1] * p[1] + t[2] * p[2]) * invDet;
+		if (u < 0.0f || u > 1.0f)
+		{
+			return false;
+		}
+
+		const float q[3] = {
+			t[1] * edge1[2] - t[2] * edge1[1],
+			t[2] * edge1[0] - t[0] * edge1[2],
+			t[0] * edge1[1] - t[1] * edge1[0]
+		};
+		const float v = (direction[0] * q[0] + direction[1] * q[1] + direction[2] * q[2]) * invDet;
+		if (v < 0.0f || (u + v) > 1.0f)
+		{
+			return false;
+		}
+
+		const float hitT = (edge2[0] * q[0] + edge2[1] * q[1] + edge2[2] * q[2]) * invDet;
+		if (hitT <= 0.001f)
+		{
+			return false;
+		}
+
+		outT = hitT;
+		return true;
+	}
+
+	static const char* GetSurfaceSourceTypeName(nri_scene::SurfaceSourceType sourceType)
+	{
+		switch (sourceType)
+		{
+		case nri_scene::SurfaceSourceType::DrawListWall: return "draw_list_wall";
+		case nri_scene::SurfaceSourceType::SupplementalOneSidedWall: return "supplemental_one_sided_wall";
+		case nri_scene::SurfaceSourceType::MirrorWall: return "mirror_wall";
+		case nri_scene::SurfaceSourceType::FloorFlat: return "floor_flat";
+		case nri_scene::SurfaceSourceType::CeilingFlat: return "ceiling_flat";
+		case nri_scene::SurfaceSourceType::FacingSprite: return "facing_sprite";
+		case nri_scene::SurfaceSourceType::VoxelProxySprite: return "voxel_proxy_sprite";
+		default: return "unknown";
+		}
+	}
+
+	static const char* GetDrawListTypeName(uint32_t drawListType)
+	{
+		switch (drawListType)
+		{
+		case GLDL_PLAINWALLS: return "plain_walls";
+		case GLDL_MASKEDWALLS: return "masked_walls";
+		case GLDL_MASKEDWALLSS: return "masked_walls_split";
+		case GLDL_MASKEDWALLSD: return "masked_walls_decal";
+		case GLDL_MASKEDWALLSV: return "masked_walls_view";
+		case GLDL_MASKEDWALLSH: return "masked_walls_horizon";
+		case GLDL_TRANSLUCENTBORDER: return "translucent_border";
+		case GLDL_PLAINFLATS: return "plain_flats";
+		case GLDL_MASKEDFLATS: return "masked_flats";
+		case GLDL_MASKEDSLOPEFLATS: return "masked_slope_flats";
+		case GLDL_TRANSLUCENT: return "translucent";
+		case GLDL_MODELS: return "models";
+		case UINT32_MAX: return "none";
+		default: return "unknown";
+		}
 	}
 
 }
@@ -492,6 +586,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		Clocker clock(NriPTGeometryBuild);
 		nri_scene::BuildGeometry(sceneView, geometry);
 	}
+	if (!preserveHistory)
+	{
+		UpdateSurfaceProbe(geometry, true);
+	}
 	if (geometry.primitives.empty())
 	{
 		LogFallback("PT scene capture produced no supported opaque geometry.");
@@ -634,10 +732,11 @@ void NRIRenderer::PrintStatus() const
 		GetUpscalerModeName(GetSelectedUpscalerMode()),
 		(float)nri_renderscale,
 		(float)nri_sharpness);
-	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u\n",
+	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u surface_probe=%d\n",
 		nri_ptdirectscene ? "on" : "off",
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
-		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u));
+		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
+		(int)nri_ptsurfaceprobe);
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
@@ -667,6 +766,7 @@ void NRIRenderer::PrintStatus() const
 	}
 
 	PrintSceneBufferStatus();
+	PrintSurfaceProbeStatus();
 }
 
 void NRIRenderer::PrintSceneBufferStatus() const
@@ -718,6 +818,148 @@ void NRIRenderer::PrintSceneBufferStatus() const
 	printBuffer(mIndexBuffer, mIndexBufferStats);
 	printBuffer(mPrimitiveBuffer, mPrimitiveBufferStats);
 	printBuffer(mMaterialBuffer, mMaterialBufferStats);
+}
+
+void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging)
+{
+	if (nri_ptsurfaceprobe <= 0 || !allowLogging)
+	{
+		return;
+	}
+
+	SurfaceProbeResult result = {};
+	result.valid = true;
+
+	float direction[3] = { mCurrentCameraForward[0], mCurrentCameraForward[1], mCurrentCameraForward[2] };
+	Normalize3(direction);
+
+	float bestDistance = std::numeric_limits<float>::infinity();
+	for (uint32_t primitiveIndex = 0; primitiveIndex < geometry.primitives.size(); ++primitiveIndex)
+	{
+		const auto& primitive = geometry.primitives[primitiveIndex];
+		const auto& v0 = geometry.vertices[primitive.indices[0]];
+		const auto& v1 = geometry.vertices[primitive.indices[1]];
+		const auto& v2 = geometry.vertices[primitive.indices[2]];
+		float hitT = 0.0f;
+		if (!IntersectProbeTriangle(v0, v1, v2, mCurrentCameraPos, direction, hitT) || hitT >= bestDistance)
+		{
+			continue;
+		}
+
+		bestDistance = hitT;
+		result.hit = true;
+		result.primitiveIndex = primitiveIndex;
+		result.materialIndex = primitive.materialIndex;
+		result.primitiveFlags = primitive.flags;
+		result.distance = hitT;
+		result.position[0] = mCurrentCameraPos[0] + direction[0] * hitT;
+		result.position[1] = mCurrentCameraPos[1] + direction[1] * hitT;
+		result.position[2] = mCurrentCameraPos[2] + direction[2] * hitT;
+		result.normal[0] = primitive.normal[0];
+		result.normal[1] = primitive.normal[1];
+		result.normal[2] = primitive.normal[2];
+		if (primitiveIndex < geometry.primitiveProvenance.size())
+		{
+			result.provenance = geometry.primitiveProvenance[primitiveIndex];
+		}
+	}
+
+	auto sameIdentity = [](const SurfaceProbeResult& a, const SurfaceProbeResult& b)
+	{
+		if (a.valid != b.valid || a.hit != b.hit)
+		{
+			return false;
+		}
+		if (!a.valid || !a.hit)
+		{
+			return true;
+		}
+
+		return
+			a.provenance.sourceType == b.provenance.sourceType &&
+			a.provenance.sectorIndex == b.provenance.sectorIndex &&
+			a.provenance.wallIndex == b.provenance.wallIndex &&
+			a.provenance.nextSectorIndex == b.provenance.nextSectorIndex &&
+			a.provenance.actorIndex == b.provenance.actorIndex &&
+			a.provenance.drawListType == b.provenance.drawListType &&
+			a.provenance.cstat == b.provenance.cstat &&
+			a.primitiveFlags == b.primitiveFlags &&
+			a.materialIndex == b.materialIndex &&
+			(a.provenance.sourceType != nri_scene::SurfaceSourceType::Unknown || a.primitiveIndex == b.primitiveIndex);
+	};
+
+	mLastSurfaceProbe = result;
+
+	const bool logOnChangeOnly = nri_ptsurfaceprobe >= 2;
+	if (logOnChangeOnly && sameIdentity(mLastLoggedSurfaceProbe, result))
+	{
+		return;
+	}
+
+	if (!result.hit)
+	{
+		Printf("NRI PT surface probe: miss\n");
+		mLastLoggedSurfaceProbe = result;
+		return;
+	}
+
+	const uint32_t flags = result.primitiveFlags;
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s two_sided_wall=%s\n",
+		GetSurfaceSourceTypeName(result.provenance.sourceType),
+		GetDrawListTypeName(result.provenance.drawListType),
+		result.provenance.sectorIndex,
+		result.provenance.wallIndex,
+		result.provenance.nextSectorIndex,
+		result.provenance.actorIndex,
+		result.provenance.cstat,
+		result.primitiveIndex,
+		result.materialIndex,
+		result.distance,
+		result.position[0], result.position[1], result.position[2],
+		result.normal[0], result.normal[1], result.normal[2],
+		flags,
+		(flags & nri_scene::MaterialFlag_Indexed) != 0 ? "yes" : "no",
+		(flags & nri_scene::MaterialFlag_Fullbright) != 0 ? "yes" : "no",
+		(flags & nri_scene::MaterialFlag_Flat) != 0 ? "yes" : "no",
+		(flags & nri_scene::MaterialFlag_Sprite) != 0 ? "yes" : "no",
+		(flags & nri_scene::MaterialFlag_Mirror) != 0 ? "yes" : "no",
+		(flags & nri_scene::MaterialFlag_Sky) != 0 ? "yes" : "no",
+		(flags & nri_scene::MaterialFlag_Portal) != 0 ? "yes" : "no",
+		(flags & nri_scene::MaterialFlag_TwoSidedWall) != 0 ? "yes" : "no");
+	mLastLoggedSurfaceProbe = result;
+}
+
+void NRIRenderer::PrintSurfaceProbeStatus() const
+{
+	if (!mLastSurfaceProbe.valid)
+	{
+		Printf("NRI PT surface probe: no sampled center hit has been recorded yet.\n");
+		return;
+	}
+
+	if (!mLastSurfaceProbe.hit)
+	{
+		Printf("NRI PT surface probe: last sampled center ray missed translated PT geometry.\n");
+		return;
+	}
+
+	const uint32_t flags = mLastSurfaceProbe.primitiveFlags;
+	Printf("NRI PT surface probe: source=%s drawlist=%s sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x two_sided_wall=%s\n",
+		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
+		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
+		mLastSurfaceProbe.provenance.sectorIndex,
+		mLastSurfaceProbe.provenance.wallIndex,
+		mLastSurfaceProbe.provenance.nextSectorIndex,
+		mLastSurfaceProbe.provenance.actorIndex,
+		mLastSurfaceProbe.provenance.cstat,
+		mLastSurfaceProbe.primitiveIndex,
+		mLastSurfaceProbe.materialIndex,
+		mLastSurfaceProbe.distance,
+		mLastSurfaceProbe.position[0],
+		mLastSurfaceProbe.position[1],
+		mLastSurfaceProbe.position[2],
+		flags,
+		(flags & nri_scene::MaterialFlag_TwoSidedWall) != 0 ? "yes" : "no");
 }
 
 const char* NRIRenderer::GetAvailabilityReason() const
