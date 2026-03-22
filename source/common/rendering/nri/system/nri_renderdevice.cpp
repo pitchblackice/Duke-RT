@@ -1853,7 +1853,14 @@ bool NRIRenderDevice::LoadNRI()
 bool NRIRenderDevice::CreateDevice()
 {
 	mLoggedD3D12FailureDred = false;
-	if (GetSelectedAPI() == nri::GraphicsAPI::D3D12)
+	const nri::GraphicsAPI selectedApi = GetSelectedAPI();
+	const bool enableGraphicsApiValidation = nri_apivalidation && selectedApi == nri::GraphicsAPI::D3D12;
+	if (nri_apivalidation && selectedApi == nri::GraphicsAPI::VK)
+	{
+		Printf("NRI Vulkan graphics API validation is temporarily disabled; continuing with NRI validation only.\n");
+	}
+
+	if (selectedApi == nri::GraphicsAPI::D3D12)
 	{
 		ConfigureD3D12DebugLayer();
 		ConfigureD3D12Dred();
@@ -1883,10 +1890,10 @@ bool NRIRenderDevice::CreateDevice()
 	}
 
 	nri::DeviceCreationDesc creationDesc = {};
-	creationDesc.graphicsAPI = GetSelectedAPI();
+	creationDesc.graphicsAPI = selectedApi;
 	creationDesc.adapterDesc = &adapters[0];
 	creationDesc.callbackInterface.MessageCallback = &NriMessageCallback;
-	creationDesc.enableGraphicsAPIValidation = !!nri_apivalidation;
+	creationDesc.enableGraphicsAPIValidation = enableGraphicsApiValidation;
 	creationDesc.enableNRIValidation = !!nri_validation;
 	creationDesc.disableVKRayTracing = false;
 	creationDesc.disableD3D12EnhancedBarriers = false;
@@ -1921,7 +1928,10 @@ bool NRIRenderDevice::CreateDevice()
 		Printf(TEXTCOLOR_RED "Failed to retrieve NRI interfaces.\n");
 		return false;
 	}
-	ConfigureD3D12InfoQueue(mCore, mDevice);
+	if (selectedApi == nri::GraphicsAPI::D3D12)
+	{
+		ConfigureD3D12InfoQueue(mCore, mDevice);
+	}
 
 	if (mCore.GetQueue(*mDevice, nri::QueueType::GRAPHICS, 0, mGraphicsQueue) != nri::Result::SUCCESS ||
 		mCore.CreateFence(*mDevice, 0, mFrameFence) != nri::Result::SUCCESS)
