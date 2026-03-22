@@ -1,6 +1,40 @@
 #include "Include/Shared.hlsli"
 #include "Include/RaytracingShared.hlsli"
 
+uint Hash32(uint value)
+{
+	value ^= value >> 16;
+	value *= 0x7feb352du;
+	value ^= value >> 15;
+	value *= 0x846ca68bu;
+	value ^= value >> 16;
+	return value;
+}
+
+float RandomFloat01(inout uint state)
+{
+	state = Hash32(state);
+	return (float)(state & 0x00ffffffu) * (1.0 / 16777216.0);
+}
+
+float3 BuildOrthonormalTangent(float3 n)
+{
+	const float3 up = abs(n.z) < 0.999 ? float3(0.0, 0.0, 1.0) : float3(0.0, 1.0, 0.0);
+	return normalize(cross(up, n));
+}
+
+float3 SampleSunDirection(float3 lightDir, uint2 pixelPos, uint frameIndex)
+{
+	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u;
+	const float sunAngularRadius = 0.03;
+	const float cosTheta = lerp(cos(sunAngularRadius), 1.0, RandomFloat01(rngState));
+	const float sinTheta = sqrt(saturate(1.0 - cosTheta * cosTheta));
+	const float phi = 6.28318530718 * RandomFloat01(rngState);
+	const float3 tangent = BuildOrthonormalTangent(lightDir);
+	const float3 bitangent = normalize(cross(lightDir, tangent));
+	return normalize(lightDir * cosTheta + tangent * (cos(phi) * sinTheta) + bitangent * (sin(phi) * sinTheta));
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -68,8 +102,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else
 	{
-		const float roughness = 0.22;
-		const float materialID = 0.0;
 		const float currentViewZ = dot(hit.position - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
 		const float2 prevUv = ProjectWorldToUv(hit.position, gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward, gTraceConstants.PrevCameraRight, gTraceConstants.PrevCameraUp, gTraceConstants.PrevTanHalfFovX, gTraceConstants.PrevTanHalfFovY);
 		const float2 currentUv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
@@ -93,6 +125,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			albedo = SampleSurfaceColor(hit.materialIndex, hit.uv);
 			const MaterialData material = GetMaterialData(hit.materialIndex);
 			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
+			const float roughness = IsMirrorMaterial(hit.materialIndex) ? 0.02 : 0.38;
+			const float metalness = 0.0;
+			const float materialID = (float)(hit.materialIndex & 255u) * (1.0 / 255.0);
 			if (bootstrapBaseColor)
 			{
 				diffuse = albedo.rgb;
@@ -104,9 +139,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			}
 			else
 			{
-				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal);
+				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
+				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir);
 				const float3 viewDir = normalize(-visibleRayDirection);
-				const float3 lightDir = normalize(gTraceConstants.LightDirection);
 				const float lambert = max(dot(hit.normal, lightDir), 0.0);
 				const float lighting = 0.20 + shadow * lambert * 0.80;
 				diffuse = albedo.rgb * lighting;
@@ -119,12 +154,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float specularTerm = pow(ndoth, 12.0) * shadow * (0.5 + 0.5 * lambert);
 				specular = specularColor * specularTerm * 0.85;
 			}
+
+			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
+			gBaseColorOutput[pixelPos] = float4(bootstrapFlat ? diffuse : albedo.rgb, metalness);
 		}
 		gMotionOutput[pixelPos] = float4(motion, 0.0, 1.0);
 		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
-		gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
-		gBaseColorOutput[pixelPos] = float4(bootstrapFlat ? diffuse : albedo.rgb, 1.0);
-		gGuideDiffuseOutput[pixelPos] = float4(diffuse, 1.0);
+		if (bootstrapFlat)
+		{
+			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, 1.0, 0.0);
+			gBaseColorOutput[pixelPos] = float4(diffuse, 0.0);
+		}
+		gGuideDiffuseOutput[pixelPos] = float4(diffuse, hitDistance);
 		gGuideSpecularOutput[pixelPos] = float4(specular, hitDistance);
 		gGuideSpecHitOutput[pixelPos] = float4(specular, hitDistance);
 

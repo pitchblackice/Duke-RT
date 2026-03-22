@@ -190,10 +190,10 @@ HitData TracePrimary(float3 origin, float3 direction)
 	return hitData;
 }
 
-float ComputeSunShadow(float3 position, float3 normal)
+float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection)
 {
 	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
-	RayDesc shadowRay = { position + normal * 0.05, 0.001, gTraceConstants.LightDirection, 100000.0 };
+	RayDesc shadowRay = { position + normal * 0.05, 0.001, lightDirection, 100000.0 };
 	shadowQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, shadowRay);
 
 	while (shadowQuery.Proceed()) {}
