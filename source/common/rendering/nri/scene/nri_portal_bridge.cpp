@@ -63,15 +63,10 @@ namespace
 		outView.stats.voxelProxyDrawItems += source.stats.voxelProxyDrawItems;
 		outView.stats.unsupportedModelDrawItems += source.stats.unsupportedModelDrawItems;
 		outView.stats.portalCapturesSkipped += source.stats.portalCapturesSkipped;
-	}
-
-	void UpdateSkyColor(float* outColor, FGameTexture* texture, PalEntry fallback)
-	{
-		if (!IsUsableGameTexturePointer(texture) || !TryGetAverageTextureColor(texture, outColor))
+		if (source.sky.priority > outView.sky.priority)
 		{
-			outColor[0] = fallback.r / 255.0f;
-			outColor[1] = fallback.g / 255.0f;
-			outColor[2] = fallback.b / 255.0f;
+			outView.sky = source.sky;
+			Copy3(source.skyColor, outView.skyColor);
 		}
 	}
 
@@ -89,7 +84,7 @@ namespace
 			{
 				if (wall.sky != nullptr)
 				{
-					UpdateSkyColor(outView.skyColor, wall.sky->texture, wall.sky->fadecolor);
+					UpdateSceneSky(outView, wall.sky->texture, wall.sky->fadecolor.d, PTSkySourceType::Portal);
 					outView.stats.skySurfaces++;
 					return;
 				}

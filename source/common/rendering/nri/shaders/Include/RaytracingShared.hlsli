@@ -209,8 +209,7 @@ float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection)
 
 float3 GetMissColor(float3 direction)
 {
-	float skyT = saturate(direction.y * 0.5 + 0.5);
-	return lerp(gTraceConstants.GroundColor, gTraceConstants.SkyColor, skyT);
+	return gSkyTexture.SampleLevel(gLinearClamp, normalize(direction), 0.0).rgb;
 }
 
 #endif

@@ -31,7 +31,10 @@ struct NRITextureResource
 	nri::AccessLayoutStage state = {};
 	uint32_t width = 0;
 	uint32_t height = 0;
+	uint32_t layerNum = 1;
 	nri::Format format = nri::Format::UNKNOWN;
+	nri::TextureType type = nri::TextureType::TEXTURE_2D;
+	nri::TextureView shaderViewType = nri::TextureView::TEXTURE;
 	nri::TextureUsageBits usage = nri::TextureUsageBits::NONE;
 	bool owned = false;
 };

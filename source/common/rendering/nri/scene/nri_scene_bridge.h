@@ -12,6 +12,7 @@ class FGameTexture;
 namespace nri_scene
 {
 bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor);
+void Copy3(const float* source, float* destination);
 
 enum class SurfaceSourceType : uint32_t
 {
@@ -34,6 +35,32 @@ enum MaterialFlags : uint32_t
 	MaterialFlag_Mirror = 1u << 4,
 	MaterialFlag_Sky = 1u << 5,
 	MaterialFlag_Portal = 1u << 6,
+};
+
+enum class PTSkyMode : uint32_t
+{
+	None = 0,
+	SolidColor,
+	Cubemap,
+};
+
+enum class PTSkySourceType : uint32_t
+{
+	None = 0,
+	Wall,
+	Flat,
+	Portal,
+};
+
+struct PTSkyDescriptor
+{
+	PTSkyMode mode = PTSkyMode::None;
+	PTSkySourceType sourceType = PTSkySourceType::None;
+	FGameTexture* texture = nullptr;
+	uint32_t faceMask = 0;
+	uint32_t priority = 0;
+	bool flipTop = false;
+	bool isThreeFace = false;
 };
 
 struct SurfaceProvenance
@@ -96,10 +123,12 @@ struct SceneView
 	std::vector<SurfaceRef> opaqueFlats;
 	std::vector<SurfaceRef> opaqueSprites;
 	SceneDebugStats stats;
+	PTSkyDescriptor sky;
 	float skyColor[3] = { 0.38f, 0.48f, 0.65f };
 	float groundColor[3] = { 0.08f, 0.08f, 0.08f };
 };
 
 SceneDebugStats CollectDebugStats(HWDrawInfo& di);
+void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 }

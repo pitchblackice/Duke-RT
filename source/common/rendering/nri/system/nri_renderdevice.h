@@ -157,8 +157,9 @@ private:
 	void FinishTargetRendering(NRITextureResource& target, nri::AccessLayoutStage after);
 	void DestroyTextureResource(NRITextureResource& resource);
 	bool CreateTextureViews(NRITextureResource& resource);
-	bool CreateOwnedTexture(NRITextureResource& resource, uint32_t width, uint32_t height, nri::Format format, nri::TextureUsageBits usage);
+	bool CreateOwnedTexture(NRITextureResource& resource, uint32_t width, uint32_t height, nri::Format format, nri::TextureUsageBits usage, nri::TextureType type = nri::TextureType::TEXTURE_2D, uint32_t layerNum = 1, nri::TextureView shaderViewType = nri::TextureView::TEXTURE);
 	bool UploadTextureData(NRITextureResource& resource, const void* data, uint32_t width, uint32_t height, uint32_t rowPitch);
+	bool UploadTextureSubresources(NRITextureResource& resource, const nri::TextureSubresourceUploadDesc* subresources, uint32_t subresourceNum, uint32_t width, uint32_t height);
 	bool CopyCurrentTargetToTexture(NRITextureResource& destination);
 	bool LoadShaderBlob(const char* fileName, std::vector<uint8_t>& outBlob);
 	const void* GetVertexShaderBytecode(size_t& size) const;

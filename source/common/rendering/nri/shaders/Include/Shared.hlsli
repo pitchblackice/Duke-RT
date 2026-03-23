@@ -94,7 +94,8 @@ SamplerState gLinearClamp : register(s1, space0);
 SamplerState gPointWrap : register(s2, space0);
 SamplerState gPointClamp : register(s3, space0);
 Texture2D<float4> gPaletteLookup : register(t0, space1);
-Texture2D<float4> gSceneTextures[MAX_SCENE_TEXTURES] : register(t1, space1);
+TextureCube<float4> gSkyTexture : register(t1, space1);
+Texture2D<float4> gSceneTextures[MAX_SCENE_TEXTURES] : register(t2, space1);
 
 Texture2D<float4> gHistoryInput : register(t0, space2);
 Texture2D<float4> gMotionInput : register(t1, space2);

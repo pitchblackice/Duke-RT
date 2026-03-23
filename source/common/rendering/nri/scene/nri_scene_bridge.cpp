@@ -16,6 +16,19 @@ namespace
 {
 	using namespace nri_scene;
 
+	struct SkyCandidate
+	{
+		bool valid = false;
+		bool hasAverageColor = false;
+		bool hasFallbackColor = false;
+		bool isCubemap = false;
+		bool isThreeFace = false;
+		bool flipTop = false;
+		uint32_t faceMask = 0;
+		uint32_t priority = 0;
+		float color[3] = {};
+	};
+
 	bool IsUsableGameTexturePointer(FGameTexture* texture)
 	{
 		const intptr_t value = (intptr_t)texture;
@@ -51,6 +64,22 @@ namespace
 		return vertex;
 	}
 
+	uint32_t MakeSkyPriority(PTSkyMode mode, PTSkySourceType sourceType)
+	{
+		uint32_t priority = mode == PTSkyMode::Cubemap ? 100u : (mode == PTSkyMode::SolidColor ? 10u : 0u);
+		switch (sourceType)
+		{
+		case PTSkySourceType::Portal:
+			return priority + 3u;
+		case PTSkySourceType::Flat:
+			return priority + 2u;
+		case PTSkySourceType::Wall:
+			return priority + 1u;
+		default:
+			return priority;
+		}
+	}
+
 	bool TryComputeAverageColorFromBaseTexture(FTexture* baseTexture, float* outColor)
 	{
 		if (baseTexture == nullptr || baseTexture->GetImage() == nullptr)
@@ -79,6 +108,102 @@ namespace
 		outColor[1] = (float)(sum[1] * scale);
 		outColor[2] = (float)(sum[2] * scale);
 		return true;
+	}
+
+	bool TryGetAverageTextureColorRecursive(FGameTexture* texture, float* outColor, int depth);
+
+	bool TryInspectSkyTexture(FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType, SkyCandidate& outCandidate)
+	{
+		outCandidate = {};
+		if (!IsUsableGameTexturePointer(texture))
+		{
+			return false;
+		}
+
+		outCandidate.valid = true;
+		outCandidate.priority = MakeSkyPriority(PTSkyMode::SolidColor, sourceType);
+		if (TryGetAverageTextureColorRecursive(texture, outCandidate.color, 0))
+		{
+			outCandidate.hasAverageColor = true;
+		}
+		else if (fallbackColor != 0)
+		{
+			const PalEntry fallback = PalEntry(fallbackColor);
+			outCandidate.color[0] = fallback.r / 255.0f;
+			outCandidate.color[1] = fallback.g / 255.0f;
+			outCandidate.color[2] = fallback.b / 255.0f;
+			outCandidate.hasFallbackColor = true;
+		}
+
+		FTexture* baseTexture = nullptr;
+		__try
+		{
+			baseTexture = texture->GetTexture();
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			baseTexture = nullptr;
+		}
+
+		auto* skybox = dynamic_cast<FSkyBox*>(baseTexture);
+		if (skybox == nullptr)
+		{
+			return true;
+		}
+
+		outCandidate.flipTop = skybox->GetSkyFlip();
+		outCandidate.isThreeFace = skybox->Is3Face();
+		for (int i = 0; i < 6; ++i)
+		{
+			FGameTexture* face = nullptr;
+			__try
+			{
+				face = skybox->GetSkyFace(i);
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				face = nullptr;
+			}
+
+			if (IsUsableGameTexturePointer(face))
+			{
+				outCandidate.faceMask |= 1u << i;
+			}
+		}
+
+		if (!outCandidate.isThreeFace && outCandidate.faceMask == 0x3fu)
+		{
+			outCandidate.isCubemap = true;
+			outCandidate.priority = MakeSkyPriority(PTSkyMode::Cubemap, sourceType);
+		}
+
+		return true;
+	}
+
+	void ApplySkyCandidate(SceneView& outView, FGameTexture* texture, const SkyCandidate& candidate, PTSkySourceType sourceType)
+	{
+		if (!candidate.valid || candidate.priority < outView.sky.priority)
+		{
+			return;
+		}
+
+		if (candidate.hasAverageColor || candidate.hasFallbackColor)
+		{
+			Copy3(candidate.color, outView.skyColor);
+		}
+
+		if (candidate.priority == outView.sky.priority && outView.sky.texture != nullptr)
+		{
+			return;
+		}
+
+		outView.sky.mode = candidate.isCubemap ? PTSkyMode::Cubemap : PTSkyMode::SolidColor;
+		outView.sky.sourceType = sourceType;
+		outView.sky.texture = texture;
+		outView.sky.faceMask = candidate.faceMask;
+		outView.sky.priority = candidate.priority;
+		outView.sky.flipTop = candidate.flipTop;
+		outView.sky.isThreeFace = candidate.isThreeFace;
 	}
 
 	bool TryGetAverageTextureColorRecursive(FGameTexture* texture, float* outColor, int depth)
@@ -335,7 +460,7 @@ namespace
 		return material;
 	}
 
-	void CaptureWalls(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats)
+	void CaptureWalls(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats, SceneView& outView)
 	{
 		for (auto* wall : list.walls)
 		{
@@ -347,6 +472,7 @@ namespace
 			if (IsSkyWall(*wall))
 			{
 				stats.skySurfaces++;
+				UpdateSceneSky(outView, wall->texture, 0, PTSkySourceType::Wall);
 				continue;
 			}
 
@@ -422,10 +548,7 @@ namespace
 			if (IsSkyFlat(*flat))
 			{
 				stats.skySurfaces++;
-				if (flat->texture != nullptr)
-				{
-					TryGetAverageTextureColor(flat->texture, outView.skyColor);
-				}
+				UpdateSceneSky(outView, flat->texture, 0, PTSkySourceType::Flat);
 				continue;
 			}
 
@@ -619,6 +742,13 @@ namespace
 
 namespace nri_scene
 {
+void Copy3(const float* source, float* destination)
+{
+	destination[0] = source[0];
+	destination[1] = source[1];
+	destination[2] = source[2];
+}
+
 bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor)
 {
 	__try
@@ -628,6 +758,15 @@ bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor)
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
 		return false;
+	}
+}
+
+void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType)
+{
+	SkyCandidate candidate = {};
+	if (TryInspectSkyTexture(texture, fallbackColor, sourceType, candidate))
+	{
+		ApplySkyCandidate(outView, texture, candidate, sourceType);
 	}
 }
 
@@ -664,12 +803,12 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 	outView.drawInfo = &di;
 	outView.stats = CollectDebugStats(di);
 
-	CaptureWalls(di, di.drawlists[GLDL_PLAINWALLS], GLDL_PLAINWALLS, outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLS], GLDL_MASKEDWALLS, outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSS], GLDL_MASKEDWALLSS, outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSD], GLDL_MASKEDWALLSD, outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSV], GLDL_MASKEDWALLSV, outView.opaqueWalls, outView.stats);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSH], GLDL_MASKEDWALLSH, outView.opaqueWalls, outView.stats);
+	CaptureWalls(di, di.drawlists[GLDL_PLAINWALLS], GLDL_PLAINWALLS, outView.opaqueWalls, outView.stats, outView);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLS], GLDL_MASKEDWALLS, outView.opaqueWalls, outView.stats, outView);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSS], GLDL_MASKEDWALLSS, outView.opaqueWalls, outView.stats, outView);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSD], GLDL_MASKEDWALLSD, outView.opaqueWalls, outView.stats, outView);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSV], GLDL_MASKEDWALLSV, outView.opaqueWalls, outView.stats, outView);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSH], GLDL_MASKEDWALLSH, outView.opaqueWalls, outView.stats, outView);
 	CaptureMirrorBorders(di, di.drawlists[GLDL_TRANSLUCENTBORDER], GLDL_TRANSLUCENTBORDER, outView.opaqueWalls, outView.stats);
 
 	CaptureFlats(di, di.drawlists[GLDL_PLAINFLATS], GLDL_PLAINFLATS, outView.opaqueFlats, outView.stats, outView);

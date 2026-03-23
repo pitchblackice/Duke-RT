@@ -2828,7 +2828,10 @@ void NRIRenderDevice::DestroyTextureResource(NRITextureResource& resource)
 	resource.owned = false;
 	resource.width = 0;
 	resource.height = 0;
+	resource.layerNum = 1;
 	resource.format = nri::Format::UNKNOWN;
+	resource.type = nri::TextureType::TEXTURE_2D;
+	resource.shaderViewType = nri::TextureView::TEXTURE;
 	resource.usage = nri::TextureUsageBits::NONE;
 	resource.state = {};
 }
@@ -2838,10 +2841,10 @@ bool NRIRenderDevice::CreateTextureViews(NRITextureResource& resource)
 	const uint32_t usage = (uint32_t)resource.usage;
 	nri::TextureViewDesc shaderViewDesc = {};
 	shaderViewDesc.texture = resource.texture;
-	shaderViewDesc.type = nri::TextureView::TEXTURE;
+	shaderViewDesc.type = resource.shaderViewType;
 	shaderViewDesc.format = resource.format;
 	shaderViewDesc.mipNum = 1;
-	shaderViewDesc.layerNum = 1;
+	shaderViewDesc.layerNum = resource.layerNum;
 	shaderViewDesc.sliceNum = 1;
 	shaderViewDesc.readonlyPlanes = nri::PlaneBits::COLOR;
 	shaderViewDesc.components = { nri::ComponentSwizzle::IDENTITY, nri::ComponentSwizzle::IDENTITY, nri::ComponentSwizzle::IDENTITY, nri::ComponentSwizzle::IDENTITY };
@@ -2905,17 +2908,17 @@ bool NRIRenderDevice::CreateTextureViews(NRITextureResource& resource)
 	return true;
 }
 
-bool NRIRenderDevice::CreateOwnedTexture(NRITextureResource& resource, uint32_t width, uint32_t height, nri::Format format, nri::TextureUsageBits usage)
+bool NRIRenderDevice::CreateOwnedTexture(NRITextureResource& resource, uint32_t width, uint32_t height, nri::Format format, nri::TextureUsageBits usage, nri::TextureType type, uint32_t layerNum, nri::TextureView shaderViewType)
 {
 	nri::TextureDesc textureDesc = {};
-	textureDesc.type = nri::TextureType::TEXTURE_2D;
+	textureDesc.type = type;
 	textureDesc.usage = usage;
 	textureDesc.format = format;
 	textureDesc.width = width;
 	textureDesc.height = height;
 	textureDesc.depth = 1;
 	textureDesc.mipNum = 1;
-	textureDesc.layerNum = 1;
+	textureDesc.layerNum = layerNum;
 	textureDesc.sampleNum = 1;
 
 	if (mCore.CreateCommittedTexture(*mDevice, nri::MemoryLocation::DEVICE, 0.0f, textureDesc, resource.texture) != nri::Result::SUCCESS)
@@ -2925,7 +2928,10 @@ bool NRIRenderDevice::CreateOwnedTexture(NRITextureResource& resource, uint32_t 
 
 	resource.width = width;
 	resource.height = height;
+	resource.layerNum = layerNum;
 	resource.format = format;
+	resource.type = type;
+	resource.shaderViewType = shaderViewType;
 	resource.usage = usage;
 	resource.owned = true;
 	resource.state = {};
@@ -2949,8 +2955,18 @@ bool NRIRenderDevice::UploadTextureData(NRITextureResource& resource, const void
 	subresource.rowPitch = rowPitch;
 	subresource.slicePitch = slicePitch;
 
+	return UploadTextureSubresources(resource, &subresource, 1, width, height);
+}
+
+bool NRIRenderDevice::UploadTextureSubresources(NRITextureResource& resource, const nri::TextureSubresourceUploadDesc* subresources, uint32_t subresourceNum, uint32_t width, uint32_t height)
+{
+	if (subresources == nullptr || subresourceNum == 0 || width == 0 || height == 0)
+	{
+		return false;
+	}
+
 	nri::TextureUploadDesc uploadDesc = {};
-	uploadDesc.subresources = &subresource;
+	uploadDesc.subresources = subresources;
 	uploadDesc.texture = resource.texture;
 	uploadDesc.after = NRIShaderResourceState();
 	uploadDesc.planes = nri::PlaneBits::COLOR;

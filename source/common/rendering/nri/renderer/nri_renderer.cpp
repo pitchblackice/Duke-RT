@@ -3,11 +3,13 @@
 #include "nri_renderstate.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
+#include "skyboxtexture.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
 #include "printf.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -32,6 +34,7 @@ EXTERN_CVAR(String, nri_api)
 namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
+	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 11;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 12;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -231,6 +234,192 @@ namespace
 	static void Copy2(const float* src, float* dst)
 	{
 		std::memcpy(dst, src, sizeof(float) * 2);
+	}
+
+	struct SkyFaceUpload
+	{
+		uint32_t width = 0;
+		uint32_t height = 0;
+		std::vector<uint8_t> pixels;
+	};
+
+	struct SkyUpload
+	{
+		uint64_t key = 0;
+		bool cubemap = false;
+		uint32_t width = 1;
+		uint32_t height = 1;
+		std::array<SkyFaceUpload, 6> faces = {};
+	};
+
+	static uint64_t HashBytes64(const uint8_t* data, size_t size)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		for (size_t i = 0; i < size; ++i)
+		{
+			hash ^= (uint64_t)data[i];
+			hash *= 1099511628211ull;
+		}
+		return hash;
+	}
+
+	static uint64_t HashSkyColor(const float* color)
+	{
+		const uint8_t rgba[4] = {
+			(uint8_t)std::clamp((int)std::lround(Clamp01(color[0]) * 255.0f), 0, 255),
+			(uint8_t)std::clamp((int)std::lround(Clamp01(color[1]) * 255.0f), 0, 255),
+			(uint8_t)std::clamp((int)std::lround(Clamp01(color[2]) * 255.0f), 0, 255),
+			255
+		};
+		return HashBytes64(rgba, sizeof(rgba));
+	}
+
+	static void FlipImageHorizontal(std::vector<uint8_t>& pixels, uint32_t width, uint32_t height)
+	{
+		for (uint32_t y = 0; y < height; ++y)
+		{
+			uint8_t* row = pixels.data() + (size_t)y * width * 4u;
+			for (uint32_t x = 0; x < width / 2; ++x)
+			{
+				uint8_t* a = row + x * 4u;
+				uint8_t* b = row + (width - 1 - x) * 4u;
+				for (uint32_t c = 0; c < 4; ++c)
+				{
+					std::swap(a[c], b[c]);
+				}
+			}
+		}
+	}
+
+	static void FlipImageVertical(std::vector<uint8_t>& pixels, uint32_t width, uint32_t height)
+	{
+		const size_t rowSize = (size_t)width * 4u;
+		std::vector<uint8_t> temp(rowSize);
+		for (uint32_t y = 0; y < height / 2; ++y)
+		{
+			uint8_t* a = pixels.data() + (size_t)y * rowSize;
+			uint8_t* b = pixels.data() + (size_t)(height - 1 - y) * rowSize;
+			std::memcpy(temp.data(), a, rowSize);
+			std::memcpy(a, b, rowSize);
+			std::memcpy(b, temp.data(), rowSize);
+		}
+	}
+
+	static bool CopyFacePixels(FGameTexture* texture, SkyFaceUpload& outFace)
+	{
+		if (texture == nullptr)
+		{
+			return false;
+		}
+
+		FTexture* baseTexture = texture->GetTexture();
+		if (baseTexture == nullptr || baseTexture->GetImage() == nullptr)
+		{
+			return false;
+		}
+
+		FTextureBuffer texBuffer = baseTexture->CreateTexBuffer(0, CTF_ProcessData);
+		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+		{
+			return false;
+		}
+
+		outFace.width = (uint32_t)texBuffer.mWidth;
+		outFace.height = (uint32_t)texBuffer.mHeight;
+		outFace.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
+		return true;
+	}
+
+	static bool BuildCubemapUpload(const nri_scene::SceneView& sceneView, SkyUpload& outUpload)
+	{
+		if (sceneView.sky.mode != nri_scene::PTSkyMode::Cubemap || sceneView.sky.texture == nullptr)
+		{
+			return false;
+		}
+
+		auto* skybox = dynamic_cast<FSkyBox*>(sceneView.sky.texture->GetTexture());
+		if (skybox == nullptr)
+		{
+			return false;
+		}
+
+		struct FaceMapping
+		{
+			int sourceIndex;
+			bool flipHorizontal;
+			bool flipVertical;
+		};
+
+		// Build sky faces are ordered north, east, south, west, top, bottom.
+		// The PT cubemap follows the conventional +X, -X, +Y, -Y, +Z, -Z order.
+		// Top and bottom need explicit flips to match the ray-space basis used by the PT shaders.
+		static const FaceMapping mappings[6] = {
+			{ 3, false, false }, // +X = west
+			{ 1, false, false }, // -X = east
+			{ 4, true, false },  // +Y = top
+			{ 5, true, true },   // -Y = bottom
+			{ 2, false, false }, // +Z = south
+			{ 0, false, false }  // -Z = north
+		};
+
+		for (uint32_t i = 0; i < 6; ++i)
+		{
+			if (!CopyFacePixels(skybox->GetSkyFace(mappings[i].sourceIndex), outUpload.faces[i]))
+			{
+				return false;
+			}
+
+			if (i == 2 && sceneView.sky.flipTop)
+			{
+				FlipImageVertical(outUpload.faces[i].pixels, outUpload.faces[i].width, outUpload.faces[i].height);
+			}
+			if (mappings[i].flipHorizontal)
+			{
+				FlipImageHorizontal(outUpload.faces[i].pixels, outUpload.faces[i].width, outUpload.faces[i].height);
+			}
+			if (mappings[i].flipVertical)
+			{
+				FlipImageVertical(outUpload.faces[i].pixels, outUpload.faces[i].width, outUpload.faces[i].height);
+			}
+		}
+
+		outUpload.width = outUpload.faces[0].width;
+		outUpload.height = outUpload.faces[0].height;
+		for (uint32_t i = 1; i < 6; ++i)
+		{
+			if (outUpload.faces[i].width != outUpload.width || outUpload.faces[i].height != outUpload.height)
+			{
+				return false;
+			}
+		}
+
+		uint64_t key = (uint64_t)(uintptr_t)sceneView.sky.texture ^ ((uint64_t)sceneView.sky.faceMask << 32);
+		key ^= sceneView.sky.flipTop ? (1ull << 63) : 0ull;
+		for (uint32_t i = 0; i < 6; ++i)
+		{
+			key ^= HashBytes64(outUpload.faces[i].pixels.data(), outUpload.faces[i].pixels.size()) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2);
+		}
+
+		outUpload.key = key;
+		outUpload.cubemap = true;
+		return true;
+	}
+
+	static void BuildSolidSkyUpload(const float* skyColor, SkyUpload& outUpload)
+	{
+		outUpload = {};
+		outUpload.key = HashSkyColor(skyColor) ^ 0x53594b59554c4c45ull;
+		for (auto& face : outUpload.faces)
+		{
+			face.width = 1;
+			face.height = 1;
+			face.pixels = {
+				(uint8_t)std::clamp((int)std::lround(Clamp01(skyColor[2]) * 255.0f), 0, 255),
+				(uint8_t)std::clamp((int)std::lround(Clamp01(skyColor[1]) * 255.0f), 0, 255),
+				(uint8_t)std::clamp((int)std::lround(Clamp01(skyColor[0]) * 255.0f), 0, 255),
+				255
+			};
+		}
 	}
 
 	static void RemapToPTSpace(const float* src, float* dst)
@@ -609,7 +798,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const bool needsFallbackMaterials = bootstrapCapturedDiagnostics || bootstrapCapturedFlat;
 	const bool needsRealTextures = !nri_ptbootstrap || bootstrapCapturedBaseColor || bootstrapMode >= 13u;
 	const bool paletteReady = needsRealTextures ? EnsurePaletteTexture(materialBridge) : true;
-	const bool texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures() : (needsRealTextures ? (paletteReady && EnsureSceneTextures(materialBridge, gpuMaterials)) : true);
+	const bool texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures() : (needsRealTextures ? (paletteReady && EnsureSceneTextures(sceneView, materialBridge, gpuMaterials)) : EnsureSkyTexture(sceneView));
 	if (needsFallbackMaterials)
 	{
 		gpuMaterials = materialBridge.materials;
@@ -1024,7 +1213,7 @@ bool NRIRenderer::CreatePipelineLayout()
 
 	nri::DescriptorRangeDesc sceneTextureRange = {};
 	sceneTextureRange.baseRegisterIndex = 0;
-	sceneTextureRange.descriptorNum = 1 + NRI_MAX_SCENE_TEXTURES;
+	sceneTextureRange.descriptorNum = NRI_SCENE_DESCRIPTOR_NUM;
 	sceneTextureRange.descriptorType = nri::DescriptorType::TEXTURE;
 	sceneTextureRange.shaderStages = NRIComputeStage();
 	sceneTextureRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
@@ -1477,13 +1666,59 @@ bool NRIRenderer::DispatchBootstrapView()
 	return true;
 }
 
-bool NRIRenderer::EnsureSceneTextures(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials)
+bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView)
+{
+	SkyUpload upload = {};
+	if (!BuildCubemapUpload(sceneView, upload))
+	{
+		BuildSolidSkyUpload(sceneView.skyColor, upload);
+	}
+
+	if (mSkyTexture.texture != nullptr &&
+		mSkyTextureKey == upload.key &&
+		mSkyTexture.width == upload.width &&
+		mSkyTexture.height == upload.height)
+	{
+		return true;
+	}
+
+	mFrameBuffer->DestroyTextureResource(mSkyTexture);
+	if (!mFrameBuffer->CreateOwnedTexture(mSkyTexture, upload.width, upload.height, nri::Format::BGRA8_UNORM, nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureType::TEXTURE_2D, 6, nri::TextureView::TEXTURE_CUBE))
+	{
+		return false;
+	}
+
+	std::array<nri::TextureSubresourceUploadDesc, 6> subresources = {};
+	for (uint32_t i = 0; i < 6; ++i)
+	{
+		subresources[i].slices = upload.faces[i].pixels.data();
+		subresources[i].sliceNum = 1;
+		subresources[i].rowPitch = upload.faces[i].width * 4u;
+		subresources[i].slicePitch = upload.faces[i].width * upload.faces[i].height * 4u;
+	}
+
+	if (!mFrameBuffer->UploadTextureSubresources(mSkyTexture, subresources.data(), (uint32_t)subresources.size(), upload.width, upload.height))
+	{
+		return false;
+	}
+
+	mSkyTextureKey = upload.key;
+	return true;
+}
+
+bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials)
 {
 	Clocker clock(NriPTSceneTextures);
 
 	outGpuMaterials = materials.materials;
-	std::vector<nri::Descriptor*> descriptors(1 + NRI_MAX_SCENE_TEXTURES, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
+	if (!EnsureSkyTexture(sceneView))
+	{
+		return false;
+	}
+
+	std::vector<nri::Descriptor*> descriptors(NRI_SCENE_DESCRIPTOR_NUM, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
 	descriptors[0] = mPaletteTexture.shaderView;
+	descriptors[1] = mSkyTexture.shaderView;
 
 	for (uint32_t i = 0; i < std::min<uint32_t>((uint32_t)materials.textures.size(), NRI_MAX_SCENE_TEXTURES); ++i)
 	{
@@ -1505,7 +1740,7 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::MaterialBridgeData& mater
 			it = mTextureCache.end() - 1;
 		}
 
-		descriptors[1 + i] = it->resource.shaderView;
+		descriptors[2 + i] = it->resource.shaderView;
 	}
 
 	for (auto& material : outGpuMaterials)
@@ -1521,8 +1756,10 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::MaterialBridgeData& mater
 
 bool NRIRenderer::UseFallbackSceneTextures()
 {
-	std::vector<nri::Descriptor*> descriptors(1 + NRI_MAX_SCENE_TEXTURES, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
+	EnsureSkyTexture(nri_scene::SceneView{});
+	std::vector<nri::Descriptor*> descriptors(NRI_SCENE_DESCRIPTOR_NUM, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
 	descriptors[0] = mFrameBuffer->mWhiteTexture->GetResource().shaderView;
+	descriptors[1] = mSkyTexture.shaderView != nullptr ? mSkyTexture.shaderView : mFrameBuffer->mWhiteTexture->GetResource().shaderView;
 	return UpdateSceneTextureSet(descriptors);
 }
 
@@ -2742,6 +2979,8 @@ void NRIRenderer::CopyTextureToActiveTarget(NRITextureResource& source)
 
 void NRIRenderer::DestroyCachedTextures()
 {
+	mFrameBuffer->DestroyTextureResource(mSkyTexture);
+	mSkyTextureKey = 0;
 	for (auto& texture : mTextureCache)
 	{
 		mFrameBuffer->DestroyTextureResource(texture.resource);

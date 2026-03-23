@@ -265,12 +265,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else
 		{
-			color = float4(GetMissColor(visibleRayDirection), 1.0);
+			const float3 missColor = GetMissColor(visibleRayDirection);
+			color = float4(missColor, 1.0);
 			gMotionOutput[pixelPos] = 0.0;
-			gViewZOutput[pixelPos] = 0.0;
+			gViewZOutput[pixelPos] = float4(1.0e6, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
-			gBaseColorOutput[pixelPos] = 0.0;
-			gGuideDiffuseOutput[pixelPos] = 0.0;
+			gBaseColorOutput[pixelPos] = float4(missColor, 0.0);
+			gGuideDiffuseOutput[pixelPos] = float4(missColor, 1.0);
 			gGuideSpecularOutput[pixelPos] = 0.0;
 			gGuideSpecHitOutput[pixelPos] = 0.0;
 		}

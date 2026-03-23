@@ -107,7 +107,8 @@ private:
 	bool DispatchBootstrapView();
 	bool UseFallbackSceneTextures();
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
-	bool EnsureSceneTextures(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials);
+	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials);
+	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView);
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool BuildAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
@@ -170,6 +171,7 @@ private:
 	nri::DescriptorSet* mTaaOutputSet = nullptr;
 
 	NRITextureResource mPaletteTexture;
+	NRITextureResource mSkyTexture;
 	std::array<NRITextureResource, (size_t)FrameTextureSlot::Count> mFrameTextures = {};
 
 	NRIBufferResource mVertexBuffer;
@@ -218,6 +220,7 @@ private:
 	float mPreviousWorldToView[16] = {};
 	float mSkyColor[3] = { 0.38f, 0.48f, 0.65f };
 	float mGroundColor[3] = { 0.08f, 0.08f, 0.08f };
+	uint64_t mSkyTextureKey = 0;
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
 	bool mPathTracingSupported = true;
