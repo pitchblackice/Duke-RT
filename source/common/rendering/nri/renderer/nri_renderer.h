@@ -84,6 +84,7 @@ private:
 	struct SkyState
 	{
 		nri_scene::PTSkyMode mode = nri_scene::PTSkyMode::None;
+		nri_scene::PTSkySourceType sourceType = nri_scene::PTSkySourceType::None;
 		FGameTexture* texture = nullptr;
 		uint32_t faceMask = 0;
 		bool flipTop = false;
@@ -240,6 +241,8 @@ private:
 	float mSkyColor[3] = { 0.38f, 0.48f, 0.65f };
 	float mGroundColor[3] = { 0.08f, 0.08f, 0.08f };
 	uint64_t mSkyTextureKey = 0;
+	uint64_t mSkySelectionSerial = 0;
+	uint64_t mLastPortalCubemapSerial = 0;
 	uint32_t mActiveSkyTextureIndex = UINT32_MAX;
 	SkyState mSkyState = {};
 	SkyState mLastTracedSkyState = {};
