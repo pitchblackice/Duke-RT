@@ -76,4 +76,5 @@ struct PTMapWorld
 
 SceneDebugStats CollectMapWorldDebugStats(const PTMapWorld& mapWorld);
 void BuildMapSceneView(const PTMapWorld& mapWorld, SceneView& outView);
+void BuildMapChunkSceneView(const PTMapWorld& mapWorld, const PTMapChunk& chunk, SceneView& outView);
 }

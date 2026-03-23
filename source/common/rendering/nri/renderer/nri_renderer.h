@@ -119,6 +119,20 @@ private:
 
 	struct StaticMapSceneCache
 	{
+		struct ChunkCache
+		{
+			uint32_t chunkIndex = UINT32_MAX;
+			uint32_t vertexOffset = 0;
+			uint32_t vertexCount = 0;
+			uint32_t indexOffset = 0;
+			uint32_t indexCount = 0;
+			uint32_t primitiveOffset = 0;
+			uint32_t primitiveCount = 0;
+			uint32_t materialOffset = 0;
+			uint32_t materialCount = 0;
+			NRIAccelerationStructureResource accelerationStructure;
+		};
+
 		bool valid = false;
 		bool texturesResident = false;
 		bool buffersResident = false;
@@ -132,6 +146,8 @@ private:
 		nri_scene::GeometryData geometry;
 		nri_scene::MaterialBridgeData materialBridge;
 		std::vector<nri_scene::MaterialData> gpuMaterials;
+		std::vector<ChunkCache> chunks;
+		uint32_t tlasInstanceCount = 0;
 	};
 
 	struct DynamicSceneFrameState
@@ -156,7 +172,16 @@ private:
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
-	bool BuildAccelerationStructures(const nri_scene::GeometryData& geometry, uint32_t staticVertexCount, uint32_t staticIndexCount, uint32_t staticPrimitiveCount);
+	bool UploadSceneBuffers(
+		NRIBufferResource& vertexBuffer,
+		NRIBufferResource& indexBuffer,
+		NRIBufferResource& primitiveBuffer,
+		NRIBufferResource& materialBuffer,
+		const nri_scene::GeometryData& geometry,
+		const std::vector<nri_scene::MaterialData>& materials);
+	bool BuildStaticMapAccelerationStructures();
+	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, const std::vector<uint32_t>& primitiveOffsets, bool staticOnly);
+	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry, uint32_t staticVertexCount, uint32_t staticIndexCount, uint32_t staticPrimitiveCount);
 	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
 	bool DispatchTraceOpaque(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool DispatchDenoiser();
@@ -185,8 +210,15 @@ private:
 	void DestroyFrameTextures();
 	void DestroySceneBuffers();
 	void DestroyAccelerationStructures();
+	void DestroyStaticMapSceneCache();
 	void DestroyBufferResource(NRIBufferResource& resource);
 	void DestroyAccelerationStructureResource(NRIAccelerationStructureResource& resource);
+	const NRIBufferResource& GetActiveVertexBuffer() const;
+	const NRIBufferResource& GetActiveIndexBuffer() const;
+	const NRIBufferResource& GetActivePrimitiveBuffer() const;
+	const NRIBufferResource& GetActiveMaterialBuffer() const;
+	const NRIBufferResource& GetActiveInstanceDataBuffer() const;
+	void BindSceneRootDescriptors();
 
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
 	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
@@ -232,6 +264,12 @@ private:
 	NRIBufferResource mIndexBuffer;
 	NRIBufferResource mPrimitiveBuffer;
 	NRIBufferResource mMaterialBuffer;
+	NRIBufferResource mInstanceDataBuffer;
+	NRIBufferResource mStaticVertexBuffer;
+	NRIBufferResource mStaticIndexBuffer;
+	NRIBufferResource mStaticPrimitiveBuffer;
+	NRIBufferResource mStaticMaterialBuffer;
+	NRIBufferResource mStaticInstanceDataBuffer;
 	NRIBufferResource mInstanceBuffer;
 	NRIBufferResource mScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
@@ -239,7 +277,6 @@ private:
 	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };
 	SceneBufferDebugStats mMaterialBufferStats = { "Material" };
 
-	NRIAccelerationStructureResource mBottomLevelAS;
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
 
@@ -296,11 +333,13 @@ private:
 	bool mUsedStaticMapSceneLastFrame = false;
 	bool mUsedDynamicSceneLastFrame = false;
 	bool mGpuSceneHasDynamicOverlay = false;
+	bool mUseStaticSceneBindings = false;
 	bool mUploadedStaticMapSceneLastFrame = false;
 	bool mBuiltStaticMapSceneASLastFrame = false;
 	bool mBuiltDynamicSceneASLastFrame = false;
 	uint64_t mObservedMapWorldBuildSerial = 0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
+	uint32_t mActiveTlasInstanceCount = 0;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastUpscalerRequest = -1;

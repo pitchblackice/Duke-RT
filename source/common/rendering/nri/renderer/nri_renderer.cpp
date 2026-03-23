@@ -329,7 +329,15 @@ namespace
 		uint32_t Flags = 0;
 		uint32_t BootstrapMode = 0;
 		uint32_t BounceCounts = 0;
-		float Padding[1] = {};
+		uint32_t InstanceDataCount = 0;
+	};
+
+	struct NRIInstanceData
+	{
+		uint32_t PrimitiveOffset = 0;
+		uint32_t Flags = 0;
+		uint32_t Reserved0 = 0;
+		uint32_t Reserved1 = 0;
 	};
 
 	static void Normalize3(float v[3])
@@ -1052,19 +1060,58 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				paletteReady = EnsurePaletteTexture(combinedMaterialBridge);
 				texturesReady = paletteReady && EnsureSceneTextures(mStaticMapScene.sceneView, combinedMaterialBridge, combinedGpuMaterials, false);
 				buffersReady = texturesReady && UploadSceneBuffers(combinedGeometry, combinedGpuMaterials);
+				if (buffersReady)
+				{
+					mFrameBuffer->WaitForCommands(true);
+					DestroyBufferResource(mInstanceBuffer);
+					DestroyBufferResource(mScratchBuffer);
+					DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+					DestroyAccelerationStructureResource(mTopLevelAS);
+				}
+				accelerationReady = buffersReady && BuildDynamicAccelerationStructure(
+					combinedGeometry,
+					(uint32_t)mStaticMapScene.geometry.vertices.size(),
+					(uint32_t)mStaticMapScene.geometry.indices.size(),
+					(uint32_t)mStaticMapScene.geometry.primitives.size());
+				if (accelerationReady)
+				{
+					std::vector<nri::TopLevelInstance> instances;
+					std::vector<uint32_t> primitiveOffsets;
+					instances.reserve(mStaticMapScene.chunks.size() + 1);
+					primitiveOffsets.reserve(mStaticMapScene.chunks.size() + 1);
+					for (uint32_t instanceIndex = 0; instanceIndex < (uint32_t)mStaticMapScene.chunks.size(); ++instanceIndex)
+					{
+						const auto& chunk = mStaticMapScene.chunks[instanceIndex];
+						nri::TopLevelInstance instance = {};
+						instance.transform[0][0] = 1.0f;
+						instance.transform[1][1] = 1.0f;
+						instance.transform[2][2] = 1.0f;
+						instance.instanceId = instanceIndex;
+						instance.mask = 0xFF;
+						instance.shaderBindingTableLocalOffset = 0;
+						instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+						instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+						instances.push_back(instance);
+						primitiveOffsets.push_back(chunk.primitiveOffset);
+					}
+
+					nri::TopLevelInstance dynamicInstance = {};
+					dynamicInstance.transform[0][0] = 1.0f;
+					dynamicInstance.transform[1][1] = 1.0f;
+					dynamicInstance.transform[2][2] = 1.0f;
+					dynamicInstance.instanceId = (uint32_t)instances.size();
+					dynamicInstance.mask = 0xFF;
+					dynamicInstance.shaderBindingTableLocalOffset = 0;
+					dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+					dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
+					instances.push_back(dynamicInstance);
+					primitiveOffsets.push_back((uint32_t)mStaticMapScene.geometry.primitives.size());
+					accelerationReady = BuildTopLevelAccelerationStructure(instances, primitiveOffsets, false);
+				}
 				if (texturesReady)
 				{
 					PrepareSceneTextureInputsForCompute();
 				}
-				// Temporarily keep dynamic overlay on the stable single-BLAS path. The
-				// validated static resident scene stays authoritative when no dynamic
-				// surfaces are present, but dynamic frames rebuild a combined BLAS/TLAS
-				// until the multi-instance TLAS path is stabilized.
-				accelerationReady = buffersReady && BuildAccelerationStructures(
-					combinedGeometry,
-					0,
-					0,
-					0);
 
 				if (paletteReady && texturesReady && buffersReady && accelerationReady)
 				{
@@ -1082,6 +1129,26 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				else
 				{
 					LogFallback("PT dynamic scene update failed; tracing the resident static world only.");
+					std::vector<nri::TopLevelInstance> instances;
+					std::vector<uint32_t> primitiveOffsets;
+					instances.reserve(mStaticMapScene.chunks.size());
+					primitiveOffsets.reserve(mStaticMapScene.chunks.size());
+					for (uint32_t instanceIndex = 0; instanceIndex < (uint32_t)mStaticMapScene.chunks.size(); ++instanceIndex)
+					{
+						const auto& chunk = mStaticMapScene.chunks[instanceIndex];
+						nri::TopLevelInstance instance = {};
+						instance.transform[0][0] = 1.0f;
+						instance.transform[1][1] = 1.0f;
+						instance.transform[2][2] = 1.0f;
+						instance.instanceId = instanceIndex;
+						instance.mask = 0xFF;
+						instance.shaderBindingTableLocalOffset = 0;
+						instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+						instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+						instances.push_back(instance);
+						primitiveOffsets.push_back(chunk.primitiveOffset);
+					}
+					BuildTopLevelAccelerationStructure(instances, primitiveOffsets, true);
 					paletteReady = true;
 					texturesReady = true;
 					buffersReady = true;
@@ -1095,9 +1162,33 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 		else if (mGpuSceneHasDynamicOverlay)
 		{
-			mStaticMapScene.buffersResident = false;
-			mStaticMapScene.accelerationResident = false;
-			if (!EnsureStaticMapScene())
+			mFrameBuffer->WaitForCommands(true);
+			DestroyBufferResource(mInstanceBuffer);
+			DestroyBufferResource(mScratchBuffer);
+			DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+			DestroyAccelerationStructureResource(mTopLevelAS);
+
+			std::vector<nri::TopLevelInstance> instances;
+			std::vector<uint32_t> primitiveOffsets;
+			instances.reserve(mStaticMapScene.chunks.size());
+			primitiveOffsets.reserve(mStaticMapScene.chunks.size());
+			for (uint32_t instanceIndex = 0; instanceIndex < (uint32_t)mStaticMapScene.chunks.size(); ++instanceIndex)
+			{
+				const auto& chunk = mStaticMapScene.chunks[instanceIndex];
+				nri::TopLevelInstance instance = {};
+				instance.transform[0][0] = 1.0f;
+				instance.transform[1][1] = 1.0f;
+				instance.transform[2][2] = 1.0f;
+				instance.instanceId = instanceIndex;
+				instance.mask = 0xFF;
+				instance.shaderBindingTableLocalOffset = 0;
+				instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+				instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+				instances.push_back(instance);
+				primitiveOffsets.push_back(chunk.primitiveOffset);
+			}
+
+			if (!BuildTopLevelAccelerationStructure(instances, primitiveOffsets, true))
 			{
 				LogFallback("PT static scene restore failed after dynamic overlay.");
 				if (preserveHistory)
@@ -1167,11 +1258,45 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 
 		buffersReady = texturesReady && UploadSceneBuffers(capturedGeometry, capturedGpuMaterials);
+		mUseStaticSceneBindings = false;
 		if (texturesReady)
 		{
 			PrepareSceneTextureInputsForCompute();
 		}
-		accelerationReady = (bootstrapCapturedView || rawTraceDirectScene) ? true : (buffersReady && BuildAccelerationStructures(capturedGeometry, 0, 0, 0));
+		if (bootstrapCapturedView || rawTraceDirectScene)
+		{
+			accelerationReady = true;
+		}
+		else if (buffersReady)
+		{
+			mFrameBuffer->WaitForCommands(true);
+			DestroyBufferResource(mInstanceBuffer);
+			DestroyBufferResource(mScratchBuffer);
+			DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+			DestroyAccelerationStructureResource(mTopLevelAS);
+
+			accelerationReady = BuildDynamicAccelerationStructure(capturedGeometry, 0, 0, 0);
+			if (accelerationReady)
+			{
+				nri::TopLevelInstance instance = {};
+				instance.transform[0][0] = 1.0f;
+				instance.transform[1][1] = 1.0f;
+				instance.transform[2][2] = 1.0f;
+				instance.instanceId = 0;
+				instance.mask = 0xFF;
+				instance.shaderBindingTableLocalOffset = 0;
+				instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+				instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
+
+				std::vector<nri::TopLevelInstance> instances = { instance };
+				std::vector<uint32_t> primitiveOffsets = { 0 };
+				accelerationReady = BuildTopLevelAccelerationStructure(instances, primitiveOffsets, false);
+			}
+		}
+		else
+		{
+			accelerationReady = false;
+		}
 		activeGeometry = &capturedGeometry;
 		activeGpuMaterials = &capturedGpuMaterials;
 	}
@@ -1380,7 +1505,7 @@ void NRIRenderer::PrintMapWorldStatus() const
 void NRIRenderer::PrintStaticMapSceneStatus() const
 {
 	const char* source = mUsedStaticMapSceneLastFrame ? "authoritative-map-world" : "captured-scene";
-	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s tris=%u materials=%u\n",
+	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s chunks=%u tlas_instances=%u tris=%u materials=%u\n",
 		source,
 		(mStaticMapScene.valid && mStaticMapScene.texturesResident && mStaticMapScene.buffersResident && mStaticMapScene.accelerationResident) ? "yes" : "no",
 		(unsigned long long)mStaticMapScene.buildSerial,
@@ -1390,13 +1515,15 @@ void NRIRenderer::PrintStaticMapSceneStatus() const
 		mStaticMapScene.reuseCount,
 		mUploadedStaticMapSceneLastFrame ? "yes" : "no",
 		mBuiltStaticMapSceneASLastFrame ? "yes" : "no",
+		(uint32_t)mStaticMapScene.chunks.size(),
+		mStaticMapScene.tlasInstanceCount,
 		(uint32_t)mStaticMapScene.geometry.primitives.size(),
 		(uint32_t)mStaticMapScene.gpuMaterials.size());
 }
 
 void NRIRenderer::PrintDynamicSceneStatus() const
 {
-	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u dynamic_as_builds=%u last_frame_as_build=%s\n",
+	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u dynamic_as_builds=%u last_frame_as_build=%s active_tlas_instances=%u\n",
 		mUsedDynamicSceneLastFrame ? "yes" : "no",
 		mDynamicSceneLastFrame.spriteSurfaceCount,
 		mDynamicSceneLastFrame.primitiveCount,
@@ -1404,7 +1531,8 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mDynamicSceneLastFrame.modelCount,
 		mDynamicSceneLastFrame.unsupportedModelCount,
 		mDynamicSceneLastFrame.asBuildCount,
-		mBuiltDynamicSceneASLastFrame ? "yes" : "no");
+		mBuiltDynamicSceneASLastFrame ? "yes" : "no",
+		mActiveTlasInstanceCount);
 }
 
 void NRIRenderer::PrintSceneBufferStatus() const
@@ -1428,8 +1556,12 @@ void NRIRenderer::PrintSceneBufferStatus() const
 			(unsigned long long)stats.peakUsedBytes);
 	};
 
-	const uint64_t totalUsed = mVertexBuffer.usedSize + mIndexBuffer.usedSize + mPrimitiveBuffer.usedSize + mMaterialBuffer.usedSize;
-	const uint64_t totalCapacity = mVertexBuffer.size + mIndexBuffer.size + mPrimitiveBuffer.size + mMaterialBuffer.size;
+	const NRIBufferResource& activeVertexBuffer = GetActiveVertexBuffer();
+	const NRIBufferResource& activeIndexBuffer = GetActiveIndexBuffer();
+	const NRIBufferResource& activePrimitiveBuffer = GetActivePrimitiveBuffer();
+	const NRIBufferResource& activeMaterialBuffer = GetActiveMaterialBuffer();
+	const uint64_t totalUsed = activeVertexBuffer.usedSize + activeIndexBuffer.usedSize + activePrimitiveBuffer.usedSize + activeMaterialBuffer.usedSize;
+	const uint64_t totalCapacity = activeVertexBuffer.size + activeIndexBuffer.size + activePrimitiveBuffer.size + activeMaterialBuffer.size;
 	const uint64_t lastFrameUploadBytes =
 		mVertexBufferStats.bytesUploadedLastFrame +
 		mIndexBufferStats.bytesUploadedLastFrame +
@@ -1452,10 +1584,10 @@ void NRIRenderer::PrintSceneBufferStatus() const
 		(unsigned long long)lastFrameUploadBytes,
 		lastFrameGrowEvents,
 		lastFrameOverwriteEvents);
-	printBuffer(mVertexBuffer, mVertexBufferStats);
-	printBuffer(mIndexBuffer, mIndexBufferStats);
-	printBuffer(mPrimitiveBuffer, mPrimitiveBufferStats);
-	printBuffer(mMaterialBuffer, mMaterialBufferStats);
+	printBuffer(activeVertexBuffer, mVertexBufferStats);
+	printBuffer(activeIndexBuffer, mIndexBufferStats);
+	printBuffer(activePrimitiveBuffer, mPrimitiveBufferStats);
+	printBuffer(activeMaterialBuffer, mMaterialBufferStats);
 }
 
 void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging)
@@ -1743,8 +1875,8 @@ bool NRIRenderer::CreatePipelineLayout()
 	rootConstant.size = sizeof(NRITraceConstants);
 	rootConstant.shaderStages = NRIComputeStage();
 
-	nri::RootDescriptorDesc rootDescriptors[5] = {};
-	for (uint32_t i = 0; i < 5; ++i)
+	nri::RootDescriptorDesc rootDescriptors[6] = {};
+	for (uint32_t i = 0; i < 6; ++i)
 	{
 		rootDescriptors[i].registerIndex = i;
 		rootDescriptors[i].shaderStages = NRIComputeStage();
@@ -1754,6 +1886,7 @@ bool NRIRenderer::CreatePipelineLayout()
 	rootDescriptors[2].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	rootDescriptors[3].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 	rootDescriptors[4].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
+	rootDescriptors[5].descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
 
 	nri::PipelineLayoutDesc desc = {};
 	desc.rootRegisterSpace = 4;
@@ -2085,8 +2218,12 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.TanHalfFovY = mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
-	constants.PrimitiveCount = mPrimitiveBuffer.stride != 0 ? (uint32_t)(mPrimitiveBuffer.usedSize / mPrimitiveBuffer.stride) : 0u;
-	constants.MaterialCount = mMaterialBuffer.stride != 0 ? (uint32_t)(mMaterialBuffer.usedSize / mMaterialBuffer.stride) : 0u;
+	const NRIBufferResource& activePrimitiveBuffer = GetActivePrimitiveBuffer();
+	const NRIBufferResource& activeMaterialBuffer = GetActiveMaterialBuffer();
+	const NRIBufferResource& activeInstanceDataBuffer = GetActiveInstanceDataBuffer();
+	constants.PrimitiveCount = activePrimitiveBuffer.stride != 0 ? (uint32_t)(activePrimitiveBuffer.usedSize / activePrimitiveBuffer.stride) : 0u;
+	constants.MaterialCount = activeMaterialBuffer.stride != 0 ? (uint32_t)(activeMaterialBuffer.usedSize / activeMaterialBuffer.stride) : 0u;
+	constants.InstanceDataCount = activeInstanceDataBuffer.stride != 0 ? (uint32_t)(activeInstanceDataBuffer.usedSize / activeInstanceDataBuffer.stride) : 0u;
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = NRI_FLAG_BOOTSTRAP_VIEW | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
@@ -2130,22 +2267,7 @@ bool NRIRenderer::DispatchBootstrapView()
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	if (mVertexBuffer.shaderView != nullptr)
-	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	}
-	if (mIndexBuffer.shaderView != nullptr)
-	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	}
-	if (mPrimitiveBuffer.shaderView != nullptr)
-	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	}
-	if (mMaterialBuffer.shaderView != nullptr)
-	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	}
+	BindSceneRootDescriptors();
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
@@ -2171,6 +2293,66 @@ void NRIRenderer::ResetSceneBufferFrameStats()
 	mMaterialBufferStats.overwriteEventsLastFrame = 0;
 }
 
+const NRIBufferResource& NRIRenderer::GetActiveVertexBuffer() const
+{
+	return mUseStaticSceneBindings ? mStaticVertexBuffer : mVertexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetActiveIndexBuffer() const
+{
+	return mUseStaticSceneBindings ? mStaticIndexBuffer : mIndexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetActivePrimitiveBuffer() const
+{
+	return mUseStaticSceneBindings ? mStaticPrimitiveBuffer : mPrimitiveBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetActiveMaterialBuffer() const
+{
+	return mUseStaticSceneBindings ? mStaticMaterialBuffer : mMaterialBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetActiveInstanceDataBuffer() const
+{
+	return mUseStaticSceneBindings ? mStaticInstanceDataBuffer : mInstanceDataBuffer;
+}
+
+void NRIRenderer::BindSceneRootDescriptors()
+{
+	if (mTopLevelAS.descriptor != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
+	}
+
+	const NRIBufferResource& vertexBuffer = GetActiveVertexBuffer();
+	const NRIBufferResource& indexBuffer = GetActiveIndexBuffer();
+	const NRIBufferResource& primitiveBuffer = GetActivePrimitiveBuffer();
+	const NRIBufferResource& materialBuffer = GetActiveMaterialBuffer();
+	const NRIBufferResource& instanceDataBuffer = GetActiveInstanceDataBuffer();
+
+	if (vertexBuffer.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, vertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	}
+	if (indexBuffer.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, indexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	}
+	if (primitiveBuffer.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, primitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	}
+	if (materialBuffer.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, materialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	}
+	if (instanceDataBuffer.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 5, instanceDataBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	}
+}
+
 bool NRIRenderer::EnsureStaticMapScene()
 {
 	if (!mMapWorld.valid)
@@ -2180,7 +2362,9 @@ bool NRIRenderer::EnsureStaticMapScene()
 
 	if (mStaticMapScene.buildSerial != mMapWorld.buildSerial)
 	{
+		DestroyStaticMapSceneCache();
 		mStaticMapScene = {};
+		mStaticAccelerationBuildSerial = 0;
 	}
 
 	if (mStaticMapScene.valid &&
@@ -2190,28 +2374,62 @@ bool NRIRenderer::EnsureStaticMapScene()
 		mStaticMapScene.buildSerial == mMapWorld.buildSerial)
 	{
 		mStaticMapScene.reuseCount++;
+		mUseStaticSceneBindings = true;
 		return true;
 	}
 
 	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView);
+	mStaticMapScene.geometry = {};
+	mStaticMapScene.materialBridge = {};
+	mStaticMapScene.chunks.clear();
+	mStaticMapScene.chunks.reserve(mMapWorld.chunks.size());
+
+	for (const nri_scene::PTMapChunk& chunk : mMapWorld.chunks)
 	{
-		Clocker clock(NriPTGeometryBuild);
-		nri_scene::BuildGeometry(mStaticMapScene.sceneView, mStaticMapScene.geometry);
-	}
-	{
-		Clocker clock(NriPTMaterialBuild);
-		nri_scene::BuildMaterials(mStaticMapScene.sceneView, mStaticMapScene.materialBridge);
+		nri_scene::SceneView chunkSceneView;
+		nri_scene::GeometryData chunkGeometry;
+		nri_scene::MaterialBridgeData chunkMaterials;
+		nri_scene::BuildMapChunkSceneView(mMapWorld, chunk, chunkSceneView);
+		{
+			Clocker clock(NriPTGeometryBuild);
+			nri_scene::BuildGeometry(chunkSceneView, chunkGeometry);
+		}
+		{
+			Clocker clock(NriPTMaterialBuild);
+			nri_scene::BuildMaterials(chunkSceneView, chunkMaterials);
+		}
+		if (chunkGeometry.primitives.empty())
+		{
+			continue;
+		}
+
+		StaticMapSceneCache::ChunkCache chunkCache = {};
+		chunkCache.chunkIndex = chunk.chunkIndex;
+		chunkCache.vertexOffset = (uint32_t)mStaticMapScene.geometry.vertices.size();
+		chunkCache.vertexCount = (uint32_t)chunkGeometry.vertices.size();
+		chunkCache.indexOffset = (uint32_t)mStaticMapScene.geometry.indices.size();
+		chunkCache.indexCount = (uint32_t)chunkGeometry.indices.size();
+		chunkCache.primitiveOffset = (uint32_t)mStaticMapScene.geometry.primitives.size();
+		chunkCache.primitiveCount = (uint32_t)chunkGeometry.primitives.size();
+		chunkCache.materialOffset = (uint32_t)mStaticMapScene.materialBridge.materials.size();
+		chunkCache.materialCount = (uint32_t)chunkMaterials.materials.size();
+
+		AppendGeometry(chunkGeometry, chunkCache.materialOffset, mStaticMapScene.geometry);
+		AppendMaterialBridge(chunkMaterials, mStaticMapScene.materialBridge);
+		mStaticMapScene.chunks.push_back(std::move(chunkCache));
 	}
 
 	if (mStaticMapScene.geometry.primitives.empty() ||
 		!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
 		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false) ||
-		!UploadSceneBuffers(mStaticMapScene.geometry, mStaticMapScene.gpuMaterials) ||
-		!BuildAccelerationStructures(
+		!UploadSceneBuffers(
+			mStaticVertexBuffer,
+			mStaticIndexBuffer,
+			mStaticPrimitiveBuffer,
+			mStaticMaterialBuffer,
 			mStaticMapScene.geometry,
-			(uint32_t)mStaticMapScene.geometry.vertices.size(),
-			(uint32_t)mStaticMapScene.geometry.indices.size(),
-			(uint32_t)mStaticMapScene.geometry.primitives.size()))
+			mStaticMapScene.gpuMaterials) ||
+		!BuildStaticMapAccelerationStructures())
 	{
 		return false;
 	}
@@ -2221,15 +2439,18 @@ bool NRIRenderer::EnsureStaticMapScene()
 	mStaticMapScene.buffersResident = true;
 	mStaticMapScene.accelerationResident = true;
 	mStaticMapScene.buildSerial = mMapWorld.buildSerial;
+	mStaticMapScene.tlasInstanceCount = (uint32_t)mStaticMapScene.chunks.size();
 	mStaticMapScene.sceneBuildCount++;
 	mStaticMapScene.gpuUploadCount++;
 	mStaticMapScene.accelerationBuildCount++;
 	mUploadedStaticMapSceneLastFrame = true;
 	mBuiltStaticMapSceneASLastFrame = true;
+	mUseStaticSceneBindings = true;
 
-	Printf("NRI PT static scene resident: level=%s build_serial=%llu tris=%u materials=%u uploads=%u as_builds=%u\n",
+	Printf("NRI PT static scene resident: level=%s build_serial=%llu chunks=%u tris=%u materials=%u uploads=%u as_builds=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
 		(unsigned long long)mStaticMapScene.buildSerial,
+		(uint32_t)mStaticMapScene.chunks.size(),
 		(uint32_t)mStaticMapScene.geometry.primitives.size(),
 		(uint32_t)mStaticMapScene.gpuMaterials.size(),
 		mStaticMapScene.gpuUploadCount,
@@ -2672,6 +2893,17 @@ bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t 
 
 bool NRIRenderer::UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
+	return UploadSceneBuffers(mVertexBuffer, mIndexBuffer, mPrimitiveBuffer, mMaterialBuffer, geometry, materials);
+}
+
+bool NRIRenderer::UploadSceneBuffers(
+	NRIBufferResource& vertexBuffer,
+	NRIBufferResource& indexBuffer,
+	NRIBufferResource& primitiveBuffer,
+	NRIBufferResource& materialBuffer,
+	const nri_scene::GeometryData& geometry,
+	const std::vector<nri_scene::MaterialData>& materials)
+{
 	Clocker clock(NriPTSceneBuffers);
 	mVertexBufferStats.bytesUploadedLastFrame = 0;
 	mVertexBufferStats.growEventsLastFrame = 0;
@@ -2687,34 +2919,24 @@ bool NRIRenderer::UploadSceneBuffers(const nri_scene::GeometryData& geometry, co
 	mMaterialBufferStats.overwriteEventsLastFrame = 0;
 
 	return
-		EnsureStructuredBuffer(mVertexBuffer, mVertexBufferStats, geometry.vertices.data(), geometry.vertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
-		EnsureStructuredBuffer(mIndexBuffer, mIndexBufferStats, geometry.indices.data(), geometry.indices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
-		EnsureStructuredBuffer(mPrimitiveBuffer, mPrimitiveBufferStats, geometry.primitives.data(), geometry.primitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
-		EnsureStructuredBuffer(mMaterialBuffer, mMaterialBufferStats, materials.data(), materials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess());
+		EnsureStructuredBuffer(vertexBuffer, mVertexBufferStats, geometry.vertices.data(), geometry.vertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
+		EnsureStructuredBuffer(indexBuffer, mIndexBufferStats, geometry.indices.data(), geometry.indices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
+		EnsureStructuredBuffer(primitiveBuffer, mPrimitiveBufferStats, geometry.primitives.data(), geometry.primitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
+		EnsureStructuredBuffer(materialBuffer, mMaterialBufferStats, materials.data(), materials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess());
 }
 
-bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geometry, uint32_t staticVertexCount, uint32_t staticIndexCount, uint32_t staticPrimitiveCount)
+bool NRIRenderer::BuildStaticMapAccelerationStructures()
 {
 	Clocker clock(NriPTAcceleration);
 
-	const bool hasStaticGeometry =
-		staticPrimitiveCount > 0 &&
-		staticVertexCount > 0 &&
-		staticIndexCount > 0;
-	const bool hasDynamicGeometry =
-		geometry.primitives.size() > staticPrimitiveCount &&
-		geometry.vertices.size() > staticVertexCount &&
-		geometry.indices.size() > staticIndexCount;
-	const bool needsStaticBuild =
-		hasStaticGeometry &&
-		(mBottomLevelAS.accelerationStructure == nullptr ||
-		 mStaticAccelerationBuildSerial != mStaticMapScene.buildSerial ||
-		 mVertexBufferStats.growEventsLastFrame > 0 ||
-		 mIndexBufferStats.growEventsLastFrame > 0);
+	if (mStaticMapScene.chunks.empty())
+	{
+		return false;
+	}
+
 	const bool needsWait =
-		needsStaticBuild ||
-		mDynamicBottomLevelAS.accelerationStructure != nullptr ||
 		mTopLevelAS.accelerationStructure != nullptr ||
+		mDynamicBottomLevelAS.accelerationStructure != nullptr ||
 		mInstanceBuffer.buffer != nullptr ||
 		mScratchBuffer.buffer != nullptr;
 	if (needsWait)
@@ -2726,90 +2948,39 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 	DestroyBufferResource(mScratchBuffer);
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 	DestroyAccelerationStructureResource(mTopLevelAS);
-	if (needsStaticBuild)
+
+	for (auto& chunk : mStaticMapScene.chunks)
 	{
-		DestroyAccelerationStructureResource(mBottomLevelAS);
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
 	}
 
-	nri::BottomLevelGeometryDesc staticGeometryDesc = {};
-	if (hasStaticGeometry)
+	uint64_t maxScratchSize = 0;
+	for (auto& chunk : mStaticMapScene.chunks)
 	{
-		staticGeometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-		staticGeometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-		staticGeometryDesc.triangles.vertexBuffer = mVertexBuffer.buffer;
-		staticGeometryDesc.triangles.vertexOffset = 0;
-		staticGeometryDesc.triangles.vertexNum = staticVertexCount;
-		staticGeometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-		staticGeometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-		staticGeometryDesc.triangles.indexBuffer = mIndexBuffer.buffer;
-		staticGeometryDesc.triangles.indexOffset = 0;
-		staticGeometryDesc.triangles.indexNum = staticIndexCount;
-		staticGeometryDesc.triangles.indexType = nri::IndexType::UINT32;
-	}
+		nri::BottomLevelGeometryDesc geometryDesc = {};
+		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+		geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
+		geometryDesc.triangles.vertexOffset = 0;
+		geometryDesc.triangles.vertexNum = (uint32_t)mStaticMapScene.geometry.vertices.size();
+		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+		geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
+		geometryDesc.triangles.indexOffset = (uint64_t)chunk.indexOffset * sizeof(uint32_t);
+		geometryDesc.triangles.indexNum = chunk.indexCount;
+		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
 
-	nri::BottomLevelGeometryDesc dynamicGeometryDesc = {};
-	if (hasDynamicGeometry)
-	{
-		dynamicGeometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-		dynamicGeometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-		dynamicGeometryDesc.triangles.vertexBuffer = mVertexBuffer.buffer;
-		dynamicGeometryDesc.triangles.vertexOffset = 0;
-		dynamicGeometryDesc.triangles.vertexNum = (uint32_t)geometry.vertices.size();
-		dynamicGeometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-		dynamicGeometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-		dynamicGeometryDesc.triangles.indexBuffer = mIndexBuffer.buffer;
-		dynamicGeometryDesc.triangles.indexOffset = (uint64_t)staticIndexCount * sizeof(uint32_t);
-		dynamicGeometryDesc.triangles.indexNum = (uint32_t)geometry.indices.size() - staticIndexCount;
-		dynamicGeometryDesc.triangles.indexType = nri::IndexType::UINT32;
-	}
-
-	nri::AccelerationStructureDesc blasDesc = {};
-	blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
-	blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
-	blasDesc.geometryOrInstanceNum = 1;
-	if (needsStaticBuild)
-	{
-		blasDesc.geometries = &staticGeometryDesc;
-		if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, mBottomLevelAS.accelerationStructure) != nri::Result::SUCCESS)
+		nri::AccelerationStructureDesc blasDesc = {};
+		blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
+		blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+		blasDesc.geometryOrInstanceNum = 1;
+		blasDesc.geometries = &geometryDesc;
+		if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, chunk.accelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
 		{
 			return false;
 		}
-	}
 
-	if (hasDynamicGeometry)
-	{
-		blasDesc.geometries = &dynamicGeometryDesc;
-		if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, mDynamicBottomLevelAS.accelerationStructure) != nri::Result::SUCCESS)
-		{
-			return false;
-		}
-	}
-
-	const uint32_t instanceCount =
-		(hasStaticGeometry && mBottomLevelAS.accelerationStructure != nullptr ? 1u : 0u) +
-		(mDynamicBottomLevelAS.accelerationStructure != nullptr ? 1u : 0u);
-	if (instanceCount == 0)
-	{
-		return false;
-	}
-
-	nri::AccelerationStructureDesc tlasDesc = {};
-	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
-	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
-	tlasDesc.geometryOrInstanceNum = instanceCount;
-	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, mTopLevelAS.accelerationStructure) != nri::Result::SUCCESS)
-	{
-		return false;
-	}
-
-	uint64_t maxScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mTopLevelAS.accelerationStructure);
-	if (needsStaticBuild)
-	{
-		maxScratchSize = std::max(maxScratchSize, mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mBottomLevelAS.accelerationStructure));
-	}
-	if (hasDynamicGeometry)
-	{
-		maxScratchSize = std::max(maxScratchSize, mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mDynamicBottomLevelAS.accelerationStructure));
+		maxScratchSize = std::max(maxScratchSize, mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
 	}
 
 	if (!CreateBufferWithoutView(mScratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
@@ -2817,80 +2988,36 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 		return false;
 	}
 
-	std::vector<nri::TopLevelInstance> instances;
-	instances.reserve(instanceCount);
-	auto appendInstance = [this, &instances](nri::AccelerationStructure& accelerationStructure, uint32_t instanceId)
-	{
-		nri::TopLevelInstance instance = {};
-		instance.transform[0][0] = 1.0f;
-		instance.transform[1][1] = 1.0f;
-		instance.transform[2][2] = 1.0f;
-		instance.instanceId = instanceId;
-		instance.mask = 0xFF;
-		instance.shaderBindingTableLocalOffset = 0;
-		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(accelerationStructure);
-		instances.push_back(instance);
-	};
-
-	if (hasStaticGeometry && mBottomLevelAS.accelerationStructure != nullptr)
-	{
-		appendInstance(*mBottomLevelAS.accelerationStructure, 0);
-	}
-	if (mDynamicBottomLevelAS.accelerationStructure != nullptr)
-	{
-		appendInstance(*mDynamicBottomLevelAS.accelerationStructure, (uint32_t)instances.size());
-	}
-
-	if (!CreateStructuredBuffer(mInstanceBuffer, instances.data(), instances.size() * sizeof(nri::TopLevelInstance), sizeof(nri::TopLevelInstance), nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT, NRIAccelerationStructureBuildInputAccess()))
-	{
-		return false;
-	}
-
-	if (mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*mTopLevelAS.accelerationStructure, mTopLevelAS.descriptor) != nri::Result::SUCCESS)
-	{
-		return false;
-	}
-
 	std::vector<nri::BufferBarrierDesc> blasBarriers;
-	blasBarriers.reserve(2);
-
-	if (needsStaticBuild)
+	blasBarriers.reserve(mStaticMapScene.chunks.size());
+	for (auto& chunk : mStaticMapScene.chunks)
 	{
-		nri::BuildBottomLevelAccelerationStructureDesc staticBuild = {};
-		staticBuild.dst = mBottomLevelAS.accelerationStructure;
-		staticBuild.geometries = &staticGeometryDesc;
-		staticBuild.geometryNum = 1;
-		staticBuild.scratchBuffer = mScratchBuffer.buffer;
-		staticBuild.scratchOffset = 0;
-		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &staticBuild, 1);
+		nri::BottomLevelGeometryDesc geometryDesc = {};
+		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+		geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
+		geometryDesc.triangles.vertexOffset = 0;
+		geometryDesc.triangles.vertexNum = (uint32_t)mStaticMapScene.geometry.vertices.size();
+		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+		geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
+		geometryDesc.triangles.indexOffset = (uint64_t)chunk.indexOffset * sizeof(uint32_t);
+		geometryDesc.triangles.indexNum = chunk.indexCount;
+		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+
+		nri::BuildBottomLevelAccelerationStructureDesc build = {};
+		build.dst = chunk.accelerationStructure.accelerationStructure;
+		build.geometries = &geometryDesc;
+		build.geometryNum = 1;
+		build.scratchBuffer = mScratchBuffer.buffer;
+		build.scratchOffset = 0;
+		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
 
 		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*mBottomLevelAS.accelerationStructure);
+		barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
 		barrier.before = NRIAccelerationStructureWriteAccess();
 		barrier.after = NRIAccelerationStructureReadAccess();
 		blasBarriers.push_back(barrier);
-		mStaticAccelerationBuildSerial = mStaticMapScene.buildSerial;
-		mBuiltStaticMapSceneASLastFrame = true;
-	}
-
-	if (hasDynamicGeometry)
-	{
-		nri::BuildBottomLevelAccelerationStructureDesc dynamicBuild = {};
-		dynamicBuild.dst = mDynamicBottomLevelAS.accelerationStructure;
-		dynamicBuild.geometries = &dynamicGeometryDesc;
-		dynamicBuild.geometryNum = 1;
-		dynamicBuild.scratchBuffer = mScratchBuffer.buffer;
-		dynamicBuild.scratchOffset = 0;
-		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &dynamicBuild, 1);
-
-		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*mDynamicBottomLevelAS.accelerationStructure);
-		barrier.before = NRIAccelerationStructureWriteAccess();
-		barrier.after = NRIAccelerationStructureReadAccess();
-		blasBarriers.push_back(barrier);
-		mBuiltDynamicSceneASLastFrame = true;
-		mDynamicSceneLastFrame.asBuildCount++;
 	}
 
 	if (!blasBarriers.empty())
@@ -2901,9 +3028,153 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, blasBarrierDesc);
 	}
 
+	std::vector<nri::TopLevelInstance> instances;
+	std::vector<uint32_t> primitiveOffsets;
+	instances.reserve(mStaticMapScene.chunks.size());
+	primitiveOffsets.reserve(mStaticMapScene.chunks.size());
+	for (uint32_t instanceIndex = 0; instanceIndex < (uint32_t)mStaticMapScene.chunks.size(); ++instanceIndex)
+	{
+		const auto& chunk = mStaticMapScene.chunks[instanceIndex];
+		nri::TopLevelInstance instance = {};
+		instance.transform[0][0] = 1.0f;
+		instance.transform[1][1] = 1.0f;
+		instance.transform[2][2] = 1.0f;
+		instance.instanceId = instanceIndex;
+		instance.mask = 0xFF;
+		instance.shaderBindingTableLocalOffset = 0;
+		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		instances.push_back(instance);
+		primitiveOffsets.push_back(chunk.primitiveOffset);
+	}
+
+	mStaticAccelerationBuildSerial = mStaticMapScene.buildSerial;
+	return BuildTopLevelAccelerationStructure(instances, primitiveOffsets, true);
+}
+
+bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry, uint32_t staticVertexCount, uint32_t staticIndexCount, uint32_t staticPrimitiveCount)
+{
+	const bool hasDynamicGeometry =
+		geometry.primitives.size() > staticPrimitiveCount &&
+		geometry.vertices.size() > staticVertexCount &&
+		geometry.indices.size() > staticIndexCount;
+	if (!hasDynamicGeometry)
+	{
+		return false;
+	}
+
+	nri::BottomLevelGeometryDesc dynamicGeometryDesc = {};
+	dynamicGeometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+	dynamicGeometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+	dynamicGeometryDesc.triangles.vertexBuffer = mVertexBuffer.buffer;
+	dynamicGeometryDesc.triangles.vertexOffset = 0;
+	dynamicGeometryDesc.triangles.vertexNum = (uint32_t)geometry.vertices.size();
+	dynamicGeometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+	dynamicGeometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+	dynamicGeometryDesc.triangles.indexBuffer = mIndexBuffer.buffer;
+	dynamicGeometryDesc.triangles.indexOffset = (uint64_t)staticIndexCount * sizeof(uint32_t);
+	dynamicGeometryDesc.triangles.indexNum = (uint32_t)geometry.indices.size() - staticIndexCount;
+	dynamicGeometryDesc.triangles.indexType = nri::IndexType::UINT32;
+
+	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+
+	nri::AccelerationStructureDesc blasDesc = {};
+	blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
+	blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+	blasDesc.geometryOrInstanceNum = 1;
+	blasDesc.geometries = &dynamicGeometryDesc;
+	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, mDynamicBottomLevelAS.accelerationStructure) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+
+	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mDynamicBottomLevelAS.accelerationStructure);
+	if (mScratchBuffer.buffer == nullptr || mScratchBuffer.size < requiredScratchSize)
+	{
+		DestroyBufferResource(mScratchBuffer);
+		if (!CreateBufferWithoutView(mScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		{
+			return false;
+		}
+	}
+
+	nri::BuildBottomLevelAccelerationStructureDesc dynamicBuild = {};
+	dynamicBuild.dst = mDynamicBottomLevelAS.accelerationStructure;
+	dynamicBuild.geometries = &dynamicGeometryDesc;
+	dynamicBuild.geometryNum = 1;
+	dynamicBuild.scratchBuffer = mScratchBuffer.buffer;
+	dynamicBuild.scratchOffset = 0;
+	mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &dynamicBuild, 1);
+
+	nri::BufferBarrierDesc barrier = {};
+	barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*mDynamicBottomLevelAS.accelerationStructure);
+	barrier.before = NRIAccelerationStructureWriteAccess();
+	barrier.after = NRIAccelerationStructureReadAccess();
+
+	nri::BarrierDesc barrierDesc = {};
+	barrierDesc.buffers = &barrier;
+	barrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+	mBuiltDynamicSceneASLastFrame = true;
+	mDynamicSceneLastFrame.asBuildCount++;
+	return true;
+}
+
+bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, const std::vector<uint32_t>& primitiveOffsets, bool staticOnly)
+{
+	if (instances.empty() || instances.size() != primitiveOffsets.size())
+	{
+		return false;
+	}
+
+	DestroyBufferResource(mInstanceBuffer);
+	DestroyAccelerationStructureResource(mTopLevelAS);
+
+	std::vector<NRIInstanceData> instanceData(instances.size());
+	for (size_t i = 0; i < primitiveOffsets.size(); ++i)
+	{
+		instanceData[i].PrimitiveOffset = primitiveOffsets[i];
+	}
+
+	NRIBufferResource& shaderInstanceDataBuffer = staticOnly ? mStaticInstanceDataBuffer : mInstanceDataBuffer;
+	DestroyBufferResource(shaderInstanceDataBuffer);
+	if (!CreateStructuredBuffer(shaderInstanceDataBuffer, instanceData.data(), instanceData.size() * sizeof(NRIInstanceData), sizeof(NRIInstanceData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (!CreateStructuredBuffer(mInstanceBuffer, instances.data(), instances.size() * sizeof(nri::TopLevelInstance), sizeof(nri::TopLevelInstance), nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT, NRIAccelerationStructureBuildInputAccess()))
+	{
+		return false;
+	}
+
+	nri::AccelerationStructureDesc tlasDesc = {};
+	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
+	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+	tlasDesc.geometryOrInstanceNum = (uint32_t)instances.size();
+	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, mTopLevelAS.accelerationStructure) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+
+	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mTopLevelAS.accelerationStructure);
+	if (mScratchBuffer.buffer == nullptr || mScratchBuffer.size < requiredScratchSize)
+	{
+		DestroyBufferResource(mScratchBuffer);
+		if (!CreateBufferWithoutView(mScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		{
+			return false;
+		}
+	}
+
+	if (mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*mTopLevelAS.accelerationStructure, mTopLevelAS.descriptor) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+
 	nri::BuildTopLevelAccelerationStructureDesc tlasBuild = {};
 	tlasBuild.dst = mTopLevelAS.accelerationStructure;
-	tlasBuild.instanceNum = instanceCount;
+	tlasBuild.instanceNum = (uint32_t)instances.size();
 	tlasBuild.instanceBuffer = mInstanceBuffer.buffer;
 	tlasBuild.instanceOffset = 0;
 	tlasBuild.scratchBuffer = mScratchBuffer.buffer;
@@ -2915,11 +3186,13 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 	tlasBarrier.before = NRIAccelerationStructureWriteAccess();
 	tlasBarrier.after = NRIComputeAccelerationStructureReadAccess();
 
+	const NRIBufferResource& activeVertexBuffer = staticOnly ? mStaticVertexBuffer : mVertexBuffer;
+	const NRIBufferResource& activeIndexBuffer = staticOnly ? mStaticIndexBuffer : mIndexBuffer;
 	nri::BufferBarrierDesc sceneBarriers[2] = {};
-	sceneBarriers[0].buffer = mVertexBuffer.buffer;
+	sceneBarriers[0].buffer = activeVertexBuffer.buffer;
 	sceneBarriers[0].before = NRIAccelerationStructureBuildInputAccess();
 	sceneBarriers[0].after = NRIComputeShaderResourceAccess();
-	sceneBarriers[1].buffer = mIndexBuffer.buffer;
+	sceneBarriers[1].buffer = activeIndexBuffer.buffer;
 	sceneBarriers[1].before = NRIAccelerationStructureBuildInputAccess();
 	sceneBarriers[1].after = NRIComputeShaderResourceAccess();
 
@@ -2928,9 +3201,14 @@ bool NRIRenderer::BuildAccelerationStructures(const nri_scene::GeometryData& geo
 	barrierDesc.buffers = barriers;
 	barrierDesc.bufferNum = (uint32_t)std::size(barriers);
 	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
-	if (hasStaticGeometry)
+
+	mActiveTlasInstanceCount = (uint32_t)instances.size();
+	mUseStaticSceneBindings = staticOnly;
+	if (staticOnly)
 	{
-		mStaticMapScene.accelerationResident = mBottomLevelAS.accelerationStructure != nullptr;
+		mStaticMapScene.tlasInstanceCount = (uint32_t)instances.size();
+		mStaticMapScene.accelerationResident = true;
+		mBuiltStaticMapSceneASLastFrame = true;
 	}
 	return true;
 }
@@ -3107,6 +3385,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
 	constants.PrimitiveCount = (uint32_t)geometry.primitives.size();
 	constants.MaterialCount = (uint32_t)materials.size();
+	constants.InstanceDataCount = mActiveTlasInstanceCount;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u);
@@ -3148,14 +3427,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	if (!directSceneTrace && mTopLevelAS.descriptor != nullptr)
-	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
-	}
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	BindSceneRootDescriptors();
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
@@ -3253,14 +3525,7 @@ bool NRIRenderer::DispatchComposition()
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	if (mTopLevelAS.descriptor != nullptr)
-	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
-	}
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	BindSceneRootDescriptors();
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mCompositionFrameTextureSet, nri::BindPoint::COMPUTE });
@@ -3605,8 +3870,12 @@ bool NRIRenderer::DispatchFinal()
 	constants.TanHalfFovY = mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
-	constants.PrimitiveCount = mPrimitiveBuffer.stride != 0 ? (uint32_t)(mPrimitiveBuffer.usedSize / mPrimitiveBuffer.stride) : 0u;
-	constants.MaterialCount = mMaterialBuffer.stride != 0 ? (uint32_t)(mMaterialBuffer.usedSize / mMaterialBuffer.stride) : 0u;
+	const NRIBufferResource& finalPrimitiveBuffer = GetActivePrimitiveBuffer();
+	const NRIBufferResource& finalMaterialBuffer = GetActiveMaterialBuffer();
+	const NRIBufferResource& finalInstanceDataBuffer = GetActiveInstanceDataBuffer();
+	constants.PrimitiveCount = finalPrimitiveBuffer.stride != 0 ? (uint32_t)(finalPrimitiveBuffer.usedSize / finalPrimitiveBuffer.stride) : 0u;
+	constants.MaterialCount = finalMaterialBuffer.stride != 0 ? (uint32_t)(finalMaterialBuffer.usedSize / finalMaterialBuffer.stride) : 0u;
+	constants.InstanceDataCount = finalInstanceDataBuffer.stride != 0 ? (uint32_t)(finalInstanceDataBuffer.usedSize / finalInstanceDataBuffer.stride) : 0u;
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags =
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
@@ -3665,14 +3934,7 @@ bool NRIRenderer::DispatchFinal()
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	if (!presentRawTrace && mTopLevelAS.descriptor != nullptr)
-	{
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
-	}
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, mVertexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 2, mIndexBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 3, mPrimitiveBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 4, mMaterialBuffer.shaderView, 0, nri::BindPoint::COMPUTE });
+	BindSceneRootDescriptors();
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mFrameTextureSet, nri::BindPoint::COMPUTE });
@@ -3910,21 +4172,47 @@ void NRIRenderer::DestroyFrameTextures()
 void NRIRenderer::DestroySceneBuffers()
 {
 	mStaticMapScene.buffersResident = false;
+	DestroyBufferResource(mStaticVertexBuffer);
+	DestroyBufferResource(mStaticIndexBuffer);
+	DestroyBufferResource(mStaticPrimitiveBuffer);
+	DestroyBufferResource(mStaticMaterialBuffer);
+	DestroyBufferResource(mStaticInstanceDataBuffer);
 	DestroyBufferResource(mVertexBuffer);
 	DestroyBufferResource(mIndexBuffer);
 	DestroyBufferResource(mPrimitiveBuffer);
 	DestroyBufferResource(mMaterialBuffer);
+	DestroyBufferResource(mInstanceDataBuffer);
 	DestroyBufferResource(mInstanceBuffer);
 	DestroyBufferResource(mScratchBuffer);
+	mUseStaticSceneBindings = false;
 }
 
 void NRIRenderer::DestroyAccelerationStructures()
 {
 	mStaticMapScene.accelerationResident = false;
-	DestroyAccelerationStructureResource(mBottomLevelAS);
+	for (auto& chunk : mStaticMapScene.chunks)
+	{
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+	}
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;
+	mActiveTlasInstanceCount = 0;
+}
+
+void NRIRenderer::DestroyStaticMapSceneCache()
+{
+	for (auto& chunk : mStaticMapScene.chunks)
+	{
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+	}
+
+	DestroyBufferResource(mStaticVertexBuffer);
+	DestroyBufferResource(mStaticIndexBuffer);
+	DestroyBufferResource(mStaticPrimitiveBuffer);
+	DestroyBufferResource(mStaticMaterialBuffer);
+	DestroyBufferResource(mStaticInstanceDataBuffer);
+	mUseStaticSceneBindings = false;
 }
 
 void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)

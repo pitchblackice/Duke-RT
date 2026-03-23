@@ -49,7 +49,15 @@ struct NRITraceConstants
 	uint Flags;
 	uint BootstrapMode;
 	uint BounceCounts;
-	float Padding;
+	uint InstanceDataCount;
+};
+
+struct InstanceData
+{
+	uint primitiveOffset;
+	uint flags;
+	uint reserved0;
+	uint reserved1;
 };
 
 struct SceneVertex
@@ -89,6 +97,7 @@ StructuredBuffer<SceneVertex> gVertices : register(t1, space4);
 StructuredBuffer<uint> gIndices : register(t2, space4);
 StructuredBuffer<PrimitiveData> gPrimitives : register(t3, space4);
 StructuredBuffer<MaterialData> gMaterials : register(t4, space4);
+StructuredBuffer<InstanceData> gInstanceData : register(t5, space4);
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);
