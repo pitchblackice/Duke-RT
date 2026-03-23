@@ -871,6 +871,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		return false;
 	}
 
+	ResetSceneBufferFrameStats();
+	mUsedStaticMapSceneLastFrame = false;
+	mUploadedStaticMapSceneLastFrame = false;
+	mBuiltStaticMapSceneASLastFrame = false;
 	RefreshMapWorld();
 	UpdatePerFrameState(di);
 	if (preserveHistory)
@@ -908,10 +912,30 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		return true;
 	}
 
-	nri_scene::SceneView sceneView;
+	const bool allowStaticMapScene = !bootstrapCapturedView && !rawTraceDirectScene && mMapWorld.valid;
+	nri_scene::SceneView capturedSceneView;
+	nri_scene::GeometryData capturedGeometry;
+	nri_scene::MaterialBridgeData materialBridge;
+	std::vector<nri_scene::MaterialData> capturedGpuMaterials;
+	const nri_scene::SceneView* activeSceneView = nullptr;
+	const nri_scene::GeometryData* activeGeometry = nullptr;
+	const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
+	bool paletteReady = true;
+	bool texturesReady = true;
+	bool buffersReady = true;
+	bool accelerationReady = true;
+
+	if (allowStaticMapScene && EnsureStaticMapScene())
+	{
+		mUsedStaticMapSceneLastFrame = true;
+		activeSceneView = &mStaticMapScene.sceneView;
+		activeGeometry = &mStaticMapScene.geometry;
+		activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+	}
+	else
 	{
 		Clocker clock(NriPTSceneCapture);
-		if (!nri_scene::CaptureScene(di, sceneView))
+		if (!nri_scene::CaptureScene(di, capturedSceneView))
 		{
 			LogFallback("PT scene capture failed.");
 			if (preserveHistory)
@@ -920,29 +944,53 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			}
 			return false;
 		}
+
+		activeSceneView = &capturedSceneView;
+
+		{
+			Clocker clock(NriPTGeometryBuild);
+			nri_scene::BuildGeometry(capturedSceneView, capturedGeometry);
+		}
+
+		{
+			Clocker clock(NriPTMaterialBuild);
+			nri_scene::BuildMaterials(capturedSceneView, materialBridge);
+		}
+
+		const bool needsFallbackMaterials = bootstrapCapturedDiagnostics || bootstrapCapturedFlat;
+		const bool needsRealTextures = !nri_ptbootstrap || bootstrapCapturedBaseColor || bootstrapMode >= 13u;
+		paletteReady = needsRealTextures ? EnsurePaletteTexture(materialBridge) : true;
+		texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures(preserveHistory) : (needsRealTextures ? (paletteReady && EnsureSceneTextures(capturedSceneView, materialBridge, capturedGpuMaterials, preserveHistory)) : EnsureSkyTexture(capturedSceneView, preserveHistory));
+		if (needsFallbackMaterials)
+		{
+			capturedGpuMaterials = materialBridge.materials;
+			for (auto& material : capturedGpuMaterials)
+			{
+				material.textureIndex = 0;
+				material.paletteIndex = 0;
+				material.flags = 0;
+				material.lightLevel = 1.0f;
+				material.alpha = 1.0f;
+			}
+		}
+		else if (!needsRealTextures)
+		{
+			capturedGpuMaterials = materialBridge.materials;
+		}
+
+		buffersReady = texturesReady && UploadSceneBuffers(capturedGeometry, capturedGpuMaterials);
+		if (texturesReady)
+		{
+			PrepareSceneTextureInputsForCompute();
+		}
+		accelerationReady = (bootstrapCapturedView || rawTraceDirectScene) ? true : (buffersReady && BuildAccelerationStructures(capturedGeometry));
+		activeGeometry = &capturedGeometry;
+		activeGpuMaterials = &capturedGpuMaterials;
 	}
 
-	LogBridgeStats(sceneView.stats);
-	if (sceneView.stats.unsupportedModelDrawItems > 0)
+	if (activeSceneView == nullptr || activeGeometry == nullptr || activeGpuMaterials == nullptr)
 	{
-		LogFallback("generic GLDL_MODELS content is unsupported in the PT bridge; rendering the supported PT scene without those model draws.");
-	}
-
-	Copy3(sceneView.skyColor, mSkyColor);
-	Copy3(sceneView.groundColor, mGroundColor);
-
-	nri_scene::GeometryData geometry;
-	{
-		Clocker clock(NriPTGeometryBuild);
-		nri_scene::BuildGeometry(sceneView, geometry);
-	}
-	if (!preserveHistory)
-	{
-		UpdateSurfaceProbe(geometry, true);
-	}
-	if (geometry.primitives.empty())
-	{
-		LogFallback("PT scene capture produced no supported opaque geometry.");
+		LogFallback("PT scene selection failed.");
 		if (preserveHistory)
 		{
 			restoreHistory();
@@ -950,39 +998,34 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		return false;
 	}
 
-	nri_scene::MaterialBridgeData materialBridge;
+	LogBridgeStats(activeSceneView->stats);
+	if (activeSceneView->stats.unsupportedModelDrawItems > 0)
 	{
-		Clocker clock(NriPTMaterialBuild);
-		nri_scene::BuildMaterials(sceneView, materialBridge);
+		LogFallback("generic GLDL_MODELS content is unsupported in the PT bridge; rendering the supported PT scene without those model draws.");
 	}
-	std::vector<nri_scene::MaterialData> gpuMaterials;
 
-	const bool needsFallbackMaterials = bootstrapCapturedDiagnostics || bootstrapCapturedFlat;
-	const bool needsRealTextures = !nri_ptbootstrap || bootstrapCapturedBaseColor || bootstrapMode >= 13u;
-	const bool paletteReady = needsRealTextures ? EnsurePaletteTexture(materialBridge) : true;
-	const bool texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures(preserveHistory) : (needsRealTextures ? (paletteReady && EnsureSceneTextures(sceneView, materialBridge, gpuMaterials, preserveHistory)) : EnsureSkyTexture(sceneView, preserveHistory));
-	if (needsFallbackMaterials)
+	Copy3(activeSceneView->skyColor, mSkyColor);
+	Copy3(activeSceneView->groundColor, mGroundColor);
+
+	if (!preserveHistory)
 	{
-		gpuMaterials = materialBridge.materials;
-		for (auto& material : gpuMaterials)
+		UpdateSurfaceProbe(*activeGeometry, true);
+	}
+	if (activeGeometry->primitives.empty())
+	{
+		LogFallback("PT scene path produced no supported opaque geometry.");
+		if (preserveHistory)
 		{
-			material.textureIndex = 0;
-			material.paletteIndex = 0;
-			material.flags = 0;
-			material.lightLevel = 1.0f;
-			material.alpha = 1.0f;
+			restoreHistory();
 		}
+		return false;
 	}
-	else if (!needsRealTextures)
-	{
-		gpuMaterials = materialBridge.materials;
-	}
-	const bool buffersReady = texturesReady && UploadSceneBuffers(geometry, gpuMaterials);
-	if (texturesReady)
+
+	if (mUsedStaticMapSceneLastFrame)
 	{
 		PrepareSceneTextureInputsForCompute();
 	}
-	const bool accelerationReady = (bootstrapCapturedView || rawTraceDirectScene) ? true : (buffersReady && BuildAccelerationStructures(geometry));
+
 	bool dispatched = false;
 	if (bootstrapCapturedView)
 	{
@@ -994,7 +1037,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 	else
 	{
-		dispatched = accelerationReady && DispatchFrameGraph(di, geometry, gpuMaterials, drawmode);
+		dispatched = accelerationReady && DispatchFrameGraph(di, *activeGeometry, *activeGpuMaterials, drawmode);
 	}
 	const bool success = paletteReady && texturesReady && buffersReady && accelerationReady && dispatched;
 
@@ -1117,6 +1160,7 @@ void NRIRenderer::PrintStatus() const
 	}
 
 	PrintMapWorldStatus();
+	PrintStaticMapSceneStatus();
 	PrintSceneBufferStatus();
 	PrintSurfaceProbeStatus();
 }
@@ -1142,6 +1186,23 @@ void NRIRenderer::PrintMapWorldStatus() const
 		stats.portalSurfaceCount,
 		stats.skySurfaceCount,
 		stats.triangleCount);
+}
+
+void NRIRenderer::PrintStaticMapSceneStatus() const
+{
+	const char* source = mUsedStaticMapSceneLastFrame ? "authoritative-map-world" : "captured-scene";
+	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s tris=%u materials=%u\n",
+		source,
+		(mStaticMapScene.valid && mStaticMapScene.texturesResident && mStaticMapScene.buffersResident && mStaticMapScene.accelerationResident) ? "yes" : "no",
+		(unsigned long long)mStaticMapScene.buildSerial,
+		mStaticMapScene.sceneBuildCount,
+		mStaticMapScene.gpuUploadCount,
+		mStaticMapScene.accelerationBuildCount,
+		mStaticMapScene.reuseCount,
+		mUploadedStaticMapSceneLastFrame ? "yes" : "no",
+		mBuiltStaticMapSceneASLastFrame ? "yes" : "no",
+		(uint32_t)mStaticMapScene.geometry.primitives.size(),
+		(uint32_t)mStaticMapScene.gpuMaterials.size());
 }
 
 void NRIRenderer::PrintSceneBufferStatus() const
@@ -1892,6 +1953,84 @@ bool NRIRenderer::DispatchBootstrapView()
 	return true;
 }
 
+void NRIRenderer::ResetSceneBufferFrameStats()
+{
+	mVertexBufferStats.bytesUploadedLastFrame = 0;
+	mVertexBufferStats.growEventsLastFrame = 0;
+	mVertexBufferStats.overwriteEventsLastFrame = 0;
+	mIndexBufferStats.bytesUploadedLastFrame = 0;
+	mIndexBufferStats.growEventsLastFrame = 0;
+	mIndexBufferStats.overwriteEventsLastFrame = 0;
+	mPrimitiveBufferStats.bytesUploadedLastFrame = 0;
+	mPrimitiveBufferStats.growEventsLastFrame = 0;
+	mPrimitiveBufferStats.overwriteEventsLastFrame = 0;
+	mMaterialBufferStats.bytesUploadedLastFrame = 0;
+	mMaterialBufferStats.growEventsLastFrame = 0;
+	mMaterialBufferStats.overwriteEventsLastFrame = 0;
+}
+
+bool NRIRenderer::EnsureStaticMapScene()
+{
+	if (!mMapWorld.valid)
+	{
+		return false;
+	}
+
+	if (mStaticMapScene.buildSerial != mMapWorld.buildSerial)
+	{
+		mStaticMapScene = {};
+	}
+
+	if (mStaticMapScene.valid &&
+		mStaticMapScene.texturesResident &&
+		mStaticMapScene.buffersResident &&
+		mStaticMapScene.accelerationResident &&
+		mStaticMapScene.buildSerial == mMapWorld.buildSerial)
+	{
+		mStaticMapScene.reuseCount++;
+		return true;
+	}
+
+	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView);
+	{
+		Clocker clock(NriPTGeometryBuild);
+		nri_scene::BuildGeometry(mStaticMapScene.sceneView, mStaticMapScene.geometry);
+	}
+	{
+		Clocker clock(NriPTMaterialBuild);
+		nri_scene::BuildMaterials(mStaticMapScene.sceneView, mStaticMapScene.materialBridge);
+	}
+
+	if (mStaticMapScene.geometry.primitives.empty() ||
+		!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
+		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false) ||
+		!UploadSceneBuffers(mStaticMapScene.geometry, mStaticMapScene.gpuMaterials) ||
+		!BuildAccelerationStructures(mStaticMapScene.geometry))
+	{
+		return false;
+	}
+
+	mStaticMapScene.valid = true;
+	mStaticMapScene.texturesResident = true;
+	mStaticMapScene.buffersResident = true;
+	mStaticMapScene.accelerationResident = true;
+	mStaticMapScene.buildSerial = mMapWorld.buildSerial;
+	mStaticMapScene.sceneBuildCount++;
+	mStaticMapScene.gpuUploadCount++;
+	mStaticMapScene.accelerationBuildCount++;
+	mUploadedStaticMapSceneLastFrame = true;
+	mBuiltStaticMapSceneASLastFrame = true;
+
+	Printf("NRI PT static scene resident: level=%s build_serial=%llu tris=%u materials=%u uploads=%u as_builds=%u\n",
+		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
+		(unsigned long long)mStaticMapScene.buildSerial,
+		(uint32_t)mStaticMapScene.geometry.primitives.size(),
+		(uint32_t)mStaticMapScene.gpuMaterials.size(),
+		mStaticMapScene.gpuUploadCount,
+		mStaticMapScene.accelerationBuildCount);
+	return true;
+}
+
 bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky)
 {
 	if (mSkyLevel != currentLevel)
@@ -2093,6 +2232,11 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	for (uint32_t i = 0; i < std::min<uint32_t>((uint32_t)materials.textures.size(), NRI_MAX_SCENE_TEXTURES); ++i)
 	{
 		const auto& upload = materials.textures[i];
+		if (upload.width == 0 || upload.height == 0 || upload.pixels.empty())
+		{
+			continue;
+		}
+
 		auto it = std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; });
 		if (it == mTextureCache.end())
 		{
@@ -3404,6 +3548,7 @@ void NRIRenderer::CopyTextureToActiveTarget(NRITextureResource& source)
 
 void NRIRenderer::DestroyCachedTextures()
 {
+	mStaticMapScene.texturesResident = false;
 	for (auto& skyTexture : mSkyTextureCache)
 	{
 		mFrameBuffer->DestroyTextureResource(skyTexture.resource);
@@ -3438,6 +3583,7 @@ void NRIRenderer::DestroyFrameTextures()
 
 void NRIRenderer::DestroySceneBuffers()
 {
+	mStaticMapScene.buffersResident = false;
 	DestroyBufferResource(mVertexBuffer);
 	DestroyBufferResource(mIndexBuffer);
 	DestroyBufferResource(mPrimitiveBuffer);
@@ -3448,6 +3594,7 @@ void NRIRenderer::DestroySceneBuffers()
 
 void NRIRenderer::DestroyAccelerationStructures()
 {
+	mStaticMapScene.accelerationResident = false;
 	DestroyAccelerationStructureResource(mBottomLevelAS);
 	DestroyAccelerationStructureResource(mTopLevelAS);
 }

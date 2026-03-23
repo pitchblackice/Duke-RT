@@ -73,4 +73,7 @@ struct PTMapWorld
 
 	void Reset();
 };
+
+SceneDebugStats CollectMapWorldDebugStats(const PTMapWorld& mapWorld);
+void BuildMapSceneView(const PTMapWorld& mapWorld, SceneView& outView);
 }
