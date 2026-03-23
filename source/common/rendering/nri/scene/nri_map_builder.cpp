@@ -336,6 +336,14 @@ namespace
 			return;
 		}
 
+		// Temporary validation path: keep sky and sector-portal planes out of the
+		// authoritative opaque world so we can verify whether they are the source
+		// of the new roof / distant-geometry artifacts in phase 2 residency.
+		if (IsSkyPlane(sec, plane) || IsPortalPlane(sec, plane))
+		{
+			return;
+		}
+
 		TArray<int>* indices = nullptr;
 		auto* mesh = sectionGeometry.get(&sections[sectionIndex], plane, { 0.0f, 0.0f }, &indices);
 		if (mesh == nullptr || indices == nullptr || indices->Size() < 3)
