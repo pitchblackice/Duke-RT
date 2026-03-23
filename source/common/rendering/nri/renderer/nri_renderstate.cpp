@@ -17,6 +17,22 @@ namespace
 		return (T)((uint32_t)a | (uint32_t)b);
 	}
 
+	static uint32_t NextPowerOfTwo(uint32_t value)
+	{
+		if (value <= 1u)
+		{
+			return 1u;
+		}
+
+		value--;
+		value |= value >> 1;
+		value |= value >> 2;
+		value |= value >> 4;
+		value |= value >> 8;
+		value |= value >> 16;
+		return value + 1u;
+	}
+
 	static nri::StageBits NRIShaderStages()
 	{
 		return (nri::StageBits)((uint32_t)nri::StageBits::VERTEX_SHADER | (uint32_t)nri::StageBits::FRAGMENT_SHADER);
@@ -347,7 +363,9 @@ NRIRenderState::StreamedBuffer NRIRenderState::StreamVertices(NRIHardwareVertexB
 	nri::StreamBufferDataDesc streamDesc = {};
 	streamDesc.dataChunks = &dataChunk;
 	streamDesc.dataChunkNum = 1;
-	streamDesc.placementAlignment = (uint32_t)std::max<size_t>(vertexBuffer->GetStride(), 16);
+	// NRI's internal alignment helper assumes power-of-two alignment. Some raster
+	// vertex formats, including the skydome path, use non-power-of-two strides such as 36 bytes.
+	streamDesc.placementAlignment = NextPowerOfTwo((uint32_t)std::max<size_t>(vertexBuffer->GetStride(), 16));
 
 	nri::BufferOffset bufferOffset = mFrameBuffer->mStreamer.StreamBufferData(*mFrameBuffer->mStreamerInstance, streamDesc);
 
