@@ -1069,9 +1069,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					}
 				}
 				buffersReady = texturesReady && UploadSceneBuffers(dynamicGeometry, dynamicGpuMaterials);
+				accelerationReady = false;
 				if (buffersReady)
 				{
-					accelerationReady = BuildDynamicAccelerationStructure(dynamicGeometry);
+					accelerationReady =
+						BuildDynamicAccelerationStructure(dynamicGeometry) &&
+						mDynamicBottomLevelAS.accelerationStructure != nullptr;
 				}
 				if (accelerationReady)
 				{
@@ -1245,7 +1248,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 		else if (buffersReady)
 		{
-			accelerationReady = BuildDynamicAccelerationStructure(capturedGeometry);
+			accelerationReady =
+				BuildDynamicAccelerationStructure(capturedGeometry) &&
+				mDynamicBottomLevelAS.accelerationStructure != nullptr;
 			if (accelerationReady)
 			{
 				nri::TopLevelInstance instance = {};
