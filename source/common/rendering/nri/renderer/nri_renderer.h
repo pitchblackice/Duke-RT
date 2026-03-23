@@ -180,7 +180,7 @@ private:
 		const nri_scene::GeometryData& geometry,
 		const std::vector<nri_scene::MaterialData>& materials);
 	bool BuildStaticMapAccelerationStructures();
-	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, const std::vector<uint32_t>& primitiveOffsets, bool staticOnly);
+	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, bool staticOnly);
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry, uint32_t staticVertexCount, uint32_t staticIndexCount, uint32_t staticPrimitiveCount);
 	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
 	bool DispatchTraceOpaque(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
@@ -217,7 +217,6 @@ private:
 	const NRIBufferResource& GetActiveIndexBuffer() const;
 	const NRIBufferResource& GetActivePrimitiveBuffer() const;
 	const NRIBufferResource& GetActiveMaterialBuffer() const;
-	const NRIBufferResource& GetActiveInstanceDataBuffer() const;
 	void BindSceneRootDescriptors();
 
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
@@ -264,12 +263,10 @@ private:
 	NRIBufferResource mIndexBuffer;
 	NRIBufferResource mPrimitiveBuffer;
 	NRIBufferResource mMaterialBuffer;
-	NRIBufferResource mInstanceDataBuffer;
 	NRIBufferResource mStaticVertexBuffer;
 	NRIBufferResource mStaticIndexBuffer;
 	NRIBufferResource mStaticPrimitiveBuffer;
 	NRIBufferResource mStaticMaterialBuffer;
-	NRIBufferResource mStaticInstanceDataBuffer;
 	NRIBufferResource mInstanceBuffer;
 	NRIBufferResource mScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };

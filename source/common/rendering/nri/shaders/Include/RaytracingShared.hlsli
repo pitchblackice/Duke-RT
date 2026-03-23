@@ -97,13 +97,7 @@ bool ShouldIgnoreOneWayHit(uint materialIndex, float3 geometricNormal, float3 ra
 
 uint ResolvePrimitiveIndex(uint instanceId, uint localPrimitiveIndex)
 {
-	if (gTraceConstants.InstanceDataCount == 0u)
-	{
-		return localPrimitiveIndex;
-	}
-
-	const uint metadataIndex = min(instanceId, gTraceConstants.InstanceDataCount - 1u);
-	return gInstanceData[metadataIndex].primitiveOffset + localPrimitiveIndex;
+	return instanceId + localPrimitiveIndex;
 }
 
 bool IntersectPrimitiveTriangle(float3 origin, float3 direction, uint primitiveIndex, out float hitT, out float3 barycentrics)
