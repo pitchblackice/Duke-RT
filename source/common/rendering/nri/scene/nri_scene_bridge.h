@@ -23,6 +23,10 @@ enum class SurfaceSourceType : uint32_t
 	CeilingFlat,
 	FacingSprite,
 	VoxelProxySprite,
+	MapWallBand,
+	MapFloorSection,
+	MapCeilingSection,
+	MapPortalSurface,
 };
 
 enum MaterialFlags : uint32_t
@@ -68,6 +72,8 @@ struct SurfaceProvenance
 	SurfaceSourceType sourceType = SurfaceSourceType::Unknown;
 	int32_t sectorIndex = -1;
 	int32_t wallIndex = -1;
+	int32_t sectionIndex = -1;
+	int32_t mapChunkIndex = -1;
 	int32_t nextSectorIndex = -1;
 	int32_t actorIndex = -1;
 	uint32_t drawListType = UINT32_MAX;
@@ -129,6 +135,7 @@ struct SceneView
 };
 
 SceneDebugStats CollectDebugStats(HWDrawInfo& di);
+MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float alpha, uint32_t extraFlags);
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 }

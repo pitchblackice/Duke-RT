@@ -1,6 +1,7 @@
 #include "nri_renderer.h"
 
 #include "nri_renderstate.h"
+#include "../scene/nri_map_builder.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
 #include "skyboxtexture.h"
@@ -657,6 +658,10 @@ namespace
 		case nri_scene::SurfaceSourceType::CeilingFlat: return "ceiling_flat";
 		case nri_scene::SurfaceSourceType::FacingSprite: return "facing_sprite";
 		case nri_scene::SurfaceSourceType::VoxelProxySprite: return "voxel_proxy_sprite";
+		case nri_scene::SurfaceSourceType::MapWallBand: return "map_wall_band";
+		case nri_scene::SurfaceSourceType::MapFloorSection: return "map_floor_section";
+		case nri_scene::SurfaceSourceType::MapCeilingSection: return "map_ceiling_section";
+		case nri_scene::SurfaceSourceType::MapPortalSurface: return "map_portal_surface";
 		default: return "unknown";
 		}
 	}
@@ -866,6 +871,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		return false;
 	}
 
+	RefreshMapWorld();
 	UpdatePerFrameState(di);
 	if (preserveHistory)
 	{
@@ -1110,8 +1116,32 @@ void NRIRenderer::PrintStatus() const
 		Printf("NRI PT last scene: no translated PT scene has been captured yet.\n");
 	}
 
+	PrintMapWorldStatus();
 	PrintSceneBufferStatus();
 	PrintSurfaceProbeStatus();
+}
+
+void NRIRenderer::PrintMapWorldStatus() const
+{
+	if (!mMapWorld.valid)
+	{
+		Printf("NRI PT map world: no authoritative map world has been built yet.\n");
+		return;
+	}
+
+	const auto& stats = mMapWorld.stats;
+	Printf("NRI PT map world: level=%s build_serial=%llu chunks=%u sectors=%u sections=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
+		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
+		(unsigned long long)mMapWorld.buildSerial,
+		stats.chunkCount,
+		stats.sectorCount,
+		stats.sectionCount,
+		stats.surfaceCount,
+		stats.wallSurfaceCount,
+		stats.flatSurfaceCount,
+		stats.portalSurfaceCount,
+		stats.skySurfaceCount,
+		stats.triangleCount);
 }
 
 void NRIRenderer::PrintSceneBufferStatus() const
@@ -1358,6 +1388,45 @@ void NRIRenderer::LogFallback(const char* reason)
 
 	Printf(TEXTCOLOR_ORANGE "NRI PT fallback: %s\n", reason != nullptr ? reason : "unknown reason");
 	mHasLoggedFallback = true;
+}
+
+void NRIRenderer::RefreshMapWorld()
+{
+	const uint64_t pendingBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
+	const bool levelChanged = mMapWorld.level != currentLevel;
+	const bool needsBuild = !mMapWorld.valid || levelChanged || pendingBuildSerial != mObservedMapWorldBuildSerial;
+	if (!needsBuild)
+	{
+		return;
+	}
+
+	nri_scene::PTMapWorld world;
+	if (!nri_scene::BuildMapWorld(world))
+	{
+		if (pendingBuildSerial != mObservedMapWorldBuildSerial || levelChanged)
+		{
+			Printf(TEXTCOLOR_RED "NRI PT map world: authoritative level-load build failed for %s.\n",
+				currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)");
+		}
+		mMapWorld.Reset();
+		mMapWorld.level = currentLevel;
+		mObservedMapWorldBuildSerial = pendingBuildSerial;
+		return;
+	}
+
+	mMapWorld = std::move(world);
+	mObservedMapWorldBuildSerial = pendingBuildSerial;
+	const auto& stats = mMapWorld.stats;
+	Printf("NRI PT map world built: level=%s build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
+		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
+		(unsigned long long)mMapWorld.buildSerial,
+		stats.chunkCount,
+		stats.surfaceCount,
+		stats.wallSurfaceCount,
+		stats.flatSurfaceCount,
+		stats.portalSurfaceCount,
+		stats.skySurfaceCount,
+		stats.triangleCount);
 }
 
 bool NRIRenderer::CreatePipelineLayout()

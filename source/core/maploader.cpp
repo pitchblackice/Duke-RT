@@ -51,6 +51,7 @@
 #include "games/blood/src/mapstructs.h"
 #include "buildtiles.h"
 #include "m_swap.h"
+#include "../common/rendering/nri/scene/nri_map_builder.h"
 
 extern BitArray clipsectormap;
 
@@ -553,6 +554,7 @@ void loadMap(const char* filename, int flags, DVector3* pos, int16_t* ang, secto
 	setWallSectors();
 	hw_CreateSections();
 	sectionGeometry.SetSize(sections.Size());
+	nri_scene::NotifyLevelGeometryReady();
 
 
 	wallbackup = wall;

@@ -4,6 +4,7 @@
 #include "nri_resources.h"
 #include "nri_upscaler.h"
 
+#include "../scene/nri_map_world.h"
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_material_bridge.h"
 #include "../scene/nri_scene_bridge.h"
@@ -136,9 +137,11 @@ private:
 	bool DispatchFinalPresent(FrameTextureSlot inputSlot);
 	bool DispatchUpscaleChain();
 	bool DispatchFinal();
+	void RefreshMapWorld();
 	bool CheckPathTracingSupport();
 	void UpdatePerFrameState(HWDrawInfo& di);
 	void LogBridgeStats(const nri_scene::SceneDebugStats& stats);
+	void PrintMapWorldStatus() const;
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;
@@ -212,6 +215,7 @@ private:
 	std::vector<CachedSkyTexture> mSkyTextureCache;
 	NRINrdContext mNrd;
 	NRIUpscalerContext mUpscaler;
+	nri_scene::PTMapWorld mMapWorld;
 	nri_scene::SceneDebugStats mLastStats = {};
 	std::array<nri::Descriptor*, 11> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 12> mOutputDescriptors = {};
@@ -255,6 +259,7 @@ private:
 	bool mUseUpscaledInFinal = false;
 	bool mUseDenoisedCompositionInputs = false;
 	bool mHasLoggedFallback = false;
+	uint64_t mObservedMapWorldBuildSerial = 0;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastUpscalerRequest = -1;

@@ -474,32 +474,6 @@ namespace
 		return flags == PORTAL_SECTOR_FLOOR || flags == PORTAL_SECTOR_FLOOR_REFLECT;
 	}
 
-	MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float alpha, uint32_t extraFlags)
-	{
-		MaterialRef material = {};
-		material.texture = texture;
-		material.palette = palette;
-		material.shade = shade;
-		material.alpha = alpha;
-		material.flags = extraFlags;
-
-		if (texture != nullptr)
-		{
-			auto* baseTexture = texture->GetTexture();
-			if (baseTexture != nullptr && baseTexture->GetImage() != nullptr && baseTexture->GetImage()->UseGamePalette())
-			{
-				material.flags |= MaterialFlag_Indexed;
-			}
-
-			if (texture->isFullbright())
-			{
-				material.flags |= MaterialFlag_Fullbright;
-			}
-		}
-
-		return material;
-	}
-
 	void CaptureWalls(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats, SceneView& outView)
 	{
 		for (auto* wall : list.walls)
@@ -797,8 +771,34 @@ bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor)
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
-		return false;
+	return false;
 	}
+}
+
+MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float alpha, uint32_t extraFlags)
+{
+	MaterialRef material = {};
+	material.texture = texture;
+	material.palette = palette;
+	material.shade = shade;
+	material.alpha = alpha;
+	material.flags = extraFlags;
+
+	if (texture != nullptr)
+	{
+		auto* baseTexture = texture->GetTexture();
+		if (baseTexture != nullptr && baseTexture->GetImage() != nullptr && baseTexture->GetImage()->UseGamePalette())
+		{
+			material.flags |= MaterialFlag_Indexed;
+		}
+
+		if (texture->isFullbright())
+		{
+			material.flags |= MaterialFlag_Fullbright;
+		}
+	}
+
+	return material;
 }
 
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType)
