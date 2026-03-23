@@ -85,6 +85,16 @@ bool IsMirrorMaterial(uint materialIndex)
 	return (GetMaterialData(materialIndex).flags & MATERIAL_FLAG_MIRROR) != 0;
 }
 
+bool ShouldIgnoreOneWayHit(uint materialIndex, float3 geometricNormal, float3 rayDirection)
+{
+	if ((GetMaterialData(materialIndex).flags & MATERIAL_FLAG_ONE_WAY) == 0)
+	{
+		return false;
+	}
+
+	return dot(normalize(geometricNormal), rayDirection) > 0.0;
+}
+
 bool IntersectPrimitiveTriangle(float3 origin, float3 direction, uint primitiveIndex, out float hitT, out float3 barycentrics)
 {
 	hitT = 0.0;
@@ -149,6 +159,11 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 		}
 
 		const PrimitiveData primitive = gPrimitives[primitiveIndex];
+		if (ShouldIgnoreOneWayHit(primitive.materialIndex, primitive.normal, direction))
+		{
+			continue;
+		}
+
 		bestHit.hit = true;
 		bestHit.primitiveIndex = primitiveIndex;
 		bestHit.barycentrics = barycentrics.yz;
@@ -162,49 +177,68 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 	return bestHit;
 }
 
+bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, out HitData hitData)
+{
+	hitData = (HitData)0;
+	float accumulatedDistance = 0.0;
+
+	[loop]
+	for (uint skipCount = 0u; skipCount < 8u; ++skipCount)
+	{
+		const float remainingDistance = maxDistance - accumulatedDistance;
+		if (remainingDistance <= 0.001)
+		{
+			return false;
+		}
+
+		RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> rayQuery;
+		RayDesc ray = { startOrigin + direction * accumulatedDistance, 0.001, direction, remainingDistance };
+		rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, ray);
+
+		while (rayQuery.Proceed()) {}
+
+		if (rayQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+		{
+			return false;
+		}
+
+		const uint primitiveIndex = rayQuery.CommittedPrimitiveIndex();
+		const PrimitiveData primitive = gPrimitives[min(primitiveIndex, gTraceConstants.PrimitiveCount - 1)];
+		const float committedDistance = rayQuery.CommittedRayT();
+		if (ShouldIgnoreOneWayHit(primitive.materialIndex, primitive.normal, direction))
+		{
+			accumulatedDistance += committedDistance + 0.01;
+			continue;
+		}
+
+		const float2 bary = rayQuery.CommittedTriangleBarycentrics();
+		const float3 weights = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
+		const float hitDistance = accumulatedDistance + committedDistance;
+		hitData.hit = true;
+		hitData.primitiveIndex = primitiveIndex;
+		hitData.barycentrics = bary;
+		hitData.distance = hitDistance;
+		hitData.position = startOrigin + direction * hitDistance;
+		hitData.normal = ResolveHitNormal(primitive.materialIndex, primitive.normal, direction);
+		hitData.uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
+		hitData.materialIndex = primitive.materialIndex;
+		return true;
+	}
+
+	return false;
+}
+
 HitData TracePrimary(float3 origin, float3 direction)
 {
 	HitData hitData = (HitData)0;
-
-	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> rayQuery;
-	RayDesc ray = { origin, 0.001, direction, 100000.0 };
-	rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, ray);
-
-	while (rayQuery.Proceed()) {}
-
-	if (rayQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
-	{
-		return hitData;
-	}
-
-	const uint primitiveIndex = rayQuery.CommittedPrimitiveIndex();
-	const PrimitiveData primitive = gPrimitives[min(primitiveIndex, gTraceConstants.PrimitiveCount - 1)];
-	const SceneVertex v0 = gVertices[primitive.indices.x];
-	const SceneVertex v1 = gVertices[primitive.indices.y];
-	const SceneVertex v2 = gVertices[primitive.indices.z];
-	const float2 bary = rayQuery.CommittedTriangleBarycentrics();
-	const float3 weights = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
-
-	hitData.hit = true;
-	hitData.primitiveIndex = primitiveIndex;
-	hitData.barycentrics = bary;
-	hitData.distance = rayQuery.CommittedRayT();
-	hitData.position = origin + direction * hitData.distance;
-	hitData.normal = ResolveHitNormal(primitive.materialIndex, primitive.normal, direction);
-	hitData.uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
-	hitData.materialIndex = primitive.materialIndex;
+	TraceClosestSurface(origin, direction, 100000.0, hitData);
 	return hitData;
 }
 
 float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection)
 {
-	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
-	RayDesc shadowRay = { position + normal * 0.05, 0.001, lightDirection, 100000.0 };
-	shadowQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, shadowRay);
-
-	while (shadowQuery.Proceed()) {}
-
-	return shadowQuery.CommittedStatus() == COMMITTED_NOTHING ? 1.0 : 0.0;
+	HitData shadowHit = (HitData)0;
+	return TraceClosestSurface(position + normal * 0.05, lightDirection, 100000.0, shadowHit) ? 0.0 : 1.0;
 }
 
 float3 GetMissColor(float3 direction)

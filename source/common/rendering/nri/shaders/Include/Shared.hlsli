@@ -19,6 +19,7 @@
 #define MATERIAL_FLAG_MIRROR 16
 #define MATERIAL_FLAG_SKY 32
 #define MATERIAL_FLAG_PORTAL 64
+#define MATERIAL_FLAG_ONE_WAY 128
 
 struct NRITraceConstants
 {

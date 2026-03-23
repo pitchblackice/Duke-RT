@@ -458,6 +458,7 @@ namespace
 			desc.texture = texture;
 			desc.shade = wal->shade;
 			desc.palette = wal->pal;
+			desc.materialFlags = (wal->cstat & CSTAT_WALL_1WAY) != 0 ? MaterialFlag_OneWay : MaterialFlag_None;
 			desc.topLeft = frontCeilingLeft;
 			desc.topRight = frontCeilingRight;
 			desc.bottomLeft = frontFloorLeft;
@@ -555,6 +556,7 @@ namespace
 					desc.texture = texture;
 					desc.shade = wal->shade;
 					desc.palette = wal->pal;
+					desc.materialFlags = (wal->cstat & CSTAT_WALL_1WAY) != 0 ? MaterialFlag_OneWay : MaterialFlag_None;
 					desc.topLeft = topLeft;
 					desc.topRight = topRight;
 					desc.bottomLeft = bottomLeft;

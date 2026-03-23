@@ -39,6 +39,7 @@ enum MaterialFlags : uint32_t
 	MaterialFlag_Mirror = 1u << 4,
 	MaterialFlag_Sky = 1u << 5,
 	MaterialFlag_Portal = 1u << 6,
+	MaterialFlag_OneWay = 1u << 7,
 };
 
 enum class PTSkyMode : uint32_t
