@@ -74,6 +74,13 @@ private:
 		NRITextureResource resource;
 	};
 
+	struct CachedSkyTexture
+	{
+		uint64_t key = 0;
+		nri_scene::PTSkyMode mode = nri_scene::PTSkyMode::None;
+		NRITextureResource resource;
+	};
+
 	struct SkyState
 	{
 		nri_scene::PTSkyMode mode = nri_scene::PTSkyMode::None;
@@ -130,6 +137,7 @@ private:
 	bool CheckPathTracingSupport();
 	void UpdatePerFrameState(HWDrawInfo& di);
 	void LogBridgeStats(const nri_scene::SceneDebugStats& stats);
+	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;
 	void LogFallback(const char* reason);
@@ -178,8 +186,10 @@ private:
 	nri::DescriptorSet* mTaaFrameTextureSet = nullptr;
 	nri::DescriptorSet* mTaaOutputSet = nullptr;
 
+	NRITextureResource* GetActiveSkyTexture() { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
+	const NRITextureResource* GetActiveSkyTexture() const { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
+
 	NRITextureResource mPaletteTexture;
-	NRITextureResource mSkyTexture;
 	std::array<NRITextureResource, (size_t)FrameTextureSlot::Count> mFrameTextures = {};
 
 	NRIBufferResource mVertexBuffer;
@@ -197,6 +207,7 @@ private:
 	NRIAccelerationStructureResource mTopLevelAS;
 
 	std::vector<CachedTexture> mTextureCache;
+	std::vector<CachedSkyTexture> mSkyTextureCache;
 	NRINrdContext mNrd;
 	NRIUpscalerContext mUpscaler;
 	nri_scene::SceneDebugStats mLastStats = {};
@@ -229,7 +240,11 @@ private:
 	float mSkyColor[3] = { 0.38f, 0.48f, 0.65f };
 	float mGroundColor[3] = { 0.08f, 0.08f, 0.08f };
 	uint64_t mSkyTextureKey = 0;
+	uint32_t mActiveSkyTextureIndex = UINT32_MAX;
 	SkyState mSkyState = {};
+	SkyState mLastTracedSkyState = {};
+	uint64_t mLastTracedSkyResolvedKey = 0;
+	bool mHasTracedSkyState = false;
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
 	bool mPathTracingSupported = true;
