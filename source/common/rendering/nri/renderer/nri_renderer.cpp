@@ -8,11 +8,16 @@
 #include "c_cvars.h"
 #include "printf.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <windows.h>
 
 CVAR(Int, nri_ptdebug, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -284,6 +289,52 @@ namespace
 		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
 	}
 
+	static bool IsUsableGameTexturePointer(FGameTexture* texture)
+	{
+		const intptr_t value = (intptr_t)texture;
+		return value > 0x10000 && value != -1;
+	}
+
+	static FTexture* TryGetBaseTexture(FGameTexture* texture)
+	{
+		if (!IsUsableGameTexturePointer(texture))
+		{
+			return nullptr;
+		}
+
+		FTexture* baseTexture = nullptr;
+		__try
+		{
+			baseTexture = texture->GetTexture();
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			baseTexture = nullptr;
+		}
+
+		return baseTexture;
+	}
+
+	static FGameTexture* TryGetSkyFace(FSkyBox* skybox, int index)
+	{
+		if (skybox == nullptr || index < 0 || index >= 6)
+		{
+			return nullptr;
+		}
+
+		FGameTexture* face = nullptr;
+		__try
+		{
+			face = skybox->GetSkyFace(index);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			face = nullptr;
+		}
+
+		return IsUsableGameTexturePointer(face) ? face : nullptr;
+	}
+
 	static uint64_t HashSkyColor(const float* color)
 	{
 		const uint8_t rgba[4] = {
@@ -328,12 +379,7 @@ namespace
 
 	static bool CopyFacePixels(FGameTexture* texture, SkyFaceUpload& outFace)
 	{
-		if (texture == nullptr)
-		{
-			return false;
-		}
-
-		FTexture* baseTexture = texture->GetTexture();
+		FTexture* baseTexture = TryGetBaseTexture(texture);
 		if (baseTexture == nullptr || baseTexture->GetImage() == nullptr)
 		{
 			return false;
@@ -353,12 +399,7 @@ namespace
 
 	static bool ProbeFace(FGameTexture* texture, SkyFaceProbe& outFace)
 	{
-		if (texture == nullptr)
-		{
-			return false;
-		}
-
-		FTexture* baseTexture = texture->GetTexture();
+		FTexture* baseTexture = TryGetBaseTexture(texture);
 		if (baseTexture == nullptr || baseTexture->GetImage() == nullptr)
 		{
 			return false;
@@ -379,12 +420,12 @@ namespace
 
 	static bool ProbeCubemapSky(const nri_scene::SceneView& sceneView, SkyProbe& outProbe)
 	{
-		if (sceneView.sky.mode != nri_scene::PTSkyMode::Cubemap || sceneView.sky.texture == nullptr)
+		if (sceneView.sky.mode != nri_scene::PTSkyMode::Cubemap || !IsUsableGameTexturePointer(sceneView.sky.texture))
 		{
 			return false;
 		}
 
-		auto* skybox = dynamic_cast<FSkyBox*>(sceneView.sky.texture->GetTexture());
+		auto* skybox = dynamic_cast<FSkyBox*>(TryGetBaseTexture(sceneView.sky.texture));
 		if (skybox == nullptr)
 		{
 			return false;
@@ -414,7 +455,7 @@ namespace
 		key = HashCombine64(key, sceneView.sky.flipTop ? 1ull : 0ull);
 		for (uint32_t i = 0; i < 6; ++i)
 		{
-			if (!ProbeFace(skybox->GetSkyFace(mappings[i].sourceIndex), outProbe.faces[i]))
+			if (!ProbeFace(TryGetSkyFace(skybox, mappings[i].sourceIndex), outProbe.faces[i]))
 			{
 				return false;
 			}
