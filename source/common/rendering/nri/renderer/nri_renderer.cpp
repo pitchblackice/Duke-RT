@@ -1029,7 +1029,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		activeGpuMaterials = &mStaticMapScene.gpuMaterials;
 		activeStats = mStaticMapScene.sceneView.stats;
 
-		if (nri_scene::CaptureDynamicScene(di, dynamicSceneView))
+		const bool deferDynamicSceneThisFrame = mUploadedStaticMapSceneLastFrame || mBuiltStaticMapSceneASLastFrame;
+		if (!deferDynamicSceneThisFrame && nri_scene::CaptureDynamicScene(di, dynamicSceneView))
 		{
 			{
 				Clocker clock(NriPTGeometryBuild);
@@ -1081,6 +1082,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					accelerationReady = true;
 				}
 			}
+		}
+		else if (deferDynamicSceneThisFrame)
+		{
+			Printf("NRI PT dynamic scene deferred: skipping dynamic overlay on the same frame that rebuilt resident static map assets.\n");
 		}
 	}
 	else
