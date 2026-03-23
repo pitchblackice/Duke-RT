@@ -74,6 +74,12 @@ private:
 		NRITextureResource resource;
 	};
 
+	struct SkyState
+	{
+		nri_scene::PTSkyMode mode = nri_scene::PTSkyMode::None;
+		FGameTexture* texture = nullptr;
+	};
+
 	struct SceneBufferDebugStats
 	{
 		const char* label = "";
@@ -221,6 +227,7 @@ private:
 	float mSkyColor[3] = { 0.38f, 0.48f, 0.65f };
 	float mGroundColor[3] = { 0.08f, 0.08f, 0.08f };
 	uint64_t mSkyTextureKey = 0;
+	SkyState mSkyState = {};
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
 	bool mPathTracingSupported = true;

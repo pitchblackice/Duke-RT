@@ -243,6 +243,22 @@ namespace
 		std::vector<uint8_t> pixels;
 	};
 
+	struct SkyFaceProbe
+	{
+		FGameTexture* texture = nullptr;
+		uint32_t width = 0;
+		uint32_t height = 0;
+		uint64_t contentId = 0;
+	};
+
+	struct SkyProbe
+	{
+		uint64_t key = 0;
+		uint32_t width = 1;
+		uint32_t height = 1;
+		std::array<SkyFaceProbe, 6> faces = {};
+	};
+
 	struct SkyUpload
 	{
 		uint64_t key = 0;
@@ -261,6 +277,11 @@ namespace
 			hash *= 1099511628211ull;
 		}
 		return hash;
+	}
+
+	static uint64_t HashCombine64(uint64_t hash, uint64_t value)
+	{
+		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
 	}
 
 	static uint64_t HashSkyColor(const float* color)
@@ -330,7 +351,33 @@ namespace
 		return true;
 	}
 
-	static bool BuildCubemapUpload(const nri_scene::SceneView& sceneView, SkyUpload& outUpload)
+	static bool ProbeFace(FGameTexture* texture, SkyFaceProbe& outFace)
+	{
+		if (texture == nullptr)
+		{
+			return false;
+		}
+
+		FTexture* baseTexture = texture->GetTexture();
+		if (baseTexture == nullptr || baseTexture->GetImage() == nullptr)
+		{
+			return false;
+		}
+
+		FTextureBuffer texBuffer = baseTexture->CreateTexBuffer(0, CTF_ProcessData);
+		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+		{
+			return false;
+		}
+
+		outFace.texture = texture;
+		outFace.width = (uint32_t)texBuffer.mWidth;
+		outFace.height = (uint32_t)texBuffer.mHeight;
+		outFace.contentId = texBuffer.mContentId != 0 ? texBuffer.mContentId : (uint64_t)(uintptr_t)texture;
+		return true;
+	}
+
+	static bool ProbeCubemapSky(const nri_scene::SceneView& sceneView, SkyProbe& outProbe)
 	{
 		if (sceneView.sky.mode != nri_scene::PTSkyMode::Cubemap || sceneView.sky.texture == nullptr)
 		{
@@ -362,9 +409,58 @@ namespace
 			{ 0, false, false }  // -Z = north
 		};
 
+		uint64_t key = HashCombine64(1469598103934665603ull, (uint64_t)(uintptr_t)sceneView.sky.texture);
+		key = HashCombine64(key, (uint64_t)sceneView.sky.faceMask);
+		key = HashCombine64(key, sceneView.sky.flipTop ? 1ull : 0ull);
 		for (uint32_t i = 0; i < 6; ++i)
 		{
-			if (!CopyFacePixels(skybox->GetSkyFace(mappings[i].sourceIndex), outUpload.faces[i]))
+			if (!ProbeFace(skybox->GetSkyFace(mappings[i].sourceIndex), outProbe.faces[i]))
+			{
+				return false;
+			}
+
+			key = HashCombine64(key, (uint64_t)(uintptr_t)outProbe.faces[i].texture);
+			key = HashCombine64(key, outProbe.faces[i].contentId);
+			key = HashCombine64(key, ((uint64_t)outProbe.faces[i].width << 32) | outProbe.faces[i].height);
+		}
+
+		outProbe.width = outProbe.faces[0].width;
+		outProbe.height = outProbe.faces[0].height;
+		for (uint32_t i = 1; i < 6; ++i)
+		{
+			if (outProbe.faces[i].width != outProbe.width || outProbe.faces[i].height != outProbe.height)
+			{
+				return false;
+			}
+		}
+
+		outProbe.key = key;
+		return true;
+	}
+
+	static bool BuildCubemapUpload(const nri_scene::SceneView& sceneView, const SkyProbe& probe, SkyUpload& outUpload)
+	{
+		struct FaceMapping
+		{
+			bool flipHorizontal;
+			bool flipVertical;
+		};
+
+		// Build sky faces are ordered north, east, south, west, top, bottom.
+		// The PT cubemap follows the conventional +X, -X, +Y, -Y, +Z, -Z order.
+		// Top and bottom need explicit flips to match the ray-space basis used by the PT shaders.
+		static const FaceMapping mappings[6] = {
+			{ false, false }, // +X = west
+			{ false, false }, // -X = east
+			{ true, false },  // +Y = top
+			{ true, true },   // -Y = bottom
+			{ false, false }, // +Z = south
+			{ false, false }  // -Z = north
+		};
+
+		for (uint32_t i = 0; i < 6; ++i)
+		{
+			if (!CopyFacePixels(probe.faces[i].texture, outUpload.faces[i]))
 			{
 				return false;
 			}
@@ -383,24 +479,9 @@ namespace
 			}
 		}
 
-		outUpload.width = outUpload.faces[0].width;
-		outUpload.height = outUpload.faces[0].height;
-		for (uint32_t i = 1; i < 6; ++i)
-		{
-			if (outUpload.faces[i].width != outUpload.width || outUpload.faces[i].height != outUpload.height)
-			{
-				return false;
-			}
-		}
-
-		uint64_t key = (uint64_t)(uintptr_t)sceneView.sky.texture ^ ((uint64_t)sceneView.sky.faceMask << 32);
-		key ^= sceneView.sky.flipTop ? (1ull << 63) : 0ull;
-		for (uint32_t i = 0; i < 6; ++i)
-		{
-			key ^= HashBytes64(outUpload.faces[i].pixels.data(), outUpload.faces[i].pixels.size()) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2);
-		}
-
-		outUpload.key = key;
+		outUpload.key = probe.key;
+		outUpload.width = probe.width;
+		outUpload.height = probe.height;
 		outUpload.cubemap = true;
 		return true;
 	}
@@ -859,6 +940,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	if (success)
 	{
+		mHasLoggedFallback = false;
 		if (bootstrapCapturedView)
 		{
 			CopyFinalToActiveTarget();
@@ -1668,12 +1750,60 @@ bool NRIRenderer::DispatchBootstrapView()
 
 bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView)
 {
-	SkyUpload upload = {};
-	if (!BuildCubemapUpload(sceneView, upload))
+	SkyProbe probe = {};
+	if (ProbeCubemapSky(sceneView, probe))
 	{
-		BuildSolidSkyUpload(sceneView.skyColor, upload);
+		if (mSkyTexture.texture != nullptr &&
+			mSkyTextureKey == probe.key &&
+			mSkyTexture.width == probe.width &&
+			mSkyTexture.height == probe.height)
+		{
+			return true;
+		}
+
+		SkyUpload upload = {};
+		if (!BuildCubemapUpload(sceneView, probe, upload))
+		{
+			return false;
+		}
+
+		mFrameBuffer->DestroyTextureResource(mSkyTexture);
+		if (!mFrameBuffer->CreateOwnedTexture(mSkyTexture, upload.width, upload.height, nri::Format::BGRA8_UNORM, nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureType::TEXTURE_2D, 6, nri::TextureView::TEXTURE_CUBE))
+		{
+			return false;
+		}
+
+		std::array<nri::TextureSubresourceUploadDesc, 6> subresources = {};
+		for (uint32_t i = 0; i < 6; ++i)
+		{
+			subresources[i].slices = upload.faces[i].pixels.data();
+			subresources[i].sliceNum = 1;
+			subresources[i].rowPitch = upload.faces[i].width * 4u;
+			subresources[i].slicePitch = upload.faces[i].width * upload.faces[i].height * 4u;
+		}
+
+		if (!mFrameBuffer->UploadTextureSubresources(mSkyTexture, subresources.data(), (uint32_t)subresources.size(), upload.width, upload.height))
+		{
+			return false;
+		}
+
+		mSkyTextureKey = upload.key;
+		mSkyState.mode = nri_scene::PTSkyMode::Cubemap;
+		mSkyState.texture = sceneView.sky.texture;
+		return true;
 	}
 
+	const bool shouldKeepLastCubemap =
+		mSkyTexture.texture != nullptr &&
+		mSkyState.mode == nri_scene::PTSkyMode::Cubemap &&
+		(sceneView.sky.texture == mSkyState.texture || (sceneView.sky.texture == nullptr && sceneView.stats.skySurfaces > 0));
+	if (shouldKeepLastCubemap)
+	{
+		return true;
+	}
+
+	SkyUpload upload = {};
+	BuildSolidSkyUpload(sceneView.skyColor, upload);
 	if (mSkyTexture.texture != nullptr &&
 		mSkyTextureKey == upload.key &&
 		mSkyTexture.width == upload.width &&
@@ -1703,6 +1833,8 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView)
 	}
 
 	mSkyTextureKey = upload.key;
+	mSkyState.mode = sceneView.sky.mode;
+	mSkyState.texture = sceneView.sky.texture;
 	return true;
 }
 
@@ -2981,6 +3113,7 @@ void NRIRenderer::DestroyCachedTextures()
 {
 	mFrameBuffer->DestroyTextureResource(mSkyTexture);
 	mSkyTextureKey = 0;
+	mSkyState = {};
 	for (auto& texture : mTextureCache)
 	{
 		mFrameBuffer->DestroyTextureResource(texture.resource);
