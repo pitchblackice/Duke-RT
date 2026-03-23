@@ -1134,7 +1134,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				else
 				{
 					LogFallback("PT dynamic scene update failed; tracing the resident static world only.");
-					RestoreStaticTopLevelScene();
+					if (mGpuSceneHasDynamicOverlay)
+					{
+						RestoreStaticTopLevelScene();
+					}
 					paletteReady = true;
 					texturesReady = true;
 					buffersReady = true;
