@@ -837,6 +837,26 @@ SceneDebugStats CollectDebugStats(HWDrawInfo& di)
 	return stats;
 }
 
+bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
+{
+	outView = {};
+	outView.drawInfo = &di;
+	outView.stats.spriteDrawItems = CountDrawListItems(di, GLDL_TRANSLUCENT) + CountDrawListItems(di, GLDL_MODELS);
+	outView.stats.translucentDrawItems = CountDrawListItems(di, GLDL_TRANSLUCENT);
+	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
+
+	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
+	CaptureModelSprites(di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
+
+	for (const auto& sprite : outView.opaqueSprites)
+	{
+		outView.stats.triangleEstimate += sprite.vertices.size() >= 3 ? (unsigned int)sprite.vertices.size() - 2 : 0;
+		outView.stats.materialRefs++;
+	}
+
+	return !outView.opaqueSprites.empty();
+}
+
 bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 {
 	outView = {};

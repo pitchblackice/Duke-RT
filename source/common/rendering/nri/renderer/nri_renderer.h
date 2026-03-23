@@ -134,6 +134,16 @@ private:
 		std::vector<nri_scene::MaterialData> gpuMaterials;
 	};
 
+	struct DynamicSceneFrameState
+	{
+		uint32_t spriteSurfaceCount = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialCount = 0;
+		uint32_t modelCount = 0;
+		uint32_t unsupportedModelCount = 0;
+		uint32_t asBuildCount = 0;
+	};
+
 	bool CreatePipelineLayout();
 	bool CreateTaaPipelineLayout();
 	bool CreatePipelines();
@@ -146,7 +156,7 @@ private:
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
-	bool BuildAccelerationStructures(const nri_scene::GeometryData& geometry);
+	bool BuildAccelerationStructures(const nri_scene::GeometryData& geometry, uint32_t staticVertexCount, uint32_t staticIndexCount, uint32_t staticPrimitiveCount);
 	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
 	bool DispatchTraceOpaque(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool DispatchDenoiser();
@@ -162,6 +172,7 @@ private:
 	void LogBridgeStats(const nri_scene::SceneDebugStats& stats);
 	void PrintMapWorldStatus() const;
 	void PrintStaticMapSceneStatus() const;
+	void PrintDynamicSceneStatus() const;
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;
@@ -229,6 +240,7 @@ private:
 	SceneBufferDebugStats mMaterialBufferStats = { "Material" };
 
 	NRIAccelerationStructureResource mBottomLevelAS;
+	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
 
 	std::vector<CachedTexture> mTextureCache;
@@ -237,6 +249,7 @@ private:
 	NRIUpscalerContext mUpscaler;
 	nri_scene::PTMapWorld mMapWorld;
 	StaticMapSceneCache mStaticMapScene;
+	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	nri_scene::SceneDebugStats mLastStats = {};
 	std::array<nri::Descriptor*, 11> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 12> mOutputDescriptors = {};
@@ -281,9 +294,12 @@ private:
 	bool mUseDenoisedCompositionInputs = false;
 	bool mHasLoggedFallback = false;
 	bool mUsedStaticMapSceneLastFrame = false;
+	bool mUsedDynamicSceneLastFrame = false;
 	bool mUploadedStaticMapSceneLastFrame = false;
 	bool mBuiltStaticMapSceneASLastFrame = false;
+	bool mBuiltDynamicSceneASLastFrame = false;
 	uint64_t mObservedMapWorldBuildSerial = 0;
+	uint64_t mStaticAccelerationBuildSerial = 0;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastUpscalerRequest = -1;

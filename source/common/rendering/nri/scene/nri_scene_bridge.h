@@ -138,5 +138,6 @@ struct SceneView
 SceneDebugStats CollectDebugStats(HWDrawInfo& di);
 MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float alpha, uint32_t extraFlags);
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType);
+bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 }
