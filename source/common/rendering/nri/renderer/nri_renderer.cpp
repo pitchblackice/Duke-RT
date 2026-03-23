@@ -82,6 +82,11 @@ namespace
 		return { nri::AccessBits::ACCELERATION_STRUCTURE_WRITE, nri::StageBits::ACCELERATION_STRUCTURE };
 	}
 
+	static nri::AccessStage NRIAccelerationStructureScratchAccess()
+	{
+		return { NRIFlags(nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::AccessBits::ACCELERATION_STRUCTURE_WRITE), nri::StageBits::ACCELERATION_STRUCTURE };
+	}
+
 	static nri::AccessStage NRIAccelerationStructureReadAccess()
 	{
 		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
@@ -3011,8 +3016,9 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 
 	std::vector<nri::BufferBarrierDesc> blasBarriers;
 	blasBarriers.reserve(mStaticMapScene.chunks.size());
-	for (auto& chunk : mStaticMapScene.chunks)
+	for (size_t chunkIndex = 0; chunkIndex < mStaticMapScene.chunks.size(); ++chunkIndex)
 	{
+		auto& chunk = mStaticMapScene.chunks[chunkIndex];
 		nri::BottomLevelGeometryDesc geometryDesc = {};
 		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
 		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
@@ -3033,6 +3039,21 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		build.scratchBuffer = mScratchBuffer.buffer;
 		build.scratchOffset = 0;
 		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
+
+		if (chunkIndex + 1 < mStaticMapScene.chunks.size())
+		{
+			// The static chunk path deliberately reuses one scratch buffer across many BLAS builds.
+			// Serialize reuse explicitly so later builds do not stomp scratch data that the GPU is still consuming.
+			nri::BufferBarrierDesc scratchBarrier = {};
+			scratchBarrier.buffer = mScratchBuffer.buffer;
+			scratchBarrier.before = NRIAccelerationStructureScratchAccess();
+			scratchBarrier.after = NRIAccelerationStructureScratchAccess();
+
+			nri::BarrierDesc scratchBarrierDesc = {};
+			scratchBarrierDesc.buffers = &scratchBarrier;
+			scratchBarrierDesc.bufferNum = 1;
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, scratchBarrierDesc);
+		}
 
 		nri::BufferBarrierDesc barrier = {};
 		barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
