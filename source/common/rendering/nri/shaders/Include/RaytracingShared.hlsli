@@ -240,9 +240,9 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			return false;
 		}
 
-		RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> rayQuery;
+		RayQuery<RAY_FLAG_FORCE_OPAQUE> rayQuery;
 		RayDesc ray = { startOrigin + direction * accumulatedDistance, 0.001, direction, remainingDistance };
-		rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, ray);
+		rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
 
 		while (rayQuery.Proceed()) {}
 
