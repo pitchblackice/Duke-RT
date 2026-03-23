@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#define NOMINMAX
+#include <windows.h>
 
 CVAR(Int, nri_ptportaldepth, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -23,8 +25,10 @@ namespace
 
 	bool IsUsableGameTexturePointer(FGameTexture* texture)
 	{
-		const intptr_t value = (intptr_t)texture;
-		return value > 0x10000 && value != -1;
+		const uintptr_t value = (uintptr_t)texture;
+		return value > 0x10000 &&
+			value != (uintptr_t)-1 &&
+			(value & (sizeof(void*) - 1)) == 0;
 	}
 
 	void TranslateSurface(SurfaceRef& surface, const float delta[3])
@@ -84,7 +88,19 @@ namespace
 			{
 				if (wall.sky != nullptr)
 				{
-					UpdateSceneSky(outView, wall.sky->texture, wall.sky->fadecolor.d, PTSkySourceType::Portal);
+					FGameTexture* texture = nullptr;
+					uint32_t fadeColor = 0;
+					__try
+					{
+						texture = wall.sky->texture;
+						fadeColor = wall.sky->fadecolor.d;
+					}
+					__except (EXCEPTION_EXECUTE_HANDLER)
+					{
+						texture = nullptr;
+						fadeColor = 0;
+					}
+					UpdateSceneSky(outView, texture, fadeColor, PTSkySourceType::Portal);
 					outView.stats.skySurfaces++;
 					return;
 				}

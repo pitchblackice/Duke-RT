@@ -31,8 +31,10 @@ namespace
 
 	bool IsUsableGameTexturePointer(FGameTexture* texture)
 	{
-		const intptr_t value = (intptr_t)texture;
-		return value > 0x10000 && value != -1;
+		const uintptr_t value = (uintptr_t)texture;
+		return value > 0x10000 &&
+			value != (uintptr_t)-1 &&
+			(value & (sizeof(void*) - 1)) == 0;
 	}
 
 	int GetOwnerActorIndex(const HWWall& wall)
@@ -115,69 +117,76 @@ namespace
 	bool TryInspectSkyTexture(FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType, SkyCandidate& outCandidate)
 	{
 		outCandidate = {};
-		if (!IsUsableGameTexturePointer(texture))
-		{
-			return false;
-		}
-
-		outCandidate.valid = true;
-		outCandidate.priority = MakeSkyPriority(PTSkyMode::SolidColor, sourceType);
-		if (TryGetAverageTextureColorRecursive(texture, outCandidate.color, 0))
-		{
-			outCandidate.hasAverageColor = true;
-		}
-		else if (fallbackColor != 0)
-		{
-			const PalEntry fallback = PalEntry(fallbackColor);
-			outCandidate.color[0] = fallback.r / 255.0f;
-			outCandidate.color[1] = fallback.g / 255.0f;
-			outCandidate.color[2] = fallback.b / 255.0f;
-			outCandidate.hasFallbackColor = true;
-		}
-
-		FTexture* baseTexture = nullptr;
 		__try
 		{
-			baseTexture = texture->GetTexture();
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			baseTexture = nullptr;
-		}
+			if (!IsUsableGameTexturePointer(texture))
+			{
+				return false;
+			}
 
-		auto* skybox = dynamic_cast<FSkyBox*>(baseTexture);
-		if (skybox == nullptr)
-		{
-			return true;
-		}
+			outCandidate.valid = true;
+			outCandidate.priority = MakeSkyPriority(PTSkyMode::SolidColor, sourceType);
+			if (TryGetAverageTextureColor(texture, outCandidate.color))
+			{
+				outCandidate.hasAverageColor = true;
+			}
+			else if (fallbackColor != 0)
+			{
+				const PalEntry fallback = PalEntry(fallbackColor);
+				outCandidate.color[0] = fallback.r / 255.0f;
+				outCandidate.color[1] = fallback.g / 255.0f;
+				outCandidate.color[2] = fallback.b / 255.0f;
+				outCandidate.hasFallbackColor = true;
+			}
 
-		outCandidate.flipTop = skybox->GetSkyFlip();
-		outCandidate.isThreeFace = skybox->Is3Face();
-		for (int i = 0; i < 6; ++i)
-		{
-			FGameTexture* face = nullptr;
+			FTexture* baseTexture = nullptr;
 			__try
 			{
-				face = skybox->GetSkyFace(i);
+				baseTexture = texture->GetTexture();
 			}
 			__except (EXCEPTION_EXECUTE_HANDLER)
 			{
-				face = nullptr;
+				baseTexture = nullptr;
 			}
 
-			if (IsUsableGameTexturePointer(face))
+			auto* skybox = dynamic_cast<FSkyBox*>(baseTexture);
+			if (skybox == nullptr)
 			{
-				outCandidate.faceMask |= 1u << i;
+				return true;
 			}
-		}
 
-		if (!outCandidate.isThreeFace && outCandidate.faceMask == 0x3fu)
+			outCandidate.flipTop = skybox->GetSkyFlip();
+			outCandidate.isThreeFace = skybox->Is3Face();
+			for (int i = 0; i < 6; ++i)
+			{
+				FGameTexture* face = nullptr;
+				__try
+				{
+					face = skybox->GetSkyFace(i);
+				}
+				__except (EXCEPTION_EXECUTE_HANDLER)
+				{
+					face = nullptr;
+				}
+
+				if (IsUsableGameTexturePointer(face))
+				{
+					outCandidate.faceMask |= 1u << i;
+				}
+			}
+
+			if (!outCandidate.isThreeFace && outCandidate.faceMask == 0x3fu)
+			{
+				outCandidate.isCubemap = true;
+				outCandidate.priority = MakeSkyPriority(PTSkyMode::Cubemap, sourceType);
+			}
+
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
-			outCandidate.isCubemap = true;
-			outCandidate.priority = MakeSkyPriority(PTSkyMode::Cubemap, sourceType);
+			return false;
 		}
-
-		return true;
 	}
 
 	void ApplySkyCandidate(SceneView& outView, FGameTexture* texture, const SkyCandidate& candidate, PTSkySourceType sourceType)
