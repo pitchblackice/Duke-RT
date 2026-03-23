@@ -84,7 +84,7 @@ namespace
 
 	static nri::AccessStage NRIAccelerationStructureScratchAccess()
 	{
-		return { NRIFlags(nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::AccessBits::ACCELERATION_STRUCTURE_WRITE), nri::StageBits::ACCELERATION_STRUCTURE };
+		return { nri::AccessBits::SCRATCH_BUFFER, nri::StageBits::ACCELERATION_STRUCTURE };
 	}
 
 	static nri::AccessStage NRIAccelerationStructureReadAccess()
