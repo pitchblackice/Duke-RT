@@ -23,7 +23,6 @@ void PTMapWorld::Reset()
 {
 	level = nullptr;
 	buildSerial = 0;
-	geometrySignature = 0;
 	valid = false;
 	chunks.clear();
 	surfaces.clear();

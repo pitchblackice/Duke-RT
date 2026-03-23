@@ -1656,10 +1656,8 @@ void NRIRenderer::LogFallback(const char* reason)
 void NRIRenderer::RefreshMapWorld()
 {
 	const uint64_t pendingBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
-	const uint64_t liveGeometrySignature = nri_scene::GetCurrentLevelGeometrySignature();
 	const bool levelChanged = mMapWorld.level != currentLevel;
-	const bool geometryChanged = mMapWorld.valid && mMapWorld.geometrySignature != liveGeometrySignature;
-	const bool needsBuild = !mMapWorld.valid || levelChanged || pendingBuildSerial != mObservedMapWorldBuildSerial || geometryChanged;
+	const bool needsBuild = !mMapWorld.valid || levelChanged || pendingBuildSerial != mObservedMapWorldBuildSerial;
 	if (!needsBuild)
 	{
 		return;

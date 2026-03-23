@@ -9,88 +9,12 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 
 namespace
 {
 	using namespace nri_scene;
 
 	uint64_t gPendingLevelGeometryBuildSerial = 0;
-
-	uint64_t HashCombine(uint64_t hash, uint64_t value)
-	{
-		hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
-		return hash;
-	}
-
-	uint64_t HashFloat(float value)
-	{
-		uint32_t bits = 0;
-		static_assert(sizeof(bits) == sizeof(value));
-		std::memcpy(&bits, &value, sizeof(bits));
-		return bits;
-	}
-
-	uint64_t HashDouble(double value)
-	{
-		uint64_t bits = 0;
-		static_assert(sizeof(bits) == sizeof(value));
-		std::memcpy(&bits, &value, sizeof(bits));
-		return bits;
-	}
-
-	uint64_t ComputeLevelGeometrySignature()
-	{
-		uint64_t hash = 0xcbf29ce484222325ull;
-		hash = HashCombine(hash, (uint64_t)sector.Size());
-		hash = HashCombine(hash, (uint64_t)wall.Size());
-		hash = HashCombine(hash, (uint64_t)sections.Size());
-
-		for (const auto& sec : sector)
-		{
-			hash = HashCombine(hash, HashDouble(sec.floorz));
-			hash = HashCombine(hash, HashDouble(sec.ceilingz));
-			hash = HashCombine(hash, HashFloat(sec.floorxpan_));
-			hash = HashCombine(hash, HashFloat(sec.floorypan_));
-			hash = HashCombine(hash, HashFloat(sec.ceilingxpan_));
-			hash = HashCombine(hash, HashFloat(sec.ceilingypan_));
-			hash = HashCombine(hash, (uint32_t)sec.floortexture.GetIndex());
-			hash = HashCombine(hash, (uint32_t)sec.ceilingtexture.GetIndex());
-			hash = HashCombine(hash, (uint32_t)sec.floorstat);
-			hash = HashCombine(hash, (uint32_t)sec.ceilingstat);
-			hash = HashCombine(hash, (uint16_t)sec.floorheinum);
-			hash = HashCombine(hash, (uint16_t)sec.ceilingheinum);
-			hash = HashCombine(hash, (uint8_t)sec.floorpal);
-			hash = HashCombine(hash, (uint8_t)sec.ceilingpal);
-			hash = HashCombine(hash, (uint8_t)sec.floorshade);
-			hash = HashCombine(hash, (uint8_t)sec.ceilingshade);
-			hash = HashCombine(hash, (uint8_t)sec.portalflags);
-			hash = HashCombine(hash, (uint8_t)sec.portalnum);
-		}
-
-		for (const auto& wal : wall)
-		{
-			hash = HashCombine(hash, HashDouble(wal.pos.X));
-			hash = HashCombine(hash, HashDouble(wal.pos.Y));
-			hash = HashCombine(hash, (uint32_t)wal.point2);
-			hash = HashCombine(hash, (uint32_t)wal.nextwall);
-			hash = HashCombine(hash, (uint32_t)wal.sector);
-			hash = HashCombine(hash, (uint32_t)wal.nextsector);
-			hash = HashCombine(hash, HashFloat(wal.xpan_));
-			hash = HashCombine(hash, HashFloat(wal.ypan_));
-			hash = HashCombine(hash, (uint32_t)wal.cstat);
-			hash = HashCombine(hash, (uint32_t)wal.walltexture.GetIndex());
-			hash = HashCombine(hash, (uint32_t)wal.overtexture.GetIndex());
-			hash = HashCombine(hash, (uint8_t)wal.shade);
-			hash = HashCombine(hash, (uint8_t)wal.pal);
-			hash = HashCombine(hash, (uint8_t)wal.xrepeat);
-			hash = HashCombine(hash, (uint8_t)wal.yrepeat);
-			hash = HashCombine(hash, (uint8_t)wal.portalflags);
-			hash = HashCombine(hash, (uint16_t)wal.portalnum);
-		}
-
-		return hash != 0 ? hash : 1ull;
-	}
 
 	enum class PTWallBandKind : uint32_t
 	{
@@ -694,17 +618,11 @@ uint64_t GetPendingLevelGeometryBuildSerial()
 	return gPendingLevelGeometryBuildSerial;
 }
 
-uint64_t GetCurrentLevelGeometrySignature()
-{
-	return ComputeLevelGeometrySignature();
-}
-
 bool BuildMapWorld(PTMapWorld& outWorld)
 {
 	outWorld.Reset();
 	outWorld.level = currentLevel;
-	outWorld.geometrySignature = ComputeLevelGeometrySignature();
-	outWorld.buildSerial = HashCombine(gPendingLevelGeometryBuildSerial, outWorld.geometrySignature);
+	outWorld.buildSerial = gPendingLevelGeometryBuildSerial;
 
 	if (sector.Size() == 0 || sections.Size() == 0 || sectionsPerSector.Size() == 0)
 	{
