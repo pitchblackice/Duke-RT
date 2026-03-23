@@ -66,6 +66,7 @@ struct PTMapWorld
 {
 	MapRecord* level = nullptr;
 	uint64_t buildSerial = 0;
+	uint64_t geometrySignature = 0;
 	bool valid = false;
 	std::vector<PTMapChunk> chunks;
 	std::vector<PTMapSurface> surfaces;
