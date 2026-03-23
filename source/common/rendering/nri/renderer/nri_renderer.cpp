@@ -1056,6 +1056,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					mFrameBuffer->WaitForCommands(true);
 					DestroyBufferResource(mInstanceBuffer);
 					DestroyBufferResource(mScratchBuffer);
+					DestroyBufferResource(mTopLevelScratchBuffer);
 					DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 					DestroyAccelerationStructureResource(mTopLevelAS);
 				}
@@ -1149,6 +1150,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			mFrameBuffer->WaitForCommands(true);
 			DestroyBufferResource(mInstanceBuffer);
 			DestroyBufferResource(mScratchBuffer);
+			DestroyBufferResource(mTopLevelScratchBuffer);
 			DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 			DestroyAccelerationStructureResource(mTopLevelAS);
 
@@ -1253,6 +1255,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			mFrameBuffer->WaitForCommands(true);
 			DestroyBufferResource(mInstanceBuffer);
 			DestroyBufferResource(mScratchBuffer);
+			DestroyBufferResource(mTopLevelScratchBuffer);
 			DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 			DestroyAccelerationStructureResource(mTopLevelAS);
 
@@ -3109,10 +3112,10 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopL
 	}
 
 	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mTopLevelAS.accelerationStructure);
-	if (mScratchBuffer.buffer == nullptr || mScratchBuffer.size < requiredScratchSize)
+	if (mTopLevelScratchBuffer.buffer == nullptr || mTopLevelScratchBuffer.size < requiredScratchSize)
 	{
-		DestroyBufferResource(mScratchBuffer);
-		if (!CreateBufferWithoutView(mScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		DestroyBufferResource(mTopLevelScratchBuffer);
+		if (!CreateBufferWithoutView(mTopLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
 		{
 			return false;
 		}
@@ -3128,7 +3131,7 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopL
 	tlasBuild.instanceNum = (uint32_t)instances.size();
 	tlasBuild.instanceBuffer = mInstanceBuffer.buffer;
 	tlasBuild.instanceOffset = 0;
-	tlasBuild.scratchBuffer = mScratchBuffer.buffer;
+	tlasBuild.scratchBuffer = mTopLevelScratchBuffer.buffer;
 	tlasBuild.scratchOffset = 0;
 	mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
 
@@ -4130,6 +4133,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mMaterialBuffer);
 	DestroyBufferResource(mInstanceBuffer);
 	DestroyBufferResource(mScratchBuffer);
+	DestroyBufferResource(mTopLevelScratchBuffer);
 	mUseStaticSceneBindings = false;
 }
 
