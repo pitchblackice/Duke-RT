@@ -6,6 +6,7 @@
 #include "skyboxtexture.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "mapinfo.h"
 #include "printf.h"
 
 #ifndef NOMINMAX
@@ -1824,7 +1825,13 @@ bool NRIRenderer::DispatchBootstrapView()
 
 bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky)
 {
-	const uint64_t skySelectionSerial = ++mSkySelectionSerial;
+	if (mSkyLevel != currentLevel)
+	{
+		mActiveSkyTextureIndex = UINT32_MAX;
+		mSkyTextureKey = 0;
+		mSkyState = {};
+		mSkyLevel = currentLevel;
+	}
 
 	auto findCachedSkyTexture = [this](uint64_t key, uint32_t width, uint32_t height) -> uint32_t
 	{
@@ -1902,7 +1909,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		mSkyState.faceMask == sceneView.sky.faceMask &&
 		mSkyState.flipTop == sceneView.sky.flipTop)
 	{
-		mLastPortalCubemapSerial = skySelectionSerial;
+		mSkyLevel = currentLevel;
 		TraceSkyState(sceneView, "reuse-active-cubemap", mSkyTextureKey);
 		return true;
 	}
@@ -1915,7 +1922,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 			activeSkyTexture->width == probe.width &&
 			activeSkyTexture->height == probe.height)
 		{
-			mLastPortalCubemapSerial = skySelectionSerial;
+			mSkyLevel = currentLevel;
 			TraceSkyState(sceneView, "reuse-active-probe", probe.key);
 			return true;
 		}
@@ -1924,7 +1931,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		if (cachedIndex != UINT32_MAX)
 		{
 			activateCachedSky(cachedIndex, probe.key, sceneView, nri_scene::PTSkyMode::Cubemap);
-			mLastPortalCubemapSerial = skySelectionSerial;
+			mSkyLevel = currentLevel;
 			TraceSkyState(sceneView, "activate-cached-cubemap", probe.key);
 			return true;
 		}
@@ -1942,23 +1949,18 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		}
 
 		activateCachedSky(createdIndex, upload.key, sceneView, nri_scene::PTSkyMode::Cubemap);
-		mLastPortalCubemapSerial = skySelectionSerial;
+		mSkyLevel = currentLevel;
 		TraceSkyState(sceneView, "create-cached-cubemap", upload.key);
 		return true;
 	}
 
-	const bool hasRecentPortalCubemap =
-		activeSkyTexture != nullptr &&
-		mSkyState.mode == nri_scene::PTSkyMode::Cubemap &&
-		mLastPortalCubemapSerial != 0 &&
-		skySelectionSerial - mLastPortalCubemapSerial <= 120;
 	const bool shouldKeepLastCubemap =
 		activeSkyTexture != nullptr &&
 		mSkyState.mode == nri_scene::PTSkyMode::Cubemap &&
 		(sceneView.sky.mode == nri_scene::PTSkyMode::None ||
 			sceneView.sky.texture == mSkyState.texture ||
 			(sceneView.sky.texture == nullptr && sceneView.stats.skySurfaces > 0) ||
-			(hasRecentPortalCubemap &&
+			(mSkyLevel == currentLevel &&
 				sceneView.sky.mode == nri_scene::PTSkyMode::SolidColor &&
 				sceneView.sky.sourceType != nri_scene::PTSkySourceType::Portal &&
 				sceneView.stats.skySurfaces > 0));
@@ -1967,7 +1969,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		if (sceneView.sky.mode == nri_scene::PTSkyMode::SolidColor &&
 			sceneView.sky.sourceType != nri_scene::PTSkySourceType::Portal)
 		{
-			TraceSkyState(sceneView, "hold-recent-portal-cubemap", mSkyTextureKey);
+			TraceSkyState(sceneView, "hold-level-cubemap", mSkyTextureKey);
 			return true;
 		}
 
@@ -3340,8 +3342,7 @@ void NRIRenderer::DestroyCachedTextures()
 	mSkyTextureCache.clear();
 	mActiveSkyTextureIndex = UINT32_MAX;
 	mSkyTextureKey = 0;
-	mSkySelectionSerial = 0;
-	mLastPortalCubemapSerial = 0;
+	mSkyLevel = nullptr;
 	mSkyState = {};
 	mLastTracedSkyState = {};
 	mLastTracedSkyResolvedKey = 0;

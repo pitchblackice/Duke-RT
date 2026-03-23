@@ -13,6 +13,7 @@
 #include <vector>
 
 class NRIRenderDevice;
+struct MapRecord;
 
 class NRIRenderer
 {
@@ -241,9 +242,8 @@ private:
 	float mSkyColor[3] = { 0.38f, 0.48f, 0.65f };
 	float mGroundColor[3] = { 0.08f, 0.08f, 0.08f };
 	uint64_t mSkyTextureKey = 0;
-	uint64_t mSkySelectionSerial = 0;
-	uint64_t mLastPortalCubemapSerial = 0;
 	uint32_t mActiveSkyTextureIndex = UINT32_MAX;
+	MapRecord* mSkyLevel = nullptr;
 	SkyState mSkyState = {};
 	SkyState mLastTracedSkyState = {};
 	uint64_t mLastTracedSkyResolvedKey = 0;
