@@ -295,6 +295,7 @@ private:
 	bool mHasLoggedFallback = false;
 	bool mUsedStaticMapSceneLastFrame = false;
 	bool mUsedDynamicSceneLastFrame = false;
+	bool mGpuSceneHasDynamicOverlay = false;
 	bool mUploadedStaticMapSceneLastFrame = false;
 	bool mBuiltStaticMapSceneASLastFrame = false;
 	bool mBuiltDynamicSceneASLastFrame = false;

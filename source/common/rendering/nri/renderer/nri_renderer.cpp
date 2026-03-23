@@ -1030,7 +1030,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		activeStats = mStaticMapScene.sceneView.stats;
 
 		const bool deferDynamicSceneThisFrame = mUploadedStaticMapSceneLastFrame || mBuiltStaticMapSceneASLastFrame;
-		if (!deferDynamicSceneThisFrame && nri_scene::CaptureDynamicScene(di, dynamicSceneView))
+		const bool hasDynamicScene = !deferDynamicSceneThisFrame && nri_scene::CaptureDynamicScene(di, dynamicSceneView);
+		if (hasDynamicScene)
 		{
 			{
 				Clocker clock(NriPTGeometryBuild);
@@ -1055,15 +1056,20 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				{
 					PrepareSceneTextureInputsForCompute();
 				}
+				// Temporarily keep dynamic overlay on the stable single-BLAS path. The
+				// validated static resident scene stays authoritative when no dynamic
+				// surfaces are present, but dynamic frames rebuild a combined BLAS/TLAS
+				// until the multi-instance TLAS path is stabilized.
 				accelerationReady = buffersReady && BuildAccelerationStructures(
 					combinedGeometry,
-					(uint32_t)mStaticMapScene.geometry.vertices.size(),
-					(uint32_t)mStaticMapScene.geometry.indices.size(),
-					(uint32_t)mStaticMapScene.geometry.primitives.size());
+					0,
+					0,
+					0);
 
 				if (paletteReady && texturesReady && buffersReady && accelerationReady)
 				{
 					mUsedDynamicSceneLastFrame = true;
+					mGpuSceneHasDynamicOverlay = true;
 					mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)dynamicSceneView.opaqueSprites.size();
 					mDynamicSceneLastFrame.primitiveCount = (uint32_t)dynamicGeometry.primitives.size();
 					mDynamicSceneLastFrame.materialCount = (uint32_t)dynamicMaterialBridge.materials.size();
@@ -1086,6 +1092,31 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		else if (deferDynamicSceneThisFrame)
 		{
 			Printf("NRI PT dynamic scene deferred: skipping dynamic overlay on the same frame that rebuilt resident static map assets.\n");
+		}
+		else if (mGpuSceneHasDynamicOverlay)
+		{
+			mStaticMapScene.buffersResident = false;
+			mStaticMapScene.accelerationResident = false;
+			if (!EnsureStaticMapScene())
+			{
+				LogFallback("PT static scene restore failed after dynamic overlay.");
+				if (preserveHistory)
+				{
+					restoreHistory();
+				}
+				return false;
+			}
+
+			mGpuSceneHasDynamicOverlay = false;
+			mUsedStaticMapSceneLastFrame = true;
+			activeSceneView = &mStaticMapScene.sceneView;
+			activeGeometry = &mStaticMapScene.geometry;
+			activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+			activeStats = mStaticMapScene.sceneView.stats;
+		}
+		else
+		{
+			mGpuSceneHasDynamicOverlay = false;
 		}
 	}
 	else
