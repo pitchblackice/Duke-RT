@@ -1062,33 +1062,18 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 				accelerationReady = buffersReady && BuildDynamicAccelerationStructure(
 					combinedGeometry,
-					(uint32_t)mStaticMapScene.geometry.vertices.size(),
-					(uint32_t)mStaticMapScene.geometry.indices.size(),
-					(uint32_t)mStaticMapScene.geometry.primitives.size());
+					0,
+					0,
+					0);
 				if (accelerationReady)
 				{
 					std::vector<nri::TopLevelInstance> instances;
-					instances.reserve(mStaticMapScene.chunks.size() + 1);
-					for (uint32_t instanceIndex = 0; instanceIndex < (uint32_t)mStaticMapScene.chunks.size(); ++instanceIndex)
-					{
-						const auto& chunk = mStaticMapScene.chunks[instanceIndex];
-						nri::TopLevelInstance instance = {};
-						instance.transform[0][0] = 1.0f;
-						instance.transform[1][1] = 1.0f;
-						instance.transform[2][2] = 1.0f;
-						instance.instanceId = chunk.primitiveOffset;
-						instance.mask = 0xFF;
-						instance.shaderBindingTableLocalOffset = 0;
-						instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-						instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
-						instances.push_back(instance);
-					}
-
+					instances.reserve(1);
 					nri::TopLevelInstance dynamicInstance = {};
 					dynamicInstance.transform[0][0] = 1.0f;
 					dynamicInstance.transform[1][1] = 1.0f;
 					dynamicInstance.transform[2][2] = 1.0f;
-					dynamicInstance.instanceId = (uint32_t)mStaticMapScene.geometry.primitives.size();
+					dynamicInstance.instanceId = 0;
 					dynamicInstance.mask = 0xFF;
 					dynamicInstance.shaderBindingTableLocalOffset = 0;
 					dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
