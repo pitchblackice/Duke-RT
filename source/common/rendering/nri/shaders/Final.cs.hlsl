@@ -177,7 +177,7 @@ float3 BootstrapGenerateRay(float2 uv)
 float3 BootstrapCapturedSceneFlat(float2 uv)
 {
 	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
-	if (gTraceConstants.PrimitiveCount == 0u)
+	if (gTraceConstants.DynamicPrimitiveCount == 0u)
 	{
 		return color;
 	}
@@ -196,7 +196,7 @@ float3 BootstrapCapturedSceneFlat(float2 uv)
 float3 BootstrapCapturedSceneBaseColor(float2 uv)
 {
 	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
-	if (gTraceConstants.PrimitiveCount == 0u)
+	if (gTraceConstants.DynamicPrimitiveCount == 0u)
 	{
 		return color;
 	}
@@ -208,13 +208,13 @@ float3 BootstrapCapturedSceneBaseColor(float2 uv)
 		return color;
 	}
 
-	return saturate(SampleSurfaceColor(hit.materialIndex, hit.uv).rgb);
+	return saturate(SampleSurfaceColor(hit.materialIndex, hit.dataSource, hit.uv).rgb);
 }
 
 float3 BootstrapCapturedSceneLit(float2 uv)
 {
 	float3 color = BootstrapPattern(uv, gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
-	if (gTraceConstants.PrimitiveCount == 0u)
+	if (gTraceConstants.DynamicPrimitiveCount == 0u)
 	{
 		return color;
 	}
@@ -226,7 +226,7 @@ float3 BootstrapCapturedSceneLit(float2 uv)
 		return GetMissColor(rayDir);
 	}
 
-	const float4 albedo = SampleSurfaceColor(hit.materialIndex, hit.uv);
+	const float4 albedo = SampleSurfaceColor(hit.materialIndex, hit.dataSource, hit.uv);
 	const float3 lightDir = normalize(gTraceConstants.LightDirection);
 	const float3 viewDir = normalize(-rayDir);
 	const float lambert = max(dot(hit.normal, lightDir), 0.0);
@@ -289,10 +289,10 @@ float BootstrapDistanceToSegment(float2 p, float2 a, float2 b)
 
 bool BootstrapProjectPrimitive(uint primitiveIndex, out float2 p0, out float2 p1, out float2 p2, out float3 worldCenter)
 {
-	const PrimitiveData primitive = gPrimitives[min(primitiveIndex, gTraceConstants.PrimitiveCount - 1u)];
-	const SceneVertex v0 = gVertices[primitive.indices.x];
-	const SceneVertex v1 = gVertices[primitive.indices.y];
-	const SceneVertex v2 = gVertices[primitive.indices.z];
+	const PrimitiveData primitive = gDynamicPrimitives[min(primitiveIndex, gTraceConstants.DynamicPrimitiveCount - 1u)];
+	const SceneVertex v0 = gDynamicVertices[primitive.indices.x];
+	const SceneVertex v1 = gDynamicVertices[primitive.indices.y];
+	const SceneVertex v2 = gDynamicVertices[primitive.indices.z];
 	float z0 = 0.0;
 	float z1 = 0.0;
 	float z2 = 0.0;
@@ -322,18 +322,18 @@ float3 BootstrapCapturedPoints(uint2 pixelPos)
 {
 	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
 	const float2 pixel = (float2)pixelPos + 0.5;
-	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 96u);
+	const uint primitiveCount = min(gTraceConstants.DynamicPrimitiveCount, 96u);
 	[loop]
 	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 	{
-		const PrimitiveData primitive = gPrimitives[primitiveIndex];
+		const PrimitiveData primitive = gDynamicPrimitives[primitiveIndex];
 		const uint indices[3] = { primitive.indices.x, primitive.indices.y, primitive.indices.z };
 		[unroll]
 		for (uint i = 0; i < 3; ++i)
 		{
 			float2 projectedPoint = 0.0;
 			float viewZ = 0.0;
-			if (!BootstrapProjectPoint(gVertices[indices[i]].position, projectedPoint, viewZ))
+			if (!BootstrapProjectPoint(gDynamicVertices[indices[i]].position, projectedPoint, viewZ))
 			{
 				continue;
 			}
@@ -351,15 +351,15 @@ float3 BootstrapCapturedPoints(uint2 pixelPos)
 float3 BootstrapSceneSignature(float2 uv)
 {
 	float3 color = float3(0.03, 0.04, 0.07);
-	if (gTraceConstants.PrimitiveCount == 0u)
+	if (gTraceConstants.DynamicPrimitiveCount == 0u)
 	{
 		return float3(0.85, 0.1, 0.1);
 	}
 
-	const PrimitiveData primitive = gPrimitives[0];
-	const SceneVertex v0 = gVertices[primitive.indices.x];
-	const float primitiveNorm = saturate((float)gTraceConstants.PrimitiveCount / 1024.0);
-	const float materialNorm = saturate((float)gTraceConstants.MaterialCount / 256.0);
+	const PrimitiveData primitive = gDynamicPrimitives[0];
+	const SceneVertex v0 = gDynamicVertices[primitive.indices.x];
+	const float primitiveNorm = saturate((float)gTraceConstants.DynamicPrimitiveCount / 1024.0);
+	const float materialNorm = saturate((float)gTraceConstants.DynamicMaterialCount / 256.0);
 	const float3 indexNorm = frac(float3((float)primitive.indices.x, (float)primitive.indices.y, (float)primitive.indices.z) * 0.013);
 	const float3 positionNorm = abs(v0.position) / (abs(v0.position) + 256.0);
 	const float3 normalNorm = primitive.normal * 0.5 + 0.5;
@@ -416,7 +416,7 @@ float3 BootstrapRawVertexScatter(uint2 pixelPos)
 {
 	const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
 	float3 color = float3(0.02, 0.025, 0.04);
-	const uint vertexCount = min(gTraceConstants.PrimitiveCount * 3u, 192u);
+	const uint vertexCount = min(gTraceConstants.DynamicPrimitiveCount * 3u, 192u);
 	if (vertexCount == 0u)
 	{
 		return float3(0.85, 0.1, 0.1);
@@ -427,7 +427,7 @@ float3 BootstrapRawVertexScatter(uint2 pixelPos)
 	[loop]
 	for (uint vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
 	{
-		const float2 pos = gVertices[vertexIndex].position.xz;
+		const float2 pos = gDynamicVertices[vertexIndex].position.xz;
 		minPos = min(minPos, pos);
 		maxPos = max(maxPos, pos);
 	}
@@ -439,7 +439,7 @@ float3 BootstrapRawVertexScatter(uint2 pixelPos)
 	[loop]
 	for (uint vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
 	{
-		const float2 normPos = BootstrapNormalizeToBounds(gVertices[vertexIndex].position.xz, minPos, maxPos);
+		const float2 normPos = BootstrapNormalizeToBounds(gDynamicVertices[vertexIndex].position.xz, minPos, maxPos);
 		const float2 vertexCell = floor(float2(normPos.x, 1.0 - normPos.y) * gridSize);
 		if (all(abs(vertexCell - cell) < 0.5))
 		{
@@ -465,7 +465,7 @@ float3 BootstrapRawPrimitiveScatter(uint2 pixelPos)
 {
 	const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
 	float3 color = float3(0.025, 0.02, 0.045);
-	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 128u);
+	const uint primitiveCount = min(gTraceConstants.DynamicPrimitiveCount, 128u);
 	if (primitiveCount == 0u)
 	{
 		return float3(0.85, 0.1, 0.1);
@@ -476,8 +476,8 @@ float3 BootstrapRawPrimitiveScatter(uint2 pixelPos)
 	[loop]
 	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 	{
-		const PrimitiveData primitive = gPrimitives[primitiveIndex];
-		const float2 c = (gVertices[primitive.indices.x].position.xz + gVertices[primitive.indices.y].position.xz + gVertices[primitive.indices.z].position.xz) / 3.0;
+		const PrimitiveData primitive = gDynamicPrimitives[primitiveIndex];
+		const float2 c = (gDynamicVertices[primitive.indices.x].position.xz + gDynamicVertices[primitive.indices.y].position.xz + gDynamicVertices[primitive.indices.z].position.xz) / 3.0;
 		minPos = min(minPos, c);
 		maxPos = max(maxPos, c);
 	}
@@ -489,8 +489,8 @@ float3 BootstrapRawPrimitiveScatter(uint2 pixelPos)
 	[loop]
 	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 	{
-		const PrimitiveData primitive = gPrimitives[primitiveIndex];
-		const float2 c = (gVertices[primitive.indices.x].position.xz + gVertices[primitive.indices.y].position.xz + gVertices[primitive.indices.z].position.xz) / 3.0;
+		const PrimitiveData primitive = gDynamicPrimitives[primitiveIndex];
+		const float2 c = (gDynamicVertices[primitive.indices.x].position.xz + gDynamicVertices[primitive.indices.y].position.xz + gDynamicVertices[primitive.indices.z].position.xz) / 3.0;
 		const float2 normPos = BootstrapNormalizeToBounds(c, minPos, maxPos);
 		const float2 primitiveCell = floor(float2(normPos.x, 1.0 - normPos.y) * gridSize);
 		if (all(abs(primitiveCell - cell) < 0.5))
@@ -517,7 +517,7 @@ float3 BootstrapPrimitiveCentroids(uint2 pixelPos)
 {
 	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
 	const float2 pixel = (float2)pixelPos + 0.5;
-	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 128u);
+	const uint primitiveCount = min(gTraceConstants.DynamicPrimitiveCount, 128u);
 	[loop]
 	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 	{
@@ -545,7 +545,7 @@ float3 BootstrapWireframe(uint2 pixelPos)
 {
 	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
 	const float2 pixel = (float2)pixelPos + 0.5;
-	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 48u);
+	const uint primitiveCount = min(gTraceConstants.DynamicPrimitiveCount, 48u);
 	[loop]
 	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 	{
@@ -572,7 +572,7 @@ float3 BootstrapFirstTriangle(uint2 pixelPos)
 {
 	float3 color = BootstrapPattern(((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight), gTraceConstants.CameraForward, gTraceConstants.SkyColor, gTraceConstants.GroundColor, gTraceConstants.FrameIndex);
 	const float2 pixel = (float2)pixelPos + 0.5;
-	const uint primitiveCount = min(gTraceConstants.PrimitiveCount, 128u);
+	const uint primitiveCount = min(gTraceConstants.DynamicPrimitiveCount, 128u);
 	[loop]
 	for (uint primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 	{

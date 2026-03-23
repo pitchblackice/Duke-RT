@@ -91,9 +91,9 @@ float3 EvaluateSunSpecular(float3 albedo, float3 normal, float3 viewDir, float3 
 	return specularColor * specularTerm * 0.85;
 }
 
-float GetSurfaceRoughness(uint materialIndex)
+float GetSurfaceRoughness(uint materialIndex, uint dataSource)
 {
-	return IsMirrorMaterial(materialIndex) ? 0.02 : 0.38;
+	return IsMirrorMaterial(materialIndex, dataSource) ? 0.02 : 0.38;
 }
 
 float3 GetSurfaceSpecularColor(float3 albedo)
@@ -124,13 +124,13 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float4 surfaceAlbedo, uint2 pixe
 			break;
 		}
 
-		const MaterialData bounceMaterial = GetMaterialData(bounceHit.materialIndex);
+		const MaterialData bounceMaterial = GetMaterialData(bounceHit.materialIndex, bounceHit.dataSource);
 		if ((bounceMaterial.flags & (MATERIAL_FLAG_MIRROR | MATERIAL_FLAG_PORTAL)) != 0)
 		{
 			break;
 		}
 
-		const float4 bounceAlbedo = SampleSurfaceColor(bounceHit.materialIndex, bounceHit.uv);
+		const float4 bounceAlbedo = SampleSurfaceColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
 		if ((bounceMaterial.flags & MATERIAL_FLAG_FULLBRIGHT) != 0)
 		{
 			indirectRadiance += throughput * bounceAlbedo.rgb;
@@ -176,13 +176,13 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			break;
 		}
 
-		const MaterialData bounceMaterial = GetMaterialData(bounceHit.materialIndex);
+		const MaterialData bounceMaterial = GetMaterialData(bounceHit.materialIndex, bounceHit.dataSource);
 		if ((bounceMaterial.flags & MATERIAL_FLAG_PORTAL) != 0)
 		{
 			break;
 		}
 
-		const float4 bounceAlbedo = SampleSurfaceColor(bounceHit.materialIndex, bounceHit.uv);
+		const float4 bounceAlbedo = SampleSurfaceColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
 		if ((bounceMaterial.flags & MATERIAL_FLAG_FULLBRIGHT) != 0)
 		{
 			indirectRadiance += throughput * bounceAlbedo.rgb;
@@ -196,7 +196,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			EvaluateSunDiffuse(bounceAlbedo.rgb, bounceHit.normal, bounceLightDir, bounceShadow) +
 			EvaluateSunSpecular(bounceAlbedo.rgb, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
 
-		const float bounceRoughness = GetSurfaceRoughness(bounceHit.materialIndex);
+		const float bounceRoughness = GetSurfaceRoughness(bounceHit.materialIndex, bounceHit.dataSource);
 		throughput *= GetSurfaceSpecularColor(bounceAlbedo.rgb) * (0.9 - bounceRoughness * 0.35);
 		if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01)
 		{
@@ -238,7 +238,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		for (uint bounce = 0u; bounce < max(GetMirrorBounceCount(), 1u); ++bounce)
 		{
 			hit = TracePrimary(rayOrigin, visibleRayDirection);
-			if (!hit.hit || !IsMirrorMaterial(hit.materialIndex))
+			if (!hit.hit || !IsMirrorMaterial(hit.materialIndex, hit.dataSource))
 			{
 				break;
 			}
@@ -298,10 +298,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else
 		{
-			albedo = SampleSurfaceColor(hit.materialIndex, hit.uv);
-			const MaterialData material = GetMaterialData(hit.materialIndex);
+			albedo = SampleSurfaceColor(hit.materialIndex, hit.dataSource, hit.uv);
+			const MaterialData material = GetMaterialData(hit.materialIndex, hit.dataSource);
 			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
-			const float roughness = GetSurfaceRoughness(hit.materialIndex);
+			const float roughness = GetSurfaceRoughness(hit.materialIndex, hit.dataSource);
 			const float metalness = 0.0;
 			const float materialID = (float)(hit.materialIndex & 255u) * (1.0 / 255.0);
 			if (bootstrapBaseColor)

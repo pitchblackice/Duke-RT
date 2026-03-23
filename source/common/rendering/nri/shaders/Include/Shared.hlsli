@@ -6,9 +6,10 @@
 
 #define SET_SAMPLERS 0
 #define SET_SCENE_TEXTURES 1
-#define SET_INPUTS 2
-#define SET_OUTPUTS 3
-#define SET_ROOT 4
+#define SET_SCENE_DATA 2
+#define SET_INPUTS 3
+#define SET_OUTPUTS 4
+#define SET_ROOT 5
 
 #define MAX_SCENE_TEXTURES 256
 
@@ -40,14 +41,17 @@ struct NRITraceConstants
 	float3 PrevCameraUp;
 	float PrevTanHalfFovY;
 	float3 LightDirection;
-	uint PrimitiveCount;
+	uint SceneInstanceCount;
 	float3 SkyColor;
 	uint DebugMode;
 	float3 GroundColor;
-	uint MaterialCount;
+	uint StaticPrimitiveCount;
 	uint FrameIndex;
+	uint DynamicPrimitiveCount;
 	uint Flags;
+	uint StaticMaterialCount;
 	uint BootstrapMode;
+	uint DynamicMaterialCount;
 	uint BounceCounts;
 };
 
@@ -81,13 +85,26 @@ struct MaterialData
 	float reserved2;
 };
 
+struct SceneInstanceData
+{
+	uint primitiveOffset;
+	uint dataSource;
+	uint reserved0;
+	uint reserved1;
+};
+
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, SET_ROOT);
 
-RaytracingAccelerationStructure gWorldTlas : register(t0, space4);
-StructuredBuffer<SceneVertex> gVertices : register(t1, space4);
-StructuredBuffer<uint> gIndices : register(t2, space4);
-StructuredBuffer<PrimitiveData> gPrimitives : register(t3, space4);
-StructuredBuffer<MaterialData> gMaterials : register(t4, space4);
+RaytracingAccelerationStructure gWorldTlas : register(t0, space5);
+StructuredBuffer<SceneVertex> gStaticVertices : register(t0, space2);
+StructuredBuffer<uint> gStaticIndices : register(t1, space2);
+StructuredBuffer<PrimitiveData> gStaticPrimitives : register(t2, space2);
+StructuredBuffer<MaterialData> gStaticMaterials : register(t3, space2);
+StructuredBuffer<SceneVertex> gDynamicVertices : register(t4, space2);
+StructuredBuffer<uint> gDynamicIndices : register(t5, space2);
+StructuredBuffer<PrimitiveData> gDynamicPrimitives : register(t6, space2);
+StructuredBuffer<MaterialData> gDynamicMaterials : register(t7, space2);
+StructuredBuffer<SceneInstanceData> gSceneInstances : register(t8, space2);
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);
@@ -97,17 +114,17 @@ Texture2D<float4> gPaletteLookup : register(t0, space1);
 TextureCube<float4> gSkyTexture : register(t1, space1);
 Texture2D<float4> gSceneTextures[MAX_SCENE_TEXTURES] : register(t2, space1);
 
-Texture2D<float4> gHistoryInput : register(t0, space2);
-Texture2D<float4> gMotionInput : register(t1, space2);
-Texture2D<float4> gViewZInput : register(t2, space2);
-Texture2D<float4> gNormalRoughnessInput : register(t3, space2);
-Texture2D<float4> gBaseColorInput : register(t4, space2);
-Texture2D<float4> gComposedInput : register(t5, space2);
-Texture2D<float4> gUpscaledInput : register(t6, space2);
-Texture2D<float4> gValidationInput : register(t7, space2);
-Texture2D<float4> gGuideDiffuseInput : register(t8, space2);
-Texture2D<float4> gGuideSpecularInput : register(t9, space2);
-Texture2D<float4> gGuideSpecHitInput : register(t10, space2);
+Texture2D<float4> gHistoryInput : register(t0, space3);
+Texture2D<float4> gMotionInput : register(t1, space3);
+Texture2D<float4> gViewZInput : register(t2, space3);
+Texture2D<float4> gNormalRoughnessInput : register(t3, space3);
+Texture2D<float4> gBaseColorInput : register(t4, space3);
+Texture2D<float4> gComposedInput : register(t5, space3);
+Texture2D<float4> gUpscaledInput : register(t6, space3);
+Texture2D<float4> gValidationInput : register(t7, space3);
+Texture2D<float4> gGuideDiffuseInput : register(t8, space3);
+Texture2D<float4> gGuideSpecularInput : register(t9, space3);
+Texture2D<float4> gGuideSpecHitInput : register(t10, space3);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gTraceOutput, u, 0, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gComposedOutput, u, 1, SET_OUTPUTS);

@@ -6,6 +6,7 @@
 struct HitData
 {
 	bool hit;
+	uint dataSource;
 	uint primitiveIndex;
 	float2 barycentrics;
 	float distance;
@@ -15,15 +16,57 @@ struct HitData
 	uint materialIndex;
 };
 
-MaterialData GetMaterialData(uint materialIndex)
+static const uint SCENE_DATA_SOURCE_STATIC = 0u;
+static const uint SCENE_DATA_SOURCE_DYNAMIC = 1u;
+
+SceneInstanceData GetSceneInstanceData(uint instanceId)
 {
-	return gMaterials[min(materialIndex, max(gTraceConstants.MaterialCount, 1u) - 1u)];
+	return gSceneInstances[min(instanceId, max(gTraceConstants.SceneInstanceCount, 1u) - 1u)];
 }
 
-float3 ResolveHitNormal(uint materialIndex, float3 geometricNormal, float3 rayDirection)
+uint GetPrimitiveCount(uint dataSource)
 {
-	float3 normal = normalize(geometricNormal);
-	return normal;
+	return dataSource == SCENE_DATA_SOURCE_DYNAMIC ? gTraceConstants.DynamicPrimitiveCount : gTraceConstants.StaticPrimitiveCount;
+}
+
+uint GetMaterialCount(uint dataSource)
+{
+	return dataSource == SCENE_DATA_SOURCE_DYNAMIC ? gTraceConstants.DynamicMaterialCount : gTraceConstants.StaticMaterialCount;
+}
+
+PrimitiveData GetPrimitiveData(uint dataSource, uint primitiveIndex)
+{
+	if (dataSource == SCENE_DATA_SOURCE_DYNAMIC)
+	{
+		return gDynamicPrimitives[min(primitiveIndex, max(gTraceConstants.DynamicPrimitiveCount, 1u) - 1u)];
+	}
+
+	return gStaticPrimitives[min(primitiveIndex, max(gTraceConstants.StaticPrimitiveCount, 1u) - 1u)];
+}
+
+SceneVertex GetVertexData(uint dataSource, uint vertexIndex)
+{
+	if (dataSource == SCENE_DATA_SOURCE_DYNAMIC)
+	{
+		return gDynamicVertices[vertexIndex];
+	}
+
+	return gStaticVertices[vertexIndex];
+}
+
+MaterialData GetMaterialData(uint materialIndex, uint dataSource)
+{
+	if (dataSource == SCENE_DATA_SOURCE_DYNAMIC)
+	{
+		return gDynamicMaterials[min(materialIndex, max(gTraceConstants.DynamicMaterialCount, 1u) - 1u)];
+	}
+
+	return gStaticMaterials[min(materialIndex, max(gTraceConstants.StaticMaterialCount, 1u) - 1u)];
+}
+
+float3 ResolveHitNormal(uint materialIndex, uint dataSource, float3 geometricNormal, float3 rayDirection)
+{
+	return normalize(geometricNormal);
 }
 
 float3 GeneratePrimaryRay(uint2 pixelPos)
@@ -55,9 +98,9 @@ float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward,
 	return float2(ndcX * 0.5 + 0.5, 0.5 - ndcY * 0.5);
 }
 
-float4 SampleSurfaceColor(uint materialIndex, float2 uv)
+float4 SampleSurfaceColor(uint materialIndex, uint dataSource, float2 uv)
 {
-	MaterialData material = GetMaterialData(materialIndex);
+	MaterialData material = GetMaterialData(materialIndex, dataSource);
 	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
 	float4 color = 0.0;
 	if (indexed)
@@ -80,14 +123,14 @@ float4 SampleSurfaceColor(uint materialIndex, float2 uv)
 	return color;
 }
 
-bool IsMirrorMaterial(uint materialIndex)
+bool IsMirrorMaterial(uint materialIndex, uint dataSource)
 {
-	return (GetMaterialData(materialIndex).flags & MATERIAL_FLAG_MIRROR) != 0;
+	return (GetMaterialData(materialIndex, dataSource).flags & MATERIAL_FLAG_MIRROR) != 0;
 }
 
-bool ShouldIgnoreOneWayHit(uint materialIndex, float3 geometricNormal, float3 rayDirection)
+bool ShouldIgnoreOneWayHit(uint materialIndex, uint dataSource, float3 geometricNormal, float3 rayDirection)
 {
-	if ((GetMaterialData(materialIndex).flags & MATERIAL_FLAG_ONE_WAY) == 0)
+	if ((GetMaterialData(materialIndex, dataSource).flags & MATERIAL_FLAG_ONE_WAY) == 0)
 	{
 		return false;
 	}
@@ -95,19 +138,19 @@ bool ShouldIgnoreOneWayHit(uint materialIndex, float3 geometricNormal, float3 ra
 	return dot(normalize(geometricNormal), rayDirection) > 0.0;
 }
 
-uint ResolvePrimitiveIndex(uint instanceId, uint localPrimitiveIndex)
+uint ResolvePrimitiveIndex(SceneInstanceData instanceData, uint localPrimitiveIndex)
 {
-	return instanceId + localPrimitiveIndex;
+	return instanceData.primitiveOffset + localPrimitiveIndex;
 }
 
 bool IntersectPrimitiveTriangle(float3 origin, float3 direction, uint primitiveIndex, out float hitT, out float3 barycentrics)
 {
 	hitT = 0.0;
 	barycentrics = 0.0;
-	const PrimitiveData primitive = gPrimitives[min(primitiveIndex, gTraceConstants.PrimitiveCount - 1u)];
-	const SceneVertex v0 = gVertices[primitive.indices.x];
-	const SceneVertex v1 = gVertices[primitive.indices.y];
-	const SceneVertex v2 = gVertices[primitive.indices.z];
+	const PrimitiveData primitive = GetPrimitiveData(SCENE_DATA_SOURCE_DYNAMIC, primitiveIndex);
+	const SceneVertex v0 = gDynamicVertices[primitive.indices.x];
+	const SceneVertex v1 = gDynamicVertices[primitive.indices.y];
+	const SceneVertex v2 = gDynamicVertices[primitive.indices.z];
 	const float3 edge1 = v1.position - v0.position;
 	const float3 edge2 = v2.position - v0.position;
 	const float3 p = cross(direction, edge2);
@@ -149,7 +192,7 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 	bestHit.distance = 1e30;
 
 	[loop]
-	for (uint primitiveIndex = 0; primitiveIndex < gTraceConstants.PrimitiveCount; ++primitiveIndex)
+	for (uint primitiveIndex = 0; primitiveIndex < gTraceConstants.DynamicPrimitiveCount; ++primitiveIndex)
 	{
 		float hitT = 0.0;
 		float3 barycentrics = 0.0;
@@ -163,18 +206,19 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 			continue;
 		}
 
-		const PrimitiveData primitive = gPrimitives[primitiveIndex];
-		if (ShouldIgnoreOneWayHit(primitive.materialIndex, primitive.normal, direction))
+		const PrimitiveData primitive = GetPrimitiveData(SCENE_DATA_SOURCE_DYNAMIC, primitiveIndex);
+		if (ShouldIgnoreOneWayHit(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, primitive.normal, direction))
 		{
 			continue;
 		}
 
 		bestHit.hit = true;
+		bestHit.dataSource = SCENE_DATA_SOURCE_DYNAMIC;
 		bestHit.primitiveIndex = primitiveIndex;
 		bestHit.barycentrics = barycentrics.yz;
 		bestHit.distance = hitT;
 		bestHit.position = origin + direction * hitT;
-		bestHit.normal = ResolveHitNormal(primitive.materialIndex, primitive.normal, direction);
+		bestHit.normal = ResolveHitNormal(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, primitive.normal, direction);
 		bestHit.uv = primitive.uv0 * barycentrics.x + primitive.uv1 * barycentrics.y + primitive.uv2 * barycentrics.z;
 		bestHit.materialIndex = primitive.materialIndex;
 	}
@@ -207,10 +251,11 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			return false;
 		}
 
-		const uint primitiveIndex = ResolvePrimitiveIndex(rayQuery.CommittedInstanceID(), rayQuery.CommittedPrimitiveIndex());
-		const PrimitiveData primitive = gPrimitives[min(primitiveIndex, gTraceConstants.PrimitiveCount - 1)];
+		const SceneInstanceData instanceData = GetSceneInstanceData(rayQuery.CommittedInstanceID());
+		const uint primitiveIndex = ResolvePrimitiveIndex(instanceData, rayQuery.CommittedPrimitiveIndex());
+		const PrimitiveData primitive = GetPrimitiveData(instanceData.dataSource, primitiveIndex);
 		const float committedDistance = rayQuery.CommittedRayT();
-		if (ShouldIgnoreOneWayHit(primitive.materialIndex, primitive.normal, direction))
+		if (ShouldIgnoreOneWayHit(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction))
 		{
 			accumulatedDistance += committedDistance + 0.01;
 			continue;
@@ -220,11 +265,12 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const float3 weights = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
 		const float hitDistance = accumulatedDistance + committedDistance;
 		hitData.hit = true;
+		hitData.dataSource = instanceData.dataSource;
 		hitData.primitiveIndex = primitiveIndex;
 		hitData.barycentrics = bary;
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
-		hitData.normal = ResolveHitNormal(primitive.materialIndex, primitive.normal, direction);
+		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction);
 		hitData.uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
 		hitData.materialIndex = primitive.materialIndex;
 		return true;

@@ -19,15 +19,18 @@ struct NRITraceConstants
 	float3 PrevCameraUp;
 	float PrevTanHalfFovY;
 	float3 LightDirection;
-	uint PrimitiveCount;
+	uint SceneInstanceCount;
 	float3 SkyColor;
 	uint DebugMode;
 	float3 GroundColor;
-	uint MaterialCount;
+	uint StaticPrimitiveCount;
 	uint FrameIndex;
+	uint DynamicPrimitiveCount;
 	uint Flags;
+	uint StaticMaterialCount;
 	uint BootstrapMode;
-	float Padding;
+	uint DynamicMaterialCount;
+	uint BounceCounts;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
