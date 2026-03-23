@@ -336,9 +336,8 @@ namespace
 			return;
 		}
 
-		// Temporary validation path: keep sky and sector-portal planes out of the
-		// authoritative opaque world so we can verify whether they are the source
-		// of the new roof / distant-geometry artifacts in phase 2 residency.
+		// Phase-2 opaque residency excludes sky and sector-portal planes. They
+		// need separate PT sky / portal handling instead of entering the opaque BLAS.
 		if (IsSkyPlane(sec, plane) || IsPortalPlane(sec, plane))
 		{
 			return;
@@ -352,14 +351,6 @@ namespace
 		}
 
 		uint32_t materialFlags = MaterialFlag_Flat;
-		if (IsSkyPlane(sec, plane))
-		{
-			materialFlags |= MaterialFlag_Sky;
-		}
-		if (IsPortalPlane(sec, plane))
-		{
-			materialFlags |= MaterialFlag_Portal;
-		}
 
 		PTMapSurface surface = {};
 		surface.kind = plane == 0 ? PTMapSurfaceKind::Floor : PTMapSurfaceKind::Ceiling;
