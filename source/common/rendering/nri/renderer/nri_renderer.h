@@ -78,6 +78,8 @@ private:
 	{
 		nri_scene::PTSkyMode mode = nri_scene::PTSkyMode::None;
 		FGameTexture* texture = nullptr;
+		uint32_t faceMask = 0;
+		bool flipTop = false;
 	};
 
 	struct SceneBufferDebugStats
@@ -111,10 +113,10 @@ private:
 	bool AllocateDescriptorSets();
 	bool EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight);
 	bool DispatchBootstrapView();
-	bool UseFallbackSceneTextures();
+	bool UseFallbackSceneTextures(bool preserveExistingSky);
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
-	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials);
-	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView);
+	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky);
+	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool BuildAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);

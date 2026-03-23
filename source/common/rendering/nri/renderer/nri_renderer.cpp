@@ -920,7 +920,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const bool needsFallbackMaterials = bootstrapCapturedDiagnostics || bootstrapCapturedFlat;
 	const bool needsRealTextures = !nri_ptbootstrap || bootstrapCapturedBaseColor || bootstrapMode >= 13u;
 	const bool paletteReady = needsRealTextures ? EnsurePaletteTexture(materialBridge) : true;
-	const bool texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures() : (needsRealTextures ? (paletteReady && EnsureSceneTextures(sceneView, materialBridge, gpuMaterials)) : EnsureSkyTexture(sceneView));
+	const bool texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures(preserveHistory) : (needsRealTextures ? (paletteReady && EnsureSceneTextures(sceneView, materialBridge, gpuMaterials, preserveHistory)) : EnsureSkyTexture(sceneView, preserveHistory));
 	if (needsFallbackMaterials)
 	{
 		gpuMaterials = materialBridge.materials;
@@ -1789,8 +1789,23 @@ bool NRIRenderer::DispatchBootstrapView()
 	return true;
 }
 
-bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView)
+bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky)
 {
+	if (preserveExistingSky && mSkyTexture.texture != nullptr)
+	{
+		return true;
+	}
+
+	if (sceneView.sky.mode == nri_scene::PTSkyMode::Cubemap &&
+		mSkyTexture.texture != nullptr &&
+		mSkyState.mode == nri_scene::PTSkyMode::Cubemap &&
+		mSkyState.texture == sceneView.sky.texture &&
+		mSkyState.faceMask == sceneView.sky.faceMask &&
+		mSkyState.flipTop == sceneView.sky.flipTop)
+	{
+		return true;
+	}
+
 	SkyProbe probe = {};
 	if (ProbeCubemapSky(sceneView, probe))
 	{
@@ -1831,13 +1846,17 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView)
 		mSkyTextureKey = upload.key;
 		mSkyState.mode = nri_scene::PTSkyMode::Cubemap;
 		mSkyState.texture = sceneView.sky.texture;
+		mSkyState.faceMask = sceneView.sky.faceMask;
+		mSkyState.flipTop = sceneView.sky.flipTop;
 		return true;
 	}
 
 	const bool shouldKeepLastCubemap =
 		mSkyTexture.texture != nullptr &&
 		mSkyState.mode == nri_scene::PTSkyMode::Cubemap &&
-		(sceneView.sky.texture == mSkyState.texture || (sceneView.sky.texture == nullptr && sceneView.stats.skySurfaces > 0));
+		(sceneView.sky.mode == nri_scene::PTSkyMode::None ||
+			sceneView.sky.texture == mSkyState.texture ||
+			(sceneView.sky.texture == nullptr && sceneView.stats.skySurfaces > 0));
 	if (shouldKeepLastCubemap)
 	{
 		return true;
@@ -1876,15 +1895,17 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView)
 	mSkyTextureKey = upload.key;
 	mSkyState.mode = sceneView.sky.mode;
 	mSkyState.texture = sceneView.sky.texture;
+	mSkyState.faceMask = sceneView.sky.faceMask;
+	mSkyState.flipTop = sceneView.sky.flipTop;
 	return true;
 }
 
-bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials)
+bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky)
 {
 	Clocker clock(NriPTSceneTextures);
 
 	outGpuMaterials = materials.materials;
-	if (!EnsureSkyTexture(sceneView))
+	if (!EnsureSkyTexture(sceneView, preserveExistingSky))
 	{
 		return false;
 	}
@@ -1927,9 +1948,12 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	return UpdateSceneTextureSet(descriptors);
 }
 
-bool NRIRenderer::UseFallbackSceneTextures()
+bool NRIRenderer::UseFallbackSceneTextures(bool preserveExistingSky)
 {
-	EnsureSkyTexture(nri_scene::SceneView{});
+	if (!preserveExistingSky || mSkyTexture.texture == nullptr)
+	{
+		EnsureSkyTexture(nri_scene::SceneView{}, false);
+	}
 	std::vector<nri::Descriptor*> descriptors(NRI_SCENE_DESCRIPTOR_NUM, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
 	descriptors[0] = mFrameBuffer->mWhiteTexture->GetResource().shaderView;
 	descriptors[1] = mSkyTexture.shaderView != nullptr ? mSkyTexture.shaderView : mFrameBuffer->mWhiteTexture->GetResource().shaderView;

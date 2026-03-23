@@ -25,8 +25,38 @@
 #include "hw_portal.h"
 #include "hw_renderstate.h"
 #include "skyboxtexture.h"
+#include <windows.h>
 
 CVAR(Float, skyoffsettest, 0.f, 0)
+
+namespace
+{
+	static bool IsUsableSkyTexture(FGameTexture* texture)
+	{
+		const intptr_t value = (intptr_t)texture;
+		return value > 0x10000 && value != -1;
+	}
+
+	static FTexture* TryGetSkyBaseTexture(FGameTexture* texture)
+	{
+		if (!IsUsableSkyTexture(texture))
+		{
+			return nullptr;
+		}
+
+		FTexture* baseTexture = nullptr;
+		__try
+		{
+			baseTexture = texture->GetTexture();
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			baseTexture = nullptr;
+		}
+
+		return baseTexture;
+	}
+}
 
 //-----------------------------------------------------------------------------
 //
@@ -51,14 +81,15 @@ void HWSkyPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 
 	state.SetVertexBuffer(vertexBuffer);
 	state.SetTextureMode(TM_OPAQUE);
-	auto skybox = origin->texture ? dynamic_cast<FSkyBox*>(origin->texture->GetTexture()) : nullptr;
+	FGameTexture* skyTexture = IsUsableSkyTexture(origin->texture) ? origin->texture : nullptr;
+	auto skybox = dynamic_cast<FSkyBox*>(TryGetSkyBaseTexture(skyTexture));
 	if (skybox)
 	{
 		vertexBuffer->RenderBox(state, skybox, origin->x_offset, false, /*di->Level->info->pixelstretch*/1, { 0, 0, 1 }, { 0, 0, 1 }, color);
 	}
-	else if (!origin->cloudy)
+	else if (!origin->cloudy && skyTexture != nullptr)
 	{
-		auto tex = origin->texture;
+		auto tex = skyTexture;
 		float texh = tex->GetDisplayHeight();
 		auto& modelMatrix = state.mModelMatrix;
 		auto& textureMatrix = state.mTextureMatrix;
@@ -78,12 +109,16 @@ void HWSkyPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 		textureMatrix.loadIdentity();
 		state.EnableTextureMatrix(true);
 		textureMatrix.scale(1.f, repeat_fac, 1.f);
-		vertexBuffer->DoRenderDome(state, origin->texture, FSkyVertexBuffer::SKYMODE_MAINLAYER, true, color);
+		vertexBuffer->DoRenderDome(state, skyTexture, FSkyVertexBuffer::SKYMODE_MAINLAYER, true, color);
 		state.EnableTextureMatrix(false);
+	}
+	else if (skyTexture != nullptr)
+	{
+		vertexBuffer->RenderDome(state, skyTexture, -origin->x_offset, origin->y_offset, false, FSkyVertexBuffer::SKYMODE_MAINLAYER, true, 0, 0, color);
 	}
 	else
 	{
-		vertexBuffer->RenderDome(state, origin->texture, -origin->x_offset, origin->y_offset, false, FSkyVertexBuffer::SKYMODE_MAINLAYER, true, 0, 0, color);
+		state.EnableTexture(false);
 	}
 	state.SetTextureMode(TM_NORMAL);
 	if (origin->fadecolor & 0xffffff)
@@ -94,6 +129,10 @@ void HWSkyPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 		state.Draw(DT_Triangles, 0, 12);
 		state.EnableTexture(true);
 		state.SetObjectColor(0xffffffff);
+	}
+	else if (skyTexture == nullptr)
+	{
+		state.EnableTexture(true);
 	}
 
 	//di->lightmode = oldlightmode;
