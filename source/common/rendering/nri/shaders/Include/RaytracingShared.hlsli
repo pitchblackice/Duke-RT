@@ -143,14 +143,6 @@ uint ResolvePrimitiveIndex(SceneInstanceData instanceData, uint localPrimitiveIn
 	return instanceData.primitiveOffset + localPrimitiveIndex;
 }
 
-float3 TransformInstancePoint(float3x4 objectToWorld, float3 position)
-{
-	return float3(
-		objectToWorld[0][0] * position.x + objectToWorld[0][1] * position.y + objectToWorld[0][2] * position.z + objectToWorld[0][3],
-		objectToWorld[1][0] * position.x + objectToWorld[1][1] * position.y + objectToWorld[1][2] * position.z + objectToWorld[1][3],
-		objectToWorld[2][0] * position.x + objectToWorld[2][1] * position.y + objectToWorld[2][2] * position.z + objectToWorld[2][3]);
-}
-
 bool IntersectPrimitiveTriangle(float3 origin, float3 direction, uint primitiveIndex, out float hitT, out float3 barycentrics)
 {
 	hitT = 0.0;
@@ -262,24 +254,8 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const SceneInstanceData instanceData = GetSceneInstanceData(rayQuery.CommittedInstanceID());
 		const uint primitiveIndex = ResolvePrimitiveIndex(instanceData, rayQuery.CommittedPrimitiveIndex());
 		const PrimitiveData primitive = GetPrimitiveData(instanceData.dataSource, primitiveIndex);
-		const float3x4 objectToWorld = rayQuery.CommittedObjectToWorld3x4();
-		const SceneVertex v0 = GetVertexData(instanceData.dataSource, primitive.indices.x);
-		const SceneVertex v1 = GetVertexData(instanceData.dataSource, primitive.indices.y);
-		const SceneVertex v2 = GetVertexData(instanceData.dataSource, primitive.indices.z);
-		const float3 worldV0 = TransformInstancePoint(objectToWorld, v0.position);
-		const float3 worldV1 = TransformInstancePoint(objectToWorld, v1.position);
-		const float3 worldV2 = TransformInstancePoint(objectToWorld, v2.position);
-		float3 worldNormal = cross(worldV1 - worldV0, worldV2 - worldV0);
-		if (dot(worldNormal, worldNormal) > 1e-8)
-		{
-			worldNormal = normalize(worldNormal);
-		}
-		else
-		{
-			worldNormal = normalize(primitive.normal);
-		}
 		const float committedDistance = rayQuery.CommittedRayT();
-		if (ShouldIgnoreOneWayHit(primitive.materialIndex, instanceData.dataSource, worldNormal, direction))
+		if (ShouldIgnoreOneWayHit(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction))
 		{
 			accumulatedDistance += committedDistance + 0.01;
 			continue;
@@ -294,7 +270,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.barycentrics = bary;
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
-		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, worldNormal, direction);
+		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction);
 		hitData.uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
 		hitData.materialIndex = primitive.materialIndex;
 		return true;
