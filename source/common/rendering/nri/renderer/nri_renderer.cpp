@@ -3400,9 +3400,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		replacement.sectorDirty = analysis.sectorDirty;
 		replacement.dragged = analysis.dragged;
 		replacement.blindSpot = analysis.reasonMask != nri_scene::PTMapChunkMutationReason_None && !analysis.signatureChanged;
+		// Section dirty alone is too broad for PT runtime replacement because
+		// the raster path can mark transient warped sections dirty during draw
+		// prep without producing a stable gameplay map mutation. Keep explicit
+		// forced invalidation for sector-dirty and dragged ownership, and let
+		// section-dirty-only cases fall back to signature-backed replacement.
 		const bool forceTopologyInvalidation =
 			(analysis.reasonMask & (nri_scene::PTMapChunkMutationReason_SectorDirty |
-				nri_scene::PTMapChunkMutationReason_SectionDirty |
 				nri_scene::PTMapChunkMutationReason_Dragged)) != 0;
 
 		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0)
