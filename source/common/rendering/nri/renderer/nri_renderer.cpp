@@ -4517,11 +4517,14 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			return;
 		}
 
-		std::array<int32_t, 56> overlaySectorQueue = {};
-		std::array<uint8_t, 56> overlaySectorTerminal = {};
+		constexpr uint8_t UnlimitedTransportNeighborhoodBudget = 0xFFu;
+		constexpr uint8_t TransportBoundaryFringeDepth = 3u;
+
+		std::array<int32_t, 96> overlaySectorQueue = {};
+		std::array<uint8_t, 96> overlaySectorBudget = {};
 		uint32_t overlaySectorCount = 0;
 		uint32_t overlaySectorReadIndex = 0;
-		const auto appendOverlaySector = [&](int32_t sectorIndex, bool terminal)
+		const auto appendOverlaySector = [&](int32_t sectorIndex, uint8_t budget)
 		{
 			if (!validSectorIndex(sectorIndex))
 			{
@@ -4537,9 +4540,9 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			{
 				if (overlaySectorQueue[i] == sectorIndex)
 				{
-					if (!terminal)
+					if (budget > overlaySectorBudget[i])
 					{
-						overlaySectorTerminal[i] = 0;
+						overlaySectorBudget[i] = budget;
 					}
 					return;
 				}
@@ -4548,16 +4551,17 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			if (overlaySectorCount < overlaySectorQueue.size())
 			{
 				overlaySectorQueue[overlaySectorCount++] = sectorIndex;
-				overlaySectorTerminal[overlaySectorCount - 1] = terminal ? 1u : 0u;
+				overlaySectorBudget[overlaySectorCount - 1] = budget;
 			}
 		};
 
-		appendOverlaySector(anchorSectorIndex, false);
+		appendOverlaySector(anchorSectorIndex, UnlimitedTransportNeighborhoodBudget);
 		while (overlaySectorReadIndex < overlaySectorCount)
 		{
 			const uint32_t queueIndex = overlaySectorReadIndex++;
 			const int32_t sectorIndex = overlaySectorQueue[queueIndex];
-			if (overlaySectorTerminal[queueIndex] != 0)
+			const uint8_t sectorBudget = overlaySectorBudget[queueIndex];
+			if (sectorBudget == 0)
 			{
 				continue;
 			}
@@ -4566,13 +4570,18 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			const bool stopAtTransportControl = sectorIndex != anchorSectorIndex &&
 				GetRuntimeSectorControlInfo(sectorIndex, sectorInfo) &&
 				HasRuntimeTransportEffector(sectorInfo);
+			uint8_t nextBudget = sectorBudget == UnlimitedTransportNeighborhoodBudget ? UnlimitedTransportNeighborhoodBudget : (uint8_t)(sectorBudget - 1u);
+			if (stopAtTransportControl)
+			{
+				nextBudget = TransportBoundaryFringeDepth;
+			}
 
 			const auto& sec = sector[(unsigned)sectorIndex];
 			for (const auto& wal : sec.walls)
 			{
 				if (wal.twoSided())
 				{
-					appendOverlaySector(wal.nextsector, stopAtTransportControl);
+					appendOverlaySector(wal.nextsector, nextBudget);
 				}
 			}
 		}
