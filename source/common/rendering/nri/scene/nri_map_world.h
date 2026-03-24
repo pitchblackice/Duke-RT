@@ -14,6 +14,17 @@ enum class PTMapChunkKind : uint32_t
 	Sector = 0,
 };
 
+enum class PTPortalKind : uint32_t
+{
+	WallMirror = 0,
+	WallView,
+	WallToSprite,
+	SectorFloorStack,
+	SectorCeilingStack,
+	SectorFloorMirror,
+	SectorCeilingMirror,
+};
+
 enum class PTMapSurfaceKind : uint32_t
 {
 	Floor = 0,
@@ -44,9 +55,42 @@ struct PTMapChunk
 	PTMapChunkKind kind = PTMapChunkKind::Sector;
 	uint32_t chunkIndex = UINT32_MAX;
 	int32_t sectorIndex = -1;
+	uint32_t localSpaceIndex = UINT32_MAX;
 	uint32_t firstSurface = 0;
 	uint32_t surfaceCount = 0;
 	uint32_t triangleCount = 0;
+};
+
+struct PTMapLocalSpace
+{
+	uint32_t localSpaceIndex = UINT32_MAX;
+	int32_t anchorSectorIndex = -1;
+	uint32_t chunkCount = 0;
+};
+
+struct PTMapPortalTarget
+{
+	int32_t sectorIndex = -1;
+	int32_t wallIndex = -1;
+	uint32_t chunkIndex = UINT32_MAX;
+	uint32_t localSpaceIndex = UINT32_MAX;
+};
+
+struct PTMapPortal
+{
+	uint32_t portalIndex = UINT32_MAX;
+	PTPortalKind kind = PTPortalKind::WallMirror;
+	uint32_t sourceChunkIndex = UINT32_MAX;
+	uint32_t sourceLocalSpaceIndex = UINT32_MAX;
+	int32_t sourceSectorIndex = -1;
+	int32_t sourceWallIndex = -1;
+	int32_t sourcePlane = -1;
+	uint32_t sourceSurfaceIndex = UINT32_MAX;
+	int32_t portalNum = -1;
+	uint32_t firstTarget = 0;
+	uint32_t targetCount = 0;
+	double delta[3] = {};
+	bool runtimeBoundTarget = false;
 };
 
 struct PTMapWorldStats
@@ -54,12 +98,19 @@ struct PTMapWorldStats
 	uint32_t sectorCount = 0;
 	uint32_t sectionCount = 0;
 	uint32_t chunkCount = 0;
+	uint32_t localSpaceCount = 0;
 	uint32_t surfaceCount = 0;
 	uint32_t wallSurfaceCount = 0;
 	uint32_t flatSurfaceCount = 0;
 	uint32_t portalSurfaceCount = 0;
 	uint32_t skySurfaceCount = 0;
 	uint32_t triangleCount = 0;
+	uint32_t portalCount = 0;
+	uint32_t portalTargetCount = 0;
+	uint32_t wallPortalCount = 0;
+	uint32_t sectorPortalCount = 0;
+	uint32_t mirrorPortalCount = 0;
+	uint32_t runtimePortalCount = 0;
 };
 
 struct PTMapWorld
@@ -69,6 +120,9 @@ struct PTMapWorld
 	bool valid = false;
 	std::vector<PTMapChunk> chunks;
 	std::vector<PTMapSurface> surfaces;
+	std::vector<PTMapLocalSpace> localSpaces;
+	std::vector<PTMapPortal> portals;
+	std::vector<PTMapPortalTarget> portalTargets;
 	PTMapWorldStats stats;
 
 	void Reset();
@@ -77,4 +131,6 @@ struct PTMapWorld
 SceneDebugStats CollectMapWorldDebugStats(const PTMapWorld& mapWorld);
 void BuildMapSceneView(const PTMapWorld& mapWorld, SceneView& outView);
 void BuildMapChunkSceneView(const PTMapWorld& mapWorld, const PTMapChunk& chunk, SceneView& outView);
+int32_t FindMapWorldLocalSpaceIndex(const PTMapWorld& mapWorld, uint32_t chunkIndex);
+int32_t FindMapWorldPortalIndex(const PTMapWorld& mapWorld, const SurfaceProvenance& provenance);
 }

@@ -4,12 +4,14 @@
 #include "gamefuncs.h"
 #include "hw_sections.h"
 #include "mapinfo.h"
+#include "render.h"
 #include "sectorgeometry.h"
 #include "texturemanager.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 namespace
 {
@@ -656,6 +658,272 @@ namespace
 		return true;
 	}
 
+	void SetPortalDeltaPT(PTMapPortal& portal, double buildX, double buildY, double buildZ)
+	{
+		portal.delta[0] = buildX;
+		portal.delta[1] = -buildZ;
+		portal.delta[2] = -buildY;
+	}
+
+	std::vector<uint32_t> BuildSectorChunkLookup(const PTMapWorld& world)
+	{
+		std::vector<uint32_t> lookup(sector.Size(), UINT32_MAX);
+		for (const PTMapChunk& chunk : world.chunks)
+		{
+			if (chunk.kind == PTMapChunkKind::Sector && chunk.sectorIndex >= 0 && (unsigned)chunk.sectorIndex < lookup.size())
+			{
+				lookup[(unsigned)chunk.sectorIndex] = chunk.chunkIndex;
+			}
+		}
+		return lookup;
+	}
+
+	std::vector<uint32_t> BuildPortalWallSurfaceLookup(const PTMapWorld& world)
+	{
+		std::vector<uint32_t> lookup(wall.Size(), UINT32_MAX);
+		for (uint32_t surfaceIndex = 0; surfaceIndex < world.surfaces.size(); ++surfaceIndex)
+		{
+			const PTMapSurface& surface = world.surfaces[surfaceIndex];
+			if (surface.kind != PTMapSurfaceKind::Portal)
+			{
+				continue;
+			}
+
+			const int wallIndex = surface.surface.provenance.wallIndex;
+			if (wallIndex >= 0 && (unsigned)wallIndex < lookup.size())
+			{
+				lookup[(unsigned)wallIndex] = surfaceIndex;
+			}
+		}
+		return lookup;
+	}
+
+	void BuildLocalSpaces(PTMapWorld& outWorld, const std::vector<uint32_t>& sectorChunkLookup)
+	{
+		std::vector<uint8_t> visited(sector.Size(), 0u);
+		outWorld.localSpaces.clear();
+
+		for (PTMapChunk& chunk : outWorld.chunks)
+		{
+			chunk.localSpaceIndex = UINT32_MAX;
+		}
+
+		for (const PTMapChunk& seedChunk : outWorld.chunks)
+		{
+			if (seedChunk.kind != PTMapChunkKind::Sector || seedChunk.sectorIndex < 0 || (unsigned)seedChunk.sectorIndex >= sector.Size())
+			{
+				continue;
+			}
+
+			const uint32_t seedSectorIndex = (uint32_t)seedChunk.sectorIndex;
+			if (visited[seedSectorIndex] != 0u)
+			{
+				continue;
+			}
+
+			PTMapLocalSpace localSpace = {};
+			localSpace.localSpaceIndex = (uint32_t)outWorld.localSpaces.size();
+			localSpace.anchorSectorIndex = seedChunk.sectorIndex;
+
+			std::vector<uint32_t> pendingSectors;
+			pendingSectors.push_back(seedSectorIndex);
+			visited[seedSectorIndex] = 1u;
+
+			while (!pendingSectors.empty())
+			{
+				const uint32_t sectorIndex = pendingSectors.back();
+				pendingSectors.pop_back();
+
+				if (sectorIndex < sectorChunkLookup.size())
+				{
+					const uint32_t chunkIndex = sectorChunkLookup[sectorIndex];
+					if (chunkIndex < outWorld.chunks.size() && outWorld.chunks[chunkIndex].localSpaceIndex == UINT32_MAX)
+					{
+						outWorld.chunks[chunkIndex].localSpaceIndex = localSpace.localSpaceIndex;
+						localSpace.chunkCount++;
+					}
+				}
+
+				const sectortype& sec = sector[sectorIndex];
+				for (const walltype& wal : sec.walls)
+				{
+					if (IsPortalWall(&wal) || wal.nextsector < 0 || (unsigned)wal.nextsector >= sector.Size())
+					{
+						continue;
+					}
+
+					const uint32_t nextSectorIndex = (uint32_t)wal.nextsector;
+					if (visited[nextSectorIndex] != 0u)
+					{
+						continue;
+					}
+
+					visited[nextSectorIndex] = 1u;
+					pendingSectors.push_back(nextSectorIndex);
+				}
+			}
+
+			outWorld.localSpaces.push_back(localSpace);
+		}
+
+		outWorld.stats.localSpaceCount = (uint32_t)outWorld.localSpaces.size();
+	}
+
+	void AppendPortalTarget(PTMapWorld& outWorld, PTMapPortal& portal, const std::vector<uint32_t>& sectorChunkLookup, int32_t sectorIndex, int32_t wallIndex)
+	{
+		PTMapPortalTarget target = {};
+		target.sectorIndex = sectorIndex;
+		target.wallIndex = wallIndex;
+		if (sectorIndex >= 0 && (unsigned)sectorIndex < sectorChunkLookup.size())
+		{
+			target.chunkIndex = sectorChunkLookup[(unsigned)sectorIndex];
+			if (target.chunkIndex < outWorld.chunks.size())
+			{
+				target.localSpaceIndex = outWorld.chunks[target.chunkIndex].localSpaceIndex;
+			}
+		}
+
+		if (portal.targetCount == 0)
+		{
+			portal.firstTarget = (uint32_t)outWorld.portalTargets.size();
+		}
+
+		outWorld.portalTargets.push_back(target);
+		portal.targetCount++;
+	}
+
+	void BuildPortalGraph(PTMapWorld& outWorld)
+	{
+		outWorld.portals.clear();
+		outWorld.portalTargets.clear();
+		outWorld.stats.portalCount = 0;
+		outWorld.stats.portalTargetCount = 0;
+		outWorld.stats.wallPortalCount = 0;
+		outWorld.stats.sectorPortalCount = 0;
+		outWorld.stats.mirrorPortalCount = 0;
+		outWorld.stats.runtimePortalCount = 0;
+
+		const std::vector<uint32_t> sectorChunkLookup = BuildSectorChunkLookup(outWorld);
+		BuildLocalSpaces(outWorld, sectorChunkLookup);
+		const std::vector<uint32_t> portalWallSurfaceLookup = BuildPortalWallSurfaceLookup(outWorld);
+
+		for (unsigned sectorIndex = 0; sectorIndex < sector.Size(); ++sectorIndex)
+		{
+			const sectortype& sec = sector[sectorIndex];
+			const uint32_t sourceChunkIndex = sectorIndex < sectorChunkLookup.size() ? sectorChunkLookup[sectorIndex] : UINT32_MAX;
+			const uint32_t sourceLocalSpaceIndex = sourceChunkIndex < outWorld.chunks.size() ? outWorld.chunks[sourceChunkIndex].localSpaceIndex : UINT32_MAX;
+
+			for (const walltype& wal : sec.walls)
+			{
+				if (!IsPortalWall(&wal))
+				{
+					continue;
+				}
+
+				PTMapPortal portal = {};
+				portal.portalIndex = (uint32_t)outWorld.portals.size();
+				portal.sourceChunkIndex = sourceChunkIndex;
+				portal.sourceLocalSpaceIndex = sourceLocalSpaceIndex;
+				portal.sourceSectorIndex = (int32_t)sectorIndex;
+				portal.sourceWallIndex = wall.IndexOf(&wal);
+				portal.sourcePlane = -1;
+				portal.portalNum = wal.portalnum;
+				if (portal.sourceWallIndex >= 0 && (unsigned)portal.sourceWallIndex < portalWallSurfaceLookup.size())
+				{
+					portal.sourceSurfaceIndex = portalWallSurfaceLookup[(unsigned)portal.sourceWallIndex];
+				}
+
+				switch (wal.portalflags)
+				{
+				case PORTAL_WALL_MIRROR:
+					portal.kind = PTPortalKind::WallMirror;
+					outWorld.stats.wallPortalCount++;
+					outWorld.stats.mirrorPortalCount++;
+					break;
+
+				case PORTAL_WALL_VIEW:
+					portal.kind = PTPortalKind::WallView;
+					outWorld.stats.wallPortalCount++;
+					if (wal.portalnum >= 0 && (unsigned)wal.portalnum < wall.Size())
+					{
+						const walltype& destWall = wall[(unsigned)wal.portalnum];
+						auto srcCenter = wal.center();
+						auto dstCenter = destWall.center();
+						SetPortalDeltaPT(portal, dstCenter.X - srcCenter.X, dstCenter.Y - srcCenter.Y, 0.0);
+						AppendPortalTarget(outWorld, portal, sectorChunkLookup, destWall.sector, wal.portalnum);
+					}
+					break;
+
+				case PORTAL_WALL_TO_SPRITE:
+					portal.kind = PTPortalKind::WallToSprite;
+					portal.runtimeBoundTarget = true;
+					outWorld.stats.wallPortalCount++;
+					outWorld.stats.runtimePortalCount++;
+					break;
+
+				default:
+					continue;
+				}
+
+				outWorld.portals.push_back(portal);
+			}
+
+			auto appendSectorPortal = [&](PTPortalKind kind, int plane)
+			{
+				PTMapPortal portal = {};
+				portal.portalIndex = (uint32_t)outWorld.portals.size();
+				portal.kind = kind;
+				portal.sourceChunkIndex = sourceChunkIndex;
+				portal.sourceLocalSpaceIndex = sourceLocalSpaceIndex;
+				portal.sourceSectorIndex = (int32_t)sectorIndex;
+				portal.sourcePlane = plane;
+				portal.portalNum = sec.portalnum;
+				outWorld.stats.sectorPortalCount++;
+
+				if (kind == PTPortalKind::SectorFloorMirror || kind == PTPortalKind::SectorCeilingMirror)
+				{
+					outWorld.stats.mirrorPortalCount++;
+				}
+				else if (sec.portalnum >= 0 && (unsigned)sec.portalnum < allPortals.Size())
+				{
+					const PortalDesc& desc = allPortals[(unsigned)sec.portalnum];
+					SetPortalDeltaPT(portal, desc.delta.X, desc.delta.Y, desc.delta.Z);
+					for (int targetSectorIndex : desc.targets)
+					{
+						AppendPortalTarget(outWorld, portal, sectorChunkLookup, targetSectorIndex, -1);
+					}
+				}
+
+				outWorld.portals.push_back(portal);
+			};
+
+			switch (sec.portalflags)
+			{
+			case PORTAL_SECTOR_FLOOR:
+				appendSectorPortal(PTPortalKind::SectorFloorStack, 0);
+				break;
+
+			case PORTAL_SECTOR_CEILING:
+				appendSectorPortal(PTPortalKind::SectorCeilingStack, 1);
+				break;
+
+			case PORTAL_SECTOR_FLOOR_REFLECT:
+				appendSectorPortal(PTPortalKind::SectorFloorMirror, 0);
+				break;
+
+			case PORTAL_SECTOR_CEILING_REFLECT:
+				appendSectorPortal(PTPortalKind::SectorCeilingMirror, 1);
+				break;
+
+			default:
+				break;
+			}
+		}
+
+		outWorld.stats.portalCount = (uint32_t)outWorld.portals.size();
+		outWorld.stats.portalTargetCount = (uint32_t)outWorld.portalTargets.size();
+	}
+
 	void CaptureWallMutationSnapshot(const walltype& wal, PTMapWallMutationSnapshot& outSnapshot)
 	{
 		outSnapshot.pos = wal.pos;
@@ -900,6 +1168,7 @@ bool BuildMapWorld(PTMapWorld& outWorld)
 	}
 
 	outWorld.stats.chunkCount = (uint32_t)outWorld.chunks.size();
+	BuildPortalGraph(outWorld);
 	outWorld.valid = true;
 	return true;
 }

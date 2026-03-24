@@ -1590,16 +1590,23 @@ void NRIRenderer::PrintMapWorldStatus() const
 	}
 
 	const auto& stats = mMapWorld.stats;
-	Printf("NRI PT map world: level=%s build_serial=%llu chunks=%u sectors=%u sections=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
+	Printf("NRI PT map world: level=%s build_serial=%llu chunks=%u local_spaces=%u sectors=%u sections=%u surfaces=%u walls=%u flats=%u portal_surfaces=%u portal_graph=%u portal_targets=%u wall_portals=%u sector_portals=%u mirror_portals=%u runtime_portals=%u skies=%u tris=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
 		(unsigned long long)mMapWorld.buildSerial,
 		stats.chunkCount,
+		stats.localSpaceCount,
 		stats.sectorCount,
 		stats.sectionCount,
 		stats.surfaceCount,
 		stats.wallSurfaceCount,
 		stats.flatSurfaceCount,
 		stats.portalSurfaceCount,
+		stats.portalCount,
+		stats.portalTargetCount,
+		stats.wallPortalCount,
+		stats.sectorPortalCount,
+		stats.mirrorPortalCount,
+		stats.runtimePortalCount,
 		stats.skySurfaceCount,
 		stats.triangleCount);
 }
@@ -1851,9 +1858,14 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bo
 	}
 
 	const uint32_t flags = result.primitiveFlags;
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s\n",
+	const int32_t localSpaceIndex = result.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)result.provenance.mapChunkIndex) : -1;
+	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, result.provenance);
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
+		result.provenance.mapChunkIndex,
+		localSpaceIndex,
+		portalGraphIndex,
 		result.provenance.sectorIndex,
 		result.provenance.wallIndex,
 		result.provenance.nextSectorIndex,
@@ -1890,9 +1902,14 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 	}
 
 	const uint32_t flags = mLastSurfaceProbe.primitiveFlags;
-	Printf("NRI PT surface probe: source=%s drawlist=%s sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x\n",
+	const int32_t localSpaceIndex = mLastSurfaceProbe.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex) : -1;
+	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, mLastSurfaceProbe.provenance);
+	Printf("NRI PT surface probe: source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
+		mLastSurfaceProbe.provenance.mapChunkIndex,
+		localSpaceIndex,
+		portalGraphIndex,
 		mLastSurfaceProbe.provenance.sectorIndex,
 		mLastSurfaceProbe.provenance.wallIndex,
 		mLastSurfaceProbe.provenance.nextSectorIndex,

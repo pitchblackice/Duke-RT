@@ -48,6 +48,9 @@ void PTMapWorld::Reset()
 	valid = false;
 	chunks.clear();
 	surfaces.clear();
+	localSpaces.clear();
+	portals.clear();
+	portalTargets.clear();
 	stats = {};
 }
 
@@ -101,5 +104,41 @@ void BuildMapChunkSceneView(const PTMapWorld& mapWorld, const PTMapChunk& chunk,
 	{
 		AppendSurfaceToSceneView(mapWorld.surfaces[surfaceIndex], outView);
 	}
+}
+
+int32_t FindMapWorldLocalSpaceIndex(const PTMapWorld& mapWorld, uint32_t chunkIndex)
+{
+	if (chunkIndex >= mapWorld.chunks.size())
+	{
+		return -1;
+	}
+
+	const uint32_t localSpaceIndex = mapWorld.chunks[chunkIndex].localSpaceIndex;
+	return localSpaceIndex < mapWorld.localSpaces.size() ? (int32_t)localSpaceIndex : -1;
+}
+
+int32_t FindMapWorldPortalIndex(const PTMapWorld& mapWorld, const SurfaceProvenance& provenance)
+{
+	for (const PTMapPortal& portal : mapWorld.portals)
+	{
+		if (portal.sourceSurfaceIndex != UINT32_MAX && portal.sourceSurfaceIndex < mapWorld.surfaces.size())
+		{
+			const SurfaceProvenance& portalProvenance = mapWorld.surfaces[portal.sourceSurfaceIndex].surface.provenance;
+			if (portalProvenance.sourceType == provenance.sourceType &&
+				portalProvenance.sectorIndex == provenance.sectorIndex &&
+				portalProvenance.wallIndex == provenance.wallIndex &&
+				portalProvenance.sectionIndex == provenance.sectionIndex)
+			{
+				return (int32_t)portal.portalIndex;
+			}
+		}
+
+		if (portal.sourceWallIndex >= 0 && portal.sourceWallIndex == provenance.wallIndex)
+		{
+			return (int32_t)portal.portalIndex;
+		}
+	}
+
+	return -1;
 }
 }
