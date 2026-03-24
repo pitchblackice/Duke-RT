@@ -4274,6 +4274,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		const RuntimeTransportLinkInfo& transportLink = runtimeTransportLinks[i];
 		const uint32_t sourceLocalSpaceIndex = getLocalSpaceIndex(transportLink.sourceSectorIndex);
 		const uint32_t destinationLocalSpaceIndex = getLocalSpaceIndex(transportLink.destinationSectorIndex);
+		const bool oneWay = (transportLink.flags & RuntimeTransportLinkFlag_OneWay) != 0;
 
 		if (candidateLocalSpaceIndex != UINT32_MAX)
 		{
@@ -4282,7 +4283,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 				appendTransportOverlay(destinationLocalSpaceIndex, transportLink.mapDx, transportLink.mapDy);
 				continue;
 			}
-			if (candidateLocalSpaceIndex == destinationLocalSpaceIndex && sourceLocalSpaceIndex != UINT32_MAX)
+			if (!oneWay && candidateLocalSpaceIndex == destinationLocalSpaceIndex && sourceLocalSpaceIndex != UINT32_MAX)
 			{
 				appendTransportOverlay(sourceLocalSpaceIndex, -transportLink.mapDx, -transportLink.mapDy);
 				continue;
@@ -4293,7 +4294,9 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		{
 			appendTransportOverlay(destinationLocalSpaceIndex, transportLink.mapDx, transportLink.mapDy);
 		}
-		else if ((transportLink.flags & RuntimeTransportLinkFlag_DestinationNearby) != 0 && sourceLocalSpaceIndex != UINT32_MAX)
+		else if (!oneWay &&
+			(transportLink.flags & RuntimeTransportLinkFlag_DestinationNearby) != 0 &&
+			sourceLocalSpaceIndex != UINT32_MAX)
 		{
 			appendTransportOverlay(sourceLocalSpaceIndex, -transportLink.mapDx, -transportLink.mapDy);
 		}
