@@ -216,6 +216,72 @@ namespace
 		return false;
 	}
 
+	static bool SectorMaskContains(const std::vector<uint8_t>& sectorMask, int32_t sectorIndex)
+	{
+		return sectorIndex >= 0 &&
+			(size_t)sectorIndex < sectorMask.size() &&
+			sectorMask[(size_t)sectorIndex] != 0;
+	}
+
+	static void FilterDynamicSceneBySectorMask(const std::vector<uint8_t>& suppressedSectorMask, nri_scene::SceneView& ioView)
+	{
+		if (suppressedSectorMask.empty() || ioView.opaqueSprites.empty())
+		{
+			return;
+		}
+
+		auto shouldKeepSprite = [&](const nri_scene::SurfaceRef& sprite)
+		{
+			return !SectorMaskContains(suppressedSectorMask, sprite.provenance.sectorIndex);
+		};
+
+		ioView.opaqueSprites.erase(
+			std::remove_if(
+				ioView.opaqueSprites.begin(),
+				ioView.opaqueSprites.end(),
+				[&](const nri_scene::SurfaceRef& sprite)
+				{
+					return !shouldKeepSprite(sprite);
+				}),
+			ioView.opaqueSprites.end());
+
+		nri_scene::SceneDebugStats filteredStats = {};
+		std::vector<int32_t> voxelActors;
+		for (const auto& sprite : ioView.opaqueSprites)
+		{
+			filteredStats.triangleEstimate += sprite.vertices.size() >= 3 ? (unsigned int)sprite.vertices.size() - 2 : 0;
+			filteredStats.materialRefs++;
+
+			switch (sprite.provenance.sourceType)
+			{
+			case nri_scene::SurfaceSourceType::FacingSprite:
+				filteredStats.spriteDrawItems++;
+				filteredStats.translucentDrawItems++;
+				break;
+
+			case nri_scene::SurfaceSourceType::VoxelProxySprite:
+			{
+				filteredStats.voxelProxyDrawItems++;
+				const int32_t actorIndex = sprite.provenance.actorIndex;
+				if (std::find(voxelActors.begin(), voxelActors.end(), actorIndex) == voxelActors.end())
+				{
+					voxelActors.push_back(actorIndex);
+					filteredStats.spriteDrawItems++;
+					filteredStats.modelDrawItems++;
+				}
+				break;
+			}
+
+			default:
+				filteredStats.spriteDrawItems++;
+				break;
+			}
+		}
+
+		filteredStats.totalDrawItems = filteredStats.spriteDrawItems;
+		ioView.stats = filteredStats;
+	}
+
 	static const char* GetSkyModeName(nri_scene::PTSkyMode mode)
 	{
 		switch (mode)
@@ -1377,6 +1443,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	bool texturesReady = true;
 	bool buffersReady = true;
 	bool accelerationReady = true;
+	std::vector<uint8_t> runtimeSpaceLinkReplacedChunkMask;
 
 	if (allowStaticMapScene && EnsureStaticMapScene())
 	{
@@ -1387,9 +1454,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		activeStats = mStaticMapScene.sceneView.stats;
 
 		const bool deferOverlayThisFrame = mUploadedStaticMapSceneLastFrame || mBuiltStaticMapSceneASLastFrame;
-		const bool hasRuntimeSpaceLinkOverlay = !deferOverlayThisFrame && BuildRuntimeSpaceLinkOverlay(di, runtimeSpaceLinkGeometry, runtimeSpaceLinkMaterialBridge);
-		const bool hasRuntimeMutationOverlay = !deferOverlayThisFrame && BuildRuntimeMapMutationOverlay(runtimeMutationGeometry, runtimeMutationMaterialBridge);
-		const bool hasDynamicScene = !deferOverlayThisFrame && nri_scene::CaptureDynamicScene(di, dynamicSceneView);
+		const bool hasRuntimeSpaceLinkOverlay = !deferOverlayThisFrame && BuildRuntimeSpaceLinkOverlay(di, runtimeSpaceLinkGeometry, runtimeSpaceLinkMaterialBridge, &runtimeSpaceLinkReplacedChunkMask);
+		const bool hasRuntimeMutationOverlay = !deferOverlayThisFrame && BuildRuntimeMapMutationOverlay(runtimeMutationGeometry, runtimeMutationMaterialBridge, hasRuntimeSpaceLinkOverlay ? &runtimeSpaceLinkReplacedChunkMask : nullptr);
+		bool hasDynamicScene = !deferOverlayThisFrame && nri_scene::CaptureDynamicScene(di, dynamicSceneView);
+		if (hasDynamicScene && hasRuntimeSpaceLinkOverlay && !runtimeSpaceLinkReplacedChunkMask.empty())
+		{
+			FilterDynamicSceneBySectorMask(runtimeSpaceLinkReplacedChunkMask, dynamicSceneView);
+			hasDynamicScene = !dynamicSceneView.opaqueSprites.empty();
+		}
 		if (hasDynamicScene)
 		{
 			{
@@ -1438,7 +1510,33 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 			std::vector<nri::TopLevelInstance> instances;
 			std::vector<SceneInstanceData> sceneInstances;
-			const std::vector<uint8_t>* replacedChunkMask = hasRuntimeMutationOverlay ? &mRuntimeMapMutations.replacedChunkMask : nullptr;
+			std::vector<uint8_t> combinedReplacedChunkMask;
+			const std::vector<uint8_t>* replacedChunkMask = nullptr;
+			if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay)
+			{
+				combinedReplacedChunkMask.assign(mMapWorld.chunks.size(), 0u);
+				if (hasRuntimeSpaceLinkOverlay)
+				{
+					for (size_t chunkIndex = 0; chunkIndex < std::min(combinedReplacedChunkMask.size(), runtimeSpaceLinkReplacedChunkMask.size()); ++chunkIndex)
+					{
+						if (runtimeSpaceLinkReplacedChunkMask[chunkIndex] != 0)
+						{
+							combinedReplacedChunkMask[chunkIndex] = 1u;
+						}
+					}
+				}
+				if (hasRuntimeMutationOverlay)
+				{
+					for (size_t chunkIndex = 0; chunkIndex < std::min(combinedReplacedChunkMask.size(), mRuntimeMapMutations.replacedChunkMask.size()); ++chunkIndex)
+					{
+						if (mRuntimeMapMutations.replacedChunkMask[chunkIndex] != 0)
+						{
+							combinedReplacedChunkMask[chunkIndex] = 1u;
+						}
+					}
+				}
+				replacedChunkMask = &combinedReplacedChunkMask;
+			}
 			BuildStaticMapInstances(instances, sceneInstances, replacedChunkMask);
 
 			if (overlayGeometry.primitives.empty())
@@ -1991,7 +2089,7 @@ void NRIRenderer::PrintRuntimeMapMutationStatus() const
 
 void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
 {
-	Printf("NRI PT runtime links: active=%s geo_effect=%s transport=%s query_attempted=%s query_rejected=%s candidate_sector=%d candidate_lotag=%d source_sector=%d reported_geo_count=%d view_roots=%u visible_sectors=%u providers=%u geo_providers=%u provider_groups=%u local_space_matches=%u visible_matches=%u links=%u transport_links=%u transport_spaces=%u translated_chunks=%u orphan_local_spaces=%u unresolved_runtime_portals=%u surfaces=%u tris=%u materials=%u\n",
+	Printf("NRI PT runtime links: active=%s geo_effect=%s transport=%s query_attempted=%s query_rejected=%s candidate_sector=%d candidate_lotag=%d source_sector=%d reported_geo_count=%d view_roots=%u visible_sectors=%u providers=%u geo_providers=%u provider_groups=%u local_space_matches=%u visible_matches=%u links=%u transport_links=%u transport_spaces=%u replaced_chunks=%u translated_chunks=%u orphan_local_spaces=%u unresolved_runtime_portals=%u surfaces=%u tris=%u materials=%u\n",
 		mRuntimeSpaceLinkLastFrame.active ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.geoEffectActive ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.transportActive ? "yes" : "no",
@@ -2011,6 +2109,7 @@ void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
 		mRuntimeSpaceLinkLastFrame.linkCount,
 		mRuntimeSpaceLinkLastFrame.transportLinkCount,
 		mRuntimeSpaceLinkLastFrame.transportLocalSpaceCount,
+		mRuntimeSpaceLinkLastFrame.replacedChunkCount,
 		mRuntimeSpaceLinkLastFrame.translatedChunkCount,
 		mRuntimeSpaceLinkLastFrame.orphanLocalSpaceCount,
 		mRuntimeSpaceLinkLastFrame.unresolvedRuntimePortalCount,
@@ -3962,7 +4061,7 @@ void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& ou
 	}
 }
 
-bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)
+bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, const std::vector<uint8_t>* suppressedChunkMask)
 {
 	outGeometry = {};
 	outMaterials = {};
@@ -4052,6 +4151,15 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mRuntimeMapLastFrame.blindSpotChunkCount++;
 		}
 
+		if (suppressedChunkMask != nullptr &&
+			chunkIndex < suppressedChunkMask->size() &&
+			(*suppressedChunkMask)[chunkIndex] != 0)
+		{
+			replacement.active = false;
+			TraceRuntimeMapMutationChunk(mapChunk, replacement);
+			continue;
+		}
+
 		if (!replacement.valid || cachedSignature != replacement.liveSignature || forceTopologyInvalidation)
 		{
 			nri_scene::SceneView liveChunkView;
@@ -4113,13 +4221,17 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	return mRuntimeMapLastFrame.active;
 }
 
-bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)
+bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, std::vector<uint8_t>* outReplacedChunkMask)
 {
 	outGeometry = {};
 	outMaterials = {};
 	mRuntimeSpaceLinkLastFrame = {};
 	mRuntimeSpaceLinkLastFrame.orphanLocalSpaceCount = CountOrphanLocalSpaces(mMapWorld);
 	mRuntimeSpaceLinkLastFrame.unresolvedRuntimePortalCount = mMapWorld.stats.runtimePortalCount;
+	if (outReplacedChunkMask != nullptr)
+	{
+		outReplacedChunkMask->assign(mMapWorld.chunks.size(), 0u);
+	}
 
 	if (!mMapWorld.valid)
 	{
@@ -4159,7 +4271,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 	mRuntimeSpaceLinkLastFrame.candidateSectorLotag = sector[(unsigned)effectSectorIndex].lotag;
 	mRuntimeSpaceLinkLastFrame.queryAttempted = true;
 
-	std::array<int32_t, 16> nearbyTransportSectors = {};
+	std::array<int32_t, 32> nearbyTransportSectors = {};
 	uint32_t nearbyTransportSectorCount = 0;
 	const auto appendNearbyTransportSector = [&](int32_t sectorIndex)
 	{
@@ -4251,8 +4363,10 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 
 	struct RuntimeTransportOverlay
 	{
-		int32_t anchorSectorIndex = -1;
-		uint32_t localSpaceIndex = UINT32_MAX;
+		int32_t translatedAnchorSectorIndex = -1;
+		uint32_t translatedLocalSpaceIndex = UINT32_MAX;
+		int32_t replacedAnchorSectorIndex = -1;
+		uint32_t replacedLocalSpaceIndex = UINT32_MAX;
 		float mapDx = 0.0f;
 		float mapDy = 0.0f;
 		int priority = 0;
@@ -4260,17 +4374,22 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 
 	std::vector<RuntimeTransportOverlay> transportOverlays;
 	transportOverlays.reserve(runtimeTransportLinkCount);
-	const auto appendTransportOverlay = [&](int32_t anchorSectorIndex, uint32_t localSpaceIndex, float mapDx, float mapDy, int priority)
+	const auto appendTransportOverlay = [&](int32_t translatedAnchorSectorIndex, uint32_t translatedLocalSpaceIndex, int32_t replacedAnchorSectorIndex, uint32_t replacedLocalSpaceIndex, float mapDx, float mapDy, int priority)
 	{
-		if (!validSectorIndex(anchorSectorIndex) || localSpaceIndex == UINT32_MAX)
+		if (!validSectorIndex(translatedAnchorSectorIndex) ||
+			!validSectorIndex(replacedAnchorSectorIndex) ||
+			translatedLocalSpaceIndex == UINT32_MAX ||
+			replacedLocalSpaceIndex == UINT32_MAX)
 		{
 			return;
 		}
 
 		for (RuntimeTransportOverlay& existing : transportOverlays)
 		{
-			if (existing.anchorSectorIndex == anchorSectorIndex &&
-				existing.localSpaceIndex == localSpaceIndex &&
+			if (existing.translatedAnchorSectorIndex == translatedAnchorSectorIndex &&
+				existing.translatedLocalSpaceIndex == translatedLocalSpaceIndex &&
+				existing.replacedAnchorSectorIndex == replacedAnchorSectorIndex &&
+				existing.replacedLocalSpaceIndex == replacedLocalSpaceIndex &&
 				fabs(existing.mapDx - mapDx) < 0.001f &&
 				fabs(existing.mapDy - mapDy) < 0.001f)
 			{
@@ -4280,8 +4399,10 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		}
 
 		RuntimeTransportOverlay overlay = {};
-		overlay.anchorSectorIndex = anchorSectorIndex;
-		overlay.localSpaceIndex = localSpaceIndex;
+		overlay.translatedAnchorSectorIndex = translatedAnchorSectorIndex;
+		overlay.translatedLocalSpaceIndex = translatedLocalSpaceIndex;
+		overlay.replacedAnchorSectorIndex = replacedAnchorSectorIndex;
+		overlay.replacedLocalSpaceIndex = replacedLocalSpaceIndex;
 		overlay.mapDx = mapDx;
 		overlay.mapDy = mapDy;
 		overlay.priority = priority;
@@ -4343,25 +4464,25 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		{
 			if (candidateLocalSpaceIndex == sourceLocalSpaceIndex && destinationLocalSpaceIndex != UINT32_MAX)
 			{
-				appendTransportOverlay(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, transportLink.mapDx, transportLink.mapDy, forwardPriority);
+				appendTransportOverlay(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.mapDx, transportLink.mapDy, forwardPriority);
 				continue;
 			}
 			if (!oneWay && candidateLocalSpaceIndex == destinationLocalSpaceIndex && sourceLocalSpaceIndex != UINT32_MAX)
 			{
-				appendTransportOverlay(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, -transportLink.mapDx, -transportLink.mapDy, reversePriority);
+				appendTransportOverlay(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.destinationSectorIndex, destinationLocalSpaceIndex, -transportLink.mapDx, -transportLink.mapDy, reversePriority);
 				continue;
 			}
 		}
 
 		if (sourceNearby && destinationLocalSpaceIndex != UINT32_MAX)
 		{
-			appendTransportOverlay(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, transportLink.mapDx, transportLink.mapDy, forwardPriority);
+			appendTransportOverlay(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.mapDx, transportLink.mapDy, forwardPriority);
 		}
 		else if (!oneWay &&
 			destinationNearby &&
 			sourceLocalSpaceIndex != UINT32_MAX)
 		{
-			appendTransportOverlay(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, -transportLink.mapDx, -transportLink.mapDy, reversePriority);
+			appendTransportOverlay(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.destinationSectorIndex, destinationLocalSpaceIndex, -transportLink.mapDx, -transportLink.mapDy, reversePriority);
 		}
 	}
 	if (transportOverlays.size() > 1)
@@ -4374,12 +4495,12 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 					return a.priority < b.priority;
 				}
 
-				if (a.anchorSectorIndex != b.anchorSectorIndex)
+				if (a.translatedAnchorSectorIndex != b.translatedAnchorSectorIndex)
 				{
-					return a.anchorSectorIndex > b.anchorSectorIndex;
+					return a.translatedAnchorSectorIndex > b.translatedAnchorSectorIndex;
 				}
 
-				return a.localSpaceIndex > b.localSpaceIndex;
+				return a.translatedLocalSpaceIndex > b.translatedLocalSpaceIndex;
 			});
 		const RuntimeTransportOverlay bestOverlay = *bestIt;
 		transportOverlays.clear();
@@ -4387,6 +4508,81 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 	}
 	mRuntimeSpaceLinkLastFrame.transportLocalSpaceCount = (uint32_t)transportOverlays.size();
 	mRuntimeSpaceLinkLastFrame.transportActive = !transportOverlays.empty();
+
+	const auto collectTransportNeighborhood = [&](int32_t anchorSectorIndex, uint32_t localSpaceIndex, std::vector<int32_t>& outSectors)
+	{
+		outSectors.clear();
+		if (!validSectorIndex(anchorSectorIndex) || localSpaceIndex == UINT32_MAX)
+		{
+			return;
+		}
+
+		std::array<int32_t, 56> overlaySectorQueue = {};
+		std::array<uint8_t, 56> overlaySectorTerminal = {};
+		uint32_t overlaySectorCount = 0;
+		uint32_t overlaySectorReadIndex = 0;
+		const auto appendOverlaySector = [&](int32_t sectorIndex, bool terminal)
+		{
+			if (!validSectorIndex(sectorIndex))
+			{
+				return;
+			}
+
+			if (mMapWorld.chunks[(unsigned)sectorIndex].localSpaceIndex != localSpaceIndex)
+			{
+				return;
+			}
+
+			for (uint32_t i = 0; i < overlaySectorCount; ++i)
+			{
+				if (overlaySectorQueue[i] == sectorIndex)
+				{
+					if (!terminal)
+					{
+						overlaySectorTerminal[i] = 0;
+					}
+					return;
+				}
+			}
+
+			if (overlaySectorCount < overlaySectorQueue.size())
+			{
+				overlaySectorQueue[overlaySectorCount++] = sectorIndex;
+				overlaySectorTerminal[overlaySectorCount - 1] = terminal ? 1u : 0u;
+			}
+		};
+
+		appendOverlaySector(anchorSectorIndex, false);
+		while (overlaySectorReadIndex < overlaySectorCount)
+		{
+			const uint32_t queueIndex = overlaySectorReadIndex++;
+			const int32_t sectorIndex = overlaySectorQueue[queueIndex];
+			if (overlaySectorTerminal[queueIndex] != 0)
+			{
+				continue;
+			}
+
+			RuntimeTaggedSectorDebugInfo sectorInfo = {};
+			const bool stopAtTransportControl = sectorIndex != anchorSectorIndex &&
+				GetRuntimeSectorControlInfo(sectorIndex, sectorInfo) &&
+				HasRuntimeTransportEffector(sectorInfo);
+
+			const auto& sec = sector[(unsigned)sectorIndex];
+			for (const auto& wal : sec.walls)
+			{
+				if (wal.twoSided())
+				{
+					appendOverlaySector(wal.nextsector, stopAtTransportControl);
+				}
+			}
+		}
+
+		outSectors.reserve(overlaySectorCount);
+		for (uint32_t i = 0; i < overlaySectorCount; ++i)
+		{
+			outSectors.push_back(overlaySectorQueue[i]);
+		}
+	};
 
 	const auto sectorMatchesVisibleSet = [&](int sectorIndex) -> bool
 	{
@@ -4616,69 +4812,26 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 
 	for (const RuntimeTransportOverlay& overlay : transportOverlays)
 	{
-		std::array<int32_t, 40> overlaySectorQueue = {};
-		std::array<uint8_t, 40> overlaySectorTerminal = {};
-		uint32_t overlaySectorCount = 0;
-		uint32_t overlaySectorReadIndex = 0;
-		const auto appendOverlaySector = [&](int32_t sectorIndex, bool terminal)
+		std::vector<int32_t> translatedSectors;
+		std::vector<int32_t> replacedSectors;
+		collectTransportNeighborhood(overlay.translatedAnchorSectorIndex, overlay.translatedLocalSpaceIndex, translatedSectors);
+		collectTransportNeighborhood(overlay.replacedAnchorSectorIndex, overlay.replacedLocalSpaceIndex, replacedSectors);
+
+		if (outReplacedChunkMask != nullptr)
 		{
-			if (!validSectorIndex(sectorIndex))
+			for (int32_t sectorIndex : replacedSectors)
 			{
-				return;
-			}
-
-			if (mMapWorld.chunks[(unsigned)sectorIndex].localSpaceIndex != overlay.localSpaceIndex)
-			{
-				return;
-			}
-
-			for (uint32_t i = 0; i < overlaySectorCount; ++i)
-			{
-				if (overlaySectorQueue[i] == sectorIndex)
+				if (sectorIndex >= 0 && (size_t)sectorIndex < outReplacedChunkMask->size() && (*outReplacedChunkMask)[(size_t)sectorIndex] == 0)
 				{
-					if (!terminal)
-					{
-						overlaySectorTerminal[i] = 0;
-					}
-					return;
-				}
-			}
-
-			if (overlaySectorCount < overlaySectorQueue.size())
-			{
-				overlaySectorQueue[overlaySectorCount++] = sectorIndex;
-				overlaySectorTerminal[overlaySectorCount - 1] = terminal ? 1u : 0u;
-			}
-		};
-
-		appendOverlaySector(overlay.anchorSectorIndex, false);
-		while (overlaySectorReadIndex < overlaySectorCount)
-		{
-			const uint32_t queueIndex = overlaySectorReadIndex++;
-			const int32_t sectorIndex = overlaySectorQueue[queueIndex];
-			if (overlaySectorTerminal[queueIndex] != 0)
-			{
-				continue;
-			}
-
-			RuntimeTaggedSectorDebugInfo sectorInfo = {};
-			const bool stopAtTransportControl = sectorIndex != overlay.anchorSectorIndex &&
-				GetRuntimeSectorControlInfo(sectorIndex, sectorInfo) &&
-				HasRuntimeTransportEffector(sectorInfo);
-
-			const auto& sec = sector[(unsigned)sectorIndex];
-			for (const auto& wal : sec.walls)
-			{
-				if (wal.twoSided())
-				{
-					appendOverlaySector(wal.nextsector, stopAtTransportControl);
+					(*outReplacedChunkMask)[(size_t)sectorIndex] = 1u;
+					mRuntimeSpaceLinkLastFrame.replacedChunkCount++;
 				}
 			}
 		}
 
-		for (uint32_t sectorListIndex = 0; sectorListIndex < overlaySectorCount; ++sectorListIndex)
+		for (int32_t sectorIndex : translatedSectors)
 		{
-			const auto& mapChunk = mMapWorld.chunks[(unsigned)overlaySectorQueue[sectorListIndex]];
+			const auto& mapChunk = mMapWorld.chunks[(unsigned)sectorIndex];
 
 			nri_scene::SceneView liveChunkView;
 			nri_scene::PTMapWorldStats liveStats = {};

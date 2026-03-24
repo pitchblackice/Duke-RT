@@ -231,6 +231,7 @@ private:
 		uint32_t linkCount = 0;
 		uint32_t transportLinkCount = 0;
 		uint32_t transportLocalSpaceCount = 0;
+		uint32_t replacedChunkCount = 0;
 		uint32_t translatedChunkCount = 0;
 		uint32_t orphanLocalSpaceCount = 0;
 		uint32_t unresolvedRuntimePortalCount = 0;
@@ -292,8 +293,8 @@ private:
 	bool BuildStaticMapAccelerationStructures();
 	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask);
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
-	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
-	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, const std::vector<uint8_t>* suppressedChunkMask = nullptr);
+	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, std::vector<uint8_t>* outReplacedChunkMask = nullptr);
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
