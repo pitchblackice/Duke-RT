@@ -3381,6 +3381,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		replacement.sectorDirty = analysis.sectorDirty;
 		replacement.dragged = analysis.dragged;
 		replacement.blindSpot = analysis.reasonMask != nri_scene::PTMapChunkMutationReason_None && !analysis.signatureChanged;
+		const bool forceTopologyInvalidation =
+			(analysis.reasonMask & (nri_scene::PTMapChunkMutationReason_SectorDirty |
+				nri_scene::PTMapChunkMutationReason_SectionDirty |
+				nri_scene::PTMapChunkMutationReason_Dragged)) != 0;
 
 		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0)
 		{
@@ -3422,12 +3426,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		if (replacement.blindSpot)
 		{
 			mRuntimeMapLastFrame.blindSpotChunkCount++;
-			replacement.active = false;
-			TraceRuntimeMapMutationChunk(mapChunk, replacement);
-			continue;
 		}
 
-		if (!replacement.valid || cachedSignature != replacement.liveSignature)
+		if (!replacement.valid || cachedSignature != replacement.liveSignature || forceTopologyInvalidation)
 		{
 			nri_scene::SceneView liveChunkView;
 			nri_scene::PTMapWorldStats liveStats = {};
