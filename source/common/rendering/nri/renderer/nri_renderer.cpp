@@ -41,6 +41,7 @@ CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptportalbridge, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_pttraceframes)
 
@@ -59,6 +60,105 @@ namespace
 	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
 	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
 	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
+
+	struct PTInstanceTransform
+	{
+		float rows[3][4] = {};
+	};
+
+	struct PortalBridgeTranslatedSpaceKey
+	{
+		uint32_t localSpaceIndex = UINT32_MAX;
+		int64_t deltaX = 0;
+		int64_t deltaY = 0;
+		int64_t deltaZ = 0;
+	};
+
+	static PTInstanceTransform MakeIdentityInstanceTransform()
+	{
+		PTInstanceTransform transform = {};
+		transform.rows[0][0] = 1.0f;
+		transform.rows[1][1] = 1.0f;
+		transform.rows[2][2] = 1.0f;
+		return transform;
+	}
+
+	static PTInstanceTransform MakeTranslatedInstanceTransform(const double delta[3])
+	{
+		PTInstanceTransform transform = MakeIdentityInstanceTransform();
+		transform.rows[0][3] = (float)delta[0];
+		transform.rows[1][3] = (float)delta[1];
+		transform.rows[2][3] = (float)delta[2];
+		return transform;
+	}
+
+	static bool MakeWallMirrorInstanceTransform(const walltype& wal, PTInstanceTransform& outTransform)
+	{
+		const DVector2 p0 = { wal.pos.X, -wal.pos.Y };
+		const DVector2 p1 = { wal.point2Wall()->pos.X, -wal.point2Wall()->pos.Y };
+		DVector2 line = p1 - p0;
+		const double lengthSq = line.X * line.X + line.Y * line.Y;
+		if (lengthSq <= 1e-8)
+		{
+			return false;
+		}
+
+		const double invLength = 1.0 / sqrt(lengthSq);
+		line.X *= invLength;
+		line.Y *= invLength;
+
+		const double nx = -line.Y;
+		const double nz = line.X;
+		const double planeOffset = nx * p0.X + nz * p0.Y;
+
+		outTransform = {};
+		outTransform.rows[0][0] = (float)(1.0 - 2.0 * nx * nx);
+		outTransform.rows[0][1] = 0.0f;
+		outTransform.rows[0][2] = (float)(-2.0 * nx * nz);
+		outTransform.rows[0][3] = (float)(2.0 * planeOffset * nx);
+		outTransform.rows[1][0] = 0.0f;
+		outTransform.rows[1][1] = 1.0f;
+		outTransform.rows[1][2] = 0.0f;
+		outTransform.rows[1][3] = 0.0f;
+		outTransform.rows[2][0] = (float)(-2.0 * nz * nx);
+		outTransform.rows[2][1] = 0.0f;
+		outTransform.rows[2][2] = (float)(1.0 - 2.0 * nz * nz);
+		outTransform.rows[2][3] = (float)(2.0 * planeOffset * nz);
+		return true;
+	}
+
+	static bool MakeSectorMirrorInstanceTransform(const sectortype& sec, int plane, PTInstanceTransform& outTransform)
+	{
+		if (plane != 0 && plane != 1)
+		{
+			return false;
+		}
+
+		const double height = -(plane == 0 ? sec.floorz : sec.ceilingz);
+		outTransform = MakeIdentityInstanceTransform();
+		outTransform.rows[1][1] = -1.0f;
+		outTransform.rows[1][3] = (float)(2.0 * height);
+		return true;
+	}
+
+	static PortalBridgeTranslatedSpaceKey MakeTranslatedSpaceKey(uint32_t localSpaceIndex, const double delta[3])
+	{
+		constexpr double scale = 1024.0;
+		PortalBridgeTranslatedSpaceKey key = {};
+		key.localSpaceIndex = localSpaceIndex;
+		key.deltaX = (int64_t)llround(delta[0] * scale);
+		key.deltaY = (int64_t)llround(delta[1] * scale);
+		key.deltaZ = (int64_t)llround(delta[2] * scale);
+		return key;
+	}
+
+	static bool SameTranslatedSpaceKey(const PortalBridgeTranslatedSpaceKey& a, const PortalBridgeTranslatedSpaceKey& b)
+	{
+		return a.localSpaceIndex == b.localSpaceIndex &&
+			a.deltaX == b.deltaX &&
+			a.deltaY == b.deltaY &&
+			a.deltaZ == b.deltaZ;
+	}
 
 	template<typename T>
 	static T NRIFlags(T a, T b)
@@ -1536,8 +1636,9 @@ void NRIRenderer::PrintStatus() const
 		GetUpscalerModeName(GetSelectedUpscalerMode()),
 		(float)nri_renderscale,
 		(float)nri_sharpness);
-	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u surface_probe=%d\n",
+	Printf("NRI PT tracing: direct_scene_fallback=%s portal_bridge=%s light_bounces=%u mirror_bounces=%u surface_probe=%d\n",
 		nri_ptdirectscene ? "on" : "off",
+		nri_ptportalbridge ? "on" : "off",
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
 		(int)nri_ptsurfaceprobe);
@@ -1577,6 +1678,7 @@ void NRIRenderer::PrintStatus() const
 	PrintStaticMapSceneStatus();
 	PrintDynamicSceneStatus();
 	PrintRuntimeMapMutationStatus();
+	PrintPortalBridgeStatus();
 	PrintSceneBufferStatus();
 	PrintSurfaceProbeStatus();
 }
@@ -1663,6 +1765,18 @@ void NRIRenderer::PrintRuntimeMapMutationStatus() const
 		mRuntimeMapLastFrame.replacementSurfaceCount,
 		mRuntimeMapLastFrame.replacementTriangleCount,
 		mRuntimeMapLastFrame.materialCount);
+}
+
+void NRIRenderer::PrintPortalBridgeStatus() const
+{
+	Printf("NRI PT portal bridge: active=%s camera_local_space=%d source_portals=%u extra_instances=%u mirror_instances=%u translated_instances=%u bridged_local_spaces=%u\n",
+		mPortalBridgeLastFrame.active ? "yes" : "no",
+		mPortalBridgeLastFrame.cameraLocalSpaceIndex,
+		mPortalBridgeLastFrame.sourcePortalCount,
+		mPortalBridgeLastFrame.portalInstanceCount,
+		mPortalBridgeLastFrame.mirroredInstanceCount,
+		mPortalBridgeLastFrame.translatedInstanceCount,
+		mPortalBridgeLastFrame.bridgedLocalSpaceCount);
 }
 
 void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement)
@@ -3325,12 +3439,34 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 			0u);
 }
 
-void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask) const
+void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask)
 {
 	outTlasInstances.clear();
 	outSceneInstances.clear();
 	outTlasInstances.reserve(mStaticMapScene.chunks.size());
 	outSceneInstances.reserve(mStaticMapScene.chunks.size());
+	mPortalBridgeLastFrame = {};
+
+	auto appendChunkInstance = [this, &outTlasInstances, &outSceneInstances](const StaticMapSceneCache::ChunkCache& chunk, const PTInstanceTransform& transform, uint32_t localSpaceIndex, uint32_t portalIndex)
+	{
+		nri::TopLevelInstance instance = {};
+		for (uint32_t row = 0; row < 3; ++row)
+		{
+			for (uint32_t col = 0; col < 4; ++col)
+			{
+				instance.transform[row][col] = transform.rows[row][col];
+			}
+		}
+		instance.instanceId = (uint32_t)outSceneInstances.size();
+		instance.mask = 0xFF;
+		instance.shaderBindingTableLocalOffset = 0;
+		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		outTlasInstances.push_back(instance);
+		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, localSpaceIndex, portalIndex });
+	};
+
+	std::vector<const StaticMapSceneCache::ChunkCache*> localSpaceChunkCaches(mMapWorld.chunks.size(), nullptr);
 
 	for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)mStaticMapScene.chunks.size(); ++chunkIndex)
 	{
@@ -3347,17 +3483,179 @@ void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& ou
 			continue;
 		}
 
-		nri::TopLevelInstance instance = {};
-		instance.transform[0][0] = 1.0f;
-		instance.transform[1][1] = 1.0f;
-		instance.transform[2][2] = 1.0f;
-		instance.instanceId = (uint32_t)outSceneInstances.size();
-		instance.mask = 0xFF;
-		instance.shaderBindingTableLocalOffset = 0;
-		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
-		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, 0u, 0u });
+		appendChunkInstance(chunk, MakeIdentityInstanceTransform(), chunk.chunkIndex < mMapWorld.chunks.size() ? mMapWorld.chunks[chunk.chunkIndex].localSpaceIndex : UINT32_MAX, UINT32_MAX);
+		if (chunk.chunkIndex < localSpaceChunkCaches.size())
+		{
+			localSpaceChunkCaches[chunk.chunkIndex] = &chunk;
+		}
+	}
+
+	if (!nri_ptportalbridge || !mMapWorld.valid || mMapWorld.portals.empty() || mMapWorld.localSpaces.empty())
+	{
+		return;
+	}
+
+	sectortype* cameraSector = nullptr;
+	updatesectorz(DVector3(mCurrentCameraPos[0], -mCurrentCameraPos[2], -mCurrentCameraPos[1]), &cameraSector);
+	if (cameraSector == nullptr)
+	{
+		return;
+	}
+
+	const int cameraSectorIndex = sector.IndexOf(cameraSector);
+	if (cameraSectorIndex < 0 || (unsigned)cameraSectorIndex >= mMapWorld.chunks.size())
+	{
+		return;
+	}
+
+	const int32_t cameraLocalSpaceIndex = nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)cameraSectorIndex);
+	if (cameraLocalSpaceIndex < 0 || (unsigned)cameraLocalSpaceIndex >= mMapWorld.localSpaces.size())
+	{
+		return;
+	}
+
+	mPortalBridgeLastFrame.active = true;
+	mPortalBridgeLastFrame.cameraLocalSpaceIndex = cameraLocalSpaceIndex;
+
+	std::vector<std::vector<const StaticMapSceneCache::ChunkCache*>> chunksByLocalSpace(mMapWorld.localSpaces.size());
+	for (uint32_t mapChunkIndex = 0; mapChunkIndex < localSpaceChunkCaches.size(); ++mapChunkIndex)
+	{
+		const auto* chunkCache = localSpaceChunkCaches[mapChunkIndex];
+		if (chunkCache == nullptr || mapChunkIndex >= mMapWorld.chunks.size())
+		{
+			continue;
+		}
+
+		const uint32_t localSpaceIndex = mMapWorld.chunks[mapChunkIndex].localSpaceIndex;
+		if (localSpaceIndex < chunksByLocalSpace.size())
+		{
+			chunksByLocalSpace[localSpaceIndex].push_back(chunkCache);
+		}
+	}
+
+	std::vector<uint8_t> bridgedLocalSpaceMask(mMapWorld.localSpaces.size(), 0u);
+	std::vector<PortalBridgeTranslatedSpaceKey> translatedSpaceKeys;
+
+	for (const nri_scene::PTMapPortal& portal : mMapWorld.portals)
+	{
+		if ((int32_t)portal.sourceLocalSpaceIndex != cameraLocalSpaceIndex)
+		{
+			continue;
+		}
+
+		mPortalBridgeLastFrame.sourcePortalCount++;
+
+		switch (portal.kind)
+		{
+		case nri_scene::PTPortalKind::WallMirror:
+		{
+			if (portal.sourceWallIndex < 0 || (unsigned)portal.sourceWallIndex >= wall.Size() ||
+				(unsigned)cameraLocalSpaceIndex >= chunksByLocalSpace.size())
+			{
+				break;
+			}
+
+			PTInstanceTransform transform = {};
+			if (!MakeWallMirrorInstanceTransform(wall[(unsigned)portal.sourceWallIndex], transform))
+			{
+				break;
+			}
+
+			for (const auto* chunkCache : chunksByLocalSpace[(unsigned)cameraLocalSpaceIndex])
+			{
+				appendChunkInstance(*chunkCache, transform, (uint32_t)cameraLocalSpaceIndex, portal.portalIndex);
+				mPortalBridgeLastFrame.portalInstanceCount++;
+				mPortalBridgeLastFrame.mirroredInstanceCount++;
+			}
+			bridgedLocalSpaceMask[(unsigned)cameraLocalSpaceIndex] = 1u;
+			break;
+		}
+
+		case nri_scene::PTPortalKind::SectorFloorMirror:
+		case nri_scene::PTPortalKind::SectorCeilingMirror:
+		{
+			if (portal.sourceSectorIndex < 0 || (unsigned)portal.sourceSectorIndex >= sector.Size() ||
+				(unsigned)cameraLocalSpaceIndex >= chunksByLocalSpace.size())
+			{
+				break;
+			}
+
+			PTInstanceTransform transform = {};
+			if (!MakeSectorMirrorInstanceTransform(sector[(unsigned)portal.sourceSectorIndex], portal.sourcePlane, transform))
+			{
+				break;
+			}
+
+			for (const auto* chunkCache : chunksByLocalSpace[(unsigned)cameraLocalSpaceIndex])
+			{
+				appendChunkInstance(*chunkCache, transform, (uint32_t)cameraLocalSpaceIndex, portal.portalIndex);
+				mPortalBridgeLastFrame.portalInstanceCount++;
+				mPortalBridgeLastFrame.mirroredInstanceCount++;
+			}
+			bridgedLocalSpaceMask[(unsigned)cameraLocalSpaceIndex] = 1u;
+			break;
+		}
+
+		case nri_scene::PTPortalKind::WallView:
+		case nri_scene::PTPortalKind::SectorFloorStack:
+		case nri_scene::PTPortalKind::SectorCeilingStack:
+		{
+			if (portal.targetCount == 0)
+			{
+				break;
+			}
+
+			const PTInstanceTransform transform = MakeTranslatedInstanceTransform(portal.delta);
+			const uint32_t endTarget = std::min<uint32_t>(portal.firstTarget + portal.targetCount, (uint32_t)mMapWorld.portalTargets.size());
+			for (uint32_t targetIndex = portal.firstTarget; targetIndex < endTarget; ++targetIndex)
+			{
+				const nri_scene::PTMapPortalTarget& target = mMapWorld.portalTargets[targetIndex];
+				if (target.localSpaceIndex == UINT32_MAX ||
+					target.localSpaceIndex >= chunksByLocalSpace.size() ||
+					target.localSpaceIndex == portal.sourceLocalSpaceIndex)
+				{
+					continue;
+				}
+
+				const PortalBridgeTranslatedSpaceKey key = MakeTranslatedSpaceKey(target.localSpaceIndex, portal.delta);
+				bool alreadyAdded = false;
+				for (const PortalBridgeTranslatedSpaceKey& existing : translatedSpaceKeys)
+				{
+					if (SameTranslatedSpaceKey(existing, key))
+					{
+						alreadyAdded = true;
+						break;
+					}
+				}
+				if (alreadyAdded)
+				{
+					continue;
+				}
+
+				translatedSpaceKeys.push_back(key);
+				for (const auto* chunkCache : chunksByLocalSpace[target.localSpaceIndex])
+				{
+					appendChunkInstance(*chunkCache, transform, target.localSpaceIndex, portal.portalIndex);
+					mPortalBridgeLastFrame.portalInstanceCount++;
+					mPortalBridgeLastFrame.translatedInstanceCount++;
+				}
+				bridgedLocalSpaceMask[target.localSpaceIndex] = 1u;
+			}
+			break;
+		}
+
+		case nri_scene::PTPortalKind::WallToSprite:
+		default:
+			break;
+		}
+	}
+
+	for (uint8_t bridged : bridgedLocalSpaceMask)
+	{
+		if (bridged != 0)
+		{
+			mPortalBridgeLastFrame.bridgedLocalSpaceCount++;
+		}
 	}
 }
 

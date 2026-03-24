@@ -210,6 +210,17 @@ private:
 		uint32_t materialCount = 0;
 	};
 
+	struct PortalBridgeFrameState
+	{
+		bool active = false;
+		int32_t cameraLocalSpaceIndex = -1;
+		uint32_t sourcePortalCount = 0;
+		uint32_t portalInstanceCount = 0;
+		uint32_t mirroredInstanceCount = 0;
+		uint32_t translatedInstanceCount = 0;
+		uint32_t bridgedLocalSpaceCount = 0;
+	};
+
 	struct SceneInstanceData
 	{
 		uint32_t primitiveOffset = 0;
@@ -262,7 +273,7 @@ private:
 		uint32_t dynamicPrimitiveCount,
 		uint32_t staticMaterialCount,
 		uint32_t dynamicMaterialCount);
-	void BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr) const;
+	void BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr);
 	bool RestoreStaticTopLevelScene();
 	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
 	bool DispatchTraceOpaque(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
@@ -281,6 +292,7 @@ private:
 	void PrintStaticMapSceneStatus() const;
 	void PrintDynamicSceneStatus() const;
 	void PrintRuntimeMapMutationStatus() const;
+	void PrintPortalBridgeStatus() const;
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
@@ -429,6 +441,7 @@ private:
 	uint32_t mBoundDynamicPrimitiveCount = 0;
 	uint32_t mBoundStaticMaterialCount = 0;
 	uint32_t mBoundDynamicMaterialCount = 0;
+	PortalBridgeFrameState mPortalBridgeLastFrame = {};
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastUpscalerRequest = -1;
