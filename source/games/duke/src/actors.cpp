@@ -55,6 +55,8 @@ BEGIN_DUKE_NS
 
 void TracePTRuntimeTransportEvent(const char* mode, DDukePlayer* player, DDukeActor* transporter, DDukeActor* owner, DDukeActor* transported, int triggerLotag, int onfloorz)
 {
+	NotePTRuntimeTransportContext(player, transporter, owner, transported, triggerLotag, onfloorz);
+
 	if (!nri_ptruntimelinktrace || player == nullptr || transported == nullptr)
 	{
 		return;

@@ -2089,10 +2089,11 @@ void NRIRenderer::PrintRuntimeMapMutationStatus() const
 
 void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
 {
-	Printf("NRI PT runtime links: active=%s geo_effect=%s transport=%s query_attempted=%s query_rejected=%s candidate_sector=%d candidate_lotag=%d source_sector=%d reported_geo_count=%d view_roots=%u visible_sectors=%u providers=%u geo_providers=%u provider_groups=%u local_space_matches=%u visible_matches=%u links=%u transport_links=%u transport_spaces=%u replaced_chunks=%u translated_chunks=%u orphan_local_spaces=%u unresolved_runtime_portals=%u surfaces=%u tris=%u materials=%u\n",
+	Printf("NRI PT runtime links: active=%s geo_effect=%s transport=%s explicit_context=%s query_attempted=%s query_rejected=%s candidate_sector=%d candidate_lotag=%d source_sector=%d reported_geo_count=%d view_roots=%u visible_sectors=%u providers=%u geo_providers=%u provider_groups=%u local_space_matches=%u visible_matches=%u links=%u transport_links=%u transport_spaces=%u replaced_chunks=%u translated_chunks=%u orphan_local_spaces=%u unresolved_runtime_portals=%u surfaces=%u tris=%u materials=%u\n",
 		mRuntimeSpaceLinkLastFrame.active ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.geoEffectActive ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.transportActive ? "yes" : "no",
+		mRuntimeSpaceLinkLastFrame.explicitTransportContext ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.queryAttempted ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.queryRejected ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.candidateSectorIndex,
@@ -4349,9 +4350,21 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 	};
 
 	const uint32_t candidateLocalSpaceIndex = getLocalSpaceIndex(effectSectorIndex);
+	RuntimeTransportContext activeTransportContext = {};
+	const bool hasExplicitTransportContext = gi != nullptr && gi->GetActiveRuntimeTransportContext(&activeTransportContext);
+	if (hasExplicitTransportContext)
+	{
+		mRuntimeSpaceLinkLastFrame.explicitTransportContext = true;
+		mRuntimeSpaceLinkLastFrame.sourceSectorIndex = activeTransportContext.link.sourceSectorIndex;
+	}
 	std::array<RuntimeTransportLinkInfo, 32> runtimeTransportLinks = {};
 	uint32_t runtimeTransportLinkCount = 0;
-	if (gi != nullptr && nearbyTransportSectorCount > 0)
+	if (hasExplicitTransportContext)
+	{
+		runtimeTransportLinks[0] = activeTransportContext.link;
+		runtimeTransportLinkCount = 1;
+	}
+	else if (gi != nullptr && nearbyTransportSectorCount > 0)
 	{
 		runtimeTransportLinkCount = gi->GetRuntimeTransportLinkInfo(
 			nearbyTransportSectors.data(),
@@ -4419,6 +4432,11 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		const bool destinationNearby = (transportLink.flags & RuntimeTransportLinkFlag_DestinationNearby) != 0;
 		int forwardPriority = 0;
 		int reversePriority = 0;
+		if (hasExplicitTransportContext)
+		{
+			forwardPriority = activeTransportContext.sourceSideActive ? 10000 : 0;
+			reversePriority = activeTransportContext.destinationSideActive ? 10000 : 0;
+		}
 		if (candidateLocalSpaceIndex == sourceLocalSpaceIndex)
 		{
 			forwardPriority += 4000;
@@ -4458,6 +4476,19 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		if (runtimeLinkDebugState.actorSectorIndex == transportLink.destinationSectorIndex)
 		{
 			reversePriority += 250;
+		}
+
+		if (hasExplicitTransportContext)
+		{
+			if (activeTransportContext.sourceSideActive && destinationLocalSpaceIndex != UINT32_MAX)
+			{
+				appendTransportOverlay(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.mapDx, transportLink.mapDy, forwardPriority);
+			}
+			else if (activeTransportContext.destinationSideActive && !oneWay && sourceLocalSpaceIndex != UINT32_MAX)
+			{
+				appendTransportOverlay(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.destinationSectorIndex, destinationLocalSpaceIndex, -transportLink.mapDx, -transportLink.mapDy, reversePriority);
+			}
+			continue;
 		}
 
 		if (candidateLocalSpaceIndex != UINT32_MAX)
