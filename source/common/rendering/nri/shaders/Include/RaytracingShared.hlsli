@@ -8,6 +8,7 @@ struct HitData
 	bool hit;
 	uint dataSource;
 	uint primitiveIndex;
+	uint portalIndex;
 	float2 barycentrics;
 	float distance;
 	float3 position;
@@ -18,6 +19,19 @@ struct HitData
 
 static const uint SCENE_DATA_SOURCE_STATIC = 0u;
 static const uint SCENE_DATA_SOURCE_DYNAMIC = 1u;
+static const uint PORTAL_TRAVERSAL_CLASS_NONE = 0u;
+static const uint PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
+static const uint PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
+static const uint PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
+
+HitData MakeEmptyHitData()
+{
+	HitData hitData = (HitData)0;
+	hitData.primitiveIndex = 0xffffffffu;
+	hitData.materialIndex = 0xffffffffu;
+	hitData.portalIndex = 0xffffffffu;
+	return hitData;
+}
 
 SceneInstanceData GetSceneInstanceData(uint instanceId)
 {
@@ -62,6 +76,18 @@ MaterialData GetMaterialData(uint materialIndex, uint dataSource)
 	}
 
 	return gStaticMaterials[min(materialIndex, max(gTraceConstants.StaticMaterialCount, 1u) - 1u)];
+}
+
+PortalData GetPortalData(uint portalIndex)
+{
+	PortalData portal = (PortalData)0;
+	portal.targetLocalSpaceIndex = 0xffffffffu;
+	if (gTraceConstants.PortalCount == 0u || portalIndex == 0xffffffffu)
+	{
+		return portal;
+	}
+
+	return gScenePortals[min(portalIndex, gTraceConstants.PortalCount - 1u)];
 }
 
 float3 ResolveHitNormal(uint materialIndex, uint dataSource, float3 geometricNormal, float3 rayDirection)
@@ -128,6 +154,17 @@ bool IsMirrorMaterial(uint materialIndex, uint dataSource)
 	return (GetMaterialData(materialIndex, dataSource).flags & MATERIAL_FLAG_MIRROR) != 0;
 }
 
+uint GetPortalTraversalDepth()
+{
+	return gTraceConstants.PortalDepth;
+}
+
+bool ResolvePortalHit(HitData hit, out PortalData portalData)
+{
+	portalData = GetPortalData(hit.portalIndex);
+	return hit.portalIndex != 0xffffffffu && portalData.traversalClass != PORTAL_TRAVERSAL_CLASS_NONE;
+}
+
 bool ShouldIgnoreOneWayHit(uint materialIndex, uint dataSource, float3 geometricNormal, float3 rayDirection)
 {
 	if ((GetMaterialData(materialIndex, dataSource).flags & MATERIAL_FLAG_ONE_WAY) == 0)
@@ -188,7 +225,7 @@ bool IntersectPrimitiveTriangle(float3 origin, float3 direction, uint primitiveI
 
 HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 {
-	HitData bestHit = (HitData)0;
+	HitData bestHit = MakeEmptyHitData();
 	bestHit.distance = 1e30;
 
 	[loop]
@@ -215,6 +252,7 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 		bestHit.hit = true;
 		bestHit.dataSource = SCENE_DATA_SOURCE_DYNAMIC;
 		bestHit.primitiveIndex = primitiveIndex;
+		bestHit.portalIndex = primitive.portalIndex;
 		bestHit.barycentrics = barycentrics.yz;
 		bestHit.distance = hitT;
 		bestHit.position = origin + direction * hitT;
@@ -228,7 +266,7 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 
 bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, out HitData hitData)
 {
-	hitData = (HitData)0;
+	hitData = MakeEmptyHitData();
 	float accumulatedDistance = 0.0;
 
 	[loop]
@@ -267,6 +305,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.hit = true;
 		hitData.dataSource = instanceData.dataSource;
 		hitData.primitiveIndex = primitiveIndex;
+		hitData.portalIndex = primitive.portalIndex;
 		hitData.barycentrics = bary;
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
@@ -279,17 +318,75 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 	return false;
 }
 
+bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, out HitData hitData, out float3 exitDirection)
+{
+	hitData = MakeEmptyHitData();
+	exitDirection = startDirection;
+	float3 origin = startOrigin;
+	float3 direction = startDirection;
+	float remainingDistance = maxDistance;
+
+	[loop]
+	for (uint continuationStep = 0u; continuationStep < 32u; ++continuationStep)
+	{
+		if (!TraceClosestSurface(origin, direction, remainingDistance, hitData))
+		{
+			exitDirection = direction;
+			return false;
+		}
+
+		PortalData portalData = (PortalData)0;
+		const bool hasPortalData = ResolvePortalHit(hitData, portalData);
+		const bool reflectivePortal = hasPortalData && portalData.traversalClass == PORTAL_TRAVERSAL_CLASS_REFLECTIVE;
+		const bool transferPortal = hasPortalData && portalData.traversalClass == PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER;
+		const bool reflectiveSurface = reflectivePortal || IsMirrorMaterial(hitData.materialIndex, hitData.dataSource);
+
+		if (reflectiveSurface && mirrorBudget > 0u)
+		{
+			remainingDistance = max(remainingDistance - hitData.distance, 0.0);
+			origin = hitData.position + hitData.normal * 0.05;
+			direction = reflect(direction, hitData.normal);
+			exitDirection = direction;
+			mirrorBudget--;
+			continue;
+		}
+
+		if (transferPortal && portalBudget > 0u)
+		{
+			remainingDistance = max(remainingDistance - hitData.distance, 0.0);
+			origin = hitData.position + direction * 0.05 + portalData.delta;
+			exitDirection = direction;
+			portalBudget--;
+			continue;
+		}
+
+		exitDirection = direction;
+		return true;
+	}
+
+	exitDirection = direction;
+	return false;
+}
+
+HitData TracePrimary(float3 origin, float3 direction, out float3 exitDirection)
+{
+	HitData hitData = MakeEmptyHitData();
+	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 16) & 0xffffu);
+	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), hitData, exitDirection);
+	return hitData;
+}
+
 HitData TracePrimary(float3 origin, float3 direction)
 {
-	HitData hitData = (HitData)0;
-	TraceClosestSurface(origin, direction, 100000.0, hitData);
-	return hitData;
+	float3 exitDirection = direction;
+	return TracePrimary(origin, direction, exitDirection);
 }
 
 float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection)
 {
-	HitData shadowHit = (HitData)0;
-	return TraceClosestSurface(position + normal * 0.05, lightDirection, 100000.0, shadowHit) ? 0.0 : 1.0;
+	HitData shadowHit = MakeEmptyHitData();
+	float3 ignoredDirection = lightDirection;
+	return TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), shadowHit, ignoredDirection) ? 0.0 : 1.0;
 }
 
 float3 GetMissColor(float3 direction)

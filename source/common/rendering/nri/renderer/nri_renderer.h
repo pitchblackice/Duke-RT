@@ -278,6 +278,7 @@ private:
 	void ResetSceneBufferFrameStats();
 	void LogBridgeStats(const nri_scene::SceneDebugStats& stats);
 	void PrintMapWorldStatus() const;
+	void PrintPortalTraversalStatus() const;
 	void PrintStaticMapSceneStatus() const;
 	void PrintDynamicSceneStatus() const;
 	void PrintRuntimeMapMutationStatus() const;
@@ -354,12 +355,14 @@ private:
 	NRIBufferResource mStaticMaterialBuffer;
 	NRIBufferResource mTlasInstanceBuffer;
 	NRIBufferResource mSceneInstanceBuffer;
+	NRIBufferResource mPortalBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
 	SceneBufferDebugStats mIndexBufferStats = { "Index" };
 	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };
 	SceneBufferDebugStats mMaterialBufferStats = { "Material" };
+	SceneBufferDebugStats mPortalBufferStats = { "Portal" };
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
@@ -429,6 +432,7 @@ private:
 	uint32_t mBoundDynamicPrimitiveCount = 0;
 	uint32_t mBoundStaticMaterialCount = 0;
 	uint32_t mBoundDynamicMaterialCount = 0;
+	uint32_t mBoundPortalCount = 0;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastUpscalerRequest = -1;

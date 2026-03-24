@@ -117,10 +117,11 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float4 surfaceAlbedo, uint2 pixe
 	[loop]
 	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
 	{
-		const HitData bounceHit = TracePrimary(origin, direction);
+		float3 tracedDirection = direction;
+		const HitData bounceHit = TracePrimary(origin, direction, tracedDirection);
 		if (!bounceHit.hit)
 		{
-			indirectRadiance += throughput * GetMissColor(direction);
+			indirectRadiance += throughput * GetMissColor(tracedDirection);
 			break;
 		}
 
@@ -169,10 +170,11 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	[loop]
 	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
 	{
-		const HitData bounceHit = TracePrimary(origin, direction);
+		float3 tracedDirection = direction;
+		const HitData bounceHit = TracePrimary(origin, direction, tracedDirection);
 		if (!bounceHit.hit)
 		{
-			indirectRadiance += throughput * GetMissColor(direction);
+			indirectRadiance += throughput * GetMissColor(tracedDirection);
 			break;
 		}
 
@@ -191,7 +193,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 
 		const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce * 5u + 1u, bounce * 7u + 3u), frameIndex + bounce + 1u);
 		const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
-		const float3 bounceViewDir = normalize(-direction);
+		const float3 bounceViewDir = normalize(-tracedDirection);
 		indirectRadiance += throughput * (
 			EvaluateSunDiffuse(bounceAlbedo.rgb, bounceHit.normal, bounceLightDir, bounceShadow) +
 			EvaluateSunSpecular(bounceAlbedo.rgb, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
@@ -204,7 +206,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 		}
 
 		origin = bounceHit.position + bounceHit.normal * 0.05;
-		direction = SampleSpecularLobe(reflect(direction, bounceHit.normal), bounceRoughness, rngState);
+		direction = SampleSpecularLobe(reflect(tracedDirection, bounceHit.normal), bounceRoughness, rngState);
 	}
 
 	return indirectRadiance;
@@ -234,18 +236,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else
 	{
-		[loop]
-		for (uint bounce = 0u; bounce < max(GetMirrorBounceCount(), 1u); ++bounce)
-		{
-			hit = TracePrimary(rayOrigin, visibleRayDirection);
-			if (!hit.hit || !IsMirrorMaterial(hit.materialIndex, hit.dataSource))
-			{
-				break;
-			}
-
-			rayOrigin = hit.position + hit.normal * 0.05;
-			visibleRayDirection = reflect(visibleRayDirection, hit.normal);
-		}
+		float3 tracedVisibleDirection = visibleRayDirection;
+		hit = TracePrimary(rayOrigin, visibleRayDirection, tracedVisibleDirection);
+		visibleRayDirection = tracedVisibleDirection;
 	}
 
 	float4 color = 0.0;

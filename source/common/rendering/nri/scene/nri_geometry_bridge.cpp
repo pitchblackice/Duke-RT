@@ -76,6 +76,7 @@ namespace
 		primitive.uv2[0] = v2.uv[0];
 		primitive.uv2[1] = v2.uv[1];
 		primitive.flags = flags;
+		primitive.portalIndex = UINT32_MAX;
 		ComputeNormal(v0, v1, v2, primitive.normal);
 		outGeometry.primitives.push_back(primitive);
 		outGeometry.primitiveProvenance.push_back(provenance);

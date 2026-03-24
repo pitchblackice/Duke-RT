@@ -42,13 +42,14 @@ CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
+EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Int, nri_pttraceframes)
 
 namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 9;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 10;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 11;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 12;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
@@ -59,6 +60,21 @@ namespace
 	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
 	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
 	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
+	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
+	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
+	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
+	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
+	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
+
+	struct ScenePortalData
+	{
+		uint32_t traversalClass = 0;
+		uint32_t kind = 0;
+		uint32_t targetLocalSpaceIndex = UINT32_MAX;
+		uint32_t flags = 0;
+		float delta[3] = {};
+		uint32_t reserved0 = 0;
+	};
 
 	template<typename T>
 	static T NRIFlags(T a, T b)
@@ -246,6 +262,90 @@ namespace
 		return merged;
 	}
 
+	static uint32_t GetPortalTraversalClass(nri_scene::PTPortalKind kind)
+	{
+		switch (kind)
+		{
+		case nri_scene::PTPortalKind::WallMirror:
+		case nri_scene::PTPortalKind::SectorFloorMirror:
+		case nri_scene::PTPortalKind::SectorCeilingMirror:
+			return NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE;
+
+		case nri_scene::PTPortalKind::WallView:
+		case nri_scene::PTPortalKind::SectorFloorStack:
+		case nri_scene::PTPortalKind::SectorCeilingStack:
+			return NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER;
+
+		case nri_scene::PTPortalKind::WallToSprite:
+			return NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND;
+
+		default:
+			return NRI_PORTAL_TRAVERSAL_CLASS_NONE;
+		}
+	}
+
+	static uint32_t CountPortalTraversalClass(const nri_scene::PTMapWorld& mapWorld, uint32_t traversalClass)
+	{
+		uint32_t count = 0;
+		for (const auto& portal : mapWorld.portals)
+		{
+			if (GetPortalTraversalClass(portal.kind) == traversalClass)
+			{
+				count++;
+			}
+		}
+		return count;
+	}
+
+	static void AssignGeometryPortalIndices(const nri_scene::PTMapWorld& mapWorld, nri_scene::GeometryData& geometry)
+	{
+		const size_t count = std::min(geometry.primitives.size(), geometry.primitiveProvenance.size());
+		for (size_t i = 0; i < count; ++i)
+		{
+			geometry.primitives[i].portalIndex = UINT32_MAX;
+			const uint32_t flags = geometry.primitives[i].flags;
+			if ((flags & (nri_scene::MaterialFlag_Mirror | nri_scene::MaterialFlag_Portal)) == 0)
+			{
+				continue;
+			}
+
+			const int32_t portalIndex = nri_scene::FindMapWorldPortalIndex(mapWorld, geometry.primitiveProvenance[i]);
+			if (portalIndex >= 0)
+			{
+				geometry.primitives[i].portalIndex = (uint32_t)portalIndex;
+			}
+		}
+	}
+
+	static std::vector<ScenePortalData> BuildScenePortalData(const nri_scene::PTMapWorld& mapWorld)
+	{
+		std::vector<ScenePortalData> portals;
+		portals.reserve(std::max<size_t>(mapWorld.portals.size(), 1u));
+
+		for (const auto& portal : mapWorld.portals)
+		{
+			ScenePortalData data = {};
+			data.traversalClass = GetPortalTraversalClass(portal.kind);
+			data.kind = (uint32_t)portal.kind;
+			data.flags = portal.runtimeBoundTarget ? NRI_PORTAL_FLAG_RUNTIME_BOUND : 0u;
+			if (portal.targetCount > 0 && portal.firstTarget < mapWorld.portalTargets.size())
+			{
+				data.targetLocalSpaceIndex = mapWorld.portalTargets[portal.firstTarget].localSpaceIndex;
+			}
+			data.delta[0] = (float)portal.delta[0];
+			data.delta[1] = (float)portal.delta[1];
+			data.delta[2] = (float)portal.delta[2];
+			portals.push_back(data);
+		}
+
+		if (portals.empty())
+		{
+			portals.push_back({});
+		}
+
+		return portals;
+	}
+
 	static void AppendGeometry(const nri_scene::GeometryData& source, uint32_t materialIndexOffset, nri_scene::GeometryData& destination)
 	{
 		const uint32_t vertexBase = (uint32_t)destination.vertices.size();
@@ -391,6 +491,10 @@ namespace
 		uint32_t BootstrapMode = 0;
 		uint32_t DynamicMaterialCount = 0;
 		uint32_t BounceCounts = 0;
+		uint32_t PortalCount = 0;
+		uint32_t PortalDepth = 0;
+		uint32_t ReservedTrace0 = 0;
+		uint32_t ReservedTrace1 = 0;
 	};
 
 	static void Normalize3(float v[3])
@@ -1104,6 +1208,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			{
 				Clocker clock(NriPTGeometryBuild);
 				nri_scene::BuildGeometry(dynamicSceneView, dynamicGeometry);
+				AssignGeometryPortalIndices(mMapWorld, dynamicGeometry);
 			}
 
 			if (!dynamicGeometry.primitives.empty())
@@ -1313,6 +1418,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		{
 			Clocker clock(NriPTGeometryBuild);
 			nri_scene::BuildGeometry(capturedSceneView, capturedGeometry);
+			AssignGeometryPortalIndices(mMapWorld, capturedGeometry);
 		}
 
 		{
@@ -1536,10 +1642,11 @@ void NRIRenderer::PrintStatus() const
 		GetUpscalerModeName(GetSelectedUpscalerMode()),
 		(float)nri_renderscale,
 		(float)nri_sharpness);
-	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u surface_probe=%d\n",
+	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u portal_depth=%u surface_probe=%d\n",
 		nri_ptdirectscene ? "on" : "off",
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
+		ClampTraceBounceCount((int)nri_ptportaldepth, 8u),
 		(int)nri_ptsurfaceprobe);
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
@@ -1574,6 +1681,7 @@ void NRIRenderer::PrintStatus() const
 	}
 
 	PrintMapWorldStatus();
+	PrintPortalTraversalStatus();
 	PrintStaticMapSceneStatus();
 	PrintDynamicSceneStatus();
 	PrintRuntimeMapMutationStatus();
@@ -1609,6 +1717,23 @@ void NRIRenderer::PrintMapWorldStatus() const
 		stats.runtimePortalCount,
 		stats.skySurfaceCount,
 		stats.triangleCount);
+}
+
+void NRIRenderer::PrintPortalTraversalStatus() const
+{
+	if (!mMapWorld.valid)
+	{
+		Printf("NRI PT portal traversal: no authoritative portal graph is available.\n");
+		return;
+	}
+
+	Printf("NRI PT portal traversal: depth=%u reflective=%u transfer=%u runtime_bound=%u hittable_surfaces=%u plane_portals_pending=%u\n",
+		ClampTraceBounceCount((int)nri_ptportaldepth, 8u),
+		CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE),
+		CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER),
+		CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND),
+		mMapWorld.stats.portalSurfaceCount,
+		mMapWorld.stats.sectorPortalCount);
 }
 
 void NRIRenderer::PrintStaticMapSceneStatus() const
@@ -2260,6 +2385,19 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
+	const std::vector<ScenePortalData> scenePortals = BuildScenePortalData(mMapWorld);
+	if (!EnsureStructuredBuffer(
+		mPortalBuffer,
+		mPortalBufferStats,
+		scenePortals.data(),
+		scenePortals.size() * sizeof(ScenePortalData),
+		sizeof(ScenePortalData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
 	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
 	{
 		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
@@ -2275,6 +2413,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer),
 		selectView(dynamicMaterialBuffer, staticMaterialBuffer),
 		mSceneInstanceBuffer.shaderView,
+		mPortalBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : descriptors)
@@ -2296,6 +2435,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundDynamicPrimitiveCount = dynamicPrimitiveCount;
 	mBoundStaticMaterialCount = staticMaterialCount;
 	mBoundDynamicMaterialCount = dynamicMaterialCount;
+	mBoundPortalCount = mMapWorld.valid ? (uint32_t)mMapWorld.portals.size() : 0u;
 	return true;
 }
 
@@ -2561,6 +2701,9 @@ void NRIRenderer::ResetSceneBufferFrameStats()
 	mMaterialBufferStats.bytesUploadedLastFrame = 0;
 	mMaterialBufferStats.growEventsLastFrame = 0;
 	mMaterialBufferStats.overwriteEventsLastFrame = 0;
+	mPortalBufferStats.bytesUploadedLastFrame = 0;
+	mPortalBufferStats.growEventsLastFrame = 0;
+	mPortalBufferStats.overwriteEventsLastFrame = 0;
 }
 
 const NRIBufferResource& NRIRenderer::GetActiveVertexBuffer() const
@@ -2648,10 +2791,11 @@ bool NRIRenderer::EnsureStaticMapScene()
 		nri_scene::GeometryData chunkGeometry;
 		nri_scene::MaterialBridgeData chunkMaterials;
 		nri_scene::BuildMapChunkSceneView(mMapWorld, chunk, chunkSceneView);
-		{
-			Clocker clock(NriPTGeometryBuild);
-			nri_scene::BuildGeometry(chunkSceneView, chunkGeometry);
-		}
+			{
+				Clocker clock(NriPTGeometryBuild);
+				nri_scene::BuildGeometry(chunkSceneView, chunkGeometry);
+				AssignGeometryPortalIndices(mMapWorld, chunkGeometry);
+			}
 		{
 			Clocker clock(NriPTMaterialBuild);
 			nri_scene::BuildMaterials(chunkSceneView, chunkMaterials);
@@ -3462,6 +3606,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				{
 					Clocker clock(NriPTGeometryBuild);
 					nri_scene::BuildGeometry(liveChunkView, liveGeometry);
+					AssignGeometryPortalIndices(mMapWorld, liveGeometry);
 				}
 				{
 					Clocker clock(NriPTMaterialBuild);
@@ -3888,6 +4033,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.BounceCounts = PackTraceBounceCounts(
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u));
+	constants.PortalCount = mBoundPortalCount;
+	constants.PortalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -4688,12 +4835,14 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mMaterialBuffer);
 	DestroyBufferResource(mTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);
+	DestroyBufferResource(mPortalBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	mBoundStaticPrimitiveCount = 0;
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
+	mBoundPortalCount = 0;
 }
 
 void NRIRenderer::DestroyAccelerationStructures()
@@ -4724,6 +4873,7 @@ void NRIRenderer::DestroyStaticMapSceneCache()
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
+	mBoundPortalCount = 0;
 	mRuntimeMapMutations.chunks.clear();
 	mRuntimeMapMutations.replacedChunkMask.clear();
 	mRuntimeMapLastFrame = {};

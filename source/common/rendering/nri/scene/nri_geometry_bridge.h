@@ -22,6 +22,7 @@ struct PrimitiveData
 	float uv2[2] = {};
 	float normal[3] = {};
 	uint32_t flags = 0;
+	uint32_t portalIndex = UINT32_MAX;
 };
 
 struct GeometryData
