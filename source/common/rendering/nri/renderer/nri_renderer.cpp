@@ -38,6 +38,7 @@ CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
@@ -1540,6 +1541,7 @@ void NRIRenderer::PrintStatus() const
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
 		(int)nri_ptsurfaceprobe);
+	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
 		(int)nri_ptmutationtracechunk,
 		(int)nri_ptmutationtracesector);
@@ -4514,6 +4516,13 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 
 void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 {
+	if (!nri_ptscenestats)
+	{
+		mLastStats = stats;
+		mHasLoggedStats = true;
+		return;
+	}
+
 	if (!mHasLoggedStats || StatsDiffer(mLastStats, stats))
 	{
 		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
