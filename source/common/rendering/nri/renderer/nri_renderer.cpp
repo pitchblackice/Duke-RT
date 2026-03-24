@@ -131,6 +131,28 @@ namespace
 			a.rrGeoCount == b.rrGeoCount;
 	}
 
+	static bool SameRuntimeTaggedSectorDebugInfo(const RuntimeTaggedSectorDebugInfo& a, const RuntimeTaggedSectorDebugInfo& b)
+	{
+		if (a.available != b.available ||
+			a.sectorIndex != b.sectorIndex ||
+			a.lotag != b.lotag ||
+			a.hitag != b.hitag ||
+			a.effectorCount != b.effectorCount)
+		{
+			return false;
+		}
+
+		for (size_t i = 0; i < countof(a.effectorLotags); ++i)
+		{
+			if (a.effectorLotags[i] != b.effectorLotags[i] || a.effectorHitags[i] != b.effectorHitags[i])
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	static const char* GetSkyModeName(nri_scene::PTSkyMode mode)
 	{
 		switch (mode)
@@ -1958,6 +1980,22 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 		if (sec.lotag != 0)
 		{
 			current.visibleTaggedSectorCount++;
+			if (current.taggedVisibleSectorStoredCount < current.taggedVisibleSectors.size())
+			{
+				RuntimeTaggedSectorDebugInfo info = {};
+				if (gi != nullptr && gi->GetRuntimeLinkDebugTaggedSectorInfo((int)sectorIndex, &info))
+				{
+					current.taggedVisibleSectors[current.taggedVisibleSectorStoredCount++] = info;
+				}
+				else
+				{
+					info.available = true;
+					info.sectorIndex = (int32_t)sectorIndex;
+					info.lotag = sec.lotag;
+					info.hitag = sec.hitag;
+					current.taggedVisibleSectors[current.taggedVisibleSectorStoredCount++] = info;
+				}
+			}
 		}
 		if (sec.lotag == 848)
 		{
@@ -1983,9 +2021,23 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 		mLastRuntimeLinkTraceState.visibleTaggedSectorCount == current.visibleTaggedSectorCount &&
 		mLastRuntimeLinkTraceState.visible848SectorCount == current.visible848SectorCount &&
 		mLastRuntimeLinkTraceState.visibleTeleportSectorCount == current.visibleTeleportSectorCount &&
+		mLastRuntimeLinkTraceState.taggedVisibleSectorStoredCount == current.taggedVisibleSectorStoredCount &&
 		SameRuntimeLinkDebugState(mLastRuntimeLinkTraceState.game, current.game);
 
+	bool sameTaggedSectors = true;
 	if (sameAsLast)
+	{
+		for (uint32_t i = 0; i < current.taggedVisibleSectorStoredCount; ++i)
+		{
+			if (!SameRuntimeTaggedSectorDebugInfo(mLastRuntimeLinkTraceState.taggedVisibleSectors[i], current.taggedVisibleSectors[i]))
+			{
+				sameTaggedSectors = false;
+				break;
+			}
+		}
+	}
+
+	if (sameAsLast && sameTaggedSectors)
 	{
 		return;
 	}
@@ -2011,6 +2063,38 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 		current.visibleTaggedSectorCount,
 		current.visible848SectorCount,
 		current.visibleTeleportSectorCount);
+
+	if (current.taggedVisibleSectorStoredCount > 0)
+	{
+		std::string taggedLine = "NRI PT runtime tagged sectors:";
+		for (uint32_t i = 0; i < current.taggedVisibleSectorStoredCount; ++i)
+		{
+			const auto& info = current.taggedVisibleSectors[i];
+			taggedLine += " [sector=" + std::to_string(info.sectorIndex) +
+				" lotag=" + std::to_string(info.lotag) +
+				" hitag=" + std::to_string(info.hitag);
+			if (info.effectorCount > 0)
+			{
+				taggedLine += " effectors=";
+				const uint32_t storedEffectors = std::min<uint32_t>(info.effectorCount, (uint32_t)countof(info.effectorLotags));
+				for (uint32_t effectorIndex = 0; effectorIndex < storedEffectors; ++effectorIndex)
+				{
+					if (effectorIndex > 0)
+					{
+						taggedLine += ",";
+					}
+					taggedLine += std::to_string(info.effectorLotags[effectorIndex]) +
+						"/" + std::to_string(info.effectorHitags[effectorIndex]);
+				}
+				if (info.effectorCount > storedEffectors)
+				{
+					taggedLine += ",...";
+				}
+			}
+			taggedLine += "]";
+		}
+		Printf("%s\n", taggedLine.c_str());
+	}
 }
 
 void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement)

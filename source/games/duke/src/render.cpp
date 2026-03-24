@@ -180,6 +180,39 @@ bool GameInterface::GetRuntimeLinkDebugState(RuntimeLinkDebugState* state)
 	return true;
 }
 
+bool GameInterface::GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info)
+{
+	if (info == nullptr || sectorIndex < 0 || (unsigned)sectorIndex >= sector.Size())
+	{
+		return false;
+	}
+
+	*info = {};
+	auto* sect = &sector[(unsigned)sectorIndex];
+	info->available = true;
+	info->sectorIndex = sectorIndex;
+	info->lotag = sect->lotag;
+	info->hitag = sect->hitag;
+
+	DukeSectIterator it(sect);
+	while (auto act = it.Next())
+	{
+		if (!iseffector(act))
+		{
+			continue;
+		}
+
+		if (info->effectorCount < countof(info->effectorLotags))
+		{
+			info->effectorLotags[info->effectorCount] = act->spr.lotag;
+			info->effectorHitags[info->effectorCount] = act->spr.hitag;
+		}
+		info->effectorCount++;
+	}
+
+	return true;
+}
+
 //---------------------------------------------------------------------------
 //
 // RRRA's drug distortion effect

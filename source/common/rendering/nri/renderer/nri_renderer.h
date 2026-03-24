@@ -245,6 +245,8 @@ private:
 		uint32_t visibleTaggedSectorCount = 0;
 		uint32_t visible848SectorCount = 0;
 		uint32_t visibleTeleportSectorCount = 0;
+		uint32_t taggedVisibleSectorStoredCount = 0;
+		std::array<RuntimeTaggedSectorDebugInfo, 8> taggedVisibleSectors = {};
 		RuntimeLinkDebugState game = {};
 	};
 

@@ -72,6 +72,17 @@ struct RuntimeLinkDebugState
 	int32_t rrGeoCount = 0;
 };
 
+struct RuntimeTaggedSectorDebugInfo
+{
+	bool available = false;
+	int32_t sectorIndex = -1;
+	int32_t lotag = 0;
+	int32_t hitag = 0;
+	uint32_t effectorCount = 0;
+	int32_t effectorLotags[4] = {};
+	int32_t effectorHitags[4] = {};
+};
+
 struct GameInterface
 {
 	virtual const char* Name() { return "$"; }
@@ -119,6 +130,7 @@ struct GameInterface
 	virtual void LeavePortal(DCoreActor* viewer, int type) {}
 	virtual bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) { return false; }
 	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
+	virtual bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) { return false; }
 	virtual int Voxelize(int sprnum) { return -1; }
 	virtual void AddExcludedEpisode(const FString& episode) {}
 	virtual int GetCurrentSkill() { return -1; }
