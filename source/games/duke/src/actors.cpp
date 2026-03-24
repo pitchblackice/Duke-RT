@@ -40,6 +40,8 @@ This file is a combination of code from the following sources:
 //-------------------------------------------------------------------------
 
 #include "ns.h"
+#include "c_cvars.h"
+#include "printf.h"
 #include "vm.h"
 #include "global.h"
 #include "names.h"
@@ -47,7 +49,49 @@ This file is a combination of code from the following sources:
 #include "constants.h"
 #include "dukeactor.h"
 
+EXTERN_CVAR(Bool, nri_ptruntimelinktrace)
+
 BEGIN_DUKE_NS
+
+void TracePTRuntimeTransportEvent(const char* mode, DDukePlayer* player, DDukeActor* transporter, DDukeActor* owner, DDukeActor* transported, int triggerLotag, int onfloorz)
+{
+	if (!nri_ptruntimelinktrace || player == nullptr || transported == nullptr)
+	{
+		return;
+	}
+
+	const auto sourceSector = transported->sector();
+	const int sourceSectorIndex = sourceSector != nullptr ? sectindex(sourceSector) : -1;
+	const int sourceSectorLotag = sourceSector != nullptr ? sourceSector->lotag : 0;
+	const int sourceSectorHitag = sourceSector != nullptr ? sourceSector->hitag : 0;
+
+	const auto transporterSector = transporter != nullptr ? transporter->sector() : nullptr;
+	const int transporterSectorIndex = transporterSector != nullptr ? sectindex(transporterSector) : -1;
+	const int transporterSectorLotag = transporterSector != nullptr ? transporterSector->lotag : 0;
+	const int transporterSectorHitag = transporterSector != nullptr ? transporterSector->hitag : 0;
+
+	const auto ownerSector = owner != nullptr ? owner->sector() : nullptr;
+	const int ownerSectorIndex = ownerSector != nullptr ? sectindex(ownerSector) : -1;
+	const int ownerSectorLotag = ownerSector != nullptr ? ownerSector->lotag : 0;
+	const int ownerSectorHitag = ownerSector != nullptr ? ownerSector->hitag : 0;
+
+	Printf("NRI PT runtime transport: mode=%s player=%d trigger_lotag=%d onfloor=%d source_sector=%d source_lotag=%d source_hitag=%d transporter_sector=%d transporter_lotag=%d transporter_hitag=%d owner_sector=%d owner_lotag=%d owner_hitag=%d on_warp=%d transporter_hold=%d\n",
+		mode != nullptr ? mode : "unknown",
+		player->pnum,
+		triggerLotag,
+		onfloorz,
+		sourceSectorIndex,
+		sourceSectorLotag,
+		sourceSectorHitag,
+		transporterSectorIndex,
+		transporterSectorLotag,
+		transporterSectorHitag,
+		ownerSectorIndex,
+		ownerSectorLotag,
+		ownerSectorHitag,
+		player->on_warping_sector,
+		player->transporter_hold);
+}
 
 
 static void moveactor(DDukeActor* actor, DDukePlayer* const pp, double pdist, const int killit_flag)

@@ -297,6 +297,7 @@ void movetransports_r(void)
 							act2->backuppos();
 							p->setbobpos();
 
+							TracePTRuntimeTransportEvent("no_effect_ground", p, act, Owner, act2, sectlotag, onfloorz);
 							ChangeActorSect(act2, Owner->sector());
 							p->setCursector(act2->sector());
 
@@ -320,6 +321,7 @@ void movetransports_r(void)
 							else act2->spr.pos.Z = Owner->spr.pos.Z + 24 + gs.playerheight;
 							act2->backupz();
 
+							TracePTRuntimeTransportEvent("owner_vertical", p, act, Owner, act2, sectlotag, onfloorz);
 							ChangeActorSect(act2, Owner->sector());
 							p->setCursector(Owner->sector());
 							break;
@@ -385,6 +387,7 @@ void movetransports_r(void)
 							p->transporter_hold = -2;
 
 						p->setCursector(Owner->sector());
+						TracePTRuntimeTransportEvent(sectlotag == ST_1_ABOVE_WATER ? "water_surface" : "water_submerge", p, act, Owner, act2, sectlotag, onfloorz);
 						ChangeActorSect(act2, Owner->sector());
 
 						if ((krand() & 255) < 32)
@@ -399,6 +402,7 @@ void movetransports_r(void)
 							p->transporter_hold = -2;
 
 						p->setCursector(Owner->sector());
+						TracePTRuntimeTransportEvent("teleport_160_161", p, act, Owner, act2, sectlotag, onfloorz);
 						ChangeActorSect(act2, Owner->sector());
 					}
 				}
