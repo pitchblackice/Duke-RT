@@ -214,7 +214,12 @@ private:
 	{
 		bool active = false;
 		bool geoEffectActive = false;
+		bool queryAttempted = false;
+		bool queryRejected = false;
+		int32_t candidateSectorIndex = -1;
+		int32_t candidateSectorLotag = -1;
 		int32_t sourceSectorIndex = -1;
+		int32_t reportedGeoCount = 0;
 		uint32_t linkCount = 0;
 		uint32_t translatedChunkCount = 0;
 		uint32_t orphanLocalSpaceCount = 0;

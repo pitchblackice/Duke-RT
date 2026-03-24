@@ -1886,10 +1886,15 @@ void NRIRenderer::PrintRuntimeMapMutationStatus() const
 
 void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
 {
-	Printf("NRI PT runtime links: active=%s geo_effect=%s source_sector=%d links=%u translated_chunks=%u orphan_local_spaces=%u unresolved_runtime_portals=%u surfaces=%u tris=%u materials=%u\n",
+	Printf("NRI PT runtime links: active=%s geo_effect=%s query_attempted=%s query_rejected=%s candidate_sector=%d candidate_lotag=%d source_sector=%d reported_geo_count=%d links=%u translated_chunks=%u orphan_local_spaces=%u unresolved_runtime_portals=%u surfaces=%u tris=%u materials=%u\n",
 		mRuntimeSpaceLinkLastFrame.active ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.geoEffectActive ? "yes" : "no",
+		mRuntimeSpaceLinkLastFrame.queryAttempted ? "yes" : "no",
+		mRuntimeSpaceLinkLastFrame.queryRejected ? "yes" : "no",
+		mRuntimeSpaceLinkLastFrame.candidateSectorIndex,
+		mRuntimeSpaceLinkLastFrame.candidateSectorLotag,
 		mRuntimeSpaceLinkLastFrame.sourceSectorIndex,
+		mRuntimeSpaceLinkLastFrame.reportedGeoCount,
 		mRuntimeSpaceLinkLastFrame.linkCount,
 		mRuntimeSpaceLinkLastFrame.translatedChunkCount,
 		mRuntimeSpaceLinkLastFrame.orphanLocalSpaceCount,
@@ -3796,9 +3801,21 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		return false;
 	}
 
+	mRuntimeSpaceLinkLastFrame.candidateSectorIndex = effectSectorIndex;
+	mRuntimeSpaceLinkLastFrame.candidateSectorLotag = sector[(unsigned)effectSectorIndex].lotag;
+	mRuntimeSpaceLinkLastFrame.queryAttempted = true;
+
 	GeoEffect effect = {};
-	if (gi == nullptr || !gi->GetGeoEffect(&effect, &sector[effectSectorIndex]) || effect.geocnt <= 0)
+	if (gi == nullptr || !gi->GetGeoEffect(&effect, &sector[effectSectorIndex]))
 	{
+		mRuntimeSpaceLinkLastFrame.queryRejected = true;
+		return false;
+	}
+
+	mRuntimeSpaceLinkLastFrame.reportedGeoCount = effect.geocnt;
+	if (effect.geocnt <= 0)
+	{
+		mRuntimeSpaceLinkLastFrame.queryRejected = true;
 		return false;
 	}
 
