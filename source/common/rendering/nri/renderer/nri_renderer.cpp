@@ -42,6 +42,7 @@ CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptruntimelinktrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Int, nri_pttraceframes)
@@ -1745,6 +1746,7 @@ void NRIRenderer::PrintStatus() const
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
 		(int)nri_ptmutationtracechunk,
 		(int)nri_ptmutationtracesector);
+	Printf("NRI PT runtime link trace: %s\n", nri_ptruntimelinktrace ? "on" : "off");
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
