@@ -672,6 +672,27 @@ namespace
 		outSnapshot.yrepeat = wal.yrepeat;
 		outSnapshot.pal = wal.pal;
 		outSnapshot.shade = wal.shade;
+		if (wal.nextsector >= 0 && (unsigned)wal.nextsector < sector.Size())
+		{
+			const sectortype& adjacent = sector[(unsigned)wal.nextsector];
+			outSnapshot.adjacentFloorz = adjacent.floorz;
+			outSnapshot.adjacentCeilingz = adjacent.ceilingz;
+			outSnapshot.adjacentFloorstat = (uint16_t)adjacent.floorstat;
+			outSnapshot.adjacentCeilingstat = (uint16_t)adjacent.ceilingstat;
+			outSnapshot.adjacentFloorheinum = adjacent.floorheinum;
+			outSnapshot.adjacentCeilingheinum = adjacent.ceilingheinum;
+			outSnapshot.adjacentPortalflags = adjacent.portalflags;
+		}
+
+		if (wal.nextwall >= 0 && (unsigned)wal.nextwall < wall.Size())
+		{
+			const walltype& nextWall = wall[(unsigned)wal.nextwall];
+			outSnapshot.nextWallCstat = (uint16_t)nextWall.cstat;
+			outSnapshot.nextWallTexture = nextWall.walltexture.GetIndex();
+			outSnapshot.nextOverTexture = nextWall.overtexture.GetIndex();
+			outSnapshot.nextWallPal = nextWall.pal;
+			outSnapshot.nextWallShade = nextWall.shade;
+		}
 	}
 
 	bool CaptureChunkMutationBaselineInternal(const PTMapChunk& chunk, PTMapChunkMutationBaseline& outBaseline)
@@ -812,6 +833,26 @@ namespace
 			{
 				outAnalysis.reasonMask |= PTMapChunkMutationReason_WallMaterial;
 			}
+
+			if (baselineWall.adjacentFloorz != ((liveWall.nextsector >= 0 && (unsigned)liveWall.nextsector < sector.Size()) ? sector[(unsigned)liveWall.nextsector].floorz : 0.0) ||
+				baselineWall.adjacentCeilingz != ((liveWall.nextsector >= 0 && (unsigned)liveWall.nextsector < sector.Size()) ? sector[(unsigned)liveWall.nextsector].ceilingz : 0.0) ||
+				baselineWall.adjacentFloorheinum != ((liveWall.nextsector >= 0 && (unsigned)liveWall.nextsector < sector.Size()) ? sector[(unsigned)liveWall.nextsector].floorheinum : 0) ||
+				baselineWall.adjacentCeilingheinum != ((liveWall.nextsector >= 0 && (unsigned)liveWall.nextsector < sector.Size()) ? sector[(unsigned)liveWall.nextsector].ceilingheinum : 0) ||
+				baselineWall.adjacentFloorstat != ((liveWall.nextsector >= 0 && (unsigned)liveWall.nextsector < sector.Size()) ? (uint16_t)sector[(unsigned)liveWall.nextsector].floorstat : 0) ||
+				baselineWall.adjacentCeilingstat != ((liveWall.nextsector >= 0 && (unsigned)liveWall.nextsector < sector.Size()) ? (uint16_t)sector[(unsigned)liveWall.nextsector].ceilingstat : 0) ||
+				baselineWall.adjacentPortalflags != ((liveWall.nextsector >= 0 && (unsigned)liveWall.nextsector < sector.Size()) ? sector[(unsigned)liveWall.nextsector].portalflags : 0))
+			{
+				outAnalysis.reasonMask |= PTMapChunkMutationReason_WallGeometry;
+			}
+
+			if (baselineWall.nextWallCstat != ((liveWall.nextwall >= 0 && (unsigned)liveWall.nextwall < wall.Size()) ? (uint16_t)wall[(unsigned)liveWall.nextwall].cstat : 0) ||
+				baselineWall.nextWallTexture != ((liveWall.nextwall >= 0 && (unsigned)liveWall.nextwall < wall.Size()) ? wall[(unsigned)liveWall.nextwall].walltexture.GetIndex() : -1) ||
+				baselineWall.nextOverTexture != ((liveWall.nextwall >= 0 && (unsigned)liveWall.nextwall < wall.Size()) ? wall[(unsigned)liveWall.nextwall].overtexture.GetIndex() : -1) ||
+				baselineWall.nextWallPal != ((liveWall.nextwall >= 0 && (unsigned)liveWall.nextwall < wall.Size()) ? wall[(unsigned)liveWall.nextwall].pal : 0) ||
+				baselineWall.nextWallShade != ((liveWall.nextwall >= 0 && (unsigned)liveWall.nextwall < wall.Size()) ? wall[(unsigned)liveWall.nextwall].shade : 0))
+			{
+				outAnalysis.reasonMask |= PTMapChunkMutationReason_WallMaterial;
+			}
 		}
 
 		outAnalysis.signatureChanged = outAnalysis.signature != baseline.signature;
@@ -947,6 +988,26 @@ uint64_t ComputeMapChunkGeometrySignature(const PTMapChunk& chunk)
 		hash = HashMix(hash, wal.yrepeat);
 		hash = HashMix(hash, wal.pal);
 		hash = HashMix(hash, (uint8_t)wal.shade);
+		if (wal.nextsector >= 0 && (unsigned)wal.nextsector < sector.Size())
+		{
+			const sectortype& adjacent = sector[(unsigned)wal.nextsector];
+			hash = HashDoubleBits(hash, adjacent.floorz);
+			hash = HashDoubleBits(hash, adjacent.ceilingz);
+			hash = HashMix(hash, (uint16_t)adjacent.floorstat);
+			hash = HashMix(hash, (uint16_t)adjacent.ceilingstat);
+			hash = HashMix(hash, (uint16_t)adjacent.floorheinum);
+			hash = HashMix(hash, (uint16_t)adjacent.ceilingheinum);
+			hash = HashMix(hash, adjacent.portalflags);
+		}
+		if (wal.nextwall >= 0 && (unsigned)wal.nextwall < wall.Size())
+		{
+			const walltype& nextWall = wall[(unsigned)wal.nextwall];
+			hash = HashMix(hash, (uint16_t)nextWall.cstat);
+			hash = HashMix(hash, nextWall.walltexture.GetIndex());
+			hash = HashMix(hash, nextWall.overtexture.GetIndex());
+			hash = HashMix(hash, nextWall.pal);
+			hash = HashMix(hash, (uint8_t)nextWall.shade);
+		}
 	}
 
 	return hash;

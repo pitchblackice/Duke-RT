@@ -35,6 +35,18 @@ struct PTMapWallMutationSnapshot
 	int32_t yrepeat = 0;
 	int32_t pal = 0;
 	int32_t shade = 0;
+	double adjacentFloorz = 0.0;
+	double adjacentCeilingz = 0.0;
+	uint16_t adjacentFloorstat = 0;
+	uint16_t adjacentCeilingstat = 0;
+	int16_t adjacentFloorheinum = 0;
+	int16_t adjacentCeilingheinum = 0;
+	uint8_t adjacentPortalflags = 0;
+	uint16_t nextWallCstat = 0;
+	int32_t nextWallTexture = -1;
+	int32_t nextOverTexture = -1;
+	int32_t nextWallPal = 0;
+	int32_t nextWallShade = 0;
 };
 
 struct PTMapChunkMutationBaseline
