@@ -150,6 +150,26 @@ namespace
 		return plane == 0 ? (sec->floorstat & CSTAT_SECTOR_SKY) != 0 : (sec->ceilingstat & CSTAT_SECTOR_SKY) != 0;
 	}
 
+	uint32_t GetPlaneMaterialFlags(const sectortype* sec, int plane)
+	{
+		uint32_t materialFlags = MaterialFlag_Flat;
+		if (sec == nullptr)
+		{
+			return materialFlags;
+		}
+
+		if (!IsPortalPlane(sec, plane))
+		{
+			return materialFlags;
+		}
+
+		const bool reflective =
+			(plane == 0 && sec->portalflags == PORTAL_SECTOR_FLOOR_REFLECT) ||
+			(plane != 0 && sec->portalflags == PORTAL_SECTOR_CEILING_REFLECT);
+		materialFlags |= reflective ? MaterialFlag_Mirror : MaterialFlag_Portal;
+		return materialFlags;
+	}
+
 	void FillPlaneProvenance(SurfaceProvenance& provenance, const sectortype* sec, int plane, int sectionIndex, int chunkIndex, uint32_t materialFlags)
 	{
 		provenance.sourceType = plane == 0 ? SurfaceSourceType::MapFloorSection : SurfaceSourceType::MapCeilingSection;
@@ -325,11 +345,16 @@ namespace
 	{
 		stats.surfaceCount++;
 		stats.triangleCount += CountTriangles(surface.surface);
+		const bool portalTagged = (surface.surface.material.flags & (MaterialFlag_Portal | MaterialFlag_Mirror)) != 0;
 		switch (surface.kind)
 		{
 		case PTMapSurfaceKind::Floor:
 		case PTMapSurfaceKind::Ceiling:
 			stats.flatSurfaceCount++;
+			if (portalTagged)
+			{
+				stats.portalSurfaceCount++;
+			}
 			break;
 		case PTMapSurfaceKind::Portal:
 			stats.portalSurfaceCount++;
@@ -359,9 +384,9 @@ namespace
 			return;
 		}
 
-		// Phase-2 opaque residency excludes sky and sector-portal planes. They
-		// need separate PT sky / portal handling instead of entering the opaque BLAS.
-		if (IsSkyPlane(sec, plane) || IsPortalPlane(sec, plane))
+		// Sky planes remain out of the opaque PT world. Sector portal planes are
+		// phase-8 traversal surfaces, so keep them hittable with portal/mirror tags.
+		if (IsSkyPlane(sec, plane))
 		{
 			return;
 		}
@@ -373,7 +398,7 @@ namespace
 			return;
 		}
 
-		uint32_t materialFlags = MaterialFlag_Flat;
+		uint32_t materialFlags = GetPlaneMaterialFlags(sec, plane);
 
 		PTMapSurface surface = {};
 		surface.kind = plane == 0 ? PTMapSurfaceKind::Floor : PTMapSurfaceKind::Ceiling;
@@ -698,6 +723,44 @@ namespace
 		return lookup;
 	}
 
+	std::vector<uint32_t> BuildPortalPlaneSurfaceLookup(const PTMapWorld& world)
+	{
+		std::vector<uint32_t> lookup(sector.Size() * 2u, UINT32_MAX);
+		for (uint32_t surfaceIndex = 0; surfaceIndex < world.surfaces.size(); ++surfaceIndex)
+		{
+			const PTMapSurface& surface = world.surfaces[surfaceIndex];
+			const SurfaceProvenance& provenance = surface.surface.provenance;
+			const int sectorIndex = provenance.sectorIndex;
+			if (sectorIndex < 0 || (unsigned)sectorIndex >= sector.Size())
+			{
+				continue;
+			}
+
+			int plane = -1;
+			if (provenance.sourceType == SurfaceSourceType::MapFloorSection)
+			{
+				plane = 0;
+			}
+			else if (provenance.sourceType == SurfaceSourceType::MapCeilingSection)
+			{
+				plane = 1;
+			}
+
+			if (plane < 0 || (surface.surface.material.flags & (MaterialFlag_Portal | MaterialFlag_Mirror)) == 0)
+			{
+				continue;
+			}
+
+			const size_t lookupIndex = (size_t)sectorIndex * 2u + (size_t)plane;
+			if (lookupIndex < lookup.size() && lookup[lookupIndex] == UINT32_MAX)
+			{
+				lookup[lookupIndex] = surfaceIndex;
+			}
+		}
+
+		return lookup;
+	}
+
 	void BuildLocalSpaces(PTMapWorld& outWorld, const std::vector<uint32_t>& sectorChunkLookup)
 	{
 		std::vector<uint8_t> visited(sector.Size(), 0u);
@@ -806,6 +869,7 @@ namespace
 		const std::vector<uint32_t> sectorChunkLookup = BuildSectorChunkLookup(outWorld);
 		BuildLocalSpaces(outWorld, sectorChunkLookup);
 		const std::vector<uint32_t> portalWallSurfaceLookup = BuildPortalWallSurfaceLookup(outWorld);
+		const std::vector<uint32_t> portalPlaneSurfaceLookup = BuildPortalPlaneSurfaceLookup(outWorld);
 
 		for (unsigned sectorIndex = 0; sectorIndex < sector.Size(); ++sectorIndex)
 		{
@@ -878,6 +942,11 @@ namespace
 				portal.sourceSectorIndex = (int32_t)sectorIndex;
 				portal.sourcePlane = plane;
 				portal.portalNum = sec.portalnum;
+				const size_t planeLookupIndex = (size_t)sectorIndex * 2u + (size_t)std::max(plane, 0);
+				if (planeLookupIndex < portalPlaneSurfaceLookup.size())
+				{
+					portal.sourceSurfaceIndex = portalPlaneSurfaceLookup[planeLookupIndex];
+				}
 				outWorld.stats.sectorPortalCount++;
 
 				if (kind == PTPortalKind::SectorFloorMirror || kind == PTPortalKind::SectorCeilingMirror)

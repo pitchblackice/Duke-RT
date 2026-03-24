@@ -119,6 +119,11 @@ int32_t FindMapWorldLocalSpaceIndex(const PTMapWorld& mapWorld, uint32_t chunkIn
 
 int32_t FindMapWorldPortalIndex(const PTMapWorld& mapWorld, const SurfaceProvenance& provenance)
 {
+	const int sourcePlane =
+		provenance.sourceType == SurfaceSourceType::MapFloorSection ? 0 :
+		provenance.sourceType == SurfaceSourceType::MapCeilingSection ? 1 :
+		-1;
+
 	for (const PTMapPortal& portal : mapWorld.portals)
 	{
 		if (portal.sourceSurfaceIndex != UINT32_MAX && portal.sourceSurfaceIndex < mapWorld.surfaces.size())
@@ -134,6 +139,13 @@ int32_t FindMapWorldPortalIndex(const PTMapWorld& mapWorld, const SurfaceProvena
 		}
 
 		if (portal.sourceWallIndex >= 0 && portal.sourceWallIndex == provenance.wallIndex)
+		{
+			return (int32_t)portal.portalIndex;
+		}
+
+		if (sourcePlane >= 0 &&
+			portal.sourcePlane == sourcePlane &&
+			portal.sourceSectorIndex == provenance.sectorIndex)
 		{
 			return (int32_t)portal.portalIndex;
 		}

@@ -297,6 +297,29 @@ namespace
 		return count;
 	}
 
+	static uint32_t CountPendingPlanePortals(const nri_scene::PTMapWorld& mapWorld)
+	{
+		uint32_t count = 0;
+		for (const auto& portal : mapWorld.portals)
+		{
+			switch (portal.kind)
+			{
+			case nri_scene::PTPortalKind::SectorFloorStack:
+			case nri_scene::PTPortalKind::SectorCeilingStack:
+			case nri_scene::PTPortalKind::SectorFloorMirror:
+			case nri_scene::PTPortalKind::SectorCeilingMirror:
+				if (portal.sourceSurfaceIndex == UINT32_MAX)
+				{
+					count++;
+				}
+				break;
+			default:
+				break;
+			}
+		}
+		return count;
+	}
+
 	static void AssignGeometryPortalIndices(const nri_scene::PTMapWorld& mapWorld, nri_scene::GeometryData& geometry)
 	{
 		const size_t count = std::min(geometry.primitives.size(), geometry.primitiveProvenance.size());
@@ -1733,7 +1756,7 @@ void NRIRenderer::PrintPortalTraversalStatus() const
 		CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER),
 		CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND),
 		mMapWorld.stats.portalSurfaceCount,
-		mMapWorld.stats.sectorPortalCount);
+		CountPendingPlanePortals(mMapWorld));
 }
 
 void NRIRenderer::PrintStaticMapSceneStatus() const
