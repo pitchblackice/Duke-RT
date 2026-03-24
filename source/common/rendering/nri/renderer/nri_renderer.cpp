@@ -4351,6 +4351,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 
 	const uint32_t candidateLocalSpaceIndex = getLocalSpaceIndex(effectSectorIndex);
 	RuntimeTransportContext activeTransportContext = {};
+	const bool requireExplicitTransportContext = gi != nullptr && gi->RequireExplicitRuntimeTransportContext();
 	const bool hasExplicitTransportContext = gi != nullptr && gi->GetActiveRuntimeTransportContext(&activeTransportContext);
 	if (hasExplicitTransportContext)
 	{
@@ -4364,7 +4365,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		runtimeTransportLinks[0] = activeTransportContext.link;
 		runtimeTransportLinkCount = 1;
 	}
-	else if (gi != nullptr && nearbyTransportSectorCount > 0)
+	else if (!requireExplicitTransportContext && gi != nullptr && nearbyTransportSectorCount > 0)
 	{
 		runtimeTransportLinkCount = gi->GetRuntimeTransportLinkInfo(
 			nearbyTransportSectors.data(),

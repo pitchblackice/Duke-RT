@@ -166,6 +166,7 @@ struct GameInterface
 	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
 	virtual bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) { return false; }
 	virtual uint32_t GetRuntimeTransportLinkInfo(const int32_t* sectorIndices, uint32_t sectorCount, RuntimeTransportLinkInfo* links, uint32_t maxLinks) { return 0; }
+	virtual bool RequireExplicitRuntimeTransportContext() { return false; }
 	virtual bool GetActiveRuntimeTransportContext(RuntimeTransportContext* context) { return false; }
 	virtual int Voxelize(int sprnum) { return -1; }
 	virtual void AddExcludedEpisode(const FString& episode) {}

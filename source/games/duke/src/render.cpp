@@ -316,23 +316,52 @@ bool GameInterface::GetActiveRuntimeTransportContext(RuntimeTransportContext* co
 	const int playerSectorIndex = sectindex(p->cursector);
 	const int actorSectorIndex = p->GetActor() != nullptr && p->GetActor()->sector() != nullptr ? sectindex(p->GetActor()->sector()) : -1;
 	const bool transportActive = p->on_warping_sector != 0 || p->transporter_hold != 0;
-	const bool sourceSideActive =
+	const bool sourceSideObserved =
 		ContextMatchesSide(cached.context, playerSectorIndex, true) ||
 		ContextMatchesSide(cached.context, actorSectorIndex, true);
-	const bool destinationSideActive =
+	const bool destinationSideObserved =
 		ContextMatchesSide(cached.context, playerSectorIndex, false) ||
 		ContextMatchesSide(cached.context, actorSectorIndex, false);
+	bool sourceSideActive = cached.context.sourceSideActive;
+	bool destinationSideActive = cached.context.destinationSideActive;
 
-	if (transportActive)
+	if (sourceSideObserved && !destinationSideObserved)
+	{
+		sourceSideActive = true;
+		destinationSideActive = false;
+	}
+	else if (destinationSideObserved && !sourceSideObserved)
+	{
+		sourceSideActive = false;
+		destinationSideActive = true;
+	}
+	else if (sourceSideObserved && destinationSideObserved)
+	{
+		if (!sourceSideActive && !destinationSideActive)
+		{
+			sourceSideActive = true;
+			destinationSideActive = false;
+		}
+	}
+	else if (transportActive)
+	{
+		if (!sourceSideActive && !destinationSideActive)
+		{
+			sourceSideActive = true;
+			destinationSideActive = false;
+		}
+	}
+
+	if (transportActive || sourceSideObserved || destinationSideObserved)
 	{
 		cached.context.lingerFrames = std::max(cached.context.lingerFrames, 8);
 	}
-	else if (!sourceSideActive && !destinationSideActive && cached.context.lingerFrames > 0)
+	else if (cached.context.lingerFrames > 0)
 	{
 		cached.context.lingerFrames--;
 	}
 
-	if (!transportActive && !sourceSideActive && !destinationSideActive && cached.context.lingerFrames <= 0)
+	if (!transportActive && !sourceSideObserved && !destinationSideObserved && cached.context.lingerFrames <= 0)
 	{
 		cached = {};
 		cached.level = currentLevel;
@@ -342,10 +371,10 @@ bool GameInterface::GetActiveRuntimeTransportContext(RuntimeTransportContext* co
 	cached.context.available = true;
 	cached.context.playerSectorIndex = playerSectorIndex;
 	cached.context.actorSectorIndex = actorSectorIndex;
-	cached.context.sourceSideActive = sourceSideActive || (!destinationSideActive && transportActive);
+	cached.context.sourceSideActive = sourceSideActive;
 	cached.context.destinationSideActive = destinationSideActive && !cached.context.sourceSideActive;
 	*context = cached.context;
-	return context->sourceSideActive || context->destinationSideActive || transportActive;
+	return context->sourceSideActive || context->destinationSideActive;
 }
 
 bool GameInterface::GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info)
