@@ -160,6 +160,36 @@ private:
 		uint32_t asBuildCount = 0;
 	};
 
+	struct RuntimeMapMutationCache
+	{
+		struct ChunkReplacement
+		{
+			uint64_t baselineSignature = 0;
+			uint64_t liveSignature = 0;
+			bool active = false;
+			bool valid = false;
+			uint32_t surfaceCount = 0;
+			uint32_t triangleCount = 0;
+			nri_scene::GeometryData geometry;
+			nri_scene::MaterialBridgeData materialBridge;
+		};
+
+		std::vector<ChunkReplacement> chunks;
+		std::vector<uint8_t> replacedChunkMask;
+	};
+
+	struct RuntimeMapMutationFrameState
+	{
+		bool active = false;
+		uint32_t dirtyChunkCount = 0;
+		uint32_t replacedChunkCount = 0;
+		uint32_t rebuiltChunkCount = 0;
+		uint32_t heldChunkCount = 0;
+		uint32_t replacementSurfaceCount = 0;
+		uint32_t replacementTriangleCount = 0;
+		uint32_t materialCount = 0;
+	};
+
 	struct SceneInstanceData
 	{
 		uint32_t primitiveOffset = 0;
@@ -197,6 +227,7 @@ private:
 	bool BuildStaticMapAccelerationStructures();
 	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask);
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
+	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -211,7 +242,7 @@ private:
 		uint32_t dynamicPrimitiveCount,
 		uint32_t staticMaterialCount,
 		uint32_t dynamicMaterialCount);
-	void BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const;
+	void BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr) const;
 	bool RestoreStaticTopLevelScene();
 	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
 	bool DispatchTraceOpaque(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
@@ -229,6 +260,7 @@ private:
 	void PrintMapWorldStatus() const;
 	void PrintStaticMapSceneStatus() const;
 	void PrintDynamicSceneStatus() const;
+	void PrintRuntimeMapMutationStatus() const;
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;
@@ -317,7 +349,9 @@ private:
 	NRIUpscalerContext mUpscaler;
 	nri_scene::PTMapWorld mMapWorld;
 	StaticMapSceneCache mStaticMapScene;
+	RuntimeMapMutationCache mRuntimeMapMutations;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
+	RuntimeMapMutationFrameState mRuntimeMapLastFrame = {};
 	nri_scene::SceneDebugStats mLastStats = {};
 	std::array<nri::Descriptor*, 11> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 12> mOutputDescriptors = {};

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace
 {
@@ -76,6 +77,26 @@ namespace
 	uint32_t CountTriangles(const SurfaceRef& surface)
 	{
 		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2 : 0;
+	}
+
+	uint64_t HashMix(uint64_t hash, uint64_t value)
+	{
+		hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+		return hash;
+	}
+
+	uint64_t HashFloatBits(uint64_t hash, float value)
+	{
+		uint32_t bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		return HashMix(hash, bits);
+	}
+
+	uint64_t HashDoubleBits(uint64_t hash, double value)
+	{
+		uint64_t bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		return HashMix(hash, bits);
 	}
 
 	void AppendSurface(PTMapWorld& outWorld, PTMapChunk& chunk, PTMapSurface&& surface)
@@ -604,6 +625,36 @@ namespace
 			}
 		}
 	}
+
+	bool BuildSectorChunk(PTMapWorld& outWorld, uint32_t sectorIndex, uint32_t chunkIndex, PTMapChunk& outChunk)
+	{
+		if (sectorIndex >= sector.Size() || sectorIndex >= sectionsPerSector.Size())
+		{
+			return false;
+		}
+
+		PTMapChunk chunk = {};
+		chunk.kind = PTMapChunkKind::Sector;
+		chunk.chunkIndex = chunkIndex;
+		chunk.sectorIndex = (int32_t)sectorIndex;
+		chunk.firstSurface = (uint32_t)outWorld.surfaces.size();
+
+		sectortype* sec = &sector[sectorIndex];
+		for (int sectionIndex : sectionsPerSector[sectorIndex])
+		{
+			BuildPlaneSurface(outWorld, chunk, sec, sectionIndex, 0);
+			BuildPlaneSurface(outWorld, chunk, sec, sectionIndex, 1);
+		}
+
+		for (auto& wal : sec->walls)
+		{
+			BuildWallGeometry(outWorld, chunk, sec, &wal);
+		}
+
+		chunk.surfaceCount = (uint32_t)outWorld.surfaces.size() - chunk.firstSurface;
+		outChunk = chunk;
+		return true;
+	}
 }
 
 namespace nri_scene
@@ -637,29 +688,92 @@ bool BuildMapWorld(PTMapWorld& outWorld)
 	for (unsigned sectorIndex = 0; sectorIndex < sector.Size(); ++sectorIndex)
 	{
 		PTMapChunk chunk = {};
-		chunk.kind = PTMapChunkKind::Sector;
-		chunk.chunkIndex = (uint32_t)outWorld.chunks.size();
-		chunk.sectorIndex = (int32_t)sectorIndex;
-		chunk.firstSurface = (uint32_t)outWorld.surfaces.size();
-
-		sectortype* sec = &sector[sectorIndex];
-		for (int sectionIndex : sectionsPerSector[sectorIndex])
+		if (!BuildSectorChunk(outWorld, sectorIndex, (uint32_t)outWorld.chunks.size(), chunk))
 		{
-			BuildPlaneSurface(outWorld, chunk, sec, sectionIndex, 0);
-			BuildPlaneSurface(outWorld, chunk, sec, sectionIndex, 1);
+			return false;
 		}
 
-		for (auto& wal : sec->walls)
-		{
-			BuildWallGeometry(outWorld, chunk, sec, &wal);
-		}
-
-		chunk.surfaceCount = (uint32_t)outWorld.surfaces.size() - chunk.firstSurface;
-		outWorld.chunks.push_back(chunk);
+		outWorld.chunks.push_back(std::move(chunk));
 	}
 
 	outWorld.stats.chunkCount = (uint32_t)outWorld.chunks.size();
 	outWorld.valid = true;
 	return true;
+}
+
+bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTMapWorldStats* outStats)
+{
+	outView = {};
+	if (outStats != nullptr)
+	{
+		*outStats = {};
+	}
+
+	if (chunk.kind != PTMapChunkKind::Sector || chunk.sectorIndex < 0)
+	{
+		return false;
+	}
+
+	PTMapWorld tempWorld = {};
+	tempWorld.level = currentLevel;
+	tempWorld.buildSerial = gPendingLevelGeometryBuildSerial;
+	tempWorld.stats.sectorCount = (uint32_t)sector.Size();
+	tempWorld.stats.sectionCount = (uint32_t)sections.Size();
+
+	PTMapChunk liveChunk = {};
+	if (!BuildSectorChunk(tempWorld, (uint32_t)chunk.sectorIndex, 0u, liveChunk))
+	{
+		return false;
+	}
+
+	tempWorld.chunks.push_back(liveChunk);
+	tempWorld.stats.chunkCount = 1;
+	tempWorld.valid = true;
+	if (outStats != nullptr)
+	{
+		*outStats = tempWorld.stats;
+	}
+
+	BuildMapChunkSceneView(tempWorld, tempWorld.chunks[0], outView);
+	return true;
+}
+
+uint64_t ComputeMapChunkGeometrySignature(const PTMapChunk& chunk)
+{
+	if (chunk.kind != PTMapChunkKind::Sector || chunk.sectorIndex < 0 || (unsigned)chunk.sectorIndex >= sector.Size())
+	{
+		return 0;
+	}
+
+	const sectortype& sec = sector[(unsigned)chunk.sectorIndex];
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashMix(hash, chunk.chunkIndex);
+	hash = HashMix(hash, (uint64_t)(uint32_t)chunk.sectorIndex);
+	hash = HashDoubleBits(hash, sec.floorz);
+	hash = HashDoubleBits(hash, sec.ceilingz);
+	hash = HashMix(hash, (uint16_t)sec.floorstat);
+	hash = HashMix(hash, (uint16_t)sec.ceilingstat);
+	hash = HashMix(hash, (uint16_t)sec.floorheinum);
+	hash = HashMix(hash, (uint16_t)sec.ceilingheinum);
+	hash = HashMix(hash, sec.portalflags);
+
+	for (const walltype& wal : sec.walls)
+	{
+		hash = HashDoubleBits(hash, wal.pos.X);
+		hash = HashDoubleBits(hash, wal.pos.Y);
+		hash = HashMix(hash, (uint32_t)wal.point2);
+		hash = HashMix(hash, (uint32_t)wal.nextwall);
+		hash = HashMix(hash, (uint32_t)wal.nextsector);
+		hash = HashMix(hash, (uint16_t)wal.cstat);
+		hash = HashMix(hash, wal.portalflags);
+		hash = HashMix(hash, wal.walltexture.GetIndex());
+		hash = HashMix(hash, wal.overtexture.GetIndex());
+		hash = HashFloatBits(hash, wal.xpan_);
+		hash = HashFloatBits(hash, wal.ypan_);
+		hash = HashMix(hash, wal.xrepeat);
+		hash = HashMix(hash, wal.yrepeat);
+	}
+
+	return hash;
 }
 }

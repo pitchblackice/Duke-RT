@@ -974,6 +974,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	mBuiltStaticMapSceneASLastFrame = false;
 	mBuiltDynamicSceneASLastFrame = false;
 	mDynamicSceneLastFrame = {};
+	mRuntimeMapLastFrame = {};
 	RefreshMapWorld();
 	UpdatePerFrameState(di);
 	if (preserveHistory)
@@ -1015,10 +1016,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::SceneView capturedSceneView;
 	nri_scene::SceneView dynamicSceneView;
 	nri_scene::GeometryData capturedGeometry;
+	nri_scene::GeometryData runtimeMutationGeometry;
 	nri_scene::GeometryData dynamicGeometry;
+	nri_scene::GeometryData overlayGeometry;
 	nri_scene::GeometryData combinedGeometry;
 	nri_scene::MaterialBridgeData materialBridge;
+	nri_scene::MaterialBridgeData runtimeMutationMaterialBridge;
 	nri_scene::MaterialBridgeData dynamicMaterialBridge;
+	nri_scene::MaterialBridgeData overlayMaterialBridge;
 	nri_scene::MaterialBridgeData combinedMaterialBridge;
 	std::vector<nri_scene::MaterialData> capturedGpuMaterials;
 	std::vector<nri_scene::MaterialData> dynamicGpuMaterials;
@@ -1040,8 +1045,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		activeGpuMaterials = &mStaticMapScene.gpuMaterials;
 		activeStats = mStaticMapScene.sceneView.stats;
 
-		const bool deferDynamicSceneThisFrame = mUploadedStaticMapSceneLastFrame || mBuiltStaticMapSceneASLastFrame;
-		const bool hasDynamicScene = !deferDynamicSceneThisFrame && nri_scene::CaptureDynamicScene(di, dynamicSceneView);
+		const bool deferOverlayThisFrame = mUploadedStaticMapSceneLastFrame || mBuiltStaticMapSceneASLastFrame;
+		const bool hasRuntimeMutationOverlay = !deferOverlayThisFrame && BuildRuntimeMapMutationOverlay(runtimeMutationGeometry, runtimeMutationMaterialBridge);
+		const bool hasDynamicScene = !deferOverlayThisFrame && nri_scene::CaptureDynamicScene(di, dynamicSceneView);
 		if (hasDynamicScene)
 		{
 			{
@@ -1055,9 +1061,61 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					Clocker clock(NriPTMaterialBuild);
 					nri_scene::BuildMaterials(dynamicSceneView, dynamicMaterialBridge);
 				}
+			}
+		}
 
+		if (hasRuntimeMutationOverlay || !dynamicGeometry.primitives.empty())
+		{
+			overlayGeometry = {};
+			overlayMaterialBridge = {};
+
+			if (hasRuntimeMutationOverlay)
+			{
+				if (!runtimeMutationGeometry.primitives.empty())
+				{
+					AppendGeometry(runtimeMutationGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
+				}
+				AppendMaterialBridge(runtimeMutationMaterialBridge, overlayMaterialBridge);
+			}
+
+			if (!dynamicGeometry.primitives.empty())
+			{
+				AppendGeometry(dynamicGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
+				AppendMaterialBridge(dynamicMaterialBridge, overlayMaterialBridge);
+			}
+
+			std::vector<nri::TopLevelInstance> instances;
+			std::vector<SceneInstanceData> sceneInstances;
+			const std::vector<uint8_t>* replacedChunkMask = hasRuntimeMutationOverlay ? &mRuntimeMapMutations.replacedChunkMask : nullptr;
+			BuildStaticMapInstances(instances, sceneInstances, replacedChunkMask);
+
+			if (overlayGeometry.primitives.empty())
+			{
+				accelerationReady =
+					BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static) &&
+					UpdateSceneDataSet(
+						mStaticVertexBuffer,
+						mStaticIndexBuffer,
+						mStaticPrimitiveBuffer,
+						mStaticMaterialBuffer,
+						mStaticVertexBuffer,
+						mStaticIndexBuffer,
+						mStaticPrimitiveBuffer,
+						mStaticMaterialBuffer,
+						sceneInstances,
+						(uint32_t)mStaticMapScene.geometry.primitives.size(),
+						0u,
+						(uint32_t)mStaticMapScene.gpuMaterials.size(),
+						0u);
+				if (accelerationReady && hasRuntimeMutationOverlay)
+				{
+					mBuiltStaticMapSceneASLastFrame = false;
+				}
+			}
+			else
+			{
 				combinedMaterialBridge = mStaticMapScene.materialBridge;
-				AppendMaterialBridge(dynamicMaterialBridge, combinedMaterialBridge);
+				AppendMaterialBridge(overlayMaterialBridge, combinedMaterialBridge);
 				paletteReady = EnsurePaletteTexture(combinedMaterialBridge);
 				texturesReady = paletteReady && EnsureSceneTextures(mStaticMapScene.sceneView, combinedMaterialBridge, combinedGpuMaterials, false);
 				dynamicGpuMaterials.clear();
@@ -1073,20 +1131,16 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						dynamicGpuMaterials.assign(combinedGpuMaterials.begin() + staticMaterialCount, combinedGpuMaterials.end());
 					}
 				}
-				buffersReady = texturesReady && UploadSceneBuffers(dynamicGeometry, dynamicGpuMaterials);
+				buffersReady = texturesReady && UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials);
 				accelerationReady = false;
 				if (buffersReady)
 				{
 					accelerationReady =
-						BuildDynamicAccelerationStructure(dynamicGeometry) &&
+						BuildDynamicAccelerationStructure(overlayGeometry) &&
 						mDynamicBottomLevelAS.accelerationStructure != nullptr;
 				}
 				if (accelerationReady)
 				{
-					std::vector<nri::TopLevelInstance> instances;
-					std::vector<SceneInstanceData> sceneInstances;
-					BuildStaticMapInstances(instances, sceneInstances);
-
 					nri::TopLevelInstance dynamicInstance = {};
 					dynamicInstance.transform[0][0] = 1.0f;
 					dynamicInstance.transform[1][1] = 1.0f;
@@ -1112,45 +1166,55 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							mMaterialBuffer,
 							sceneInstances,
 							(uint32_t)mStaticMapScene.geometry.primitives.size(),
-							(uint32_t)dynamicGeometry.primitives.size(),
+							(uint32_t)overlayGeometry.primitives.size(),
 							(uint32_t)mStaticMapScene.gpuMaterials.size(),
 							(uint32_t)dynamicGpuMaterials.size());
 				}
-				if (texturesReady)
-				{
-					PrepareSceneTextureInputsForCompute();
-				}
+			}
 
-				if (paletteReady && texturesReady && buffersReady && accelerationReady)
+			if (overlayGeometry.primitives.empty() || texturesReady)
+			{
+				PrepareSceneTextureInputsForCompute();
+			}
+
+			if (paletteReady && texturesReady && buffersReady && accelerationReady)
+			{
+				mUsedDynamicSceneLastFrame = !dynamicGeometry.primitives.empty();
+				mGpuSceneHasDynamicOverlay = true;
+				mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)dynamicSceneView.opaqueSprites.size();
+				mDynamicSceneLastFrame.primitiveCount = (uint32_t)dynamicGeometry.primitives.size();
+				mDynamicSceneLastFrame.materialCount = (uint32_t)dynamicMaterialBridge.materials.size();
+				mDynamicSceneLastFrame.modelCount = dynamicSceneView.stats.modelDrawItems;
+				mDynamicSceneLastFrame.unsupportedModelCount = dynamicSceneView.stats.unsupportedModelDrawItems;
+				if (!overlayGeometry.primitives.empty())
 				{
-					mUsedDynamicSceneLastFrame = true;
-					mGpuSceneHasDynamicOverlay = true;
-					mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)dynamicSceneView.opaqueSprites.size();
-					mDynamicSceneLastFrame.primitiveCount = (uint32_t)dynamicGeometry.primitives.size();
-					mDynamicSceneLastFrame.materialCount = (uint32_t)dynamicGpuMaterials.size();
-					mDynamicSceneLastFrame.modelCount = dynamicSceneView.stats.modelDrawItems;
-					mDynamicSceneLastFrame.unsupportedModelCount = dynamicSceneView.stats.unsupportedModelDrawItems;
 					combinedGeometry = mStaticMapScene.geometry;
-					AppendGeometry(dynamicGeometry, (uint32_t)mStaticMapScene.materialBridge.materials.size(), combinedGeometry);
+					AppendGeometry(overlayGeometry, (uint32_t)mStaticMapScene.materialBridge.materials.size(), combinedGeometry);
 					activeGeometry = &combinedGeometry;
 					activeGpuMaterials = &combinedGpuMaterials;
-					activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicSceneView.stats);
 				}
 				else
 				{
-					LogFallback("PT dynamic scene update failed; tracing the resident static world only.");
-					if (mGpuSceneHasDynamicOverlay)
-					{
-						RestoreStaticTopLevelScene();
-					}
-					paletteReady = true;
-					texturesReady = true;
-					buffersReady = true;
-					accelerationReady = true;
+					activeGeometry = &mStaticMapScene.geometry;
+					activeGpuMaterials = &mStaticMapScene.gpuMaterials;
 				}
+
+				activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicSceneView.stats);
+			}
+			else
+			{
+				LogFallback("PT runtime/dynamic overlay update failed; tracing the resident static world only.");
+				if (mGpuSceneHasDynamicOverlay)
+				{
+					RestoreStaticTopLevelScene();
+				}
+				paletteReady = true;
+				texturesReady = true;
+				buffersReady = true;
+				accelerationReady = true;
 			}
 		}
-		else if (deferDynamicSceneThisFrame)
+		else if (deferOverlayThisFrame)
 		{
 			Printf("NRI PT dynamic scene deferred: skipping dynamic overlay on the same frame that rebuilt resident static map assets.\n");
 		}
@@ -1457,6 +1521,7 @@ void NRIRenderer::PrintStatus() const
 	PrintMapWorldStatus();
 	PrintStaticMapSceneStatus();
 	PrintDynamicSceneStatus();
+	PrintRuntimeMapMutationStatus();
 	PrintSceneBufferStatus();
 	PrintSurfaceProbeStatus();
 }
@@ -1515,6 +1580,19 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mDynamicSceneLastFrame.asBuildCount,
 		mBuiltDynamicSceneASLastFrame ? "yes" : "no",
 		mActiveTlasInstanceCount);
+}
+
+void NRIRenderer::PrintRuntimeMapMutationStatus() const
+{
+	Printf("NRI PT runtime map: active=%s dirty_chunks=%u replaced_chunks=%u rebuilt_chunks=%u held_chunks=%u surfaces=%u tris=%u materials=%u\n",
+		mRuntimeMapLastFrame.active ? "yes" : "no",
+		mRuntimeMapLastFrame.dirtyChunkCount,
+		mRuntimeMapLastFrame.replacedChunkCount,
+		mRuntimeMapLastFrame.rebuiltChunkCount,
+		mRuntimeMapLastFrame.heldChunkCount,
+		mRuntimeMapLastFrame.replacementSurfaceCount,
+		mRuntimeMapLastFrame.replacementTriangleCount,
+		mRuntimeMapLastFrame.materialCount);
 }
 
 void NRIRenderer::PrintSceneBufferStatus() const
@@ -2408,9 +2486,18 @@ bool NRIRenderer::EnsureStaticMapScene()
 	mStaticMapScene.materialBridge = {};
 	mStaticMapScene.chunks.clear();
 	mStaticMapScene.chunks.reserve(mMapWorld.chunks.size());
+	mRuntimeMapMutations.chunks.clear();
+	mRuntimeMapMutations.chunks.resize(mMapWorld.chunks.size());
+	mRuntimeMapMutations.replacedChunkMask.assign(mMapWorld.chunks.size(), 0u);
 
 	for (const nri_scene::PTMapChunk& chunk : mMapWorld.chunks)
 	{
+		if (chunk.chunkIndex < mRuntimeMapMutations.chunks.size())
+		{
+			mRuntimeMapMutations.chunks[chunk.chunkIndex].baselineSignature = nri_scene::ComputeMapChunkGeometrySignature(chunk);
+			mRuntimeMapMutations.chunks[chunk.chunkIndex].liveSignature = mRuntimeMapMutations.chunks[chunk.chunkIndex].baselineSignature;
+		}
+
 		nri_scene::SceneView chunkSceneView;
 		nri_scene::GeometryData chunkGeometry;
 		nri_scene::MaterialBridgeData chunkMaterials;
@@ -3092,7 +3179,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 			0u);
 }
 
-void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
+void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask) const
 {
 	outTlasInstances.clear();
 	outSceneInstances.clear();
@@ -3102,6 +3189,13 @@ void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& ou
 	for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)mStaticMapScene.chunks.size(); ++chunkIndex)
 	{
 		const auto& chunk = mStaticMapScene.chunks[chunkIndex];
+		if (replacedChunkMask != nullptr &&
+			chunk.chunkIndex < replacedChunkMask->size() &&
+			(*replacedChunkMask)[chunk.chunkIndex] != 0)
+		{
+			continue;
+		}
+
 		if (chunk.accelerationStructure.accelerationStructure == nullptr)
 		{
 			continue;
@@ -3119,6 +3213,94 @@ void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& ou
 		outTlasInstances.push_back(instance);
 		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, 0u, 0u });
 	}
+}
+
+bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)
+{
+	outGeometry = {};
+	outMaterials = {};
+	mRuntimeMapLastFrame = {};
+
+	if (!mStaticMapScene.valid ||
+		mRuntimeMapMutations.chunks.size() != mMapWorld.chunks.size() ||
+		mRuntimeMapMutations.replacedChunkMask.size() != mMapWorld.chunks.size())
+	{
+		return false;
+	}
+
+	std::fill(mRuntimeMapMutations.replacedChunkMask.begin(), mRuntimeMapMutations.replacedChunkMask.end(), 0u);
+
+	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
+	{
+		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
+		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
+		const uint64_t liveSignature = nri_scene::ComputeMapChunkGeometrySignature(mapChunk);
+		const uint64_t cachedSignature = replacement.liveSignature;
+
+		if (liveSignature == replacement.baselineSignature)
+		{
+			replacement.active = false;
+			continue;
+		}
+
+		mRuntimeMapLastFrame.dirtyChunkCount++;
+		if (!replacement.valid || cachedSignature != liveSignature)
+		{
+			nri_scene::SceneView liveChunkView;
+			nri_scene::PTMapWorldStats liveStats = {};
+			if (nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveChunkView, &liveStats))
+			{
+				nri_scene::GeometryData liveGeometry;
+				nri_scene::MaterialBridgeData liveMaterials;
+				{
+					Clocker clock(NriPTGeometryBuild);
+					nri_scene::BuildGeometry(liveChunkView, liveGeometry);
+				}
+				{
+					Clocker clock(NriPTMaterialBuild);
+					nri_scene::BuildMaterials(liveChunkView, liveMaterials);
+				}
+
+				replacement.geometry = std::move(liveGeometry);
+				replacement.materialBridge = std::move(liveMaterials);
+				replacement.liveSignature = liveSignature;
+				replacement.surfaceCount = liveStats.surfaceCount;
+				replacement.triangleCount = liveStats.triangleCount;
+				replacement.valid = true;
+				replacement.active = true;
+				mRuntimeMapLastFrame.rebuiltChunkCount++;
+			}
+			else if (replacement.valid)
+			{
+				replacement.active = true;
+				mRuntimeMapLastFrame.heldChunkCount++;
+			}
+			else
+			{
+				replacement.active = false;
+				continue;
+			}
+		}
+		else
+		{
+			replacement.active = true;
+		}
+
+		mRuntimeMapMutations.replacedChunkMask[chunkIndex] = 1u;
+		mRuntimeMapLastFrame.replacedChunkCount++;
+		mRuntimeMapLastFrame.replacementSurfaceCount += replacement.surfaceCount;
+		mRuntimeMapLastFrame.replacementTriangleCount += replacement.triangleCount;
+		mRuntimeMapLastFrame.materialCount += (uint32_t)replacement.materialBridge.materials.size();
+
+		if (!replacement.geometry.primitives.empty())
+		{
+			AppendGeometry(replacement.geometry, (uint32_t)outMaterials.materials.size(), outGeometry);
+		}
+		AppendMaterialBridge(replacement.materialBridge, outMaterials);
+	}
+
+	mRuntimeMapLastFrame.active = mRuntimeMapLastFrame.replacedChunkCount > 0;
+	return mRuntimeMapLastFrame.active;
 }
 
 bool NRIRenderer::RestoreStaticTopLevelScene()
@@ -4327,6 +4509,9 @@ void NRIRenderer::DestroyStaticMapSceneCache()
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
+	mRuntimeMapMutations.chunks.clear();
+	mRuntimeMapMutations.replacedChunkMask.clear();
+	mRuntimeMapLastFrame = {};
 }
 
 void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)
