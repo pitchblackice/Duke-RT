@@ -4616,10 +4616,11 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 
 	for (const RuntimeTransportOverlay& overlay : transportOverlays)
 	{
-		std::array<int32_t, 24> overlaySectorQueue = {};
+		std::array<int32_t, 40> overlaySectorQueue = {};
+		std::array<uint8_t, 40> overlaySectorTerminal = {};
 		uint32_t overlaySectorCount = 0;
 		uint32_t overlaySectorReadIndex = 0;
-		const auto appendOverlaySector = [&](int32_t sectorIndex)
+		const auto appendOverlaySector = [&](int32_t sectorIndex, bool terminal)
 		{
 			if (!validSectorIndex(sectorIndex))
 			{
@@ -4635,6 +4636,10 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			{
 				if (overlaySectorQueue[i] == sectorIndex)
 				{
+					if (!terminal)
+					{
+						overlaySectorTerminal[i] = 0;
+					}
 					return;
 				}
 			}
@@ -4642,27 +4647,31 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			if (overlaySectorCount < overlaySectorQueue.size())
 			{
 				overlaySectorQueue[overlaySectorCount++] = sectorIndex;
+				overlaySectorTerminal[overlaySectorCount - 1] = terminal ? 1u : 0u;
 			}
 		};
 
-		appendOverlaySector(overlay.anchorSectorIndex);
+		appendOverlaySector(overlay.anchorSectorIndex, false);
 		while (overlaySectorReadIndex < overlaySectorCount)
 		{
-			const int32_t sectorIndex = overlaySectorQueue[overlaySectorReadIndex++];
-			RuntimeTaggedSectorDebugInfo sectorInfo = {};
-			if (sectorIndex != overlay.anchorSectorIndex &&
-				GetRuntimeSectorControlInfo(sectorIndex, sectorInfo) &&
-				HasRuntimeTransportEffector(sectorInfo))
+			const uint32_t queueIndex = overlaySectorReadIndex++;
+			const int32_t sectorIndex = overlaySectorQueue[queueIndex];
+			if (overlaySectorTerminal[queueIndex] != 0)
 			{
 				continue;
 			}
+
+			RuntimeTaggedSectorDebugInfo sectorInfo = {};
+			const bool stopAtTransportControl = sectorIndex != overlay.anchorSectorIndex &&
+				GetRuntimeSectorControlInfo(sectorIndex, sectorInfo) &&
+				HasRuntimeTransportEffector(sectorInfo);
 
 			const auto& sec = sector[(unsigned)sectorIndex];
 			for (const auto& wal : sec.walls)
 			{
 				if (wal.twoSided())
 				{
-					appendOverlaySector(wal.nextsector);
+					appendOverlaySector(wal.nextsector, stopAtTransportControl);
 				}
 			}
 		}
