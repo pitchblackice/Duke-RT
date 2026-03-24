@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <unordered_map>
 #include <windows.h>
 
@@ -37,6 +38,8 @@ CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_pttraceframes)
 
@@ -127,6 +130,53 @@ namespace
 	static nri::AccessStage NRIComputeAccelerationStructureReadAccess()
 	{
 		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::COMPUTE_SHADER };
+	}
+
+	static void AppendMutationReasonToken(std::string& text, const char* token)
+	{
+		if (!text.empty())
+		{
+			text += "|";
+		}
+		text += token;
+	}
+
+	static std::string GetRuntimeMapMutationReasonSummary(uint32_t reasonMask)
+	{
+		std::string text;
+		if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0)
+		{
+			AppendMutationReasonToken(text, "sector_geom");
+		}
+		if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0)
+		{
+			AppendMutationReasonToken(text, "sector_mat");
+		}
+		if ((reasonMask & nri_scene::PTMapChunkMutationReason_WallGeometry) != 0)
+		{
+			AppendMutationReasonToken(text, "wall_geom");
+		}
+		if ((reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0)
+		{
+			AppendMutationReasonToken(text, "wall_mat");
+		}
+		if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0)
+		{
+			AppendMutationReasonToken(text, "sector_dirty");
+		}
+		if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectionDirty) != 0)
+		{
+			AppendMutationReasonToken(text, "section_dirty");
+		}
+		if ((reasonMask & nri_scene::PTMapChunkMutationReason_Dragged) != 0)
+		{
+			AppendMutationReasonToken(text, "dragged");
+		}
+		if (text.empty())
+		{
+			text = "none";
+		}
+		return text;
 	}
 
 	static uint32_t GetDispatchSize(uint32_t value)
@@ -1490,6 +1540,9 @@ void NRIRenderer::PrintStatus() const
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
 		(int)nri_ptsurfaceprobe);
+	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
+		(int)nri_ptmutationtracechunk,
+		(int)nri_ptmutationtracesector);
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
@@ -1584,15 +1637,77 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 
 void NRIRenderer::PrintRuntimeMapMutationStatus() const
 {
-	Printf("NRI PT runtime map: active=%s dirty_chunks=%u replaced_chunks=%u rebuilt_chunks=%u held_chunks=%u surfaces=%u tris=%u materials=%u\n",
+	Printf("NRI PT runtime map: active=%s dirty_chunks=%u replaced_chunks=%u rebuilt_chunks=%u held_chunks=%u blind_spots=%u sector_geom=%u sector_mat=%u wall_geom=%u wall_mat=%u sector_dirty=%u section_dirty=%u dragged=%u surfaces=%u tris=%u materials=%u\n",
 		mRuntimeMapLastFrame.active ? "yes" : "no",
 		mRuntimeMapLastFrame.dirtyChunkCount,
 		mRuntimeMapLastFrame.replacedChunkCount,
 		mRuntimeMapLastFrame.rebuiltChunkCount,
 		mRuntimeMapLastFrame.heldChunkCount,
+		mRuntimeMapLastFrame.blindSpotChunkCount,
+		mRuntimeMapLastFrame.sectorGeometryChunkCount,
+		mRuntimeMapLastFrame.sectorMaterialChunkCount,
+		mRuntimeMapLastFrame.wallGeometryChunkCount,
+		mRuntimeMapLastFrame.wallMaterialChunkCount,
+		mRuntimeMapLastFrame.sectorDirtyChunkCount,
+		mRuntimeMapLastFrame.sectionDirtyChunkCount,
+		mRuntimeMapLastFrame.draggedChunkCount,
 		mRuntimeMapLastFrame.replacementSurfaceCount,
 		mRuntimeMapLastFrame.replacementTriangleCount,
 		mRuntimeMapLastFrame.materialCount);
+}
+
+void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement)
+{
+	const bool filterByChunk = nri_ptmutationtracechunk >= 0;
+	const bool filterBySector = nri_ptmutationtracesector >= 0;
+	if (!filterByChunk && !filterBySector)
+	{
+		return;
+	}
+
+	if (filterByChunk && mapChunk.chunkIndex != (uint32_t)nri_ptmutationtracechunk)
+	{
+		return;
+	}
+
+	if (filterBySector && mapChunk.sectorIndex != nri_ptmutationtracesector)
+	{
+		return;
+	}
+
+	const bool changed =
+		replacement.traceCount == 0 ||
+		replacement.lastTraceSignature != replacement.liveSignature ||
+		replacement.lastTraceReasonMask != replacement.reasonMask ||
+		replacement.lastTraceActive != replacement.active ||
+		replacement.lastTraceBlindSpot != replacement.blindSpot;
+	if (!changed)
+	{
+		return;
+	}
+
+	const std::string reasons = GetRuntimeMapMutationReasonSummary(replacement.reasonMask);
+	Printf("NRI PT runtime map trace: chunk=%u sector=%d active=%s blind_spot=%s signature_changed=%s baseline_sig=0x%llx live_sig=0x%llx reasons=%s section_dirty=%u sector_dirty=%s dragged=%s surfaces=%u tris=%u materials=%u\n",
+		mapChunk.chunkIndex,
+		mapChunk.sectorIndex,
+		replacement.active ? "yes" : "no",
+		replacement.blindSpot ? "yes" : "no",
+		replacement.liveSignature != replacement.baselineSignature ? "yes" : "no",
+		(unsigned long long)replacement.baselineSignature,
+		(unsigned long long)replacement.liveSignature,
+		reasons.c_str(),
+		replacement.sectionDirtyCount,
+		replacement.sectorDirty ? "yes" : "no",
+		replacement.dragged ? "yes" : "no",
+		replacement.surfaceCount,
+		replacement.triangleCount,
+		(uint32_t)replacement.materialBridge.materials.size());
+
+	replacement.lastTraceSignature = replacement.liveSignature;
+	replacement.lastTraceReasonMask = replacement.reasonMask;
+	replacement.lastTraceActive = replacement.active;
+	replacement.lastTraceBlindSpot = replacement.blindSpot;
+	replacement.traceCount++;
 }
 
 void NRIRenderer::PrintSceneBufferStatus() const
@@ -2494,8 +2609,20 @@ bool NRIRenderer::EnsureStaticMapScene()
 	{
 		if (chunk.chunkIndex < mRuntimeMapMutations.chunks.size())
 		{
-			mRuntimeMapMutations.chunks[chunk.chunkIndex].baselineSignature = nri_scene::ComputeMapChunkGeometrySignature(chunk);
-			mRuntimeMapMutations.chunks[chunk.chunkIndex].liveSignature = mRuntimeMapMutations.chunks[chunk.chunkIndex].baselineSignature;
+			auto& replacement = mRuntimeMapMutations.chunks[chunk.chunkIndex];
+			nri_scene::CaptureMapChunkMutationBaseline(chunk, replacement.baseline);
+			replacement.baselineSignature = replacement.baseline.signature;
+			replacement.liveSignature = replacement.baselineSignature;
+			replacement.reasonMask = 0;
+			replacement.sectionDirtyCount = 0;
+			replacement.sectorDirty = false;
+			replacement.dragged = false;
+			replacement.blindSpot = false;
+			replacement.lastTraceSignature = UINT64_MAX;
+			replacement.lastTraceReasonMask = UINT32_MAX;
+			replacement.lastTraceActive = false;
+			replacement.lastTraceBlindSpot = false;
+			replacement.traceCount = 0;
 		}
 
 		nri_scene::SceneView chunkSceneView;
@@ -3234,17 +3361,73 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	{
 		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
 		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
-		const uint64_t liveSignature = nri_scene::ComputeMapChunkGeometrySignature(mapChunk);
 		const uint64_t cachedSignature = replacement.liveSignature;
-
-		if (liveSignature == replacement.baselineSignature)
+		nri_scene::PTMapChunkMutationAnalysis analysis = {};
+		if (!nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement.baseline, analysis))
 		{
 			replacement.active = false;
+			replacement.reasonMask = nri_scene::PTMapChunkMutationReason_None;
+			replacement.sectionDirtyCount = 0;
+			replacement.sectorDirty = false;
+			replacement.dragged = false;
+			replacement.blindSpot = false;
+			TraceRuntimeMapMutationChunk(mapChunk, replacement);
+			continue;
+		}
+
+		replacement.liveSignature = analysis.signature;
+		replacement.reasonMask = analysis.reasonMask;
+		replacement.sectionDirtyCount = analysis.sectionDirtyCount;
+		replacement.sectorDirty = analysis.sectorDirty;
+		replacement.dragged = analysis.dragged;
+		replacement.blindSpot = analysis.reasonMask != nri_scene::PTMapChunkMutationReason_None && !analysis.signatureChanged;
+
+		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0)
+		{
+			mRuntimeMapLastFrame.sectorGeometryChunkCount++;
+		}
+		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0)
+		{
+			mRuntimeMapLastFrame.sectorMaterialChunkCount++;
+		}
+		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_WallGeometry) != 0)
+		{
+			mRuntimeMapLastFrame.wallGeometryChunkCount++;
+		}
+		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0)
+		{
+			mRuntimeMapLastFrame.wallMaterialChunkCount++;
+		}
+		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0)
+		{
+			mRuntimeMapLastFrame.sectorDirtyChunkCount++;
+		}
+		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectionDirty) != 0)
+		{
+			mRuntimeMapLastFrame.sectionDirtyChunkCount++;
+		}
+		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_Dragged) != 0)
+		{
+			mRuntimeMapLastFrame.draggedChunkCount++;
+		}
+
+		if (analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None)
+		{
+			replacement.active = false;
+			TraceRuntimeMapMutationChunk(mapChunk, replacement);
 			continue;
 		}
 
 		mRuntimeMapLastFrame.dirtyChunkCount++;
-		if (!replacement.valid || cachedSignature != liveSignature)
+		if (replacement.blindSpot)
+		{
+			mRuntimeMapLastFrame.blindSpotChunkCount++;
+			replacement.active = false;
+			TraceRuntimeMapMutationChunk(mapChunk, replacement);
+			continue;
+		}
+
+		if (!replacement.valid || cachedSignature != replacement.liveSignature)
 		{
 			nri_scene::SceneView liveChunkView;
 			nri_scene::PTMapWorldStats liveStats = {};
@@ -3263,7 +3446,6 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 				replacement.geometry = std::move(liveGeometry);
 				replacement.materialBridge = std::move(liveMaterials);
-				replacement.liveSignature = liveSignature;
 				replacement.surfaceCount = liveStats.surfaceCount;
 				replacement.triangleCount = liveStats.triangleCount;
 				replacement.valid = true;
@@ -3278,6 +3460,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			else
 			{
 				replacement.active = false;
+				TraceRuntimeMapMutationChunk(mapChunk, replacement);
 				continue;
 			}
 		}
@@ -3297,6 +3480,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			AppendGeometry(replacement.geometry, (uint32_t)outMaterials.materials.size(), outGeometry);
 		}
 		AppendMaterialBridge(replacement.materialBridge, outMaterials);
+		TraceRuntimeMapMutationChunk(mapChunk, replacement);
 	}
 
 	mRuntimeMapLastFrame.active = mRuntimeMapLastFrame.replacedChunkCount > 0;

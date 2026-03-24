@@ -4,6 +4,7 @@
 #include "nri_resources.h"
 #include "nri_upscaler.h"
 
+#include "../scene/nri_map_builder.h"
 #include "../scene/nri_map_world.h"
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_material_bridge.h"
@@ -164,10 +165,21 @@ private:
 	{
 		struct ChunkReplacement
 		{
+			nri_scene::PTMapChunkMutationBaseline baseline;
 			uint64_t baselineSignature = 0;
 			uint64_t liveSignature = 0;
+			uint64_t lastTraceSignature = UINT64_MAX;
+			uint32_t reasonMask = 0;
+			uint32_t sectionDirtyCount = 0;
+			uint32_t lastTraceReasonMask = UINT32_MAX;
+			uint32_t traceCount = 0;
 			bool active = false;
 			bool valid = false;
+			bool sectorDirty = false;
+			bool dragged = false;
+			bool blindSpot = false;
+			bool lastTraceActive = false;
+			bool lastTraceBlindSpot = false;
 			uint32_t surfaceCount = 0;
 			uint32_t triangleCount = 0;
 			nri_scene::GeometryData geometry;
@@ -185,6 +197,14 @@ private:
 		uint32_t replacedChunkCount = 0;
 		uint32_t rebuiltChunkCount = 0;
 		uint32_t heldChunkCount = 0;
+		uint32_t blindSpotChunkCount = 0;
+		uint32_t sectorGeometryChunkCount = 0;
+		uint32_t sectorMaterialChunkCount = 0;
+		uint32_t wallGeometryChunkCount = 0;
+		uint32_t wallMaterialChunkCount = 0;
+		uint32_t sectorDirtyChunkCount = 0;
+		uint32_t sectionDirtyChunkCount = 0;
+		uint32_t draggedChunkCount = 0;
 		uint32_t replacementSurfaceCount = 0;
 		uint32_t replacementTriangleCount = 0;
 		uint32_t materialCount = 0;
@@ -261,6 +281,7 @@ private:
 	void PrintStaticMapSceneStatus() const;
 	void PrintDynamicSceneStatus() const;
 	void PrintRuntimeMapMutationStatus() const;
+	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;

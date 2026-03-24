@@ -655,6 +655,168 @@ namespace
 		outChunk = chunk;
 		return true;
 	}
+
+	void CaptureWallMutationSnapshot(const walltype& wal, PTMapWallMutationSnapshot& outSnapshot)
+	{
+		outSnapshot.pos = wal.pos;
+		outSnapshot.point2 = wal.point2;
+		outSnapshot.nextwall = wal.nextwall;
+		outSnapshot.nextsector = wal.nextsector;
+		outSnapshot.cstat = (uint16_t)wal.cstat;
+		outSnapshot.portalflags = wal.portalflags;
+		outSnapshot.walltexture = wal.walltexture.GetIndex();
+		outSnapshot.overtexture = wal.overtexture.GetIndex();
+		outSnapshot.xpan = wal.xpan_;
+		outSnapshot.ypan = wal.ypan_;
+		outSnapshot.xrepeat = wal.xrepeat;
+		outSnapshot.yrepeat = wal.yrepeat;
+		outSnapshot.pal = wal.pal;
+		outSnapshot.shade = wal.shade;
+	}
+
+	bool CaptureChunkMutationBaselineInternal(const PTMapChunk& chunk, PTMapChunkMutationBaseline& outBaseline)
+	{
+		outBaseline = {};
+		if (chunk.kind != PTMapChunkKind::Sector || chunk.sectorIndex < 0 || (unsigned)chunk.sectorIndex >= sector.Size())
+		{
+			return false;
+		}
+
+		const sectortype& sec = sector[(unsigned)chunk.sectorIndex];
+		outBaseline.sectorIndex = chunk.sectorIndex;
+		outBaseline.signature = ComputeMapChunkGeometrySignature(chunk);
+		outBaseline.floorz = sec.floorz;
+		outBaseline.ceilingz = sec.ceilingz;
+		outBaseline.floorstat = (uint16_t)sec.floorstat;
+		outBaseline.ceilingstat = (uint16_t)sec.ceilingstat;
+		outBaseline.floorheinum = sec.floorheinum;
+		outBaseline.ceilingheinum = sec.ceilingheinum;
+		outBaseline.portalflags = sec.portalflags;
+		outBaseline.floortexture = sec.floortexture.GetIndex();
+		outBaseline.ceilingtexture = sec.ceilingtexture.GetIndex();
+		outBaseline.floorxpan = sec.floorxpan_;
+		outBaseline.floorypan = sec.floorypan_;
+		outBaseline.ceilingxpan = sec.ceilingxpan_;
+		outBaseline.ceilingypan = sec.ceilingypan_;
+		outBaseline.floorpal = sec.floorpal;
+		outBaseline.ceilingpal = sec.ceilingpal;
+		outBaseline.floorshade = sec.floorshade;
+		outBaseline.ceilingshade = sec.ceilingshade;
+
+		for (int sectionIndex : sectionsPerSector[(unsigned)chunk.sectorIndex])
+		{
+			outBaseline.sectionIndices.push_back(sectionIndex);
+		}
+
+		outBaseline.walls.reserve(sec.walls.Size());
+		for (const walltype& wal : sec.walls)
+		{
+			PTMapWallMutationSnapshot snapshot = {};
+			CaptureWallMutationSnapshot(wal, snapshot);
+			outBaseline.walls.push_back(snapshot);
+		}
+
+		return true;
+	}
+
+	bool AnalyzeChunkMutationInternal(const PTMapChunk& chunk, const PTMapChunkMutationBaseline& baseline, PTMapChunkMutationAnalysis& outAnalysis)
+	{
+		outAnalysis = {};
+		if (chunk.kind != PTMapChunkKind::Sector || chunk.sectorIndex < 0 || (unsigned)chunk.sectorIndex >= sector.Size())
+		{
+			return false;
+		}
+
+		const sectortype& sec = sector[(unsigned)chunk.sectorIndex];
+		outAnalysis.signature = ComputeMapChunkGeometrySignature(chunk);
+
+		if (baseline.sectorIndex != chunk.sectorIndex ||
+			baseline.floorz != sec.floorz ||
+			baseline.ceilingz != sec.ceilingz ||
+			baseline.floorheinum != sec.floorheinum ||
+			baseline.ceilingheinum != sec.ceilingheinum)
+		{
+			outAnalysis.reasonMask |= PTMapChunkMutationReason_SectorGeometry;
+		}
+
+		if (baseline.floorstat != (uint16_t)sec.floorstat ||
+			baseline.ceilingstat != (uint16_t)sec.ceilingstat ||
+			baseline.portalflags != sec.portalflags ||
+			baseline.floortexture != sec.floortexture.GetIndex() ||
+			baseline.ceilingtexture != sec.ceilingtexture.GetIndex() ||
+			baseline.floorxpan != sec.floorxpan_ ||
+			baseline.floorypan != sec.floorypan_ ||
+			baseline.ceilingxpan != sec.ceilingxpan_ ||
+			baseline.ceilingypan != sec.ceilingypan_ ||
+			baseline.floorpal != sec.floorpal ||
+			baseline.ceilingpal != sec.ceilingpal ||
+			baseline.floorshade != sec.floorshade ||
+			baseline.ceilingshade != sec.ceilingshade)
+		{
+			outAnalysis.reasonMask |= PTMapChunkMutationReason_SectorMaterial;
+		}
+
+		outAnalysis.sectorDirty = sec.dirty != 0;
+		if (outAnalysis.sectorDirty)
+		{
+			outAnalysis.reasonMask |= PTMapChunkMutationReason_SectorDirty;
+		}
+
+		outAnalysis.dragged = (sec.exflags & SECTOREX_DRAGGED) != 0;
+		if (outAnalysis.dragged)
+		{
+			outAnalysis.reasonMask |= PTMapChunkMutationReason_Dragged;
+		}
+
+		for (int sectionIndex : baseline.sectionIndices)
+		{
+			if ((unsigned)sectionIndex < sections.Size() && sections[sectionIndex].dirty != 0)
+			{
+				outAnalysis.sectionDirtyCount++;
+			}
+		}
+		if (outAnalysis.sectionDirtyCount > 0)
+		{
+			outAnalysis.reasonMask |= PTMapChunkMutationReason_SectionDirty;
+		}
+
+		if (baseline.walls.size() != sec.walls.Size())
+		{
+			outAnalysis.reasonMask |= PTMapChunkMutationReason_WallGeometry;
+		}
+
+		const size_t wallCount = std::min<size_t>(baseline.walls.size(), sec.walls.Size());
+		for (size_t wallIndex = 0; wallIndex < wallCount; ++wallIndex)
+		{
+			const PTMapWallMutationSnapshot& baselineWall = baseline.walls[wallIndex];
+			const walltype& liveWall = sec.walls[(unsigned)wallIndex];
+
+			if (baselineWall.pos != liveWall.pos ||
+				baselineWall.point2 != liveWall.point2 ||
+				baselineWall.nextwall != liveWall.nextwall ||
+				baselineWall.nextsector != liveWall.nextsector)
+			{
+				outAnalysis.reasonMask |= PTMapChunkMutationReason_WallGeometry;
+			}
+
+			if (baselineWall.cstat != (uint16_t)liveWall.cstat ||
+				baselineWall.portalflags != liveWall.portalflags ||
+				baselineWall.walltexture != liveWall.walltexture.GetIndex() ||
+				baselineWall.overtexture != liveWall.overtexture.GetIndex() ||
+				baselineWall.xpan != liveWall.xpan_ ||
+				baselineWall.ypan != liveWall.ypan_ ||
+				baselineWall.xrepeat != liveWall.xrepeat ||
+				baselineWall.yrepeat != liveWall.yrepeat ||
+				baselineWall.pal != liveWall.pal ||
+				baselineWall.shade != liveWall.shade)
+			{
+				outAnalysis.reasonMask |= PTMapChunkMutationReason_WallMaterial;
+			}
+		}
+
+		outAnalysis.signatureChanged = outAnalysis.signature != baseline.signature;
+		return true;
+	}
 }
 
 namespace nri_scene
@@ -775,5 +937,20 @@ uint64_t ComputeMapChunkGeometrySignature(const PTMapChunk& chunk)
 	}
 
 	return hash;
+}
+
+bool CaptureMapChunkMutationBaseline(const PTMapChunk& chunk, PTMapChunkMutationBaseline& outBaseline)
+{
+	return CaptureChunkMutationBaselineInternal(chunk, outBaseline);
+}
+
+bool AnalyzeMapChunkMutation(const PTMapChunk& chunk, const PTMapChunkMutationBaseline& baseline, PTMapChunkMutationAnalysis& outAnalysis)
+{
+	if (!AnalyzeChunkMutationInternal(chunk, baseline, outAnalysis))
+	{
+		return false;
+	}
+
+	return true;
 }
 }
