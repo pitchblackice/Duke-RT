@@ -210,6 +210,20 @@ private:
 		uint32_t materialCount = 0;
 	};
 
+	struct RuntimeSpaceLinkFrameState
+	{
+		bool active = false;
+		bool geoEffectActive = false;
+		int32_t sourceSectorIndex = -1;
+		uint32_t linkCount = 0;
+		uint32_t translatedChunkCount = 0;
+		uint32_t orphanLocalSpaceCount = 0;
+		uint32_t unresolvedRuntimePortalCount = 0;
+		uint32_t surfaceCount = 0;
+		uint32_t triangleCount = 0;
+		uint32_t materialCount = 0;
+	};
+
 	struct SceneInstanceData
 	{
 		uint32_t primitiveOffset = 0;
@@ -248,6 +262,7 @@ private:
 	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask);
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -282,6 +297,7 @@ private:
 	void PrintStaticMapSceneStatus() const;
 	void PrintDynamicSceneStatus() const;
 	void PrintRuntimeMapMutationStatus() const;
+	void PrintRuntimeSpaceLinkStatus() const;
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
@@ -376,6 +392,7 @@ private:
 	RuntimeMapMutationCache mRuntimeMapMutations;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	RuntimeMapMutationFrameState mRuntimeMapLastFrame = {};
+	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	nri_scene::SceneDebugStats mLastStats = {};
 	std::array<nri::Descriptor*, 11> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 12> mOutputDescriptors = {};
