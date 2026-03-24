@@ -1886,7 +1886,7 @@ void NRIRenderer::PrintRuntimeMapMutationStatus() const
 
 void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
 {
-	Printf("NRI PT runtime links: active=%s geo_effect=%s query_attempted=%s query_rejected=%s candidate_sector=%d candidate_lotag=%d source_sector=%d reported_geo_count=%d links=%u translated_chunks=%u orphan_local_spaces=%u unresolved_runtime_portals=%u surfaces=%u tris=%u materials=%u\n",
+	Printf("NRI PT runtime links: active=%s geo_effect=%s query_attempted=%s query_rejected=%s candidate_sector=%d candidate_lotag=%d source_sector=%d reported_geo_count=%d view_roots=%u visible_sectors=%u providers=%u geo_providers=%u provider_groups=%u local_space_matches=%u visible_matches=%u links=%u translated_chunks=%u orphan_local_spaces=%u unresolved_runtime_portals=%u surfaces=%u tris=%u materials=%u\n",
 		mRuntimeSpaceLinkLastFrame.active ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.geoEffectActive ? "yes" : "no",
 		mRuntimeSpaceLinkLastFrame.queryAttempted ? "yes" : "no",
@@ -1895,6 +1895,13 @@ void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
 		mRuntimeSpaceLinkLastFrame.candidateSectorLotag,
 		mRuntimeSpaceLinkLastFrame.sourceSectorIndex,
 		mRuntimeSpaceLinkLastFrame.reportedGeoCount,
+		mRuntimeSpaceLinkLastFrame.viewRootSectorCount,
+		mRuntimeSpaceLinkLastFrame.visibleSectorCount,
+		mRuntimeSpaceLinkLastFrame.providerSectorCount,
+		mRuntimeSpaceLinkLastFrame.geoProviderCount,
+		mRuntimeSpaceLinkLastFrame.providerGroupCount,
+		mRuntimeSpaceLinkLastFrame.localSpaceMatchedProviderCount,
+		mRuntimeSpaceLinkLastFrame.visibleMatchedProviderCount,
 		mRuntimeSpaceLinkLastFrame.linkCount,
 		mRuntimeSpaceLinkLastFrame.translatedChunkCount,
 		mRuntimeSpaceLinkLastFrame.orphanLocalSpaceCount,
@@ -3789,16 +3796,27 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		if (di.Viewpoint.SectCount > 0)
 		{
 			effectSectorIndex = di.Viewpoint.SectNums[0];
+			mRuntimeSpaceLinkLastFrame.viewRootSectorCount = (uint32_t)di.Viewpoint.SectCount;
 		}
 	}
 	else
 	{
 		effectSectorIndex = di.Viewpoint.SectCount;
+		mRuntimeSpaceLinkLastFrame.viewRootSectorCount = 1;
 	}
 
 	if (effectSectorIndex < 0 || (unsigned)effectSectorIndex >= sector.Size())
 	{
 		return false;
+	}
+
+	const BitArray& visibleSectors = di.GetVisibleSectors();
+	for (unsigned sectorIndex = 0; sectorIndex < visibleSectors.Size(); ++sectorIndex)
+	{
+		if (visibleSectors.Check(sectorIndex))
+		{
+			mRuntimeSpaceLinkLastFrame.visibleSectorCount++;
+		}
 	}
 
 	mRuntimeSpaceLinkLastFrame.candidateSectorIndex = effectSectorIndex;
@@ -3827,6 +3845,12 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 	};
 
 	const uint32_t candidateLocalSpaceIndex = getLocalSpaceIndex(effectSectorIndex);
+	const auto sectorMatchesVisibleSet = [&](int sectorIndex) -> bool
+	{
+		return sectorIndex >= 0 &&
+			(unsigned)sectorIndex < visibleSectors.Size() &&
+			visibleSectors.Check((unsigned)sectorIndex);
+	};
 	auto groupMatchesCandidate = [&](const GeoEffect& candidateEffect, int groupIndex) -> bool
 	{
 		auto matchesSector = [&](sectortype* sect) -> bool
@@ -3860,8 +3884,26 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			matchesSector(candidateEffect.geosectorwarp != nullptr ? candidateEffect.geosectorwarp[groupIndex] : nullptr) ||
 			matchesSector(candidateEffect.geosectorwarp2 != nullptr ? candidateEffect.geosectorwarp2[groupIndex] : nullptr);
 	};
+	auto groupMatchesVisibleSectors = [&](const GeoEffect& candidateEffect, int groupIndex) -> bool
+	{
+		auto matchesVisible = [&](sectortype* sect) -> bool
+		{
+			if (sect == nullptr)
+			{
+				return false;
+			}
 
-	if (providerSectorIndex < 0 && gi != nullptr)
+			const int sectorIndex = sector.IndexOf(sect);
+			return sectorMatchesVisibleSet(sectorIndex);
+		};
+
+		return
+			matchesVisible(candidateEffect.geosector != nullptr ? candidateEffect.geosector[groupIndex] : nullptr) ||
+			matchesVisible(candidateEffect.geosectorwarp != nullptr ? candidateEffect.geosectorwarp[groupIndex] : nullptr) ||
+			matchesVisible(candidateEffect.geosectorwarp2 != nullptr ? candidateEffect.geosectorwarp2[groupIndex] : nullptr);
+	};
+
+	if (gi != nullptr)
 	{
 		for (unsigned sectorIndex = 0; sectorIndex < sector.Size(); ++sectorIndex)
 		{
@@ -3870,23 +3912,41 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 				continue;
 			}
 
+			mRuntimeSpaceLinkLastFrame.providerSectorCount++;
+
 			GeoEffect candidateEffect = {};
 			if (!gi->GetGeoEffect(&candidateEffect, &sector[sectorIndex]) || candidateEffect.geocnt <= 0)
 			{
 				continue;
 			}
 
+			mRuntimeSpaceLinkLastFrame.geoProviderCount++;
+			mRuntimeSpaceLinkLastFrame.providerGroupCount += (uint32_t)candidateEffect.geocnt;
+
 			bool matched = false;
+			bool visibleMatched = false;
 			for (int i = 0; i < candidateEffect.geocnt; ++i)
 			{
 				if (groupMatchesCandidate(candidateEffect, i))
 				{
 					matched = true;
-					break;
+				}
+				if (groupMatchesVisibleSectors(candidateEffect, i))
+				{
+					visibleMatched = true;
 				}
 			}
 
-			if (!matched)
+			if (matched)
+			{
+				mRuntimeSpaceLinkLastFrame.localSpaceMatchedProviderCount++;
+			}
+			if (visibleMatched)
+			{
+				mRuntimeSpaceLinkLastFrame.visibleMatchedProviderCount++;
+			}
+
+			if (providerSectorIndex >= 0 || !matched)
 			{
 				continue;
 			}

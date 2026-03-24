@@ -220,6 +220,13 @@ private:
 		int32_t candidateSectorLotag = -1;
 		int32_t sourceSectorIndex = -1;
 		int32_t reportedGeoCount = 0;
+		uint32_t viewRootSectorCount = 0;
+		uint32_t visibleSectorCount = 0;
+		uint32_t providerSectorCount = 0;
+		uint32_t geoProviderCount = 0;
+		uint32_t providerGroupCount = 0;
+		uint32_t localSpaceMatchedProviderCount = 0;
+		uint32_t visibleMatchedProviderCount = 0;
 		uint32_t linkCount = 0;
 		uint32_t translatedChunkCount = 0;
 		uint32_t orphanLocalSpaceCount = 0;
