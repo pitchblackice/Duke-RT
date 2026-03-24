@@ -918,6 +918,17 @@ uint64_t ComputeMapChunkGeometrySignature(const PTMapChunk& chunk)
 	hash = HashMix(hash, (uint16_t)sec.floorheinum);
 	hash = HashMix(hash, (uint16_t)sec.ceilingheinum);
 	hash = HashMix(hash, sec.portalflags);
+	hash = HashMix(hash, sec.exflags);
+	hash = HashMix(hash, sec.floortexture.GetIndex());
+	hash = HashMix(hash, sec.ceilingtexture.GetIndex());
+	hash = HashFloatBits(hash, sec.floorxpan_);
+	hash = HashFloatBits(hash, sec.floorypan_);
+	hash = HashFloatBits(hash, sec.ceilingxpan_);
+	hash = HashFloatBits(hash, sec.ceilingypan_);
+	hash = HashMix(hash, sec.floorpal);
+	hash = HashMix(hash, sec.ceilingpal);
+	hash = HashMix(hash, (uint8_t)sec.floorshade);
+	hash = HashMix(hash, (uint8_t)sec.ceilingshade);
 
 	for (const walltype& wal : sec.walls)
 	{
@@ -934,6 +945,8 @@ uint64_t ComputeMapChunkGeometrySignature(const PTMapChunk& chunk)
 		hash = HashFloatBits(hash, wal.ypan_);
 		hash = HashMix(hash, wal.xrepeat);
 		hash = HashMix(hash, wal.yrepeat);
+		hash = HashMix(hash, wal.pal);
+		hash = HashMix(hash, (uint8_t)wal.shade);
 	}
 
 	return hash;
