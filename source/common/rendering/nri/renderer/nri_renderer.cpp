@@ -153,6 +153,56 @@ namespace
 		return true;
 	}
 
+	static bool ShouldStoreRuntimeSectorControlInfo(const RuntimeTaggedSectorDebugInfo& info)
+	{
+		return info.available && (info.lotag != 0 || info.hitag != 0 || info.effectorCount > 0);
+	}
+
+	static bool AppendRuntimeSectorControlInfo(std::array<RuntimeTaggedSectorDebugInfo, 12>& infos, uint32_t& infoCount, const RuntimeTaggedSectorDebugInfo& info)
+	{
+		if (!ShouldStoreRuntimeSectorControlInfo(info))
+		{
+			return false;
+		}
+
+		for (uint32_t i = 0; i < infoCount; ++i)
+		{
+			if (infos[i].sectorIndex == info.sectorIndex)
+			{
+				return false;
+			}
+		}
+
+		if (infoCount >= infos.size())
+		{
+			return false;
+		}
+
+		infos[infoCount++] = info;
+		return true;
+	}
+
+	static bool GetRuntimeSectorControlInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo& info)
+	{
+		if (!validSectorIndex(sectorIndex))
+		{
+			return false;
+		}
+
+		info = {};
+		if (gi != nullptr && gi->GetRuntimeLinkDebugTaggedSectorInfo(sectorIndex, &info))
+		{
+			return true;
+		}
+
+		const auto& sec = sector[(unsigned)sectorIndex];
+		info.available = true;
+		info.sectorIndex = sectorIndex;
+		info.lotag = sec.lotag;
+		info.hitag = sec.hitag;
+		return true;
+	}
+
 	static const char* GetSkyModeName(nri_scene::PTSkyMode mode)
 	{
 		switch (mode)
@@ -2012,6 +2062,44 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 		gi->GetRuntimeLinkDebugState(&current.game);
 	}
 
+	std::array<int32_t, 4> controlRoots =
+	{
+		current.candidateSectorIndex,
+		current.sourceSectorIndex,
+		current.game.playerSectorIndex,
+		current.game.actorSectorIndex
+	};
+
+	for (const int32_t rootSectorIndex : controlRoots)
+	{
+		if (!validSectorIndex(rootSectorIndex))
+		{
+			continue;
+		}
+
+		RuntimeTaggedSectorDebugInfo rootInfo = {};
+		if (GetRuntimeSectorControlInfo(rootSectorIndex, rootInfo))
+		{
+			AppendRuntimeSectorControlInfo(current.nearbyControlSectors, current.nearbyControlSectorStoredCount, rootInfo);
+		}
+
+		const auto& rootSector = sector[(unsigned)rootSectorIndex];
+		for (const auto& wal : rootSector.walls)
+		{
+			if (!wal.twoSided())
+			{
+				continue;
+			}
+
+			const int32_t adjacentSectorIndex = wal.nextsector;
+			RuntimeTaggedSectorDebugInfo adjacentInfo = {};
+			if (GetRuntimeSectorControlInfo(adjacentSectorIndex, adjacentInfo))
+			{
+				AppendRuntimeSectorControlInfo(current.nearbyControlSectors, current.nearbyControlSectorStoredCount, adjacentInfo);
+			}
+		}
+	}
+
 	const bool sameAsLast =
 		mHasRuntimeLinkTraceState &&
 		mLastRuntimeLinkTraceState.valid == current.valid &&
@@ -2022,6 +2110,7 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 		mLastRuntimeLinkTraceState.visible848SectorCount == current.visible848SectorCount &&
 		mLastRuntimeLinkTraceState.visibleTeleportSectorCount == current.visibleTeleportSectorCount &&
 		mLastRuntimeLinkTraceState.taggedVisibleSectorStoredCount == current.taggedVisibleSectorStoredCount &&
+		mLastRuntimeLinkTraceState.nearbyControlSectorStoredCount == current.nearbyControlSectorStoredCount &&
 		SameRuntimeLinkDebugState(mLastRuntimeLinkTraceState.game, current.game);
 
 	bool sameTaggedSectors = true;
@@ -2037,7 +2126,20 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 		}
 	}
 
-	if (sameAsLast && sameTaggedSectors)
+	bool sameNearbyControlSectors = true;
+	if (sameAsLast)
+	{
+		for (uint32_t i = 0; i < current.nearbyControlSectorStoredCount; ++i)
+		{
+			if (!SameRuntimeTaggedSectorDebugInfo(mLastRuntimeLinkTraceState.nearbyControlSectors[i], current.nearbyControlSectors[i]))
+			{
+				sameNearbyControlSectors = false;
+				break;
+			}
+		}
+	}
+
+	if (sameAsLast && sameTaggedSectors && sameNearbyControlSectors)
 	{
 		return;
 	}
@@ -2094,6 +2196,38 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 			taggedLine += "]";
 		}
 		Printf("%s\n", taggedLine.c_str());
+	}
+
+	if (current.nearbyControlSectorStoredCount > 0)
+	{
+		std::string controlLine = "NRI PT runtime nearby controls:";
+		for (uint32_t i = 0; i < current.nearbyControlSectorStoredCount; ++i)
+		{
+			const auto& info = current.nearbyControlSectors[i];
+			controlLine += " [sector=" + std::to_string(info.sectorIndex) +
+				" lotag=" + std::to_string(info.lotag) +
+				" hitag=" + std::to_string(info.hitag);
+			if (info.effectorCount > 0)
+			{
+				controlLine += " effectors=";
+				const uint32_t storedEffectors = std::min<uint32_t>(info.effectorCount, (uint32_t)countof(info.effectorLotags));
+				for (uint32_t effectorIndex = 0; effectorIndex < storedEffectors; ++effectorIndex)
+				{
+					if (effectorIndex > 0)
+					{
+						controlLine += ",";
+					}
+					controlLine += std::to_string(info.effectorLotags[effectorIndex]) +
+						"/" + std::to_string(info.effectorHitags[effectorIndex]);
+				}
+				if (info.effectorCount > storedEffectors)
+				{
+					controlLine += ",...";
+				}
+			}
+			controlLine += "]";
+		}
+		Printf("%s\n", controlLine.c_str());
 	}
 }
 
