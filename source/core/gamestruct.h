@@ -56,6 +56,22 @@ struct GeoEffect
 
 };
 
+struct RuntimeLinkDebugState
+{
+	bool available = false;
+	bool specialWaterSector = false;
+	int32_t playerSectorIndex = -1;
+	int32_t playerSectorLotag = 0;
+	int32_t playerSectorHitag = 0;
+	int32_t effectiveSectorLotag = 0;
+	int32_t actorSectorIndex = -1;
+	int32_t actorSectorLotag = 0;
+	int32_t actorSectorHitag = 0;
+	int32_t onWarpingSector = 0;
+	int32_t transporterHold = 0;
+	int32_t rrGeoCount = 0;
+};
+
 struct GameInterface
 {
 	virtual const char* Name() { return "$"; }
@@ -102,6 +118,7 @@ struct GameInterface
 	virtual void EnterPortal(DCoreActor* viewer, int type) {}
 	virtual void LeavePortal(DCoreActor* viewer, int type) {}
 	virtual bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) { return false; }
+	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
 	virtual int Voxelize(int sprnum) { return -1; }
 	virtual void AddExcludedEpisode(const FString& episode) {}
 	virtual int GetCurrentSkill() { return -1; }

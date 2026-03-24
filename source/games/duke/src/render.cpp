@@ -122,6 +122,64 @@ bool GameInterface::GetGeoEffect(GeoEffect* eff, sectortype* viewsector)
 	return false;
 }
 
+bool GameInterface::GetRuntimeLinkDebugState(RuntimeLinkDebugState* state)
+{
+	if (state == nullptr)
+	{
+		return false;
+	}
+
+	*state = {};
+
+	const auto p = getPlayer(screenpeek);
+	if (p == nullptr || !p->insector())
+	{
+		return false;
+	}
+
+	const auto playerSector = p->cursector;
+	const auto actor = p->GetActor();
+	const auto actorSector = actor != nullptr ? actor->sector() : nullptr;
+	if (playerSector == nullptr || actor == nullptr)
+	{
+		return false;
+	}
+
+	int effectiveLotag = playerSector->lotag;
+	bool specialWaterSector = false;
+	if (effectiveLotag == 867)
+	{
+		DukeSectIterator it(playerSector);
+		while (auto act = it.Next())
+		{
+			if (act->GetClass() == RedneckWaterSurfaceClass && act->spr.pos.Z - 8 < actor->getOffsetZ())
+			{
+				effectiveLotag = ST_2_UNDERWATER;
+				break;
+			}
+		}
+	}
+	else if (effectiveLotag == 848 && tilesurface(playerSector->floortexture) == TSURF_SPECIALWATER)
+	{
+		effectiveLotag = ST_1_ABOVE_WATER;
+		specialWaterSector = true;
+	}
+
+	state->available = true;
+	state->specialWaterSector = specialWaterSector;
+	state->playerSectorIndex = sectindex(playerSector);
+	state->playerSectorLotag = playerSector->lotag;
+	state->playerSectorHitag = playerSector->hitag;
+	state->effectiveSectorLotag = effectiveLotag;
+	state->actorSectorIndex = actorSector != nullptr ? sectindex(actorSector) : -1;
+	state->actorSectorLotag = actorSector != nullptr ? actorSector->lotag : 0;
+	state->actorSectorHitag = actorSector != nullptr ? actorSector->hitag : 0;
+	state->onWarpingSector = p->on_warping_sector;
+	state->transporterHold = p->transporter_hold;
+	state->rrGeoCount = geocnt;
+	return true;
+}
+
 //---------------------------------------------------------------------------
 //
 // RRRA's drug distortion effect

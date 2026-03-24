@@ -57,6 +57,7 @@ struct GameInterface : public ::GameInterface
 	void EnterPortal(DCoreActor* viewer, int type) override;
 	void LeavePortal(DCoreActor* viewer, int type) override;
 	bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) override;
+	bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) override;
 	void AddExcludedEpisode(const FString& episode) override;
 	int GetCurrentSkill() override;
 	bool WantEscape() override;
@@ -115,4 +116,3 @@ PClassActor* CallGetRadiusDamageType(DDukeActor* actor, int targhealth);
 extern FTextureID mirrortex, foftex;
 
 END_DUKE_NS
-

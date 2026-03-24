@@ -236,6 +236,18 @@ private:
 		uint32_t materialCount = 0;
 	};
 
+	struct RuntimeLinkTraceState
+	{
+		bool valid = false;
+		int32_t candidateSectorIndex = -1;
+		int32_t sourceSectorIndex = -1;
+		bool geoEffectActive = false;
+		uint32_t visibleTaggedSectorCount = 0;
+		uint32_t visible848SectorCount = 0;
+		uint32_t visibleTeleportSectorCount = 0;
+		RuntimeLinkDebugState game = {};
+	};
+
 	struct SceneInstanceData
 	{
 		uint32_t primitiveOffset = 0;
@@ -310,6 +322,7 @@ private:
 	void PrintDynamicSceneStatus() const;
 	void PrintRuntimeMapMutationStatus() const;
 	void PrintRuntimeSpaceLinkStatus() const;
+	void TraceRuntimeLinkEvents(HWDrawInfo& di);
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
@@ -405,6 +418,7 @@ private:
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	RuntimeMapMutationFrameState mRuntimeMapLastFrame = {};
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
+	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
 	nri_scene::SceneDebugStats mLastStats = {};
 	std::array<nri::Descriptor*, 11> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 12> mOutputDescriptors = {};
@@ -444,6 +458,7 @@ private:
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
 	bool mPathTracingSupported = true;
+	bool mHasRuntimeLinkTraceState = false;
 	bool mResetHistory = true;
 	bool mUseUpscaledInFinal = false;
 	bool mUseDenoisedCompositionInputs = false;

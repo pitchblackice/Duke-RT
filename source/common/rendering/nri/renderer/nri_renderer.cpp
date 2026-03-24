@@ -114,6 +114,23 @@ namespace
 		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
 	}
 
+	static bool SameRuntimeLinkDebugState(const RuntimeLinkDebugState& a, const RuntimeLinkDebugState& b)
+	{
+		return
+			a.available == b.available &&
+			a.specialWaterSector == b.specialWaterSector &&
+			a.playerSectorIndex == b.playerSectorIndex &&
+			a.playerSectorLotag == b.playerSectorLotag &&
+			a.playerSectorHitag == b.playerSectorHitag &&
+			a.effectiveSectorLotag == b.effectiveSectorLotag &&
+			a.actorSectorIndex == b.actorSectorIndex &&
+			a.actorSectorLotag == b.actorSectorLotag &&
+			a.actorSectorHitag == b.actorSectorHitag &&
+			a.onWarpingSector == b.onWarpingSector &&
+			a.transporterHold == b.transporterHold &&
+			a.rrGeoCount == b.rrGeoCount;
+	}
+
 	static const char* GetSkyModeName(nri_scene::PTSkyMode mode)
 	{
 		switch (mode)
@@ -1608,6 +1625,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		return false;
 	}
 
+	TraceRuntimeLinkEvents(di);
 	LogBridgeStats(activeStats);
 	if (activeStats.unsupportedModelDrawItems > 0)
 	{
@@ -1911,6 +1929,88 @@ void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
 		mRuntimeSpaceLinkLastFrame.surfaceCount,
 		mRuntimeSpaceLinkLastFrame.triangleCount,
 		mRuntimeSpaceLinkLastFrame.materialCount);
+}
+
+void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
+{
+	if (!nri_ptruntimelinktrace)
+	{
+		mHasRuntimeLinkTraceState = false;
+		mLastRuntimeLinkTraceState = {};
+		return;
+	}
+
+	RuntimeLinkTraceState current = {};
+	current.valid = true;
+	current.candidateSectorIndex = mRuntimeSpaceLinkLastFrame.candidateSectorIndex;
+	current.sourceSectorIndex = mRuntimeSpaceLinkLastFrame.sourceSectorIndex;
+	current.geoEffectActive = mRuntimeSpaceLinkLastFrame.geoEffectActive;
+
+	const BitArray& visibleSectors = di.GetVisibleSectors();
+	for (unsigned sectorIndex = 0; sectorIndex < visibleSectors.Size(); ++sectorIndex)
+	{
+		if (!visibleSectors.Check(sectorIndex))
+		{
+			continue;
+		}
+
+		const auto& sec = sector[sectorIndex];
+		if (sec.lotag != 0)
+		{
+			current.visibleTaggedSectorCount++;
+		}
+		if (sec.lotag == 848)
+		{
+			current.visible848SectorCount++;
+		}
+		if (sec.lotag == 160 || sec.lotag == 161)
+		{
+			current.visibleTeleportSectorCount++;
+		}
+	}
+
+	if (gi != nullptr)
+	{
+		gi->GetRuntimeLinkDebugState(&current.game);
+	}
+
+	const bool sameAsLast =
+		mHasRuntimeLinkTraceState &&
+		mLastRuntimeLinkTraceState.valid == current.valid &&
+		mLastRuntimeLinkTraceState.candidateSectorIndex == current.candidateSectorIndex &&
+		mLastRuntimeLinkTraceState.sourceSectorIndex == current.sourceSectorIndex &&
+		mLastRuntimeLinkTraceState.geoEffectActive == current.geoEffectActive &&
+		mLastRuntimeLinkTraceState.visibleTaggedSectorCount == current.visibleTaggedSectorCount &&
+		mLastRuntimeLinkTraceState.visible848SectorCount == current.visible848SectorCount &&
+		mLastRuntimeLinkTraceState.visibleTeleportSectorCount == current.visibleTeleportSectorCount &&
+		SameRuntimeLinkDebugState(mLastRuntimeLinkTraceState.game, current.game);
+
+	if (sameAsLast)
+	{
+		return;
+	}
+
+	mLastRuntimeLinkTraceState = current;
+	mHasRuntimeLinkTraceState = true;
+
+	Printf("NRI PT runtime link event: geo_effect=%s candidate_sector=%d source_sector=%d player_sector=%d lotag=%d hitag=%d effective_lotag=%d actor_sector=%d actor_lotag=%d actor_hitag=%d on_warp=%d transporter_hold=%d rr_geo_count=%d special_water=%s visible_tagged=%u visible_848=%u visible_teleport=%u\n",
+		current.geoEffectActive ? "yes" : "no",
+		current.candidateSectorIndex,
+		current.sourceSectorIndex,
+		current.game.playerSectorIndex,
+		current.game.playerSectorLotag,
+		current.game.playerSectorHitag,
+		current.game.effectiveSectorLotag,
+		current.game.actorSectorIndex,
+		current.game.actorSectorLotag,
+		current.game.actorSectorHitag,
+		current.game.onWarpingSector,
+		current.game.transporterHold,
+		current.game.rrGeoCount,
+		current.game.specialWaterSector ? "yes" : "no",
+		current.visibleTaggedSectorCount,
+		current.visible848SectorCount,
+		current.visibleTeleportSectorCount);
 }
 
 void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement)
