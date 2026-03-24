@@ -214,6 +214,7 @@ private:
 	{
 		bool active = false;
 		bool geoEffectActive = false;
+		bool transportActive = false;
 		bool queryAttempted = false;
 		bool queryRejected = false;
 		int32_t candidateSectorIndex = -1;
@@ -228,6 +229,8 @@ private:
 		uint32_t localSpaceMatchedProviderCount = 0;
 		uint32_t visibleMatchedProviderCount = 0;
 		uint32_t linkCount = 0;
+		uint32_t transportLinkCount = 0;
+		uint32_t transportLocalSpaceCount = 0;
 		uint32_t translatedChunkCount = 0;
 		uint32_t orphanLocalSpaceCount = 0;
 		uint32_t unresolvedRuntimePortalCount = 0;

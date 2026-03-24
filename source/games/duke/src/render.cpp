@@ -213,6 +213,115 @@ bool GameInterface::GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, Runtime
 	return true;
 }
 
+uint32_t GameInterface::GetRuntimeTransportLinkInfo(const int32_t* sectorIndices, uint32_t sectorCount, RuntimeTransportLinkInfo* links, uint32_t maxLinks)
+{
+	if (sectorIndices == nullptr || links == nullptr || maxLinks == 0)
+	{
+		return 0;
+	}
+
+	auto sectorIsNearby = [&](int sectorIndex) -> bool
+	{
+		if (sectorIndex < 0)
+		{
+			return false;
+		}
+
+		for (uint32_t i = 0; i < sectorCount; ++i)
+		{
+			if (sectorIndices[i] == sectorIndex)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	uint32_t linkCount = 0;
+	DukeStatIterator it(STAT_TRANSPORT);
+	while (auto act = it.Next())
+	{
+		if (!iseffector(act))
+		{
+			continue;
+		}
+
+		if (act->spr.lotag != SE_7_TELEPORT && act->spr.lotag != SE_23_ONE_WAY_TELEPORT)
+		{
+			continue;
+		}
+
+		auto owner = act->GetOwner();
+		if (owner == nullptr || owner == act || act->sector() == nullptr || owner->sector() == nullptr)
+		{
+			continue;
+		}
+
+		const int sourceSectorIndex = sectindex(act->sector());
+		const int destinationSectorIndex = sectindex(owner->sector());
+		const bool sourceNearby = sectorIsNearby(sourceSectorIndex);
+		const bool destinationNearby = sectorIsNearby(destinationSectorIndex);
+		if (!sourceNearby && !destinationNearby)
+		{
+			continue;
+		}
+
+		RuntimeTransportLinkInfo info = {};
+		info.available = true;
+		info.sourceSectorIndex = sourceSectorIndex;
+		info.destinationSectorIndex = destinationSectorIndex;
+		info.sourceEffectorLotag = act->spr.lotag;
+		info.sourceEffectorHitag = act->spr.hitag;
+		info.destinationEffectorLotag = iseffector(owner) ? owner->spr.lotag : 0;
+		info.destinationEffectorHitag = iseffector(owner) ? owner->spr.hitag : 0;
+		info.mapDx = float(act->spr.pos.X - owner->spr.pos.X);
+		info.mapDy = float(act->spr.pos.Y - owner->spr.pos.Y);
+		info.flags = RuntimeTransportLinkFlag_None;
+		if (sourceNearby)
+		{
+			info.flags |= RuntimeTransportLinkFlag_SourceNearby;
+		}
+		if (destinationNearby)
+		{
+			info.flags |= RuntimeTransportLinkFlag_DestinationNearby;
+		}
+		if (iseffector(owner) && owner->spr.lotag == SE_23_ONE_WAY_TELEPORT)
+		{
+			info.flags |= RuntimeTransportLinkFlag_OneWay;
+		}
+		else
+		{
+			info.flags |= RuntimeTransportLinkFlag_TwoWay;
+		}
+
+		bool duplicate = false;
+		for (uint32_t i = 0; i < linkCount; ++i)
+		{
+			if (links[i].sourceSectorIndex == info.sourceSectorIndex &&
+				links[i].destinationSectorIndex == info.destinationSectorIndex &&
+				links[i].sourceEffectorHitag == info.sourceEffectorHitag)
+			{
+				duplicate = true;
+				break;
+			}
+		}
+		if (duplicate)
+		{
+			continue;
+		}
+
+		if (linkCount >= maxLinks)
+		{
+			break;
+		}
+
+		links[linkCount++] = info;
+	}
+
+	return linkCount;
+}
+
 //---------------------------------------------------------------------------
 //
 // RRRA's drug distortion effect
