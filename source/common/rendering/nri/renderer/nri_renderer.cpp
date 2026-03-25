@@ -1832,6 +1832,15 @@ void NRIRenderer::PrintStatus() const
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
 		ClampTraceBounceCount((int)nri_ptportaldepth, 8u),
 		(int)nri_ptsurfaceprobe);
+	Printf("NRI PT NRD: integration=%s requested=%s validation_output=%s denoiser=%s motion=%s prev_position=%s extra_debugs=%s\n",
+		mNrd.IsReady() ? "ready" : "cold",
+		nri_denoise ? "on" : "off",
+		nri_validation ? "expected" : "disabled",
+		"REBLUR_DIFFUSE_SPECULAR",
+		"2.5D",
+		"interpolated",
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z");
+	Printf("NRI PT NRD guides: hit_distance=distance_over_4096 roughness=mirror_0.02_else_0.38 metalness=constant_0 material_id=material_hash\n");
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
 		(int)nri_ptmutationtracechunk,
@@ -4604,9 +4613,10 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
 	const bool useCompositionPresent = !nri_ptbootstrap && (nri_ptdebug == 0 || nri_ptdebug == 15);
 	const bool useValidationPresent = !nri_ptbootstrap && nri_ptdebug == 9;
+	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 16 || nri_ptdebug == 17);
 	const bool useFinalDebugPresent = !nri_ptbootstrap &&
-		((nri_ptdebug >= 5 && nri_ptdebug <= 8) || nri_ptdebug == 13 || nri_ptdebug == 14);
-	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPresent && !useValidationPresent && !useFinalDebugPresent;
+		((nri_ptdebug >= 5 && nri_ptdebug <= 8) || nri_ptdebug == 13 || nri_ptdebug == 14 || (nri_ptdebug >= 18 && nri_ptdebug <= 20));
+	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPresent && !useValidationPresent && !useDenoisedDebugPresent && !useFinalDebugPresent;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
@@ -4637,6 +4647,23 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		}
 
 		if (!DispatchRawPresent(FrameTextureSlot::Validation))
+		{
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (useDenoisedDebugPresent)
+	{
+		if (!DispatchDenoiser())
+		{
+			return false;
+		}
+
+		const FrameTextureSlot denoisedSlot = nri_ptdebug == 16 ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::DenoisedSpecular;
+		if (!DispatchRawPresent(denoisedSlot))
 		{
 			return false;
 		}

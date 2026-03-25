@@ -272,12 +272,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else
 	{
 		const float currentViewZ = dot(hit.position - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
-		const float2 prevUv = ProjectWorldToUv(hit.position, gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward, gTraceConstants.PrevCameraRight, gTraceConstants.PrevCameraUp, gTraceConstants.PrevTanHalfFovX, gTraceConstants.PrevTanHalfFovY);
-		const float2 currentUv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
-		float2 motion = 0.0;
+		const float3 previousHitPosition = ResolveHitVertexPosition(hit, true);
+		const float2 prevUv = ProjectWorldToUv(previousHitPosition, gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward, gTraceConstants.PrevCameraRight, gTraceConstants.PrevCameraUp, gTraceConstants.PrevTanHalfFovX, gTraceConstants.PrevTanHalfFovY);
+		const float2 projectedCurrentUv = ProjectWorldToUv(hit.position, gTraceConstants.CameraPos, gTraceConstants.CameraForward, gTraceConstants.CameraRight, gTraceConstants.CameraUp, gTraceConstants.TanHalfFovX, gTraceConstants.TanHalfFovY);
+		const float2 fallbackCurrentUv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+		const bool currentUvValid = all(projectedCurrentUv >= 0.0) && all(projectedCurrentUv <= 1.0);
+		const float2 currentUv = currentUvValid ? projectedCurrentUv : fallbackCurrentUv;
+		const float previousViewZ = dot(previousHitPosition - gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward);
+		float3 motion = 0.0;
 		if (all(prevUv >= 0.0) && all(prevUv <= 1.0))
 		{
-			motion = (prevUv - currentUv) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+			motion.xy = (prevUv - currentUv) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+			motion.z = previousViewZ - currentViewZ;
 		}
 
 		const float hitDistance = saturate(hit.distance / 4096.0);
@@ -324,7 +330,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
 			gBaseColorOutput[pixelPos] = float4(bootstrapFlat ? diffuse : albedo.rgb, metalness);
 		}
-		gMotionOutput[pixelPos] = float4(motion, 0.0, 1.0);
+		gMotionOutput[pixelPos] = float4(motion, 1.0);
 		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
 		if (bootstrapFlat)
 		{

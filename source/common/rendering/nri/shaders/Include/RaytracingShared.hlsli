@@ -95,6 +95,24 @@ float3 ResolveHitNormal(uint materialIndex, uint dataSource, float3 geometricNor
 	return normalize(geometricNormal);
 }
 
+float3 ResolveHitBarycentricWeights(HitData hit)
+{
+	return float3(1.0 - hit.barycentrics.x - hit.barycentrics.y, hit.barycentrics.x, hit.barycentrics.y);
+}
+
+float3 ResolveHitVertexPosition(HitData hit, bool previous)
+{
+	const PrimitiveData primitive = GetPrimitiveData(hit.dataSource, hit.primitiveIndex);
+	const SceneVertex v0 = GetVertexData(hit.dataSource, primitive.indices.x);
+	const SceneVertex v1 = GetVertexData(hit.dataSource, primitive.indices.y);
+	const SceneVertex v2 = GetVertexData(hit.dataSource, primitive.indices.z);
+	const float3 weights = ResolveHitBarycentricWeights(hit);
+	const float3 p0 = previous ? v0.prevPosition : v0.position;
+	const float3 p1 = previous ? v1.prevPosition : v1.position;
+	const float3 p2 = previous ? v2.prevPosition : v2.position;
+	return p0 * weights.x + p1 * weights.y + p2 * weights.z;
+}
+
 float3 GeneratePrimaryRay(uint2 pixelPos)
 {
 	float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);

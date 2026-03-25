@@ -714,6 +714,25 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
+	else if (gTraceConstants.DebugMode == 18)
+	{
+		const float metalness = saturate(gBaseColorInput[pixelPos].a);
+		composed = float4(metalness.xxx, 1.0);
+	}
+	else if (gTraceConstants.DebugMode == 19)
+	{
+		float materialID = 0.0;
+		const float roughness = NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos], materialID).w;
+		composed = float4(roughness.xxx, 1.0);
+	}
+	else if (gTraceConstants.DebugMode == 20)
+	{
+		const float motionZ = gMotionInput[pixelPos].z;
+		const float magnitude = saturate(abs(motionZ) / 256.0);
+		const float3 positive = float3(0.5 + 0.5 * magnitude, 0.5 - 0.5 * magnitude, 0.5 - 0.5 * magnitude);
+		const float3 negative = float3(0.5 - 0.5 * magnitude, 0.5 - 0.5 * magnitude, 0.5 + 0.5 * magnitude);
+		composed = float4(motionZ >= 0.0 ? positive : negative, 1.0);
+	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
 		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);

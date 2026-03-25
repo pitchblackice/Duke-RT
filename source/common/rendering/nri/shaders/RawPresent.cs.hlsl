@@ -67,10 +67,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		color += gUnused1.Load(int3(samplePos, 0)).rgb;
 	}
-	if (gTraceConstants.DebugMode == 11u)
+	if (gTraceConstants.DebugMode == 11u || gTraceConstants.DebugMode == 16u || gTraceConstants.DebugMode == 17u)
 	{
-		const float4 rawSpecular = gInputTexture.Load(int3(samplePos, 0));
-		color = ToneMapDebugRadiance(rawSpecular.rgb);
+		const float4 rawRadiance = gInputTexture.Load(int3(samplePos, 0));
+		color = ToneMapDebugRadiance(rawRadiance.rgb);
 	}
 	else
 	if (gTraceConstants.DebugMode == 12u)
