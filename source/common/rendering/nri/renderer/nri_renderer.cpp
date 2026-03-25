@@ -4742,7 +4742,14 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			rawPresentSlot = FrameTextureSlot::UnfilteredSpecular;
 		}
 
-		if (!DispatchRawPresent(rawPresentSlot))
+		if (nri_ptdebug == 12)
+		{
+			if (!DispatchRawPresent(rawPresentSlot, FrameTextureSlot::ViewZ, FrameTextureSlot::NormalRoughness))
+			{
+				return false;
+			}
+		}
+		else if (!DispatchRawPresent(rawPresentSlot))
 		{
 			return false;
 		}
@@ -4948,7 +4955,7 @@ bool NRIRenderer::DispatchComposition()
 	return true;
 }
 
-bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlot secondarySlot)
+bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlot secondarySlot, FrameTextureSlot tertiarySlot)
 {
 	Clocker clock(NriPTRawPresent);
 
@@ -4963,6 +4970,8 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 	NRITextureResource& input = GetFrameTexture(inputSlot);
 	const bool addSecondary = secondarySlot != FrameTextureSlot::Count;
 	NRITextureResource& secondary = GetFrameTexture(addSecondary ? secondarySlot : inputSlot);
+	const bool hasTertiary = tertiarySlot != FrameTextureSlot::Count;
+	NRITextureResource& tertiary = GetFrameTexture(hasTertiary ? tertiarySlot : inputSlot);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
 	if (addSecondary)
 	{
@@ -4971,12 +4980,13 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 
 	mFrameBuffer->TransitionTexture(input, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(secondary, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(tertiary, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
 
 	const nri::Descriptor* inputs[3] = {
 		input.shaderView,
 		secondary.shaderView,
-		input.shaderView
+		tertiary.shaderView
 	};
 	nri::UpdateDescriptorRangeDesc inputUpdate = {};
 	inputUpdate.descriptorSet = mTaaFrameTextureSet;

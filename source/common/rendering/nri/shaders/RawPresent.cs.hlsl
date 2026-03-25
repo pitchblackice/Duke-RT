@@ -51,6 +51,8 @@ float3 ToneMapDebugRadiance(float3 value)
 	return value / (1.0 + value);
 }
 
+static const float4 kReblurHitDistanceParams = float4(3.0, 0.1, 20.0, -25.0);
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -77,7 +79,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (gTraceConstants.DebugMode == 12u)
 	{
 		const float normalizedHitDistance = saturate(gInputTexture.Load(int3(samplePos, 0)).a);
-		color = normalizedHitDistance.xxx;
+		float materialID = 0.0;
+		const float roughness = NRD_FrontEnd_UnpackNormalAndRoughness(gUnused2.Load(int3(samplePos, 0)), materialID).w;
+		const float viewZ = abs(gUnused1.Load(int3(samplePos, 0)).x);
+		if (viewZ >= NRD_INF * 0.5)
+		{
+			color = float3(1.0, 0.0, 0.0);
+		}
+		else
+		{
+			const float hitDistance = REBLUR_GetHitDist(normalizedHitDistance, viewZ, kReblurHitDistanceParams, roughness);
+			const float mapped = saturate(log2(1.0 + max(hitDistance, 0.0)) / 12.0);
+			color = mapped.xxx;
+		}
 	}
 	else
 	{

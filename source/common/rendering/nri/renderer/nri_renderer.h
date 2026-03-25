@@ -311,7 +311,7 @@ private:
 	bool DispatchTraceOpaque(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool DispatchDenoiser();
 	bool DispatchComposition();
-	bool DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlot secondarySlot = FrameTextureSlot::Count);
+	bool DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlot secondarySlot = FrameTextureSlot::Count, FrameTextureSlot tertiarySlot = FrameTextureSlot::Count);
 	bool DispatchFinalPresent(FrameTextureSlot inputSlot);
 	bool DispatchUpscaleChain();
 	bool DispatchFinal();
