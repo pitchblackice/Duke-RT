@@ -215,7 +215,6 @@ private:
 		bool active = false;
 		bool geoEffectActive = false;
 		bool transportActive = false;
-		bool explicitTransportContext = false;
 		bool queryAttempted = false;
 		bool queryRejected = false;
 		int32_t candidateSectorIndex = -1;

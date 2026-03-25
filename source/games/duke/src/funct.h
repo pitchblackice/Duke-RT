@@ -144,7 +144,6 @@ void destroyit(DDukeActor* actor);
 void mamaspawn(DDukeActor* actor);
 void forceplayerangle(DDukePlayer* snum);
 void TracePTRuntimeTransportEvent(const char* mode, DDukePlayer* player, DDukeActor* transporter, DDukeActor* owner, DDukeActor* transported, int triggerLotag, int onfloorz);
-void NotePTRuntimeTransportContext(DDukePlayer* player, DDukeActor* transporter, DDukeActor* owner, DDukeActor* transported, int triggerLotag, int onfloorz);
 
 
 bool checkhitceiling(sectortype* sectp);
