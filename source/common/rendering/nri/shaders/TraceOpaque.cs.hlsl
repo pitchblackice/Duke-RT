@@ -96,6 +96,26 @@ float GetSurfaceRoughness(uint materialIndex, uint dataSource)
 	return IsMirrorMaterial(materialIndex, dataSource) ? 0.02 : 0.38;
 }
 
+static const float4 kReblurHitDistanceParams = float4(3.0, 0.1, 20.0, -25.0);
+
+float GetNormalizedReblurHitDistance(float hitDistance, float viewZ, float roughness)
+{
+	const float trimmedHitDistance = NRD_FrontEnd_TrimHitDistance(max(hitDistance, 0.0), 0.001);
+	return REBLUR_FrontEnd_GetNormHitDist(trimmedHitDistance, abs(viewZ), kReblurHitDistanceParams, roughness);
+}
+
+float4 PackReblurDiffuseRadiance(float3 radiance, float hitDistance, float viewZ)
+{
+	const float normHitDistance = GetNormalizedReblurHitDistance(hitDistance, viewZ, 1.0);
+	return REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance, normHitDistance, true);
+}
+
+float4 PackReblurSpecularRadiance(float3 radiance, float hitDistance, float viewZ, float roughness)
+{
+	const float normHitDistance = GetNormalizedReblurHitDistance(hitDistance, viewZ, roughness);
+	return REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance, normHitDistance, true);
+}
+
 float3 GetSurfaceSpecularColor(float3 albedo)
 {
 	return lerp(float3(0.04, 0.04, 0.04), albedo, 0.12);
@@ -259,13 +279,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else
 		{
 			const float3 missColor = GetMissColor(visibleRayDirection);
-			color = float4(missColor, 1.0);
+			const float4 packedDiffuse = PackReblurDiffuseRadiance(missColor, NRD_INF, NRD_INF);
+			color = (gTraceConstants.DebugMode >= 1 && gTraceConstants.DebugMode <= 4) ? float4(missColor, 1.0) : packedDiffuse;
 			gMotionOutput[pixelPos] = 0.0;
-			gViewZOutput[pixelPos] = float4(1.0e6, 0.0, 0.0, 1.0);
+			gViewZOutput[pixelPos] = float4(NRD_INF, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
 			gBaseColorOutput[pixelPos] = float4(missColor, 0.0);
-			gGuideDiffuseOutput[pixelPos] = float4(missColor, 1.0);
-			gGuideSpecularOutput[pixelPos] = 0.0;
+			gGuideDiffuseOutput[pixelPos] = packedDiffuse;
+			gGuideSpecularOutput[pixelPos] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(0.0, 0.0, true);
 			gGuideSpecHitOutput[pixelPos] = 0.0;
 		}
 	}
@@ -286,10 +307,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			motion.z = previousViewZ - currentViewZ;
 		}
 
-		const float hitDistance = saturate(hit.distance / 4096.0);
+		const float hitDistance = hit.distance;
 		float4 albedo = 1.0;
 		float3 diffuse = 0.0;
 		float3 specular = 0.0;
+		float roughness = 1.0;
 		if (bootstrapFlat)
 		{
 			const float primitiveHash = (float)(hit.primitiveIndex % 31u) / 30.0;
@@ -300,7 +322,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			albedo = SampleSurfaceColor(hit.materialIndex, hit.dataSource, hit.uv);
 			const MaterialData material = GetMaterialData(hit.materialIndex, hit.dataSource);
 			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
-			const float roughness = GetSurfaceRoughness(hit.materialIndex, hit.dataSource);
+			roughness = GetSurfaceRoughness(hit.materialIndex, hit.dataSource);
 			const float metalness = 0.0;
 			const float materialID = (float)(hit.materialIndex & 255u) * (1.0 / 255.0);
 			if (bootstrapBaseColor)
@@ -332,14 +354,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		gMotionOutput[pixelPos] = float4(motion, 1.0);
 		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
+		const float4 packedDiffuse = PackReblurDiffuseRadiance(diffuse, hitDistance, currentViewZ);
+		const float4 packedSpecular = PackReblurSpecularRadiance(specular, hitDistance, currentViewZ, roughness);
 		if (bootstrapFlat)
 		{
 			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, 1.0, 0.0);
 			gBaseColorOutput[pixelPos] = float4(diffuse, 0.0);
 		}
-		gGuideDiffuseOutput[pixelPos] = float4(diffuse, hitDistance);
-		gGuideSpecularOutput[pixelPos] = float4(specular, hitDistance);
-		gGuideSpecHitOutput[pixelPos] = float4(specular, hitDistance);
+		gGuideDiffuseOutput[pixelPos] = packedDiffuse;
+		gGuideSpecularOutput[pixelPos] = packedSpecular;
+		gGuideSpecHitOutput[pixelPos] = float4(specular, packedSpecular.w);
 
 		if (gTraceConstants.DebugMode == 1)
 		{
@@ -361,7 +385,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else
 		{
-			color = float4(diffuse, hitDistance);
+			color = packedDiffuse;
 		}
 	}
 

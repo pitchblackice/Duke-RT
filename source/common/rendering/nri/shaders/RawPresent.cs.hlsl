@@ -1,4 +1,5 @@
 #include "NRI.hlsl"
+#include "NRD.hlsli"
 
 struct NRITraceConstants
 {
@@ -67,9 +68,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		color += gUnused1.Load(int3(samplePos, 0)).rgb;
 	}
-	if (gTraceConstants.DebugMode == 11u || gTraceConstants.DebugMode == 16u || gTraceConstants.DebugMode == 17u)
+	if (gTraceConstants.DebugMode == 10u || gTraceConstants.DebugMode == 11u || gTraceConstants.DebugMode == 16u || gTraceConstants.DebugMode == 17u)
 	{
-		const float4 rawRadiance = gInputTexture.Load(int3(samplePos, 0));
+		const float4 rawRadiance = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gInputTexture.Load(int3(samplePos, 0)));
 		color = ToneMapDebugRadiance(rawRadiance.rgb);
 	}
 	else

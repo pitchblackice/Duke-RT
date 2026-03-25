@@ -26,7 +26,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	const float3 diffuse = SanitizeColor(gComposedInput.Load(int3(pixelPos, 0)).rgb);
-	const float3 specular = SanitizeColor(gUpscaledInput.Load(int3(pixelPos, 0)).rgb);
+	const float3 diffuse = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gComposedInput.Load(int3(pixelPos, 0))).rgb);
+	const float3 specular = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gUpscaledInput.Load(int3(pixelPos, 0))).rgb);
 	gComposedOutput[pixelPos] = float4(saturate(diffuse + specular), 1.0);
 }
