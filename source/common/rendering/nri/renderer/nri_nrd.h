@@ -3,6 +3,7 @@
 #include "nri_resources.h"
 
 #include "NRD.h"
+#include "NRDSettings.h"
 #include "NRDIntegration.h"
 
 struct NRINrdDispatchDesc
@@ -26,7 +27,12 @@ struct NRINrdDispatchDesc
 	float viewToClipMatrixPrev[16] = {};
 	float worldToViewMatrix[16] = {};
 	float worldToViewMatrixPrev[16] = {};
+	uint32_t maxAccumulatedFrameNum = 31;
+	uint32_t maxFastAccumulatedFrameNum = 7;
+	uint32_t maxStabilizedFrameNum = 31;
+	uint32_t hitDistanceReconstructionMode = 0;
 	bool resetHistory = false;
+	bool enableAntiFirefly = true;
 	bool enableValidation = false;
 };
 
@@ -44,7 +50,9 @@ private:
 
 	nrd::Integration mIntegration;
 	nrd::Identifier mDenoiser = 0;
+	nrd::ReblurSettings mReblurSettings = {};
 	uint32_t mWidth = 0;
 	uint32_t mHeight = 0;
 	bool mInitialized = false;
+	bool mHasReblurSettings = false;
 };

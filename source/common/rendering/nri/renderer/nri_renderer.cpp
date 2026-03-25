@@ -31,6 +31,12 @@ CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdmaxframes, 31, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdfastframes, 7, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdstabilizationframes, 31, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_nrdantifirefly, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdhitdistrecon, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdsplit, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_apivalidation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_dred, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -112,6 +118,51 @@ namespace
 	static nri::AccessStage NRIAccelerationStructureReadAccess()
 	{
 		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
+	}
+
+	static uint32_t ClampNrdHistoryFrameCount(int value)
+	{
+		return (uint32_t)std::clamp(value, 0, (int)nrd::REBLUR_MAX_HISTORY_FRAME_NUM);
+	}
+
+	static uint32_t ClampNrdFastFrameCount(int value, uint32_t maxAccumulatedFrameNum)
+	{
+		return (uint32_t)std::clamp(value, 0, (int)maxAccumulatedFrameNum);
+	}
+
+	static uint32_t ClampNrdStabilizationFrameCount(int value, uint32_t maxAccumulatedFrameNum)
+	{
+		return (uint32_t)std::clamp(value, 0, (int)maxAccumulatedFrameNum);
+	}
+
+	static uint32_t GetNrdHitDistanceReconstructionMode()
+	{
+		return (uint32_t)std::clamp((int)nri_nrdhitdistrecon, 0, 2);
+	}
+
+	static const char* GetNrdHitDistanceReconstructionModeName(uint32_t mode)
+	{
+		switch (mode)
+		{
+		case 1: return "area_3x3";
+		case 2: return "area_5x5";
+		default: return "off";
+		}
+	}
+
+	static uint32_t GetNrdInputSplitMode()
+	{
+		return (uint32_t)std::clamp((int)nri_nrdsplit, 0, 2);
+	}
+
+	static const char* GetNrdInputSplitModeName(uint32_t mode)
+	{
+		switch (mode)
+		{
+		case 1: return "raw_left_denoised_right";
+		case 2: return "denoised_left_raw_right";
+		default: return "off";
+		}
 	}
 
 	static bool SameRuntimeLinkDebugState(const RuntimeLinkDebugState& a, const RuntimeLinkDebugState& b)
@@ -1800,6 +1851,11 @@ void NRIRenderer::PrintStatus() const
 	const NRIUpscalerKind requested = GetSelectedUpscalerKind();
 	const NRIUpscalerKind resolved = GetResolvedUpscalerKindForStatus();
 	const uint32_t bootstrapMode = GetBootstrapMode();
+	const uint32_t nrdMaxFrames = ClampNrdHistoryFrameCount((int)nri_nrdmaxframes);
+	const uint32_t nrdFastFrames = ClampNrdFastFrameCount((int)nri_nrdfastframes, nrdMaxFrames);
+	const uint32_t nrdStabilizationFrames = ClampNrdStabilizationFrameCount((int)nri_nrdstabilizationframes, nrdMaxFrames);
+	const uint32_t nrdHitDistanceReconstruction = GetNrdHitDistanceReconstructionMode();
+	const uint32_t nrdInputSplit = GetNrdInputSplitMode();
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -1840,7 +1896,15 @@ void NRIRenderer::PrintStatus() const
 		"2.5D",
 		"interpolated",
 		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z");
-	Printf("NRI PT NRD guides: hit_distance=distance_over_4096 roughness=mirror_0.02_else_0.38 metalness=constant_0 material_id=material_hash\n");
+	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s\n",
+		nrdMaxFrames,
+		nrdFastFrames,
+		nrdStabilizationFrames,
+		nri_nrdantifirefly ? "on" : "off",
+		GetNrdHitDistanceReconstructionModeName(nrdHitDistanceReconstruction),
+		GetNrdInputSplitModeName(nrdInputSplit));
+	Printf("NRI PT NRD tuning: fast_history_sigma=1.5 blur_radius=0.5..12.0 prepass=8/12 material_floor=1/2\n");
+	Printf("NRI PT NRD guides: hit_distance=secondary_transport_only_reblur_norm roughness=material_hint metalness=material_hint material_id=semantic_class\n");
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
 		(int)nri_ptmutationtracechunk,
@@ -4859,6 +4923,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 bool NRIRenderer::DispatchDenoiser()
 {
 	Clocker clock(NriPTDenoiser);
+	const uint32_t nrdMaxFrames = ClampNrdHistoryFrameCount((int)nri_nrdmaxframes);
 
 	if (!mNrd.EnsureReady(*mFrameBuffer->mDevice, mRenderWidth, mRenderHeight, 1))
 	{
@@ -4887,7 +4952,12 @@ bool NRIRenderer::DispatchDenoiser()
 	std::memcpy(desc.viewToClipMatrixPrev, mPreviousViewToClip, sizeof(desc.viewToClipMatrixPrev));
 	std::memcpy(desc.worldToViewMatrix, mCurrentWorldToView, sizeof(desc.worldToViewMatrix));
 	std::memcpy(desc.worldToViewMatrixPrev, mPreviousWorldToView, sizeof(desc.worldToViewMatrixPrev));
+	desc.maxAccumulatedFrameNum = nrdMaxFrames;
+	desc.maxFastAccumulatedFrameNum = ClampNrdFastFrameCount((int)nri_nrdfastframes, nrdMaxFrames);
+	desc.maxStabilizedFrameNum = ClampNrdStabilizationFrameCount((int)nri_nrdstabilizationframes, nrdMaxFrames);
+	desc.hitDistanceReconstructionMode = GetNrdHitDistanceReconstructionMode();
 	desc.resetHistory = mResetHistory;
+	desc.enableAntiFirefly = nri_nrdantifirefly;
 	desc.enableValidation = nri_validation;
 	return mNrd.Denoise(desc);
 }
@@ -4917,24 +4987,31 @@ bool NRIRenderer::DispatchComposition()
 	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
+	constants.ReservedTrace0 = GetNrdInputSplitMode();
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
 
-	const FrameTextureSlot diffuseSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::UnfilteredDiffuse;
-	const FrameTextureSlot specularSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedSpecular : FrameTextureSlot::UnfilteredSpecular;
-	NRITextureResource& diffuse = GetFrameTexture(diffuseSlot);
-	NRITextureResource& specular = GetFrameTexture(specularSlot);
+	NRITextureResource& diffuse = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
+	NRITextureResource& specular = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular);
+	const FrameTextureSlot filteredDiffuseSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::UnfilteredDiffuse;
+	const FrameTextureSlot filteredSpecularSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedSpecular : FrameTextureSlot::UnfilteredSpecular;
+	NRITextureResource& filteredDiffuse = GetFrameTexture(filteredDiffuseSlot);
+	NRITextureResource& filteredSpecular = GetFrameTexture(filteredSpecularSlot);
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 
 	mFrameBuffer->TransitionTexture(diffuse, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(specular, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(filteredDiffuse, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(filteredSpecular, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(composed, NRIComputeStorageState());
 
 	const nri::Descriptor* defaultInput = diffuse.shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
 	mFrameInputDescriptors[5] = diffuse.shaderView;
 	mFrameInputDescriptors[6] = specular.shaderView;
+	mFrameInputDescriptors[8] = filteredDiffuse.shaderView;
+	mFrameInputDescriptors[9] = filteredSpecular.shaderView;
 	UpdateFrameTextureSet(mCompositionFrameTextureSet, mFrameInputDescriptors);
 
 	const nri::Descriptor* defaultOutput = composed.storageView;

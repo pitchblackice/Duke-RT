@@ -1178,6 +1178,12 @@ OptionMenu "NRIOptions" protected
 	Slider "Bootstrap Mode Index",				"nri_ptbootstrapmode",			0, 13, 1, 0
 	Option "Denoiser",							"nri_denoise",					"OnOff"
 	Option "Validation",						"nri_validation",				"OnOff"
+	Slider "NRD Max Frames",					"nri_nrdmaxframes",				0, 63, 1, 0
+	Slider "NRD Fast Frames",					"nri_nrdfastframes",			0, 63, 1, 0
+	Slider "NRD Stabilization",					"nri_nrdstabilizationframes",	0, 63, 1, 0
+	Option "NRD Anti-Firefly",					"nri_nrdantifirefly",			"OnOff"
+	Option "NRD HitT Recon",					"nri_nrdhitdistrecon",			"NRDHitDistanceReconstruction"
+	Option "NRD Raw/Denoised Split",			"nri_nrdsplit",					"NRDInputSplit"
 	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"
 	Option "Upscaler Mode",						"nri_upscalermode",				"NRIUpscalerMode"
 	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2
@@ -1742,6 +1748,20 @@ OptionValue NRIUpscalerMode
 	3, "Balanced"
 	4, "Performance"
 	5, "Ultra Performance"
+}
+
+OptionValue NRDHitDistanceReconstruction
+{
+	0, "Off"
+	1, "Area 3x3"
+	2, "Area 5x5"
+}
+
+OptionValue NRDInputSplit
+{
+	0, "Off"
+	1, "Raw | Denoised"
+	2, "Denoised | Raw"
 }
 
 OptionValue NRIPTDebug

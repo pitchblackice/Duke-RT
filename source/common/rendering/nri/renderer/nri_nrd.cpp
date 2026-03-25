@@ -3,6 +3,7 @@
 #include "printf.h"
 #include "NRDIntegration.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 namespace
@@ -10,6 +11,38 @@ namespace
 	const nrd::DenoiserDesc gDenoisers[] = {
 		{ nrd::Identifier(1), nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR }
 	};
+
+	static nrd::HitDistanceReconstructionMode ClampHitDistanceReconstructionMode(uint32_t value)
+	{
+		switch (value)
+		{
+		case 1: return nrd::HitDistanceReconstructionMode::AREA_3X3;
+		case 2: return nrd::HitDistanceReconstructionMode::AREA_5X5;
+		default: return nrd::HitDistanceReconstructionMode::OFF;
+		}
+	}
+
+	static nrd::ReblurSettings BuildReblurSettings(const NRINrdDispatchDesc& desc)
+	{
+		nrd::ReblurSettings settings = {};
+		settings.maxAccumulatedFrameNum = desc.maxAccumulatedFrameNum;
+		settings.maxFastAccumulatedFrameNum = std::min(desc.maxFastAccumulatedFrameNum, settings.maxAccumulatedFrameNum);
+		settings.maxStabilizedFrameNum = std::min(desc.maxStabilizedFrameNum, settings.maxAccumulatedFrameNum);
+		settings.hitDistanceReconstructionMode = ClampHitDistanceReconstructionMode(desc.hitDistanceReconstructionMode);
+		settings.enableAntiFirefly = desc.enableAntiFirefly;
+
+		// Sample-guided baseline tuned down for Build content, where direct and indirect lighting
+		// still share one denoised signal and the stock REBLUR radii are too aggressive.
+		settings.fastHistoryClampingSigmaScale = 1.5f;
+		settings.diffusePrepassBlurRadius = 8.0f;
+		settings.specularPrepassBlurRadius = 12.0f;
+		settings.minBlurRadius = 0.5f;
+		settings.maxBlurRadius = 12.0f;
+		settings.minMaterialForDiffuse = 1.0f;
+		settings.minMaterialForSpecular = 2.0f;
+
+		return settings;
+	}
 }
 
 nrd::Resource NRINrdContext::MakeResource(NRITextureResource& texture)
@@ -51,6 +84,7 @@ bool NRINrdContext::EnsureReady(nri::Device& device, uint32_t width, uint32_t he
 	mWidth = width;
 	mHeight = height;
 	mInitialized = true;
+	mHasReblurSettings = false;
 	return true;
 }
 
@@ -70,6 +104,22 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 		desc.diffuse == nullptr || desc.specular == nullptr || desc.validation == nullptr)
 	{
 		return false;
+	}
+
+	const nrd::ReblurSettings reblurSettings = BuildReblurSettings(desc);
+	const bool settingsChanged =
+		!mHasReblurSettings ||
+		std::memcmp(&mReblurSettings, &reblurSettings, sizeof(reblurSettings)) != 0;
+
+	if (settingsChanged)
+	{
+		if (mIntegration.SetDenoiserSettings(mDenoiser, &reblurSettings) != nrd::Result::SUCCESS)
+		{
+			return false;
+		}
+
+		mReblurSettings = reblurSettings;
+		mHasReblurSettings = true;
 	}
 
 	nrd::CommonSettings commonSettings = {};
@@ -97,7 +147,7 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	commonSettings.disocclusionThreshold = 0.01f;
 	commonSettings.disocclusionThresholdAlternate = 0.05f;
 	commonSettings.frameIndex = desc.frameIndex;
-	commonSettings.accumulationMode = desc.resetHistory ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
+	commonSettings.accumulationMode = (desc.resetHistory || settingsChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
 	commonSettings.isMotionVectorInWorldSpace = false;
 	commonSettings.isBaseColorMetalnessAvailable = true;
 	commonSettings.enableValidation = desc.enableValidation;
@@ -145,4 +195,6 @@ void NRINrdContext::Shutdown()
 	mWidth = 0;
 	mHeight = 0;
 	mDenoiser = 0;
+	mReblurSettings = {};
+	mHasReblurSettings = false;
 }
