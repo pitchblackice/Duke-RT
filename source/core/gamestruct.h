@@ -83,29 +83,6 @@ struct RuntimeTaggedSectorDebugInfo
 	int32_t effectorHitags[4] = {};
 };
 
-enum RuntimeTransportLinkFlags : uint32_t
-{
-	RuntimeTransportLinkFlag_None = 0,
-	RuntimeTransportLinkFlag_OneWay = 1 << 0,
-	RuntimeTransportLinkFlag_TwoWay = 1 << 1,
-	RuntimeTransportLinkFlag_SourceNearby = 1 << 2,
-	RuntimeTransportLinkFlag_DestinationNearby = 1 << 3,
-};
-
-struct RuntimeTransportLinkInfo
-{
-	bool available = false;
-	int32_t sourceSectorIndex = -1;
-	int32_t destinationSectorIndex = -1;
-	int32_t sourceEffectorLotag = 0;
-	int32_t sourceEffectorHitag = 0;
-	int32_t destinationEffectorLotag = 0;
-	int32_t destinationEffectorHitag = 0;
-	float mapDx = 0.0f;
-	float mapDy = 0.0f;
-	uint32_t flags = RuntimeTransportLinkFlag_None;
-};
-
 struct GameInterface
 {
 	virtual const char* Name() { return "$"; }
@@ -154,7 +131,6 @@ struct GameInterface
 	virtual bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) { return false; }
 	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
 	virtual bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) { return false; }
-	virtual uint32_t GetRuntimeTransportLinkInfo(const int32_t* sectorIndices, uint32_t sectorCount, RuntimeTransportLinkInfo* links, uint32_t maxLinks) { return 0; }
 	virtual int Voxelize(int sprnum) { return -1; }
 	virtual void AddExcludedEpisode(const FString& episode) {}
 	virtual int GetCurrentSkill() { return -1; }

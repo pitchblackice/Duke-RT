@@ -214,7 +214,6 @@ private:
 	{
 		bool active = false;
 		bool geoEffectActive = false;
-		bool transportActive = false;
 		bool queryAttempted = false;
 		bool queryRejected = false;
 		int32_t candidateSectorIndex = -1;
@@ -229,9 +228,6 @@ private:
 		uint32_t localSpaceMatchedProviderCount = 0;
 		uint32_t visibleMatchedProviderCount = 0;
 		uint32_t linkCount = 0;
-		uint32_t transportLinkCount = 0;
-		uint32_t transportLocalSpaceCount = 0;
-		uint32_t replacedChunkCount = 0;
 		uint32_t translatedChunkCount = 0;
 		uint32_t orphanLocalSpaceCount = 0;
 		uint32_t unresolvedRuntimePortalCount = 0;
@@ -293,8 +289,8 @@ private:
 	bool BuildStaticMapAccelerationStructures();
 	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask);
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
-	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, const std::vector<uint8_t>* suppressedChunkMask = nullptr);
-	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, std::vector<uint8_t>* outReplacedChunkMask = nullptr);
+	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,

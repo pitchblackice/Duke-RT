@@ -59,7 +59,6 @@ struct GameInterface : public ::GameInterface
 	bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) override;
 	bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) override;
 	bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) override;
-	uint32_t GetRuntimeTransportLinkInfo(const int32_t* sectorIndices, uint32_t sectorCount, RuntimeTransportLinkInfo* links, uint32_t maxLinks) override;
 	void AddExcludedEpisode(const FString& episode) override;
 	int GetCurrentSkill() override;
 	bool WantEscape() override;
