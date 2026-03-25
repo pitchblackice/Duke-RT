@@ -4718,7 +4718,8 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useFinalDebugPresent)
 	{
-		if (!DispatchFinalPresent(FrameTextureSlot::UnfilteredDiffuse))
+		mUseUpscaledInFinal = false;
+		if (!DispatchFinal())
 		{
 			return false;
 		}
