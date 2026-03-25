@@ -26,6 +26,7 @@
 
 CVAR(Int, nri_ptdebug, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrddenoiser, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_upscaler, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -158,6 +159,20 @@ namespace
 	static uint32_t GetNrdInputSplitMode()
 	{
 		return (uint32_t)std::clamp((int)nri_nrdsplit, 0, 2);
+	}
+
+	static NRINrdDenoiserMode GetSelectedNrdDenoiserMode()
+	{
+		return (NRINrdDenoiserMode)std::clamp((int)nri_nrddenoiser, 0, 1);
+	}
+
+	static const char* GetNrdDenoiserModeName(NRINrdDenoiserMode mode)
+	{
+		switch (mode)
+		{
+		case NRINrdDenoiserMode::Relax: return "RELAX_DIFFUSE_SPECULAR";
+		default: return "REBLUR_DIFFUSE_SPECULAR";
+		}
 	}
 
 	static float ClampNrdFastHistorySigmaScale(float value)
@@ -1876,6 +1891,7 @@ void NRIRenderer::PrintStatus() const
 	const uint32_t nrdStabilizationFrames = ClampNrdStabilizationFrameCount((int)nri_nrdstabilizationframes, nrdMaxFrames);
 	const uint32_t nrdHitDistanceReconstruction = GetNrdHitDistanceReconstructionMode();
 	const uint32_t nrdInputSplit = GetNrdInputSplitMode();
+	const NRINrdDenoiserMode nrdDenoiserMode = GetSelectedNrdDenoiserMode();
 	const float nrdFastHistorySigma = ClampNrdFastHistorySigmaScale((float)nri_nrdfasthistorysigma);
 	const float nrdDiffusePrepass = ClampNrdPrepassBlurRadius((float)nri_nrdprepassdiffuse);
 	const float nrdSpecularPrepass = ClampNrdPrepassBlurRadius((float)nri_nrdprepassspecular);
@@ -1917,7 +1933,7 @@ void NRIRenderer::PrintStatus() const
 		mNrd.IsReady() ? "ready" : "cold",
 		nri_denoise ? "on" : "off",
 		nri_validation ? "expected" : "disabled",
-		"REBLUR_DIFFUSE_SPECULAR",
+		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
 		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z");
@@ -1928,13 +1944,24 @@ void NRIRenderer::PrintStatus() const
 		nri_nrdantifirefly ? "on" : "off",
 		GetNrdHitDistanceReconstructionModeName(nrdHitDistanceReconstruction),
 		GetNrdInputSplitModeName(nrdInputSplit));
-	Printf("NRI PT NRD tuning: fast_history_sigma=%.2f blur_radius=%.2f..%.2f prepass=%.2f/%.2f material_floor=1/2\n",
-		nrdFastHistorySigma,
-		nrdMinBlur,
-		nrdMaxBlur,
-		nrdDiffusePrepass,
-		nrdSpecularPrepass);
-	Printf("NRI PT NRD guides: diffuse_signal=demodulated_illumination hit_distance=secondary_transport_only_reblur_norm roughness=material_hint metalness=material_hint material_id=semantic_class\n");
+	if (nrdDenoiserMode == NRINrdDenoiserMode::Relax)
+	{
+		Printf("NRI PT NRD tuning: fast_history_sigma=%.2f prepass=%.2f/%.2f material_floor=1/2 blur_radius=n/a_relax\n",
+			nrdFastHistorySigma,
+			nrdDiffusePrepass,
+			nrdSpecularPrepass);
+	}
+	else
+	{
+		Printf("NRI PT NRD tuning: fast_history_sigma=%.2f blur_radius=%.2f..%.2f prepass=%.2f/%.2f material_floor=1/2\n",
+			nrdFastHistorySigma,
+			nrdMinBlur,
+			nrdMaxBlur,
+			nrdDiffusePrepass,
+			nrdSpecularPrepass);
+	}
+	Printf("NRI PT NRD guides: diffuse_signal=demodulated_illumination hit_distance=%s roughness=material_hint metalness=material_hint material_id=semantic_class\n",
+		nrdDenoiserMode == NRINrdDenoiserMode::Relax ? "secondary_transport_linear_hitdist" : "secondary_transport_reblur_norm");
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
 		(int)nri_ptmutationtracechunk,
@@ -4905,6 +4932,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u));
 	constants.PortalCount = mBoundPortalCount;
 	constants.PortalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
+	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -4982,6 +5010,7 @@ bool NRIRenderer::DispatchDenoiser()
 	std::memcpy(desc.viewToClipMatrixPrev, mPreviousViewToClip, sizeof(desc.viewToClipMatrixPrev));
 	std::memcpy(desc.worldToViewMatrix, mCurrentWorldToView, sizeof(desc.worldToViewMatrix));
 	std::memcpy(desc.worldToViewMatrixPrev, mPreviousWorldToView, sizeof(desc.worldToViewMatrixPrev));
+	desc.denoiserMode = GetSelectedNrdDenoiserMode();
 	desc.maxAccumulatedFrameNum = nrdMaxFrames;
 	desc.maxFastAccumulatedFrameNum = ClampNrdFastFrameCount((int)nri_nrdfastframes, nrdMaxFrames);
 	desc.maxStabilizedFrameNum = ClampNrdStabilizationFrameCount((int)nri_nrdstabilizationframes, nrdMaxFrames);
@@ -5023,6 +5052,7 @@ bool NRIRenderer::DispatchComposition()
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	constants.ReservedTrace0 = GetNrdInputSplitMode();
+	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -5087,6 +5117,7 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
 	const bool addSecondary = secondarySlot != FrameTextureSlot::Count;

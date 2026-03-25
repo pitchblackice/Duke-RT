@@ -9,8 +9,14 @@
 namespace
 {
 	const nrd::DenoiserDesc gDenoisers[] = {
-		{ nrd::Identifier(1), nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR }
+		{ nrd::Identifier(1), nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR },
+		{ nrd::Identifier(2), nrd::Denoiser::RELAX_DIFFUSE_SPECULAR }
 	};
+
+	static bool UseRelax(NRINrdDenoiserMode mode)
+	{
+		return mode == NRINrdDenoiserMode::Relax;
+	}
 
 	static nrd::HitDistanceReconstructionMode ClampHitDistanceReconstructionMode(uint32_t value)
 	{
@@ -42,6 +48,23 @@ namespace
 		settings.minMaterialForSpecular = 2.0f;
 		settings.usePrepassOnlyForSpecularMotionEstimation = settings.specularPrepassBlurRadius > 0.0f;
 
+		return settings;
+	}
+
+	static nrd::RelaxSettings BuildRelaxSettings(const NRINrdDispatchDesc& desc)
+	{
+		nrd::RelaxSettings settings = {};
+		settings.diffuseMaxAccumulatedFrameNum = desc.maxAccumulatedFrameNum;
+		settings.specularMaxAccumulatedFrameNum = desc.maxAccumulatedFrameNum;
+		settings.diffuseMaxFastAccumulatedFrameNum = std::min(desc.maxFastAccumulatedFrameNum, settings.diffuseMaxAccumulatedFrameNum);
+		settings.specularMaxFastAccumulatedFrameNum = std::min(desc.maxFastAccumulatedFrameNum, settings.specularMaxAccumulatedFrameNum);
+		settings.hitDistanceReconstructionMode = ClampHitDistanceReconstructionMode(desc.hitDistanceReconstructionMode);
+		settings.enableAntiFirefly = desc.enableAntiFirefly;
+		settings.fastHistoryClampingSigmaScale = desc.fastHistoryClampingSigmaScale;
+		settings.diffusePrepassBlurRadius = desc.diffusePrepassBlurRadius;
+		settings.specularPrepassBlurRadius = desc.specularPrepassBlurRadius;
+		settings.minMaterialForDiffuse = 1.0f;
+		settings.minMaterialForSpecular = 2.0f;
 		return settings;
 	}
 }
@@ -81,11 +104,14 @@ bool NRINrdContext::EnsureReady(nri::Device& device, uint32_t width, uint32_t he
 		return false;
 	}
 
-	mDenoiser = gDenoisers[0].identifier;
+	mReblurDenoiser = gDenoisers[0].identifier;
+	mRelaxDenoiser = gDenoisers[1].identifier;
 	mWidth = width;
 	mHeight = height;
 	mInitialized = true;
 	mHasReblurSettings = false;
+	mHasRelaxSettings = false;
+	mLastDenoiserMode = NRINrdDenoiserMode::Reblur;
 	return true;
 }
 
@@ -107,21 +133,49 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 		return false;
 	}
 
-	const nrd::ReblurSettings reblurSettings = BuildReblurSettings(desc);
-	const bool settingsChanged =
-		!mHasReblurSettings ||
-		std::memcmp(&mReblurSettings, &reblurSettings, sizeof(reblurSettings)) != 0;
+	const bool useRelax = UseRelax(desc.denoiserMode);
+	const bool denoiserChanged = desc.denoiserMode != mLastDenoiserMode;
+	bool settingsChanged = false;
+	nrd::Identifier activeDenoiser = useRelax ? mRelaxDenoiser : mReblurDenoiser;
 
-	if (settingsChanged)
+	if (useRelax)
 	{
-		if (mIntegration.SetDenoiserSettings(mDenoiser, &reblurSettings) != nrd::Result::SUCCESS)
-		{
-			return false;
-		}
+		const nrd::RelaxSettings relaxSettings = BuildRelaxSettings(desc);
+		settingsChanged =
+			!mHasRelaxSettings ||
+			std::memcmp(&mRelaxSettings, &relaxSettings, sizeof(relaxSettings)) != 0;
 
-		mReblurSettings = reblurSettings;
-		mHasReblurSettings = true;
+		if (settingsChanged)
+		{
+			if (mIntegration.SetDenoiserSettings(activeDenoiser, &relaxSettings) != nrd::Result::SUCCESS)
+			{
+				return false;
+			}
+
+			mRelaxSettings = relaxSettings;
+			mHasRelaxSettings = true;
+		}
 	}
+	else
+	{
+		const nrd::ReblurSettings reblurSettings = BuildReblurSettings(desc);
+		settingsChanged =
+			!mHasReblurSettings ||
+			std::memcmp(&mReblurSettings, &reblurSettings, sizeof(reblurSettings)) != 0;
+
+		if (settingsChanged)
+		{
+			if (mIntegration.SetDenoiserSettings(activeDenoiser, &reblurSettings) != nrd::Result::SUCCESS)
+			{
+				return false;
+			}
+
+			mReblurSettings = reblurSettings;
+			mHasReblurSettings = true;
+		}
+	}
+
+	mLastDenoiserMode = desc.denoiserMode;
 
 	nrd::CommonSettings commonSettings = {};
 	std::memcpy(commonSettings.viewToClipMatrix, desc.viewToClipMatrix, sizeof(commonSettings.viewToClipMatrix));
@@ -148,7 +202,7 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	commonSettings.disocclusionThreshold = 0.01f;
 	commonSettings.disocclusionThresholdAlternate = 0.05f;
 	commonSettings.frameIndex = desc.frameIndex;
-	commonSettings.accumulationMode = (desc.resetHistory || settingsChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
+	commonSettings.accumulationMode = (desc.resetHistory || denoiserChanged || settingsChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
 	commonSettings.isMotionVectorInWorldSpace = false;
 	commonSettings.isBaseColorMetalnessAvailable = true;
 	commonSettings.enableValidation = desc.enableValidation;
@@ -170,7 +224,7 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	resourceSnapshot.SetResource(nrd::ResourceType::OUT_SPEC_RADIANCE_HITDIST, MakeResource(*desc.specular));
 	resourceSnapshot.SetResource(nrd::ResourceType::OUT_VALIDATION, MakeResource(*desc.validation));
 
-	mIntegration.Denoise(&mDenoiser, 1, *desc.commandBuffer, resourceSnapshot);
+	mIntegration.Denoise(&activeDenoiser, 1, *desc.commandBuffer, resourceSnapshot);
 
 	for (size_t i = 0; i < resourceSnapshot.uniqueNum; ++i)
 	{
@@ -195,7 +249,11 @@ void NRINrdContext::Shutdown()
 	mInitialized = false;
 	mWidth = 0;
 	mHeight = 0;
-	mDenoiser = 0;
+	mReblurDenoiser = 0;
+	mRelaxDenoiser = 0;
 	mReblurSettings = {};
+	mRelaxSettings = {};
 	mHasReblurSettings = false;
+	mHasRelaxSettings = false;
+	mLastDenoiserMode = NRINrdDenoiserMode::Reblur;
 }

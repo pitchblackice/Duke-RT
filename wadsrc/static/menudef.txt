@@ -1177,6 +1177,7 @@ OptionMenu "NRIOptions" protected
 	Option "Bootstrap Mode",						"nri_ptbootstrapmode",			"NRIPTBootstrapMode"
 	Slider "Bootstrap Mode Index",				"nri_ptbootstrapmode",			0, 13, 1, 0
 	Option "Denoiser",							"nri_denoise",					"OnOff"
+	Option "NRD Method",						"nri_nrddenoiser",				"NRDDenoiser"
 	Option "Validation",						"nri_validation",				"OnOff"
 	Slider "NRD Max Frames",					"nri_nrdmaxframes",				0, 63, 1, 0
 	Slider "NRD Fast Frames",					"nri_nrdfastframes",			0, 63, 1, 0
@@ -1767,6 +1768,12 @@ OptionValue NRDInputSplit
 	0, "Off"
 	1, "Raw | Denoised"
 	2, "Denoised | Raw"
+}
+
+OptionValue NRDDenoiser
+{
+	0, "REBLUR"
+	1, "RELAX"
 }
 
 OptionValue NRIPTDebug

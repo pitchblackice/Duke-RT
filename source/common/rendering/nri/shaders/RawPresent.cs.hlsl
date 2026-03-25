@@ -32,6 +32,10 @@ struct NRITraceConstants
 	uint BootstrapMode;
 	uint DynamicMaterialCount;
 	uint BounceCounts;
+	uint PortalCount;
+	uint PortalDepth;
+	uint ReservedTrace0;
+	uint ReservedTrace1;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
@@ -49,6 +53,16 @@ float3 ToneMapDebugRadiance(float3 value)
 	value = max(value, 0.0);
 	value *= 4.0;
 	return value / (1.0 + value);
+}
+
+bool UseRelaxDenoiser()
+{
+	return gTraceConstants.ReservedTrace1 == 1u;
+}
+
+float3 UnpackDebugRadiance(float4 packed)
+{
+	return UseRelaxDenoiser() ? RELAX_BackEnd_UnpackRadiance(packed).rgb : REBLUR_BackEnd_UnpackRadianceAndNormHitDist(packed).rgb;
 }
 
 static const float4 kReblurHitDistanceParams = float4(3.0, 0.1, 20.0, -25.0);
@@ -72,22 +86,27 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	if (gTraceConstants.DebugMode == 10u || gTraceConstants.DebugMode == 11u || gTraceConstants.DebugMode == 16u || gTraceConstants.DebugMode == 17u)
 	{
-		const float4 rawRadiance = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gInputTexture.Load(int3(samplePos, 0)));
-		color = ToneMapDebugRadiance(rawRadiance.rgb);
+		color = ToneMapDebugRadiance(UnpackDebugRadiance(gInputTexture.Load(int3(samplePos, 0))));
 	}
 	else
 	if (gTraceConstants.DebugMode == 12u)
 	{
-		const float normalizedHitDistance = saturate(gInputTexture.Load(int3(samplePos, 0)).a);
-		float materialID = 0.0;
-		const float roughness = NRD_FrontEnd_UnpackNormalAndRoughness(gUnused2.Load(int3(samplePos, 0)), materialID).w;
 		const float viewZ = abs(gUnused1.Load(int3(samplePos, 0)).x);
 		if (viewZ >= NRD_INF * 0.5)
 		{
 			color = float3(1.0, 0.0, 0.0);
 		}
+		else if (UseRelaxDenoiser())
+		{
+			const float hitDistance = max(gInputTexture.Load(int3(samplePos, 0)).a, 0.0);
+			const float mapped = saturate(log2(1.0 + hitDistance) / 12.0);
+			color = mapped.xxx;
+		}
 		else
 		{
+			const float normalizedHitDistance = saturate(gInputTexture.Load(int3(samplePos, 0)).a);
+			float materialID = 0.0;
+			const float roughness = NRD_FrontEnd_UnpackNormalAndRoughness(gUnused2.Load(int3(samplePos, 0)), materialID).w;
 			const float hitDistance = REBLUR_GetHitDist(normalizedHitDistance, viewZ, kReblurHitDistanceParams, roughness);
 			const float mapped = saturate(log2(1.0 + max(hitDistance, 0.0)) / 12.0);
 			color = mapped.xxx;

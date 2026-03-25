@@ -6,6 +6,12 @@
 #include "NRDSettings.h"
 #include "NRDIntegration.h"
 
+enum class NRINrdDenoiserMode : uint32_t
+{
+	Reblur = 0,
+	Relax = 1,
+};
+
 struct NRINrdDispatchDesc
 {
 	nri::CommandBuffer* commandBuffer = nullptr;
@@ -27,6 +33,7 @@ struct NRINrdDispatchDesc
 	float viewToClipMatrixPrev[16] = {};
 	float worldToViewMatrix[16] = {};
 	float worldToViewMatrixPrev[16] = {};
+	NRINrdDenoiserMode denoiserMode = NRINrdDenoiserMode::Reblur;
 	float fastHistoryClampingSigmaScale = 1.25f;
 	float diffusePrepassBlurRadius = 0.0f;
 	float specularPrepassBlurRadius = 4.0f;
@@ -54,10 +61,14 @@ private:
 	static nrd::Resource MakeResource(NRITextureResource& texture);
 
 	nrd::Integration mIntegration;
-	nrd::Identifier mDenoiser = 0;
+	nrd::Identifier mReblurDenoiser = 0;
+	nrd::Identifier mRelaxDenoiser = 0;
 	nrd::ReblurSettings mReblurSettings = {};
+	nrd::RelaxSettings mRelaxSettings = {};
 	uint32_t mWidth = 0;
 	uint32_t mHeight = 0;
 	bool mInitialized = false;
 	bool mHasReblurSettings = false;
+	bool mHasRelaxSettings = false;
+	NRINrdDenoiserMode mLastDenoiserMode = NRINrdDenoiserMode::Reblur;
 };

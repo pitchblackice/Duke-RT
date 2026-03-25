@@ -10,6 +10,16 @@ float3 SanitizeColor(float3 value)
 	return value;
 }
 
+bool UseRelaxDenoiser()
+{
+	return gTraceConstants.ReservedTrace1 == 1u;
+}
+
+float3 UnpackDenoisedRadiance(float4 packed)
+{
+	return UseRelaxDenoiser() ? RELAX_BackEnd_UnpackRadiance(packed).rgb : REBLUR_BackEnd_UnpackRadianceAndNormHitDist(packed).rgb;
+}
+
 float3 ResolveDiffuseContribution(uint2 pixelPos, float3 diffuseSignal)
 {
 	const float viewZ = abs(gViewZInput.Load(int3(pixelPos, 0)).x);
@@ -44,10 +54,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	const float3 rawDiffuseSignal = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gComposedInput.Load(int3(pixelPos, 0))).rgb);
-	const float3 rawSpecular = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gUpscaledInput.Load(int3(pixelPos, 0))).rgb);
-	const float3 filteredDiffuseSignal = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gGuideDiffuseInput.Load(int3(pixelPos, 0))).rgb);
-	const float3 filteredSpecular = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gGuideSpecularInput.Load(int3(pixelPos, 0))).rgb);
+	const float3 rawDiffuseSignal = SanitizeColor(UnpackDenoisedRadiance(gComposedInput.Load(int3(pixelPos, 0))));
+	const float3 rawSpecular = SanitizeColor(UnpackDenoisedRadiance(gUpscaledInput.Load(int3(pixelPos, 0))));
+	const float3 filteredDiffuseSignal = SanitizeColor(UnpackDenoisedRadiance(gGuideDiffuseInput.Load(int3(pixelPos, 0))));
+	const float3 filteredSpecular = SanitizeColor(UnpackDenoisedRadiance(gGuideSpecularInput.Load(int3(pixelPos, 0))));
 	const float3 rawDiffuse = ResolveDiffuseContribution(pixelPos, rawDiffuseSignal);
 	const float3 filteredDiffuse = ResolveDiffuseContribution(pixelPos, filteredDiffuseSignal);
 

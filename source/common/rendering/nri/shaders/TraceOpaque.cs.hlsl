@@ -71,6 +71,11 @@ uint GetMirrorBounceCount()
 	return (gTraceConstants.BounceCounts >> 16) & 0xffffu;
 }
 
+bool UseRelaxDenoiser()
+{
+	return gTraceConstants.ReservedTrace1 == 1u;
+}
+
 float3 EvaluateSunDiffuseLighting(float3 normal, float3 lightDir, float shadow)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
@@ -114,6 +119,26 @@ float4 PackReblurSpecularRadiance(float3 radiance, float hitDistance, float view
 {
 	const float normHitDistance = GetNormalizedReblurHitDistance(hitDistance, viewZ, roughness);
 	return REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance, normHitDistance, true);
+}
+
+float4 PackDiffuseRadiance(float3 radiance, float hitDistance, float viewZ)
+{
+	if (UseRelaxDenoiser())
+	{
+		return RELAX_FrontEnd_PackRadianceAndHitDist(radiance, max(hitDistance, 0.0), true);
+	}
+
+	return PackReblurDiffuseRadiance(radiance, hitDistance, viewZ);
+}
+
+float4 PackSpecularRadiance(float3 radiance, float hitDistance, float viewZ, float roughness)
+{
+	if (UseRelaxDenoiser())
+	{
+		return RELAX_FrontEnd_PackRadianceAndHitDist(radiance, max(hitDistance, 0.0), true);
+	}
+
+	return PackReblurSpecularRadiance(radiance, hitDistance, viewZ, roughness);
 }
 
 float GetSurfaceMetalness(MaterialData material)
@@ -313,14 +338,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else
 		{
 			const float3 missColor = GetMissColor(visibleRayDirection);
-			const float4 packedDiffuse = PackReblurDiffuseRadiance(missColor, NRD_INF, NRD_INF);
+			const float4 packedDiffuse = PackDiffuseRadiance(missColor, NRD_INF, NRD_INF);
 			color = (gTraceConstants.DebugMode >= 1 && gTraceConstants.DebugMode <= 4) ? float4(missColor, 1.0) : packedDiffuse;
 			gMotionOutput[pixelPos] = 0.0;
 			gViewZOutput[pixelPos] = float4(NRD_INF, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
 			gBaseColorOutput[pixelPos] = float4(missColor, 0.0);
 			gGuideDiffuseOutput[pixelPos] = packedDiffuse;
-			gGuideSpecularOutput[pixelPos] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(0.0, 0.0, true);
+			gGuideSpecularOutput[pixelPos] = PackSpecularRadiance(0.0, 0.0, NRD_INF, 1.0);
 			gGuideSpecHitOutput[pixelPos] = 0.0;
 		}
 	}
@@ -389,8 +414,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		gMotionOutput[pixelPos] = float4(motion, 1.0);
 		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
-		const float4 packedDiffuse = PackReblurDiffuseRadiance(diffuse, diffuseHitDistance, currentViewZ);
-		const float4 packedSpecular = PackReblurSpecularRadiance(specular, specularHitDistance, currentViewZ, roughness);
+		const float4 packedDiffuse = PackDiffuseRadiance(diffuse, diffuseHitDistance, currentViewZ);
+		const float4 packedSpecular = PackSpecularRadiance(specular, specularHitDistance, currentViewZ, roughness);
 		if (bootstrapFlat)
 		{
 			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, 1.0, 0.0);
