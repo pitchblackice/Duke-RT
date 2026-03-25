@@ -27,6 +27,11 @@ struct NRINrdDispatchDesc
 	float viewToClipMatrixPrev[16] = {};
 	float worldToViewMatrix[16] = {};
 	float worldToViewMatrixPrev[16] = {};
+	float fastHistoryClampingSigmaScale = 1.25f;
+	float diffusePrepassBlurRadius = 0.0f;
+	float specularPrepassBlurRadius = 4.0f;
+	float minBlurRadius = 0.0f;
+	float maxBlurRadius = 4.0f;
 	uint32_t maxAccumulatedFrameNum = 31;
 	uint32_t maxFastAccumulatedFrameNum = 7;
 	uint32_t maxStabilizedFrameNum = 31;

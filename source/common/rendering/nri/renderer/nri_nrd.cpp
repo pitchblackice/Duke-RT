@@ -30,16 +30,17 @@ namespace
 		settings.maxStabilizedFrameNum = std::min(desc.maxStabilizedFrameNum, settings.maxAccumulatedFrameNum);
 		settings.hitDistanceReconstructionMode = ClampHitDistanceReconstructionMode(desc.hitDistanceReconstructionMode);
 		settings.enableAntiFirefly = desc.enableAntiFirefly;
+		settings.fastHistoryClampingSigmaScale = desc.fastHistoryClampingSigmaScale;
+		settings.diffusePrepassBlurRadius = desc.diffusePrepassBlurRadius;
+		settings.specularPrepassBlurRadius = desc.specularPrepassBlurRadius;
+		settings.minBlurRadius = desc.minBlurRadius;
+		settings.maxBlurRadius = std::max(desc.maxBlurRadius, settings.minBlurRadius);
 
-		// Sample-guided baseline tuned down for Build content, where direct and indirect lighting
-		// still share one denoised signal and the stock REBLUR radii are too aggressive.
-		settings.fastHistoryClampingSigmaScale = 1.5f;
-		settings.diffusePrepassBlurRadius = 8.0f;
-		settings.specularPrepassBlurRadius = 12.0f;
-		settings.minBlurRadius = 0.5f;
-		settings.maxBlurRadius = 12.0f;
+		// Keep the sample-style material floors, but expose the dominant spatial controls live
+		// because current Raze gameplay still denoises a mixed direct+indirect signal.
 		settings.minMaterialForDiffuse = 1.0f;
 		settings.minMaterialForSpecular = 2.0f;
+		settings.usePrepassOnlyForSpecularMotionEstimation = settings.specularPrepassBlurRadius > 0.0f;
 
 		return settings;
 	}

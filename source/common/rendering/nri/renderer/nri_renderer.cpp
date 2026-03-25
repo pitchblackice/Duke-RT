@@ -37,6 +37,11 @@ CVAR(Int, nri_nrdstabilizationframes, 31, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_nrdantifirefly, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrdhitdistrecon, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrdsplit, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdfasthistorysigma, 1.25f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdprepassdiffuse, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdprepassspecular, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdblurmin, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdblurmax, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_apivalidation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_dred, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -153,6 +158,21 @@ namespace
 	static uint32_t GetNrdInputSplitMode()
 	{
 		return (uint32_t)std::clamp((int)nri_nrdsplit, 0, 2);
+	}
+
+	static float ClampNrdFastHistorySigmaScale(float value)
+	{
+		return std::clamp(value, 1.0f, 3.0f);
+	}
+
+	static float ClampNrdPrepassBlurRadius(float value)
+	{
+		return std::clamp(value, 0.0f, 75.0f);
+	}
+
+	static float ClampNrdBlurRadius(float value)
+	{
+		return std::clamp(value, 0.0f, 60.0f);
 	}
 
 	static const char* GetNrdInputSplitModeName(uint32_t mode)
@@ -1856,6 +1876,11 @@ void NRIRenderer::PrintStatus() const
 	const uint32_t nrdStabilizationFrames = ClampNrdStabilizationFrameCount((int)nri_nrdstabilizationframes, nrdMaxFrames);
 	const uint32_t nrdHitDistanceReconstruction = GetNrdHitDistanceReconstructionMode();
 	const uint32_t nrdInputSplit = GetNrdInputSplitMode();
+	const float nrdFastHistorySigma = ClampNrdFastHistorySigmaScale((float)nri_nrdfasthistorysigma);
+	const float nrdDiffusePrepass = ClampNrdPrepassBlurRadius((float)nri_nrdprepassdiffuse);
+	const float nrdSpecularPrepass = ClampNrdPrepassBlurRadius((float)nri_nrdprepassspecular);
+	const float nrdMinBlur = ClampNrdBlurRadius((float)nri_nrdblurmin);
+	const float nrdMaxBlur = std::max(nrdMinBlur, ClampNrdBlurRadius((float)nri_nrdblurmax));
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -1903,7 +1928,12 @@ void NRIRenderer::PrintStatus() const
 		nri_nrdantifirefly ? "on" : "off",
 		GetNrdHitDistanceReconstructionModeName(nrdHitDistanceReconstruction),
 		GetNrdInputSplitModeName(nrdInputSplit));
-	Printf("NRI PT NRD tuning: fast_history_sigma=1.5 blur_radius=0.5..12.0 prepass=8/12 material_floor=1/2\n");
+	Printf("NRI PT NRD tuning: fast_history_sigma=%.2f blur_radius=%.2f..%.2f prepass=%.2f/%.2f material_floor=1/2\n",
+		nrdFastHistorySigma,
+		nrdMinBlur,
+		nrdMaxBlur,
+		nrdDiffusePrepass,
+		nrdSpecularPrepass);
 	Printf("NRI PT NRD guides: hit_distance=secondary_transport_only_reblur_norm roughness=material_hint metalness=material_hint material_id=semantic_class\n");
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
@@ -4956,6 +4986,11 @@ bool NRIRenderer::DispatchDenoiser()
 	desc.maxFastAccumulatedFrameNum = ClampNrdFastFrameCount((int)nri_nrdfastframes, nrdMaxFrames);
 	desc.maxStabilizedFrameNum = ClampNrdStabilizationFrameCount((int)nri_nrdstabilizationframes, nrdMaxFrames);
 	desc.hitDistanceReconstructionMode = GetNrdHitDistanceReconstructionMode();
+	desc.fastHistoryClampingSigmaScale = ClampNrdFastHistorySigmaScale((float)nri_nrdfasthistorysigma);
+	desc.diffusePrepassBlurRadius = ClampNrdPrepassBlurRadius((float)nri_nrdprepassdiffuse);
+	desc.specularPrepassBlurRadius = ClampNrdPrepassBlurRadius((float)nri_nrdprepassspecular);
+	desc.minBlurRadius = ClampNrdBlurRadius((float)nri_nrdblurmin);
+	desc.maxBlurRadius = std::max(desc.minBlurRadius, ClampNrdBlurRadius((float)nri_nrdblurmax));
 	desc.resetHistory = mResetHistory;
 	desc.enableAntiFirefly = nri_nrdantifirefly;
 	desc.enableValidation = nri_validation;

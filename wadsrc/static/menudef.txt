@@ -1184,6 +1184,11 @@ OptionMenu "NRIOptions" protected
 	Option "NRD Anti-Firefly",					"nri_nrdantifirefly",			"OnOff"
 	Option "NRD HitT Recon",					"nri_nrdhitdistrecon",			"NRDHitDistanceReconstruction"
 	Option "NRD Raw/Denoised Split",			"nri_nrdsplit",					"NRDInputSplit"
+	Slider "NRD Fast Sigma",					"nri_nrdfasthistorysigma",		1.0, 3.0, 0.05, 2
+	Slider "NRD Diffuse Prepass",				"nri_nrdprepassdiffuse",		0.0, 24.0, 0.5, 2
+	Slider "NRD Specular Prepass",				"nri_nrdprepassspecular",		0.0, 24.0, 0.5, 2
+	Slider "NRD Min Blur",						"nri_nrdblurmin",				0.0, 12.0, 0.25, 2
+	Slider "NRD Max Blur",						"nri_nrdblurmax",				0.0, 24.0, 0.25, 2
 	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"
 	Option "Upscaler Mode",						"nri_upscalermode",				"NRIUpscalerMode"
 	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2
