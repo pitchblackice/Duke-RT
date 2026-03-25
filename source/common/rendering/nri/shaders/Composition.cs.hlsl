@@ -10,6 +10,24 @@ float3 SanitizeColor(float3 value)
 	return value;
 }
 
+float3 ResolveDiffuseContribution(uint2 pixelPos, float3 diffuseSignal)
+{
+	const float viewZ = abs(gViewZInput.Load(int3(pixelPos, 0)).x);
+	if (viewZ >= NRD_INF * 0.5)
+	{
+		return diffuseSignal;
+	}
+
+	float materialID = 0.0;
+	NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos], materialID);
+	if (materialID >= 1.5 && materialID < 2.5)
+	{
+		return diffuseSignal;
+	}
+
+	return diffuseSignal * saturate(gBaseColorInput[pixelPos].rgb);
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -26,10 +44,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	const float3 rawDiffuse = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gComposedInput.Load(int3(pixelPos, 0))).rgb);
+	const float3 rawDiffuseSignal = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gComposedInput.Load(int3(pixelPos, 0))).rgb);
 	const float3 rawSpecular = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gUpscaledInput.Load(int3(pixelPos, 0))).rgb);
-	const float3 filteredDiffuse = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gGuideDiffuseInput.Load(int3(pixelPos, 0))).rgb);
+	const float3 filteredDiffuseSignal = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gGuideDiffuseInput.Load(int3(pixelPos, 0))).rgb);
 	const float3 filteredSpecular = SanitizeColor(REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gGuideSpecularInput.Load(int3(pixelPos, 0))).rgb);
+	const float3 rawDiffuse = ResolveDiffuseContribution(pixelPos, rawDiffuseSignal);
+	const float3 filteredDiffuse = ResolveDiffuseContribution(pixelPos, filteredDiffuseSignal);
 
 	float3 composed = filteredDiffuse + filteredSpecular;
 	const uint splitMode = gTraceConstants.ReservedTrace0;

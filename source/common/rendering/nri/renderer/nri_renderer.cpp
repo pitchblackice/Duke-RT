@@ -1934,7 +1934,7 @@ void NRIRenderer::PrintStatus() const
 		nrdMaxBlur,
 		nrdDiffusePrepass,
 		nrdSpecularPrepass);
-	Printf("NRI PT NRD guides: hit_distance=secondary_transport_only_reblur_norm roughness=material_hint metalness=material_hint material_id=semantic_class\n");
+	Printf("NRI PT NRD guides: diffuse_signal=demodulated_illumination hit_distance=secondary_transport_only_reblur_norm roughness=material_hint metalness=material_hint material_id=semantic_class\n");
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
 		(int)nri_ptmutationtracechunk,

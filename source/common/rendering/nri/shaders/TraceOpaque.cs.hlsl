@@ -71,11 +71,11 @@ uint GetMirrorBounceCount()
 	return (gTraceConstants.BounceCounts >> 16) & 0xffffu;
 }
 
-float3 EvaluateSunDiffuse(float3 albedo, float3 normal, float3 lightDir, float shadow)
+float3 EvaluateSunDiffuseLighting(float3 normal, float3 lightDir, float shadow)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
 	const float lighting = 0.20 + shadow * lambert * 0.80;
-	return albedo * lighting;
+	return lighting.xxx;
 }
 
 float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3 viewDir, float3 lightDir, float shadow)
@@ -131,7 +131,7 @@ float3 GetSurfaceSpecularColor(float3 albedo, float metalness)
 	return lerp(float3(0.04, 0.04, 0.04), albedo, metalness);
 }
 
-float3 TraceIndirectDiffuse(HitData surfaceHit, float4 surfaceAlbedo, uint2 pixelPos, uint frameIndex, uint bounceCount, out float outHitDistance)
+float3 TraceIndirectDiffuse(HitData surfaceHit, uint2 pixelPos, uint frameIndex, uint bounceCount, out float outHitDistance)
 {
 	outHitDistance = 0.0;
 	if (bounceCount == 0u)
@@ -140,7 +140,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float4 surfaceAlbedo, uint2 pixe
 	}
 
 	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u ^ 0x9e3779b9u;
-	float3 throughput = surfaceAlbedo.rgb;
+	float3 throughput = 1.0;
 	float3 indirectRadiance = 0.0;
 	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
 	float3 direction = SampleCosineHemisphere(surfaceHit.normal, rngState);
@@ -180,7 +180,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float4 surfaceAlbedo, uint2 pixe
 
 		const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce + 1u, bounce * 3u + 1u), frameIndex + bounce + 1u);
 		const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
-		indirectRadiance += throughput * EvaluateSunDiffuse(bounceAlbedo.rgb, bounceHit.normal, bounceLightDir, bounceShadow);
+		indirectRadiance += throughput * bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow);
 		throughput *= bounceAlbedo.rgb * 0.65;
 		if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01)
 		{
@@ -250,7 +250,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 		const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
 		const float3 bounceViewDir = normalize(-tracedDirection);
 		indirectRadiance += throughput * (
-			EvaluateSunDiffuse(bounceAlbedo.rgb, bounceHit.normal, bounceLightDir, bounceShadow) +
+			bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) +
 			EvaluateSunSpecular(bounceAlbedo.rgb, bounceMetalness, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
 
 		throughput *= GetSurfaceSpecularColor(bounceAlbedo.rgb, bounceMetalness) * (0.9 - bounceRoughness * 0.35);
@@ -374,12 +374,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
 				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir);
 				const float3 viewDir = normalize(-visibleRayDirection);
-				diffuse = EvaluateSunDiffuse(albedo.rgb, hit.normal, lightDir, shadow);
+				diffuse = EvaluateSunDiffuseLighting(hit.normal, lightDir, shadow);
 				specular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, shadow);
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{
-					diffuse += TraceIndirectDiffuse(hit, albedo, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance);
+					diffuse += TraceIndirectDiffuse(hit, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance);
 					specular += TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, lightBounceCount, specularHitDistance);
 				}
 			}
