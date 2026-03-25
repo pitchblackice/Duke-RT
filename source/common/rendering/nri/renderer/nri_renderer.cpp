@@ -5029,6 +5029,9 @@ bool NRIRenderer::DispatchComposition()
 
 	NRITextureResource& diffuse = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
 	NRITextureResource& specular = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular);
+	NRITextureResource& viewZ = GetFrameTexture(FrameTextureSlot::ViewZ);
+	NRITextureResource& normalRoughness = GetFrameTexture(FrameTextureSlot::NormalRoughness);
+	NRITextureResource& baseColorMetalness = GetFrameTexture(FrameTextureSlot::BaseColorMetalness);
 	const FrameTextureSlot filteredDiffuseSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::UnfilteredDiffuse;
 	const FrameTextureSlot filteredSpecularSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedSpecular : FrameTextureSlot::UnfilteredSpecular;
 	NRITextureResource& filteredDiffuse = GetFrameTexture(filteredDiffuseSlot);
@@ -5037,12 +5040,18 @@ bool NRIRenderer::DispatchComposition()
 
 	mFrameBuffer->TransitionTexture(diffuse, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(specular, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(viewZ, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(normalRoughness, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(baseColorMetalness, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(filteredDiffuse, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(filteredSpecular, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(composed, NRIComputeStorageState());
 
 	const nri::Descriptor* defaultInput = diffuse.shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+	mFrameInputDescriptors[2] = viewZ.shaderView;
+	mFrameInputDescriptors[3] = normalRoughness.shaderView;
+	mFrameInputDescriptors[4] = baseColorMetalness.shaderView;
 	mFrameInputDescriptors[5] = diffuse.shaderView;
 	mFrameInputDescriptors[6] = specular.shaderView;
 	mFrameInputDescriptors[8] = filteredDiffuse.shaderView;
