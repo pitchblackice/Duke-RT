@@ -83,11 +83,11 @@ struct MaterialData
 	uint textureIndex;
 	uint paletteIndex;
 	uint flags;
-	uint reserved;
+	uint materialClass;
 	float lightLevel;
 	float alpha;
-	float reserved1;
-	float reserved2;
+	float roughnessHint;
+	float metalnessHint;
 };
 
 struct SceneInstanceData

@@ -11,11 +11,11 @@ struct MaterialData
 	uint32_t textureIndex = 0;
 	uint32_t paletteIndex = 0;
 	uint32_t flags = 0;
-	uint32_t reserved = 0;
+	uint32_t materialClass = 0;
 	float lightLevel = 1.0f;
 	float alpha = 1.0f;
-	float reserved1 = 0.0f;
-	float reserved2 = 0.0f;
+	float roughnessHint = 0.45f;
+	float metalnessHint = 0.0f;
 };
 
 struct TextureUpload

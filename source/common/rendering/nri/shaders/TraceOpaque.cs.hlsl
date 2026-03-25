@@ -78,22 +78,22 @@ float3 EvaluateSunDiffuse(float3 albedo, float3 normal, float3 lightDir, float s
 	return albedo * lighting;
 }
 
-float3 EvaluateSunSpecular(float3 albedo, float3 normal, float3 viewDir, float3 lightDir, float shadow)
+float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3 viewDir, float3 lightDir, float shadow)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
 	const float3 halfVector = normalize(lightDir + viewDir);
 	const float ndoth = max(dot(normal, halfVector), 0.0);
 	const float vdoth = max(dot(viewDir, halfVector), 0.0);
 	const float fresnel = pow(1.0 - vdoth, 5.0);
-	const float3 dielectricF0 = lerp(float3(0.04, 0.04, 0.04), albedo, 0.12);
+	const float3 dielectricF0 = lerp(float3(0.04, 0.04, 0.04), albedo, metalness);
 	const float3 specularColor = lerp(dielectricF0, float3(1.0, 1.0, 1.0), fresnel);
 	const float specularTerm = pow(ndoth, 12.0) * shadow * (0.5 + 0.5 * lambert);
 	return specularColor * specularTerm * 0.85;
 }
 
-float GetSurfaceRoughness(uint materialIndex, uint dataSource)
+float GetSurfaceRoughness(MaterialData material)
 {
-	return IsMirrorMaterial(materialIndex, dataSource) ? 0.02 : 0.38;
+	return clamp(material.roughnessHint, 0.02, 1.0);
 }
 
 static const float4 kReblurHitDistanceParams = float4(3.0, 0.1, 20.0, -25.0);
@@ -116,9 +116,19 @@ float4 PackReblurSpecularRadiance(float3 radiance, float hitDistance, float view
 	return REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance, normHitDistance, true);
 }
 
-float3 GetSurfaceSpecularColor(float3 albedo)
+float GetSurfaceMetalness(MaterialData material)
 {
-	return lerp(float3(0.04, 0.04, 0.04), albedo, 0.12);
+	return saturate(material.metalnessHint);
+}
+
+float GetSurfaceMaterialID(MaterialData material)
+{
+	return min((float)material.materialClass, 3.0);
+}
+
+float3 GetSurfaceSpecularColor(float3 albedo, float metalness)
+{
+	return lerp(float3(0.04, 0.04, 0.04), albedo, metalness);
 }
 
 float3 TraceIndirectDiffuse(HitData surfaceHit, float4 surfaceAlbedo, uint2 pixelPos, uint frameIndex, uint bounceCount, out float outHitDistance)
@@ -194,7 +204,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	}
 
 	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u ^ 0x85ebca6bu;
-	float3 throughput = GetSurfaceSpecularColor(surfaceAlbedo.rgb);
+	float3 throughput = GetSurfaceSpecularColor(surfaceAlbedo.rgb, 0.0);
 	float3 indirectRadiance = 0.0;
 	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
 	float3 direction = SampleSpecularLobe(reflect(-viewDir, surfaceHit.normal), roughness, rngState);
@@ -227,6 +237,8 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			break;
 		}
 
+		const float bounceRoughness = GetSurfaceRoughness(bounceMaterial);
+		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial);
 		const float4 bounceAlbedo = SampleSurfaceColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
 		if ((bounceMaterial.flags & MATERIAL_FLAG_FULLBRIGHT) != 0)
 		{
@@ -239,10 +251,9 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 		const float3 bounceViewDir = normalize(-tracedDirection);
 		indirectRadiance += throughput * (
 			EvaluateSunDiffuse(bounceAlbedo.rgb, bounceHit.normal, bounceLightDir, bounceShadow) +
-			EvaluateSunSpecular(bounceAlbedo.rgb, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
+			EvaluateSunSpecular(bounceAlbedo.rgb, bounceMetalness, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
 
-		const float bounceRoughness = GetSurfaceRoughness(bounceHit.materialIndex, bounceHit.dataSource);
-		throughput *= GetSurfaceSpecularColor(bounceAlbedo.rgb) * (0.9 - bounceRoughness * 0.35);
+		throughput *= GetSurfaceSpecularColor(bounceAlbedo.rgb, bounceMetalness) * (0.9 - bounceRoughness * 0.35);
 		if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01)
 		{
 			break;
@@ -346,9 +357,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			albedo = SampleSurfaceColor(hit.materialIndex, hit.dataSource, hit.uv);
 			const MaterialData material = GetMaterialData(hit.materialIndex, hit.dataSource);
 			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
-			roughness = GetSurfaceRoughness(hit.materialIndex, hit.dataSource);
-			const float metalness = 0.0;
-			const float materialID = (float)(hit.materialIndex & 255u) * (1.0 / 255.0);
+			roughness = GetSurfaceRoughness(material);
+			const float metalness = GetSurfaceMetalness(material);
+			const float materialID = GetSurfaceMaterialID(material);
 			if (bootstrapBaseColor)
 			{
 				diffuse = albedo.rgb;
@@ -364,7 +375,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir);
 				const float3 viewDir = normalize(-visibleRayDirection);
 				diffuse = EvaluateSunDiffuse(albedo.rgb, hit.normal, lightDir, shadow);
-				specular = EvaluateSunSpecular(albedo.rgb, hit.normal, viewDir, lightDir, shadow);
+				specular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, shadow);
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{
