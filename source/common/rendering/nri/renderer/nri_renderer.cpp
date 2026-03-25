@@ -4417,7 +4417,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		transportOverlays.push_back(overlay);
 	};
 
-	const auto collectTransportNeighborhood = [&](int32_t anchorSectorIndex, uint32_t localSpaceIndex, std::vector<int32_t>& outSectors)
+	const auto collectTransportNeighborhood = [&](int32_t anchorSectorIndex, uint32_t localSpaceIndex, uint8_t baseBudget, uint8_t boundaryFringeDepth, std::vector<int32_t>& outSectors)
 	{
 		outSectors.clear();
 		if (!validSectorIndex(anchorSectorIndex) || localSpaceIndex == UINT32_MAX)
@@ -4426,7 +4426,6 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		}
 
 		constexpr uint8_t UnlimitedTransportNeighborhoodBudget = 0xFFu;
-		constexpr uint8_t TransportBoundaryFringeDepth = 3u;
 
 		std::array<int32_t, 96> overlaySectorQueue = {};
 		std::array<uint8_t, 96> overlaySectorBudget = {};
@@ -4463,7 +4462,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			}
 		};
 
-		appendOverlaySector(anchorSectorIndex, UnlimitedTransportNeighborhoodBudget);
+		appendOverlaySector(anchorSectorIndex, baseBudget);
 		while (overlaySectorReadIndex < overlaySectorCount)
 		{
 			const uint32_t queueIndex = overlaySectorReadIndex++;
@@ -4481,7 +4480,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			uint8_t nextBudget = sectorBudget == UnlimitedTransportNeighborhoodBudget ? UnlimitedTransportNeighborhoodBudget : (uint8_t)(sectorBudget - 1u);
 			if (stopAtTransportControl)
 			{
-				nextBudget = TransportBoundaryFringeDepth;
+				nextBudget = boundaryFringeDepth;
 			}
 
 			const auto& sec = sector[(unsigned)sectorIndex];
@@ -4500,6 +4499,11 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			outSectors.push_back(overlaySectorQueue[i]);
 		}
 	};
+
+	constexpr uint8_t UnlimitedTransportNeighborhoodBudget = 0xFFu;
+	constexpr uint8_t SelectionTransportBoundaryFringeDepth = 3u;
+	constexpr uint8_t OverlayTransportNeighborhoodDepth = 6u;
+	constexpr uint8_t OverlayTransportBoundaryFringeDepth = 1u;
 
 	const auto countContextNeighborhoodSectors = [&](const std::vector<int32_t>& sectorsToCheck) -> uint32_t
 	{
@@ -4543,8 +4547,8 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		const bool destinationNearby = (transportLink.flags & RuntimeTransportLinkFlag_DestinationNearby) != 0;
 		std::vector<int32_t> sourceNeighborhood;
 		std::vector<int32_t> destinationNeighborhood;
-		collectTransportNeighborhood(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, sourceNeighborhood);
-		collectTransportNeighborhood(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, destinationNeighborhood);
+		collectTransportNeighborhood(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, UnlimitedTransportNeighborhoodBudget, SelectionTransportBoundaryFringeDepth, sourceNeighborhood);
+		collectTransportNeighborhood(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, UnlimitedTransportNeighborhoodBudget, SelectionTransportBoundaryFringeDepth, destinationNeighborhood);
 		const uint32_t sourceContextCount = countContextNeighborhoodSectors(sourceNeighborhood);
 		const uint32_t destinationContextCount = countContextNeighborhoodSectors(destinationNeighborhood);
 		const bool rootTouchesSource = neighborhoodContainsRoot(sourceNeighborhood);
@@ -4876,8 +4880,10 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 	{
 		std::vector<int32_t> translatedSectors;
 		std::vector<int32_t> replacedSectors;
-		collectTransportNeighborhood(overlay.translatedAnchorSectorIndex, overlay.translatedLocalSpaceIndex, translatedSectors);
-		collectTransportNeighborhood(overlay.replacedAnchorSectorIndex, overlay.replacedLocalSpaceIndex, replacedSectors);
+		// Keep transport selection broad and stable, but trim the rendered/replaced neighborhood
+		// so transporter-driven replacement does not pull large unrelated chunks into view.
+		collectTransportNeighborhood(overlay.translatedAnchorSectorIndex, overlay.translatedLocalSpaceIndex, OverlayTransportNeighborhoodDepth, OverlayTransportBoundaryFringeDepth, translatedSectors);
+		collectTransportNeighborhood(overlay.replacedAnchorSectorIndex, overlay.replacedLocalSpaceIndex, OverlayTransportNeighborhoodDepth, OverlayTransportBoundaryFringeDepth, replacedSectors);
 
 		if (outReplacedChunkMask != nullptr)
 		{
