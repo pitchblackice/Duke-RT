@@ -4310,14 +4310,6 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		appendNearbyTransportSector(effectSectorIndex);
 	}
 
-	for (unsigned sectorIndex = 0; sectorIndex < visibleSectors.Size(); ++sectorIndex)
-	{
-		if (visibleSectors.Check(sectorIndex))
-		{
-			appendNearbyTransportSector((int32_t)sectorIndex);
-		}
-	}
-
 	RuntimeLinkDebugState runtimeLinkDebugState = {};
 	if (gi != nullptr)
 	{
@@ -4509,14 +4501,18 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		}
 	};
 
-	const auto countVisibleNeighborhoodSectors = [&](const std::vector<int32_t>& sectorsToCheck) -> uint32_t
+	const auto countContextNeighborhoodSectors = [&](const std::vector<int32_t>& sectorsToCheck) -> uint32_t
 	{
 		uint32_t count = 0;
 		for (const int32_t sectorIndex : sectorsToCheck)
 		{
-			if (sectorIndex >= 0 && (unsigned)sectorIndex < visibleSectors.Size() && visibleSectors.Check((unsigned)sectorIndex))
+			for (uint32_t i = 0; i < nearbyTransportSectorCount; ++i)
 			{
-				count++;
+				if (nearbyTransportSectors[i] == sectorIndex)
+				{
+					count++;
+					break;
+				}
 			}
 		}
 		return count;
@@ -4549,8 +4545,8 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		std::vector<int32_t> destinationNeighborhood;
 		collectTransportNeighborhood(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, sourceNeighborhood);
 		collectTransportNeighborhood(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, destinationNeighborhood);
-		const uint32_t sourceVisibleCount = countVisibleNeighborhoodSectors(sourceNeighborhood);
-		const uint32_t destinationVisibleCount = countVisibleNeighborhoodSectors(destinationNeighborhood);
+		const uint32_t sourceContextCount = countContextNeighborhoodSectors(sourceNeighborhood);
+		const uint32_t destinationContextCount = countContextNeighborhoodSectors(destinationNeighborhood);
 		const bool rootTouchesSource = neighborhoodContainsRoot(sourceNeighborhood);
 		const bool rootTouchesDestination = neighborhoodContainsRoot(destinationNeighborhood);
 		int forwardPriority = 0;
@@ -4563,8 +4559,8 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		{
 			reversePriority += 10000;
 		}
-		forwardPriority += (int)destinationVisibleCount * 100;
-		reversePriority += (int)sourceVisibleCount * 100;
+		forwardPriority += (int)sourceContextCount * 250;
+		reversePriority += (int)destinationContextCount * 250;
 		if (candidateLocalSpaceIndex == sourceLocalSpaceIndex)
 		{
 			forwardPriority += 2000;
@@ -4598,24 +4594,24 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			reversePriority += 250;
 		}
 
-		if (rootTouchesSource && destinationVisibleCount > 0 && destinationLocalSpaceIndex != UINT32_MAX)
+		if (rootTouchesSource && sourceContextCount > 0 && destinationLocalSpaceIndex != UINT32_MAX)
 		{
 			appendTransportOverlay(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.mapDx, transportLink.mapDy, forwardPriority);
 			continue;
 		}
-		if (!oneWay && rootTouchesDestination && sourceVisibleCount > 0 && sourceLocalSpaceIndex != UINT32_MAX)
+		if (!oneWay && rootTouchesDestination && destinationContextCount > 0 && sourceLocalSpaceIndex != UINT32_MAX)
 		{
 			appendTransportOverlay(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.destinationSectorIndex, destinationLocalSpaceIndex, -transportLink.mapDx, -transportLink.mapDy, reversePriority);
 			continue;
 		}
 		if (!rootTouchesSource && !rootTouchesDestination)
 		{
-			if (destinationVisibleCount > sourceVisibleCount && destinationLocalSpaceIndex != UINT32_MAX)
+			if (sourceContextCount > destinationContextCount && sourceContextCount > 0 && destinationLocalSpaceIndex != UINT32_MAX)
 			{
 				appendTransportOverlay(transportLink.destinationSectorIndex, destinationLocalSpaceIndex, transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.mapDx, transportLink.mapDy, forwardPriority);
 				continue;
 			}
-			if (!oneWay && sourceVisibleCount > destinationVisibleCount && sourceLocalSpaceIndex != UINT32_MAX)
+			if (!oneWay && destinationContextCount > sourceContextCount && destinationContextCount > 0 && sourceLocalSpaceIndex != UINT32_MAX)
 			{
 				appendTransportOverlay(transportLink.sourceSectorIndex, sourceLocalSpaceIndex, transportLink.destinationSectorIndex, destinationLocalSpaceIndex, -transportLink.mapDx, -transportLink.mapDy, reversePriority);
 			}
