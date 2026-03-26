@@ -105,12 +105,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const bool resetHistory = (gTraceConstants.Flags & NRI_FLAG_RESET_HISTORY) != 0u;
 	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);
 
-	if (gTraceConstants.DebugMode == 26u)
-	{
-		gHistoryOutput[pixelPos] = float4(currentColor, 1.0);
-		return;
-	}
-
 	const float4 centerMotion = gMotionInput[pixelPos];
 	const bool unreliableHistory = centerMotion.w <= 0.0;
 	const int radius = 1;
