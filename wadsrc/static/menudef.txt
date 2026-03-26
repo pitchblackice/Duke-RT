@@ -1190,6 +1190,8 @@ OptionMenu "NRIOptions" protected
 	Slider "NRD Specular Prepass",				"nri_nrdprepassspecular",		0.0, 24.0, 0.5, 2
 	Slider "NRD Min Blur",						"nri_nrdblurmin",				0.0, 12.0, 0.25, 2
 	Slider "NRD Max Blur",						"nri_nrdblurmax",				0.0, 24.0, 0.25, 2
+	Slider "SIGMA Stabilization",				"nri_nrdsigmastabilization",	0, 7, 1, 0
+	Slider "SIGMA Plane Dist",					"nri_nrdsigmaplanedistance",	0.001, 0.100, 0.001, 3
 	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"
 	Option "Upscaler Mode",						"nri_upscalermode",				"NRIUpscalerMode"
 	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2

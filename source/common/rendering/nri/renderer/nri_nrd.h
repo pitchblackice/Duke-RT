@@ -42,9 +42,11 @@ struct NRINrdDispatchDesc
 	float specularPrepassBlurRadius = 4.0f;
 	float minBlurRadius = 0.0f;
 	float maxBlurRadius = 4.0f;
+	float sigmaPlaneDistanceSensitivity = 0.01f;
 	uint32_t maxAccumulatedFrameNum = 31;
 	uint32_t maxFastAccumulatedFrameNum = 7;
 	uint32_t maxStabilizedFrameNum = 31;
+	uint32_t sigmaMaxStabilizedFrameNum = 2;
 	uint32_t hitDistanceReconstructionMode = 0;
 	bool resetHistory = false;
 	bool enableAntiFirefly = true;

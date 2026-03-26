@@ -43,6 +43,8 @@ CVAR(Float, nri_nrdprepassdiffuse, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_nrdprepassspecular, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_nrdblurmin, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_nrdblurmax, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdsigmastabilization, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdsigmaplanedistance, 0.01f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_apivalidation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_dred, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -142,6 +144,11 @@ namespace
 		return (uint32_t)std::clamp(value, 0, (int)maxAccumulatedFrameNum);
 	}
 
+	static uint32_t ClampSigmaStabilizationFrameCount(int value)
+	{
+		return (uint32_t)std::clamp(value, 0, (int)nrd::SIGMA_MAX_HISTORY_FRAME_NUM);
+	}
+
 	static uint32_t GetNrdHitDistanceReconstructionMode()
 	{
 		return (uint32_t)std::clamp((int)nri_nrdhitdistrecon, 0, 2);
@@ -189,6 +196,11 @@ namespace
 	static float ClampNrdBlurRadius(float value)
 	{
 		return std::clamp(value, 0.0f, 60.0f);
+	}
+
+	static float ClampSigmaPlaneDistanceSensitivity(float value)
+	{
+		return std::clamp(value, 0.001f, 0.1f);
 	}
 
 	static const char* GetNrdInputSplitModeName(uint32_t mode)
@@ -1898,6 +1910,8 @@ void NRIRenderer::PrintStatus() const
 	const float nrdSpecularPrepass = ClampNrdPrepassBlurRadius((float)nri_nrdprepassspecular);
 	const float nrdMinBlur = ClampNrdBlurRadius((float)nri_nrdblurmin);
 	const float nrdMaxBlur = std::max(nrdMinBlur, ClampNrdBlurRadius((float)nri_nrdblurmax));
+	const uint32_t sigmaStabilizationFrames = ClampSigmaStabilizationFrameCount((int)nri_nrdsigmastabilization);
+	const float sigmaPlaneDistance = ClampSigmaPlaneDistanceSensitivity((float)nri_nrdsigmaplanedistance);
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -1946,6 +1960,9 @@ void NRIRenderer::PrintStatus() const
 		GetNrdHitDistanceReconstructionModeName(nrdHitDistanceReconstruction),
 		GetNrdInputSplitModeName(nrdInputSplit),
 		(nri_denoise && !nri_ptbootstrap) ? "sigma" : "off");
+	Printf("NRI PT SIGMA tuning: stabilization_frames=%u plane_distance_sensitivity=%.3f\n",
+		sigmaStabilizationFrames,
+		sigmaPlaneDistance);
 	if (nrdDenoiserMode == NRINrdDenoiserMode::Relax)
 	{
 		Printf("NRI PT NRD tuning: fast_history_sigma=%.2f prepass=%.2f/%.2f material_floor=1/2 blur_radius=n/a_relax\n",
@@ -5054,6 +5071,8 @@ bool NRIRenderer::DispatchDenoiser()
 	desc.specularPrepassBlurRadius = ClampNrdPrepassBlurRadius((float)nri_nrdprepassspecular);
 	desc.minBlurRadius = ClampNrdBlurRadius((float)nri_nrdblurmin);
 	desc.maxBlurRadius = std::max(desc.minBlurRadius, ClampNrdBlurRadius((float)nri_nrdblurmax));
+	desc.sigmaMaxStabilizedFrameNum = ClampSigmaStabilizationFrameCount((int)nri_nrdsigmastabilization);
+	desc.sigmaPlaneDistanceSensitivity = ClampSigmaPlaneDistanceSensitivity((float)nri_nrdsigmaplanedistance);
 	desc.resetHistory = mResetHistory;
 	desc.enableAntiFirefly = nri_nrdantifirefly;
 	desc.enableValidation = nri_validation;

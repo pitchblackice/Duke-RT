@@ -72,7 +72,8 @@ namespace
 	static nrd::SigmaSettings BuildSigmaSettings(const NRINrdDispatchDesc& desc)
 	{
 		nrd::SigmaSettings settings = {};
-		settings.maxStabilizedFrameNum = std::min(desc.maxStabilizedFrameNum, nrd::SIGMA_MAX_HISTORY_FRAME_NUM);
+		settings.maxStabilizedFrameNum = std::min(desc.sigmaMaxStabilizedFrameNum, nrd::SIGMA_MAX_HISTORY_FRAME_NUM);
+		settings.planeDistanceSensitivity = desc.sigmaPlaneDistanceSensitivity;
 		settings.lightDirection[0] = desc.lightDirection[0];
 		settings.lightDirection[1] = desc.lightDirection[1];
 		settings.lightDirection[2] = desc.lightDirection[2];
