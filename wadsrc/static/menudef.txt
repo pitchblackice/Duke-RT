@@ -1202,6 +1202,7 @@ OptionMenu "NRIOptions" protected
 	Slider "SIGMA Plane Dist",					"nri_nrdsigmaplanedistance",	0.001, 0.100, 0.001, 3
 	StaticText "----------------"
 	StaticText "Upscaling"
+	Option "TAA",								"nri_pttaa",					"OnOff"
 	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"
 	Option "Upscaler Mode",						"nri_upscalermode",				"NRIUpscalerMode"
 	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2

@@ -29,6 +29,7 @@ CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrddenoiser, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_upscaler, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_pttaa, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -2152,10 +2153,11 @@ void NRIRenderer::PrintTemporalStatus() const
 	const FrameTextureSlot presentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
 	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
-	Printf("NRI PT temporal: debug=%d requested=%s resolved=%s last_debug=%d last_temporal=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
+	Printf("NRI PT temporal: debug=%d requested=%s resolved=%s taa=%s last_debug=%d last_temporal=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
 		(int)nri_ptdebug,
 		GetUpscalerName(requested),
 		GetUpscalerName(resolved),
+		nri_pttaa ? "on" : "off",
 		mLastDebugMode,
 		GetUpscalerName(mLastTemporalHistoryUpscaler),
 		mResetHistory ? "yes" : "no",
@@ -5702,7 +5704,8 @@ bool NRIRenderer::DispatchUpscaleChain()
 	Clocker clock(NriPTUpscale);
 
 	const NRIUpscalerKind kind = ResolveUpscalerKind(true);
-	const bool runAppTaa = kind == NRIUpscalerKind::Off || kind == NRIUpscalerKind::NIS;
+	const bool taaEligible = kind == NRIUpscalerKind::Off || kind == NRIUpscalerKind::NIS;
+	const bool runAppTaa = taaEligible && !!nri_pttaa;
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
@@ -5750,6 +5753,10 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mTaaOutputSet, nri::BindPoint::COMPUTE });
 		mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Taa));
 		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+	}
+	else if (taaEligible)
+	{
+		CopyTexture(composed, historyOutput);
 	}
 
 	if (kind == NRIUpscalerKind::Off)
