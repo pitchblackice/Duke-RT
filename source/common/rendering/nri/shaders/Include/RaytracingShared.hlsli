@@ -167,6 +167,32 @@ float4 SampleSurfaceColor(uint materialIndex, uint dataSource, float2 uv)
 	return color;
 }
 
+float4 SampleSurfaceColorRaw(uint materialIndex, uint dataSource, float2 uv)
+{
+	MaterialData material = GetMaterialData(materialIndex, dataSource);
+	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
+	if (indexed)
+	{
+		return gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointWrap, uv, 0.0);
+	}
+
+	return gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
+}
+
+bool IsTransparentSurfaceSample(uint materialIndex, uint dataSource, float2 uv)
+{
+	const MaterialData material = GetMaterialData(materialIndex, dataSource);
+	const float4 rawSample = SampleSurfaceColorRaw(materialIndex, dataSource, uv);
+	if ((material.flags & MATERIAL_FLAG_INDEXED) != 0)
+	{
+		// In the paletted path, color index 0 is reserved as transparent.
+		const uint paletteIndex = (uint)round(saturate(rawSample.r) * 255.0);
+		return paletteIndex == 0u;
+	}
+
+	return rawSample.a < 0.5;
+}
+
 bool IsMirrorMaterial(uint materialIndex, uint dataSource)
 {
 	return (GetMaterialData(materialIndex, dataSource).flags & MATERIAL_FLAG_MIRROR) != 0;
@@ -267,6 +293,12 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 			continue;
 		}
 
+		const float2 uv = primitive.uv0 * barycentrics.x + primitive.uv1 * barycentrics.y + primitive.uv2 * barycentrics.z;
+		if (IsTransparentSurfaceSample(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, uv))
+		{
+			continue;
+		}
+
 		bestHit.hit = true;
 		bestHit.dataSource = SCENE_DATA_SOURCE_DYNAMIC;
 		bestHit.primitiveIndex = primitiveIndex;
@@ -275,7 +307,7 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 		bestHit.distance = hitT;
 		bestHit.position = origin + direction * hitT;
 		bestHit.normal = ResolveHitNormal(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, primitive.normal, direction);
-		bestHit.uv = primitive.uv0 * barycentrics.x + primitive.uv1 * barycentrics.y + primitive.uv2 * barycentrics.z;
+		bestHit.uv = uv;
 		bestHit.materialIndex = primitive.materialIndex;
 	}
 
@@ -319,6 +351,13 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 
 		const float2 bary = rayQuery.CommittedTriangleBarycentrics();
 		const float3 weights = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
+		const float2 uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
+		if (IsTransparentSurfaceSample(primitive.materialIndex, instanceData.dataSource, uv))
+		{
+			accumulatedDistance += committedDistance + 0.01;
+			continue;
+		}
+
 		const float hitDistance = accumulatedDistance + committedDistance;
 		hitData.hit = true;
 		hitData.dataSource = instanceData.dataSource;
@@ -328,7 +367,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
 		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction);
-		hitData.uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
+		hitData.uv = uv;
 		hitData.materialIndex = primitive.materialIndex;
 		return true;
 	}
