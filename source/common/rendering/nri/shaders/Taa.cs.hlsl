@@ -2,8 +2,9 @@
 
 #define NRI_FLAG_RESET_HISTORY 0x1u
 #define TAA_HISTORY_FRAME_CAP 32.0
-#define TAA_SIGMA_SCALE 1.5
-#define TAA_REJECTION_SCALE 8.0
+#define TAA_BASE_BLEND (1.0 / TAA_HISTORY_FRAME_CAP)
+#define TAA_SIGMA_SCALE 1.25
+#define TAA_REJECTION_SCALE 2.0
 #define TAA_HISTORY_EPSILON 1e-4
 
 struct NRITraceConstants
@@ -47,18 +48,6 @@ Texture2D<float4> gComposedInput : register(t2, space0);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gHistoryOutput, u, 0, 1);
 
-float3 EncodeColor(float3 color)
-{
-	color = max(color, 0.0);
-	return color / (1.0 + color);
-}
-
-float3 DecodeColor(float3 encoded)
-{
-	encoded = clamp(encoded, 0.0, 0.999);
-	return encoded / max(1.0 - encoded, TAA_HISTORY_EPSILON);
-}
-
 float4 LoadHistory(int2 pixelPos, uint2 size)
 {
 	const int2 clampedPos = clamp(pixelPos, int2(0, 0), int2(size) - 1);
@@ -84,6 +73,12 @@ float MaxComponent(float3 value)
 	return max(value.x, max(value.y, value.z));
 }
 
+float3 LoadCurrentColor(int2 pixelPos, uint2 size)
+{
+	const int2 clampedPos = clamp(pixelPos, int2(0, 0), int2(size) - 1);
+	return max(gComposedInput.Load(int3(clampedPos, 0)).rgb, 0.0);
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -100,6 +95,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float2 resolution = float2(size);
 	const float2 uv = ((float2)pixelPos + 0.5) / resolution;
 	const bool resetHistory = (gTraceConstants.Flags & NRI_FLAG_RESET_HISTORY) != 0u;
+	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);
 
 	const float4 centerMotion = gMotionInput[pixelPos];
 	const bool want5x5 = centerMotion.w < 0.0;
@@ -124,15 +120,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			}
 
 			const int2 samplePos = clamp(int2(pixelPos) + int2(x, y), int2(0, 0), int2(size) - 1);
-			const float3 encodedColor = EncodeColor(gComposedInput.Load(int3(samplePos, 0)).rgb);
+			const float3 sampleColor = LoadCurrentColor(samplePos, size);
 			const float4 sampleMotion = gMotionInput.Load(int3(samplePos, 0));
 			const float weight = exp(-0.5 * float(x * x + y * y));
 
-			mean += encodedColor * weight;
-			meanSquares += encodedColor * encodedColor * weight;
+			mean += sampleColor * weight;
+			meanSquares += sampleColor * sampleColor * weight;
 			sum += weight;
-			neighborhoodMin = min(neighborhoodMin, encodedColor);
-			neighborhoodMax = max(neighborhoodMax, encodedColor);
+			neighborhoodMin = min(neighborhoodMin, sampleColor);
+			neighborhoodMax = max(neighborhoodMax, sampleColor);
 
 			const float depthLike = abs(sampleMotion.w);
 			if (depthLike > 0.0 && depthLike < minDepthLike)
@@ -151,22 +147,23 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float2 prevUv = uv + selectedMotion / resolution;
 	const bool historyInScreen = all(prevUv >= 0.0) && all(prevUv <= 1.0);
 
-	float3 currentColor = max(gComposedInput[pixelPos].rgb, 0.0);
 	float4 historySample = float4(currentColor, 0.0);
 	if (!resetHistory && historyInScreen)
 	{
 		historySample = SampleHistoryBilinear(prevUv, size);
 	}
 
-	const float3 historyEncoded = EncodeColor(historySample.rgb);
-	const float3 clampedHistoryEncoded = clamp(historyEncoded, clampMin, clampMax);
-	const float rejection = saturate(MaxComponent(abs(historyEncoded - clampedHistoryEncoded)) * TAA_REJECTION_SCALE);
-	const bool rejectHistory = resetHistory || !historyInScreen || rejection >= 0.75;
+	const float3 historyColor = max(historySample.rgb, 0.0);
+	const float3 clampedHistory = clamp(historyColor, clampMin, clampMax);
+	const float divergence = MaxComponent(abs(historyColor - clampedHistory));
+	const float historyScale = max(MaxComponent(currentColor), MaxComponent(clampedHistory));
+	const float rejection = saturate(divergence / max(historyScale, 1.0) * TAA_REJECTION_SCALE);
+	const bool rejectHistory = resetHistory || !historyInScreen;
 
 	float effectiveHistoryFrames = 1.0 + saturate(historySample.w) * (TAA_HISTORY_FRAME_CAP - 1.0);
 	effectiveHistoryFrames = lerp(effectiveHistoryFrames, 1.0, rejection);
 
-	float currentWeight = 1.0 / (effectiveHistoryFrames + 1.0);
+	float currentWeight = max(1.0 / (effectiveHistoryFrames + 1.0), TAA_BASE_BLEND);
 	currentWeight = max(currentWeight, rejection);
 	if (want5x5)
 	{
@@ -178,7 +175,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		effectiveHistoryFrames = 1.0;
 	}
 
-	const float3 clampedHistory = DecodeColor(clampedHistoryEncoded);
 	const float3 resultColor = lerp(clampedHistory, currentColor, currentWeight);
 	const float nextHistoryFrames = rejectHistory ? 1.0 : min(effectiveHistoryFrames + 1.0, TAA_HISTORY_FRAME_CAP);
 	const float nextHistoryAlpha = (nextHistoryFrames - 1.0) / (TAA_HISTORY_FRAME_CAP - 1.0);

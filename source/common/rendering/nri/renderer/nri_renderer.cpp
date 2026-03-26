@@ -1312,6 +1312,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const bool bootstrapCapturedFlat = nri_ptbootstrap && bootstrapMode == 11u;
 	const bool bootstrapCapturedBaseColor = nri_ptbootstrap && bootstrapMode == 12u;
 	const bool rawTraceDirectScene = !nri_ptbootstrap && nri_ptdirectscene;
+	const int debugMode = (int)nri_ptdebug;
 
 	const bool preserveHistory = drawmode != DM_MAINVIEW;
 	uint32_t savedFrameIndex = mFrameIndex;
@@ -1403,6 +1404,18 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	mDynamicSceneLastFrame = {};
 	mRuntimeMapLastFrame = {};
 	mRuntimeSpaceLinkLastFrame = {};
+
+	if (!preserveHistory)
+	{
+		const NRIUpscalerKind resolvedUpscaler = ResolveUpscalerKind(false);
+		if (!nri_ptbootstrap && (debugMode != mLastDebugMode || resolvedUpscaler != mLastTemporalHistoryUpscaler))
+		{
+			mResetHistory = true;
+		}
+		mLastDebugMode = debugMode;
+		mLastTemporalHistoryUpscaler = resolvedUpscaler;
+	}
+
 	RefreshMapWorld();
 	UpdatePerFrameState(di);
 	if (preserveHistory)

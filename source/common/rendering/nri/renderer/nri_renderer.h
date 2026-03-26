@@ -524,8 +524,10 @@ private:
 	uint32_t mNextRuntimePointLightId = 1;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
+	int mLastDebugMode = -1;
 	int mLastUpscalerRequest = -1;
 	NRIUpscalerKind mLastUpscalerResolved = NRIUpscalerKind::Off;
+	NRIUpscalerKind mLastTemporalHistoryUpscaler = NRIUpscalerKind::Off;
 	FrameTextureSlot mHistoryInputSlot = FrameTextureSlot::TaaHistoryPing;
 	FrameTextureSlot mHistoryOutputSlot = FrameTextureSlot::TaaHistoryPong;
 	FrameTextureSlot mUpscaledInputSlot = FrameTextureSlot::Upscaled;
