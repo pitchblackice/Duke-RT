@@ -358,8 +358,10 @@ private:
 	void PrintPortalTraversalStatus() const;
 	void PrintStaticMapSceneStatus() const;
 	void PrintDynamicSceneStatus() const;
+	void PrintTemporalStatus() const;
 	void PrintRuntimeMapMutationStatus() const;
 	void PrintRuntimeSpaceLinkStatus() const;
+	void TraceTemporalState(const char* stage, NRIUpscalerKind resolvedUpscaler, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
@@ -403,6 +405,7 @@ private:
 	nri::UpscalerMode GetSelectedUpscalerMode() const;
 	bool IsUpscalerSupported(NRIUpscalerKind kind) const;
 	void FillMatrix(float* outMatrix, const VSMatrix& matrix) const;
+	const char* GetFrameTextureSlotName(FrameTextureSlot slot) const;
 
 	NRIRenderDevice* mFrameBuffer = nullptr;
 	nri::PipelineLayout* mPipelineLayout = nullptr;

@@ -1410,6 +1410,15 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		const NRIUpscalerKind resolvedUpscaler = ResolveUpscalerKind(false);
 		if (!nri_ptbootstrap && (debugMode != mLastDebugMode || resolvedUpscaler != mLastTemporalHistoryUpscaler))
 		{
+			if (nri_pttraceframes > 0)
+			{
+				Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d resolved=%s->%s\n",
+					mFrameIndex,
+					mLastDebugMode,
+					debugMode,
+					GetUpscalerName(mLastTemporalHistoryUpscaler),
+					GetUpscalerName(resolvedUpscaler));
+			}
 			mResetHistory = true;
 		}
 		mLastDebugMode = debugMode;
@@ -2124,10 +2133,89 @@ void NRIRenderer::PrintStatus() const
 	PrintPortalTraversalStatus();
 	PrintStaticMapSceneStatus();
 	PrintDynamicSceneStatus();
+	PrintTemporalStatus();
 	PrintRuntimeMapMutationStatus();
 	PrintRuntimeSpaceLinkStatus();
 	PrintSceneBufferStatus();
 	PrintSurfaceProbeStatus();
+}
+
+void NRIRenderer::PrintTemporalStatus() const
+{
+	const NRIUpscalerKind requested = GetSelectedUpscalerKind();
+	const NRIUpscalerKind resolved = GetResolvedUpscalerKindForStatus();
+	const FrameTextureSlot presentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
+	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
+	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
+	Printf("NRI PT temporal: debug=%d requested=%s resolved=%s last_debug=%d last_temporal=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
+		(int)nri_ptdebug,
+		GetUpscalerName(requested),
+		GetUpscalerName(resolved),
+		mLastDebugMode,
+		GetUpscalerName(mLastTemporalHistoryUpscaler),
+		mResetHistory ? "yes" : "no",
+		mHasPreviousCameraState ? "yes" : "no",
+		GetFrameTextureSlotName(mHistoryInputSlot),
+		historyInput.width,
+		historyInput.height,
+		(uint32_t)historyInput.state.access,
+		(uint32_t)historyInput.state.layout,
+		(uint32_t)historyInput.state.stages,
+		GetFrameTextureSlotName(mHistoryOutputSlot),
+		historyOutput.width,
+		historyOutput.height,
+		(uint32_t)historyOutput.state.access,
+		(uint32_t)historyOutput.state.layout,
+		(uint32_t)historyOutput.state.stages,
+		GetFrameTextureSlotName(presentSlot),
+		GetFrameTextureSlotName(mUpscaledInputSlot),
+		mUseUpscaledInFinal ? "yes" : "no");
+}
+
+void NRIRenderer::TraceTemporalState(const char* stage, NRIUpscalerKind resolvedUpscaler, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const
+{
+	if (nri_pttraceframes <= 0)
+	{
+		return;
+	}
+
+	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
+	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
+	const NRITextureResource& primary = GetFrameTexture(primarySlot);
+	const NRITextureResource& secondary = secondarySlot == FrameTextureSlot::Count ? GetFrameTexture(mHistoryOutputSlot) : GetFrameTexture(secondarySlot);
+	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved=%s run_app_taa=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
+		stage != nullptr ? stage : "unknown",
+		mFrameIndex,
+		(int)nri_ptdebug,
+		GetUpscalerName(resolvedUpscaler),
+		runAppTaa ? "yes" : "no",
+		mResetHistory ? "yes" : "no",
+		mHasPreviousCameraState ? "yes" : "no",
+		GetFrameTextureSlotName(mHistoryInputSlot),
+		historyInput.width,
+		historyInput.height,
+		(uint32_t)historyInput.state.access,
+		(uint32_t)historyInput.state.layout,
+		(uint32_t)historyInput.state.stages,
+		GetFrameTextureSlotName(mHistoryOutputSlot),
+		historyOutput.width,
+		historyOutput.height,
+		(uint32_t)historyOutput.state.access,
+		(uint32_t)historyOutput.state.layout,
+		(uint32_t)historyOutput.state.stages,
+		GetFrameTextureSlotName(primarySlot),
+		primary.width,
+		primary.height,
+		(uint32_t)primary.state.access,
+		(uint32_t)primary.state.layout,
+		(uint32_t)primary.state.stages,
+		GetFrameTextureSlotName(secondarySlot == FrameTextureSlot::Count ? mHistoryOutputSlot : secondarySlot),
+		secondary.width,
+		secondary.height,
+		(uint32_t)secondary.state.access,
+		(uint32_t)secondary.state.layout,
+		(uint32_t)secondary.state.stages,
+		mUseUpscaledInFinal ? "yes" : "no");
 }
 
 void NRIRenderer::PrintMapWorldStatus() const
@@ -5116,6 +5204,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		}
 
 		const FrameTextureSlot resolvedPresentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
+		TraceTemporalState("resolved-present", ResolveUpscalerKind(false), false, resolvedPresentSlot, mHistoryOutputSlot);
 		if (!DispatchFinalPresent(resolvedPresentSlot))
 		{
 			return false;
@@ -5165,6 +5254,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
+		TraceTemporalState("debug13-14-final", ResolveUpscalerKind(false), false, mHistoryOutputSlot, mUpscaledInputSlot);
 		if (!DispatchFinal())
 		{
 			return false;
@@ -5592,6 +5682,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
+	TraceTemporalState("upscale-entry", kind, runAppTaa, mHistoryOutputSlot, FrameTextureSlot::Composed);
 
 	if (runAppTaa)
 	{
@@ -5640,6 +5731,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 	{
 		mUseUpscaledInFinal = false;
 		mUpscaledInputSlot = mHistoryOutputSlot;
+		TraceTemporalState("upscale-native", kind, runAppTaa, mHistoryOutputSlot, mUpscaledInputSlot);
 		return true;
 	}
 
@@ -5668,6 +5760,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 		mUseUpscaledInFinal = true;
 		mUpscaledInputSlot = FrameTextureSlot::Upscaled;
+		TraceTemporalState("upscale-nis", kind, runAppTaa, mUpscaledInputSlot, mHistoryOutputSlot);
 		return true;
 	}
 
@@ -5776,6 +5869,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 	mUseUpscaledInFinal = true;
 	mUpscaledInputSlot = FrameTextureSlot::PreFinal;
+	TraceTemporalState("upscale-vendor", kind, runAppTaa, mUpscaledInputSlot, FrameTextureSlot::Composed);
 	return true;
 }
 
@@ -6270,6 +6364,38 @@ NRIUpscalerKind NRIRenderer::ResolveUpscalerKind(bool logFallback)
 	}
 
 	return resolved;
+}
+
+const char* NRIRenderer::GetFrameTextureSlotName(FrameTextureSlot slot) const
+{
+	switch (slot)
+	{
+	case FrameTextureSlot::ViewZ: return "ViewZ";
+	case FrameTextureSlot::Motion: return "Motion";
+	case FrameTextureSlot::NormalRoughness: return "NormalRoughness";
+	case FrameTextureSlot::BaseColorMetalness: return "BaseColorMetalness";
+	case FrameTextureSlot::UnfilteredDiffuse: return "UnfilteredDiffuse";
+	case FrameTextureSlot::UnfilteredSpecular: return "UnfilteredSpecular";
+	case FrameTextureSlot::UnfilteredPenumbra: return "UnfilteredPenumbra";
+	case FrameTextureSlot::DenoisedDiffuse: return "DenoisedDiffuse";
+	case FrameTextureSlot::DenoisedSpecular: return "DenoisedSpecular";
+	case FrameTextureSlot::DenoisedShadow: return "DenoisedShadow";
+	case FrameTextureSlot::Composed: return "Composed";
+	case FrameTextureSlot::DirectLighting: return "DirectLighting";
+	case FrameTextureSlot::DirectEmission: return "DirectEmission";
+	case FrameTextureSlot::TaaHistoryPing: return "TaaHistoryPing";
+	case FrameTextureSlot::TaaHistoryPong: return "TaaHistoryPong";
+	case FrameTextureSlot::Validation: return "Validation";
+	case FrameTextureSlot::DlssDiffuseAlbedo: return "DlssDiffuseAlbedo";
+	case FrameTextureSlot::DlssSpecularAlbedo: return "DlssSpecularAlbedo";
+	case FrameTextureSlot::DlssSpecularHitDistance: return "DlssSpecularHitDistance";
+	case FrameTextureSlot::DlssNormalRoughness: return "DlssNormalRoughness";
+	case FrameTextureSlot::Upscaled: return "Upscaled";
+	case FrameTextureSlot::PreFinal: return "PreFinal";
+	case FrameTextureSlot::Final: return "Final";
+	case FrameTextureSlot::Count: return "Count";
+	default: return "Unknown";
+	}
 }
 
 NRIUpscalerKind NRIRenderer::GetSelectedUpscalerKind() const
