@@ -405,7 +405,7 @@ float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, ou
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
 	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), shadowHit, ignoredDirection);
-	shadowHitDistance = blocked ? shadowHit.distance : 0.0;
+	shadowHitDistance = blocked ? shadowHit.distance : NRD_FP16_MAX;
 	return blocked ? 0.0 : 1.0;
 }
 
