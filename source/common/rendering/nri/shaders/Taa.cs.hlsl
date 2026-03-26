@@ -1,11 +1,14 @@
 #include "NRI.hlsl"
 
 #define NRI_FLAG_RESET_HISTORY 0x1u
-#define TAA_HISTORY_FRAME_CAP 32.0
+#define TAA_HISTORY_FRAME_CAP 12.0
 #define TAA_BASE_BLEND (1.0 / TAA_HISTORY_FRAME_CAP)
-#define TAA_SIGMA_SCALE 1.25
-#define TAA_REJECTION_SCALE 2.0
+#define TAA_SIGMA_SCALE 1.0
+#define TAA_REJECTION_SCALE 2.5
 #define TAA_HISTORY_EPSILON 1e-4
+#define TAA_MOTION_BLEND_SCALE 1.5
+#define TAA_MOTION_REJECT_PIXELS 2.0
+#define TAA_MOTION_MIN_WEIGHT 0.2
 
 struct NRITraceConstants
 {
@@ -98,14 +101,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);
 
 	const float4 centerMotion = gMotionInput[pixelPos];
-	const bool want5x5 = centerMotion.w < 0.0;
-	const int radius = want5x5 ? 2 : 1;
+	const bool unreliableHistory = centerMotion.w <= 0.0;
+	const int radius = 1;
 	float sum = 0.0;
 	float3 mean = 0.0;
 	float3 meanSquares = 0.0;
 	float3 neighborhoodMin = 1e6;
 	float3 neighborhoodMax = -1e6;
-	float minDepthLike = abs(centerMotion.w);
 	float2 selectedMotion = centerMotion.xy;
 
 	[loop]
@@ -114,14 +116,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		[loop]
 		for (int x = -radius; x <= radius; ++x)
 		{
-			if (!want5x5 && max(abs(x), abs(y)) > 1)
-			{
-				continue;
-			}
-
 			const int2 samplePos = clamp(int2(pixelPos) + int2(x, y), int2(0, 0), int2(size) - 1);
 			const float3 sampleColor = LoadCurrentColor(samplePos, size);
-			const float4 sampleMotion = gMotionInput.Load(int3(samplePos, 0));
 			const float weight = exp(-0.5 * float(x * x + y * y));
 
 			mean += sampleColor * weight;
@@ -129,13 +125,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			sum += weight;
 			neighborhoodMin = min(neighborhoodMin, sampleColor);
 			neighborhoodMax = max(neighborhoodMax, sampleColor);
-
-			const float depthLike = abs(sampleMotion.w);
-			if (depthLike > 0.0 && depthLike < minDepthLike)
-			{
-				minDepthLike = depthLike;
-				selectedMotion = sampleMotion.xy;
-			}
 		}
 	}
 
@@ -145,7 +134,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 clampMin = max(neighborhoodMin, mean - sigma);
 	const float3 clampMax = min(neighborhoodMax, mean + sigma);
 	const float2 prevUv = uv + selectedMotion / resolution;
-	const bool historyInScreen = all(prevUv >= 0.0) && all(prevUv <= 1.0);
+	const bool historyInScreen = !unreliableHistory && all(prevUv >= 0.0) && all(prevUv <= 1.0);
 
 	float4 historySample = float4(currentColor, 0.0);
 	if (!resetHistory && historyInScreen)
@@ -157,17 +146,20 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 clampedHistory = clamp(historyColor, clampMin, clampMax);
 	const float divergence = MaxComponent(abs(historyColor - clampedHistory));
 	const float historyScale = max(MaxComponent(currentColor), MaxComponent(clampedHistory));
-	const float rejection = saturate(divergence / max(historyScale, 1.0) * TAA_REJECTION_SCALE);
-	const bool rejectHistory = resetHistory || !historyInScreen;
+	const float motionPixels = length(selectedMotion);
+	const float motionRejection = saturate(motionPixels / TAA_MOTION_BLEND_SCALE);
+	const float clampRejection = saturate(divergence / max(historyScale, 1.0) * TAA_REJECTION_SCALE);
+	const float rejection = max(clampRejection, motionRejection);
+	const bool rejectHistory = resetHistory || !historyInScreen || motionPixels >= TAA_MOTION_REJECT_PIXELS;
 
 	float effectiveHistoryFrames = 1.0 + saturate(historySample.w) * (TAA_HISTORY_FRAME_CAP - 1.0);
 	effectiveHistoryFrames = lerp(effectiveHistoryFrames, 1.0, rejection);
 
 	float currentWeight = max(1.0 / (effectiveHistoryFrames + 1.0), TAA_BASE_BLEND);
 	currentWeight = max(currentWeight, rejection);
-	if (want5x5)
+	if (motionPixels > 0.0)
 	{
-		currentWeight = max(currentWeight, 0.125);
+		currentWeight = max(currentWeight, TAA_MOTION_MIN_WEIGHT);
 	}
 	if (rejectHistory)
 	{
