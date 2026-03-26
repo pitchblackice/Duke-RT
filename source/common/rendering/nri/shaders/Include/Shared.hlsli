@@ -142,6 +142,8 @@ Texture2D<float4> gGuideDiffuseInput : register(t8, space3);
 Texture2D<float4> gGuideSpecularInput : register(t9, space3);
 Texture2D<float4> gGuideSpecHitInput : register(t10, space3);
 Texture2D<float4> gShadowInput : register(t11, space3);
+Texture2D<float4> gDirectLightingInput : register(t12, space3);
+Texture2D<float4> gDirectEmissionInput : register(t13, space3);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gTraceOutput, u, 0, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gComposedOutput, u, 1, SET_OUTPUTS);
@@ -156,5 +158,7 @@ NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gGuideDiffuseOutput, u, 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gGuideSpecularOutput, u, 10, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gGuideSpecHitOutput, u, 11, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gShadowPenumbraOutput, u, 12, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gDirectLightingOutput, u, 13, SET_OUTPUTS);
+NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gDirectEmissionOutput, u, 14, SET_OUTPUTS);
 
 #endif

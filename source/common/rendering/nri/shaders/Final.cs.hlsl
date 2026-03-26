@@ -775,6 +775,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			composed = float4(denoisedShadow.xxx, 1.0);
 		}
 	}
+	else if (gTraceConstants.DebugMode == 24)
+	{
+		composed = float4(saturate(gDirectLightingInput[pixelPos].rgb), 1.0);
+	}
+	else if (gTraceConstants.DebugMode == 25)
+	{
+		composed = float4(saturate(gDirectEmissionInput[pixelPos].rgb), 1.0);
+	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
 		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);

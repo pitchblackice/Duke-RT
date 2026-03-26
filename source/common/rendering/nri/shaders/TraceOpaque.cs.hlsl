@@ -88,6 +88,17 @@ float3 EvaluateSunDiffuseLighting(float3 normal, float3 lightDir, float shadow)
 	return lighting.xxx;
 }
 
+float3 EvaluateAmbientDiffuse(float3 albedo)
+{
+	return albedo * 0.20;
+}
+
+float3 EvaluateDirectSunDiffuse(float3 albedo, float3 normal, float3 lightDir)
+{
+	const float lambert = max(dot(normal, lightDir), 0.0);
+	return albedo * (lambert * 0.80);
+}
+
 float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3 viewDir, float3 lightDir, float shadow)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
@@ -343,6 +354,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gGuideSpecularOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
 			gGuideSpecHitOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
 			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, kTanSunAngularRadius), 1.0, 0.0, 1.0);
+			gDirectLightingOutput[pixelPos] = 0.0;
+			gDirectEmissionOutput[pixelPos] = float4(sentinel, 1.0);
 		}
 		else
 		{
@@ -357,6 +370,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gGuideSpecularOutput[pixelPos] = PackSpecularRadiance(0.0, 0.0, NRD_INF, 1.0);
 			gGuideSpecHitOutput[pixelPos] = 0.0;
 			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, kTanSunAngularRadius), 1.0, 0.0, 1.0);
+			gDirectLightingOutput[pixelPos] = 0.0;
+			gDirectEmissionOutput[pixelPos] = float4(missColor, 1.0);
 		}
 	}
 	else
@@ -379,6 +394,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float4 albedo = 1.0;
 		float3 diffuse = 0.0;
 		float3 specular = 0.0;
+		float3 directLighting = 0.0;
+		float3 directEmission = 0.0;
 		float diffuseHitDistance = 0.0;
 		float specularHitDistance = 0.0;
 		float shadowVisibility = 1.0;
@@ -400,11 +417,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			if (bootstrapBaseColor)
 			{
 				diffuse = albedo.rgb;
+				directEmission = albedo.rgb;
 			}
 			else if (fullbright)
 			{
 				diffuse = albedo.rgb;
 				specular = 0.0;
+				directEmission = albedo.rgb;
 			}
 			else
 			{
@@ -418,10 +437,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					shadowPenumbra = SIGMA_FrontEnd_PackPenumbra(shadowHitDistance, kTanSunAngularRadius);
 				}
 				const float3 viewDir = normalize(-visibleRayDirection);
+				directEmission = EvaluateAmbientDiffuse(albedo.rgb);
+				const float3 directSunDiffuse = EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir);
+				const float3 directSunSpecular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0);
+				directLighting = directSunDiffuse + directSunSpecular;
 				if (!splitShadowDenoiser)
 				{
-					diffuse = EvaluateSunDiffuseLighting(hit.normal, lightDir, shadow);
-					specular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, shadow);
+					diffuse = directEmission + directSunDiffuse * shadow;
+					specular = directSunSpecular * shadow;
 				}
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
@@ -447,6 +470,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gGuideSpecularOutput[pixelPos] = packedSpecular;
 		gGuideSpecHitOutput[pixelPos] = float4(specular, packedSpecular.w);
 		gShadowPenumbraOutput[pixelPos] = float4(shadowPenumbra, shadowVisibility, 0.0, 1.0);
+		gDirectLightingOutput[pixelPos] = float4(directLighting, 1.0);
+		gDirectEmissionOutput[pixelPos] = float4(directEmission, 1.0);
 
 		if (gTraceConstants.DebugMode == 1)
 		{

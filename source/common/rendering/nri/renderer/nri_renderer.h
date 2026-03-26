@@ -46,7 +46,8 @@ private:
 		DenoisedSpecular,
 		DenoisedShadow,
 		Composed,
-		ComposedSpecViewZ,
+		DirectLighting,
+		DirectEmission,
 		TaaHistoryPing,
 		TaaHistoryPong,
 		Validation,
@@ -357,9 +358,9 @@ private:
 	bool UpdateSamplerSet();
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors);
 	bool UpdateFrameTextureSet();
-	bool UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 12>& descriptors);
+	bool UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 14>& descriptors);
 	bool UpdateOutputSet();
-	bool UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 13>& descriptors);
+	bool UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors);
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
 	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) { return mFrameTextures[(size_t)slot]; }
@@ -426,8 +427,8 @@ private:
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
 	nri_scene::SceneDebugStats mLastStats = {};
-	std::array<nri::Descriptor*, 12> mFrameInputDescriptors = {};
-	std::array<nri::Descriptor*, 13> mOutputDescriptors = {};
+	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
+	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	uint32_t mFrameIndex = 0;
 	uint32_t mRenderWidth = 0;
 	uint32_t mRenderHeight = 0;
