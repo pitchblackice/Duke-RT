@@ -33,6 +33,7 @@ struct NRITraceConstants
 	uint DynamicMaterialCount;
 	uint BounceCounts;
 	uint PortalCount;
+	uint RuntimeLightCount;
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;

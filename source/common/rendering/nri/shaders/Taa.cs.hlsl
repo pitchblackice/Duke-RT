@@ -41,6 +41,11 @@ struct NRITraceConstants
 	uint BootstrapMode;
 	uint DynamicMaterialCount;
 	uint BounceCounts;
+	uint PortalCount;
+	uint RuntimeLightCount;
+	uint PortalDepth;
+	uint ReservedTrace0;
+	uint ReservedTrace1;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
@@ -99,6 +104,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float2 uv = ((float2)pixelPos + 0.5) / resolution;
 	const bool resetHistory = (gTraceConstants.Flags & NRI_FLAG_RESET_HISTORY) != 0u;
 	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);
+
+	if (gTraceConstants.DebugMode == 26u)
+	{
+		gHistoryOutput[pixelPos] = float4(currentColor, 1.0);
+		return;
+	}
 
 	const float4 centerMotion = gMotionInput[pixelPos];
 	const bool unreliableHistory = centerMotion.w <= 0.0;

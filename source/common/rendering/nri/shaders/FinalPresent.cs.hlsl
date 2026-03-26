@@ -31,6 +31,11 @@ struct NRITraceConstants
 	uint BootstrapMode;
 	uint DynamicMaterialCount;
 	uint BounceCounts;
+	uint PortalCount;
+	uint RuntimeLightCount;
+	uint PortalDepth;
+	uint ReservedTrace0;
+	uint ReservedTrace1;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
