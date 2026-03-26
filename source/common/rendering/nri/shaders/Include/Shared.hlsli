@@ -54,6 +54,7 @@ struct NRITraceConstants
 	uint DynamicMaterialCount;
 	uint BounceCounts;
 	uint PortalCount;
+	uint RuntimeLightCount;
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;
@@ -108,6 +109,14 @@ struct PortalData
 	uint reserved0;
 };
 
+struct RuntimePointLightData
+{
+	float3 position;
+	float radius;
+	float3 color;
+	float intensity;
+};
+
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, SET_ROOT);
 
 RaytracingAccelerationStructure gWorldTlas : register(t0, space5);
@@ -121,6 +130,7 @@ StructuredBuffer<PrimitiveData> gDynamicPrimitives : register(t6, space2);
 StructuredBuffer<MaterialData> gDynamicMaterials : register(t7, space2);
 StructuredBuffer<SceneInstanceData> gSceneInstances : register(t8, space2);
 StructuredBuffer<PortalData> gScenePortals : register(t9, space2);
+StructuredBuffer<RuntimePointLightData> gRuntimePointLights : register(t10, space2);
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);

@@ -112,6 +112,20 @@ float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3
 	return specularColor * specularTerm * 0.85;
 }
 
+float EvaluatePointLightAttenuation(float distance, float radius, float intensity)
+{
+	if (radius <= 0.0 || distance >= radius)
+	{
+		return 0.0;
+	}
+
+	const float normalizedDistance = saturate(distance / radius);
+	const float softRange = 1.0 - normalizedDistance;
+	const float smoothRange = softRange * softRange * (3.0 - 2.0 * softRange);
+	const float inverseSquare = rcp(max(distance * distance, 1.0));
+	return intensity * inverseSquare * smoothRange * smoothRange;
+}
+
 float GetSurfaceRoughness(MaterialData material)
 {
 	return clamp(material.roughnessHint, 0.02, 1.0);
@@ -446,6 +460,48 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					diffuse = directEmission + directSunDiffuse * shadow;
 					specular = directSunSpecular * shadow;
 				}
+
+				[loop]
+				for (uint runtimeLightIndex = 0u; runtimeLightIndex < gTraceConstants.RuntimeLightCount; ++runtimeLightIndex)
+				{
+					const RuntimePointLightData runtimeLight = gRuntimePointLights[runtimeLightIndex];
+					const float3 toLight = runtimeLight.position - hit.position;
+					const float lightDistanceSq = dot(toLight, toLight);
+					if (lightDistanceSq <= 0.0001)
+					{
+						continue;
+					}
+
+					const float lightDistance = sqrt(lightDistanceSq);
+					if (lightDistance >= runtimeLight.radius)
+					{
+						continue;
+					}
+
+					const float3 runtimeLightDir = toLight / lightDistance;
+					const float lambert = max(dot(hit.normal, runtimeLightDir), 0.0);
+					if (lambert <= 0.0)
+					{
+						continue;
+					}
+
+					const float runtimeShadow = directSceneTrace ? 1.0 : ComputePointLightShadow(hit.position, hit.normal, runtimeLightDir, lightDistance);
+					if (runtimeShadow <= 0.0)
+					{
+						continue;
+					}
+
+					const float attenuation = EvaluatePointLightAttenuation(lightDistance, runtimeLight.radius, runtimeLight.intensity);
+					if (attenuation <= 0.0)
+					{
+						continue;
+					}
+
+					const float3 lightColor = runtimeLight.color * attenuation;
+					diffuse += albedo.rgb * (lambert * 0.80) * lightColor * runtimeShadow;
+					specular += EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, runtimeLightDir, 1.0) * lightColor * runtimeShadow;
+				}
+
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{

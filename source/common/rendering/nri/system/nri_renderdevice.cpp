@@ -19,6 +19,8 @@
 #include "hw_skydome.h"
 #include "hw_lightbuffer.h"
 #include "hw_bonebuffer.h"
+#include "coreplayer.h"
+#include "coreactor.h"
 
 #include <windows.h>
 #include <d3d12.h>
@@ -56,7 +58,16 @@ CUSTOM_CVAR(Int, nri_pttraceframes, 0, 0)
 namespace
 {
 	static constexpr int DefaultSwapChainTextureCount = 3;
+	static constexpr float DefaultPtTestLightRadius = 256.0f;
+	static constexpr float DefaultPtTestLightOffset = 64.0f;
 	static NRIRenderDevice* GetActiveNRIRenderDevice();
+
+	static void WorldToPathTracingPosition(const DVector3& worldPos, float out[3])
+	{
+		out[0] = (float)worldPos.X;
+		out[1] = (float)-worldPos.Z;
+		out[2] = (float)-worldPos.Y;
+	}
 }
 
 CUSTOM_CVAR(Int, nri_ptswaptextures, 0, 0)
@@ -862,6 +873,76 @@ CCMD(nri_ptreset)
 	if (auto* frameBuffer = GetActiveNRIRenderDevice())
 	{
 		frameBuffer->ResetPathTracingHistory();
+	}
+}
+
+CCMD(nri_ptlightspawn)
+{
+	if (argv.argc() < 5)
+	{
+		Printf("nri_ptlightspawn <r> <g> <b> <intensity> [radius] [offset]: spawns a PT test point light in front of the local player.\n");
+		return;
+	}
+
+	auto* frameBuffer = GetActiveNRIRenderDevice();
+	if (frameBuffer == nullptr)
+	{
+		Printf("nri_ptlightspawn is only available while using the NRI renderer.\n");
+		return;
+	}
+
+	const float radius = argv.argc() > 5 ? (float)atof(argv[5]) : DefaultPtTestLightRadius;
+	const float offset = argv.argc() > 6 ? (float)atof(argv[6]) : DefaultPtTestLightOffset;
+	uint32_t lightId = 0;
+	frameBuffer->SpawnPathTracingPointLight(
+		(float)atof(argv[1]),
+		(float)atof(argv[2]),
+		(float)atof(argv[3]),
+		(float)atof(argv[4]),
+		radius,
+		offset,
+		lightId);
+}
+
+CCMD(nri_ptlightlist)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingPointLights();
+	}
+	else
+	{
+		Printf("nri_ptlightlist is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptlightclear)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->ClearPathTracingPointLights();
+	}
+	else
+	{
+		Printf("nri_ptlightclear is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptlightremove)
+{
+	if (argv.argc() < 2)
+	{
+		Printf("nri_ptlightremove <id>: removes a PT test point light by id.\n");
+		return;
+	}
+
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->RemovePathTracingPointLight((uint32_t)atoi(argv[1]));
+	}
+	else
+	{
+		Printf("nri_ptlightremove is only available while using the NRI renderer.\n");
 	}
 }
 
@@ -1776,6 +1857,142 @@ void NRIRenderDevice::ResetPathTracingHistory()
 
 	mRenderer->ResetHistory();
 	Printf("NRI PT history reset requested.\n");
+}
+
+bool NRIRenderDevice::SpawnPathTracingPointLight(float red, float green, float blue, float intensity, float radius, float offset, uint32_t& outId)
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT test lights are unavailable because the renderer is not initialized.\n");
+		return false;
+	}
+
+	if (!mRenderer->IsPathTracingSupported())
+	{
+		Printf("NRI PT test lights are unavailable because path tracing is not active (%s).\n", mRenderer->GetAvailabilityReason());
+		return false;
+	}
+
+	if (netgame)
+	{
+		Printf("nri_ptlightspawn cannot be used in multiplayer.\n");
+		return false;
+	}
+
+	if (gamestate != GS_LEVEL)
+	{
+		Printf("nri_ptlightspawn: must be in a level.\n");
+		return false;
+	}
+
+	DCorePlayer* player = PlayerArray[myconnectindex];
+	if (player == nullptr)
+	{
+		Printf("nri_ptlightspawn: no local player is available.\n");
+		return false;
+	}
+
+	DCoreActor* actor = player->GetActor();
+	if (actor == nullptr)
+	{
+		Printf("nri_ptlightspawn: local player actor is unavailable.\n");
+		return false;
+	}
+
+	if (intensity <= 0.0f)
+	{
+		Printf("nri_ptlightspawn: intensity must be > 0.\n");
+		return false;
+	}
+
+	if (radius <= 0.0f)
+	{
+		Printf("nri_ptlightspawn: radius must be > 0.\n");
+		return false;
+	}
+
+	if (offset < 0.0f)
+	{
+		Printf("nri_ptlightspawn: offset must be >= 0.\n");
+		return false;
+	}
+
+	const DRotator viewRotation(
+		player->getPitchWithView(),
+		actor->spr.Angles.Yaw + player->ViewAngles.Yaw,
+		actor->spr.Angles.Roll + player->ViewAngles.Roll);
+	const DVector3 forward(viewRotation);
+	const DVector3 spawnPosition = actor->getPosWithOffsetZ() + forward * offset;
+	float renderPosition[3] = {};
+	WorldToPathTracingPosition(spawnPosition, renderPosition);
+	const float lightColor[3] = {
+		red < 0.0f ? 0.0f : red,
+		green < 0.0f ? 0.0f : green,
+		blue < 0.0f ? 0.0f : blue,
+	};
+	if (!mRenderer->AddRuntimePointLight(renderPosition, lightColor, intensity, radius, outId))
+	{
+		Printf("nri_ptlightspawn: failed to add PT test light. active=%u limit=64\n", mRenderer->GetRuntimePointLightCount());
+		return false;
+	}
+
+	Printf("NRI PT test light spawned: id=%u world_pos=(%.3f, %.3f, %.3f) render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f offset=%.3f\n",
+		outId,
+		spawnPosition.X,
+		spawnPosition.Y,
+		spawnPosition.Z,
+		renderPosition[0],
+		renderPosition[1],
+		renderPosition[2],
+		lightColor[0],
+		lightColor[1],
+		lightColor[2],
+		intensity,
+		radius,
+		offset);
+	return true;
+}
+
+bool NRIRenderDevice::RemovePathTracingPointLight(uint32_t id)
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT test lights are unavailable because the renderer is not initialized.\n");
+		return false;
+	}
+
+	if (!mRenderer->RemoveRuntimePointLight(id))
+	{
+		Printf("nri_ptlightremove: no PT test light with id=%u.\n", id);
+		return false;
+	}
+
+	Printf("NRI PT test light removed: id=%u remaining=%u\n", id, mRenderer->GetRuntimePointLightCount());
+	return true;
+}
+
+void NRIRenderDevice::ClearPathTracingPointLights()
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT test lights are unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	const uint32_t clearedCount = mRenderer->GetRuntimePointLightCount();
+	mRenderer->ClearRuntimePointLights();
+	Printf("NRI PT test lights cleared: count=%u\n", clearedCount);
+}
+
+void NRIRenderDevice::PrintPathTracingPointLights() const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT test lights are unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintRuntimePointLights();
 }
 
 void NRIRenderDevice::LogStartup()

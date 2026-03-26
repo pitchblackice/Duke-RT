@@ -55,6 +55,10 @@ public:
 	void PrintPathTracingStatus() const;
 	void PrintPathTracingBuffers() const;
 	void ResetPathTracingHistory();
+	bool SpawnPathTracingPointLight(float red, float green, float blue, float intensity, float radius, float offset, uint32_t& outId);
+	bool RemovePathTracingPointLight(uint32_t id);
+	void ClearPathTracingPointLights();
+	void PrintPathTracingPointLights() const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
 
 private:

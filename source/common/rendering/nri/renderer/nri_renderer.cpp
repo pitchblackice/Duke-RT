@@ -65,9 +65,10 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 10;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 11;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
+	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -761,6 +762,7 @@ namespace
 		uint32_t DynamicMaterialCount = 0;
 		uint32_t BounceCounts = 0;
 		uint32_t PortalCount = 0;
+		uint32_t RuntimeLightCount = 0;
 		uint32_t PortalDepth = 0;
 		uint32_t ReservedTrace0 = 0;
 		uint32_t ReservedTrace1 = 0;
@@ -1251,6 +1253,7 @@ void NRIRenderer::Shutdown()
 	mNrd.Shutdown();
 	mUpscaler.Shutdown(*mFrameBuffer);
 	DestroyAccelerationStructures();
+	ClearRuntimePointLights();
 	DestroySceneBuffers();
 	DestroyFrameTextures();
 	mFrameBuffer->DestroyTextureResource(mPaletteTexture);
@@ -1895,6 +1898,92 @@ void NRIRenderer::ResetHistory()
 	mRuntimeChunkTranslationHistory.clear();
 }
 
+bool NRIRenderer::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId)
+{
+	if (position == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)
+	{
+		return false;
+	}
+
+	if (mRuntimePointLights.size() >= NRI_MAX_RUNTIME_POINT_LIGHTS)
+	{
+		return false;
+	}
+
+	RuntimePointLightData light = {};
+	light.id = mNextRuntimePointLightId++;
+	Copy3(position, light.position);
+	light.color[0] = std::max(color[0], 0.0f);
+	light.color[1] = std::max(color[1], 0.0f);
+	light.color[2] = std::max(color[2], 0.0f);
+	light.intensity = intensity;
+	light.radius = radius;
+	mRuntimePointLights.push_back(light);
+	outId = light.id;
+	mBoundRuntimeLightCount = 0;
+	mResetHistory = true;
+	return true;
+}
+
+bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
+{
+	const auto it = std::find_if(mRuntimePointLights.begin(), mRuntimePointLights.end(), [id](const RuntimePointLightData& light)
+	{
+		return light.id == id;
+	});
+	if (it == mRuntimePointLights.end())
+	{
+		return false;
+	}
+
+	mRuntimePointLights.erase(it);
+	mBoundRuntimeLightCount = 0;
+	mResetHistory = true;
+	return true;
+}
+
+void NRIRenderer::ClearRuntimePointLights()
+{
+	if (mRuntimePointLights.empty())
+	{
+		return;
+	}
+
+	mRuntimePointLights.clear();
+	mBoundRuntimeLightCount = 0;
+	mResetHistory = true;
+}
+
+void NRIRenderer::PrintRuntimePointLights() const
+{
+	Printf("NRI PT test lights: count=%u limit=%u\n",
+		(uint32_t)mRuntimePointLights.size(),
+		NRI_MAX_RUNTIME_POINT_LIGHTS);
+	if (mRuntimePointLights.empty())
+	{
+		return;
+	}
+
+	for (const RuntimePointLightData& light : mRuntimePointLights)
+	{
+		Printf("NRI PT test light %u: render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
+			light.id,
+			light.position[0],
+			light.position[1],
+			light.position[2],
+			light.color[0],
+			light.color[1],
+			light.color[2],
+			light.intensity,
+			light.radius);
+	}
+}
+
+uint32_t NRIRenderer::GetRuntimePointLightCount() const
+{
+	return (uint32_t)mRuntimePointLights.size();
+}
+
 void NRIRenderer::PrintStatus() const
 {
 	const NRIUpscalerKind requested = GetSelectedUpscalerKind();
@@ -1987,6 +2076,9 @@ void NRIRenderer::PrintStatus() const
 		(int)nri_ptmutationtracechunk,
 		(int)nri_ptmutationtracesector);
 	Printf("NRI PT runtime link trace: %s\n", nri_ptruntimelinktrace ? "on" : "off");
+	Printf("NRI PT test lights: active=%u limit=%u\n",
+		(uint32_t)mRuntimePointLights.size(),
+		NRI_MAX_RUNTIME_POINT_LIGHTS);
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
@@ -2492,6 +2584,8 @@ void NRIRenderer::PrintSceneBufferStatus() const
 	printBuffer(activeIndexBuffer, mIndexBufferStats);
 	printBuffer(activePrimitiveBuffer, mPrimitiveBufferStats);
 	printBuffer(activeMaterialBuffer, mMaterialBufferStats);
+	printBuffer(mPortalBuffer, mPortalBufferStats);
+	printBuffer(mRuntimeLightBuffer, mRuntimeLightBufferStats);
 }
 
 void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging)
@@ -2703,6 +2797,12 @@ void NRIRenderer::RefreshMapWorld()
 {
 	const uint64_t pendingBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
 	const bool levelChanged = mMapWorld.level != currentLevel;
+	if (levelChanged && !mRuntimePointLights.empty())
+	{
+		const uint32_t clearedCount = (uint32_t)mRuntimePointLights.size();
+		ClearRuntimePointLights();
+		Printf("NRI PT test lights cleared: count=%u reason=level-change\n", clearedCount);
+	}
 	const bool needsBuild = !mMapWorld.valid || levelChanged || pendingBuildSerial != mObservedMapWorldBuildSerial;
 	if (!needsBuild)
 	{
@@ -2947,6 +3047,21 @@ bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& des
 	return true;
 }
 
+void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const
+{
+	outLights.clear();
+	outLights.reserve(mRuntimePointLights.size());
+	for (const RuntimePointLightData& light : mRuntimePointLights)
+	{
+		RuntimePointLightGpuData gpuLight = {};
+		Copy3(light.position, gpuLight.position);
+		gpuLight.radius = light.radius;
+		Copy3(light.color, gpuLight.color);
+		gpuLight.intensity = light.intensity;
+		outLights.push_back(gpuLight);
+	}
+}
+
 bool NRIRenderer::UpdateSceneDataSet(
 	const NRIBufferResource& staticVertexBuffer,
 	const NRIBufferResource& staticIndexBuffer,
@@ -2966,6 +3081,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 	{
 		return false;
 	}
+
+	mBoundRuntimeLightCount = 0;
 
 	static SceneBufferDebugStats sSceneInstanceStats = { "SceneInstance" };
 	if (!EnsureStructuredBuffer(
@@ -2993,6 +3110,20 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
+	std::vector<RuntimePointLightGpuData> runtimeLights;
+	BuildRuntimePointLightUpload(runtimeLights);
+	if (!EnsureStructuredBuffer(
+		mRuntimeLightBuffer,
+		mRuntimeLightBufferStats,
+		runtimeLights.empty() ? nullptr : runtimeLights.data(),
+		runtimeLights.size() * sizeof(RuntimePointLightGpuData),
+		sizeof(RuntimePointLightGpuData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
 	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
 	{
 		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
@@ -3009,6 +3140,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		selectView(dynamicMaterialBuffer, staticMaterialBuffer),
 		mSceneInstanceBuffer.shaderView,
 		mPortalBuffer.shaderView,
+		mRuntimeLightBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : descriptors)
@@ -3031,6 +3163,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundStaticMaterialCount = staticMaterialCount;
 	mBoundDynamicMaterialCount = dynamicMaterialCount;
 	mBoundPortalCount = mMapWorld.valid ? (uint32_t)mMapWorld.portals.size() : 0u;
+	mBoundRuntimeLightCount = (uint32_t)runtimeLights.size();
 	return true;
 }
 
@@ -5055,6 +5188,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u));
 	constants.PortalCount = mBoundPortalCount;
+	constants.RuntimeLightCount = mBoundRuntimeLightCount;
 	constants.PortalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 	Copy3(mSkyColor, constants.SkyColor);
@@ -5192,6 +5326,7 @@ bool NRIRenderer::DispatchComposition()
 		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
+	constants.RuntimeLightCount = mBoundRuntimeLightCount;
 	constants.ReservedTrace0 = GetNrdInputSplitMode();
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 	Copy3(mSkyColor, constants.SkyColor);
@@ -5614,6 +5749,7 @@ bool NRIRenderer::DispatchFinal()
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
+	constants.RuntimeLightCount = mBoundRuntimeLightCount;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -5929,6 +6065,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);
 	DestroyBufferResource(mPortalBuffer);
+	DestroyBufferResource(mRuntimeLightBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	mBoundStaticPrimitiveCount = 0;
@@ -5936,6 +6073,7 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
 	mBoundPortalCount = 0;
+	mBoundRuntimeLightCount = 0;
 }
 
 void NRIRenderer::DestroyAccelerationStructures()

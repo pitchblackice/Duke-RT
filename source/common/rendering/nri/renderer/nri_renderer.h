@@ -29,6 +29,11 @@ public:
 	void ResetHistory();
 	void PrintStatus() const;
 	void PrintSceneBufferStatus() const;
+	bool AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId);
+	bool RemoveRuntimePointLight(uint32_t id);
+	void ClearRuntimePointLights();
+	void PrintRuntimePointLights() const;
+	uint32_t GetRuntimePointLightCount() const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	const char* GetAvailabilityReason() const;
 
@@ -119,6 +124,23 @@ private:
 		float position[3] = {};
 		float normal[3] = {};
 		nri_scene::SurfaceProvenance provenance = {};
+	};
+
+	struct RuntimePointLightData
+	{
+		uint32_t id = 0;
+		float position[3] = {};
+		float color[3] = { 1.0f, 1.0f, 1.0f };
+		float intensity = 1.0f;
+		float radius = 0.0f;
+	};
+
+	struct RuntimePointLightGpuData
+	{
+		float position[3] = {};
+		float radius = 0.0f;
+		float color[3] = { 1.0f, 1.0f, 1.0f };
+		float intensity = 1.0f;
 	};
 
 	struct StaticMapSceneCache
@@ -302,6 +324,7 @@ private:
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	void BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const;
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -412,6 +435,7 @@ private:
 	NRIBufferResource mTlasInstanceBuffer;
 	NRIBufferResource mSceneInstanceBuffer;
 	NRIBufferResource mPortalBuffer;
+	NRIBufferResource mRuntimeLightBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
@@ -419,6 +443,7 @@ private:
 	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };
 	SceneBufferDebugStats mMaterialBufferStats = { "Material" };
 	SceneBufferDebugStats mPortalBufferStats = { "Portal" };
+	SceneBufferDebugStats mRuntimeLightBufferStats = { "RuntimeLight" };
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
@@ -436,6 +461,7 @@ private:
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
 	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
 	nri_scene::SceneDebugStats mLastStats = {};
+	std::vector<RuntimePointLightData> mRuntimePointLights;
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	uint32_t mFrameIndex = 0;
@@ -494,6 +520,8 @@ private:
 	uint32_t mBoundStaticMaterialCount = 0;
 	uint32_t mBoundDynamicMaterialCount = 0;
 	uint32_t mBoundPortalCount = 0;
+	uint32_t mBoundRuntimeLightCount = 0;
+	uint32_t mNextRuntimePointLightId = 1;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastUpscalerRequest = -1;

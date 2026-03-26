@@ -454,6 +454,20 @@ float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection)
 	return ComputeSunShadow(position, normal, lightDirection, shadowHitDistance);
 }
 
+float ComputePointLightShadow(float3 position, float3 normal, float3 lightDirection, float lightDistance)
+{
+	if (lightDistance <= 0.051)
+	{
+		return 1.0;
+	}
+
+	HitData shadowHit = MakeEmptyHitData();
+	float3 ignoredDirection = lightDirection;
+	const float maxDistance = max(lightDistance - 0.05, 0.001);
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, 0u, GetPortalTraversalDepth(), shadowHit, ignoredDirection);
+	return blocked ? 0.0 : 1.0;
+}
+
 float3 GetMissColor(float3 direction)
 {
 	return gSkyTexture.SampleLevel(gLinearClamp, normalize(direction), 0.0).rgb;
