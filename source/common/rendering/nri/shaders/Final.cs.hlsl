@@ -719,6 +719,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
+	else if (gTraceConstants.DebugMode == 26)
+	{
+		composed = float4(saturate(gValidationInput.Load(int3(samplePos, 0)).rgb), 1.0);
+	}
 	else if (gTraceConstants.DebugMode == 18)
 	{
 		const float metalness = saturate(gBaseColorInput[pixelPos].a);

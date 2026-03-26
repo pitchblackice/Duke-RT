@@ -53,6 +53,7 @@ CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_pttemporalprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -99,6 +100,18 @@ namespace
 	static T NRIFlags(T a, T b)
 	{
 		return (T)((uint32_t)a | (uint32_t)b);
+	}
+
+	static const char* GetTemporalProbeModeName(int mode)
+	{
+		switch (mode)
+		{
+		case 0: return "off";
+		case 1: return "composed-pre-taa";
+		case 2: return "history-in-pre-taa";
+		case 3: return "history-out-post-taa";
+		default: return "unknown";
+		}
 	}
 
 	static nri::StageBits NRIComputeStage()
@@ -2150,12 +2163,15 @@ void NRIRenderer::PrintTemporalStatus() const
 	const FrameTextureSlot presentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
 	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
-	Printf("NRI PT temporal: debug=%d requested=%s resolved=%s last_debug=%d last_temporal=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
+	const int temporalProbeMode = std::clamp((int)nri_pttemporalprobe, 0, 3);
+	Printf("NRI PT temporal: debug=%d requested=%s resolved=%s last_debug=%d last_temporal=%s probe=%d(%s) reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
 		(int)nri_ptdebug,
 		GetUpscalerName(requested),
 		GetUpscalerName(resolved),
 		mLastDebugMode,
 		GetUpscalerName(mLastTemporalHistoryUpscaler),
+		temporalProbeMode,
+		GetTemporalProbeModeName(temporalProbeMode),
 		mResetHistory ? "yes" : "no",
 		mHasPreviousCameraState ? "yes" : "no",
 		GetFrameTextureSlotName(mHistoryInputSlot),
@@ -5091,7 +5107,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
 	const bool useResolvedPresent = !nri_ptbootstrap && nri_ptdebug == 0;
 	const bool useComposedDebugPresent = !nri_ptbootstrap && nri_ptdebug == 15;
-	const bool usePostCompositionDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 13 || nri_ptdebug == 14);
+	const bool usePostCompositionDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 13 || nri_ptdebug == 14 || nri_ptdebug == 26);
 	const bool useCompositionPath = useResolvedPresent || useComposedDebugPresent || usePostCompositionDebugPresent;
 	const bool useValidationPresent = !nri_ptbootstrap && nri_ptdebug == 9;
 	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 16 || nri_ptdebug == 17);
@@ -5259,7 +5275,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedPhaseGDebugPrepassPath)
 		{
-			Printf("NRI Phase G: ptdebug 13/14 now route through Composition and DispatchUpscaleChain before shared Final debug presentation.\n");
+			Printf("NRI Phase G: ptdebug 13/14/26 now route through Composition and DispatchUpscaleChain before shared Final debug presentation.\n");
 			sLoggedPhaseGDebugPrepassPath = true;
 		}
 
@@ -5273,7 +5289,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
-		TraceTemporalState("debug13-14-final", ResolveUpscalerKind(false), false, mHistoryOutputSlot, mUpscaledInputSlot);
+		TraceTemporalState("debug13-14-26-final", ResolveUpscalerKind(false), false, mHistoryOutputSlot, mUpscaledInputSlot);
 		if (!DispatchFinal())
 		{
 			return false;
@@ -5698,13 +5714,39 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 	const NRIUpscalerKind kind = ResolveUpscalerKind(true);
 	const bool runAppTaa = kind == NRIUpscalerKind::Off || kind == NRIUpscalerKind::NIS;
+	const int temporalProbeMode = std::clamp((int)nri_pttemporalprobe, 0, 3);
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
+	NRITextureResource& validation = GetFrameTexture(FrameTextureSlot::Validation);
 	TraceTemporalState("upscale-entry", kind, runAppTaa, mHistoryOutputSlot, FrameTextureSlot::Composed);
 
 	if (runAppTaa)
 	{
+		auto captureTemporalProbe = [&](const char* stage, NRITextureResource& source, FrameTextureSlot sourceSlot) -> void
+		{
+			CopyTexture(source, validation);
+			if (nri_pttraceframes > 0)
+			{
+				Printf("NRI PT temporal probe: frame=%u mode=%d(%s) stage=%s source=%s dest=%s\n",
+					mFrameIndex,
+					temporalProbeMode,
+					GetTemporalProbeModeName(temporalProbeMode),
+					stage != nullptr ? stage : "unknown",
+					GetFrameTextureSlotName(sourceSlot),
+					GetFrameTextureSlotName(FrameTextureSlot::Validation));
+			}
+		};
+
+		if (temporalProbeMode == 1)
+		{
+			captureTemporalProbe("pre-taa", composed, FrameTextureSlot::Composed);
+		}
+		else if (temporalProbeMode == 2)
+		{
+			captureTemporalProbe("pre-taa", historyInput, mHistoryInputSlot);
+		}
+
 		NRITraceConstants constants = {};
 		constants.RenderWidth = mRenderWidth;
 		constants.RenderHeight = mRenderHeight;
@@ -5744,6 +5786,11 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mTaaOutputSet, nri::BindPoint::COMPUTE });
 		mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Taa));
 		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+
+		if (temporalProbeMode == 3)
+		{
+			captureTemporalProbe("post-taa", historyOutput, mHistoryOutputSlot);
+		}
 	}
 
 	if (kind == NRIUpscalerKind::Off)
