@@ -421,6 +421,8 @@ private:
 	nri::DescriptorSet* mCompositionOutputSet = nullptr;
 	nri::DescriptorSet* mTaaFrameTextureSet = nullptr;
 	nri::DescriptorSet* mTaaOutputSet = nullptr;
+	nri::DescriptorSet* mPresentFrameTextureSet = nullptr;
+	nri::DescriptorSet* mPresentOutputSet = nullptr;
 
 	NRITextureResource* GetActiveSkyTexture() { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
 	const NRITextureResource* GetActiveSkyTexture() const { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
