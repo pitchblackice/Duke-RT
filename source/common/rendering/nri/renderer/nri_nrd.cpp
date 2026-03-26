@@ -79,6 +79,16 @@ namespace
 		settings.lightDirection[2] = desc.lightDirection[2];
 		return settings;
 	}
+
+	static bool SigmaSettingsEqual(const nrd::SigmaSettings& a, const nrd::SigmaSettings& b)
+	{
+		return
+			a.maxStabilizedFrameNum == b.maxStabilizedFrameNum &&
+			a.planeDistanceSensitivity == b.planeDistanceSensitivity &&
+			a.lightDirection[0] == b.lightDirection[0] &&
+			a.lightDirection[1] == b.lightDirection[1] &&
+			a.lightDirection[2] == b.lightDirection[2];
+	}
 }
 
 nrd::Resource NRINrdContext::MakeResource(NRITextureResource& texture)
@@ -162,18 +172,17 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 		const nrd::SigmaSettings sigmaSettings = BuildSigmaSettings(desc);
 		sigmaSettingsChanged =
 			!mHasSigmaSettings ||
-			std::memcmp(&mSigmaSettings, &sigmaSettings, sizeof(sigmaSettings)) != 0;
+			!SigmaSettingsEqual(mSigmaSettings, sigmaSettings);
 
-		if (sigmaSettingsChanged)
+		// Match the sample more closely here: SIGMA settings are pushed every frame,
+		// while history restart is still keyed off the explicit field comparison above.
+		if (mIntegration.SetDenoiserSettings(mSigmaDenoiser, &sigmaSettings) != nrd::Result::SUCCESS)
 		{
-			if (mIntegration.SetDenoiserSettings(mSigmaDenoiser, &sigmaSettings) != nrd::Result::SUCCESS)
-			{
-				return false;
-			}
-
-			mSigmaSettings = sigmaSettings;
-			mHasSigmaSettings = true;
+			return false;
 		}
+
+		mSigmaSettings = sigmaSettings;
+		mHasSigmaSettings = true;
 	}
 
 	if (useRelax)
