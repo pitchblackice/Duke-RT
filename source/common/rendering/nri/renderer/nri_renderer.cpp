@@ -5770,46 +5770,63 @@ bool NRIRenderer::DispatchUpscaleChain()
 			captureTemporalProbe("pre-taa", historyInput, mHistoryInputSlot);
 		}
 
-		NRITraceConstants constants = {};
-		constants.RenderWidth = mRenderWidth;
-		constants.RenderHeight = mRenderHeight;
-		constants.DisplayWidth = mOutputWidth;
-		constants.DisplayHeight = mOutputHeight;
-		constants.FrameIndex = mFrameIndex;
-		constants.DebugMode = (uint32_t)nri_ptdebug;
-		constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+		const bool useHistoryCopyProbe = (int)nri_ptdebug == 26 && temporalProbeMode == 3;
+		if (useHistoryCopyProbe)
+		{
+			CopyTexture(composed, historyOutput);
+			if (nri_pttraceframes > 0)
+			{
+				Printf("NRI PT temporal probe: frame=%u mode=%d(%s) stage=copy-to-history source=%s dest=%s\n",
+					mFrameIndex,
+					temporalProbeMode,
+					GetTemporalProbeModeName(temporalProbeMode),
+					GetFrameTextureSlotName(FrameTextureSlot::Composed),
+					GetFrameTextureSlotName(mHistoryOutputSlot));
+			}
+		}
+		else
+		{
+			NRITraceConstants constants = {};
+			constants.RenderWidth = mRenderWidth;
+			constants.RenderHeight = mRenderHeight;
+			constants.DisplayWidth = mOutputWidth;
+			constants.DisplayHeight = mOutputHeight;
+			constants.FrameIndex = mFrameIndex;
+			constants.DebugMode = (uint32_t)nri_ptdebug;
+			constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 
-		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
+			mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
+			mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
+			mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+			mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
 
-		const nri::Descriptor* taaInputs[3] = {
-			historyInput.shaderView,
-			GetFrameTexture(FrameTextureSlot::Motion).shaderView,
-			composed.shaderView
-		};
-		nri::UpdateDescriptorRangeDesc taaInputUpdate = {};
-		taaInputUpdate.descriptorSet = mTaaFrameTextureSet;
-		taaInputUpdate.rangeIndex = 0;
-		taaInputUpdate.descriptors = taaInputs;
-		taaInputUpdate.descriptorNum = (uint32_t)std::size(taaInputs);
-		mFrameBuffer->mCore.UpdateDescriptorRanges(&taaInputUpdate, 1);
+			const nri::Descriptor* taaInputs[3] = {
+				historyInput.shaderView,
+				GetFrameTexture(FrameTextureSlot::Motion).shaderView,
+				composed.shaderView
+			};
+			nri::UpdateDescriptorRangeDesc taaInputUpdate = {};
+			taaInputUpdate.descriptorSet = mTaaFrameTextureSet;
+			taaInputUpdate.rangeIndex = 0;
+			taaInputUpdate.descriptors = taaInputs;
+			taaInputUpdate.descriptorNum = (uint32_t)std::size(taaInputs);
+			mFrameBuffer->mCore.UpdateDescriptorRanges(&taaInputUpdate, 1);
 
-		const nri::Descriptor* taaOutputs[1] = { historyOutput.storageView };
-		nri::UpdateDescriptorRangeDesc taaOutputUpdate = {};
-		taaOutputUpdate.descriptorSet = mTaaOutputSet;
-		taaOutputUpdate.rangeIndex = 0;
-		taaOutputUpdate.descriptors = taaOutputs;
-		taaOutputUpdate.descriptorNum = (uint32_t)std::size(taaOutputs);
-		mFrameBuffer->mCore.UpdateDescriptorRanges(&taaOutputUpdate, 1);
+			const nri::Descriptor* taaOutputs[1] = { historyOutput.storageView };
+			nri::UpdateDescriptorRangeDesc taaOutputUpdate = {};
+			taaOutputUpdate.descriptorSet = mTaaOutputSet;
+			taaOutputUpdate.rangeIndex = 0;
+			taaOutputUpdate.descriptors = taaOutputs;
+			taaOutputUpdate.descriptorNum = (uint32_t)std::size(taaOutputs);
+			mFrameBuffer->mCore.UpdateDescriptorRanges(&taaOutputUpdate, 1);
 
-		mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mTaaPipelineLayout);
-		mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mTaaFrameTextureSet, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mTaaOutputSet, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Taa));
-		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+			mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mTaaPipelineLayout);
+			mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+			mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mTaaFrameTextureSet, nri::BindPoint::COMPUTE });
+			mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mTaaOutputSet, nri::BindPoint::COMPUTE });
+			mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Taa));
+			mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+		}
 
 		if (temporalProbeMode == 3)
 		{
