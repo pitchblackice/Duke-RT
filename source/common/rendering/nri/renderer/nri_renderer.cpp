@@ -78,6 +78,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
 	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
 	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
+	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
@@ -1410,6 +1411,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		const NRIUpscalerKind resolvedUpscaler = ResolveUpscalerKind(false);
 		if (!nri_ptbootstrap && (debugMode != mLastDebugMode || resolvedUpscaler != mLastTemporalHistoryUpscaler))
 		{
+			ArmTemporalTraceBudget("mode-change");
 			if (nri_pttraceframes > 0)
 			{
 				Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d resolved=%s->%s\n",
@@ -1915,6 +1917,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 void NRIRenderer::ResetHistory()
 {
+	ArmTemporalTraceBudget("history-reset");
 	mResetHistory = true;
 	mHasPreviousCameraState = false;
 	mRuntimeChunkTranslationHistory.clear();
@@ -2170,6 +2173,22 @@ void NRIRenderer::PrintTemporalStatus() const
 		GetFrameTextureSlotName(presentSlot),
 		GetFrameTextureSlotName(mUpscaledInputSlot),
 		mUseUpscaledInFinal ? "yes" : "no");
+}
+
+void NRIRenderer::ArmTemporalTraceBudget(const char* reason)
+{
+	if ((int)nri_pttraceframes >= NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT)
+	{
+		return;
+	}
+
+	nri_pttraceframes = NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT;
+	Printf("NRI PT temporal trace: armed=%d reason=%s frame=%u debug=%d resolved=%s\n",
+		(int)nri_pttraceframes,
+		reason != nullptr ? reason : "unspecified",
+		mFrameIndex,
+		(int)nri_ptdebug,
+		GetUpscalerName(ResolveUpscalerKind(false)));
 }
 
 void NRIRenderer::TraceTemporalState(const char* stage, NRIUpscalerKind resolvedUpscaler, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const

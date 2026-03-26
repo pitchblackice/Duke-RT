@@ -361,6 +361,7 @@ private:
 	void PrintTemporalStatus() const;
 	void PrintRuntimeMapMutationStatus() const;
 	void PrintRuntimeSpaceLinkStatus() const;
+	void ArmTemporalTraceBudget(const char* reason);
 	void TraceTemporalState(const char* stage, NRIUpscalerKind resolvedUpscaler, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
