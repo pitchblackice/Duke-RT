@@ -400,11 +400,19 @@ HitData TracePrimary(float3 origin, float3 direction)
 	return TracePrimary(origin, direction, exitDirection);
 }
 
-float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection)
+float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, out float shadowHitDistance)
 {
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
-	return TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), shadowHit, ignoredDirection) ? 0.0 : 1.0;
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), shadowHit, ignoredDirection);
+	shadowHitDistance = blocked ? shadowHit.distance : 0.0;
+	return blocked ? 0.0 : 1.0;
+}
+
+float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection)
+{
+	float shadowHitDistance = 0.0;
+	return ComputeSunShadow(position, normal, lightDirection, shadowHitDistance);
 }
 
 float3 GetMissColor(float3 direction)

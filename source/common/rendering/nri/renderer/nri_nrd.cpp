@@ -10,7 +10,8 @@ namespace
 {
 	const nrd::DenoiserDesc gDenoisers[] = {
 		{ nrd::Identifier(1), nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR },
-		{ nrd::Identifier(2), nrd::Denoiser::RELAX_DIFFUSE_SPECULAR }
+		{ nrd::Identifier(2), nrd::Denoiser::RELAX_DIFFUSE_SPECULAR },
+		{ nrd::Identifier(3), nrd::Denoiser::SIGMA_SHADOW }
 	};
 
 	static bool UseRelax(NRINrdDenoiserMode mode)
@@ -67,6 +68,16 @@ namespace
 		settings.minMaterialForSpecular = 2.0f;
 		return settings;
 	}
+
+	static nrd::SigmaSettings BuildSigmaSettings(const NRINrdDispatchDesc& desc)
+	{
+		nrd::SigmaSettings settings = {};
+		settings.maxStabilizedFrameNum = std::min(desc.maxStabilizedFrameNum, nrd::SIGMA_MAX_HISTORY_FRAME_NUM);
+		settings.lightDirection[0] = desc.lightDirection[0];
+		settings.lightDirection[1] = desc.lightDirection[1];
+		settings.lightDirection[2] = desc.lightDirection[2];
+		return settings;
+	}
 }
 
 nrd::Resource NRINrdContext::MakeResource(NRITextureResource& texture)
@@ -106,11 +117,13 @@ bool NRINrdContext::EnsureReady(nri::Device& device, uint32_t width, uint32_t he
 
 	mReblurDenoiser = gDenoisers[0].identifier;
 	mRelaxDenoiser = gDenoisers[1].identifier;
+	mSigmaDenoiser = gDenoisers[2].identifier;
 	mWidth = width;
 	mHeight = height;
 	mInitialized = true;
 	mHasReblurSettings = false;
 	mHasRelaxSettings = false;
+	mHasSigmaSettings = false;
 	mLastDenoiserMode = NRINrdDenoiserMode::Reblur;
 	return true;
 }
@@ -132,11 +145,35 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	{
 		return false;
 	}
+	if (desc.enableSigmaShadow && (desc.unfilteredPenumbra == nullptr || desc.shadow == nullptr))
+	{
+		return false;
+	}
 
 	const bool useRelax = UseRelax(desc.denoiserMode);
 	const bool denoiserChanged = desc.denoiserMode != mLastDenoiserMode;
 	bool settingsChanged = false;
 	nrd::Identifier activeDenoiser = useRelax ? mRelaxDenoiser : mReblurDenoiser;
+	bool sigmaSettingsChanged = false;
+
+	if (desc.enableSigmaShadow)
+	{
+		const nrd::SigmaSettings sigmaSettings = BuildSigmaSettings(desc);
+		sigmaSettingsChanged =
+			!mHasSigmaSettings ||
+			std::memcmp(&mSigmaSettings, &sigmaSettings, sizeof(sigmaSettings)) != 0;
+
+		if (sigmaSettingsChanged)
+		{
+			if (mIntegration.SetDenoiserSettings(mSigmaDenoiser, &sigmaSettings) != nrd::Result::SUCCESS)
+			{
+				return false;
+			}
+
+			mSigmaSettings = sigmaSettings;
+			mHasSigmaSettings = true;
+		}
+	}
 
 	if (useRelax)
 	{
@@ -202,7 +239,7 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	commonSettings.disocclusionThreshold = 0.01f;
 	commonSettings.disocclusionThresholdAlternate = 0.05f;
 	commonSettings.frameIndex = desc.frameIndex;
-	commonSettings.accumulationMode = (desc.resetHistory || denoiserChanged || settingsChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
+	commonSettings.accumulationMode = (desc.resetHistory || denoiserChanged || settingsChanged || sigmaSettingsChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
 	commonSettings.isMotionVectorInWorldSpace = false;
 	commonSettings.isBaseColorMetalnessAvailable = true;
 	commonSettings.enableValidation = desc.enableValidation;
@@ -223,8 +260,17 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	resourceSnapshot.SetResource(nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST, MakeResource(*desc.diffuse));
 	resourceSnapshot.SetResource(nrd::ResourceType::OUT_SPEC_RADIANCE_HITDIST, MakeResource(*desc.specular));
 	resourceSnapshot.SetResource(nrd::ResourceType::OUT_VALIDATION, MakeResource(*desc.validation));
-
-	mIntegration.Denoise(&activeDenoiser, 1, *desc.commandBuffer, resourceSnapshot);
+	if (desc.enableSigmaShadow)
+	{
+		resourceSnapshot.SetResource(nrd::ResourceType::IN_PENUMBRA, MakeResource(*desc.unfilteredPenumbra));
+		resourceSnapshot.SetResource(nrd::ResourceType::OUT_SHADOW_TRANSLUCENCY, MakeResource(*desc.shadow));
+		const nrd::Identifier denoisers[] = { mSigmaDenoiser, activeDenoiser };
+		mIntegration.Denoise(denoisers, 2, *desc.commandBuffer, resourceSnapshot);
+	}
+	else
+	{
+		mIntegration.Denoise(&activeDenoiser, 1, *desc.commandBuffer, resourceSnapshot);
+	}
 
 	for (size_t i = 0; i < resourceSnapshot.uniqueNum; ++i)
 	{
@@ -251,9 +297,12 @@ void NRINrdContext::Shutdown()
 	mHeight = 0;
 	mReblurDenoiser = 0;
 	mRelaxDenoiser = 0;
+	mSigmaDenoiser = 0;
 	mReblurSettings = {};
 	mRelaxSettings = {};
+	mSigmaSettings = {};
 	mHasReblurSettings = false;
 	mHasRelaxSettings = false;
+	mHasSigmaSettings = false;
 	mLastDenoiserMode = NRINrdDenoiserMode::Reblur;
 }

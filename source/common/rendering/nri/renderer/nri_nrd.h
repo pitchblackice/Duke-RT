@@ -21,14 +21,17 @@ struct NRINrdDispatchDesc
 	NRITextureResource* baseColorMetalness = nullptr;
 	NRITextureResource* unfilteredDiffuse = nullptr;
 	NRITextureResource* unfilteredSpecular = nullptr;
+	NRITextureResource* unfilteredPenumbra = nullptr;
 	NRITextureResource* diffuse = nullptr;
 	NRITextureResource* specular = nullptr;
+	NRITextureResource* shadow = nullptr;
 	NRITextureResource* validation = nullptr;
 	uint32_t resourceWidth = 0;
 	uint32_t resourceHeight = 0;
 	uint32_t frameIndex = 0;
 	float cameraJitter[2] = {};
 	float cameraJitterPrev[2] = {};
+	float lightDirection[3] = {};
 	float viewToClipMatrix[16] = {};
 	float viewToClipMatrixPrev[16] = {};
 	float worldToViewMatrix[16] = {};
@@ -46,6 +49,7 @@ struct NRINrdDispatchDesc
 	bool resetHistory = false;
 	bool enableAntiFirefly = true;
 	bool enableValidation = false;
+	bool enableSigmaShadow = false;
 };
 
 class NRINrdContext
@@ -63,12 +67,15 @@ private:
 	nrd::Integration mIntegration;
 	nrd::Identifier mReblurDenoiser = 0;
 	nrd::Identifier mRelaxDenoiser = 0;
+	nrd::Identifier mSigmaDenoiser = 0;
 	nrd::ReblurSettings mReblurSettings = {};
 	nrd::RelaxSettings mRelaxSettings = {};
+	nrd::SigmaSettings mSigmaSettings = {};
 	uint32_t mWidth = 0;
 	uint32_t mHeight = 0;
 	bool mInitialized = false;
 	bool mHasReblurSettings = false;
 	bool mHasRelaxSettings = false;
+	bool mHasSigmaSettings = false;
 	NRINrdDenoiserMode mLastDenoiserMode = NRINrdDenoiserMode::Reblur;
 };

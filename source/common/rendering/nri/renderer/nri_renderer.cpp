@@ -64,8 +64,8 @@ namespace
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
 	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 10;
-	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 11;
-	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 12;
+	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 12;
+	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 13;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -74,6 +74,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
 	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
 	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
+	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
@@ -1937,13 +1938,14 @@ void NRIRenderer::PrintStatus() const
 		"2.5D",
 		"interpolated",
 		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z");
-	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s\n",
+	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s shadow_split=%s\n",
 		nrdMaxFrames,
 		nrdFastFrames,
 		nrdStabilizationFrames,
 		nri_nrdantifirefly ? "on" : "off",
 		GetNrdHitDistanceReconstructionModeName(nrdHitDistanceReconstruction),
-		GetNrdInputSplitModeName(nrdInputSplit));
+		GetNrdInputSplitModeName(nrdInputSplit),
+		(nri_denoise && !nri_ptbootstrap) ? "sigma" : "off");
 	if (nrdDenoiserMode == NRINrdDenoiserMode::Relax)
 	{
 		Printf("NRI PT NRD tuning: fast_history_sigma=%.2f prepass=%.2f/%.2f material_floor=1/2 blur_radius=n/a_relax\n",
@@ -3015,7 +3017,7 @@ bool NRIRenderer::UpdateFrameTextureSet()
 	return UpdateFrameTextureSet(mFrameTextureSet, mFrameInputDescriptors);
 }
 
-bool NRIRenderer::UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 11>& descriptors)
+bool NRIRenderer::UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 12>& descriptors)
 {
 	const nri::Descriptor* rawDescriptors[NRI_INPUT_DESCRIPTOR_NUM] = {};
 	for (size_t i = 0; i < NRI_INPUT_DESCRIPTOR_NUM; ++i)
@@ -3037,7 +3039,7 @@ bool NRIRenderer::UpdateOutputSet()
 	return UpdateOutputSet(mOutputSet, mOutputDescriptors);
 }
 
-bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 12>& descriptors)
+bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 13>& descriptors)
 {
 	const nri::Descriptor* rawDescriptors[NRI_OUTPUT_DESCRIPTOR_NUM] = {};
 	for (size_t i = 0; i < NRI_OUTPUT_DESCRIPTOR_NUM; ++i)
@@ -3141,8 +3143,10 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		CreateFrameTexture(FrameTextureSlot::BaseColorMetalness, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::UnfilteredDiffuse, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::UnfilteredSpecular, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::UnfilteredPenumbra, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::DenoisedDiffuse, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::DenoisedSpecular, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::DenoisedShadow, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::Composed, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::ComposedSpecViewZ, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::TaaHistoryPing, renderWidth, renderHeight, colorFormat) &&
@@ -4743,6 +4747,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
 	mUseUpscaledInFinal = false;
 	mUseDenoisedCompositionInputs = false;
+	mUseSplitShadowDenoiser = useCompositionPresent && nri_denoise;
 
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
@@ -4923,7 +4928,10 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.StaticPrimitiveCount = mBoundStaticPrimitiveCount;
 	constants.FrameIndex = mFrameIndex;
 	constants.DynamicPrimitiveCount = mBoundDynamicPrimitiveCount;
-	constants.Flags = (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) | (directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u);
+	constants.Flags =
+		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
+		(mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
@@ -4939,6 +4947,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredSpecular), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredPenumbra), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeStorageState());
@@ -4963,6 +4972,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mOutputDescriptors[9] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).storageView;
 	mOutputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).storageView;
 	mOutputDescriptors[11] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).storageView;
+	mOutputDescriptors[12] = GetFrameTexture(FrameTextureSlot::UnfilteredPenumbra).storageView;
 	UpdateOutputSet();
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
@@ -4998,8 +5008,10 @@ bool NRIRenderer::DispatchDenoiser()
 	desc.baseColorMetalness = &GetFrameTexture(FrameTextureSlot::BaseColorMetalness);
 	desc.unfilteredDiffuse = &GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
 	desc.unfilteredSpecular = &GetFrameTexture(FrameTextureSlot::UnfilteredSpecular);
+	desc.unfilteredPenumbra = &GetFrameTexture(FrameTextureSlot::UnfilteredPenumbra);
 	desc.diffuse = &GetFrameTexture(FrameTextureSlot::DenoisedDiffuse);
 	desc.specular = &GetFrameTexture(FrameTextureSlot::DenoisedSpecular);
+	desc.shadow = &GetFrameTexture(FrameTextureSlot::DenoisedShadow);
 	desc.validation = &GetFrameTexture(FrameTextureSlot::Validation);
 	desc.resourceWidth = mRenderWidth;
 	desc.resourceHeight = mRenderHeight;
@@ -5010,6 +5022,10 @@ bool NRIRenderer::DispatchDenoiser()
 	std::memcpy(desc.viewToClipMatrixPrev, mPreviousViewToClip, sizeof(desc.viewToClipMatrixPrev));
 	std::memcpy(desc.worldToViewMatrix, mCurrentWorldToView, sizeof(desc.worldToViewMatrix));
 	std::memcpy(desc.worldToViewMatrixPrev, mPreviousWorldToView, sizeof(desc.worldToViewMatrixPrev));
+	desc.lightDirection[0] = 0.3f;
+	desc.lightDirection[1] = 0.85f;
+	desc.lightDirection[2] = -0.4f;
+	Normalize3(desc.lightDirection);
 	desc.denoiserMode = GetSelectedNrdDenoiserMode();
 	desc.maxAccumulatedFrameNum = nrdMaxFrames;
 	desc.maxFastAccumulatedFrameNum = ClampNrdFastFrameCount((int)nri_nrdfastframes, nrdMaxFrames);
@@ -5023,6 +5039,7 @@ bool NRIRenderer::DispatchDenoiser()
 	desc.resetHistory = mResetHistory;
 	desc.enableAntiFirefly = nri_nrdantifirefly;
 	desc.enableValidation = nri_validation;
+	desc.enableSigmaShadow = mUseSplitShadowDenoiser;
 	return mNrd.Denoise(desc);
 }
 
@@ -5048,7 +5065,9 @@ bool NRIRenderer::DispatchComposition()
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
 	constants.FrameIndex = mFrameIndex;
-	constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+	constants.Flags =
+		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u);
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	constants.ReservedTrace0 = GetNrdInputSplitMode();
@@ -5062,10 +5081,13 @@ bool NRIRenderer::DispatchComposition()
 	NRITextureResource& viewZ = GetFrameTexture(FrameTextureSlot::ViewZ);
 	NRITextureResource& normalRoughness = GetFrameTexture(FrameTextureSlot::NormalRoughness);
 	NRITextureResource& baseColorMetalness = GetFrameTexture(FrameTextureSlot::BaseColorMetalness);
+	NRITextureResource& rawShadow = GetFrameTexture(FrameTextureSlot::UnfilteredPenumbra);
 	const FrameTextureSlot filteredDiffuseSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::UnfilteredDiffuse;
 	const FrameTextureSlot filteredSpecularSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedSpecular : FrameTextureSlot::UnfilteredSpecular;
+	const FrameTextureSlot filteredShadowSlot = mUseDenoisedCompositionInputs ? FrameTextureSlot::DenoisedShadow : FrameTextureSlot::UnfilteredPenumbra;
 	NRITextureResource& filteredDiffuse = GetFrameTexture(filteredDiffuseSlot);
 	NRITextureResource& filteredSpecular = GetFrameTexture(filteredSpecularSlot);
+	NRITextureResource& filteredShadow = GetFrameTexture(filteredShadowSlot);
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 
 	mFrameBuffer->TransitionTexture(diffuse, NRIComputeShaderResourceState());
@@ -5073,8 +5095,10 @@ bool NRIRenderer::DispatchComposition()
 	mFrameBuffer->TransitionTexture(viewZ, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(normalRoughness, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(baseColorMetalness, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(rawShadow, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(filteredDiffuse, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(filteredSpecular, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(filteredShadow, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(composed, NRIComputeStorageState());
 
 	const nri::Descriptor* defaultInput = diffuse.shaderView;
@@ -5086,6 +5110,8 @@ bool NRIRenderer::DispatchComposition()
 	mFrameInputDescriptors[6] = specular.shaderView;
 	mFrameInputDescriptors[8] = filteredDiffuse.shaderView;
 	mFrameInputDescriptors[9] = filteredSpecular.shaderView;
+	mFrameInputDescriptors[10] = rawShadow.shaderView;
+	mFrameInputDescriptors[11] = filteredShadow.shaderView;
 	UpdateFrameTextureSet(mCompositionFrameTextureSet, mFrameInputDescriptors);
 
 	const nri::Descriptor* defaultOutput = composed.storageView;

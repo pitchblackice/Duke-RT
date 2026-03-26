@@ -15,9 +15,61 @@ bool UseRelaxDenoiser()
 	return gTraceConstants.ReservedTrace1 == 1u;
 }
 
+bool UseSplitShadowDenoiser()
+{
+	return (gTraceConstants.Flags & 0x20u) != 0;
+}
+
 float3 UnpackDenoisedRadiance(float4 packed)
 {
 	return UseRelaxDenoiser() ? RELAX_BackEnd_UnpackRadiance(packed).rgb : REBLUR_BackEnd_UnpackRadianceAndNormHitDist(packed).rgb;
+}
+
+float3 GeneratePrimaryRay(uint2 pixelPos)
+{
+	float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+	float2 uv = ((float2)pixelPos + 0.5) / resolution;
+	float2 ndc = uv * 2.0 - 1.0;
+	ndc.y = -ndc.y;
+
+	float3 ray =
+		gTraceConstants.CameraForward +
+		ndc.x * gTraceConstants.TanHalfFovX * gTraceConstants.CameraRight +
+		ndc.y * gTraceConstants.TanHalfFovY * gTraceConstants.CameraUp;
+
+	return normalize(ray);
+}
+
+float3 EvaluateSunDiffuseLighting(float3 normal, float3 lightDir, float shadow)
+{
+	const float lambert = max(dot(normal, lightDir), 0.0);
+	const float lighting = 0.20 + shadow * lambert * 0.80;
+	return lighting.xxx;
+}
+
+float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3 viewDir, float3 lightDir, float shadow)
+{
+	const float lambert = max(dot(normal, lightDir), 0.0);
+	const float3 halfVector = normalize(lightDir + viewDir);
+	const float ndoth = max(dot(normal, halfVector), 0.0);
+	const float vdoth = max(dot(viewDir, halfVector), 0.0);
+	const float fresnel = pow(1.0 - vdoth, 5.0);
+	const float3 dielectricF0 = lerp(float3(0.04, 0.04, 0.04), albedo, metalness);
+	const float3 specularColor = lerp(dielectricF0, float3(1.0, 1.0, 1.0), fresnel);
+	const float specularTerm = pow(ndoth, 12.0) * shadow * (0.5 + 0.5 * lambert);
+	return specularColor * specularTerm * 0.85;
+}
+
+float GetMaterialID(uint2 pixelPos)
+{
+	float materialID = 0.0;
+	NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos], materialID);
+	return materialID;
+}
+
+bool IsEmissiveMaterial(float materialID)
+{
+	return materialID >= 1.5 && materialID < 2.5;
 }
 
 float3 ResolveDiffuseContribution(uint2 pixelPos, float3 diffuseSignal)
@@ -28,14 +80,54 @@ float3 ResolveDiffuseContribution(uint2 pixelPos, float3 diffuseSignal)
 		return diffuseSignal;
 	}
 
-	float materialID = 0.0;
-	NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos], materialID);
-	if (materialID >= 1.5 && materialID < 2.5)
+	const float materialID = GetMaterialID(pixelPos);
+	if (IsEmissiveMaterial(materialID))
 	{
 		return diffuseSignal;
 	}
 
 	return diffuseSignal * saturate(gBaseColorInput[pixelPos].rgb);
+}
+
+float ResolveShadowFactor(uint2 pixelPos, bool filtered)
+{
+	if (!UseSplitShadowDenoiser())
+	{
+		return 1.0;
+	}
+
+	if (filtered)
+	{
+		return saturate(SIGMA_BackEnd_UnpackShadow(gShadowInput.Load(int3(pixelPos, 0))).x);
+	}
+
+	return saturate(gGuideSpecHitInput.Load(int3(pixelPos, 0)).y);
+}
+
+float3 ComposeLighting(uint2 pixelPos, float3 diffuseSignal, float3 specularSignal, float shadowFactor)
+{
+	const float viewZ = abs(gViewZInput.Load(int3(pixelPos, 0)).x);
+	if (viewZ >= NRD_INF * 0.5)
+	{
+		return diffuseSignal + specularSignal;
+	}
+
+	float materialID = 0.0;
+	const float4 normalAndRoughness = NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos], materialID);
+	if (IsEmissiveMaterial(materialID))
+	{
+		return diffuseSignal + specularSignal;
+	}
+
+	const float3 albedo = saturate(gBaseColorInput[pixelPos].rgb);
+	const float metalness = saturate(gBaseColorInput[pixelPos].a);
+	const float3 normal = normalAndRoughness.xyz;
+	const float3 lightDir = normalize(gTraceConstants.LightDirection);
+	const float3 viewDir = normalize(-GeneratePrimaryRay(pixelPos));
+	const float3 indirectDiffuse = diffuseSignal * albedo;
+	const float3 directDiffuse = EvaluateSunDiffuseLighting(normal, lightDir, shadowFactor) * albedo;
+	const float3 directSpecular = EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, shadowFactor);
+	return indirectDiffuse + specularSignal + directDiffuse + directSpecular;
 }
 
 [numthreads(8, 8, 1)]
@@ -60,12 +152,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 filteredSpecular = SanitizeColor(UnpackDenoisedRadiance(gGuideSpecularInput.Load(int3(pixelPos, 0))));
 	const float3 rawDiffuse = ResolveDiffuseContribution(pixelPos, rawDiffuseSignal);
 	const float3 filteredDiffuse = ResolveDiffuseContribution(pixelPos, filteredDiffuseSignal);
+	const float rawShadow = ResolveShadowFactor(pixelPos, false);
+	const float filteredShadow = ResolveShadowFactor(pixelPos, true);
 
-	float3 composed = filteredDiffuse + filteredSpecular;
+	float3 composed = UseSplitShadowDenoiser() ?
+		ComposeLighting(pixelPos, filteredDiffuseSignal, filteredSpecular, filteredShadow) :
+		(filteredDiffuse + filteredSpecular);
 	const uint splitMode = gTraceConstants.ReservedTrace0;
 	if (splitMode != 0u)
 	{
-		const float3 rawComposed = rawDiffuse + rawSpecular;
+		const float3 rawComposed = UseSplitShadowDenoiser() ?
+			ComposeLighting(pixelPos, rawDiffuseSignal, rawSpecular, rawShadow) :
+			(rawDiffuse + rawSpecular);
 		const bool leftSide = pixelPos.x * 2u < gTraceConstants.RenderWidth;
 		const bool rawOnLeft = splitMode == 1u;
 		composed = (leftSide == rawOnLeft) ? rawComposed : composed;

@@ -71,6 +71,11 @@ uint GetMirrorBounceCount()
 	return (gTraceConstants.BounceCounts >> 16) & 0xffffu;
 }
 
+bool UseSplitShadowDenoiser()
+{
+	return (gTraceConstants.Flags & 0x20u) != 0;
+}
+
 bool UseRelaxDenoiser()
 {
 	return gTraceConstants.ReservedTrace1 == 1u;
@@ -334,6 +339,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gGuideDiffuseOutput[pixelPos] = float4(sentinel, 1.0);
 			gGuideSpecularOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
 			gGuideSpecHitOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
+			gShadowPenumbraOutput[pixelPos] = float4(0.0, 1.0, 0.0, 1.0);
 		}
 		else
 		{
@@ -347,6 +353,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gGuideDiffuseOutput[pixelPos] = packedDiffuse;
 			gGuideSpecularOutput[pixelPos] = PackSpecularRadiance(0.0, 0.0, NRD_INF, 1.0);
 			gGuideSpecHitOutput[pixelPos] = 0.0;
+			gShadowPenumbraOutput[pixelPos] = float4(0.0, 1.0, 0.0, 1.0);
 		}
 	}
 	else
@@ -371,6 +378,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 specular = 0.0;
 		float diffuseHitDistance = 0.0;
 		float specularHitDistance = 0.0;
+		float shadowVisibility = 1.0;
+		float shadowPenumbra = 0.0;
 		float roughness = 1.0;
 		if (bootstrapFlat)
 		{
@@ -396,11 +405,21 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			}
 			else
 			{
+				const bool splitShadowDenoiser = UseSplitShadowDenoiser() && !directSceneTrace;
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
-				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir);
+				float shadowHitDistance = 0.0;
+				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir, shadowHitDistance);
+				shadowVisibility = shadow;
+				if (splitShadowDenoiser)
+				{
+					shadowPenumbra = SIGMA_FrontEnd_PackPenumbra(shadowHitDistance, tan(0.03));
+				}
 				const float3 viewDir = normalize(-visibleRayDirection);
-				diffuse = EvaluateSunDiffuseLighting(hit.normal, lightDir, shadow);
-				specular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, shadow);
+				if (!splitShadowDenoiser)
+				{
+					diffuse = EvaluateSunDiffuseLighting(hit.normal, lightDir, shadow);
+					specular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, shadow);
+				}
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{
@@ -424,6 +443,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gGuideDiffuseOutput[pixelPos] = packedDiffuse;
 		gGuideSpecularOutput[pixelPos] = packedSpecular;
 		gGuideSpecHitOutput[pixelPos] = float4(specular, packedSpecular.w);
+		gShadowPenumbraOutput[pixelPos] = float4(shadowPenumbra, shadowVisibility, 0.0, 1.0);
 
 		if (gTraceConstants.DebugMode == 1)
 		{
