@@ -1,4 +1,4 @@
-#include "NRI.hlsl"
+#include "Include/Shared.hlsli"
 
 #define NRI_FLAG_RESET_HISTORY 0x1u
 #define TAA_HISTORY_FRAME_CAP 12.0
@@ -9,47 +9,6 @@
 #define TAA_MOTION_BLEND_SCALE 1.5
 #define TAA_MOTION_REJECT_PIXELS 2.0
 #define TAA_MOTION_MIN_WEIGHT 0.2
-
-struct NRITraceConstants
-{
-	float3 CameraPos;
-	uint RenderWidth;
-	float3 CameraForward;
-	uint RenderHeight;
-	float3 CameraRight;
-	float TanHalfFovX;
-	float3 CameraUp;
-	float TanHalfFovY;
-	float3 PrevCameraPos;
-	uint DisplayWidth;
-	float3 PrevCameraForward;
-	uint DisplayHeight;
-	float3 PrevCameraRight;
-	float PrevTanHalfFovX;
-	float3 PrevCameraUp;
-	float PrevTanHalfFovY;
-	float3 LightDirection;
-	uint SceneInstanceCount;
-	float3 SkyColor;
-	uint DebugMode;
-	float3 GroundColor;
-	uint StaticPrimitiveCount;
-	uint FrameIndex;
-	uint DynamicPrimitiveCount;
-	uint Flags;
-	uint StaticMaterialCount;
-	uint BootstrapMode;
-	uint DynamicMaterialCount;
-	uint BounceCounts;
-};
-
-NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
-
-Texture2D<float4> gHistoryInput : register(t0, space0);
-Texture2D<float4> gMotionInput : register(t1, space0);
-Texture2D<float4> gComposedInput : register(t2, space0);
-
-NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gHistoryOutput, u, 0, 1);
 
 float4 LoadHistory(int2 pixelPos, uint2 size)
 {
