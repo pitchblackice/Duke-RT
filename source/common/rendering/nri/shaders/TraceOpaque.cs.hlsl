@@ -106,6 +106,9 @@ float GetSurfaceRoughness(MaterialData material)
 	return clamp(material.roughnessHint, 0.02, 1.0);
 }
 
+static const float kSunAngularRadius = 0.03;
+static const float kTanSunAngularRadius = 0.0300090032;
+
 static const float4 kReblurHitDistanceParams = float4(3.0, 0.1, 20.0, -25.0);
 
 float GetNormalizedReblurHitDistance(float hitDistance, float viewZ, float roughness)
@@ -339,7 +342,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gGuideDiffuseOutput[pixelPos] = float4(sentinel, 1.0);
 			gGuideSpecularOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
 			gGuideSpecHitOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
-			gShadowPenumbraOutput[pixelPos] = float4(0.0, 1.0, 0.0, 1.0);
+			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, kTanSunAngularRadius), 1.0, 0.0, 1.0);
 		}
 		else
 		{
@@ -353,7 +356,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gGuideDiffuseOutput[pixelPos] = packedDiffuse;
 			gGuideSpecularOutput[pixelPos] = PackSpecularRadiance(0.0, 0.0, NRD_INF, 1.0);
 			gGuideSpecHitOutput[pixelPos] = 0.0;
-			gShadowPenumbraOutput[pixelPos] = float4(0.0, 1.0, 0.0, 1.0);
+			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, kTanSunAngularRadius), 1.0, 0.0, 1.0);
 		}
 	}
 	else
@@ -410,9 +413,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				float shadowHitDistance = 0.0;
 				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir, shadowHitDistance);
 				shadowVisibility = shadow;
-				if (splitShadowDenoiser)
+				if (!directSceneTrace)
 				{
-					shadowPenumbra = SIGMA_FrontEnd_PackPenumbra(shadowHitDistance, tan(0.03));
+					shadowPenumbra = SIGMA_FrontEnd_PackPenumbra(shadowHitDistance, kTanSunAngularRadius);
 				}
 				const float3 viewDir = normalize(-visibleRayDirection);
 				if (!splitShadowDenoiser)
