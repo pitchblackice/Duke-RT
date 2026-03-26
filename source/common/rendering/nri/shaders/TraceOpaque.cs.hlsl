@@ -360,7 +360,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			const float3 sentinel = bootstrapFlat ? float3(1.0, 0.0, 1.0) : float3(1.0, 0.5, 0.0);
 			color = float4(sentinel, 1.0);
-			gMotionOutput[pixelPos] = 0.0;
+			gMotionOutput[pixelPos] = float4(0.0, 0.0, 0.0, -1.0);
 			gViewZOutput[pixelPos] = float4(1.0, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
 			gBaseColorOutput[pixelPos] = float4(sentinel, 1.0);
@@ -376,7 +376,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float3 missColor = GetMissColor(visibleRayDirection);
 			const float4 packedDiffuse = PackDiffuseRadiance(missColor, NRD_INF, NRD_INF);
 			color = (gTraceConstants.DebugMode >= 1 && gTraceConstants.DebugMode <= 4) ? float4(missColor, 1.0) : packedDiffuse;
-			gMotionOutput[pixelPos] = 0.0;
+			gMotionOutput[pixelPos] = float4(0.0, 0.0, 0.0, -NRD_INF);
 			gViewZOutput[pixelPos] = float4(NRD_INF, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
 			gBaseColorOutput[pixelPos] = float4(missColor, 0.0);
@@ -513,7 +513,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
 			gBaseColorOutput[pixelPos] = float4(bootstrapFlat ? diffuse : albedo.rgb, metalness);
 		}
-		gMotionOutput[pixelPos] = float4(motion, 1.0);
+		gMotionOutput[pixelPos] = float4(motion, currentViewZ);
 		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
 		const float4 packedDiffuse = PackDiffuseRadiance(diffuse, diffuseHitDistance, currentViewZ);
 		const float4 packedSpecular = PackSpecularRadiance(specular, specularHitDistance, currentViewZ, roughness);
