@@ -1172,33 +1172,47 @@ OptionMenu "NRIOptions" protected
 	StaticText "Backend and API changes require a restart."
 	StaticText ""
 
-	StaticText "Runtime"
+	StaticText "Tracing / Runtime"
 	Option "Bootstrap View",						"nri_ptbootstrap",				"OnOff"
 	Option "Bootstrap Mode",						"nri_ptbootstrapmode",			"NRIPTBootstrapMode"
 	Slider "Bootstrap Mode Index",				"nri_ptbootstrapmode",			0, 13, 1, 0
+	StaticText "----------------"
+	StaticText "NRD / Core"
 	Option "Denoiser",							"nri_denoise",					"OnOff"
 	Option "NRD Method",						"nri_nrddenoiser",				"NRDDenoiser"
 	Option "Validation",						"nri_validation",				"OnOff"
+	Option "NRD Raw/Denoised Split",			"nri_nrdsplit",					"NRDInputSplit"
+	Option "NRD Anti-Firefly",					"nri_nrdantifirefly",			"OnOff"
+	Option "NRD HitT Recon",					"nri_nrdhitdistrecon",			"NRDHitDistanceReconstruction"
+	StaticText "----------------"
+	StaticText "NRD / History"
 	Slider "NRD Max Frames",					"nri_nrdmaxframes",				0, 63, 1, 0
 	Slider "NRD Fast Frames",					"nri_nrdfastframes",			0, 63, 1, 0
 	Slider "NRD Stabilization",					"nri_nrdstabilizationframes",	0, 63, 1, 0
-	Option "NRD Anti-Firefly",					"nri_nrdantifirefly",			"OnOff"
-	Option "NRD HitT Recon",					"nri_nrdhitdistrecon",			"NRDHitDistanceReconstruction"
-	Option "NRD Raw/Denoised Split",			"nri_nrdsplit",					"NRDInputSplit"
 	Slider "NRD Fast Sigma",					"nri_nrdfasthistorysigma",		1.0, 3.0, 0.05, 2
+	StaticText "----------------"
+	StaticText "NRD / Spatial"
 	Slider "NRD Diffuse Prepass",				"nri_nrdprepassdiffuse",		0.0, 24.0, 0.5, 2
 	Slider "NRD Specular Prepass",				"nri_nrdprepassspecular",		0.0, 24.0, 0.5, 2
 	Slider "NRD Min Blur",						"nri_nrdblurmin",				0.0, 12.0, 0.25, 2
 	Slider "NRD Max Blur",						"nri_nrdblurmax",				0.0, 24.0, 0.25, 2
+	StaticText "----------------"
+	StaticText "SIGMA / Shadows"
 	Slider "SIGMA Stabilization",				"nri_nrdsigmastabilization",	0, 7, 1, 0
 	Slider "SIGMA Plane Dist",					"nri_nrdsigmaplanedistance",	0.001, 0.100, 0.001, 3
+	StaticText "----------------"
+	StaticText "Upscaling"
 	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"
 	Option "Upscaler Mode",						"nri_upscalermode",				"NRIUpscalerMode"
 	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2
 	Slider "Sharpness",							"nri_sharpness",				0.0, 1.0, 0.05, 2
+	StaticText "----------------"
+	StaticText "Traversal / Lighting"
 	Slider "Portal Depth",						"nri_ptportaldepth",			0, 6, 1, 0
 	Slider "Light Bounces",						"nri_ptlightbounces",			0, 4, 1, 0
 	Slider "Mirror Bounces",					"nri_ptmirrorbounces",			0, 8, 1, 0
+	StaticText "----------------"
+	StaticText "Debug / Inspection"
 	Option "PT Debug View",						"nri_ptdebug",					"NRIPTDebug"
 	Slider "PT Debug Index",					"nri_ptdebug",					0, 25, 1, 0
 	StaticText ""
