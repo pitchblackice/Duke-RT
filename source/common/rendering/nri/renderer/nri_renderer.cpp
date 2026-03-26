@@ -5280,7 +5280,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedPhaseGDebugPrepassPath)
 		{
-			Printf("NRI Phase G: ptdebug 13/14 now route through Composition and DispatchUpscaleChain before shared Final debug presentation.\n");
+			Printf("NRI Phase G: ptdebug 13/14 now route through Composition, DispatchUpscaleChain, and direct FinalPresent of the temporal outputs.\n");
 			sLoggedPhaseGDebugPrepassPath = true;
 		}
 
@@ -5294,8 +5294,9 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
-		TraceTemporalState("debug13-14-final", ResolveUpscalerKind(false), false, mHistoryOutputSlot, mUpscaledInputSlot);
-		if (!DispatchFinal())
+		const FrameTextureSlot debugSlot = nri_ptdebug == 13 ? mHistoryOutputSlot : mUpscaledInputSlot;
+		TraceTemporalState("debug13-14-present", ResolveUpscalerKind(false), false, debugSlot, mHistoryOutputSlot);
+		if (!DispatchFinalPresent(debugSlot))
 		{
 			return false;
 		}
