@@ -1198,7 +1198,7 @@ OptionMenu "NRIOptions" protected
 	Slider "Light Bounces",						"nri_ptlightbounces",			0, 4, 1, 0
 	Slider "Mirror Bounces",					"nri_ptmirrorbounces",			0, 8, 1, 0
 	Option "PT Debug View",						"nri_ptdebug",					"NRIPTDebug"
-	Slider "PT Debug Index",					"nri_ptdebug",					0, 20, 1, 0
+	Slider "PT Debug Index",					"nri_ptdebug",					0, 23, 1, 0
 	StaticText ""
 
 	StaticText "Commands"
@@ -1799,6 +1799,9 @@ OptionValue NRIPTDebug
 	18, "Metalness"
 	19, "Roughness"
 	20, "Motion Z"
+	21, "Raw Penumbra"
+	22, "Raw Shadow"
+	23, "Denoised Shadow"
 }
 
 OptionValue NRIPTBootstrapMode

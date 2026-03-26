@@ -1,6 +1,11 @@
 #include "Include/Shared.hlsli"
 #include "Include/RaytracingShared.hlsli"
 
+bool UseSplitShadowDenoiser()
+{
+	return (gTraceConstants.Flags & 0x20u) != 0;
+}
+
 float3 BootstrapPattern(float2 uv, float3 cameraForward, float3 skyColor, float3 groundColor, uint frameIndex)
 {
 	const float2 centered = uv * 2.0 - 1.0;
@@ -732,6 +737,43 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float3 positive = float3(0.5 + 0.5 * magnitude, 0.5 - 0.5 * magnitude, 0.5 - 0.5 * magnitude);
 		const float3 negative = float3(0.5 - 0.5 * magnitude, 0.5 - 0.5 * magnitude, 0.5 + 0.5 * magnitude);
 		composed = float4(motionZ >= 0.0 ? positive : negative, 1.0);
+	}
+	else if (gTraceConstants.DebugMode == 21)
+	{
+		if (!UseSplitShadowDenoiser())
+		{
+			composed = float4(1.0, 0.0, 1.0, 1.0);
+		}
+		else
+		{
+			const float penumbra = max(gGuideSpecHitInput[pixelPos].x, 0.0);
+			const float mapped = saturate(log2(1.0 + penumbra) / 8.0);
+			composed = float4(mapped.xxx, 1.0);
+		}
+	}
+	else if (gTraceConstants.DebugMode == 22)
+	{
+		if (!UseSplitShadowDenoiser())
+		{
+			composed = float4(1.0, 0.0, 1.0, 1.0);
+		}
+		else
+		{
+			const float rawShadow = saturate(gGuideSpecHitInput[pixelPos].y);
+			composed = float4(rawShadow.xxx, 1.0);
+		}
+	}
+	else if (gTraceConstants.DebugMode == 23)
+	{
+		if (!UseSplitShadowDenoiser())
+		{
+			composed = float4(1.0, 0.0, 1.0, 1.0);
+		}
+		else
+		{
+			const float denoisedShadow = saturate(SIGMA_BackEnd_UnpackShadow(gShadowInput[pixelPos]).x);
+			composed = float4(denoisedShadow.xxx, 1.0);
+		}
 	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
