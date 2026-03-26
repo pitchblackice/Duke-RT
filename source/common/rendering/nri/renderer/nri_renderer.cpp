@@ -4962,24 +4962,29 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	Clocker clock(NriPTFrameGraph);
 
 	static bool sLoggedPhaseBCompositionPath = false;
+	static bool sLoggedPhaseGResolvedPresentPath = false;
+	static bool sLoggedPhaseGDebugPrepassPath = false;
 	static bool sLoggedPhaseFDenoiserPath = false;
 	static bool sLoggedPhaseFDenoiserFallback = false;
 	static bool sLoggedRawTraceBypass = false;
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
-	const bool useCompositionPresent = !nri_ptbootstrap && (nri_ptdebug == 0 || nri_ptdebug == 15);
+	const bool useResolvedPresent = !nri_ptbootstrap && nri_ptdebug == 0;
+	const bool useComposedDebugPresent = !nri_ptbootstrap && nri_ptdebug == 15;
+	const bool usePostCompositionDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 13 || nri_ptdebug == 14);
+	const bool useCompositionPath = useResolvedPresent || useComposedDebugPresent || usePostCompositionDebugPresent;
 	const bool useValidationPresent = !nri_ptbootstrap && nri_ptdebug == 9;
 	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 16 || nri_ptdebug == 17);
 	const bool useShadowDebugPresent = !nri_ptbootstrap && (nri_ptdebug >= 21 && nri_ptdebug <= 23);
 	const bool useFinalDebugPresent = !nri_ptbootstrap &&
-		((nri_ptdebug >= 5 && nri_ptdebug <= 8) || nri_ptdebug == 13 || nri_ptdebug == 14 || (nri_ptdebug >= 18 && nri_ptdebug <= 20) || useShadowDebugPresent || nri_ptdebug == 24 || nri_ptdebug == 25);
-	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPresent && !useValidationPresent && !useDenoisedDebugPresent && !useFinalDebugPresent;
+		((nri_ptdebug >= 5 && nri_ptdebug <= 8) || (nri_ptdebug >= 18 && nri_ptdebug <= 20) || useShadowDebugPresent || nri_ptdebug == 24 || nri_ptdebug == 25);
+	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPath && !useValidationPresent && !useDenoisedDebugPresent && !useFinalDebugPresent;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
 	mUseUpscaledInFinal = false;
 	mUseDenoisedCompositionInputs = false;
-	mUseSplitShadowDenoiser = useShadowDebugPresent || (useCompositionPresent && nri_denoise);
+	mUseSplitShadowDenoiser = useShadowDebugPresent || (useCompositionPath && nri_denoise);
 
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
@@ -5047,19 +5052,13 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return true;
 	}
 
-	if (useCompositionPresent)
+	auto dispatchCompositionPath = [&]() -> bool
 	{
-		if (!sLoggedPhaseBCompositionPath)
-		{
-			Printf("NRI Phase B: ptdebug 0/15 now routes through Composition and the minimal FinalPresent presenter.\n");
-			sLoggedPhaseBCompositionPath = true;
-		}
-
 		if (nri_denoise)
 		{
 			if (!sLoggedPhaseFDenoiserPath)
 			{
-				Printf("NRI Phase F: ptdebug 0/15 now routes through NRD before Composition when nri_denoise is enabled.\n");
+				Printf("NRI Phase F: the Composition-backed PT paths now route through NRD before Composition when nri_denoise is enabled.\n");
 				sLoggedPhaseFDenoiserPath = true;
 			}
 
@@ -5082,7 +5081,78 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
+		return true;
+	};
+
+	if (useResolvedPresent)
+	{
+		if (!sLoggedPhaseGResolvedPresentPath)
+		{
+			Printf("NRI Phase G: ptdebug 0 now routes through Composition, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
+			sLoggedPhaseGResolvedPresentPath = true;
+		}
+
+		if (!dispatchCompositionPath())
+		{
+			return false;
+		}
+
+		if (!DispatchUpscaleChain())
+		{
+			return false;
+		}
+
+		const FrameTextureSlot resolvedPresentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
+		if (!DispatchFinalPresent(resolvedPresentSlot))
+		{
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (useComposedDebugPresent)
+	{
+		if (!sLoggedPhaseBCompositionPath)
+		{
+			Printf("NRI Phase B: ptdebug 15 now routes through Composition and the minimal FinalPresent presenter.\n");
+			sLoggedPhaseBCompositionPath = true;
+		}
+
+		if (!dispatchCompositionPath())
+		{
+			return false;
+		}
+
 		if (!DispatchFinalPresent(FrameTextureSlot::Composed))
+		{
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (usePostCompositionDebugPresent)
+	{
+		if (!sLoggedPhaseGDebugPrepassPath)
+		{
+			Printf("NRI Phase G: ptdebug 13/14 now route through Composition and DispatchUpscaleChain before shared Final debug presentation.\n");
+			sLoggedPhaseGDebugPrepassPath = true;
+		}
+
+		if (!dispatchCompositionPath())
+		{
+			return false;
+		}
+
+		if (!DispatchUpscaleChain())
+		{
+			return false;
+		}
+
+		if (!DispatchFinal())
 		{
 			return false;
 		}
