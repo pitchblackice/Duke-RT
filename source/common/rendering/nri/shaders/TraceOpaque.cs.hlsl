@@ -122,8 +122,8 @@ float EvaluatePointLightAttenuation(float distance, float radius, float intensit
 	const float normalizedDistance = saturate(distance / radius);
 	const float softRange = 1.0 - normalizedDistance;
 	const float smoothRange = softRange * softRange * (3.0 - 2.0 * softRange);
-	const float inverseSquare = rcp(max(distance * distance, 1.0));
-	return intensity * inverseSquare * smoothRange * smoothRange;
+	const float shapedFalloff = rcp(1.0 + 4.0 * normalizedDistance * normalizedDistance);
+	return intensity * smoothRange * smoothRange * shapedFalloff;
 }
 
 float GetSurfaceRoughness(MaterialData material)
