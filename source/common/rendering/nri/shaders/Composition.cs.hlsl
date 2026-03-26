@@ -72,6 +72,11 @@ bool IsEmissiveMaterial(float materialID)
 	return materialID >= 1.5 && materialID < 2.5;
 }
 
+bool IsSpecularSpecialMaterial(float materialID)
+{
+	return materialID >= 2.5;
+}
+
 float3 ResolveDiffuseContribution(uint2 pixelPos, float3 diffuseSignal)
 {
 	const float viewZ = abs(gViewZInput.Load(int3(pixelPos, 0)).x);
@@ -148,19 +153,26 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 rawDirectEmission = SanitizeColor(gDirectEmissionInput.Load(int3(pixelPos, 0)).rgb);
 	const float rawShadow = ResolveShadowFactor(pixelPos, false);
 	const float filteredShadow = ResolveShadowFactor(pixelPos, true);
+	const float materialID = GetMaterialID(pixelPos);
 
-	float3 composed = UseSplitShadowDenoiser() ?
+	const float3 filteredComposed = UseSplitShadowDenoiser() ?
 		ComposeLighting(pixelPos, filteredDiffuseSignal, filteredSpecular, filteredShadow, rawDirectLighting, rawDirectEmission) :
 		(ResolveDiffuseContribution(pixelPos, filteredDiffuseSignal) + filteredSpecular);
+	const float3 rawComposed = UseSplitShadowDenoiser() ?
+		ComposeLighting(pixelPos, rawDiffuseSignal, rawSpecular, rawShadow, rawDirectLighting, rawDirectEmission) :
+		(ResolveDiffuseContribution(pixelPos, rawDiffuseSignal) + rawSpecular);
+	const bool specialMaterialRawFallback = UseSplitShadowDenoiser() && IsSpecularSpecialMaterial(materialID);
+	float3 composed = specialMaterialRawFallback ? rawComposed : filteredComposed;
 	const uint splitMode = gTraceConstants.ReservedTrace0;
 	if (splitMode != 0u)
 	{
-		const float3 rawComposed = UseSplitShadowDenoiser() ?
-			ComposeLighting(pixelPos, rawDiffuseSignal, rawSpecular, rawShadow, rawDirectLighting, rawDirectEmission) :
-			(ResolveDiffuseContribution(pixelPos, rawDiffuseSignal) + rawSpecular);
 		const bool leftSide = pixelPos.x * 2u < gTraceConstants.RenderWidth;
 		const bool rawOnLeft = splitMode == 1u;
-		composed = (leftSide == rawOnLeft) ? rawComposed : composed;
+		composed = (leftSide == rawOnLeft) ? rawComposed : filteredComposed;
+		if (specialMaterialRawFallback)
+		{
+			composed = rawComposed;
+		}
 
 		const int dividerX = int(gTraceConstants.RenderWidth / 2u);
 		if (abs((int)pixelPos.x - dividerX) <= 1)

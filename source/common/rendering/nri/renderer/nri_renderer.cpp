@@ -553,16 +553,16 @@ namespace
 		return orphanCount;
 	}
 
-	static void TranslateGeometry(nri_scene::GeometryData& geometry, float dx, float dy, float dz)
+	static void TranslateGeometry(nri_scene::GeometryData& geometry, float dx, float dy, float dz, float prevDx, float prevDy, float prevDz)
 	{
 		for (auto& vertex : geometry.vertices)
 		{
 			vertex.position[0] += dx;
 			vertex.position[1] += dy;
 			vertex.position[2] += dz;
-			vertex.prevPosition[0] += dx;
-			vertex.prevPosition[1] += dy;
-			vertex.prevPosition[2] += dz;
+			vertex.prevPosition[0] += prevDx;
+			vertex.prevPosition[1] += prevDy;
+			vertex.prevPosition[2] += prevDz;
 		}
 	}
 
@@ -1892,6 +1892,7 @@ void NRIRenderer::ResetHistory()
 {
 	mResetHistory = true;
 	mHasPreviousCameraState = false;
+	mRuntimeChunkTranslationHistory.clear();
 }
 
 void NRIRenderer::PrintStatus() const
@@ -2150,6 +2151,10 @@ void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
 		mRuntimeSpaceLinkLastFrame.surfaceCount,
 		mRuntimeSpaceLinkLastFrame.triangleCount,
 		mRuntimeSpaceLinkLastFrame.materialCount);
+	Printf("NRI PT runtime link motion: prev_chunk_offsets=%u topology_changed=%s special_material_history=%s\n",
+		(uint32_t)mRuntimeChunkTranslationHistory.size(),
+		mRuntimeSpaceLinkLastFrame.topologyChanged ? "yes" : "no",
+		"portal_mirror_raw_fallback");
 }
 
 void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
@@ -4257,8 +4262,19 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 	mRuntimeSpaceLinkLastFrame.orphanLocalSpaceCount = CountOrphanLocalSpaces(mMapWorld);
 	mRuntimeSpaceLinkLastFrame.unresolvedRuntimePortalCount = mMapWorld.stats.runtimePortalCount;
 
+	const auto deactivateRuntimeLinkHistory = [&]()
+	{
+		if (!mRuntimeChunkTranslationHistory.empty())
+		{
+			mRuntimeSpaceLinkLastFrame.topologyChanged = true;
+			mRuntimeChunkTranslationHistory.clear();
+			mResetHistory = true;
+		}
+	};
+
 	if (!mMapWorld.valid)
 	{
+		deactivateRuntimeLinkHistory();
 		return false;
 	}
 
@@ -4279,6 +4295,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 
 	if (effectSectorIndex < 0 || (unsigned)effectSectorIndex >= sector.Size())
 	{
+		deactivateRuntimeLinkHistory();
 		return false;
 	}
 
@@ -4432,6 +4449,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 	if (providerSectorIndex < 0)
 	{
 		mRuntimeSpaceLinkLastFrame.queryRejected = true;
+		deactivateRuntimeLinkHistory();
 		return false;
 	}
 
@@ -4440,6 +4458,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 	if (effect.geocnt <= 0)
 	{
 		mRuntimeSpaceLinkLastFrame.queryRejected = true;
+		deactivateRuntimeLinkHistory();
 		return false;
 	}
 
@@ -4448,6 +4467,8 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		uint32_t chunkIndex = UINT32_MAX;
 		float dx = 0.0f;
 		float dz = 0.0f;
+		float prevDx = 0.0f;
+		float prevDz = 0.0f;
 	};
 
 	std::vector<RuntimeGeoLink> links;
@@ -4500,11 +4521,68 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 
 	if (links.empty())
 	{
+		deactivateRuntimeLinkHistory();
 		return false;
 	}
 
+	const auto findPreviousTranslation = [&](uint32_t chunkIndex, float& outPrevDx, float& outPrevDz) -> bool
+	{
+		for (const RuntimeChunkTranslationState& previous : mRuntimeChunkTranslationHistory)
+		{
+			if (previous.chunkIndex == chunkIndex)
+			{
+				outPrevDx = previous.dx;
+				outPrevDz = previous.dz;
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	for (RuntimeGeoLink& link : links)
+	{
+		findPreviousTranslation(link.chunkIndex, link.prevDx, link.prevDz);
+	}
+
+	const auto runtimeLinkTopologyChanged = [&]() -> bool
+	{
+		if (links.size() != mRuntimeChunkTranslationHistory.size())
+		{
+			return true;
+		}
+
+		for (const RuntimeGeoLink& link : links)
+		{
+			bool found = false;
+			for (const RuntimeChunkTranslationState& previous : mRuntimeChunkTranslationHistory)
+			{
+				if (previous.chunkIndex == link.chunkIndex)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if (!found)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	};
+
 	mRuntimeSpaceLinkLastFrame.geoEffectActive = true;
 	mRuntimeSpaceLinkLastFrame.linkCount = (uint32_t)links.size();
+	mRuntimeSpaceLinkLastFrame.topologyChanged = runtimeLinkTopologyChanged();
+	if (mRuntimeSpaceLinkLastFrame.topologyChanged)
+	{
+		mResetHistory = true;
+	}
+
+	std::vector<RuntimeChunkTranslationState> nextRuntimeChunkTranslationHistory;
+	nextRuntimeChunkTranslationHistory.reserve(links.size());
 
 	for (const RuntimeGeoLink& link : links)
 	{
@@ -4526,7 +4604,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 			Clocker clock(NriPTGeometryBuild);
 			nri_scene::BuildGeometry(liveChunkView, chunkGeometry);
 			AssignGeometryPortalIndices(mMapWorld, chunkGeometry);
-			TranslateGeometry(chunkGeometry, link.dx, 0.0f, link.dz);
+			TranslateGeometry(chunkGeometry, link.dx, 0.0f, link.dz, link.prevDx, 0.0f, link.prevDz);
 		}
 		{
 			Clocker clock(NriPTMaterialBuild);
@@ -4543,8 +4621,10 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		mRuntimeSpaceLinkLastFrame.surfaceCount += liveStats.surfaceCount;
 		mRuntimeSpaceLinkLastFrame.triangleCount += liveStats.triangleCount;
 		mRuntimeSpaceLinkLastFrame.materialCount += (uint32_t)chunkMaterials.materials.size();
+		nextRuntimeChunkTranslationHistory.push_back({ link.chunkIndex, link.dx, link.dz });
 	}
 
+	mRuntimeChunkTranslationHistory = std::move(nextRuntimeChunkTranslationHistory);
 	mRuntimeSpaceLinkLastFrame.active = !outGeometry.primitives.empty();
 	return mRuntimeSpaceLinkLastFrame.active;
 }

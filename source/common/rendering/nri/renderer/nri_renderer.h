@@ -217,6 +217,7 @@ private:
 	{
 		bool active = false;
 		bool geoEffectActive = false;
+		bool topologyChanged = false;
 		bool queryAttempted = false;
 		bool queryRejected = false;
 		int32_t candidateSectorIndex = -1;
@@ -237,6 +238,13 @@ private:
 		uint32_t surfaceCount = 0;
 		uint32_t triangleCount = 0;
 		uint32_t materialCount = 0;
+	};
+
+	struct RuntimeChunkTranslationState
+	{
+		uint32_t chunkIndex = UINT32_MAX;
+		float dx = 0.0f;
+		float dz = 0.0f;
 	};
 
 	struct RuntimeLinkTraceState
@@ -426,6 +434,7 @@ private:
 	RuntimeMapMutationFrameState mRuntimeMapLastFrame = {};
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
+	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
 	nri_scene::SceneDebugStats mLastStats = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
