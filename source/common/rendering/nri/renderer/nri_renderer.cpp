@@ -5577,50 +5577,14 @@ bool NRIRenderer::DispatchUpscaleChain()
 	const NRIUpscalerKind kind = ResolveUpscalerKind(true);
 	const bool runAppTaa = kind == NRIUpscalerKind::Off || kind == NRIUpscalerKind::NIS;
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
-	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
 
 	if (runAppTaa)
 	{
-		NRITraceConstants constants = {};
-		constants.RenderWidth = mRenderWidth;
-		constants.RenderHeight = mRenderHeight;
-		constants.DisplayWidth = mOutputWidth;
-		constants.DisplayHeight = mOutputHeight;
-		constants.FrameIndex = mFrameIndex;
-		constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
-
-		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
-
-		const nri::Descriptor* taaInputs[3] = {
-			historyInput.shaderView,
-			GetFrameTexture(FrameTextureSlot::Motion).shaderView,
-			composed.shaderView
-		};
-		nri::UpdateDescriptorRangeDesc taaInputUpdate = {};
-		taaInputUpdate.descriptorSet = mTaaFrameTextureSet;
-		taaInputUpdate.rangeIndex = 0;
-		taaInputUpdate.descriptors = taaInputs;
-		taaInputUpdate.descriptorNum = (uint32_t)std::size(taaInputs);
-		mFrameBuffer->mCore.UpdateDescriptorRanges(&taaInputUpdate, 1);
-
-		const nri::Descriptor* taaOutputs[1] = { historyOutput.storageView };
-		nri::UpdateDescriptorRangeDesc taaOutputUpdate = {};
-		taaOutputUpdate.descriptorSet = mTaaOutputSet;
-		taaOutputUpdate.rangeIndex = 0;
-		taaOutputUpdate.descriptors = taaOutputs;
-		taaOutputUpdate.descriptorNum = (uint32_t)std::size(taaOutputs);
-		mFrameBuffer->mCore.UpdateDescriptorRanges(&taaOutputUpdate, 1);
-
-		mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mTaaPipelineLayout);
-		mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mTaaFrameTextureSet, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mTaaOutputSet, nri::BindPoint::COMPUTE });
-		mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Taa));
-		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+		// Phase 3 has not landed yet, so native temporal resolve is still a placeholder.
+		// Keep the post-composition shell alive by explicitly copying into the history slot
+		// instead of dispatching the placeholder TAA shader.
+		CopyTexture(composed, historyOutput);
 	}
 
 	if (kind == NRIUpscalerKind::Off)
