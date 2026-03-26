@@ -5107,8 +5107,9 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
 	const bool useResolvedPresent = !nri_ptbootstrap && nri_ptdebug == 0;
 	const bool useComposedDebugPresent = !nri_ptbootstrap && nri_ptdebug == 15;
-	const bool usePostCompositionDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 13 || nri_ptdebug == 14 || nri_ptdebug == 26);
-	const bool useCompositionPath = useResolvedPresent || useComposedDebugPresent || usePostCompositionDebugPresent;
+	const bool usePostCompositionDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 13 || nri_ptdebug == 14);
+	const bool usePostCompositionProbePresent = !nri_ptbootstrap && nri_ptdebug == 26;
+	const bool useCompositionPath = useResolvedPresent || useComposedDebugPresent || usePostCompositionDebugPresent || usePostCompositionProbePresent;
 	const bool useValidationPresent = !nri_ptbootstrap && nri_ptdebug == 9;
 	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 16 || nri_ptdebug == 17);
 	const bool useShadowDebugPresent = !nri_ptbootstrap && (nri_ptdebug >= 21 && nri_ptdebug <= 23);
@@ -5275,7 +5276,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedPhaseGDebugPrepassPath)
 		{
-			Printf("NRI Phase G: ptdebug 13/14/26 now route through Composition and DispatchUpscaleChain before shared Final debug presentation.\n");
+			Printf("NRI Phase G: ptdebug 13/14 now route through Composition and DispatchUpscaleChain before shared Final debug presentation.\n");
 			sLoggedPhaseGDebugPrepassPath = true;
 		}
 
@@ -5289,8 +5290,30 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
-		TraceTemporalState("debug13-14-26-final", ResolveUpscalerKind(false), false, mHistoryOutputSlot, mUpscaledInputSlot);
+		TraceTemporalState("debug13-14-final", ResolveUpscalerKind(false), false, mHistoryOutputSlot, mUpscaledInputSlot);
 		if (!DispatchFinal())
+		{
+			return false;
+		}
+
+		CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (usePostCompositionProbePresent)
+	{
+		if (!dispatchCompositionPath())
+		{
+			return false;
+		}
+
+		if (!DispatchUpscaleChain())
+		{
+			return false;
+		}
+
+		TraceTemporalState("debug26-probe-present", ResolveUpscalerKind(false), false, FrameTextureSlot::Validation, mHistoryOutputSlot);
+		if (!DispatchFinalPresent(FrameTextureSlot::Validation))
 		{
 			return false;
 		}
