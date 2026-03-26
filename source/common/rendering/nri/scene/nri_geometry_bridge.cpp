@@ -131,6 +131,15 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 			continue;
 		}
 
+		if (sprite.vertices.size() == 4)
+		{
+			// Facing sprites come from HWSprite as a 4-vertex triangle strip.
+			AppendTriangle(MakeVertex(sprite.vertices[0]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[2]), materialIndex, sprite.material.flags, sprite.provenance, outGeometry);
+			AppendTriangle(MakeVertex(sprite.vertices[2]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[3]), materialIndex, sprite.material.flags, sprite.provenance, outGeometry);
+			materialIndex++;
+			continue;
+		}
+
 		SceneVertex root = MakeVertex(sprite.vertices[0]);
 		for (uint32_t i = 1; i + 1 < sprite.vertices.size(); ++i)
 		{
