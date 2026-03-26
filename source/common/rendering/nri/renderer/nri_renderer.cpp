@@ -5776,6 +5776,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		constants.DisplayWidth = mOutputWidth;
 		constants.DisplayHeight = mOutputHeight;
 		constants.FrameIndex = mFrameIndex;
+		constants.DebugMode = (uint32_t)nri_ptdebug;
 		constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 
 		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
