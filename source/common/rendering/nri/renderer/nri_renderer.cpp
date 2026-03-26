@@ -5498,7 +5498,8 @@ bool NRIRenderer::DispatchFinal()
 	constants.Flags =
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u) |
-		(presentRawTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u);
+		(presentRawTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
+		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = bootstrapMode;
