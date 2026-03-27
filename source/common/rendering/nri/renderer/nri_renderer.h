@@ -318,6 +318,7 @@ private:
 	bool BuildStaticMapAccelerationStructures();
 	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask);
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
+	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const;

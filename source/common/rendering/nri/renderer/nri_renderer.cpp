@@ -1905,6 +1905,25 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		sceneLightDynamicView,
 		sceneLightDynamicMaterials);
 
+	if (sceneLightUsesStaticMapScene && !mGpuSceneHasDynamicOverlay)
+	{
+		const bool needsResidentStaticLightRefresh =
+			!mSceneLights.GetAnalyticLights().activeLights.empty() ||
+			mBoundRuntimeLightCount != 0;
+		if (needsResidentStaticLightRefresh)
+		{
+			if (!RefreshResidentStaticSceneDataSet())
+			{
+				LogFallback("PT static scene light refresh failed.");
+				if (preserveHistory)
+				{
+					restoreHistory();
+				}
+				return false;
+			}
+		}
+	}
+
 	TraceRuntimeLinkEvents(di);
 	LogBridgeStats(activeStats);
 	if (activeStats.unsupportedModelDrawItems > 0)
@@ -5185,6 +5204,27 @@ bool NRIRenderer::RestoreStaticTopLevelScene()
 			0u,
 			(uint32_t)mStaticMapScene.gpuMaterials.size(),
 			0u);
+}
+
+bool NRIRenderer::RefreshResidentStaticSceneDataSet()
+{
+	std::vector<SceneInstanceData> sceneInstances;
+	std::vector<nri::TopLevelInstance> ignoredInstances;
+	BuildStaticMapInstances(ignoredInstances, sceneInstances);
+	return UpdateSceneDataSet(
+		mStaticVertexBuffer,
+		mStaticIndexBuffer,
+		mStaticPrimitiveBuffer,
+		mStaticMaterialBuffer,
+		mVertexBuffer,
+		mIndexBuffer,
+		mPrimitiveBuffer,
+		mMaterialBuffer,
+		sceneInstances,
+		(uint32_t)mStaticMapScene.geometry.primitives.size(),
+		0u,
+		(uint32_t)mStaticMapScene.gpuMaterials.size(),
+		0u);
 }
 
 bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry)
