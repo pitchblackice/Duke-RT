@@ -80,6 +80,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
 	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
+	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
@@ -768,7 +769,49 @@ namespace
 		uint32_t PortalDepth = 0;
 		uint32_t ReservedTrace0 = 0;
 		uint32_t ReservedTrace1 = 0;
+		float CurrentJitterX = 0.0f;
+		float CurrentJitterY = 0.0f;
+		float PreviousJitterX = 0.0f;
+		float PreviousJitterY = 0.0f;
 	};
+
+	static bool IsAppTaaEligibleUpscaler(NRIUpscalerKind kind)
+	{
+		return kind == NRIUpscalerKind::Off || kind == NRIUpscalerKind::NIS;
+	}
+
+	static bool ShouldRunAppTaa(NRIUpscalerKind kind)
+	{
+		return IsAppTaaEligibleUpscaler(kind) && !!nri_pttaa;
+	}
+
+	static bool ShouldUseTemporalJitter(NRIUpscalerKind kind)
+	{
+		return ShouldRunAppTaa(kind) || kind == NRIUpscalerKind::DLSR || kind == NRIUpscalerKind::DLRR;
+	}
+
+	static float GetHaltonSample(uint32_t index, uint32_t base)
+	{
+		float inverseBase = 1.0f / (float)base;
+		float fraction = inverseBase;
+		float result = 0.0f;
+
+		while (index > 0)
+		{
+			result += fraction * (float)(index % base);
+			index /= base;
+			fraction *= inverseBase;
+		}
+
+		return result;
+	}
+
+	static void ComputeTemporalJitter(uint32_t frameIndex, float outJitter[2])
+	{
+		const uint32_t sampleIndex = (frameIndex % NRI_TAA_JITTER_PHASE_COUNT) + 1u;
+		outJitter[0] = GetHaltonSample(sampleIndex, 2u) - 0.5f;
+		outJitter[1] = GetHaltonSample(sampleIndex, 3u) - 0.5f;
+	}
 
 	static void Normalize3(float v[3])
 	{
@@ -1412,22 +1455,26 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	if (!preserveHistory)
 	{
 		const NRIUpscalerKind resolvedUpscaler = ResolveUpscalerKind(false);
-		if (!nri_ptbootstrap && (debugMode != mLastDebugMode || resolvedUpscaler != mLastTemporalHistoryUpscaler))
+		const bool runAppTaa = ShouldRunAppTaa(resolvedUpscaler);
+		if (!nri_ptbootstrap && (debugMode != mLastDebugMode || resolvedUpscaler != mLastTemporalHistoryUpscaler || runAppTaa != mLastTemporalAppTaaEnabled))
 		{
 			ArmTemporalTraceBudget("mode-change");
 			if (nri_pttraceframes > 0)
 			{
-				Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d resolved=%s->%s\n",
+				Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d resolved=%s->%s app_taa=%s->%s\n",
 					mFrameIndex,
 					mLastDebugMode,
 					debugMode,
 					GetUpscalerName(mLastTemporalHistoryUpscaler),
-					GetUpscalerName(resolvedUpscaler));
+					GetUpscalerName(resolvedUpscaler),
+					mLastTemporalAppTaaEnabled ? "yes" : "no",
+					runAppTaa ? "yes" : "no");
 			}
 			mResetHistory = true;
 		}
 		mLastDebugMode = debugMode;
 		mLastTemporalHistoryUpscaler = resolvedUpscaler;
+		mLastTemporalAppTaaEnabled = runAppTaa;
 	}
 
 	RefreshMapWorld();
@@ -6084,8 +6131,16 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	const float tanHalfFovX = tanf((float)di.Viewpoint.FieldOfView.Radians() * 0.5f);
 	mCurrentTanHalfFovX = tanHalfFovX;
 	mCurrentTanHalfFovY = tanHalfFovX * ((float)mRenderHeight / std::max(1.0f, (float)mRenderWidth));
-	mCurrentJitter[0] = 0.0f;
-	mCurrentJitter[1] = 0.0f;
+	const NRIUpscalerKind resolvedUpscaler = ResolveUpscalerKind(false);
+	if (!nri_ptbootstrap && ShouldUseTemporalJitter(resolvedUpscaler))
+	{
+		ComputeTemporalJitter(mFrameIndex, mCurrentJitter);
+	}
+	else
+	{
+		mCurrentJitter[0] = 0.0f;
+		mCurrentJitter[1] = 0.0f;
+	}
 	FillMatrix(mCurrentViewToClip, di.VPUniforms.mProjectionMatrix);
 	FillMatrix(mCurrentWorldToView, di.VPUniforms.mViewMatrix);
 

@@ -509,6 +509,7 @@ private:
 	bool mHasRuntimeLinkTraceState = false;
 	bool mResetHistory = true;
 	bool mUseUpscaledInFinal = false;
+	bool mLastTemporalAppTaaEnabled = false;
 	bool mUseDenoisedCompositionInputs = false;
 	bool mUseSplitShadowDenoiser = false;
 	bool mHasLoggedFallback = false;

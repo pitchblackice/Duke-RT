@@ -46,6 +46,10 @@ struct NRITraceConstants
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;
+	float CurrentJitterX;
+	float CurrentJitterY;
+	float PreviousJitterX;
+	float PreviousJitterY;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
@@ -101,7 +105,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 pixelPos = dispatchThreadId.xy;
 	const uint2 size = uint2(width, height);
 	const float2 resolution = float2(size);
-	const float2 uv = ((float2)pixelPos + 0.5) / resolution;
+	const float2 currentJitter = float2(gTraceConstants.CurrentJitterX, gTraceConstants.CurrentJitterY);
+	const float2 uv = ((float2)pixelPos + 0.5 + currentJitter) / resolution;
 	const bool resetHistory = (gTraceConstants.Flags & NRI_FLAG_RESET_HISTORY) != 0u;
 	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);
 

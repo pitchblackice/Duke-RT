@@ -58,6 +58,10 @@ struct NRITraceConstants
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;
+	float CurrentJitterX;
+	float CurrentJitterY;
+	float PreviousJitterX;
+	float PreviousJitterY;
 };
 
 struct SceneVertex
