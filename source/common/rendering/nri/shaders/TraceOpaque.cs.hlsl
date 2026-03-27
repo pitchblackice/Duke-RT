@@ -356,7 +356,7 @@ float3 GetSurfaceSpecularColor(float3 albedo, float metalness)
 	return lerp(float3(0.04, 0.04, 0.04), albedo, metalness);
 }
 
-float3 TraceIndirectDiffuse(HitData surfaceHit, uint2 pixelPos, uint frameIndex, uint bounceCount, out float outHitDistance)
+float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixelPos, uint frameIndex, uint bounceCount, out float outHitDistance)
 {
 	outHitDistance = 0.0;
 	if (bounceCount == 0u)
@@ -365,7 +365,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, uint2 pixelPos, uint frameIndex,
 	}
 
 	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u ^ 0x9e3779b9u;
-	float3 throughput = 1.0;
+	float3 throughput = surfaceAlbedo;
 	float3 indirectRadiance = 0.0;
 	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
 	float3 direction = SampleCosineHemisphere(surfaceHit.normal, rngState);
@@ -750,7 +750,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{
-					diffuse += TraceIndirectDiffuse(hit, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance);
+					diffuse += TraceIndirectDiffuse(hit, albedo.rgb, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance);
 					specular += TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, lightBounceCount, specularHitDistance);
 				}
 			}
