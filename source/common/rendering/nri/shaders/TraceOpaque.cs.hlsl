@@ -129,17 +129,18 @@ float EvaluatePointLightAttenuation(float distance, float radius, float intensit
 RuntimeLightTileHeaderData GetRuntimeLightTileHeader(uint2 pixelPos)
 {
 	RuntimeLightTileHeaderData header = { 0u, 0u };
+	const uint2 tileCounts = uint2(gTraceConstants.ReservedTrace0 & 0xffffu, gTraceConstants.ReservedTrace0 >> 16u);
+	static const uint kRuntimeLightTileSize = 64u;
 	if (gTraceConstants.RuntimeLightCount == 0u ||
-		gTraceConstants.RuntimeLightTileCountX == 0u ||
-		gTraceConstants.RuntimeLightTileCountY == 0u ||
-		gTraceConstants.RuntimeLightTileSize == 0u)
+		tileCounts.x == 0u ||
+		tileCounts.y == 0u)
 	{
 		return header;
 	}
 
-	const uint tileX = min(pixelPos.x / gTraceConstants.RuntimeLightTileSize, gTraceConstants.RuntimeLightTileCountX - 1u);
-	const uint tileY = min(pixelPos.y / gTraceConstants.RuntimeLightTileSize, gTraceConstants.RuntimeLightTileCountY - 1u);
-	return gRuntimeLightTileHeaders[tileY * gTraceConstants.RuntimeLightTileCountX + tileX];
+	const uint tileX = min(pixelPos.x / kRuntimeLightTileSize, tileCounts.x - 1u);
+	const uint tileY = min(pixelPos.y / kRuntimeLightTileSize, tileCounts.y - 1u);
+	return gRuntimeLightTileHeaders[tileY * tileCounts.x + tileX];
 }
 
 float GetSurfaceRoughness(MaterialData material)

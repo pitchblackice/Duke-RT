@@ -34,9 +34,6 @@ struct NRITraceConstants
 	uint BounceCounts;
 	uint PortalCount;
 	uint RuntimeLightCount;
-	uint RuntimeLightTileCountX;
-	uint RuntimeLightTileCountY;
-	uint RuntimeLightTileSize;
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;

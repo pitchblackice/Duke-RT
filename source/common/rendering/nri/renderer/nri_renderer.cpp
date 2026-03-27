@@ -775,9 +775,6 @@ namespace
 		uint32_t BounceCounts = 0;
 		uint32_t PortalCount = 0;
 		uint32_t RuntimeLightCount = 0;
-		uint32_t RuntimeLightTileCountX = 0;
-		uint32_t RuntimeLightTileCountY = 0;
-		uint32_t RuntimeLightTileSize = 0;
 		uint32_t PortalDepth = 0;
 		uint32_t ReservedTrace0 = 0;
 		uint32_t ReservedTrace1 = 0;
@@ -5911,10 +5908,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u));
 	constants.PortalCount = mBoundPortalCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
-	constants.RuntimeLightTileCountX = mBoundRuntimeLightTileCountX;
-	constants.RuntimeLightTileCountY = mBoundRuntimeLightTileCountY;
-	constants.RuntimeLightTileSize = mBoundRuntimeLightTileSize;
 	constants.PortalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
+	constants.ReservedTrace0 = (mBoundRuntimeLightTileCountX & 0xffffu) | ((mBoundRuntimeLightTileCountY & 0xffffu) << 16u);
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
@@ -6052,9 +6047,6 @@ bool NRIRenderer::DispatchComposition()
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
-	constants.RuntimeLightTileCountX = mBoundRuntimeLightTileCountX;
-	constants.RuntimeLightTileCountY = mBoundRuntimeLightTileCountY;
-	constants.RuntimeLightTileSize = mBoundRuntimeLightTileSize;
 	constants.ReservedTrace0 = GetNrdInputSplitMode();
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 	Copy3(mSkyColor, constants.SkyColor);
@@ -6473,9 +6465,6 @@ bool NRIRenderer::DispatchFinal()
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
-	constants.RuntimeLightTileCountX = mBoundRuntimeLightTileCountX;
-	constants.RuntimeLightTileCountY = mBoundRuntimeLightTileCountY;
-	constants.RuntimeLightTileSize = mBoundRuntimeLightTileSize;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
