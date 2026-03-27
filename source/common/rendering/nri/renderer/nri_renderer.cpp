@@ -6990,6 +6990,19 @@ void NRIRenderer::DestroyAccelerationStructures()
 
 void NRIRenderer::DestroyStaticMapSceneCache()
 {
+	const bool hasResidentStaticSceneResources =
+		!mStaticMapScene.chunks.empty() ||
+		mStaticVertexBuffer.buffer != nullptr ||
+		mStaticIndexBuffer.buffer != nullptr ||
+		mStaticPrimitiveBuffer.buffer != nullptr ||
+		mStaticMaterialBuffer.buffer != nullptr;
+	if (hasResidentStaticSceneResources && mFrameBuffer != nullptr)
+	{
+		// The resident PT static scene can still be referenced by the previous frame's
+		// TLAS and descriptor bindings. Wait before tearing it down for live rebuilds.
+		mFrameBuffer->WaitForCommands(true);
+	}
+
 	for (auto& chunk : mStaticMapScene.chunks)
 	{
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
