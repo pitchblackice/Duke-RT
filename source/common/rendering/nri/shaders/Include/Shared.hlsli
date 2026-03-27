@@ -167,7 +167,7 @@ struct SectorLightData
 {
 	float3 ambientColor;
 	float ambientIntensity;
-	float hemisphereColor;
+	float3 hemisphereColor;
 	float hemisphereAmount;
 	float fogAmount;
 	float pulseScale;
