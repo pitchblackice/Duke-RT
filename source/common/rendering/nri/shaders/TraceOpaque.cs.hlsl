@@ -346,7 +346,9 @@ float3 EvaluateSectorLightingSource(MaterialData material, float3 normal)
 
 float3 EvaluateSectorLighting(MaterialData material, float3 normal, float3 albedo)
 {
-	return albedo * EvaluateSectorLightingSource(material, normal);
+	const float3 sourceLighting = EvaluateSectorLightingSource(material, normal);
+	const float neutralAlbedo = dot(albedo, float3(0.2126, 0.7152, 0.0722));
+	return sourceLighting * neutralAlbedo;
 }
 
 float3 GetSurfaceSpecularColor(float3 albedo, float metalness)
@@ -666,7 +668,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 				const float3 viewDir = normalize(-visibleRayDirection);
 				sectorSourceLighting = EvaluateSectorLightingSource(material, hit.normal);
-				sectorAmbientLighting = albedo.rgb * sectorSourceLighting;
+				sectorAmbientLighting = EvaluateSectorLighting(material, hit.normal, albedo.rgb);
 				directEmission = EvaluateAmbientDiffuse(albedo.rgb) + sectorAmbientLighting;
 				const float3 directSunDiffuse = EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir);
 				const float3 directSunSpecular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0);
