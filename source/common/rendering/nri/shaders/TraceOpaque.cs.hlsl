@@ -403,6 +403,8 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, uint2 pixelPos, uint frameIndex,
 			break;
 		}
 
+		indirectRadiance += throughput * EvaluateSectorLighting(bounceMaterial, bounceHit.normal, bounceAlbedo.rgb);
+
 		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial);
 		const float3 bounceViewDir = normalize(-tracedDirection);
 		float3 bounceEmissiveDiffuse = 0.0;
@@ -490,6 +492,8 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			indirectRadiance += throughput * EvaluateMaterialEmission(bounceMaterial, bounceAlbedo.rgb);
 			break;
 		}
+
+		indirectRadiance += throughput * EvaluateSectorLighting(bounceMaterial, bounceHit.normal, bounceAlbedo.rgb);
 
 		const float3 bounceViewDir = normalize(-tracedDirection);
 		float3 bounceEmissiveDiffuse = 0.0;
