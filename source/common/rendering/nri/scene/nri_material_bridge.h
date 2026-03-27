@@ -6,6 +6,16 @@
 
 namespace nri_scene
 {
+enum MaterialLightingFlags : uint32_t
+{
+	MaterialLightingFlag_None = 0,
+	MaterialLightingFlag_MaterialFullbright = 1u << 0,
+	MaterialLightingFlag_TextureFullbright = 1u << 1,
+	MaterialLightingFlag_TextureGlowing = 1u << 2,
+	MaterialLightingFlag_TextureAutoGlowing = 1u << 3,
+	MaterialLightingFlag_HasGlowmap = 1u << 4,
+};
+
 struct MaterialData
 {
 	uint32_t textureIndex = 0;
@@ -16,6 +26,23 @@ struct MaterialData
 	float alpha = 1.0f;
 	float roughnessHint = 0.45f;
 	float metalnessHint = 0.0f;
+};
+
+struct MaterialLightingMetadata
+{
+	FGameTexture* texture = nullptr;
+	uint64_t materialKey = 0;
+	uint64_t textureContentKey = 0;
+	uint64_t glowmapContentKey = 0;
+	uint32_t textureId = 0;
+	uint32_t paletteIndex = 0;
+	uint32_t materialFlags = 0;
+	uint32_t lightingFlags = 0;
+	int32_t shade = 0;
+	float alpha = 1.0f;
+	float lightLevel = 1.0f;
+	float averageColor[3] = { 1.0f, 1.0f, 1.0f };
+	float glowColor[3] = {};
 };
 
 struct TextureUpload
@@ -30,6 +57,7 @@ struct TextureUpload
 struct MaterialBridgeData
 {
 	std::vector<MaterialData> materials;
+	std::vector<MaterialLightingMetadata> lightMetadata;
 	std::vector<TextureUpload> textures;
 	std::vector<uint8_t> paletteLookup;
 	uint32_t paletteWidth = 256;

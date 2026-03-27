@@ -59,6 +59,7 @@ public:
 	bool RemovePathTracingPointLight(uint32_t id);
 	void ClearPathTracingPointLights();
 	void PrintPathTracingPointLights() const;
+	void PrintPathTracingSceneLightDump(float radius, uint32_t limit) const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
 
 private:

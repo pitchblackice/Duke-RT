@@ -924,6 +924,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_renderstate.cpp
 	common/rendering/nri/renderer/nri_resources.cpp
 	common/rendering/nri/renderer/nri_renderer.cpp
+	common/rendering/nri/renderer/nri_scene_lights.cpp
 	common/rendering/nri/renderer/nri_upscaler.cpp
 	common/rendering/nri/scene/nri_map_world.cpp
 	common/rendering/nri/scene/nri_map_builder.cpp

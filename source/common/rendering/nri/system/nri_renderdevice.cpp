@@ -946,6 +946,34 @@ CCMD(nri_ptlightremove)
 	}
 }
 
+CCMD(nri_ptlightdump)
+{
+	const float radius = argv.argc() > 1 ? (float)atof(argv[1]) : 2048.0f;
+	const uint32_t limit = argv.argc() > 2 ? (uint32_t)atoi(argv[2]) : 32u;
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingSceneLightDump(radius, limit);
+	}
+	else
+	{
+		Printf("nri_ptlightdump is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptlightdebug_nearplayer)
+{
+	const float radius = argv.argc() > 1 ? (float)atof(argv[1]) : 1024.0f;
+	const uint32_t limit = argv.argc() > 2 ? (uint32_t)atoi(argv[2]) : 16u;
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingSceneLightDump(radius, limit);
+	}
+	else
+	{
+		Printf("nri_ptlightdebug_nearplayer is only available while using the NRI renderer.\n");
+	}
+}
+
 NRIRenderDevice::NRIRenderDevice(void* hMonitor, bool fullscreen)
 	: SystemBaseFrameBuffer(hMonitor, fullscreen), mRenderState(std::make_unique<NRIRenderState>(this))
 {
@@ -1993,6 +2021,17 @@ void NRIRenderDevice::PrintPathTracingPointLights() const
 	}
 
 	mRenderer->PrintRuntimePointLights();
+}
+
+void NRIRenderDevice::PrintPathTracingSceneLightDump(float radius, uint32_t limit) const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT scene-light dump is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintSceneLightDump(radius, limit);
 }
 
 void NRIRenderDevice::LogStartup()

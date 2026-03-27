@@ -5,6 +5,7 @@
 #include "textures.h"
 
 #include <algorithm>
+#include <array>
 #include <unordered_map>
 
 EXTERN_CVAR(Int, hw_lightmode)
@@ -124,9 +125,53 @@ namespace
 		return hash;
 	}
 
+	void Fnv1a64Append(uint64_t& hash, const void* data, size_t size)
+	{
+		const uint8_t* bytes = static_cast<const uint8_t*>(data);
+		for (size_t i = 0; i < size; ++i)
+		{
+			hash ^= (uint64_t)bytes[i];
+			hash *= 1099511628211ull;
+		}
+	}
+
 	uint64_t MakeTextureKey(FGameTexture* texture, bool indexed)
 	{
 		return (uint64_t)(uintptr_t)texture ^ (indexed ? 1ull : 0ull);
+	}
+
+	uint64_t ComputeTextureContentKey(FTexture* texture, bool indexed)
+	{
+		if (texture == nullptr)
+		{
+			return 0;
+		}
+
+		if (indexed)
+		{
+			FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_Indexed);
+			if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+			{
+				return 0;
+			}
+
+			uint64_t key = Fnv1a64(texBuffer.mBuffer, (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight);
+			key ^= ((uint64_t)(uint32_t)texBuffer.mWidth << 32) | (uint64_t)(uint32_t)texBuffer.mHeight;
+			key ^= (1ull << 63);
+			return key;
+		}
+
+		FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_ProcessData);
+		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+		{
+			return 0;
+		}
+
+		uint64_t key = texBuffer.mContentId != 0 ?
+			texBuffer.mContentId :
+			Fnv1a64(texBuffer.mBuffer, (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
+		key ^= ((uint64_t)(uint32_t)texBuffer.mWidth << 32) | (uint64_t)(uint32_t)texBuffer.mHeight;
+		return key;
 	}
 
 	TextureUpload BuildTextureUpload(FGameTexture* texture, bool indexed)
@@ -173,6 +218,77 @@ namespace
 		return upload;
 	}
 
+	uint64_t ComputeMaterialKey(const MaterialRef& materialRef, const MaterialLightingMetadata& metadata)
+	{
+		uint64_t key = 1469598103934665603ull;
+		Fnv1a64Append(key, &metadata.textureContentKey, sizeof(metadata.textureContentKey));
+		Fnv1a64Append(key, &metadata.glowmapContentKey, sizeof(metadata.glowmapContentKey));
+		Fnv1a64Append(key, &metadata.textureId, sizeof(metadata.textureId));
+		Fnv1a64Append(key, &metadata.paletteIndex, sizeof(metadata.paletteIndex));
+		Fnv1a64Append(key, &metadata.materialFlags, sizeof(metadata.materialFlags));
+		Fnv1a64Append(key, &metadata.lightingFlags, sizeof(metadata.lightingFlags));
+		Fnv1a64Append(key, &materialRef.alpha, sizeof(materialRef.alpha));
+		return key;
+	}
+
+	MaterialLightingMetadata BuildMaterialLightingMetadata(const MaterialRef& materialRef, const MaterialData& material, uint64_t textureContentKey)
+	{
+		MaterialLightingMetadata metadata = {};
+		metadata.texture = materialRef.texture;
+		metadata.textureContentKey = textureContentKey;
+		metadata.paletteIndex = material.paletteIndex;
+		metadata.materialFlags = material.flags;
+		metadata.shade = materialRef.shade;
+		metadata.alpha = material.alpha;
+		metadata.lightLevel = material.lightLevel;
+
+		const bool materialFullbright = (material.flags & MaterialFlag_Fullbright) != 0;
+		if (materialFullbright)
+		{
+			metadata.lightingFlags |= MaterialLightingFlag_MaterialFullbright;
+		}
+
+		if (materialRef.texture != nullptr)
+		{
+			metadata.textureId = (uint32_t)materialRef.texture->GetID().GetIndex();
+			if (materialRef.texture->isFullbright())
+			{
+				metadata.lightingFlags |= MaterialLightingFlag_TextureFullbright;
+			}
+			if (materialRef.texture->isGlowing())
+			{
+				metadata.lightingFlags |= MaterialLightingFlag_TextureGlowing;
+				materialRef.texture->GetGlowColor(metadata.glowColor);
+			}
+			if (materialRef.texture->isAutoGlowing())
+			{
+				metadata.lightingFlags |= MaterialLightingFlag_TextureAutoGlowing;
+			}
+			if (materialRef.texture->GetGlowmap() != nullptr)
+			{
+				metadata.lightingFlags |= MaterialLightingFlag_HasGlowmap;
+				metadata.glowmapContentKey = ComputeTextureContentKey(materialRef.texture->GetGlowmap(), false);
+			}
+
+			if (!TryGetAverageTextureColor(materialRef.texture, metadata.averageColor))
+			{
+				metadata.averageColor[0] = 1.0f;
+				metadata.averageColor[1] = 1.0f;
+				metadata.averageColor[2] = 1.0f;
+			}
+			if ((metadata.lightingFlags & MaterialLightingFlag_TextureGlowing) == 0 &&
+				(metadata.lightingFlags & MaterialLightingFlag_HasGlowmap) != 0)
+			{
+				metadata.glowColor[0] = metadata.averageColor[0];
+				metadata.glowColor[1] = metadata.averageColor[1];
+				metadata.glowColor[2] = metadata.averageColor[2];
+			}
+		}
+
+		metadata.materialKey = ComputeMaterialKey(materialRef, metadata);
+		return metadata;
+	}
+
 	void AppendSurfaceMaterial(const MaterialRef& materialRef, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
 	{
 		MaterialData material = {};
@@ -200,6 +316,8 @@ namespace
 		}
 
 		outMaterials.materials.push_back(material);
+		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(materialRef, material, outMaterials.textures[material.textureIndex].key);
+		outMaterials.lightMetadata.push_back(metadata);
 	}
 
 	void BuildPaletteLookup(MaterialBridgeData& outMaterials)

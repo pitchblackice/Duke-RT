@@ -2,6 +2,7 @@
 
 #include "nri_nrd.h"
 #include "nri_resources.h"
+#include "nri_scene_lights.h"
 #include "nri_upscaler.h"
 
 #include "../scene/nri_map_builder.h"
@@ -29,6 +30,7 @@ public:
 	void ResetHistory();
 	void PrintStatus() const;
 	void PrintSceneBufferStatus() const;
+	void PrintSceneLightDump(float radius, uint32_t limit) const;
 	bool AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId);
 	bool RemoveRuntimePointLight(uint32_t id);
 	void ClearRuntimePointLights();
@@ -369,6 +371,12 @@ private:
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;
+	void RefreshSceneLightSystem(
+		bool usedStaticMapScene,
+		const nri_scene::SceneView* capturedSceneView,
+		const nri_scene::MaterialBridgeData* capturedMaterials,
+		const nri_scene::SceneView* dynamicSceneView,
+		const nri_scene::MaterialBridgeData* dynamicMaterials);
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
 	void CopyTexture(NRITextureResource& source, NRITextureResource& destination);
@@ -468,6 +476,7 @@ private:
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
 	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
 	nri_scene::SceneDebugStats mLastStats = {};
+	SceneLightSystem mSceneLights;
 	std::vector<RuntimePointLightData> mRuntimePointLights;
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};

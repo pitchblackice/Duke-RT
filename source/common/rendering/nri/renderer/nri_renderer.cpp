@@ -654,9 +654,11 @@ namespace
 			textureLookup.emplace(destination.textures[i].key, i);
 		}
 
-		for (const auto& material : source.materials)
+		for (size_t materialIndex = 0; materialIndex < source.materials.size(); ++materialIndex)
 		{
+			const auto& material = source.materials[materialIndex];
 			nri_scene::MaterialData copy = material;
+			const bool hasLightMetadata = materialIndex < source.lightMetadata.size();
 			if (material.textureIndex < source.textures.size())
 			{
 				const auto& texture = source.textures[material.textureIndex];
@@ -675,6 +677,10 @@ namespace
 			}
 
 			destination.materials.push_back(copy);
+			if (hasLightMetadata)
+			{
+				destination.lightMetadata.push_back(source.lightMetadata[materialIndex]);
+			}
 		}
 
 		if (destination.paletteLookup.empty())
@@ -1251,6 +1257,17 @@ namespace
 		}
 	}
 
+	static const char* GetSceneLightRecordSourceName(SceneLightRecordSource source)
+	{
+		switch (source)
+		{
+		case SceneLightRecordSource::CapturedScene: return "captured_scene";
+		case SceneLightRecordSource::StaticMapScene: return "static_map_scene";
+		case SceneLightRecordSource::DynamicScene: return "dynamic_scene";
+		default: return "none";
+		}
+	}
+
 }
 
 NRIRenderer::NRIRenderer(NRIRenderDevice* frameBuffer)
@@ -1532,6 +1549,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::SceneView* activeSceneView = nullptr;
 	const nri_scene::GeometryData* activeGeometry = nullptr;
 	const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
+	const nri_scene::SceneView* sceneLightCapturedView = nullptr;
+	const nri_scene::MaterialBridgeData* sceneLightCapturedMaterials = nullptr;
+	const nri_scene::SceneView* sceneLightDynamicView = nullptr;
+	const nri_scene::MaterialBridgeData* sceneLightDynamicMaterials = nullptr;
+	bool sceneLightUsesStaticMapScene = false;
 	nri_scene::SceneDebugStats activeStats = {};
 	bool paletteReady = true;
 	bool texturesReady = true;
@@ -1540,6 +1562,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	if (allowStaticMapScene && EnsureStaticMapScene())
 	{
+		sceneLightUsesStaticMapScene = true;
 		mUsedStaticMapSceneLastFrame = true;
 		activeSceneView = &mStaticMapScene.sceneView;
 		activeGeometry = &mStaticMapScene.geometry;
@@ -1565,6 +1588,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					nri_scene::BuildMaterials(dynamicSceneView, dynamicMaterialBridge);
 				}
 			}
+
+			sceneLightDynamicView = &dynamicSceneView;
+			sceneLightDynamicMaterials = &dynamicMaterialBridge;
 		}
 
 		if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || !dynamicGeometry.primitives.empty())
@@ -1769,6 +1795,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 
 		activeSceneView = &capturedSceneView;
+		sceneLightCapturedView = &capturedSceneView;
 		activeStats = capturedSceneView.stats;
 
 		{
@@ -1781,6 +1808,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			Clocker clock(NriPTMaterialBuild);
 			nri_scene::BuildMaterials(capturedSceneView, materialBridge);
 		}
+		sceneLightCapturedMaterials = &materialBridge;
 
 		const bool needsFallbackMaterials = bootstrapCapturedDiagnostics || bootstrapCapturedFlat;
 		const bool needsRealTextures = !nri_ptbootstrap || bootstrapCapturedBaseColor || bootstrapMode >= 13u;
@@ -1869,6 +1897,13 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 		return false;
 	}
+
+	RefreshSceneLightSystem(
+		sceneLightUsesStaticMapScene,
+		sceneLightCapturedView,
+		sceneLightCapturedMaterials,
+		sceneLightDynamicView,
+		sceneLightDynamicMaterials);
 
 	TraceRuntimeLinkEvents(di);
 	LogBridgeStats(activeStats);
@@ -2915,6 +2950,131 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		mLastSurfaceProbe.position[1],
 		mLastSurfaceProbe.position[2],
 		flags);
+}
+
+void NRIRenderer::RefreshSceneLightSystem(
+	bool usedStaticMapScene,
+	const nri_scene::SceneView* capturedSceneView,
+	const nri_scene::MaterialBridgeData* capturedMaterials,
+	const nri_scene::SceneView* dynamicSceneView,
+	const nri_scene::MaterialBridgeData* dynamicMaterials)
+{
+	mSceneLights.BeginFrame(mFrameIndex);
+
+	if (usedStaticMapScene && mStaticMapScene.valid)
+	{
+		mSceneLights.AppendSceneView(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, SceneLightRecordSource::StaticMapScene);
+	}
+	else if (capturedSceneView != nullptr && capturedMaterials != nullptr)
+	{
+		mSceneLights.AppendSceneView(*capturedSceneView, *capturedMaterials, SceneLightRecordSource::CapturedScene);
+	}
+
+	if (dynamicSceneView != nullptr && dynamicMaterials != nullptr)
+	{
+		mSceneLights.AppendSceneView(*dynamicSceneView, *dynamicMaterials, SceneLightRecordSource::DynamicScene);
+	}
+}
+
+void NRIRenderer::PrintSceneLightDump(float radius, uint32_t limit) const
+{
+	if (!mSceneLights.HasRecords())
+	{
+		Printf("NRI PT scene lights: no cached scene-light identity is available yet.\n");
+		return;
+	}
+
+	struct Candidate
+	{
+		const SceneLightSystem::SurfaceRecord* record = nullptr;
+		float distanceSq = 0.0f;
+	};
+
+	std::vector<Candidate> candidates;
+	candidates.reserve(mSceneLights.GetSurfaceRecords().size());
+	const float radiusSq = radius > 0.0f ? radius * radius : -1.0f;
+
+	for (const SceneLightSystem::SurfaceRecord& record : mSceneLights.GetSurfaceRecords())
+	{
+		const float dx = record.center[0] - mCurrentCameraPos[0];
+		const float dy = record.center[1] - mCurrentCameraPos[1];
+		const float dz = record.center[2] - mCurrentCameraPos[2];
+		const float distanceSq = dx * dx + dy * dy + dz * dz;
+		if (radiusSq >= 0.0f && distanceSq > radiusSq)
+		{
+			continue;
+		}
+
+		candidates.push_back({ &record, distanceSq });
+	}
+
+	std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b)
+	{
+		if (a.distanceSq != b.distanceSq)
+		{
+			return a.distanceSq < b.distanceSq;
+		}
+		return a.record->materialIndex < b.record->materialIndex;
+	});
+
+	const uint32_t requestedLimit = limit == 0 ? 32u : limit;
+	const uint32_t printCount = (uint32_t)std::min<size_t>(candidates.size(), requestedLimit);
+	Printf("NRI PT scene lights: cached_surface_identities=%u near_camera=%u radius=%.2f frame=%u\n",
+		(uint32_t)mSceneLights.GetSurfaceRecords().size(),
+		(uint32_t)candidates.size(),
+		radius,
+		mFrameIndex);
+
+	for (uint32_t i = 0; i < printCount; ++i)
+	{
+		const SceneLightSystem::SurfaceRecord& record = *candidates[i].record;
+		const uint32_t lightingFlags = record.material.lightingFlags;
+		const int32_t localSpaceIndex = record.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)record.provenance.mapChunkIndex) : -1;
+		const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, record.provenance);
+		const char* textureName = record.material.texture != nullptr ? record.material.texture->GetName().GetChars() : "(null)";
+		Printf("NRI PT scene light %u: source=%s drawlist=%s dist=%.2f center=(%.2f, %.2f, %.2f) radius=%.2f material=%u material_key=0x%016llx texture_key=0x%016llx glowmap_key=0x%016llx tile=%u texture=%s sector=%d wall=%d chunk=%d local_space=%d portal_graph=%d actor=%d palette=%u shade=%d alpha=%.3f light=%.3f flags=0x%x fullbright=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s avg=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+			i,
+			GetSceneLightRecordSourceName(record.source),
+			GetDrawListTypeName(record.provenance.drawListType),
+			std::sqrt(candidates[i].distanceSq),
+			record.center[0],
+			record.center[1],
+			record.center[2],
+			record.boundsRadius,
+			record.materialIndex,
+			(unsigned long long)record.material.materialKey,
+			(unsigned long long)record.material.textureContentKey,
+			(unsigned long long)record.material.glowmapContentKey,
+			record.material.textureId,
+			textureName,
+			record.provenance.sectorIndex,
+			record.provenance.wallIndex,
+			record.provenance.mapChunkIndex,
+			localSpaceIndex,
+			portalGraphIndex,
+			record.provenance.actorIndex,
+			record.material.paletteIndex,
+			record.material.shade,
+			record.material.alpha,
+			record.material.lightLevel,
+			record.material.materialFlags,
+			(lightingFlags & nri_scene::MaterialLightingFlag_MaterialFullbright) != 0 ? "yes" : "no",
+			(lightingFlags & nri_scene::MaterialLightingFlag_TextureFullbright) != 0 ? "yes" : "no",
+			(lightingFlags & nri_scene::MaterialLightingFlag_TextureGlowing) != 0 ? "yes" : "no",
+			(lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0 ? "yes" : "no",
+			(lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0 ? "yes" : "no",
+			record.material.averageColor[0],
+			record.material.averageColor[1],
+			record.material.averageColor[2],
+			record.material.glowColor[0],
+			record.material.glowColor[1],
+			record.material.glowColor[2]);
+	}
+
+	if (printCount == 0)
+	{
+		Printf("NRI PT scene lights: no cached surfaces matched the requested radius.\n");
+	}
 }
 
 const char* NRIRenderer::GetAvailabilityReason() const
