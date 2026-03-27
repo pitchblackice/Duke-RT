@@ -219,6 +219,99 @@ float3 EvaluateMaterialEmission(MaterialData material, float3 albedo)
 	return 0.0;
 }
 
+uint GetEmissiveSurfaceCount()
+{
+	return gEmissiveSurfaceHeaders[0].activeCount;
+}
+
+uint SampleEmissiveSurfaceIndex(inout uint rngState)
+{
+	const uint emissiveCount = GetEmissiveSurfaceCount();
+	if (emissiveCount == 0u)
+	{
+		return 0xffffffffu;
+	}
+
+	const float r = RandomFloat01(rngState);
+	uint low = 0u;
+	uint high = emissiveCount - 1u;
+	[unroll]
+	for (uint i = 0u; i < 12u && low < high; ++i)
+	{
+		const uint mid = (low + high) >> 1u;
+		if (r <= gEmissiveSurfaceCdf[mid])
+		{
+			high = mid;
+		}
+		else
+		{
+			low = mid + 1u;
+		}
+	}
+
+	return low;
+}
+
+void EvaluateSampledEmissiveLighting(
+	float3 position,
+	float3 normal,
+	float3 viewDir,
+	float3 albedo,
+	float metalness,
+	inout uint rngState,
+	bool traceVisibility,
+	out float3 outDiffuse,
+	out float3 outSpecular,
+	out uint outSurfaceIndex,
+	out bool outOccluded)
+{
+	outDiffuse = 0.0;
+	outSpecular = 0.0;
+	outSurfaceIndex = 0xffffffffu;
+	outOccluded = false;
+
+	const uint surfaceIndex = SampleEmissiveSurfaceIndex(rngState);
+	if (surfaceIndex == 0xffffffffu)
+	{
+		return;
+	}
+
+	outSurfaceIndex = surfaceIndex;
+	const EmissiveSurfaceData surface = gEmissiveSurfaces[surfaceIndex];
+	const float3 toLight = surface.center - position;
+	const float lightDistanceSq = dot(toLight, toLight);
+	if (lightDistanceSq <= 0.0001)
+	{
+		return;
+	}
+
+	const float lightDistance = sqrt(lightDistanceSq);
+	const float3 lightDir = toLight / lightDistance;
+	const float lambert = max(dot(normal, lightDir), 0.0);
+	if (lambert <= 0.0)
+	{
+		return;
+	}
+
+	if (traceVisibility)
+	{
+		const float visibility = ComputePointLightShadow(position, normal, lightDir, lightDistance);
+		if (visibility <= 0.0)
+		{
+			outOccluded = true;
+			return;
+		}
+	}
+
+	const float pdf = max(surface.selectionPdf, 1e-4);
+	const float projectedArea = max(surface.surfaceArea, 0.001);
+	const float solidAngleEstimate = min(projectedArea / max(12.56637061436 * lightDistanceSq, 0.01), 1.0);
+	const float sampleWeight = min(solidAngleEstimate / pdf, 16.0);
+	const float3 lightColor = surface.emissiveColor * surface.emissiveIntensity;
+	outDiffuse = albedo * (lambert * 0.80) * lightColor * sampleWeight;
+	outSpecular = EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, 1.0) * lightColor * sampleWeight;
+}
+
 float3 GetSurfaceSpecularColor(float3 albedo, float metalness)
 {
 	return lerp(float3(0.04, 0.04, 0.04), albedo, metalness);
@@ -270,6 +363,26 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, uint2 pixelPos, uint frameIndex,
 			indirectRadiance += throughput * EvaluateMaterialEmission(bounceMaterial, bounceAlbedo.rgb);
 			break;
 		}
+
+		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial);
+		const float3 bounceViewDir = normalize(-tracedDirection);
+		float3 bounceEmissiveDiffuse = 0.0;
+		float3 bounceEmissiveSpecular = 0.0;
+		uint bounceEmissiveSurfaceIndex = 0xffffffffu;
+		bool bounceEmissiveOccluded = false;
+		EvaluateSampledEmissiveLighting(
+			bounceHit.position,
+			bounceHit.normal,
+			bounceViewDir,
+			bounceAlbedo.rgb,
+			bounceMetalness,
+			rngState,
+			true,
+			bounceEmissiveDiffuse,
+			bounceEmissiveSpecular,
+			bounceEmissiveSurfaceIndex,
+			bounceEmissiveOccluded);
+		indirectRadiance += throughput * (bounceEmissiveDiffuse + bounceEmissiveSpecular);
 
 		const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce + 1u, bounce * 3u + 1u), frameIndex + bounce + 1u);
 		const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
@@ -339,9 +452,27 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			break;
 		}
 
+		const float3 bounceViewDir = normalize(-tracedDirection);
+		float3 bounceEmissiveDiffuse = 0.0;
+		float3 bounceEmissiveSpecular = 0.0;
+		uint bounceEmissiveSurfaceIndex = 0xffffffffu;
+		bool bounceEmissiveOccluded = false;
+		EvaluateSampledEmissiveLighting(
+			bounceHit.position,
+			bounceHit.normal,
+			bounceViewDir,
+			bounceAlbedo.rgb,
+			bounceMetalness,
+			rngState,
+			true,
+			bounceEmissiveDiffuse,
+			bounceEmissiveSpecular,
+			bounceEmissiveSurfaceIndex,
+			bounceEmissiveOccluded);
+		indirectRadiance += throughput * (bounceEmissiveDiffuse + bounceEmissiveSpecular);
+
 		const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce * 5u + 1u, bounce * 7u + 3u), frameIndex + bounce + 1u);
 		const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
-		const float3 bounceViewDir = normalize(-tracedDirection);
 		indirectRadiance += throughput * (
 			bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) +
 			EvaluateSunSpecular(bounceAlbedo.rgb, bounceMetalness, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
@@ -448,6 +579,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 directLighting = 0.0;
 		float3 directEmission = 0.0;
 		float3 analyticDirectLighting = 0.0;
+		float3 emissiveDirectLighting = 0.0;
 		float diffuseHitDistance = 0.0;
 		float specularHitDistance = 0.0;
 		float shadowVisibility = 1.0;
@@ -555,6 +687,27 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					specular += analyticSpecular;
 				}
 
+				float3 emissiveSampleDiffuse = 0.0;
+				float3 emissiveSampleSpecular = 0.0;
+				uint emissiveSampleSurfaceIndex = 0xffffffffu;
+				bool emissiveSampleOccluded = false;
+				uint emissiveSampleRng = pixelPos.x ^ (pixelPos.y << 16u) ^ (gTraceConstants.FrameIndex + 1u) * 0x9e3779b9u;
+				EvaluateSampledEmissiveLighting(
+					hit.position,
+					hit.normal,
+					viewDir,
+					albedo.rgb,
+					metalness,
+					emissiveSampleRng,
+					!directSceneTrace,
+					emissiveSampleDiffuse,
+					emissiveSampleSpecular,
+					emissiveSampleSurfaceIndex,
+					emissiveSampleOccluded);
+				emissiveDirectLighting += emissiveSampleDiffuse + emissiveSampleSpecular;
+				diffuse += emissiveSampleDiffuse;
+				specular += emissiveSampleSpecular;
+
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{
@@ -607,6 +760,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else if (gTraceConstants.DebugMode == 27)
 		{
 			color = float4(directEmission, 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 28)
+		{
+			color = float4(emissiveDirectLighting, 1.0);
 		}
 		else
 		{

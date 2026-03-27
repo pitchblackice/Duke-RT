@@ -158,6 +158,29 @@ private:
 		uint32_t indexCount = 0;
 	};
 
+	struct EmissiveSurfaceHeaderGpuData
+	{
+		uint32_t activeCount = 0;
+		uint32_t dominantIndex = UINT32_MAX;
+		uint32_t flags = 0;
+		float totalPower = 0.0f;
+	};
+
+	struct EmissiveSurfaceGpuData
+	{
+		float center[3] = {};
+		float boundsRadius = 0.0f;
+		float emissiveColor[3] = {};
+		float emissiveIntensity = 0.0f;
+		float surfaceArea = 0.0f;
+		float powerEstimate = 0.0f;
+		float selectionPdf = 0.0f;
+		uint32_t sourceFlags = 0;
+		uint32_t textureId = 0;
+		uint32_t stableKeyLo = 0;
+		uint32_t stableKeyHi = 0;
+	};
+
 	struct StaticMapSceneCache
 	{
 		struct ChunkCache
@@ -341,6 +364,10 @@ private:
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const;
+	void BuildEmissiveSamplingUpload(
+		EmissiveSurfaceHeaderGpuData& outHeader,
+		std::vector<EmissiveSurfaceGpuData>& outSurfaces,
+		std::vector<float>& outCdf);
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -477,6 +504,9 @@ private:
 	NRIBufferResource mRuntimeLightBuffer;
 	NRIBufferResource mRuntimeLightTileHeaderBuffer;
 	NRIBufferResource mRuntimeLightTileIndexBuffer;
+	NRIBufferResource mEmissiveSurfaceHeaderBuffer;
+	NRIBufferResource mEmissiveSurfaceBuffer;
+	NRIBufferResource mEmissiveSurfaceCdfBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
@@ -487,6 +517,9 @@ private:
 	SceneBufferDebugStats mRuntimeLightBufferStats = { "RuntimeLight" };
 	SceneBufferDebugStats mRuntimeLightTileHeaderBufferStats = { "RuntimeLightTileHeader" };
 	SceneBufferDebugStats mRuntimeLightTileIndexBufferStats = { "RuntimeLightTileIndex" };
+	SceneBufferDebugStats mEmissiveSurfaceHeaderBufferStats = { "EmissiveSurfaceHeader" };
+	SceneBufferDebugStats mEmissiveSurfaceBufferStats = { "EmissiveSurface" };
+	SceneBufferDebugStats mEmissiveSurfaceCdfBufferStats = { "EmissiveSurfaceCdf" };
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
@@ -571,6 +604,11 @@ private:
 	uint32_t mBoundRuntimeLightTileSize = 0;
 	uint32_t mBoundRuntimeLightTileIndexCount = 0;
 	uint32_t mBoundRuntimeLightMaxTileOccupancy = 0;
+	uint32_t mBoundEmissiveSurfaceCount = 0;
+	uint32_t mBoundEmissiveDominantTile = 0;
+	uint32_t mBoundEmissiveDominantFlags = 0;
+	float mBoundEmissiveTotalPower = 0.0f;
+	float mBoundEmissiveDominantPower = 0.0f;
 	uint32_t mNextRuntimePointLightId = 1;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};

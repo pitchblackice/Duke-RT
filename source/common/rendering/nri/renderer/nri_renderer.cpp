@@ -59,6 +59,7 @@ CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptruntimelinktrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissiveheuristics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptemissiveautoonly, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminsurface, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
@@ -69,7 +70,7 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 13;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 16;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
@@ -77,6 +78,7 @@ namespace
 	constexpr uint32_t NRI_RUNTIME_LIGHT_TILE_SIZE = 64;
 	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT = 26;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
+	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_DIRECT = 28;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -94,6 +96,7 @@ namespace
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
+	constexpr uint32_t NRI_EMISSIVE_SAMPLING_FLAG_AUTO_ONLY = 0x1u;
 
 	struct ScenePortalData
 	{
@@ -856,6 +859,14 @@ namespace
 	static const char* YesNo(bool value)
 	{
 		return value ? "yes" : "no";
+	}
+
+	static bool HasAutoEmissiveSourceFlags(uint32_t sourceFlags)
+	{
+		return (sourceFlags & (
+			SceneEmissiveSurfaceSourceFlag_AutoFullbright |
+			SceneEmissiveSurfaceSourceFlag_AutoTextureGlow |
+			SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0;
 	}
 
 	struct SkyFaceUpload
@@ -2309,13 +2320,14 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		return a.distanceSq < b.distanceSq;
 	});
 
-	Printf("NRI PT emissive surfaces: active=%u auto=%u explicit=%u total_power=%.3f min_surface=%.3f min_power=%.3f\n",
+	Printf("NRI PT emissive surfaces: active=%u auto=%u explicit=%u total_power=%.3f min_surface=%.3f min_power=%.3f sampling_auto_only=%s\n",
 		(uint32_t)emissive.activeSurfaces.size(),
 		emissive.autoTaggedCount,
 		emissive.explicitRuleMatchCount,
 		emissive.totalPowerEstimate,
 		(float)nri_ptemissiveminsurface,
-		(float)nri_ptemissiveminpower);
+		(float)nri_ptemissiveminpower,
+		nri_ptemissiveautoonly ? "on" : "off");
 
 	const uint32_t printCount = std::min<uint32_t>((uint32_t)candidates.size(), limit);
 	for (uint32_t i = 0; i < printCount; ++i)
@@ -2397,7 +2409,7 @@ void NRIRenderer::PrintStatus() const
 		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
-		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=raw_penumbra 22=raw_shadow 23=denoised_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags");
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=raw_penumbra 22=raw_shadow 23=denoised_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct");
 	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s shadow_split=%s\n",
 		nrdMaxFrames,
 		nrdFastFrames,
@@ -2444,16 +2456,24 @@ void NRIRenderer::PrintStatus() const
 		mBoundRuntimeLightTileIndexCount,
 		mBoundRuntimeLightMaxTileOccupancy,
 		NRI_PTDEBUG_ANALYTIC_DIRECT);
-	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f debug_mode=%u thresholds=area>=%.3f power>=%.3f heuristics=%s\n",
+	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s\n",
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().textureRules.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
 		mSceneLights.GetEmissiveSurfaces().explicitRuleMatchCount,
 		mSceneLights.GetEmissiveSurfaces().totalPowerEstimate,
 		NRI_PTDEBUG_EMISSIVE_TAGS,
+		NRI_PTDEBUG_EMISSIVE_DIRECT,
 		(float)nri_ptemissiveminsurface,
 		(float)nri_ptemissiveminpower,
-		nri_ptemissiveheuristics ? "on" : "off");
+		nri_ptemissiveheuristics ? "on" : "off",
+		nri_ptemissiveautoonly ? "on" : "off");
+	Printf("NRI PT emissive sampling: candidates=%u total_power=%.3f dominant_tile=%u dominant_power=%.3f dominant_flags=0x%x\n",
+		mBoundEmissiveSurfaceCount,
+		mBoundEmissiveTotalPower,
+		mBoundEmissiveDominantTile,
+		mBoundEmissiveDominantPower,
+		mBoundEmissiveDominantFlags);
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
@@ -3064,6 +3084,9 @@ void NRIRenderer::PrintSceneBufferStatus() const
 	printBuffer(mRuntimeLightBuffer, mRuntimeLightBufferStats);
 	printBuffer(mRuntimeLightTileHeaderBuffer, mRuntimeLightTileHeaderBufferStats);
 	printBuffer(mRuntimeLightTileIndexBuffer, mRuntimeLightTileIndexBufferStats);
+	printBuffer(mEmissiveSurfaceHeaderBuffer, mEmissiveSurfaceHeaderBufferStats);
+	printBuffer(mEmissiveSurfaceBuffer, mEmissiveSurfaceBufferStats);
+	printBuffer(mEmissiveSurfaceCdfBuffer, mEmissiveSurfaceCdfBufferStats);
 }
 
 void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging)
@@ -3761,6 +3784,90 @@ void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuD
 	}
 }
 
+void NRIRenderer::BuildEmissiveSamplingUpload(
+	EmissiveSurfaceHeaderGpuData& outHeader,
+	std::vector<EmissiveSurfaceGpuData>& outSurfaces,
+	std::vector<float>& outCdf)
+{
+	outHeader = {};
+	outHeader.dominantIndex = UINT32_MAX;
+	outHeader.flags = nri_ptemissiveautoonly ? NRI_EMISSIVE_SAMPLING_FLAG_AUTO_ONLY : 0u;
+	outSurfaces.clear();
+	outCdf.clear();
+
+	const auto& activeSurfaces = mSceneLights.GetEmissiveSurfaces().activeSurfaces;
+	outSurfaces.reserve(activeSurfaces.size());
+	outCdf.reserve(activeSurfaces.size());
+
+	float totalPower = 0.0f;
+	float dominantPower = -1.0f;
+	uint32_t dominantTile = 0;
+	uint32_t dominantFlags = 0;
+
+	for (const auto& surface : activeSurfaces)
+	{
+		if (nri_ptemissiveautoonly && !HasAutoEmissiveSourceFlags(surface.sourceFlags))
+		{
+			continue;
+		}
+
+		EmissiveSurfaceGpuData gpuSurface = {};
+		Copy3(surface.center, gpuSurface.center);
+		gpuSurface.boundsRadius = surface.boundsRadius;
+		Copy3(surface.emissiveColor, gpuSurface.emissiveColor);
+		gpuSurface.emissiveIntensity = surface.emissiveIntensity;
+		gpuSurface.surfaceArea = surface.surfaceArea;
+		gpuSurface.powerEstimate = std::max(surface.powerEstimate, 0.0f);
+		gpuSurface.sourceFlags = surface.sourceFlags;
+		gpuSurface.textureId = surface.textureId;
+		gpuSurface.stableKeyLo = (uint32_t)(surface.stableKey & 0xffffffffu);
+		gpuSurface.stableKeyHi = (uint32_t)(surface.stableKey >> 32u);
+		outSurfaces.push_back(gpuSurface);
+
+		totalPower += gpuSurface.powerEstimate;
+		if (gpuSurface.powerEstimate > dominantPower)
+		{
+			dominantPower = gpuSurface.powerEstimate;
+			outHeader.dominantIndex = (uint32_t)outSurfaces.size() - 1u;
+			dominantTile = gpuSurface.textureId;
+			dominantFlags = gpuSurface.sourceFlags;
+		}
+	}
+
+	outHeader.activeCount = (uint32_t)outSurfaces.size();
+	outHeader.totalPower = totalPower;
+	mBoundEmissiveSurfaceCount = outHeader.activeCount;
+	mBoundEmissiveTotalPower = totalPower;
+	mBoundEmissiveDominantTile = dominantTile;
+	mBoundEmissiveDominantFlags = dominantFlags;
+	mBoundEmissiveDominantPower = std::max(dominantPower, 0.0f);
+
+	if (outSurfaces.empty())
+	{
+		outCdf.resize(1, 1.0f);
+		return;
+	}
+
+	float runningCdf = 0.0f;
+	const float invTotalPower = totalPower > 0.0f ? (1.0f / totalPower) : 0.0f;
+	for (size_t i = 0; i < outSurfaces.size(); ++i)
+	{
+		float pdf = 0.0f;
+		if (totalPower > 0.0f)
+		{
+			pdf = outSurfaces[i].powerEstimate * invTotalPower;
+		}
+		else
+		{
+			pdf = 1.0f / (float)outSurfaces.size();
+		}
+
+		outSurfaces[i].selectionPdf = pdf;
+		runningCdf += pdf;
+		outCdf.push_back(i + 1 == outSurfaces.size() ? 1.0f : std::min(runningCdf, 1.0f));
+	}
+}
+
 void NRIRenderer::BuildRuntimeLightClusterUpload(
 	std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 	std::vector<uint32_t>& outIndices,
@@ -3970,6 +4077,46 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
+	EmissiveSurfaceHeaderGpuData emissiveHeader = {};
+	std::vector<EmissiveSurfaceGpuData> emissiveSurfaces;
+	std::vector<float> emissiveCdf;
+	BuildEmissiveSamplingUpload(emissiveHeader, emissiveSurfaces, emissiveCdf);
+	if (!EnsureStructuredBuffer(
+		mEmissiveSurfaceHeaderBuffer,
+		mEmissiveSurfaceHeaderBufferStats,
+		&emissiveHeader,
+		sizeof(emissiveHeader),
+		sizeof(EmissiveSurfaceHeaderGpuData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (!EnsureStructuredBuffer(
+		mEmissiveSurfaceBuffer,
+		mEmissiveSurfaceBufferStats,
+		emissiveSurfaces.empty() ? nullptr : emissiveSurfaces.data(),
+		emissiveSurfaces.empty() ? 0u : emissiveSurfaces.size() * sizeof(EmissiveSurfaceGpuData),
+		sizeof(EmissiveSurfaceGpuData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (!EnsureStructuredBuffer(
+		mEmissiveSurfaceCdfBuffer,
+		mEmissiveSurfaceCdfBufferStats,
+		emissiveCdf.data(),
+		emissiveCdf.size() * sizeof(float),
+		sizeof(float),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
 	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
 	{
 		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
@@ -3989,6 +4136,9 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mRuntimeLightBuffer.shaderView,
 		mRuntimeLightTileHeaderBuffer.shaderView,
 		mRuntimeLightTileIndexBuffer.shaderView,
+		mEmissiveSurfaceHeaderBuffer.shaderView,
+		mEmissiveSurfaceBuffer.shaderView,
+		mEmissiveSurfaceCdfBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : descriptors)
@@ -7021,6 +7171,9 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mRuntimeLightBuffer);
 	DestroyBufferResource(mRuntimeLightTileHeaderBuffer);
 	DestroyBufferResource(mRuntimeLightTileIndexBuffer);
+	DestroyBufferResource(mEmissiveSurfaceHeaderBuffer);
+	DestroyBufferResource(mEmissiveSurfaceBuffer);
+	DestroyBufferResource(mEmissiveSurfaceCdfBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	mBoundStaticPrimitiveCount = 0;
@@ -7034,6 +7187,11 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundRuntimeLightTileSize = 0;
 	mBoundRuntimeLightTileIndexCount = 0;
 	mBoundRuntimeLightMaxTileOccupancy = 0;
+	mBoundEmissiveSurfaceCount = 0;
+	mBoundEmissiveDominantTile = 0;
+	mBoundEmissiveDominantFlags = 0;
+	mBoundEmissiveTotalPower = 0.0f;
+	mBoundEmissiveDominantPower = 0.0f;
 }
 
 void NRIRenderer::DestroyAccelerationStructures()
