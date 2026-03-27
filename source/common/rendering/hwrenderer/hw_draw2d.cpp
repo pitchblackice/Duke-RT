@@ -72,8 +72,6 @@ void Draw2D(F2DDrawer* drawer, FRenderState& state, int x, int y, int width, int
 	state.EnableMultisampling(false);
 	state.EnableLineSmooth(gl_aalines);
 
-	bool cache_hw_2dmip = hw_2dmip; // cache cvar lookup so it's not done in a loop
-
 	auto &vertices = drawer->mVertices;
 	auto &indices = drawer->mIndices;
 	auto &commands = drawer->mData;
@@ -183,7 +181,8 @@ void Draw2D(F2DDrawer* drawer, FRenderState& state, int x, int y, int width, int
 			auto flags = cmd.mTexture->GetUseType() >= ETextureType::Special? UF_None : cmd.mTexture->GetUseType() == ETextureType::FontChar? UF_Font : UF_Texture;
 
 			auto scaleflags = cmd.mFlags & F2DDrawer::DTF_Indexed ? CTF_Indexed : 0;
-			state.SetMaterial(cmd.mTexture, flags, scaleflags, cmd.mFlags & F2DDrawer::DTF_Wrap ? CLAMP_NONE : (cache_hw_2dmip ? CLAMP_XY : CLAMP_XY_NOMIP), cmd.mTranslationId, -1);
+			const int clampMode = (cmd.mFlags & F2DDrawer::DTF_Wrap) ? CLAMP_NOFILTER : CLAMP_NOFILTER_XY;
+			state.SetMaterial(cmd.mTexture, flags, scaleflags, clampMode, cmd.mTranslationId, -1);
 			state.EnableTexture(true);
 
 			// Canvas textures are stored upside down
