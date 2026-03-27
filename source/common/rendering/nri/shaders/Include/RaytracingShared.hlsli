@@ -148,29 +148,14 @@ float4 SampleSurfaceColor(uint materialIndex, uint dataSource, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex, dataSource);
 	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
-	const bool clampUv = (material.flags & MATERIAL_FLAG_SPRITE) != 0;
 	float4 color = 0.0;
 	if (indexed)
 	{
-		if (clampUv)
-		{
-			color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointClamp, uv, 0.0);
-		}
-		else
-		{
-			color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointWrap, uv, 0.0);
-		}
+		color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointWrap, uv, 0.0);
 	}
 	else
 	{
-		if (clampUv)
-		{
-			color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearClamp, uv, 0.0);
-		}
-		else
-		{
-			color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
-		}
+		color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
 	}
 
 	if (indexed)
@@ -188,20 +173,9 @@ float4 SampleSurfaceColorRaw(uint materialIndex, uint dataSource, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex, dataSource);
 	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
-	const bool clampUv = (material.flags & MATERIAL_FLAG_SPRITE) != 0;
 	if (indexed)
 	{
-		if (clampUv)
-		{
-			return gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointClamp, uv, 0.0);
-		}
-
 		return gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointWrap, uv, 0.0);
-	}
-
-	if (clampUv)
-	{
-		return gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearClamp, uv, 0.0);
 	}
 
 	return gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
