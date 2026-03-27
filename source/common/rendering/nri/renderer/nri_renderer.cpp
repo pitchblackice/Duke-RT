@@ -6251,7 +6251,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
 	mUseUpscaledInFinal = false;
 	mUseDenoisedCompositionInputs = false;
-	mUseSplitShadowDenoiser = useShadowDebugPresent || (useCompositionPath && nri_denoise);
+	mUseSplitShadowDenoiser = useShadowDebugPresent;
 
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
