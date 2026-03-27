@@ -16,6 +16,8 @@ namespace
 {
 	using namespace nri_scene;
 
+	constexpr float kAttachedWallSpriteDepthNudge = 0.01f;
+
 	struct SkyCandidate
 	{
 		bool valid = false;
@@ -350,6 +352,28 @@ namespace
 		}
 	}
 
+	void NudgeAttachedWallSpriteSurface(const HWWall& wall, SurfaceRef& surface)
+	{
+		if (wall.Sprite == nullptr || wall.walldist == nullptr || surface.vertices.empty())
+		{
+			return;
+		}
+
+		// The raster path uses depth bias for wall-attached sprites so coplanar walls do not overdraw them.
+		// PT needs a small geometric equivalent or the structural wall can win the closest-hit test.
+		const DVector2 normal = wall.Sprite->Angles.Yaw.ToVector();
+		const float offsetX = (float)(normal.X * kAttachedWallSpriteDepthNudge);
+		const float offsetZ = (float)(-normal.Y * kAttachedWallSpriteDepthNudge);
+
+		for (CapturedVertex& vertex : surface.vertices)
+		{
+			vertex.position[0] += offsetX;
+			vertex.position[2] += offsetZ;
+			vertex.prevPosition[0] += offsetX;
+			vertex.prevPosition[2] += offsetZ;
+		}
+	}
+
 	bool IsEffectivelyOpaque(const FRenderStyle& style, float alpha)
 	{
 		return alpha >= 0.999f &&
@@ -502,7 +526,8 @@ namespace
 			}
 
 			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, MaterialFlag_None);
+			const uint32_t extraFlags = wall->Sprite != nullptr ? MaterialFlag_Sprite : MaterialFlag_None;
+			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, extraFlags);
 			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::DrawListWall, drawListType, GetOwnerActorIndex(*wall), surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
 			surface.vertices.reserve(wall->vertcount);
@@ -515,6 +540,8 @@ namespace
 			{
 				ApplyActorPreviousTransform(surface, wall->Sprite->ownerActor);
 			}
+
+			NudgeAttachedWallSpriteSurface(*wall, surface);
 
 			outWalls.push_back(std::move(surface));
 		}
