@@ -197,6 +197,8 @@ namespace
 
 	void ResolveSectorTint(const sectortype& sec, int paletteIndex, float outTint[3], float& outFogStrength)
 	{
+		(void)paletteIndex;
+
 		outTint[0] = 1.0f;
 		outTint[1] = 1.0f;
 		outTint[2] = 1.0f;
@@ -204,31 +206,16 @@ namespace
 
 		const float visibilityStrength = std::clamp((float)sec.visibility / 128.0f, 0.0f, 1.0f);
 		const bool hasExplicitFogPalette = sec.fogpal > 0;
-		if (!hasExplicitFogPalette && visibilityStrength <= 0.0f)
+		outFogStrength = hasExplicitFogPalette ? std::max(visibilityStrength, 0.35f) : visibilityStrength;
+		if (!hasExplicitFogPalette)
 		{
 			return;
 		}
 
 		PalEntry fade = {};
-		if (hasExplicitFogPalette)
-		{
-			fade = lookups.getFade(clamp((int)sec.fogpal, 0, MAXPALOOKUPS - 1));
-		}
-		else
-		{
-			fade = lookups.getFade(clamp((int)sec.floorpal, 0, MAXPALOOKUPS - 1));
-			if (!HasPalEntryColor(fade))
-			{
-				fade = lookups.getFade(clamp((int)sec.ceilingpal, 0, MAXPALOOKUPS - 1));
-			}
-			if (!HasPalEntryColor(fade))
-			{
-				fade = lookups.getFade(clamp(paletteIndex, 0, MAXPALOOKUPS - 1));
-			}
-		}
+		fade = lookups.getFade(clamp((int)sec.fogpal, 0, MAXPALOOKUPS - 1));
 
 		const bool hasFogTint = HasPalEntryColor(fade);
-		outFogStrength = hasExplicitFogPalette ? std::max(visibilityStrength, 0.35f) : visibilityStrength;
 		if (!hasFogTint)
 		{
 			return;
@@ -563,12 +550,17 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 	const int paletteFilter = (int)nri_ptsectorfilterpal;
 	const int minShadeFilter = (int)nri_ptsectorfilterminshade;
 	const int maxShadeFilter = std::max(minShadeFilter, (int)nri_ptsectorfiltermaxshade);
-	const int lotagFilter = (int)nri_ptsectorfilterlotag;
-	const uint32_t pulseFrames = std::max(0, (int)nri_ptsectorpulseframes);
-	const float pulseAmount = std::max(0.0f, (float)nri_ptsectorpulseamount);
-	const float ambientScale = std::max(0.0f, (float)nri_ptsectorambientscale);
-	const float hemisphereScale = std::max(0.0f, (float)nri_ptsectorhemiscale);
-	const float fogScale = std::max(0.0f, (float)nri_ptsectorfogscale);
+		const int lotagFilter = (int)nri_ptsectorfilterlotag;
+		const uint32_t pulseFrames = std::max(0, (int)nri_ptsectorpulseframes);
+		const float pulseAmount = std::max(0.0f, (float)nri_ptsectorpulseamount);
+		const bool pulseSelectionFiltered =
+			paletteFilter >= 0 ||
+			lotagFilter >= 0 ||
+			minShadeFilter > -128 ||
+			maxShadeFilter < 127;
+		const float ambientScale = std::max(0.0f, (float)nri_ptsectorambientscale);
+		const float hemisphereScale = std::max(0.0f, (float)nri_ptsectorhemiscale);
+		const float fogScale = std::max(0.0f, (float)nri_ptsectorfogscale);
 	const float sectorClamp = std::max(0.0f, (float)nri_ptsectorclamp);
 
 	for (uint32_t sectorIndex = 0; sectorIndex < sectorCount; ++sectorIndex)
@@ -597,7 +589,8 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		float tint[3] = {};
 		float fogStrength = 0.0f;
 		ResolveSectorTint(sec, resolvedPalette, tint, fogStrength);
-		const float pulseScale = EvaluatePulseScale(0x5EC70B5E00000000ull ^ (uint64_t)sectorIndex, frameIndex, pulseFrames, pulseAmount);
+		const bool sectorPulseEnabled = pulseSelectionFiltered && pulseFrames > 1 && pulseAmount > 0.0f;
+		const float pulseScale = sectorPulseEnabled ? EvaluatePulseScale(0x5EC70B5E00000000ull ^ (uint64_t)sectorIndex, frameIndex, pulseFrames, pulseAmount) : 1.0f;
 		const float clampedAmbient = std::min(sectorClamp, ambientScale * (0.10f + lightLevel * 0.55f) * pulseScale);
 		const float clampedHemisphere = std::min(sectorClamp, hemisphereScale * (0.08f + (0.5f + 0.5f * std::abs(hemisphereBias)) * 0.45f) * pulseScale);
 		const float clampedFog = std::min(sectorClamp, fogScale * fogStrength * pulseScale);
@@ -622,7 +615,7 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 			entry.sourceFlags |= SceneSectorLightSourceFlag_FogPresent;
 			mSectorLighting.fogSectorCount++;
 		}
-		if (pulseFrames > 1 && pulseAmount > 0.0f)
+		if (sectorPulseEnabled)
 		{
 			entry.sourceFlags |= SceneSectorLightSourceFlag_Pulsing;
 			mSectorLighting.pulsingSectorCount++;
