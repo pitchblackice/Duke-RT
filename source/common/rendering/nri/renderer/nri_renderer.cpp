@@ -62,6 +62,17 @@ CVAR(Bool, nri_ptemissiveheuristics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissiveautoonly, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminsurface, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsectorambientscale, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsectorhemiscale, 0.12f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsectorfogscale, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsectorclamp, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsectorfilterpal, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsectorfilterminshade, -128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsectorfiltermaxshade, 127, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsectorfilterlotag, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsectorpulseframes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsectorpulseamount, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Int, nri_pttraceframes)
@@ -70,7 +81,7 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 16;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 18;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
@@ -79,6 +90,7 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT = 26;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_DIRECT = 28;
+	constexpr uint32_t NRI_PTDEBUG_SECTOR_AMBIENT = 29;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -97,6 +109,7 @@ namespace
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
 	constexpr uint32_t NRI_EMISSIVE_SAMPLING_FLAG_AUTO_ONLY = 0x1u;
+	constexpr uint32_t NRI_SECTOR_LIGHTING_FLAG_ENABLED = 0x1u;
 
 	struct ScenePortalData
 	{
@@ -1943,7 +1956,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	{
 		const bool needsResidentStaticLightRefresh =
 			!mSceneLights.GetAnalyticLights().activeLights.empty() ||
-			mBoundRuntimeLightCount != 0;
+			mBoundRuntimeLightCount != 0 ||
+			mSceneLights.GetSectorLighting().activeSectorCount > 0 ||
+			mBoundSectorLightActiveCount != 0;
 		if (needsResidentStaticLightRefresh)
 		{
 			if (!RefreshResidentStaticSceneDataSet())
@@ -2352,6 +2367,128 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 	}
 }
 
+void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
+{
+	const auto& registry = mSceneLights.GetSectorLighting();
+	if (registry.activeSectorIndices.empty())
+	{
+		Printf("NRI PT sector lights: no active sector-light records are available.\n");
+		return;
+	}
+
+	struct SectorCandidate
+	{
+		uint32_t sectorIndex = UINT32_MAX;
+		float distanceSq = std::numeric_limits<float>::max();
+		float center[3] = {};
+	};
+
+	std::vector<float> centerSums((size_t)registry.sectorCount * 3u, 0.0f);
+	std::vector<uint32_t> centerCounts(registry.sectorCount, 0u);
+	for (const auto& record : mSceneLights.GetSurfaceRecords())
+	{
+		if (record.provenance.sectorIndex < 0)
+		{
+			continue;
+		}
+
+		const uint32_t sectorIndex = (uint32_t)record.provenance.sectorIndex;
+		if (sectorIndex >= registry.sectorCount)
+		{
+			continue;
+		}
+
+		centerSums[(size_t)sectorIndex * 3u + 0u] += record.center[0];
+		centerSums[(size_t)sectorIndex * 3u + 1u] += record.center[1];
+		centerSums[(size_t)sectorIndex * 3u + 2u] += record.center[2];
+		centerCounts[sectorIndex]++;
+	}
+
+	std::vector<SectorCandidate> candidates;
+	candidates.reserve(registry.activeSectorIndices.size());
+	const float radiusSq = radius > 0.0f ? radius * radius : std::numeric_limits<float>::max();
+	for (uint32_t sectorIndex : registry.activeSectorIndices)
+	{
+		if (sectorIndex >= registry.sectorCount || sectorIndex >= centerCounts.size() || centerCounts[sectorIndex] == 0u)
+		{
+			continue;
+		}
+
+		SectorCandidate candidate = {};
+		candidate.sectorIndex = sectorIndex;
+		const float invCount = 1.0f / (float)centerCounts[sectorIndex];
+		candidate.center[0] = centerSums[(size_t)sectorIndex * 3u + 0u] * invCount;
+		candidate.center[1] = centerSums[(size_t)sectorIndex * 3u + 1u] * invCount;
+		candidate.center[2] = centerSums[(size_t)sectorIndex * 3u + 2u] * invCount;
+		const float dx = candidate.center[0] - mCurrentCameraPos[0];
+		const float dy = candidate.center[1] - mCurrentCameraPos[1];
+		const float dz = candidate.center[2] - mCurrentCameraPos[2];
+		candidate.distanceSq = dx * dx + dy * dy + dz * dz;
+		if (candidate.distanceSq <= radiusSq)
+		{
+			candidates.push_back(candidate);
+		}
+	}
+
+	std::sort(candidates.begin(), candidates.end(), [](const SectorCandidate& a, const SectorCandidate& b)
+	{
+		if (a.distanceSq != b.distanceSq)
+		{
+			return a.distanceSq < b.distanceSq;
+		}
+		return a.sectorIndex < b.sectorIndex;
+	});
+
+	Printf("NRI PT sector lights: active=%u eligible=%u fog=%u pulsing=%u radius=%.1f limit=%u scales=(%.3f, %.3f, %.3f) clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
+		registry.activeSectorCount,
+		registry.eligibleSectorCount,
+		registry.fogSectorCount,
+		registry.pulsingSectorCount,
+		radius,
+		limit,
+		(float)nri_ptsectorambientscale,
+		(float)nri_ptsectorhemiscale,
+		(float)nri_ptsectorfogscale,
+		(float)nri_ptsectorclamp,
+		(int)nri_ptsectorfilterpal,
+		(int)nri_ptsectorfilterminshade,
+		(int)nri_ptsectorfiltermaxshade,
+		(int)nri_ptsectorfilterlotag,
+		(int)nri_ptsectorpulseframes,
+		(float)nri_ptsectorpulseamount);
+
+	const uint32_t printCount = std::min<uint32_t>((uint32_t)candidates.size(), limit);
+	for (uint32_t i = 0; i < printCount; ++i)
+	{
+		const SectorCandidate& candidate = candidates[i];
+		const auto& entry = registry.sectors[candidate.sectorIndex];
+		Printf("NRI PT sector light %u: sector=%u dist=%.2f center=(%.2f, %.2f, %.2f) ambient=(%.3f, %.3f, %.3f)*%.3f hemi=%.3f fog=%.3f pulse=%.3f palette=%d shade=%d lotag=%d hitag=%d flags=0x%x\n",
+			i,
+			candidate.sectorIndex,
+			std::sqrt(candidate.distanceSq),
+			candidate.center[0],
+			candidate.center[1],
+			candidate.center[2],
+			entry.ambientColor[0],
+			entry.ambientColor[1],
+			entry.ambientColor[2],
+			entry.ambientIntensity,
+			entry.hemisphereAmount,
+			entry.fogAmount,
+			entry.pulseScale,
+			entry.paletteIndex,
+			entry.averageShade,
+			entry.lotag,
+			entry.hitag,
+			entry.sourceFlags);
+	}
+
+	if (printCount == 0)
+	{
+		Printf("NRI PT sector lights: no active sector lights matched the requested radius.\n");
+	}
+}
+
 void NRIRenderer::PrintStatus() const
 {
 	const NRIUpscalerKind requested = GetSelectedUpscalerKind();
@@ -2409,7 +2546,7 @@ void NRIRenderer::PrintStatus() const
 		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
-		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=raw_penumbra 22=raw_shadow 23=denoised_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct");
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=raw_penumbra 22=raw_shadow 23=denoised_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient");
 	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s shadow_split=%s\n",
 		nrdMaxFrames,
 		nrdFastFrames,
@@ -2474,6 +2611,29 @@ void NRIRenderer::PrintStatus() const
 		mBoundEmissiveDominantTile,
 		mBoundEmissiveDominantPower,
 		mBoundEmissiveDominantFlags);
+	Printf("NRI PT sector lighting: enabled=%s active=%u eligible=%u fog=%u pulsing=%u debug_mode=%u scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
+		nri_ptsectorlighting ? "on" : "off",
+		mSceneLights.GetSectorLighting().activeSectorCount,
+		mSceneLights.GetSectorLighting().eligibleSectorCount,
+		mSceneLights.GetSectorLighting().fogSectorCount,
+		mSceneLights.GetSectorLighting().pulsingSectorCount,
+		NRI_PTDEBUG_SECTOR_AMBIENT,
+		(float)nri_ptsectorambientscale,
+		(float)nri_ptsectorhemiscale,
+		(float)nri_ptsectorfogscale,
+		(float)nri_ptsectorclamp,
+		(int)nri_ptsectorfilterpal,
+		(int)nri_ptsectorfilterminshade,
+		(int)nri_ptsectorfiltermaxshade,
+		(int)nri_ptsectorfilterlotag,
+		(int)nri_ptsectorpulseframes,
+		(float)nri_ptsectorpulseamount);
+	Printf("NRI PT sector buffer: sectors=%u active=%u pulsing=%u dominant_sector=%u dominant_contribution=%.3f\n",
+		mBoundSectorLightSectorCount,
+		mBoundSectorLightActiveCount,
+		mBoundSectorLightPulsingCount,
+		mBoundSectorLightDominantSector != UINT32_MAX ? mBoundSectorLightDominantSector : 0u,
+		mBoundSectorLightDominantContribution);
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
@@ -3087,6 +3247,8 @@ void NRIRenderer::PrintSceneBufferStatus() const
 	printBuffer(mEmissiveSurfaceHeaderBuffer, mEmissiveSurfaceHeaderBufferStats);
 	printBuffer(mEmissiveSurfaceBuffer, mEmissiveSurfaceBufferStats);
 	printBuffer(mEmissiveSurfaceCdfBuffer, mEmissiveSurfaceCdfBufferStats);
+	printBuffer(mSectorLightHeaderBuffer, mSectorLightHeaderBufferStats);
+	printBuffer(mSectorLightBuffer, mSectorLightBufferStats);
 }
 
 void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging)
@@ -3314,6 +3476,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 
 	mSceneLights.RebuildAnalyticLights(mFrameIndex, NRI_MAX_RUNTIME_POINT_LIGHTS);
 	mSceneLights.RebuildEmissiveSurfaces(NRI_MAX_EMISSIVE_SURFACES);
+	mSceneLights.RebuildSectorLighting(mFrameIndex, (uint32_t)sector.Size());
 	if (mSceneLights.ConsumeAnalyticLightTopologyChanged())
 	{
 		mBoundRuntimeLightCount = 0;
@@ -3327,6 +3490,10 @@ void NRIRenderer::RefreshSceneLightSystem(
 	{
 		QueueStaticMapSceneLightingInvalidation();
 		RequestHistoryReset("emissive-material-change");
+	}
+	if (mSceneLights.ConsumeSectorLightingTopologyChanged())
+	{
+		RequestHistoryReset("sector-light-topology");
 	}
 }
 
@@ -3868,6 +4035,53 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 	}
 }
 
+void NRIRenderer::BuildSectorLightingUpload(
+	SectorLightHeaderGpuData& outHeader,
+	std::vector<SectorLightGpuData>& outSectors)
+{
+	const auto& registry = mSceneLights.GetSectorLighting();
+	outHeader = {};
+	outHeader.sectorCount = registry.sectorCount;
+	outHeader.activeCount = registry.activeSectorCount;
+	outHeader.pulsingCount = registry.pulsingSectorCount;
+	outHeader.flags = nri_ptsectorlighting ? NRI_SECTOR_LIGHTING_FLAG_ENABLED : 0u;
+	outSectors.assign(registry.sectorCount, {});
+
+	mBoundSectorLightSectorCount = registry.sectorCount;
+	mBoundSectorLightActiveCount = registry.activeSectorCount;
+	mBoundSectorLightPulsingCount = registry.pulsingSectorCount;
+	mBoundSectorLightDominantSector = UINT32_MAX;
+	mBoundSectorLightDominantContribution = 0.0f;
+
+	for (uint32_t sectorIndex : registry.activeSectorIndices)
+	{
+		if (sectorIndex >= registry.sectors.size() || sectorIndex >= outSectors.size())
+		{
+			continue;
+		}
+
+		const auto& source = registry.sectors[sectorIndex];
+		auto& target = outSectors[sectorIndex];
+		Copy3(source.ambientColor, target.ambientColor);
+		Copy3(source.ambientColor, target.hemisphereColor);
+		target.ambientIntensity = source.ambientIntensity;
+		target.hemisphereAmount = source.hemisphereAmount;
+		target.fogAmount = source.fogAmount;
+		target.pulseScale = source.pulseScale;
+		target.sourceFlags = source.sourceFlags;
+		target.paletteIndex = source.paletteIndex;
+		target.lotag = source.lotag;
+		target.hitag = source.hitag;
+
+		const float contribution = source.ambientIntensity + std::abs(source.hemisphereAmount) + source.fogAmount;
+		if (contribution > mBoundSectorLightDominantContribution)
+		{
+			mBoundSectorLightDominantContribution = contribution;
+			mBoundSectorLightDominantSector = sectorIndex;
+		}
+	}
+}
+
 void NRIRenderer::BuildRuntimeLightClusterUpload(
 	std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 	std::vector<uint32_t>& outIndices,
@@ -4117,6 +4331,33 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
+	SectorLightHeaderGpuData sectorLightHeader = {};
+	std::vector<SectorLightGpuData> sectorLights;
+	BuildSectorLightingUpload(sectorLightHeader, sectorLights);
+	if (!EnsureStructuredBuffer(
+		mSectorLightHeaderBuffer,
+		mSectorLightHeaderBufferStats,
+		&sectorLightHeader,
+		sizeof(sectorLightHeader),
+		sizeof(SectorLightHeaderGpuData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (!EnsureStructuredBuffer(
+		mSectorLightBuffer,
+		mSectorLightBufferStats,
+		sectorLights.empty() ? nullptr : sectorLights.data(),
+		sectorLights.empty() ? 0u : sectorLights.size() * sizeof(SectorLightGpuData),
+		sizeof(SectorLightGpuData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
 	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
 	{
 		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
@@ -4139,6 +4380,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mEmissiveSurfaceHeaderBuffer.shaderView,
 		mEmissiveSurfaceBuffer.shaderView,
 		mEmissiveSurfaceCdfBuffer.shaderView,
+		mSectorLightHeaderBuffer.shaderView,
+		mSectorLightBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : descriptors)
@@ -7174,6 +7417,8 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mEmissiveSurfaceHeaderBuffer);
 	DestroyBufferResource(mEmissiveSurfaceBuffer);
 	DestroyBufferResource(mEmissiveSurfaceCdfBuffer);
+	DestroyBufferResource(mSectorLightHeaderBuffer);
+	DestroyBufferResource(mSectorLightBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	mBoundStaticPrimitiveCount = 0;
@@ -7192,6 +7437,11 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundEmissiveDominantFlags = 0;
 	mBoundEmissiveTotalPower = 0.0f;
 	mBoundEmissiveDominantPower = 0.0f;
+	mBoundSectorLightSectorCount = 0;
+	mBoundSectorLightActiveCount = 0;
+	mBoundSectorLightPulsingCount = 0;
+	mBoundSectorLightDominantSector = UINT32_MAX;
+	mBoundSectorLightDominantContribution = 0.0f;
 }
 
 void NRIRenderer::DestroyAccelerationStructures()

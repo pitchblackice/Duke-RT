@@ -40,6 +40,17 @@ EXTERN_CVAR(Bool, nri_validation)
 EXTERN_CVAR(Bool, nri_apivalidation)
 EXTERN_CVAR(Bool, nri_dred)
 EXTERN_CVAR(Bool, vid_vsync)
+EXTERN_CVAR(Bool, nri_ptsectorlighting)
+EXTERN_CVAR(Float, nri_ptsectorambientscale)
+EXTERN_CVAR(Float, nri_ptsectorhemiscale)
+EXTERN_CVAR(Float, nri_ptsectorfogscale)
+EXTERN_CVAR(Float, nri_ptsectorclamp)
+EXTERN_CVAR(Int, nri_ptsectorfilterpal)
+EXTERN_CVAR(Int, nri_ptsectorfilterminshade)
+EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
+EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
+EXTERN_CVAR(Int, nri_ptsectorpulseframes)
+EXTERN_CVAR(Float, nri_ptsectorpulseamount)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
 
@@ -1094,6 +1105,72 @@ CCMD(nri_ptemissivedump)
 	else
 	{
 		Printf("nri_ptemissivedump is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptsectorlight_set)
+{
+	if (argv.argc() < 4)
+	{
+		Printf("nri_ptsectorlight_set <ambientScale> <hemiScale> <fogScale>: updates PT sector-light heuristic scales.\n");
+		return;
+	}
+
+	nri_ptsectorambientscale = (float)atof(argv[1]);
+	nri_ptsectorhemiscale = (float)atof(argv[2]);
+	nri_ptsectorfogscale = (float)atof(argv[3]);
+	Printf("NRI PT sector-light scales set: ambient=%.3f hemi=%.3f fog=%.3f\n",
+		(float)nri_ptsectorambientscale,
+		(float)nri_ptsectorhemiscale,
+		(float)nri_ptsectorfogscale);
+}
+
+CCMD(nri_ptsectorlight_filter)
+{
+	if (argv.argc() < 4)
+	{
+		Printf("nri_ptsectorlight_filter <pal|-1> <minShade> <maxShade> [lotag]: updates PT sector-light heuristic filters.\n");
+		return;
+	}
+
+	nri_ptsectorfilterpal = atoi(argv[1]);
+	nri_ptsectorfilterminshade = atoi(argv[2]);
+	nri_ptsectorfiltermaxshade = atoi(argv[3]);
+	nri_ptsectorfilterlotag = argv.argc() > 4 ? atoi(argv[4]) : -1;
+	Printf("NRI PT sector-light filter set: pal=%d shade=[%d,%d] lotag=%d\n",
+		(int)nri_ptsectorfilterpal,
+		(int)nri_ptsectorfilterminshade,
+		(int)nri_ptsectorfiltermaxshade,
+		(int)nri_ptsectorfilterlotag);
+}
+
+CCMD(nri_ptsectorlight_clear)
+{
+	nri_ptsectorlighting = true;
+	nri_ptsectorambientscale = 0.20f;
+	nri_ptsectorhemiscale = 0.12f;
+	nri_ptsectorfogscale = 0.20f;
+	nri_ptsectorclamp = 1.0f;
+	nri_ptsectorfilterpal = -1;
+	nri_ptsectorfilterminshade = -128;
+	nri_ptsectorfiltermaxshade = 127;
+	nri_ptsectorfilterlotag = -1;
+	nri_ptsectorpulseframes = 0;
+	nri_ptsectorpulseamount = 0.0f;
+	Printf("NRI PT sector-light heuristics cleared.\n");
+}
+
+CCMD(nri_ptsectorlightdump)
+{
+	const float radius = argv.argc() > 1 ? (float)atof(argv[1]) : 2048.0f;
+	const uint32_t limit = argv.argc() > 2 ? (uint32_t)atoi(argv[2]) : 32u;
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingSectorLights(radius, limit);
+	}
+	else
+	{
+		Printf("nri_ptsectorlightdump is only available while using the NRI renderer.\n");
 	}
 }
 
@@ -2284,6 +2361,17 @@ void NRIRenderDevice::PrintPathTracingEmissiveSurfaces(float radius, uint32_t li
 	}
 
 	mRenderer->PrintEmissiveSurfaceDump(radius, limit);
+}
+
+void NRIRenderDevice::PrintPathTracingSectorLights(float radius, uint32_t limit) const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT sector-light dump is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintSectorLightDump(radius, limit);
 }
 
 void NRIRenderDevice::LogStartup()

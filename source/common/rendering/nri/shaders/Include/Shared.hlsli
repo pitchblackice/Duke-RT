@@ -95,7 +95,9 @@ struct MaterialData
 	float emissiveIntensity;
 	float emissiveMaskScale;
 	uint emissiveMode;
-	float2 emissiveReserved;
+	uint sectorIndex;
+	float sectorHemisphereBias;
+	float emissiveReserved;
 };
 
 struct SceneInstanceData
@@ -151,6 +153,28 @@ struct EmissiveSurfaceData
 	uint textureId;
 	uint stableKeyLo;
 	uint stableKeyHi;
+};
+
+struct SectorLightHeaderData
+{
+	uint sectorCount;
+	uint activeCount;
+	uint pulsingCount;
+	uint flags;
+};
+
+struct SectorLightData
+{
+	float3 ambientColor;
+	float ambientIntensity;
+	float hemisphereColor;
+	float hemisphereAmount;
+	float fogAmount;
+	float pulseScale;
+	uint sourceFlags;
+	int paletteIndex;
+	int lotag;
+	int hitag;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, SET_ROOT);
@@ -212,6 +236,8 @@ StructuredBuffer<uint> gRuntimeLightTileIndices : register(t12, space2);
 StructuredBuffer<EmissiveSurfaceHeaderData> gEmissiveSurfaceHeaders : register(t13, space2);
 StructuredBuffer<EmissiveSurfaceData> gEmissiveSurfaces : register(t14, space2);
 StructuredBuffer<float> gEmissiveSurfaceCdf : register(t15, space2);
+StructuredBuffer<SectorLightHeaderData> gSectorLightHeaders : register(t16, space2);
+StructuredBuffer<SectorLightData> gSectorLights : register(t17, space2);
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);

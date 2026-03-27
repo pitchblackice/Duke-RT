@@ -37,7 +37,9 @@ struct MaterialData
 	float emissiveIntensity = 0.0f;
 	float emissiveMaskScale = 0.0f;
 	uint32_t emissiveMode = MaterialEmissiveMode_None;
-	float emissiveReserved[2] = {};
+	uint32_t sectorIndex = UINT32_MAX;
+	float sectorHemisphereBias = 0.0f;
+	float emissiveReserved = 0.0f;
 };
 
 struct MaterialLightingMetadata
@@ -52,6 +54,7 @@ struct MaterialLightingMetadata
 	uint32_t lightingFlags = 0;
 	uint32_t materialClass = 0;
 	uint32_t emissiveMode = MaterialEmissiveMode_None;
+	int32_t sectorIndex = -1;
 	int32_t shade = 0;
 	float alpha = 1.0f;
 	float lightLevel = 1.0f;

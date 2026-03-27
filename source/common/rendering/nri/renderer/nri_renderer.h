@@ -44,6 +44,7 @@ public:
 	void ClearTextureEmissiveHeuristics();
 	void PrintTextureEmissiveHeuristics() const;
 	void PrintEmissiveSurfaceDump(float radius, uint32_t limit) const;
+	void PrintSectorLightDump(float radius, uint32_t limit) const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	const char* GetAvailabilityReason() const;
 
@@ -179,6 +180,28 @@ private:
 		uint32_t textureId = 0;
 		uint32_t stableKeyLo = 0;
 		uint32_t stableKeyHi = 0;
+	};
+
+	struct SectorLightHeaderGpuData
+	{
+		uint32_t sectorCount = 0;
+		uint32_t activeCount = 0;
+		uint32_t pulsingCount = 0;
+		uint32_t flags = 0;
+	};
+
+	struct SectorLightGpuData
+	{
+		float ambientColor[3] = {};
+		float ambientIntensity = 0.0f;
+		float hemisphereColor[3] = {};
+		float hemisphereAmount = 0.0f;
+		float fogAmount = 0.0f;
+		float pulseScale = 1.0f;
+		uint32_t sourceFlags = 0;
+		int32_t paletteIndex = -1;
+		int32_t lotag = 0;
+		int32_t hitag = 0;
 	};
 
 	struct StaticMapSceneCache
@@ -368,6 +391,9 @@ private:
 		EmissiveSurfaceHeaderGpuData& outHeader,
 		std::vector<EmissiveSurfaceGpuData>& outSurfaces,
 		std::vector<float>& outCdf);
+	void BuildSectorLightingUpload(
+		SectorLightHeaderGpuData& outHeader,
+		std::vector<SectorLightGpuData>& outSectors);
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -507,6 +533,8 @@ private:
 	NRIBufferResource mEmissiveSurfaceHeaderBuffer;
 	NRIBufferResource mEmissiveSurfaceBuffer;
 	NRIBufferResource mEmissiveSurfaceCdfBuffer;
+	NRIBufferResource mSectorLightHeaderBuffer;
+	NRIBufferResource mSectorLightBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
@@ -520,6 +548,8 @@ private:
 	SceneBufferDebugStats mEmissiveSurfaceHeaderBufferStats = { "EmissiveSurfaceHeader" };
 	SceneBufferDebugStats mEmissiveSurfaceBufferStats = { "EmissiveSurface" };
 	SceneBufferDebugStats mEmissiveSurfaceCdfBufferStats = { "EmissiveSurfaceCdf" };
+	SceneBufferDebugStats mSectorLightHeaderBufferStats = { "SectorLightHeader" };
+	SceneBufferDebugStats mSectorLightBufferStats = { "SectorLight" };
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
@@ -609,6 +639,11 @@ private:
 	uint32_t mBoundEmissiveDominantFlags = 0;
 	float mBoundEmissiveTotalPower = 0.0f;
 	float mBoundEmissiveDominantPower = 0.0f;
+	uint32_t mBoundSectorLightSectorCount = 0;
+	uint32_t mBoundSectorLightActiveCount = 0;
+	uint32_t mBoundSectorLightPulsingCount = 0;
+	uint32_t mBoundSectorLightDominantSector = UINT32_MAX;
+	float mBoundSectorLightDominantContribution = 0.0f;
 	uint32_t mNextRuntimePointLightId = 1;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};

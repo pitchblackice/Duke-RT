@@ -1,14 +1,28 @@
 #include "nri_scene_lights.h"
 
 #include "c_cvars.h"
+#include "maptypes.h"
+#include "palette.h"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <unordered_map>
 
 EXTERN_CVAR(Bool, nri_ptemissiveheuristics)
 EXTERN_CVAR(Float, nri_ptemissiveminpower)
 EXTERN_CVAR(Float, nri_ptemissiveminsurface)
+EXTERN_CVAR(Bool, nri_ptsectorlighting)
+EXTERN_CVAR(Float, nri_ptsectorambientscale)
+EXTERN_CVAR(Float, nri_ptsectorhemiscale)
+EXTERN_CVAR(Float, nri_ptsectorfogscale)
+EXTERN_CVAR(Float, nri_ptsectorclamp)
+EXTERN_CVAR(Int, nri_ptsectorfilterpal)
+EXTERN_CVAR(Int, nri_ptsectorfilterminshade)
+EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
+EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
+EXTERN_CVAR(Int, nri_ptsectorpulseframes)
+EXTERN_CVAR(Float, nri_ptsectorpulseamount)
 
 namespace
 {
@@ -143,9 +157,82 @@ namespace
 		return 0.35f + 0.65f * (0.5f + 0.5f * std::sin(phase));
 	}
 
+	float EvaluatePulseScale(uint64_t stableKey, uint32_t frameIndex, uint32_t pulseFrames, float pulseAmount)
+	{
+		if (pulseFrames <= 1 || pulseAmount <= 0.0f)
+		{
+			return 1.0f;
+		}
+
+		const float clampedAmount = std::clamp(pulseAmount, 0.0f, 0.95f);
+		const float baseScale = 1.0f - clampedAmount;
+		return baseScale + clampedAmount * EvaluateFlickerScale(stableKey ^ 0x5EC70B5E00000000ull, frameIndex, pulseFrames);
+	}
+
 	float ComputeColorLuminance(const float color[3])
 	{
 		return color[0] * 0.2126f + color[1] * 0.7152f + color[2] * 0.0722f;
+	}
+
+	float ComputeBuildLightLevel(int shade, int paletteIndex)
+	{
+		const int clampedPalette = clamp(paletteIndex, 0, MAXPALOOKUPS - 1);
+		const float shadeDiv = lookups.tables[clampedPalette].ShadeFactor;
+		const bool fullbright = shadeDiv < 1.0f / 1000.0f || shade < -numshades;
+		if (fullbright)
+		{
+			return 1.0f;
+		}
+
+		float inverseLight = (float)shade * 255.0f / (float)numshades;
+		inverseLight /= shadeDiv;
+		const float lightLevel = clamp(255.0f - inverseLight, 0.0f, 255.0f);
+		return lightLevel / 255.0f;
+	}
+
+	bool HasPalEntryColor(const PalEntry& color)
+	{
+		return color.r != 0 || color.g != 0 || color.b != 0;
+	}
+
+	void ResolveSectorTint(const sectortype& sec, int paletteIndex, float outTint[3], float& outFogStrength)
+	{
+		outTint[0] = 1.0f;
+		outTint[1] = 1.0f;
+		outTint[2] = 1.0f;
+		outFogStrength = 0.0f;
+
+		PalEntry fade = lookups.getFade(clamp(paletteIndex, 0, MAXPALOOKUPS - 1));
+		if (!HasPalEntryColor(fade))
+		{
+			fade = lookups.getFade(clamp((int)sec.floorpal, 0, MAXPALOOKUPS - 1));
+		}
+		if (!HasPalEntryColor(fade))
+		{
+			fade = lookups.getFade(clamp((int)sec.ceilingpal, 0, MAXPALOOKUPS - 1));
+		}
+		if (!HasPalEntryColor(fade) && sec.fogpal > 0)
+		{
+			fade = lookups.getFade(clamp((int)sec.fogpal, 0, MAXPALOOKUPS - 1));
+		}
+
+		const bool hasFogTint = HasPalEntryColor(fade);
+		const float visibilityStrength = std::clamp((float)sec.visibility / 128.0f, 0.0f, 1.0f);
+		outFogStrength = std::max(visibilityStrength, hasFogTint ? 0.35f : 0.0f);
+		if (!hasFogTint)
+		{
+			return;
+		}
+
+		const float tint[3] = {
+			(float)fade.r / 255.0f,
+			(float)fade.g / 255.0f,
+			(float)fade.b / 255.0f,
+		};
+		const float tintWeight = std::clamp(0.35f + outFogStrength * 0.45f, 0.0f, 0.85f);
+		outTint[0] = 1.0f + (tint[0] - 1.0f) * tintWeight;
+		outTint[1] = 1.0f + (tint[1] - 1.0f) * tintWeight;
+		outTint[2] = 1.0f + (tint[2] - 1.0f) * tintWeight;
 	}
 
 	uint64_t BuildEmissiveStableKey(const SceneLightSystem::SurfaceRecord& record)
@@ -255,6 +342,11 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mEmissiveSurfaces.explicitRuleMatchCount = 0;
 	mEmissiveSurfaces.truncatedSurfaceCount = 0;
 	mEmissiveSurfaces.topologyChanged = false;
+	mSectorLighting.eligibleSectorCount = 0;
+	mSectorLighting.activeSectorCount = 0;
+	mSectorLighting.fogSectorCount = 0;
+	mSectorLighting.pulsingSectorCount = 0;
+	mSectorLighting.topologyChanged = false;
 }
 
 void SceneLightSystem::AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source)
@@ -422,6 +514,133 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 	mEmissiveSurfaces.activeSurfaces = std::move(nextSurfaces);
 }
 
+void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount)
+{
+	mSectorLighting.sectorCount = sectorCount;
+	mSectorLighting.eligibleSectorCount = 0;
+	mSectorLighting.activeSectorCount = 0;
+	mSectorLighting.fogSectorCount = 0;
+	mSectorLighting.pulsingSectorCount = 0;
+	mSectorLighting.sectors.assign(sectorCount, {});
+
+	std::vector<uint8_t> seenSectors(sectorCount, 0u);
+	for (const SurfaceRecord& record : mSurfaceRecords)
+	{
+		if (record.provenance.sectorIndex < 0)
+		{
+			continue;
+		}
+
+		const uint32_t sectorIndex = (uint32_t)record.provenance.sectorIndex;
+		if (sectorIndex >= sectorCount)
+		{
+			continue;
+		}
+
+		seenSectors[sectorIndex] = 1u;
+	}
+
+	mSectorLighting.activeSectorIndices.clear();
+	mSectorLighting.activeSectorIndices.reserve(sectorCount);
+
+	if (!nri_ptsectorlighting || sectorCount == 0)
+	{
+		mSectorLighting.topologyChanged = !mSectorLighting.activeTopologyKeys.empty();
+		mSectorLighting.activeTopologyKeys.clear();
+		return;
+	}
+
+	const int paletteFilter = (int)nri_ptsectorfilterpal;
+	const int minShadeFilter = (int)nri_ptsectorfilterminshade;
+	const int maxShadeFilter = std::max(minShadeFilter, (int)nri_ptsectorfiltermaxshade);
+	const int lotagFilter = (int)nri_ptsectorfilterlotag;
+	const uint32_t pulseFrames = std::max(0, (int)nri_ptsectorpulseframes);
+	const float pulseAmount = std::max(0.0f, (float)nri_ptsectorpulseamount);
+	const float ambientScale = std::max(0.0f, (float)nri_ptsectorambientscale);
+	const float hemisphereScale = std::max(0.0f, (float)nri_ptsectorhemiscale);
+	const float fogScale = std::max(0.0f, (float)nri_ptsectorfogscale);
+	const float sectorClamp = std::max(0.0f, (float)nri_ptsectorclamp);
+
+	for (uint32_t sectorIndex = 0; sectorIndex < sectorCount; ++sectorIndex)
+	{
+		if (sectorIndex >= seenSectors.size() || seenSectors[sectorIndex] == 0u)
+		{
+			continue;
+		}
+
+		mSectorLighting.eligibleSectorCount++;
+
+		const auto& sec = sector[sectorIndex];
+		const int resolvedPalette = sec.floorpal != 0 ? (int)sec.floorpal : (int)sec.ceilingpal;
+		const int averageShade = ((int)sec.floorshade + (int)sec.ceilingshade) / 2;
+		if ((paletteFilter >= 0 && resolvedPalette != paletteFilter) ||
+			(averageShade < minShadeFilter || averageShade > maxShadeFilter) ||
+			(lotagFilter >= 0 && sec.lotag != lotagFilter))
+		{
+			continue;
+		}
+
+		const float lightLevel = ComputeBuildLightLevel(averageShade, resolvedPalette);
+		const float floorLight = ComputeBuildLightLevel((int)sec.floorshade, resolvedPalette);
+		const float ceilingLight = ComputeBuildLightLevel((int)sec.ceilingshade, resolvedPalette);
+		const float hemisphereBias = clamp(ceilingLight - floorLight, -1.0f, 1.0f);
+		float tint[3] = {};
+		float fogStrength = 0.0f;
+		ResolveSectorTint(sec, resolvedPalette, tint, fogStrength);
+		const float pulseScale = EvaluatePulseScale(0x5EC70B5E00000000ull ^ (uint64_t)sectorIndex, frameIndex, pulseFrames, pulseAmount);
+		const float clampedAmbient = std::min(sectorClamp, ambientScale * (0.10f + lightLevel * 0.55f) * pulseScale);
+		const float clampedHemisphere = std::min(sectorClamp, hemisphereScale * (0.08f + (0.5f + 0.5f * std::abs(hemisphereBias)) * 0.45f) * pulseScale);
+		const float clampedFog = std::min(sectorClamp, fogScale * fogStrength * pulseScale);
+		if (clampedAmbient <= 0.0f && clampedHemisphere <= 0.0f && clampedFog <= 0.0f)
+		{
+			continue;
+		}
+
+		SectorLightingRegistry::SectorLightRecord entry = {};
+		entry.sectorIndex = sectorIndex;
+		entry.sourceFlags = SceneSectorLightSourceFlag_Heuristic;
+		if (paletteFilter >= 0)
+		{
+			entry.sourceFlags |= SceneSectorLightSourceFlag_PaletteFilter;
+		}
+		if (lotagFilter >= 0)
+		{
+			entry.sourceFlags |= SceneSectorLightSourceFlag_LotagFilter;
+		}
+		if (fogStrength > 0.0f)
+		{
+			entry.sourceFlags |= SceneSectorLightSourceFlag_FogPresent;
+			mSectorLighting.fogSectorCount++;
+		}
+		if (pulseFrames > 1 && pulseAmount > 0.0f)
+		{
+			entry.sourceFlags |= SceneSectorLightSourceFlag_Pulsing;
+			mSectorLighting.pulsingSectorCount++;
+		}
+
+		entry.paletteIndex = resolvedPalette;
+		entry.lotag = sec.lotag;
+		entry.hitag = sec.hitag;
+		entry.averageShade = averageShade;
+		entry.ambientColor[0] = tint[0];
+		entry.ambientColor[1] = tint[1];
+		entry.ambientColor[2] = tint[2];
+		entry.ambientIntensity = clampedAmbient;
+		entry.hemisphereAmount = hemisphereBias * clampedHemisphere;
+		entry.fogAmount = clampedFog;
+		entry.pulseScale = pulseScale;
+
+		mSectorLighting.sectors[sectorIndex] = entry;
+		mSectorLighting.activeSectorIndices.push_back(sectorIndex);
+	}
+
+	mSectorLighting.activeSectorCount = (uint32_t)mSectorLighting.activeSectorIndices.size();
+	std::vector<uint32_t> nextTopologyKeys = mSectorLighting.activeSectorIndices;
+	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
+	mSectorLighting.topologyChanged = nextTopologyKeys != mSectorLighting.activeTopologyKeys;
+	mSectorLighting.activeTopologyKeys = std::move(nextTopologyKeys);
+}
+
 bool SceneLightSystem::AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius)
 {
 	if (position == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)
@@ -572,6 +791,13 @@ bool SceneLightSystem::ConsumeEmissiveMaterialsDirty()
 	return dirty;
 }
 
+bool SceneLightSystem::ConsumeSectorLightingTopologyChanged()
+{
+	const bool changed = mSectorLighting.topologyChanged;
+	mSectorLighting.topologyChanged = false;
+	return changed;
+}
+
 void SceneLightSystem::AppendSurfaceList(const std::vector<nri_scene::SurfaceRef>& surfaces, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t& inOutMaterialIndex)
 {
 	for (const nri_scene::SurfaceRef& surface : surfaces)
@@ -589,6 +815,7 @@ void SceneLightSystem::AppendSurfaceList(const std::vector<nri_scene::SurfaceRef
 		}
 		else if (inOutMaterialIndex < materials.materials.size())
 		{
+			record.material.sectorIndex = materials.materials[inOutMaterialIndex].sectorIndex != UINT32_MAX ? (int32_t)materials.materials[inOutMaterialIndex].sectorIndex : -1;
 			record.material.paletteIndex = materials.materials[inOutMaterialIndex].paletteIndex;
 			record.material.materialFlags = materials.materials[inOutMaterialIndex].flags;
 			record.material.alpha = materials.materials[inOutMaterialIndex].alpha;

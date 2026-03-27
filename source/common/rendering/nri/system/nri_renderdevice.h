@@ -68,6 +68,7 @@ public:
 	void ClearPathTracingEmissiveHeuristics();
 	void PrintPathTracingEmissiveHeuristics() const;
 	void PrintPathTracingEmissiveSurfaces(float radius, uint32_t limit) const;
+	void PrintPathTracingSectorLights(float radius, uint32_t limit) const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
 
 private:

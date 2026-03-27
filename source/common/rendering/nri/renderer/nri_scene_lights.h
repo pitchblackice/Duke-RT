@@ -30,6 +30,16 @@ enum SceneEmissiveSurfaceSourceFlags : uint32_t
 	SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule = 1u << 3,
 };
 
+enum SceneSectorLightSourceFlags : uint32_t
+{
+	SceneSectorLightSourceFlag_None = 0,
+	SceneSectorLightSourceFlag_Heuristic = 1u << 0,
+	SceneSectorLightSourceFlag_PaletteFilter = 1u << 1,
+	SceneSectorLightSourceFlag_LotagFilter = 1u << 2,
+	SceneSectorLightSourceFlag_FogPresent = 1u << 3,
+	SceneSectorLightSourceFlag_Pulsing = 1u << 4,
+};
+
 class SceneLightSystem
 {
 public:
@@ -111,6 +121,30 @@ public:
 
 	struct SectorLightingRegistry
 	{
+		struct SectorLightRecord
+		{
+			uint32_t sectorIndex = UINT32_MAX;
+			uint32_t sourceFlags = SceneSectorLightSourceFlag_None;
+			int32_t paletteIndex = -1;
+			int32_t lotag = 0;
+			int32_t hitag = 0;
+			int32_t averageShade = 0;
+			float ambientColor[3] = {};
+			float ambientIntensity = 0.0f;
+			float hemisphereAmount = 0.0f;
+			float fogAmount = 0.0f;
+			float pulseScale = 1.0f;
+		};
+
+		std::vector<SectorLightRecord> sectors;
+		std::vector<uint32_t> activeSectorIndices;
+		std::vector<uint32_t> activeTopologyKeys;
+		uint32_t sectorCount = 0;
+		uint32_t eligibleSectorCount = 0;
+		uint32_t activeSectorCount = 0;
+		uint32_t fogSectorCount = 0;
+		uint32_t pulsingSectorCount = 0;
+		bool topologyChanged = false;
 	};
 
 	struct EnvironmentLightingState
@@ -133,6 +167,7 @@ public:
 	void AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source);
 	void RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxActiveLights);
 	void RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces);
+	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
 
 	bool AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool RemoveManualAnalyticLight(uint32_t id);
@@ -158,6 +193,7 @@ public:
 	bool ConsumeAnalyticLightTopologyChanged();
 	bool ConsumeEmissiveSurfaceTopologyChanged();
 	bool ConsumeEmissiveMaterialsDirty();
+	bool ConsumeSectorLightingTopologyChanged();
 
 private:
 	void AppendSurfaceList(const std::vector<nri_scene::SurfaceRef>& surfaces, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t& inOutMaterialIndex);

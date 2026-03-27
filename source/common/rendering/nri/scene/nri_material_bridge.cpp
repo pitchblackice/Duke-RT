@@ -244,14 +244,15 @@ namespace
 		return intensity;
 	}
 
-	MaterialLightingMetadata BuildMaterialLightingMetadata(const MaterialRef& materialRef, const MaterialData& material, uint64_t textureContentKey)
+	MaterialLightingMetadata BuildMaterialLightingMetadata(const SurfaceRef& surface, const MaterialData& material, uint64_t textureContentKey)
 	{
 		MaterialLightingMetadata metadata = {};
-		metadata.texture = materialRef.texture;
+		metadata.texture = surface.material.texture;
 		metadata.textureContentKey = textureContentKey;
 		metadata.paletteIndex = material.paletteIndex;
 		metadata.materialFlags = material.flags;
-		metadata.shade = materialRef.shade;
+		metadata.sectorIndex = surface.provenance.sectorIndex;
+		metadata.shade = surface.material.shade;
 		metadata.alpha = material.alpha;
 		metadata.lightLevel = material.lightLevel;
 		metadata.materialClass = material.materialClass;
@@ -262,29 +263,29 @@ namespace
 			metadata.lightingFlags |= MaterialLightingFlag_MaterialFullbright;
 		}
 
-		if (materialRef.texture != nullptr)
+		if (surface.material.texture != nullptr)
 		{
-			metadata.textureId = (uint32_t)materialRef.texture->GetID().GetIndex();
-			if (materialRef.texture->isFullbright())
+			metadata.textureId = (uint32_t)surface.material.texture->GetID().GetIndex();
+			if (surface.material.texture->isFullbright())
 			{
 				metadata.lightingFlags |= MaterialLightingFlag_TextureFullbright;
 			}
-			if (materialRef.texture->isGlowing())
+			if (surface.material.texture->isGlowing())
 			{
 				metadata.lightingFlags |= MaterialLightingFlag_TextureGlowing;
-				materialRef.texture->GetGlowColor(metadata.glowColor);
+				surface.material.texture->GetGlowColor(metadata.glowColor);
 			}
-			if (materialRef.texture->isAutoGlowing())
+			if (surface.material.texture->isAutoGlowing())
 			{
 				metadata.lightingFlags |= MaterialLightingFlag_TextureAutoGlowing;
 			}
-			if (materialRef.texture->GetGlowmap() != nullptr)
+			if (surface.material.texture->GetGlowmap() != nullptr)
 			{
 				metadata.lightingFlags |= MaterialLightingFlag_HasGlowmap;
-				metadata.glowmapContentKey = ComputeTextureContentKey(materialRef.texture->GetGlowmap(), false);
+				metadata.glowmapContentKey = ComputeTextureContentKey(surface.material.texture->GetGlowmap(), false);
 			}
 
-			if (!TryGetAverageTextureColor(materialRef.texture, metadata.averageColor))
+			if (!TryGetAverageTextureColor(surface.material.texture, metadata.averageColor))
 			{
 				metadata.averageColor[0] = 1.0f;
 				metadata.averageColor[1] = 1.0f;
@@ -325,12 +326,13 @@ namespace
 			}
 		}
 
-		metadata.materialKey = ComputeMaterialKey(materialRef, metadata);
+		metadata.materialKey = ComputeMaterialKey(surface.material, metadata);
 		return metadata;
 	}
 
-	void AppendSurfaceMaterial(const MaterialRef& materialRef, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
+	void AppendSurfaceMaterial(const SurfaceRef& surface, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
 	{
+		const MaterialRef& materialRef = surface.material;
 		MaterialData material = {};
 		material.flags = materialRef.flags;
 		material.paletteIndex = (uint32_t)clamp(materialRef.palette, 0, MAXPALOOKUPS - 1);
@@ -355,8 +357,9 @@ namespace
 			material.textureIndex = it->second;
 		}
 
+		material.sectorIndex = surface.provenance.sectorIndex >= 0 ? (uint32_t)surface.provenance.sectorIndex : UINT32_MAX;
 		outMaterials.materials.push_back(material);
-		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(materialRef, material, outMaterials.textures[material.textureIndex].key);
+		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(surface, material, outMaterials.textures[material.textureIndex].key);
 		outMaterials.lightMetadata.push_back(metadata);
 	}
 
@@ -392,17 +395,17 @@ void BuildMaterials(const SceneView& sceneView, MaterialBridgeData& outMaterials
 
 	for (const SurfaceRef& wall : sceneView.opaqueWalls)
 	{
-		AppendSurfaceMaterial(wall.material, textureLookup, outMaterials);
+		AppendSurfaceMaterial(wall, textureLookup, outMaterials);
 	}
 
 	for (const SurfaceRef& flat : sceneView.opaqueFlats)
 	{
-		AppendSurfaceMaterial(flat.material, textureLookup, outMaterials);
+		AppendSurfaceMaterial(flat, textureLookup, outMaterials);
 	}
 
 	for (const SurfaceRef& sprite : sceneView.opaqueSprites)
 	{
-		AppendSurfaceMaterial(sprite.material, textureLookup, outMaterials);
+		AppendSurfaceMaterial(sprite, textureLookup, outMaterials);
 	}
 
 	BuildPaletteLookup(outMaterials);
