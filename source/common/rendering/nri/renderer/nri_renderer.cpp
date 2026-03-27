@@ -2023,21 +2023,16 @@ bool NRIRenderer::AddRuntimePointLight(const float position[3], const float colo
 		return false;
 	}
 
-	if (mRuntimePointLights.size() >= NRI_MAX_RUNTIME_POINT_LIGHTS)
+	if (mSceneLights.GetManualAnalyticLightCount() >= NRI_MAX_RUNTIME_POINT_LIGHTS)
 	{
 		return false;
 	}
 
-	RuntimePointLightData light = {};
-	light.id = mNextRuntimePointLightId++;
-	Copy3(position, light.position);
-	light.color[0] = std::max(color[0], 0.0f);
-	light.color[1] = std::max(color[1], 0.0f);
-	light.color[2] = std::max(color[2], 0.0f);
-	light.intensity = intensity;
-	light.radius = radius;
-	mRuntimePointLights.push_back(light);
-	outId = light.id;
+	outId = mNextRuntimePointLightId++;
+	if (!mSceneLights.AddManualAnalyticLight(outId, position, color, intensity, radius))
+	{
+		return false;
+	}
 	mBoundRuntimeLightCount = 0;
 	RequestHistoryReset("runtime-light-change");
 	return true;
@@ -2045,16 +2040,11 @@ bool NRIRenderer::AddRuntimePointLight(const float position[3], const float colo
 
 bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
 {
-	const auto it = std::find_if(mRuntimePointLights.begin(), mRuntimePointLights.end(), [id](const RuntimePointLightData& light)
-	{
-		return light.id == id;
-	});
-	if (it == mRuntimePointLights.end())
+	if (!mSceneLights.RemoveManualAnalyticLight(id))
 	{
 		return false;
 	}
 
-	mRuntimePointLights.erase(it);
 	mBoundRuntimeLightCount = 0;
 	RequestHistoryReset("runtime-light-change");
 	return true;
@@ -2062,30 +2052,43 @@ bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
 
 void NRIRenderer::ClearRuntimePointLights()
 {
-	if (mRuntimePointLights.empty())
+	if (mSceneLights.GetManualAnalyticLightCount() == 0)
 	{
 		return;
 	}
 
-	mRuntimePointLights.clear();
+	mSceneLights.ClearManualAnalyticLights();
 	mBoundRuntimeLightCount = 0;
 	RequestHistoryReset("runtime-light-change");
 }
 
 void NRIRenderer::PrintRuntimePointLights() const
 {
-	Printf("NRI PT test lights: count=%u limit=%u\n",
-		(uint32_t)mRuntimePointLights.size(),
+	const auto& analyticLights = mSceneLights.GetAnalyticLights();
+	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u matched_surfaces=%u deduped=%u truncated=%u limit=%u\n",
+		(uint32_t)analyticLights.activeLights.size(),
+		(uint32_t)analyticLights.manualLights.size(),
+		(uint32_t)analyticLights.spriteTileRules.size(),
+		analyticLights.matchedSurfaceCount,
+		analyticLights.dedupedMatchCount,
+		analyticLights.truncatedLightCount,
 		NRI_MAX_RUNTIME_POINT_LIGHTS);
-	if (mRuntimePointLights.empty())
+	if (analyticLights.activeLights.empty())
 	{
 		return;
 	}
 
-	for (const RuntimePointLightData& light : mRuntimePointLights)
+	for (const SceneLightSystem::SceneAnalyticLight& light : analyticLights.activeLights)
 	{
-		Printf("NRI PT test light %u: render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
+		Printf("NRI PT analytic light %u: id=%u stable=0x%016llx source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
 			light.id,
+			light.id,
+			(unsigned long long)light.stableKey,
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_Manual) != 0 ? "manual" : "heuristic",
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_SpriteTileHeuristic) != 0 ? ":sprite_tile" : "",
+			light.sourceRuleId,
+			light.actorIndex,
+			light.textureId,
 			light.position[0],
 			light.position[1],
 			light.position[2],
@@ -2099,7 +2102,51 @@ void NRIRenderer::PrintRuntimePointLights() const
 
 uint32_t NRIRenderer::GetRuntimePointLightCount() const
 {
-	return (uint32_t)mRuntimePointLights.size();
+	return mSceneLights.GetManualAnalyticLightCount();
+}
+
+bool NRIRenderer::AddSpriteTileLightHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId)
+{
+	if (!mSceneLights.AddSpriteTileHeuristic(textureId, color, intensity, radius, flickerFrames, outRuleId))
+	{
+		return false;
+	}
+
+	RequestHistoryReset("analytic-light-heuristic-change");
+	return true;
+}
+
+void NRIRenderer::ClearSpriteTileLightHeuristics()
+{
+	if (mSceneLights.GetAnalyticLights().spriteTileRules.empty())
+	{
+		return;
+	}
+
+	mSceneLights.ClearSpriteTileHeuristics();
+	RequestHistoryReset("analytic-light-heuristic-change");
+}
+
+void NRIRenderer::PrintSpriteTileLightHeuristics() const
+{
+	const auto& analyticLights = mSceneLights.GetAnalyticLights();
+	Printf("NRI PT analytic sprite-tile heuristics: rules=%u matched_surfaces=%u deduped=%u truncated=%u\n",
+		(uint32_t)analyticLights.spriteTileRules.size(),
+		analyticLights.matchedSurfaceCount,
+		analyticLights.dedupedMatchCount,
+		analyticLights.truncatedLightCount);
+	for (const auto& rule : analyticLights.spriteTileRules)
+	{
+		Printf("NRI PT analytic heuristic %u: tile=%u color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f flicker_frames=%u\n",
+			rule.ruleId,
+			rule.textureId,
+			rule.color[0],
+			rule.color[1],
+			rule.color[2],
+			rule.intensity,
+			rule.radius,
+			rule.flickerFrames);
+	}
 }
 
 void NRIRenderer::PrintStatus() const
@@ -2194,8 +2241,10 @@ void NRIRenderer::PrintStatus() const
 		(int)nri_ptmutationtracechunk,
 		(int)nri_ptmutationtracesector);
 	Printf("NRI PT runtime link trace: %s\n", nri_ptruntimelinktrace ? "on" : "off");
-	Printf("NRI PT test lights: active=%u limit=%u\n",
-		(uint32_t)mRuntimePointLights.size(),
+	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u limit=%u\n",
+		(uint32_t)mSceneLights.GetAnalyticLights().activeLights.size(),
+		(uint32_t)mSceneLights.GetAnalyticLights().manualLights.size(),
+		(uint32_t)mSceneLights.GetAnalyticLights().spriteTileRules.size(),
 		NRI_MAX_RUNTIME_POINT_LIGHTS);
 	if (nri_ptbootstrap)
 	{
@@ -2979,6 +3028,13 @@ void NRIRenderer::RefreshSceneLightSystem(
 	{
 		mSceneLights.AppendSceneView(*dynamicSceneView, *dynamicMaterials, SceneLightRecordSource::DynamicScene);
 	}
+
+	mSceneLights.RebuildAnalyticLights(mFrameIndex, NRI_MAX_RUNTIME_POINT_LIGHTS);
+	if (mSceneLights.ConsumeAnalyticLightTopologyChanged())
+	{
+		mBoundRuntimeLightCount = 0;
+		RequestHistoryReset("analytic-light-topology");
+	}
 }
 
 void NRIRenderer::PrintSceneLightDump(float radius, uint32_t limit) const
@@ -3141,9 +3197,9 @@ void NRIRenderer::RefreshMapWorld()
 {
 	const uint64_t pendingBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
 	const bool levelChanged = mMapWorld.level != currentLevel;
-	if (levelChanged && !mRuntimePointLights.empty())
+	if (levelChanged && mSceneLights.GetManualAnalyticLightCount() > 0)
 	{
-		const uint32_t clearedCount = (uint32_t)mRuntimePointLights.size();
+		const uint32_t clearedCount = mSceneLights.GetManualAnalyticLightCount();
 		ClearRuntimePointLights();
 		Printf("NRI PT test lights cleared: count=%u reason=level-change\n", clearedCount);
 	}
@@ -3395,9 +3451,10 @@ bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& des
 
 void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const
 {
+	const auto& activeLights = mSceneLights.GetAnalyticLights().activeLights;
 	outLights.clear();
-	outLights.reserve(mRuntimePointLights.size());
-	for (const RuntimePointLightData& light : mRuntimePointLights)
+	outLights.reserve(activeLights.size());
+	for (const SceneLightSystem::SceneAnalyticLight& light : activeLights)
 	{
 		RuntimePointLightGpuData gpuLight = {};
 		Copy3(light.position, gpuLight.position);

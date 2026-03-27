@@ -59,6 +59,9 @@ public:
 	bool RemovePathTracingPointLight(uint32_t id);
 	void ClearPathTracingPointLights();
 	void PrintPathTracingPointLights() const;
+	bool AddPathTracingSpriteTileLightHeuristic(uint32_t textureId, float red, float green, float blue, float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
+	void ClearPathTracingLightHeuristics();
+	void PrintPathTracingLightHeuristics() const;
 	void PrintPathTracingSceneLightDump(float radius, uint32_t limit) const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
 

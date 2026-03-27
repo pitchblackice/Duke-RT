@@ -36,6 +36,9 @@ public:
 	void ClearRuntimePointLights();
 	void PrintRuntimePointLights() const;
 	uint32_t GetRuntimePointLightCount() const;
+	bool AddSpriteTileLightHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
+	void ClearSpriteTileLightHeuristics();
+	void PrintSpriteTileLightHeuristics() const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	const char* GetAvailabilityReason() const;
 
@@ -126,15 +129,6 @@ private:
 		float position[3] = {};
 		float normal[3] = {};
 		nri_scene::SurfaceProvenance provenance = {};
-	};
-
-	struct RuntimePointLightData
-	{
-		uint32_t id = 0;
-		float position[3] = {};
-		float color[3] = { 1.0f, 1.0f, 1.0f };
-		float intensity = 1.0f;
-		float radius = 0.0f;
 	};
 
 	struct RuntimePointLightGpuData
@@ -477,7 +471,6 @@ private:
 	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
-	std::vector<RuntimePointLightData> mRuntimePointLights;
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	uint32_t mFrameIndex = 0;

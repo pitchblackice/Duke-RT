@@ -916,6 +916,57 @@ CCMD(nri_ptlightlist)
 	}
 }
 
+CCMD(nri_ptlightheuristic_addsprite)
+{
+	if (argv.argc() < 7)
+	{
+		Printf("nri_ptlightheuristic_addsprite <tile> <r> <g> <b> <intensity> <radius> [flicker_frames]: adds a PT analytic sprite-tile light heuristic.\n");
+		return;
+	}
+
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		uint32_t ruleId = 0;
+		frameBuffer->AddPathTracingSpriteTileLightHeuristic(
+			(uint32_t)atoi(argv[1]),
+			(float)atof(argv[2]),
+			(float)atof(argv[3]),
+			(float)atof(argv[4]),
+			(float)atof(argv[5]),
+			(float)atof(argv[6]),
+			argv.argc() > 7 ? (uint32_t)atoi(argv[7]) : 0u,
+			ruleId);
+	}
+	else
+	{
+		Printf("nri_ptlightheuristic_addsprite is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptlightheuristic_clear)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->ClearPathTracingLightHeuristics();
+	}
+	else
+	{
+		Printf("nri_ptlightheuristic_clear is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptlightheuristic_list)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingLightHeuristics();
+	}
+	else
+	{
+		Printf("nri_ptlightheuristic_list is only available while using the NRI renderer.\n");
+	}
+}
+
 CCMD(nri_ptlightclear)
 {
 	if (auto* frameBuffer = GetActiveNRIRenderDevice())
@@ -2021,6 +2072,72 @@ void NRIRenderDevice::PrintPathTracingPointLights() const
 	}
 
 	mRenderer->PrintRuntimePointLights();
+}
+
+bool NRIRenderDevice::AddPathTracingSpriteTileLightHeuristic(uint32_t textureId, float red, float green, float blue, float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId)
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT analytic light heuristics are unavailable because the renderer is not initialized.\n");
+		return false;
+	}
+
+	if (intensity <= 0.0f)
+	{
+		Printf("nri_ptlightheuristic_addsprite: intensity must be > 0.\n");
+		return false;
+	}
+
+	if (radius <= 0.0f)
+	{
+		Printf("nri_ptlightheuristic_addsprite: radius must be > 0.\n");
+		return false;
+	}
+
+	const float lightColor[3] = {
+		red < 0.0f ? 0.0f : red,
+		green < 0.0f ? 0.0f : green,
+		blue < 0.0f ? 0.0f : blue,
+	};
+	if (!mRenderer->AddSpriteTileLightHeuristic(textureId, lightColor, intensity, radius, flickerFrames, outRuleId))
+	{
+		Printf("nri_ptlightheuristic_addsprite: failed to add analytic light heuristic for tile=%u.\n", textureId);
+		return false;
+	}
+
+	Printf("NRI PT analytic light heuristic added: rule=%u tile=%u color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f flicker_frames=%u\n",
+		outRuleId,
+		textureId,
+		lightColor[0],
+		lightColor[1],
+		lightColor[2],
+		intensity,
+		radius,
+		flickerFrames);
+	return true;
+}
+
+void NRIRenderDevice::ClearPathTracingLightHeuristics()
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT analytic light heuristics are unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->ClearSpriteTileLightHeuristics();
+	Printf("NRI PT analytic light heuristics cleared.\n");
+}
+
+void NRIRenderDevice::PrintPathTracingLightHeuristics() const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT analytic light heuristics are unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintSpriteTileLightHeuristics();
 }
 
 void NRIRenderDevice::PrintPathTracingSceneLightDump(float radius, uint32_t limit) const
