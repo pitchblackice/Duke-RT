@@ -1499,6 +1499,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	RefreshMapWorld();
+	if (mPendingStaticMapLightingInvalidation)
+	{
+		InvalidateStaticMapSceneForMaterialLighting();
+		mPendingStaticMapLightingInvalidation = false;
+	}
 	UpdatePerFrameState(di);
 	if (preserveHistory)
 	{
@@ -2219,7 +2224,7 @@ bool NRIRenderer::AddTextureEmissiveHeuristic(uint32_t textureId, float intensit
 		return false;
 	}
 
-	InvalidateStaticMapSceneForMaterialLighting();
+	QueueStaticMapSceneLightingInvalidation();
 	mSceneLights.ConsumeEmissiveMaterialsDirty();
 	RequestHistoryReset("emissive-heuristic-change");
 	return true;
@@ -2233,7 +2238,7 @@ void NRIRenderer::ClearTextureEmissiveHeuristics()
 	}
 
 	mSceneLights.ClearTextureEmissiveHeuristics();
-	InvalidateStaticMapSceneForMaterialLighting();
+	QueueStaticMapSceneLightingInvalidation();
 	mSceneLights.ConsumeEmissiveMaterialsDirty();
 	RequestHistoryReset("emissive-heuristic-change");
 }
@@ -3236,9 +3241,14 @@ void NRIRenderer::RefreshSceneLightSystem(
 	}
 	if (mSceneLights.ConsumeEmissiveMaterialsDirty())
 	{
-		InvalidateStaticMapSceneForMaterialLighting();
+		QueueStaticMapSceneLightingInvalidation();
 		RequestHistoryReset("emissive-material-change");
 	}
+}
+
+void NRIRenderer::QueueStaticMapSceneLightingInvalidation()
+{
+	mPendingStaticMapLightingInvalidation = true;
 }
 
 void NRIRenderer::ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const

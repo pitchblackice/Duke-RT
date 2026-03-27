@@ -384,6 +384,7 @@ private:
 		const nri_scene::SceneView* dynamicSceneView,
 		const nri_scene::MaterialBridgeData* dynamicMaterials);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
+	void QueueStaticMapSceneLightingInvalidation();
 	void InvalidateStaticMapSceneForMaterialLighting();
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
@@ -547,6 +548,7 @@ private:
 	bool mUploadedStaticMapSceneLastFrame = false;
 	bool mBuiltStaticMapSceneASLastFrame = false;
 	bool mBuiltDynamicSceneASLastFrame = false;
+	bool mPendingStaticMapLightingInvalidation = false;
 	uint64_t mObservedMapWorldBuildSerial = 0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
 	uint32_t mActiveTlasInstanceCount = 0;
