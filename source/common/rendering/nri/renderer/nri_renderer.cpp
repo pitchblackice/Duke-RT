@@ -2693,6 +2693,11 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 
 void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement)
 {
+	if (nri_pttraceframes <= 0)
+	{
+		return;
+	}
+
 	const bool filterByChunk = nri_ptmutationtracechunk >= 0;
 	const bool filterBySector = nri_ptmutationtracesector >= 0;
 	if (!filterByChunk && !filterBySector)
