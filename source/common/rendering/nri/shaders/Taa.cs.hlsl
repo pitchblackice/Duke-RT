@@ -1,6 +1,8 @@
 #include "NRI.hlsl"
 
 #define NRI_FLAG_RESET_HISTORY 0x1u
+#define NRI_FLAG_USE_JITTER 0x40u
+#define NRI_TAA_JITTER_PHASE_COUNT 8u
 #define TAA_HISTORY_FRAME_CAP 12.0
 #define TAA_BASE_BLEND (1.0 / TAA_HISTORY_FRAME_CAP)
 #define TAA_SIGMA_SCALE 1.0
@@ -46,10 +48,6 @@ struct NRITraceConstants
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;
-	float CurrentJitterX;
-	float CurrentJitterY;
-	float PreviousJitterX;
-	float PreviousJitterY;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
@@ -91,6 +89,35 @@ float3 LoadCurrentColor(int2 pixelPos, uint2 size)
 	return max(gComposedInput.Load(int3(clampedPos, 0)).rgb, 0.0);
 }
 
+float GetTemporalHaltonSample(uint index, uint base)
+{
+	float inverseBase = 1.0 / float(base);
+	float fraction = inverseBase;
+	float result = 0.0;
+
+	while (index > 0u)
+	{
+		result += fraction * float(index % base);
+		index /= base;
+		fraction *= inverseBase;
+	}
+
+	return result;
+}
+
+float2 GetCurrentTemporalJitter()
+{
+	if ((gTraceConstants.Flags & NRI_FLAG_USE_JITTER) == 0u)
+	{
+		return 0.0;
+	}
+
+	const uint sampleIndex = (gTraceConstants.FrameIndex % NRI_TAA_JITTER_PHASE_COUNT) + 1u;
+	return float2(
+		GetTemporalHaltonSample(sampleIndex, 2u) - 0.5,
+		GetTemporalHaltonSample(sampleIndex, 3u) - 0.5);
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -105,7 +132,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 pixelPos = dispatchThreadId.xy;
 	const uint2 size = uint2(width, height);
 	const float2 resolution = float2(size);
-	const float2 currentJitter = float2(gTraceConstants.CurrentJitterX, gTraceConstants.CurrentJitterY);
+	const float2 currentJitter = GetCurrentTemporalJitter();
 	const float2 uv = ((float2)pixelPos + 0.5 + currentJitter) / resolution;
 	const bool resetHistory = (gTraceConstants.Flags & NRI_FLAG_RESET_HISTORY) != 0u;
 	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);

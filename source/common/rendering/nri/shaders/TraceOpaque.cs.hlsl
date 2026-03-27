@@ -391,8 +391,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else
 	{
 		const float currentViewZ = dot(hit.position - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
-		const float2 currentJitter = float2(gTraceConstants.CurrentJitterX, gTraceConstants.CurrentJitterY);
-		const float2 previousJitter = float2(gTraceConstants.PreviousJitterX, gTraceConstants.PreviousJitterY);
+		const float2 currentJitter = GetCurrentTemporalJitter();
+		const float2 previousJitter = GetPreviousTemporalJitter();
 		const float3 previousHitPosition = ResolveHitVertexPosition(hit, true);
 		const float2 prevUv = ProjectWorldToUv(previousHitPosition, gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward, gTraceConstants.PrevCameraRight, gTraceConstants.PrevCameraUp, gTraceConstants.PrevTanHalfFovX, gTraceConstants.PrevTanHalfFovY, previousJitter);
 		const float2 projectedCurrentUv = ProjectWorldToUv(hit.position, gTraceConstants.CameraPos, gTraceConstants.CameraForward, gTraceConstants.CameraRight, gTraceConstants.CameraUp, gTraceConstants.TanHalfFovX, gTraceConstants.TanHalfFovY, currentJitter);

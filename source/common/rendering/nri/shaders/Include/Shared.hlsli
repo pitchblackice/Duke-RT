@@ -12,6 +12,8 @@
 #define SET_ROOT 5
 
 #define MAX_SCENE_TEXTURES 256
+#define NRI_FLAG_USE_JITTER 0x40u
+#define NRI_TAA_JITTER_PHASE_COUNT 8u
 
 #define MATERIAL_FLAG_INDEXED 1
 #define MATERIAL_FLAG_FULLBRIGHT 2
@@ -58,10 +60,6 @@ struct NRITraceConstants
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;
-	float CurrentJitterX;
-	float CurrentJitterY;
-	float PreviousJitterX;
-	float PreviousJitterY;
 };
 
 struct SceneVertex
@@ -122,6 +120,46 @@ struct RuntimePointLightData
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, SET_ROOT);
+
+float GetTemporalHaltonSample(uint index, uint base)
+{
+	float inverseBase = 1.0 / float(base);
+	float fraction = inverseBase;
+	float result = 0.0;
+
+	while (index > 0u)
+	{
+		result += fraction * float(index % base);
+		index /= base;
+		fraction *= inverseBase;
+	}
+
+	return result;
+}
+
+float2 GetTemporalJitterForFrame(uint frameIndex)
+{
+	if ((gTraceConstants.Flags & NRI_FLAG_USE_JITTER) == 0u)
+	{
+		return 0.0;
+	}
+
+	const uint sampleIndex = (frameIndex % NRI_TAA_JITTER_PHASE_COUNT) + 1u;
+	return float2(
+		GetTemporalHaltonSample(sampleIndex, 2u) - 0.5,
+		GetTemporalHaltonSample(sampleIndex, 3u) - 0.5);
+}
+
+float2 GetCurrentTemporalJitter()
+{
+	return GetTemporalJitterForFrame(gTraceConstants.FrameIndex);
+}
+
+float2 GetPreviousTemporalJitter()
+{
+	const uint previousFrameIndex = gTraceConstants.FrameIndex > 0u ? gTraceConstants.FrameIndex - 1u : 0u;
+	return GetTemporalJitterForFrame(previousFrameIndex);
+}
 
 RaytracingAccelerationStructure gWorldTlas : register(t0, space5);
 StructuredBuffer<SceneVertex> gStaticVertices : register(t0, space2);

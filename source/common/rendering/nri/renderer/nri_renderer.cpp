@@ -79,6 +79,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
 	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
 	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
+	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
@@ -769,10 +770,6 @@ namespace
 		uint32_t PortalDepth = 0;
 		uint32_t ReservedTrace0 = 0;
 		uint32_t ReservedTrace1 = 0;
-		float CurrentJitterX = 0.0f;
-		float CurrentJitterY = 0.0f;
-		float PreviousJitterX = 0.0f;
-		float PreviousJitterY = 0.0f;
 	};
 
 	static bool IsAppTaaEligibleUpscaler(NRIUpscalerKind kind)
@@ -5402,6 +5399,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	NRITraceConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
+	const bool useTemporalJitter = !nri_ptbootstrap && ShouldUseTemporalJitter(ResolveUpscalerKind(false));
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
@@ -5426,7 +5424,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.Flags =
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
-		(mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u);
+		(mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
+		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
@@ -5767,7 +5766,9 @@ bool NRIRenderer::DispatchUpscaleChain()
 		constants.DisplayHeight = mOutputHeight;
 		constants.FrameIndex = mFrameIndex;
 		constants.DebugMode = (uint32_t)nri_ptdebug;
-		constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+		constants.Flags =
+			(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+			(runAppTaa ? NRI_FLAG_USE_JITTER : 0u);
 
 		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
