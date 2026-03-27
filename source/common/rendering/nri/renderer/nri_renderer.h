@@ -130,6 +130,14 @@ private:
 		uint32_t primitiveIndex = UINT32_MAX;
 		uint32_t materialIndex = UINT32_MAX;
 		uint32_t primitiveFlags = 0;
+		uint32_t materialLightingFlags = 0;
+		uint32_t textureId = 0;
+		uint32_t materialClass = 0;
+		uint32_t emissiveMode = 0;
+		float lightLevel = 0.0f;
+		float alpha = 1.0f;
+		float averageColor[3] = { 1.0f, 1.0f, 1.0f };
+		float glowColor[3] = {};
 		float distance = 0.0f;
 		float position[3] = {};
 		float normal[3] = {};
@@ -375,7 +383,7 @@ private:
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
-	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging);
+	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;
 	void RefreshSceneLightSystem(
 		bool usedStaticMapScene,

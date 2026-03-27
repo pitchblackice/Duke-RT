@@ -853,6 +853,11 @@ namespace
 		std::memcpy(dst, src, sizeof(float) * 2);
 	}
 
+	static const char* YesNo(bool value)
+	{
+		return value ? "yes" : "no";
+	}
+
 	struct SkyFaceUpload
 	{
 		uint32_t width = 0;
@@ -1561,6 +1566,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::SceneView* activeSceneView = nullptr;
 	const nri_scene::GeometryData* activeGeometry = nullptr;
 	const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
+	const nri_scene::MaterialBridgeData* activeMaterialBridge = nullptr;
 	const nri_scene::SceneView* sceneLightCapturedView = nullptr;
 	const nri_scene::MaterialBridgeData* sceneLightCapturedMaterials = nullptr;
 	const nri_scene::SceneView* sceneLightDynamicView = nullptr;
@@ -1579,6 +1585,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		activeSceneView = &mStaticMapScene.sceneView;
 		activeGeometry = &mStaticMapScene.geometry;
 		activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+		activeMaterialBridge = &mStaticMapScene.materialBridge;
 		activeStats = mStaticMapScene.sceneView.stats;
 
 		const bool deferOverlayThisFrame = mUploadedStaticMapSceneLastFrame || mBuiltStaticMapSceneASLastFrame;
@@ -1742,11 +1749,13 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					AppendGeometry(overlayGeometry, (uint32_t)mStaticMapScene.materialBridge.materials.size(), combinedGeometry);
 					activeGeometry = &combinedGeometry;
 					activeGpuMaterials = &combinedGpuMaterials;
+					activeMaterialBridge = &combinedMaterialBridge;
 				}
 				else
 				{
 					activeGeometry = &mStaticMapScene.geometry;
 					activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+					activeMaterialBridge = &mStaticMapScene.materialBridge;
 				}
 
 				activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicSceneView.stats);
@@ -1786,6 +1795,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			activeSceneView = &mStaticMapScene.sceneView;
 			activeGeometry = &mStaticMapScene.geometry;
 			activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+			activeMaterialBridge = &mStaticMapScene.materialBridge;
 			activeStats = mStaticMapScene.sceneView.stats;
 		}
 		else
@@ -1807,6 +1817,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 
 		activeSceneView = &capturedSceneView;
+		activeMaterialBridge = &materialBridge;
 		sceneLightCapturedView = &capturedSceneView;
 		activeStats = capturedSceneView.stats;
 
@@ -1900,7 +1911,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		activeGpuMaterials = &capturedGpuMaterials;
 	}
 
-	if (activeSceneView == nullptr || activeGeometry == nullptr || activeGpuMaterials == nullptr)
+	if (activeSceneView == nullptr || activeGeometry == nullptr || activeGpuMaterials == nullptr || activeMaterialBridge == nullptr)
 	{
 		LogFallback("PT scene selection failed.");
 		if (preserveHistory)
@@ -1948,7 +1959,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	if (!preserveHistory)
 	{
-		UpdateSurfaceProbe(*activeGeometry, true);
+		UpdateSurfaceProbe(*activeGeometry, activeMaterialBridge, true);
 	}
 	if (activeGeometry->primitives.empty())
 	{
@@ -3055,7 +3066,7 @@ void NRIRenderer::PrintSceneBufferStatus() const
 	printBuffer(mRuntimeLightTileIndexBuffer, mRuntimeLightTileIndexBufferStats);
 }
 
-void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging)
+void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging)
 {
 	if (nri_ptsurfaceprobe <= 0 || !allowLogging)
 	{
@@ -3099,6 +3110,19 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bo
 		}
 	}
 
+	if (result.hit && materials != nullptr && result.materialIndex < materials->lightMetadata.size())
+	{
+		const auto& metadata = materials->lightMetadata[result.materialIndex];
+		result.materialLightingFlags = metadata.lightingFlags;
+		result.textureId = metadata.textureId;
+		result.materialClass = metadata.materialClass;
+		result.emissiveMode = metadata.emissiveMode;
+		result.lightLevel = metadata.lightLevel;
+		result.alpha = metadata.alpha;
+		Copy3(metadata.averageColor, result.averageColor);
+		Copy3(metadata.glowColor, result.glowColor);
+	}
+
 	auto sameIdentity = [](const SurfaceProbeResult& a, const SurfaceProbeResult& b)
 	{
 		if (a.valid != b.valid || a.hit != b.hit)
@@ -3118,6 +3142,8 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bo
 			a.provenance.actorIndex == b.provenance.actorIndex &&
 			a.provenance.drawListType == b.provenance.drawListType &&
 			a.provenance.cstat == b.provenance.cstat &&
+			a.textureId == b.textureId &&
+			a.materialLightingFlags == b.materialLightingFlags &&
 			a.primitiveFlags == b.primitiveFlags &&
 			a.materialIndex == b.materialIndex &&
 			(a.provenance.sourceType != nri_scene::SurfaceSourceType::Unknown || a.primitiveIndex == b.primitiveIndex);
@@ -3139,9 +3165,10 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bo
 	}
 
 	const uint32_t flags = result.primitiveFlags;
+	const uint32_t lightingFlags = result.materialLightingFlags;
 	const int32_t localSpaceIndex = result.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)result.provenance.mapChunkIndex) : -1;
 	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, result.provenance);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s\n",
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		result.provenance.mapChunkIndex,
@@ -3154,17 +3181,28 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bo
 		result.provenance.cstat,
 		result.primitiveIndex,
 		result.materialIndex,
+		result.textureId,
 		result.distance,
 		result.position[0], result.position[1], result.position[2],
 		result.normal[0], result.normal[1], result.normal[2],
 		flags,
-		(flags & nri_scene::MaterialFlag_Indexed) != 0 ? "yes" : "no",
-		(flags & nri_scene::MaterialFlag_Fullbright) != 0 ? "yes" : "no",
-		(flags & nri_scene::MaterialFlag_Flat) != 0 ? "yes" : "no",
-		(flags & nri_scene::MaterialFlag_Sprite) != 0 ? "yes" : "no",
-		(flags & nri_scene::MaterialFlag_Mirror) != 0 ? "yes" : "no",
-		(flags & nri_scene::MaterialFlag_Sky) != 0 ? "yes" : "no",
-		(flags & nri_scene::MaterialFlag_Portal) != 0 ? "yes" : "no");
+		YesNo((flags & nri_scene::MaterialFlag_Indexed) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Fullbright) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Flat) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Sprite) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Mirror) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Sky) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Portal) != 0),
+		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureFullbright) != 0),
+		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureGlowing) != 0),
+		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0),
+		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0),
+		result.materialClass,
+		result.emissiveMode,
+		result.lightLevel,
+		result.alpha,
+		result.averageColor[0], result.averageColor[1], result.averageColor[2],
+		result.glowColor[0], result.glowColor[1], result.glowColor[2]);
 	mLastLoggedSurfaceProbe = result;
 }
 
@@ -3183,9 +3221,10 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 	}
 
 	const uint32_t flags = mLastSurfaceProbe.primitiveFlags;
+	const uint32_t lightingFlags = mLastSurfaceProbe.materialLightingFlags;
 	const int32_t localSpaceIndex = mLastSurfaceProbe.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex) : -1;
 	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, mLastSurfaceProbe.provenance);
-	Printf("NRI PT surface probe: source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x\n",
+	Printf("NRI PT surface probe: source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
 		mLastSurfaceProbe.provenance.mapChunkIndex,
@@ -3198,11 +3237,33 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		mLastSurfaceProbe.provenance.cstat,
 		mLastSurfaceProbe.primitiveIndex,
 		mLastSurfaceProbe.materialIndex,
+		mLastSurfaceProbe.textureId,
 		mLastSurfaceProbe.distance,
 		mLastSurfaceProbe.position[0],
 		mLastSurfaceProbe.position[1],
 		mLastSurfaceProbe.position[2],
-		flags);
+		flags,
+		YesNo((flags & nri_scene::MaterialFlag_Indexed) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Fullbright) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Flat) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Sprite) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Mirror) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Sky) != 0),
+		YesNo((flags & nri_scene::MaterialFlag_Portal) != 0),
+		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureFullbright) != 0),
+		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureGlowing) != 0),
+		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0),
+		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0),
+		mLastSurfaceProbe.materialClass,
+		mLastSurfaceProbe.emissiveMode,
+		mLastSurfaceProbe.lightLevel,
+		mLastSurfaceProbe.alpha,
+		mLastSurfaceProbe.averageColor[0],
+		mLastSurfaceProbe.averageColor[1],
+		mLastSurfaceProbe.averageColor[2],
+		mLastSurfaceProbe.glowColor[0],
+		mLastSurfaceProbe.glowColor[1],
+		mLastSurfaceProbe.glowColor[2]);
 }
 
 void NRIRenderer::RefreshSceneLightSystem(
