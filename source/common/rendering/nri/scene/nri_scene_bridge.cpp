@@ -374,6 +374,62 @@ namespace
 		}
 	}
 
+	bool TryComputeSurfaceNormal(const SurfaceRef& surface, float* outNormal)
+	{
+		if (surface.vertices.size() < 3)
+		{
+			return false;
+		}
+
+		const CapturedVertex& a = surface.vertices[0];
+		const CapturedVertex& b = surface.vertices[1];
+		const CapturedVertex& c = surface.vertices[2];
+		const float abx = b.position[0] - a.position[0];
+		const float aby = b.position[1] - a.position[1];
+		const float abz = b.position[2] - a.position[2];
+		const float acx = c.position[0] - a.position[0];
+		const float acy = c.position[1] - a.position[1];
+		const float acz = c.position[2] - a.position[2];
+		const float nx = aby * acz - abz * acy;
+		const float ny = abz * acx - abx * acz;
+		const float nz = abx * acy - aby * acx;
+		const float lengthSq = nx * nx + ny * ny + nz * nz;
+		if (lengthSq <= 1.0e-8f)
+		{
+			return false;
+		}
+
+		const float invLength = 1.0f / sqrtf(lengthSq);
+		outNormal[0] = nx * invLength;
+		outNormal[1] = ny * invLength;
+		outNormal[2] = nz * invLength;
+		return true;
+	}
+
+	void NudgeSpriteFlatSurface(const HWFlat& flat, SurfaceRef& surface)
+	{
+		if (flat.Sprite == nullptr || surface.vertices.empty())
+		{
+			return;
+		}
+
+		float normal[3] = {};
+		if (!TryComputeSurfaceNormal(surface, normal))
+		{
+			return;
+		}
+
+		for (CapturedVertex& vertex : surface.vertices)
+		{
+			vertex.position[0] += normal[0] * kAttachedWallSpriteDepthNudge;
+			vertex.position[1] += normal[1] * kAttachedWallSpriteDepthNudge;
+			vertex.position[2] += normal[2] * kAttachedWallSpriteDepthNudge;
+			vertex.prevPosition[0] += normal[0] * kAttachedWallSpriteDepthNudge;
+			vertex.prevPosition[1] += normal[1] * kAttachedWallSpriteDepthNudge;
+			vertex.prevPosition[2] += normal[2] * kAttachedWallSpriteDepthNudge;
+		}
+	}
+
 	bool IsEffectivelyOpaque(const FRenderStyle& style, float alpha)
 	{
 		return alpha >= 0.999f &&
@@ -660,6 +716,8 @@ namespace
 			{
 				ApplyActorPreviousTransform(surface, flat->Sprite->ownerActor);
 			}
+
+			NudgeSpriteFlatSurface(*flat, surface);
 
 			outFlats.push_back(std::move(surface));
 		}
