@@ -1025,6 +1025,18 @@ CCMD(nri_ptlightdebug_nearplayer)
 	}
 }
 
+CCMD(nri_ptlightclusterdebug)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingLightClusters();
+	}
+	else
+	{
+		Printf("nri_ptlightclusterdebug is only available while using the NRI renderer.\n");
+	}
+}
+
 NRIRenderDevice::NRIRenderDevice(void* hMonitor, bool fullscreen)
 	: SystemBaseFrameBuffer(hMonitor, fullscreen), mRenderState(std::make_unique<NRIRenderState>(this))
 {
@@ -2149,6 +2161,17 @@ void NRIRenderDevice::PrintPathTracingSceneLightDump(float radius, uint32_t limi
 	}
 
 	mRenderer->PrintSceneLightDump(radius, limit);
+}
+
+void NRIRenderDevice::PrintPathTracingLightClusters() const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT light-cluster debug is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintRuntimeLightClusterStatus();
 }
 
 void NRIRenderDevice::LogStartup()

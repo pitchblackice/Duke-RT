@@ -66,10 +66,12 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 11;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 13;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
+	constexpr uint32_t NRI_RUNTIME_LIGHT_TILE_SIZE = 64;
+	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT = 26;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -773,6 +775,9 @@ namespace
 		uint32_t BounceCounts = 0;
 		uint32_t PortalCount = 0;
 		uint32_t RuntimeLightCount = 0;
+		uint32_t RuntimeLightTileCountX = 0;
+		uint32_t RuntimeLightTileCountY = 0;
+		uint32_t RuntimeLightTileSize = 0;
 		uint32_t PortalDepth = 0;
 		uint32_t ReservedTrace0 = 0;
 		uint32_t ReservedTrace1 = 0;
@@ -2119,6 +2124,43 @@ void NRIRenderer::PrintRuntimePointLights() const
 	}
 }
 
+void NRIRenderer::PrintRuntimeLightClusterStatus() const
+{
+	const uint32_t tileCount = mBoundRuntimeLightTileCountX * mBoundRuntimeLightTileCountY;
+	const uint32_t centerTileX = mBoundRuntimeLightTileCountX > 0 ? (mBoundRuntimeLightTileCountX - 1) / 2u : 0u;
+	const uint32_t centerTileY = mBoundRuntimeLightTileCountY > 0 ? (mBoundRuntimeLightTileCountY - 1) / 2u : 0u;
+	uint32_t centerTileCount = 0;
+	if (mRuntimeLightTileHeaderBuffer.buffer != nullptr &&
+		mBoundRuntimeLightTileCountX > 0 &&
+		mBoundRuntimeLightTileCountY > 0)
+	{
+		void* mapped = mFrameBuffer->mCore.MapBuffer(*mRuntimeLightTileHeaderBuffer.buffer, 0, mRuntimeLightTileHeaderBuffer.usedSize);
+		if (mapped != nullptr)
+		{
+			const auto* headers = reinterpret_cast<const RuntimeLightTileHeaderGpuData*>(mapped);
+			const uint32_t centerIndex = centerTileY * mBoundRuntimeLightTileCountX + centerTileX;
+			if ((uint64_t)(centerIndex + 1) * sizeof(RuntimeLightTileHeaderGpuData) <= mRuntimeLightTileHeaderBuffer.usedSize)
+			{
+				centerTileCount = headers[centerIndex].indexCount;
+			}
+			mFrameBuffer->mCore.UnmapBuffer(*mRuntimeLightTileHeaderBuffer.buffer);
+		}
+	}
+
+	Printf("NRI PT light clusters: tile_size=%u grid=%ux%u tiles=%u active_lights=%u used_indices=%u max_occupancy=%u center_tile=(%u,%u) center_count=%u debug_mode=%u\n",
+		mBoundRuntimeLightTileSize,
+		mBoundRuntimeLightTileCountX,
+		mBoundRuntimeLightTileCountY,
+		tileCount,
+		mBoundRuntimeLightCount,
+		mBoundRuntimeLightTileIndexCount,
+		mBoundRuntimeLightMaxTileOccupancy,
+		centerTileX,
+		centerTileY,
+		centerTileCount,
+		NRI_PTDEBUG_ANALYTIC_DIRECT);
+}
+
 uint32_t NRIRenderer::GetRuntimePointLightCount() const
 {
 	return mSceneLights.GetManualAnalyticLightCount();
@@ -2225,7 +2267,7 @@ void NRIRenderer::PrintStatus() const
 		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
-		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=raw_penumbra 22=raw_shadow 23=denoised_shadow 24=direct_lighting 25=direct_emission");
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=raw_penumbra 22=raw_shadow 23=denoised_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct");
 	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s shadow_split=%s\n",
 		nrdMaxFrames,
 		nrdFastFrames,
@@ -2265,6 +2307,13 @@ void NRIRenderer::PrintStatus() const
 		(uint32_t)mSceneLights.GetAnalyticLights().manualLights.size(),
 		(uint32_t)mSceneLights.GetAnalyticLights().spriteTileRules.size(),
 		NRI_MAX_RUNTIME_POINT_LIGHTS);
+	Printf("NRI PT analytic clusters: tile=%u grid=%ux%u used_indices=%u max_occupancy=%u debug_mode=%u\n",
+		mBoundRuntimeLightTileSize,
+		mBoundRuntimeLightTileCountX,
+		mBoundRuntimeLightTileCountY,
+		mBoundRuntimeLightTileIndexCount,
+		mBoundRuntimeLightMaxTileOccupancy,
+		NRI_PTDEBUG_ANALYTIC_DIRECT);
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
@@ -2873,6 +2922,8 @@ void NRIRenderer::PrintSceneBufferStatus() const
 	printBuffer(activeMaterialBuffer, mMaterialBufferStats);
 	printBuffer(mPortalBuffer, mPortalBufferStats);
 	printBuffer(mRuntimeLightBuffer, mRuntimeLightBufferStats);
+	printBuffer(mRuntimeLightTileHeaderBuffer, mRuntimeLightTileHeaderBufferStats);
+	printBuffer(mRuntimeLightTileIndexBuffer, mRuntimeLightTileIndexBufferStats);
 }
 
 void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, bool allowLogging)
@@ -3484,6 +3535,116 @@ void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuD
 	}
 }
 
+void NRIRenderer::BuildRuntimeLightClusterUpload(
+	std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
+	std::vector<uint32_t>& outIndices,
+	uint32_t& outTileCountX,
+	uint32_t& outTileCountY,
+	uint32_t& outTileIndexCount,
+	uint32_t& outMaxTileOccupancy) const
+{
+	const auto& activeLights = mSceneLights.GetAnalyticLights().activeLights;
+	const uint32_t activeLightCount = (uint32_t)activeLights.size();
+	outTileCountX = std::max(1u, (mRenderWidth + NRI_RUNTIME_LIGHT_TILE_SIZE - 1u) / NRI_RUNTIME_LIGHT_TILE_SIZE);
+	outTileCountY = std::max(1u, (mRenderHeight + NRI_RUNTIME_LIGHT_TILE_SIZE - 1u) / NRI_RUNTIME_LIGHT_TILE_SIZE);
+	const uint32_t tileCount = outTileCountX * outTileCountY;
+	const uint32_t maxIndexCapacity = tileCount * NRI_MAX_RUNTIME_POINT_LIGHTS;
+	outTileIndexCount = 0;
+	outMaxTileOccupancy = 0;
+	outHeaders.assign(tileCount, {});
+	outIndices.assign(maxIndexCapacity, 0u);
+
+	if (tileCount == 0 || activeLightCount == 0 || mRenderWidth == 0 || mRenderHeight == 0)
+	{
+		return;
+	}
+
+	auto dot3 = [](const float* a, const float* b) -> float
+	{
+		return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+	};
+
+	std::vector<std::vector<uint32_t>> tileLights(tileCount);
+	for (uint32_t lightIndex = 0; lightIndex < activeLightCount; ++lightIndex)
+	{
+		const SceneLightSystem::SceneAnalyticLight& light = activeLights[lightIndex];
+		const float toLight[3] = {
+			light.position[0] - mCurrentCameraPos[0],
+			light.position[1] - mCurrentCameraPos[1],
+			light.position[2] - mCurrentCameraPos[2]
+		};
+		const float viewX = dot3(toLight, mCurrentCameraRight);
+		const float viewY = dot3(toLight, mCurrentCameraUp);
+		const float viewZ = dot3(toLight, mCurrentCameraForward);
+		if (viewZ <= -light.radius)
+		{
+			continue;
+		}
+
+		int32_t minTileX = 0;
+		int32_t minTileY = 0;
+		int32_t maxTileX = (int32_t)outTileCountX - 1;
+		int32_t maxTileY = (int32_t)outTileCountY - 1;
+
+		if (viewZ > light.radius &&
+			mCurrentTanHalfFovX > 0.0f &&
+			mCurrentTanHalfFovY > 0.0f)
+		{
+			const float conservativeDepth = std::max(viewZ - light.radius, 1.0f);
+			const float centerNdcX = viewX / (viewZ * mCurrentTanHalfFovX);
+			const float centerNdcY = viewY / (viewZ * mCurrentTanHalfFovY);
+			const float radiusNdcX = light.radius / (conservativeDepth * mCurrentTanHalfFovX);
+			const float radiusNdcY = light.radius / (conservativeDepth * mCurrentTanHalfFovY);
+			const float minPixelX = ((centerNdcX - radiusNdcX) * 0.5f + 0.5f) * (float)mRenderWidth;
+			const float maxPixelX = ((centerNdcX + radiusNdcX) * 0.5f + 0.5f) * (float)mRenderWidth;
+			const float minPixelY = (0.5f - (centerNdcY + radiusNdcY) * 0.5f) * (float)mRenderHeight;
+			const float maxPixelY = (0.5f - (centerNdcY - radiusNdcY) * 0.5f) * (float)mRenderHeight;
+			if (maxPixelX < 0.0f || minPixelX >= (float)mRenderWidth || maxPixelY < 0.0f || minPixelY >= (float)mRenderHeight)
+			{
+				continue;
+			}
+
+			minTileX = std::max(0, (int32_t)std::floor(minPixelX / (float)NRI_RUNTIME_LIGHT_TILE_SIZE));
+			minTileY = std::max(0, (int32_t)std::floor(minPixelY / (float)NRI_RUNTIME_LIGHT_TILE_SIZE));
+			maxTileX = std::min((int32_t)outTileCountX - 1, (int32_t)std::floor(std::max(maxPixelX - 1.0f, 0.0f) / (float)NRI_RUNTIME_LIGHT_TILE_SIZE));
+			maxTileY = std::min((int32_t)outTileCountY - 1, (int32_t)std::floor(std::max(maxPixelY - 1.0f, 0.0f) / (float)NRI_RUNTIME_LIGHT_TILE_SIZE));
+		}
+
+		if (minTileX > maxTileX || minTileY > maxTileY)
+		{
+			continue;
+		}
+
+		for (int32_t tileY = minTileY; tileY <= maxTileY; ++tileY)
+		{
+			for (int32_t tileX = minTileX; tileX <= maxTileX; ++tileX)
+			{
+				tileLights[(size_t)tileY * outTileCountX + (size_t)tileX].push_back(lightIndex);
+			}
+		}
+	}
+
+	uint32_t indexCursor = 0;
+	for (uint32_t tileIndex = 0; tileIndex < tileCount; ++tileIndex)
+	{
+		RuntimeLightTileHeaderGpuData& header = outHeaders[tileIndex];
+		const std::vector<uint32_t>& tileLightList = tileLights[tileIndex];
+		header.indexOffset = indexCursor;
+		header.indexCount = (uint32_t)tileLightList.size();
+		outMaxTileOccupancy = std::max(outMaxTileOccupancy, header.indexCount);
+		for (uint32_t lightIndex : tileLightList)
+		{
+			if (indexCursor < outIndices.size())
+			{
+				outIndices[indexCursor] = lightIndex;
+				indexCursor++;
+			}
+		}
+	}
+
+	outTileIndexCount = indexCursor;
+}
+
 bool NRIRenderer::UpdateSceneDataSet(
 	const NRIBufferResource& staticVertexBuffer,
 	const NRIBufferResource& staticIndexBuffer,
@@ -3546,6 +3707,43 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
+	std::vector<RuntimeLightTileHeaderGpuData> runtimeLightTileHeaders;
+	std::vector<uint32_t> runtimeLightTileIndices;
+	uint32_t runtimeLightTileCountX = 0;
+	uint32_t runtimeLightTileCountY = 0;
+	uint32_t runtimeLightTileIndexCount = 0;
+	uint32_t runtimeLightMaxTileOccupancy = 0;
+	BuildRuntimeLightClusterUpload(
+		runtimeLightTileHeaders,
+		runtimeLightTileIndices,
+		runtimeLightTileCountX,
+		runtimeLightTileCountY,
+		runtimeLightTileIndexCount,
+		runtimeLightMaxTileOccupancy);
+	if (!EnsureStructuredBuffer(
+		mRuntimeLightTileHeaderBuffer,
+		mRuntimeLightTileHeaderBufferStats,
+		runtimeLightTileHeaders.data(),
+		runtimeLightTileHeaders.size() * sizeof(RuntimeLightTileHeaderGpuData),
+		sizeof(RuntimeLightTileHeaderGpuData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (!EnsureStructuredBuffer(
+		mRuntimeLightTileIndexBuffer,
+		mRuntimeLightTileIndexBufferStats,
+		runtimeLightTileIndices.data(),
+		runtimeLightTileIndices.size() * sizeof(uint32_t),
+		sizeof(uint32_t),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
 	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
 	{
 		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
@@ -3563,6 +3761,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mSceneInstanceBuffer.shaderView,
 		mPortalBuffer.shaderView,
 		mRuntimeLightBuffer.shaderView,
+		mRuntimeLightTileHeaderBuffer.shaderView,
+		mRuntimeLightTileIndexBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : descriptors)
@@ -3586,6 +3786,11 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundDynamicMaterialCount = dynamicMaterialCount;
 	mBoundPortalCount = mMapWorld.valid ? (uint32_t)mMapWorld.portals.size() : 0u;
 	mBoundRuntimeLightCount = (uint32_t)runtimeLights.size();
+	mBoundRuntimeLightTileCountX = runtimeLightTileCountX;
+	mBoundRuntimeLightTileCountY = runtimeLightTileCountY;
+	mBoundRuntimeLightTileSize = NRI_RUNTIME_LIGHT_TILE_SIZE;
+	mBoundRuntimeLightTileIndexCount = runtimeLightTileIndexCount;
+	mBoundRuntimeLightMaxTileOccupancy = runtimeLightMaxTileOccupancy;
 	return true;
 }
 
@@ -5706,6 +5911,9 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u));
 	constants.PortalCount = mBoundPortalCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
+	constants.RuntimeLightTileCountX = mBoundRuntimeLightTileCountX;
+	constants.RuntimeLightTileCountY = mBoundRuntimeLightTileCountY;
+	constants.RuntimeLightTileSize = mBoundRuntimeLightTileSize;
 	constants.PortalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 	Copy3(mSkyColor, constants.SkyColor);
@@ -5844,6 +6052,9 @@ bool NRIRenderer::DispatchComposition()
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
+	constants.RuntimeLightTileCountX = mBoundRuntimeLightTileCountX;
+	constants.RuntimeLightTileCountY = mBoundRuntimeLightTileCountY;
+	constants.RuntimeLightTileSize = mBoundRuntimeLightTileSize;
 	constants.ReservedTrace0 = GetNrdInputSplitMode();
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 	Copy3(mSkyColor, constants.SkyColor);
@@ -6262,6 +6473,9 @@ bool NRIRenderer::DispatchFinal()
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
+	constants.RuntimeLightTileCountX = mBoundRuntimeLightTileCountX;
+	constants.RuntimeLightTileCountY = mBoundRuntimeLightTileCountY;
+	constants.RuntimeLightTileSize = mBoundRuntimeLightTileSize;
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -6586,6 +6800,8 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mSceneInstanceBuffer);
 	DestroyBufferResource(mPortalBuffer);
 	DestroyBufferResource(mRuntimeLightBuffer);
+	DestroyBufferResource(mRuntimeLightTileHeaderBuffer);
+	DestroyBufferResource(mRuntimeLightTileIndexBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	mBoundStaticPrimitiveCount = 0;
@@ -6594,6 +6810,11 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundDynamicMaterialCount = 0;
 	mBoundPortalCount = 0;
 	mBoundRuntimeLightCount = 0;
+	mBoundRuntimeLightTileCountX = 0;
+	mBoundRuntimeLightTileCountY = 0;
+	mBoundRuntimeLightTileSize = 0;
+	mBoundRuntimeLightTileIndexCount = 0;
+	mBoundRuntimeLightMaxTileOccupancy = 0;
 }
 
 void NRIRenderer::DestroyAccelerationStructures()

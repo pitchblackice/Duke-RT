@@ -35,6 +35,7 @@ public:
 	bool RemoveRuntimePointLight(uint32_t id);
 	void ClearRuntimePointLights();
 	void PrintRuntimePointLights() const;
+	void PrintRuntimeLightClusterStatus() const;
 	uint32_t GetRuntimePointLightCount() const;
 	bool AddSpriteTileLightHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
 	void ClearSpriteTileLightHeuristics();
@@ -137,6 +138,12 @@ private:
 		float radius = 0.0f;
 		float color[3] = { 1.0f, 1.0f, 1.0f };
 		float intensity = 1.0f;
+	};
+
+	struct RuntimeLightTileHeaderGpuData
+	{
+		uint32_t indexOffset = 0;
+		uint32_t indexCount = 0;
 	};
 
 	struct StaticMapSceneCache
@@ -393,6 +400,13 @@ private:
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
 	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
+	void BuildRuntimeLightClusterUpload(
+		std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
+		std::vector<uint32_t>& outIndices,
+		uint32_t& outTileCountX,
+		uint32_t& outTileCountY,
+		uint32_t& outTileIndexCount,
+		uint32_t& outMaxTileOccupancy) const;
 	bool UpdateSamplerSet();
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors);
 	bool UpdateFrameTextureSet();
@@ -446,6 +460,8 @@ private:
 	NRIBufferResource mSceneInstanceBuffer;
 	NRIBufferResource mPortalBuffer;
 	NRIBufferResource mRuntimeLightBuffer;
+	NRIBufferResource mRuntimeLightTileHeaderBuffer;
+	NRIBufferResource mRuntimeLightTileIndexBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
@@ -454,6 +470,8 @@ private:
 	SceneBufferDebugStats mMaterialBufferStats = { "Material" };
 	SceneBufferDebugStats mPortalBufferStats = { "Portal" };
 	SceneBufferDebugStats mRuntimeLightBufferStats = { "RuntimeLight" };
+	SceneBufferDebugStats mRuntimeLightTileHeaderBufferStats = { "RuntimeLightTileHeader" };
+	SceneBufferDebugStats mRuntimeLightTileIndexBufferStats = { "RuntimeLightTileIndex" };
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
@@ -532,6 +550,11 @@ private:
 	uint32_t mBoundDynamicMaterialCount = 0;
 	uint32_t mBoundPortalCount = 0;
 	uint32_t mBoundRuntimeLightCount = 0;
+	uint32_t mBoundRuntimeLightTileCountX = 0;
+	uint32_t mBoundRuntimeLightTileCountY = 0;
+	uint32_t mBoundRuntimeLightTileSize = 0;
+	uint32_t mBoundRuntimeLightTileIndexCount = 0;
+	uint32_t mBoundRuntimeLightMaxTileOccupancy = 0;
 	uint32_t mNextRuntimePointLightId = 1;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};

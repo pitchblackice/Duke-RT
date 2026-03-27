@@ -57,6 +57,9 @@ struct NRITraceConstants
 	uint BounceCounts;
 	uint PortalCount;
 	uint RuntimeLightCount;
+	uint RuntimeLightTileCountX;
+	uint RuntimeLightTileCountY;
+	uint RuntimeLightTileSize;
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;
@@ -119,6 +122,12 @@ struct RuntimePointLightData
 	float intensity;
 };
 
+struct RuntimeLightTileHeaderData
+{
+	uint indexOffset;
+	uint indexCount;
+};
+
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, SET_ROOT);
 
 float GetTemporalHaltonSample(uint index, uint base)
@@ -173,6 +182,8 @@ StructuredBuffer<MaterialData> gDynamicMaterials : register(t7, space2);
 StructuredBuffer<SceneInstanceData> gSceneInstances : register(t8, space2);
 StructuredBuffer<PortalData> gScenePortals : register(t9, space2);
 StructuredBuffer<RuntimePointLightData> gRuntimePointLights : register(t10, space2);
+StructuredBuffer<RuntimeLightTileHeaderData> gRuntimeLightTileHeaders : register(t11, space2);
+StructuredBuffer<uint> gRuntimeLightTileIndices : register(t12, space2);
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);

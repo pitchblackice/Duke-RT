@@ -126,6 +126,22 @@ float EvaluatePointLightAttenuation(float distance, float radius, float intensit
 	return intensity * smoothRange * smoothRange * shapedFalloff;
 }
 
+RuntimeLightTileHeaderData GetRuntimeLightTileHeader(uint2 pixelPos)
+{
+	RuntimeLightTileHeaderData header = { 0u, 0u };
+	if (gTraceConstants.RuntimeLightCount == 0u ||
+		gTraceConstants.RuntimeLightTileCountX == 0u ||
+		gTraceConstants.RuntimeLightTileCountY == 0u ||
+		gTraceConstants.RuntimeLightTileSize == 0u)
+	{
+		return header;
+	}
+
+	const uint tileX = min(pixelPos.x / gTraceConstants.RuntimeLightTileSize, gTraceConstants.RuntimeLightTileCountX - 1u);
+	const uint tileY = min(pixelPos.y / gTraceConstants.RuntimeLightTileSize, gTraceConstants.RuntimeLightTileCountY - 1u);
+	return gRuntimeLightTileHeaders[tileY * gTraceConstants.RuntimeLightTileCountX + tileX];
+}
+
 float GetSurfaceRoughness(MaterialData material)
 {
 	return clamp(material.roughnessHint, 0.02, 1.0);
@@ -412,6 +428,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 specular = 0.0;
 		float3 directLighting = 0.0;
 		float3 directEmission = 0.0;
+		float3 analyticDirectLighting = 0.0;
 		float diffuseHitDistance = 0.0;
 		float specularHitDistance = 0.0;
 		float shadowVisibility = 1.0;
@@ -463,9 +480,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					specular = directSunSpecular * shadow;
 				}
 
+				const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
 				[loop]
-				for (uint runtimeLightIndex = 0u; runtimeLightIndex < gTraceConstants.RuntimeLightCount; ++runtimeLightIndex)
+				for (uint runtimeLightCandidate = 0u; runtimeLightCandidate < runtimeLightTile.indexCount; ++runtimeLightCandidate)
 				{
+					const uint runtimeLightIndex = gRuntimeLightTileIndices[runtimeLightTile.indexOffset + runtimeLightCandidate];
+					if (runtimeLightIndex >= gTraceConstants.RuntimeLightCount)
+					{
+						continue;
+					}
+
 					const RuntimePointLightData runtimeLight = gRuntimePointLights[runtimeLightIndex];
 					const float3 toLight = runtimeLight.position - hit.position;
 					const float lightDistanceSq = dot(toLight, toLight);
@@ -500,8 +524,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					}
 
 					const float3 lightColor = runtimeLight.color * attenuation;
-					diffuse += albedo.rgb * (lambert * 0.80) * lightColor * runtimeShadow;
-					specular += EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, runtimeLightDir, 1.0) * lightColor * runtimeShadow;
+					const float3 analyticDiffuse = albedo.rgb * (lambert * 0.80) * lightColor * runtimeShadow;
+					const float3 analyticSpecular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, runtimeLightDir, 1.0) * lightColor * runtimeShadow;
+					analyticDirectLighting += analyticDiffuse + analyticSpecular;
+					diffuse += analyticDiffuse;
+					specular += analyticSpecular;
 				}
 
 				const uint lightBounceCount = GetLightBounceCount();
@@ -548,6 +575,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			float id = (float)(hit.primitiveIndex % 29u) / 28.0;
 			color = float4(frac(id * 1.1), frac(id * 1.9), frac(id * 2.7), 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 26)
+		{
+			color = float4(analyticDirectLighting, 1.0);
 		}
 		else
 		{
