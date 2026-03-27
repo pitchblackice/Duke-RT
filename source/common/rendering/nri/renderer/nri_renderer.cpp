@@ -1964,10 +1964,21 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 void NRIRenderer::ResetHistory()
 {
-	ArmTemporalTraceBudget("history-reset");
+	RequestHistoryReset("history-reset", true, true);
+}
+
+void NRIRenderer::RequestHistoryReset(const char* reason, bool clearPreviousCameraState, bool clearRuntimeChunkTranslationHistory)
+{
+	ArmTemporalTraceBudget(reason);
 	mResetHistory = true;
-	mHasPreviousCameraState = false;
-	mRuntimeChunkTranslationHistory.clear();
+	if (clearPreviousCameraState)
+	{
+		mHasPreviousCameraState = false;
+	}
+	if (clearRuntimeChunkTranslationHistory)
+	{
+		mRuntimeChunkTranslationHistory.clear();
+	}
 }
 
 bool NRIRenderer::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId)
@@ -1993,7 +2004,7 @@ bool NRIRenderer::AddRuntimePointLight(const float position[3], const float colo
 	mRuntimePointLights.push_back(light);
 	outId = light.id;
 	mBoundRuntimeLightCount = 0;
-	mResetHistory = true;
+	RequestHistoryReset("runtime-light-change");
 	return true;
 }
 
@@ -2010,7 +2021,7 @@ bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
 
 	mRuntimePointLights.erase(it);
 	mBoundRuntimeLightCount = 0;
-	mResetHistory = true;
+	RequestHistoryReset("runtime-light-change");
 	return true;
 }
 
@@ -2023,7 +2034,7 @@ void NRIRenderer::ClearRuntimePointLights()
 
 	mRuntimePointLights.clear();
 	mBoundRuntimeLightCount = 0;
-	mResetHistory = true;
+	RequestHistoryReset("runtime-light-change");
 }
 
 void NRIRenderer::PrintRuntimePointLights() const
@@ -3455,7 +3466,7 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	mOutputWidth = outputWidth;
 	mOutputHeight = outputHeight;
 	mOutputFormat = outputFormat;
-	mResetHistory = true;
+	RequestHistoryReset("frame-resources");
 
 	const nri::Format colorFormat = nri::Format::RGBA16_SFLOAT;
 	const nri::Format normalRoughnessFormat = nri::Format::R10_G10_B10_A2_UNORM;
@@ -4570,8 +4581,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		if (!mRuntimeChunkTranslationHistory.empty())
 		{
 			mRuntimeSpaceLinkLastFrame.topologyChanged = true;
-			mRuntimeChunkTranslationHistory.clear();
-			mResetHistory = true;
+			RequestHistoryReset("runtime-link-deactivated", false, true);
 		}
 	};
 
@@ -4881,7 +4891,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 	mRuntimeSpaceLinkLastFrame.topologyChanged = runtimeLinkTopologyChanged();
 	if (mRuntimeSpaceLinkLastFrame.topologyChanged)
 	{
-		mResetHistory = true;
+		RequestHistoryReset("runtime-link-topology");
 	}
 
 	std::vector<RuntimeChunkTranslationState> nextRuntimeChunkTranslationHistory;

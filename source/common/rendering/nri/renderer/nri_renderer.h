@@ -361,6 +361,7 @@ private:
 	void PrintTemporalStatus() const;
 	void PrintRuntimeMapMutationStatus() const;
 	void PrintRuntimeSpaceLinkStatus() const;
+	void RequestHistoryReset(const char* reason, bool clearPreviousCameraState = false, bool clearRuntimeChunkTranslationHistory = false);
 	void ArmTemporalTraceBudget(const char* reason);
 	void TraceTemporalState(const char* stage, NRIUpscalerKind resolvedUpscaler, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);
