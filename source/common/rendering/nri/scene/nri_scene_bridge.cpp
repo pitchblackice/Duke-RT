@@ -467,6 +467,14 @@ namespace
 			true;
 	}
 
+	bool IsOpaqueSpriteFlat(const HWFlat& flat)
+	{
+		return flat.texture != nullptr &&
+			flat.vertcount >= 3 &&
+			IsEffectivelyOpaque(flat.RenderStyle, flat.alpha) &&
+			flat.Sprite != nullptr;
+	}
+
 	bool IsSkyFlat(const HWFlat& flat)
 	{
 		if (flat.sec == nullptr)
@@ -606,6 +614,40 @@ namespace
 
 			SurfaceRef surface = {};
 			surface.material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, MaterialFlag_Flat);
+			surface.provenance = MakeFlatProvenance(*flat, drawListType, surface.material.flags);
+			const FFlatVertex* vertices = screen->mVertexData->GetBuffer(flat->vertindex);
+			surface.vertices.reserve((uint32_t)flat->vertcount);
+			for (int i = 0; i < flat->vertcount; ++i)
+			{
+				surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
+			}
+
+			if (flat->Sprite != nullptr && flat->Sprite->ownerActor != nullptr)
+			{
+				ApplyActorPreviousTransform(surface, flat->Sprite->ownerActor);
+			}
+
+			outFlats.push_back(std::move(surface));
+		}
+	}
+
+	void CaptureSpriteFlats(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outFlats)
+	{
+		for (auto* flat : list.flats)
+		{
+			if (flat == nullptr)
+			{
+				continue;
+			}
+
+			flat->MakeVertices(&di);
+			if (!IsOpaqueSpriteFlat(*flat))
+			{
+				continue;
+			}
+
+			SurfaceRef surface = {};
+			surface.material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, MaterialFlag_Flat | MaterialFlag_Sprite);
 			surface.provenance = MakeFlatProvenance(*flat, drawListType, surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer(flat->vertindex);
 			surface.vertices.reserve((uint32_t)flat->vertcount);
@@ -868,12 +910,39 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 {
 	outView = {};
 	outView.drawInfo = &di;
+	outView.stats.wallDrawItems =
+		CountDrawListItems(di, GLDL_MASKEDWALLSS) +
+		CountDrawListItems(di, GLDL_MASKEDWALLSD) +
+		CountDrawListItems(di, GLDL_MASKEDWALLSV) +
+		CountDrawListItems(di, GLDL_MASKEDWALLSH);
+	outView.stats.flatDrawItems =
+		CountDrawListItems(di, GLDL_MASKEDFLATS) +
+		CountDrawListItems(di, GLDL_MASKEDSLOPEFLATS);
 	outView.stats.spriteDrawItems = CountDrawListItems(di, GLDL_TRANSLUCENT) + CountDrawListItems(di, GLDL_MODELS);
 	outView.stats.translucentDrawItems = CountDrawListItems(di, GLDL_TRANSLUCENT);
-	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
+	outView.stats.modelDrawItems = CountDrawListItems(di, GLDL_MODELS);
+	outView.stats.totalDrawItems = outView.stats.wallDrawItems + outView.stats.flatDrawItems + outView.stats.spriteDrawItems;
 
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSS], GLDL_MASKEDWALLSS, outView.opaqueWalls, outView.stats, outView);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSD], GLDL_MASKEDWALLSD, outView.opaqueWalls, outView.stats, outView);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSV], GLDL_MASKEDWALLSV, outView.opaqueWalls, outView.stats, outView);
+	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSH], GLDL_MASKEDWALLSH, outView.opaqueWalls, outView.stats, outView);
+	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDFLATS], GLDL_MASKEDFLATS, outView.opaqueFlats);
+	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats);
 	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
 	CaptureModelSprites(di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
+
+	for (const auto& wall : outView.opaqueWalls)
+	{
+		outView.stats.triangleEstimate += wall.vertices.size() >= 3 ? (unsigned int)wall.vertices.size() - 2 : 0;
+		outView.stats.materialRefs++;
+	}
+
+	for (const auto& flat : outView.opaqueFlats)
+	{
+		outView.stats.triangleEstimate += (unsigned int)(flat.vertices.size() / 3);
+		outView.stats.materialRefs++;
+	}
 
 	for (const auto& sprite : outView.opaqueSprites)
 	{
@@ -881,7 +950,7 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 		outView.stats.materialRefs++;
 	}
 
-	return !outView.opaqueSprites.empty();
+	return !outView.opaqueWalls.empty() || !outView.opaqueFlats.empty() || !outView.opaqueSprites.empty();
 }
 
 bool CaptureScene(HWDrawInfo& di, SceneView& outView)
@@ -901,6 +970,8 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 	CaptureFlats(di, di.drawlists[GLDL_PLAINFLATS], GLDL_PLAINFLATS, outView.opaqueFlats, outView.stats, outView);
 	CaptureFlats(di, di.drawlists[GLDL_MASKEDFLATS], GLDL_MASKEDFLATS, outView.opaqueFlats, outView.stats, outView);
 	CaptureFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats, outView.stats, outView);
+	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDFLATS], GLDL_MASKEDFLATS, outView.opaqueFlats);
+	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats);
 
 	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
 	CaptureModelSprites(di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
