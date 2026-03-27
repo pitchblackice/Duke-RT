@@ -23,6 +23,8 @@ static const uint PORTAL_TRAVERSAL_CLASS_NONE = 0u;
 static const uint PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
 static const uint PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
 static const uint PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
+static const float TRACE_MIN_DISTANCE = 1e-4;
+static const float TRACE_CONTINUE_BIAS = 1e-4;
 
 HitData MakeEmptyHitData()
 {
@@ -259,7 +261,7 @@ bool IntersectPrimitiveTriangle(float3 origin, float3 direction, uint primitiveI
 	}
 
 	const float candidateT = dot(edge2, q) * invDet;
-	if (candidateT <= 0.001)
+	if (candidateT <= TRACE_MIN_DISTANCE)
 	{
 		return false;
 	}
@@ -325,13 +327,13 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 	for (uint skipCount = 0u; skipCount < 8u; ++skipCount)
 	{
 		const float remainingDistance = maxDistance - accumulatedDistance;
-		if (remainingDistance <= 0.001)
+		if (remainingDistance <= TRACE_MIN_DISTANCE)
 		{
 			return false;
 		}
 
 		RayQuery<RAY_FLAG_FORCE_OPAQUE> rayQuery;
-		RayDesc ray = { startOrigin + direction * accumulatedDistance, 0.001, direction, remainingDistance };
+		RayDesc ray = { startOrigin + direction * accumulatedDistance, TRACE_MIN_DISTANCE, direction, remainingDistance };
 		rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
 
 		while (rayQuery.Proceed()) {}
@@ -347,7 +349,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const float committedDistance = rayQuery.CommittedRayT();
 		if (ShouldIgnoreOneWayHit(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction))
 		{
-			accumulatedDistance += committedDistance + 0.01;
+			accumulatedDistance += committedDistance + TRACE_CONTINUE_BIAS;
 			continue;
 		}
 
@@ -356,7 +358,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const float2 uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
 		if (IsTransparentSurfaceSample(primitive.materialIndex, instanceData.dataSource, uv))
 		{
-			accumulatedDistance += committedDistance + 0.01;
+			accumulatedDistance += committedDistance + TRACE_CONTINUE_BIAS;
 			continue;
 		}
 
