@@ -202,23 +202,33 @@ namespace
 		outTint[2] = 1.0f;
 		outFogStrength = 0.0f;
 
-		PalEntry fade = lookups.getFade(clamp(paletteIndex, 0, MAXPALOOKUPS - 1));
-		if (!HasPalEntryColor(fade))
+		const float visibilityStrength = std::clamp((float)sec.visibility / 128.0f, 0.0f, 1.0f);
+		const bool hasExplicitFogPalette = sec.fogpal > 0;
+		if (!hasExplicitFogPalette && visibilityStrength <= 0.0f)
 		{
-			fade = lookups.getFade(clamp((int)sec.floorpal, 0, MAXPALOOKUPS - 1));
+			return;
 		}
-		if (!HasPalEntryColor(fade))
-		{
-			fade = lookups.getFade(clamp((int)sec.ceilingpal, 0, MAXPALOOKUPS - 1));
-		}
-		if (!HasPalEntryColor(fade) && sec.fogpal > 0)
+
+		PalEntry fade = {};
+		if (hasExplicitFogPalette)
 		{
 			fade = lookups.getFade(clamp((int)sec.fogpal, 0, MAXPALOOKUPS - 1));
 		}
+		else
+		{
+			fade = lookups.getFade(clamp((int)sec.floorpal, 0, MAXPALOOKUPS - 1));
+			if (!HasPalEntryColor(fade))
+			{
+				fade = lookups.getFade(clamp((int)sec.ceilingpal, 0, MAXPALOOKUPS - 1));
+			}
+			if (!HasPalEntryColor(fade))
+			{
+				fade = lookups.getFade(clamp(paletteIndex, 0, MAXPALOOKUPS - 1));
+			}
+		}
 
 		const bool hasFogTint = HasPalEntryColor(fade);
-		const float visibilityStrength = std::clamp((float)sec.visibility / 128.0f, 0.0f, 1.0f);
-		outFogStrength = std::max(visibilityStrength, hasFogTint ? 0.35f : 0.0f);
+		outFogStrength = hasExplicitFogPalette ? std::max(visibilityStrength, 0.35f) : visibilityStrength;
 		if (!hasFogTint)
 		{
 			return;
@@ -229,7 +239,7 @@ namespace
 			(float)fade.g / 255.0f,
 			(float)fade.b / 255.0f,
 		};
-		const float tintWeight = std::clamp(0.35f + outFogStrength * 0.45f, 0.0f, 0.85f);
+		const float tintWeight = std::clamp((hasExplicitFogPalette ? 0.20f : 0.10f) + outFogStrength * 0.35f, 0.0f, 0.65f);
 		outTint[0] = 1.0f + (tint[0] - 1.0f) * tintWeight;
 		outTint[1] = 1.0f + (tint[1] - 1.0f) * tintWeight;
 		outTint[2] = 1.0f + (tint[2] - 1.0f) * tintWeight;
