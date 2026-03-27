@@ -40,6 +40,10 @@ public:
 	bool AddSpriteTileLightHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
 	void ClearSpriteTileLightHeuristics();
 	void PrintSpriteTileLightHeuristics() const;
+	bool AddTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId);
+	void ClearTextureEmissiveHeuristics();
+	void PrintTextureEmissiveHeuristics() const;
+	void PrintEmissiveSurfaceDump(float radius, uint32_t limit) const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	const char* GetAvailabilityReason() const;
 
@@ -379,6 +383,8 @@ private:
 		const nri_scene::MaterialBridgeData* capturedMaterials,
 		const nri_scene::SceneView* dynamicSceneView,
 		const nri_scene::MaterialBridgeData* dynamicMaterials);
+	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
+	void InvalidateStaticMapSceneForMaterialLighting();
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
 	void CopyTexture(NRITextureResource& source, NRITextureResource& destination);

@@ -91,6 +91,11 @@ struct MaterialData
 	float alpha;
 	float roughnessHint;
 	float metalnessHint;
+	float3 emissiveColor;
+	float emissiveIntensity;
+	float emissiveMaskScale;
+	uint emissiveMode;
+	float2 emissiveReserved;
 };
 
 struct SceneInstanceData

@@ -58,6 +58,9 @@ CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptruntimelinktrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptemissiveheuristics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptemissiveminsurface, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Int, nri_pttraceframes)
@@ -70,8 +73,10 @@ namespace
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
+	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
 	constexpr uint32_t NRI_RUNTIME_LIGHT_TILE_SIZE = 64;
 	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT = 26;
+	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -2207,6 +2212,118 @@ void NRIRenderer::PrintSpriteTileLightHeuristics() const
 	}
 }
 
+bool NRIRenderer::AddTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId)
+{
+	if (!mSceneLights.AddTextureEmissiveHeuristic(textureId, intensityScale, outRuleId))
+	{
+		return false;
+	}
+
+	InvalidateStaticMapSceneForMaterialLighting();
+	mSceneLights.ConsumeEmissiveMaterialsDirty();
+	RequestHistoryReset("emissive-heuristic-change");
+	return true;
+}
+
+void NRIRenderer::ClearTextureEmissiveHeuristics()
+{
+	if (mSceneLights.GetEmissiveSurfaces().textureRules.empty())
+	{
+		return;
+	}
+
+	mSceneLights.ClearTextureEmissiveHeuristics();
+	InvalidateStaticMapSceneForMaterialLighting();
+	mSceneLights.ConsumeEmissiveMaterialsDirty();
+	RequestHistoryReset("emissive-heuristic-change");
+}
+
+void NRIRenderer::PrintTextureEmissiveHeuristics() const
+{
+	const auto& emissive = mSceneLights.GetEmissiveSurfaces();
+	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u active=%u total_power=%.3f truncated=%u\n",
+		(uint32_t)emissive.textureRules.size(),
+		emissive.autoTaggedCount,
+		emissive.explicitRuleMatchCount,
+		(uint32_t)emissive.activeSurfaces.size(),
+		emissive.totalPowerEstimate,
+		emissive.truncatedSurfaceCount);
+	for (const auto& rule : emissive.textureRules)
+	{
+		Printf("NRI PT emissive heuristic %u: tile=%u intensity_scale=%.3f\n",
+			rule.ruleId,
+			rule.textureId,
+			rule.intensityScale);
+	}
+}
+
+void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
+{
+	const auto& emissive = mSceneLights.GetEmissiveSurfaces();
+	if (emissive.activeSurfaces.empty())
+	{
+		Printf("NRI PT emissive surfaces: no emissive surfaces are active.\n");
+		return;
+	}
+
+	struct Candidate
+	{
+		const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord* record = nullptr;
+		float distanceSq = 0.0f;
+	};
+
+	std::vector<Candidate> candidates;
+	candidates.reserve(emissive.activeSurfaces.size());
+	const float radiusSq = radius > 0.0f ? radius * radius : -1.0f;
+	for (const auto& record : emissive.activeSurfaces)
+	{
+		const float dx = record.center[0] - mCurrentCameraPos[0];
+		const float dy = record.center[1] - mCurrentCameraPos[1];
+		const float dz = record.center[2] - mCurrentCameraPos[2];
+		const float distanceSq = dx * dx + dy * dy + dz * dz;
+		if (radiusSq >= 0.0f && distanceSq > radiusSq)
+		{
+			continue;
+		}
+		candidates.push_back({ &record, distanceSq });
+	}
+
+	std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b)
+	{
+		return a.distanceSq < b.distanceSq;
+	});
+
+	Printf("NRI PT emissive surfaces: active=%u auto=%u explicit=%u total_power=%.3f min_surface=%.3f min_power=%.3f\n",
+		(uint32_t)emissive.activeSurfaces.size(),
+		emissive.autoTaggedCount,
+		emissive.explicitRuleMatchCount,
+		emissive.totalPowerEstimate,
+		(float)nri_ptemissiveminsurface,
+		(float)nri_ptemissiveminpower);
+
+	const uint32_t printCount = std::min<uint32_t>((uint32_t)candidates.size(), limit);
+	for (uint32_t i = 0; i < printCount; ++i)
+	{
+		const auto& record = *candidates[i].record;
+		Printf("NRI PT emissive %u: stable=0x%016llx flags=0x%x rule=%u actor=%d tile=%u area=%.2f power=%.3f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+			i,
+			(unsigned long long)record.stableKey,
+			record.sourceFlags,
+			record.sourceRuleId,
+			record.actorIndex,
+			record.textureId,
+			record.surfaceArea,
+			record.powerEstimate,
+			record.center[0],
+			record.center[1],
+			record.center[2],
+			record.emissiveColor[0],
+			record.emissiveColor[1],
+			record.emissiveColor[2],
+			record.emissiveIntensity);
+	}
+}
+
 void NRIRenderer::PrintStatus() const
 {
 	const NRIUpscalerKind requested = GetSelectedUpscalerKind();
@@ -2264,7 +2381,7 @@ void NRIRenderer::PrintStatus() const
 		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
-		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=raw_penumbra 22=raw_shadow 23=denoised_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct");
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=raw_penumbra 22=raw_shadow 23=denoised_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags");
 	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s shadow_split=%s\n",
 		nrdMaxFrames,
 		nrdFastFrames,
@@ -2311,6 +2428,16 @@ void NRIRenderer::PrintStatus() const
 		mBoundRuntimeLightTileIndexCount,
 		mBoundRuntimeLightMaxTileOccupancy,
 		NRI_PTDEBUG_ANALYTIC_DIRECT);
+	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f debug_mode=%u thresholds=area>=%.3f power>=%.3f heuristics=%s\n",
+		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
+		(uint32_t)mSceneLights.GetEmissiveSurfaces().textureRules.size(),
+		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
+		mSceneLights.GetEmissiveSurfaces().explicitRuleMatchCount,
+		mSceneLights.GetEmissiveSurfaces().totalPowerEstimate,
+		NRI_PTDEBUG_EMISSIVE_TAGS,
+		(float)nri_ptemissiveminsurface,
+		(float)nri_ptemissiveminpower,
+		nri_ptemissiveheuristics ? "on" : "off");
 	if (nri_ptbootstrap)
 	{
 		Printf("NRI PT bootstrap mode: %u\n", bootstrapMode);
@@ -3097,11 +3224,42 @@ void NRIRenderer::RefreshSceneLightSystem(
 	}
 
 	mSceneLights.RebuildAnalyticLights(mFrameIndex, NRI_MAX_RUNTIME_POINT_LIGHTS);
+	mSceneLights.RebuildEmissiveSurfaces(NRI_MAX_EMISSIVE_SURFACES);
 	if (mSceneLights.ConsumeAnalyticLightTopologyChanged())
 	{
 		mBoundRuntimeLightCount = 0;
 		RequestHistoryReset("analytic-light-topology");
 	}
+	if (mSceneLights.ConsumeEmissiveSurfaceTopologyChanged())
+	{
+		RequestHistoryReset("emissive-surface-topology");
+	}
+	if (mSceneLights.ConsumeEmissiveMaterialsDirty())
+	{
+		InvalidateStaticMapSceneForMaterialLighting();
+		RequestHistoryReset("emissive-material-change");
+	}
+}
+
+void NRIRenderer::ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const
+{
+	const uint32_t count = std::min<uint32_t>((uint32_t)inOutGpuMaterials.size(), (uint32_t)materials.lightMetadata.size());
+	for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
+	{
+		mSceneLights.ApplyEmissiveMaterialSettings(materials.lightMetadata[materialIndex], inOutGpuMaterials[materialIndex]);
+	}
+}
+
+void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
+{
+	if (!mStaticMapScene.valid)
+	{
+		return;
+	}
+
+	DestroyStaticMapSceneCache();
+	mStaticMapScene = {};
+	mStaticAccelerationBuildSerial = 0;
 }
 
 void NRIRenderer::PrintSceneLightDump(float radius, uint32_t limit) const
@@ -4403,6 +4561,7 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	Clocker clock(NriPTSceneTextures);
 
 	outGpuMaterials = materials.materials;
+	ApplyEmissiveMaterialOverrides(materials, outGpuMaterials);
 	if (!EnsureSkyTexture(sceneView, preserveExistingSky))
 	{
 		return false;

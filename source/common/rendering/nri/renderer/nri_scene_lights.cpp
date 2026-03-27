@@ -1,8 +1,14 @@
 #include "nri_scene_lights.h"
 
+#include "c_cvars.h"
+
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
+
+EXTERN_CVAR(Bool, nri_ptemissiveheuristics)
+EXTERN_CVAR(Float, nri_ptemissiveminpower)
+EXTERN_CVAR(Float, nri_ptemissiveminsurface)
 
 namespace
 {
@@ -46,6 +52,47 @@ namespace
 			const float dz = vertex.position[2] - outCenter[2];
 			outRadius = std::max(outRadius, std::sqrt(dx * dx + dy * dy + dz * dz));
 		}
+	}
+
+	float ComputeTriangleArea(const nri_scene::CapturedVertex& a, const nri_scene::CapturedVertex& b, const nri_scene::CapturedVertex& c)
+	{
+		const float abx = b.position[0] - a.position[0];
+		const float aby = b.position[1] - a.position[1];
+		const float abz = b.position[2] - a.position[2];
+		const float acx = c.position[0] - a.position[0];
+		const float acy = c.position[1] - a.position[1];
+		const float acz = c.position[2] - a.position[2];
+		const float crossX = aby * acz - abz * acy;
+		const float crossY = abz * acx - abx * acz;
+		const float crossZ = abx * acy - aby * acx;
+		return 0.5f * std::sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
+	}
+
+	float ComputeSurfaceArea(const nri_scene::SurfaceRef& surface)
+	{
+		if (surface.vertices.size() < 3)
+		{
+			return 0.0f;
+		}
+
+		float area = 0.0f;
+		if ((surface.material.flags & nri_scene::MaterialFlag_Flat) != 0)
+		{
+			for (uint32_t i = 0; i + 2 < surface.vertices.size(); i += 3)
+			{
+				area += ComputeTriangleArea(surface.vertices[i], surface.vertices[i + 1], surface.vertices[i + 2]);
+			}
+		}
+		else
+		{
+			const nri_scene::CapturedVertex& root = surface.vertices[0];
+			for (uint32_t i = 1; i + 1 < surface.vertices.size(); ++i)
+			{
+				area += ComputeTriangleArea(root, surface.vertices[i], surface.vertices[i + 1]);
+			}
+		}
+
+		return area;
 	}
 
 	uint64_t HashCombine64(uint64_t hash, uint64_t value)
@@ -95,6 +142,94 @@ namespace
 		const float phase = ((float)phaseFrame / (float)flickerFrames) * TwoPi;
 		return 0.35f + 0.65f * (0.5f + 0.5f * std::sin(phase));
 	}
+
+	float ComputeColorLuminance(const float color[3])
+	{
+		return color[0] * 0.2126f + color[1] * 0.7152f + color[2] * 0.0722f;
+	}
+
+	uint64_t BuildEmissiveStableKey(const SceneLightSystem::SurfaceRecord& record)
+	{
+		uint64_t key = 1469598103934665603ull;
+		key = HashCombine64(key, record.material.materialKey);
+		key = HashCombine64(key, (uint64_t)(uint32_t)record.provenance.sourceType);
+		if (record.provenance.actorIndex >= 0)
+		{
+			key = HashCombine64(key, 0xE611551000000000ull | (uint64_t)(uint32_t)record.provenance.actorIndex);
+		}
+		else
+		{
+			key = HashCombine64(key, QuantizePositionKey(record.center));
+		}
+		return key;
+	}
+
+	bool EvaluateEmissiveMaterial(
+		const SceneLightSystem::EmissiveSurfaceRegistry& registry,
+		const nri_scene::MaterialLightingMetadata& metadata,
+		uint32_t& outSourceFlags,
+		uint32_t& outRuleId,
+		float outColor[3],
+		float& outIntensity,
+		uint32_t& outMode)
+	{
+		outSourceFlags = SceneEmissiveSurfaceSourceFlag_None;
+		outRuleId = 0;
+		outColor[0] = 0.0f;
+		outColor[1] = 0.0f;
+		outColor[2] = 0.0f;
+		outIntensity = 0.0f;
+		outMode = nri_scene::MaterialEmissiveMode_None;
+
+		if (nri_ptemissiveheuristics)
+		{
+			if ((metadata.lightingFlags & (nri_scene::MaterialLightingFlag_MaterialFullbright | nri_scene::MaterialLightingFlag_TextureFullbright)) != 0)
+			{
+				outSourceFlags |= SceneEmissiveSurfaceSourceFlag_AutoFullbright;
+			}
+			if ((metadata.lightingFlags & (nri_scene::MaterialLightingFlag_TextureGlowing | nri_scene::MaterialLightingFlag_TextureAutoGlowing)) != 0)
+			{
+				outSourceFlags |= SceneEmissiveSurfaceSourceFlag_AutoTextureGlow;
+			}
+			if ((metadata.lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0)
+			{
+				outSourceFlags |= SceneEmissiveSurfaceSourceFlag_AutoGlowmap;
+			}
+
+			if (metadata.emissiveMode != nri_scene::MaterialEmissiveMode_None && metadata.emissiveIntensity > 0.0f)
+			{
+				outMode = metadata.emissiveMode;
+				outIntensity = metadata.emissiveIntensity;
+				Copy3f(metadata.emissiveColor, outColor);
+			}
+		}
+
+		for (const auto& rule : registry.textureRules)
+		{
+			if (metadata.textureId != rule.textureId)
+			{
+				continue;
+			}
+
+			outSourceFlags |= SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule;
+			outRuleId = rule.ruleId;
+			if (outMode == nri_scene::MaterialEmissiveMode_None)
+			{
+				outMode = nri_scene::MaterialEmissiveMode_UseConstantColor;
+				outColor[0] = metadata.glowColor[0] > 0.0f ? metadata.glowColor[0] : metadata.averageColor[0];
+				outColor[1] = metadata.glowColor[1] > 0.0f ? metadata.glowColor[1] : metadata.averageColor[1];
+				outColor[2] = metadata.glowColor[2] > 0.0f ? metadata.glowColor[2] : metadata.averageColor[2];
+				outIntensity = std::max(rule.intensityScale, 0.0f);
+			}
+			else
+			{
+				outIntensity *= std::max(rule.intensityScale, 0.0f);
+			}
+			break;
+		}
+
+		return outMode != nri_scene::MaterialEmissiveMode_None && outIntensity > 0.0f;
+	}
 }
 
 void SceneLightSystem::Reset()
@@ -115,6 +250,11 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mAnalyticLights.dedupedMatchCount = 0;
 	mAnalyticLights.truncatedLightCount = 0;
 	mAnalyticLights.topologyChanged = false;
+	mEmissiveSurfaces.totalPowerEstimate = 0.0f;
+	mEmissiveSurfaces.autoTaggedCount = 0;
+	mEmissiveSurfaces.explicitRuleMatchCount = 0;
+	mEmissiveSurfaces.truncatedSurfaceCount = 0;
+	mEmissiveSurfaces.topologyChanged = false;
 }
 
 void SceneLightSystem::AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source)
@@ -198,6 +338,90 @@ void SceneLightSystem::RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxAc
 	mAnalyticLights.activeLights = std::move(nextLights);
 }
 
+void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
+{
+	mEmissiveSurfaces.totalPowerEstimate = 0.0f;
+	mEmissiveSurfaces.autoTaggedCount = 0;
+	mEmissiveSurfaces.explicitRuleMatchCount = 0;
+	mEmissiveSurfaces.truncatedSurfaceCount = 0;
+
+	std::vector<EmissiveSurfaceRegistry::EmissiveSurfaceRecord> nextSurfaces;
+	nextSurfaces.reserve(std::min<uint32_t>((uint32_t)mSurfaceRecords.size(), maxActiveSurfaces));
+
+	const float minSurfaceArea = std::max((float)nri_ptemissiveminsurface, 0.0f);
+	const float minPower = std::max((float)nri_ptemissiveminpower, 0.0f);
+
+	for (const SurfaceRecord& record : mSurfaceRecords)
+	{
+		uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
+		uint32_t sourceRuleId = 0;
+		float emissiveColor[3] = {};
+		float emissiveIntensity = 0.0f;
+		uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
+		if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, record.material, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode))
+		{
+			continue;
+		}
+
+		if (record.surfaceArea < minSurfaceArea)
+		{
+			continue;
+		}
+
+		const float resolvedLuminance = emissiveMode == nri_scene::MaterialEmissiveMode_UseAlbedo ?
+			ComputeColorLuminance(record.material.averageColor) :
+			ComputeColorLuminance(emissiveColor);
+		const float powerEstimate = record.surfaceArea * resolvedLuminance * emissiveIntensity;
+		if (powerEstimate < minPower)
+		{
+			continue;
+		}
+
+		if (nextSurfaces.size() >= maxActiveSurfaces)
+		{
+			mEmissiveSurfaces.truncatedSurfaceCount++;
+			continue;
+		}
+
+		EmissiveSurfaceRegistry::EmissiveSurfaceRecord emissive = {};
+		emissive.stableKey = BuildEmissiveStableKey(record);
+		emissive.sourceFlags = sourceFlags;
+		emissive.sourceRuleId = sourceRuleId;
+		emissive.source = record.source;
+		emissive.actorIndex = record.provenance.actorIndex;
+		emissive.textureId = record.material.textureId;
+		emissive.materialIndex = record.materialIndex;
+		emissive.surfaceArea = record.surfaceArea;
+		emissive.boundsRadius = record.boundsRadius;
+		emissive.powerEstimate = powerEstimate;
+		Copy3f(record.center, emissive.center);
+		Copy3f(emissiveColor, emissive.emissiveColor);
+		emissive.emissiveIntensity = emissiveIntensity;
+		nextSurfaces.push_back(emissive);
+
+		if ((sourceFlags & (SceneEmissiveSurfaceSourceFlag_AutoFullbright | SceneEmissiveSurfaceSourceFlag_AutoTextureGlow | SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0)
+		{
+			mEmissiveSurfaces.autoTaggedCount++;
+		}
+		if ((sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) != 0)
+		{
+			mEmissiveSurfaces.explicitRuleMatchCount++;
+		}
+		mEmissiveSurfaces.totalPowerEstimate += powerEstimate;
+	}
+
+	std::vector<uint64_t> nextTopologyKeys;
+	nextTopologyKeys.reserve(nextSurfaces.size());
+	for (const auto& emissive : nextSurfaces)
+	{
+		nextTopologyKeys.push_back(emissive.stableKey);
+	}
+	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
+	mEmissiveSurfaces.topologyChanged = nextTopologyKeys != mEmissiveSurfaces.activeTopologyKeys;
+	mEmissiveSurfaces.activeTopologyKeys = std::move(nextTopologyKeys);
+	mEmissiveSurfaces.activeSurfaces = std::move(nextSurfaces);
+}
+
 bool SceneLightSystem::AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius)
 {
 	if (position == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)
@@ -268,11 +492,84 @@ void SceneLightSystem::ClearSpriteTileHeuristics()
 	mAnalyticLights.spriteTileRules.clear();
 }
 
+bool SceneLightSystem::AddTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId)
+{
+	if (textureId == 0 || intensityScale <= 0.0f)
+	{
+		return false;
+	}
+
+	EmissiveSurfaceRegistry::EmissiveHeuristicRule rule = {};
+	rule.ruleId = mEmissiveSurfaces.nextRuleId++;
+	rule.textureId = textureId;
+	rule.intensityScale = intensityScale;
+	mEmissiveSurfaces.textureRules.push_back(rule);
+	mEmissiveSurfaces.materialsDirty = true;
+	outRuleId = rule.ruleId;
+	return true;
+}
+
+void SceneLightSystem::ClearTextureEmissiveHeuristics()
+{
+	if (mEmissiveSurfaces.textureRules.empty())
+	{
+		return;
+	}
+
+	mEmissiveSurfaces.textureRules.clear();
+	mEmissiveSurfaces.materialsDirty = true;
+}
+
+bool SceneLightSystem::ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const
+{
+	uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
+	uint32_t sourceRuleId = 0;
+	float emissiveColor[3] = {};
+	float emissiveIntensity = 0.0f;
+	uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
+	if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode))
+	{
+		inOutMaterial.emissiveColor[0] = 0.0f;
+		inOutMaterial.emissiveColor[1] = 0.0f;
+		inOutMaterial.emissiveColor[2] = 0.0f;
+		inOutMaterial.emissiveIntensity = 0.0f;
+		inOutMaterial.emissiveMaskScale = 0.0f;
+		inOutMaterial.emissiveMode = nri_scene::MaterialEmissiveMode_None;
+		return false;
+	}
+
+	inOutMaterial.emissiveColor[0] = emissiveColor[0];
+	inOutMaterial.emissiveColor[1] = emissiveColor[1];
+	inOutMaterial.emissiveColor[2] = emissiveColor[2];
+	inOutMaterial.emissiveIntensity = emissiveIntensity;
+	inOutMaterial.emissiveMaskScale = metadata.emissiveMaskScale > 0.0f ? metadata.emissiveMaskScale : 1.0f;
+	inOutMaterial.emissiveMode = emissiveMode;
+	if (inOutMaterial.materialClass != 3u)
+	{
+		inOutMaterial.materialClass = 2u;
+	}
+	return true;
+}
+
 bool SceneLightSystem::ConsumeAnalyticLightTopologyChanged()
 {
 	const bool changed = mAnalyticLights.topologyChanged;
 	mAnalyticLights.topologyChanged = false;
 	return changed;
+}
+
+bool SceneLightSystem::ConsumeEmissiveSurfaceTopologyChanged()
+{
+	const bool changed = mEmissiveSurfaces.topologyChanged;
+	mEmissiveSurfaces.topologyChanged = false;
+	return changed;
+}
+
+bool SceneLightSystem::ConsumeEmissiveMaterialsDirty()
+{
+	const bool dirty = mEmissiveSurfaces.materialsDirty;
+	mEmissiveSurfaces.materialsDirty = false;
+	return dirty;
 }
 
 void SceneLightSystem::AppendSurfaceList(const std::vector<nri_scene::SurfaceRef>& surfaces, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t& inOutMaterialIndex)
@@ -284,6 +581,7 @@ void SceneLightSystem::AppendSurfaceList(const std::vector<nri_scene::SurfaceRef
 		record.materialIndex = inOutMaterialIndex;
 		record.provenance = surface.provenance;
 		ComputeSurfaceBounds(surface, record.center, record.boundsRadius);
+		record.surfaceArea = ComputeSurfaceArea(surface);
 
 		if (inOutMaterialIndex < materials.lightMetadata.size())
 		{

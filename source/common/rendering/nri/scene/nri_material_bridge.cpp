@@ -96,11 +96,6 @@ namespace
 	uint32_t ComputeMaterialClass(const MaterialRef& materialRef)
 	{
 		const uint32_t flags = materialRef.flags;
-		if ((flags & MaterialFlag_Fullbright) != 0)
-		{
-			return MaterialClass_Emissive;
-		}
-
 		if ((flags & (MaterialFlag_Mirror | MaterialFlag_Portal)) != 0)
 		{
 			return MaterialClass_SpecularSpecial;
@@ -231,6 +226,24 @@ namespace
 		return key;
 	}
 
+	float ComputeGlowEmissiveIntensity(const MaterialLightingMetadata& metadata)
+	{
+		float intensity = 0.0f;
+		if ((metadata.lightingFlags & MaterialLightingFlag_TextureGlowing) != 0)
+		{
+			intensity = std::max(intensity, 1.25f);
+		}
+		if ((metadata.lightingFlags & MaterialLightingFlag_TextureAutoGlowing) != 0)
+		{
+			intensity = std::max(intensity, 1.10f);
+		}
+		if ((metadata.lightingFlags & MaterialLightingFlag_HasGlowmap) != 0)
+		{
+			intensity = std::max(intensity, 1.50f);
+		}
+		return intensity;
+	}
+
 	MaterialLightingMetadata BuildMaterialLightingMetadata(const MaterialRef& materialRef, const MaterialData& material, uint64_t textureContentKey)
 	{
 		MaterialLightingMetadata metadata = {};
@@ -241,6 +254,7 @@ namespace
 		metadata.shade = materialRef.shade;
 		metadata.alpha = material.alpha;
 		metadata.lightLevel = material.lightLevel;
+		metadata.materialClass = material.materialClass;
 
 		const bool materialFullbright = (material.flags & MaterialFlag_Fullbright) != 0;
 		if (materialFullbright)
@@ -282,6 +296,32 @@ namespace
 				metadata.glowColor[0] = metadata.averageColor[0];
 				metadata.glowColor[1] = metadata.averageColor[1];
 				metadata.glowColor[2] = metadata.averageColor[2];
+			}
+		}
+
+		const bool sampledEmissive =
+			(metadata.lightingFlags & MaterialLightingFlag_MaterialFullbright) != 0 ||
+			(metadata.lightingFlags & MaterialLightingFlag_TextureFullbright) != 0;
+		if (sampledEmissive)
+		{
+			metadata.emissiveMode = MaterialEmissiveMode_UseAlbedo;
+			metadata.emissiveIntensity = 1.0f;
+			metadata.emissiveMaskScale = 1.0f;
+			metadata.emissiveColor[0] = 1.0f;
+			metadata.emissiveColor[1] = 1.0f;
+			metadata.emissiveColor[2] = 1.0f;
+		}
+		else
+		{
+			const float glowIntensity = ComputeGlowEmissiveIntensity(metadata);
+			if (glowIntensity > 0.0f)
+			{
+				metadata.emissiveMode = MaterialEmissiveMode_UseConstantColor;
+				metadata.emissiveIntensity = glowIntensity;
+				metadata.emissiveMaskScale = 1.0f;
+				metadata.emissiveColor[0] = metadata.glowColor[0] > 0.0f ? metadata.glowColor[0] : metadata.averageColor[0];
+				metadata.emissiveColor[1] = metadata.glowColor[1] > 0.0f ? metadata.glowColor[1] : metadata.averageColor[1];
+				metadata.emissiveColor[2] = metadata.glowColor[2] > 0.0f ? metadata.glowColor[2] : metadata.averageColor[2];
 			}
 		}
 

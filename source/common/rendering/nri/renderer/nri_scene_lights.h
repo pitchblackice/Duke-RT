@@ -21,6 +21,15 @@ enum SceneAnalyticLightSourceFlags : uint32_t
 	SceneAnalyticLightSourceFlag_SpriteTileHeuristic = 1u << 1,
 };
 
+enum SceneEmissiveSurfaceSourceFlags : uint32_t
+{
+	SceneEmissiveSurfaceSourceFlag_None = 0,
+	SceneEmissiveSurfaceSourceFlag_AutoFullbright = 1u << 0,
+	SceneEmissiveSurfaceSourceFlag_AutoTextureGlow = 1u << 1,
+	SceneEmissiveSurfaceSourceFlag_AutoGlowmap = 1u << 2,
+	SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule = 1u << 3,
+};
+
 class SceneLightSystem
 {
 public:
@@ -64,6 +73,40 @@ public:
 
 	struct EmissiveSurfaceRegistry
 	{
+		struct EmissiveHeuristicRule
+		{
+			uint32_t ruleId = 0;
+			uint32_t textureId = 0;
+			float intensityScale = 1.0f;
+		};
+
+		struct EmissiveSurfaceRecord
+		{
+			uint64_t stableKey = 0;
+			uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
+			uint32_t sourceRuleId = 0;
+			SceneLightRecordSource source = SceneLightRecordSource::None;
+			int32_t actorIndex = -1;
+			uint32_t textureId = 0;
+			uint32_t materialIndex = UINT32_MAX;
+			float center[3] = {};
+			float boundsRadius = 0.0f;
+			float surfaceArea = 0.0f;
+			float emissiveColor[3] = {};
+			float emissiveIntensity = 0.0f;
+			float powerEstimate = 0.0f;
+		};
+
+		std::vector<EmissiveHeuristicRule> textureRules;
+		std::vector<EmissiveSurfaceRecord> activeSurfaces;
+		std::vector<uint64_t> activeTopologyKeys;
+		float totalPowerEstimate = 0.0f;
+		uint32_t autoTaggedCount = 0;
+		uint32_t explicitRuleMatchCount = 0;
+		uint32_t truncatedSurfaceCount = 0;
+		uint32_t nextRuleId = 1;
+		bool topologyChanged = false;
+		bool materialsDirty = false;
 	};
 
 	struct SectorLightingRegistry
@@ -80,6 +123,7 @@ public:
 		uint32_t materialIndex = UINT32_MAX;
 		float center[3] = {};
 		float boundsRadius = 0.0f;
+		float surfaceArea = 0.0f;
 		nri_scene::SurfaceProvenance provenance = {};
 		nri_scene::MaterialLightingMetadata material = {};
 	};
@@ -88,6 +132,7 @@ public:
 	void BeginFrame(uint64_t frameSerial);
 	void AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source);
 	void RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxActiveLights);
+	void RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces);
 
 	bool AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool RemoveManualAnalyticLight(uint32_t id);
@@ -96,6 +141,10 @@ public:
 
 	bool AddSpriteTileHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
 	void ClearSpriteTileHeuristics();
+
+	bool AddTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId);
+	void ClearTextureEmissiveHeuristics();
+	bool ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const;
 
 	bool HasRecords() const { return !mSurfaceRecords.empty(); }
 	uint64_t GetFrameSerial() const { return mFrameSerial; }
@@ -107,6 +156,8 @@ public:
 	const EnvironmentLightingState& GetEnvironmentLighting() const { return mEnvironmentLighting; }
 
 	bool ConsumeAnalyticLightTopologyChanged();
+	bool ConsumeEmissiveSurfaceTopologyChanged();
+	bool ConsumeEmissiveMaterialsDirty();
 
 private:
 	void AppendSurfaceList(const std::vector<nri_scene::SurfaceRef>& surfaces, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t& inOutMaterialIndex);

@@ -1037,6 +1037,66 @@ CCMD(nri_ptlightclusterdebug)
 	}
 }
 
+CCMD(nri_ptemissiveheuristic_addtile)
+{
+	if (argv.argc() < 2)
+	{
+		Printf("nri_ptemissiveheuristic_addtile <tile> [intensity_scale]: adds a PT emissive tile allow-list rule.\n");
+		return;
+	}
+
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		uint32_t ruleId = 0;
+		frameBuffer->AddPathTracingTextureEmissiveHeuristic(
+			(uint32_t)atoi(argv[1]),
+			argv.argc() > 2 ? (float)atof(argv[2]) : 1.0f,
+			ruleId);
+	}
+	else
+	{
+		Printf("nri_ptemissiveheuristic_addtile is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptemissiveheuristic_clear)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->ClearPathTracingEmissiveHeuristics();
+	}
+	else
+	{
+		Printf("nri_ptemissiveheuristic_clear is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptemissiveheuristic_list)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingEmissiveHeuristics();
+	}
+	else
+	{
+		Printf("nri_ptemissiveheuristic_list is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptemissivedump)
+{
+	const float radius = argv.argc() > 1 ? (float)atof(argv[1]) : 2048.0f;
+	const uint32_t limit = argv.argc() > 2 ? (uint32_t)atoi(argv[2]) : 32u;
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingEmissiveSurfaces(radius, limit);
+	}
+	else
+	{
+		Printf("nri_ptemissivedump is only available while using the NRI renderer.\n");
+	}
+}
+
 NRIRenderDevice::NRIRenderDevice(void* hMonitor, bool fullscreen)
 	: SystemBaseFrameBuffer(hMonitor, fullscreen), mRenderState(std::make_unique<NRIRenderState>(this))
 {
@@ -2172,6 +2232,58 @@ void NRIRenderDevice::PrintPathTracingLightClusters() const
 	}
 
 	mRenderer->PrintRuntimeLightClusterStatus();
+}
+
+bool NRIRenderDevice::AddPathTracingTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId)
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT emissive heuristics are unavailable because the renderer is not initialized.\n");
+		return false;
+	}
+
+	if (!mRenderer->AddTextureEmissiveHeuristic(textureId, intensityScale, outRuleId))
+	{
+		Printf("NRI PT emissive heuristic add failed: tile=%u intensity_scale=%.3f\n", textureId, intensityScale);
+		return false;
+	}
+
+	Printf("NRI PT emissive heuristic %u added: tile=%u intensity_scale=%.3f\n", outRuleId, textureId, intensityScale);
+	return true;
+}
+
+void NRIRenderDevice::ClearPathTracingEmissiveHeuristics()
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT emissive heuristics are unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->ClearTextureEmissiveHeuristics();
+	Printf("NRI PT emissive heuristics cleared.\n");
+}
+
+void NRIRenderDevice::PrintPathTracingEmissiveHeuristics() const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT emissive heuristics are unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintTextureEmissiveHeuristics();
+}
+
+void NRIRenderDevice::PrintPathTracingEmissiveSurfaces(float radius, uint32_t limit) const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT emissive-surface dump is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintEmissiveSurfaceDump(radius, limit);
 }
 
 void NRIRenderDevice::LogStartup()

@@ -64,6 +64,10 @@ public:
 	void PrintPathTracingLightHeuristics() const;
 	void PrintPathTracingSceneLightDump(float radius, uint32_t limit) const;
 	void PrintPathTracingLightClusters() const;
+	bool AddPathTracingTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId);
+	void ClearPathTracingEmissiveHeuristics();
+	void PrintPathTracingEmissiveHeuristics() const;
+	void PrintPathTracingEmissiveSurfaces(float radius, uint32_t limit) const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
 
 private:
