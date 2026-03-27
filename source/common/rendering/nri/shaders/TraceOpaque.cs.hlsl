@@ -317,7 +317,7 @@ void EvaluateSampledEmissiveLighting(
 	outSpecular = EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, 1.0) * lightColor * sampleWeight;
 }
 
-float3 EvaluateSectorLighting(MaterialData material, float3 normal, float3 albedo)
+float3 EvaluateSectorLightingSource(MaterialData material, float3 normal)
 {
 	if ((gSectorLightHeaders[0].flags & 0x1u) == 0u)
 	{
@@ -341,7 +341,12 @@ float3 EvaluateSectorLighting(MaterialData material, float3 normal, float3 albed
 	const float hemisphereTerm = max(1.0 + sectorLight.hemisphereAmount * lerp(-1.0, 1.0, upFactor), 0.0);
 	const float fogTerm = sectorLight.fogAmount * lerp(0.35, 1.0, upFactor);
 	const float intensity = sectorLight.ambientIntensity * hemisphereTerm + fogTerm;
-	return albedo * sectorLight.ambientColor * intensity;
+	return sectorLight.ambientColor * intensity;
+}
+
+float3 EvaluateSectorLighting(MaterialData material, float3 normal, float3 albedo)
+{
+	return albedo * EvaluateSectorLightingSource(material, normal);
 }
 
 float3 GetSurfaceSpecularColor(float3 albedo, float metalness)
@@ -395,8 +400,6 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, uint2 pixelPos, uint frameIndex,
 			indirectRadiance += throughput * EvaluateMaterialEmission(bounceMaterial, bounceAlbedo.rgb);
 			break;
 		}
-
-		indirectRadiance += throughput * EvaluateSectorLighting(bounceMaterial, bounceHit.normal, bounceAlbedo.rgb);
 
 		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial);
 		const float3 bounceViewDir = normalize(-tracedDirection);
@@ -485,8 +488,6 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			indirectRadiance += throughput * EvaluateMaterialEmission(bounceMaterial, bounceAlbedo.rgb);
 			break;
 		}
-
-		indirectRadiance += throughput * EvaluateSectorLighting(bounceMaterial, bounceHit.normal, bounceAlbedo.rgb);
 
 		const float3 bounceViewDir = normalize(-tracedDirection);
 		float3 bounceEmissiveDiffuse = 0.0;
@@ -616,6 +617,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 directEmission = 0.0;
 		float3 analyticDirectLighting = 0.0;
 		float3 emissiveDirectLighting = 0.0;
+		float3 sectorSourceLighting = 0.0;
 		float3 sectorAmbientLighting = 0.0;
 		float diffuseHitDistance = 0.0;
 		float specularHitDistance = 0.0;
@@ -663,7 +665,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					shadowPenumbra = SIGMA_FrontEnd_PackPenumbra(shadowHitDistance, kTanSunAngularRadius);
 				}
 				const float3 viewDir = normalize(-visibleRayDirection);
-				sectorAmbientLighting = EvaluateSectorLighting(material, hit.normal, albedo.rgb);
+				sectorSourceLighting = EvaluateSectorLightingSource(material, hit.normal);
+				sectorAmbientLighting = albedo.rgb * sectorSourceLighting;
 				directEmission = EvaluateAmbientDiffuse(albedo.rgb) + sectorAmbientLighting;
 				const float3 directSunDiffuse = EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir);
 				const float3 directSunSpecular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0);
@@ -805,7 +808,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else if (gTraceConstants.DebugMode == 29)
 		{
-			color = float4(sectorAmbientLighting, 1.0);
+			color = float4(sectorSourceLighting, 1.0);
 		}
 		else
 		{
