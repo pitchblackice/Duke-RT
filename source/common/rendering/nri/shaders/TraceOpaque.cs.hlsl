@@ -651,7 +651,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			}
 			else if (emissiveMaterial || fullbright)
 			{
-				diffuse = albedo.rgb;
+				diffuse = 0.0;
 				specular = 0.0;
 				directEmission = EvaluateMaterialEmission(material, albedo.rgb);
 				if (!emissiveMaterial)
@@ -661,7 +661,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			}
 			else
 			{
-				const bool splitShadowDenoiser = UseSplitShadowDenoiser() && !directSceneTrace;
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
 				float shadowHitDistance = 0.0;
 				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir, shadowHitDistance);
@@ -673,15 +672,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float3 viewDir = normalize(-visibleRayDirection);
 				sectorSourceLighting = EvaluateSectorLightingSource(material, hit.normal);
 				sectorAmbientLighting = EvaluateSectorLighting(material, hit.normal, albedo.rgb);
-				directEmission = EvaluateAmbientDiffuse(albedo.rgb) + sectorAmbientLighting;
+				directLighting += EvaluateAmbientDiffuse(albedo.rgb) + sectorAmbientLighting;
 				const float3 directSunDiffuse = EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir);
 				const float3 directSunSpecular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0);
-				directLighting = directSunDiffuse + directSunSpecular;
-				if (!splitShadowDenoiser)
-				{
-					diffuse = directEmission + directSunDiffuse * shadow;
-					specular = directSunSpecular * shadow;
-				}
+				directLighting += (directSunDiffuse + directSunSpecular) * shadow;
 
 				const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
 				[loop]
@@ -730,8 +724,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					const float3 analyticDiffuse = albedo.rgb * (lambert * 0.80) * lightColor * runtimeShadow;
 					const float3 analyticSpecular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, runtimeLightDir, 1.0) * lightColor * runtimeShadow;
 					analyticDirectLighting += analyticDiffuse + analyticSpecular;
-					diffuse += analyticDiffuse;
-					specular += analyticSpecular;
+					directLighting += analyticDiffuse + analyticSpecular;
 				}
 
 				float3 emissiveSampleDiffuse = 0.0;
@@ -752,8 +745,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					emissiveSampleSurfaceIndex,
 					emissiveSampleOccluded);
 				emissiveDirectLighting += emissiveSampleDiffuse + emissiveSampleSpecular;
-				diffuse += emissiveSampleDiffuse;
-				specular += emissiveSampleSpecular;
+				directLighting += emissiveSampleDiffuse + emissiveSampleSpecular;
 
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
