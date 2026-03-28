@@ -1669,12 +1669,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::GeometryData runtimeMutationGeometry;
 	nri_scene::GeometryData runtimeSpaceLinkGeometry;
 	nri_scene::GeometryData dynamicGeometry;
+	nri_scene::GeometryData mergedDynamicGeometry;
 	nri_scene::GeometryData overlayGeometry;
 	nri_scene::GeometryData combinedGeometry;
 	nri_scene::MaterialBridgeData materialBridge;
 	nri_scene::MaterialBridgeData runtimeMutationMaterialBridge;
 	nri_scene::MaterialBridgeData runtimeSpaceLinkMaterialBridge;
 	nri_scene::MaterialBridgeData dynamicMaterialBridge;
+	nri_scene::MaterialBridgeData mergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData overlayMaterialBridge;
 	nri_scene::MaterialBridgeData combinedMaterialBridge;
 	std::vector<nri_scene::MaterialData> capturedGpuMaterials;
@@ -1688,6 +1690,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::MaterialBridgeData* sceneLightCapturedMaterials = nullptr;
 	const nri_scene::SceneView* sceneLightDynamicView = nullptr;
 	const nri_scene::MaterialBridgeData* sceneLightDynamicMaterials = nullptr;
+	nri_scene::SceneView mergedDynamicSceneView;
+	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
+	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	bool sceneLightUsesStaticMapScene = false;
 	nri_scene::SceneDebugStats activeStats = {};
@@ -1696,6 +1702,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	bool buffersReady = true;
 	bool accelerationReady = true;
 	bool usingPersistentDynamicEmissiveCache = false;
+	bool liveDynamicHasEmissive = false;
 
 	if (allowStaticMapScene && EnsureStaticMapScene())
 	{
@@ -1730,17 +1737,67 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 			sceneLightDynamicView = &dynamicSceneView;
 			sceneLightDynamicMaterials = &dynamicMaterialBridge;
-			RebuildPersistentDynamicEmissiveCache(dynamicSceneView, dynamicMaterialBridge);
+			activeDynamicSceneView = &dynamicSceneView;
+			activeDynamicGeometry = &dynamicGeometry;
+			activeDynamicMaterials = &dynamicMaterialBridge;
+			liveDynamicHasEmissive = RebuildPersistentDynamicEmissiveCache(dynamicSceneView, dynamicMaterialBridge);
 		}
 
-		const bool hasPersistentDynamicEmissive = !hasDynamicScene && mPersistentDynamicEmissiveCache.valid;
-		if (hasPersistentDynamicEmissive)
+		const bool shouldUsePersistentDynamicEmissive = mPersistentDynamicEmissiveCache.valid && !liveDynamicHasEmissive;
+		if (shouldUsePersistentDynamicEmissive)
 		{
-			sceneLightDynamicView = &mPersistentDynamicEmissiveCache.sceneView;
-			sceneLightDynamicMaterials = &mPersistentDynamicEmissiveCache.materialBridge;
+			usingPersistentDynamicEmissiveCache = true;
+			if (hasDynamicScene)
+			{
+				mergedDynamicSceneView = dynamicSceneView;
+				mergedDynamicSceneView.opaqueWalls.insert(
+					mergedDynamicSceneView.opaqueWalls.end(),
+					mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.begin(),
+					mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.end());
+				mergedDynamicSceneView.opaqueFlats.insert(
+					mergedDynamicSceneView.opaqueFlats.end(),
+					mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.begin(),
+					mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.end());
+				mergedDynamicSceneView.opaqueSprites.insert(
+					mergedDynamicSceneView.opaqueSprites.end(),
+					mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.begin(),
+					mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.end());
+				mergedDynamicSceneView.stats = MergeSceneStats(dynamicSceneView.stats, mPersistentDynamicEmissiveCache.sceneView.stats);
+
+				{
+					Clocker clock(NriPTGeometryBuild);
+					nri_scene::BuildGeometry(mergedDynamicSceneView, mergedDynamicGeometry);
+					AssignGeometryPortalIndices(mMapWorld, mergedDynamicGeometry);
+				}
+				{
+					Clocker clock(NriPTMaterialBuild);
+					nri_scene::BuildMaterials(mergedDynamicSceneView, mergedDynamicMaterialBridge);
+				}
+
+				if (!mergedDynamicGeometry.primitives.empty())
+				{
+					activeDynamicSceneView = &mergedDynamicSceneView;
+					activeDynamicGeometry = &mergedDynamicGeometry;
+					activeDynamicMaterials = &mergedDynamicMaterialBridge;
+				}
+			}
+			else
+			{
+				activeDynamicSceneView = &mPersistentDynamicEmissiveCache.sceneView;
+				activeDynamicGeometry = &mPersistentDynamicEmissiveCache.geometry;
+				activeDynamicMaterials = &mPersistentDynamicEmissiveCache.materialBridge;
+			}
+
+			sceneLightDynamicView = activeDynamicSceneView;
+			sceneLightDynamicMaterials = activeDynamicMaterials;
 		}
 
-		if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || !dynamicGeometry.primitives.empty() || hasPersistentDynamicEmissive)
+		const bool hasActiveDynamicOverlay =
+			activeDynamicGeometry != nullptr &&
+			!activeDynamicGeometry->primitives.empty() &&
+			activeDynamicMaterials != nullptr;
+
+		if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay)
 		{
 			overlayGeometry = {};
 			overlayMaterialBridge = {};
@@ -1763,16 +1820,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				AppendMaterialBridge(runtimeMutationMaterialBridge, overlayMaterialBridge);
 			}
 
-			if (!dynamicGeometry.primitives.empty())
+			if (hasActiveDynamicOverlay)
 			{
-				AppendGeometry(dynamicGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
-				AppendMaterialBridge(dynamicMaterialBridge, overlayMaterialBridge);
-			}
-			else if (hasPersistentDynamicEmissive)
-			{
-				usingPersistentDynamicEmissiveCache = true;
-				AppendGeometry(mPersistentDynamicEmissiveCache.geometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
-				AppendMaterialBridge(mPersistentDynamicEmissiveCache.materialBridge, overlayMaterialBridge);
+				AppendGeometry(*activeDynamicGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
+				AppendMaterialBridge(*activeDynamicMaterials, overlayMaterialBridge);
 			}
 
 			std::vector<nri::TopLevelInstance> instances;
@@ -1830,9 +1881,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						BuildDynamicAccelerationStructure(overlayGeometry) &&
 						mDynamicBottomLevelAS.accelerationStructure != nullptr;
 				}
-				emissiveSamplingContext.dynamicGeometry =
-					!dynamicGeometry.primitives.empty() ? &dynamicGeometry :
-					(usingPersistentDynamicEmissiveCache ? &mPersistentDynamicEmissiveCache.geometry : nullptr);
+				emissiveSamplingContext.dynamicGeometry = hasActiveDynamicOverlay ? activeDynamicGeometry : nullptr;
 				emissiveSamplingContext.dynamicPrimitiveBaseOffset = (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationGeometry.primitives.size());
 				if (accelerationReady)
 				{
@@ -1874,23 +1923,15 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 			if (paletteReady && texturesReady && buffersReady && accelerationReady)
 			{
-				mUsedDynamicSceneLastFrame = !dynamicGeometry.primitives.empty() || usingPersistentDynamicEmissiveCache;
+				mUsedDynamicSceneLastFrame = hasActiveDynamicOverlay;
 				mGpuSceneHasDynamicOverlay = true;
-				if (!dynamicGeometry.primitives.empty())
+				if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
 				{
-					mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)dynamicSceneView.opaqueSprites.size();
-					mDynamicSceneLastFrame.primitiveCount = (uint32_t)dynamicGeometry.primitives.size();
-					mDynamicSceneLastFrame.materialCount = (uint32_t)dynamicMaterialBridge.materials.size();
-					mDynamicSceneLastFrame.modelCount = dynamicSceneView.stats.modelDrawItems;
-					mDynamicSceneLastFrame.unsupportedModelCount = dynamicSceneView.stats.unsupportedModelDrawItems;
-				}
-				else if (usingPersistentDynamicEmissiveCache)
-				{
-					mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.size();
-					mDynamicSceneLastFrame.primitiveCount = (uint32_t)mPersistentDynamicEmissiveCache.geometry.primitives.size();
-					mDynamicSceneLastFrame.materialCount = (uint32_t)mPersistentDynamicEmissiveCache.materialBridge.materials.size();
-					mDynamicSceneLastFrame.modelCount = 0;
-					mDynamicSceneLastFrame.unsupportedModelCount = 0;
+					mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)activeDynamicSceneView->opaqueSprites.size();
+					mDynamicSceneLastFrame.primitiveCount = (uint32_t)activeDynamicGeometry->primitives.size();
+					mDynamicSceneLastFrame.materialCount = (uint32_t)activeDynamicMaterials->materials.size();
+					mDynamicSceneLastFrame.modelCount = activeDynamicSceneView->stats.modelDrawItems;
+					mDynamicSceneLastFrame.unsupportedModelCount = activeDynamicSceneView->stats.unsupportedModelDrawItems;
 				}
 				if (!overlayGeometry.primitives.empty())
 				{
@@ -1909,8 +1950,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 				activeStats = MergeSceneStats(
 					mStaticMapScene.sceneView.stats,
-					!dynamicGeometry.primitives.empty() ? dynamicSceneView.stats :
-					(usingPersistentDynamicEmissiveCache ? mPersistentDynamicEmissiveCache.sceneView.stats : nri_scene::SceneDebugStats{}));
+					activeDynamicSceneView != nullptr ? activeDynamicSceneView->stats : nri_scene::SceneDebugStats{});
 			}
 			else
 			{
@@ -3086,7 +3126,6 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 		(uint32_t)next.sceneView.opaqueSprites.size();
 	if (next.surfaceCount == 0)
 	{
-		ResetPersistentDynamicEmissiveCache();
 		return false;
 	}
 
@@ -3111,7 +3150,6 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 	next.valid = next.primitiveCount > 0 && next.materialCount > 0;
 	if (!next.valid)
 	{
-		ResetPersistentDynamicEmissiveCache();
 		return false;
 	}
 
