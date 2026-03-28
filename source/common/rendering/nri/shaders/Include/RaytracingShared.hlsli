@@ -99,12 +99,7 @@ bool UseFastEmissiveShadow()
 
 float3 ResolveHitNormal(uint materialIndex, uint dataSource, float3 geometricNormal, float3 rayDirection)
 {
-	float3 resolvedNormal = normalize(geometricNormal);
-	if (dot(resolvedNormal, rayDirection) > 0.0)
-	{
-		resolvedNormal = -resolvedNormal;
-	}
-	return resolvedNormal;
+	return normalize(geometricNormal);
 }
 
 float3 ResolveHitBarycentricWeights(HitData hit)

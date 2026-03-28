@@ -53,6 +53,28 @@ namespace
 		outNormal[2] = nz / length;
 	}
 
+	bool ShouldFlipFlatNormal(uint32_t flags, const SurfaceProvenance& provenance, const float normal[3])
+	{
+		if ((flags & MaterialFlag_Flat) == 0)
+		{
+			return false;
+		}
+
+		switch (provenance.sourceType)
+		{
+		case SurfaceSourceType::FloorFlat:
+		case SurfaceSourceType::MapFloorSection:
+			return normal[1] < 0.0f;
+
+		case SurfaceSourceType::CeilingFlat:
+		case SurfaceSourceType::MapCeilingSection:
+			return normal[1] > 0.0f;
+
+		default:
+			return false;
+		}
+	}
+
 	void AppendTriangle(const SceneVertex& v0, const SceneVertex& v1, const SceneVertex& v2, uint32_t materialIndex, uint32_t flags, const SurfaceProvenance& provenance, GeometryData& outGeometry)
 	{
 		const uint32_t vertexBase = (uint32_t)outGeometry.vertices.size();
@@ -78,6 +100,12 @@ namespace
 		primitive.flags = flags;
 		primitive.portalIndex = UINT32_MAX;
 		ComputeNormal(v0, v1, v2, primitive.normal);
+		if (ShouldFlipFlatNormal(flags, provenance, primitive.normal))
+		{
+			primitive.normal[0] = -primitive.normal[0];
+			primitive.normal[1] = -primitive.normal[1];
+			primitive.normal[2] = -primitive.normal[2];
+		}
 		outGeometry.primitives.push_back(primitive);
 		outGeometry.primitiveProvenance.push_back(provenance);
 	}
