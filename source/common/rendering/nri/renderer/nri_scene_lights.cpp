@@ -378,9 +378,9 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mSectorLighting.topologyChanged = false;
 }
 
-void SceneLightSystem::AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source)
+void SceneLightSystem::AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t materialIndexBase)
 {
-	uint32_t materialIndex = 0;
+	uint32_t materialIndex = materialIndexBase;
 	AppendSurfaceList(sceneView.opaqueWalls, materials, source, materialIndex);
 	AppendSurfaceList(sceneView.opaqueFlats, materials, source, materialIndex);
 	AppendSurfaceList(sceneView.opaqueSprites, materials, source, materialIndex);

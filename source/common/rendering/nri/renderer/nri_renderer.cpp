@@ -3643,7 +3643,15 @@ void NRIRenderer::RefreshSceneLightSystem(
 
 	if (usedStaticMapScene && mStaticMapScene.valid)
 	{
-		mSceneLights.AppendSceneView(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, SceneLightRecordSource::StaticMapScene);
+		const size_t chunkCount = std::min(mStaticMapScene.lightChunkViews.size(), mStaticMapScene.chunks.size());
+		for (size_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
+		{
+			mSceneLights.AppendSceneView(
+				mStaticMapScene.lightChunkViews[chunkIndex],
+				mStaticMapScene.materialBridge,
+				SceneLightRecordSource::StaticMapScene,
+				mStaticMapScene.chunks[chunkIndex].materialOffset);
+		}
 	}
 	else if (capturedSceneView != nullptr && capturedMaterials != nullptr)
 	{
@@ -5120,9 +5128,11 @@ bool NRIRenderer::EnsureStaticMapScene()
 	}
 
 	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView);
+	mStaticMapScene.lightChunkViews.clear();
 	mStaticMapScene.geometry = {};
 	mStaticMapScene.materialBridge = {};
 	mStaticMapScene.chunks.clear();
+	mStaticMapScene.lightChunkViews.reserve(mMapWorld.chunks.size());
 	mStaticMapScene.chunks.reserve(mMapWorld.chunks.size());
 	mRuntimeMapMutations.chunks.clear();
 	mRuntimeMapMutations.chunks.resize(mMapWorld.chunks.size());
@@ -5179,6 +5189,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 
 		AppendGeometry(chunkGeometry, chunkCache.materialOffset, mStaticMapScene.geometry);
 		AppendMaterialBridge(chunkMaterials, mStaticMapScene.materialBridge);
+		mStaticMapScene.lightChunkViews.push_back(std::move(chunkSceneView));
 		mStaticMapScene.chunks.push_back(std::move(chunkCache));
 	}
 

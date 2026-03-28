@@ -258,6 +258,7 @@ private:
 		uint32_t accelerationBuildCount = 0;
 		uint32_t reuseCount = 0;
 		nri_scene::SceneView sceneView;
+		std::vector<nri_scene::SceneView> lightChunkViews;
 		nri_scene::GeometryData geometry;
 		nri_scene::MaterialBridgeData materialBridge;
 		std::vector<nri_scene::MaterialData> gpuMaterials;

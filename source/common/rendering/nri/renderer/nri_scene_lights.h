@@ -169,7 +169,7 @@ public:
 
 	void Reset();
 	void BeginFrame(uint64_t frameSerial);
-	void AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source);
+	void AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t materialIndexBase = 0);
 	void RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxActiveLights);
 	void RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces);
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
