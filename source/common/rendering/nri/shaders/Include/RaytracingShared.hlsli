@@ -151,24 +151,38 @@ float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward,
 	return uv - jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 }
 
+float2 ResolveProjectedUv(float4 clip, float2 jitter)
+{
+	const float2 ndc = clip.xy / clip.w;
+	return float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) - jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+}
+
+float4 MultiplyVsMatrixPoint(float4 v, float4 matrixColumns[4])
+{
+	return float4(
+		dot(v, float4(matrixColumns[0].x, matrixColumns[1].x, matrixColumns[2].x, matrixColumns[3].x)),
+		dot(v, float4(matrixColumns[0].y, matrixColumns[1].y, matrixColumns[2].y, matrixColumns[3].y)),
+		dot(v, float4(matrixColumns[0].z, matrixColumns[1].z, matrixColumns[2].z, matrixColumns[3].z)),
+		dot(v, float4(matrixColumns[0].w, matrixColumns[1].w, matrixColumns[2].w, matrixColumns[3].w)));
+}
+
 bool ProjectWorldToUvMatrix(float3 worldPos, bool previousFrame, float2 jitter, out float2 uv)
 {
 	const ReprojectionData reprojection = gReprojectionDataBuffer[0];
 	const float4 world = float4(worldPos, 1.0);
 	const float4 view = previousFrame
-		? mul(reprojection.previousWorldToViewMatrix, world)
-		: mul(reprojection.currentWorldToViewMatrix, world);
+		? MultiplyVsMatrixPoint(world, reprojection.previousWorldToViewMatrix)
+		: MultiplyVsMatrixPoint(world, reprojection.currentWorldToViewMatrix);
 	const float4 clip = previousFrame
-		? mul(reprojection.previousViewToClipMatrix, view)
-		: mul(reprojection.currentViewToClipMatrix, view);
+		? MultiplyVsMatrixPoint(view, reprojection.previousViewToClipMatrix)
+		: MultiplyVsMatrixPoint(view, reprojection.currentViewToClipMatrix);
 	if (abs(clip.w) <= 1e-5)
 	{
 		uv = float2(-1.0, -1.0);
 		return false;
 	}
 
-	const float2 ndc = clip.xy / clip.w;
-	uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) - jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+	uv = ResolveProjectedUv(clip, jitter);
 	return all(uv >= 0.0) && all(uv <= 1.0);
 }
 

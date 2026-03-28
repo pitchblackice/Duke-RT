@@ -178,10 +178,10 @@ struct SectorLightData
 
 struct ReprojectionData
 {
-	float4x4 currentViewToClipMatrix;
-	float4x4 previousViewToClipMatrix;
-	float4x4 currentWorldToViewMatrix;
-	float4x4 previousWorldToViewMatrix;
+	float4 currentViewToClipMatrix[4];
+	float4 previousViewToClipMatrix[4];
+	float4 currentWorldToViewMatrix[4];
+	float4 previousWorldToViewMatrix[4];
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, SET_ROOT);
