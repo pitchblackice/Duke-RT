@@ -5042,13 +5042,15 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	}
 
 	const uint32_t sceneLeft = std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.left, 0), targetWidth - 1u);
-	const uint32_t sceneTop = std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.top, 0), targetHeight - 1u);
+	// mSceneViewport.top is prepared for bottom-left raster viewport APIs; PT present/composite passes sample in top-left texture space.
+	const uint32_t sceneBottom = std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.top, 0), targetHeight - 1u);
 	outputWidth = std::min(outputWidth, targetWidth - sceneLeft);
-	outputHeight = std::min(outputHeight, targetHeight - sceneTop);
+	outputHeight = std::min(outputHeight, targetHeight - sceneBottom);
 	if (outputWidth == 0 || outputHeight == 0)
 	{
 		return false;
 	}
+	const uint32_t sceneTop = targetHeight - sceneBottom - outputHeight;
 
 	const NRIUpscalerKind upscalerKind = ResolveUpscalerKind(false);
 	float renderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
