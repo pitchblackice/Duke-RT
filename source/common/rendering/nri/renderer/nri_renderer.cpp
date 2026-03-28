@@ -8031,6 +8031,57 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	}
 	FillMatrix(mCurrentViewToClip, di.VPUniforms.mProjectionMatrix);
 	FillMatrix(mCurrentWorldToView, di.VPUniforms.mViewMatrix);
+	if (nri_pttraceframes > 0)
+	{
+		const uint32_t targetWidth = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->width : 0u;
+		const uint32_t targetHeight = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->height : 0u;
+		const uint32_t sceneLeft = targetWidth > 0 ? std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.left, 0), targetWidth - 1u) : 0u;
+		const uint32_t sceneBottom = targetHeight > 0 ? std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.top, 0), targetHeight - 1u) : 0u;
+		const uint32_t sceneWidth = targetWidth > 0 ? std::min<uint32_t>(std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.width, 1u), targetWidth - sceneLeft) : 0u;
+		const uint32_t sceneHeight = targetHeight > 0 ? std::min<uint32_t>(std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.height, 1u), targetHeight - sceneBottom) : 0u;
+		const uint32_t sceneTop = targetHeight > 0 ? (targetHeight - sceneBottom - sceneHeight) : 0u;
+		const auto& uniformCameraPos = di.VPUniforms.mCameraPos;
+		const FVector3 hwForward(di.Viewpoint.HWAngles);
+		Printf("NRI PT camera: frame=%u hw_pitch=%.3f hw_yaw=%.3f hw_roll=%.3f scene_bl=(%d,%d %dx%d) scene_tl=(%u,%u %ux%u) target=%ux%u uniform_pos=(%.3f,%.3f,%.3f) inverse_pos=(%.3f,%.3f,%.3f) hw_forward=(%.3f,%.3f,%.3f) basis_fwd=(%.3f,%.3f,%.3f) basis_right=(%.3f,%.3f,%.3f) basis_up=(%.3f,%.3f,%.3f) tan=(%.6f,%.6f) proj=(%.6f,%.6f,%.6f,%.6f)\n",
+			mFrameIndex,
+			di.Viewpoint.HWAngles.Pitch.Degrees(),
+			di.Viewpoint.HWAngles.Yaw.Degrees(),
+			di.Viewpoint.HWAngles.Roll.Degrees(),
+			mFrameBuffer->mSceneViewport.left,
+			mFrameBuffer->mSceneViewport.top,
+			mFrameBuffer->mSceneViewport.width,
+			mFrameBuffer->mSceneViewport.height,
+			sceneLeft,
+			sceneTop,
+			sceneWidth,
+			sceneHeight,
+			targetWidth,
+			targetHeight,
+			uniformCameraPos.X,
+			uniformCameraPos.Y,
+			uniformCameraPos.Z,
+			mCurrentCameraPos[0],
+			mCurrentCameraPos[1],
+			mCurrentCameraPos[2],
+			hwForward.X,
+			hwForward.Y,
+			hwForward.Z,
+			mCurrentCameraForward[0],
+			mCurrentCameraForward[1],
+			mCurrentCameraForward[2],
+			mCurrentCameraRight[0],
+			mCurrentCameraRight[1],
+			mCurrentCameraRight[2],
+			mCurrentCameraUp[0],
+			mCurrentCameraUp[1],
+			mCurrentCameraUp[2],
+			mCurrentTanHalfFovX,
+			mCurrentTanHalfFovY,
+			projection != nullptr ? projection[0] : 0.0f,
+			projection != nullptr ? projection[5] : 0.0f,
+			projection != nullptr ? projection[8] : 0.0f,
+			projection != nullptr ? projection[9] : 0.0f);
+	}
 
 	if (!mHasPreviousCameraState)
 	{
