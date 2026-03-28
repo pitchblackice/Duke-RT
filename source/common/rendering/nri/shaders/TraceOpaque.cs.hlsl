@@ -670,8 +670,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gViewZOutput[pixelPos] = float4(NRD_INF, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
 			gBaseColorOutput[pixelPos] = float4(missColor, 0.0);
-			gGuideDiffuseOutput[pixelPos] = packedDiffuse;
-			gGuideSpecularOutput[pixelPos] = PackSpecularRadiance(0.0, 0.0, NRD_INF, 1.0);
+			// Keep sky misses out of NRD's ordinary noisy radiance inputs and composite them via direct emission.
+			gGuideDiffuseOutput[pixelPos] = 0.0;
+			gGuideSpecularOutput[pixelPos] = 0.0;
 			gGuideSpecHitOutput[pixelPos] = 0.0;
 			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, kTanSunAngularRadius), 1.0, 0.0, 1.0);
 			gDirectLightingOutput[pixelPos] = 0.0;
