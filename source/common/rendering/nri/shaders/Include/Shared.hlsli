@@ -176,6 +176,14 @@ struct SectorLightData
 	int hitag;
 };
 
+struct ReprojectionData
+{
+	float4x4 currentViewToClipMatrix;
+	float4x4 previousViewToClipMatrix;
+	float4x4 currentWorldToViewMatrix;
+	float4x4 previousWorldToViewMatrix;
+};
+
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, SET_ROOT);
 
 float GetTemporalHaltonSample(uint index, uint base)
@@ -237,6 +245,7 @@ StructuredBuffer<EmissivePrimitiveData> gEmissivePrimitives : register(t14, spac
 StructuredBuffer<float> gEmissivePrimitiveCdf : register(t15, space2);
 StructuredBuffer<SectorLightHeaderData> gSectorLightHeaders : register(t16, space2);
 StructuredBuffer<SectorLightData> gSectorLights : register(t17, space2);
+StructuredBuffer<ReprojectionData> gReprojectionDataBuffer : register(t18, space2);
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);

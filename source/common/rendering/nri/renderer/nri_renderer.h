@@ -438,6 +438,7 @@ private:
 	void BuildSectorLightingUpload(
 		SectorLightHeaderGpuData& outHeader,
 		std::vector<SectorLightGpuData>& outSectors);
+	bool UpdateReprojectionBuffer();
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -582,6 +583,7 @@ private:
 	NRIBufferResource mEmissiveTlasInstanceBuffer;
 	NRIBufferResource mSectorLightHeaderBuffer;
 	NRIBufferResource mSectorLightBuffer;
+	NRIBufferResource mReprojectionBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
@@ -598,6 +600,7 @@ private:
 	SceneBufferDebugStats mEmissiveTlasInstanceBufferStats = { "EmissiveTLASInstance" };
 	SceneBufferDebugStats mSectorLightHeaderBufferStats = { "SectorLightHeader" };
 	SceneBufferDebugStats mSectorLightBufferStats = { "SectorLight" };
+	SceneBufferDebugStats mReprojectionBufferStats = { "Reprojection" };
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
@@ -618,7 +621,7 @@ private:
 	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
-	std::array<nri::Descriptor*, 18> mSceneDataDescriptors = {};
+	std::array<nri::Descriptor*, 19> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;

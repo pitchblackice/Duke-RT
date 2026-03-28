@@ -711,42 +711,72 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float4 probeUvFlags = gDirectLightingInput.Load(int3(probeSamplePos, 0));
 		float4 probeUvs = gDirectEmissionInput.Load(int3(probeSamplePos, 0));
 		bool foundProbeSample = probeUvFlags.x > 0.5 || probeUvFlags.y > 0.5 || probeMotion.w > 0.0;
-
-		[loop]
-		for (int radius = 1; radius <= 24 && !foundProbeSample; ++radius)
-		{
-			[loop]
-			for (int y = -radius; y <= radius && !foundProbeSample; ++y)
-			{
-				[loop]
-				for (int x = -radius; x <= radius && !foundProbeSample; ++x)
-				{
-					if (abs(x) != radius && abs(y) != radius)
-					{
-						continue;
-					}
-
-					const int2 candidatePixel = clamp(int2(sceneSize / 2u) + int2(x, y), int2(0, 0), int2(sceneSize) - 1);
-					const uint2 candidateSample = ResolvePresentSamplePos(uint2(candidatePixel));
-					const float4 candidateMotion = gMotionInput.Load(int3(candidateSample, 0));
-					const float4 candidateFlags = gDirectLightingInput.Load(int3(candidateSample, 0));
-					if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateMotion.w > 0.0)
-					{
-						probePixelPos = uint2(candidatePixel);
-						probeSamplePos = candidateSample;
-						probeMotion = candidateMotion;
-						probeUvFlags = candidateFlags;
-						probeUvs = gDirectEmissionInput.Load(int3(candidateSample, 0));
-						foundProbeSample = true;
-					}
-				}
-			}
-		}
-
 		const uint probeLeft = 20u;
 		const uint probeWidth = 96u;
 		const uint probeCenterX = probeLeft + probeWidth / 2u;
 		const uint probeRight = probeLeft + probeWidth;
+		const bool overlayRegion = pixelPosU.x < probeRight + 116u && pixelPosU.y < 52u;
+
+		if (overlayRegion)
+		{
+			[loop]
+			for (int radius = 1; radius <= 24 && !foundProbeSample; ++radius)
+			{
+				[loop]
+				for (int y = -radius; y <= radius && !foundProbeSample; ++y)
+				{
+					[loop]
+					for (int x = -radius; x <= radius && !foundProbeSample; ++x)
+					{
+						if (abs(x) != radius && abs(y) != radius)
+						{
+							continue;
+						}
+
+						const int2 candidatePixel = clamp(int2(sceneSize / 2u) + int2(x, y), int2(0, 0), int2(sceneSize) - 1);
+						const uint2 candidateSample = ResolvePresentSamplePos(uint2(candidatePixel));
+						const float4 candidateMotion = gMotionInput.Load(int3(candidateSample, 0));
+						const float4 candidateFlags = gDirectLightingInput.Load(int3(candidateSample, 0));
+						if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateMotion.w > 0.0)
+						{
+							probePixelPos = uint2(candidatePixel);
+							probeSamplePos = candidateSample;
+							probeMotion = candidateMotion;
+							probeUvFlags = candidateFlags;
+							probeUvs = gDirectEmissionInput.Load(int3(candidateSample, 0));
+							foundProbeSample = true;
+						}
+					}
+				}
+			}
+
+			if (!foundProbeSample)
+			{
+				const uint stepX = max(sceneSize.x / 16u, 1u);
+				const uint stepY = max(sceneSize.y / 16u, 1u);
+				[loop]
+				for (uint y = 0u; y < sceneSize.y && !foundProbeSample; y += stepY)
+				{
+					[loop]
+					for (uint x = 0u; x < sceneSize.x && !foundProbeSample; x += stepX)
+					{
+						const uint2 candidatePixel = uint2(x, y);
+						const uint2 candidateSample = ResolvePresentSamplePos(candidatePixel);
+						const float4 candidateMotion = gMotionInput.Load(int3(candidateSample, 0));
+						const float4 candidateFlags = gDirectLightingInput.Load(int3(candidateSample, 0));
+						if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateMotion.w > 0.0)
+						{
+							probePixelPos = candidatePixel;
+							probeSamplePos = candidateSample;
+							probeMotion = candidateMotion;
+							probeUvFlags = candidateFlags;
+							probeUvs = gDirectEmissionInput.Load(int3(candidateSample, 0));
+							foundProbeSample = true;
+						}
+					}
+				}
+			}
+		}
 
 		if (pixelPosU.x >= probeLeft && pixelPosU.x < probeRight && pixelPosU.y >= 20u && pixelPosU.y < 52u)
 		{

@@ -85,7 +85,7 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 18;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 19;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
@@ -892,6 +892,14 @@ namespace
 		uint32_t PortalDepth = 0;
 		uint32_t ReservedTrace0 = 0;
 		uint32_t ReservedTrace1 = 0;
+	};
+
+	struct NRIReprojectionData
+	{
+		float currentViewToClip[16] = {};
+		float previousViewToClip[16] = {};
+		float currentWorldToView[16] = {};
+		float previousWorldToView[16] = {};
 	};
 
 	static bool IsAppTaaEligibleUpscaler(NRIUpscalerKind kind)
@@ -4624,6 +4632,52 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	return true;
 }
 
+bool NRIRenderer::UpdateReprojectionBuffer()
+{
+	NRIReprojectionData data = {};
+	std::memcpy(data.currentViewToClip, mCurrentViewToClip, sizeof(data.currentViewToClip));
+	std::memcpy(data.previousViewToClip, mPreviousViewToClip, sizeof(data.previousViewToClip));
+	std::memcpy(data.currentWorldToView, mCurrentWorldToView, sizeof(data.currentWorldToView));
+	std::memcpy(data.previousWorldToView, mPreviousWorldToView, sizeof(data.previousWorldToView));
+	if (!EnsureStructuredBuffer(
+		mReprojectionBuffer,
+		mReprojectionBufferStats,
+		&data,
+		sizeof(data),
+		sizeof(data),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (mSceneDataDescriptors[18] != mReprojectionBuffer.shaderView)
+	{
+		mSceneDataDescriptors[18] = mReprojectionBuffer.shaderView;
+		bool descriptorsReady = mSceneDataSet != nullptr;
+		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
+		{
+			if (descriptor == nullptr)
+			{
+				descriptorsReady = false;
+				break;
+			}
+		}
+
+		if (descriptorsReady)
+		{
+			nri::UpdateDescriptorRangeDesc update = {};
+			update.descriptorSet = mSceneDataSet;
+			update.rangeIndex = 0;
+			update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
+			update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
+			mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+		}
+	}
+
+	return true;
+}
+
 void NRIRenderer::BuildRuntimeLightClusterUpload(
 	std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 	std::vector<uint32_t>& outIndices,
@@ -4749,6 +4803,11 @@ bool NRIRenderer::UpdateSceneDataSet(
 	uint32_t staticMaterialCount,
 	uint32_t dynamicMaterialCount)
 {
+	if (!UpdateReprojectionBuffer())
+	{
+		return false;
+	}
+
 	if (sceneInstances.empty())
 	{
 		return false;
@@ -4926,6 +4985,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mEmissivePrimitiveCdfBuffer.shaderView,
 		mSectorLightHeaderBuffer.shaderView,
 		mSectorLightBuffer.shaderView,
+		mReprojectionBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
@@ -5143,6 +5203,11 @@ bool NRIRenderer::EnsurePaletteTexture(const nri_scene::MaterialBridgeData& mate
 bool NRIRenderer::DispatchBootstrapView()
 {
 	Clocker clock(NriPTBootstrapDispatch);
+
+	if (!UpdateReprojectionBuffer())
+	{
+		return false;
+	}
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	NRITraceConstants constants = {};
@@ -7257,6 +7322,11 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 {
 	Clocker clock(NriPTTraceOpaque);
 
+	if (!UpdateReprojectionBuffer())
+	{
+		return false;
+	}
+
 	NRITraceConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
@@ -8259,6 +8329,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mEmissivePrimitiveCdfBuffer);
 	DestroyBufferResource(mSectorLightHeaderBuffer);
 	DestroyBufferResource(mSectorLightBuffer);
+	DestroyBufferResource(mReprojectionBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
