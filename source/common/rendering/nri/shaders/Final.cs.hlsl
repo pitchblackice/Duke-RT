@@ -704,6 +704,69 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float pulse = ((gTraceConstants.FrameIndex & 1u) != 0u) ? 1.0 : 0.2;
 			composed = float4(pulse, 1.0 - pulse, 0.0, 1.0);
 		}
+
+		const uint2 probePixelPos = sceneSize / 2u;
+		const uint2 probeSamplePos = ResolvePresentSamplePos(probePixelPos);
+		const float4 probeMotion = gMotionInput.Load(int3(probeSamplePos, 0));
+
+		const uint probeLeft = 20u;
+		const uint probeWidth = 96u;
+		const uint probeCenterX = probeLeft + probeWidth / 2u;
+		const uint probeRight = probeLeft + probeWidth;
+
+		if (pixelPosU.x >= probeLeft && pixelPosU.x < probeRight && pixelPosU.y >= 20u && pixelPosU.y < 52u)
+		{
+			const bool isAxis = pixelPosU.x == probeCenterX;
+			const uint halfWidth = probeWidth / 2u - 1u;
+
+			if (pixelPosU.y < 28u)
+			{
+				const float normalized = clamp(probeMotion.x / 8.0, -1.0, 1.0);
+				const uint extent = (uint)round(abs(normalized) * (float)halfWidth);
+				const bool isFilled =
+					(normalized >= 0.0 && pixelPosU.x >= probeCenterX && pixelPosU.x <= probeCenterX + extent) ||
+					(normalized < 0.0 && pixelPosU.x <= probeCenterX && pixelPosU.x + extent >= probeCenterX);
+				float3 color = isAxis ? float3(0.8, 0.8, 0.8) : float3(0.08, 0.08, 0.08);
+				if (isFilled)
+				{
+					color = normalized >= 0.0 ? float3(0.2, 0.8, 0.2) : float3(0.8, 0.2, 0.2);
+				}
+				composed = float4(color, 1.0);
+			}
+			else if (pixelPosU.y >= 31u && pixelPosU.y < 39u)
+			{
+				const float normalized = clamp(probeMotion.y / 8.0, -1.0, 1.0);
+				const uint extent = (uint)round(abs(normalized) * (float)halfWidth);
+				const bool isFilled =
+					(normalized >= 0.0 && pixelPosU.x >= probeCenterX && pixelPosU.x <= probeCenterX + extent) ||
+					(normalized < 0.0 && pixelPosU.x <= probeCenterX && pixelPosU.x + extent >= probeCenterX);
+				float3 color = isAxis ? float3(0.8, 0.8, 0.8) : float3(0.08, 0.08, 0.08);
+				if (isFilled)
+				{
+					color = normalized >= 0.0 ? float3(0.2, 0.8, 0.8) : float3(0.8, 0.2, 0.8);
+				}
+				composed = float4(color, 1.0);
+			}
+			else if (pixelPosU.y >= 42u && pixelPosU.y < 50u)
+			{
+				const float normalized = clamp(probeMotion.z / 64.0, -1.0, 1.0);
+				const uint extent = (uint)round(abs(normalized) * (float)halfWidth);
+				const bool isFilled =
+					(normalized >= 0.0 && pixelPosU.x >= probeCenterX && pixelPosU.x <= probeCenterX + extent) ||
+					(normalized < 0.0 && pixelPosU.x <= probeCenterX && pixelPosU.x + extent >= probeCenterX);
+				float3 color = isAxis ? float3(0.8, 0.8, 0.8) : float3(0.08, 0.08, 0.08);
+				if (isFilled)
+				{
+					color = normalized >= 0.0 ? float3(0.9, 0.6, 0.2) : float3(0.2, 0.2, 0.8);
+				}
+				composed = float4(color, 1.0);
+			}
+		}
+
+		if (pixelPosU.x >= probeRight + 4u && pixelPosU.x < probeRight + 16u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
+		{
+			composed = probeMotion.w > 0.0 ? float4(0.1, 0.9, 0.1, 1.0) : float4(1.0, 0.0, 1.0, 1.0);
+		}
 	}
 	else if (gTraceConstants.DebugMode == 6)
 	{
