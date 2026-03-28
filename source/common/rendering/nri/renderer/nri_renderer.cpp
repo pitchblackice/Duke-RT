@@ -8004,9 +8004,21 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 		Normalize3(mCurrentCameraForward);
 	}
 
-	const float tanHalfFovX = tanf((float)di.Viewpoint.FieldOfView.Radians() * 0.5f);
-	mCurrentTanHalfFovX = tanHalfFovX;
-	mCurrentTanHalfFovY = tanHalfFovX * ((float)mRenderHeight / std::max(1.0f, (float)mRenderWidth));
+	const float* projection = di.VPUniforms.mProjectionMatrix.get();
+	const float projectionScaleX = projection != nullptr ? std::fabs(projection[0]) : 0.0f;
+	const float projectionScaleY = projection != nullptr ? std::fabs(projection[5]) : 0.0f;
+	if (projectionScaleX > 0.0001f && projectionScaleY > 0.0001f)
+	{
+		// Match the hardware backend frustum exactly instead of rebuilding Y-FOV from the PT render dimensions.
+		mCurrentTanHalfFovX = 1.0f / projectionScaleX;
+		mCurrentTanHalfFovY = 1.0f / projectionScaleY;
+	}
+	else
+	{
+		const float tanHalfFovX = tanf((float)di.Viewpoint.FieldOfView.Radians() * 0.5f);
+		mCurrentTanHalfFovX = tanHalfFovX;
+		mCurrentTanHalfFovY = tanHalfFovX * ((float)mRenderHeight / std::max(1.0f, (float)mRenderWidth));
+	}
 	const NRIUpscalerKind resolvedUpscaler = ResolveUpscalerKind(false);
 	if (!nri_ptbootstrap && ShouldUseTemporalJitter(resolvedUpscaler))
 	{
