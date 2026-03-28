@@ -705,11 +705,43 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			composed = float4(pulse, 1.0 - pulse, 0.0, 1.0);
 		}
 
-		const uint2 probePixelPos = sceneSize / 2u;
-		const uint2 probeSamplePos = ResolvePresentSamplePos(probePixelPos);
-		const float4 probeMotion = gMotionInput.Load(int3(probeSamplePos, 0));
-		const float4 probeUvFlags = gDirectLightingInput.Load(int3(probeSamplePos, 0));
-		const float4 probeUvs = gDirectEmissionInput.Load(int3(probeSamplePos, 0));
+		uint2 probePixelPos = sceneSize / 2u;
+		uint2 probeSamplePos = ResolvePresentSamplePos(probePixelPos);
+		float4 probeMotion = gMotionInput.Load(int3(probeSamplePos, 0));
+		float4 probeUvFlags = gDirectLightingInput.Load(int3(probeSamplePos, 0));
+		float4 probeUvs = gDirectEmissionInput.Load(int3(probeSamplePos, 0));
+		bool foundProbeSample = probeUvFlags.x > 0.5 || probeUvFlags.y > 0.5 || probeMotion.w > 0.0;
+
+		[loop]
+		for (int radius = 1; radius <= 24 && !foundProbeSample; ++radius)
+		{
+			[loop]
+			for (int y = -radius; y <= radius && !foundProbeSample; ++y)
+			{
+				[loop]
+				for (int x = -radius; x <= radius && !foundProbeSample; ++x)
+				{
+					if (abs(x) != radius && abs(y) != radius)
+					{
+						continue;
+					}
+
+					const int2 candidatePixel = clamp(int2(sceneSize / 2u) + int2(x, y), int2(0, 0), int2(sceneSize) - 1);
+					const uint2 candidateSample = ResolvePresentSamplePos(uint2(candidatePixel));
+					const float4 candidateMotion = gMotionInput.Load(int3(candidateSample, 0));
+					const float4 candidateFlags = gDirectLightingInput.Load(int3(candidateSample, 0));
+					if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateMotion.w > 0.0)
+					{
+						probePixelPos = uint2(candidatePixel);
+						probeSamplePos = candidateSample;
+						probeMotion = candidateMotion;
+						probeUvFlags = candidateFlags;
+						probeUvs = gDirectEmissionInput.Load(int3(candidateSample, 0));
+						foundProbeSample = true;
+					}
+				}
+			}
+		}
 
 		const uint probeLeft = 20u;
 		const uint probeWidth = 96u;
@@ -807,6 +839,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			const float v = clamp(probeUvs.w, 0.0, 1.0);
 			composed = pixelPosU.x < 52u + (uint)round(v * 48.0) ? float4(1.0, 0.6, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
+		}
+		if (pixelPosU.x >= probeRight + 104u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
+		{
+			composed = foundProbeSample ? float4(0.9, 0.9, 0.1, 1.0) : float4(0.25, 0.05, 0.25, 1.0);
 		}
 	}
 	else if (gTraceConstants.DebugMode == 6)
