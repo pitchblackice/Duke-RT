@@ -40,7 +40,7 @@ public:
 	bool AddSpriteTileLightHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
 	void ClearSpriteTileLightHeuristics();
 	void PrintSpriteTileLightHeuristics() const;
-	bool AddTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId);
+	bool AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t emissiveMode, float intensityScale, const float* emissiveColor, bool hasExplicitColor, uint32_t& outRuleId);
 	void ClearTextureEmissiveHeuristics();
 	void PrintTextureEmissiveHeuristics() const;
 	void PrintEmissiveSurfaceDump(float radius, uint32_t limit) const;
@@ -135,9 +135,11 @@ private:
 		uint32_t textureId = 0;
 		uint32_t materialClass = 0;
 		uint32_t emissiveMode = 0;
+		uint32_t emissiveTextureIndex = UINT32_MAX;
 		float lightLevel = 0.0f;
 		float alpha = 1.0f;
 		float averageColor[3] = { 1.0f, 1.0f, 1.0f };
+		float emissiveColor[3] = {};
 		float glowColor[3] = {};
 		float distance = 0.0f;
 		float position[3] = {};

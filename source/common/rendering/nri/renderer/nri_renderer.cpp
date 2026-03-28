@@ -113,6 +113,17 @@ namespace
 	constexpr uint32_t NRI_EMISSIVE_SAMPLING_FLAG_AUTO_ONLY = 0x1u;
 	constexpr uint32_t NRI_SECTOR_LIGHTING_FLAG_ENABLED = 0x1u;
 
+	const char* GetMaterialEmissiveModeName(uint32_t mode)
+	{
+		switch (mode)
+		{
+		case nri_scene::MaterialEmissiveMode_UseBaseTexture: return "base";
+		case nri_scene::MaterialEmissiveMode_UseConstantColor: return "constant";
+		case nri_scene::MaterialEmissiveMode_UseGlowmapTexture: return "glowmap";
+		default: return "none";
+		}
+	}
+
 	struct ScenePortalData
 	{
 		uint32_t traversalClass = 0;
@@ -2256,9 +2267,9 @@ void NRIRenderer::PrintSpriteTileLightHeuristics() const
 	}
 }
 
-bool NRIRenderer::AddTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId)
+bool NRIRenderer::AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t emissiveMode, float intensityScale, const float* emissiveColor, bool hasExplicitColor, uint32_t& outRuleId)
 {
-	if (!mSceneLights.AddTextureEmissiveHeuristic(textureId, intensityScale, outRuleId))
+	if (!mSceneLights.AddTextureEmissiveHeuristic(textureId, emissiveMode, intensityScale, emissiveColor, hasExplicitColor, outRuleId))
 	{
 		return false;
 	}
@@ -2294,10 +2305,15 @@ void NRIRenderer::PrintTextureEmissiveHeuristics() const
 		emissive.truncatedSurfaceCount);
 	for (const auto& rule : emissive.textureRules)
 	{
-		Printf("NRI PT emissive heuristic %u: tile=%u intensity_scale=%.3f\n",
+		Printf("NRI PT emissive heuristic %u: tile=%u mode=%s intensity_scale=%.3f explicit_color=%s color=(%.3f, %.3f, %.3f)\n",
 			rule.ruleId,
 			rule.textureId,
-			rule.intensityScale);
+			GetMaterialEmissiveModeName(rule.emissiveMode),
+			rule.intensityScale,
+			rule.hasExplicitColor ? "yes" : "no",
+			rule.emissiveColor[0],
+			rule.emissiveColor[1],
+			rule.emissiveColor[2]);
 	}
 }
 
@@ -2350,13 +2366,15 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 	for (uint32_t i = 0; i < printCount; ++i)
 	{
 		const auto& record = *candidates[i].record;
-		Printf("NRI PT emissive %u: stable=0x%016llx flags=0x%x rule=%u actor=%d tile=%u area=%.2f power=%.3f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		Printf("NRI PT emissive %u: stable=0x%016llx flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
 			i,
 			(unsigned long long)record.stableKey,
 			record.sourceFlags,
 			record.sourceRuleId,
 			record.actorIndex,
 			record.textureId,
+			GetMaterialEmissiveModeName(record.emissiveMode),
+			record.emissiveTextureIndex != UINT32_MAX ? record.emissiveTextureIndex : 0u,
 			record.surfaceArea,
 			record.powerEstimate,
 			record.center[0],
@@ -2545,6 +2563,19 @@ void NRIRenderer::PrintStatus() const
 		nri_ptdirectionallight ? "on" : "off",
 		nri_ptsectorlighting ? "on" : "off",
 		nri_ptemissiveheuristics ? "on" : "off");
+	uint32_t emissiveBaseCount = 0;
+	uint32_t emissiveConstantCount = 0;
+	uint32_t emissiveGlowmapCount = 0;
+	for (const auto& surface : mSceneLights.GetEmissiveSurfaces().activeSurfaces)
+	{
+		switch (surface.emissiveMode)
+		{
+		case nri_scene::MaterialEmissiveMode_UseBaseTexture: emissiveBaseCount++; break;
+		case nri_scene::MaterialEmissiveMode_UseConstantColor: emissiveConstantCount++; break;
+		case nri_scene::MaterialEmissiveMode_UseGlowmapTexture: emissiveGlowmapCount++; break;
+		default: break;
+		}
+	}
 	Printf("NRI PT NRD: integration=%s requested=%s validation_output=%s denoiser=%s motion=%s prev_position=%s extra_debugs=%s\n",
 		mNrd.IsReady() ? "ready" : "cold",
 		nri_denoise ? "on" : "off",
@@ -2611,6 +2642,10 @@ void NRIRenderer::PrintStatus() const
 		(float)nri_ptemissiveminpower,
 		nri_ptemissiveheuristics ? "on" : "off",
 		nri_ptemissiveautoonly ? "on" : "off");
+	Printf("NRI PT emissive sources: base=%u glowmap=%u constant=%u\n",
+		emissiveBaseCount,
+		emissiveGlowmapCount,
+		emissiveConstantCount);
 	Printf("NRI PT emissive sampling: candidates=%u total_power=%.3f dominant_tile=%u dominant_power=%.3f dominant_flags=0x%x\n",
 		mBoundEmissiveSurfaceCount,
 		mBoundEmissiveTotalPower,
@@ -3307,11 +3342,23 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		result.materialLightingFlags = metadata.lightingFlags;
 		result.textureId = metadata.textureId;
 		result.materialClass = metadata.materialClass;
-		result.emissiveMode = metadata.emissiveMode;
 		result.lightLevel = metadata.lightLevel;
 		result.alpha = metadata.alpha;
 		Copy3(metadata.averageColor, result.averageColor);
+		Copy3(metadata.emissiveColor, result.emissiveColor);
 		Copy3(metadata.glowColor, result.glowColor);
+
+		nri_scene::MaterialData effectiveMaterial = {};
+		effectiveMaterial.textureIndex = metadata.textureIndex;
+		effectiveMaterial.paletteIndex = metadata.paletteIndex;
+		effectiveMaterial.flags = metadata.materialFlags;
+		effectiveMaterial.materialClass = metadata.materialClass;
+		effectiveMaterial.lightLevel = metadata.lightLevel;
+		effectiveMaterial.alpha = metadata.alpha;
+		effectiveMaterial.emissiveTextureIndex = metadata.emissiveTextureIndex;
+		mSceneLights.ApplyEmissiveMaterialSettings(metadata, effectiveMaterial);
+		result.emissiveMode = effectiveMaterial.emissiveMode;
+		result.emissiveTextureIndex = effectiveMaterial.emissiveTextureIndex;
 	}
 
 	auto sameIdentity = [](const SurfaceProbeResult& a, const SurfaceProbeResult& b)
@@ -3359,7 +3406,7 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	const uint32_t lightingFlags = result.materialLightingFlags;
 	const int32_t localSpaceIndex = result.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)result.provenance.mapChunkIndex) : -1;
 	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, result.provenance);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		result.provenance.mapChunkIndex,
@@ -3389,10 +3436,12 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0),
 		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0),
 		result.materialClass,
-		result.emissiveMode,
+		GetMaterialEmissiveModeName(result.emissiveMode),
+		result.emissiveTextureIndex != UINT32_MAX ? result.emissiveTextureIndex : 0u,
 		result.lightLevel,
 		result.alpha,
 		result.averageColor[0], result.averageColor[1], result.averageColor[2],
+		result.emissiveColor[0], result.emissiveColor[1], result.emissiveColor[2],
 		result.glowColor[0], result.glowColor[1], result.glowColor[2]);
 	mLastLoggedSurfaceProbe = result;
 }
@@ -3415,7 +3464,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 	const uint32_t lightingFlags = mLastSurfaceProbe.materialLightingFlags;
 	const int32_t localSpaceIndex = mLastSurfaceProbe.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex) : -1;
 	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, mLastSurfaceProbe.provenance);
-	Printf("NRI PT surface probe: source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
 		mLastSurfaceProbe.provenance.mapChunkIndex,
@@ -3446,12 +3495,16 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0),
 		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0),
 		mLastSurfaceProbe.materialClass,
-		mLastSurfaceProbe.emissiveMode,
+		GetMaterialEmissiveModeName(mLastSurfaceProbe.emissiveMode),
+		mLastSurfaceProbe.emissiveTextureIndex != UINT32_MAX ? mLastSurfaceProbe.emissiveTextureIndex : 0u,
 		mLastSurfaceProbe.lightLevel,
 		mLastSurfaceProbe.alpha,
 		mLastSurfaceProbe.averageColor[0],
 		mLastSurfaceProbe.averageColor[1],
 		mLastSurfaceProbe.averageColor[2],
+		mLastSurfaceProbe.emissiveColor[0],
+		mLastSurfaceProbe.emissiveColor[1],
+		mLastSurfaceProbe.emissiveColor[2],
 		mLastSurfaceProbe.glowColor[0],
 		mLastSurfaceProbe.glowColor[1],
 		mLastSurfaceProbe.glowColor[2]);
@@ -3585,7 +3638,7 @@ void NRIRenderer::PrintSceneLightDump(float radius, uint32_t limit) const
 		const int32_t localSpaceIndex = record.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)record.provenance.mapChunkIndex) : -1;
 		const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, record.provenance);
 		const char* textureName = record.material.texture != nullptr ? record.material.texture->GetName().GetChars() : "(null)";
-		Printf("NRI PT scene light %u: source=%s drawlist=%s dist=%.2f center=(%.2f, %.2f, %.2f) radius=%.2f material=%u material_key=0x%016llx texture_key=0x%016llx glowmap_key=0x%016llx tile=%u texture=%s sector=%d wall=%d chunk=%d local_space=%d portal_graph=%d actor=%d palette=%u shade=%d alpha=%.3f light=%.3f flags=0x%x fullbright=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s avg=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+		Printf("NRI PT scene light %u: source=%s drawlist=%s dist=%.2f center=(%.2f, %.2f, %.2f) radius=%.2f material=%u material_key=0x%016llx texture_key=0x%016llx glowmap_key=0x%016llx tile=%u texture=%s sector=%d wall=%d chunk=%d local_space=%d portal_graph=%d actor=%d palette=%u shade=%d alpha=%.3f light=%.3f flags=0x%x fullbright=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s emissive_mode=%s emissive_tex=%u avg=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 			i,
 			GetSceneLightRecordSourceName(record.source),
 			GetDrawListTypeName(record.provenance.drawListType),
@@ -3616,6 +3669,8 @@ void NRIRenderer::PrintSceneLightDump(float radius, uint32_t limit) const
 			(lightingFlags & nri_scene::MaterialLightingFlag_TextureGlowing) != 0 ? "yes" : "no",
 			(lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0 ? "yes" : "no",
 			(lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0 ? "yes" : "no",
+			GetMaterialEmissiveModeName(record.material.emissiveMode),
+			record.material.emissiveTextureIndex != UINT32_MAX ? record.material.emissiveTextureIndex : 0u,
 			record.material.averageColor[0],
 			record.material.averageColor[1],
 			record.material.averageColor[2],
@@ -5074,6 +5129,10 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		if (material.textureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
 			material.textureIndex = 0;
+		}
+		if (material.emissiveTextureIndex != UINT32_MAX && material.emissiveTextureIndex >= NRI_MAX_SCENE_TEXTURES)
+		{
+			material.emissiveTextureIndex = 0;
 		}
 	}
 

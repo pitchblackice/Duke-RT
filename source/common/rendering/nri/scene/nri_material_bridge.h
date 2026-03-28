@@ -19,8 +19,10 @@ enum MaterialLightingFlags : uint32_t
 enum MaterialEmissiveMode : uint32_t
 {
 	MaterialEmissiveMode_None = 0,
-	MaterialEmissiveMode_UseAlbedo = 1,
+	MaterialEmissiveMode_UseBaseTexture = 1,
 	MaterialEmissiveMode_UseConstantColor = 2,
+	MaterialEmissiveMode_UseGlowmapTexture = 3,
+	MaterialEmissiveMode_UseAlbedo = MaterialEmissiveMode_UseBaseTexture,
 };
 
 struct MaterialData
@@ -38,7 +40,7 @@ struct MaterialData
 	float emissiveMaskScale = 0.0f;
 	uint32_t emissiveMode = MaterialEmissiveMode_None;
 	uint32_t sectorIndex = UINT32_MAX;
-	float sectorHemisphereBias = 0.0f;
+	uint32_t emissiveTextureIndex = UINT32_MAX;
 	float emissiveReserved = 0.0f;
 };
 
@@ -49,6 +51,9 @@ struct MaterialLightingMetadata
 	uint64_t textureContentKey = 0;
 	uint64_t glowmapContentKey = 0;
 	uint32_t textureId = 0;
+	uint32_t textureIndex = 0;
+	uint32_t glowmapTextureIndex = UINT32_MAX;
+	uint32_t emissiveTextureIndex = UINT32_MAX;
 	uint32_t paletteIndex = 0;
 	uint32_t materialFlags = 0;
 	uint32_t lightingFlags = 0;

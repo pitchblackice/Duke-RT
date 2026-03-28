@@ -87,7 +87,10 @@ public:
 		{
 			uint32_t ruleId = 0;
 			uint32_t textureId = 0;
+			uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
 			float intensityScale = 1.0f;
+			float emissiveColor[3] = { 1.0f, 1.0f, 1.0f };
+			bool hasExplicitColor = false;
 		};
 
 		struct EmissiveSurfaceRecord
@@ -98,7 +101,9 @@ public:
 			SceneLightRecordSource source = SceneLightRecordSource::None;
 			int32_t actorIndex = -1;
 			uint32_t textureId = 0;
+			uint32_t emissiveTextureIndex = UINT32_MAX;
 			uint32_t materialIndex = UINT32_MAX;
+			uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
 			float center[3] = {};
 			float boundsRadius = 0.0f;
 			float surfaceArea = 0.0f;
@@ -177,7 +182,7 @@ public:
 	bool AddSpriteTileHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
 	void ClearSpriteTileHeuristics();
 
-	bool AddTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId);
+	bool AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t emissiveMode, float intensityScale, const float* emissiveColor, bool hasExplicitColor, uint32_t& outRuleId);
 	void ClearTextureEmissiveHeuristics();
 	bool ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const;
 

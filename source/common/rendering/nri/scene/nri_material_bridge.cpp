@@ -135,6 +135,11 @@ namespace
 		return (uint64_t)(uintptr_t)texture ^ (indexed ? 1ull : 0ull);
 	}
 
+	uint64_t MakeTextureKey(FTexture* texture, bool indexed)
+	{
+		return ((uint64_t)(uintptr_t)texture ^ (indexed ? 1ull : 0ull)) ^ 0x4000000000000000ull;
+	}
+
 	uint64_t ComputeTextureContentKey(FTexture* texture, bool indexed)
 	{
 		if (texture == nullptr)
@@ -169,21 +174,20 @@ namespace
 		return key;
 	}
 
-	TextureUpload BuildTextureUpload(FGameTexture* texture, bool indexed)
+	TextureUpload BuildTextureUpload(FTexture* texture, bool indexed)
 	{
 		TextureUpload upload = {};
 		upload.indexed = indexed;
 		upload.key = MakeTextureKey(texture, indexed);
 
-		if (texture == nullptr || texture->GetTexture() == nullptr)
+		if (texture == nullptr)
 		{
 			return upload;
 		}
 
-		auto* baseTexture = texture->GetTexture();
 		if (indexed)
 		{
-			FTextureBuffer texBuffer = baseTexture->CreateTexBuffer(0, CTF_Indexed);
+			FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_Indexed);
 			if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
 			{
 				upload.width = (uint32_t)texBuffer.mWidth;
@@ -194,7 +198,7 @@ namespace
 		}
 		else
 		{
-			FTextureBuffer texBuffer = baseTexture->CreateTexBuffer(0, CTF_ProcessData);
+			FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_ProcessData);
 			if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
 			{
 				upload.width = (uint32_t)texBuffer.mWidth;
@@ -211,6 +215,41 @@ namespace
 		}
 
 		return upload;
+	}
+
+	TextureUpload BuildTextureUpload(FGameTexture* texture, bool indexed)
+	{
+		return texture != nullptr ? BuildTextureUpload(texture->GetTexture(), indexed) : TextureUpload{};
+	}
+
+	uint32_t EnsureTextureUploadIndex(FGameTexture* texture, bool indexed, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
+	{
+		const uint64_t textureKey = MakeTextureKey(texture, indexed);
+		auto it = textureLookup.find(textureKey);
+		if (it == textureLookup.end())
+		{
+			const uint32_t textureIndex = (uint32_t)outMaterials.textures.size();
+			textureLookup.emplace(textureKey, textureIndex);
+			outMaterials.textures.push_back(BuildTextureUpload(texture, indexed));
+			return textureIndex;
+		}
+
+		return it->second;
+	}
+
+	uint32_t EnsureTextureUploadIndex(FTexture* texture, bool indexed, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
+	{
+		const uint64_t textureKey = MakeTextureKey(texture, indexed);
+		auto it = textureLookup.find(textureKey);
+		if (it == textureLookup.end())
+		{
+			const uint32_t textureIndex = (uint32_t)outMaterials.textures.size();
+			textureLookup.emplace(textureKey, textureIndex);
+			outMaterials.textures.push_back(BuildTextureUpload(texture, indexed));
+			return textureIndex;
+		}
+
+		return it->second;
 	}
 
 	uint64_t ComputeMaterialKey(const MaterialRef& materialRef, const MaterialLightingMetadata& metadata)
@@ -244,11 +283,13 @@ namespace
 		return intensity;
 	}
 
-	MaterialLightingMetadata BuildMaterialLightingMetadata(const SurfaceRef& surface, const MaterialData& material, uint64_t textureContentKey)
+	MaterialLightingMetadata BuildMaterialLightingMetadata(const SurfaceRef& surface, const MaterialData& material, uint64_t textureContentKey, uint32_t glowmapTextureIndex)
 	{
 		MaterialLightingMetadata metadata = {};
 		metadata.texture = surface.material.texture;
 		metadata.textureContentKey = textureContentKey;
+		metadata.textureIndex = material.textureIndex;
+		metadata.glowmapTextureIndex = glowmapTextureIndex;
 		metadata.paletteIndex = material.paletteIndex;
 		metadata.materialFlags = material.flags;
 		metadata.sectorIndex = surface.provenance.sectorIndex;
@@ -305,7 +346,8 @@ namespace
 			(metadata.lightingFlags & MaterialLightingFlag_TextureFullbright) != 0;
 		if (sampledEmissive)
 		{
-			metadata.emissiveMode = MaterialEmissiveMode_UseAlbedo;
+			metadata.emissiveMode = MaterialEmissiveMode_UseBaseTexture;
+			metadata.emissiveTextureIndex = material.textureIndex;
 			metadata.emissiveIntensity = 1.0f;
 			metadata.emissiveMaskScale = 1.0f;
 			metadata.emissiveColor[0] = 1.0f;
@@ -317,7 +359,8 @@ namespace
 			const float glowIntensity = ComputeGlowEmissiveIntensity(metadata);
 			if (glowIntensity > 0.0f)
 			{
-				metadata.emissiveMode = MaterialEmissiveMode_UseConstantColor;
+				metadata.emissiveMode = glowmapTextureIndex != UINT32_MAX ? MaterialEmissiveMode_UseGlowmapTexture : MaterialEmissiveMode_UseConstantColor;
+				metadata.emissiveTextureIndex = glowmapTextureIndex;
 				metadata.emissiveIntensity = glowIntensity;
 				metadata.emissiveMaskScale = 1.0f;
 				metadata.emissiveColor[0] = metadata.glowColor[0] > 0.0f ? metadata.glowColor[0] : metadata.averageColor[0];
@@ -343,23 +386,17 @@ namespace
 		material.materialClass = ComputeMaterialClass(materialRef);
 
 		const bool indexed = (materialRef.flags & MaterialFlag_Indexed) != 0;
-		const uint64_t textureKey = MakeTextureKey(materialRef.texture, indexed);
-		auto it = textureLookup.find(textureKey);
-		if (it == textureLookup.end())
-		{
-			const uint32_t textureIndex = (uint32_t)outMaterials.textures.size();
-			textureLookup.emplace(textureKey, textureIndex);
-			outMaterials.textures.push_back(BuildTextureUpload(materialRef.texture, indexed));
-			material.textureIndex = textureIndex;
-		}
-		else
-		{
-			material.textureIndex = it->second;
-		}
+		material.textureIndex = EnsureTextureUploadIndex(materialRef.texture, indexed, textureLookup, outMaterials);
 
 		material.sectorIndex = surface.provenance.sectorIndex >= 0 ? (uint32_t)surface.provenance.sectorIndex : UINT32_MAX;
 		outMaterials.materials.push_back(material);
-		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(surface, material, outMaterials.textures[material.textureIndex].key);
+		uint32_t glowmapTextureIndex = UINT32_MAX;
+		if (materialRef.texture != nullptr && materialRef.texture->GetGlowmap() != nullptr)
+		{
+			glowmapTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetGlowmap(), false, textureLookup, outMaterials);
+		}
+
+		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(surface, material, outMaterials.textures[material.textureIndex].key, glowmapTextureIndex);
 		outMaterials.lightMetadata.push_back(metadata);
 	}
 

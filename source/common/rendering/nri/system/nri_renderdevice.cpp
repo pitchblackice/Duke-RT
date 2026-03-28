@@ -1052,7 +1052,7 @@ CCMD(nri_ptemissiveheuristic_addtile)
 {
 	if (argv.argc() < 2)
 	{
-		Printf("nri_ptemissiveheuristic_addtile <tile> [intensity_scale]: adds a PT emissive tile allow-list rule.\n");
+		Printf("nri_ptemissiveheuristic_addtile <tile> [intensity_scale]: adds a PT emissive tile rule using base-texture emission.\n");
 		return;
 	}
 
@@ -1061,12 +1061,71 @@ CCMD(nri_ptemissiveheuristic_addtile)
 		uint32_t ruleId = 0;
 		frameBuffer->AddPathTracingTextureEmissiveHeuristic(
 			(uint32_t)atoi(argv[1]),
+			nri_scene::MaterialEmissiveMode_UseBaseTexture,
 			argv.argc() > 2 ? (float)atof(argv[2]) : 1.0f,
+			nullptr,
+			false,
 			ruleId);
 	}
 	else
 	{
 		Printf("nri_ptemissiveheuristic_addtile is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptemissiveheuristic_addtilemode)
+{
+	if (argv.argc() < 3)
+	{
+		Printf("nri_ptemissiveheuristic_addtilemode <tile> <base|glowmap|constant> [intensity_scale] [r g b]: adds a PT emissive tile rule with an explicit source mode.\n");
+		return;
+	}
+
+	uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
+	const char* modeName = argv[2];
+	if (!stricmp(modeName, "base") || !stricmp(modeName, "albedo") || !stricmp(modeName, "texture"))
+	{
+		emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
+	}
+	else if (!stricmp(modeName, "glowmap") || !stricmp(modeName, "glow"))
+	{
+		emissiveMode = nri_scene::MaterialEmissiveMode_UseGlowmapTexture;
+	}
+	else if (!stricmp(modeName, "constant") || !stricmp(modeName, "const"))
+	{
+		emissiveMode = nri_scene::MaterialEmissiveMode_UseConstantColor;
+	}
+	else
+	{
+		Printf("Unknown emissive mode '%s'. Expected one of: base, glowmap, constant.\n", modeName);
+		return;
+	}
+
+	const float intensityScale = argv.argc() > 3 ? (float)atof(argv[3]) : 1.0f;
+	bool hasExplicitColor = false;
+	float emissiveColor[3] = { 1.0f, 1.0f, 1.0f };
+	if (emissiveMode == nri_scene::MaterialEmissiveMode_UseConstantColor && argv.argc() >= 7)
+	{
+		emissiveColor[0] = (float)atof(argv[4]);
+		emissiveColor[1] = (float)atof(argv[5]);
+		emissiveColor[2] = (float)atof(argv[6]);
+		hasExplicitColor = true;
+	}
+
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		uint32_t ruleId = 0;
+		frameBuffer->AddPathTracingTextureEmissiveHeuristic(
+			(uint32_t)atoi(argv[1]),
+			emissiveMode,
+			intensityScale,
+			hasExplicitColor ? emissiveColor : nullptr,
+			hasExplicitColor,
+			ruleId);
+	}
+	else
+	{
+		Printf("nri_ptemissiveheuristic_addtilemode is only available while using the NRI renderer.\n");
 	}
 }
 
@@ -2311,7 +2370,7 @@ void NRIRenderDevice::PrintPathTracingLightClusters() const
 	mRenderer->PrintRuntimeLightClusterStatus();
 }
 
-bool NRIRenderDevice::AddPathTracingTextureEmissiveHeuristic(uint32_t textureId, float intensityScale, uint32_t& outRuleId)
+bool NRIRenderDevice::AddPathTracingTextureEmissiveHeuristic(uint32_t textureId, uint32_t emissiveMode, float intensityScale, const float* emissiveColor, bool hasExplicitColor, uint32_t& outRuleId)
 {
 	if (mRenderer == nullptr)
 	{
@@ -2319,13 +2378,18 @@ bool NRIRenderDevice::AddPathTracingTextureEmissiveHeuristic(uint32_t textureId,
 		return false;
 	}
 
-	if (!mRenderer->AddTextureEmissiveHeuristic(textureId, intensityScale, outRuleId))
+	if (!mRenderer->AddTextureEmissiveHeuristic(textureId, emissiveMode, intensityScale, emissiveColor, hasExplicitColor, outRuleId))
 	{
-		Printf("NRI PT emissive heuristic add failed: tile=%u intensity_scale=%.3f\n", textureId, intensityScale);
+		Printf("NRI PT emissive heuristic add failed: tile=%u mode=%u intensity_scale=%.3f\n", textureId, emissiveMode, intensityScale);
 		return false;
 	}
 
-	Printf("NRI PT emissive heuristic %u added: tile=%u intensity_scale=%.3f\n", outRuleId, textureId, intensityScale);
+	Printf("NRI PT emissive heuristic %u added: tile=%u mode=%u intensity_scale=%.3f explicit_color=%s\n",
+		outRuleId,
+		textureId,
+		emissiveMode,
+		intensityScale,
+		hasExplicitColor ? "yes" : "no");
 	return true;
 }
 

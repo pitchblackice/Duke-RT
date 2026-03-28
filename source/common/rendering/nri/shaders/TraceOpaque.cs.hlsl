@@ -211,15 +211,11 @@ bool IsMaterialEmissive(MaterialData material)
 	return material.emissiveMode != 0u && material.emissiveIntensity > 0.0;
 }
 
-float3 EvaluateMaterialEmission(MaterialData material, float3 albedo)
+float3 EvaluateMaterialEmission(uint materialIndex, uint dataSource, MaterialData material, float2 uv)
 {
-	if (material.emissiveMode == 1u)
+	if (material.emissiveMode != 0u)
 	{
-		return albedo * material.emissiveIntensity * max(material.emissiveMaskScale, 1.0);
-	}
-	if (material.emissiveMode == 2u)
-	{
-		return material.emissiveColor * material.emissiveIntensity;
+		return SampleMaterialEmissionSource(materialIndex, dataSource, uv) * material.emissiveIntensity;
 	}
 	return 0.0;
 }
@@ -401,10 +397,10 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 			break;
 		}
 
-		const float4 bounceAlbedo = SampleSurfaceColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
+		const float4 bounceAlbedo = SampleMaterialBaseColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
 		if (IsMaterialEmissive(bounceMaterial))
 		{
-			indirectRadiance += throughput * EvaluateMaterialEmission(bounceMaterial, bounceAlbedo.rgb);
+			indirectRadiance += throughput * EvaluateMaterialEmission(bounceHit.materialIndex, bounceHit.dataSource, bounceMaterial, bounceHit.uv);
 			break;
 		}
 
@@ -494,10 +490,10 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 
 		const float bounceRoughness = GetSurfaceRoughness(bounceMaterial);
 		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial);
-		const float4 bounceAlbedo = SampleSurfaceColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
+		const float4 bounceAlbedo = SampleMaterialBaseColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
 		if (IsMaterialEmissive(bounceMaterial))
 		{
-			indirectRadiance += throughput * EvaluateMaterialEmission(bounceMaterial, bounceAlbedo.rgb);
+			indirectRadiance += throughput * EvaluateMaterialEmission(bounceHit.materialIndex, bounceHit.dataSource, bounceMaterial, bounceHit.uv);
 			break;
 		}
 
@@ -648,7 +644,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else
 		{
-			albedo = SampleSurfaceColor(hit.materialIndex, hit.dataSource, hit.uv);
+			albedo = SampleMaterialBaseColor(hit.materialIndex, hit.dataSource, hit.uv);
 			const MaterialData material = GetMaterialData(hit.materialIndex, hit.dataSource);
 			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
 			const bool emissiveMaterial = IsMaterialEmissive(material);
@@ -664,7 +660,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			{
 				diffuse = 0.0;
 				specular = 0.0;
-				directEmission = EvaluateMaterialEmission(material, albedo.rgb);
+				directEmission = EvaluateMaterialEmission(hit.materialIndex, hit.dataSource, material, hit.uv);
 				if (!emissiveMaterial)
 				{
 					directEmission = albedo.rgb;

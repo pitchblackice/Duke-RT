@@ -146,18 +146,16 @@ float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward,
 	return uv - jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 }
 
-float4 SampleSurfaceColor(uint materialIndex, uint dataSource, float2 uv)
+float4 SampleMaterialColor(MaterialData material, uint textureIndex, float2 uv, bool indexed, bool applyLightLevel)
 {
-	MaterialData material = GetMaterialData(materialIndex, dataSource);
-	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
 	float4 color = 0.0;
 	if (indexed)
 	{
-		color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointWrap, uv, 0.0);
+		color = gSceneTextures[min(textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointWrap, uv, 0.0);
 	}
 	else
 	{
-		color = gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
+		color = gSceneTextures[min(textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
 	}
 
 	if (indexed)
@@ -167,26 +165,66 @@ float4 SampleSurfaceColor(uint materialIndex, uint dataSource, float2 uv)
 		color = gPaletteLookup.SampleLevel(gPointClamp, paletteUv, 0.0);
 	}
 
-	color.rgb *= material.lightLevel;
+	if (applyLightLevel)
+	{
+		color.rgb *= material.lightLevel;
+	}
 	return color;
+}
+
+float4 SampleMaterialBaseColor(uint materialIndex, uint dataSource, float2 uv)
+{
+	MaterialData material = GetMaterialData(materialIndex, dataSource);
+	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
+	return SampleMaterialColor(material, material.textureIndex, uv, indexed, true);
+}
+
+float4 SampleMaterialBaseColorRaw(uint materialIndex, uint dataSource, float2 uv)
+{
+	MaterialData material = GetMaterialData(materialIndex, dataSource);
+	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
+	return SampleMaterialColor(material, material.textureIndex, uv, indexed, false);
+}
+
+float3 SampleMaterialEmissionSource(uint materialIndex, uint dataSource, float2 uv)
+{
+	const MaterialData material = GetMaterialData(materialIndex, dataSource);
+	const float maskScale = max(material.emissiveMaskScale, 1.0);
+	if (material.emissiveMode == 1u)
+	{
+		return SampleMaterialColor(material, material.textureIndex, uv, (material.flags & MATERIAL_FLAG_INDEXED) != 0, false).rgb * maskScale;
+	}
+	if (material.emissiveMode == 2u)
+	{
+		return material.emissiveColor * maskScale;
+	}
+	if (material.emissiveMode == 3u)
+	{
+		if (material.emissiveTextureIndex == 0xffffffffu)
+		{
+			return material.emissiveColor * maskScale;
+		}
+
+		return SampleMaterialColor(material, material.emissiveTextureIndex, uv, false, false).rgb * maskScale;
+	}
+
+	return 0.0;
+}
+
+float4 SampleSurfaceColor(uint materialIndex, uint dataSource, float2 uv)
+{
+	return SampleMaterialBaseColor(materialIndex, dataSource, uv);
 }
 
 float4 SampleSurfaceColorRaw(uint materialIndex, uint dataSource, float2 uv)
 {
-	MaterialData material = GetMaterialData(materialIndex, dataSource);
-	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
-	if (indexed)
-	{
-		return gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointWrap, uv, 0.0);
-	}
-
-	return gSceneTextures[min(material.textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
+	return SampleMaterialBaseColorRaw(materialIndex, dataSource, uv);
 }
 
 bool IsTransparentSurfaceSample(uint materialIndex, uint dataSource, float2 uv)
 {
 	const MaterialData material = GetMaterialData(materialIndex, dataSource);
-	const float4 rawSample = SampleSurfaceColorRaw(materialIndex, dataSource, uv);
+	const float4 rawSample = SampleMaterialBaseColorRaw(materialIndex, dataSource, uv);
 	if ((material.flags & MATERIAL_FLAG_INDEXED) != 0)
 	{
 		// In the paletted path, color index 0 is reserved as transparent.

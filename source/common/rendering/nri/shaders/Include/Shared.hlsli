@@ -96,7 +96,7 @@ struct MaterialData
 	float emissiveMaskScale;
 	uint emissiveMode;
 	uint sectorIndex;
-	float sectorHemisphereBias;
+	uint emissiveTextureIndex;
 	float emissiveReserved;
 };
 
