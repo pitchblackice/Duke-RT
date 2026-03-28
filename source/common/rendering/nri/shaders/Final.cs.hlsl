@@ -685,8 +685,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	if (gTraceConstants.DebugMode == 5)
 	{
-		const float2 motion = gMotionInput.Load(int3(samplePos, 0)).xy / max(float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight), 1.0);
-		composed = float4(motion * 0.5 + 0.5, 0.5, 1.0);
+		const float4 motionSample = gMotionInput.Load(int3(samplePos, 0));
+		if (motionSample.w <= 0.0)
+		{
+			composed = float4(1.0, 0.0, 1.0, 1.0);
+		}
+		else
+		{
+			const float2 motionPixels = motionSample.xy;
+			const float2 mapped = clamp(motionPixels / 32.0, -1.0, 1.0);
+			const float magnitude = saturate(length(motionPixels) / 32.0);
+			composed = float4(mapped * 0.5 + 0.5, magnitude, 1.0);
+		}
 	}
 	else if (gTraceConstants.DebugMode == 6)
 	{
