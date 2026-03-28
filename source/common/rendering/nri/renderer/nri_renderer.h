@@ -276,6 +276,17 @@ private:
 		uint32_t asBuildCount = 0;
 	};
 
+	struct PersistentDynamicEmissiveCache
+	{
+		bool valid = false;
+		uint32_t surfaceCount = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialCount = 0;
+		nri_scene::SceneView sceneView;
+		nri_scene::GeometryData geometry;
+		nri_scene::MaterialBridgeData materialBridge;
+	};
+
 	struct RuntimeMapMutationCache
 	{
 		struct ChunkReplacement
@@ -477,6 +488,8 @@ private:
 		const nri_scene::MaterialBridgeData* capturedMaterials,
 		const nri_scene::SceneView* dynamicSceneView,
 		const nri_scene::MaterialBridgeData* dynamicMaterials);
+	void ResetPersistentDynamicEmissiveCache();
+	bool RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void QueueStaticMapSceneLightingInvalidation();
 	void InvalidateStaticMapSceneForMaterialLighting();
@@ -598,6 +611,7 @@ private:
 	StaticMapSceneCache mStaticMapScene;
 	RuntimeMapMutationCache mRuntimeMapMutations;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
+	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	RuntimeMapMutationFrameState mRuntimeMapLastFrame = {};
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};

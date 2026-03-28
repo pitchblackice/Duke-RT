@@ -785,6 +785,17 @@ void SceneLightSystem::ClearTextureEmissiveHeuristics()
 	mEmissiveSurfaces.materialsDirty = true;
 }
 
+bool SceneLightSystem::MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const
+{
+	uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
+	uint32_t sourceRuleId = 0;
+	float emissiveColor[3] = {};
+	float emissiveIntensity = 0.0f;
+	uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
+	uint32_t emissiveTextureIndex = UINT32_MAX;
+	return EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex);
+}
+
 bool SceneLightSystem::ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const
 {
 	uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
