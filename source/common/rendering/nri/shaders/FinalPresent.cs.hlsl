@@ -52,7 +52,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	uint2 targetSize;
 	gOutputTexture.GetDimensions(targetSize.x, targetSize.y);
 	const uint packedSceneOrigin = gTraceConstants.ReservedTrace0;
-	const uint2 sceneOrigin = uint2(packedSceneOrigin & 0xffffu, packedSceneOrigin >> 16);
+	const int2 sceneOrigin = int2((int)(packedSceneOrigin << 16) >> 16, (int)packedSceneOrigin >> 16);
 	if (dispatchThreadId.x >= targetSize.x || dispatchThreadId.y >= targetSize.y)
 	{
 		return;
@@ -60,15 +60,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const uint2 targetPixelPos = dispatchThreadId.xy;
 	const uint2 outputSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
-	if (any(targetPixelPos < sceneOrigin) || any(targetPixelPos >= sceneOrigin + outputSize))
+	const int2 pixelPos = int2(targetPixelPos) - sceneOrigin;
+	if (pixelPos.x < 0 || pixelPos.y < 0 || pixelPos.x >= (int)outputSize.x || pixelPos.y >= (int)outputSize.y)
 	{
 		gOutputTexture[targetPixelPos] = 0.0;
 		return;
 	}
 
-	const uint2 pixelPos = targetPixelPos - sceneOrigin;
 	const uint2 inputSize = uint2(max(gTraceConstants.RenderWidth, 1u), max(gTraceConstants.RenderHeight, 1u));
-	const uint2 samplePos = min((pixelPos * inputSize) / outputSize, inputSize - 1u);
+	const uint2 samplePos = min((uint2(pixelPos) * inputSize) / outputSize, inputSize - 1u);
 	const float3 color = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
 	gOutputTexture[targetPixelPos] = color;
 }

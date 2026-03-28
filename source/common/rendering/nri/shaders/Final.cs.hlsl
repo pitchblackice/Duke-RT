@@ -608,7 +608,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	uint2 targetSize;
 	gFinalOutput.GetDimensions(targetSize.x, targetSize.y);
 	const uint packedSceneOrigin = gTraceConstants.ReservedTrace0;
-	const uint2 sceneOrigin = uint2(packedSceneOrigin & 0xffffu, packedSceneOrigin >> 16);
+	const int2 sceneOrigin = int2((int)(packedSceneOrigin << 16) >> 16, (int)packedSceneOrigin >> 16);
 	if (dispatchThreadId.x >= targetSize.x || dispatchThreadId.y >= targetSize.y)
 	{
 		return;
@@ -616,15 +616,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const uint2 targetPixelPos = dispatchThreadId.xy;
 	const uint2 sceneSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
-	if (any(targetPixelPos < sceneOrigin) || any(targetPixelPos >= sceneOrigin + sceneSize))
+	const int2 pixelPos = int2(targetPixelPos) - sceneOrigin;
+	if (pixelPos.x < 0 || pixelPos.y < 0 || pixelPos.x >= (int)sceneSize.x || pixelPos.y >= (int)sceneSize.y)
 	{
 		gFinalOutput[targetPixelPos] = 0.0;
 		return;
 	}
 
-	const uint2 pixelPos = targetPixelPos - sceneOrigin;
-	const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
-	const uint2 samplePos = ResolvePresentSamplePos(pixelPos);
+	const uint2 pixelPosU = uint2(pixelPos);
+	const float2 uv = ((float2)pixelPosU + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
+	const uint2 samplePos = ResolvePresentSamplePos(pixelPosU);
 	float4 composed = 0.0;
 
 	if ((gTraceConstants.Flags & 0x4u) != 0)
@@ -648,27 +649,27 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else if (gTraceConstants.BootstrapMode == 5)
 		{
-			color = BootstrapRawVertexScatter(pixelPos);
+			color = BootstrapRawVertexScatter(pixelPosU);
 		}
 		else if (gTraceConstants.BootstrapMode == 6)
 		{
-			color = BootstrapRawPrimitiveScatter(pixelPos);
+			color = BootstrapRawPrimitiveScatter(pixelPosU);
 		}
 		else if (gTraceConstants.BootstrapMode == 7)
 		{
-			color = BootstrapCapturedPoints(pixelPos);
+			color = BootstrapCapturedPoints(pixelPosU);
 		}
 		else if (gTraceConstants.BootstrapMode == 8)
 		{
-			color = BootstrapPrimitiveCentroids(pixelPos);
+			color = BootstrapPrimitiveCentroids(pixelPosU);
 		}
 		else if (gTraceConstants.BootstrapMode == 9)
 		{
-			color = BootstrapWireframe(pixelPos);
+			color = BootstrapWireframe(pixelPosU);
 		}
 		else if (gTraceConstants.BootstrapMode == 10)
 		{
-			color = BootstrapFirstTriangle(pixelPos);
+			color = BootstrapFirstTriangle(pixelPosU);
 		}
 		else if (gTraceConstants.BootstrapMode == 11)
 		{
@@ -721,11 +722,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 13)
 	{
-		composed = float4(saturate(gHistoryInput.Load(int3(pixelPos, 0)).rgb), 1.0);
+		composed = float4(saturate(gHistoryInput.Load(int3(pixelPosU, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 14)
 	{
-		composed = float4(saturate(gUpscaledInput.Load(int3(pixelPos, 0)).rgb), 1.0);
+		composed = float4(saturate(gUpscaledInput.Load(int3(pixelPosU, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 15)
 	{
@@ -801,7 +802,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if ((gTraceConstants.Flags & 0x2u) != 0)
 	{
-		composed = gUpscaledInput.Load(int3(pixelPos, 0));
+		composed = gUpscaledInput.Load(int3(pixelPosU, 0));
 	}
 	else
 	{

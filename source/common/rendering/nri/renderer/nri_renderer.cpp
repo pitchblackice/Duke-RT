@@ -5041,16 +5041,10 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		return false;
 	}
 
-	const uint32_t sceneLeft = std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.left, 0), targetWidth - 1u);
-	// mSceneViewport.top is prepared for bottom-left raster viewport APIs; PT present/composite passes sample in top-left texture space.
-	const uint32_t sceneBottom = std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.top, 0), targetHeight - 1u);
-	outputWidth = std::min(outputWidth, targetWidth - sceneLeft);
-	outputHeight = std::min(outputHeight, targetHeight - sceneBottom);
-	if (outputWidth == 0 || outputHeight == 0)
-	{
-		return false;
-	}
-	const uint32_t sceneTop = targetHeight - sceneBottom - outputHeight;
+	const int32_t sceneLeft = mFrameBuffer->mSceneViewport.left;
+	// Preserve the oversized hardware viewport and crop it during present instead of shrinking it to the visible target.
+	const int32_t sceneBottom = mFrameBuffer->mSceneViewport.top;
+	const int32_t sceneTop = (int32_t)targetHeight - sceneBottom - (int32_t)outputHeight;
 
 	const NRIUpscalerKind upscalerKind = ResolveUpscalerKind(false);
 	float renderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
@@ -5177,7 +5171,7 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
-	constants.ReservedTrace0 = (mSceneLeft & 0xffffu) | ((mSceneTop & 0xffffu) << 16);
+	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -7523,7 +7517,7 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
-	constants.ReservedTrace0 = (mSceneLeft & 0xffffu) | ((mSceneTop & 0xffffu) << 16);
+	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
@@ -7582,7 +7576,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
-	constants.ReservedTrace0 = (mSceneLeft & 0xffffu) | ((mSceneTop & 0xffffu) << 16);
+	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
@@ -7864,7 +7858,7 @@ bool NRIRenderer::DispatchFinal()
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
-	constants.ReservedTrace0 = (mSceneLeft & 0xffffu) | ((mSceneTop & 0xffffu) << 16);
+	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -8035,11 +8029,11 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	{
 		const uint32_t targetWidth = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->width : 0u;
 		const uint32_t targetHeight = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->height : 0u;
-		const uint32_t sceneLeft = targetWidth > 0 ? std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.left, 0), targetWidth - 1u) : 0u;
-		const uint32_t sceneBottom = targetHeight > 0 ? std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.top, 0), targetHeight - 1u) : 0u;
-		const uint32_t sceneWidth = targetWidth > 0 ? std::min<uint32_t>(std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.width, 1u), targetWidth - sceneLeft) : 0u;
-		const uint32_t sceneHeight = targetHeight > 0 ? std::min<uint32_t>(std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.height, 1u), targetHeight - sceneBottom) : 0u;
-		const uint32_t sceneTop = targetHeight > 0 ? (targetHeight - sceneBottom - sceneHeight) : 0u;
+		const int32_t sceneLeft = mFrameBuffer->mSceneViewport.left;
+		const int32_t sceneBottom = mFrameBuffer->mSceneViewport.top;
+		const int32_t sceneWidth = mFrameBuffer->mSceneViewport.width;
+		const int32_t sceneHeight = mFrameBuffer->mSceneViewport.height;
+		const int32_t sceneTop = (int32_t)targetHeight - sceneBottom - sceneHeight;
 		const auto& uniformCameraPos = di.VPUniforms.mCameraPos;
 		const FVector3 hwForward(di.Viewpoint.HWAngles);
 		Printf("NRI PT camera: frame=%u hw_pitch=%.3f hw_yaw=%.3f hw_roll=%.3f scene_bl=(%d,%d %dx%d) scene_tl=(%u,%u %ux%u) target=%ux%u uniform_pos=(%.3f,%.3f,%.3f) inverse_pos=(%.3f,%.3f,%.3f) hw_forward=(%.3f,%.3f,%.3f) basis_fwd=(%.3f,%.3f,%.3f) basis_right=(%.3f,%.3f,%.3f) basis_up=(%.3f,%.3f,%.3f) tan=(%.6f,%.6f) proj=(%.6f,%.6f,%.6f,%.6f)\n",

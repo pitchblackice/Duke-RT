@@ -629,8 +629,8 @@ private:
 	uint32_t mOutputHeight = 0;
 	uint32_t mTargetWidth = 0;
 	uint32_t mTargetHeight = 0;
-	uint32_t mSceneLeft = 0;
-	uint32_t mSceneTop = 0;
+	int32_t mSceneLeft = 0;
+	int32_t mSceneTop = 0;
 	nri::Format mOutputFormat = nri::Format::UNKNOWN;
 	float mCurrentCameraPos[3] = {};
 	float mCurrentCameraForward[3] = {};
