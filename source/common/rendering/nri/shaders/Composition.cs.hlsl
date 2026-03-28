@@ -12,7 +12,7 @@ float3 SanitizeColor(float3 value)
 
 bool UseRelaxDenoiser()
 {
-	return gTraceConstants.ReservedTrace1 == 1u;
+	return (gTraceConstants.ReservedTrace1 & 0xffu) == 1u;
 }
 
 bool UseSplitShadowDenoiser()

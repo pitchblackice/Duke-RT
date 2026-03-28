@@ -65,6 +65,7 @@ CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminsurface, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptemissivesamples, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorambientscale, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorhemiscale, 0.12f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -95,6 +96,10 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_DIRECT = 28;
 	constexpr uint32_t NRI_PTDEBUG_SECTOR_AMBIENT = 29;
+	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_SAMPLE_UV = 30;
+	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_SAMPLE_RADIANCE = 31;
+	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_SAMPLE_PRIMITIVE = 32;
+	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_SAMPLE_VISIBILITY = 33;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -541,6 +546,11 @@ namespace
 	static uint32_t PackTraceBounceCounts(uint32_t lightBounceCount, uint32_t mirrorBounceCount)
 	{
 		return (lightBounceCount & 0xffffu) | ((mirrorBounceCount & 0xffffu) << 16);
+	}
+
+	static uint32_t PackTraceAux1(uint32_t denoiserMode, uint32_t emissiveSampleCount)
+	{
+		return (denoiserMode & 0xffu) | ((emissiveSampleCount & 0xffu) << 8u);
 	}
 
 	static nri_scene::SceneDebugStats MergeSceneStats(const nri_scene::SceneDebugStats& a, const nri_scene::SceneDebugStats& b)
@@ -2460,7 +2470,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 	for (uint32_t i = 0; i < printCount; ++i)
 	{
 		const auto& record = *candidates[i].record;
-		Printf("NRI PT emissive %u: stable=0x%016llx source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		Printf("NRI PT emissive %u: stable=0x%016llx source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
 			i,
 			(unsigned long long)record.stableKey,
 			GetSceneDataSourceName(record.dataSource),
@@ -2474,6 +2484,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 			record.emissiveTextureIndex != UINT32_MAX ? record.emissiveTextureIndex : 0u,
 			record.primitiveArea,
 			record.powerEstimate,
+			record.selectionPdf,
 			record.center[0],
 			record.center[1],
 			record.center[2],
@@ -2680,7 +2691,7 @@ void NRIRenderer::PrintStatus() const
 		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
-		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=live_raw_penumbra 22=live_raw_shadow 23=temporal_sigma_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient");
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=live_raw_penumbra 22=live_raw_shadow 23=temporal_sigma_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient 30=emissive_uv 31=emissive_radiance 32=emissive_primitive 33=emissive_visibility");
 	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s shadow_split=%s\n",
 		nrdMaxFrames,
 		nrdFastFrames,
@@ -2743,14 +2754,19 @@ void NRIRenderer::PrintStatus() const
 		emissiveBaseCount,
 		emissiveGlowmapCount,
 		emissiveConstantCount);
-	Printf("NRI PT emissive sampling: primitives=%u total_power=%.3f dominant_tile=%u dominant_primitive=%u dominant_source=%s dominant_power=%.3f dominant_flags=0x%x\n",
+	Printf("NRI PT emissive sampling: primitives=%u total_power=%.3f samples=%u dominant_tile=%u dominant_primitive=%u dominant_source=%s dominant_power=%.3f dominant_flags=0x%x debug_modes=%u/%u/%u/%u\n",
 		mBoundEmissivePrimitiveCount,
 		mBoundEmissiveTotalPower,
+		std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u),
 		mBoundEmissiveDominantTile,
 		mBoundEmissiveDominantPrimitive,
 		GetSceneDataSourceName(mBoundEmissiveDominantDataSource),
 		mBoundEmissiveDominantPower,
-		mBoundEmissiveDominantFlags);
+		mBoundEmissiveDominantFlags,
+		NRI_PTDEBUG_EMISSIVE_SAMPLE_UV,
+		NRI_PTDEBUG_EMISSIVE_SAMPLE_RADIANCE,
+		NRI_PTDEBUG_EMISSIVE_SAMPLE_PRIMITIVE,
+		NRI_PTDEBUG_EMISSIVE_SAMPLE_VISIBILITY);
 	Printf("NRI PT emissive query: tlas=%s fast_shadow=%s instances=%u static=%u dynamic=%u builds=%u\n",
 		nri_ptemissivetlas ? "on" : "off",
 		nri_ptemissivefastshadow ? "on" : "off",
@@ -4231,6 +4247,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.debug.actorIndex = surface.actorIndex;
 			candidate.debug.primitiveArea = primitiveArea;
 			candidate.debug.powerEstimate = candidate.gpu.powerEstimate;
+			candidate.debug.selectionPdf = 0.0f;
 			candidate.debug.emissiveIntensity = surface.emissiveIntensity;
 			Copy3(surface.emissiveColor, candidate.debug.emissiveColor);
 			ComputePrimitiveCenter(*geometry, localPrimitiveIndex, candidate.debug.center);
@@ -4328,6 +4345,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 		}
 
 		outPrimitives[i].selectionPdf = pdf;
+		outDebugRecords[i].selectionPdf = pdf;
 		runningCdf += pdf;
 		outCdf.push_back(i + 1 == outPrimitives.size() ? 1.0f : std::min(runningCdf, 1.0f));
 	}
@@ -7104,7 +7122,9 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
 	constants.PortalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
 	constants.ReservedTrace0 = (mBoundRuntimeLightTileCountX & 0xffffu) | ((mBoundRuntimeLightTileCountY & 0xffffu) << 16u);
-	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
+	constants.ReservedTrace1 = PackTraceAux1(
+		(uint32_t)GetSelectedNrdDenoiserMode(),
+		std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u));
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);

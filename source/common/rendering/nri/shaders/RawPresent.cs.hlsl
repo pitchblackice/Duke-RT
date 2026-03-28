@@ -58,7 +58,7 @@ float3 ToneMapDebugRadiance(float3 value)
 
 bool UseRelaxDenoiser()
 {
-	return gTraceConstants.ReservedTrace1 == 1u;
+	return (gTraceConstants.ReservedTrace1 & 0xffu) == 1u;
 }
 
 float3 UnpackDebugRadiance(float4 packed)
