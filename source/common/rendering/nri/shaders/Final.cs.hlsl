@@ -693,9 +693,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else
 		{
 			const float2 motionPixels = motionSample.xy;
-			const float2 mapped = clamp(motionPixels / 32.0, -1.0, 1.0);
-			const float magnitude = saturate(length(motionPixels) / 32.0);
-			composed = float4(mapped * 0.5 + 0.5, magnitude, 1.0);
+			const float2 signedMagnitude = sign(motionPixels) * sqrt(saturate(abs(motionPixels) / 8.0));
+			const float magnitude = saturate(log2(1.0 + length(motionPixels)) / 3.0);
+			composed = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
 		}
 
 		// A live pulse in the corner makes it obvious whether this debug view is updating every frame.
