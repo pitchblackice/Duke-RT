@@ -697,6 +697,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float magnitude = saturate(length(motionPixels) / 32.0);
 			composed = float4(mapped * 0.5 + 0.5, magnitude, 1.0);
 		}
+
+		// A live pulse in the corner makes it obvious whether this debug view is updating every frame.
+		if (pixelPosU.x < 16u && pixelPosU.y < 16u)
+		{
+			const float pulse = ((gTraceConstants.FrameIndex & 1u) != 0u) ? 1.0 : 0.2;
+			composed = float4(pulse, 1.0 - pulse, 0.0, 1.0);
+		}
 	}
 	else if (gTraceConstants.DebugMode == 6)
 	{
