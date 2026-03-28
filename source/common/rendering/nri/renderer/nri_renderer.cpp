@@ -63,6 +63,8 @@ CVAR(Bool, nri_ptemissiveheuristics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissiveautoonly, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminsurface, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptemissivetlas, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorambientscale, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorhemiscale, 0.12f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -93,6 +95,7 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_DIRECT = 28;
 	constexpr uint32_t NRI_PTDEBUG_SECTOR_AMBIENT = 29;
+	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TLAS = 32;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -104,6 +107,8 @@ namespace
 	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
 	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
+	constexpr uint32_t NRI_FLAG_FAST_EMISSIVE_SHADOW = 0x100u;
+	constexpr uint32_t NRI_FLAG_USE_EMISSIVE_TLAS = 0x200u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
@@ -2067,6 +2072,15 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 		return false;
 	}
+	if (!BuildEmissiveTopLevelAccelerationStructure())
+	{
+		LogFallback("PT emissive TLAS update failed.");
+		if (preserveHistory)
+		{
+			restoreHistory();
+		}
+		return false;
+	}
 
 	TraceRuntimeLinkEvents(di);
 	LogBridgeStats(activeStats);
@@ -2739,6 +2753,14 @@ void NRIRenderer::PrintStatus() const
 		GetSceneDataSourceName(mBoundEmissiveDominantDataSource),
 		mBoundEmissiveDominantPower,
 		mBoundEmissiveDominantFlags);
+	Printf("NRI PT emissive query: tlas=%s fast_shadow=%s instances=%u static=%u dynamic=%u builds=%u debug_mode=%u\n",
+		nri_ptemissivetlas ? "on" : "off",
+		nri_ptemissivefastshadow ? "on" : "off",
+		mEmissiveTlasInstanceCount,
+		mEmissiveTlasStaticInstanceCount,
+		mEmissiveTlasDynamicInstanceCount,
+		mEmissiveTlasBuildCount,
+		NRI_PTDEBUG_EMISSIVE_TLAS);
 	Printf("NRI PT sector lighting: enabled=%s active=%u eligible=%u fog=%u pulsing=%u debug_mode=%u scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
 		nri_ptsectorlighting ? "on" : "off",
 		mSceneLights.GetSectorLighting().activeSectorCount,
@@ -3934,10 +3956,13 @@ bool NRIRenderer::CreatePipelineLayout()
 	rootConstant.size = sizeof(NRITraceConstants);
 	rootConstant.shaderStages = NRIComputeStage();
 
-	nri::RootDescriptorDesc rootDescriptors[1] = {};
+	nri::RootDescriptorDesc rootDescriptors[2] = {};
 	rootDescriptors[0].registerIndex = 0;
 	rootDescriptors[0].shaderStages = NRIComputeStage();
 	rootDescriptors[0].descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
+	rootDescriptors[1].registerIndex = 1;
+	rootDescriptors[1].shaderStages = NRIComputeStage();
+	rootDescriptors[1].descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
 
 	nri::PipelineLayoutDesc desc = {};
 	desc.rootRegisterSpace = 5;
@@ -4571,6 +4596,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	{
 		return false;
 	}
+	mBoundSceneInstances = sceneInstances;
 
 	const std::vector<ScenePortalData> scenePortals = BuildScenePortalData(mMapWorld);
 	if (!EnsureStructuredBuffer(
@@ -5054,6 +5080,8 @@ void NRIRenderer::BindSceneRootDescriptors()
 	if (mTopLevelAS.descriptor != nullptr)
 	{
 		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
+		nri::Descriptor* emissiveDescriptor = mEmissiveTopLevelAS.descriptor != nullptr ? mEmissiveTopLevelAS.descriptor : mTopLevelAS.descriptor;
+		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, emissiveDescriptor, 0, nri::BindPoint::COMPUTE });
 	}
 }
 
@@ -5665,8 +5693,10 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 
 	const bool needsWait =
 		mTopLevelAS.accelerationStructure != nullptr ||
+		mEmissiveTopLevelAS.accelerationStructure != nullptr ||
 		mDynamicBottomLevelAS.accelerationStructure != nullptr ||
 		mTlasInstanceBuffer.buffer != nullptr ||
+		mEmissiveTlasInstanceBuffer.buffer != nullptr ||
 		mSceneInstanceBuffer.buffer != nullptr ||
 		mScratchBuffer.buffer != nullptr;
 	if (needsWait)
@@ -5675,10 +5705,12 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	}
 
 	DestroyBufferResource(mTlasInstanceBuffer);
+	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 	DestroyAccelerationStructureResource(mTopLevelAS);
+	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 
 	for (auto& chunk : mStaticMapScene.chunks)
 	{
@@ -6466,6 +6498,201 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 	return true;
 }
 
+bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
+{
+	mEmissiveTlasInstanceCount = 0;
+	mEmissiveTlasStaticInstanceCount = 0;
+	mEmissiveTlasDynamicInstanceCount = 0;
+
+	if (!nri_ptemissivetlas ||
+		mBoundEmissivePrimitiveRecords.empty() ||
+		mBoundSceneInstances.empty())
+	{
+		DestroyBufferResource(mEmissiveTlasInstanceBuffer);
+		DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+		return true;
+	}
+
+	std::unordered_map<uint32_t, uint32_t> staticSceneInstanceByPrimitiveOffset;
+	staticSceneInstanceByPrimitiveOffset.reserve(mBoundSceneInstances.size());
+	uint32_t dynamicSceneInstanceIndex = UINT32_MAX;
+	for (uint32_t sceneInstanceIndex = 0; sceneInstanceIndex < (uint32_t)mBoundSceneInstances.size(); ++sceneInstanceIndex)
+	{
+		const SceneInstanceData& sceneInstance = mBoundSceneInstances[sceneInstanceIndex];
+		if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+		{
+			staticSceneInstanceByPrimitiveOffset.emplace(sceneInstance.primitiveOffset, sceneInstanceIndex);
+		}
+		else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC && dynamicSceneInstanceIndex == UINT32_MAX)
+		{
+			dynamicSceneInstanceIndex = sceneInstanceIndex;
+		}
+	}
+
+	std::vector<uint8_t> emissiveStaticChunks(mStaticMapScene.chunks.size(), 0u);
+	bool includeDynamicInstance = false;
+	const auto findStaticChunkIndexForPrimitive = [&](uint32_t primitiveIndex) -> int32_t
+	{
+		uint32_t low = 0;
+		uint32_t high = (uint32_t)mStaticMapScene.chunks.size();
+		while (low < high)
+		{
+			const uint32_t mid = (low + high) >> 1u;
+			const auto& chunk = mStaticMapScene.chunks[mid];
+			const uint32_t chunkBegin = chunk.primitiveOffset;
+			const uint32_t chunkEnd = chunkBegin + chunk.primitiveCount;
+			if (primitiveIndex < chunkBegin)
+			{
+				high = mid;
+			}
+			else if (primitiveIndex >= chunkEnd)
+			{
+				low = mid + 1u;
+			}
+			else
+			{
+				return (int32_t)mid;
+			}
+		}
+
+		return -1;
+	};
+
+	for (const EmissivePrimitiveDebugRecord& record : mBoundEmissivePrimitiveRecords)
+	{
+		if (record.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+		{
+			const int32_t chunkIndex = findStaticChunkIndexForPrimitive(record.primitiveIndex);
+			if (chunkIndex >= 0)
+			{
+				emissiveStaticChunks[(size_t)chunkIndex] = 1u;
+			}
+		}
+		else if (record.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC &&
+			dynamicSceneInstanceIndex != UINT32_MAX &&
+			mDynamicBottomLevelAS.accelerationStructure != nullptr)
+		{
+			includeDynamicInstance = true;
+		}
+	}
+
+	std::vector<nri::TopLevelInstance> instances;
+	instances.reserve(mStaticMapScene.chunks.size() + (includeDynamicInstance ? 1u : 0u));
+	for (size_t chunkIndex = 0; chunkIndex < mStaticMapScene.chunks.size(); ++chunkIndex)
+	{
+		if (emissiveStaticChunks[chunkIndex] == 0u)
+		{
+			continue;
+		}
+
+		const auto& chunk = mStaticMapScene.chunks[chunkIndex];
+		if (chunk.accelerationStructure.accelerationStructure == nullptr)
+		{
+			continue;
+		}
+
+		const auto sceneInstanceIt = staticSceneInstanceByPrimitiveOffset.find(chunk.primitiveOffset);
+		if (sceneInstanceIt == staticSceneInstanceByPrimitiveOffset.end())
+		{
+			continue;
+		}
+
+		nri::TopLevelInstance instance = {};
+		instance.transform[0][0] = 1.0f;
+		instance.transform[1][1] = 1.0f;
+		instance.transform[2][2] = 1.0f;
+		instance.instanceId = sceneInstanceIt->second;
+		instance.mask = 0xFF;
+		instance.shaderBindingTableLocalOffset = 0;
+		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		instances.push_back(instance);
+		mEmissiveTlasStaticInstanceCount++;
+	}
+
+	if (includeDynamicInstance)
+	{
+		nri::TopLevelInstance instance = {};
+		instance.transform[0][0] = 1.0f;
+		instance.transform[1][1] = 1.0f;
+		instance.transform[2][2] = 1.0f;
+		instance.instanceId = dynamicSceneInstanceIndex;
+		instance.mask = 0xFF;
+		instance.shaderBindingTableLocalOffset = 0;
+		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
+		instances.push_back(instance);
+		mEmissiveTlasDynamicInstanceCount = 1;
+	}
+
+	if (instances.empty())
+	{
+		DestroyBufferResource(mEmissiveTlasInstanceBuffer);
+		DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+		return true;
+	}
+
+	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+	if (!EnsureStructuredBuffer(
+		mEmissiveTlasInstanceBuffer,
+		mEmissiveTlasInstanceBufferStats,
+		instances.data(),
+		instances.size() * sizeof(nri::TopLevelInstance),
+		sizeof(nri::TopLevelInstance),
+		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
+		NRIAccelerationStructureBuildInputAccess()))
+	{
+		return false;
+	}
+
+	nri::AccelerationStructureDesc tlasDesc = {};
+	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
+	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+	tlasDesc.geometryOrInstanceNum = (uint32_t)instances.size();
+	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, mEmissiveTopLevelAS.accelerationStructure) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+
+	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mEmissiveTopLevelAS.accelerationStructure);
+	if (mTopLevelScratchBuffer.buffer == nullptr || mTopLevelScratchBuffer.size < requiredScratchSize)
+	{
+		DestroyBufferResource(mTopLevelScratchBuffer);
+		if (!CreateBufferWithoutView(mTopLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		{
+			return false;
+		}
+	}
+
+	if (mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*mEmissiveTopLevelAS.accelerationStructure, mEmissiveTopLevelAS.descriptor) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+
+	nri::BuildTopLevelAccelerationStructureDesc tlasBuild = {};
+	tlasBuild.dst = mEmissiveTopLevelAS.accelerationStructure;
+	tlasBuild.instanceNum = (uint32_t)instances.size();
+	tlasBuild.instanceBuffer = mEmissiveTlasInstanceBuffer.buffer;
+	tlasBuild.instanceOffset = 0;
+	tlasBuild.scratchBuffer = mTopLevelScratchBuffer.buffer;
+	tlasBuild.scratchOffset = 0;
+	mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
+
+	nri::BufferBarrierDesc tlasBarrier = {};
+	tlasBarrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*mEmissiveTopLevelAS.accelerationStructure);
+	tlasBarrier.before = NRIAccelerationStructureWriteAccess();
+	tlasBarrier.after = NRIComputeAccelerationStructureReadAccess();
+
+	nri::BarrierDesc barrierDesc = {};
+	barrierDesc.buffers = &tlasBarrier;
+	barrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+
+	mEmissiveTlasInstanceCount = (uint32_t)instances.size();
+	mEmissiveTlasBuildCount++;
+	return true;
+}
+
 bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask)
 {
 	if (instances.empty())
@@ -6873,6 +7100,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		(directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
 		(mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
 		(nri_ptdirectionallight ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
+		(mEmissiveTopLevelAS.descriptor != nullptr ? NRI_FLAG_USE_EMISSIVE_TLAS : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
@@ -7760,6 +7989,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mPrimitiveBuffer);
 	DestroyBufferResource(mMaterialBuffer);
 	DestroyBufferResource(mTlasInstanceBuffer);
+	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);
 	DestroyBufferResource(mPortalBuffer);
 	DestroyBufferResource(mRuntimeLightBuffer);
@@ -7772,6 +8002,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mSectorLightBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
+	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mBoundStaticPrimitiveCount = 0;
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
@@ -7788,9 +8019,14 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundEmissiveDominantTile = 0;
 	mBoundEmissiveDominantFlags = 0;
 	mBoundEmissiveDominantDataSource = 0;
+	mEmissiveTlasInstanceCount = 0;
+	mEmissiveTlasStaticInstanceCount = 0;
+	mEmissiveTlasDynamicInstanceCount = 0;
+	mEmissiveTlasBuildCount = 0;
 	mBoundEmissiveTotalPower = 0.0f;
 	mBoundEmissiveDominantPower = 0.0f;
 	mBoundEmissivePrimitiveRecords.clear();
+	mBoundSceneInstances.clear();
 	mBoundSectorLightSectorCount = 0;
 	mBoundSectorLightActiveCount = 0;
 	mBoundSectorLightPulsingCount = 0;
@@ -7807,8 +8043,13 @@ void NRIRenderer::DestroyAccelerationStructures()
 	}
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 	DestroyAccelerationStructureResource(mTopLevelAS);
+	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;
 	mActiveTlasInstanceCount = 0;
+	mEmissiveTlasInstanceCount = 0;
+	mEmissiveTlasStaticInstanceCount = 0;
+	mEmissiveTlasDynamicInstanceCount = 0;
+	mEmissiveTlasBuildCount = 0;
 }
 
 void NRIRenderer::DestroyStaticMapSceneCache()

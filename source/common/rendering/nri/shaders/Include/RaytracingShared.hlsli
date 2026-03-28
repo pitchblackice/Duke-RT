@@ -92,6 +92,16 @@ PortalData GetPortalData(uint portalIndex)
 	return gScenePortals[min(portalIndex, gTraceConstants.PortalCount - 1u)];
 }
 
+bool UseFastEmissiveShadow()
+{
+	return (gTraceConstants.Flags & NRI_FLAG_FAST_EMISSIVE_SHADOW) != 0;
+}
+
+bool UseEmissiveTlas()
+{
+	return (gTraceConstants.Flags & NRI_FLAG_USE_EMISSIVE_TLAS) != 0;
+}
+
 float3 ResolveHitNormal(uint materialIndex, uint dataSource, float3 geometricNormal, float3 rayDirection)
 {
 	return normalize(geometricNormal);
@@ -417,6 +427,72 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 	return false;
 }
 
+bool TraceClosestEmissiveSupport(float3 startOrigin, float3 direction, float maxDistance, out HitData hitData)
+{
+	hitData = MakeEmptyHitData();
+	if (!UseEmissiveTlas())
+	{
+		return false;
+	}
+
+	float accumulatedDistance = 0.0;
+
+	[loop]
+	for (uint skipCount = 0u; skipCount < 8u; ++skipCount)
+	{
+		const float remainingDistance = maxDistance - accumulatedDistance;
+		if (remainingDistance <= TRACE_MIN_DISTANCE)
+		{
+			return false;
+		}
+
+		RayQuery<RAY_FLAG_FORCE_OPAQUE> rayQuery;
+		RayDesc ray = { startOrigin + direction * accumulatedDistance, TRACE_MIN_DISTANCE, direction, remainingDistance };
+		rayQuery.TraceRayInline(gEmissiveTlas, RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
+
+		while (rayQuery.Proceed()) {}
+
+		if (rayQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+		{
+			return false;
+		}
+
+		const SceneInstanceData instanceData = GetSceneInstanceData(rayQuery.CommittedInstanceID());
+		const uint primitiveIndex = ResolvePrimitiveIndex(instanceData, rayQuery.CommittedPrimitiveIndex());
+		const PrimitiveData primitive = GetPrimitiveData(instanceData.dataSource, primitiveIndex);
+		const float committedDistance = rayQuery.CommittedRayT();
+		if (ShouldIgnoreOneWayHit(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction))
+		{
+			accumulatedDistance += committedDistance + TRACE_CONTINUE_BIAS;
+			continue;
+		}
+
+		const float2 bary = rayQuery.CommittedTriangleBarycentrics();
+		const float3 weights = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
+		const float2 uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
+		if (IsTransparentSurfaceSample(primitive.materialIndex, instanceData.dataSource, uv))
+		{
+			accumulatedDistance += committedDistance + TRACE_CONTINUE_BIAS;
+			continue;
+		}
+
+		const float hitDistance = accumulatedDistance + committedDistance;
+		hitData.hit = true;
+		hitData.dataSource = instanceData.dataSource;
+		hitData.primitiveIndex = primitiveIndex;
+		hitData.portalIndex = primitive.portalIndex;
+		hitData.barycentrics = bary;
+		hitData.distance = hitDistance;
+		hitData.position = startOrigin + direction * hitDistance;
+		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction);
+		hitData.uv = uv;
+		hitData.materialIndex = primitive.materialIndex;
+		return true;
+	}
+
+	return false;
+}
+
 bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, out HitData hitData, out float3 exitDirection)
 {
 	hitData = MakeEmptyHitData();
@@ -507,6 +583,19 @@ float ComputePointLightShadow(float3 position, float3 normal, float3 lightDirect
 	float3 ignoredDirection = lightDirection;
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
 	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, 0u, GetPortalTraversalDepth(), shadowHit, ignoredDirection);
+	return blocked ? 0.0 : 1.0;
+}
+
+float ComputeFastPointLightShadow(float3 position, float3 normal, float3 lightDirection, float lightDistance)
+{
+	if (lightDistance <= 0.051)
+	{
+		return 1.0;
+	}
+
+	HitData shadowHit = MakeEmptyHitData();
+	const float maxDistance = max(lightDistance - 0.05, 0.001);
+	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, shadowHit);
 	return blocked ? 0.0 : 1.0;
 }
 

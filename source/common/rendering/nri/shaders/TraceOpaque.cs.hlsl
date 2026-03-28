@@ -338,7 +338,9 @@ void EvaluateSampledEmissiveLighting(
 
 	if (traceVisibility)
 	{
-		const float visibility = ComputePointLightShadow(position, normal, lightDir, lightDistance);
+		const float visibility = UseFastEmissiveShadow() ?
+			ComputeFastPointLightShadow(position, normal, lightDir, lightDistance) :
+			ComputePointLightShadow(position, normal, lightDir, lightDistance);
 		if (visibility <= 0.0)
 		{
 			outOccluded = true;
@@ -602,6 +604,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const bool bootstrapBaseColor = bootstrapMode == 12;
 
 	HitData hit = (HitData)0;
+	HitData emissiveSupportHit = MakeEmptyHitData();
 	if (directSceneTrace)
 	{
 		hit = TraceBootstrapGeometry(rayOrigin, visibleRayDirection);
@@ -611,6 +614,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 tracedVisibleDirection = visibleRayDirection;
 		hit = TracePrimary(rayOrigin, visibleRayDirection, tracedVisibleDirection);
 		visibleRayDirection = tracedVisibleDirection;
+	}
+	if (gTraceConstants.DebugMode == 32 && !directSceneTrace)
+	{
+		TraceClosestEmissiveSupport(rayOrigin, visibleRayDirection, 100000.0, emissiveSupportHit);
 	}
 
 	float4 color = 0.0;
@@ -635,7 +642,23 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			const float3 missColor = GetMissColor(visibleRayDirection);
 			const float4 packedDiffuse = PackDiffuseRadiance(missColor, NRD_INF, NRD_INF);
-			color = (gTraceConstants.DebugMode >= 1 && gTraceConstants.DebugMode <= 4) ? float4(missColor, 1.0) : packedDiffuse;
+			if (gTraceConstants.DebugMode == 32)
+			{
+				if (emissiveSupportHit.hit)
+				{
+					const float id = (float)(emissiveSupportHit.primitiveIndex % 31u) / 30.0;
+					const float3 sourceTint = emissiveSupportHit.dataSource == SCENE_DATA_SOURCE_DYNAMIC ? float3(0.20, 0.70, 1.0) : float3(1.0, 0.72, 0.20);
+					color = float4(saturate(float3(frac(id * 1.1), frac(id * 1.9), frac(id * 2.7)) * 0.55 + sourceTint * 0.45), 1.0);
+				}
+				else
+				{
+					color = float4(0.0, 0.0, 0.0, 1.0);
+				}
+			}
+			else
+			{
+				color = (gTraceConstants.DebugMode >= 1 && gTraceConstants.DebugMode <= 4) ? float4(missColor, 1.0) : packedDiffuse;
+			}
 			gMotionOutput[pixelPos] = float4(0.0, 0.0, 0.0, -NRD_INF);
 			gViewZOutput[pixelPos] = float4(NRD_INF, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
@@ -872,6 +895,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else if (gTraceConstants.DebugMode == 31)
 		{
 			color = float4(emissiveSampleRadiance, 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 32)
+		{
+			if (emissiveSupportHit.hit)
+			{
+				const float id = (float)(emissiveSupportHit.primitiveIndex % 31u) / 30.0;
+				const float3 sourceTint = emissiveSupportHit.dataSource == SCENE_DATA_SOURCE_DYNAMIC ? float3(0.20, 0.70, 1.0) : float3(1.0, 0.72, 0.20);
+				color = float4(saturate(float3(frac(id * 1.1), frac(id * 1.9), frac(id * 2.7)) * 0.55 + sourceTint * 0.45), 1.0);
+			}
+			else
+			{
+				color = float4(0.0, 0.0, 0.0, 1.0);
+			}
 		}
 		else
 		{

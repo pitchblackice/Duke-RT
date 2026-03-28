@@ -409,6 +409,7 @@ private:
 		const std::vector<nri_scene::MaterialData>& materials);
 	bool BuildStaticMapAccelerationStructures();
 	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask);
+	bool BuildEmissiveTopLevelAccelerationStructure();
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
 	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
@@ -563,6 +564,7 @@ private:
 	NRIBufferResource mEmissivePrimitiveHeaderBuffer;
 	NRIBufferResource mEmissivePrimitiveBuffer;
 	NRIBufferResource mEmissivePrimitiveCdfBuffer;
+	NRIBufferResource mEmissiveTlasInstanceBuffer;
 	NRIBufferResource mSectorLightHeaderBuffer;
 	NRIBufferResource mSectorLightBuffer;
 	NRIBufferResource mScratchBuffer;
@@ -578,11 +580,13 @@ private:
 	SceneBufferDebugStats mEmissivePrimitiveHeaderBufferStats = { "EmissivePrimitiveHeader" };
 	SceneBufferDebugStats mEmissivePrimitiveBufferStats = { "EmissivePrimitive" };
 	SceneBufferDebugStats mEmissivePrimitiveCdfBufferStats = { "EmissivePrimitiveCdf" };
+	SceneBufferDebugStats mEmissiveTlasInstanceBufferStats = { "EmissiveTLASInstance" };
 	SceneBufferDebugStats mSectorLightHeaderBufferStats = { "SectorLightHeader" };
 	SceneBufferDebugStats mSectorLightBufferStats = { "SectorLight" };
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
+	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
 	std::vector<CachedTexture> mTextureCache;
 	std::vector<CachedSkyTexture> mSkyTextureCache;
@@ -601,6 +605,7 @@ private:
 	std::array<nri::Descriptor*, 18> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
+	std::vector<SceneInstanceData> mBoundSceneInstances;
 	uint32_t mFrameIndex = 0;
 	uint32_t mRenderWidth = 0;
 	uint32_t mRenderHeight = 0;
@@ -670,6 +675,10 @@ private:
 	uint32_t mBoundEmissiveDominantTile = 0;
 	uint32_t mBoundEmissiveDominantFlags = 0;
 	uint32_t mBoundEmissiveDominantDataSource = 0;
+	uint32_t mEmissiveTlasInstanceCount = 0;
+	uint32_t mEmissiveTlasStaticInstanceCount = 0;
+	uint32_t mEmissiveTlasDynamicInstanceCount = 0;
+	uint32_t mEmissiveTlasBuildCount = 0;
 	float mBoundEmissiveTotalPower = 0.0f;
 	float mBoundEmissiveDominantPower = 0.0f;
 	std::vector<EmissivePrimitiveDebugRecord> mBoundEmissivePrimitiveRecords;
