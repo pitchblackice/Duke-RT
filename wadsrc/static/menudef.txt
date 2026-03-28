@@ -1212,10 +1212,12 @@ OptionMenu "NRIOptions" protected
 	Slider "Portal Depth",						"nri_ptportaldepth",			0, 6, 1, 0
 	Slider "Light Bounces",						"nri_ptlightbounces",			0, 4, 1, 0
 	Slider "Mirror Bounces",					"nri_ptmirrorbounces",			0, 8, 1, 0
+	Slider "Emissive Samples",					"nri_ptemissivesamples",		1, 4, 1, 0
+	Option "Emissive Fast Shadow",				"nri_ptemissivefastshadow",		"OnOff"
 	StaticText "----------------"
 	StaticText "Debug / Inspection"
 	Option "PT Debug View",						"nri_ptdebug",					"NRIPTDebug"
-	Slider "PT Debug Index",					"nri_ptdebug",					0, 25, 1, 0
+	Slider "PT Debug Index",					"nri_ptdebug",					0, 33, 1, 0
 	StaticText ""
 
 	StaticText "Commands"
@@ -1821,6 +1823,14 @@ OptionValue NRIPTDebug
 	23, "Denoised Shadow"
 	24, "Direct Lighting"
 	25, "Direct Emission"
+	26, "Analytic Direct"
+	27, "Emissive Tags"
+	28, "Emissive Direct"
+	29, "Sector Ambient"
+	30, "Emissive UV"
+	31, "Emissive Radiance"
+	32, "Emissive Primitive"
+	33, "Emissive Visibility"
 }
 
 OptionValue NRIPTBootstrapMode
