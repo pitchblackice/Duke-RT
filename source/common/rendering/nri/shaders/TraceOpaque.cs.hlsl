@@ -258,6 +258,20 @@ uint SampleEmissivePrimitiveIndex(inout uint rngState)
 	return low;
 }
 
+float3 SamplePointOnPrimitive(uint dataSource, PrimitiveData primitive, inout uint rngState, out float2 outUv, out float3 outNormal)
+{
+	const SceneVertex v0 = GetVertexData(dataSource, primitive.indices.x);
+	const SceneVertex v1 = GetVertexData(dataSource, primitive.indices.y);
+	const SceneVertex v2 = GetVertexData(dataSource, primitive.indices.z);
+	const float u1 = RandomFloat01(rngState);
+	const float u2 = RandomFloat01(rngState);
+	const float rootU1 = sqrt(saturate(u1));
+	const float3 barycentrics = float3(1.0 - rootU1, rootU1 * (1.0 - u2), rootU1 * u2);
+	outUv = primitive.uv0 * barycentrics.x + primitive.uv1 * barycentrics.y + primitive.uv2 * barycentrics.z;
+	outNormal = normalize(primitive.normal);
+	return v0.position * barycentrics.x + v1.position * barycentrics.y + v2.position * barycentrics.z;
+}
+
 void EvaluateSampledEmissiveLighting(
 	float3 position,
 	float3 normal,
@@ -269,12 +283,16 @@ void EvaluateSampledEmissiveLighting(
 	out float3 outDiffuse,
 	out float3 outSpecular,
 	out uint outPrimitiveIndex,
-	out bool outOccluded)
+	out bool outOccluded,
+	out float2 outEmitterUv,
+	out float3 outEmitterRadiance)
 {
 	outDiffuse = 0.0;
 	outSpecular = 0.0;
 	outPrimitiveIndex = 0xffffffffu;
 	outOccluded = false;
+	outEmitterUv = 0.0;
+	outEmitterRadiance = 0.0;
 
 	const uint candidateIndex = SampleEmissivePrimitiveIndex(rngState);
 	if (candidateIndex == 0xffffffffu)
@@ -285,13 +303,13 @@ void EvaluateSampledEmissiveLighting(
 	const EmissivePrimitiveData candidate = gEmissivePrimitives[candidateIndex];
 	outPrimitiveIndex = candidate.primitiveIndex;
 	const PrimitiveData primitive = GetPrimitiveData(candidate.dataSource, candidate.primitiveIndex);
-	const SceneVertex v0 = GetVertexData(candidate.dataSource, primitive.indices.x);
-	const SceneVertex v1 = GetVertexData(candidate.dataSource, primitive.indices.y);
-	const SceneVertex v2 = GetVertexData(candidate.dataSource, primitive.indices.z);
-	const float3 lightPosition = (v0.position + v1.position + v2.position) / 3.0;
-	const float2 lightUv = (primitive.uv0 + primitive.uv1 + primitive.uv2) / 3.0;
+	float2 lightUv = 0.0;
+	float3 lightNormal = 0.0;
+	const float3 lightPosition = SamplePointOnPrimitive(candidate.dataSource, primitive, rngState, lightUv, lightNormal);
+	outEmitterUv = lightUv;
 	const MaterialData lightMaterial = GetMaterialData(primitive.materialIndex, candidate.dataSource);
 	const float3 lightColor = SampleMaterialEmissionSource(primitive.materialIndex, candidate.dataSource, lightUv) * lightMaterial.emissiveIntensity;
+	outEmitterRadiance = lightColor;
 	if (all(lightColor <= 0.0))
 	{
 		return;
@@ -312,6 +330,12 @@ void EvaluateSampledEmissiveLighting(
 		return;
 	}
 
+	const float emitterLambert = max(dot(lightNormal, -lightDir), 0.0);
+	if (emitterLambert <= 0.0)
+	{
+		return;
+	}
+
 	if (traceVisibility)
 	{
 		const float visibility = ComputePointLightShadow(position, normal, lightDir, lightDistance);
@@ -323,7 +347,7 @@ void EvaluateSampledEmissiveLighting(
 	}
 
 	const float pdf = max(candidate.selectionPdf, 1e-4);
-	const float projectedArea = max(candidate.primitiveArea, 0.001);
+	const float projectedArea = max(candidate.primitiveArea * emitterLambert, 0.001);
 	const float solidAngleEstimate = min(projectedArea / max(12.56637061436 * lightDistanceSq, 0.01), 1.0);
 	const float sampleWeight = min(solidAngleEstimate / pdf, 16.0);
 	outDiffuse = albedo * (lambert * 0.80) * lightColor * sampleWeight;
@@ -424,6 +448,8 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 		float3 bounceEmissiveSpecular = 0.0;
 		uint bounceEmissivePrimitiveIndex = 0xffffffffu;
 		bool bounceEmissiveOccluded = false;
+		float2 bounceEmissiveUv = 0.0;
+		float3 bounceEmissiveRadiance = 0.0;
 		EvaluateSampledEmissiveLighting(
 			bounceHit.position,
 			bounceHit.normal,
@@ -435,7 +461,9 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 			bounceEmissiveDiffuse,
 			bounceEmissiveSpecular,
 			bounceEmissivePrimitiveIndex,
-			bounceEmissiveOccluded);
+			bounceEmissiveOccluded,
+			bounceEmissiveUv,
+			bounceEmissiveRadiance);
 		indirectRadiance += throughput * (bounceEmissiveDiffuse + bounceEmissiveSpecular);
 
 		if (UseDirectionalPlaceholderLight())
@@ -516,6 +544,8 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 		float3 bounceEmissiveSpecular = 0.0;
 		uint bounceEmissivePrimitiveIndex = 0xffffffffu;
 		bool bounceEmissiveOccluded = false;
+		float2 bounceEmissiveUv = 0.0;
+		float3 bounceEmissiveRadiance = 0.0;
 		EvaluateSampledEmissiveLighting(
 			bounceHit.position,
 			bounceHit.normal,
@@ -527,7 +557,9 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			bounceEmissiveDiffuse,
 			bounceEmissiveSpecular,
 			bounceEmissivePrimitiveIndex,
-			bounceEmissiveOccluded);
+			bounceEmissiveOccluded,
+			bounceEmissiveUv,
+			bounceEmissiveRadiance);
 		indirectRadiance += throughput * (bounceEmissiveDiffuse + bounceEmissiveSpecular);
 
 		if (UseDirectionalPlaceholderLight())
@@ -642,6 +674,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 directEmission = 0.0;
 		float3 analyticDirectLighting = 0.0;
 		float3 emissiveDirectLighting = 0.0;
+		float2 emissiveSampleUv = 0.0;
+		float3 emissiveSampleRadiance = 0.0;
 		float3 sectorSourceLighting = 0.0;
 		float3 sectorAmbientLighting = 0.0;
 		float diffuseHitDistance = 0.0;
@@ -764,7 +798,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					emissiveSampleDiffuse,
 					emissiveSampleSpecular,
 					emissiveSamplePrimitiveIndex,
-					emissiveSampleOccluded);
+					emissiveSampleOccluded,
+					emissiveSampleUv,
+					emissiveSampleRadiance);
 				emissiveDirectLighting += emissiveSampleDiffuse + emissiveSampleSpecular;
 				directLighting += emissiveSampleDiffuse + emissiveSampleSpecular;
 
@@ -828,6 +864,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else if (gTraceConstants.DebugMode == 29)
 		{
 			color = float4(sectorSourceLighting, 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 30)
+		{
+			color = float4(frac(emissiveSampleUv), 0.0, 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 31)
+		{
+			color = float4(emissiveSampleRadiance, 1.0);
 		}
 		else
 		{
