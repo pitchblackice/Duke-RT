@@ -63,7 +63,7 @@ CVAR(Bool, nri_ptemissiveheuristics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissiveautoonly, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminsurface, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptemissivetlas, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorambientscale, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -95,7 +95,6 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_DIRECT = 28;
 	constexpr uint32_t NRI_PTDEBUG_SECTOR_AMBIENT = 29;
-	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TLAS = 32;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -108,7 +107,6 @@ namespace
 	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
 	constexpr uint32_t NRI_FLAG_FAST_EMISSIVE_SHADOW = 0x100u;
-	constexpr uint32_t NRI_FLAG_USE_EMISSIVE_TLAS = 0x200u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
@@ -2753,14 +2751,13 @@ void NRIRenderer::PrintStatus() const
 		GetSceneDataSourceName(mBoundEmissiveDominantDataSource),
 		mBoundEmissiveDominantPower,
 		mBoundEmissiveDominantFlags);
-	Printf("NRI PT emissive query: tlas=%s fast_shadow=%s instances=%u static=%u dynamic=%u builds=%u debug_mode=%u\n",
+	Printf("NRI PT emissive query: tlas=%s fast_shadow=%s instances=%u static=%u dynamic=%u builds=%u\n",
 		nri_ptemissivetlas ? "on" : "off",
 		nri_ptemissivefastshadow ? "on" : "off",
 		mEmissiveTlasInstanceCount,
 		mEmissiveTlasStaticInstanceCount,
 		mEmissiveTlasDynamicInstanceCount,
-		mEmissiveTlasBuildCount,
-		NRI_PTDEBUG_EMISSIVE_TLAS);
+		mEmissiveTlasBuildCount);
 	Printf("NRI PT sector lighting: enabled=%s active=%u eligible=%u fog=%u pulsing=%u debug_mode=%u scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
 		nri_ptsectorlighting ? "on" : "off",
 		mSceneLights.GetSectorLighting().activeSectorCount,
@@ -3956,13 +3953,10 @@ bool NRIRenderer::CreatePipelineLayout()
 	rootConstant.size = sizeof(NRITraceConstants);
 	rootConstant.shaderStages = NRIComputeStage();
 
-	nri::RootDescriptorDesc rootDescriptors[2] = {};
+	nri::RootDescriptorDesc rootDescriptors[1] = {};
 	rootDescriptors[0].registerIndex = 0;
 	rootDescriptors[0].shaderStages = NRIComputeStage();
 	rootDescriptors[0].descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
-	rootDescriptors[1].registerIndex = 1;
-	rootDescriptors[1].shaderStages = NRIComputeStage();
-	rootDescriptors[1].descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
 
 	nri::PipelineLayoutDesc desc = {};
 	desc.rootRegisterSpace = 5;
@@ -5080,8 +5074,6 @@ void NRIRenderer::BindSceneRootDescriptors()
 	if (mTopLevelAS.descriptor != nullptr)
 	{
 		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 0, mTopLevelAS.descriptor, 0, nri::BindPoint::COMPUTE });
-		nri::Descriptor* emissiveDescriptor = mEmissiveTopLevelAS.descriptor != nullptr ? mEmissiveTopLevelAS.descriptor : mTopLevelAS.descriptor;
-		mFrameBuffer->mCore.CmdSetRootDescriptor(*mFrameBuffer->mCommandBuffer, { 1, emissiveDescriptor, 0, nri::BindPoint::COMPUTE });
 	}
 }
 
@@ -7101,7 +7093,6 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		(mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
 		(nri_ptdirectionallight ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
 		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
-		(mEmissiveTopLevelAS.descriptor != nullptr ? NRI_FLAG_USE_EMISSIVE_TLAS : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
