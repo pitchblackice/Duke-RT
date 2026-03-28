@@ -132,7 +132,7 @@ struct RuntimeLightTileHeaderData
 	uint indexCount;
 };
 
-struct EmissiveSurfaceHeaderData
+struct EmissivePrimitiveHeaderData
 {
 	uint activeCount;
 	uint dominantIndex;
@@ -140,17 +140,15 @@ struct EmissiveSurfaceHeaderData
 	float totalPower;
 };
 
-struct EmissiveSurfaceData
+struct EmissivePrimitiveData
 {
-	float3 center;
-	float boundsRadius;
-	float3 emissiveColor;
-	float emissiveIntensity;
-	float surfaceArea;
-	float powerEstimate;
-	float selectionPdf;
+	uint dataSource;
+	uint primitiveIndex;
 	uint sourceFlags;
 	uint textureId;
+	float primitiveArea;
+	float powerEstimate;
+	float selectionPdf;
 	uint stableKeyLo;
 	uint stableKeyHi;
 };
@@ -233,9 +231,9 @@ StructuredBuffer<PortalData> gScenePortals : register(t9, space2);
 StructuredBuffer<RuntimePointLightData> gRuntimePointLights : register(t10, space2);
 StructuredBuffer<RuntimeLightTileHeaderData> gRuntimeLightTileHeaders : register(t11, space2);
 StructuredBuffer<uint> gRuntimeLightTileIndices : register(t12, space2);
-StructuredBuffer<EmissiveSurfaceHeaderData> gEmissiveSurfaceHeaders : register(t13, space2);
-StructuredBuffer<EmissiveSurfaceData> gEmissiveSurfaces : register(t14, space2);
-StructuredBuffer<float> gEmissiveSurfaceCdf : register(t15, space2);
+StructuredBuffer<EmissivePrimitiveHeaderData> gEmissivePrimitiveHeaders : register(t13, space2);
+StructuredBuffer<EmissivePrimitiveData> gEmissivePrimitives : register(t14, space2);
+StructuredBuffer<float> gEmissivePrimitiveCdf : register(t15, space2);
 StructuredBuffer<SectorLightHeaderData> gSectorLightHeaders : register(t16, space2);
 StructuredBuffer<SectorLightData> gSectorLights : register(t17, space2);
 

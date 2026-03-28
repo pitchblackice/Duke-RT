@@ -87,6 +87,7 @@ namespace
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
+	constexpr uint32_t NRI_MAX_EMISSIVE_PRIMITIVES = 16384;
 	constexpr uint32_t NRI_RUNTIME_LIGHT_TILE_SIZE = 64;
 	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT = 26;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
@@ -122,6 +123,72 @@ namespace
 		case nri_scene::MaterialEmissiveMode_UseGlowmapTexture: return "glowmap";
 		default: return "none";
 		}
+	}
+
+	const char* GetSceneDataSourceName(uint32_t dataSource)
+	{
+		switch (dataSource)
+		{
+		case NRI_SCENE_DATA_SOURCE_STATIC: return "static";
+		case NRI_SCENE_DATA_SOURCE_DYNAMIC: return "dynamic";
+		default: return "unknown";
+		}
+	}
+
+	float ComputePrimitiveArea(const nri_scene::GeometryData& geometry, uint32_t primitiveIndex)
+	{
+		if (primitiveIndex >= geometry.primitives.size())
+		{
+			return 0.0f;
+		}
+
+		const auto& primitive = geometry.primitives[primitiveIndex];
+		if (primitive.indices[0] >= geometry.vertices.size() ||
+			primitive.indices[1] >= geometry.vertices.size() ||
+			primitive.indices[2] >= geometry.vertices.size())
+		{
+			return 0.0f;
+		}
+
+		const auto& a = geometry.vertices[primitive.indices[0]];
+		const auto& b = geometry.vertices[primitive.indices[1]];
+		const auto& c = geometry.vertices[primitive.indices[2]];
+		const float abx = b.position[0] - a.position[0];
+		const float aby = b.position[1] - a.position[1];
+		const float abz = b.position[2] - a.position[2];
+		const float acx = c.position[0] - a.position[0];
+		const float acy = c.position[1] - a.position[1];
+		const float acz = c.position[2] - a.position[2];
+		const float crossX = aby * acz - abz * acy;
+		const float crossY = abz * acx - abx * acz;
+		const float crossZ = abx * acy - aby * acx;
+		return 0.5f * std::sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
+	}
+
+	void ComputePrimitiveCenter(const nri_scene::GeometryData& geometry, uint32_t primitiveIndex, float outCenter[3])
+	{
+		outCenter[0] = 0.0f;
+		outCenter[1] = 0.0f;
+		outCenter[2] = 0.0f;
+		if (primitiveIndex >= geometry.primitives.size())
+		{
+			return;
+		}
+
+		const auto& primitive = geometry.primitives[primitiveIndex];
+		if (primitive.indices[0] >= geometry.vertices.size() ||
+			primitive.indices[1] >= geometry.vertices.size() ||
+			primitive.indices[2] >= geometry.vertices.size())
+		{
+			return;
+		}
+
+		const auto& a = geometry.vertices[primitive.indices[0]];
+		const auto& b = geometry.vertices[primitive.indices[1]];
+		const auto& c = geometry.vertices[primitive.indices[2]];
+		outCenter[0] = (a.position[0] + b.position[0] + c.position[0]) / 3.0f;
+		outCenter[1] = (a.position[1] + b.position[1] + c.position[1]) / 3.0f;
+		outCenter[2] = (a.position[2] + b.position[2] + c.position[2]) / 3.0f;
 	}
 
 	struct ScenePortalData
@@ -1608,6 +1675,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::MaterialBridgeData* sceneLightCapturedMaterials = nullptr;
 	const nri_scene::SceneView* sceneLightDynamicView = nullptr;
 	const nri_scene::MaterialBridgeData* sceneLightDynamicMaterials = nullptr;
+	EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	bool sceneLightUsesStaticMapScene = false;
 	nri_scene::SceneDebugStats activeStats = {};
 	bool paletteReady = true;
@@ -1618,6 +1686,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	if (allowStaticMapScene && EnsureStaticMapScene())
 	{
 		sceneLightUsesStaticMapScene = true;
+		emissiveSamplingContext.staticGeometry = &mStaticMapScene.geometry;
 		mUsedStaticMapSceneLastFrame = true;
 		activeSceneView = &mStaticMapScene.sceneView;
 		activeGeometry = &mStaticMapScene.geometry;
@@ -1733,6 +1802,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						BuildDynamicAccelerationStructure(overlayGeometry) &&
 						mDynamicBottomLevelAS.accelerationStructure != nullptr;
 				}
+				emissiveSamplingContext.dynamicGeometry = !dynamicGeometry.primitives.empty() ? &dynamicGeometry : nullptr;
+				emissiveSamplingContext.dynamicPrimitiveBaseOffset = (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationGeometry.primitives.size());
 				if (accelerationReady)
 				{
 					nri::TopLevelInstance dynamicInstance = {};
@@ -1946,6 +2017,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 		activeGeometry = &capturedGeometry;
 		activeGpuMaterials = &capturedGpuMaterials;
+		emissiveSamplingContext.capturedGeometry = &capturedGeometry;
 	}
 
 	if (activeSceneView == nullptr || activeGeometry == nullptr || activeGpuMaterials == nullptr || activeMaterialBridge == nullptr)
@@ -1984,6 +2056,16 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				return false;
 			}
 		}
+	}
+
+	if (!UpdateEmissiveSamplingBuffers(emissiveSamplingContext))
+	{
+		LogFallback("PT emissive primitive update failed.");
+		if (preserveHistory)
+		{
+			restoreHistory();
+		}
+		return false;
 	}
 
 	TraceRuntimeLinkEvents(di);
@@ -2319,23 +2401,22 @@ void NRIRenderer::PrintTextureEmissiveHeuristics() const
 
 void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 {
-	const auto& emissive = mSceneLights.GetEmissiveSurfaces();
-	if (emissive.activeSurfaces.empty())
+	if (mBoundEmissivePrimitiveRecords.empty())
 	{
-		Printf("NRI PT emissive surfaces: no emissive surfaces are active.\n");
+		Printf("NRI PT emissive primitives: no emissive primitive candidates are bound.\n");
 		return;
 	}
 
 	struct Candidate
 	{
-		const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord* record = nullptr;
+		const EmissivePrimitiveDebugRecord* record = nullptr;
 		float distanceSq = 0.0f;
 	};
 
 	std::vector<Candidate> candidates;
-	candidates.reserve(emissive.activeSurfaces.size());
+	candidates.reserve(mBoundEmissivePrimitiveRecords.size());
 	const float radiusSq = radius > 0.0f ? radius * radius : -1.0f;
-	for (const auto& record : emissive.activeSurfaces)
+	for (const auto& record : mBoundEmissivePrimitiveRecords)
 	{
 		const float dx = record.center[0] - mCurrentCameraPos[0];
 		const float dy = record.center[1] - mCurrentCameraPos[1];
@@ -2353,11 +2434,12 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		return a.distanceSq < b.distanceSq;
 	});
 
-	Printf("NRI PT emissive surfaces: active=%u auto=%u explicit=%u total_power=%.3f min_surface=%.3f min_power=%.3f sampling_auto_only=%s\n",
-		(uint32_t)emissive.activeSurfaces.size(),
-		emissive.autoTaggedCount,
-		emissive.explicitRuleMatchCount,
-		emissive.totalPowerEstimate,
+	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u total_power=%.3f min_surface=%.3f min_power=%.3f sampling_auto_only=%s\n",
+		(uint32_t)mBoundEmissivePrimitiveRecords.size(),
+		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
+		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
+		mSceneLights.GetEmissiveSurfaces().explicitRuleMatchCount,
+		mBoundEmissiveTotalPower,
 		(float)nri_ptemissiveminsurface,
 		(float)nri_ptemissiveminpower,
 		nri_ptemissiveautoonly ? "on" : "off");
@@ -2366,16 +2448,19 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 	for (uint32_t i = 0; i < printCount; ++i)
 	{
 		const auto& record = *candidates[i].record;
-		Printf("NRI PT emissive %u: stable=0x%016llx flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		Printf("NRI PT emissive %u: stable=0x%016llx source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
 			i,
 			(unsigned long long)record.stableKey,
+			GetSceneDataSourceName(record.dataSource),
+			record.primitiveIndex,
+			record.materialIndex,
 			record.sourceFlags,
 			record.sourceRuleId,
 			record.actorIndex,
 			record.textureId,
 			GetMaterialEmissiveModeName(record.emissiveMode),
 			record.emissiveTextureIndex != UINT32_MAX ? record.emissiveTextureIndex : 0u,
-			record.surfaceArea,
+			record.primitiveArea,
 			record.powerEstimate,
 			record.center[0],
 			record.center[1],
@@ -2646,10 +2731,12 @@ void NRIRenderer::PrintStatus() const
 		emissiveBaseCount,
 		emissiveGlowmapCount,
 		emissiveConstantCount);
-	Printf("NRI PT emissive sampling: candidates=%u total_power=%.3f dominant_tile=%u dominant_power=%.3f dominant_flags=0x%x\n",
-		mBoundEmissiveSurfaceCount,
+	Printf("NRI PT emissive sampling: primitives=%u total_power=%.3f dominant_tile=%u dominant_primitive=%u dominant_source=%s dominant_power=%.3f dominant_flags=0x%x\n",
+		mBoundEmissivePrimitiveCount,
 		mBoundEmissiveTotalPower,
 		mBoundEmissiveDominantTile,
+		mBoundEmissiveDominantPrimitive,
+		GetSceneDataSourceName(mBoundEmissiveDominantDataSource),
 		mBoundEmissiveDominantPower,
 		mBoundEmissiveDominantFlags);
 	Printf("NRI PT sector lighting: enabled=%s active=%u eligible=%u fog=%u pulsing=%u debug_mode=%u scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
@@ -3285,9 +3372,9 @@ void NRIRenderer::PrintSceneBufferStatus() const
 	printBuffer(mRuntimeLightBuffer, mRuntimeLightBufferStats);
 	printBuffer(mRuntimeLightTileHeaderBuffer, mRuntimeLightTileHeaderBufferStats);
 	printBuffer(mRuntimeLightTileIndexBuffer, mRuntimeLightTileIndexBufferStats);
-	printBuffer(mEmissiveSurfaceHeaderBuffer, mEmissiveSurfaceHeaderBufferStats);
-	printBuffer(mEmissiveSurfaceBuffer, mEmissiveSurfaceBufferStats);
-	printBuffer(mEmissiveSurfaceCdfBuffer, mEmissiveSurfaceCdfBufferStats);
+	printBuffer(mEmissivePrimitiveHeaderBuffer, mEmissivePrimitiveHeaderBufferStats);
+	printBuffer(mEmissivePrimitiveBuffer, mEmissivePrimitiveBufferStats);
+	printBuffer(mEmissivePrimitiveCdfBuffer, mEmissivePrimitiveCdfBufferStats);
 	printBuffer(mSectorLightHeaderBuffer, mSectorLightHeaderBufferStats);
 	printBuffer(mSectorLightBuffer, mSectorLightBufferStats);
 }
@@ -4013,24 +4100,127 @@ void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuD
 }
 
 void NRIRenderer::BuildEmissiveSamplingUpload(
-	EmissiveSurfaceHeaderGpuData& outHeader,
-	std::vector<EmissiveSurfaceGpuData>& outSurfaces,
-	std::vector<float>& outCdf)
+	const EmissiveSamplingBuildContext& context,
+	EmissivePrimitiveHeaderGpuData& outHeader,
+	std::vector<EmissivePrimitiveGpuData>& outPrimitives,
+	std::vector<float>& outCdf,
+	std::vector<EmissivePrimitiveDebugRecord>& outDebugRecords) const
 {
 	outHeader = {};
 	outHeader.dominantIndex = UINT32_MAX;
 	outHeader.flags = nri_ptemissiveautoonly ? NRI_EMISSIVE_SAMPLING_FLAG_AUTO_ONLY : 0u;
-	outSurfaces.clear();
+	outPrimitives.clear();
 	outCdf.clear();
+	outDebugRecords.clear();
 
+	struct MaterialPrimitiveRange
+	{
+		uint32_t first = UINT32_MAX;
+		uint32_t count = 0;
+	};
+
+	struct BuiltCandidate
+	{
+		EmissivePrimitiveGpuData gpu = {};
+		EmissivePrimitiveDebugRecord debug = {};
+	};
+
+	auto buildRanges = [](const nri_scene::GeometryData* geometry, std::vector<MaterialPrimitiveRange>& outRanges)
+	{
+		outRanges.clear();
+		if (geometry == nullptr)
+		{
+			return;
+		}
+
+		uint32_t maxMaterialIndex = 0;
+		for (const auto& primitive : geometry->primitives)
+		{
+			maxMaterialIndex = std::max(maxMaterialIndex, primitive.materialIndex);
+		}
+
+		outRanges.assign((size_t)maxMaterialIndex + 1u, {});
+		for (uint32_t primitiveIndex = 0; primitiveIndex < geometry->primitives.size(); ++primitiveIndex)
+		{
+			const uint32_t materialIndex = geometry->primitives[primitiveIndex].materialIndex;
+			auto& range = outRanges[materialIndex];
+			if (range.count == 0)
+			{
+				range.first = primitiveIndex;
+			}
+			range.count++;
+		}
+	};
+
+	std::vector<MaterialPrimitiveRange> staticRanges;
+	std::vector<MaterialPrimitiveRange> capturedRanges;
+	std::vector<MaterialPrimitiveRange> dynamicRanges;
+	buildRanges(context.staticGeometry, staticRanges);
+	buildRanges(context.capturedGeometry, capturedRanges);
+	buildRanges(context.dynamicGeometry, dynamicRanges);
+
+	std::vector<BuiltCandidate> candidates;
 	const auto& activeSurfaces = mSceneLights.GetEmissiveSurfaces().activeSurfaces;
-	outSurfaces.reserve(activeSurfaces.size());
-	outCdf.reserve(activeSurfaces.size());
+	candidates.reserve(activeSurfaces.size());
 
-	float totalPower = 0.0f;
-	float dominantPower = -1.0f;
-	uint32_t dominantTile = 0;
-	uint32_t dominantFlags = 0;
+	auto appendSurfacePrimitives = [&](const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, const nri_scene::GeometryData* geometry, const std::vector<MaterialPrimitiveRange>& ranges, uint32_t dataSource, uint32_t primitiveBase)
+	{
+		if (geometry == nullptr || surface.materialIndex == UINT32_MAX || surface.materialIndex >= ranges.size())
+		{
+			return;
+		}
+
+		const auto& range = ranges[surface.materialIndex];
+		if (range.count == 0 || range.first == UINT32_MAX)
+		{
+			return;
+		}
+
+		float representativeLuminance = 0.0f;
+		if (surface.surfaceArea > 0.0f && surface.emissiveIntensity > 0.0f)
+		{
+			representativeLuminance = std::max(surface.powerEstimate / (surface.surfaceArea * surface.emissiveIntensity), 0.0f);
+		}
+
+		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
+		{
+			const uint32_t localPrimitiveIndex = range.first + localOffset;
+			const uint32_t primitiveIndex = primitiveBase + localPrimitiveIndex;
+			const float primitiveArea = ComputePrimitiveArea(*geometry, localPrimitiveIndex);
+			if (primitiveArea <= 0.0f)
+			{
+				continue;
+			}
+
+			BuiltCandidate candidate = {};
+			candidate.gpu.dataSource = dataSource;
+			candidate.gpu.primitiveIndex = primitiveIndex;
+			candidate.gpu.sourceFlags = surface.sourceFlags;
+			candidate.gpu.textureId = surface.textureId;
+			candidate.gpu.primitiveArea = primitiveArea;
+			candidate.gpu.powerEstimate = std::max(primitiveArea * representativeLuminance * surface.emissiveIntensity, 0.0f);
+
+			candidate.debug.stableKey = HashCombine64(surface.stableKey, ((uint64_t)dataSource << 32u) | primitiveIndex);
+			candidate.debug.dataSource = dataSource;
+			candidate.debug.primitiveIndex = primitiveIndex;
+			candidate.debug.materialIndex = surface.materialIndex;
+			candidate.debug.sourceFlags = surface.sourceFlags;
+			candidate.debug.sourceRuleId = surface.sourceRuleId;
+			candidate.debug.textureId = surface.textureId;
+			candidate.debug.emissiveMode = surface.emissiveMode;
+			candidate.debug.emissiveTextureIndex = surface.emissiveTextureIndex;
+			candidate.debug.actorIndex = surface.actorIndex;
+			candidate.debug.primitiveArea = primitiveArea;
+			candidate.debug.powerEstimate = candidate.gpu.powerEstimate;
+			candidate.debug.emissiveIntensity = surface.emissiveIntensity;
+			Copy3(surface.emissiveColor, candidate.debug.emissiveColor);
+			ComputePrimitiveCenter(*geometry, localPrimitiveIndex, candidate.debug.center);
+
+			candidate.gpu.stableKeyLo = (uint32_t)(candidate.debug.stableKey & 0xffffffffu);
+			candidate.gpu.stableKeyHi = (uint32_t)(candidate.debug.stableKey >> 32u);
+			candidates.push_back(candidate);
+		}
+	};
 
 	for (const auto& surface : activeSurfaces)
 	{
@@ -4039,38 +4229,66 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			continue;
 		}
 
-		EmissiveSurfaceGpuData gpuSurface = {};
-		Copy3(surface.center, gpuSurface.center);
-		gpuSurface.boundsRadius = surface.boundsRadius;
-		Copy3(surface.emissiveColor, gpuSurface.emissiveColor);
-		gpuSurface.emissiveIntensity = surface.emissiveIntensity;
-		gpuSurface.surfaceArea = surface.surfaceArea;
-		gpuSurface.powerEstimate = std::max(surface.powerEstimate, 0.0f);
-		gpuSurface.sourceFlags = surface.sourceFlags;
-		gpuSurface.textureId = surface.textureId;
-		gpuSurface.stableKeyLo = (uint32_t)(surface.stableKey & 0xffffffffu);
-		gpuSurface.stableKeyHi = (uint32_t)(surface.stableKey >> 32u);
-		outSurfaces.push_back(gpuSurface);
-
-		totalPower += gpuSurface.powerEstimate;
-		if (gpuSurface.powerEstimate > dominantPower)
+		switch (surface.source)
 		{
-			dominantPower = gpuSurface.powerEstimate;
-			outHeader.dominantIndex = (uint32_t)outSurfaces.size() - 1u;
-			dominantTile = gpuSurface.textureId;
-			dominantFlags = gpuSurface.sourceFlags;
+		case SceneLightRecordSource::StaticMapScene:
+			appendSurfacePrimitives(surface, context.staticGeometry, staticRanges, NRI_SCENE_DATA_SOURCE_STATIC, 0u);
+			break;
+		case SceneLightRecordSource::CapturedScene:
+			appendSurfacePrimitives(surface, context.capturedGeometry, capturedRanges, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u);
+			break;
+		case SceneLightRecordSource::DynamicScene:
+			appendSurfacePrimitives(surface, context.dynamicGeometry, dynamicRanges, NRI_SCENE_DATA_SOURCE_DYNAMIC, context.dynamicPrimitiveBaseOffset);
+			break;
+		default:
+			break;
 		}
 	}
 
-	outHeader.activeCount = (uint32_t)outSurfaces.size();
-	outHeader.totalPower = totalPower;
-	mBoundEmissiveSurfaceCount = outHeader.activeCount;
-	mBoundEmissiveTotalPower = totalPower;
-	mBoundEmissiveDominantTile = dominantTile;
-	mBoundEmissiveDominantFlags = dominantFlags;
-	mBoundEmissiveDominantPower = std::max(dominantPower, 0.0f);
+	if (candidates.size() > NRI_MAX_EMISSIVE_PRIMITIVES)
+	{
+		std::stable_sort(candidates.begin(), candidates.end(), [](const BuiltCandidate& a, const BuiltCandidate& b)
+		{
+			if (a.gpu.powerEstimate != b.gpu.powerEstimate)
+			{
+				return a.gpu.powerEstimate > b.gpu.powerEstimate;
+			}
 
-	if (outSurfaces.empty())
+			return a.debug.stableKey < b.debug.stableKey;
+		});
+		candidates.resize(NRI_MAX_EMISSIVE_PRIMITIVES);
+	}
+
+	outPrimitives.reserve(candidates.size());
+	outDebugRecords.reserve(candidates.size());
+
+	float totalPower = 0.0f;
+	float dominantPower = -1.0f;
+	uint32_t dominantTile = 0;
+	uint32_t dominantFlags = 0;
+	uint32_t dominantPrimitive = UINT32_MAX;
+	uint32_t dominantDataSource = 0;
+
+	for (size_t i = 0; i < candidates.size(); ++i)
+	{
+		outPrimitives.push_back(candidates[i].gpu);
+		outDebugRecords.push_back(candidates[i].debug);
+		totalPower += candidates[i].gpu.powerEstimate;
+		if (candidates[i].gpu.powerEstimate > dominantPower)
+		{
+			dominantPower = candidates[i].gpu.powerEstimate;
+			outHeader.dominantIndex = (uint32_t)i;
+			dominantTile = candidates[i].gpu.textureId;
+			dominantFlags = candidates[i].gpu.sourceFlags;
+			dominantPrimitive = candidates[i].gpu.primitiveIndex;
+			dominantDataSource = candidates[i].gpu.dataSource;
+		}
+	}
+
+	outHeader.activeCount = (uint32_t)outPrimitives.size();
+	outHeader.totalPower = totalPower;
+
+	if (outPrimitives.empty())
 	{
 		outCdf.resize(1, 1.0f);
 		return;
@@ -4078,21 +4296,21 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 
 	float runningCdf = 0.0f;
 	const float invTotalPower = totalPower > 0.0f ? (1.0f / totalPower) : 0.0f;
-	for (size_t i = 0; i < outSurfaces.size(); ++i)
+	for (size_t i = 0; i < outPrimitives.size(); ++i)
 	{
 		float pdf = 0.0f;
 		if (totalPower > 0.0f)
 		{
-			pdf = outSurfaces[i].powerEstimate * invTotalPower;
+			pdf = outPrimitives[i].powerEstimate * invTotalPower;
 		}
 		else
 		{
-			pdf = 1.0f / (float)outSurfaces.size();
+			pdf = 1.0f / (float)outPrimitives.size();
 		}
 
-		outSurfaces[i].selectionPdf = pdf;
+		outPrimitives[i].selectionPdf = pdf;
 		runningCdf += pdf;
-		outCdf.push_back(i + 1 == outSurfaces.size() ? 1.0f : std::min(runningCdf, 1.0f));
+		outCdf.push_back(i + 1 == outPrimitives.size() ? 1.0f : std::min(runningCdf, 1.0f));
 	}
 }
 
@@ -4141,6 +4359,72 @@ void NRIRenderer::BuildSectorLightingUpload(
 			mBoundSectorLightDominantSector = sectorIndex;
 		}
 	}
+}
+
+bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context)
+{
+	EmissivePrimitiveHeaderGpuData emissiveHeader = {};
+	std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
+	std::vector<float> emissiveCdf;
+	std::vector<EmissivePrimitiveDebugRecord> emissiveDebugRecords;
+	BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveDebugRecords);
+
+	if (!EnsureStructuredBuffer(
+		mEmissivePrimitiveHeaderBuffer,
+		mEmissivePrimitiveHeaderBufferStats,
+		&emissiveHeader,
+		sizeof(emissiveHeader),
+		sizeof(EmissivePrimitiveHeaderGpuData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (!EnsureStructuredBuffer(
+		mEmissivePrimitiveBuffer,
+		mEmissivePrimitiveBufferStats,
+		emissivePrimitives.empty() ? nullptr : emissivePrimitives.data(),
+		emissivePrimitives.empty() ? 0u : emissivePrimitives.size() * sizeof(EmissivePrimitiveGpuData),
+		sizeof(EmissivePrimitiveGpuData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (!EnsureStructuredBuffer(
+		mEmissivePrimitiveCdfBuffer,
+		mEmissivePrimitiveCdfBufferStats,
+		emissiveCdf.data(),
+		emissiveCdf.size() * sizeof(float),
+		sizeof(float),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	mBoundEmissivePrimitiveCount = emissiveHeader.activeCount;
+	mBoundEmissiveTotalPower = emissiveHeader.totalPower;
+	mBoundEmissiveDominantPrimitive = emissiveHeader.dominantIndex != UINT32_MAX && emissiveHeader.dominantIndex < emissiveDebugRecords.size() ? emissiveDebugRecords[emissiveHeader.dominantIndex].primitiveIndex : UINT32_MAX;
+	mBoundEmissiveDominantTile = emissiveHeader.dominantIndex != UINT32_MAX && emissiveHeader.dominantIndex < emissivePrimitives.size() ? emissivePrimitives[emissiveHeader.dominantIndex].textureId : 0u;
+	mBoundEmissiveDominantFlags = emissiveHeader.dominantIndex != UINT32_MAX && emissiveHeader.dominantIndex < emissivePrimitives.size() ? emissivePrimitives[emissiveHeader.dominantIndex].sourceFlags : 0u;
+	mBoundEmissiveDominantDataSource = emissiveHeader.dominantIndex != UINT32_MAX && emissiveHeader.dominantIndex < emissivePrimitives.size() ? emissivePrimitives[emissiveHeader.dominantIndex].dataSource : 0u;
+	mBoundEmissiveDominantPower = emissiveHeader.dominantIndex != UINT32_MAX && emissiveHeader.dominantIndex < emissivePrimitives.size() ? emissivePrimitives[emissiveHeader.dominantIndex].powerEstimate : 0.0f;
+	mBoundEmissivePrimitiveRecords = std::move(emissiveDebugRecords);
+
+	mSceneDataDescriptors[13] = mEmissivePrimitiveHeaderBuffer.shaderView;
+	mSceneDataDescriptors[14] = mEmissivePrimitiveBuffer.shaderView;
+	mSceneDataDescriptors[15] = mEmissivePrimitiveCdfBuffer.shaderView;
+
+	nri::UpdateDescriptorRangeDesc update = {};
+	update.descriptorSet = mSceneDataSet;
+	update.rangeIndex = 0;
+	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
+	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
+	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	return true;
 }
 
 void NRIRenderer::BuildRuntimeLightClusterUpload(
@@ -4352,16 +4636,17 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
-	EmissiveSurfaceHeaderGpuData emissiveHeader = {};
-	std::vector<EmissiveSurfaceGpuData> emissiveSurfaces;
+	EmissivePrimitiveHeaderGpuData emissiveHeader = {};
+	std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
 	std::vector<float> emissiveCdf;
-	BuildEmissiveSamplingUpload(emissiveHeader, emissiveSurfaces, emissiveCdf);
+	std::vector<EmissivePrimitiveDebugRecord> ignoredEmissiveDebugRecords;
+	BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, ignoredEmissiveDebugRecords);
 	if (!EnsureStructuredBuffer(
-		mEmissiveSurfaceHeaderBuffer,
-		mEmissiveSurfaceHeaderBufferStats,
+		mEmissivePrimitiveHeaderBuffer,
+		mEmissivePrimitiveHeaderBufferStats,
 		&emissiveHeader,
 		sizeof(emissiveHeader),
-		sizeof(EmissiveSurfaceHeaderGpuData),
+		sizeof(EmissivePrimitiveHeaderGpuData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
 		NRIComputeShaderResourceAccess()))
 	{
@@ -4369,11 +4654,11 @@ bool NRIRenderer::UpdateSceneDataSet(
 	}
 
 	if (!EnsureStructuredBuffer(
-		mEmissiveSurfaceBuffer,
-		mEmissiveSurfaceBufferStats,
-		emissiveSurfaces.empty() ? nullptr : emissiveSurfaces.data(),
-		emissiveSurfaces.empty() ? 0u : emissiveSurfaces.size() * sizeof(EmissiveSurfaceGpuData),
-		sizeof(EmissiveSurfaceGpuData),
+		mEmissivePrimitiveBuffer,
+		mEmissivePrimitiveBufferStats,
+		emissivePrimitives.empty() ? nullptr : emissivePrimitives.data(),
+		emissivePrimitives.empty() ? 0u : emissivePrimitives.size() * sizeof(EmissivePrimitiveGpuData),
+		sizeof(EmissivePrimitiveGpuData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
 		NRIComputeShaderResourceAccess()))
 	{
@@ -4381,8 +4666,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 	}
 
 	if (!EnsureStructuredBuffer(
-		mEmissiveSurfaceCdfBuffer,
-		mEmissiveSurfaceCdfBufferStats,
+		mEmissivePrimitiveCdfBuffer,
+		mEmissivePrimitiveCdfBufferStats,
 		emissiveCdf.data(),
 		emissiveCdf.size() * sizeof(float),
 		sizeof(float),
@@ -4424,7 +4709,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
 	};
 
-	const nri::Descriptor* descriptors[NRI_SCENE_DATA_DESCRIPTOR_NUM] = {
+	mSceneDataDescriptors = {
 		selectView(staticVertexBuffer, dynamicVertexBuffer),
 		selectView(staticIndexBuffer, dynamicIndexBuffer),
 		selectView(staticPrimitiveBuffer, dynamicPrimitiveBuffer),
@@ -4438,14 +4723,14 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mRuntimeLightBuffer.shaderView,
 		mRuntimeLightTileHeaderBuffer.shaderView,
 		mRuntimeLightTileIndexBuffer.shaderView,
-		mEmissiveSurfaceHeaderBuffer.shaderView,
-		mEmissiveSurfaceBuffer.shaderView,
-		mEmissiveSurfaceCdfBuffer.shaderView,
+		mEmissivePrimitiveHeaderBuffer.shaderView,
+		mEmissivePrimitiveBuffer.shaderView,
+		mEmissivePrimitiveCdfBuffer.shaderView,
 		mSectorLightHeaderBuffer.shaderView,
 		mSectorLightBuffer.shaderView,
 	};
 
-	for (const nri::Descriptor* descriptor : descriptors)
+	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 	{
 		if (descriptor == nullptr)
 		{
@@ -4456,7 +4741,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	nri::UpdateDescriptorRangeDesc update = {};
 	update.descriptorSet = mSceneDataSet;
 	update.rangeIndex = 0;
-	update.descriptors = descriptors;
+	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
 	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
 
@@ -7480,9 +7765,9 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mRuntimeLightBuffer);
 	DestroyBufferResource(mRuntimeLightTileHeaderBuffer);
 	DestroyBufferResource(mRuntimeLightTileIndexBuffer);
-	DestroyBufferResource(mEmissiveSurfaceHeaderBuffer);
-	DestroyBufferResource(mEmissiveSurfaceBuffer);
-	DestroyBufferResource(mEmissiveSurfaceCdfBuffer);
+	DestroyBufferResource(mEmissivePrimitiveHeaderBuffer);
+	DestroyBufferResource(mEmissivePrimitiveBuffer);
+	DestroyBufferResource(mEmissivePrimitiveCdfBuffer);
 	DestroyBufferResource(mSectorLightHeaderBuffer);
 	DestroyBufferResource(mSectorLightBuffer);
 	DestroyBufferResource(mScratchBuffer);
@@ -7498,11 +7783,14 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundRuntimeLightTileSize = 0;
 	mBoundRuntimeLightTileIndexCount = 0;
 	mBoundRuntimeLightMaxTileOccupancy = 0;
-	mBoundEmissiveSurfaceCount = 0;
+	mBoundEmissivePrimitiveCount = 0;
+	mBoundEmissiveDominantPrimitive = UINT32_MAX;
 	mBoundEmissiveDominantTile = 0;
 	mBoundEmissiveDominantFlags = 0;
+	mBoundEmissiveDominantDataSource = 0;
 	mBoundEmissiveTotalPower = 0.0f;
 	mBoundEmissiveDominantPower = 0.0f;
+	mBoundEmissivePrimitiveRecords.clear();
 	mBoundSectorLightSectorCount = 0;
 	mBoundSectorLightActiveCount = 0;
 	mBoundSectorLightPulsingCount = 0;

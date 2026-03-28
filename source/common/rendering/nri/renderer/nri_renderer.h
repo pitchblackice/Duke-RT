@@ -161,7 +161,7 @@ private:
 		uint32_t indexCount = 0;
 	};
 
-	struct EmissiveSurfaceHeaderGpuData
+	struct EmissivePrimitiveHeaderGpuData
 	{
 		uint32_t activeCount = 0;
 		uint32_t dominantIndex = UINT32_MAX;
@@ -169,19 +169,44 @@ private:
 		float totalPower = 0.0f;
 	};
 
-	struct EmissiveSurfaceGpuData
+	struct EmissivePrimitiveGpuData
 	{
-		float center[3] = {};
-		float boundsRadius = 0.0f;
-		float emissiveColor[3] = {};
-		float emissiveIntensity = 0.0f;
-		float surfaceArea = 0.0f;
-		float powerEstimate = 0.0f;
-		float selectionPdf = 0.0f;
+		uint32_t dataSource = 0;
+		uint32_t primitiveIndex = UINT32_MAX;
 		uint32_t sourceFlags = 0;
 		uint32_t textureId = 0;
+		float primitiveArea = 0.0f;
+		float powerEstimate = 0.0f;
+		float selectionPdf = 0.0f;
 		uint32_t stableKeyLo = 0;
 		uint32_t stableKeyHi = 0;
+	};
+
+	struct EmissivePrimitiveDebugRecord
+	{
+		uint64_t stableKey = 0;
+		uint32_t dataSource = 0;
+		uint32_t primitiveIndex = UINT32_MAX;
+		uint32_t materialIndex = UINT32_MAX;
+		uint32_t sourceFlags = 0;
+		uint32_t sourceRuleId = 0;
+		uint32_t textureId = 0;
+		uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
+		uint32_t emissiveTextureIndex = UINT32_MAX;
+		int32_t actorIndex = -1;
+		float center[3] = {};
+		float primitiveArea = 0.0f;
+		float powerEstimate = 0.0f;
+		float emissiveColor[3] = {};
+		float emissiveIntensity = 0.0f;
+	};
+
+	struct EmissiveSamplingBuildContext
+	{
+		const nri_scene::GeometryData* staticGeometry = nullptr;
+		const nri_scene::GeometryData* capturedGeometry = nullptr;
+		const nri_scene::GeometryData* dynamicGeometry = nullptr;
+		uint32_t dynamicPrimitiveBaseOffset = 0;
 	};
 
 	struct SectorLightHeaderGpuData
@@ -390,9 +415,12 @@ private:
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const;
 	void BuildEmissiveSamplingUpload(
-		EmissiveSurfaceHeaderGpuData& outHeader,
-		std::vector<EmissiveSurfaceGpuData>& outSurfaces,
-		std::vector<float>& outCdf);
+		const EmissiveSamplingBuildContext& context,
+		EmissivePrimitiveHeaderGpuData& outHeader,
+		std::vector<EmissivePrimitiveGpuData>& outPrimitives,
+		std::vector<float>& outCdf,
+		std::vector<EmissivePrimitiveDebugRecord>& outDebugRecords) const;
+	bool UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context);
 	void BuildSectorLightingUpload(
 		SectorLightHeaderGpuData& outHeader,
 		std::vector<SectorLightGpuData>& outSectors);
@@ -532,9 +560,9 @@ private:
 	NRIBufferResource mRuntimeLightBuffer;
 	NRIBufferResource mRuntimeLightTileHeaderBuffer;
 	NRIBufferResource mRuntimeLightTileIndexBuffer;
-	NRIBufferResource mEmissiveSurfaceHeaderBuffer;
-	NRIBufferResource mEmissiveSurfaceBuffer;
-	NRIBufferResource mEmissiveSurfaceCdfBuffer;
+	NRIBufferResource mEmissivePrimitiveHeaderBuffer;
+	NRIBufferResource mEmissivePrimitiveBuffer;
+	NRIBufferResource mEmissivePrimitiveCdfBuffer;
 	NRIBufferResource mSectorLightHeaderBuffer;
 	NRIBufferResource mSectorLightBuffer;
 	NRIBufferResource mScratchBuffer;
@@ -547,9 +575,9 @@ private:
 	SceneBufferDebugStats mRuntimeLightBufferStats = { "RuntimeLight" };
 	SceneBufferDebugStats mRuntimeLightTileHeaderBufferStats = { "RuntimeLightTileHeader" };
 	SceneBufferDebugStats mRuntimeLightTileIndexBufferStats = { "RuntimeLightTileIndex" };
-	SceneBufferDebugStats mEmissiveSurfaceHeaderBufferStats = { "EmissiveSurfaceHeader" };
-	SceneBufferDebugStats mEmissiveSurfaceBufferStats = { "EmissiveSurface" };
-	SceneBufferDebugStats mEmissiveSurfaceCdfBufferStats = { "EmissiveSurfaceCdf" };
+	SceneBufferDebugStats mEmissivePrimitiveHeaderBufferStats = { "EmissivePrimitiveHeader" };
+	SceneBufferDebugStats mEmissivePrimitiveBufferStats = { "EmissivePrimitive" };
+	SceneBufferDebugStats mEmissivePrimitiveCdfBufferStats = { "EmissivePrimitiveCdf" };
 	SceneBufferDebugStats mSectorLightHeaderBufferStats = { "SectorLightHeader" };
 	SceneBufferDebugStats mSectorLightBufferStats = { "SectorLight" };
 
@@ -570,6 +598,7 @@ private:
 	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
+	std::array<nri::Descriptor*, 18> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	uint32_t mFrameIndex = 0;
@@ -636,11 +665,14 @@ private:
 	uint32_t mBoundRuntimeLightTileSize = 0;
 	uint32_t mBoundRuntimeLightTileIndexCount = 0;
 	uint32_t mBoundRuntimeLightMaxTileOccupancy = 0;
-	uint32_t mBoundEmissiveSurfaceCount = 0;
+	uint32_t mBoundEmissivePrimitiveCount = 0;
+	uint32_t mBoundEmissiveDominantPrimitive = UINT32_MAX;
 	uint32_t mBoundEmissiveDominantTile = 0;
 	uint32_t mBoundEmissiveDominantFlags = 0;
+	uint32_t mBoundEmissiveDominantDataSource = 0;
 	float mBoundEmissiveTotalPower = 0.0f;
 	float mBoundEmissiveDominantPower = 0.0f;
+	std::vector<EmissivePrimitiveDebugRecord> mBoundEmissivePrimitiveRecords;
 	uint32_t mBoundSectorLightSectorCount = 0;
 	uint32_t mBoundSectorLightActiveCount = 0;
 	uint32_t mBoundSectorLightPulsingCount = 0;
