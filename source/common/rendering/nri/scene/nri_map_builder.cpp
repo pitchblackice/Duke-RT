@@ -384,13 +384,6 @@ namespace
 			return;
 		}
 
-		// Sky planes remain out of the opaque PT world. Sector portal planes are
-		// phase-8 traversal surfaces, so keep them hittable with portal/mirror tags.
-		if (IsSkyPlane(sec, plane))
-		{
-			return;
-		}
-
 		TArray<int>* indices = nullptr;
 		auto* mesh = sectionGeometry.get(&sections[sectionIndex], plane, { 0.0f, 0.0f }, &indices);
 		if (mesh == nullptr || indices == nullptr || indices->Size() < 3)
@@ -399,6 +392,10 @@ namespace
 		}
 
 		uint32_t materialFlags = GetPlaneMaterialFlags(sec, plane);
+		if (IsSkyPlane(sec, plane))
+		{
+			materialFlags |= MaterialFlag_Sky;
+		}
 
 		PTMapSurface surface = {};
 		surface.kind = plane == 0 ? PTMapSurfaceKind::Floor : PTMapSurfaceKind::Ceiling;

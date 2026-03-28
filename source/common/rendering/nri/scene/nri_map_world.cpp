@@ -26,6 +26,10 @@ namespace
 		if ((copy.material.flags & MaterialFlag_Sky) != 0 && copy.material.texture != nullptr)
 		{
 			UpdateSceneSky(outView, copy.material.texture, 0, GetSkySourceType(copy.provenance));
+			// Map-world sky carriers should feed the scene-level environment only.
+			// Keeping them out of the opaque lists preserves the "sky via miss"
+			// contract used by the dynamic scene-capture path.
+			return;
 		}
 
 		switch (surface.kind)
