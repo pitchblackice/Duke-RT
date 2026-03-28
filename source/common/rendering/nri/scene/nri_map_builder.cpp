@@ -2,6 +2,7 @@
 
 #include "build.h"
 #include "gamefuncs.h"
+#include "hw_portal.h"
 #include "hw_sections.h"
 #include "mapinfo.h"
 #include "render.h"
@@ -12,6 +13,8 @@
 #include <cmath>
 #include <cstring>
 #include <vector>
+
+void initSkyInfo(HWDrawInfo* di, HWSkyInfo* sky, sectortype* sector, int plane);
 
 namespace
 {
@@ -148,6 +151,26 @@ namespace
 		}
 
 		return plane == 0 ? (sec->floorstat & CSTAT_SECTOR_SKY) != 0 : (sec->ceilingstat & CSTAT_SECTOR_SKY) != 0;
+	}
+
+	FGameTexture* ResolvePlaneTexture(sectortype* sec, int plane)
+	{
+		if (sec == nullptr)
+		{
+			return nullptr;
+		}
+
+		if (IsSkyPlane(sec, plane))
+		{
+			HWSkyInfo skyinfo = {};
+			initSkyInfo(nullptr, &skyinfo, sec, plane);
+			if (skyinfo.texture != nullptr && skyinfo.texture->isValid())
+			{
+				return skyinfo.texture;
+			}
+		}
+
+		return TexMan.GetGameTexture(plane == 0 ? sec->floortexture : sec->ceilingtexture, true);
 	}
 
 	uint32_t GetPlaneMaterialFlags(const sectortype* sec, int plane)
@@ -378,7 +401,7 @@ namespace
 			return;
 		}
 
-		FGameTexture* texture = TexMan.GetGameTexture(plane == 0 ? sec->floortexture : sec->ceilingtexture, true);
+		FGameTexture* texture = ResolvePlaneTexture(sec, plane);
 		if (texture == nullptr || !texture->isValid())
 		{
 			return;
