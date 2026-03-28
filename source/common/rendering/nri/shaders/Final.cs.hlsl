@@ -767,6 +767,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			composed = probeMotion.w > 0.0 ? float4(0.1, 0.9, 0.1, 1.0) : float4(1.0, 0.0, 1.0, 1.0);
 		}
+
+		const float cameraPosDelta = length(gTraceConstants.CameraPos - gTraceConstants.PrevCameraPos);
+		const float cameraForwardDelta = length(gTraceConstants.CameraForward - gTraceConstants.PrevCameraForward);
+		if (pixelPosU.x >= probeRight + 20u && pixelPosU.x < probeRight + 32u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
+		{
+			composed = cameraPosDelta > 0.001 ? float4(0.1, 0.8, 0.1, 1.0) : float4(0.25, 0.05, 0.05, 1.0);
+		}
+		if (pixelPosU.x >= probeRight + 20u && pixelPosU.x < probeRight + 32u && pixelPosU.y >= 36u && pixelPosU.y < 48u)
+		{
+			composed = cameraForwardDelta > 0.0005 ? float4(0.1, 0.8, 0.8, 1.0) : float4(0.05, 0.12, 0.12, 1.0);
+		}
 	}
 	else if (gTraceConstants.DebugMode == 6)
 	{
