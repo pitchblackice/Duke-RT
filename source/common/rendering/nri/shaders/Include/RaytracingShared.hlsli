@@ -146,7 +146,7 @@ float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward,
 	return uv - jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 }
 
-float4 SampleMaterialColor(MaterialData material, uint textureIndex, float2 uv, bool indexed, bool applyLightLevel)
+float4 SampleMaterialColor(MaterialData material, uint textureIndex, float2 uv, bool indexed, bool applyPaletteLookup, bool applyLightLevel)
 {
 	float4 color = 0.0;
 	if (indexed)
@@ -158,7 +158,7 @@ float4 SampleMaterialColor(MaterialData material, uint textureIndex, float2 uv, 
 		color = gSceneTextures[min(textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gLinearWrap, uv, 0.0);
 	}
 
-	if (indexed)
+	if (indexed && applyPaletteLookup)
 	{
 		float paletteValue = saturate(color.r) * 255.0;
 		float2 paletteUv = float2((paletteValue + 0.5) / 256.0, ((float)material.paletteIndex + 0.5) / 256.0);
@@ -176,14 +176,14 @@ float4 SampleMaterialBaseColor(uint materialIndex, uint dataSource, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex, dataSource);
 	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
-	return SampleMaterialColor(material, material.textureIndex, uv, indexed, true);
+	return SampleMaterialColor(material, material.textureIndex, uv, indexed, true, true);
 }
 
 float4 SampleMaterialBaseColorRaw(uint materialIndex, uint dataSource, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex, dataSource);
 	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
-	return SampleMaterialColor(material, material.textureIndex, uv, indexed, false);
+	return SampleMaterialColor(material, material.textureIndex, uv, indexed, false, false);
 }
 
 float3 SampleMaterialEmissionSource(uint materialIndex, uint dataSource, float2 uv)
@@ -192,7 +192,7 @@ float3 SampleMaterialEmissionSource(uint materialIndex, uint dataSource, float2 
 	const float maskScale = max(material.emissiveMaskScale, 1.0);
 	if (material.emissiveMode == 1u)
 	{
-		return SampleMaterialColor(material, material.textureIndex, uv, (material.flags & MATERIAL_FLAG_INDEXED) != 0, false).rgb * maskScale;
+		return SampleMaterialColor(material, material.textureIndex, uv, (material.flags & MATERIAL_FLAG_INDEXED) != 0, true, false).rgb * maskScale;
 	}
 	if (material.emissiveMode == 2u)
 	{
@@ -205,7 +205,7 @@ float3 SampleMaterialEmissionSource(uint materialIndex, uint dataSource, float2 
 			return material.emissiveColor * maskScale;
 		}
 
-		return SampleMaterialColor(material, material.emissiveTextureIndex, uv, false, false).rgb * maskScale;
+		return SampleMaterialColor(material, material.emissiveTextureIndex, uv, false, false, false).rgb * maskScale;
 	}
 
 	return 0.0;
