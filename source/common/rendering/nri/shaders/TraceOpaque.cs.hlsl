@@ -660,6 +660,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, kTanSunAngularRadius), 1.0, 0.0, 1.0);
 			gDirectLightingOutput[pixelPos] = 0.0;
 			gDirectEmissionOutput[pixelPos] = float4(sentinel, 1.0);
+			if (gTraceConstants.DebugMode == 5)
+			{
+				gDirectLightingOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
+				gDirectEmissionOutput[pixelPos] = 0.0;
+			}
 		}
 		else
 		{
@@ -677,6 +682,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, kTanSunAngularRadius), 1.0, 0.0, 1.0);
 			gDirectLightingOutput[pixelPos] = 0.0;
 			gDirectEmissionOutput[pixelPos] = float4(missColor, 1.0);
+			if (gTraceConstants.DebugMode == 5)
+			{
+				gDirectLightingOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
+				gDirectEmissionOutput[pixelPos] = 0.0;
+			}
 		}
 	}
 	else
@@ -690,9 +700,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float2 fallbackCurrentUv = ((float2)pixelPos + 0.5 + currentJitter) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 		const bool currentUvValid = all(projectedCurrentUv >= 0.0) && all(projectedCurrentUv <= 1.0);
 		const float2 currentUv = currentUvValid ? projectedCurrentUv : fallbackCurrentUv;
+		const bool prevUvValid = all(prevUv >= 0.0) && all(prevUv <= 1.0);
 		const float previousViewZ = dot(previousHitPosition - gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward);
 		float3 motion = 0.0;
-		if (all(prevUv >= 0.0) && all(prevUv <= 1.0))
+		if (prevUvValid)
 		{
 			motion.xy = (prevUv - currentUv) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 			motion.z = previousViewZ - currentViewZ;
@@ -907,6 +918,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gShadowPenumbraOutput[pixelPos] = float4(shadowPenumbra, shadowVisibility, 0.0, 1.0);
 		gDirectLightingOutput[pixelPos] = float4(directLighting, 1.0);
 		gDirectEmissionOutput[pixelPos] = float4(directEmission, 1.0);
+		if (gTraceConstants.DebugMode == 5)
+		{
+			gDirectLightingOutput[pixelPos] = float4(currentUvValid ? 1.0 : 0.0, prevUvValid ? 1.0 : 0.0, 1.0, 1.0);
+			gDirectEmissionOutput[pixelPos] = float4(prevUv, currentUv);
+		}
 
 		if (gTraceConstants.DebugMode == 1)
 		{
