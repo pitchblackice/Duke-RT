@@ -76,6 +76,11 @@ bool UseSplitShadowDenoiser()
 	return (gTraceConstants.Flags & 0x20u) != 0;
 }
 
+bool UseDirectionalPlaceholderLight()
+{
+	return (gTraceConstants.Flags & 0x80u) != 0;
+}
+
 bool UseRelaxDenoiser()
 {
 	return gTraceConstants.ReservedTrace1 == 1u;
@@ -425,9 +430,12 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 			bounceEmissiveOccluded);
 		indirectRadiance += throughput * (bounceEmissiveDiffuse + bounceEmissiveSpecular);
 
-		const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce + 1u, bounce * 3u + 1u), frameIndex + bounce + 1u);
-		const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
-		indirectRadiance += throughput * bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow);
+		if (UseDirectionalPlaceholderLight())
+		{
+			const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce + 1u, bounce * 3u + 1u), frameIndex + bounce + 1u);
+			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
+			indirectRadiance += throughput * bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow);
+		}
 		throughput *= bounceAlbedo.rgb * 0.65;
 		if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01)
 		{
@@ -514,11 +522,14 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			bounceEmissiveOccluded);
 		indirectRadiance += throughput * (bounceEmissiveDiffuse + bounceEmissiveSpecular);
 
-		const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce * 5u + 1u, bounce * 7u + 3u), frameIndex + bounce + 1u);
-		const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
-		indirectRadiance += throughput * (
-			bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) +
-			EvaluateSunSpecular(bounceAlbedo.rgb, bounceMetalness, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
+		if (UseDirectionalPlaceholderLight())
+		{
+			const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce * 5u + 1u, bounce * 7u + 3u), frameIndex + bounce + 1u);
+			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
+			indirectRadiance += throughput * (
+				bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) +
+				EvaluateSunSpecular(bounceAlbedo.rgb, bounceMetalness, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
+		}
 
 		throughput *= GetSurfaceSpecularColor(bounceAlbedo.rgb, bounceMetalness) * (0.9 - bounceRoughness * 0.35);
 		if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01)
@@ -661,11 +672,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			}
 			else
 			{
+				const bool useDirectionalLight = UseDirectionalPlaceholderLight();
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
 				float shadowHitDistance = 0.0;
-				const float shadow = directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir, shadowHitDistance);
+				const float shadow = useDirectionalLight ? (directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir, shadowHitDistance)) : 0.0;
 				shadowVisibility = shadow;
-				if (!directSceneTrace)
+				if (useDirectionalLight && !directSceneTrace)
 				{
 					shadowPenumbra = SIGMA_FrontEnd_PackPenumbra(shadowHitDistance, kTanSunAngularRadius);
 				}
@@ -673,9 +685,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				sectorSourceLighting = EvaluateSectorLightingSource(material, hit.normal);
 				sectorAmbientLighting = EvaluateSectorLighting(material, hit.normal, albedo.rgb);
 				directLighting += EvaluateAmbientDiffuse(albedo.rgb) + sectorAmbientLighting;
-				const float3 directSunDiffuse = EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir);
-				const float3 directSunSpecular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0);
-				directLighting += (directSunDiffuse + directSunSpecular) * shadow;
+				const float3 directSunDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir) : 0.0;
+				const float3 directSunSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0) : 0.0;
+				diffuse += directSunDiffuse * shadow;
+				specular += directSunSpecular * shadow;
 
 				const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
 				[loop]

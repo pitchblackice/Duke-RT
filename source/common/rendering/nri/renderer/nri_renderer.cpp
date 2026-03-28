@@ -51,6 +51,7 @@ CVAR(Bool, nri_dred, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptbootstrapmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptdirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -101,6 +102,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
 	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
 	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
+	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
@@ -2539,6 +2541,10 @@ void NRIRenderer::PrintStatus() const
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
 		ClampTraceBounceCount((int)nri_ptportaldepth, 8u),
 		(int)nri_ptsurfaceprobe);
+	Printf("NRI PT lighting shell: directional_placeholder=%s sector=%s emissive_heuristics=%s\n",
+		nri_ptdirectionallight ? "on" : "off",
+		nri_ptsectorlighting ? "on" : "off",
+		nri_ptemissiveheuristics ? "on" : "off");
 	Printf("NRI PT NRD: integration=%s requested=%s validation_output=%s denoiser=%s motion=%s prev_position=%s extra_debugs=%s\n",
 		mNrd.IsReady() ? "ready" : "cold",
 		nri_denoise ? "on" : "off",
@@ -2546,7 +2552,7 @@ void NRIRenderer::PrintStatus() const
 		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
-		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=raw_penumbra 22=raw_shadow 23=denoised_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient");
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=live_raw_penumbra 22=live_raw_shadow 23=temporal_sigma_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient");
 	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s shadow_split=%s\n",
 		nrdMaxFrames,
 		nrdFastFrames,
@@ -2554,7 +2560,7 @@ void NRIRenderer::PrintStatus() const
 		nri_nrdantifirefly ? "on" : "off",
 		GetNrdHitDistanceReconstructionModeName(nrdHitDistanceReconstruction),
 		GetNrdInputSplitModeName(nrdInputSplit),
-		(nri_denoise && !nri_ptbootstrap) ? "sigma" : "off");
+		mUseSplitShadowDenoiser ? "sigma-debug" : "off");
 	Printf("NRI PT SIGMA tuning: stabilization_frames=%u plane_distance_sensitivity=%.3f\n",
 		sigmaStabilizationFrames,
 		sigmaPlaneDistance);
@@ -6522,6 +6528,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
 		(mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
+		(nri_ptdirectionallight ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
