@@ -605,12 +605,24 @@ float3 BootstrapFirstTriangle(uint2 pixelPos)
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-	if (dispatchThreadId.x >= gTraceConstants.DisplayWidth || dispatchThreadId.y >= gTraceConstants.DisplayHeight)
+	uint2 targetSize;
+	gFinalOutput.GetDimensions(targetSize.x, targetSize.y);
+	const uint packedSceneOrigin = gTraceConstants.ReservedTrace0;
+	const uint2 sceneOrigin = uint2(packedSceneOrigin & 0xffffu, packedSceneOrigin >> 16);
+	if (dispatchThreadId.x >= targetSize.x || dispatchThreadId.y >= targetSize.y)
 	{
 		return;
 	}
 
-	const uint2 pixelPos = dispatchThreadId.xy;
+	const uint2 targetPixelPos = dispatchThreadId.xy;
+	const uint2 sceneSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
+	if (any(targetPixelPos < sceneOrigin) || any(targetPixelPos >= sceneOrigin + sceneSize))
+	{
+		gFinalOutput[targetPixelPos] = 0.0;
+		return;
+	}
+
+	const uint2 pixelPos = targetPixelPos - sceneOrigin;
 	const float2 uv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
 	const uint2 samplePos = ResolvePresentSamplePos(pixelPos);
 	float4 composed = 0.0;
@@ -666,32 +678,32 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			color = BootstrapCapturedSceneBaseColor(uv);
 		}
-		gFinalOutput[pixelPos] = saturate(color);
+		gFinalOutput[targetPixelPos] = saturate(color);
 		return;
 	}
 
 	if (gTraceConstants.DebugMode == 5)
 	{
-		const float2 motion = gMotionInput[pixelPos].xy / max(float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight), 1.0);
+		const float2 motion = gMotionInput.Load(int3(samplePos, 0)).xy / max(float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight), 1.0);
 		composed = float4(motion * 0.5 + 0.5, 0.5, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 6)
 	{
-		const float viewZ = abs(gViewZInput[pixelPos].x);
+		const float viewZ = abs(gViewZInput.Load(int3(samplePos, 0)).x);
 		const float normalized = saturate(viewZ / 4096.0);
 		composed = float4(normalized.xxx, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 7)
 	{
-		composed = float4(saturate(gBaseColorInput[pixelPos].rgb), 1.0);
+		composed = float4(saturate(gBaseColorInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 8)
 	{
-		composed = float4(NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos]).xyz * 0.5 + 0.5, 1.0);
+		composed = float4(NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput.Load(int3(samplePos, 0))).xyz * 0.5 + 0.5, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 9)
 	{
-		composed = float4(saturate(gValidationInput[pixelPos].rgb), 1.0);
+		composed = float4(saturate(gValidationInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 10)
 	{
@@ -709,11 +721,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 13)
 	{
-		composed = float4(saturate(gHistoryInput.Load(int3(samplePos, 0)).rgb), 1.0);
+		composed = float4(saturate(gHistoryInput.Load(int3(pixelPos, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 14)
 	{
-		composed = float4(saturate(gUpscaledInput.Load(int3(samplePos, 0)).rgb), 1.0);
+		composed = float4(saturate(gUpscaledInput.Load(int3(pixelPos, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 15)
 	{
@@ -721,18 +733,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 18)
 	{
-		const float metalness = saturate(gBaseColorInput[pixelPos].a);
+		const float metalness = saturate(gBaseColorInput.Load(int3(samplePos, 0)).a);
 		composed = float4(metalness.xxx, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 19)
 	{
 		float materialID = 0.0;
-		const float roughness = NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos], materialID).w;
+		const float roughness = NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput.Load(int3(samplePos, 0)), materialID).w;
 		composed = float4(roughness.xxx, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 20)
 	{
-		const float motionZ = gMotionInput[pixelPos].z;
+		const float motionZ = gMotionInput.Load(int3(samplePos, 0)).z;
 		const float magnitude = saturate(abs(motionZ) / 256.0);
 		const float3 positive = float3(0.5 + 0.5 * magnitude, 0.5 - 0.5 * magnitude, 0.5 - 0.5 * magnitude);
 		const float3 negative = float3(0.5 - 0.5 * magnitude, 0.5 - 0.5 * magnitude, 0.5 + 0.5 * magnitude);
@@ -746,7 +758,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else
 		{
-			const float penumbra = max(gGuideSpecHitInput[pixelPos].x, 0.0);
+			const float penumbra = max(gGuideSpecHitInput.Load(int3(samplePos, 0)).x, 0.0);
 			const float mapped = saturate(log2(1.0 + penumbra) / 8.0);
 			composed = float4(mapped.xxx, 1.0);
 		}
@@ -759,7 +771,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else
 		{
-			const float rawShadow = saturate(gGuideSpecHitInput[pixelPos].y);
+			const float rawShadow = saturate(gGuideSpecHitInput.Load(int3(samplePos, 0)).y);
 			composed = float4(rawShadow.xxx, 1.0);
 		}
 	}
@@ -771,17 +783,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else
 		{
-			const float denoisedShadow = saturate(SIGMA_BackEnd_UnpackShadow(gShadowInput[pixelPos]).x);
+			const float denoisedShadow = saturate(SIGMA_BackEnd_UnpackShadow(gShadowInput.Load(int3(samplePos, 0))).x);
 			composed = float4(denoisedShadow.xxx, 1.0);
 		}
 	}
 	else if (gTraceConstants.DebugMode == 24)
 	{
-		composed = float4(saturate(gDirectLightingInput[pixelPos].rgb), 1.0);
+		composed = float4(saturate(gDirectLightingInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 25)
 	{
-		composed = float4(saturate(gDirectEmissionInput[pixelPos].rgb), 1.0);
+		composed = float4(saturate(gDirectEmissionInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
@@ -789,12 +801,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if ((gTraceConstants.Flags & 0x2u) != 0)
 	{
-		composed = gUpscaledInput.Load(int3(samplePos, 0));
+		composed = gUpscaledInput.Load(int3(pixelPos, 0));
 	}
 	else
 	{
-		composed = gComposedInput[pixelPos];
+		composed = gComposedInput.Load(int3(samplePos, 0));
 	}
 
-	gFinalOutput[pixelPos] = saturate(composed.rgb);
+	gFinalOutput[targetPixelPos] = saturate(composed.rgb);
 }

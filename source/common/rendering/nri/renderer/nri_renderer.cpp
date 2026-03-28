@@ -1574,7 +1574,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	const bool ready =
 		Initialize() &&
-		EnsureFrameResources(mFrameBuffer->mActiveTarget->width, mFrameBuffer->mActiveTarget->height);
+		EnsureFrameResources(
+			std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.width, 1u),
+			std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.height, 1u),
+			mFrameBuffer->mActiveTarget->width,
+			mFrameBuffer->mActiveTarget->height);
 	if (!ready)
 	{
 		LogFallback("PT frame resources or pipelines failed to initialize.");
@@ -5028,10 +5032,19 @@ void NRIRenderer::PrepareSceneTextureInputsForCompute()
 	}
 }
 
-bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight)
+bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
 {
 	Clocker clock(NriPTFrameResources);
 
+	if (outputWidth == 0 || outputHeight == 0 || targetWidth == 0 || targetHeight == 0)
+	{
+		return false;
+	}
+
+	const uint32_t sceneLeft = std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.left, 0), targetWidth - 1u);
+	const uint32_t sceneTop = std::min<uint32_t>((uint32_t)std::max(mFrameBuffer->mSceneViewport.top, 0), targetHeight - 1u);
+	outputWidth = std::min(outputWidth, targetWidth - sceneLeft);
+	outputHeight = std::min(outputHeight, targetHeight - sceneTop);
 	if (outputWidth == 0 || outputHeight == 0)
 	{
 		return false;
@@ -5056,6 +5069,10 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		mRenderHeight == renderHeight &&
 		mOutputWidth == outputWidth &&
 		mOutputHeight == outputHeight &&
+		mTargetWidth == targetWidth &&
+		mTargetHeight == targetHeight &&
+		mSceneLeft == sceneLeft &&
+		mSceneTop == sceneTop &&
 		mOutputFormat == outputFormat &&
 		GetFrameTexture(FrameTextureSlot::Final).texture != nullptr;
 
@@ -5070,6 +5087,10 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	mRenderHeight = renderHeight;
 	mOutputWidth = outputWidth;
 	mOutputHeight = outputHeight;
+	mTargetWidth = targetWidth;
+	mTargetHeight = targetHeight;
+	mSceneLeft = sceneLeft;
+	mSceneTop = sceneTop;
 	mOutputFormat = outputFormat;
 	RequestHistoryReset("frame-resources");
 
@@ -5100,7 +5121,7 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		CreateFrameTexture(FrameTextureSlot::DlssNormalRoughness, renderWidth, renderHeight, normalRoughnessFormat) &&
 		CreateFrameTexture(FrameTextureSlot::Upscaled, outputWidth, outputHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::PreFinal, outputWidth, outputHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::Final, outputWidth, outputHeight, finalFormat);
+		CreateFrameTexture(FrameTextureSlot::Final, targetWidth, targetHeight, finalFormat);
 }
 
 bool NRIRenderer::EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials)
@@ -5154,6 +5175,7 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.DebugMode = (uint32_t)nri_ptdebug;
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
+	constants.ReservedTrace0 = (mSceneLeft & 0xffffu) | ((mSceneTop & 0xffffu) << 16);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -5200,7 +5222,7 @@ bool NRIRenderer::DispatchBootstrapView()
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Final));
-	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mOutputWidth), GetDispatchSize(mOutputHeight), 1 });
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mTargetWidth), GetDispatchSize(mTargetHeight), 1 });
 	return true;
 }
 
@@ -7499,6 +7521,7 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.ReservedTrace0 = (mSceneLeft & 0xffffu) | ((mSceneTop & 0xffffu) << 16);
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
@@ -7542,7 +7565,7 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mPresentFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mPresentOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::RawPresent));
-	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mOutputWidth), GetDispatchSize(mOutputHeight), 1 });
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mTargetWidth), GetDispatchSize(mTargetHeight), 1 });
 	return true;
 }
 
@@ -7557,6 +7580,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
 	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.ReservedTrace0 = (mSceneLeft & 0xffffu) | ((mSceneTop & 0xffffu) << 16);
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
@@ -7589,7 +7613,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mPresentFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mPresentOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::FinalPresent));
-	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mOutputWidth), GetDispatchSize(mOutputHeight), 1 });
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mTargetWidth), GetDispatchSize(mTargetHeight), 1 });
 	return true;
 }
 
@@ -7838,6 +7862,7 @@ bool NRIRenderer::DispatchFinal()
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
+	constants.ReservedTrace0 = (mSceneLeft & 0xffffu) | ((mSceneTop & 0xffffu) << 16);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -7903,7 +7928,7 @@ bool NRIRenderer::DispatchFinal()
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Final));
-	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mOutputWidth), GetDispatchSize(mOutputHeight), 1 });
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mTargetWidth), GetDispatchSize(mTargetHeight), 1 });
 	return true;
 }
 
@@ -8144,6 +8169,10 @@ void NRIRenderer::DestroyFrameTextures()
 	mRenderHeight = 0;
 	mOutputWidth = 0;
 	mOutputHeight = 0;
+	mTargetWidth = 0;
+	mTargetHeight = 0;
+	mSceneLeft = 0;
+	mSceneTop = 0;
 	mOutputFormat = nri::Format::UNKNOWN;
 }
 
