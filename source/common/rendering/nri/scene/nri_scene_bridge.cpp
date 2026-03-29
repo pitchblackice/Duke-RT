@@ -82,22 +82,17 @@ namespace
 		std::chrono::steady_clock::time_point mStart = {};
 	};
 
-	bool TryBuildPersistentAverageColorSignature(FTexture* baseTexture, TextureSignature& outSignature)
+	bool TryBuildPersistentAverageColorSignature(FGameTexture* texture, TextureSignature& outSignature)
 	{
 		outSignature = {};
-		if (baseTexture == nullptr || dynamic_cast<FSkyBox*>(baseTexture) != nullptr)
+		if (!IsUsableGameTexturePointer(texture))
 		{
 			return false;
 		}
 
-		TextureSignatureRequest request = {};
-		request.contentKind = TextureSignatureContentKind::ProcessedBGRA;
-		request.translation = 0;
-		request.flags = TextureSignatureRequestFlag_None;
-		return TryBuildImageTextureSignature(baseTexture, request, outSignature) &&
+		return TryBuildAverageColorTextureSignature(texture, outSignature) &&
 			outSignature.valid &&
-			outSignature.persistentEligible &&
-			outSignature.sourceKind == TextureSignatureSourceKind::ImageBacked;
+			outSignature.persistentEligible;
 	}
 
 	bool TryLoadPersistentAverageColor(const TextureSignature& signature, float* outColor, bool& outSuccess)
@@ -519,7 +514,7 @@ namespace
 		}
 
 		TextureSignature persistentSignature = {};
-		const bool hasPersistentSignature = TryBuildPersistentAverageColorSignature(baseTexture, persistentSignature);
+		const bool hasPersistentSignature = TryBuildPersistentAverageColorSignature(texture, persistentSignature);
 
 		bool cachedSuccess = false;
 		if (hasPersistentSignature && TryLoadPersistentAverageColor(persistentSignature, outColor, cachedSuccess))

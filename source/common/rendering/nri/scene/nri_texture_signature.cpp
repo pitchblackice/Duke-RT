@@ -137,8 +137,9 @@ namespace
 		return salt;
 	}
 
-	bool TryBuildSkyboxTextureSignatureImpl(FSkyBox* skybox, const TextureSignatureRequest& request, TextureSignature& outSignature, int depth);
+	bool TryBuildSkyboxTextureSignatureImpl(FSkyBox* skybox, const TextureSignatureRequest& request, TextureSignature& outSignature, int depth, bool includeFlipTopInKey);
 	bool TryBuildTextureSignatureImpl(FGameTexture* texture, const TextureSignatureRequest& request, TextureSignature& outSignature, int depth);
+	bool TryBuildAverageColorTextureSignatureImpl(FGameTexture* texture, TextureSignature& outSignature, int depth);
 }
 
 namespace nri_scene
@@ -212,18 +213,23 @@ bool TryBuildSkyboxTextureSignature(FGameTexture* texture, const TextureSignatur
 		return false;
 	}
 
-	return TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, 0);
+	return TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, 0, true);
 }
 
 bool TryBuildTextureSignature(FGameTexture* texture, const TextureSignatureRequest& request, TextureSignature& outSignature)
 {
 	return TryBuildTextureSignatureImpl(texture, request, outSignature, 0);
 }
+
+bool TryBuildAverageColorTextureSignature(FGameTexture* texture, TextureSignature& outSignature)
+{
+	return TryBuildAverageColorTextureSignatureImpl(texture, outSignature, 0);
+}
 }
 
 namespace
 {
-	bool TryBuildSkyboxTextureSignatureImpl(FSkyBox* skybox, const TextureSignatureRequest& request, TextureSignature& outSignature, int depth)
+	bool TryBuildSkyboxTextureSignatureImpl(FSkyBox* skybox, const TextureSignatureRequest& request, TextureSignature& outSignature, int depth, bool includeFlipTopInKey)
 	{
 		outSignature = {};
 		if (!CanBuildTextureSignatureFromMetadata(request) || skybox == nullptr || depth > kMaxTextureSignatureDepth)
@@ -250,7 +256,10 @@ namespace
 			}
 
 			TextureSignature faceSignature = {};
-			if (!TryBuildTextureSignatureImpl(face, request, faceSignature, depth + 1))
+			const bool faceOk = includeFlipTopInKey ?
+				TryBuildTextureSignatureImpl(face, request, faceSignature, depth + 1) :
+				TryBuildAverageColorTextureSignatureImpl(face, faceSignature, depth + 1);
+			if (!faceOk)
 			{
 				return false;
 			}
@@ -274,7 +283,10 @@ namespace
 		{
 			FGameTexture* previous = TryGetSkyPrevious(skybox);
 			TextureSignature previousSignature = {};
-			if (previous == nullptr || !TryBuildTextureSignatureImpl(previous, request, previousSignature, depth + 1))
+			const bool previousOk = previous != nullptr && (includeFlipTopInKey ?
+				TryBuildTextureSignatureImpl(previous, request, previousSignature, depth + 1) :
+				TryBuildAverageColorTextureSignatureImpl(previous, previousSignature, depth + 1));
+			if (!previousOk)
 			{
 				return false;
 			}
@@ -298,7 +310,10 @@ namespace
 		const bool flipTop = skybox->GetSkyFlip();
 		key = HashCombine64(key, (uint64_t)faceMask);
 		key = HashCombine64(key, isThreeFace ? 1ull : 0ull);
-		key = HashCombine64(key, flipTop ? 1ull : 0ull);
+		if (includeFlipTopInKey)
+		{
+			key = HashCombine64(key, flipTop ? 1ull : 0ull);
+		}
 
 		outSignature.valid = true;
 		outSignature.metadataDerived = true;
@@ -330,7 +345,34 @@ namespace
 
 		if (auto* skybox = dynamic_cast<FSkyBox*>(baseTexture))
 		{
-			return TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, depth);
+			return TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, depth, true);
+		}
+
+		return TryBuildImageTextureSignature(baseTexture, request, outSignature);
+	}
+
+	bool TryBuildAverageColorTextureSignatureImpl(FGameTexture* texture, TextureSignature& outSignature, int depth)
+	{
+		outSignature = {};
+		if (depth > kMaxTextureSignatureDepth)
+		{
+			return false;
+		}
+
+		FTexture* baseTexture = TryResolveBaseTexture(texture);
+		if (baseTexture == nullptr)
+		{
+			return false;
+		}
+
+		TextureSignatureRequest request = {};
+		request.contentKind = TextureSignatureContentKind::ProcessedBGRA;
+		request.translation = 0;
+		request.flags = TextureSignatureRequestFlag_None;
+
+		if (auto* skybox = dynamic_cast<FSkyBox*>(baseTexture))
+		{
+			return TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, depth, false);
 		}
 
 		return TryBuildImageTextureSignature(baseTexture, request, outSignature);

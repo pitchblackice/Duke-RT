@@ -67,4 +67,10 @@ bool TryBuildSkyboxTextureSignature(FGameTexture* texture, const TextureSignatur
 // Attempts to build a metadata-only signature for a game texture by resolving it to
 // either an image-backed texture or a structural skybox description.
 bool TryBuildTextureSignature(FGameTexture* texture, const TextureSignatureRequest& request, TextureSignature& outSignature);
+
+// Attempts to build a metadata-only signature for average-color caching.
+// This is intentionally narrower than a generic texture-content signature:
+// it describes the source structure needed to derive an average color, so
+// skybox-only orientation details like flip-top are excluded from the key.
+bool TryBuildAverageColorTextureSignature(FGameTexture* texture, TextureSignature& outSignature);
 }
