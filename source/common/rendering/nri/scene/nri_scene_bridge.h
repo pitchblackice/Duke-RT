@@ -100,6 +100,25 @@ struct SceneDebugStats
 	unsigned int unsupportedModelDrawItems = 0;
 };
 
+struct SkyPerfStats
+{
+	uint32_t updateCalls = 0;
+	uint32_t wallUpdateCalls = 0;
+	uint32_t flatUpdateCalls = 0;
+	uint32_t portalUpdateCalls = 0;
+	uint32_t inspectCalls = 0;
+	uint32_t inspectCubemapCandidates = 0;
+	uint32_t inspectSolidCandidates = 0;
+	uint32_t inspectFaceWalks = 0;
+	uint32_t averageColorBaseCalls = 0;
+	uint32_t averageColorRecursiveCalls = 0;
+	uint32_t recursiveSkyboxFaceSamples = 0;
+	uint64_t averageColorPixels = 0;
+	uint64_t updateTimeUs = 0;
+	uint64_t inspectTimeUs = 0;
+	uint64_t averageColorTimeUs = 0;
+};
+
 struct MaterialRef
 {
 	FGameTexture* texture = nullptr;
@@ -138,6 +157,8 @@ struct SceneView
 SceneDebugStats CollectDebugStats(HWDrawInfo& di);
 MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float alpha, uint32_t extraFlags);
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType);
+void ResetSkyPerfStats();
+SkyPerfStats ConsumeSkyPerfStats();
 bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 }

@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -121,6 +122,78 @@ namespace
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
 	constexpr uint32_t NRI_EMISSIVE_SAMPLING_FLAG_AUTO_ONLY = 0x1u;
 	constexpr uint32_t NRI_SECTOR_LIGHTING_FLAG_ENABLED = 0x1u;
+
+	struct RendererSkyPerfTraceStats
+	{
+		uint32_t ensureSceneTexturesCalls = 0;
+		uint32_t ensureSceneTexturesPreserveTrueCalls = 0;
+		uint32_t ensureSceneTexturesPreserveFalseCalls = 0;
+		uint32_t ensureSkyCalls = 0;
+		uint32_t preserveExistingHits = 0;
+		uint32_t reuseActiveCubemapHits = 0;
+		uint32_t probeAttempts = 0;
+		uint32_t probeSuccesses = 0;
+		uint32_t reuseActiveProbeHits = 0;
+		uint32_t activateCachedCubemapHits = 0;
+		uint32_t createCachedCubemapHits = 0;
+		uint32_t keepLastCubemapHits = 0;
+		uint32_t holdLevelCubemapHits = 0;
+		uint32_t solidReuseHits = 0;
+		uint32_t solidActivateHits = 0;
+		uint32_t solidCreateHits = 0;
+		uint32_t probeFaceCalls = 0;
+		uint32_t buildCubemapUploadCalls = 0;
+		uint32_t residentStaticSceneTextureBuilds = 0;
+		uint32_t combinedOverlayTextureBuilds = 0;
+		uint32_t lightingInvalidationRequests = 0;
+		uint32_t lightingInvalidationsApplied = 0;
+		uint32_t emissiveMaterialDirtyEvents = 0;
+		uint64_t ensureSkyTimeUs = 0;
+		uint64_t probeCubemapTimeUs = 0;
+		uint64_t probeFaceTimeUs = 0;
+		uint64_t buildCubemapUploadTimeUs = 0;
+	};
+
+	RendererSkyPerfTraceStats gRendererSkyPerfTraceStats = {};
+
+	bool ShouldTraceSkyPerf()
+	{
+		return nri_pttraceframes > 0;
+	}
+
+	class ScopedSkyPerfTimer
+	{
+	public:
+		explicit ScopedSkyPerfTimer(uint64_t& targetUs)
+			: mTarget(ShouldTraceSkyPerf() ? &targetUs : nullptr)
+		{
+			if (mTarget != nullptr)
+			{
+				mStart = std::chrono::steady_clock::now();
+			}
+		}
+
+		~ScopedSkyPerfTimer()
+		{
+			if (mTarget != nullptr)
+			{
+				const auto elapsed = std::chrono::steady_clock::now() - mStart;
+				*mTarget += (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+			}
+		}
+
+		ScopedSkyPerfTimer(const ScopedSkyPerfTimer&) = delete;
+		ScopedSkyPerfTimer& operator=(const ScopedSkyPerfTimer&) = delete;
+
+	private:
+		uint64_t* mTarget = nullptr;
+		std::chrono::steady_clock::time_point mStart = {};
+	};
+
+	void ResetRendererSkyPerfTraceStats()
+	{
+		gRendererSkyPerfTraceStats = {};
+	}
 
 	const char* GetMaterialEmissiveModeName(uint32_t mode)
 	{
@@ -1146,6 +1219,11 @@ namespace
 
 	static bool ProbeFace(FGameTexture* texture, SkyFaceProbe& outFace)
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.probeFaceCalls++;
+		}
+		ScopedSkyPerfTimer timer(gRendererSkyPerfTraceStats.probeFaceTimeUs);
 		FTexture* baseTexture = TryGetBaseTexture(texture);
 		if (baseTexture == nullptr || baseTexture->GetImage() == nullptr)
 		{
@@ -1167,6 +1245,11 @@ namespace
 
 	static bool ProbeCubemapSky(const nri_scene::SceneView& sceneView, SkyProbe& outProbe)
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.probeAttempts++;
+		}
+		ScopedSkyPerfTimer timer(gRendererSkyPerfTraceStats.probeCubemapTimeUs);
 		if (sceneView.sky.mode != nri_scene::PTSkyMode::Cubemap || !IsUsableGameTexturePointer(sceneView.sky.texture))
 		{
 			return false;
@@ -1223,11 +1306,20 @@ namespace
 		}
 
 		outProbe.key = key;
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.probeSuccesses++;
+		}
 		return true;
 	}
 
 	static bool BuildCubemapUpload(const nri_scene::SceneView& sceneView, const SkyProbe& probe, SkyUpload& outUpload)
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.buildCubemapUploadCalls++;
+		}
+		ScopedSkyPerfTimer timer(gRendererSkyPerfTraceStats.buildCubemapUploadTimeUs);
 		struct FaceMapping
 		{
 			bool flipHorizontal;
@@ -1507,6 +1599,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	Clocker totalClock(NriPTAll);
+	const uint32_t traceFrameIndex = mFrameIndex;
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	const bool bootstrapSimpleView = nri_ptbootstrap && bootstrapMode <= 3u;
@@ -1603,6 +1696,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	}
 
 	ResetSceneBufferFrameStats();
+	ResetRendererSkyPerfTraceStats();
+	nri_scene::ResetSkyPerfStats();
 	mUsedStaticMapSceneLastFrame = false;
 	mUsedDynamicSceneLastFrame = false;
 	mUploadedStaticMapSceneLastFrame = false;
@@ -1640,6 +1735,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	RefreshMapWorld();
 	if (mPendingStaticMapLightingInvalidation)
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.lightingInvalidationsApplied++;
+		}
 		InvalidateStaticMapSceneForMaterialLighting();
 		mPendingStaticMapLightingInvalidation = false;
 	}
@@ -1876,6 +1975,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				combinedMaterialBridge = mStaticMapScene.materialBridge;
 				AppendMaterialBridge(overlayMaterialBridge, combinedMaterialBridge);
 				paletteReady = EnsurePaletteTexture(combinedMaterialBridge);
+				if (ShouldTraceSkyPerf())
+				{
+					gRendererSkyPerfTraceStats.combinedOverlayTextureBuilds++;
+				}
 				texturesReady = paletteReady && EnsureSceneTextures(mStaticMapScene.sceneView, combinedMaterialBridge, combinedGpuMaterials, false);
 				dynamicGpuMaterials.clear();
 				if (texturesReady)
@@ -2266,6 +2369,58 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	else if (preserveHistory)
 	{
 		restoreHistory();
+	}
+
+	if (nri_pttraceframes > 0)
+	{
+		const nri_scene::SkyPerfStats sceneSkyPerf = nri_scene::ConsumeSkyPerfStats();
+		Printf("NRI PT sky perf: frame=%u ensure_scene=%u preserve_scene=%u rebuild_scene=%u ensure_sky=%u preserve_hit=%u reuse_active=%u reuse_probe=%u probe=%u/%u face_probes=%u uploads=%u ensure_ms=%.3f probe_ms=%.3f face_ms=%.3f upload_ms=%.3f static_builds=%u overlay_builds=%u\n",
+			traceFrameIndex,
+			gRendererSkyPerfTraceStats.ensureSceneTexturesCalls,
+			gRendererSkyPerfTraceStats.ensureSceneTexturesPreserveTrueCalls,
+			gRendererSkyPerfTraceStats.ensureSceneTexturesPreserveFalseCalls,
+			gRendererSkyPerfTraceStats.ensureSkyCalls,
+			gRendererSkyPerfTraceStats.preserveExistingHits,
+			gRendererSkyPerfTraceStats.reuseActiveCubemapHits + gRendererSkyPerfTraceStats.solidReuseHits,
+			gRendererSkyPerfTraceStats.reuseActiveProbeHits,
+			gRendererSkyPerfTraceStats.probeSuccesses,
+			gRendererSkyPerfTraceStats.probeAttempts,
+			gRendererSkyPerfTraceStats.probeFaceCalls,
+			gRendererSkyPerfTraceStats.buildCubemapUploadCalls,
+			(double)gRendererSkyPerfTraceStats.ensureSkyTimeUs / 1000.0,
+			(double)gRendererSkyPerfTraceStats.probeCubemapTimeUs / 1000.0,
+			(double)gRendererSkyPerfTraceStats.probeFaceTimeUs / 1000.0,
+			(double)gRendererSkyPerfTraceStats.buildCubemapUploadTimeUs / 1000.0,
+			gRendererSkyPerfTraceStats.residentStaticSceneTextureBuilds,
+			gRendererSkyPerfTraceStats.combinedOverlayTextureBuilds);
+		Printf("NRI PT sky scene: frame=%u updates=%u wall=%u flat=%u portal=%u inspects=%u cubemap_candidates=%u solid_candidates=%u inspect_faces=%u avg_base=%u avg_recursive=%u recursive_faces=%u avg_pixels=%llu update_ms=%.3f inspect_ms=%.3f avg_ms=%.3f\n",
+			traceFrameIndex,
+			sceneSkyPerf.updateCalls,
+			sceneSkyPerf.wallUpdateCalls,
+			sceneSkyPerf.flatUpdateCalls,
+			sceneSkyPerf.portalUpdateCalls,
+			sceneSkyPerf.inspectCalls,
+			sceneSkyPerf.inspectCubemapCandidates,
+			sceneSkyPerf.inspectSolidCandidates,
+			sceneSkyPerf.inspectFaceWalks,
+			sceneSkyPerf.averageColorBaseCalls,
+			sceneSkyPerf.averageColorRecursiveCalls,
+			sceneSkyPerf.recursiveSkyboxFaceSamples,
+			(unsigned long long)sceneSkyPerf.averageColorPixels,
+			(double)sceneSkyPerf.updateTimeUs / 1000.0,
+			(double)sceneSkyPerf.inspectTimeUs / 1000.0,
+			(double)sceneSkyPerf.averageColorTimeUs / 1000.0);
+		Printf("NRI PT sky invalidation: frame=%u requests=%u applied=%u emissive_material_dirty=%u keep_last=%u hold_level=%u cached_cubemap=%u create_cubemap=%u cached_solid=%u create_solid=%u\n",
+			traceFrameIndex,
+			gRendererSkyPerfTraceStats.lightingInvalidationRequests,
+			gRendererSkyPerfTraceStats.lightingInvalidationsApplied,
+			gRendererSkyPerfTraceStats.emissiveMaterialDirtyEvents,
+			gRendererSkyPerfTraceStats.keepLastCubemapHits,
+			gRendererSkyPerfTraceStats.holdLevelCubemapHits,
+			gRendererSkyPerfTraceStats.activateCachedCubemapHits,
+			gRendererSkyPerfTraceStats.createCachedCubemapHits,
+			gRendererSkyPerfTraceStats.solidActivateHits,
+			gRendererSkyPerfTraceStats.solidCreateHits);
 	}
 
 	return success;
@@ -3840,6 +3995,10 @@ void NRIRenderer::RefreshSceneLightSystem(
 	}
 	if (mSceneLights.ConsumeEmissiveMaterialsDirty())
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.emissiveMaterialDirtyEvents++;
+		}
 		QueueStaticMapSceneLightingInvalidation();
 		RequestHistoryReset("emissive-material-change");
 	}
@@ -3851,6 +4010,10 @@ void NRIRenderer::RefreshSceneLightSystem(
 
 void NRIRenderer::QueueStaticMapSceneLightingInvalidation()
 {
+	if (ShouldTraceSkyPerf())
+	{
+		gRendererSkyPerfTraceStats.lightingInvalidationRequests++;
+	}
 	mPendingStaticMapLightingInvalidation = true;
 }
 
@@ -5429,6 +5592,11 @@ bool NRIRenderer::EnsureStaticMapScene()
 		mStaticMapScene.chunks.push_back(std::move(chunkCache));
 	}
 
+	if (ShouldTraceSkyPerf())
+	{
+		gRendererSkyPerfTraceStats.residentStaticSceneTextureBuilds++;
+	}
+
 	if (mStaticMapScene.geometry.primitives.empty() ||
 		!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
 		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false) ||
@@ -5469,6 +5637,11 @@ bool NRIRenderer::EnsureStaticMapScene()
 
 bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky)
 {
+	if (ShouldTraceSkyPerf())
+	{
+		gRendererSkyPerfTraceStats.ensureSkyCalls++;
+	}
+	ScopedSkyPerfTimer timer(gRendererSkyPerfTraceStats.ensureSkyTimeUs);
 	if (mSkyLevel != currentLevel)
 	{
 		mActiveSkyTextureIndex = UINT32_MAX;
@@ -5542,6 +5715,10 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 	const NRITextureResource* activeSkyTexture = GetActiveSkyTexture();
 	if (preserveExistingSky && activeSkyTexture != nullptr)
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.preserveExistingHits++;
+		}
 		TraceSkyState(sceneView, "preserve-existing", mSkyTextureKey);
 		return true;
 	}
@@ -5554,6 +5731,10 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		mSkyState.flipTop == sceneView.sky.flipTop)
 	{
 		mSkyLevel = currentLevel;
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.reuseActiveCubemapHits++;
+		}
 		TraceSkyState(sceneView, "reuse-active-cubemap", mSkyTextureKey);
 		return true;
 	}
@@ -5567,6 +5748,10 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 			activeSkyTexture->height == probe.height)
 		{
 			mSkyLevel = currentLevel;
+			if (ShouldTraceSkyPerf())
+			{
+				gRendererSkyPerfTraceStats.reuseActiveProbeHits++;
+			}
 			TraceSkyState(sceneView, "reuse-active-probe", probe.key);
 			return true;
 		}
@@ -5576,6 +5761,10 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		{
 			activateCachedSky(cachedIndex, probe.key, sceneView, nri_scene::PTSkyMode::Cubemap);
 			mSkyLevel = currentLevel;
+			if (ShouldTraceSkyPerf())
+			{
+				gRendererSkyPerfTraceStats.activateCachedCubemapHits++;
+			}
 			TraceSkyState(sceneView, "activate-cached-cubemap", probe.key);
 			return true;
 		}
@@ -5594,6 +5783,10 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 
 		activateCachedSky(createdIndex, upload.key, sceneView, nri_scene::PTSkyMode::Cubemap);
 		mSkyLevel = currentLevel;
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.createCachedCubemapHits++;
+		}
 		TraceSkyState(sceneView, "create-cached-cubemap", upload.key);
 		return true;
 	}
@@ -5613,10 +5806,18 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		if (sceneView.sky.mode == nri_scene::PTSkyMode::SolidColor &&
 			sceneView.sky.sourceType != nri_scene::PTSkySourceType::Portal)
 		{
+			if (ShouldTraceSkyPerf())
+			{
+				gRendererSkyPerfTraceStats.holdLevelCubemapHits++;
+			}
 			TraceSkyState(sceneView, "hold-level-cubemap", mSkyTextureKey);
 			return true;
 		}
 
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.keepLastCubemapHits++;
+		}
 		TraceSkyState(sceneView, "keep-last-cubemap", mSkyTextureKey);
 		return true;
 	}
@@ -5628,6 +5829,10 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		activeSkyTexture->width == upload.width &&
 		activeSkyTexture->height == upload.height)
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.solidReuseHits++;
+		}
 		TraceSkyState(sceneView, "reuse-active-solid", upload.key);
 		return true;
 	}
@@ -5636,6 +5841,10 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 	if (cachedIndex != UINT32_MAX)
 	{
 		activateCachedSky(cachedIndex, upload.key, sceneView, nri_scene::PTSkyMode::SolidColor);
+		if (ShouldTraceSkyPerf())
+		{
+			gRendererSkyPerfTraceStats.solidActivateHits++;
+		}
 		TraceSkyState(sceneView, "activate-cached-solid", upload.key);
 		return true;
 	}
@@ -5647,6 +5856,10 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 	}
 
 	activateCachedSky(createdIndex, upload.key, sceneView, nri_scene::PTSkyMode::SolidColor);
+	if (ShouldTraceSkyPerf())
+	{
+		gRendererSkyPerfTraceStats.solidCreateHits++;
+	}
 	TraceSkyState(sceneView, "create-cached-solid", upload.key);
 	return true;
 }
@@ -5654,6 +5867,18 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky)
 {
 	Clocker clock(NriPTSceneTextures);
+	if (ShouldTraceSkyPerf())
+	{
+		gRendererSkyPerfTraceStats.ensureSceneTexturesCalls++;
+		if (preserveExistingSky)
+		{
+			gRendererSkyPerfTraceStats.ensureSceneTexturesPreserveTrueCalls++;
+		}
+		else
+		{
+			gRendererSkyPerfTraceStats.ensureSceneTexturesPreserveFalseCalls++;
+		}
+	}
 
 	outGpuMaterials = materials.materials;
 	ApplyEmissiveMaterialOverrides(materials, outGpuMaterials);

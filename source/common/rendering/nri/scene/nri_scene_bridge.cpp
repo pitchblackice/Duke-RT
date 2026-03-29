@@ -2,6 +2,7 @@
 
 #include "nri_portal_bridge.h"
 
+#include "c_cvars.h"
 #include "hw_portal.h"
 #include "hw_voxels.h"
 #include "image.h"
@@ -10,13 +11,52 @@
 #include "texturemanager.h"
 #include "textures.h"
 #include "v_video.h"
+#include <chrono>
 #include <windows.h>
+
+EXTERN_CVAR(Int, nri_pttraceframes)
 
 namespace
 {
 	using namespace nri_scene;
 
 	constexpr float kAttachedWallSpriteDepthNudge = 0.01f;
+
+	SkyPerfStats gSkyPerfStats = {};
+
+	bool ShouldTraceSkyPerf()
+	{
+		return nri_pttraceframes > 0;
+	}
+
+	class ScopedSkyPerfTimer
+	{
+	public:
+		explicit ScopedSkyPerfTimer(uint64_t& targetUs)
+			: mTarget(ShouldTraceSkyPerf() ? &targetUs : nullptr)
+		{
+			if (mTarget != nullptr)
+			{
+				mStart = std::chrono::steady_clock::now();
+			}
+		}
+
+		~ScopedSkyPerfTimer()
+		{
+			if (mTarget != nullptr)
+			{
+				const auto elapsed = std::chrono::steady_clock::now() - mStart;
+				*mTarget += (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+			}
+		}
+
+		ScopedSkyPerfTimer(const ScopedSkyPerfTimer&) = delete;
+		ScopedSkyPerfTimer& operator=(const ScopedSkyPerfTimer&) = delete;
+
+	private:
+		uint64_t* mTarget = nullptr;
+		std::chrono::steady_clock::time_point mStart = {};
+	};
 
 	struct SkyCandidate
 	{
@@ -117,6 +157,11 @@ namespace
 
 	bool TryComputeAverageColorFromBaseTexture(FTexture* baseTexture, float* outColor)
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			gSkyPerfStats.averageColorBaseCalls++;
+		}
+		ScopedSkyPerfTimer timer(gSkyPerfStats.averageColorTimeUs);
 		if (baseTexture == nullptr || baseTexture->GetImage() == nullptr)
 		{
 			return false;
@@ -130,6 +175,10 @@ namespace
 
 		double sum[3] = {};
 		const size_t pixelCount = (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight;
+		if (ShouldTraceSkyPerf())
+		{
+			gSkyPerfStats.averageColorPixels += (uint64_t)pixelCount;
+		}
 		for (size_t i = 0; i < pixelCount; ++i)
 		{
 			const uint8_t* pixel = texBuffer.mBuffer + i * 4u;
@@ -147,9 +196,8 @@ namespace
 
 	bool TryGetAverageTextureColorRecursive(FGameTexture* texture, float* outColor, int depth);
 
-	bool TryInspectSkyTexture(FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType, SkyCandidate& outCandidate)
+	bool TryInspectSkyTextureInner(FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType, SkyCandidate& outCandidate)
 	{
-		outCandidate = {};
 		__try
 		{
 			if (!IsUsableGameTexturePointer(texture))
@@ -185,6 +233,10 @@ namespace
 			auto* skybox = dynamic_cast<FSkyBox*>(baseTexture);
 			if (skybox == nullptr)
 			{
+				if (ShouldTraceSkyPerf())
+				{
+					gSkyPerfStats.inspectSolidCandidates++;
+				}
 				return true;
 			}
 
@@ -192,6 +244,10 @@ namespace
 			outCandidate.isThreeFace = skybox->Is3Face();
 			for (int i = 0; i < 6; ++i)
 			{
+				if (ShouldTraceSkyPerf())
+				{
+					gSkyPerfStats.inspectFaceWalks++;
+				}
 				FGameTexture* face = nullptr;
 				__try
 				{
@@ -212,6 +268,14 @@ namespace
 			{
 				outCandidate.isCubemap = true;
 				outCandidate.priority = MakeSkyPriority(PTSkyMode::Cubemap, sourceType);
+				if (ShouldTraceSkyPerf())
+				{
+					gSkyPerfStats.inspectCubemapCandidates++;
+				}
+			}
+			else if (ShouldTraceSkyPerf())
+			{
+				gSkyPerfStats.inspectSolidCandidates++;
 			}
 
 			return true;
@@ -220,6 +284,17 @@ namespace
 		{
 			return false;
 		}
+	}
+
+	bool TryInspectSkyTexture(FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType, SkyCandidate& outCandidate)
+	{
+		outCandidate = {};
+		if (ShouldTraceSkyPerf())
+		{
+			gSkyPerfStats.inspectCalls++;
+		}
+		ScopedSkyPerfTimer timer(gSkyPerfStats.inspectTimeUs);
+		return TryInspectSkyTextureInner(texture, fallbackColor, sourceType, outCandidate);
 	}
 
 	void ApplySkyCandidate(SceneView& outView, FGameTexture* texture, const SkyCandidate& candidate, PTSkySourceType sourceType)
@@ -250,6 +325,10 @@ namespace
 
 	bool TryGetAverageTextureColorRecursive(FGameTexture* texture, float* outColor, int depth)
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			gSkyPerfStats.averageColorRecursiveCalls++;
+		}
 		if (!IsUsableGameTexturePointer(texture) || depth > 4)
 		{
 			return false;
@@ -285,6 +364,10 @@ namespace
 		int sampledFaces = 0;
 		for (int i = 0; i < 6; ++i)
 		{
+			if (ShouldTraceSkyPerf())
+			{
+				gSkyPerfStats.recursiveSkyboxFaceSamples++;
+			}
 			float faceColor[3] = {};
 			FGameTexture* skyFace = nullptr;
 			__try
@@ -883,6 +966,18 @@ namespace
 
 namespace nri_scene
 {
+void ResetSkyPerfStats()
+{
+	gSkyPerfStats = {};
+}
+
+SkyPerfStats ConsumeSkyPerfStats()
+{
+	SkyPerfStats stats = gSkyPerfStats;
+	gSkyPerfStats = {};
+	return stats;
+}
+
 void Copy3(const float* source, float* destination)
 {
 	destination[0] = source[0];
@@ -930,6 +1025,25 @@ MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float
 
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType)
 {
+	if (ShouldTraceSkyPerf())
+	{
+		gSkyPerfStats.updateCalls++;
+		switch (sourceType)
+		{
+		case PTSkySourceType::Wall:
+			gSkyPerfStats.wallUpdateCalls++;
+			break;
+		case PTSkySourceType::Flat:
+			gSkyPerfStats.flatUpdateCalls++;
+			break;
+		case PTSkySourceType::Portal:
+			gSkyPerfStats.portalUpdateCalls++;
+			break;
+		default:
+			break;
+		}
+	}
+	ScopedSkyPerfTimer timer(gSkyPerfStats.updateTimeUs);
 	SkyCandidate candidate = {};
 	if (TryInspectSkyTexture(texture, fallbackColor, sourceType, candidate))
 	{
