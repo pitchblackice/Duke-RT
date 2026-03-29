@@ -1,5 +1,7 @@
 #include "nri_material_bridge.h"
 
+#include "nri_texture_signature.h"
+
 #include "palette.h"
 #include "tiletexture.h"
 #include "textures.h"
@@ -140,50 +142,59 @@ namespace
 		return ((uint64_t)(uintptr_t)texture ^ (indexed ? 1ull : 0ull)) ^ 0x4000000000000000ull;
 	}
 
-	uint64_t ComputeTextureContentKey(FTexture* texture, bool indexed)
+	bool TryBuildSharedTextureContentKey(FGameTexture* gameTexture, FTexture* baseTexture, bool indexed, uint64_t& outKey, uint32_t& outWidth, uint32_t& outHeight)
 	{
-		if (texture == nullptr)
-		{
-			return 0;
-		}
+		outKey = 0;
+		outWidth = 0;
+		outHeight = 0;
 
 		if (indexed)
 		{
-			FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_Indexed);
-			if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
-			{
-				return 0;
-			}
-
-			uint64_t key = Fnv1a64(texBuffer.mBuffer, (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight);
-			key ^= ((uint64_t)(uint32_t)texBuffer.mWidth << 32) | (uint64_t)(uint32_t)texBuffer.mHeight;
-			key ^= (1ull << 63);
-			return key;
+			return false;
 		}
 
-		FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_ProcessData);
-		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+		TextureSignatureRequest request = {};
+		request.contentKind = TextureSignatureContentKind::ProcessedBGRA;
+		request.translation = 0;
+		request.flags = TextureSignatureRequestFlag_None;
+
+		TextureSignature signature = {};
+		bool success = false;
+		if (gameTexture != nullptr)
 		{
-			return 0;
+			success = TryBuildTextureSignature(gameTexture, request, signature);
+		}
+		else if (baseTexture != nullptr)
+		{
+			success = TryBuildImageTextureSignature(baseTexture, request, signature);
 		}
 
-		uint64_t key = texBuffer.mContentId != 0 ?
-			texBuffer.mContentId :
-			Fnv1a64(texBuffer.mBuffer, (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
-		key ^= ((uint64_t)(uint32_t)texBuffer.mWidth << 32) | (uint64_t)(uint32_t)texBuffer.mHeight;
-		return key;
+		if (!success || !signature.valid || !signature.persistentEligible || signature.width == 0 || signature.height == 0)
+		{
+			return false;
+		}
+
+		outKey = signature.key;
+		outWidth = signature.width;
+		outHeight = signature.height;
+		return true;
 	}
 
-	TextureUpload BuildTextureUpload(FTexture* texture, bool indexed)
+	TextureUpload BuildTextureUpload(FGameTexture* gameTexture, FTexture* texture, bool indexed)
 	{
 		TextureUpload upload = {};
 		upload.indexed = indexed;
-		upload.key = MakeTextureKey(texture, indexed);
+		upload.key = gameTexture != nullptr ? MakeTextureKey(gameTexture, indexed) : MakeTextureKey(texture, indexed);
 
 		if (texture == nullptr)
 		{
 			return upload;
 		}
+
+		uint64_t sharedKey = 0;
+		uint32_t sharedWidth = 0;
+		uint32_t sharedHeight = 0;
+		const bool hasSharedKey = TryBuildSharedTextureContentKey(gameTexture, texture, indexed, sharedKey, sharedWidth, sharedHeight);
 
 		if (indexed)
 		{
@@ -204,11 +215,17 @@ namespace
 				upload.width = (uint32_t)texBuffer.mWidth;
 				upload.height = (uint32_t)texBuffer.mHeight;
 				upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
-				upload.key = texBuffer.mContentId != 0 ? texBuffer.mContentId : Fnv1a64(upload.pixels.data(), upload.pixels.size());
+				upload.key = hasSharedKey ? sharedKey : Fnv1a64(upload.pixels.data(), upload.pixels.size());
 			}
 		}
 
-		if (upload.width != 0 && upload.height != 0)
+		if (hasSharedKey && upload.width != 0 && upload.height != 0)
+		{
+			upload.width = sharedWidth;
+			upload.height = sharedHeight;
+			upload.key = sharedKey;
+		}
+		else if (upload.width != 0 && upload.height != 0)
 		{
 			upload.key ^= ((uint64_t)upload.width << 32) | (uint64_t)upload.height;
 			upload.key ^= indexed ? (1ull << 63) : 0ull;
@@ -217,9 +234,14 @@ namespace
 		return upload;
 	}
 
+	TextureUpload BuildTextureUpload(FTexture* texture, bool indexed)
+	{
+		return BuildTextureUpload(nullptr, texture, indexed);
+	}
+
 	TextureUpload BuildTextureUpload(FGameTexture* texture, bool indexed)
 	{
-		return texture != nullptr ? BuildTextureUpload(texture->GetTexture(), indexed) : TextureUpload{};
+		return texture != nullptr ? BuildTextureUpload(texture, texture->GetTexture(), indexed) : TextureUpload{};
 	}
 
 	uint32_t EnsureTextureUploadIndex(FGameTexture* texture, bool indexed, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
@@ -283,7 +305,7 @@ namespace
 		return intensity;
 	}
 
-	MaterialLightingMetadata BuildMaterialLightingMetadata(const SurfaceRef& surface, const MaterialData& material, uint64_t textureContentKey, uint32_t glowmapTextureIndex)
+	MaterialLightingMetadata BuildMaterialLightingMetadata(const SurfaceRef& surface, const MaterialData& material, uint64_t textureContentKey, uint32_t glowmapTextureIndex, uint64_t glowmapContentKey)
 	{
 		MaterialLightingMetadata metadata = {};
 		metadata.texture = surface.material.texture;
@@ -323,7 +345,7 @@ namespace
 			if (surface.material.texture->GetGlowmap() != nullptr)
 			{
 				metadata.lightingFlags |= MaterialLightingFlag_HasGlowmap;
-				metadata.glowmapContentKey = ComputeTextureContentKey(surface.material.texture->GetGlowmap(), false);
+				metadata.glowmapContentKey = glowmapContentKey;
 			}
 
 			if (!TryGetAverageTextureColor(surface.material.texture, metadata.averageColor))
@@ -391,12 +413,14 @@ namespace
 		material.sectorIndex = surface.provenance.sectorIndex >= 0 ? (uint32_t)surface.provenance.sectorIndex : UINT32_MAX;
 		outMaterials.materials.push_back(material);
 		uint32_t glowmapTextureIndex = UINT32_MAX;
+		uint64_t glowmapContentKey = 0;
 		if (materialRef.texture != nullptr && materialRef.texture->GetGlowmap() != nullptr)
 		{
 			glowmapTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetGlowmap(), false, textureLookup, outMaterials);
+			glowmapContentKey = outMaterials.textures[glowmapTextureIndex].key;
 		}
 
-		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(surface, material, outMaterials.textures[material.textureIndex].key, glowmapTextureIndex);
+		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(surface, material, outMaterials.textures[material.textureIndex].key, glowmapTextureIndex, glowmapContentKey);
 		outMaterials.lightMetadata.push_back(metadata);
 	}
 
