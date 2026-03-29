@@ -715,7 +715,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const uint probeWidth = 96u;
 		const uint probeCenterX = probeLeft + probeWidth / 2u;
 		const uint probeRight = probeLeft + probeWidth;
-		const bool overlayRegion = pixelPosU.x < probeRight + 116u && pixelPosU.y < 52u;
+		const bool overlayRegion = pixelPosU.x < probeRight + 132u && pixelPosU.y < 52u;
 
 		if (overlayRegion)
 		{
@@ -850,27 +850,35 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			composed = probeUvFlags.y > 0.5 ? float4(0.1, 0.9, 0.9, 1.0) : float4(0.05, 0.12, 0.12, 1.0);
 		}
-		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 100u && pixelPosU.y >= 20u && pixelPosU.y < 24u)
+		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 64u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
+		{
+			composed = float4(0.06, 0.06, 0.06, 1.0);
+		}
+		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 64u && pixelPosU.y >= 36u && pixelPosU.y < 48u)
+		{
+			composed = float4(0.06, 0.06, 0.06, 1.0);
+		}
+		if (pixelPosU.x >= probeRight + 68u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 20u && pixelPosU.y < 24u)
 		{
 			const float u = clamp(probeUvs.x, 0.0, 1.0);
-			composed = pixelPosU.x < 52u + (uint)round(u * 48.0) ? float4(0.3, 0.9, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
+			composed = pixelPosU.x < 68u + (uint)round(u * 48.0) ? float4(0.3, 0.9, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
 		}
-		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 100u && pixelPosU.y >= 26u && pixelPosU.y < 30u)
+		if (pixelPosU.x >= probeRight + 68u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 26u && pixelPosU.y < 30u)
 		{
 			const float v = clamp(probeUvs.y, 0.0, 1.0);
-			composed = pixelPosU.x < 52u + (uint)round(v * 48.0) ? float4(0.3, 0.7, 1.0, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
+			composed = pixelPosU.x < 68u + (uint)round(v * 48.0) ? float4(0.3, 0.7, 1.0, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
 		}
-		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 100u && pixelPosU.y >= 36u && pixelPosU.y < 40u)
+		if (pixelPosU.x >= probeRight + 68u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 36u && pixelPosU.y < 40u)
 		{
 			const float u = clamp(probeUvs.z, 0.0, 1.0);
-			composed = pixelPosU.x < 52u + (uint)round(u * 48.0) ? float4(0.9, 0.8, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
+			composed = pixelPosU.x < 68u + (uint)round(u * 48.0) ? float4(0.9, 0.8, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
 		}
-		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 100u && pixelPosU.y >= 42u && pixelPosU.y < 46u)
+		if (pixelPosU.x >= probeRight + 68u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 42u && pixelPosU.y < 46u)
 		{
 			const float v = clamp(probeUvs.w, 0.0, 1.0);
-			composed = pixelPosU.x < 52u + (uint)round(v * 48.0) ? float4(1.0, 0.6, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
+			composed = pixelPosU.x < 68u + (uint)round(v * 48.0) ? float4(1.0, 0.6, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
 		}
-		if (pixelPosU.x >= probeRight + 104u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
+		if (pixelPosU.x >= probeRight + 120u && pixelPosU.x < probeRight + 132u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
 		{
 			composed = foundProbeSample ? float4(0.9, 0.9, 0.1, 1.0) : float4(0.25, 0.05, 0.25, 1.0);
 		}

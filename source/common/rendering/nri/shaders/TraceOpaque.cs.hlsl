@@ -662,7 +662,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gDirectEmissionOutput[pixelPos] = float4(sentinel, 1.0);
 			if (gTraceConstants.DebugMode == 5)
 			{
-				gDirectLightingOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
+				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
 		}
@@ -684,7 +684,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gDirectEmissionOutput[pixelPos] = float4(missColor, 1.0);
 			if (gTraceConstants.DebugMode == 5)
 			{
-				gDirectLightingOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
+				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
 		}
