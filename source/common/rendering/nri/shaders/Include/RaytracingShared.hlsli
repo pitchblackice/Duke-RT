@@ -136,7 +136,7 @@ float3 GeneratePrimaryRay(uint2 pixelPos)
 	return normalize(ray);
 }
 
-float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp, float tanHalfFovX, float tanHalfFovY, float2 jitter)
+float2 ProjectWorldToUvRaw(float3 worldPos, float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp, float tanHalfFovX, float tanHalfFovY)
 {
 	float3 relative = worldPos - cameraPos;
 	float viewZ = dot(relative, cameraForward);
@@ -147,14 +147,29 @@ float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward,
 
 	float ndcX = dot(relative, cameraRight) / max(viewZ * tanHalfFovX, 1e-5);
 	float ndcY = dot(relative, cameraUp) / max(viewZ * tanHalfFovY, 1e-5);
-	float2 uv = float2(ndcX * 0.5 + 0.5, 0.5 - ndcY * 0.5);
-	return uv - jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+	return float2(ndcX * 0.5 + 0.5, 0.5 - ndcY * 0.5);
+}
+
+float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp, float tanHalfFovX, float tanHalfFovY, float2 jitter)
+{
+	return ProjectWorldToUvRaw(worldPos, cameraPos, cameraForward, cameraRight, cameraUp, tanHalfFovX, tanHalfFovY)
+		- jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+}
+
+float2 ResolveProjectedUvRaw(float4 clip)
+{
+	const float2 ndc = clip.xy / clip.w;
+	return float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
 }
 
 float2 ResolveProjectedUv(float4 clip, float2 jitter)
 {
-	const float2 ndc = clip.xy / clip.w;
-	return float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) - jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+	return ResolveProjectedUvRaw(clip) - jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+}
+
+float2 ApplyTemporalJitterToUv(float2 uv, float2 jitter)
+{
+	return uv + jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 }
 
 float4 MultiplyVsMatrixPoint(float4 v, float4 matrixColumns[4])
@@ -166,7 +181,7 @@ float4 MultiplyVsMatrixPoint(float4 v, float4 matrixColumns[4])
 		dot(v, float4(matrixColumns[0].w, matrixColumns[1].w, matrixColumns[2].w, matrixColumns[3].w)));
 }
 
-bool ProjectWorldToUvMatrix(float3 worldPos, bool previousFrame, float2 jitter, out float2 uv)
+bool ProjectWorldToUvMatrixRaw(float3 worldPos, bool previousFrame, out float2 uv)
 {
 	const ReprojectionData reprojection = gReprojectionDataBuffer[0];
 	const float4 world = float4(worldPos, 1.0);
@@ -182,7 +197,20 @@ bool ProjectWorldToUvMatrix(float3 worldPos, bool previousFrame, float2 jitter, 
 		return false;
 	}
 
-	uv = ResolveProjectedUv(clip, jitter);
+	uv = ResolveProjectedUvRaw(clip);
+	return all(uv >= 0.0) && all(uv <= 1.0);
+}
+
+bool ProjectWorldToUvMatrix(float3 worldPos, bool previousFrame, float2 jitter, out float2 uv)
+{
+	float2 rawUv = 0.0;
+	if (!ProjectWorldToUvMatrixRaw(worldPos, previousFrame, rawUv))
+	{
+		uv = rawUv;
+		return false;
+	}
+
+	uv = ApplyTemporalJitterToUv(rawUv, -jitter);
 	return all(uv >= 0.0) && all(uv <= 1.0);
 }
 
