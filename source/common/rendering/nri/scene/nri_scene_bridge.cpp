@@ -1,6 +1,7 @@
 #include "nri_scene_bridge.h"
 
 #include "nri_portal_bridge.h"
+#include "nri_texture_signature.h"
 
 #include "c_cvars.h"
 #include "hw_portal.h"
@@ -41,7 +42,8 @@ namespace
 		float color[3] = {};
 	};
 
-	std::unordered_map<const FTexture*, AverageColorCacheEntry> gAverageTextureColorCache;
+	std::unordered_map<const FTexture*, AverageColorCacheEntry> gFrameLocalAverageTextureColorCache;
+	std::unordered_map<uint64_t, AverageColorCacheEntry> gPersistentAverageTextureColorCache;
 	std::unordered_map<const FGameTexture*, CachedSkyInspection> gSkyInspectionCache;
 
 	bool IsUsableGameTexturePointer(FGameTexture* texture);
@@ -80,16 +82,34 @@ namespace
 		std::chrono::steady_clock::time_point mStart = {};
 	};
 
-	bool TryLoadCachedAverageColor(FTexture* baseTexture, float* outColor, bool& outSuccess)
+	bool TryBuildPersistentAverageColorSignature(FTexture* baseTexture, TextureSignature& outSignature)
 	{
-		outSuccess = false;
-		if (baseTexture == nullptr)
+		outSignature = {};
+		if (baseTexture == nullptr || dynamic_cast<FSkyBox*>(baseTexture) != nullptr)
 		{
 			return false;
 		}
 
-		const auto it = gAverageTextureColorCache.find(baseTexture);
-		if (it == gAverageTextureColorCache.end())
+		TextureSignatureRequest request = {};
+		request.contentKind = TextureSignatureContentKind::ProcessedBGRA;
+		request.translation = 0;
+		request.flags = TextureSignatureRequestFlag_None;
+		return TryBuildImageTextureSignature(baseTexture, request, outSignature) &&
+			outSignature.valid &&
+			outSignature.persistentEligible &&
+			outSignature.sourceKind == TextureSignatureSourceKind::ImageBacked;
+	}
+
+	bool TryLoadPersistentAverageColor(const TextureSignature& signature, float* outColor, bool& outSuccess)
+	{
+		outSuccess = false;
+		if (!signature.valid || !signature.persistentEligible)
+		{
+			return false;
+		}
+
+		const auto it = gPersistentAverageTextureColorCache.find(signature.key);
+		if (it == gPersistentAverageTextureColorCache.end())
 		{
 			return false;
 		}
@@ -102,14 +122,51 @@ namespace
 		return true;
 	}
 
-	void StoreCachedAverageColor(FTexture* baseTexture, bool success, const float* color)
+	void StorePersistentAverageColor(const TextureSignature& signature, bool success, const float* color)
+	{
+		if (!signature.valid || !signature.persistentEligible)
+		{
+			return;
+		}
+
+		AverageColorCacheEntry& entry = gPersistentAverageTextureColorCache[signature.key];
+		entry.success = success;
+		if (success && color != nullptr)
+		{
+			Copy3(color, entry.color);
+		}
+	}
+
+	bool TryLoadFrameLocalAverageColor(FTexture* baseTexture, float* outColor, bool& outSuccess)
+	{
+		outSuccess = false;
+		if (baseTexture == nullptr)
+		{
+			return false;
+		}
+
+		const auto it = gFrameLocalAverageTextureColorCache.find(baseTexture);
+		if (it == gFrameLocalAverageTextureColorCache.end())
+		{
+			return false;
+		}
+
+		outSuccess = it->second.success;
+		if (outSuccess)
+		{
+			Copy3(it->second.color, outColor);
+		}
+		return true;
+	}
+
+	void StoreFrameLocalAverageColor(FTexture* baseTexture, bool success, const float* color)
 	{
 		if (baseTexture == nullptr)
 		{
 			return;
 		}
 
-		AverageColorCacheEntry& entry = gAverageTextureColorCache[baseTexture];
+		AverageColorCacheEntry& entry = gFrameLocalAverageTextureColorCache[baseTexture];
 		entry.success = success;
 		if (success && color != nullptr)
 		{
@@ -461,8 +518,16 @@ namespace
 			return false;
 		}
 
+		TextureSignature persistentSignature = {};
+		const bool hasPersistentSignature = TryBuildPersistentAverageColorSignature(baseTexture, persistentSignature);
+
 		bool cachedSuccess = false;
-		if (TryLoadCachedAverageColor(baseTexture, outColor, cachedSuccess))
+		if (hasPersistentSignature && TryLoadPersistentAverageColor(persistentSignature, outColor, cachedSuccess))
+		{
+			return cachedSuccess;
+		}
+
+		if (TryLoadFrameLocalAverageColor(baseTexture, outColor, cachedSuccess))
 		{
 			return cachedSuccess;
 		}
@@ -470,7 +535,11 @@ namespace
 		float computedColor[3] = {};
 		if (TryComputeAverageColorFromBaseTexture(baseTexture, computedColor))
 		{
-			StoreCachedAverageColor(baseTexture, true, computedColor);
+			StoreFrameLocalAverageColor(baseTexture, true, computedColor);
+			if (hasPersistentSignature)
+			{
+				StorePersistentAverageColor(persistentSignature, true, computedColor);
+			}
 			Copy3(computedColor, outColor);
 			return true;
 		}
@@ -478,7 +547,11 @@ namespace
 		auto* skybox = dynamic_cast<FSkyBox*>(baseTexture);
 		if (skybox == nullptr)
 		{
-			StoreCachedAverageColor(baseTexture, false, nullptr);
+			StoreFrameLocalAverageColor(baseTexture, false, nullptr);
+			if (hasPersistentSignature)
+			{
+				StorePersistentAverageColor(persistentSignature, false, nullptr);
+			}
 			return false;
 		}
 
@@ -515,7 +588,7 @@ namespace
 			computedColor[0] = accumulated[0] * invCount;
 			computedColor[1] = accumulated[1] * invCount;
 			computedColor[2] = accumulated[2] * invCount;
-			StoreCachedAverageColor(baseTexture, true, computedColor);
+			StoreFrameLocalAverageColor(baseTexture, true, computedColor);
 			Copy3(computedColor, outColor);
 			return true;
 		}
@@ -530,7 +603,7 @@ namespace
 			previous = nullptr;
 		}
 		const bool success = TryGetAverageTextureColorRecursive(previous, computedColor, depth + 1);
-		StoreCachedAverageColor(baseTexture, success, success ? computedColor : nullptr);
+		StoreFrameLocalAverageColor(baseTexture, success, success ? computedColor : nullptr);
 		if (success)
 		{
 			Copy3(computedColor, outColor);
@@ -1098,7 +1171,7 @@ namespace nri_scene
 {
 void ResetAverageTextureColorCache()
 {
-	gAverageTextureColorCache.clear();
+	gFrameLocalAverageTextureColorCache.clear();
 	gSkyInspectionCache.clear();
 }
 
