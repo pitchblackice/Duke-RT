@@ -176,7 +176,7 @@ bool ProjectWorldToUvMatrix(float3 worldPos, bool previousFrame, float2 jitter, 
 	const float4 clip = previousFrame
 		? MultiplyVsMatrixPoint(view, reprojection.previousViewToClipMatrix)
 		: MultiplyVsMatrixPoint(view, reprojection.currentViewToClipMatrix);
-	if (abs(clip.w) <= 1e-5)
+	if (clip.w <= 1e-5)
 	{
 		uv = float2(-1.0, -1.0);
 		return false;

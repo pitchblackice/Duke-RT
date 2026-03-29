@@ -691,19 +691,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else
 	{
-		const float currentViewZ = dot(hit.position - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
+		const float3 currentHitPosition = ResolveHitVertexPosition(hit, false);
+		const float currentViewZ = dot(currentHitPosition - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
 		const float2 currentJitter = GetCurrentTemporalJitter();
 		const float2 previousJitter = GetPreviousTemporalJitter();
 		const float3 previousHitPosition = ResolveHitVertexPosition(hit, true);
-		const float2 fallbackCurrentUv = ((float2)pixelPos + 0.5 + currentJitter) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+		float2 currentUv = 0.0;
 		float2 prevUv = 0.0;
-		float2 projectedCurrentUv = 0.0;
+		const bool currentUvValid = ProjectWorldToUvMatrix(currentHitPosition, false, currentJitter, currentUv);
 		const bool prevUvValid = ProjectWorldToUvMatrix(previousHitPosition, true, previousJitter, prevUv);
-		const bool currentUvValid = ProjectWorldToUvMatrix(hit.position, false, currentJitter, projectedCurrentUv);
-		const float2 currentUv = fallbackCurrentUv;
 		const float previousViewZ = dot(previousHitPosition - gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward);
 		float3 motion = 0.0;
-		if (prevUvValid)
+		if (currentUvValid && prevUvValid)
 		{
 			motion.xy = (prevUv - currentUv) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 			motion.z = previousViewZ - currentViewZ;
@@ -920,8 +919,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gDirectEmissionOutput[pixelPos] = float4(directEmission, 1.0);
 		if (gTraceConstants.DebugMode == 5)
 		{
-			gDirectLightingOutput[pixelPos] = float4(currentUvValid ? 1.0 : 0.0, prevUvValid ? 1.0 : 0.0, 1.0, 1.0);
-			gDirectEmissionOutput[pixelPos] = float4(prevUv, currentUv);
+			gDirectLightingOutput[pixelPos] = float4(currentUvValid ? 1.0 : 0.0, prevUvValid ? 1.0 : 0.0, 0.0, 0.0);
+			gDirectEmissionOutput[pixelPos] = float4(currentUv, prevUv);
 		}
 
 		if (gTraceConstants.DebugMode == 1)
