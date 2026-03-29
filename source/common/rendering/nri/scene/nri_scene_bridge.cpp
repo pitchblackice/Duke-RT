@@ -30,7 +30,21 @@ namespace
 		float color[3] = {};
 	};
 
+	struct CachedSkyInspection
+	{
+		bool valid = false;
+		bool hasAverageColor = false;
+		bool isCubemap = false;
+		bool isThreeFace = false;
+		bool flipTop = false;
+		uint32_t faceMask = 0;
+		float color[3] = {};
+	};
+
 	std::unordered_map<const FTexture*, AverageColorCacheEntry> gAverageTextureColorCache;
+	std::unordered_map<const FGameTexture*, CachedSkyInspection> gSkyInspectionCache;
+
+	bool IsUsableGameTexturePointer(FGameTexture* texture);
 
 	bool ShouldTraceSkyPerf()
 	{
@@ -101,6 +115,33 @@ namespace
 		{
 			Copy3(color, entry.color);
 		}
+	}
+
+	bool TryLoadCachedSkyInspection(FGameTexture* texture, CachedSkyInspection& outInspection)
+	{
+		if (!IsUsableGameTexturePointer(texture))
+		{
+			return false;
+		}
+
+		const auto it = gSkyInspectionCache.find(texture);
+		if (it == gSkyInspectionCache.end())
+		{
+			return false;
+		}
+
+		outInspection = it->second;
+		return true;
+	}
+
+	void StoreCachedSkyInspection(FGameTexture* texture, const CachedSkyInspection& inspection)
+	{
+		if (!IsUsableGameTexturePointer(texture))
+		{
+			return;
+		}
+
+		gSkyInspectionCache[texture] = inspection;
 	}
 
 	struct SkyCandidate
@@ -241,7 +282,31 @@ namespace
 
 	bool TryGetAverageTextureColorRecursive(FGameTexture* texture, float* outColor, int depth);
 
-	bool TryInspectSkyTextureInner(FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType, SkyCandidate& outCandidate)
+	void ApplyCachedSkyInspectionToCandidate(const CachedSkyInspection& inspection, uint32_t fallbackColor, PTSkySourceType sourceType, SkyCandidate& outCandidate)
+	{
+		outCandidate = {};
+		outCandidate.valid = inspection.valid;
+		outCandidate.isCubemap = inspection.isCubemap;
+		outCandidate.isThreeFace = inspection.isThreeFace;
+		outCandidate.flipTop = inspection.flipTop;
+		outCandidate.faceMask = inspection.faceMask;
+		outCandidate.priority = MakeSkyPriority(inspection.isCubemap ? PTSkyMode::Cubemap : PTSkyMode::SolidColor, sourceType);
+		if (inspection.hasAverageColor)
+		{
+			outCandidate.hasAverageColor = true;
+			Copy3(inspection.color, outCandidate.color);
+		}
+		else if (fallbackColor != 0)
+		{
+			const PalEntry fallback = PalEntry(fallbackColor);
+			outCandidate.color[0] = fallback.r / 255.0f;
+			outCandidate.color[1] = fallback.g / 255.0f;
+			outCandidate.color[2] = fallback.b / 255.0f;
+			outCandidate.hasFallbackColor = true;
+		}
+	}
+
+	bool TryInspectSkyTextureInner(FGameTexture* texture, CachedSkyInspection& outInspection)
 	{
 		__try
 		{
@@ -250,19 +315,11 @@ namespace
 				return false;
 			}
 
-			outCandidate.valid = true;
-			outCandidate.priority = MakeSkyPriority(PTSkyMode::SolidColor, sourceType);
-			if (TryGetAverageTextureColor(texture, outCandidate.color))
+			outInspection = {};
+			outInspection.valid = true;
+			if (TryGetAverageTextureColor(texture, outInspection.color))
 			{
-				outCandidate.hasAverageColor = true;
-			}
-			else if (fallbackColor != 0)
-			{
-				const PalEntry fallback = PalEntry(fallbackColor);
-				outCandidate.color[0] = fallback.r / 255.0f;
-				outCandidate.color[1] = fallback.g / 255.0f;
-				outCandidate.color[2] = fallback.b / 255.0f;
-				outCandidate.hasFallbackColor = true;
+				outInspection.hasAverageColor = true;
 			}
 
 			FTexture* baseTexture = nullptr;
@@ -285,8 +342,8 @@ namespace
 				return true;
 			}
 
-			outCandidate.flipTop = skybox->GetSkyFlip();
-			outCandidate.isThreeFace = skybox->Is3Face();
+			outInspection.flipTop = skybox->GetSkyFlip();
+			outInspection.isThreeFace = skybox->Is3Face();
 			for (int i = 0; i < 6; ++i)
 			{
 				if (ShouldTraceSkyPerf())
@@ -305,14 +362,13 @@ namespace
 
 				if (IsUsableGameTexturePointer(face))
 				{
-					outCandidate.faceMask |= 1u << i;
+					outInspection.faceMask |= 1u << i;
 				}
 			}
 
-			if (!outCandidate.isThreeFace && outCandidate.faceMask == 0x3fu)
+			if (!outInspection.isThreeFace && outInspection.faceMask == 0x3fu)
 			{
-				outCandidate.isCubemap = true;
-				outCandidate.priority = MakeSkyPriority(PTSkyMode::Cubemap, sourceType);
+				outInspection.isCubemap = true;
 				if (ShouldTraceSkyPerf())
 				{
 					gSkyPerfStats.inspectCubemapCandidates++;
@@ -333,13 +389,24 @@ namespace
 
 	bool TryInspectSkyTexture(FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType, SkyCandidate& outCandidate)
 	{
-		outCandidate = {};
-		if (ShouldTraceSkyPerf())
+		CachedSkyInspection inspection = {};
+		if (!TryLoadCachedSkyInspection(texture, inspection))
 		{
-			gSkyPerfStats.inspectCalls++;
+			if (ShouldTraceSkyPerf())
+			{
+				gSkyPerfStats.inspectCalls++;
+			}
+			ScopedSkyPerfTimer timer(gSkyPerfStats.inspectTimeUs);
+			if (!TryInspectSkyTextureInner(texture, inspection))
+			{
+				outCandidate = {};
+				return false;
+			}
+			StoreCachedSkyInspection(texture, inspection);
 		}
-		ScopedSkyPerfTimer timer(gSkyPerfStats.inspectTimeUs);
-		return TryInspectSkyTextureInner(texture, fallbackColor, sourceType, outCandidate);
+
+		ApplyCachedSkyInspectionToCandidate(inspection, fallbackColor, sourceType, outCandidate);
+		return outCandidate.valid;
 	}
 
 	void ApplySkyCandidate(SceneView& outView, FGameTexture* texture, const SkyCandidate& candidate, PTSkySourceType sourceType)
@@ -1032,6 +1099,7 @@ namespace nri_scene
 void ResetAverageTextureColorCache()
 {
 	gAverageTextureColorCache.clear();
+	gSkyInspectionCache.clear();
 }
 
 void ResetSkyPerfStats()
