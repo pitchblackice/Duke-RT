@@ -256,7 +256,11 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	commonSettings.accumulationMode = (desc.resetHistory || denoiserChanged || settingsChanged || sigmaSettingsChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
 	// Camera motion is already represented by the matrices above, so motion vectors stay in screen space here.
 	commonSettings.isMotionVectorInWorldSpace = false;
-	commonSettings.isBaseColorMetalnessAvailable = true;
+	// REBLUR can use base-color/metalness to patch motion vectors during stabilization.
+	// After enabling virtual miss motion this started pulling background/specular motion into
+	// ordinary surface history in visible edge/emissive cases, so keep the optional path off
+	// for REBLUR until we have a more deliberate motion-patching policy.
+	commonSettings.isBaseColorMetalnessAvailable = useRelax;
 	commonSettings.enableValidation = desc.enableValidation;
 
 	if (mIntegration.SetCommonSettings(commonSettings) != nrd::Result::SUCCESS)
