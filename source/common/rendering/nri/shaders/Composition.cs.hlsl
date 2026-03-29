@@ -191,5 +191,5 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 
-	gComposedOutput[pixelPos] = float4(saturate(composed), 1.0);
+	gComposedOutput[pixelPos] = float4(SanitizeColor(composed), 1.0);
 }
