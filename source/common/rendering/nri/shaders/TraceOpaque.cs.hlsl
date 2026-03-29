@@ -857,8 +857,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				directLighting += EvaluateAmbientDiffuse(albedo.rgb) + sectorAmbientLighting;
 				const float3 directSunDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir) : 0.0;
 				const float3 directSunSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0) : 0.0;
-				diffuse += directSunDiffuse * shadow;
-				specular += directSunSpecular * shadow;
+				// Keep hard direct-light structure out of NRD's noisy radiance inputs so shadow edges
+				// and material response stay in the direct-light composition path instead of getting spatially blurred.
+				directLighting += (directSunDiffuse + directSunSpecular) * shadow;
 
 				const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
 				[loop]
