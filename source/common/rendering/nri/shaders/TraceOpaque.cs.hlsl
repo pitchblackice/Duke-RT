@@ -665,7 +665,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42 || gTraceConstants.DebugMode == 43)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42 || gTraceConstants.DebugMode == 43 || gTraceConstants.DebugMode == 44 || gTraceConstants.DebugMode == 45)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
@@ -692,7 +692,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42 || gTraceConstants.DebugMode == 43)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42 || gTraceConstants.DebugMode == 43 || gTraceConstants.DebugMode == 44 || gTraceConstants.DebugMode == 45)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
@@ -1177,6 +1177,30 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			heat = lerp(heat, float3(0.95, 0.85, 0.20), saturate((mapped - 0.60) * 3.0));
 			heat = lerp(heat, float3(1.0, 0.25, 0.10), saturate((mapped - 0.85) * 6.0));
 			color = float4(heat, 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 44)
+		{
+			const float2 motionPixels = motion.xy;
+			const float2 signedMagnitude = sign(motionPixels) * sqrt(saturate(abs(motionPixels) / 8.0));
+			const float magnitude = saturate(log2(1.0 + length(motionPixels)) / 3.0);
+			color = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 45)
+		{
+			if (!(currentUvValid && prevUvValid))
+			{
+				color = float4(1.0, 0.0, 1.0, 1.0);
+			}
+			else
+			{
+				const float2 currentUvNonJittered = ApplyTemporalJitterToUv(currentUvRaw, -currentJitter);
+				const float2 prevUvNonJittered = ApplyTemporalJitterToUv(prevUvRaw, -previousJitter);
+				const float2 reconstructedPrevUv = currentUvNonJittered + motion.xy / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+				const float2 errorPixels = (reconstructedPrevUv - prevUvNonJittered) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+				const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
+				const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
+				color = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+			}
 		}
 		else
 		{
