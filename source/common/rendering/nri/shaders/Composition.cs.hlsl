@@ -20,6 +20,11 @@ bool UseSplitShadowDenoiser()
 	return (gTraceConstants.Flags & 0x20u) != 0;
 }
 
+bool UseDirectionalPlaceholderLight()
+{
+	return (gTraceConstants.Flags & 0x80u) != 0;
+}
+
 float3 UnpackDenoisedRadiance(float4 packed)
 {
 	return UseRelaxDenoiser() ? RELAX_BackEnd_UnpackRadiance(packed).rgb : REBLUR_BackEnd_UnpackRadianceAndNormHitDist(packed).rgb;
@@ -45,6 +50,12 @@ float3 EvaluateSunDiffuseLighting(float3 normal, float3 lightDir, float shadow)
 	const float lambert = max(dot(normal, lightDir), 0.0);
 	const float lighting = 0.20 + shadow * lambert * 0.80;
 	return lighting.xxx;
+}
+
+float3 EvaluateDirectSunDiffuse(float3 albedo, float3 normal, float3 lightDir)
+{
+	const float lambert = max(dot(normal, lightDir), 0.0);
+	return albedo * (lambert * 0.80);
 }
 
 float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3 viewDir, float3 lightDir, float shadow)
@@ -75,6 +86,37 @@ bool IsEmissiveMaterial(float materialID)
 bool IsSpecularSpecialMaterial(float materialID)
 {
 	return materialID >= 2.5;
+}
+
+float GetRawSunShadow(uint2 pixelPos)
+{
+	// Composition aliases t10 through gGuideSpecHitInput, but the descriptor set binds the raw SIGMA front-end output there.
+	return saturate(gGuideSpecHitInput.Load(int3(pixelPos, 0)).y);
+}
+
+float GetFilteredSunShadow(uint2 pixelPos)
+{
+	return saturate(SIGMA_BackEnd_UnpackShadow(gShadowInput.Load(int3(pixelPos, 0))).x);
+}
+
+void ApplyShadowAwareSunCorrection(uint2 pixelPos, float materialID, float3 normal, float3 albedo, float metalness, float3 viewDir, bool useFilteredShadow, inout float3 diffuseSignal, inout float3 specularSignal)
+{
+	if (!UseSplitShadowDenoiser() || !UseDirectionalPlaceholderLight() || IsEmissiveMaterial(materialID) || IsSpecularSpecialMaterial(materialID))
+	{
+		return;
+	}
+
+	const float rawShadow = GetRawSunShadow(pixelPos);
+	const float targetShadow = useFilteredShadow ? GetFilteredSunShadow(pixelPos) : rawShadow;
+	const float shadowDelta = targetShadow - rawShadow;
+	if (abs(shadowDelta) <= 1e-4)
+	{
+		return;
+	}
+
+	const float3 lightDir = normalize(gTraceConstants.LightDirection);
+	diffuseSignal += EvaluateDirectSunDiffuse(albedo, normal, lightDir) * shadowDelta;
+	specularSignal += EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, 1.0) * shadowDelta;
 }
 
 float3 ComposeLighting(uint2 pixelPos, float3 diffuseSignal, float3 specularSignal, float3 directLighting, float3 directEmission)
@@ -111,9 +153,20 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 rawDirectLighting = SanitizeColor(gDirectLightingInput.Load(int3(pixelPos, 0)).rgb);
 	const float3 rawDirectEmission = SanitizeColor(gDirectEmissionInput.Load(int3(pixelPos, 0)).rgb);
 	const float materialID = GetMaterialID(pixelPos);
+	const float3 normal = NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos]).xyz;
+	const float metalness = saturate(gBaseColorInput.Load(int3(pixelPos, 0)).a);
+	const float3 albedo = SanitizeColor(gBaseColorInput.Load(int3(pixelPos, 0)).rgb);
+	const float3 viewDir = normalize(-GeneratePrimaryRay(pixelPos));
 
-	const float3 filteredComposed = ComposeLighting(pixelPos, filteredDiffuseSignal, filteredSpecular, rawDirectLighting, rawDirectEmission);
-	const float3 rawComposed = ComposeLighting(pixelPos, rawDiffuseSignal, rawSpecular, rawDirectLighting, rawDirectEmission);
+	float3 adjustedRawDiffuseSignal = rawDiffuseSignal;
+	float3 adjustedRawSpecular = rawSpecular;
+	float3 adjustedFilteredDiffuseSignal = filteredDiffuseSignal;
+	float3 adjustedFilteredSpecular = filteredSpecular;
+	ApplyShadowAwareSunCorrection(pixelPos, materialID, normal, albedo, metalness, viewDir, false, adjustedRawDiffuseSignal, adjustedRawSpecular);
+	ApplyShadowAwareSunCorrection(pixelPos, materialID, normal, albedo, metalness, viewDir, true, adjustedFilteredDiffuseSignal, adjustedFilteredSpecular);
+
+	const float3 filteredComposed = ComposeLighting(pixelPos, adjustedFilteredDiffuseSignal, adjustedFilteredSpecular, rawDirectLighting, rawDirectEmission);
+	const float3 rawComposed = ComposeLighting(pixelPos, adjustedRawDiffuseSignal, adjustedRawSpecular, rawDirectLighting, rawDirectEmission);
 	const bool specialMaterialRawFallback = UseSplitShadowDenoiser() && IsSpecularSpecialMaterial(materialID);
 	float3 composed = specialMaterialRawFallback ? rawComposed : filteredComposed;
 	const uint splitMode = gTraceConstants.ReservedTrace0;
