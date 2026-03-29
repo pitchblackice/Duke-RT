@@ -12,6 +12,7 @@
 #include "textures.h"
 #include "v_video.h"
 #include <chrono>
+#include <unordered_map>
 #include <windows.h>
 
 EXTERN_CVAR(Int, nri_pttraceframes)
@@ -23,6 +24,13 @@ namespace
 	constexpr float kAttachedWallSpriteDepthNudge = 0.01f;
 
 	SkyPerfStats gSkyPerfStats = {};
+	struct AverageColorCacheEntry
+	{
+		bool success = false;
+		float color[3] = {};
+	};
+
+	std::unordered_map<const FTexture*, AverageColorCacheEntry> gAverageTextureColorCache;
 
 	bool ShouldTraceSkyPerf()
 	{
@@ -57,6 +65,43 @@ namespace
 		uint64_t* mTarget = nullptr;
 		std::chrono::steady_clock::time_point mStart = {};
 	};
+
+	bool TryLoadCachedAverageColor(FTexture* baseTexture, float* outColor, bool& outSuccess)
+	{
+		outSuccess = false;
+		if (baseTexture == nullptr)
+		{
+			return false;
+		}
+
+		const auto it = gAverageTextureColorCache.find(baseTexture);
+		if (it == gAverageTextureColorCache.end())
+		{
+			return false;
+		}
+
+		outSuccess = it->second.success;
+		if (outSuccess)
+		{
+			Copy3(it->second.color, outColor);
+		}
+		return true;
+	}
+
+	void StoreCachedAverageColor(FTexture* baseTexture, bool success, const float* color)
+	{
+		if (baseTexture == nullptr)
+		{
+			return;
+		}
+
+		AverageColorCacheEntry& entry = gAverageTextureColorCache[baseTexture];
+		entry.success = success;
+		if (success && color != nullptr)
+		{
+			Copy3(color, entry.color);
+		}
+	}
 
 	struct SkyCandidate
 	{
@@ -349,14 +394,24 @@ namespace
 			return false;
 		}
 
-		if (TryComputeAverageColorFromBaseTexture(baseTexture, outColor))
+		bool cachedSuccess = false;
+		if (TryLoadCachedAverageColor(baseTexture, outColor, cachedSuccess))
 		{
+			return cachedSuccess;
+		}
+
+		float computedColor[3] = {};
+		if (TryComputeAverageColorFromBaseTexture(baseTexture, computedColor))
+		{
+			StoreCachedAverageColor(baseTexture, true, computedColor);
+			Copy3(computedColor, outColor);
 			return true;
 		}
 
 		auto* skybox = dynamic_cast<FSkyBox*>(baseTexture);
 		if (skybox == nullptr)
 		{
+			StoreCachedAverageColor(baseTexture, false, nullptr);
 			return false;
 		}
 
@@ -390,9 +445,11 @@ namespace
 		if (sampledFaces > 0)
 		{
 			const float invCount = 1.0f / sampledFaces;
-			outColor[0] = accumulated[0] * invCount;
-			outColor[1] = accumulated[1] * invCount;
-			outColor[2] = accumulated[2] * invCount;
+			computedColor[0] = accumulated[0] * invCount;
+			computedColor[1] = accumulated[1] * invCount;
+			computedColor[2] = accumulated[2] * invCount;
+			StoreCachedAverageColor(baseTexture, true, computedColor);
+			Copy3(computedColor, outColor);
 			return true;
 		}
 
@@ -405,7 +462,13 @@ namespace
 		{
 			previous = nullptr;
 		}
-		return TryGetAverageTextureColorRecursive(previous, outColor, depth + 1);
+		const bool success = TryGetAverageTextureColorRecursive(previous, computedColor, depth + 1);
+		StoreCachedAverageColor(baseTexture, success, success ? computedColor : nullptr);
+		if (success)
+		{
+			Copy3(computedColor, outColor);
+		}
+		return success;
 	}
 
 	unsigned int CountDrawListItems(HWDrawInfo& di, DrawListType type)
@@ -966,6 +1029,11 @@ namespace
 
 namespace nri_scene
 {
+void ResetAverageTextureColorCache()
+{
+	gAverageTextureColorCache.clear();
+}
+
 void ResetSkyPerfStats()
 {
 	gSkyPerfStats = {};

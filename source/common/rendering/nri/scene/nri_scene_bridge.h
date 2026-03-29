@@ -12,6 +12,7 @@ class FGameTexture;
 namespace nri_scene
 {
 bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor);
+void ResetAverageTextureColorCache();
 void Copy3(const float* source, float* destination);
 
 enum class SurfaceSourceType : uint32_t

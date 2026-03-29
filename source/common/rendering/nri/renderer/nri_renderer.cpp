@@ -1697,6 +1697,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	ResetSceneBufferFrameStats();
 	ResetRendererSkyPerfTraceStats();
+	nri_scene::ResetAverageTextureColorCache();
 	nri_scene::ResetSkyPerfStats();
 	mUsedStaticMapSceneLastFrame = false;
 	mUsedDynamicSceneLastFrame = false;
