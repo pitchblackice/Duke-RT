@@ -20,12 +20,27 @@ namespace
 		}
 	}
 
-	void AppendSurfaceToSceneView(const PTMapSurface& surface, SceneView& outView)
+	void ApplyPreservedSky(SceneView& outView, const SceneView* preservedSkyView)
+	{
+		if (preservedSkyView == nullptr)
+		{
+			return;
+		}
+
+		outView.sky = preservedSkyView->sky;
+		Copy3(preservedSkyView->skyColor, outView.skyColor);
+		Copy3(preservedSkyView->groundColor, outView.groundColor);
+	}
+
+	void AppendSurfaceToSceneView(const PTMapSurface& surface, SceneView& outView, const SceneView* preservedSkyView)
 	{
 		SurfaceRef copy = surface.surface;
 		if ((copy.material.flags & MaterialFlag_Sky) != 0 && copy.material.texture != nullptr)
 		{
-			UpdateSceneSky(outView, copy.material.texture, 0, GetSkySourceType(copy.provenance));
+			if (preservedSkyView == nullptr)
+			{
+				UpdateSceneSky(outView, copy.material.texture, 0, GetSkySourceType(copy.provenance));
+			}
 			// Map-world sky carriers should feed the scene-level environment only.
 			// Keeping them out of the opaque lists preserves the "sky via miss"
 			// contract used by the dynamic scene-capture path.
@@ -82,7 +97,7 @@ SceneDebugStats CollectMapWorldDebugStats(const PTMapWorld& mapWorld)
 	return stats;
 }
 
-void BuildMapSceneView(const PTMapWorld& mapWorld, SceneView& outView)
+void BuildMapSceneView(const PTMapWorld& mapWorld, SceneView& outView, const SceneView* preservedSkyView)
 {
 	outView = {};
 	outView.stats = CollectMapWorldDebugStats(mapWorld);
@@ -91,11 +106,13 @@ void BuildMapSceneView(const PTMapWorld& mapWorld, SceneView& outView)
 
 	for (const PTMapSurface& surface : mapWorld.surfaces)
 	{
-		AppendSurfaceToSceneView(surface, outView);
+		AppendSurfaceToSceneView(surface, outView, preservedSkyView);
 	}
+
+	ApplyPreservedSky(outView, preservedSkyView);
 }
 
-void BuildMapChunkSceneView(const PTMapWorld& mapWorld, const PTMapChunk& chunk, SceneView& outView)
+void BuildMapChunkSceneView(const PTMapWorld& mapWorld, const PTMapChunk& chunk, SceneView& outView, const SceneView* preservedSkyView)
 {
 	outView = {};
 	outView.drawInfo = nullptr;
@@ -106,8 +123,10 @@ void BuildMapChunkSceneView(const PTMapWorld& mapWorld, const PTMapChunk& chunk,
 	const uint32_t endSurface = std::min<uint32_t>(chunk.firstSurface + chunk.surfaceCount, (uint32_t)mapWorld.surfaces.size());
 	for (uint32_t surfaceIndex = chunk.firstSurface; surfaceIndex < endSurface; ++surfaceIndex)
 	{
-		AppendSurfaceToSceneView(mapWorld.surfaces[surfaceIndex], outView);
+		AppendSurfaceToSceneView(mapWorld.surfaces[surfaceIndex], outView, preservedSkyView);
 	}
+
+	ApplyPreservedSky(outView, preservedSkyView);
 }
 
 int32_t FindMapWorldLocalSpaceIndex(const PTMapWorld& mapWorld, uint32_t chunkIndex)

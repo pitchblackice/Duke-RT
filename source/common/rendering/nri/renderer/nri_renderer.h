@@ -112,6 +112,13 @@ private:
 		bool flipTop = false;
 	};
 
+	struct PreservedStaticMapSkyState
+	{
+		bool valid = false;
+		uint64_t buildSerial = 0;
+		nri_scene::SceneView sceneView;
+	};
+
 	struct SceneBufferDebugStats
 	{
 		const char* label = "";
@@ -662,6 +669,7 @@ private:
 	SkyState mLastTracedSkyState = {};
 	uint64_t mLastTracedSkyResolvedKey = 0;
 	bool mHasTracedSkyState = false;
+	PreservedStaticMapSkyState mPreservedStaticMapSky = {};
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
 	bool mPathTracingSupported = true;

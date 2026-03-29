@@ -4034,6 +4034,13 @@ void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
 		return;
 	}
 
+	mPreservedStaticMapSky = {};
+	mPreservedStaticMapSky.valid = true;
+	mPreservedStaticMapSky.buildSerial = mStaticMapScene.buildSerial;
+	mPreservedStaticMapSky.sceneView.sky = mStaticMapScene.sceneView.sky;
+	Copy3(mStaticMapScene.sceneView.skyColor, mPreservedStaticMapSky.sceneView.skyColor);
+	Copy3(mStaticMapScene.sceneView.groundColor, mPreservedStaticMapSky.sceneView.groundColor);
+
 	DestroyStaticMapSceneCache();
 	mStaticMapScene = {};
 	mStaticAccelerationBuildSerial = 0;
@@ -5515,6 +5522,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 		DestroyStaticMapSceneCache();
 		mStaticMapScene = {};
 		mStaticAccelerationBuildSerial = 0;
+		mPreservedStaticMapSky = {};
 	}
 
 	if (mStaticMapScene.valid &&
@@ -5527,7 +5535,11 @@ bool NRIRenderer::EnsureStaticMapScene()
 		return true;
 	}
 
-	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView);
+	const nri_scene::SceneView* preservedSkyView =
+		(mPreservedStaticMapSky.valid && mPreservedStaticMapSky.buildSerial == mMapWorld.buildSerial)
+		? &mPreservedStaticMapSky.sceneView
+		: nullptr;
+	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView, preservedSkyView);
 	mStaticMapScene.lightChunkViews.clear();
 	mStaticMapScene.geometry = {};
 	mStaticMapScene.materialBridge = {};
@@ -5561,7 +5573,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 		nri_scene::SceneView chunkSceneView;
 		nri_scene::GeometryData chunkGeometry;
 		nri_scene::MaterialBridgeData chunkMaterials;
-		nri_scene::BuildMapChunkSceneView(mMapWorld, chunk, chunkSceneView);
+		nri_scene::BuildMapChunkSceneView(mMapWorld, chunk, chunkSceneView, preservedSkyView);
 			{
 				Clocker clock(NriPTGeometryBuild);
 				nri_scene::BuildGeometry(chunkSceneView, chunkGeometry);
@@ -5624,6 +5636,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 	mStaticMapScene.accelerationBuildCount++;
 	mUploadedStaticMapSceneLastFrame = true;
 	mBuiltStaticMapSceneASLastFrame = true;
+	mPreservedStaticMapSky = {};
 
 	Printf("NRI PT static scene resident: level=%s build_serial=%llu chunks=%u tris=%u materials=%u uploads=%u as_builds=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",

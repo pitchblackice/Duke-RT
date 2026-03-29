@@ -129,8 +129,8 @@ struct PTMapWorld
 };
 
 SceneDebugStats CollectMapWorldDebugStats(const PTMapWorld& mapWorld);
-void BuildMapSceneView(const PTMapWorld& mapWorld, SceneView& outView);
-void BuildMapChunkSceneView(const PTMapWorld& mapWorld, const PTMapChunk& chunk, SceneView& outView);
+void BuildMapSceneView(const PTMapWorld& mapWorld, SceneView& outView, const SceneView* preservedSkyView = nullptr);
+void BuildMapChunkSceneView(const PTMapWorld& mapWorld, const PTMapChunk& chunk, SceneView& outView, const SceneView* preservedSkyView = nullptr);
 int32_t FindMapWorldLocalSpaceIndex(const PTMapWorld& mapWorld, uint32_t chunkIndex);
 int32_t FindMapWorldPortalIndex(const PTMapWorld& mapWorld, const SurfaceProvenance& provenance);
 }
