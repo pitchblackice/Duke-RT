@@ -1026,6 +1026,25 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			composed = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
 		}
 	}
+	else if (gTraceConstants.DebugMode == 43)
+	{
+		const float4 motionSample = gMotionInput.Load(int3(samplePos, 0));
+		const float4 sidebandUv = gDirectLightingInput.Load(int3(samplePos, 0));
+		const float4 sidebandFlags = gDirectEmissionInput.Load(int3(samplePos, 0));
+		if (motionSample.w <= 0.0 || sidebandFlags.x <= 0.5 || sidebandFlags.y <= 0.5)
+		{
+			composed = float4(1.0, 0.0, 1.0, 1.0);
+		}
+		else
+		{
+			const float2 sceneSizeF = float2(sceneSize);
+			const float2 reconstructedPrevUv = sidebandUv.zw + motionSample.xy / sceneSizeF;
+			const float2 errorPixels = (reconstructedPrevUv - sidebandUv.xy) * sceneSizeF;
+			const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
+			const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
+			composed = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+		}
+	}
 	else if (gTraceConstants.DebugMode == 34)
 	{
 		const float4 debugSample = gDirectLightingInput.Load(int3(samplePos, 0));
