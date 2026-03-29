@@ -665,9 +665,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
+				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
 		}
 		else
@@ -691,9 +692,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
+				gDirectEmissionOutput[pixelPos] = 0.0;
 				color = float4(1.0, 0.0, 1.0, 1.0);
 			}
 		}
@@ -942,6 +944,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				basisCurrentUvValid ? 1.0 : 0.0,
 				basisPrevUvValid ? 1.0 : 0.0);
 			gDirectEmissionOutput[pixelPos] = float4(currentUv, prevUv);
+		}
+		else if (gTraceConstants.DebugMode == 42)
+		{
+			const float2 currentUvNonJittered = ApplyTemporalJitterToUv(currentUvRaw, -currentJitter);
+			const float2 prevUvNonJittered = ApplyTemporalJitterToUv(prevUvRaw, -previousJitter);
+			gDirectLightingOutput[pixelPos] = float4(prevUvNonJittered, currentUvNonJittered);
+			gDirectEmissionOutput[pixelPos] = float4(currentUvValid ? 1.0 : 0.0, prevUvValid ? 1.0 : 0.0, 0.0, 0.0);
 		}
 		else if (gTraceConstants.DebugMode == 34)
 		{
