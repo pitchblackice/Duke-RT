@@ -665,7 +665,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 			}
@@ -691,7 +691,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 				color = float4(1.0, 0.0, 1.0, 1.0);
@@ -1037,6 +1037,34 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			{
 				const float2 actualPixelUv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 				const float2 errorPixels = (basisCurrentUv - actualPixelUv) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+				const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
+				const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
+				color = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+			}
+		}
+		else if (gTraceConstants.DebugMode == 37)
+		{
+			if (!basisCurrentUvValid)
+			{
+				color = float4(1.0, 0.0, 1.0, 1.0);
+			}
+			else
+			{
+				const float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+				const float2 jitterUv = currentJitter / resolution;
+				const float2 actualPixelUv = ((float2)pixelPos + 0.5) / resolution;
+				float2 candidateUv = basisCurrentUv;
+
+				if (pixelPos.x >= gTraceConstants.RenderWidth / 3u && pixelPos.x < (gTraceConstants.RenderWidth * 2u) / 3u)
+				{
+					candidateUv = basisCurrentUv + jitterUv;
+				}
+				else if (pixelPos.x >= (gTraceConstants.RenderWidth * 2u) / 3u)
+				{
+					candidateUv = basisCurrentUv + jitterUv * 2.0;
+				}
+
+				const float2 errorPixels = (candidateUv - actualPixelUv) * resolution;
 				const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
 				const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
 				color = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
