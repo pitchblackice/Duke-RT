@@ -762,6 +762,23 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 specular = 0.0;
 		float3 directLighting = 0.0;
 		float3 directEmission = 0.0;
+		// Explicit lighting ownership after composition slices 1-3:
+		// - directLighting: stable raw direct-composition bucket only
+		//   * ambient / sector ambient
+		//   * runtime point-light direct terms
+		// - diffuse/specular transport: denoised transport bucket
+		//   * directional sun diffuse/specular
+		//   * sampled emissive diffuse/specular
+		//   * indirect diffuse/specular
+		// - directEmission: only actual emissive-hit / fullbright surface output
+		float3 ambientDirectLighting = 0.0;
+		float3 runtimePointDirectLighting = 0.0;
+		float3 sunTransportDiffuse = 0.0;
+		float3 sunTransportSpecular = 0.0;
+		float3 sampledEmissiveTransportDiffuse = 0.0;
+		float3 sampledEmissiveTransportSpecular = 0.0;
+		float3 indirectTransportDiffuse = 0.0;
+		float3 indirectTransportSpecular = 0.0;
 		float3 analyticDirectLighting = 0.0;
 		float3 emissiveDirectLighting = 0.0;
 		float2 emissiveSampleUv = 0.0;
@@ -820,11 +837,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float3 viewDir = normalize(-visibleRayDirection);
 				sectorSourceLighting = EvaluateSectorLightingSource(material, hit.normal);
 				sectorAmbientLighting = EvaluateSectorLighting(material, hit.normal, albedo.rgb);
-				directLighting += EvaluateAmbientDiffuse(albedo.rgb) + sectorAmbientLighting;
-				const float3 directSunDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir) : 0.0;
-				const float3 directSunSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0) : 0.0;
-				diffuse += directSunDiffuse * shadow;
-				specular += directSunSpecular * shadow;
+				ambientDirectLighting = EvaluateAmbientDiffuse(albedo.rgb) + sectorAmbientLighting;
+				sunTransportDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir) * shadow : 0.0;
+				sunTransportSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0) * shadow : 0.0;
 
 				const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
 				[loop]
@@ -873,7 +888,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					const float3 analyticDiffuse = albedo.rgb * (lambert * 0.80) * lightColor * runtimeShadow;
 					const float3 analyticSpecular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, runtimeLightDir, 1.0) * lightColor * runtimeShadow;
 					analyticDirectLighting += analyticDiffuse + analyticSpecular;
-					directLighting += analyticDiffuse + analyticSpecular;
+					runtimePointDirectLighting += analyticDiffuse + analyticSpecular;
 				}
 
 				float3 emissiveSampleDiffuse = 0.0;
@@ -938,17 +953,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				emissiveSampleDiffuse *= invEmissiveSampleCount;
 				emissiveSampleSpecular *= invEmissiveSampleCount;
 				emissiveDirectLighting += emissiveSampleDiffuse + emissiveSampleSpecular;
-				// Sampled emissive lighting is still transport, not surface emission. Feed it through the denoised
-				// diffuse/specular paths instead of recombining it raw through directLighting.
-				diffuse += emissiveSampleDiffuse;
-				specular += emissiveSampleSpecular;
+				sampledEmissiveTransportDiffuse = emissiveSampleDiffuse;
+				sampledEmissiveTransportSpecular = emissiveSampleSpecular;
 
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{
-					diffuse += TraceIndirectDiffuse(hit, albedo.rgb, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance);
-					specular += TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, lightBounceCount, specularHitDistance);
+					indirectTransportDiffuse = TraceIndirectDiffuse(hit, albedo.rgb, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance);
+					indirectTransportSpecular = TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, lightBounceCount, specularHitDistance);
 				}
+
+				diffuse += sunTransportDiffuse + sampledEmissiveTransportDiffuse + indirectTransportDiffuse;
+				specular += sunTransportSpecular + sampledEmissiveTransportSpecular + indirectTransportSpecular;
+				directLighting += ambientDirectLighting + runtimePointDirectLighting;
 			}
 
 			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
