@@ -5,6 +5,7 @@
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
 #include "skyboxtexture.h"
+#include "image.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
 #include "mapinfo.h"
@@ -1230,16 +1231,24 @@ namespace
 			return false;
 		}
 
-		FTextureBuffer texBuffer = baseTexture->CreateTexBuffer(0, CTF_ProcessData);
-		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+		const int width = baseTexture->GetWidth();
+		const int height = baseTexture->GetHeight();
+		if (width <= 0 || height <= 0)
 		{
 			return false;
 		}
 
+		FContentIdBuilder contentId = {};
+		contentId.imageID = baseTexture->GetImage()->GetId();
+		contentId.translation = 0;
+		contentId.expand = 0;
+		contentId.scaler = 0;
+		contentId.scalefactor = 0;
+
 		outFace.texture = texture;
-		outFace.width = (uint32_t)texBuffer.mWidth;
-		outFace.height = (uint32_t)texBuffer.mHeight;
-		outFace.contentId = texBuffer.mContentId != 0 ? texBuffer.mContentId : (uint64_t)(uintptr_t)texture;
+		outFace.width = (uint32_t)width;
+		outFace.height = (uint32_t)height;
+		outFace.contentId = contentId.id != 0 ? contentId.id : (uint64_t)(uintptr_t)texture;
 		return true;
 	}
 
