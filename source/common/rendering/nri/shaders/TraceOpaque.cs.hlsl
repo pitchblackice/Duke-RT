@@ -665,7 +665,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 			}
@@ -691,7 +691,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 				color = float4(1.0, 0.0, 1.0, 1.0);
@@ -1143,6 +1143,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			const float magnitude = length(previousHitPosition - currentHitPosition);
 			const float mapped = saturate(log2(1.0 + magnitude * 256.0) / 8.0);
+			float3 heat = lerp(float3(0.01, 0.01, 0.05), float3(0.08, 0.40, 0.90), saturate(mapped * 2.0));
+			heat = lerp(heat, float3(0.10, 0.80, 0.30), saturate((mapped - 0.30) * 2.5));
+			heat = lerp(heat, float3(0.95, 0.85, 0.20), saturate((mapped - 0.60) * 3.0));
+			heat = lerp(heat, float3(1.0, 0.25, 0.10), saturate((mapped - 0.85) * 6.0));
+			color = float4(heat, 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 40)
+		{
+			const float3 toHit = currentHitPosition - gTraceConstants.CameraPos;
+			const float alongRay = max(dot(toHit, GeneratePrimaryRay(pixelPos)), 0.0);
+			const float3 closestPointOnRay = gTraceConstants.CameraPos + GeneratePrimaryRay(pixelPos) * alongRay;
+			const float closureError = length(currentHitPosition - closestPointOnRay);
+			const float mapped = saturate(log2(1.0 + closureError * 256.0) / 8.0);
 			float3 heat = lerp(float3(0.01, 0.01, 0.05), float3(0.08, 0.40, 0.90), saturate(mapped * 2.0));
 			heat = lerp(heat, float3(0.10, 0.80, 0.30), saturate((mapped - 0.30) * 2.5));
 			heat = lerp(heat, float3(0.95, 0.85, 0.20), saturate((mapped - 0.60) * 3.0));
