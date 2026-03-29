@@ -70,12 +70,14 @@ float4 EncodeSignedPixelVectorDebug(float2 vectorPixels)
 	return float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
 }
 
-void ComputeSkyVirtualMotion(float3 rayOrigin, float3 rayDirection, out bool currentUvValid, out bool prevUvValid, out float2 currentUvRaw, out float2 prevUvRaw, out float2 motionPixels)
+void ComputeSkyVirtualMotion(float3 rayOrigin, float3 rayDirection, out bool currentUvValid, out bool prevUvValid, out float2 currentUvRaw, out float2 prevUvRaw, out float2 motionPixels, out float currentViewZ, out float previousViewZ)
 {
 	const float3 virtualPosition = rayOrigin + rayDirection * kSkyVirtualMotionDistance;
 	currentUvValid = ProjectWorldToUvMatrixRaw(virtualPosition, false, currentUvRaw);
 	prevUvValid = ProjectWorldToUvMatrixRaw(virtualPosition, true, prevUvRaw);
 	motionPixels = 0.0;
+	currentViewZ = dot(virtualPosition - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
+	previousViewZ = dot(virtualPosition - gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward);
 
 	if (currentUvValid && prevUvValid)
 	{
@@ -700,7 +702,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float3 missColor = GetMissColor(visibleRayDirection);
 			const float4 packedDiffuse = PackDiffuseRadiance(missColor, NRD_INF, NRD_INF);
 			color = (gTraceConstants.DebugMode >= 1 && gTraceConstants.DebugMode <= 4) ? float4(missColor, 1.0) : packedDiffuse;
-			gMotionOutput[pixelPos] = float4(0.0, 0.0, 0.0, -NRD_INF);
+			bool missCurrentUvValid = false;
+			bool missPrevUvValid = false;
+			float2 missCurrentUvRaw = 0.0;
+			float2 missPrevUvRaw = 0.0;
+			float2 missMotionPixels = 0.0;
+			float missCurrentViewZ = 0.0;
+			float missPreviousViewZ = 0.0;
+			ComputeSkyVirtualMotion(rayOrigin, visibleRayDirection, missCurrentUvValid, missPrevUvValid, missCurrentUvRaw, missPrevUvRaw, missMotionPixels, missCurrentViewZ, missPreviousViewZ);
+			const float missMotionZ = (missCurrentUvValid && missPrevUvValid) ? (missPreviousViewZ - missCurrentViewZ) : 0.0;
+			gMotionOutput[pixelPos] = float4(missMotionPixels, missMotionZ, -NRD_INF);
 			gViewZOutput[pixelPos] = float4(NRD_INF, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
 			gBaseColorOutput[pixelPos] = float4(missColor, 0.0);
@@ -726,13 +737,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 				else if (gTraceConstants.DebugMode == 47 || gTraceConstants.DebugMode == 48)
 				{
-					bool missCurrentUvValid = false;
-					bool missPrevUvValid = false;
-					float2 missCurrentUvRaw = 0.0;
-					float2 missPrevUvRaw = 0.0;
-					float2 missMotionPixels = 0.0;
-					ComputeSkyVirtualMotion(rayOrigin, visibleRayDirection, missCurrentUvValid, missPrevUvValid, missCurrentUvRaw, missPrevUvRaw, missMotionPixels);
-
 					if (gTraceConstants.DebugMode == 47)
 					{
 						color = (missCurrentUvValid && missPrevUvValid) ? EncodeSignedPixelVectorDebug(missMotionPixels) : float4(1.0, 0.0, 1.0, 1.0);
