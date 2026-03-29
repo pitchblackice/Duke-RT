@@ -255,6 +255,27 @@ uint2 ResolvePresentSamplePos(uint2 pixelPos)
 	return min((pixelPos * inputSize) / outputSize, inputSize - 1u);
 }
 
+float4 VisualizeMotionVector(float4 motionSample, float viewZ)
+{
+	const bool isSky = abs(viewZ) >= NRD_INF * 0.5;
+	const bool valid = motionSample.w > 0.0 || isSky;
+	if (!valid)
+	{
+		return float4(1.0, 0.0, 1.0, 1.0);
+	}
+
+	const float2 motionPixels = motionSample.xy;
+	const float2 signedMagnitude = sign(motionPixels) * sqrt(saturate(abs(motionPixels) / 8.0));
+	const float magnitude = saturate(log2(1.0 + length(motionPixels)) / 3.0);
+	float3 color = float3(signedMagnitude * 0.5 + 0.5, magnitude);
+	if (isSky)
+	{
+		color = lerp(color, float3(0.35, 0.45, 0.75), 0.18);
+	}
+
+	return float4(saturate(color), 1.0);
+}
+
 float3 BootstrapHashColor(uint index)
 {
 	const float seed = (float)(index + 1u);
@@ -686,202 +707,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (gTraceConstants.DebugMode == 5)
 	{
 		const float4 motionSample = gMotionInput.Load(int3(samplePos, 0));
-		if (motionSample.w <= 0.0)
-		{
-			composed = float4(1.0, 0.0, 1.0, 1.0);
-		}
-		else
-		{
-			const float2 motionPixels = motionSample.xy;
-			const float2 signedMagnitude = sign(motionPixels) * sqrt(saturate(abs(motionPixels) / 8.0));
-			const float magnitude = saturate(log2(1.0 + length(motionPixels)) / 3.0);
-			composed = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
-		}
-
-		// A live pulse in the corner makes it obvious whether this debug view is updating every frame.
-		if (pixelPosU.x < 16u && pixelPosU.y < 16u)
-		{
-			const float pulse = ((gTraceConstants.FrameIndex & 1u) != 0u) ? 1.0 : 0.2;
-			composed = float4(pulse, 1.0 - pulse, 0.0, 1.0);
-		}
-
-		uint2 probePixelPos = sceneSize / 2u;
-		uint2 probeSamplePos = ResolvePresentSamplePos(probePixelPos);
-		float4 probeMotion = gMotionInput.Load(int3(probeSamplePos, 0));
-		float4 probeUvFlags = gDirectLightingInput.Load(int3(probeSamplePos, 0));
-		float4 probeUvs = gDirectEmissionInput.Load(int3(probeSamplePos, 0));
-		bool foundProbeSample = probeUvFlags.x > 0.5 || probeUvFlags.y > 0.5 || probeUvFlags.z > 0.5 || probeUvFlags.w > 0.5 || probeMotion.w > 0.0;
-		const uint probeLeft = 20u;
-		const uint probeWidth = 96u;
-		const uint probeCenterX = probeLeft + probeWidth / 2u;
-		const uint probeRight = probeLeft + probeWidth;
-		const bool overlayRegion = pixelPosU.x < probeRight + 132u && pixelPosU.y < 52u;
-
-		if (overlayRegion)
-		{
-			[loop]
-			for (int radius = 1; radius <= 24 && !foundProbeSample; ++radius)
-			{
-				[loop]
-				for (int y = -radius; y <= radius && !foundProbeSample; ++y)
-				{
-					[loop]
-					for (int x = -radius; x <= radius && !foundProbeSample; ++x)
-					{
-						if (abs(x) != radius && abs(y) != radius)
-						{
-							continue;
-						}
-
-						const int2 candidatePixel = clamp(int2(sceneSize / 2u) + int2(x, y), int2(0, 0), int2(sceneSize) - 1);
-						const uint2 candidateSample = ResolvePresentSamplePos(uint2(candidatePixel));
-						const float4 candidateMotion = gMotionInput.Load(int3(candidateSample, 0));
-						const float4 candidateFlags = gDirectLightingInput.Load(int3(candidateSample, 0));
-						if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateFlags.z > 0.5 || candidateFlags.w > 0.5 || candidateMotion.w > 0.0)
-						{
-							probePixelPos = uint2(candidatePixel);
-							probeSamplePos = candidateSample;
-							probeMotion = candidateMotion;
-							probeUvFlags = candidateFlags;
-							probeUvs = gDirectEmissionInput.Load(int3(candidateSample, 0));
-							foundProbeSample = true;
-						}
-					}
-				}
-			}
-
-			if (!foundProbeSample)
-			{
-				const uint stepX = max(sceneSize.x / 16u, 1u);
-				const uint stepY = max(sceneSize.y / 16u, 1u);
-				[loop]
-				for (uint y = 0u; y < sceneSize.y && !foundProbeSample; y += stepY)
-				{
-					[loop]
-					for (uint x = 0u; x < sceneSize.x && !foundProbeSample; x += stepX)
-					{
-						const uint2 candidatePixel = uint2(x, y);
-						const uint2 candidateSample = ResolvePresentSamplePos(candidatePixel);
-						const float4 candidateMotion = gMotionInput.Load(int3(candidateSample, 0));
-						const float4 candidateFlags = gDirectLightingInput.Load(int3(candidateSample, 0));
-						if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateFlags.z > 0.5 || candidateFlags.w > 0.5 || candidateMotion.w > 0.0)
-						{
-							probePixelPos = candidatePixel;
-							probeSamplePos = candidateSample;
-							probeMotion = candidateMotion;
-							probeUvFlags = candidateFlags;
-							probeUvs = gDirectEmissionInput.Load(int3(candidateSample, 0));
-							foundProbeSample = true;
-						}
-					}
-				}
-			}
-		}
-
-		if (pixelPosU.x >= probeLeft && pixelPosU.x < probeRight && pixelPosU.y >= 20u && pixelPosU.y < 52u)
-		{
-			const bool isAxis = pixelPosU.x == probeCenterX;
-			const uint halfWidth = probeWidth / 2u - 1u;
-
-			if (pixelPosU.y < 28u)
-			{
-				const float normalized = clamp(probeMotion.x / 8.0, -1.0, 1.0);
-				const uint extent = (uint)round(abs(normalized) * (float)halfWidth);
-				const bool isFilled =
-					(normalized >= 0.0 && pixelPosU.x >= probeCenterX && pixelPosU.x <= probeCenterX + extent) ||
-					(normalized < 0.0 && pixelPosU.x <= probeCenterX && pixelPosU.x + extent >= probeCenterX);
-				float3 color = isAxis ? float3(0.8, 0.8, 0.8) : float3(0.08, 0.08, 0.08);
-				if (isFilled)
-				{
-					color = normalized >= 0.0 ? float3(0.2, 0.8, 0.2) : float3(0.8, 0.2, 0.2);
-				}
-				composed = float4(color, 1.0);
-			}
-			else if (pixelPosU.y >= 31u && pixelPosU.y < 39u)
-			{
-				const float normalized = clamp(probeMotion.y / 8.0, -1.0, 1.0);
-				const uint extent = (uint)round(abs(normalized) * (float)halfWidth);
-				const bool isFilled =
-					(normalized >= 0.0 && pixelPosU.x >= probeCenterX && pixelPosU.x <= probeCenterX + extent) ||
-					(normalized < 0.0 && pixelPosU.x <= probeCenterX && pixelPosU.x + extent >= probeCenterX);
-				float3 color = isAxis ? float3(0.8, 0.8, 0.8) : float3(0.08, 0.08, 0.08);
-				if (isFilled)
-				{
-					color = normalized >= 0.0 ? float3(0.2, 0.8, 0.8) : float3(0.8, 0.2, 0.8);
-				}
-				composed = float4(color, 1.0);
-			}
-			else if (pixelPosU.y >= 42u && pixelPosU.y < 50u)
-			{
-				const float normalized = clamp(probeMotion.z / 64.0, -1.0, 1.0);
-				const uint extent = (uint)round(abs(normalized) * (float)halfWidth);
-				const bool isFilled =
-					(normalized >= 0.0 && pixelPosU.x >= probeCenterX && pixelPosU.x <= probeCenterX + extent) ||
-					(normalized < 0.0 && pixelPosU.x <= probeCenterX && pixelPosU.x + extent >= probeCenterX);
-				float3 color = isAxis ? float3(0.8, 0.8, 0.8) : float3(0.08, 0.08, 0.08);
-				if (isFilled)
-				{
-					color = normalized >= 0.0 ? float3(0.9, 0.6, 0.2) : float3(0.2, 0.2, 0.8);
-				}
-				composed = float4(color, 1.0);
-			}
-		}
-
-		if (pixelPosU.x >= probeRight + 4u && pixelPosU.x < probeRight + 16u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
-		{
-			composed = probeMotion.w > 0.0 ? float4(0.1, 0.9, 0.1, 1.0) : float4(1.0, 0.0, 1.0, 1.0);
-		}
-
-		const float cameraPosDelta = length(gTraceConstants.CameraPos - gTraceConstants.PrevCameraPos);
-		const float cameraForwardDelta = length(gTraceConstants.CameraForward - gTraceConstants.PrevCameraForward);
-		if (pixelPosU.x >= probeRight + 20u && pixelPosU.x < probeRight + 32u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
-		{
-			composed = cameraPosDelta > 0.001 ? float4(0.1, 0.8, 0.1, 1.0) : float4(0.25, 0.05, 0.05, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 20u && pixelPosU.x < probeRight + 32u && pixelPosU.y >= 36u && pixelPosU.y < 48u)
-		{
-			composed = cameraForwardDelta > 0.0005 ? float4(0.1, 0.8, 0.8, 1.0) : float4(0.05, 0.12, 0.12, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 36u && pixelPosU.x < probeRight + 48u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
-		{
-			composed = probeUvFlags.x > 0.5 ? float4(0.1, 0.9, 0.1, 1.0) : float4(0.25, 0.05, 0.05, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 36u && pixelPosU.x < probeRight + 48u && pixelPosU.y >= 36u && pixelPosU.y < 48u)
-		{
-			composed = probeUvFlags.y > 0.5 ? float4(0.1, 0.9, 0.9, 1.0) : float4(0.05, 0.12, 0.12, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 64u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
-		{
-			composed = probeUvFlags.z > 0.5 ? float4(0.9, 0.8, 0.2, 1.0) : float4(0.20, 0.12, 0.04, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 64u && pixelPosU.y >= 36u && pixelPosU.y < 48u)
-		{
-			composed = probeUvFlags.w > 0.5 ? float4(0.9, 0.5, 0.2, 1.0) : float4(0.18, 0.08, 0.04, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 68u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 20u && pixelPosU.y < 24u)
-		{
-			const float u = clamp(probeUvs.x, 0.0, 1.0);
-			composed = pixelPosU.x < 68u + (uint)round(u * 48.0) ? float4(0.3, 0.9, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 68u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 26u && pixelPosU.y < 30u)
-		{
-			const float v = clamp(probeUvs.y, 0.0, 1.0);
-			composed = pixelPosU.x < 68u + (uint)round(v * 48.0) ? float4(0.3, 0.7, 1.0, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 68u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 36u && pixelPosU.y < 40u)
-		{
-			const float u = clamp(probeUvs.z, 0.0, 1.0);
-			composed = pixelPosU.x < 68u + (uint)round(u * 48.0) ? float4(0.9, 0.8, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 68u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 42u && pixelPosU.y < 46u)
-		{
-			const float v = clamp(probeUvs.w, 0.0, 1.0);
-			composed = pixelPosU.x < 68u + (uint)round(v * 48.0) ? float4(1.0, 0.6, 0.3, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
-		}
-		if (pixelPosU.x >= probeRight + 120u && pixelPosU.x < probeRight + 132u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
-		{
-			composed = foundProbeSample ? float4(0.9, 0.9, 0.1, 1.0) : float4(0.25, 0.05, 0.25, 1.0);
-		}
+		const float viewZ = gViewZInput.Load(int3(samplePos, 0)).x;
+		composed = VisualizeMotionVector(motionSample, viewZ);
 	}
 	else if (gTraceConstants.DebugMode == 6)
 	{
@@ -990,92 +817,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else if (gTraceConstants.DebugMode == 25)
 	{
 		composed = float4(saturate(gDirectEmissionInput.Load(int3(samplePos, 0)).rgb), 1.0);
-	}
-	else if (gTraceConstants.DebugMode == 41)
-	{
-		const float4 motionSample = gMotionInput.Load(int3(samplePos, 0));
-		if (motionSample.w <= 0.0)
-		{
-			composed = float4(1.0, 0.0, 1.0, 1.0);
-		}
-		else
-		{
-			const float2 motionPixels = motionSample.xy;
-			const float2 signedMagnitude = sign(motionPixels) * sqrt(saturate(abs(motionPixels) / 8.0));
-			const float magnitude = saturate(log2(1.0 + length(motionPixels)) / 3.0);
-			composed = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
-		}
-	}
-	else if (gTraceConstants.DebugMode == 42)
-	{
-		const float4 motionSample = gMotionInput.Load(int3(samplePos, 0));
-		const float4 sidebandUv = gDirectLightingInput.Load(int3(samplePos, 0));
-		const float4 sidebandFlags = gDirectEmissionInput.Load(int3(samplePos, 0));
-		if (motionSample.w <= 0.0 || sidebandFlags.x <= 0.5 || sidebandFlags.y <= 0.5)
-		{
-			composed = float4(1.0, 0.0, 1.0, 1.0);
-		}
-		else
-		{
-			const float2 sceneSizeF = float2(sceneSize);
-			const float2 currentUvNonJittered = ((float2)samplePos + 0.5) / sceneSizeF;
-			const float2 reconstructedPrevUv = currentUvNonJittered + motionSample.xy / sceneSizeF;
-			const float2 errorPixels = (reconstructedPrevUv - sidebandUv.xy) * sceneSizeF;
-			const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
-			const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
-			composed = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
-		}
-	}
-	else if (gTraceConstants.DebugMode == 43)
-	{
-		const float4 motionSample = gMotionInput.Load(int3(samplePos, 0));
-		const float4 sidebandUv = gDirectLightingInput.Load(int3(samplePos, 0));
-		const float4 sidebandFlags = gDirectEmissionInput.Load(int3(samplePos, 0));
-		if (motionSample.w <= 0.0 || sidebandFlags.x <= 0.5 || sidebandFlags.y <= 0.5)
-		{
-			composed = float4(1.0, 0.0, 1.0, 1.0);
-		}
-		else
-		{
-			const float2 sceneSizeF = float2(sceneSize);
-			const float2 reconstructedPrevUv = sidebandUv.zw + motionSample.xy / sceneSizeF;
-			const float2 errorPixels = (reconstructedPrevUv - sidebandUv.xy) * sceneSizeF;
-			const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
-			const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
-			composed = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
-		}
-	}
-	else if (gTraceConstants.DebugMode == 34)
-	{
-		const float4 debugSample = gDirectLightingInput.Load(int3(samplePos, 0));
-		if (debugSample.w <= 0.0)
-		{
-			composed = float4(1.0, 0.0, 1.0, 1.0);
-		}
-		else
-		{
-			const float2 errorPixels = debugSample.xy;
-			const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
-			const float magnitude = saturate(log2(1.0 + max(debugSample.z, 0.0)) / 3.0);
-			composed = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
-		}
-	}
-	else if (gTraceConstants.DebugMode == 35)
-	{
-		const float4 debugSample = gDirectLightingInput.Load(int3(samplePos, 0));
-		const float magnitude = length(debugSample.xyz);
-		if (debugSample.w <= 0.0)
-		{
-			composed = float4(1.0, 0.0, 1.0, 1.0);
-		}
-		else
-		{
-			const float mapped = saturate(log2(1.0 + magnitude * 256.0) / 8.0);
-			float3 heat = lerp(float3(0.02, 0.02, 0.08), float3(0.10, 0.75, 0.25), saturate(mapped * 2.0));
-			heat = lerp(heat, float3(0.95, 0.85, 0.20), saturate((mapped - 0.45) * 2.5));
-			heat = lerp(heat, float3(1.0, 0.28, 0.10), saturate((mapped - 0.8) * 5.0));
-			composed = float4(heat, 1.0);
-		}
 	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
