@@ -8,3 +8,5 @@ build-vs2019/
 raze-crash.log
 /vcpkg_installed
 /bin/windows/runtime-deps
+.vs/
+out/
