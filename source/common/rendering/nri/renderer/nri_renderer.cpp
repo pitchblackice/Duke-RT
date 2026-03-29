@@ -2775,7 +2775,7 @@ void NRIRenderer::PrintStatus() const
 		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
-		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=live_raw_penumbra 22=live_raw_shadow 23=temporal_sigma_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient 30=emissive_uv 31=emissive_radiance 32=emissive_primitive 33=emissive_visibility 34=current_reprojection_error 35=hit_position_delta 36=basis_reprojection_error 37=jitter_comp_probe");
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=live_raw_penumbra 22=live_raw_shadow 23=temporal_sigma_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient 30=emissive_uv 31=emissive_radiance 32=emissive_primitive 33=emissive_visibility 34=current_reprojection_error 35=hit_position_delta 36=basis_reprojection_error 37=jitter_comp_probe 38=uv_reference_probe");
 	Printf("NRI PT NRD settings: max_frames=%u fast_frames=%u stabilization_frames=%u anti_firefly=%s hit_recon=%s input_split=%s shadow_split=%s\n",
 		nrdMaxFrames,
 		nrdFastFrames,

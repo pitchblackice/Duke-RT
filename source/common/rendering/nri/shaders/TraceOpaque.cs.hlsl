@@ -665,7 +665,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 			}
@@ -691,7 +691,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 				color = float4(1.0, 0.0, 1.0, 1.0);
@@ -1082,6 +1082,52 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 
 				const float2 errorPixels = (candidateUv - actualPixelUv) * resolution;
+				const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
+				const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
+				const float2 mappedSigned = signedMagnitude * 0.5 + 0.5;
+				const float3 baseColor = float3(mappedSigned.x, mappedSigned.y, magnitude);
+				color = float4(baseColor * tint, 1.0);
+			}
+		}
+		else if (gTraceConstants.DebugMode == 38)
+		{
+			const uint split0 = gTraceConstants.RenderWidth / 3u;
+			const uint split1 = (gTraceConstants.RenderWidth * 2u) / 3u;
+			const bool onDivider = abs((int)pixelPos.x - (int)split0) <= 1 || abs((int)pixelPos.x - (int)split1) <= 1;
+			if (onDivider)
+			{
+				color = float4(1.0, 1.0, 1.0, 1.0);
+			}
+			else if (!basisCurrentUvValid)
+			{
+				color = float4(1.0, 0.0, 1.0, 1.0);
+			}
+			else
+			{
+				const float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+				const float2 jitterUv = currentJitter / resolution;
+				const float2 actualNonJitteredUv = ((float2)pixelPos + 0.5) / resolution;
+				const float2 actualJitteredUv = ((float2)pixelPos + 0.5 + currentJitter) / resolution;
+				float2 candidateUv = basisCurrentUv + jitterUv;
+				float2 referenceUv = actualNonJitteredUv;
+				float3 tint = float3(0.85, 0.90, 1.00);
+
+				if (pixelPos.x >= split0 && pixelPos.x < split1)
+				{
+					// Middle third: raw projected UV against jittered traced-sample UV.
+					candidateUv = basisCurrentUv + jitterUv;
+					referenceUv = actualJitteredUv;
+					tint = float3(0.85, 1.00, 0.85);
+				}
+				else if (pixelPos.x >= split1)
+				{
+					// Right third: current subtract-once projector against non-jittered UV.
+					candidateUv = basisCurrentUv;
+					referenceUv = actualNonJitteredUv;
+					tint = float3(1.00, 0.85, 0.85);
+				}
+
+				const float2 errorPixels = (candidateUv - referenceUv) * resolution;
 				const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
 				const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
 				const float2 mappedSigned = signedMagnitude * 0.5 + 0.5;
