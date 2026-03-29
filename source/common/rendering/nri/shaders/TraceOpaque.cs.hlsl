@@ -61,6 +61,30 @@ float3 SampleSpecularLobe(float3 reflectionDir, float roughness, inout uint rngS
 	return normalize(lerp(reflectionDir, blurred, blurAmount));
 }
 
+static const float kSkyVirtualMotionDistance = 65536.0;
+
+float4 EncodeSignedPixelVectorDebug(float2 vectorPixels)
+{
+	const float2 signedMagnitude = sign(vectorPixels) * sqrt(saturate(abs(vectorPixels) / 8.0));
+	const float magnitude = saturate(log2(1.0 + length(vectorPixels)) / 3.0);
+	return float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+}
+
+void ComputeSkyVirtualMotion(float3 rayOrigin, float3 rayDirection, out bool currentUvValid, out bool prevUvValid, out float2 currentUvRaw, out float2 prevUvRaw, out float2 motionPixels)
+{
+	const float3 virtualPosition = rayOrigin + rayDirection * kSkyVirtualMotionDistance;
+	currentUvValid = ProjectWorldToUvMatrixRaw(virtualPosition, false, currentUvRaw);
+	prevUvValid = ProjectWorldToUvMatrixRaw(virtualPosition, true, prevUvRaw);
+	motionPixels = 0.0;
+
+	if (currentUvValid && prevUvValid)
+	{
+		const float2 currentJitter = GetCurrentTemporalJitter();
+		const float2 previousJitter = GetPreviousTemporalJitter();
+		motionPixels = (prevUvRaw - currentUvRaw) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight) + (currentJitter - previousJitter);
+	}
+}
+
 uint GetLightBounceCount()
 {
 	return gTraceConstants.BounceCounts & 0xffffu;
@@ -665,7 +689,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42 || gTraceConstants.DebugMode == 43 || gTraceConstants.DebugMode == 44 || gTraceConstants.DebugMode == 45)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42 || gTraceConstants.DebugMode == 43 || gTraceConstants.DebugMode == 44 || gTraceConstants.DebugMode == 45 || gTraceConstants.DebugMode == 46 || gTraceConstants.DebugMode == 47 || gTraceConstants.DebugMode == 48)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
@@ -692,11 +716,47 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
-			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42 || gTraceConstants.DebugMode == 43 || gTraceConstants.DebugMode == 44 || gTraceConstants.DebugMode == 45)
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35 || gTraceConstants.DebugMode == 36 || gTraceConstants.DebugMode == 37 || gTraceConstants.DebugMode == 38 || gTraceConstants.DebugMode == 39 || gTraceConstants.DebugMode == 40 || gTraceConstants.DebugMode == 42 || gTraceConstants.DebugMode == 43 || gTraceConstants.DebugMode == 44 || gTraceConstants.DebugMode == 45 || gTraceConstants.DebugMode == 46 || gTraceConstants.DebugMode == 47 || gTraceConstants.DebugMode == 48)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
-				color = float4(1.0, 0.0, 1.0, 1.0);
+				if (gTraceConstants.DebugMode == 46)
+				{
+					color = EncodeSignedPixelVectorDebug(0.0);
+				}
+				else if (gTraceConstants.DebugMode == 47 || gTraceConstants.DebugMode == 48)
+				{
+					bool missCurrentUvValid = false;
+					bool missPrevUvValid = false;
+					float2 missCurrentUvRaw = 0.0;
+					float2 missPrevUvRaw = 0.0;
+					float2 missMotionPixels = 0.0;
+					ComputeSkyVirtualMotion(rayOrigin, visibleRayDirection, missCurrentUvValid, missPrevUvValid, missCurrentUvRaw, missPrevUvRaw, missMotionPixels);
+
+					if (gTraceConstants.DebugMode == 47)
+					{
+						color = (missCurrentUvValid && missPrevUvValid) ? EncodeSignedPixelVectorDebug(missMotionPixels) : float4(1.0, 0.0, 1.0, 1.0);
+					}
+					else
+					{
+						if (!(missCurrentUvValid && missPrevUvValid))
+						{
+							color = float4(1.0, 0.0, 1.0, 1.0);
+						}
+						else
+						{
+							const float2 currentUvNonJittered = ApplyTemporalJitterToUv(missCurrentUvRaw, -GetCurrentTemporalJitter());
+							const float2 prevUvNonJittered = ApplyTemporalJitterToUv(missPrevUvRaw, -GetPreviousTemporalJitter());
+							const float2 reconstructedPrevUv = currentUvNonJittered + missMotionPixels / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+							const float2 errorPixels = (reconstructedPrevUv - prevUvNonJittered) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+							color = EncodeSignedPixelVectorDebug(errorPixels);
+						}
+					}
+				}
+				else
+				{
+					color = float4(1.0, 0.0, 1.0, 1.0);
+				}
 			}
 		}
 	}
@@ -1180,10 +1240,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else if (gTraceConstants.DebugMode == 44)
 		{
-			const float2 motionPixels = motion.xy;
-			const float2 signedMagnitude = sign(motionPixels) * sqrt(saturate(abs(motionPixels) / 8.0));
-			const float magnitude = saturate(log2(1.0 + length(motionPixels)) / 3.0);
-			color = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+			color = EncodeSignedPixelVectorDebug(motion.xy);
 		}
 		else if (gTraceConstants.DebugMode == 45)
 		{
@@ -1197,10 +1254,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float2 prevUvNonJittered = ApplyTemporalJitterToUv(prevUvRaw, -previousJitter);
 				const float2 reconstructedPrevUv = currentUvNonJittered + motion.xy / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 				const float2 errorPixels = (reconstructedPrevUv - prevUvNonJittered) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
-				const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
-				const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
-				color = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+				color = EncodeSignedPixelVectorDebug(errorPixels);
 			}
+		}
+		else if (gTraceConstants.DebugMode == 46 || gTraceConstants.DebugMode == 47 || gTraceConstants.DebugMode == 48)
+		{
+			color = 0.0;
 		}
 		else
 		{
