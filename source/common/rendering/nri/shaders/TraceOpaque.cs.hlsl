@@ -938,7 +938,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				emissiveSampleDiffuse *= invEmissiveSampleCount;
 				emissiveSampleSpecular *= invEmissiveSampleCount;
 				emissiveDirectLighting += emissiveSampleDiffuse + emissiveSampleSpecular;
-				directLighting += emissiveSampleDiffuse + emissiveSampleSpecular;
+				// Sampled emissive lighting is still transport, not surface emission. Feed it through the denoised
+				// diffuse/specular paths instead of recombining it raw through directLighting.
+				diffuse += emissiveSampleDiffuse;
+				specular += emissiveSampleSpecular;
 
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
