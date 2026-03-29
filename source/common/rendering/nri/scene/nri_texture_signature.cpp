@@ -144,6 +144,40 @@ namespace
 
 namespace nri_scene
 {
+bool IsTexturePersistentSignatureEligible(FTexture* texture)
+{
+	if (texture == nullptr)
+	{
+		return false;
+	}
+
+	// Canvas-backed textures are runtime-mutable and should never be treated as
+	// persistently stable across execution, even if metadata becomes richer later.
+	if (texture->isCanvas() || texture->isHardwareCanvas() || dynamic_cast<FCanvasTexture*>(texture) != nullptr)
+	{
+		return false;
+	}
+
+	return texture->GetImage() != nullptr;
+}
+
+bool IsTexturePersistentSignatureEligible(FGameTexture* texture)
+{
+	if (!IsUsableGameTexturePointer(texture))
+	{
+		return false;
+	}
+
+	// Keep wrapper-level mutable cases explicit so callers do not accidentally
+	// inherit persistence just because the wrapped base exposes an image ID.
+	if (texture->isHardwareCanvas() || texture->isSoftwareCanvas() || texture->GetUseType() == ETextureType::SWCanvas)
+	{
+		return false;
+	}
+
+	return IsTexturePersistentSignatureEligible(TryResolveBaseTexture(texture));
+}
+
 bool CanBuildTextureSignatureFromMetadata(const TextureSignatureRequest& request)
 {
 	if (request.contentKind != TextureSignatureContentKind::ProcessedBGRA)
@@ -194,7 +228,7 @@ bool TryBuildImageTextureSignature(FTexture* texture, const TextureSignatureRequ
 
 	outSignature.valid = true;
 	outSignature.metadataDerived = true;
-	outSignature.persistentEligible = true;
+	outSignature.persistentEligible = IsTexturePersistentSignatureEligible(texture);
 	outSignature.sourceKind = TextureSignatureSourceKind::ImageBacked;
 	outSignature.request = request;
 	outSignature.key = key;
@@ -213,7 +247,12 @@ bool TryBuildSkyboxTextureSignature(FGameTexture* texture, const TextureSignatur
 		return false;
 	}
 
-	return TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, 0, true);
+	const bool success = TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, 0, true);
+	if (success)
+	{
+		outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+	}
+	return success;
 }
 
 bool TryBuildTextureSignature(FGameTexture* texture, const TextureSignatureRequest& request, TextureSignature& outSignature)
@@ -345,10 +384,20 @@ namespace
 
 		if (auto* skybox = dynamic_cast<FSkyBox*>(baseTexture))
 		{
-			return TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, depth, true);
+			const bool success = TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, depth, true);
+			if (success)
+			{
+				outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+			}
+			return success;
 		}
 
-		return TryBuildImageTextureSignature(baseTexture, request, outSignature);
+		const bool success = TryBuildImageTextureSignature(baseTexture, request, outSignature);
+		if (success)
+		{
+			outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+		}
+		return success;
 	}
 
 	bool TryBuildAverageColorTextureSignatureImpl(FGameTexture* texture, TextureSignature& outSignature, int depth)
@@ -372,9 +421,19 @@ namespace
 
 		if (auto* skybox = dynamic_cast<FSkyBox*>(baseTexture))
 		{
-			return TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, depth, false);
+			const bool success = TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, depth, false);
+			if (success)
+			{
+				outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+			}
+			return success;
 		}
 
-		return TryBuildImageTextureSignature(baseTexture, request, outSignature);
+		const bool success = TryBuildImageTextureSignature(baseTexture, request, outSignature);
+		if (success)
+		{
+			outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+		}
+		return success;
 	}
 }

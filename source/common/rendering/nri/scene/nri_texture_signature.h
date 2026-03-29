@@ -73,4 +73,11 @@ bool TryBuildTextureSignature(FGameTexture* texture, const TextureSignatureReque
 // it describes the source structure needed to derive an average color, so
 // skybox-only orientation details like flip-top are excluded from the key.
 bool TryBuildAverageColorTextureSignature(FGameTexture* texture, TextureSignature& outSignature);
+
+// Returns whether a texture is safe to treat as persistently stable across
+// execution for cache reuse. Callers may still build valid metadata-derived
+// signatures for non-persistent cases, but should keep them on short-lived
+// fallback paths.
+bool IsTexturePersistentSignatureEligible(FTexture* texture);
+bool IsTexturePersistentSignatureEligible(FGameTexture* texture);
 }
