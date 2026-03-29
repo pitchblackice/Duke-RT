@@ -138,6 +138,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);
 
 	const float4 centerMotion = gMotionInput[pixelPos];
+	// TAA consumes the shared PT motion contract from Shared.hlsli:
+	// - xy is pixel-space old-minus-new reprojection
+	// - w is a Raze-local validity/history signal, not an NRD requirement
 	const bool unreliableHistory = centerMotion.w <= 0.0;
 	const int radius = 1;
 	float sum = 0.0;
@@ -170,6 +173,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 sigma = sqrt(max(meanSquares - mean * mean, 0.0)) * TAA_SIGMA_SCALE;
 	const float3 clampMin = max(neighborhoodMin, mean - sigma);
 	const float3 clampMax = min(neighborhoodMax, mean + sigma);
+	// The producer writes pixel-space motion, so TAA converts back to UV by dividing by the render resolution.
 	const float2 prevUv = uv + selectedMotion / resolution;
 	const bool historyInScreen = !unreliableHistory && all(prevUv >= 0.0) && all(prevUv <= 1.0);
 

@@ -229,6 +229,10 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	std::memcpy(commonSettings.viewToClipMatrixPrev, desc.viewToClipMatrixPrev, sizeof(commonSettings.viewToClipMatrixPrev));
 	std::memcpy(commonSettings.worldToViewMatrix, desc.worldToViewMatrix, sizeof(commonSettings.worldToViewMatrix));
 	std::memcpy(commonSettings.worldToViewMatrixPrev, desc.worldToViewMatrixPrev, sizeof(commonSettings.worldToViewMatrixPrev));
+	// Raze feeds NRD the sample-shaped 2.5D screen-space contract:
+	// - motion.xy written in pixel units by TraceOpaque
+	// - motion.z written as viewZPrev - viewZ
+	// NRD converts xy back to normalized screen space through motionVectorScale.
 	commonSettings.motionVectorScale[0] = 1.0f / (float)desc.resourceWidth;
 	commonSettings.motionVectorScale[1] = 1.0f / (float)desc.resourceHeight;
 	commonSettings.motionVectorScale[2] = 1.0f;
@@ -250,6 +254,7 @@ bool NRINrdContext::Denoise(const NRINrdDispatchDesc& desc)
 	commonSettings.disocclusionThresholdAlternate = 0.05f;
 	commonSettings.frameIndex = desc.frameIndex;
 	commonSettings.accumulationMode = (desc.resetHistory || denoiserChanged || settingsChanged || sigmaSettingsChanged) ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
+	// Camera motion is already represented by the matrices above, so motion vectors stay in screen space here.
 	commonSettings.isMotionVectorInWorldSpace = false;
 	commonSettings.isBaseColorMetalnessAvailable = true;
 	commonSettings.enableValidation = desc.enableValidation;

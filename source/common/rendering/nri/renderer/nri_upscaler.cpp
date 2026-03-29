@@ -96,6 +96,7 @@ bool NRIUpscalerContext::Dispatch(NRIRenderDevice& frameBuffer, NRIUpscalerKind 
 	dispatchDesc.input = { desc.input->texture, desc.input->shaderView };
 	dispatchDesc.currentResolution = { (nri::Dim_t)desc.currentWidth, (nri::Dim_t)desc.currentHeight };
 	dispatchDesc.cameraJitter = { desc.cameraJitter[0], desc.cameraJitter[1] };
+	// The shared PT motion buffer is already written in pixel units, so the upscaler path keeps mvScale at identity.
 	dispatchDesc.mvScale = { 1.0f, 1.0f };
 	dispatchDesc.flags = desc.resetHistory ? nri::DispatchUpscaleBits::RESET_HISTORY : nri::DispatchUpscaleBits::NONE;
 

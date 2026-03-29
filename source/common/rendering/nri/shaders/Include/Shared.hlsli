@@ -256,6 +256,15 @@ TextureCube<float4> gSkyTexture : register(t1, space1);
 Texture2D<float4> gSceneTextures[MAX_SCENE_TEXTURES] : register(t2, space1);
 
 Texture2D<float4> gHistoryInput : register(t0, space3);
+// PT motion contract shared by TraceOpaque, NRD, TAA, and the upscaler:
+// - xy: non-jittered screen-space motion in pixel units, with oldUv = newUv + motion.xy / renderSize
+// - z: 2.5D depth delta, viewZPrev - viewZ
+// - w: Raze-local history/validity metadata. Positive values allow local history consumers to reproject;
+//   current hit paths store current viewZ here, while bootstrap/miss paths write a negative sentinel.
+// - NRD consumes xyz only and is configured in screen-space 2.5D mode through motionVectorScale.
+// Target policy during the MV rebuild:
+// - opaque hits and sky/miss paths should both eventually follow the same canonical reprojection story
+// - sky/background should not remain on unconditional zero motion once the dedicated miss path lands
 Texture2D<float4> gMotionInput : register(t1, space3);
 Texture2D<float4> gViewZInput : register(t2, space3);
 Texture2D<float4> gNormalRoughnessInput : register(t3, space3);
@@ -273,6 +282,7 @@ Texture2D<float4> gDirectEmissionInput : register(t13, space3);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gTraceOutput, u, 0, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gComposedOutput, u, 1, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float3>, gFinalOutput, u, 2, SET_OUTPUTS);
+// See gMotionInput above for the authoritative PT motion-buffer contract.
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gMotionOutput, u, 3, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gViewZOutput, u, 4, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gNormalRoughnessOutput, u, 5, SET_OUTPUTS);
