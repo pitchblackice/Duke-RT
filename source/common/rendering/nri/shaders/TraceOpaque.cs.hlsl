@@ -665,6 +665,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35)
+			{
+				gDirectLightingOutput[pixelPos] = 0.0;
+			}
 		}
 		else
 		{
@@ -687,6 +691,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				gDirectLightingOutput[pixelPos] = 0.0;
 				gDirectEmissionOutput[pixelPos] = 0.0;
 			}
+			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35)
+			{
+				gDirectLightingOutput[pixelPos] = 0.0;
+			}
 		}
 	}
 	else
@@ -696,8 +704,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float2 currentJitter = GetCurrentTemporalJitter();
 		const float2 previousJitter = GetPreviousTemporalJitter();
 		const float3 previousHitPosition = ResolveHitVertexPosition(hit, true);
+		const float2 basisCurrentUv = ProjectWorldToUv(currentHitPosition, gTraceConstants.CameraPos, gTraceConstants.CameraForward, gTraceConstants.CameraRight, gTraceConstants.CameraUp, gTraceConstants.TanHalfFovX, gTraceConstants.TanHalfFovY, currentJitter);
+		const float2 basisPrevUv = ProjectWorldToUv(previousHitPosition, gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward, gTraceConstants.PrevCameraRight, gTraceConstants.PrevCameraUp, gTraceConstants.PrevTanHalfFovX, gTraceConstants.PrevTanHalfFovY, previousJitter);
 		float2 currentUv = 0.0;
 		float2 prevUv = 0.0;
+		const bool basisCurrentUvValid = all(basisCurrentUv >= 0.0) && all(basisCurrentUv <= 1.0);
+		const bool basisPrevUvValid = all(basisPrevUv >= 0.0) && all(basisPrevUv <= 1.0);
 		const bool currentUvValid = ProjectWorldToUvMatrix(currentHitPosition, false, currentJitter, currentUv);
 		const bool prevUvValid = ProjectWorldToUvMatrix(previousHitPosition, true, previousJitter, prevUv);
 		const float previousViewZ = dot(previousHitPosition - gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward);
@@ -919,8 +931,24 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gDirectEmissionOutput[pixelPos] = float4(directEmission, 1.0);
 		if (gTraceConstants.DebugMode == 5)
 		{
-			gDirectLightingOutput[pixelPos] = float4(currentUvValid ? 1.0 : 0.0, prevUvValid ? 1.0 : 0.0, 0.0, 0.0);
+			gDirectLightingOutput[pixelPos] = float4(
+				currentUvValid ? 1.0 : 0.0,
+				prevUvValid ? 1.0 : 0.0,
+				basisCurrentUvValid ? 1.0 : 0.0,
+				basisPrevUvValid ? 1.0 : 0.0);
 			gDirectEmissionOutput[pixelPos] = float4(currentUv, prevUv);
+		}
+		else if (gTraceConstants.DebugMode == 34)
+		{
+			const float2 actualPixelUv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+			const float2 reprojectionErrorPixels = (currentUv - actualPixelUv) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+			const float reprojectionErrorMagnitude = length(reprojectionErrorPixels);
+			gDirectLightingOutput[pixelPos] = float4(reprojectionErrorPixels, reprojectionErrorMagnitude, currentUvValid ? 1.0 : 0.0);
+		}
+		else if (gTraceConstants.DebugMode == 35)
+		{
+			const float3 hitPositionDelta = hit.position - currentHitPosition;
+			gDirectLightingOutput[pixelPos] = float4(hitPositionDelta, 1.0);
 		}
 
 		if (gTraceConstants.DebugMode == 1)

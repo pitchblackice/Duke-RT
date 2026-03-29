@@ -710,7 +710,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float4 probeMotion = gMotionInput.Load(int3(probeSamplePos, 0));
 		float4 probeUvFlags = gDirectLightingInput.Load(int3(probeSamplePos, 0));
 		float4 probeUvs = gDirectEmissionInput.Load(int3(probeSamplePos, 0));
-		bool foundProbeSample = probeUvFlags.x > 0.5 || probeUvFlags.y > 0.5 || probeMotion.w > 0.0;
+		bool foundProbeSample = probeUvFlags.x > 0.5 || probeUvFlags.y > 0.5 || probeUvFlags.z > 0.5 || probeUvFlags.w > 0.5 || probeMotion.w > 0.0;
 		const uint probeLeft = 20u;
 		const uint probeWidth = 96u;
 		const uint probeCenterX = probeLeft + probeWidth / 2u;
@@ -737,7 +737,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 						const uint2 candidateSample = ResolvePresentSamplePos(uint2(candidatePixel));
 						const float4 candidateMotion = gMotionInput.Load(int3(candidateSample, 0));
 						const float4 candidateFlags = gDirectLightingInput.Load(int3(candidateSample, 0));
-						if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateMotion.w > 0.0)
+						if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateFlags.z > 0.5 || candidateFlags.w > 0.5 || candidateMotion.w > 0.0)
 						{
 							probePixelPos = uint2(candidatePixel);
 							probeSamplePos = candidateSample;
@@ -764,7 +764,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 						const uint2 candidateSample = ResolvePresentSamplePos(candidatePixel);
 						const float4 candidateMotion = gMotionInput.Load(int3(candidateSample, 0));
 						const float4 candidateFlags = gDirectLightingInput.Load(int3(candidateSample, 0));
-						if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateMotion.w > 0.0)
+						if (candidateFlags.x > 0.5 || candidateFlags.y > 0.5 || candidateFlags.z > 0.5 || candidateFlags.w > 0.5 || candidateMotion.w > 0.0)
 						{
 							probePixelPos = candidatePixel;
 							probeSamplePos = candidateSample;
@@ -852,11 +852,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 64u && pixelPosU.y >= 20u && pixelPosU.y < 32u)
 		{
-			composed = float4(0.06, 0.06, 0.06, 1.0);
+			composed = probeUvFlags.z > 0.5 ? float4(0.9, 0.8, 0.2, 1.0) : float4(0.20, 0.12, 0.04, 1.0);
 		}
 		if (pixelPosU.x >= probeRight + 52u && pixelPosU.x < probeRight + 64u && pixelPosU.y >= 36u && pixelPosU.y < 48u)
 		{
-			composed = float4(0.06, 0.06, 0.06, 1.0);
+			composed = probeUvFlags.w > 0.5 ? float4(0.9, 0.5, 0.2, 1.0) : float4(0.18, 0.08, 0.04, 1.0);
 		}
 		if (pixelPosU.x >= probeRight + 68u && pixelPosU.x < probeRight + 116u && pixelPosU.y >= 20u && pixelPosU.y < 24u)
 		{
@@ -990,6 +990,38 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else if (gTraceConstants.DebugMode == 25)
 	{
 		composed = float4(saturate(gDirectEmissionInput.Load(int3(samplePos, 0)).rgb), 1.0);
+	}
+	else if (gTraceConstants.DebugMode == 34)
+	{
+		const float4 debugSample = gDirectLightingInput.Load(int3(samplePos, 0));
+		if (debugSample.w <= 0.0)
+		{
+			composed = float4(1.0, 0.0, 1.0, 1.0);
+		}
+		else
+		{
+			const float2 errorPixels = debugSample.xy;
+			const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
+			const float magnitude = saturate(log2(1.0 + max(debugSample.z, 0.0)) / 3.0);
+			composed = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+		}
+	}
+	else if (gTraceConstants.DebugMode == 35)
+	{
+		const float4 debugSample = gDirectLightingInput.Load(int3(samplePos, 0));
+		const float magnitude = length(debugSample.xyz);
+		if (debugSample.w <= 0.0)
+		{
+			composed = float4(1.0, 0.0, 1.0, 1.0);
+		}
+		else
+		{
+			const float mapped = saturate(log2(1.0 + magnitude * 256.0) / 8.0);
+			float3 heat = lerp(float3(0.02, 0.02, 0.08), float3(0.10, 0.75, 0.25), saturate(mapped * 2.0));
+			heat = lerp(heat, float3(0.95, 0.85, 0.20), saturate((mapped - 0.45) * 2.5));
+			heat = lerp(heat, float3(1.0, 0.28, 0.10), saturate((mapped - 0.8) * 5.0));
+			composed = float4(heat, 1.0);
+		}
 	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
