@@ -1044,7 +1044,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else if (gTraceConstants.DebugMode == 37)
 		{
-			if (!basisCurrentUvValid)
+			const uint split0 = gTraceConstants.RenderWidth / 3u;
+			const uint split1 = (gTraceConstants.RenderWidth * 2u) / 3u;
+			const bool onDivider = abs((int)pixelPos.x - (int)split0) <= 1 || abs((int)pixelPos.x - (int)split1) <= 1;
+			if (onDivider)
+			{
+				color = float4(1.0, 1.0, 1.0, 1.0);
+			}
+			else if (!basisCurrentUvValid)
 			{
 				color = float4(1.0, 0.0, 1.0, 1.0);
 			}
@@ -1054,20 +1061,32 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float2 jitterUv = currentJitter / resolution;
 				const float2 actualPixelUv = ((float2)pixelPos + 0.5) / resolution;
 				float2 candidateUv = basisCurrentUv;
+				float3 tint = float3(0.92, 0.92, 0.92);
 
-				if (pixelPos.x >= gTraceConstants.RenderWidth / 3u && pixelPos.x < (gTraceConstants.RenderWidth * 2u) / 3u)
+				if (pixelPos.x >= split0 && pixelPos.x < split1)
 				{
+					// Middle third: no jitter compensation.
 					candidateUv = basisCurrentUv + jitterUv;
+					tint = float3(0.85, 1.00, 0.85);
 				}
-				else if (pixelPos.x >= (gTraceConstants.RenderWidth * 2u) / 3u)
+				else if (pixelPos.x >= split1)
 				{
-					candidateUv = basisCurrentUv + jitterUv * 2.0;
+					// Right third: opposite-sign overshoot to make the choice visible even under a large base bias.
+					candidateUv = basisCurrentUv + jitterUv * 4.0;
+					tint = float3(1.00, 0.85, 0.85);
+				}
+				else
+				{
+					// Left third: current subtract-once behavior.
+					tint = float3(0.85, 0.90, 1.00);
 				}
 
 				const float2 errorPixels = (candidateUv - actualPixelUv) * resolution;
 				const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
 				const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
-				color = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+				const float2 mappedSigned = signedMagnitude * 0.5 + 0.5;
+				const float3 baseColor = float3(mappedSigned.x, mappedSigned.y, magnitude);
+				color = float4(baseColor * tint, 1.0);
 			}
 		}
 		else
