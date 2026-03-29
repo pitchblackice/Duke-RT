@@ -255,27 +255,6 @@ uint2 ResolvePresentSamplePos(uint2 pixelPos)
 	return min((pixelPos * inputSize) / outputSize, inputSize - 1u);
 }
 
-float4 VisualizeMotionVector(float4 motionSample, float viewZ)
-{
-	const bool isSky = abs(viewZ) >= NRD_INF * 0.5;
-	const bool valid = motionSample.w > 0.0 || isSky;
-	if (!valid)
-	{
-		return float4(1.0, 0.0, 1.0, 1.0);
-	}
-
-	const float2 motionPixels = motionSample.xy;
-	const float2 signedMagnitude = sign(motionPixels) * sqrt(saturate(abs(motionPixels) / 8.0));
-	const float magnitude = saturate(log2(1.0 + length(motionPixels)) / 3.0);
-	float3 color = float3(signedMagnitude * 0.5 + 0.5, magnitude);
-	if (isSky)
-	{
-		color = lerp(color, float3(0.35, 0.45, 0.75), 0.18);
-	}
-
-	return float4(saturate(color), 1.0);
-}
-
 float3 BootstrapHashColor(uint index)
 {
 	const float seed = (float)(index + 1u);
@@ -704,13 +683,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	if (gTraceConstants.DebugMode == 5)
-	{
-		const float4 motionSample = gMotionInput.Load(int3(samplePos, 0));
-		const float viewZ = gViewZInput.Load(int3(samplePos, 0)).x;
-		composed = VisualizeMotionVector(motionSample, viewZ);
-	}
-	else if (gTraceConstants.DebugMode == 6)
+	if (gTraceConstants.DebugMode == 6)
 	{
 		const float viewZ = abs(gViewZInput.Load(int3(samplePos, 0)).x);
 		const float normalized = saturate(viewZ / 4096.0);

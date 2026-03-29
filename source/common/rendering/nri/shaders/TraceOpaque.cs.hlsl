@@ -80,6 +80,27 @@ void ComputeSkyVirtualMotion(float3 rayOrigin, float3 rayDirection, out bool cur
 	}
 }
 
+float4 VisualizeMotionVector(float4 motionSample, float viewZ)
+{
+	const bool isSky = abs(viewZ) >= NRD_INF * 0.5;
+	const bool valid = motionSample.w > 0.0 || isSky;
+	if (!valid)
+	{
+		return float4(1.0, 0.0, 1.0, 1.0);
+	}
+
+	const float2 motionPixels = motionSample.xy;
+	const float2 signedMagnitude = sign(motionPixels) * sqrt(saturate(abs(motionPixels) / 8.0));
+	const float magnitude = saturate(log2(1.0 + length(motionPixels)) / 3.0);
+	float3 color = float3(signedMagnitude * 0.5 + 0.5, magnitude);
+	if (isSky)
+	{
+		color = lerp(color, float3(0.35, 0.45, 0.75), 0.18);
+	}
+
+	return float4(saturate(color), 1.0);
+}
+
 uint GetLightBounceCount()
 {
 	return gTraceConstants.BounceCounts & 0xffffu;
@@ -668,7 +689,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		if (bootstrapFlat || bootstrapBaseColor)
 		{
 			const float3 sentinel = bootstrapFlat ? float3(1.0, 0.0, 1.0) : float3(1.0, 0.5, 0.0);
-			color = float4(sentinel, 1.0);
+			color = gTraceConstants.DebugMode == 5 ? VisualizeMotionVector(float4(0.0, 0.0, 0.0, -1.0), 1.0) : float4(sentinel, 1.0);
 			gMotionOutput[pixelPos] = float4(0.0, 0.0, 0.0, -1.0);
 			gViewZOutput[pixelPos] = float4(1.0, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
@@ -694,7 +715,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			float missPreviousViewZ = 0.0;
 			ComputeSkyVirtualMotion(rayOrigin, visibleRayDirection, missCurrentUvValid, missPrevUvValid, missCurrentUvRaw, missPrevUvRaw, missMotionPixels, missCurrentViewZ, missPreviousViewZ);
 			const float missMotionZ = (missCurrentUvValid && missPrevUvValid) ? (missPreviousViewZ - missCurrentViewZ) : 0.0;
-			gMotionOutput[pixelPos] = float4(missMotionPixels, missMotionZ, -NRD_INF);
+			const float4 missMotion = float4(missMotionPixels, missMotionZ, -NRD_INF);
+			color = gTraceConstants.DebugMode == 5 ? VisualizeMotionVector(missMotion, NRD_INF) : color;
+			gMotionOutput[pixelPos] = missMotion;
 			gViewZOutput[pixelPos] = float4(NRD_INF, 0.0, 0.0, 1.0);
 			gNormalRoughnessOutput[pixelPos] = 0.0;
 			gBaseColorOutput[pixelPos] = float4(missColor, 0.0);
@@ -928,7 +951,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
 			gBaseColorOutput[pixelPos] = float4(bootstrapFlat ? diffuse : albedo.rgb, metalness);
 		}
-		gMotionOutput[pixelPos] = float4(motion, currentViewZ);
+		const float4 motionOutput = float4(motion, currentViewZ);
+		gMotionOutput[pixelPos] = motionOutput;
 		gViewZOutput[pixelPos] = float4(currentViewZ, 0.0, 0.0, 1.0);
 		const float4 packedDiffuse = PackDiffuseRadiance(diffuse, diffuseHitDistance, currentViewZ);
 		const float4 packedSpecular = PackSpecularRadiance(specular, specularHitDistance, currentViewZ, roughness);
@@ -961,6 +985,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			float id = (float)(hit.primitiveIndex % 29u) / 28.0;
 			color = float4(frac(id * 1.1), frac(id * 1.9), frac(id * 2.7), 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 5)
+		{
+			color = VisualizeMotionVector(motionOutput, currentViewZ);
 		}
 		else if (gTraceConstants.DebugMode == 26)
 		{

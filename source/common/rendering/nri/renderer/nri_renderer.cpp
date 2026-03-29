@@ -285,6 +285,11 @@ namespace
 		return (uint32_t)std::clamp((int)nri_nrdsplit, 0, 2);
 	}
 
+	static uint32_t GetEffectivePtDebugMode()
+	{
+		return (nri_ptdebug >= 0 && nri_ptdebug <= (int)NRI_PTDEBUG_EMISSIVE_SAMPLE_VISIBILITY) ? (uint32_t)nri_ptdebug : 0u;
+	}
+
 	static NRINrdDenoiserMode GetSelectedNrdDenoiserMode()
 	{
 		return (NRINrdDenoiserMode)std::clamp((int)nri_nrddenoiser, 0, 1);
@@ -5233,7 +5238,7 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags = NRI_FLAG_BOOTSTRAP_VIEW | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
-	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
 	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
@@ -7063,18 +7068,20 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	static bool sLoggedPhaseFDenoiserPath = false;
 	static bool sLoggedPhaseFDenoiserFallback = false;
 	static bool sLoggedRawTraceBypass = false;
+	const int ptDebugMode = (int)GetEffectivePtDebugMode();
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
-	const bool useResolvedPresent = !nri_ptbootstrap && nri_ptdebug == 0;
-	const bool useComposedDebugPresent = !nri_ptbootstrap && nri_ptdebug == 15;
-	const bool usePostCompositionDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 13 || nri_ptdebug == 14);
+	const bool useResolvedPresent = !nri_ptbootstrap && ptDebugMode == 0;
+	const bool useComposedDebugPresent = !nri_ptbootstrap && ptDebugMode == 15;
+	const bool usePostCompositionDebugPresent = !nri_ptbootstrap && (ptDebugMode == 13 || ptDebugMode == 14);
 	const bool useCompositionPath = useResolvedPresent || useComposedDebugPresent || usePostCompositionDebugPresent;
-	const bool useValidationPresent = !nri_ptbootstrap && nri_ptdebug == 9;
-	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 16 || nri_ptdebug == 17);
-	const bool useShadowDebugPresent = !nri_ptbootstrap && (nri_ptdebug >= 21 && nri_ptdebug <= 23);
+	const bool useValidationPresent = !nri_ptbootstrap && ptDebugMode == 9;
+	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (ptDebugMode == 16 || ptDebugMode == 17);
+	const bool useShadowDebugPresent = !nri_ptbootstrap && (ptDebugMode >= 21 && ptDebugMode <= 23);
 	const bool useFinalDebugPresent = !nri_ptbootstrap &&
-		((nri_ptdebug >= 5 && nri_ptdebug <= 8) || (nri_ptdebug >= 18 && nri_ptdebug <= 20) || useShadowDebugPresent || nri_ptdebug == 24 || nri_ptdebug == 25);
-	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPath && !useValidationPresent && !useDenoisedDebugPresent && !useFinalDebugPresent;
+		((ptDebugMode >= 6 && ptDebugMode <= 8) || (ptDebugMode >= 18 && ptDebugMode <= 20) || useShadowDebugPresent || ptDebugMode == 24 || ptDebugMode == 25);
+	const bool rawTraceDirectPresent = !nri_ptbootstrap &&
+		((ptDebugMode >= 1 && ptDebugMode <= 5) || (ptDebugMode >= 10 && ptDebugMode <= 12) || (ptDebugMode >= 26 && ptDebugMode <= 33));
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
@@ -7121,7 +7128,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
-		const FrameTextureSlot denoisedSlot = nri_ptdebug == 16 ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::DenoisedSpecular;
+		const FrameTextureSlot denoisedSlot = ptDebugMode == 16 ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::DenoisedSpecular;
 		if (!DispatchRawPresent(denoisedSlot))
 		{
 			return false;
@@ -7249,7 +7256,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
-		const FrameTextureSlot debugSlot = nri_ptdebug == 13 ? mHistoryOutputSlot : mUpscaledInputSlot;
+		const FrameTextureSlot debugSlot = ptDebugMode == 13 ? mHistoryOutputSlot : mUpscaledInputSlot;
 		TraceTemporalState("debug13-14-present", ResolveUpscalerKind(false), false, debugSlot, mHistoryOutputSlot);
 		if (!DispatchFinalPresent(debugSlot))
 		{
@@ -7281,12 +7288,12 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		}
 
 		FrameTextureSlot rawPresentSlot = FrameTextureSlot::UnfilteredDiffuse;
-		if (nri_ptdebug == 11 || nri_ptdebug == 12)
+		if (ptDebugMode == 11 || ptDebugMode == 12)
 		{
 			rawPresentSlot = FrameTextureSlot::UnfilteredSpecular;
 		}
 
-		if (nri_ptdebug == 12)
+		if (ptDebugMode == 12)
 		{
 			if (!DispatchRawPresent(rawPresentSlot, FrameTextureSlot::ViewZ, FrameTextureSlot::NormalRoughness))
 			{
@@ -7348,7 +7355,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.PrevTanHalfFovX = mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = mPreviousTanHalfFovY;
 	constants.SceneInstanceCount = mSceneInstanceBuffer.stride != 0 ? (uint32_t)(mSceneInstanceBuffer.usedSize / mSceneInstanceBuffer.stride) : 0u;
-	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.StaticPrimitiveCount = mBoundStaticPrimitiveCount;
 	constants.FrameIndex = mFrameIndex;
 	constants.DynamicPrimitiveCount = mBoundDynamicPrimitiveCount;
@@ -7505,7 +7512,7 @@ bool NRIRenderer::DispatchComposition()
 	constants.Flags =
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u);
-	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
 	constants.ReservedTrace0 = GetNrdInputSplitMode();
@@ -7586,7 +7593,7 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 	constants.DisplayWidth = mOutputWidth;
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
-	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 
@@ -7645,7 +7652,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 	constants.DisplayWidth = mOutputWidth;
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
-	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
@@ -7703,7 +7710,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		constants.DisplayWidth = mOutputWidth;
 		constants.DisplayHeight = mOutputHeight;
 		constants.FrameIndex = mFrameIndex;
-		constants.DebugMode = (uint32_t)nri_ptdebug;
+		constants.DebugMode = GetEffectivePtDebugMode();
 		constants.Flags =
 			(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 			(runAppTaa ? NRI_FLAG_USE_JITTER : 0u);
@@ -7924,7 +7931,7 @@ bool NRIRenderer::DispatchFinal()
 		(presentRawTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
 		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
-	constants.DebugMode = (uint32_t)nri_ptdebug;
+	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
