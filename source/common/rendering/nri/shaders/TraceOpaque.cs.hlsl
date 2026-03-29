@@ -694,6 +694,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			else if (gTraceConstants.DebugMode == 34 || gTraceConstants.DebugMode == 35)
 			{
 				gDirectLightingOutput[pixelPos] = 0.0;
+				color = float4(1.0, 0.0, 1.0, 1.0);
 			}
 		}
 	}
@@ -1001,6 +1002,30 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			const float rejectedFraction = saturate(1.0 - emissiveSampleVisibleFraction - emissiveSampleOccludedFraction);
 			color = float4(emissiveSampleOccludedFraction, emissiveSampleVisibleFraction, rejectedFraction, 1.0);
+		}
+		else if (gTraceConstants.DebugMode == 34)
+		{
+			if (!currentUvValid)
+			{
+				color = float4(1.0, 0.0, 1.0, 1.0);
+			}
+			else
+			{
+				const float2 actualPixelUv = ((float2)pixelPos + 0.5) / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+				const float2 errorPixels = (currentUv - actualPixelUv) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+				const float2 signedMagnitude = sign(errorPixels) * sqrt(saturate(abs(errorPixels) / 8.0));
+				const float magnitude = saturate(log2(1.0 + length(errorPixels)) / 3.0);
+				color = float4(signedMagnitude * 0.5 + 0.5, magnitude, 1.0);
+			}
+		}
+		else if (gTraceConstants.DebugMode == 35)
+		{
+			const float magnitude = length(hit.position - currentHitPosition);
+			const float mapped = saturate(log2(1.0 + magnitude * 256.0) / 8.0);
+			float3 heat = lerp(float3(0.02, 0.02, 0.08), float3(0.10, 0.75, 0.25), saturate(mapped * 2.0));
+			heat = lerp(heat, float3(0.95, 0.85, 0.20), saturate((mapped - 0.45) * 2.5));
+			heat = lerp(heat, float3(1.0, 0.28, 0.10), saturate((mapped - 0.8) * 5.0));
+			color = float4(heat, 1.0);
 		}
 		else
 		{

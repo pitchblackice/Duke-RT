@@ -7073,7 +7073,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (nri_ptdebug == 16 || nri_ptdebug == 17);
 	const bool useShadowDebugPresent = !nri_ptbootstrap && (nri_ptdebug >= 21 && nri_ptdebug <= 23);
 	const bool useFinalDebugPresent = !nri_ptbootstrap &&
-		((nri_ptdebug >= 5 && nri_ptdebug <= 8) || (nri_ptdebug >= 18 && nri_ptdebug <= 20) || useShadowDebugPresent || nri_ptdebug == 24 || nri_ptdebug == 25 || nri_ptdebug == 34 || nri_ptdebug == 35);
+		((nri_ptdebug >= 5 && nri_ptdebug <= 8) || (nri_ptdebug >= 18 && nri_ptdebug <= 20) || useShadowDebugPresent || nri_ptdebug == 24 || nri_ptdebug == 25);
 	const bool rawTraceDirectPresent = !nri_ptbootstrap && !useCompositionPath && !useValidationPresent && !useDenoisedDebugPresent && !useFinalDebugPresent;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
