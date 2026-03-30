@@ -936,7 +936,7 @@ namespace
 		switch (kind)
 		{
 		case NRIMainUpscalerKind::DLRR:
-			return nri::UpscalerMode::NATIVE;
+			return requestedMode;
 		case NRIMainUpscalerKind::DLSR:
 			return requestedMode;
 		default:
@@ -951,7 +951,7 @@ namespace
 		case NRIMainUpscalerKind::DLSR:
 			return GetUpscalerRenderScale(requestedMode);
 		case NRIMainUpscalerKind::DLRR:
-			return 1.0f;
+			return GetUpscalerRenderScale(requestedMode);
 		default:
 			return manualRenderScale;
 		}
@@ -962,7 +962,7 @@ namespace
 		switch (kind)
 		{
 		case NRIMainUpscalerKind::DLSR: return "sr-mode-scale";
-		case NRIMainUpscalerKind::DLRR: return "rr-native-locked";
+		case NRIMainUpscalerKind::DLRR: return "rr-mode-scale";
 		default: return "manual-scale";
 		}
 	}
