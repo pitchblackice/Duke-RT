@@ -7,49 +7,44 @@
 
 namespace
 {
-	nri::Upscaler* SelectUpscaler(NRIUpscalerKind kind, nri::Upscaler* nis, nri::Upscaler* dlsr, nri::Upscaler* dlrr)
+	nri::Upscaler* SelectMainUpscaler(NRIMainUpscalerKind kind, nri::Upscaler* dlsr, nri::Upscaler* dlrr)
 	{
 		switch (kind)
 		{
-		case NRIUpscalerKind::NIS: return nis;
-		case NRIUpscalerKind::DLSR: return dlsr;
-		case NRIUpscalerKind::DLRR: return dlrr;
+		case NRIMainUpscalerKind::DLSR: return dlsr;
+		case NRIMainUpscalerKind::DLRR: return dlrr;
 		default: return nullptr;
 		}
 	}
 
-	nri::UpscalerType ToUpscalerType(NRIUpscalerKind kind)
+	nri::Upscaler* SelectPostSharpen(NRIPostSharpenKind kind, nri::Upscaler* nis)
 	{
 		switch (kind)
 		{
-		case NRIUpscalerKind::NIS: return nri::UpscalerType::NIS;
-		case NRIUpscalerKind::DLSR: return nri::UpscalerType::DLSR;
-		case NRIUpscalerKind::DLRR: return nri::UpscalerType::DLRR;
-		default: return nri::UpscalerType::NIS;
+		case NRIPostSharpenKind::NIS: return nis;
+		default: return nullptr;
 		}
 	}
 }
 
-bool NRIUpscalerContext::EnsureUpscaler(NRIRenderDevice& frameBuffer, NRIUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight)
+bool NRIUpscalerContext::EnsureUpscaler(
+	NRIRenderDevice& frameBuffer,
+	UpscalerSlotState& slot,
+	nri::UpscalerType type,
+	nri::UpscalerMode mode,
+	uint32_t upscaleWidth,
+	uint32_t upscaleHeight,
+	nri::UpscalerBits flags)
 {
-	if (kind == NRIUpscalerKind::Off)
+	if (slot.instance != nullptr &&
+		slot.mode == mode &&
+		slot.upscaleWidth == upscaleWidth &&
+		slot.upscaleHeight == upscaleHeight)
 	{
 		return true;
 	}
 
-	nri::Upscaler*& slot =
-		kind == NRIUpscalerKind::NIS ? mNis :
-		kind == NRIUpscalerKind::DLSR ? mDlsr :
-		mDlrr;
-
-	if (slot != nullptr && mMode == mode && mUpscaleWidth == upscaleWidth && mUpscaleHeight == upscaleHeight)
-	{
-		return true;
-	}
-
-	DestroyUpscaler(frameBuffer, slot);
-
-	const nri::UpscalerType type = ToUpscalerType(kind);
+	DestroyUpscaler(frameBuffer, slot.instance);
 	if (!frameBuffer.mUpscaler.IsUpscalerSupported(*frameBuffer.mDevice, type))
 	{
 		return false;
@@ -60,32 +55,57 @@ bool NRIUpscalerContext::EnsureUpscaler(NRIRenderDevice& frameBuffer, NRIUpscale
 	upscalerDesc.type = type;
 	upscalerDesc.mode = mode;
 	upscalerDesc.commandBuffer = frameBuffer.mCommandBuffer;
-	upscalerDesc.flags = nri::UpscalerBits::HDR;
-	if (kind == NRIUpscalerKind::DLSR || kind == NRIUpscalerKind::DLRR)
-	{
-		upscalerDesc.flags = (nri::UpscalerBits)((uint32_t)nri::UpscalerBits::HDR | (uint32_t)nri::UpscalerBits::DEPTH_LINEAR);
-	}
+	upscalerDesc.flags = flags;
 
-	if (frameBuffer.mUpscaler.CreateUpscaler(*frameBuffer.mDevice, upscalerDesc, slot) != nri::Result::SUCCESS)
+	if (frameBuffer.mUpscaler.CreateUpscaler(*frameBuffer.mDevice, upscalerDesc, slot.instance) != nri::Result::SUCCESS)
 	{
-		slot = nullptr;
+		slot.instance = nullptr;
 		return false;
 	}
 
-	mMode = mode;
-	mUpscaleWidth = upscaleWidth;
-	mUpscaleHeight = upscaleHeight;
+	slot.mode = mode;
+	slot.upscaleWidth = upscaleWidth;
+	slot.upscaleHeight = upscaleHeight;
 	return true;
 }
 
-bool NRIUpscalerContext::EnsureReady(NRIRenderDevice& frameBuffer, NRIUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight)
+bool NRIUpscalerContext::EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight)
 {
-	return EnsureUpscaler(frameBuffer, kind, mode, upscaleWidth, upscaleHeight);
+	if (kind == NRIMainUpscalerKind::Off)
+	{
+		return true;
+	}
+
+	const nri::UpscalerType type =
+		kind == NRIMainUpscalerKind::DLSR ? nri::UpscalerType::DLSR :
+		nri::UpscalerType::DLRR;
+	UpscalerSlotState& slot =
+		kind == NRIMainUpscalerKind::DLSR ? mDlsr :
+		mDlrr;
+	const nri::UpscalerBits flags = (nri::UpscalerBits)((uint32_t)nri::UpscalerBits::HDR | (uint32_t)nri::UpscalerBits::DEPTH_LINEAR);
+	return EnsureUpscaler(frameBuffer, slot, type, mode, upscaleWidth, upscaleHeight, flags);
 }
 
-bool NRIUpscalerContext::Dispatch(NRIRenderDevice& frameBuffer, NRIUpscalerKind kind, const NRIUpscalerDispatchDesc& desc)
+bool NRIUpscalerContext::EnsurePostSharpen(NRIRenderDevice& frameBuffer, NRIPostSharpenKind kind, uint32_t upscaleWidth, uint32_t upscaleHeight)
 {
-	nri::Upscaler* upscaler = SelectUpscaler(kind, mNis, mDlsr, mDlrr);
+	if (kind == NRIPostSharpenKind::Off)
+	{
+		return true;
+	}
+
+	return EnsureUpscaler(
+		frameBuffer,
+		mNis,
+		nri::UpscalerType::NIS,
+		nri::UpscalerMode::QUALITY,
+		upscaleWidth,
+		upscaleHeight,
+		nri::UpscalerBits::HDR);
+}
+
+bool NRIUpscalerContext::DispatchMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc)
+{
+	nri::Upscaler* upscaler = SelectMainUpscaler(kind, mDlsr.instance, mDlrr.instance);
 	if (upscaler == nullptr || desc.commandBuffer == nullptr || desc.input == nullptr || desc.output == nullptr)
 	{
 		return false;
@@ -100,11 +120,7 @@ bool NRIUpscalerContext::Dispatch(NRIRenderDevice& frameBuffer, NRIUpscalerKind 
 	dispatchDesc.mvScale = { 1.0f, 1.0f };
 	dispatchDesc.flags = desc.resetHistory ? nri::DispatchUpscaleBits::RESET_HISTORY : nri::DispatchUpscaleBits::NONE;
 
-	if (kind == NRIUpscalerKind::NIS)
-	{
-		dispatchDesc.settings.nis.sharpness = desc.sharpness;
-	}
-	else if (kind == NRIUpscalerKind::DLSR)
+	if (kind == NRIMainUpscalerKind::DLSR)
 	{
 		if (desc.motion == nullptr || desc.depth == nullptr)
 		{
@@ -114,7 +130,7 @@ bool NRIUpscalerContext::Dispatch(NRIRenderDevice& frameBuffer, NRIUpscalerKind 
 		dispatchDesc.guides.upscaler.mv = { desc.motion->texture, desc.motion->shaderView };
 		dispatchDesc.guides.upscaler.depth = { desc.depth->texture, desc.depth->shaderView };
 	}
-	else if (kind == NRIUpscalerKind::DLRR)
+	else if (kind == NRIMainUpscalerKind::DLRR)
 	{
 		if (desc.motion == nullptr || desc.depth == nullptr || desc.normalRoughness == nullptr ||
 			desc.diffuseAlbedo == nullptr || desc.specularAlbedo == nullptr || desc.specularHitDistance == nullptr)
@@ -136,6 +152,28 @@ bool NRIUpscalerContext::Dispatch(NRIRenderDevice& frameBuffer, NRIUpscalerKind 
 	return true;
 }
 
+bool NRIUpscalerContext::DispatchPostSharpen(NRIRenderDevice& frameBuffer, NRIPostSharpenKind kind, const NRIUpscalerDispatchDesc& desc)
+{
+	nri::Upscaler* upscaler = SelectPostSharpen(kind, mNis.instance);
+	if (upscaler == nullptr || desc.commandBuffer == nullptr || desc.input == nullptr || desc.output == nullptr)
+	{
+		return false;
+	}
+
+	nri::DispatchUpscaleDesc dispatchDesc = {};
+	dispatchDesc.output = { desc.output->texture, desc.output->storageView };
+	dispatchDesc.input = { desc.input->texture, desc.input->shaderView };
+	dispatchDesc.currentResolution = { (nri::Dim_t)desc.currentWidth, (nri::Dim_t)desc.currentHeight };
+	dispatchDesc.cameraJitter = { desc.cameraJitter[0], desc.cameraJitter[1] };
+	// The shared PT motion buffer is already written in pixel units, so the upscaler path keeps mvScale at identity.
+	dispatchDesc.mvScale = { 1.0f, 1.0f };
+	dispatchDesc.flags = desc.resetHistory ? nri::DispatchUpscaleBits::RESET_HISTORY : nri::DispatchUpscaleBits::NONE;
+	dispatchDesc.settings.nis.sharpness = desc.sharpness;
+
+	frameBuffer.mUpscaler.CmdDispatchUpscale(*desc.commandBuffer, *upscaler, dispatchDesc);
+	return true;
+}
+
 void NRIUpscalerContext::DestroyUpscaler(NRIRenderDevice& frameBuffer, nri::Upscaler*& upscaler)
 {
 	if (upscaler != nullptr)
@@ -147,9 +185,10 @@ void NRIUpscalerContext::DestroyUpscaler(NRIRenderDevice& frameBuffer, nri::Upsc
 
 void NRIUpscalerContext::Shutdown(NRIRenderDevice& frameBuffer)
 {
-	DestroyUpscaler(frameBuffer, mNis);
-	DestroyUpscaler(frameBuffer, mDlsr);
-	DestroyUpscaler(frameBuffer, mDlrr);
-	mUpscaleWidth = 0;
-	mUpscaleHeight = 0;
+	DestroyUpscaler(frameBuffer, mNis.instance);
+	DestroyUpscaler(frameBuffer, mDlsr.instance);
+	DestroyUpscaler(frameBuffer, mDlrr.instance);
+	mNis = {};
+	mDlsr = {};
+	mDlrr = {};
 }

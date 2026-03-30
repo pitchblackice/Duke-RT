@@ -484,7 +484,7 @@ private:
 	void PrintRuntimeSpaceLinkStatus() const;
 	void RequestHistoryReset(const char* reason, bool clearPreviousCameraState = false, bool clearRuntimeChunkTranslationHistory = false);
 	void ArmTemporalTraceBudget(const char* reason);
-	void TraceTemporalState(const char* stage, NRIUpscalerKind resolvedUpscaler, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
+	void TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
@@ -540,11 +540,15 @@ private:
 	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) { return mFrameTextures[(size_t)slot]; }
 	const NRITextureResource& GetFrameTexture(FrameTextureSlot slot) const { return mFrameTextures[(size_t)slot]; }
 	nri::Pipeline* GetPipeline(PipelineSlot slot) const { return mPipelines[(size_t)slot]; }
-	NRIUpscalerKind GetSelectedUpscalerKind() const;
-	NRIUpscalerKind ResolveUpscalerKind(bool logFallback);
-	NRIUpscalerKind GetResolvedUpscalerKindForStatus() const;
+	NRIMainUpscalerKind GetSelectedMainUpscalerKind() const;
+	NRIMainUpscalerKind ResolveMainUpscalerKind(bool logFallback);
+	NRIMainUpscalerKind GetResolvedMainUpscalerKindForStatus() const;
+	NRIPostSharpenKind GetSelectedPostSharpenKind() const;
+	NRIPostSharpenKind ResolvePostSharpenKind(bool logFallback);
+	NRIPostSharpenKind GetResolvedPostSharpenKindForStatus() const;
 	nri::UpscalerMode GetSelectedUpscalerMode() const;
-	bool IsUpscalerSupported(NRIUpscalerKind kind) const;
+	bool IsMainUpscalerSupported(NRIMainUpscalerKind kind) const;
+	bool IsPostSharpenSupported(NRIPostSharpenKind kind) const;
 	void FillMatrix(float* outMatrix, const VSMatrix& matrix) const;
 	const char* GetFrameTextureSlotName(FrameTextureSlot slot) const;
 
@@ -722,9 +726,12 @@ private:
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastDebugMode = -1;
-	int mLastUpscalerRequest = -1;
-	NRIUpscalerKind mLastUpscalerResolved = NRIUpscalerKind::Off;
-	NRIUpscalerKind mLastTemporalHistoryUpscaler = NRIUpscalerKind::Off;
+	int mLastMainUpscalerRequest = -1;
+	int mLastPostSharpenRequest = -1;
+	NRIMainUpscalerKind mLastMainUpscalerResolved = NRIMainUpscalerKind::Off;
+	NRIPostSharpenKind mLastPostSharpenResolved = NRIPostSharpenKind::Off;
+	NRIMainUpscalerKind mLastTemporalHistoryMainUpscaler = NRIMainUpscalerKind::Off;
+	NRIPostSharpenKind mLastTemporalPostSharpen = NRIPostSharpenKind::Off;
 	FrameTextureSlot mHistoryInputSlot = FrameTextureSlot::TaaHistoryPing;
 	FrameTextureSlot mHistoryOutputSlot = FrameTextureSlot::TaaHistoryPong;
 	FrameTextureSlot mUpscaledInputSlot = FrameTextureSlot::Upscaled;

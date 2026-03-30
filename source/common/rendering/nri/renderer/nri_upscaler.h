@@ -4,12 +4,17 @@
 
 class NRIRenderDevice;
 
-enum class NRIUpscalerKind : uint32_t
+enum class NRIMainUpscalerKind : uint32_t
+{
+	Off = 0,
+	DLSR = 2,
+	DLRR = 3,
+};
+
+enum class NRIPostSharpenKind : uint32_t
 {
 	Off = 0,
 	NIS = 1,
-	DLSR = 2,
-	DLRR = 3,
 };
 
 struct NRIUpscalerDispatchDesc
@@ -35,18 +40,32 @@ struct NRIUpscalerDispatchDesc
 class NRIUpscalerContext
 {
 public:
-	bool EnsureReady(NRIRenderDevice& frameBuffer, NRIUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight);
-	bool Dispatch(NRIRenderDevice& frameBuffer, NRIUpscalerKind kind, const NRIUpscalerDispatchDesc& desc);
+	bool EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight);
+	bool DispatchMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc);
+	bool EnsurePostSharpen(NRIRenderDevice& frameBuffer, NRIPostSharpenKind kind, uint32_t upscaleWidth, uint32_t upscaleHeight);
+	bool DispatchPostSharpen(NRIRenderDevice& frameBuffer, NRIPostSharpenKind kind, const NRIUpscalerDispatchDesc& desc);
 	void Shutdown(NRIRenderDevice& frameBuffer);
 
 private:
-	bool EnsureUpscaler(NRIRenderDevice& frameBuffer, NRIUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight);
+	struct UpscalerSlotState
+	{
+		nri::Upscaler* instance = nullptr;
+		nri::UpscalerMode mode = nri::UpscalerMode::QUALITY;
+		uint32_t upscaleWidth = 0;
+		uint32_t upscaleHeight = 0;
+	};
+
+	bool EnsureUpscaler(
+		NRIRenderDevice& frameBuffer,
+		UpscalerSlotState& slot,
+		nri::UpscalerType type,
+		nri::UpscalerMode mode,
+		uint32_t upscaleWidth,
+		uint32_t upscaleHeight,
+		nri::UpscalerBits flags);
 	void DestroyUpscaler(NRIRenderDevice& frameBuffer, nri::Upscaler*& upscaler);
 
-	nri::Upscaler* mNis = nullptr;
-	nri::Upscaler* mDlsr = nullptr;
-	nri::Upscaler* mDlrr = nullptr;
-	nri::UpscalerMode mMode = nri::UpscalerMode::QUALITY;
-	uint32_t mUpscaleWidth = 0;
-	uint32_t mUpscaleHeight = 0;
+	UpscalerSlotState mNis = {};
+	UpscalerSlotState mDlsr = {};
+	UpscalerSlotState mDlrr = {};
 };

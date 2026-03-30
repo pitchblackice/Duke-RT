@@ -1203,7 +1203,8 @@ OptionMenu "NRIOptions" protected
 	StaticText "----------------"
 	StaticText "Upscaling"
 	Option "TAA",								"nri_pttaa",					"OnOff"
-	Option "Upscaler",							"nri_upscaler",					"NRIUpscaler"
+	Option "Main Upscaler",						"nri_upscaler",					"NRIMainUpscaler"
+	Option "Post Sharpen",						"nri_postsharpen",				"NRIPostSharpen"
 	Option "Upscaler Mode",						"nri_upscalermode",				"NRIUpscalerMode"
 	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2
 	Slider "Sharpness",							"nri_sharpness",				0.0, 1.0, 0.05, 2
@@ -1757,12 +1758,17 @@ OptionString NRIAPI
 	"d3d12", "D3D12"
 }
 
-OptionValue NRIUpscaler
+OptionValue NRIMainUpscaler
+{
+	0, "$OPTVAL_OFF"
+	2, "DLSS-SR"
+	3, "DLRR"
+}
+
+OptionValue NRIPostSharpen
 {
 	0, "$OPTVAL_OFF"
 	1, "NIS"
-	2, "DLSS-SR"
-	3, "DLRR"
 }
 
 OptionValue NRIUpscalerMode
