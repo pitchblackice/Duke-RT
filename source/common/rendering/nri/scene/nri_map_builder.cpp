@@ -1282,7 +1282,7 @@ bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTM
 	tempWorld.stats.sectionCount = (uint32_t)sections.Size();
 
 	PTMapChunk liveChunk = {};
-	if (!BuildSectorChunk(tempWorld, (uint32_t)chunk.sectorIndex, 0u, liveChunk))
+	if (!BuildSectorChunk(tempWorld, (uint32_t)chunk.sectorIndex, chunk.chunkIndex, liveChunk))
 	{
 		return false;
 	}
