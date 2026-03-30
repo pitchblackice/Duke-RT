@@ -8185,15 +8185,13 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(vendorInput, NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(upscalerDepth, NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(rrGuideDiffuseAlbedo, NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(rrGuideSpecularAlbedo, NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(rrGuideSpecularHitDistance, NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(rrGuideNormalRoughness, NRIComputeStorageState());
 
-	const nri::Descriptor* defaultInput = composed.shaderView;
+	const nri::Descriptor* defaultInput = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
 	mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
 	mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
@@ -8201,10 +8199,9 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	mFrameInputDescriptors[6] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	UpdateFrameTextureSet();
 
-	const nri::Descriptor* defaultOutput = vendorInput.storageView;
+	const nri::Descriptor* defaultOutput = upscalerDepth.storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
 	mOutputDescriptors[5] = rrGuideNormalRoughness.storageView;
-	mOutputDescriptors[8] = vendorInput.storageView;
 	mOutputDescriptors[9] = rrGuideDiffuseAlbedo.storageView;
 	mOutputDescriptors[10] = rrGuideSpecularAlbedo.storageView;
 	mOutputDescriptors[11] = rrGuideSpecularHitDistance.storageView;

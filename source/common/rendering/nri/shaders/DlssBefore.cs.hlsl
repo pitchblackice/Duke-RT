@@ -54,11 +54,9 @@ StructuredBuffer<ReprojectionData> gReprojectionDataBuffer : register(t18, space
 Texture2D<float4> gViewZInput : register(t2, space3);
 Texture2D<float4> gNormalRoughnessInput : register(t3, space3);
 Texture2D<float4> gBaseColorInput : register(t4, space3);
-Texture2D<float4> gComposedInput : register(t5, space3);
 Texture2D<float4> gSpecularInput : register(t6, space3);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gRrGuideNormalRoughnessOutput, u, 5, 4);
-NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gVendorInputOutput, u, 8, 4);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gRrGuideDiffuseAlbedoOutput, u, 9, 4);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gRrGuideSpecularAlbedoOutput, u, 10, 4);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float>, gRrGuideSpecHitDistanceOutput, u, 11, 4);
@@ -172,7 +170,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const uint2 pixelPos = dispatchThreadId.xy;
 	const float4 baseColor = saturate(gBaseColorInput[pixelPos]);
-	const float4 composed = gComposedInput[pixelPos];
 	const float rawViewZ = gViewZInput[pixelPos].x;
 	const float viewZ = abs(rawViewZ);
 	const bool isSky = viewZ >= NRD_INF * 0.5;
