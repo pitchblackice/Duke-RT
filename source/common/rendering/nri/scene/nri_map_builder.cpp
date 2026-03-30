@@ -1262,9 +1262,9 @@ bool BuildMapWorld(PTMapWorld& outWorld)
 	return true;
 }
 
-bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTMapWorldStats* outStats)
+bool BuildLiveMapChunkWorld(const PTMapChunk& chunk, PTMapWorld& outWorld, PTMapWorldStats* outStats)
 {
-	outView = {};
+	outWorld = {};
 	if (outStats != nullptr)
 	{
 		*outStats = {};
@@ -1275,27 +1275,38 @@ bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTM
 		return false;
 	}
 
-	PTMapWorld tempWorld = {};
-	tempWorld.level = currentLevel;
-	tempWorld.buildSerial = gPendingLevelGeometryBuildSerial;
-	tempWorld.stats.sectorCount = (uint32_t)sector.Size();
-	tempWorld.stats.sectionCount = (uint32_t)sections.Size();
+	outWorld.level = currentLevel;
+	outWorld.buildSerial = gPendingLevelGeometryBuildSerial;
+	outWorld.stats.sectorCount = (uint32_t)sector.Size();
+	outWorld.stats.sectionCount = (uint32_t)sections.Size();
 
 	PTMapChunk liveChunk = {};
-	if (!BuildSectorChunk(tempWorld, (uint32_t)chunk.sectorIndex, chunk.chunkIndex, liveChunk))
+	if (!BuildSectorChunk(outWorld, (uint32_t)chunk.sectorIndex, chunk.chunkIndex, liveChunk))
 	{
 		return false;
 	}
 
-	tempWorld.chunks.push_back(liveChunk);
-	tempWorld.stats.chunkCount = 1;
-	tempWorld.valid = true;
+	outWorld.chunks.push_back(liveChunk);
+	outWorld.stats.chunkCount = 1;
+	outWorld.valid = true;
 	if (outStats != nullptr)
 	{
-		*outStats = tempWorld.stats;
+		*outStats = outWorld.stats;
 	}
 
-	BuildMapChunkSceneView(tempWorld, tempWorld.chunks[0], outView);
+	return true;
+}
+
+bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTMapWorldStats* outStats)
+{
+	outView = {};
+	PTMapWorld liveWorld = {};
+	if (!BuildLiveMapChunkWorld(chunk, liveWorld, outStats))
+	{
+		return false;
+	}
+
+	BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], outView);
 	return true;
 }
 

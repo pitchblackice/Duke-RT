@@ -253,6 +253,239 @@ namespace
 		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2 : 0u;
 	}
 
+	struct ChunkCompareSurfaceKey
+	{
+		uint32_t kind = UINT32_MAX;
+		uint32_t sourceType = (uint32_t)nri_scene::SurfaceSourceType::Unknown;
+		int32_t sectorIndex = -1;
+		int32_t wallIndex = -1;
+		int32_t sectionIndex = -1;
+		int32_t nextSectorIndex = -1;
+		int32_t actorIndex = -1;
+		uint32_t cstat = 0;
+		uint32_t materialFlags = 0;
+		uint32_t primaryKey = UINT32_MAX;
+		uint32_t secondaryKey = UINT32_MAX;
+
+		bool operator==(const ChunkCompareSurfaceKey& other) const
+		{
+			return kind == other.kind &&
+				sourceType == other.sourceType &&
+				sectorIndex == other.sectorIndex &&
+				wallIndex == other.wallIndex &&
+				sectionIndex == other.sectionIndex &&
+				nextSectorIndex == other.nextSectorIndex &&
+				actorIndex == other.actorIndex &&
+				cstat == other.cstat &&
+				materialFlags == other.materialFlags &&
+				primaryKey == other.primaryKey &&
+				secondaryKey == other.secondaryKey;
+		}
+	};
+
+	struct ChunkCompareSurfaceKeyHash
+	{
+		size_t operator()(const ChunkCompareSurfaceKey& key) const
+		{
+			size_t h = 1469598103934665603ull;
+			const auto mix = [&h](uint64_t value)
+			{
+				h ^= (size_t)value;
+				h *= 1099511628211ull;
+			};
+			mix(key.kind);
+			mix(key.sourceType);
+			mix((uint32_t)key.sectorIndex);
+			mix((uint32_t)key.wallIndex);
+			mix((uint32_t)key.sectionIndex);
+			mix((uint32_t)key.nextSectorIndex);
+			mix((uint32_t)key.actorIndex);
+			mix(key.cstat);
+			mix(key.materialFlags);
+			mix(key.primaryKey);
+			mix(key.secondaryKey);
+			return h;
+		}
+	};
+
+	struct ChunkCompareSurfaceMetrics
+	{
+		float centroid[3] = {};
+		float normal[3] = {};
+		float area = 0.0f;
+		float aabbMin[3] = {};
+		float aabbMax[3] = {};
+		uint32_t vertexCount = 0;
+		uint32_t triangleCount = 0;
+		uint32_t textureId = 0;
+		int palette = 0;
+		int shade = 0;
+		float alpha = 1.0f;
+		uint32_t materialFlags = 0;
+	};
+
+	struct ChunkCompareMatchRecord
+	{
+		uint32_t staticSurfaceIndex = UINT32_MAX;
+		uint32_t liveSurfaceIndex = UINT32_MAX;
+		ChunkCompareSurfaceKey key = {};
+		ChunkCompareSurfaceMetrics staticMetrics = {};
+		ChunkCompareSurfaceMetrics liveMetrics = {};
+		float delta[3] = {};
+		float deltaDistance = 0.0f;
+		float areaRatio = 1.0f;
+		float normalDot = 1.0f;
+		float materialScore = 0.0f;
+		float deviationFromMean = 0.0f;
+		float score = 0.0f;
+	};
+
+	static ChunkCompareSurfaceKey BuildChunkCompareSurfaceKey(const nri_scene::PTMapSurface& surface)
+	{
+		ChunkCompareSurfaceKey key = {};
+		key.kind = (uint32_t)surface.kind;
+		key.sourceType = (uint32_t)surface.surface.provenance.sourceType;
+		key.sectorIndex = surface.surface.provenance.sectorIndex;
+		key.wallIndex = surface.surface.provenance.wallIndex;
+		key.sectionIndex = surface.surface.provenance.sectionIndex;
+		key.nextSectorIndex = surface.surface.provenance.nextSectorIndex;
+		key.actorIndex = surface.surface.provenance.actorIndex;
+		key.cstat = surface.surface.provenance.cstat;
+		key.materialFlags = surface.surface.provenance.materialFlags;
+		key.primaryKey = surface.key.primary;
+		key.secondaryKey = surface.key.secondary;
+		return key;
+	}
+
+	static uint32_t GetSurfaceTextureId(const nri_scene::PTMapSurface& surface)
+	{
+		return
+			surface.surface.material.texture != nullptr ?
+			(uint32_t)surface.surface.material.texture->GetID().GetIndex() :
+			0u;
+	}
+
+	static float Distance3(const float a[3], const float b[3])
+	{
+		const float dx = a[0] - b[0];
+		const float dy = a[1] - b[1];
+		const float dz = a[2] - b[2];
+		return std::sqrt(dx * dx + dy * dy + dz * dz);
+	}
+
+	static float Dot3(const float a[3], const float b[3])
+	{
+		return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+	}
+
+	static float ComputeTriangleArea(const nri_scene::CapturedVertex& a, const nri_scene::CapturedVertex& b, const nri_scene::CapturedVertex& c)
+	{
+		const float abx = b.position[0] - a.position[0];
+		const float aby = b.position[1] - a.position[1];
+		const float abz = b.position[2] - a.position[2];
+		const float acx = c.position[0] - a.position[0];
+		const float acy = c.position[1] - a.position[1];
+		const float acz = c.position[2] - a.position[2];
+		const float crossX = aby * acz - abz * acy;
+		const float crossY = abz * acx - abx * acz;
+		const float crossZ = abx * acy - aby * acx;
+		return 0.5f * std::sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
+	}
+
+	static void ComputeTriangleNormal(const nri_scene::CapturedVertex& a, const nri_scene::CapturedVertex& b, const nri_scene::CapturedVertex& c, float outNormal[3])
+	{
+		outNormal[0] = 0.0f;
+		outNormal[1] = 0.0f;
+		outNormal[2] = 0.0f;
+		const float abx = b.position[0] - a.position[0];
+		const float aby = b.position[1] - a.position[1];
+		const float abz = b.position[2] - a.position[2];
+		const float acx = c.position[0] - a.position[0];
+		const float acy = c.position[1] - a.position[1];
+		const float acz = c.position[2] - a.position[2];
+		const float crossX = aby * acz - abz * acy;
+		const float crossY = abz * acx - abx * acz;
+		const float crossZ = abx * acy - aby * acx;
+		const float length = std::sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
+		if (length <= 0.0001f)
+		{
+			return;
+		}
+
+		outNormal[0] = crossX / length;
+		outNormal[1] = crossY / length;
+		outNormal[2] = crossZ / length;
+	}
+
+	static ChunkCompareSurfaceMetrics ComputeChunkCompareSurfaceMetrics(const nri_scene::PTMapSurface& surface)
+	{
+		ChunkCompareSurfaceMetrics metrics = {};
+		const auto& vertices = surface.surface.vertices;
+		metrics.vertexCount = (uint32_t)vertices.size();
+		metrics.triangleCount = CountSurfaceTriangles(surface.surface);
+		metrics.textureId = GetSurfaceTextureId(surface);
+		metrics.palette = surface.surface.material.palette;
+		metrics.shade = surface.surface.material.shade;
+		metrics.alpha = surface.surface.material.alpha;
+		metrics.materialFlags = surface.surface.material.flags;
+		if (vertices.empty())
+		{
+			return metrics;
+		}
+
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			metrics.aabbMin[axis] = vertices[0].position[axis];
+			metrics.aabbMax[axis] = vertices[0].position[axis];
+		}
+
+		for (const auto& vertex : vertices)
+		{
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				metrics.centroid[axis] += vertex.position[axis];
+				metrics.aabbMin[axis] = std::min(metrics.aabbMin[axis], vertex.position[axis]);
+				metrics.aabbMax[axis] = std::max(metrics.aabbMax[axis], vertex.position[axis]);
+			}
+		}
+
+		const float invCount = 1.0f / (float)vertices.size();
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			metrics.centroid[axis] *= invCount;
+		}
+
+		if (vertices.size() >= 3)
+		{
+			if ((surface.surface.material.flags & nri_scene::MaterialFlag_Flat) != 0 &&
+				(vertices.size() % 3u) == 0u)
+			{
+				for (size_t i = 0; i + 2 < vertices.size(); i += 3)
+				{
+					metrics.area += ComputeTriangleArea(vertices[i], vertices[i + 1], vertices[i + 2]);
+					if (metrics.normal[0] == 0.0f && metrics.normal[1] == 0.0f && metrics.normal[2] == 0.0f)
+					{
+						ComputeTriangleNormal(vertices[i], vertices[i + 1], vertices[i + 2], metrics.normal);
+					}
+				}
+			}
+			else
+			{
+				const auto& root = vertices[0];
+				for (size_t i = 1; i + 1 < vertices.size(); ++i)
+				{
+					metrics.area += ComputeTriangleArea(root, vertices[i], vertices[i + 1]);
+					if (metrics.normal[0] == 0.0f && metrics.normal[1] == 0.0f && metrics.normal[2] == 0.0f)
+					{
+						ComputeTriangleNormal(root, vertices[i], vertices[i + 1], metrics.normal);
+					}
+				}
+			}
+		}
+
+		return metrics;
+	}
+
 	const char* GetMapSurfaceKindName(nri_scene::PTMapSurfaceKind kind)
 	{
 		switch (kind)
@@ -4634,6 +4867,323 @@ void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
 			surface.surface.material.palette,
 			surface.surface.material.shade,
 			surface.surface.material.alpha,
+			(uint32_t)surface.surface.vertices.size(),
+			CountSurfaceTriangles(surface.surface));
+	}
+}
+
+void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
+{
+	if (!mMapWorld.valid)
+	{
+		Printf("NRI PT chunk compare: no authoritative map world has been built yet.\n");
+		return;
+	}
+
+	if (chunkIndex < 0)
+	{
+		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit && mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
+		{
+			chunkIndex = mLastSurfaceProbe.provenance.mapChunkIndex;
+		}
+		else
+		{
+			Printf("NRI PT chunk compare: no chunk was specified and the last surface probe hit did not resolve to a map chunk.\n");
+			return;
+		}
+	}
+
+	if (chunkIndex < 0 || (unsigned)chunkIndex >= mMapWorld.chunks.size())
+	{
+		Printf("NRI PT chunk compare: chunk %d is out of range [0,%u).\n", chunkIndex, (uint32_t)mMapWorld.chunks.size());
+		return;
+	}
+
+	const auto& staticChunk = mMapWorld.chunks[(unsigned)chunkIndex];
+	nri_scene::PTMapWorld liveWorld = {};
+	nri_scene::PTMapWorldStats liveStats = {};
+	if (!nri_scene::BuildLiveMapChunkWorld(staticChunk, liveWorld, &liveStats) ||
+		liveWorld.chunks.empty())
+	{
+		Printf("NRI PT chunk compare: failed to build live runtime chunk %d.\n", chunkIndex);
+		return;
+	}
+
+	const auto& liveChunk = liveWorld.chunks[0];
+	const auto* replacement =
+		(unsigned)chunkIndex < mRuntimeMapMutations.chunks.size() ?
+		&mRuntimeMapMutations.chunks[(unsigned)chunkIndex] :
+		nullptr;
+
+	std::vector<uint32_t> staticSurfaceIndices;
+	std::vector<uint32_t> liveSurfaceIndices;
+	staticSurfaceIndices.reserve(staticChunk.surfaceCount);
+	liveSurfaceIndices.reserve(liveChunk.surfaceCount);
+
+	for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < staticChunk.surfaceCount; ++localSurfaceIndex)
+	{
+		const uint32_t surfaceIndex = staticChunk.firstSurface + localSurfaceIndex;
+		if (surfaceIndex >= mMapWorld.surfaces.size())
+		{
+			break;
+		}
+		staticSurfaceIndices.push_back(surfaceIndex);
+	}
+
+	for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < liveChunk.surfaceCount; ++localSurfaceIndex)
+	{
+		const uint32_t surfaceIndex = liveChunk.firstSurface + localSurfaceIndex;
+		if (surfaceIndex >= liveWorld.surfaces.size())
+		{
+			break;
+		}
+		liveSurfaceIndices.push_back(surfaceIndex);
+	}
+
+	std::unordered_map<ChunkCompareSurfaceKey, std::vector<uint32_t>, ChunkCompareSurfaceKeyHash> liveSurfaceLookup;
+	liveSurfaceLookup.reserve(liveSurfaceIndices.size());
+	for (uint32_t liveLocalIndex = 0; liveLocalIndex < (uint32_t)liveSurfaceIndices.size(); ++liveLocalIndex)
+	{
+		const auto& liveSurface = liveWorld.surfaces[liveSurfaceIndices[liveLocalIndex]];
+		liveSurfaceLookup[BuildChunkCompareSurfaceKey(liveSurface)].push_back(liveLocalIndex);
+	}
+
+	std::vector<uint8_t> liveSurfaceUsed(liveSurfaceIndices.size(), 0u);
+	std::vector<ChunkCompareMatchRecord> matches;
+	std::vector<uint32_t> unmatchedStaticSurfaceIndices;
+	std::vector<uint32_t> unmatchedLiveSurfaceIndices;
+	matches.reserve(std::min(staticSurfaceIndices.size(), liveSurfaceIndices.size()));
+	unmatchedStaticSurfaceIndices.reserve(staticSurfaceIndices.size());
+	unmatchedLiveSurfaceIndices.reserve(liveSurfaceIndices.size());
+
+	for (uint32_t staticSurfaceIndex : staticSurfaceIndices)
+	{
+		const auto& staticSurface = mMapWorld.surfaces[staticSurfaceIndex];
+		const ChunkCompareSurfaceKey key = BuildChunkCompareSurfaceKey(staticSurface);
+		auto it = liveSurfaceLookup.find(key);
+		if (it == liveSurfaceLookup.end())
+		{
+			unmatchedStaticSurfaceIndices.push_back(staticSurfaceIndex);
+			continue;
+		}
+
+		uint32_t matchedLiveLocalIndex = UINT32_MAX;
+		for (uint32_t candidate : it->second)
+		{
+			if (candidate < liveSurfaceUsed.size() && liveSurfaceUsed[candidate] == 0u)
+			{
+				matchedLiveLocalIndex = candidate;
+				break;
+			}
+		}
+		if (matchedLiveLocalIndex == UINT32_MAX)
+		{
+			unmatchedStaticSurfaceIndices.push_back(staticSurfaceIndex);
+			continue;
+		}
+
+		liveSurfaceUsed[matchedLiveLocalIndex] = 1u;
+		const uint32_t liveSurfaceIndex = liveSurfaceIndices[matchedLiveLocalIndex];
+		const auto& liveSurface = liveWorld.surfaces[liveSurfaceIndex];
+
+		ChunkCompareMatchRecord match = {};
+		match.staticSurfaceIndex = staticSurfaceIndex;
+		match.liveSurfaceIndex = liveSurfaceIndex;
+		match.key = key;
+		match.staticMetrics = ComputeChunkCompareSurfaceMetrics(staticSurface);
+		match.liveMetrics = ComputeChunkCompareSurfaceMetrics(liveSurface);
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			match.delta[axis] = match.liveMetrics.centroid[axis] - match.staticMetrics.centroid[axis];
+		}
+		match.deltaDistance = Distance3(match.liveMetrics.centroid, match.staticMetrics.centroid);
+		if (match.staticMetrics.area > 0.0001f)
+		{
+			match.areaRatio = match.liveMetrics.area / match.staticMetrics.area;
+		}
+		else
+		{
+			match.areaRatio = match.liveMetrics.area > 0.0001f ? 9999.0f : 1.0f;
+		}
+
+		const float staticNormalLength = std::sqrt(Dot3(match.staticMetrics.normal, match.staticMetrics.normal));
+		const float liveNormalLength = std::sqrt(Dot3(match.liveMetrics.normal, match.liveMetrics.normal));
+		if (staticNormalLength > 0.0001f && liveNormalLength > 0.0001f)
+		{
+			match.normalDot = std::max(-1.0f, std::min(1.0f, Dot3(match.staticMetrics.normal, match.liveMetrics.normal)));
+		}
+		else
+		{
+			match.normalDot = staticNormalLength <= 0.0001f && liveNormalLength <= 0.0001f ? 1.0f : 0.0f;
+		}
+
+		match.materialScore =
+			(match.staticMetrics.textureId == match.liveMetrics.textureId ? 0.0f : 1.0f) +
+			(match.staticMetrics.palette == match.liveMetrics.palette ? 0.0f : 1.0f) +
+			(match.staticMetrics.shade == match.liveMetrics.shade ? 0.0f : 1.0f) +
+			(match.staticMetrics.materialFlags == match.liveMetrics.materialFlags ? 0.0f : 1.0f) +
+			(std::fabs(match.staticMetrics.alpha - match.liveMetrics.alpha) > 0.001f ? 1.0f : 0.0f);
+		matches.push_back(match);
+	}
+
+	for (uint32_t liveLocalIndex = 0; liveLocalIndex < (uint32_t)liveSurfaceIndices.size(); ++liveLocalIndex)
+	{
+		if (liveSurfaceUsed[liveLocalIndex] == 0u)
+		{
+			unmatchedLiveSurfaceIndices.push_back(liveSurfaceIndices[liveLocalIndex]);
+		}
+	}
+
+	float meanDelta[3] = {};
+	for (const auto& match : matches)
+	{
+		meanDelta[0] += match.delta[0];
+		meanDelta[1] += match.delta[1];
+		meanDelta[2] += match.delta[2];
+	}
+	if (!matches.empty())
+	{
+		const float invMatchCount = 1.0f / (float)matches.size();
+		meanDelta[0] *= invMatchCount;
+		meanDelta[1] *= invMatchCount;
+		meanDelta[2] *= invMatchCount;
+	}
+
+	uint32_t within1 = 0;
+	uint32_t within4 = 0;
+	uint32_t areaOutlierCount = 0;
+	uint32_t normalOutlierCount = 0;
+	uint32_t materialDiffCount = 0;
+	for (auto& match : matches)
+	{
+		const float meanDeltaPoint[3] = { meanDelta[0], meanDelta[1], meanDelta[2] };
+		match.deviationFromMean = Distance3(match.delta, meanDeltaPoint);
+		const float areaDelta = std::fabs(match.areaRatio - 1.0f);
+		if (match.deviationFromMean <= 1.0f)
+		{
+			within1++;
+		}
+		if (match.deviationFromMean <= 4.0f)
+		{
+			within4++;
+		}
+		if (areaDelta > 0.05f)
+		{
+			areaOutlierCount++;
+		}
+		if (match.normalDot < 0.98f)
+		{
+			normalOutlierCount++;
+		}
+		if (match.materialScore > 0.0f)
+		{
+			materialDiffCount++;
+		}
+		match.score = match.deviationFromMean + areaDelta * 10.0f + (1.0f - match.normalDot) * 10.0f + match.materialScore;
+	}
+
+	std::sort(matches.begin(), matches.end(), [](const ChunkCompareMatchRecord& a, const ChunkCompareMatchRecord& b)
+	{
+		return a.score > b.score;
+	});
+
+	const bool likelyCoherent =
+		!matches.empty() &&
+		unmatchedStaticSurfaceIndices.empty() &&
+		unmatchedLiveSurfaceIndices.empty() &&
+		within4 + std::max<uint32_t>(1u, (uint32_t)matches.size() / 10u) >= (uint32_t)matches.size() &&
+		areaOutlierCount == 0 &&
+		normalOutlierCount == 0;
+
+	Printf("NRI PT chunk compare: chunk=%d sector=%d static_surfaces=%u live_surfaces=%u matched=%u unmatched_static=%u unmatched_live=%u reasons=%s dragged=%s replacement_active=%s mean_delta=(%.2f, %.2f, %.2f) within_1=%u within_4=%u area_outliers=%u normal_outliers=%u material_diffs=%u likely_coherent=%s live_tris=%u\n",
+		chunkIndex,
+		staticChunk.sectorIndex,
+		(uint32_t)staticSurfaceIndices.size(),
+		(uint32_t)liveSurfaceIndices.size(),
+		(uint32_t)matches.size(),
+		(uint32_t)unmatchedStaticSurfaceIndices.size(),
+		(uint32_t)unmatchedLiveSurfaceIndices.size(),
+		replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask).c_str() : "none",
+		YesNo(replacement != nullptr && replacement->dragged),
+		YesNo(replacement != nullptr && replacement->active),
+		meanDelta[0],
+		meanDelta[1],
+		meanDelta[2],
+		within1,
+		within4,
+		areaOutlierCount,
+		normalOutlierCount,
+		materialDiffCount,
+		YesNo(likelyCoherent),
+		liveChunk.triangleCount);
+
+	const size_t outlierCount = std::min<size_t>(matches.size(), 8u);
+	for (size_t i = 0; i < outlierCount; ++i)
+	{
+		const auto& match = matches[i];
+		if (match.score <= 0.01f && likelyCoherent)
+		{
+			break;
+		}
+
+		const auto& staticSurface = mMapWorld.surfaces[match.staticSurfaceIndex];
+		const auto& liveSurface = liveWorld.surfaces[match.liveSurfaceIndex];
+		Printf("NRI PT chunk compare match: static_surface=%u live_surface=%u kind=%s source=%s sector=%d wall=%d section=%d nextsector=%d cstat=0x%x delta=(%.2f, %.2f, %.2f) dev=%.2f area_ratio=%.3f normal_dot=%.3f tile_static=%u tile_live=%u flags_static=0x%x flags_live=0x%x\n",
+			match.staticSurfaceIndex,
+			match.liveSurfaceIndex,
+			GetMapSurfaceKindName(staticSurface.kind),
+			GetSurfaceSourceTypeName(staticSurface.surface.provenance.sourceType),
+			staticSurface.surface.provenance.sectorIndex,
+			staticSurface.surface.provenance.wallIndex,
+			staticSurface.surface.provenance.sectionIndex,
+			staticSurface.surface.provenance.nextSectorIndex,
+			staticSurface.surface.provenance.cstat,
+			match.delta[0],
+			match.delta[1],
+			match.delta[2],
+			match.deviationFromMean,
+			match.areaRatio,
+			match.normalDot,
+			match.staticMetrics.textureId,
+			match.liveMetrics.textureId,
+			staticSurface.surface.material.flags,
+			liveSurface.surface.material.flags);
+	}
+
+	const size_t unmatchedStaticCount = std::min<size_t>(unmatchedStaticSurfaceIndices.size(), 8u);
+	for (size_t i = 0; i < unmatchedStaticCount; ++i)
+	{
+		const auto& surface = mMapWorld.surfaces[unmatchedStaticSurfaceIndices[i]];
+		Printf("NRI PT chunk compare unmatched_static: surface=%u kind=%s source=%s sector=%d wall=%d section=%d nextsector=%d cstat=0x%x tile=%u flags=0x%x verts=%u tris=%u\n",
+			unmatchedStaticSurfaceIndices[i],
+			GetMapSurfaceKindName(surface.kind),
+			GetSurfaceSourceTypeName(surface.surface.provenance.sourceType),
+			surface.surface.provenance.sectorIndex,
+			surface.surface.provenance.wallIndex,
+			surface.surface.provenance.sectionIndex,
+			surface.surface.provenance.nextSectorIndex,
+			surface.surface.provenance.cstat,
+			GetSurfaceTextureId(surface),
+			surface.surface.material.flags,
+			(uint32_t)surface.surface.vertices.size(),
+			CountSurfaceTriangles(surface.surface));
+	}
+
+	const size_t unmatchedLiveCount = std::min<size_t>(unmatchedLiveSurfaceIndices.size(), 8u);
+	for (size_t i = 0; i < unmatchedLiveCount; ++i)
+	{
+		const auto& surface = liveWorld.surfaces[unmatchedLiveSurfaceIndices[i]];
+		Printf("NRI PT chunk compare unmatched_live: surface=%u kind=%s source=%s sector=%d wall=%d section=%d nextsector=%d cstat=0x%x tile=%u flags=0x%x verts=%u tris=%u\n",
+			unmatchedLiveSurfaceIndices[i],
+			GetMapSurfaceKindName(surface.kind),
+			GetSurfaceSourceTypeName(surface.surface.provenance.sourceType),
+			surface.surface.provenance.sectorIndex,
+			surface.surface.provenance.wallIndex,
+			surface.surface.provenance.sectionIndex,
+			surface.surface.provenance.nextSectorIndex,
+			surface.surface.provenance.cstat,
+			GetSurfaceTextureId(surface),
+			surface.surface.material.flags,
 			(uint32_t)surface.surface.vertices.size(),
 			CountSurfaceTriangles(surface.surface));
 	}

@@ -87,6 +87,7 @@ struct PTMapChunkMutationAnalysis
 void NotifyLevelGeometryReady();
 uint64_t GetPendingLevelGeometryBuildSerial();
 bool BuildMapWorld(PTMapWorld& outWorld);
+bool BuildLiveMapChunkWorld(const PTMapChunk& chunk, PTMapWorld& outWorld, PTMapWorldStats* outStats = nullptr);
 bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTMapWorldStats* outStats = nullptr);
 uint64_t ComputeMapChunkGeometrySignature(const PTMapChunk& chunk);
 bool CaptureMapChunkMutationBaseline(const PTMapChunk& chunk, PTMapChunkMutationBaseline& outBaseline);
