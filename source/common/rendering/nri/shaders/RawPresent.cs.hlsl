@@ -201,7 +201,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const bool isSky = viewZ >= NRD_INF * 0.5;
 			const float metalness = saturate(baseColorMetalness.w);
 			const float3 specularF0 = lerp(float3(0.04, 0.04, 0.04), saturate(baseColorMetalness.rgb), metalness);
-			const float3 proxyVis = isSky ? 0.0 : saturate(log2(1.0 + specularF0 * 256.0) / 8.0) * float3(0.5, 0.8, 1.0);
+			const float proxyLuma = dot(specularF0, float3(0.299, 0.587, 0.114));
+			const float3 proxyVis = isSky ? 0.0 : saturate(log2(1.0 + proxyLuma * 256.0) / 8.0).xxx;
 
 			color = max(guideVis, proxyVis);
 		}
