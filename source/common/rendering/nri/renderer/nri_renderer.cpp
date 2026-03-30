@@ -5543,6 +5543,9 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		return true;
 	}
 
+	// Frame-resource rebuilds on resize/upscaler mode changes can retire textures that the current
+	// command allocator still references. Drain GPU work before destroying frame-sized resources.
+	mFrameBuffer->WaitForCommands(true);
 	mNrd.Shutdown();
 	DestroyFrameTextures();
 	mRenderWidth = renderWidth;
