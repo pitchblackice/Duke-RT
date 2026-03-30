@@ -190,7 +190,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 envSpecular = isSky ? 0.0 : EvaluateEnvironmentSpecular(specularF0, roughness, normal, viewDir);
 	const float specularHitDistance = isSky ? 0.0 : GetSpecularHitDistance(packedSpecular, viewZ, roughness);
 
-	gVendorInputOutput[pixelPos] = composed;
 	gRrGuideDiffuseAlbedoOutput[pixelPos] = float4(isSky ? 0.0 : saturate(diffuseAlbedo * (1.0 - envSpecular)), 1.0);
 	gRrGuideSpecularAlbedoOutput[pixelPos] = float4(isSky ? 0.0 : saturate(envSpecular), 1.0);
 	gRrGuideSpecHitDistanceOutput[pixelPos] = specularHitDistance;

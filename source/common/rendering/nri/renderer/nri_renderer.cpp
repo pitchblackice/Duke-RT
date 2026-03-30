@@ -1716,8 +1716,10 @@ void NRIRenderer::Shutdown()
 	mCompositionOutputSet = nullptr;
 	mTaaFrameTextureSet = nullptr;
 	mTaaOutputSet = nullptr;
-	mPresentFrameTextureSet = nullptr;
-	mPresentOutputSet = nullptr;
+	mRawPresentFrameTextureSet = nullptr;
+	mRawPresentOutputSet = nullptr;
+	mFinalPresentFrameTextureSet = nullptr;
+	mFinalPresentOutputSet = nullptr;
 }
 
 bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
@@ -4612,8 +4614,10 @@ bool NRIRenderer::AllocateDescriptorSets()
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &mCompositionOutputSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mTaaFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 1, &mTaaOutputSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 1, &mPresentOutputSet, 1, 0) == nri::Result::SUCCESS;
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mRawPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 1, &mRawPresentOutputSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mFinalPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 1, &mFinalPresentOutputSet, 1, 0) == nri::Result::SUCCESS;
 }
 
 bool NRIRenderer::UpdateSamplerSet()
@@ -8270,7 +8274,7 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 		tertiary.shaderView
 	};
 	nri::UpdateDescriptorRangeDesc inputUpdate = {};
-	inputUpdate.descriptorSet = mPresentFrameTextureSet;
+	inputUpdate.descriptorSet = mRawPresentFrameTextureSet;
 	inputUpdate.rangeIndex = 0;
 	inputUpdate.descriptors = inputs;
 	inputUpdate.descriptorNum = (uint32_t)std::size(inputs);
@@ -8278,7 +8282,7 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 
 	const nri::Descriptor* outputs[1] = { final.storageView };
 	nri::UpdateDescriptorRangeDesc outputUpdate = {};
-	outputUpdate.descriptorSet = mPresentOutputSet;
+	outputUpdate.descriptorSet = mRawPresentOutputSet;
 	outputUpdate.rangeIndex = 0;
 	outputUpdate.descriptors = outputs;
 	outputUpdate.descriptorNum = (uint32_t)std::size(outputs);
@@ -8286,8 +8290,8 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mTaaPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mPresentFrameTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mPresentOutputSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mRawPresentFrameTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mRawPresentOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::RawPresent));
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mTargetWidth), GetDispatchSize(mTargetHeight), 1 });
 	return true;
@@ -8319,7 +8323,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 		input.shaderView
 	};
 	nri::UpdateDescriptorRangeDesc inputUpdate = {};
-	inputUpdate.descriptorSet = mPresentFrameTextureSet;
+	inputUpdate.descriptorSet = mFinalPresentFrameTextureSet;
 	inputUpdate.rangeIndex = 0;
 	inputUpdate.descriptors = inputs;
 	inputUpdate.descriptorNum = (uint32_t)std::size(inputs);
@@ -8327,7 +8331,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 
 	const nri::Descriptor* outputs[1] = { final.storageView };
 	nri::UpdateDescriptorRangeDesc outputUpdate = {};
-	outputUpdate.descriptorSet = mPresentOutputSet;
+	outputUpdate.descriptorSet = mFinalPresentOutputSet;
 	outputUpdate.rangeIndex = 0;
 	outputUpdate.descriptors = outputs;
 	outputUpdate.descriptorNum = (uint32_t)std::size(outputs);
@@ -8335,8 +8339,8 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mTaaPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mPresentFrameTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mPresentOutputSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mFinalPresentFrameTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mFinalPresentOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::FinalPresent));
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mTargetWidth), GetDispatchSize(mTargetHeight), 1 });
 	return true;
