@@ -3010,6 +3010,7 @@ void NRIRenderer::PrintStatus() const
 		nri_ptdirectionallight ? "on" : "off",
 		nri_ptsectorlighting ? "on" : "off",
 		nri_ptemissiveheuristics ? "on" : "off");
+	Printf("NRI PT transparent shell: trace_transparent=placeholder_noop\n");
 	uint32_t emissiveBaseCount = 0;
 	uint32_t emissiveConstantCount = 0;
 	uint32_t emissiveGlowmapCount = 0;
@@ -4508,6 +4509,7 @@ bool NRIRenderer::CreatePipelines()
 
 	FString trace = FStringf("TraceOpaque.cs.%s", suffix);
 	FString composition = FStringf("Composition.cs.%s", suffix);
+	FString traceTransparent = FStringf("TraceTransparent.cs.%s", suffix);
 	FString taa = FStringf("Taa.cs.%s", suffix);
 	FString rawPresent = FStringf("RawPresent.cs.%s", suffix);
 	FString finalPresent = FStringf("FinalPresent.cs.%s", suffix);
@@ -4518,6 +4520,7 @@ bool NRIRenderer::CreatePipelines()
 	return
 		createPipeline(trace.GetChars(), PipelineSlot::TraceOpaque, mPipelineLayout) &&
 		createPipeline(composition.GetChars(), PipelineSlot::Composition, mPipelineLayout) &&
+		createPipeline(traceTransparent.GetChars(), PipelineSlot::TraceTransparent, mPipelineLayout) &&
 		createPipeline(taa.GetChars(), PipelineSlot::Taa, mTaaPipelineLayout) &&
 		createPipeline(rawPresent.GetChars(), PipelineSlot::RawPresent, mTaaPipelineLayout) &&
 		createPipeline(finalPresent.GetChars(), PipelineSlot::FinalPresent, mTaaPipelineLayout) &&
@@ -5454,6 +5457,7 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		CreateFrameTexture(FrameTextureSlot::DenoisedSpecular, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::DenoisedShadow, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::Composed, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::TraceTransparentOutput, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::DirectLighting, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::DirectEmission, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::TaaHistoryPing, renderWidth, renderHeight, colorFormat) &&
@@ -7444,6 +7448,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	static bool sLoggedPhaseGDebugPrepassPath = false;
 	static bool sLoggedPhaseFDenoiserPath = false;
 	static bool sLoggedPhaseFDenoiserFallback = false;
+	static bool sLoggedPhaseFTraceTransparentPath = false;
 	static bool sLoggedRawTraceBypass = false;
 	const int ptDebugMode = (int)GetEffectivePtDebugMode();
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
@@ -7561,6 +7566,17 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
+		if (!sLoggedPhaseFTraceTransparentPath)
+		{
+			Printf("NRI Phase F.5: Composition-backed PT paths now pass through placeholder TraceTransparent before output-resolution dispatch.\n");
+			sLoggedPhaseFTraceTransparentPath = true;
+		}
+
+		if (!DispatchTraceTransparent())
+		{
+			return false;
+		}
+
 		return true;
 	};
 
@@ -7568,7 +7584,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedPhaseGResolvedPresentPath)
 		{
-			Printf("NRI Phase G: ptdebug 0 now routes through Composition, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
+			Printf("NRI Phase G: ptdebug 0 now routes through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
 			sLoggedPhaseGResolvedPresentPath = true;
 		}
 
@@ -7597,7 +7613,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedPhaseBCompositionPath)
 		{
-			Printf("NRI Phase B: ptdebug 15 now routes through Composition and the minimal FinalPresent presenter.\n");
+			Printf("NRI Phase B: ptdebug 15 now routes through Composition, placeholder TraceTransparent, and the minimal FinalPresent presenter.\n");
 			sLoggedPhaseBCompositionPath = true;
 		}
 
@@ -7606,7 +7622,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return false;
 		}
 
-		if (!DispatchFinalPresent(FrameTextureSlot::Composed))
+		if (!DispatchFinalPresent(FrameTextureSlot::TraceTransparentOutput))
 		{
 			return false;
 		}
@@ -7619,7 +7635,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedPhaseGDebugPrepassPath)
 		{
-			Printf("NRI Phase G: ptdebug 13/14 now route through Composition, DispatchUpscaleChain, and direct FinalPresent of the temporal outputs.\n");
+			Printf("NRI Phase G: ptdebug 13/14 now route through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and direct FinalPresent of the temporal outputs.\n");
 			sLoggedPhaseGDebugPrepassPath = true;
 		}
 
@@ -7961,6 +7977,47 @@ bool NRIRenderer::DispatchComposition()
 	return true;
 }
 
+bool NRIRenderer::DispatchTraceTransparent()
+{
+	Clocker clock(NriPTComposition);
+
+	NRITraceConstants constants = {};
+	constants.RenderWidth = mRenderWidth;
+	constants.RenderHeight = mRenderHeight;
+	constants.DisplayWidth = mOutputWidth;
+	constants.DisplayHeight = mOutputHeight;
+	constants.FrameIndex = mFrameIndex;
+	constants.DebugMode = GetEffectivePtDebugMode();
+
+	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
+	NRITextureResource& transparentOutput = GetFrameTexture(FrameTextureSlot::TraceTransparentOutput);
+
+	mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(transparentOutput, NRIComputeStorageState());
+
+	const nri::Descriptor* defaultInput = composed.shaderView;
+	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+	mFrameInputDescriptors[5] = composed.shaderView;
+	UpdateFrameTextureSet();
+
+	const nri::Descriptor* defaultOutput = transparentOutput.storageView;
+	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+	mOutputDescriptors[1] = transparentOutput.storageView;
+	UpdateOutputSet();
+
+	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
+	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	BindSceneRootDescriptors();
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::TraceTransparent));
+	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+	return true;
+}
+
 bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlot secondarySlot, FrameTextureSlot tertiarySlot)
 {
 	Clocker clock(NriPTRawPresent);
@@ -8076,10 +8133,10 @@ bool NRIRenderer::DispatchUpscaleChain()
 	const NRIMainUpscalerKind mainKind = ResolveMainUpscalerKind(true);
 	const NRIPostSharpenKind postSharpenKind = ResolvePostSharpenKind(true);
 	const bool runAppTaa = ShouldRunAppTaa(mainKind);
-	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
+	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::TraceTransparentOutput);
 	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
-	TraceTemporalState("upscale-entry", mainKind, postSharpenKind, runAppTaa, mHistoryOutputSlot, FrameTextureSlot::Composed);
+	TraceTemporalState("upscale-entry", mainKind, postSharpenKind, runAppTaa, mHistoryOutputSlot, FrameTextureSlot::TraceTransparentOutput);
 
 	if (runAppTaa)
 	{
@@ -8232,7 +8289,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mUseUpscaledInFinal = true;
 		mUpscaledInputSlot = FrameTextureSlot::VendorOutput;
 		resolvedInputSlot = FrameTextureSlot::VendorOutput;
-		TraceTemporalState("upscale-vendor", mainKind, postSharpenKind, runAppTaa, mUpscaledInputSlot, FrameTextureSlot::Composed);
+		TraceTemporalState("upscale-vendor", mainKind, postSharpenKind, runAppTaa, mUpscaledInputSlot, FrameTextureSlot::TraceTransparentOutput);
 	}
 	else
 	{
@@ -8939,6 +8996,7 @@ const char* NRIRenderer::GetFrameTextureSlotName(FrameTextureSlot slot) const
 	case FrameTextureSlot::DenoisedSpecular: return "DenoisedSpecular";
 	case FrameTextureSlot::DenoisedShadow: return "DenoisedShadow";
 	case FrameTextureSlot::Composed: return "Composed";
+	case FrameTextureSlot::TraceTransparentOutput: return "TraceTransparentOutput";
 	case FrameTextureSlot::DirectLighting: return "DirectLighting";
 	case FrameTextureSlot::DirectEmission: return "DirectEmission";
 	case FrameTextureSlot::TaaHistoryPing: return "TaaHistoryPing";
