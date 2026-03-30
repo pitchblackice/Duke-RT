@@ -633,6 +633,11 @@ namespace
 		return (denoiserMode & 0xffu) | ((emissiveSampleCount & 0xffu) << 8u);
 	}
 
+	static uint32_t PackUInt16Pair(uint32_t lo, uint32_t hi)
+	{
+		return (lo & 0xffffu) | ((hi & 0xffffu) << 16u);
+	}
+
 	static nri_scene::SceneDebugStats MergeSceneStats(const nri_scene::SceneDebugStats& a, const nri_scene::SceneDebugStats& b)
 	{
 		nri_scene::SceneDebugStats merged = {};
@@ -5431,6 +5436,10 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 
 	const nri::Format colorFormat = nri::Format::RGBA16_SFLOAT;
 	const nri::Format normalRoughnessFormat = nri::Format::R10_G10_B10_A2_UNORM;
+	const nri::Format upscalerDepthFormat = nri::Format::R32_SFLOAT;
+	const nri::Format rrGuideAlbedoFormat = nri::Format::RGBA8_UNORM;
+	const nri::Format rrGuideSpecHitDistanceFormat = nri::Format::R16_SFLOAT;
+	const nri::Format rrGuideNormalRoughnessFormat = nri::Format::RGBA16_SFLOAT;
 	const nri::Format finalFormat = outputFormat;
 
 	return
@@ -5450,12 +5459,15 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		CreateFrameTexture(FrameTextureSlot::TaaHistoryPing, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::TaaHistoryPong, renderWidth, renderHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::Validation, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::DlssSpecularAlbedo, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::DlssSpecularHitDistance, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::DlssNormalRoughness, renderWidth, renderHeight, normalRoughnessFormat) &&
-		CreateFrameTexture(FrameTextureSlot::Upscaled, outputWidth, outputHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::PreFinal, outputWidth, outputHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::SrInput, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::RrInput, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::UpscalerDepth, renderWidth, renderHeight, upscalerDepthFormat) &&
+		CreateFrameTexture(FrameTextureSlot::RrGuideDiffuseAlbedo, renderWidth, renderHeight, rrGuideAlbedoFormat) &&
+		CreateFrameTexture(FrameTextureSlot::RrGuideSpecularAlbedo, renderWidth, renderHeight, rrGuideAlbedoFormat) &&
+		CreateFrameTexture(FrameTextureSlot::RrGuideSpecularHitDistance, renderWidth, renderHeight, rrGuideSpecHitDistanceFormat) &&
+		CreateFrameTexture(FrameTextureSlot::RrGuideNormalRoughness, renderWidth, renderHeight, rrGuideNormalRoughnessFormat) &&
+		CreateFrameTexture(FrameTextureSlot::VendorOutput, outputWidth, outputHeight, colorFormat) &&
+		CreateFrameTexture(FrameTextureSlot::PostSharpenOutput, outputWidth, outputHeight, colorFormat) &&
 		CreateFrameTexture(FrameTextureSlot::Final, targetWidth, targetHeight, finalFormat);
 }
 
@@ -5549,7 +5561,7 @@ bool NRIRenderer::DispatchBootstrapView()
 	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	UpdateFrameTextureSet();
 
-	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::PreFinal).storageView);
+	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::VendorOutput).storageView);
 	mOutputDescriptors[2] = final.storageView;
 	UpdateOutputSet();
 
@@ -7449,7 +7461,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		((ptDebugMode >= 1 && ptDebugMode <= 5) || (ptDebugMode >= 10 && ptDebugMode <= 12) || (ptDebugMode >= 26 && ptDebugMode <= 33));
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
-	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
+	mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
 	mUseUpscaledInFinal = false;
 	mUseDenoisedCompositionInputs = false;
 	mUseSplitShadowDenoiser = useShadowDebugPresent || (useCompositionPath && nri_denoise && nri_ptdirectionallight);
@@ -7757,26 +7769,26 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeStorageState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo), NRIComputeStorageState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo), NRIComputeStorageState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::SrInput), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::RrGuideDiffuseAlbedo), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::RrGuideSpecularHitDistance), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Composed), NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::VendorOutput), NRIComputeStorageState());
 
 	const nri::Descriptor* defaultInput = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
 	UpdateFrameTextureSet();
 
-	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
+	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::SrInput).storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
 	mOutputDescriptors[0] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).storageView;
 	mOutputDescriptors[3] = GetFrameTexture(FrameTextureSlot::Motion).storageView;
 	mOutputDescriptors[4] = GetFrameTexture(FrameTextureSlot::ViewZ).storageView;
 	mOutputDescriptors[5] = GetFrameTexture(FrameTextureSlot::NormalRoughness).storageView;
 	mOutputDescriptors[6] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).storageView;
-	mOutputDescriptors[9] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).storageView;
+	mOutputDescriptors[9] = GetFrameTexture(FrameTextureSlot::RrGuideDiffuseAlbedo).storageView;
 	mOutputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).storageView;
-	mOutputDescriptors[11] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).storageView;
+	mOutputDescriptors[11] = GetFrameTexture(FrameTextureSlot::RrGuideSpecularHitDistance).storageView;
 	mOutputDescriptors[12] = GetFrameTexture(FrameTextureSlot::UnfilteredPenumbra).storageView;
 	mOutputDescriptors[13] = GetFrameTexture(FrameTextureSlot::DirectLighting).storageView;
 	mOutputDescriptors[14] = GetFrameTexture(FrameTextureSlot::DirectEmission).storageView;
@@ -8023,6 +8035,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
+	constants.ReservedTrace1 = PackUInt16Pair(input.width, input.height);
 
 	mFrameBuffer->TransitionTexture(input, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
@@ -8122,24 +8135,43 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 	if (mainKind != NRIMainUpscalerKind::Off)
 	{
+		const FrameTextureSlot vendorInputSlot =
+			mainKind == NRIMainUpscalerKind::DLSR ? FrameTextureSlot::SrInput :
+			FrameTextureSlot::RrInput;
+		NRITextureResource& vendorInput = GetFrameTexture(vendorInputSlot);
+		NRITextureResource& upscalerDepth = GetFrameTexture(FrameTextureSlot::UpscalerDepth);
+		NRITextureResource& rrGuideDiffuseAlbedo = GetFrameTexture(FrameTextureSlot::RrGuideDiffuseAlbedo);
+		NRITextureResource& rrGuideSpecularAlbedo = GetFrameTexture(FrameTextureSlot::RrGuideSpecularAlbedo);
+		NRITextureResource& rrGuideSpecularHitDistance = GetFrameTexture(FrameTextureSlot::RrGuideSpecularHitDistance);
+		NRITextureResource& rrGuideNormalRoughness = GetFrameTexture(FrameTextureSlot::RrGuideNormalRoughness);
+		NRITextureResource& vendorOutput = GetFrameTexture(FrameTextureSlot::VendorOutput);
+
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Composed), NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo), NRIComputeStorageState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo), NRIComputeStorageState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(vendorInput, NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(upscalerDepth, NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(rrGuideDiffuseAlbedo, NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(rrGuideSpecularAlbedo, NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(rrGuideSpecularHitDistance, NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(rrGuideNormalRoughness, NRIComputeStorageState());
 
 		const nri::Descriptor* defaultInput = composed.shaderView;
 		mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
 		mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
+		mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
 		mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
 		UpdateFrameTextureSet();
 
-		const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
+		const nri::Descriptor* defaultOutput = vendorInput.storageView;
 		mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
-		mOutputDescriptors[9] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).storageView;
-		mOutputDescriptors[10] = GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo).storageView;
-		mOutputDescriptors[11] = GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance).storageView;
+		mOutputDescriptors[5] = rrGuideNormalRoughness.storageView;
+		mOutputDescriptors[8] = vendorInput.storageView;
+		mOutputDescriptors[9] = rrGuideDiffuseAlbedo.storageView;
+		mOutputDescriptors[10] = rrGuideSpecularAlbedo.storageView;
+		mOutputDescriptors[11] = rrGuideSpecularHitDistance.storageView;
+		mOutputDescriptors[12] = upscalerDepth.storageView;
 		UpdateOutputSet();
 
 		{
@@ -8162,11 +8194,13 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
 
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo), NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo), NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Upscaled), NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(vendorInput, NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(upscalerDepth, NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(rrGuideDiffuseAlbedo, NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(rrGuideSpecularAlbedo, NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(rrGuideSpecularHitDistance, NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(rrGuideNormalRoughness, NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(vendorOutput, NRIComputeStorageState());
 
 		if (!mUpscaler.EnsureMainUpscaler(*mFrameBuffer, mainKind, GetSelectedUpscalerMode(), mOutputWidth, mOutputHeight))
 		{
@@ -8175,14 +8209,14 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 		NRIUpscalerDispatchDesc upscalerDesc = {};
 		upscalerDesc.commandBuffer = mFrameBuffer->mCommandBuffer;
-		upscalerDesc.input = &GetFrameTexture(FrameTextureSlot::Composed);
-		upscalerDesc.output = &GetFrameTexture(FrameTextureSlot::Upscaled);
+		upscalerDesc.input = &vendorInput;
+		upscalerDesc.output = &vendorOutput;
 		upscalerDesc.motion = &GetFrameTexture(FrameTextureSlot::Motion);
-		upscalerDesc.depth = &GetFrameTexture(FrameTextureSlot::ViewZ);
-		upscalerDesc.normalRoughness = &GetFrameTexture(FrameTextureSlot::NormalRoughness);
-		upscalerDesc.diffuseAlbedo = &GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo);
-		upscalerDesc.specularAlbedo = &GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo);
-		upscalerDesc.specularHitDistance = &GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance);
+		upscalerDesc.depth = &upscalerDepth;
+		upscalerDesc.normalRoughness = &rrGuideNormalRoughness;
+		upscalerDesc.diffuseAlbedo = &rrGuideDiffuseAlbedo;
+		upscalerDesc.specularAlbedo = &rrGuideSpecularAlbedo;
+		upscalerDesc.specularHitDistance = &rrGuideSpecularHitDistance;
 		upscalerDesc.currentWidth = mRenderWidth;
 		upscalerDesc.currentHeight = mRenderHeight;
 		Copy2(mCurrentJitter, upscalerDesc.cameraJitter);
@@ -8195,39 +8229,9 @@ bool NRIRenderer::DispatchUpscaleChain()
 			return false;
 		}
 
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Upscaled), NRIComputeShaderResourceState());
-		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), NRIComputeStorageState());
-
-		mFrameInputDescriptors.fill(GetFrameTexture(FrameTextureSlot::Composed).shaderView);
-		mFrameInputDescriptors[6] = GetFrameTexture(FrameTextureSlot::Upscaled).shaderView;
-		UpdateFrameTextureSet();
-
-		mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::PreFinal).storageView);
-		mOutputDescriptors[2] = GetFrameTexture(FrameTextureSlot::PreFinal).storageView;
-		UpdateOutputSet();
-
-		{
-			NRITraceConstants constants = {};
-			constants.RenderWidth = mRenderWidth;
-			constants.RenderHeight = mRenderHeight;
-			constants.DisplayWidth = mOutputWidth;
-			constants.DisplayHeight = mOutputHeight;
-			constants.FrameIndex = mFrameIndex;
-			constants.Flags = NRI_FLAG_USE_UPSCALED | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
-			mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
-			mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-			mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
-			mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
-			mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
-			mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
-			mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
-		}
-		mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::DlssAfter));
-		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mOutputWidth), GetDispatchSize(mOutputHeight), 1 });
-
 		mUseUpscaledInFinal = true;
-		mUpscaledInputSlot = FrameTextureSlot::PreFinal;
-		resolvedInputSlot = FrameTextureSlot::PreFinal;
+		mUpscaledInputSlot = FrameTextureSlot::VendorOutput;
+		resolvedInputSlot = FrameTextureSlot::VendorOutput;
 		TraceTemporalState("upscale-vendor", mainKind, postSharpenKind, runAppTaa, mUpscaledInputSlot, FrameTextureSlot::Composed);
 	}
 	else
@@ -8244,7 +8248,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 	}
 
 	NRITextureResource& postInput = GetFrameTexture(resolvedInputSlot);
-	NRITextureResource& postOutput = GetFrameTexture(FrameTextureSlot::Upscaled);
+	NRITextureResource& postOutput = GetFrameTexture(FrameTextureSlot::PostSharpenOutput);
 	mFrameBuffer->TransitionTexture(postInput, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(postOutput, NRIComputeStorageState());
 	if (!mUpscaler.EnsurePostSharpen(*mFrameBuffer, postSharpenKind, mOutputWidth, mOutputHeight))
@@ -8267,7 +8271,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 	}
 
 	mUseUpscaledInFinal = true;
-	mUpscaledInputSlot = FrameTextureSlot::Upscaled;
+	mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
 	TraceTemporalState("upscale-post-sharpen", mainKind, postSharpenKind, runAppTaa, mUpscaledInputSlot, resolvedInputSlot);
 	return true;
 }
@@ -8329,12 +8333,11 @@ bool NRIRenderer::DispatchFinal()
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DirectEmission), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Composed), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Validation), NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo), NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo), NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::DlssSpecularHitDistance), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::RrGuideDiffuseAlbedo), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::RrGuideSpecularAlbedo), NRIComputeShaderResourceState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::RrGuideSpecularHitDistance), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(history, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(upscaled, NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::PreFinal), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
 
 	mFrameInputDescriptors.fill(GetFrameTexture(FrameTextureSlot::Composed).shaderView);
@@ -8346,8 +8349,8 @@ bool NRIRenderer::DispatchFinal()
 	mFrameInputDescriptors[5] = presentRawTrace ? (mUseUpscaledInFinal ? upscaled.shaderView : GetFrameTexture(FrameTextureSlot::Composed).shaderView) : GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors[6] = upscaled.shaderView;
 	mFrameInputDescriptors[7] = GetFrameTexture(FrameTextureSlot::Validation).shaderView;
-	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::DlssDiffuseAlbedo).shaderView;
-	mFrameInputDescriptors[9] = GetFrameTexture(FrameTextureSlot::DlssSpecularAlbedo).shaderView;
+	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::RrGuideDiffuseAlbedo).shaderView;
+	mFrameInputDescriptors[9] = GetFrameTexture(FrameTextureSlot::RrGuideSpecularAlbedo).shaderView;
 	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredPenumbra).shaderView;
 	mFrameInputDescriptors[11] = GetFrameTexture(FrameTextureSlot::DenoisedShadow).shaderView;
 	mFrameInputDescriptors[12] = GetFrameTexture(FrameTextureSlot::DirectLighting).shaderView;
@@ -8941,12 +8944,15 @@ const char* NRIRenderer::GetFrameTextureSlotName(FrameTextureSlot slot) const
 	case FrameTextureSlot::TaaHistoryPing: return "TaaHistoryPing";
 	case FrameTextureSlot::TaaHistoryPong: return "TaaHistoryPong";
 	case FrameTextureSlot::Validation: return "Validation";
-	case FrameTextureSlot::DlssDiffuseAlbedo: return "DlssDiffuseAlbedo";
-	case FrameTextureSlot::DlssSpecularAlbedo: return "DlssSpecularAlbedo";
-	case FrameTextureSlot::DlssSpecularHitDistance: return "DlssSpecularHitDistance";
-	case FrameTextureSlot::DlssNormalRoughness: return "DlssNormalRoughness";
-	case FrameTextureSlot::Upscaled: return "Upscaled";
-	case FrameTextureSlot::PreFinal: return "PreFinal";
+	case FrameTextureSlot::SrInput: return "SrInput";
+	case FrameTextureSlot::RrInput: return "RrInput";
+	case FrameTextureSlot::UpscalerDepth: return "UpscalerDepth";
+	case FrameTextureSlot::RrGuideDiffuseAlbedo: return "RrGuideDiffuseAlbedo";
+	case FrameTextureSlot::RrGuideSpecularAlbedo: return "RrGuideSpecularAlbedo";
+	case FrameTextureSlot::RrGuideSpecularHitDistance: return "RrGuideSpecularHitDistance";
+	case FrameTextureSlot::RrGuideNormalRoughness: return "RrGuideNormalRoughness";
+	case FrameTextureSlot::VendorOutput: return "VendorOutput";
+	case FrameTextureSlot::PostSharpenOutput: return "PostSharpenOutput";
 	case FrameTextureSlot::Final: return "Final";
 	case FrameTextureSlot::Count: return "Count";
 	default: return "Unknown";

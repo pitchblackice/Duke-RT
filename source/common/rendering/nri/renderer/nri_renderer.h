@@ -67,12 +67,15 @@ private:
 		TaaHistoryPing,
 		TaaHistoryPong,
 		Validation,
-		DlssDiffuseAlbedo,
-		DlssSpecularAlbedo,
-		DlssSpecularHitDistance,
-		DlssNormalRoughness,
-		Upscaled,
-		PreFinal,
+		SrInput,
+		RrInput,
+		UpscalerDepth,
+		RrGuideDiffuseAlbedo,
+		RrGuideSpecularAlbedo,
+		RrGuideSpecularHitDistance,
+		RrGuideNormalRoughness,
+		VendorOutput,
+		PostSharpenOutput,
 		Final,
 		Count
 	};
@@ -734,5 +737,5 @@ private:
 	NRIPostSharpenKind mLastTemporalPostSharpen = NRIPostSharpenKind::Off;
 	FrameTextureSlot mHistoryInputSlot = FrameTextureSlot::TaaHistoryPing;
 	FrameTextureSlot mHistoryOutputSlot = FrameTextureSlot::TaaHistoryPong;
-	FrameTextureSlot mUpscaledInputSlot = FrameTextureSlot::Upscaled;
+	FrameTextureSlot mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
 };

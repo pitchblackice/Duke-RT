@@ -67,7 +67,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	const uint2 inputSize = uint2(max(gTraceConstants.RenderWidth, 1u), max(gTraceConstants.RenderHeight, 1u));
+	const uint packedInputSize = gTraceConstants.ReservedTrace1;
+	const uint2 inputSize = uint2(max(packedInputSize & 0xffffu, 1u), max(packedInputSize >> 16u, 1u));
 	const uint2 samplePos = min((uint2(pixelPos) * inputSize) / outputSize, inputSize - 1u);
 	const float3 color = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
 	gOutputTexture[targetPixelPos] = color;
