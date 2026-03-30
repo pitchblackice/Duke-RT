@@ -7992,10 +7992,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 
 	const nri::Descriptor* defaultInput = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
-	if (!UpdateFrameTextureSet(mUpscalerPrepassFrameTextureSet, mFrameInputDescriptors))
-	{
-		return false;
-	}
+	UpdateFrameTextureSet();
 
 	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::Validation).storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
@@ -8010,10 +8007,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mOutputDescriptors[12] = GetFrameTexture(FrameTextureSlot::UnfilteredPenumbra).storageView;
 	mOutputDescriptors[13] = GetFrameTexture(FrameTextureSlot::DirectLighting).storageView;
 	mOutputDescriptors[14] = GetFrameTexture(FrameTextureSlot::DirectEmission).storageView;
-	if (!UpdateOutputSet(mUpscalerPrepassOutputSet, mOutputDescriptors))
-	{
-		return false;
-	}
+	UpdateOutputSet();
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
@@ -8239,7 +8233,10 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 		mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
 		mFrameInputDescriptors[6] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	}
-	UpdateFrameTextureSet();
+	if (!UpdateFrameTextureSet(mUpscalerPrepassFrameTextureSet, mFrameInputDescriptors))
+	{
+		return false;
+	}
 
 	const nri::Descriptor* defaultOutput = upscalerDepth.storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
@@ -8251,7 +8248,10 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 		mOutputDescriptors[10] = rrGuideSpecularAlbedo.storageView;
 		mOutputDescriptors[11] = rrGuideSpecularHitDistance.storageView;
 	}
-	UpdateOutputSet();
+	if (!UpdateOutputSet(mUpscalerPrepassOutputSet, mOutputDescriptors))
+	{
+		return false;
+	}
 
 	NRITraceConstants constants = {};
 	constants.RenderWidth = mRenderWidth;
