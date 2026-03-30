@@ -7876,7 +7876,8 @@ bool NRIRenderer::DispatchComposition()
 	constants.FrameIndex = mFrameIndex;
 	constants.Flags =
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
-		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u);
+		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
+		(nri_ptdirectionallight ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u);
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
