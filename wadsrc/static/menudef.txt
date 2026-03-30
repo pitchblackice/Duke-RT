@@ -1844,7 +1844,7 @@ OptionValue NRIPTDebug
 	38, "Vendor Output Final"
 	39, "RR Input"
 	40, "RR Diffuse Albedo"
-	41, "RR Specular Albedo"
+	41, "RR Specular"
 	42, "RR Normal Roughness"
 	43, "RR Specular Hit Distance"
 	44, "Post-Sharpen Output"
