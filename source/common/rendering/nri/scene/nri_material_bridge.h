@@ -76,6 +76,7 @@ struct TextureUpload
 	uint32_t width = 0;
 	uint32_t height = 0;
 	bool indexed = false;
+	FTexture* sourceTexture = nullptr;
 	std::vector<uint8_t> pixels;
 };
 
@@ -90,4 +91,5 @@ struct MaterialBridgeData
 };
 
 void BuildMaterials(const SceneView& sceneView, MaterialBridgeData& outMaterials);
+bool RealizeTextureUploadPayload(const TextureUpload& upload, std::vector<uint8_t>& outPixels, uint32_t& outWidth, uint32_t& outHeight);
 }

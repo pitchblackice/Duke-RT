@@ -5917,7 +5917,7 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	for (uint32_t i = 0; i < std::min<uint32_t>((uint32_t)materials.textures.size(), NRI_MAX_SCENE_TEXTURES); ++i)
 	{
 		const auto& upload = materials.textures[i];
-		if (upload.width == 0 || upload.height == 0 || upload.pixels.empty())
+		if (upload.width == 0 || upload.height == 0)
 		{
 			continue;
 		}
@@ -5925,12 +5925,35 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		auto it = std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; });
 		if (it == mTextureCache.end())
 		{
+			std::vector<uint8_t> realizedPixels;
+			uint32_t realizedWidth = upload.width;
+			uint32_t realizedHeight = upload.height;
+			const uint8_t* pixelData = upload.pixels.data();
+			if (upload.pixels.empty())
+			{
+				if (!nri_scene::RealizeTextureUploadPayload(upload, realizedPixels, realizedWidth, realizedHeight))
+				{
+					continue;
+				}
+				pixelData = realizedPixels.data();
+			}
+			else
+			{
+				realizedWidth = upload.width;
+				realizedHeight = upload.height;
+			}
+
+			if (pixelData == nullptr || realizedWidth == 0 || realizedHeight == 0)
+			{
+				continue;
+			}
+
 			CachedTexture cacheEntry = {};
 			cacheEntry.key = upload.key;
 			const nri::Format format = upload.indexed ? nri::Format::R8_UNORM : nri::Format::BGRA8_UNORM;
-			const uint32_t rowPitch = upload.indexed ? upload.width : upload.width * 4u;
-			if (!mFrameBuffer->CreateOwnedTexture(cacheEntry.resource, upload.width, upload.height, format, nri::TextureUsageBits::SHADER_RESOURCE) ||
-				!mFrameBuffer->UploadTextureData(cacheEntry.resource, upload.pixels.data(), upload.width, upload.height, rowPitch))
+			const uint32_t rowPitch = upload.indexed ? realizedWidth : realizedWidth * 4u;
+			if (!mFrameBuffer->CreateOwnedTexture(cacheEntry.resource, realizedWidth, realizedHeight, format, nri::TextureUsageBits::SHADER_RESOURCE) ||
+				!mFrameBuffer->UploadTextureData(cacheEntry.resource, pixelData, realizedWidth, realizedHeight, rowPitch))
 			{
 				return false;
 			}

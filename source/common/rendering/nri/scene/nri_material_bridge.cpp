@@ -184,6 +184,7 @@ namespace
 	{
 		TextureUpload upload = {};
 		upload.indexed = indexed;
+		upload.sourceTexture = texture;
 		upload.key = gameTexture != nullptr ? MakeTextureKey(gameTexture, indexed) : MakeTextureKey(texture, indexed);
 
 		if (texture == nullptr)
@@ -196,6 +197,7 @@ namespace
 		uint32_t sharedHeight = 0;
 		const bool hasSharedKey = TryBuildSharedTextureContentKey(gameTexture, texture, indexed, sharedKey, sharedWidth, sharedHeight);
 
+		const bool deferRealization = hasSharedKey && !indexed;
 		if (indexed)
 		{
 			FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_Indexed);
@@ -209,13 +211,22 @@ namespace
 		}
 		else
 		{
-			FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_ProcessData);
-			if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
+			if (deferRealization)
 			{
-				upload.width = (uint32_t)texBuffer.mWidth;
-				upload.height = (uint32_t)texBuffer.mHeight;
-				upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
-				upload.key = hasSharedKey ? sharedKey : Fnv1a64(upload.pixels.data(), upload.pixels.size());
+				upload.width = sharedWidth;
+				upload.height = sharedHeight;
+				upload.key = sharedKey;
+			}
+			else
+			{
+				FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_ProcessData);
+				if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
+				{
+					upload.width = (uint32_t)texBuffer.mWidth;
+					upload.height = (uint32_t)texBuffer.mHeight;
+					upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
+					upload.key = hasSharedKey ? sharedKey : Fnv1a64(upload.pixels.data(), upload.pixels.size());
+				}
 			}
 		}
 
@@ -449,6 +460,43 @@ namespace
 
 namespace nri_scene
 {
+bool RealizeTextureUploadPayload(const TextureUpload& upload, std::vector<uint8_t>& outPixels, uint32_t& outWidth, uint32_t& outHeight)
+{
+	outPixels.clear();
+	outWidth = 0;
+	outHeight = 0;
+
+	if (upload.sourceTexture == nullptr)
+	{
+		return false;
+	}
+
+	if (upload.indexed)
+	{
+		FTextureBuffer texBuffer = upload.sourceTexture->CreateTexBuffer(0, CTF_Indexed);
+		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+		{
+			return false;
+		}
+
+		outWidth = (uint32_t)texBuffer.mWidth;
+		outHeight = (uint32_t)texBuffer.mHeight;
+		outPixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight);
+		return !outPixels.empty();
+	}
+
+	FTextureBuffer texBuffer = upload.sourceTexture->CreateTexBuffer(0, CTF_ProcessData);
+	if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+	{
+		return false;
+	}
+
+	outWidth = (uint32_t)texBuffer.mWidth;
+	outHeight = (uint32_t)texBuffer.mHeight;
+	outPixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
+	return !outPixels.empty();
+}
+
 void BuildMaterials(const SceneView& sceneView, MaterialBridgeData& outMaterials)
 {
 	outMaterials = {};
