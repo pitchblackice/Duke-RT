@@ -7992,7 +7992,10 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 
 	const nri::Descriptor* defaultInput = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
-	UpdateFrameTextureSet();
+	if (!UpdateFrameTextureSet(mUpscalerPrepassFrameTextureSet, mFrameInputDescriptors))
+	{
+		return false;
+	}
 
 	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::Validation).storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
@@ -8007,7 +8010,10 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mOutputDescriptors[12] = GetFrameTexture(FrameTextureSlot::UnfilteredPenumbra).storageView;
 	mOutputDescriptors[13] = GetFrameTexture(FrameTextureSlot::DirectLighting).storageView;
 	mOutputDescriptors[14] = GetFrameTexture(FrameTextureSlot::DirectEmission).storageView;
-	UpdateOutputSet();
+	if (!UpdateOutputSet(mUpscalerPrepassOutputSet, mOutputDescriptors))
+	{
+		return false;
+	}
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
