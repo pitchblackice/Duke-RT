@@ -167,6 +167,8 @@ private:
 	{
 		bool valid = false;
 		bool usesStaticMapScene = false;
+		bool staticTlasExcludesReplacedChunks = false;
+		bool staticProbeExcludesReplacedChunks = false;
 		uint32_t staticPrimitiveCount = 0;
 		uint32_t runtimeSpaceLinkPrimitiveCount = 0;
 		uint32_t runtimeMutationPrimitiveCount = 0;

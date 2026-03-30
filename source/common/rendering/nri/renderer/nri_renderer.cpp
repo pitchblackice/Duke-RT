@@ -2498,6 +2498,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	mSurfaceProbeFrame = {};
 	mSurfaceProbeFrame.valid = true;
 	mSurfaceProbeFrame.usesStaticMapScene = mUsedStaticMapSceneLastFrame;
+	mSurfaceProbeFrame.staticTlasExcludesReplacedChunks = !runtimeMutationGeometry.primitives.empty();
+	mSurfaceProbeFrame.staticProbeExcludesReplacedChunks = false;
 	mSurfaceProbeFrame.staticPrimitiveCount = mUsedStaticMapSceneLastFrame ? (uint32_t)mStaticMapScene.geometry.primitives.size() : 0u;
 	mSurfaceProbeFrame.runtimeSpaceLinkPrimitiveCount = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
 	mSurfaceProbeFrame.runtimeMutationPrimitiveCount = (uint32_t)runtimeMutationGeometry.primitives.size();
@@ -4162,6 +4164,8 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	const int32_t localSpaceIndex = result.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)result.provenance.mapChunkIndex) : -1;
 	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, result.provenance);
 	bool chunkResidentStatic = false;
+	bool chunkStaticTlasInstanced = false;
+	bool chunkStaticProbeIncluded = false;
 	bool chunkReplaced = false;
 	bool chunkSectorDirty = false;
 	bool chunkDragged = false;
@@ -4178,6 +4182,14 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 			if (chunkCache.chunkIndex == chunkIndex)
 			{
 				chunkResidentStatic = true;
+				chunkStaticTlasInstanced =
+					!mSurfaceProbeFrame.staticTlasExcludesReplacedChunks ||
+					chunkIndex >= mRuntimeMapMutations.replacedChunkMask.size() ||
+					mRuntimeMapMutations.replacedChunkMask[chunkIndex] == 0;
+				chunkStaticProbeIncluded =
+					!mSurfaceProbeFrame.staticProbeExcludesReplacedChunks ||
+					chunkIndex >= mRuntimeMapMutations.replacedChunkMask.size() ||
+					mRuntimeMapMutations.replacedChunkMask[chunkIndex] == 0;
 				break;
 			}
 		}
@@ -4195,13 +4207,15 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		}
 	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(result.sceneOwner),
 		GetSceneDataSourceName(result.sceneDataSource),
 		result.provenance.mapChunkIndex,
 		YesNo(chunkResidentStatic),
+		YesNo(chunkStaticTlasInstanced),
+		YesNo(chunkStaticProbeIncluded),
 		YesNo(chunkReplaced),
 		chunkReasons.c_str(),
 		chunkSectionDirtyCount,
@@ -4265,6 +4279,8 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 	const int32_t localSpaceIndex = mLastSurfaceProbe.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex) : -1;
 	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, mLastSurfaceProbe.provenance);
 	bool chunkResidentStatic = false;
+	bool chunkStaticTlasInstanced = false;
+	bool chunkStaticProbeIncluded = false;
 	bool chunkReplaced = false;
 	bool chunkSectorDirty = false;
 	bool chunkDragged = false;
@@ -4281,6 +4297,14 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 			if (chunkCache.chunkIndex == chunkIndex)
 			{
 				chunkResidentStatic = true;
+				chunkStaticTlasInstanced =
+					!mSurfaceProbeFrame.staticTlasExcludesReplacedChunks ||
+					chunkIndex >= mRuntimeMapMutations.replacedChunkMask.size() ||
+					mRuntimeMapMutations.replacedChunkMask[chunkIndex] == 0;
+				chunkStaticProbeIncluded =
+					!mSurfaceProbeFrame.staticProbeExcludesReplacedChunks ||
+					chunkIndex >= mRuntimeMapMutations.replacedChunkMask.size() ||
+					mRuntimeMapMutations.replacedChunkMask[chunkIndex] == 0;
 				break;
 			}
 		}
@@ -4298,13 +4322,15 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		}
 	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
-	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner),
 		GetSceneDataSourceName(mLastSurfaceProbe.sceneDataSource),
 		mLastSurfaceProbe.provenance.mapChunkIndex,
 		YesNo(chunkResidentStatic),
+		YesNo(chunkStaticTlasInstanced),
+		YesNo(chunkStaticProbeIncluded),
 		YesNo(chunkReplaced),
 		chunkReasons.c_str(),
 		chunkSectionDirtyCount,
@@ -4388,6 +4414,16 @@ void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
 		mStaticMapScene.chunks.end(),
 		[chunkIndex](const StaticMapSceneCache::ChunkCache& cache) { return cache.chunkIndex == (uint32_t)chunkIndex; });
 	const bool residentStatic = staticChunkIt != mStaticMapScene.chunks.end();
+	const bool staticTlasInstanced =
+		residentStatic &&
+		(!mSurfaceProbeFrame.staticTlasExcludesReplacedChunks ||
+		 (unsigned)chunkIndex >= mRuntimeMapMutations.replacedChunkMask.size() ||
+		 mRuntimeMapMutations.replacedChunkMask[(unsigned)chunkIndex] == 0);
+	const bool staticProbeIncluded =
+		residentStatic &&
+		(!mSurfaceProbeFrame.staticProbeExcludesReplacedChunks ||
+		 (unsigned)chunkIndex >= mRuntimeMapMutations.replacedChunkMask.size() ||
+		 mRuntimeMapMutations.replacedChunkMask[(unsigned)chunkIndex] == 0);
 	const auto* replacement =
 		(unsigned)chunkIndex < mRuntimeMapMutations.chunks.size() ?
 		&mRuntimeMapMutations.chunks[(unsigned)chunkIndex] :
@@ -4425,7 +4461,7 @@ void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
 		}
 	}
 
-	Printf("NRI PT chunk dump: chunk=%d sector=%d local_space=%u surfaces=%u tris=%u portal_surfaces=%u sky_surfaces=%u source_portals=%u resident_static=%s runtime_replaced=%s replacement_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u\n",
+	Printf("NRI PT chunk dump: chunk=%d sector=%d local_space=%u surfaces=%u tris=%u portal_surfaces=%u sky_surfaces=%u source_portals=%u resident_static=%s static_tlas_instanced=%s static_probe_included=%s runtime_replaced=%s replacement_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u\n",
 		chunkIndex,
 		chunk.sectorIndex,
 		chunk.localSpaceIndex,
@@ -4435,6 +4471,8 @@ void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
 		skySurfaceCount,
 		sourcePortalCount,
 		YesNo(residentStatic),
+		YesNo(staticTlasInstanced),
+		YesNo(staticProbeIncluded),
 		YesNo(replacement != nullptr && replacement->active),
 		replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask).c_str() : "none",
 		replacement != nullptr ? replacement->sectionDirtyCount : 0u,
