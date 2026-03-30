@@ -148,7 +148,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 	else
-	if (gTraceConstants.DebugMode == 34u || gTraceConstants.DebugMode == 35u || gTraceConstants.DebugMode == 37u)
+	if (gTraceConstants.DebugMode == 34u || gTraceConstants.DebugMode == 35u || gTraceConstants.DebugMode == 37u || gTraceConstants.DebugMode == 39u)
 	{
 		color = VisualizeHdrProbe(gInputTexture.Load(int3(samplePos, 0)).rgb);
 	}

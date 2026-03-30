@@ -1218,7 +1218,7 @@ OptionMenu "NRIOptions" protected
 	StaticText "----------------"
 	StaticText "Debug / Inspection"
 	Option "PT Debug View",						"nri_ptdebug",					"NRIPTDebug"
-	Slider "PT Debug Index",					"nri_ptdebug",					0, 38, 1, 0
+	Slider "PT Debug Index",					"nri_ptdebug",					0, 39, 1, 0
 	StaticText ""
 
 	StaticText "Commands"
