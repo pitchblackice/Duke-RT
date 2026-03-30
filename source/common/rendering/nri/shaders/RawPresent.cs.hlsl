@@ -192,7 +192,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			// RR specular albedo is often much darker than the diffuse guide on dielectric-heavy scenes.
 			// Use a stronger log exposure here so a healthy-but-small guide does not read as fully black.
-			color = saturate(log2(1.0 + guide * 256.0) / 8.0);
+			float3 guideVis = saturate(log2(1.0 + guide * 256.0) / 8.0);
+
+			// If the actual RR specular albedo guide is still effectively black, fall back to a base-color/metalness
+			// F0 proxy so the probe can still reveal where specular-capable materials exist.
+			const float4 baseColorMetalness = gUnused1.Load(int3(samplePos, 0));
+			const float viewZ = abs(gUnused2.Load(int3(samplePos, 0)).x);
+			const bool isSky = viewZ >= NRD_INF * 0.5;
+			const float metalness = saturate(baseColorMetalness.w);
+			const float3 specularF0 = lerp(float3(0.04, 0.04, 0.04), saturate(baseColorMetalness.rgb), metalness);
+			const float3 proxyVis = isSky ? 0.0 : saturate(log2(1.0 + specularF0 * 256.0) / 8.0) * float3(0.5, 0.8, 1.0);
+
+			color = max(guideVis, proxyVis);
 		}
 	}
 	else

@@ -7889,18 +7889,24 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			}
 
 			FrameTextureSlot probeSlot = FrameTextureSlot::UpscalerDepth;
+			FrameTextureSlot probeSecondarySlot = FrameTextureSlot::Count;
+			FrameTextureSlot probeTertiarySlot = FrameTextureSlot::Count;
 			switch ((uint32_t)ptDebugMode)
 			{
 			case NRI_PTDEBUG_UPSCALER_SR_INPUT: probeSlot = FrameTextureSlot::SrInput; break;
 			case NRI_PTDEBUG_UPSCALER_SR_DEPTH: probeSlot = FrameTextureSlot::UpscalerDepth; break;
 			case NRI_PTDEBUG_UPSCALER_RR_INPUT: probeSlot = FrameTextureSlot::RrInput; break;
 			case NRI_PTDEBUG_UPSCALER_RR_DIFFUSE_ALBEDO: probeSlot = FrameTextureSlot::RrGuideDiffuseAlbedo; break;
-			case NRI_PTDEBUG_UPSCALER_RR_SPECULAR_ALBEDO: probeSlot = FrameTextureSlot::RrGuideSpecularAlbedo; break;
+			case NRI_PTDEBUG_UPSCALER_RR_SPECULAR_ALBEDO:
+				probeSlot = FrameTextureSlot::RrGuideSpecularAlbedo;
+				probeSecondarySlot = FrameTextureSlot::BaseColorMetalness;
+				probeTertiarySlot = FrameTextureSlot::ViewZ;
+				break;
 			case NRI_PTDEBUG_UPSCALER_RR_NORMAL_ROUGHNESS: probeSlot = FrameTextureSlot::RrGuideNormalRoughness; break;
 			case NRI_PTDEBUG_UPSCALER_RR_SPECULAR_HIT_DISTANCE: probeSlot = FrameTextureSlot::RrGuideSpecularHitDistance; break;
 			default: break;
 			}
-			if (!DispatchRawPresent(probeSlot))
+			if (!DispatchRawPresent(probeSlot, probeSecondarySlot, probeTertiarySlot))
 			{
 				return false;
 			}
