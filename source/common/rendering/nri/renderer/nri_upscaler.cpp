@@ -82,7 +82,10 @@ bool NRIUpscalerContext::EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMai
 	UpscalerSlotState& slot =
 		kind == NRIMainUpscalerKind::DLSR ? mDlsr :
 		mDlrr;
-	const nri::UpscalerBits flags = (nri::UpscalerBits)((uint32_t)nri::UpscalerBits::HDR | (uint32_t)nri::UpscalerBits::DEPTH_LINEAR);
+	const nri::UpscalerBits flags =
+		kind == NRIMainUpscalerKind::DLSR
+		? nri::UpscalerBits::HDR
+		: (nri::UpscalerBits)((uint32_t)nri::UpscalerBits::HDR | (uint32_t)nri::UpscalerBits::DEPTH_LINEAR);
 	return EnsureUpscaler(frameBuffer, slot, type, mode, upscaleWidth, upscaleHeight, flags);
 }
 

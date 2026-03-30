@@ -8234,6 +8234,11 @@ bool NRIRenderer::DispatchUpscaleChain()
 	{
 		CopyTexture(composed, historyOutput);
 	}
+	else if (mainKind == NRIMainUpscalerKind::DLSR)
+	{
+		// Keep ptdebug 13 meaningful even when app-TAA is intentionally bypassed for vendor SR.
+		CopyTexture(composed, historyOutput);
+	}
 
 	FrameTextureSlot resolvedInputSlot = mHistoryOutputSlot;
 
