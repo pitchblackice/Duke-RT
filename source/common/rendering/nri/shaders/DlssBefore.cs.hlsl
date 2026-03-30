@@ -107,6 +107,19 @@ float3 ReconstructWorldPosition(uint2 pixelPos, float viewZ)
 	return gTraceConstants.CameraPos + relative;
 }
 
+float3 ReconstructViewPosition(uint2 pixelPos, float viewZ)
+{
+	const float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
+	float2 uv = ((float2)pixelPos + 0.5) / resolution;
+	float2 ndc = uv * 2.0 - 1.0;
+	ndc.y = -ndc.y;
+
+	return float3(
+		ndc.x * gTraceConstants.TanHalfFovX * viewZ,
+		ndc.y * gTraceConstants.TanHalfFovY * viewZ,
+		viewZ);
+}
+
 float ConvertViewZToClipDepth(uint2 pixelPos, float viewZ)
 {
 	if (abs(viewZ) >= NRD_INF * 0.5)
@@ -115,9 +128,8 @@ float ConvertViewZToClipDepth(uint2 pixelPos, float viewZ)
 	}
 
 	const ReprojectionData reprojection = gReprojectionDataBuffer[0];
-	const float3 worldPos = ReconstructWorldPosition(pixelPos, viewZ);
-	const float4 world = float4(worldPos, 1.0);
-	const float4 view = MultiplyVsMatrixPoint(world, reprojection.currentWorldToViewMatrix);
+	const float3 viewPos = ReconstructViewPosition(pixelPos, viewZ);
+	const float4 view = float4(viewPos, 1.0);
 	const float4 clip = MultiplyVsMatrixPoint(view, reprojection.currentViewToClipMatrix);
 	return clip.w > 1e-5 ? clip.z / clip.w : 1.0;
 }
