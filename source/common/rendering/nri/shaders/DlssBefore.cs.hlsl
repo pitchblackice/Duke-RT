@@ -117,7 +117,7 @@ float3 ReconstructViewPosition(uint2 pixelPos, float viewZ)
 	return float3(
 		ndc.x * gTraceConstants.TanHalfFovX * viewZ,
 		ndc.y * gTraceConstants.TanHalfFovY * viewZ,
-		viewZ);
+		-viewZ);
 }
 
 float ConvertViewZToClipDepth(uint2 pixelPos, float viewZ)

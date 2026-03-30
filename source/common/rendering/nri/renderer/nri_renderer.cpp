@@ -107,6 +107,7 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_SR_INPUT = 35;
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_SR_DEPTH = 36;
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_VENDOR_OUTPUT = 37;
+	constexpr uint32_t NRI_PTDEBUG_UPSCALER_VENDOR_FINAL_PRESENT = 38;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -366,7 +367,7 @@ namespace
 
 	static uint32_t GetEffectivePtDebugMode()
 	{
-		return (nri_ptdebug >= 0 && nri_ptdebug <= (int)NRI_PTDEBUG_UPSCALER_VENDOR_OUTPUT) ? (uint32_t)nri_ptdebug : 0u;
+		return (nri_ptdebug >= 0 && nri_ptdebug <= (int)NRI_PTDEBUG_UPSCALER_VENDOR_FINAL_PRESENT) ? (uint32_t)nri_ptdebug : 0u;
 	}
 
 	static NRINrdDenoiserMode GetSelectedNrdDenoiserMode()
@@ -7543,8 +7544,9 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const bool useUpscalerPrepassProbe = !nri_ptbootstrap &&
 		(ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_INPUT || ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_DEPTH);
 	const bool useUpscalerVendorProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_VENDOR_OUTPUT;
+	const bool useUpscalerVendorFinalProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_VENDOR_FINAL_PRESENT;
 	const bool useCompositionPath = useResolvedPresent || useComposedDebugPresent || usePostCompositionDebugPresent ||
-		useUpscalerTraceTransparentProbe || useUpscalerPrepassProbe || useUpscalerVendorProbe;
+		useUpscalerTraceTransparentProbe || useUpscalerPrepassProbe || useUpscalerVendorProbe || useUpscalerVendorFinalProbe;
 	const bool useValidationPresent = !nri_ptbootstrap && ptDebugMode == 9;
 	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (ptDebugMode == 16 || ptDebugMode == 17);
 	const bool useShadowDebugPresent = !nri_ptbootstrap && (ptDebugMode >= 21 && ptDebugMode <= 23);
@@ -7748,11 +7750,11 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return true;
 	}
 
-	if (useUpscalerTraceTransparentProbe || useUpscalerPrepassProbe || useUpscalerVendorProbe)
+	if (useUpscalerTraceTransparentProbe || useUpscalerPrepassProbe || useUpscalerVendorProbe || useUpscalerVendorFinalProbe)
 	{
 		if (!sLoggedUpscalerProbePath)
 		{
-			Printf("NRI Phase G instrumentation: ptdebug 34..37 now expose TraceTransparentOutput, main upscaler input, UpscalerDepth, and VendorOutput probe views for DLSS/RR investigation.\n");
+			Printf("NRI Phase G instrumentation: ptdebug 34..38 now expose TraceTransparentOutput, main upscaler input, UpscalerDepth, raw VendorOutput, and FinalPresent(VendorOutput) probe views for DLSS/RR investigation.\n");
 			sLoggedUpscalerProbePath = true;
 		}
 
@@ -7808,6 +7810,17 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		if (!DispatchUpscaleChain())
 		{
 			return false;
+		}
+
+		if (useUpscalerVendorFinalProbe)
+		{
+			if (!DispatchFinalPresent(FrameTextureSlot::VendorOutput))
+			{
+				return false;
+			}
+
+			CopyFinalToActiveTarget();
+			return true;
 		}
 
 		if (!DispatchRawPresent(FrameTextureSlot::VendorOutput))
