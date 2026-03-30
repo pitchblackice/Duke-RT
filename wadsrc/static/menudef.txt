@@ -1218,7 +1218,7 @@ OptionMenu "NRIOptions" protected
 	StaticText "----------------"
 	StaticText "Debug / Inspection"
 	Option "PT Debug View",						"nri_ptdebug",					"NRIPTDebug"
-	Slider "PT Debug Index",					"nri_ptdebug",					0, 39, 1, 0
+	Slider "PT Debug Index",					"nri_ptdebug",					0, 44, 1, 0
 	StaticText ""
 
 	StaticText "Commands"
@@ -1838,11 +1838,16 @@ OptionValue NRIPTDebug
 	32, "Emissive Primitive"
 	33, "Emissive Visibility"
 	34, "TraceTransparent Output"
-	35, "Main Upscaler Input"
-	36, "Upscaler Depth"
+	35, "SR Input"
+	36, "SR Depth"
 	37, "Vendor Output"
 	38, "Vendor Output Final"
-	39, "Main Upscaler Input (Copy)"
+	39, "RR Input"
+	40, "RR Diffuse Albedo"
+	41, "RR Specular Albedo"
+	42, "RR Normal Roughness"
+	43, "RR Specular Hit Distance"
+	44, "Post-Sharpen Output"
 }
 
 OptionValue NRIPTBootstrapMode

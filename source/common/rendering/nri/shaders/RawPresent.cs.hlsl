@@ -61,6 +61,11 @@ bool AnyNonFinite(float3 value)
 	return any(isnan(value)) || any(isinf(value));
 }
 
+bool NonFinite1(float value)
+{
+	return isnan(value) || isinf(value);
+}
+
 float3 VisualizeHdrProbe(float3 value)
 {
 	if (AnyNonFinite(value))
@@ -148,7 +153,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 	else
-	if (gTraceConstants.DebugMode == 34u || gTraceConstants.DebugMode == 35u || gTraceConstants.DebugMode == 37u || gTraceConstants.DebugMode == 39u)
+	if (gTraceConstants.DebugMode == 34u || gTraceConstants.DebugMode == 35u || gTraceConstants.DebugMode == 37u || gTraceConstants.DebugMode == 38u || gTraceConstants.DebugMode == 39u || gTraceConstants.DebugMode == 44u)
 	{
 		color = VisualizeHdrProbe(gInputTexture.Load(int3(samplePos, 0)).rgb);
 	}
@@ -167,6 +172,33 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else
 		{
 			color = saturate(depth).xxx;
+		}
+	}
+	else
+	if (gTraceConstants.DebugMode == 40u || gTraceConstants.DebugMode == 41u)
+	{
+		color = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
+	}
+	else
+	if (gTraceConstants.DebugMode == 42u)
+	{
+		const float4 packed = gInputTexture.Load(int3(samplePos, 0));
+		const float3 normalVis = saturate(packed.xyz * 0.5 + 0.5);
+		const float roughness = saturate(packed.w);
+		color = lerp(normalVis, roughness.xxx, 0.35);
+	}
+	else
+	if (gTraceConstants.DebugMode == 43u)
+	{
+		const float hitDistance = gInputTexture.Load(int3(samplePos, 0)).x;
+		if (NonFinite1(hitDistance))
+		{
+			color = float3(1.0, 0.0, 1.0);
+		}
+		else
+		{
+			const float mapped = saturate(log2(1.0 + max(hitDistance, 0.0)) / 12.0);
+			color = mapped.xxx;
 		}
 	}
 	else

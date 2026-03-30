@@ -108,7 +108,12 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_SR_DEPTH = 36;
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_VENDOR_OUTPUT = 37;
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_VENDOR_FINAL_PRESENT = 38;
-	constexpr uint32_t NRI_PTDEBUG_UPSCALER_SR_INPUT_COPY_ONLY = 39;
+	constexpr uint32_t NRI_PTDEBUG_UPSCALER_RR_INPUT = 39;
+	constexpr uint32_t NRI_PTDEBUG_UPSCALER_RR_DIFFUSE_ALBEDO = 40;
+	constexpr uint32_t NRI_PTDEBUG_UPSCALER_RR_SPECULAR_ALBEDO = 41;
+	constexpr uint32_t NRI_PTDEBUG_UPSCALER_RR_NORMAL_ROUGHNESS = 42;
+	constexpr uint32_t NRI_PTDEBUG_UPSCALER_RR_SPECULAR_HIT_DISTANCE = 43;
+	constexpr uint32_t NRI_PTDEBUG_UPSCALER_POST_SHARPEN_OUTPUT = 44;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
@@ -368,7 +373,7 @@ namespace
 
 	static uint32_t GetEffectivePtDebugMode()
 	{
-		return (nri_ptdebug >= 0 && nri_ptdebug <= (int)NRI_PTDEBUG_UPSCALER_SR_INPUT_COPY_ONLY) ? (uint32_t)nri_ptdebug : 0u;
+		return (nri_ptdebug >= 0 && nri_ptdebug <= (int)NRI_PTDEBUG_UPSCALER_POST_SHARPEN_OUTPUT) ? (uint32_t)nri_ptdebug : 0u;
 	}
 
 	static NRINrdDenoiserMode GetSelectedNrdDenoiserMode()
@@ -1041,6 +1046,16 @@ namespace
 		case nri::UpscalerMode::PERFORMANCE: return "performance";
 		case nri::UpscalerMode::ULTRA_PERFORMANCE: return "ultra_performance";
 		default: return "native";
+		}
+	}
+
+	static const char* GetUpscalerFamilyName(NRIMainUpscalerKind kind, bool runAppTaa)
+	{
+		switch (kind)
+		{
+		case NRIMainUpscalerKind::DLSR: return "vendor-sr";
+		case NRIMainUpscalerKind::DLRR: return "vendor-rr";
+		default: return runAppTaa ? "native-taa" : "native";
 		}
 	}
 
@@ -2585,6 +2600,7 @@ void NRIRenderer::RequestHistoryReset(const char* reason, bool clearPreviousCame
 {
 	ArmTemporalTraceBudget(reason);
 	mResetHistory = true;
+	mLastHistoryResetReason = (reason != nullptr && *reason != '\0') ? reason : "unspecified";
 	if (clearPreviousCameraState)
 	{
 		mHasPreviousCameraState = false;
@@ -3020,6 +3036,7 @@ void NRIRenderer::PrintStatus() const
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
 	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
 	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMain, requestedUpscalerMode);
+	const bool runAppTaa = ShouldRunAppTaa(resolvedMain);
 	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
 	const float resolvedRenderScale = ResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
 	const bool expectsUpscalerJitter = resolvedMain == NRIMainUpscalerKind::DLSR || resolvedMain == NRIMainUpscalerKind::DLRR;
@@ -3038,6 +3055,11 @@ void NRIRenderer::PrintStatus() const
 	const float nrdMaxBlur = std::max(nrdMinBlur, ClampNrdBlurRadius((float)nri_nrdblurmax));
 	const uint32_t sigmaStabilizationFrames = ClampSigmaStabilizationFrameCount((int)nri_nrdsigmastabilization);
 	const float sigmaPlaneDistance = ClampSigmaPlaneDistanceSensitivity((float)nri_nrdsigmaplanedistance);
+	const NRITextureResource& srInput = GetFrameTexture(FrameTextureSlot::SrInput);
+	const NRITextureResource& rrInput = GetFrameTexture(FrameTextureSlot::RrInput);
+	const NRITextureResource& upscalerDepth = GetFrameTexture(FrameTextureSlot::UpscalerDepth);
+	const NRITextureResource& vendorOutput = GetFrameTexture(FrameTextureSlot::VendorOutput);
+	const NRITextureResource& postSharpenOutput = GetFrameTexture(FrameTextureSlot::PostSharpenOutput);
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -3076,6 +3098,21 @@ void NRIRenderer::PrintStatus() const
 		mOutputHeight,
 		expectsUpscalerJitter ? "upscaler" : (ShouldRunAppTaa(resolvedMain) ? "taa" : "off"),
 		expectedJitterPhases);
+	Printf("NRI PT output shell: family=%s sr_input=%ux%u rr_input=%ux%u guides=%ux%u vendor=%ux%u post_output=%ux%u post=%s active=%s last_reset_reason=%s\n",
+		GetUpscalerFamilyName(resolvedMain, runAppTaa),
+		srInput.width,
+		srInput.height,
+		rrInput.width,
+		rrInput.height,
+		upscalerDepth.width,
+		upscalerDepth.height,
+		vendorOutput.width,
+		vendorOutput.height,
+		postSharpenOutput.width,
+		postSharpenOutput.height,
+		GetPostSharpenName(resolvedPost),
+		resolvedPost == NRIPostSharpenKind::Off ? "pre-post" : "post-sharpen-output",
+		mLastHistoryResetReason.c_str());
 	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u portal_depth=%u surface_probe=%d\n",
 		nri_ptdirectscene ? "on" : "off",
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
@@ -3107,7 +3144,7 @@ void NRIRenderer::PrintStatus() const
 		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
-		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=live_raw_penumbra 22=live_raw_shadow 23=temporal_sigma_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient 30=emissive_uv 31=emissive_radiance 32=emissive_primitive 33=emissive_visibility");
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=live_raw_penumbra 22=live_raw_shadow 23=temporal_sigma_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient 30=emissive_uv 31=emissive_radiance 32=emissive_primitive 33=emissive_visibility 34=trace_transparent 35=sr_input 36=sr_depth 37=vendor_output 38=vendor_output_final 39=rr_input 40=rr_diffuse_albedo 41=rr_specular_albedo 42=rr_normal_roughness 43=rr_specular_hit_distance 44=post_sharpen_output");
 	const char* shadowSplitMode =
 		!mUseSplitShadowDenoiser ? "off" :
 		(GetEffectivePtDebugMode() >= 21 && GetEffectivePtDebugMode() <= 23) ? "sigma-debug" :
@@ -3325,7 +3362,7 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
 	const NRITextureResource& primary = GetFrameTexture(primarySlot);
 	const NRITextureResource& secondary = secondarySlot == FrameTextureSlot::Count ? GetFrameTexture(mHistoryOutputSlot) : GetFrameTexture(secondarySlot);
-	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
+	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s reset=%s reset_reason=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
 		stage != nullptr ? stage : "unknown",
 		mFrameIndex,
 		(int)nri_ptdebug,
@@ -3333,6 +3370,7 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 		GetPostSharpenName(resolvedPostSharpen),
 		runAppTaa ? "yes" : "no",
 		mResetHistory ? "yes" : "no",
+		mLastHistoryResetReason.c_str(),
 		mHasPreviousCameraState ? "yes" : "no",
 		GetFrameTextureSlotName(mHistoryInputSlot),
 		historyInput.width,
@@ -7553,13 +7591,22 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const bool useComposedDebugPresent = !nri_ptbootstrap && ptDebugMode == 15;
 	const bool usePostCompositionDebugPresent = !nri_ptbootstrap && (ptDebugMode == 13 || ptDebugMode == 14);
 	const bool useUpscalerTraceTransparentProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_TRACE_TRANSPARENT;
-	const bool useUpscalerPrepassProbe = !nri_ptbootstrap &&
-		(ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_INPUT || ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_DEPTH);
+	const bool useUpscalerSrInputProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_INPUT;
+	const bool useUpscalerSrDepthProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_DEPTH;
 	const bool useUpscalerVendorProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_VENDOR_OUTPUT;
 	const bool useUpscalerVendorFinalProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_VENDOR_FINAL_PRESENT;
-	const bool useUpscalerCopyOnlyProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_INPUT_COPY_ONLY;
+	const bool useUpscalerRrInputProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_INPUT;
+	const bool useUpscalerRrDiffuseAlbedoProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_DIFFUSE_ALBEDO;
+	const bool useUpscalerRrSpecularAlbedoProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_SPECULAR_ALBEDO;
+	const bool useUpscalerRrNormalRoughnessProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_NORMAL_ROUGHNESS;
+	const bool useUpscalerRrSpecularHitDistanceProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_SPECULAR_HIT_DISTANCE;
+	const bool useUpscalerPostSharpenProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_POST_SHARPEN_OUTPUT;
+	const bool useUpscalerPrepassProbe = useUpscalerSrInputProbe || useUpscalerSrDepthProbe || useUpscalerRrInputProbe ||
+		useUpscalerRrDiffuseAlbedoProbe || useUpscalerRrSpecularAlbedoProbe || useUpscalerRrNormalRoughnessProbe ||
+		useUpscalerRrSpecularHitDistanceProbe;
 	const bool useCompositionPath = useResolvedPresent || useComposedDebugPresent || usePostCompositionDebugPresent ||
-		useUpscalerTraceTransparentProbe || useUpscalerPrepassProbe || useUpscalerVendorProbe || useUpscalerVendorFinalProbe;
+		useUpscalerTraceTransparentProbe || useUpscalerPrepassProbe || useUpscalerVendorProbe || useUpscalerVendorFinalProbe ||
+		useUpscalerPostSharpenProbe;
 	const bool useValidationPresent = !nri_ptbootstrap && ptDebugMode == 9;
 	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (ptDebugMode == 16 || ptDebugMode == 17);
 	const bool useShadowDebugPresent = !nri_ptbootstrap && (ptDebugMode >= 21 && ptDebugMode <= 23);
@@ -7645,7 +7692,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		const NRIMainUpscalerKind resolvedMainKind = ResolveMainUpscalerKind(false);
 		const bool buildRrInput = resolvedMainKind == NRIMainUpscalerKind::DLRR;
 		const bool needStandardComposition =
-			!buildRrInput || useComposedDebugPresent || useUpscalerTraceTransparentProbe || useUpscalerCopyOnlyProbe;
+			!buildRrInput || useComposedDebugPresent || useUpscalerTraceTransparentProbe;
 
 		mUseDenoisedCompositionInputs = false;
 
@@ -7791,11 +7838,11 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		return true;
 	}
 
-	if (useUpscalerTraceTransparentProbe || useUpscalerPrepassProbe || useUpscalerVendorProbe || useUpscalerVendorFinalProbe || useUpscalerCopyOnlyProbe)
+	if (useUpscalerTraceTransparentProbe || useUpscalerPrepassProbe || useUpscalerVendorProbe || useUpscalerVendorFinalProbe || useUpscalerPostSharpenProbe)
 	{
 		if (!sLoggedUpscalerProbePath)
 		{
-			Printf("NRI Phase G instrumentation: ptdebug 34..39 now expose TraceTransparentOutput, main upscaler input, UpscalerDepth, raw VendorOutput, FinalPresent(VendorOutput), and a copy-only SR input probe for DLSS/RR investigation.\n");
+			Printf("NRI Phase I instrumentation: ptdebug 34..44 now expose TraceTransparentOutput, explicit SR/RR inputs, SR depth, RR guides, vendor output, FinalPresent(VendorOutput), and post-sharpen output.\n");
 			sLoggedUpscalerProbePath = true;
 		}
 
@@ -7815,8 +7862,14 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			return true;
 		}
 
-		const NRIMainUpscalerKind debugMainKind = ResolveMainUpscalerKind(true);
-		if (debugMainKind == NRIMainUpscalerKind::Off)
+		const bool useExplicitSrProbe = useUpscalerSrInputProbe || useUpscalerSrDepthProbe;
+		const bool useExplicitRrProbe = useUpscalerRrInputProbe || useUpscalerRrDiffuseAlbedoProbe ||
+			useUpscalerRrSpecularAlbedoProbe || useUpscalerRrNormalRoughnessProbe || useUpscalerRrSpecularHitDistanceProbe;
+		const NRIMainUpscalerKind debugMainKind =
+			useExplicitSrProbe ? NRIMainUpscalerKind::DLSR :
+			useExplicitRrProbe ? NRIMainUpscalerKind::DLRR :
+			ResolveMainUpscalerKind(true);
+		if ((useUpscalerVendorProbe || useUpscalerVendorFinalProbe) && debugMainKind == NRIMainUpscalerKind::Off)
 		{
 			Printf(TEXTCOLOR_ORANGE "NRI upscaler probe view requires a resolved vendor main upscaler. Current resolved_main=off.\n");
 			if (!DispatchRawPresent(FrameTextureSlot::TraceTransparentOutput))
@@ -7835,24 +7888,18 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 				return false;
 			}
 
-			const FrameTextureSlot probeSlot =
-				ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_INPUT ?
-					(debugMainKind == NRIMainUpscalerKind::DLSR ? FrameTextureSlot::SrInput : FrameTextureSlot::RrInput) :
-				FrameTextureSlot::UpscalerDepth;
-			if (!DispatchRawPresent(probeSlot))
+			FrameTextureSlot probeSlot = FrameTextureSlot::UpscalerDepth;
+			switch ((uint32_t)ptDebugMode)
 			{
-				return false;
+			case NRI_PTDEBUG_UPSCALER_SR_INPUT: probeSlot = FrameTextureSlot::SrInput; break;
+			case NRI_PTDEBUG_UPSCALER_SR_DEPTH: probeSlot = FrameTextureSlot::UpscalerDepth; break;
+			case NRI_PTDEBUG_UPSCALER_RR_INPUT: probeSlot = FrameTextureSlot::RrInput; break;
+			case NRI_PTDEBUG_UPSCALER_RR_DIFFUSE_ALBEDO: probeSlot = FrameTextureSlot::RrGuideDiffuseAlbedo; break;
+			case NRI_PTDEBUG_UPSCALER_RR_SPECULAR_ALBEDO: probeSlot = FrameTextureSlot::RrGuideSpecularAlbedo; break;
+			case NRI_PTDEBUG_UPSCALER_RR_NORMAL_ROUGHNESS: probeSlot = FrameTextureSlot::RrGuideNormalRoughness; break;
+			case NRI_PTDEBUG_UPSCALER_RR_SPECULAR_HIT_DISTANCE: probeSlot = FrameTextureSlot::RrGuideSpecularHitDistance; break;
+			default: break;
 			}
-
-			CopyFinalToActiveTarget();
-			return true;
-		}
-
-		if (useUpscalerCopyOnlyProbe)
-		{
-			const FrameTextureSlot probeSlot =
-				debugMainKind == NRIMainUpscalerKind::DLSR ? FrameTextureSlot::SrInput : FrameTextureSlot::RrInput;
-			CopyTexture(GetFrameTexture(FrameTextureSlot::TraceTransparentOutput), GetFrameTexture(probeSlot));
 			if (!DispatchRawPresent(probeSlot))
 			{
 				return false;
@@ -7870,6 +7917,19 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		if (useUpscalerVendorFinalProbe)
 		{
 			if (!DispatchFinalPresent(FrameTextureSlot::VendorOutput))
+			{
+				return false;
+			}
+
+			CopyFinalToActiveTarget();
+			return true;
+		}
+
+		if (useUpscalerPostSharpenProbe)
+		{
+			const FrameTextureSlot probeSlot =
+				ResolvePostSharpenKind(false) == NRIPostSharpenKind::Off ? mUpscaledInputSlot : FrameTextureSlot::PostSharpenOutput;
+			if (!DispatchRawPresent(probeSlot))
 			{
 				return false;
 			}

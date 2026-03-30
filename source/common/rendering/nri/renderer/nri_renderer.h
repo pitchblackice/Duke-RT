@@ -691,6 +691,7 @@ private:
 	bool mPathTracingSupported = true;
 	bool mHasRuntimeLinkTraceState = false;
 	bool mResetHistory = true;
+	std::string mLastHistoryResetReason = "startup";
 	bool mUseUpscaledInFinal = false;
 	bool mLastTemporalAppTaaEnabled = false;
 	bool mUseDenoisedCompositionInputs = false;
