@@ -145,9 +145,28 @@ float3 GetSpecularF0(float3 baseColor, float metalness)
 float3 EvaluateEnvironmentSpecular(float3 specularF0, float roughness, float3 normal, float3 viewDir)
 {
 	const float noV = abs(dot(normal, viewDir));
-	const float3 grazing = max(float3(1.0 - roughness, 1.0 - roughness, 1.0 - roughness), specularF0);
-	const float fresnel = pow(1.0 - noV, 5.0);
-	return lerp(specularF0, grazing, fresnel);
+	const float m = saturate(roughness * roughness);
+
+	float4 X;
+	X.x = 1.0;
+	X.y = noV;
+	X.z = noV * noV;
+	X.w = noV * X.z;
+
+	float4 Y;
+	Y.x = 1.0;
+	Y.y = m;
+	Y.z = m * m;
+	Y.w = m * Y.z;
+
+	const float2x2 M1 = float2x2(0.99044, -1.28514, 1.29678, -0.755907);
+	const float3x3 M2 = float3x3(1.0, 2.92338, 59.4188, 20.3225, -27.0302, 222.592, 121.563, 626.13, 316.627);
+	const float2x2 M3 = float2x2(0.0365463, 3.32707, 9.0632, -9.04756);
+	const float3x3 M4 = float3x3(1.0, 3.59685, -1.36772, 9.04401, -16.3174, 9.22949, 5.56589, 19.7886, -20.2123);
+
+	const float bias = dot(mul(M1, X.xy), Y.xy) / max(dot(mul(M2, X.xyw), Y.xyw), 1e-6);
+	const float scale = dot(mul(M3, X.xy), Y.xy) / max(dot(mul(M4, X.xzw), Y.xyw), 1e-6);
+	return saturate(specularF0 * scale + bias);
 }
 
 float GetSpecularHitDistance(float4 packedSpecular, float viewZ, float roughness)
