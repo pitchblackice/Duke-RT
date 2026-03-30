@@ -1837,6 +1837,12 @@ OptionValue NRIPTDebug
 	31, "Emissive Radiance"
 	32, "Emissive Primitive"
 	33, "Emissive Visibility"
+	34, "TraceTransparent Output"
+	35, "Main Upscaler Input"
+	36, "Upscaler Depth"
+	37, "Vendor Output"
+	38, "Vendor Output Final"
+	39, "Main Upscaler Input (Copy)"
 }
 
 OptionValue NRIPTBootstrapMode
