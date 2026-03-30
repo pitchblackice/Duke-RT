@@ -175,12 +175,25 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 	else
-	if (gTraceConstants.DebugMode == 40u || gTraceConstants.DebugMode == 41u)
+	if (gTraceConstants.DebugMode == 40u)
 	{
 		const float3 guide = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
-		// RR albedo guides are often very dark in linear space, especially specular on dielectrics.
-		// Lift them slightly so the probe remains useful without changing the underlying guide data.
 		color = sqrt(guide);
+	}
+	else
+	if (gTraceConstants.DebugMode == 41u)
+	{
+		const float3 guide = max(gInputTexture.Load(int3(samplePos, 0)).rgb, 0.0);
+		if (AnyNonFinite(guide))
+		{
+			color = float3(1.0, 0.0, 1.0);
+		}
+		else
+		{
+			// RR specular albedo is often much darker than the diffuse guide on dielectric-heavy scenes.
+			// Use a stronger log exposure here so a healthy-but-small guide does not read as fully black.
+			color = saturate(log2(1.0 + guide * 256.0) / 8.0);
+		}
 	}
 	else
 	if (gTraceConstants.DebugMode == 42u)
