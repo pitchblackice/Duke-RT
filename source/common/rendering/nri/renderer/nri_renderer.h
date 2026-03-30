@@ -472,6 +472,7 @@ private:
 	bool DispatchDenoiser();
 	bool DispatchComposition();
 	bool DispatchTraceTransparent();
+	bool DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind);
 	bool DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlot secondarySlot = FrameTextureSlot::Count, FrameTextureSlot tertiarySlot = FrameTextureSlot::Count);
 	bool DispatchFinalPresent(FrameTextureSlot inputSlot);
 	bool DispatchUpscaleChain();

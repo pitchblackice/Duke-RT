@@ -56,6 +56,29 @@ float3 ToneMapDebugRadiance(float3 value)
 	return value / (1.0 + value);
 }
 
+bool AnyNonFinite(float3 value)
+{
+	return any(isnan(value)) || any(isinf(value));
+}
+
+float3 VisualizeHdrProbe(float3 value)
+{
+	if (AnyNonFinite(value))
+	{
+		return float3(1.0, 0.0, 1.0);
+	}
+
+	const float3 positive = ToneMapDebugRadiance(max(value, 0.0));
+	const float negativeMagnitude = max(max(-value.x, -value.y), -value.z);
+	if (negativeMagnitude <= 0.0)
+	{
+		return positive;
+	}
+
+	const float negativeMarker = saturate(log2(1.0 + negativeMagnitude) / 8.0);
+	return max(positive, float3(negativeMarker, 0.0, 0.0));
+}
+
 bool UseRelaxDenoiser()
 {
 	return (gTraceConstants.ReservedTrace1 & 0xffu) == 1u;
@@ -122,6 +145,28 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float hitDistance = REBLUR_GetHitDist(normalizedHitDistance, viewZ, kReblurHitDistanceParams, roughness);
 			const float mapped = saturate(log2(1.0 + max(hitDistance, 0.0)) / 12.0);
 			color = mapped.xxx;
+		}
+	}
+	else
+	if (gTraceConstants.DebugMode == 34u || gTraceConstants.DebugMode == 35u || gTraceConstants.DebugMode == 37u)
+	{
+		color = VisualizeHdrProbe(gInputTexture.Load(int3(samplePos, 0)).rgb);
+	}
+	else
+	if (gTraceConstants.DebugMode == 36u)
+	{
+		const float depth = gInputTexture.Load(int3(samplePos, 0)).x;
+		if (isnan(depth) || isinf(depth))
+		{
+			color = float3(1.0, 0.0, 1.0);
+		}
+		else if (depth >= 0.9999)
+		{
+			color = float3(0.0, 0.0, 1.0);
+		}
+		else
+		{
+			color = saturate(depth).xxx;
 		}
 	}
 	else
