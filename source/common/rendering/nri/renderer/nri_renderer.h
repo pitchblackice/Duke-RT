@@ -89,6 +89,7 @@ private:
 		Taa,
 		RawPresent,
 		FinalPresent,
+		DlssSrBefore,
 		DlssBefore,
 		DlssAfter,
 		Final,

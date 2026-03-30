@@ -4587,6 +4587,7 @@ bool NRIRenderer::CreatePipelines()
 	FString taa = FStringf("Taa.cs.%s", suffix);
 	FString rawPresent = FStringf("RawPresent.cs.%s", suffix);
 	FString finalPresent = FStringf("FinalPresent.cs.%s", suffix);
+	FString dlssSrBefore = FStringf("DlssSrBefore.cs.%s", suffix);
 	FString dlssBefore = FStringf("DlssBefore.cs.%s", suffix);
 	FString dlssAfter = FStringf("DlssAfter.cs.%s", suffix);
 	FString final = FStringf("Final.cs.%s", suffix);
@@ -4598,6 +4599,7 @@ bool NRIRenderer::CreatePipelines()
 		createPipeline(taa.GetChars(), PipelineSlot::Taa, mTaaPipelineLayout) &&
 		createPipeline(rawPresent.GetChars(), PipelineSlot::RawPresent, mTaaPipelineLayout) &&
 		createPipeline(finalPresent.GetChars(), PipelineSlot::FinalPresent, mTaaPipelineLayout) &&
+		createPipeline(dlssSrBefore.GetChars(), PipelineSlot::DlssSrBefore, mPipelineLayout) &&
 		createPipeline(dlssBefore.GetChars(), PipelineSlot::DlssBefore, mPipelineLayout) &&
 		createPipeline(dlssAfter.GetChars(), PipelineSlot::DlssAfter, mPipelineLayout) &&
 		createPipeline(final.GetChars(), PipelineSlot::Final, mPipelineLayout);
@@ -8196,32 +8198,42 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	NRITextureResource& rrGuideSpecularAlbedo = GetFrameTexture(FrameTextureSlot::RrGuideSpecularAlbedo);
 	NRITextureResource& rrGuideSpecularHitDistance = GetFrameTexture(FrameTextureSlot::RrGuideSpecularHitDistance);
 	NRITextureResource& rrGuideNormalRoughness = GetFrameTexture(FrameTextureSlot::RrGuideNormalRoughness);
+	const bool useSrPrepass = mainKind == NRIMainUpscalerKind::DLSR;
 
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(upscalerDepth, NRIComputeStorageState());
-	mFrameBuffer->TransitionTexture(rrGuideDiffuseAlbedo, NRIComputeStorageState());
-	mFrameBuffer->TransitionTexture(rrGuideSpecularAlbedo, NRIComputeStorageState());
-	mFrameBuffer->TransitionTexture(rrGuideSpecularHitDistance, NRIComputeStorageState());
-	mFrameBuffer->TransitionTexture(rrGuideNormalRoughness, NRIComputeStorageState());
+	if (!useSrPrepass)
+	{
+		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(rrGuideDiffuseAlbedo, NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(rrGuideSpecularAlbedo, NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(rrGuideSpecularHitDistance, NRIComputeStorageState());
+		mFrameBuffer->TransitionTexture(rrGuideNormalRoughness, NRIComputeStorageState());
+	}
 
 	const nri::Descriptor* defaultInput = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
 	mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
-	mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
-	mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
-	mFrameInputDescriptors[6] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
+	if (!useSrPrepass)
+	{
+		mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
+		mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
+		mFrameInputDescriptors[6] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
+	}
 	UpdateFrameTextureSet();
 
 	const nri::Descriptor* defaultOutput = upscalerDepth.storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
-	mOutputDescriptors[5] = rrGuideNormalRoughness.storageView;
-	mOutputDescriptors[9] = rrGuideDiffuseAlbedo.storageView;
-	mOutputDescriptors[10] = rrGuideSpecularAlbedo.storageView;
-	mOutputDescriptors[11] = rrGuideSpecularHitDistance.storageView;
 	mOutputDescriptors[12] = upscalerDepth.storageView;
+	if (!useSrPrepass)
+	{
+		mOutputDescriptors[5] = rrGuideNormalRoughness.storageView;
+		mOutputDescriptors[9] = rrGuideDiffuseAlbedo.storageView;
+		mOutputDescriptors[10] = rrGuideSpecularAlbedo.storageView;
+		mOutputDescriptors[11] = rrGuideSpecularHitDistance.storageView;
+	}
 	UpdateOutputSet();
 
 	NRITraceConstants constants = {};
@@ -8243,7 +8255,7 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::DlssBefore));
+	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(useSrPrepass ? PipelineSlot::DlssSrBefore : PipelineSlot::DlssBefore));
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
 	// Keep guide generation in DlssBefore, but source the main vendor input via a direct copy.
 	// This removes one avoidable failure point from the SR/RR source path while investigation is ongoing.
