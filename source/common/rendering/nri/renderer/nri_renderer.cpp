@@ -7981,40 +7981,9 @@ bool NRIRenderer::DispatchTraceTransparent()
 {
 	Clocker clock(NriPTComposition);
 
-	NRITraceConstants constants = {};
-	constants.RenderWidth = mRenderWidth;
-	constants.RenderHeight = mRenderHeight;
-	constants.DisplayWidth = mOutputWidth;
-	constants.DisplayHeight = mOutputHeight;
-	constants.FrameIndex = mFrameIndex;
-	constants.DebugMode = GetEffectivePtDebugMode();
-
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
 	NRITextureResource& transparentOutput = GetFrameTexture(FrameTextureSlot::TraceTransparentOutput);
-
-	mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
-	mFrameBuffer->TransitionTexture(transparentOutput, NRIComputeStorageState());
-
-	const nri::Descriptor* defaultInput = composed.shaderView;
-	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
-	mFrameInputDescriptors[5] = composed.shaderView;
-	UpdateFrameTextureSet();
-
-	const nri::Descriptor* defaultOutput = transparentOutput.storageView;
-	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
-	mOutputDescriptors[1] = transparentOutput.storageView;
-	UpdateOutputSet();
-
-	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
-	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	BindSceneRootDescriptors();
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::TraceTransparent));
-	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+	CopyTexture(composed, transparentOutput);
 	return true;
 }
 
