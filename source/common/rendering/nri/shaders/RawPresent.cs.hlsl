@@ -177,7 +177,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	else
 	if (gTraceConstants.DebugMode == 40u || gTraceConstants.DebugMode == 41u)
 	{
-		color = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
+		const float3 guide = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
+		// RR albedo guides are often very dark in linear space, especially specular on dielectrics.
+		// Lift them slightly so the probe remains useful without changing the underlying guide data.
+		color = sqrt(guide);
 	}
 	else
 	if (gTraceConstants.DebugMode == 42u)
