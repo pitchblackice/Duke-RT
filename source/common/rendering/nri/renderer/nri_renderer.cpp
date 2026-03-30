@@ -8200,6 +8200,11 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	NRITextureResource& rrGuideNormalRoughness = GetFrameTexture(FrameTextureSlot::RrGuideNormalRoughness);
 	const bool useSrPrepass = mainKind == NRIMainUpscalerKind::DLSR;
 
+	// Main upscaler input is just the post-transparent beauty signal for both SR and RR.
+	// Copy it before running any guide-generation compute so the source path is independent
+	// of the prepass dispatch ordering while SR/RR integration is still being stabilized.
+	CopyTexture(composed, vendorInput);
+
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(upscalerDepth, NRIComputeStorageState());
 	if (!useSrPrepass)
@@ -8257,9 +8262,6 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(useSrPrepass ? PipelineSlot::DlssSrBefore : PipelineSlot::DlssBefore));
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
-	// Keep guide generation in DlssBefore, but source the main vendor input via a direct copy.
-	// This removes one avoidable failure point from the SR/RR source path while investigation is ongoing.
-	CopyTexture(composed, vendorInput);
 	return true;
 }
 
