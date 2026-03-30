@@ -66,9 +66,9 @@ namespace
 		return true;
 	}
 
-	FTexture* TryResolveBaseTexture(FGameTexture* texture)
+	FTexture* TryResolveBaseTextureUnchecked(FGameTexture* texture)
 	{
-		if (!IsUsableGameTexturePointer(texture))
+		if (texture == nullptr)
 		{
 			return nullptr;
 		}
@@ -84,6 +84,28 @@ namespace
 		}
 
 		return baseTexture;
+	}
+
+	FTexture* TryResolveBaseTexture(FGameTexture* texture)
+	{
+		return IsUsableGameTexturePointer(texture) ? TryResolveBaseTextureUnchecked(texture) : nullptr;
+	}
+
+	bool IsTexturePersistentSignatureEligibleUnchecked(FGameTexture* texture, FTexture* baseTexture)
+	{
+		if (texture == nullptr)
+		{
+			return false;
+		}
+
+		// Keep wrapper-level mutable cases explicit so callers do not accidentally
+		// inherit persistence just because the wrapped base exposes an image ID.
+		if (texture->isHardwareCanvas() || texture->isSoftwareCanvas() || texture->GetUseType() == ETextureType::SWCanvas)
+		{
+			return false;
+		}
+
+		return IsTexturePersistentSignatureEligible(baseTexture);
 	}
 
 	FGameTexture* TryGetSkyFace(FSkyBox* skybox, int index)
@@ -163,19 +185,13 @@ bool IsTexturePersistentSignatureEligible(FTexture* texture)
 
 bool IsTexturePersistentSignatureEligible(FGameTexture* texture)
 {
-	if (!IsUsableGameTexturePointer(texture))
+	FTexture* baseTexture = TryResolveBaseTexture(texture);
+	if (baseTexture == nullptr)
 	{
 		return false;
 	}
 
-	// Keep wrapper-level mutable cases explicit so callers do not accidentally
-	// inherit persistence just because the wrapped base exposes an image ID.
-	if (texture->isHardwareCanvas() || texture->isSoftwareCanvas() || texture->GetUseType() == ETextureType::SWCanvas)
-	{
-		return false;
-	}
-
-	return IsTexturePersistentSignatureEligible(TryResolveBaseTexture(texture));
+	return IsTexturePersistentSignatureEligibleUnchecked(texture, baseTexture);
 }
 
 bool CanBuildTextureSignatureFromMetadata(const TextureSignatureRequest& request)
@@ -250,18 +266,30 @@ bool TryBuildSkyboxTextureSignature(FGameTexture* texture, const TextureSignatur
 	const bool success = TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, 0, true);
 	if (success)
 	{
-		outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+		outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligibleUnchecked(texture, baseTexture);
 	}
 	return success;
 }
 
 bool TryBuildTextureSignature(FGameTexture* texture, const TextureSignatureRequest& request, TextureSignature& outSignature)
 {
+	if (!IsUsableGameTexturePointer(texture))
+	{
+		outSignature = {};
+		return false;
+	}
+
 	return TryBuildTextureSignatureImpl(texture, request, outSignature, 0);
 }
 
 bool TryBuildAverageColorTextureSignature(FGameTexture* texture, TextureSignature& outSignature)
 {
+	if (!IsUsableGameTexturePointer(texture))
+	{
+		outSignature = {};
+		return false;
+	}
+
 	return TryBuildAverageColorTextureSignatureImpl(texture, outSignature, 0);
 }
 }
@@ -376,7 +404,7 @@ namespace
 			return false;
 		}
 
-		FTexture* baseTexture = TryResolveBaseTexture(texture);
+		FTexture* baseTexture = TryResolveBaseTextureUnchecked(texture);
 		if (baseTexture == nullptr)
 		{
 			return false;
@@ -387,7 +415,7 @@ namespace
 			const bool success = TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, depth, true);
 			if (success)
 			{
-				outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+				outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligibleUnchecked(texture, baseTexture);
 			}
 			return success;
 		}
@@ -395,7 +423,7 @@ namespace
 		const bool success = TryBuildImageTextureSignature(baseTexture, request, outSignature);
 		if (success)
 		{
-			outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+			outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligibleUnchecked(texture, baseTexture);
 		}
 		return success;
 	}
@@ -408,7 +436,7 @@ namespace
 			return false;
 		}
 
-		FTexture* baseTexture = TryResolveBaseTexture(texture);
+		FTexture* baseTexture = TryResolveBaseTextureUnchecked(texture);
 		if (baseTexture == nullptr)
 		{
 			return false;
@@ -424,7 +452,7 @@ namespace
 			const bool success = TryBuildSkyboxTextureSignatureImpl(skybox, request, outSignature, depth, false);
 			if (success)
 			{
-				outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+				outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligibleUnchecked(texture, baseTexture);
 			}
 			return success;
 		}
@@ -432,7 +460,7 @@ namespace
 		const bool success = TryBuildImageTextureSignature(baseTexture, request, outSignature);
 		if (success)
 		{
-			outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligible(texture);
+			outSignature.persistentEligible = outSignature.persistentEligible && IsTexturePersistentSignatureEligibleUnchecked(texture, baseTexture);
 		}
 		return success;
 	}

@@ -85,11 +85,6 @@ namespace
 	bool TryBuildPersistentAverageColorSignature(FGameTexture* texture, TextureSignature& outSignature)
 	{
 		outSignature = {};
-		if (!IsUsableGameTexturePointer(texture))
-		{
-			return false;
-		}
-
 		return TryBuildAverageColorTextureSignature(texture, outSignature) &&
 			outSignature.valid &&
 			outSignature.persistentEligible;
