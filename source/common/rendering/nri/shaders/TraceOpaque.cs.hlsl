@@ -765,9 +765,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		// Explicit lighting ownership after composition slices 1-3:
 		// - directLighting: stable raw direct-composition bucket only
 		//   * ambient / sector ambient
+		//   * placeholder directional sun diffuse/specular (already shadowed)
 		//   * runtime point-light direct terms
 		// - diffuse/specular transport: denoised transport bucket
-		//   * directional sun diffuse/specular
 		//   * sampled emissive diffuse/specular
 		//   * indirect diffuse/specular
 		// - directEmission: only actual emissive-hit / fullbright surface output
@@ -963,9 +963,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					indirectTransportSpecular = TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, lightBounceCount, specularHitDistance);
 				}
 
-				diffuse += sunTransportDiffuse + sampledEmissiveTransportDiffuse + indirectTransportDiffuse;
-				specular += sunTransportSpecular + sampledEmissiveTransportSpecular + indirectTransportSpecular;
-				directLighting += ambientDirectLighting + runtimePointDirectLighting;
+				diffuse += sampledEmissiveTransportDiffuse + indirectTransportDiffuse;
+				specular += sampledEmissiveTransportSpecular + indirectTransportSpecular;
+				// Keep the placeholder sun out of the denoised transport bucket so its hard shadow
+				// structure does not get spatially mixed back into REBLUR/RELAX radiance history.
+				directLighting += ambientDirectLighting + sunTransportDiffuse + sunTransportSpecular + runtimePointDirectLighting;
 			}
 
 			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
