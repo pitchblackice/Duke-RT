@@ -1715,6 +1715,8 @@ void NRIRenderer::Shutdown()
 	mOutputSet = nullptr;
 	mCompositionFrameTextureSet = nullptr;
 	mCompositionOutputSet = nullptr;
+	mUpscalerPrepassFrameTextureSet = nullptr;
+	mUpscalerPrepassOutputSet = nullptr;
 	mTaaFrameTextureSet = nullptr;
 	mTaaOutputSet = nullptr;
 	mRawPresentFrameTextureSet = nullptr;
@@ -4615,6 +4617,8 @@ bool NRIRenderer::AllocateDescriptorSets()
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &mOutputSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mCompositionFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &mCompositionOutputSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mUpscalerPrepassFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &mUpscalerPrepassOutputSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mTaaFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 1, &mTaaOutputSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mRawPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
@@ -5653,11 +5657,11 @@ bool NRIRenderer::DispatchBootstrapView()
 	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView;
 	mFrameInputDescriptors[9] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
-	UpdateFrameTextureSet();
+	UpdateFrameTextureSet(mUpscalerPrepassFrameTextureSet, mFrameInputDescriptors);
 
 	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::VendorOutput).storageView);
 	mOutputDescriptors[2] = final.storageView;
-	UpdateOutputSet();
+	UpdateOutputSet(mUpscalerPrepassOutputSet, mOutputDescriptors);
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
@@ -8260,8 +8264,8 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mUpscalerPrepassFrameTextureSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mUpscalerPrepassOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(useSrPrepass ? PipelineSlot::DlssSrBefore : PipelineSlot::DlssBefore));
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
 	return true;

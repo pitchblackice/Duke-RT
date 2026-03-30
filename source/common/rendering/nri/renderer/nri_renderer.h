@@ -571,6 +571,8 @@ private:
 	nri::DescriptorSet* mOutputSet = nullptr;
 	nri::DescriptorSet* mCompositionFrameTextureSet = nullptr;
 	nri::DescriptorSet* mCompositionOutputSet = nullptr;
+	nri::DescriptorSet* mUpscalerPrepassFrameTextureSet = nullptr;
+	nri::DescriptorSet* mUpscalerPrepassOutputSet = nullptr;
 	nri::DescriptorSet* mTaaFrameTextureSet = nullptr;
 	nri::DescriptorSet* mTaaOutputSet = nullptr;
 	nri::DescriptorSet* mRawPresentFrameTextureSet = nullptr;
