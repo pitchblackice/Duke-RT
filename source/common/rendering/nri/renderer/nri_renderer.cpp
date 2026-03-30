@@ -7982,6 +7982,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::SrInput), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::RrGuideDiffuseAlbedo), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::RrGuideSpecularHitDistance), NRIComputeStorageState());
+	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Validation), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Composed), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::VendorOutput), NRIComputeStorageState());
 
@@ -7989,7 +7990,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
 	UpdateFrameTextureSet();
 
-	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::SrInput).storageView;
+	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::Validation).storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
 	mOutputDescriptors[0] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).storageView;
 	mOutputDescriptors[3] = GetFrameTexture(FrameTextureSlot::Motion).storageView;
