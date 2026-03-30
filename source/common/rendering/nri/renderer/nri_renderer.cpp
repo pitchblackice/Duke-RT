@@ -8175,6 +8175,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
+		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(vendorInput, NRIComputeStorageState());
 		mFrameBuffer->TransitionTexture(upscalerDepth, NRIComputeStorageState());
@@ -8188,6 +8189,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameInputDescriptors[2] = GetFrameTexture(FrameTextureSlot::ViewZ).shaderView;
 		mFrameInputDescriptors[3] = GetFrameTexture(FrameTextureSlot::NormalRoughness).shaderView;
 		mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
+		mFrameInputDescriptors[6] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 		UpdateFrameTextureSet();
 
 		const nri::Descriptor* defaultOutput = vendorInput.storageView;
@@ -8207,6 +8209,11 @@ bool NRIRenderer::DispatchUpscaleChain()
 			constants.DisplayWidth = mOutputWidth;
 			constants.DisplayHeight = mOutputHeight;
 			constants.FrameIndex = mFrameIndex;
+			constants.ReservedTrace0 =
+				mainKind == NRIMainUpscalerKind::DLSR ? 1u :
+				mainKind == NRIMainUpscalerKind::DLRR ? 2u :
+				0u;
+			constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
 			constants.Flags = mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 			mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 			mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
