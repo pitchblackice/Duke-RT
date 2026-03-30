@@ -5572,7 +5572,7 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	const nri::Format colorFormat = nri::Format::RGBA16_SFLOAT;
 	const nri::Format normalRoughnessFormat = nri::Format::R10_G10_B10_A2_UNORM;
 	const nri::Format upscalerDepthFormat = nri::Format::R32_SFLOAT;
-	const nri::Format rrGuideAlbedoFormat = nri::Format::RGBA8_UNORM;
+	const nri::Format rrGuideAlbedoFormat = nri::Format::R10_G10_B10_A2_UNORM;
 	const nri::Format rrGuideSpecHitDistanceFormat = nri::Format::R16_SFLOAT;
 	const nri::Format rrGuideNormalRoughnessFormat = nri::Format::RGBA16_SFLOAT;
 	const nri::Format finalFormat = outputFormat;
