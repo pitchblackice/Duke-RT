@@ -8205,6 +8205,7 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	// Copy it before running any guide-generation compute so the source path is independent
 	// of the prepass dispatch ordering while SR/RR integration is still being stabilized.
 	CopyTexture(composed, vendorInput);
+	mFrameBuffer->TransitionTexture(vendorInput, NRIComputeShaderResourceState());
 
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(upscalerDepth, NRIComputeStorageState());
