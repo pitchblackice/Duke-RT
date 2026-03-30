@@ -906,6 +906,56 @@ namespace
 		}
 	}
 
+	static uint32_t GetUpscalerJitterPhaseCount(nri::UpscalerMode mode)
+	{
+		switch (mode)
+		{
+		case nri::UpscalerMode::NATIVE: return 8u;
+		case nri::UpscalerMode::ULTRA_QUALITY: return 14u;
+		case nri::UpscalerMode::QUALITY: return 18u;
+		case nri::UpscalerMode::BALANCED: return 23u;
+		case nri::UpscalerMode::PERFORMANCE: return 32u;
+		case nri::UpscalerMode::ULTRA_PERFORMANCE: return 72u;
+		default: return 8u;
+		}
+	}
+
+	static nri::UpscalerMode ResolveUpscalerModeForMain(NRIMainUpscalerKind kind, nri::UpscalerMode requestedMode)
+	{
+		switch (kind)
+		{
+		case NRIMainUpscalerKind::DLRR:
+			return nri::UpscalerMode::NATIVE;
+		case NRIMainUpscalerKind::DLSR:
+			return requestedMode;
+		default:
+			return requestedMode;
+		}
+	}
+
+	static float ResolveRenderScaleForMain(NRIMainUpscalerKind kind, nri::UpscalerMode requestedMode, float manualRenderScale)
+	{
+		switch (kind)
+		{
+		case NRIMainUpscalerKind::DLSR:
+			return GetUpscalerRenderScale(requestedMode);
+		case NRIMainUpscalerKind::DLRR:
+			return 1.0f;
+		default:
+			return manualRenderScale;
+		}
+	}
+
+	static const char* GetRenderResolutionPolicyName(NRIMainUpscalerKind kind)
+	{
+		switch (kind)
+		{
+		case NRIMainUpscalerKind::DLSR: return "sr-mode-scale";
+		case NRIMainUpscalerKind::DLRR: return "rr-native-locked";
+		default: return "manual-scale";
+		}
+	}
+
 	static void SyncLegacyUpscalerConfig(bool logMigration)
 	{
 		if ((int)nri_upscaler == 1)
@@ -2958,6 +3008,12 @@ void NRIRenderer::PrintStatus() const
 	const NRIMainUpscalerKind resolvedMain = GetResolvedMainUpscalerKindForStatus();
 	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
+	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
+	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMain, requestedUpscalerMode);
+	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
+	const float resolvedRenderScale = ResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
+	const bool expectsUpscalerJitter = resolvedMain == NRIMainUpscalerKind::DLSR || resolvedMain == NRIMainUpscalerKind::DLRR;
+	const uint32_t expectedJitterPhases = expectsUpscalerJitter ? GetUpscalerJitterPhaseCount(resolvedUpscalerMode) : NRI_TAA_JITTER_PHASE_COUNT;
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	const uint32_t nrdMaxFrames = ClampNrdHistoryFrameCount((int)nri_nrdmaxframes);
 	const uint32_t nrdFastFrames = ClampNrdFastFrameCount((int)nri_nrdfastframes, nrdMaxFrames);
@@ -2987,7 +3043,7 @@ void NRIRenderer::PrintStatus() const
 		mOutputHeight,
 		mHasPreviousCameraState ? "yes" : "no",
 		mResetHistory ? "yes" : "no");
-	Printf("NRI PT features: bootstrap=%s denoise=%s validation=%s api_validation=%s dred=%s main_upscaler=%s->%s post_sharpen=%s->%s mode=%s render_scale=%.3f sharpness=%.3f\n",
+	Printf("NRI PT features: bootstrap=%s denoise=%s validation=%s api_validation=%s dred=%s main_upscaler=%s->%s post_sharpen=%s->%s requested_mode=%s resolved_mode=%s requested_render_scale=%.3f resolved_render_scale=%.3f sharpness=%.3f\n",
 		nri_ptbootstrap ? "on" : "off",
 		nri_denoise ? "on" : "off",
 		nri_validation ? "on" : "off",
@@ -2997,9 +3053,19 @@ void NRIRenderer::PrintStatus() const
 		GetMainUpscalerName(resolvedMain),
 		GetPostSharpenName(requestedPost),
 		GetPostSharpenName(resolvedPost),
-		GetUpscalerModeName(GetSelectedUpscalerMode()),
-		(float)nri_renderscale,
+		GetUpscalerModeName(requestedUpscalerMode),
+		GetUpscalerModeName(resolvedUpscalerMode),
+		requestedRenderScale,
+		resolvedRenderScale,
 		(float)nri_sharpness);
+	Printf("NRI PT resolution policy: policy=%s render=%ux%u output=%ux%u jitter=%s phases=%u\n",
+		GetRenderResolutionPolicyName(resolvedMain),
+		mRenderWidth,
+		mRenderHeight,
+		mOutputWidth,
+		mOutputHeight,
+		expectsUpscalerJitter ? "upscaler" : (ShouldRunAppTaa(resolvedMain) ? "taa" : "off"),
+		expectedJitterPhases);
 	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u portal_depth=%u surface_probe=%d\n",
 		nri_ptdirectscene ? "on" : "off",
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
@@ -5394,11 +5460,10 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	const int32_t sceneTop = (int32_t)targetHeight - sceneBottom - (int32_t)outputHeight;
 
 	const NRIMainUpscalerKind mainUpscalerKind = ResolveMainUpscalerKind(false);
-	float renderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
-	if (mainUpscalerKind == NRIMainUpscalerKind::DLSR || mainUpscalerKind == NRIMainUpscalerKind::DLRR)
-	{
-		renderScale = GetUpscalerRenderScale(GetSelectedUpscalerMode());
-	}
+	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
+	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(mainUpscalerKind, requestedUpscalerMode);
+	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
+	const float renderScale = ResolveRenderScaleForMain(mainUpscalerKind, requestedUpscalerMode, requestedRenderScale);
 
 	const uint32_t renderWidth = std::max(1u, (uint32_t)std::lround((double)outputWidth * renderScale));
 	const uint32_t renderHeight = std::max(1u, (uint32_t)std::lround((double)outputHeight * renderScale));
@@ -5436,6 +5501,19 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	mSceneTop = sceneTop;
 	mOutputFormat = outputFormat;
 	RequestHistoryReset("frame-resources");
+	Printf("NRI PT frame resources: main=%s policy=%s requested_mode=%s resolved_mode=%s requested_render_scale=%.3f resolved_render_scale=%.3f render=%ux%u output=%ux%u jitter=%s phases=%u\n",
+		GetMainUpscalerName(mainUpscalerKind),
+		GetRenderResolutionPolicyName(mainUpscalerKind),
+		GetUpscalerModeName(requestedUpscalerMode),
+		GetUpscalerModeName(resolvedUpscalerMode),
+		requestedRenderScale,
+		renderScale,
+		renderWidth,
+		renderHeight,
+		outputWidth,
+		outputHeight,
+		(mainUpscalerKind == NRIMainUpscalerKind::DLSR || mainUpscalerKind == NRIMainUpscalerKind::DLRR) ? "upscaler" : (ShouldRunAppTaa(mainUpscalerKind) ? "taa" : "off"),
+		(mainUpscalerKind == NRIMainUpscalerKind::DLSR || mainUpscalerKind == NRIMainUpscalerKind::DLRR) ? GetUpscalerJitterPhaseCount(resolvedUpscalerMode) : NRI_TAA_JITTER_PHASE_COUNT);
 
 	const nri::Format colorFormat = nri::Format::RGBA16_SFLOAT;
 	const nri::Format normalRoughnessFormat = nri::Format::R10_G10_B10_A2_UNORM;
@@ -8235,7 +8313,8 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->TransitionTexture(rrGuideNormalRoughness, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(vendorOutput, NRIComputeStorageState());
 
-		if (!mUpscaler.EnsureMainUpscaler(*mFrameBuffer, mainKind, GetSelectedUpscalerMode(), mOutputWidth, mOutputHeight))
+		const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(mainKind, GetSelectedUpscalerMode());
+		if (!mUpscaler.EnsureMainUpscaler(*mFrameBuffer, mainKind, resolvedUpscalerMode, mOutputWidth, mOutputHeight))
 		{
 			return false;
 		}
