@@ -871,6 +871,19 @@ CCMD(nri_ptstatus)
 	}
 }
 
+CCMD(nri_ptchunkdump)
+{
+	const int32_t chunkIndex = argv.argc() > 1 ? atoi(argv[1]) : -1;
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingMapChunkDump(chunkIndex);
+	}
+	else
+	{
+		Printf("nri_ptchunkdump is only available while using the NRI renderer.\n");
+	}
+}
+
 CCMD(nri_ptbuffers)
 {
 	if (auto* frameBuffer = GetActiveNRIRenderDevice())
@@ -1856,6 +1869,17 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 	{
 		mRenderer->PrintSceneBufferStatus();
 	}
+}
+
+void NRIRenderDevice::PrintPathTracingMapChunkDump(int32_t chunkIndex) const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT chunk dump is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintMapChunkDump(chunkIndex);
 }
 
 void NRIRenderDevice::PrintFrameBoundaryStatus() const

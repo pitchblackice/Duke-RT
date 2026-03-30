@@ -116,6 +116,12 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_POST_SHARPEN_OUTPUT = 44;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
+	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_UNKNOWN = 0;
+	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_STATIC_MAP = 1;
+	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_CAPTURED_SCENE = 2;
+	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_RUNTIME_LINK = 3;
+	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION = 4;
+	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY = 5;
 	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
 	constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
 	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
@@ -225,6 +231,39 @@ namespace
 		{
 		case NRI_SCENE_DATA_SOURCE_STATIC: return "static";
 		case NRI_SCENE_DATA_SOURCE_DYNAMIC: return "dynamic";
+		default: return "unknown";
+		}
+	}
+
+	const char* GetSurfaceProbeSceneOwnerName(uint32_t owner)
+	{
+		switch (owner)
+		{
+		case NRI_SURFACE_PROBE_OWNER_STATIC_MAP: return "static_map";
+		case NRI_SURFACE_PROBE_OWNER_CAPTURED_SCENE: return "captured_scene";
+		case NRI_SURFACE_PROBE_OWNER_RUNTIME_LINK: return "runtime_link_overlay";
+		case NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION: return "runtime_mutation_overlay";
+		case NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY: return "dynamic_overlay";
+		default: return "unknown";
+		}
+	}
+
+	uint32_t CountSurfaceTriangles(const nri_scene::SurfaceRef& surface)
+	{
+		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2 : 0u;
+	}
+
+	const char* GetMapSurfaceKindName(nri_scene::PTMapSurfaceKind kind)
+	{
+		switch (kind)
+		{
+		case nri_scene::PTMapSurfaceKind::Floor: return "floor";
+		case nri_scene::PTMapSurfaceKind::Ceiling: return "ceiling";
+		case nri_scene::PTMapSurfaceKind::WallOneSided: return "wall_one_sided";
+		case nri_scene::PTMapSurfaceKind::WallUpper: return "wall_upper";
+		case nri_scene::PTMapSurfaceKind::WallMiddle: return "wall_middle";
+		case nri_scene::PTMapSurfaceKind::WallLower: return "wall_lower";
+		case nri_scene::PTMapSurfaceKind::Portal: return "portal";
 		default: return "unknown";
 		}
 	}
@@ -2456,6 +2495,13 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	Copy3(activeSceneView->skyColor, mSkyColor);
 	Copy3(activeSceneView->groundColor, mGroundColor);
+	mSurfaceProbeFrame = {};
+	mSurfaceProbeFrame.valid = true;
+	mSurfaceProbeFrame.usesStaticMapScene = mUsedStaticMapSceneLastFrame;
+	mSurfaceProbeFrame.staticPrimitiveCount = mUsedStaticMapSceneLastFrame ? (uint32_t)mStaticMapScene.geometry.primitives.size() : 0u;
+	mSurfaceProbeFrame.runtimeSpaceLinkPrimitiveCount = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
+	mSurfaceProbeFrame.runtimeMutationPrimitiveCount = (uint32_t)runtimeMutationGeometry.primitives.size();
+	mSurfaceProbeFrame.dynamicPrimitiveCount = activeDynamicGeometry != nullptr ? (uint32_t)activeDynamicGeometry->primitives.size() : 0u;
 
 	if (!preserveHistory)
 	{
@@ -4025,6 +4071,49 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		result.emissiveTextureIndex = effectiveMaterial.emissiveTextureIndex;
 	}
 
+	if (result.hit)
+	{
+		if (!mSurfaceProbeFrame.valid)
+		{
+			result.sceneDataSource = UINT32_MAX;
+			result.sceneOwner = NRI_SURFACE_PROBE_OWNER_UNKNOWN;
+		}
+		else if (!mSurfaceProbeFrame.usesStaticMapScene)
+		{
+			result.sceneDataSource = NRI_SCENE_DATA_SOURCE_DYNAMIC;
+			result.sceneOwner = NRI_SURFACE_PROBE_OWNER_CAPTURED_SCENE;
+		}
+		else if (result.primitiveIndex < mSurfaceProbeFrame.staticPrimitiveCount)
+		{
+			result.sceneDataSource = NRI_SCENE_DATA_SOURCE_STATIC;
+			result.sceneOwner = NRI_SURFACE_PROBE_OWNER_STATIC_MAP;
+		}
+		else
+		{
+			uint32_t overlayPrimitiveIndex = result.primitiveIndex - mSurfaceProbeFrame.staticPrimitiveCount;
+			result.sceneDataSource = NRI_SCENE_DATA_SOURCE_DYNAMIC;
+			if (overlayPrimitiveIndex < mSurfaceProbeFrame.runtimeSpaceLinkPrimitiveCount)
+			{
+				result.sceneOwner = NRI_SURFACE_PROBE_OWNER_RUNTIME_LINK;
+			}
+			else
+			{
+				overlayPrimitiveIndex -= std::min(overlayPrimitiveIndex, mSurfaceProbeFrame.runtimeSpaceLinkPrimitiveCount);
+				if (overlayPrimitiveIndex < mSurfaceProbeFrame.runtimeMutationPrimitiveCount)
+				{
+					result.sceneOwner = NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION;
+				}
+				else
+				{
+					overlayPrimitiveIndex -= std::min(overlayPrimitiveIndex, mSurfaceProbeFrame.runtimeMutationPrimitiveCount);
+					result.sceneOwner = overlayPrimitiveIndex < mSurfaceProbeFrame.dynamicPrimitiveCount ?
+						NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY :
+						NRI_SURFACE_PROBE_OWNER_UNKNOWN;
+				}
+			}
+		}
+	}
+
 	auto sameIdentity = [](const SurfaceProbeResult& a, const SurfaceProbeResult& b)
 	{
 		if (a.valid != b.valid || a.hit != b.hit)
@@ -4047,6 +4136,8 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 			a.textureId == b.textureId &&
 			a.materialLightingFlags == b.materialLightingFlags &&
 			a.primitiveFlags == b.primitiveFlags &&
+			a.sceneDataSource == b.sceneDataSource &&
+			a.sceneOwner == b.sceneOwner &&
 			a.materialIndex == b.materialIndex &&
 			(a.provenance.sourceType != nri_scene::SurfaceSourceType::Unknown || a.primitiveIndex == b.primitiveIndex);
 	};
@@ -4070,10 +4161,55 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	const uint32_t lightingFlags = result.materialLightingFlags;
 	const int32_t localSpaceIndex = result.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)result.provenance.mapChunkIndex) : -1;
 	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, result.provenance);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	bool chunkResidentStatic = false;
+	bool chunkReplaced = false;
+	bool chunkSectorDirty = false;
+	bool chunkDragged = false;
+	bool chunkBlindSpot = false;
+	uint32_t chunkReasonMask = 0;
+	uint32_t chunkSectionDirtyCount = 0;
+	uint32_t replacementSurfaceCount = 0;
+	uint32_t replacementTriangleCount = 0;
+	if (result.provenance.mapChunkIndex >= 0)
+	{
+		const uint32_t chunkIndex = (uint32_t)result.provenance.mapChunkIndex;
+		for (const auto& chunkCache : mStaticMapScene.chunks)
+		{
+			if (chunkCache.chunkIndex == chunkIndex)
+			{
+				chunkResidentStatic = true;
+				break;
+			}
+		}
+		if (chunkIndex < mRuntimeMapMutations.chunks.size())
+		{
+			const auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
+			chunkReplaced = replacement.active;
+			chunkSectorDirty = replacement.sectorDirty;
+			chunkDragged = replacement.dragged;
+			chunkBlindSpot = replacement.blindSpot;
+			chunkReasonMask = replacement.reasonMask;
+			chunkSectionDirtyCount = replacement.sectionDirtyCount;
+			replacementSurfaceCount = replacement.surfaceCount;
+			replacementTriangleCount = replacement.triangleCount;
+		}
+	}
+	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
+		GetSurfaceProbeSceneOwnerName(result.sceneOwner),
+		GetSceneDataSourceName(result.sceneDataSource),
 		result.provenance.mapChunkIndex,
+		YesNo(chunkResidentStatic),
+		YesNo(chunkReplaced),
+		chunkReasons.c_str(),
+		chunkSectionDirtyCount,
+		YesNo(chunkSectorDirty),
+		YesNo(chunkDragged),
+		YesNo(chunkBlindSpot),
+		replacementSurfaceCount,
+		replacementTriangleCount,
 		localSpaceIndex,
 		portalGraphIndex,
 		result.provenance.sectorIndex,
@@ -4128,10 +4264,55 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 	const uint32_t lightingFlags = mLastSurfaceProbe.materialLightingFlags;
 	const int32_t localSpaceIndex = mLastSurfaceProbe.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex) : -1;
 	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, mLastSurfaceProbe.provenance);
-	Printf("NRI PT surface probe: source=%s drawlist=%s chunk=%d local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	bool chunkResidentStatic = false;
+	bool chunkReplaced = false;
+	bool chunkSectorDirty = false;
+	bool chunkDragged = false;
+	bool chunkBlindSpot = false;
+	uint32_t chunkReasonMask = 0;
+	uint32_t chunkSectionDirtyCount = 0;
+	uint32_t replacementSurfaceCount = 0;
+	uint32_t replacementTriangleCount = 0;
+	if (mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
+	{
+		const uint32_t chunkIndex = (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex;
+		for (const auto& chunkCache : mStaticMapScene.chunks)
+		{
+			if (chunkCache.chunkIndex == chunkIndex)
+			{
+				chunkResidentStatic = true;
+				break;
+			}
+		}
+		if (chunkIndex < mRuntimeMapMutations.chunks.size())
+		{
+			const auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
+			chunkReplaced = replacement.active;
+			chunkSectorDirty = replacement.sectorDirty;
+			chunkDragged = replacement.dragged;
+			chunkBlindSpot = replacement.blindSpot;
+			chunkReasonMask = replacement.reasonMask;
+			chunkSectionDirtyCount = replacement.sectionDirtyCount;
+			replacementSurfaceCount = replacement.surfaceCount;
+			replacementTriangleCount = replacement.triangleCount;
+		}
+	}
+	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
+	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
+		GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner),
+		GetSceneDataSourceName(mLastSurfaceProbe.sceneDataSource),
 		mLastSurfaceProbe.provenance.mapChunkIndex,
+		YesNo(chunkResidentStatic),
+		YesNo(chunkReplaced),
+		chunkReasons.c_str(),
+		chunkSectionDirtyCount,
+		YesNo(chunkSectorDirty),
+		YesNo(chunkDragged),
+		YesNo(chunkBlindSpot),
+		replacementSurfaceCount,
+		replacementTriangleCount,
 		localSpaceIndex,
 		portalGraphIndex,
 		mLastSurfaceProbe.provenance.sectorIndex,
@@ -4172,6 +4353,165 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		mLastSurfaceProbe.glowColor[0],
 		mLastSurfaceProbe.glowColor[1],
 		mLastSurfaceProbe.glowColor[2]);
+}
+
+void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
+{
+	if (!mMapWorld.valid)
+	{
+		Printf("NRI PT chunk dump: no authoritative map world has been built yet.\n");
+		return;
+	}
+
+	if (chunkIndex < 0)
+	{
+		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit && mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
+		{
+			chunkIndex = mLastSurfaceProbe.provenance.mapChunkIndex;
+		}
+		else
+		{
+			Printf("NRI PT chunk dump: no chunk was specified and the last surface probe hit did not resolve to a map chunk.\n");
+			return;
+		}
+	}
+
+	if (chunkIndex < 0 || (unsigned)chunkIndex >= mMapWorld.chunks.size())
+	{
+		Printf("NRI PT chunk dump: chunk %d is out of range [0,%u).\n", chunkIndex, (uint32_t)mMapWorld.chunks.size());
+		return;
+	}
+
+	const auto& chunk = mMapWorld.chunks[(unsigned)chunkIndex];
+	const auto staticChunkIt = std::find_if(
+		mStaticMapScene.chunks.begin(),
+		mStaticMapScene.chunks.end(),
+		[chunkIndex](const StaticMapSceneCache::ChunkCache& cache) { return cache.chunkIndex == (uint32_t)chunkIndex; });
+	const bool residentStatic = staticChunkIt != mStaticMapScene.chunks.end();
+	const auto* replacement =
+		(unsigned)chunkIndex < mRuntimeMapMutations.chunks.size() ?
+		&mRuntimeMapMutations.chunks[(unsigned)chunkIndex] :
+		nullptr;
+
+	uint32_t portalSurfaceCount = 0;
+	uint32_t skySurfaceCount = 0;
+	uint32_t surfaceTriangleCount = 0;
+	for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < chunk.surfaceCount; ++localSurfaceIndex)
+	{
+		const uint32_t surfaceIndex = chunk.firstSurface + localSurfaceIndex;
+		if (surfaceIndex >= mMapWorld.surfaces.size())
+		{
+			break;
+		}
+
+		const auto& surface = mMapWorld.surfaces[surfaceIndex];
+		surfaceTriangleCount += CountSurfaceTriangles(surface.surface);
+		if ((surface.surface.material.flags & (nri_scene::MaterialFlag_Portal | nri_scene::MaterialFlag_Mirror)) != 0)
+		{
+			portalSurfaceCount++;
+		}
+		if ((surface.surface.material.flags & nri_scene::MaterialFlag_Sky) != 0)
+		{
+			skySurfaceCount++;
+		}
+	}
+
+	uint32_t sourcePortalCount = 0;
+	for (const auto& portal : mMapWorld.portals)
+	{
+		if (portal.sourceChunkIndex == (uint32_t)chunkIndex)
+		{
+			sourcePortalCount++;
+		}
+	}
+
+	Printf("NRI PT chunk dump: chunk=%d sector=%d local_space=%u surfaces=%u tris=%u portal_surfaces=%u sky_surfaces=%u source_portals=%u resident_static=%s runtime_replaced=%s replacement_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u\n",
+		chunkIndex,
+		chunk.sectorIndex,
+		chunk.localSpaceIndex,
+		chunk.surfaceCount,
+		surfaceTriangleCount,
+		portalSurfaceCount,
+		skySurfaceCount,
+		sourcePortalCount,
+		YesNo(residentStatic),
+		YesNo(replacement != nullptr && replacement->active),
+		replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask).c_str() : "none",
+		replacement != nullptr ? replacement->sectionDirtyCount : 0u,
+		YesNo(replacement != nullptr && replacement->sectorDirty),
+		YesNo(replacement != nullptr && replacement->dragged),
+		YesNo(replacement != nullptr && replacement->blindSpot),
+		replacement != nullptr ? replacement->surfaceCount : 0u,
+		replacement != nullptr ? replacement->triangleCount : 0u);
+
+	if (residentStatic)
+	{
+		Printf("NRI PT chunk dump static: primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u as_ready=%s\n",
+			staticChunkIt->primitiveOffset,
+			staticChunkIt->primitiveCount,
+			staticChunkIt->materialOffset,
+			staticChunkIt->materialCount,
+			YesNo(staticChunkIt->accelerationStructure.accelerationStructure != nullptr));
+	}
+
+	for (const auto& portal : mMapWorld.portals)
+	{
+		if (portal.sourceChunkIndex != (uint32_t)chunkIndex)
+		{
+			continue;
+		}
+
+		Printf("NRI PT chunk portal: portal=%u source_surface=%u source_sector=%d source_wall=%d source_plane=%d target_count=%u runtime_bound=%s delta=(%.2f, %.2f, %.2f)\n",
+			portal.portalIndex,
+			portal.sourceSurfaceIndex,
+			portal.sourceSectorIndex,
+			portal.sourceWallIndex,
+			portal.sourcePlane,
+			portal.targetCount,
+			YesNo(portal.runtimeBoundTarget),
+			(float)portal.delta[0],
+			(float)portal.delta[1],
+			(float)portal.delta[2]);
+	}
+
+	for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < chunk.surfaceCount; ++localSurfaceIndex)
+	{
+		const uint32_t surfaceIndex = chunk.firstSurface + localSurfaceIndex;
+		if (surfaceIndex >= mMapWorld.surfaces.size())
+		{
+			break;
+		}
+
+		const auto& surface = mMapWorld.surfaces[surfaceIndex];
+		const uint32_t flags = surface.surface.material.flags;
+		const uint32_t textureId =
+			surface.surface.material.texture != nullptr ?
+			(uint32_t)surface.surface.material.texture->GetID().GetIndex() :
+			0u;
+		Printf("NRI PT chunk surface %u: kind=%s source=%s section=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x flags=0x%x flat=%s sprite=%s mirror=%s sky=%s portal=%s one_way=%s tile=%u pal=%d shade=%d alpha=%.3f verts=%u tris=%u\n",
+			surfaceIndex,
+			GetMapSurfaceKindName(surface.kind),
+			GetSurfaceSourceTypeName(surface.surface.provenance.sourceType),
+			surface.surface.provenance.sectionIndex,
+			surface.surface.provenance.sectorIndex,
+			surface.surface.provenance.wallIndex,
+			surface.surface.provenance.nextSectorIndex,
+			surface.surface.provenance.actorIndex,
+			surface.surface.provenance.cstat,
+			flags,
+			YesNo((flags & nri_scene::MaterialFlag_Flat) != 0),
+			YesNo((flags & nri_scene::MaterialFlag_Sprite) != 0),
+			YesNo((flags & nri_scene::MaterialFlag_Mirror) != 0),
+			YesNo((flags & nri_scene::MaterialFlag_Sky) != 0),
+			YesNo((flags & nri_scene::MaterialFlag_Portal) != 0),
+			YesNo((flags & nri_scene::MaterialFlag_OneWay) != 0),
+			textureId,
+			surface.surface.material.palette,
+			surface.surface.material.shade,
+			surface.surface.material.alpha,
+			(uint32_t)surface.surface.vertices.size(),
+			CountSurfaceTriangles(surface.surface));
+	}
 }
 
 void NRIRenderer::RefreshSceneLightSystem(

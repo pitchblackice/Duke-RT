@@ -45,6 +45,7 @@ public:
 	void PrintTextureEmissiveHeuristics() const;
 	void PrintEmissiveSurfaceDump(float radius, uint32_t limit) const;
 	void PrintSectorLightDump(float radius, uint32_t limit) const;
+	void PrintMapChunkDump(int32_t chunkIndex) const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	const char* GetAvailabilityReason() const;
 
@@ -141,6 +142,8 @@ private:
 	{
 		bool valid = false;
 		bool hit = false;
+		uint32_t sceneDataSource = UINT32_MAX;
+		uint32_t sceneOwner = 0;
 		uint32_t primitiveIndex = UINT32_MAX;
 		uint32_t materialIndex = UINT32_MAX;
 		uint32_t primitiveFlags = 0;
@@ -158,6 +161,16 @@ private:
 		float position[3] = {};
 		float normal[3] = {};
 		nri_scene::SurfaceProvenance provenance = {};
+	};
+
+	struct SurfaceProbeFrameState
+	{
+		bool valid = false;
+		bool usesStaticMapScene = false;
+		uint32_t staticPrimitiveCount = 0;
+		uint32_t runtimeSpaceLinkPrimitiveCount = 0;
+		uint32_t runtimeMutationPrimitiveCount = 0;
+		uint32_t dynamicPrimitiveCount = 0;
 	};
 
 	struct RuntimePointLightGpuData
@@ -690,6 +703,7 @@ private:
 	bool mHasPreviousCameraState = false;
 	bool mPathTracingSupported = true;
 	bool mHasRuntimeLinkTraceState = false;
+	SurfaceProbeFrameState mSurfaceProbeFrame = {};
 	bool mResetHistory = true;
 	std::string mLastHistoryResetReason = "startup";
 	bool mUseUpscaledInFinal = false;
