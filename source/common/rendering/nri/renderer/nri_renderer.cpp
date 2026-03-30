@@ -8228,6 +8228,9 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::DlssBefore));
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+	// Keep guide generation in DlssBefore, but source the main vendor input via a direct copy.
+	// This removes one avoidable failure point from the SR/RR source path while investigation is ongoing.
+	CopyTexture(composed, vendorInput);
 	return true;
 }
 
