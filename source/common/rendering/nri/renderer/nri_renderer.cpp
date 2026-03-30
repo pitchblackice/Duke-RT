@@ -896,6 +896,73 @@ namespace
 		destination.primitiveProvenance.insert(destination.primitiveProvenance.end(), source.primitiveProvenance.begin(), source.primitiveProvenance.end());
 	}
 
+	static void AppendGeometryChunk(
+		const nri_scene::GeometryData& source,
+		uint32_t sourceVertexOffset,
+		uint32_t sourceVertexCount,
+		uint32_t sourceIndexOffset,
+		uint32_t sourceIndexCount,
+		uint32_t sourcePrimitiveOffset,
+		uint32_t sourcePrimitiveCount,
+		nri_scene::GeometryData& destination)
+	{
+		if (sourceVertexOffset >= source.vertices.size() ||
+			sourcePrimitiveOffset >= source.primitives.size() ||
+			sourceVertexCount == 0 ||
+			sourcePrimitiveCount == 0)
+		{
+			return;
+		}
+
+		sourceVertexCount = std::min(sourceVertexCount, (uint32_t)source.vertices.size() - sourceVertexOffset);
+		if (sourceIndexOffset >= source.indices.size())
+		{
+			sourceIndexCount = 0;
+		}
+		else
+		{
+			sourceIndexCount = std::min(sourceIndexCount, (uint32_t)source.indices.size() - sourceIndexOffset);
+		}
+		sourcePrimitiveCount = std::min(sourcePrimitiveCount, (uint32_t)source.primitives.size() - sourcePrimitiveOffset);
+		const uint32_t sourcePrimitiveProvenanceCount =
+			sourcePrimitiveOffset < source.primitiveProvenance.size() ?
+			std::min(sourcePrimitiveCount, (uint32_t)source.primitiveProvenance.size() - sourcePrimitiveOffset) :
+			0u;
+
+		const uint32_t vertexBase = (uint32_t)destination.vertices.size();
+		destination.vertices.insert(
+			destination.vertices.end(),
+			source.vertices.begin() + sourceVertexOffset,
+			source.vertices.begin() + sourceVertexOffset + sourceVertexCount);
+
+		if (sourceIndexCount > 0)
+		{
+			destination.indices.reserve(destination.indices.size() + sourceIndexCount);
+			for (uint32_t i = 0; i < sourceIndexCount; ++i)
+			{
+				destination.indices.push_back(vertexBase + source.indices[sourceIndexOffset + i] - sourceVertexOffset);
+			}
+		}
+
+		destination.primitives.reserve(destination.primitives.size() + sourcePrimitiveCount);
+		for (uint32_t i = 0; i < sourcePrimitiveCount; ++i)
+		{
+			nri_scene::PrimitiveData copy = source.primitives[sourcePrimitiveOffset + i];
+			copy.indices[0] = vertexBase + copy.indices[0] - sourceVertexOffset;
+			copy.indices[1] = vertexBase + copy.indices[1] - sourceVertexOffset;
+			copy.indices[2] = vertexBase + copy.indices[2] - sourceVertexOffset;
+			destination.primitives.push_back(copy);
+		}
+
+		if (sourcePrimitiveProvenanceCount > 0)
+		{
+			destination.primitiveProvenance.insert(
+				destination.primitiveProvenance.end(),
+				source.primitiveProvenance.begin() + sourcePrimitiveOffset,
+				source.primitiveProvenance.begin() + sourcePrimitiveOffset + sourcePrimitiveProvenanceCount);
+		}
+	}
+
 	static void AppendMaterialBridge(const nri_scene::MaterialBridgeData& source, nri_scene::MaterialBridgeData& destination)
 	{
 		std::unordered_map<uint64_t, uint32_t> textureLookup;
@@ -2014,6 +2081,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
+	uint32_t activeStaticProbePrimitiveCount = 0;
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	bool sceneLightUsesStaticMapScene = false;
 	nri_scene::SceneDebugStats activeStats = {};
@@ -2033,6 +2101,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		activeGeometry = &mStaticMapScene.geometry;
 		activeGpuMaterials = &mStaticMapScene.gpuMaterials;
 		activeMaterialBridge = &mStaticMapScene.materialBridge;
+		activeStaticProbePrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
 		activeStats = mStaticMapScene.sceneView.stats;
 
 		const bool deferOverlayThisFrame = mUploadedStaticMapSceneLastFrame || mBuiltStaticMapSceneASLastFrame;
@@ -2259,7 +2328,21 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 				if (!overlayGeometry.primitives.empty())
 				{
-					combinedGeometry = mStaticMapScene.geometry;
+					const bool useFilteredStaticProbeGeometry =
+						hasRuntimeMutationOverlay &&
+						!mRuntimeMapMutations.replacedChunkMask.empty();
+					nri_scene::GeometryData filteredStaticGeometry;
+					if (useFilteredStaticProbeGeometry)
+					{
+						BuildFilteredStaticMapGeometry(mRuntimeMapMutations.replacedChunkMask, filteredStaticGeometry);
+						activeStaticProbePrimitiveCount = (uint32_t)filteredStaticGeometry.primitives.size();
+						combinedGeometry = std::move(filteredStaticGeometry);
+					}
+					else
+					{
+						combinedGeometry = mStaticMapScene.geometry;
+						activeStaticProbePrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
+					}
 					AppendGeometry(overlayGeometry, (uint32_t)mStaticMapScene.materialBridge.materials.size(), combinedGeometry);
 					activeGeometry = &combinedGeometry;
 					activeGpuMaterials = &combinedGpuMaterials;
@@ -2499,8 +2582,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	mSurfaceProbeFrame.valid = true;
 	mSurfaceProbeFrame.usesStaticMapScene = mUsedStaticMapSceneLastFrame;
 	mSurfaceProbeFrame.staticTlasExcludesReplacedChunks = !runtimeMutationGeometry.primitives.empty();
-	mSurfaceProbeFrame.staticProbeExcludesReplacedChunks = false;
-	mSurfaceProbeFrame.staticPrimitiveCount = mUsedStaticMapSceneLastFrame ? (uint32_t)mStaticMapScene.geometry.primitives.size() : 0u;
+	mSurfaceProbeFrame.staticProbeExcludesReplacedChunks =
+		mUsedStaticMapSceneLastFrame &&
+		activeGeometry != nullptr &&
+		activeGeometry != &mStaticMapScene.geometry &&
+		!runtimeMutationGeometry.primitives.empty();
+	mSurfaceProbeFrame.staticPrimitiveCount = mUsedStaticMapSceneLastFrame ? activeStaticProbePrimitiveCount : 0u;
 	mSurfaceProbeFrame.runtimeSpaceLinkPrimitiveCount = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
 	mSurfaceProbeFrame.runtimeMutationPrimitiveCount = (uint32_t)runtimeMutationGeometry.primitives.size();
 	mSurfaceProbeFrame.dynamicPrimitiveCount = activeDynamicGeometry != nullptr ? (uint32_t)activeDynamicGeometry->primitives.size() : 0u;
@@ -7013,6 +7100,34 @@ void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& ou
 		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
 		outTlasInstances.push_back(instance);
 		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, 0u, 0u });
+	}
+}
+
+void NRIRenderer::BuildFilteredStaticMapGeometry(const std::vector<uint8_t>& replacedChunkMask, nri_scene::GeometryData& outGeometry) const
+{
+	outGeometry = {};
+	outGeometry.vertices.reserve(mStaticMapScene.geometry.vertices.size());
+	outGeometry.indices.reserve(mStaticMapScene.geometry.indices.size());
+	outGeometry.primitives.reserve(mStaticMapScene.geometry.primitives.size());
+	outGeometry.primitiveProvenance.reserve(mStaticMapScene.geometry.primitiveProvenance.size());
+
+	for (const auto& chunk : mStaticMapScene.chunks)
+	{
+		if (chunk.chunkIndex < replacedChunkMask.size() &&
+			replacedChunkMask[chunk.chunkIndex] != 0)
+		{
+			continue;
+		}
+
+		AppendGeometryChunk(
+			mStaticMapScene.geometry,
+			chunk.vertexOffset,
+			chunk.vertexCount,
+			chunk.indexOffset,
+			chunk.indexCount,
+			chunk.primitiveOffset,
+			chunk.primitiveCount,
+			outGeometry);
 	}
 }
 
