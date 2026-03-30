@@ -7572,7 +7572,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
 	mUseUpscaledInFinal = false;
 	mUseDenoisedCompositionInputs = false;
-	mUseSplitShadowDenoiser = useShadowDebugPresent;
+	mUseSplitShadowDenoiser = useShadowDebugPresent || (useCompositionPath && nri_denoise && nri_ptdirectionallight);
 
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
@@ -7648,7 +7648,6 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			!buildRrInput || useComposedDebugPresent || useUpscalerTraceTransparentProbe || useUpscalerCopyOnlyProbe;
 
 		mUseDenoisedCompositionInputs = false;
-		mUseSplitShadowDenoiser = useShadowDebugPresent;
 
 		if (buildRrInput)
 		{
@@ -7658,6 +7657,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 				sLoggedPhaseHRrInputPath = true;
 			}
 
+			mUseSplitShadowDenoiser = false;
 			if (!DispatchComposition(FrameTextureSlot::RrInput))
 			{
 				return false;
