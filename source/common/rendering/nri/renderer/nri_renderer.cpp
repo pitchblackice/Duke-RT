@@ -7545,6 +7545,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	static bool sLoggedPhaseFTraceTransparentPath = false;
 	static bool sLoggedUpscalerProbePath = false;
 	static bool sLoggedRawTraceBypass = false;
+	static bool sLoggedPhaseHRrInputPath = false;
 	const int ptDebugMode = (int)GetEffectivePtDebugMode();
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
@@ -7571,7 +7572,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
 	mUseUpscaledInFinal = false;
 	mUseDenoisedCompositionInputs = false;
-	mUseSplitShadowDenoiser = useShadowDebugPresent || (useCompositionPath && nri_denoise && nri_ptdirectionallight);
+	mUseSplitShadowDenoiser = useShadowDebugPresent;
 
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
@@ -7641,7 +7642,34 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	auto dispatchCompositionPath = [&]() -> bool
 	{
-		if (nri_denoise)
+		const NRIMainUpscalerKind resolvedMainKind = ResolveMainUpscalerKind(false);
+		const bool buildRrInput = resolvedMainKind == NRIMainUpscalerKind::DLRR;
+		const bool needStandardComposition =
+			!buildRrInput || useComposedDebugPresent || useUpscalerTraceTransparentProbe || useUpscalerCopyOnlyProbe;
+
+		mUseDenoisedCompositionInputs = false;
+		mUseSplitShadowDenoiser = useShadowDebugPresent;
+
+		if (buildRrInput)
+		{
+			if (!sLoggedPhaseHRrInputPath)
+			{
+				Printf("NRI Phase H: DLRR now builds a separate noisy RrInput before NRD and bypasses opaque denoising for the vendor RR branch.\n");
+				sLoggedPhaseHRrInputPath = true;
+			}
+
+			if (!DispatchComposition(FrameTextureSlot::RrInput))
+			{
+				return false;
+			}
+		}
+
+		if (!needStandardComposition)
+		{
+			return true;
+		}
+
+		if (!buildRrInput && nri_denoise)
 		{
 			if (!sLoggedPhaseFDenoiserPath)
 			{
@@ -7660,10 +7688,11 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			else
 			{
 				mUseDenoisedCompositionInputs = true;
+				mUseSplitShadowDenoiser = nri_ptdirectionallight;
 			}
 		}
 
-		if (!DispatchComposition())
+		if (!DispatchComposition(FrameTextureSlot::Composed))
 		{
 			return false;
 		}
@@ -8079,7 +8108,7 @@ bool NRIRenderer::DispatchDenoiser()
 	return mNrd.Denoise(desc);
 }
 
-bool NRIRenderer::DispatchComposition()
+bool NRIRenderer::DispatchComposition(FrameTextureSlot outputSlot)
 {
 	Clocker clock(NriPTComposition);
 
@@ -8128,7 +8157,7 @@ bool NRIRenderer::DispatchComposition()
 	NRITextureResource& filteredDiffuse = GetFrameTexture(filteredDiffuseSlot);
 	NRITextureResource& filteredSpecular = GetFrameTexture(filteredSpecularSlot);
 	NRITextureResource& filteredShadow = GetFrameTexture(filteredShadowSlot);
-	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::Composed);
+	NRITextureResource& composed = GetFrameTexture(outputSlot);
 
 	mFrameBuffer->TransitionTexture(diffuse, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(specular, NRIComputeShaderResourceState());
@@ -8193,7 +8222,6 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 		return false;
 	}
 
-	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::TraceTransparentOutput);
 	const FrameTextureSlot vendorInputSlot =
 		mainKind == NRIMainUpscalerKind::DLSR ? FrameTextureSlot::SrInput :
 		FrameTextureSlot::RrInput;
@@ -8205,10 +8233,12 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	NRITextureResource& rrGuideNormalRoughness = GetFrameTexture(FrameTextureSlot::RrGuideNormalRoughness);
 	const bool useSrPrepass = mainKind == NRIMainUpscalerKind::DLSR;
 
-	// Main upscaler input is just the post-transparent beauty signal for both SR and RR.
-	// Copy it before running any guide-generation compute so the source path is independent
-	// of the prepass dispatch ordering while SR/RR integration is still being stabilized.
-	CopyTexture(composed, vendorInput);
+	// SR consumes the post-transparent composed signal, while RR now arrives with an
+	// explicitly prepared noisy RrInput from the frame-graph path above.
+	if (useSrPrepass)
+	{
+		CopyTexture(GetFrameTexture(FrameTextureSlot::TraceTransparentOutput), vendorInput);
+	}
 	mFrameBuffer->TransitionTexture(vendorInput, NRIComputeShaderResourceState());
 
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
@@ -8394,9 +8424,12 @@ bool NRIRenderer::DispatchUpscaleChain()
 	const NRIPostSharpenKind postSharpenKind = ResolvePostSharpenKind(true);
 	const bool runAppTaa = ShouldRunAppTaa(mainKind);
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::TraceTransparentOutput);
+	const FrameTextureSlot vendorSourceSlot =
+		mainKind == NRIMainUpscalerKind::DLRR ? FrameTextureSlot::RrInput :
+		FrameTextureSlot::TraceTransparentOutput;
 	NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
-	TraceTemporalState("upscale-entry", mainKind, postSharpenKind, runAppTaa, mHistoryOutputSlot, FrameTextureSlot::TraceTransparentOutput);
+	TraceTemporalState("upscale-entry", mainKind, postSharpenKind, runAppTaa, mHistoryOutputSlot, vendorSourceSlot);
 
 	if (runAppTaa)
 	{
@@ -8451,6 +8484,11 @@ bool NRIRenderer::DispatchUpscaleChain()
 	{
 		// Keep ptdebug 13 meaningful even when app-TAA is intentionally bypassed for vendor SR.
 		CopyTexture(composed, historyOutput);
+	}
+	else if (mainKind == NRIMainUpscalerKind::DLRR)
+	{
+		// Keep ptdebug 13 meaningful for RR as well by exposing the explicit noisy RR input.
+		CopyTexture(GetFrameTexture(FrameTextureSlot::RrInput), historyOutput);
 	}
 
 	FrameTextureSlot resolvedInputSlot = mHistoryOutputSlot;
@@ -8513,7 +8551,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mUseUpscaledInFinal = true;
 		mUpscaledInputSlot = FrameTextureSlot::VendorOutput;
 		resolvedInputSlot = FrameTextureSlot::VendorOutput;
-		TraceTemporalState("upscale-vendor", mainKind, postSharpenKind, runAppTaa, mUpscaledInputSlot, FrameTextureSlot::TraceTransparentOutput);
+		TraceTemporalState("upscale-vendor", mainKind, postSharpenKind, runAppTaa, mUpscaledInputSlot, vendorSourceSlot);
 	}
 	else
 	{
