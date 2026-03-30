@@ -1,5 +1,6 @@
 #include "nri_hwtexture.h"
 
+#include "../scene/nri_texture_signature.h"
 #include "nri_renderdevice.h"
 #include "printf.h"
 #include "textures.h"
@@ -7,6 +8,32 @@
 
 namespace
 {
+	bool TryBuildHardwareTextureSignature(FTexture* texture, int translation, int flags, nri_scene::TextureSignature& outSignature)
+	{
+		outSignature = {};
+		if (texture == nullptr || !nri_scene::IsTexturePersistentSignatureEligible(texture))
+		{
+			return false;
+		}
+
+		nri_scene::TextureSignatureRequest request = {};
+		request.contentKind = nri_scene::TextureSignatureContentKind::ProcessedBGRA;
+		request.translation = translation;
+		request.flags = nri_scene::TextureSignatureRequestFlag_None;
+		if ((flags & CTF_Expand) != 0)
+		{
+			request.flags |= nri_scene::TextureSignatureRequestFlag_Expand;
+		}
+		if ((flags & CTF_Upscale) != 0)
+		{
+			request.flags |= nri_scene::TextureSignatureRequestFlag_Upscale;
+		}
+
+		return nri_scene::TryBuildImageTextureSignature(texture, request, outSignature) &&
+			outSignature.valid &&
+			outSignature.persistentEligible;
+	}
+
 	bool TryMemcpyTexturePixels(void* dst, const void* src, size_t size)
 	{
 		if (dst == nullptr || src == nullptr || size == 0)
@@ -104,6 +131,22 @@ void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags
 		mFrameBuffer->Note2DTextureEnsure(false);
 	}
 
+	nri_scene::TextureSignature signature = {};
+	const bool hasMetadataSignature = TryBuildHardwareTextureSignature(tex, translation, flags, signature);
+	if (hasMetadataSignature &&
+		mResource.texture != nullptr &&
+		mContentId == signature.key &&
+		mResource.width == signature.width &&
+		mResource.height == signature.height &&
+		mResource.format == nri::Format::BGRA8_UNORM)
+	{
+		if (mFrameBuffer != nullptr)
+		{
+			mFrameBuffer->Note2DTextureCacheHit();
+		}
+		return;
+	}
+
 	FTextureBuffer texBuffer = tex->CreateTexBuffer(translation, flags | CTF_ProcessData);
 	if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
 	{
@@ -158,7 +201,7 @@ void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags
 
 	CreateTextureResource((uint32_t)texBuffer.mWidth, (uint32_t)texBuffer.mHeight, nri::Format::BGRA8_UNORM, nri::TextureUsageBits::SHADER_RESOURCE);
 	UploadTextureData(uploadPixels.data(), (uint32_t)texBuffer.mWidth, (uint32_t)texBuffer.mHeight, nri::Format::BGRA8_UNORM, (uint32_t)texBuffer.mWidth * 4u);
-	mContentId = texBuffer.mContentId;
+	mContentId = hasMetadataSignature ? signature.key : texBuffer.mContentId;
 }
 
 void NRIHardwareTexture::EnsureCanvas(FTexture* tex)
