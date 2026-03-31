@@ -14,6 +14,7 @@
 #define MAX_SCENE_TEXTURES 256
 #define NRI_FLAG_USE_JITTER 0x40u
 #define NRI_FLAG_FAST_EMISSIVE_SHADOW 0x100u
+#define NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS 0x200u
 #define NRI_TAA_JITTER_PHASE_COUNT 8u
 
 #define MATERIAL_FLAG_INDEXED 1
@@ -80,6 +81,7 @@ struct PrimitiveData
 	float3 normal;
 	uint flags;
 	uint portalIndex;
+	uint reserved0;
 };
 
 struct MaterialData
@@ -246,6 +248,7 @@ StructuredBuffer<float> gEmissivePrimitiveCdf : register(t15, space2);
 StructuredBuffer<SectorLightHeaderData> gSectorLightHeaders : register(t16, space2);
 StructuredBuffer<SectorLightData> gSectorLights : register(t17, space2);
 StructuredBuffer<ReprojectionData> gReprojectionDataBuffer : register(t18, space2);
+StructuredBuffer<uint> gVisibleChunkWords : register(t19, space2);
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);

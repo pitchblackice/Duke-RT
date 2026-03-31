@@ -50,6 +50,7 @@ public:
 	void PrintMapBuildTrace(int32_t chunkIndex, int32_t sectorIndex) const;
 	void PrintMapSectorTrace(int32_t sectorIndex) const;
 	void PrintMapRorTrace(int32_t sectorIndex) const;
+	void PrintVisibleSectorTrace(int32_t sectorIndex) const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	const char* GetAvailabilityReason() const;
 
@@ -471,6 +472,7 @@ private:
 		SectorLightHeaderGpuData& outHeader,
 		std::vector<SectorLightGpuData>& outSectors);
 	bool UpdateReprojectionBuffer();
+	bool UpdateVisibleChunkBuffer();
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -627,6 +629,7 @@ private:
 	NRIBufferResource mSectorLightHeaderBuffer;
 	NRIBufferResource mSectorLightBuffer;
 	NRIBufferResource mReprojectionBuffer;
+	NRIBufferResource mVisibleChunkBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
@@ -644,6 +647,7 @@ private:
 	SceneBufferDebugStats mSectorLightHeaderBufferStats = { "SectorLightHeader" };
 	SceneBufferDebugStats mSectorLightBufferStats = { "SectorLight" };
 	SceneBufferDebugStats mReprojectionBufferStats = { "Reprojection" };
+	SceneBufferDebugStats mVisibleChunkBufferStats = { "VisibleChunk" };
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
@@ -664,10 +668,14 @@ private:
 	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
-	std::array<nri::Descriptor*, 19> mSceneDataDescriptors = {};
+	std::array<nri::Descriptor*, 20> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;
+	std::vector<uint8_t> mCurrentVisibleSectorMask;
+	std::vector<uint32_t> mCurrentVisibleChunkWords;
+	uint32_t mCurrentVisibleSectorCount = 0;
+	uint32_t mCurrentVisibleChunkCount = 0;
 	uint32_t mFrameIndex = 0;
 	uint32_t mRenderWidth = 0;
 	uint32_t mRenderHeight = 0;

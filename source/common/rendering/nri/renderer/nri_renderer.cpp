@@ -80,6 +80,7 @@ CVAR(Int, nri_ptsectorfiltermaxshade, 127, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfilterlotag, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorpulseframes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorpulseamount, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptvisiblechunkgate, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Int, nri_pttraceframes)
@@ -88,7 +89,7 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 19;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 20;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
@@ -132,6 +133,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
 	constexpr uint32_t NRI_FLAG_FAST_EMISSIVE_SHADOW = 0x100u;
+	constexpr uint32_t NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS = 0x200u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
@@ -6005,6 +6007,77 @@ void NRIRenderer::PrintMapRorTrace(int32_t sectorIndex) const
 	}
 }
 
+void NRIRenderer::PrintVisibleSectorTrace(int32_t sectorIndex) const
+{
+	if (sectorIndex < 0)
+	{
+		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit && mLastSurfaceProbe.provenance.sectorIndex >= 0)
+		{
+			sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
+		}
+		else
+		{
+			Printf("NRI PT visible trace: no sector was specified and the last probe did not resolve to a sector.\n");
+			return;
+		}
+	}
+
+	if (!validSectorIndex(sectorIndex))
+	{
+		Printf("NRI PT visible trace: sector %d is out of range [0,%u).\n", sectorIndex, (uint32_t)sector.Size());
+		return;
+	}
+
+	const int32_t chunkIndex = mMapWorld.valid ? FindMapChunkIndexForSector(mMapWorld, sectorIndex) : -1;
+	const bool sectorVisible =
+		(unsigned)sectorIndex < mCurrentVisibleSectorMask.size() &&
+		mCurrentVisibleSectorMask[(unsigned)sectorIndex] != 0u;
+	const bool chunkVisible =
+		chunkIndex >= 0 &&
+		((uint32_t)chunkIndex >> 5u) < mCurrentVisibleChunkWords.size() &&
+		(mCurrentVisibleChunkWords[(uint32_t)chunkIndex >> 5u] & (1u << ((uint32_t)chunkIndex & 31u))) != 0u;
+
+	Printf("NRI PT visible trace: sector=%d chunk=%d sector_visible=%s chunk_visible=%s visible_sector_count=%u visible_chunk_count=%u gate_enabled=%s camera_local_space=%u\n",
+		sectorIndex,
+		chunkIndex,
+		YesNo(sectorVisible),
+		YesNo(chunkVisible),
+		mCurrentVisibleSectorCount,
+		mCurrentVisibleChunkCount,
+		YesNo(nri_ptvisiblechunkgate),
+		mCurrentCameraLocalSpaceIndex);
+
+	std::string neighborLine = "NRI PT visible neighbors:";
+	const auto& sec = sector[(unsigned)sectorIndex];
+	for (const auto& wal : sec.walls)
+	{
+		if (!wal.twoSided())
+		{
+			continue;
+		}
+
+		const int32_t adjacentSectorIndex = wal.nextsector;
+		if (!validSectorIndex(adjacentSectorIndex))
+		{
+			continue;
+		}
+
+		const int32_t adjacentChunkIndex = mMapWorld.valid ? FindMapChunkIndexForSector(mMapWorld, adjacentSectorIndex) : -1;
+		const bool adjacentSectorVisible =
+			(unsigned)adjacentSectorIndex < mCurrentVisibleSectorMask.size() &&
+			mCurrentVisibleSectorMask[(unsigned)adjacentSectorIndex] != 0u;
+		const bool adjacentChunkVisible =
+			adjacentChunkIndex >= 0 &&
+			((uint32_t)adjacentChunkIndex >> 5u) < mCurrentVisibleChunkWords.size() &&
+			(mCurrentVisibleChunkWords[(uint32_t)adjacentChunkIndex >> 5u] & (1u << ((uint32_t)adjacentChunkIndex & 31u))) != 0u;
+		neighborLine += " [sector=" + std::to_string(adjacentSectorIndex) +
+			" chunk=" + std::to_string(adjacentChunkIndex) +
+			" sector_visible=" + std::string(YesNo(adjacentSectorVisible)) +
+			" chunk_visible=" + std::string(YesNo(adjacentChunkVisible)) + "]";
+	}
+	Printf("%s\n", neighborLine.c_str());
+}
+
 void NRIRenderer::RefreshSceneLightSystem(
 	bool usedStaticMapScene,
 	const nri_scene::SceneView* capturedSceneView,
@@ -6916,6 +6989,50 @@ bool NRIRenderer::UpdateReprojectionBuffer()
 	return true;
 }
 
+bool NRIRenderer::UpdateVisibleChunkBuffer()
+{
+	const uint32_t defaultVisibleChunkWord = 0u;
+	const void* visibleChunkData = mCurrentVisibleChunkWords.empty() ? (const void*)&defaultVisibleChunkWord : mCurrentVisibleChunkWords.data();
+	const size_t visibleChunkSize = mCurrentVisibleChunkWords.empty() ? sizeof(uint32_t) : mCurrentVisibleChunkWords.size() * sizeof(uint32_t);
+	if (!EnsureStructuredBuffer(
+		mVisibleChunkBuffer,
+		mVisibleChunkBufferStats,
+		visibleChunkData,
+		visibleChunkSize,
+		sizeof(uint32_t),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (mSceneDataDescriptors[19] != mVisibleChunkBuffer.shaderView)
+	{
+		mSceneDataDescriptors[19] = mVisibleChunkBuffer.shaderView;
+		bool descriptorsReady = mSceneDataSet != nullptr;
+		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
+		{
+			if (descriptor == nullptr)
+			{
+				descriptorsReady = false;
+				break;
+			}
+		}
+
+		if (descriptorsReady)
+		{
+			nri::UpdateDescriptorRangeDesc update = {};
+			update.descriptorSet = mSceneDataSet;
+			update.rangeIndex = 0;
+			update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
+			update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
+			mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+		}
+	}
+
+	return true;
+}
+
 void NRIRenderer::BuildRuntimeLightClusterUpload(
 	std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 	std::vector<uint32_t>& outIndices,
@@ -7042,6 +7159,11 @@ bool NRIRenderer::UpdateSceneDataSet(
 	uint32_t dynamicMaterialCount)
 {
 	if (!UpdateReprojectionBuffer())
+	{
+		return false;
+	}
+
+	if (!UpdateVisibleChunkBuffer())
 	{
 		return false;
 	}
@@ -7199,6 +7321,11 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
+	if (!UpdateVisibleChunkBuffer())
+	{
+		return false;
+	}
+
 	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
 	{
 		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
@@ -7224,6 +7351,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mSectorLightHeaderBuffer.shaderView,
 		mSectorLightBuffer.shaderView,
 		mReprojectionBuffer.shaderView,
+		mVisibleChunkBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
@@ -8280,10 +8408,22 @@ bool NRIRenderer::UploadSceneBuffers(
 	mMaterialBufferStats.growEventsLastFrame = 0;
 	mMaterialBufferStats.overwriteEventsLastFrame = 0;
 
+	std::vector<nri_scene::PrimitiveData> gpuPrimitives = geometry.primitives;
+	const size_t primitiveCount = std::min(gpuPrimitives.size(), geometry.primitiveProvenance.size());
+	for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+	{
+		const int32_t chunkIndex = geometry.primitiveProvenance[primitiveIndex].mapChunkIndex;
+		gpuPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+	}
+	for (size_t primitiveIndex = primitiveCount; primitiveIndex < gpuPrimitives.size(); ++primitiveIndex)
+	{
+		gpuPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+	}
+
 	return
 		EnsureStructuredBuffer(vertexBuffer, mVertexBufferStats, geometry.vertices.data(), geometry.vertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
 		EnsureStructuredBuffer(indexBuffer, mIndexBufferStats, geometry.indices.data(), geometry.indices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
-		EnsureStructuredBuffer(primitiveBuffer, mPrimitiveBufferStats, geometry.primitives.data(), geometry.primitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
+		EnsureStructuredBuffer(primitiveBuffer, mPrimitiveBufferStats, gpuPrimitives.data(), gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
 		EnsureStructuredBuffer(materialBuffer, mMaterialBufferStats, materials.data(), materials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess());
 }
 
@@ -9918,6 +10058,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		(mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
 		(nri_ptdirectionallight ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
 		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
+		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
@@ -10719,6 +10860,45 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 		}
 	}
 
+	mCurrentVisibleSectorMask.assign(sector.Size(), 0u);
+	mCurrentVisibleSectorCount = 0;
+	mCurrentVisibleChunkCount = 0;
+	const size_t visibleChunkWordCount = std::max<size_t>((mMapWorld.chunks.size() + 31u) / 32u, 1u);
+	mCurrentVisibleChunkWords.assign(visibleChunkWordCount, 0u);
+	const BitArray& visibleSectors = di.GetVisibleSectors();
+	for (unsigned sectorIndex = 0; sectorIndex < visibleSectors.Size(); ++sectorIndex)
+	{
+		if (!visibleSectors.Check(sectorIndex))
+		{
+			continue;
+		}
+
+		if (sectorIndex < mCurrentVisibleSectorMask.size() && mCurrentVisibleSectorMask[sectorIndex] == 0u)
+		{
+			mCurrentVisibleSectorMask[sectorIndex] = 1u;
+			mCurrentVisibleSectorCount++;
+		}
+
+		if (!mMapWorld.valid)
+		{
+			continue;
+		}
+
+		const int32_t chunkIndex = FindMapChunkIndexForSector(mMapWorld, (int32_t)sectorIndex);
+		if (chunkIndex < 0)
+		{
+			continue;
+		}
+
+		const uint32_t wordIndex = (uint32_t)chunkIndex >> 5u;
+		const uint32_t bitMask = 1u << ((uint32_t)chunkIndex & 31u);
+		if (wordIndex < mCurrentVisibleChunkWords.size() && (mCurrentVisibleChunkWords[wordIndex] & bitMask) == 0u)
+		{
+			mCurrentVisibleChunkWords[wordIndex] |= bitMask;
+			mCurrentVisibleChunkCount++;
+		}
+	}
+
 	const float* projection = di.VPUniforms.mProjectionMatrix.get();
 	const float projectionScaleX = projection != nullptr ? std::fabs(projection[0]) : 0.0f;
 	const float projectionScaleY = projection != nullptr ? std::fabs(projection[5]) : 0.0f;
@@ -10981,6 +11161,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mSectorLightHeaderBuffer);
 	DestroyBufferResource(mSectorLightBuffer);
 	DestroyBufferResource(mReprojectionBuffer);
+	DestroyBufferResource(mVisibleChunkBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);

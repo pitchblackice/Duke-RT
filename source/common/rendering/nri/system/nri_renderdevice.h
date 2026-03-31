@@ -74,6 +74,7 @@ public:
 	void PrintPathTracingMapBuildTrace(int32_t chunkIndex, int32_t sectorIndex) const;
 	void PrintPathTracingMapSectorTrace(int32_t sectorIndex) const;
 	void PrintPathTracingMapRorTrace(int32_t sectorIndex) const;
+	void PrintPathTracingVisibleSectorTrace(int32_t sectorIndex) const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
 
 private:
