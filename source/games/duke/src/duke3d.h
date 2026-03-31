@@ -57,6 +57,7 @@ struct GameInterface : public ::GameInterface
 	void EnterPortal(DCoreActor* viewer, int type) override;
 	void LeavePortal(DCoreActor* viewer, int type) override;
 	bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) override;
+	bool GetGeoEffectDebugInfo(int sectorIndex, GeoEffectDebugInfo* info) override;
 	bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) override;
 	bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) override;
 	void AddExcludedEpisode(const FString& episode) override;

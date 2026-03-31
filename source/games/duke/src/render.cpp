@@ -122,6 +122,62 @@ bool GameInterface::GetGeoEffect(GeoEffect* eff, sectortype* viewsector)
 	return false;
 }
 
+bool GameInterface::GetGeoEffectDebugInfo(int sectorIndex, GeoEffectDebugInfo* info)
+{
+	if (info == nullptr || sectorIndex < 0 || (unsigned)sectorIndex >= sector.Size())
+	{
+		return false;
+	}
+
+	*info = {};
+	info->available = true;
+	info->rrGame = isRR();
+	info->activeForSector = info->rrGame && sector[(unsigned)sectorIndex].lotag == 848;
+	info->sectorIndex = sectorIndex;
+	info->totalGroupCount = geocnt;
+
+	if (!info->rrGame)
+	{
+		return true;
+	}
+
+	uint32_t storedGroupCount = 0;
+	for (int groupIndex = 0; groupIndex < geocnt; ++groupIndex)
+	{
+		const int32_t sourceSectorIndex = geosector[groupIndex] != nullptr ? sectindex(geosector[groupIndex]) : -1;
+		const int32_t warpSectorIndex = geosectorwarp[groupIndex] != nullptr ? sectindex(geosectorwarp[groupIndex]) : -1;
+		const int32_t warpSector2Index = geosectorwarp2[groupIndex] != nullptr ? sectindex(geosectorwarp2[groupIndex]) : -1;
+		const bool matchesSource = sourceSectorIndex == sectorIndex;
+		const bool matchesWarp = warpSectorIndex == sectorIndex;
+		const bool matchesWarp2 = warpSector2Index == sectorIndex;
+		if (!matchesSource && !matchesWarp && !matchesWarp2)
+		{
+			continue;
+		}
+
+		info->matchedGroupCount++;
+		if (storedGroupCount >= GeoEffectDebugInfo::MaxStoredGroups)
+		{
+			continue;
+		}
+
+		auto& group = info->groups[storedGroupCount++];
+		group.available = true;
+		group.sourceSectorIndex = sourceSectorIndex;
+		group.warpSectorIndex = warpSectorIndex;
+		group.warpSector2Index = warpSector2Index;
+		group.dx = geox[groupIndex];
+		group.dy = geoy[groupIndex];
+		group.dx2 = geox2[groupIndex];
+		group.dy2 = geoy2[groupIndex];
+		group.queryMatchesSource = matchesSource;
+		group.queryMatchesWarp = matchesWarp;
+		group.queryMatchesWarp2 = matchesWarp2;
+	}
+
+	return true;
+}
+
 bool GameInterface::GetRuntimeLinkDebugState(RuntimeLinkDebugState* state)
 {
 	if (state == nullptr)

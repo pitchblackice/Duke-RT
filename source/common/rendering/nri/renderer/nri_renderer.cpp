@@ -781,6 +781,31 @@ namespace
 		return true;
 	}
 
+	static std::string GetEffectorSummary(const RuntimeTaggedSectorDebugInfo& info)
+	{
+		if (info.effectorCount == 0)
+		{
+			return "none";
+		}
+
+		std::string summary;
+		const uint32_t storedEffectors = std::min<uint32_t>(info.effectorCount, (uint32_t)countof(info.effectorLotags));
+		for (uint32_t effectorIndex = 0; effectorIndex < storedEffectors; ++effectorIndex)
+		{
+			if (!summary.empty())
+			{
+				summary += ",";
+			}
+			summary += std::to_string(info.effectorLotags[effectorIndex]) +
+				"/" + std::to_string(info.effectorHitags[effectorIndex]);
+		}
+		if (info.effectorCount > storedEffectors)
+		{
+			summary += ",...";
+		}
+		return summary;
+	}
+
 	static const char* GetSkyModeName(nri_scene::PTSkyMode mode)
 	{
 		switch (mode)
@@ -5818,6 +5843,165 @@ void NRIRenderer::PrintMapSectorTrace(int32_t sectorIndex) const
 			YesNo((wal.cstat & CSTAT_WALL_1WAY) != 0),
 			YesNo((wal.cstat & CSTAT_WALL_MASKED) != 0),
 			YesNo((wal.cstat & CSTAT_WALL_ALIGN_BOTTOM) != 0));
+	}
+}
+
+void NRIRenderer::PrintMapRorTrace(int32_t sectorIndex) const
+{
+	if (sectorIndex < 0)
+	{
+		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit && mLastSurfaceProbe.provenance.sectorIndex >= 0)
+		{
+			sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
+		}
+		else
+		{
+			Printf("NRI PT ROR trace: no sector was specified and the last probe did not resolve to a sector.\n");
+			return;
+		}
+	}
+
+	if (!validSectorIndex(sectorIndex))
+	{
+		Printf("NRI PT ROR trace: sector %d is out of range [0,%u).\n", sectorIndex, (uint32_t)sector.Size());
+		return;
+	}
+
+	const int32_t chunkIndex = mMapWorld.valid ? FindMapChunkIndexForSector(mMapWorld, sectorIndex) : -1;
+	const uint32_t localSpaceIndex =
+		chunkIndex >= 0 && (unsigned)chunkIndex < mMapWorld.chunks.size() ?
+		mMapWorld.chunks[(unsigned)chunkIndex].localSpaceIndex :
+		UINT32_MAX;
+	const auto& sec = sector[(unsigned)sectorIndex];
+	const auto* replacement =
+		chunkIndex >= 0 && (unsigned)chunkIndex < mRuntimeMapMutations.chunks.size() ?
+		&mRuntimeMapMutations.chunks[(unsigned)chunkIndex] :
+		nullptr;
+
+	Printf("NRI PT ROR trace: sector=%d chunk=%d local_space=%u camera_local_space=%u portalflags=%s(0x%x) portalnum=%d exflags=0x%x exflags_summary=%s lotag=%d hitag=%d runtime_replaced=%s replacement_reasons=%s dragged=%s blind_spot=%s\n",
+		sectorIndex,
+		chunkIndex,
+		localSpaceIndex,
+		mCurrentCameraLocalSpaceIndex,
+		GetSectorPortalFlagName(sec.portalflags),
+		sec.portalflags,
+		(int)sec.portalnum,
+		(unsigned)sec.exflags,
+		GetSectorExflagsSummary((uint16_t)sec.exflags).c_str(),
+		(int)sec.lotag,
+		(int)sec.hitag,
+		YesNo(replacement != nullptr && replacement->active),
+		replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask).c_str() : "none",
+		YesNo(replacement != nullptr && replacement->dragged),
+		YesNo(replacement != nullptr && replacement->blindSpot));
+
+	std::array<RuntimeTaggedSectorDebugInfo, 16> controls = {};
+	uint32_t controlCount = 0;
+	RuntimeTaggedSectorDebugInfo rootInfo = {};
+	if (GetRuntimeSectorControlInfo(sectorIndex, rootInfo))
+	{
+		controls[controlCount++] = rootInfo;
+	}
+
+	for (const auto& wal : sec.walls)
+	{
+		if (!wal.twoSided())
+		{
+			continue;
+		}
+
+		RuntimeTaggedSectorDebugInfo adjacentInfo = {};
+		if (!GetRuntimeSectorControlInfo(wal.nextsector, adjacentInfo))
+		{
+			continue;
+		}
+
+		bool alreadyStored = false;
+		for (uint32_t i = 0; i < controlCount; ++i)
+		{
+			if (controls[i].sectorIndex == adjacentInfo.sectorIndex)
+			{
+				alreadyStored = true;
+				break;
+			}
+		}
+		if (!alreadyStored && controlCount < controls.size())
+		{
+			controls[controlCount++] = adjacentInfo;
+		}
+	}
+
+	std::string controlLine = "NRI PT ROR controls:";
+	for (uint32_t i = 0; i < controlCount; ++i)
+	{
+		const auto& info = controls[i];
+		const int32_t infoChunkIndex = mMapWorld.valid ? FindMapChunkIndexForSector(mMapWorld, info.sectorIndex) : -1;
+		const uint32_t infoLocalSpaceIndex =
+			infoChunkIndex >= 0 && (unsigned)infoChunkIndex < mMapWorld.chunks.size() ?
+			mMapWorld.chunks[(unsigned)infoChunkIndex].localSpaceIndex :
+			UINT32_MAX;
+		controlLine += " [sector=" + std::to_string(info.sectorIndex) +
+			" chunk=" + std::to_string(infoChunkIndex) +
+			" local_space=" + std::to_string(infoLocalSpaceIndex) +
+			" lotag=" + std::to_string(info.lotag) +
+			" hitag=" + std::to_string(info.hitag) +
+			" effectors=" + GetEffectorSummary(info) + "]";
+	}
+	Printf("%s\n", controlLine.c_str());
+
+	bool anyGeoInfo = false;
+	for (uint32_t i = 0; i < controlCount; ++i)
+	{
+		GeoEffectDebugInfo geoInfo = {};
+		if (gi == nullptr || !gi->GetGeoEffectDebugInfo(controls[i].sectorIndex, &geoInfo) || !geoInfo.available)
+		{
+			continue;
+		}
+
+		Printf("NRI PT ROR geo effect: sector=%d rr_game=%s active_for_sector=%s total_groups=%u matched_groups=%u\n",
+			controls[i].sectorIndex,
+			YesNo(geoInfo.rrGame),
+			YesNo(geoInfo.activeForSector),
+			geoInfo.totalGroupCount,
+			geoInfo.matchedGroupCount);
+		anyGeoInfo = true;
+
+		const uint32_t storedGroupCount = std::min<uint32_t>(geoInfo.matchedGroupCount, GeoEffectDebugInfo::MaxStoredGroups);
+		for (uint32_t groupIndex = 0; groupIndex < storedGroupCount; ++groupIndex)
+		{
+			const auto& group = geoInfo.groups[groupIndex];
+			if (!group.available)
+			{
+				continue;
+			}
+
+			const int32_t sourceChunkIndex = mMapWorld.valid ? FindMapChunkIndexForSector(mMapWorld, group.sourceSectorIndex) : -1;
+			const int32_t warpChunkIndex = mMapWorld.valid ? FindMapChunkIndexForSector(mMapWorld, group.warpSectorIndex) : -1;
+			const int32_t warp2ChunkIndex = mMapWorld.valid ? FindMapChunkIndexForSector(mMapWorld, group.warpSector2Index) : -1;
+			const char* matchSource = group.queryMatchesSource ? "source" : "";
+			const char* matchWarp = group.queryMatchesWarp ? (group.queryMatchesSource ? "|warp" : "warp") : "";
+			const char* matchWarp2 = group.queryMatchesWarp2 ? ((group.queryMatchesSource || group.queryMatchesWarp) ? "|warp2" : "warp2") : "";
+			Printf("NRI PT ROR geo group: query_sector=%d source_sector=%d source_chunk=%d warp_sector=%d warp_chunk=%d dxy=(%.2f, %.2f) warp2_sector=%d warp2_chunk=%d dxy2=(%.2f, %.2f) query_match=%s%s%s\n",
+				controls[i].sectorIndex,
+				group.sourceSectorIndex,
+				sourceChunkIndex,
+				group.warpSectorIndex,
+				warpChunkIndex,
+				group.dx,
+				group.dy,
+				group.warpSector2Index,
+				warp2ChunkIndex,
+				group.dx2,
+				group.dy2,
+				matchSource,
+				matchWarp,
+				matchWarp2);
+		}
+	}
+
+	if (!anyGeoInfo)
+	{
+		Printf("NRI PT ROR geo effect: unavailable\n");
 	}
 }
 

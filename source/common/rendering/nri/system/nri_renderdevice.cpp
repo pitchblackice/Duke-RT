@@ -933,6 +933,19 @@ CCMD(nri_ptsectortrace)
 	}
 }
 
+CCMD(nri_ptrortrace)
+{
+	const int32_t sectorIndex = argv.argc() > 1 ? atoi(argv[1]) : -1;
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingMapRorTrace(sectorIndex);
+	}
+	else
+	{
+		Printf("nri_ptrortrace is only available while using the NRI renderer.\n");
+	}
+}
+
 CCMD(nri_ptbuffers)
 {
 	if (auto* frameBuffer = GetActiveNRIRenderDevice())
@@ -1962,6 +1975,17 @@ void NRIRenderDevice::PrintPathTracingMapSectorTrace(int32_t sectorIndex) const
 	}
 
 	mRenderer->PrintMapSectorTrace(sectorIndex);
+}
+
+void NRIRenderDevice::PrintPathTracingMapRorTrace(int32_t sectorIndex) const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT ROR trace is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintMapRorTrace(sectorIndex);
 }
 
 void NRIRenderDevice::PrintFrameBoundaryStatus() const
