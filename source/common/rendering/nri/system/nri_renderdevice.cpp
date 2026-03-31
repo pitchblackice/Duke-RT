@@ -1619,45 +1619,45 @@ bool NRIRenderDevice::EnsureFrameGenerationUiTexture(uint32_t width, uint32_t he
 
 	if (mFrameGenerationUiTexture == nullptr)
 	{
-		mFrameGenerationUiTexture = MakeGameTexture(new FCanvasTexture((int)width, (int)height), nullptr, ETextureType::SWCanvas);
+		mFrameGenerationUiTexture = MakeGameTexture(new FWrapperTexture((int)width, (int)height, 1), nullptr, ETextureType::SWCanvas);
 	}
 
-	auto* canvas = mFrameGenerationUiTexture != nullptr ? static_cast<FCanvasTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
-	if (canvas == nullptr)
+	auto* wrapper = mFrameGenerationUiTexture != nullptr ? static_cast<FWrapperTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
+	if (wrapper == nullptr)
 	{
 		return false;
 	}
 
-	if (canvas->GetWidth() != (int)width || canvas->GetHeight() != (int)height)
+	if (wrapper->GetWidth() != (int)width || wrapper->GetHeight() != (int)height)
 	{
 		delete mFrameGenerationUiTexture;
-		mFrameGenerationUiTexture = MakeGameTexture(new FCanvasTexture((int)width, (int)height), nullptr, ETextureType::SWCanvas);
-		canvas = mFrameGenerationUiTexture != nullptr ? static_cast<FCanvasTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
-		if (canvas == nullptr)
+		mFrameGenerationUiTexture = MakeGameTexture(new FWrapperTexture((int)width, (int)height, 1), nullptr, ETextureType::SWCanvas);
+		wrapper = mFrameGenerationUiTexture != nullptr ? static_cast<FWrapperTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
+		if (wrapper == nullptr)
 		{
 			return false;
 		}
 	}
 
-	auto* hwTex = static_cast<NRIHardwareTexture*>(canvas->GetHardwareTexture(0, 0));
+	auto* hwTex = static_cast<NRIHardwareTexture*>(wrapper->GetSystemTexture());
 	if (hwTex == nullptr)
 	{
 		return false;
 	}
 
-	hwTex->EnsureCanvas(canvas);
+	hwTex->CreateWipeTexture((int)width, (int)height, "FrameGenerationUiTexture");
 	return hwTex->GetResource().texture != nullptr && hwTex->GetResource().colorAttachmentView != nullptr;
 }
 
 NRITextureResource* NRIRenderDevice::GetFrameGenerationUiTargetResource() const
 {
-	auto* canvas = mFrameGenerationUiTexture != nullptr ? static_cast<FCanvasTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
-	if (canvas == nullptr)
+	auto* wrapper = mFrameGenerationUiTexture != nullptr ? static_cast<FWrapperTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
+	if (wrapper == nullptr)
 	{
 		return nullptr;
 	}
 
-	auto* hwTex = static_cast<NRIHardwareTexture*>(canvas->GetHardwareTexture(0, 0));
+	auto* hwTex = static_cast<NRIHardwareTexture*>(wrapper->GetSystemTexture());
 	if (hwTex == nullptr)
 	{
 		return nullptr;
@@ -1724,16 +1724,11 @@ void NRIRenderDevice::FinalizeFrameGenerationUiTarget()
 		return;
 	}
 
-	auto* canvas = mFrameGenerationUiTexture != nullptr ? static_cast<FCanvasTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
 	NRITextureResource* uiTarget = GetFrameGenerationUiTargetResource();
 	if (uiTarget != nullptr)
 	{
 		TransitionTexture(*uiTarget, NRIShaderResourceState());
 		mFrameGeneration.SetUiTexture(uiTarget);
-	}
-	if (canvas != nullptr)
-	{
-		canvas->SetUpdated(true);
 	}
 
 	mRenderState->EndFrame();
@@ -1749,7 +1744,7 @@ void NRIRenderDevice::CompositeFrameGenerationUiTexture()
 	}
 
 	SetActiveRenderTarget();
-	DrawTexture(twod, mFrameGenerationUiTexture, 0, 0, DTA_Masked, false, TAG_DONE);
+	DrawTexture(twod, mFrameGenerationUiTexture, 0, 0, DTA_FlipY, screen->RenderTextureIsFlipped(), DTA_Masked, false, TAG_DONE);
 }
 
 void NRIRenderDevice::DestroyFrameGenerationUiTexture()
