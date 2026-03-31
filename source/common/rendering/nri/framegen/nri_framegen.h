@@ -111,6 +111,7 @@ struct NRIFrameGenerationFrameDesc
 	char resetReason[64] = "none";
 	NRIFrameGenerationColorSource hudlessColorSource = NRIFrameGenerationColorSource::Unknown;
 	const NRITextureResource* hudlessColor = nullptr;
+	const NRITextureResource* uiTexture = nullptr;
 	const NRITextureResource* motionVectors = nullptr;
 	const NRITextureResource* depth = nullptr;
 	float cameraJitter[2] = {};
@@ -182,6 +183,7 @@ public:
 	void OnPresentStart(const NRIRenderDevice& frameBuffer);
 	void OnPresentEnd(const NRIRenderDevice& frameBuffer, nri::Result presentResult);
 	void SetFrameDesc(const NRIFrameGenerationFrameDesc& desc);
+	void SetUiTexture(const NRITextureResource* uiTexture);
 
 	const NRIFrameGenerationPolicy& GetPolicy() const { return mPolicy; }
 	const NRIFrameGenerationFrameDesc& GetFrameDesc() const { return mLastFrameDesc; }

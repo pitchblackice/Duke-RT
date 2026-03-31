@@ -3535,11 +3535,13 @@ void NRIRenderer::PrintStatus() const
 		frameGenPolicy.resolvedReason);
 	if (hasFrameGenDesc)
 	{
-		Printf("NRI PT framegen inputs: frame_id=%llu hudless=%s:%ux%u motion=%ux%u depth=%ux%u render_rect=%u,%u+%ux%u output_rect=%u,%u+%ux%u reset=%s prev_camera=%s frame_time=%s frame_time_ms=%.3f\n",
+		Printf("NRI PT framegen inputs: frame_id=%llu hudless=%s:%ux%u ui=%ux%u motion=%ux%u depth=%ux%u render_rect=%u,%u+%ux%u output_rect=%u,%u+%ux%u reset=%s prev_camera=%s frame_time=%s frame_time_ms=%.3f\n",
 			(unsigned long long)frameGenDesc.frameId,
 			NRIFrameGenerationContext::GetColorSourceName(frameGenDesc.hudlessColorSource),
 			frameGenDesc.hudlessColor != nullptr ? frameGenDesc.hudlessColor->width : 0u,
 			frameGenDesc.hudlessColor != nullptr ? frameGenDesc.hudlessColor->height : 0u,
+			frameGenDesc.uiTexture != nullptr ? frameGenDesc.uiTexture->width : 0u,
+			frameGenDesc.uiTexture != nullptr ? frameGenDesc.uiTexture->height : 0u,
 			frameGenDesc.motionVectors != nullptr ? frameGenDesc.motionVectors->width : 0u,
 			frameGenDesc.motionVectors != nullptr ? frameGenDesc.motionVectors->height : 0u,
 			frameGenDesc.depth != nullptr ? frameGenDesc.depth->width : 0u,
@@ -10508,6 +10510,7 @@ void NRIRenderer::UpdateFrameGenerationFrameDesc()
 	desc.resetReason[std::size(desc.resetReason) - 1u] = '\0';
 	desc.hudlessColorSource = NRIFrameGenerationColorSource::Final;
 	desc.hudlessColor = &GetFrameTexture(FrameTextureSlot::Final);
+	desc.uiTexture = nullptr;
 	desc.motionVectors = &GetFrameTexture(FrameTextureSlot::Motion);
 	desc.depth = &GetFrameTexture(FrameTextureSlot::UpscalerDepth);
 	std::memcpy(desc.cameraJitter, mCurrentJitter, sizeof(desc.cameraJitter));

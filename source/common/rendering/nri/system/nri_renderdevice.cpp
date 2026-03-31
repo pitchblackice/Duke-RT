@@ -1334,9 +1334,21 @@ void NRIRenderDevice::Update()
 {
 	if (mInitialized && mFrameBegun)
 	{
-		SetActiveRenderTarget();
-		Draw2D();
-		twod->Clear();
+		if (mFrameGenerationUiTargetActive)
+		{
+			Draw2D();
+			twod->Clear();
+			FinalizeFrameGenerationUiTarget();
+			CompositeFrameGenerationUiTexture();
+			Draw2D();
+			twod->Clear();
+		}
+		else
+		{
+			SetActiveRenderTarget();
+			Draw2D();
+			twod->Clear();
+		}
 		mRenderState->EndFrame();
 		EndFrameAndPresent();
 	}
@@ -1584,6 +1596,169 @@ nri::SwapChainBits NRIRenderDevice::GetEffectiveRequestedSwapChainFlags() const
 	return flags;
 }
 
+bool NRIRenderDevice::ShouldUseFrameGenerationUiTarget() const
+{
+	if (!mInitialized || mFrameBegun == false || mUsingSaveTarget || mCurrentPresentTarget == nullptr)
+	{
+		return false;
+	}
+
+	const auto& policy = mFrameGeneration.GetPolicy();
+	return
+		policy.requestedEnabled &&
+		policy.requestedProvider != NRIFrameGenerationProvider::Off &&
+		policy.resolvedUiMode == NRIFrameGenerationUiMode::UiTexture;
+}
+
+bool NRIRenderDevice::EnsureFrameGenerationUiTexture(uint32_t width, uint32_t height)
+{
+	if (width == 0 || height == 0)
+	{
+		return false;
+	}
+
+	if (mFrameGenerationUiTexture == nullptr)
+	{
+		mFrameGenerationUiTexture = MakeGameTexture(new FCanvasTexture((int)width, (int)height), nullptr, ETextureType::SWCanvas);
+	}
+
+	auto* canvas = mFrameGenerationUiTexture != nullptr ? static_cast<FCanvasTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
+	if (canvas == nullptr)
+	{
+		return false;
+	}
+
+	if (canvas->GetWidth() != (int)width || canvas->GetHeight() != (int)height)
+	{
+		delete mFrameGenerationUiTexture;
+		mFrameGenerationUiTexture = MakeGameTexture(new FCanvasTexture((int)width, (int)height), nullptr, ETextureType::SWCanvas);
+		canvas = mFrameGenerationUiTexture != nullptr ? static_cast<FCanvasTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
+		if (canvas == nullptr)
+		{
+			return false;
+		}
+	}
+
+	auto* hwTex = static_cast<NRIHardwareTexture*>(canvas->GetHardwareTexture(0, 0));
+	if (hwTex == nullptr)
+	{
+		return false;
+	}
+
+	hwTex->EnsureCanvas(canvas);
+	return hwTex->GetResource().texture != nullptr && hwTex->GetResource().colorAttachmentView != nullptr;
+}
+
+NRITextureResource* NRIRenderDevice::GetFrameGenerationUiTargetResource() const
+{
+	auto* canvas = mFrameGenerationUiTexture != nullptr ? static_cast<FCanvasTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
+	if (canvas == nullptr)
+	{
+		return nullptr;
+	}
+
+	auto* hwTex = static_cast<NRIHardwareTexture*>(canvas->GetHardwareTexture(0, 0));
+	if (hwTex == nullptr)
+	{
+		return nullptr;
+	}
+
+	return &hwTex->GetResource();
+}
+
+void NRIRenderDevice::ClearTargetColor(NRITextureResource& target, float red, float green, float blue, float alpha)
+{
+	if (mCommandBuffer == nullptr || target.colorAttachmentView == nullptr)
+	{
+		return;
+	}
+
+	mRenderState->EndFrame();
+	PrepareTargetForRendering(target, true);
+
+	nri::AttachmentDesc colorAttachment = {};
+	colorAttachment.descriptor = target.colorAttachmentView;
+	colorAttachment.loadOp = nri::LoadOp::CLEAR;
+	colorAttachment.storeOp = nri::StoreOp::STORE;
+	colorAttachment.clearValue.color.f.x = red;
+	colorAttachment.clearValue.color.f.y = green;
+	colorAttachment.clearValue.color.f.z = blue;
+	colorAttachment.clearValue.color.f.w = alpha;
+
+	nri::RenderingDesc renderingDesc = {};
+	renderingDesc.colors = &colorAttachment;
+	renderingDesc.colorNum = 1;
+	mCore.CmdBeginRendering(*mCommandBuffer, renderingDesc);
+	mCore.CmdEndRendering(*mCommandBuffer);
+	mActiveTarget = &target;
+	mRenderState->NotifyExternalTargetWrite();
+}
+
+void NRIRenderDevice::BeginFrameGenerationUiTarget()
+{
+	if (mCurrentPresentTarget == nullptr)
+	{
+		return;
+	}
+
+	if (!EnsureFrameGenerationUiTexture(mCurrentPresentTarget->width, mCurrentPresentTarget->height))
+	{
+		return;
+	}
+
+	NRITextureResource* uiTarget = GetFrameGenerationUiTargetResource();
+	if (uiTarget == nullptr)
+	{
+		return;
+	}
+
+	ClearTargetColor(*uiTarget, 0.0f, 0.0f, 0.0f, 0.0f);
+	mActiveTarget = uiTarget;
+	mFrameGenerationUiTargetActive = true;
+}
+
+void NRIRenderDevice::FinalizeFrameGenerationUiTarget()
+{
+	if (!mFrameGenerationUiTargetActive)
+	{
+		return;
+	}
+
+	auto* canvas = mFrameGenerationUiTexture != nullptr ? static_cast<FCanvasTexture*>(mFrameGenerationUiTexture->GetTexture()) : nullptr;
+	NRITextureResource* uiTarget = GetFrameGenerationUiTargetResource();
+	if (uiTarget != nullptr)
+	{
+		TransitionTexture(*uiTarget, NRIShaderResourceState());
+		mFrameGeneration.SetUiTexture(uiTarget);
+	}
+	if (canvas != nullptr)
+	{
+		canvas->SetUpdated(true);
+	}
+
+	mRenderState->EndFrame();
+	mActiveTarget = mCurrentPresentTarget;
+	mFrameGenerationUiTargetActive = false;
+}
+
+void NRIRenderDevice::CompositeFrameGenerationUiTexture()
+{
+	if (mFrameGenerationUiTexture == nullptr || mCurrentPresentTarget == nullptr || twod == nullptr)
+	{
+		return;
+	}
+
+	SetActiveRenderTarget();
+	DrawTexture(twod, mFrameGenerationUiTexture, 0, 0, DTA_Masked, false, TAG_DONE);
+}
+
+void NRIRenderDevice::DestroyFrameGenerationUiTexture()
+{
+	delete mFrameGenerationUiTexture;
+	mFrameGenerationUiTexture = nullptr;
+	mFrameGenerationUiTargetActive = false;
+}
+
 void NRIRenderDevice::WaitForCommands(bool finish)
 {
 	if (mDevice == nullptr)
@@ -1630,6 +1805,7 @@ void NRIRenderDevice::SetSaveBuffers(bool yes)
 
 	mRenderState->EndFrame();
 	mActiveTarget = yes ? &mSaveTarget : mCurrentPresentTarget;
+	mFrameGenerationUiTargetActive = false;
 }
 
 void NRIRenderDevice::ImageTransitionScene(bool)
@@ -1685,6 +1861,7 @@ void NRIRenderDevice::SetActiveRenderTarget()
 	mRenderState->EndFrame();
 	mActiveTarget = mUsingSaveTarget ? &mSaveTarget : mCurrentPresentTarget;
 	mLastFrameBoundaryStats.sceneTargetSelected = (mActiveTarget == &mSceneTarget);
+	mFrameGenerationUiTargetActive = false;
 }
 
 void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::function<void()> &afterBloomDrawEndScene2D)
@@ -1723,6 +1900,11 @@ void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::func
 	else
 	{
 		SetActiveRenderTarget();
+	}
+
+	if (ShouldUseFrameGenerationUiTarget())
+	{
+		BeginFrameGenerationUiTarget();
 	}
 
 	if (afterBloomDrawEndScene2D)
@@ -3344,6 +3526,8 @@ bool NRIRenderDevice::CreateRenderResources()
 
 void NRIRenderDevice::DestroyRenderResources()
 {
+	DestroyFrameGenerationUiTexture();
+
 	delete mWhiteTexture;
 	mWhiteTexture = nullptr;
 	mWhiteTextureSet = nullptr;
@@ -4020,6 +4204,7 @@ void NRIRenderDevice::ResetFrameTracking(bool presentedAcquiredImage)
 	mCommandBufferOpen = false;
 	mCurrentPresentTarget = nullptr;
 	mActiveTarget = nullptr;
+	mFrameGenerationUiTargetActive = false;
 	mHasAcquiredSwapChainImage = false;
 	mCurrentSwapChainImage = 0;
 }

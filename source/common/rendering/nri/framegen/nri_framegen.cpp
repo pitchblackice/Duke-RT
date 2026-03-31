@@ -436,6 +436,16 @@ void NRIFrameGenerationContext::SetFrameDesc(const NRIFrameGenerationFrameDesc& 
 	mHasFrameDesc = true;
 }
 
+void NRIFrameGenerationContext::SetUiTexture(const NRITextureResource* uiTexture)
+{
+	if (!mHasFrameDesc)
+	{
+		return;
+	}
+
+	mLastFrameDesc.uiTexture = uiTexture;
+}
+
 NRIFrameGenerationInputAudit NRIFrameGenerationContext::BuildInputAudit(const NRIFrameGenerationFrameDesc& desc) const
 {
 	NRIFrameGenerationInputAudit audit = {};

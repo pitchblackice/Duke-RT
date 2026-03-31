@@ -14,6 +14,7 @@ class NRIHardwareVertexBuffer;
 class NRIHardwareIndexBuffer;
 class FCanvasTexture;
 class FTexture;
+class FGameTexture;
 class NRIRenderer;
 class NRIUpscalerContext;
 
@@ -221,6 +222,14 @@ private:
 	void RefreshNativeFrameGenerationSwapChain();
 	bool ShouldRequestFrameGenerationLowLatencySwapChain() const;
 	nri::SwapChainBits GetEffectiveRequestedSwapChainFlags() const;
+	bool ShouldUseFrameGenerationUiTarget() const;
+	bool EnsureFrameGenerationUiTexture(uint32_t width, uint32_t height);
+	NRITextureResource* GetFrameGenerationUiTargetResource() const;
+	void ClearTargetColor(NRITextureResource& target, float red, float green, float blue, float alpha);
+	void BeginFrameGenerationUiTarget();
+	void FinalizeFrameGenerationUiTarget();
+	void CompositeFrameGenerationUiTexture();
+	void DestroyFrameGenerationUiTexture();
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
@@ -263,6 +272,7 @@ private:
 	NRITextureResource mSaveTarget;
 	NRITextureResource* mActiveTarget = nullptr;
 	NRITextureResource* mCurrentPresentTarget = nullptr;
+	FGameTexture* mFrameGenerationUiTexture = nullptr;
 	nri::DescriptorSet* mWhiteTextureSet = nullptr;
 	NRIHardwareTexture* mWhiteTexture = nullptr;
 
@@ -288,6 +298,7 @@ private:
 	bool mUsingSaveTarget = false;
 	bool mHasAcquiredSwapChainImage = false;
 	bool mHasPresentedSwapChainFrame = false;
+	bool mFrameGenerationUiTargetActive = false;
 	uint32_t mCurrentSwapChainImage = 0;
 	uint32_t mCurrentQueuedFrameIndex = 0;
 	uint32_t mAcquireSemaphoreIndex = 0;
