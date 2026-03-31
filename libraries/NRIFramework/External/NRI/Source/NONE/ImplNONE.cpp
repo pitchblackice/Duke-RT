@@ -1121,6 +1121,10 @@ static Texture* const* NRI_CALL GetSwapChainTextures(const SwapChain&, uint32_t&
     return (Texture**)textures;
 }
 
+static uint64_t NRI_CALL GetSwapChainNativeObject(const SwapChain&) {
+    return 0;
+}
+
 static Result NRI_CALL GetDisplayDesc(SwapChain&, DisplayDesc& displayDesc) {
     displayDesc = {};
 
@@ -1145,6 +1149,7 @@ Result DeviceNONE::FillFunctionTable(SwapChainInterface& table) const {
     table.CreateSwapChain = ::CreateSwapChain;
     table.DestroySwapChain = ::DestroySwapChain;
     table.GetSwapChainTextures = ::GetSwapChainTextures;
+    table.GetSwapChainNativeObject = ::GetSwapChainNativeObject;
     table.GetDisplayDesc = ::GetDisplayDesc;
     table.AcquireNextTexture = ::AcquireNextTexture;
     table.WaitForPresent = ::WaitForPresent;

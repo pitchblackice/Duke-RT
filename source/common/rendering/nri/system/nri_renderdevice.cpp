@@ -1826,6 +1826,39 @@ TArray<uint8_t> NRIRenderDevice::GetScreenshotBuffer(int& pitch, ESSType& color_
 	return buffer;
 }
 
+void NRIRenderDevice::RefreshNativeFrameGenerationHandles()
+{
+	mNativeD3D12Device = nullptr;
+	mNativeD3D12GraphicsQueue = nullptr;
+
+	if (GetSelectedAPI() != nri::GraphicsAPI::D3D12)
+	{
+		return;
+	}
+
+	if (mDevice != nullptr && mCore.GetDeviceNativeObject != nullptr)
+	{
+		mNativeD3D12Device = static_cast<ID3D12Device*>(mCore.GetDeviceNativeObject(mDevice));
+	}
+
+	if (mGraphicsQueue != nullptr && mCore.GetQueueNativeObject != nullptr)
+	{
+		mNativeD3D12GraphicsQueue = static_cast<ID3D12CommandQueue*>(mCore.GetQueueNativeObject(mGraphicsQueue));
+	}
+}
+
+void NRIRenderDevice::RefreshNativeFrameGenerationSwapChain()
+{
+	mNativeD3D12SwapChain = nullptr;
+
+	if (GetSelectedAPI() != nri::GraphicsAPI::D3D12 || mSwapChain == nullptr || mSwapChainInterface.GetSwapChainNativeObject == nullptr)
+	{
+		return;
+	}
+
+	mNativeD3D12SwapChain = reinterpret_cast<IDXGISwapChain4*>(mSwapChainInterface.GetSwapChainNativeObject(*mSwapChain));
+}
+
 void NRIRenderDevice::PrintPathTracingCaps() const
 {
 	if (mDevice == nullptr)
@@ -1862,6 +1895,11 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		frameGenPolicy.resolvedLowLatency ? "on" : "off",
 		frameGenPolicy.swapChainReady ? "ready" : "cold",
 		frameGenPolicy.resolvedReason);
+	Printf("NRI PT framegen native: device=%s queue=%s swapchain=%s path=%s\n",
+		mNativeD3D12Device != nullptr ? "ok" : "missing",
+		mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
+		mNativeD3D12SwapChain != nullptr ? "ok" : "missing",
+		GetSelectedAPI() == nri::GraphicsAPI::D3D12 ? "nri-native-object+d3d12-swapchain-native" : "unsupported-api");
 
 	if (mRenderer != nullptr)
 	{
@@ -2679,6 +2717,12 @@ bool NRIRenderDevice::CreateDevice()
 	}
 	SetNriDebugName(mCore, mGraphicsQueue, "Raze.GraphicsQueue");
 	SetNriDebugName(mCore, mFrameFence, "Raze.FrameFence");
+	RefreshNativeFrameGenerationHandles();
+	Printf("NRI framegen native handles: api=%s device=%s queue=%s swapchain=%s\n",
+		startupApi,
+		mNativeD3D12Device != nullptr ? "ok" : "missing",
+		mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
+		"pending");
 
 	if (!CreateQueuedFrames())
 	{
@@ -2921,6 +2965,7 @@ bool NRIRenderDevice::CreateSwapChain()
 		Printf(TEXTCOLOR_RED "Failed to create NRI swapchain.\n");
 		return false;
 	}
+	RefreshNativeFrameGenerationSwapChain();
 	mFrameGeneration.OnSwapChainCreated(*this);
 	SetNriDebugName(mCore, mSwapChain, "Raze.SwapChain");
 
@@ -2978,6 +3023,11 @@ bool NRIRenderDevice::CreateSwapChain()
 		nri_ptwaitpresent ? "on" : "off",
 		width,
 		height);
+	Printf("NRI framegen native handles: api=%s device=%s queue=%s swapchain=%s\n",
+		(const char*)nri_api,
+		mNativeD3D12Device != nullptr ? "ok" : "missing",
+		mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
+		mNativeD3D12SwapChain != nullptr ? "ok" : "missing");
 
 	return true;
 }
@@ -3009,6 +3059,7 @@ bool NRIRenderDevice::CreateQueuedFrames()
 
 void NRIRenderDevice::DestroySwapChain()
 {
+	RefreshNativeFrameGenerationSwapChain();
 	ResetFrameTracking();
 	mSwapChainFlags = nri::SwapChainBits::NONE;
 	mSwapChainQueuedFrameNum = 0;
@@ -3055,6 +3106,7 @@ void NRIRenderDevice::DestroySwapChain()
 		mSwapChainInterface.DestroySwapChain(mSwapChain);
 		mSwapChain = nullptr;
 	}
+	RefreshNativeFrameGenerationSwapChain();
 }
 
 void NRIRenderDevice::DestroyQueuedFrames()

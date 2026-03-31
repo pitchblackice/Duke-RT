@@ -17,6 +17,12 @@ class FTexture;
 class NRIRenderer;
 class NRIUpscalerContext;
 
+#ifdef _WIN32
+struct ID3D12Device;
+struct ID3D12CommandQueue;
+struct IDXGISwapChain4;
+#endif
+
 class NRIRenderDevice : public SystemBaseFrameBuffer
 {
 	typedef SystemBaseFrameBuffer Super;
@@ -73,6 +79,11 @@ public:
 	void PrintPathTracingMapChunkDump(int32_t chunkIndex) const;
 	void PrintPathTracingMapChunkCompare(int32_t chunkIndex) const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
+#ifdef _WIN32
+	ID3D12Device* GetNativeD3D12Device() const { return mNativeD3D12Device; }
+	ID3D12CommandQueue* GetNativeD3D12GraphicsQueue() const { return mNativeD3D12GraphicsQueue; }
+	IDXGISwapChain4* GetNativeD3D12SwapChain() const { return mNativeD3D12SwapChain; }
+#endif
 
 private:
 	static constexpr uint32_t FrameSequenceHistorySize = 8;
@@ -205,6 +216,8 @@ private:
 	uint32_t GetQueuedFrameIndex(uint64_t frameIndex) const;
 	void SelectQueuedFrame(uint32_t queuedFrameIndex);
 	void ResetFrameTracking(bool presentedAcquiredImage = false);
+	void RefreshNativeFrameGenerationHandles();
+	void RefreshNativeFrameGenerationSwapChain();
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
@@ -260,6 +273,11 @@ private:
 	std::vector<uint64_t> mSwapChainAcquireCounts;
 	std::vector<uint64_t> mSwapChainPresentCounts;
 	std::vector<uint64_t> mSwapChainAbandonCounts;
+#ifdef _WIN32
+	ID3D12Device* mNativeD3D12Device = nullptr;
+	ID3D12CommandQueue* mNativeD3D12GraphicsQueue = nullptr;
+	IDXGISwapChain4* mNativeD3D12SwapChain = nullptr;
+#endif
 	uint64_t mFrameIndex = 0;
 	uint64_t mSubmittedFenceValue = 0;
 	bool mFrameBegun = false;

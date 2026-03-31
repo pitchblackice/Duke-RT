@@ -39,6 +39,10 @@ struct SwapChainD3D12 final : public DisplayDescHelper, DebugNameBase {
         return DisplayDescHelper::GetDisplayDesc(m_Hwnd, displayDesc);
     }
 
+    inline uint64_t GetNativeObject() const {
+        return (uint64_t)m_SwapChain.GetInterface();
+    }
+
     Texture* const* GetTextures(uint32_t& textureNum) const;
     Result AcquireNextTexture(uint32_t& textureIndex);
     Result WaitForPresent();

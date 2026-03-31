@@ -40,6 +40,10 @@ struct SwapChainVK final : public DisplayDescHelper, DebugNameBase {
         return DisplayDescHelper::GetDisplayDesc(m_Hwnd, displayDesc);
     }
 
+    inline uint64_t GetNativeObject() const {
+        return (uint64_t)m_Handle;
+    }
+
     Texture* const* GetTextures(uint32_t& textureNum) const;
     Result AcquireNextTexture(FenceVK& acquireSemaphore, uint32_t& textureIndex);
     Result WaitForPresent();
