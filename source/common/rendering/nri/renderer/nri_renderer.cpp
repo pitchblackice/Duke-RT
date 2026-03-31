@@ -2088,6 +2088,18 @@ void NRIRenderer::Shutdown()
 	DestroyFrameTextures();
 	mFrameBuffer->DestroyTextureResource(mPaletteTexture);
 	DestroyCachedTextures();
+	mFrameGenerationFrameId = 0;
+	mHasFrameGenerationRealFrameTime = false;
+	mHasPendingFrameGenerationRealFrameTime = false;
+	mHasFrameGenerationTimestamp = false;
+	mHasFrameGenerationConfigState = false;
+	mLastFrameGenerationRealFrameTimeMs = 0.0f;
+	mPendingFrameGenerationRealFrameTimeMs = 0.0f;
+	mLastFrameGenerationTimestamp = {};
+	mPendingFrameGenerationTimestamp = {};
+	mLastFrameGenerationRequestedEnabled = false;
+	mLastFrameGenerationRequestedProvider = NRIFrameGenerationProvider::Off;
+	mLastFrameGenerationResolvedUiMode = NRIFrameGenerationUiMode::Auto;
 
 	for (nri::Pipeline*& pipeline : mPipelines)
 	{
@@ -2248,39 +2260,23 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	mDynamicSceneLastFrame = {};
 	mRuntimeMapLastFrame = {};
 	mRuntimeSpaceLinkLastFrame = {};
-
 	if (!preserveHistory)
 	{
-		const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
-		const NRIPostSharpenKind resolvedPostSharpen = ResolvePostSharpenKind(false);
-		const bool runAppTaa = ShouldRunAppTaa(resolvedMainUpscaler);
-		if (!nri_ptbootstrap &&
-			(debugMode != mLastDebugMode ||
-			 resolvedMainUpscaler != mLastTemporalHistoryMainUpscaler ||
-			 resolvedPostSharpen != mLastTemporalPostSharpen ||
-			 runAppTaa != mLastTemporalAppTaaEnabled))
+		mPendingFrameGenerationTimestamp = std::chrono::steady_clock::now();
+		mHasPendingFrameGenerationRealFrameTime = false;
+		mPendingFrameGenerationRealFrameTimeMs = 0.0f;
+		if (mHasFrameGenerationTimestamp)
 		{
-			ArmTemporalTraceBudget("mode-change");
-			if (nri_pttraceframes > 0)
+			const auto elapsed = mPendingFrameGenerationTimestamp - mLastFrameGenerationTimestamp;
+			mPendingFrameGenerationRealFrameTimeMs = (float)std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(elapsed).count();
+			mHasPendingFrameGenerationRealFrameTime = true;
+			if (mPendingFrameGenerationRealFrameTimeMs > 250.0f)
 			{
-				Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d main=%s->%s post=%s->%s app_taa=%s->%s\n",
-					mFrameIndex,
-					mLastDebugMode,
-					debugMode,
-					GetMainUpscalerName(mLastTemporalHistoryMainUpscaler),
-					GetMainUpscalerName(resolvedMainUpscaler),
-					GetPostSharpenName(mLastTemporalPostSharpen),
-					GetPostSharpenName(resolvedPostSharpen),
-					mLastTemporalAppTaaEnabled ? "yes" : "no",
-					runAppTaa ? "yes" : "no");
+				RequestHistoryReset("cadence-break");
 			}
-			mResetHistory = true;
 		}
-		mLastDebugMode = debugMode;
-		mLastTemporalHistoryMainUpscaler = resolvedMainUpscaler;
-		mLastTemporalPostSharpen = resolvedPostSharpen;
-		mLastTemporalAppTaaEnabled = runAppTaa;
 	}
+	UpdateFrameGenerationHistoryPolicy(debugMode, mFrameBuffer->mFrameGeneration.GetPolicy(), preserveHistory);
 
 	RefreshMapWorld();
 	if (mPendingStaticMapLightingInvalidation)
@@ -2317,6 +2313,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		CopyFinalToActiveTarget();
 		if (!preserveHistory)
 		{
+			NoteSuccessfulRealFrame();
 			++mFrameIndex;
 			mHasPreviousCameraState = true;
 			mResetHistory = false;
@@ -2936,6 +2933,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 		if (!preserveHistory)
 		{
+			NoteSuccessfulRealFrame();
 			mFrameIndex++;
 			mHasPreviousCameraState = true;
 			mResetHistory = false;
@@ -3484,8 +3482,9 @@ void NRIRenderer::PrintStatus() const
 		Printf(" (%s)", GetAvailabilityReason());
 	}
 	Printf("\n");
-	Printf("NRI PT frame: index=%u render=%ux%u output=%ux%u prev_camera=%s reset_history=%s\n",
+	Printf("NRI PT frame: index=%u fg_frame_id=%llu render=%ux%u output=%ux%u prev_camera=%s reset_history=%s\n",
 		mFrameIndex,
+		(unsigned long long)mFrameGenerationFrameId,
 		mRenderWidth,
 		mRenderHeight,
 		mOutputWidth,
@@ -3535,7 +3534,7 @@ void NRIRenderer::PrintStatus() const
 		frameGenPolicy.resolvedReason);
 	if (hasFrameGenDesc)
 	{
-		Printf("NRI PT framegen inputs: frame_id=%llu hudless=%ux%u motion=%ux%u depth=%ux%u reset=%s prev_camera=%s frame_time=%s\n",
+		Printf("NRI PT framegen inputs: frame_id=%llu hudless=%ux%u motion=%ux%u depth=%ux%u reset=%s prev_camera=%s frame_time=%s frame_time_ms=%.3f\n",
 			(unsigned long long)frameGenDesc.frameId,
 			frameGenDesc.hudlessColor != nullptr ? frameGenDesc.hudlessColor->width : 0u,
 			frameGenDesc.hudlessColor != nullptr ? frameGenDesc.hudlessColor->height : 0u,
@@ -3545,7 +3544,8 @@ void NRIRenderer::PrintStatus() const
 			frameGenDesc.depth != nullptr ? frameGenDesc.depth->height : 0u,
 			frameGenDesc.resetReason[0] != '\0' ? frameGenDesc.resetReason : "none",
 			frameGenDesc.hasPreviousCamera ? "yes" : "no",
-			frameGenDesc.hasRealFrameTimeMs ? "captured" : "pending");
+			frameGenDesc.hasRealFrameTimeMs ? "captured" : "pending",
+			frameGenDesc.realFrameTimeMs);
 	}
 	Printf("NRI PT resolution policy: policy=%s render=%ux%u output=%ux%u jitter=%s phases=%u\n",
 		GetRenderResolutionPolicyName(resolvedMain),
@@ -5629,6 +5629,10 @@ void NRIRenderer::RefreshMapWorld()
 {
 	const uint64_t pendingBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
 	const bool levelChanged = mMapWorld.level != currentLevel;
+	if (levelChanged)
+	{
+		RequestHistoryReset("map-load", true, true);
+	}
 	if (levelChanged && mSceneLights.GetManualAnalyticLightCount() > 0)
 	{
 		const uint32_t clearedCount = mSceneLights.GetManualAnalyticLightCount();
@@ -6798,6 +6802,13 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 
 	// Frame-resource rebuilds on resize/upscaler mode changes can retire textures that the current
 	// command allocator still references. Drain GPU work before destroying frame-sized resources.
+	const bool dimensionsChanged =
+		mRenderWidth != renderWidth ||
+		mRenderHeight != renderHeight ||
+		mOutputWidth != outputWidth ||
+		mOutputHeight != outputHeight ||
+		mTargetWidth != targetWidth ||
+		mTargetHeight != targetHeight;
 	mFrameBuffer->WaitForCommands(true);
 	mNrd.Shutdown();
 	DestroyFrameTextures();
@@ -6810,7 +6821,7 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	mSceneLeft = sceneLeft;
 	mSceneTop = sceneTop;
 	mOutputFormat = outputFormat;
-	RequestHistoryReset("frame-resources");
+	RequestHistoryReset(dimensionsChanged ? "resize" : "frame-resources");
 	Printf("NRI PT frame resources: main=%s policy=%s requested_mode=%s resolved_mode=%s requested_render_scale=%.3f resolved_render_scale=%.3f render=%ux%u output=%ux%u jitter=%s phases=%u\n",
 		GetMainUpscalerName(mainUpscalerKind),
 		GetRenderResolutionPolicyName(mainUpscalerKind),
@@ -10237,6 +10248,19 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 			projection != nullptr ? projection[9] : 0.0f);
 	}
 
+	if (mHasPreviousCameraState && !mResetHistory)
+	{
+		const float dx = mCurrentCameraPos[0] - mPreviousCameraPos[0];
+		const float dy = mCurrentCameraPos[1] - mPreviousCameraPos[1];
+		const float dz = mCurrentCameraPos[2] - mPreviousCameraPos[2];
+		const float distanceSq = dx * dx + dy * dy + dz * dz;
+		static constexpr float TeleportDistanceThreshold = 2048.0f;
+		if (distanceSq > TeleportDistanceThreshold * TeleportDistanceThreshold)
+		{
+			RequestHistoryReset("camera-teleport", true, false);
+		}
+	}
+
 	if (!mHasPreviousCameraState)
 	{
 		Copy3(mCurrentCameraPos, mPreviousCameraPos);
@@ -10342,6 +10366,97 @@ void NRIRenderer::CopyFinalToActiveTarget()
 	CopyTextureToActiveTarget(final);
 }
 
+void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFrameGenerationPolicy& frameGenPolicy, bool preserveHistory)
+{
+	if (preserveHistory)
+	{
+		return;
+	}
+
+	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
+	const NRIPostSharpenKind resolvedPostSharpen = ResolvePostSharpenKind(false);
+	const bool runAppTaa = ShouldRunAppTaa(resolvedMainUpscaler);
+	if (!nri_ptbootstrap &&
+		(debugMode != mLastDebugMode ||
+		 resolvedMainUpscaler != mLastTemporalHistoryMainUpscaler ||
+		 resolvedPostSharpen != mLastTemporalPostSharpen ||
+		 runAppTaa != mLastTemporalAppTaaEnabled))
+	{
+		ArmTemporalTraceBudget("mode-change");
+		if (nri_pttraceframes > 0)
+		{
+			Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d main=%s->%s post=%s->%s app_taa=%s->%s\n",
+				mFrameIndex,
+				mLastDebugMode,
+				debugMode,
+				GetMainUpscalerName(mLastTemporalHistoryMainUpscaler),
+				GetMainUpscalerName(resolvedMainUpscaler),
+				GetPostSharpenName(mLastTemporalPostSharpen),
+				GetPostSharpenName(resolvedPostSharpen),
+				mLastTemporalAppTaaEnabled ? "yes" : "no",
+				runAppTaa ? "yes" : "no");
+		}
+		RequestHistoryReset("mode-change");
+	}
+	mLastDebugMode = debugMode;
+	mLastTemporalHistoryMainUpscaler = resolvedMainUpscaler;
+	mLastTemporalPostSharpen = resolvedPostSharpen;
+	mLastTemporalAppTaaEnabled = runAppTaa;
+
+	if (!mHasFrameGenerationConfigState)
+	{
+		mHasFrameGenerationConfigState = true;
+		mLastFrameGenerationRequestedEnabled = frameGenPolicy.requestedEnabled;
+		mLastFrameGenerationRequestedProvider = frameGenPolicy.requestedProvider;
+		mLastFrameGenerationResolvedUiMode = frameGenPolicy.resolvedUiMode;
+		return;
+	}
+
+	const char* frameGenResetReason = nullptr;
+	if (frameGenPolicy.requestedEnabled != mLastFrameGenerationRequestedEnabled)
+	{
+		frameGenResetReason = "framegen-toggle";
+	}
+	else if (frameGenPolicy.requestedProvider != mLastFrameGenerationRequestedProvider)
+	{
+		frameGenResetReason = "framegen-provider-change";
+	}
+	else if (frameGenPolicy.resolvedUiMode != mLastFrameGenerationResolvedUiMode)
+	{
+		frameGenResetReason = "framegen-ui-mode-change";
+	}
+
+	if (frameGenResetReason != nullptr)
+	{
+		RequestHistoryReset(frameGenResetReason);
+		if (nri_pttraceframes > 0)
+		{
+			Printf("NRI PT temporal reset: reason=%s frame=%u requested=%s->%s provider=%s->%s ui=%s->%s\n",
+				frameGenResetReason,
+				mFrameIndex,
+				mLastFrameGenerationRequestedEnabled ? "on" : "off",
+				frameGenPolicy.requestedEnabled ? "on" : "off",
+				NRIFrameGenerationContext::GetProviderName(mLastFrameGenerationRequestedProvider),
+				NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
+				NRIFrameGenerationContext::GetUiModeName(mLastFrameGenerationResolvedUiMode),
+				NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.resolvedUiMode));
+		}
+	}
+
+	mLastFrameGenerationRequestedEnabled = frameGenPolicy.requestedEnabled;
+	mLastFrameGenerationRequestedProvider = frameGenPolicy.requestedProvider;
+	mLastFrameGenerationResolvedUiMode = frameGenPolicy.resolvedUiMode;
+}
+
+void NRIRenderer::NoteSuccessfulRealFrame()
+{
+	mLastFrameGenerationRealFrameTimeMs = mPendingFrameGenerationRealFrameTimeMs;
+	mHasFrameGenerationRealFrameTime = mHasPendingFrameGenerationRealFrameTime;
+	mLastFrameGenerationTimestamp = mPendingFrameGenerationTimestamp;
+	mHasFrameGenerationTimestamp = true;
+	++mFrameGenerationFrameId;
+}
+
 void NRIRenderer::UpdateFrameGenerationFrameDesc()
 {
 	if (mFrameBuffer == nullptr)
@@ -10350,14 +10465,16 @@ void NRIRenderer::UpdateFrameGenerationFrameDesc()
 	}
 
 	NRIFrameGenerationFrameDesc desc = {};
-	desc.frameId = (uint64_t)mFrameIndex + 1u;
+	desc.frameId = mFrameGenerationFrameId + 1u;
 	desc.renderWidth = mRenderWidth;
 	desc.renderHeight = mRenderHeight;
 	desc.outputWidth = mOutputWidth;
 	desc.outputHeight = mOutputHeight;
 	desc.hasPreviousCamera = mHasPreviousCameraState;
 	desc.resetHistory = mResetHistory;
-	const char* resetReason = mLastHistoryResetReason.empty() ? "none" : mLastHistoryResetReason.c_str();
+	desc.hasRealFrameTimeMs = mHasPendingFrameGenerationRealFrameTime;
+	desc.realFrameTimeMs = mPendingFrameGenerationRealFrameTimeMs;
+	const char* resetReason = mResetHistory && !mLastHistoryResetReason.empty() ? mLastHistoryResetReason.c_str() : "none";
 	std::strncpy(desc.resetReason, resetReason, std::size(desc.resetReason) - 1u);
 	desc.resetReason[std::size(desc.resetReason) - 1u] = '\0';
 	desc.hudlessColor = &GetFrameTexture(FrameTextureSlot::Final);

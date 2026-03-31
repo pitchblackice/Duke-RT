@@ -4,6 +4,7 @@
 #include "nri_resources.h"
 #include "nri_scene_lights.h"
 #include "nri_upscaler.h"
+#include "../framegen/nri_framegen.h"
 
 #include "../scene/nri_map_builder.h"
 #include "../scene/nri_map_world.h"
@@ -11,6 +12,7 @@
 #include "../scene/nri_material_bridge.h"
 #include "../scene/nri_scene_bridge.h"
 
+#include <chrono>
 #include <cstdint>
 #include <array>
 #include <vector>
@@ -529,6 +531,9 @@ private:
 	void InvalidateStaticMapSceneForMaterialLighting();
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
+	void UpdateFrameGenerationFrameDesc();
+	void UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFrameGenerationPolicy& frameGenPolicy, bool preserveHistory);
+	void NoteSuccessfulRealFrame();
 	void CopyTexture(NRITextureResource& source, NRITextureResource& destination);
 	void CopyTextureToActiveTarget(NRITextureResource& source);
 
@@ -577,7 +582,6 @@ private:
 	bool IsPostSharpenSupported(NRIPostSharpenKind kind) const;
 	void FillMatrix(float* outMatrix, const VSMatrix& matrix) const;
 	const char* GetFrameTextureSlotName(FrameTextureSlot slot) const;
-	void UpdateFrameGenerationFrameDesc();
 
 	NRIRenderDevice* mFrameBuffer = nullptr;
 	nri::PipelineLayout* mPipelineLayout = nullptr;
@@ -671,6 +675,7 @@ private:
 	std::vector<SceneInstanceData> mBoundSceneInstances;
 	std::vector<uint32_t> mCurrentVisibleChunkWords;
 	uint32_t mFrameIndex = 0;
+	uint64_t mFrameGenerationFrameId = 0;
 	uint32_t mRenderWidth = 0;
 	uint32_t mRenderHeight = 0;
 	uint32_t mOutputWidth = 0;
@@ -710,11 +715,22 @@ private:
 	PreservedStaticMapSkyState mPreservedStaticMapSky = {};
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
+	bool mHasFrameGenerationRealFrameTime = false;
+	bool mHasPendingFrameGenerationRealFrameTime = false;
+	bool mHasFrameGenerationTimestamp = false;
+	bool mHasFrameGenerationConfigState = false;
 	bool mPathTracingSupported = true;
 	bool mHasRuntimeLinkTraceState = false;
 	SurfaceProbeFrameState mSurfaceProbeFrame = {};
 	bool mResetHistory = true;
 	std::string mLastHistoryResetReason = "startup";
+	float mLastFrameGenerationRealFrameTimeMs = 0.0f;
+	float mPendingFrameGenerationRealFrameTimeMs = 0.0f;
+	std::chrono::steady_clock::time_point mLastFrameGenerationTimestamp = {};
+	std::chrono::steady_clock::time_point mPendingFrameGenerationTimestamp = {};
+	bool mLastFrameGenerationRequestedEnabled = false;
+	NRIFrameGenerationProvider mLastFrameGenerationRequestedProvider = NRIFrameGenerationProvider::Off;
+	NRIFrameGenerationUiMode mLastFrameGenerationResolvedUiMode = NRIFrameGenerationUiMode::Auto;
 	bool mUseUpscaledInFinal = false;
 	bool mLastTemporalAppTaaEnabled = false;
 	bool mUseDenoisedCompositionInputs = false;
