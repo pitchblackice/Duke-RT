@@ -71,6 +71,8 @@ public:
 	void PrintPathTracingSectorLights(float radius, uint32_t limit) const;
 	void PrintPathTracingMapChunkDump(int32_t chunkIndex) const;
 	void PrintPathTracingMapChunkCompare(int32_t chunkIndex) const;
+	void PrintPathTracingMapBuildTrace(int32_t chunkIndex, int32_t sectorIndex) const;
+	void PrintPathTracingMapSectorTrace(int32_t sectorIndex) const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
 
 private:

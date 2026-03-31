@@ -865,6 +865,150 @@ namespace
 		return text;
 	}
 
+	enum BuildTraceWallSurfaceBits : uint32_t
+	{
+		BuildTraceWallSurface_None = 0,
+		BuildTraceWallSurface_Portal = 1 << 0,
+		BuildTraceWallSurface_OneSided = 1 << 1,
+		BuildTraceWallSurface_Upper = 1 << 2,
+		BuildTraceWallSurface_Middle = 1 << 3,
+		BuildTraceWallSurface_Lower = 1 << 4,
+	};
+
+	static bool IsPortalWallFlag(uint8_t portalFlags)
+	{
+		switch (portalFlags)
+		{
+		case PORTAL_WALL_VIEW:
+		case PORTAL_WALL_MIRROR:
+		case PORTAL_WALL_TO_SPRITE:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	static const char* GetSectorPortalFlagName(uint8_t portalFlags)
+	{
+		switch (portalFlags)
+		{
+		case PORTAL_SECTOR_FLOOR: return "sector_floor";
+		case PORTAL_SECTOR_CEILING: return "sector_ceiling";
+		case PORTAL_SECTOR_FLOOR_REFLECT: return "sector_floor_reflect";
+		case PORTAL_SECTOR_CEILING_REFLECT: return "sector_ceiling_reflect";
+		default: return "none";
+		}
+	}
+
+	static const char* GetWallPortalFlagName(uint8_t portalFlags)
+	{
+		switch (portalFlags)
+		{
+		case PORTAL_WALL_VIEW: return "wall_view";
+		case PORTAL_WALL_MIRROR: return "wall_mirror";
+		case PORTAL_WALL_TO_SPRITE: return "wall_to_sprite";
+		default: return "none";
+		}
+	}
+
+	static std::string GetSectorExflagsSummary(uint16_t exflags)
+	{
+		if (exflags == 0)
+		{
+			return "none";
+		}
+
+		std::string summary;
+		if ((exflags & SECTOREX_DRAGGED) != 0)
+		{
+			summary += "dragged";
+		}
+
+		const uint16_t unknownFlags = exflags & ~SECTOREX_DRAGGED;
+		if (unknownFlags != 0)
+		{
+			if (!summary.empty())
+			{
+				summary += "|";
+			}
+			summary += "other";
+		}
+		return summary;
+	}
+
+	static std::string JoinIndices(const std::vector<int32_t>& values, size_t limit = 12u)
+	{
+		if (values.empty())
+		{
+			return "none";
+		}
+
+		std::string summary;
+		const size_t count = std::min(values.size(), limit);
+		for (size_t i = 0; i < count; ++i)
+		{
+			if (!summary.empty())
+			{
+				summary += ",";
+			}
+			summary += std::to_string(values[i]);
+		}
+		if (values.size() > count)
+		{
+			summary += ",...";
+		}
+		return summary;
+	}
+
+	static std::string GetBuildTraceWallSurfaceSummary(uint32_t mask)
+	{
+		if (mask == BuildTraceWallSurface_None)
+		{
+			return "none";
+		}
+
+		std::string summary;
+		const auto append = [&summary](const char* token)
+		{
+			if (!summary.empty())
+			{
+				summary += "|";
+			}
+			summary += token;
+		};
+		if ((mask & BuildTraceWallSurface_Portal) != 0) append("portal");
+		if ((mask & BuildTraceWallSurface_OneSided) != 0) append("one_sided");
+		if ((mask & BuildTraceWallSurface_Upper) != 0) append("upper");
+		if ((mask & BuildTraceWallSurface_Middle) != 0) append("middle");
+		if ((mask & BuildTraceWallSurface_Lower) != 0) append("lower");
+		return summary;
+	}
+
+	static uint32_t GetBuildTraceWallSurfaceMask(const nri_scene::PTMapSurface& surface)
+	{
+		switch (surface.kind)
+		{
+		case nri_scene::PTMapSurfaceKind::Portal: return BuildTraceWallSurface_Portal;
+		case nri_scene::PTMapSurfaceKind::WallOneSided: return BuildTraceWallSurface_OneSided;
+		case nri_scene::PTMapSurfaceKind::WallUpper: return BuildTraceWallSurface_Upper;
+		case nri_scene::PTMapSurfaceKind::WallMiddle: return BuildTraceWallSurface_Middle;
+		case nri_scene::PTMapSurfaceKind::WallLower: return BuildTraceWallSurface_Lower;
+		default: return BuildTraceWallSurface_None;
+		}
+	}
+
+	static int32_t FindMapChunkIndexForSector(const nri_scene::PTMapWorld& mapWorld, int32_t sectorIndex)
+	{
+		for (const auto& chunk : mapWorld.chunks)
+		{
+			if (chunk.kind == nri_scene::PTMapChunkKind::Sector && chunk.sectorIndex == sectorIndex)
+			{
+				return (int32_t)chunk.chunkIndex;
+			}
+		}
+		return -1;
+	}
+
 	static uint32_t GetDispatchSize(uint32_t value)
 	{
 		return (value + 7u) / 8u;
@@ -5285,6 +5429,395 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 			surface.surface.material.flags,
 			(uint32_t)surface.surface.vertices.size(),
 			CountSurfaceTriangles(surface.surface));
+	}
+}
+
+void NRIRenderer::PrintMapBuildTrace(int32_t chunkIndex, int32_t sectorIndex) const
+{
+	if (!mMapWorld.valid)
+	{
+		Printf("NRI PT build trace: no authoritative map world has been built yet.\n");
+		return;
+	}
+
+	if (sectorIndex < 0 && chunkIndex < 0)
+	{
+		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit)
+		{
+			if (mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
+			{
+				chunkIndex = mLastSurfaceProbe.provenance.mapChunkIndex;
+			}
+			else if (mLastSurfaceProbe.provenance.sectorIndex >= 0)
+			{
+				sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
+			}
+		}
+	}
+
+	if (sectorIndex >= 0)
+	{
+		chunkIndex = FindMapChunkIndexForSector(mMapWorld, sectorIndex);
+	}
+
+	if (chunkIndex < 0 || (unsigned)chunkIndex >= mMapWorld.chunks.size())
+	{
+		Printf("NRI PT build trace: no valid chunk/sector target was resolved.\n");
+		return;
+	}
+
+	const auto& chunk = mMapWorld.chunks[(unsigned)chunkIndex];
+	if (chunk.kind != nri_scene::PTMapChunkKind::Sector || chunk.sectorIndex < 0 || (unsigned)chunk.sectorIndex >= sector.Size())
+	{
+		Printf("NRI PT build trace: chunk %d is not a valid sector chunk.\n", chunkIndex);
+		return;
+	}
+
+	sectorIndex = chunk.sectorIndex;
+	const auto& sec = sector[(unsigned)sectorIndex];
+	const auto* replacement =
+		(unsigned)chunkIndex < mRuntimeMapMutations.chunks.size() ?
+		&mRuntimeMapMutations.chunks[(unsigned)chunkIndex] :
+		nullptr;
+	const auto* baseline =
+		replacement != nullptr && replacement->baseline.sectorIndex == sectorIndex ?
+		&replacement->baseline :
+		nullptr;
+
+	std::vector<int32_t> currentWallIndices;
+	currentWallIndices.reserve(sec.walls.Size());
+	for (const auto& wal : sec.walls)
+	{
+		currentWallIndices.push_back(wall.IndexOf(&wal));
+	}
+
+	nri_scene::PTMapWorld liveWorld = {};
+	nri_scene::PTMapWorldStats liveStats = {};
+	const bool haveLiveWorld = nri_scene::BuildLiveMapChunkWorld(chunk, liveWorld, &liveStats) && !liveWorld.chunks.empty();
+
+	const auto printTraceForWorld =
+		[this, &sec, &chunk, baseline, replacement, &currentWallIndices](const char* label, const nri_scene::PTMapWorld& traceWorld, const nri_scene::PTMapChunk& traceChunk, uint32_t traceLocalSpaceIndex, bool useBaselineMeta)
+	{
+		std::unordered_map<int32_t, uint32_t> wallMasks;
+		std::vector<int32_t> floorSections;
+		std::vector<int32_t> ceilingSections;
+		uint32_t floorSurfaceCount = 0;
+		uint32_t ceilingSurfaceCount = 0;
+		uint32_t floorPortalCount = 0;
+		uint32_t ceilingPortalCount = 0;
+		uint32_t floorSkyCount = 0;
+		uint32_t ceilingSkyCount = 0;
+		uint32_t surfaceTriangleCount = 0;
+		for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < traceChunk.surfaceCount; ++localSurfaceIndex)
+		{
+			const uint32_t surfaceIndex = traceChunk.firstSurface + localSurfaceIndex;
+			if (surfaceIndex >= traceWorld.surfaces.size())
+			{
+				break;
+			}
+
+			const auto& surface = traceWorld.surfaces[surfaceIndex];
+			const uint32_t flags = surface.surface.material.flags;
+			surfaceTriangleCount += CountSurfaceTriangles(surface.surface);
+			if (surface.kind == nri_scene::PTMapSurfaceKind::Floor)
+			{
+				floorSurfaceCount++;
+				if ((flags & (nri_scene::MaterialFlag_Portal | nri_scene::MaterialFlag_Mirror)) != 0)
+				{
+					floorPortalCount++;
+				}
+				if ((flags & nri_scene::MaterialFlag_Sky) != 0)
+				{
+					floorSkyCount++;
+				}
+				if (surface.surface.provenance.sectionIndex >= 0 &&
+					std::find(floorSections.begin(), floorSections.end(), surface.surface.provenance.sectionIndex) == floorSections.end())
+				{
+					floorSections.push_back(surface.surface.provenance.sectionIndex);
+				}
+			}
+			else if (surface.kind == nri_scene::PTMapSurfaceKind::Ceiling)
+			{
+				ceilingSurfaceCount++;
+				if ((flags & (nri_scene::MaterialFlag_Portal | nri_scene::MaterialFlag_Mirror)) != 0)
+				{
+					ceilingPortalCount++;
+				}
+				if ((flags & nri_scene::MaterialFlag_Sky) != 0)
+				{
+					ceilingSkyCount++;
+				}
+				if (surface.surface.provenance.sectionIndex >= 0 &&
+					std::find(ceilingSections.begin(), ceilingSections.end(), surface.surface.provenance.sectionIndex) == ceilingSections.end())
+				{
+					ceilingSections.push_back(surface.surface.provenance.sectionIndex);
+				}
+			}
+			else if (surface.surface.provenance.wallIndex >= 0)
+			{
+				wallMasks[surface.surface.provenance.wallIndex] |= GetBuildTraceWallSurfaceMask(surface);
+			}
+		}
+
+		std::vector<int32_t> traversedNeighbors;
+		std::vector<int32_t> portalBlockedNeighbors;
+		std::vector<int32_t> solidClosedNeighbors;
+		if (useBaselineMeta && baseline != nullptr && baseline->walls.size() == currentWallIndices.size())
+		{
+			for (const auto& wal : baseline->walls)
+			{
+				if (IsPortalWallFlag(wal.portalflags))
+				{
+					if (wal.nextsector >= 0)
+					{
+						portalBlockedNeighbors.push_back(wal.nextsector);
+					}
+					continue;
+				}
+				if (wal.nextsector >= 0 && wal.nextsector < (int32_t)sector.Size())
+				{
+					traversedNeighbors.push_back(wal.nextsector);
+				}
+				else
+				{
+					solidClosedNeighbors.push_back(wal.nextsector);
+				}
+			}
+		}
+		else
+		{
+			for (const auto& wal : sec.walls)
+			{
+				if (IsPortalWallFlag(wal.portalflags))
+				{
+					if (wal.nextsector >= 0)
+					{
+						portalBlockedNeighbors.push_back(wal.nextsector);
+					}
+					continue;
+				}
+				if (wal.nextsector >= 0 && (unsigned)wal.nextsector < sector.Size())
+				{
+					traversedNeighbors.push_back(wal.nextsector);
+				}
+				else
+				{
+					solidClosedNeighbors.push_back(wal.nextsector);
+				}
+			}
+		}
+
+		const uint8_t portalFlags = useBaselineMeta && baseline != nullptr ? baseline->portalflags : sec.portalflags;
+		Printf("NRI PT build trace [%s]: chunk=%u sector=%d local_space=%u camera_local_space=%u surfaces=%u tris=%u portalflags=%s(0x%x) portalnum=%d exflags=0x%x exflags_summary=%s runtime_replaced=%s replacement_reasons=%s\n",
+			label,
+			traceChunk.chunkIndex,
+			traceChunk.sectorIndex,
+			traceLocalSpaceIndex,
+			mCurrentCameraLocalSpaceIndex,
+			traceChunk.surfaceCount,
+			surfaceTriangleCount,
+			GetSectorPortalFlagName(portalFlags),
+			portalFlags,
+			(int)sec.portalnum,
+			(unsigned)sec.exflags,
+			GetSectorExflagsSummary((uint16_t)sec.exflags).c_str(),
+			YesNo(replacement != nullptr && replacement->active),
+			replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask).c_str() : "none");
+		Printf("NRI PT build trace [%s] planes: floor_surfaces=%u floor_portal=%u floor_sky=%u floor_sections=%s ceiling_surfaces=%u ceiling_portal=%u ceiling_sky=%u ceiling_sections=%s\n",
+			label,
+			floorSurfaceCount,
+			floorPortalCount,
+			floorSkyCount,
+			JoinIndices(floorSections).c_str(),
+			ceilingSurfaceCount,
+			ceilingPortalCount,
+			ceilingSkyCount,
+			JoinIndices(ceilingSections).c_str());
+		Printf("NRI PT build trace [%s] flood: traversed=%s portal_blocked=%s solid_closed=%s\n",
+			label,
+			JoinIndices(traversedNeighbors).c_str(),
+			JoinIndices(portalBlockedNeighbors).c_str(),
+			JoinIndices(solidClosedNeighbors).c_str());
+
+		if (useBaselineMeta && baseline != nullptr && baseline->walls.size() == currentWallIndices.size())
+		{
+			for (size_t wallLocalIndex = 0; wallLocalIndex < baseline->walls.size(); ++wallLocalIndex)
+			{
+				const auto& wallSnapshot = baseline->walls[wallLocalIndex];
+				const int32_t wallIndex = wallLocalIndex < currentWallIndices.size() ? currentWallIndices[wallLocalIndex] : -1;
+				const int32_t adjacentChunkIndex = wallSnapshot.nextsector >= 0 ? FindMapChunkIndexForSector(mMapWorld, wallSnapshot.nextsector) : -1;
+				const uint32_t adjacentLocalSpaceIndex =
+					adjacentChunkIndex >= 0 && (unsigned)adjacentChunkIndex < mMapWorld.chunks.size() ?
+					mMapWorld.chunks[(unsigned)adjacentChunkIndex].localSpaceIndex :
+					UINT32_MAX;
+				const uint32_t surfaceMask =
+					wallIndex >= 0 && wallMasks.find(wallIndex) != wallMasks.end() ?
+					wallMasks[wallIndex] :
+					BuildTraceWallSurface_None;
+				Printf("NRI PT build trace [%s] wall: wall=%d nextsector=%d nextchunk=%d next_local_space=%u nextwall=%d cstat=0x%x portalflags=%s(0x%x) bands=%s\n",
+					label,
+					wallIndex,
+					wallSnapshot.nextsector,
+					adjacentChunkIndex,
+					adjacentLocalSpaceIndex,
+					wallSnapshot.nextwall,
+					wallSnapshot.cstat,
+					GetWallPortalFlagName(wallSnapshot.portalflags),
+					wallSnapshot.portalflags,
+					GetBuildTraceWallSurfaceSummary(surfaceMask).c_str());
+			}
+		}
+		else
+		{
+			for (const auto& wal : sec.walls)
+			{
+				const int32_t wallIndex = wall.IndexOf(&wal);
+				const int32_t adjacentChunkIndex = wal.nextsector >= 0 ? FindMapChunkIndexForSector(mMapWorld, wal.nextsector) : -1;
+				const uint32_t adjacentLocalSpaceIndex =
+					adjacentChunkIndex >= 0 && (unsigned)adjacentChunkIndex < mMapWorld.chunks.size() ?
+					mMapWorld.chunks[(unsigned)adjacentChunkIndex].localSpaceIndex :
+					UINT32_MAX;
+				const uint32_t surfaceMask =
+					wallMasks.find(wallIndex) != wallMasks.end() ?
+					wallMasks[wallIndex] :
+					BuildTraceWallSurface_None;
+				Printf("NRI PT build trace [%s] wall: wall=%d nextsector=%d nextchunk=%d next_local_space=%u nextwall=%d cstat=0x%x portalflags=%s(0x%x) bands=%s\n",
+					label,
+					wallIndex,
+					wal.nextsector,
+					adjacentChunkIndex,
+					adjacentLocalSpaceIndex,
+					wal.nextwall,
+					wal.cstat,
+					GetWallPortalFlagName(wal.portalflags),
+					wal.portalflags,
+					GetBuildTraceWallSurfaceSummary(surfaceMask).c_str());
+			}
+		}
+	};
+
+	printTraceForWorld("static", mMapWorld, chunk, chunk.localSpaceIndex, true);
+	if (haveLiveWorld)
+	{
+		printTraceForWorld("live", liveWorld, liveWorld.chunks[0], chunk.localSpaceIndex, false);
+	}
+	else
+	{
+		Printf("NRI PT build trace [live]: failed to rebuild live chunk %d.\n", chunkIndex);
+	}
+}
+
+void NRIRenderer::PrintMapSectorTrace(int32_t sectorIndex) const
+{
+	if (!mMapWorld.valid)
+	{
+		Printf("NRI PT sector trace: no authoritative map world has been built yet.\n");
+		return;
+	}
+
+	if (sectorIndex < 0)
+	{
+		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit && mLastSurfaceProbe.provenance.sectorIndex >= 0)
+		{
+			sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
+		}
+		else
+		{
+			Printf("NRI PT sector trace: no sector was specified and the last probe did not resolve to a sector.\n");
+			return;
+		}
+	}
+
+	if (sectorIndex < 0 || (unsigned)sectorIndex >= sector.Size())
+	{
+		Printf("NRI PT sector trace: sector %d is out of range [0,%u).\n", sectorIndex, (uint32_t)sector.Size());
+		return;
+	}
+
+	const auto& sec = sector[(unsigned)sectorIndex];
+	const int32_t chunkIndex = FindMapChunkIndexForSector(mMapWorld, sectorIndex);
+	const uint32_t localSpaceIndex =
+		chunkIndex >= 0 && (unsigned)chunkIndex < mMapWorld.chunks.size() ?
+		mMapWorld.chunks[(unsigned)chunkIndex].localSpaceIndex :
+		UINT32_MAX;
+	const bool sameCameraLocalSpace =
+		localSpaceIndex != UINT32_MAX &&
+		mCurrentCameraLocalSpaceIndex != UINT32_MAX &&
+		localSpaceIndex == mCurrentCameraLocalSpaceIndex;
+	const auto* replacement =
+		chunkIndex >= 0 && (unsigned)chunkIndex < mRuntimeMapMutations.chunks.size() ?
+		&mRuntimeMapMutations.chunks[(unsigned)chunkIndex] :
+		nullptr;
+	nri_scene::PTMapChunkMutationAnalysis analysis = {};
+	const bool analyzed =
+		replacement != nullptr &&
+		chunkIndex >= 0 &&
+		(unsigned)chunkIndex < mMapWorld.chunks.size() &&
+		nri_scene::AnalyzeMapChunkMutation(mMapWorld.chunks[(unsigned)chunkIndex], replacement->baseline, analysis);
+
+	Printf("NRI PT sector trace: sector=%d chunk=%d local_space=%u camera_local_space=%u same_camera_space=%s portalflags=%s(0x%x) portalnum=%d exflags=0x%x exflags_summary=%s floorz=%.2f ceilingz=%.2f floorstat=0x%x ceilingstat=0x%x floorheinum=%d ceilingheinum=%d lotag=%d hitag=%d runtime_replaced=%s replacement_reasons=%s sector_dirty=%s dragged=%s blind_spot=%s signature_changed=%s\n",
+		sectorIndex,
+		chunkIndex,
+		localSpaceIndex,
+		mCurrentCameraLocalSpaceIndex,
+		YesNo(sameCameraLocalSpace),
+		GetSectorPortalFlagName(sec.portalflags),
+		sec.portalflags,
+		(int)sec.portalnum,
+		(unsigned)sec.exflags,
+		GetSectorExflagsSummary((uint16_t)sec.exflags).c_str(),
+		(float)sec.floorz,
+		(float)sec.ceilingz,
+		(unsigned)sec.floorstat,
+		(unsigned)sec.ceilingstat,
+		(int)sec.floorheinum,
+		(int)sec.ceilingheinum,
+		(int)sec.lotag,
+		(int)sec.hitag,
+		YesNo(replacement != nullptr && replacement->active),
+		replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask).c_str() : "none",
+		YesNo(replacement != nullptr && replacement->sectorDirty),
+		YesNo(replacement != nullptr && replacement->dragged),
+		YesNo(replacement != nullptr && replacement->blindSpot),
+		YesNo(analyzed && analysis.signatureChanged));
+
+	if (replacement != nullptr)
+	{
+		Printf("NRI PT sector trace baseline: signature=0x%016llx baseline_sector=%d section_indices=%s wall_count=%u live_signature=0x%016llx section_dirty=%u\n",
+			(unsigned long long)replacement->baselineSignature,
+			replacement->baseline.sectorIndex,
+			JoinIndices(replacement->baseline.sectionIndices).c_str(),
+			(uint32_t)replacement->baseline.walls.size(),
+			(unsigned long long)replacement->liveSignature,
+			replacement->sectionDirtyCount);
+	}
+
+	for (const auto& wal : sec.walls)
+	{
+		const int32_t wallIndex = wall.IndexOf(&wal);
+		const int32_t adjacentChunkIndex = wal.nextsector >= 0 ? FindMapChunkIndexForSector(mMapWorld, wal.nextsector) : -1;
+		const uint32_t adjacentLocalSpaceIndex =
+			adjacentChunkIndex >= 0 && (unsigned)adjacentChunkIndex < mMapWorld.chunks.size() ?
+			mMapWorld.chunks[(unsigned)adjacentChunkIndex].localSpaceIndex :
+			UINT32_MAX;
+		Printf("NRI PT sector wall: wall=%d nextsector=%d nextchunk=%d next_local_space=%u nextwall=%d cstat=0x%x portalflags=%s(0x%x) walltile=%u overtile=%u pal=%d shade=%d xrepeat=%d yrepeat=%d one_way=%s masked=%s bottom_align=%s\n",
+			wallIndex,
+			wal.nextsector,
+			adjacentChunkIndex,
+			adjacentLocalSpaceIndex,
+			wal.nextwall,
+			wal.cstat,
+			GetWallPortalFlagName(wal.portalflags),
+			wal.portalflags,
+			wal.walltexture.GetIndex(),
+			wal.overtexture.GetIndex(),
+			wal.pal,
+			wal.shade,
+			wal.xrepeat,
+			wal.yrepeat,
+			YesNo((wal.cstat & CSTAT_WALL_1WAY) != 0),
+			YesNo((wal.cstat & CSTAT_WALL_MASKED) != 0),
+			YesNo((wal.cstat & CSTAT_WALL_ALIGN_BOTTOM) != 0));
 	}
 }
 

@@ -47,6 +47,8 @@ public:
 	void PrintSectorLightDump(float radius, uint32_t limit) const;
 	void PrintMapChunkDump(int32_t chunkIndex) const;
 	void PrintMapChunkCompare(int32_t chunkIndex) const;
+	void PrintMapBuildTrace(int32_t chunkIndex, int32_t sectorIndex) const;
+	void PrintMapSectorTrace(int32_t sectorIndex) const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	const char* GetAvailabilityReason() const;
 

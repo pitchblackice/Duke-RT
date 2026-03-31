@@ -897,6 +897,42 @@ CCMD(nri_ptchunkcompare)
 	}
 }
 
+CCMD(nri_ptbuildtrace)
+{
+	int32_t chunkIndex = -1;
+	int32_t sectorIndex = -1;
+	if (argv.argc() > 2 && !stricmp(argv[1], "sector"))
+	{
+		sectorIndex = atoi(argv[2]);
+	}
+	else if (argv.argc() > 1)
+	{
+		chunkIndex = atoi(argv[1]);
+	}
+
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingMapBuildTrace(chunkIndex, sectorIndex);
+	}
+	else
+	{
+		Printf("nri_ptbuildtrace is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptsectortrace)
+{
+	const int32_t sectorIndex = argv.argc() > 1 ? atoi(argv[1]) : -1;
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingMapSectorTrace(sectorIndex);
+	}
+	else
+	{
+		Printf("nri_ptsectortrace is only available while using the NRI renderer.\n");
+	}
+}
+
 CCMD(nri_ptbuffers)
 {
 	if (auto* frameBuffer = GetActiveNRIRenderDevice())
@@ -1904,6 +1940,28 @@ void NRIRenderDevice::PrintPathTracingMapChunkCompare(int32_t chunkIndex) const
 	}
 
 	mRenderer->PrintMapChunkCompare(chunkIndex);
+}
+
+void NRIRenderDevice::PrintPathTracingMapBuildTrace(int32_t chunkIndex, int32_t sectorIndex) const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT build trace is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintMapBuildTrace(chunkIndex, sectorIndex);
+}
+
+void NRIRenderDevice::PrintPathTracingMapSectorTrace(int32_t sectorIndex) const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT sector trace is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintMapSectorTrace(sectorIndex);
 }
 
 void NRIRenderDevice::PrintFrameBoundaryStatus() const
