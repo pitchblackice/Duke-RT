@@ -1195,10 +1195,6 @@ static Texture* const* NRI_CALL GetSwapChainTextures(const SwapChain& swapChain,
     return ((SwapChainD3D12&)swapChain).GetTextures(textureNum);
 }
 
-static uint64_t NRI_CALL GetSwapChainNativeObject(const SwapChain& swapChain) {
-    return ((SwapChainD3D12&)swapChain).GetNativeObject();
-}
-
 static Result NRI_CALL GetDisplayDesc(SwapChain& swapChain, DisplayDesc& displayDesc) {
     return ((SwapChainD3D12&)swapChain).GetDisplayDesc(displayDesc);
 }
@@ -1222,7 +1218,6 @@ Result DeviceD3D12::FillFunctionTable(SwapChainInterface& table) const {
     table.CreateSwapChain = ::CreateSwapChain;
     table.DestroySwapChain = ::DestroySwapChain;
     table.GetSwapChainTextures = ::GetSwapChainTextures;
-    table.GetSwapChainNativeObject = ::GetSwapChainNativeObject;
     table.GetDisplayDesc = ::GetDisplayDesc;
     table.AcquireNextTexture = ::AcquireNextTexture;
     table.WaitForPresent = ::WaitForPresent;

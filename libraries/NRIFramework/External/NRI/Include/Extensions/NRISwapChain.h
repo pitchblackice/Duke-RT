@@ -124,7 +124,6 @@ NriStruct(SwapChainInterface) {
     Nri(Result)             (NRI_CALL *CreateSwapChain)         (NriRef(Device) device, const NriRef(SwapChainDesc) swapChainDesc, NriOut NriRef(SwapChain*) swapChain);
     void                    (NRI_CALL *DestroySwapChain)        (NriPtr(SwapChain) swapChain);
     NriPtr(Texture) const*  (NRI_CALL *GetSwapChainTextures)    (const NriRef(SwapChain) swapChain, NriOut NonNriRef(uint32_t) textureNum);
-    uint64_t                (NRI_CALL *GetSwapChainNativeObject)(const NriRef(SwapChain) swapChain); // IDXGISwapChain4* as uint64_t | VkSwapchainKHR
 
     // Returns "FAILURE" if swap chain's window is outside of all monitors
     Nri(Result)             (NRI_CALL *GetDisplayDesc)          (NriRef(SwapChain) swapChain, NriOut NriRef(DisplayDesc) displayDesc);

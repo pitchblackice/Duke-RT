@@ -1850,13 +1850,6 @@ void NRIRenderDevice::RefreshNativeFrameGenerationHandles()
 void NRIRenderDevice::RefreshNativeFrameGenerationSwapChain()
 {
 	mNativeD3D12SwapChain = nullptr;
-
-	if (GetSelectedAPI() != nri::GraphicsAPI::D3D12 || mSwapChain == nullptr || mSwapChainInterface.GetSwapChainNativeObject == nullptr)
-	{
-		return;
-	}
-
-	mNativeD3D12SwapChain = reinterpret_cast<IDXGISwapChain4*>(mSwapChainInterface.GetSwapChainNativeObject(*mSwapChain));
 }
 
 void NRIRenderDevice::PrintPathTracingCaps() const
@@ -1899,7 +1892,7 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		mNativeD3D12Device != nullptr ? "ok" : "missing",
 		mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
 		mNativeD3D12SwapChain != nullptr ? "ok" : "missing",
-		GetSelectedAPI() == nri::GraphicsAPI::D3D12 ? "nri-native-object+d3d12-swapchain-native" : "unsupported-api");
+		GetSelectedAPI() == nri::GraphicsAPI::D3D12 ? "nri-public-device-queue-only" : "unsupported-api");
 
 	if (mRenderer != nullptr)
 	{
