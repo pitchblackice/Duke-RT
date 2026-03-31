@@ -41,6 +41,9 @@ EXTERN_CVAR(Bool, nri_validation)
 EXTERN_CVAR(Bool, nri_apivalidation)
 EXTERN_CVAR(Bool, nri_dred)
 EXTERN_CVAR(Bool, vid_vsync)
+EXTERN_CVAR(Bool, nri_framegen)
+EXTERN_CVAR(Bool, nri_framegenlatency)
+EXTERN_CVAR(Int, nri_framegenprovider)
 EXTERN_CVAR(Bool, nri_ptsectorlighting)
 EXTERN_CVAR(Float, nri_ptsectorambientscale)
 EXTERN_CVAR(Float, nri_ptsectorhemiscale)
@@ -828,6 +831,11 @@ namespace
 		}
 	}
 
+	static bool HasRequestedFrameGenerationProvider()
+	{
+		return (int)nri_framegenprovider != 0;
+	}
+
 	static const char* DescribeSwapChainFlagOverride()
 	{
 		switch ((int)nri_ptswapflags)
@@ -1536,6 +1544,46 @@ void NRIRenderDevice::SetVSync(bool vsync)
 	}
 }
 
+bool NRIRenderDevice::ShouldRequestFrameGenerationLowLatencySwapChain() const
+{
+	if (!nri_framegen || !nri_framegenlatency || !HasRequestedFrameGenerationProvider())
+	{
+		return false;
+	}
+
+	if (mDevice == nullptr || mSwapChainInterface.CreateSwapChain == nullptr)
+	{
+		return false;
+	}
+
+	if (GetSelectedAPI() != nri::GraphicsAPI::D3D12 || IsFullscreenModeActive())
+	{
+		return false;
+	}
+
+	const nri::DeviceDesc& deviceDesc = mCore.GetDeviceDesc(*mDevice);
+	if (!deviceDesc.features.lowLatency)
+	{
+		return false;
+	}
+
+	return
+		mLowLatency.SetLatencySleepMode != nullptr &&
+		mLowLatency.SetLatencyMarker != nullptr &&
+		mLowLatency.LatencySleep != nullptr &&
+		mLowLatency.GetLatencyReport != nullptr;
+}
+
+nri::SwapChainBits NRIRenderDevice::GetEffectiveRequestedSwapChainFlags() const
+{
+	nri::SwapChainBits flags = GetRequestedSwapChainFlags();
+	if (ShouldRequestFrameGenerationLowLatencySwapChain())
+	{
+		flags = NRIFlags(flags, nri::SwapChainBits::ALLOW_LOW_LATENCY);
+	}
+	return flags;
+}
+
 void NRIRenderDevice::WaitForCommands(bool finish)
 {
 	if (mDevice == nullptr)
@@ -1876,7 +1924,7 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLRR) ? "yes" : "no",
 		(int)nri_ptportaldepth);
 	const auto& frameGenPolicy = mFrameGeneration.GetPolicy();
-	Printf("NRI PT framegen caps: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
+	Printf("NRI PT framegen caps: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
 		frameGenPolicy.requestedEnabled ? "on" : "off",
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.resolvedProvider),
@@ -1887,6 +1935,8 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		frameGenPolicy.requestedLowLatency ? "on" : "off",
 		frameGenPolicy.resolvedLowLatency ? "on" : "off",
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.lowLatencyAvailable),
+		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.lowLatencyInterfaceAvailable),
+		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.lowLatencySwapChainEnabled),
 		frameGenPolicy.requestedAsync ? "on" : "off",
 		frameGenPolicy.resolvedAsync ? "on" : "off",
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.asyncWorkloadAvailable),
@@ -1904,6 +1954,24 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
 		mNativeD3D12SwapChain != nullptr ? "ok" : "missing",
 		GetSelectedAPI() == nri::GraphicsAPI::D3D12 ? "nri-public-device-queue-only" : "unsupported-api");
+	const auto& lowLatencyState = mFrameGeneration.GetLowLatencyState();
+	Printf("NRI PT low-latency: iface=%s swapchain=%s configured=%s sleep=%s count=%llu markers=%llu present=%s set_mode=%s sleep_result=%s sim=%s/%s submit=%s/%s report=%s present_us=%llu..%llu\n",
+		lowLatencyState.interfaceAvailable ? "yes" : "no",
+		lowLatencyState.swapChainEnabled ? "yes" : "no",
+		lowLatencyState.sleepModeConfigured ? "yes" : "no",
+		lowLatencyState.sleepInvoked ? "yes" : "no",
+		(unsigned long long)lowLatencyState.latencySleepCount,
+		(unsigned long long)lowLatencyState.markerCount,
+		lowLatencyState.presentBoundarySeen ? "yes" : "no",
+		GetNriResultName(lowLatencyState.setSleepModeResult),
+		GetNriResultName(lowLatencyState.latencySleepResult),
+		GetNriResultName(lowLatencyState.simulationStartMarkerResult),
+		GetNriResultName(lowLatencyState.simulationEndMarkerResult),
+		GetNriResultName(lowLatencyState.renderSubmitStartMarkerResult),
+		GetNriResultName(lowLatencyState.renderSubmitEndMarkerResult),
+		GetNriResultName(lowLatencyState.latencyReportResult),
+		(unsigned long long)lowLatencyState.latencyReport.presentStartTimeUs,
+		(unsigned long long)lowLatencyState.latencyReport.presentEndTimeUs);
 
 	if (mRenderer != nullptr)
 	{
@@ -2575,7 +2643,7 @@ void NRIRenderDevice::LogStartup()
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLSR) ? "yes" : "no",
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLRR) ? "yes" : "no");
 	const auto& frameGenPolicy = mFrameGeneration.GetPolicy();
-	Printf("Frame generation policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
+	Printf("Frame generation policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
 		frameGenPolicy.requestedEnabled ? "on" : "off",
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.resolvedProvider),
@@ -2586,6 +2654,8 @@ void NRIRenderDevice::LogStartup()
 		frameGenPolicy.requestedLowLatency ? "on" : "off",
 		frameGenPolicy.resolvedLowLatency ? "on" : "off",
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.lowLatencyAvailable),
+		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.lowLatencyInterfaceAvailable),
+		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.lowLatencySwapChainEnabled),
 		frameGenPolicy.requestedAsync ? "on" : "off",
 		frameGenPolicy.resolvedAsync ? "on" : "off",
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.asyncWorkloadAvailable),
@@ -2724,6 +2794,17 @@ bool NRIRenderDevice::CreateDevice()
 	{
 		ConfigureD3D12InfoQueue(mCore, mDevice);
 	}
+
+	mLowLatency = {};
+	const nri::Result lowLatencyResult = mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::LowLatencyInterface), &mLowLatency);
+	if (lowLatencyResult != nri::Result::SUCCESS)
+	{
+		mLowLatency = {};
+	}
+	Printf("NRI low-latency interface: requested=%s result=%s available=%s\n",
+		selectedApi == nri::GraphicsAPI::D3D12 ? "yes" : "no",
+		GetNriResultName(lowLatencyResult),
+		mLowLatency.SetLatencySleepMode != nullptr ? "yes" : "no");
 
 	if (mCore.GetQueue(*mDevice, nri::QueueType::GRAPHICS, 0, mGraphicsQueue) != nri::Result::SUCCESS ||
 		mCore.CreateFence(*mDevice, 0, mFrameFence) != nri::Result::SUCCESS)
@@ -2973,7 +3054,7 @@ bool NRIRenderDevice::CreateSwapChain()
 	swapChainDesc.height = height;
 	swapChainDesc.textureNum = GetRequestedSwapChainTextureCount();
 	swapChainDesc.format = nri::SwapChainFormat::BT709_G22_8BIT;
-	swapChainDesc.flags = GetRequestedSwapChainFlags();
+	swapChainDesc.flags = GetEffectiveRequestedSwapChainFlags();
 	swapChainDesc.queuedFrameNum = QueuedFrameCount;
 
 	if (mSwapChainInterface.CreateSwapChain(*mDevice, swapChainDesc, mSwapChain) != nri::Result::SUCCESS)
@@ -2981,6 +3062,7 @@ bool NRIRenderDevice::CreateSwapChain()
 		Printf(TEXTCOLOR_RED "Failed to create NRI swapchain.\n");
 		return false;
 	}
+	mSwapChainFlags = swapChainDesc.flags;
 	RefreshNativeFrameGenerationSwapChain();
 	mFrameGeneration.OnSwapChainCreated(*this);
 	SetNriDebugName(mCore, mSwapChain, "Raze.SwapChain");
@@ -2988,7 +3070,6 @@ bool NRIRenderDevice::CreateSwapChain()
 	uint32_t textureCount = 0;
 	nri::Texture* const* textures = mSwapChainInterface.GetSwapChainTextures(*mSwapChain, textureCount);
 	mSwapChainImages.resize(textureCount);
-	mSwapChainFlags = swapChainDesc.flags;
 	mSwapChainQueuedFrameNum = swapChainDesc.queuedFrameNum;
 	mSwapChainTextureCount = (uint8_t)(std::min<uint32_t>)(textureCount, 255u);
 	mObservedSwapChainAcquireMask = 0;
@@ -3352,9 +3433,11 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 
 	const uint32_t width = (uint32_t)(std::max)(GetClientWidth(), 1);
 	const uint32_t height = (uint32_t)(std::max)(GetClientHeight(), 1);
+	const nri::SwapChainBits requestedFlags = GetEffectiveRequestedSwapChainFlags();
 	if (!mSwapChainImages.empty() &&
 		mSwapChainImages[0].target.width == width &&
-		mSwapChainImages[0].target.height == height)
+		mSwapChainImages[0].target.height == height &&
+		mSwapChainFlags == requestedFlags)
 	{
 		return true;
 	}
@@ -3388,6 +3471,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 	const nri::FenceSubmitDesc signalFences[] = { releaseFence, frameFence };
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
 
+	mFrameGeneration.OnSimulationEnd(*this);
 	nri::QueueSubmitDesc submitDesc = {};
 	submitDesc.waitFences = &waitFence;
 	submitDesc.waitFenceNum = 1;
@@ -3395,11 +3479,15 @@ void NRIRenderDevice::EndFrameAndPresent()
 	submitDesc.commandBufferNum = 1;
 	submitDesc.signalFences = signalFences;
 	submitDesc.signalFenceNum = 2;
+	const bool lowLatencySwapChainEnabled = ((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::ALLOW_LOW_LATENCY) != 0;
+	submitDesc.swapChain = lowLatencySwapChainEnabled ? mSwapChain : nullptr;
 	nri::Result submitResult = nri::Result::FAILURE;
+	mFrameGeneration.OnRenderSubmitStart(*this);
 	{
 		ScopedNriTiming submitTiming(NriPTQueueSubmit, mLastFrameBoundaryStats.submitMs);
 		submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
 	}
+	mFrameGeneration.OnRenderSubmitEnd(*this);
 	if (submitResult != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "NRI QueueSubmit failed with result '%s'.\n", GetNriResultName(submitResult));
@@ -3408,10 +3496,12 @@ void NRIRenderDevice::EndFrameAndPresent()
 
 	mStreamer.EndStreamerFrame(*mStreamerInstance);
 	nri::Result presentResult = nri::Result::FAILURE;
+	mFrameGeneration.OnPresentStart(*this);
 	{
 		ScopedNriTiming presentTiming(NriPTQueuePresent, mLastFrameBoundaryStats.presentMs);
 		presentResult = mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
 	}
+	mFrameGeneration.OnPresentEnd(*this, presentResult);
 	mLastFrameBoundaryStats.presentResult = presentResult;
 	if (presentResult == nri::Result::SUCCESS)
 	{

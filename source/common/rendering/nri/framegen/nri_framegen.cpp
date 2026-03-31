@@ -73,6 +73,8 @@ namespace
 			a.fullscreenActive == b.fullscreenActive &&
 			a.windowModeSupported == b.windowModeSupported &&
 			a.lowLatencyAvailable == b.lowLatencyAvailable &&
+			a.lowLatencyInterfaceAvailable == b.lowLatencyInterfaceAvailable &&
+			a.lowLatencySwapChainEnabled == b.lowLatencySwapChainEnabled &&
 			a.waitableSwapChainAvailable == b.waitableSwapChainAvailable &&
 			a.asyncWorkloadAvailable == b.asyncWorkloadAvailable &&
 			a.nativeDeviceAvailable == b.nativeDeviceAvailable &&
@@ -129,6 +131,7 @@ void NRIFrameGenerationContext::Initialize(const NRIRenderDevice& frameBuffer)
 {
 	mInitialized = true;
 	mSwapChainReady = frameBuffer.mSwapChain != nullptr;
+	ResetLowLatencyState();
 	RefreshPolicy(frameBuffer, true);
 }
 
@@ -140,6 +143,7 @@ void NRIFrameGenerationContext::Shutdown()
 	mHasLoggedPolicy = false;
 	mPolicy = {};
 	mLastFrameDesc = {};
+	ResetLowLatencyState();
 }
 
 void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer, bool logChanges)
@@ -147,10 +151,12 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 	const NRIFrameGenerationPolicy newPolicy = BuildPolicy(frameBuffer);
 	const bool changed = !ArePoliciesEquivalent(mPolicy, newPolicy);
 	mPolicy = newPolicy;
+	mLowLatencyState.interfaceAvailable = mPolicy.lowLatencyInterfaceAvailable;
+	mLowLatencyState.swapChainEnabled = mPolicy.lowLatencySwapChainEnabled;
 
 	if (logChanges && (!mHasLoggedPolicy || changed))
 	{
-		Printf("NRI frame generation policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
+		Printf("NRI frame generation policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
 			mPolicy.requestedEnabled ? "on" : "off",
 			GetProviderName(mPolicy.requestedProvider),
 			GetProviderName(mPolicy.resolvedProvider),
@@ -161,6 +167,8 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 			mPolicy.requestedLowLatency ? "on" : "off",
 			mPolicy.resolvedLowLatency ? "on" : "off",
 			GetAvailabilityName(mPolicy.lowLatencyAvailable),
+			GetAvailabilityName(mPolicy.lowLatencyInterfaceAvailable),
+			GetAvailabilityName(mPolicy.lowLatencySwapChainEnabled),
 			mPolicy.requestedAsync ? "on" : "off",
 			mPolicy.resolvedAsync ? "on" : "off",
 			GetAvailabilityName(mPolicy.asyncWorkloadAvailable),
@@ -206,14 +214,26 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 	{
 		const nri::DeviceDesc& deviceDesc = frameBuffer.mCore.GetDeviceDesc(*frameBuffer.mDevice);
 		policy.shaderModel = deviceDesc.shaderModel;
-		policy.lowLatencyAvailable = !!deviceDesc.features.lowLatency;
+		policy.lowLatencyInterfaceAvailable = frameBuffer.mLowLatency.SetLatencySleepMode != nullptr &&
+			frameBuffer.mLowLatency.SetLatencyMarker != nullptr &&
+			frameBuffer.mLowLatency.LatencySleep != nullptr &&
+			frameBuffer.mLowLatency.GetLatencyReport != nullptr;
+		policy.lowLatencyAvailable = !!deviceDesc.features.lowLatency && policy.lowLatencyInterfaceAvailable;
+		policy.lowLatencySwapChainEnabled = policy.swapChainReady &&
+			(((uint32_t)frameBuffer.mSwapChainFlags & (uint32_t)nri::SwapChainBits::ALLOW_LOW_LATENCY) != 0);
 		policy.waitableSwapChainAvailable = !!deviceDesc.features.waitableSwapChain;
 	}
 	policy.shaderModelSupported = frameBuffer.mDevice != nullptr && policy.shaderModel >= 62u;
 	policy.providerRuntimeSupported = false;
 	policy.asyncWorkloadAvailable = false;
 	policy.resolvedAsync = false;
-	policy.resolvedLowLatency = false;
+	policy.resolvedLowLatency =
+		policy.requestedEnabled &&
+		policy.requestedLowLatency &&
+		policy.apiSupported &&
+		policy.windowModeSupported &&
+		policy.lowLatencyAvailable &&
+		policy.lowLatencySwapChainEnabled;
 
 	if (!policy.requestedEnabled)
 	{
@@ -303,18 +323,48 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 void NRIFrameGenerationContext::OnSwapChainCreated(const NRIRenderDevice& frameBuffer)
 {
 	mSwapChainReady = true;
+	ResetLowLatencyState();
+	RefreshPolicy(frameBuffer, false);
+	ConfigureLowLatencyMode(frameBuffer);
 	RefreshPolicy(frameBuffer, true);
 }
 
 void NRIFrameGenerationContext::OnSwapChainDestroyed(const NRIRenderDevice& frameBuffer)
 {
 	mSwapChainReady = false;
+	ResetLowLatencyState();
 	RefreshPolicy(frameBuffer, false);
 }
 
 void NRIFrameGenerationContext::BeginFrame(const NRIRenderDevice& frameBuffer)
 {
 	RefreshPolicy(frameBuffer, true);
+	mLowLatencyState.sleepInvoked = false;
+	mLowLatencyState.presentBoundarySeen = false;
+	mLowLatencyState.latencySleepResult = nri::Result::FAILURE;
+	mLowLatencyState.simulationStartMarkerResult = nri::Result::FAILURE;
+	mLowLatencyState.simulationEndMarkerResult = nri::Result::FAILURE;
+	mLowLatencyState.renderSubmitStartMarkerResult = nri::Result::FAILURE;
+	mLowLatencyState.renderSubmitEndMarkerResult = nri::Result::FAILURE;
+	mLowLatencyState.latencyReportResult = nri::Result::FAILURE;
+	mLowLatencyState.latencyReport = {};
+	ConfigureLowLatencyMode(frameBuffer);
+	if (!IsLowLatencyOperational(frameBuffer))
+	{
+		return;
+	}
+
+	if (frameBuffer.mSwapChain != nullptr)
+	{
+		mLowLatencyState.latencySleepResult = frameBuffer.mLowLatency.LatencySleep(*frameBuffer.mSwapChain);
+		mLowLatencyState.sleepInvoked = mLowLatencyState.latencySleepResult == nri::Result::SUCCESS;
+		if (mLowLatencyState.sleepInvoked)
+		{
+			mLowLatencyState.latencySleepCount++;
+		}
+	}
+
+	SetLowLatencyMarker(frameBuffer, nri::LatencyMarker::SIMULATION_START, mLowLatencyState.simulationStartMarkerResult);
 }
 
 void NRIFrameGenerationContext::EndFrame(const NRIRenderDevice& frameBuffer)
@@ -326,4 +376,82 @@ void NRIFrameGenerationContext::SetFrameDesc(const NRIFrameGenerationFrameDesc& 
 {
 	mLastFrameDesc = desc;
 	mHasFrameDesc = true;
+}
+
+void NRIFrameGenerationContext::OnSimulationEnd(const NRIRenderDevice& frameBuffer)
+{
+	SetLowLatencyMarker(frameBuffer, nri::LatencyMarker::SIMULATION_END, mLowLatencyState.simulationEndMarkerResult);
+}
+
+void NRIFrameGenerationContext::OnRenderSubmitStart(const NRIRenderDevice& frameBuffer)
+{
+	SetLowLatencyMarker(frameBuffer, nri::LatencyMarker::RENDER_SUBMIT_START, mLowLatencyState.renderSubmitStartMarkerResult);
+}
+
+void NRIFrameGenerationContext::OnRenderSubmitEnd(const NRIRenderDevice& frameBuffer)
+{
+	SetLowLatencyMarker(frameBuffer, nri::LatencyMarker::RENDER_SUBMIT_END, mLowLatencyState.renderSubmitEndMarkerResult);
+}
+
+void NRIFrameGenerationContext::OnPresentStart(const NRIRenderDevice&)
+{
+	mLowLatencyState.presentBoundarySeen = true;
+}
+
+void NRIFrameGenerationContext::OnPresentEnd(const NRIRenderDevice& frameBuffer, nri::Result presentResult)
+{
+	mLowLatencyState.presentBoundarySeen = mLowLatencyState.presentBoundarySeen || presentResult == nri::Result::SUCCESS;
+	if (!IsLowLatencyOperational(frameBuffer) || presentResult != nri::Result::SUCCESS || frameBuffer.mSwapChain == nullptr)
+	{
+		return;
+	}
+
+	mLowLatencyState.latencyReportResult = frameBuffer.mLowLatency.GetLatencyReport(*frameBuffer.mSwapChain, mLowLatencyState.latencyReport);
+}
+
+bool NRIFrameGenerationContext::IsLowLatencyOperational(const NRIRenderDevice& frameBuffer) const
+{
+	return
+		mPolicy.resolvedLowLatency &&
+		frameBuffer.mSwapChain != nullptr &&
+		frameBuffer.mLowLatency.SetLatencySleepMode != nullptr &&
+		frameBuffer.mLowLatency.SetLatencyMarker != nullptr &&
+		frameBuffer.mLowLatency.LatencySleep != nullptr &&
+		frameBuffer.mLowLatency.GetLatencyReport != nullptr;
+}
+
+void NRIFrameGenerationContext::ConfigureLowLatencyMode(const NRIRenderDevice& frameBuffer)
+{
+	if (frameBuffer.mSwapChain == nullptr || frameBuffer.mLowLatency.SetLatencySleepMode == nullptr || !mPolicy.lowLatencySwapChainEnabled)
+	{
+		return;
+	}
+
+	nri::LatencySleepMode sleepMode = {};
+	sleepMode.minIntervalUs = 0;
+	sleepMode.lowLatencyMode = mPolicy.resolvedLowLatency;
+	sleepMode.lowLatencyBoost = false;
+	mLowLatencyState.configuredSleepMode = sleepMode;
+	mLowLatencyState.setSleepModeResult = frameBuffer.mLowLatency.SetLatencySleepMode(*frameBuffer.mSwapChain, sleepMode);
+	mLowLatencyState.sleepModeConfigured = mLowLatencyState.setSleepModeResult == nri::Result::SUCCESS;
+}
+
+void NRIFrameGenerationContext::SetLowLatencyMarker(const NRIRenderDevice& frameBuffer, nri::LatencyMarker marker, nri::Result& resultSlot)
+{
+	resultSlot = nri::Result::FAILURE;
+	if (!IsLowLatencyOperational(frameBuffer))
+	{
+		return;
+	}
+
+	resultSlot = frameBuffer.mLowLatency.SetLatencyMarker(*frameBuffer.mSwapChain, marker);
+	if (resultSlot == nri::Result::SUCCESS)
+	{
+		mLowLatencyState.markerCount++;
+	}
+}
+
+void NRIFrameGenerationContext::ResetLowLatencyState()
+{
+	mLowLatencyState = {};
 }

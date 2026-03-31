@@ -3507,7 +3507,7 @@ void NRIRenderer::PrintStatus() const
 		requestedRenderScale,
 		resolvedRenderScale,
 		(float)nri_sharpness);
-	Printf("NRI PT framegen policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s frame_desc=%s reason=%s\n",
+	Printf("NRI PT framegen policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s frame_desc=%s reason=%s\n",
 		frameGenPolicy.requestedEnabled ? "on" : "off",
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.resolvedProvider),
@@ -3518,6 +3518,8 @@ void NRIRenderer::PrintStatus() const
 		frameGenPolicy.requestedLowLatency ? "on" : "off",
 		frameGenPolicy.resolvedLowLatency ? "on" : "off",
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.lowLatencyAvailable),
+		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.lowLatencyInterfaceAvailable),
+		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.lowLatencySwapChainEnabled),
 		frameGenPolicy.requestedAsync ? "on" : "off",
 		frameGenPolicy.resolvedAsync ? "on" : "off",
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.asyncWorkloadAvailable),

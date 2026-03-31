@@ -3,6 +3,7 @@
 #include "NRI.h"
 #include "Extensions/NRIDeviceCreation.h"
 #include "Extensions/NRIHelper.h"
+#include "Extensions/NRILowLatency.h"
 #include "Extensions/NRIRayTracing.h"
 #include "Extensions/NRIStreamer.h"
 #include "Extensions/NRISwapChain.h"

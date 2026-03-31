@@ -219,6 +219,8 @@ private:
 	void ResetFrameTracking(bool presentedAcquiredImage = false);
 	void RefreshNativeFrameGenerationHandles();
 	void RefreshNativeFrameGenerationSwapChain();
+	bool ShouldRequestFrameGenerationLowLatencySwapChain() const;
+	nri::SwapChainBits GetEffectiveRequestedSwapChainFlags() const;
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
@@ -240,6 +242,7 @@ private:
 	nri::StreamerInterface mStreamer = {};
 	nri::SwapChainInterface mSwapChainInterface = {};
 	nri::UpscalerInterface mUpscaler = {};
+	nri::LowLatencyInterface mLowLatency = {};
 	nri::Device* mDevice = nullptr;
 	nri::Queue* mGraphicsQueue = nullptr;
 	nri::SwapChain* mSwapChain = nullptr;

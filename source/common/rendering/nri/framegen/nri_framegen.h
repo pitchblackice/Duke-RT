@@ -33,6 +33,8 @@ struct NRIFrameGenerationPolicy
 	bool fullscreenActive = false;
 	bool windowModeSupported = false;
 	bool lowLatencyAvailable = false;
+	bool lowLatencyInterfaceAvailable = false;
+	bool lowLatencySwapChainEnabled = false;
 	bool waitableSwapChainAvailable = false;
 	bool asyncWorkloadAvailable = false;
 	bool nativeDeviceAvailable = false;
@@ -73,6 +75,26 @@ struct NRIFrameGenerationFrameDesc
 	float previousWorldToView[16] = {};
 };
 
+struct NRIFrameGenerationLowLatencyState
+{
+	bool interfaceAvailable = false;
+	bool swapChainEnabled = false;
+	bool sleepModeConfigured = false;
+	bool sleepInvoked = false;
+	bool presentBoundarySeen = false;
+	nri::LatencySleepMode configuredSleepMode = {};
+	nri::Result setSleepModeResult = nri::Result::FAILURE;
+	nri::Result latencySleepResult = nri::Result::FAILURE;
+	nri::Result simulationStartMarkerResult = nri::Result::FAILURE;
+	nri::Result simulationEndMarkerResult = nri::Result::FAILURE;
+	nri::Result renderSubmitStartMarkerResult = nri::Result::FAILURE;
+	nri::Result renderSubmitEndMarkerResult = nri::Result::FAILURE;
+	nri::Result latencyReportResult = nri::Result::FAILURE;
+	uint64_t latencySleepCount = 0;
+	uint64_t markerCount = 0;
+	nri::LatencyReport latencyReport = {};
+};
+
 class NRIFrameGenerationContext
 {
 public:
@@ -83,10 +105,16 @@ public:
 	void OnSwapChainDestroyed(const NRIRenderDevice& frameBuffer);
 	void BeginFrame(const NRIRenderDevice& frameBuffer);
 	void EndFrame(const NRIRenderDevice& frameBuffer);
+	void OnSimulationEnd(const NRIRenderDevice& frameBuffer);
+	void OnRenderSubmitStart(const NRIRenderDevice& frameBuffer);
+	void OnRenderSubmitEnd(const NRIRenderDevice& frameBuffer);
+	void OnPresentStart(const NRIRenderDevice& frameBuffer);
+	void OnPresentEnd(const NRIRenderDevice& frameBuffer, nri::Result presentResult);
 	void SetFrameDesc(const NRIFrameGenerationFrameDesc& desc);
 
 	const NRIFrameGenerationPolicy& GetPolicy() const { return mPolicy; }
 	const NRIFrameGenerationFrameDesc& GetFrameDesc() const { return mLastFrameDesc; }
+	const NRIFrameGenerationLowLatencyState& GetLowLatencyState() const { return mLowLatencyState; }
 	bool HasFrameDesc() const { return mHasFrameDesc; }
 
 	static const char* GetProviderName(NRIFrameGenerationProvider provider);
@@ -96,6 +124,10 @@ public:
 
 private:
 	NRIFrameGenerationPolicy BuildPolicy(const NRIRenderDevice& frameBuffer) const;
+	bool IsLowLatencyOperational(const NRIRenderDevice& frameBuffer) const;
+	void ConfigureLowLatencyMode(const NRIRenderDevice& frameBuffer);
+	void SetLowLatencyMarker(const NRIRenderDevice& frameBuffer, nri::LatencyMarker marker, nri::Result& resultSlot);
+	void ResetLowLatencyState();
 
 	bool mInitialized = false;
 	bool mSwapChainReady = false;
@@ -103,4 +135,5 @@ private:
 	bool mHasLoggedPolicy = false;
 	NRIFrameGenerationPolicy mPolicy = {};
 	NRIFrameGenerationFrameDesc mLastFrameDesc = {};
+	NRIFrameGenerationLowLatencyState mLowLatencyState = {};
 };
