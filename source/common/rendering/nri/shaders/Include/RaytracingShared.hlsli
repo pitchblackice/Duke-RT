@@ -327,9 +327,9 @@ uint GetTraceRootLocalSpaceIndex()
 	return packed == 0xffffu ? 0xffffffffu : packed;
 }
 
-bool ShouldGateVisibleChunks()
+bool ShouldGatePrimaryVisibleChunks()
 {
-	return (gTraceConstants.Flags & NRI_FLAG_GATE_VISIBLE_CHUNKS) != 0u;
+	return (gTraceConstants.Flags & NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS) != 0u;
 }
 
 bool IsVisibleChunk(uint chunkIndex)
@@ -611,7 +611,7 @@ HitData TracePrimary(float3 origin, float3 direction, uint startLocalSpaceIndex,
 
 HitData TracePrimary(float3 origin, float3 direction, out float3 exitDirection)
 {
-	return TracePrimary(origin, direction, GetTraceRootLocalSpaceIndex(), ShouldGateVisibleChunks(), exitDirection);
+	return TracePrimary(origin, direction, GetTraceRootLocalSpaceIndex(), ShouldGatePrimaryVisibleChunks(), exitDirection);
 }
 
 HitData TracePrimary(float3 origin, float3 direction)
