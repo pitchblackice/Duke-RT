@@ -340,6 +340,33 @@ namespace
 		float score = 0.0f;
 	};
 
+	enum class ChunkReplacementCoherenceClass : uint32_t
+	{
+		Coherent = 0,
+		SeamOnlyFailure,
+		Incoherent,
+	};
+
+	struct ChunkReplacementSeamOutlier
+	{
+		uint32_t liveSurfaceIndex = UINT32_MAX;
+		int32_t adjacentSectorIndex = -1;
+		int32_t adjacentChunkIndex = -1;
+		float deviation = 0.0f;
+		float normalDot = 1.0f;
+		float areaRatio = 1.0f;
+	};
+
+	struct ChunkReplacementCoherenceReport
+	{
+		ChunkReplacementCoherenceClass classification = ChunkReplacementCoherenceClass::Coherent;
+		uint32_t matchedSurfaceCount = 0;
+		uint32_t unmatchedStaticSurfaceCount = 0;
+		uint32_t unmatchedLiveSurfaceCount = 0;
+		uint32_t nonSeamOutlierCount = 0;
+		std::vector<ChunkReplacementSeamOutlier> seamOutliers;
+	};
+
 	static ChunkCompareSurfaceKey BuildChunkCompareSurfaceKey(const nri_scene::PTMapSurface& surface)
 	{
 		ChunkCompareSurfaceKey key = {};
@@ -484,6 +511,288 @@ namespace
 		}
 
 		return metrics;
+	}
+
+	static bool IsChunkCompareBorderSurface(const nri_scene::PTMapSurface& surface)
+	{
+		return surface.surface.provenance.nextSectorIndex >= 0 &&
+			surface.kind != nri_scene::PTMapSurfaceKind::Floor &&
+			surface.kind != nri_scene::PTMapSurfaceKind::Ceiling &&
+			surface.kind != nri_scene::PTMapSurfaceKind::Portal;
+	}
+
+	static void ResetMapSurfaceStats(nri_scene::PTMapWorldStats& stats)
+	{
+		stats.surfaceCount = 0;
+		stats.wallSurfaceCount = 0;
+		stats.flatSurfaceCount = 0;
+		stats.portalSurfaceCount = 0;
+		stats.skySurfaceCount = 0;
+		stats.triangleCount = 0;
+	}
+
+	static void AccumulateMapSurfaceStats(const nri_scene::PTMapSurface& surface, nri_scene::PTMapWorldStats& stats)
+	{
+		stats.surfaceCount++;
+		stats.triangleCount += CountSurfaceTriangles(surface.surface);
+		const bool portalTagged = (surface.surface.material.flags & (nri_scene::MaterialFlag_Portal | nri_scene::MaterialFlag_Mirror)) != 0;
+		switch (surface.kind)
+		{
+		case nri_scene::PTMapSurfaceKind::Floor:
+		case nri_scene::PTMapSurfaceKind::Ceiling:
+			stats.flatSurfaceCount++;
+			if (portalTagged)
+			{
+				stats.portalSurfaceCount++;
+			}
+			break;
+
+		case nri_scene::PTMapSurfaceKind::Portal:
+			stats.portalSurfaceCount++;
+			stats.wallSurfaceCount++;
+			break;
+
+		default:
+			stats.wallSurfaceCount++;
+			break;
+		}
+
+		if ((surface.surface.material.flags & nri_scene::MaterialFlag_Sky) != 0)
+		{
+			stats.skySurfaceCount++;
+		}
+	}
+
+	static void FilterLiveChunkWorldSurfaces(nri_scene::PTMapWorld& liveWorld, const std::vector<uint32_t>& removedSurfaceIndices)
+	{
+		if (liveWorld.chunks.empty() || removedSurfaceIndices.empty())
+		{
+			return;
+		}
+
+		std::vector<uint8_t> removeMask(liveWorld.surfaces.size(), 0u);
+		for (uint32_t surfaceIndex : removedSurfaceIndices)
+		{
+			if (surfaceIndex < removeMask.size())
+			{
+				removeMask[surfaceIndex] = 1u;
+			}
+		}
+
+		std::vector<nri_scene::PTMapSurface> filteredSurfaces;
+		filteredSurfaces.reserve(liveWorld.surfaces.size());
+		nri_scene::PTMapWorldStats filteredStats = liveWorld.stats;
+		ResetMapSurfaceStats(filteredStats);
+		uint32_t filteredTriangleCount = 0;
+
+		for (uint32_t surfaceIndex = 0; surfaceIndex < (uint32_t)liveWorld.surfaces.size(); ++surfaceIndex)
+		{
+			if (removeMask[surfaceIndex] != 0u)
+			{
+				continue;
+			}
+
+			const auto& surface = liveWorld.surfaces[surfaceIndex];
+			filteredTriangleCount += CountSurfaceTriangles(surface.surface);
+			AccumulateMapSurfaceStats(surface, filteredStats);
+			filteredSurfaces.push_back(surface);
+		}
+
+		liveWorld.surfaces = std::move(filteredSurfaces);
+		liveWorld.stats = filteredStats;
+		auto& chunk = liveWorld.chunks[0];
+		chunk.firstSurface = 0;
+		chunk.surfaceCount = (uint32_t)liveWorld.surfaces.size();
+		chunk.triangleCount = filteredTriangleCount;
+	}
+
+	static ChunkReplacementCoherenceReport EvaluateChunkReplacementCoherence(
+		const nri_scene::PTMapWorld& staticWorld,
+		const nri_scene::PTMapChunk& staticChunk,
+		const nri_scene::PTMapWorld& liveWorld,
+		const nri_scene::PTMapChunk& liveChunk)
+	{
+		ChunkReplacementCoherenceReport report = {};
+
+		std::vector<uint32_t> staticSurfaceIndices;
+		std::vector<uint32_t> liveSurfaceIndices;
+		staticSurfaceIndices.reserve(staticChunk.surfaceCount);
+		liveSurfaceIndices.reserve(liveChunk.surfaceCount);
+
+		for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < staticChunk.surfaceCount; ++localSurfaceIndex)
+		{
+			const uint32_t surfaceIndex = staticChunk.firstSurface + localSurfaceIndex;
+			if (surfaceIndex >= staticWorld.surfaces.size())
+			{
+				break;
+			}
+			staticSurfaceIndices.push_back(surfaceIndex);
+		}
+
+		for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < liveChunk.surfaceCount; ++localSurfaceIndex)
+		{
+			const uint32_t surfaceIndex = liveChunk.firstSurface + localSurfaceIndex;
+			if (surfaceIndex >= liveWorld.surfaces.size())
+			{
+				break;
+			}
+			liveSurfaceIndices.push_back(surfaceIndex);
+		}
+
+		std::unordered_map<ChunkCompareSurfaceKey, std::vector<uint32_t>, ChunkCompareSurfaceKeyHash> liveSurfaceLookup;
+		liveSurfaceLookup.reserve(liveSurfaceIndices.size());
+		for (uint32_t liveLocalIndex = 0; liveLocalIndex < (uint32_t)liveSurfaceIndices.size(); ++liveLocalIndex)
+		{
+			const auto& liveSurface = liveWorld.surfaces[liveSurfaceIndices[liveLocalIndex]];
+			liveSurfaceLookup[BuildChunkCompareSurfaceKey(liveSurface)].push_back(liveLocalIndex);
+		}
+
+		std::vector<uint8_t> liveSurfaceUsed(liveSurfaceIndices.size(), 0u);
+		std::vector<ChunkCompareMatchRecord> matches;
+		matches.reserve(std::min(staticSurfaceIndices.size(), liveSurfaceIndices.size()));
+
+		for (uint32_t staticSurfaceIndex : staticSurfaceIndices)
+		{
+			const auto& staticSurface = staticWorld.surfaces[staticSurfaceIndex];
+			const ChunkCompareSurfaceKey key = BuildChunkCompareSurfaceKey(staticSurface);
+			auto it = liveSurfaceLookup.find(key);
+			if (it == liveSurfaceLookup.end())
+			{
+				report.unmatchedStaticSurfaceCount++;
+				continue;
+			}
+
+			uint32_t matchedLiveLocalIndex = UINT32_MAX;
+			for (uint32_t candidate : it->second)
+			{
+				if (candidate < liveSurfaceUsed.size() && liveSurfaceUsed[candidate] == 0u)
+				{
+					matchedLiveLocalIndex = candidate;
+					break;
+				}
+			}
+			if (matchedLiveLocalIndex == UINT32_MAX)
+			{
+				report.unmatchedStaticSurfaceCount++;
+				continue;
+			}
+
+			liveSurfaceUsed[matchedLiveLocalIndex] = 1u;
+			const uint32_t liveSurfaceIndex = liveSurfaceIndices[matchedLiveLocalIndex];
+			const auto& liveSurface = liveWorld.surfaces[liveSurfaceIndex];
+
+			ChunkCompareMatchRecord match = {};
+			match.staticSurfaceIndex = staticSurfaceIndex;
+			match.liveSurfaceIndex = liveSurfaceIndex;
+			match.key = key;
+			match.staticMetrics = ComputeChunkCompareSurfaceMetrics(staticSurface);
+			match.liveMetrics = ComputeChunkCompareSurfaceMetrics(liveSurface);
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				match.delta[axis] = match.liveMetrics.centroid[axis] - match.staticMetrics.centroid[axis];
+			}
+			match.deltaDistance = Distance3(match.liveMetrics.centroid, match.staticMetrics.centroid);
+			if (match.staticMetrics.area > 0.0001f)
+			{
+				match.areaRatio = match.liveMetrics.area / match.staticMetrics.area;
+			}
+			else
+			{
+				match.areaRatio = match.liveMetrics.area > 0.0001f ? 9999.0f : 1.0f;
+			}
+
+			const float staticNormalLength = std::sqrt(Dot3(match.staticMetrics.normal, match.staticMetrics.normal));
+			const float liveNormalLength = std::sqrt(Dot3(match.liveMetrics.normal, match.liveMetrics.normal));
+			if (staticNormalLength > 0.0001f && liveNormalLength > 0.0001f)
+			{
+				match.normalDot = std::max(-1.0f, std::min(1.0f, Dot3(match.staticMetrics.normal, match.liveMetrics.normal)));
+			}
+			else
+			{
+				match.normalDot = staticNormalLength <= 0.0001f && liveNormalLength <= 0.0001f ? 1.0f : 0.0f;
+			}
+
+			matches.push_back(match);
+		}
+
+		for (uint32_t liveLocalIndex = 0; liveLocalIndex < (uint32_t)liveSurfaceIndices.size(); ++liveLocalIndex)
+		{
+			if (liveSurfaceUsed[liveLocalIndex] == 0u)
+			{
+				report.unmatchedLiveSurfaceCount++;
+			}
+		}
+
+		report.matchedSurfaceCount = (uint32_t)matches.size();
+
+		float meanDelta[3] = {};
+		for (const auto& match : matches)
+		{
+			meanDelta[0] += match.delta[0];
+			meanDelta[1] += match.delta[1];
+			meanDelta[2] += match.delta[2];
+		}
+		if (!matches.empty())
+		{
+			const float invMatchCount = 1.0f / (float)matches.size();
+			meanDelta[0] *= invMatchCount;
+			meanDelta[1] *= invMatchCount;
+			meanDelta[2] *= invMatchCount;
+		}
+
+		std::unordered_map<int32_t, uint32_t> sectorChunkLookup;
+		sectorChunkLookup.reserve(staticWorld.chunks.size());
+		for (const auto& mapChunk : staticWorld.chunks)
+		{
+			if (mapChunk.sectorIndex >= 0)
+			{
+				sectorChunkLookup.emplace(mapChunk.sectorIndex, mapChunk.chunkIndex);
+			}
+		}
+
+		for (auto& match : matches)
+		{
+			const float meanDeltaPoint[3] = { meanDelta[0], meanDelta[1], meanDelta[2] };
+			match.deviationFromMean = Distance3(match.delta, meanDeltaPoint);
+			const float areaDelta = std::fabs(match.areaRatio - 1.0f);
+			const auto& staticSurface = staticWorld.surfaces[match.staticSurfaceIndex];
+			if (IsChunkCompareBorderSurface(staticSurface))
+			{
+				if (match.deviationFromMean > 0.5f || areaDelta > 0.05f || match.normalDot < 0.98f)
+				{
+					ChunkReplacementSeamOutlier seam = {};
+					seam.liveSurfaceIndex = match.liveSurfaceIndex;
+					seam.adjacentSectorIndex = staticSurface.surface.provenance.nextSectorIndex;
+					auto adjacentChunkIt = sectorChunkLookup.find(seam.adjacentSectorIndex);
+					seam.adjacentChunkIndex = adjacentChunkIt != sectorChunkLookup.end() ? (int32_t)adjacentChunkIt->second : -1;
+					seam.deviation = match.deviationFromMean;
+					seam.normalDot = match.normalDot;
+					seam.areaRatio = match.areaRatio;
+					report.seamOutliers.push_back(seam);
+				}
+			}
+			else if (match.deviationFromMean > 4.0f || areaDelta > 0.05f || match.normalDot < 0.98f)
+			{
+				report.nonSeamOutlierCount++;
+			}
+		}
+
+		if (report.unmatchedStaticSurfaceCount > 0 ||
+			report.unmatchedLiveSurfaceCount > 0 ||
+			report.nonSeamOutlierCount > 0)
+		{
+			report.classification = ChunkReplacementCoherenceClass::Incoherent;
+		}
+		else if (!report.seamOutliers.empty())
+		{
+			report.classification = ChunkReplacementCoherenceClass::SeamOnlyFailure;
+		}
+		else
+		{
+			report.classification = ChunkReplacementCoherenceClass::Coherent;
+		}
+
+		return report;
 	}
 
 	const char* GetMapSurfaceKindName(nri_scene::PTMapSurfaceKind kind)
@@ -7790,10 +8099,25 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 	std::fill(mRuntimeMapMutations.replacedChunkMask.begin(), mRuntimeMapMutations.replacedChunkMask.end(), 0u);
 
+	struct PendingRuntimeMutationChunk
+	{
+		bool dirty = false;
+		bool forceTopologyInvalidation = false;
+		bool rebuildAttempted = false;
+		bool liveWorldBuilt = false;
+		nri_scene::PTMapChunkMutationAnalysis analysis = {};
+		nri_scene::PTMapWorld liveWorld = {};
+		nri_scene::PTMapWorldStats liveStats = {};
+		ChunkReplacementCoherenceReport coherence = {};
+	};
+
+	std::vector<PendingRuntimeMutationChunk> pendingChunks(mMapWorld.chunks.size());
+
 	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
 	{
 		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
 		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
+		auto& pending = pendingChunks[chunkIndex];
 		const uint64_t cachedSignature = replacement.liveSignature;
 		nri_scene::PTMapChunkMutationAnalysis analysis = {};
 		if (!nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement.baseline, analysis))
@@ -7808,6 +8132,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			continue;
 		}
 
+		pending.analysis = analysis;
 		replacement.liveSignature = analysis.signature;
 		replacement.reasonMask = analysis.reasonMask;
 		replacement.sectionDirtyCount = analysis.sectionDirtyCount;
@@ -7822,6 +8147,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		const bool forceTopologyInvalidation =
 			(analysis.reasonMask & (nri_scene::PTMapChunkMutationReason_SectorDirty |
 				nri_scene::PTMapChunkMutationReason_Dragged)) != 0;
+		pending.forceTopologyInvalidation = forceTopologyInvalidation;
 
 		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0)
 		{
@@ -7860,6 +8186,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		}
 
 		mRuntimeMapLastFrame.dirtyChunkCount++;
+		pending.dirty = true;
 		if (replacement.blindSpot)
 		{
 			mRuntimeMapLastFrame.blindSpotChunkCount++;
@@ -7867,10 +8194,87 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 		if (!replacement.valid || cachedSignature != replacement.liveSignature || forceTopologyInvalidation)
 		{
-			nri_scene::SceneView liveChunkView;
-			nri_scene::PTMapWorldStats liveStats = {};
-			if (nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveChunkView, &liveStats))
+			pending.rebuildAttempted = true;
+			if (nri_scene::BuildLiveMapChunkWorld(mapChunk, pending.liveWorld, &pending.liveStats) &&
+				!pending.liveWorld.chunks.empty())
 			{
+				pending.liveWorldBuilt = true;
+				pending.coherence = EvaluateChunkReplacementCoherence(
+					mMapWorld,
+					mapChunk,
+					pending.liveWorld,
+					pending.liveWorld.chunks[0]);
+			}
+		}
+	}
+
+	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
+	{
+		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
+		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
+		const auto& pending = pendingChunks[chunkIndex];
+		if (!pending.dirty)
+		{
+			continue;
+		}
+
+		if (pending.rebuildAttempted)
+		{
+			if (!pending.liveWorldBuilt)
+			{
+				if (replacement.valid)
+				{
+					replacement.active = true;
+					mRuntimeMapLastFrame.heldChunkCount++;
+				}
+				else
+				{
+					replacement.active = false;
+					TraceRuntimeMapMutationChunk(mapChunk, replacement);
+					continue;
+				}
+			}
+			else if (pending.coherence.classification == ChunkReplacementCoherenceClass::Incoherent)
+			{
+				replacement.active = false;
+				replacement.valid = false;
+				mRuntimeMapLastFrame.heldChunkCount++;
+				TraceRuntimeMapMutationChunk(mapChunk, replacement);
+				continue;
+			}
+			else
+			{
+				nri_scene::PTMapWorld filteredLiveWorld = pending.liveWorld;
+				std::vector<uint32_t> removedSeamSurfaceIndices;
+				if (pending.coherence.classification == ChunkReplacementCoherenceClass::SeamOnlyFailure)
+				{
+					for (const auto& seam : pending.coherence.seamOutliers)
+					{
+						if (seam.adjacentChunkIndex < 0 || (unsigned)seam.adjacentChunkIndex >= pendingChunks.size())
+						{
+							continue;
+						}
+
+						const auto& adjacentPending = pendingChunks[(unsigned)seam.adjacentChunkIndex];
+						if (!adjacentPending.dirty ||
+							adjacentPending.analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None ||
+							adjacentPending.coherence.classification != ChunkReplacementCoherenceClass::Incoherent)
+						{
+							continue;
+						}
+
+						removedSeamSurfaceIndices.push_back(seam.liveSurfaceIndex);
+					}
+				}
+
+				if (!removedSeamSurfaceIndices.empty())
+				{
+					FilterLiveChunkWorldSurfaces(filteredLiveWorld, removedSeamSurfaceIndices);
+				}
+
+				nri_scene::SceneView liveChunkView;
+				nri_scene::BuildMapChunkSceneView(filteredLiveWorld, filteredLiveWorld.chunks[0], liveChunkView);
+
 				nri_scene::GeometryData liveGeometry;
 				nri_scene::MaterialBridgeData liveMaterials;
 				{
@@ -7885,27 +8289,22 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 				replacement.geometry = std::move(liveGeometry);
 				replacement.materialBridge = std::move(liveMaterials);
-				replacement.surfaceCount = liveStats.surfaceCount;
-				replacement.triangleCount = liveStats.triangleCount;
+				replacement.surfaceCount = filteredLiveWorld.stats.surfaceCount;
+				replacement.triangleCount = filteredLiveWorld.stats.triangleCount;
 				replacement.valid = true;
 				replacement.active = true;
 				mRuntimeMapLastFrame.rebuiltChunkCount++;
 			}
-			else if (replacement.valid)
-			{
-				replacement.active = true;
-				mRuntimeMapLastFrame.heldChunkCount++;
-			}
-			else
-			{
-				replacement.active = false;
-				TraceRuntimeMapMutationChunk(mapChunk, replacement);
-				continue;
-			}
 		}
 		else
 		{
-			replacement.active = true;
+			replacement.active = replacement.valid;
+		}
+
+		if (!replacement.active)
+		{
+			TraceRuntimeMapMutationChunk(mapChunk, replacement);
+			continue;
 		}
 
 		mRuntimeMapMutations.replacedChunkMask[chunkIndex] = 1u;
