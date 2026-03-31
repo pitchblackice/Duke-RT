@@ -3475,6 +3475,7 @@ void NRIRenderer::PrintStatus() const
 	const auto& frameGenPolicy = mFrameBuffer->mFrameGeneration.GetPolicy();
 	const bool hasFrameGenDesc = mFrameBuffer->mFrameGeneration.HasFrameDesc();
 	const auto& frameGenDesc = mFrameBuffer->mFrameGeneration.GetFrameDesc();
+	const auto& frameGenAudit = mFrameBuffer->mFrameGeneration.GetInputAudit();
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -3534,18 +3535,44 @@ void NRIRenderer::PrintStatus() const
 		frameGenPolicy.resolvedReason);
 	if (hasFrameGenDesc)
 	{
-		Printf("NRI PT framegen inputs: frame_id=%llu hudless=%ux%u motion=%ux%u depth=%ux%u reset=%s prev_camera=%s frame_time=%s frame_time_ms=%.3f\n",
+		Printf("NRI PT framegen inputs: frame_id=%llu hudless=%s:%ux%u motion=%ux%u depth=%ux%u render_rect=%u,%u+%ux%u output_rect=%u,%u+%ux%u reset=%s prev_camera=%s frame_time=%s frame_time_ms=%.3f\n",
 			(unsigned long long)frameGenDesc.frameId,
+			NRIFrameGenerationContext::GetColorSourceName(frameGenDesc.hudlessColorSource),
 			frameGenDesc.hudlessColor != nullptr ? frameGenDesc.hudlessColor->width : 0u,
 			frameGenDesc.hudlessColor != nullptr ? frameGenDesc.hudlessColor->height : 0u,
 			frameGenDesc.motionVectors != nullptr ? frameGenDesc.motionVectors->width : 0u,
 			frameGenDesc.motionVectors != nullptr ? frameGenDesc.motionVectors->height : 0u,
 			frameGenDesc.depth != nullptr ? frameGenDesc.depth->width : 0u,
 			frameGenDesc.depth != nullptr ? frameGenDesc.depth->height : 0u,
+			frameGenDesc.renderRect.left,
+			frameGenDesc.renderRect.top,
+			frameGenDesc.renderRect.width,
+			frameGenDesc.renderRect.height,
+			frameGenDesc.outputRect.left,
+			frameGenDesc.outputRect.top,
+			frameGenDesc.outputRect.width,
+			frameGenDesc.outputRect.height,
 			frameGenDesc.resetReason[0] != '\0' ? frameGenDesc.resetReason : "none",
 			frameGenDesc.hasPreviousCamera ? "yes" : "no",
 			frameGenDesc.hasRealFrameTimeMs ? "captured" : "pending",
 			frameGenDesc.realFrameTimeMs);
+		Printf("NRI PT framegen contract: motion=%s/%s scale=%.3f,%.3f depth=%s inverted=%s infinite=%s jitter=current(%.3f,%.3f) prev(%.3f,%.3f) fsr3=motion:%s depth:%s prepare:%s adapter:%s reason=%s\n",
+			NRIFrameGenerationContext::GetMotionVectorSpaceName(frameGenDesc.motionVectorSpace),
+			NRIFrameGenerationContext::GetMotionVectorDirectionName(frameGenDesc.motionVectorDirection),
+			frameGenDesc.motionVectorScale[0],
+			frameGenDesc.motionVectorScale[1],
+			NRIFrameGenerationContext::GetDepthTypeName(frameGenDesc.depthType),
+			frameGenDesc.depthInverted ? "yes" : "no",
+			frameGenDesc.depthInfinite ? "yes" : "no",
+			frameGenDesc.cameraJitter[0],
+			frameGenDesc.cameraJitter[1],
+			frameGenDesc.previousCameraJitter[0],
+			frameGenDesc.previousCameraJitter[1],
+			frameGenAudit.fsr3MotionCompatible ? "yes" : "no",
+			frameGenAudit.fsr3DepthCompatible ? "yes" : "no",
+			frameGenAudit.fsr3PrepareInputsRequired ? "yes" : "no",
+			NRIFrameGenerationContext::GetAdapterRequirementName(frameGenAudit.adapterRequirement),
+			frameGenAudit.statusReason);
 	}
 	Printf("NRI PT resolution policy: policy=%s render=%ux%u output=%ux%u jitter=%s phases=%u\n",
 		GetRenderResolutionPolicyName(resolvedMain),
@@ -10470,6 +10497,8 @@ void NRIRenderer::UpdateFrameGenerationFrameDesc()
 	desc.renderHeight = mRenderHeight;
 	desc.outputWidth = mOutputWidth;
 	desc.outputHeight = mOutputHeight;
+	desc.renderRect = { 0u, 0u, mRenderWidth, mRenderHeight };
+	desc.outputRect = { 0u, 0u, mOutputWidth, mOutputHeight };
 	desc.hasPreviousCamera = mHasPreviousCameraState;
 	desc.resetHistory = mResetHistory;
 	desc.hasRealFrameTimeMs = mHasPendingFrameGenerationRealFrameTime;
@@ -10477,10 +10506,19 @@ void NRIRenderer::UpdateFrameGenerationFrameDesc()
 	const char* resetReason = mResetHistory && !mLastHistoryResetReason.empty() ? mLastHistoryResetReason.c_str() : "none";
 	std::strncpy(desc.resetReason, resetReason, std::size(desc.resetReason) - 1u);
 	desc.resetReason[std::size(desc.resetReason) - 1u] = '\0';
+	desc.hudlessColorSource = NRIFrameGenerationColorSource::Final;
 	desc.hudlessColor = &GetFrameTexture(FrameTextureSlot::Final);
 	desc.motionVectors = &GetFrameTexture(FrameTextureSlot::Motion);
 	desc.depth = &GetFrameTexture(FrameTextureSlot::UpscalerDepth);
 	std::memcpy(desc.cameraJitter, mCurrentJitter, sizeof(desc.cameraJitter));
+	std::memcpy(desc.previousCameraJitter, mPreviousJitter, sizeof(desc.previousCameraJitter));
+	desc.motionVectorScale[0] = 1.0f;
+	desc.motionVectorScale[1] = 1.0f;
+	desc.motionVectorSpace = NRIFrameGenerationMotionVectorSpace::ScreenPixels;
+	desc.motionVectorDirection = NRIFrameGenerationMotionVectorDirection::CurrentToPrevious;
+	desc.depthType = NRIFrameGenerationDepthType::ClipDepth;
+	desc.depthInverted = false;
+	desc.depthInfinite = false;
 	std::memcpy(desc.currentViewToClip, mCurrentViewToClip, sizeof(desc.currentViewToClip));
 	std::memcpy(desc.previousViewToClip, mPreviousViewToClip, sizeof(desc.previousViewToClip));
 	std::memcpy(desc.currentWorldToView, mCurrentWorldToView, sizeof(desc.currentWorldToView));

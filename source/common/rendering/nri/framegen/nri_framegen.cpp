@@ -4,6 +4,8 @@
 #include "c_cvars.h"
 #include "printf.h"
 
+#include <cstring>
+
 EXTERN_CVAR(Bool, nri_framegen)
 EXTERN_CVAR(Int, nri_framegenprovider)
 EXTERN_CVAR(Int, nri_framegenui)
@@ -117,6 +119,60 @@ const char* NRIFrameGenerationContext::GetUiModeName(NRIFrameGenerationUiMode mo
 	}
 }
 
+const char* NRIFrameGenerationContext::GetColorSourceName(NRIFrameGenerationColorSource source)
+{
+	switch (source)
+	{
+	default:
+	case NRIFrameGenerationColorSource::Unknown: return "unknown";
+	case NRIFrameGenerationColorSource::Final: return "final";
+	}
+}
+
+const char* NRIFrameGenerationContext::GetMotionVectorSpaceName(NRIFrameGenerationMotionVectorSpace space)
+{
+	switch (space)
+	{
+	default:
+	case NRIFrameGenerationMotionVectorSpace::Unknown: return "unknown";
+	case NRIFrameGenerationMotionVectorSpace::ScreenPixels: return "screen_pixels";
+	}
+}
+
+const char* NRIFrameGenerationContext::GetMotionVectorDirectionName(NRIFrameGenerationMotionVectorDirection direction)
+{
+	switch (direction)
+	{
+	default:
+	case NRIFrameGenerationMotionVectorDirection::Unknown: return "unknown";
+	case NRIFrameGenerationMotionVectorDirection::CurrentToPrevious: return "current_to_previous";
+	case NRIFrameGenerationMotionVectorDirection::PreviousToCurrent: return "previous_to_current";
+	}
+}
+
+const char* NRIFrameGenerationContext::GetDepthTypeName(NRIFrameGenerationDepthType type)
+{
+	switch (type)
+	{
+	default:
+	case NRIFrameGenerationDepthType::Unknown: return "unknown";
+	case NRIFrameGenerationDepthType::ClipDepth: return "clip_depth";
+	case NRIFrameGenerationDepthType::ViewZ: return "view_z";
+	}
+}
+
+const char* NRIFrameGenerationContext::GetAdapterRequirementName(NRIFrameGenerationAdapterRequirement requirement)
+{
+	switch (requirement)
+	{
+	default:
+	case NRIFrameGenerationAdapterRequirement::None: return "none";
+	case NRIFrameGenerationAdapterRequirement::MotionVectors: return "motion";
+	case NRIFrameGenerationAdapterRequirement::Depth: return "depth";
+	case NRIFrameGenerationAdapterRequirement::MotionAndDepth: return "motion+depth";
+	}
+}
+
 const char* NRIFrameGenerationContext::GetWindowModeName(bool fullscreen)
 {
 	return fullscreen ? "fullscreen" : "windowed";
@@ -143,6 +199,7 @@ void NRIFrameGenerationContext::Shutdown()
 	mHasLoggedPolicy = false;
 	mPolicy = {};
 	mLastFrameDesc = {};
+	mLastInputAudit = {};
 	ResetLowLatencyState();
 }
 
@@ -375,7 +432,85 @@ void NRIFrameGenerationContext::EndFrame(const NRIRenderDevice& frameBuffer)
 void NRIFrameGenerationContext::SetFrameDesc(const NRIFrameGenerationFrameDesc& desc)
 {
 	mLastFrameDesc = desc;
+	mLastInputAudit = BuildInputAudit(desc);
 	mHasFrameDesc = true;
+}
+
+NRIFrameGenerationInputAudit NRIFrameGenerationContext::BuildInputAudit(const NRIFrameGenerationFrameDesc& desc) const
+{
+	NRIFrameGenerationInputAudit audit = {};
+	audit.renderRectValid =
+		desc.renderRect.left == 0u &&
+		desc.renderRect.top == 0u &&
+		desc.renderRect.width == desc.renderWidth &&
+		desc.renderRect.height == desc.renderHeight;
+	audit.outputRectValid =
+		desc.outputRect.left == 0u &&
+		desc.outputRect.top == 0u &&
+		desc.outputRect.width == desc.outputWidth &&
+		desc.outputRect.height == desc.outputHeight;
+	audit.currentJitterValid = true;
+	audit.previousJitterValid = desc.hasPreviousCamera;
+	audit.hudlessColorAvailable = desc.hudlessColor != nullptr;
+	audit.motionVectorsAvailable = desc.motionVectors != nullptr;
+	audit.depthAvailable = desc.depth != nullptr;
+	audit.motionResolutionMatchesRender =
+		audit.motionVectorsAvailable &&
+		desc.motionVectors->width == desc.renderWidth &&
+		desc.motionVectors->height == desc.renderHeight;
+	audit.depthResolutionMatchesRender =
+		audit.depthAvailable &&
+		desc.depth->width == desc.renderWidth &&
+		desc.depth->height == desc.renderHeight;
+	audit.fsr3MotionCompatible =
+		audit.motionResolutionMatchesRender &&
+		desc.motionVectorSpace == NRIFrameGenerationMotionVectorSpace::ScreenPixels &&
+		desc.motionVectorDirection == NRIFrameGenerationMotionVectorDirection::CurrentToPrevious &&
+		desc.motionVectorScale[0] == 1.0f &&
+		desc.motionVectorScale[1] == 1.0f;
+	audit.fsr3DepthCompatible =
+		audit.depthResolutionMatchesRender &&
+		desc.depthType == NRIFrameGenerationDepthType::ClipDepth;
+	audit.fsr3PrepareInputsRequired = true;
+	audit.complete =
+		audit.renderRectValid &&
+		audit.outputRectValid &&
+		audit.currentJitterValid &&
+		audit.hudlessColorAvailable &&
+		audit.motionVectorsAvailable &&
+		audit.depthAvailable;
+
+	if (!audit.complete)
+	{
+		std::strncpy(audit.statusReason, "missing-required-input", std::size(audit.statusReason) - 1u);
+		audit.statusReason[std::size(audit.statusReason) - 1u] = '\0';
+		audit.adapterRequirement = NRIFrameGenerationAdapterRequirement::MotionAndDepth;
+		return audit;
+	}
+
+	if (!audit.fsr3MotionCompatible && !audit.fsr3DepthCompatible)
+	{
+		audit.adapterRequirement = NRIFrameGenerationAdapterRequirement::MotionAndDepth;
+		std::strncpy(audit.statusReason, "fsr3-motion-depth-adapter", std::size(audit.statusReason) - 1u);
+	}
+	else if (!audit.fsr3MotionCompatible)
+	{
+		audit.adapterRequirement = NRIFrameGenerationAdapterRequirement::MotionVectors;
+		std::strncpy(audit.statusReason, "fsr3-motion-adapter", std::size(audit.statusReason) - 1u);
+	}
+	else if (!audit.fsr3DepthCompatible)
+	{
+		audit.adapterRequirement = NRIFrameGenerationAdapterRequirement::Depth;
+		std::strncpy(audit.statusReason, "fsr3-depth-adapter", std::size(audit.statusReason) - 1u);
+	}
+	else
+	{
+		audit.adapterRequirement = NRIFrameGenerationAdapterRequirement::None;
+		std::strncpy(audit.statusReason, "fsr3-prepare-pass-pending", std::size(audit.statusReason) - 1u);
+	}
+
+	audit.statusReason[std::size(audit.statusReason) - 1u] = '\0';
+	return audit;
 }
 
 void NRIFrameGenerationContext::OnSimulationEnd(const NRIRenderDevice& frameBuffer)
