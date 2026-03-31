@@ -46,7 +46,18 @@ namespace
 
 	static NRIFrameGenerationUiMode ResolveUiMode(NRIFrameGenerationUiMode requested)
 	{
-		return requested == NRIFrameGenerationUiMode::Auto ? NRIFrameGenerationUiMode::UiTexture : requested;
+		switch (requested)
+		{
+		default:
+		case NRIFrameGenerationUiMode::Auto:
+			return NRIFrameGenerationUiMode::UiTexture;
+		case NRIFrameGenerationUiMode::PresentCallback:
+			// Present callbacks stay out of scope until the proxy-swapchain path exists.
+			return NRIFrameGenerationUiMode::UiTexture;
+		case NRIFrameGenerationUiMode::Hudless:
+		case NRIFrameGenerationUiMode::UiTexture:
+			return requested;
+		}
 	}
 
 	static bool ArePoliciesEquivalent(const NRIFrameGenerationPolicy& a, const NRIFrameGenerationPolicy& b)
@@ -57,8 +68,16 @@ namespace
 			a.resolvedEnabled == b.resolvedEnabled &&
 			a.apiSupported == b.apiSupported &&
 			a.shaderModelSupported == b.shaderModelSupported &&
-			a.providerImplemented == b.providerImplemented &&
+			a.providerRuntimeSupported == b.providerRuntimeSupported &&
 			a.swapChainReady == b.swapChainReady &&
+			a.fullscreenActive == b.fullscreenActive &&
+			a.windowModeSupported == b.windowModeSupported &&
+			a.lowLatencyAvailable == b.lowLatencyAvailable &&
+			a.waitableSwapChainAvailable == b.waitableSwapChainAvailable &&
+			a.asyncWorkloadAvailable == b.asyncWorkloadAvailable &&
+			a.nativeDeviceAvailable == b.nativeDeviceAvailable &&
+			a.nativeGraphicsQueueAvailable == b.nativeGraphicsQueueAvailable &&
+			a.nativeSwapChainAvailable == b.nativeSwapChainAvailable &&
 			a.shaderModel == b.shaderModel &&
 			a.selectedApiName == b.selectedApiName &&
 			a.resolvedReason == b.resolvedReason &&
@@ -96,6 +115,16 @@ const char* NRIFrameGenerationContext::GetUiModeName(NRIFrameGenerationUiMode mo
 	}
 }
 
+const char* NRIFrameGenerationContext::GetWindowModeName(bool fullscreen)
+{
+	return fullscreen ? "fullscreen" : "windowed";
+}
+
+const char* NRIFrameGenerationContext::GetAvailabilityName(bool available)
+{
+	return available ? "yes" : "no";
+}
+
 void NRIFrameGenerationContext::Initialize(const NRIRenderDevice& frameBuffer)
 {
 	mInitialized = true;
@@ -121,20 +150,28 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 
 	if (logChanges && (!mHasLoggedPolicy || changed))
 	{
-		Printf("NRI frame generation policy: requested=%s provider=%s resolved=%s ui=%s->%s async=%s->%s latency=%s->%s api=%s shader_model=%u.%u swapchain=%s reason=%s\n",
+		Printf("NRI frame generation policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
 			mPolicy.requestedEnabled ? "on" : "off",
 			GetProviderName(mPolicy.requestedProvider),
 			GetProviderName(mPolicy.resolvedProvider),
-			GetUiModeName(mPolicy.requestedUiMode),
-			GetUiModeName(mPolicy.resolvedUiMode),
-			mPolicy.requestedAsync ? "on" : "off",
-			mPolicy.resolvedAsync ? "on" : "off",
-			mPolicy.requestedLowLatency ? "on" : "off",
-			mPolicy.resolvedLowLatency ? "on" : "off",
 			mPolicy.selectedApiName,
 			mPolicy.shaderModel / 10u,
 			mPolicy.shaderModel % 10u,
+			GetWindowModeName(mPolicy.fullscreenActive),
+			mPolicy.requestedLowLatency ? "on" : "off",
+			mPolicy.resolvedLowLatency ? "on" : "off",
+			GetAvailabilityName(mPolicy.lowLatencyAvailable),
+			mPolicy.requestedAsync ? "on" : "off",
+			mPolicy.resolvedAsync ? "on" : "off",
+			GetAvailabilityName(mPolicy.asyncWorkloadAvailable),
+			GetUiModeName(mPolicy.requestedUiMode),
+			GetUiModeName(mPolicy.resolvedUiMode),
 			mPolicy.swapChainReady ? "ready" : "cold",
+			mPolicy.nativeDeviceAvailable ? "ok" : "missing",
+			mPolicy.nativeGraphicsQueueAvailable ? "ok" : "missing",
+			mPolicy.nativeSwapChainAvailable ? "ok" : "missing",
+			GetAvailabilityName(mPolicy.waitableSwapChainAvailable),
+			GetAvailabilityName(mPolicy.providerRuntimeSupported),
 			mPolicy.resolvedReason);
 	}
 
@@ -152,16 +189,31 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 	policy.requestedLowLatency = !!nri_framegenlatency;
 	policy.resolvedUiMode = ResolveUiMode(policy.requestedUiMode);
 	policy.swapChainReady = mSwapChainReady;
+	policy.fullscreenActive = frameBuffer.IsFullscreenModeActive();
+	policy.windowModeSupported = !policy.fullscreenActive;
 
 	const nri::GraphicsAPI api = frameBuffer.GetSelectedAPI();
 	policy.selectedApiName = GetApiName(api);
 	policy.apiSupported = api == nri::GraphicsAPI::D3D12;
 
+#ifdef _WIN32
+	policy.nativeDeviceAvailable = frameBuffer.GetNativeD3D12Device() != nullptr;
+	policy.nativeGraphicsQueueAvailable = frameBuffer.GetNativeD3D12GraphicsQueue() != nullptr;
+	policy.nativeSwapChainAvailable = frameBuffer.GetNativeD3D12SwapChain() != nullptr;
+#endif
+
 	if (frameBuffer.mDevice != nullptr)
 	{
-		policy.shaderModel = frameBuffer.mCore.GetDeviceDesc(*frameBuffer.mDevice).shaderModel;
+		const nri::DeviceDesc& deviceDesc = frameBuffer.mCore.GetDeviceDesc(*frameBuffer.mDevice);
+		policy.shaderModel = deviceDesc.shaderModel;
+		policy.lowLatencyAvailable = !!deviceDesc.features.lowLatency;
+		policy.waitableSwapChainAvailable = !!deviceDesc.features.waitableSwapChain;
 	}
 	policy.shaderModelSupported = frameBuffer.mDevice != nullptr && policy.shaderModel >= 62u;
+	policy.providerRuntimeSupported = false;
+	policy.asyncWorkloadAvailable = false;
+	policy.resolvedAsync = false;
+	policy.resolvedLowLatency = false;
 
 	if (!policy.requestedEnabled)
 	{
@@ -191,6 +243,13 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 		return policy;
 	}
 
+	if (!policy.windowModeSupported)
+	{
+		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
+		policy.resolvedReason = "fullscreen-not-supported";
+		return policy;
+	}
+
 	if (!policy.shaderModelSupported)
 	{
 		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
@@ -198,9 +257,46 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 		return policy;
 	}
 
-	policy.providerImplemented = false;
-	policy.resolvedProvider = NRIFrameGenerationProvider::Off;
-	policy.resolvedReason = "provider-stubbed-phase0-1";
+	if (!policy.nativeDeviceAvailable)
+	{
+		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
+		policy.resolvedReason = "native-device-unavailable";
+		return policy;
+	}
+
+	if (!policy.nativeGraphicsQueueAvailable)
+	{
+		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
+		policy.resolvedReason = "native-queue-unavailable";
+		return policy;
+	}
+
+	if (!policy.swapChainReady)
+	{
+		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
+		policy.resolvedReason = "swapchain-cold";
+		return policy;
+	}
+
+	if (!policy.nativeSwapChainAvailable)
+	{
+		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
+		policy.resolvedReason = "native-swapchain-unresolved";
+		return policy;
+	}
+
+	if (!policy.providerRuntimeSupported)
+	{
+		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
+		policy.resolvedReason = "provider-runtime-unavailable";
+		return policy;
+	}
+
+	policy.resolvedEnabled = true;
+	policy.resolvedAsync = policy.requestedAsync && policy.asyncWorkloadAvailable;
+	policy.resolvedLowLatency = policy.requestedLowLatency && policy.lowLatencyAvailable;
+	policy.resolvedProvider = policy.requestedProvider;
+	policy.resolvedReason = "enabled";
 	return policy;
 }
 

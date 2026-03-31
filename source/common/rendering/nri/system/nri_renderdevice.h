@@ -79,6 +79,7 @@ public:
 	void PrintPathTracingMapChunkDump(int32_t chunkIndex) const;
 	void PrintPathTracingMapChunkCompare(int32_t chunkIndex) const;
 	bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const override;
+	bool IsFullscreenModeActive() const { return m_Fullscreen; }
 #ifdef _WIN32
 	ID3D12Device* GetNativeD3D12Device() const { return mNativeD3D12Device; }
 	ID3D12CommandQueue* GetNativeD3D12GraphicsQueue() const { return mNativeD3D12GraphicsQueue; }

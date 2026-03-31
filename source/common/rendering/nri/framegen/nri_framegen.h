@@ -28,8 +28,16 @@ struct NRIFrameGenerationPolicy
 	bool resolvedEnabled = false;
 	bool apiSupported = false;
 	bool shaderModelSupported = false;
-	bool providerImplemented = false;
+	bool providerRuntimeSupported = false;
 	bool swapChainReady = false;
+	bool fullscreenActive = false;
+	bool windowModeSupported = false;
+	bool lowLatencyAvailable = false;
+	bool waitableSwapChainAvailable = false;
+	bool asyncWorkloadAvailable = false;
+	bool nativeDeviceAvailable = false;
+	bool nativeGraphicsQueueAvailable = false;
+	bool nativeSwapChainAvailable = false;
 	uint32_t shaderModel = 0;
 	const char* selectedApiName = "unknown";
 	const char* resolvedReason = "not-initialized";
@@ -83,6 +91,8 @@ public:
 
 	static const char* GetProviderName(NRIFrameGenerationProvider provider);
 	static const char* GetUiModeName(NRIFrameGenerationUiMode mode);
+	static const char* GetWindowModeName(bool fullscreen);
+	static const char* GetAvailabilityName(bool available);
 
 private:
 	NRIFrameGenerationPolicy BuildPolicy(const NRIRenderDevice& frameBuffer) const;
