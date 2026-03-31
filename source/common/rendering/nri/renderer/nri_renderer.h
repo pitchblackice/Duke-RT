@@ -577,6 +577,7 @@ private:
 	bool IsPostSharpenSupported(NRIPostSharpenKind kind) const;
 	void FillMatrix(float* outMatrix, const VSMatrix& matrix) const;
 	const char* GetFrameTextureSlotName(FrameTextureSlot slot) const;
+	void UpdateFrameGenerationFrameDesc();
 
 	NRIRenderDevice* mFrameBuffer = nullptr;
 	nri::PipelineLayout* mPipelineLayout = nullptr;

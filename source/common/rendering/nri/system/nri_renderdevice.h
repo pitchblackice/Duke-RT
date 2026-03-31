@@ -1,6 +1,7 @@
 #pragma once
 
 #include "base_sysfb.h"
+#include "../framegen/nri_framegen.h"
 #include "nri_local.h"
 
 #include <memory>
@@ -209,6 +210,7 @@ private:
 	friend class NRIRenderState;
 	friend class NRIRenderer;
 	friend class NRIUpscalerContext;
+	friend class NRIFrameGenerationContext;
 
 	std::unique_ptr<NRIRenderState> mRenderState;
 	std::unique_ptr<NRIRenderer> mRenderer;
@@ -236,6 +238,7 @@ private:
 	nri::Descriptor* mConstantBufferView = nullptr;
 	nri::Descriptor* mSamplers[(size_t)NRISamplerMode::Count] = {};
 	nri::DescriptorSet* mSamplerSets[(size_t)NRISamplerMode::Count] = {};
+	NRIFrameGenerationContext mFrameGeneration;
 
 	std::vector<NRISwapChainImage> mSwapChainImages;
 	std::vector<QueuedFrame> mQueuedFrames;

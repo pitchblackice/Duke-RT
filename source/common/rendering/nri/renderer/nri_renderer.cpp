@@ -1,5 +1,6 @@
 #include "nri_renderer.h"
 
+#include "../framegen/nri_framegen.h"
 #include "nri_renderstate.h"
 #include "../scene/nri_map_builder.h"
 #include "../system/nri_hwtexture.h"
@@ -35,7 +36,32 @@ CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttaa, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_framegen, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_framegenprovider, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 1)
+	{
+		self = 1;
+	}
+}
+CUSTOM_CVAR(Int, nri_framegenui, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 3)
+	{
+		self = 3;
+	}
+}
+CVAR(Bool, nri_framegenasync, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_framegenlatency, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrdmaxframes, 31, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrdfastframes, 7, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrdstabilizationframes, 31, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -3448,6 +3474,9 @@ void NRIRenderer::PrintStatus() const
 	const NRITextureResource& upscalerDepth = GetFrameTexture(FrameTextureSlot::UpscalerDepth);
 	const NRITextureResource& vendorOutput = GetFrameTexture(FrameTextureSlot::VendorOutput);
 	const NRITextureResource& postSharpenOutput = GetFrameTexture(FrameTextureSlot::PostSharpenOutput);
+	const auto& frameGenPolicy = mFrameBuffer->mFrameGeneration.GetPolicy();
+	const bool hasFrameGenDesc = mFrameBuffer->mFrameGeneration.HasFrameDesc();
+	const auto& frameGenDesc = mFrameBuffer->mFrameGeneration.GetFrameDesc();
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -3478,6 +3507,33 @@ void NRIRenderer::PrintStatus() const
 		requestedRenderScale,
 		resolvedRenderScale,
 		(float)nri_sharpness);
+	Printf("NRI PT framegen policy: requested=%s provider=%s resolved=%s ui=%s->%s async=%s->%s latency=%s->%s swapchain=%s frame_desc=%s reason=%s\n",
+		frameGenPolicy.requestedEnabled ? "on" : "off",
+		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
+		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.resolvedProvider),
+		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.requestedUiMode),
+		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.resolvedUiMode),
+		frameGenPolicy.requestedAsync ? "on" : "off",
+		frameGenPolicy.resolvedAsync ? "on" : "off",
+		frameGenPolicy.requestedLowLatency ? "on" : "off",
+		frameGenPolicy.resolvedLowLatency ? "on" : "off",
+		frameGenPolicy.swapChainReady ? "ready" : "cold",
+		hasFrameGenDesc ? "captured" : "empty",
+		frameGenPolicy.resolvedReason);
+	if (hasFrameGenDesc)
+	{
+		Printf("NRI PT framegen inputs: frame_id=%llu hudless=%ux%u motion=%ux%u depth=%ux%u reset=%s prev_camera=%s frame_time=%s\n",
+			(unsigned long long)frameGenDesc.frameId,
+			frameGenDesc.hudlessColor != nullptr ? frameGenDesc.hudlessColor->width : 0u,
+			frameGenDesc.hudlessColor != nullptr ? frameGenDesc.hudlessColor->height : 0u,
+			frameGenDesc.motionVectors != nullptr ? frameGenDesc.motionVectors->width : 0u,
+			frameGenDesc.motionVectors != nullptr ? frameGenDesc.motionVectors->height : 0u,
+			frameGenDesc.depth != nullptr ? frameGenDesc.depth->width : 0u,
+			frameGenDesc.depth != nullptr ? frameGenDesc.depth->height : 0u,
+			frameGenDesc.resetReason[0] != '\0' ? frameGenDesc.resetReason : "none",
+			frameGenDesc.hasPreviousCamera ? "yes" : "no",
+			frameGenDesc.hasRealFrameTimeMs ? "captured" : "pending");
+	}
 	Printf("NRI PT resolution policy: policy=%s render=%ux%u output=%ux%u jitter=%s phases=%u\n",
 		GetRenderResolutionPolicyName(resolvedMain),
 		mRenderWidth,
@@ -10268,8 +10324,38 @@ void NRIRenderer::CopyFinalToActiveTarget()
 {
 	Clocker clock(NriPTCopyFinal);
 
+	UpdateFrameGenerationFrameDesc();
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
 	CopyTextureToActiveTarget(final);
+}
+
+void NRIRenderer::UpdateFrameGenerationFrameDesc()
+{
+	if (mFrameBuffer == nullptr)
+	{
+		return;
+	}
+
+	NRIFrameGenerationFrameDesc desc = {};
+	desc.frameId = (uint64_t)mFrameIndex + 1u;
+	desc.renderWidth = mRenderWidth;
+	desc.renderHeight = mRenderHeight;
+	desc.outputWidth = mOutputWidth;
+	desc.outputHeight = mOutputHeight;
+	desc.hasPreviousCamera = mHasPreviousCameraState;
+	desc.resetHistory = mResetHistory;
+	const char* resetReason = mLastHistoryResetReason.empty() ? "none" : mLastHistoryResetReason.c_str();
+	std::strncpy(desc.resetReason, resetReason, std::size(desc.resetReason) - 1u);
+	desc.resetReason[std::size(desc.resetReason) - 1u] = '\0';
+	desc.hudlessColor = &GetFrameTexture(FrameTextureSlot::Final);
+	desc.motionVectors = &GetFrameTexture(FrameTextureSlot::Motion);
+	desc.depth = &GetFrameTexture(FrameTextureSlot::UpscalerDepth);
+	std::memcpy(desc.cameraJitter, mCurrentJitter, sizeof(desc.cameraJitter));
+	std::memcpy(desc.currentViewToClip, mCurrentViewToClip, sizeof(desc.currentViewToClip));
+	std::memcpy(desc.previousViewToClip, mPreviousViewToClip, sizeof(desc.previousViewToClip));
+	std::memcpy(desc.currentWorldToView, mCurrentWorldToView, sizeof(desc.currentWorldToView));
+	std::memcpy(desc.previousWorldToView, mPreviousWorldToView, sizeof(desc.previousWorldToView));
+	mFrameBuffer->mFrameGeneration.SetFrameDesc(desc);
 }
 
 void NRIRenderer::CopyTexture(NRITextureResource& source, NRITextureResource& destination)

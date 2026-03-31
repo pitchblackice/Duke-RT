@@ -604,6 +604,7 @@ file( GLOB HEADER_FILES
 	common/rendering/vulkan/shaders/*.h
 	common/rendering/vulkan/textures/*.h
 	common/rendering/nri/system/*.h
+	common/rendering/nri/framegen/*.h
 	common/rendering/nri/renderer/*.h
 	common/scripting/core/*h
 	common/scripting/vm/*h
@@ -920,6 +921,7 @@ set (NRI_SOURCES
 	common/rendering/nri/system/nri_renderdevice.cpp
 	common/rendering/nri/system/nri_hwbuffer.cpp
 	common/rendering/nri/system/nri_hwtexture.cpp
+	common/rendering/nri/framegen/nri_framegen.cpp
 	common/rendering/nri/renderer/nri_nrd.cpp
 	common/rendering/nri/renderer/nri_renderstate.cpp
 	common/rendering/nri/renderer/nri_resources.cpp
@@ -1799,6 +1801,7 @@ source_group("Common\\Rendering\\OpenGL Loader" REGULAR_EXPRESSION "^${CMAKE_CUR
 source_group("Common\\Rendering\\OpenGL Backend" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/gl/.+")
 source_group("Common\\Rendering\\GLES Backend" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/gles/.+")
 source_group("Common\\Rendering\\NRI Renderer\\System" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/system/.+")
+source_group("Common\\Rendering\\NRI Renderer\\Framegen" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/framegen/.+")
 source_group("Common\\Rendering\\NRI Renderer\\Renderer" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/renderer/.+")
 source_group("Common\\Rendering\\NRI Renderer\\Shaders" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/.+")
 source_group("Common\\Rendering\\Vulkan Renderer\\System" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/vulkan/system/.+")

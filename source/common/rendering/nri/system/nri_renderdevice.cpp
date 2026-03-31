@@ -1,5 +1,6 @@
 #include "nri_renderdevice.h"
 
+#include "../framegen/nri_framegen.h"
 #include "../renderer/nri_renderer.h"
 #include "../renderer/nri_renderstate.h"
 #include "nri_hwbuffer.h"
@@ -1289,6 +1290,7 @@ NRIRenderDevice::~NRIRenderDevice()
 	{
 		mRenderer->Shutdown();
 	}
+	mFrameGeneration.Shutdown();
 
 	DestroyQueuedFrames();
 
@@ -1344,6 +1346,7 @@ void NRIRenderDevice::InitializeState()
 		mInitialized = false;
 		return;
 	}
+	mFrameGeneration.Initialize(*this);
 
 	mVertexData = new FFlatVertexBuffer(GetWidth(), GetHeight(), mPipelineNbr);
 	mSkyData = new FSkyVertexBuffer;
@@ -1385,6 +1388,8 @@ void NRIRenderDevice::BeginFrame()
 	{
 		return;
 	}
+
+	mFrameGeneration.BeginFrame(*this);
 
 	mTraceThisFrame = false;
 	if (nri_pttraceframes > 0)
@@ -1844,6 +1849,19 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLSR) ? "yes" : "no",
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLRR) ? "yes" : "no",
 		(int)nri_ptportaldepth);
+	const auto& frameGenPolicy = mFrameGeneration.GetPolicy();
+	Printf("NRI PT framegen caps: requested=%s provider=%s resolved=%s ui=%s->%s async=%s->%s latency=%s->%s swapchain=%s reason=%s\n",
+		frameGenPolicy.requestedEnabled ? "on" : "off",
+		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
+		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.resolvedProvider),
+		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.requestedUiMode),
+		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.resolvedUiMode),
+		frameGenPolicy.requestedAsync ? "on" : "off",
+		frameGenPolicy.resolvedAsync ? "on" : "off",
+		frameGenPolicy.requestedLowLatency ? "on" : "off",
+		frameGenPolicy.resolvedLowLatency ? "on" : "off",
+		frameGenPolicy.swapChainReady ? "ready" : "cold",
+		frameGenPolicy.resolvedReason);
 
 	if (mRenderer != nullptr)
 	{
@@ -2514,6 +2532,18 @@ void NRIRenderDevice::LogStartup()
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::NIS) ? "yes" : "no",
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLSR) ? "yes" : "no",
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLRR) ? "yes" : "no");
+	const auto& frameGenPolicy = mFrameGeneration.GetPolicy();
+	Printf("Frame generation policy: requested=%s provider=%s resolved=%s ui=%s->%s async=%s->%s latency=%s->%s reason=%s\n",
+		frameGenPolicy.requestedEnabled ? "on" : "off",
+		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
+		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.resolvedProvider),
+		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.requestedUiMode),
+		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.resolvedUiMode),
+		frameGenPolicy.requestedAsync ? "on" : "off",
+		frameGenPolicy.resolvedAsync ? "on" : "off",
+		frameGenPolicy.requestedLowLatency ? "on" : "off",
+		frameGenPolicy.resolvedLowLatency ? "on" : "off",
+		frameGenPolicy.resolvedReason);
 
 	mLoggedStartup = true;
 }
@@ -2891,6 +2921,7 @@ bool NRIRenderDevice::CreateSwapChain()
 		Printf(TEXTCOLOR_RED "Failed to create NRI swapchain.\n");
 		return false;
 	}
+	mFrameGeneration.OnSwapChainCreated(*this);
 	SetNriDebugName(mCore, mSwapChain, "Raze.SwapChain");
 
 	uint32_t textureCount = 0;
@@ -2988,6 +3019,7 @@ void NRIRenderDevice::DestroySwapChain()
 	mSwapChainPresentCounts.clear();
 	mSwapChainAbandonCounts.clear();
 	mHasPresentedSwapChainFrame = false;
+	mFrameGeneration.OnSwapChainDestroyed(*this);
 
 	for (auto& image : mSwapChainImages)
 	{
@@ -3265,6 +3297,8 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 
 void NRIRenderDevice::EndFrameAndPresent()
 {
+	mFrameGeneration.EndFrame(*this);
+
 	static int sLoggedPresentCount = 0;
 
 	if (!mFrameBegun || mCommandBuffer == nullptr || mCurrentPresentTarget == nullptr)
