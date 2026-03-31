@@ -5049,11 +5049,25 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 		meanDelta[2] *= invMatchCount;
 	}
 
+	std::unordered_map<int32_t, uint32_t> sectorChunkLookup;
+	sectorChunkLookup.reserve(mMapWorld.chunks.size());
+	for (const auto& mapChunk : mMapWorld.chunks)
+	{
+		if (mapChunk.sectorIndex >= 0)
+		{
+			sectorChunkLookup.emplace(mapChunk.sectorIndex, mapChunk.chunkIndex);
+		}
+	}
+
 	uint32_t within1 = 0;
 	uint32_t within4 = 0;
 	uint32_t areaOutlierCount = 0;
 	uint32_t normalOutlierCount = 0;
 	uint32_t materialDiffCount = 0;
+	uint32_t seamSurfaceCount = 0;
+	uint32_t seamOutlierCount = 0;
+	uint32_t seamAgainstStaticCount = 0;
+	uint32_t seamAgainstReplacedCount = 0;
 	for (auto& match : matches)
 	{
 		const float meanDeltaPoint[3] = { meanDelta[0], meanDelta[1], meanDelta[2] };
@@ -5080,6 +5094,33 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 			materialDiffCount++;
 		}
 		match.score = match.deviationFromMean + areaDelta * 10.0f + (1.0f - match.normalDot) * 10.0f + match.materialScore;
+
+		const auto& staticSurface = mMapWorld.surfaces[match.staticSurfaceIndex];
+		if (staticSurface.surface.provenance.nextSectorIndex >= 0 &&
+			staticSurface.kind != nri_scene::PTMapSurfaceKind::Floor &&
+			staticSurface.kind != nri_scene::PTMapSurfaceKind::Ceiling &&
+			staticSurface.kind != nri_scene::PTMapSurfaceKind::Portal)
+		{
+			seamSurfaceCount++;
+			auto adjacentChunkIt = sectorChunkLookup.find(staticSurface.surface.provenance.nextSectorIndex);
+			const bool adjacentReplaced =
+				adjacentChunkIt != sectorChunkLookup.end() &&
+				adjacentChunkIt->second < mRuntimeMapMutations.chunks.size() &&
+				mRuntimeMapMutations.chunks[adjacentChunkIt->second].active;
+			if (adjacentReplaced)
+			{
+				seamAgainstReplacedCount++;
+			}
+			else
+			{
+				seamAgainstStaticCount++;
+			}
+
+			if (match.deviationFromMean > 0.5f)
+			{
+				seamOutlierCount++;
+			}
+		}
 	}
 
 	std::sort(matches.begin(), matches.end(), [](const ChunkCompareMatchRecord& a, const ChunkCompareMatchRecord& b)
@@ -5116,6 +5157,12 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 		materialDiffCount,
 		YesNo(likelyCoherent),
 		liveChunk.triangleCount);
+	Printf("NRI PT chunk seam compare: chunk=%d border_surfaces=%u seam_outliers=%u adjacent_static=%u adjacent_replaced=%u\n",
+		chunkIndex,
+		seamSurfaceCount,
+		seamOutlierCount,
+		seamAgainstStaticCount,
+		seamAgainstReplacedCount);
 
 	const size_t outlierCount = std::min<size_t>(matches.size(), 8u);
 	for (size_t i = 0; i < outlierCount; ++i)
@@ -5148,6 +5195,53 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 			match.liveMetrics.textureId,
 			staticSurface.surface.material.flags,
 			liveSurface.surface.material.flags);
+	}
+
+	size_t seamPrinted = 0;
+	for (const auto& match : matches)
+	{
+		if (seamPrinted >= 8u)
+		{
+			break;
+		}
+
+		const auto& staticSurface = mMapWorld.surfaces[match.staticSurfaceIndex];
+		if (staticSurface.surface.provenance.nextSectorIndex < 0 ||
+			staticSurface.kind == nri_scene::PTMapSurfaceKind::Floor ||
+			staticSurface.kind == nri_scene::PTMapSurfaceKind::Ceiling ||
+			staticSurface.kind == nri_scene::PTMapSurfaceKind::Portal)
+		{
+			continue;
+		}
+
+		auto adjacentChunkIt = sectorChunkLookup.find(staticSurface.surface.provenance.nextSectorIndex);
+		const int32_t adjacentChunkIndex = adjacentChunkIt != sectorChunkLookup.end() ? (int32_t)adjacentChunkIt->second : -1;
+		const bool adjacentReplaced =
+			adjacentChunkIndex >= 0 &&
+			(unsigned)adjacentChunkIndex < mRuntimeMapMutations.chunks.size() &&
+			mRuntimeMapMutations.chunks[(unsigned)adjacentChunkIndex].active;
+		const bool seamOutlier = match.deviationFromMean > 0.5f;
+		if (!seamOutlier && seamPrinted >= 4u)
+		{
+			continue;
+		}
+
+		Printf("NRI PT chunk seam match: static_surface=%u live_surface=%u kind=%s wall=%d nextsector=%d adjacent_chunk=%d adjacent_replaced=%s delta=(%.2f, %.2f, %.2f) dev=%.2f area_ratio=%.3f normal_dot=%.3f seam_outlier=%s\n",
+			match.staticSurfaceIndex,
+			match.liveSurfaceIndex,
+			GetMapSurfaceKindName(staticSurface.kind),
+			staticSurface.surface.provenance.wallIndex,
+			staticSurface.surface.provenance.nextSectorIndex,
+			adjacentChunkIndex,
+			YesNo(adjacentReplaced),
+			match.delta[0],
+			match.delta[1],
+			match.delta[2],
+			match.deviationFromMean,
+			match.areaRatio,
+			match.normalDot,
+			YesNo(seamOutlier));
+		seamPrinted++;
 	}
 
 	const size_t unmatchedStaticCount = std::min<size_t>(unmatchedStaticSurfaceIndices.size(), 8u);
