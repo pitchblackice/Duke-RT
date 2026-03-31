@@ -6676,6 +6676,22 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 	std::vector<BuiltCandidate> candidates;
 	const auto& activeSurfaces = mSceneLights.GetEmissiveSurfaces().activeSurfaces;
 	candidates.reserve(activeSurfaces.size());
+	const auto isVisibleChunkIndex = [&](int32_t chunkIndex) -> bool
+	{
+		if (!nri_ptvisiblechunkgate || chunkIndex < 0)
+		{
+			return true;
+		}
+
+		const uint32_t visibleChunkIndex = (uint32_t)chunkIndex;
+		const size_t wordIndex = visibleChunkIndex >> 5u;
+		if (wordIndex >= mCurrentVisibleChunkWords.size())
+		{
+			return false;
+		}
+
+		return (mCurrentVisibleChunkWords[wordIndex] & (1u << (visibleChunkIndex & 31u))) != 0u;
+	};
 
 	auto appendSurfacePrimitives = [&](const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, const nri_scene::GeometryData* geometry, const std::vector<MaterialPrimitiveRange>& ranges, uint32_t dataSource, uint32_t primitiveBase)
 	{
@@ -6699,6 +6715,12 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
 		{
 			const uint32_t localPrimitiveIndex = range.first + localOffset;
+			if (localPrimitiveIndex < geometry->primitiveProvenance.size() &&
+				!isVisibleChunkIndex(geometry->primitiveProvenance[localPrimitiveIndex].mapChunkIndex))
+			{
+				continue;
+			}
+
 			const uint32_t primitiveIndex = primitiveBase + localPrimitiveIndex;
 			const float primitiveArea = ComputePrimitiveArea(*geometry, localPrimitiveIndex);
 			if (primitiveArea <= 0.0f)
