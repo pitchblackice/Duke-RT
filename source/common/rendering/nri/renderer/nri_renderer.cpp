@@ -916,6 +916,11 @@ namespace
 		return (denoiserMode & 0xffu) | ((emissiveSampleCount & 0xffu) << 8u);
 	}
 
+	static uint32_t EncodeTraceLocalSpace(uint32_t localSpaceIndex)
+	{
+		return (localSpaceIndex == UINT32_MAX ? 0xffffu : std::min(localSpaceIndex, 0xffffu)) << 16u;
+	}
+
 	static uint32_t PackUInt16Pair(uint32_t lo, uint32_t hi)
 	{
 		return (lo & 0xffffu) | ((hi & 0xffffu) << 16u);
@@ -6776,6 +6781,7 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
 	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
+	constants.ReservedTrace1 = EncodeTraceLocalSpace(mCurrentCameraLocalSpaceIndex);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -7743,7 +7749,11 @@ void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& ou
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
 		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, 0u, 0u });
+		const uint32_t localSpaceIndex =
+			chunk.chunkIndex < mMapWorld.chunks.size() ?
+			mMapWorld.chunks[chunk.chunkIndex].localSpaceIndex :
+			UINT32_MAX;
+		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, localSpaceIndex, 0u });
 	}
 }
 
@@ -9204,7 +9214,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.ReservedTrace0 = (mBoundRuntimeLightTileCountX & 0xffffu) | ((mBoundRuntimeLightTileCountY & 0xffffu) << 16u);
 	constants.ReservedTrace1 = PackTraceAux1(
 		(uint32_t)GetSelectedNrdDenoiserMode(),
-		std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u));
+		std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u)) |
+		EncodeTraceLocalSpace(mCurrentCameraLocalSpaceIndex);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
 	Normalize3(constants.LightDirection);
@@ -9975,6 +9986,20 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 		Normalize3(mCurrentCameraRight);
 		Normalize3(mCurrentCameraUp);
 		Normalize3(mCurrentCameraForward);
+	}
+
+	mCurrentCameraLocalSpaceIndex = UINT32_MAX;
+	if (mMapWorld.valid && di.Viewpoint.SectNums != nullptr && di.Viewpoint.SectCount > 0)
+	{
+		const int rootSectorIndex = di.Viewpoint.SectNums[0];
+		for (const auto& chunk : mMapWorld.chunks)
+		{
+			if (chunk.kind == nri_scene::PTMapChunkKind::Sector && chunk.sectorIndex == rootSectorIndex)
+			{
+				mCurrentCameraLocalSpaceIndex = chunk.localSpaceIndex;
+				break;
+			}
+		}
 	}
 
 	const float* projection = di.VPUniforms.mProjectionMatrix.get();

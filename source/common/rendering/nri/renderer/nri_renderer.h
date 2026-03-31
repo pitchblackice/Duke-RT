@@ -679,6 +679,7 @@ private:
 	float mCurrentCameraForward[3] = {};
 	float mCurrentCameraRight[3] = {};
 	float mCurrentCameraUp[3] = {};
+	uint32_t mCurrentCameraLocalSpaceIndex = UINT32_MAX;
 	float mPreviousCameraPos[3] = {};
 	float mPreviousCameraForward[3] = {};
 	float mPreviousCameraRight[3] = {};

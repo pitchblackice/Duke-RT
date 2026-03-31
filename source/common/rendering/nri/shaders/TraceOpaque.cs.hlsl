@@ -472,6 +472,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 	float3 indirectRadiance = 0.0;
 	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
 	float3 direction = SampleCosineHemisphere(surfaceHit.normal, rngState);
+	uint currentLocalSpaceIndex = surfaceHit.localSpaceIndex;
 	bool hasSecondaryHitDistance = false;
 	float accumulatedSecondaryHitDistance = 0.0;
 
@@ -479,7 +480,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
 	{
 		float3 tracedDirection = direction;
-		const HitData bounceHit = TracePrimary(origin, direction, tracedDirection);
+		const HitData bounceHit = TracePrimary(origin, direction, currentLocalSpaceIndex, tracedDirection);
 		if (!bounceHit.hit)
 		{
 			if (!hasSecondaryHitDistance)
@@ -537,7 +538,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 		if (UseDirectionalPlaceholderLight())
 		{
 			const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce + 1u, bounce * 3u + 1u), frameIndex + bounce + 1u);
-			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
+			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir, bounceHit.localSpaceIndex);
 			indirectRadiance += throughput * bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow);
 		}
 		throughput *= bounceAlbedo.rgb * 0.65;
@@ -548,6 +549,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 
 		origin = bounceHit.position + bounceHit.normal * 0.05;
 		direction = SampleCosineHemisphere(bounceHit.normal, rngState);
+		currentLocalSpaceIndex = bounceHit.localSpaceIndex;
 	}
 
 	outHitDistance = hasSecondaryHitDistance ? accumulatedSecondaryHitDistance : 0.0;
@@ -567,13 +569,14 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	float3 indirectRadiance = 0.0;
 	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
 	float3 direction = SampleSpecularLobe(reflect(-viewDir, surfaceHit.normal), roughness, rngState);
+	uint currentLocalSpaceIndex = surfaceHit.localSpaceIndex;
 	bool hasSecondaryHitDistance = false;
 
 	[loop]
 	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
 	{
 		float3 tracedDirection = direction;
-		const HitData bounceHit = TracePrimary(origin, direction, tracedDirection);
+		const HitData bounceHit = TracePrimary(origin, direction, currentLocalSpaceIndex, tracedDirection);
 		if (!bounceHit.hit)
 		{
 			if (!hasSecondaryHitDistance)
@@ -635,7 +638,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 		if (UseDirectionalPlaceholderLight())
 		{
 			const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce * 5u + 1u, bounce * 7u + 3u), frameIndex + bounce + 1u);
-			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
+			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir, bounceHit.localSpaceIndex);
 			indirectRadiance += throughput * (
 				bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) +
 				EvaluateSunSpecular(bounceAlbedo.rgb, bounceMetalness, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
@@ -649,6 +652,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 
 		origin = bounceHit.position + bounceHit.normal * 0.05;
 		direction = SampleSpecularLobe(reflect(tracedDirection, bounceHit.normal), bounceRoughness, rngState);
+		currentLocalSpaceIndex = bounceHit.localSpaceIndex;
 	}
 
 	return indirectRadiance;
@@ -828,7 +832,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const bool useDirectionalLight = UseDirectionalPlaceholderLight();
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
 				float shadowHitDistance = 0.0;
-				const float shadow = useDirectionalLight ? (directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir, shadowHitDistance)) : 0.0;
+				const float shadow = useDirectionalLight ? (directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir, hit.localSpaceIndex, shadowHitDistance)) : 0.0;
 				shadowVisibility = shadow;
 				if (useDirectionalLight && !directSceneTrace)
 				{
