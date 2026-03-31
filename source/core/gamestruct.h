@@ -83,34 +83,6 @@ struct RuntimeTaggedSectorDebugInfo
 	int32_t effectorHitags[4] = {};
 };
 
-struct GeoEffectDebugGroupInfo
-{
-	bool available = false;
-	int32_t sourceSectorIndex = -1;
-	int32_t warpSectorIndex = -1;
-	int32_t warpSector2Index = -1;
-	double dx = 0.0;
-	double dy = 0.0;
-	double dx2 = 0.0;
-	double dy2 = 0.0;
-	bool queryMatchesSource = false;
-	bool queryMatchesWarp = false;
-	bool queryMatchesWarp2 = false;
-};
-
-struct GeoEffectDebugInfo
-{
-	static constexpr uint32_t MaxStoredGroups = 12;
-
-	bool available = false;
-	bool rrGame = false;
-	bool activeForSector = false;
-	int32_t sectorIndex = -1;
-	uint32_t totalGroupCount = 0;
-	uint32_t matchedGroupCount = 0;
-	GeoEffectDebugGroupInfo groups[MaxStoredGroups] = {};
-};
-
 struct GameInterface
 {
 	virtual const char* Name() { return "$"; }
@@ -157,7 +129,6 @@ struct GameInterface
 	virtual void EnterPortal(DCoreActor* viewer, int type) {}
 	virtual void LeavePortal(DCoreActor* viewer, int type) {}
 	virtual bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) { return false; }
-	virtual bool GetGeoEffectDebugInfo(int sectorIndex, GeoEffectDebugInfo* info) { return false; }
 	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
 	virtual bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) { return false; }
 	virtual int Voxelize(int sprnum) { return -1; }

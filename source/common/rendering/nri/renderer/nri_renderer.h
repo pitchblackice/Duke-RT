@@ -47,10 +47,6 @@ public:
 	void PrintSectorLightDump(float radius, uint32_t limit) const;
 	void PrintMapChunkDump(int32_t chunkIndex) const;
 	void PrintMapChunkCompare(int32_t chunkIndex) const;
-	void PrintMapBuildTrace(int32_t chunkIndex, int32_t sectorIndex) const;
-	void PrintMapSectorTrace(int32_t sectorIndex) const;
-	void PrintMapRorTrace(int32_t sectorIndex) const;
-	void PrintVisibleSectorTrace(int32_t sectorIndex) const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	const char* GetAvailabilityReason() const;
 
@@ -672,10 +668,7 @@ private:
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;
-	std::vector<uint8_t> mCurrentVisibleSectorMask;
 	std::vector<uint32_t> mCurrentVisibleChunkWords;
-	uint32_t mCurrentVisibleSectorCount = 0;
-	uint32_t mCurrentVisibleChunkCount = 0;
 	uint32_t mFrameIndex = 0;
 	uint32_t mRenderWidth = 0;
 	uint32_t mRenderHeight = 0;
@@ -690,7 +683,6 @@ private:
 	float mCurrentCameraForward[3] = {};
 	float mCurrentCameraRight[3] = {};
 	float mCurrentCameraUp[3] = {};
-	uint32_t mCurrentCameraLocalSpaceIndex = UINT32_MAX;
 	float mPreviousCameraPos[3] = {};
 	float mPreviousCameraForward[3] = {};
 	float mPreviousCameraRight[3] = {};

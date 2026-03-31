@@ -9,7 +9,6 @@ struct HitData
 	uint dataSource;
 	uint primitiveIndex;
 	uint portalIndex;
-	uint localSpaceIndex;
 	float2 barycentrics;
 	float distance;
 	float3 position;
@@ -33,7 +32,6 @@ HitData MakeEmptyHitData()
 	hitData.primitiveIndex = 0xffffffffu;
 	hitData.materialIndex = 0xffffffffu;
 	hitData.portalIndex = 0xffffffffu;
-	hitData.localSpaceIndex = 0xffffffffu;
 	return hitData;
 }
 
@@ -321,12 +319,6 @@ bool ResolvePortalHit(HitData hit, out PortalData portalData)
 	return hit.portalIndex != 0xffffffffu && portalData.traversalClass != PORTAL_TRAVERSAL_CLASS_NONE;
 }
 
-uint GetTraceRootLocalSpaceIndex()
-{
-	const uint packed = gTraceConstants.ReservedTrace1 >> 16u;
-	return packed == 0xffffu ? 0xffffffffu : packed;
-}
-
 bool ShouldGatePrimaryVisibleChunks()
 {
 	return (gTraceConstants.Flags & NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS) != 0u;
@@ -445,7 +437,6 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 		bestHit.dataSource = SCENE_DATA_SOURCE_DYNAMIC;
 		bestHit.primitiveIndex = primitiveIndex;
 		bestHit.portalIndex = primitive.portalIndex;
-		bestHit.localSpaceIndex = GetTraceRootLocalSpaceIndex();
 		bestHit.barycentrics = barycentrics.yz;
 		bestHit.distance = hitT;
 		bestHit.position = origin + direction * hitT;
@@ -457,7 +448,7 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 	return bestHit;
 }
 
-bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, uint currentLocalSpaceIndex, bool gateVisibleChunks, out HitData hitData)
+bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, bool gateVisibleChunks, out HitData hitData)
 {
 	hitData = MakeEmptyHitData();
 	float accumulatedDistance = 0.0;
@@ -483,15 +474,6 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		}
 
 		const SceneInstanceData instanceData = GetSceneInstanceData(rayQuery.CommittedInstanceID());
-		const uint instanceLocalSpaceIndex = instanceData.reserved0;
-		if (currentLocalSpaceIndex != 0xffffffffu &&
-			instanceLocalSpaceIndex != 0xffffffffu &&
-			instanceLocalSpaceIndex != currentLocalSpaceIndex)
-		{
-			accumulatedDistance += rayQuery.CommittedRayT() + TRACE_CONTINUE_BIAS;
-			continue;
-		}
-
 		const uint primitiveIndex = ResolvePrimitiveIndex(instanceData, rayQuery.CommittedPrimitiveIndex());
 		const PrimitiveData primitive = GetPrimitiveData(instanceData.dataSource, primitiveIndex);
 		const float committedDistance = rayQuery.CommittedRayT();
@@ -521,7 +503,6 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.dataSource = instanceData.dataSource;
 		hitData.primitiveIndex = primitiveIndex;
 		hitData.portalIndex = primitive.portalIndex;
-		hitData.localSpaceIndex = instanceLocalSpaceIndex != 0xffffffffu ? instanceLocalSpaceIndex : currentLocalSpaceIndex;
 		hitData.barycentrics = bary;
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
@@ -534,19 +515,18 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 	return false;
 }
 
-bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, uint startLocalSpaceIndex, bool gateVisibleChunks, out HitData hitData, out float3 exitDirection)
+bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, bool gateVisibleChunks, out HitData hitData, out float3 exitDirection)
 {
 	hitData = MakeEmptyHitData();
 	exitDirection = startDirection;
 	float3 origin = startOrigin;
 	float3 direction = startDirection;
 	float remainingDistance = maxDistance;
-	uint currentLocalSpaceIndex = startLocalSpaceIndex;
 
 	[loop]
 	for (uint continuationStep = 0u; continuationStep < 32u; ++continuationStep)
 	{
-		if (!TraceClosestSurface(origin, direction, remainingDistance, currentLocalSpaceIndex, gateVisibleChunks, hitData))
+		if (!TraceClosestSurface(origin, direction, remainingDistance, gateVisibleChunks, hitData))
 		{
 			exitDirection = direction;
 			return false;
@@ -573,10 +553,6 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 		{
 			remainingDistance = max(remainingDistance - hitData.distance, 0.0);
 			origin = hitData.position + direction * 0.05 + portalData.delta;
-			if (portalData.targetLocalSpaceIndex != 0xffffffffu)
-			{
-				currentLocalSpaceIndex = portalData.targetLocalSpaceIndex;
-			}
 			exitDirection = direction;
 			gateVisibleChunks = false;
 			portalBudget--;
@@ -593,25 +569,28 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 
 bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, out HitData hitData, out float3 exitDirection)
 {
-	return TraceScenePath(startOrigin, startDirection, maxDistance, mirrorBudget, portalBudget, GetTraceRootLocalSpaceIndex(), false, hitData, exitDirection);
+	return TraceScenePath(startOrigin, startDirection, maxDistance, mirrorBudget, portalBudget, false, hitData, exitDirection);
 }
 
-HitData TracePrimary(float3 origin, float3 direction, uint startLocalSpaceIndex, bool gateVisibleChunks, out float3 exitDirection)
+HitData TracePrimary(float3 origin, float3 direction, bool gateVisibleChunks, out float3 exitDirection)
 {
 	HitData hitData = MakeEmptyHitData();
 	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 16) & 0xffffu);
-	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), startLocalSpaceIndex, gateVisibleChunks, hitData, exitDirection);
+	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), gateVisibleChunks, hitData, exitDirection);
 	return hitData;
-}
-
-HitData TracePrimary(float3 origin, float3 direction, uint startLocalSpaceIndex, out float3 exitDirection)
-{
-	return TracePrimary(origin, direction, startLocalSpaceIndex, false, exitDirection);
 }
 
 HitData TracePrimary(float3 origin, float3 direction, out float3 exitDirection)
 {
-	return TracePrimary(origin, direction, GetTraceRootLocalSpaceIndex(), ShouldGatePrimaryVisibleChunks(), exitDirection);
+	return TracePrimary(origin, direction, ShouldGatePrimaryVisibleChunks(), exitDirection);
+}
+
+HitData TracePrimaryUngated(float3 origin, float3 direction, out float3 exitDirection)
+{
+	HitData hitData = MakeEmptyHitData();
+	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 16) & 0xffffu);
+	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), false, hitData, exitDirection);
+	return hitData;
 }
 
 HitData TracePrimary(float3 origin, float3 direction)
@@ -620,30 +599,19 @@ HitData TracePrimary(float3 origin, float3 direction)
 	return TracePrimary(origin, direction, exitDirection);
 }
 
-float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, uint startLocalSpaceIndex, out float shadowHitDistance)
+float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, out float shadowHitDistance)
 {
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
-	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), startLocalSpaceIndex, false, shadowHit, ignoredDirection);
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), shadowHit, ignoredDirection);
 	shadowHitDistance = blocked ? shadowHit.distance : NRD_FP16_MAX;
 	return blocked ? 0.0 : 1.0;
-}
-
-float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, out float shadowHitDistance)
-{
-	return ComputeSunShadow(position, normal, lightDirection, GetTraceRootLocalSpaceIndex(), shadowHitDistance);
-}
-
-float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, uint startLocalSpaceIndex)
-{
-	float shadowHitDistance = 0.0;
-	return ComputeSunShadow(position, normal, lightDirection, startLocalSpaceIndex, shadowHitDistance);
 }
 
 float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection)
 {
 	float shadowHitDistance = 0.0;
-	return ComputeSunShadow(position, normal, lightDirection, GetTraceRootLocalSpaceIndex(), shadowHitDistance);
+	return ComputeSunShadow(position, normal, lightDirection, shadowHitDistance);
 }
 
 float ComputePointLightShadow(float3 position, float3 normal, float3 lightDirection, float lightDistance)
@@ -656,8 +624,13 @@ float ComputePointLightShadow(float3 position, float3 normal, float3 lightDirect
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
-	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, 0u, GetPortalTraversalDepth(), GetTraceRootLocalSpaceIndex(), false, shadowHit, ignoredDirection);
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, 0u, GetPortalTraversalDepth(), shadowHit, ignoredDirection);
 	return blocked ? 0.0 : 1.0;
+}
+
+bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, out HitData hitData)
+{
+	return TraceClosestSurface(startOrigin, direction, maxDistance, false, hitData);
 }
 
 float ComputeFastPointLightShadow(float3 position, float3 normal, float3 lightDirection, float lightDistance)
@@ -669,7 +642,7 @@ float ComputeFastPointLightShadow(float3 position, float3 normal, float3 lightDi
 
 	HitData shadowHit = MakeEmptyHitData();
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
-	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, GetTraceRootLocalSpaceIndex(), false, shadowHit);
+	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, shadowHit);
 	return blocked ? 0.0 : 1.0;
 }
 
