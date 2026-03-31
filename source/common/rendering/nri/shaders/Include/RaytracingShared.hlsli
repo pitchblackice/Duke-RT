@@ -327,9 +327,9 @@ uint GetTraceRootLocalSpaceIndex()
 	return packed == 0xffffu ? 0xffffffffu : packed;
 }
 
-bool ShouldGatePrimaryVisibleChunks()
+bool ShouldGateVisibleChunks()
 {
-	return (gTraceConstants.Flags & NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS) != 0u;
+	return (gTraceConstants.Flags & NRI_FLAG_GATE_VISIBLE_CHUNKS) != 0u;
 }
 
 bool IsVisibleChunk(uint chunkIndex)
@@ -611,7 +611,7 @@ HitData TracePrimary(float3 origin, float3 direction, uint startLocalSpaceIndex,
 
 HitData TracePrimary(float3 origin, float3 direction, out float3 exitDirection)
 {
-	return TracePrimary(origin, direction, GetTraceRootLocalSpaceIndex(), ShouldGatePrimaryVisibleChunks(), exitDirection);
+	return TracePrimary(origin, direction, GetTraceRootLocalSpaceIndex(), ShouldGateVisibleChunks(), exitDirection);
 }
 
 HitData TracePrimary(float3 origin, float3 direction)
@@ -624,7 +624,7 @@ float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, ui
 {
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
-	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), startLocalSpaceIndex, false, shadowHit, ignoredDirection);
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), startLocalSpaceIndex, ShouldGateVisibleChunks(), shadowHit, ignoredDirection);
 	shadowHitDistance = blocked ? shadowHit.distance : NRD_FP16_MAX;
 	return blocked ? 0.0 : 1.0;
 }
@@ -656,7 +656,7 @@ float ComputePointLightShadow(float3 position, float3 normal, float3 lightDirect
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
-	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, 0u, GetPortalTraversalDepth(), GetTraceRootLocalSpaceIndex(), false, shadowHit, ignoredDirection);
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, 0u, GetPortalTraversalDepth(), GetTraceRootLocalSpaceIndex(), ShouldGateVisibleChunks(), shadowHit, ignoredDirection);
 	return blocked ? 0.0 : 1.0;
 }
 
@@ -669,7 +669,7 @@ float ComputeFastPointLightShadow(float3 position, float3 normal, float3 lightDi
 
 	HitData shadowHit = MakeEmptyHitData();
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
-	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, GetTraceRootLocalSpaceIndex(), false, shadowHit);
+	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, GetTraceRootLocalSpaceIndex(), ShouldGateVisibleChunks(), shadowHit);
 	return blocked ? 0.0 : 1.0;
 }
 
