@@ -193,9 +193,9 @@ RuntimeLightTileHeaderData GetRuntimeLightTileHeader(uint2 pixelPos)
 	return gRuntimeLightTileHeaders[tileY * tileCounts.x + tileX];
 }
 
-float GetSurfaceRoughness(MaterialData material)
+float GetSurfaceRoughness(MaterialData material, float2 uv)
 {
-	return clamp(material.roughnessHint, 0.02, 1.0);
+	return SampleMaterialRoughness(material, uv);
 }
 
 static const float kSunAngularRadius = 0.03;
@@ -241,9 +241,9 @@ float4 PackSpecularRadiance(float3 radiance, float hitDistance, float viewZ, flo
 	return PackReblurSpecularRadiance(radiance, hitDistance, viewZ, roughness);
 }
 
-float GetSurfaceMetalness(MaterialData material)
+float GetSurfaceMetalness(MaterialData material, float2 uv)
 {
-	return saturate(material.metalnessHint);
+	return SampleMaterialMetalness(material, uv);
 }
 
 float GetSurfaceMaterialID(MaterialData material)
@@ -508,7 +508,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 
 		indirectRadiance += throughput * EvaluateSectorLighting(bounceMaterial, bounceHit.normal, bounceAlbedo.rgb);
 
-		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial);
+		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial, bounceHit.uv);
 		const float3 bounceViewDir = normalize(-tracedDirection);
 		float3 bounceEmissiveDiffuse = 0.0;
 		float3 bounceEmissiveSpecular = 0.0;
@@ -596,8 +596,8 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			break;
 		}
 
-		const float bounceRoughness = GetSurfaceRoughness(bounceMaterial);
-		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial);
+		const float bounceRoughness = GetSurfaceRoughness(bounceMaterial, bounceHit.uv);
+		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial, bounceHit.uv);
 		const float4 bounceAlbedo = SampleMaterialBaseColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
 		if (IsMaterialEmissive(bounceMaterial))
 		{
@@ -805,8 +805,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const MaterialData material = GetMaterialData(hit.materialIndex, hit.dataSource);
 			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
 			const bool emissiveMaterial = IsMaterialEmissive(material);
-			roughness = GetSurfaceRoughness(material);
-			const float metalness = GetSurfaceMetalness(material);
+			roughness = GetSurfaceRoughness(material, hit.uv);
+			const float metalness = GetSurfaceMetalness(material, hit.uv);
 			const float materialID = GetSurfaceMaterialID(material);
 			if (bootstrapBaseColor)
 			{

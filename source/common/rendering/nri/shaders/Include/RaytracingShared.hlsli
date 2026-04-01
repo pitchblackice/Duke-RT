@@ -216,6 +216,11 @@ bool ProjectWorldToUvMatrix(float3 worldPos, bool previousFrame, float2 jitter, 
 
 float4 SampleMaterialColor(MaterialData material, uint textureIndex, float2 uv, bool indexed, bool applyPaletteLookup, bool applyLightLevel)
 {
+	if (textureIndex == 0xffffffffu)
+	{
+		return 0.0;
+	}
+
 	float4 color = 0.0;
 	if (indexed)
 	{
@@ -238,6 +243,16 @@ float4 SampleMaterialColor(MaterialData material, uint textureIndex, float2 uv, 
 		color.rgb *= material.lightLevel;
 	}
 	return color;
+}
+
+float SampleMaterialScalarChannel(MaterialData material, uint textureIndex, float2 uv, float fallback)
+{
+	if (textureIndex == 0xffffffffu)
+	{
+		return fallback;
+	}
+
+	return SampleMaterialColor(material, textureIndex, uv, false, false, false).r;
 }
 
 float4 SampleMaterialBaseColor(uint materialIndex, uint dataSource, float2 uv)
@@ -277,6 +292,16 @@ float3 SampleMaterialEmissionSource(uint materialIndex, uint dataSource, float2 
 	}
 
 	return 0.0;
+}
+
+float SampleMaterialMetalness(MaterialData material, float2 uv)
+{
+	return saturate(SampleMaterialScalarChannel(material, material.metallicTextureIndex, uv, material.metalnessHint));
+}
+
+float SampleMaterialRoughness(MaterialData material, float2 uv)
+{
+	return clamp(SampleMaterialScalarChannel(material, material.roughnessTextureIndex, uv, material.roughnessHint), 0.02, 1.0);
 }
 
 float4 SampleSurfaceColor(uint materialIndex, uint dataSource, float2 uv)

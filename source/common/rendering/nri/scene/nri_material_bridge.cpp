@@ -290,6 +290,8 @@ namespace
 		uint64_t key = 1469598103934665603ull;
 		Fnv1a64Append(key, &metadata.textureContentKey, sizeof(metadata.textureContentKey));
 		Fnv1a64Append(key, &metadata.glowmapContentKey, sizeof(metadata.glowmapContentKey));
+		Fnv1a64Append(key, &metadata.metallicContentKey, sizeof(metadata.metallicContentKey));
+		Fnv1a64Append(key, &metadata.roughnessContentKey, sizeof(metadata.roughnessContentKey));
 		Fnv1a64Append(key, &metadata.textureId, sizeof(metadata.textureId));
 		Fnv1a64Append(key, &metadata.paletteIndex, sizeof(metadata.paletteIndex));
 		Fnv1a64Append(key, &metadata.materialFlags, sizeof(metadata.materialFlags));
@@ -316,13 +318,24 @@ namespace
 		return intensity;
 	}
 
-	MaterialLightingMetadata BuildMaterialLightingMetadata(const SurfaceRef& surface, const MaterialData& material, uint64_t textureContentKey, uint32_t glowmapTextureIndex, uint64_t glowmapContentKey)
+	MaterialLightingMetadata BuildMaterialLightingMetadata(
+		const SurfaceRef& surface,
+		const MaterialData& material,
+		uint64_t textureContentKey,
+		uint32_t glowmapTextureIndex,
+		uint64_t glowmapContentKey,
+		uint32_t metallicTextureIndex,
+		uint64_t metallicContentKey,
+		uint32_t roughnessTextureIndex,
+		uint64_t roughnessContentKey)
 	{
 		MaterialLightingMetadata metadata = {};
 		metadata.texture = surface.material.texture;
 		metadata.textureContentKey = textureContentKey;
 		metadata.textureIndex = material.textureIndex;
 		metadata.glowmapTextureIndex = glowmapTextureIndex;
+		metadata.metallicTextureIndex = metallicTextureIndex;
+		metadata.roughnessTextureIndex = roughnessTextureIndex;
 		metadata.paletteIndex = material.paletteIndex;
 		metadata.materialFlags = material.flags;
 		metadata.sectorIndex = surface.provenance.sectorIndex;
@@ -330,6 +343,8 @@ namespace
 		metadata.alpha = material.alpha;
 		metadata.lightLevel = material.lightLevel;
 		metadata.materialClass = material.materialClass;
+		metadata.metallicContentKey = metallicContentKey;
+		metadata.roughnessContentKey = roughnessContentKey;
 
 		const bool materialFullbright = (material.flags & MaterialFlag_Fullbright) != 0;
 		if (materialFullbright)
@@ -425,13 +440,38 @@ namespace
 		outMaterials.materials.push_back(material);
 		uint32_t glowmapTextureIndex = UINT32_MAX;
 		uint64_t glowmapContentKey = 0;
+		uint32_t metallicTextureIndex = UINT32_MAX;
+		uint64_t metallicContentKey = 0;
+		uint32_t roughnessTextureIndex = UINT32_MAX;
+		uint64_t roughnessContentKey = 0;
 		if (materialRef.texture != nullptr && materialRef.texture->GetGlowmap() != nullptr)
 		{
 			glowmapTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetGlowmap(), false, textureLookup, outMaterials);
 			glowmapContentKey = outMaterials.textures[glowmapTextureIndex].key;
 		}
+		if (materialRef.texture != nullptr && materialRef.texture->GetMetallic() != nullptr)
+		{
+			metallicTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetMetallic(), false, textureLookup, outMaterials);
+			metallicContentKey = outMaterials.textures[metallicTextureIndex].key;
+			outMaterials.materials.back().metallicTextureIndex = metallicTextureIndex;
+		}
+		if (materialRef.texture != nullptr && materialRef.texture->GetRoughness() != nullptr)
+		{
+			roughnessTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetRoughness(), false, textureLookup, outMaterials);
+			roughnessContentKey = outMaterials.textures[roughnessTextureIndex].key;
+			outMaterials.materials.back().roughnessTextureIndex = roughnessTextureIndex;
+		}
 
-		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(surface, material, outMaterials.textures[material.textureIndex].key, glowmapTextureIndex, glowmapContentKey);
+		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(
+			surface,
+			outMaterials.materials.back(),
+			outMaterials.textures[material.textureIndex].key,
+			glowmapTextureIndex,
+			glowmapContentKey,
+			metallicTextureIndex,
+			metallicContentKey,
+			roughnessTextureIndex,
+			roughnessContentKey);
 		outMaterials.lightMetadata.push_back(metadata);
 	}
 

@@ -31,6 +31,10 @@ struct MaterialData
 	uint32_t paletteIndex = 0;
 	uint32_t flags = 0;
 	uint32_t materialClass = 0;
+	uint32_t metallicTextureIndex = UINT32_MAX;
+	uint32_t roughnessTextureIndex = UINT32_MAX;
+	uint32_t sectorIndex = UINT32_MAX;
+	uint32_t emissiveTextureIndex = UINT32_MAX;
 	float lightLevel = 1.0f;
 	float alpha = 1.0f;
 	float roughnessHint = 0.45f;
@@ -39,8 +43,6 @@ struct MaterialData
 	float emissiveIntensity = 0.0f;
 	float emissiveMaskScale = 0.0f;
 	uint32_t emissiveMode = MaterialEmissiveMode_None;
-	uint32_t sectorIndex = UINT32_MAX;
-	uint32_t emissiveTextureIndex = UINT32_MAX;
 	float emissiveReserved = 0.0f;
 };
 
@@ -50,9 +52,13 @@ struct MaterialLightingMetadata
 	uint64_t materialKey = 0;
 	uint64_t textureContentKey = 0;
 	uint64_t glowmapContentKey = 0;
+	uint64_t metallicContentKey = 0;
+	uint64_t roughnessContentKey = 0;
 	uint32_t textureId = 0;
 	uint32_t textureIndex = 0;
 	uint32_t glowmapTextureIndex = UINT32_MAX;
+	uint32_t metallicTextureIndex = UINT32_MAX;
+	uint32_t roughnessTextureIndex = UINT32_MAX;
 	uint32_t emissiveTextureIndex = UINT32_MAX;
 	uint32_t paletteIndex = 0;
 	uint32_t materialFlags = 0;

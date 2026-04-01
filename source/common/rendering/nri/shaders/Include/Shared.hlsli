@@ -90,6 +90,10 @@ struct MaterialData
 	uint paletteIndex;
 	uint flags;
 	uint materialClass;
+	uint metallicTextureIndex;
+	uint roughnessTextureIndex;
+	uint sectorIndex;
+	uint emissiveTextureIndex;
 	float lightLevel;
 	float alpha;
 	float roughnessHint;
@@ -98,8 +102,6 @@ struct MaterialData
 	float emissiveIntensity;
 	float emissiveMaskScale;
 	uint emissiveMode;
-	uint sectorIndex;
-	uint emissiveTextureIndex;
 	float emissiveReserved;
 };
 

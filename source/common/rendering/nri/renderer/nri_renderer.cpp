@@ -1273,32 +1273,50 @@ namespace
 			textureLookup.emplace(destination.textures[i].key, i);
 		}
 
+		auto remapTextureIndex = [&source, &destination, &textureLookup](uint32_t textureIndex) -> uint32_t
+		{
+			if (textureIndex == UINT32_MAX)
+			{
+				return UINT32_MAX;
+			}
+			if (textureIndex >= source.textures.size())
+			{
+				return textureIndex;
+			}
+
+			const auto& texture = source.textures[textureIndex];
+			auto it = textureLookup.find(texture.key);
+			if (it == textureLookup.end())
+			{
+				const uint32_t newIndex = (uint32_t)destination.textures.size();
+				textureLookup.emplace(texture.key, newIndex);
+				destination.textures.push_back(texture);
+				return newIndex;
+			}
+
+			return it->second;
+		};
+
 		for (size_t materialIndex = 0; materialIndex < source.materials.size(); ++materialIndex)
 		{
 			const auto& material = source.materials[materialIndex];
 			nri_scene::MaterialData copy = material;
 			const bool hasLightMetadata = materialIndex < source.lightMetadata.size();
-			if (material.textureIndex < source.textures.size())
-			{
-				const auto& texture = source.textures[material.textureIndex];
-				auto it = textureLookup.find(texture.key);
-				if (it == textureLookup.end())
-				{
-					const uint32_t newIndex = (uint32_t)destination.textures.size();
-					textureLookup.emplace(texture.key, newIndex);
-					destination.textures.push_back(texture);
-					copy.textureIndex = newIndex;
-				}
-				else
-				{
-					copy.textureIndex = it->second;
-				}
-			}
+			copy.textureIndex = remapTextureIndex(material.textureIndex);
+			copy.metallicTextureIndex = remapTextureIndex(material.metallicTextureIndex);
+			copy.roughnessTextureIndex = remapTextureIndex(material.roughnessTextureIndex);
+			copy.emissiveTextureIndex = remapTextureIndex(material.emissiveTextureIndex);
 
 			destination.materials.push_back(copy);
 			if (hasLightMetadata)
 			{
-				destination.lightMetadata.push_back(source.lightMetadata[materialIndex]);
+				nri_scene::MaterialLightingMetadata metadata = source.lightMetadata[materialIndex];
+				metadata.textureIndex = remapTextureIndex(metadata.textureIndex);
+				metadata.glowmapTextureIndex = remapTextureIndex(metadata.glowmapTextureIndex);
+				metadata.metallicTextureIndex = remapTextureIndex(metadata.metallicTextureIndex);
+				metadata.roughnessTextureIndex = remapTextureIndex(metadata.roughnessTextureIndex);
+				metadata.emissiveTextureIndex = remapTextureIndex(metadata.emissiveTextureIndex);
+				destination.lightMetadata.push_back(metadata);
 			}
 		}
 
@@ -2743,6 +2761,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				material.textureIndex = 0;
 				material.paletteIndex = 0;
 				material.flags = 0;
+				material.metallicTextureIndex = UINT32_MAX;
+				material.roughnessTextureIndex = UINT32_MAX;
+				material.emissiveTextureIndex = UINT32_MAX;
 				material.lightLevel = 1.0f;
 				material.alpha = 1.0f;
 			}
@@ -7583,6 +7604,14 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		if (material.textureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
 			material.textureIndex = 0;
+		}
+		if (material.metallicTextureIndex != UINT32_MAX && material.metallicTextureIndex >= NRI_MAX_SCENE_TEXTURES)
+		{
+			material.metallicTextureIndex = UINT32_MAX;
+		}
+		if (material.roughnessTextureIndex != UINT32_MAX && material.roughnessTextureIndex >= NRI_MAX_SCENE_TEXTURES)
+		{
+			material.roughnessTextureIndex = UINT32_MAX;
 		}
 		if (material.emissiveTextureIndex != UINT32_MAX && material.emissiveTextureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
