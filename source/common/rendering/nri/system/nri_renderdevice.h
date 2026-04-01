@@ -81,6 +81,7 @@ public:
 	void ClearPathTracingEmissiveHeuristics();
 	void PrintPathTracingEmissiveHeuristics() const;
 	void NotifyPathTracingGlowControlChange();
+	void NotifyPathTracingDebugSphereTessellationChange();
 	void PrintPathTracingEmissiveSurfaces(float radius, uint32_t limit) const;
 	void PrintPathTracingSectorLights(float radius, uint32_t limit) const;
 	void PrintPathTracingMapChunkDump(int32_t chunkIndex) const;

@@ -40,11 +40,11 @@ CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, vid_vsync)
+EXTERN_CVAR(Int, nri_ptspherelongs)
+EXTERN_CVAR(Int, nri_ptspherelats)
 
 namespace
 {
-	static constexpr uint32_t NriPtDebugSphereLongitudeSegments = 32u;
-	static constexpr uint32_t NriPtDebugSphereLatitudeSegments = 16u;
 	static constexpr uint32_t NriPtDebugSphereLimit = 64u;
 
 	static bool ResolveSurfaceProbeTextureDebugInfo(uint32_t textureId, FString& outTextureName, int32_t& outLegacyTile)
@@ -86,6 +86,29 @@ namespace
 		}
 	}
 
+	static void NotifyActiveDebugSphereTessellationChange()
+	{
+		if (screen != nullptr && screen->Backend() == 4)
+		{
+			static_cast<NRIRenderDevice*>(screen)->NotifyPathTracingDebugSphereTessellationChange();
+		}
+	}
+
+	static uint32_t GetRuntimeDebugSphereLongitudeSegments()
+	{
+		return (uint32_t)clamp<int>(nri_ptspherelongs, 8, 256);
+	}
+
+	static uint32_t GetRuntimeDebugSphereLatitudeSegments()
+	{
+		return (uint32_t)clamp<int>(nri_ptspherelats, 4, 128);
+	}
+
+	static uint32_t GetRuntimeDebugSphereTriangleCount()
+	{
+		return GetRuntimeDebugSphereLongitudeSegments() * 2u * (GetRuntimeDebugSphereLatitudeSegments() - 1u);
+	}
+
 	static void PathTracingToWorldPosition(const float source[3], float destination[3])
 	{
 		destination[0] = source[0];
@@ -97,6 +120,18 @@ namespace
 CUSTOM_CVAR(Bool, nri_framegen, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	RefreshActiveFrameGenerationSwapChain();
+}
+
+CUSTOM_CVAR(Int, nri_ptspherelongs, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	self = clamp<int>(self, 8, 256);
+	NotifyActiveDebugSphereTessellationChange();
+}
+
+CUSTOM_CVAR(Int, nri_ptspherelats, 32, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	self = clamp<int>(self, 4, 128);
+	NotifyActiveDebugSphereTessellationChange();
 }
 
 CUSTOM_CVAR(Int, nri_framegenprovider, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -3319,11 +3354,12 @@ void NRIRenderer::ClearRuntimeDebugSpheres()
 
 void NRIRenderer::PrintRuntimeDebugSpheres() const
 {
-	Printf("NRI PT debug spheres: active=%u limit=%u tessellation=%ux%u\n",
+	Printf("NRI PT debug spheres: active=%u limit=%u tessellation=%ux%u triangles_per_sphere=%u\n",
 		(uint32_t)mRuntimeDebugSpheres.size(),
 		NriPtDebugSphereLimit,
-		NriPtDebugSphereLongitudeSegments,
-		NriPtDebugSphereLatitudeSegments);
+		GetRuntimeDebugSphereLongitudeSegments(),
+		GetRuntimeDebugSphereLatitudeSegments(),
+		GetRuntimeDebugSphereTriangleCount());
 	for (const RuntimeDebugSphere& sphere : mRuntimeDebugSpheres)
 	{
 		float worldPosition[3] = {};
@@ -3423,6 +3459,11 @@ void NRIRenderer::NotifyGlowControlChange()
 	QueueStaticMapSceneLightingInvalidation();
 	ResetPersistentDynamicEmissiveCache();
 	RequestHistoryReset("glow-control-change");
+}
+
+void NRIRenderer::NotifyDebugSphereTessellationChange()
+{
+	RequestHistoryReset("debug-sphere-tessellation-change");
 }
 
 void NRIRenderer::PrintTextureEmissiveHeuristics() const
@@ -8345,11 +8386,13 @@ void NRIRenderer::AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sce
 		return;
 	}
 
+	const uint32_t longitudeSegments = GetRuntimeDebugSphereLongitudeSegments();
+	const uint32_t latitudeSegments = GetRuntimeDebugSphereLatitudeSegments();
 	sceneView.opaqueFlats.reserve(sceneView.opaqueFlats.size() + mRuntimeDebugSpheres.size());
 	sceneView.stats.totalDrawItems += (unsigned int)mRuntimeDebugSpheres.size();
 	sceneView.stats.flatDrawItems += (unsigned int)mRuntimeDebugSpheres.size();
 	sceneView.stats.materialRefs += (unsigned int)mRuntimeDebugSpheres.size();
-	sceneView.stats.triangleEstimate += (unsigned int)(mRuntimeDebugSpheres.size() * NriPtDebugSphereLongitudeSegments * 2u * (NriPtDebugSphereLatitudeSegments - 1u));
+	sceneView.stats.triangleEstimate += (unsigned int)(mRuntimeDebugSpheres.size() * GetRuntimeDebugSphereTriangleCount());
 
 	constexpr float Pi = 3.14159265358979323846f;
 	auto makeVertex = [Pi](const RuntimeDebugSphere& sphere, float u, float v) -> nri_scene::CapturedVertex
@@ -8410,14 +8453,14 @@ void NRIRenderer::AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sce
 		surface.material.flags = nri_scene::MaterialFlag_None;
 		surface.provenance.sourceType = nri_scene::SurfaceSourceType::DebugSphere;
 
-		for (uint32_t lat = 0; lat < NriPtDebugSphereLatitudeSegments; ++lat)
+		for (uint32_t lat = 0; lat < latitudeSegments; ++lat)
 		{
-			const float v0 = (float)lat / (float)NriPtDebugSphereLatitudeSegments;
-			const float v1 = (float)(lat + 1u) / (float)NriPtDebugSphereLatitudeSegments;
-			for (uint32_t lon = 0; lon < NriPtDebugSphereLongitudeSegments; ++lon)
+			const float v0 = (float)lat / (float)latitudeSegments;
+			const float v1 = (float)(lat + 1u) / (float)latitudeSegments;
+			for (uint32_t lon = 0; lon < longitudeSegments; ++lon)
 			{
-				const float u0 = (float)lon / (float)NriPtDebugSphereLongitudeSegments;
-				const float u1 = (float)(lon + 1u) / (float)NriPtDebugSphereLongitudeSegments;
+				const float u0 = (float)lon / (float)longitudeSegments;
+				const float u1 = (float)(lon + 1u) / (float)longitudeSegments;
 				const auto p00 = makeVertex(sphere, u0, v0);
 				const auto p01 = makeVertex(sphere, u1, v0);
 				const auto p10 = makeVertex(sphere, u0, v1);
@@ -8427,7 +8470,7 @@ void NRIRenderer::AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sce
 				{
 					appendTriangle(surface, sphere, p00, p10, p11);
 				}
-				else if (lat + 1u == NriPtDebugSphereLatitudeSegments)
+				else if (lat + 1u == latitudeSegments)
 				{
 					appendTriangle(surface, sphere, p00, p10, p01);
 				}

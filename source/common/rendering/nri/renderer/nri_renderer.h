@@ -51,6 +51,7 @@ public:
 	void ClearTextureEmissiveHeuristics();
 	void PrintTextureEmissiveHeuristics() const;
 	void NotifyGlowControlChange();
+	void NotifyDebugSphereTessellationChange();
 	void PrintEmissiveSurfaceDump(float radius, uint32_t limit) const;
 	void PrintSectorLightDump(float radius, uint32_t limit) const;
 	void PrintMapChunkDump(int32_t chunkIndex) const;

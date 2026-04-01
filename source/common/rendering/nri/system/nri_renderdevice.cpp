@@ -3266,6 +3266,16 @@ void NRIRenderDevice::NotifyPathTracingGlowControlChange()
 	mRenderer->NotifyGlowControlChange();
 }
 
+void NRIRenderDevice::NotifyPathTracingDebugSphereTessellationChange()
+{
+	if (mRenderer == nullptr)
+	{
+		return;
+	}
+
+	mRenderer->NotifyDebugSphereTessellationChange();
+}
+
 void NRIRenderDevice::PrintPathTracingEmissiveSurfaces(float radius, uint32_t limit) const
 {
 	if (mRenderer == nullptr)
