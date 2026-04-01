@@ -196,6 +196,7 @@ void GameInput::processMovement(const double turnscale, const bool allowstrafe, 
 	if (scaleAdjust < 1)
 	{
 		PlayerArray[myconnectindex]->CameraAngles += thisInput.ang;
+		PerfLoopTraceNoteFastCameraApply((float)thisInput.ang.Yaw.Degrees(), (float)thisInput.ang.Pitch.Degrees());
 	}
 }
 
@@ -259,6 +260,7 @@ void GameInput::processVehicle(const double baseVel, const double velScale, cons
 	if (scaleAdjust < 1)
 	{
 		PlayerArray[myconnectindex]->CameraAngles += thisInput.ang;
+		PerfLoopTraceNoteFastCameraApply((float)thisInput.ang.Yaw.Degrees(), 0.0f);
 	}
 }
 

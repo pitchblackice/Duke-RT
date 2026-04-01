@@ -70,6 +70,7 @@ struct PerfLoopInputTraceStats
 	uint32_t ticcmdBuilds = 0;
 	uint32_t yawApplyCalls = 0;
 	uint32_t pitchApplyCalls = 0;
+	uint32_t fastCameraApplyCalls = 0;
 	float postedMouseX = 0.0f;
 	float postedMouseY = 0.0f;
 	float dispatchedMouseX = 0.0f;
@@ -80,6 +81,8 @@ struct PerfLoopInputTraceStats
 	float ticcmdPitchDegrees = 0.0f;
 	float appliedYawDegrees = 0.0f;
 	float appliedPitchDegrees = 0.0f;
+	float fastCameraYawDegrees = 0.0f;
+	float fastCameraPitchDegrees = 0.0f;
 };
 
 struct PerfLoop2DProducerDelta
@@ -114,6 +117,7 @@ void PerfLoopTraceNoteGameInputSample(float x, float y);
 void PerfLoopTraceNoteTiccmdBuild(float yawDegrees, float pitchDegrees);
 void PerfLoopTraceNotePlayerYawApply(float yawDegrees);
 void PerfLoopTraceNotePlayerPitchApply(float pitchDegrees);
+void PerfLoopTraceNoteFastCameraApply(float yawDegrees, float pitchDegrees);
 void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta);
 void PerfLoopTraceNoteAltHud2D(const PerfLoop2DProducerDelta& delta);
 void PerfLoopTraceNoteCrosshair2D(const PerfLoop2DProducerDelta& delta);

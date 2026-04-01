@@ -224,6 +224,16 @@ void PerfLoopTraceNotePlayerPitchApply(float pitchDegrees)
 	perfLoopInputTraceStats.appliedPitchDegrees += pitchDegrees;
 }
 
+void PerfLoopTraceNoteFastCameraApply(float yawDegrees, float pitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.fastCameraApplyCalls++;
+	perfLoopInputTraceStats.fastCameraYawDegrees += yawDegrees;
+	perfLoopInputTraceStats.fastCameraPitchDegrees += pitchDegrees;
+}
+
 void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta)
 {
 	if (!PerfLoopTraceActive())

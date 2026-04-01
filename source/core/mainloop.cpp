@@ -1114,7 +1114,7 @@ void MainLoop ()
 					perf2DProducerTraceStats.drawtile.commands,
 					perf2DProducerTraceStats.drawtile.ms);
 				Printf(
-					"PERF input trace: frame=%llu getevent=%u starttic_calls=%u handleevents=%u msgs=%u burst=%u raw_input=%u raw_keyboard=%u raw_mouse=%u raw_mouse_moves=%u raw_mouse_drop=%u posted_mouse=%u dispatched_mouse=%u sampled_mouse=%u route_yaw=%u route_strafe=%u route_pitch=%u route_aimmove=%u ticcmds=%u yaw_apply=%u pitch_apply=%u posted_delta=(%.1f,%.1f) dispatched_delta=(%.1f,%.1f) sampled_delta=(%.1f,%.1f) ticcmd_deg=(%.3f,%.3f) applied_deg=(%.3f,%.3f) key_down=%u key_up=%u device_change=%u queue_hw=%u queue_overflow=%u\n",
+					"PERF input trace: frame=%llu getevent=%u starttic_calls=%u handleevents=%u msgs=%u burst=%u raw_input=%u raw_keyboard=%u raw_mouse=%u raw_mouse_moves=%u raw_mouse_drop=%u posted_mouse=%u dispatched_mouse=%u sampled_mouse=%u route_yaw=%u route_strafe=%u route_pitch=%u route_aimmove=%u ticcmds=%u yaw_apply=%u pitch_apply=%u fast_camera=%u posted_delta=(%.1f,%.1f) dispatched_delta=(%.1f,%.1f) sampled_delta=(%.1f,%.1f) ticcmd_deg=(%.3f,%.3f) applied_deg=(%.3f,%.3f) fast_camera_deg=(%.3f,%.3f) key_down=%u key_up=%u device_change=%u queue_hw=%u queue_overflow=%u\n",
 					(unsigned long long)traceFrame,
 					inputTrace.iGetEventCalls,
 					inputTrace.startTicCalls,
@@ -1136,6 +1136,7 @@ void MainLoop ()
 					inputTrace.ticcmdBuilds,
 					inputTrace.yawApplyCalls,
 					inputTrace.pitchApplyCalls,
+					inputTrace.fastCameraApplyCalls,
 					inputTrace.postedMouseX,
 					inputTrace.postedMouseY,
 					inputTrace.dispatchedMouseX,
@@ -1146,6 +1147,8 @@ void MainLoop ()
 					inputTrace.ticcmdPitchDegrees,
 					inputTrace.appliedYawDegrees,
 					inputTrace.appliedPitchDegrees,
+					inputTrace.fastCameraYawDegrees,
+					inputTrace.fastCameraPitchDegrees,
 					inputTrace.keyDownEvents,
 					inputTrace.keyUpEvents,
 					inputTrace.deviceChangeEvents,
