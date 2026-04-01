@@ -15,6 +15,7 @@
 #include "gamestruct.h"
 #include "texinfo.h"
 #include "texturemanager.h"
+#include "d_eventbase.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -343,6 +344,41 @@ namespace
 	{
 		return nri_pttraceframes > 0;
 	}
+
+	bool ShouldTracePtPerf()
+	{
+		return PerfLoopTraceActive() || nri_pttraceframes > 0;
+	}
+
+	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
+	{
+		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
+	}
+
+	class ScopedPtPerfTimer
+	{
+	public:
+		explicit ScopedPtPerfTimer(double& targetMs)
+			: mTarget(ShouldTracePtPerf() ? &targetMs : nullptr)
+		{
+			if (mTarget != nullptr)
+			{
+				mStart = std::chrono::steady_clock::now();
+			}
+		}
+
+		~ScopedPtPerfTimer()
+		{
+			if (mTarget != nullptr)
+			{
+				*mTarget += DurationMs(mStart, std::chrono::steady_clock::now());
+			}
+		}
+
+	private:
+		double* mTarget = nullptr;
+		std::chrono::steady_clock::time_point mStart = {};
+	};
 
 	class ScopedSkyPerfTimer
 	{
@@ -2294,6 +2330,66 @@ void NRIRenderer::Shutdown()
 	mFinalPresentOutputSet = nullptr;
 }
 
+void NRIRenderer::ResetPerfTraceStats()
+{
+	mLastPerfShellTraceStats = {};
+	mLastPerfResourceTraceStats = {};
+}
+
+void NRIRenderer::WaitForCommandsTracked()
+{
+	if (mFrameBuffer == nullptr)
+	{
+		return;
+	}
+
+	const bool trace = ShouldTracePtPerf();
+	const auto start = trace ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+	mFrameBuffer->WaitForCommands(true);
+	if (trace)
+	{
+		mLastPerfResourceTraceStats.waitCalls++;
+		mLastPerfResourceTraceStats.waitMs += DurationMs(start, std::chrono::steady_clock::now());
+	}
+}
+
+void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth)
+{
+	if (!ShouldTracePtPerf() || stats == nullptr)
+	{
+		return;
+	}
+
+	auto& perf = mLastPerfResourceTraceStats;
+	if (growth)
+	{
+		perf.growEvents++;
+	}
+	else
+	{
+		perf.overwriteEvents++;
+	}
+
+	auto noteBytes = [&](uint32_t& callCount, uint64_t& byteCount)
+	{
+		callCount++;
+		byteCount += size;
+	};
+
+	if (stats == &mVertexBufferStats || stats == &mIndexBufferStats || stats == &mPrimitiveBufferStats || stats == &mMaterialBufferStats)
+	{
+		noteBytes(perf.sceneUploadCalls, perf.sceneUploadBytes);
+	}
+	else if (stats == &mEmissivePrimitiveHeaderBufferStats || stats == &mEmissivePrimitiveBufferStats || stats == &mEmissivePrimitiveCdfBufferStats || stats == &mEmissiveTlasInstanceBufferStats)
+	{
+		noteBytes(perf.emissiveUploadCalls, perf.emissiveUploadBytes);
+	}
+	else
+	{
+		noteBytes(perf.sceneDataUploadCalls, perf.sceneDataUploadBytes);
+	}
+}
+
 bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 {
 	if ((drawmode != DM_MAINVIEW && drawmode != DM_OFFSCREEN) || portal || mFrameBuffer == nullptr ||
@@ -2308,6 +2404,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		return false;
 	}
 
+	ResetPerfTraceStats();
+	ScopedPtPerfTimer totalPerfTimer(mLastPerfShellTraceStats.totalMs);
 	Clocker totalClock(NriPTAll);
 	const uint32_t traceFrameIndex = mFrameIndex;
 
@@ -2388,13 +2486,17 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mResetHistory = savedResetHistory;
 	};
 
-	const bool ready =
-		Initialize() &&
-		EnsureFrameResources(
-			std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.width, 1u),
-			std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.height, 1u),
-			mFrameBuffer->mActiveTarget->width,
-			mFrameBuffer->mActiveTarget->height);
+	bool ready = false;
+	{
+		ScopedPtPerfTimer initPerfTimer(mLastPerfShellTraceStats.initResourcesMs);
+		ready =
+			Initialize() &&
+			EnsureFrameResources(
+				std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.width, 1u),
+				std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.height, 1u),
+				mFrameBuffer->mActiveTarget->width,
+				mFrameBuffer->mActiveTarget->height);
+	}
 	if (!ready)
 	{
 		LogFallback("PT frame resources or pipelines failed to initialize.");
@@ -2527,22 +2629,36 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	bool usingPersistentDynamicEmissiveCache = false;
 	bool liveDynamicHasEmissive = false;
 
-	if (allowStaticMapScene && EnsureStaticMapScene())
 	{
-		sceneLightUsesStaticMapScene = true;
-		emissiveSamplingContext.staticGeometry = &mStaticMapScene.geometry;
-		mUsedStaticMapSceneLastFrame = true;
-		activeSceneView = &mStaticMapScene.sceneView;
-		activeGeometry = &mStaticMapScene.geometry;
-		activeGpuMaterials = &mStaticMapScene.gpuMaterials;
-		activeMaterialBridge = &mStaticMapScene.materialBridge;
-		activeStaticProbePrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
-		activeStats = mStaticMapScene.sceneView.stats;
+		ScopedPtPerfTimer sceneSelectTimer(mLastPerfShellTraceStats.sceneSelectMs);
+		if (allowStaticMapScene && EnsureStaticMapScene())
+		{
+			sceneLightUsesStaticMapScene = true;
+			emissiveSamplingContext.staticGeometry = &mStaticMapScene.geometry;
+			mUsedStaticMapSceneLastFrame = true;
+			activeSceneView = &mStaticMapScene.sceneView;
+			activeGeometry = &mStaticMapScene.geometry;
+			activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+			activeMaterialBridge = &mStaticMapScene.materialBridge;
+			activeStaticProbePrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
+			activeStats = mStaticMapScene.sceneView.stats;
 
 		const bool deferOverlayThisFrame = mUploadedStaticMapSceneLastFrame || mBuiltStaticMapSceneASLastFrame;
-		const bool hasRuntimeSpaceLinkOverlay = !deferOverlayThisFrame && BuildRuntimeSpaceLinkOverlay(di, runtimeSpaceLinkGeometry, runtimeSpaceLinkMaterialBridge);
-		const bool hasRuntimeMutationOverlay = !deferOverlayThisFrame && BuildRuntimeMapMutationOverlay(runtimeMutationGeometry, runtimeMutationMaterialBridge);
-		const bool hasDynamicScene = !deferOverlayThisFrame && nri_scene::CaptureDynamicScene(di, dynamicSceneView);
+		const bool hasRuntimeSpaceLinkOverlay = !deferOverlayThisFrame && [&]()
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeSpaceLinkMs);
+			return BuildRuntimeSpaceLinkOverlay(di, runtimeSpaceLinkGeometry, runtimeSpaceLinkMaterialBridge);
+		}();
+		const bool hasRuntimeMutationOverlay = !deferOverlayThisFrame && [&]()
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationMs);
+			return BuildRuntimeMapMutationOverlay(runtimeMutationGeometry, runtimeMutationMaterialBridge);
+		}();
+		const bool hasDynamicScene = !deferOverlayThisFrame && [&]()
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicCaptureMs);
+			return nri_scene::CaptureDynamicScene(di, dynamicSceneView);
+		}();
 		if (hasDynamicScene)
 		{
 			{
@@ -2564,7 +2680,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			activeDynamicSceneView = &dynamicSceneView;
 			activeDynamicGeometry = &dynamicGeometry;
 			activeDynamicMaterials = &dynamicMaterialBridge;
-			liveDynamicHasEmissive = RebuildPersistentDynamicEmissiveCache(dynamicSceneView, dynamicMaterialBridge);
+			liveDynamicHasEmissive = [&]()
+			{
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentDynamicMs);
+				return RebuildPersistentDynamicEmissiveCache(dynamicSceneView, dynamicMaterialBridge);
+			}();
 		}
 
 		PrunePersistentDynamicEmissiveCacheToLiveActors();
@@ -2622,10 +2742,15 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			activeDynamicGeometry != nullptr &&
 			!activeDynamicGeometry->primitives.empty() &&
 			activeDynamicMaterials != nullptr;
-		const bool hasRuntimeDebugSphereOverlay = !deferOverlayThisFrame && BuildRuntimeDebugSphereOverlay(debugSphereGeometry, debugSphereMaterialBridge);
+		const bool hasRuntimeDebugSphereOverlay = !deferOverlayThisFrame && [&]()
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereMs);
+			return BuildRuntimeDebugSphereOverlay(debugSphereGeometry, debugSphereMaterialBridge);
+		}();
 
 		if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasRuntimeDebugSphereOverlay)
 		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.overlayAssembleMs);
 			overlayGeometry = {};
 			overlayMaterialBridge = {};
 
@@ -2958,6 +3083,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		activeGeometry = &capturedGeometry;
 		activeGpuMaterials = &capturedGpuMaterials;
 		emissiveSamplingContext.capturedGeometry = &capturedGeometry;
+		}
 	}
 
 	if (activeSceneView == nullptr || activeGeometry == nullptr || activeGpuMaterials == nullptr || activeMaterialBridge == nullptr)
@@ -3118,6 +3244,29 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	else if (preserveHistory)
 	{
 		restoreHistory();
+	}
+
+	if (success)
+	{
+		mLastPerfShellTraceStats.activePrimitiveCount = (uint32_t)activeGeometry->primitives.size();
+		mLastPerfShellTraceStats.dynamicPrimitiveCount = activeDynamicGeometry != nullptr ? (uint32_t)activeDynamicGeometry->primitives.size() : 0u;
+		mLastPerfShellTraceStats.activeMaterialCount = (uint32_t)activeGpuMaterials->size();
+		mLastPerfShellTraceStats.sceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
+		mLastPerfShellTraceStats.usedStaticMapScene = mUsedStaticMapSceneLastFrame;
+		mLastPerfShellTraceStats.usedDynamicOverlay = mGpuSceneHasDynamicOverlay;
+		mLastPerfShellTraceStats.usedPersistentDynamicEmissiveCache = usingPersistentDynamicEmissiveCache;
+		const double accountedMs =
+			mLastPerfShellTraceStats.initResourcesMs +
+			mLastPerfShellTraceStats.mapWorldMs +
+			mLastPerfShellTraceStats.updateStateMs +
+			mLastPerfShellTraceStats.sceneSelectMs +
+			mLastPerfShellTraceStats.sceneLightsMs +
+			mLastPerfShellTraceStats.residentLightRefreshMs +
+			mLastPerfShellTraceStats.emissiveUpdateMs +
+			mLastPerfShellTraceStats.emissiveTlasMs +
+			mLastPerfShellTraceStats.surfaceProbeMs +
+			mLastPerfShellTraceStats.frameGraphMs;
+		mLastPerfShellTraceStats.otherMs = std::max(0.0, mLastPerfShellTraceStats.totalMs - accountedMs);
 	}
 
 	if (nri_pttraceframes > 0)
@@ -4872,6 +5021,7 @@ void NRIRenderer::PrintSceneBufferStatus() const
 
 void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging)
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.surfaceProbeMs);
 	if (nri_ptsurfaceprobe <= 0 || !allowLogging)
 	{
 		return;
@@ -5868,6 +6018,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 	const nri_scene::SceneView* dynamicSceneView,
 	const nri_scene::MaterialBridgeData* dynamicMaterials)
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneLightsMs);
 	mSceneLights.BeginFrame(mFrameIndex);
 
 	if (usedStaticMapScene && mStaticMapScene.valid)
@@ -6121,6 +6272,7 @@ void NRIRenderer::LogFallback(const char* reason)
 
 void NRIRenderer::RefreshMapWorld()
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.mapWorldMs);
 	const uint64_t pendingBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
 	const bool levelChanged = mMapWorld.level != currentLevel;
 	if (levelChanged)
@@ -6677,6 +6829,7 @@ void NRIRenderer::BuildSectorLightingUpload(
 
 bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context)
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.emissiveUpdateMs);
 	EmissivePrimitiveHeaderGpuData emissiveHeader = {};
 	std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
 	std::vector<float> emissiveCdf;
@@ -6978,10 +7131,9 @@ bool NRIRenderer::UpdateSceneDataSet(
 
 	mBoundRuntimeLightCount = 0;
 
-	static SceneBufferDebugStats sSceneInstanceStats = { "SceneInstance" };
 	if (!EnsureStructuredBuffer(
 		mSceneInstanceBuffer,
-		sSceneInstanceStats,
+		mSceneInstanceBufferStats,
 		sceneInstances.data(),
 		sceneInstances.size() * sizeof(SceneInstanceData),
 		sizeof(SceneInstanceData),
@@ -7309,7 +7461,7 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		mOutputHeight != outputHeight ||
 		mTargetWidth != targetWidth ||
 		mTargetHeight != targetHeight;
-	mFrameBuffer->WaitForCommands(true);
+	WaitForCommandsTracked();
 	mNrd.Shutdown();
 	DestroyFrameTextures();
 	mRenderWidth = renderWidth;
@@ -7530,6 +7682,7 @@ void NRIRenderer::BindSceneRootDescriptors()
 
 bool NRIRenderer::EnsureStaticMapScene()
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.staticSceneMs);
 	if (!mMapWorld.valid)
 	{
 		return false;
@@ -8017,7 +8170,7 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 {
 	if (resource.buffer != nullptr || resource.shaderView != nullptr)
 	{
-		mFrameBuffer->WaitForCommands(true);
+		WaitForCommandsTracked();
 	}
 
 	DestroyBufferResource(resource);
@@ -8093,13 +8246,14 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 	stats.overwriteEventsLastFrame = 0;
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
+	NotePerfBufferUpload(&stats, size, needsGrowth);
 
 	if (needsGrowth)
 	{
 		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
 		if (resource.buffer != nullptr || resource.shaderView != nullptr)
 		{
-			mFrameBuffer->WaitForCommands(true);
+			WaitForCommandsTracked();
 		}
 		DestroyBufferResource(resource);
 
@@ -8144,7 +8298,7 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 		{
 			// Scene buffers are reused persistent DEVICE_UPLOAD allocations. Fence before
 			// overwriting them so prior queued frames cannot read partially updated data.
-			mFrameBuffer->WaitForCommands(true);
+			WaitForCommandsTracked();
 		}
 
 		void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, 0, resource.size);
@@ -8177,7 +8331,7 @@ bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t 
 {
 	if (resource.buffer != nullptr)
 	{
-		mFrameBuffer->WaitForCommands(true);
+		WaitForCommandsTracked();
 	}
 
 	DestroyBufferResource(resource);
@@ -8261,7 +8415,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		mScratchBuffer.buffer != nullptr;
 	if (needsWait)
 	{
-		mFrameBuffer->WaitForCommands(true);
+		WaitForCommandsTracked();
 	}
 
 	DestroyBufferResource(mTlasInstanceBuffer);
@@ -9141,6 +9295,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 
 bool NRIRenderer::RestoreStaticTopLevelScene()
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.restoreStaticSceneMs);
 	std::vector<nri::TopLevelInstance> instances;
 	std::vector<SceneInstanceData> sceneInstances;
 	BuildStaticMapInstances(instances, sceneInstances);
@@ -9164,6 +9319,7 @@ bool NRIRenderer::RestoreStaticTopLevelScene()
 
 bool NRIRenderer::RefreshResidentStaticSceneDataSet()
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.residentLightRefreshMs);
 	std::vector<SceneInstanceData> sceneInstances;
 	std::vector<nri::TopLevelInstance> ignoredInstances;
 	BuildStaticMapInstances(ignoredInstances, sceneInstances);
@@ -9249,6 +9405,7 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 
 bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.emissiveTlasMs);
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
@@ -9552,6 +9709,7 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopL
 
 bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int)
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.frameGraphMs);
 	Clocker clock(NriPTFrameGraph);
 
 	static bool sLoggedPhaseBCompositionPath = false;
@@ -10749,6 +10907,7 @@ bool NRIRenderer::DispatchFinal()
 
 void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.updateStateMs);
 	Clocker clock(NriPTUpdateState);
 
 	if (mHasPreviousCameraState)
@@ -11032,6 +11191,7 @@ void NRIRenderer::TraceSkyState(const nri_scene::SceneView& sceneView, const cha
 
 void NRIRenderer::CopyFinalToActiveTarget()
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.copyFinalMs);
 	Clocker clock(NriPTCopyFinal);
 
 	UpdateFrameGenerationFrameDesc();
@@ -11326,7 +11486,7 @@ void NRIRenderer::DestroyStaticMapSceneCache()
 	{
 		// The resident PT static scene can still be referenced by the previous frame's
 		// TLAS and descriptor bindings. Wait before tearing it down for live rebuilds.
-		mFrameBuffer->WaitForCommands(true);
+		WaitForCommandsTracked();
 	}
 
 	for (auto& chunk : mStaticMapScene.chunks)

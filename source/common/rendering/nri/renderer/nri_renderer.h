@@ -23,6 +23,52 @@ struct MapRecord;
 class NRIRenderer
 {
 public:
+	struct PerfShellTraceStats
+	{
+		double totalMs = 0.0;
+		double initResourcesMs = 0.0;
+		double mapWorldMs = 0.0;
+		double updateStateMs = 0.0;
+		double sceneSelectMs = 0.0;
+		double sceneLightsMs = 0.0;
+		double residentLightRefreshMs = 0.0;
+		double emissiveUpdateMs = 0.0;
+		double emissiveTlasMs = 0.0;
+		double surfaceProbeMs = 0.0;
+		double frameGraphMs = 0.0;
+		double otherMs = 0.0;
+		double staticSceneMs = 0.0;
+		double runtimeMutationMs = 0.0;
+		double runtimeSpaceLinkMs = 0.0;
+		double runtimeDebugSphereMs = 0.0;
+		double overlayAssembleMs = 0.0;
+		double dynamicCaptureMs = 0.0;
+		double persistentDynamicMs = 0.0;
+		double restoreStaticSceneMs = 0.0;
+		double copyFinalMs = 0.0;
+		uint32_t activePrimitiveCount = 0;
+		uint32_t dynamicPrimitiveCount = 0;
+		uint32_t activeMaterialCount = 0;
+		uint32_t sceneInstanceCount = 0;
+		bool usedStaticMapScene = false;
+		bool usedDynamicOverlay = false;
+		bool usedPersistentDynamicEmissiveCache = false;
+	};
+
+	struct PerfResourceTraceStats
+	{
+		uint32_t waitCalls = 0;
+		double waitMs = 0.0;
+		uint32_t growEvents = 0;
+		uint32_t overwriteEvents = 0;
+		uint32_t sceneUploadCalls = 0;
+		uint32_t sceneDataUploadCalls = 0;
+		uint32_t emissiveUploadCalls = 0;
+		uint64_t sceneUploadBytes = 0;
+		uint64_t sceneDataUploadBytes = 0;
+		uint64_t emissiveUploadBytes = 0;
+	};
+
 	explicit NRIRenderer(NRIRenderDevice* frameBuffer);
 	~NRIRenderer();
 
@@ -59,6 +105,8 @@ public:
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	bool RefreshPathTracingAvailability();
 	const char* GetAvailabilityReason() const;
+	const PerfShellTraceStats& GetLastPerfShellTraceStats() const { return mLastPerfShellTraceStats; }
+	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
 
 private:
 	enum class FrameTextureSlot : uint32_t
@@ -593,6 +641,9 @@ private:
 	bool UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors);
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
+	void ResetPerfTraceStats();
+	void WaitForCommandsTracked();
+	void NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth);
 	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) { return mFrameTextures[(size_t)slot]; }
 	const NRITextureResource& GetFrameTexture(FrameTextureSlot slot) const { return mFrameTextures[(size_t)slot]; }
 	nri::Pipeline* GetPipeline(PipelineSlot slot) const { return mPipelines[(size_t)slot]; }
@@ -662,6 +713,7 @@ private:
 	SceneBufferDebugStats mIndexBufferStats = { "Index" };
 	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };
 	SceneBufferDebugStats mMaterialBufferStats = { "Material" };
+	SceneBufferDebugStats mSceneInstanceBufferStats = { "SceneInstance" };
 	SceneBufferDebugStats mPortalBufferStats = { "Portal" };
 	SceneBufferDebugStats mRuntimeLightBufferStats = { "RuntimeLight" };
 	SceneBufferDebugStats mRuntimeLightTileHeaderBufferStats = { "RuntimeLightTileHeader" };
@@ -674,6 +726,8 @@ private:
 	SceneBufferDebugStats mSectorLightBufferStats = { "SectorLight" };
 	SceneBufferDebugStats mReprojectionBufferStats = { "Reprojection" };
 	SceneBufferDebugStats mVisibleChunkBufferStats = { "VisibleChunk" };
+	PerfShellTraceStats mLastPerfShellTraceStats = {};
+	PerfResourceTraceStats mLastPerfResourceTraceStats = {};
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;

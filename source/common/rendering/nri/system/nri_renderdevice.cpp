@@ -2335,6 +2335,58 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 
 	const bool rendered = mRenderer->RenderScene(di, drawmode, portal);
 	mLastFrameBoundaryStats.pathTracedSceneRendered = mLastFrameBoundaryStats.pathTracedSceneRendered || rendered;
+	if (rendered && PerfLoopTraceActive())
+	{
+		const auto& shell = mRenderer->GetLastPerfShellTraceStats();
+		const auto& resource = mRenderer->GetLastPerfResourceTraceStats();
+		Printf(
+			"PERF pt shell trace NRI: frame=%llu total=%.3f init=%.3f map=%.3f state=%.3f select=%.3f lights=%.3f resident=%.3f emissive=%.3f emissive_tlas=%.3f surface=%.3f graph=%.3f other=%.3f used_static=%d used_dynamic=%d persistent=%d prims=%u dyn_prims=%u mats=%u scene_instances=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.totalMs,
+			shell.initResourcesMs,
+			shell.mapWorldMs,
+			shell.updateStateMs,
+			shell.sceneSelectMs,
+			shell.sceneLightsMs,
+			shell.residentLightRefreshMs,
+			shell.emissiveUpdateMs,
+			shell.emissiveTlasMs,
+			shell.surfaceProbeMs,
+			shell.frameGraphMs,
+			shell.otherMs,
+			shell.usedStaticMapScene ? 1 : 0,
+			shell.usedDynamicOverlay ? 1 : 0,
+			shell.usedPersistentDynamicEmissiveCache ? 1 : 0,
+			shell.activePrimitiveCount,
+			shell.dynamicPrimitiveCount,
+			shell.activeMaterialCount,
+			shell.sceneInstanceCount);
+		Printf(
+			"PERF pt shell detail NRI: frame=%llu static_scene=%.3f mutation=%.3f spacelink=%.3f debug_sphere=%.3f overlay=%.3f dynamic_capture=%.3f persistent=%.3f restore_static=%.3f copy_final=%.3f\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.staticSceneMs,
+			shell.runtimeMutationMs,
+			shell.runtimeSpaceLinkMs,
+			shell.runtimeDebugSphereMs,
+			shell.overlayAssembleMs,
+			shell.dynamicCaptureMs,
+			shell.persistentDynamicMs,
+			shell.restoreStaticSceneMs,
+			shell.copyFinalMs);
+		Printf(
+			"PERF pt resource trace NRI: frame=%llu waits=%u wait_ms=%.3f grow=%u overwrite=%u scene_uploads=%u scene_bytes=%llu data_uploads=%u data_bytes=%llu emissive_uploads=%u emissive_bytes=%llu\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			resource.waitCalls,
+			resource.waitMs,
+			resource.growEvents,
+			resource.overwriteEvents,
+			resource.sceneUploadCalls,
+			(unsigned long long)resource.sceneUploadBytes,
+			resource.sceneDataUploadCalls,
+			(unsigned long long)resource.sceneDataUploadBytes,
+			resource.emissiveUploadCalls,
+			(unsigned long long)resource.emissiveUploadBytes);
+	}
 	return rendered;
 }
 
