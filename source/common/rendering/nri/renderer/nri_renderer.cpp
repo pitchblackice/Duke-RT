@@ -12,6 +12,8 @@
 #include "mapinfo.h"
 #include "printf.h"
 #include "gamestruct.h"
+#include "texinfo.h"
+#include "texturemanager.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -41,6 +43,29 @@ EXTERN_CVAR(Bool, vid_vsync)
 
 namespace
 {
+	static bool ResolveSurfaceProbeTextureDebugInfo(uint32_t textureId, FString& outTextureName, int32_t& outLegacyTile)
+	{
+		outTextureName = "(none)";
+		outLegacyTile = -1;
+		if (textureId == 0)
+		{
+			return false;
+		}
+
+		auto texture = TexMan.GameByIndex((int)textureId);
+		if (texture == nullptr)
+		{
+			return false;
+		}
+
+		outTextureName = texture->GetName();
+		if (textureId >= (uint32_t)firstarttile && textureId <= (uint32_t)(firstarttile + maxarttile))
+		{
+			outLegacyTile = legacyTileNum(FSetTextureID((int)textureId));
+		}
+		return true;
+	}
+
 	static void RefreshActiveFrameGenerationSwapChain()
 	{
 		if (screen != nullptr && screen->Backend() == 4)
@@ -4741,7 +4766,10 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		}
 	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	FString textureName;
+	int32_t legacyTile = -1;
+	ResolveSurfaceProbeTextureDebugInfo(result.textureId, textureName, legacyTile);
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(result.sceneOwner),
@@ -4768,6 +4796,8 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		result.primitiveIndex,
 		result.materialIndex,
 		result.textureId,
+		legacyTile,
+		textureName.GetChars(),
 		result.distance,
 		result.position[0], result.position[1], result.position[2],
 		result.normal[0], result.normal[1], result.normal[2],
