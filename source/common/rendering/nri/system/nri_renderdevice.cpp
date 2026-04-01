@@ -105,6 +105,8 @@ namespace
 	static constexpr int DefaultSwapChainTextureCount = 3;
 	static constexpr float DefaultPtTestLightRadius = 256.0f;
 	static constexpr float DefaultPtTestLightOffset = 64.0f;
+	static constexpr float DefaultPtTestSphereMetalness = 1.0f;
+	static constexpr float DefaultPtTestSphereRoughness = 0.05f;
 	static NRIRenderDevice* GetActiveNRIRenderDevice();
 
 	static void WorldToPathTracingPosition(const DVector3& worldPos, float out[3])
@@ -989,6 +991,96 @@ CCMD(nri_ptlightlist)
 	else
 	{
 		Printf("nri_ptlightlist is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptsphere)
+{
+	if (argv.argc() < 3)
+	{
+		Printf("nri_ptsphere <diameter> <distance> [metalness] [roughness]: spawns a PT debug sphere along camera forward.\n");
+		return;
+	}
+
+	auto* frameBuffer = GetActiveNRIRenderDevice();
+	if (frameBuffer == nullptr)
+	{
+		Printf("nri_ptsphere is only available while using the NRI renderer.\n");
+		return;
+	}
+
+	uint32_t sphereId = 0;
+	frameBuffer->SpawnPathTracingDebugSphere(
+		(float)atof(argv[1]),
+		(float)atof(argv[2]),
+		argv.argc() > 3 ? (float)atof(argv[3]) : DefaultPtTestSphereMetalness,
+		argv.argc() > 4 ? (float)atof(argv[4]) : DefaultPtTestSphereRoughness,
+		sphereId);
+}
+
+CCMD(nri_ptspherespawn)
+{
+	if (argv.argc() < 3)
+	{
+		Printf("nri_ptspherespawn <diameter> <distance> [metalness] [roughness]: spawns a PT debug sphere along camera forward.\n");
+		return;
+	}
+
+	auto* frameBuffer = GetActiveNRIRenderDevice();
+	if (frameBuffer == nullptr)
+	{
+		Printf("nri_ptspherespawn is only available while using the NRI renderer.\n");
+		return;
+	}
+
+	uint32_t sphereId = 0;
+	frameBuffer->SpawnPathTracingDebugSphere(
+		(float)atof(argv[1]),
+		(float)atof(argv[2]),
+		argv.argc() > 3 ? (float)atof(argv[3]) : DefaultPtTestSphereMetalness,
+		argv.argc() > 4 ? (float)atof(argv[4]) : DefaultPtTestSphereRoughness,
+		sphereId);
+}
+
+CCMD(nri_ptspherelist)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->PrintPathTracingDebugSpheres();
+	}
+	else
+	{
+		Printf("nri_ptspherelist is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptsphereclear)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->ClearPathTracingDebugSpheres();
+	}
+	else
+	{
+		Printf("nri_ptsphereclear is only available while using the NRI renderer.\n");
+	}
+}
+
+CCMD(nri_ptsphereremove)
+{
+	if (argv.argc() < 2)
+	{
+		Printf("nri_ptsphereremove <id>: removes a PT debug sphere by id.\n");
+		return;
+	}
+
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->RemovePathTracingDebugSphere((uint32_t)atoi(argv[1]));
+	}
+	else
+	{
+		Printf("nri_ptsphereremove is only available while using the NRI renderer.\n");
 	}
 }
 
@@ -2903,6 +2995,131 @@ void NRIRenderDevice::PrintPathTracingPointLights() const
 	}
 
 	mRenderer->PrintRuntimePointLights();
+}
+
+bool NRIRenderDevice::SpawnPathTracingDebugSphere(float diameter, float distance, float metalness, float roughness, uint32_t& outId)
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT debug spheres are unavailable because the renderer is not initialized.\n");
+		return false;
+	}
+
+	if (!mRenderer->IsPathTracingSupported())
+	{
+		Printf("NRI PT debug spheres are unavailable because path tracing is not active (%s).\n", mRenderer->GetAvailabilityReason());
+		return false;
+	}
+
+	if (netgame)
+	{
+		Printf("nri_ptsphere cannot be used in multiplayer.\n");
+		return false;
+	}
+
+	if (gamestate != GS_LEVEL)
+	{
+		Printf("nri_ptsphere: must be in a level.\n");
+		return false;
+	}
+
+	DCorePlayer* player = PlayerArray[myconnectindex];
+	if (player == nullptr)
+	{
+		Printf("nri_ptsphere: no local player is available.\n");
+		return false;
+	}
+
+	DCoreActor* actor = player->GetActor();
+	if (actor == nullptr)
+	{
+		Printf("nri_ptsphere: local player actor is unavailable.\n");
+		return false;
+	}
+
+	if (diameter <= 0.0f)
+	{
+		Printf("nri_ptsphere: diameter must be > 0.\n");
+		return false;
+	}
+
+	if (distance < 0.0f)
+	{
+		Printf("nri_ptsphere: distance must be >= 0.\n");
+		return false;
+	}
+
+	const float clampedMetalness = clamp(metalness, 0.0f, 1.0f);
+	const float clampedRoughness = clamp(roughness, 0.0f, 1.0f);
+	const DRotator viewRotation(
+		player->getPitchWithView(),
+		actor->spr.Angles.Yaw + player->ViewAngles.Yaw,
+		actor->spr.Angles.Roll + player->ViewAngles.Roll);
+	const DVector3 forward(viewRotation);
+	const DVector3 spawnPosition = actor->getPosWithOffsetZ() + forward * distance;
+	float renderPosition[3] = {};
+	WorldToPathTracingPosition(spawnPosition, renderPosition);
+	if (!mRenderer->AddRuntimeDebugSphere(renderPosition, diameter, clampedMetalness, clampedRoughness, outId))
+	{
+		Printf("nri_ptsphere: failed to add PT debug sphere. active=%u limit=64\n", mRenderer->GetRuntimeDebugSphereCount());
+		return false;
+	}
+
+	Printf("NRI PT debug sphere spawned: id=%u world_pos=(%.3f, %.3f, %.3f) render_pos=(%.3f, %.3f, %.3f) diameter=%.3f metalness=%.3f roughness=%.3f distance=%.3f\n",
+		outId,
+		spawnPosition.X,
+		spawnPosition.Y,
+		spawnPosition.Z,
+		renderPosition[0],
+		renderPosition[1],
+		renderPosition[2],
+		diameter,
+		clampedMetalness,
+		clampedRoughness,
+		distance);
+	return true;
+}
+
+bool NRIRenderDevice::RemovePathTracingDebugSphere(uint32_t id)
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT debug spheres are unavailable because the renderer is not initialized.\n");
+		return false;
+	}
+
+	if (!mRenderer->RemoveRuntimeDebugSphere(id))
+	{
+		Printf("nri_ptsphereremove: no PT debug sphere with id=%u.\n", id);
+		return false;
+	}
+
+	Printf("NRI PT debug sphere removed: id=%u remaining=%u\n", id, mRenderer->GetRuntimeDebugSphereCount());
+	return true;
+}
+
+void NRIRenderDevice::ClearPathTracingDebugSpheres()
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT debug spheres are unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	const uint32_t clearedCount = mRenderer->GetRuntimeDebugSphereCount();
+	mRenderer->ClearRuntimeDebugSpheres();
+	Printf("NRI PT debug spheres cleared: count=%u\n", clearedCount);
+}
+
+void NRIRenderDevice::PrintPathTracingDebugSpheres() const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT debug spheres are unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintRuntimeDebugSpheres();
 }
 
 bool NRIRenderDevice::AddPathTracingSpriteTileLightHeuristic(uint32_t textureId, float red, float green, float blue, float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId)

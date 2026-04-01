@@ -28,6 +28,7 @@ enum class SurfaceSourceType : uint32_t
 	MapFloorSection,
 	MapCeilingSection,
 	MapPortalSurface,
+	DebugSphere,
 };
 
 enum MaterialFlags : uint32_t

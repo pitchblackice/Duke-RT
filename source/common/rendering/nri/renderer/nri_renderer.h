@@ -39,6 +39,11 @@ public:
 	void PrintRuntimePointLights() const;
 	void PrintRuntimeLightClusterStatus() const;
 	uint32_t GetRuntimePointLightCount() const;
+	bool AddRuntimeDebugSphere(const float center[3], float diameter, float metalness, float roughness, uint32_t& outId);
+	bool RemoveRuntimeDebugSphere(uint32_t id);
+	void ClearRuntimeDebugSpheres();
+	void PrintRuntimeDebugSpheres() const;
+	uint32_t GetRuntimeDebugSphereCount() const;
 	bool AddSpriteTileLightHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
 	void ClearSpriteTileLightHeuristics();
 	void PrintSpriteTileLightHeuristics() const;
@@ -190,6 +195,15 @@ private:
 		float radius = 0.0f;
 		float color[3] = { 1.0f, 1.0f, 1.0f };
 		float intensity = 1.0f;
+	};
+
+	struct RuntimeDebugSphere
+	{
+		uint32_t id = 0;
+		float center[3] = {};
+		float diameter = 0.0f;
+		float metalness = 1.0f;
+		float roughness = 0.05f;
 	};
 
 	struct RuntimeLightTileHeaderGpuData
@@ -524,6 +538,7 @@ private:
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;
+	bool BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials) const;
 	void RefreshSceneLightSystem(
 		bool usedStaticMapScene,
 		const nri_scene::SceneView* capturedSceneView,
@@ -781,6 +796,8 @@ private:
 	uint32_t mBoundSectorLightDominantSector = UINT32_MAX;
 	float mBoundSectorLightDominantContribution = 0.0f;
 	uint32_t mNextRuntimePointLightId = 1;
+	std::vector<RuntimeDebugSphere> mRuntimeDebugSpheres;
+	uint32_t mNextRuntimeDebugSphereId = 1;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastDebugMode = -1;

@@ -68,6 +68,10 @@ public:
 	bool RemovePathTracingPointLight(uint32_t id);
 	void ClearPathTracingPointLights();
 	void PrintPathTracingPointLights() const;
+	bool SpawnPathTracingDebugSphere(float diameter, float distance, float metalness, float roughness, uint32_t& outId);
+	bool RemovePathTracingDebugSphere(uint32_t id);
+	void ClearPathTracingDebugSpheres();
+	void PrintPathTracingDebugSpheres() const;
 	bool AddPathTracingSpriteTileLightHeuristic(uint32_t textureId, float red, float green, float blue, float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
 	void ClearPathTracingLightHeuristics();
 	void PrintPathTracingLightHeuristics() const;
