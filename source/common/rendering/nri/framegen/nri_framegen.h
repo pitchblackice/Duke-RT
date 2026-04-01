@@ -126,6 +126,14 @@ struct NRIFrameGenerationFrameDesc
 	float previousViewToClip[16] = {};
 	float currentWorldToView[16] = {};
 	float previousWorldToView[16] = {};
+	float cameraPosition[3] = {};
+	float cameraForward[3] = {};
+	float cameraRight[3] = {};
+	float cameraUp[3] = {};
+	float cameraNear = 0.0f;
+	float cameraFar = 0.0f;
+	float cameraFovVerticalRadians = 0.0f;
+	float viewSpaceToMetersFactor = 0.0f;
 };
 
 struct NRIFrameGenerationInputAudit
@@ -167,6 +175,38 @@ struct NRIFrameGenerationLowLatencyState
 	nri::LatencyReport latencyReport = {};
 };
 
+struct NRIFrameGenerationProviderState
+{
+	bool runtimeLoaded = false;
+	bool runtimeFunctionsLoaded = false;
+	bool contextCreated = false;
+	bool debugConfigured = false;
+	bool configuredThisFrame = false;
+	bool prepareDispatchedThisFrame = false;
+	bool prepareCameraInfoProvided = false;
+	bool noSwapChainNotify = true;
+	bool memoryUsageValid = false;
+	bool contextDimensionsValid = false;
+	uint32_t contextDisplayWidth = 0;
+	uint32_t contextDisplayHeight = 0;
+	uint32_t contextRenderWidth = 0;
+	uint32_t contextRenderHeight = 0;
+	uint64_t lastConfiguredFrameId = 0;
+	uint64_t lastPreparedFrameId = 0;
+	uint64_t configureCount = 0;
+	uint64_t prepareCount = 0;
+	uint64_t totalUsageBytes = 0;
+	uint64_t aliasableUsageBytes = 0;
+	uint32_t lastCreateResult = 0;
+	uint32_t lastDestroyResult = 0;
+	uint32_t lastConfigureResult = 0;
+	uint32_t lastPrepareResult = 0;
+	uint32_t lastQueryResult = 0;
+	char runtimeLibrary[64] = "unloaded";
+	char providerVersion[64] = "unknown";
+	char lastStatusReason[96] = "not-loaded";
+};
+
 class NRIFrameGenerationContext
 {
 public:
@@ -182,13 +222,14 @@ public:
 	void OnRenderSubmitEnd(const NRIRenderDevice& frameBuffer);
 	void OnPresentStart(const NRIRenderDevice& frameBuffer);
 	void OnPresentEnd(const NRIRenderDevice& frameBuffer, nri::Result presentResult);
-	void SetFrameDesc(const NRIFrameGenerationFrameDesc& desc);
+	void SetFrameDesc(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationFrameDesc& desc);
 	void SetUiTexture(const NRITextureResource* uiTexture);
 
 	const NRIFrameGenerationPolicy& GetPolicy() const { return mPolicy; }
 	const NRIFrameGenerationFrameDesc& GetFrameDesc() const { return mLastFrameDesc; }
 	const NRIFrameGenerationInputAudit& GetInputAudit() const { return mLastInputAudit; }
 	const NRIFrameGenerationLowLatencyState& GetLowLatencyState() const { return mLowLatencyState; }
+	const NRIFrameGenerationProviderState& GetProviderState() const { return mProviderState; }
 	bool HasFrameDesc() const { return mHasFrameDesc; }
 
 	static const char* GetProviderName(NRIFrameGenerationProvider provider);
@@ -200,6 +241,7 @@ public:
 	static const char* GetAdapterRequirementName(NRIFrameGenerationAdapterRequirement requirement);
 	static const char* GetWindowModeName(bool fullscreen);
 	static const char* GetAvailabilityName(bool available);
+	static const char* GetProviderReturnCodeName(uint32_t result);
 
 private:
 	NRIFrameGenerationPolicy BuildPolicy(const NRIRenderDevice& frameBuffer) const;
@@ -208,6 +250,11 @@ private:
 	void ConfigureLowLatencyMode(const NRIRenderDevice& frameBuffer);
 	void SetLowLatencyMarker(const NRIRenderDevice& frameBuffer, nri::LatencyMarker marker, nri::Result& resultSlot);
 	void ResetLowLatencyState();
+	void ResetProviderState();
+	void ShutdownProvider();
+	bool EnsureProviderRuntime(const NRIRenderDevice& frameBuffer);
+	bool EnsureProviderContext(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationFrameDesc& desc);
+	void ConfigureAndPrepareProvider(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationFrameDesc& desc);
 
 	bool mInitialized = false;
 	bool mSwapChainReady = false;
@@ -217,4 +264,14 @@ private:
 	NRIFrameGenerationFrameDesc mLastFrameDesc = {};
 	NRIFrameGenerationInputAudit mLastInputAudit = {};
 	NRIFrameGenerationLowLatencyState mLowLatencyState = {};
+	NRIFrameGenerationProviderState mProviderState = {};
+
+	void* mFfxModule = nullptr;
+	void* mFfxContext = nullptr;
+	void* mFfxCreateContextFn = nullptr;
+	void* mFfxDestroyContextFn = nullptr;
+	void* mFfxConfigureFn = nullptr;
+	void* mFfxQueryFn = nullptr;
+	void* mFfxDispatchFn = nullptr;
+	void* mFfxAllocCallbacks = nullptr;
 };

@@ -1,19 +1,174 @@
 #include "nri_framegen.h"
+#include "nri_ffx_api.h"
 
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
 #include "printf.h"
 
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <iterator>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 EXTERN_CVAR(Bool, nri_framegen)
 EXTERN_CVAR(Int, nri_framegenprovider)
 EXTERN_CVAR(Int, nri_framegenui)
 EXTERN_CVAR(Bool, nri_framegenasync)
 EXTERN_CVAR(Bool, nri_framegenlatency)
+EXTERN_CVAR(Bool, nri_validation)
 
 namespace
 {
+#ifdef _WIN32
+	struct NriFfxFunctionTable
+	{
+		PfnFfxCreateContext createContext = nullptr;
+		PfnFfxDestroyContext destroyContext = nullptr;
+		PfnFfxConfigure configure = nullptr;
+		PfnFfxQuery query = nullptr;
+		PfnFfxDispatch dispatch = nullptr;
+	};
+
+	static void* NriFfxAlloc(void*, uint64_t size)
+	{
+		return std::malloc((size_t)size);
+	}
+
+	static void NriFfxDealloc(void*, void* memory)
+	{
+		std::free(memory);
+	}
+
+	static const char* GetFfxLibraryName(NRIFrameGenerationProvider provider)
+	{
+		switch (provider)
+		{
+		default:
+		case NRIFrameGenerationProvider::Off:
+			return "";
+		case NRIFrameGenerationProvider::FSR3:
+			return "amd_fidelityfx_dx12.dll";
+		}
+	}
+
+	static const char* GetFfxReturnCodeName(uint32_t result)
+	{
+		switch (result)
+		{
+		default: return "unknown";
+		case NRI_FFX_API_RETURN_OK: return "ok";
+		case NRI_FFX_API_RETURN_ERROR: return "error";
+		case NRI_FFX_API_RETURN_ERROR_UNKNOWN_DESCTYPE: return "unknown-desctype";
+		case NRI_FFX_API_RETURN_ERROR_RUNTIME_ERROR: return "runtime-error";
+		case NRI_FFX_API_RETURN_NO_PROVIDER: return "no-provider";
+		case NRI_FFX_API_RETURN_ERROR_MEMORY: return "memory-error";
+		case NRI_FFX_API_RETURN_ERROR_PARAMETER: return "parameter-error";
+		}
+	}
+
+	static D3D12_RESOURCE_STATES ConvertNriStateToD3D12State(const nri::AccessLayoutStage& state)
+	{
+		switch (state.layout)
+		{
+		case nri::Layout::COPY_DESTINATION:
+			return D3D12_RESOURCE_STATE_COPY_DEST;
+		case nri::Layout::COPY_SOURCE:
+			return D3D12_RESOURCE_STATE_COPY_SOURCE;
+		case nri::Layout::COLOR_ATTACHMENT:
+			return D3D12_RESOURCE_STATE_RENDER_TARGET;
+		case nri::Layout::SHADER_RESOURCE_STORAGE:
+			return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+		case nri::Layout::PRESENT:
+			return D3D12_RESOURCE_STATE_PRESENT;
+		case nri::Layout::SHADER_RESOURCE:
+			return D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		default:
+			break;
+		}
+
+		if ((state.access & nri::AccessBits::COPY_DESTINATION) != 0)
+			return D3D12_RESOURCE_STATE_COPY_DEST;
+		if ((state.access & nri::AccessBits::COPY_SOURCE) != 0)
+			return D3D12_RESOURCE_STATE_COPY_SOURCE;
+		if ((state.access & nri::AccessBits::COLOR_ATTACHMENT) != 0)
+			return D3D12_RESOURCE_STATE_RENDER_TARGET;
+		if ((state.access & nri::AccessBits::SHADER_RESOURCE_STORAGE) != 0)
+			return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+		if ((state.access & nri::AccessBits::SHADER_RESOURCE) != 0)
+			return D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		return D3D12_RESOURCE_STATE_COMMON;
+	}
+
+	static ID3D12Resource* GetNativeTexture(const nri::CoreInterface& core, const NRITextureResource* texture)
+	{
+		if (texture == nullptr || texture->texture == nullptr || core.GetTextureNativeObject == nullptr)
+			return nullptr;
+		return reinterpret_cast<ID3D12Resource*>(core.GetTextureNativeObject(texture->texture));
+	}
+
+	static void* GetNativeCommandList(const nri::CoreInterface& core, nri::CommandBuffer* commandBuffer)
+	{
+		if (commandBuffer == nullptr || core.GetCommandBufferNativeObject == nullptr)
+			return nullptr;
+		return core.GetCommandBufferNativeObject(commandBuffer);
+	}
+
+	static FfxApiResource GetFfxTextureResource(const nri::CoreInterface& core, const NRITextureResource* texture)
+	{
+		ID3D12Resource* nativeTexture = GetNativeTexture(core, texture);
+		const D3D12_RESOURCE_STATES state = texture != nullptr ? ConvertNriStateToD3D12State(texture->state) : D3D12_RESOURCE_STATE_COMMON;
+		return NriFfxGetResourceDX12(nativeTexture, NriFfxGetResourceStateFromDx12State(state));
+	}
+
+	static uint32_t GetFfxCreateFlags(const NRIFrameGenerationPolicy& policy, const NRIFrameGenerationFrameDesc& desc, bool enableDebugChecking)
+	{
+		uint32_t flags = 0;
+		if (policy.requestedAsync)
+			flags |= NRI_FFX_FRAMEGENERATION_ENABLE_ASYNC_WORKLOAD_SUPPORT;
+		if (desc.motionVectors != nullptr && desc.motionVectors->width == desc.outputWidth && desc.motionVectors->height == desc.outputHeight)
+			flags |= NRI_FFX_FRAMEGENERATION_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS;
+		if (desc.depthInverted)
+			flags |= NRI_FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED;
+		if (desc.depthInfinite)
+			flags |= NRI_FFX_FRAMEGENERATION_ENABLE_DEPTH_INFINITE;
+		if (enableDebugChecking)
+			flags |= NRI_FFX_FRAMEGENERATION_ENABLE_DEBUG_CHECKING;
+		return flags;
+	}
+
+	static void NriFfxMessageCallback(uint32_t type, const wchar_t* message)
+	{
+		if (message == nullptr)
+			return;
+
+		char narrow[1024] = {};
+		const int converted = WideCharToMultiByte(CP_UTF8, 0, message, -1, narrow, (int)std::size(narrow), nullptr, nullptr);
+		if (converted <= 0)
+		{
+			Printf("NRI FFX framegen: [%u] <failed to convert message>\n", type);
+			return;
+		}
+
+		Printf("NRI FFX framegen: type=%u msg=%s\n", type, narrow);
+	}
+
+	static void CopyString(char* destination, size_t destinationSize, const char* source)
+	{
+		if (destination == nullptr || destinationSize == 0u)
+			return;
+
+		if (source == nullptr)
+			source = "";
+
+		std::strncpy(destination, source, destinationSize - 1u);
+		destination[destinationSize - 1u] = '\0';
+	}
+#endif
+
 	static const char* GetApiName(nri::GraphicsAPI api)
 	{
 		switch (api)
@@ -183,16 +338,29 @@ const char* NRIFrameGenerationContext::GetAvailabilityName(bool available)
 	return available ? "yes" : "no";
 }
 
+const char* NRIFrameGenerationContext::GetProviderReturnCodeName(uint32_t result)
+{
+#ifdef _WIN32
+	return GetFfxReturnCodeName(result);
+#else
+	(void)result;
+	return "unsupported";
+#endif
+}
+
 void NRIFrameGenerationContext::Initialize(const NRIRenderDevice& frameBuffer)
 {
 	mInitialized = true;
 	mSwapChainReady = frameBuffer.mSwapChain != nullptr;
 	ResetLowLatencyState();
+	ResetProviderState();
+	EnsureProviderRuntime(frameBuffer);
 	RefreshPolicy(frameBuffer, true);
 }
 
 void NRIFrameGenerationContext::Shutdown()
 {
+	ShutdownProvider();
 	mInitialized = false;
 	mSwapChainReady = false;
 	mHasFrameDesc = false;
@@ -201,6 +369,7 @@ void NRIFrameGenerationContext::Shutdown()
 	mLastFrameDesc = {};
 	mLastInputAudit = {};
 	ResetLowLatencyState();
+	ResetProviderState();
 }
 
 void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer, bool logChanges)
@@ -281,7 +450,7 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 		policy.waitableSwapChainAvailable = !!deviceDesc.features.waitableSwapChain;
 	}
 	policy.shaderModelSupported = frameBuffer.mDevice != nullptr && policy.shaderModel >= 62u;
-	policy.providerRuntimeSupported = false;
+	policy.providerRuntimeSupported = mProviderState.runtimeFunctionsLoaded;
 	policy.asyncWorkloadAvailable = false;
 	policy.resolvedAsync = false;
 	policy.resolvedLowLatency =
@@ -381,6 +550,7 @@ void NRIFrameGenerationContext::OnSwapChainCreated(const NRIRenderDevice& frameB
 {
 	mSwapChainReady = true;
 	ResetLowLatencyState();
+	EnsureProviderRuntime(frameBuffer);
 	RefreshPolicy(frameBuffer, false);
 	ConfigureLowLatencyMode(frameBuffer);
 	RefreshPolicy(frameBuffer, true);
@@ -395,6 +565,7 @@ void NRIFrameGenerationContext::OnSwapChainDestroyed(const NRIRenderDevice& fram
 
 void NRIFrameGenerationContext::BeginFrame(const NRIRenderDevice& frameBuffer)
 {
+	EnsureProviderRuntime(frameBuffer);
 	RefreshPolicy(frameBuffer, true);
 	mLowLatencyState.sleepInvoked = false;
 	mLowLatencyState.presentBoundarySeen = false;
@@ -405,6 +576,9 @@ void NRIFrameGenerationContext::BeginFrame(const NRIRenderDevice& frameBuffer)
 	mLowLatencyState.renderSubmitEndMarkerResult = nri::Result::FAILURE;
 	mLowLatencyState.latencyReportResult = nri::Result::FAILURE;
 	mLowLatencyState.latencyReport = {};
+	mProviderState.configuredThisFrame = false;
+	mProviderState.prepareDispatchedThisFrame = false;
+	mProviderState.prepareCameraInfoProvided = false;
 	ConfigureLowLatencyMode(frameBuffer);
 	if (!IsLowLatencyOperational(frameBuffer))
 	{
@@ -429,11 +603,12 @@ void NRIFrameGenerationContext::EndFrame(const NRIRenderDevice& frameBuffer)
 	RefreshPolicy(frameBuffer, false);
 }
 
-void NRIFrameGenerationContext::SetFrameDesc(const NRIFrameGenerationFrameDesc& desc)
+void NRIFrameGenerationContext::SetFrameDesc(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationFrameDesc& desc)
 {
 	mLastFrameDesc = desc;
 	mLastInputAudit = BuildInputAudit(desc);
 	mHasFrameDesc = true;
+	ConfigureAndPrepareProvider(frameBuffer, desc);
 }
 
 void NRIFrameGenerationContext::SetUiTexture(const NRITextureResource* uiTexture)
@@ -599,4 +774,416 @@ void NRIFrameGenerationContext::SetLowLatencyMarker(const NRIRenderDevice& frame
 void NRIFrameGenerationContext::ResetLowLatencyState()
 {
 	mLowLatencyState = {};
+}
+
+void NRIFrameGenerationContext::ResetProviderState()
+{
+	mProviderState = {};
+	mProviderState.noSwapChainNotify = true;
+	std::strncpy(mProviderState.runtimeLibrary, "unloaded", std::size(mProviderState.runtimeLibrary) - 1u);
+	std::strncpy(mProviderState.providerVersion, "unknown", std::size(mProviderState.providerVersion) - 1u);
+	std::strncpy(mProviderState.lastStatusReason, "not-loaded", std::size(mProviderState.lastStatusReason) - 1u);
+	mProviderState.runtimeLibrary[std::size(mProviderState.runtimeLibrary) - 1u] = '\0';
+	mProviderState.providerVersion[std::size(mProviderState.providerVersion) - 1u] = '\0';
+	mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+}
+
+void NRIFrameGenerationContext::ShutdownProvider()
+{
+#ifdef _WIN32
+	const auto destroyContext = reinterpret_cast<PfnFfxDestroyContext>(mFfxDestroyContextFn);
+	const auto allocationCallbacks = reinterpret_cast<ffxAllocationCallbacks*>(mFfxAllocCallbacks);
+	if (mFfxContext != nullptr && destroyContext != nullptr)
+	{
+		ffxContext context = mFfxContext;
+		mProviderState.lastDestroyResult = destroyContext(&context, allocationCallbacks);
+		mFfxContext = context;
+	}
+	else
+	{
+		mProviderState.lastDestroyResult = NRI_FFX_API_RETURN_OK;
+	}
+
+	if (allocationCallbacks != nullptr)
+	{
+		delete allocationCallbacks;
+		mFfxAllocCallbacks = nullptr;
+	}
+
+	if (mFfxModule != nullptr)
+	{
+		FreeLibrary(reinterpret_cast<HMODULE>(mFfxModule));
+		mFfxModule = nullptr;
+	}
+#endif
+
+	mFfxContext = nullptr;
+	mFfxCreateContextFn = nullptr;
+	mFfxDestroyContextFn = nullptr;
+	mFfxConfigureFn = nullptr;
+	mFfxQueryFn = nullptr;
+	mFfxDispatchFn = nullptr;
+	ResetProviderState();
+	std::strncpy(mProviderState.lastStatusReason, "shutdown", std::size(mProviderState.lastStatusReason) - 1u);
+	mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+}
+
+bool NRIFrameGenerationContext::EnsureProviderRuntime(const NRIRenderDevice& frameBuffer)
+{
+#ifndef _WIN32
+	(void)frameBuffer;
+	std::strncpy(mProviderState.lastStatusReason, "win32-only", std::size(mProviderState.lastStatusReason) - 1u);
+	mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+	return false;
+#else
+	if (GetRequestedProvider() != NRIFrameGenerationProvider::FSR3)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "provider-not-requested", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return false;
+	}
+
+	if (frameBuffer.GetSelectedAPI() != nri::GraphicsAPI::D3D12)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "api-not-d3d12", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return false;
+	}
+
+	if (mProviderState.runtimeFunctionsLoaded)
+	{
+		return true;
+	}
+
+	const char* libraryName = GetFfxLibraryName(NRIFrameGenerationProvider::FSR3);
+	CopyString(mProviderState.runtimeLibrary, std::size(mProviderState.runtimeLibrary), libraryName);
+
+	if (mFfxModule == nullptr)
+	{
+		mFfxModule = LoadLibraryA(libraryName);
+		if (mFfxModule == nullptr)
+		{
+			mProviderState.runtimeLoaded = false;
+			mProviderState.runtimeFunctionsLoaded = false;
+			std::strncpy(mProviderState.lastStatusReason, "runtime-dll-missing", std::size(mProviderState.lastStatusReason) - 1u);
+			mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+			return false;
+		}
+
+		mProviderState.runtimeLoaded = true;
+	}
+
+	if (mFfxAllocCallbacks == nullptr)
+	{
+		auto* allocationCallbacks = new ffxAllocationCallbacks{};
+		allocationCallbacks->pUserData = nullptr;
+		allocationCallbacks->alloc = &NriFfxAlloc;
+		allocationCallbacks->dealloc = &NriFfxDealloc;
+		mFfxAllocCallbacks = allocationCallbacks;
+	}
+
+	mFfxCreateContextFn = reinterpret_cast<void*>(GetProcAddress(reinterpret_cast<HMODULE>(mFfxModule), "ffxCreateContext"));
+	mFfxDestroyContextFn = reinterpret_cast<void*>(GetProcAddress(reinterpret_cast<HMODULE>(mFfxModule), "ffxDestroyContext"));
+	mFfxConfigureFn = reinterpret_cast<void*>(GetProcAddress(reinterpret_cast<HMODULE>(mFfxModule), "ffxConfigure"));
+	mFfxQueryFn = reinterpret_cast<void*>(GetProcAddress(reinterpret_cast<HMODULE>(mFfxModule), "ffxQuery"));
+	mFfxDispatchFn = reinterpret_cast<void*>(GetProcAddress(reinterpret_cast<HMODULE>(mFfxModule), "ffxDispatch"));
+
+	mProviderState.runtimeFunctionsLoaded =
+		mFfxCreateContextFn != nullptr &&
+		mFfxDestroyContextFn != nullptr &&
+		mFfxConfigureFn != nullptr &&
+		mFfxQueryFn != nullptr &&
+		mFfxDispatchFn != nullptr;
+
+	if (!mProviderState.runtimeFunctionsLoaded)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "runtime-symbol-missing", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return false;
+	}
+
+	std::strncpy(mProviderState.lastStatusReason, "runtime-loaded", std::size(mProviderState.lastStatusReason) - 1u);
+	mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+	return true;
+#endif
+}
+
+bool NRIFrameGenerationContext::EnsureProviderContext(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationFrameDesc& desc)
+{
+#ifndef _WIN32
+	(void)frameBuffer;
+	(void)desc;
+	return false;
+#else
+	if (!EnsureProviderRuntime(frameBuffer))
+	{
+		return false;
+	}
+
+	if (frameBuffer.GetNativeD3D12Device() == nullptr)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "native-device-unavailable", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return false;
+	}
+
+	if (desc.outputWidth == 0u || desc.outputHeight == 0u || desc.renderWidth == 0u || desc.renderHeight == 0u)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "invalid-dimensions", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return false;
+	}
+
+	ID3D12Resource* nativeHudlessColor = GetNativeTexture(frameBuffer.mCore, desc.hudlessColor);
+	if (nativeHudlessColor == nullptr)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "hudless-color-unavailable", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return false;
+	}
+
+	const D3D12_RESOURCE_DESC hudlessDesc = nativeHudlessColor->GetDesc();
+	const uint32_t backBufferFormat = NriFfxGetSurfaceFormatDX12(hudlessDesc.Format);
+	if (backBufferFormat == NRI_FFX_API_SURFACE_FORMAT_UNKNOWN)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "unsupported-backbuffer-format", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return false;
+	}
+
+	const bool dimensionsChanged =
+		mProviderState.contextCreated &&
+		(mProviderState.contextDisplayWidth != desc.outputWidth ||
+		 mProviderState.contextDisplayHeight != desc.outputHeight ||
+		 mProviderState.contextRenderWidth != desc.renderWidth ||
+		 mProviderState.contextRenderHeight != desc.renderHeight);
+	if (dimensionsChanged)
+	{
+		const auto destroyContext = reinterpret_cast<PfnFfxDestroyContext>(mFfxDestroyContextFn);
+		const auto allocationCallbacks = reinterpret_cast<ffxAllocationCallbacks*>(mFfxAllocCallbacks);
+		if (destroyContext != nullptr && mFfxContext != nullptr)
+		{
+			ffxContext context = mFfxContext;
+			mProviderState.lastDestroyResult = destroyContext(&context, allocationCallbacks);
+			mFfxContext = nullptr;
+		}
+		mProviderState.contextCreated = false;
+		mProviderState.contextDimensionsValid = false;
+		mProviderState.debugConfigured = false;
+		mProviderState.configuredThisFrame = false;
+		mProviderState.prepareDispatchedThisFrame = false;
+		mProviderState.prepareCameraInfoProvided = false;
+		mProviderState.memoryUsageValid = false;
+		mProviderState.totalUsageBytes = 0;
+		mProviderState.aliasableUsageBytes = 0;
+		std::strncpy(mProviderState.lastStatusReason, "context-recreate-pending", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+	}
+
+	if (mProviderState.contextCreated)
+	{
+		return true;
+	}
+
+	ffxCreateBackendDX12Desc backendDesc = {};
+	NriFfxInitHeader(backendDesc.header, NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12);
+	backendDesc.device = frameBuffer.GetNativeD3D12Device();
+
+	ffxCreateContextDescFrameGeneration createDesc = {};
+	NriFfxInitHeader(createDesc.header, NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION);
+	createDesc.flags = GetFfxCreateFlags(mPolicy, desc, !!nri_validation);
+	createDesc.displaySize = { desc.outputWidth, desc.outputHeight };
+	createDesc.maxRenderSize = { desc.renderWidth, desc.renderHeight };
+	createDesc.backBufferFormat = backBufferFormat;
+
+	ffxCreateContextDescFrameGenerationHudless hudlessFormatDesc = {};
+	NriFfxInitHeader(hudlessFormatDesc.header, NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_HUDLESS);
+	hudlessFormatDesc.hudlessBackBufferFormat = backBufferFormat;
+
+	createDesc.header.pNext = &hudlessFormatDesc.header;
+	hudlessFormatDesc.header.pNext = &backendDesc.header;
+
+	const auto createContext = reinterpret_cast<PfnFfxCreateContext>(mFfxCreateContextFn);
+	const auto configure = reinterpret_cast<PfnFfxConfigure>(mFfxConfigureFn);
+	const auto query = reinterpret_cast<PfnFfxQuery>(mFfxQueryFn);
+	const auto allocationCallbacks = reinterpret_cast<ffxAllocationCallbacks*>(mFfxAllocCallbacks);
+
+	ffxContext context = nullptr;
+	mProviderState.lastCreateResult = createContext(&context, &createDesc.header, allocationCallbacks);
+	if (mProviderState.lastCreateResult != NRI_FFX_API_RETURN_OK)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "context-create-failed", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return false;
+	}
+
+	mFfxContext = context;
+	mProviderState.contextCreated = true;
+	mProviderState.contextDimensionsValid = true;
+	mProviderState.contextDisplayWidth = desc.outputWidth;
+	mProviderState.contextDisplayHeight = desc.outputHeight;
+	mProviderState.contextRenderWidth = desc.renderWidth;
+	mProviderState.contextRenderHeight = desc.renderHeight;
+
+	if (nri_validation)
+	{
+		ffxConfigureDescGlobalDebug1 debugDesc = {};
+		NriFfxInitHeader(debugDesc.header, NRI_FFX_API_CONFIGURE_DESC_TYPE_GLOBALDEBUG1);
+		debugDesc.fpMessage = &NriFfxMessageCallback;
+		debugDesc.debugLevel = NRI_FFX_API_CONFIGURE_GLOBALDEBUG_LEVEL_WARNINGS;
+		mProviderState.debugConfigured = configure(reinterpret_cast<ffxContext*>(&mFfxContext), &debugDesc.header) == NRI_FFX_API_RETURN_OK;
+	}
+	else
+	{
+		mProviderState.debugConfigured = false;
+	}
+
+	ffxQueryGetProviderVersion versionQuery = {};
+	NriFfxInitHeader(versionQuery.header, NRI_FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION);
+	mProviderState.lastQueryResult = query(reinterpret_cast<ffxContext*>(&mFfxContext), &versionQuery.header);
+	if (mProviderState.lastQueryResult == NRI_FFX_API_RETURN_OK && versionQuery.versionName != nullptr)
+	{
+		CopyString(mProviderState.providerVersion, std::size(mProviderState.providerVersion), versionQuery.versionName);
+	}
+
+	FfxApiEffectMemoryUsage memoryUsage = {};
+	ffxQueryDescFrameGenerationGetGPUMemoryUsage memoryQuery = {};
+	NriFfxInitHeader(memoryQuery.header, NRI_FFX_API_QUERY_DESC_TYPE_FRAMEGENERATION_GPU_MEMORY_USAGE);
+	memoryQuery.gpuMemoryUsageFrameGeneration = &memoryUsage;
+	mProviderState.lastQueryResult = query(reinterpret_cast<ffxContext*>(&mFfxContext), &memoryQuery.header);
+	if (mProviderState.lastQueryResult == NRI_FFX_API_RETURN_OK)
+	{
+		mProviderState.memoryUsageValid = true;
+		mProviderState.totalUsageBytes = memoryUsage.totalUsageInBytes;
+		mProviderState.aliasableUsageBytes = memoryUsage.aliasableUsageInBytes;
+	}
+
+	std::strncpy(mProviderState.lastStatusReason, "context-created", std::size(mProviderState.lastStatusReason) - 1u);
+	mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+	return true;
+#endif
+}
+
+void NRIFrameGenerationContext::ConfigureAndPrepareProvider(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationFrameDesc& desc)
+{
+#ifndef _WIN32
+	(void)frameBuffer;
+	(void)desc;
+	return;
+#else
+	if (!mInitialized || !mPolicy.requestedEnabled || mPolicy.requestedProvider != NRIFrameGenerationProvider::FSR3)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "provider-not-requested", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return;
+	}
+
+	if (!mLastInputAudit.complete || mLastInputAudit.adapterRequirement != NRIFrameGenerationAdapterRequirement::None)
+	{
+		CopyString(mProviderState.lastStatusReason, std::size(mProviderState.lastStatusReason), mLastInputAudit.statusReason);
+		return;
+	}
+
+	if (!EnsureProviderContext(frameBuffer, desc))
+	{
+		return;
+	}
+
+	ID3D12GraphicsCommandList* nativeCommandList = reinterpret_cast<ID3D12GraphicsCommandList*>(GetNativeCommandList(frameBuffer.mCore, frameBuffer.mCommandBuffer));
+	if (nativeCommandList == nullptr)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "native-commandlist-unavailable", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return;
+	}
+
+	auto& mutableFrameBuffer = const_cast<NRIRenderDevice&>(frameBuffer);
+	if (desc.hudlessColor != nullptr)
+	{
+		mutableFrameBuffer.TransitionTexture(*const_cast<NRITextureResource*>(desc.hudlessColor), NRIComputeShaderResourceState());
+	}
+	if (desc.motionVectors != nullptr)
+	{
+		mutableFrameBuffer.TransitionTexture(*const_cast<NRITextureResource*>(desc.motionVectors), NRIComputeShaderResourceState());
+	}
+	if (desc.depth != nullptr)
+	{
+		mutableFrameBuffer.TransitionTexture(*const_cast<NRITextureResource*>(desc.depth), NRIComputeShaderResourceState());
+	}
+
+	const auto configure = reinterpret_cast<PfnFfxConfigure>(mFfxConfigureFn);
+	const auto dispatch = reinterpret_cast<PfnFfxDispatch>(mFfxDispatchFn);
+
+	ffxConfigureDescFrameGeneration configureDesc = {};
+	NriFfxInitHeader(configureDesc.header, NRI_FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION);
+	configureDesc.swapChain = nullptr;
+	configureDesc.presentCallback = nullptr;
+	configureDesc.presentCallbackUserContext = nullptr;
+	configureDesc.frameGenerationCallback = nullptr;
+	configureDesc.frameGenerationCallbackUserContext = nullptr;
+	configureDesc.frameGenerationEnabled = true;
+	configureDesc.allowAsyncWorkloads = false;
+	configureDesc.HUDLessColor = GetFfxTextureResource(frameBuffer.mCore, desc.hudlessColor);
+	configureDesc.flags = NRI_FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY;
+	configureDesc.onlyPresentGenerated = false;
+	configureDesc.generationRect = {
+		(int32_t)desc.outputRect.left,
+		(int32_t)desc.outputRect.top,
+		(int32_t)desc.outputRect.width,
+		(int32_t)desc.outputRect.height
+	};
+	configureDesc.frameID = desc.frameId;
+
+	mProviderState.lastConfigureResult = configure(reinterpret_cast<ffxContext*>(&mFfxContext), &configureDesc.header);
+	if (mProviderState.lastConfigureResult != NRI_FFX_API_RETURN_OK)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "configure-failed", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return;
+	}
+
+	mProviderState.configuredThisFrame = true;
+	mProviderState.lastConfiguredFrameId = desc.frameId;
+	++mProviderState.configureCount;
+
+	ffxDispatchDescFrameGenerationPrepareCameraInfo cameraInfoDesc = {};
+	NriFfxInitHeader(cameraInfoDesc.header, NRI_FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_CAMERAINFO);
+	std::memcpy(cameraInfoDesc.cameraPosition, desc.cameraPosition, sizeof(cameraInfoDesc.cameraPosition));
+	std::memcpy(cameraInfoDesc.cameraUp, desc.cameraUp, sizeof(cameraInfoDesc.cameraUp));
+	std::memcpy(cameraInfoDesc.cameraRight, desc.cameraRight, sizeof(cameraInfoDesc.cameraRight));
+	std::memcpy(cameraInfoDesc.cameraForward, desc.cameraForward, sizeof(cameraInfoDesc.cameraForward));
+
+	ffxDispatchDescFrameGenerationPrepare prepareDesc = {};
+	NriFfxInitHeader(prepareDesc.header, NRI_FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE);
+	prepareDesc.header.pNext = reinterpret_cast<ffxApiHeader*>(&cameraInfoDesc.header);
+	prepareDesc.frameID = desc.frameId;
+	prepareDesc.flags = NRI_FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY;
+	prepareDesc.commandList = nativeCommandList;
+	prepareDesc.renderSize = { desc.renderWidth, desc.renderHeight };
+	prepareDesc.jitterOffset = { desc.cameraJitter[0], desc.cameraJitter[1] };
+	prepareDesc.motionVectorScale = { desc.motionVectorScale[0], desc.motionVectorScale[1] };
+	prepareDesc.frameTimeDelta = desc.hasRealFrameTimeMs && desc.realFrameTimeMs > 0.0f ? desc.realFrameTimeMs : (1000.0f / 60.0f);
+	prepareDesc.unused_reset = desc.resetHistory;
+	prepareDesc.cameraNear = desc.cameraNear;
+	prepareDesc.cameraFar = desc.cameraFar;
+	prepareDesc.cameraFovAngleVertical = desc.cameraFovVerticalRadians;
+	prepareDesc.viewSpaceToMetersFactor = desc.viewSpaceToMetersFactor > 0.0f ? desc.viewSpaceToMetersFactor : 1.0f;
+	prepareDesc.depth = GetFfxTextureResource(frameBuffer.mCore, desc.depth);
+	prepareDesc.motionVectors = GetFfxTextureResource(frameBuffer.mCore, desc.motionVectors);
+
+	mProviderState.lastPrepareResult = dispatch(reinterpret_cast<ffxContext*>(&mFfxContext), &prepareDesc.header);
+	if (mProviderState.lastPrepareResult != NRI_FFX_API_RETURN_OK)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "prepare-dispatch-failed", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return;
+	}
+
+	mProviderState.prepareDispatchedThisFrame = true;
+	mProviderState.prepareCameraInfoProvided = true;
+	mProviderState.lastPreparedFrameId = desc.frameId;
+	++mProviderState.prepareCount;
+	std::strncpy(mProviderState.lastStatusReason, "prepare-dispatched", std::size(mProviderState.lastStatusReason) - 1u);
+	mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+#endif
 }

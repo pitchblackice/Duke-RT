@@ -3476,6 +3476,7 @@ void NRIRenderer::PrintStatus() const
 	const bool hasFrameGenDesc = mFrameBuffer->mFrameGeneration.HasFrameDesc();
 	const auto& frameGenDesc = mFrameBuffer->mFrameGeneration.GetFrameDesc();
 	const auto& frameGenAudit = mFrameBuffer->mFrameGeneration.GetInputAudit();
+	const auto& frameGenProvider = mFrameBuffer->mFrameGeneration.GetProviderState();
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -3533,6 +3534,33 @@ void NRIRenderer::PrintStatus() const
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.providerRuntimeSupported),
 		hasFrameGenDesc ? "captured" : "empty",
 		frameGenPolicy.resolvedReason);
+	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu frames=%llu/%llu query=%s create=%s config=%s prepare=%s vram=%s:%llu/%llu reason=%s\n",
+		frameGenProvider.runtimeLoaded ? "yes" : "no",
+		frameGenProvider.runtimeFunctionsLoaded ? "yes" : "no",
+		frameGenProvider.contextCreated ? "yes" : "no",
+		frameGenProvider.debugConfigured ? "yes" : "no",
+		frameGenProvider.noSwapChainNotify ? "yes" : "no",
+		frameGenProvider.configuredThisFrame ? "yes" : "no",
+		frameGenProvider.prepareDispatchedThisFrame ? "yes" : "no",
+		frameGenProvider.prepareCameraInfoProvided ? "yes" : "no",
+		frameGenProvider.runtimeLibrary,
+		frameGenProvider.providerVersion,
+		frameGenProvider.contextRenderWidth,
+		frameGenProvider.contextRenderHeight,
+		frameGenProvider.contextDisplayWidth,
+		frameGenProvider.contextDisplayHeight,
+		(unsigned long long)frameGenProvider.configureCount,
+		(unsigned long long)frameGenProvider.prepareCount,
+		(unsigned long long)frameGenProvider.lastConfiguredFrameId,
+		(unsigned long long)frameGenProvider.lastPreparedFrameId,
+		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastQueryResult),
+		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastCreateResult),
+		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastConfigureResult),
+		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastPrepareResult),
+		frameGenProvider.memoryUsageValid ? "yes" : "no",
+		(unsigned long long)frameGenProvider.totalUsageBytes,
+		(unsigned long long)frameGenProvider.aliasableUsageBytes,
+		frameGenProvider.lastStatusReason);
 	if (hasFrameGenDesc)
 	{
 		Printf("NRI PT framegen inputs: frame_id=%llu hudless=%s:%ux%u ui=%ux%u motion=%ux%u depth=%ux%u render_rect=%u,%u+%ux%u output_rect=%u,%u+%ux%u reset=%s prev_camera=%s frame_time=%s frame_time_ms=%.3f\n",
@@ -10526,7 +10554,15 @@ void NRIRenderer::UpdateFrameGenerationFrameDesc()
 	std::memcpy(desc.previousViewToClip, mPreviousViewToClip, sizeof(desc.previousViewToClip));
 	std::memcpy(desc.currentWorldToView, mCurrentWorldToView, sizeof(desc.currentWorldToView));
 	std::memcpy(desc.previousWorldToView, mPreviousWorldToView, sizeof(desc.previousWorldToView));
-	mFrameBuffer->mFrameGeneration.SetFrameDesc(desc);
+	std::memcpy(desc.cameraPosition, mCurrentCameraPos, sizeof(desc.cameraPosition));
+	std::memcpy(desc.cameraForward, mCurrentCameraForward, sizeof(desc.cameraForward));
+	std::memcpy(desc.cameraRight, mCurrentCameraRight, sizeof(desc.cameraRight));
+	std::memcpy(desc.cameraUp, mCurrentCameraUp, sizeof(desc.cameraUp));
+	desc.cameraNear = screen->GetZNear();
+	desc.cameraFar = screen->GetZFar();
+	desc.cameraFovVerticalRadians = 2.0f * atanf(mCurrentTanHalfFovY);
+	desc.viewSpaceToMetersFactor = 1.0f;
+	mFrameBuffer->mFrameGeneration.SetFrameDesc(*mFrameBuffer, desc);
 }
 
 void NRIRenderer::CopyTexture(NRITextureResource& source, NRITextureResource& destination)
