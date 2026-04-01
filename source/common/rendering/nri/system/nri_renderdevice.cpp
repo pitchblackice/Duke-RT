@@ -1645,7 +1645,7 @@ bool NRIRenderDevice::EnsureFrameGenerationUiTexture(uint32_t width, uint32_t he
 		return false;
 	}
 
-	hwTex->CreateWipeTexture((int)width, (int)height, "FrameGenerationUiTexture");
+	hwTex->EnsureCanvas(wrapper);
 	return hwTex->GetResource().texture != nullptr && hwTex->GetResource().colorAttachmentView != nullptr;
 }
 
@@ -1744,7 +1744,7 @@ void NRIRenderDevice::CompositeFrameGenerationUiTexture()
 	}
 
 	SetActiveRenderTarget();
-	DrawTexture(twod, mFrameGenerationUiTexture, 0, 0, DTA_FlipY, screen->RenderTextureIsFlipped(), DTA_Masked, false, TAG_DONE);
+	DrawTexture(twod, mFrameGenerationUiTexture, 0, 0, DTA_Masked, false, TAG_DONE);
 }
 
 void NRIRenderDevice::DestroyFrameGenerationUiTexture()
