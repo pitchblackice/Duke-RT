@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "menu.h"
 #include "gameinput.h"
 #include "g_input.h"
+#include "d_eventbase.h"
 
 //---------------------------------------------------------------------------
 //
@@ -123,6 +124,8 @@ void GameInput::processMovement(const double turnscale, const bool allowstrafe, 
 	InputPacket thisInput{};
 	keymove = 1 << int(!!(inputBuffer.actions & SB_RUN));
 	const auto hidspeed = getTicrateAngle(YAW_TURNSPEEDS[2]);
+	const bool yawUsesMouseLook = !(buttonMap.ButtonDown(gamefunc_Strafe) && allowstrafe);
+	const bool pitchUsesMouseLook = !(inputBuffer.actions & SB_AIMMODE);
 
 	// get all input amounts.
 	const auto turning = buttonMap.ButtonDown(gamefunc_Turn_Right) -
@@ -140,8 +143,10 @@ void GameInput::processMovement(const double turnscale, const bool allowstrafe, 
 		buttonMap.ButtonDown(gamefunc_Move_Down) +
 		joyAxes[JOYAXIS_Up] * scaleAdjust;
 
+	PerfLoopTraceNoteMouseRoute(yawUsesMouseLook, pitchUsesMouseLook, mouseInput.X, mouseInput.Y);
+
 	// process player yaw input.
-	if (!(buttonMap.ButtonDown(gamefunc_Strafe) && allowstrafe))
+	if (yawUsesMouseLook)
 	{
 		const double turndir = clamp(turning + strafing * !allowstrafe, -1., 1.);
 		const double tttscale = (cl_noturnscaling || isTurboTurnTime()) ? 1 : PRETURBOTURNSCALE;
@@ -160,7 +165,7 @@ void GameInput::processMovement(const double turnscale, const bool allowstrafe, 
 	}
 
 	// process player pitch input.
-	if (!(inputBuffer.actions & SB_AIMMODE))
+	if (pitchUsesMouseLook)
 	{
 		thisInput.ang.Pitch -= MOUSE_SCALE * mouseInput.Y * m_pitch;
 		thisInput.ang.Pitch -= hidspeed * joyAxes[JOYAXIS_Pitch] * scaleAdjust;
@@ -384,6 +389,7 @@ void GameInput::getInput(InputPacket* packet)
 	{
 		const DVector3& maxVel = MAXVEL[keymove];
 		*packet = {	clamp(inputBuffer.vel, -maxVel, maxVel), clamp(inputBuffer.ang, -MAXANG, MAXANG), inputBuffer.actions };
+		PerfLoopTraceNoteTiccmdBuild((float)packet->ang.Yaw.Degrees(), (float)packet->ang.Pitch.Degrees());
 		inputBuffer = {};
 	}
 }

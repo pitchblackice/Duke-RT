@@ -169,6 +169,23 @@ void PerfLoopTraceNoteMouseDispatch(float x, float y)
 	perfLoopInputTraceStats.dispatchedMouseY += y;
 }
 
+void PerfLoopTraceNoteMouseRoute(bool yawLook, bool pitchLook, float x, float y)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	if (x != 0.0f)
+	{
+		if (yawLook) perfLoopInputTraceStats.mouseYawLookSamples++;
+		else perfLoopInputTraceStats.mouseStrafeSamples++;
+	}
+	if (y != 0.0f)
+	{
+		if (pitchLook) perfLoopInputTraceStats.mousePitchLookSamples++;
+		else perfLoopInputTraceStats.mouseAimMoveSamples++;
+	}
+}
+
 void PerfLoopTraceNoteGameInputSample(float x, float y)
 {
 	if (!PerfLoopTraceActive())
@@ -177,6 +194,34 @@ void PerfLoopTraceNoteGameInputSample(float x, float y)
 	perfLoopInputTraceStats.sampledMouseInputs++;
 	perfLoopInputTraceStats.sampledMouseX += x;
 	perfLoopInputTraceStats.sampledMouseY += y;
+}
+
+void PerfLoopTraceNoteTiccmdBuild(float yawDegrees, float pitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.ticcmdBuilds++;
+	perfLoopInputTraceStats.ticcmdYawDegrees += yawDegrees;
+	perfLoopInputTraceStats.ticcmdPitchDegrees += pitchDegrees;
+}
+
+void PerfLoopTraceNotePlayerYawApply(float yawDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.yawApplyCalls++;
+	perfLoopInputTraceStats.appliedYawDegrees += yawDegrees;
+}
+
+void PerfLoopTraceNotePlayerPitchApply(float pitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.pitchApplyCalls++;
+	perfLoopInputTraceStats.appliedPitchDegrees += pitchDegrees;
 }
 
 void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta)

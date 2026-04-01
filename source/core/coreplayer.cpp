@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 //------------------------------------------------------------------------- 
 
 #include "gameinput.h"
+#include "d_eventbase.h"
 
 
 //---------------------------------------------------------------------------
@@ -117,7 +118,12 @@ void DCorePlayer::doPitchInput()
 	// Add player's mouse/device input.
 	if (cmd.ucmd.ang.Pitch.Degrees())
 	{
-		actor->spr.Angles.Pitch += cmd.ucmd.ang.Pitch * gameInput.SyncInput();
+		const DAngle appliedPitch = cmd.ucmd.ang.Pitch * gameInput.SyncInput();
+		actor->spr.Angles.Pitch += appliedPitch;
+		if (pnum == myconnectindex)
+		{
+			PerfLoopTraceNotePlayerPitchApply((float)appliedPitch.Degrees());
+		}
 		cmd.ucmd.actions &= ~SB_CENTERVIEW;
 	}
 
@@ -166,7 +172,12 @@ void DCorePlayer::doPitchInput()
 void DCorePlayer::doYawInput()
 {
 	// Add player's mouse/device input.
-	actor->spr.Angles.Yaw += cmd.ucmd.ang.Yaw * gameInput.SyncInput();
+	const DAngle appliedYaw = cmd.ucmd.ang.Yaw * gameInput.SyncInput();
+	actor->spr.Angles.Yaw += appliedYaw;
+	if (pnum == myconnectindex)
+	{
+		PerfLoopTraceNotePlayerYawApply((float)appliedYaw.Degrees());
+	}
 
 	if (cmd.ucmd.actions & SB_TURNAROUND)
 	{

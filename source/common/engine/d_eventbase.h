@@ -63,12 +63,23 @@ struct PerfLoopInputTraceStats
 	uint32_t deviceChangeEvents = 0;
 	uint32_t eventQueueHighWater = 0;
 	uint32_t eventQueueOverflows = 0;
+	uint32_t mouseYawLookSamples = 0;
+	uint32_t mouseStrafeSamples = 0;
+	uint32_t mousePitchLookSamples = 0;
+	uint32_t mouseAimMoveSamples = 0;
+	uint32_t ticcmdBuilds = 0;
+	uint32_t yawApplyCalls = 0;
+	uint32_t pitchApplyCalls = 0;
 	float postedMouseX = 0.0f;
 	float postedMouseY = 0.0f;
 	float dispatchedMouseX = 0.0f;
 	float dispatchedMouseY = 0.0f;
 	float sampledMouseX = 0.0f;
 	float sampledMouseY = 0.0f;
+	float ticcmdYawDegrees = 0.0f;
+	float ticcmdPitchDegrees = 0.0f;
+	float appliedYawDegrees = 0.0f;
+	float appliedPitchDegrees = 0.0f;
 };
 
 struct PerfLoop2DProducerDelta
@@ -98,7 +109,11 @@ void PerfLoopTraceNoteRawInputMessage(bool isMouse, bool isKeyboard);
 void PerfLoopTraceNoteRawMousePacket(bool accepted, int dx, int dy);
 void PerfLoopTraceNoteMousePost(float x, float y);
 void PerfLoopTraceNoteMouseDispatch(float x, float y);
+void PerfLoopTraceNoteMouseRoute(bool yawLook, bool pitchLook, float x, float y);
 void PerfLoopTraceNoteGameInputSample(float x, float y);
+void PerfLoopTraceNoteTiccmdBuild(float yawDegrees, float pitchDegrees);
+void PerfLoopTraceNotePlayerYawApply(float yawDegrees);
+void PerfLoopTraceNotePlayerPitchApply(float pitchDegrees);
 void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta);
 void PerfLoopTraceNoteAltHud2D(const PerfLoop2DProducerDelta& delta);
 void PerfLoopTraceNoteCrosshair2D(const PerfLoop2DProducerDelta& delta);
