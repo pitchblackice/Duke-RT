@@ -67,6 +67,7 @@ void ResetProfilingData()
 {
 	All.Reset();
 	All.Clock();
+	Finish.Reset();
 	Bsp.Reset();
 	PortalAll.Reset();
 	RenderAll.Reset();
@@ -79,7 +80,10 @@ void ResetProfilingData()
 	SetupFlat.Reset();
 	RenderSprite.Reset();
 	SetupSprite.Reset();
+	Dirty.Reset();
 	drawcalls.Reset();
+	twoD.Reset();
+	Flush3D.Reset();
 	MTWait.Reset();
 	WTTotal.Reset();
 	NriPTAll.Reset();

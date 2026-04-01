@@ -7,7 +7,9 @@
 #include "nri_hwtexture.h"
 #include "c_cvars.h"
 #include "cmdlib.h"
+#include "d_eventbase.h"
 #include "i_mainwindow.h"
+#include "i_time.h"
 #include "printf.h"
 #include "textures.h"
 #include "v_2ddrawer.h"
@@ -1453,8 +1455,15 @@ NRIRenderDevice::~NRIRenderDevice()
 
 void NRIRenderDevice::Update()
 {
+	double draw2DMs = 0.0;
+	double endFrameMs = 0.0;
+	double presentShellMs = 0.0;
+	double baseUpdateMs = 0.0;
+	const double updateStartMs = I_msTimeF();
+
 	if (mInitialized && mFrameBegun)
 	{
+		double stageStartMs = I_msTimeF();
 		if (mFrameGenerationUiTargetActive)
 		{
 			const uint32_t sceneBlendPrefixCount = GetFrameGenerationSceneBlendPrefixCount();
@@ -1485,11 +1494,34 @@ void NRIRenderDevice::Update()
 			Draw2D();
 			twod->Clear();
 		}
+		draw2DMs = I_msTimeF() - stageStartMs;
+		stageStartMs = I_msTimeF();
 		mRenderState->EndFrame();
+		endFrameMs = I_msTimeF() - stageStartMs;
+		stageStartMs = I_msTimeF();
 		EndFrameAndPresent();
+		presentShellMs = I_msTimeF() - stageStartMs;
 	}
 
+	double stageStartMs = I_msTimeF();
 	Super::Update();
+	baseUpdateMs = I_msTimeF() - stageStartMs;
+
+	if (PerfLoopTraceActive())
+	{
+		Printf(
+			"PERF update trace NRI: frame=%llu draw2d=%.3f endframe=%.3f present_shell=%.3f base=%.3f total=%.3f frame_begun=%d framegen_ui=%d acquired=%d presented=%d\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			draw2DMs,
+			endFrameMs,
+			presentShellMs,
+			baseUpdateMs,
+			I_msTimeF() - updateStartMs,
+			mFrameBegun ? 1 : 0,
+			mFrameGenerationUiTargetActive ? 1 : 0,
+			mHasAcquiredSwapChainImage ? 1 : 0,
+			mHasPresentedSwapChainFrame ? 1 : 0);
+	}
 }
 
 void NRIRenderDevice::InitializeState()
@@ -4214,7 +4246,22 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 
 void NRIRenderDevice::EndFrameAndPresent()
 {
+	const double presentShellStartMs = I_msTimeF();
+	double frameGenEndMs = 0.0;
+	double configureDispatchMs = 0.0;
+	double transitionMs = 0.0;
+	double endCommandMs = 0.0;
+	double simulationEndMs = 0.0;
+	double submitPrepMs = 0.0;
+	double submitCallMs = 0.0;
+	double streamerEndMs = 0.0;
+	double presentCallMs = 0.0;
+	double tracePrintMs = 0.0;
+	double resetMs = 0.0;
+	double stageStartMs = I_msTimeF();
+
 	mFrameGeneration.EndFrame(*this);
+	frameGenEndMs = I_msTimeF() - stageStartMs;
 
 	static int sLoggedPresentCount = 0;
 
@@ -4224,10 +4271,16 @@ void NRIRenderDevice::EndFrameAndPresent()
 		return;
 	}
 
+	stageStartMs = I_msTimeF();
 	mFrameGeneration.ConfigureAndDispatchFrame(*this);
+	configureDispatchMs = I_msTimeF() - stageStartMs;
+	stageStartMs = I_msTimeF();
 	TransitionTexture(*mCurrentPresentTarget, { nri::AccessBits::NONE, nri::Layout::PRESENT, nri::StageBits::NONE });
+	transitionMs = I_msTimeF() - stageStartMs;
+	stageStartMs = I_msTimeF();
 	mCore.EndCommandBuffer(*mCommandBuffer);
 	mCommandBufferOpen = false;
+	endCommandMs = I_msTimeF() - stageStartMs;
 
 	const uint64_t submittedFenceValue = 1 + mFrameIndex;
 	mSubmittedFenceValue = submittedFenceValue;
@@ -4235,7 +4288,9 @@ void NRIRenderDevice::EndFrameAndPresent()
 	const nri::FenceSubmitDesc frameFence = { mFrameFence, submittedFenceValue, nri::StageBits::NONE };
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
 
+	stageStartMs = I_msTimeF();
 	mFrameGeneration.OnSimulationEnd(*this);
+	simulationEndMs = I_msTimeF() - stageStartMs;
 	nri::QueueSubmitDesc submitDesc = {};
 	submitDesc.commandBuffers = commandBuffers;
 	submitDesc.commandBufferNum = 1;
@@ -4262,10 +4317,14 @@ void NRIRenderDevice::EndFrameAndPresent()
 		submitDesc.swapChain = nullptr;
 	}
 	nri::Result submitResult = nri::Result::FAILURE;
+	stageStartMs = I_msTimeF();
 	mFrameGeneration.OnRenderSubmitStart(*this);
+	submitPrepMs = I_msTimeF() - stageStartMs;
 	{
 		ScopedNriTiming submitTiming(NriPTQueueSubmit, mLastFrameBoundaryStats.submitMs);
+		stageStartMs = I_msTimeF();
 		submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+		submitCallMs = I_msTimeF() - stageStartMs;
 	}
 	mFrameGeneration.OnRenderSubmitEnd(*this);
 	if (submitResult != nri::Result::SUCCESS)
@@ -4278,11 +4337,14 @@ void NRIRenderDevice::EndFrameAndPresent()
 		LogD3D12FailureDiagnostics("QueueSubmit");
 	}
 
+	stageStartMs = I_msTimeF();
 	mStreamer.EndStreamerFrame(*mStreamerInstance);
+	streamerEndMs = I_msTimeF() - stageStartMs;
 	nri::Result presentResult = nri::Result::FAILURE;
 	mFrameGeneration.OnPresentStart(*this);
 	{
 		ScopedNriTiming presentTiming(NriPTQueuePresent, mLastFrameBoundaryStats.presentMs);
+		stageStartMs = I_msTimeF();
 		if (IsFrameGenerationPresentPathActive())
 		{
 			if (!mFrameGeneration.Present(*this, !!vid_vsync, mFrameGenerationPresentAllowsTearing, presentResult))
@@ -4294,6 +4356,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		{
 			presentResult = mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
 		}
+		presentCallMs = I_msTimeF() - stageStartMs;
 	}
 	mFrameGeneration.OnPresentEnd(*this, presentResult);
 	mLastFrameBoundaryStats.presentResult = presentResult;
@@ -4347,14 +4410,37 @@ void NRIRenderDevice::EndFrameAndPresent()
 	const bool tracedGameplayFrame = mTraceThisFrame && (mLastFrameBoundaryStats.pathTracedSceneRendered || mLastFrameBoundaryStats.postProcessInvoked);
 	if (tracedGameplayFrame)
 	{
+		stageStartMs = I_msTimeF();
 		PrintFrameBoundaryStatus();
 		PrintSwapChainStatus();
 		PrintFrameShellStatus();
 		Print2DTextureStatus();
+		tracePrintMs = I_msTimeF() - stageStartMs;
 		const int remainingTraceFrames = (int)nri_pttraceframes - 1;
 		nri_pttraceframes = remainingTraceFrames > 0 ? remainingTraceFrames : 0;
 	}
+	stageStartMs = I_msTimeF();
 	ResetFrameTracking(presentResult == nri::Result::SUCCESS);
+	resetMs = I_msTimeF() - stageStartMs;
+	if (PerfLoopTraceActive())
+	{
+		Printf(
+			"PERF present trace NRI: frame=%llu fg_end=%.3f dispatch=%.3f transition=%.3f endcmd=%.3f sim_end=%.3f submit_prep=%.3f submit_call=%.3f streamer=%.3f present_call=%.3f trace_print=%.3f reset=%.3f total=%.3f present_ok=%d\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			frameGenEndMs,
+			configureDispatchMs,
+			transitionMs,
+			endCommandMs,
+			simulationEndMs,
+			submitPrepMs,
+			submitCallMs,
+			streamerEndMs,
+			presentCallMs,
+			tracePrintMs,
+			resetMs,
+			I_msTimeF() - presentShellStartMs,
+			presentResult == nri::Result::SUCCESS ? 1 : 0);
+	}
 	mFrameIndex++;
 }
 
