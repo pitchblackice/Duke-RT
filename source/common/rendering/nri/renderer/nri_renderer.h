@@ -56,6 +56,7 @@ public:
 	void PrintMapChunkDump(int32_t chunkIndex) const;
 	void PrintMapChunkCompare(int32_t chunkIndex) const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
+	bool RefreshPathTracingAvailability();
 	const char* GetAvailabilityReason() const;
 
 private:

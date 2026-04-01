@@ -2869,7 +2869,7 @@ bool NRIRenderDevice::SpawnPathTracingPointLight(float red, float green, float b
 		return false;
 	}
 
-	if (!mRenderer->IsPathTracingSupported())
+	if (!mRenderer->RefreshPathTracingAvailability())
 	{
 		Printf("NRI PT test lights are unavailable because path tracing is not active (%s).\n", mRenderer->GetAvailabilityReason());
 		return false;
@@ -3005,7 +3005,7 @@ bool NRIRenderDevice::SpawnPathTracingDebugSphere(float diameter, float distance
 		return false;
 	}
 
-	if (!mRenderer->IsPathTracingSupported())
+	if (!mRenderer->RefreshPathTracingAvailability())
 	{
 		Printf("NRI PT debug spheres are unavailable because path tracing is not active (%s).\n", mRenderer->GetAvailabilityReason());
 		return false;

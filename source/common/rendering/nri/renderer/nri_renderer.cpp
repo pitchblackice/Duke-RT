@@ -5913,6 +5913,11 @@ const char* NRIRenderer::GetAvailabilityReason() const
 	return "path tracing is unavailable";
 }
 
+bool NRIRenderer::RefreshPathTracingAvailability()
+{
+	return CheckPathTracingSupport();
+}
+
 bool NRIRenderer::CheckPathTracingSupport()
 {
 	mPathTracingSupported = mFrameBuffer != nullptr && mFrameBuffer->mDevice != nullptr;
