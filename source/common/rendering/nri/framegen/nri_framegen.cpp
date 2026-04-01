@@ -421,6 +421,22 @@ const char* NRIFrameGenerationContext::GetProviderReturnCodeName(uint32_t result
 #endif
 }
 
+const char* NRIFrameGenerationContext::GetPresentResultName(nri::Result result)
+{
+	switch (result)
+	{
+	default: return "unknown";
+	case nri::Result::SUCCESS: return "success";
+	case nri::Result::FAILURE: return "failure";
+	case nri::Result::INVALID_ARGUMENT: return "invalid-argument";
+	case nri::Result::OUT_OF_MEMORY: return "out-of-memory";
+	case nri::Result::UNSUPPORTED: return "unsupported";
+	case nri::Result::DEVICE_LOST: return "device-lost";
+	case nri::Result::OUT_OF_DATE: return "out-of-date";
+	case nri::Result::INVALID_SDK: return "invalid-sdk";
+	}
+}
+
 bool NRIFrameGenerationContext::IsPresentBridgeActive() const
 {
 #ifdef _WIN32

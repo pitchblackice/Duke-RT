@@ -275,6 +275,7 @@ public:
 	static const char* GetWindowModeName(bool fullscreen);
 	static const char* GetAvailabilityName(bool available);
 	static const char* GetProviderReturnCodeName(uint32_t result);
+	static const char* GetPresentResultName(nri::Result result);
 
 private:
 	NRIFrameGenerationPolicy BuildPolicy(const NRIRenderDevice& frameBuffer) const;

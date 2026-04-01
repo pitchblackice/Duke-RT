@@ -3534,7 +3534,7 @@ void NRIRenderer::PrintStatus() const
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.providerRuntimeSupported),
 		hasFrameGenDesc ? "captured" : "empty",
 		frameGenPolicy.resolvedReason);
-	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s swapctx=%s bridge=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s fg_dispatch=%s ui_reg=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu fg:%llu frames=%llu/%llu query=%s/%s create=%s/%s config=%s/%s prepare=%s dispatch=%s vram=fg:%s:%llu/%llu sc:%s:%llu/%llu resets=%llu last_reset=%s present=%s/%d count=%llu reason=%s\n",
+	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s swapctx=%s bridge=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s fg_dispatch=%s ui_reg=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu fg:%llu frames=%llu/%llu query=%s/%s create=%s/%s config=%s/%s prepare=%s dispatch=%s vram=fg:%s:%llu/%llu sc:%s:%llu/%llu resets=%llu last_reset=%s present=%s/%s count=%llu reason=%s\n",
 		frameGenProvider.runtimeLoaded ? "yes" : "no",
 		frameGenProvider.runtimeFunctionsLoaded ? "yes" : "no",
 		frameGenProvider.contextCreated ? "yes" : "no",
@@ -3575,9 +3575,17 @@ void NRIRenderer::PrintStatus() const
 		(unsigned long long)frameGenProvider.resetCount,
 		frameGenProvider.lastResetReason,
 		frameGenProvider.lastPresentMode,
-		(int)frameGenProvider.lastPresentResult,
+		NRIFrameGenerationContext::GetPresentResultName(frameGenProvider.lastPresentResult),
 		(unsigned long long)frameGenProvider.presentCount,
 		frameGenProvider.lastStatusReason);
+	Printf("NRI PT framegen present: current=%s bridge_active=%s generated=%s fallback_pending=%s last=%s result=%s\n",
+		frameGenProvider.frameGenerationDispatchedThisFrame ? "generated" :
+			(frameGenProvider.presentUsedBridgeThisFrame ? "passthrough" : "native"),
+		frameGenProvider.presentBridgeReady ? "yes" : "no",
+		frameGenProvider.frameGenerationDispatchedThisFrame ? "yes" : "no",
+		frameGenProvider.nativeFallbackRequested ? "yes" : "no",
+		frameGenProvider.lastPresentMode,
+		NRIFrameGenerationContext::GetPresentResultName(frameGenProvider.lastPresentResult));
 	if (hasFrameGenDesc)
 	{
 		Printf("NRI PT framegen inputs: frame_id=%llu hudless=%s:%ux%u ui=%ux%u motion=%ux%u depth=%ux%u render_rect=%u,%u+%ux%u output_rect=%u,%u+%ux%u reset=%s prev_camera=%s frame_time=%s frame_time_ms=%.3f\n",

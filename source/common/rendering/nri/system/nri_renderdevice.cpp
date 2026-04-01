@@ -2393,6 +2393,14 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		GetNriResultName(frameGenProvider.lastPresentResult),
 		(unsigned long long)frameGenProvider.presentCount,
 		frameGenProvider.lastStatusReason);
+	Printf("NRI PT framegen present: current=%s bridge_active=%s generated=%s fallback_pending=%s last=%s result=%s\n",
+		frameGenProvider.frameGenerationDispatchedThisFrame ? "generated" :
+			(frameGenProvider.presentUsedBridgeThisFrame ? "passthrough" : "native"),
+		frameGenProvider.presentBridgeReady ? "yes" : "no",
+		frameGenProvider.frameGenerationDispatchedThisFrame ? "yes" : "no",
+		frameGenProvider.nativeFallbackRequested ? "yes" : "no",
+		frameGenProvider.lastPresentMode,
+		NRIFrameGenerationContext::GetPresentResultName(frameGenProvider.lastPresentResult));
 	const auto& lowLatencyState = mFrameGeneration.GetLowLatencyState();
 	Printf("NRI PT low-latency: iface=%s swapchain=%s configured=%s sleep=%s count=%llu markers=%llu present=%s set_mode=%s sleep_result=%s sim=%s/%s submit=%s/%s report=%s present_us=%llu..%llu\n",
 		lowLatencyState.interfaceAvailable ? "yes" : "no",
