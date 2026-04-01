@@ -36,8 +36,25 @@ CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttaa, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_framegen, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+EXTERN_CVAR(Bool, vid_vsync)
+
+namespace
+{
+	static void RefreshActiveFrameGenerationSwapChain()
+	{
+		if (screen != nullptr && screen->Backend() == 4)
+		{
+			static_cast<NRIRenderDevice*>(screen)->SetVSync(vid_vsync);
+		}
+	}
+}
+
+CUSTOM_CVAR(Bool, nri_framegen, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	RefreshActiveFrameGenerationSwapChain();
+}
+
 CUSTOM_CVAR(Int, nri_framegenprovider, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -48,6 +65,8 @@ CUSTOM_CVAR(Int, nri_framegenprovider, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	{
 		self = 1;
 	}
+
+	RefreshActiveFrameGenerationSwapChain();
 }
 CUSTOM_CVAR(Int, nri_framegenui, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
@@ -61,7 +80,10 @@ CUSTOM_CVAR(Int, nri_framegenui, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 CVAR(Bool, nri_framegenasync, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_framegenlatency, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Bool, nri_framegenlatency, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	RefreshActiveFrameGenerationSwapChain();
+}
 CVAR(Int, nri_nrdmaxframes, 31, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrdfastframes, 7, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrdstabilizationframes, 31, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
