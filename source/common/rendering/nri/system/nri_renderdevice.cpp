@@ -1365,6 +1365,18 @@ void NRIRenderDevice::Update()
 	{
 		if (mFrameGenerationUiTargetActive)
 		{
+			const uint32_t sceneBlendPrefixCount = GetFrameGenerationSceneBlendPrefixCount();
+			if (sceneBlendPrefixCount > 0u)
+			{
+				SetActiveRenderTarget();
+				DrawFrameGenerationSceneBlendPrefix();
+				if (NRITextureResource* uiTarget = GetFrameGenerationUiTargetResource(); uiTarget != nullptr)
+				{
+					mActiveTarget = uiTarget;
+					mFrameGenerationUiTargetActive = true;
+				}
+			}
+
 			Draw2D();
 			twod->Clear();
 			FinalizeFrameGenerationUiTarget();
@@ -1989,7 +2001,6 @@ void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::func
 
 	if (ShouldUseFrameGenerationUiTarget())
 	{
-		DrawFrameGenerationSceneBlendPrefix();
 		BeginFrameGenerationUiTarget();
 	}
 }
