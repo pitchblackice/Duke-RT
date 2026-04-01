@@ -73,6 +73,14 @@ namespace
 			static_cast<NRIRenderDevice*>(screen)->SetVSync(vid_vsync);
 		}
 	}
+
+	static void NotifyActiveGlowControlChange()
+	{
+		if (screen != nullptr && screen->Backend() == 4)
+		{
+			static_cast<NRIRenderDevice*>(screen)->NotifyPathTracingGlowControlChange();
+		}
+	}
 }
 
 CUSTOM_CVAR(Bool, nri_framegen, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -139,6 +147,22 @@ CVAR(Bool, nri_ptemissiveheuristics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissiveautoonly, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminsurface, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptglowscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	NotifyActiveGlowControlChange();
+}
+CUSTOM_CVAR(Float, nri_ptglowreach, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	NotifyActiveGlowControlChange();
+}
 CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptemissivesamples, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -3288,6 +3312,13 @@ void NRIRenderer::ClearTextureEmissiveHeuristics()
 	QueueStaticMapSceneLightingInvalidation();
 	mSceneLights.ConsumeEmissiveMaterialsDirty();
 	RequestHistoryReset("emissive-heuristic-change");
+}
+
+void NRIRenderer::NotifyGlowControlChange()
+{
+	QueueStaticMapSceneLightingInvalidation();
+	ResetPersistentDynamicEmissiveCache();
+	RequestHistoryReset("glow-control-change");
 }
 
 void NRIRenderer::PrintTextureEmissiveHeuristics() const

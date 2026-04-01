@@ -3039,6 +3039,16 @@ void NRIRenderDevice::PrintPathTracingEmissiveHeuristics() const
 	mRenderer->PrintTextureEmissiveHeuristics();
 }
 
+void NRIRenderDevice::NotifyPathTracingGlowControlChange()
+{
+	if (mRenderer == nullptr)
+	{
+		return;
+	}
+
+	mRenderer->NotifyGlowControlChange();
+}
+
 void NRIRenderDevice::PrintPathTracingEmissiveSurfaces(float radius, uint32_t limit) const
 {
 	if (mRenderer == nullptr)

@@ -351,23 +351,22 @@ float4 SampleMaterialBaseColorRaw(uint materialIndex, uint dataSource, float2 uv
 float3 SampleMaterialEmissionSource(uint materialIndex, uint dataSource, float2 uv)
 {
 	const MaterialData material = GetMaterialData(materialIndex, dataSource);
-	const float maskScale = max(material.emissiveMaskScale, 1.0);
 	if (material.emissiveMode == 1u)
 	{
-		return SampleMaterialColor(material, material.textureIndex, uv, (material.flags & MATERIAL_FLAG_INDEXED) != 0, true, false).rgb * maskScale;
+		return SampleMaterialColor(material, material.textureIndex, uv, (material.flags & MATERIAL_FLAG_INDEXED) != 0, true, false).rgb;
 	}
 	if (material.emissiveMode == 2u)
 	{
-		return material.emissiveColor * maskScale;
+		return material.emissiveColor;
 	}
 	if (material.emissiveMode == 3u)
 	{
 		if (material.emissiveTextureIndex == 0xffffffffu)
 		{
-			return material.emissiveColor * maskScale;
+			return material.emissiveColor;
 		}
 
-		return SampleMaterialColor(material, material.emissiveTextureIndex, uv, false, false, false).rgb * maskScale;
+		return SampleMaterialColor(material, material.emissiveTextureIndex, uv, false, false, false).rgb;
 	}
 
 	return 0.0;

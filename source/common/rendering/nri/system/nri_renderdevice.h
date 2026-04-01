@@ -76,6 +76,7 @@ public:
 	bool AddPathTracingTextureEmissiveHeuristic(uint32_t textureId, uint32_t emissiveMode, float intensityScale, const float* emissiveColor, bool hasExplicitColor, uint32_t& outRuleId);
 	void ClearPathTracingEmissiveHeuristics();
 	void PrintPathTracingEmissiveHeuristics() const;
+	void NotifyPathTracingGlowControlChange();
 	void PrintPathTracingEmissiveSurfaces(float radius, uint32_t limit) const;
 	void PrintPathTracingSectorLights(float radius, uint32_t limit) const;
 	void PrintPathTracingMapChunkDump(int32_t chunkIndex) const;

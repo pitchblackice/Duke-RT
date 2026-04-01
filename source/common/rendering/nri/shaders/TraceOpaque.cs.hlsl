@@ -357,8 +357,9 @@ void EvaluateSampledEmissiveLighting(
 	outEmitterUv = lightUv;
 	const MaterialData lightMaterial = GetMaterialData(primitive.materialIndex, candidate.dataSource);
 	const float3 lightColor = SampleMaterialEmissionSource(primitive.materialIndex, candidate.dataSource, lightUv) * lightMaterial.emissiveIntensity;
+	const float reachScale = max(lightMaterial.emissiveMaskScale, 0.0);
 	outEmitterRadiance = lightColor;
-	if (all(lightColor <= 0.0))
+	if (all(lightColor <= 0.0) || reachScale <= 0.0)
 	{
 		return;
 	}
@@ -399,7 +400,7 @@ void EvaluateSampledEmissiveLighting(
 	const float pdf = max(candidate.selectionPdf, 1e-4);
 	const float projectedArea = max(candidate.primitiveArea * emitterLambert, 0.001);
 	const float solidAngleEstimate = min(projectedArea / max(12.56637061436 * lightDistanceSq, 0.01), 1.0);
-	const float sampleWeight = min(solidAngleEstimate / pdf, 16.0);
+	const float sampleWeight = min(solidAngleEstimate / pdf, 16.0) * reachScale;
 	outDiffuse = albedo * (lambert * 0.80) * lightColor * sampleWeight;
 	outSpecular = EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, 1.0) * lightColor * sampleWeight;
 }
