@@ -377,6 +377,7 @@ void GameInput::getInput(InputPacket* packet)
 	I_GetAxes(joyAxes);
 	processInputBits();
 	if (!paused) gi->doPlayerMovement();
+	PerfLoopTraceNoteGameInputSample(mouseInput.X, mouseInput.Y);
 	mouseInput.Zero();
 
 	if (packet)

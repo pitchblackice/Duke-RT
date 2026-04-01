@@ -584,6 +584,10 @@ bool FRawMouse::ProcessRawInput(RAWINPUT *raw, int code)
 {
 	if (!Grabbed || raw->header.dwType != RIM_TYPEMOUSE || !use_mouse)
 	{
+		if (raw->header.dwType == RIM_TYPEMOUSE)
+		{
+			PerfLoopTraceNoteRawMousePacket(false, raw->data.mouse.lLastX, raw->data.mouse.lLastY);
+		}
 		return false;
 	}
 	// Check buttons. The up and down motions are stored in the usButtonFlags field.
@@ -614,6 +618,7 @@ bool FRawMouse::ProcessRawInput(RAWINPUT *raw, int code)
 	}
 	int x = raw->data.mouse.lLastX;
 	int y = raw->data.mouse.lLastY;
+	PerfLoopTraceNoteRawMousePacket(true, x, y);
 	PostMouseMove(x, y);
 	if (x | y)
 	{

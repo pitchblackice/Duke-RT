@@ -91,6 +91,7 @@
 #include "texinfo.h"
 #include "texturemanager.h"
 #include "gameinput.h"
+#include "d_eventbase.h"
 
 CVAR(Bool, vid_activeinbackground, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, r_ticstability, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -99,6 +100,7 @@ EXTERN_CVAR(Bool, cl_capfps)
 CVAR(Bool, cl_resumesavegame, true, CVAR_ARCHIVE)
 EXTERN_CVAR (Bool, vid_vsync)
 EXTERN_CVAR (Int, vid_maxfps)
+EXTERN_CVAR (Int, perf_looptraceframes)
 
 static uint64_t stabilityticduration = 0;
 static uint64_t stabilitystarttime = 0;
@@ -129,6 +131,51 @@ void DoLoadGame(const char* name);
 bool sendsave;
 FString	savedescription;
 FString	savegamefile;
+
+namespace
+{
+	struct PerfTryRunTicsTraceStats
+	{
+		bool doWait = false;
+		bool pausedReturn = false;
+		bool zeroCountReturn = false;
+		bool waitLoopReturn = false;
+		int realtics = 0;
+		int availabletics = 0;
+		int counts = 0;
+		int lowtic = 0;
+		int waitLoopIterations = 0;
+		int ticksRun = 0;
+		double durationMs = 0.0;
+	};
+
+	struct PerfDisplayTraceStats
+	{
+		bool skippedInactive = false;
+		bool levelRendered = false;
+		double beginFrameMs = 0.0;
+		double renderMs = 0.0;
+		double overlayMs = 0.0;
+		double updateMs = 0.0;
+	};
+
+	static PerfTryRunTicsTraceStats perfTryRunTicsTraceStats;
+	static PerfDisplayTraceStats perfDisplayTraceStats;
+
+	static const char* GetGameStateName(int state)
+	{
+		switch (state)
+		{
+		case GS_STARTUP: return "startup";
+		case GS_LEVEL: return "level";
+		case GS_MENUSCREEN: return "menu";
+		case GS_FULLCONSOLE: return "console";
+		case GS_CUTSCENE: return "cutscene";
+		case GS_INTRO: return "intro";
+		default: return "unknown";
+		}
+	}
+}
 
 //==========================================================================
 //
@@ -416,6 +463,7 @@ void Display()
 {
 	if (screen == nullptr || (!AppActive && (screen->IsFullscreen() || !vid_activeinbackground)))
 	{
+		perfDisplayTraceStats.skippedInactive = true;
 		return;
 	}
 	
@@ -425,9 +473,11 @@ void Display()
 		wipestart = screen->WipeStartScreen();
 	}
 
+	double stageStart = I_msTimeF();
 	screen->FrameTime = I_msTimeFS();
 	tileUpdateAnimations();
 	screen->BeginFrame();
+	perfDisplayTraceStats.beginFrameMs += I_msTimeF() - stageStart;
 	twodpsp.Clear();
 	twodpsp.SetSize(screen->GetWidth(), screen->GetHeight());
 	twodpsp.ClearClipRect();
@@ -450,6 +500,8 @@ void Display()
 	case GS_LEVEL:
 		if (gametic != 0)
 		{
+			perfDisplayTraceStats.levelRendered = true;
+			stageStart = I_msTimeF();
 			screen->FrameTime = I_msTimeFS();
 			screen->BeginFrame();
 			screen->SetSceneRenderTarget(gl_ssao != 0);
@@ -457,6 +509,7 @@ void Display()
 			gi->Render();
 			DrawFullscreenBlends();
 			drawMapTitle();
+			perfDisplayTraceStats.renderMs += I_msTimeF() - stageStart;
 			break;
 		}
 		[[fallthrough]];
@@ -466,6 +519,7 @@ void Display()
 		break;
 	}
 	
+	stageStart = I_msTimeF();
 	if (nextwipe == wipe_None)
 	{
 		DrawOverlays();
@@ -501,8 +555,11 @@ void Display()
 		PerformWipe(wipestart, screen->WipeEndScreen(), nextwipe, true, DrawOverlays);
 		nextwipe = wipe_None;
 	}
+	perfDisplayTraceStats.overlayMs += I_msTimeF() - stageStart;
 
+	stageStart = I_msTimeF();
 	screen->Update();
+	perfDisplayTraceStats.updateMs += I_msTimeF() - stageStart;
 }
 
 //==========================================================================
@@ -559,6 +616,8 @@ void TryRunTics (void)
 	int 		availabletics;
 	int 		counts;
 	int 		numplaying;
+	const double traceStartMs = I_msTimeF();
+	perfTryRunTicsTraceStats = {};
 
 	// If paused, do not eat more CPU time than we need, because it
 	// will all be wasted anyway.
@@ -566,6 +625,7 @@ void TryRunTics (void)
 
 	if (vid_dontdowait && ((vid_maxfps > 0) || (vid_vsync == true)))
 		doWait = false;
+	perfTryRunTicsTraceStats.doWait = doWait;
 
 	// get real tics
 	if (doWait)
@@ -578,12 +638,17 @@ void TryRunTics (void)
 	}
 	realtics = entertic - oldentertics;
 	oldentertics = entertic;
+	perfTryRunTicsTraceStats.realtics = realtics;
 
 	// get available tics
 	NetUpdate ();
 
 	if (pauseext)
+	{
+		perfTryRunTicsTraceStats.pausedReturn = true;
+		perfTryRunTicsTraceStats.durationMs = I_msTimeF() - traceStartMs;
 		return;
+	}
 
 	lowtic = INT_MAX;
 	numplaying = 0;
@@ -598,6 +663,8 @@ void TryRunTics (void)
 	}
 
 	availabletics = lowtic - gametic / ticdup;
+	perfTryRunTicsTraceStats.availabletics = availabletics;
+	perfTryRunTicsTraceStats.lowtic = lowtic;
 
 	// decide how many tics to run
 	if (realtics < availabletics-1)
@@ -606,6 +673,7 @@ void TryRunTics (void)
 		counts = realtics;
 	else
 		counts = availabletics;
+	perfTryRunTicsTraceStats.counts = counts;
 
 	// Uncapped framerate needs seprate checks
 	if (counts == 0 && !doWait)
@@ -628,6 +696,8 @@ void TryRunTics (void)
 		{
 			gameInput.getInput();
 		}
+		perfTryRunTicsTraceStats.zeroCountReturn = true;
+		perfTryRunTicsTraceStats.durationMs = I_msTimeF() - traceStartMs;
 		return;
 	}
 
@@ -637,6 +707,7 @@ void TryRunTics (void)
 	// wait for new tics if needed
 	while (lowtic < gametic + counts)
 	{
+		perfTryRunTicsTraceStats.waitLoopIterations++;
 		NetUpdate ();
 		lowtic = INT_MAX;
 
@@ -666,6 +737,8 @@ void TryRunTics (void)
 			gi->Unpredict();
 			gi->Predict(myconnectindex);
 #endif
+			perfTryRunTicsTraceStats.waitLoopReturn = true;
+			perfTryRunTicsTraceStats.durationMs = I_msTimeF() - traceStartMs;
 			return;
 		}
 	}
@@ -686,6 +759,7 @@ void TryRunTics (void)
 #endif
 		while (counts--)
 		{
+			perfTryRunTicsTraceStats.ticksRun++;
 			TicStabilityBegin();
 			if (gametic > lowtic)
 			{
@@ -715,6 +789,7 @@ void TryRunTics (void)
 	{
 		TicStabilityWait();
 	}
+	perfTryRunTicsTraceStats.durationMs = I_msTimeF() - traceStartMs;
 }
 
 
@@ -727,6 +802,7 @@ void TryRunTics (void)
 void MainLoop ()
 {
 	int lasttic = 0;
+	uint64_t traceFrame = 0;
 
 	// Clamp the timer to TICRATE until the playloop has been entered.
 	r_NoInterpolate = true;
@@ -749,26 +825,115 @@ void MainLoop ()
 	{
 		try
 		{
+			traceFrame++;
+			if (PerfLoopTraceActive())
+			{
+				PerfLoopTraceResetInputStats();
+				perfTryRunTicsTraceStats = {};
+				perfDisplayTraceStats = {};
+			}
+
 			// frame syncronous IO operations
+			const double frameStartMs = I_msTimeF();
+			double startFrameMs = 0.0;
 			if (gametic > lasttic)
 			{
+				const double stageStartMs = I_msTimeF();
 				lasttic = gametic;
 				I_StartFrame ();
+				startFrameMs = I_msTimeF() - stageStartMs;
 			}
 			I_SetFrameTime();
 
 			// update the scale factor for unsynchronised input here.
 			gameInput.UpdateInputScale();
 
+			const double tryRunStartMs = I_msTimeF();
 			TryRunTics (); // will run at least one tic
+			const double tryRunMs = I_msTimeF() - tryRunStartMs;
 			// Update display, next frame, with current state.
+			const double startTicStartMs = I_msTimeF();
 			I_StartTic();
+			const double startTicMs = I_msTimeF() - startTicStartMs;
 
+			const double displayStartMs = I_msTimeF();
 			Display();
+			const double displayMs = I_msTimeF() - displayStartMs;
+			const double musicStartMs = I_msTimeF();
 			Mus_UpdateMusic();		// must be at the end.
+			const double musicMs = I_msTimeF() - musicStartMs;
+
+			if (PerfLoopTraceActive())
+			{
+				const auto inputTrace = PerfLoopTraceGetInputStats();
+				const double frameMs = I_msTimeF() - frameStartMs;
+				Printf(
+					"PERF loop trace: frame=%llu state=%s gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d display_skip=%d level_rendered=%d\n",
+					(unsigned long long)traceFrame,
+					GetGameStateName(gamestate),
+					gametic,
+					startFrameMs,
+					tryRunMs,
+					perfTryRunTicsTraceStats.durationMs,
+					displayMs,
+					perfDisplayTraceStats.beginFrameMs,
+					perfDisplayTraceStats.renderMs,
+					perfDisplayTraceStats.overlayMs,
+					perfDisplayTraceStats.updateMs,
+					startTicMs,
+					musicMs,
+					frameMs,
+					perfTryRunTicsTraceStats.doWait ? 1 : 0,
+					perfTryRunTicsTraceStats.realtics,
+					perfTryRunTicsTraceStats.availabletics,
+					perfTryRunTicsTraceStats.counts,
+					perfTryRunTicsTraceStats.ticksRun,
+					perfTryRunTicsTraceStats.waitLoopIterations,
+					perfTryRunTicsTraceStats.zeroCountReturn ? 1 : 0,
+					perfTryRunTicsTraceStats.waitLoopReturn ? 1 : 0,
+					perfTryRunTicsTraceStats.pausedReturn ? 1 : 0,
+					perfDisplayTraceStats.skippedInactive ? 1 : 0,
+					perfDisplayTraceStats.levelRendered ? 1 : 0);
+				Printf(
+					"PERF input trace: frame=%llu getevent=%u starttic_calls=%u handleevents=%u msgs=%u burst=%u raw_input=%u raw_keyboard=%u raw_mouse=%u raw_mouse_moves=%u raw_mouse_drop=%u posted_mouse=%u dispatched_mouse=%u sampled_mouse=%u posted_delta=(%.1f,%.1f) dispatched_delta=(%.1f,%.1f) sampled_delta=(%.1f,%.1f) key_down=%u key_up=%u device_change=%u queue_hw=%u queue_overflow=%u\n",
+					(unsigned long long)traceFrame,
+					inputTrace.iGetEventCalls,
+					inputTrace.startTicCalls,
+					inputTrace.handleeventsCalls,
+					inputTrace.peekedMessages,
+					inputTrace.maxMessageBurst,
+					inputTrace.rawInputMessages,
+					inputTrace.rawKeyboardPackets,
+					inputTrace.rawMousePackets,
+					inputTrace.rawMouseMovePackets,
+					inputTrace.rawMouseDroppedPackets,
+					inputTrace.postedMouseMoves,
+					inputTrace.dispatchedMouseMoves,
+					inputTrace.sampledMouseInputs,
+					inputTrace.postedMouseX,
+					inputTrace.postedMouseY,
+					inputTrace.dispatchedMouseX,
+					inputTrace.dispatchedMouseY,
+					inputTrace.sampledMouseX,
+					inputTrace.sampledMouseY,
+					inputTrace.keyDownEvents,
+					inputTrace.keyUpEvents,
+					inputTrace.deviceChangeEvents,
+					inputTrace.eventQueueHighWater,
+					inputTrace.eventQueueOverflows);
+				const int remainingTraceFrames = (int)perf_looptraceframes - 1;
+				perf_looptraceframes = remainingTraceFrames > 0 ? remainingTraceFrames : 0;
+			}
 		}
 		catch (CRecoverableError &error)
 		{
+			if (PerfLoopTraceActive())
+			{
+				Printf("PERF loop trace caught: frame=%llu type=recoverable state=%s gametic=%d\n",
+					(unsigned long long)traceFrame,
+					GetGameStateName(gamestate),
+					gametic);
+			}
 			if (error.GetMessage ())
 			{
 				Printf (PRINT_BOLD, "\n%s\n", error.GetMessage());
@@ -780,6 +945,13 @@ void MainLoop ()
 		}
 		catch (CVMAbortException &error)
 		{
+			if (PerfLoopTraceActive())
+			{
+				Printf("PERF loop trace caught: frame=%llu type=vmabort state=%s gametic=%d\n",
+					(unsigned long long)traceFrame,
+					GetGameStateName(gamestate),
+					gametic);
+			}
 			error.MaybePrintMessage();
 			Printf("%s", error.stacktrace.GetChars());
 			gi->ErrorCleanup();
@@ -789,4 +961,3 @@ void MainLoop ()
 		}
 	}
 }
-

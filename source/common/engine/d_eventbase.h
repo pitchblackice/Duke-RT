@@ -43,6 +43,46 @@ extern	event_t 		events[MAXEVENTS];
 extern int eventhead;
 extern int eventtail;
 
+struct PerfLoopInputTraceStats
+{
+	uint32_t iGetEventCalls = 0;
+	uint32_t startTicCalls = 0;
+	uint32_t handleeventsCalls = 0;
+	uint32_t peekedMessages = 0;
+	uint32_t maxMessageBurst = 0;
+	uint32_t rawInputMessages = 0;
+	uint32_t rawKeyboardPackets = 0;
+	uint32_t rawMousePackets = 0;
+	uint32_t rawMouseMovePackets = 0;
+	uint32_t rawMouseDroppedPackets = 0;
+	uint32_t postedMouseMoves = 0;
+	uint32_t dispatchedMouseMoves = 0;
+	uint32_t sampledMouseInputs = 0;
+	uint32_t keyDownEvents = 0;
+	uint32_t keyUpEvents = 0;
+	uint32_t deviceChangeEvents = 0;
+	uint32_t eventQueueHighWater = 0;
+	uint32_t eventQueueOverflows = 0;
+	float postedMouseX = 0.0f;
+	float postedMouseY = 0.0f;
+	float dispatchedMouseX = 0.0f;
+	float dispatchedMouseY = 0.0f;
+	float sampledMouseX = 0.0f;
+	float sampledMouseY = 0.0f;
+};
+
+bool PerfLoopTraceActive();
+void PerfLoopTraceResetInputStats();
+PerfLoopInputTraceStats PerfLoopTraceGetInputStats();
+void PerfLoopTraceNoteHandleevents();
+void PerfLoopTraceNoteIStartTic();
+void PerfLoopTraceNoteIGetEvent(uint32_t peekedMessages);
+void PerfLoopTraceNoteRawInputMessage(bool isMouse, bool isKeyboard);
+void PerfLoopTraceNoteRawMousePacket(bool accepted, int dx, int dy);
+void PerfLoopTraceNoteMousePost(float x, float y);
+void PerfLoopTraceNoteMouseDispatch(float x, float y);
+void PerfLoopTraceNoteGameInputSample(float x, float y);
+
 struct FUiEvent
 {
 	// this essentially translates event_t UI events to ZScript.
@@ -75,4 +115,3 @@ struct FInputEvent
 
 	FInputEvent(const event_t *ev);
 };
-

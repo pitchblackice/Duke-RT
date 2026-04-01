@@ -49,6 +49,8 @@ extern bool ToggleFullscreen;
 
 int32_t handleevents(void)
 {
+	PerfLoopTraceNoteHandleevents();
+
 	if (ToggleFullscreen)
 	{
 		vid_fullscreen = !vid_fullscreen;

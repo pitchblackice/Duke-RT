@@ -33,6 +33,8 @@
 **
 */ 
 
+#include <algorithm>
+
 #include "c_bind.h"
 #include "d_eventbase.h"
 #include "c_console.h"
@@ -43,15 +45,128 @@
 #include "vm.h"
 #include "gamestate.h"
 #include "i_interface.h"
+#include "c_cvars.h"
 
 int eventhead;
 int eventtail;
 event_t events[MAXEVENTS];
 
+CUSTOM_CVAR(Int, perf_looptraceframes, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 600)
+	{
+		self = 600;
+	}
+}
+
 CVAR(Float, m_sensitivity_x, 2.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, m_sensitivity_y, 2.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, invertmouse, false, CVAR_GLOBALCONFIG | CVAR_ARCHIVE);  // Invert mouse look down/up?
 CVAR(Bool, invertmousex, false,	CVAR_GLOBALCONFIG | CVAR_ARCHIVE);  // Invert mouse look left/right?
+
+static PerfLoopInputTraceStats perfLoopInputTraceStats;
+
+bool PerfLoopTraceActive()
+{
+	return perf_looptraceframes > 0;
+}
+
+void PerfLoopTraceResetInputStats()
+{
+	perfLoopInputTraceStats = {};
+}
+
+PerfLoopInputTraceStats PerfLoopTraceGetInputStats()
+{
+	return perfLoopInputTraceStats;
+}
+
+void PerfLoopTraceNoteHandleevents()
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.handleeventsCalls++;
+}
+
+void PerfLoopTraceNoteIStartTic()
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.startTicCalls++;
+}
+
+void PerfLoopTraceNoteIGetEvent(uint32_t peekedMessages)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.iGetEventCalls++;
+	perfLoopInputTraceStats.peekedMessages += peekedMessages;
+	perfLoopInputTraceStats.maxMessageBurst = std::max(perfLoopInputTraceStats.maxMessageBurst, peekedMessages);
+}
+
+void PerfLoopTraceNoteRawInputMessage(bool isMouse, bool isKeyboard)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.rawInputMessages++;
+	if (isMouse) perfLoopInputTraceStats.rawMousePackets++;
+	if (isKeyboard) perfLoopInputTraceStats.rawKeyboardPackets++;
+}
+
+void PerfLoopTraceNoteRawMousePacket(bool accepted, int dx, int dy)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	if (!accepted)
+	{
+		perfLoopInputTraceStats.rawMouseDroppedPackets++;
+		return;
+	}
+
+	if (dx != 0 || dy != 0)
+	{
+		perfLoopInputTraceStats.rawMouseMovePackets++;
+	}
+}
+
+void PerfLoopTraceNoteMousePost(float x, float y)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.postedMouseMoves++;
+	perfLoopInputTraceStats.postedMouseX += x;
+	perfLoopInputTraceStats.postedMouseY += y;
+}
+
+void PerfLoopTraceNoteMouseDispatch(float x, float y)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.dispatchedMouseMoves++;
+	perfLoopInputTraceStats.dispatchedMouseX += x;
+	perfLoopInputTraceStats.dispatchedMouseY += y;
+}
+
+void PerfLoopTraceNoteGameInputSample(float x, float y)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.sampledMouseInputs++;
+	perfLoopInputTraceStats.sampledMouseX += x;
+	perfLoopInputTraceStats.sampledMouseY += y;
+}
 
 
 //==========================================================================
@@ -161,6 +276,23 @@ void D_PostEvent(event_t* ev)
 	if (sysCallbacks.DispatchEvent && sysCallbacks.DispatchEvent(ev))
 		return;
 
+	if (PerfLoopTraceActive())
+	{
+		if (ev->type == EV_KeyDown) perfLoopInputTraceStats.keyDownEvents++;
+		else if (ev->type == EV_KeyUp) perfLoopInputTraceStats.keyUpEvents++;
+		else if (ev->type == EV_DeviceChange) perfLoopInputTraceStats.deviceChangeEvents++;
+
+		int occupancy = eventhead - eventtail;
+		if (occupancy < 0) occupancy += MAXEVENTS;
+		perfLoopInputTraceStats.eventQueueHighWater = std::max(perfLoopInputTraceStats.eventQueueHighWater, (uint32_t)occupancy);
+
+		const int nexthead = (eventhead + 1) & (MAXEVENTS - 1);
+		if (nexthead == eventtail)
+		{
+			perfLoopInputTraceStats.eventQueueOverflows++;
+		}
+	}
+
 	events[eventhead] = *ev;
 	eventhead = (eventhead + 1) & (MAXEVENTS - 1);
 }
@@ -179,6 +311,7 @@ void PostMouseMove(int xx, int yy)
 	if (ev.x || ev.y)
 	{
 		ev.type = EV_Mouse;
+		PerfLoopTraceNoteMousePost(ev.x, ev.y);
 		D_PostEvent(&ev);
 	}
 }
@@ -266,4 +399,3 @@ DEFINE_FIELD_X(InputEvent, FInputEvent, KeyString);
 DEFINE_FIELD_X(InputEvent, FInputEvent, KeyChar);
 DEFINE_FIELD_X(InputEvent, FInputEvent, MouseX);
 DEFINE_FIELD_X(InputEvent, FInputEvent, MouseY);
-
