@@ -1740,6 +1740,84 @@ void NRIRenderDevice::Draw2D()
 		return;
 	}
 
+	struct Draw2DTraceStats
+	{
+		uint32_t commands = 0;
+		uint32_t specialCommands = 0;
+		uint32_t texturedCommands = 0;
+		uint32_t canvasTextureCommands = 0;
+		uint32_t scissorCommands = 0;
+		uint32_t transformedCommands = 0;
+		uint32_t shapeCommands = 0;
+		uint32_t triangleCommands = 0;
+		uint32_t lineCommands = 0;
+		uint32_t pointCommands = 0;
+		int32_t vertices = 0;
+		int32_t indices = 0;
+	};
+
+	auto collectTraceStats = [](F2DDrawer* drawer)
+	{
+		Draw2DTraceStats stats;
+		if (drawer == nullptr)
+		{
+			return stats;
+		}
+
+		stats.vertices = drawer->mVertices.Size();
+		stats.indices = drawer->mIndices.Size();
+		stats.commands = (uint32_t)drawer->mData.Size();
+		for (const auto& cmd : drawer->mData)
+		{
+			if (cmd.isSpecial != SpecialDrawCommand::NotSpecial)
+			{
+				stats.specialCommands++;
+				continue;
+			}
+
+			if (cmd.mTexture != nullptr && cmd.mTexture->isValid())
+			{
+				stats.texturedCommands++;
+				if (cmd.mTexture->isHardwareCanvas())
+				{
+					stats.canvasTextureCommands++;
+				}
+			}
+			if ((cmd.mFlags & F2DDrawer::DTF_Scissor) != 0)
+			{
+				stats.scissorCommands++;
+			}
+			if (cmd.useTransform)
+			{
+				stats.transformedCommands++;
+			}
+			if (cmd.shape2DBufInfo != nullptr)
+			{
+				stats.shapeCommands++;
+			}
+
+			switch (cmd.mType)
+			{
+			case F2DDrawer::DrawTypeLines:
+				stats.lineCommands++;
+				break;
+			case F2DDrawer::DrawTypePoints:
+				stats.pointCommands++;
+				break;
+			case F2DDrawer::DrawTypeTriangles:
+			default:
+				stats.triangleCommands++;
+				break;
+			}
+		}
+		return stats;
+	};
+
+	const char* drawMode = "full";
+	F2DDrawer* activeDrawer = twod;
+	F2DDrawer uiDrawer;
+	const double drawStartMs = I_msTimeF();
+
 	if (mFrameGenerationUiTargetActive)
 	{
 		const uint32_t sceneBlendPrefixCount = GetFrameGenerationSceneBlendPrefixCount();
@@ -1750,14 +1828,43 @@ void NRIRenderDevice::Draw2D()
 
 		if (sceneBlendPrefixCount > 0)
 		{
-			F2DDrawer uiDrawer = *twod;
+			uiDrawer = *twod;
 			uiDrawer.mData.Delete(0, (int)sceneBlendPrefixCount);
-			::Draw2D(&uiDrawer, *mRenderState);
-			return;
+			activeDrawer = &uiDrawer;
+			drawMode = "ui-suffix";
 		}
 	}
 
-	::Draw2D(twod, *mRenderState);
+	const auto traceStats = collectTraceStats(activeDrawer);
+	::Draw2D(activeDrawer, *mRenderState);
+
+	if (PerfLoopTraceActive())
+	{
+		const auto& texStats = mTexture2DDebugStats;
+		Printf(
+			"PERF draw2d trace NRI: frame=%llu mode=%s draw_ms=%.3f cmds=%u specials=%u textured=%u canvas=%u scissor=%u xform=%u shapes=%u tris=%u lines=%u points=%u verts=%d indices=%d ensure=%u hits=%u misses=%u uploads=%u recreate=%u bytes=%llu\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			drawMode,
+			I_msTimeF() - drawStartMs,
+			traceStats.commands,
+			traceStats.specialCommands,
+			traceStats.texturedCommands,
+			traceStats.canvasTextureCommands,
+			traceStats.scissorCommands,
+			traceStats.transformedCommands,
+			traceStats.shapeCommands,
+			traceStats.triangleCommands,
+			traceStats.lineCommands,
+			traceStats.pointCommands,
+			traceStats.vertices,
+			traceStats.indices,
+			texStats.ensureCalls,
+			texStats.cacheHits,
+			texStats.cacheMisses,
+			texStats.uploadAttempts,
+			texStats.resourceRecreates,
+			(unsigned long long)texStats.uploadedBytes);
+	}
 }
 
 void NRIRenderDevice::SetVSync(bool vsync)
