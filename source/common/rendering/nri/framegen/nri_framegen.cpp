@@ -6,6 +6,7 @@
 #include "c_cvars.h"
 #include "printf.h"
 
+#include <cassert>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -227,7 +228,19 @@ namespace
 			return nri::Result::DEVICE_LOST;
 		return nri::Result::FAILURE;
 	}
+
+	static const char* GetPresentModeName(bool usedBridge, bool generatedFrame)
+	{
+		if (!usedBridge)
+			return "native";
+		return generatedFrame ? "proxy-generated" : "proxy-passthrough";
+	}
 #endif
+
+	static const char* GetSafeResetReason(const char* reason)
+	{
+		return (reason != nullptr && *reason != '\0') ? reason : "unspecified";
+	}
 
 	static const char* GetApiName(nri::GraphicsAPI api)
 	{
@@ -669,6 +682,8 @@ void NRIFrameGenerationContext::BeginFrame(const NRIRenderDevice& frameBuffer)
 	mProviderState.configuredThisFrame = false;
 	mProviderState.prepareDispatchedThisFrame = false;
 	mProviderState.prepareCameraInfoProvided = false;
+	mProviderState.presentUsedBridgeThisFrame = false;
+	mProviderState.presentGeneratedThisFrame = false;
 	ConfigureLowLatencyMode(frameBuffer);
 	if (!IsLowLatencyOperational(frameBuffer))
 	{
@@ -699,6 +714,10 @@ void NRIFrameGenerationContext::SetFrameDesc(const NRIRenderDevice& frameBuffer,
 	mLastFrameDesc = desc;
 	mLastInputAudit = BuildInputAudit(desc);
 	mHasFrameDesc = true;
+	if (desc.resetHistory)
+	{
+		NoteReset(desc.resetReason);
+	}
 }
 
 void NRIFrameGenerationContext::SetUiTexture(const NRITextureResource* uiTexture)
@@ -737,12 +756,38 @@ bool NRIFrameGenerationContext::Present(const NRIRenderDevice& frameBuffer, bool
 	const UINT presentFlags = (!vsync && allowTearing) ? DXGI_PRESENT_ALLOW_TEARING : 0u;
 	const HRESULT hr = mFfxSwapChain->Present(syncInterval, presentFlags);
 	outResult = GetNriPresentResult(hr);
+	mProviderState.lastPresentResult = outResult;
+	mProviderState.presentUsedBridgeThisFrame = true;
+	mProviderState.presentGeneratedThisFrame = mProviderState.frameGenerationDispatchedThisFrame;
+	CopyString(mProviderState.lastPresentMode, std::size(mProviderState.lastPresentMode),
+		GetPresentModeName(true, mProviderState.frameGenerationDispatchedThisFrame));
+	++mProviderState.presentCount;
 	if (FAILED(hr))
 	{
 		CopyString(mProviderState.lastStatusReason, std::size(mProviderState.lastStatusReason), "proxy-present-failed");
 	}
 	return true;
 #endif
+}
+
+void NRIFrameGenerationContext::NoteReset(const char* reason)
+{
+	CopyString(mProviderState.lastResetReason, std::size(mProviderState.lastResetReason), GetSafeResetReason(reason));
+	++mProviderState.resetCount;
+}
+
+void NRIFrameGenerationContext::RequestNativeFallback(const char* reason)
+{
+	mProviderState.nativeFallbackRequested = true;
+	NoteReset(reason);
+	CopyString(mProviderState.lastStatusReason, std::size(mProviderState.lastStatusReason), GetSafeResetReason(reason));
+}
+
+bool NRIFrameGenerationContext::ConsumeNativeFallbackRequest()
+{
+	const bool requested = mProviderState.nativeFallbackRequested;
+	mProviderState.nativeFallbackRequested = false;
+	return requested;
 }
 
 NRIFrameGenerationInputAudit NRIFrameGenerationContext::BuildInputAudit(const NRIFrameGenerationFrameDesc& desc) const
@@ -844,6 +889,12 @@ void NRIFrameGenerationContext::OnPresentStart(const NRIRenderDevice&)
 
 void NRIFrameGenerationContext::OnPresentEnd(const NRIRenderDevice& frameBuffer, nri::Result presentResult)
 {
+	mProviderState.lastPresentResult = presentResult;
+	if (presentResult == nri::Result::SUCCESS && !mProviderState.presentUsedBridgeThisFrame)
+	{
+		CopyString(mProviderState.lastPresentMode, std::size(mProviderState.lastPresentMode), "native");
+		++mProviderState.presentCount;
+	}
 	mLowLatencyState.presentBoundarySeen = mLowLatencyState.presentBoundarySeen || presentResult == nri::Result::SUCCESS;
 	if (!IsLowLatencyOperational(frameBuffer) || presentResult != nri::Result::SUCCESS || frameBuffer.mSwapChain == nullptr)
 	{
@@ -904,17 +955,23 @@ void NRIFrameGenerationContext::ResetProviderState()
 {
 	mProviderState = {};
 	mProviderState.noSwapChainNotify = true;
+	mProviderState.lastPresentResult = nri::Result::FAILURE;
 	std::strncpy(mProviderState.runtimeLibrary, "unloaded", std::size(mProviderState.runtimeLibrary) - 1u);
 	std::strncpy(mProviderState.providerVersion, "unknown", std::size(mProviderState.providerVersion) - 1u);
+	std::strncpy(mProviderState.lastResetReason, "none", std::size(mProviderState.lastResetReason) - 1u);
+	std::strncpy(mProviderState.lastPresentMode, "none", std::size(mProviderState.lastPresentMode) - 1u);
 	std::strncpy(mProviderState.lastStatusReason, "not-loaded", std::size(mProviderState.lastStatusReason) - 1u);
 	mProviderState.runtimeLibrary[std::size(mProviderState.runtimeLibrary) - 1u] = '\0';
 	mProviderState.providerVersion[std::size(mProviderState.providerVersion) - 1u] = '\0';
+	mProviderState.lastResetReason[std::size(mProviderState.lastResetReason) - 1u] = '\0';
+	mProviderState.lastPresentMode[std::size(mProviderState.lastPresentMode) - 1u] = '\0';
 	mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
 }
 
 void NRIFrameGenerationContext::DestroyProviderPresentBridge()
 {
 #ifdef _WIN32
+	assert(mFfxSwapChainContext != nullptr || mFfxSwapChain == nullptr);
 	const auto dispatch = reinterpret_cast<PfnFfxDispatch>(mFfxDispatchFn);
 	const auto destroyContext = reinterpret_cast<PfnFfxDestroyContext>(mFfxDestroyContextFn);
 	const auto allocationCallbacks = reinterpret_cast<ffxAllocationCallbacks*>(mFfxAllocCallbacks);
@@ -1256,6 +1313,7 @@ bool NRIFrameGenerationContext::EnsureProviderContext(const NRIRenderDevice& fra
 		 mProviderState.contextRenderHeight != desc.renderHeight);
 	if (dimensionsChanged)
 	{
+		NoteReset("output-size-change");
 		const auto destroyContext = reinterpret_cast<PfnFfxDestroyContext>(mFfxDestroyContextFn);
 		const auto allocationCallbacks = reinterpret_cast<ffxAllocationCallbacks*>(mFfxAllocCallbacks);
 		if (destroyContext != nullptr && mFfxContext != nullptr)
@@ -1461,6 +1519,13 @@ void NRIFrameGenerationContext::ConfigureAndPrepareProvider(const NRIRenderDevic
 
 	if (usePresentBridge && mFfxSwapChainContext != nullptr)
 	{
+		assert(desc.uiTexture != nullptr || mPolicy.resolvedUiMode != NRIFrameGenerationUiMode::UiTexture);
+		if (desc.uiTexture == nullptr && mPolicy.resolvedUiMode == NRIFrameGenerationUiMode::UiTexture)
+		{
+			std::strncpy(mProviderState.lastStatusReason, "ui-texture-missing", std::size(mProviderState.lastStatusReason) - 1u);
+			mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+			return;
+		}
 		ffxConfigureDescFrameGenerationSwapChainRegisterUiResourceDX12 uiConfig = {};
 		NriFfxInitHeader(uiConfig.header, NRI_FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_REGISTERUIRESOURCE_DX12);
 		uiConfig.uiResource = GetFfxTextureResource(frameBuffer.mCore, desc.uiTexture);

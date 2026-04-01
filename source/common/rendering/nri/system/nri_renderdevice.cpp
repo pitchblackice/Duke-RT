@@ -1321,14 +1321,13 @@ NRIRenderDevice::~NRIRenderDevice()
 	delete mBones;
 	mBones = nullptr;
 
-	DestroyRenderResources();
 	DestroySwapChain();
-
+	mFrameGeneration.Shutdown();
 	if (mRenderer != nullptr)
 	{
 		mRenderer->Shutdown();
 	}
-	mFrameGeneration.Shutdown();
+	DestroyRenderResources();
 
 	DestroyQueuedFrames();
 
@@ -1505,6 +1504,9 @@ void NRIRenderDevice::BeginFrame()
 		IDXGISwapChain4* frameGenSwapChain = mFrameGeneration.GetPresentSwapChain();
 		if (frameGenSwapChain == nullptr)
 		{
+			mFrameGeneration.RequestNativeFallback("present-bridge-invalidated");
+			WaitForCommands(true);
+			CreateSwapChain();
 			return;
 		}
 
@@ -1517,6 +1519,9 @@ void NRIRenderDevice::BeginFrame()
 			Printf(TEXTCOLOR_RED "NRI framegen present bridge returned backbuffer index %u outside wrapped image range %u.\n",
 				mCurrentSwapChainImage,
 				(unsigned)mFrameGenerationPresentImages.size());
+			mFrameGeneration.RequestNativeFallback("present-bridge-invalidated");
+			WaitForCommands(true);
+			CreateSwapChain();
 			return;
 		}
 		mCurrentPresentTarget = &mFrameGenerationPresentImages[mCurrentSwapChainImage];
@@ -1567,6 +1572,10 @@ void NRIRenderDevice::BeginFrame()
 
 		if (acquireResult != nri::Result::SUCCESS)
 		{
+			if (acquireResult == nri::Result::DEVICE_LOST)
+			{
+				mFrameGeneration.NoteReset("device-lost");
+			}
 			Printf(TEXTCOLOR_RED "NRI failed to acquire swapchain image.\n");
 			LogD3D12FailureDiagnostics("AcquireNextTexture");
 			return;
@@ -1636,6 +1645,7 @@ void NRIRenderDevice::SetVSync(bool vsync)
 		return;
 	}
 
+	mFrameGeneration.NoteReset("vsync-change");
 	WaitForCommands(true);
 	if (!CreateSwapChain())
 	{
@@ -2339,7 +2349,7 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		mNativeD3D12SwapChain != nullptr ? "ok" : "missing",
 		GetSelectedAPI() == nri::GraphicsAPI::D3D12 ? "nri-public-device-queue-only" : "unsupported-api");
 	const auto& frameGenProvider = mFrameGeneration.GetProviderState();
-	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s swapctx=%s bridge=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s fg_dispatch=%s ui_reg=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu fg:%llu frames=%llu/%llu query=%s/%s create=%s/%s config=%s/%s prepare=%s dispatch=%s vram=fg:%s:%llu/%llu sc:%s:%llu/%llu reason=%s\n",
+	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s swapctx=%s bridge=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s fg_dispatch=%s ui_reg=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu fg:%llu frames=%llu/%llu query=%s/%s create=%s/%s config=%s/%s prepare=%s dispatch=%s vram=fg:%s:%llu/%llu sc:%s:%llu/%llu resets=%llu last_reset=%s present=%s/%s count=%llu reason=%s\n",
 		frameGenProvider.runtimeLoaded ? "yes" : "no",
 		frameGenProvider.runtimeFunctionsLoaded ? "yes" : "no",
 		frameGenProvider.contextCreated ? "yes" : "no",
@@ -2377,6 +2387,11 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		frameGenProvider.swapChainMemoryUsageValid ? "yes" : "no",
 		(unsigned long long)frameGenProvider.swapChainTotalUsageBytes,
 		(unsigned long long)frameGenProvider.swapChainAliasableUsageBytes,
+		(unsigned long long)frameGenProvider.resetCount,
+		frameGenProvider.lastResetReason,
+		frameGenProvider.lastPresentMode,
+		GetNriResultName(frameGenProvider.lastPresentResult),
+		(unsigned long long)frameGenProvider.presentCount,
 		frameGenProvider.lastStatusReason);
 	const auto& lowLatencyState = mFrameGeneration.GetLowLatencyState();
 	Printf("NRI PT low-latency: iface=%s swapchain=%s configured=%s sleep=%s count=%llu markers=%llu present=%s set_mode=%s sleep_result=%s sim=%s/%s submit=%s/%s report=%s present_us=%llu..%llu\n",
@@ -3490,7 +3505,8 @@ bool NRIRenderDevice::CreateSwapChain()
 		nri_framegen &&
 		HasRequestedFrameGenerationProvider() &&
 		GetSelectedAPI() == nri::GraphicsAPI::D3D12 &&
-		!IsFullscreenModeActive();
+		!IsFullscreenModeActive() &&
+		!mFrameGeneration.ConsumeNativeFallbackRequest();
 
 	mSwapChainFlags = swapChainDesc.flags;
 	mSwapChainQueuedFrameNum = swapChainDesc.queuedFrameNum;
@@ -3922,6 +3938,12 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 			{
 				return true;
 			}
+
+			mFrameGeneration.NoteReset(
+				(mFrameGenerationPresentImages[0].width != width || mFrameGenerationPresentImages[0].height != height) ?
+					"swapchain-resize" :
+					"swapchain-flags-change");
+			WaitForCommands(true);
 		}
 		return CreateSwapChain();
 	}
@@ -3937,6 +3959,10 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 		return true;
 	}
 
+	mFrameGeneration.NoteReset(
+		(!mSwapChainImages.empty() && (mSwapChainImages[0].target.width != width || mSwapChainImages[0].target.height != height)) ?
+			"swapchain-resize" :
+			"swapchain-flags-change");
 	WaitForCommands(true);
 	return CreateSwapChain();
 }
@@ -3999,6 +4025,10 @@ void NRIRenderDevice::EndFrameAndPresent()
 	mFrameGeneration.OnRenderSubmitEnd(*this);
 	if (submitResult != nri::Result::SUCCESS)
 	{
+		if (submitResult == nri::Result::DEVICE_LOST)
+		{
+			mFrameGeneration.NoteReset("device-lost");
+		}
 		Printf(TEXTCOLOR_RED "NRI QueueSubmit failed with result '%s'.\n", GetNriResultName(submitResult));
 		LogD3D12FailureDiagnostics("QueueSubmit");
 	}
@@ -4041,8 +4071,25 @@ void NRIRenderDevice::EndFrameAndPresent()
 	else
 	{
 		mHasPresentedSwapChainFrame = false;
+		if (presentResult == nri::Result::DEVICE_LOST)
+		{
+			mFrameGeneration.NoteReset("device-lost");
+		}
 		Printf(TEXTCOLOR_RED "NRI QueuePresent failed with result '%s'.\n", GetNriResultName(presentResult));
 		LogD3D12FailureDiagnostics(IsFrameGenerationPresentPathActive() ? "FramegenPresent" : "QueuePresent");
+		if (IsFrameGenerationPresentPathActive() && presentResult != nri::Result::DEVICE_LOST)
+		{
+			mFrameGeneration.RequestNativeFallback("proxy-present-failed");
+			WaitForCommands(true);
+			if (CreateSwapChain())
+			{
+				Printf(TEXTCOLOR_YELLOW "NRI framegen present fallback: recreated the native swapchain path after proxy present failure.\n");
+			}
+			else
+			{
+				Printf(TEXTCOLOR_RED "NRI framegen present fallback failed to recreate the native swapchain path.\n");
+			}
+		}
 	}
 	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())
 	{

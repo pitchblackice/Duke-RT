@@ -185,12 +185,15 @@ struct NRIFrameGenerationProviderState
 	bool contextCreated = false;
 	bool swapChainContextCreated = false;
 	bool presentBridgeReady = false;
+	bool nativeFallbackRequested = false;
 	bool debugConfigured = false;
 	bool configuredThisFrame = false;
 	bool prepareDispatchedThisFrame = false;
 	bool prepareCameraInfoProvided = false;
 	bool frameGenerationDispatchedThisFrame = false;
 	bool uiResourceRegisteredThisFrame = false;
+	bool presentUsedBridgeThisFrame = false;
+	bool presentGeneratedThisFrame = false;
 	bool noSwapChainNotify = true;
 	bool memoryUsageValid = false;
 	bool swapChainMemoryUsageValid = false;
@@ -204,6 +207,8 @@ struct NRIFrameGenerationProviderState
 	uint64_t configureCount = 0;
 	uint64_t prepareCount = 0;
 	uint64_t dispatchCount = 0;
+	uint64_t resetCount = 0;
+	uint64_t presentCount = 0;
 	uint64_t totalUsageBytes = 0;
 	uint64_t aliasableUsageBytes = 0;
 	uint64_t swapChainTotalUsageBytes = 0;
@@ -217,8 +222,11 @@ struct NRIFrameGenerationProviderState
 	uint32_t lastDispatchResult = 0;
 	uint32_t lastQueryResult = 0;
 	uint32_t lastSwapChainQueryResult = 0;
+	nri::Result lastPresentResult = nri::Result::FAILURE;
 	char runtimeLibrary[64] = "unloaded";
 	char providerVersion[64] = "unknown";
+	char lastResetReason[96] = "none";
+	char lastPresentMode[48] = "none";
 	char lastStatusReason[96] = "not-loaded";
 };
 
@@ -241,6 +249,9 @@ public:
 	void SetUiTexture(const NRITextureResource* uiTexture);
 	void ConfigureAndDispatchFrame(const NRIRenderDevice& frameBuffer);
 	bool Present(const NRIRenderDevice& frameBuffer, bool vsync, bool allowTearing, nri::Result& outResult);
+	void NoteReset(const char* reason);
+	void RequestNativeFallback(const char* reason);
+	bool ConsumeNativeFallbackRequest();
 
 	const NRIFrameGenerationPolicy& GetPolicy() const { return mPolicy; }
 	const NRIFrameGenerationFrameDesc& GetFrameDesc() const { return mLastFrameDesc; }

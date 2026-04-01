@@ -3534,7 +3534,7 @@ void NRIRenderer::PrintStatus() const
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.providerRuntimeSupported),
 		hasFrameGenDesc ? "captured" : "empty",
 		frameGenPolicy.resolvedReason);
-	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s swapctx=%s bridge=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s fg_dispatch=%s ui_reg=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu fg:%llu frames=%llu/%llu query=%s/%s create=%s/%s config=%s/%s prepare=%s dispatch=%s vram=fg:%s:%llu/%llu sc:%s:%llu/%llu reason=%s\n",
+	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s swapctx=%s bridge=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s fg_dispatch=%s ui_reg=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu fg:%llu frames=%llu/%llu query=%s/%s create=%s/%s config=%s/%s prepare=%s dispatch=%s vram=fg:%s:%llu/%llu sc:%s:%llu/%llu resets=%llu last_reset=%s present=%s/%d count=%llu reason=%s\n",
 		frameGenProvider.runtimeLoaded ? "yes" : "no",
 		frameGenProvider.runtimeFunctionsLoaded ? "yes" : "no",
 		frameGenProvider.contextCreated ? "yes" : "no",
@@ -3572,6 +3572,11 @@ void NRIRenderer::PrintStatus() const
 		frameGenProvider.swapChainMemoryUsageValid ? "yes" : "no",
 		(unsigned long long)frameGenProvider.swapChainTotalUsageBytes,
 		(unsigned long long)frameGenProvider.swapChainAliasableUsageBytes,
+		(unsigned long long)frameGenProvider.resetCount,
+		frameGenProvider.lastResetReason,
+		frameGenProvider.lastPresentMode,
+		(int)frameGenProvider.lastPresentResult,
+		(unsigned long long)frameGenProvider.presentCount,
 		frameGenProvider.lastStatusReason);
 	if (hasFrameGenDesc)
 	{
