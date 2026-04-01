@@ -124,13 +124,31 @@ CUSTOM_CVAR(Bool, nri_framegen, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Int, nri_ptspherelongs, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
-	self = clamp<int>(self, 8, 256);
+	if (self < 8)
+	{
+		self = 8;
+		return;
+	}
+	else if (self > 256)
+	{
+		self = 256;
+		return;
+	}
 	NotifyActiveDebugSphereTessellationChange();
 }
 
 CUSTOM_CVAR(Int, nri_ptspherelats, 32, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
-	self = clamp<int>(self, 4, 128);
+	if (self < 4)
+	{
+		self = 4;
+		return;
+	}
+	else if (self > 128)
+	{
+		self = 128;
+		return;
+	}
 	NotifyActiveDebugSphereTessellationChange();
 }
 
