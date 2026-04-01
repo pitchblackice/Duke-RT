@@ -160,8 +160,71 @@ namespace
 		double updateMs = 0.0;
 	};
 
+	struct Perf2DProducerDelta
+	{
+		int commands = 0;
+		int vertices = 0;
+		int indices = 0;
+		double ms = 0.0;
+	};
+
+	struct Perf2DProducerTraceStats
+	{
+		bool introSkipped = false;
+		Perf2DProducerDelta fullscreenBlends;
+		Perf2DProducerDelta mapTitle;
+		Perf2DProducerDelta chat;
+		Perf2DProducerDelta console;
+		Perf2DProducerDelta menu;
+		Perf2DProducerDelta stats;
+		Perf2DProducerDelta rate;
+		Perf2DProducerDelta drawtile;
+		Perf2DProducerDelta overlays;
+		int totalCommands = 0;
+		int totalVertices = 0;
+		int totalIndices = 0;
+	};
+
 	static PerfTryRunTicsTraceStats perfTryRunTicsTraceStats;
 	static PerfDisplayTraceStats perfDisplayTraceStats;
+	static Perf2DProducerTraceStats perf2DProducerTraceStats;
+
+	struct Perf2DSnapshot
+	{
+		int commands = 0;
+		int vertices = 0;
+		int indices = 0;
+	};
+
+	static Perf2DSnapshot Capture2DSnapshot()
+	{
+		if (twod == nullptr)
+		{
+			return {};
+		}
+
+		Perf2DSnapshot snapshot;
+		snapshot.commands = twod->mData.Size();
+		snapshot.vertices = twod->mVertices.Size();
+		snapshot.indices = twod->mIndices.Size();
+		return snapshot;
+	}
+
+	template<typename Func>
+	static Perf2DProducerDelta Trace2DProducer(Func&& func)
+	{
+		const auto before = Capture2DSnapshot();
+		const double startMs = I_msTimeF();
+		func();
+		const auto after = Capture2DSnapshot();
+
+		Perf2DProducerDelta delta;
+		delta.commands = after.commands - before.commands;
+		delta.vertices = after.vertices - before.vertices;
+		delta.indices = after.indices - before.indices;
+		delta.ms = I_msTimeF() - startMs;
+		return delta;
+	}
 
 	static const char* GetGameStateName(int state)
 	{
@@ -442,15 +505,48 @@ void DrawOverlays()
 {
 	NetUpdate();			// send out any new accumulation
 
+	const auto overlayStart = Capture2DSnapshot();
 	if (gamestate != GS_INTRO) // do not draw overlays on the intros
 	{
-		// Draw overlay elements
-		CT_Drawer();
-		C_DrawConsole();
-		M_Drawer();
-		FStat::PrintStat(twod);
+		if (PerfLoopTraceActive())
+		{
+			perf2DProducerTraceStats.chat = Trace2DProducer([]() { CT_Drawer(); });
+			perf2DProducerTraceStats.console = Trace2DProducer([]() { C_DrawConsole(); });
+			perf2DProducerTraceStats.menu = Trace2DProducer([]() { M_Drawer(); });
+			perf2DProducerTraceStats.stats = Trace2DProducer([]() { FStat::PrintStat(twod); });
+		}
+		else
+		{
+			// Draw overlay elements
+			CT_Drawer();
+			C_DrawConsole();
+			M_Drawer();
+			FStat::PrintStat(twod);
+		}
 	}
-	DrawRateStuff();
+	else if (PerfLoopTraceActive())
+	{
+		perf2DProducerTraceStats.introSkipped = true;
+	}
+
+	if (PerfLoopTraceActive())
+	{
+		perf2DProducerTraceStats.rate = Trace2DProducer([]() { DrawRateStuff(); });
+		const auto overlayEnd = Capture2DSnapshot();
+		perf2DProducerTraceStats.overlays.commands = overlayEnd.commands - overlayStart.commands;
+		perf2DProducerTraceStats.overlays.vertices = overlayEnd.vertices - overlayStart.vertices;
+		perf2DProducerTraceStats.overlays.indices = overlayEnd.indices - overlayStart.indices;
+		perf2DProducerTraceStats.overlays.ms =
+			perf2DProducerTraceStats.chat.ms +
+			perf2DProducerTraceStats.console.ms +
+			perf2DProducerTraceStats.menu.ms +
+			perf2DProducerTraceStats.stats.ms +
+			perf2DProducerTraceStats.rate.ms;
+	}
+	else
+	{
+		DrawRateStuff();
+	}
 }
 
 //==========================================================================
@@ -508,8 +604,16 @@ void Display()
 			screen->SetSceneRenderTarget(gl_ssao != 0);
 			//updateModelInterpolation();
 			gi->Render();
-			DrawFullscreenBlends();
-			drawMapTitle();
+			if (PerfLoopTraceActive())
+			{
+				perf2DProducerTraceStats.fullscreenBlends = Trace2DProducer([]() { DrawFullscreenBlends(); });
+				perf2DProducerTraceStats.mapTitle = Trace2DProducer([]() { drawMapTitle(); });
+			}
+			else
+			{
+				DrawFullscreenBlends();
+				drawMapTitle();
+			}
 			perfDisplayTraceStats.renderMs += I_msTimeF() - stageStart;
 			break;
 		}
@@ -526,28 +630,39 @@ void Display()
 		DrawOverlays();
 		if (drawtile[0])
 		{
-			auto tex = TexMan.CheckForTexture(drawtile, ETextureType::Any);
-			if (!tex.isValid()) tex = tileGetTextureID(atoi(drawtile));
-			if (tex.isValid())
+			auto drawTileFunc = []()
 			{
-				auto tx = TexMan.GetGameTexture(tex, true);
-				if (tx)
+				auto tex = TexMan.CheckForTexture(drawtile, ETextureType::Any);
+				if (!tex.isValid()) tex = tileGetTextureID(atoi(drawtile));
+				if (tex.isValid())
 				{
-					int width = (int)tx->GetDisplayWidth();
-					int height = (int)tx->GetDisplayHeight();
-					int dwidth, dheight;
-					if (width > height)
+					auto tx = TexMan.GetGameTexture(tex, true);
+					if (tx)
 					{
-						dwidth = screen->GetWidth() / 4;
-						dheight = height * dwidth / width;
+						int width = (int)tx->GetDisplayWidth();
+						int height = (int)tx->GetDisplayHeight();
+						int dwidth, dheight;
+						if (width > height)
+						{
+							dwidth = screen->GetWidth() / 4;
+							dheight = height * dwidth / width;
+						}
+						else
+						{
+							dheight = screen->GetHeight() / 4;
+							dwidth = width * dheight / height;
+						}
+						DrawTexture(twod, tx, 0, 0, DTA_DestWidth, dwidth, DTA_DestHeight, dheight, TAG_DONE);
 					}
-					else
-					{
-						dheight = screen->GetHeight() / 4;
-						dwidth = width * dheight / height;
-					}
-					DrawTexture(twod, tx, 0, 0, DTA_DestWidth, dwidth, DTA_DestHeight, dheight, TAG_DONE);
 				}
+			};
+			if (PerfLoopTraceActive())
+			{
+				perf2DProducerTraceStats.drawtile = Trace2DProducer(drawTileFunc);
+			}
+			else
+			{
+				drawTileFunc();
 			}
 		}
 	}
@@ -561,6 +676,14 @@ void Display()
 	stageStart = I_msTimeF();
 	screen->Update();
 	perfDisplayTraceStats.updateMs += I_msTimeF() - stageStart;
+
+	if (PerfLoopTraceActive())
+	{
+		const auto final2D = Capture2DSnapshot();
+		perf2DProducerTraceStats.totalCommands = final2D.commands;
+		perf2DProducerTraceStats.totalVertices = final2D.vertices;
+		perf2DProducerTraceStats.totalIndices = final2D.indices;
+	}
 }
 
 //==========================================================================
@@ -832,6 +955,7 @@ void MainLoop ()
 				PerfLoopTraceResetInputStats();
 				perfTryRunTicsTraceStats = {};
 				perfDisplayTraceStats = {};
+				perf2DProducerTraceStats = {};
 			}
 
 			// frame syncronous IO operations
@@ -958,6 +1082,31 @@ void MainLoop ()
 						renderTrace.nriRawPresentMs,
 						renderTrace.nriFinalPresentMs);
 				}
+				Printf(
+					"PERF twod producer trace: frame=%llu total_cmds=%d total_verts=%d total_indices=%d intro_skip=%d overlays_cmds=%d overlays_ms=%.3f fsblend_cmds=%d fsblend_ms=%.3f maptitle_cmds=%d maptitle_ms=%.3f chat_cmds=%d chat_ms=%.3f console_cmds=%d console_ms=%.3f menu_cmds=%d menu_ms=%.3f stats_cmds=%d stats_ms=%.3f rate_cmds=%d rate_ms=%.3f drawtile_cmds=%d drawtile_ms=%.3f\n",
+					(unsigned long long)traceFrame,
+					perf2DProducerTraceStats.totalCommands,
+					perf2DProducerTraceStats.totalVertices,
+					perf2DProducerTraceStats.totalIndices,
+					perf2DProducerTraceStats.introSkipped ? 1 : 0,
+					perf2DProducerTraceStats.overlays.commands,
+					perf2DProducerTraceStats.overlays.ms,
+					perf2DProducerTraceStats.fullscreenBlends.commands,
+					perf2DProducerTraceStats.fullscreenBlends.ms,
+					perf2DProducerTraceStats.mapTitle.commands,
+					perf2DProducerTraceStats.mapTitle.ms,
+					perf2DProducerTraceStats.chat.commands,
+					perf2DProducerTraceStats.chat.ms,
+					perf2DProducerTraceStats.console.commands,
+					perf2DProducerTraceStats.console.ms,
+					perf2DProducerTraceStats.menu.commands,
+					perf2DProducerTraceStats.menu.ms,
+					perf2DProducerTraceStats.stats.commands,
+					perf2DProducerTraceStats.stats.ms,
+					perf2DProducerTraceStats.rate.commands,
+					perf2DProducerTraceStats.rate.ms,
+					perf2DProducerTraceStats.drawtile.commands,
+					perf2DProducerTraceStats.drawtile.ms);
 				Printf(
 					"PERF input trace: frame=%llu getevent=%u starttic_calls=%u handleevents=%u msgs=%u burst=%u raw_input=%u raw_keyboard=%u raw_mouse=%u raw_mouse_moves=%u raw_mouse_drop=%u posted_mouse=%u dispatched_mouse=%u sampled_mouse=%u posted_delta=(%.1f,%.1f) dispatched_delta=(%.1f,%.1f) sampled_delta=(%.1f,%.1f) key_down=%u key_up=%u device_change=%u queue_hw=%u queue_overflow=%u\n",
 					(unsigned long long)traceFrame,
