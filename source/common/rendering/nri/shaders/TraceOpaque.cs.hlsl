@@ -143,6 +143,11 @@ float3 EvaluateAmbientDiffuse(float3 albedo)
 	return albedo * 0.20;
 }
 
+float3 GetSurfaceDiffuseColor(float3 albedo, float metalness)
+{
+	return albedo * (1.0 - metalness);
+}
+
 float3 EvaluateDirectSunDiffuse(float3 albedo, float3 normal, float3 lightDir)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
@@ -401,7 +406,7 @@ void EvaluateSampledEmissiveLighting(
 	const float projectedArea = max(candidate.primitiveArea * emitterLambert, 0.001);
 	const float solidAngleEstimate = min(projectedArea / max(12.56637061436 * lightDistanceSq, 0.01), 1.0);
 	const float sampleWeight = min(solidAngleEstimate / pdf, 16.0) * reachScale;
-	outDiffuse = albedo * (lambert * 0.80) * lightColor * sampleWeight;
+	outDiffuse = GetSurfaceDiffuseColor(albedo, metalness) * (lambert * 0.80) * lightColor * sampleWeight;
 	outSpecular = EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, 1.0) * lightColor * sampleWeight;
 }
 
@@ -500,6 +505,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 			break;
 		}
 
+		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial, bounceHit.uv);
 		const float4 bounceAlbedo = SampleMaterialBaseColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
 		if (IsMaterialEmissive(bounceMaterial))
 		{
@@ -507,9 +513,9 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 			break;
 		}
 
-		indirectRadiance += throughput * EvaluateSectorLighting(bounceMaterial, bounceHit.normal, bounceAlbedo.rgb);
+		const float3 bounceDiffuseColor = GetSurfaceDiffuseColor(bounceAlbedo.rgb, bounceMetalness);
+		indirectRadiance += throughput * EvaluateSectorLighting(bounceMaterial, bounceHit.normal, bounceDiffuseColor);
 
-		const float bounceMetalness = GetSurfaceMetalness(bounceMaterial, bounceHit.uv);
 		const float3 bounceViewDir = normalize(-tracedDirection);
 		float3 bounceEmissiveDiffuse = 0.0;
 		float3 bounceEmissiveSpecular = 0.0;
@@ -539,9 +545,9 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 		{
 			const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce + 1u, bounce * 3u + 1u), frameIndex + bounce + 1u);
 			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
-			indirectRadiance += throughput * bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow);
+			indirectRadiance += throughput * bounceDiffuseColor * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow);
 		}
-		throughput *= bounceAlbedo.rgb * 0.65;
+		throughput *= bounceDiffuseColor * 0.65;
 		if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01)
 		{
 			break;
@@ -555,7 +561,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 	return indirectRadiance;
 }
 
-float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 viewDir, uint2 pixelPos, uint frameIndex, float roughness, uint bounceCount, out float outHitDistance)
+float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 viewDir, uint2 pixelPos, uint frameIndex, float roughness, float metalness, uint bounceCount, out float outHitDistance)
 {
 	outHitDistance = 0.0;
 	if (bounceCount == 0u)
@@ -564,7 +570,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	}
 
 	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u ^ 0x85ebca6bu;
-	float3 throughput = GetSurfaceSpecularColor(surfaceAlbedo.rgb, 0.0);
+	float3 throughput = GetSurfaceSpecularColor(surfaceAlbedo.rgb, metalness);
 	float3 indirectRadiance = 0.0;
 	float3 origin = surfaceHit.position + surfaceHit.normal * 0.05;
 	float3 direction = SampleSpecularLobe(reflect(-viewDir, surfaceHit.normal), roughness, rngState);
@@ -606,7 +612,8 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			break;
 		}
 
-		indirectRadiance += throughput * EvaluateSectorLighting(bounceMaterial, bounceHit.normal, bounceAlbedo.rgb);
+		const float3 bounceDiffuseColor = GetSurfaceDiffuseColor(bounceAlbedo.rgb, bounceMetalness);
+		indirectRadiance += throughput * EvaluateSectorLighting(bounceMaterial, bounceHit.normal, bounceDiffuseColor);
 
 		const float3 bounceViewDir = normalize(-tracedDirection);
 		float3 bounceEmissiveDiffuse = 0.0;
@@ -638,7 +645,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 			const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce * 5u + 1u, bounce * 7u + 3u), frameIndex + bounce + 1u);
 			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
 			indirectRadiance += throughput * (
-				bounceAlbedo.rgb * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) +
+				bounceDiffuseColor * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) +
 				EvaluateSunSpecular(bounceAlbedo.rgb, bounceMetalness, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
 		}
 
@@ -808,6 +815,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const bool emissiveMaterial = IsMaterialEmissive(material);
 			roughness = GetSurfaceRoughness(material, hit.uv);
 			const float metalness = GetSurfaceMetalness(material, hit.uv);
+			const float3 diffuseAlbedo = GetSurfaceDiffuseColor(albedo.rgb, metalness);
 			const float materialID = GetSurfaceMaterialID(material);
 			if (bootstrapBaseColor)
 			{
@@ -837,9 +845,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 				const float3 viewDir = normalize(-visibleRayDirection);
 				sectorSourceLighting = EvaluateSectorLightingSource(material, hit.normal);
-				sectorAmbientLighting = EvaluateSectorLighting(material, hit.normal, albedo.rgb);
-				ambientDirectLighting = EvaluateAmbientDiffuse(albedo.rgb) + sectorAmbientLighting;
-				sunTransportDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(albedo.rgb, hit.normal, lightDir) * shadow : 0.0;
+				sectorAmbientLighting = EvaluateSectorLighting(material, hit.normal, diffuseAlbedo);
+				ambientDirectLighting = EvaluateAmbientDiffuse(diffuseAlbedo) + sectorAmbientLighting;
+				sunTransportDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(diffuseAlbedo, hit.normal, lightDir) * shadow : 0.0;
 				sunTransportSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0) * shadow : 0.0;
 
 				const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
@@ -886,7 +894,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					}
 
 					const float3 lightColor = runtimeLight.color * attenuation;
-					const float3 analyticDiffuse = albedo.rgb * (lambert * 0.80) * lightColor * runtimeShadow;
+					const float3 analyticDiffuse = diffuseAlbedo * (lambert * 0.80) * lightColor * runtimeShadow;
 					const float3 analyticSpecular = EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, runtimeLightDir, 1.0) * lightColor * runtimeShadow;
 					analyticDirectLighting += analyticDiffuse + analyticSpecular;
 					runtimePointDirectLighting += analyticDiffuse + analyticSpecular;
@@ -960,8 +968,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{
-					indirectTransportDiffuse = TraceIndirectDiffuse(hit, albedo.rgb, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance);
-					indirectTransportSpecular = TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, lightBounceCount, specularHitDistance);
+					indirectTransportDiffuse = TraceIndirectDiffuse(hit, diffuseAlbedo, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance);
+					indirectTransportSpecular = TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, metalness, lightBounceCount, specularHitDistance);
 				}
 
 				diffuse += sampledEmissiveTransportDiffuse + indirectTransportDiffuse;

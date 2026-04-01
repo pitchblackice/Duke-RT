@@ -68,6 +68,11 @@ float3 EvaluateDirectSunDiffuse(float3 albedo, float3 normal, float3 lightDir)
 	return albedo * (lambert * 0.80);
 }
 
+float3 GetSurfaceDiffuseColor(float3 albedo, float metalness)
+{
+	return albedo * (1.0 - metalness);
+}
+
 float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3 viewDir, float3 lightDir, float shadow)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
@@ -108,7 +113,7 @@ void ApplyShadowAwareDirectLightingCorrection(uint2 pixelPos, float materialID, 
 	}
 
 	const float3 lightDir = normalize(gTraceConstants.LightDirection);
-	directLighting += EvaluateDirectSunDiffuse(albedo, normal, lightDir) * shadowDelta;
+	directLighting += EvaluateDirectSunDiffuse(GetSurfaceDiffuseColor(albedo, metalness), normal, lightDir) * shadowDelta;
 	directLighting += EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, 1.0) * shadowDelta;
 }
 
