@@ -2649,6 +2649,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeSpaceLinkMs);
 			return BuildRuntimeSpaceLinkOverlay(di, runtimeSpaceLinkGeometry, runtimeSpaceLinkMaterialBridge);
 		}();
+		mLastPerfShellTraceStats.runtimeSpaceLinkPrimitiveCount = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
+		mLastPerfShellTraceStats.runtimeSpaceLinkMaterialCount = (uint32_t)runtimeSpaceLinkMaterialBridge.materials.size();
 		const bool hasRuntimeMutationOverlay = !deferOverlayThisFrame && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationMs);
@@ -2783,6 +2785,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				AppendGeometry(debugSphereGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
 				AppendMaterialBridge(debugSphereMaterialBridge, overlayMaterialBridge);
 			}
+
+			mLastPerfShellTraceStats.overlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
+			mLastPerfShellTraceStats.overlayMaterialCount = (uint32_t)overlayMaterialBridge.materials.size();
 
 			std::vector<nri::TopLevelInstance> instances;
 			std::vector<SceneInstanceData> sceneInstances;
@@ -8607,10 +8612,15 @@ void NRIRenderer::BuildFilteredStaticMapGeometry(const std::vector<uint8_t>& rep
 	}
 }
 
-bool NRIRenderer::BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials) const
+bool NRIRenderer::BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)
 {
 	outGeometry = {};
 	outMaterials = {};
+	mLastPerfShellTraceStats.runtimeDebugSphereCount = (uint32_t)mRuntimeDebugSpheres.size();
+	mLastPerfShellTraceStats.runtimeDebugSphereLongitudeSegments = GetRuntimeDebugSphereLongitudeSegments();
+	mLastPerfShellTraceStats.runtimeDebugSphereLatitudeSegments = GetRuntimeDebugSphereLatitudeSegments();
+	mLastPerfShellTraceStats.runtimeDebugSpherePrimitiveCount = 0;
+	mLastPerfShellTraceStats.runtimeDebugSphereMaterialCount = 0;
 
 	if (mRuntimeDebugSpheres.empty())
 	{
@@ -8618,45 +8628,60 @@ bool NRIRenderer::BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeo
 	}
 
 	nri_scene::SceneView sphereView = {};
-	AppendRuntimeDebugSpheresToSceneView(sphereView);
-	nri_scene::BuildGeometry(sphereView, outGeometry);
-	nri_scene::BuildMaterials(sphereView, outMaterials);
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereViewMs);
+		AppendRuntimeDebugSpheresToSceneView(sphereView);
+	}
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereGeoMs);
+		nri_scene::BuildGeometry(sphereView, outGeometry);
+	}
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereMaterialMs);
+		nri_scene::BuildMaterials(sphereView, outMaterials);
+	}
 
 	const size_t materialCount = std::min(mRuntimeDebugSpheres.size(), outMaterials.materials.size());
-	for (size_t i = 0; i < materialCount; ++i)
 	{
-		const RuntimeDebugSphere& sphere = mRuntimeDebugSpheres[i];
-		nri_scene::MaterialData& material = outMaterials.materials[i];
-		material.lightLevel = 1.0f;
-		material.alpha = 1.0f;
-		material.metalnessHint = sphere.metalness;
-		material.roughnessHint = sphere.roughness;
-		material.materialClass = 0;
-
-		if (i < outMaterials.lightMetadata.size())
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereTuneMs);
+		for (size_t i = 0; i < materialCount; ++i)
 		{
-			nri_scene::MaterialLightingMetadata& metadata = outMaterials.lightMetadata[i];
-			metadata.texture = nullptr;
-			metadata.textureId = 0;
-			metadata.materialFlags = material.flags;
-			metadata.materialClass = material.materialClass;
-			metadata.alpha = material.alpha;
-			metadata.lightLevel = material.lightLevel;
-			metadata.averageColor[0] = 1.0f;
-			metadata.averageColor[1] = 1.0f;
-			metadata.averageColor[2] = 1.0f;
+			const RuntimeDebugSphere& sphere = mRuntimeDebugSpheres[i];
+			nri_scene::MaterialData& material = outMaterials.materials[i];
+			material.lightLevel = 1.0f;
+			material.alpha = 1.0f;
+			material.metalnessHint = sphere.metalness;
+			material.roughnessHint = sphere.roughness;
+			material.materialClass = 0;
 
-			uint32_t diameterBits = 0;
-			uint32_t metalnessBits = 0;
-			uint32_t roughnessBits = 0;
-			std::memcpy(&diameterBits, &sphere.diameter, sizeof(diameterBits));
-			std::memcpy(&metalnessBits, &sphere.metalness, sizeof(metalnessBits));
-			std::memcpy(&roughnessBits, &sphere.roughness, sizeof(roughnessBits));
-			metadata.materialKey = HashCombine64(metadata.materialKey, sphere.id);
-			metadata.materialKey = HashCombine64(metadata.materialKey, ((uint64_t)diameterBits << 32u) | (uint64_t)metalnessBits);
-			metadata.materialKey = HashCombine64(metadata.materialKey, (uint64_t)roughnessBits);
+			if (i < outMaterials.lightMetadata.size())
+			{
+				nri_scene::MaterialLightingMetadata& metadata = outMaterials.lightMetadata[i];
+				metadata.texture = nullptr;
+				metadata.textureId = 0;
+				metadata.materialFlags = material.flags;
+				metadata.materialClass = material.materialClass;
+				metadata.alpha = material.alpha;
+				metadata.lightLevel = material.lightLevel;
+				metadata.averageColor[0] = 1.0f;
+				metadata.averageColor[1] = 1.0f;
+				metadata.averageColor[2] = 1.0f;
+
+				uint32_t diameterBits = 0;
+				uint32_t metalnessBits = 0;
+				uint32_t roughnessBits = 0;
+				std::memcpy(&diameterBits, &sphere.diameter, sizeof(diameterBits));
+				std::memcpy(&metalnessBits, &sphere.metalness, sizeof(metalnessBits));
+				std::memcpy(&roughnessBits, &sphere.roughness, sizeof(roughnessBits));
+				metadata.materialKey = HashCombine64(metadata.materialKey, sphere.id);
+				metadata.materialKey = HashCombine64(metadata.materialKey, ((uint64_t)diameterBits << 32u) | (uint64_t)metalnessBits);
+				metadata.materialKey = HashCombine64(metadata.materialKey, (uint64_t)roughnessBits);
+			}
 		}
 	}
+
+	mLastPerfShellTraceStats.runtimeDebugSpherePrimitiveCount = (uint32_t)outGeometry.primitives.size();
+	mLastPerfShellTraceStats.runtimeDebugSphereMaterialCount = (uint32_t)outMaterials.materials.size();
 
 	return !outGeometry.primitives.empty() && !outMaterials.materials.empty();
 }
@@ -8773,6 +8798,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	outGeometry = {};
 	outMaterials = {};
 	mRuntimeMapLastFrame = {};
+	mLastPerfShellTraceStats.runtimeMutationDirtyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationRebuiltChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationHeldChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationReplacedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationPrimitiveCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialCount = 0;
 
 	if (!mStaticMapScene.valid ||
 		mRuntimeMapMutations.chunks.size() != mMapWorld.chunks.size() ||
@@ -8789,7 +8820,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
 		const uint64_t cachedSignature = replacement.liveSignature;
 		nri_scene::PTMapChunkMutationAnalysis analysis = {};
-		if (!nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement.baseline, analysis))
+		const bool analyzed = [&]()
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationAnalyzeMs);
+			return nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement.baseline, analysis);
+		}();
+		if (!analyzed)
 		{
 			replacement.active = false;
 			replacement.reasonMask = nri_scene::PTMapChunkMutationReason_None;
@@ -8853,6 +8889,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		}
 
 		mRuntimeMapLastFrame.dirtyChunkCount++;
+		mLastPerfShellTraceStats.runtimeMutationDirtyChunks++;
 		if (replacement.blindSpot)
 		{
 			mRuntimeMapLastFrame.blindSpotChunkCount++;
@@ -8862,8 +8899,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			nri_scene::SceneView liveChunkView;
 			nri_scene::PTMapWorldStats liveStats = {};
-			if (nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveChunkView, &liveStats))
+			const bool builtChunk = [&]()
 			{
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationRebuildMs);
+				if (!nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveChunkView, &liveStats))
+				{
+					return false;
+				}
+
 				nri_scene::GeometryData liveGeometry;
 				nri_scene::MaterialBridgeData liveMaterials;
 				{
@@ -8883,13 +8926,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.valid = true;
 				replacement.active = true;
 				mRuntimeMapLastFrame.rebuiltChunkCount++;
-			}
-			else if (replacement.valid)
+				mLastPerfShellTraceStats.runtimeMutationRebuiltChunks++;
+				return true;
+			}();
+			if (!builtChunk && replacement.valid)
 			{
 				replacement.active = true;
 				mRuntimeMapLastFrame.heldChunkCount++;
+				mLastPerfShellTraceStats.runtimeMutationHeldChunks++;
 			}
-			else
+			else if (!builtChunk)
 			{
 				replacement.active = false;
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
@@ -8903,19 +8949,25 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 		mRuntimeMapMutations.replacedChunkMask[chunkIndex] = 1u;
 		mRuntimeMapLastFrame.replacedChunkCount++;
+		mLastPerfShellTraceStats.runtimeMutationReplacedChunks++;
 		mRuntimeMapLastFrame.replacementSurfaceCount += replacement.surfaceCount;
 		mRuntimeMapLastFrame.replacementTriangleCount += replacement.triangleCount;
 		mRuntimeMapLastFrame.materialCount += (uint32_t)replacement.materialBridge.materials.size();
 
-		if (!replacement.geometry.primitives.empty())
 		{
-			AppendGeometry(replacement.geometry, (uint32_t)outMaterials.materials.size(), outGeometry);
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationAppendMs);
+			if (!replacement.geometry.primitives.empty())
+			{
+				AppendGeometry(replacement.geometry, (uint32_t)outMaterials.materials.size(), outGeometry);
+			}
+			AppendMaterialBridge(replacement.materialBridge, outMaterials);
 		}
-		AppendMaterialBridge(replacement.materialBridge, outMaterials);
 		TraceRuntimeMapMutationChunk(mapChunk, replacement);
 	}
 
 	mRuntimeMapLastFrame.active = mRuntimeMapLastFrame.replacedChunkCount > 0;
+	mLastPerfShellTraceStats.runtimeMutationPrimitiveCount = (uint32_t)outGeometry.primitives.size();
+	mLastPerfShellTraceStats.runtimeMutationMaterialCount = (uint32_t)outMaterials.materials.size();
 	return mRuntimeMapLastFrame.active;
 }
 
@@ -9341,6 +9393,10 @@ bool NRIRenderer::RefreshResidentStaticSceneDataSet()
 
 bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry)
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicAsMs);
+	mLastPerfShellTraceStats.dynamicAsPrimitiveCount = (uint32_t)geometry.primitives.size();
+	mLastPerfShellTraceStats.dynamicAsVertexCount = (uint32_t)geometry.vertices.size();
+	mLastPerfShellTraceStats.dynamicAsIndexCount = (uint32_t)geometry.indices.size();
 	if (geometry.primitives.empty() || geometry.vertices.empty() || geometry.indices.empty())
 	{
 		return false;
@@ -9366,18 +9422,30 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 	blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_BUILD;
 	blasDesc.geometryOrInstanceNum = 1;
 	blasDesc.geometries = &dynamicGeometryDesc;
-	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, mDynamicBottomLevelAS.accelerationStructure) != nri::Result::SUCCESS)
+	const bool createdAs = [&]()
+	{
+		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsCreateMs);
+		return mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, mDynamicBottomLevelAS.accelerationStructure) == nri::Result::SUCCESS;
+	}();
+	if (!createdAs)
 	{
 		return false;
 	}
 
-	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mDynamicBottomLevelAS.accelerationStructure);
+	uint64_t requiredScratchSize = 0;
+	{
+		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsScratchMs);
+		requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mDynamicBottomLevelAS.accelerationStructure);
+	}
 	if (mScratchBuffer.buffer == nullptr || mScratchBuffer.size < requiredScratchSize)
 	{
 		DestroyBufferResource(mScratchBuffer);
-		if (!CreateBufferWithoutView(mScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
 		{
-			return false;
+			ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsScratchMs);
+			if (!CreateBufferWithoutView(mScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+			{
+				return false;
+			}
 		}
 	}
 
@@ -9387,7 +9455,10 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 	dynamicBuild.geometryNum = 1;
 	dynamicBuild.scratchBuffer = mScratchBuffer.buffer;
 	dynamicBuild.scratchOffset = 0;
-	mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &dynamicBuild, 1);
+	{
+		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsBuildMs);
+		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &dynamicBuild, 1);
+	}
 
 	nri::BufferBarrierDesc barrier = {};
 	barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*mDynamicBottomLevelAS.accelerationStructure);
@@ -9397,7 +9468,10 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 	nri::BarrierDesc barrierDesc = {};
 	barrierDesc.buffers = &barrier;
 	barrierDesc.bufferNum = 1;
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+	{
+		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsBarrierMs);
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+	}
 	mBuiltDynamicSceneASLastFrame = true;
 	mDynamicSceneLastFrame.asBuildCount++;
 	return true;
