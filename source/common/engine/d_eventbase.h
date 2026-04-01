@@ -71,9 +71,26 @@ struct PerfLoopInputTraceStats
 	float sampledMouseY = 0.0f;
 };
 
+struct PerfLoop2DProducerDelta
+{
+	int commands = 0;
+	int vertices = 0;
+	int indices = 0;
+	double ms = 0.0;
+};
+
+struct PerfLoop2DProducerTraceStats
+{
+	PerfLoop2DProducerDelta statusBar;
+	PerfLoop2DProducerDelta altHud;
+	PerfLoop2DProducerDelta crosshair;
+};
+
 bool PerfLoopTraceActive();
 void PerfLoopTraceResetInputStats();
 PerfLoopInputTraceStats PerfLoopTraceGetInputStats();
+void PerfLoopTraceReset2DProducerStats();
+PerfLoop2DProducerTraceStats PerfLoopTraceGet2DProducerStats();
 void PerfLoopTraceNoteHandleevents();
 void PerfLoopTraceNoteIStartTic();
 void PerfLoopTraceNoteIGetEvent(uint32_t peekedMessages);
@@ -82,6 +99,9 @@ void PerfLoopTraceNoteRawMousePacket(bool accepted, int dx, int dy);
 void PerfLoopTraceNoteMousePost(float x, float y);
 void PerfLoopTraceNoteMouseDispatch(float x, float y);
 void PerfLoopTraceNoteGameInputSample(float x, float y);
+void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta);
+void PerfLoopTraceNoteAltHud2D(const PerfLoop2DProducerDelta& delta);
+void PerfLoopTraceNoteCrosshair2D(const PerfLoop2DProducerDelta& delta);
 
 struct FUiEvent
 {

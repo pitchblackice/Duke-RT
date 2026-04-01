@@ -674,16 +674,15 @@ void Display()
 	perfDisplayTraceStats.overlayMs += I_msTimeF() - stageStart;
 
 	stageStart = I_msTimeF();
-	screen->Update();
-	perfDisplayTraceStats.updateMs += I_msTimeF() - stageStart;
-
 	if (PerfLoopTraceActive())
 	{
-		const auto final2D = Capture2DSnapshot();
-		perf2DProducerTraceStats.totalCommands = final2D.commands;
-		perf2DProducerTraceStats.totalVertices = final2D.vertices;
-		perf2DProducerTraceStats.totalIndices = final2D.indices;
+		const auto preUpdate2D = Capture2DSnapshot();
+		perf2DProducerTraceStats.totalCommands = preUpdate2D.commands;
+		perf2DProducerTraceStats.totalVertices = preUpdate2D.vertices;
+		perf2DProducerTraceStats.totalIndices = preUpdate2D.indices;
 	}
+	screen->Update();
+	perfDisplayTraceStats.updateMs += I_msTimeF() - stageStart;
 }
 
 //==========================================================================
@@ -953,6 +952,7 @@ void MainLoop ()
 			if (PerfLoopTraceActive())
 			{
 				PerfLoopTraceResetInputStats();
+				PerfLoopTraceReset2DProducerStats();
 				perfTryRunTicsTraceStats = {};
 				perfDisplayTraceStats = {};
 				perf2DProducerTraceStats = {};
@@ -1083,7 +1083,7 @@ void MainLoop ()
 						renderTrace.nriFinalPresentMs);
 				}
 				Printf(
-					"PERF twod producer trace: frame=%llu total_cmds=%d total_verts=%d total_indices=%d intro_skip=%d overlays_cmds=%d overlays_ms=%.3f fsblend_cmds=%d fsblend_ms=%.3f maptitle_cmds=%d maptitle_ms=%.3f chat_cmds=%d chat_ms=%.3f console_cmds=%d console_ms=%.3f menu_cmds=%d menu_ms=%.3f stats_cmds=%d stats_ms=%.3f rate_cmds=%d rate_ms=%.3f drawtile_cmds=%d drawtile_ms=%.3f\n",
+					"PERF twod producer trace: frame=%llu total_cmds=%d total_verts=%d total_indices=%d intro_skip=%d overlays_cmds=%d overlays_ms=%.3f fsblend_cmds=%d fsblend_ms=%.3f maptitle_cmds=%d maptitle_ms=%.3f statusbar_cmds=%d statusbar_ms=%.3f althud_cmds=%d althud_ms=%.3f crosshair_cmds=%d crosshair_ms=%.3f chat_cmds=%d chat_ms=%.3f console_cmds=%d console_ms=%.3f menu_cmds=%d menu_ms=%.3f stats_cmds=%d stats_ms=%.3f rate_cmds=%d rate_ms=%.3f drawtile_cmds=%d drawtile_ms=%.3f\n",
 					(unsigned long long)traceFrame,
 					perf2DProducerTraceStats.totalCommands,
 					perf2DProducerTraceStats.totalVertices,
@@ -1095,6 +1095,12 @@ void MainLoop ()
 					perf2DProducerTraceStats.fullscreenBlends.ms,
 					perf2DProducerTraceStats.mapTitle.commands,
 					perf2DProducerTraceStats.mapTitle.ms,
+					PerfLoopTraceGet2DProducerStats().statusBar.commands,
+					PerfLoopTraceGet2DProducerStats().statusBar.ms,
+					PerfLoopTraceGet2DProducerStats().altHud.commands,
+					PerfLoopTraceGet2DProducerStats().altHud.ms,
+					PerfLoopTraceGet2DProducerStats().crosshair.commands,
+					PerfLoopTraceGet2DProducerStats().crosshair.ms,
 					perf2DProducerTraceStats.chat.commands,
 					perf2DProducerTraceStats.chat.ms,
 					perf2DProducerTraceStats.console.commands,

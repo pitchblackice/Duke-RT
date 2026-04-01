@@ -47,7 +47,9 @@
 #include "v_text.h"
 #include "vm.h"
 #include "i_interface.h"
+#include "i_time.h"
 #include "r_videoscale.h"
+#include "d_eventbase.h"
 
 FGameTexture* CrosshairImage;
 static int CrosshairNum;
@@ -127,6 +129,27 @@ void ST_UnloadCrosshair()
 
 void ST_DrawCrosshair(int phealth, double xpos, double ypos, double scale, DAngle angle)
 {
+	struct Perf2DSnapshot
+	{
+		int commands = 0;
+		int vertices = 0;
+		int indices = 0;
+	};
+
+	auto capture2DSnapshot = []()
+	{
+		Perf2DSnapshot snapshot;
+		if (twod != nullptr)
+		{
+			snapshot.commands = twod->mData.Size();
+			snapshot.vertices = twod->mVertices.Size();
+			snapshot.indices = twod->mIndices.Size();
+		}
+		return snapshot;
+	};
+
+	const auto before = capture2DSnapshot();
+	const double startMs = PerfLoopTraceActive() ? I_msTimeF() : 0.0;
 	uint32_t color;
 	double size;
 	int w, h;
@@ -212,6 +235,17 @@ void ST_DrawCrosshair(int phealth, double xpos, double ypos, double scale, DAngl
 		DTA_AlphaChannel, true,
 		DTA_FillColor, color & 0xFFFFFF,
 		TAG_DONE);
+
+	if (PerfLoopTraceActive())
+	{
+		const auto after = capture2DSnapshot();
+		PerfLoop2DProducerDelta delta;
+		delta.commands = after.commands - before.commands;
+		delta.vertices = after.vertices - before.vertices;
+		delta.indices = after.indices - before.indices;
+		delta.ms = I_msTimeF() - startMs;
+		PerfLoopTraceNoteCrosshair2D(delta);
+	}
 }
 
 
@@ -962,5 +996,3 @@ void DStatusBarCore::SetClipRect(double x, double y, double w, double h, int fla
 	int hh = int(y + h - y1); // y=3.5, height = 5.5 where adding both values gives a larger integer than adding the two integers.
 	twod->SetClipRect(x1, y1, ww, hh);
 }
-
-

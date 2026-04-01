@@ -64,6 +64,7 @@
 #include "razefont.h"
 #include "gamefuncs.h"
 #include "statistics.h"
+#include "d_eventbase.h"
 
 #include "../version.h"
 
@@ -199,8 +200,34 @@ void drawMapTitle()
 
 void DrawAltHUD(SummaryInfo* info);
 
+namespace
+{
+	struct Perf2DSnapshot
+	{
+		int commands = 0;
+		int vertices = 0;
+		int indices = 0;
+	};
+
+	static Perf2DSnapshot Capture2DSnapshot()
+	{
+		if (twod == nullptr)
+		{
+			return {};
+		}
+
+		Perf2DSnapshot snapshot;
+		snapshot.commands = twod->mData.Size();
+		snapshot.vertices = twod->mVertices.Size();
+		snapshot.indices = twod->mIndices.Size();
+		return snapshot;
+	}
+}
+
 void UpdateStatusBar(SummaryInfo* info)
 {
+	const auto before = Capture2DSnapshot();
+	const double startMs = PerfLoopTraceActive() ? I_msTimeF() : 0.0;
 	info->time = Scale(info->time, 1000, 120); // The statusbar expects milliseconds
 	info->totaltime = STAT_GetTotalTime();
 
@@ -212,12 +239,32 @@ void UpdateStatusBar(SummaryInfo* info)
 			VMValue params[] = { StatusBar, info };
 			VMCall(func, params, 2, nullptr, 0);
 		}
+		if (PerfLoopTraceActive())
+		{
+			const auto after = Capture2DSnapshot();
+			PerfLoop2DProducerDelta delta;
+			delta.commands = after.commands - before.commands;
+			delta.vertices = after.vertices - before.vertices;
+			delta.indices = after.indices - before.indices;
+			delta.ms = I_msTimeF() - startMs;
+			PerfLoopTraceNoteStatusBar2D(delta);
+		}
 		return;
 	}
 	IFVIRTUALPTRNAME(StatusBar, NAME_RazeStatusBar, UpdateStatusBar)
 	{
 		VMValue params[] = { StatusBar, info };
 		VMCall(func, params, 2, nullptr, 0);
+	}
+	if (PerfLoopTraceActive())
+	{
+		const auto after = Capture2DSnapshot();
+		PerfLoop2DProducerDelta delta;
+		delta.commands = after.commands - before.commands;
+		delta.vertices = after.vertices - before.vertices;
+		delta.indices = after.indices - before.indices;
+		delta.ms = I_msTimeF() - startMs;
+		PerfLoopTraceNoteStatusBar2D(delta);
 	}
 }
 
@@ -247,4 +294,3 @@ void InitStatusBar()
 		VMCall(func, params, 1, nullptr, 0);
 	}
 }
-

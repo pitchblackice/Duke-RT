@@ -43,6 +43,8 @@
 #include "v_font.h"
 #include "mapinfo.h"
 #include "base_sbar.h"
+#include "d_eventbase.h"
+#include "i_time.h"
 
 #include <time.h>
 
@@ -170,6 +172,27 @@ EXTERN_CVAR(Float, hud_scalefactor)
 
 void DrawAltHUD(SummaryInfo *info)
 {
+	struct Perf2DSnapshot
+	{
+		int commands = 0;
+		int vertices = 0;
+		int indices = 0;
+	};
+
+	auto capture2DSnapshot = []()
+	{
+		Perf2DSnapshot snapshot;
+		if (twod != nullptr)
+		{
+			snapshot.commands = twod->mData.Size();
+			snapshot.vertices = twod->mVertices.Size();
+			snapshot.indices = twod->mIndices.Size();
+		}
+		return snapshot;
+	};
+
+	const auto before = capture2DSnapshot();
+	const double startMs = PerfLoopTraceActive() ? I_msTimeF() : 0.0;
 	int hudwidth;
 	int hudheight;
 
@@ -196,5 +219,15 @@ void DrawAltHUD(SummaryInfo *info)
 		VMValue params[] = { AltHud, StatusBar, info, hudwidth, hudheight };
 		VMCall(func, params, countof(params), nullptr, 0);
 	}
-}
 
+	if (PerfLoopTraceActive())
+	{
+		const auto after = capture2DSnapshot();
+		PerfLoop2DProducerDelta delta;
+		delta.commands = after.commands - before.commands;
+		delta.vertices = after.vertices - before.vertices;
+		delta.indices = after.indices - before.indices;
+		delta.ms = I_msTimeF() - startMs;
+		PerfLoopTraceNoteAltHud2D(delta);
+	}
+}

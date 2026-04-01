@@ -69,6 +69,7 @@ CVAR(Bool, invertmouse, false, CVAR_GLOBALCONFIG | CVAR_ARCHIVE);  // Invert mou
 CVAR(Bool, invertmousex, false,	CVAR_GLOBALCONFIG | CVAR_ARCHIVE);  // Invert mouse look left/right?
 
 static PerfLoopInputTraceStats perfLoopInputTraceStats;
+static PerfLoop2DProducerTraceStats perfLoop2DProducerTraceStats;
 
 bool PerfLoopTraceActive()
 {
@@ -83,6 +84,16 @@ void PerfLoopTraceResetInputStats()
 PerfLoopInputTraceStats PerfLoopTraceGetInputStats()
 {
 	return perfLoopInputTraceStats;
+}
+
+void PerfLoopTraceReset2DProducerStats()
+{
+	perfLoop2DProducerTraceStats = {};
+}
+
+PerfLoop2DProducerTraceStats PerfLoopTraceGet2DProducerStats()
+{
+	return perfLoop2DProducerTraceStats;
 }
 
 void PerfLoopTraceNoteHandleevents()
@@ -166,6 +177,30 @@ void PerfLoopTraceNoteGameInputSample(float x, float y)
 	perfLoopInputTraceStats.sampledMouseInputs++;
 	perfLoopInputTraceStats.sampledMouseX += x;
 	perfLoopInputTraceStats.sampledMouseY += y;
+}
+
+void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.statusBar = delta;
+}
+
+void PerfLoopTraceNoteAltHud2D(const PerfLoop2DProducerDelta& delta)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.altHud = delta;
+}
+
+void PerfLoopTraceNoteCrosshair2D(const PerfLoop2DProducerDelta& delta)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.crosshair = delta;
 }
 
 
