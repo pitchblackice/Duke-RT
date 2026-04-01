@@ -40,6 +40,7 @@
 #include "i_time.h"
 #include "i_interface.h"
 #include "printf.h"
+#include "d_eventbase.h"
 
 glcycle_t RenderWall,SetupWall,ClipWall;
 glcycle_t RenderFlat,SetupFlat;
@@ -187,6 +188,66 @@ static void AppendLightStats(FString &out)
 		iter_dlight, draw_dlight, iter_dlightf, draw_dlightf );
 }
 
+PerfRenderTraceStats GetPerfRenderTraceStats()
+{
+	PerfRenderTraceStats stats;
+	stats.allMs = All.TimeMS();
+	stats.finishMs = Finish.TimeMS();
+	stats.renderAllMs = RenderAll.TimeMS();
+	stats.processAllMs = ProcessAll.TimeMS();
+	stats.portalAllMs = PortalAll.TimeMS();
+	stats.postProcessMs = PostProcess.TimeMS();
+	stats.drawCallsMs = drawcalls.TimeMS();
+	stats.renderWallMs = RenderWall.TimeMS();
+	stats.setupWallMs = SetupWall.TimeMS();
+	stats.clipWallMs = ClipWall.TimeMS();
+	stats.bspMs = Bsp.TimeMS() - stats.clipWallMs;
+	stats.renderFlatMs = RenderFlat.TimeMS();
+	stats.setupFlatMs = SetupFlat.TimeMS();
+	stats.renderSpriteMs = RenderSprite.TimeMS();
+	stats.setupSpriteMs = SetupSprite.TimeMS();
+	stats.twoDMs = twoD.TimeMS();
+	stats.finish3DMs = Flush3D.TimeMS() - stats.twoDMs;
+	stats.mtWaitMs = MTWait.TimeMS();
+	stats.wtTotalMs = WTTotal.TimeMS();
+	stats.renderedWalls = rendered_lines;
+	stats.renderedFlats = rendered_flats;
+	stats.renderedSprites = rendered_sprites;
+	stats.renderedDecals = rendered_decals;
+	stats.renderedPortals = rendered_portals;
+	stats.renderedVertices = vertexcount;
+	stats.flatVertexCount = flatvertices;
+	stats.flatPrimitiveCount = flatprimitives;
+	stats.nriAllMs = NriPTAll.TimeMS();
+	stats.nriActive = stats.nriAllMs > 0.0;
+	stats.nriInitializeMs = NriPTInitialize.TimeMS();
+	stats.nriFrameResourcesMs = NriPTFrameResources.TimeMS();
+	stats.nriUpdateStateMs = NriPTUpdateState.TimeMS();
+	stats.nriSceneCaptureMs = NriPTSceneCapture.TimeMS();
+	stats.nriGeometryBuildMs = NriPTGeometryBuild.TimeMS();
+	stats.nriMaterialBuildMs = NriPTMaterialBuild.TimeMS();
+	stats.nriPaletteUploadMs = NriPTPaletteUpload.TimeMS();
+	stats.nriSceneTexturesMs = NriPTSceneTextures.TimeMS();
+	stats.nriSceneBuffersMs = NriPTSceneBuffers.TimeMS();
+	stats.nriAccelerationMs = NriPTAcceleration.TimeMS();
+	stats.nriBootstrapDispatchMs = NriPTBootstrapDispatch.TimeMS();
+	stats.nriFrameGraphMs = NriPTFrameGraph.TimeMS();
+	stats.nriCopyFinalMs = NriPTCopyFinal.TimeMS();
+	stats.nriFrameWaitMs = NriPTFrameWait.TimeMS();
+	stats.nriWaitPresentMs = NriPTWaitPresent.TimeMS();
+	stats.nriAcquireSwapMs = NriPTAcquireSwap.TimeMS();
+	stats.nriQueueSubmitMs = NriPTQueueSubmit.TimeMS();
+	stats.nriQueuePresentMs = NriPTQueuePresent.TimeMS();
+	stats.nriTraceOpaqueMs = NriPTTraceOpaque.TimeMS();
+	stats.nriDenoiserMs = NriPTDenoiser.TimeMS();
+	stats.nriCompositionMs = NriPTComposition.TimeMS();
+	stats.nriUpscaleMs = NriPTUpscale.TimeMS();
+	stats.nriFinalMs = NriPTFinal.TimeMS();
+	stats.nriRawPresentMs = NriPTRawPresent.TimeMS();
+	stats.nriFinalPresentMs = NriPTFinalPresent.TimeMS();
+	return stats;
+}
+
 ADD_STAT(rendertimes)
 {
 	static FString buff;
@@ -271,5 +332,5 @@ bool glcycle_t::active = false;
 void  checkBenchActive()
 {
 	FStat *stat = FStat::FindStat("rendertimes");
-	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats);
+	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats || PerfLoopTraceActive());
 }

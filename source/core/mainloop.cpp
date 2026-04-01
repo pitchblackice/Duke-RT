@@ -92,6 +92,7 @@
 #include "texturemanager.h"
 #include "gameinput.h"
 #include "d_eventbase.h"
+#include "hw_clock.h"
 
 CVAR(Bool, vid_activeinbackground, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, r_ticstability, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -866,6 +867,7 @@ void MainLoop ()
 			if (PerfLoopTraceActive())
 			{
 				const auto inputTrace = PerfLoopTraceGetInputStats();
+				const auto renderTrace = GetPerfRenderTraceStats();
 				const double frameMs = I_msTimeF() - frameStartMs;
 				Printf(
 					"PERF loop trace: frame=%llu state=%s gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d display_skip=%d level_rendered=%d\n",
@@ -894,6 +896,68 @@ void MainLoop ()
 					perfTryRunTicsTraceStats.pausedReturn ? 1 : 0,
 					perfDisplayTraceStats.skippedInactive ? 1 : 0,
 					perfDisplayTraceStats.levelRendered ? 1 : 0);
+				Printf(
+					"PERF render trace: frame=%llu hw_all=%.3f hw_finish=%.3f hw_render=%.3f hw_setup=%.3f hw_portal=%.3f hw_post=%.3f hw_drawcalls=%.3f wall_render=%.3f wall_setup=%.3f wall_clip=%.3f bsp=%.3f flat_render=%.3f flat_setup=%.3f sprite_render=%.3f sprite_setup=%.3f twod=%.3f finish3d=%.3f mt_wait=%.3f wt_total=%.3f walls=%d flats=%d sprites=%d decals=%d portals=%d verts=%d flat_verts=%d flat_prims=%d\n",
+					(unsigned long long)traceFrame,
+					renderTrace.allMs,
+					renderTrace.finishMs,
+					renderTrace.renderAllMs,
+					renderTrace.processAllMs,
+					renderTrace.portalAllMs,
+					renderTrace.postProcessMs,
+					renderTrace.drawCallsMs,
+					renderTrace.renderWallMs,
+					renderTrace.setupWallMs,
+					renderTrace.clipWallMs,
+					renderTrace.bspMs,
+					renderTrace.renderFlatMs,
+					renderTrace.setupFlatMs,
+					renderTrace.renderSpriteMs,
+					renderTrace.setupSpriteMs,
+					renderTrace.twoDMs,
+					renderTrace.finish3DMs,
+					renderTrace.mtWaitMs,
+					renderTrace.wtTotalMs,
+					renderTrace.renderedWalls,
+					renderTrace.renderedFlats,
+					renderTrace.renderedSprites,
+					renderTrace.renderedDecals,
+					renderTrace.renderedPortals,
+					renderTrace.renderedVertices,
+					renderTrace.flatVertexCount,
+					renderTrace.flatPrimitiveCount);
+				if (renderTrace.nriActive)
+				{
+					Printf(
+						"PERF render trace NRI: frame=%llu total=%.3f init=%.3f res=%.3f state=%.3f capture=%.3f geo=%.3f mats=%.3f palette=%.3f textures=%.3f buffers=%.3f as=%.3f bootstrap=%.3f graph=%.3f copy=%.3f wait=%.3f wait_present=%.3f acquire=%.3f submit=%.3f present=%.3f trace=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f raw_present=%.3f final_present=%.3f\n",
+						(unsigned long long)traceFrame,
+						renderTrace.nriAllMs,
+						renderTrace.nriInitializeMs,
+						renderTrace.nriFrameResourcesMs,
+						renderTrace.nriUpdateStateMs,
+						renderTrace.nriSceneCaptureMs,
+						renderTrace.nriGeometryBuildMs,
+						renderTrace.nriMaterialBuildMs,
+						renderTrace.nriPaletteUploadMs,
+						renderTrace.nriSceneTexturesMs,
+						renderTrace.nriSceneBuffersMs,
+						renderTrace.nriAccelerationMs,
+						renderTrace.nriBootstrapDispatchMs,
+						renderTrace.nriFrameGraphMs,
+						renderTrace.nriCopyFinalMs,
+						renderTrace.nriFrameWaitMs,
+						renderTrace.nriWaitPresentMs,
+						renderTrace.nriAcquireSwapMs,
+						renderTrace.nriQueueSubmitMs,
+						renderTrace.nriQueuePresentMs,
+						renderTrace.nriTraceOpaqueMs,
+						renderTrace.nriDenoiserMs,
+						renderTrace.nriCompositionMs,
+						renderTrace.nriUpscaleMs,
+						renderTrace.nriFinalMs,
+						renderTrace.nriRawPresentMs,
+						renderTrace.nriFinalPresentMs);
+				}
 				Printf(
 					"PERF input trace: frame=%llu getevent=%u starttic_calls=%u handleevents=%u msgs=%u burst=%u raw_input=%u raw_keyboard=%u raw_mouse=%u raw_mouse_moves=%u raw_mouse_drop=%u posted_mouse=%u dispatched_mouse=%u sampled_mouse=%u posted_delta=(%.1f,%.1f) dispatched_delta=(%.1f,%.1f) sampled_delta=(%.1f,%.1f) key_down=%u key_up=%u device_change=%u queue_hw=%u queue_overflow=%u\n",
 					(unsigned long long)traceFrame,
