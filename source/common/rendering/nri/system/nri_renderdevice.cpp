@@ -72,6 +72,35 @@ CUSTOM_CVAR(Int, nri_pttraceframes, 0, 0)
 
 namespace
 {
+	static bool IsFullscreenPaletteBlendCommand(const F2DDrawer& drawer, const F2DDrawer::RenderCommand& cmd)
+	{
+		if (cmd.isSpecial != SpecialDrawCommand::NotSpecial ||
+			cmd.mTexture != nullptr ||
+			cmd.shape2DBufInfo != nullptr ||
+			cmd.mType != F2DDrawer::DrawTypeTriangles ||
+			(cmd.mFlags & F2DDrawer::DTF_Scissor) != 0 ||
+			cmd.mVertCount != 4 ||
+			cmd.mIndexCount != 6 ||
+			cmd.mVertIndex < 0 ||
+			cmd.mVertIndex + 3 >= drawer.mVertices.SSize())
+		{
+			return false;
+		}
+
+		const auto& v0 = drawer.mVertices[cmd.mVertIndex + 0];
+		const auto& v1 = drawer.mVertices[cmd.mVertIndex + 1];
+		const auto& v2 = drawer.mVertices[cmd.mVertIndex + 2];
+		const auto& v3 = drawer.mVertices[cmd.mVertIndex + 3];
+		const float width = (float)drawer.GetWidth();
+		const float height = (float)drawer.GetHeight();
+
+		return
+			v0.x == 0.0f && v0.y == 0.0f &&
+			v1.x == 0.0f && v1.y == height &&
+			v2.x == width && v2.y == 0.0f &&
+			v3.x == width && v3.y == height;
+	}
+
 	static constexpr int DefaultSwapChainTextureCount = 3;
 	static constexpr float DefaultPtTestLightRadius = 256.0f;
 	static constexpr float DefaultPtTestLightOffset = 64.0f;
@@ -1537,6 +1566,23 @@ void NRIRenderDevice::Draw2D()
 		return;
 	}
 
+	if (mFrameGenerationUiTargetActive)
+	{
+		const uint32_t sceneBlendPrefixCount = GetFrameGenerationSceneBlendPrefixCount();
+		if (sceneBlendPrefixCount >= twod->mData.Size())
+		{
+			return;
+		}
+
+		if (sceneBlendPrefixCount > 0)
+		{
+			F2DDrawer uiDrawer = *twod;
+			uiDrawer.mData.Delete(0, (int)sceneBlendPrefixCount);
+			::Draw2D(&uiDrawer, *mRenderState);
+			return;
+		}
+	}
+
 	::Draw2D(twod, *mRenderState);
 }
 
@@ -1608,6 +1654,27 @@ bool NRIRenderDevice::ShouldUseFrameGenerationUiTarget() const
 		policy.requestedEnabled &&
 		policy.requestedProvider != NRIFrameGenerationProvider::Off &&
 		policy.resolvedUiMode == NRIFrameGenerationUiMode::UiTexture;
+}
+
+uint32_t NRIRenderDevice::GetFrameGenerationSceneBlendPrefixCount() const
+{
+	if (twod == nullptr)
+	{
+		return 0u;
+	}
+
+	uint32_t count = 0u;
+	for (const auto& cmd : twod->mData)
+	{
+		if (!IsFullscreenPaletteBlendCommand(*twod, cmd))
+		{
+			break;
+		}
+
+		++count;
+	}
+
+	return count;
 }
 
 bool NRIRenderDevice::EnsureFrameGenerationUiTexture(uint32_t width, uint32_t height)
@@ -1715,6 +1782,24 @@ void NRIRenderDevice::BeginFrameGenerationUiTarget()
 	ClearTargetColor(*uiTarget, 0.0f, 0.0f, 0.0f, 0.0f);
 	mActiveTarget = uiTarget;
 	mFrameGenerationUiTargetActive = true;
+}
+
+void NRIRenderDevice::DrawFrameGenerationSceneBlendPrefix()
+{
+	if (twod == nullptr)
+	{
+		return;
+	}
+
+	const uint32_t sceneBlendPrefixCount = GetFrameGenerationSceneBlendPrefixCount();
+	if (sceneBlendPrefixCount == 0u)
+	{
+		return;
+	}
+
+	F2DDrawer sceneBlendDrawer = *twod;
+	sceneBlendDrawer.mData.Clamp(sceneBlendPrefixCount);
+	::Draw2D(&sceneBlendDrawer, *mRenderState);
 }
 
 void NRIRenderDevice::FinalizeFrameGenerationUiTarget()
@@ -1897,14 +1982,15 @@ void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::func
 		SetActiveRenderTarget();
 	}
 
-	if (ShouldUseFrameGenerationUiTarget())
-	{
-		BeginFrameGenerationUiTarget();
-	}
-
 	if (afterBloomDrawEndScene2D)
 	{
 		afterBloomDrawEndScene2D();
+	}
+
+	if (ShouldUseFrameGenerationUiTarget())
+	{
+		DrawFrameGenerationSceneBlendPrefix();
+		BeginFrameGenerationUiTarget();
 	}
 }
 
