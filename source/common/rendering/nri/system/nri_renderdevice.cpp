@@ -1840,9 +1840,10 @@ void NRIRenderDevice::Draw2D()
 
 	if (PerfLoopTraceActive())
 	{
+		const auto rsTrace = mRenderState->GetPerfTraceStats();
 		const auto& texStats = mTexture2DDebugStats;
 		Printf(
-			"PERF draw2d trace NRI: frame=%llu mode=%s draw_ms=%.3f cmds=%u specials=%u textured=%u canvas=%u scissor=%u xform=%u shapes=%u tris=%u lines=%u points=%u verts=%d indices=%d ensure=%u hits=%u misses=%u uploads=%u recreate=%u bytes=%llu\n",
+			"PERF draw2d trace NRI: frame=%llu mode=%s draw_ms=%.3f cmds=%u specials=%u textured=%u canvas=%u scissor=%u xform=%u shapes=%u tris=%u lines=%u points=%u verts=%d indices=%d ensure=%u hits=%u misses=%u uploads=%u recreate=%u bytes=%llu apply_calls=%u indexed=%u pipe_create=%u apply_ms=%.3f pipe_ms=%.3f vstream_ms=%.3f istream_ms=%.3f ensure_ms=%.3f begin_ms=%.3f bind_ms=%.3f drawcall_ms=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			drawMode,
 			I_msTimeF() - drawStartMs,
@@ -1863,7 +1864,19 @@ void NRIRenderDevice::Draw2D()
 			texStats.cacheMisses,
 			texStats.uploadAttempts,
 			texStats.resourceRecreates,
-			(unsigned long long)texStats.uploadedBytes);
+			(unsigned long long)texStats.uploadedBytes,
+			rsTrace.applyCalls,
+			rsTrace.indexedCalls,
+			rsTrace.pipelineCreates,
+			rsTrace.applyMs,
+			rsTrace.pipelineMs,
+			rsTrace.vertexStreamMs,
+			rsTrace.indexStreamMs,
+			rsTrace.textureEnsureMs,
+			rsTrace.beginRenderingMs,
+			rsTrace.bindStateMs,
+			rsTrace.drawCallMs);
+		mRenderState->ResetPerfTraceStats();
 	}
 }
 

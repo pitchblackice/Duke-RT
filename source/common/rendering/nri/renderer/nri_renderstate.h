@@ -13,6 +13,24 @@ class NRIRenderDevice;
 class NRIRenderState : public FRenderState
 {
 public:
+	struct PerfTraceStats
+	{
+		uint32_t applyCalls = 0;
+		uint32_t indexedCalls = 0;
+		uint32_t pipelineLookups = 0;
+		uint32_t pipelineCreates = 0;
+		uint32_t textureEnsureCalls = 0;
+		uint32_t beginRenderingCalls = 0;
+		double applyMs = 0.0;
+		double pipelineMs = 0.0;
+		double vertexStreamMs = 0.0;
+		double indexStreamMs = 0.0;
+		double textureEnsureMs = 0.0;
+		double beginRenderingMs = 0.0;
+		double bindStateMs = 0.0;
+		double drawCallMs = 0.0;
+	};
+
 	explicit NRIRenderState(NRIRenderDevice* fb);
 
 	void ClearScreen() override;
@@ -38,6 +56,8 @@ public:
 	void BeginFrame();
 	void EndFrame();
 	void NotifyExternalTargetWrite();
+	void ResetPerfTraceStats();
+	PerfTraceStats GetPerfTraceStats() const;
 
 private:
 	struct PipelineKey
@@ -112,4 +132,5 @@ private:
 	int mClearTargets = CT_Color;
 	bool mRendering = false;
 	bool mNeedsClear = true;
+	PerfTraceStats mPerfTraceStats;
 };

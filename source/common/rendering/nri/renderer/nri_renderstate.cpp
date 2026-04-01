@@ -3,7 +3,9 @@
 #include "../system/nri_hwbuffer.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
+#include "d_eventbase.h"
 #include "hw_material.h"
+#include "i_time.h"
 #include "printf.h"
 #include "textures.h"
 
@@ -233,6 +235,7 @@ void NRIRenderState::BeginFrame()
 	mRendering = false;
 	mNeedsClear = true;
 	mClearTargets = CT_Color;
+	mPerfTraceStats = {};
 }
 
 void NRIRenderState::EndFrame()
@@ -247,8 +250,29 @@ void NRIRenderState::NotifyExternalTargetWrite()
 	mNeedsClear = false;
 }
 
+void NRIRenderState::ResetPerfTraceStats()
+{
+	mPerfTraceStats = {};
+}
+
+NRIRenderState::PerfTraceStats NRIRenderState::GetPerfTraceStats() const
+{
+	return mPerfTraceStats;
+}
+
 void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 {
+	const bool traceActive = PerfLoopTraceActive();
+	const double applyStartMs = traceActive ? I_msTimeF() : 0.0;
+	if (traceActive)
+	{
+		mPerfTraceStats.applyCalls++;
+		if (indexed)
+		{
+			mPerfTraceStats.indexedCalls++;
+		}
+	}
+
 	if (mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)
 	{
 		return;
@@ -265,13 +289,27 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 		return;
 	}
 
+	double stageStartMs = traceActive ? I_msTimeF() : 0.0;
+	if (traceActive)
+	{
+		mPerfTraceStats.pipelineLookups++;
+	}
 	nri::Pipeline* pipeline = GetPipeline(dt);
+	if (traceActive)
+	{
+		mPerfTraceStats.pipelineMs += I_msTimeF() - stageStartMs;
+	}
 	if (pipeline == nullptr)
 	{
 		return;
 	}
 
+	stageStartMs = traceActive ? I_msTimeF() : 0.0;
 	StreamedBuffer vertexStream = StreamVertices(vertexBuffer);
+	if (traceActive)
+	{
+		mPerfTraceStats.vertexStreamMs += I_msTimeF() - stageStartMs;
+	}
 	if (vertexStream.buffer == nullptr)
 	{
 		return;
@@ -308,7 +346,16 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 		{
 			// Lazy texture uploads use the helper upload path and can submit work immediately,
 			// so they must happen before we open a rendering scope on the current command buffer.
+			if (traceActive)
+			{
+				mPerfTraceStats.textureEnsureCalls++;
+				stageStartMs = I_msTimeF();
+			}
 			hwTexture->EnsureTexture(layer->layerTexture, mMaterial.mTranslation, layer->scaleFlags);
+			if (traceActive)
+			{
+				mPerfTraceStats.textureEnsureMs += I_msTimeF() - stageStartMs;
+			}
 			if (hwTexture->GetResource().textureSet != nullptr)
 			{
 				textureSet = hwTexture->GetResource().textureSet;
@@ -316,8 +363,24 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 		}
 	}
 
+	if (traceActive)
+	{
+		stageStartMs = I_msTimeF();
+	}
 	BeginRenderingIfNeeded();
+	if (traceActive)
+	{
+		if (mRendering)
+		{
+			mPerfTraceStats.beginRenderingCalls++;
+		}
+		mPerfTraceStats.beginRenderingMs += I_msTimeF() - stageStartMs;
+	}
 
+	if (traceActive)
+	{
+		stageStartMs = I_msTimeF();
+	}
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::GRAPHICS, *mFrameBuffer->mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetViewports(*mFrameBuffer->mCommandBuffer, &viewport, 1);
 	mFrameBuffer->mCore.CmdSetScissors(*mFrameBuffer->mCommandBuffer, &scissor, 1);
@@ -326,22 +389,55 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, textureSet, nri::BindPoint::GRAPHICS });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *pipeline);
 	mFrameBuffer->mCore.CmdSetVertexBuffers(*mFrameBuffer->mCommandBuffer, 0, &vertexDesc, 1);
+	if (traceActive)
+	{
+		mPerfTraceStats.bindStateMs += I_msTimeF() - stageStartMs;
+	}
 
 	if (indexed)
 	{
 		auto* indexBuffer = static_cast<NRIHardwareIndexBuffer*>(mIndexBuffer);
+		if (traceActive)
+		{
+			stageStartMs = I_msTimeF();
+		}
 		StreamedBuffer indexStream = StreamIndices(indexBuffer, 0, (uint32_t)indexBuffer->Size() / 4u);
+		if (traceActive)
+		{
+			mPerfTraceStats.indexStreamMs += I_msTimeF() - stageStartMs;
+		}
 		if (indexStream.buffer == nullptr)
 		{
 			return;
 		}
 
+		if (traceActive)
+		{
+			stageStartMs = I_msTimeF();
+		}
 		mFrameBuffer->mCore.CmdSetIndexBuffer(*mFrameBuffer->mCommandBuffer, *indexStream.buffer, indexStream.offset, nri::IndexType::UINT32);
 		mFrameBuffer->mCore.CmdDrawIndexed(*mFrameBuffer->mCommandBuffer, { (uint32_t)count, 1, (uint32_t)firstIndex, 0, 0 });
+		if (traceActive)
+		{
+			mPerfTraceStats.drawCallMs += I_msTimeF() - stageStartMs;
+		}
 	}
 	else
 	{
+		if (traceActive)
+		{
+			stageStartMs = I_msTimeF();
+		}
 		mFrameBuffer->mCore.CmdDraw(*mFrameBuffer->mCommandBuffer, { (uint32_t)count, 1, (uint32_t)firstIndex, 0 });
+		if (traceActive)
+		{
+			mPerfTraceStats.drawCallMs += I_msTimeF() - stageStartMs;
+		}
+	}
+
+	if (traceActive)
+	{
+		mPerfTraceStats.applyMs += I_msTimeF() - applyStartMs;
 	}
 }
 
@@ -520,6 +616,10 @@ nri::Pipeline* NRIRenderState::GetPipeline(int dt)
 		return nullptr;
 	}
 
+	if (PerfLoopTraceActive())
+	{
+		mPerfTraceStats.pipelineCreates++;
+	}
 	mPipelines.emplace(key, pipeline);
 	return pipeline;
 }
