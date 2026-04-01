@@ -155,6 +155,7 @@ private:
 		uint32_t materialClass = 0;
 		uint32_t emissiveMode = 0;
 		uint32_t emissiveTextureIndex = UINT32_MAX;
+		uint32_t normalTextureIndex = UINT32_MAX;
 		uint32_t metallicTextureIndex = UINT32_MAX;
 		uint32_t roughnessTextureIndex = UINT32_MAX;
 		float lightLevel = 0.0f;

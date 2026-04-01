@@ -90,6 +90,7 @@ struct MaterialData
 	uint paletteIndex;
 	uint flags;
 	uint materialClass;
+	uint normalTextureIndex;
 	uint metallicTextureIndex;
 	uint roughnessTextureIndex;
 	uint sectorIndex;

@@ -290,6 +290,7 @@ namespace
 		uint64_t key = 1469598103934665603ull;
 		Fnv1a64Append(key, &metadata.textureContentKey, sizeof(metadata.textureContentKey));
 		Fnv1a64Append(key, &metadata.glowmapContentKey, sizeof(metadata.glowmapContentKey));
+		Fnv1a64Append(key, &metadata.normalContentKey, sizeof(metadata.normalContentKey));
 		Fnv1a64Append(key, &metadata.metallicContentKey, sizeof(metadata.metallicContentKey));
 		Fnv1a64Append(key, &metadata.roughnessContentKey, sizeof(metadata.roughnessContentKey));
 		Fnv1a64Append(key, &metadata.textureId, sizeof(metadata.textureId));
@@ -324,6 +325,8 @@ namespace
 		uint64_t textureContentKey,
 		uint32_t glowmapTextureIndex,
 		uint64_t glowmapContentKey,
+		uint32_t normalTextureIndex,
+		uint64_t normalContentKey,
 		uint32_t metallicTextureIndex,
 		uint64_t metallicContentKey,
 		uint32_t roughnessTextureIndex,
@@ -334,6 +337,7 @@ namespace
 		metadata.textureContentKey = textureContentKey;
 		metadata.textureIndex = material.textureIndex;
 		metadata.glowmapTextureIndex = glowmapTextureIndex;
+		metadata.normalTextureIndex = normalTextureIndex;
 		metadata.metallicTextureIndex = metallicTextureIndex;
 		metadata.roughnessTextureIndex = roughnessTextureIndex;
 		metadata.paletteIndex = material.paletteIndex;
@@ -343,6 +347,7 @@ namespace
 		metadata.alpha = material.alpha;
 		metadata.lightLevel = material.lightLevel;
 		metadata.materialClass = material.materialClass;
+		metadata.normalContentKey = normalContentKey;
 		metadata.metallicContentKey = metallicContentKey;
 		metadata.roughnessContentKey = roughnessContentKey;
 
@@ -440,6 +445,8 @@ namespace
 		outMaterials.materials.push_back(material);
 		uint32_t glowmapTextureIndex = UINT32_MAX;
 		uint64_t glowmapContentKey = 0;
+		uint32_t normalTextureIndex = UINT32_MAX;
+		uint64_t normalContentKey = 0;
 		uint32_t metallicTextureIndex = UINT32_MAX;
 		uint64_t metallicContentKey = 0;
 		uint32_t roughnessTextureIndex = UINT32_MAX;
@@ -455,6 +462,12 @@ namespace
 			metallicContentKey = outMaterials.textures[metallicTextureIndex].key;
 			outMaterials.materials.back().metallicTextureIndex = metallicTextureIndex;
 		}
+		if (materialRef.texture != nullptr && materialRef.texture->GetNormalmap() != nullptr)
+		{
+			normalTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetNormalmap(), false, textureLookup, outMaterials);
+			normalContentKey = outMaterials.textures[normalTextureIndex].key;
+			outMaterials.materials.back().normalTextureIndex = normalTextureIndex;
+		}
 		if (materialRef.texture != nullptr && materialRef.texture->GetRoughness() != nullptr)
 		{
 			roughnessTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetRoughness(), false, textureLookup, outMaterials);
@@ -468,6 +481,8 @@ namespace
 			outMaterials.textures[material.textureIndex].key,
 			glowmapTextureIndex,
 			glowmapContentKey,
+			normalTextureIndex,
+			normalContentKey,
 			metallicTextureIndex,
 			metallicContentKey,
 			roughnessTextureIndex,

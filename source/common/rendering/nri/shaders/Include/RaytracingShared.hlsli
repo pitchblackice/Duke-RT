@@ -97,9 +97,88 @@ bool UseFastEmissiveShadow()
 	return (gTraceConstants.Flags & NRI_FLAG_FAST_EMISSIVE_SHADOW) != 0;
 }
 
-float3 ResolveHitNormal(uint materialIndex, uint dataSource, float3 geometricNormal, float3 rayDirection)
+float4 SampleMaterialColor(MaterialData material, uint textureIndex, float2 uv, bool indexed, bool applyPaletteLookup, bool applyLightLevel);
+
+bool TryResolveHitTangentFrame(uint dataSource, uint primitiveIndex, float3 geometricNormal, out float3 tangent, out float3 bitangent)
 {
-	return normalize(geometricNormal);
+	const PrimitiveData primitive = GetPrimitiveData(dataSource, primitiveIndex);
+	const SceneVertex v0 = GetVertexData(dataSource, primitive.indices.x);
+	const SceneVertex v1 = GetVertexData(dataSource, primitive.indices.y);
+	const SceneVertex v2 = GetVertexData(dataSource, primitive.indices.z);
+	const float3 p0 = v0.position;
+	const float3 p1 = v1.position;
+	const float3 p2 = v2.position;
+	const float2 uv0 = primitive.uv0;
+	const float2 uv1 = primitive.uv1;
+	const float2 uv2 = primitive.uv2;
+	const float3 edge1 = p1 - p0;
+	const float3 edge2 = p2 - p0;
+	const float2 duv1 = uv1 - uv0;
+	const float2 duv2 = uv2 - uv0;
+	const float determinant = duv1.x * duv2.y - duv1.y * duv2.x;
+	if (abs(determinant) <= 1e-6)
+	{
+		tangent = 0.0;
+		bitangent = 0.0;
+		return false;
+	}
+
+	float3 tangentRaw = (edge1 * duv2.y - edge2 * duv1.y) / determinant;
+	float3 bitangentRaw = (edge2 * duv1.x - edge1 * duv2.x) / determinant;
+	tangentRaw -= geometricNormal * dot(geometricNormal, tangentRaw);
+	const float tangentLengthSq = dot(tangentRaw, tangentRaw);
+	const float bitangentLengthSq = dot(bitangentRaw, bitangentRaw);
+	if (tangentLengthSq <= 1e-8 || bitangentLengthSq <= 1e-8)
+	{
+		tangent = 0.0;
+		bitangent = 0.0;
+		return false;
+	}
+
+	tangent = tangentRaw * rsqrt(tangentLengthSq);
+	bitangent = normalize(cross(geometricNormal, tangent));
+	const float handedness = dot(cross(geometricNormal, tangent), bitangentRaw) < 0.0 ? -1.0 : 1.0;
+	bitangent *= handedness;
+	return true;
+}
+
+float3 SampleMaterialNormalMap(MaterialData material, float2 uv, float3 geometricNormal, float3 tangent, float3 bitangent)
+{
+	if (material.normalTextureIndex == 0xffffffffu)
+	{
+		return normalize(geometricNormal);
+	}
+
+	float3 map = SampleMaterialColor(material, material.normalTextureIndex, uv, false, false, false).xyz;
+	map = map * (255.0 / 127.0) - (128.0 / 127.0);
+	map.y = -map.y;
+
+	const float3 mappedNormal = normalize(tangent * map.x + bitangent * map.y + geometricNormal * map.z);
+	if (dot(mappedNormal, mappedNormal) <= 1e-8 || dot(mappedNormal, geometricNormal) <= 0.0)
+	{
+		return normalize(geometricNormal);
+	}
+
+	return mappedNormal;
+}
+
+float3 ResolveHitNormal(uint materialIndex, uint dataSource, uint primitiveIndex, float3 geometricNormal, float2 uv)
+{
+	const MaterialData material = GetMaterialData(materialIndex, dataSource);
+	float3 resolvedNormal = normalize(geometricNormal);
+	if (material.normalTextureIndex == 0xffffffffu)
+	{
+		return resolvedNormal;
+	}
+
+	float3 tangent = 0.0;
+	float3 bitangent = 0.0;
+	if (!TryResolveHitTangentFrame(dataSource, primitiveIndex, resolvedNormal, tangent, bitangent))
+	{
+		return resolvedNormal;
+	}
+
+	return SampleMaterialNormalMap(material, uv, resolvedNormal, tangent, bitangent);
 }
 
 float3 ResolveHitBarycentricWeights(HitData hit)
@@ -465,8 +544,8 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 		bestHit.barycentrics = barycentrics.yz;
 		bestHit.distance = hitT;
 		bestHit.position = origin + direction * hitT;
-		bestHit.normal = ResolveHitNormal(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, primitive.normal, direction);
 		bestHit.uv = uv;
+		bestHit.normal = ResolveHitNormal(primitive.materialIndex, SCENE_DATA_SOURCE_DYNAMIC, primitiveIndex, primitive.normal, uv);
 		bestHit.materialIndex = primitive.materialIndex;
 	}
 
@@ -531,8 +610,8 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.barycentrics = bary;
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
-		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction);
 		hitData.uv = uv;
+		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, primitiveIndex, primitive.normal, uv);
 		hitData.materialIndex = primitive.materialIndex;
 		return true;
 	}
