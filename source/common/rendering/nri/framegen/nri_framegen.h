@@ -6,6 +6,9 @@
 #include <cstdint>
 
 class NRIRenderDevice;
+#ifdef _WIN32
+struct IDXGISwapChain4;
+#endif
 
 enum class NRIFrameGenerationProvider : uint32_t
 {
@@ -180,12 +183,17 @@ struct NRIFrameGenerationProviderState
 	bool runtimeLoaded = false;
 	bool runtimeFunctionsLoaded = false;
 	bool contextCreated = false;
+	bool swapChainContextCreated = false;
+	bool presentBridgeReady = false;
 	bool debugConfigured = false;
 	bool configuredThisFrame = false;
 	bool prepareDispatchedThisFrame = false;
 	bool prepareCameraInfoProvided = false;
+	bool frameGenerationDispatchedThisFrame = false;
+	bool uiResourceRegisteredThisFrame = false;
 	bool noSwapChainNotify = true;
 	bool memoryUsageValid = false;
+	bool swapChainMemoryUsageValid = false;
 	bool contextDimensionsValid = false;
 	uint32_t contextDisplayWidth = 0;
 	uint32_t contextDisplayHeight = 0;
@@ -195,13 +203,20 @@ struct NRIFrameGenerationProviderState
 	uint64_t lastPreparedFrameId = 0;
 	uint64_t configureCount = 0;
 	uint64_t prepareCount = 0;
+	uint64_t dispatchCount = 0;
 	uint64_t totalUsageBytes = 0;
 	uint64_t aliasableUsageBytes = 0;
+	uint64_t swapChainTotalUsageBytes = 0;
+	uint64_t swapChainAliasableUsageBytes = 0;
 	uint32_t lastCreateResult = 0;
+	uint32_t lastSwapChainCreateResult = 0;
 	uint32_t lastDestroyResult = 0;
 	uint32_t lastConfigureResult = 0;
+	uint32_t lastSwapChainConfigureResult = 0;
 	uint32_t lastPrepareResult = 0;
+	uint32_t lastDispatchResult = 0;
 	uint32_t lastQueryResult = 0;
+	uint32_t lastSwapChainQueryResult = 0;
 	char runtimeLibrary[64] = "unloaded";
 	char providerVersion[64] = "unknown";
 	char lastStatusReason[96] = "not-loaded";
@@ -224,6 +239,8 @@ public:
 	void OnPresentEnd(const NRIRenderDevice& frameBuffer, nri::Result presentResult);
 	void SetFrameDesc(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationFrameDesc& desc);
 	void SetUiTexture(const NRITextureResource* uiTexture);
+	void ConfigureAndDispatchFrame(const NRIRenderDevice& frameBuffer);
+	bool Present(const NRIRenderDevice& frameBuffer, bool vsync, bool allowTearing, nri::Result& outResult);
 
 	const NRIFrameGenerationPolicy& GetPolicy() const { return mPolicy; }
 	const NRIFrameGenerationFrameDesc& GetFrameDesc() const { return mLastFrameDesc; }
@@ -231,6 +248,11 @@ public:
 	const NRIFrameGenerationLowLatencyState& GetLowLatencyState() const { return mLowLatencyState; }
 	const NRIFrameGenerationProviderState& GetProviderState() const { return mProviderState; }
 	bool HasFrameDesc() const { return mHasFrameDesc; }
+	bool IsPresentBridgeActive() const;
+	bool ShouldUsePresentBridge() const;
+#ifdef _WIN32
+	IDXGISwapChain4* GetPresentSwapChain() const;
+#endif
 
 	static const char* GetProviderName(NRIFrameGenerationProvider provider);
 	static const char* GetUiModeName(NRIFrameGenerationUiMode mode);
@@ -251,8 +273,10 @@ private:
 	void SetLowLatencyMarker(const NRIRenderDevice& frameBuffer, nri::LatencyMarker marker, nri::Result& resultSlot);
 	void ResetLowLatencyState();
 	void ResetProviderState();
+	void DestroyProviderPresentBridge();
 	void ShutdownProvider();
 	bool EnsureProviderRuntime(const NRIRenderDevice& frameBuffer);
+	bool EnsureProviderPresentBridge(const NRIRenderDevice& frameBuffer);
 	bool EnsureProviderContext(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationFrameDesc& desc);
 	void ConfigureAndPrepareProvider(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationFrameDesc& desc);
 
@@ -268,10 +292,14 @@ private:
 
 	void* mFfxModule = nullptr;
 	void* mFfxContext = nullptr;
+	void* mFfxSwapChainContext = nullptr;
 	void* mFfxCreateContextFn = nullptr;
 	void* mFfxDestroyContextFn = nullptr;
 	void* mFfxConfigureFn = nullptr;
 	void* mFfxQueryFn = nullptr;
 	void* mFfxDispatchFn = nullptr;
 	void* mFfxAllocCallbacks = nullptr;
+#ifdef _WIN32
+	IDXGISwapChain4* mFfxSwapChain = nullptr;
+#endif
 };

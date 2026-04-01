@@ -25,6 +25,7 @@
 
 #include <windows.h>
 #include <d3d12.h>
+#include <dxgi1_6.h>
 
 #ifdef ERROR
 #undef ERROR
@@ -1380,9 +1381,12 @@ void NRIRenderDevice::Update()
 			Draw2D();
 			twod->Clear();
 			FinalizeFrameGenerationUiTarget();
-			CompositeFrameGenerationUiTexture();
-			Draw2D();
-			twod->Clear();
+			if (!IsFrameGenerationPresentPathActive())
+			{
+				CompositeFrameGenerationUiTexture();
+				Draw2D();
+				twod->Clear();
+			}
 		}
 		else
 		{
@@ -1493,41 +1497,47 @@ void NRIRenderDevice::BeginFrame()
 		return;
 	}
 
-	const bool waitableSwapChain = ((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::WAITABLE) != 0;
-	const bool allowWaitForPresent = waitableSwapChain;
-	if (nri_ptwaitpresent && allowWaitForPresent && mHasPresentedSwapChainFrame && mSwapChain != nullptr)
-	{
-		nri::Result waitForPresentResult = nri::Result::FAILURE;
-		{
-			ScopedNriTiming waitPresentTiming(NriPTWaitPresent, mLastFrameBoundaryStats.waitForPresentMs);
-			waitForPresentResult = mSwapChainInterface.WaitForPresent(*mSwapChain);
-		}
-		mLastFrameBoundaryStats.waitForPresentResult = waitForPresentResult;
-	}
-
 	mAcquireSemaphoreIndex = mSwapChainImages.empty() ? 0 : (uint32_t)(mFrameIndex % mSwapChainImages.size());
 	mLastFrameBoundaryStats.acquireSemaphoreIndex = mAcquireSemaphoreIndex;
 
-	nri::Result acquireResult = nri::Result::FAILURE;
+	if (IsFrameGenerationPresentPathActive())
 	{
-		ScopedNriTiming acquireTiming(NriPTAcquireSwap, mLastFrameBoundaryStats.acquireMs);
-		acquireResult = mSwapChainInterface.AcquireNextTexture(*mSwapChain, *mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, mCurrentSwapChainImage);
-	}
-	mLastFrameBoundaryStats.acquireResult = acquireResult;
-	mLastFrameBoundaryStats.swapChainImageIndex = mCurrentSwapChainImage;
-	if (acquireResult == nri::Result::SUCCESS)
-	{
-		NoteSwapChainAcquire(mCurrentSwapChainImage);
-	}
-	if (acquireResult == nri::Result::OUT_OF_DATE)
-	{
-		if (!EnsureSwapChainSize())
+		IDXGISwapChain4* frameGenSwapChain = mFrameGeneration.GetPresentSwapChain();
+		if (frameGenSwapChain == nullptr)
 		{
 			return;
 		}
 
+		mCurrentSwapChainImage = frameGenSwapChain->GetCurrentBackBufferIndex();
+		mLastFrameBoundaryStats.acquireResult = nri::Result::SUCCESS;
+		mLastFrameBoundaryStats.swapChainImageIndex = mCurrentSwapChainImage;
+		mHasAcquiredSwapChainImage = false;
+		if (mCurrentSwapChainImage >= mFrameGenerationPresentImages.size())
 		{
-			ScopedNriTiming reacquireTiming(NriPTAcquireSwap, mLastFrameBoundaryStats.acquireMs);
+			Printf(TEXTCOLOR_RED "NRI framegen present bridge returned backbuffer index %u outside wrapped image range %u.\n",
+				mCurrentSwapChainImage,
+				(unsigned)mFrameGenerationPresentImages.size());
+			return;
+		}
+		mCurrentPresentTarget = &mFrameGenerationPresentImages[mCurrentSwapChainImage];
+	}
+	else
+	{
+		const bool waitableSwapChain = ((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::WAITABLE) != 0;
+		const bool allowWaitForPresent = waitableSwapChain;
+		if (nri_ptwaitpresent && allowWaitForPresent && mHasPresentedSwapChainFrame && mSwapChain != nullptr)
+		{
+			nri::Result waitForPresentResult = nri::Result::FAILURE;
+			{
+				ScopedNriTiming waitPresentTiming(NriPTWaitPresent, mLastFrameBoundaryStats.waitForPresentMs);
+				waitForPresentResult = mSwapChainInterface.WaitForPresent(*mSwapChain);
+			}
+			mLastFrameBoundaryStats.waitForPresentResult = waitForPresentResult;
+		}
+
+		nri::Result acquireResult = nri::Result::FAILURE;
+		{
+			ScopedNriTiming acquireTiming(NriPTAcquireSwap, mLastFrameBoundaryStats.acquireMs);
 			acquireResult = mSwapChainInterface.AcquireNextTexture(*mSwapChain, *mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, mCurrentSwapChainImage);
 		}
 		mLastFrameBoundaryStats.acquireResult = acquireResult;
@@ -1536,17 +1546,36 @@ void NRIRenderDevice::BeginFrame()
 		{
 			NoteSwapChainAcquire(mCurrentSwapChainImage);
 		}
+		if (acquireResult == nri::Result::OUT_OF_DATE)
+		{
+			if (!EnsureSwapChainSize())
+			{
+				return;
+			}
+
+			{
+				ScopedNriTiming reacquireTiming(NriPTAcquireSwap, mLastFrameBoundaryStats.acquireMs);
+				acquireResult = mSwapChainInterface.AcquireNextTexture(*mSwapChain, *mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, mCurrentSwapChainImage);
+			}
+			mLastFrameBoundaryStats.acquireResult = acquireResult;
+			mLastFrameBoundaryStats.swapChainImageIndex = mCurrentSwapChainImage;
+			if (acquireResult == nri::Result::SUCCESS)
+			{
+				NoteSwapChainAcquire(mCurrentSwapChainImage);
+			}
+		}
+
+		if (acquireResult != nri::Result::SUCCESS)
+		{
+			Printf(TEXTCOLOR_RED "NRI failed to acquire swapchain image.\n");
+			LogD3D12FailureDiagnostics("AcquireNextTexture");
+			return;
+		}
+
+		mHasAcquiredSwapChainImage = true;
+		mCurrentPresentTarget = &mSwapChainImages[mCurrentSwapChainImage].target;
 	}
 
-	if (acquireResult != nri::Result::SUCCESS)
-	{
-		Printf(TEXTCOLOR_RED "NRI failed to acquire swapchain image.\n");
-		LogD3D12FailureDiagnostics("AcquireNextTexture");
-		return;
-	}
-
-	mHasAcquiredSwapChainImage = true;
-	mCurrentPresentTarget = &mSwapChainImages[mCurrentSwapChainImage].target;
 	// Match NRD-Sample's swapchain handling: each acquired image re-enters command recording
 	// with unknown local state and must be explicitly transitioned before first use.
 	mCurrentPresentTarget->state = {};
@@ -2174,6 +2203,87 @@ void NRIRenderDevice::RefreshNativeFrameGenerationSwapChain()
 	mNativeD3D12SwapChain = nullptr;
 }
 
+bool NRIRenderDevice::RefreshFrameGenerationPresentTargets()
+{
+#ifndef _WIN32
+	return false;
+#else
+	DestroyFrameGenerationPresentTargets();
+	mFrameGenerationPresentAllowsTearing = false;
+
+	if (mDevice == nullptr || mWrapperD3D12.CreateTextureD3D12 == nullptr || !mFrameGeneration.IsPresentBridgeActive())
+	{
+		return false;
+	}
+
+	IDXGISwapChain4* swapChain = mFrameGeneration.GetPresentSwapChain();
+	if (swapChain == nullptr)
+	{
+		return false;
+	}
+
+	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+	if (FAILED(swapChain->GetDesc1(&swapChainDesc)))
+	{
+		return false;
+	}
+
+	mFrameGenerationPresentAllowsTearing = (swapChainDesc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) != 0;
+	mFrameGenerationPresentImages.resize(swapChainDesc.BufferCount);
+	for (UINT i = 0; i < swapChainDesc.BufferCount; ++i)
+	{
+		ID3D12Resource* nativeResource = nullptr;
+		if (FAILED(swapChain->GetBuffer(i, IID_PPV_ARGS(&nativeResource))) || nativeResource == nullptr)
+		{
+			DestroyFrameGenerationPresentTargets();
+			return false;
+		}
+
+		nri::TextureD3D12Desc textureDesc = {};
+		textureDesc.d3d12Resource = nativeResource;
+
+		auto& target = mFrameGenerationPresentImages[i];
+		if (mWrapperD3D12.CreateTextureD3D12(*mDevice, textureDesc, target.texture) != nri::Result::SUCCESS)
+		{
+			nativeResource->Release();
+			DestroyFrameGenerationPresentTargets();
+			return false;
+		}
+		nativeResource->Release();
+
+		target.owned = true;
+		const nri::TextureDesc& wrappedDesc = mCore.GetTextureDesc(*target.texture);
+		target.width = wrappedDesc.width;
+		target.height = wrappedDesc.height;
+		target.layerNum = wrappedDesc.layerNum;
+		target.format = wrappedDesc.format;
+		target.usage = wrappedDesc.usage;
+		target.type = wrappedDesc.type;
+		target.shaderViewType = nri::TextureView::TEXTURE;
+		target.state = {};
+
+		if (!CreateTextureViews(target))
+		{
+			DestroyFrameGenerationPresentTargets();
+			return false;
+		}
+	}
+
+	return true;
+#endif
+}
+
+void NRIRenderDevice::DestroyFrameGenerationPresentTargets()
+{
+	for (auto& target : mFrameGenerationPresentImages)
+	{
+		DestroyTextureResource(target);
+	}
+
+	mFrameGenerationPresentImages.clear();
+	mFrameGenerationPresentAllowsTearing = false;
+}
+
 void NRIRenderDevice::PrintPathTracingCaps() const
 {
 	if (mDevice == nullptr)
@@ -2229,14 +2339,18 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		mNativeD3D12SwapChain != nullptr ? "ok" : "missing",
 		GetSelectedAPI() == nri::GraphicsAPI::D3D12 ? "nri-public-device-queue-only" : "unsupported-api");
 	const auto& frameGenProvider = mFrameGeneration.GetProviderState();
-	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu frames=%llu/%llu query=%s create=%s config=%s prepare=%s vram=%s:%llu/%llu reason=%s\n",
+	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s swapctx=%s bridge=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s fg_dispatch=%s ui_reg=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu fg:%llu frames=%llu/%llu query=%s/%s create=%s/%s config=%s/%s prepare=%s dispatch=%s vram=fg:%s:%llu/%llu sc:%s:%llu/%llu reason=%s\n",
 		frameGenProvider.runtimeLoaded ? "yes" : "no",
 		frameGenProvider.runtimeFunctionsLoaded ? "yes" : "no",
 		frameGenProvider.contextCreated ? "yes" : "no",
+		frameGenProvider.swapChainContextCreated ? "yes" : "no",
+		frameGenProvider.presentBridgeReady ? "yes" : "no",
 		frameGenProvider.debugConfigured ? "yes" : "no",
 		frameGenProvider.noSwapChainNotify ? "yes" : "no",
 		frameGenProvider.configuredThisFrame ? "yes" : "no",
 		frameGenProvider.prepareDispatchedThisFrame ? "yes" : "no",
+		frameGenProvider.frameGenerationDispatchedThisFrame ? "yes" : "no",
+		frameGenProvider.uiResourceRegisteredThisFrame ? "yes" : "no",
 		frameGenProvider.prepareCameraInfoProvided ? "yes" : "no",
 		frameGenProvider.runtimeLibrary,
 		frameGenProvider.providerVersion,
@@ -2246,15 +2360,23 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		frameGenProvider.contextDisplayHeight,
 		(unsigned long long)frameGenProvider.configureCount,
 		(unsigned long long)frameGenProvider.prepareCount,
+		(unsigned long long)frameGenProvider.dispatchCount,
 		(unsigned long long)frameGenProvider.lastConfiguredFrameId,
 		(unsigned long long)frameGenProvider.lastPreparedFrameId,
 		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastQueryResult),
+		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastSwapChainQueryResult),
 		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastCreateResult),
+		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastSwapChainCreateResult),
 		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastConfigureResult),
+		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastSwapChainConfigureResult),
 		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastPrepareResult),
+		NRIFrameGenerationContext::GetProviderReturnCodeName(frameGenProvider.lastDispatchResult),
 		frameGenProvider.memoryUsageValid ? "yes" : "no",
 		(unsigned long long)frameGenProvider.totalUsageBytes,
 		(unsigned long long)frameGenProvider.aliasableUsageBytes,
+		frameGenProvider.swapChainMemoryUsageValid ? "yes" : "no",
+		(unsigned long long)frameGenProvider.swapChainTotalUsageBytes,
+		(unsigned long long)frameGenProvider.swapChainAliasableUsageBytes,
 		frameGenProvider.lastStatusReason);
 	const auto& lowLatencyState = mFrameGeneration.GetLowLatencyState();
 	Printf("NRI PT low-latency: iface=%s swapchain=%s configured=%s sleep=%s count=%llu markers=%llu present=%s set_mode=%s sleep_result=%s sim=%s/%s submit=%s/%s report=%s present_us=%llu..%llu\n",
@@ -3095,6 +3217,11 @@ bool NRIRenderDevice::CreateDevice()
 	if (selectedApi == nri::GraphicsAPI::D3D12)
 	{
 		ConfigureD3D12InfoQueue(mCore, mDevice);
+		const nri::Result wrapperResult = mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::WrapperD3D12Interface), &mWrapperD3D12);
+		if (wrapperResult != nri::Result::SUCCESS)
+		{
+			mWrapperD3D12 = {};
+		}
 	}
 
 	mLowLatency = {};
@@ -3359,14 +3486,64 @@ bool NRIRenderDevice::CreateSwapChain()
 	swapChainDesc.flags = GetEffectiveRequestedSwapChainFlags();
 	swapChainDesc.queuedFrameNum = QueuedFrameCount;
 
+	const bool tryFrameGenPresentBridge =
+		nri_framegen &&
+		HasRequestedFrameGenerationProvider() &&
+		GetSelectedAPI() == nri::GraphicsAPI::D3D12 &&
+		!IsFullscreenModeActive();
+
+	mSwapChainFlags = swapChainDesc.flags;
+	mSwapChainQueuedFrameNum = swapChainDesc.queuedFrameNum;
+	mSwapChainTextureCount = 0;
+	mObservedSwapChainAcquireMask = 0;
+	mObservedSwapChainPresentMask = 0;
+	mSwapChainAcquireCounts.clear();
+	mSwapChainPresentCounts.clear();
+	mSwapChainAbandonCounts.clear();
+	mHasPresentedSwapChainFrame = false;
+
+	if (tryFrameGenPresentBridge)
+	{
+		RefreshNativeFrameGenerationSwapChain();
+		mFrameGeneration.OnSwapChainCreated(*this);
+		if (mFrameGeneration.IsPresentBridgeActive() && RefreshFrameGenerationPresentTargets())
+		{
+			mSwapChainTextureCount = (uint8_t)(std::min<size_t>)(mFrameGenerationPresentImages.size(), 255u);
+			mSwapChainAcquireCounts.assign(mFrameGenerationPresentImages.size(), 0);
+			mSwapChainPresentCounts.assign(mFrameGenerationPresentImages.size(), 0);
+			mSwapChainAbandonCounts.assign(mFrameGenerationPresentImages.size(), 0);
+			Printf("NRI framegen proxy swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s wait_present=%s size=%ux%u\n",
+				(uint32_t)mSwapChainTextureCount,
+				(uint32_t)mSwapChainQueuedFrameNum,
+				vid_vsync ? "on" : "off",
+				DescribeSwapChainFlags(mSwapChainFlags).GetChars(),
+				nri_ptwaitpresent ? "on" : "off",
+				width,
+				height);
+			Printf("NRI framegen native handles: api=%s device=%s queue=%s swapchain=%s\n",
+				(const char*)nri_api,
+				mNativeD3D12Device != nullptr ? "ok" : "missing",
+				mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
+				mNativeD3D12SwapChain != nullptr ? "ok" : "missing");
+			return true;
+		}
+
+		DestroyFrameGenerationPresentTargets();
+		mFrameGeneration.OnSwapChainDestroyed(*this);
+		Printf(TEXTCOLOR_YELLOW "NRI framegen proxy swapchain creation failed; falling back to the native NRI swapchain path.\n");
+	}
+
 	if (mSwapChainInterface.CreateSwapChain(*mDevice, swapChainDesc, mSwapChain) != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "Failed to create NRI swapchain.\n");
 		return false;
 	}
-	mSwapChainFlags = swapChainDesc.flags;
 	RefreshNativeFrameGenerationSwapChain();
 	mFrameGeneration.OnSwapChainCreated(*this);
+	if (mFrameGeneration.IsPresentBridgeActive() && !RefreshFrameGenerationPresentTargets())
+	{
+		Printf(TEXTCOLOR_RED "NRI framegen present bridge is active but proxy backbuffer wrapping failed; falling back to native present path.\n");
+	}
 	SetNriDebugName(mCore, mSwapChain, "Raze.SwapChain");
 
 	uint32_t textureCount = 0;
@@ -3458,6 +3635,7 @@ bool NRIRenderDevice::CreateQueuedFrames()
 
 void NRIRenderDevice::DestroySwapChain()
 {
+	DestroyFrameGenerationPresentTargets();
 	RefreshNativeFrameGenerationSwapChain();
 	ResetFrameTracking();
 	mSwapChainFlags = nri::SwapChainBits::NONE;
@@ -3646,6 +3824,7 @@ bool NRIRenderDevice::CreateRenderResources()
 
 void NRIRenderDevice::DestroyRenderResources()
 {
+	DestroyFrameGenerationPresentTargets();
 	DestroyFrameGenerationUiTexture();
 
 	delete mWhiteTexture;
@@ -3732,6 +3911,18 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 {
 	if (mSwapChain == nullptr)
 	{
+		if (!mFrameGenerationPresentImages.empty() && IsFrameGenerationPresentPathActive())
+		{
+			const uint32_t width = (uint32_t)(std::max)(GetClientWidth(), 1);
+			const uint32_t height = (uint32_t)(std::max)(GetClientHeight(), 1);
+			const nri::SwapChainBits requestedFlags = GetEffectiveRequestedSwapChainFlags();
+			if (mFrameGenerationPresentImages[0].width == width &&
+				mFrameGenerationPresentImages[0].height == height &&
+				mSwapChainFlags == requestedFlags)
+			{
+				return true;
+			}
+		}
 		return CreateSwapChain();
 	}
 
@@ -3762,29 +3953,43 @@ void NRIRenderDevice::EndFrameAndPresent()
 		return;
 	}
 
+	mFrameGeneration.ConfigureAndDispatchFrame(*this);
 	TransitionTexture(*mCurrentPresentTarget, { nri::AccessBits::NONE, nri::Layout::PRESENT, nri::StageBits::NONE });
 	mCore.EndCommandBuffer(*mCommandBuffer);
 	mCommandBufferOpen = false;
 
-	const nri::FenceSubmitDesc waitFence = { mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, 0, NRISwapChainAcquireWaitStages() };
-	const nri::FenceSubmitDesc releaseFence = { mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore, 0, nri::StageBits::NONE };
 	const uint64_t submittedFenceValue = 1 + mFrameIndex;
 	mSubmittedFenceValue = submittedFenceValue;
 	mLastFrameBoundaryStats.submittedFenceValue = submittedFenceValue;
 	const nri::FenceSubmitDesc frameFence = { mFrameFence, submittedFenceValue, nri::StageBits::NONE };
-	const nri::FenceSubmitDesc signalFences[] = { releaseFence, frameFence };
 	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
 
 	mFrameGeneration.OnSimulationEnd(*this);
 	nri::QueueSubmitDesc submitDesc = {};
-	submitDesc.waitFences = &waitFence;
-	submitDesc.waitFenceNum = 1;
 	submitDesc.commandBuffers = commandBuffers;
 	submitDesc.commandBufferNum = 1;
-	submitDesc.signalFences = signalFences;
-	submitDesc.signalFenceNum = 2;
-	const bool lowLatencySwapChainEnabled = ((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::ALLOW_LOW_LATENCY) != 0;
-	submitDesc.swapChain = lowLatencySwapChainEnabled ? mSwapChain : nullptr;
+	nri::FenceSubmitDesc waitFence = {};
+	nri::FenceSubmitDesc signalFences[2] = {};
+	if (!IsFrameGenerationPresentPathActive())
+	{
+		waitFence = { mSwapChainImages[mAcquireSemaphoreIndex].acquireSemaphore, 0, NRISwapChainAcquireWaitStages() };
+		const nri::FenceSubmitDesc releaseFence = { mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore, 0, nri::StageBits::NONE };
+		signalFences[0] = releaseFence;
+		signalFences[1] = frameFence;
+		submitDesc.waitFences = &waitFence;
+		submitDesc.waitFenceNum = 1;
+		submitDesc.signalFences = signalFences;
+		submitDesc.signalFenceNum = 2;
+		const bool lowLatencySwapChainEnabled = ((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::ALLOW_LOW_LATENCY) != 0;
+		submitDesc.swapChain = lowLatencySwapChainEnabled ? mSwapChain : nullptr;
+	}
+	else
+	{
+		signalFences[0] = frameFence;
+		submitDesc.signalFences = signalFences;
+		submitDesc.signalFenceNum = 1;
+		submitDesc.swapChain = nullptr;
+	}
 	nri::Result submitResult = nri::Result::FAILURE;
 	mFrameGeneration.OnRenderSubmitStart(*this);
 	{
@@ -3803,13 +4008,26 @@ void NRIRenderDevice::EndFrameAndPresent()
 	mFrameGeneration.OnPresentStart(*this);
 	{
 		ScopedNriTiming presentTiming(NriPTQueuePresent, mLastFrameBoundaryStats.presentMs);
-		presentResult = mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
+		if (IsFrameGenerationPresentPathActive())
+		{
+			if (!mFrameGeneration.Present(*this, !!vid_vsync, mFrameGenerationPresentAllowsTearing, presentResult))
+			{
+				presentResult = nri::Result::FAILURE;
+			}
+		}
+		else
+		{
+			presentResult = mSwapChainInterface.QueuePresent(*mSwapChain, *mSwapChainImages[mCurrentSwapChainImage].releaseSemaphore);
+		}
 	}
 	mFrameGeneration.OnPresentEnd(*this, presentResult);
 	mLastFrameBoundaryStats.presentResult = presentResult;
 	if (presentResult == nri::Result::SUCCESS)
 	{
-		NoteSwapChainPresent(mCurrentSwapChainImage);
+		if (!IsFrameGenerationPresentPathActive())
+		{
+			NoteSwapChainPresent(mCurrentSwapChainImage);
+		}
 		mHasPresentedSwapChainFrame = true;
 		if (nri_ptdebug > 0 && sLoggedPresentCount < 4)
 		{
@@ -3824,7 +4042,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 	{
 		mHasPresentedSwapChainFrame = false;
 		Printf(TEXTCOLOR_RED "NRI QueuePresent failed with result '%s'.\n", GetNriResultName(presentResult));
-		LogD3D12FailureDiagnostics("QueuePresent");
+		LogD3D12FailureDiagnostics(IsFrameGenerationPresentPathActive() ? "FramegenPresent" : "QueuePresent");
 	}
 	if (mCurrentQueuedFrameIndex < mQueuedFrames.size())
 	{

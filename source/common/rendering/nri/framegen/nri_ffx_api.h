@@ -4,6 +4,7 @@
 
 #include <d3d12.h>
 #include <dxgi.h>
+#include <dxgi1_5.h>
 
 #include <cstdint>
 #include <cstring>
@@ -68,6 +69,15 @@ enum
 	NRI_FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION_REGISTERDISTORTIONRESOURCE = 0x00020008u,
 	NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_HUDLESS = 0x00020009u,
 	NRI_FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_CAMERAINFO = 0x0002000au,
+	NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_WRAP_DX12 = 0x00030001u,
+	NRI_FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_REGISTERUIRESOURCE_DX12 = 0x00030002u,
+	NRI_FFX_API_QUERY_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_INTERPOLATIONCOMMANDLIST_DX12 = 0x00030003u,
+	NRI_FFX_API_QUERY_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_INTERPOLATIONTEXTURE_DX12 = 0x00030004u,
+	NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_NEW_DX12 = 0x00030005u,
+	NRI_FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12 = 0x00030006u,
+	NRI_FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_WAIT_FOR_PRESENTS_DX12 = 0x00030007u,
+	NRI_FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_KEYVALUE_DX12 = 0x00030008u,
+	NRI_FFX_API_QUERY_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_GPU_MEMORY_USAGE_DX12 = 0x00030009u,
 };
 
 enum
@@ -96,6 +106,12 @@ enum
 	NRI_FFX_FRAMEGENERATION_FLAG_DRAW_DEBUG_VIEW = (1u << 2),
 	NRI_FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY = (1u << 3),
 	NRI_FFX_FRAMEGENERATION_FLAG_DRAW_DEBUG_PACING_LINES = (1u << 4),
+};
+
+enum
+{
+	NRI_FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_USE_PREMUL_ALPHA = (1u << 0),
+	NRI_FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING = (1u << 1),
 };
 
 enum
@@ -275,13 +291,69 @@ struct ffxCreateContextDescFrameGenerationHudless
 	uint32_t hudlessBackBufferFormat;
 };
 
+struct ffxCreateContextDescFrameGenerationSwapChainWrapDX12
+{
+	ffxCreateContextDescHeader header;
+	IDXGISwapChain4** swapchain;
+	ID3D12CommandQueue* gameQueue;
+};
+
+struct ffxCreateContextDescFrameGenerationSwapChainNewDX12
+{
+	ffxCreateContextDescHeader header;
+	IDXGISwapChain4** swapchain;
+	DXGI_SWAP_CHAIN_DESC* desc;
+	IDXGIFactory* dxgiFactory;
+	ID3D12CommandQueue* gameQueue;
+};
+
+struct ffxCreateContextDescFrameGenerationSwapChainForHwndDX12
+{
+	ffxCreateContextDescHeader header;
+	IDXGISwapChain4** swapchain;
+	HWND hwnd;
+	DXGI_SWAP_CHAIN_DESC1* desc;
+	DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fullscreenDesc;
+	IDXGIFactory* dxgiFactory;
+	ID3D12CommandQueue* gameQueue;
+};
+
+struct ffxCallbackDescFrameGenerationPresent
+{
+	ffxDispatchDescHeader header;
+	void* device;
+	void* commandList;
+	FfxApiResource currentBackBuffer;
+	FfxApiResource currentUI;
+	FfxApiResource outputSwapChainBuffer;
+	bool isGeneratedFrame;
+	uint64_t frameID;
+};
+
+struct ffxDispatchDescFrameGeneration
+{
+	ffxDispatchDescHeader header;
+	void* commandList;
+	FfxApiResource presentColor;
+	FfxApiResource outputs[4];
+	uint32_t numGeneratedFrames;
+	bool reset;
+	uint32_t backbufferTransferFunction;
+	float minMaxLuminance[2];
+	FfxApiRect2D generationRect;
+	uint64_t frameID;
+};
+
+typedef ffxReturnCode_t(*PfnFfxPresentCallback)(ffxCallbackDescFrameGenerationPresent* params, void* userContext);
+typedef ffxReturnCode_t(*PfnFfxFrameGenerationDispatchCallback)(ffxDispatchDescFrameGeneration* params, void* userContext);
+
 struct ffxConfigureDescFrameGeneration
 {
 	ffxConfigureDescHeader header;
 	void* swapChain;
-	void* presentCallback;
+	PfnFfxPresentCallback presentCallback;
 	void* presentCallbackUserContext;
-	void* frameGenerationCallback;
+	PfnFfxFrameGenerationDispatchCallback frameGenerationCallback;
 	void* frameGenerationCallbackUserContext;
 	bool frameGenerationEnabled;
 	bool allowAsyncWorkloads;
@@ -318,6 +390,36 @@ struct ffxDispatchDescFrameGenerationPrepareCameraInfo
 	float cameraUp[3];
 	float cameraRight[3];
 	float cameraForward[3];
+};
+
+struct ffxConfigureDescFrameGenerationSwapChainRegisterUiResourceDX12
+{
+	ffxConfigureDescHeader header;
+	FfxApiResource uiResource;
+	uint32_t flags;
+};
+
+struct ffxQueryDescFrameGenerationSwapChainInterpolationCommandListDX12
+{
+	ffxQueryDescHeader header;
+	void** pOutCommandList;
+};
+
+struct ffxQueryDescFrameGenerationSwapChainInterpolationTextureDX12
+{
+	ffxQueryDescHeader header;
+	FfxApiResource* pOutTexture;
+};
+
+struct ffxDispatchDescFrameGenerationSwapChainWaitForPresentsDX12
+{
+	ffxDispatchDescHeader header;
+};
+
+struct ffxQueryFrameGenerationSwapChainGetGPUMemoryUsageDX12
+{
+	ffxQueryDescHeader header;
+	FfxApiEffectMemoryUsage* gpuMemoryUsageFrameGenerationSwapchain;
 };
 
 static inline void NriFfxInitHeader(ffxApiHeader& header, uint64_t type)

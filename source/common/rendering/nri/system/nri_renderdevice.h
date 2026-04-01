@@ -3,6 +3,7 @@
 #include "base_sysfb.h"
 #include "../framegen/nri_framegen.h"
 #include "nri_local.h"
+#include "Extensions/NRIWrapperD3D12.h"
 
 #include <memory>
 #include <vector>
@@ -85,6 +86,7 @@ public:
 	ID3D12Device* GetNativeD3D12Device() const { return mNativeD3D12Device; }
 	ID3D12CommandQueue* GetNativeD3D12GraphicsQueue() const { return mNativeD3D12GraphicsQueue; }
 	IDXGISwapChain4* GetNativeD3D12SwapChain() const { return mNativeD3D12SwapChain; }
+	bool IsFrameGenerationPresentPathActive() const { return !mFrameGenerationPresentImages.empty() && mFrameGeneration.ShouldUsePresentBridge(); }
 #endif
 
 private:
@@ -220,6 +222,8 @@ private:
 	void ResetFrameTracking(bool presentedAcquiredImage = false);
 	void RefreshNativeFrameGenerationHandles();
 	void RefreshNativeFrameGenerationSwapChain();
+	bool RefreshFrameGenerationPresentTargets();
+	void DestroyFrameGenerationPresentTargets();
 	bool ShouldRequestFrameGenerationLowLatencySwapChain() const;
 	nri::SwapChainBits GetEffectiveRequestedSwapChainFlags() const;
 	bool ShouldUseFrameGenerationUiTarget() const;
@@ -254,6 +258,7 @@ private:
 	nri::SwapChainInterface mSwapChainInterface = {};
 	nri::UpscalerInterface mUpscaler = {};
 	nri::LowLatencyInterface mLowLatency = {};
+	nri::WrapperD3D12Interface mWrapperD3D12 = {};
 	nri::Device* mDevice = nullptr;
 	nri::Queue* mGraphicsQueue = nullptr;
 	nri::SwapChain* mSwapChain = nullptr;
@@ -269,6 +274,7 @@ private:
 	NRIFrameGenerationContext mFrameGeneration;
 
 	std::vector<NRISwapChainImage> mSwapChainImages;
+	std::vector<NRITextureResource> mFrameGenerationPresentImages;
 	std::vector<QueuedFrame> mQueuedFrames;
 	NRITextureResource mSceneTarget;
 	NRITextureResource mSaveTarget;
@@ -293,6 +299,7 @@ private:
 	ID3D12Device* mNativeD3D12Device = nullptr;
 	ID3D12CommandQueue* mNativeD3D12GraphicsQueue = nullptr;
 	IDXGISwapChain4* mNativeD3D12SwapChain = nullptr;
+	bool mFrameGenerationPresentAllowsTearing = false;
 #endif
 	uint64_t mFrameIndex = 0;
 	uint64_t mSubmittedFenceValue = 0;
