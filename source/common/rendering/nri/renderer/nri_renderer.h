@@ -539,6 +539,7 @@ private:
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;
 	bool BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials) const;
+	void AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sceneView) const;
 	void RefreshSceneLightSystem(
 		bool usedStaticMapScene,
 		const nri_scene::SceneView* capturedSceneView,

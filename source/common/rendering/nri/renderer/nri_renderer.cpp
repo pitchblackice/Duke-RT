@@ -8290,11 +8290,61 @@ bool NRIRenderer::BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeo
 	}
 
 	nri_scene::SceneView sphereView = {};
-	sphereView.opaqueFlats.reserve(mRuntimeDebugSpheres.size());
-	sphereView.stats.totalDrawItems = (unsigned int)mRuntimeDebugSpheres.size();
-	sphereView.stats.flatDrawItems = (unsigned int)mRuntimeDebugSpheres.size();
-	sphereView.stats.materialRefs = (unsigned int)mRuntimeDebugSpheres.size();
-	sphereView.stats.triangleEstimate = (unsigned int)(mRuntimeDebugSpheres.size() * NriPtDebugSphereLongitudeSegments * 2u * (NriPtDebugSphereLatitudeSegments - 1u));
+	AppendRuntimeDebugSpheresToSceneView(sphereView);
+	nri_scene::BuildGeometry(sphereView, outGeometry);
+	nri_scene::BuildMaterials(sphereView, outMaterials);
+
+	const size_t materialCount = std::min(mRuntimeDebugSpheres.size(), outMaterials.materials.size());
+	for (size_t i = 0; i < materialCount; ++i)
+	{
+		const RuntimeDebugSphere& sphere = mRuntimeDebugSpheres[i];
+		nri_scene::MaterialData& material = outMaterials.materials[i];
+		material.lightLevel = 1.0f;
+		material.alpha = 1.0f;
+		material.metalnessHint = sphere.metalness;
+		material.roughnessHint = sphere.roughness;
+		material.materialClass = 0;
+
+		if (i < outMaterials.lightMetadata.size())
+		{
+			nri_scene::MaterialLightingMetadata& metadata = outMaterials.lightMetadata[i];
+			metadata.texture = nullptr;
+			metadata.textureId = 0;
+			metadata.materialFlags = material.flags;
+			metadata.materialClass = material.materialClass;
+			metadata.alpha = material.alpha;
+			metadata.lightLevel = material.lightLevel;
+			metadata.averageColor[0] = 1.0f;
+			metadata.averageColor[1] = 1.0f;
+			metadata.averageColor[2] = 1.0f;
+
+			uint32_t diameterBits = 0;
+			uint32_t metalnessBits = 0;
+			uint32_t roughnessBits = 0;
+			std::memcpy(&diameterBits, &sphere.diameter, sizeof(diameterBits));
+			std::memcpy(&metalnessBits, &sphere.metalness, sizeof(metalnessBits));
+			std::memcpy(&roughnessBits, &sphere.roughness, sizeof(roughnessBits));
+			metadata.materialKey = HashCombine64(metadata.materialKey, sphere.id);
+			metadata.materialKey = HashCombine64(metadata.materialKey, ((uint64_t)diameterBits << 32u) | (uint64_t)metalnessBits);
+			metadata.materialKey = HashCombine64(metadata.materialKey, (uint64_t)roughnessBits);
+		}
+	}
+
+	return !outGeometry.primitives.empty() && !outMaterials.materials.empty();
+}
+
+void NRIRenderer::AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sceneView) const
+{
+	if (mRuntimeDebugSpheres.empty())
+	{
+		return;
+	}
+
+	sceneView.opaqueFlats.reserve(sceneView.opaqueFlats.size() + mRuntimeDebugSpheres.size());
+	sceneView.stats.totalDrawItems += (unsigned int)mRuntimeDebugSpheres.size();
+	sceneView.stats.flatDrawItems += (unsigned int)mRuntimeDebugSpheres.size();
+	sceneView.stats.materialRefs += (unsigned int)mRuntimeDebugSpheres.size();
+	sceneView.stats.triangleEstimate += (unsigned int)(mRuntimeDebugSpheres.size() * NriPtDebugSphereLongitudeSegments * 2u * (NriPtDebugSphereLatitudeSegments - 1u));
 
 	constexpr float Pi = 3.14159265358979323846f;
 	auto makeVertex = [Pi](const RuntimeDebugSphere& sphere, float u, float v) -> nri_scene::CapturedVertex
@@ -8384,49 +8434,8 @@ bool NRIRenderer::BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeo
 			}
 		}
 
-		sphereView.opaqueFlats.push_back(std::move(surface));
+		sceneView.opaqueFlats.push_back(std::move(surface));
 	}
-
-	nri_scene::BuildGeometry(sphereView, outGeometry);
-	nri_scene::BuildMaterials(sphereView, outMaterials);
-
-	const size_t materialCount = std::min(mRuntimeDebugSpheres.size(), outMaterials.materials.size());
-	for (size_t i = 0; i < materialCount; ++i)
-	{
-		const RuntimeDebugSphere& sphere = mRuntimeDebugSpheres[i];
-		nri_scene::MaterialData& material = outMaterials.materials[i];
-		material.lightLevel = 1.0f;
-		material.alpha = 1.0f;
-		material.metalnessHint = sphere.metalness;
-		material.roughnessHint = sphere.roughness;
-		material.materialClass = 0;
-
-		if (i < outMaterials.lightMetadata.size())
-		{
-			nri_scene::MaterialLightingMetadata& metadata = outMaterials.lightMetadata[i];
-			metadata.texture = nullptr;
-			metadata.textureId = 0;
-			metadata.materialFlags = material.flags;
-			metadata.materialClass = material.materialClass;
-			metadata.alpha = material.alpha;
-			metadata.lightLevel = material.lightLevel;
-			metadata.averageColor[0] = 1.0f;
-			metadata.averageColor[1] = 1.0f;
-			metadata.averageColor[2] = 1.0f;
-
-			uint32_t diameterBits = 0;
-			uint32_t metalnessBits = 0;
-			uint32_t roughnessBits = 0;
-			std::memcpy(&diameterBits, &sphere.diameter, sizeof(diameterBits));
-			std::memcpy(&metalnessBits, &sphere.metalness, sizeof(metalnessBits));
-			std::memcpy(&roughnessBits, &sphere.roughness, sizeof(roughnessBits));
-			metadata.materialKey = HashCombine64(metadata.materialKey, sphere.id);
-			metadata.materialKey = HashCombine64(metadata.materialKey, ((uint64_t)diameterBits << 32u) | (uint64_t)metalnessBits);
-			metadata.materialKey = HashCombine64(metadata.materialKey, (uint64_t)roughnessBits);
-		}
-	}
-
-	return !outGeometry.primitives.empty() && !outMaterials.materials.empty();
 }
 
 bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)
