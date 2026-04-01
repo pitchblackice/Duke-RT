@@ -9,6 +9,7 @@
 #include "image.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
+#include "coreactor.h"
 #include "mapinfo.h"
 #include "printf.h"
 #include "gamestruct.h"
@@ -2566,6 +2567,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			liveDynamicHasEmissive = RebuildPersistentDynamicEmissiveCache(dynamicSceneView, dynamicMaterialBridge);
 		}
 
+		PrunePersistentDynamicEmissiveCacheToLiveActors();
+
 		const bool shouldUsePersistentDynamicEmissive = mPersistentDynamicEmissiveCache.valid && !liveDynamicHasEmissive;
 		if (shouldUsePersistentDynamicEmissive)
 		{
@@ -4290,6 +4293,113 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 void NRIRenderer::ResetPersistentDynamicEmissiveCache()
 {
 	mPersistentDynamicEmissiveCache = {};
+}
+
+void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
+{
+	if (!mPersistentDynamicEmissiveCache.valid)
+	{
+		return;
+	}
+
+	std::unordered_map<int32_t, bool> liveActorIndices;
+	liveActorIndices.reserve(256);
+
+	TSpriteIterator<DCoreActor> it;
+	while (auto actor = it.Next())
+	{
+		if (actor == nullptr ||
+			!actor->exists() ||
+			(actor->ObjectFlags & OF_EuthanizeMe) != 0)
+		{
+			continue;
+		}
+
+		liveActorIndices[(int32_t)actor->GetIndex()] = true;
+	}
+
+	bool needsPrune = false;
+	auto detectStaleActorOwnership = [&needsPrune, &liveActorIndices](const auto& surfaces)
+	{
+		for (const auto& surface : surfaces)
+		{
+			if (surface.provenance.actorIndex >= 0 &&
+				liveActorIndices.find(surface.provenance.actorIndex) == liveActorIndices.end())
+			{
+				needsPrune = true;
+				return;
+			}
+		}
+	};
+
+	detectStaleActorOwnership(mPersistentDynamicEmissiveCache.sceneView.opaqueWalls);
+	detectStaleActorOwnership(mPersistentDynamicEmissiveCache.sceneView.opaqueFlats);
+	detectStaleActorOwnership(mPersistentDynamicEmissiveCache.sceneView.opaqueSprites);
+	if (!needsPrune)
+	{
+		return;
+	}
+
+	PersistentDynamicEmissiveCache next = {};
+	next.sceneView.drawInfo = mPersistentDynamicEmissiveCache.sceneView.drawInfo;
+	next.sceneView.sky = mPersistentDynamicEmissiveCache.sceneView.sky;
+	Copy3(mPersistentDynamicEmissiveCache.sceneView.skyColor, next.sceneView.skyColor);
+	Copy3(mPersistentDynamicEmissiveCache.sceneView.groundColor, next.sceneView.groundColor);
+
+	auto appendLiveOwnedSurfaces = [&liveActorIndices](const auto& source, auto& destination)
+	{
+		for (const auto& surface : source)
+		{
+			if (surface.provenance.actorIndex >= 0 &&
+				liveActorIndices.find(surface.provenance.actorIndex) == liveActorIndices.end())
+			{
+				continue;
+			}
+
+			destination.push_back(surface);
+		}
+	};
+
+	appendLiveOwnedSurfaces(mPersistentDynamicEmissiveCache.sceneView.opaqueWalls, next.sceneView.opaqueWalls);
+	appendLiveOwnedSurfaces(mPersistentDynamicEmissiveCache.sceneView.opaqueFlats, next.sceneView.opaqueFlats);
+	appendLiveOwnedSurfaces(mPersistentDynamicEmissiveCache.sceneView.opaqueSprites, next.sceneView.opaqueSprites);
+
+	next.surfaceCount =
+		(uint32_t)next.sceneView.opaqueWalls.size() +
+		(uint32_t)next.sceneView.opaqueFlats.size() +
+		(uint32_t)next.sceneView.opaqueSprites.size();
+	if (next.surfaceCount == 0)
+	{
+		mPersistentDynamicEmissiveCache = {};
+		return;
+	}
+
+	{
+		Clocker clock(NriPTGeometryBuild);
+		nri_scene::BuildGeometry(next.sceneView, next.geometry);
+		AssignGeometryPortalIndices(mMapWorld, next.geometry);
+	}
+	{
+		Clocker clock(NriPTMaterialBuild);
+		nri_scene::BuildMaterials(next.sceneView, next.materialBridge);
+	}
+
+	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
+	next.materialCount = (uint32_t)next.materialBridge.materials.size();
+	next.sceneView.stats.totalDrawItems = next.surfaceCount;
+	next.sceneView.stats.wallDrawItems = (uint32_t)next.sceneView.opaqueWalls.size();
+	next.sceneView.stats.flatDrawItems = (uint32_t)next.sceneView.opaqueFlats.size();
+	next.sceneView.stats.spriteDrawItems = (uint32_t)next.sceneView.opaqueSprites.size();
+	next.sceneView.stats.triangleEstimate = next.primitiveCount;
+	next.sceneView.stats.materialRefs = next.materialCount;
+	next.valid = next.primitiveCount > 0 && next.materialCount > 0;
+	if (!next.valid)
+	{
+		mPersistentDynamicEmissiveCache = {};
+		return;
+	}
+
+	mPersistentDynamicEmissiveCache = std::move(next);
 }
 
 bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials)
