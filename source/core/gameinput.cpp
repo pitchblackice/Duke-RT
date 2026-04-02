@@ -192,8 +192,10 @@ void GameInput::processMovement(const double turnscale, const bool allowstrafe, 
 	inputBuffer.vel += thisInput.vel;
 	inputBuffer.ang += thisInput.ang;
 
-	// directly update player angles if we can.
-	if (scaleAdjust < 1)
+	// In unsynced mode, local view response must always be driven from this path.
+	// Lagged frames can push scaleAdjust above 1, so gating on the fraction creates
+	// a dead zone where ticcmds are built but neither the local camera nor actor moves.
+	if (!SyncInput())
 	{
 		PlayerArray[myconnectindex]->CameraAngles += thisInput.ang;
 		PerfLoopTraceNoteFastCameraApply((float)thisInput.ang.Yaw.Degrees(), (float)thisInput.ang.Pitch.Degrees());
@@ -256,8 +258,8 @@ void GameInput::processVehicle(const double baseVel, const double velScale, cons
 		turnheldtime = 0;
 	}
 
-	// directly update player angles if we can.
-	if (scaleAdjust < 1)
+	// Unsynced vehicle turning uses the same immediate local-camera path.
+	if (!SyncInput())
 	{
 		PlayerArray[myconnectindex]->CameraAngles += thisInput.ang;
 		PerfLoopTraceNoteFastCameraApply((float)thisInput.ang.Yaw.Degrees(), 0.0f);
