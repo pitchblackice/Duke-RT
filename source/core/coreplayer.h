@@ -20,6 +20,7 @@ protected:
 		CameraPos = {};
 		memset(&lastcmd, 0, sizeof(lastcmd));
 		memset(&cmd, 0, sizeof(cmd));
+		cmdSyncInput = false;
 		actor = nullptr;
 		pnum = 0;
 	}
@@ -31,6 +32,7 @@ public:
 	DAngle YawSpin;
 	DVector3 CameraPos;
 	ticcmd_t lastcmd, cmd;
+	bool cmdSyncInput = false;
 	DCoreActor* actor;
 	uint8_t pnum;
 

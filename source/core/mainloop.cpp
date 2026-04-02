@@ -259,6 +259,7 @@ void G_BuildTiccmd(ticcmd_t* cmd)
 	}
 	cmd->ucmd = {};
 	gameInput.getInput(&cmd->ucmd);
+	localcmdsync[maketic % LOCALCMDTICS] = gameInput.SyncInput();
 	cmd->consistency = consistency[myconnectindex][(maketic / ticdup) % BACKUPTICS];
 }
 
@@ -448,6 +449,11 @@ static void GameTicker()
 #endif
 			{
 				*cmd = *newcmd;
+				PlayerArray[i]->cmdSyncInput = netcmdsync[i][buf];
+				if (i == myconnectindex && PerfLoopTraceActive())
+				{
+					PerfLoopTraceNoteCommandSync(PlayerArray[i]->cmdSyncInput);
+				}
 			}
 
 
@@ -1161,9 +1167,10 @@ void MainLoop ()
 					inputTrace.eventQueueHighWater,
 					inputTrace.eventQueueOverflows);
 				Printf(
-					"PERF camera trace: frame=%llu sync=%d input_scale=%.6f actor_yaw_calls=%u actor_pitch_calls=%u cam_updates=%u cam_resets=%u render_calls=%u cmd_deg=(%.3f,%.3f) actor_delta=(%.3f,%.3f) actor=(%.3f,%.3f) camera_delta=(%.3f,%.3f) camera=(%.3f,%.3f) render=(%.3f,%.3f) render_frame_delta=(%.3f,%.3f)\n",
+					"PERF camera trace: frame=%llu sync=%d cmd_sync=%d input_scale=%.6f actor_yaw_calls=%u actor_pitch_calls=%u cam_updates=%u cam_resets=%u render_calls=%u cmd_deg=(%.3f,%.3f) actor_delta=(%.3f,%.3f) actor=(%.3f,%.3f) camera_delta=(%.3f,%.3f) camera=(%.3f,%.3f) render=(%.3f,%.3f) render_frame_delta=(%.3f,%.3f)\n",
 					(unsigned long long)traceFrame,
 					cameraTrace.syncInput ? 1 : 0,
+					cameraTrace.cmdSyncInput ? 1 : 0,
 					cameraTrace.inputScale,
 					cameraTrace.actorYawCalls,
 					cameraTrace.actorPitchCalls,

@@ -264,6 +264,14 @@ void PerfLoopTraceNoteInputMode(bool syncInput, double inputScale)
 	perfLoopCameraTraceStats.inputScale = inputScale;
 }
 
+void PerfLoopTraceNoteCommandSync(bool syncInput)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopCameraTraceStats.cmdSyncInput = syncInput;
+}
+
 void PerfLoopTraceNoteActorYaw(float cmdYawDegrees, float deltaYawDegrees, float currentYawDegrees)
 {
 	if (!PerfLoopTraceActive())

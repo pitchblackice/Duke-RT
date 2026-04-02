@@ -121,7 +121,7 @@ void DCorePlayer::doPitchInput()
 	// Add player's mouse/device input.
 	if (cmd.ucmd.ang.Pitch.Degrees())
 	{
-		const DAngle appliedPitch = cmd.ucmd.ang.Pitch * gameInput.SyncInput();
+		const DAngle appliedPitch = cmd.ucmd.ang.Pitch * (pnum == myconnectindex ? cmdSyncInput : gameInput.SyncInput());
 		actor->spr.Angles.Pitch += appliedPitch;
 		if (pnum == myconnectindex)
 		{
@@ -185,7 +185,7 @@ void DCorePlayer::doYawInput()
 	const DAngle cmdYaw = cmd.ucmd.ang.Yaw;
 
 	// Add player's mouse/device input.
-	const DAngle appliedYaw = cmd.ucmd.ang.Yaw * gameInput.SyncInput();
+	const DAngle appliedYaw = cmd.ucmd.ang.Yaw * (pnum == myconnectindex ? cmdSyncInput : gameInput.SyncInput());
 	actor->spr.Angles.Yaw += appliedYaw;
 	if (pnum == myconnectindex)
 	{
@@ -348,7 +348,7 @@ void DCorePlayer::doRollInput(const bool bUnderwater)
 	else
 	{
 		// Add player's device input.
-		actor->spr.Angles.Roll += cmd.ucmd.ang.Roll * gameInput.SyncInput();
+		actor->spr.Angles.Roll += cmd.ucmd.ang.Roll * (pnum == myconnectindex ? cmdSyncInput : gameInput.SyncInput());
 	}
 }
 

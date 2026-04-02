@@ -103,6 +103,7 @@ struct PerfLoop2DProducerTraceStats
 struct PerfLoopCameraTraceStats
 {
 	bool syncInput = false;
+	bool cmdSyncInput = false;
 	double inputScale = 1.0;
 	uint32_t actorYawCalls = 0;
 	uint32_t actorPitchCalls = 0;
@@ -146,6 +147,7 @@ void PerfLoopTraceNotePlayerYawApply(float yawDegrees);
 void PerfLoopTraceNotePlayerPitchApply(float pitchDegrees);
 void PerfLoopTraceNoteFastCameraApply(float yawDegrees, float pitchDegrees);
 void PerfLoopTraceNoteInputMode(bool syncInput, double inputScale);
+void PerfLoopTraceNoteCommandSync(bool syncInput);
 void PerfLoopTraceNoteActorYaw(float cmdYawDegrees, float deltaYawDegrees, float currentYawDegrees);
 void PerfLoopTraceNoteActorPitch(float cmdPitchDegrees, float deltaPitchDegrees, float currentPitchDegrees);
 void PerfLoopTraceNoteCameraAngles(float deltaYawDegrees, float deltaPitchDegrees, float currentYawDegrees, float currentPitchDegrees, bool reset);

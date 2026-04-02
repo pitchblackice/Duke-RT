@@ -115,9 +115,11 @@ uint8_t NetMode = NET_PeerToPeer;
 #define PL_DRONE		0x80	// bit flag in doomdata->player
 
 ticcmd_t		localcmds[LOCALCMDTICS];
+bool			localcmdsync[LOCALCMDTICS];
 
 FDynamicBuffer	NetSpecs[MAXPLAYERS][BACKUPTICS];
 ticcmd_t		netcmds[MAXPLAYERS][BACKUPTICS];
+bool			netcmdsync[MAXPLAYERS][BACKUPTICS];
 int 			nettics[MAXNETNODES];
 bool 			nodeingame[MAXNETNODES];				// set false as nodes leave game
 bool			nodejustleft[MAXNETNODES];				// set when a node just left
@@ -1047,6 +1049,10 @@ void NetUpdate (void)
 					modp = (mod + tic) % LOCALCMDTICS;
 					localcmds[modp].ucmd.vel = vel;
 					localcmds[modp].ucmd.ang = ang;
+					if (tic > 0)
+					{
+						localcmdsync[modp] = localcmdsync[mod];
+					}
 				}
 
 				Net_NewMakeTic ();
