@@ -953,6 +953,7 @@ void MainLoop ()
 			{
 				PerfLoopTraceResetInputStats();
 				PerfLoopTraceReset2DProducerStats();
+				PerfLoopTraceResetCameraStats();
 				perfTryRunTicsTraceStats = {};
 				perfDisplayTraceStats = {};
 				perf2DProducerTraceStats = {};
@@ -972,6 +973,10 @@ void MainLoop ()
 
 			// update the scale factor for unsynchronised input here.
 			gameInput.UpdateInputScale();
+			if (PerfLoopTraceActive())
+			{
+				PerfLoopTraceNoteInputMode(gameInput.SyncInput(), gameInput.GetInputScale());
+			}
 
 			const double tryRunStartMs = I_msTimeF();
 			TryRunTics (); // will run at least one tic
@@ -991,6 +996,7 @@ void MainLoop ()
 			if (PerfLoopTraceActive())
 			{
 				const auto inputTrace = PerfLoopTraceGetInputStats();
+				const auto cameraTrace = PerfLoopTraceGetCameraStats();
 				const auto renderTrace = GetPerfRenderTraceStats();
 				const double frameMs = I_msTimeF() - frameStartMs;
 				Printf(
@@ -1154,6 +1160,30 @@ void MainLoop ()
 					inputTrace.deviceChangeEvents,
 					inputTrace.eventQueueHighWater,
 					inputTrace.eventQueueOverflows);
+				Printf(
+					"PERF camera trace: frame=%llu sync=%d input_scale=%.6f actor_yaw_calls=%u actor_pitch_calls=%u cam_updates=%u cam_resets=%u render_calls=%u cmd_deg=(%.3f,%.3f) actor_delta=(%.3f,%.3f) actor=(%.3f,%.3f) camera_delta=(%.3f,%.3f) camera=(%.3f,%.3f) render=(%.3f,%.3f) render_frame_delta=(%.3f,%.3f)\n",
+					(unsigned long long)traceFrame,
+					cameraTrace.syncInput ? 1 : 0,
+					cameraTrace.inputScale,
+					cameraTrace.actorYawCalls,
+					cameraTrace.actorPitchCalls,
+					cameraTrace.cameraUpdateCalls,
+					cameraTrace.cameraResetCalls,
+					cameraTrace.renderCalls,
+					cameraTrace.consumedCmdYawDegrees,
+					cameraTrace.consumedCmdPitchDegrees,
+					cameraTrace.actorYawDeltaDegrees,
+					cameraTrace.actorPitchDeltaDegrees,
+					cameraTrace.actorYawDegrees,
+					cameraTrace.actorPitchDegrees,
+					cameraTrace.cameraYawDeltaDegrees,
+					cameraTrace.cameraPitchDeltaDegrees,
+					cameraTrace.cameraYawDegrees,
+					cameraTrace.cameraPitchDegrees,
+					cameraTrace.renderYawDegrees,
+					cameraTrace.renderPitchDegrees,
+					cameraTrace.renderFrameDeltaYawDegrees,
+					cameraTrace.renderFrameDeltaPitchDegrees);
 				const int remainingTraceFrames = (int)perf_looptraceframes - 1;
 				perf_looptraceframes = remainingTraceFrames > 0 ? remainingTraceFrames : 0;
 			}

@@ -70,6 +70,17 @@ CVAR(Bool, invertmousex, false,	CVAR_GLOBALCONFIG | CVAR_ARCHIVE);  // Invert mo
 
 static PerfLoopInputTraceStats perfLoopInputTraceStats;
 static PerfLoop2DProducerTraceStats perfLoop2DProducerTraceStats;
+static PerfLoopCameraTraceStats perfLoopCameraTraceStats;
+static bool perfLoopHasLastRenderAngles = false;
+static float perfLoopLastRenderYawDegrees = 0.0f;
+static float perfLoopLastRenderPitchDegrees = 0.0f;
+
+static float NormalizeAngleDeltaDegrees(float degrees)
+{
+	while (degrees <= -180.0f) degrees += 360.0f;
+	while (degrees > 180.0f) degrees -= 360.0f;
+	return degrees;
+}
 
 bool PerfLoopTraceActive()
 {
@@ -94,6 +105,16 @@ void PerfLoopTraceReset2DProducerStats()
 PerfLoop2DProducerTraceStats PerfLoopTraceGet2DProducerStats()
 {
 	return perfLoop2DProducerTraceStats;
+}
+
+void PerfLoopTraceResetCameraStats()
+{
+	perfLoopCameraTraceStats = {};
+}
+
+PerfLoopCameraTraceStats PerfLoopTraceGetCameraStats()
+{
+	return perfLoopCameraTraceStats;
 }
 
 void PerfLoopTraceNoteHandleevents()
@@ -232,6 +253,68 @@ void PerfLoopTraceNoteFastCameraApply(float yawDegrees, float pitchDegrees)
 	perfLoopInputTraceStats.fastCameraApplyCalls++;
 	perfLoopInputTraceStats.fastCameraYawDegrees += yawDegrees;
 	perfLoopInputTraceStats.fastCameraPitchDegrees += pitchDegrees;
+}
+
+void PerfLoopTraceNoteInputMode(bool syncInput, double inputScale)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopCameraTraceStats.syncInput = syncInput;
+	perfLoopCameraTraceStats.inputScale = inputScale;
+}
+
+void PerfLoopTraceNoteActorYaw(float cmdYawDegrees, float deltaYawDegrees, float currentYawDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopCameraTraceStats.actorYawCalls++;
+	perfLoopCameraTraceStats.consumedCmdYawDegrees += cmdYawDegrees;
+	perfLoopCameraTraceStats.actorYawDeltaDegrees += deltaYawDegrees;
+	perfLoopCameraTraceStats.actorYawDegrees = currentYawDegrees;
+}
+
+void PerfLoopTraceNoteActorPitch(float cmdPitchDegrees, float deltaPitchDegrees, float currentPitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopCameraTraceStats.actorPitchCalls++;
+	perfLoopCameraTraceStats.consumedCmdPitchDegrees += cmdPitchDegrees;
+	perfLoopCameraTraceStats.actorPitchDeltaDegrees += deltaPitchDegrees;
+	perfLoopCameraTraceStats.actorPitchDegrees = currentPitchDegrees;
+}
+
+void PerfLoopTraceNoteCameraAngles(float deltaYawDegrees, float deltaPitchDegrees, float currentYawDegrees, float currentPitchDegrees, bool reset)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	if (reset) perfLoopCameraTraceStats.cameraResetCalls++;
+	else perfLoopCameraTraceStats.cameraUpdateCalls++;
+	perfLoopCameraTraceStats.cameraYawDeltaDegrees += deltaYawDegrees;
+	perfLoopCameraTraceStats.cameraPitchDeltaDegrees += deltaPitchDegrees;
+	perfLoopCameraTraceStats.cameraYawDegrees = currentYawDegrees;
+	perfLoopCameraTraceStats.cameraPitchDegrees = currentPitchDegrees;
+}
+
+void PerfLoopTraceNoteRenderAngles(float yawDegrees, float pitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	if (perfLoopCameraTraceStats.renderCalls == 0 && perfLoopHasLastRenderAngles)
+	{
+		perfLoopCameraTraceStats.renderFrameDeltaYawDegrees = NormalizeAngleDeltaDegrees(yawDegrees - perfLoopLastRenderYawDegrees);
+		perfLoopCameraTraceStats.renderFrameDeltaPitchDegrees = pitchDegrees - perfLoopLastRenderPitchDegrees;
+	}
+	perfLoopCameraTraceStats.renderCalls++;
+	perfLoopCameraTraceStats.renderYawDegrees = yawDegrees;
+	perfLoopCameraTraceStats.renderPitchDegrees = pitchDegrees;
+	perfLoopHasLastRenderAngles = true;
+	perfLoopLastRenderYawDegrees = yawDegrees;
+	perfLoopLastRenderPitchDegrees = pitchDegrees;
 }
 
 void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta)

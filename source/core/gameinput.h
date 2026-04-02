@@ -96,6 +96,10 @@ public:
 	{
 		return syncinput || cl_syncinput || cl_capfps;
 	}
+	double GetInputScale() const
+	{
+		return scaleAdjust;
+	}
 	void ForceInputSync(const int pnum)
 	{
 		if (pnum == myconnectindex)

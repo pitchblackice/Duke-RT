@@ -115,6 +115,9 @@ CUSTOM_CVAR(Int, cl_viewtilting, 0, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)
 
 void DCorePlayer::doPitchInput()
 {
+	const DAngle startPitch = actor->spr.Angles.Pitch;
+	const DAngle cmdPitch = cmd.ucmd.ang.Pitch;
+
 	// Add player's mouse/device input.
 	if (cmd.ucmd.ang.Pitch.Degrees())
 	{
@@ -160,6 +163,13 @@ void DCorePlayer::doPitchInput()
 	const auto maximum = GetMaxPitch() - ViewAngles.Pitch * (ViewAngles.Pitch < nullAngle);
 	const auto minimum = GetMinPitch() - ViewAngles.Pitch * (ViewAngles.Pitch > nullAngle);
 	actor->spr.Angles.Pitch = clamp(actor->spr.Angles.Pitch, maximum, minimum);
+	if (pnum == myconnectindex)
+	{
+		PerfLoopTraceNoteActorPitch(
+			(float)cmdPitch.Degrees(),
+			(float)(actor->spr.Angles.Pitch - startPitch).Degrees(),
+			(float)actor->spr.Angles.Pitch.Degrees());
+	}
 }
 
 
@@ -171,6 +181,9 @@ void DCorePlayer::doPitchInput()
 
 void DCorePlayer::doYawInput()
 {
+	const DAngle startYaw = actor->spr.Angles.Yaw;
+	const DAngle cmdYaw = cmd.ucmd.ang.Yaw;
+
 	// Add player's mouse/device input.
 	const DAngle appliedYaw = cmd.ucmd.ang.Yaw * gameInput.SyncInput();
 	actor->spr.Angles.Yaw += appliedYaw;
@@ -201,6 +214,13 @@ void DCorePlayer::doYawInput()
 			YawSpin = nullAngle;
 		}
 		actor->spr.Angles.Yaw += add;
+	}
+	if (pnum == myconnectindex)
+	{
+		PerfLoopTraceNoteActorYaw(
+			(float)cmdYaw.Degrees(),
+			(float)deltaangle(startYaw, actor->spr.Angles.Yaw).Degrees(),
+			(float)actor->spr.Angles.Yaw.Degrees());
 	}
 }
 

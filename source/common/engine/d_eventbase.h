@@ -100,11 +100,38 @@ struct PerfLoop2DProducerTraceStats
 	PerfLoop2DProducerDelta crosshair;
 };
 
+struct PerfLoopCameraTraceStats
+{
+	bool syncInput = false;
+	double inputScale = 1.0;
+	uint32_t actorYawCalls = 0;
+	uint32_t actorPitchCalls = 0;
+	uint32_t cameraUpdateCalls = 0;
+	uint32_t cameraResetCalls = 0;
+	uint32_t renderCalls = 0;
+	float consumedCmdYawDegrees = 0.0f;
+	float consumedCmdPitchDegrees = 0.0f;
+	float actorYawDeltaDegrees = 0.0f;
+	float actorPitchDeltaDegrees = 0.0f;
+	float actorYawDegrees = 0.0f;
+	float actorPitchDegrees = 0.0f;
+	float cameraYawDeltaDegrees = 0.0f;
+	float cameraPitchDeltaDegrees = 0.0f;
+	float cameraYawDegrees = 0.0f;
+	float cameraPitchDegrees = 0.0f;
+	float renderYawDegrees = 0.0f;
+	float renderPitchDegrees = 0.0f;
+	float renderFrameDeltaYawDegrees = 0.0f;
+	float renderFrameDeltaPitchDegrees = 0.0f;
+};
+
 bool PerfLoopTraceActive();
 void PerfLoopTraceResetInputStats();
 PerfLoopInputTraceStats PerfLoopTraceGetInputStats();
 void PerfLoopTraceReset2DProducerStats();
 PerfLoop2DProducerTraceStats PerfLoopTraceGet2DProducerStats();
+void PerfLoopTraceResetCameraStats();
+PerfLoopCameraTraceStats PerfLoopTraceGetCameraStats();
 void PerfLoopTraceNoteHandleevents();
 void PerfLoopTraceNoteIStartTic();
 void PerfLoopTraceNoteIGetEvent(uint32_t peekedMessages);
@@ -118,6 +145,11 @@ void PerfLoopTraceNoteTiccmdBuild(float yawDegrees, float pitchDegrees);
 void PerfLoopTraceNotePlayerYawApply(float yawDegrees);
 void PerfLoopTraceNotePlayerPitchApply(float pitchDegrees);
 void PerfLoopTraceNoteFastCameraApply(float yawDegrees, float pitchDegrees);
+void PerfLoopTraceNoteInputMode(bool syncInput, double inputScale);
+void PerfLoopTraceNoteActorYaw(float cmdYawDegrees, float deltaYawDegrees, float currentYawDegrees);
+void PerfLoopTraceNoteActorPitch(float cmdPitchDegrees, float deltaPitchDegrees, float currentPitchDegrees);
+void PerfLoopTraceNoteCameraAngles(float deltaYawDegrees, float deltaPitchDegrees, float currentYawDegrees, float currentPitchDegrees, bool reset);
+void PerfLoopTraceNoteRenderAngles(float yawDegrees, float pitchDegrees);
 void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta);
 void PerfLoopTraceNoteAltHud2D(const PerfLoop2DProducerDelta& delta);
 void PerfLoopTraceNoteCrosshair2D(const PerfLoop2DProducerDelta& delta);

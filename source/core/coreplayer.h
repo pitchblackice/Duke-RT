@@ -1,5 +1,6 @@
 #pragma once
 
+#include "d_eventbase.h"
 #include "d_net.h"
 #include "packet.h"
 #include "gamestate.h"
@@ -70,15 +71,29 @@ public:
 		// Get angles and return with clamped off pitch.
 		auto angles = CameraAngles + interpolatedvalue(PrevViewAngles, ViewAngles, interpfrac);
 		angles.Pitch = ClampViewPitch(angles.Pitch);
+		if (pnum == myconnectindex)
+		{
+			PerfLoopTraceNoteRenderAngles((float)angles.Yaw.Degrees(), (float)angles.Pitch.Degrees());
+		}
 		return angles;
 	}
 
 	void updateCameraAngles(const double interpfrac)
 	{
 		// Apply the current interpolated angle state to the render angles.
+		const auto previous = CameraAngles;
 		const auto lerpAngles = interpolatedvalue(actor->PrevAngles, actor->spr.Angles, interpfrac);
 		CameraAngles += lerpAngles - PrevLerpAngles;
 		PrevLerpAngles = lerpAngles;
+		if (pnum == myconnectindex)
+		{
+			PerfLoopTraceNoteCameraAngles(
+				(float)deltaangle(previous.Yaw, CameraAngles.Yaw).Degrees(),
+				(float)(CameraAngles.Pitch - previous.Pitch).Degrees(),
+				(float)CameraAngles.Yaw.Degrees(),
+				(float)CameraAngles.Pitch.Degrees(),
+				false);
+		}
 	}
 
 	void resetCameraAngles()
@@ -86,9 +101,19 @@ public:
 		if (actor != nullptr)
 		{
 			// Apply any last remaining ticrate angle updates and reset variables.
+			const auto previous = CameraAngles;
 			CameraAngles += actor->spr.Angles - PrevLerpAngles;
 			PrevLerpAngles = actor->spr.Angles = CameraAngles;
 			PrevViewAngles = ViewAngles;
+			if (pnum == myconnectindex)
+			{
+				PerfLoopTraceNoteCameraAngles(
+					(float)deltaangle(previous.Yaw, CameraAngles.Yaw).Degrees(),
+					(float)(CameraAngles.Pitch - previous.Pitch).Degrees(),
+					(float)CameraAngles.Yaw.Degrees(),
+					(float)CameraAngles.Pitch.Degrees(),
+					true);
+			}
 		}
 	}
 
