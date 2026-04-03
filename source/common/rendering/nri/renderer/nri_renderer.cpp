@@ -10,6 +10,7 @@
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
 #include "coreactor.h"
+#include "gamecontrol.h"
 #include "lightoverlay.h"
 #include "mapinfo.h"
 #include "printf.h"
@@ -65,6 +66,11 @@ namespace
 		key = HashCombineLightOverlay(key, (uint64_t)y);
 		key = HashCombineLightOverlay(key, (uint64_t)z);
 		return key;
+	}
+
+	static uint32_t GetGameplayLightTimeIndex()
+	{
+		return PlayClock > 0 ? (uint32_t)(PlayClock / 4) : 0u;
 	}
 
 	static void ComputeCapturedSurfaceCenter(const nri_scene::SurfaceRef& surface, float outCenter[3])
@@ -6671,14 +6677,15 @@ void NRIRenderer::RefreshSceneLightSystem(
 	{
 		BuildStaticMapAnalyticOverlayRules(resolvedLightOverlays, mMapWorld, mapOverlayRules);
 	}
+	const uint32_t gameplayLightTimeIndex = GetGameplayLightTimeIndex();
 
 	mSceneLights.RebuildAnalyticLights(
-		mFrameIndex,
+		gameplayLightTimeIndex,
 		NRI_MAX_RUNTIME_POINT_LIGHTS,
 		actorOverlayRules.empty() ? nullptr : &actorOverlayRules,
 		mapOverlayRules.empty() ? nullptr : &mapOverlayRules);
 	mSceneLights.RebuildEmissiveSurfaces(NRI_MAX_EMISSIVE_SURFACES);
-	mSceneLights.RebuildSectorLighting(mFrameIndex, (uint32_t)sector.Size());
+	mSceneLights.RebuildSectorLighting(gameplayLightTimeIndex, (uint32_t)sector.Size());
 	if (resolvedLightOverlays.resolvedGeneration != 0 &&
 		resolvedLightOverlays.resolvedGeneration != mLastResolvedLightOverlayGeneration)
 	{
