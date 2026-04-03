@@ -7020,28 +7020,40 @@ void NRIRenderer::RefreshSceneLightSystem(
 	{
 		RequestHistoryReset("directional-light-change");
 	}
-	if (mSceneLights.ConsumeAnalyticLightTopologyChanged())
+	const bool analyticLightTopologyChanged = mSceneLights.ConsumeAnalyticLightTopologyChanged();
+	const bool analyticLightPropertiesChanged = mSceneLights.ConsumeAnalyticLightPropertiesChanged();
+	const bool emissiveSurfaceTopologyChanged = mSceneLights.ConsumeEmissiveSurfaceTopologyChanged();
+	const bool emissiveSurfacePropertiesChanged = mSceneLights.ConsumeEmissiveSurfacePropertiesChanged();
+	const bool emissiveMaterialsDirty = mSceneLights.ConsumeEmissiveMaterialsDirty();
+	const bool sectorLightingTopologyChanged = mSceneLights.ConsumeSectorLightingTopologyChanged();
+
+	if (analyticLightTopologyChanged)
 	{
 		mBoundRuntimeLightCount = 0;
 		RequestHistoryReset("analytic-light-topology");
 	}
-	if (mSceneLights.ConsumeEmissiveSurfaceTopologyChanged())
+	if (emissiveSurfaceTopologyChanged)
 	{
 		RequestHistoryReset("emissive-surface-topology");
 	}
-	if (mSceneLights.ConsumeEmissiveMaterialsDirty())
+	if (emissiveMaterialsDirty)
 	{
 		if (ShouldTraceSkyPerf())
 		{
 			gRendererSkyPerfTraceStats.emissiveMaterialDirtyEvents++;
 		}
+
+		// Material rebakes still need scene-data invalidation, but property-only
+		// emissive updates should not force a global PT/NRD history reset.
 		QueueStaticMapSceneLightingInvalidation();
-		RequestHistoryReset("emissive-material-change");
 	}
-	if (mSceneLights.ConsumeSectorLightingTopologyChanged())
+	if (sectorLightingTopologyChanged)
 	{
 		RequestHistoryReset("sector-light-topology");
 	}
+
+	(void)analyticLightPropertiesChanged;
+	(void)emissiveSurfacePropertiesChanged;
 }
 
 void NRIRenderer::QueueStaticMapSceneLightingInvalidation()
