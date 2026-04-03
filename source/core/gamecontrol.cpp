@@ -73,6 +73,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "gi.h"
 #include "vm.h"
 #include "g_mapinfo.h"
+#include "lightoverlay.h"
 #include "gamefuncs.h"
 #include "hw_voxels.h"
 #include "hw_palmanager.h"
@@ -1162,6 +1163,7 @@ int RunGame()
 	StartWindow->Progress();
 	G_ParseMapInfo();
 	ParseGLDefs();
+	ParseLightOverlays();
 	ReplaceMusics(true);
 	CreateStatusBar();
 	SetDefaultMenuColors();
