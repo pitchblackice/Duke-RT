@@ -6646,7 +6646,6 @@ void NRIRenderer::RefreshSceneLightSystem(
 	if (usedStaticMapScene && mStaticMapScene.valid)
 	{
 		const size_t chunkCount = std::min(mStaticMapScene.lightChunkViews.size(), mStaticMapScene.chunks.size());
-		uint32_t runtimeMutationMaterialOffset = 0;
 		for (size_t chunkListIndex = 0; chunkListIndex < chunkCount; ++chunkListIndex)
 		{
 			const auto& staticChunk = mStaticMapScene.chunks[chunkListIndex];
@@ -6657,13 +6656,6 @@ void NRIRenderer::RefreshSceneLightSystem(
 				mRuntimeMapMutations.chunks[mapChunkIndex].valid;
 			if (useRuntimeMutationReplacement)
 			{
-				const auto& replacement = mRuntimeMapMutations.chunks[mapChunkIndex];
-				mSceneLights.AppendSceneView(
-					replacement.sceneView,
-					replacement.materialBridge,
-					SceneLightRecordSource::RuntimeMutationScene,
-					runtimeMutationMaterialOffset);
-				runtimeMutationMaterialOffset += (uint32_t)replacement.materialBridge.materials.size();
 				continue;
 			}
 
@@ -6672,6 +6664,25 @@ void NRIRenderer::RefreshSceneLightSystem(
 				mStaticMapScene.materialBridge,
 				SceneLightRecordSource::StaticMapScene,
 				staticChunk.materialOffset);
+		}
+
+		// Runtime mutation emissive records must follow the same full map chunk
+		// order used by BuildRuntimeMapMutationOverlay so material indices line
+		// up with the uploaded replacement geometry/material buffers.
+		uint32_t runtimeMutationMaterialOffset = 0;
+		for (const auto& replacement : mRuntimeMapMutations.chunks)
+		{
+			if (!replacement.active || !replacement.valid)
+			{
+				continue;
+			}
+
+			mSceneLights.AppendSceneView(
+				replacement.sceneView,
+				replacement.materialBridge,
+				SceneLightRecordSource::RuntimeMutationScene,
+				runtimeMutationMaterialOffset);
+			runtimeMutationMaterialOffset += (uint32_t)replacement.materialBridge.materials.size();
 		}
 	}
 	else if (capturedSceneView != nullptr && capturedMaterials != nullptr)
