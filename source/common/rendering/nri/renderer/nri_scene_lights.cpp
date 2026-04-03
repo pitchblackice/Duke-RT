@@ -174,7 +174,7 @@ namespace
 		const uint32_t seed = (uint32_t)(stableKey ^ (stableKey >> 32));
 		const uint32_t phaseFrame = (frameIndex + seed) % flickerFrames;
 		const float phase = ((float)phaseFrame / (float)flickerFrames) * TwoPi;
-		return 0.35f + 0.65f * (0.5f + 0.5f * std::sin(phase));
+		return 0.35f + 0.65f * (0.5f + 0.5f * std::cos(phase));
 	}
 
 	float EvaluatePulseScale(uint64_t stableKey, uint32_t frameIndex, uint32_t pulseFrames, float pulseAmount)
