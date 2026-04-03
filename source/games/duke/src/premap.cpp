@@ -38,6 +38,7 @@ Prepared for public release: 03/21/2003 - Charlie Wiederhold, 3D Realms
 #include "precache.h"
 #include "render.h"
 #include "screenjob_.h"
+#include "../../../common/rendering/nri/scene/nri_map_builder.h"
 
 BEGIN_DUKE_NS  
 
@@ -1087,6 +1088,12 @@ static int LoadTheMap(MapRecord *mi, DDukePlayer*p, int gamemode)
 
 	allignwarpelevators();
 	resetpspritevars(gamemode, pos, mapangle(lbang));
+
+	// Duke applies additional authoritative wall/sector startup state after
+	// loadMap() returns. Publish PT readiness from the settled state so the
+	// first gameplay frame does not treat those startup changes as runtime
+	// mutations.
+	nri_scene::NotifyLevelGeometryReady();
 
 	if (r_precache)
 	{
