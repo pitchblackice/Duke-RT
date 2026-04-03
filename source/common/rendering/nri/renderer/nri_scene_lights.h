@@ -56,6 +56,20 @@ enum SceneLightDiagnosticFlags : uint32_t
 class SceneLightSystem
 {
 public:
+	struct SurfaceIdentityOverrides
+	{
+		std::vector<uint64_t> opaqueWalls;
+		std::vector<uint64_t> opaqueFlats;
+		std::vector<uint64_t> opaqueSprites;
+
+		void Clear()
+		{
+			opaqueWalls.clear();
+			opaqueFlats.clear();
+			opaqueSprites.clear();
+		}
+	};
+
 	struct SceneAnalyticLight
 	{
 		uint32_t id = 0;
@@ -234,7 +248,8 @@ public:
 		const nri_scene::MaterialBridgeData& materials,
 		SceneLightRecordSource source,
 		uint32_t materialIndexBase = 0,
-		uint32_t materialLookupIndexBase = 0);
+		uint32_t materialLookupIndexBase = 0,
+		const SurfaceIdentityOverrides* identityOverrides = nullptr);
 	void RebuildAnalyticLights(
 		uint32_t frameIndex,
 		uint32_t maxActiveLights,
@@ -259,6 +274,10 @@ public:
 	bool HasRecords() const { return !mSurfaceRecords.empty(); }
 	uint64_t GetFrameSerial() const { return mFrameSerial; }
 	const std::vector<SurfaceRecord>& GetSurfaceRecords() const { return mSurfaceRecords; }
+	static uint64_t ComputeSurfaceIdentityKey(
+		SceneLightRecordSource source,
+		const nri_scene::SurfaceProvenance& provenance,
+		const float center[3]);
 
 	const AnalyticLightRegistry& GetAnalyticLights() const { return mAnalyticLights; }
 	const EmissiveSurfaceRegistry& GetEmissiveSurfaces() const { return mEmissiveSurfaces; }
@@ -280,7 +299,8 @@ private:
 		SceneLightRecordSource source,
 		uint32_t materialIndexBase,
 		uint32_t materialLookupIndexBase,
-		uint32_t& inOutLocalMaterialIndex);
+		uint32_t& inOutLocalMaterialIndex,
+		const std::vector<uint64_t>* identityOverrides);
 
 	AnalyticLightRegistry mAnalyticLights = {};
 	EmissiveSurfaceRegistry mEmissiveSurfaces = {};

@@ -524,12 +524,46 @@ void SceneLightSystem::AppendSceneView(
 	const nri_scene::MaterialBridgeData& materials,
 	SceneLightRecordSource source,
 	uint32_t materialIndexBase,
-	uint32_t materialLookupIndexBase)
+	uint32_t materialLookupIndexBase,
+	const SurfaceIdentityOverrides* identityOverrides)
 {
 	uint32_t localMaterialIndex = 0;
-	AppendSurfaceList(sceneView.opaqueWalls, materials, source, materialIndexBase, materialLookupIndexBase, localMaterialIndex);
-	AppendSurfaceList(sceneView.opaqueFlats, materials, source, materialIndexBase, materialLookupIndexBase, localMaterialIndex);
-	AppendSurfaceList(sceneView.opaqueSprites, materials, source, materialIndexBase, materialLookupIndexBase, localMaterialIndex);
+	AppendSurfaceList(
+		sceneView.opaqueWalls,
+		materials,
+		source,
+		materialIndexBase,
+		materialLookupIndexBase,
+		localMaterialIndex,
+		identityOverrides != nullptr ? &identityOverrides->opaqueWalls : nullptr);
+	AppendSurfaceList(
+		sceneView.opaqueFlats,
+		materials,
+		source,
+		materialIndexBase,
+		materialLookupIndexBase,
+		localMaterialIndex,
+		identityOverrides != nullptr ? &identityOverrides->opaqueFlats : nullptr);
+	AppendSurfaceList(
+		sceneView.opaqueSprites,
+		materials,
+		source,
+		materialIndexBase,
+		materialLookupIndexBase,
+		localMaterialIndex,
+		identityOverrides != nullptr ? &identityOverrides->opaqueSprites : nullptr);
+}
+
+uint64_t SceneLightSystem::ComputeSurfaceIdentityKey(
+	SceneLightRecordSource source,
+	const nri_scene::SurfaceProvenance& provenance,
+	const float center[3])
+{
+	SurfaceRecord record = {};
+	record.source = source;
+	record.provenance = provenance;
+	Copy3f(center, record.center);
+	return BuildSurfaceIdentityKey(record);
 }
 
 void SceneLightSystem::RebuildAnalyticLights(
@@ -1258,10 +1292,12 @@ void SceneLightSystem::AppendSurfaceList(
 	SceneLightRecordSource source,
 	uint32_t materialIndexBase,
 	uint32_t materialLookupIndexBase,
-	uint32_t& inOutLocalMaterialIndex)
+	uint32_t& inOutLocalMaterialIndex,
+	const std::vector<uint64_t>* identityOverrides)
 {
-	for (const nri_scene::SurfaceRef& surface : surfaces)
+	for (size_t surfaceIndex = 0; surfaceIndex < surfaces.size(); ++surfaceIndex)
 	{
+		const nri_scene::SurfaceRef& surface = surfaces[surfaceIndex];
 		SurfaceRecord record = {};
 		record.source = source;
 		record.materialIndex = materialIndexBase + inOutLocalMaterialIndex;
@@ -1283,7 +1319,14 @@ void SceneLightSystem::AppendSurfaceList(
 			record.material.lightLevel = materials.materials[materialLookupIndex].lightLevel;
 		}
 
-		record.identityKey = BuildSurfaceIdentityKey(record);
+		const uint64_t inheritedIdentityKey =
+			identityOverrides != nullptr && surfaceIndex < identityOverrides->size() ?
+			(*identityOverrides)[surfaceIndex] :
+			0ull;
+		record.identityKey =
+			inheritedIdentityKey != 0ull ?
+			inheritedIdentityKey :
+			BuildSurfaceIdentityKey(record);
 
 		mSurfaceRecords.push_back(record);
 		++inOutLocalMaterialIndex;

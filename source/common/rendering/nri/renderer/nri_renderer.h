@@ -463,6 +463,7 @@ private:
 			bool lastTraceBlindSpot = false;
 			uint32_t surfaceCount = 0;
 			uint32_t triangleCount = 0;
+			SceneLightSystem::SurfaceIdentityOverrides lightIdentityOverrides;
 			nri_scene::SceneView sceneView;
 			nri_scene::GeometryData geometry;
 			nri_scene::MaterialBridgeData materialBridge;

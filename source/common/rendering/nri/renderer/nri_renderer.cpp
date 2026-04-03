@@ -1158,6 +1158,110 @@ namespace
 		return key;
 	}
 
+	static void BuildRuntimeMutationLightIdentityOverrides(
+		const nri_scene::PTMapWorld& staticWorld,
+		const nri_scene::PTMapChunk& staticChunk,
+		const nri_scene::PTMapWorld& liveWorld,
+		const nri_scene::PTMapChunk& liveChunk,
+		SceneLightSystem::SurfaceIdentityOverrides& outOverrides)
+	{
+		outOverrides.Clear();
+		if (!staticWorld.valid || !liveWorld.valid)
+		{
+			return;
+		}
+
+		std::vector<uint32_t> staticSurfaceIndices;
+		std::vector<uint32_t> liveSurfaceIndices;
+		staticSurfaceIndices.reserve(staticChunk.surfaceCount);
+		liveSurfaceIndices.reserve(liveChunk.surfaceCount);
+
+		for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < staticChunk.surfaceCount; ++localSurfaceIndex)
+		{
+			const uint32_t surfaceIndex = staticChunk.firstSurface + localSurfaceIndex;
+			if (surfaceIndex >= staticWorld.surfaces.size())
+			{
+				break;
+			}
+			staticSurfaceIndices.push_back(surfaceIndex);
+		}
+
+		for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < liveChunk.surfaceCount; ++localSurfaceIndex)
+		{
+			const uint32_t surfaceIndex = liveChunk.firstSurface + localSurfaceIndex;
+			if (surfaceIndex >= liveWorld.surfaces.size())
+			{
+				break;
+			}
+			liveSurfaceIndices.push_back(surfaceIndex);
+		}
+
+		std::unordered_map<ChunkCompareSurfaceKey, std::vector<uint32_t>, ChunkCompareSurfaceKeyHash> liveSurfaceLookup;
+		liveSurfaceLookup.reserve(liveSurfaceIndices.size());
+		for (uint32_t liveLocalIndex = 0; liveLocalIndex < (uint32_t)liveSurfaceIndices.size(); ++liveLocalIndex)
+		{
+			const auto& liveSurface = liveWorld.surfaces[liveSurfaceIndices[liveLocalIndex]];
+			liveSurfaceLookup[BuildChunkCompareSurfaceKey(liveSurface)].push_back(liveLocalIndex);
+		}
+
+		std::vector<uint8_t> liveSurfaceUsed(liveSurfaceIndices.size(), 0u);
+		std::vector<uint64_t> inheritedIdentityKeys(liveSurfaceIndices.size(), 0ull);
+		float staticSurfaceCenter[3] = {};
+		for (uint32_t staticSurfaceIndex : staticSurfaceIndices)
+		{
+			const auto& staticSurface = staticWorld.surfaces[staticSurfaceIndex];
+			const ChunkCompareSurfaceKey key = BuildChunkCompareSurfaceKey(staticSurface);
+			auto liveSurfaceIt = liveSurfaceLookup.find(key);
+			if (liveSurfaceIt == liveSurfaceLookup.end())
+			{
+				continue;
+			}
+
+			uint32_t matchedLiveLocalIndex = UINT32_MAX;
+			for (uint32_t candidate : liveSurfaceIt->second)
+			{
+				if (candidate < liveSurfaceUsed.size() && liveSurfaceUsed[candidate] == 0u)
+				{
+					matchedLiveLocalIndex = candidate;
+					break;
+				}
+			}
+			if (matchedLiveLocalIndex == UINT32_MAX)
+			{
+				continue;
+			}
+
+			liveSurfaceUsed[matchedLiveLocalIndex] = 1u;
+			ComputeCapturedSurfaceCenter(staticSurface.surface, staticSurfaceCenter);
+			inheritedIdentityKeys[matchedLiveLocalIndex] = SceneLightSystem::ComputeSurfaceIdentityKey(
+				SceneLightRecordSource::StaticMapScene,
+				staticSurface.surface.provenance,
+				staticSurfaceCenter);
+		}
+
+		outOverrides.opaqueWalls.reserve(liveWorld.stats.wallSurfaceCount);
+		outOverrides.opaqueFlats.reserve(liveWorld.stats.flatSurfaceCount);
+		for (uint32_t liveLocalIndex = 0; liveLocalIndex < (uint32_t)liveSurfaceIndices.size(); ++liveLocalIndex)
+		{
+			const auto& liveSurface = liveWorld.surfaces[liveSurfaceIndices[liveLocalIndex]];
+			if ((liveSurface.surface.material.flags & nri_scene::MaterialFlag_Sky) != 0 && liveSurface.surface.material.texture != nullptr)
+			{
+				continue;
+			}
+
+			switch (liveSurface.kind)
+			{
+			case nri_scene::PTMapSurfaceKind::Floor:
+			case nri_scene::PTMapSurfaceKind::Ceiling:
+				outOverrides.opaqueFlats.push_back(inheritedIdentityKeys[liveLocalIndex]);
+				break;
+			default:
+				outOverrides.opaqueWalls.push_back(inheritedIdentityKeys[liveLocalIndex]);
+				break;
+			}
+		}
+	}
+
 	static uint32_t GetSurfaceTextureId(const nri_scene::PTMapSurface& surface)
 	{
 		return
@@ -7053,7 +7157,8 @@ void NRIRenderer::RefreshSceneLightSystem(
 				replacement.materialBridge,
 				SceneLightRecordSource::RuntimeMutationScene,
 				runtimeMutationMaterialOffset,
-				0u);
+				0u,
+				&replacement.lightIdentityOverrides);
 			runtimeMutationMaterialOffset += (uint32_t)replacement.materialBridge.materials.size();
 		}
 	}
@@ -10034,6 +10139,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.sectorDirty = false;
 			replacement.dragged = false;
 			replacement.blindSpot = false;
+			replacement.lightIdentityOverrides.Clear();
 			replacement.sceneView = {};
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
 			continue;
@@ -10096,6 +10202,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		if (analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None)
 		{
 			replacement.active = false;
+			replacement.lightIdentityOverrides.Clear();
 			replacement.sceneView = {};
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
 			continue;
@@ -10110,15 +10217,24 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 		if (!replacement.valid || cachedSignature != replacement.liveSignature || forceTopologyInvalidation)
 		{
+			nri_scene::PTMapWorld liveWorld = {};
 			nri_scene::SceneView liveChunkView;
 			nri_scene::PTMapWorldStats liveStats = {};
 			const bool builtChunk = [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationRebuildMs);
-				if (!nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveChunkView, &liveStats))
+				if (!nri_scene::BuildLiveMapChunkWorld(mapChunk, liveWorld, &liveStats))
 				{
 					return false;
 				}
+
+				nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], liveChunkView);
+				BuildRuntimeMutationLightIdentityOverrides(
+					mMapWorld,
+					mapChunk,
+					liveWorld,
+					liveWorld.chunks[0],
+					replacement.lightIdentityOverrides);
 
 				nri_scene::GeometryData liveGeometry;
 				nri_scene::MaterialBridgeData liveMaterials;
@@ -10152,6 +10268,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			else if (!builtChunk)
 			{
 				replacement.active = false;
+				replacement.lightIdentityOverrides.Clear();
 				replacement.sceneView = {};
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
 				continue;
