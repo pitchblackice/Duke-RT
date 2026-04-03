@@ -644,6 +644,7 @@ private:
 	void ResetPersistentDynamicEmissiveCache();
 	void PrunePersistentDynamicEmissiveCacheToLiveActors();
 	bool RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials);
+	void RebuildStartupMutationBaseline();
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void QueueStaticMapSceneLightingInvalidation();
@@ -871,7 +872,10 @@ private:
 	bool mBuiltStaticMapSceneASLastFrame = false;
 	bool mBuiltDynamicSceneASLastFrame = false;
 	bool mPendingStaticMapLightingInvalidation = false;
+	bool mAllowStartupMutationRebaseline = false;
+	bool mPendingStartupMutationRebaseline = false;
 	uint64_t mObservedMapWorldBuildSerial = 0;
+	uint64_t mStartupMutationRebaselineDeadlineFrame = 0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
 	uint32_t mActiveTlasInstanceCount = 0;
 	uint32_t mBoundStaticPrimitiveCount = 0;
