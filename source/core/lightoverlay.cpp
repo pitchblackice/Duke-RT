@@ -8,6 +8,8 @@
 #include "cmdlib.h"
 #include "c_dispatch.h"
 #include "filesystem.h"
+#include "coreactor.h"
+#include "mapinfo.h"
 #include "printf.h"
 #include "sc_man.h"
 
@@ -15,6 +17,8 @@ namespace
 {
 	static ParsedLightOverlayDatabase GLightOverlayDatabase;
 	static uint32_t GLightOverlayGeneration = 0;
+	static ResolvedLightOverlaySet GResolvedLightOverlaySet;
+	static uint32_t GResolvedLightOverlayGeneration = 0;
 
 	static FString GetLumpDisplayName(int lumpNum)
 	{
@@ -64,6 +68,26 @@ namespace
 		destination[0] = source[0];
 		destination[1] = source[1];
 		destination[2] = source[2];
+	}
+
+	static FString CanonicalizeMapName(const char* mapName)
+	{
+		if (mapName == nullptr || mapName[0] == 0)
+		{
+			return "";
+		}
+
+		if (auto* map = FindMapByName(mapName))
+		{
+			return map->labelName;
+		}
+
+		return ExtractFileBase(mapName);
+	}
+
+	static FString GetCurrentResolvedMapName()
+	{
+		return currentLevel != nullptr ? currentLevel->labelName : FString("");
 	}
 
 	struct ParsedLightOverlayDatabaseBuilder
@@ -718,11 +742,213 @@ namespace
 				SourceLocationText(rule->source).GetChars());
 		}
 	}
+
+	static void DumpResolvedLightOverlaySet(const ResolvedLightOverlaySet& resolved)
+	{
+		Printf("LIGHTOVR resolved: parsed_generation=%u resolved_generation=%u map=%s current_map=%s actor_rules=%d map_lights=%d directional=%d actor_overrides=%d\n",
+			resolved.parsedGeneration,
+			resolved.resolvedGeneration,
+			resolved.activeMapName.IsNotEmpty() ? resolved.activeMapName.GetChars() : "(none)",
+			resolved.currentMapAvailable ? "yes" : "no",
+			resolved.actorRules.Size(),
+			resolved.mapLightRules.Size(),
+			resolved.directionalRules.Size(),
+			resolved.actorOverrideRules.Size());
+
+		for (const auto& rule : resolved.actorRules)
+		{
+			Printf("LIGHTOVR resolved actorrule %s: actorclass=%s resolved=%s type=%s source=%s\n",
+				rule.id.GetChars(),
+				rule.actorClassName.GetChars(),
+				rule.actorClassResolved ? "yes" : "no",
+				rule.lightType.GetChars(),
+				SourceLocationText(rule.source).GetChars());
+		}
+
+		for (const auto& rule : resolved.directionalRules)
+		{
+			Printf("LIGHTOVR resolved directional %s map=%s source=%s\n",
+				rule.id.GetChars(),
+				rule.mapName.GetChars(),
+				SourceLocationText(rule.source).GetChars());
+		}
+
+		for (const auto& rule : resolved.mapLightRules)
+		{
+			Printf("LIGHTOVR resolved light %s map=%s type=%s anchor=%s source=%s\n",
+				rule.id.GetChars(),
+				rule.mapName.GetChars(),
+				rule.lightType.GetChars(),
+				AnchorTypeName(rule.anchorType),
+				SourceLocationText(rule.source).GetChars());
+		}
+
+		for (const auto& rule : resolved.actorOverrideRules)
+		{
+			Printf("LIGHTOVR resolved actoroverride %s map=%s actorclass=%s resolved=%s receiver=%s source=%s\n",
+				rule.id.GetChars(),
+				rule.mapName.GetChars(),
+				rule.actorClassName.GetChars(),
+				rule.actorClassResolved ? "yes" : "no",
+				ReceiverModeName(rule.receiverMode),
+				SourceLocationText(rule.source).GetChars());
+		}
+	}
+
+	static void CopyActorRule(const ParsedLightOverlayActorRule& source, ResolvedLightOverlayActorRule& destination)
+	{
+		destination.id = source.id;
+		destination.source = source.source;
+		destination.actorClassName = source.actorClassName;
+		destination.actorClass = PClass::FindActor(source.actorClassName);
+		destination.actorClassResolved = destination.actorClass != nullptr;
+		destination.hasTileFilter = source.hasTileFilter;
+		destination.tileFilter = source.tileFilter;
+		destination.lightType = source.lightType;
+		destination.hasColor = source.hasColor;
+		CopyVector3(source.color, destination.color);
+		destination.hasIntensity = source.hasIntensity;
+		destination.intensity = source.intensity;
+		destination.hasRadius = source.hasRadius;
+		destination.radius = source.radius;
+		destination.hasRange = source.hasRange;
+		destination.range = source.range;
+		destination.hasOffset = source.hasOffset;
+		CopyVector3(source.offset, destination.offset);
+		destination.hasDirection = source.hasDirection;
+		CopyVector3(source.direction, destination.direction);
+		destination.hasFlicker = source.hasFlicker;
+		destination.flickerFrames = source.flickerFrames;
+		destination.hasLocalSpacePolicy = source.hasLocalSpacePolicy;
+		destination.localSpacePolicy = source.localSpacePolicy;
+	}
+
+	static void CopyDirectionalRule(const ParsedLightOverlayDirectionalRule& source, ResolvedLightOverlayDirectionalRule& destination)
+	{
+		destination.mapName = source.mapName;
+		destination.id = source.id;
+		destination.source = source.source;
+		destination.hasColor = source.hasColor;
+		CopyVector3(source.color, destination.color);
+		destination.hasIntensity = source.hasIntensity;
+		destination.intensity = source.intensity;
+		destination.hasDirection = source.hasDirection;
+		CopyVector3(source.direction, destination.direction);
+		destination.hasAngularSize = source.hasAngularSize;
+		destination.angularSize = source.angularSize;
+		destination.hasShadow = source.hasShadow;
+		destination.shadow = source.shadow;
+	}
+
+	static void CopyMapLightRule(const ParsedLightOverlayMapLightRule& source, ResolvedLightOverlayMapLightRule& destination)
+	{
+		destination.mapName = source.mapName;
+		destination.id = source.id;
+		destination.source = source.source;
+		destination.lightType = source.lightType;
+		destination.anchorType = source.anchorType;
+		destination.hasAnchorPosition = source.hasAnchorPosition;
+		CopyVector3(source.anchorPosition, destination.anchorPosition);
+		destination.anchorIndex = source.anchorIndex;
+		destination.hasOffset = source.hasOffset;
+		CopyVector3(source.offset, destination.offset);
+		destination.hasDirection = source.hasDirection;
+		CopyVector3(source.direction, destination.direction);
+		destination.hasColor = source.hasColor;
+		CopyVector3(source.color, destination.color);
+		destination.hasIntensity = source.hasIntensity;
+		destination.intensity = source.intensity;
+		destination.hasRadius = source.hasRadius;
+		destination.radius = source.radius;
+		destination.hasRange = source.hasRange;
+		destination.range = source.range;
+		destination.hasFlicker = source.hasFlicker;
+		destination.flickerFrames = source.flickerFrames;
+	}
+
+	static void CopyActorOverrideRule(const ParsedLightOverlayActorOverrideRule& source, ResolvedLightOverlayActorOverrideRule& destination)
+	{
+		destination.mapName = source.mapName;
+		destination.id = source.id;
+		destination.source = source.source;
+		destination.actorClassName = source.actorClassName;
+		destination.actorClass = PClass::FindActor(source.actorClassName);
+		destination.actorClassResolved = destination.actorClass != nullptr;
+		destination.receiverMode = source.receiverMode;
+		destination.hasReceiverMode = source.hasReceiverMode;
+	}
+
+	static const ResolvedLightOverlaySet& ResolveLightOverlaysForMapInternal(const FString& mapName, bool currentMapAvailable)
+	{
+		const bool sameGeneration = GResolvedLightOverlaySet.parsedGeneration == GLightOverlayDatabase.generation;
+		const bool sameMap = GResolvedLightOverlaySet.activeMapName.CompareNoCase(mapName) == 0;
+		if (sameGeneration && sameMap && GResolvedLightOverlaySet.currentMapAvailable == currentMapAvailable)
+		{
+			return GResolvedLightOverlaySet;
+		}
+
+		ResolvedLightOverlaySet resolved;
+		resolved.parsedGeneration = GLightOverlayDatabase.generation;
+		resolved.resolvedGeneration = ++GResolvedLightOverlayGeneration;
+		resolved.activeMapName = mapName;
+		resolved.currentMapAvailable = currentMapAvailable;
+
+		for (const auto& source : GLightOverlayDatabase.actorRules)
+		{
+			ResolvedLightOverlayActorRule destination;
+			CopyActorRule(source, destination);
+			resolved.actorRules.Push(destination);
+		}
+
+		for (const auto& source : GLightOverlayDatabase.directionalRules)
+		{
+			if (mapName.IsNotEmpty() && source.mapName.CompareNoCase(mapName) == 0)
+			{
+				ResolvedLightOverlayDirectionalRule destination;
+				CopyDirectionalRule(source, destination);
+				resolved.directionalRules.Push(destination);
+			}
+		}
+
+		for (const auto& source : GLightOverlayDatabase.mapLightRules)
+		{
+			if (mapName.IsNotEmpty() && source.mapName.CompareNoCase(mapName) == 0)
+			{
+				ResolvedLightOverlayMapLightRule destination;
+				CopyMapLightRule(source, destination);
+				resolved.mapLightRules.Push(destination);
+			}
+		}
+
+		for (const auto& source : GLightOverlayDatabase.actorOverrideRules)
+		{
+			if (mapName.IsNotEmpty() && source.mapName.CompareNoCase(mapName) == 0)
+			{
+				ResolvedLightOverlayActorOverrideRule destination;
+				CopyActorOverrideRule(source, destination);
+				resolved.actorOverrideRules.Push(destination);
+			}
+		}
+
+		GResolvedLightOverlaySet = std::move(resolved);
+		return GResolvedLightOverlaySet;
+	}
 }
 
 const ParsedLightOverlayDatabase& GetParsedLightOverlayDatabase()
 {
 	return GLightOverlayDatabase;
+}
+
+const ResolvedLightOverlaySet& GetResolvedLightOverlaySet()
+{
+	return ResolveLightOverlaysForMapInternal(GetCurrentResolvedMapName(), currentLevel != nullptr);
+}
+
+const ResolvedLightOverlaySet& ResolveLightOverlaysForMap(const char* mapName)
+{
+	const FString requestedMapName = CanonicalizeMapName(mapName);
+	return ResolveLightOverlaysForMapInternal(requestedMapName, requestedMapName.IsNotEmpty());
 }
 
 bool ParseLightOverlays(bool verbose)
@@ -760,6 +986,8 @@ bool ParseLightOverlays(bool verbose)
 			GLightOverlayDatabase.hadParseErrors ? "yes" : "no");
 	}
 
+	ResolveLightOverlaysForMapInternal(GetCurrentResolvedMapName(), currentLevel != nullptr);
+
 	return !GLightOverlayDatabase.hadParseErrors;
 }
 
@@ -772,4 +1000,18 @@ CCMD(lightoverlay_reload)
 CCMD(lightoverlay_dump)
 {
 	DumpParsedLightOverlayDatabase(GetParsedLightOverlayDatabase());
+}
+
+CCMD(lightoverlay_dumpresolved)
+{
+	if (argv.argc() > 2)
+	{
+		Printf("usage: lightoverlay_dumpresolved [mapname]\n");
+		return;
+	}
+
+	const ResolvedLightOverlaySet& resolved = argv.argc() == 2 ?
+		ResolveLightOverlaysForMap(argv[1]) :
+		GetResolvedLightOverlaySet();
+	DumpResolvedLightOverlaySet(resolved);
 }

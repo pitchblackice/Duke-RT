@@ -3,6 +3,8 @@
 #include "tarray.h"
 #include "zstring.h"
 
+class PClassActor;
+
 enum class LightOverlayAnchorType : uint8_t
 {
 	None,
@@ -130,5 +132,102 @@ struct ParsedLightOverlayDatabase
 	TArray<ParsedLightOverlayActorOverrideRule> actorOverrideRules;
 };
 
+struct ResolvedLightOverlayActorRule
+{
+	FString id;
+	LightOverlaySourceLocation source;
+	FString actorClassName;
+	PClassActor* actorClass = nullptr;
+	bool actorClassResolved = false;
+	bool hasTileFilter = false;
+	int tileFilter = -1;
+	FString lightType;
+	bool hasColor = false;
+	float color[3] = { 1.0f, 1.0f, 1.0f };
+	bool hasIntensity = false;
+	float intensity = 0.0f;
+	bool hasRadius = false;
+	float radius = 0.0f;
+	bool hasRange = false;
+	float range = 0.0f;
+	bool hasOffset = false;
+	float offset[3] = { 0.0f, 0.0f, 0.0f };
+	bool hasDirection = false;
+	float direction[3] = { 0.0f, 0.0f, 0.0f };
+	bool hasFlicker = false;
+	uint32_t flickerFrames = 0;
+	bool hasLocalSpacePolicy = false;
+	FString localSpacePolicy;
+};
+
+struct ResolvedLightOverlayDirectionalRule
+{
+	FString mapName;
+	FString id;
+	LightOverlaySourceLocation source;
+	bool hasColor = false;
+	float color[3] = { 1.0f, 1.0f, 1.0f };
+	bool hasIntensity = false;
+	float intensity = 0.0f;
+	bool hasDirection = false;
+	float direction[3] = { 0.0f, 0.0f, -1.0f };
+	bool hasAngularSize = false;
+	float angularSize = 0.0f;
+	bool hasShadow = false;
+	bool shadow = true;
+};
+
+struct ResolvedLightOverlayMapLightRule
+{
+	FString mapName;
+	FString id;
+	LightOverlaySourceLocation source;
+	FString lightType;
+	LightOverlayAnchorType anchorType = LightOverlayAnchorType::None;
+	bool hasAnchorPosition = false;
+	float anchorPosition[3] = { 0.0f, 0.0f, 0.0f };
+	int anchorIndex = -1;
+	bool hasOffset = false;
+	float offset[3] = { 0.0f, 0.0f, 0.0f };
+	bool hasDirection = false;
+	float direction[3] = { 0.0f, 0.0f, 0.0f };
+	bool hasColor = false;
+	float color[3] = { 1.0f, 1.0f, 1.0f };
+	bool hasIntensity = false;
+	float intensity = 0.0f;
+	bool hasRadius = false;
+	float radius = 0.0f;
+	bool hasRange = false;
+	float range = 0.0f;
+	bool hasFlicker = false;
+	uint32_t flickerFrames = 0;
+};
+
+struct ResolvedLightOverlayActorOverrideRule
+{
+	FString mapName;
+	FString id;
+	LightOverlaySourceLocation source;
+	FString actorClassName;
+	PClassActor* actorClass = nullptr;
+	bool actorClassResolved = false;
+	LightOverlayReceiverMode receiverMode = LightOverlayReceiverMode::Default;
+	bool hasReceiverMode = false;
+};
+
+struct ResolvedLightOverlaySet
+{
+	uint32_t parsedGeneration = 0;
+	uint32_t resolvedGeneration = 0;
+	FString activeMapName;
+	bool currentMapAvailable = false;
+	TArray<ResolvedLightOverlayActorRule> actorRules;
+	TArray<ResolvedLightOverlayDirectionalRule> directionalRules;
+	TArray<ResolvedLightOverlayMapLightRule> mapLightRules;
+	TArray<ResolvedLightOverlayActorOverrideRule> actorOverrideRules;
+};
+
 const ParsedLightOverlayDatabase& GetParsedLightOverlayDatabase();
+const ResolvedLightOverlaySet& GetResolvedLightOverlaySet();
+const ResolvedLightOverlaySet& ResolveLightOverlaysForMap(const char* mapName);
 bool ParseLightOverlays(bool verbose = false);
