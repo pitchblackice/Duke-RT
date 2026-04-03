@@ -156,7 +156,8 @@ public:
 		uint32_t nextRuleId = 1;
 		bool topologyChanged = false;
 		bool propertiesChanged = false;
-		bool materialsDirty = false;
+		bool materialBindingChanged = false;
+		bool materialPropertiesChanged = false;
 	};
 
 	struct SectorLightingRegistry
@@ -245,7 +246,8 @@ public:
 	bool ConsumeAnalyticLightPropertiesChanged();
 	bool ConsumeEmissiveSurfaceTopologyChanged();
 	bool ConsumeEmissiveSurfacePropertiesChanged();
-	bool ConsumeEmissiveMaterialsDirty();
+	bool ConsumeEmissiveMaterialBindingChanged();
+	bool ConsumeEmissiveMaterialPropertiesChanged();
 	bool ConsumeSectorLightingTopologyChanged();
 
 private:

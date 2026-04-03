@@ -4396,7 +4396,8 @@ bool NRIRenderer::AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t emiss
 	}
 
 	QueueStaticMapSceneLightingInvalidation();
-	mSceneLights.ConsumeEmissiveMaterialsDirty();
+	mSceneLights.ConsumeEmissiveMaterialBindingChanged();
+	mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
 	RequestHistoryReset("emissive-heuristic-change");
 	return true;
 }
@@ -4410,7 +4411,8 @@ void NRIRenderer::ClearTextureEmissiveHeuristics()
 
 	mSceneLights.ClearTextureEmissiveHeuristics();
 	QueueStaticMapSceneLightingInvalidation();
-	mSceneLights.ConsumeEmissiveMaterialsDirty();
+	mSceneLights.ConsumeEmissiveMaterialBindingChanged();
+	mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
 	RequestHistoryReset("emissive-heuristic-change");
 }
 
@@ -7024,7 +7026,8 @@ void NRIRenderer::RefreshSceneLightSystem(
 	const bool analyticLightPropertiesChanged = mSceneLights.ConsumeAnalyticLightPropertiesChanged();
 	const bool emissiveSurfaceTopologyChanged = mSceneLights.ConsumeEmissiveSurfaceTopologyChanged();
 	const bool emissiveSurfacePropertiesChanged = mSceneLights.ConsumeEmissiveSurfacePropertiesChanged();
-	const bool emissiveMaterialsDirty = mSceneLights.ConsumeEmissiveMaterialsDirty();
+	const bool emissiveMaterialBindingChanged = mSceneLights.ConsumeEmissiveMaterialBindingChanged();
+	const bool emissiveMaterialPropertiesChanged = mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
 	const bool sectorLightingTopologyChanged = mSceneLights.ConsumeSectorLightingTopologyChanged();
 
 	if (analyticLightTopologyChanged)
@@ -7036,15 +7039,15 @@ void NRIRenderer::RefreshSceneLightSystem(
 	{
 		RequestHistoryReset("emissive-surface-topology");
 	}
-	if (emissiveMaterialsDirty)
+	if (emissiveMaterialBindingChanged)
 	{
 		if (ShouldTraceSkyPerf())
 		{
 			gRendererSkyPerfTraceStats.emissiveMaterialDirtyEvents++;
 		}
 
-		// Material rebakes still need scene-data invalidation, but property-only
-		// emissive updates should not force a global PT/NRD history reset.
+		// Binding changes still require resident static materials to be refreshed,
+		// but they no longer need to tear down the whole static scene cache.
 		QueueStaticMapSceneLightingInvalidation();
 	}
 	if (sectorLightingTopologyChanged)
@@ -7054,6 +7057,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 
 	(void)analyticLightPropertiesChanged;
 	(void)emissiveSurfacePropertiesChanged;
+	(void)emissiveMaterialPropertiesChanged;
 }
 
 void NRIRenderer::QueueStaticMapSceneLightingInvalidation()
@@ -7122,16 +7126,28 @@ void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
 		return;
 	}
 
-	mPreservedStaticMapSky = {};
-	mPreservedStaticMapSky.valid = true;
-	mPreservedStaticMapSky.buildSerial = mStaticMapScene.buildSerial;
-	mPreservedStaticMapSky.sceneView.sky = mStaticMapScene.sceneView.sky;
-	Copy3(mStaticMapScene.sceneView.skyColor, mPreservedStaticMapSky.sceneView.skyColor);
-	Copy3(mStaticMapScene.sceneView.groundColor, mPreservedStaticMapSky.sceneView.groundColor);
+	if (!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
+		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false) ||
+		!EnsureStructuredBuffer(
+			mStaticMaterialBuffer,
+			mMaterialBufferStats,
+			mStaticMapScene.gpuMaterials.data(),
+			mStaticMapScene.gpuMaterials.size() * sizeof(nri_scene::MaterialData),
+			sizeof(nri_scene::MaterialData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+	{
+		// Fall back to a full resident-scene rebuild on the next frame if the
+		// targeted material refresh path fails for any reason.
+		DestroyStaticMapSceneCache();
+		mStaticMapScene = {};
+		mStaticAccelerationBuildSerial = 0;
+		return;
+	}
 
-	DestroyStaticMapSceneCache();
-	mStaticMapScene = {};
-	mStaticAccelerationBuildSerial = 0;
+	mStaticMapScene.texturesResident = true;
+	mStaticMapScene.buffersResident = true;
+	mStaticMapScene.gpuUploadCount++;
 }
 
 void NRIRenderer::PrintSceneLightDump(float radius, uint32_t limit) const

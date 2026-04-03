@@ -999,7 +999,8 @@ bool SceneLightSystem::AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t 
 		rule.emissiveColor[2] = std::max(emissiveColor[2], 0.0f);
 	}
 	mEmissiveSurfaces.textureRules.push_back(rule);
-	mEmissiveSurfaces.materialsDirty = true;
+	mEmissiveSurfaces.materialBindingChanged = true;
+	mEmissiveSurfaces.materialPropertiesChanged = true;
 	outRuleId = rule.ruleId;
 	return true;
 }
@@ -1012,7 +1013,8 @@ void SceneLightSystem::ClearTextureEmissiveHeuristics()
 	}
 
 	mEmissiveSurfaces.textureRules.clear();
-	mEmissiveSurfaces.materialsDirty = true;
+	mEmissiveSurfaces.materialBindingChanged = true;
+	mEmissiveSurfaces.materialPropertiesChanged = true;
 }
 
 bool SceneLightSystem::MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const
@@ -1090,11 +1092,18 @@ bool SceneLightSystem::ConsumeEmissiveSurfacePropertiesChanged()
 	return changed;
 }
 
-bool SceneLightSystem::ConsumeEmissiveMaterialsDirty()
+bool SceneLightSystem::ConsumeEmissiveMaterialBindingChanged()
 {
-	const bool dirty = mEmissiveSurfaces.materialsDirty;
-	mEmissiveSurfaces.materialsDirty = false;
-	return dirty;
+	const bool changed = mEmissiveSurfaces.materialBindingChanged;
+	mEmissiveSurfaces.materialBindingChanged = false;
+	return changed;
+}
+
+bool SceneLightSystem::ConsumeEmissiveMaterialPropertiesChanged()
+{
+	const bool changed = mEmissiveSurfaces.materialPropertiesChanged;
+	mEmissiveSurfaces.materialPropertiesChanged = false;
+	return changed;
 }
 
 bool SceneLightSystem::ConsumeSectorLightingTopologyChanged()
