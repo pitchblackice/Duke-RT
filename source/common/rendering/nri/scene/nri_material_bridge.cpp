@@ -343,6 +343,7 @@ namespace
 		metadata.paletteIndex = material.paletteIndex;
 		metadata.materialFlags = material.flags;
 		metadata.sectorIndex = surface.provenance.sectorIndex;
+		metadata.actorIndex = surface.provenance.actorIndex;
 		metadata.shade = surface.material.shade;
 		metadata.alpha = material.alpha;
 		metadata.lightLevel = material.lightLevel;
@@ -487,6 +488,7 @@ namespace
 			metallicContentKey,
 			roughnessTextureIndex,
 			roughnessContentKey);
+		outMaterials.materials.back().lightingFlags = metadata.lightingFlags;
 		outMaterials.lightMetadata.push_back(metadata);
 	}
 

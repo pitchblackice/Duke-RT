@@ -642,6 +642,7 @@ private:
 	void PrunePersistentDynamicEmissiveCacheToLiveActors();
 	bool RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
+	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void QueueStaticMapSceneLightingInvalidation();
 	void InvalidateStaticMapSceneForMaterialLighting();
 	void LogFallback(const char* reason);

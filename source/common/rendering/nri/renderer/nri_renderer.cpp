@@ -271,6 +271,79 @@ namespace
 		return state;
 	}
 
+	enum ActorShadowOverrideBits : uint32_t
+	{
+		ActorShadowOverride_None = 0,
+		ActorShadowOverride_NoShadowReceive = 1u << 0,
+		ActorShadowOverride_NoShadowCast = 1u << 1,
+	};
+
+	static void BuildActorShadowOverrideMap(const ResolvedLightOverlaySet& resolved, std::unordered_map<int32_t, uint32_t>& outOverrides)
+	{
+		if (resolved.actorOverrideRules.Size() == 0)
+		{
+			return;
+		}
+
+		TSpriteIterator<DCoreActor> it;
+		while (auto actor = it.Next())
+		{
+			if (actor == nullptr || !actor->exists() || (actor->ObjectFlags & OF_EuthanizeMe) != 0)
+			{
+				continue;
+			}
+
+			PClass* actorClass = actor->GetClass();
+			if (actorClass == nullptr)
+			{
+				continue;
+			}
+
+			uint32_t overrideBits = ActorShadowOverride_None;
+			bool touched = false;
+			for (const auto& resolvedRule : resolved.actorOverrideRules)
+			{
+				if (!resolvedRule.actorClassResolved ||
+					resolvedRule.actorClass == nullptr ||
+					(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)))
+				{
+					continue;
+				}
+
+				if (resolvedRule.hasShadowReceive)
+				{
+					touched = true;
+					if (resolvedRule.shadowReceive)
+					{
+						overrideBits &= ~ActorShadowOverride_NoShadowReceive;
+					}
+					else
+					{
+						overrideBits |= ActorShadowOverride_NoShadowReceive;
+					}
+				}
+
+				if (resolvedRule.hasShadowCast)
+				{
+					touched = true;
+					if (resolvedRule.shadowCast)
+					{
+						overrideBits &= ~ActorShadowOverride_NoShadowCast;
+					}
+					else
+					{
+						overrideBits |= ActorShadowOverride_NoShadowCast;
+					}
+				}
+			}
+
+			if (touched && overrideBits != ActorShadowOverride_None)
+			{
+				outOverrides[(int32_t)actor->GetIndex()] = overrideBits;
+			}
+		}
+	}
+
 	static uint32_t BuildMapOverlayRuleId(const ResolvedLightOverlayMapLightRule& rule)
 	{
 		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
@@ -6620,6 +6693,47 @@ void NRIRenderer::ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridge
 	}
 }
 
+void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const
+{
+	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	if (resolvedLightOverlays.actorOverrideRules.Size() == 0)
+	{
+		return;
+	}
+
+	std::unordered_map<int32_t, uint32_t> actorOverrides;
+	BuildActorShadowOverrideMap(resolvedLightOverlays, actorOverrides);
+	if (actorOverrides.empty())
+	{
+		return;
+	}
+
+	const uint32_t count = std::min<uint32_t>((uint32_t)inOutGpuMaterials.size(), (uint32_t)materials.lightMetadata.size());
+	for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
+	{
+		const nri_scene::MaterialLightingMetadata& metadata = materials.lightMetadata[materialIndex];
+		if (metadata.actorIndex < 0)
+		{
+			continue;
+		}
+
+		auto it = actorOverrides.find(metadata.actorIndex);
+		if (it == actorOverrides.end())
+		{
+			continue;
+		}
+
+		if ((it->second & ActorShadowOverride_NoShadowReceive) != 0)
+		{
+			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowReceive;
+		}
+		if ((it->second & ActorShadowOverride_NoShadowCast) != 0)
+		{
+			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
+		}
+	}
+}
+
 void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
 {
 	if (!mStaticMapScene.valid)
@@ -8604,6 +8718,7 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 
 	outGpuMaterials = materials.materials;
 	ApplyEmissiveMaterialOverrides(materials, outGpuMaterials);
+	ApplyActorShadowMaterialOverrides(materials, outGpuMaterials);
 	if (!EnsureSkyTexture(sceneView, preserveExistingSky))
 	{
 		return false;

@@ -54,15 +54,6 @@ namespace
 		}
 	}
 
-	static const char* ReceiverModeName(LightOverlayReceiverMode mode)
-	{
-		switch (mode)
-		{
-		case LightOverlayReceiverMode::NoShadowReceive: return "no_shadow_receive";
-		default: return "default";
-		}
-	}
-
 	static void CopyVector3(const float source[3], float destination[3])
 	{
 		destination[0] = source[0];
@@ -610,18 +601,37 @@ namespace
 				else if (sc.Compare("shadowreceive"))
 				{
 					sc.MustGetString();
-					rule.hasReceiverMode = true;
 					if (!stricmp(sc.String, "off"))
 					{
-						rule.receiverMode = LightOverlayReceiverMode::NoShadowReceive;
+						rule.hasShadowReceive = true;
+						rule.shadowReceive = false;
 					}
 					else if (!stricmp(sc.String, "default") || !stricmp(sc.String, "on"))
 					{
-						rule.receiverMode = LightOverlayReceiverMode::Default;
+						rule.hasShadowReceive = true;
+						rule.shadowReceive = true;
 					}
 					else
 					{
-						sc.ScriptMessage("Invalid shadowreceive value '%s'; expected off/default", sc.String);
+						sc.ScriptMessage("Invalid shadowreceive value '%s'; expected off/default/on", sc.String);
+					}
+				}
+				else if (sc.Compare("shadowcast"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "off"))
+					{
+						rule.hasShadowCast = true;
+						rule.shadowCast = false;
+					}
+					else if (!stricmp(sc.String, "default") || !stricmp(sc.String, "on"))
+					{
+						rule.hasShadowCast = true;
+						rule.shadowCast = true;
+					}
+					else
+					{
+						sc.ScriptMessage("Invalid shadowcast value '%s'; expected off/default/on", sc.String);
 					}
 				}
 				else
@@ -734,11 +744,12 @@ namespace
 
 		for (const ParsedLightOverlayActorOverrideRule* rule : SortRulesByOrder(database.actorOverrideRules))
 		{
-			Printf("LIGHTOVR actoroverride %s map=%s actorclass=%s receiver=%s source=%s\n",
+			Printf("LIGHTOVR actoroverride %s map=%s actorclass=%s shadowreceive=%s shadowcast=%s source=%s\n",
 				rule->id.GetChars(),
 				rule->mapName.GetChars(),
 				rule->actorClassName.GetChars(),
-				ReceiverModeName(rule->receiverMode),
+				rule->hasShadowReceive ? (rule->shadowReceive ? "default" : "off") : "(unset)",
+				rule->hasShadowCast ? (rule->shadowCast ? "default" : "off") : "(unset)",
 				SourceLocationText(rule->source).GetChars());
 		}
 	}
@@ -785,12 +796,13 @@ namespace
 
 		for (const auto& rule : resolved.actorOverrideRules)
 		{
-			Printf("LIGHTOVR resolved actoroverride %s map=%s actorclass=%s resolved=%s receiver=%s source=%s\n",
+			Printf("LIGHTOVR resolved actoroverride %s map=%s actorclass=%s resolved=%s shadowreceive=%s shadowcast=%s source=%s\n",
 				rule.id.GetChars(),
 				rule.mapName.GetChars(),
 				rule.actorClassName.GetChars(),
 				rule.actorClassResolved ? "yes" : "no",
-				ReceiverModeName(rule.receiverMode),
+				rule.hasShadowReceive ? (rule.shadowReceive ? "default" : "off") : "(unset)",
+				rule.hasShadowCast ? (rule.shadowCast ? "default" : "off") : "(unset)",
 				SourceLocationText(rule.source).GetChars());
 		}
 	}
@@ -874,8 +886,10 @@ namespace
 		destination.actorClassName = source.actorClassName;
 		destination.actorClass = PClass::FindActor(source.actorClassName);
 		destination.actorClassResolved = destination.actorClass != nullptr;
-		destination.receiverMode = source.receiverMode;
-		destination.hasReceiverMode = source.hasReceiverMode;
+		destination.hasShadowReceive = source.hasShadowReceive;
+		destination.shadowReceive = source.shadowReceive;
+		destination.hasShadowCast = source.hasShadowCast;
+		destination.shadowCast = source.shadowCast;
 	}
 
 	static const ResolvedLightOverlaySet& ResolveLightOverlaysForMapInternal(const FString& mapName, bool currentMapAvailable)

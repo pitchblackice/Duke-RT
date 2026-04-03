@@ -14,6 +14,8 @@ enum MaterialLightingFlags : uint32_t
 	MaterialLightingFlag_TextureGlowing = 1u << 2,
 	MaterialLightingFlag_TextureAutoGlowing = 1u << 3,
 	MaterialLightingFlag_HasGlowmap = 1u << 4,
+	MaterialLightingFlag_NoShadowReceive = 1u << 5,
+	MaterialLightingFlag_NoShadowCast = 1u << 6,
 };
 
 enum MaterialEmissiveMode : uint32_t
@@ -31,6 +33,7 @@ struct MaterialData
 	uint32_t paletteIndex = 0;
 	uint32_t flags = 0;
 	uint32_t materialClass = 0;
+	uint32_t lightingFlags = 0;
 	uint32_t normalTextureIndex = UINT32_MAX;
 	uint32_t metallicTextureIndex = UINT32_MAX;
 	uint32_t roughnessTextureIndex = UINT32_MAX;
@@ -69,6 +72,7 @@ struct MaterialLightingMetadata
 	uint32_t materialClass = 0;
 	uint32_t emissiveMode = MaterialEmissiveMode_None;
 	int32_t sectorIndex = -1;
+	int32_t actorIndex = -1;
 	int32_t shade = 0;
 	float alpha = 1.0f;
 	float lightLevel = 1.0f;

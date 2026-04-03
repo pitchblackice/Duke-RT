@@ -27,6 +27,9 @@
 #define MATERIAL_FLAG_PORTAL 64
 #define MATERIAL_FLAG_ONE_WAY 128
 
+#define MATERIAL_LIGHTING_FLAG_NO_SHADOW_RECEIVE 32
+#define MATERIAL_LIGHTING_FLAG_NO_SHADOW_CAST 64
+
 struct NRITraceConstants
 {
 	float3 CameraPos;
@@ -91,6 +94,7 @@ struct MaterialData
 	uint paletteIndex;
 	uint flags;
 	uint materialClass;
+	uint lightingFlags;
 	uint normalTextureIndex;
 	uint metallicTextureIndex;
 	uint roughnessTextureIndex;

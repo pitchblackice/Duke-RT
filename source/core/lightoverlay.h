@@ -13,12 +13,6 @@ enum class LightOverlayAnchorType : uint8_t
 	Wall,
 };
 
-enum class LightOverlayReceiverMode : uint8_t
-{
-	Default,
-	NoShadowReceive,
-};
-
 struct LightOverlaySourceLocation
 {
 	FString sourceName;
@@ -109,8 +103,10 @@ struct ParsedLightOverlayActorOverrideRule
 	FString id;
 	LightOverlaySourceLocation source;
 	FString actorClassName;
-	LightOverlayReceiverMode receiverMode = LightOverlayReceiverMode::Default;
-	bool hasReceiverMode = false;
+	bool hasShadowReceive = false;
+	bool shadowReceive = true;
+	bool hasShadowCast = false;
+	bool shadowCast = true;
 };
 
 struct ParsedLightOverlaySourceFile
@@ -211,8 +207,10 @@ struct ResolvedLightOverlayActorOverrideRule
 	FString actorClassName;
 	PClassActor* actorClass = nullptr;
 	bool actorClassResolved = false;
-	LightOverlayReceiverMode receiverMode = LightOverlayReceiverMode::Default;
-	bool hasReceiverMode = false;
+	bool hasShadowReceive = false;
+	bool shadowReceive = true;
+	bool hasShadowCast = false;
+	bool shadowCast = true;
 };
 
 struct ResolvedLightOverlaySet
