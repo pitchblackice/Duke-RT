@@ -6948,6 +6948,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 				mStaticMapScene.lightChunkViews[chunkListIndex],
 				mStaticMapScene.materialBridge,
 				SceneLightRecordSource::StaticMapScene,
+				staticChunk.materialOffset,
 				staticChunk.materialOffset);
 		}
 
@@ -6966,7 +6967,8 @@ void NRIRenderer::RefreshSceneLightSystem(
 				replacement.sceneView,
 				replacement.materialBridge,
 				SceneLightRecordSource::RuntimeMutationScene,
-				runtimeMutationMaterialOffset);
+				runtimeMutationMaterialOffset,
+				0u);
 			runtimeMutationMaterialOffset += (uint32_t)replacement.materialBridge.materials.size();
 		}
 	}

@@ -494,12 +494,17 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mSectorLighting.topologyChanged = false;
 }
 
-void SceneLightSystem::AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t materialIndexBase)
+void SceneLightSystem::AppendSceneView(
+	const nri_scene::SceneView& sceneView,
+	const nri_scene::MaterialBridgeData& materials,
+	SceneLightRecordSource source,
+	uint32_t materialIndexBase,
+	uint32_t materialLookupIndexBase)
 {
-	uint32_t materialIndex = materialIndexBase;
-	AppendSurfaceList(sceneView.opaqueWalls, materials, source, materialIndex);
-	AppendSurfaceList(sceneView.opaqueFlats, materials, source, materialIndex);
-	AppendSurfaceList(sceneView.opaqueSprites, materials, source, materialIndex);
+	uint32_t localMaterialIndex = 0;
+	AppendSurfaceList(sceneView.opaqueWalls, materials, source, materialIndexBase, materialLookupIndexBase, localMaterialIndex);
+	AppendSurfaceList(sceneView.opaqueFlats, materials, source, materialIndexBase, materialLookupIndexBase, localMaterialIndex);
+	AppendSurfaceList(sceneView.opaqueSprites, materials, source, materialIndexBase, materialLookupIndexBase, localMaterialIndex);
 }
 
 void SceneLightSystem::RebuildAnalyticLights(
@@ -1099,33 +1104,40 @@ bool SceneLightSystem::ConsumeSectorLightingTopologyChanged()
 	return changed;
 }
 
-void SceneLightSystem::AppendSurfaceList(const std::vector<nri_scene::SurfaceRef>& surfaces, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t& inOutMaterialIndex)
+void SceneLightSystem::AppendSurfaceList(
+	const std::vector<nri_scene::SurfaceRef>& surfaces,
+	const nri_scene::MaterialBridgeData& materials,
+	SceneLightRecordSource source,
+	uint32_t materialIndexBase,
+	uint32_t materialLookupIndexBase,
+	uint32_t& inOutLocalMaterialIndex)
 {
 	for (const nri_scene::SurfaceRef& surface : surfaces)
 	{
 		SurfaceRecord record = {};
 		record.source = source;
-		record.materialIndex = inOutMaterialIndex;
+		record.materialIndex = materialIndexBase + inOutLocalMaterialIndex;
 		record.provenance = surface.provenance;
 		ComputeSurfaceBounds(surface, record.center, record.boundsRadius);
 		record.surfaceArea = ComputeSurfaceArea(surface);
 
-		if (inOutMaterialIndex < materials.lightMetadata.size())
+		const uint32_t materialLookupIndex = materialLookupIndexBase + inOutLocalMaterialIndex;
+		if (materialLookupIndex < materials.lightMetadata.size())
 		{
-			record.material = materials.lightMetadata[inOutMaterialIndex];
+			record.material = materials.lightMetadata[materialLookupIndex];
 		}
-		else if (inOutMaterialIndex < materials.materials.size())
+		else if (materialLookupIndex < materials.materials.size())
 		{
-			record.material.sectorIndex = materials.materials[inOutMaterialIndex].sectorIndex != UINT32_MAX ? (int32_t)materials.materials[inOutMaterialIndex].sectorIndex : -1;
-			record.material.paletteIndex = materials.materials[inOutMaterialIndex].paletteIndex;
-			record.material.materialFlags = materials.materials[inOutMaterialIndex].flags;
-			record.material.alpha = materials.materials[inOutMaterialIndex].alpha;
-			record.material.lightLevel = materials.materials[inOutMaterialIndex].lightLevel;
+			record.material.sectorIndex = materials.materials[materialLookupIndex].sectorIndex != UINT32_MAX ? (int32_t)materials.materials[materialLookupIndex].sectorIndex : -1;
+			record.material.paletteIndex = materials.materials[materialLookupIndex].paletteIndex;
+			record.material.materialFlags = materials.materials[materialLookupIndex].flags;
+			record.material.alpha = materials.materials[materialLookupIndex].alpha;
+			record.material.lightLevel = materials.materials[materialLookupIndex].lightLevel;
 		}
 
 		record.identityKey = BuildSurfaceIdentityKey(record);
 
 		mSurfaceRecords.push_back(record);
-		++inOutMaterialIndex;
+		++inOutLocalMaterialIndex;
 	}
 }

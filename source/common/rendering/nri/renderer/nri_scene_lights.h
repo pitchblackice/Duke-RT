@@ -205,7 +205,12 @@ public:
 
 	void Reset();
 	void BeginFrame(uint64_t frameSerial);
-	void AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t materialIndexBase = 0);
+	void AppendSceneView(
+		const nri_scene::SceneView& sceneView,
+		const nri_scene::MaterialBridgeData& materials,
+		SceneLightRecordSource source,
+		uint32_t materialIndexBase = 0,
+		uint32_t materialLookupIndexBase = 0);
 	void RebuildAnalyticLights(
 		uint32_t frameIndex,
 		uint32_t maxActiveLights,
@@ -244,7 +249,13 @@ public:
 	bool ConsumeSectorLightingTopologyChanged();
 
 private:
-	void AppendSurfaceList(const std::vector<nri_scene::SurfaceRef>& surfaces, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t& inOutMaterialIndex);
+	void AppendSurfaceList(
+		const std::vector<nri_scene::SurfaceRef>& surfaces,
+		const nri_scene::MaterialBridgeData& materials,
+		SceneLightRecordSource source,
+		uint32_t materialIndexBase,
+		uint32_t materialLookupIndexBase,
+		uint32_t& inOutLocalMaterialIndex);
 
 	AnalyticLightRegistry mAnalyticLights = {};
 	EmissiveSurfaceRegistry mEmissiveSurfaces = {};
