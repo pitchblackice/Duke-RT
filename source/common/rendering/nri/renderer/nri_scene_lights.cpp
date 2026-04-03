@@ -191,6 +191,29 @@ namespace
 		return key;
 	}
 
+	uint64_t HashQuantizedFloat(uint64_t hash, float value, float scale)
+	{
+		const int64_t quantized = (int64_t)std::llround((double)value * (double)scale);
+		return HashCombine64(hash, (uint64_t)quantized);
+	}
+
+	uint64_t BuildAnalyticPropertyHash(const SceneLightSystem::SceneAnalyticLight& light)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.source);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.actorIndex);
+		hash = HashCombine64(hash, (uint64_t)light.textureId);
+		hash = HashQuantizedFloat(hash, light.position[0], 16.0f);
+		hash = HashQuantizedFloat(hash, light.position[1], 16.0f);
+		hash = HashQuantizedFloat(hash, light.position[2], 16.0f);
+		hash = HashQuantizedFloat(hash, light.color[0], 4096.0f);
+		hash = HashQuantizedFloat(hash, light.color[1], 4096.0f);
+		hash = HashQuantizedFloat(hash, light.color[2], 4096.0f);
+		hash = HashQuantizedFloat(hash, light.intensity, 4096.0f);
+		hash = HashQuantizedFloat(hash, light.radius, 16.0f);
+		return hash;
+	}
+
 	float EvaluateFlickerScale(uint64_t stableKey, uint32_t frameIndex, uint32_t flickerFrames)
 	{
 		if (flickerFrames <= 1)
@@ -302,6 +325,29 @@ namespace
 	uint64_t BuildEmissiveTopologyKey(const SceneLightSystem::SurfaceRecord& record)
 	{
 		return record.identityKey;
+	}
+
+	uint64_t BuildEmissivePropertyHash(const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)emissive.sourceFlags);
+		hash = HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
+		hash = HashCombine64(hash, (uint64_t)emissive.textureId);
+		hash = HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
+		hash = HashCombine64(hash, (uint64_t)emissive.emissiveMode);
+		hash = HashQuantizedFloat(hash, emissive.center[0], 16.0f);
+		hash = HashQuantizedFloat(hash, emissive.center[1], 16.0f);
+		hash = HashQuantizedFloat(hash, emissive.center[2], 16.0f);
+		hash = HashQuantizedFloat(hash, emissive.boundsRadius, 16.0f);
+		hash = HashQuantizedFloat(hash, emissive.surfaceArea, 16.0f);
+		hash = HashQuantizedFloat(hash, emissive.emissiveColor[0], 4096.0f);
+		hash = HashQuantizedFloat(hash, emissive.emissiveColor[1], 4096.0f);
+		hash = HashQuantizedFloat(hash, emissive.emissiveColor[2], 4096.0f);
+		hash = HashQuantizedFloat(hash, emissive.emissiveIntensity, 4096.0f);
+		hash = HashQuantizedFloat(hash, emissive.powerEstimate, 256.0f);
+		return hash;
 	}
 
 	bool EvaluateEmissiveMaterial(
@@ -434,11 +480,13 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mAnalyticLights.dedupedMatchCount = 0;
 	mAnalyticLights.truncatedLightCount = 0;
 	mAnalyticLights.topologyChanged = false;
+	mAnalyticLights.propertiesChanged = false;
 	mEmissiveSurfaces.totalPowerEstimate = 0.0f;
 	mEmissiveSurfaces.autoTaggedCount = 0;
 	mEmissiveSurfaces.explicitRuleMatchCount = 0;
 	mEmissiveSurfaces.truncatedSurfaceCount = 0;
 	mEmissiveSurfaces.topologyChanged = false;
+	mEmissiveSurfaces.propertiesChanged = false;
 	mSectorLighting.eligibleSectorCount = 0;
 	mSectorLighting.activeSectorCount = 0;
 	mSectorLighting.fogSectorCount = 0;
@@ -597,13 +645,27 @@ void SceneLightSystem::RebuildAnalyticLights(
 
 	std::vector<uint64_t> nextTopologyKeys;
 	nextTopologyKeys.reserve(nextLights.size());
+	std::unordered_map<uint64_t, uint64_t> nextPropertyHashes;
+	nextPropertyHashes.reserve(nextLights.size());
 	for (const SceneAnalyticLight& light : nextLights)
 	{
 		nextTopologyKeys.push_back(light.stableKey);
+		nextPropertyHashes.emplace(light.stableKey, BuildAnalyticPropertyHash(light));
 	}
 	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
 	mAnalyticLights.topologyChanged = nextTopologyKeys != mAnalyticLights.activeTopologyKeys;
+	mAnalyticLights.propertiesChanged = false;
+	for (const auto& entry : nextPropertyHashes)
+	{
+		const auto previousIt = mAnalyticLights.activePropertyHashes.find(entry.first);
+		if (previousIt != mAnalyticLights.activePropertyHashes.end() && previousIt->second != entry.second)
+		{
+			mAnalyticLights.propertiesChanged = true;
+			break;
+		}
+	}
 	mAnalyticLights.activeTopologyKeys = std::move(nextTopologyKeys);
+	mAnalyticLights.activePropertyHashes = std::move(nextPropertyHashes);
 	mAnalyticLights.activeLights = std::move(nextLights);
 }
 
@@ -685,13 +747,27 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 
 	std::vector<uint64_t> nextTopologyKeys;
 	nextTopologyKeys.reserve(nextSurfaces.size());
+	std::unordered_map<uint64_t, uint64_t> nextPropertyHashes;
+	nextPropertyHashes.reserve(nextSurfaces.size());
 	for (const auto& emissive : nextSurfaces)
 	{
 		nextTopologyKeys.push_back(emissive.stableKey);
+		nextPropertyHashes.emplace(emissive.stableKey, BuildEmissivePropertyHash(emissive));
 	}
 	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
 	mEmissiveSurfaces.topologyChanged = nextTopologyKeys != mEmissiveSurfaces.activeTopologyKeys;
+	mEmissiveSurfaces.propertiesChanged = false;
+	for (const auto& entry : nextPropertyHashes)
+	{
+		const auto previousIt = mEmissiveSurfaces.activePropertyHashes.find(entry.first);
+		if (previousIt != mEmissiveSurfaces.activePropertyHashes.end() && previousIt->second != entry.second)
+		{
+			mEmissiveSurfaces.propertiesChanged = true;
+			break;
+		}
+	}
 	mEmissiveSurfaces.activeTopologyKeys = std::move(nextTopologyKeys);
+	mEmissiveSurfaces.activePropertyHashes = std::move(nextPropertyHashes);
 	mEmissiveSurfaces.activeSurfaces = std::move(nextSurfaces);
 }
 
@@ -988,10 +1064,24 @@ bool SceneLightSystem::ConsumeAnalyticLightTopologyChanged()
 	return changed;
 }
 
+bool SceneLightSystem::ConsumeAnalyticLightPropertiesChanged()
+{
+	const bool changed = mAnalyticLights.propertiesChanged;
+	mAnalyticLights.propertiesChanged = false;
+	return changed;
+}
+
 bool SceneLightSystem::ConsumeEmissiveSurfaceTopologyChanged()
 {
 	const bool changed = mEmissiveSurfaces.topologyChanged;
 	mEmissiveSurfaces.topologyChanged = false;
+	return changed;
+}
+
+bool SceneLightSystem::ConsumeEmissiveSurfacePropertiesChanged()
+{
+	const bool changed = mEmissiveSurfaces.propertiesChanged;
+	mEmissiveSurfaces.propertiesChanged = false;
 	return changed;
 }
 

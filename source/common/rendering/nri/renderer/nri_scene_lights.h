@@ -102,6 +102,7 @@ public:
 		std::vector<AnalyticLightHeuristicRule> spriteTileRules;
 		std::vector<SceneAnalyticLight> activeLights;
 		std::vector<uint64_t> activeTopologyKeys;
+		std::unordered_map<uint64_t, uint64_t> activePropertyHashes;
 		uint32_t matchedSurfaceCount = 0;
 		uint32_t actorOverlayRuleCount = 0;
 		uint32_t actorOverlayMatchedSurfaceCount = 0;
@@ -110,6 +111,7 @@ public:
 		uint32_t truncatedLightCount = 0;
 		uint32_t nextRuleId = 1;
 		bool topologyChanged = false;
+		bool propertiesChanged = false;
 	};
 
 	struct EmissiveSurfaceRegistry
@@ -146,12 +148,14 @@ public:
 		std::vector<EmissiveHeuristicRule> textureRules;
 		std::vector<EmissiveSurfaceRecord> activeSurfaces;
 		std::vector<uint64_t> activeTopologyKeys;
+		std::unordered_map<uint64_t, uint64_t> activePropertyHashes;
 		float totalPowerEstimate = 0.0f;
 		uint32_t autoTaggedCount = 0;
 		uint32_t explicitRuleMatchCount = 0;
 		uint32_t truncatedSurfaceCount = 0;
 		uint32_t nextRuleId = 1;
 		bool topologyChanged = false;
+		bool propertiesChanged = false;
 		bool materialsDirty = false;
 	};
 
@@ -233,7 +237,9 @@ public:
 	const EnvironmentLightingState& GetEnvironmentLighting() const { return mEnvironmentLighting; }
 
 	bool ConsumeAnalyticLightTopologyChanged();
+	bool ConsumeAnalyticLightPropertiesChanged();
 	bool ConsumeEmissiveSurfaceTopologyChanged();
+	bool ConsumeEmissiveSurfacePropertiesChanged();
 	bool ConsumeEmissiveMaterialsDirty();
 	bool ConsumeSectorLightingTopologyChanged();
 
