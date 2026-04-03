@@ -44,6 +44,15 @@ enum SceneSectorLightSourceFlags : uint32_t
 	SceneSectorLightSourceFlag_Pulsing = 1u << 4,
 };
 
+enum SceneLightDiagnosticFlags : uint32_t
+{
+	SceneLightDiagnosticFlag_None = 0,
+	SceneLightDiagnosticFlag_PreviousMatch = 1u << 0,
+	SceneLightDiagnosticFlag_PropertyChanged = 1u << 1,
+	SceneLightDiagnosticFlag_Rebound = 1u << 2,
+	SceneLightDiagnosticFlag_Added = 1u << 3,
+};
+
 class SceneLightSystem
 {
 public:
@@ -103,6 +112,11 @@ public:
 		std::vector<SceneAnalyticLight> activeLights;
 		std::vector<uint64_t> activeTopologyKeys;
 		std::unordered_map<uint64_t, uint64_t> activePropertyHashes;
+		std::unordered_map<uint64_t, uint64_t> activeBindingHashes;
+		std::unordered_map<uint64_t, uint32_t> activeDiagnosticFlags;
+		std::vector<uint64_t> addedTopologyKeys;
+		std::vector<uint64_t> removedTopologyKeys;
+		std::vector<uint64_t> reboundTopologyKeys;
 		uint32_t matchedSurfaceCount = 0;
 		uint32_t actorOverlayRuleCount = 0;
 		uint32_t actorOverlayMatchedSurfaceCount = 0;
@@ -112,6 +126,8 @@ public:
 		uint32_t nextRuleId = 1;
 		bool topologyChanged = false;
 		bool propertiesChanged = false;
+		bool lastBuildTopologyChanged = false;
+		bool lastBuildPropertiesChanged = false;
 	};
 
 	struct EmissiveSurfaceRegistry
@@ -149,6 +165,11 @@ public:
 		std::vector<EmissiveSurfaceRecord> activeSurfaces;
 		std::vector<uint64_t> activeTopologyKeys;
 		std::unordered_map<uint64_t, uint64_t> activePropertyHashes;
+		std::unordered_map<uint64_t, uint64_t> activeBindingHashes;
+		std::unordered_map<uint64_t, uint32_t> activeDiagnosticFlags;
+		std::vector<uint64_t> addedTopologyKeys;
+		std::vector<uint64_t> removedTopologyKeys;
+		std::vector<uint64_t> reboundTopologyKeys;
 		float totalPowerEstimate = 0.0f;
 		uint32_t autoTaggedCount = 0;
 		uint32_t explicitRuleMatchCount = 0;
@@ -158,6 +179,8 @@ public:
 		bool propertiesChanged = false;
 		bool materialBindingChanged = false;
 		bool materialPropertiesChanged = false;
+		bool lastBuildTopologyChanged = false;
+		bool lastBuildPropertiesChanged = false;
 	};
 
 	struct SectorLightingRegistry

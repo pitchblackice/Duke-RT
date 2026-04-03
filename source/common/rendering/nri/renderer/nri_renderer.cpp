@@ -27,6 +27,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -919,6 +920,35 @@ namespace
 	bool ShouldTracePtPerf()
 	{
 		return PerfLoopTraceActive() || nri_pttraceframes > 0;
+	}
+
+	std::string FormatTopologyKeyList(const std::vector<uint64_t>& keys, size_t limit = 8)
+	{
+		if (keys.empty())
+		{
+			return "none";
+		}
+
+		std::string result;
+		const size_t printCount = std::min(keys.size(), limit);
+		char buffer[32] = {};
+		for (size_t i = 0; i < printCount; ++i)
+		{
+			if (!result.empty())
+			{
+				result += ",";
+			}
+
+			std::snprintf(buffer, sizeof(buffer), "0x%016llx", (unsigned long long)keys[i]);
+			result += buffer;
+		}
+
+		if (printCount < keys.size())
+		{
+			result += ",...";
+		}
+
+		return result;
 	}
 
 	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
@@ -3967,6 +3997,25 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	if (nri_pttraceframes > 0)
 	{
+		const auto& analyticLights = mSceneLights.GetAnalyticLights();
+		const auto& emissiveSurfaces = mSceneLights.GetEmissiveSurfaces();
+		Printf("NRI PT light trace: frame=%u analytic=%u topo=%s prop=%s added=%u removed=%u rebound=%u emissive=%u topo=%s prop=%s added=%u removed=%u rebound=%u reset=%s reason=%s\n",
+			traceFrameIndex,
+			(uint32_t)analyticLights.activeLights.size(),
+			YesNo(analyticLights.lastBuildTopologyChanged),
+			YesNo(analyticLights.lastBuildPropertiesChanged),
+			(uint32_t)analyticLights.addedTopologyKeys.size(),
+			(uint32_t)analyticLights.removedTopologyKeys.size(),
+			(uint32_t)analyticLights.reboundTopologyKeys.size(),
+			(uint32_t)emissiveSurfaces.activeSurfaces.size(),
+			YesNo(emissiveSurfaces.lastBuildTopologyChanged),
+			YesNo(emissiveSurfaces.lastBuildPropertiesChanged),
+			(uint32_t)emissiveSurfaces.addedTopologyKeys.size(),
+			(uint32_t)emissiveSurfaces.removedTopologyKeys.size(),
+			(uint32_t)emissiveSurfaces.reboundTopologyKeys.size(),
+			YesNo(mResetHistory),
+			mResetHistory ? mLastHistoryResetReason.c_str() : "none");
+
 		const nri_scene::SkyPerfStats sceneSkyPerf = nri_scene::ConsumeSkyPerfStats();
 		Printf("NRI PT sky perf: frame=%u ensure_scene=%u preserve_scene=%u rebuild_scene=%u ensure_sky=%u preserve_hit=%u reuse_active=%u reuse_probe=%u probe=%u/%u face_probes=%u uploads=%u ensure_ms=%.3f probe_ms=%.3f face_ms=%.3f upload_ms=%.3f static_builds=%u overlay_builds=%u\n",
 			traceFrameIndex,
@@ -4170,7 +4219,7 @@ void NRIRenderer::ClearRuntimePointLights()
 void NRIRenderer::PrintRuntimePointLights() const
 {
 	const auto& analyticLights = mSceneLights.GetAnalyticLights();
-	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u overlay_rules=%u map_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u limit=%u\n",
+	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u overlay_rules=%u map_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
 		(uint32_t)analyticLights.activeLights.size(),
 		(uint32_t)analyticLights.manualLights.size(),
 		(uint32_t)analyticLights.spriteTileRules.size(),
@@ -4180,6 +4229,11 @@ void NRIRenderer::PrintRuntimePointLights() const
 		analyticLights.actorOverlayMatchedSurfaceCount,
 		analyticLights.dedupedMatchCount,
 		analyticLights.truncatedLightCount,
+		YesNo(analyticLights.lastBuildTopologyChanged),
+		YesNo(analyticLights.lastBuildPropertiesChanged),
+		(uint32_t)analyticLights.addedTopologyKeys.size(),
+		(uint32_t)analyticLights.removedTopologyKeys.size(),
+		(uint32_t)analyticLights.reboundTopologyKeys.size(),
 		NRI_MAX_RUNTIME_POINT_LIGHTS);
 	if (analyticLights.activeLights.empty())
 	{
@@ -4198,10 +4252,16 @@ void NRIRenderer::PrintRuntimePointLights() const
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? ":actor" :
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_MapOverlay) != 0 ? ":map" :
 			"";
-		Printf("NRI PT analytic light %u: id=%u stable=0x%016llx source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
+		const auto diagnosticIt = analyticLights.activeDiagnosticFlags.find(light.stableKey);
+		const uint32_t diagnosticFlags = diagnosticIt != analyticLights.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
+		Printf("NRI PT analytic light %u: id=%u topology=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
 			light.id,
 			light.id,
 			(unsigned long long)light.stableKey,
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PreviousMatch) != 0),
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Added) != 0),
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Rebound) != 0),
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PropertyChanged) != 0),
 			sourceBase,
 			sourceSuffix,
 			light.sourceRuleId,
@@ -4487,23 +4547,36 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		return a.distanceSq < b.distanceSq;
 	});
 
-	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u total_power=%.3f min_surface=%.3f min_power=%.3f sampling_auto_only=%s\n",
+	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u min_surface=%.3f min_power=%.3f sampling_auto_only=%s\n",
 		(uint32_t)mBoundEmissivePrimitiveRecords.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
 		mSceneLights.GetEmissiveSurfaces().explicitRuleMatchCount,
 		mBoundEmissiveTotalPower,
+		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildTopologyChanged),
+		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildPropertiesChanged),
+		(uint32_t)mSceneLights.GetEmissiveSurfaces().addedTopologyKeys.size(),
+		(uint32_t)mSceneLights.GetEmissiveSurfaces().removedTopologyKeys.size(),
+		(uint32_t)mSceneLights.GetEmissiveSurfaces().reboundTopologyKeys.size(),
 		(float)nri_ptemissiveminsurface,
 		(float)nri_ptemissiveminpower,
 		nri_ptemissiveautoonly ? "on" : "off");
 
+	const auto& emissiveSurfaces = mSceneLights.GetEmissiveSurfaces();
 	const uint32_t printCount = std::min<uint32_t>((uint32_t)candidates.size(), limit);
 	for (uint32_t i = 0; i < printCount; ++i)
 	{
 		const auto& record = *candidates[i].record;
-		Printf("NRI PT emissive %u: stable=0x%016llx source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		const auto diagnosticIt = emissiveSurfaces.activeDiagnosticFlags.find(record.surfaceStableKey);
+		const uint32_t diagnosticFlags = diagnosticIt != emissiveSurfaces.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
+		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
 			i,
 			(unsigned long long)record.stableKey,
+			(unsigned long long)record.surfaceStableKey,
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PreviousMatch) != 0),
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Added) != 0),
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Rebound) != 0),
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PropertyChanged) != 0),
 			GetSceneDataSourceName(record.dataSource),
 			record.primitiveIndex,
 			record.materialIndex,
@@ -4942,10 +5015,15 @@ void NRIRenderer::PrintStatus() const
 		(int)nri_ptmutationtracechunk,
 		(int)nri_ptmutationtracesector);
 	Printf("NRI PT runtime link trace: %s\n", nri_ptruntimelinktrace ? "on" : "off");
-	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u limit=%u\n",
+	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
 		(uint32_t)mSceneLights.GetAnalyticLights().activeLights.size(),
 		(uint32_t)mSceneLights.GetAnalyticLights().manualLights.size(),
 		(uint32_t)mSceneLights.GetAnalyticLights().spriteTileRules.size(),
+		YesNo(mSceneLights.GetAnalyticLights().lastBuildTopologyChanged),
+		YesNo(mSceneLights.GetAnalyticLights().lastBuildPropertiesChanged),
+		(uint32_t)mSceneLights.GetAnalyticLights().addedTopologyKeys.size(),
+		(uint32_t)mSceneLights.GetAnalyticLights().removedTopologyKeys.size(),
+		(uint32_t)mSceneLights.GetAnalyticLights().reboundTopologyKeys.size(),
 		NRI_MAX_RUNTIME_POINT_LIGHTS);
 	Printf("NRI PT analytic clusters: tile=%u grid=%ux%u used_indices=%u max_occupancy=%u debug_mode=%u\n",
 		mBoundRuntimeLightTileSize,
@@ -4954,12 +5032,17 @@ void NRIRenderer::PrintStatus() const
 		mBoundRuntimeLightTileIndexCount,
 		mBoundRuntimeLightMaxTileOccupancy,
 		NRI_PTDEBUG_ANALYTIC_DIRECT);
-	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s\n",
+	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s\n",
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().textureRules.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
 		mSceneLights.GetEmissiveSurfaces().explicitRuleMatchCount,
 		mSceneLights.GetEmissiveSurfaces().totalPowerEstimate,
+		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildTopologyChanged),
+		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildPropertiesChanged),
+		(uint32_t)mSceneLights.GetEmissiveSurfaces().addedTopologyKeys.size(),
+		(uint32_t)mSceneLights.GetEmissiveSurfaces().removedTopologyKeys.size(),
+		(uint32_t)mSceneLights.GetEmissiveSurfaces().reboundTopologyKeys.size(),
 		NRI_PTDEBUG_EMISSIVE_TAGS,
 		NRI_PTDEBUG_EMISSIVE_DIRECT,
 		(float)nri_ptemissiveminsurface,
@@ -7033,10 +7116,28 @@ void NRIRenderer::RefreshSceneLightSystem(
 	if (analyticLightTopologyChanged)
 	{
 		mBoundRuntimeLightCount = 0;
+		if (ShouldTraceSkyPerf())
+		{
+			const auto& analyticLights = mSceneLights.GetAnalyticLights();
+			Printf("NRI PT light topology analytic: frame=%u added=%s removed=%s rebound=%s\n",
+				mFrameIndex,
+				FormatTopologyKeyList(analyticLights.addedTopologyKeys).c_str(),
+				FormatTopologyKeyList(analyticLights.removedTopologyKeys).c_str(),
+				FormatTopologyKeyList(analyticLights.reboundTopologyKeys).c_str());
+		}
 		RequestHistoryReset("analytic-light-topology");
 	}
 	if (emissiveSurfaceTopologyChanged)
 	{
+		if (ShouldTraceSkyPerf())
+		{
+			const auto& emissiveSurfaces = mSceneLights.GetEmissiveSurfaces();
+			Printf("NRI PT light topology emissive: frame=%u added=%s removed=%s rebound=%s\n",
+				mFrameIndex,
+				FormatTopologyKeyList(emissiveSurfaces.addedTopologyKeys).c_str(),
+				FormatTopologyKeyList(emissiveSurfaces.removedTopologyKeys).c_str(),
+				FormatTopologyKeyList(emissiveSurfaces.reboundTopologyKeys).c_str());
+		}
 		RequestHistoryReset("emissive-surface-topology");
 	}
 	if (emissiveMaterialBindingChanged)
@@ -7759,6 +7860,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.gpu.powerEstimate = std::max(primitiveArea * representativeLuminance * surface.emissiveIntensity, 0.0f);
 
 			candidate.debug.stableKey = HashCombine64(surface.stableKey, ((uint64_t)dataSource << 32u) | primitiveIndex);
+			candidate.debug.surfaceStableKey = surface.stableKey;
 			candidate.debug.dataSource = dataSource;
 			candidate.debug.primitiveIndex = primitiveIndex;
 			candidate.debug.materialIndex = surface.materialIndex;

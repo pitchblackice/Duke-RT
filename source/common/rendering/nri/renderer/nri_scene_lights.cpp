@@ -214,6 +214,17 @@ namespace
 		return hash;
 	}
 
+	uint64_t BuildAnalyticBindingHash(const SceneLightSystem::SceneAnalyticLight& light)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)light.sourceFlags);
+		hash = HashCombine64(hash, (uint64_t)light.sourceRuleId);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.source);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.actorIndex);
+		hash = HashCombine64(hash, (uint64_t)light.textureId);
+		return hash;
+	}
+
 	float EvaluateFlickerScale(uint64_t stableKey, uint32_t frameIndex, uint32_t flickerFrames)
 	{
 		if (flickerFrames <= 1)
@@ -347,6 +358,20 @@ namespace
 		hash = HashQuantizedFloat(hash, emissive.emissiveColor[2], 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.emissiveIntensity, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.powerEstimate, 256.0f);
+		return hash;
+	}
+
+	uint64_t BuildEmissiveBindingHash(const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)emissive.sourceFlags);
+		hash = HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
+		hash = HashCombine64(hash, (uint64_t)emissive.textureId);
+		hash = HashCombine64(hash, (uint64_t)emissive.materialIndex);
+		hash = HashCombine64(hash, (uint64_t)emissive.emissiveMode);
+		hash = HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
 		return hash;
 	}
 
@@ -651,15 +676,47 @@ void SceneLightSystem::RebuildAnalyticLights(
 	std::vector<uint64_t> nextTopologyKeys;
 	nextTopologyKeys.reserve(nextLights.size());
 	std::unordered_map<uint64_t, uint64_t> nextPropertyHashes;
+	std::unordered_map<uint64_t, uint64_t> nextBindingHashes;
+	std::unordered_map<uint64_t, uint32_t> nextDiagnosticFlags;
 	nextPropertyHashes.reserve(nextLights.size());
+	nextBindingHashes.reserve(nextLights.size());
+	nextDiagnosticFlags.reserve(nextLights.size());
 	for (const SceneAnalyticLight& light : nextLights)
 	{
 		nextTopologyKeys.push_back(light.stableKey);
-		nextPropertyHashes.emplace(light.stableKey, BuildAnalyticPropertyHash(light));
+		const uint64_t propertyHash = BuildAnalyticPropertyHash(light);
+		const uint64_t bindingHash = BuildAnalyticBindingHash(light);
+		uint32_t diagnosticFlags = SceneLightDiagnosticFlag_None;
+		const auto previousPropertyIt = mAnalyticLights.activePropertyHashes.find(light.stableKey);
+		if (previousPropertyIt != mAnalyticLights.activePropertyHashes.end())
+		{
+			diagnosticFlags |= SceneLightDiagnosticFlag_PreviousMatch;
+			if (previousPropertyIt->second != propertyHash)
+			{
+				diagnosticFlags |= SceneLightDiagnosticFlag_PropertyChanged;
+			}
+		}
+		else
+		{
+			diagnosticFlags |= SceneLightDiagnosticFlag_Added;
+		}
+
+		const auto previousBindingIt = mAnalyticLights.activeBindingHashes.find(light.stableKey);
+		if (previousBindingIt != mAnalyticLights.activeBindingHashes.end() && previousBindingIt->second != bindingHash)
+		{
+			diagnosticFlags |= SceneLightDiagnosticFlag_Rebound;
+		}
+
+		nextPropertyHashes.emplace(light.stableKey, propertyHash);
+		nextBindingHashes.emplace(light.stableKey, bindingHash);
+		nextDiagnosticFlags.emplace(light.stableKey, diagnosticFlags);
 	}
 	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
 	mAnalyticLights.topologyChanged = nextTopologyKeys != mAnalyticLights.activeTopologyKeys;
 	mAnalyticLights.propertiesChanged = false;
+	mAnalyticLights.addedTopologyKeys.clear();
+	mAnalyticLights.removedTopologyKeys.clear();
+	mAnalyticLights.reboundTopologyKeys.clear();
 	for (const auto& entry : nextPropertyHashes)
 	{
 		const auto previousIt = mAnalyticLights.activePropertyHashes.find(entry.first);
@@ -669,8 +726,33 @@ void SceneLightSystem::RebuildAnalyticLights(
 			break;
 		}
 	}
+	for (const auto& key : nextTopologyKeys)
+	{
+		if (mAnalyticLights.activePropertyHashes.find(key) == mAnalyticLights.activePropertyHashes.end())
+		{
+			mAnalyticLights.addedTopologyKeys.push_back(key);
+		}
+	}
+	for (const auto& key : mAnalyticLights.activeTopologyKeys)
+	{
+		if (nextPropertyHashes.find(key) == nextPropertyHashes.end())
+		{
+			mAnalyticLights.removedTopologyKeys.push_back(key);
+		}
+	}
+	for (const auto& entry : nextDiagnosticFlags)
+	{
+		if ((entry.second & SceneLightDiagnosticFlag_Rebound) != 0)
+		{
+			mAnalyticLights.reboundTopologyKeys.push_back(entry.first);
+		}
+	}
+	mAnalyticLights.lastBuildTopologyChanged = mAnalyticLights.topologyChanged;
+	mAnalyticLights.lastBuildPropertiesChanged = mAnalyticLights.propertiesChanged;
 	mAnalyticLights.activeTopologyKeys = std::move(nextTopologyKeys);
 	mAnalyticLights.activePropertyHashes = std::move(nextPropertyHashes);
+	mAnalyticLights.activeBindingHashes = std::move(nextBindingHashes);
+	mAnalyticLights.activeDiagnosticFlags = std::move(nextDiagnosticFlags);
 	mAnalyticLights.activeLights = std::move(nextLights);
 }
 
@@ -753,15 +835,47 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 	std::vector<uint64_t> nextTopologyKeys;
 	nextTopologyKeys.reserve(nextSurfaces.size());
 	std::unordered_map<uint64_t, uint64_t> nextPropertyHashes;
+	std::unordered_map<uint64_t, uint64_t> nextBindingHashes;
+	std::unordered_map<uint64_t, uint32_t> nextDiagnosticFlags;
 	nextPropertyHashes.reserve(nextSurfaces.size());
+	nextBindingHashes.reserve(nextSurfaces.size());
+	nextDiagnosticFlags.reserve(nextSurfaces.size());
 	for (const auto& emissive : nextSurfaces)
 	{
 		nextTopologyKeys.push_back(emissive.stableKey);
-		nextPropertyHashes.emplace(emissive.stableKey, BuildEmissivePropertyHash(emissive));
+		const uint64_t propertyHash = BuildEmissivePropertyHash(emissive);
+		const uint64_t bindingHash = BuildEmissiveBindingHash(emissive);
+		uint32_t diagnosticFlags = SceneLightDiagnosticFlag_None;
+		const auto previousPropertyIt = mEmissiveSurfaces.activePropertyHashes.find(emissive.stableKey);
+		if (previousPropertyIt != mEmissiveSurfaces.activePropertyHashes.end())
+		{
+			diagnosticFlags |= SceneLightDiagnosticFlag_PreviousMatch;
+			if (previousPropertyIt->second != propertyHash)
+			{
+				diagnosticFlags |= SceneLightDiagnosticFlag_PropertyChanged;
+			}
+		}
+		else
+		{
+			diagnosticFlags |= SceneLightDiagnosticFlag_Added;
+		}
+
+		const auto previousBindingIt = mEmissiveSurfaces.activeBindingHashes.find(emissive.stableKey);
+		if (previousBindingIt != mEmissiveSurfaces.activeBindingHashes.end() && previousBindingIt->second != bindingHash)
+		{
+			diagnosticFlags |= SceneLightDiagnosticFlag_Rebound;
+		}
+
+		nextPropertyHashes.emplace(emissive.stableKey, propertyHash);
+		nextBindingHashes.emplace(emissive.stableKey, bindingHash);
+		nextDiagnosticFlags.emplace(emissive.stableKey, diagnosticFlags);
 	}
 	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
 	mEmissiveSurfaces.topologyChanged = nextTopologyKeys != mEmissiveSurfaces.activeTopologyKeys;
 	mEmissiveSurfaces.propertiesChanged = false;
+	mEmissiveSurfaces.addedTopologyKeys.clear();
+	mEmissiveSurfaces.removedTopologyKeys.clear();
+	mEmissiveSurfaces.reboundTopologyKeys.clear();
 	for (const auto& entry : nextPropertyHashes)
 	{
 		const auto previousIt = mEmissiveSurfaces.activePropertyHashes.find(entry.first);
@@ -771,8 +885,33 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 			break;
 		}
 	}
+	for (const auto& key : nextTopologyKeys)
+	{
+		if (mEmissiveSurfaces.activePropertyHashes.find(key) == mEmissiveSurfaces.activePropertyHashes.end())
+		{
+			mEmissiveSurfaces.addedTopologyKeys.push_back(key);
+		}
+	}
+	for (const auto& key : mEmissiveSurfaces.activeTopologyKeys)
+	{
+		if (nextPropertyHashes.find(key) == nextPropertyHashes.end())
+		{
+			mEmissiveSurfaces.removedTopologyKeys.push_back(key);
+		}
+	}
+	for (const auto& entry : nextDiagnosticFlags)
+	{
+		if ((entry.second & SceneLightDiagnosticFlag_Rebound) != 0)
+		{
+			mEmissiveSurfaces.reboundTopologyKeys.push_back(entry.first);
+		}
+	}
+	mEmissiveSurfaces.lastBuildTopologyChanged = mEmissiveSurfaces.topologyChanged;
+	mEmissiveSurfaces.lastBuildPropertiesChanged = mEmissiveSurfaces.propertiesChanged;
 	mEmissiveSurfaces.activeTopologyKeys = std::move(nextTopologyKeys);
 	mEmissiveSurfaces.activePropertyHashes = std::move(nextPropertyHashes);
+	mEmissiveSurfaces.activeBindingHashes = std::move(nextBindingHashes);
+	mEmissiveSurfaces.activeDiagnosticFlags = std::move(nextDiagnosticFlags);
 	mEmissiveSurfaces.activeSurfaces = std::move(nextSurfaces);
 }
 

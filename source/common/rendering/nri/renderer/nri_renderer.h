@@ -337,6 +337,7 @@ private:
 	struct EmissivePrimitiveDebugRecord
 	{
 		uint64_t stableKey = 0;
+		uint64_t surfaceStableKey = 0;
 		uint32_t dataSource = 0;
 		uint32_t primitiveIndex = UINT32_MAX;
 		uint32_t materialIndex = UINT32_MAX;
