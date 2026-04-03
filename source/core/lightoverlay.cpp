@@ -339,6 +339,42 @@ namespace
 					sc.MustGetString();
 					rule.actorClassName = sc.String;
 				}
+				else if (sc.Compare("shadowreceive"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "off"))
+					{
+						rule.hasShadowReceive = true;
+						rule.shadowReceive = false;
+					}
+					else if (!stricmp(sc.String, "default") || !stricmp(sc.String, "on"))
+					{
+						rule.hasShadowReceive = true;
+						rule.shadowReceive = true;
+					}
+					else
+					{
+						sc.ScriptMessage("Invalid shadowreceive value '%s'; expected off/default/on", sc.String);
+					}
+				}
+				else if (sc.Compare("shadowcast"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "off"))
+					{
+						rule.hasShadowCast = true;
+						rule.shadowCast = false;
+					}
+					else if (!stricmp(sc.String, "default") || !stricmp(sc.String, "on"))
+					{
+						rule.hasShadowCast = true;
+						rule.shadowCast = true;
+					}
+					else
+					{
+						sc.ScriptMessage("Invalid shadowcast value '%s'; expected off/default/on", sc.String);
+					}
+				}
 				else if (sc.Compare("tile"))
 				{
 					sc.MustGetNumber();
@@ -694,10 +730,12 @@ namespace
 
 		for (const ParsedLightOverlayActorRule* rule : SortRulesByOrder(database.actorRules))
 		{
-			Printf("LIGHTOVR actorrule %s: actorclass=%s type=%s source=%s\n",
+			Printf("LIGHTOVR actorrule %s: actorclass=%s type=%s shadowreceive=%s shadowcast=%s source=%s\n",
 				rule->id.GetChars(),
 				rule->actorClassName.GetChars(),
 				rule->lightType.GetChars(),
+				rule->hasShadowReceive ? (rule->shadowReceive ? "default" : "off") : "(unset)",
+				rule->hasShadowCast ? (rule->shadowCast ? "default" : "off") : "(unset)",
 				SourceLocationText(rule->source).GetChars());
 			if (rule->hasTileFilter) Printf("  tile=%d\n", rule->tileFilter);
 			if (rule->hasColor) Printf("  color=(%.3f, %.3f, %.3f)\n", rule->color[0], rule->color[1], rule->color[2]);
@@ -768,11 +806,13 @@ namespace
 
 		for (const auto& rule : resolved.actorRules)
 		{
-			Printf("LIGHTOVR resolved actorrule %s: actorclass=%s resolved=%s type=%s source=%s\n",
+			Printf("LIGHTOVR resolved actorrule %s: actorclass=%s resolved=%s type=%s shadowreceive=%s shadowcast=%s source=%s\n",
 				rule.id.GetChars(),
 				rule.actorClassName.GetChars(),
 				rule.actorClassResolved ? "yes" : "no",
 				rule.lightType.GetChars(),
+				rule.hasShadowReceive ? (rule.shadowReceive ? "default" : "off") : "(unset)",
+				rule.hasShadowCast ? (rule.shadowCast ? "default" : "off") : "(unset)",
 				SourceLocationText(rule.source).GetChars());
 		}
 
@@ -814,6 +854,10 @@ namespace
 		destination.actorClassName = source.actorClassName;
 		destination.actorClass = PClass::FindActor(source.actorClassName);
 		destination.actorClassResolved = destination.actorClass != nullptr;
+		destination.hasShadowReceive = source.hasShadowReceive;
+		destination.shadowReceive = source.shadowReceive;
+		destination.hasShadowCast = source.hasShadowCast;
+		destination.shadowCast = source.shadowCast;
 		destination.hasTileFilter = source.hasTileFilter;
 		destination.tileFilter = source.tileFilter;
 		destination.lightType = source.lightType;

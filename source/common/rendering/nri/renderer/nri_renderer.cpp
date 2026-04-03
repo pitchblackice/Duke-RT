@@ -280,7 +280,7 @@ namespace
 
 	static void BuildActorShadowOverrideMap(const ResolvedLightOverlaySet& resolved, std::unordered_map<int32_t, uint32_t>& outOverrides)
 	{
-		if (resolved.actorOverrideRules.Size() == 0)
+		if (resolved.actorRules.Size() == 0 && resolved.actorOverrideRules.Size() == 0)
 		{
 			return;
 		}
@@ -301,6 +301,48 @@ namespace
 
 			uint32_t overrideBits = ActorShadowOverride_None;
 			bool touched = false;
+			const uint32_t actorTextureId = (unsigned)actor->spr.picnum < MAXTILES ? (uint32_t)tileGetTextureID(actor->spr.picnum).GetIndex() : 0u;
+			for (const auto& resolvedRule : resolved.actorRules)
+			{
+				if (!resolvedRule.actorClassResolved ||
+					resolvedRule.actorClass == nullptr ||
+					(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)))
+				{
+					continue;
+				}
+
+				if (resolvedRule.hasTileFilter && actorTextureId != (uint32_t)resolvedRule.tileFilter)
+				{
+					continue;
+				}
+
+				if (resolvedRule.hasShadowReceive)
+				{
+					touched = true;
+					if (resolvedRule.shadowReceive)
+					{
+						overrideBits &= ~ActorShadowOverride_NoShadowReceive;
+					}
+					else
+					{
+						overrideBits |= ActorShadowOverride_NoShadowReceive;
+					}
+				}
+
+				if (resolvedRule.hasShadowCast)
+				{
+					touched = true;
+					if (resolvedRule.shadowCast)
+					{
+						overrideBits &= ~ActorShadowOverride_NoShadowCast;
+					}
+					else
+					{
+						overrideBits |= ActorShadowOverride_NoShadowCast;
+					}
+				}
+			}
+
 			for (const auto& resolvedRule : resolved.actorOverrideRules)
 			{
 				if (!resolvedRule.actorClassResolved ||

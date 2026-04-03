@@ -33,6 +33,10 @@ struct ParsedLightOverlayActorRule
 	FString id;
 	LightOverlaySourceLocation source;
 	FString actorClassName;
+	bool hasShadowReceive = false;
+	bool shadowReceive = true;
+	bool hasShadowCast = false;
+	bool shadowCast = true;
 	bool hasTileFilter = false;
 	int tileFilter = -1;
 	FString lightType;
@@ -135,6 +139,10 @@ struct ResolvedLightOverlayActorRule
 	FString actorClassName;
 	PClassActor* actorClass = nullptr;
 	bool actorClassResolved = false;
+	bool hasShadowReceive = false;
+	bool shadowReceive = true;
+	bool hasShadowCast = false;
+	bool shadowCast = true;
 	bool hasTileFilter = false;
 	int tileFilter = -1;
 	FString lightType;
