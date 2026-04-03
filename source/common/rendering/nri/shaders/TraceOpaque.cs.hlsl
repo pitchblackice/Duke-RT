@@ -26,7 +26,7 @@ float3 BuildOrthonormalTangent(float3 n)
 float3 SampleSunDirection(float3 lightDir, uint2 pixelPos, uint frameIndex)
 {
 	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u;
-	const float sunAngularRadius = 0.03;
+	const float sunAngularRadius = GetDirectionalPlaceholderAngularSize();
 	const float cosTheta = lerp(cos(sunAngularRadius), 1.0, RandomFloat01(rngState));
 	const float sinTheta = sqrt(saturate(1.0 - cosTheta * cosTheta));
 	const float phi = 6.28318530718 * RandomFloat01(rngState);
@@ -103,12 +103,12 @@ float4 VisualizeMotionVector(float4 motionSample, float viewZ)
 
 uint GetLightBounceCount()
 {
-	return gTraceConstants.BounceCounts & 0xffffu;
+	return gTraceConstants.BounceCounts & 0xfu;
 }
 
 uint GetMirrorBounceCount()
 {
-	return (gTraceConstants.BounceCounts >> 16) & 0xffffu;
+	return (gTraceConstants.BounceCounts >> 4u) & 0xfu;
 }
 
 bool UseSplitShadowDenoiser()
@@ -119,6 +119,11 @@ bool UseSplitShadowDenoiser()
 bool UseDirectionalPlaceholderLight()
 {
 	return (gTraceConstants.Flags & 0x80u) != 0;
+}
+
+bool UseDirectionalPlaceholderShadow()
+{
+	return (gTraceConstants.Flags & NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW) != 0;
 }
 
 bool UseRelaxDenoiser()
@@ -202,9 +207,6 @@ float GetSurfaceRoughness(MaterialData material, float2 uv)
 {
 	return SampleMaterialRoughness(material, uv);
 }
-
-static const float kSunAngularRadius = 0.03;
-static const float kTanSunAngularRadius = 0.0300090032;
 
 static const float4 kReblurHitDistanceParams = float4(3.0, 0.1, 20.0, -25.0);
 
@@ -544,8 +546,8 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 		if (UseDirectionalPlaceholderLight())
 		{
 			const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce + 1u, bounce * 3u + 1u), frameIndex + bounce + 1u);
-			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
-			indirectRadiance += throughput * bounceDiffuseColor * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow);
+			const float bounceShadow = UseDirectionalPlaceholderShadow() ? ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir) : 1.0;
+			indirectRadiance += throughput * bounceDiffuseColor * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) * GetDirectionalPlaceholderColor();
 		}
 		throughput *= bounceDiffuseColor * 0.65;
 		if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01)
@@ -643,10 +645,10 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 		if (UseDirectionalPlaceholderLight())
 		{
 			const float3 bounceLightDir = SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos + uint2(bounce * 5u + 1u, bounce * 7u + 3u), frameIndex + bounce + 1u);
-			const float bounceShadow = ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir);
+			const float bounceShadow = UseDirectionalPlaceholderShadow() ? ComputeSunShadow(bounceHit.position, bounceHit.normal, bounceLightDir) : 1.0;
 			indirectRadiance += throughput * (
-				bounceDiffuseColor * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) +
-				EvaluateSunSpecular(bounceAlbedo.rgb, bounceMetalness, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow));
+				(bounceDiffuseColor * EvaluateSunDiffuseLighting(bounceHit.normal, bounceLightDir, bounceShadow) +
+				EvaluateSunSpecular(bounceAlbedo.rgb, bounceMetalness, bounceHit.normal, bounceViewDir, bounceLightDir, bounceShadow)) * GetDirectionalPlaceholderColor());
 		}
 
 		throughput *= GetSurfaceSpecularColor(bounceAlbedo.rgb, bounceMetalness) * (0.9 - bounceRoughness * 0.35);
@@ -705,7 +707,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gGuideDiffuseOutput[pixelPos] = float4(sentinel, 1.0);
 			gGuideSpecularOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
 			gGuideSpecHitOutput[pixelPos] = float4(0.0, 0.0, 0.0, 1.0);
-			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, kTanSunAngularRadius), 1.0, 0.0, 1.0);
+			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, GetDirectionalPlaceholderTanAngularSize()), 1.0, 0.0, 1.0);
 			gDirectLightingOutput[pixelPos] = 0.0;
 			gDirectEmissionOutput[pixelPos] = float4(sentinel, 1.0);
 		}
@@ -733,7 +735,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			gGuideDiffuseOutput[pixelPos] = 0.0;
 			gGuideSpecularOutput[pixelPos] = 0.0;
 			gGuideSpecHitOutput[pixelPos] = 0.0;
-			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, kTanSunAngularRadius), 1.0, 0.0, 1.0);
+			gShadowPenumbraOutput[pixelPos] = float4(SIGMA_FrontEnd_PackPenumbra(NRD_FP16_MAX, GetDirectionalPlaceholderTanAngularSize()), 1.0, 0.0, 1.0);
 			gDirectLightingOutput[pixelPos] = 0.0;
 			gDirectEmissionOutput[pixelPos] = float4(missColor, 1.0);
 		}
@@ -835,20 +837,22 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			else
 			{
 				const bool useDirectionalLight = UseDirectionalPlaceholderLight();
+				const bool useDirectionalShadow = UseDirectionalPlaceholderShadow();
+				const float3 directionalLightColor = GetDirectionalPlaceholderColor();
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
 				float shadowHitDistance = 0.0;
-				const float shadow = useDirectionalLight ? (directSceneTrace ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir, shadowHitDistance)) : 0.0;
+				const float shadow = useDirectionalLight ? ((directSceneTrace || !useDirectionalShadow) ? 1.0 : ComputeSunShadow(hit.position, hit.normal, lightDir, shadowHitDistance)) : 0.0;
 				shadowVisibility = shadow;
-				if (useDirectionalLight && !directSceneTrace)
+				if (useDirectionalLight && useDirectionalShadow && !directSceneTrace)
 				{
-					shadowPenumbra = SIGMA_FrontEnd_PackPenumbra(shadowHitDistance, kTanSunAngularRadius);
+					shadowPenumbra = SIGMA_FrontEnd_PackPenumbra(shadowHitDistance, GetDirectionalPlaceholderTanAngularSize());
 				}
 				const float3 viewDir = normalize(-visibleRayDirection);
 				sectorSourceLighting = EvaluateSectorLightingSource(material, hit.normal);
 				sectorAmbientLighting = EvaluateSectorLighting(material, hit.normal, diffuseAlbedo);
 				ambientDirectLighting = EvaluateAmbientDiffuse(diffuseAlbedo) + sectorAmbientLighting;
-				sunTransportDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(diffuseAlbedo, hit.normal, lightDir) * shadow : 0.0;
-				sunTransportSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0) * shadow : 0.0;
+				sunTransportDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(diffuseAlbedo, hit.normal, lightDir) * directionalLightColor * shadow : 0.0;
+				sunTransportSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, hit.normal, viewDir, lightDir, 1.0) * directionalLightColor * shadow : 0.0;
 
 				const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
 				[loop]

@@ -25,6 +25,11 @@ bool UseDirectionalPlaceholderLight()
 	return (gTraceConstants.Flags & 0x80u) != 0;
 }
 
+bool UseDirectionalPlaceholderShadow()
+{
+	return (gTraceConstants.Flags & NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW) != 0;
+}
+
 float3 UnpackDenoisedRadiance(float4 packed)
 {
 	return UseRelaxDenoiser() ? RELAX_BackEnd_UnpackRadiance(packed).rgb : REBLUR_BackEnd_UnpackRadianceAndNormHitDist(packed).rgb;
@@ -99,7 +104,7 @@ float GetFilteredSunShadow(uint2 pixelPos)
 
 void ApplyShadowAwareDirectLightingCorrection(uint2 pixelPos, float materialID, float3 normal, float3 albedo, float metalness, float3 viewDir, bool useFilteredShadow, inout float3 directLighting)
 {
-	if (!UseSplitShadowDenoiser() || !UseDirectionalPlaceholderLight() || IsEmissiveMaterial(materialID) || IsSpecularSpecialMaterial(materialID))
+	if (!UseSplitShadowDenoiser() || !UseDirectionalPlaceholderLight() || !UseDirectionalPlaceholderShadow() || IsEmissiveMaterial(materialID) || IsSpecularSpecialMaterial(materialID))
 	{
 		return;
 	}
@@ -113,8 +118,8 @@ void ApplyShadowAwareDirectLightingCorrection(uint2 pixelPos, float materialID, 
 	}
 
 	const float3 lightDir = normalize(gTraceConstants.LightDirection);
-	directLighting += EvaluateDirectSunDiffuse(GetSurfaceDiffuseColor(albedo, metalness), normal, lightDir) * shadowDelta;
-	directLighting += EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, 1.0) * shadowDelta;
+	directLighting += EvaluateDirectSunDiffuse(GetSurfaceDiffuseColor(albedo, metalness), normal, lightDir) * GetDirectionalPlaceholderColor() * shadowDelta;
+	directLighting += EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, 1.0) * GetDirectionalPlaceholderColor() * shadowDelta;
 }
 
 float3 ComposeLighting(uint2 pixelPos, float3 diffuseSignal, float3 specularSignal, float3 directLighting, float3 directEmission)

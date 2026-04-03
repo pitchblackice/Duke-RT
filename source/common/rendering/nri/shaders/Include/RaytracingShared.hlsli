@@ -678,7 +678,7 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 HitData TracePrimary(float3 origin, float3 direction, bool gateVisibleChunks, out float3 exitDirection)
 {
 	HitData hitData = MakeEmptyHitData();
-	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 16) & 0xffffu);
+	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 4u) & 0xfu);
 	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), gateVisibleChunks, hitData, exitDirection);
 	return hitData;
 }
@@ -691,7 +691,7 @@ HitData TracePrimary(float3 origin, float3 direction, out float3 exitDirection)
 HitData TracePrimaryUngated(float3 origin, float3 direction, out float3 exitDirection)
 {
 	HitData hitData = MakeEmptyHitData();
-	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 16) & 0xffffu);
+	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 4u) & 0xfu);
 	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), false, hitData, exitDirection);
 	return hitData;
 }

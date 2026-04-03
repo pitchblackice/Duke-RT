@@ -15,6 +15,7 @@
 #define NRI_FLAG_USE_JITTER 0x40u
 #define NRI_FLAG_FAST_EMISSIVE_SHADOW 0x100u
 #define NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS 0x200u
+#define NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW 0x400u
 #define NRI_TAA_JITTER_PHASE_COUNT 8u
 
 #define MATERIAL_FLAG_INDEXED 1
@@ -190,6 +191,26 @@ struct ReprojectionData
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, SET_ROOT);
+
+float3 GetDirectionalPlaceholderColor()
+{
+	const uint packed = gTraceConstants.BounceCounts >> 8u;
+	return float3(
+		(float)(packed & 0xffu),
+		(float)((packed >> 8u) & 0xffu),
+		(float)((packed >> 16u) & 0xffu)) * (8.0 / 255.0);
+}
+
+float GetDirectionalPlaceholderAngularSize()
+{
+	const float normalized = (float)((gTraceConstants.ReservedTrace1 >> 16u) & 0xffffu) * (1.0 / 65535.0);
+	return max(normalized * 1.2, 1e-4);
+}
+
+float GetDirectionalPlaceholderTanAngularSize()
+{
+	return tan(GetDirectionalPlaceholderAngularSize());
+}
 
 float GetTemporalHaltonSample(uint index, uint base)
 {

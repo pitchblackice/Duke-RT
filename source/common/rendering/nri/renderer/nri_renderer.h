@@ -20,6 +20,18 @@
 class NRIRenderDevice;
 struct MapRecord;
 
+struct NRIDirectionalLightState
+{
+	bool enabled = false;
+	bool shadow = true;
+	bool fromOverlay = false;
+	uint32_t ruleId = 0;
+	uint64_t stateHash = 0;
+	float direction[3] = { 0.3f, 0.85f, -0.4f };
+	float color[3] = { 1.0f, 1.0f, 1.0f };
+	float angularSize = 0.03f;
+};
+
 class NRIRenderer
 {
 public:
@@ -778,6 +790,7 @@ private:
 	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
+	NRIDirectionalLightState mDirectionalLightState = {};
 	std::array<nri::Descriptor*, 20> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
@@ -829,6 +842,7 @@ private:
 	bool mHasPendingFrameGenerationRealFrameTime = false;
 	bool mHasFrameGenerationTimestamp = false;
 	bool mHasFrameGenerationConfigState = false;
+	bool mHasDirectionalLightState = false;
 	bool mPathTracingSupported = true;
 	bool mHasRuntimeLinkTraceState = false;
 	SurfaceProbeFrameState mSurfaceProbeFrame = {};

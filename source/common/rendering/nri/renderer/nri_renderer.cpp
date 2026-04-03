@@ -131,6 +131,146 @@ namespace
 		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
 	}
 
+	static bool IsUsableDirectionalVector(const float direction[3])
+	{
+		if (!std::isfinite(direction[0]) || !std::isfinite(direction[1]) || !std::isfinite(direction[2]))
+		{
+			return false;
+		}
+
+		const float lengthSq = direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2];
+		return lengthSq > 0.000001f;
+	}
+
+	static float ClampDirectionalAngularSize(float angularSize)
+	{
+		if (!std::isfinite(angularSize))
+		{
+			return 0.03f;
+		}
+
+		return std::clamp(angularSize, 0.001f, 1.2f);
+	}
+
+	static uint64_t QuantizeDirectionalLightScalar(float value, float scale)
+	{
+		return (uint64_t)(int64_t)std::llround((double)value * (double)scale);
+	}
+
+	static uint32_t PackDirectionalLightColor24(const float color[3])
+	{
+		auto packChannel = [](float value) -> uint32_t
+		{
+			const float clamped = std::clamp(value, 0.0f, 8.0f);
+			return (uint32_t)std::clamp((int)std::lround((double)(clamped * (255.0f / 8.0f))), 0, 255);
+		};
+
+		const uint32_t r = packChannel(color[0]);
+		const uint32_t g = packChannel(color[1]);
+		const uint32_t b = packChannel(color[2]);
+		return r | (g << 8u) | (b << 16u);
+	}
+
+	static uint32_t PackDirectionalAngularSize16(float angularSize)
+	{
+		const float normalized = ClampDirectionalAngularSize(angularSize) / 1.2f;
+		return (uint32_t)std::clamp((int)std::lround((double)(normalized * 65535.0f)), 0, 65535);
+	}
+
+	static uint64_t BuildDirectionalLightStateHash(const NRIDirectionalLightState& state)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombineLightOverlay(hash, state.enabled ? 1ull : 0ull);
+		hash = HashCombineLightOverlay(hash, state.shadow ? 1ull : 0ull);
+		hash = HashCombineLightOverlay(hash, state.fromOverlay ? 1ull : 0ull);
+		hash = HashCombineLightOverlay(hash, (uint64_t)state.ruleId);
+		hash = HashCombineLightOverlay(hash, QuantizeDirectionalLightScalar(state.direction[0], 4096.0f));
+		hash = HashCombineLightOverlay(hash, QuantizeDirectionalLightScalar(state.direction[1], 4096.0f));
+		hash = HashCombineLightOverlay(hash, QuantizeDirectionalLightScalar(state.direction[2], 4096.0f));
+		hash = HashCombineLightOverlay(hash, QuantizeDirectionalLightScalar(state.color[0], 4096.0f));
+		hash = HashCombineLightOverlay(hash, QuantizeDirectionalLightScalar(state.color[1], 4096.0f));
+		hash = HashCombineLightOverlay(hash, QuantizeDirectionalLightScalar(state.color[2], 4096.0f));
+		hash = HashCombineLightOverlay(hash, QuantizeDirectionalLightScalar(state.angularSize, 4096.0f));
+		return hash;
+	}
+
+	static const char* GetDirectionalLightSourceName(const NRIDirectionalLightState& state)
+	{
+		if (!state.enabled)
+		{
+			return "off";
+		}
+
+		return state.fromOverlay ? "overlay" : "default";
+	}
+
+	static NRIDirectionalLightState BuildDirectionalLightState(const ResolvedLightOverlaySet& resolved, bool directionalLightEnabled)
+	{
+		NRIDirectionalLightState state = {};
+		state.enabled = directionalLightEnabled;
+		state.shadow = true;
+
+		if (resolved.directionalRules.Size() > 0)
+		{
+			const ResolvedLightOverlayDirectionalRule& rule = resolved.directionalRules.Last();
+			state.fromOverlay = true;
+			state.ruleId = BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
+			state.enabled = directionalLightEnabled;
+			state.shadow = !rule.hasShadow || rule.shadow;
+
+			if (rule.hasDirection && IsUsableDirectionalVector(rule.direction))
+			{
+				state.direction[0] = rule.direction[0];
+				state.direction[1] = rule.direction[1];
+				state.direction[2] = rule.direction[2];
+				const float invLength = 1.0f / sqrtf(
+					state.direction[0] * state.direction[0] +
+					state.direction[1] * state.direction[1] +
+					state.direction[2] * state.direction[2]);
+				state.direction[0] *= invLength;
+				state.direction[1] *= invLength;
+				state.direction[2] *= invLength;
+			}
+			else
+			{
+				state.enabled = false;
+				state.shadow = false;
+			}
+
+			if (rule.hasColor)
+			{
+				state.color[0] = std::max(rule.color[0], 0.0f);
+				state.color[1] = std::max(rule.color[1], 0.0f);
+				state.color[2] = std::max(rule.color[2], 0.0f);
+			}
+
+			const float intensity = rule.hasIntensity ? std::max(rule.intensity, 0.0f) : 1.0f;
+			state.color[0] *= intensity;
+			state.color[1] *= intensity;
+			state.color[2] *= intensity;
+			if (intensity <= 0.0f)
+			{
+				state.enabled = false;
+				state.shadow = false;
+			}
+
+			if (rule.hasAngularSize)
+			{
+				state.angularSize = ClampDirectionalAngularSize(rule.angularSize);
+			}
+		}
+
+		if (!state.enabled)
+		{
+			state.color[0] = 0.0f;
+			state.color[1] = 0.0f;
+			state.color[2] = 0.0f;
+		}
+
+		state.stateHash = BuildDirectionalLightStateHash(state);
+		return state;
+	}
+
 	static uint32_t BuildMapOverlayRuleId(const ResolvedLightOverlayMapLightRule& rule)
 	{
 		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
@@ -606,6 +746,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
 	constexpr uint32_t NRI_FLAG_FAST_EMISSIVE_SHADOW = 0x100u;
 	constexpr uint32_t NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS = 0x200u;
+	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW = 0x400u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
@@ -1433,14 +1574,25 @@ namespace
 		return (uint32_t)std::max(0, std::min(value, (int)maxValue));
 	}
 
-	static uint32_t PackTraceBounceCounts(uint32_t lightBounceCount, uint32_t mirrorBounceCount)
+	static uint32_t PackTraceBounceCounts(uint32_t lightBounceCount, uint32_t mirrorBounceCount, const float directionalColor[3])
 	{
-		return (lightBounceCount & 0xffffu) | ((mirrorBounceCount & 0xffffu) << 16);
+		return
+			(lightBounceCount & 0xfu) |
+			((mirrorBounceCount & 0xfu) << 4u) |
+			(PackDirectionalLightColor24(directionalColor) << 8u);
 	}
 
-	static uint32_t PackTraceAux1(uint32_t denoiserMode, uint32_t emissiveSampleCount)
+	static uint32_t PackTraceAux1(uint32_t denoiserMode, uint32_t emissiveSampleCount, float directionalAngularSize)
 	{
-		return (denoiserMode & 0xffu) | ((emissiveSampleCount & 0xffu) << 8u);
+		return
+			(denoiserMode & 0xffu) |
+			((emissiveSampleCount & 0xffu) << 8u) |
+			(PackDirectionalAngularSize16(directionalAngularSize) << 16u);
+	}
+
+	static uint32_t PackDenoiserAux1(uint32_t denoiserMode, float directionalAngularSize)
+	{
+		return (denoiserMode & 0xffu) | (PackDirectionalAngularSize16(directionalAngularSize) << 16u);
 	}
 
 	static uint32_t PackUInt16Pair(uint32_t lo, uint32_t hi)
@@ -2054,6 +2206,14 @@ namespace
 		v[0] /= length;
 		v[1] /= length;
 		v[2] /= length;
+	}
+
+	static void ApplyDirectionalLightStateToConstants(const NRIDirectionalLightState& state, NRITraceConstants& constants)
+	{
+		constants.LightDirection[0] = state.direction[0];
+		constants.LightDirection[1] = state.direction[1];
+		constants.LightDirection[2] = state.direction[2];
+		Normalize3(constants.LightDirection);
 	}
 
 	static void TransformPoint(const VSMatrix& matrix, float x, float y, float z, float out[4])
@@ -4402,10 +4562,21 @@ void NRIRenderer::PrintStatus() const
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
 		ClampTraceBounceCount((int)nri_ptportaldepth, 8u),
 		(int)nri_ptsurfaceprobe);
-	Printf("NRI PT lighting shell: directional_placeholder=%s sector=%s emissive_heuristics=%s\n",
-		nri_ptdirectionallight ? "on" : "off",
+	Printf("NRI PT lighting shell: directional=%s sector=%s emissive_heuristics=%s\n",
+		mDirectionalLightState.enabled ? "on" : "off",
 		nri_ptsectorlighting ? "on" : "off",
 		nri_ptemissiveheuristics ? "on" : "off");
+	Printf("NRI PT directional light: source=%s shadow=%s rule=%u dir=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) angular=%.3f\n",
+		GetDirectionalLightSourceName(mDirectionalLightState),
+		mDirectionalLightState.enabled && mDirectionalLightState.shadow ? "on" : "off",
+		mDirectionalLightState.ruleId,
+		mDirectionalLightState.direction[0],
+		mDirectionalLightState.direction[1],
+		mDirectionalLightState.direction[2],
+		mDirectionalLightState.color[0],
+		mDirectionalLightState.color[1],
+		mDirectionalLightState.color[2],
+		mDirectionalLightState.angularSize);
 	Printf("NRI PT transparent shell: trace_transparent=placeholder_noop\n");
 	uint32_t emissiveBaseCount = 0;
 	uint32_t emissiveConstantCount = 0;
@@ -6371,6 +6542,13 @@ void NRIRenderer::RefreshSceneLightSystem(
 	}
 
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	const NRIDirectionalLightState nextDirectionalLightState = BuildDirectionalLightState(resolvedLightOverlays, nri_ptdirectionallight);
+	const bool directionalLightStateChanged =
+		!mHasDirectionalLightState ||
+		nextDirectionalLightState.stateHash != mDirectionalLightState.stateHash;
+	const bool hadDirectionalLightState = mHasDirectionalLightState;
+	mDirectionalLightState = nextDirectionalLightState;
+	mHasDirectionalLightState = true;
 	std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>> actorOverlayRules;
 	std::vector<SceneLightSystem::AnalyticLightRegistry::MapOverlayRule> mapOverlayRules;
 	BuildActorAnalyticOverlayRules(resolvedLightOverlays, actorOverlayRules);
@@ -6395,6 +6573,10 @@ void NRIRenderer::RefreshSceneLightSystem(
 		{
 			RequestHistoryReset("lightoverlay-resolve");
 		}
+	}
+	if (hadDirectionalLightState && directionalLightStateChanged)
+	{
+		RequestHistoryReset("directional-light-change");
 	}
 	if (mSceneLights.ConsumeAnalyticLightTopologyChanged())
 	{
@@ -7927,15 +8109,20 @@ bool NRIRenderer::DispatchBootstrapView()
 	constants.StaticPrimitiveCount = mBoundStaticPrimitiveCount;
 	constants.DynamicPrimitiveCount = mBoundDynamicPrimitiveCount;
 	constants.FrameIndex = mFrameIndex;
-	constants.Flags = NRI_FLAG_BOOTSTRAP_VIEW | (mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u);
+	constants.Flags =
+		NRI_FLAG_BOOTSTRAP_VIEW |
+		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(mDirectionalLightState.enabled && mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
+	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, mDirectionalLightState.color);
 	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
-	Normalize3(constants.LightDirection);
+	ApplyDirectionalLightStateToConstants(mDirectionalLightState, constants);
 
 	NRITextureResource& history = GetFrameTexture(mHistoryOutputSlot);
 	NRITextureResource& upscaled = GetFrameTexture(FrameTextureSlot::Composed);
@@ -10175,7 +10362,8 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
 	mUseUpscaledInFinal = false;
 	mUseDenoisedCompositionInputs = false;
-	mUseSplitShadowDenoiser = useShadowDebugPresent || (useCompositionPath && nri_denoise && nri_ptdirectionallight);
+	const bool directionalLightShadowEnabled = mDirectionalLightState.enabled && mDirectionalLightState.shadow;
+	mUseSplitShadowDenoiser = directionalLightShadowEnabled && (useShadowDebugPresent || (useCompositionPath && nri_denoise));
 
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
@@ -10291,7 +10479,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			else
 			{
 				mUseDenoisedCompositionInputs = true;
-				mUseSplitShadowDenoiser = nri_ptdirectionallight;
+				mUseSplitShadowDenoiser = directionalLightShadowEnabled;
 			}
 		}
 
@@ -10605,7 +10793,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
 		(mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
-		(nri_ptdirectionallight ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(mDirectionalLightState.enabled && mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u) |
 		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u);
@@ -10614,17 +10803,19 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
 	constants.BounceCounts = PackTraceBounceCounts(
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
-		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u));
+		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
+		mDirectionalLightState.color);
 	constants.PortalCount = mBoundPortalCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
 	constants.PortalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
 	constants.ReservedTrace0 = (mBoundRuntimeLightTileCountX & 0xffffu) | ((mBoundRuntimeLightTileCountY & 0xffffu) << 16u);
 	constants.ReservedTrace1 = PackTraceAux1(
 		(uint32_t)GetSelectedNrdDenoiserMode(),
-		std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u));
+		std::max<uint32_t>(ClampTraceBounceCount((int)nri_ptemissivesamples, 4u), 1u),
+		mDirectionalLightState.angularSize);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
-	Normalize3(constants.LightDirection);
+	ApplyDirectionalLightStateToConstants(mDirectionalLightState, constants);
 
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse), NRIComputeStorageState());
 	mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::UnfilteredSpecular), NRIComputeStorageState());
@@ -10708,9 +10899,9 @@ bool NRIRenderer::DispatchDenoiser()
 	std::memcpy(desc.viewToClipMatrixPrev, mPreviousViewToClip, sizeof(desc.viewToClipMatrixPrev));
 	std::memcpy(desc.worldToViewMatrix, mCurrentWorldToView, sizeof(desc.worldToViewMatrix));
 	std::memcpy(desc.worldToViewMatrixPrev, mPreviousWorldToView, sizeof(desc.worldToViewMatrixPrev));
-	desc.lightDirection[0] = 0.3f;
-	desc.lightDirection[1] = 0.85f;
-	desc.lightDirection[2] = -0.4f;
+	desc.lightDirection[0] = mDirectionalLightState.direction[0];
+	desc.lightDirection[1] = mDirectionalLightState.direction[1];
+	desc.lightDirection[2] = mDirectionalLightState.direction[2];
 	Normalize3(desc.lightDirection);
 	desc.denoiserMode = GetSelectedNrdDenoiserMode();
 	desc.maxAccumulatedFrameNum = nrdMaxFrames;
@@ -10756,15 +10947,17 @@ bool NRIRenderer::DispatchComposition(FrameTextureSlot outputSlot)
 	constants.Flags =
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
-		(nri_ptdirectionallight ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u);
+		(mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(mDirectionalLightState.enabled && mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
+	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, mDirectionalLightState.color);
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
 	constants.ReservedTrace0 = GetNrdInputSplitMode();
-	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
+	constants.ReservedTrace1 = PackDenoiserAux1((uint32_t)GetSelectedNrdDenoiserMode(), mDirectionalLightState.angularSize);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
-	Normalize3(constants.LightDirection);
+	ApplyDirectionalLightStateToConstants(mDirectionalLightState, constants);
 
 	NRITextureResource& diffuse = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse);
 	NRITextureResource& specular = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular);
@@ -11249,16 +11442,20 @@ bool NRIRenderer::DispatchFinal()
 		(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u) |
 		(presentRawTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
-		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u);
+		(mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
+		(mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(mDirectionalLightState.enabled && mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
+	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, mDirectionalLightState.color);
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
 	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
+	constants.ReservedTrace1 = PackDenoiserAux1(0u, mDirectionalLightState.angularSize);
 	Copy3(mSkyColor, constants.SkyColor);
 	Copy3(mGroundColor, constants.GroundColor);
-	Normalize3(constants.LightDirection);
+	ApplyDirectionalLightStateToConstants(mDirectionalLightState, constants);
 
 	NRITextureResource& history = GetFrameTexture(mHistoryOutputSlot);
 	NRITextureResource& upscaled = GetFrameTexture(mUpscaledInputSlot);

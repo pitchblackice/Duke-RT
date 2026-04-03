@@ -57,7 +57,7 @@ float3 BootstrapPlane(float2 uv)
 			const float stripe = 0.5 + 0.5 * sin(localX * 0.05 + gTraceConstants.FrameIndex * 0.02);
 			base = lerp(base, base.bgr, stripe * 0.15);
 			base = lerp(base, float3(0.98, 0.96, 0.9), gridMask * 0.85);
-			const float sun = saturate(dot(planeNormal, normalize(gTraceConstants.LightDirection))) * 0.35 + 0.65;
+			const float sun = saturate(dot(planeNormal, normalize(gTraceConstants.LightDirection))) * dot(GetDirectionalPlaceholderColor(), float3(0.2126, 0.7152, 0.0722)) * 0.35 + 0.65;
 			color = base * distanceFade * sun;
 		}
 	}
@@ -233,10 +233,11 @@ float3 BootstrapCapturedSceneLit(float2 uv)
 
 	const float4 albedo = SampleSurfaceColor(hit.materialIndex, hit.dataSource, hit.uv);
 	const float3 lightDir = normalize(gTraceConstants.LightDirection);
+	const float3 directionalLightColor = GetDirectionalPlaceholderColor();
 	const float3 viewDir = normalize(-rayDir);
 	const float lambert = max(dot(hit.normal, lightDir), 0.0);
 	const float lighting = 0.20 + lambert * 0.80;
-	float3 diffuse = albedo.rgb * lighting;
+	float3 diffuse = albedo.rgb * lighting * directionalLightColor;
 	const float3 halfVector = normalize(lightDir + viewDir);
 	const float ndoth = max(dot(hit.normal, halfVector), 0.0);
 	const float vdoth = max(dot(viewDir, halfVector), 0.0);
@@ -244,7 +245,7 @@ float3 BootstrapCapturedSceneLit(float2 uv)
 	const float3 dielectricF0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, 0.12);
 	const float3 specularColor = lerp(dielectricF0, float3(1.0, 1.0, 1.0), fresnel);
 	const float specularTerm = pow(ndoth, 12.0) * (0.5 + 0.5 * lambert);
-	const float3 specular = specularColor * specularTerm * 0.85;
+	const float3 specular = specularColor * directionalLightColor * specularTerm * 0.85;
 	return saturate(diffuse + specular);
 }
 
