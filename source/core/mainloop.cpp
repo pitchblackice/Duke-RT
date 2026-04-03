@@ -77,9 +77,10 @@
 #include "c_console.h"
 #include "uiinput.h"
 #include "v_video.h"
+#include "mapinfo.h"
+#include "gamecvars.h"
 #include "palette.h"
 #include "build.h"
-#include "mapinfo.h"
 #include "automap.h"
 #include "statusbar.h"
 #include "gamestruct.h"
@@ -269,16 +270,52 @@ void G_BuildTiccmd(ticcmd_t* cmd)
 //
 //==========================================================================
 bool newGameStarted;
+static bool gPendingPathTracingLevelPreload = false;
+
+static void CancelPendingPathTracingLevelPreload()
+{
+	gPendingPathTracingLevelPreload = false;
+	if (screen != nullptr)
+	{
+		screen->CancelPathTracingLevelPreload();
+	}
+}
+
+static void FinalizePendingLevelStart()
+{
+	CancelPendingPathTracingLevelPreload();
+	gameaction = ga_level;
+	ResetStatusBar();
+	gameInput.resetCrouchToggle();
+}
+
+static bool BeginPathTracingLevelPreloadGate()
+{
+	if (screen == nullptr || !screen->StartPathTracingLevelPreload())
+	{
+		return false;
+	}
+
+	gPendingPathTracingLevelPreload = true;
+	if (cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined())
+	{
+		StartCutscene(globalCutscenes.LoadingScreen, SJ_BLOCKUI, [](bool) {});
+	}
+	gameaction = ga_intermission;
+	return true;
+}
 
 void NewGame(MapRecord* map, int skill, bool ns = false)
 {
 	gi->FreeLevelData();
+	CancelPendingPathTracingLevelPreload();
 	newGameStarted = true;
 	ShowIntermission(nullptr, map, nullptr, [=](bool) { 
 		gi->NewGame(map, skill, ns); 
-		gameaction = ga_level;
-		ResetStatusBar();
-		gameInput.resetCrouchToggle();
+		if (!BeginPathTracingLevelPreloadGate())
+		{
+			FinalizePendingLevelStart();
+		}
 		});
 }
 
@@ -341,6 +378,7 @@ static void GameTicker()
 			break;
 
 		case ga_startup:
+			CancelPendingPathTracingLevelPreload();
 			Mus_Stop();
 			FX_StopAllSounds();
 			gi->FreeLevelData();
@@ -348,10 +386,12 @@ static void GameTicker()
 			break;
 
 		case ga_mainmenu:
+			CancelPendingPathTracingLevelPreload();
 			FX_StopAllSounds();
 			if (isBlood()) Mus_Stop();
 			[[fallthrough]];
 		case ga_mainmenunostopsound:
+			CancelPendingPathTracingLevelPreload();
 			gi->FreeLevelData();
 			gamestate = GS_MENUSCREEN;
 			M_StartControlPanel(ga == ga_mainmenu);
@@ -359,6 +399,7 @@ static void GameTicker()
 			break;
 
 		case ga_creditsmenu:
+			CancelPendingPathTracingLevelPreload();
 			FX_StopAllSounds();
 			gi->FreeLevelData();
 			gamestate = GS_MENUSCREEN;
@@ -377,6 +418,7 @@ static void GameTicker()
 		case ga_loadgame:
 		case ga_loadgamehidecon:
 		//case ga_autoloadgame:
+			CancelPendingPathTracingLevelPreload();
 			G_DoLoadGame();
 			break;
 
@@ -386,6 +428,7 @@ static void GameTicker()
 			break;
 
 		case ga_level:
+			CancelPendingPathTracingLevelPreload();
 			Net_ClearFifo();
 			inputState.ClearAllInput();
 			gameInput.Clear();
@@ -598,6 +641,17 @@ void Display()
 	case GS_INTRO:
 	case GS_CUTSCENE:
 		ScreenJobDraw();
+		if (gPendingPathTracingLevelPreload && screen != nullptr && screen->IsPathTracingLevelPreloadPending())
+		{
+			if (screen->TickPathTracingLevelPreload())
+			{
+				if (cutscene.runner != nullptr)
+				{
+					EndScreenJob();
+				}
+				FinalizePendingLevelStart();
+			}
+		}
 		break;
 
 	case GS_LEVEL:

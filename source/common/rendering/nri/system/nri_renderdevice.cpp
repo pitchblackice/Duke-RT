@@ -2425,6 +2425,64 @@ bool NRIRenderDevice::HasActiveSceneFrame() const
 	return mInitialized && mFrameBegun && mCommandBuffer != nullptr && mActiveTarget != nullptr;
 }
 
+bool NRIRenderDevice::StartPathTracingLevelPreload()
+{
+	if (!mInitialized || mRenderer == nullptr)
+	{
+		mPathTracingLevelPreloadPending = false;
+		return false;
+	}
+
+	if (!mRenderer->RefreshPathTracingAvailability() || !mRenderer->IsPathTracingSupported())
+	{
+		mPathTracingLevelPreloadPending = false;
+		return false;
+	}
+
+	mPathTracingLevelPreloadPending = true;
+	return true;
+}
+
+bool NRIRenderDevice::TickPathTracingLevelPreload()
+{
+	if (!mPathTracingLevelPreloadPending)
+	{
+		return true;
+	}
+
+	if (!mInitialized || mRenderer == nullptr)
+	{
+		mPathTracingLevelPreloadPending = false;
+		return true;
+	}
+
+	if (!mFrameBegun || mCommandBuffer == nullptr || mActiveTarget == nullptr)
+	{
+		return false;
+	}
+
+	const uint32_t outputWidth = std::max<uint32_t>((uint32_t)mSceneViewport.width, 1u);
+	const uint32_t outputHeight = std::max<uint32_t>((uint32_t)mSceneViewport.height, 1u);
+	const uint32_t targetWidth = std::max<uint32_t>(mActiveTarget->width, 1u);
+	const uint32_t targetHeight = std::max<uint32_t>(mActiveTarget->height, 1u);
+	const bool ready = mRenderer->PreloadLevelScene(outputWidth, outputHeight, targetWidth, targetHeight);
+	if (ready)
+	{
+		mPathTracingLevelPreloadPending = false;
+	}
+	return ready;
+}
+
+bool NRIRenderDevice::IsPathTracingLevelPreloadPending() const
+{
+	return mPathTracingLevelPreloadPending;
+}
+
+void NRIRenderDevice::CancelPathTracingLevelPreload()
+{
+	mPathTracingLevelPreloadPending = false;
+}
+
 bool NRIRenderDevice::ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const
 {
 	return !!nri_ptsanity && drawmode == DM_MAINVIEW && !portal;

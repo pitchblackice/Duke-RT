@@ -3926,6 +3926,87 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	return success;
 }
 
+bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
+{
+	if (mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)
+	{
+		return false;
+	}
+
+	if (!RefreshPathTracingAvailability() || !mPathTracingSupported)
+	{
+		return true;
+	}
+
+	ResetPerfTraceStats();
+	{
+		ScopedPtPerfTimer initPerfTimer(mLastPerfShellTraceStats.initResourcesMs);
+		if (!Initialize() || !EnsureFrameResources(outputWidth, outputHeight, targetWidth, targetHeight))
+		{
+			LogFallback("PT preload frame resources or pipelines failed to initialize.");
+			return true;
+		}
+	}
+
+	ResetSceneBufferFrameStats();
+	ResetRendererSkyPerfTraceStats();
+	nri_scene::ResetAverageTextureColorCache();
+	nri_scene::ResetSkyPerfStats();
+
+	RefreshMapWorld();
+	if (mPendingStartupMutationRebaseline)
+	{
+		RebuildStartupMutationBaseline();
+	}
+	if (!mMapWorld.valid)
+	{
+		return true;
+	}
+
+	if (!EnsureStaticMapScene())
+	{
+		LogFallback("PT preload resident static scene build failed.");
+		return true;
+	}
+
+	RefreshSceneLightSystem(true, nullptr, nullptr, nullptr, nullptr);
+	if (!mGpuSceneHasDynamicOverlay)
+	{
+		const bool needsResidentStaticLightRefresh =
+			!mSceneLights.GetAnalyticLights().activeLights.empty() ||
+			mBoundRuntimeLightCount != 0 ||
+			mSceneLights.GetSectorLighting().activeSectorCount > 0 ||
+			mBoundSectorLightActiveCount != 0;
+		if (needsResidentStaticLightRefresh && !RefreshResidentStaticSceneDataSet())
+		{
+			LogFallback("PT preload static scene light refresh failed.");
+			return true;
+		}
+	}
+
+	EmissiveSamplingBuildContext emissiveSamplingContext = {};
+	emissiveSamplingContext.staticGeometry = &mStaticMapScene.geometry;
+	if (!UpdateEmissiveSamplingBuffers(emissiveSamplingContext))
+	{
+		LogFallback("PT preload emissive primitive update failed.");
+		return true;
+	}
+	if (!BuildEmissiveTopLevelAccelerationStructure())
+	{
+		LogFallback("PT preload emissive TLAS update failed.");
+		return true;
+	}
+
+	PrepareSceneTextureInputsForCompute();
+	Printf("NRI PT preload ready: level=%s build_serial=%llu chunks=%u tris=%u materials=%u\n",
+		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
+		(unsigned long long)mMapWorld.buildSerial,
+		(uint32_t)mStaticMapScene.chunks.size(),
+		(uint32_t)mStaticMapScene.geometry.primitives.size(),
+		(uint32_t)mStaticMapScene.gpuMaterials.size());
+	return true;
+}
+
 void NRIRenderer::ResetHistory()
 {
 	RequestHistoryReset("history-reset", true, true);

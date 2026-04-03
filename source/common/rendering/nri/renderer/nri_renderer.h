@@ -117,6 +117,7 @@ public:
 	bool Initialize();
 	void Shutdown();
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
+	bool PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
 	void ResetHistory();
 	void PrintStatus() const;
 	void PrintSceneBufferStatus() const;
