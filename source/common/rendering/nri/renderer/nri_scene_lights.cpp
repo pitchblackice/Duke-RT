@@ -128,39 +128,66 @@ namespace
 		return key;
 	}
 
-	uint64_t BuildHeuristicStableKey(const SceneLightSystem::AnalyticLightHeuristicRule& rule, const SceneLightSystem::SurfaceRecord& record)
+	uint64_t HashTaggedSignedValue(uint64_t hash, uint64_t tag, int32_t value)
+	{
+		hash = HashCombine64(hash, tag);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)(value + 1));
+		return hash;
+	}
+
+	uint64_t BuildSurfaceIdentityKey(const SceneLightSystem::SurfaceRecord& record)
 	{
 		uint64_t key = 1469598103934665603ull;
-		key = HashCombine64(key, (uint64_t)rule.ruleId);
-		key = HashCombine64(key, (uint64_t)record.material.textureId);
+		key = HashCombine64(key, (uint64_t)(uint32_t)record.source);
 		key = HashCombine64(key, (uint64_t)(uint32_t)record.provenance.sourceType);
+		key = HashCombine64(key, (uint64_t)record.provenance.drawListType);
+
+		bool hasAuthoritativeOwnership = false;
 		if (record.provenance.actorIndex >= 0)
 		{
-			key = HashCombine64(key, 0xA11C700000000000ull | (uint64_t)(uint32_t)record.provenance.actorIndex);
+			key = HashTaggedSignedValue(key, 0xA11C700000000001ull, record.provenance.actorIndex);
+			hasAuthoritativeOwnership = true;
 		}
-		else
+		if (record.provenance.sectorIndex >= 0)
 		{
-			key = HashCombine64(key, record.material.materialKey);
+			key = HashTaggedSignedValue(key, 0x5EC70B5E00000001ull, record.provenance.sectorIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (record.provenance.wallIndex >= 0)
+		{
+			key = HashTaggedSignedValue(key, 0xAA11000000000001ull, record.provenance.wallIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (record.provenance.sectionIndex >= 0)
+		{
+			key = HashTaggedSignedValue(key, 0x5EC7100000000001ull, record.provenance.sectionIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (record.provenance.mapChunkIndex >= 0)
+		{
+			key = HashTaggedSignedValue(key, 0xC4C0000000000001ull, record.provenance.mapChunkIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (record.provenance.nextSectorIndex >= 0)
+		{
+			key = HashTaggedSignedValue(key, 0x9E57000000000001ull, record.provenance.nextSectorIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (!hasAuthoritativeOwnership)
+		{
+			key = HashCombine64(key, 0xCE173E0000000001ull);
 			key = HashCombine64(key, QuantizePositionKey(record.center));
 		}
+
 		return key;
 	}
 
-	uint64_t BuildActorOverlayStableKey(const SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& rule, const SceneLightSystem::SurfaceRecord& record)
+	uint64_t BuildAnalyticTopologyKey(uint32_t sourceFlags, uint32_t ruleId, const SceneLightSystem::SurfaceRecord& record)
 	{
 		uint64_t key = 1469598103934665603ull;
-		key = HashCombine64(key, (uint64_t)rule.ruleId);
-		if (record.provenance.actorIndex >= 0)
-		{
-			// Actor overlay lights should stay stable across animated tile changes and
-			// captured-vs-dynamic scene routing. Their identity is the matched actor and rule.
-			key = HashCombine64(key, 0x0A47000000000000ull | (uint64_t)(uint32_t)record.provenance.actorIndex);
-		}
-		else
-		{
-			key = HashCombine64(key, record.material.materialKey);
-			key = HashCombine64(key, QuantizePositionKey(record.center));
-		}
+		key = HashCombine64(key, (uint64_t)sourceFlags);
+		key = HashCombine64(key, (uint64_t)ruleId);
+		key = HashCombine64(key, record.identityKey);
 		return key;
 	}
 
@@ -272,20 +299,9 @@ namespace
 		outTint[2] = 1.0f + (tint[2] - 1.0f) * tintWeight;
 	}
 
-	uint64_t BuildEmissiveStableKey(const SceneLightSystem::SurfaceRecord& record)
+	uint64_t BuildEmissiveTopologyKey(const SceneLightSystem::SurfaceRecord& record)
 	{
-		uint64_t key = 1469598103934665603ull;
-		key = HashCombine64(key, record.material.materialKey);
-		key = HashCombine64(key, (uint64_t)(uint32_t)record.provenance.sourceType);
-		if (record.provenance.actorIndex >= 0)
-		{
-			key = HashCombine64(key, 0xE611551000000000ull | (uint64_t)(uint32_t)record.provenance.actorIndex);
-		}
-		else
-		{
-			key = HashCombine64(key, QuantizePositionKey(record.center));
-		}
-		return key;
+		return record.identityKey;
 	}
 
 	bool EvaluateEmissiveMaterial(
@@ -499,7 +515,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 			mAnalyticLights.matchedSurfaceCount++;
 
 			SceneAnalyticLight light = {};
-			light.stableKey = BuildHeuristicStableKey(rule, record);
+			light.stableKey = BuildAnalyticTopologyKey(SceneAnalyticLightSourceFlag_SpriteTileHeuristic, rule.ruleId, record);
 			light.id = 0;
 			light.sourceFlags = SceneAnalyticLightSourceFlag_SpriteTileHeuristic;
 			light.sourceRuleId = rule.ruleId;
@@ -541,7 +557,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 				mAnalyticLights.actorOverlayMatchedSurfaceCount++;
 
 				SceneAnalyticLight light = {};
-				light.stableKey = BuildActorOverlayStableKey(rule, record);
+				light.stableKey = BuildAnalyticTopologyKey(SceneAnalyticLightSourceFlag_ActorOverlay, rule.ruleId, record);
 				light.id = 0;
 				light.sourceFlags = SceneAnalyticLightSourceFlag_ActorOverlay;
 				light.sourceRuleId = rule.ruleId;
@@ -639,7 +655,7 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 		}
 
 		EmissiveSurfaceRegistry::EmissiveSurfaceRecord emissive = {};
-		emissive.stableKey = BuildEmissiveStableKey(record);
+		emissive.stableKey = BuildEmissiveTopologyKey(record);
 		emissive.sourceFlags = sourceFlags;
 		emissive.sourceRuleId = sourceRuleId;
 		emissive.source = record.source;
@@ -1016,6 +1032,8 @@ void SceneLightSystem::AppendSurfaceList(const std::vector<nri_scene::SurfaceRef
 			record.material.alpha = materials.materials[inOutMaterialIndex].alpha;
 			record.material.lightLevel = materials.materials[inOutMaterialIndex].lightLevel;
 		}
+
+		record.identityKey = BuildSurfaceIdentityKey(record);
 
 		mSurfaceRecords.push_back(record);
 		++inOutMaterialIndex;

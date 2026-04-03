@@ -189,6 +189,7 @@ public:
 
 	struct SurfaceRecord
 	{
+		uint64_t identityKey = 0;
 		SceneLightRecordSource source = SceneLightRecordSource::None;
 		uint32_t materialIndex = UINT32_MAX;
 		float center[3] = {};
