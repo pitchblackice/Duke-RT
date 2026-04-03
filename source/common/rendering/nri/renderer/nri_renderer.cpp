@@ -6647,15 +6647,17 @@ void NRIRenderer::RefreshSceneLightSystem(
 	{
 		const size_t chunkCount = std::min(mStaticMapScene.lightChunkViews.size(), mStaticMapScene.chunks.size());
 		uint32_t runtimeMutationMaterialOffset = 0;
-		for (size_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
+		for (size_t chunkListIndex = 0; chunkListIndex < chunkCount; ++chunkListIndex)
 		{
+			const auto& staticChunk = mStaticMapScene.chunks[chunkListIndex];
+			const uint32_t mapChunkIndex = staticChunk.chunkIndex;
 			const bool useRuntimeMutationReplacement =
-				chunkIndex < mRuntimeMapMutations.chunks.size() &&
-				mRuntimeMapMutations.chunks[chunkIndex].active &&
-				mRuntimeMapMutations.chunks[chunkIndex].valid;
+				mapChunkIndex < mRuntimeMapMutations.chunks.size() &&
+				mRuntimeMapMutations.chunks[mapChunkIndex].active &&
+				mRuntimeMapMutations.chunks[mapChunkIndex].valid;
 			if (useRuntimeMutationReplacement)
 			{
-				const auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
+				const auto& replacement = mRuntimeMapMutations.chunks[mapChunkIndex];
 				mSceneLights.AppendSceneView(
 					replacement.sceneView,
 					replacement.materialBridge,
@@ -6666,10 +6668,10 @@ void NRIRenderer::RefreshSceneLightSystem(
 			}
 
 			mSceneLights.AppendSceneView(
-				mStaticMapScene.lightChunkViews[chunkIndex],
+				mStaticMapScene.lightChunkViews[chunkListIndex],
 				mStaticMapScene.materialBridge,
 				SceneLightRecordSource::StaticMapScene,
-				mStaticMapScene.chunks[chunkIndex].materialOffset);
+				staticChunk.materialOffset);
 		}
 	}
 	else if (capturedSceneView != nullptr && capturedMaterials != nullptr)
