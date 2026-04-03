@@ -146,6 +146,24 @@ namespace
 		return key;
 	}
 
+	uint64_t BuildActorOverlayStableKey(const SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& rule, const SceneLightSystem::SurfaceRecord& record)
+	{
+		uint64_t key = 1469598103934665603ull;
+		key = HashCombine64(key, (uint64_t)rule.ruleId);
+		key = HashCombine64(key, (uint64_t)record.material.textureId);
+		key = HashCombine64(key, (uint64_t)(uint32_t)record.provenance.sourceType);
+		if (record.provenance.actorIndex >= 0)
+		{
+			key = HashCombine64(key, 0x0A47000000000000ull | (uint64_t)(uint32_t)record.provenance.actorIndex);
+		}
+		else
+		{
+			key = HashCombine64(key, record.material.materialKey);
+			key = HashCombine64(key, QuantizePositionKey(record.center));
+		}
+		return key;
+	}
+
 	float EvaluateFlickerScale(uint64_t stableKey, uint32_t frameIndex, uint32_t flickerFrames)
 	{
 		if (flickerFrames <= 1)
@@ -394,6 +412,8 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mFrameSerial = frameSerial;
 	mSurfaceRecords.clear();
 	mAnalyticLights.matchedSurfaceCount = 0;
+	mAnalyticLights.actorOverlayRuleCount = 0;
+	mAnalyticLights.actorOverlayMatchedSurfaceCount = 0;
 	mAnalyticLights.dedupedMatchCount = 0;
 	mAnalyticLights.truncatedLightCount = 0;
 	mAnalyticLights.topologyChanged = false;
@@ -417,12 +437,21 @@ void SceneLightSystem::AppendSceneView(const nri_scene::SceneView& sceneView, co
 	AppendSurfaceList(sceneView.opaqueSprites, materials, source, materialIndex);
 }
 
-void SceneLightSystem::RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxActiveLights)
+void SceneLightSystem::RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxActiveLights, const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules)
 {
 	std::vector<SceneAnalyticLight> nextLights;
-	nextLights.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size());
+	size_t overlayRuleCount = 0;
+	if (actorOverlayRules != nullptr)
+	{
+		for (const auto& entry : *actorOverlayRules)
+		{
+			overlayRuleCount += entry.second.size();
+		}
+	}
+	mAnalyticLights.actorOverlayRuleCount = (uint32_t)overlayRuleCount;
+	nextLights.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size() + overlayRuleCount);
 	std::unordered_map<uint64_t, size_t> keyToLightIndex;
-	keyToLightIndex.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size() * 4u);
+	keyToLightIndex.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size() * 4u + overlayRuleCount * 2u);
 
 	auto tryAppendLight = [this, &nextLights, &keyToLightIndex, maxActiveLights](const SceneAnalyticLight& light)
 	{
@@ -475,6 +504,51 @@ void SceneLightSystem::RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxAc
 			light.intensity = rule.intensity * EvaluateFlickerScale(light.stableKey, frameIndex, rule.flickerFrames);
 			light.radius = rule.radius;
 			tryAppendLight(light);
+		}
+	}
+
+	if (actorOverlayRules != nullptr && !actorOverlayRules->empty())
+	{
+		for (const SurfaceRecord& record : mSurfaceRecords)
+		{
+			if ((record.material.materialFlags & nri_scene::MaterialFlag_Sprite) == 0 ||
+				record.provenance.actorIndex < 0)
+			{
+				continue;
+			}
+
+			const auto actorRuleIt = actorOverlayRules->find(record.provenance.actorIndex);
+			if (actorRuleIt == actorOverlayRules->end())
+			{
+				continue;
+			}
+
+			for (const AnalyticLightRegistry::ActorOverlayRule& rule : actorRuleIt->second)
+			{
+				if (rule.hasTileFilter && record.material.textureId != rule.tileFilter)
+				{
+					continue;
+				}
+
+				mAnalyticLights.matchedSurfaceCount++;
+				mAnalyticLights.actorOverlayMatchedSurfaceCount++;
+
+				SceneAnalyticLight light = {};
+				light.stableKey = BuildActorOverlayStableKey(rule, record);
+				light.id = 0;
+				light.sourceFlags = SceneAnalyticLightSourceFlag_ActorOverlay;
+				light.sourceRuleId = rule.ruleId;
+				light.source = record.source;
+				light.actorIndex = record.provenance.actorIndex;
+				light.textureId = record.material.textureId;
+				light.position[0] = record.center[0] + rule.offset[0];
+				light.position[1] = record.center[1] + rule.offset[1];
+				light.position[2] = record.center[2] + rule.offset[2];
+				Copy3f(rule.color, light.color);
+				light.intensity = rule.intensity * EvaluateFlickerScale(light.stableKey, frameIndex, rule.flickerFrames);
+				light.radius = rule.radius;
+				tryAppendLight(light);
+			}
 		}
 	}
 

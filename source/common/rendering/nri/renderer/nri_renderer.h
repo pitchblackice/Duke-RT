@@ -783,6 +783,7 @@ private:
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;
 	std::vector<uint32_t> mCurrentVisibleChunkWords;
+	uint32_t mLastResolvedLightOverlayGeneration = 0;
 	uint32_t mFrameIndex = 0;
 	uint64_t mFrameGenerationFrameId = 0;
 	uint32_t mRenderWidth = 0;

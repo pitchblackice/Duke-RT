@@ -4,6 +4,7 @@
 #include "../scene/nri_scene_bridge.h"
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 enum class SceneLightRecordSource : uint32_t
@@ -19,6 +20,7 @@ enum SceneAnalyticLightSourceFlags : uint32_t
 	SceneAnalyticLightSourceFlag_None = 0,
 	SceneAnalyticLightSourceFlag_Manual = 1u << 0,
 	SceneAnalyticLightSourceFlag_SpriteTileHeuristic = 1u << 1,
+	SceneAnalyticLightSourceFlag_ActorOverlay = 1u << 2,
 };
 
 enum SceneEmissiveSurfaceSourceFlags : uint32_t
@@ -70,11 +72,25 @@ public:
 
 	struct AnalyticLightRegistry
 	{
+		struct ActorOverlayRule
+		{
+			uint32_t ruleId = 0;
+			bool hasTileFilter = false;
+			uint32_t tileFilter = 0;
+			float color[3] = { 1.0f, 1.0f, 1.0f };
+			float intensity = 0.0f;
+			float radius = 0.0f;
+			float offset[3] = {};
+			uint32_t flickerFrames = 0;
+		};
+
 		std::vector<SceneAnalyticLight> manualLights;
 		std::vector<AnalyticLightHeuristicRule> spriteTileRules;
 		std::vector<SceneAnalyticLight> activeLights;
 		std::vector<uint64_t> activeTopologyKeys;
 		uint32_t matchedSurfaceCount = 0;
+		uint32_t actorOverlayRuleCount = 0;
+		uint32_t actorOverlayMatchedSurfaceCount = 0;
 		uint32_t dedupedMatchCount = 0;
 		uint32_t truncatedLightCount = 0;
 		uint32_t nextRuleId = 1;
@@ -170,7 +186,7 @@ public:
 	void Reset();
 	void BeginFrame(uint64_t frameSerial);
 	void AppendSceneView(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, SceneLightRecordSource source, uint32_t materialIndexBase = 0);
-	void RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxActiveLights);
+	void RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxActiveLights, const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules = nullptr);
 	void RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces);
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
 

@@ -10,6 +10,7 @@
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
 #include "coreactor.h"
+#include "lightoverlay.h"
 #include "mapinfo.h"
 #include "printf.h"
 #include "gamestruct.h"
@@ -48,6 +49,98 @@ EXTERN_CVAR(Int, nri_ptspherelats)
 namespace
 {
 	static constexpr uint32_t NriPtDebugSphereLimit = 64u;
+
+	static uint64_t HashLightOverlayText(uint64_t hash, const char* text)
+	{
+		if (text == nullptr)
+		{
+			return hash;
+		}
+
+		for (const unsigned char* cursor = (const unsigned char*)text; *cursor != '\0'; ++cursor)
+		{
+			hash ^= (uint64_t)(*cursor);
+			hash *= 1099511628211ull;
+		}
+		return hash;
+	}
+
+	static uint32_t BuildActorOverlayRuleId(const ResolvedLightOverlayActorRule& rule)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashLightOverlayText(hash, rule.id.GetChars());
+		hash = HashLightOverlayText(hash, rule.actorClassName.GetChars());
+		hash = HashLightOverlayText(hash, rule.source.sourceName.GetChars());
+		hash ^= (uint64_t)rule.source.orderIndex + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+		const uint32_t id = (uint32_t)(hash ^ (hash >> 32));
+		return id != 0 ? id : 1u;
+	}
+
+	static bool IsSupportedActorOverlayRule(const ResolvedLightOverlayActorRule& rule)
+	{
+		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
+	}
+
+	static void BuildActorAnalyticOverlayRules(
+		const ResolvedLightOverlaySet& resolved,
+		std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>>& outRules)
+	{
+		if (resolved.actorRules.Size() == 0)
+		{
+			return;
+		}
+
+		TSpriteIterator<DCoreActor> it;
+		while (auto actor = it.Next())
+		{
+			if (actor == nullptr ||
+				!actor->exists() ||
+				(actor->ObjectFlags & OF_EuthanizeMe) != 0)
+			{
+				continue;
+			}
+
+			PClass* actorClass = actor->GetClass();
+			if (actorClass == nullptr)
+			{
+				continue;
+			}
+
+			auto& actorRules = outRules[(int32_t)actor->GetIndex()];
+			for (const auto& resolvedRule : resolved.actorRules)
+			{
+				if (!resolvedRule.actorClassResolved ||
+					resolvedRule.actorClass == nullptr ||
+					!IsSupportedActorOverlayRule(resolvedRule) ||
+					resolvedRule.intensity <= 0.0f ||
+					resolvedRule.radius <= 0.0f ||
+					(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)))
+				{
+					continue;
+				}
+
+				SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule actorRule = {};
+				actorRule.ruleId = BuildActorOverlayRuleId(resolvedRule);
+				actorRule.hasTileFilter = resolvedRule.hasTileFilter;
+				actorRule.tileFilter = resolvedRule.hasTileFilter && resolvedRule.tileFilter >= 0 ? (uint32_t)resolvedRule.tileFilter : 0u;
+				actorRule.color[0] = resolvedRule.color[0];
+				actorRule.color[1] = resolvedRule.color[1];
+				actorRule.color[2] = resolvedRule.color[2];
+				actorRule.intensity = resolvedRule.intensity;
+				actorRule.radius = resolvedRule.radius;
+				actorRule.offset[0] = resolvedRule.offset[0];
+				actorRule.offset[1] = resolvedRule.offset[1];
+				actorRule.offset[2] = resolvedRule.offset[2];
+				actorRule.flickerFrames = resolvedRule.flickerFrames;
+				actorRules.push_back(actorRule);
+			}
+
+			if (actorRules.empty())
+			{
+				outRules.erase((int32_t)actor->GetIndex());
+			}
+		}
+	}
 
 	static bool ResolveSurfaceProbeTextureDebugInfo(uint32_t textureId, FString& outTextureName, int32_t& outLegacyTile)
 	{
@@ -3398,11 +3491,13 @@ void NRIRenderer::ClearRuntimePointLights()
 void NRIRenderer::PrintRuntimePointLights() const
 {
 	const auto& analyticLights = mSceneLights.GetAnalyticLights();
-	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u matched_surfaces=%u deduped=%u truncated=%u limit=%u\n",
+	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u overlay_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u limit=%u\n",
 		(uint32_t)analyticLights.activeLights.size(),
 		(uint32_t)analyticLights.manualLights.size(),
 		(uint32_t)analyticLights.spriteTileRules.size(),
+		analyticLights.actorOverlayRuleCount,
 		analyticLights.matchedSurfaceCount,
+		analyticLights.actorOverlayMatchedSurfaceCount,
 		analyticLights.dedupedMatchCount,
 		analyticLights.truncatedLightCount,
 		NRI_MAX_RUNTIME_POINT_LIGHTS);
@@ -3413,12 +3508,20 @@ void NRIRenderer::PrintRuntimePointLights() const
 
 	for (const SceneLightSystem::SceneAnalyticLight& light : analyticLights.activeLights)
 	{
+		const char* sourceBase =
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_Manual) != 0 ? "manual" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? "overlay" :
+			"heuristic";
+		const char* sourceSuffix =
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_SpriteTileHeuristic) != 0 ? ":sprite_tile" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? ":actor" :
+			"";
 		Printf("NRI PT analytic light %u: id=%u stable=0x%016llx source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
 			light.id,
 			light.id,
 			(unsigned long long)light.stableKey,
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_Manual) != 0 ? "manual" : "heuristic",
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_SpriteTileHeuristic) != 0 ? ":sprite_tile" : "",
+			sourceBase,
+			sourceSuffix,
 			light.sourceRuleId,
 			light.actorIndex,
 			light.textureId,
@@ -6048,9 +6151,26 @@ void NRIRenderer::RefreshSceneLightSystem(
 		mSceneLights.AppendSceneView(*dynamicSceneView, *dynamicMaterials, SceneLightRecordSource::DynamicScene);
 	}
 
-	mSceneLights.RebuildAnalyticLights(mFrameIndex, NRI_MAX_RUNTIME_POINT_LIGHTS);
+	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>> actorOverlayRules;
+	BuildActorAnalyticOverlayRules(resolvedLightOverlays, actorOverlayRules);
+
+	mSceneLights.RebuildAnalyticLights(
+		mFrameIndex,
+		NRI_MAX_RUNTIME_POINT_LIGHTS,
+		actorOverlayRules.empty() ? nullptr : &actorOverlayRules);
 	mSceneLights.RebuildEmissiveSurfaces(NRI_MAX_EMISSIVE_SURFACES);
 	mSceneLights.RebuildSectorLighting(mFrameIndex, (uint32_t)sector.Size());
+	if (resolvedLightOverlays.resolvedGeneration != 0 &&
+		resolvedLightOverlays.resolvedGeneration != mLastResolvedLightOverlayGeneration)
+	{
+		const bool hadPreviousGeneration = mLastResolvedLightOverlayGeneration != 0;
+		mLastResolvedLightOverlayGeneration = resolvedLightOverlays.resolvedGeneration;
+		if (hadPreviousGeneration)
+		{
+			RequestHistoryReset("lightoverlay-resolve");
+		}
+	}
 	if (mSceneLights.ConsumeAnalyticLightTopologyChanged())
 	{
 		mBoundRuntimeLightCount = 0;
