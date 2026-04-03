@@ -50,6 +50,46 @@ namespace
 {
 	static constexpr uint32_t NriPtDebugSphereLimit = 64u;
 
+	static uint64_t HashCombineLightOverlay(uint64_t hash, uint64_t value)
+	{
+		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
+	}
+
+	static uint64_t QuantizeLightOverlayPositionKey(const float position[3])
+	{
+		const int64_t x = (int64_t)std::llround(position[0] * 16.0f);
+		const int64_t y = (int64_t)std::llround(position[1] * 16.0f);
+		const int64_t z = (int64_t)std::llround(position[2] * 16.0f);
+		uint64_t key = 1469598103934665603ull;
+		key = HashCombineLightOverlay(key, (uint64_t)x);
+		key = HashCombineLightOverlay(key, (uint64_t)y);
+		key = HashCombineLightOverlay(key, (uint64_t)z);
+		return key;
+	}
+
+	static void ComputeCapturedSurfaceCenter(const nri_scene::SurfaceRef& surface, float outCenter[3])
+	{
+		outCenter[0] = 0.0f;
+		outCenter[1] = 0.0f;
+		outCenter[2] = 0.0f;
+		if (surface.vertices.empty())
+		{
+			return;
+		}
+
+		for (const nri_scene::CapturedVertex& vertex : surface.vertices)
+		{
+			outCenter[0] += vertex.position[0];
+			outCenter[1] += vertex.position[1];
+			outCenter[2] += vertex.position[2];
+		}
+
+		const float invCount = 1.0f / (float)surface.vertices.size();
+		outCenter[0] *= invCount;
+		outCenter[1] *= invCount;
+		outCenter[2] *= invCount;
+	}
+
 	static uint64_t HashLightOverlayText(uint64_t hash, const char* text)
 	{
 		if (text == nullptr)
@@ -65,20 +105,159 @@ namespace
 		return hash;
 	}
 
-	static uint32_t BuildActorOverlayRuleId(const ResolvedLightOverlayActorRule& rule)
+	static uint32_t BuildResolvedLightOverlayRuleId(const char* id, const char* classOrMapName, const LightOverlaySourceLocation& source)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashLightOverlayText(hash, rule.id.GetChars());
-		hash = HashLightOverlayText(hash, rule.actorClassName.GetChars());
-		hash = HashLightOverlayText(hash, rule.source.sourceName.GetChars());
-		hash ^= (uint64_t)rule.source.orderIndex + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
-		const uint32_t id = (uint32_t)(hash ^ (hash >> 32));
-		return id != 0 ? id : 1u;
+		hash = HashLightOverlayText(hash, id);
+		hash = HashLightOverlayText(hash, classOrMapName);
+		hash = HashLightOverlayText(hash, source.sourceName.GetChars());
+		hash ^= (uint64_t)source.orderIndex + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+		const uint32_t ruleId = (uint32_t)(hash ^ (hash >> 32));
+		return ruleId != 0 ? ruleId : 1u;
+	}
+
+	static uint32_t BuildActorOverlayRuleId(const ResolvedLightOverlayActorRule& rule)
+	{
+		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.actorClassName.GetChars(), rule.source);
 	}
 
 	static bool IsSupportedActorOverlayRule(const ResolvedLightOverlayActorRule& rule)
 	{
 		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
+	}
+
+	static bool IsSupportedMapOverlayRule(const ResolvedLightOverlayMapLightRule& rule)
+	{
+		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
+	}
+
+	static uint32_t BuildMapOverlayRuleId(const ResolvedLightOverlayMapLightRule& rule)
+	{
+		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
+	}
+
+	static uint64_t BuildMapOverlayStableKey(uint32_t ruleId, const float position[3])
+	{
+		uint64_t key = 1469598103934665603ull;
+		key = HashCombineLightOverlay(key, (uint64_t)ruleId);
+		key = HashCombineLightOverlay(key, QuantizeLightOverlayPositionKey(position));
+		return key;
+	}
+
+	static bool TryResolveSectorMapOverlayAnchorPosition(const nri_scene::PTMapWorld& mapWorld, int32_t sectorIndex, float outPosition[3])
+	{
+		const nri_scene::PTMapChunk* matchedChunk = nullptr;
+		for (const auto& chunk : mapWorld.chunks)
+		{
+			if (chunk.sectorIndex == sectorIndex)
+			{
+				matchedChunk = &chunk;
+				break;
+			}
+		}
+		if (matchedChunk == nullptr)
+		{
+			return false;
+		}
+
+		float flatCenterSum[3] = {};
+		int flatCenterCount = 0;
+		float anyCenterSum[3] = {};
+		int anyCenterCount = 0;
+		const uint32_t endSurface = matchedChunk->firstSurface + matchedChunk->surfaceCount;
+		for (uint32_t surfaceIndex = matchedChunk->firstSurface; surfaceIndex < endSurface && surfaceIndex < mapWorld.surfaces.size(); ++surfaceIndex)
+		{
+			const auto& surface = mapWorld.surfaces[surfaceIndex].surface;
+			if (surface.provenance.sectorIndex != sectorIndex)
+			{
+				continue;
+			}
+
+			float center[3] = {};
+			ComputeCapturedSurfaceCenter(surface, center);
+			anyCenterSum[0] += center[0];
+			anyCenterSum[1] += center[1];
+			anyCenterSum[2] += center[2];
+			anyCenterCount++;
+
+			if (surface.provenance.sourceType == nri_scene::SurfaceSourceType::MapFloorSection ||
+				surface.provenance.sourceType == nri_scene::SurfaceSourceType::MapCeilingSection)
+			{
+				flatCenterSum[0] += center[0];
+				flatCenterSum[1] += center[1];
+				flatCenterSum[2] += center[2];
+				flatCenterCount++;
+			}
+		}
+
+		const float* sum = flatCenterCount > 0 ? flatCenterSum : anyCenterSum;
+		const int count = flatCenterCount > 0 ? flatCenterCount : anyCenterCount;
+		if (count <= 0)
+		{
+			return false;
+		}
+
+		const float invCount = 1.0f / (float)count;
+		outPosition[0] = sum[0] * invCount;
+		outPosition[1] = sum[1] * invCount;
+		outPosition[2] = sum[2] * invCount;
+		return true;
+	}
+
+	static bool TryResolveWallMapOverlayAnchorPosition(const nri_scene::PTMapWorld& mapWorld, int32_t wallIndex, float outPosition[3])
+	{
+		float centerSum[3] = {};
+		int centerCount = 0;
+		for (const auto& mapSurface : mapWorld.surfaces)
+		{
+			if (mapSurface.surface.provenance.wallIndex != wallIndex)
+			{
+				continue;
+			}
+
+			float center[3] = {};
+			ComputeCapturedSurfaceCenter(mapSurface.surface, center);
+			centerSum[0] += center[0];
+			centerSum[1] += center[1];
+			centerSum[2] += center[2];
+			centerCount++;
+		}
+
+		if (centerCount <= 0)
+		{
+			return false;
+		}
+
+		const float invCount = 1.0f / (float)centerCount;
+		outPosition[0] = centerSum[0] * invCount;
+		outPosition[1] = centerSum[1] * invCount;
+		outPosition[2] = centerSum[2] * invCount;
+		return true;
+	}
+
+	static bool TryResolveMapOverlayAnchorPosition(const nri_scene::PTMapWorld& mapWorld, const ResolvedLightOverlayMapLightRule& rule, float outPosition[3])
+	{
+		switch (rule.anchorType)
+		{
+		case LightOverlayAnchorType::Position:
+			if (!rule.hasAnchorPosition)
+			{
+				return false;
+			}
+			outPosition[0] = rule.anchorPosition[0];
+			outPosition[1] = rule.anchorPosition[1];
+			outPosition[2] = rule.anchorPosition[2];
+			return true;
+
+		case LightOverlayAnchorType::Sector:
+			return rule.anchorIndex >= 0 && TryResolveSectorMapOverlayAnchorPosition(mapWorld, rule.anchorIndex, outPosition);
+
+		case LightOverlayAnchorType::Wall:
+			return rule.anchorIndex >= 0 && TryResolveWallMapOverlayAnchorPosition(mapWorld, rule.anchorIndex, outPosition);
+
+		default:
+			return false;
+		}
 	}
 
 	static void BuildActorAnalyticOverlayRules(
@@ -139,6 +318,43 @@ namespace
 			{
 				outRules.erase((int32_t)actor->GetIndex());
 			}
+		}
+	}
+
+	static void BuildStaticMapAnalyticOverlayRules(
+		const ResolvedLightOverlaySet& resolved,
+		const nri_scene::PTMapWorld& mapWorld,
+		std::vector<SceneLightSystem::AnalyticLightRegistry::MapOverlayRule>& outRules)
+	{
+		for (const auto& resolvedRule : resolved.mapLightRules)
+		{
+			if (!IsSupportedMapOverlayRule(resolvedRule) ||
+				resolvedRule.intensity <= 0.0f ||
+				resolvedRule.radius <= 0.0f)
+			{
+				continue;
+			}
+
+			float anchorPosition[3] = {};
+			if (!TryResolveMapOverlayAnchorPosition(mapWorld, resolvedRule, anchorPosition))
+			{
+				continue;
+			}
+
+			SceneLightSystem::AnalyticLightRegistry::MapOverlayRule overlayRule = {};
+			overlayRule.ruleId = BuildMapOverlayRuleId(resolvedRule);
+			overlayRule.source = SceneLightRecordSource::StaticMapScene;
+			overlayRule.position[0] = anchorPosition[0] + resolvedRule.offset[0];
+			overlayRule.position[1] = anchorPosition[1] + resolvedRule.offset[1];
+			overlayRule.position[2] = anchorPosition[2] + resolvedRule.offset[2];
+			overlayRule.stableKey = BuildMapOverlayStableKey(overlayRule.ruleId, overlayRule.position);
+			overlayRule.color[0] = resolvedRule.color[0];
+			overlayRule.color[1] = resolvedRule.color[1];
+			overlayRule.color[2] = resolvedRule.color[2];
+			overlayRule.intensity = resolvedRule.intensity;
+			overlayRule.radius = resolvedRule.radius;
+			overlayRule.flickerFrames = resolvedRule.flickerFrames;
+			outRules.push_back(overlayRule);
 		}
 	}
 
@@ -3491,11 +3707,12 @@ void NRIRenderer::ClearRuntimePointLights()
 void NRIRenderer::PrintRuntimePointLights() const
 {
 	const auto& analyticLights = mSceneLights.GetAnalyticLights();
-	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u overlay_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u limit=%u\n",
+	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u overlay_rules=%u map_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u limit=%u\n",
 		(uint32_t)analyticLights.activeLights.size(),
 		(uint32_t)analyticLights.manualLights.size(),
 		(uint32_t)analyticLights.spriteTileRules.size(),
 		analyticLights.actorOverlayRuleCount,
+		analyticLights.mapOverlayRuleCount,
 		analyticLights.matchedSurfaceCount,
 		analyticLights.actorOverlayMatchedSurfaceCount,
 		analyticLights.dedupedMatchCount,
@@ -3511,10 +3728,12 @@ void NRIRenderer::PrintRuntimePointLights() const
 		const char* sourceBase =
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_Manual) != 0 ? "manual" :
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? "overlay" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_MapOverlay) != 0 ? "overlay" :
 			"heuristic";
 		const char* sourceSuffix =
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_SpriteTileHeuristic) != 0 ? ":sprite_tile" :
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? ":actor" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_MapOverlay) != 0 ? ":map" :
 			"";
 		Printf("NRI PT analytic light %u: id=%u stable=0x%016llx source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
 			light.id,
@@ -6153,12 +6372,18 @@ void NRIRenderer::RefreshSceneLightSystem(
 
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>> actorOverlayRules;
+	std::vector<SceneLightSystem::AnalyticLightRegistry::MapOverlayRule> mapOverlayRules;
 	BuildActorAnalyticOverlayRules(resolvedLightOverlays, actorOverlayRules);
+	if (mMapWorld.valid)
+	{
+		BuildStaticMapAnalyticOverlayRules(resolvedLightOverlays, mMapWorld, mapOverlayRules);
+	}
 
 	mSceneLights.RebuildAnalyticLights(
 		mFrameIndex,
 		NRI_MAX_RUNTIME_POINT_LIGHTS,
-		actorOverlayRules.empty() ? nullptr : &actorOverlayRules);
+		actorOverlayRules.empty() ? nullptr : &actorOverlayRules,
+		mapOverlayRules.empty() ? nullptr : &mapOverlayRules);
 	mSceneLights.RebuildEmissiveSurfaces(NRI_MAX_EMISSIVE_SURFACES);
 	mSceneLights.RebuildSectorLighting(mFrameIndex, (uint32_t)sector.Size());
 	if (resolvedLightOverlays.resolvedGeneration != 0 &&

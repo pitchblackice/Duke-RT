@@ -414,6 +414,7 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mAnalyticLights.matchedSurfaceCount = 0;
 	mAnalyticLights.actorOverlayRuleCount = 0;
 	mAnalyticLights.actorOverlayMatchedSurfaceCount = 0;
+	mAnalyticLights.mapOverlayRuleCount = 0;
 	mAnalyticLights.dedupedMatchCount = 0;
 	mAnalyticLights.truncatedLightCount = 0;
 	mAnalyticLights.topologyChanged = false;
@@ -437,7 +438,11 @@ void SceneLightSystem::AppendSceneView(const nri_scene::SceneView& sceneView, co
 	AppendSurfaceList(sceneView.opaqueSprites, materials, source, materialIndex);
 }
 
-void SceneLightSystem::RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxActiveLights, const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules)
+void SceneLightSystem::RebuildAnalyticLights(
+	uint32_t frameIndex,
+	uint32_t maxActiveLights,
+	const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules,
+	const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules)
 {
 	std::vector<SceneAnalyticLight> nextLights;
 	size_t overlayRuleCount = 0;
@@ -448,10 +453,12 @@ void SceneLightSystem::RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxAc
 			overlayRuleCount += entry.second.size();
 		}
 	}
+	const size_t mapOverlayRuleCount = mapOverlayRules != nullptr ? mapOverlayRules->size() : 0u;
 	mAnalyticLights.actorOverlayRuleCount = (uint32_t)overlayRuleCount;
-	nextLights.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size() + overlayRuleCount);
+	mAnalyticLights.mapOverlayRuleCount = (uint32_t)mapOverlayRuleCount;
+	nextLights.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size() + overlayRuleCount + mapOverlayRuleCount);
 	std::unordered_map<uint64_t, size_t> keyToLightIndex;
-	keyToLightIndex.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size() * 4u + overlayRuleCount * 2u);
+	keyToLightIndex.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size() * 4u + overlayRuleCount * 2u + mapOverlayRuleCount);
 
 	auto tryAppendLight = [this, &nextLights, &keyToLightIndex, maxActiveLights](const SceneAnalyticLight& light)
 	{
@@ -549,6 +556,26 @@ void SceneLightSystem::RebuildAnalyticLights(uint32_t frameIndex, uint32_t maxAc
 				light.radius = rule.radius;
 				tryAppendLight(light);
 			}
+		}
+	}
+
+	if (mapOverlayRules != nullptr)
+	{
+		for (const AnalyticLightRegistry::MapOverlayRule& rule : *mapOverlayRules)
+		{
+			SceneAnalyticLight light = {};
+			light.stableKey = rule.stableKey;
+			light.id = 0;
+			light.sourceFlags = SceneAnalyticLightSourceFlag_MapOverlay;
+			light.sourceRuleId = rule.ruleId;
+			light.source = rule.source;
+			light.actorIndex = -1;
+			light.textureId = 0;
+			Copy3f(rule.position, light.position);
+			Copy3f(rule.color, light.color);
+			light.intensity = rule.intensity * EvaluateFlickerScale(light.stableKey, frameIndex, rule.flickerFrames);
+			light.radius = rule.radius;
+			tryAppendLight(light);
 		}
 	}
 
