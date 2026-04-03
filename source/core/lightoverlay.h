@@ -123,6 +123,7 @@ struct ParsedLightOverlaySourceFile
 struct ParsedLightOverlayDatabase
 {
 	uint32_t generation = 0;
+	uint64_t contentHash = 0;
 	bool hadParseErrors = false;
 	ParsedLightOverlayDefaults defaults;
 	TArray<ParsedLightOverlaySourceFile> sourceFiles;
@@ -233,7 +234,22 @@ struct ResolvedLightOverlaySet
 	TArray<ResolvedLightOverlayActorOverrideRule> actorOverrideRules;
 };
 
+enum class LightOverlayRuleKind : uint8_t
+{
+	ActorRule,
+	Directional,
+	MapLight,
+	ActorOverride,
+};
+
 const ParsedLightOverlayDatabase& GetParsedLightOverlayDatabase();
 const ResolvedLightOverlaySet& GetResolvedLightOverlaySet();
 const ResolvedLightOverlaySet& ResolveLightOverlaysForMap(const char* mapName);
 bool ParseLightOverlays(bool verbose = false);
+bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database, bool verbose = false);
+FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorRule& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayDirectionalRule& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMapLightRule& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced = nullptr);
+bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRuleKind kind, const char* id, const char* mapName = nullptr);

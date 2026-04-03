@@ -1,6 +1,7 @@
 #include "lightoverlay.h"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "c_dispatch.h"
 #include "filesystem.h"
 #include "coreactor.h"
+#include "files.h"
 #include "mapinfo.h"
 #include "printf.h"
 #include "sc_man.h"
@@ -59,6 +61,38 @@ namespace
 		destination[0] = source[0];
 		destination[1] = source[1];
 		destination[2] = source[2];
+	}
+
+	static uint64_t HashCombineLightOverlayText(uint64_t hash, uint8_t value)
+	{
+		hash ^= value;
+		hash *= 1099511628211ull;
+		return hash;
+	}
+
+	static FString FormatLightOverlayFloat(float value)
+	{
+		FString text = FStringf("%.6g", value);
+		if (text.IndexOf('.') < 0 && text.IndexOf('e') < 0 && text.IndexOf('E') < 0)
+		{
+			text << ".0";
+		}
+		return text;
+	}
+
+	static FString QuoteLightOverlayString(const FString& value)
+	{
+		FString quoted = "\"";
+		for (const char* p = value.GetChars(); *p != 0; ++p)
+		{
+			if (*p == '\\' || *p == '"')
+			{
+				quoted << '\\';
+			}
+			quoted << *p;
+		}
+		quoted << '"';
+		return quoted;
 	}
 
 	static FString CanonicalizeMapName(const char* mapName)
@@ -705,6 +739,260 @@ namespace
 		return sorted;
 	}
 
+	template <typename RuleType>
+	static std::vector<const RuleType*> SortRulesById(const TArray<RuleType>& rules)
+	{
+		std::vector<const RuleType*> sorted;
+		sorted.reserve(rules.Size());
+		for (auto& rule : rules)
+		{
+			sorted.push_back(&rule);
+		}
+		std::sort(sorted.begin(), sorted.end(), [](const RuleType* left, const RuleType* right)
+		{
+			const int idCompare = left->id.CompareNoCase(right->id);
+			if (idCompare != 0)
+			{
+				return idCompare < 0;
+			}
+			return left->source.orderIndex < right->source.orderIndex;
+		});
+		return sorted;
+	}
+
+	static std::vector<FString> CollectSortedMapNames(const ParsedLightOverlayDatabase& database)
+	{
+		std::vector<FString> mapNames;
+		auto addMap = [&mapNames](const FString& mapName)
+		{
+			for (const auto& existing : mapNames)
+			{
+				if (existing.CompareNoCase(mapName) == 0)
+				{
+					return;
+				}
+			}
+			mapNames.push_back(mapName);
+		};
+
+		for (const auto& rule : database.directionalRules) addMap(rule.mapName);
+		for (const auto& rule : database.mapLightRules) addMap(rule.mapName);
+		for (const auto& rule : database.actorOverrideRules) addMap(rule.mapName);
+
+		std::sort(mapNames.begin(), mapNames.end(), [](const FString& left, const FString& right)
+		{
+			return left.CompareNoCase(right) < 0;
+		});
+		return mapNames;
+	}
+
+	static void AppendLine(FString& text, int indentLevel, const FString& line)
+	{
+		for (int i = 0; i < indentLevel; ++i)
+		{
+			text << "    ";
+		}
+		text << line << "\n";
+	}
+
+	static void AppendVector3Field(FString& text, int indentLevel, const char* name, const float value[3])
+	{
+		AppendLine(text, indentLevel, FStringf("%s %s %s %s",
+			name,
+			FormatLightOverlayFloat(value[0]).GetChars(),
+			FormatLightOverlayFloat(value[1]).GetChars(),
+			FormatLightOverlayFloat(value[2]).GetChars()));
+	}
+
+	static void AppendShadowStateField(FString& text, int indentLevel, const char* name, bool enabled)
+	{
+		AppendLine(text, indentLevel, FStringf("%s %s", name, enabled ? "on" : "off"));
+	}
+
+	static void AppendActorRuleBlock(FString& text, const ParsedLightOverlayActorRule& rule)
+	{
+		AppendLine(text, 1, FStringf("actorrule %s", QuoteLightOverlayString(rule.id).GetChars()));
+		AppendLine(text, 1, "{");
+		AppendLine(text, 2, FStringf("actorclass %s", QuoteLightOverlayString(rule.actorClassName).GetChars()));
+		if (rule.hasShadowReceive) AppendShadowStateField(text, 2, "shadowreceive", rule.shadowReceive);
+		if (rule.hasShadowCast) AppendShadowStateField(text, 2, "shadowcast", rule.shadowCast);
+		if (rule.hasTileFilter) AppendLine(text, 2, FStringf("tile %d", rule.tileFilter));
+		AppendLine(text, 2, FStringf("type %s", QuoteLightOverlayString(rule.lightType).GetChars()));
+		if (rule.hasColor) AppendVector3Field(text, 2, "color", rule.color);
+		if (rule.hasIntensity) AppendLine(text, 2, FStringf("intensity %s", FormatLightOverlayFloat(rule.intensity).GetChars()));
+		if (rule.hasRadius) AppendLine(text, 2, FStringf("radius %s", FormatLightOverlayFloat(rule.radius).GetChars()));
+		if (rule.hasRange) AppendLine(text, 2, FStringf("range %s", FormatLightOverlayFloat(rule.range).GetChars()));
+		if (rule.hasOffset) AppendVector3Field(text, 2, "offset", rule.offset);
+		if (rule.hasDirection) AppendVector3Field(text, 2, "direction", rule.direction);
+		if (rule.hasFlicker) AppendLine(text, 2, FStringf("flicker %u", rule.flickerFrames));
+		if (rule.hasLocalSpacePolicy) AppendLine(text, 2, FStringf("localspace %s", QuoteLightOverlayString(rule.localSpacePolicy).GetChars()));
+		AppendLine(text, 1, "}");
+	}
+
+	static void AppendDirectionalRuleBlock(FString& text, const ParsedLightOverlayDirectionalRule& rule)
+	{
+		AppendLine(text, 2, FStringf("directional %s", QuoteLightOverlayString(rule.id).GetChars()));
+		AppendLine(text, 2, "{");
+		if (rule.hasColor) AppendVector3Field(text, 3, "color", rule.color);
+		if (rule.hasIntensity) AppendLine(text, 3, FStringf("intensity %s", FormatLightOverlayFloat(rule.intensity).GetChars()));
+		if (rule.hasDirection) AppendVector3Field(text, 3, "direction", rule.direction);
+		if (rule.hasAngularSize) AppendLine(text, 3, FStringf("angularsize %s", FormatLightOverlayFloat(rule.angularSize).GetChars()));
+		if (rule.hasShadow) AppendShadowStateField(text, 3, "shadow", rule.shadow);
+		AppendLine(text, 2, "}");
+	}
+
+	static void AppendMapLightRuleBlock(FString& text, const ParsedLightOverlayMapLightRule& rule)
+	{
+		AppendLine(text, 2, FStringf("light %s", QuoteLightOverlayString(rule.id).GetChars()));
+		AppendLine(text, 2, "{");
+		AppendLine(text, 3, FStringf("type %s", QuoteLightOverlayString(rule.lightType).GetChars()));
+		switch (rule.anchorType)
+		{
+		case LightOverlayAnchorType::Position:
+			AppendLine(text, 3, FStringf("anchor position %s %s %s",
+				FormatLightOverlayFloat(rule.anchorPosition[0]).GetChars(),
+				FormatLightOverlayFloat(rule.anchorPosition[1]).GetChars(),
+				FormatLightOverlayFloat(rule.anchorPosition[2]).GetChars()));
+			break;
+		case LightOverlayAnchorType::Sector:
+			AppendLine(text, 3, FStringf("anchor sector %d", rule.anchorIndex));
+			break;
+		case LightOverlayAnchorType::Wall:
+			AppendLine(text, 3, FStringf("anchor wall %d", rule.anchorIndex));
+			break;
+		default:
+			break;
+		}
+		if (rule.hasOffset) AppendVector3Field(text, 3, "offset", rule.offset);
+		if (rule.hasDirection) AppendVector3Field(text, 3, "direction", rule.direction);
+		if (rule.hasColor) AppendVector3Field(text, 3, "color", rule.color);
+		if (rule.hasIntensity) AppendLine(text, 3, FStringf("intensity %s", FormatLightOverlayFloat(rule.intensity).GetChars()));
+		if (rule.hasRadius) AppendLine(text, 3, FStringf("radius %s", FormatLightOverlayFloat(rule.radius).GetChars()));
+		if (rule.hasRange) AppendLine(text, 3, FStringf("range %s", FormatLightOverlayFloat(rule.range).GetChars()));
+		if (rule.hasFlicker) AppendLine(text, 3, FStringf("flicker %u", rule.flickerFrames));
+		AppendLine(text, 2, "}");
+	}
+
+	static void AppendActorOverrideRuleBlock(FString& text, const ParsedLightOverlayActorOverrideRule& rule)
+	{
+		AppendLine(text, 2, FStringf("actoroverride %s", QuoteLightOverlayString(rule.id).GetChars()));
+		AppendLine(text, 2, "{");
+		AppendLine(text, 3, FStringf("actorclass %s", QuoteLightOverlayString(rule.actorClassName).GetChars()));
+		if (rule.hasShadowReceive) AppendShadowStateField(text, 3, "shadowreceive", rule.shadowReceive);
+		if (rule.hasShadowCast) AppendShadowStateField(text, 3, "shadowcast", rule.shadowCast);
+		AppendLine(text, 2, "}");
+	}
+
+	static uint64_t ComputeLightOverlayTextHash(const FString& text)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		for (const char* p = text.GetChars(); *p != 0; ++p)
+		{
+			hash = HashCombineLightOverlayText(hash, (uint8_t)*p);
+		}
+		return hash;
+	}
+
+	static int32_t FindActorRuleIndex(const ParsedLightOverlayDatabase& database, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.actorRules.Size(); ++i)
+		{
+			if (database.actorRules[i].id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
+	static int32_t FindDirectionalRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.directionalRules.Size(); ++i)
+		{
+			if (database.directionalRules[i].mapName.CompareNoCase(mapName) == 0 &&
+				database.directionalRules[i].id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
+	static int32_t FindMapLightRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.mapLightRules.Size(); ++i)
+		{
+			if (database.mapLightRules[i].mapName.CompareNoCase(mapName) == 0 &&
+				database.mapLightRules[i].id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
+	static int32_t FindActorOverrideRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.actorOverrideRules.Size(); ++i)
+		{
+			if (database.actorOverrideRules[i].mapName.CompareNoCase(mapName) == 0 &&
+				database.actorOverrideRules[i].id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
+	static uint32_t FindNextLightOverlayOrderIndex(const ParsedLightOverlayDatabase& database)
+	{
+		uint32_t nextOrderIndex = 0;
+		auto update = [&nextOrderIndex](const LightOverlaySourceLocation& source)
+		{
+			nextOrderIndex = std::max(nextOrderIndex, source.orderIndex);
+		};
+
+		if (database.defaults.present) update(database.defaults.source);
+		for (const auto& rule : database.actorRules) update(rule.source);
+		for (const auto& rule : database.directionalRules) update(rule.source);
+		for (const auto& rule : database.mapLightRules) update(rule.source);
+		for (const auto& rule : database.actorOverrideRules) update(rule.source);
+		return nextOrderIndex + 1;
+	}
+
+	static void EnsureEditableSource(ParsedLightOverlayDatabase& database, LightOverlaySourceLocation& source, const LightOverlaySourceLocation* existingSource = nullptr)
+	{
+		if (source.sourceName.IsEmpty())
+		{
+			source.sourceName = "editor";
+		}
+		if (source.orderIndex == 0)
+		{
+			source.orderIndex = existingSource != nullptr && existingSource->orderIndex != 0 ?
+				existingSource->orderIndex :
+				FindNextLightOverlayOrderIndex(database);
+		}
+
+		bool found = false;
+		for (const auto& sourceFile : database.sourceFiles)
+		{
+			if (sourceFile.lumpNum == source.lumpNum &&
+				sourceFile.sourceName.CompareNoCase(source.sourceName) == 0)
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+		{
+			ParsedLightOverlaySourceFile sourceFile;
+			sourceFile.lumpNum = source.lumpNum;
+			sourceFile.sourceName = source.sourceName;
+			database.sourceFiles.Push(sourceFile);
+		}
+	}
+
 	static void DumpParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database)
 	{
 		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d map_lights=%d directional=%d actor_overrides=%d parse_errors=%s\n",
@@ -993,6 +1281,232 @@ namespace
 	}
 }
 
+FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database)
+{
+	FString text;
+	AppendLine(text, 0, "LIGHTOVR");
+	AppendLine(text, 0, "{");
+
+	if (database.defaults.present)
+	{
+		AppendLine(text, 1, "defaults");
+		AppendLine(text, 1, "{");
+		AppendLine(text, 1, "}");
+		if (database.actorRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
+		{
+			text << "\n";
+		}
+	}
+
+	const auto actorRules = SortRulesById(database.actorRules);
+	for (size_t i = 0; i < actorRules.size(); ++i)
+	{
+		if (i > 0)
+		{
+			text << "\n";
+		}
+		AppendActorRuleBlock(text, *actorRules[i]);
+	}
+
+	const auto mapNames = CollectSortedMapNames(database);
+	if (!actorRules.empty() && !mapNames.empty())
+	{
+		text << "\n";
+	}
+
+	for (size_t mapIndex = 0; mapIndex < mapNames.size(); ++mapIndex)
+	{
+		const FString& mapName = mapNames[mapIndex];
+		AppendLine(text, 1, FStringf("map %s", QuoteLightOverlayString(mapName).GetChars()));
+		AppendLine(text, 1, "{");
+
+		std::vector<const ParsedLightOverlayDirectionalRule*> directionalRules;
+		for (const auto& rule : database.directionalRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0)
+			{
+				directionalRules.push_back(&rule);
+			}
+		}
+		std::sort(directionalRules.begin(), directionalRules.end(), [](const auto* left, const auto* right)
+		{
+			const int idCompare = left->id.CompareNoCase(right->id);
+			return idCompare != 0 ? idCompare < 0 : left->source.orderIndex < right->source.orderIndex;
+		});
+		for (const auto* rule : directionalRules)
+		{
+			AppendDirectionalRuleBlock(text, *rule);
+		}
+
+		std::vector<const ParsedLightOverlayMapLightRule*> mapLightRules;
+		for (const auto& rule : database.mapLightRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0)
+			{
+				mapLightRules.push_back(&rule);
+			}
+		}
+		std::sort(mapLightRules.begin(), mapLightRules.end(), [](const auto* left, const auto* right)
+		{
+			const int idCompare = left->id.CompareNoCase(right->id);
+			return idCompare != 0 ? idCompare < 0 : left->source.orderIndex < right->source.orderIndex;
+		});
+		for (const auto* rule : mapLightRules)
+		{
+			AppendMapLightRuleBlock(text, *rule);
+		}
+
+		std::vector<const ParsedLightOverlayActorOverrideRule*> actorOverrides;
+		for (const auto& rule : database.actorOverrideRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0)
+			{
+				actorOverrides.push_back(&rule);
+			}
+		}
+		std::sort(actorOverrides.begin(), actorOverrides.end(), [](const auto* left, const auto* right)
+		{
+			const int idCompare = left->id.CompareNoCase(right->id);
+			return idCompare != 0 ? idCompare < 0 : left->source.orderIndex < right->source.orderIndex;
+		});
+		for (const auto* rule : actorOverrides)
+		{
+			AppendActorOverrideRuleBlock(text, *rule);
+		}
+
+		AppendLine(text, 1, "}");
+		if (mapIndex + 1 < mapNames.size())
+		{
+			text << "\n";
+		}
+	}
+
+	AppendLine(text, 0, "}");
+	return text;
+}
+
+bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database, bool verbose)
+{
+	ParsedLightOverlayDatabase nextDatabase = database;
+	nextDatabase.contentHash = ComputeLightOverlayTextHash(SerializeLightOverlayDatabase(nextDatabase));
+
+	const bool contentChanged = nextDatabase.contentHash != GLightOverlayDatabase.contentHash;
+	nextDatabase.generation = contentChanged ? ++GLightOverlayGeneration : GLightOverlayDatabase.generation;
+	GLightOverlayDatabase = std::move(nextDatabase);
+
+	if (verbose)
+	{
+		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d map_lights=%d directional=%d actor_overrides=%d parse_errors=%s changed=%s\n",
+			GLightOverlayDatabase.generation,
+			GLightOverlayDatabase.sourceFiles.Size(),
+			GLightOverlayDatabase.actorRules.Size(),
+			GLightOverlayDatabase.mapLightRules.Size(),
+			GLightOverlayDatabase.directionalRules.Size(),
+			GLightOverlayDatabase.actorOverrideRules.Size(),
+			GLightOverlayDatabase.hadParseErrors ? "yes" : "no",
+			contentChanged ? "yes" : "no");
+	}
+
+	ResolveLightOverlaysForMapInternal(GetCurrentResolvedMapName(), currentLevel != nullptr);
+	return !GLightOverlayDatabase.hadParseErrors;
+}
+
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorRule& rule, bool* outReplaced)
+{
+	ParsedLightOverlayActorRule nextRule = rule;
+	const int32_t index = FindActorRuleIndex(database, nextRule.id);
+	if (outReplaced != nullptr) *outReplaced = index >= 0;
+	EnsureEditableSource(database, nextRule.source, index >= 0 ? &database.actorRules[index].source : nullptr);
+	if (index >= 0)
+	{
+		database.actorRules[index] = std::move(nextRule);
+	}
+	else
+	{
+		database.actorRules.Push(std::move(nextRule));
+	}
+	return true;
+}
+
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayDirectionalRule& rule, bool* outReplaced)
+{
+	ParsedLightOverlayDirectionalRule nextRule = rule;
+	const int32_t index = FindDirectionalRuleIndex(database, nextRule.mapName, nextRule.id);
+	if (outReplaced != nullptr) *outReplaced = index >= 0;
+	EnsureEditableSource(database, nextRule.source, index >= 0 ? &database.directionalRules[index].source : nullptr);
+	if (index >= 0)
+	{
+		database.directionalRules[index] = std::move(nextRule);
+	}
+	else
+	{
+		database.directionalRules.Push(std::move(nextRule));
+	}
+	return true;
+}
+
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMapLightRule& rule, bool* outReplaced)
+{
+	ParsedLightOverlayMapLightRule nextRule = rule;
+	const int32_t index = FindMapLightRuleIndex(database, nextRule.mapName, nextRule.id);
+	if (outReplaced != nullptr) *outReplaced = index >= 0;
+	EnsureEditableSource(database, nextRule.source, index >= 0 ? &database.mapLightRules[index].source : nullptr);
+	if (index >= 0)
+	{
+		database.mapLightRules[index] = std::move(nextRule);
+	}
+	else
+	{
+		database.mapLightRules.Push(std::move(nextRule));
+	}
+	return true;
+}
+
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced)
+{
+	ParsedLightOverlayActorOverrideRule nextRule = rule;
+	const int32_t index = FindActorOverrideRuleIndex(database, nextRule.mapName, nextRule.id);
+	if (outReplaced != nullptr) *outReplaced = index >= 0;
+	EnsureEditableSource(database, nextRule.source, index >= 0 ? &database.actorOverrideRules[index].source : nullptr);
+	if (index >= 0)
+	{
+		database.actorOverrideRules[index] = std::move(nextRule);
+	}
+	else
+	{
+		database.actorOverrideRules.Push(std::move(nextRule));
+	}
+	return true;
+}
+
+bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRuleKind kind, const char* id, const char* mapName)
+{
+	const FString ruleId = id != nullptr ? FString(id) : FString("");
+	const FString scopedMapName = mapName != nullptr ? FString(mapName) : FString("");
+	int32_t index = -1;
+	switch (kind)
+	{
+	case LightOverlayRuleKind::ActorRule:
+		index = FindActorRuleIndex(database, ruleId);
+		if (index >= 0) database.actorRules.Delete(index);
+		return index >= 0;
+	case LightOverlayRuleKind::Directional:
+		index = FindDirectionalRuleIndex(database, scopedMapName, ruleId);
+		if (index >= 0) database.directionalRules.Delete(index);
+		return index >= 0;
+	case LightOverlayRuleKind::MapLight:
+		index = FindMapLightRuleIndex(database, scopedMapName, ruleId);
+		if (index >= 0) database.mapLightRules.Delete(index);
+		return index >= 0;
+	case LightOverlayRuleKind::ActorOverride:
+		index = FindActorOverrideRuleIndex(database, scopedMapName, ruleId);
+		if (index >= 0) database.actorOverrideRules.Delete(index);
+		return index >= 0;
+	default:
+		return false;
+	}
+}
+
 const ParsedLightOverlayDatabase& GetParsedLightOverlayDatabase()
 {
 	return GLightOverlayDatabase;
@@ -1029,24 +1543,7 @@ bool ParseLightOverlays(bool verbose)
 		builder.database.hadParseErrors = builder.database.hadParseErrors || storedSourceFile.hadParseErrors;
 	}
 
-	builder.database.generation = ++GLightOverlayGeneration;
-	GLightOverlayDatabase = std::move(builder.database);
-
-	if (verbose)
-	{
-		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d map_lights=%d directional=%d actor_overrides=%d parse_errors=%s\n",
-			GLightOverlayDatabase.generation,
-			GLightOverlayDatabase.sourceFiles.Size(),
-			GLightOverlayDatabase.actorRules.Size(),
-			GLightOverlayDatabase.mapLightRules.Size(),
-			GLightOverlayDatabase.directionalRules.Size(),
-			GLightOverlayDatabase.actorOverrideRules.Size(),
-			GLightOverlayDatabase.hadParseErrors ? "yes" : "no");
-	}
-
-	ResolveLightOverlaysForMapInternal(GetCurrentResolvedMapName(), currentLevel != nullptr);
-
-	return !GLightOverlayDatabase.hadParseErrors;
+	return ApplyParsedLightOverlayDatabase(builder.database, verbose);
 }
 
 CCMD(lightoverlay_reload)
@@ -1072,4 +1569,29 @@ CCMD(lightoverlay_dumpresolved)
 		ResolveLightOverlaysForMap(argv[1]) :
 		GetResolvedLightOverlaySet();
 	DumpResolvedLightOverlaySet(resolved);
+}
+
+CCMD(lightoverlay_dumpnormalized)
+{
+	Printf("%s", SerializeLightOverlayDatabase(GetParsedLightOverlayDatabase()).GetChars());
+}
+
+CCMD(lightoverlay_export)
+{
+	if (argv.argc() != 2)
+	{
+		Printf("usage: lightoverlay_export <path>\n");
+		return;
+	}
+
+	std::unique_ptr<FileWriter> file(FileWriter::Open(argv[1]));
+	if (file == nullptr)
+	{
+		Printf("LIGHTOVR export failed: could not open '%s' for writing.\n", argv[1]);
+		return;
+	}
+
+	const FString serialized = SerializeLightOverlayDatabase(GetParsedLightOverlayDatabase());
+	file->Write(serialized.GetChars(), serialized.Len());
+	Printf("LIGHTOVR export wrote %d bytes to %s.\n", serialized.Len(), argv[1]);
 }
