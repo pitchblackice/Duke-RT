@@ -2062,6 +2062,50 @@ namespace
 		}
 	}
 
+	static bool MaterialDataEqual(const nri_scene::MaterialData& a, const nri_scene::MaterialData& b)
+	{
+		return
+			a.textureIndex == b.textureIndex &&
+			a.paletteIndex == b.paletteIndex &&
+			a.flags == b.flags &&
+			a.materialClass == b.materialClass &&
+			a.lightingFlags == b.lightingFlags &&
+			a.normalTextureIndex == b.normalTextureIndex &&
+			a.metallicTextureIndex == b.metallicTextureIndex &&
+			a.roughnessTextureIndex == b.roughnessTextureIndex &&
+			a.sectorIndex == b.sectorIndex &&
+			a.emissiveTextureIndex == b.emissiveTextureIndex &&
+			a.lightLevel == b.lightLevel &&
+			a.alpha == b.alpha &&
+			a.roughnessHint == b.roughnessHint &&
+			a.metalnessHint == b.metalnessHint &&
+			a.emissiveColor[0] == b.emissiveColor[0] &&
+			a.emissiveColor[1] == b.emissiveColor[1] &&
+			a.emissiveColor[2] == b.emissiveColor[2] &&
+			a.emissiveIntensity == b.emissiveIntensity &&
+			a.emissiveMaskScale == b.emissiveMaskScale &&
+			a.emissiveMode == b.emissiveMode &&
+			a.emissiveReserved == b.emissiveReserved;
+	}
+
+	static bool MaterialDataVectorEqual(const std::vector<nri_scene::MaterialData>& a, const std::vector<nri_scene::MaterialData>& b)
+	{
+		if (a.size() != b.size())
+		{
+			return false;
+		}
+
+		for (size_t i = 0; i < a.size(); ++i)
+		{
+			if (!MaterialDataEqual(a[i], b[i]))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	static float GetUpscalerRenderScale(nri::UpscalerMode mode)
 	{
 		switch (mode)
@@ -3704,6 +3748,56 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		sceneLightCapturedMaterials,
 		sceneLightDynamicView,
 		sceneLightDynamicMaterials);
+
+	if (mGpuSceneHasDynamicOverlay &&
+		activeMaterialBridge == &combinedMaterialBridge &&
+		!overlayGeometry.primitives.empty())
+	{
+		std::vector<nri_scene::MaterialData> refreshedCombinedGpuMaterials = combinedMaterialBridge.materials;
+		ApplyEmissiveMaterialOverrides(combinedMaterialBridge, refreshedCombinedGpuMaterials);
+		ApplyActorShadowMaterialOverrides(combinedMaterialBridge, refreshedCombinedGpuMaterials);
+		if (!MaterialDataVectorEqual(refreshedCombinedGpuMaterials, combinedGpuMaterials))
+		{
+			const size_t staticMaterialCount = mStaticMapScene.gpuMaterials.size();
+			if (refreshedCombinedGpuMaterials.size() < staticMaterialCount)
+			{
+				LogFallback("PT runtime overlay material refresh produced an invalid material slice.");
+				if (preserveHistory)
+				{
+					restoreHistory();
+				}
+				return false;
+			}
+
+			combinedGpuMaterials = std::move(refreshedCombinedGpuMaterials);
+			dynamicGpuMaterials.assign(combinedGpuMaterials.begin() + staticMaterialCount, combinedGpuMaterials.end());
+			if (!UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) ||
+				!UpdateSceneDataSet(
+					mStaticVertexBuffer,
+					mStaticIndexBuffer,
+					mStaticPrimitiveBuffer,
+					mStaticMaterialBuffer,
+					mVertexBuffer,
+					mIndexBuffer,
+					mPrimitiveBuffer,
+					mMaterialBuffer,
+					mBoundSceneInstances,
+					(uint32_t)mStaticMapScene.geometry.primitives.size(),
+					(uint32_t)overlayGeometry.primitives.size(),
+					(uint32_t)mStaticMapScene.gpuMaterials.size(),
+					(uint32_t)dynamicGpuMaterials.size()))
+			{
+				LogFallback("PT runtime overlay material refresh failed after scene-light rebuild.");
+				if (preserveHistory)
+				{
+					restoreHistory();
+				}
+				return false;
+			}
+
+			activeGpuMaterials = &combinedGpuMaterials;
+		}
+	}
 
 	if (sceneLightUsesStaticMapScene && !mGpuSceneHasDynamicOverlay)
 	{
