@@ -12,6 +12,7 @@ enum class SceneLightRecordSource : uint32_t
 	None = 0,
 	CapturedScene,
 	StaticMapScene,
+	RuntimeMutationScene,
 	DynamicScene,
 };
 

@@ -349,6 +349,8 @@ private:
 	{
 		const nri_scene::GeometryData* staticGeometry = nullptr;
 		const nri_scene::GeometryData* capturedGeometry = nullptr;
+		const nri_scene::GeometryData* runtimeMutationGeometry = nullptr;
+		uint32_t runtimeMutationPrimitiveBaseOffset = 0;
 		const nri_scene::GeometryData* dynamicGeometry = nullptr;
 		uint32_t dynamicPrimitiveBaseOffset = 0;
 	};
@@ -451,6 +453,7 @@ private:
 			bool lastTraceBlindSpot = false;
 			uint32_t surfaceCount = 0;
 			uint32_t triangleCount = 0;
+			nri_scene::SceneView sceneView;
 			nri_scene::GeometryData geometry;
 			nri_scene::MaterialBridgeData materialBridge;
 		};

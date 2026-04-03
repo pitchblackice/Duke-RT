@@ -2817,6 +2817,7 @@ namespace
 		{
 		case SceneLightRecordSource::CapturedScene: return "captured_scene";
 		case SceneLightRecordSource::StaticMapScene: return "static_map_scene";
+		case SceneLightRecordSource::RuntimeMutationScene: return "runtime_mutation_scene";
 		case SceneLightRecordSource::DynamicScene: return "dynamic_scene";
 		default: return "none";
 		}
@@ -3438,6 +3439,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						BuildDynamicAccelerationStructure(overlayGeometry) &&
 						mDynamicBottomLevelAS.accelerationStructure != nullptr;
 				}
+				emissiveSamplingContext.runtimeMutationGeometry = hasRuntimeMutationOverlay ? &runtimeMutationGeometry : nullptr;
+				emissiveSamplingContext.runtimeMutationPrimitiveBaseOffset = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
 				emissiveSamplingContext.dynamicGeometry = hasActiveDynamicOverlay ? activeDynamicGeometry : nullptr;
 				emissiveSamplingContext.dynamicPrimitiveBaseOffset = (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationGeometry.primitives.size());
 				if (accelerationReady)
@@ -6643,8 +6646,25 @@ void NRIRenderer::RefreshSceneLightSystem(
 	if (usedStaticMapScene && mStaticMapScene.valid)
 	{
 		const size_t chunkCount = std::min(mStaticMapScene.lightChunkViews.size(), mStaticMapScene.chunks.size());
+		uint32_t runtimeMutationMaterialOffset = 0;
 		for (size_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
 		{
+			const bool useRuntimeMutationReplacement =
+				chunkIndex < mRuntimeMapMutations.chunks.size() &&
+				mRuntimeMapMutations.chunks[chunkIndex].active &&
+				mRuntimeMapMutations.chunks[chunkIndex].valid;
+			if (useRuntimeMutationReplacement)
+			{
+				const auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
+				mSceneLights.AppendSceneView(
+					replacement.sceneView,
+					replacement.materialBridge,
+					SceneLightRecordSource::RuntimeMutationScene,
+					runtimeMutationMaterialOffset);
+				runtimeMutationMaterialOffset += (uint32_t)replacement.materialBridge.materials.size();
+				continue;
+			}
+
 			mSceneLights.AppendSceneView(
 				mStaticMapScene.lightChunkViews[chunkIndex],
 				mStaticMapScene.materialBridge,
@@ -7313,9 +7333,11 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 
 	std::vector<MaterialPrimitiveRange> staticRanges;
 	std::vector<MaterialPrimitiveRange> capturedRanges;
+	std::vector<MaterialPrimitiveRange> runtimeMutationRanges;
 	std::vector<MaterialPrimitiveRange> dynamicRanges;
 	buildRanges(context.staticGeometry, staticRanges);
 	buildRanges(context.capturedGeometry, capturedRanges);
+	buildRanges(context.runtimeMutationGeometry, runtimeMutationRanges);
 	buildRanges(context.dynamicGeometry, dynamicRanges);
 
 	std::vector<BuiltCandidate> candidates;
@@ -7396,6 +7418,9 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			break;
 		case SceneLightRecordSource::CapturedScene:
 			appendSurfacePrimitives(surface, context.capturedGeometry, capturedRanges, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u);
+			break;
+		case SceneLightRecordSource::RuntimeMutationScene:
+			appendSurfacePrimitives(surface, context.runtimeMutationGeometry, runtimeMutationRanges, NRI_SCENE_DATA_SOURCE_DYNAMIC, context.runtimeMutationPrimitiveBaseOffset);
 			break;
 		case SceneLightRecordSource::DynamicScene:
 			appendSurfacePrimitives(surface, context.dynamicGeometry, dynamicRanges, NRI_SCENE_DATA_SOURCE_DYNAMIC, context.dynamicPrimitiveBaseOffset);
@@ -9529,6 +9554,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.sectorDirty = false;
 			replacement.dragged = false;
 			replacement.blindSpot = false;
+			replacement.sceneView = {};
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
 			continue;
 		}
@@ -9580,6 +9606,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		if (analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None)
 		{
 			replacement.active = false;
+			replacement.sceneView = {};
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
 			continue;
 		}
@@ -9615,6 +9642,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					nri_scene::BuildMaterials(liveChunkView, liveMaterials);
 				}
 
+				replacement.sceneView = std::move(liveChunkView);
 				replacement.geometry = std::move(liveGeometry);
 				replacement.materialBridge = std::move(liveMaterials);
 				replacement.surfaceCount = liveStats.surfaceCount;
@@ -9634,6 +9662,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			else if (!builtChunk)
 			{
 				replacement.active = false;
+				replacement.sceneView = {};
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
 				continue;
 			}
