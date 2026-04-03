@@ -5987,6 +5987,8 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		return;
 	}
 
+	const SurfaceProbeEmissiveDiagnostics emissiveDiagnostics = BuildSurfaceProbeEmissiveDiagnostics(result);
+
 	const uint32_t flags = result.primitiveFlags;
 	const uint32_t lightingFlags = result.materialLightingFlags;
 	const int32_t localSpaceIndex = result.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)result.provenance.mapChunkIndex) : -1;
@@ -6038,7 +6040,7 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	FString textureName;
 	int32_t legacyTile = -1;
 	ResolveSurfaceProbeTextureDebugInfo(result.textureId, textureName, legacyTile);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(result.sceneOwner),
@@ -6093,12 +6095,111 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		result.materialClass,
 		GetMaterialEmissiveModeName(result.emissiveMode),
 		result.emissiveTextureIndex != UINT32_MAX ? result.emissiveTextureIndex : 0u,
+		YesNo(emissiveDiagnostics.sceneLightSurfaceMatch),
+		emissiveDiagnostics.sceneLightMaterialIndex != UINT32_MAX ? emissiveDiagnostics.sceneLightMaterialIndex : 0u,
+		YesNo(emissiveDiagnostics.activeEmissiveSurfaceMatch),
+		emissiveDiagnostics.emissivePrimitiveMatchCount,
 		result.lightLevel,
 		result.alpha,
 		result.averageColor[0], result.averageColor[1], result.averageColor[2],
 		result.emissiveColor[0], result.emissiveColor[1], result.emissiveColor[2],
 		result.glowColor[0], result.glowColor[1], result.glowColor[2]);
 	mLastLoggedSurfaceProbe = result;
+}
+
+NRIRenderer::SurfaceProbeEmissiveDiagnostics NRIRenderer::BuildSurfaceProbeEmissiveDiagnostics(const SurfaceProbeResult& probe) const
+{
+	SurfaceProbeEmissiveDiagnostics diagnostics = {};
+	if (!probe.valid || !probe.hit)
+	{
+		return diagnostics;
+	}
+
+	const auto provenanceMatches = [](const nri_scene::SurfaceProvenance& a, const nri_scene::SurfaceProvenance& b)
+	{
+		return
+			a.sourceType == b.sourceType &&
+			a.drawListType == b.drawListType &&
+			a.mapChunkIndex == b.mapChunkIndex &&
+			a.sectionIndex == b.sectionIndex &&
+			a.sectorIndex == b.sectorIndex &&
+			a.wallIndex == b.wallIndex &&
+			a.nextSectorIndex == b.nextSectorIndex &&
+			a.actorIndex == b.actorIndex &&
+			a.cstat == b.cstat;
+	};
+
+	const auto mapOwnerToLightSource = [](uint32_t owner) -> SceneLightRecordSource
+	{
+		switch (owner)
+		{
+		case NRI_SURFACE_PROBE_OWNER_STATIC_MAP: return SceneLightRecordSource::StaticMapScene;
+		case NRI_SURFACE_PROBE_OWNER_CAPTURED_SCENE: return SceneLightRecordSource::CapturedScene;
+		case NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION: return SceneLightRecordSource::RuntimeMutationScene;
+		case NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY: return SceneLightRecordSource::DynamicScene;
+		default: return SceneLightRecordSource::CapturedScene;
+		}
+	};
+
+	const SceneLightRecordSource expectedSource = mapOwnerToLightSource(probe.sceneOwner);
+	const SceneLightSystem::SurfaceRecord* matchedSurface = nullptr;
+	for (const auto& record : mSceneLights.GetSurfaceRecords())
+	{
+		if (!provenanceMatches(record.provenance, probe.provenance))
+		{
+			continue;
+		}
+		if (record.material.textureId != probe.textureId)
+		{
+			continue;
+		}
+		if (record.source == expectedSource)
+		{
+			matchedSurface = &record;
+			break;
+		}
+		if (matchedSurface == nullptr)
+		{
+			matchedSurface = &record;
+		}
+	}
+
+	if (matchedSurface == nullptr)
+	{
+		return diagnostics;
+	}
+
+	diagnostics.sceneLightSurfaceMatch = true;
+	diagnostics.sceneLightMaterialIndex = matchedSurface->materialIndex;
+
+	for (const auto& surface : mSceneLights.GetEmissiveSurfaces().activeSurfaces)
+	{
+		if (surface.source == matchedSurface->source &&
+			surface.materialIndex == matchedSurface->materialIndex &&
+			surface.textureId == matchedSurface->material.textureId &&
+			surface.actorIndex == matchedSurface->provenance.actorIndex)
+		{
+			diagnostics.activeEmissiveSurfaceMatch = true;
+			break;
+		}
+	}
+
+	const uint32_t expectedDataSource =
+		matchedSurface->source == SceneLightRecordSource::StaticMapScene ?
+			NRI_SCENE_DATA_SOURCE_STATIC :
+			NRI_SCENE_DATA_SOURCE_DYNAMIC;
+	for (const auto& record : mBoundEmissivePrimitiveRecords)
+	{
+		if (record.dataSource == expectedDataSource &&
+			record.materialIndex == matchedSurface->materialIndex &&
+			record.textureId == matchedSurface->material.textureId &&
+			record.actorIndex == matchedSurface->provenance.actorIndex)
+		{
+			diagnostics.emissivePrimitiveMatchCount++;
+		}
+	}
+
+	return diagnostics;
 }
 
 void NRIRenderer::PrintSurfaceProbeStatus() const
@@ -6115,6 +6216,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		return;
 	}
 
+	const SurfaceProbeEmissiveDiagnostics emissiveDiagnostics = BuildSurfaceProbeEmissiveDiagnostics(mLastSurfaceProbe);
 	const uint32_t flags = mLastSurfaceProbe.primitiveFlags;
 	const uint32_t lightingFlags = mLastSurfaceProbe.materialLightingFlags;
 	const int32_t localSpaceIndex = mLastSurfaceProbe.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex) : -1;
@@ -6163,7 +6265,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		}
 	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
-	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner),
@@ -6217,6 +6319,10 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		mLastSurfaceProbe.materialClass,
 		GetMaterialEmissiveModeName(mLastSurfaceProbe.emissiveMode),
 		mLastSurfaceProbe.emissiveTextureIndex != UINT32_MAX ? mLastSurfaceProbe.emissiveTextureIndex : 0u,
+		YesNo(emissiveDiagnostics.sceneLightSurfaceMatch),
+		emissiveDiagnostics.sceneLightMaterialIndex != UINT32_MAX ? emissiveDiagnostics.sceneLightMaterialIndex : 0u,
+		YesNo(emissiveDiagnostics.activeEmissiveSurfaceMatch),
+		emissiveDiagnostics.emissivePrimitiveMatchCount,
 		mLastSurfaceProbe.lightLevel,
 		mLastSurfaceProbe.alpha,
 		mLastSurfaceProbe.averageColor[0],

@@ -270,6 +270,14 @@ private:
 		nri_scene::SurfaceProvenance provenance = {};
 	};
 
+	struct SurfaceProbeEmissiveDiagnostics
+	{
+		bool sceneLightSurfaceMatch = false;
+		bool activeEmissiveSurfaceMatch = false;
+		uint32_t sceneLightMaterialIndex = UINT32_MAX;
+		uint32_t emissivePrimitiveMatchCount = 0;
+	};
+
 	struct SurfaceProbeFrameState
 	{
 		bool valid = false;
@@ -634,6 +642,7 @@ private:
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	void PrintSurfaceProbeStatus() const;
+	SurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const SurfaceProbeResult& probe) const;
 	bool BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sceneView) const;
 	void RefreshSceneLightSystem(
