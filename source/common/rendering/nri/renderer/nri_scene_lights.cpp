@@ -150,10 +150,10 @@ namespace
 	{
 		uint64_t key = 1469598103934665603ull;
 		key = HashCombine64(key, (uint64_t)rule.ruleId);
-		key = HashCombine64(key, (uint64_t)record.material.textureId);
-		key = HashCombine64(key, (uint64_t)(uint32_t)record.provenance.sourceType);
 		if (record.provenance.actorIndex >= 0)
 		{
+			// Actor overlay lights should stay stable across animated tile changes and
+			// captured-vs-dynamic scene routing. Their identity is the matched actor and rule.
 			key = HashCombine64(key, 0x0A47000000000000ull | (uint64_t)(uint32_t)record.provenance.actorIndex);
 		}
 		else
