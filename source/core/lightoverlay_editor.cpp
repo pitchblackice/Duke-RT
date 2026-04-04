@@ -266,8 +266,10 @@ namespace
 			return false;
 		}
 
-		file->Write(text.GetChars(), text.Len());
-		return true;
+		const size_t bytesToWrite = text.Len();
+		const size_t bytesWritten = file->Write(text.GetChars(), bytesToWrite);
+		file->Close();
+		return bytesWritten == bytesToWrite;
 	}
 
 	static bool ReloadActorLightEditorOverlays()
