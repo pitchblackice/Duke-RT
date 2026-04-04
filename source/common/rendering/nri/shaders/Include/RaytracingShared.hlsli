@@ -483,6 +483,25 @@ bool IsVisibleFlatPlane(uint sectorIndex, bool ceiling)
 	return (gVisibleFlatPlaneWords[wordIndex] & (1u << (flatPlaneIndex & 31u))) != 0u;
 }
 
+bool IsRejectedStaticWallSlot(uint slotIndex)
+{
+	if (slotIndex == 0xffffffffu)
+	{
+		return false;
+	}
+
+	uint rejectedStaticWallSlotWordCount = 0u;
+	uint rejectedStaticWallSlotStride = 0u;
+	gRejectedStaticWallSlotWords.GetDimensions(rejectedStaticWallSlotWordCount, rejectedStaticWallSlotStride);
+	const uint wordIndex = slotIndex >> 5u;
+	if (wordIndex >= rejectedStaticWallSlotWordCount)
+	{
+		return false;
+	}
+
+	return (gRejectedStaticWallSlotWords[wordIndex] & (1u << (slotIndex & 31u))) != 0u;
+}
+
 bool ShouldRejectHiddenStaticFlat(uint materialIndex, uint dataSource, PrimitiveData primitive)
 {
 	if (dataSource != SCENE_DATA_SOURCE_STATIC)
@@ -499,6 +518,21 @@ bool ShouldRejectHiddenStaticFlat(uint materialIndex, uint dataSource, Primitive
 	}
 
 	return !IsVisibleFlatPlane(material.sectorIndex, primitive.normal.y < 0.0);
+}
+
+bool ShouldRejectReplacedStaticWall(uint dataSource, PrimitiveData primitive)
+{
+	if (dataSource != SCENE_DATA_SOURCE_STATIC)
+	{
+		return false;
+	}
+
+	if ((primitive.flags & MATERIAL_FLAG_FLAT) != 0u)
+	{
+		return false;
+	}
+
+	return IsRejectedStaticWallSlot(primitive.reserved1);
 }
 
 bool ShouldIgnoreOneWayHit(uint materialIndex, uint dataSource, float3 geometricNormal, float3 rayDirection)
@@ -650,6 +684,12 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		}
 
 		if (gateVisibleChunks && ShouldRejectHiddenStaticFlat(primitive.materialIndex, instanceData.dataSource, primitive))
+		{
+			accumulatedDistance = committedDistance;
+			continue;
+		}
+
+		if (ShouldRejectReplacedStaticWall(instanceData.dataSource, primitive))
 		{
 			accumulatedDistance = committedDistance;
 			continue;

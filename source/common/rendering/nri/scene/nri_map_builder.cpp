@@ -212,7 +212,7 @@ namespace
 		provenance.sourceType = desc.sourceType;
 		provenance.sectorIndex = desc.frontSector != nullptr ? sector.IndexOf(desc.frontSector) : -1;
 		provenance.wallIndex = desc.wall != nullptr ? wall.IndexOf(desc.wall) : -1;
-		provenance.sectionIndex = -1;
+		provenance.sectionIndex = (int32_t)desc.bandKind;
 		provenance.mapChunkIndex = chunkIndex;
 		provenance.nextSectorIndex = desc.wall != nullptr ? desc.wall->nextsector : -1;
 		provenance.drawListType = UINT32_MAX;

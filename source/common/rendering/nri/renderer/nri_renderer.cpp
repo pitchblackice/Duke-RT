@@ -190,6 +190,14 @@ namespace
 			(reasonMask & ~materialOnlyReasonMask) == 0;
 	}
 
+	static bool IsPureWallMaterialOnlyChunkReplacement(uint32_t reasonMask)
+	{
+		return
+			(reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0 &&
+			(reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) == 0 &&
+			(reasonMask & ~(nri_scene::PTMapChunkMutationReason_SectorMaterial | nri_scene::PTMapChunkMutationReason_WallMaterial)) == 0;
+	}
+
 	static uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView)
 	{
 		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
@@ -197,10 +205,97 @@ namespace
 
 	static bool RequiresExclusiveMaterialOnlyChunkReplacement(uint32_t reasonMask)
 	{
-		// Material-only wall mutations leave the stale static wall traceable if
-		// we only overlay the changed wall subset. Replacing the whole rebuilt
-		// live chunk avoids that without dropping unrelated geometry.
-		return (reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0;
+		// Pure wall-material mutations should keep unchanged flats in the static
+		// chunk authoritative. Only mixed wall+flat material mutations need full
+		// chunk replacement.
+		return
+			(reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0 &&
+			(reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0;
+	}
+
+	static uint32_t BuildWallSurfaceSlotId(const nri_scene::SurfaceProvenance& provenance)
+	{
+		static constexpr uint32_t kWallSurfaceSlotKindCount = 8u;
+		if (provenance.wallIndex < 0)
+		{
+			return UINT32_MAX;
+		}
+
+		switch (provenance.sourceType)
+		{
+		case nri_scene::SurfaceSourceType::MapWallBand:
+		case nri_scene::SurfaceSourceType::MapPortalSurface:
+			break;
+		default:
+			return UINT32_MAX;
+		}
+
+		if (provenance.sectionIndex < 0 || provenance.sectionIndex >= (int32_t)kWallSurfaceSlotKindCount)
+		{
+			return UINT32_MAX;
+		}
+
+		return (uint32_t)provenance.wallIndex * kWallSurfaceSlotKindCount + (uint32_t)provenance.sectionIndex;
+	}
+
+	static uint32_t BuildWallSurfaceSlotId(const nri_scene::PTMapSurface& surface)
+	{
+		return BuildWallSurfaceSlotId(surface.surface.provenance);
+	}
+
+	static uint32_t GetSurfaceTextureId(const nri_scene::PTMapSurface& surface);
+
+	static bool DidWallSurfaceMaterialChange(const nri_scene::PTMapSurface& staticSurface, const nri_scene::PTMapSurface& liveSurface)
+	{
+		return
+			GetSurfaceTextureId(staticSurface) != GetSurfaceTextureId(liveSurface) ||
+			staticSurface.surface.material.palette != liveSurface.surface.material.palette ||
+			staticSurface.surface.material.shade != liveSurface.surface.material.shade ||
+			std::fabs(staticSurface.surface.material.alpha - liveSurface.surface.material.alpha) > 0.001f ||
+			staticSurface.surface.material.flags != liveSurface.surface.material.flags ||
+			staticSurface.surface.provenance.cstat != liveSurface.surface.provenance.cstat ||
+			staticSurface.surface.provenance.sourceType != liveSurface.surface.provenance.sourceType;
+	}
+
+	static void BuildRejectedStaticWallSlotsForMaterialOnlyOverlay(
+		const nri_scene::PTMapWorld& staticWorld,
+		const nri_scene::PTMapChunk& staticChunk,
+		const nri_scene::PTMapWorld& liveWorld,
+		const nri_scene::PTMapChunk& liveChunk,
+		std::vector<uint32_t>& outRejectedSlots)
+	{
+		outRejectedSlots.clear();
+
+		std::unordered_map<uint32_t, const nri_scene::PTMapSurface*> liveWallSurfaceBySlot;
+		const uint32_t liveEndSurface = std::min<uint32_t>(liveChunk.firstSurface + liveChunk.surfaceCount, (uint32_t)liveWorld.surfaces.size());
+		for (uint32_t surfaceIndex = liveChunk.firstSurface; surfaceIndex < liveEndSurface; ++surfaceIndex)
+		{
+			const auto& liveSurface = liveWorld.surfaces[surfaceIndex];
+			const uint32_t slotId = BuildWallSurfaceSlotId(liveSurface);
+			if (slotId == UINT32_MAX)
+			{
+				continue;
+			}
+
+			liveWallSurfaceBySlot.emplace(slotId, &liveSurface);
+		}
+
+		const uint32_t staticEndSurface = std::min<uint32_t>(staticChunk.firstSurface + staticChunk.surfaceCount, (uint32_t)staticWorld.surfaces.size());
+		for (uint32_t surfaceIndex = staticChunk.firstSurface; surfaceIndex < staticEndSurface; ++surfaceIndex)
+		{
+			const auto& staticSurface = staticWorld.surfaces[surfaceIndex];
+			const uint32_t slotId = BuildWallSurfaceSlotId(staticSurface);
+			if (slotId == UINT32_MAX)
+			{
+				continue;
+			}
+
+			const auto liveIt = liveWallSurfaceBySlot.find(slotId);
+			if (liveIt == liveWallSurfaceBySlot.end() || DidWallSurfaceMaterialChange(staticSurface, *liveIt->second))
+			{
+				outRejectedSlots.push_back(slotId);
+			}
+		}
 	}
 
 	static void FilterMaterialOnlyReplacementSceneView(nri_scene::SceneView& sceneView, uint32_t reasonMask)
@@ -988,13 +1083,14 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 21;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 22;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
 	constexpr uint32_t NRI_MAX_EMISSIVE_PRIMITIVES = 16384;
 	constexpr uint32_t NRI_RUNTIME_LIGHT_TILE_SIZE = 64;
+	constexpr uint32_t NRI_MAX_WALL_SURFACE_SLOT_KINDS = 8;
 	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT = 26;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_DIRECT = 28;
@@ -9340,6 +9436,50 @@ bool NRIRenderer::UpdateVisibleFlatPlaneBuffer()
 	return true;
 }
 
+bool NRIRenderer::UpdateRejectedStaticWallSlotBuffer()
+{
+	const uint32_t defaultRejectedStaticWallSlotWord = 0u;
+	const void* rejectedStaticWallSlotData = mCurrentRejectedStaticWallSlotWords.empty() ? (const void*)&defaultRejectedStaticWallSlotWord : mCurrentRejectedStaticWallSlotWords.data();
+	const size_t rejectedStaticWallSlotSize = mCurrentRejectedStaticWallSlotWords.empty() ? sizeof(uint32_t) : mCurrentRejectedStaticWallSlotWords.size() * sizeof(uint32_t);
+	if (!EnsureStructuredBuffer(
+		mRejectedStaticWallSlotBuffer,
+		mRejectedStaticWallSlotBufferStats,
+		rejectedStaticWallSlotData,
+		rejectedStaticWallSlotSize,
+		sizeof(uint32_t),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (mSceneDataDescriptors[21] != mRejectedStaticWallSlotBuffer.shaderView)
+	{
+		mSceneDataDescriptors[21] = mRejectedStaticWallSlotBuffer.shaderView;
+		bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
+		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
+		{
+			if (descriptor == nullptr)
+			{
+				descriptorsReady = false;
+				break;
+			}
+		}
+
+		if (descriptorsReady)
+		{
+			nri::UpdateDescriptorRangeDesc update = {};
+			update.descriptorSet = mSceneDataSet;
+			update.rangeIndex = 0;
+			update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
+			update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
+			mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+		}
+	}
+
+	return true;
+}
+
 void NRIRenderer::BuildRuntimeLightClusterUpload(
 	std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 	std::vector<uint32_t>& outIndices,
@@ -9483,6 +9623,11 @@ bool NRIRenderer::UpdateSceneDataSet(
 	}
 
 	if (!UpdateVisibleChunkBuffer())
+	{
+		return false;
+	}
+
+	if (!UpdateRejectedStaticWallSlotBuffer())
 	{
 		return false;
 	}
@@ -9713,6 +9858,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mReprojectionBuffer.shaderView,
 		mVisibleChunkBuffer.shaderView,
 		mVisibleFlatPlaneBuffer.shaderView,
+		mRejectedStaticWallSlotBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
@@ -10152,6 +10298,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 			replacement.dragged = false;
 			replacement.blindSpot = false;
 			replacement.excludeStaticChunk = false;
+			replacement.rejectedStaticWallSlots.clear();
 			replacement.lastTraceSignature = UINT64_MAX;
 			replacement.lastTraceReasonMask = UINT32_MAX;
 			replacement.lastTraceActive = false;
@@ -10800,12 +10947,15 @@ bool NRIRenderer::UploadSceneBuffers(
 	const size_t primitiveCount = std::min(gpuPrimitives.size(), geometry.primitiveProvenance.size());
 	for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 	{
-		const int32_t chunkIndex = geometry.primitiveProvenance[primitiveIndex].mapChunkIndex;
+		const auto& provenance = geometry.primitiveProvenance[primitiveIndex];
+		const int32_t chunkIndex = provenance.mapChunkIndex;
 		gpuPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+		gpuPrimitives[primitiveIndex].reserved1 = BuildWallSurfaceSlotId(provenance);
 	}
 	for (size_t primitiveIndex = primitiveCount; primitiveIndex < gpuPrimitives.size(); ++primitiveIndex)
 	{
 		gpuPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+		gpuPrimitives[primitiveIndex].reserved1 = UINT32_MAX;
 	}
 
 	return
@@ -11249,6 +11399,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.dragged = false;
 			replacement.blindSpot = false;
 			replacement.excludeStaticChunk = false;
+			replacement.rejectedStaticWallSlots.clear();
 			replacement.lightIdentityOverrides.Clear();
 			replacement.sceneView = {};
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
@@ -11313,6 +11464,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			replacement.active = false;
 			replacement.excludeStaticChunk = false;
+			replacement.rejectedStaticWallSlots.clear();
 			replacement.lightIdentityOverrides.Clear();
 			replacement.sceneView = {};
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
@@ -11345,6 +11497,19 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				const bool exclusiveMaterialOnlyReplacement =
 					materialOnlyReplacement &&
 					RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
+				if (materialOnlyReplacement && IsPureWallMaterialOnlyChunkReplacement(analysis.reasonMask))
+				{
+					BuildRejectedStaticWallSlotsForMaterialOnlyOverlay(
+						mMapWorld,
+						mapChunk,
+						liveWorld,
+						liveWorld.chunks[0],
+						replacement.rejectedStaticWallSlots);
+				}
+				else
+				{
+					replacement.rejectedStaticWallSlots.clear();
+				}
 				if (replacement.blindSpot && replacement.dragged)
 				{
 					NudgeBlindSpotReplacementFlats(liveChunkView);
@@ -11394,6 +11559,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				replacement.active = false;
 				replacement.excludeStaticChunk = false;
+				replacement.rejectedStaticWallSlots.clear();
 				replacement.lightIdentityOverrides.Clear();
 				replacement.sceneView = {};
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
@@ -11403,6 +11569,20 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		else
 		{
 			replacement.active = true;
+		}
+
+		if (replacement.active &&
+			!replacement.excludeStaticChunk &&
+			IsPureWallMaterialOnlyChunkReplacement(replacement.reasonMask))
+		{
+			for (uint32_t slotId : replacement.rejectedStaticWallSlots)
+			{
+				const size_t wordIndex = slotId >> 5u;
+				if (wordIndex < mCurrentRejectedStaticWallSlotWords.size())
+				{
+					mCurrentRejectedStaticWallSlotWords[wordIndex] |= 1u << (slotId & 31u);
+				}
+			}
 		}
 
 		mRuntimeMapMutations.replacedChunkMask[chunkIndex] = replacement.excludeStaticChunk ? 1u : 0u;
@@ -13577,8 +13757,10 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	const BitArray& visibleSectors = di.GetVisibleSectors();
 	const size_t visibleChunkWordCount = std::max<size_t>((mMapWorld.chunks.size() + 31u) / 32u, 1u);
 	const size_t visibleFlatPlaneWordCount = std::max<size_t>(((size_t)sector.Size() * 2u + 31u) / 32u, 1u);
+	const size_t rejectedStaticWallSlotWordCount = std::max<size_t>(((size_t)wall.Size() * NRI_MAX_WALL_SURFACE_SLOT_KINDS + 31u) / 32u, 1u);
 	mCurrentVisibleChunkWords.assign(visibleChunkWordCount, 0u);
 	mCurrentVisibleFlatPlaneWords.assign(visibleFlatPlaneWordCount, 0u);
+	mCurrentRejectedStaticWallSlotWords.assign(rejectedStaticWallSlotWordCount, 0u);
 	for (unsigned sectorIndex = 0; sectorIndex < visibleSectors.Size(); ++sectorIndex)
 	{
 		if (!visibleSectors.Check(sectorIndex))
@@ -13992,6 +14174,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mReprojectionBuffer);
 	DestroyBufferResource(mVisibleChunkBuffer);
 	DestroyBufferResource(mVisibleFlatPlaneBuffer);
+	DestroyBufferResource(mRejectedStaticWallSlotBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);

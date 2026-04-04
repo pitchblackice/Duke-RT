@@ -87,6 +87,7 @@ struct PrimitiveData
 	uint flags;
 	uint portalIndex;
 	uint reserved0;
+	uint reserved1;
 };
 
 struct MaterialData
@@ -279,6 +280,7 @@ StructuredBuffer<SectorLightData> gSectorLights : register(t17, space2);
 StructuredBuffer<ReprojectionData> gReprojectionDataBuffer : register(t18, space2);
 StructuredBuffer<uint> gVisibleChunkWords : register(t19, space2);
 StructuredBuffer<uint> gVisibleFlatPlaneWords : register(t20, space2);
+StructuredBuffer<uint> gRejectedStaticWallSlotWords : register(t21, space2);
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);
