@@ -75,6 +75,18 @@ CUSTOM_CVAR(Int, nri_pttraceframes, 0, 0)
 	}
 }
 
+CUSTOM_CVAR(Int, nri_ptnudgetrace, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 1)
+	{
+		self = 1;
+	}
+}
+
 namespace
 {
 	static bool IsFullscreenPaletteBlendCommand(const F2DDrawer& drawer, const F2DDrawer::RenderCommand& cmd)

@@ -4,6 +4,7 @@
 #include "gamefuncs.h"
 #include "maptypes.h"
 #include "palette.h"
+#include "printf.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,10 +27,66 @@ EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
 EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
+EXTERN_CVAR(Int, nri_ptnudgetrace)
 
 namespace
 {
 	constexpr float TwoPi = 6.28318530717958647692f;
+
+	const char* GetSurfaceSourceTypeName(nri_scene::SurfaceSourceType sourceType)
+	{
+		switch (sourceType)
+		{
+		case nri_scene::SurfaceSourceType::DrawListWall: return "draw_list_wall";
+		case nri_scene::SurfaceSourceType::MirrorWall: return "mirror_wall";
+		case nri_scene::SurfaceSourceType::FloorFlat: return "floor_flat";
+		case nri_scene::SurfaceSourceType::CeilingFlat: return "ceiling_flat";
+		case nri_scene::SurfaceSourceType::FacingSprite: return "facing_sprite";
+		case nri_scene::SurfaceSourceType::VoxelProxySprite: return "voxel_proxy_sprite";
+		case nri_scene::SurfaceSourceType::MapWallBand: return "map_wall_band";
+		case nri_scene::SurfaceSourceType::MapFloorSection: return "map_floor_section";
+		case nri_scene::SurfaceSourceType::MapCeilingSection: return "map_ceiling_section";
+		case nri_scene::SurfaceSourceType::MapPortalSurface: return "map_portal_surface";
+		case nri_scene::SurfaceSourceType::DebugSphere: return "debug_sphere";
+		default: return "unknown";
+		}
+	}
+
+	void TraceSurfaceNudge(
+		const SceneLightSystem::SurfaceRecord& record,
+		const SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& rule,
+		const char* pathName,
+		const DVector3& sourcePosition,
+		const DVector3& nudgedPosition,
+		float displacement)
+	{
+		if (nri_ptnudgetrace <= 0)
+		{
+			return;
+		}
+
+		const DVector3 delta = nudgedPosition - sourcePosition;
+		Printf(
+			"NRI PT surface nudge: rule=%u path=%s source=%s sector=%d wall=%d nextsector=%d cstat=0x%x nudge=%.3f disp=%.3f from=(%.2f, %.2f, %.2f) to=(%.2f, %.2f, %.2f) delta=(%.2f, %.2f, %.2f)\n",
+			rule.ruleId,
+			pathName != nullptr ? pathName : "unknown",
+			GetSurfaceSourceTypeName(record.provenance.sourceType),
+			record.provenance.sectorIndex,
+			record.provenance.wallIndex,
+			record.provenance.nextSectorIndex,
+			record.provenance.cstat,
+			rule.nudgeFromSurfaceDistance,
+			displacement,
+			sourcePosition.X,
+			sourcePosition.Y,
+			sourcePosition.Z,
+			nudgedPosition.X,
+			nudgedPosition.Y,
+			nudgedPosition.Z,
+			delta.X,
+			delta.Y,
+			delta.Z);
+	}
 
 	void Copy3f(const float* source, float* destination)
 	{
@@ -612,6 +669,7 @@ namespace
 		float provenanceWallDisplacement = 0.0f;
 		if (TryApplyProvenanceWallSurfaceNudge(record, sourcePosition, rule.nudgeFromSurfaceDistance, provenanceWallPosition, provenanceWallDisplacement))
 		{
+			TraceSurfaceNudge(record, rule, "source_wall", sourcePosition, provenanceWallPosition, provenanceWallDisplacement);
 			position[0] = (float)provenanceWallPosition.X;
 			position[1] = (float)provenanceWallPosition.Y;
 			position[2] = (float)provenanceWallPosition.Z;
@@ -643,6 +701,8 @@ namespace
 		{
 			return;
 		}
+
+		TraceSurfaceNudge(record, rule, bestPosition.Z != sourcePosition.Z ? "plane" : "wall_fallback", sourcePosition, bestPosition, bestDisplacement);
 
 		position[0] = (float)bestPosition.X;
 		position[1] = (float)bestPosition.Y;
