@@ -776,6 +776,7 @@ CVAR(Bool, nri_ptdirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -914,12 +915,17 @@ namespace
 
 	bool ShouldTraceSkyPerf()
 	{
-		return nri_pttraceframes > 0;
+		return !!nri_pttemporaltrace && nri_pttraceframes > 0;
+	}
+
+	bool ShouldEmitTemporalTraceLogs()
+	{
+		return !!nri_pttemporaltrace && nri_pttraceframes > 0;
 	}
 
 	bool ShouldTracePtPerf()
 	{
-		return PerfLoopTraceActive() || nri_pttraceframes > 0;
+		return PerfLoopTraceActive() || ShouldEmitTemporalTraceLogs();
 	}
 
 	std::string FormatTopologyKeyList(const std::vector<uint64_t>& keys, size_t limit = 8)
@@ -4157,7 +4163,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mLastPerfShellTraceStats.otherMs = std::max(0.0, mLastPerfShellTraceStats.totalMs - accountedMs);
 	}
 
-	if (nri_pttraceframes > 0)
+	if (ShouldEmitTemporalTraceLogs())
 	{
 		const auto& analyticLights = mSceneLights.GetAnalyticLights();
 		const auto& emissiveSurfaces = mSceneLights.GetEmissiveSurfaces();
@@ -4335,7 +4341,7 @@ void NRIRenderer::RequestHistoryReset(const char* reason, bool clearPreviousCame
 void NRIRenderer::NoteLightHistoryChange(const char* reason)
 {
 	ArmTemporalTraceBudget(reason);
-	if (nri_pttraceframes > 0)
+	if (ShouldEmitTemporalTraceLogs())
 	{
 		Printf("NRI PT light change: reason=%s frame=%u reset=no\n",
 			(reason != nullptr && *reason != '\0') ? reason : "unspecified",
@@ -5349,6 +5355,11 @@ void NRIRenderer::PrintTemporalStatus() const
 
 void NRIRenderer::ArmTemporalTraceBudget(const char* reason)
 {
+	if (!nri_pttemporaltrace)
+	{
+		return;
+	}
+
 	if ((int)nri_pttraceframes >= NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT)
 	{
 		return;
@@ -5368,7 +5379,7 @@ void NRIRenderer::ArmTemporalTraceBudget(const char* reason)
 
 void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const
 {
-	if (nri_pttraceframes <= 0)
+	if (!ShouldEmitTemporalTraceLogs())
 	{
 		return;
 	}
@@ -5957,7 +5968,7 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 
 void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement)
 {
-	if (nri_pttraceframes <= 0)
+	if (!ShouldEmitTemporalTraceLogs())
 	{
 		return;
 	}
@@ -12724,7 +12735,7 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 
 		mCurrentVisibleChunkWords[wordIndex] |= 1u << (visibleChunkIndex & 31u);
 	}
-	if (nri_pttraceframes > 0)
+	if (ShouldEmitTemporalTraceLogs())
 	{
 		const uint32_t targetWidth = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->width : 0u;
 		const uint32_t targetHeight = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->height : 0u;
@@ -12835,7 +12846,7 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 
 void NRIRenderer::TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey)
 {
-	if (nri_pttraceframes <= 0)
+	if (!ShouldEmitTemporalTraceLogs())
 	{
 		return;
 	}
@@ -12912,7 +12923,7 @@ void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFra
 		 runAppTaa != mLastTemporalAppTaaEnabled))
 	{
 		ArmTemporalTraceBudget("mode-change");
-		if (nri_pttraceframes > 0)
+		if (ShouldEmitTemporalTraceLogs())
 		{
 			Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d main=%s->%s post=%s->%s app_taa=%s->%s\n",
 				mFrameIndex,
@@ -12958,7 +12969,7 @@ void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFra
 	if (frameGenResetReason != nullptr)
 	{
 		RequestHistoryReset(frameGenResetReason);
-		if (nri_pttraceframes > 0)
+		if (ShouldEmitTemporalTraceLogs())
 		{
 			Printf("NRI PT temporal reset: reason=%s frame=%u requested=%s->%s provider=%s->%s ui=%s->%s\n",
 				frameGenResetReason,
