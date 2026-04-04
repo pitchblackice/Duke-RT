@@ -624,7 +624,6 @@ private:
 	bool UpdateReprojectionBuffer();
 	bool UpdateVisibleChunkBuffer();
 	bool UpdateVisibleFlatPlaneBuffer();
-	bool UpdateReplacedStaticWallChunkBuffer();
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -800,7 +799,6 @@ private:
 	NRIBufferResource mReprojectionBuffer;
 	NRIBufferResource mVisibleChunkBuffer;
 	NRIBufferResource mVisibleFlatPlaneBuffer;
-	NRIBufferResource mReplacedStaticWallChunkBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
@@ -821,7 +819,6 @@ private:
 	SceneBufferDebugStats mReprojectionBufferStats = { "Reprojection" };
 	SceneBufferDebugStats mVisibleChunkBufferStats = { "VisibleChunk" };
 	SceneBufferDebugStats mVisibleFlatPlaneBufferStats = { "VisibleFlatPlane" };
-	SceneBufferDebugStats mReplacedStaticWallChunkBufferStats = { "ReplacedStaticWallChunk" };
 	PerfShellTraceStats mLastPerfShellTraceStats = {};
 	PerfResourceTraceStats mLastPerfResourceTraceStats = {};
 
@@ -848,13 +845,12 @@ private:
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneLightSystem::SceneAnalyticLight> mTransientMuzzleFlashLights;
-	std::array<nri::Descriptor*, 22> mSceneDataDescriptors = {};
+	std::array<nri::Descriptor*, 21> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;
 	std::vector<uint32_t> mCurrentVisibleChunkWords;
 	std::vector<uint32_t> mCurrentVisibleFlatPlaneWords;
-	std::vector<uint32_t> mCurrentReplacedStaticWallChunkWords;
 	uint32_t mLastResolvedLightOverlayGeneration = 0;
 	uint32_t mFrameIndex = 0;
 	uint64_t mFrameGenerationFrameId = 0;

@@ -180,39 +180,28 @@ namespace
 		}
 	}
 
-static bool IsMaterialOnlyChunkReplacement(uint32_t reasonMask)
-{
-	const uint32_t materialOnlyReasonMask =
-		nri_scene::PTMapChunkMutationReason_SectorMaterial |
-		nri_scene::PTMapChunkMutationReason_WallMaterial;
-	return
-		(reasonMask & materialOnlyReasonMask) != 0 &&
-		(reasonMask & ~materialOnlyReasonMask) == 0;
-}
-
-static bool IsPureWallMaterialOnlyChunkReplacement(uint32_t reasonMask)
-{
-	return
-		(reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0 &&
-		(reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) == 0 &&
-		(reasonMask & ~(nri_scene::PTMapChunkMutationReason_SectorMaterial | nri_scene::PTMapChunkMutationReason_WallMaterial)) == 0;
-}
+	static bool IsMaterialOnlyChunkReplacement(uint32_t reasonMask)
+	{
+		const uint32_t materialOnlyReasonMask =
+			nri_scene::PTMapChunkMutationReason_SectorMaterial |
+			nri_scene::PTMapChunkMutationReason_WallMaterial;
+		return
+			(reasonMask & materialOnlyReasonMask) != 0 &&
+			(reasonMask & ~materialOnlyReasonMask) == 0;
+	}
 
 	static uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView)
 	{
 		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
 	}
 
-static bool RequiresExclusiveMaterialOnlyChunkReplacement(uint32_t reasonMask)
-{
-	// Mixed wall+flat material mutations still need whole-chunk replacement.
-	// Pure wall-material mutations stay in overlay mode so unchanged static
-	// flats remain authoritative; the RT shader rejects stale static walls for
-	// those chunks via a dedicated per-frame bitset.
-	return
-		(reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0 &&
-		(reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0;
-}
+	static bool RequiresExclusiveMaterialOnlyChunkReplacement(uint32_t reasonMask)
+	{
+		// Material-only wall mutations leave the stale static wall traceable if
+		// we only overlay the changed wall subset. Replacing the whole rebuilt
+		// live chunk avoids that without dropping unrelated geometry.
+		return (reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0;
+	}
 
 	static void FilterMaterialOnlyReplacementSceneView(nri_scene::SceneView& sceneView, uint32_t reasonMask)
 	{
@@ -999,7 +988,7 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 22;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 21;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
@@ -9351,50 +9340,6 @@ bool NRIRenderer::UpdateVisibleFlatPlaneBuffer()
 	return true;
 }
 
-bool NRIRenderer::UpdateReplacedStaticWallChunkBuffer()
-{
-	const uint32_t defaultReplacedStaticWallChunkWord = 0u;
-	const void* replacedStaticWallChunkData = mCurrentReplacedStaticWallChunkWords.empty() ? (const void*)&defaultReplacedStaticWallChunkWord : mCurrentReplacedStaticWallChunkWords.data();
-	const size_t replacedStaticWallChunkSize = mCurrentReplacedStaticWallChunkWords.empty() ? sizeof(uint32_t) : mCurrentReplacedStaticWallChunkWords.size() * sizeof(uint32_t);
-	if (!EnsureStructuredBuffer(
-		mReplacedStaticWallChunkBuffer,
-		mReplacedStaticWallChunkBufferStats,
-		replacedStaticWallChunkData,
-		replacedStaticWallChunkSize,
-		sizeof(uint32_t),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
-	{
-		return false;
-	}
-
-	if (mSceneDataDescriptors[21] != mReplacedStaticWallChunkBuffer.shaderView)
-	{
-		mSceneDataDescriptors[21] = mReplacedStaticWallChunkBuffer.shaderView;
-		bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
-		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
-		{
-			if (descriptor == nullptr)
-			{
-				descriptorsReady = false;
-				break;
-			}
-		}
-
-		if (descriptorsReady)
-		{
-			nri::UpdateDescriptorRangeDesc update = {};
-			update.descriptorSet = mSceneDataSet;
-			update.rangeIndex = 0;
-			update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
-			update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-			mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
-		}
-	}
-
-	return true;
-}
-
 void NRIRenderer::BuildRuntimeLightClusterUpload(
 	std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 	std::vector<uint32_t>& outIndices,
@@ -9538,11 +9483,6 @@ bool NRIRenderer::UpdateSceneDataSet(
 	}
 
 	if (!UpdateVisibleChunkBuffer())
-	{
-		return false;
-	}
-
-	if (!UpdateReplacedStaticWallChunkBuffer())
 	{
 		return false;
 	}
@@ -9773,7 +9713,6 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mReprojectionBuffer.shaderView,
 		mVisibleChunkBuffer.shaderView,
 		mVisibleFlatPlaneBuffer.shaderView,
-		mReplacedStaticWallChunkBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
@@ -11464,14 +11403,6 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		else
 		{
 			replacement.active = true;
-		}
-
-		if (replacement.active &&
-			!replacement.excludeStaticChunk &&
-			chunkIndex < mCurrentReplacedStaticWallChunkWords.size() * 32u &&
-			IsPureWallMaterialOnlyChunkReplacement(replacement.reasonMask))
-		{
-			mCurrentReplacedStaticWallChunkWords[chunkIndex >> 5u] |= (1u << (chunkIndex & 31u));
 		}
 
 		mRuntimeMapMutations.replacedChunkMask[chunkIndex] = replacement.excludeStaticChunk ? 1u : 0u;
@@ -13648,7 +13579,6 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	const size_t visibleFlatPlaneWordCount = std::max<size_t>(((size_t)sector.Size() * 2u + 31u) / 32u, 1u);
 	mCurrentVisibleChunkWords.assign(visibleChunkWordCount, 0u);
 	mCurrentVisibleFlatPlaneWords.assign(visibleFlatPlaneWordCount, 0u);
-	mCurrentReplacedStaticWallChunkWords.assign(visibleChunkWordCount, 0u);
 	for (unsigned sectorIndex = 0; sectorIndex < visibleSectors.Size(); ++sectorIndex)
 	{
 		if (!visibleSectors.Check(sectorIndex))
@@ -14062,7 +13992,6 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mReprojectionBuffer);
 	DestroyBufferResource(mVisibleChunkBuffer);
 	DestroyBufferResource(mVisibleFlatPlaneBuffer);
-	DestroyBufferResource(mReplacedStaticWallChunkBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
