@@ -351,6 +351,116 @@ namespace
 		return false;
 	}
 
+	bool IsWallLikeSurfaceSource(nri_scene::SurfaceSourceType sourceType)
+	{
+		switch (sourceType)
+		{
+		case nri_scene::SurfaceSourceType::DrawListWall:
+		case nri_scene::SurfaceSourceType::MirrorWall:
+		case nri_scene::SurfaceSourceType::MapWallBand:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	DVector2 ComputeSectorCenter2D(const sectortype* sec)
+	{
+		if (sec == nullptr || sec->walls.Size() == 0)
+		{
+			return {};
+		}
+
+		DVector2 center = {};
+		for (const auto& wal : sec->walls)
+		{
+			center += wal.pos;
+		}
+		return center / (double)sec->walls.Size();
+	}
+
+	bool TryProjectAwayFromWall(
+		const DVector3& sourcePosition,
+		const walltype& sourceWall,
+		float nudgeDistance,
+		const sectortype* preferredSideSector,
+		DVector3& outPosition,
+		float& outDisplacement)
+	{
+		outPosition = sourcePosition;
+		outDisplacement = 0.0f;
+
+		if (!IsValidSurfaceNudgeDistance(nudgeDistance))
+		{
+			return false;
+		}
+
+		DVector2 nearestPoint = {};
+		const double maxDistanceSquared = (double)nudgeDistance * (double)nudgeDistance;
+		const double distanceSquared = SquareDistToWall(sourcePosition.X, sourcePosition.Y, &sourceWall, &nearestPoint);
+		if (distanceSquared > maxDistanceSquared)
+		{
+			return false;
+		}
+
+		DVector2 wallNormal = sourceWall.delta().Rotated90CCW().Unit();
+		const DVector2 nearestToSource = sourcePosition.XY() - nearestPoint;
+		if (nearestToSource.LengthSquared() > 1e-12)
+		{
+			if (nearestToSource.dot(wallNormal) < 0.0)
+			{
+				wallNormal = -wallNormal;
+			}
+		}
+		else if (preferredSideSector != nullptr)
+		{
+			const DVector2 sectorDelta = ComputeSectorCenter2D(preferredSideSector) - nearestPoint;
+			if (sectorDelta.dot(wallNormal) < 0.0)
+			{
+				wallNormal = -wallNormal;
+			}
+		}
+
+		const DVector2 nudgedXY = nearestPoint + wallNormal * nudgeDistance;
+		const DVector2 displacement = nudgedXY - sourcePosition.XY();
+		const double displacementSquared = displacement.LengthSquared();
+		if (displacementSquared <= 1e-12)
+		{
+			return false;
+		}
+
+		outPosition = sourcePosition;
+		outPosition.X = nudgedXY.X;
+		outPosition.Y = nudgedXY.Y;
+		outDisplacement = (float)std::sqrt(displacementSquared);
+		return true;
+	}
+
+	bool TryApplyProvenanceWallSurfaceNudge(
+		const SceneLightSystem::SurfaceRecord& record,
+		const DVector3& sourcePosition,
+		float nudgeDistance,
+		DVector3& outPosition,
+		float& outDisplacement)
+	{
+		outPosition = sourcePosition;
+		outDisplacement = 0.0f;
+
+		if (!IsWallLikeSurfaceSource(record.provenance.sourceType) ||
+			record.provenance.wallIndex < 0 ||
+			(unsigned)record.provenance.wallIndex >= wall.Size())
+		{
+			return false;
+		}
+
+		const walltype& sourceWall = wall[(unsigned)record.provenance.wallIndex];
+		const sectortype* preferredSideSector =
+			record.provenance.sectorIndex >= 0 && (unsigned)record.provenance.sectorIndex < sector.Size() ?
+			&sector[(unsigned)record.provenance.sectorIndex] :
+			nullptr;
+		return TryProjectAwayFromWall(sourcePosition, sourceWall, nudgeDistance, preferredSideSector, outPosition, outDisplacement);
+	}
+
 	bool TryApplyWallSurfaceNudge(
 		const DVector3& sourcePosition,
 		sectortype* startSector,
@@ -367,15 +477,17 @@ namespace
 		}
 
 		walltype* bestWall = nullptr;
-		DVector2 bestNearestPoint = sourcePosition.XY();
 		double bestDistanceSquared = DBL_MAX;
+		const double maxDistanceSquared = (double)nudgeDistance * (double)nudgeDistance;
 
 		BFSSectorSearch search(startSector);
 		while (auto sec = search.GetNext())
 		{
 			for (auto& wal : sec->walls)
 			{
-				if (IsCloseToWall(sourcePosition.XY(), &wal, nudgeDistance) != EClose::InFront)
+				DVector2 nearestPoint = {};
+				const double distanceSquared = SquareDistToWall(sourcePosition.X, sourcePosition.Y, &wal, &nearestPoint);
+				if (distanceSquared > maxDistanceSquared)
 				{
 					continue;
 				}
@@ -395,49 +507,22 @@ namespace
 					}
 				}
 
-				if (!blocked)
-				{
-					continue;
-				}
-
-				DVector2 nearestPoint = {};
-				const double distanceSquared = SquareDistToWall(sourcePosition.X, sourcePosition.Y, &wal, &nearestPoint);
-				if (distanceSquared >= bestDistanceSquared)
+				if (!blocked || distanceSquared >= bestDistanceSquared)
 				{
 					continue;
 				}
 
 				bestWall = &wal;
-				bestNearestPoint = nearestPoint;
 				bestDistanceSquared = distanceSquared;
 			}
 		}
 
-		if (bestWall == nullptr || bestDistanceSquared > (double)nudgeDistance * (double)nudgeDistance)
+		if (bestWall == nullptr)
 		{
 			return false;
 		}
 
-		DVector2 wallNormal = bestWall->delta().Rotated90CCW().Unit();
-		const DVector2 nearestToSource = sourcePosition.XY() - bestNearestPoint;
-		if (nearestToSource.dot(wallNormal) < 0.0)
-		{
-			wallNormal = -wallNormal;
-		}
-
-		const DVector2 nudgedXY = bestNearestPoint + wallNormal * nudgeDistance;
-		const DVector2 displacement = nudgedXY - sourcePosition.XY();
-		const double displacementSquared = displacement.LengthSquared();
-		if (displacementSquared <= 1e-12)
-		{
-			return false;
-		}
-
-		outPosition = sourcePosition;
-		outPosition.X = nudgedXY.X;
-		outPosition.Y = nudgedXY.Y;
-		outDisplacement = (float)std::sqrt(displacementSquared);
-		return true;
+		return TryProjectAwayFromWall(sourcePosition, *bestWall, nudgeDistance, nullptr, outPosition, outDisplacement);
 	}
 
 	bool TryApplyPlaneSurfaceNudge(
@@ -520,6 +605,16 @@ namespace
 		sectortype* startSector = nullptr;
 		if (!TryResolveSurfaceNudgeSector(record, sourcePosition, startSector) || startSector == nullptr)
 		{
+			return;
+		}
+
+		DVector3 provenanceWallPosition = sourcePosition;
+		float provenanceWallDisplacement = 0.0f;
+		if (TryApplyProvenanceWallSurfaceNudge(record, sourcePosition, rule.nudgeFromSurfaceDistance, provenanceWallPosition, provenanceWallDisplacement))
+		{
+			position[0] = (float)provenanceWallPosition.X;
+			position[1] = (float)provenanceWallPosition.Y;
+			position[2] = (float)provenanceWallPosition.Z;
 			return;
 		}
 
