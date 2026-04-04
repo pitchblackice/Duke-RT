@@ -1426,7 +1426,6 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 	outView = {};
 	outView.drawInfo = &di;
 	outView.stats.wallDrawItems =
-		CountDrawListItems(di, GLDL_MASKEDWALLS) +
 		CountDrawListItems(di, GLDL_MASKEDWALLSS) +
 		CountDrawListItems(di, GLDL_MASKEDWALLSD) +
 		CountDrawListItems(di, GLDL_MASKEDWALLSV) +
@@ -1439,7 +1438,6 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 	outView.stats.modelDrawItems = CountDrawListItems(di, GLDL_MODELS);
 	outView.stats.totalDrawItems = outView.stats.wallDrawItems + outView.stats.flatDrawItems + outView.stats.spriteDrawItems;
 
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLS], GLDL_MASKEDWALLS, outView.opaqueWalls, outView.stats, outView);
 	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSS], GLDL_MASKEDWALLSS, outView.opaqueWalls, outView.stats, outView);
 	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSD], GLDL_MASKEDWALLSD, outView.opaqueWalls, outView.stats, outView);
 	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSV], GLDL_MASKEDWALLSV, outView.opaqueWalls, outView.stats, outView);
