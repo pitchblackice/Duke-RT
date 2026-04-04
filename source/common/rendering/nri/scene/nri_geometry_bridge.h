@@ -24,7 +24,6 @@ struct PrimitiveData
 	uint32_t flags = 0;
 	uint32_t portalIndex = UINT32_MAX;
 	uint32_t reserved0 = UINT32_MAX;
-	uint32_t reserved1 = UINT32_MAX;
 };
 
 struct GeometryData
