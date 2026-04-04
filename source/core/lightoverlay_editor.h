@@ -47,6 +47,8 @@ struct ActorLightEditorState
 	bool enabled = false;
 	ActorLightEditorTarget currentTarget;
 	FString lastNotifyActorClassName;
+	uint64_t lastNotifyTimeMs = 0;
+	uint64_t lastActorSeenTimeMs = 0;
 	FString writableLightOvrPath;
 	int writableLightOvrLumpNum = -1;
 	bool printActionPressed = false;

@@ -7,6 +7,7 @@
 #include "d_net.h"
 #include "gamefuncs.h"
 #include "gamestate.h"
+#include "i_time.h"
 #include "printf.h"
 
 CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -14,6 +15,8 @@ CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 namespace
 {
 	static ActorLightEditorState GActorLightEditorState;
+	static constexpr uint64_t ActorLightEditorNotifyRepeatMs = 750;
+	static constexpr uint64_t ActorLightEditorNotifyClearGraceMs = 250;
 
 	static const char* GetActorLightEditorClassName(const DCoreActor* actor)
 	{
@@ -100,6 +103,40 @@ namespace
 			break;
 		}
 	}
+
+	static void UpdateActorLightEditorNotify()
+	{
+		const uint64_t nowMs = I_msTime();
+		const auto& target = GActorLightEditorState.currentTarget;
+
+		if (target.kind == ActorLightEditorTargetKind::Actor && !target.actorClassName.IsEmpty())
+		{
+			GActorLightEditorState.lastActorSeenTimeMs = nowMs;
+
+			const bool classChanged = GActorLightEditorState.lastNotifyActorClassName != target.actorClassName;
+			const bool cooldownExpired =
+				GActorLightEditorState.lastNotifyTimeMs == 0 ||
+				(nowMs - GActorLightEditorState.lastNotifyTimeMs) >= ActorLightEditorNotifyRepeatMs;
+
+			if (classChanged || cooldownExpired)
+			{
+				Printf(PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG, "%s\n", target.actorClassName.GetChars());
+				GActorLightEditorState.lastNotifyActorClassName = target.actorClassName;
+				GActorLightEditorState.lastNotifyTimeMs = nowMs;
+			}
+
+			return;
+		}
+
+		if (!GActorLightEditorState.lastNotifyActorClassName.IsEmpty() &&
+			GActorLightEditorState.lastActorSeenTimeMs != 0 &&
+			(nowMs - GActorLightEditorState.lastActorSeenTimeMs) >= ActorLightEditorNotifyClearGraceMs)
+		{
+			GActorLightEditorState.lastNotifyActorClassName = "";
+			GActorLightEditorState.lastNotifyTimeMs = 0;
+			GActorLightEditorState.lastActorSeenTimeMs = 0;
+		}
+	}
 }
 
 bool IsActorLightEditorEnabled()
@@ -137,6 +174,7 @@ void TickActorLightEditor()
 	}
 
 	ActorLightEditorSampleTarget(GActorLightEditorState.currentTarget);
+	UpdateActorLightEditorNotify();
 }
 
 bool ActorLightEditorResponder(event_t* ev)
