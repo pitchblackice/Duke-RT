@@ -479,6 +479,7 @@ private:
 			bool sectorDirty = false;
 			bool dragged = false;
 			bool blindSpot = false;
+			bool excludeStaticChunk = false;
 			bool lastTraceActive = false;
 			bool lastTraceBlindSpot = false;
 			uint32_t surfaceCount = 0;
