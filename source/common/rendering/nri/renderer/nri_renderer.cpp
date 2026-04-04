@@ -8612,11 +8612,6 @@ void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuD
 	outLights.reserve(activeLights.size());
 	for (const SceneLightSystem::SceneAnalyticLight& light : activeLights)
 	{
-		if (light.intensity <= 0.0f || light.radius <= 0.0f)
-		{
-			continue;
-		}
-
 		RuntimePointLightGpuData gpuLight = {};
 		Copy3(light.position, gpuLight.position);
 		gpuLight.radius = light.radius;
