@@ -1,6 +1,7 @@
 #include "lightoverlay.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -121,6 +122,7 @@ namespace
 		uint32_t nextOrderIndex = 0;
 		std::unordered_map<std::string, int> actorRuleLookup;
 		std::unordered_map<std::string, int> directionalRuleLookup;
+		std::unordered_map<std::string, int> muzzleFlashRuleLookup;
 		std::unordered_map<std::string, int> mapLightRuleLookup;
 		std::unordered_map<std::string, int> actorOverrideLookup;
 
@@ -165,6 +167,26 @@ namespace
 			{
 				Printf(TEXTCOLOR_ORANGE "LIGHTOVR warning: duplicate directional rule '%s' for map '%s' in %s; using the last definition.\n",
 					rule.id.GetChars(), rule.mapName.GetChars(), rule.source.sourceName.GetChars());
+			}
+			existing = rule;
+		}
+
+		void AddMuzzleFlashRule(const ParsedLightOverlayMuzzleFlashRule& rule)
+		{
+			const std::string key = MakeNormalizedKey(rule.id);
+			auto it = muzzleFlashRuleLookup.find(key);
+			if (it == muzzleFlashRuleLookup.end())
+			{
+				muzzleFlashRuleLookup.emplace(key, database.muzzleFlashRules.Size());
+				database.muzzleFlashRules.Push(rule);
+				return;
+			}
+
+			auto& existing = database.muzzleFlashRules[it->second];
+			if (existing.source.lumpNum == rule.source.lumpNum)
+			{
+				Printf(TEXTCOLOR_ORANGE "LIGHTOVR warning: duplicate muzzleflashrule '%s' in %s; using the last definition.\n",
+					rule.id.GetChars(), rule.source.sourceName.GetChars());
 			}
 			existing = rule;
 		}
@@ -285,6 +307,39 @@ namespace
 			outValue[2] = (float)sc.Float;
 		}
 
+		void MustParseFloatRange(float outRange[2], bool allowSingleValue, bool singleValueIsPlusMinus, const char* fieldName)
+		{
+			sc.MustGetFloat();
+			const float first = (float)sc.Float;
+			if (sc.CheckFloat())
+			{
+				const float second = (float)sc.Float;
+				outRange[0] = std::min(first, second);
+				outRange[1] = std::max(first, second);
+				return;
+			}
+
+			if (!allowSingleValue)
+			{
+				sc.ScriptMessage("Field '%s' requires two float values", fieldName);
+				outRange[0] = first;
+				outRange[1] = first;
+				return;
+			}
+
+			if (singleValueIsPlusMinus)
+			{
+				const float plusMinus = fabsf(first);
+				outRange[0] = -plusMinus;
+				outRange[1] = plusMinus;
+			}
+			else
+			{
+				outRange[0] = first;
+				outRange[1] = first;
+			}
+		}
+
 		void SkipUnknownField(const char* context, const char* fieldName)
 		{
 			sc.ScriptMessage("Unknown field '%s' in %s definition", fieldName, context);
@@ -326,6 +381,10 @@ namespace
 				else if (sc.Compare("actorrule"))
 				{
 					ParseActorRule();
+				}
+				else if (sc.Compare("muzzleflashrule"))
+				{
+					ParseMuzzleFlashRule();
 				}
 				else if (sc.Compare("map"))
 				{
@@ -473,6 +532,81 @@ namespace
 
 			FinalizeSourceLocation(rule.source);
 			builder.AddActorRule(rule);
+		}
+
+		void ParseMuzzleFlashRule()
+		{
+			sc.MustGetString();
+			ParsedLightOverlayMuzzleFlashRule rule;
+			rule.id = sc.String;
+			rule.source = MakeSourceLocation(sc.GetMessageLine());
+
+			sc.MustGetStringName("{");
+			while (!sc.CheckString("}"))
+			{
+				sc.MustGetString();
+				if (sc.Compare("color"))
+				{
+					rule.hasColor = true;
+					MustParseVector3(rule.color);
+				}
+				else if (sc.Compare("intensity"))
+				{
+					sc.MustGetFloat();
+					rule.hasIntensity = true;
+					rule.intensity = (float)sc.Float;
+				}
+				else if (sc.Compare("intensityrandom"))
+				{
+					rule.hasIntensityRandom = true;
+					MustParseFloatRange(rule.intensityRandomRange, false, false, "intensityrandom");
+				}
+				else if (sc.Compare("radius"))
+				{
+					sc.MustGetFloat();
+					rule.hasRadius = true;
+					rule.radius = (float)sc.Float;
+				}
+				else if (sc.Compare("radiusrandom"))
+				{
+					rule.hasRadiusRandom = true;
+					MustParseFloatRange(rule.radiusRandomRange, false, false, "radiusrandom");
+				}
+				else if (sc.Compare("delayseconds"))
+				{
+					sc.MustGetFloat();
+					rule.hasDelaySeconds = true;
+					rule.delaySeconds = std::max(0.0f, (float)sc.Float);
+				}
+				else if (sc.Compare("delayrandomseconds"))
+				{
+					rule.hasDelayRandomSeconds = true;
+					MustParseFloatRange(rule.delayRandomSecondsRange, false, false, "delayrandomseconds");
+				}
+				else if (sc.Compare("durationseconds"))
+				{
+					sc.MustGetFloat();
+					rule.hasDurationSeconds = true;
+					rule.durationSeconds = std::max(0.0f, (float)sc.Float);
+				}
+				else if (sc.Compare("durationrandomseconds"))
+				{
+					rule.hasDurationRandomSeconds = true;
+					MustParseFloatRange(rule.durationRandomSecondsRange, true, true, "durationrandomseconds");
+				}
+				else if (sc.Compare("offset"))
+				{
+					rule.hasOffset = true;
+					MustParseVector3(rule.offset);
+				}
+				else
+				{
+					SkipUnknownField("muzzleflashrule", sc.String);
+				}
+			}
+
+			FinalizeSourceLocation(rule.source);
+			builder.AddMuzzleFlashRule(rule);
 		}
 
 		void ParseMapBlock()
@@ -809,6 +943,14 @@ namespace
 		AppendLine(text, indentLevel, FStringf("%s %s", name, enabled ? "on" : "off"));
 	}
 
+	static void AppendFloatRangeField(FString& text, int indentLevel, const char* name, const float range[2])
+	{
+		AppendLine(text, indentLevel, FStringf("%s %s %s",
+			name,
+			FormatLightOverlayFloat(range[0]).GetChars(),
+			FormatLightOverlayFloat(range[1]).GetChars()));
+	}
+
 	static void AppendActorRuleBlock(FString& text, const ParsedLightOverlayActorRule& rule)
 	{
 		AppendLine(text, 1, FStringf("actorrule %s", QuoteLightOverlayString(rule.id).GetChars()));
@@ -826,6 +968,23 @@ namespace
 		if (rule.hasDirection) AppendVector3Field(text, 2, "direction", rule.direction);
 		if (rule.hasFlicker) AppendLine(text, 2, FStringf("flicker %u", rule.flickerFrames));
 		if (rule.hasLocalSpacePolicy) AppendLine(text, 2, FStringf("localspace %s", QuoteLightOverlayString(rule.localSpacePolicy).GetChars()));
+		AppendLine(text, 1, "}");
+	}
+
+	static void AppendMuzzleFlashRuleBlock(FString& text, const ParsedLightOverlayMuzzleFlashRule& rule)
+	{
+		AppendLine(text, 1, FStringf("muzzleflashrule %s", QuoteLightOverlayString(rule.id).GetChars()));
+		AppendLine(text, 1, "{");
+		if (rule.hasColor) AppendVector3Field(text, 2, "color", rule.color);
+		if (rule.hasIntensity) AppendLine(text, 2, FStringf("intensity %s", FormatLightOverlayFloat(rule.intensity).GetChars()));
+		if (rule.hasIntensityRandom) AppendFloatRangeField(text, 2, "intensityrandom", rule.intensityRandomRange);
+		if (rule.hasRadius) AppendLine(text, 2, FStringf("radius %s", FormatLightOverlayFloat(rule.radius).GetChars()));
+		if (rule.hasRadiusRandom) AppendFloatRangeField(text, 2, "radiusrandom", rule.radiusRandomRange);
+		if (rule.hasDelaySeconds) AppendLine(text, 2, FStringf("delayseconds %s", FormatLightOverlayFloat(rule.delaySeconds).GetChars()));
+		if (rule.hasDelayRandomSeconds) AppendFloatRangeField(text, 2, "delayrandomseconds", rule.delayRandomSecondsRange);
+		if (rule.hasDurationSeconds) AppendLine(text, 2, FStringf("durationseconds %s", FormatLightOverlayFloat(rule.durationSeconds).GetChars()));
+		if (rule.hasDurationRandomSeconds) AppendFloatRangeField(text, 2, "durationrandomseconds", rule.durationRandomSecondsRange);
+		if (rule.hasOffset) AppendVector3Field(text, 2, "offset", rule.offset);
 		AppendLine(text, 1, "}");
 	}
 
@@ -918,6 +1077,18 @@ namespace
 		return -1;
 	}
 
+	static int32_t FindMuzzleFlashRuleIndex(const ParsedLightOverlayDatabase& database, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.muzzleFlashRules.Size(); ++i)
+		{
+			if (database.muzzleFlashRules[i].id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
 	static int32_t FindMapLightRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
 	{
 		for (unsigned i = 0; i < (unsigned)database.mapLightRules.Size(); ++i)
@@ -955,6 +1126,7 @@ namespace
 		if (database.defaults.present) update(database.defaults.source);
 		for (const auto& rule : database.actorRules) update(rule.source);
 		for (const auto& rule : database.directionalRules) update(rule.source);
+		for (const auto& rule : database.muzzleFlashRules) update(rule.source);
 		for (const auto& rule : database.mapLightRules) update(rule.source);
 		for (const auto& rule : database.actorOverrideRules) update(rule.source);
 		return nextOrderIndex + 1;
@@ -995,10 +1167,11 @@ namespace
 
 	static void DumpParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database)
 	{
-		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d map_lights=%d directional=%d actor_overrides=%d parse_errors=%s\n",
+		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d directional=%d actor_overrides=%d parse_errors=%s\n",
 			database.generation,
 			database.sourceFiles.Size(),
 			database.actorRules.Size(),
+			database.muzzleFlashRules.Size(),
 			database.mapLightRules.Size(),
 			database.directionalRules.Size(),
 			database.actorOverrideRules.Size(),
@@ -1034,6 +1207,23 @@ namespace
 			if (rule->hasDirection) Printf("  direction=(%.3f, %.3f, %.3f)\n", rule->direction[0], rule->direction[1], rule->direction[2]);
 			if (rule->hasFlicker) Printf("  flicker_frames=%u\n", rule->flickerFrames);
 			if (rule->hasLocalSpacePolicy) Printf("  localspace=%s\n", rule->localSpacePolicy.GetChars());
+		}
+
+		for (const ParsedLightOverlayMuzzleFlashRule* rule : SortRulesByOrder(database.muzzleFlashRules))
+		{
+			Printf("LIGHTOVR muzzleflashrule %s: source=%s\n",
+				rule->id.GetChars(),
+				SourceLocationText(rule->source).GetChars());
+			if (rule->hasColor) Printf("  color=(%.3f, %.3f, %.3f)\n", rule->color[0], rule->color[1], rule->color[2]);
+			if (rule->hasIntensity) Printf("  intensity=%.3f\n", rule->intensity);
+			if (rule->hasIntensityRandom) Printf("  intensityrandom=(%.3f, %.3f)\n", rule->intensityRandomRange[0], rule->intensityRandomRange[1]);
+			if (rule->hasRadius) Printf("  radius=%.3f\n", rule->radius);
+			if (rule->hasRadiusRandom) Printf("  radiusrandom=(%.3f, %.3f)\n", rule->radiusRandomRange[0], rule->radiusRandomRange[1]);
+			if (rule->hasDelaySeconds) Printf("  delayseconds=%.3f\n", rule->delaySeconds);
+			if (rule->hasDelayRandomSeconds) Printf("  delayrandomseconds=(%.3f, %.3f)\n", rule->delayRandomSecondsRange[0], rule->delayRandomSecondsRange[1]);
+			if (rule->hasDurationSeconds) Printf("  durationseconds=%.3f\n", rule->durationSeconds);
+			if (rule->hasDurationRandomSeconds) Printf("  durationrandomseconds=(%.3f, %.3f)\n", rule->durationRandomSecondsRange[0], rule->durationRandomSecondsRange[1]);
+			if (rule->hasOffset) Printf("  offset=(%.3f, %.3f, %.3f)\n", rule->offset[0], rule->offset[1], rule->offset[2]);
 		}
 
 		for (const ParsedLightOverlayDirectionalRule* rule : SortRulesByOrder(database.directionalRules))
@@ -1082,12 +1272,13 @@ namespace
 
 	static void DumpResolvedLightOverlaySet(const ResolvedLightOverlaySet& resolved)
 	{
-		Printf("LIGHTOVR resolved: parsed_generation=%u resolved_generation=%u map=%s current_map=%s actor_rules=%d map_lights=%d directional=%d actor_overrides=%d\n",
+		Printf("LIGHTOVR resolved: parsed_generation=%u resolved_generation=%u map=%s current_map=%s actor_rules=%d muzzle_flashes=%d map_lights=%d directional=%d actor_overrides=%d\n",
 			resolved.parsedGeneration,
 			resolved.resolvedGeneration,
 			resolved.activeMapName.IsNotEmpty() ? resolved.activeMapName.GetChars() : "(none)",
 			resolved.currentMapAvailable ? "yes" : "no",
 			resolved.actorRules.Size(),
+			resolved.muzzleFlashRules.Size(),
 			resolved.mapLightRules.Size(),
 			resolved.directionalRules.Size(),
 			resolved.actorOverrideRules.Size());
@@ -1101,6 +1292,13 @@ namespace
 				rule.lightType.GetChars(),
 				rule.hasShadowReceive ? (rule.shadowReceive ? "default" : "off") : "(unset)",
 				rule.hasShadowCast ? (rule.shadowCast ? "default" : "off") : "(unset)",
+				SourceLocationText(rule.source).GetChars());
+		}
+
+		for (const auto& rule : resolved.muzzleFlashRules)
+		{
+			Printf("LIGHTOVR resolved muzzleflashrule %s source=%s\n",
+				rule.id.GetChars(),
 				SourceLocationText(rule.source).GetChars());
 		}
 
@@ -1184,6 +1382,36 @@ namespace
 		destination.shadow = source.shadow;
 	}
 
+	static void CopyMuzzleFlashRule(const ParsedLightOverlayMuzzleFlashRule& source, ResolvedLightOverlayMuzzleFlashRule& destination)
+	{
+		destination.id = source.id;
+		destination.source = source.source;
+		destination.hasColor = source.hasColor;
+		CopyVector3(source.color, destination.color);
+		destination.hasIntensity = source.hasIntensity;
+		destination.intensity = source.intensity;
+		destination.hasIntensityRandom = source.hasIntensityRandom;
+		destination.intensityRandomRange[0] = source.intensityRandomRange[0];
+		destination.intensityRandomRange[1] = source.intensityRandomRange[1];
+		destination.hasRadius = source.hasRadius;
+		destination.radius = source.radius;
+		destination.hasRadiusRandom = source.hasRadiusRandom;
+		destination.radiusRandomRange[0] = source.radiusRandomRange[0];
+		destination.radiusRandomRange[1] = source.radiusRandomRange[1];
+		destination.hasDelaySeconds = source.hasDelaySeconds;
+		destination.delaySeconds = source.delaySeconds;
+		destination.hasDelayRandomSeconds = source.hasDelayRandomSeconds;
+		destination.delayRandomSecondsRange[0] = source.delayRandomSecondsRange[0];
+		destination.delayRandomSecondsRange[1] = source.delayRandomSecondsRange[1];
+		destination.hasDurationSeconds = source.hasDurationSeconds;
+		destination.durationSeconds = source.durationSeconds;
+		destination.hasDurationRandomSeconds = source.hasDurationRandomSeconds;
+		destination.durationRandomSecondsRange[0] = source.durationRandomSecondsRange[0];
+		destination.durationRandomSecondsRange[1] = source.durationRandomSecondsRange[1];
+		destination.hasOffset = source.hasOffset;
+		CopyVector3(source.offset, destination.offset);
+	}
+
 	static void CopyMapLightRule(const ParsedLightOverlayMapLightRule& source, ResolvedLightOverlayMapLightRule& destination)
 	{
 		destination.mapName = source.mapName;
@@ -1246,6 +1474,13 @@ namespace
 			resolved.actorRules.Push(destination);
 		}
 
+		for (const auto& source : GLightOverlayDatabase.muzzleFlashRules)
+		{
+			ResolvedLightOverlayMuzzleFlashRule destination;
+			CopyMuzzleFlashRule(source, destination);
+			resolved.muzzleFlashRules.Push(destination);
+		}
+
 		for (const auto& source : GLightOverlayDatabase.directionalRules)
 		{
 			if (mapName.IsNotEmpty() && source.mapName.CompareNoCase(mapName) == 0)
@@ -1292,7 +1527,7 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 		AppendLine(text, 1, "defaults");
 		AppendLine(text, 1, "{");
 		AppendLine(text, 1, "}");
-		if (database.actorRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
+		if (database.actorRules.Size() > 0 || database.muzzleFlashRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
 		{
 			text << "\n";
 		}
@@ -1308,8 +1543,22 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 		AppendActorRuleBlock(text, *actorRules[i]);
 	}
 
+	const auto muzzleFlashRules = SortRulesById(database.muzzleFlashRules);
+	if (!actorRules.empty() && !muzzleFlashRules.empty())
+	{
+		text << "\n";
+	}
+	for (size_t i = 0; i < muzzleFlashRules.size(); ++i)
+	{
+		if (i > 0)
+		{
+			text << "\n";
+		}
+		AppendMuzzleFlashRuleBlock(text, *muzzleFlashRules[i]);
+	}
+
 	const auto mapNames = CollectSortedMapNames(database);
-	if (!actorRules.empty() && !mapNames.empty())
+	if ((!actorRules.empty() || !muzzleFlashRules.empty()) && !mapNames.empty())
 	{
 		text << "\n";
 	}
@@ -1396,10 +1645,11 @@ bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database,
 
 	if (verbose)
 	{
-		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d map_lights=%d directional=%d actor_overrides=%d parse_errors=%s changed=%s\n",
+		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d directional=%d actor_overrides=%d parse_errors=%s changed=%s\n",
 			GLightOverlayDatabase.generation,
 			GLightOverlayDatabase.sourceFiles.Size(),
 			GLightOverlayDatabase.actorRules.Size(),
+			GLightOverlayDatabase.muzzleFlashRules.Size(),
 			GLightOverlayDatabase.mapLightRules.Size(),
 			GLightOverlayDatabase.directionalRules.Size(),
 			GLightOverlayDatabase.actorOverrideRules.Size(),
@@ -1441,6 +1691,23 @@ bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const Pa
 	else
 	{
 		database.directionalRules.Push(std::move(nextRule));
+	}
+	return true;
+}
+
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMuzzleFlashRule& rule, bool* outReplaced)
+{
+	ParsedLightOverlayMuzzleFlashRule nextRule = rule;
+	const int32_t index = FindMuzzleFlashRuleIndex(database, nextRule.id);
+	if (outReplaced != nullptr) *outReplaced = index >= 0;
+	EnsureEditableSource(database, nextRule.source, index >= 0 ? &database.muzzleFlashRules[index].source : nullptr);
+	if (index >= 0)
+	{
+		database.muzzleFlashRules[index] = std::move(nextRule);
+	}
+	else
+	{
+		database.muzzleFlashRules.Push(std::move(nextRule));
 	}
 	return true;
 }
@@ -1493,6 +1760,10 @@ bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRu
 	case LightOverlayRuleKind::Directional:
 		index = FindDirectionalRuleIndex(database, scopedMapName, ruleId);
 		if (index >= 0) database.directionalRules.Delete(index);
+		return index >= 0;
+	case LightOverlayRuleKind::MuzzleFlash:
+		index = FindMuzzleFlashRuleIndex(database, ruleId);
+		if (index >= 0) database.muzzleFlashRules.Delete(index);
 		return index >= 0;
 	case LightOverlayRuleKind::MapLight:
 		index = FindMapLightRuleIndex(database, scopedMapName, ruleId);

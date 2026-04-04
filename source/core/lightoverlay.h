@@ -75,6 +75,32 @@ struct ParsedLightOverlayDirectionalRule
 	bool shadow = true;
 };
 
+struct ParsedLightOverlayMuzzleFlashRule
+{
+	FString id;
+	LightOverlaySourceLocation source;
+	bool hasColor = false;
+	float color[3] = { 1.0f, 1.0f, 1.0f };
+	bool hasIntensity = false;
+	float intensity = 0.0f;
+	bool hasIntensityRandom = false;
+	float intensityRandomRange[2] = { 1.0f, 1.0f };
+	bool hasRadius = false;
+	float radius = 0.0f;
+	bool hasRadiusRandom = false;
+	float radiusRandomRange[2] = { 1.0f, 1.0f };
+	bool hasDelaySeconds = false;
+	float delaySeconds = 0.0f;
+	bool hasDelayRandomSeconds = false;
+	float delayRandomSecondsRange[2] = { 0.0f, 0.0f };
+	bool hasDurationSeconds = false;
+	float durationSeconds = 0.0f;
+	bool hasDurationRandomSeconds = false;
+	float durationRandomSecondsRange[2] = { 0.0f, 0.0f };
+	bool hasOffset = false;
+	float offset[3] = { 0.0f, 0.0f, 0.0f };
+};
+
 struct ParsedLightOverlayMapLightRule
 {
 	FString mapName;
@@ -129,6 +155,7 @@ struct ParsedLightOverlayDatabase
 	TArray<ParsedLightOverlaySourceFile> sourceFiles;
 	TArray<ParsedLightOverlayActorRule> actorRules;
 	TArray<ParsedLightOverlayDirectionalRule> directionalRules;
+	TArray<ParsedLightOverlayMuzzleFlashRule> muzzleFlashRules;
 	TArray<ParsedLightOverlayMapLightRule> mapLightRules;
 	TArray<ParsedLightOverlayActorOverrideRule> actorOverrideRules;
 };
@@ -182,6 +209,32 @@ struct ResolvedLightOverlayDirectionalRule
 	bool shadow = true;
 };
 
+struct ResolvedLightOverlayMuzzleFlashRule
+{
+	FString id;
+	LightOverlaySourceLocation source;
+	bool hasColor = false;
+	float color[3] = { 1.0f, 1.0f, 1.0f };
+	bool hasIntensity = false;
+	float intensity = 0.0f;
+	bool hasIntensityRandom = false;
+	float intensityRandomRange[2] = { 1.0f, 1.0f };
+	bool hasRadius = false;
+	float radius = 0.0f;
+	bool hasRadiusRandom = false;
+	float radiusRandomRange[2] = { 1.0f, 1.0f };
+	bool hasDelaySeconds = false;
+	float delaySeconds = 0.0f;
+	bool hasDelayRandomSeconds = false;
+	float delayRandomSecondsRange[2] = { 0.0f, 0.0f };
+	bool hasDurationSeconds = false;
+	float durationSeconds = 0.0f;
+	bool hasDurationRandomSeconds = false;
+	float durationRandomSecondsRange[2] = { 0.0f, 0.0f };
+	bool hasOffset = false;
+	float offset[3] = { 0.0f, 0.0f, 0.0f };
+};
+
 struct ResolvedLightOverlayMapLightRule
 {
 	FString mapName;
@@ -230,6 +283,7 @@ struct ResolvedLightOverlaySet
 	bool currentMapAvailable = false;
 	TArray<ResolvedLightOverlayActorRule> actorRules;
 	TArray<ResolvedLightOverlayDirectionalRule> directionalRules;
+	TArray<ResolvedLightOverlayMuzzleFlashRule> muzzleFlashRules;
 	TArray<ResolvedLightOverlayMapLightRule> mapLightRules;
 	TArray<ResolvedLightOverlayActorOverrideRule> actorOverrideRules;
 };
@@ -238,6 +292,7 @@ enum class LightOverlayRuleKind : uint8_t
 {
 	ActorRule,
 	Directional,
+	MuzzleFlash,
 	MapLight,
 	ActorOverride,
 };
@@ -250,6 +305,7 @@ bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database,
 FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayDirectionalRule& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMuzzleFlashRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMapLightRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced = nullptr);
 bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRuleKind kind, const char* id, const char* mapName = nullptr);
