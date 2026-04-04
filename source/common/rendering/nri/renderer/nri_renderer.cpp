@@ -2598,6 +2598,64 @@ namespace
 		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
 	}
 
+	static uint32_t FloatBits(float value)
+	{
+		uint32_t bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		return bits;
+	}
+
+	static uint64_t HashGeometryForEmissiveSampling(const nri_scene::GeometryData* geometry)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		if (geometry == nullptr)
+		{
+			return HashCombine64(hash, 0ull);
+		}
+
+		hash = HashCombine64(hash, (uint64_t)geometry->vertices.size());
+		hash = HashCombine64(hash, (uint64_t)geometry->primitives.size());
+		for (const nri_scene::SceneVertex& vertex : geometry->vertices)
+		{
+			hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[0]));
+			hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[1]));
+			hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[2]));
+		}
+
+		for (const nri_scene::PrimitiveData& primitive : geometry->primitives)
+		{
+			hash = HashCombine64(hash, (uint64_t)primitive.indices[0]);
+			hash = HashCombine64(hash, (uint64_t)primitive.indices[1]);
+			hash = HashCombine64(hash, (uint64_t)primitive.indices[2]);
+			hash = HashCombine64(hash, (uint64_t)primitive.materialIndex);
+		}
+
+		return hash;
+	}
+
+	static uint64_t BuildEmissiveTlasInstancePayloadHash(const std::vector<nri::TopLevelInstance>& instances)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)instances.size());
+		for (const nri::TopLevelInstance& instance : instances)
+		{
+			hash = HashCombine64(hash, (uint64_t)instance.instanceId);
+			hash = HashCombine64(hash, (uint64_t)instance.mask);
+			hash = HashCombine64(hash, (uint64_t)instance.shaderBindingTableLocalOffset);
+			hash = HashCombine64(hash, (uint64_t)instance.flags);
+			hash = HashCombine64(hash, instance.accelerationStructureHandle);
+			for (uint32_t row = 0; row < 3; ++row)
+			{
+				hash = HashCombine64(hash, (uint64_t)FloatBits(instance.transform[row][0]));
+				hash = HashCombine64(hash, (uint64_t)FloatBits(instance.transform[row][1]));
+				hash = HashCombine64(hash, (uint64_t)FloatBits(instance.transform[row][2]));
+				hash = HashCombine64(hash, (uint64_t)FloatBits(instance.transform[row][3]));
+			}
+		}
+
+		return hash;
+	}
+
 	static bool IsUsableGameTexturePointer(FGameTexture* texture)
 	{
 		const intptr_t value = (intptr_t)texture;
@@ -7861,6 +7919,54 @@ void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuD
 	}
 }
 
+uint64_t NRIRenderer::BuildRuntimeLightPayloadHash() const
+{
+	const auto& activeLights = mSceneLights.GetAnalyticLights().activeLights;
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashCombine64(hash, (uint64_t)activeLights.size());
+	for (const SceneLightSystem::SceneAnalyticLight& light : activeLights)
+	{
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[0]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[1]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[2]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[0]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[1]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[2]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.intensity));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.radius));
+	}
+
+	return hash;
+}
+
+uint64_t NRIRenderer::BuildRuntimeLightClusterCameraHash() const
+{
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashCombine64(hash, (uint64_t)mRenderWidth);
+	hash = HashCombine64(hash, (uint64_t)mRenderHeight);
+
+	if (mSceneLights.GetAnalyticLights().activeLights.empty())
+	{
+		return hash;
+	}
+
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraPos[0]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraPos[1]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraPos[2]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraForward[0]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraForward[1]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraForward[2]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraRight[0]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraRight[1]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraRight[2]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraUp[0]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraUp[1]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraUp[2]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentTanHalfFovX));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentTanHalfFovY));
+	return hash;
+}
+
 void NRIRenderer::BuildEmissiveSamplingUpload(
 	const EmissiveSamplingBuildContext& context,
 	EmissivePrimitiveHeaderGpuData& outHeader,
@@ -8131,9 +8237,46 @@ void NRIRenderer::BuildSectorLightingUpload(
 	}
 }
 
+uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const
+{
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashCombine64(hash, nri_ptemissiveautoonly ? 1ull : 0ull);
+	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.staticGeometry));
+	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.capturedGeometry));
+	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.runtimeMutationGeometry));
+	hash = HashCombine64(hash, (uint64_t)context.runtimeMutationPrimitiveBaseOffset);
+	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.dynamicGeometry));
+	hash = HashCombine64(hash, (uint64_t)context.dynamicPrimitiveBaseOffset);
+
+	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
+	hash = HashCombine64(hash, (uint64_t)emissiveRegistry.activeSurfaces.size());
+	for (const auto& surface : emissiveRegistry.activeSurfaces)
+	{
+		hash = HashCombine64(hash, surface.stableKey);
+
+		const auto propertyIt = emissiveRegistry.activePropertyHashes.find(surface.stableKey);
+		hash = HashCombine64(hash, propertyIt != emissiveRegistry.activePropertyHashes.end() ? propertyIt->second : 0ull);
+
+		const auto bindingIt = emissiveRegistry.activeBindingHashes.find(surface.stableKey);
+		hash = HashCombine64(hash, bindingIt != emissiveRegistry.activeBindingHashes.end() ? bindingIt->second : 0ull);
+	}
+
+	return hash;
+}
+
 bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context)
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.emissiveUpdateMs);
+	const uint64_t payloadHash = BuildEmissiveSamplingPayloadHash(context);
+	if (mEmissiveSamplingPayloadCacheValid &&
+		mEmissiveSamplingPayloadHash == payloadHash &&
+		mEmissivePrimitiveHeaderBuffer.shaderView != nullptr &&
+		mEmissivePrimitiveBuffer.shaderView != nullptr &&
+		mEmissivePrimitiveCdfBuffer.shaderView != nullptr)
+	{
+		return true;
+	}
+
 	EmissivePrimitiveHeaderGpuData emissiveHeader = {};
 	std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
 	std::vector<float> emissiveCdf;
@@ -8195,6 +8338,8 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
 	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	mEmissiveSamplingPayloadCacheValid = true;
+	mEmissiveSamplingPayloadHash = payloadHash;
 	return true;
 }
 
@@ -8461,96 +8606,132 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
-	std::vector<RuntimePointLightGpuData> runtimeLights;
-	BuildRuntimePointLightUpload(runtimeLights);
-	if (!EnsureStructuredBuffer(
-		mRuntimeLightBuffer,
-		mRuntimeLightBufferStats,
-		runtimeLights.empty() ? nullptr : runtimeLights.data(),
-		runtimeLights.size() * sizeof(RuntimePointLightGpuData),
-		sizeof(RuntimePointLightGpuData),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+	const uint64_t runtimeLightPayloadHash = BuildRuntimeLightPayloadHash();
+	const uint32_t activeRuntimeLightCount = (uint32_t)mSceneLights.GetAnalyticLights().activeLights.size();
+	if (!mRuntimeLightPayloadCacheValid ||
+		mRuntimeLightPayloadHash != runtimeLightPayloadHash ||
+		mRuntimeLightBuffer.shaderView == nullptr)
 	{
-		return false;
+		std::vector<RuntimePointLightGpuData> runtimeLights;
+		BuildRuntimePointLightUpload(runtimeLights);
+		if (!EnsureStructuredBuffer(
+			mRuntimeLightBuffer,
+			mRuntimeLightBufferStats,
+			runtimeLights.empty() ? nullptr : runtimeLights.data(),
+			runtimeLights.size() * sizeof(RuntimePointLightGpuData),
+			sizeof(RuntimePointLightGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+		{
+			return false;
+		}
+
+		mRuntimeLightPayloadCacheValid = true;
+		mRuntimeLightPayloadHash = runtimeLightPayloadHash;
 	}
 
-	std::vector<RuntimeLightTileHeaderGpuData> runtimeLightTileHeaders;
-	std::vector<uint32_t> runtimeLightTileIndices;
 	uint32_t runtimeLightTileCountX = 0;
 	uint32_t runtimeLightTileCountY = 0;
 	uint32_t runtimeLightTileIndexCount = 0;
 	uint32_t runtimeLightMaxTileOccupancy = 0;
-	BuildRuntimeLightClusterUpload(
-		runtimeLightTileHeaders,
-		runtimeLightTileIndices,
-		runtimeLightTileCountX,
-		runtimeLightTileCountY,
-		runtimeLightTileIndexCount,
-		runtimeLightMaxTileOccupancy);
-	if (!EnsureStructuredBuffer(
-		mRuntimeLightTileHeaderBuffer,
-		mRuntimeLightTileHeaderBufferStats,
-		runtimeLightTileHeaders.data(),
-		runtimeLightTileHeaders.size() * sizeof(RuntimeLightTileHeaderGpuData),
-		sizeof(RuntimeLightTileHeaderGpuData),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+	const uint64_t runtimeLightClusterCameraHash = BuildRuntimeLightClusterCameraHash();
+	const uint64_t runtimeLightClusterPayloadHash =
+		HashCombine64(runtimeLightPayloadHash, runtimeLightClusterCameraHash);
+	if (!mRuntimeLightClusterCacheValid ||
+		mRuntimeLightClusterPayloadHash != runtimeLightClusterPayloadHash ||
+		mRuntimeLightTileHeaderBuffer.shaderView == nullptr ||
+		mRuntimeLightTileIndexBuffer.shaderView == nullptr)
 	{
-		return false;
+		std::vector<RuntimeLightTileHeaderGpuData> runtimeLightTileHeaders;
+		std::vector<uint32_t> runtimeLightTileIndices;
+		BuildRuntimeLightClusterUpload(
+			runtimeLightTileHeaders,
+			runtimeLightTileIndices,
+			runtimeLightTileCountX,
+			runtimeLightTileCountY,
+			runtimeLightTileIndexCount,
+			runtimeLightMaxTileOccupancy);
+		if (!EnsureStructuredBuffer(
+			mRuntimeLightTileHeaderBuffer,
+			mRuntimeLightTileHeaderBufferStats,
+			runtimeLightTileHeaders.data(),
+			runtimeLightTileHeaders.size() * sizeof(RuntimeLightTileHeaderGpuData),
+			sizeof(RuntimeLightTileHeaderGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+		{
+			return false;
+		}
+
+		if (!EnsureStructuredBuffer(
+			mRuntimeLightTileIndexBuffer,
+			mRuntimeLightTileIndexBufferStats,
+			runtimeLightTileIndices.data(),
+			runtimeLightTileIndices.size() * sizeof(uint32_t),
+			sizeof(uint32_t),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+		{
+			return false;
+		}
+
+		mRuntimeLightClusterCacheValid = true;
+		mRuntimeLightClusterPayloadHash = runtimeLightClusterPayloadHash;
+		mRuntimeLightClusterCameraHash = runtimeLightClusterCameraHash;
+	}
+	else
+	{
+		runtimeLightTileCountX = mBoundRuntimeLightTileCountX;
+		runtimeLightTileCountY = mBoundRuntimeLightTileCountY;
+		runtimeLightTileIndexCount = mBoundRuntimeLightTileIndexCount;
+		runtimeLightMaxTileOccupancy = mBoundRuntimeLightMaxTileOccupancy;
 	}
 
-	if (!EnsureStructuredBuffer(
-		mRuntimeLightTileIndexBuffer,
-		mRuntimeLightTileIndexBufferStats,
-		runtimeLightTileIndices.data(),
-		runtimeLightTileIndices.size() * sizeof(uint32_t),
-		sizeof(uint32_t),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+	if (!mEmissiveSamplingPayloadCacheValid ||
+		mEmissivePrimitiveHeaderBuffer.shaderView == nullptr ||
+		mEmissivePrimitiveBuffer.shaderView == nullptr ||
+		mEmissivePrimitiveCdfBuffer.shaderView == nullptr)
 	{
-		return false;
-	}
+		EmissivePrimitiveHeaderGpuData emissiveHeader = {};
+		std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
+		std::vector<float> emissiveCdf;
+		std::vector<EmissivePrimitiveDebugRecord> ignoredEmissiveDebugRecords;
+		BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, ignoredEmissiveDebugRecords);
+		if (!EnsureStructuredBuffer(
+			mEmissivePrimitiveHeaderBuffer,
+			mEmissivePrimitiveHeaderBufferStats,
+			&emissiveHeader,
+			sizeof(emissiveHeader),
+			sizeof(EmissivePrimitiveHeaderGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+		{
+			return false;
+		}
 
-	EmissivePrimitiveHeaderGpuData emissiveHeader = {};
-	std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
-	std::vector<float> emissiveCdf;
-	std::vector<EmissivePrimitiveDebugRecord> ignoredEmissiveDebugRecords;
-	BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, ignoredEmissiveDebugRecords);
-	if (!EnsureStructuredBuffer(
-		mEmissivePrimitiveHeaderBuffer,
-		mEmissivePrimitiveHeaderBufferStats,
-		&emissiveHeader,
-		sizeof(emissiveHeader),
-		sizeof(EmissivePrimitiveHeaderGpuData),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
-	{
-		return false;
-	}
+		if (!EnsureStructuredBuffer(
+			mEmissivePrimitiveBuffer,
+			mEmissivePrimitiveBufferStats,
+			emissivePrimitives.empty() ? nullptr : emissivePrimitives.data(),
+			emissivePrimitives.empty() ? 0u : emissivePrimitives.size() * sizeof(EmissivePrimitiveGpuData),
+			sizeof(EmissivePrimitiveGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+		{
+			return false;
+		}
 
-	if (!EnsureStructuredBuffer(
-		mEmissivePrimitiveBuffer,
-		mEmissivePrimitiveBufferStats,
-		emissivePrimitives.empty() ? nullptr : emissivePrimitives.data(),
-		emissivePrimitives.empty() ? 0u : emissivePrimitives.size() * sizeof(EmissivePrimitiveGpuData),
-		sizeof(EmissivePrimitiveGpuData),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
-	{
-		return false;
-	}
-
-	if (!EnsureStructuredBuffer(
-		mEmissivePrimitiveCdfBuffer,
-		mEmissivePrimitiveCdfBufferStats,
-		emissiveCdf.data(),
-		emissiveCdf.size() * sizeof(float),
-		sizeof(float),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
-	{
-		return false;
+		if (!EnsureStructuredBuffer(
+			mEmissivePrimitiveCdfBuffer,
+			mEmissivePrimitiveCdfBufferStats,
+			emissiveCdf.data(),
+			emissiveCdf.size() * sizeof(float),
+			sizeof(float),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+		{
+			return false;
+		}
 	}
 
 	SectorLightHeaderGpuData sectorLightHeader = {};
@@ -8628,7 +8809,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundStaticMaterialCount = staticMaterialCount;
 	mBoundDynamicMaterialCount = dynamicMaterialCount;
 	mBoundPortalCount = mMapWorld.valid ? (uint32_t)mMapWorld.portals.size() : 0u;
-	mBoundRuntimeLightCount = (uint32_t)runtimeLights.size();
+	mBoundRuntimeLightCount = activeRuntimeLightCount;
 	mBoundRuntimeLightTileCountX = runtimeLightTileCountX;
 	mBoundRuntimeLightTileCountY = runtimeLightTileCountY;
 	mBoundRuntimeLightTileSize = NRI_RUNTIME_LIGHT_TILE_SIZE;
@@ -10835,6 +11016,8 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 	{
 		DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 		DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+		mEmissiveTlasInstancePayloadCacheValid = false;
+		mEmissiveTlasInstancePayloadHash = 0;
 		return true;
 	}
 
@@ -10954,6 +11137,18 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 	{
 		DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 		DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+		mEmissiveTlasInstancePayloadCacheValid = false;
+		mEmissiveTlasInstancePayloadHash = 0;
+		return true;
+	}
+
+	const uint64_t payloadHash = BuildEmissiveTlasInstancePayloadHash(instances);
+	if (mEmissiveTlasInstancePayloadCacheValid &&
+		mEmissiveTlasInstancePayloadHash == payloadHash &&
+		mEmissiveTlasInstanceBuffer.buffer != nullptr &&
+		mEmissiveTopLevelAS.accelerationStructure != nullptr)
+	{
+		mEmissiveTlasInstanceCount = (uint32_t)instances.size();
 		return true;
 	}
 
@@ -11015,6 +11210,8 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 
 	mEmissiveTlasInstanceCount = (uint32_t)instances.size();
 	mEmissiveTlasBuildCount++;
+	mEmissiveTlasInstancePayloadCacheValid = true;
+	mEmissiveTlasInstancePayloadHash = payloadHash;
 	return true;
 }
 
@@ -12864,15 +13061,24 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundRuntimeLightTileSize = 0;
 	mBoundRuntimeLightTileIndexCount = 0;
 	mBoundRuntimeLightMaxTileOccupancy = 0;
+	mRuntimeLightPayloadCacheValid = false;
+	mRuntimeLightPayloadHash = 0;
+	mRuntimeLightClusterCacheValid = false;
+	mRuntimeLightClusterPayloadHash = 0;
+	mRuntimeLightClusterCameraHash = 0;
 	mBoundEmissivePrimitiveCount = 0;
 	mBoundEmissiveDominantPrimitive = UINT32_MAX;
 	mBoundEmissiveDominantTile = 0;
 	mBoundEmissiveDominantFlags = 0;
 	mBoundEmissiveDominantDataSource = 0;
+	mEmissiveSamplingPayloadCacheValid = false;
+	mEmissiveSamplingPayloadHash = 0;
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
 	mEmissiveTlasBuildCount = 0;
+	mEmissiveTlasInstancePayloadCacheValid = false;
+	mEmissiveTlasInstancePayloadHash = 0;
 	mBoundEmissiveTotalPower = 0.0f;
 	mBoundEmissiveDominantPower = 0.0f;
 	mBoundEmissivePrimitiveRecords.clear();
@@ -12900,6 +13106,8 @@ void NRIRenderer::DestroyAccelerationStructures()
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
 	mEmissiveTlasBuildCount = 0;
+	mEmissiveTlasInstancePayloadCacheValid = false;
+	mEmissiveTlasInstancePayloadHash = 0;
 }
 
 void NRIRenderer::DestroyStaticMapSceneCache()

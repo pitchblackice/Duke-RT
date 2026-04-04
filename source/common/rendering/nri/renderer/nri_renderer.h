@@ -585,6 +585,9 @@ private:
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const;
+	uint64_t BuildRuntimeLightPayloadHash() const;
+	uint64_t BuildRuntimeLightClusterCameraHash() const;
+	uint64_t BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const;
 	void BuildEmissiveSamplingUpload(
 		const EmissiveSamplingBuildContext& context,
 		EmissivePrimitiveHeaderGpuData& outHeader,
@@ -901,15 +904,24 @@ private:
 	uint32_t mBoundRuntimeLightTileSize = 0;
 	uint32_t mBoundRuntimeLightTileIndexCount = 0;
 	uint32_t mBoundRuntimeLightMaxTileOccupancy = 0;
+	bool mRuntimeLightPayloadCacheValid = false;
+	uint64_t mRuntimeLightPayloadHash = 0;
+	bool mRuntimeLightClusterCacheValid = false;
+	uint64_t mRuntimeLightClusterPayloadHash = 0;
+	uint64_t mRuntimeLightClusterCameraHash = 0;
 	uint32_t mBoundEmissivePrimitiveCount = 0;
 	uint32_t mBoundEmissiveDominantPrimitive = UINT32_MAX;
 	uint32_t mBoundEmissiveDominantTile = 0;
 	uint32_t mBoundEmissiveDominantFlags = 0;
 	uint32_t mBoundEmissiveDominantDataSource = 0;
+	bool mEmissiveSamplingPayloadCacheValid = false;
+	uint64_t mEmissiveSamplingPayloadHash = 0;
 	uint32_t mEmissiveTlasInstanceCount = 0;
 	uint32_t mEmissiveTlasStaticInstanceCount = 0;
 	uint32_t mEmissiveTlasDynamicInstanceCount = 0;
 	uint32_t mEmissiveTlasBuildCount = 0;
+	bool mEmissiveTlasInstancePayloadCacheValid = false;
+	uint64_t mEmissiveTlasInstancePayloadHash = 0;
 	float mBoundEmissiveTotalPower = 0.0f;
 	float mBoundEmissiveDominantPower = 0.0f;
 	std::vector<EmissivePrimitiveDebugRecord> mBoundEmissivePrimitiveRecords;
