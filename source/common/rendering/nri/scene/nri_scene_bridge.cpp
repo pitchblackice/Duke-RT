@@ -635,11 +635,31 @@ namespace
 			return;
 		}
 
+		DVector2 nudgeDirection = {};
+		const DVector2 spriteCenter = wall.Sprite->pos.XY();
+		const DVector2 nearestPoint = NearestPointOnWall(spriteCenter.X, spriteCenter.Y, wall.walldist);
+		const DVector2 wallToSprite = spriteCenter - nearestPoint;
+		if (wallToSprite.LengthSquared() > 1.0e-8)
+		{
+			nudgeDirection = wallToSprite.Unit();
+		}
+		else
+		{
+			// Exact on-wall placements need a stable wall-side fallback. Match the
+			// same sector-owned wall normal convention used by pushmove().
+			const DVector2 wallNormal = wall.walldist->delta().Rotated90CCW();
+			if (wallNormal.LengthSquared() <= 1.0e-8)
+			{
+				return;
+			}
+
+			nudgeDirection = wallNormal.Unit();
+		}
+
 		// The raster path uses depth bias for wall-attached sprites so coplanar walls do not overdraw them.
 		// PT needs a small geometric equivalent or the structural wall can win the closest-hit test.
-		const DVector2 normal = wall.Sprite->Angles.Yaw.ToVector();
-		const float offsetX = (float)(normal.X * kAttachedWallSpriteDepthNudge);
-		const float offsetZ = (float)(-normal.Y * kAttachedWallSpriteDepthNudge);
+		const float offsetX = (float)(nudgeDirection.X * kAttachedWallSpriteDepthNudge);
+		const float offsetZ = (float)(-nudgeDirection.Y * kAttachedWallSpriteDepthNudge);
 
 		for (CapturedVertex& vertex : surface.vertices)
 		{
