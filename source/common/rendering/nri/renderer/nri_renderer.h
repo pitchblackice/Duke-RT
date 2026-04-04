@@ -588,6 +588,7 @@ private:
 	uint64_t BuildRuntimeLightPayloadHash() const;
 	uint64_t BuildRuntimeLightClusterCameraHash() const;
 	uint64_t BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const;
+	uint64_t BuildSectorLightingPayloadHash() const;
 	void BuildEmissiveSamplingUpload(
 		const EmissiveSamplingBuildContext& context,
 		EmissivePrimitiveHeaderGpuData& outHeader,
@@ -595,6 +596,7 @@ private:
 		std::vector<float>& outCdf,
 		std::vector<EmissivePrimitiveDebugRecord>& outDebugRecords) const;
 	bool UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context);
+	void UpdateBoundSectorLightingState();
 	void BuildSectorLightingUpload(
 		SectorLightHeaderGpuData& outHeader,
 		std::vector<SectorLightGpuData>& outSectors);
@@ -925,6 +927,8 @@ private:
 	float mBoundEmissiveTotalPower = 0.0f;
 	float mBoundEmissiveDominantPower = 0.0f;
 	std::vector<EmissivePrimitiveDebugRecord> mBoundEmissivePrimitiveRecords;
+	bool mSectorLightingPayloadCacheValid = false;
+	uint64_t mSectorLightingPayloadHash = 0;
 	uint32_t mBoundSectorLightSectorCount = 0;
 	uint32_t mBoundSectorLightActiveCount = 0;
 	uint32_t mBoundSectorLightPulsingCount = 0;

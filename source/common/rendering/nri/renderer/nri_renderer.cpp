@@ -8195,18 +8195,13 @@ void NRIRenderer::BuildSectorLightingUpload(
 	std::vector<SectorLightGpuData>& outSectors)
 {
 	const auto& registry = mSceneLights.GetSectorLighting();
+	UpdateBoundSectorLightingState();
 	outHeader = {};
 	outHeader.sectorCount = registry.sectorCount;
 	outHeader.activeCount = registry.activeSectorCount;
 	outHeader.pulsingCount = registry.pulsingSectorCount;
 	outHeader.flags = nri_ptsectorlighting ? NRI_SECTOR_LIGHTING_FLAG_ENABLED : 0u;
 	outSectors.assign(registry.sectorCount, {});
-
-	mBoundSectorLightSectorCount = registry.sectorCount;
-	mBoundSectorLightActiveCount = registry.activeSectorCount;
-	mBoundSectorLightPulsingCount = registry.pulsingSectorCount;
-	mBoundSectorLightDominantSector = UINT32_MAX;
-	mBoundSectorLightDominantContribution = 0.0f;
 
 	for (uint32_t sectorIndex : registry.activeSectorIndices)
 	{
@@ -8227,13 +8222,6 @@ void NRIRenderer::BuildSectorLightingUpload(
 		target.paletteIndex = source.paletteIndex;
 		target.lotag = source.lotag;
 		target.hitag = source.hitag;
-
-		const float contribution = source.ambientIntensity + std::abs(source.hemisphereAmount) + source.fogAmount;
-		if (contribution > mBoundSectorLightDominantContribution)
-		{
-			mBoundSectorLightDominantContribution = contribution;
-			mBoundSectorLightDominantSector = sectorIndex;
-		}
 	}
 }
 
@@ -8262,6 +8250,66 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 	}
 
 	return hash;
+}
+
+uint64_t NRIRenderer::BuildSectorLightingPayloadHash() const
+{
+	const auto& registry = mSceneLights.GetSectorLighting();
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashCombine64(hash, nri_ptsectorlighting ? 1ull : 0ull);
+	hash = HashCombine64(hash, (uint64_t)registry.sectorCount);
+	hash = HashCombine64(hash, (uint64_t)registry.activeSectorCount);
+	hash = HashCombine64(hash, (uint64_t)registry.pulsingSectorCount);
+	for (uint32_t sectorIndex : registry.activeSectorIndices)
+	{
+		hash = HashCombine64(hash, (uint64_t)sectorIndex);
+		if (sectorIndex >= registry.sectors.size())
+		{
+			continue;
+		}
+
+		const auto& sector = registry.sectors[sectorIndex];
+		hash = HashCombine64(hash, (uint64_t)sector.sourceFlags);
+		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.paletteIndex);
+		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.lotag);
+		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.hitag);
+		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.averageShade);
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[0]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[1]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[2]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientIntensity));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.hemisphereAmount));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.fogAmount));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.pulseScale));
+	}
+
+	return hash;
+}
+
+void NRIRenderer::UpdateBoundSectorLightingState()
+{
+	const auto& registry = mSceneLights.GetSectorLighting();
+	mBoundSectorLightSectorCount = registry.sectorCount;
+	mBoundSectorLightActiveCount = registry.activeSectorCount;
+	mBoundSectorLightPulsingCount = registry.pulsingSectorCount;
+	mBoundSectorLightDominantSector = UINT32_MAX;
+	mBoundSectorLightDominantContribution = 0.0f;
+
+	for (uint32_t sectorIndex : registry.activeSectorIndices)
+	{
+		if (sectorIndex >= registry.sectors.size())
+		{
+			continue;
+		}
+
+		const auto& sector = registry.sectors[sectorIndex];
+		const float contribution = sector.ambientIntensity + std::abs(sector.hemisphereAmount) + sector.fogAmount;
+		if (contribution > mBoundSectorLightDominantContribution)
+		{
+			mBoundSectorLightDominantContribution = contribution;
+			mBoundSectorLightDominantSector = sectorIndex;
+		}
+	}
 }
 
 bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context)
@@ -8734,31 +8782,42 @@ bool NRIRenderer::UpdateSceneDataSet(
 		}
 	}
 
-	SectorLightHeaderGpuData sectorLightHeader = {};
-	std::vector<SectorLightGpuData> sectorLights;
-	BuildSectorLightingUpload(sectorLightHeader, sectorLights);
-	if (!EnsureStructuredBuffer(
-		mSectorLightHeaderBuffer,
-		mSectorLightHeaderBufferStats,
-		&sectorLightHeader,
-		sizeof(sectorLightHeader),
-		sizeof(SectorLightHeaderGpuData),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+	UpdateBoundSectorLightingState();
+	const uint64_t sectorLightingPayloadHash = BuildSectorLightingPayloadHash();
+	if (!mSectorLightingPayloadCacheValid ||
+		mSectorLightingPayloadHash != sectorLightingPayloadHash ||
+		mSectorLightHeaderBuffer.shaderView == nullptr ||
+		mSectorLightBuffer.shaderView == nullptr)
 	{
-		return false;
-	}
+		SectorLightHeaderGpuData sectorLightHeader = {};
+		std::vector<SectorLightGpuData> sectorLights;
+		BuildSectorLightingUpload(sectorLightHeader, sectorLights);
+		if (!EnsureStructuredBuffer(
+			mSectorLightHeaderBuffer,
+			mSectorLightHeaderBufferStats,
+			&sectorLightHeader,
+			sizeof(sectorLightHeader),
+			sizeof(SectorLightHeaderGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+		{
+			return false;
+		}
 
-	if (!EnsureStructuredBuffer(
-		mSectorLightBuffer,
-		mSectorLightBufferStats,
-		sectorLights.empty() ? nullptr : sectorLights.data(),
-		sectorLights.empty() ? 0u : sectorLights.size() * sizeof(SectorLightGpuData),
-		sizeof(SectorLightGpuData),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
-	{
-		return false;
+		if (!EnsureStructuredBuffer(
+			mSectorLightBuffer,
+			mSectorLightBufferStats,
+			sectorLights.empty() ? nullptr : sectorLights.data(),
+			sectorLights.empty() ? 0u : sectorLights.size() * sizeof(SectorLightGpuData),
+			sizeof(SectorLightGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+		{
+			return false;
+		}
+
+		mSectorLightingPayloadCacheValid = true;
+		mSectorLightingPayloadHash = sectorLightingPayloadHash;
 	}
 
 	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
@@ -13088,6 +13147,8 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundSectorLightPulsingCount = 0;
 	mBoundSectorLightDominantSector = UINT32_MAX;
 	mBoundSectorLightDominantContribution = 0.0f;
+	mSectorLightingPayloadCacheValid = false;
+	mSectorLightingPayloadHash = 0;
 }
 
 void NRIRenderer::DestroyAccelerationStructures()
