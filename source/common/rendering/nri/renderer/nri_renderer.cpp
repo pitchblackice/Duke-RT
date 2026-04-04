@@ -1799,6 +1799,65 @@ namespace
 		return -1;
 	}
 
+	static void MarkChunkVisible(std::vector<uint32_t>& visibleChunkWords, uint32_t chunkIndex)
+	{
+		const size_t wordIndex = (size_t)(chunkIndex >> 5u);
+		if (wordIndex >= visibleChunkWords.size())
+		{
+			return;
+		}
+
+		visibleChunkWords[wordIndex] |= 1u << (chunkIndex & 31u);
+	}
+
+	static void MarkVisibleChunkForSector(const nri_scene::PTMapWorld& mapWorld, int32_t sectorIndex, std::vector<uint32_t>& visibleChunkWords)
+	{
+		const int32_t chunkIndex = FindMapChunkIndexForSector(mapWorld, sectorIndex);
+		if (chunkIndex >= 0)
+		{
+			MarkChunkVisible(visibleChunkWords, (uint32_t)chunkIndex);
+		}
+	}
+
+	static void AccumulateVisibleChunksFromViewRoots(const HWDrawInfo& di, const nri_scene::PTMapWorld& mapWorld, std::vector<uint32_t>& visibleChunkWords)
+	{
+		if (di.Viewpoint.SectNums != nullptr)
+		{
+			for (int i = 0; i < di.Viewpoint.SectCount; ++i)
+			{
+				MarkVisibleChunkForSector(mapWorld, di.Viewpoint.SectNums[i], visibleChunkWords);
+			}
+		}
+		else
+		{
+			MarkVisibleChunkForSector(mapWorld, di.Viewpoint.SectCount, visibleChunkWords);
+		}
+	}
+
+	static void AccumulateVisibleChunksFromDrawLists(const HWDrawInfo& di, const nri_scene::PTMapWorld& mapWorld, std::vector<uint32_t>& visibleChunkWords)
+	{
+		for (int drawListType = 0; drawListType < GLDL_TYPES; ++drawListType)
+		{
+			const HWDrawList& drawList = di.drawlists[drawListType];
+
+			for (const HWWall* wall : drawList.walls)
+			{
+				if (wall != nullptr && wall->seg != nullptr)
+				{
+					MarkVisibleChunkForSector(mapWorld, wall->seg->sector, visibleChunkWords);
+				}
+			}
+
+			for (const HWFlat* flat : drawList.flats)
+			{
+				if (flat != nullptr && flat->sec != nullptr)
+				{
+					MarkVisibleChunkForSector(mapWorld, sector.IndexOf(flat->sec), visibleChunkWords);
+				}
+			}
+		}
+	}
+
 	static uint64_t GetGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride)
 	{
 		uint64_t newCapacity = std::max<uint64_t>(requiredSize, stride);
@@ -12720,21 +12779,14 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 			continue;
 		}
 
-		const int32_t chunkIndex = FindMapChunkIndexForSector(mMapWorld, (int32_t)sectorIndex);
-		if (chunkIndex < 0)
-		{
-			continue;
-		}
-
-		const uint32_t visibleChunkIndex = (uint32_t)chunkIndex;
-		const size_t wordIndex = visibleChunkIndex >> 5u;
-		if (wordIndex >= mCurrentVisibleChunkWords.size())
-		{
-			continue;
-		}
-
-		mCurrentVisibleChunkWords[wordIndex] |= 1u << (visibleChunkIndex & 31u);
+		MarkVisibleChunkForSector(mMapWorld, (int32_t)sectorIndex, mCurrentVisibleChunkWords);
 	}
+	// HWDrawInfo can accumulate geometry from multiple RenderScene passes
+	// while its final visible-sector bitset only reflects the last traversal.
+	// Union the root sectors and accumulated drawlists so the PT chunk gate
+	// tracks the scene the HAL actually built this frame.
+	AccumulateVisibleChunksFromViewRoots(di, mMapWorld, mCurrentVisibleChunkWords);
+	AccumulateVisibleChunksFromDrawLists(di, mMapWorld, mCurrentVisibleChunkWords);
 	if (ShouldEmitTemporalTraceLogs())
 	{
 		const uint32_t targetWidth = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->width : 0u;
