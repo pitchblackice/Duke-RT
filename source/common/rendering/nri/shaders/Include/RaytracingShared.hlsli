@@ -408,7 +408,13 @@ bool IsTransparentSurfaceSample(uint materialIndex, uint dataSource, float2 uv)
 	const float4 rawSample = SampleMaterialBaseColorRaw(materialIndex, dataSource, uv);
 	if ((material.flags & MATERIAL_FLAG_INDEXED) != 0)
 	{
-		// In the paletted path, color index 0 is reserved as transparent.
+		// In the paletted path, only explicitly alpha-clipped carriers treat
+		// color index 0 as transparent. Ordinary indexed floors/walls remain opaque.
+		if ((material.flags & MATERIAL_FLAG_ALPHA_CLIP) == 0)
+		{
+			return false;
+		}
+
 		const uint paletteIndex = (uint)round(saturate(rawSample.r) * 255.0);
 		return paletteIndex == 0u;
 	}

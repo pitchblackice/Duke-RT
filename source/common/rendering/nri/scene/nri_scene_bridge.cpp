@@ -838,6 +838,25 @@ namespace
 		return flags == PORTAL_SECTOR_FLOOR || flags == PORTAL_SECTOR_FLOOR_REFLECT;
 	}
 
+	bool DrawListUsesAlphaClip(uint32_t drawListType)
+	{
+		switch (drawListType)
+		{
+		case GLDL_MASKEDWALLS:
+		case GLDL_MASKEDWALLSS:
+		case GLDL_MASKEDWALLSD:
+		case GLDL_MASKEDWALLSV:
+		case GLDL_MASKEDWALLSH:
+		case GLDL_MASKEDFLATS:
+		case GLDL_MASKEDSLOPEFLATS:
+		case GLDL_TRANSLUCENT:
+		case GLDL_MODELS:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	void CaptureWalls(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats, SceneView& outView)
 	{
 		for (auto* wall : list.walls)
@@ -866,7 +885,11 @@ namespace
 			}
 
 			SurfaceRef surface = {};
-			const uint32_t extraFlags = wall->Sprite != nullptr ? MaterialFlag_Sprite : MaterialFlag_None;
+			uint32_t extraFlags = wall->Sprite != nullptr ? MaterialFlag_Sprite : MaterialFlag_None;
+			if (wall->Sprite != nullptr || DrawListUsesAlphaClip(drawListType))
+			{
+				extraFlags |= MaterialFlag_AlphaClip;
+			}
 			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, extraFlags);
 			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::DrawListWall, drawListType, GetOwnerActorIndex(*wall), surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
@@ -945,7 +968,12 @@ namespace
 			}
 
 			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, MaterialFlag_Flat);
+			uint32_t extraFlags = MaterialFlag_Flat;
+			if (DrawListUsesAlphaClip(drawListType))
+			{
+				extraFlags |= MaterialFlag_AlphaClip;
+			}
+			surface.material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, extraFlags);
 			surface.provenance = MakeFlatProvenance(*flat, drawListType, surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer(flat->vertindex);
 			surface.vertices.reserve((uint32_t)flat->vertcount);
@@ -979,7 +1007,7 @@ namespace
 			}
 
 			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, MaterialFlag_Flat | MaterialFlag_Sprite);
+			surface.material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, MaterialFlag_Flat | MaterialFlag_Sprite | MaterialFlag_AlphaClip);
 			surface.provenance = MakeFlatProvenance(*flat, drawListType, surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer(flat->vertindex);
 			surface.vertices.reserve((uint32_t)flat->vertcount);
@@ -1032,7 +1060,7 @@ namespace
 			}
 
 			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite);
+			surface.material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
 			surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::FacingSprite, drawListType, surface.material.flags);
 			surface.vertices.reserve(4);
 			for (uint32_t i = 0; i < 4; ++i)
@@ -1141,7 +1169,7 @@ namespace
 			for (const auto& face : faces)
 			{
 				SurfaceRef surface = {};
-				surface.material = MakeMaterialRef(voxelTexture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite);
+				surface.material = MakeMaterialRef(voxelTexture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
 				surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
 				surface.vertices.reserve(4);
 				AddVoxelFace(sprite->rotmat, extents, face, surface);

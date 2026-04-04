@@ -103,7 +103,7 @@ namespace
 			return MaterialClass_SpecularSpecial;
 		}
 
-		if ((flags & (MaterialFlag_Sprite | MaterialFlag_Indexed | MaterialFlag_OneWay)) != 0 || materialRef.alpha < 0.999f)
+		if ((flags & (MaterialFlag_Sprite | MaterialFlag_Indexed | MaterialFlag_OneWay | MaterialFlag_AlphaClip)) != 0 || materialRef.alpha < 0.999f)
 		{
 			return MaterialClass_UnstableDiffuse;
 		}
