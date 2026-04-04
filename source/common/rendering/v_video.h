@@ -273,6 +273,7 @@ public:
 	virtual bool IsPathTracingLevelPreloadPending() const { return false; }
 	virtual void CancelPathTracingLevelPreload() {}
 	virtual void SetActiveRenderTarget() {}
+	virtual void PrintPathTracingSurfaceProbeStatus() const;
 
 	// Screen wiping
 	virtual FTexture *WipeStartScreen();

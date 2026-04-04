@@ -55,6 +55,7 @@ public:
 	bool TickPathTracingLevelPreload() override;
 	bool IsPathTracingLevelPreloadPending() const override;
 	void CancelPathTracingLevelPreload() override;
+	void PrintPathTracingSurfaceProbeStatus() const override;
 
 	IHardwareTexture* CreateHardwareTexture(int numchannels) override;
 	IVertexBuffer* CreateVertexBuffer() override;

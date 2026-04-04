@@ -143,6 +143,7 @@ public:
 	void NotifyDebugSphereTessellationChange();
 	void PrintEmissiveSurfaceDump(float radius, uint32_t limit) const;
 	void PrintSectorLightDump(float radius, uint32_t limit) const;
+	void PrintSurfaceProbeStatus() const;
 	void PrintMapChunkDump(int32_t chunkIndex) const;
 	void PrintMapChunkCompare(int32_t chunkIndex) const;
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
@@ -649,7 +650,6 @@ private:
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
-	void PrintSurfaceProbeStatus() const;
 	SurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const SurfaceProbeResult& probe) const;
 	bool BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sceneView) const;

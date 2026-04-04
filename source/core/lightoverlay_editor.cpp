@@ -1,3 +1,5 @@
+#include <cctype>
+
 #include "lightoverlay_editor.h"
 
 #include "c_cvars.h"
@@ -9,6 +11,7 @@
 #include "gamestate.h"
 #include "i_time.h"
 #include "printf.h"
+#include "v_video.h"
 
 CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -104,6 +107,106 @@ namespace
 		}
 	}
 
+	static void PrintActorLightEditorActorData(const ActorLightEditorTarget& target)
+	{
+		const auto* actor = target.actor;
+		if (actor == nullptr)
+		{
+			Printf("NRI PT actor light editor: sampled actor target is no longer valid.\n");
+			return;
+		}
+
+		Printf(
+			"NRI PT actor light editor: actor=%d class=%s stat=%d sector=%d type=%d pal=%d shade=%d cstat=0x%x cstat2=0x%x pos=(%.2f, %.2f, %.2f) hitpos=(%.2f, %.2f, %.2f)\n",
+			actor->GetIndex(),
+			target.actorClassName.GetChars(),
+			(int)actor->spr.statnum,
+			actor->sectno(),
+			(int)actor->spr.type,
+			(int)actor->spr.pal,
+			(int)actor->spr.shade,
+			(unsigned int)actor->spr.cstat,
+			(unsigned int)actor->spr.cstat2,
+			actor->spr.pos.X,
+			actor->spr.pos.Y,
+			actor->spr.pos.Z,
+			target.hitX,
+			target.hitY,
+			target.hitZ);
+
+		Printf(
+			"NRI PT actor light editor: lotag=%d hitag=%d extra=%d detail=%d owner=%d clipdist=%.2f clipdist_map=%u blend=%u pal=%u scale=(%.3f, %.3f) offset=(%d, %d) angles=(%.2f, %.2f, %.2f) vel=(%.2f, %.2f, %.2f) object_flags=0x%x\n",
+			(int)actor->spr.lotag,
+			(int)actor->spr.hitag,
+			(int)actor->spr.extra,
+			(int)actor->spr.detail,
+			(int)actor->spr.intowner,
+			actor->clipdist,
+			(unsigned int)actor->spr.clipdist,
+			(unsigned int)actor->spr.blend,
+			(unsigned int)actor->spr.pal,
+			actor->spr.scale.X,
+			actor->spr.scale.Y,
+			(int)actor->spr.xoffset,
+			(int)actor->spr.yoffset,
+			actor->spr.Angles.Yaw.Degrees(),
+			actor->spr.Angles.Pitch.Degrees(),
+			actor->spr.Angles.Roll.Degrees(),
+			actor->vel.X,
+			actor->vel.Y,
+			actor->vel.Z,
+			(unsigned int)actor->ObjectFlags);
+	}
+
+	static void PrintActorLightEditorSurfaceData()
+	{
+		if (screen == nullptr)
+		{
+			Printf("NRI PT actor light editor: surface probe status is unavailable because no screen backend is active.\n");
+			return;
+		}
+
+		screen->PrintPathTracingSurfaceProbeStatus();
+	}
+
+	static bool IsActorLightEditorActionKey(const event_t* ev, char key)
+	{
+		if (ev == nullptr || (ev->type != EV_KeyDown && ev->type != EV_KeyUp))
+		{
+			return false;
+		}
+
+		const unsigned char ascii = static_cast<unsigned char>(ev->data2 & 0xff);
+		return ascii != 0 && std::tolower(ascii) == key;
+	}
+
+	static void PerformActorLightEditorPrintAction()
+	{
+		ActorLightEditorTarget target;
+		if (!ActorLightEditorSampleTarget(target))
+		{
+			Printf("NRI PT actor light editor: no local gameplay sampling context is available.\n");
+			return;
+		}
+
+		GActorLightEditorState.currentTarget = target;
+
+		switch (target.kind)
+		{
+		case ActorLightEditorTargetKind::Actor:
+			PrintActorLightEditorActorData(target);
+			break;
+
+		case ActorLightEditorTargetKind::Surface:
+			PrintActorLightEditorSurfaceData();
+			break;
+
+		default:
+			PrintActorLightEditorTarget(target);
+			break;
+		}
+	}
+
 	static void UpdateActorLightEditorNotify()
 	{
 		const uint64_t nowMs = I_msTime();
@@ -182,6 +285,24 @@ bool ActorLightEditorResponder(event_t* ev)
 	if (!IsActorLightEditorEnabled() || ev == nullptr)
 	{
 		return false;
+	}
+
+	if (IsActorLightEditorActionKey(ev, 'p'))
+	{
+		if (ev->type == EV_KeyDown)
+		{
+			if (!GActorLightEditorState.printActionPressed)
+			{
+				GActorLightEditorState.printActionPressed = true;
+				PerformActorLightEditorPrintAction();
+			}
+		}
+		else
+		{
+			GActorLightEditorState.printActionPressed = false;
+		}
+
+		return true;
 	}
 
 	return false;

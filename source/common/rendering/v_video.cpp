@@ -186,6 +186,11 @@ const char* V_GetStartupNriAPI()
 	return (api != nullptr && *api != '\0') ? api : (const char*)nri_api;
 }
 
+void DFrameBuffer::PrintPathTracingSurfaceProbeStatus() const
+{
+	Printf("NRI PT surface probe is only available while using the NRI renderer.\n");
+}
+
 
 CUSTOM_CVAR(Int, uiscale, 0, CVAR_ARCHIVE | CVAR_NOINITCALL)
 {

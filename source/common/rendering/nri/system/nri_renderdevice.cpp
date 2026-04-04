@@ -2843,6 +2843,17 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 	}
 }
 
+void NRIRenderDevice::PrintPathTracingSurfaceProbeStatus() const
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT surface probe is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->PrintSurfaceProbeStatus();
+}
+
 void NRIRenderDevice::PrintPathTracingMapChunkDump(int32_t chunkIndex) const
 {
 	if (mRenderer == nullptr)
