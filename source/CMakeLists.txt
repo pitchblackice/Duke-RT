@@ -1004,6 +1004,7 @@ set (PCH_SOURCES
 	core/gameinput.cpp
 	core/g_mapinfo.cpp
 	core/lightoverlay.cpp
+	core/lightoverlay_editor.cpp
 	core/interpolate.cpp
 	core/inputstate.cpp
 	core/maphack.cpp

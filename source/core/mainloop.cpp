@@ -66,6 +66,7 @@
 #include "i_time.h"
 #include "d_net.h"
 #include "gamecontrol.h"
+#include "lightoverlay_editor.h"
 #include "c_console.h"
 #include "razemenu.h"
 #include "i_system.h"
@@ -553,6 +554,7 @@ static void GameTicker()
 void DrawOverlays()
 {
 	NetUpdate();			// send out any new accumulation
+	TickActorLightEditor();
 
 	const auto overlayStart = Capture2DSnapshot();
 	if (gamestate != GS_INTRO) // do not draw overlays on the intros

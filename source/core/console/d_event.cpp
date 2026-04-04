@@ -41,6 +41,7 @@
 #include "razemenu.h"
 #include "gamestate.h"
 #include "gamecontrol.h"
+#include "lightoverlay_editor.h"
 #include "uiinput.h"
 #include "automap.h"
 #include "screenjob.h"
@@ -75,11 +76,14 @@ bool G_Responder (event_t *ev)
 			gameInput.SendAction(SB_ESCAPE);
 			return true;
 		}
+		if (ActorLightEditorResponder(ev))
+			return true;
 		if (C_DoKey (ev, &Bindings, &DoubleBindings))
 			return true;
 		break;
 
 	case EV_KeyUp:
+		ActorLightEditorResponder(ev);
 		C_DoKey (ev, &Bindings, &DoubleBindings);
 		break;
 
@@ -96,5 +100,4 @@ bool G_Responder (event_t *ev)
 	return (ev->type == EV_KeyDown ||
 			ev->type == EV_Mouse);
 }
-
 
