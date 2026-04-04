@@ -159,6 +159,67 @@ namespace
 		}
 	}
 
+	static void NudgeCapturedSurface(nri_scene::SurfaceRef& surface, float depthNudge)
+	{
+		float normal[3] = {};
+		if (!TryComputeCapturedSurfaceNormal(surface, normal))
+		{
+			return;
+		}
+
+		for (nri_scene::CapturedVertex& vertex : surface.vertices)
+		{
+			vertex.position[0] += normal[0] * depthNudge;
+			vertex.position[1] += normal[1] * depthNudge;
+			vertex.position[2] += normal[2] * depthNudge;
+			vertex.prevPosition[0] += normal[0] * depthNudge;
+			vertex.prevPosition[1] += normal[1] * depthNudge;
+			vertex.prevPosition[2] += normal[2] * depthNudge;
+		}
+	}
+
+	static bool IsMaterialOnlyChunkReplacement(uint32_t reasonMask)
+	{
+		const uint32_t materialOnlyReasonMask =
+			nri_scene::PTMapChunkMutationReason_SectorMaterial |
+			nri_scene::PTMapChunkMutationReason_WallMaterial;
+		return
+			(reasonMask & materialOnlyReasonMask) != 0 &&
+			(reasonMask & ~materialOnlyReasonMask) == 0;
+	}
+
+	static uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView)
+	{
+		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
+	}
+
+	static void FilterMaterialOnlyReplacementSceneView(nri_scene::SceneView& sceneView, uint32_t reasonMask)
+	{
+		static constexpr float kMaterialOnlyReplacementDepthNudge = 0.01f;
+		const bool keepWalls = (reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0;
+		const bool keepFlats = (reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0;
+
+		if (!keepWalls)
+		{
+			sceneView.opaqueWalls.clear();
+		}
+
+		if (!keepFlats)
+		{
+			sceneView.opaqueFlats.clear();
+		}
+
+		for (nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
+		{
+			NudgeCapturedSurface(surface, kMaterialOnlyReplacementDepthNudge);
+		}
+
+		for (nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
+		{
+			NudgeCapturedSurface(surface, kMaterialOnlyReplacementDepthNudge);
+		}
+	}
+
 	static uint64_t HashLightOverlayText(uint64_t hash, const char* text)
 	{
 		if (text == nullptr)
@@ -10739,6 +10800,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mRuntimeMapLastFrame.blindSpotChunkCount++;
 		}
 
+		const bool materialOnlyReplacement = IsMaterialOnlyChunkReplacement(analysis.reasonMask);
+
 		if (!replacement.valid || cachedSignature != replacement.liveSignature || forceTopologyInvalidation)
 		{
 			nri_scene::PTMapWorld liveWorld = {};
@@ -10756,6 +10819,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				if (replacement.blindSpot && replacement.dragged)
 				{
 					NudgeBlindSpotReplacementFlats(liveChunkView);
+				}
+				if (materialOnlyReplacement)
+				{
+					FilterMaterialOnlyReplacementSceneView(liveChunkView, analysis.reasonMask);
 				}
 				BuildRuntimeMutationLightIdentityOverrides(
 					mMapWorld,
@@ -10779,8 +10846,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.sceneView = std::move(liveChunkView);
 				replacement.geometry = std::move(liveGeometry);
 				replacement.materialBridge = std::move(liveMaterials);
-				replacement.surfaceCount = liveStats.surfaceCount;
-				replacement.triangleCount = liveStats.triangleCount;
+				replacement.surfaceCount = CountSceneViewSurfaces(replacement.sceneView);
+				replacement.triangleCount = (uint32_t)replacement.geometry.primitives.size();
 				replacement.valid = true;
 				replacement.active = true;
 				mRuntimeMapLastFrame.rebuiltChunkCount++;
@@ -10807,7 +10874,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.active = true;
 		}
 
-		mRuntimeMapMutations.replacedChunkMask[chunkIndex] = 1u;
+		mRuntimeMapMutations.replacedChunkMask[chunkIndex] = materialOnlyReplacement ? 0u : 1u;
 		mRuntimeMapLastFrame.replacedChunkCount++;
 		mLastPerfShellTraceStats.runtimeMutationReplacedChunks++;
 		mRuntimeMapLastFrame.replacementSurfaceCount += replacement.surfaceCount;
