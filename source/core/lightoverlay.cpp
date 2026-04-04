@@ -535,6 +535,16 @@ namespace
 					sc.MustGetNumber();
 					rule.hasFlicker = true;
 					rule.flickerFrames = std::max(sc.Number, 0);
+					rule.hasRandom = false;
+					rule.randomIntensityRange[0] = 0.0f;
+					rule.randomIntensityRange[1] = 0.0f;
+				}
+				else if (sc.Compare("random"))
+				{
+					rule.hasRandom = true;
+					MustParseFloatRange(rule.randomIntensityRange, false, false, "random");
+					rule.hasFlicker = false;
+					rule.flickerFrames = 0;
 				}
 				else if (sc.Compare("localspace"))
 				{
@@ -986,6 +996,7 @@ namespace
 		if (rule.hasOffset) AppendVector3Field(text, 2, "offset", rule.offset);
 		if (rule.hasDirection) AppendVector3Field(text, 2, "direction", rule.direction);
 		if (rule.hasFlicker) AppendLine(text, 2, FStringf("flicker %u", rule.flickerFrames));
+		if (rule.hasRandom) AppendFloatRangeField(text, 2, "random", rule.randomIntensityRange);
 		if (rule.hasLocalSpacePolicy) AppendLine(text, 2, FStringf("localspace %s", QuoteLightOverlayString(rule.localSpacePolicy).GetChars()));
 		AppendLine(text, 1, "}");
 	}
@@ -1226,6 +1237,7 @@ namespace
 			if (rule->hasOffset) Printf("  offset=(%.3f, %.3f, %.3f)\n", rule->offset[0], rule->offset[1], rule->offset[2]);
 			if (rule->hasDirection) Printf("  direction=(%.3f, %.3f, %.3f)\n", rule->direction[0], rule->direction[1], rule->direction[2]);
 			if (rule->hasFlicker) Printf("  flicker_frames=%u\n", rule->flickerFrames);
+			if (rule->hasRandom) Printf("  random=(%.3f, %.3f)\n", rule->randomIntensityRange[0], rule->randomIntensityRange[1]);
 			if (rule->hasLocalSpacePolicy) Printf("  localspace=%s\n", rule->localSpacePolicy.GetChars());
 		}
 
@@ -1384,6 +1396,9 @@ namespace
 		CopyVector3(source.direction, destination.direction);
 		destination.hasFlicker = source.hasFlicker;
 		destination.flickerFrames = source.flickerFrames;
+		destination.hasRandom = source.hasRandom;
+		destination.randomIntensityRange[0] = source.randomIntensityRange[0];
+		destination.randomIntensityRange[1] = source.randomIntensityRange[1];
 		destination.hasLocalSpacePolicy = source.hasLocalSpacePolicy;
 		destination.localSpacePolicy = source.localSpacePolicy;
 	}

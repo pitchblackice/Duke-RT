@@ -250,6 +250,64 @@ namespace
 		return baseScale + clampedAmount * EvaluateFlickerScale(stableKey ^ 0x5EC70B5E00000000ull, frameIndex, pulseFrames);
 	}
 
+	uint64_t AdvanceOverlayRandomState(uint64_t& state)
+	{
+		state += 0x9e3779b97f4a7c15ull;
+		uint64_t z = state;
+		z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+		z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+		return z ^ (z >> 31);
+	}
+
+	float NextOverlayUnitRandom(uint64_t& state)
+	{
+		const uint64_t bits = AdvanceOverlayRandomState(state);
+		return (float)((bits >> 40) & 0xFFFFFFu) * (1.0f / 16777215.0f);
+	}
+
+	float EvaluateOverlayRandomIntensityOffset(uint64_t stableKey, uint32_t renderFrameIndex, float minValue, float maxValue)
+	{
+		if (!std::isfinite(minValue) || !std::isfinite(maxValue))
+		{
+			return 0.0f;
+		}
+
+		if (minValue > maxValue)
+		{
+			std::swap(minValue, maxValue);
+		}
+
+		if (minValue == maxValue)
+		{
+			return minValue;
+		}
+
+		uint64_t randomState = stableKey ^ 0xA17F4D6300000000ull ^ ((uint64_t)renderFrameIndex * 0x9e3779b97f4a7c15ull);
+		return minValue + (maxValue - minValue) * NextOverlayUnitRandom(randomState);
+	}
+
+	float ResolveOverlayLightIntensity(
+		float baseIntensity,
+		uint64_t stableKey,
+		uint32_t flickerTimeIndex,
+		uint32_t renderFrameIndex,
+		uint32_t flickerFrames,
+		bool hasRandomIntensity,
+		const float randomIntensityRange[2])
+	{
+		if (hasRandomIntensity)
+		{
+			const float intensityOffset = EvaluateOverlayRandomIntensityOffset(
+				stableKey,
+				renderFrameIndex,
+				randomIntensityRange[0],
+				randomIntensityRange[1]);
+			return std::max(baseIntensity + intensityOffset, 0.0f);
+		}
+
+		return baseIntensity * EvaluateFlickerScale(stableKey, flickerTimeIndex, flickerFrames);
+	}
+
 	float ComputeColorLuminance(const float color[3])
 	{
 		return color[0] * 0.2126f + color[1] * 0.7152f + color[2] * 0.0722f;
@@ -567,7 +625,8 @@ uint64_t SceneLightSystem::ComputeSurfaceIdentityKey(
 }
 
 void SceneLightSystem::RebuildAnalyticLights(
-	uint32_t frameIndex,
+	uint32_t flickerTimeIndex,
+	uint32_t renderFrameIndex,
 	uint32_t maxActiveLights,
 	const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules,
 	const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules)
@@ -641,7 +700,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 			light.textureId = record.material.textureId;
 			Copy3f(record.center, light.position);
 			Copy3f(rule.color, light.color);
-			light.intensity = rule.intensity * EvaluateFlickerScale(light.stableKey, frameIndex, rule.flickerFrames);
+			light.intensity = rule.intensity * EvaluateFlickerScale(light.stableKey, flickerTimeIndex, rule.flickerFrames);
 			light.radius = rule.radius;
 			tryAppendLight(light);
 		}
@@ -685,7 +744,14 @@ void SceneLightSystem::RebuildAnalyticLights(
 				light.position[1] = record.center[1] + rule.offset[1];
 				light.position[2] = record.center[2] + rule.offset[2];
 				Copy3f(rule.color, light.color);
-				light.intensity = rule.intensity * EvaluateFlickerScale(light.stableKey, frameIndex, rule.flickerFrames);
+				light.intensity = ResolveOverlayLightIntensity(
+					rule.intensity,
+					light.stableKey,
+					flickerTimeIndex,
+					renderFrameIndex,
+					rule.flickerFrames,
+					rule.hasRandomIntensity,
+					rule.randomIntensityRange);
 				light.radius = rule.radius;
 				tryAppendLight(light);
 			}
@@ -706,7 +772,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 			light.textureId = 0;
 			Copy3f(rule.position, light.position);
 			Copy3f(rule.color, light.color);
-			light.intensity = rule.intensity * EvaluateFlickerScale(light.stableKey, frameIndex, rule.flickerFrames);
+			light.intensity = rule.intensity * EvaluateFlickerScale(light.stableKey, flickerTimeIndex, rule.flickerFrames);
 			light.radius = rule.radius;
 			tryAppendLight(light);
 		}

@@ -56,6 +56,8 @@ struct ParsedLightOverlayActorRule
 	float direction[3] = { 0.0f, 0.0f, 0.0f };
 	bool hasFlicker = false;
 	uint32_t flickerFrames = 0;
+	bool hasRandom = false;
+	float randomIntensityRange[2] = { 0.0f, 0.0f };
 	bool hasLocalSpacePolicy = false;
 	FString localSpacePolicy;
 };
@@ -192,6 +194,8 @@ struct ResolvedLightOverlayActorRule
 	float direction[3] = { 0.0f, 0.0f, 0.0f };
 	bool hasFlicker = false;
 	uint32_t flickerFrames = 0;
+	bool hasRandom = false;
+	float randomIntensityRange[2] = { 0.0f, 0.0f };
 	bool hasLocalSpacePolicy = false;
 	FString localSpacePolicy;
 };

@@ -108,6 +108,8 @@ public:
 			float radius = 0.0f;
 			float offset[3] = {};
 			uint32_t flickerFrames = 0;
+			bool hasRandomIntensity = false;
+			float randomIntensityRange[2] = { 0.0f, 0.0f };
 		};
 
 		struct MapOverlayRule
@@ -255,7 +257,8 @@ public:
 		uint32_t materialLookupIndexBase = 0,
 		const SurfaceIdentityOverrides* identityOverrides = nullptr);
 	void RebuildAnalyticLights(
-		uint32_t frameIndex,
+		uint32_t flickerTimeIndex,
+		uint32_t renderFrameIndex,
 		uint32_t maxActiveLights,
 		const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules = nullptr,
 		const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules = nullptr);

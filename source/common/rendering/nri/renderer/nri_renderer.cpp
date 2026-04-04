@@ -724,6 +724,9 @@ namespace
 				actorRule.offset[1] = resolvedRule.offset[1];
 				actorRule.offset[2] = resolvedRule.offset[2];
 				actorRule.flickerFrames = resolvedRule.flickerFrames;
+				actorRule.hasRandomIntensity = resolvedRule.hasRandom;
+				actorRule.randomIntensityRange[0] = resolvedRule.randomIntensityRange[0];
+				actorRule.randomIntensityRange[1] = resolvedRule.randomIntensityRange[1];
 				actorRules.push_back(actorRule);
 			}
 
@@ -7987,6 +7990,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 
 	mSceneLights.RebuildAnalyticLights(
 		gameplayLightTimeIndex,
+		mFrameIndex,
 		NRI_MAX_RUNTIME_POINT_LIGHTS,
 		actorOverlayRules.empty() ? nullptr : &actorOverlayRules,
 		mapOverlayRules.empty() ? nullptr : &mapOverlayRules);
