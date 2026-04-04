@@ -191,6 +191,10 @@ void DFrameBuffer::PrintPathTracingSurfaceProbeStatus() const
 	Printf("NRI PT surface probe is only available while using the NRI renderer.\n");
 }
 
+void DFrameBuffer::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent&)
+{
+}
+
 
 CUSTOM_CVAR(Int, uiscale, 0, CVAR_ARCHIVE | CVAR_NOINITCALL)
 {

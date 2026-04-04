@@ -55,7 +55,10 @@ public:
 	bool TickPathTracingLevelPreload() override;
 	bool IsPathTracingLevelPreloadPending() const override;
 	void CancelPathTracingLevelPreload() override;
+	void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event) override;
 	void PrintPathTracingSurfaceProbeStatus() const override;
+	void ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeaponLightEvent>& outEvents);
+	uint32_t GetPendingPathTracingWeaponLightEventCount() const;
 
 	IHardwareTexture* CreateHardwareTexture(int numchannels) override;
 	IVertexBuffer* CreateVertexBuffer() override;
@@ -332,4 +335,7 @@ private:
 	uint32_t mFrameSequenceWriteIndex = 0;
 	Texture2DDebugStats mTexture2DDebugStats;
 	bool mTraceThisFrame = false;
+	TArray<PathTracingWeaponLightEvent> mPendingPathTracingWeaponLightEvents;
+	uint64_t mNextPathTracingWeaponLightEventSerial = 1;
+	uint32_t mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
 };

@@ -46,6 +46,7 @@
 #include "hw_levelmesh.h"
 #include "buffers.h"
 #include "files.h"
+#include "zstring.h"
 
 
 struct FPortalSceneState;
@@ -126,6 +127,19 @@ protected:
 class IHardwareTexture;
 class FTexture;
 
+struct PathTracingWeaponLightEvent
+{
+	FString eventId;
+	int32_t emitterActorIndex = -1;
+	bool hasEmitterActorIndex = false;
+	DVector3 worldPosition;
+	DVector3 basisRight;
+	DVector3 basisForward;
+	DVector3 basisUp;
+	bool hasBasis = false;
+	double absoluteTimeSeconds = 0.0;
+	uint64_t serial = 0;
+};
 
 class DFrameBuffer
 {
@@ -273,6 +287,7 @@ public:
 	virtual bool IsPathTracingLevelPreloadPending() const { return false; }
 	virtual void CancelPathTracingLevelPreload() {}
 	virtual void SetActiveRenderTarget() {}
+	virtual void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event);
 	virtual void PrintPathTracingSurfaceProbeStatus() const;
 
 	// Screen wiping

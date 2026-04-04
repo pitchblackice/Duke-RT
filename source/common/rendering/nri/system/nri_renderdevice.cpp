@@ -2854,6 +2854,30 @@ void NRIRenderDevice::PrintPathTracingSurfaceProbeStatus() const
 	mRenderer->PrintSurfaceProbeStatus();
 }
 
+void NRIRenderDevice::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event)
+{
+	if (event.eventId.IsEmpty())
+	{
+		return;
+	}
+
+	PathTracingWeaponLightEvent queuedEvent = event;
+	queuedEvent.serial = mNextPathTracingWeaponLightEventSerial++;
+	mPendingPathTracingWeaponLightEvents.Push(std::move(queuedEvent));
+	mPathTracingWeaponLightEventsEnqueuedThisFrame++;
+}
+
+void NRIRenderDevice::ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeaponLightEvent>& outEvents)
+{
+	outEvents.Clear();
+	outEvents.Swap(mPendingPathTracingWeaponLightEvents);
+}
+
+uint32_t NRIRenderDevice::GetPendingPathTracingWeaponLightEventCount() const
+{
+	return (uint32_t)mPendingPathTracingWeaponLightEvents.Size();
+}
+
 void NRIRenderDevice::PrintPathTracingMapChunkDump(int32_t chunkIndex) const
 {
 	if (mRenderer == nullptr)
@@ -4690,9 +4714,17 @@ void NRIRenderDevice::EndFrameAndPresent()
 		const int remainingTraceFrames = (int)nri_pttraceframes - 1;
 		nri_pttraceframes = remainingTraceFrames > 0 ? remainingTraceFrames : 0;
 	}
+	if (nri_ptdebug > 0 && mPathTracingWeaponLightEventsEnqueuedThisFrame > 0)
+	{
+		Printf("NRI PT weapon-light events: frame=%llu enqueued=%u pending=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			mPathTracingWeaponLightEventsEnqueuedThisFrame,
+			(uint32_t)mPendingPathTracingWeaponLightEvents.Size());
+	}
 	stageStartMs = I_msTimeF();
 	ResetFrameTracking(presentResult == nri::Result::SUCCESS);
 	resetMs = I_msTimeF() - stageStartMs;
+	mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
 	if (PerfLoopTraceActive())
 	{
 		Printf(
