@@ -1746,6 +1746,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions, sectortype* p
 		if (p->kickback_pic == 1)
 		{
 			shoot(pact, DukeShotSparkClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "redneck.pistol.primary");
 			S_PlayActorSound(PISTOL_FIRE, pact);
 			p->noise_radius = 512;
 			madenoise(p);
@@ -1812,6 +1813,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions, sectortype* p
 		{
 			for (int ii = 0; ii < 10; ii++)
 				shoot(pact, RedneckShotgunShotClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "redneck.shotgun.primary");
 
 			p->ammo_amount[SHOTGUN_WEAPON]--;
 
@@ -1830,6 +1832,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions, sectortype* p
 			{
 				for (int ii = 0; ii < 10; ii++)
 					shoot(pact, RedneckShotgunShotClass);
+				EmitPathTracingPlayerWeaponLightEvent(p, "redneck.shotgun.primary");
 
 				p->ammo_amount[SHOTGUN_WEAPON]--;
 
@@ -1921,6 +1924,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions, sectortype* p
 
 				S_PlayActorSound(CHAINGUN_FIRE, pact);
 				shoot(pact, DukeChaingunShotClass);
+				EmitPathTracingPlayerWeaponLightEvent(p, "redneck.riflegun.primary");
 				p->noise_radius = 512;
 				madenoise(p);
 				lastvisinc = PlayClock + 32;
@@ -1953,6 +1957,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions, sectortype* p
 		{
 			p->okickback_pic = p->kickback_pic = 0;
 			shoot(pact, RedneckBuzzSawClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "redneck.buzzsaw.primary");
 			p->noise_radius = 64;
 			madenoise(p);
 			checkavailweapon(p);
@@ -1966,6 +1971,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions, sectortype* p
 		{
 			p->ammo_amount[THROWSAW_WEAPON]--;
 			shoot(pact, RedneckSawbladeClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "redneck.throwsaw.primary");
 			checkavailweapon(p);
 		}
 		p->kickback_pic++;
@@ -2051,7 +2057,10 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions, sectortype* p
 	case ALIENBLASTER_WEAPON:
 		p->kickback_pic++;
 		if (p->kickback_pic >= 7 && p->kickback_pic <= 11)
+		{
 			shoot(pact, RedneckFirelaserClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "redneck.alienblaster.primary");
+		}
 
 		if (p->kickback_pic == 5)
 		{

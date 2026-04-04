@@ -38,8 +38,14 @@ source as it is released.
 #include "mapinfo.h"
 #include "dukeactor.h"
 #include "vm.h"
+#include "v_video.h"
 
 BEGIN_DUKE_NS 
+
+namespace
+{
+	static constexpr double BuildTickSeconds = 1.0 / 120.0;
+}
 
 //---------------------------------------------------------------------------
 //
@@ -988,6 +994,44 @@ void shoot(DDukeActor* actor, PClass* cls)
 		return;
 
 	CallShootThis(static_cast<DDukeActor*>(GetDefaultByType(cls)), actor, pnum, spos, sang);
+}
+
+void EmitPathTracingPlayerWeaponLightEvent(DDukePlayer* p, const char* eventId)
+{
+	if (screen == nullptr || p == nullptr || eventId == nullptr || *eventId == '\0')
+	{
+		return;
+	}
+
+	auto* actor = p->GetActor();
+	if (actor == nullptr)
+	{
+		return;
+	}
+
+	const DRotator viewRotation(
+		p->getPitchWithView(),
+		actor->spr.Angles.Yaw + p->ViewAngles.Yaw,
+		actor->spr.Angles.Roll + p->ViewAngles.Roll);
+	const DVector3 forward = DVector3(viewRotation).Unit();
+	const DVector3 right = DVector3(DRotator(nullAngle, viewRotation.Yaw + DAngle90, nullAngle)).Unit();
+	DVector3 up = (forward ^ right).Unit();
+	if (up.isZero())
+	{
+		up = DVector3(0.0, 0.0, 1.0);
+	}
+
+	PathTracingWeaponLightEvent event;
+	event.eventId = eventId;
+	event.hasEmitterActorIndex = true;
+	event.emitterActorIndex = actor->GetIndex();
+	event.worldPosition = actor->getPosWithOffsetZ().plusZ(p->pyoff + 4);
+	event.basisRight = right;
+	event.basisForward = forward;
+	event.basisUp = up;
+	event.hasBasis = true;
+	event.absoluteTimeSeconds = PlayClock > 0 ? (double)PlayClock * BuildTickSeconds : 0.0;
+	screen->EmitPathTracingWeaponLightEvent(event);
 }
 
 //---------------------------------------------------------------------------
