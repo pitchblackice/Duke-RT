@@ -11,10 +11,13 @@
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_material_bridge.h"
 #include "../scene/nri_scene_bridge.h"
+#include "lightoverlay.h"
 
 #include <chrono>
 #include <cstdint>
 #include <array>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 class NRIRenderDevice;
@@ -660,6 +663,9 @@ private:
 		const nri_scene::MaterialBridgeData* capturedMaterials,
 		const nri_scene::SceneView* dynamicSceneView,
 		const nri_scene::MaterialBridgeData* dynamicMaterials);
+	void RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightOverlaySet& resolvedLightOverlays);
+	void ResetMuzzleFlashOverlayState(const char* reason);
+	const ResolvedLightOverlayMuzzleFlashRule* FindResolvedMuzzleFlashRule(const FString& eventId) const;
 	void ResetPersistentDynamicEmissiveCache();
 	void PrunePersistentDynamicEmissiveCacheToLiveActors();
 	bool RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials);
@@ -817,6 +823,7 @@ private:
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
 	NRIDirectionalLightState mDirectionalLightState = {};
+	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::array<nri::Descriptor*, 21> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};

@@ -1080,6 +1080,55 @@ namespace
 		return result;
 	}
 
+	std::string BuildNormalizedMuzzleFlashEventKey(const FString& eventId)
+	{
+		if (eventId.IsEmpty())
+		{
+			return {};
+		}
+
+		const FString normalizedId = eventId.MakeLower();
+		return std::string(normalizedId.GetChars());
+	}
+
+	std::string FormatMuzzleFlashRuleIdList(const std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule>& lookup, size_t limit = 16)
+	{
+		if (lookup.empty())
+		{
+			return "none";
+		}
+
+		std::vector<std::string> ids;
+		ids.reserve(lookup.size());
+		for (const auto& entry : lookup)
+		{
+			ids.push_back(entry.second.id.GetChars());
+		}
+
+		std::sort(ids.begin(), ids.end());
+
+		std::string result;
+		const size_t printCount = std::min(ids.size(), limit);
+		for (size_t i = 0; i < printCount; ++i)
+		{
+			if (!result.empty())
+			{
+				result += ",";
+			}
+
+			result += ids[i];
+		}
+
+		if (printCount < ids.size())
+		{
+			char buffer[32] = {};
+			std::snprintf(buffer, sizeof(buffer), ",...(+%u)", (unsigned)(ids.size() - printCount));
+			result += buffer;
+		}
+
+		return result;
+	}
+
 	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
 	{
 		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
@@ -3353,6 +3402,9 @@ bool NRIRenderer::Initialize()
 
 void NRIRenderer::Shutdown()
 {
+	ResetMuzzleFlashOverlayState("renderer-shutdown");
+	mLastResolvedLightOverlayGeneration = 0;
+
 	if (mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
 	{
 		return;
@@ -3413,6 +3465,54 @@ void NRIRenderer::Shutdown()
 	mRawPresentOutputSet = nullptr;
 	mFinalPresentFrameTextureSet = nullptr;
 	mFinalPresentOutputSet = nullptr;
+}
+
+void NRIRenderer::RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightOverlaySet& resolvedLightOverlays)
+{
+	mResolvedMuzzleFlashRuleLookup.clear();
+	mResolvedMuzzleFlashRuleLookup.reserve((size_t)resolvedLightOverlays.muzzleFlashRules.Size());
+	for (const auto& rule : resolvedLightOverlays.muzzleFlashRules)
+	{
+		const std::string key = BuildNormalizedMuzzleFlashEventKey(rule.id);
+		if (key.empty())
+		{
+			continue;
+		}
+
+		mResolvedMuzzleFlashRuleLookup[key] = rule;
+	}
+}
+
+void NRIRenderer::ResetMuzzleFlashOverlayState(const char* reason)
+{
+	mResolvedMuzzleFlashRuleLookup.clear();
+
+	uint32_t discardedEventCount = 0;
+	if (mFrameBuffer != nullptr)
+	{
+		TArray<PathTracingWeaponLightEvent> discardedEvents;
+		mFrameBuffer->ConsumePathTracingWeaponLightEvents(discardedEvents);
+		discardedEventCount = (uint32_t)discardedEvents.Size();
+	}
+
+	if (discardedEventCount > 0 && nri_ptdebug > 0)
+	{
+		Printf("NRI PT muzzle-flash reset: reason=%s discarded_events=%u\n",
+			reason != nullptr ? reason : "unknown",
+			discardedEventCount);
+	}
+}
+
+const ResolvedLightOverlayMuzzleFlashRule* NRIRenderer::FindResolvedMuzzleFlashRule(const FString& eventId) const
+{
+	const std::string key = BuildNormalizedMuzzleFlashEventKey(eventId);
+	if (key.empty())
+	{
+		return nullptr;
+	}
+
+	const auto it = mResolvedMuzzleFlashRuleLookup.find(key);
+	return it != mResolvedMuzzleFlashRuleLookup.end() ? &it->second : nullptr;
 }
 
 void NRIRenderer::ResetPerfTraceStats()
@@ -7531,6 +7631,36 @@ void NRIRenderer::RefreshSceneLightSystem(
 	}
 
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	const bool resolvedGenerationChanged =
+		resolvedLightOverlays.resolvedGeneration != mLastResolvedLightOverlayGeneration;
+	const bool muzzleFlashLookupNeedsRefresh =
+		resolvedGenerationChanged ||
+		mResolvedMuzzleFlashRuleLookup.size() != (size_t)resolvedLightOverlays.muzzleFlashRules.Size();
+	if (muzzleFlashLookupNeedsRefresh)
+	{
+		const bool hadPreviousGeneration = mLastResolvedLightOverlayGeneration != 0;
+		if (resolvedGenerationChanged && hadPreviousGeneration)
+		{
+			ResetMuzzleFlashOverlayState("lightoverlay-resolve");
+		}
+		else if (resolvedLightOverlays.resolvedGeneration == 0)
+		{
+			ResetMuzzleFlashOverlayState("lightoverlay-empty");
+		}
+
+		RefreshResolvedMuzzleFlashRuleLookup(resolvedLightOverlays);
+		mLastResolvedLightOverlayGeneration = resolvedLightOverlays.resolvedGeneration;
+		Printf("NRI PT muzzle-flash rules: generation=%u count=%u ids=%s\n",
+			resolvedLightOverlays.resolvedGeneration,
+			(unsigned)mResolvedMuzzleFlashRuleLookup.size(),
+			FormatMuzzleFlashRuleIdList(mResolvedMuzzleFlashRuleLookup).c_str());
+
+		if (resolvedGenerationChanged && hadPreviousGeneration)
+		{
+			NoteLightHistoryChange("lightoverlay-resolve");
+		}
+	}
+
 	const NRIDirectionalLightState nextDirectionalLightState = BuildDirectionalLightState(resolvedLightOverlays, nri_ptdirectionallight);
 	const bool directionalLightStateChanged =
 		!mHasDirectionalLightState ||
@@ -7554,16 +7684,6 @@ void NRIRenderer::RefreshSceneLightSystem(
 		mapOverlayRules.empty() ? nullptr : &mapOverlayRules);
 	mSceneLights.RebuildEmissiveSurfaces(NRI_MAX_EMISSIVE_SURFACES);
 	mSceneLights.RebuildSectorLighting(gameplayLightTimeIndex, (uint32_t)sector.Size());
-	if (resolvedLightOverlays.resolvedGeneration != 0 &&
-		resolvedLightOverlays.resolvedGeneration != mLastResolvedLightOverlayGeneration)
-	{
-		const bool hadPreviousGeneration = mLastResolvedLightOverlayGeneration != 0;
-		mLastResolvedLightOverlayGeneration = resolvedLightOverlays.resolvedGeneration;
-		if (hadPreviousGeneration)
-		{
-			NoteLightHistoryChange("lightoverlay-resolve");
-		}
-	}
 	if (hadDirectionalLightState && directionalLightStateChanged)
 	{
 		NoteLightHistoryChange("directional-light-change");
