@@ -222,6 +222,30 @@ namespace
 		}
 	}
 
+	static bool RequiresExclusiveMaterialOnlyChunkReplacement(const nri_scene::SceneView& sceneView, uint32_t reasonMask)
+	{
+		if ((reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) == 0)
+		{
+			return false;
+		}
+
+		constexpr uint32_t kExclusiveWallFlags =
+			nri_scene::MaterialFlag_AlphaClip |
+			nri_scene::MaterialFlag_OneWay |
+			nri_scene::MaterialFlag_Mirror |
+			nri_scene::MaterialFlag_Portal;
+
+		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
+		{
+			if ((surface.material.flags & kExclusiveWallFlags) != 0)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	static uint64_t HashLightOverlayText(uint64_t hash, const char* text)
 	{
 		if (text == nullptr)
@@ -11239,6 +11263,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.sectorDirty = false;
 			replacement.dragged = false;
 			replacement.blindSpot = false;
+			replacement.exclusiveMaterialOnlyChunkReplacement = false;
 			replacement.lightIdentityOverrides.Clear();
 			replacement.sceneView = {};
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
@@ -11302,6 +11327,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		if (analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None)
 		{
 			replacement.active = false;
+			replacement.exclusiveMaterialOnlyChunkReplacement = false;
 			replacement.lightIdentityOverrides.Clear();
 			replacement.sceneView = {};
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
@@ -11335,7 +11361,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				{
 					NudgeBlindSpotReplacementFlats(liveChunkView);
 				}
-				if (materialOnlyReplacement)
+				replacement.exclusiveMaterialOnlyChunkReplacement =
+					materialOnlyReplacement &&
+					RequiresExclusiveMaterialOnlyChunkReplacement(liveChunkView, analysis.reasonMask);
+				if (materialOnlyReplacement && !replacement.exclusiveMaterialOnlyChunkReplacement)
 				{
 					FilterMaterialOnlyReplacementSceneView(liveChunkView, analysis.reasonMask);
 				}
@@ -11378,6 +11407,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			else if (!builtChunk)
 			{
 				replacement.active = false;
+				replacement.exclusiveMaterialOnlyChunkReplacement = false;
 				replacement.lightIdentityOverrides.Clear();
 				replacement.sceneView = {};
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
@@ -11389,7 +11419,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.active = true;
 		}
 
-		mRuntimeMapMutations.replacedChunkMask[chunkIndex] = materialOnlyReplacement ? 0u : 1u;
+		mRuntimeMapMutations.replacedChunkMask[chunkIndex] =
+			(materialOnlyReplacement && !replacement.exclusiveMaterialOnlyChunkReplacement) ? 0u : 1u;
 		mRuntimeMapLastFrame.replacedChunkCount++;
 		mLastPerfShellTraceStats.runtimeMutationReplacedChunks++;
 		mRuntimeMapLastFrame.replacementSurfaceCount += replacement.surfaceCount;
