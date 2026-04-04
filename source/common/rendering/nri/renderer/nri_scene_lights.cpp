@@ -33,6 +33,16 @@ namespace
 {
 	constexpr float TwoPi = 6.28318530717958647692f;
 
+	DVector3 PathTracingToWorldPosition(const DVector3& source)
+	{
+		return { source.X, -source.Z, -source.Y };
+	}
+
+	DVector3 WorldToPathTracingPosition(const DVector3& source)
+	{
+		return { source.X, -source.Z, -source.Y };
+	}
+
 	const char* GetSurfaceSourceTypeName(nri_scene::SurfaceSourceType sourceType)
 	{
 		switch (sourceType)
@@ -658,39 +668,41 @@ namespace
 			return;
 		}
 
-		const DVector3 sourcePosition(position[0], position[1], position[2]);
+		const DVector3 sourceRenderPosition(position[0], position[1], position[2]);
+		const DVector3 sourceWorldPosition = PathTracingToWorldPosition(sourceRenderPosition);
 		sectortype* startSector = nullptr;
-		if (!TryResolveSurfaceNudgeSector(record, sourcePosition, startSector) || startSector == nullptr)
+		if (!TryResolveSurfaceNudgeSector(record, sourceWorldPosition, startSector) || startSector == nullptr)
 		{
 			return;
 		}
 
-		DVector3 provenanceWallPosition = sourcePosition;
+		DVector3 provenanceWallPosition = sourceWorldPosition;
 		float provenanceWallDisplacement = 0.0f;
-		if (TryApplyProvenanceWallSurfaceNudge(record, sourcePosition, rule.nudgeFromSurfaceDistance, provenanceWallPosition, provenanceWallDisplacement))
+		if (TryApplyProvenanceWallSurfaceNudge(record, sourceWorldPosition, rule.nudgeFromSurfaceDistance, provenanceWallPosition, provenanceWallDisplacement))
 		{
-			TraceSurfaceNudge(record, rule, "source_wall", sourcePosition, provenanceWallPosition, provenanceWallDisplacement);
-			position[0] = (float)provenanceWallPosition.X;
-			position[1] = (float)provenanceWallPosition.Y;
-			position[2] = (float)provenanceWallPosition.Z;
+			const DVector3 provenanceWallRenderPosition = WorldToPathTracingPosition(provenanceWallPosition);
+			TraceSurfaceNudge(record, rule, "source_wall", sourceRenderPosition, provenanceWallRenderPosition, provenanceWallDisplacement);
+			position[0] = (float)provenanceWallRenderPosition.X;
+			position[1] = (float)provenanceWallRenderPosition.Y;
+			position[2] = (float)provenanceWallRenderPosition.Z;
 			return;
 		}
 
-		DVector3 bestPosition = sourcePosition;
+		DVector3 bestPosition = sourceWorldPosition;
 		float bestDisplacement = FLT_MAX;
 
-		DVector3 wallPosition = sourcePosition;
+		DVector3 wallPosition = sourceWorldPosition;
 		float wallDisplacement = 0.0f;
-		if (TryApplyWallSurfaceNudge(sourcePosition, startSector, rule.nudgeFromSurfaceDistance, wallPosition, wallDisplacement) &&
+		if (TryApplyWallSurfaceNudge(sourceWorldPosition, startSector, rule.nudgeFromSurfaceDistance, wallPosition, wallDisplacement) &&
 			wallDisplacement < bestDisplacement)
 		{
 			bestPosition = wallPosition;
 			bestDisplacement = wallDisplacement;
 		}
 
-		DVector3 planePosition = sourcePosition;
+		DVector3 planePosition = sourceWorldPosition;
 		float planeDisplacement = 0.0f;
-		if (TryApplyPlaneSurfaceNudge(sourcePosition, startSector, rule.nudgeFromSurfaceDistance, planePosition, planeDisplacement) &&
+		if (TryApplyPlaneSurfaceNudge(sourceWorldPosition, startSector, rule.nudgeFromSurfaceDistance, planePosition, planeDisplacement) &&
 			planeDisplacement < bestDisplacement)
 		{
 			bestPosition = planePosition;
@@ -702,11 +714,12 @@ namespace
 			return;
 		}
 
-		TraceSurfaceNudge(record, rule, bestPosition.Z != sourcePosition.Z ? "plane" : "wall_fallback", sourcePosition, bestPosition, bestDisplacement);
+		const DVector3 bestRenderPosition = WorldToPathTracingPosition(bestPosition);
+		TraceSurfaceNudge(record, rule, bestPosition.Z != sourceWorldPosition.Z ? "plane" : "wall_fallback", sourceRenderPosition, bestRenderPosition, bestDisplacement);
 
-		position[0] = (float)bestPosition.X;
-		position[1] = (float)bestPosition.Y;
-		position[2] = (float)bestPosition.Z;
+		position[0] = (float)bestRenderPosition.X;
+		position[1] = (float)bestRenderPosition.Y;
+		position[2] = (float)bestRenderPosition.Z;
 	}
 
 	float ComputeColorLuminance(const float color[3])
