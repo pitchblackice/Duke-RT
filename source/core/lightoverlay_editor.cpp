@@ -4,12 +4,15 @@
 
 #include "c_cvars.h"
 #include "c_dispatch.h"
+#include "cmdlib.h"
 #include "coreactor.h"
 #include "coreplayer.h"
 #include "d_net.h"
+#include "filesystem.h"
 #include "gamefuncs.h"
 #include "gamestate.h"
 #include "i_time.h"
+#include "lightoverlay.h"
 #include "printf.h"
 #include "v_video.h"
 
@@ -20,6 +23,14 @@ namespace
 	static ActorLightEditorState GActorLightEditorState;
 	static constexpr uint64_t ActorLightEditorNotifyRepeatMs = 750;
 	static constexpr uint64_t ActorLightEditorNotifyClearGraceMs = 250;
+
+	enum class ActorLightEditorWritableSourceKind : uint8_t
+	{
+		None,
+		Directory,
+		StandaloneFile,
+		ReadOnlyContainer,
+	};
 
 	static const char* GetActorLightEditorClassName(const DCoreActor* actor)
 	{
@@ -104,6 +115,98 @@ namespace
 		default:
 			Printf("NRI PT actor light editor target: kind=none\n");
 			break;
+		}
+	}
+
+	static ActorLightEditorWritableSourceKind ClassifyActorLightEditorWritableSource(int lumpNum, FString& outPath)
+	{
+		outPath = "";
+		if (lumpNum < 0)
+		{
+			return ActorLightEditorWritableSourceKind::None;
+		}
+
+		const int container = fileSystem.GetFileContainer(lumpNum);
+		const char* entryName = fileSystem.GetFileFullName(lumpNum);
+		const char* containerPath = fileSystem.GetResourceFileFullName(container);
+		if (container < 0 || entryName == nullptr || entryName[0] == 0 || containerPath == nullptr || containerPath[0] == 0)
+		{
+			return ActorLightEditorWritableSourceKind::None;
+		}
+
+		FString normalizedContainerPath = containerPath;
+		FixPathSeperator(normalizedContainerPath);
+
+		if (DirExists(normalizedContainerPath.GetChars()))
+		{
+			outPath = normalizedContainerPath;
+			if (outPath.IsEmpty() || outPath.Back() != '/')
+			{
+				outPath << '/';
+			}
+			outPath << entryName;
+			FixPathSeperator(outPath);
+			return ActorLightEditorWritableSourceKind::Directory;
+		}
+
+		if (!FileExists(normalizedContainerPath.GetChars()))
+		{
+			return ActorLightEditorWritableSourceKind::None;
+		}
+
+		const FString resourceBase = ExtractFileBase(normalizedContainerPath.GetChars(), true);
+		const FString entryBase = ExtractFileBase(entryName, true);
+		if (fileSystem.GetEntryCount(container) == 1 &&
+			resourceBase.CompareNoCase("LIGHTOVR") == 0 &&
+			entryBase.CompareNoCase("LIGHTOVR") == 0)
+		{
+			outPath = normalizedContainerPath;
+			return ActorLightEditorWritableSourceKind::StandaloneFile;
+		}
+
+		return ActorLightEditorWritableSourceKind::ReadOnlyContainer;
+	}
+
+	static void PrintActorLightEditorWritableSourceFailure()
+	{
+		const auto& database = GetParsedLightOverlayDatabase();
+		if (database.sourceFiles.Size() == 0)
+		{
+			Printf("NRI PT actor light editor: no mounted LIGHTOVR source is available.\n");
+			return;
+		}
+
+		bool sawMountedSource = false;
+		bool sawReadOnlySource = false;
+		for (int i = database.sourceFiles.Size() - 1; i >= 0; --i)
+		{
+			const auto& sourceFile = database.sourceFiles[i];
+			if (sourceFile.lumpNum < 0)
+			{
+				continue;
+			}
+
+			sawMountedSource = true;
+			FString ignoredPath;
+			const auto kind = ClassifyActorLightEditorWritableSource(sourceFile.lumpNum, ignoredPath);
+			if (kind == ActorLightEditorWritableSourceKind::ReadOnlyContainer)
+			{
+				sawReadOnlySource = true;
+				break;
+			}
+		}
+
+		if (sawReadOnlySource)
+		{
+			Printf("NRI PT actor light editor: no writable mounted LIGHTOVR source is available; archive-backed sources are read-only.\n");
+		}
+		else if (sawMountedSource)
+		{
+			Printf("NRI PT actor light editor: no writable mounted LIGHTOVR source could be resolved from the current overlay metadata.\n");
+		}
+		else
+		{
+			Printf("NRI PT actor light editor: no mounted LIGHTOVR source is available.\n");
 		}
 	}
 
@@ -354,6 +457,36 @@ bool ActorLightEditorResolveWritableSource(FString& outPath, int* outLumpNum)
 	{
 		*outLumpNum = -1;
 	}
+
+	const auto& database = GetParsedLightOverlayDatabase();
+	for (int i = database.sourceFiles.Size() - 1; i >= 0; --i)
+	{
+		const auto& sourceFile = database.sourceFiles[i];
+		if (sourceFile.lumpNum < 0)
+		{
+			continue;
+		}
+
+		FString candidatePath;
+		const auto kind = ClassifyActorLightEditorWritableSource(sourceFile.lumpNum, candidatePath);
+		if (kind != ActorLightEditorWritableSourceKind::Directory &&
+			kind != ActorLightEditorWritableSourceKind::StandaloneFile)
+		{
+			continue;
+		}
+
+		outPath = candidatePath;
+		if (outLumpNum != nullptr)
+		{
+			*outLumpNum = sourceFile.lumpNum;
+		}
+		GActorLightEditorState.writableLightOvrPath = candidatePath;
+		GActorLightEditorState.writableLightOvrLumpNum = sourceFile.lumpNum;
+		return true;
+	}
+
+	GActorLightEditorState.writableLightOvrPath = "";
+	GActorLightEditorState.writableLightOvrLumpNum = -1;
 	return false;
 }
 
@@ -367,4 +500,21 @@ CCMD(nri_ptactorlightedittarget)
 	}
 
 	PrintActorLightEditorTarget(target);
+}
+
+CCMD(nri_ptactorlighteditwritable)
+{
+	FString path;
+	int lumpNum = -1;
+	if (!ActorLightEditorResolveWritableSource(path, &lumpNum))
+	{
+		PrintActorLightEditorWritableSourceFailure();
+		return;
+	}
+
+	Printf(
+		"NRI PT actor light editor writable LIGHTOVR: path=%s lump=%d source=%s\n",
+		path.GetChars(),
+		lumpNum,
+		lumpNum >= 0 ? fileSystem.GetFileFullPath(lumpNum).c_str() : "(none)");
 }
