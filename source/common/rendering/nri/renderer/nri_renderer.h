@@ -642,6 +642,7 @@ private:
 	void PrintRuntimeMapMutationStatus() const;
 	void PrintRuntimeSpaceLinkStatus() const;
 	void RequestHistoryReset(const char* reason, bool clearPreviousCameraState = false, bool clearRuntimeChunkTranslationHistory = false);
+	void NoteLightHistoryChange(const char* reason);
 	void ArmTemporalTraceBudget(const char* reason);
 	void TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);

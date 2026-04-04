@@ -4332,6 +4332,17 @@ void NRIRenderer::RequestHistoryReset(const char* reason, bool clearPreviousCame
 	}
 }
 
+void NRIRenderer::NoteLightHistoryChange(const char* reason)
+{
+	ArmTemporalTraceBudget(reason);
+	if (nri_pttraceframes > 0)
+	{
+		Printf("NRI PT light change: reason=%s frame=%u reset=no\n",
+			(reason != nullptr && *reason != '\0') ? reason : "unspecified",
+			mFrameIndex);
+	}
+}
+
 bool NRIRenderer::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId)
 {
 	if (position == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)
@@ -4350,7 +4361,7 @@ bool NRIRenderer::AddRuntimePointLight(const float position[3], const float colo
 		return false;
 	}
 	mBoundRuntimeLightCount = 0;
-	RequestHistoryReset("runtime-light-change");
+	NoteLightHistoryChange("runtime-light-change");
 	return true;
 }
 
@@ -4362,7 +4373,7 @@ bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
 	}
 
 	mBoundRuntimeLightCount = 0;
-	RequestHistoryReset("runtime-light-change");
+	NoteLightHistoryChange("runtime-light-change");
 	return true;
 }
 
@@ -4375,7 +4386,7 @@ void NRIRenderer::ClearRuntimePointLights()
 
 	mSceneLights.ClearManualAnalyticLights();
 	mBoundRuntimeLightCount = 0;
-	RequestHistoryReset("runtime-light-change");
+	NoteLightHistoryChange("runtime-light-change");
 }
 
 void NRIRenderer::PrintRuntimePointLights() const
@@ -4573,7 +4584,7 @@ bool NRIRenderer::AddSpriteTileLightHeuristic(uint32_t textureId, const float co
 		return false;
 	}
 
-	RequestHistoryReset("analytic-light-heuristic-change");
+	NoteLightHistoryChange("analytic-light-heuristic-change");
 	return true;
 }
 
@@ -4585,7 +4596,7 @@ void NRIRenderer::ClearSpriteTileLightHeuristics()
 	}
 
 	mSceneLights.ClearSpriteTileHeuristics();
-	RequestHistoryReset("analytic-light-heuristic-change");
+	NoteLightHistoryChange("analytic-light-heuristic-change");
 }
 
 void NRIRenderer::PrintSpriteTileLightHeuristics() const
@@ -4620,7 +4631,7 @@ bool NRIRenderer::AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t emiss
 	QueueStaticMapSceneLightingInvalidation();
 	mSceneLights.ConsumeEmissiveMaterialBindingChanged();
 	mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
-	RequestHistoryReset("emissive-heuristic-change");
+	NoteLightHistoryChange("emissive-heuristic-change");
 	return true;
 }
 
@@ -4635,14 +4646,14 @@ void NRIRenderer::ClearTextureEmissiveHeuristics()
 	QueueStaticMapSceneLightingInvalidation();
 	mSceneLights.ConsumeEmissiveMaterialBindingChanged();
 	mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
-	RequestHistoryReset("emissive-heuristic-change");
+	NoteLightHistoryChange("emissive-heuristic-change");
 }
 
 void NRIRenderer::NotifyGlowControlChange()
 {
 	QueueStaticMapSceneLightingInvalidation();
 	ResetPersistentDynamicEmissiveCache();
-	RequestHistoryReset("glow-control-change");
+	NoteLightHistoryChange("glow-control-change");
 }
 
 void NRIRenderer::NotifyDebugSphereTessellationChange()
@@ -7261,12 +7272,12 @@ void NRIRenderer::RefreshSceneLightSystem(
 		mLastResolvedLightOverlayGeneration = resolvedLightOverlays.resolvedGeneration;
 		if (hadPreviousGeneration)
 		{
-			RequestHistoryReset("lightoverlay-resolve");
+			NoteLightHistoryChange("lightoverlay-resolve");
 		}
 	}
 	if (hadDirectionalLightState && directionalLightStateChanged)
 	{
-		RequestHistoryReset("directional-light-change");
+		NoteLightHistoryChange("directional-light-change");
 	}
 	const bool analyticLightTopologyChanged = mSceneLights.ConsumeAnalyticLightTopologyChanged();
 	const bool analyticLightPropertiesChanged = mSceneLights.ConsumeAnalyticLightPropertiesChanged();
@@ -7288,7 +7299,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 				FormatTopologyKeyList(analyticLights.removedTopologyKeys).c_str(),
 				FormatTopologyKeyList(analyticLights.reboundTopologyKeys).c_str());
 		}
-		RequestHistoryReset("analytic-light-topology");
+		NoteLightHistoryChange("analytic-light-topology");
 	}
 	if (emissiveSurfaceTopologyChanged)
 	{
@@ -7301,7 +7312,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 				FormatTopologyKeyList(emissiveSurfaces.removedTopologyKeys).c_str(),
 				FormatTopologyKeyList(emissiveSurfaces.reboundTopologyKeys).c_str());
 		}
-		RequestHistoryReset("emissive-surface-topology");
+		NoteLightHistoryChange("emissive-surface-topology");
 	}
 	if (emissiveMaterialBindingChanged)
 	{
@@ -7316,7 +7327,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 	}
 	if (sectorLightingTopologyChanged)
 	{
-		RequestHistoryReset("sector-light-topology");
+		NoteLightHistoryChange("sector-light-topology");
 	}
 
 	(void)analyticLightPropertiesChanged;
