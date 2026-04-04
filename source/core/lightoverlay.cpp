@@ -1532,6 +1532,8 @@ bool ParseLightOverlays(bool verbose)
 	static const char* lightOverlayNames[] = { "LIGHTOVR", nullptr };
 	while ((workingLump = fileSystem.FindLumpMulti(lightOverlayNames, &lastLump)) != -1)
 	{
+		fileSystem.RefreshFile(workingLump);
+
 		ParsedLightOverlaySourceFile sourceFile;
 		sourceFile.lumpNum = workingLump;
 		sourceFile.sourceName = GetLumpDisplayName(workingLump);

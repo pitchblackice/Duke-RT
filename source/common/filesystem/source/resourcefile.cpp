@@ -729,6 +729,31 @@ FileData FResourceFile::Read(uint32_t entry)
 	return fr.Read(entry < NumLumps ? Entries[entry].Length : 0);
 }
 
+bool FResourceFile::RefreshEntry(uint32_t entry)
+{
+	if (entry >= NumLumps)
+	{
+		return false;
+	}
+
+	// Single-file loose lump mounts can refresh their cached size from disk.
+	if (NumLumps != 1 || (Entries[entry].Flags & (RESFF_FULLPATH | RESFF_EMBEDDED)) != 0)
+	{
+		return false;
+	}
+
+	FileReader reader;
+	if (!reader.OpenFile(FileName))
+	{
+		return false;
+	}
+
+	const size_t length = (size_t)reader.GetLength();
+	Entries[entry].Length = length;
+	Entries[entry].CompressedSize = length;
+	return true;
+}
+
 
 
 }
