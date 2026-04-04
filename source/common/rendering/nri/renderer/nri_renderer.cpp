@@ -51,6 +51,8 @@ EXTERN_CVAR(Int, nri_ptspherelats)
 namespace
 {
 	static constexpr uint32_t NriPtDebugSphereLimit = 64u;
+	static constexpr uint32_t NriPtMuzzleFlashSlotCount = 8u;
+	static constexpr double BuildTickSeconds = 1.0 / 120.0;
 
 	static uint64_t HashCombineLightOverlay(uint64_t hash, uint64_t value)
 	{
@@ -1127,6 +1129,88 @@ namespace
 		}
 
 		return result;
+	}
+
+	double GetCurrentGameplayTimeSeconds()
+	{
+		return PlayClock > 0 ? (double)PlayClock * BuildTickSeconds : 0.0;
+	}
+
+	void WorldToPathTracingPosition(const DVector3& worldPos, float out[3])
+	{
+		out[0] = (float)worldPos.X;
+		out[1] = (float)-worldPos.Z;
+		out[2] = (float)-worldPos.Y;
+	}
+
+	uint32_t BuildMuzzleFlashRuleId(const ResolvedLightOverlayMuzzleFlashRule& rule)
+	{
+		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), "", rule.source);
+	}
+
+	uint64_t BuildMuzzleFlashRandomSeed(const PathTracingWeaponLightEvent& event)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombineLightOverlay(hash, event.serial);
+		hash = HashCombineLightOverlay(hash, (uint64_t)(uint32_t)(event.hasEmitterActorIndex ? event.emitterActorIndex + 1 : 0));
+		hash = HashLightOverlayText(hash, BuildNormalizedMuzzleFlashEventKey(event.eventId).c_str());
+		return hash;
+	}
+
+	uint64_t AdvanceMuzzleFlashRandomState(uint64_t& state)
+	{
+		state += 0x9e3779b97f4a7c15ull;
+		uint64_t z = state;
+		z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+		z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+		return z ^ (z >> 31);
+	}
+
+	float NextMuzzleFlashUnitRandom(uint64_t& state)
+	{
+		const uint64_t bits = AdvanceMuzzleFlashRandomState(state);
+		return (float)((bits >> 40) & 0xFFFFFFu) * (1.0f / 16777215.0f);
+	}
+
+	float ResolveMuzzleFlashRandomRange(uint64_t& randomState, float minValue, float maxValue)
+	{
+		if (!std::isfinite(minValue) || !std::isfinite(maxValue))
+		{
+			return 0.0f;
+		}
+
+		if (minValue > maxValue)
+		{
+			std::swap(minValue, maxValue);
+		}
+
+		if (minValue == maxValue)
+		{
+			return minValue;
+		}
+
+		return minValue + (maxValue - minValue) * NextMuzzleFlashUnitRandom(randomState);
+	}
+
+	float EvaluateMuzzleFlashFadeOut(double currentTimeSeconds, bool occupied, float peakIntensity, float radius, double activationTimeSeconds, double endTimeSeconds)
+	{
+		if (!occupied ||
+			peakIntensity <= 0.0f ||
+			radius <= 0.0f ||
+			currentTimeSeconds < activationTimeSeconds)
+		{
+			return 0.0f;
+		}
+
+		const double durationSeconds = endTimeSeconds - activationTimeSeconds;
+		if (durationSeconds <= 0.0 || currentTimeSeconds >= endTimeSeconds)
+		{
+			return 0.0f;
+		}
+
+		const double progress = std::clamp((currentTimeSeconds - activationTimeSeconds) / durationSeconds, 0.0, 1.0);
+		const double fade = progress >= 1.0 ? 0.0 : std::pow(2.0, -10.0 * progress);
+		return (float)(peakIntensity * fade);
 	}
 
 	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
@@ -3486,6 +3570,24 @@ void NRIRenderer::RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightOverla
 void NRIRenderer::ResetMuzzleFlashOverlayState(const char* reason)
 {
 	mResolvedMuzzleFlashRuleLookup.clear();
+	for (TransientMuzzleFlashSlot& slot : mTransientMuzzleFlashSlots)
+	{
+		slot.ruleId = 0;
+		slot.sourceEventSerial = 0;
+		slot.emitterActorIndex = -1;
+		slot.renderPosition[0] = 0.0f;
+		slot.renderPosition[1] = 0.0f;
+		slot.renderPosition[2] = 0.0f;
+		slot.color[0] = 1.0f;
+		slot.color[1] = 1.0f;
+		slot.color[2] = 1.0f;
+		slot.peakIntensity = 0.0f;
+		slot.radius = 0.0f;
+		slot.activationTimeSeconds = 0.0;
+		slot.endTimeSeconds = 0.0;
+		slot.occupied = false;
+	}
+	mTransientMuzzleFlashLights.clear();
 
 	uint32_t discardedEventCount = 0;
 	if (mFrameBuffer != nullptr)
@@ -3513,6 +3615,178 @@ const ResolvedLightOverlayMuzzleFlashRule* NRIRenderer::FindResolvedMuzzleFlashR
 
 	const auto it = mResolvedMuzzleFlashRuleLookup.find(key);
 	return it != mResolvedMuzzleFlashRuleLookup.end() ? &it->second : nullptr;
+}
+
+void NRIRenderer::RefreshTransientMuzzleFlashLights(double currentTimeSeconds)
+{
+	if (mTransientMuzzleFlashSlots.empty())
+	{
+		mTransientMuzzleFlashSlots.resize(NriPtMuzzleFlashSlotCount);
+		for (uint32_t slotIndex = 0; slotIndex < (uint32_t)mTransientMuzzleFlashSlots.size(); ++slotIndex)
+		{
+			TransientMuzzleFlashSlot& slot = mTransientMuzzleFlashSlots[slotIndex];
+			slot.stableKey = 0x4d555a5a4c450000ull | (uint64_t)slotIndex;
+			slot.slotIndex = slotIndex;
+			slot.color[0] = 1.0f;
+			slot.color[1] = 1.0f;
+			slot.color[2] = 1.0f;
+		}
+	}
+
+	TArray<PathTracingWeaponLightEvent> pendingEvents;
+	if (mFrameBuffer != nullptr)
+	{
+		mFrameBuffer->ConsumePathTracingWeaponLightEvents(pendingEvents);
+	}
+
+	for (const PathTracingWeaponLightEvent& event : pendingEvents)
+	{
+		const ResolvedLightOverlayMuzzleFlashRule* rule = FindResolvedMuzzleFlashRule(event.eventId);
+		if (rule == nullptr)
+		{
+			if (nri_ptdebug > 0)
+			{
+				Printf("NRI PT muzzle-flash ignored: event=%s serial=%llu reason=no-rule\n",
+					event.eventId.GetChars(),
+					(unsigned long long)event.serial);
+			}
+			continue;
+		}
+
+		const float baseIntensity = rule->hasIntensity ? std::max(rule->intensity, 0.0f) : 0.0f;
+		const float baseRadius = rule->hasRadius ? std::max(rule->radius, 0.0f) : 0.0f;
+		const float baseDelaySeconds = rule->hasDelaySeconds ? std::max(rule->delaySeconds, 0.0f) : 0.0f;
+		const float baseDurationSeconds = rule->hasDurationSeconds ? std::max(rule->durationSeconds, 0.0f) : 0.0f;
+		if (baseIntensity <= 0.0f || baseRadius <= 0.0f || baseDurationSeconds <= 0.0f)
+		{
+			if (nri_ptdebug > 0)
+			{
+				Printf("NRI PT muzzle-flash ignored: event=%s serial=%llu reason=invalid-rule intensity=%.3f radius=%.3f duration=%.4f\n",
+					event.eventId.GetChars(),
+					(unsigned long long)event.serial,
+					baseIntensity,
+					baseRadius,
+					baseDurationSeconds);
+			}
+			continue;
+		}
+
+		uint64_t randomState = BuildMuzzleFlashRandomSeed(event);
+		const float intensityScale = rule->hasIntensityRandom ? ResolveMuzzleFlashRandomRange(randomState, rule->intensityRandomRange[0], rule->intensityRandomRange[1]) : 1.0f;
+		const float radiusScale = rule->hasRadiusRandom ? ResolveMuzzleFlashRandomRange(randomState, rule->radiusRandomRange[0], rule->radiusRandomRange[1]) : 1.0f;
+		const float delayRandomSeconds = rule->hasDelayRandomSeconds ? ResolveMuzzleFlashRandomRange(randomState, rule->delayRandomSecondsRange[0], rule->delayRandomSecondsRange[1]) : 0.0f;
+		const float durationRandomSeconds = rule->hasDurationRandomSeconds ? ResolveMuzzleFlashRandomRange(randomState, rule->durationRandomSecondsRange[0], rule->durationRandomSecondsRange[1]) : 0.0f;
+		const float resolvedPeakIntensity = std::max(baseIntensity * intensityScale, 0.0f);
+		const float resolvedRadius = std::max(baseRadius * radiusScale, 0.0f);
+		const float resolvedDelaySeconds = std::max(baseDelaySeconds + delayRandomSeconds, 0.0f);
+		const float resolvedDurationSeconds = std::max(baseDurationSeconds + durationRandomSeconds, 0.001f);
+		if (resolvedPeakIntensity <= 0.0f || resolvedRadius <= 0.0f)
+		{
+			continue;
+		}
+
+		DVector3 resolvedWorldPosition = event.worldPosition;
+		if (rule->hasOffset && event.hasBasis)
+		{
+			resolvedWorldPosition +=
+				event.basisRight * rule->offset[0] +
+				event.basisForward * rule->offset[1] +
+				event.basisUp * rule->offset[2];
+		}
+
+		float renderPosition[3] = {};
+		WorldToPathTracingPosition(resolvedWorldPosition, renderPosition);
+
+		size_t selectedSlotIndex = 0;
+		bool foundReusableSlot = false;
+		double oldestEndTimeSeconds = std::numeric_limits<double>::infinity();
+		for (size_t slotIndex = 0; slotIndex < mTransientMuzzleFlashSlots.size(); ++slotIndex)
+		{
+			const TransientMuzzleFlashSlot& slot = mTransientMuzzleFlashSlots[slotIndex];
+			if (!slot.occupied || slot.endTimeSeconds <= currentTimeSeconds)
+			{
+				selectedSlotIndex = slotIndex;
+				foundReusableSlot = true;
+				break;
+			}
+
+			if (slot.endTimeSeconds < oldestEndTimeSeconds)
+			{
+				oldestEndTimeSeconds = slot.endTimeSeconds;
+				selectedSlotIndex = slotIndex;
+			}
+		}
+
+		TransientMuzzleFlashSlot& slot = mTransientMuzzleFlashSlots[selectedSlotIndex];
+		slot.ruleId = BuildMuzzleFlashRuleId(*rule);
+		slot.sourceEventSerial = event.serial;
+		slot.emitterActorIndex = event.hasEmitterActorIndex ? event.emitterActorIndex : -1;
+		Copy3(renderPosition, slot.renderPosition);
+		slot.color[0] = rule->hasColor ? std::max(rule->color[0], 0.0f) : 1.0f;
+		slot.color[1] = rule->hasColor ? std::max(rule->color[1], 0.0f) : 1.0f;
+		slot.color[2] = rule->hasColor ? std::max(rule->color[2], 0.0f) : 1.0f;
+		slot.peakIntensity = resolvedPeakIntensity;
+		slot.radius = resolvedRadius;
+		slot.activationTimeSeconds = std::max(event.absoluteTimeSeconds, 0.0) + (double)resolvedDelaySeconds;
+		slot.endTimeSeconds = slot.activationTimeSeconds + (double)resolvedDurationSeconds;
+		slot.occupied = true;
+
+		if (nri_ptdebug > 0)
+		{
+			Printf("NRI PT muzzle-flash spawn: slot=%u reused=%s event=%s serial=%llu rule=%u actor=%d delay=%.4f duration=%.4f peak=%.3f radius=%.3f render_pos=(%.3f, %.3f, %.3f)\n",
+				slot.slotIndex,
+				YesNo(foundReusableSlot),
+				event.eventId.GetChars(),
+				(unsigned long long)event.serial,
+				slot.ruleId,
+				slot.emitterActorIndex,
+				resolvedDelaySeconds,
+				resolvedDurationSeconds,
+				slot.peakIntensity,
+				slot.radius,
+				slot.renderPosition[0],
+				slot.renderPosition[1],
+				slot.renderPosition[2]);
+		}
+	}
+
+	mTransientMuzzleFlashLights.clear();
+	mTransientMuzzleFlashLights.reserve(mTransientMuzzleFlashSlots.size());
+	for (TransientMuzzleFlashSlot& slot : mTransientMuzzleFlashSlots)
+	{
+		SceneLightSystem::SceneAnalyticLight light = {};
+		light.id = 0x8000u + slot.slotIndex;
+		light.stableKey = slot.stableKey;
+		light.sourceFlags = SceneAnalyticLightSourceFlag_MuzzleFlash;
+		light.sourceRuleId = slot.ruleId;
+		light.source = SceneLightRecordSource::None;
+		light.actorIndex = slot.emitterActorIndex;
+		Copy3(slot.renderPosition, light.position);
+		Copy3(slot.color, light.color);
+		light.intensity = EvaluateMuzzleFlashFadeOut(
+			currentTimeSeconds,
+			slot.occupied,
+			slot.peakIntensity,
+			slot.radius,
+			slot.activationTimeSeconds,
+			slot.endTimeSeconds);
+		light.radius = light.intensity > 0.0f ? slot.radius : 0.0f;
+		mTransientMuzzleFlashLights.push_back(light);
+
+		if (slot.occupied && currentTimeSeconds >= slot.endTimeSeconds)
+		{
+			slot.ruleId = 0;
+			slot.sourceEventSerial = 0;
+			slot.emitterActorIndex = -1;
+			slot.peakIntensity = 0.0f;
+			slot.radius = 0.0f;
+			slot.activationTimeSeconds = 0.0;
+			slot.endTimeSeconds = 0.0;
+			slot.occupied = false;
+		}
+	}
+
+	mSceneLights.SetTransientAnalyticLights(mTransientMuzzleFlashLights);
 }
 
 void NRIRenderer::ResetPerfTraceStats()
@@ -4750,9 +5024,11 @@ void NRIRenderer::ClearRuntimePointLights()
 void NRIRenderer::PrintRuntimePointLights() const
 {
 	const auto& analyticLights = mSceneLights.GetAnalyticLights();
-	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u overlay_rules=%u map_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
+	Printf("NRI PT analytic lights: active=%u manual=%u muzzle_slots=%u muzzle_active=%u rules=%u overlay_rules=%u map_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
 		(uint32_t)analyticLights.activeLights.size(),
 		(uint32_t)analyticLights.manualLights.size(),
+		analyticLights.transientMuzzleSlotCount,
+		analyticLights.transientMuzzleActiveCount,
 		(uint32_t)analyticLights.spriteTileRules.size(),
 		analyticLights.actorOverlayRuleCount,
 		analyticLights.mapOverlayRuleCount,
@@ -4775,10 +5051,12 @@ void NRIRenderer::PrintRuntimePointLights() const
 	{
 		const char* sourceBase =
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_Manual) != 0 ? "manual" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_MuzzleFlash) != 0 ? "transient" :
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? "overlay" :
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_MapOverlay) != 0 ? "overlay" :
 			"heuristic";
 		const char* sourceSuffix =
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_MuzzleFlash) != 0 ? ":muzzle" :
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_SpriteTileHeuristic) != 0 ? ":sprite_tile" :
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? ":actor" :
 			(light.sourceFlags & SceneAnalyticLightSourceFlag_MapOverlay) != 0 ? ":map" :
@@ -5546,9 +5824,11 @@ void NRIRenderer::PrintStatus() const
 		(int)nri_ptmutationtracechunk,
 		(int)nri_ptmutationtracesector);
 	Printf("NRI PT runtime link trace: %s\n", nri_ptruntimelinktrace ? "on" : "off");
-	Printf("NRI PT analytic lights: active=%u manual=%u rules=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
+	Printf("NRI PT analytic lights: active=%u manual=%u muzzle_slots=%u muzzle_active=%u rules=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
 		(uint32_t)mSceneLights.GetAnalyticLights().activeLights.size(),
 		(uint32_t)mSceneLights.GetAnalyticLights().manualLights.size(),
+		mSceneLights.GetAnalyticLights().transientMuzzleSlotCount,
+		mSceneLights.GetAnalyticLights().transientMuzzleActiveCount,
 		(uint32_t)mSceneLights.GetAnalyticLights().spriteTileRules.size(),
 		YesNo(mSceneLights.GetAnalyticLights().lastBuildTopologyChanged),
 		YesNo(mSceneLights.GetAnalyticLights().lastBuildPropertiesChanged),
@@ -7676,6 +7956,8 @@ void NRIRenderer::RefreshSceneLightSystem(
 		BuildStaticMapAnalyticOverlayRules(resolvedLightOverlays, mMapWorld, mapOverlayRules);
 	}
 	const uint32_t gameplayLightTimeIndex = GetGameplayLightTimeIndex();
+	const double currentTimeSeconds = GetCurrentGameplayTimeSeconds();
+	RefreshTransientMuzzleFlashLights(currentTimeSeconds);
 
 	mSceneLights.RebuildAnalyticLights(
 		gameplayLightTimeIndex,
@@ -8330,6 +8612,11 @@ void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuD
 	outLights.reserve(activeLights.size());
 	for (const SceneLightSystem::SceneAnalyticLight& light : activeLights)
 	{
+		if (light.intensity <= 0.0f || light.radius <= 0.0f)
+		{
+			continue;
+		}
+
 		RuntimePointLightGpuData gpuLight = {};
 		Copy3(light.position, gpuLight.position);
 		gpuLight.radius = light.radius;
@@ -8994,6 +9281,11 @@ void NRIRenderer::BuildRuntimeLightClusterUpload(
 	for (uint32_t lightIndex = 0; lightIndex < activeLightCount; ++lightIndex)
 	{
 		const SceneLightSystem::SceneAnalyticLight& light = activeLights[lightIndex];
+		if (light.intensity <= 0.0f || light.radius <= 0.0f)
+		{
+			continue;
+		}
+
 		const float toLight[3] = {
 			light.position[0] - mCurrentCameraPos[0],
 			light.position[1] - mCurrentCameraPos[1],

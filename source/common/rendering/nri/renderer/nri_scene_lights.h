@@ -23,6 +23,7 @@ enum SceneAnalyticLightSourceFlags : uint32_t
 	SceneAnalyticLightSourceFlag_SpriteTileHeuristic = 1u << 1,
 	SceneAnalyticLightSourceFlag_ActorOverlay = 1u << 2,
 	SceneAnalyticLightSourceFlag_MapOverlay = 1u << 3,
+	SceneAnalyticLightSourceFlag_MuzzleFlash = 1u << 4,
 };
 
 enum SceneEmissiveSurfaceSourceFlags : uint32_t
@@ -122,6 +123,7 @@ public:
 		};
 
 		std::vector<SceneAnalyticLight> manualLights;
+		std::vector<SceneAnalyticLight> transientLights;
 		std::vector<AnalyticLightHeuristicRule> spriteTileRules;
 		std::vector<SceneAnalyticLight> activeLights;
 		std::vector<uint64_t> activeTopologyKeys;
@@ -135,6 +137,8 @@ public:
 		uint32_t actorOverlayRuleCount = 0;
 		uint32_t actorOverlayMatchedSurfaceCount = 0;
 		uint32_t mapOverlayRuleCount = 0;
+		uint32_t transientMuzzleSlotCount = 0;
+		uint32_t transientMuzzleActiveCount = 0;
 		uint32_t dedupedMatchCount = 0;
 		uint32_t truncatedLightCount = 0;
 		uint32_t nextRuleId = 1;
@@ -262,6 +266,7 @@ public:
 	bool RemoveManualAnalyticLight(uint32_t id);
 	void ClearManualAnalyticLights();
 	uint32_t GetManualAnalyticLightCount() const { return (uint32_t)mAnalyticLights.manualLights.size(); }
+	void SetTransientAnalyticLights(const std::vector<SceneAnalyticLight>& lights);
 
 	bool AddSpriteTileHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
 	void ClearSpriteTileHeuristics();

@@ -584,9 +584,9 @@ void SceneLightSystem::RebuildAnalyticLights(
 	const size_t mapOverlayRuleCount = mapOverlayRules != nullptr ? mapOverlayRules->size() : 0u;
 	mAnalyticLights.actorOverlayRuleCount = (uint32_t)overlayRuleCount;
 	mAnalyticLights.mapOverlayRuleCount = (uint32_t)mapOverlayRuleCount;
-	nextLights.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size() + overlayRuleCount + mapOverlayRuleCount);
+	nextLights.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.transientLights.size() + mAnalyticLights.spriteTileRules.size() + overlayRuleCount + mapOverlayRuleCount);
 	std::unordered_map<uint64_t, size_t> keyToLightIndex;
-	keyToLightIndex.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.spriteTileRules.size() * 4u + overlayRuleCount * 2u + mapOverlayRuleCount);
+	keyToLightIndex.reserve(mAnalyticLights.manualLights.size() + mAnalyticLights.transientLights.size() + mAnalyticLights.spriteTileRules.size() * 4u + overlayRuleCount * 2u + mapOverlayRuleCount);
 
 	auto tryAppendLight = [this, &nextLights, &keyToLightIndex, maxActiveLights](const SceneAnalyticLight& light)
 	{
@@ -609,6 +609,11 @@ void SceneLightSystem::RebuildAnalyticLights(
 	for (const SceneAnalyticLight& manualLight : mAnalyticLights.manualLights)
 	{
 		tryAppendLight(manualLight);
+	}
+
+	for (const SceneAnalyticLight& transientLight : mAnalyticLights.transientLights)
+	{
+		tryAppendLight(transientLight);
 	}
 
 	for (const AnalyticLightHeuristicRule& rule : mAnalyticLights.spriteTileRules)
@@ -1124,6 +1129,22 @@ bool SceneLightSystem::RemoveManualAnalyticLight(uint32_t id)
 void SceneLightSystem::ClearManualAnalyticLights()
 {
 	mAnalyticLights.manualLights.clear();
+}
+
+void SceneLightSystem::SetTransientAnalyticLights(const std::vector<SceneAnalyticLight>& lights)
+{
+	mAnalyticLights.transientLights = lights;
+	mAnalyticLights.transientMuzzleSlotCount = (uint32_t)lights.size();
+	mAnalyticLights.transientMuzzleActiveCount = 0;
+	for (const SceneAnalyticLight& light : lights)
+	{
+		if ((light.sourceFlags & SceneAnalyticLightSourceFlag_MuzzleFlash) != 0 &&
+			light.intensity > 0.0f &&
+			light.radius > 0.0f)
+		{
+			mAnalyticLights.transientMuzzleActiveCount++;
+		}
+	}
 }
 
 bool SceneLightSystem::AddSpriteTileHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId)

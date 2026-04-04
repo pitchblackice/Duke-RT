@@ -311,6 +311,22 @@ private:
 		float roughness = 0.05f;
 	};
 
+	struct TransientMuzzleFlashSlot
+	{
+		uint64_t stableKey = 0;
+		uint32_t slotIndex = 0;
+		uint32_t ruleId = 0;
+		uint64_t sourceEventSerial = 0;
+		int32_t emitterActorIndex = -1;
+		float renderPosition[3] = {};
+		float color[3] = { 1.0f, 1.0f, 1.0f };
+		float peakIntensity = 0.0f;
+		float radius = 0.0f;
+		double activationTimeSeconds = 0.0;
+		double endTimeSeconds = 0.0;
+		bool occupied = false;
+	};
+
 	struct RuntimeLightTileHeaderGpuData
 	{
 		uint32_t indexOffset = 0;
@@ -666,6 +682,7 @@ private:
 	void RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightOverlaySet& resolvedLightOverlays);
 	void ResetMuzzleFlashOverlayState(const char* reason);
 	const ResolvedLightOverlayMuzzleFlashRule* FindResolvedMuzzleFlashRule(const FString& eventId) const;
+	void RefreshTransientMuzzleFlashLights(double currentTimeSeconds);
 	void ResetPersistentDynamicEmissiveCache();
 	void PrunePersistentDynamicEmissiveCacheToLiveActors();
 	bool RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials);
@@ -824,6 +841,8 @@ private:
 	SceneLightSystem mSceneLights;
 	NRIDirectionalLightState mDirectionalLightState = {};
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
+	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
+	std::vector<SceneLightSystem::SceneAnalyticLight> mTransientMuzzleFlashLights;
 	std::array<nri::Descriptor*, 21> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
