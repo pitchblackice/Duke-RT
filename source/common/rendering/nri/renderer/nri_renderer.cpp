@@ -403,14 +403,15 @@ namespace
 		return state;
 	}
 
-	enum ActorShadowOverrideBits : uint32_t
+	enum ActorMaterialOverrideBits : uint32_t
 	{
-		ActorShadowOverride_None = 0,
-		ActorShadowOverride_NoShadowReceive = 1u << 0,
-		ActorShadowOverride_NoShadowCast = 1u << 1,
+		ActorMaterialOverride_None = 0,
+		ActorMaterialOverride_NoShadowReceive = 1u << 0,
+		ActorMaterialOverride_NoShadowCast = 1u << 1,
+		ActorMaterialOverride_Fullbright = 1u << 2,
 	};
 
-	static void BuildActorShadowOverrideMap(const ResolvedLightOverlaySet& resolved, std::unordered_map<int32_t, uint32_t>& outOverrides)
+	static void BuildActorMaterialOverrideMap(const ResolvedLightOverlaySet& resolved, std::unordered_map<int32_t, uint32_t>& outOverrides)
 	{
 		if (resolved.actorRules.Size() == 0 && resolved.actorOverrideRules.Size() == 0)
 		{
@@ -431,7 +432,7 @@ namespace
 				continue;
 			}
 
-			uint32_t overrideBits = ActorShadowOverride_None;
+			uint32_t overrideBits = ActorMaterialOverride_None;
 			bool touched = false;
 			const uint32_t actorTextureId = (unsigned)actor->spr.picnum < MAXTILES ? (uint32_t)tileGetTextureID(actor->spr.picnum).GetIndex() : 0u;
 			for (const auto& resolvedRule : resolved.actorRules)
@@ -453,11 +454,11 @@ namespace
 					touched = true;
 					if (resolvedRule.shadowReceive)
 					{
-						overrideBits &= ~ActorShadowOverride_NoShadowReceive;
+						overrideBits &= ~ActorMaterialOverride_NoShadowReceive;
 					}
 					else
 					{
-						overrideBits |= ActorShadowOverride_NoShadowReceive;
+						overrideBits |= ActorMaterialOverride_NoShadowReceive;
 					}
 				}
 
@@ -466,11 +467,24 @@ namespace
 					touched = true;
 					if (resolvedRule.shadowCast)
 					{
-						overrideBits &= ~ActorShadowOverride_NoShadowCast;
+						overrideBits &= ~ActorMaterialOverride_NoShadowCast;
 					}
 					else
 					{
-						overrideBits |= ActorShadowOverride_NoShadowCast;
+						overrideBits |= ActorMaterialOverride_NoShadowCast;
+					}
+				}
+
+				if (resolvedRule.hasFullbright)
+				{
+					touched = true;
+					if (resolvedRule.fullbright)
+					{
+						overrideBits |= ActorMaterialOverride_Fullbright;
+					}
+					else
+					{
+						overrideBits &= ~ActorMaterialOverride_Fullbright;
 					}
 				}
 			}
@@ -489,11 +503,11 @@ namespace
 					touched = true;
 					if (resolvedRule.shadowReceive)
 					{
-						overrideBits &= ~ActorShadowOverride_NoShadowReceive;
+						overrideBits &= ~ActorMaterialOverride_NoShadowReceive;
 					}
 					else
 					{
-						overrideBits |= ActorShadowOverride_NoShadowReceive;
+						overrideBits |= ActorMaterialOverride_NoShadowReceive;
 					}
 				}
 
@@ -502,20 +516,32 @@ namespace
 					touched = true;
 					if (resolvedRule.shadowCast)
 					{
-						overrideBits &= ~ActorShadowOverride_NoShadowCast;
+						overrideBits &= ~ActorMaterialOverride_NoShadowCast;
 					}
 					else
 					{
-						overrideBits |= ActorShadowOverride_NoShadowCast;
+						overrideBits |= ActorMaterialOverride_NoShadowCast;
 					}
 				}
 			}
 
-			if (touched && overrideBits != ActorShadowOverride_None)
+			if (touched && overrideBits != ActorMaterialOverride_None)
 			{
 				outOverrides[(int32_t)actor->GetIndex()] = overrideBits;
 			}
 		}
+	}
+
+	static bool HasActorFullbrightOverrides(const ResolvedLightOverlaySet& resolved)
+	{
+		for (const auto& rule : resolved.actorRules)
+		{
+			if (rule.hasFullbright)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	static uint32_t BuildMapOverlayRuleId(const ResolvedLightOverlayMapLightRule& rule)
@@ -4136,7 +4162,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			{
 				{
 					Clocker clock(NriPTMaterialBuild);
-					nri_scene::BuildMaterials(dynamicSceneView, dynamicMaterialBridge);
+					BuildMaterialsWithActorOverrides(dynamicSceneView, dynamicMaterialBridge);
 				}
 			}
 
@@ -4182,7 +4208,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 				{
 					Clocker clock(NriPTMaterialBuild);
-					nri_scene::BuildMaterials(mergedDynamicSceneView, mergedDynamicMaterialBridge);
+					BuildMaterialsWithActorOverrides(mergedDynamicSceneView, mergedDynamicMaterialBridge);
 				}
 
 				if (!mergedDynamicGeometry.primitives.empty())
@@ -4468,7 +4494,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 		{
 			Clocker clock(NriPTMaterialBuild);
-			nri_scene::BuildMaterials(capturedSceneView, materialBridge);
+			BuildMaterialsWithActorOverrides(capturedSceneView, materialBridge);
 		}
 		sceneLightCapturedMaterials = &materialBridge;
 
@@ -6232,7 +6258,7 @@ void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 	}
 	{
 		Clocker clock(NriPTMaterialBuild);
-		nri_scene::BuildMaterials(next.sceneView, next.materialBridge);
+		BuildMaterialsWithActorOverrides(next.sceneView, next.materialBridge);
 	}
 
 	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
@@ -6297,7 +6323,7 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 	}
 	{
 		Clocker clock(NriPTMaterialBuild);
-		nri_scene::BuildMaterials(next.sceneView, next.materialBridge);
+		BuildMaterialsWithActorOverrides(next.sceneView, next.materialBridge);
 	}
 
 	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
@@ -8044,16 +8070,73 @@ void NRIRenderer::ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridge
 	}
 }
 
+void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials) const
+{
+	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	if (HasActorFullbrightOverrides(resolvedLightOverlays))
+	{
+		std::unordered_map<int32_t, uint32_t> actorOverrides;
+		BuildActorMaterialOverrideMap(resolvedLightOverlays, actorOverrides);
+		if (!actorOverrides.empty())
+		{
+			struct SavedMaterialFlags
+			{
+				uint32_t* flags = nullptr;
+				uint32_t value = 0;
+			};
+
+			std::vector<SavedMaterialFlags> savedFlags;
+			savedFlags.reserve(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
+
+			auto applyOverrides = [&actorOverrides, &savedFlags](auto& surfaces)
+			{
+				for (auto& surface : surfaces)
+				{
+					if ((surface.material.flags & nri_scene::MaterialFlag_Sprite) == 0)
+					{
+						continue;
+					}
+
+					auto it = actorOverrides.find(surface.provenance.actorIndex);
+					if (it == actorOverrides.end())
+					{
+						continue;
+					}
+
+					if ((it->second & ActorMaterialOverride_Fullbright) != 0)
+					{
+						savedFlags.push_back({ &surface.material.flags, surface.material.flags });
+						surface.material.flags |= nri_scene::MaterialFlag_Fullbright;
+					}
+				}
+			};
+
+			applyOverrides(sceneView.opaqueWalls);
+			applyOverrides(sceneView.opaqueFlats);
+			applyOverrides(sceneView.opaqueSprites);
+
+			nri_scene::BuildMaterials(sceneView, outMaterials);
+			for (const SavedMaterialFlags& saved : savedFlags)
+			{
+				*saved.flags = saved.value;
+			}
+			return;
+		}
+	}
+
+	nri_scene::BuildMaterials(sceneView, outMaterials);
+}
+
 void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const
 {
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
-	if (resolvedLightOverlays.actorOverrideRules.Size() == 0)
+	if (resolvedLightOverlays.actorRules.Size() == 0 && resolvedLightOverlays.actorOverrideRules.Size() == 0)
 	{
 		return;
 	}
 
 	std::unordered_map<int32_t, uint32_t> actorOverrides;
-	BuildActorShadowOverrideMap(resolvedLightOverlays, actorOverrides);
+	BuildActorMaterialOverrideMap(resolvedLightOverlays, actorOverrides);
 	if (actorOverrides.empty())
 	{
 		return;
@@ -8074,11 +8157,11 @@ void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBri
 			continue;
 		}
 
-		if ((it->second & ActorShadowOverride_NoShadowReceive) != 0)
+		if ((it->second & ActorMaterialOverride_NoShadowReceive) != 0)
 		{
 			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowReceive;
 		}
-		if ((it->second & ActorShadowOverride_NoShadowCast) != 0)
+		if ((it->second & ActorMaterialOverride_NoShadowCast) != 0)
 		{
 			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
 		}
@@ -10072,7 +10155,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 			}
 		{
 			Clocker clock(NriPTMaterialBuild);
-			nri_scene::BuildMaterials(chunkSceneView, chunkMaterials);
+			BuildMaterialsWithActorOverrides(chunkSceneView, chunkMaterials);
 		}
 		if (chunkGeometry.primitives.empty())
 		{
@@ -11266,7 +11349,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				}
 				{
 					Clocker clock(NriPTMaterialBuild);
-					nri_scene::BuildMaterials(liveChunkView, liveMaterials);
+					BuildMaterialsWithActorOverrides(liveChunkView, liveMaterials);
 				}
 
 				replacement.sceneView = std::move(liveChunkView);
@@ -11690,7 +11773,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		}
 		{
 			Clocker clock(NriPTMaterialBuild);
-			nri_scene::BuildMaterials(liveChunkView, chunkMaterials);
+			BuildMaterialsWithActorOverrides(liveChunkView, chunkMaterials);
 		}
 
 		if (!chunkGeometry.primitives.empty())

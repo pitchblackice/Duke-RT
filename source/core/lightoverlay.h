@@ -37,6 +37,8 @@ struct ParsedLightOverlayActorRule
 	bool shadowReceive = true;
 	bool hasShadowCast = false;
 	bool shadowCast = true;
+	bool hasFullbright = false;
+	bool fullbright = false;
 	bool hasTileFilter = false;
 	int tileFilter = -1;
 	FString lightType;
@@ -171,6 +173,8 @@ struct ResolvedLightOverlayActorRule
 	bool shadowReceive = true;
 	bool hasShadowCast = false;
 	bool shadowCast = true;
+	bool hasFullbright = false;
+	bool fullbright = false;
 	bool hasTileFilter = false;
 	int tileFilter = -1;
 	FString lightType;

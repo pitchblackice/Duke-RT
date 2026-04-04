@@ -468,6 +468,24 @@ namespace
 						sc.ScriptMessage("Invalid shadowcast value '%s'; expected off/default/on", sc.String);
 					}
 				}
+				else if (sc.Compare("fullbright"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "on"))
+					{
+						rule.hasFullbright = true;
+						rule.fullbright = true;
+					}
+					else if (!stricmp(sc.String, "off") || !stricmp(sc.String, "default"))
+					{
+						rule.hasFullbright = true;
+						rule.fullbright = false;
+					}
+					else
+					{
+						sc.ScriptMessage("Invalid fullbright value '%s'; expected off/default/on", sc.String);
+					}
+				}
 				else if (sc.Compare("tile"))
 				{
 					sc.MustGetNumber();
@@ -958,6 +976,7 @@ namespace
 		AppendLine(text, 2, FStringf("actorclass %s", QuoteLightOverlayString(rule.actorClassName).GetChars()));
 		if (rule.hasShadowReceive) AppendShadowStateField(text, 2, "shadowreceive", rule.shadowReceive);
 		if (rule.hasShadowCast) AppendShadowStateField(text, 2, "shadowcast", rule.shadowCast);
+		if (rule.hasFullbright) AppendShadowStateField(text, 2, "fullbright", rule.fullbright);
 		if (rule.hasTileFilter) AppendLine(text, 2, FStringf("tile %d", rule.tileFilter));
 		AppendLine(text, 2, FStringf("type %s", QuoteLightOverlayString(rule.lightType).GetChars()));
 		if (rule.hasColor) AppendVector3Field(text, 2, "color", rule.color);
@@ -1191,12 +1210,13 @@ namespace
 
 		for (const ParsedLightOverlayActorRule* rule : SortRulesByOrder(database.actorRules))
 		{
-			Printf("LIGHTOVR actorrule %s: actorclass=%s type=%s shadowreceive=%s shadowcast=%s source=%s\n",
+			Printf("LIGHTOVR actorrule %s: actorclass=%s type=%s shadowreceive=%s shadowcast=%s fullbright=%s source=%s\n",
 				rule->id.GetChars(),
 				rule->actorClassName.GetChars(),
 				rule->lightType.GetChars(),
 				rule->hasShadowReceive ? (rule->shadowReceive ? "default" : "off") : "(unset)",
 				rule->hasShadowCast ? (rule->shadowCast ? "default" : "off") : "(unset)",
+				rule->hasFullbright ? (rule->fullbright ? "on" : "off") : "(unset)",
 				SourceLocationText(rule->source).GetChars());
 			if (rule->hasTileFilter) Printf("  tile=%d\n", rule->tileFilter);
 			if (rule->hasColor) Printf("  color=(%.3f, %.3f, %.3f)\n", rule->color[0], rule->color[1], rule->color[2]);
@@ -1285,13 +1305,14 @@ namespace
 
 		for (const auto& rule : resolved.actorRules)
 		{
-			Printf("LIGHTOVR resolved actorrule %s: actorclass=%s resolved=%s type=%s shadowreceive=%s shadowcast=%s source=%s\n",
+			Printf("LIGHTOVR resolved actorrule %s: actorclass=%s resolved=%s type=%s shadowreceive=%s shadowcast=%s fullbright=%s source=%s\n",
 				rule.id.GetChars(),
 				rule.actorClassName.GetChars(),
 				rule.actorClassResolved ? "yes" : "no",
 				rule.lightType.GetChars(),
 				rule.hasShadowReceive ? (rule.shadowReceive ? "default" : "off") : "(unset)",
 				rule.hasShadowCast ? (rule.shadowCast ? "default" : "off") : "(unset)",
+				rule.hasFullbright ? (rule.fullbright ? "on" : "off") : "(unset)",
 				SourceLocationText(rule.source).GetChars());
 		}
 
@@ -1344,6 +1365,8 @@ namespace
 		destination.shadowReceive = source.shadowReceive;
 		destination.hasShadowCast = source.hasShadowCast;
 		destination.shadowCast = source.shadowCast;
+		destination.hasFullbright = source.hasFullbright;
+		destination.fullbright = source.fullbright;
 		destination.hasTileFilter = source.hasTileFilter;
 		destination.tileFilter = source.tileFilter;
 		destination.lightType = source.lightType;
