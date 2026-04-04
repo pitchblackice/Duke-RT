@@ -1176,7 +1176,12 @@ namespace
 			}
 
 			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
+			uint32_t extraFlags = MaterialFlag_Sprite | MaterialFlag_AlphaClip;
+			if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
+			{
+				extraFlags |= MaterialFlag_FacingBillboard;
+			}
+			surface.material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, extraFlags);
 			surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::FacingSprite, drawListType, surface.material.flags);
 			surface.vertices.reserve(4);
 			for (uint32_t i = 0; i < 4; ++i)
