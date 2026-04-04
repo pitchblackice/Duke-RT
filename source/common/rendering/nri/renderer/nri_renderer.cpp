@@ -8955,12 +8955,12 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
-	if (!UpdateVisibleChunkBuffer())
+	if (!UpdateVisibleFlatPlaneBuffer())
 	{
 		return false;
 	}
 
-	if (!UpdateVisibleFlatPlaneBuffer())
+	if (!UpdateVisibleChunkBuffer())
 	{
 		return false;
 	}
@@ -13464,6 +13464,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+	mSceneDataDescriptors.fill(nullptr);
 	mBoundStaticPrimitiveCount = 0;
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
