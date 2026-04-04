@@ -195,49 +195,12 @@ namespace
 		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
 	}
 
-	static bool HasExclusiveMaterialOnlyWallSurface(const nri_scene::PTMapWorld& world, const nri_scene::PTMapChunk& chunk)
+	static bool RequiresExclusiveMaterialOnlyChunkReplacement(uint32_t reasonMask)
 	{
-		const uint32_t endSurface = std::min<uint32_t>(chunk.firstSurface + chunk.surfaceCount, (uint32_t)world.surfaces.size());
-		for (uint32_t surfaceIndex = chunk.firstSurface; surfaceIndex < endSurface; ++surfaceIndex)
-		{
-			const auto& surface = world.surfaces[surfaceIndex];
-			switch (surface.kind)
-			{
-			case nri_scene::PTMapSurfaceKind::Floor:
-			case nri_scene::PTMapSurfaceKind::Ceiling:
-				continue;
-			default:
-				break;
-			}
-
-			const uint32_t flags = surface.surface.material.flags;
-			if ((flags & (nri_scene::MaterialFlag_AlphaClip |
-				nri_scene::MaterialFlag_OneWay |
-				nri_scene::MaterialFlag_Mirror |
-				nri_scene::MaterialFlag_Portal)) != 0)
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	static bool RequiresExclusiveMaterialOnlyChunkReplacement(
-		const nri_scene::PTMapWorld& staticWorld,
-		const nri_scene::PTMapChunk& staticChunk,
-		const nri_scene::PTMapWorld& liveWorld,
-		const nri_scene::PTMapChunk& liveChunk,
-		uint32_t reasonMask)
-	{
-		if ((reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) == 0)
-		{
-			return false;
-		}
-
-		return
-			HasExclusiveMaterialOnlyWallSurface(staticWorld, staticChunk) ||
-			HasExclusiveMaterialOnlyWallSurface(liveWorld, liveChunk);
+		// Material-only wall mutations leave the stale static wall traceable if
+		// we only overlay the changed wall subset. Replacing the whole rebuilt
+		// live chunk avoids that without dropping unrelated geometry.
+		return (reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0;
 	}
 
 	static void FilterMaterialOnlyReplacementSceneView(nri_scene::SceneView& sceneView, uint32_t reasonMask)
@@ -11381,12 +11344,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], liveChunkView);
 				const bool exclusiveMaterialOnlyReplacement =
 					materialOnlyReplacement &&
-					RequiresExclusiveMaterialOnlyChunkReplacement(
-						mMapWorld,
-						mapChunk,
-						liveWorld,
-						liveWorld.chunks[0],
-						analysis.reasonMask);
+					RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
 				if (replacement.blindSpot && replacement.dragged)
 				{
 					NudgeBlindSpotReplacementFlats(liveChunkView);
