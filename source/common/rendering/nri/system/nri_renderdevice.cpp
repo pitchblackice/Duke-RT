@@ -24,6 +24,8 @@
 #include "hw_bonebuffer.h"
 #include "coreplayer.h"
 #include "coreactor.h"
+#include "gamecontrol.h"
+#include "lightoverlay.h"
 
 #include <windows.h>
 #include <d3d12.h>
@@ -109,6 +111,7 @@ namespace
 	static constexpr float DefaultPtTestLightOffset = 64.0f;
 	static constexpr float DefaultPtTestSphereMetalness = 1.0f;
 	static constexpr float DefaultPtTestSphereRoughness = 0.05f;
+	static constexpr double BuildTickSeconds = 1.0 / 120.0;
 	static NRIRenderDevice* GetActiveNRIRenderDevice();
 
 	static void WorldToPathTracingPosition(const DVector3& worldPos, float out[3])
@@ -116,6 +119,124 @@ namespace
 		out[0] = (float)worldPos.X;
 		out[1] = (float)-worldPos.Z;
 		out[2] = (float)-worldPos.Y;
+	}
+
+	static FString DescribeResolvedMuzzleFlashRuleIds(const ResolvedLightOverlaySet& resolvedSet, uint32_t limit = 16u)
+	{
+		if (resolvedSet.muzzleFlashRules.Size() == 0)
+		{
+			return "none";
+		}
+
+		TArray<FString> ids;
+		ids.Reserve(resolvedSet.muzzleFlashRules.Size());
+		for (const auto& rule : resolvedSet.muzzleFlashRules)
+		{
+			ids.Push(rule.id);
+		}
+
+		std::sort(ids.begin(), ids.end(), [](const FString& a, const FString& b)
+		{
+			return a.CompareNoCase(b) < 0;
+		});
+
+		FString result;
+		const uint32_t printCount = std::min<uint32_t>((uint32_t)ids.Size(), limit);
+		for (uint32_t i = 0; i < printCount; ++i)
+		{
+			if (!result.IsEmpty())
+			{
+				result << ",";
+			}
+			result << ids[i];
+		}
+
+		if (printCount < (uint32_t)ids.Size())
+		{
+			result.AppendFormat(",...(+%u)", (uint32_t)ids.Size() - printCount);
+		}
+
+		return result;
+	}
+
+	static const ResolvedLightOverlayMuzzleFlashRule* FindResolvedMuzzleFlashRule(const ResolvedLightOverlaySet& resolvedSet, const char* eventId)
+	{
+		if (eventId == nullptr || *eventId == '\0')
+		{
+			return nullptr;
+		}
+
+		for (const auto& rule : resolvedSet.muzzleFlashRules)
+		{
+			if (rule.id.CompareNoCase(eventId) == 0)
+			{
+				return &rule;
+			}
+		}
+
+		return nullptr;
+	}
+
+	static bool BuildLocalPlayerWeaponLightEvent(const char* eventId, float forwardOffset, PathTracingWeaponLightEvent& outEvent, FString& outError)
+	{
+		if (eventId == nullptr || *eventId == '\0')
+		{
+			outError = "missing muzzle-flash event id";
+			return false;
+		}
+
+		if (netgame)
+		{
+			outError = "cannot be used in multiplayer";
+			return false;
+		}
+
+		outEvent = {};
+		outEvent.eventId = eventId;
+		outEvent.absoluteTimeSeconds = PlayClock > 0 ? (double)PlayClock * BuildTickSeconds : 0.0;
+
+		DCorePlayer* player = PlayerArray[myconnectindex];
+		if (player == nullptr)
+		{
+			outEvent.worldPosition = DVector3(forwardOffset, 0.0, 0.0);
+			outEvent.basisRight = DVector3(0.0, 1.0, 0.0);
+			outEvent.basisForward = DVector3(1.0, 0.0, 0.0);
+			outEvent.basisUp = DVector3(0.0, 0.0, 1.0);
+			outEvent.hasBasis = true;
+			return true;
+		}
+
+		DCoreActor* actor = player->GetActor();
+		if (actor == nullptr)
+		{
+			outEvent.worldPosition = DVector3(forwardOffset, 0.0, 0.0);
+			outEvent.basisRight = DVector3(0.0, 1.0, 0.0);
+			outEvent.basisForward = DVector3(1.0, 0.0, 0.0);
+			outEvent.basisUp = DVector3(0.0, 0.0, 1.0);
+			outEvent.hasBasis = true;
+			return true;
+		}
+
+		const DRotator viewRotation(
+			player->getPitchWithView(),
+			actor->spr.Angles.Yaw + player->ViewAngles.Yaw,
+			actor->spr.Angles.Roll + player->ViewAngles.Roll);
+		const DVector3 forward = DVector3(viewRotation).Unit();
+		const DVector3 right = DVector3(DRotator(nullAngle, viewRotation.Yaw + DAngle90, nullAngle)).Unit();
+		DVector3 up = (forward ^ right).Unit();
+		if (up.isZero())
+		{
+			up = DVector3(0.0, 0.0, 1.0);
+		}
+
+		outEvent.hasEmitterActorIndex = true;
+		outEvent.emitterActorIndex = actor->GetIndex();
+		outEvent.worldPosition = actor->getPosWithOffsetZ() + forward * forwardOffset;
+		outEvent.basisRight = right;
+		outEvent.basisForward = forward;
+		outEvent.basisUp = up;
+		outEvent.hasBasis = true;
+		return true;
 	}
 }
 
@@ -994,6 +1115,52 @@ CCMD(nri_ptlightlist)
 	{
 		Printf("nri_ptlightlist is only available while using the NRI renderer.\n");
 	}
+}
+
+CCMD(nri_ptmuzzleflash_test)
+{
+	if (argv.argc() < 2)
+	{
+		Printf("nri_ptmuzzleflash_test <rule_id>: emits one synthetic PT muzzle-flash event from the local player.\n");
+		return;
+	}
+
+	auto* frameBuffer = GetActiveNRIRenderDevice();
+	if (frameBuffer == nullptr)
+	{
+		Printf("nri_ptmuzzleflash_test is only available while using the NRI renderer.\n");
+		return;
+	}
+
+	const ResolvedLightOverlaySet& resolvedSet = GetResolvedLightOverlaySet();
+	const char* ruleId = argv[1];
+	const ResolvedLightOverlayMuzzleFlashRule* rule = FindResolvedMuzzleFlashRule(resolvedSet, ruleId);
+	if (rule == nullptr)
+	{
+		Printf("nri_ptmuzzleflash_test: no resolved muzzle-flash rule '%s'. available=%s\n",
+			ruleId,
+			DescribeResolvedMuzzleFlashRuleIds(resolvedSet).GetChars());
+		return;
+	}
+
+	PathTracingWeaponLightEvent event;
+	FString error;
+	if (!BuildLocalPlayerWeaponLightEvent(rule->id.GetChars(), DefaultPtTestLightOffset, event, error))
+	{
+		Printf("nri_ptmuzzleflash_test: %s.\n", error.GetChars());
+		return;
+	}
+
+	frameBuffer->EmitPathTracingWeaponLightEvent(event);
+	Printf("NRI PT muzzle-flash test queued: event=%s actor=%d world_pos=(%.3f, %.3f, %.3f) time=%.4f pending=%u source=%s\n",
+		event.eventId.GetChars(),
+		event.emitterActorIndex,
+		event.worldPosition.X,
+		event.worldPosition.Y,
+		event.worldPosition.Z,
+		event.absoluteTimeSeconds,
+		frameBuffer->GetPendingPathTracingWeaponLightEventCount(),
+		rule->source.sourceName.GetChars());
 }
 
 CCMD(nri_ptsphere)
