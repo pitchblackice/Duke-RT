@@ -443,6 +443,11 @@ namespace
 		ReloadActorLightEditorOverlays();
 	}
 
+	static void PerformActorLightEditorReloadAction()
+	{
+		ReloadActorLightEditorOverlays();
+	}
+
 	static void UpdateActorLightEditorNotify()
 	{
 		const uint64_t nowMs = I_msTime();
@@ -554,6 +559,24 @@ bool ActorLightEditorResponder(event_t* ev)
 		else
 		{
 			GActorLightEditorState.createRuleActionPressed = false;
+		}
+
+		return true;
+	}
+
+	if (IsActorLightEditorActionKey(ev, 'l'))
+	{
+		if (ev->type == EV_KeyDown)
+		{
+			if (!GActorLightEditorState.reloadActionPressed)
+			{
+				GActorLightEditorState.reloadActionPressed = true;
+				PerformActorLightEditorReloadAction();
+			}
+		}
+		else
+		{
+			GActorLightEditorState.reloadActionPressed = false;
 		}
 
 		return true;
