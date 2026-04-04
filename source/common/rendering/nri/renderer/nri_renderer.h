@@ -603,6 +603,7 @@ private:
 		std::vector<SectorLightGpuData>& outSectors);
 	bool UpdateReprojectionBuffer();
 	bool UpdateVisibleChunkBuffer();
+	bool UpdateVisibleFlatPlaneBuffer();
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -772,6 +773,7 @@ private:
 	NRIBufferResource mSectorLightBuffer;
 	NRIBufferResource mReprojectionBuffer;
 	NRIBufferResource mVisibleChunkBuffer;
+	NRIBufferResource mVisibleFlatPlaneBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
@@ -791,6 +793,7 @@ private:
 	SceneBufferDebugStats mSectorLightBufferStats = { "SectorLight" };
 	SceneBufferDebugStats mReprojectionBufferStats = { "Reprojection" };
 	SceneBufferDebugStats mVisibleChunkBufferStats = { "VisibleChunk" };
+	SceneBufferDebugStats mVisibleFlatPlaneBufferStats = { "VisibleFlatPlane" };
 	PerfShellTraceStats mLastPerfShellTraceStats = {};
 	PerfResourceTraceStats mLastPerfResourceTraceStats = {};
 
@@ -814,11 +817,12 @@ private:
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
 	NRIDirectionalLightState mDirectionalLightState = {};
-	std::array<nri::Descriptor*, 20> mSceneDataDescriptors = {};
+	std::array<nri::Descriptor*, 21> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;
 	std::vector<uint32_t> mCurrentVisibleChunkWords;
+	std::vector<uint32_t> mCurrentVisibleFlatPlaneWords;
 	uint32_t mLastResolvedLightOverlayGeneration = 0;
 	uint32_t mFrameIndex = 0;
 	uint64_t mFrameGenerationFrameId = 0;

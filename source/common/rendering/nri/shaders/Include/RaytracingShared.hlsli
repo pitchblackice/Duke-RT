@@ -463,6 +463,44 @@ bool IsVisibleChunk(uint chunkIndex)
 	return (gVisibleChunkWords[wordIndex] & (1u << (chunkIndex & 31u))) != 0u;
 }
 
+bool IsVisibleFlatPlane(uint sectorIndex, bool ceiling)
+{
+	if (sectorIndex == 0xffffffffu)
+	{
+		return true;
+	}
+
+	uint visibleFlatPlaneWordCount = 0u;
+	uint visibleFlatPlaneStride = 0u;
+	gVisibleFlatPlaneWords.GetDimensions(visibleFlatPlaneWordCount, visibleFlatPlaneStride);
+	const uint flatPlaneIndex = sectorIndex * 2u + (ceiling ? 1u : 0u);
+	const uint wordIndex = flatPlaneIndex >> 5u;
+	if (wordIndex >= visibleFlatPlaneWordCount)
+	{
+		return false;
+	}
+
+	return (gVisibleFlatPlaneWords[wordIndex] & (1u << (flatPlaneIndex & 31u))) != 0u;
+}
+
+bool ShouldRejectHiddenStaticFlat(uint materialIndex, uint dataSource, PrimitiveData primitive)
+{
+	if (dataSource != SCENE_DATA_SOURCE_STATIC)
+	{
+		return false;
+	}
+
+	const MaterialData material = GetMaterialData(materialIndex, dataSource);
+	const uint flags = material.flags;
+	if ((flags & MATERIAL_FLAG_FLAT) == 0 ||
+		(flags & (MATERIAL_FLAG_SPRITE | MATERIAL_FLAG_MIRROR | MATERIAL_FLAG_SKY | MATERIAL_FLAG_PORTAL)) != 0)
+	{
+		return false;
+	}
+
+	return !IsVisibleFlatPlane(material.sectorIndex, primitive.normal.y < 0.0);
+}
+
 bool ShouldIgnoreOneWayHit(uint materialIndex, uint dataSource, float3 geometricNormal, float3 rayDirection)
 {
 	if ((GetMaterialData(materialIndex, dataSource).flags & MATERIAL_FLAG_ONE_WAY) == 0)
@@ -606,6 +644,12 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const PrimitiveData primitive = GetPrimitiveData(instanceData.dataSource, primitiveIndex);
 		const float committedDistance = rayQuery.CommittedRayT();
 		if (gateVisibleChunks && !IsVisibleChunk(primitive.reserved0))
+		{
+			accumulatedDistance = committedDistance;
+			continue;
+		}
+
+		if (gateVisibleChunks && ShouldRejectHiddenStaticFlat(primitive.materialIndex, instanceData.dataSource, primitive))
 		{
 			accumulatedDistance = committedDistance;
 			continue;

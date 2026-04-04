@@ -886,7 +886,7 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 20;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 21;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
@@ -1883,6 +1883,45 @@ namespace
 		return (visibleChunkWords[wordIndex] & (1u << (chunkIndex & 31u))) != 0u;
 	}
 
+	static uint32_t GetFlatPlaneVisibilityIndex(int32_t sectorIndex, bool ceiling)
+	{
+		return (uint32_t)sectorIndex * 2u + (ceiling ? 1u : 0u);
+	}
+
+	static void MarkFlatPlaneVisible(std::vector<uint32_t>& visibleFlatPlaneWords, int32_t sectorIndex, bool ceiling)
+	{
+		if (sectorIndex < 0)
+		{
+			return;
+		}
+
+		const uint32_t flatPlaneIndex = GetFlatPlaneVisibilityIndex(sectorIndex, ceiling);
+		const size_t wordIndex = (size_t)(flatPlaneIndex >> 5u);
+		if (wordIndex >= visibleFlatPlaneWords.size())
+		{
+			return;
+		}
+
+		visibleFlatPlaneWords[wordIndex] |= 1u << (flatPlaneIndex & 31u);
+	}
+
+	static bool IsFlatPlaneMarkedVisible(const std::vector<uint32_t>& visibleFlatPlaneWords, int32_t sectorIndex, bool ceiling)
+	{
+		if (sectorIndex < 0)
+		{
+			return false;
+		}
+
+		const uint32_t flatPlaneIndex = GetFlatPlaneVisibilityIndex(sectorIndex, ceiling);
+		const size_t wordIndex = (size_t)(flatPlaneIndex >> 5u);
+		if (wordIndex >= visibleFlatPlaneWords.size())
+		{
+			return false;
+		}
+
+		return (visibleFlatPlaneWords[wordIndex] & (1u << (flatPlaneIndex & 31u))) != 0u;
+	}
+
 	static void MarkVisibleChunkForSector(const nri_scene::PTMapWorld& mapWorld, int32_t sectorIndex, std::vector<uint32_t>& visibleChunkWords)
 	{
 		const int32_t chunkIndex = FindMapChunkIndexForSector(mapWorld, sectorIndex);
@@ -1927,6 +1966,26 @@ namespace
 				{
 					MarkVisibleChunkForSector(mapWorld, sector.IndexOf(flat->sec), visibleChunkWords);
 				}
+			}
+		}
+	}
+
+	static void AccumulateVisibleFlatPlanesFromDrawLists(const HWDrawInfo& di, std::vector<uint32_t>& visibleFlatPlaneWords)
+	{
+		for (int drawListType = 0; drawListType < GLDL_TYPES; ++drawListType)
+		{
+			const HWDrawList& drawList = di.drawlists[drawListType];
+			for (const HWFlat* flat : drawList.flats)
+			{
+				if (flat == nullptr || flat->sec == nullptr || flat->Sprite != nullptr)
+				{
+					continue;
+				}
+
+				MarkFlatPlaneVisible(
+					visibleFlatPlaneWords,
+					sector.IndexOf(flat->sec),
+					flat->plane != 0);
 			}
 		}
 	}
@@ -6398,6 +6457,8 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	bool chunkStaticTlasInstanced = false;
 	bool chunkStaticProbeIncluded = false;
 	bool chunkVisibleGate = false;
+	bool flatPlaneVisibilityRelevant = false;
+	bool flatPlaneVisible = false;
 	bool chunkReplaced = false;
 	bool chunkSectorDirty = false;
 	bool chunkDragged = false;
@@ -6439,17 +6500,25 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 			replacementTriangleCount = replacement.triangleCount;
 		}
 	}
+	if ((flags & nri_scene::MaterialFlag_Flat) != 0 &&
+		(flags & (nri_scene::MaterialFlag_Sprite | nri_scene::MaterialFlag_Mirror | nri_scene::MaterialFlag_Sky | nri_scene::MaterialFlag_Portal)) == 0 &&
+		result.provenance.sectorIndex >= 0)
+	{
+		flatPlaneVisibilityRelevant = true;
+		flatPlaneVisible = IsFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, result.provenance.sectorIndex, result.normal[1] < 0.0f);
+	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
 	FString textureName;
 	int32_t legacyTile = -1;
 	ResolveSurfaceProbeTextureDebugInfo(result.textureId, textureName, legacyTile);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(result.sceneOwner),
 		GetSceneDataSourceName(result.sceneDataSource),
 		result.provenance.mapChunkIndex,
 		YesNo(chunkVisibleGate),
+		flatPlaneVisibilityRelevant ? YesNo(flatPlaneVisible) : "n/a",
 		YesNo(chunkResidentStatic),
 		YesNo(chunkStaticTlasInstanced),
 		YesNo(chunkStaticProbeIncluded),
@@ -6629,6 +6698,8 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 	bool chunkStaticTlasInstanced = false;
 	bool chunkStaticProbeIncluded = false;
 	bool chunkVisibleGate = false;
+	bool flatPlaneVisibilityRelevant = false;
+	bool flatPlaneVisible = false;
 	bool chunkReplaced = false;
 	bool chunkSectorDirty = false;
 	bool chunkDragged = false;
@@ -6670,14 +6741,22 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 			replacementTriangleCount = replacement.triangleCount;
 		}
 	}
+	if ((flags & nri_scene::MaterialFlag_Flat) != 0 &&
+		(flags & (nri_scene::MaterialFlag_Sprite | nri_scene::MaterialFlag_Mirror | nri_scene::MaterialFlag_Sky | nri_scene::MaterialFlag_Portal)) == 0 &&
+		mLastSurfaceProbe.provenance.sectorIndex >= 0)
+	{
+		flatPlaneVisibilityRelevant = true;
+		flatPlaneVisible = IsFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, mLastSurfaceProbe.provenance.sectorIndex, mLastSurfaceProbe.normal[1] < 0.0f);
+	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
-	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner),
 		GetSceneDataSourceName(mLastSurfaceProbe.sceneDataSource),
 		mLastSurfaceProbe.provenance.mapChunkIndex,
 		YesNo(chunkVisibleGate),
+		flatPlaneVisibilityRelevant ? YesNo(flatPlaneVisible) : "n/a",
 		YesNo(chunkResidentStatic),
 		YesNo(chunkStaticTlasInstanced),
 		YesNo(chunkStaticProbeIncluded),
@@ -8641,6 +8720,50 @@ bool NRIRenderer::UpdateVisibleChunkBuffer()
 	return true;
 }
 
+bool NRIRenderer::UpdateVisibleFlatPlaneBuffer()
+{
+	const uint32_t defaultVisibleFlatPlaneWord = 0u;
+	const void* visibleFlatPlaneData = mCurrentVisibleFlatPlaneWords.empty() ? (const void*)&defaultVisibleFlatPlaneWord : mCurrentVisibleFlatPlaneWords.data();
+	const size_t visibleFlatPlaneSize = mCurrentVisibleFlatPlaneWords.empty() ? sizeof(uint32_t) : mCurrentVisibleFlatPlaneWords.size() * sizeof(uint32_t);
+	if (!EnsureStructuredBuffer(
+		mVisibleFlatPlaneBuffer,
+		mVisibleFlatPlaneBufferStats,
+		visibleFlatPlaneData,
+		visibleFlatPlaneSize,
+		sizeof(uint32_t),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
+	if (mSceneDataDescriptors[20] != mVisibleFlatPlaneBuffer.shaderView)
+	{
+		mSceneDataDescriptors[20] = mVisibleFlatPlaneBuffer.shaderView;
+		bool descriptorsReady = mSceneDataSet != nullptr;
+		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
+		{
+			if (descriptor == nullptr)
+			{
+				descriptorsReady = false;
+				break;
+			}
+		}
+
+		if (descriptorsReady)
+		{
+			nri::UpdateDescriptorRangeDesc update = {};
+			update.descriptorSet = mSceneDataSet;
+			update.rangeIndex = 0;
+			update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
+			update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
+			mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+		}
+	}
+
+	return true;
+}
+
 void NRIRenderer::BuildRuntimeLightClusterUpload(
 	std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 	std::vector<uint32_t>& outIndices,
@@ -8776,7 +8899,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return false;
 	}
 
-	if (!UpdateVisibleChunkBuffer())
+	if (!UpdateVisibleFlatPlaneBuffer())
 	{
 		return false;
 	}
@@ -9006,6 +9129,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mSectorLightBuffer.shaderView,
 		mReprojectionBuffer.shaderView,
 		mVisibleChunkBuffer.shaderView,
+		mVisibleFlatPlaneBuffer.shaderView,
 	};
 
 	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
@@ -12854,7 +12978,9 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	FillMatrix(mCurrentWorldToView, di.VPUniforms.mViewMatrix);
 	const BitArray& visibleSectors = di.GetVisibleSectors();
 	const size_t visibleChunkWordCount = std::max<size_t>((mMapWorld.chunks.size() + 31u) / 32u, 1u);
+	const size_t visibleFlatPlaneWordCount = std::max<size_t>(((size_t)sector.Size() * 2u + 31u) / 32u, 1u);
 	mCurrentVisibleChunkWords.assign(visibleChunkWordCount, 0u);
+	mCurrentVisibleFlatPlaneWords.assign(visibleFlatPlaneWordCount, 0u);
 	for (unsigned sectorIndex = 0; sectorIndex < visibleSectors.Size(); ++sectorIndex)
 	{
 		if (!visibleSectors.Check(sectorIndex))
@@ -12870,6 +12996,10 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	// tracks the scene the HAL actually built this frame.
 	AccumulateVisibleChunksFromViewRoots(di, mMapWorld, mCurrentVisibleChunkWords);
 	AccumulateVisibleChunksFromDrawLists(di, mMapWorld, mCurrentVisibleChunkWords);
+	// Chunk visibility is still too coarse for overlapping static floors and ceilings.
+	// Track the exact floor/ceiling sectors backed by the accumulated flat drawlists
+	// so the RT primary path can reject hidden coplanar static flat sections.
+	AccumulateVisibleFlatPlanesFromDrawLists(di, mCurrentVisibleFlatPlaneWords);
 	if (ShouldEmitTemporalTraceLogs())
 	{
 		const uint32_t targetWidth = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->width : 0u;
@@ -13263,6 +13393,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mSectorLightBuffer);
 	DestroyBufferResource(mReprojectionBuffer);
 	DestroyBufferResource(mVisibleChunkBuffer);
+	DestroyBufferResource(mVisibleFlatPlaneBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);

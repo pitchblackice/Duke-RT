@@ -278,6 +278,7 @@ StructuredBuffer<SectorLightHeaderData> gSectorLightHeaders : register(t16, spac
 StructuredBuffer<SectorLightData> gSectorLights : register(t17, space2);
 StructuredBuffer<ReprojectionData> gReprojectionDataBuffer : register(t18, space2);
 StructuredBuffer<uint> gVisibleChunkWords : register(t19, space2);
+StructuredBuffer<uint> gVisibleFlatPlaneWords : register(t20, space2);
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);
