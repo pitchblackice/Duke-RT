@@ -366,21 +366,76 @@ namespace
 			return false;
 		}
 
-		DVector3 candidate = sourcePosition;
-		sectortype* candidateSector = startSector;
-		if (pushmove(candidate, &candidateSector, nudgeDistance, 0.0, 0.0, 0u) != 0)
+		walltype* bestWall = nullptr;
+		DVector2 bestNearestPoint = sourcePosition.XY();
+		double bestDistanceSquared = DBL_MAX;
+
+		BFSSectorSearch search(startSector);
+		while (auto sec = search.GetNext())
+		{
+			for (auto& wal : sec->walls)
+			{
+				if (IsCloseToWall(sourcePosition.XY(), &wal, nudgeDistance) != EClose::InFront)
+				{
+					continue;
+				}
+
+				bool blocked = false;
+				if (!wal.twoSided())
+				{
+					blocked = true;
+				}
+				else
+				{
+					const DVector2 nearestPoint = NearestPointOnWall(sourcePosition.X, sourcePosition.Y, &wal);
+					blocked = checkOpening(nearestPoint, sourcePosition.Z, sec, wal.nextSector(), 0.0, 0.0);
+					if (!blocked)
+					{
+						search.Add(wal.nextSector());
+					}
+				}
+
+				if (!blocked)
+				{
+					continue;
+				}
+
+				DVector2 nearestPoint = {};
+				const double distanceSquared = SquareDistToWall(sourcePosition.X, sourcePosition.Y, &wal, &nearestPoint);
+				if (distanceSquared >= bestDistanceSquared)
+				{
+					continue;
+				}
+
+				bestWall = &wal;
+				bestNearestPoint = nearestPoint;
+				bestDistanceSquared = distanceSquared;
+			}
+		}
+
+		if (bestWall == nullptr || bestDistanceSquared > (double)nudgeDistance * (double)nudgeDistance)
 		{
 			return false;
 		}
 
-		const DVector2 displacement = candidate.XY() - sourcePosition.XY();
+		DVector2 wallNormal = bestWall->delta().Rotated90CCW().Unit();
+		const DVector2 nearestToSource = sourcePosition.XY() - bestNearestPoint;
+		if (nearestToSource.dot(wallNormal) < 0.0)
+		{
+			wallNormal = -wallNormal;
+		}
+
+		const DVector2 nudgedXY = bestNearestPoint + wallNormal * nudgeDistance;
+		const DVector2 displacement = nudgedXY - sourcePosition.XY();
 		const double displacementSquared = displacement.LengthSquared();
 		if (displacementSquared <= 1e-12)
 		{
 			return false;
 		}
 
-		outPosition = candidate;
+		outPosition = sourcePosition;
+		outPosition.X = nudgedXY.X;
+		outPosition.Y = nudgedXY.Y;
 		outDisplacement = (float)std::sqrt(displacementSquared);
 		return true;
 	}
