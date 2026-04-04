@@ -630,6 +630,79 @@ namespace
 
 	bool TryComputeSurfaceNormal(const SurfaceRef& surface, float* outNormal);
 
+	bool TryFindNearbyWallSpriteBackingWall(const HWWall& wall, walltype*& outWall, DVector2& outNearestPoint)
+	{
+		outWall = nullptr;
+		outNearestPoint = {};
+		if (wall.Sprite == nullptr || wall.Sprite->sectp == nullptr)
+		{
+			return false;
+		}
+
+		if (wall.walldist != nullptr)
+		{
+			outWall = wall.walldist;
+			outNearestPoint = NearestPointOnWall(wall.Sprite->pos.X, wall.Sprite->pos.Y, outWall, false);
+			return true;
+		}
+
+		double maxOrthDist = 3.0 * maptoworld;
+		const double maxDistSq = maxOrthDist * maxOrthDist;
+		const DAngle maxAngDelta = DAngle360 / 1024;
+		walltype* bestWall = nullptr;
+		DVector2 bestNearestPoint = {};
+
+		for (auto& candidate : wall.Sprite->sectp->walls)
+		{
+			const DVector2 delta = candidate.delta();
+			const DAngle deltaAng = absangle(delta.Angle(), wall.Sprite->Angles.Yaw);
+			if (deltaAng < DAngle90 - maxAngDelta || deltaAng > DAngle90 + maxAngDelta)
+			{
+				continue;
+			}
+
+			DVector2 nearestPoint = NearestPointOnWall(wall.Sprite->pos.X, wall.Sprite->pos.Y, &candidate, false);
+			if (!((wall.Sprite->Angles.Yaw.Buildang()) & 510))
+			{
+				double newDist = DBL_MAX;
+				if (delta.X == 0.0)
+				{
+					newDist = fabs(wall.Sprite->pos.X - candidate.pos.X);
+				}
+				else if (delta.Y == 0.0)
+				{
+					newDist = fabs(wall.Sprite->pos.Y - candidate.pos.Y);
+				}
+
+				if (newDist < maxOrthDist)
+				{
+					maxOrthDist = newDist;
+					bestWall = &candidate;
+					bestNearestPoint = nearestPoint;
+				}
+			}
+			else
+			{
+				const double wallDistSq = SquareDistToWall(wall.Sprite->pos.X, wall.Sprite->pos.Y, &candidate, &nearestPoint);
+				if (wallDistSq <= maxDistSq)
+				{
+					outWall = &candidate;
+					outNearestPoint = nearestPoint;
+					return true;
+				}
+			}
+		}
+
+		if (bestWall == nullptr)
+		{
+			return false;
+		}
+
+		outWall = bestWall;
+		outNearestPoint = bestNearestPoint;
+		return true;
+	}
+
 	void NudgeAttachedWallSpriteSurface(const HWWall& wall, SurfaceRef& surface)
 	{
 		if (wall.Sprite == nullptr || surface.vertices.empty())
@@ -638,11 +711,12 @@ namespace
 		}
 
 		float offset[3] = {};
-		if (wall.walldist != nullptr)
+		walltype* backingWall = nullptr;
+		DVector2 nearestPoint = {};
+		if (TryFindNearbyWallSpriteBackingWall(wall, backingWall, nearestPoint))
 		{
 			DVector2 nudgeDirection = {};
 			const DVector2 spriteCenter = wall.Sprite->pos.XY();
-			const DVector2 nearestPoint = NearestPointOnWall(spriteCenter.X, spriteCenter.Y, wall.walldist);
 			const DVector2 wallToSprite = spriteCenter - nearestPoint;
 			if (wallToSprite.LengthSquared() > 1.0e-8)
 			{
@@ -652,7 +726,7 @@ namespace
 			{
 				// Exact on-wall placements need a stable wall-side fallback. Match the
 				// same sector-owned wall normal convention used by pushmove().
-				const DVector2 wallNormal = wall.walldist->delta().Rotated90CCW();
+				const DVector2 wallNormal = backingWall->delta().Rotated90CCW();
 				if (wallNormal.LengthSquared() <= 1.0e-8)
 				{
 					return;
