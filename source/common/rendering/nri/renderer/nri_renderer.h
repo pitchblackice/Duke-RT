@@ -911,6 +911,7 @@ private:
 	uint32_t mBoundRuntimeLightTileSize = 0;
 	uint32_t mBoundRuntimeLightTileIndexCount = 0;
 	uint32_t mBoundRuntimeLightMaxTileOccupancy = 0;
+	bool mSceneDataDescriptorsInitialized = false;
 	bool mRuntimeLightPayloadCacheValid = false;
 	uint64_t mRuntimeLightPayloadHash = 0;
 	bool mRuntimeLightClusterCacheValid = false;

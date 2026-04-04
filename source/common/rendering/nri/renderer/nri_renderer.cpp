@@ -8680,12 +8680,28 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	mSceneDataDescriptors[14] = mEmissivePrimitiveBuffer.shaderView;
 	mSceneDataDescriptors[15] = mEmissivePrimitiveCdfBuffer.shaderView;
 
-	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = mSceneDataSet;
-	update.rangeIndex = 0;
-	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
-	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
+	if (descriptorsReady)
+	{
+		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
+		{
+			if (descriptor == nullptr)
+			{
+				descriptorsReady = false;
+				break;
+			}
+		}
+	}
+
+	if (descriptorsReady)
+	{
+		nri::UpdateDescriptorRangeDesc update = {};
+		update.descriptorSet = mSceneDataSet;
+		update.rangeIndex = 0;
+		update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
+		update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
+		mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	}
 	mEmissiveSamplingPayloadCacheValid = true;
 	mEmissiveSamplingPayloadHash = payloadHash;
 	return true;
@@ -8713,7 +8729,7 @@ bool NRIRenderer::UpdateReprojectionBuffer()
 	if (mSceneDataDescriptors[18] != mReprojectionBuffer.shaderView)
 	{
 		mSceneDataDescriptors[18] = mReprojectionBuffer.shaderView;
-		bool descriptorsReady = mSceneDataSet != nullptr;
+		bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
 		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 		{
 			if (descriptor == nullptr)
@@ -8757,7 +8773,7 @@ bool NRIRenderer::UpdateVisibleChunkBuffer()
 	if (mSceneDataDescriptors[19] != mVisibleChunkBuffer.shaderView)
 	{
 		mSceneDataDescriptors[19] = mVisibleChunkBuffer.shaderView;
-		bool descriptorsReady = mSceneDataSet != nullptr;
+		bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
 		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 		{
 			if (descriptor == nullptr)
@@ -8801,7 +8817,7 @@ bool NRIRenderer::UpdateVisibleFlatPlaneBuffer()
 	if (mSceneDataDescriptors[20] != mVisibleFlatPlaneBuffer.shaderView)
 	{
 		mSceneDataDescriptors[20] = mVisibleFlatPlaneBuffer.shaderView;
-		bool descriptorsReady = mSceneDataSet != nullptr;
+		bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
 		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 		{
 			if (descriptor == nullptr)
@@ -8950,6 +8966,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 	uint32_t staticMaterialCount,
 	uint32_t dynamicMaterialCount)
 {
+	mSceneDataDescriptorsInitialized = false;
+
 	if (!UpdateReprojectionBuffer())
 	{
 		return false;
@@ -9207,6 +9225,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
 	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	mSceneDataDescriptorsInitialized = true;
 
 	mBoundStaticPrimitiveCount = staticPrimitiveCount;
 	mBoundDynamicPrimitiveCount = dynamicPrimitiveCount;
@@ -13464,6 +13483,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+	mSceneDataDescriptorsInitialized = false;
 	mSceneDataDescriptors.fill(nullptr);
 	mBoundStaticPrimitiveCount = 0;
 	mBoundDynamicPrimitiveCount = 0;
