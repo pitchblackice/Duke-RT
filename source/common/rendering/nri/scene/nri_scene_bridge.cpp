@@ -628,45 +628,67 @@ namespace
 		}
 	}
 
+	bool TryComputeSurfaceNormal(const SurfaceRef& surface, float* outNormal);
+
 	void NudgeAttachedWallSpriteSurface(const HWWall& wall, SurfaceRef& surface)
 	{
-		if (wall.Sprite == nullptr || wall.walldist == nullptr || surface.vertices.empty())
+		if (wall.Sprite == nullptr || surface.vertices.empty())
 		{
 			return;
 		}
 
-		DVector2 nudgeDirection = {};
-		const DVector2 spriteCenter = wall.Sprite->pos.XY();
-		const DVector2 nearestPoint = NearestPointOnWall(spriteCenter.X, spriteCenter.Y, wall.walldist);
-		const DVector2 wallToSprite = spriteCenter - nearestPoint;
-		if (wallToSprite.LengthSquared() > 1.0e-8)
+		float offset[3] = {};
+		if (wall.walldist != nullptr)
 		{
-			nudgeDirection = wallToSprite.Unit();
+			DVector2 nudgeDirection = {};
+			const DVector2 spriteCenter = wall.Sprite->pos.XY();
+			const DVector2 nearestPoint = NearestPointOnWall(spriteCenter.X, spriteCenter.Y, wall.walldist);
+			const DVector2 wallToSprite = spriteCenter - nearestPoint;
+			if (wallToSprite.LengthSquared() > 1.0e-8)
+			{
+				nudgeDirection = wallToSprite.Unit();
+			}
+			else
+			{
+				// Exact on-wall placements need a stable wall-side fallback. Match the
+				// same sector-owned wall normal convention used by pushmove().
+				const DVector2 wallNormal = wall.walldist->delta().Rotated90CCW();
+				if (wallNormal.LengthSquared() <= 1.0e-8)
+				{
+					return;
+				}
+
+				nudgeDirection = wallNormal.Unit();
+			}
+
+			offset[0] = (float)(nudgeDirection.X * kAttachedWallSpriteDepthNudge);
+			offset[2] = (float)(-nudgeDirection.Y * kAttachedWallSpriteDepthNudge);
 		}
 		else
 		{
-			// Exact on-wall placements need a stable wall-side fallback. Match the
-			// same sector-owned wall normal convention used by pushmove().
-			const DVector2 wallNormal = wall.walldist->delta().Rotated90CCW();
-			if (wallNormal.LengthSquared() <= 1.0e-8)
+			float normal[3] = {};
+			if (!TryComputeSurfaceNormal(surface, normal))
 			{
 				return;
 			}
 
-			nudgeDirection = wallNormal.Unit();
+			offset[0] = normal[0] * kAttachedWallSpriteDepthNudge;
+			offset[1] = normal[1] * kAttachedWallSpriteDepthNudge;
+			offset[2] = normal[2] * kAttachedWallSpriteDepthNudge;
 		}
 
-		// The raster path uses depth bias for wall-attached sprites so coplanar walls do not overdraw them.
-		// PT needs a small geometric equivalent or the structural wall can win the closest-hit test.
-		const float offsetX = (float)(nudgeDirection.X * kAttachedWallSpriteDepthNudge);
-		const float offsetZ = (float)(-nudgeDirection.Y * kAttachedWallSpriteDepthNudge);
+		// The raster path uses depth bias / draw-order handling for wall-flush
+		// sprite content. PT needs a small geometric equivalent or nearby walls
+		// can win the closest-hit test.
 
 		for (CapturedVertex& vertex : surface.vertices)
 		{
-			vertex.position[0] += offsetX;
-			vertex.position[2] += offsetZ;
-			vertex.prevPosition[0] += offsetX;
-			vertex.prevPosition[2] += offsetZ;
+			vertex.position[0] += offset[0];
+			vertex.position[1] += offset[1];
+			vertex.position[2] += offset[2];
+			vertex.prevPosition[0] += offset[0];
+			vertex.prevPosition[1] += offset[1];
+			vertex.prevPosition[2] += offset[2];
 		}
 	}
 
