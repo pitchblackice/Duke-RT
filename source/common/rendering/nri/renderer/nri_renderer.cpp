@@ -723,6 +723,8 @@ namespace
 				actorRule.offset[0] = resolvedRule.offset[0];
 				actorRule.offset[1] = resolvedRule.offset[1];
 				actorRule.offset[2] = resolvedRule.offset[2];
+				actorRule.hasNudgeFromSurface = resolvedRule.hasNudgeFromSurface && resolvedRule.nudgeFromSurfaceDistance > 0.0f;
+				actorRule.nudgeFromSurfaceDistance = resolvedRule.nudgeFromSurfaceDistance;
 				actorRule.flickerFrames = resolvedRule.flickerFrames;
 				actorRule.hasRandomIntensity = resolvedRule.hasRandom;
 				actorRule.randomIntensityRange[0] = resolvedRule.randomIntensityRange[0];

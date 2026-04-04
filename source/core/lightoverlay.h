@@ -52,6 +52,8 @@ struct ParsedLightOverlayActorRule
 	float range = 0.0f;
 	bool hasOffset = false;
 	float offset[3] = { 0.0f, 0.0f, 0.0f };
+	bool hasNudgeFromSurface = false;
+	float nudgeFromSurfaceDistance = 0.0f;
 	bool hasDirection = false;
 	float direction[3] = { 0.0f, 0.0f, 0.0f };
 	bool hasFlicker = false;
@@ -190,6 +192,8 @@ struct ResolvedLightOverlayActorRule
 	float range = 0.0f;
 	bool hasOffset = false;
 	float offset[3] = { 0.0f, 0.0f, 0.0f };
+	bool hasNudgeFromSurface = false;
+	float nudgeFromSurfaceDistance = 0.0f;
 	bool hasDirection = false;
 	float direction[3] = { 0.0f, 0.0f, 0.0f };
 	bool hasFlicker = false;

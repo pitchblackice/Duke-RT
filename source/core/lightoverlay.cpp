@@ -525,6 +525,12 @@ namespace
 					rule.hasOffset = true;
 					MustParseVector3(rule.offset);
 				}
+				else if (sc.Compare("nudgefromsurface"))
+				{
+					sc.MustGetFloat();
+					rule.hasNudgeFromSurface = true;
+					rule.nudgeFromSurfaceDistance = (float)sc.Float;
+				}
 				else if (sc.Compare("direction"))
 				{
 					rule.hasDirection = true;
@@ -994,6 +1000,7 @@ namespace
 		if (rule.hasRadius) AppendLine(text, 2, FStringf("radius %s", FormatLightOverlayFloat(rule.radius).GetChars()));
 		if (rule.hasRange) AppendLine(text, 2, FStringf("range %s", FormatLightOverlayFloat(rule.range).GetChars()));
 		if (rule.hasOffset) AppendVector3Field(text, 2, "offset", rule.offset);
+		if (rule.hasNudgeFromSurface) AppendLine(text, 2, FStringf("nudgefromsurface %s", FormatLightOverlayFloat(rule.nudgeFromSurfaceDistance).GetChars()));
 		if (rule.hasDirection) AppendVector3Field(text, 2, "direction", rule.direction);
 		if (rule.hasFlicker) AppendLine(text, 2, FStringf("flicker %u", rule.flickerFrames));
 		if (rule.hasRandom) AppendFloatRangeField(text, 2, "random", rule.randomIntensityRange);
@@ -1235,6 +1242,7 @@ namespace
 			if (rule->hasRadius) Printf("  radius=%.3f\n", rule->radius);
 			if (rule->hasRange) Printf("  range=%.3f\n", rule->range);
 			if (rule->hasOffset) Printf("  offset=(%.3f, %.3f, %.3f)\n", rule->offset[0], rule->offset[1], rule->offset[2]);
+			if (rule->hasNudgeFromSurface) Printf("  nudgefromsurface=%.3f\n", rule->nudgeFromSurfaceDistance);
 			if (rule->hasDirection) Printf("  direction=(%.3f, %.3f, %.3f)\n", rule->direction[0], rule->direction[1], rule->direction[2]);
 			if (rule->hasFlicker) Printf("  flicker_frames=%u\n", rule->flickerFrames);
 			if (rule->hasRandom) Printf("  random=(%.3f, %.3f)\n", rule->randomIntensityRange[0], rule->randomIntensityRange[1]);
@@ -1326,6 +1334,17 @@ namespace
 				rule.hasShadowCast ? (rule.shadowCast ? "default" : "off") : "(unset)",
 				rule.hasFullbright ? (rule.fullbright ? "on" : "off") : "(unset)",
 				SourceLocationText(rule.source).GetChars());
+			if (rule.hasTileFilter) Printf("  tile=%d\n", rule.tileFilter);
+			if (rule.hasColor) Printf("  color=(%.3f, %.3f, %.3f)\n", rule.color[0], rule.color[1], rule.color[2]);
+			if (rule.hasIntensity) Printf("  intensity=%.3f\n", rule.intensity);
+			if (rule.hasRadius) Printf("  radius=%.3f\n", rule.radius);
+			if (rule.hasRange) Printf("  range=%.3f\n", rule.range);
+			if (rule.hasOffset) Printf("  offset=(%.3f, %.3f, %.3f)\n", rule.offset[0], rule.offset[1], rule.offset[2]);
+			if (rule.hasNudgeFromSurface) Printf("  nudgefromsurface=%.3f\n", rule.nudgeFromSurfaceDistance);
+			if (rule.hasDirection) Printf("  direction=(%.3f, %.3f, %.3f)\n", rule.direction[0], rule.direction[1], rule.direction[2]);
+			if (rule.hasFlicker) Printf("  flicker_frames=%u\n", rule.flickerFrames);
+			if (rule.hasRandom) Printf("  random=(%.3f, %.3f)\n", rule.randomIntensityRange[0], rule.randomIntensityRange[1]);
+			if (rule.hasLocalSpacePolicy) Printf("  localspace=%s\n", rule.localSpacePolicy.GetChars());
 		}
 
 		for (const auto& rule : resolved.muzzleFlashRules)
@@ -1392,6 +1411,8 @@ namespace
 		destination.range = source.range;
 		destination.hasOffset = source.hasOffset;
 		CopyVector3(source.offset, destination.offset);
+		destination.hasNudgeFromSurface = source.hasNudgeFromSurface;
+		destination.nudgeFromSurfaceDistance = source.nudgeFromSurfaceDistance;
 		destination.hasDirection = source.hasDirection;
 		CopyVector3(source.direction, destination.direction);
 		destination.hasFlicker = source.hasFlicker;

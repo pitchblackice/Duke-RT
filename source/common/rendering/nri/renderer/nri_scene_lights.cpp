@@ -1,6 +1,7 @@
 #include "nri_scene_lights.h"
 
 #include "c_cvars.h"
+#include "gamefuncs.h"
 #include "maptypes.h"
 #include "palette.h"
 
@@ -306,6 +307,196 @@ namespace
 		}
 
 		return baseIntensity * EvaluateFlickerScale(stableKey, flickerTimeIndex, flickerFrames);
+	}
+
+	bool IsValidSurfaceNudgeDistance(float distance)
+	{
+		return std::isfinite(distance) && distance > 0.0f;
+	}
+
+	bool TryResolveSurfaceNudgeSector(
+		const SceneLightSystem::SurfaceRecord& record,
+		const DVector3& position,
+		sectortype*& outSector)
+	{
+		outSector =
+			record.provenance.sectorIndex >= 0 && (unsigned)record.provenance.sectorIndex < sector.Size() ?
+			&sector[(unsigned)record.provenance.sectorIndex] :
+			nullptr;
+
+		sectortype* candidate = outSector;
+		updatesectorz(position, &candidate);
+		if (candidate != nullptr)
+		{
+			outSector = candidate;
+			return true;
+		}
+
+		candidate = outSector;
+		updatesector(position, &candidate);
+		if (candidate != nullptr)
+		{
+			outSector = candidate;
+			return true;
+		}
+
+		const int bestSectorIndex = FindBestSector(position);
+		if (bestSectorIndex >= 0 && (unsigned)bestSectorIndex < sector.Size())
+		{
+			outSector = &sector[(unsigned)bestSectorIndex];
+			return true;
+		}
+
+		outSector = nullptr;
+		return false;
+	}
+
+	bool TryApplyWallSurfaceNudge(
+		const DVector3& sourcePosition,
+		sectortype* startSector,
+		float nudgeDistance,
+		DVector3& outPosition,
+		float& outDisplacement)
+	{
+		outPosition = sourcePosition;
+		outDisplacement = 0.0f;
+
+		if (startSector == nullptr || !IsValidSurfaceNudgeDistance(nudgeDistance))
+		{
+			return false;
+		}
+
+		DVector3 candidate = sourcePosition;
+		sectortype* candidateSector = startSector;
+		if (pushmove(candidate, &candidateSector, nudgeDistance, 0.0, 0.0, 0u) != 0)
+		{
+			return false;
+		}
+
+		const DVector2 displacement = candidate.XY() - sourcePosition.XY();
+		const double displacementSquared = displacement.LengthSquared();
+		if (displacementSquared <= 1e-12)
+		{
+			return false;
+		}
+
+		outPosition = candidate;
+		outDisplacement = (float)std::sqrt(displacementSquared);
+		return true;
+	}
+
+	bool TryApplyPlaneSurfaceNudge(
+		const DVector3& sourcePosition,
+		sectortype* startSector,
+		float nudgeDistance,
+		DVector3& outPosition,
+		float& outDisplacement)
+	{
+		outPosition = sourcePosition;
+		outDisplacement = 0.0f;
+
+		if (startSector == nullptr || !IsValidSurfaceNudgeDistance(nudgeDistance))
+		{
+			return false;
+		}
+
+		double ceilingZ = -FLT_MAX;
+		double floorZ = FLT_MAX;
+		CollisionBase ceilingHit = {};
+		CollisionBase floorHit = {};
+		getzrange(sourcePosition, startSector, &ceilingZ, ceilingHit, &floorZ, floorHit, nudgeDistance, 0u);
+
+		double bestTargetZ = sourcePosition.Z;
+		double bestDisplacement = DBL_MAX;
+		bool foundCandidate = false;
+
+		const double ceilingDistance = sourcePosition.Z - ceilingZ;
+		if (ceilingHit.type == kHitSector &&
+			ceilingDistance >= 0.0 &&
+			ceilingDistance < nudgeDistance)
+		{
+			const double targetZ = ceilingZ + nudgeDistance;
+			const double displacement = targetZ - sourcePosition.Z;
+			if (displacement > 0.0 && displacement < bestDisplacement)
+			{
+				bestTargetZ = targetZ;
+				bestDisplacement = displacement;
+				foundCandidate = true;
+			}
+		}
+
+		const double floorDistance = floorZ - sourcePosition.Z;
+		if (floorHit.type == kHitSector &&
+			floorDistance >= 0.0 &&
+			floorDistance < nudgeDistance)
+		{
+			const double targetZ = floorZ - nudgeDistance;
+			const double displacement = sourcePosition.Z - targetZ;
+			if (displacement > 0.0 && displacement < bestDisplacement)
+			{
+				bestTargetZ = targetZ;
+				bestDisplacement = displacement;
+				foundCandidate = true;
+			}
+		}
+
+		if (!foundCandidate)
+		{
+			return false;
+		}
+
+		outPosition = sourcePosition;
+		outPosition.Z = bestTargetZ;
+		outDisplacement = (float)bestDisplacement;
+		return true;
+	}
+
+	void ApplyActorOverlaySurfaceNudge(
+		const SceneLightSystem::SurfaceRecord& record,
+		const SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& rule,
+		float position[3])
+	{
+		if (!rule.hasNudgeFromSurface || !IsValidSurfaceNudgeDistance(rule.nudgeFromSurfaceDistance) || position == nullptr)
+		{
+			return;
+		}
+
+		const DVector3 sourcePosition(position[0], position[1], position[2]);
+		sectortype* startSector = nullptr;
+		if (!TryResolveSurfaceNudgeSector(record, sourcePosition, startSector) || startSector == nullptr)
+		{
+			return;
+		}
+
+		DVector3 bestPosition = sourcePosition;
+		float bestDisplacement = FLT_MAX;
+
+		DVector3 wallPosition = sourcePosition;
+		float wallDisplacement = 0.0f;
+		if (TryApplyWallSurfaceNudge(sourcePosition, startSector, rule.nudgeFromSurfaceDistance, wallPosition, wallDisplacement) &&
+			wallDisplacement < bestDisplacement)
+		{
+			bestPosition = wallPosition;
+			bestDisplacement = wallDisplacement;
+		}
+
+		DVector3 planePosition = sourcePosition;
+		float planeDisplacement = 0.0f;
+		if (TryApplyPlaneSurfaceNudge(sourcePosition, startSector, rule.nudgeFromSurfaceDistance, planePosition, planeDisplacement) &&
+			planeDisplacement < bestDisplacement)
+		{
+			bestPosition = planePosition;
+			bestDisplacement = planeDisplacement;
+		}
+
+		if (bestDisplacement == FLT_MAX)
+		{
+			return;
+		}
+
+		position[0] = (float)bestPosition.X;
+		position[1] = (float)bestPosition.Y;
+		position[2] = (float)bestPosition.Z;
 	}
 
 	float ComputeColorLuminance(const float color[3])
@@ -743,6 +934,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 				light.position[0] = record.center[0] + rule.offset[0];
 				light.position[1] = record.center[1] + rule.offset[1];
 				light.position[2] = record.center[2] + rule.offset[2];
+				ApplyActorOverlaySurfaceNudge(record, rule, light.position);
 				Copy3f(rule.color, light.color);
 				light.intensity = ResolveOverlayLightIntensity(
 					rule.intensity,

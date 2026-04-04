@@ -107,6 +107,8 @@ public:
 			float intensity = 0.0f;
 			float radius = 0.0f;
 			float offset[3] = {};
+			bool hasNudgeFromSurface = false;
+			float nudgeFromSurfaceDistance = 0.0f;
 			uint32_t flickerFrames = 0;
 			bool hasRandomIntensity = false;
 			float randomIntensityRange[2] = { 0.0f, 0.0f };
