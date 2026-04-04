@@ -1,4 +1,5 @@
 #include <cctype>
+#include <memory>
 
 #include "lightoverlay_editor.h"
 
@@ -210,6 +211,72 @@ namespace
 		}
 	}
 
+	static FString FindActorLightEditorSourceNameForLump(const ParsedLightOverlayDatabase& database, int lumpNum)
+	{
+		for (const auto& sourceFile : database.sourceFiles)
+		{
+			if (sourceFile.lumpNum == lumpNum)
+			{
+				return sourceFile.sourceName;
+			}
+		}
+
+		const char* fullName = lumpNum >= 0 ? fileSystem.GetFileFullName(lumpNum) : nullptr;
+		return fullName != nullptr ? FString(fullName) : FString("LIGHTOVR");
+	}
+
+	static bool HasActorLightEditorRuleId(const ParsedLightOverlayDatabase& database, const FString& id)
+	{
+		for (const auto& rule : database.actorRules)
+		{
+			if (rule.id.CompareNoCase(id) == 0)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	static FString BuildActorLightEditorUniqueRuleId(const ParsedLightOverlayDatabase& database, const FString& actorClassName)
+	{
+		FString baseId = actorClassName;
+		if (!HasActorLightEditorRuleId(database, baseId))
+		{
+			return baseId;
+		}
+
+		for (int suffix = 2; suffix < 1000000; ++suffix)
+		{
+			FString candidate = FStringf("%s_%d", baseId.GetChars(), suffix);
+			if (!HasActorLightEditorRuleId(database, candidate))
+			{
+				return candidate;
+			}
+		}
+
+		return FStringf("%s_%u", baseId.GetChars(), (unsigned)I_msTime());
+	}
+
+	static bool WriteActorLightEditorTextFile(const FString& path, const FString& text)
+	{
+		std::unique_ptr<FileWriter> file(FileWriter::Open(path.GetChars()));
+		if (file == nullptr)
+		{
+			return false;
+		}
+
+		file->Write(text.GetChars(), text.Len());
+		return true;
+	}
+
+	static bool ReloadActorLightEditorOverlays()
+	{
+		const bool ok = ParseLightOverlays(true);
+		Printf("LIGHTOVR reload %s.\n", ok ? "completed" : "completed with parse errors");
+		return ok;
+	}
+
 	static void PrintActorLightEditorActorData(const ActorLightEditorTarget& target)
 	{
 		const auto* actor = target.actor;
@@ -310,6 +377,70 @@ namespace
 		}
 	}
 
+	static void PerformActorLightEditorCreateRuleAction()
+	{
+		ActorLightEditorTarget target;
+		if (!ActorLightEditorSampleTarget(target))
+		{
+			Printf("NRI PT actor light editor: no local gameplay sampling context is available.\n");
+			return;
+		}
+
+		GActorLightEditorState.currentTarget = target;
+		if (target.kind != ActorLightEditorTargetKind::Actor || target.actor == nullptr || target.actorClassName.IsEmpty())
+		{
+			Printf("NRI PT actor light editor: placeholder rule creation requires an actor target.\n");
+			return;
+		}
+
+		FString writablePath;
+		int writableLumpNum = -1;
+		if (!ActorLightEditorResolveWritableSource(writablePath, &writableLumpNum))
+		{
+			PrintActorLightEditorWritableSourceFailure();
+			return;
+		}
+
+		ParsedLightOverlayDatabase database = GetParsedLightOverlayDatabase();
+		ParsedLightOverlayActorRule rule = {};
+		rule.id = BuildActorLightEditorUniqueRuleId(database, target.actorClassName);
+		rule.actorClassName = target.actorClassName;
+		rule.lightType = "point";
+		rule.hasColor = true;
+		rule.color[0] = 1.0f;
+		rule.color[1] = 0.9f;
+		rule.color[2] = 0.7f;
+		rule.hasIntensity = true;
+		rule.intensity = 8.0f;
+		rule.hasRadius = true;
+		rule.radius = 96.0f;
+		rule.hasOffset = true;
+		rule.offset[0] = 0.0f;
+		rule.offset[1] = 0.0f;
+		rule.offset[2] = 0.0f;
+		rule.source.lumpNum = writableLumpNum;
+		rule.source.sourceName = FindActorLightEditorSourceNameForLump(database, writableLumpNum);
+
+		bool replaced = false;
+		AddOrReplaceLightOverlayRule(database, rule, &replaced);
+
+		const FString serialized = SerializeLightOverlayDatabase(database);
+		if (!WriteActorLightEditorTextFile(writablePath, serialized))
+		{
+			Printf("NRI PT actor light editor: failed to open writable LIGHTOVR '%s'.\n", writablePath.GetChars());
+			return;
+		}
+
+		Printf(
+			"NRI PT actor light editor: created placeholder actorrule '%s' for class '%s' and wrote %d bytes to %s.\n",
+			rule.id.GetChars(),
+			rule.actorClassName.GetChars(),
+			serialized.Len(),
+			writablePath.GetChars());
+
+		ReloadActorLightEditorOverlays();
+	}
+
 	static void UpdateActorLightEditorNotify()
 	{
 		const uint64_t nowMs = I_msTime();
@@ -403,6 +534,24 @@ bool ActorLightEditorResponder(event_t* ev)
 		else
 		{
 			GActorLightEditorState.printActionPressed = false;
+		}
+
+		return true;
+	}
+
+	if (IsActorLightEditorActionKey(ev, 'o'))
+	{
+		if (ev->type == EV_KeyDown)
+		{
+			if (!GActorLightEditorState.createRuleActionPressed)
+			{
+				GActorLightEditorState.createRuleActionPressed = true;
+				PerformActorLightEditorCreateRuleAction();
+			}
+		}
+		else
+		{
+			GActorLightEditorState.createRuleActionPressed = false;
 		}
 
 		return true;
