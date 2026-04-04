@@ -24,7 +24,7 @@ static const uint PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
 static const uint PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
 static const uint PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
 static const float TRACE_MIN_DISTANCE = 1e-4;
-static const float TRACE_CONTINUE_BIAS = 1e-4;
+static const float TRACE_FILTER_CONTINUE_BIAS = 1e-6;
 static const uint TRACE_FILTER_SKIP_LIMIT = 64u;
 
 HitData MakeEmptyHitData()
@@ -577,16 +577,21 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 	// Runtime replacement overlays can stack many filtered hits in front of the
 	// eventual visible surface. Keep enough budget to walk past hidden chunks,
 	// alpha-clipped carriers, and one-way rejects without dropping the ray.
+	//
+	// Keep the original ray origin across filtered restarts so we only pay one
+	// tiny epsilon in TMin instead of shifting the origin forward and then
+	// applying another minimum distance. That preserves nearly coplanar follow-up
+	// hits after rejecting a frontmost back-side or gate-invisible surface.
 	for (uint skipCount = 0u; skipCount < TRACE_FILTER_SKIP_LIMIT; ++skipCount)
 	{
-		const float remainingDistance = maxDistance - accumulatedDistance;
-		if (remainingDistance <= TRACE_MIN_DISTANCE)
+		const float traceMinDistance = accumulatedDistance > 0.0 ? (accumulatedDistance + TRACE_FILTER_CONTINUE_BIAS) : TRACE_MIN_DISTANCE;
+		if (traceMinDistance >= maxDistance)
 		{
 			return false;
 		}
 
 		RayQuery<RAY_FLAG_FORCE_OPAQUE> rayQuery;
-		RayDesc ray = { startOrigin + direction * accumulatedDistance, TRACE_MIN_DISTANCE, direction, remainingDistance };
+		RayDesc ray = { startOrigin, traceMinDistance, direction, maxDistance };
 		rayQuery.TraceRayInline(gWorldTlas, RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
 
 		while (rayQuery.Proceed()) {}
@@ -602,13 +607,13 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const float committedDistance = rayQuery.CommittedRayT();
 		if (gateVisibleChunks && !IsVisibleChunk(primitive.reserved0))
 		{
-			accumulatedDistance += committedDistance + TRACE_CONTINUE_BIAS;
+			accumulatedDistance = committedDistance;
 			continue;
 		}
 
 		if (ShouldIgnoreOneWayHit(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction))
 		{
-			accumulatedDistance += committedDistance + TRACE_CONTINUE_BIAS;
+			accumulatedDistance = committedDistance;
 			continue;
 		}
 
@@ -617,17 +622,17 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const float2 uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
 		if (IsTransparentSurfaceSample(primitive.materialIndex, instanceData.dataSource, uv))
 		{
-			accumulatedDistance += committedDistance + TRACE_CONTINUE_BIAS;
+			accumulatedDistance = committedDistance;
 			continue;
 		}
 
 		if (ignoreNoShadowCast && !MaterialCastsShadow(GetMaterialData(primitive.materialIndex, instanceData.dataSource)))
 		{
-			accumulatedDistance += committedDistance + TRACE_CONTINUE_BIAS;
+			accumulatedDistance = committedDistance;
 			continue;
 		}
 
-		const float hitDistance = accumulatedDistance + committedDistance;
+		const float hitDistance = committedDistance;
 		hitData.hit = true;
 		hitData.dataSource = instanceData.dataSource;
 		hitData.primitiveIndex = primitiveIndex;
