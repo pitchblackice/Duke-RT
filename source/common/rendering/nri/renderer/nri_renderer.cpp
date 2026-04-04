@@ -97,6 +97,68 @@ namespace
 		outCenter[2] *= invCount;
 	}
 
+	static bool TryComputeCapturedSurfaceNormal(const nri_scene::SurfaceRef& surface, float outNormal[3])
+	{
+		if (surface.vertices.size() < 3)
+		{
+			return false;
+		}
+
+		const nri_scene::CapturedVertex& a = surface.vertices[0];
+		const nri_scene::CapturedVertex& b = surface.vertices[1];
+		const nri_scene::CapturedVertex& c = surface.vertices[2];
+		const float abx = b.position[0] - a.position[0];
+		const float aby = b.position[1] - a.position[1];
+		const float abz = b.position[2] - a.position[2];
+		const float acx = c.position[0] - a.position[0];
+		const float acy = c.position[1] - a.position[1];
+		const float acz = c.position[2] - a.position[2];
+		const float nx = aby * acz - abz * acy;
+		const float ny = abz * acx - abx * acz;
+		const float nz = abx * acy - aby * acx;
+		const float lengthSq = nx * nx + ny * ny + nz * nz;
+		if (lengthSq <= 1.0e-8f)
+		{
+			return false;
+		}
+
+		const float invLength = 1.0f / std::sqrt(lengthSq);
+		outNormal[0] = nx * invLength;
+		outNormal[1] = ny * invLength;
+		outNormal[2] = nz * invLength;
+		return true;
+	}
+
+	static void NudgeBlindSpotReplacementFlats(nri_scene::SceneView& sceneView)
+	{
+		static constexpr float kBlindSpotFlatDepthNudge = 0.01f;
+
+		for (nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
+		{
+			if (surface.provenance.sourceType != nri_scene::SurfaceSourceType::MapFloorSection &&
+				surface.provenance.sourceType != nri_scene::SurfaceSourceType::MapCeilingSection)
+			{
+				continue;
+			}
+
+			float normal[3] = {};
+			if (!TryComputeCapturedSurfaceNormal(surface, normal))
+			{
+				continue;
+			}
+
+			for (nri_scene::CapturedVertex& vertex : surface.vertices)
+			{
+				vertex.position[0] += normal[0] * kBlindSpotFlatDepthNudge;
+				vertex.position[1] += normal[1] * kBlindSpotFlatDepthNudge;
+				vertex.position[2] += normal[2] * kBlindSpotFlatDepthNudge;
+				vertex.prevPosition[0] += normal[0] * kBlindSpotFlatDepthNudge;
+				vertex.prevPosition[1] += normal[1] * kBlindSpotFlatDepthNudge;
+				vertex.prevPosition[2] += normal[2] * kBlindSpotFlatDepthNudge;
+			}
+		}
+	}
+
 	static uint64_t HashLightOverlayText(uint64_t hash, const char* text)
 	{
 		if (text == nullptr)
@@ -10567,6 +10629,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				}
 
 				nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], liveChunkView);
+				if (replacement.blindSpot && replacement.dragged)
+				{
+					NudgeBlindSpotReplacementFlats(liveChunkView);
+				}
 				BuildRuntimeMutationLightIdentityOverrides(
 					mMapWorld,
 					mapChunk,
