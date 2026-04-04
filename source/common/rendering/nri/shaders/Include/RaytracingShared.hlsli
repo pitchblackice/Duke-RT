@@ -25,6 +25,7 @@ static const uint PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
 static const uint PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
 static const float TRACE_MIN_DISTANCE = 1e-4;
 static const float TRACE_CONTINUE_BIAS = 1e-4;
+static const uint TRACE_FILTER_SKIP_LIMIT = 64u;
 
 HitData MakeEmptyHitData()
 {
@@ -573,7 +574,10 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 	float accumulatedDistance = 0.0;
 
 	[loop]
-	for (uint skipCount = 0u; skipCount < 8u; ++skipCount)
+	// Runtime replacement overlays can stack many filtered hits in front of the
+	// eventual visible surface. Keep enough budget to walk past hidden chunks,
+	// alpha-clipped carriers, and one-way rejects without dropping the ray.
+	for (uint skipCount = 0u; skipCount < TRACE_FILTER_SKIP_LIMIT; ++skipCount)
 	{
 		const float remainingDistance = maxDistance - accumulatedDistance;
 		if (remainingDistance <= TRACE_MIN_DISTANCE)

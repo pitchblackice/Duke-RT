@@ -1810,6 +1810,17 @@ namespace
 		visibleChunkWords[wordIndex] |= 1u << (chunkIndex & 31u);
 	}
 
+	static bool IsChunkMarkedVisible(const std::vector<uint32_t>& visibleChunkWords, uint32_t chunkIndex)
+	{
+		const size_t wordIndex = (size_t)(chunkIndex >> 5u);
+		if (wordIndex >= visibleChunkWords.size())
+		{
+			return false;
+		}
+
+		return (visibleChunkWords[wordIndex] & (1u << (chunkIndex & 31u))) != 0u;
+	}
+
 	static void MarkVisibleChunkForSector(const nri_scene::PTMapWorld& mapWorld, int32_t sectorIndex, std::vector<uint32_t>& visibleChunkWords)
 	{
 		const int32_t chunkIndex = FindMapChunkIndexForSector(mapWorld, sectorIndex);
@@ -6324,6 +6335,7 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	bool chunkResidentStatic = false;
 	bool chunkStaticTlasInstanced = false;
 	bool chunkStaticProbeIncluded = false;
+	bool chunkVisibleGate = false;
 	bool chunkReplaced = false;
 	bool chunkSectorDirty = false;
 	bool chunkDragged = false;
@@ -6335,6 +6347,7 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	if (result.provenance.mapChunkIndex >= 0)
 	{
 		const uint32_t chunkIndex = (uint32_t)result.provenance.mapChunkIndex;
+		chunkVisibleGate = IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunkIndex);
 		for (const auto& chunkCache : mStaticMapScene.chunks)
 		{
 			if (chunkCache.chunkIndex == chunkIndex)
@@ -6368,12 +6381,13 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	FString textureName;
 	int32_t legacyTile = -1;
 	ResolveSurfaceProbeTextureDebugInfo(result.textureId, textureName, legacyTile);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(result.sceneOwner),
 		GetSceneDataSourceName(result.sceneDataSource),
 		result.provenance.mapChunkIndex,
+		YesNo(chunkVisibleGate),
 		YesNo(chunkResidentStatic),
 		YesNo(chunkStaticTlasInstanced),
 		YesNo(chunkStaticProbeIncluded),
@@ -6552,6 +6566,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 	bool chunkResidentStatic = false;
 	bool chunkStaticTlasInstanced = false;
 	bool chunkStaticProbeIncluded = false;
+	bool chunkVisibleGate = false;
 	bool chunkReplaced = false;
 	bool chunkSectorDirty = false;
 	bool chunkDragged = false;
@@ -6563,6 +6578,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 	if (mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
 	{
 		const uint32_t chunkIndex = (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex;
+		chunkVisibleGate = IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunkIndex);
 		for (const auto& chunkCache : mStaticMapScene.chunks)
 		{
 			if (chunkCache.chunkIndex == chunkIndex)
@@ -6593,12 +6609,13 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		}
 	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
-	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner),
 		GetSceneDataSourceName(mLastSurfaceProbe.sceneDataSource),
 		mLastSurfaceProbe.provenance.mapChunkIndex,
+		YesNo(chunkVisibleGate),
 		YesNo(chunkResidentStatic),
 		YesNo(chunkStaticTlasInstanced),
 		YesNo(chunkStaticProbeIncluded),
