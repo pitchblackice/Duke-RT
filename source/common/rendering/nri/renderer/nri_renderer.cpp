@@ -10491,6 +10491,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky)
 {
 	Clocker clock(NriPTSceneTextures);
+	static bool sLoggedActiveCanvasTextureReuse = false;
 	if (ShouldTraceSkyPerf())
 	{
 		gRendererSkyPerfTraceStats.ensureSceneTexturesCalls++;
@@ -10525,6 +10526,17 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		}
 
 		auto it = std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; });
+		if (mFrameBuffer->mActiveCanvasSourceTexture != nullptr &&
+			upload.sourceTexture == mFrameBuffer->mActiveCanvasSourceTexture &&
+			it == mTextureCache.end())
+		{
+			if (!sLoggedActiveCanvasTextureReuse || nri_ptdebug > 0)
+			{
+				Printf(TEXTCOLOR_ORANGE "NRI PT textures: using a fallback descriptor for the canvas currently being rendered to avoid self-referential camera-texture uploads.\n");
+				sLoggedActiveCanvasTextureReuse = true;
+			}
+			continue;
+		}
 		if (it == mTextureCache.end())
 		{
 			std::vector<uint8_t> realizedPixels;

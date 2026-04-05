@@ -2473,6 +2473,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 {
 	static bool sLoggedFirstSceneAttempt = false;
 	static bool sLoggedFrameShellSkip = false;
+	static bool sLoggedOffscreenCanvasSoftFallback = false;
 
 	if (!mInitialized)
 	{
@@ -2515,6 +2516,21 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 	}
 
 	const bool rendered = mRenderer->RenderScene(di, drawmode, portal);
+	if (!rendered && drawmode == DM_OFFSCREEN && mActiveCanvasTexture != nullptr)
+	{
+		if (!sLoggedOffscreenCanvasSoftFallback || nri_ptdebug > 0)
+		{
+			Printf(TEXTCOLOR_ORANGE "NRI camera texture fallback: PT offscreen render failed while updating a canvas target; skipping unsupported raster fallback and %s.\n",
+				mActiveCanvasTexture->bFirstUpdate ? "clearing the target" : "preserving the previous canvas contents");
+			sLoggedOffscreenCanvasSoftFallback = true;
+		}
+
+		if (mActiveCanvasTexture->bFirstUpdate && mActiveTarget != nullptr)
+		{
+			ClearTargetColor(*mActiveTarget, mSceneClearColor[0], mSceneClearColor[1], mSceneClearColor[2], mSceneClearColor[3]);
+		}
+		return true;
+	}
 	mLastFrameBoundaryStats.pathTracedSceneRendered = mLastFrameBoundaryStats.pathTracedSceneRendered || rendered;
 	if (rendered && PerfLoopTraceActive())
 	{
@@ -4939,8 +4955,12 @@ void NRIRenderDevice::RenderTextureView(FCanvasTexture* tex, std::function<void(
 	hwTex->EnsureCanvas(tex);
 
 	NRITextureResource* previousTarget = mActiveTarget;
+	FCanvasTexture* previousCanvasTexture = mActiveCanvasTexture;
+	FTexture* previousCanvasSourceTexture = mActiveCanvasSourceTexture;
 	mRenderState->EndFrame();
 	mActiveTarget = &hwTex->GetResource();
+	mActiveCanvasTexture = tex;
+	mActiveCanvasSourceTexture = tex;
 
 	IntRect bounds = {};
 	bounds.width = tex->GetWidth();
@@ -4950,6 +4970,8 @@ void NRIRenderDevice::RenderTextureView(FCanvasTexture* tex, std::function<void(
 	mRenderState->EndFrame();
 	TransitionTexture(hwTex->GetResource(), NRIShaderResourceState());
 	mActiveTarget = previousTarget;
+	mActiveCanvasTexture = previousCanvasTexture;
+	mActiveCanvasSourceTexture = previousCanvasSourceTexture;
 	tex->SetUpdated(true);
 }
 

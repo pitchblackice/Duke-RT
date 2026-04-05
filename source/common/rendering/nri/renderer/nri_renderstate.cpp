@@ -289,12 +289,58 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 		return;
 	}
 
+	int pipelineDt = dt;
+	uint32_t drawFirstVertex = (uint32_t)firstIndex;
+	uint32_t drawVertexCount = (uint32_t)count;
+	std::vector<uint8_t> expandedTriangleFanVertices;
+	const bool expandTriangleFan = !indexed && dt == DT_TriangleFan;
+	if (expandTriangleFan)
+	{
+		const size_t stride = vertexBuffer->GetStride();
+		const uint8_t* source = vertexBuffer->Data();
+		const size_t bufferSize = vertexBuffer->Size();
+		const size_t baseOffset = mVertexOffsets[0] >= 0 ? (size_t)mVertexOffsets[0] : 0u;
+		if (stride == 0 || source == nullptr || count < 3 || firstIndex < 0 || baseOffset > bufferSize)
+		{
+			return;
+		}
+
+		const size_t firstVertex = (size_t)firstIndex;
+		const size_t vertexCount = (size_t)count;
+		const size_t availableVertexCount = (bufferSize - baseOffset) / stride;
+		if (firstVertex > availableVertexCount || vertexCount > availableVertexCount - firstVertex)
+		{
+			return;
+		}
+
+		const size_t expandedVertexCount = (vertexCount - 2u) * 3u;
+		expandedTriangleFanVertices.resize(expandedVertexCount * stride);
+		uint8_t* dst = expandedTriangleFanVertices.data();
+		const uint8_t* fanBase = source + baseOffset + firstVertex * stride;
+		for (size_t triangleIndex = 0; triangleIndex < vertexCount - 2u; ++triangleIndex)
+		{
+			const uint8_t* v0 = fanBase;
+			const uint8_t* v1 = fanBase + (triangleIndex + 1u) * stride;
+			const uint8_t* v2 = fanBase + (triangleIndex + 2u) * stride;
+			std::memcpy(dst, v0, stride);
+			dst += stride;
+			std::memcpy(dst, v1, stride);
+			dst += stride;
+			std::memcpy(dst, v2, stride);
+			dst += stride;
+		}
+
+		pipelineDt = DT_Triangles;
+		drawFirstVertex = 0;
+		drawVertexCount = (uint32_t)expandedVertexCount;
+	}
+
 	double stageStartMs = traceActive ? I_msTimeF() : 0.0;
 	if (traceActive)
 	{
 		mPerfTraceStats.pipelineLookups++;
 	}
-	nri::Pipeline* pipeline = GetPipeline(dt);
+	nri::Pipeline* pipeline = GetPipeline(pipelineDt);
 	if (traceActive)
 	{
 		mPerfTraceStats.pipelineMs += I_msTimeF() - stageStartMs;
@@ -305,7 +351,23 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 	}
 
 	stageStartMs = traceActive ? I_msTimeF() : 0.0;
-	StreamedBuffer vertexStream = StreamVertices(vertexBuffer);
+	StreamedBuffer vertexStream = {};
+	if (expandTriangleFan)
+	{
+		nri::DataSize dataChunk = { expandedTriangleFanVertices.data(), expandedTriangleFanVertices.size() };
+		nri::StreamBufferDataDesc streamDesc = {};
+		streamDesc.dataChunks = &dataChunk;
+		streamDesc.dataChunkNum = 1;
+		streamDesc.placementAlignment = NextPowerOfTwo((uint32_t)std::max<size_t>(vertexBuffer->GetStride(), 16));
+		nri::BufferOffset bufferOffset = mFrameBuffer->mStreamer.StreamBufferData(*mFrameBuffer->mStreamerInstance, streamDesc);
+		vertexStream.buffer = bufferOffset.buffer;
+		vertexStream.offset = bufferOffset.offset;
+		vertexStream.stride = (uint32_t)vertexBuffer->GetStride();
+	}
+	else
+	{
+		vertexStream = StreamVertices(vertexBuffer);
+	}
 	if (traceActive)
 	{
 		mPerfTraceStats.vertexStreamMs += I_msTimeF() - stageStartMs;
@@ -334,7 +396,7 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 
 	nri::VertexBufferDesc vertexDesc = {};
 	vertexDesc.buffer = vertexStream.buffer;
-	vertexDesc.offset = vertexStream.offset + (uint64_t)mVertexOffsets[0];
+	vertexDesc.offset = vertexStream.offset + (expandTriangleFan ? 0ull : (uint64_t)mVertexOffsets[0]);
 	vertexDesc.stride = (uint32_t)vertexStream.stride;
 
 	nri::DescriptorSet* textureSet = mFrameBuffer->mWhiteTextureSet;
@@ -428,7 +490,7 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 		{
 			stageStartMs = I_msTimeF();
 		}
-		mFrameBuffer->mCore.CmdDraw(*mFrameBuffer->mCommandBuffer, { (uint32_t)count, 1, (uint32_t)firstIndex, 0 });
+		mFrameBuffer->mCore.CmdDraw(*mFrameBuffer->mCommandBuffer, { drawVertexCount, 1, drawFirstVertex, 0 });
 		if (traceActive)
 		{
 			mPerfTraceStats.drawCallMs += I_msTimeF() - stageStartMs;

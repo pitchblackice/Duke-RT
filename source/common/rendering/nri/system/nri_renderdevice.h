@@ -294,6 +294,8 @@ private:
 	NRITextureResource mSaveTarget;
 	NRITextureResource* mActiveTarget = nullptr;
 	NRITextureResource* mCurrentPresentTarget = nullptr;
+	FCanvasTexture* mActiveCanvasTexture = nullptr;
+	FTexture* mActiveCanvasSourceTexture = nullptr;
 	FGameTexture* mFrameGenerationUiTexture = nullptr;
 	nri::DescriptorSet* mWhiteTextureSet = nullptr;
 	NRIHardwareTexture* mWhiteTexture = nullptr;
