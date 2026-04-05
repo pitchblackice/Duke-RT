@@ -10525,6 +10525,20 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 			continue;
 		}
 
+		if (upload.sourceTexture != nullptr && upload.sourceTexture->isHardwareCanvas())
+		{
+			auto* hardwareTexture = static_cast<NRIHardwareTexture*>(upload.sourceTexture->GetHardwareTexture(0, 0));
+			if (hardwareTexture != nullptr)
+			{
+				hardwareTexture->EnsureCanvas(upload.sourceTexture);
+				if (hardwareTexture->GetResource().shaderView != nullptr)
+				{
+					descriptors[2 + i] = hardwareTexture->GetResource().shaderView;
+					continue;
+				}
+			}
+		}
+
 		auto it = std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; });
 		if (mFrameBuffer->mActiveCanvasSourceTexture != nullptr &&
 			upload.sourceTexture == mFrameBuffer->mActiveCanvasSourceTexture &&
