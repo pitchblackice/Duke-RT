@@ -290,10 +290,13 @@ bool IsMaterialEmissive(MaterialData material)
 	return material.emissiveMode != 0u && material.emissiveIntensity > 0.0;
 }
 
-bool ShouldRenderMaterialEmission(MaterialData material)
+float3 OverlayBlend(float3 target, float3 blend)
 {
-	// Glowmaps are an emissive-lighting source for PT, not a visible surface overlay.
-	return material.emissiveMode != 3u;
+	target = saturate(target);
+	blend = saturate(blend);
+	const float3 low = (2.0 * target) * blend;
+	const float3 high = 1.0 - 2.0 * (1.0 - target) * (1.0 - blend);
+	return lerp(low, high, step(0.5.xxx, target));
 }
 
 float3 EvaluateMaterialEmission(uint materialIndex, uint dataSource, MaterialData material, float2 uv)
@@ -303,6 +306,17 @@ float3 EvaluateMaterialEmission(uint materialIndex, uint dataSource, MaterialDat
 		return SampleMaterialEmissionSource(materialIndex, dataSource, uv) * material.emissiveIntensity;
 	}
 	return 0.0;
+}
+
+float3 EvaluateVisibleMaterialEmission(uint materialIndex, uint dataSource, MaterialData material, float3 albedo, float2 uv)
+{
+	if (material.emissiveMode == 3u)
+	{
+		const float3 glow = SampleMaterialEmissionSource(materialIndex, dataSource, uv);
+		return OverlayBlend(albedo, glow) * material.emissiveIntensity;
+	}
+
+	return EvaluateMaterialEmission(materialIndex, dataSource, material, uv);
 }
 
 uint GetEmissivePrimitiveCount()
@@ -1023,9 +1037,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				// Keep the placeholder sun out of the denoised transport bucket so its hard shadow
 				// structure does not get spatially mixed back into REBLUR/RELAX radiance history.
 				directLighting += ambientDirectLighting + sunTransportDiffuse + sunTransportSpecular + runtimePointDirectLighting;
-				if (emissiveMaterial && ShouldRenderMaterialEmission(material))
+				if (emissiveMaterial)
 				{
-					directEmission = EvaluateMaterialEmission(hit.materialIndex, hit.dataSource, material, hit.uv);
+					directEmission = EvaluateVisibleMaterialEmission(hit.materialIndex, hit.dataSource, material, albedo.rgb, hit.uv);
 				}
 			}
 
