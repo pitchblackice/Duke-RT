@@ -297,6 +297,7 @@ private:
 	NRITextureResource* mCurrentPresentTarget = nullptr;
 	FCanvasTexture* mActiveCanvasTexture = nullptr;
 	FTexture* mActiveCanvasSourceTexture = nullptr;
+	FCanvasTexture* mPendingViewSnapshotCanvas = nullptr;
 	FGameTexture* mFrameGenerationUiTexture = nullptr;
 	nri::DescriptorSet* mWhiteTextureSet = nullptr;
 	NRIHardwareTexture* mWhiteTexture = nullptr;

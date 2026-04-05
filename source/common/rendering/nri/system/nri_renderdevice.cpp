@@ -2458,6 +2458,18 @@ void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::func
 		SetActiveRenderTarget();
 	}
 
+	if (mPendingViewSnapshotCanvas != nullptr)
+	{
+		auto* canvas = mPendingViewSnapshotCanvas;
+		mPendingViewSnapshotCanvas = nullptr;
+		auto* hwTex = static_cast<NRIHardwareTexture*>(canvas->GetHardwareTexture(0, 0));
+		hwTex->EnsureCanvas(canvas);
+		if (CopyCurrentTargetToTexture(hwTex->GetResource()))
+		{
+			canvas->SetUpdated(true);
+		}
+	}
+
 	if (afterBloomDrawEndScene2D)
 	{
 		afterBloomDrawEndScene2D();
@@ -4996,6 +5008,12 @@ void NRIRenderDevice::SnapshotCurrentViewToCanvas(FCanvasTexture* tex)
 {
 	if (!mInitialized || tex == nullptr)
 	{
+		return;
+	}
+
+	if (mFrameBegun && mCurrentPresentTarget != nullptr)
+	{
+		mPendingViewSnapshotCanvas = tex;
 		return;
 	}
 
