@@ -68,6 +68,7 @@ BEGIN_DUKE_NS
 void GameInterface::UpdateCameras(double smoothratio)
 {
 	const int VIEWSCREEN_ACTIVE_DISTANCE = 1024;
+	static TObjPtr<DDukeActor*> sPreviousViewCamera;
 
 	if (camsprite == nullptr)
 		return;
@@ -79,6 +80,15 @@ void GameInterface::UpdateCameras(double smoothratio)
 		// Updating the offscreen monitor canvas in the same frame forces a second
 		// render at a different size, which is unsupported by the current NRI PT path.
 		camsprite->SetOwner(p->newOwner);
+		sPreviousViewCamera = p->newOwner;
+		return;
+	}
+	if (sPreviousViewCamera != nullptr)
+	{
+		// The first frame after leaving camera view still renders the normal main
+		// scene at window size. Skip the monitor refresh in that transition frame
+		// so NRI PT does not bounce between offscreen and main-view frame sizes.
+		sPreviousViewCamera = nullptr;
 		return;
 	}
 
