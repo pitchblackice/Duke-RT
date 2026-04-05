@@ -815,7 +815,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		// - diffuse/specular transport: denoised transport bucket
 		//   * sampled emissive diffuse/specular
 		//   * indirect diffuse/specular
-		// - directEmission: only actual emissive-hit / fullbright surface output
+		// - directEmission: additive self-emission term plus any legacy fullbright override
 		float3 ambientDirectLighting = 0.0;
 		float3 runtimePointDirectLighting = 0.0;
 		float3 sunTransportDiffuse = 0.0;
@@ -860,15 +860,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				diffuse = albedo.rgb;
 				directEmission = albedo.rgb;
 			}
-			else if (emissiveMaterial || fullbright)
+			else if (fullbright)
 			{
 				diffuse = 0.0;
 				specular = 0.0;
-				directEmission = EvaluateMaterialEmission(hit.materialIndex, hit.dataSource, material, hit.uv);
-				if (!emissiveMaterial)
-				{
-					directEmission = albedo.rgb;
-				}
+				directEmission = albedo.rgb;
 			}
 			else
 			{
@@ -1021,6 +1017,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				// Keep the placeholder sun out of the denoised transport bucket so its hard shadow
 				// structure does not get spatially mixed back into REBLUR/RELAX radiance history.
 				directLighting += ambientDirectLighting + sunTransportDiffuse + sunTransportSpecular + runtimePointDirectLighting;
+				if (emissiveMaterial)
+				{
+					directEmission = EvaluateMaterialEmission(hit.materialIndex, hit.dataSource, material, hit.uv);
+				}
 			}
 
 			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
