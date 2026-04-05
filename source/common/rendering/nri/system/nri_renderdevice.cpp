@@ -4992,6 +4992,21 @@ void NRIRenderDevice::RenderTextureView(FCanvasTexture* tex, std::function<void(
 	tex->SetUpdated(true);
 }
 
+void NRIRenderDevice::SnapshotCurrentViewToCanvas(FCanvasTexture* tex)
+{
+	if (!mInitialized || tex == nullptr)
+	{
+		return;
+	}
+
+	auto* hwTex = static_cast<NRIHardwareTexture*>(tex->GetHardwareTexture(0, 0));
+	hwTex->EnsureCanvas(tex);
+	if (CopyCurrentTargetToTexture(hwTex->GetResource()))
+	{
+		tex->SetUpdated(true);
+	}
+}
+
 void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 {
 	if (buffer == nullptr || width <= 0 || height <= 0)

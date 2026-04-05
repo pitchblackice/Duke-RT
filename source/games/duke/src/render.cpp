@@ -112,6 +112,17 @@ void GameInterface::UpdateCameras(double smoothratio)
 	}
 }
 
+static FCanvasTexture* GetViewscreenCanvas()
+{
+	auto tex = TexMan.FindGameTexture("VIEWSCR", ETextureType::Any);
+	if (tex == nullptr || tex->GetTexture() == nullptr || !tex->GetTexture()->isCanvas())
+	{
+		return nullptr;
+	}
+
+	return static_cast<FCanvasTexture*>(tex->GetTexture());
+}
+
 void GameInterface::EnterPortal(DCoreActor* viewer, int type)
 {
 	if (type == PORTAL_WALL_MIRROR) display_mirror++;
@@ -444,6 +455,13 @@ void displayrooms(int snum, double interpfrac, bool sceneonly)
 	if (camview) viewer->spr.cstat = CSTAT_SPRITE_INVISIBLE;
 	if (!sceneonly) drawweapon(interpfrac);
 	render_drawrooms(viewer, cpos, sect, cangles, interpfrac, fov);
+	if (p->newOwner != nullptr)
+	{
+		if (auto* canvas = GetViewscreenCanvas(); canvas != nullptr)
+		{
+			screen->SnapshotCurrentViewToCanvas(canvas);
+		}
+	}
 	viewer->spr.cstat = cstat;
 
 	//GLInterface.SetMapFog(false);

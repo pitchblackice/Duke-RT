@@ -197,6 +197,7 @@ private:
 	void EndFrameAndPresent();
 	void LogD3D12FailureDiagnostics(const char* context);
 	void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc) override;
+	void SnapshotCurrentViewToCanvas(FCanvasTexture* tex) override;
 	void CopyScreenToBuffer(int width, int height, uint8_t* buffer) override;
 	void TransitionTexture(NRITextureResource& texture, nri::AccessLayoutStage after);
 	void PrepareTargetForRendering(NRITextureResource& target, bool clear);
