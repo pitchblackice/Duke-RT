@@ -969,6 +969,13 @@ CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptemissivesamples, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectorlightmultiplier, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
 CVAR(Float, nri_ptsectorambientscale, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorhemiscale, 0.12f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorfogscale, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -3033,6 +3040,11 @@ namespace
 		uint32_t bits = 0;
 		std::memcpy(&bits, &value, sizeof(bits));
 		return bits;
+	}
+
+	static float GetSectorLightMultiplier()
+	{
+		return std::max(0.0f, (float)nri_ptsectorlightmultiplier);
 	}
 
 	static uint64_t HashGeometryForEmissiveSampling(const nri_scene::GeometryData* geometry)
@@ -5450,6 +5462,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 {
 	const auto& registry = mSceneLights.GetSectorLighting();
+	const float sectorLightMultiplier = GetSectorLightMultiplier();
 	if (registry.activeSectorIndices.empty())
 	{
 		Printf("NRI PT sector lights: no active sector-light records are available.\n");
@@ -5519,13 +5532,14 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 		return a.sectorIndex < b.sectorIndex;
 	});
 
-	Printf("NRI PT sector lights: active=%u eligible=%u fog=%u pulsing=%u radius=%.1f limit=%u scales=(%.3f, %.3f, %.3f) clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
+	Printf("NRI PT sector lights: active=%u eligible=%u fog=%u pulsing=%u radius=%.1f limit=%u multiplier=%.3f scales=(%.3f, %.3f, %.3f) clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
 		registry.activeSectorCount,
 		registry.eligibleSectorCount,
 		registry.fogSectorCount,
 		registry.pulsingSectorCount,
 		radius,
 		limit,
+		sectorLightMultiplier,
 		(float)nri_ptsectorambientscale,
 		(float)nri_ptsectorhemiscale,
 		(float)nri_ptsectorfogscale,
@@ -5552,9 +5566,9 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 			entry.ambientColor[0],
 			entry.ambientColor[1],
 			entry.ambientColor[2],
-			entry.ambientIntensity,
-			entry.hemisphereAmount,
-			entry.fogAmount,
+			entry.ambientIntensity * sectorLightMultiplier,
+			entry.hemisphereAmount * sectorLightMultiplier,
+			entry.fogAmount * sectorLightMultiplier,
 			entry.pulseScale,
 			entry.paletteIndex,
 			entry.averageShade,
@@ -5923,13 +5937,14 @@ void NRIRenderer::PrintStatus() const
 		mEmissiveTlasStaticInstanceCount,
 		mEmissiveTlasDynamicInstanceCount,
 		mEmissiveTlasBuildCount);
-	Printf("NRI PT sector lighting: enabled=%s active=%u eligible=%u fog=%u pulsing=%u debug_mode=%u scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
+	Printf("NRI PT sector lighting: enabled=%s active=%u eligible=%u fog=%u pulsing=%u debug_mode=%u multiplier=%.3f scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
 		nri_ptsectorlighting ? "on" : "off",
 		mSceneLights.GetSectorLighting().activeSectorCount,
 		mSceneLights.GetSectorLighting().eligibleSectorCount,
 		mSceneLights.GetSectorLighting().fogSectorCount,
 		mSceneLights.GetSectorLighting().pulsingSectorCount,
 		NRI_PTDEBUG_SECTOR_AMBIENT,
+		GetSectorLightMultiplier(),
 		(float)nri_ptsectorambientscale,
 		(float)nri_ptsectorhemiscale,
 		(float)nri_ptsectorfogscale,
@@ -8997,6 +9012,7 @@ void NRIRenderer::BuildSectorLightingUpload(
 	std::vector<SectorLightGpuData>& outSectors)
 {
 	const auto& registry = mSceneLights.GetSectorLighting();
+	const float sectorLightMultiplier = GetSectorLightMultiplier();
 	UpdateBoundSectorLightingState();
 	outHeader = {};
 	outHeader.sectorCount = registry.sectorCount;
@@ -9016,9 +9032,9 @@ void NRIRenderer::BuildSectorLightingUpload(
 		auto& target = outSectors[sectorIndex];
 		Copy3(source.ambientColor, target.ambientColor);
 		Copy3(source.ambientColor, target.hemisphereColor);
-		target.ambientIntensity = source.ambientIntensity;
-		target.hemisphereAmount = source.hemisphereAmount;
-		target.fogAmount = source.fogAmount;
+		target.ambientIntensity = source.ambientIntensity * sectorLightMultiplier;
+		target.hemisphereAmount = source.hemisphereAmount * sectorLightMultiplier;
+		target.fogAmount = source.fogAmount * sectorLightMultiplier;
 		target.pulseScale = source.pulseScale;
 		target.sourceFlags = source.sourceFlags;
 		target.paletteIndex = source.paletteIndex;
@@ -9059,6 +9075,7 @@ uint64_t NRIRenderer::BuildSectorLightingPayloadHash() const
 	const auto& registry = mSceneLights.GetSectorLighting();
 	uint64_t hash = 1469598103934665603ull;
 	hash = HashCombine64(hash, nri_ptsectorlighting ? 1ull : 0ull);
+	hash = HashCombine64(hash, (uint64_t)FloatBits(GetSectorLightMultiplier()));
 	hash = HashCombine64(hash, (uint64_t)registry.sectorCount);
 	hash = HashCombine64(hash, (uint64_t)registry.activeSectorCount);
 	hash = HashCombine64(hash, (uint64_t)registry.pulsingSectorCount);
@@ -9091,6 +9108,7 @@ uint64_t NRIRenderer::BuildSectorLightingPayloadHash() const
 void NRIRenderer::UpdateBoundSectorLightingState()
 {
 	const auto& registry = mSceneLights.GetSectorLighting();
+	const float sectorLightMultiplier = GetSectorLightMultiplier();
 	mBoundSectorLightSectorCount = registry.sectorCount;
 	mBoundSectorLightActiveCount = registry.activeSectorCount;
 	mBoundSectorLightPulsingCount = registry.pulsingSectorCount;
@@ -9105,7 +9123,7 @@ void NRIRenderer::UpdateBoundSectorLightingState()
 		}
 
 		const auto& sector = registry.sectors[sectorIndex];
-		const float contribution = sector.ambientIntensity + std::abs(sector.hemisphereAmount) + sector.fogAmount;
+		const float contribution = sectorLightMultiplier * (sector.ambientIntensity + std::abs(sector.hemisphereAmount) + sector.fogAmount);
 		if (contribution > mBoundSectorLightDominantContribution)
 		{
 			mBoundSectorLightDominantContribution = contribution;

@@ -50,6 +50,7 @@ EXTERN_CVAR(Bool, nri_framegen)
 EXTERN_CVAR(Bool, nri_framegenlatency)
 EXTERN_CVAR(Int, nri_framegenprovider)
 EXTERN_CVAR(Bool, nri_ptsectorlighting)
+EXTERN_CVAR(Float, nri_ptsectorlightmultiplier)
 EXTERN_CVAR(Float, nri_ptsectorambientscale)
 EXTERN_CVAR(Float, nri_ptsectorhemiscale)
 EXTERN_CVAR(Float, nri_ptsectorfogscale)
@@ -1544,6 +1545,7 @@ CCMD(nri_ptsectorlight_filter)
 CCMD(nri_ptsectorlight_clear)
 {
 	nri_ptsectorlighting = true;
+	nri_ptsectorlightmultiplier = 1.0f;
 	nri_ptsectorambientscale = 0.20f;
 	nri_ptsectorhemiscale = 0.12f;
 	nri_ptsectorfogscale = 0.20f;
