@@ -2473,6 +2473,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 {
 	static bool sLoggedFirstSceneAttempt = false;
 	static bool sLoggedFrameShellSkip = false;
+	static bool sLoggedOffscreenCanvasBypass = false;
 	static bool sLoggedOffscreenCanvasSoftFallback = false;
 
 	if (!mInitialized)
@@ -2513,6 +2514,22 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 	if (mRenderer == nullptr)
 	{
 		return false;
+	}
+
+	if (drawmode == DM_OFFSCREEN && mActiveCanvasTexture != nullptr)
+	{
+		if (!sLoggedOffscreenCanvasBypass || nri_ptdebug > 0)
+		{
+			Printf(TEXTCOLOR_ORANGE "NRI camera texture bypass: skipping PT offscreen rendering for canvas targets to avoid frame-resource size thrash with the main view; %s.\n",
+				mActiveCanvasTexture->bFirstUpdate ? "clearing the target" : "preserving the previous canvas contents");
+			sLoggedOffscreenCanvasBypass = true;
+		}
+
+		if (mActiveCanvasTexture->bFirstUpdate && mActiveTarget != nullptr)
+		{
+			ClearTargetColor(*mActiveTarget, mSceneClearColor[0], mSceneClearColor[1], mSceneClearColor[2], mSceneClearColor[3]);
+		}
+		return true;
 	}
 
 	const bool rendered = mRenderer->RenderScene(di, drawmode, portal);
