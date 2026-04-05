@@ -73,7 +73,14 @@ void GameInterface::UpdateCameras(double smoothratio)
 		return;
 
 	auto p = getPlayer(screenpeek);
-	if (p->newOwner != nullptr) camsprite->SetOwner(p->newOwner);
+	if (p->newOwner != nullptr)
+	{
+		// Active camera use already renders the main view from the camera actor.
+		// Updating the offscreen monitor canvas in the same frame forces a second
+		// render at a different size, which is unsupported by the current NRI PT path.
+		camsprite->SetOwner(p->newOwner);
+		return;
+	}
 
 	if (camsprite->GetOwner() && (p->GetActor()->spr.pos - camsprite->spr.pos).Length() < VIEWSCREEN_ACTIVE_DISTANCE)
 	{
