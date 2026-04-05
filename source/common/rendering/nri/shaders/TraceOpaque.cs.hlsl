@@ -290,6 +290,12 @@ bool IsMaterialEmissive(MaterialData material)
 	return material.emissiveMode != 0u && material.emissiveIntensity > 0.0;
 }
 
+bool ShouldRenderMaterialEmission(MaterialData material)
+{
+	// Glowmaps are an emissive-lighting source for PT, not a visible surface overlay.
+	return material.emissiveMode != 3u;
+}
+
 float3 EvaluateMaterialEmission(uint materialIndex, uint dataSource, MaterialData material, float2 uv)
 {
 	if (material.emissiveMode != 0u)
@@ -1017,7 +1023,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				// Keep the placeholder sun out of the denoised transport bucket so its hard shadow
 				// structure does not get spatially mixed back into REBLUR/RELAX radiance history.
 				directLighting += ambientDirectLighting + sunTransportDiffuse + sunTransportSpecular + runtimePointDirectLighting;
-				if (emissiveMaterial)
+				if (emissiveMaterial && ShouldRenderMaterialEmission(material))
 				{
 					directEmission = EvaluateMaterialEmission(hit.materialIndex, hit.dataSource, material, hit.uv);
 				}
