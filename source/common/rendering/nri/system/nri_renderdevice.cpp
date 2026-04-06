@@ -987,47 +987,6 @@ namespace
 		}
 	}
 
-	static float GetSafeDisplaySdrLuminance(float displaySdrLuminance)
-	{
-		return displaySdrLuminance > 1.0f ? displaySdrLuminance : 1.0f;
-	}
-
-	static float GetSafeDisplayMaxLuminance(float displaySdrLuminance, float displayMaxLuminance)
-	{
-		const float safeDisplaySdr = GetSafeDisplaySdrLuminance(displaySdrLuminance);
-		return displayMaxLuminance > safeDisplaySdr ? displayMaxLuminance : safeDisplaySdr;
-	}
-
-	static float GetClampedPaperWhiteNits(float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
-	{
-		const float safeDisplaySdr = GetSafeDisplaySdrLuminance(displaySdrLuminance);
-		const float safeDisplayMax = GetSafeDisplayMaxLuminance(displaySdrLuminance, displayMaxLuminance);
-		float safePaperWhite = paperWhiteNits > safeDisplaySdr ? paperWhiteNits : safeDisplaySdr;
-		if (safePaperWhite > safeDisplayMax)
-		{
-			safePaperWhite = safeDisplayMax;
-		}
-		return safePaperWhite;
-	}
-
-	static float GetHdrPaperWhiteScale(const NRIPTOutputPolicy& policy)
-	{
-		return GetClampedPaperWhiteNits(policy.paperWhiteNits, policy.displaySdrLuminance, policy.displayMaxLuminance) / 80.0f;
-	}
-
-	static float GetHdrHeadroomInPaperWhites(const NRIPTOutputPolicy& policy)
-	{
-		const float safeDisplayMax = GetSafeDisplayMaxLuminance(policy.displaySdrLuminance, policy.displayMaxLuminance);
-		const float safePaperWhite = GetClampedPaperWhiteNits(policy.paperWhiteNits, policy.displaySdrLuminance, policy.displayMaxLuminance);
-		const float headroom = safeDisplayMax / safePaperWhite;
-		return headroom > 1.0f ? headroom : 1.0f;
-	}
-
-	static float GetHdrMaxOutputScale(const NRIPTOutputPolicy& policy)
-	{
-		return GetHdrPaperWhiteScale(policy) * GetHdrHeadroomInPaperWhites(policy);
-	}
-
 	static FString DescribeSwapChainImageMask(uint64_t mask, uint32_t textureCount)
 	{
 		if (textureCount == 0)
@@ -3464,9 +3423,10 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 	const FString presentCounts = DescribeSwapChainImageCounts(mSwapChainPresentCounts);
 	const FString abandonCounts = DescribeSwapChainImageCounts(mSwapChainAbandonCounts);
 	const NRIPTOutputPolicy outputPolicy = GetPathTracingOutputPolicy();
-	const float hdrPaperWhiteScale = GetHdrPaperWhiteScale(outputPolicy);
-	const float hdrHeadroom = GetHdrHeadroomInPaperWhites(outputPolicy);
-	const float hdrMaxScale = GetHdrMaxOutputScale(outputPolicy);
+	const float hdrPaperWhiteScale = GetNRIPTHdrPaperWhiteScale(outputPolicy);
+	const float hdrHeadroom = GetNRIPTHdrHeadroomInPaperWhites(outputPolicy);
+	const float hdrMaxScale = GetNRIPTHdrMaxOutputScale(outputPolicy);
+	const bool hdrUiContractActive = outputPolicy.hdrSwapChainActive;
 	Printf("NRI PT swapchain: textures=%u queued_frames=%u vsync=%s flags=%s texture_override=%d flag_override=%s wait_present=%s acquire_seen=%u/%u [%s] present_seen=%u/%u [%s]\n",
 		(uint32_t)mSwapChainTextureCount,
 		(uint32_t)mSwapChainQueuedFrameNum,
@@ -3499,6 +3459,13 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 		outputPolicy.displayMaxLuminance,
 		GetNriResultName(mSwapChainDisplayDescResult),
 		mSwapChainOutputResolveReason.IsEmpty() ? "unknown" : mSwapChainOutputResolveReason.GetChars());
+	Printf("NRI PT ui output: present_contract=%s gamma=%.3f hdr_scale=%.3f active_target=%s framegen_ui_target=%s\n",
+		hdrUiContractActive ? "hdr-paperwhite" : "sdr-direct",
+		hdrUiContractActive ? 2.2f : 1.0f,
+		hdrUiContractActive ? hdrPaperWhiteScale : 1.0f,
+		mActiveTarget == mCurrentPresentTarget ? "present" :
+			(mActiveTarget == &mSceneTarget ? "scene" : (mActiveTarget == &mSaveTarget ? "save" : "other")),
+		mFrameGenerationUiTargetActive ? "yes" : "no");
 	Printf("NRI PT swapchain counts: acquire=[%s] present=[%s] abandoned=[%s]\n",
 		acquireCounts.GetChars(),
 		presentCounts.GetChars(),

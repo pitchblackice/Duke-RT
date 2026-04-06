@@ -1,5 +1,6 @@
 #include "nri_renderstate.h"
 
+#include "../nri_output.h"
 #include "../system/nri_hwbuffer.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
@@ -738,6 +739,10 @@ void NRIRenderState::FillShaderConstants(NRIShaderConstants& constants) const
 	constants.InvViewportSize[1] = viewportHeight > 0 ? 1.0f / viewportHeight : 1.0f;
 	constants.ScreenFade = mStreamData.uDynLightColor.W;
 	constants.Flags = 0;
+	constants.OutputInfo[0] = 1.0f;
+	constants.OutputInfo[1] = 1.0f;
+	constants.OutputInfo[2] = 0.0f;
+	constants.OutputInfo[3] = 0.0f;
 
 	if (mTextureEnabled && mMaterial.mMaterial != nullptr)
 	{
@@ -752,6 +757,19 @@ void NRIRenderState::FillShaderConstants(NRIShaderConstants& constants) const
 	if (mTextureMode == TM_INVERSE || mTextureMode == TM_INVERTOPAQUE || (mRenderStyle.Flags & STYLEF_InvertSource))
 	{
 		constants.Flags |= NRI2D_Invert;
+	}
+
+	if (mFrameBuffer != nullptr &&
+		mFrameBuffer->mActiveTarget != nullptr &&
+		mFrameBuffer->mActiveTarget == mFrameBuffer->mCurrentPresentTarget)
+	{
+		const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
+		if (outputPolicy.hdrSwapChainActive)
+		{
+			constants.Flags |= NRI2D_OutputHdrLinear;
+			constants.OutputInfo[0] = GetNRIPTHdrPaperWhiteScale(outputPolicy);
+			constants.OutputInfo[1] = 2.2f;
+		}
 	}
 
 	constants.ObjectColor[0] = mStreamData.uObjectColor.r;

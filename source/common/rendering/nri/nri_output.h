@@ -32,6 +32,47 @@ struct NRIPTOutputPolicy
 	bool offscreenHdrTarget = true;
 };
 
+inline float GetNRIPTOutputSafeDisplaySdrLuminance(float displaySdrLuminance)
+{
+	return displaySdrLuminance > 1.0f ? displaySdrLuminance : 1.0f;
+}
+
+inline float GetNRIPTOutputSafeDisplayMaxLuminance(float displaySdrLuminance, float displayMaxLuminance)
+{
+	const float safeDisplaySdr = GetNRIPTOutputSafeDisplaySdrLuminance(displaySdrLuminance);
+	return displayMaxLuminance > safeDisplaySdr ? displayMaxLuminance : safeDisplaySdr;
+}
+
+inline float GetNRIPTOutputClampedPaperWhiteNits(float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
+{
+	const float safeDisplaySdr = GetNRIPTOutputSafeDisplaySdrLuminance(displaySdrLuminance);
+	const float safeDisplayMax = GetNRIPTOutputSafeDisplayMaxLuminance(displaySdrLuminance, displayMaxLuminance);
+	float safePaperWhite = paperWhiteNits > safeDisplaySdr ? paperWhiteNits : safeDisplaySdr;
+	if (safePaperWhite > safeDisplayMax)
+	{
+		safePaperWhite = safeDisplayMax;
+	}
+	return safePaperWhite;
+}
+
+inline float GetNRIPTHdrPaperWhiteScale(const NRIPTOutputPolicy& policy)
+{
+	return GetNRIPTOutputClampedPaperWhiteNits(policy.paperWhiteNits, policy.displaySdrLuminance, policy.displayMaxLuminance) / 80.0f;
+}
+
+inline float GetNRIPTHdrHeadroomInPaperWhites(const NRIPTOutputPolicy& policy)
+{
+	const float safeDisplayMax = GetNRIPTOutputSafeDisplayMaxLuminance(policy.displaySdrLuminance, policy.displayMaxLuminance);
+	const float safePaperWhite = GetNRIPTOutputClampedPaperWhiteNits(policy.paperWhiteNits, policy.displaySdrLuminance, policy.displayMaxLuminance);
+	const float headroom = safeDisplayMax / safePaperWhite;
+	return headroom > 1.0f ? headroom : 1.0f;
+}
+
+inline float GetNRIPTHdrMaxOutputScale(const NRIPTOutputPolicy& policy)
+{
+	return GetNRIPTHdrPaperWhiteScale(policy) * GetNRIPTHdrHeadroomInPaperWhites(policy);
+}
+
 inline const char* GetNRIPTOutputModeName(NRIPTOutputMode mode)
 {
 	switch (mode)

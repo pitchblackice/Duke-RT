@@ -45,6 +45,7 @@ struct NRIShaderConstants
 	float InvViewportSize[2] = { 1.0f, 1.0f };
 	uint32_t Flags = 0;
 	float ScreenFade = 1.0f;
+	float OutputInfo[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
 
 	float ObjectColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	float AddColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -69,7 +70,10 @@ enum NRI2DShaderFlags : uint32_t
 	NRI2D_Textured = 1u << 0,
 	NRI2D_AlphaFromRed = 1u << 1,
 	NRI2D_Invert = 1u << 2,
+	NRI2D_OutputHdrLinear = 1u << 3,
 };
+
+static_assert(sizeof(NRIShaderConstants) <= 224, "NRIShaderConstants must stay within the validated 2D root-constant budget.");
 
 struct NRISwapChainImage
 {

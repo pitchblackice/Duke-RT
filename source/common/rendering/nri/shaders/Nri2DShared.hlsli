@@ -8,6 +8,7 @@ struct Nri2DConstants
 	float2 InvViewportSize;
 	uint Flags;
 	float ScreenFade;
+	float4 OutputInfo;
 
 	float4 ObjectColor;
 	float4 AddColor;
@@ -22,6 +23,7 @@ NRI_ROOT_CONSTANTS(Nri2DConstants, gNri2DConstants, 0, 2);
 static const uint NRI2D_FLAG_TEXTURED = 1u << 0;
 static const uint NRI2D_FLAG_ALPHA_FROM_RED = 1u << 1;
 static const uint NRI2D_FLAG_INVERT = 1u << 2;
+static const uint NRI2D_FLAG_OUTPUT_HDR_LINEAR = 1u << 3;
 
 float4 NriTransformPosition(float3 p)
 {

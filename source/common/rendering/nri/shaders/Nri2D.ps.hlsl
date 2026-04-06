@@ -33,5 +33,14 @@ float4 main(PSInput input) : SV_Target0
 	color.rgb = color.rgb * gNri2DConstants.ObjectColor.rgb + gNri2DConstants.AddColor.rgb;
 	color.a *= gNri2DConstants.ObjectColor.a;
 	color *= gNri2DConstants.ScreenFade;
-	return saturate(color);
+	color = saturate(color);
+
+	if ((gNri2DConstants.Flags & NRI2D_FLAG_OUTPUT_HDR_LINEAR) != 0)
+	{
+		const float hdrScale = max(gNri2DConstants.OutputInfo.x, 0.0);
+		const float gamma = max(gNri2DConstants.OutputInfo.y, 1.0);
+		color.rgb = pow(color.rgb, gamma) * hdrScale;
+	}
+
+	return color;
 }
