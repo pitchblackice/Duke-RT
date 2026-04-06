@@ -116,6 +116,18 @@ float3 ApplyLegacyClampOutputMapping(float3 color)
 	return saturate(SanitizeFiniteColor(color));
 }
 
+float3 ApplyDebugRadianceDisplayMapping(float3 color, uint2 pixelPos, uint frameIndex)
+{
+	const float3 toneMapped = ApplySdrTonemap(SanitizeFiniteColor(color), NRI_PT_TONEMAP_HABLE);
+	return ApplySdrTransferAndDither(toneMapped, pixelPos, frameIndex);
+}
+
+float3 ApplyDebugNormalizedDisplayMapping(float3 color, uint2 pixelPos, uint frameIndex)
+{
+	const float3 normalized = saturate(SanitizeFiniteColor(color));
+	return ApplySdrTransferAndDither(normalized, pixelPos, frameIndex);
+}
+
 float3 ApplyPresentDisplayMapping(
 	float3 color,
 	uint2 pixelPos,

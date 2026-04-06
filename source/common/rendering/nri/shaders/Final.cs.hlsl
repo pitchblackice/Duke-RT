@@ -629,6 +629,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float2 uv = ((float2)pixelPosU + 0.5) / float2(gTraceConstants.DisplayWidth, gTraceConstants.DisplayHeight);
 	const uint2 samplePos = ResolvePresentSamplePos(pixelPosU);
 	float4 composed = 0.0;
+	bool useRadianceDisplayMapping = false;
 
 	if ((gTraceConstants.Flags & 0x4u) != 0)
 	{
@@ -705,11 +706,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 10)
 	{
-		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
+		composed = float4(gComposedInput.Load(int3(samplePos, 0)).rgb, 1.0);
+		useRadianceDisplayMapping = true;
 	}
 	else if (gTraceConstants.DebugMode == 11)
 	{
-		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
+		composed = float4(gComposedInput.Load(int3(samplePos, 0)).rgb, 1.0);
+		useRadianceDisplayMapping = true;
 	}
 	else if (gTraceConstants.DebugMode == 12)
 	{
@@ -719,15 +722,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 13)
 	{
-		composed = float4(saturate(gHistoryInput.Load(int3(pixelPosU, 0)).rgb), 1.0);
+		composed = float4(gHistoryInput.Load(int3(pixelPosU, 0)).rgb, 1.0);
+		useRadianceDisplayMapping = true;
 	}
 	else if (gTraceConstants.DebugMode == 14)
 	{
-		composed = float4(saturate(gUpscaledInput.Load(int3(pixelPosU, 0)).rgb), 1.0);
+		composed = float4(gUpscaledInput.Load(int3(pixelPosU, 0)).rgb, 1.0);
+		useRadianceDisplayMapping = true;
 	}
 	else if (gTraceConstants.DebugMode == 15)
 	{
-		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
+		composed = float4(gComposedInput.Load(int3(samplePos, 0)).rgb, 1.0);
+		useRadianceDisplayMapping = true;
 	}
 	else if (gTraceConstants.DebugMode == 18)
 	{
@@ -787,24 +793,31 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (gTraceConstants.DebugMode == 24)
 	{
-		composed = float4(saturate(gDirectLightingInput.Load(int3(samplePos, 0)).rgb), 1.0);
+		composed = float4(gDirectLightingInput.Load(int3(samplePos, 0)).rgb, 1.0);
+		useRadianceDisplayMapping = true;
 	}
 	else if (gTraceConstants.DebugMode == 25)
 	{
-		composed = float4(saturate(gDirectEmissionInput.Load(int3(samplePos, 0)).rgb), 1.0);
+		composed = float4(gDirectEmissionInput.Load(int3(samplePos, 0)).rgb, 1.0);
+		useRadianceDisplayMapping = true;
 	}
 	else if ((gTraceConstants.Flags & 0x8u) != 0)
 	{
-		composed = float4(saturate(gComposedInput.Load(int3(samplePos, 0)).rgb), 1.0);
+		composed = float4(gComposedInput.Load(int3(samplePos, 0)).rgb, 1.0);
+		useRadianceDisplayMapping = true;
 	}
 	else if ((gTraceConstants.Flags & 0x2u) != 0)
 	{
 		composed = gUpscaledInput.Load(int3(pixelPosU, 0));
+		useRadianceDisplayMapping = true;
 	}
 	else
 	{
 		composed = gComposedInput.Load(int3(samplePos, 0));
+		useRadianceDisplayMapping = true;
 	}
 
-	gFinalOutput[targetPixelPos] = ApplyLegacyClampOutputMapping(composed.rgb);
+	gFinalOutput[targetPixelPos] = useRadianceDisplayMapping ?
+		ApplyDebugRadianceDisplayMapping(composed.rgb, targetPixelPos, gTraceConstants.FrameIndex) :
+		ApplyDebugNormalizedDisplayMapping(composed.rgb, targetPixelPos, gTraceConstants.FrameIndex);
 }
