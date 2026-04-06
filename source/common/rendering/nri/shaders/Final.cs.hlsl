@@ -1,5 +1,6 @@
 #include "Include/Shared.hlsli"
 #include "Include/RaytracingShared.hlsli"
+#include "Include/DisplayMapping.hlsli"
 
 bool UseSplitShadowDenoiser()
 {
@@ -680,7 +681,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		{
 			color = BootstrapCapturedSceneBaseColor(uv);
 		}
-		gFinalOutput[targetPixelPos] = saturate(color);
+		gFinalOutput[targetPixelPos] = ApplyLegacyClampOutputMapping(color);
 		return;
 	}
 
@@ -805,5 +806,5 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		composed = gComposedInput.Load(int3(samplePos, 0));
 	}
 
-	gFinalOutput[targetPixelPos] = saturate(composed.rgb);
+	gFinalOutput[targetPixelPos] = ApplyLegacyClampOutputMapping(composed.rgb);
 }

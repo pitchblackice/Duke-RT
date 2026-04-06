@@ -1,5 +1,6 @@
 #include "NRI.hlsl"
 #include "Include/PresentConstants.hlsli"
+#include "Include/DisplayMapping.hlsli"
 
 NRI_ROOT_CONSTANTS(NRIPresentConstants, gPresentConstants, 0, 2);
 
@@ -32,8 +33,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const uint2 inputSize = uint2(max(gPresentConstants.InputWidth, 1u), max(gPresentConstants.InputHeight, 1u));
 	const uint2 samplePos = min((uint2(pixelPos) * inputSize) / outputSize, inputSize - 1u);
-	// Phase 2A: FinalPresent now has a dedicated present-constants contract.
-	// Real SDR tonemap / HDR output mapping lands in the later display-mapping phases.
-	const float3 color = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
+	const float3 color = ApplyPresentDisplayMappingPreview(
+		gInputTexture.Load(int3(samplePos, 0)).rgb,
+		targetPixelPos,
+		gPresentConstants.FrameIndex,
+		gPresentConstants.OutputMode,
+		gPresentConstants.TonemapMode,
+		gPresentConstants.OutputFlags,
+		gPresentConstants.Exposure,
+		gPresentConstants.PaperWhiteNits,
+		gPresentConstants.DisplaySdrLuminance,
+		gPresentConstants.DisplayMaxLuminance);
 	gOutputTexture[targetPixelPos] = color;
 }
