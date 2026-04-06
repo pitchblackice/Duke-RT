@@ -587,7 +587,8 @@ public:
 		double closestCenterHitDistance = std::numeric_limits<double>::infinity();
 		int32_t closestCenterHitWallIndex = -1;
 		HWPortal* bestPortal = nullptr;
-		double bestScore = -std::numeric_limits<double>::infinity();
+		double bestDistanceSquared = std::numeric_limits<double>::infinity();
+		double bestFacing = -std::numeric_limits<double>::infinity();
 		int32_t bestPortalWallIndex = -1;
 		for (HWPortal* portal : di.Portals)
 		{
@@ -631,22 +632,31 @@ public:
 				}
 			}
 
+			const double distanceSquared = SquareDistToWall(di.Viewpoint.Pos.X, di.Viewpoint.Pos.Y, mirrorLine);
+			if (distanceSquared <= 0.0001)
+			{
+				outSelectedWallIndex = mirrorWallIndex;
+				return portal;
+			}
+
 			const DVector2 midpoint(
 				(mirrorLine->pos.X + next->pos.X) * 0.5,
 				(-mirrorLine->pos.Y - next->pos.Y) * 0.5);
 			const DVector2 toMirror = midpoint - cameraPos;
-			const double distanceSquared = toMirror.LengthSquared();
-			if (distanceSquared <= 0.0001)
+			const double midpointDistanceSquared = toMirror.LengthSquared();
+			if (midpointDistanceSquared <= 0.0001)
 			{
-				continue;
+				outSelectedWallIndex = mirrorWallIndex;
+				return portal;
 			}
 
-			const DVector2 toMirrorDir = toMirror / sqrt(distanceSquared);
+			const DVector2 toMirrorDir = toMirror / sqrt(midpointDistanceSquared);
 			const double facing = cameraDir | toMirrorDir;
-			const double score = facing * 1000.0 - sqrt(distanceSquared);
-			if (score > bestScore)
+			if (distanceSquared < bestDistanceSquared - 0.0001 ||
+				(std::abs(distanceSquared - bestDistanceSquared) <= 0.0001 && facing > bestFacing))
 			{
-				bestScore = score;
+				bestDistanceSquared = distanceSquared;
+				bestFacing = facing;
 				bestPortal = portal;
 				bestPortalWallIndex = mirrorWallIndex;
 			}
