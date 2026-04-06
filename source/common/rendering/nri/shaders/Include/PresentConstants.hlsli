@@ -41,7 +41,7 @@ struct NRIPresentConstants
 	float PaperWhiteNits;
 	float DisplayMaxLuminance;
 	float DisplaySdrLuminance;
-	uint NightVisionMode;
+	uint NightVisionPackedModeTint;
 	float NightVisionStrength;
 	float NightVisionExposure;
 	uint NightVisionPackedControls;

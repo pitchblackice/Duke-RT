@@ -1233,6 +1233,9 @@ OptionMenu "NRIOptions" protected
 	Slider "Night Vision Exposure",			"nri_ptnightvisionexposure",	0.25, 4.00, 0.05, 2
 	Slider "Night Vision Contrast",			"nri_ptnightvisioncontrast",	0.25, 2.00, 0.05, 2
 	Slider "Night Vision Saturation",			"nri_ptnightvisionsaturation",	0.00, 2.00, 0.05, 2
+	Slider "Night Vision Red",				"nri_ptnightvisionred",		0.00, 2.00, 0.05, 2
+	Slider "Night Vision Green",				"nri_ptnightvisiongreen",		0.00, 2.00, 0.05, 2
+	Slider "Night Vision Blue",				"nri_ptnightvisionblue",		0.00, 2.00, 0.05, 2
 	StaticText "These multipliers only apply while PT night vision is active."
 	StaticText "----------------"
 	StaticText "Traversal / Lighting"

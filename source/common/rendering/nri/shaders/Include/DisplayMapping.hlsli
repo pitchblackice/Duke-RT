@@ -33,7 +33,21 @@ float3 ApplyPresentSceneContrast(float3 color, float contrast)
 	return max((color - pivot.xxx) * safeContrast + pivot.xxx, 0.0);
 }
 
-float3 ApplyDukeNightVisionViewOperator(float3 color, float strength)
+uint GetNightVisionMode(uint packedModeTint)
+{
+	return packedModeTint & 0xffu;
+}
+
+float3 GetNightVisionTint(uint packedModeTint)
+{
+	const float unpackScale = 2.0 / 255.0;
+	return float3(
+		(float)((packedModeTint >> 8) & 0xffu) * unpackScale,
+		(float)((packedModeTint >> 16) & 0xffu) * unpackScale,
+		(float)((packedModeTint >> 24) & 0xffu) * unpackScale);
+}
+
+float3 ApplyDukeNightVisionViewOperator(float3 color, float strength, float3 tint)
 {
 	const float safeStrength = saturate(strength);
 	if (safeStrength <= 0.0)
@@ -45,15 +59,16 @@ float3 ApplyDukeNightVisionViewOperator(float3 color, float strength)
 	const float luma = max(dot(sanitized, float3(0.2126, 0.7152, 0.0722)), 0.0);
 	const float liftedLuma = max(luma, sqrt(luma) * 0.55);
 	const float3 detail = luma > 1e-4 ? lerp(1.0.xxx, saturate(sanitized / luma), 0.20) : 1.0.xxx;
-	const float3 tinted = liftedLuma * float3(0.18, 1.0, 0.22) * detail;
+	const float3 tinted = liftedLuma * max(tint, 0.0.xxx) * detail;
 	return lerp(sanitized, tinted, safeStrength);
 }
 
-float3 ApplyNightVisionViewOperator(float3 color, uint mode, float strength)
+float3 ApplyNightVisionViewOperator(float3 color, uint packedModeTint, float strength)
 {
+	const uint mode = GetNightVisionMode(packedModeTint);
 	if (mode == NRI_PT_NIGHT_VISION_MODE_DUKE)
 	{
-		return ApplyDukeNightVisionViewOperator(color, strength);
+		return ApplyDukeNightVisionViewOperator(color, strength, GetNightVisionTint(packedModeTint));
 	}
 
 	return max(color, 0.0);
@@ -66,7 +81,7 @@ float UnpackNightVisionPackedControl(uint packedControls, uint shift)
 }
 
 void ApplyNightVisionDisplayControlMultipliers(
-	uint mode,
+	uint packedModeTint,
 	float strength,
 	float nightVisionExposure,
 	uint nightVisionPackedControls,
@@ -75,7 +90,7 @@ void ApplyNightVisionDisplayControlMultipliers(
 	inout float saturation)
 {
 	const float safeStrength = saturate(strength);
-	if (mode == NRI_PT_NIGHT_VISION_MODE_NONE || safeStrength <= 0.0)
+	if (GetNightVisionMode(packedModeTint) == NRI_PT_NIGHT_VISION_MODE_NONE || safeStrength <= 0.0)
 	{
 		return;
 	}
@@ -277,7 +292,7 @@ float3 ApplyPresentDisplayMapping(
 	float saturation,
 	float shoulder,
 	float toe,
-	uint nightVisionMode,
+	uint nightVisionPackedModeTint,
 	float nightVisionStrength,
 	float nightVisionExposure,
 	uint nightVisionPackedControls,
@@ -292,7 +307,7 @@ float3 ApplyPresentDisplayMapping(
 	float tunedContrast = contrast;
 	float tunedSaturation = saturation;
 	ApplyNightVisionDisplayControlMultipliers(
-		nightVisionMode,
+		nightVisionPackedModeTint,
 		nightVisionStrength,
 		nightVisionExposure,
 		nightVisionPackedControls,
@@ -302,7 +317,7 @@ float3 ApplyPresentDisplayMapping(
 	const float3 sanitized = SanitizeFiniteColor(color);
 	const float3 exposed = ApplyManualExposure(sanitized, tunedExposure);
 	const float3 calibratedScene = ApplyPresentSceneContrast(exposed, tunedContrast);
-	const float3 sceneWithViewEffects = ApplyNightVisionViewOperator(calibratedScene, nightVisionMode, nightVisionStrength);
+	const float3 sceneWithViewEffects = ApplyNightVisionViewOperator(calibratedScene, nightVisionPackedModeTint, nightVisionStrength);
 	if (hdrSwapChainActive)
 	{
 		return ApplyHdrOutputMapping(sceneWithViewEffects, tonemapMode, tunedSaturation, shoulder, toe, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);

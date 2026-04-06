@@ -166,6 +166,39 @@ CUSTOM_CVAR(Float, nri_ptnightvisionsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBAL
 		self = 2.0f;
 	}
 }
+CUSTOM_CVAR(Float, nri_ptnightvisionred, 0.18f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 2.0f)
+	{
+		self = 2.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptnightvisiongreen, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 2.0f)
+	{
+		self = 2.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptnightvisionblue, 0.22f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 2.0f)
+	{
+		self = 2.0f;
+	}
+}
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, vid_vsync)
 EXTERN_CVAR(Int, nri_ptspherelongs)
@@ -191,6 +224,14 @@ namespace
 		const uint32_t contrastBits = (uint32_t)std::lround(std::clamp(contrast, 0.0f, 2.0f) * (65535.0f / 2.0f));
 		const uint32_t saturationBits = (uint32_t)std::lround(std::clamp(saturation, 0.0f, 2.0f) * (65535.0f / 2.0f));
 		return contrastBits | (saturationBits << 16);
+	}
+
+	static uint32_t PackNightVisionModeAndTint(NRIPTNightVisionMode mode, float red, float green, float blue)
+	{
+		const uint32_t redBits = (uint32_t)std::lround(std::clamp(red, 0.0f, 2.0f) * (255.0f / 2.0f));
+		const uint32_t greenBits = (uint32_t)std::lround(std::clamp(green, 0.0f, 2.0f) * (255.0f / 2.0f));
+		const uint32_t blueBits = (uint32_t)std::lround(std::clamp(blue, 0.0f, 2.0f) * (255.0f / 2.0f));
+		return (uint32_t)mode | (redBits << 8) | (greenBits << 16) | (blueBits << 24);
 	}
 
 	static uint64_t HashCombineLightOverlay(uint64_t hash, uint64_t value)
@@ -3411,7 +3452,7 @@ namespace
 		float PaperWhiteNits = 200.0f;
 		float DisplayMaxLuminance = 80.0f;
 		float DisplaySdrLuminance = 80.0f;
-		uint32_t NightVisionMode = 0;
+		uint32_t NightVisionPackedModeTint = 0;
 		float NightVisionStrength = 0.0f;
 		float NightVisionExposure = 1.0f;
 		uint32_t NightVisionPackedControls = 0;
@@ -3455,7 +3496,11 @@ namespace
 
 	static void ApplyNightVisionStateToPresentConstants(const NRIPTNightVisionState& state, NRIPresentConstants& constants)
 	{
-		constants.NightVisionMode = (uint32_t)state.mode;
+		constants.NightVisionPackedModeTint = PackNightVisionModeAndTint(
+			state.mode,
+			(float)nri_ptnightvisionred,
+			(float)nri_ptnightvisiongreen,
+			(float)nri_ptnightvisionblue);
 		constants.NightVisionStrength = nri_ptnightvision ? state.strength01 : 0.0f;
 		constants.NightVisionExposure = (float)nri_ptnightvisionexposure;
 		constants.NightVisionPackedControls = PackNightVisionControls(
@@ -6300,6 +6345,10 @@ void NRIRenderer::PrintStatus() const
 		(float)nri_ptnightvisionexposure,
 		(float)nri_ptnightvisioncontrast,
 		(float)nri_ptnightvisionsaturation);
+	Printf("NRI PT nightvision tint: red=%.3f green=%.3f blue=%.3f\n",
+		(float)nri_ptnightvisionred,
+		(float)nri_ptnightvisiongreen,
+		(float)nri_ptnightvisionblue);
 	Printf("NRI PT material calibration: fullbright_boost=%.3f\n",
 		(float)nri_ptfullbrightboost);
 	if (outputPolicy.hdrSwapChainActive)
