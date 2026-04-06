@@ -576,12 +576,13 @@ public:
 		sceneView.stats = stats;
 	}
 
-	static HWPortal* SelectPrimaryMirrorPortal(const HWDrawInfo& di, uint32_t& outCandidateCount, int32_t& outSelectedWallIndex)
+	static HWPortal* SelectPrimaryMirrorPortal(const HWDrawInfo& di, uint32_t& outCandidateCount, int32_t& outSelectedWallIndex, int32_t preferredWallIndex = -1)
 	{
 		outCandidateCount = 0;
 		outSelectedWallIndex = -1;
 		const DVector2 cameraPos(di.Viewpoint.Pos.X, -di.Viewpoint.Pos.Y);
 		const DVector2 cameraDir = di.Viewpoint.ViewVector;
+		HWPortal* preferredPortal = nullptr;
 		HWPortal* closestCenterHitPortal = nullptr;
 		double closestCenterHitDistance = std::numeric_limits<double>::infinity();
 		int32_t closestCenterHitWallIndex = -1;
@@ -602,6 +603,12 @@ public:
 				continue;
 			}
 
+			const int32_t mirrorWallIndex = wall.IndexOf(mirrorLine);
+			if (preferredWallIndex >= 0 && mirrorWallIndex == preferredWallIndex)
+			{
+				preferredPortal = portal;
+			}
+
 			const walltype* next = mirrorLine->point2Wall();
 			if (next == nullptr)
 			{
@@ -620,7 +627,7 @@ public:
 				{
 					closestCenterHitDistance = rayDistance;
 					closestCenterHitPortal = portal;
-					closestCenterHitWallIndex = wall.IndexOf(mirrorLine);
+					closestCenterHitWallIndex = mirrorWallIndex;
 				}
 			}
 
@@ -641,8 +648,14 @@ public:
 			{
 				bestScore = score;
 				bestPortal = portal;
-				bestPortalWallIndex = wall.IndexOf(mirrorLine);
+				bestPortalWallIndex = mirrorWallIndex;
 			}
+		}
+
+		if (preferredPortal != nullptr)
+		{
+			outSelectedWallIndex = preferredWallIndex;
+			return preferredPortal;
 		}
 
 		if (closestCenterHitPortal != nullptr)
@@ -1010,7 +1023,7 @@ public:
 		return true;
 	}
 
-	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, nri_scene::SceneView& outView)
+	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, int32_t preferredMirrorWallIndex, nri_scene::SceneView& outView)
 	{
 		outView = {};
 		MirrorPlayerCaptureStats captureStats = {};
@@ -1034,7 +1047,7 @@ public:
 		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
 		captureStats.localPlayerActorIndex = actorIndex;
 		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
-		HWPortal* const mirrorPortal = SelectPrimaryMirrorPortal(di, captureStats.mirrorPortalCandidates, captureStats.selectedMirrorWallIndex);
+		HWPortal* const mirrorPortal = SelectPrimaryMirrorPortal(di, captureStats.mirrorPortalCandidates, captureStats.selectedMirrorWallIndex, preferredMirrorWallIndex);
 		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
 		captureDi->visibility = di.visibility;
 		captureDi->rellight = di.rellight;
@@ -5432,10 +5445,17 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicCaptureMs);
 			return nri_scene::CaptureDynamicScene(di, dynamicSceneView);
 		}();
+		const int32_t preferredMirrorWallIndex =
+			mLastSurfaceProbe.valid &&
+			mLastSurfaceProbe.hit &&
+			(mLastSurfaceProbe.primitiveFlags & nri_scene::MaterialFlag_Mirror) != 0 &&
+			mLastSurfaceProbe.provenance.wallIndex >= 0 ?
+				mLastSurfaceProbe.provenance.wallIndex :
+				-1;
 		uint32_t visibleMirrorPortalCandidates = 0;
 		int32_t selectedVisibleMirrorWallIndex = -1;
 		HWPortal* const visibleMirrorPortal = !deferOverlayThisFrame ?
-			SelectPrimaryMirrorPortal(di, visibleMirrorPortalCandidates, selectedVisibleMirrorWallIndex) :
+			SelectPrimaryMirrorPortal(di, visibleMirrorPortalCandidates, selectedVisibleMirrorWallIndex, preferredMirrorWallIndex) :
 			nullptr;
 		mHasVisibleMirrorPortalLastFrame = visibleMirrorPortal != nullptr;
 		const bool hasMirrorExtendedDynamicScene =
@@ -5448,7 +5468,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		const bool hasMirrorPlayerScene =
 			!deferOverlayThisFrame &&
 			IsMirrorPlayerPreviewCaptureEnabled() &&
-			CaptureMirrorPlayerDynamicScene(di, mirrorPlayerSceneView);
+			CaptureMirrorPlayerDynamicScene(di, preferredMirrorWallIndex, mirrorPlayerSceneView);
 		if (hasDynamicScene)
 		{
 			{
