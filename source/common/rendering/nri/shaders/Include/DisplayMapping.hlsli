@@ -64,14 +64,42 @@ float3 ApplySdrTonemap(float3 color, uint tonemapMode)
 	return max(TonemapHable(color), 0.0);
 }
 
-float3 ApplyHdrOutputMapping(float3 color, float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
+float GetHdrSafePaperWhiteNits(float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
 {
-	const float safePaperWhite = max(paperWhiteNits, 1.0);
 	const float safeDisplaySdr = max(displaySdrLuminance, 1.0);
 	const float safeDisplayMax = max(displayMaxLuminance, safeDisplaySdr);
-	const float paperWhiteScale = safePaperWhite / safeDisplaySdr;
-	const float maxScale = safeDisplaySdr / safeDisplayMax;
-	return max(color * paperWhiteScale * maxScale, 0.0);
+	return clamp(max(paperWhiteNits, safeDisplaySdr), safeDisplaySdr, safeDisplayMax);
+}
+
+float GetHdrPaperWhiteScale(float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
+{
+	return GetHdrSafePaperWhiteNits(paperWhiteNits, displaySdrLuminance, displayMaxLuminance) / 80.0;
+}
+
+float GetHdrHeadroomInPaperWhites(float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
+{
+	const float safeDisplaySdr = max(displaySdrLuminance, 1.0);
+	const float safeDisplayMax = max(displayMaxLuminance, safeDisplaySdr);
+	const float safePaperWhite = GetHdrSafePaperWhiteNits(paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
+	return max(safeDisplayMax / safePaperWhite, 1.0);
+}
+
+float GetHdrMaxOutputScale(float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
+{
+	return GetHdrPaperWhiteScale(paperWhiteNits, displaySdrLuminance, displayMaxLuminance) *
+		GetHdrHeadroomInPaperWhites(paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
+}
+
+float3 ApplyHdrOutputMapping(float3 color, uint tonemapMode, float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
+{
+	const float paperWhiteScale = GetHdrPaperWhiteScale(paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
+	const float headroomInPaperWhites = GetHdrHeadroomInPaperWhites(paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
+	const float referenceInput = 1.0 / headroomInPaperWhites;
+	const float referenceCurve = max(ApplySdrTonemap(referenceInput.xxx, tonemapMode).x, 1e-5);
+	const float3 mappedPaperWhiteUnits = min(
+		ApplySdrTonemap(color / headroomInPaperWhites, tonemapMode) / referenceCurve,
+		headroomInPaperWhites.xxx);
+	return max(mappedPaperWhiteUnits * paperWhiteScale, 0.0);
 }
 
 float LinearToSrgbChannel(float value)
@@ -147,7 +175,7 @@ float3 ApplyPresentDisplayMapping(
 	const float3 exposed = ApplyManualExposure(sanitized, exposure);
 	if (hdrSwapChainActive)
 	{
-		return ApplyHdrOutputMapping(exposed, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
+		return ApplyHdrOutputMapping(exposed, tonemapMode, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
 	}
 
 	const float3 toneMapped = ApplySdrTonemap(exposed, tonemapMode);

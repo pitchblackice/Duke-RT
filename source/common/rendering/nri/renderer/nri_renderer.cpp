@@ -5885,6 +5885,20 @@ void NRIRenderer::PrintStatus() const
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,
 		outputPolicy.displayMaxLuminance);
+	if (outputPolicy.hdrSwapChainActive)
+	{
+		const float safeDisplaySdr = std::max(outputPolicy.displaySdrLuminance, 1.0f);
+		const float safeDisplayMax = std::max(outputPolicy.displayMaxLuminance, safeDisplaySdr);
+		const float safePaperWhite = std::clamp(std::max(outputPolicy.paperWhiteNits, safeDisplaySdr), safeDisplaySdr, safeDisplayMax);
+		const float hdrPaperWhiteScale = safePaperWhite / 80.0f;
+		const float hdrHeadroom = std::max(safeDisplayMax / safePaperWhite, 1.0f);
+		const float hdrMaxScale = hdrPaperWhiteScale * hdrHeadroom;
+		Printf("NRI PT output hdr: paper_scale=%.3f headroom=%.3f max_scale=%.3f active_linear16=%s\n",
+			hdrPaperWhiteScale,
+			hdrHeadroom,
+			hdrMaxScale,
+			outputPolicy.resolvedMode == NRIPTOutputMode::HDRLinear16 ? "yes" : "no");
+	}
 	Printf("NRI PT routing: debug=%u route=%s presenter=%s owner=%s root_bytes=scene:%u temporal:%u present:%u\n",
 		GetEffectivePtDebugMode(),
 		presentRoute.routeName,

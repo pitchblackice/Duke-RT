@@ -987,6 +987,47 @@ namespace
 		}
 	}
 
+	static float GetSafeDisplaySdrLuminance(float displaySdrLuminance)
+	{
+		return displaySdrLuminance > 1.0f ? displaySdrLuminance : 1.0f;
+	}
+
+	static float GetSafeDisplayMaxLuminance(float displaySdrLuminance, float displayMaxLuminance)
+	{
+		const float safeDisplaySdr = GetSafeDisplaySdrLuminance(displaySdrLuminance);
+		return displayMaxLuminance > safeDisplaySdr ? displayMaxLuminance : safeDisplaySdr;
+	}
+
+	static float GetClampedPaperWhiteNits(float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
+	{
+		const float safeDisplaySdr = GetSafeDisplaySdrLuminance(displaySdrLuminance);
+		const float safeDisplayMax = GetSafeDisplayMaxLuminance(displaySdrLuminance, displayMaxLuminance);
+		float safePaperWhite = paperWhiteNits > safeDisplaySdr ? paperWhiteNits : safeDisplaySdr;
+		if (safePaperWhite > safeDisplayMax)
+		{
+			safePaperWhite = safeDisplayMax;
+		}
+		return safePaperWhite;
+	}
+
+	static float GetHdrPaperWhiteScale(const NRIPTOutputPolicy& policy)
+	{
+		return GetClampedPaperWhiteNits(policy.paperWhiteNits, policy.displaySdrLuminance, policy.displayMaxLuminance) / 80.0f;
+	}
+
+	static float GetHdrHeadroomInPaperWhites(const NRIPTOutputPolicy& policy)
+	{
+		const float safeDisplayMax = GetSafeDisplayMaxLuminance(policy.displaySdrLuminance, policy.displayMaxLuminance);
+		const float safePaperWhite = GetClampedPaperWhiteNits(policy.paperWhiteNits, policy.displaySdrLuminance, policy.displayMaxLuminance);
+		const float headroom = safeDisplayMax / safePaperWhite;
+		return headroom > 1.0f ? headroom : 1.0f;
+	}
+
+	static float GetHdrMaxOutputScale(const NRIPTOutputPolicy& policy)
+	{
+		return GetHdrPaperWhiteScale(policy) * GetHdrHeadroomInPaperWhites(policy);
+	}
+
 	static FString DescribeSwapChainImageMask(uint64_t mask, uint32_t textureCount)
 	{
 		if (textureCount == 0)
@@ -3259,8 +3300,8 @@ void NRIRenderDevice::ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& ou
 			outReason = "hdr10-pq-display-sdr";
 			return;
 		}
-		outResolvedFormat = outRequestedFormat;
-		outReason = "hdr10-pq";
+		outResolvedFormat = nri::SwapChainFormat::BT709_G10_16BIT;
+		outReason = "hdr10-pq-deferred-linear16";
 		return;
 
 	default:
@@ -3423,6 +3464,9 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 	const FString presentCounts = DescribeSwapChainImageCounts(mSwapChainPresentCounts);
 	const FString abandonCounts = DescribeSwapChainImageCounts(mSwapChainAbandonCounts);
 	const NRIPTOutputPolicy outputPolicy = GetPathTracingOutputPolicy();
+	const float hdrPaperWhiteScale = GetHdrPaperWhiteScale(outputPolicy);
+	const float hdrHeadroom = GetHdrHeadroomInPaperWhites(outputPolicy);
+	const float hdrMaxScale = GetHdrMaxOutputScale(outputPolicy);
 	Printf("NRI PT swapchain: textures=%u queued_frames=%u vsync=%s flags=%s texture_override=%d flag_override=%s wait_present=%s acquire_seen=%u/%u [%s] present_seen=%u/%u [%s]\n",
 		(uint32_t)mSwapChainTextureCount,
 		(uint32_t)mSwapChainQueuedFrameNum,
@@ -3437,7 +3481,7 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 		CountSetBits(mObservedSwapChainPresentMask),
 		(uint32_t)mSwapChainTextureCount,
 		presentedImages.GetChars());
-	Printf("NRI PT swapchain output: requested_mode=%s resolved_mode=%s requested_format=%s created_format=%s resolved_texture_format=%s tonemap=%s exposure=%.3f paper_white=%.1f display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f display_desc_result=%s reason=%s\n",
+	Printf("NRI PT swapchain output: requested_mode=%s resolved_mode=%s requested_format=%s created_format=%s resolved_texture_format=%s tonemap=%s exposure=%.3f paper_white=%.1f hdr_paper_scale=%.3f hdr_headroom=%.3f hdr_max_scale=%.3f display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f display_desc_result=%s reason=%s\n",
 		GetNRIPTOutputModeName(outputPolicy.requestedMode),
 		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
 		GetSwapChainFormatName(mRequestedSwapChainFormat),
@@ -3446,6 +3490,9 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 		GetNRIPTTonemapModeName(outputPolicy.tonemapMode),
 		outputPolicy.exposure,
 		outputPolicy.paperWhiteNits,
+		hdrPaperWhiteScale,
+		hdrHeadroom,
+		hdrMaxScale,
 		mHasSwapChainDisplayDesc ? "yes" : "no",
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,

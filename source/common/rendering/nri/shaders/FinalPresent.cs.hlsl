@@ -34,6 +34,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 inputSize = uint2(max(gPresentConstants.InputWidth, 1u), max(gPresentConstants.InputHeight, 1u));
 	const uint2 samplePos = min((uint2(pixelPos) * inputSize) / outputSize, inputSize - 1u);
 	const float3 inputColor = gInputTexture.Load(int3(samplePos, 0)).rgb;
+	const bool hdrSwapChainActive =
+		gPresentConstants.OutputMode != NRI_PT_OUTPUT_MODE_SDR &&
+		(gPresentConstants.OutputFlags & NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE) != 0u;
 	if (gPresentConstants.DebugMode == 13u || gPresentConstants.DebugMode == 14u || gPresentConstants.DebugMode == 15u || gPresentConstants.DebugMode == 45u)
 	{
 		float3 debugColor = SanitizeFiniteColor(inputColor);
@@ -42,7 +45,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			debugColor = ApplyManualExposure(debugColor, gPresentConstants.Exposure);
 		}
 
-		gOutputTexture[targetPixelPos] = ApplyDebugRadianceDisplayMapping(debugColor, targetPixelPos, gPresentConstants.FrameIndex);
+		gOutputTexture[targetPixelPos] = hdrSwapChainActive ?
+			ApplyHdrOutputMapping(
+				debugColor,
+				gPresentConstants.TonemapMode,
+				gPresentConstants.PaperWhiteNits,
+				gPresentConstants.DisplaySdrLuminance,
+				gPresentConstants.DisplayMaxLuminance) :
+			ApplyDebugRadianceDisplayMapping(debugColor, targetPixelPos, gPresentConstants.FrameIndex);
 		return;
 	}
 
