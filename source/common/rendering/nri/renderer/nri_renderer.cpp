@@ -508,6 +508,14 @@ public:
 		return true;
 	}
 
+	static bool IsMirrorPlayerPreviewCaptureEnabled()
+	{
+		// The preview capture is not yet consumed by a reflection-only trace path.
+		// Running a second CreateScene pass here can still perturb live render state,
+		// so keep it disabled until the later mirror visibility phases land.
+		return false;
+	}
+
 	static bool RequiresExclusiveMaterialOnlyChunkReplacement(uint32_t reasonMask)
 	{
 		// Material-only wall mutations leave the stale static wall traceable if
@@ -4793,7 +4801,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicCaptureMs);
 			return nri_scene::CaptureDynamicScene(di, dynamicSceneView);
 		}();
-		const bool hasMirrorPlayerScene = !deferOverlayThisFrame && CaptureMirrorPlayerDynamicScene(di, mirrorPlayerSceneView);
+		const bool hasMirrorPlayerScene =
+			!deferOverlayThisFrame &&
+			IsMirrorPlayerPreviewCaptureEnabled() &&
+			CaptureMirrorPlayerDynamicScene(di, mirrorPlayerSceneView);
 		if (hasDynamicScene)
 		{
 			{
