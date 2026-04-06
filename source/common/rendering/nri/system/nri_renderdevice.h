@@ -207,9 +207,7 @@ private:
 	bool CreateOwnedTexture(NRITextureResource& resource, uint32_t width, uint32_t height, nri::Format format, nri::TextureUsageBits usage, nri::TextureType type = nri::TextureType::TEXTURE_2D, uint32_t layerNum = 1, nri::TextureView shaderViewType = nri::TextureView::TEXTURE);
 	bool UploadTextureData(NRITextureResource& resource, const void* data, uint32_t width, uint32_t height, uint32_t rowPitch);
 	bool UploadTextureSubresources(NRITextureResource& resource, const nri::TextureSubresourceUploadDesc* subresources, uint32_t subresourceNum, uint32_t width, uint32_t height);
-	bool CopyTextureToTexture(NRITextureResource& destination, NRITextureResource& source);
 	bool CopyCurrentTargetToTexture(NRITextureResource& destination);
-	bool SnapshotTextureToCanvas(FCanvasTexture* tex, NRITextureResource& source);
 	bool LoadShaderBlob(const char* fileName, std::vector<uint8_t>& outBlob);
 	const void* GetVertexShaderBytecode(size_t& size) const;
 	const void* GetPixelShaderBytecode(size_t& size) const;
@@ -299,6 +297,7 @@ private:
 	NRITextureResource* mCurrentPresentTarget = nullptr;
 	FCanvasTexture* mActiveCanvasTexture = nullptr;
 	FTexture* mActiveCanvasSourceTexture = nullptr;
+	FCanvasTexture* mPendingViewSnapshotCanvas = nullptr;
 	FGameTexture* mFrameGenerationUiTexture = nullptr;
 	nri::DescriptorSet* mWhiteTextureSet = nullptr;
 	NRIHardwareTexture* mWhiteTexture = nullptr;
