@@ -512,10 +512,10 @@ public:
 
 	static bool IsMirrorPlayerPreviewCaptureEnabled()
 	{
-		// The preview capture is not yet consumed by a reflection-only trace path.
-		// Running a second CreateScene pass here can still perturb live render state,
-		// so keep it disabled until the later mirror visibility phases land.
-		return false;
+		// Phase 5 merges the captured local-player slice into the live PT dynamic
+		// overlay and phase 4 marks it reflection-only, so the extra capture pass is
+		// now consumed by the active mirror path instead of running as inert preview work.
+		return true;
 	}
 
 	static FGameTexture* GetLiveActorSurfaceTexture(const DCoreActor& actor, nri_scene::SurfaceSourceType sourceType)
@@ -4951,13 +4951,17 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			activeDynamicGeometry != nullptr &&
 			!activeDynamicGeometry->primitives.empty() &&
 			activeDynamicMaterials != nullptr;
+		const bool hasMirrorPlayerOverlay =
+			hasMirrorPlayerScene &&
+			!mirrorPlayerGeometry.primitives.empty() &&
+			!mirrorPlayerMaterialBridge.materials.empty();
 		const bool hasRuntimeDebugSphereOverlay = !deferOverlayThisFrame && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereMs);
 			return BuildRuntimeDebugSphereOverlay(debugSphereGeometry, debugSphereMaterialBridge);
 		}();
 
-		if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasRuntimeDebugSphereOverlay)
+		if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasMirrorPlayerOverlay || hasRuntimeDebugSphereOverlay)
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.overlayAssembleMs);
 			overlayGeometry = {};
@@ -4985,6 +4989,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			{
 				AppendGeometry(*activeDynamicGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
 				AppendMaterialBridge(*activeDynamicMaterials, overlayMaterialBridge);
+			}
+
+			if (hasMirrorPlayerOverlay)
+			{
+				AppendGeometry(mirrorPlayerGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
+				AppendMaterialBridge(mirrorPlayerMaterialBridge, overlayMaterialBridge);
 			}
 
 			if (hasRuntimeDebugSphereOverlay)
@@ -5099,7 +5109,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 			if (paletteReady && texturesReady && buffersReady && accelerationReady)
 			{
-				mUsedDynamicSceneLastFrame = hasActiveDynamicOverlay;
+				mUsedDynamicSceneLastFrame = hasActiveDynamicOverlay || hasMirrorPlayerOverlay;
 				mGpuSceneHasDynamicOverlay = true;
 				if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
 				{
@@ -5148,7 +5158,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 				activeStats = MergeSceneStats(
 					mStaticMapScene.sceneView.stats,
-					activeDynamicSceneView != nullptr ? activeDynamicSceneView->stats : nri_scene::SceneDebugStats{});
+					hasMirrorPlayerScene ?
+						MergeSceneStats(
+							activeDynamicSceneView != nullptr ? activeDynamicSceneView->stats : nri_scene::SceneDebugStats{},
+							mirrorPlayerSceneView.stats) :
+						(activeDynamicSceneView != nullptr ? activeDynamicSceneView->stats : nri_scene::SceneDebugStats{}));
 			}
 			else
 			{
