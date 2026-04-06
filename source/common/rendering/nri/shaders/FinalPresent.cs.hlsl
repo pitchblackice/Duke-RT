@@ -36,6 +36,14 @@ struct NRITraceConstants
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;
+	uint OutputMode;
+	uint TonemapMode;
+	uint OutputFlags;
+	uint ReservedOutput0;
+	float Exposure;
+	float PaperWhiteNits;
+	float DisplayMaxLuminance;
+	float DisplaySdrLuminance;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
@@ -70,6 +78,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint packedInputSize = gTraceConstants.ReservedTrace1;
 	const uint2 inputSize = uint2(max(packedInputSize & 0xffffu, 1u), max(packedInputSize >> 16u, 1u));
 	const uint2 samplePos = min((uint2(pixelPos) * inputSize) / outputSize, inputSize - 1u);
+	// Phase 0/1 HDR plumbing: output-policy constants are now available here.
+	// Real SDR tonemap / HDR output mapping lands in the later display-mapping phases.
 	const float3 color = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
 	gOutputTexture[targetPixelPos] = color;
 }

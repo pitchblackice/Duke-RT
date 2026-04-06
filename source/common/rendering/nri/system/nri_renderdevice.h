@@ -1,6 +1,7 @@
 #pragma once
 
 #include "base_sysfb.h"
+#include "../nri_output.h"
 #include "../framegen/nri_framegen.h"
 #include "nri_local.h"
 #include "Extensions/NRIWrapperD3D12.h"
@@ -59,6 +60,7 @@ public:
 	void PrintPathTracingSurfaceProbeStatus() const override;
 	void ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeaponLightEvent>& outEvents);
 	uint32_t GetPendingPathTracingWeaponLightEventCount() const;
+	NRIPTOutputPolicy GetPathTracingOutputPolicy() const;
 
 	IHardwareTexture* CreateHardwareTexture(int numchannels) override;
 	IVertexBuffer* CreateVertexBuffer() override;
@@ -312,6 +314,10 @@ private:
 	std::vector<uint8_t> mPixelShaderBlob;
 	FString mDeviceName = "NRI";
 	nri::SwapChainBits mSwapChainFlags = nri::SwapChainBits::NONE;
+	nri::SwapChainFormat mRequestedSwapChainFormat = nri::SwapChainFormat::BT709_G22_8BIT;
+	nri::Format mResolvedSwapChainTextureFormat = nri::Format::UNKNOWN;
+	nri::DisplayDesc mSwapChainDisplayDesc = {};
+	nri::Result mSwapChainDisplayDescResult = nri::Result::FAILURE;
 	uint8_t mSwapChainQueuedFrameNum = 0;
 	uint8_t mSwapChainTextureCount = 0;
 	uint64_t mObservedSwapChainAcquireMask = 0;
@@ -332,6 +338,7 @@ private:
 	bool mPathTracingLevelPreloadPending = false;
 	bool mHasAcquiredSwapChainImage = false;
 	bool mHasPresentedSwapChainFrame = false;
+	bool mHasSwapChainDisplayDesc = false;
 	bool mFrameGenerationUiTargetActive = false;
 	uint32_t mCurrentSwapChainImage = 0;
 	uint32_t mCurrentQueuedFrameIndex = 0;

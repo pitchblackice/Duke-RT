@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../nri_output.h"
 #include "nri_nrd.h"
 #include "nri_resources.h"
 #include "nri_scene_lights.h"
@@ -899,6 +900,7 @@ private:
 	bool mHasFrameGenerationConfigState = false;
 	bool mHasDirectionalLightState = false;
 	bool mPathTracingSupported = true;
+	bool mHasOutputPolicyState = false;
 	bool mHasRuntimeLinkTraceState = false;
 	SurfaceProbeFrameState mSurfaceProbeFrame = {};
 	bool mResetHistory = true;
@@ -976,6 +978,8 @@ private:
 	int mLastDebugMode = -1;
 	int mLastMainUpscalerRequest = -1;
 	int mLastPostSharpenRequest = -1;
+	NRIPTOutputMode mLastOutputRequestedMode = NRIPTOutputMode::SDR;
+	NRIPTOutputMode mLastOutputResolvedMode = NRIPTOutputMode::SDR;
 	NRIMainUpscalerKind mLastMainUpscalerResolved = NRIMainUpscalerKind::Off;
 	NRIPostSharpenKind mLastPostSharpenResolved = NRIPostSharpenKind::Off;
 	NRIMainUpscalerKind mLastTemporalHistoryMainUpscaler = NRIMainUpscalerKind::Off;

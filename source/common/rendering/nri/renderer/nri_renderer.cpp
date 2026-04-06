@@ -43,6 +43,50 @@ CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttaa, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 3)
+	{
+		self = 3;
+	}
+}
+CUSTOM_CVAR(Int, nri_pttonemap, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 2)
+	{
+		self = 2;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.125f)
+	{
+		self = 0.125f;
+	}
+	else if (self > 8.0f)
+	{
+		self = 8.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptpaperwhite, 200.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 80.0f)
+	{
+		self = 80.0f;
+	}
+	else if (self > 400.0f)
+	{
+		self = 400.0f;
+	}
+}
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, vid_vsync)
 EXTERN_CVAR(Int, nri_ptspherelongs)
@@ -2888,6 +2932,14 @@ namespace
 		uint32_t PortalDepth = 0;
 		uint32_t ReservedTrace0 = 0;
 		uint32_t ReservedTrace1 = 0;
+		uint32_t OutputMode = 0;
+		uint32_t TonemapMode = 0;
+		uint32_t OutputFlags = 0;
+		uint32_t ReservedOutput0 = 0;
+		float Exposure = 1.0f;
+		float PaperWhiteNits = 200.0f;
+		float DisplayMaxLuminance = 80.0f;
+		float DisplaySdrLuminance = 80.0f;
 	};
 
 	struct NRIReprojectionData
@@ -2897,6 +2949,21 @@ namespace
 		float currentWorldToView[16] = {};
 		float previousWorldToView[16] = {};
 	};
+
+	static void ApplyOutputPolicyToConstants(const NRIPTOutputPolicy& policy, NRITraceConstants& constants)
+	{
+		constants.OutputMode = (uint32_t)policy.resolvedMode;
+		constants.TonemapMode = (uint32_t)policy.tonemapMode;
+		constants.OutputFlags =
+			(policy.displayInfoAvailable ? 0x1u : 0u) |
+			(policy.displayHdrSupported ? 0x2u : 0u) |
+			(policy.hdrSwapChainActive ? 0x4u : 0u) |
+			(policy.offscreenHdrTarget ? 0x8u : 0u);
+		constants.Exposure = policy.exposure;
+		constants.PaperWhiteNits = policy.paperWhiteNits;
+		constants.DisplayMaxLuminance = policy.displayMaxLuminance;
+		constants.DisplaySdrLuminance = policy.displaySdrLuminance;
+	}
 
 	static bool IsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
 	{
@@ -5617,6 +5684,7 @@ void NRIRenderer::PrintStatus() const
 	const NRITextureResource& vendorOutput = GetFrameTexture(FrameTextureSlot::VendorOutput);
 	const NRITextureResource& postSharpenOutput = GetFrameTexture(FrameTextureSlot::PostSharpenOutput);
 	const auto& frameGenPolicy = mFrameBuffer->mFrameGeneration.GetPolicy();
+	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
 	const bool hasFrameGenDesc = mFrameBuffer->mFrameGeneration.HasFrameDesc();
 	const auto& frameGenDesc = mFrameBuffer->mFrameGeneration.GetFrameDesc();
 	const auto& frameGenAudit = mFrameBuffer->mFrameGeneration.GetInputAudit();
@@ -5637,6 +5705,18 @@ void NRIRenderer::PrintStatus() const
 		mOutputHeight,
 		mHasPreviousCameraState ? "yes" : "no",
 		mResetHistory ? "yes" : "no");
+	Printf("NRI PT output: requested_mode=%s resolved_mode=%s tonemap=%s exposure=%.3f paper_white=%.1f offscreen_hdr=%s hdr_swapchain=%s display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f\n",
+		GetNRIPTOutputModeName(outputPolicy.requestedMode),
+		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
+		GetNRIPTTonemapModeName(outputPolicy.tonemapMode),
+		outputPolicy.exposure,
+		outputPolicy.paperWhiteNits,
+		outputPolicy.offscreenHdrTarget ? "yes" : "no",
+		outputPolicy.hdrSwapChainActive ? "yes" : "no",
+		outputPolicy.displayInfoAvailable ? "yes" : "no",
+		outputPolicy.displayHdrSupported ? "yes" : "no",
+		outputPolicy.displaySdrLuminance,
+		outputPolicy.displayMaxLuminance);
 	Printf("NRI PT features: bootstrap=%s denoise=%s validation=%s api_validation=%s dred=%s main_upscaler=%s->%s post_sharpen=%s->%s requested_mode=%s resolved_mode=%s requested_render_scale=%.3f resolved_render_scale=%.3f sharpness=%.3f\n",
 		nri_ptbootstrap ? "on" : "off",
 		nri_denoise ? "on" : "off",
@@ -13131,6 +13211,7 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 	Clocker clock(NriPTRawPresent);
 
 	NRITraceConstants constants = {};
+	ApplyOutputPolicyToConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
 	constants.DisplayWidth = mOutputWidth;
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
@@ -13190,6 +13271,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 	Clocker clock(NriPTFinalPresent);
 
 	NRITraceConstants constants = {};
+	ApplyOutputPolicyToConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
 	constants.RenderWidth = mRenderWidth;
 	constants.RenderHeight = mRenderHeight;
 	constants.DisplayWidth = mOutputWidth;
@@ -13418,6 +13500,7 @@ bool NRIRenderer::DispatchFinal()
 	Clocker clock(NriPTFinal);
 
 	NRITraceConstants constants = {};
+	ApplyOutputPolicyToConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool presentRawTrace = (!nri_ptbootstrap && !mUseUpscaledInFinal) || bootstrapMode >= 13u;
 	Copy3(mCurrentCameraPos, constants.CameraPos);
@@ -13821,6 +13904,29 @@ void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFra
 	if (preserveHistory)
 	{
 		return;
+	}
+
+	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
+	if (!mHasOutputPolicyState)
+	{
+		mHasOutputPolicyState = true;
+		mLastOutputRequestedMode = outputPolicy.requestedMode;
+		mLastOutputResolvedMode = outputPolicy.resolvedMode;
+	}
+	else if (outputPolicy.requestedMode != mLastOutputRequestedMode || outputPolicy.resolvedMode != mLastOutputResolvedMode)
+	{
+		RequestHistoryReset("output-mode-change");
+		if (ShouldEmitTemporalTraceLogs())
+		{
+			Printf("NRI PT temporal reset: reason=output-mode-change frame=%u requested_output=%s->%s resolved_output=%s->%s\n",
+				mFrameIndex,
+				GetNRIPTOutputModeName(mLastOutputRequestedMode),
+				GetNRIPTOutputModeName(outputPolicy.requestedMode),
+				GetNRIPTOutputModeName(mLastOutputResolvedMode),
+				GetNRIPTOutputModeName(outputPolicy.resolvedMode));
+		}
+		mLastOutputRequestedMode = outputPolicy.requestedMode;
+		mLastOutputResolvedMode = outputPolicy.resolvedMode;
 	}
 
 	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);

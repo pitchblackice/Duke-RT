@@ -37,6 +37,14 @@ struct NRITraceConstants
 	uint PortalDepth;
 	uint ReservedTrace0;
 	uint ReservedTrace1;
+	uint OutputMode;
+	uint TonemapMode;
+	uint OutputFlags;
+	uint ReservedOutput0;
+	float Exposure;
+	float PaperWhiteNits;
+	float DisplayMaxLuminance;
+	float DisplaySdrLuminance;
 };
 
 NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);

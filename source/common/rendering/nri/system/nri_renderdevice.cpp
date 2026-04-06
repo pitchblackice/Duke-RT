@@ -54,6 +54,10 @@ EXTERN_CVAR(Float, nri_ptsectorlightmultiplier)
 EXTERN_CVAR(Float, nri_ptsectorambientscale)
 EXTERN_CVAR(Float, nri_ptsectorhemiscale)
 EXTERN_CVAR(Float, nri_ptsectorfogscale)
+EXTERN_CVAR(Int, nri_ptoutputmode)
+EXTERN_CVAR(Int, nri_pttonemap)
+EXTERN_CVAR(Float, nri_ptexposure)
+EXTERN_CVAR(Float, nri_ptpaperwhite)
 EXTERN_CVAR(Float, nri_ptsectorclamp)
 EXTERN_CVAR(Int, nri_ptsectorfilterpal)
 EXTERN_CVAR(Int, nri_ptsectorfilterminshade)
@@ -920,6 +924,52 @@ namespace
 		}
 
 		return description;
+	}
+
+	static const char* GetSwapChainFormatName(nri::SwapChainFormat format)
+	{
+		switch (format)
+		{
+		case nri::SwapChainFormat::BT709_G10_16BIT: return "BT709_G10_16BIT";
+		case nri::SwapChainFormat::BT709_G22_8BIT: return "BT709_G22_8BIT";
+		case nri::SwapChainFormat::BT709_G22_10BIT: return "BT709_G22_10BIT";
+		case nri::SwapChainFormat::BT2020_G2084_10BIT: return "BT2020_G2084_10BIT";
+		default: return "unknown";
+		}
+	}
+
+	static const char* GetNriFormatName(nri::Format format)
+	{
+		switch (format)
+		{
+		case nri::Format::UNKNOWN: return "UNKNOWN";
+		case nri::Format::RGBA16_SFLOAT: return "RGBA16_SFLOAT";
+		case nri::Format::BGRA8_UNORM: return "BGRA8_UNORM";
+		case nri::Format::RGBA8_UNORM: return "RGBA8_UNORM";
+		case nri::Format::R10_G10_B10_A2_UNORM: return "R10_G10_B10_A2_UNORM";
+		default: return "other";
+		}
+	}
+
+	static NRIPTOutputMode GetRequestedPathTracingOutputMode()
+	{
+		switch ((int)nri_ptoutputmode)
+		{
+		case 1: return NRIPTOutputMode::HDRAuto;
+		case 2: return NRIPTOutputMode::HDRLinear16;
+		case 3: return NRIPTOutputMode::HDR10PQ;
+		default: return NRIPTOutputMode::SDR;
+		}
+	}
+
+	static NRIPTTonemapMode GetRequestedPathTracingTonemapMode()
+	{
+		switch ((int)nri_pttonemap)
+		{
+		case 1: return NRIPTTonemapMode::ACESFitted;
+		case 2: return NRIPTTonemapMode::Reinhard;
+		default: return NRIPTTonemapMode::Hable;
+		}
 	}
 
 	static FString DescribeSwapChainImageMask(uint64_t mask, uint32_t textureCount)
@@ -3120,6 +3170,38 @@ void NRIRenderDevice::PrintPathTracingStatus() const
 	}
 }
 
+NRIPTOutputPolicy NRIRenderDevice::GetPathTracingOutputPolicy() const
+{
+	NRIPTOutputPolicy policy = {};
+	policy.requestedMode = GetRequestedPathTracingOutputMode();
+	policy.tonemapMode = GetRequestedPathTracingTonemapMode();
+	policy.exposure = (float)nri_ptexposure;
+	policy.paperWhiteNits = (float)nri_ptpaperwhite;
+	policy.displayInfoAvailable = mHasSwapChainDisplayDesc;
+	policy.displayHdrSupported = mHasSwapChainDisplayDesc && mSwapChainDisplayDesc.isHDR;
+	policy.displayMaxLuminance = mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.maxLuminance : 80.0f;
+	policy.displaySdrLuminance = mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.sdrLuminance : 80.0f;
+	policy.offscreenHdrTarget = true;
+
+	switch (mRequestedSwapChainFormat)
+	{
+	case nri::SwapChainFormat::BT709_G10_16BIT:
+		policy.resolvedMode = NRIPTOutputMode::HDRLinear16;
+		policy.hdrSwapChainActive = true;
+		break;
+	case nri::SwapChainFormat::BT2020_G2084_10BIT:
+		policy.resolvedMode = NRIPTOutputMode::HDR10PQ;
+		policy.hdrSwapChainActive = true;
+		break;
+	default:
+		policy.resolvedMode = NRIPTOutputMode::SDR;
+		policy.hdrSwapChainActive = false;
+		break;
+	}
+
+	return policy;
+}
+
 void NRIRenderDevice::PrintPathTracingBuffers() const
 {
 	PrintPathTracingCaps();
@@ -3256,6 +3338,7 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 	const FString acquireCounts = DescribeSwapChainImageCounts(mSwapChainAcquireCounts);
 	const FString presentCounts = DescribeSwapChainImageCounts(mSwapChainPresentCounts);
 	const FString abandonCounts = DescribeSwapChainImageCounts(mSwapChainAbandonCounts);
+	const NRIPTOutputPolicy outputPolicy = GetPathTracingOutputPolicy();
 	Printf("NRI PT swapchain: textures=%u queued_frames=%u vsync=%s flags=%s texture_override=%d flag_override=%s wait_present=%s acquire_seen=%u/%u [%s] present_seen=%u/%u [%s]\n",
 		(uint32_t)mSwapChainTextureCount,
 		(uint32_t)mSwapChainQueuedFrameNum,
@@ -3270,6 +3353,19 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 		CountSetBits(mObservedSwapChainPresentMask),
 		(uint32_t)mSwapChainTextureCount,
 		presentedImages.GetChars());
+	Printf("NRI PT swapchain output: requested_mode=%s resolved_mode=%s requested_format=%s resolved_texture_format=%s tonemap=%s exposure=%.3f paper_white=%.1f display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f display_desc_result=%s\n",
+		GetNRIPTOutputModeName(outputPolicy.requestedMode),
+		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
+		GetSwapChainFormatName(mRequestedSwapChainFormat),
+		GetNriFormatName(mResolvedSwapChainTextureFormat),
+		GetNRIPTTonemapModeName(outputPolicy.tonemapMode),
+		outputPolicy.exposure,
+		outputPolicy.paperWhiteNits,
+		mHasSwapChainDisplayDesc ? "yes" : "no",
+		outputPolicy.displayHdrSupported ? "yes" : "no",
+		outputPolicy.displaySdrLuminance,
+		outputPolicy.displayMaxLuminance,
+		GetNriResultName(mSwapChainDisplayDescResult));
 	Printf("NRI PT swapchain counts: acquire=[%s] present=[%s] abandoned=[%s]\n",
 		acquireCounts.GetChars(),
 		presentCounts.GetChars(),
@@ -4371,6 +4467,11 @@ bool NRIRenderDevice::CreateSwapChain()
 		!IsFullscreenModeActive() &&
 		!mFrameGeneration.ConsumeNativeFallbackRequest();
 
+	mRequestedSwapChainFormat = swapChainDesc.format;
+	mResolvedSwapChainTextureFormat = nri::Format::UNKNOWN;
+	mSwapChainDisplayDesc = {};
+	mSwapChainDisplayDescResult = nri::Result::FAILURE;
+	mHasSwapChainDisplayDesc = false;
 	mSwapChainFlags = swapChainDesc.flags;
 	mSwapChainQueuedFrameNum = swapChainDesc.queuedFrameNum;
 	mSwapChainTextureCount = 0;
@@ -4449,6 +4550,7 @@ bool NRIRenderDevice::CreateSwapChain()
 		image.target.width = desc.width;
 		image.target.height = desc.height;
 		image.target.format = desc.format;
+		mResolvedSwapChainTextureFormat = desc.format;
 		image.target.usage = desc.usage;
 		image.target.state = {};
 
@@ -4468,16 +4570,25 @@ bool NRIRenderDevice::CreateSwapChain()
 		SetNriDebugName(mCore, image.releaseSemaphore, releaseFenceName.c_str());
 	}
 
-	Printf("NRI swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s texture_override=%d flag_override=%s wait_present=%s size=%ux%u\n",
+	mSwapChainDisplayDescResult = mSwapChainInterface.GetDisplayDesc(*mSwapChain, mSwapChainDisplayDesc);
+	mHasSwapChainDisplayDesc = mSwapChainDisplayDescResult == nri::Result::SUCCESS;
+
+	Printf("NRI swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s requested_format=%s resolved_texture_format=%s texture_override=%d flag_override=%s wait_present=%s size=%ux%u display_desc=%s hdr=%s sdr_nits=%.1f max_nits=%.1f\n",
 		(uint32_t)mSwapChainTextureCount,
 		(uint32_t)mSwapChainQueuedFrameNum,
 		vid_vsync ? "on" : "off",
 		DescribeSwapChainFlags(mSwapChainFlags).GetChars(),
+		GetSwapChainFormatName(mRequestedSwapChainFormat),
+		GetNriFormatName(mResolvedSwapChainTextureFormat),
 		(int)nri_ptswaptextures,
 		DescribeSwapChainFlagOverride(),
 		nri_ptwaitpresent ? "on" : "off",
 		width,
-		height);
+		height,
+		GetNriResultName(mSwapChainDisplayDescResult),
+		mHasSwapChainDisplayDesc && mSwapChainDisplayDesc.isHDR ? "yes" : "no",
+		mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.sdrLuminance : 80.0f,
+		mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.maxLuminance : 80.0f);
 	Printf("NRI framegen native handles: api=%s device=%s queue=%s swapchain=%s\n",
 		(const char*)nri_api,
 		mNativeD3D12Device != nullptr ? "ok" : "missing",
@@ -4518,6 +4629,10 @@ void NRIRenderDevice::DestroySwapChain()
 	RefreshNativeFrameGenerationSwapChain();
 	ResetFrameTracking();
 	mSwapChainFlags = nri::SwapChainBits::NONE;
+	mRequestedSwapChainFormat = nri::SwapChainFormat::BT709_G22_8BIT;
+	mResolvedSwapChainTextureFormat = nri::Format::UNKNOWN;
+	mSwapChainDisplayDesc = {};
+	mSwapChainDisplayDescResult = nri::Result::FAILURE;
 	mSwapChainQueuedFrameNum = 0;
 	mSwapChainTextureCount = 0;
 	mObservedSwapChainAcquireMask = 0;
@@ -4526,6 +4641,7 @@ void NRIRenderDevice::DestroySwapChain()
 	mSwapChainPresentCounts.clear();
 	mSwapChainAbandonCounts.clear();
 	mHasPresentedSwapChainFrame = false;
+	mHasSwapChainDisplayDesc = false;
 	mFrameGeneration.OnSwapChainDestroyed(*this);
 
 	for (auto& image : mSwapChainImages)
