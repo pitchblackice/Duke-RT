@@ -1158,12 +1158,22 @@ namespace
 			(int32_t)sprite.Sprite->ownerActor->GetIndex() == actorIndex;
 	}
 
+	bool IsCapturableActorShadowTempSprite(const HWSprite& sprite)
+	{
+		return
+			sprite.Sprite != nullptr &&
+			sprite.Sprite->statnum == 99 &&
+			sprite.Sprite->pal == 4 &&
+			sprite.Sprite->shade == 127 &&
+			(sprite.Sprite->cstat & CSTAT_SPRITE_TRANSLUCENT) != 0;
+	}
+
 	bool IsCapturableActorFacingSprite(const HWSprite& sprite, int32_t actorIndex)
 	{
 		return
 			IsOwnedByActor(sprite, actorIndex) &&
 			sprite.Sprite != nullptr &&
-			sprite.Sprite->statnum != 99 &&
+			(sprite.Sprite->statnum != 99 || IsCapturableActorShadowTempSprite(sprite)) &&
 			sprite.texture != nullptr &&
 			sprite.modelframe == 0 &&
 			sprite.alpha > (1.0f / 255.0f);
