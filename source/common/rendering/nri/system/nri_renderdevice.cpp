@@ -5497,16 +5497,20 @@ bool NRIRenderDevice::SnapshotTextureToCanvas(FCanvasTexture* tex, NRITextureRes
 	mRenderState->EndFrame();
 	mActiveTarget = &canvasHwTex->GetResource();
 	mRenderState->NotifyExternalTargetWrite();
+	ClearTargetColor(*mActiveTarget, 0.0f, 0.0f, 0.0f, 1.0f);
+	mRenderState->SetColorMask(true, true, true, false);
 
 	F2DDrawer snapshotDrawer;
 	DrawTexture(&snapshotDrawer, mViewSnapshotTexture, 0, 0,
 		DTA_DestWidth, tex->GetWidth(),
 		DTA_DestHeight, tex->GetHeight(),
 		DTA_FlipY, RenderTextureIsFlipped(),
+		DTA_LegacyRenderStyle, STYLE_Source,
 		DTA_Masked, false,
 		TAG_DONE);
 	::Draw2D(&snapshotDrawer, *mRenderState, 0, 0, tex->GetWidth(), tex->GetHeight());
 	snapshotDrawer.Clear();
+	mRenderState->SetColorMask(true, true, true, true);
 
 	tex->SetUpdated(true);
 
