@@ -668,14 +668,19 @@ public:
 			return closestCenterHitPortal;
 		}
 
+		if (bestPortal != nullptr)
+		{
+			outSelectedWallIndex = bestPortalWallIndex;
+			return bestPortal;
+		}
+
 		if (preferredPortal != nullptr)
 		{
 			outSelectedWallIndex = preferredWallIndex;
 			return preferredPortal;
 		}
 
-		outSelectedWallIndex = bestPortalWallIndex;
-		return bestPortal;
+		return nullptr;
 	}
 
 	struct MirrorBillboardLayout
@@ -1033,7 +1038,7 @@ public:
 		return true;
 	}
 
-	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, int32_t preferredMirrorWallIndex, nri_scene::SceneView& outView)
+	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, HWPortal* mirrorPortal, int32_t selectedMirrorWallIndex, uint32_t mirrorPortalCandidates, nri_scene::SceneView& outView)
 	{
 		outView = {};
 		MirrorPlayerCaptureStats captureStats = {};
@@ -1057,7 +1062,8 @@ public:
 		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
 		captureStats.localPlayerActorIndex = actorIndex;
 		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
-		HWPortal* const mirrorPortal = SelectPrimaryMirrorPortal(di, captureStats.mirrorPortalCandidates, captureStats.selectedMirrorWallIndex, preferredMirrorWallIndex);
+		captureStats.mirrorPortalCandidates = mirrorPortalCandidates;
+		captureStats.selectedMirrorWallIndex = selectedMirrorWallIndex;
 		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
 		captureDi->visibility = di.visibility;
 		captureDi->rellight = di.rellight;
@@ -5478,7 +5484,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		const bool hasMirrorPlayerScene =
 			!deferOverlayThisFrame &&
 			IsMirrorPlayerPreviewCaptureEnabled() &&
-			CaptureMirrorPlayerDynamicScene(di, preferredMirrorWallIndex, mirrorPlayerSceneView);
+			CaptureMirrorPlayerDynamicScene(
+				di,
+				visibleMirrorPortal,
+				selectedVisibleMirrorWallIndex,
+				visibleMirrorPortalCandidates,
+				mirrorPlayerSceneView);
 		if (hasDynamicScene)
 		{
 			{
