@@ -26,6 +26,52 @@ float3 ApplyManualExposure(float3 color, float exposure)
 	return color * max(exposure, 0.0);
 }
 
+float3 ApplyPresentSceneContrast(float3 color, float contrast)
+{
+	const float safeContrast = max(contrast, 0.0);
+	const float pivot = 0.18;
+	return max((color - pivot.xxx) * safeContrast + pivot.xxx, 0.0);
+}
+
+float ApplyDisplayToe(float value, float toe)
+{
+	const float safeValue = saturate(value);
+	const float safeToe = max(toe, 1e-3);
+	const float curved = pow(safeValue, safeToe);
+	const float weight = saturate(1.0 - safeValue * 2.0);
+	return lerp(safeValue, curved, weight);
+}
+
+float ApplyDisplayShoulder(float value, float shoulder)
+{
+	const float safeValue = saturate(value);
+	const float safeShoulder = max(shoulder, 1e-3);
+	const float curved = 1.0 - pow(1.0 - safeValue, safeShoulder);
+	const float weight = saturate(safeValue * 2.0 - 1.0);
+	return lerp(safeValue, curved, weight);
+}
+
+float3 ApplyDisplayToeAndShoulder(float3 color, float toe, float shoulder)
+{
+	return float3(
+		ApplyDisplayShoulder(ApplyDisplayToe(color.x, toe), shoulder),
+		ApplyDisplayShoulder(ApplyDisplayToe(color.y, toe), shoulder),
+		ApplyDisplayShoulder(ApplyDisplayToe(color.z, toe), shoulder));
+}
+
+float3 ApplyDisplaySaturation(float3 color, float saturation)
+{
+	const float safeSaturation = max(saturation, 0.0);
+	const float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
+	return max(lerp(luma.xxx, color, safeSaturation), 0.0);
+}
+
+float3 ApplyDisplayCalibration(float3 color, float saturation, float toe, float shoulder)
+{
+	const float3 shaped = ApplyDisplayToeAndShoulder(saturate(color), toe, shoulder);
+	return saturate(ApplyDisplaySaturation(shaped, saturation));
+}
+
 float3 TonemapHable(float3 color)
 {
 	const float A = 0.15;
@@ -90,16 +136,25 @@ float GetHdrMaxOutputScale(float paperWhiteNits, float displaySdrLuminance, floa
 		GetHdrHeadroomInPaperWhites(paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
 }
 
-float3 ApplyHdrOutputMapping(float3 color, uint tonemapMode, float paperWhiteNits, float displaySdrLuminance, float displayMaxLuminance)
+float3 ApplyHdrOutputMapping(
+	float3 color,
+	uint tonemapMode,
+	float saturation,
+	float shoulder,
+	float toe,
+	float paperWhiteNits,
+	float displaySdrLuminance,
+	float displayMaxLuminance)
 {
 	const float paperWhiteScale = GetHdrPaperWhiteScale(paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
 	const float headroomInPaperWhites = GetHdrHeadroomInPaperWhites(paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
 	const float referenceInput = 1.0 / headroomInPaperWhites;
 	const float referenceCurve = max(ApplySdrTonemap(referenceInput.xxx, tonemapMode).x, 1e-5);
-	const float3 mappedPaperWhiteUnits = min(
-		ApplySdrTonemap(color / headroomInPaperWhites, tonemapMode) / referenceCurve,
-		headroomInPaperWhites.xxx);
-	return max(mappedPaperWhiteUnits * paperWhiteScale, 0.0);
+	const float3 mappedPaperWhiteUnits = ApplySdrTonemap(color / headroomInPaperWhites, tonemapMode) / referenceCurve;
+	const float3 normalized = saturate(mappedPaperWhiteUnits / headroomInPaperWhites.xxx);
+	const float3 calibrated = ApplyDisplayCalibration(normalized, saturation, toe, shoulder);
+	const float3 restoredPaperWhiteUnits = min(calibrated * headroomInPaperWhites, headroomInPaperWhites.xxx);
+	return max(restoredPaperWhiteUnits * paperWhiteScale, 0.0);
 }
 
 float LinearToSrgbChannel(float value)
@@ -164,6 +219,10 @@ float3 ApplyPresentDisplayMapping(
 	uint tonemapMode,
 	uint outputFlags,
 	float exposure,
+	float contrast,
+	float saturation,
+	float shoulder,
+	float toe,
 	float paperWhiteNits,
 	float displaySdrLuminance,
 	float displayMaxLuminance)
@@ -173,13 +232,15 @@ float3 ApplyPresentDisplayMapping(
 		(outputFlags & NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE) != 0u;
 	const float3 sanitized = SanitizeFiniteColor(color);
 	const float3 exposed = ApplyManualExposure(sanitized, exposure);
+	const float3 calibratedScene = ApplyPresentSceneContrast(exposed, contrast);
 	if (hdrSwapChainActive)
 	{
-		return ApplyHdrOutputMapping(exposed, tonemapMode, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
+		return ApplyHdrOutputMapping(calibratedScene, tonemapMode, saturation, shoulder, toe, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
 	}
 
-	const float3 toneMapped = ApplySdrTonemap(exposed, tonemapMode);
-	return ApplySdrTransferAndDither(toneMapped, pixelPos, frameIndex);
+	const float3 toneMapped = ApplySdrTonemap(calibratedScene, tonemapMode);
+	const float3 calibratedDisplay = ApplyDisplayCalibration(toneMapped, saturation, toe, shoulder);
+	return ApplySdrTransferAndDither(calibratedDisplay, pixelPos, frameIndex);
 }
 
 #endif

@@ -1219,8 +1219,13 @@ OptionMenu "NRIOptions" protected
 	Option "Output Mode",						"nri_ptoutputmode",				"NRIPTOutputMode"
 	Option "Tonemap",							"nri_pttonemap",				"NRIPTTonemap"
 	Slider "Exposure",							"nri_ptexposure",				0.125, 8.0, 0.125, 3
+	Slider "Contrast",							"nri_ptcontrast",				0.50, 1.50, 0.05, 2
+	Slider "Saturation",						"nri_ptsaturation",				0.00, 2.00, 0.05, 2
+	Slider "Highlight Shoulder",				"nri_ptshoulder",				0.50, 1.50, 0.05, 2
+	Slider "Shadow Toe",						"nri_pttoe",					0.50, 1.50, 0.05, 2
 	Slider "Paper White",						"nri_ptpaperwhite",				80.0, 400.0, 5.0, 1
-	StaticText "HDR output plumbing is staged; current present remains SDR."
+	Slider "Fullbright Boost",					"nri_ptfullbrightboost",		0.50, 8.00, 0.25, 2
+	StaticText "Output calibration affects final present; light energy remains upstream."
 	StaticText "Output-mode changes reset PT history."
 	StaticText "----------------"
 	StaticText "Traversal / Lighting"
@@ -1232,7 +1237,7 @@ OptionMenu "NRIOptions" protected
 	StaticText "----------------"
 	StaticText "Debug / Inspection"
 	Option "PT Debug View",						"nri_ptdebug",					"NRIPTDebug"
-	Slider "PT Debug Index",					"nri_ptdebug",					0, 44, 1, 0
+	Slider "PT Debug Index",					"nri_ptdebug",					0, 45, 1, 0
 	StaticText ""
 
 	StaticText "Commands"

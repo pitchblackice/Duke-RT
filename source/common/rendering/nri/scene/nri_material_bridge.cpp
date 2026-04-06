@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 EXTERN_CVAR(Int, hw_lightmode)
+EXTERN_CVAR(Float, nri_ptfullbrightboost)
 
 namespace
 {
@@ -54,7 +55,15 @@ namespace
 
 		if ((flags & MaterialFlag_Fullbright) != 0)
 		{
-			return 1.0f;
+			if ((flags & MaterialFlag_Sprite) != 0)
+			{
+				return 0.45f;
+			}
+			if ((flags & MaterialFlag_Flat) != 0)
+			{
+				return 0.60f;
+			}
+			return 0.55f;
 		}
 
 		float roughness = 0.45f;
@@ -319,6 +328,11 @@ namespace
 		return intensity;
 	}
 
+	float GetSampledFullbrightEmissiveIntensity()
+	{
+		return std::clamp((float)nri_ptfullbrightboost, 0.50f, 8.00f);
+	}
+
 	MaterialLightingMetadata BuildMaterialLightingMetadata(
 		const SurfaceRef& surface,
 		const MaterialData& material,
@@ -402,7 +416,7 @@ namespace
 		{
 			metadata.emissiveMode = MaterialEmissiveMode_UseBaseTexture;
 			metadata.emissiveTextureIndex = material.textureIndex;
-			metadata.emissiveIntensity = 1.0f;
+			metadata.emissiveIntensity = GetSampledFullbrightEmissiveIntensity();
 			metadata.emissiveMaskScale = 1.0f;
 			metadata.emissiveColor[0] = 1.0f;
 			metadata.emissiveColor[1] = 1.0f;

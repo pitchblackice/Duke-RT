@@ -49,6 +49,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			ApplyHdrOutputMapping(
 				debugColor,
 				gPresentConstants.TonemapMode,
+				gPresentConstants.Saturation,
+				gPresentConstants.Shoulder,
+				gPresentConstants.Toe,
 				gPresentConstants.PaperWhiteNits,
 				gPresentConstants.DisplaySdrLuminance,
 				gPresentConstants.DisplayMaxLuminance) :
@@ -64,6 +67,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gPresentConstants.TonemapMode,
 		gPresentConstants.OutputFlags,
 		gPresentConstants.Exposure,
+		gPresentConstants.Contrast,
+		gPresentConstants.Saturation,
+		gPresentConstants.Shoulder,
+		gPresentConstants.Toe,
 		gPresentConstants.PaperWhiteNits,
 		gPresentConstants.DisplaySdrLuminance,
 		gPresentConstants.DisplayMaxLuminance);

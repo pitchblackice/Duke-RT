@@ -76,6 +76,50 @@ CUSTOM_CVAR(Float, nri_ptexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 8.0f;
 	}
 }
+CUSTOM_CVAR(Float, nri_ptcontrast, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.50f)
+	{
+		self = 0.50f;
+	}
+	else if (self > 1.50f)
+	{
+		self = 1.50f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.00f)
+	{
+		self = 0.00f;
+	}
+	else if (self > 2.00f)
+	{
+		self = 2.00f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptshoulder, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.50f)
+	{
+		self = 0.50f;
+	}
+	else if (self > 1.50f)
+	{
+		self = 1.50f;
+	}
+}
+CUSTOM_CVAR(Float, nri_pttoe, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.50f)
+	{
+		self = 0.50f;
+	}
+	else if (self > 1.50f)
+	{
+		self = 1.50f;
+	}
+}
 CUSTOM_CVAR(Float, nri_ptpaperwhite, 200.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 80.0f)
@@ -867,6 +911,14 @@ namespace
 		}
 	}
 
+	static void NotifyActiveMaterialLightingCalibrationChange()
+	{
+		if (screen != nullptr && screen->Backend() == 4)
+		{
+			static_cast<NRIRenderDevice*>(screen)->NotifyPathTracingMaterialLightingCalibrationChange();
+		}
+	}
+
 	static void NotifyActiveDebugSphereTessellationChange()
 	{
 		if (screen != nullptr && screen->Backend() == 4)
@@ -1008,6 +1060,18 @@ CUSTOM_CVAR(Float, nri_ptglowreach, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 0.0f;
 	}
 	NotifyActiveGlowControlChange();
+}
+CUSTOM_CVAR(Float, nri_ptfullbrightboost, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.50f)
+	{
+		self = 0.50f;
+	}
+	else if (self > 8.00f)
+	{
+		self = 8.00f;
+	}
+	NotifyActiveMaterialLightingCalibrationChange();
 }
 CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -3090,6 +3154,10 @@ namespace
 		uint32_t TonemapMode = 0;
 		uint32_t OutputFlags = 0;
 		float Exposure = 1.0f;
+		float Contrast = 1.0f;
+		float Saturation = 1.0f;
+		float Shoulder = 1.0f;
+		float Toe = 1.0f;
 		float PaperWhiteNits = 200.0f;
 		float DisplayMaxLuminance = 80.0f;
 		float DisplaySdrLuminance = 80.0f;
@@ -3105,7 +3173,7 @@ namespace
 
 	static_assert(sizeof(NRITraceSceneConstants) <= 224, "NRITraceSceneConstants must stay within the validated shared root-constant budget.");
 	static_assert(sizeof(NRITemporalConstants) <= 32, "NRITemporalConstants must stay compact.");
-	static_assert(sizeof(NRIPresentConstants) <= 64, "NRIPresentConstants must stay compact.");
+	static_assert(sizeof(NRIPresentConstants) <= 96, "NRIPresentConstants must stay compact.");
 
 	static uint32_t PackPresentSceneOrigin(int sceneLeft, int sceneTop)
 	{
@@ -3122,6 +3190,10 @@ namespace
 			(policy.hdrSwapChainActive ? NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE : 0u) |
 			(policy.offscreenHdrTarget ? NRI_PRESENT_OUTPUT_FLAG_OFFSCREEN_HDR_TARGET : 0u);
 		constants.Exposure = policy.exposure;
+		constants.Contrast = policy.contrast;
+		constants.Saturation = policy.saturation;
+		constants.Shoulder = policy.shoulder;
+		constants.Toe = policy.toe;
 		constants.PaperWhiteNits = policy.paperWhiteNits;
 		constants.DisplayMaxLuminance = policy.displayMaxLuminance;
 		constants.DisplaySdrLuminance = policy.displaySdrLuminance;
@@ -5577,6 +5649,13 @@ void NRIRenderer::NotifyGlowControlChange()
 	NoteLightHistoryChange("glow-control-change");
 }
 
+void NRIRenderer::NotifyMaterialLightingCalibrationChange()
+{
+	QueueStaticMapSceneLightingInvalidation();
+	ResetPersistentDynamicEmissiveCache();
+	NoteLightHistoryChange("material-lighting-calibration-change");
+}
+
 void NRIRenderer::NotifyDebugSphereTessellationChange()
 {
 	RequestHistoryReset("debug-sphere-tessellation-change");
@@ -5873,11 +5952,15 @@ void NRIRenderer::PrintStatus() const
 		mOutputHeight,
 		mHasPreviousCameraState ? "yes" : "no",
 		mResetHistory ? "yes" : "no");
-	Printf("NRI PT output: requested_mode=%s resolved_mode=%s tonemap=%s exposure=%.3f paper_white=%.1f offscreen_hdr=%s hdr_swapchain=%s display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f\n",
+	Printf("NRI PT output: requested_mode=%s resolved_mode=%s tonemap=%s exposure=%.3f contrast=%.3f saturation=%.3f shoulder=%.3f toe=%.3f paper_white=%.1f offscreen_hdr=%s hdr_swapchain=%s display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f\n",
 		GetNRIPTOutputModeName(outputPolicy.requestedMode),
 		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
 		GetNRIPTTonemapModeName(outputPolicy.tonemapMode),
 		outputPolicy.exposure,
+		outputPolicy.contrast,
+		outputPolicy.saturation,
+		outputPolicy.shoulder,
+		outputPolicy.toe,
 		outputPolicy.paperWhiteNits,
 		outputPolicy.offscreenHdrTarget ? "yes" : "no",
 		outputPolicy.hdrSwapChainActive ? "yes" : "no",
@@ -5885,6 +5968,8 @@ void NRIRenderer::PrintStatus() const
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,
 		outputPolicy.displayMaxLuminance);
+	Printf("NRI PT material calibration: fullbright_boost=%.3f\n",
+		(float)nri_ptfullbrightboost);
 	if (outputPolicy.hdrSwapChainActive)
 	{
 		const float safeDisplaySdr = std::max(outputPolicy.displaySdrLuminance, 1.0f);

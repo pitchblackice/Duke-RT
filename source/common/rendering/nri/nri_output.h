@@ -23,6 +23,10 @@ struct NRIPTOutputPolicy
 	NRIPTOutputMode resolvedMode = NRIPTOutputMode::SDR;
 	NRIPTTonemapMode tonemapMode = NRIPTTonemapMode::Hable;
 	float exposure = 1.0f;
+	float contrast = 1.0f;
+	float saturation = 1.0f;
+	float shoulder = 1.0f;
+	float toe = 1.0f;
 	float paperWhiteNits = 200.0f;
 	float displayMaxLuminance = 80.0f;
 	float displaySdrLuminance = 80.0f;

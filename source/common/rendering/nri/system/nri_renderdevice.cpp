@@ -57,6 +57,10 @@ EXTERN_CVAR(Float, nri_ptsectorfogscale)
 EXTERN_CVAR(Int, nri_ptoutputmode)
 EXTERN_CVAR(Int, nri_pttonemap)
 EXTERN_CVAR(Float, nri_ptexposure)
+EXTERN_CVAR(Float, nri_ptcontrast)
+EXTERN_CVAR(Float, nri_ptsaturation)
+EXTERN_CVAR(Float, nri_ptshoulder)
+EXTERN_CVAR(Float, nri_pttoe)
 EXTERN_CVAR(Float, nri_ptpaperwhite)
 EXTERN_CVAR(Float, nri_ptsectorclamp)
 EXTERN_CVAR(Int, nri_ptsectorfilterpal)
@@ -3274,6 +3278,10 @@ NRIPTOutputPolicy NRIRenderDevice::GetPathTracingOutputPolicy() const
 	policy.requestedMode = GetRequestedPathTracingOutputMode();
 	policy.tonemapMode = GetRequestedPathTracingTonemapMode();
 	policy.exposure = (float)nri_ptexposure;
+	policy.contrast = (float)nri_ptcontrast;
+	policy.saturation = (float)nri_ptsaturation;
+	policy.shoulder = (float)nri_ptshoulder;
+	policy.toe = (float)nri_pttoe;
 	policy.paperWhiteNits = (float)nri_ptpaperwhite;
 	policy.displayInfoAvailable = mHasSwapChainDisplayDesc;
 	policy.displayHdrSupported = mHasSwapChainDisplayDesc && mSwapChainDisplayDesc.isHDR;
@@ -3441,7 +3449,7 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 		CountSetBits(mObservedSwapChainPresentMask),
 		(uint32_t)mSwapChainTextureCount,
 		presentedImages.GetChars());
-	Printf("NRI PT swapchain output: requested_mode=%s resolved_mode=%s requested_format=%s created_format=%s resolved_texture_format=%s tonemap=%s exposure=%.3f paper_white=%.1f hdr_paper_scale=%.3f hdr_headroom=%.3f hdr_max_scale=%.3f display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f display_desc_result=%s reason=%s\n",
+	Printf("NRI PT swapchain output: requested_mode=%s resolved_mode=%s requested_format=%s created_format=%s resolved_texture_format=%s tonemap=%s exposure=%.3f contrast=%.3f saturation=%.3f shoulder=%.3f toe=%.3f paper_white=%.1f hdr_paper_scale=%.3f hdr_headroom=%.3f hdr_max_scale=%.3f display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f display_desc_result=%s reason=%s\n",
 		GetNRIPTOutputModeName(outputPolicy.requestedMode),
 		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
 		GetSwapChainFormatName(mRequestedSwapChainFormat),
@@ -3449,6 +3457,10 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 		GetNriFormatName(mResolvedSwapChainTextureFormat),
 		GetNRIPTTonemapModeName(outputPolicy.tonemapMode),
 		outputPolicy.exposure,
+		outputPolicy.contrast,
+		outputPolicy.saturation,
+		outputPolicy.shoulder,
+		outputPolicy.toe,
 		outputPolicy.paperWhiteNits,
 		hdrPaperWhiteScale,
 		hdrHeadroom,
@@ -4078,6 +4090,16 @@ void NRIRenderDevice::NotifyPathTracingGlowControlChange()
 	}
 
 	mRenderer->NotifyGlowControlChange();
+}
+
+void NRIRenderDevice::NotifyPathTracingMaterialLightingCalibrationChange()
+{
+	if (mRenderer == nullptr)
+	{
+		return;
+	}
+
+	mRenderer->NotifyMaterialLightingCalibrationChange();
 }
 
 void NRIRenderDevice::NotifyPathTracingDebugSphereTessellationChange()

@@ -31,6 +31,10 @@ struct NRIPresentConstants
 	uint TonemapMode;
 	uint OutputFlags;
 	float Exposure;
+	float Contrast;
+	float Saturation;
+	float Shoulder;
+	float Toe;
 	float PaperWhiteNits;
 	float DisplayMaxLuminance;
 	float DisplaySdrLuminance;
