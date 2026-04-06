@@ -241,7 +241,7 @@ void animatesprites_r(tspriteArray& tsprites, const DVector2& viewVec, DAngle vi
 		}
 
 		h->dispictex = t->spritetexture();
-		if (t->sectp->floortexture == mirrortex)
+		if (t->sectp->floortexture == mirrortex && !(mirrorCaptureOverride && h->isPlayer() && h->GetOwner()))
 			t->scale = DVector2(0, 0);
 	}
 }
