@@ -1675,6 +1675,14 @@ void NRIRenderDevice::Update()
 			Draw2D();
 			twod->Clear();
 		}
+
+		if (mPendingViewSnapshotCanvas != nullptr && mCurrentPresentTarget != nullptr)
+		{
+			auto* canvas = mPendingViewSnapshotCanvas;
+			mPendingViewSnapshotCanvas = nullptr;
+			SnapshotTextureToCanvas(canvas, *mCurrentPresentTarget);
+		}
+
 		draw2DMs = I_msTimeF() - stageStartMs;
 		stageStartMs = I_msTimeF();
 		mRenderState->EndFrame();
@@ -2209,6 +2217,62 @@ NRITextureResource* NRIRenderDevice::GetFrameGenerationUiTargetResource() const
 	return &hwTex->GetResource();
 }
 
+bool NRIRenderDevice::EnsureViewSnapshotTexture(uint32_t width, uint32_t height)
+{
+	if (width == 0 || height == 0)
+	{
+		return false;
+	}
+
+	if (mViewSnapshotTexture == nullptr)
+	{
+		mViewSnapshotTexture = MakeGameTexture(new FWrapperTexture((int)width, (int)height, 1), nullptr, ETextureType::SWCanvas);
+	}
+
+	auto* wrapper = mViewSnapshotTexture != nullptr ? static_cast<FWrapperTexture*>(mViewSnapshotTexture->GetTexture()) : nullptr;
+	if (wrapper == nullptr)
+	{
+		return false;
+	}
+
+	if (wrapper->GetWidth() != (int)width || wrapper->GetHeight() != (int)height)
+	{
+		delete mViewSnapshotTexture;
+		mViewSnapshotTexture = MakeGameTexture(new FWrapperTexture((int)width, (int)height, 1), nullptr, ETextureType::SWCanvas);
+		wrapper = mViewSnapshotTexture != nullptr ? static_cast<FWrapperTexture*>(mViewSnapshotTexture->GetTexture()) : nullptr;
+		if (wrapper == nullptr)
+		{
+			return false;
+		}
+	}
+
+	auto* hwTex = static_cast<NRIHardwareTexture*>(wrapper->GetSystemTexture());
+	if (hwTex == nullptr)
+	{
+		return false;
+	}
+
+	hwTex->EnsureCanvas(wrapper);
+	return hwTex->GetResource().texture != nullptr && hwTex->GetResource().colorAttachmentView != nullptr;
+}
+
+NRITextureResource* NRIRenderDevice::GetViewSnapshotTargetResource() const
+{
+	auto* wrapper = mViewSnapshotTexture != nullptr ? static_cast<FWrapperTexture*>(mViewSnapshotTexture->GetTexture()) : nullptr;
+	if (wrapper == nullptr)
+	{
+		return nullptr;
+	}
+
+	auto* hwTex = static_cast<NRIHardwareTexture*>(wrapper->GetSystemTexture());
+	if (hwTex == nullptr)
+	{
+		return nullptr;
+	}
+
+	return &hwTex->GetResource();
+}
+
 void NRIRenderDevice::ClearTargetColor(NRITextureResource& target, float red, float green, float blue, float alpha)
 {
 	if (mCommandBuffer == nullptr || target.colorAttachmentView == nullptr)
@@ -2313,6 +2377,12 @@ void NRIRenderDevice::DestroyFrameGenerationUiTexture()
 	delete mFrameGenerationUiTexture;
 	mFrameGenerationUiTexture = nullptr;
 	mFrameGenerationUiTargetActive = false;
+}
+
+void NRIRenderDevice::DestroyViewSnapshotTexture()
+{
+	delete mViewSnapshotTexture;
+	mViewSnapshotTexture = nullptr;
 }
 
 void NRIRenderDevice::WaitForCommands(bool finish)
@@ -2456,18 +2526,6 @@ void NRIRenderDevice::PostProcessScene(bool swscene, int, float, const std::func
 	else
 	{
 		SetActiveRenderTarget();
-	}
-
-	if (mPendingViewSnapshotCanvas != nullptr)
-	{
-		auto* canvas = mPendingViewSnapshotCanvas;
-		mPendingViewSnapshotCanvas = nullptr;
-		auto* hwTex = static_cast<NRIHardwareTexture*>(canvas->GetHardwareTexture(0, 0));
-		hwTex->EnsureCanvas(canvas);
-		if (CopyCurrentTargetToTexture(hwTex->GetResource()))
-		{
-			canvas->SetUpdated(true);
-		}
 	}
 
 	if (afterBloomDrawEndScene2D)
@@ -4640,6 +4698,7 @@ void NRIRenderDevice::DestroyRenderResources()
 {
 	DestroyFrameGenerationPresentTargets();
 	DestroyFrameGenerationUiTexture();
+	DestroyViewSnapshotTexture();
 
 	delete mWhiteTexture;
 	mWhiteTexture = nullptr;
@@ -5339,10 +5398,9 @@ bool NRIRenderDevice::UploadTextureSubresources(NRITextureResource& resource, co
 	return false;
 }
 
-bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination)
+bool NRIRenderDevice::CopyTextureToTexture(NRITextureResource& destination, NRITextureResource& source)
 {
-	NRITextureResource* source = mFrameBegun && mActiveTarget != nullptr ? mActiveTarget : mCurrentPresentTarget;
-	if (source == nullptr || source->texture == nullptr || destination.texture == nullptr)
+	if (source.texture == nullptr || destination.texture == nullptr)
 	{
 		return false;
 	}
@@ -5353,16 +5411,16 @@ bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination
 		mRenderState->EndFrame();
 	}
 
-	if (!useActiveFrameCommandBuffer && !BeginCommandList("CopyCurrentTargetToTexture", true))
+	if (!useActiveFrameCommandBuffer && !BeginCommandList("CopyTextureToTexture", true))
 	{
 		return false;
 	}
 
-	const nri::AccessLayoutStage sourceStateBeforeCopy = source->state;
-	TransitionTexture(*source, NRICopySourceState());
+	const nri::AccessLayoutStage sourceStateBeforeCopy = source.state;
+	TransitionTexture(source, NRICopySourceState());
 	TransitionTexture(destination, NRICopyDestinationState());
-	mCore.CmdCopyTexture(*mCommandBuffer, *destination.texture, nullptr, *source->texture, nullptr);
-	TransitionTexture(*source, sourceStateBeforeCopy);
+	mCore.CmdCopyTexture(*mCommandBuffer, *destination.texture, nullptr, *source.texture, nullptr);
+	TransitionTexture(source, sourceStateBeforeCopy);
 	TransitionTexture(destination, NRIShaderResourceState());
 
 	if (useActiveFrameCommandBuffer)
@@ -5391,6 +5449,72 @@ bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination
 	mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
 	mCore.Wait(*copyFence, frameFence.value);
 	mCore.DestroyFence(copyFence);
+	return true;
+}
+
+bool NRIRenderDevice::CopyCurrentTargetToTexture(NRITextureResource& destination)
+{
+	NRITextureResource* source = mFrameBegun && mActiveTarget != nullptr ? mActiveTarget : mCurrentPresentTarget;
+	if (source == nullptr || source->texture == nullptr || destination.texture == nullptr)
+	{
+		return false;
+	}
+
+	return CopyTextureToTexture(destination, *source);
+}
+
+bool NRIRenderDevice::SnapshotTextureToCanvas(FCanvasTexture* tex, NRITextureResource& source)
+{
+	if (tex == nullptr || source.texture == nullptr || twod == nullptr)
+	{
+		return false;
+	}
+
+	auto* canvasHwTex = static_cast<NRIHardwareTexture*>(tex->GetHardwareTexture(0, 0));
+	if (canvasHwTex == nullptr)
+	{
+		return false;
+	}
+	canvasHwTex->EnsureCanvas(tex);
+
+	if (!EnsureViewSnapshotTexture(source.width, source.height))
+	{
+		return false;
+	}
+
+	NRITextureResource* snapshotTarget = GetViewSnapshotTargetResource();
+	if (snapshotTarget == nullptr)
+	{
+		return false;
+	}
+
+	if (!CopyTextureToTexture(*snapshotTarget, source))
+	{
+		return false;
+	}
+
+	NRITextureResource* previousTarget = mActiveTarget;
+	mRenderState->EndFrame();
+	mActiveTarget = &canvasHwTex->GetResource();
+	mRenderState->NotifyExternalTargetWrite();
+
+	F2DDrawer snapshotDrawer;
+	DrawTexture(&snapshotDrawer, mViewSnapshotTexture, 0, 0,
+		DTA_DestWidth, tex->GetWidth(),
+		DTA_DestHeight, tex->GetHeight(),
+		DTA_FlipY, RenderTextureIsFlipped(),
+		DTA_Masked, false,
+		TAG_DONE);
+	::Draw2D(&snapshotDrawer, *mRenderState, 0, 0, tex->GetWidth(), tex->GetHeight());
+	snapshotDrawer.Clear();
+
+	tex->SetUpdated(true);
+
+	mRenderState->EndFrame();
+	TransitionTexture(canvasHwTex->GetResource(), NRIShaderResourceState());
+	mActiveTarget = previousTarget;
+	mRenderState->NotifyExternalTargetWrite();
+
 	return true;
 }
 

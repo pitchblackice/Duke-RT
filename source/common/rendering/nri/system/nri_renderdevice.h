@@ -245,12 +245,17 @@ private:
 	uint32_t GetFrameGenerationSceneBlendPrefixCount() const;
 	bool EnsureFrameGenerationUiTexture(uint32_t width, uint32_t height);
 	NRITextureResource* GetFrameGenerationUiTargetResource() const;
+	bool EnsureViewSnapshotTexture(uint32_t width, uint32_t height);
+	NRITextureResource* GetViewSnapshotTargetResource() const;
 	void ClearTargetColor(NRITextureResource& target, float red, float green, float blue, float alpha);
 	void BeginFrameGenerationUiTarget();
 	void DrawFrameGenerationSceneBlendPrefix();
 	void FinalizeFrameGenerationUiTarget();
 	void CompositeFrameGenerationUiTexture();
 	void DestroyFrameGenerationUiTexture();
+	void DestroyViewSnapshotTexture();
+	bool CopyTextureToTexture(NRITextureResource& destination, NRITextureResource& source);
+	bool SnapshotTextureToCanvas(FCanvasTexture* tex, NRITextureResource& source);
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
@@ -299,6 +304,7 @@ private:
 	FTexture* mActiveCanvasSourceTexture = nullptr;
 	FCanvasTexture* mPendingViewSnapshotCanvas = nullptr;
 	FGameTexture* mFrameGenerationUiTexture = nullptr;
+	FGameTexture* mViewSnapshotTexture = nullptr;
 	nri::DescriptorSet* mWhiteTextureSet = nullptr;
 	NRIHardwareTexture* mWhiteTexture = nullptr;
 
