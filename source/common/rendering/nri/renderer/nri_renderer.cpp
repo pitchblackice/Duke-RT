@@ -11,6 +11,7 @@
 #include "c_cvars.h"
 #include "coreactor.h"
 #include "coreplayer.h"
+#include "hw_voxels.h"
 #include "gamecontrol.h"
 #include "lightoverlay.h"
 #include "mapinfo.h"
@@ -514,6 +515,53 @@ public:
 		// Running a second CreateScene pass here can still perturb live render state,
 		// so keep it disabled until the later mirror visibility phases land.
 		return false;
+	}
+
+	static FGameTexture* GetLiveActorSurfaceTexture(const DCoreActor& actor, nri_scene::SurfaceSourceType sourceType)
+	{
+		switch (sourceType)
+		{
+		case nri_scene::SurfaceSourceType::FacingSprite:
+			return TexMan.GetGameTexture(actor.spr.spritetexture());
+
+		case nri_scene::SurfaceSourceType::VoxelProxySprite:
+		{
+			if (!r_voxels)
+			{
+				return nullptr;
+			}
+
+			const int voxelIndex = GetExtInfo(actor.spr.spritetexture()).tiletovox;
+			if (voxelIndex < 0 || voxelIndex >= MAXVOXELS || voxmodels[voxelIndex] == nullptr || voxmodels[voxelIndex]->model == nullptr)
+			{
+				return nullptr;
+			}
+
+			return TexMan.GetGameTexture(voxmodels[voxelIndex]->model->GetPaletteTexture());
+		}
+
+		default:
+			return nullptr;
+		}
+	}
+
+	static bool CachedSurfaceMatchesLiveActor(const nri_scene::SurfaceRef& surface, const DCoreActor& actor)
+	{
+		switch (surface.provenance.sourceType)
+		{
+		case nri_scene::SurfaceSourceType::FacingSprite:
+		case nri_scene::SurfaceSourceType::VoxelProxySprite:
+		{
+			FGameTexture* const liveTexture = GetLiveActorSurfaceTexture(actor, surface.provenance.sourceType);
+			return
+				liveTexture != nullptr &&
+				surface.material.texture == liveTexture &&
+				surface.material.palette == actor.spr.pal;
+		}
+
+		default:
+			return true;
+		}
 	}
 
 	static bool RequiresExclusiveMaterialOnlyChunkReplacement(uint32_t reasonMask)
@@ -6967,7 +7015,9 @@ void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 	}
 
 	std::unordered_map<int32_t, bool> liveActorIndices;
+	std::unordered_map<int32_t, DCoreActor*> liveActorsByIndex;
 	liveActorIndices.reserve(256);
+	liveActorsByIndex.reserve(256);
 
 	TSpriteIterator<DCoreActor> it;
 	while (auto actor = it.Next())
@@ -6980,14 +7030,31 @@ void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 		}
 
 		liveActorIndices[(int32_t)actor->GetIndex()] = true;
+		liveActorsByIndex[(int32_t)actor->GetIndex()] = actor;
 	}
 
 	bool needsPrune = false;
-	auto detectStaleActorOwnership = [&needsPrune, &liveActorIndices](const auto& surfaces)
+	auto detectStaleActorOwnership = [&needsPrune, &liveActorIndices, &liveActorsByIndex](const auto& surfaces)
 	{
 		for (const auto& surface : surfaces)
 		{
-			if (surface.provenance.actorIndex >= 0 &&
+			if (surface.provenance.sourceType == nri_scene::SurfaceSourceType::FacingSprite ||
+				surface.provenance.sourceType == nri_scene::SurfaceSourceType::VoxelProxySprite)
+			{
+				if (surface.provenance.actorIndex < 0)
+				{
+					needsPrune = true;
+					return;
+				}
+
+				auto liveActorIt = liveActorsByIndex.find(surface.provenance.actorIndex);
+				if (liveActorIt == liveActorsByIndex.end() || !CachedSurfaceMatchesLiveActor(surface, *liveActorIt->second))
+				{
+					needsPrune = true;
+					return;
+				}
+			}
+			else if (surface.provenance.actorIndex >= 0 &&
 				liveActorIndices.find(surface.provenance.actorIndex) == liveActorIndices.end())
 			{
 				needsPrune = true;
@@ -7010,11 +7077,25 @@ void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 	Copy3(mPersistentDynamicEmissiveCache.sceneView.skyColor, next.sceneView.skyColor);
 	Copy3(mPersistentDynamicEmissiveCache.sceneView.groundColor, next.sceneView.groundColor);
 
-	auto appendLiveOwnedSurfaces = [&liveActorIndices](const auto& source, auto& destination)
+	auto appendLiveOwnedSurfaces = [&liveActorIndices, &liveActorsByIndex](const auto& source, auto& destination)
 	{
 		for (const auto& surface : source)
 		{
-			if (surface.provenance.actorIndex >= 0 &&
+			if (surface.provenance.sourceType == nri_scene::SurfaceSourceType::FacingSprite ||
+				surface.provenance.sourceType == nri_scene::SurfaceSourceType::VoxelProxySprite)
+			{
+				if (surface.provenance.actorIndex < 0)
+				{
+					continue;
+				}
+
+				auto liveActorIt = liveActorsByIndex.find(surface.provenance.actorIndex);
+				if (liveActorIt == liveActorsByIndex.end() || !CachedSurfaceMatchesLiveActor(surface, *liveActorIt->second))
+				{
+					continue;
+				}
+			}
+			else if (surface.provenance.actorIndex >= 0 &&
 				liveActorIndices.find(surface.provenance.actorIndex) == liveActorIndices.end())
 			{
 				continue;
@@ -7082,7 +7163,10 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 			const bool keepSurface =
 				materialIndex < materials.lightMetadata.size() &&
 				mSceneLights.MaterialWouldEmit(materials.lightMetadata[materialIndex]);
-			if (keepSurface)
+			const bool keepSpriteCacheSurface =
+				surface.provenance.sourceType != nri_scene::SurfaceSourceType::FacingSprite &&
+				surface.provenance.sourceType != nri_scene::SurfaceSourceType::VoxelProxySprite;
+			if (keepSurface && (keepSpriteCacheSurface || surface.provenance.actorIndex >= 0))
 			{
 				destination.push_back(surface);
 			}
