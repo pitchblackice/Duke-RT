@@ -1150,11 +1150,76 @@ namespace
 			IsEffectivelyOpaque(sprite.RenderStyle, sprite.alpha);
 	}
 
+	bool IsOwnedByActor(const HWSprite& sprite, int32_t actorIndex)
+	{
+		return
+			sprite.Sprite != nullptr &&
+			sprite.Sprite->ownerActor != nullptr &&
+			(int32_t)sprite.Sprite->ownerActor->GetIndex() == actorIndex;
+	}
+
+	bool IsCapturableActorFacingSprite(const HWSprite& sprite, int32_t actorIndex)
+	{
+		return
+			IsOwnedByActor(sprite, actorIndex) &&
+			sprite.texture != nullptr &&
+			sprite.modelframe == 0 &&
+			sprite.alpha > (1.0f / 255.0f);
+	}
+
 	void CaptureFacingSprites(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outSprites)
 	{
 		for (auto* sprite : list.sprites)
 		{
 			if (sprite == nullptr || !IsOpaqueSprite(*sprite))
+			{
+				continue;
+			}
+
+			if (sprite->vertexindex < 0)
+			{
+				sprite->CreateVertices(&di);
+			}
+
+			if (sprite->vertexindex < 0)
+			{
+				continue;
+			}
+
+			const FFlatVertex* vertices = screen->mVertexData->GetBuffer(sprite->vertexindex);
+			if (vertices == nullptr)
+			{
+				continue;
+			}
+
+			SurfaceRef surface = {};
+			uint32_t extraFlags = MaterialFlag_Sprite | MaterialFlag_AlphaClip;
+			if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
+			{
+				extraFlags |= MaterialFlag_FacingBillboard;
+			}
+			surface.material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, extraFlags);
+			surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::FacingSprite, drawListType, surface.material.flags);
+			surface.vertices.reserve(4);
+			for (uint32_t i = 0; i < 4; ++i)
+			{
+				surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
+			}
+
+			if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
+			{
+				ApplyActorPreviousTransform(surface, sprite->Sprite->ownerActor);
+			}
+
+			outSprites.push_back(std::move(surface));
+		}
+	}
+
+	void CaptureActorFacingSprites(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, int32_t actorIndex, std::vector<SurfaceRef>& outSprites)
+	{
+		for (auto* sprite : list.sprites)
+		{
+			if (sprite == nullptr || !IsCapturableActorFacingSprite(*sprite, actorIndex))
 			{
 				continue;
 			}
@@ -1258,6 +1323,67 @@ namespace
 		for (auto* sprite : list.sprites)
 		{
 			if (sprite == nullptr)
+			{
+				continue;
+			}
+
+			stats.modelDrawItems++;
+
+			if (sprite->modelframe > 0)
+			{
+				stats.unsupportedModelDrawItems++;
+				continue;
+			}
+
+			if (sprite->modelframe >= 0 || sprite->voxel == nullptr || sprite->voxel->model == nullptr)
+			{
+				continue;
+			}
+
+			FGameTexture* voxelTexture = TexMan.GetGameTexture(sprite->voxel->model->GetPaletteTexture());
+			if (voxelTexture == nullptr || !voxelTexture->isValid())
+			{
+				continue;
+			}
+
+			const float extents[3] = {
+				(float)sprite->voxel->siz.X,
+				(float)sprite->voxel->siz.Z,
+				(float)sprite->voxel->siz.Y
+			};
+
+			for (const auto& face : faces)
+			{
+				SurfaceRef surface = {};
+				surface.material = MakeMaterialRef(voxelTexture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
+				surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
+				surface.vertices.reserve(4);
+				AddVoxelFace(sprite->rotmat, extents, face, surface);
+				if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
+				{
+					ApplyActorPreviousTransform(surface, sprite->Sprite->ownerActor);
+				}
+				outSprites.push_back(std::move(surface));
+			}
+
+			stats.voxelProxyDrawItems++;
+		}
+	}
+
+	void CaptureActorModelSprites(HWDrawList& list, uint32_t drawListType, int32_t actorIndex, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
+	{
+		static const int faces[6][4] = {
+			{ 0, 1, 2, 3 },
+			{ 4, 5, 6, 7 },
+			{ 0, 4, 7, 3 },
+			{ 1, 5, 6, 2 },
+			{ 3, 2, 6, 7 },
+			{ 0, 1, 5, 4 },
+		};
+
+		for (auto* sprite : list.sprites)
+		{
+			if (sprite == nullptr || !IsOwnedByActor(*sprite, actorIndex))
 			{
 				continue;
 			}
@@ -1471,6 +1597,28 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 	}
 
 	return !outView.opaqueWalls.empty() || !outView.opaqueFlats.empty() || !outView.opaqueSprites.empty();
+}
+
+bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView)
+{
+	outView = {};
+	outView.drawInfo = &di;
+	CaptureActorFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, actorIndex, outView.opaqueSprites);
+	CaptureActorModelSprites(di.drawlists[GLDL_MODELS], GLDL_MODELS, actorIndex, outView.opaqueSprites, outView.stats);
+
+	outView.stats.spriteDrawItems = (uint32_t)outView.opaqueSprites.size();
+	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
+	for (const auto& sprite : outView.opaqueSprites)
+	{
+		outView.stats.triangleEstimate += sprite.vertices.size() >= 3 ? (unsigned int)sprite.vertices.size() - 2 : 0;
+		outView.stats.materialRefs++;
+		if (sprite.provenance.sourceType != SurfaceSourceType::VoxelProxySprite)
+		{
+			outView.stats.translucentDrawItems++;
+		}
+	}
+
+	return !outView.opaqueSprites.empty();
 }
 
 bool CaptureScene(HWDrawInfo& di, SceneView& outView)

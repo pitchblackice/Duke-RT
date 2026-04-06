@@ -621,7 +621,7 @@ public:
 		captureDi->CreateScene(false);
 		captureStats.rawFacingSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
 		captureStats.rawVoxelSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
-		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, outView);
+		const bool hasCapture = nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, outView);
 		captureStats.capturedScene = hasCapture;
 		captureStats.capturedSurfaceCount = CountSceneViewSurfaces(outView);
 		AccumulateSceneViewActorSurfaceStats(
@@ -639,15 +639,8 @@ public:
 			return false;
 		}
 
-		if (!FilterSceneViewToActor(outView, actorIndex))
-		{
-			TraceMirrorPlayerCaptureStats(captureStats);
-			outView = {};
-			return false;
-		}
-
 		outView.primitiveFlags = nri_scene::PrimitiveFlag_ReflectionOnly;
-		captureStats.filteredSurfaceCount = CountSceneViewSurfaces(outView);
+		captureStats.filteredSurfaceCount = captureStats.capturedSurfaceCount;
 		TraceMirrorPlayerCaptureStats(captureStats);
 		return true;
 	}

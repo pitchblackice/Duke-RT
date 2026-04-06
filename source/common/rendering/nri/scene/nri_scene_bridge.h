@@ -171,5 +171,6 @@ void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallback
 void ResetSkyPerfStats();
 SkyPerfStats ConsumeSkyPerfStats();
 bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView);
+bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 }
