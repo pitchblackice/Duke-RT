@@ -506,6 +506,7 @@ public:
 			return false;
 		}
 
+		outView.primitiveFlags = nri_scene::PrimitiveFlag_ReflectionOnly;
 		return true;
 	}
 

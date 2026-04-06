@@ -46,6 +46,12 @@ enum MaterialFlags : uint32_t
 	MaterialFlag_FacingBillboard = 1u << 9,
 };
 
+enum PrimitiveFlags : uint32_t
+{
+	PrimitiveFlag_None = 0,
+	PrimitiveFlag_ReflectionOnly = 1u << 16,
+};
+
 enum class PTSkyMode : uint32_t
 {
 	None = 0,
@@ -152,6 +158,7 @@ struct SceneView
 	std::vector<SurfaceRef> opaqueWalls;
 	std::vector<SurfaceRef> opaqueFlats;
 	std::vector<SurfaceRef> opaqueSprites;
+	uint32_t primitiveFlags = PrimitiveFlag_None;
 	SceneDebugStats stats;
 	PTSkyDescriptor sky;
 	float skyColor[3] = { 0.38f, 0.48f, 0.65f };

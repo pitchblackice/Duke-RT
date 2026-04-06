@@ -116,6 +116,7 @@ namespace nri_scene
 void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 {
 	outGeometry = {};
+	const uint32_t scenePrimitiveFlags = sceneView.primitiveFlags;
 
 	uint32_t materialIndex = 0;
 	for (const SurfaceRef& wall : sceneView.opaqueWalls)
@@ -129,7 +130,7 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 		SceneVertex root = MakeVertex(wall.vertices[0]);
 		for (uint32_t i = 1; i + 1 < wall.vertices.size(); ++i)
 		{
-			AppendTriangle(root, MakeVertex(wall.vertices[i]), MakeVertex(wall.vertices[i + 1]), materialIndex, wall.material.flags, wall.provenance, outGeometry);
+			AppendTriangle(root, MakeVertex(wall.vertices[i]), MakeVertex(wall.vertices[i + 1]), materialIndex, wall.material.flags | scenePrimitiveFlags, wall.provenance, outGeometry);
 		}
 
 		materialIndex++;
@@ -145,7 +146,7 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 
 		for (uint32_t i = 0; i + 2 < flat.vertices.size(); i += 3)
 		{
-			AppendTriangle(MakeVertex(flat.vertices[i]), MakeVertex(flat.vertices[i + 1]), MakeVertex(flat.vertices[i + 2]), materialIndex, flat.material.flags, flat.provenance, outGeometry);
+			AppendTriangle(MakeVertex(flat.vertices[i]), MakeVertex(flat.vertices[i + 1]), MakeVertex(flat.vertices[i + 2]), materialIndex, flat.material.flags | scenePrimitiveFlags, flat.provenance, outGeometry);
 		}
 
 		materialIndex++;
@@ -162,8 +163,8 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 		if (sprite.vertices.size() == 4)
 		{
 			// Facing sprites come from HWSprite as a 4-vertex triangle strip.
-			AppendTriangle(MakeVertex(sprite.vertices[0]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[2]), materialIndex, sprite.material.flags, sprite.provenance, outGeometry);
-			AppendTriangle(MakeVertex(sprite.vertices[2]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[3]), materialIndex, sprite.material.flags, sprite.provenance, outGeometry);
+			AppendTriangle(MakeVertex(sprite.vertices[0]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[2]), materialIndex, sprite.material.flags | scenePrimitiveFlags, sprite.provenance, outGeometry);
+			AppendTriangle(MakeVertex(sprite.vertices[2]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[3]), materialIndex, sprite.material.flags | scenePrimitiveFlags, sprite.provenance, outGeometry);
 			materialIndex++;
 			continue;
 		}
@@ -171,7 +172,7 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 		SceneVertex root = MakeVertex(sprite.vertices[0]);
 		for (uint32_t i = 1; i + 1 < sprite.vertices.size(); ++i)
 		{
-			AppendTriangle(root, MakeVertex(sprite.vertices[i]), MakeVertex(sprite.vertices[i + 1]), materialIndex, sprite.material.flags, sprite.provenance, outGeometry);
+			AppendTriangle(root, MakeVertex(sprite.vertices[i]), MakeVertex(sprite.vertices[i + 1]), materialIndex, sprite.material.flags | scenePrimitiveFlags, sprite.provenance, outGeometry);
 		}
 
 		materialIndex++;
