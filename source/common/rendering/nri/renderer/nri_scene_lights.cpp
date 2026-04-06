@@ -16,6 +16,7 @@ EXTERN_CVAR(Float, nri_ptemissiveminpower)
 EXTERN_CVAR(Float, nri_ptemissiveminsurface)
 EXTERN_CVAR(Float, nri_ptglowscale)
 EXTERN_CVAR(Float, nri_ptglowreach)
+EXTERN_CVAR(Float, nri_ptglowfalloff)
 EXTERN_CVAR(Bool, nri_ptsectorlighting)
 EXTERN_CVAR(Float, nri_ptsectorambientscale)
 EXTERN_CVAR(Float, nri_ptsectorhemiscale)
@@ -758,9 +759,14 @@ namespace
 		return IsGlowDrivenEmissive(sourceFlags, emissiveMode) ? std::max((float)nri_ptglowscale, 0.0f) : 1.0f;
 	}
 
-	float ResolveGlowReachScale(uint32_t sourceFlags, uint32_t emissiveMode)
+	float ResolveGlowSamplingScale(uint32_t sourceFlags, uint32_t emissiveMode)
 	{
 		return IsGlowDrivenEmissive(sourceFlags, emissiveMode) ? std::max((float)nri_ptglowreach, 0.0f) : 1.0f;
+	}
+
+	float ResolveGlowFalloffScale(uint32_t sourceFlags, uint32_t emissiveMode)
+	{
+		return IsGlowDrivenEmissive(sourceFlags, emissiveMode) ? std::clamp((float)nri_ptglowfalloff, 0.25f, 4.0f) : 1.0f;
 	}
 
 	bool HasPalEntryColor(const PalEntry& color)
@@ -856,7 +862,8 @@ namespace
 		float& outIntensity,
 		uint32_t& outMode,
 		uint32_t& outTextureIndex,
-		float& outReachScale)
+		float& outSamplingScale,
+		float& outFalloffScale)
 	{
 		outSourceFlags = SceneEmissiveSurfaceSourceFlag_None;
 		outRuleId = 0;
@@ -866,7 +873,8 @@ namespace
 		outIntensity = 0.0f;
 		outMode = nri_scene::MaterialEmissiveMode_None;
 		outTextureIndex = UINT32_MAX;
-		outReachScale = 1.0f;
+		outSamplingScale = 1.0f;
+		outFalloffScale = 1.0f;
 
 		if (nri_ptemissiveheuristics)
 		{
@@ -951,7 +959,8 @@ namespace
 		}
 
 		outIntensity *= ResolveGlowStrengthScale(outSourceFlags, outMode);
-		outReachScale = ResolveGlowReachScale(outSourceFlags, outMode);
+		outSamplingScale = ResolveGlowSamplingScale(outSourceFlags, outMode);
+		outFalloffScale = ResolveGlowFalloffScale(outSourceFlags, outMode);
 		return outIntensity > 0.0f;
 	}
 }
@@ -1297,8 +1306,9 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 		float emissiveIntensity = 0.0f;
 		uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
 		uint32_t emissiveTextureIndex = UINT32_MAX;
-		float emissiveReachScale = 1.0f;
-		if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, record.material, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveReachScale))
+		float emissiveSamplingScale = 1.0f;
+		float emissiveFalloffScale = 1.0f;
+		if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, record.material, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale))
 		{
 			continue;
 		}
@@ -1311,7 +1321,7 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 		const float resolvedLuminance = emissiveMode == nri_scene::MaterialEmissiveMode_UseBaseTexture ?
 			ComputeColorLuminance(record.material.averageColor) :
 			ComputeColorLuminance(emissiveColor);
-		const float powerEstimate = record.surfaceArea * resolvedLuminance * emissiveIntensity * emissiveReachScale;
+		const float powerEstimate = record.surfaceArea * resolvedLuminance * emissiveIntensity;
 		if (powerEstimate < minPower)
 		{
 			continue;
@@ -1700,8 +1710,9 @@ bool SceneLightSystem::MaterialWouldEmit(const nri_scene::MaterialLightingMetada
 	float emissiveIntensity = 0.0f;
 	uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
 	uint32_t emissiveTextureIndex = UINT32_MAX;
-	float emissiveReachScale = 1.0f;
-	return EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveReachScale);
+	float emissiveSamplingScale = 1.0f;
+	float emissiveFalloffScale = 1.0f;
+	return EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale);
 }
 
 bool SceneLightSystem::ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const
@@ -1712,8 +1723,9 @@ bool SceneLightSystem::ApplyEmissiveMaterialSettings(const nri_scene::MaterialLi
 	float emissiveIntensity = 0.0f;
 	uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
 	uint32_t emissiveTextureIndex = UINT32_MAX;
-	float emissiveReachScale = 1.0f;
-	if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveReachScale))
+	float emissiveSamplingScale = 1.0f;
+	float emissiveFalloffScale = 1.0f;
+	if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale))
 	{
 		inOutMaterial.emissiveColor[0] = 0.0f;
 		inOutMaterial.emissiveColor[1] = 0.0f;
@@ -1729,7 +1741,7 @@ bool SceneLightSystem::ApplyEmissiveMaterialSettings(const nri_scene::MaterialLi
 	inOutMaterial.emissiveColor[1] = emissiveColor[1];
 	inOutMaterial.emissiveColor[2] = emissiveColor[2];
 	inOutMaterial.emissiveIntensity = emissiveIntensity;
-	inOutMaterial.emissiveMaskScale = std::max(emissiveReachScale, 0.0f);
+	inOutMaterial.emissiveMaskScale = std::max(emissiveFalloffScale, 0.0f);
 	inOutMaterial.emissiveMode = emissiveMode;
 	inOutMaterial.emissiveTextureIndex = emissiveTextureIndex;
 	if (inOutMaterial.materialClass != 3u)

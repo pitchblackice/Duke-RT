@@ -125,6 +125,7 @@ struct EmissivePrimitiveData
 	uint textureId;
 	float primitiveArea;
 	float powerEstimate;
+	float selectionWeight;
 	float selectionPdf;
 	uint stableKeyLo;
 	uint stableKeyHi;

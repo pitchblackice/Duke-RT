@@ -1971,6 +1971,18 @@ CUSTOM_CVAR(Float, nri_ptglowreach, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 	NotifyActiveGlowControlChange();
 }
+CUSTOM_CVAR(Float, nri_ptglowfalloff, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.25f)
+	{
+		self = 0.25f;
+	}
+	else if (self > 4.0f)
+	{
+		self = 4.0f;
+	}
+	NotifyActiveGlowControlChange();
+}
 CUSTOM_CVAR(Float, nri_ptfullbrightboost, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
@@ -2920,6 +2932,21 @@ namespace
 	static float GetFullbrightBoostScale()
 	{
 		return std::clamp((float)nri_ptfullbrightboost, 0.50f, 8.00f);
+	}
+
+	static bool IsGlowDrivenEmissiveForSampling(uint32_t sourceFlags, uint32_t emissiveMode)
+	{
+		if (emissiveMode == nri_scene::MaterialEmissiveMode_UseGlowmapTexture)
+		{
+			return true;
+		}
+
+		return (sourceFlags & (SceneEmissiveSurfaceSourceFlag_AutoTextureGlow | SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0;
+	}
+
+	static float ResolveGlowSamplingScale(uint32_t sourceFlags, uint32_t emissiveMode)
+	{
+		return IsGlowDrivenEmissiveForSampling(sourceFlags, emissiveMode) ? std::max((float)nri_ptglowreach, 0.0f) : 1.0f;
 	}
 
 	static float GetFullbrightRoughnessHint(uint32_t materialFlags)
@@ -6853,12 +6880,15 @@ void NRIRenderer::UpdateNightVisionState()
 void NRIRenderer::PrintTextureEmissiveHeuristics() const
 {
 	const auto& emissive = mSceneLights.GetEmissiveSurfaces();
-	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u active=%u total_power=%.3f truncated=%u\n",
+	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u active=%u total_power=%.3f glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f truncated=%u\n",
 		(uint32_t)emissive.textureRules.size(),
 		emissive.autoTaggedCount,
 		emissive.explicitRuleMatchCount,
 		(uint32_t)emissive.activeSurfaces.size(),
 		emissive.totalPowerEstimate,
+		(float)nri_ptglowscale,
+		(float)nri_ptglowreach,
+		(float)nri_ptglowfalloff,
 		emissive.truncatedSurfaceCount);
 	for (const auto& rule : emissive.textureRules)
 	{
@@ -6931,7 +6961,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		const auto& record = *candidates[i].record;
 		const auto diagnosticIt = emissiveSurfaces.activeDiagnosticFlags.find(record.surfaceStableKey);
 		const uint32_t diagnosticFlags = diagnosticIt != emissiveSurfaces.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
-		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
 			i,
 			(unsigned long long)record.stableKey,
 			(unsigned long long)record.surfaceStableKey,
@@ -6950,6 +6980,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 			record.emissiveTextureIndex != UINT32_MAX ? record.emissiveTextureIndex : 0u,
 			record.primitiveArea,
 			record.powerEstimate,
+			record.selectionWeight,
 			record.selectionPdf,
 			record.center[0],
 			record.center[1],
@@ -7455,7 +7486,7 @@ void NRIRenderer::PrintStatus() const
 		mBoundRuntimeLightTileIndexCount,
 		mBoundRuntimeLightMaxTileOccupancy,
 		NRI_PTDEBUG_ANALYTIC_DIRECT);
-	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s\n",
+	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f\n",
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().textureRules.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
@@ -7471,7 +7502,10 @@ void NRIRenderer::PrintStatus() const
 		(float)nri_ptemissiveminsurface,
 		(float)nri_ptemissiveminpower,
 		nri_ptemissiveheuristics ? "on" : "off",
-		nri_ptemissiveautoonly ? "on" : "off");
+		nri_ptemissiveautoonly ? "on" : "off",
+		(float)nri_ptglowscale,
+		(float)nri_ptglowreach,
+		(float)nri_ptglowfalloff);
 	Printf("NRI PT emissive sources: base=%u glowmap=%u constant=%u\n",
 		emissiveBaseCount,
 		emissiveGlowmapCount,
@@ -10563,6 +10597,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 		{
 			representativeLuminance = std::max(surface.powerEstimate / (surface.surfaceArea * surface.emissiveIntensity), 0.0f);
 		}
+		const float samplingScale = ResolveGlowSamplingScale(surface.sourceFlags, surface.emissiveMode);
 
 		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
 		{
@@ -10581,6 +10616,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.gpu.textureId = surface.textureId;
 			candidate.gpu.primitiveArea = primitiveArea;
 			candidate.gpu.powerEstimate = std::max(primitiveArea * representativeLuminance * surface.emissiveIntensity, 0.0f);
+			candidate.gpu.selectionWeight = candidate.gpu.powerEstimate * samplingScale;
 
 			candidate.debug.stableKey = HashCombine64(surface.stableKey, ((uint64_t)dataSource << 32u) | primitiveIndex);
 			candidate.debug.surfaceStableKey = surface.stableKey;
@@ -10595,6 +10631,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.debug.actorIndex = surface.actorIndex;
 			candidate.debug.primitiveArea = primitiveArea;
 			candidate.debug.powerEstimate = candidate.gpu.powerEstimate;
+			candidate.debug.selectionWeight = candidate.gpu.selectionWeight;
 			candidate.debug.selectionPdf = 0.0f;
 			candidate.debug.emissiveIntensity = surface.emissiveIntensity;
 			Copy3(surface.emissiveColor, candidate.debug.emissiveColor);
@@ -10636,9 +10673,9 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 	{
 		std::stable_sort(candidates.begin(), candidates.end(), [](const BuiltCandidate& a, const BuiltCandidate& b)
 		{
-			if (a.gpu.powerEstimate != b.gpu.powerEstimate)
+			if (a.gpu.selectionWeight != b.gpu.selectionWeight)
 			{
-				return a.gpu.powerEstimate > b.gpu.powerEstimate;
+				return a.gpu.selectionWeight > b.gpu.selectionWeight;
 			}
 
 			return a.debug.stableKey < b.debug.stableKey;
@@ -10650,6 +10687,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 	outDebugRecords.reserve(candidates.size());
 
 	float totalPower = 0.0f;
+	float totalSelectionWeight = 0.0f;
 	float dominantPower = -1.0f;
 	uint32_t dominantTile = 0;
 	uint32_t dominantFlags = 0;
@@ -10661,6 +10699,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 		outPrimitives.push_back(candidates[i].gpu);
 		outDebugRecords.push_back(candidates[i].debug);
 		totalPower += candidates[i].gpu.powerEstimate;
+		totalSelectionWeight += candidates[i].gpu.selectionWeight;
 		if (candidates[i].gpu.powerEstimate > dominantPower)
 		{
 			dominantPower = candidates[i].gpu.powerEstimate;
@@ -10682,13 +10721,13 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 	}
 
 	float runningCdf = 0.0f;
-	const float invTotalPower = totalPower > 0.0f ? (1.0f / totalPower) : 0.0f;
+	const float invTotalSelectionWeight = totalSelectionWeight > 0.0f ? (1.0f / totalSelectionWeight) : 0.0f;
 	for (size_t i = 0; i < outPrimitives.size(); ++i)
 	{
 		float pdf = 0.0f;
-		if (totalPower > 0.0f)
+		if (totalSelectionWeight > 0.0f)
 		{
-			pdf = outPrimitives[i].powerEstimate * invTotalPower;
+			pdf = outPrimitives[i].selectionWeight * invTotalSelectionWeight;
 		}
 		else
 		{

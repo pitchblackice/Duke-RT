@@ -366,6 +366,7 @@ private:
 		uint32_t textureId = 0;
 		float primitiveArea = 0.0f;
 		float powerEstimate = 0.0f;
+		float selectionWeight = 0.0f;
 		float selectionPdf = 0.0f;
 		uint32_t stableKeyLo = 0;
 		uint32_t stableKeyHi = 0;
@@ -387,6 +388,7 @@ private:
 		float center[3] = {};
 		float primitiveArea = 0.0f;
 		float powerEstimate = 0.0f;
+		float selectionWeight = 0.0f;
 		float selectionPdf = 0.0f;
 		float emissiveColor[3] = {};
 		float emissiveIntensity = 0.0f;
