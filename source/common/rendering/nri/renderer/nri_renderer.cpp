@@ -614,11 +614,6 @@ public:
 
 			const DVector2 toMirrorDir = toMirror / sqrt(distanceSquared);
 			const double facing = cameraDir | toMirrorDir;
-			if (facing <= 0.0)
-			{
-				continue;
-			}
-
 			const double score = facing * 1000.0 - sqrt(distanceSquared);
 			if (score > bestScore)
 			{
