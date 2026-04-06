@@ -17,6 +17,7 @@
 #include "mapinfo.h"
 #include "printf.h"
 #include "gamestruct.h"
+#include "hw_portal.h"
 #include "texinfo.h"
 #include "texturemanager.h"
 #include "d_eventbase.h"
@@ -525,6 +526,36 @@ public:
 		bool mPrevious = false;
 	};
 
+	class ScopedPortalSceneCaptureState
+	{
+public:
+		ScopedPortalSceneCaptureState(DCoreActor* viewer, int type)
+			: mViewer(viewer), mType(type)
+		{
+			if (gi != nullptr)
+			{
+				gi->EnterPortal(mViewer, mType);
+				mEntered = true;
+			}
+		}
+
+		~ScopedPortalSceneCaptureState()
+		{
+			if (mEntered && gi != nullptr)
+			{
+				gi->LeavePortal(mViewer, mType);
+			}
+		}
+
+		ScopedPortalSceneCaptureState(const ScopedPortalSceneCaptureState&) = delete;
+		ScopedPortalSceneCaptureState& operator=(const ScopedPortalSceneCaptureState&) = delete;
+
+	private:
+		DCoreActor* mViewer = nullptr;
+		int mType = -1;
+		bool mEntered = false;
+	};
+
 	static void RebuildSceneViewStats(nri_scene::SceneView& sceneView)
 	{
 		nri_scene::SceneDebugStats stats = {};
@@ -567,28 +598,6 @@ public:
 		sceneView.stats = stats;
 	}
 
-	static bool FilterSceneViewToActor(nri_scene::SceneView& sceneView, int32_t actorIndex)
-	{
-		auto retainActorSurfaces = [actorIndex](auto& surfaces)
-		{
-			surfaces.erase(
-				std::remove_if(
-					surfaces.begin(),
-					surfaces.end(),
-					[actorIndex](const auto& surface)
-					{
-						return surface.provenance.actorIndex != actorIndex;
-					}),
-				surfaces.end());
-		};
-
-		retainActorSurfaces(sceneView.opaqueWalls);
-		retainActorSurfaces(sceneView.opaqueFlats);
-		retainActorSurfaces(sceneView.opaqueSprites);
-		RebuildSceneViewStats(sceneView);
-		return CountSceneViewSurfaces(sceneView) > 0;
-	}
-
 	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, nri_scene::SceneView& outView)
 	{
 		outView = {};
@@ -613,16 +622,63 @@ public:
 		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
 		captureStats.localPlayerActorIndex = actorIndex;
 		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
-		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
-		captureDi->visibility = di.visibility;
-		captureDi->rellight = di.rellight;
+		FRenderState* renderState = screen != nullptr ? screen->RenderState() : nullptr;
+		if (renderState == nullptr)
+		{
+			TraceMirrorPlayerCaptureStats(captureStats);
+			return false;
+		}
 
-		const ScopedMirrorPlayerVisibilityCaptureOverride mirrorCaptureOverride(true);
-		captureDi->CreateScene(false);
-		captureStats.rawFacingSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
-		captureStats.rawVoxelSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
-		const bool hasCapture = nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, outView);
-		captureStats.capturedScene = hasCapture;
+		for (HWPortal* portal : di.Portals)
+		{
+			if (portal == nullptr || portal->GetType() != PORTAL_WALL_MIRROR)
+			{
+				continue;
+			}
+
+			auto* scenePortal = static_cast<HWScenePortalBase*>(portal);
+			HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
+			if (captureDi == nullptr)
+			{
+				continue;
+			}
+
+			captureDi->visibility = di.visibility;
+			captureDi->rellight = di.rellight;
+			const bool setup = scenePortal->SetupForSceneCapture(captureDi, *renderState);
+			if (!setup)
+			{
+				captureDi->EndDrawInfo();
+				continue;
+			}
+
+			const int portalType = portal->GetType();
+			const bool portalFlag = portalType == PORTAL_SECTOR_CEILING;
+			{
+				const ScopedPortalSceneCaptureState portalCaptureState(captureDi->Viewpoint.CameraActor, portalType);
+				const ScopedMirrorPlayerVisibilityCaptureOverride mirrorCaptureOverride(true);
+				captureDi->CreateScene(portalFlag);
+			}
+
+			captureStats.rawFacingSprites += CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
+			captureStats.rawVoxelSprites += CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
+
+			nri_scene::SceneView childView;
+			if (nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, childView))
+			{
+				for (nri_scene::SurfaceRef& sprite : childView.opaqueSprites)
+				{
+					outView.opaqueSprites.push_back(std::move(sprite));
+				}
+			}
+
+			scenePortal->ShutdownAfterSceneCapture(captureDi, *renderState);
+			captureDi->EndDrawInfo();
+		}
+
+		outView.drawInfo = &di;
+		RebuildSceneViewStats(outView);
+		captureStats.capturedScene = CountSceneViewSurfaces(outView) > 0;
 		captureStats.capturedSurfaceCount = CountSceneViewSurfaces(outView);
 		AccumulateSceneViewActorSurfaceStats(
 			outView,
@@ -630,9 +686,7 @@ public:
 			captureStats.capturedMatchingActorSurfaces,
 			captureStats.capturedOtherActorSurfaces,
 			captureStats.capturedActorlessSurfaces);
-		outView.drawInfo = &di;
-		captureDi->EndDrawInfo();
-		if (!hasCapture)
+		if (!captureStats.capturedScene)
 		{
 			TraceMirrorPlayerCaptureStats(captureStats);
 			outView = {};
