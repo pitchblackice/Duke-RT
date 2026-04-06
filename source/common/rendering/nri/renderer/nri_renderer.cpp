@@ -1186,6 +1186,108 @@ public:
 		}
 	}
 
+	static uint64_t HashPersistentSurfaceTaggedSignedValue(uint64_t hash, uint64_t tag, int32_t value)
+	{
+		hash = (hash ^ tag) * 1099511628211ull;
+		hash = (hash ^ (uint64_t)(uint32_t)(value + 1)) * 1099511628211ull;
+		return hash;
+	}
+
+	static uint64_t QuantizePersistentSurfaceCenter(const nri_scene::SurfaceRef& surface)
+	{
+		if (surface.vertices.empty())
+		{
+			return 0ull;
+		}
+
+		double center[3] = {};
+		for (const auto& vertex : surface.vertices)
+		{
+			center[0] += vertex.position[0];
+			center[1] += vertex.position[1];
+			center[2] += vertex.position[2];
+		}
+
+		const double invVertexCount = 1.0 / (double)surface.vertices.size();
+		const int64_t x = (int64_t)std::llround(center[0] * invVertexCount * 16.0);
+		const int64_t y = (int64_t)std::llround(center[1] * invVertexCount * 16.0);
+		const int64_t z = (int64_t)std::llround(center[2] * invVertexCount * 16.0);
+
+		uint64_t key = 1469598103934665603ull;
+		key = (key ^ (uint64_t)x) * 1099511628211ull;
+		key = (key ^ (uint64_t)y) * 1099511628211ull;
+		key = (key ^ (uint64_t)z) * 1099511628211ull;
+		return key;
+	}
+
+	static uint64_t BuildPersistentEmissiveSurfaceIdentityKey(const nri_scene::SurfaceRef& surface)
+	{
+		uint64_t key = 1469598103934665603ull;
+		key = (key ^ (uint64_t)(uint32_t)surface.provenance.sourceType) * 1099511628211ull;
+		key = (key ^ (uint64_t)surface.provenance.drawListType) * 1099511628211ull;
+
+		bool hasAuthoritativeOwnership = false;
+		if (surface.provenance.actorIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0xA11C700000000001ull, surface.provenance.actorIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.sectorIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0x5EC70B5E00000001ull, surface.provenance.sectorIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.wallIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0xAA11000000000001ull, surface.provenance.wallIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.sectionIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0x5EC7100000000001ull, surface.provenance.sectionIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.mapChunkIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0xC4C0000000000001ull, surface.provenance.mapChunkIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.nextSectorIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0x9E57000000000001ull, surface.provenance.nextSectorIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (!hasAuthoritativeOwnership)
+		{
+			key = (key ^ 0xCE173E0000000001ull) * 1099511628211ull;
+			key = (key ^ QuantizePersistentSurfaceCenter(surface)) * 1099511628211ull;
+		}
+
+		key = (key ^ (uint64_t)(uintptr_t)surface.material.texture) * 1099511628211ull;
+		key = (key ^ (uint64_t)(uint32_t)(surface.material.palette + 1)) * 1099511628211ull;
+		key = (key ^ (uint64_t)surface.provenance.cstat) * 1099511628211ull;
+		key = (key ^ (uint64_t)surface.provenance.materialFlags) * 1099511628211ull;
+		return key;
+	}
+
+	template <typename SurfaceContainer>
+	static void AppendUniquePersistentEmissiveSurfaces(
+		const SurfaceContainer& source,
+		SurfaceContainer& destination,
+		std::unordered_set<uint64_t>& inOutSeenKeys)
+	{
+		for (const auto& surface : source)
+		{
+			const uint64_t identityKey = BuildPersistentEmissiveSurfaceIdentityKey(surface);
+			if (!inOutSeenKeys.insert(identityKey).second)
+			{
+				continue;
+			}
+
+			destination.push_back(surface);
+		}
+	}
+
 	static bool RequiresExclusiveMaterialOnlyChunkReplacement(uint32_t reasonMask)
 	{
 		// Material-only wall mutations leave the stale static wall traceable if
@@ -5624,26 +5726,46 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 		PrunePersistentDynamicEmissiveCacheToLiveActors();
 
-		const bool shouldUsePersistentDynamicEmissive = mPersistentDynamicEmissiveCache.valid && !liveDynamicHasEmissive;
+		const bool shouldUsePersistentDynamicEmissive = mPersistentDynamicEmissiveCache.valid;
 		if (shouldUsePersistentDynamicEmissive)
 		{
 			usingPersistentDynamicEmissiveCache = true;
 			if (hasDynamicScene)
 			{
 				mergedDynamicSceneView = dynamicSceneView;
-				mergedDynamicSceneView.opaqueWalls.insert(
-					mergedDynamicSceneView.opaqueWalls.end(),
-					mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.begin(),
-					mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.end());
-				mergedDynamicSceneView.opaqueFlats.insert(
-					mergedDynamicSceneView.opaqueFlats.end(),
-					mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.begin(),
-					mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.end());
-				mergedDynamicSceneView.opaqueSprites.insert(
-					mergedDynamicSceneView.opaqueSprites.end(),
-					mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.begin(),
-					mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.end());
-				mergedDynamicSceneView.stats = MergeSceneStats(dynamicSceneView.stats, mPersistentDynamicEmissiveCache.sceneView.stats);
+				std::unordered_set<uint64_t> seenSurfaceKeys;
+				seenSurfaceKeys.reserve(
+					mergedDynamicSceneView.opaqueWalls.size() +
+					mergedDynamicSceneView.opaqueFlats.size() +
+					mergedDynamicSceneView.opaqueSprites.size() +
+					mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.size() +
+					mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.size() +
+					mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.size());
+				for (const auto& surface : mergedDynamicSceneView.opaqueWalls)
+				{
+					seenSurfaceKeys.insert(BuildPersistentEmissiveSurfaceIdentityKey(surface));
+				}
+				for (const auto& surface : mergedDynamicSceneView.opaqueFlats)
+				{
+					seenSurfaceKeys.insert(BuildPersistentEmissiveSurfaceIdentityKey(surface));
+				}
+				for (const auto& surface : mergedDynamicSceneView.opaqueSprites)
+				{
+					seenSurfaceKeys.insert(BuildPersistentEmissiveSurfaceIdentityKey(surface));
+				}
+				AppendUniquePersistentEmissiveSurfaces(
+					mPersistentDynamicEmissiveCache.sceneView.opaqueWalls,
+					mergedDynamicSceneView.opaqueWalls,
+					seenSurfaceKeys);
+				AppendUniquePersistentEmissiveSurfaces(
+					mPersistentDynamicEmissiveCache.sceneView.opaqueFlats,
+					mergedDynamicSceneView.opaqueFlats,
+					seenSurfaceKeys);
+				AppendUniquePersistentEmissiveSurfaces(
+					mPersistentDynamicEmissiveCache.sceneView.opaqueSprites,
+					mergedDynamicSceneView.opaqueSprites,
+					seenSurfaceKeys);
+				RebuildSceneViewStats(mergedDynamicSceneView);
 
 				{
 					Clocker clock(NriPTGeometryBuild);
@@ -7959,8 +8081,18 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 	Copy3(sceneView.skyColor, next.sceneView.skyColor);
 	Copy3(sceneView.groundColor, next.sceneView.groundColor);
 
+	bool liveSceneHasEmissive = false;
+	std::unordered_set<uint64_t> seenSurfaceKeys;
+	seenSurfaceKeys.reserve(
+		sceneView.opaqueWalls.size() +
+		sceneView.opaqueFlats.size() +
+		sceneView.opaqueSprites.size() +
+		mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.size() +
+		mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.size() +
+		mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.size());
+
 	uint32_t materialIndex = 0;
-	auto appendSurfaceList = [this, &materials, &materialIndex](const auto& source, auto& destination)
+	auto appendLiveSurfaceList = [this, &materials, &materialIndex, &liveSceneHasEmissive, &seenSurfaceKeys](const auto& source, auto& destination)
 	{
 		for (const auto& surface : source)
 		{
@@ -7972,15 +8104,36 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 				surface.provenance.sourceType != nri_scene::SurfaceSourceType::VoxelProxySprite;
 			if (keepSurface && (keepSpriteCacheSurface || surface.provenance.actorIndex >= 0))
 			{
-				destination.push_back(surface);
+				liveSceneHasEmissive = true;
+				const uint64_t identityKey = BuildPersistentEmissiveSurfaceIdentityKey(surface);
+				if (seenSurfaceKeys.insert(identityKey).second)
+				{
+					destination.push_back(surface);
+				}
 			}
 			materialIndex++;
 		}
 	};
 
-	appendSurfaceList(sceneView.opaqueWalls, next.sceneView.opaqueWalls);
-	appendSurfaceList(sceneView.opaqueFlats, next.sceneView.opaqueFlats);
-	appendSurfaceList(sceneView.opaqueSprites, next.sceneView.opaqueSprites);
+	appendLiveSurfaceList(sceneView.opaqueWalls, next.sceneView.opaqueWalls);
+	appendLiveSurfaceList(sceneView.opaqueFlats, next.sceneView.opaqueFlats);
+	appendLiveSurfaceList(sceneView.opaqueSprites, next.sceneView.opaqueSprites);
+
+	if (mPersistentDynamicEmissiveCache.valid)
+	{
+		AppendUniquePersistentEmissiveSurfaces(
+			mPersistentDynamicEmissiveCache.sceneView.opaqueWalls,
+			next.sceneView.opaqueWalls,
+			seenSurfaceKeys);
+		AppendUniquePersistentEmissiveSurfaces(
+			mPersistentDynamicEmissiveCache.sceneView.opaqueFlats,
+			next.sceneView.opaqueFlats,
+			seenSurfaceKeys);
+		AppendUniquePersistentEmissiveSurfaces(
+			mPersistentDynamicEmissiveCache.sceneView.opaqueSprites,
+			next.sceneView.opaqueSprites,
+			seenSurfaceKeys);
+	}
 
 	next.surfaceCount =
 		(uint32_t)next.sceneView.opaqueWalls.size() +
@@ -7988,7 +8141,8 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 		(uint32_t)next.sceneView.opaqueSprites.size();
 	if (next.surfaceCount == 0)
 	{
-		return false;
+		mPersistentDynamicEmissiveCache = {};
+		return liveSceneHasEmissive;
 	}
 
 	{
@@ -8012,11 +8166,12 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 	next.valid = next.primitiveCount > 0 && next.materialCount > 0;
 	if (!next.valid)
 	{
-		return false;
+		mPersistentDynamicEmissiveCache = {};
+		return liveSceneHasEmissive;
 	}
 
 	mPersistentDynamicEmissiveCache = std::move(next);
-	return true;
+	return liveSceneHasEmissive;
 }
 
 void NRIRenderer::PrintRuntimeMapMutationStatus() const
