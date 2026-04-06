@@ -2007,6 +2007,70 @@ namespace
 		return std::max((float)nri_ptexposure, 0.125f);
 	}
 
+	static float GetFullbrightBoostScale()
+	{
+		return std::clamp((float)nri_ptfullbrightboost, 0.50f, 8.00f);
+	}
+
+	static float GetFullbrightRoughnessHint(uint32_t materialFlags)
+	{
+		if ((materialFlags & nri_scene::MaterialFlag_Sprite) != 0)
+		{
+			return 0.45f;
+		}
+		if ((materialFlags & nri_scene::MaterialFlag_Flat) != 0)
+		{
+			return 0.60f;
+		}
+		return 0.55f;
+	}
+
+	static void ApplyActorFullbrightOverridesToBuiltMaterials(
+		const std::unordered_map<int32_t, uint32_t>& actorOverrides,
+		nri_scene::MaterialBridgeData& materials)
+	{
+		const uint32_t count = std::min<uint32_t>((uint32_t)materials.materials.size(), (uint32_t)materials.lightMetadata.size());
+		const float fullbrightBoost = GetFullbrightBoostScale();
+		for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
+		{
+			nri_scene::MaterialLightingMetadata& metadata = materials.lightMetadata[materialIndex];
+			if (metadata.actorIndex < 0)
+			{
+				continue;
+			}
+
+			auto it = actorOverrides.find(metadata.actorIndex);
+			if (it == actorOverrides.end() || (it->second & ActorMaterialOverride_Fullbright) == 0)
+			{
+				continue;
+			}
+
+			nri_scene::MaterialData& material = materials.materials[materialIndex];
+			material.flags |= nri_scene::MaterialFlag_Fullbright;
+			material.lightLevel = 1.0f;
+			material.roughnessHint = GetFullbrightRoughnessHint(material.flags);
+			material.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
+			material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
+			material.emissiveTextureIndex = material.textureIndex;
+			material.emissiveIntensity = fullbrightBoost;
+			material.emissiveMaskScale = 1.0f;
+			material.emissiveColor[0] = 1.0f;
+			material.emissiveColor[1] = 1.0f;
+			material.emissiveColor[2] = 1.0f;
+
+			metadata.materialFlags |= nri_scene::MaterialFlag_Fullbright;
+			metadata.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
+			metadata.lightLevel = 1.0f;
+			metadata.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
+			metadata.emissiveTextureIndex = material.textureIndex;
+			metadata.emissiveIntensity = fullbrightBoost;
+			metadata.emissiveMaskScale = 1.0f;
+			metadata.emissiveColor[0] = 1.0f;
+			metadata.emissiveColor[1] = 1.0f;
+			metadata.emissiveColor[2] = 1.0f;
+		}
+	}
+
 	static float GetExposureDeltaStops(float previousExposure, float currentExposure)
 	{
 		const float safePrevious = std::max(previousExposure, 0.125f);
@@ -8510,6 +8574,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 			applyOverrides(sceneView.opaqueSprites);
 
 			nri_scene::BuildMaterials(sceneView, outMaterials);
+			ApplyActorFullbrightOverridesToBuiltMaterials(actorOverrides, outMaterials);
 			for (const SavedMaterialFlags& saved : savedFlags)
 			{
 				*saved.flags = saved.value;
@@ -8537,6 +8602,7 @@ void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBri
 	}
 
 	const uint32_t count = std::min<uint32_t>((uint32_t)inOutGpuMaterials.size(), (uint32_t)materials.lightMetadata.size());
+	const float fullbrightBoost = GetFullbrightBoostScale();
 	for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
 	{
 		const nri_scene::MaterialLightingMetadata& metadata = materials.lightMetadata[materialIndex];
@@ -8558,6 +8624,21 @@ void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBri
 		if ((it->second & ActorMaterialOverride_NoShadowCast) != 0)
 		{
 			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
+		}
+		if ((it->second & ActorMaterialOverride_Fullbright) != 0)
+		{
+			nri_scene::MaterialData& material = inOutGpuMaterials[materialIndex];
+			material.flags |= nri_scene::MaterialFlag_Fullbright;
+			material.lightLevel = 1.0f;
+			material.roughnessHint = GetFullbrightRoughnessHint(material.flags);
+			material.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
+			material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
+			material.emissiveTextureIndex = material.textureIndex;
+			material.emissiveIntensity = fullbrightBoost;
+			material.emissiveMaskScale = 1.0f;
+			material.emissiveColor[0] = 1.0f;
+			material.emissiveColor[1] = 1.0f;
+			material.emissiveColor[2] = 1.0f;
 		}
 	}
 }
