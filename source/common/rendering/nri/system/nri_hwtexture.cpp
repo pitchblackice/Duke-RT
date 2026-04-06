@@ -126,6 +126,18 @@ void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags
 		return;
 	}
 
+	// Wrapper-backed SWCanvas textures already own a live GPU resource.
+	// Do not fall back to CreateTexBuffer(), which for FWrapperTexture has no software pixels.
+	if (dynamic_cast<FWrapperTexture*>(tex) != nullptr)
+	{
+		if (mFrameBuffer != nullptr)
+		{
+			mFrameBuffer->Note2DTextureEnsure(false);
+			mFrameBuffer->Note2DTextureCacheHit();
+		}
+		return;
+	}
+
 	if (mFrameBuffer != nullptr)
 	{
 		mFrameBuffer->Note2DTextureEnsure(false);
