@@ -82,6 +82,9 @@ extern int spriteqloc;
 extern int thunder_brightness;
 inline DukeLevel dlevel;
 
+bool IsMirrorPlayerVisibilityCaptureActive();
+void SetMirrorPlayerVisibilityCaptureActive(bool active);
+
 enum animtype_t
 {
 	anim_floorz,
@@ -148,4 +151,3 @@ void RegisterClasses();
 END_DUKE_NS
 
 #include "inlines.h"
-

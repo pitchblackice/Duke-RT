@@ -56,6 +56,8 @@ struct GameInterface : public ::GameInterface
 	void UpdateCameras(double smoothratio) override;
 	void EnterPortal(DCoreActor* viewer, int type) override;
 	void LeavePortal(DCoreActor* viewer, int type) override;
+	void SetMirrorPlayerVisibilityCaptureOverride(bool enabled) override;
+	bool GetMirrorPlayerVisibilityCaptureOverride() const override;
 	bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) override;
 	bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) override;
 	bool GetNightVisionState(RuntimeNightVisionState* state) override;

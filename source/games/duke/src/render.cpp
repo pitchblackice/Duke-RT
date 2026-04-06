@@ -41,6 +41,11 @@ extern float GlobalFogDensity;
 
 BEGIN_DUKE_NS
 
+namespace
+{
+	bool gMirrorPlayerVisibilityCaptureOverride = false;
+}
+
 //---------------------------------------------------------------------------
 //
 // Floor Over Floor
@@ -131,6 +136,16 @@ void GameInterface::EnterPortal(DCoreActor* viewer, int type)
 void GameInterface::LeavePortal(DCoreActor* viewer, int type) 
 {
 	if (type == PORTAL_WALL_MIRROR) display_mirror--;
+}
+
+void GameInterface::SetMirrorPlayerVisibilityCaptureOverride(bool enabled)
+{
+	SetMirrorPlayerVisibilityCaptureActive(enabled);
+}
+
+bool GameInterface::GetMirrorPlayerVisibilityCaptureOverride() const
+{
+	return IsMirrorPlayerVisibilityCaptureActive();
 }
 
 bool GameInterface::GetGeoEffect(GeoEffect* eff, sectortype* viewsector)
@@ -511,6 +526,16 @@ bool GameInterface::GenerateSavePic()
 void GameInterface::processSprites(tspriteArray& tsprites, const DVector3& view, DAngle viewang, double interpfrac)
 {
 	fi.animatesprites(tsprites, view.XY(), viewang, interpfrac);
+}
+
+bool IsMirrorPlayerVisibilityCaptureActive()
+{
+	return gMirrorPlayerVisibilityCaptureOverride;
+}
+
+void SetMirrorPlayerVisibilityCaptureActive(bool active)
+{
+	gMirrorPlayerVisibilityCaptureOverride = active;
 }
 
 

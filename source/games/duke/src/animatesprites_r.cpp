@@ -85,6 +85,7 @@ void animatesprites_r(tspriteArray& tsprites, const DVector2& viewVec, DAngle vi
 
 		const auto p = getPlayer(h->PlayerIndex());
 		const auto spp = getPlayer(screenpeek);
+		const bool mirrorCaptureOverride = IsMirrorPlayerVisibilityCaptureActive();
 
 		if (h->spr.statnum != STAT_ACTOR && h->isPlayer() && p->newOwner == nullptr && h->GetOwner())
 		{
@@ -133,7 +134,7 @@ void animatesprites_r(tspriteArray& tsprites, const DVector2& viewVec, DAngle vi
 #endif
 			}
 
-			if ((display_mirror == 1 || spp != p || !h->GetOwner()) && ud.multimode > 1 && cl_showweapon && h->spr.extra > 0 && p->curr_weapon > 0)
+			if ((display_mirror == 1 || mirrorCaptureOverride || spp != p || !h->GetOwner()) && ud.multimode > 1 && cl_showweapon && h->spr.extra > 0 && p->curr_weapon > 0)
 			{
 				auto newtspr = tsprites.newTSprite();
 				*newtspr = *t;
@@ -190,7 +191,7 @@ void animatesprites_r(tspriteArray& tsprites, const DVector2& viewVec, DAngle vi
 			}
 
 			if (ud.cameraactor == nullptr && p->newOwner == nullptr)
-				if (h->GetOwner() && display_mirror == 0 && p->over_shoulder_on == 0)
+				if (h->GetOwner() && display_mirror == 0 && !mirrorCaptureOverride && p->over_shoulder_on == 0)
 					if (ud.multimode < 2 || (ud.multimode > 1 && p == spp))
 					{
 						t->ownerActor = nullptr;
