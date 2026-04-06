@@ -45,6 +45,7 @@ CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttaa, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+EXTERN_CVAR(Bool, nri_ptscenestats)
 CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -376,6 +377,127 @@ namespace
 		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
 	}
 
+	struct MirrorPlayerCaptureStats
+	{
+		int32_t viewpointActorIndex = -1;
+		int32_t localPlayerActorIndex = -1;
+		bool viewpointMatchesLocalPlayer = false;
+		bool capturedScene = false;
+		uint32_t rawFacingSprites = 0;
+		uint32_t rawVoxelSprites = 0;
+		uint32_t capturedSurfaceCount = 0;
+		uint32_t capturedMatchingActorSurfaces = 0;
+		uint32_t capturedOtherActorSurfaces = 0;
+		uint32_t capturedActorlessSurfaces = 0;
+		uint32_t filteredSurfaceCount = 0;
+	};
+
+	static bool MirrorPlayerCaptureStatsDiffer(const MirrorPlayerCaptureStats& a, const MirrorPlayerCaptureStats& b)
+	{
+		return
+			a.viewpointActorIndex != b.viewpointActorIndex ||
+			a.localPlayerActorIndex != b.localPlayerActorIndex ||
+			a.viewpointMatchesLocalPlayer != b.viewpointMatchesLocalPlayer ||
+			a.capturedScene != b.capturedScene ||
+			a.rawFacingSprites != b.rawFacingSprites ||
+			a.rawVoxelSprites != b.rawVoxelSprites ||
+			a.capturedSurfaceCount != b.capturedSurfaceCount ||
+			a.capturedMatchingActorSurfaces != b.capturedMatchingActorSurfaces ||
+			a.capturedOtherActorSurfaces != b.capturedOtherActorSurfaces ||
+			a.capturedActorlessSurfaces != b.capturedActorlessSurfaces ||
+			a.filteredSurfaceCount != b.filteredSurfaceCount;
+	}
+
+	static uint32_t CountDrawListActorSprites(const HWDrawList& drawList, int32_t actorIndex, bool requireVoxel)
+	{
+		uint32_t count = 0;
+		for (auto* sprite : drawList.sprites)
+		{
+			if (sprite == nullptr || sprite->Sprite == nullptr || sprite->Sprite->ownerActor == nullptr)
+			{
+				continue;
+			}
+
+			if ((int32_t)sprite->Sprite->ownerActor->GetIndex() != actorIndex)
+			{
+				continue;
+			}
+
+			const bool isVoxelSprite =
+				sprite->modelframe < 0 &&
+				sprite->voxel != nullptr &&
+				sprite->voxel->model != nullptr;
+			if (requireVoxel ? isVoxelSprite : !isVoxelSprite)
+			{
+				count++;
+			}
+		}
+		return count;
+	}
+
+	static void AccumulateSceneViewActorSurfaceStats(
+		const nri_scene::SceneView& sceneView,
+		int32_t actorIndex,
+		uint32_t& outMatching,
+		uint32_t& outOther,
+		uint32_t& outActorless)
+	{
+		auto visit = [&](const auto& surfaces)
+		{
+			for (const auto& surface : surfaces)
+			{
+				if (surface.provenance.actorIndex < 0)
+				{
+					outActorless++;
+				}
+				else if (surface.provenance.actorIndex == actorIndex)
+				{
+					outMatching++;
+				}
+				else
+				{
+					outOther++;
+				}
+			}
+		};
+
+		visit(sceneView.opaqueWalls);
+		visit(sceneView.opaqueFlats);
+		visit(sceneView.opaqueSprites);
+	}
+
+	static void TraceMirrorPlayerCaptureStats(const MirrorPlayerCaptureStats& stats)
+	{
+		static bool hasPrevious = false;
+		static MirrorPlayerCaptureStats previous = {};
+		if (!nri_ptscenestats)
+		{
+			hasPrevious = false;
+			previous = {};
+			return;
+		}
+
+		if (hasPrevious && !MirrorPlayerCaptureStatsDiffer(previous, stats))
+		{
+			return;
+		}
+
+		Printf("NRI PT mirror player capture: view_actor=%d local_actor=%d camera_match=%s raw_facing=%u raw_voxels=%u captured=%s surfaces=%u match=%u other=%u actorless=%u filtered=%u\n",
+			stats.viewpointActorIndex,
+			stats.localPlayerActorIndex,
+			stats.viewpointMatchesLocalPlayer ? "yes" : "no",
+			stats.rawFacingSprites,
+			stats.rawVoxelSprites,
+			stats.capturedScene ? "yes" : "no",
+			stats.capturedSurfaceCount,
+			stats.capturedMatchingActorSurfaces,
+			stats.capturedOtherActorSurfaces,
+			stats.capturedActorlessSurfaces,
+			stats.filteredSurfaceCount);
+		hasPrevious = true;
+		previous = stats;
+	}
+
 	class ScopedMirrorPlayerVisibilityCaptureOverride
 	{
 public:
@@ -470,43 +592,63 @@ public:
 	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, nri_scene::SceneView& outView)
 	{
 		outView = {};
+		MirrorPlayerCaptureStats captureStats = {};
+		captureStats.viewpointActorIndex = di.Viewpoint.CameraActor != nullptr ? (int32_t)di.Viewpoint.CameraActor->GetIndex() : -1;
 		if (gi == nullptr ||
-			di.Viewpoint.CameraActor == nullptr ||
 			myconnectindex < 0 ||
 			myconnectindex >= MAXPLAYERS)
 		{
+			TraceMirrorPlayerCaptureStats(captureStats);
 			return false;
 		}
 
 		DCorePlayer* localPlayer = PlayerArray[myconnectindex];
-		if (localPlayer == nullptr || localPlayer->GetActor() != di.Viewpoint.CameraActor)
+		DCoreActor* localPlayerActor = localPlayer != nullptr ? localPlayer->GetActor() : nullptr;
+		if (localPlayerActor == nullptr)
 		{
+			TraceMirrorPlayerCaptureStats(captureStats);
 			return false;
 		}
 
-		const int32_t actorIndex = (int32_t)di.Viewpoint.CameraActor->GetIndex();
+		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
+		captureStats.localPlayerActorIndex = actorIndex;
+		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
 		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
 		captureDi->visibility = di.visibility;
 		captureDi->rellight = di.rellight;
 
 		const ScopedMirrorPlayerVisibilityCaptureOverride mirrorCaptureOverride(true);
 		captureDi->CreateScene(false);
+		captureStats.rawFacingSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
+		captureStats.rawVoxelSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
 		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, outView);
+		captureStats.capturedScene = hasCapture;
+		captureStats.capturedSurfaceCount = CountSceneViewSurfaces(outView);
+		AccumulateSceneViewActorSurfaceStats(
+			outView,
+			actorIndex,
+			captureStats.capturedMatchingActorSurfaces,
+			captureStats.capturedOtherActorSurfaces,
+			captureStats.capturedActorlessSurfaces);
 		outView.drawInfo = &di;
 		captureDi->EndDrawInfo();
 		if (!hasCapture)
 		{
+			TraceMirrorPlayerCaptureStats(captureStats);
 			outView = {};
 			return false;
 		}
 
 		if (!FilterSceneViewToActor(outView, actorIndex))
 		{
+			TraceMirrorPlayerCaptureStats(captureStats);
 			outView = {};
 			return false;
 		}
 
 		outView.primitiveFlags = nri_scene::PrimitiveFlag_ReflectionOnly;
+		captureStats.filteredSurfaceCount = CountSceneViewSurfaces(outView);
+		TraceMirrorPlayerCaptureStats(captureStats);
 		return true;
 	}
 
