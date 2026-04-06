@@ -652,16 +652,16 @@ public:
 			}
 		}
 
-		if (preferredPortal != nullptr)
-		{
-			outSelectedWallIndex = preferredWallIndex;
-			return preferredPortal;
-		}
-
 		if (closestCenterHitPortal != nullptr)
 		{
 			outSelectedWallIndex = closestCenterHitWallIndex;
 			return closestCenterHitPortal;
+		}
+
+		if (preferredPortal != nullptr)
+		{
+			outSelectedWallIndex = preferredWallIndex;
+			return preferredPortal;
 		}
 
 		outSelectedWallIndex = bestPortalWallIndex;
