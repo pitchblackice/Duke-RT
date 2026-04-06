@@ -526,36 +526,6 @@ public:
 		bool mPrevious = false;
 	};
 
-	class ScopedPortalSceneCaptureState
-	{
-public:
-		ScopedPortalSceneCaptureState(DCoreActor* viewer, int type)
-			: mViewer(viewer), mType(type)
-		{
-			if (gi != nullptr)
-			{
-				gi->EnterPortal(mViewer, mType);
-				mEntered = true;
-			}
-		}
-
-		~ScopedPortalSceneCaptureState()
-		{
-			if (mEntered && gi != nullptr)
-			{
-				gi->LeavePortal(mViewer, mType);
-			}
-		}
-
-		ScopedPortalSceneCaptureState(const ScopedPortalSceneCaptureState&) = delete;
-		ScopedPortalSceneCaptureState& operator=(const ScopedPortalSceneCaptureState&) = delete;
-
-	private:
-		DCoreActor* mViewer = nullptr;
-		int mType = -1;
-		bool mEntered = false;
-	};
-
 	static void RebuildSceneViewStats(nri_scene::SceneView& sceneView)
 	{
 		nri_scene::SceneDebugStats stats = {};
@@ -598,6 +568,95 @@ public:
 		sceneView.stats = stats;
 	}
 
+	static bool TryReflectMirrorPoint(const walltype& mirrorLine, float& ioX, float& ioY)
+	{
+		const double ax = mirrorLine.pos.X;
+		const double ay = -mirrorLine.pos.Y;
+		const walltype* next = mirrorLine.point2Wall();
+		if (next == nullptr)
+		{
+			return false;
+		}
+
+		const double bx = next->pos.X;
+		const double by = -next->pos.Y;
+		const double dx = bx - ax;
+		const double dy = by - ay;
+		const double lengthSquared = dx * dx + dy * dy;
+		if (lengthSquared <= 0.0)
+		{
+			return false;
+		}
+
+		const double px = ioX;
+		const double py = ioY;
+		const double projection = ((px - ax) * dx + (py - ay) * dy) / lengthSquared;
+		const double projectedX = ax + dx * projection;
+		const double projectedY = ay + dy * projection;
+		ioX = (float)(projectedX * 2.0 - px);
+		ioY = (float)(projectedY * 2.0 - py);
+		return true;
+	}
+
+	static bool ReflectCapturedSurfaceAcrossMirror(const walltype& mirrorLine, nri_scene::SurfaceRef& surface)
+	{
+		bool reflected = false;
+		for (nri_scene::CapturedVertex& vertex : surface.vertices)
+		{
+			float x = vertex.position[0];
+			float y = vertex.position[2];
+			if (TryReflectMirrorPoint(mirrorLine, x, y))
+			{
+				vertex.position[0] = x;
+				vertex.position[2] = y;
+				reflected = true;
+			}
+
+			x = vertex.prevPosition[0];
+			y = vertex.prevPosition[2];
+			if (TryReflectMirrorPoint(mirrorLine, x, y))
+			{
+				vertex.prevPosition[0] = x;
+				vertex.prevPosition[2] = y;
+				reflected = true;
+			}
+		}
+
+		return reflected;
+	}
+
+	static bool AppendReflectedMirrorPlayerSurfaces(const HWDrawInfo& di, const nri_scene::SceneView& sourceView, nri_scene::SceneView& outView)
+	{
+		bool appended = false;
+		for (HWPortal* portal : di.Portals)
+		{
+			if (portal == nullptr || portal->GetType() != PORTAL_WALL_MIRROR)
+			{
+				continue;
+			}
+
+			auto* mirrorLine = static_cast<walltype*>(portal->GetSource());
+			if (mirrorLine == nullptr)
+			{
+				continue;
+			}
+
+			for (const nri_scene::SurfaceRef& sourceSurface : sourceView.opaqueSprites)
+			{
+				nri_scene::SurfaceRef reflectedSurface = sourceSurface;
+				if (!ReflectCapturedSurfaceAcrossMirror(*mirrorLine, reflectedSurface))
+				{
+					continue;
+				}
+
+				outView.opaqueSprites.push_back(std::move(reflectedSurface));
+				appended = true;
+			}
+		}
+
+		return appended;
+	}
+
 	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, nri_scene::SceneView& outView)
 	{
 		outView = {};
@@ -622,63 +681,28 @@ public:
 		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
 		captureStats.localPlayerActorIndex = actorIndex;
 		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
-		FRenderState* renderState = screen != nullptr ? screen->RenderState() : nullptr;
-		if (renderState == nullptr)
+		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
+		captureDi->visibility = di.visibility;
+		captureDi->rellight = di.rellight;
+
+		const ScopedMirrorPlayerVisibilityCaptureOverride mirrorCaptureOverride(true);
+		captureDi->CreateScene(false);
+		captureStats.rawFacingSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
+		captureStats.rawVoxelSprites = CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
+
+		nri_scene::SceneView capturedView;
+		const bool hasCapture = nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, capturedView);
+		captureDi->EndDrawInfo();
+		if (!hasCapture || !AppendReflectedMirrorPlayerSurfaces(di, capturedView, outView))
 		{
 			TraceMirrorPlayerCaptureStats(captureStats);
+			outView = {};
 			return false;
-		}
-
-		for (HWPortal* portal : di.Portals)
-		{
-			if (portal == nullptr || portal->GetType() != PORTAL_WALL_MIRROR)
-			{
-				continue;
-			}
-
-			auto* scenePortal = static_cast<HWScenePortalBase*>(portal);
-			HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
-			if (captureDi == nullptr)
-			{
-				continue;
-			}
-
-			captureDi->visibility = di.visibility;
-			captureDi->rellight = di.rellight;
-			const bool setup = scenePortal->SetupForSceneCapture(captureDi, *renderState);
-			if (!setup)
-			{
-				captureDi->EndDrawInfo();
-				continue;
-			}
-
-			const int portalType = portal->GetType();
-			const bool portalFlag = portalType == PORTAL_SECTOR_CEILING;
-			{
-				const ScopedPortalSceneCaptureState portalCaptureState(captureDi->Viewpoint.CameraActor, portalType);
-				const ScopedMirrorPlayerVisibilityCaptureOverride mirrorCaptureOverride(true);
-				captureDi->CreateScene(portalFlag);
-			}
-
-			captureStats.rawFacingSprites += CountDrawListActorSprites(captureDi->drawlists[GLDL_TRANSLUCENT], actorIndex, false);
-			captureStats.rawVoxelSprites += CountDrawListActorSprites(captureDi->drawlists[GLDL_MODELS], actorIndex, true);
-
-			nri_scene::SceneView childView;
-			if (nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, childView))
-			{
-				for (nri_scene::SurfaceRef& sprite : childView.opaqueSprites)
-				{
-					outView.opaqueSprites.push_back(std::move(sprite));
-				}
-			}
-
-			scenePortal->ShutdownAfterSceneCapture(captureDi, *renderState);
-			captureDi->EndDrawInfo();
 		}
 
 		outView.drawInfo = &di;
 		RebuildSceneViewStats(outView);
-		captureStats.capturedScene = CountSceneViewSurfaces(outView) > 0;
+		captureStats.capturedScene = true;
 		captureStats.capturedSurfaceCount = CountSceneViewSurfaces(outView);
 		AccumulateSceneViewActorSurfaceStats(
 			outView,
@@ -686,12 +710,6 @@ public:
 			captureStats.capturedMatchingActorSurfaces,
 			captureStats.capturedOtherActorSurfaces,
 			captureStats.capturedActorlessSurfaces);
-		if (!captureStats.capturedScene)
-		{
-			TraceMirrorPlayerCaptureStats(captureStats);
-			outView = {};
-			return false;
-		}
 
 		outView.primitiveFlags = nri_scene::PrimitiveFlag_ReflectionOnly;
 		captureStats.filteredSurfaceCount = captureStats.capturedSurfaceCount;
