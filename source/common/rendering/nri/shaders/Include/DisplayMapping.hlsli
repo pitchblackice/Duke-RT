@@ -33,6 +33,32 @@ float3 ApplyPresentSceneContrast(float3 color, float contrast)
 	return max((color - pivot.xxx) * safeContrast + pivot.xxx, 0.0);
 }
 
+float3 ApplyDukeNightVisionViewOperator(float3 color, float strength)
+{
+	const float safeStrength = saturate(strength);
+	if (safeStrength <= 0.0)
+	{
+		return max(color, 0.0);
+	}
+
+	const float3 sanitized = max(color, 0.0);
+	const float luma = max(dot(sanitized, float3(0.2126, 0.7152, 0.0722)), 0.0);
+	const float liftedLuma = max(luma, sqrt(luma) * 0.55);
+	const float3 detail = luma > 1e-4 ? lerp(1.0.xxx, saturate(sanitized / luma), 0.20) : 1.0.xxx;
+	const float3 tinted = liftedLuma * float3(0.18, 1.0, 0.22) * detail;
+	return lerp(sanitized, tinted, safeStrength);
+}
+
+float3 ApplyNightVisionViewOperator(float3 color, uint mode, float strength)
+{
+	if (mode == NRI_PT_NIGHT_VISION_MODE_DUKE)
+	{
+		return ApplyDukeNightVisionViewOperator(color, strength);
+	}
+
+	return max(color, 0.0);
+}
+
 float ApplyDisplayToe(float value, float toe)
 {
 	const float safeValue = saturate(value);
@@ -223,6 +249,8 @@ float3 ApplyPresentDisplayMapping(
 	float saturation,
 	float shoulder,
 	float toe,
+	uint nightVisionMode,
+	float nightVisionStrength,
 	float paperWhiteNits,
 	float displaySdrLuminance,
 	float displayMaxLuminance)
@@ -233,12 +261,13 @@ float3 ApplyPresentDisplayMapping(
 	const float3 sanitized = SanitizeFiniteColor(color);
 	const float3 exposed = ApplyManualExposure(sanitized, exposure);
 	const float3 calibratedScene = ApplyPresentSceneContrast(exposed, contrast);
+	const float3 sceneWithViewEffects = ApplyNightVisionViewOperator(calibratedScene, nightVisionMode, nightVisionStrength);
 	if (hdrSwapChainActive)
 	{
-		return ApplyHdrOutputMapping(calibratedScene, tonemapMode, saturation, shoulder, toe, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
+		return ApplyHdrOutputMapping(sceneWithViewEffects, tonemapMode, saturation, shoulder, toe, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
 	}
 
-	const float3 toneMapped = ApplySdrTonemap(calibratedScene, tonemapMode);
+	const float3 toneMapped = ApplySdrTonemap(sceneWithViewEffects, tonemapMode);
 	const float3 calibratedDisplay = ApplyDisplayCalibration(toneMapped, saturation, toe, shoulder);
 	return ApplySdrTransferAndDither(calibratedDisplay, pixelPos, frameIndex);
 }

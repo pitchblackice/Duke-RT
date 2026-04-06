@@ -208,6 +208,30 @@ bool GameInterface::GetRuntimeLinkDebugState(RuntimeLinkDebugState* state)
 	return true;
 }
 
+bool GameInterface::GetNightVisionState(RuntimeNightVisionState* state)
+{
+	if (state == nullptr)
+	{
+		return false;
+	}
+
+	*state = {};
+
+	const auto p = getPlayer(screenpeek);
+	if (p == nullptr)
+	{
+		return false;
+	}
+
+	state->available = true;
+	state->mode = RuntimeNightVisionMode::Duke;
+	state->viewEligible = p->newOwner == nullptr && ud.cameraactor == nullptr;
+	state->remainingSeconds = max((int)p->heat_amount, 0) * (1.0f / 120.0f);
+	state->enabled = state->viewEligible && p->heat_on != 0 && p->heat_amount > 0;
+	state->strength01 = state->enabled ? 1.0f : 0.0f;
+	return true;
+}
+
 bool GameInterface::GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info)
 {
 	if (info == nullptr || sectorIndex < 0 || (unsigned)sectorIndex >= sector.Size())

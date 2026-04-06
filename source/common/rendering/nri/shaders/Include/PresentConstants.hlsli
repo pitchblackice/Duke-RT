@@ -10,6 +10,9 @@
 #define NRI_PT_TONEMAP_ACES_FITTED 1u
 #define NRI_PT_TONEMAP_REINHARD 2u
 
+#define NRI_PT_NIGHT_VISION_MODE_NONE 0u
+#define NRI_PT_NIGHT_VISION_MODE_DUKE 1u
+
 #define NRI_PRESENT_FLAG_ADD_SECONDARY 0x10u
 #define NRI_PRESENT_OUTPUT_FLAG_DISPLAY_INFO_AVAILABLE 0x1u
 #define NRI_PRESENT_OUTPUT_FLAG_DISPLAY_HDR_SUPPORTED 0x2u
@@ -38,6 +41,10 @@ struct NRIPresentConstants
 	float PaperWhiteNits;
 	float DisplayMaxLuminance;
 	float DisplaySdrLuminance;
+	uint NightVisionMode;
+	float NightVisionStrength;
+	float NightVisionRemainingSeconds;
+	float ReservedPresent0;
 };
 
 #endif

@@ -36,6 +36,21 @@ struct NRIDirectionalLightState
 	float angularSize = 0.03f;
 };
 
+enum class NRIPTNightVisionMode : uint32_t
+{
+	None = 0,
+	Duke = 1
+};
+
+struct NRIPTNightVisionState
+{
+	NRIPTNightVisionMode mode = NRIPTNightVisionMode::None;
+	bool viewEligible = false;
+	bool enabled = false;
+	float strength01 = 0.0f;
+	float remainingSeconds = 0.0f;
+};
+
 class NRIRenderer
 {
 public:
@@ -657,6 +672,7 @@ private:
 	void RefreshMapWorld();
 	bool CheckPathTracingSupport();
 	void UpdatePerFrameState(HWDrawInfo& di);
+	void UpdateNightVisionState();
 	void ResetSceneBufferFrameStats();
 	void LogBridgeStats(const nri_scene::SceneDebugStats& stats);
 	void PrintMapWorldStatus() const;
@@ -846,6 +862,7 @@ private:
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
 	NRIDirectionalLightState mDirectionalLightState = {};
+	NRIPTNightVisionState mNightVisionState = {};
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneLightSystem::SceneAnalyticLight> mTransientMuzzleFlashLights;

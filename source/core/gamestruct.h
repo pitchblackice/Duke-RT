@@ -72,6 +72,22 @@ struct RuntimeLinkDebugState
 	int32_t rrGeoCount = 0;
 };
 
+enum class RuntimeNightVisionMode : uint32_t
+{
+	None = 0,
+	Duke = 1,
+};
+
+struct RuntimeNightVisionState
+{
+	bool available = false;
+	RuntimeNightVisionMode mode = RuntimeNightVisionMode::None;
+	bool viewEligible = false;
+	bool enabled = false;
+	float strength01 = 0.0f;
+	float remainingSeconds = 0.0f;
+};
+
 struct RuntimeTaggedSectorDebugInfo
 {
 	bool available = false;
@@ -130,6 +146,7 @@ struct GameInterface
 	virtual void LeavePortal(DCoreActor* viewer, int type) {}
 	virtual bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) { return false; }
 	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
+	virtual bool GetNightVisionState(RuntimeNightVisionState* state) { return false; }
 	virtual bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) { return false; }
 	virtual int Voxelize(int sprnum) { return -1; }
 	virtual void AddExcludedEpisode(const FString& episode) {}

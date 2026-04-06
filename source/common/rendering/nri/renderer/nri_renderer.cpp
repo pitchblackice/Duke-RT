@@ -131,6 +131,7 @@ CUSTOM_CVAR(Float, nri_ptpaperwhite, 200.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 400.0f;
 	}
 }
+CVAR(Bool, nri_ptnightvision, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, vid_vsync)
 EXTERN_CVAR(Int, nri_ptspherelongs)
@@ -141,6 +142,15 @@ namespace
 	static constexpr uint32_t NriPtDebugSphereLimit = 64u;
 	static constexpr uint32_t NriPtMuzzleFlashSlotCount = 8u;
 	static constexpr double BuildTickSeconds = 1.0 / 120.0;
+
+	static const char* GetNightVisionModeName(NRIPTNightVisionMode mode)
+	{
+		switch (mode)
+		{
+		case NRIPTNightVisionMode::Duke: return "duke";
+		default: return "none";
+		}
+	}
 
 	static uint64_t HashCombineLightOverlay(uint64_t hash, uint64_t value)
 	{
@@ -3227,6 +3237,10 @@ namespace
 		float PaperWhiteNits = 200.0f;
 		float DisplayMaxLuminance = 80.0f;
 		float DisplaySdrLuminance = 80.0f;
+		uint32_t NightVisionMode = 0;
+		float NightVisionStrength = 0.0f;
+		float NightVisionRemainingSeconds = 0.0f;
+		float ReservedPresent0 = 0.0f;
 	};
 
 	struct NRIReprojectionData
@@ -3263,6 +3277,13 @@ namespace
 		constants.PaperWhiteNits = policy.paperWhiteNits;
 		constants.DisplayMaxLuminance = policy.displayMaxLuminance;
 		constants.DisplaySdrLuminance = policy.displaySdrLuminance;
+	}
+
+	static void ApplyNightVisionStateToPresentConstants(const NRIPTNightVisionState& state, NRIPresentConstants& constants)
+	{
+		constants.NightVisionMode = (uint32_t)state.mode;
+		constants.NightVisionStrength = nri_ptnightvision ? state.strength01 : 0.0f;
+		constants.NightVisionRemainingSeconds = state.remainingSeconds;
 	}
 
 	static bool IsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
@@ -5727,6 +5748,37 @@ void NRIRenderer::NotifyDebugSphereTessellationChange()
 	RequestHistoryReset("debug-sphere-tessellation-change");
 }
 
+void NRIRenderer::UpdateNightVisionState()
+{
+	mNightVisionState = {};
+
+	if (gi == nullptr)
+	{
+		return;
+	}
+
+	RuntimeNightVisionState runtimeState = {};
+	if (!gi->GetNightVisionState(&runtimeState) || !runtimeState.available)
+	{
+		return;
+	}
+
+	switch (runtimeState.mode)
+	{
+	case RuntimeNightVisionMode::Duke:
+		mNightVisionState.mode = NRIPTNightVisionMode::Duke;
+		break;
+	default:
+		mNightVisionState.mode = NRIPTNightVisionMode::None;
+		break;
+	}
+
+	mNightVisionState.viewEligible = runtimeState.viewEligible;
+	mNightVisionState.enabled = runtimeState.enabled;
+	mNightVisionState.strength01 = runtimeState.strength01;
+	mNightVisionState.remainingSeconds = runtimeState.remainingSeconds;
+}
+
 void NRIRenderer::PrintTextureEmissiveHeuristics() const
 {
 	const auto& emissive = mSceneLights.GetEmissiveSurfaces();
@@ -6034,6 +6086,13 @@ void NRIRenderer::PrintStatus() const
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,
 		outputPolicy.displayMaxLuminance);
+	Printf("NRI PT nightvision: mode=%s view_eligible=%s active=%s presenter=%s strength=%.3f remaining_s=%.3f\n",
+		GetNightVisionModeName(mNightVisionState.mode),
+		YesNo(mNightVisionState.viewEligible),
+		YesNo(mNightVisionState.enabled),
+		nri_ptnightvision ? "on" : "off",
+		mNightVisionState.strength01,
+		mNightVisionState.remainingSeconds);
 	Printf("NRI PT material calibration: fullbright_boost=%.3f\n",
 		(float)nri_ptfullbrightboost);
 	if (outputPolicy.hdrSwapChainActive)
@@ -13680,6 +13739,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 
 	NRIPresentConstants constants = {};
 	ApplyOutputPolicyToPresentConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
+	ApplyNightVisionStateToPresentConstants(mNightVisionState, constants);
 	constants.DisplayWidth = mOutputWidth;
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
@@ -14209,6 +14269,8 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 		std::memcpy(mPreviousViewToClip, mCurrentViewToClip, sizeof(mPreviousViewToClip));
 		std::memcpy(mPreviousWorldToView, mCurrentWorldToView, sizeof(mPreviousWorldToView));
 	}
+
+	UpdateNightVisionState();
 }
 
 void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
