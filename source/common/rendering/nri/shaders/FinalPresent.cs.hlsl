@@ -73,6 +73,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gPresentConstants.Toe,
 		gPresentConstants.NightVisionMode,
 		gPresentConstants.NightVisionStrength,
+		gPresentConstants.NightVisionExposure,
+		gPresentConstants.NightVisionPackedControls,
 		gPresentConstants.PaperWhiteNits,
 		gPresentConstants.DisplaySdrLuminance,
 		gPresentConstants.DisplayMaxLuminance);

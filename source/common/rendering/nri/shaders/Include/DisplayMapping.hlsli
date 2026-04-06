@@ -59,6 +59,34 @@ float3 ApplyNightVisionViewOperator(float3 color, uint mode, float strength)
 	return max(color, 0.0);
 }
 
+float UnpackNightVisionPackedControl(uint packedControls, uint shift)
+{
+	const uint bits = (packedControls >> shift) & 0xffffu;
+	return (float)bits * (2.0 / 65535.0);
+}
+
+void ApplyNightVisionDisplayControlMultipliers(
+	uint mode,
+	float strength,
+	float nightVisionExposure,
+	uint nightVisionPackedControls,
+	inout float exposure,
+	inout float contrast,
+	inout float saturation)
+{
+	const float safeStrength = saturate(strength);
+	if (mode == NRI_PT_NIGHT_VISION_MODE_NONE || safeStrength <= 0.0)
+	{
+		return;
+	}
+
+	const float nightVisionContrast = UnpackNightVisionPackedControl(nightVisionPackedControls, 0u);
+	const float nightVisionSaturation = UnpackNightVisionPackedControl(nightVisionPackedControls, 16u);
+	exposure *= lerp(1.0, max(nightVisionExposure, 0.0), safeStrength);
+	contrast *= lerp(1.0, max(nightVisionContrast, 0.0), safeStrength);
+	saturation *= lerp(1.0, max(nightVisionSaturation, 0.0), safeStrength);
+}
+
 float ApplyDisplayToe(float value, float toe)
 {
 	const float safeValue = saturate(value);
@@ -251,6 +279,8 @@ float3 ApplyPresentDisplayMapping(
 	float toe,
 	uint nightVisionMode,
 	float nightVisionStrength,
+	float nightVisionExposure,
+	uint nightVisionPackedControls,
 	float paperWhiteNits,
 	float displaySdrLuminance,
 	float displayMaxLuminance)
@@ -258,17 +288,28 @@ float3 ApplyPresentDisplayMapping(
 	const bool hdrSwapChainActive =
 		outputMode != NRI_PT_OUTPUT_MODE_SDR &&
 		(outputFlags & NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE) != 0u;
+	float tunedExposure = exposure;
+	float tunedContrast = contrast;
+	float tunedSaturation = saturation;
+	ApplyNightVisionDisplayControlMultipliers(
+		nightVisionMode,
+		nightVisionStrength,
+		nightVisionExposure,
+		nightVisionPackedControls,
+		tunedExposure,
+		tunedContrast,
+		tunedSaturation);
 	const float3 sanitized = SanitizeFiniteColor(color);
-	const float3 exposed = ApplyManualExposure(sanitized, exposure);
-	const float3 calibratedScene = ApplyPresentSceneContrast(exposed, contrast);
+	const float3 exposed = ApplyManualExposure(sanitized, tunedExposure);
+	const float3 calibratedScene = ApplyPresentSceneContrast(exposed, tunedContrast);
 	const float3 sceneWithViewEffects = ApplyNightVisionViewOperator(calibratedScene, nightVisionMode, nightVisionStrength);
 	if (hdrSwapChainActive)
 	{
-		return ApplyHdrOutputMapping(sceneWithViewEffects, tonemapMode, saturation, shoulder, toe, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
+		return ApplyHdrOutputMapping(sceneWithViewEffects, tonemapMode, tunedSaturation, shoulder, toe, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
 	}
 
 	const float3 toneMapped = ApplySdrTonemap(sceneWithViewEffects, tonemapMode);
-	const float3 calibratedDisplay = ApplyDisplayCalibration(toneMapped, saturation, toe, shoulder);
+	const float3 calibratedDisplay = ApplyDisplayCalibration(toneMapped, tunedSaturation, toe, shoulder);
 	return ApplySdrTransferAndDither(calibratedDisplay, pixelPos, frameIndex);
 }
 

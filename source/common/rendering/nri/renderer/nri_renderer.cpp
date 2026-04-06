@@ -132,6 +132,39 @@ CUSTOM_CVAR(Float, nri_ptpaperwhite, 200.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 CVAR(Bool, nri_ptnightvision, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptnightvisionexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.25f)
+	{
+		self = 0.25f;
+	}
+	else if (self > 4.0f)
+	{
+		self = 4.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptnightvisioncontrast, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.25f)
+	{
+		self = 0.25f;
+	}
+	else if (self > 2.0f)
+	{
+		self = 2.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptnightvisionsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 2.0f)
+	{
+		self = 2.0f;
+	}
+}
 CVAR(Bool, nri_validation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, vid_vsync)
 EXTERN_CVAR(Int, nri_ptspherelongs)
@@ -150,6 +183,13 @@ namespace
 		case NRIPTNightVisionMode::Duke: return "duke";
 		default: return "none";
 		}
+	}
+
+	static uint32_t PackNightVisionControls(float contrast, float saturation)
+	{
+		const uint32_t contrastBits = (uint32_t)std::lround(std::clamp(contrast, 0.0f, 2.0f) * (65535.0f / 2.0f));
+		const uint32_t saturationBits = (uint32_t)std::lround(std::clamp(saturation, 0.0f, 2.0f) * (65535.0f / 2.0f));
+		return contrastBits | (saturationBits << 16);
 	}
 
 	static uint64_t HashCombineLightOverlay(uint64_t hash, uint64_t value)
@@ -3239,8 +3279,8 @@ namespace
 		float DisplaySdrLuminance = 80.0f;
 		uint32_t NightVisionMode = 0;
 		float NightVisionStrength = 0.0f;
-		float NightVisionRemainingSeconds = 0.0f;
-		float ReservedPresent0 = 0.0f;
+		float NightVisionExposure = 1.0f;
+		uint32_t NightVisionPackedControls = 0;
 	};
 
 	struct NRIReprojectionData
@@ -3283,7 +3323,10 @@ namespace
 	{
 		constants.NightVisionMode = (uint32_t)state.mode;
 		constants.NightVisionStrength = nri_ptnightvision ? state.strength01 : 0.0f;
-		constants.NightVisionRemainingSeconds = state.remainingSeconds;
+		constants.NightVisionExposure = (float)nri_ptnightvisionexposure;
+		constants.NightVisionPackedControls = PackNightVisionControls(
+			(float)nri_ptnightvisioncontrast,
+			(float)nri_ptnightvisionsaturation);
 	}
 
 	static bool IsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
@@ -6093,6 +6136,10 @@ void NRIRenderer::PrintStatus() const
 		nri_ptnightvision ? "on" : "off",
 		mNightVisionState.strength01,
 		mNightVisionState.remainingSeconds);
+	Printf("NRI PT nightvision tuning: exposure=%.3f contrast=%.3f saturation=%.3f\n",
+		(float)nri_ptnightvisionexposure,
+		(float)nri_ptnightvisioncontrast,
+		(float)nri_ptnightvisionsaturation);
 	Printf("NRI PT material calibration: fullbright_boost=%.3f\n",
 		(float)nri_ptfullbrightboost);
 	if (outputPolicy.hdrSwapChainActive)

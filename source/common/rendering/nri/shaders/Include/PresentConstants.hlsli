@@ -43,8 +43,8 @@ struct NRIPresentConstants
 	float DisplaySdrLuminance;
 	uint NightVisionMode;
 	float NightVisionStrength;
-	float NightVisionRemainingSeconds;
-	float ReservedPresent0;
+	float NightVisionExposure;
+	uint NightVisionPackedControls;
 };
 
 #endif

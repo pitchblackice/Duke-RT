@@ -1228,6 +1228,13 @@ OptionMenu "NRIOptions" protected
 	StaticText "Output calibration affects final present; light energy remains upstream."
 	StaticText "Output-mode changes reset PT history."
 	StaticText "----------------"
+	StaticText "Night Vision"
+	Option "Night Vision Presenter",			"nri_ptnightvision",			"OnOff"
+	Slider "Night Vision Exposure",			"nri_ptnightvisionexposure",	0.25, 4.00, 0.05, 2
+	Slider "Night Vision Contrast",			"nri_ptnightvisioncontrast",	0.25, 2.00, 0.05, 2
+	Slider "Night Vision Saturation",			"nri_ptnightvisionsaturation",	0.00, 2.00, 0.05, 2
+	StaticText "These multipliers only apply while PT night vision is active."
+	StaticText "----------------"
 	StaticText "Traversal / Lighting"
 	Slider "Portal Depth",						"nri_ptportaldepth",			0, 6, 1, 0
 	Slider "Light Bounces",						"nri_ptlightbounces",			0, 4, 1, 0
