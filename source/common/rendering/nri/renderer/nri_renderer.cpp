@@ -2932,14 +2932,6 @@ namespace
 		uint32_t PortalDepth = 0;
 		uint32_t ReservedTrace0 = 0;
 		uint32_t ReservedTrace1 = 0;
-		uint32_t OutputMode = 0;
-		uint32_t TonemapMode = 0;
-		uint32_t OutputFlags = 0;
-		uint32_t ReservedOutput0 = 0;
-		float Exposure = 1.0f;
-		float PaperWhiteNits = 200.0f;
-		float DisplayMaxLuminance = 80.0f;
-		float DisplaySdrLuminance = 80.0f;
 	};
 
 	struct NRIReprojectionData
@@ -2952,17 +2944,8 @@ namespace
 
 	static void ApplyOutputPolicyToConstants(const NRIPTOutputPolicy& policy, NRITraceConstants& constants)
 	{
-		constants.OutputMode = (uint32_t)policy.resolvedMode;
-		constants.TonemapMode = (uint32_t)policy.tonemapMode;
-		constants.OutputFlags =
-			(policy.displayInfoAvailable ? 0x1u : 0u) |
-			(policy.displayHdrSupported ? 0x2u : 0u) |
-			(policy.hdrSwapChainActive ? 0x4u : 0u) |
-			(policy.offscreenHdrTarget ? 0x8u : 0u);
-		constants.Exposure = policy.exposure;
-		constants.PaperWhiteNits = policy.paperWhiteNits;
-		constants.DisplayMaxLuminance = policy.displayMaxLuminance;
-		constants.DisplaySdrLuminance = policy.displaySdrLuminance;
+		(void)policy;
+		(void)constants;
 	}
 
 	static bool IsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
