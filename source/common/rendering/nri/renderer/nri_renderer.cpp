@@ -8347,8 +8347,24 @@ void NRIRenderer::PrintSceneBufferStatus() const
 void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging)
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.surfaceProbeMs);
-	if (nri_ptsurfaceprobe <= 0 || !allowLogging)
+	const bool logSurfaceProbe = allowLogging && nri_ptsurfaceprobe > 0;
+	if (geometry.primitives.empty())
 	{
+		mLastSurfaceProbe = {};
+		mLastSurfaceProbe.valid = true;
+		if (!logSurfaceProbe)
+		{
+			return;
+		}
+
+		const bool logOnChangeOnly = nri_ptsurfaceprobe >= 2;
+		if (logOnChangeOnly && mLastLoggedSurfaceProbe.valid && !mLastLoggedSurfaceProbe.hit)
+		{
+			return;
+		}
+
+		Printf("NRI PT surface probe: miss\n");
+		mLastLoggedSurfaceProbe = mLastSurfaceProbe;
 		return;
 	}
 
@@ -8497,6 +8513,10 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	};
 
 	mLastSurfaceProbe = result;
+	if (!logSurfaceProbe)
+	{
+		return;
+	}
 
 	const bool logOnChangeOnly = nri_ptsurfaceprobe >= 2;
 	if (logOnChangeOnly && sameIdentity(mLastLoggedSurfaceProbe, result))
