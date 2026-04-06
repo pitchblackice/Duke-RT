@@ -34,7 +34,10 @@ float3 TonemapHable(float3 color)
 	const float D = 0.20;
 	const float E = 0.02;
 	const float F = 0.30;
-	return ((color * (A * color + C * B) + D * E) / (color * (A * color + B) + D * F)) - E / F;
+	const float whitePoint = 11.2;
+	const float3 numerator = ((color * (A * color + C * B) + D * E) / (color * (A * color + B) + D * F)) - E / F;
+	const float white = (((whitePoint * (A * whitePoint + C * B) + D * E) / (whitePoint * (A * whitePoint + B) + D * F)) - E / F);
+	return numerator / max(white, 1e-5);
 }
 
 float3 TonemapAcesFitted(float3 color)
@@ -113,7 +116,7 @@ float3 ApplyLegacyClampOutputMapping(float3 color)
 	return saturate(SanitizeFiniteColor(color));
 }
 
-float3 ApplyPresentDisplayMappingPreview(
+float3 ApplyPresentDisplayMapping(
 	float3 color,
 	uint2 pixelPos,
 	uint frameIndex,
@@ -125,18 +128,18 @@ float3 ApplyPresentDisplayMappingPreview(
 	float displaySdrLuminance,
 	float displayMaxLuminance)
 {
-	// Phase 3 keeps the legacy clamped behavior but moves output ownership into one shared helper site.
-	// Phase 4 replaces this wrapper body with real SDR output mapping in the main present path.
-	(void)pixelPos;
-	(void)frameIndex;
-	(void)outputMode;
-	(void)tonemapMode;
-	(void)outputFlags;
-	(void)exposure;
-	(void)paperWhiteNits;
-	(void)displaySdrLuminance;
-	(void)displayMaxLuminance;
-	return ApplyLegacyClampOutputMapping(color);
+	const bool hdrSwapChainActive =
+		outputMode != NRI_PT_OUTPUT_MODE_SDR &&
+		(outputFlags & NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE) != 0u;
+	const float3 sanitized = SanitizeFiniteColor(color);
+	const float3 exposed = ApplyManualExposure(sanitized, exposure);
+	if (hdrSwapChainActive)
+	{
+		return ApplyHdrOutputMapping(exposed, paperWhiteNits, displaySdrLuminance, displayMaxLuminance);
+	}
+
+	const float3 toneMapped = ApplySdrTonemap(exposed, tonemapMode);
+	return ApplySdrTransferAndDither(toneMapped, pixelPos, frameIndex);
 }
 
 #endif

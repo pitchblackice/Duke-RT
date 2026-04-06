@@ -33,7 +33,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const uint2 inputSize = uint2(max(gPresentConstants.InputWidth, 1u), max(gPresentConstants.InputHeight, 1u));
 	const uint2 samplePos = min((uint2(pixelPos) * inputSize) / outputSize, inputSize - 1u);
-	const float3 color = ApplyPresentDisplayMappingPreview(
+	const float3 color = ApplyPresentDisplayMapping(
 		gInputTexture.Load(int3(samplePos, 0)).rgb,
 		targetPixelPos,
 		gPresentConstants.FrameIndex,
