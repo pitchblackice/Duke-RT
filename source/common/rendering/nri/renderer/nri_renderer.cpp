@@ -336,21 +336,20 @@ namespace
 
 	class ScopedMirrorPlayerVisibilityCaptureOverride
 	{
-	public:
+public:
 		explicit ScopedMirrorPlayerVisibilityCaptureOverride(bool enabled)
 		{
-			if (enabled && gi != nullptr)
-			{
-				mEnabled = true;
-				gi->SetMirrorPlayerVisibilityCaptureOverride(true);
-			}
+			if (!enabled || gi == nullptr) return;
+			mEnabled = true;
+			mPrevious = gi->GetMirrorPlayerVisibilityCaptureOverride();
+			gi->SetMirrorPlayerVisibilityCaptureOverride(true);
 		}
 
 		~ScopedMirrorPlayerVisibilityCaptureOverride()
 		{
 			if (mEnabled && gi != nullptr)
 			{
-				gi->SetMirrorPlayerVisibilityCaptureOverride(false);
+				gi->SetMirrorPlayerVisibilityCaptureOverride(mPrevious);
 			}
 		}
 
@@ -359,6 +358,7 @@ namespace
 
 	private:
 		bool mEnabled = false;
+		bool mPrevious = false;
 	};
 
 	static void RebuildSceneViewStats(nri_scene::SceneView& sceneView)
@@ -386,7 +386,7 @@ namespace
 
 		for (const nri_scene::SurfaceRef& sprite : sceneView.opaqueSprites)
 		{
-			stats.triangleEstimate += (uint32_t)(sprite.vertices.size() / 3u);
+			stats.triangleEstimate += sprite.vertices.size() >= 3 ? (uint32_t)sprite.vertices.size() - 2u : 0u;
 			stats.materialRefs++;
 			if (sprite.provenance.sourceType == nri_scene::SurfaceSourceType::VoxelProxySprite)
 			{
@@ -428,7 +428,10 @@ namespace
 	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, nri_scene::SceneView& outView)
 	{
 		outView = {};
-		if (gi == nullptr || di.Viewpoint.CameraActor == nullptr)
+		if (gi == nullptr ||
+			di.Viewpoint.CameraActor == nullptr ||
+			myconnectindex < 0 ||
+			myconnectindex >= MAXPLAYERS)
 		{
 			return false;
 		}
@@ -447,6 +450,7 @@ namespace
 		const ScopedMirrorPlayerVisibilityCaptureOverride mirrorCaptureOverride(true);
 		captureDi->CreateScene(false);
 		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, outView);
+		outView.drawInfo = &di;
 		captureDi->EndDrawInfo();
 		if (!hasCapture)
 		{
@@ -454,7 +458,6 @@ namespace
 			return false;
 		}
 
-		outView.drawInfo = &di;
 		if (!FilterSceneViewToActor(outView, actorIndex))
 		{
 			outView = {};
