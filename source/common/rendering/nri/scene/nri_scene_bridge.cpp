@@ -1162,6 +1162,8 @@ namespace
 	{
 		return
 			IsOwnedByActor(sprite, actorIndex) &&
+			sprite.Sprite != nullptr &&
+			sprite.Sprite->statnum != 99 &&
 			sprite.texture != nullptr &&
 			sprite.modelframe == 0 &&
 			sprite.alpha > (1.0f / 255.0f);
