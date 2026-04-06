@@ -1,13 +1,14 @@
 #include "NRI.hlsl"
 #include "Include/TemporalConstants.hlsli"
+#include "Include/DisplayMapping.hlsli"
 
 #define NRI_FLAG_RESET_HISTORY 0x1u
 #define NRI_FLAG_USE_JITTER 0x40u
 #define NRI_TAA_JITTER_PHASE_COUNT 8u
 #define TAA_HISTORY_FRAME_CAP 12.0
 #define TAA_BASE_BLEND (1.0 / TAA_HISTORY_FRAME_CAP)
-#define TAA_SIGMA_SCALE 1.0
-#define TAA_REJECTION_SCALE 2.5
+#define TAA_SIGMA_SCALE 2.0
+#define TAA_REJECTION_SCALE 2.0
 #define TAA_HISTORY_EPSILON 1e-4
 #define TAA_MOTION_BLEND_SCALE 1.5
 #define TAA_MOTION_REJECT_PIXELS 2.0
@@ -49,7 +50,9 @@ float MaxComponent(float3 value)
 float3 LoadCurrentColor(int2 pixelPos, uint2 size)
 {
 	const int2 clampedPos = clamp(pixelPos, int2(0, 0), int2(size) - 1);
-	return max(gComposedInput.Load(int3(clampedPos, 0)).rgb, 0.0);
+	// Native TAA operates on a pre-exposed HDR signal so history stays in a stable FP16-friendly domain.
+	const float3 sceneColor = SanitizeFiniteColor(gComposedInput.Load(int3(clampedPos, 0)).rgb);
+	return ApplyManualExposure(sceneColor, gTemporalConstants.Exposure);
 }
 
 float GetTemporalHaltonSample(uint index, uint base)

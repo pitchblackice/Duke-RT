@@ -1065,6 +1065,7 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_RR_NORMAL_ROUGHNESS = 42;
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_RR_SPECULAR_HIT_DISTANCE = 43;
 	constexpr uint32_t NRI_PTDEBUG_UPSCALER_POST_SHARPEN_OUTPUT = 44;
+	constexpr uint32_t NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT = 45;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_UNKNOWN = 0;
@@ -1091,6 +1092,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW = 0x400u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
+	constexpr float NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS = 0.5f;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
 
 	enum class NRIPresentRouteKind
@@ -1933,7 +1935,19 @@ namespace
 
 	static uint32_t GetEffectivePtDebugMode()
 	{
-		return (nri_ptdebug >= 0 && nri_ptdebug <= (int)NRI_PTDEBUG_UPSCALER_POST_SHARPEN_OUTPUT) ? (uint32_t)nri_ptdebug : 0u;
+		return (nri_ptdebug >= 0 && nri_ptdebug <= (int)NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT) ? (uint32_t)nri_ptdebug : 0u;
+	}
+
+	static float GetTemporalExposure()
+	{
+		return std::max((float)nri_ptexposure, 0.125f);
+	}
+
+	static float GetExposureDeltaStops(float previousExposure, float currentExposure)
+	{
+		const float safePrevious = std::max(previousExposure, 0.125f);
+		const float safeCurrent = std::max(currentExposure, 0.125f);
+		return std::abs(std::log2(safeCurrent) - std::log2(safePrevious));
 	}
 
 	static uint32_t GetBootstrapMode();
@@ -1970,6 +1984,10 @@ namespace
 		if (debugMode == 15u)
 		{
 			return { NRIPresentRouteKind::ComposedDebug, "composition_probe", "FinalPresent", "debug-composition" };
+		}
+		if (debugMode == NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT)
+		{
+			return { NRIPresentRouteKind::ComposedDebug, "taa_pre_exposed_probe", "FinalPresent", "debug-temporal" };
 		}
 		if (debugMode == 13u || debugMode == 14u)
 		{
@@ -3054,6 +3072,7 @@ namespace
 		uint32_t RenderHeight = 0;
 		uint32_t FrameIndex = 0;
 		uint32_t Flags = 0;
+		float Exposure = 1.0f;
 	};
 
 	struct NRIPresentConstants
@@ -6075,7 +6094,7 @@ void NRIRenderer::PrintStatus() const
 		GetNrdDenoiserModeName(nrdDenoiserMode),
 		"2.5D",
 		"interpolated",
-		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=live_raw_penumbra 22=live_raw_shadow 23=temporal_sigma_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient 30=emissive_uv 31=emissive_radiance 32=emissive_primitive 33=emissive_visibility 34=trace_transparent 35=sr_input 36=sr_depth 37=vendor_output 38=vendor_output_final 39=rr_input 40=rr_diffuse_albedo 41=rr_specular_albedo 42=rr_normal_roughness 43=rr_specular_hit_distance 44=post_sharpen_output");
+		"16=denoised_diff 17=denoised_spec 18=metalness 19=roughness 20=motion_z 21=live_raw_penumbra 22=live_raw_shadow 23=temporal_sigma_shadow 24=direct_lighting 25=direct_emission 26=analytic_direct 27=emissive_tags 28=emissive_direct 29=sector_ambient 30=emissive_uv 31=emissive_radiance 32=emissive_primitive 33=emissive_visibility 34=trace_transparent 35=sr_input 36=sr_depth 37=vendor_output 38=vendor_output_final 39=rr_input 40=rr_diffuse_albedo 41=rr_specular_albedo 42=rr_normal_roughness 43=rr_specular_hit_distance 44=post_sharpen_output 45=taa_pre_exposed_input");
 	const char* shadowSplitMode =
 		!mUseSplitShadowDenoiser ? "off" :
 		(GetEffectivePtDebugMode() >= 21 && GetEffectivePtDebugMode() <= 23) ? "sigma-debug" :
@@ -6244,6 +6263,8 @@ void NRIRenderer::PrintTemporalStatus() const
 	const NRIMainUpscalerKind resolvedMain = GetResolvedMainUpscalerKindForStatus();
 	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
+	const float exposure = GetTemporalExposure();
+	const float exposureStops = std::log2(std::max(exposure, 0.125f));
 	const FrameTextureSlot presentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
 	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
@@ -6274,6 +6295,10 @@ void NRIRenderer::PrintTemporalStatus() const
 		GetFrameTextureSlotName(presentSlot),
 		GetFrameTextureSlotName(mUpscaledInputSlot),
 		mUseUpscaledInFinal ? "yes" : "no");
+	Printf("NRI PT temporal domain: history=pre_exposed_hdr exposure=%.3f exposure_stops=%.3f reset_threshold_stops=%.3f inspect_scene=15 inspect_pre_exposed=45 inspect_post_taa=13 inspect_post_upscale=14\n",
+		exposure,
+		exposureStops,
+		NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS);
 }
 
 void NRIRenderer::ArmTemporalTraceBudget(const char* reason)
@@ -6311,13 +6336,14 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
 	const NRITextureResource& primary = GetFrameTexture(primarySlot);
 	const NRITextureResource& secondary = secondarySlot == FrameTextureSlot::Count ? GetFrameTexture(mHistoryOutputSlot) : GetFrameTexture(secondarySlot);
-	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s reset=%s reset_reason=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
+	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s domain=pre_exposed_hdr exposure=%.3f reset=%s reset_reason=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
 		stage != nullptr ? stage : "unknown",
 		mFrameIndex,
 		(int)nri_ptdebug,
 		GetMainUpscalerName(resolvedMainUpscaler),
 		GetPostSharpenName(resolvedPostSharpen),
 		runAppTaa ? "yes" : "no",
+		GetTemporalExposure(),
 		mResetHistory ? "yes" : "no",
 		mLastHistoryResetReason.c_str(),
 		mHasPreviousCameraState ? "yes" : "no",
@@ -12816,7 +12842,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedPhaseBCompositionPath)
 		{
-			Printf("NRI Phase B: ptdebug 15 now routes through Composition, placeholder TraceTransparent, and the minimal FinalPresent presenter.\n");
+			Printf("NRI Phase B: ptdebug 15/45 now route through Composition, placeholder TraceTransparent, and the minimal FinalPresent presenter.\n");
 			sLoggedPhaseBCompositionPath = true;
 		}
 
@@ -13538,6 +13564,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		constants.Flags =
 			(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 			(runAppTaa ? NRI_FLAG_USE_JITTER : 0u);
+		constants.Exposure = GetTemporalExposure();
 
 		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
@@ -14121,6 +14148,32 @@ void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFra
 		}
 		mLastOutputRequestedMode = outputPolicy.requestedMode;
 		mLastOutputResolvedMode = outputPolicy.resolvedMode;
+	}
+
+	const float temporalExposure = GetTemporalExposure();
+	if (!mHasTemporalExposureState)
+	{
+		mHasTemporalExposureState = true;
+		mLastTemporalExposure = temporalExposure;
+	}
+	else
+	{
+		const float exposureDeltaStops = GetExposureDeltaStops(mLastTemporalExposure, temporalExposure);
+		if (exposureDeltaStops >= NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS)
+		{
+			RequestHistoryReset("exposure-change");
+			if (ShouldEmitTemporalTraceLogs())
+			{
+				Printf("NRI PT temporal reset: reason=exposure-change frame=%u exposure=%.3f->%.3f delta_stops=%.3f threshold=%.3f\n",
+					mFrameIndex,
+					mLastTemporalExposure,
+					temporalExposure,
+					exposureDeltaStops,
+					NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS);
+			}
+		}
+
+		mLastTemporalExposure = temporalExposure;
 	}
 
 	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);

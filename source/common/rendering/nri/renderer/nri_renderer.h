@@ -916,6 +916,7 @@ private:
 	NRIFrameGenerationUiMode mLastFrameGenerationResolvedUiMode = NRIFrameGenerationUiMode::Auto;
 	bool mUseUpscaledInFinal = false;
 	bool mLastTemporalAppTaaEnabled = false;
+	bool mHasTemporalExposureState = false;
 	bool mUseDenoisedCompositionInputs = false;
 	bool mUseSplitShadowDenoiser = false;
 	bool mHasLoggedFallback = false;
@@ -982,6 +983,7 @@ private:
 	int mLastPostSharpenRequest = -1;
 	NRIPTOutputMode mLastOutputRequestedMode = NRIPTOutputMode::SDR;
 	NRIPTOutputMode mLastOutputResolvedMode = NRIPTOutputMode::SDR;
+	float mLastTemporalExposure = 1.0f;
 	NRIMainUpscalerKind mLastMainUpscalerResolved = NRIMainUpscalerKind::Off;
 	NRIPostSharpenKind mLastPostSharpenResolved = NRIPostSharpenKind::Off;
 	NRIMainUpscalerKind mLastTemporalHistoryMainUpscaler = NRIMainUpscalerKind::Off;

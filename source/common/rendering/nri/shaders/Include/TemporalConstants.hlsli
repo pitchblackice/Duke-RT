@@ -7,6 +7,7 @@ struct NRITemporalConstants
 	uint RenderHeight;
 	uint FrameIndex;
 	uint Flags;
+	float Exposure;
 };
 
 #endif
