@@ -754,6 +754,47 @@ public:
 		return true;
 	}
 
+	static bool ApplyWallMirrorViewpoint(const walltype& mirrorLine, FRenderViewpoint& viewpoint)
+	{
+		const walltype* next = mirrorLine.point2Wall();
+		if (next == nullptr)
+		{
+			return false;
+		}
+
+		const double x = mirrorLine.pos.X;
+		const double y = mirrorLine.pos.Y;
+		const double dx = next->pos.X - x;
+		const double dy = next->pos.Y - y;
+		const double lengthSq = dx * dx + dy * dy;
+		if (lengthSq <= 0.0001)
+		{
+			return false;
+		}
+
+		const DVector2 viewPos = { viewpoint.Pos.X, -viewpoint.Pos.Y };
+		const double projection = ((viewPos.X - x) * dx + (viewPos.Y - y) * dy) * 2.0;
+		const double mirroredX = x * 2.0 + dx * projection / lengthSq - viewPos.X;
+		const double mirroredY = y * 2.0 + dy * projection / lengthSq - viewPos.Y;
+
+		const angle_t mirrorAngle = VecToAngle(dx, dy).BAMs();
+		const angle_t mirroredRotAngle = mirrorAngle + mirrorAngle - viewpoint.RotAngle;
+
+		viewpoint.Pos.X = mirroredX;
+		viewpoint.Pos.Y = -mirroredY;
+		viewpoint.RotAngle = mirroredRotAngle;
+		viewpoint.SectNums = nullptr;
+		viewpoint.SectCount = mirrorLine.sector;
+		viewpoint.HWAngles.Yaw = FAngle::fromBam(-ANGLE_90 + mirroredRotAngle);
+
+		const double focalTangent = tan(viewpoint.FieldOfView.Radians() / 2.0);
+		const DAngle facingAngle = DAngle::fromDeg(270.0 - viewpoint.HWAngles.Yaw.Degrees());
+		viewpoint.TanSin = focalTangent * facingAngle.Sin();
+		viewpoint.TanCos = focalTangent * facingAngle.Cos();
+		viewpoint.ViewVector = facingAngle.ToVector();
+		return true;
+	}
+
 	static nri_scene::CapturedVertex MakeMirrorBillboardVertex(const nri_scene::CapturedVertex& source, const float center[3], float widthAxisX, float widthAxisY, float halfWidth, bool rightSide, bool previous)
 	{
 		nri_scene::CapturedVertex result = source;
@@ -799,47 +840,12 @@ public:
 
 	static bool AppendMirrorPlayerSurfaces(const HWDrawInfo& di, const nri_scene::SceneView& sourceView, nri_scene::SceneView& outView)
 	{
-		uint32_t mirrorPortalCandidates = 0;
-		int32_t selectedMirrorWallIndex = -1;
-		HWPortal* portal = SelectPrimaryMirrorPortal(di, mirrorPortalCandidates, selectedMirrorWallIndex);
-		bool appendedBillboards = false;
-		if (portal != nullptr)
-		{
-			auto* mirrorLine = static_cast<walltype*>(portal->GetSource());
-			if (mirrorLine != nullptr)
-			{
-				for (const nri_scene::SurfaceRef& sourceSurface : sourceView.opaqueSprites)
-				{
-					if ((sourceSurface.material.flags & nri_scene::MaterialFlag_FacingBillboard) == 0)
-					{
-						continue;
-					}
-
-					nri_scene::SurfaceRef billboardSurface;
-					if (!ReorientFacingBillboardForMirror(di, *mirrorLine, sourceSurface, billboardSurface))
-					{
-						continue;
-					}
-
-					outView.opaqueSprites.push_back(std::move(billboardSurface));
-					appendedBillboards = true;
-				}
-			}
-		}
-
-		bool appendedNonBillboards = false;
 		for (const nri_scene::SurfaceRef& sourceSurface : sourceView.opaqueSprites)
 		{
-			if ((sourceSurface.material.flags & nri_scene::MaterialFlag_FacingBillboard) != 0)
-			{
-				continue;
-			}
-
 			outView.opaqueSprites.push_back(sourceSurface);
-			appendedNonBillboards = true;
 		}
 
-		return appendedBillboards || appendedNonBillboards;
+		return !outView.opaqueSprites.empty();
 	}
 
 	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, nri_scene::SceneView& outView)
@@ -866,10 +872,18 @@ public:
 		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
 		captureStats.localPlayerActorIndex = actorIndex;
 		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
-		SelectPrimaryMirrorPortal(di, captureStats.mirrorPortalCandidates, captureStats.selectedMirrorWallIndex);
+		HWPortal* const mirrorPortal = SelectPrimaryMirrorPortal(di, captureStats.mirrorPortalCandidates, captureStats.selectedMirrorWallIndex);
 		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
 		captureDi->visibility = di.visibility;
 		captureDi->rellight = di.rellight;
+		if (mirrorPortal != nullptr)
+		{
+			auto* mirrorLine = static_cast<walltype*>(mirrorPortal->GetSource());
+			if (mirrorLine != nullptr)
+			{
+				ApplyWallMirrorViewpoint(*mirrorLine, captureDi->Viewpoint);
+			}
+		}
 
 		const ScopedMirrorPlayerVisibilityCaptureOverride mirrorCaptureOverride(true);
 		captureDi->CreateScene(false);
