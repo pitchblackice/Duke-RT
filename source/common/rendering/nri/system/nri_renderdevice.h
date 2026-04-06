@@ -243,6 +243,7 @@ private:
 	void DestroyFrameGenerationPresentTargets();
 	bool ShouldRequestFrameGenerationLowLatencySwapChain() const;
 	nri::SwapChainBits GetEffectiveRequestedSwapChainFlags() const;
+	void ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& outRequestedFormat, nri::SwapChainFormat& outResolvedFormat, const char*& outReason) const;
 	bool ShouldUseFrameGenerationUiTarget() const;
 	uint32_t GetFrameGenerationSceneBlendPrefixCount() const;
 	bool EnsureFrameGenerationUiTexture(uint32_t width, uint32_t height);
@@ -315,6 +316,7 @@ private:
 	FString mDeviceName = "NRI";
 	nri::SwapChainBits mSwapChainFlags = nri::SwapChainBits::NONE;
 	nri::SwapChainFormat mRequestedSwapChainFormat = nri::SwapChainFormat::BT709_G22_8BIT;
+	nri::SwapChainFormat mCreatedSwapChainFormat = nri::SwapChainFormat::BT709_G22_8BIT;
 	nri::Format mResolvedSwapChainTextureFormat = nri::Format::UNKNOWN;
 	nri::DisplayDesc mSwapChainDisplayDesc = {};
 	nri::Result mSwapChainDisplayDescResult = nri::Result::FAILURE;
@@ -343,6 +345,7 @@ private:
 	uint32_t mCurrentSwapChainImage = 0;
 	uint32_t mCurrentQueuedFrameIndex = 0;
 	uint32_t mAcquireSemaphoreIndex = 0;
+	FString mSwapChainOutputResolveReason = "requested-sdr";
 	bool mCommandBufferOpen = false;
 	bool mInitialized = false;
 	bool mLoggedStartup = false;
