@@ -1,6 +1,7 @@
 #include "nri_portal_bridge.h"
 
 #include "c_cvars.h"
+#include "gamestruct.h"
 #include "hw_portal.h"
 #include "image.h"
 #include "textures.h"
@@ -21,6 +22,33 @@ namespace
 	struct CaptureState
 	{
 		FRenderState* renderState = nullptr;
+	};
+
+	class ScopedPortalCaptureState
+	{
+	public:
+		ScopedPortalCaptureState(DCoreActor* viewer, int type)
+			: mViewer(viewer), mType(type)
+		{
+			if (gi != nullptr)
+			{
+				gi->EnterPortal(mViewer, mType);
+				mEntered = true;
+			}
+		}
+
+		~ScopedPortalCaptureState()
+		{
+			if (mEntered && gi != nullptr)
+			{
+				gi->LeavePortal(mViewer, mType);
+			}
+		}
+
+	private:
+		DCoreActor* mViewer = nullptr;
+		int mType = -1;
+		bool mEntered = false;
 	};
 
 	bool IsUsableGameTexturePointer(FGameTexture* texture)
@@ -148,6 +176,7 @@ namespace
 
 		switch (portal->GetType())
 		{
+		case PORTAL_WALL_MIRROR:
 		case PORTAL_WALL_VIEW:
 		case PORTAL_WALL_TO_SPRITE:
 		case PORTAL_SECTOR_FLOOR:
@@ -210,8 +239,12 @@ namespace
 				continue;
 			}
 
-			const bool portalFlag = portal->GetType() == PORTAL_SECTOR_CEILING;
-			child->CreateScene(portalFlag);
+			const int portalType = portal->GetType();
+			const bool portalFlag = portalType == PORTAL_SECTOR_CEILING;
+			{
+				const ScopedPortalCaptureState portalCaptureState(child->Viewpoint.CameraActor, portalType);
+				child->CreateScene(portalFlag);
+			}
 
 			SceneView childView;
 			if (CaptureScene(*child, childView))
