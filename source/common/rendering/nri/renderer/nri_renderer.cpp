@@ -382,8 +382,10 @@ namespace
 	{
 		int32_t viewpointActorIndex = -1;
 		int32_t localPlayerActorIndex = -1;
+		int32_t selectedMirrorWallIndex = -1;
 		bool viewpointMatchesLocalPlayer = false;
 		bool capturedScene = false;
+		uint32_t mirrorPortalCandidates = 0;
 		uint32_t rawFacingSprites = 0;
 		uint32_t rawVoxelSprites = 0;
 		uint32_t capturedSurfaceCount = 0;
@@ -398,8 +400,10 @@ namespace
 		return
 			a.viewpointActorIndex != b.viewpointActorIndex ||
 			a.localPlayerActorIndex != b.localPlayerActorIndex ||
+			a.selectedMirrorWallIndex != b.selectedMirrorWallIndex ||
 			a.viewpointMatchesLocalPlayer != b.viewpointMatchesLocalPlayer ||
 			a.capturedScene != b.capturedScene ||
+			a.mirrorPortalCandidates != b.mirrorPortalCandidates ||
 			a.rawFacingSprites != b.rawFacingSprites ||
 			a.rawVoxelSprites != b.rawVoxelSprites ||
 			a.capturedSurfaceCount != b.capturedSurfaceCount ||
@@ -483,9 +487,11 @@ namespace
 			return;
 		}
 
-		Printf("NRI PT mirror player capture: view_actor=%d local_actor=%d camera_match=%s raw_facing=%u raw_voxels=%u captured=%s surfaces=%u match=%u other=%u actorless=%u filtered=%u\n",
+		Printf("NRI PT mirror player capture: view_actor=%d local_actor=%d mirror_candidates=%u mirror_wall=%d camera_match=%s raw_facing=%u raw_voxels=%u captured=%s surfaces=%u match=%u other=%u actorless=%u filtered=%u\n",
 			stats.viewpointActorIndex,
 			stats.localPlayerActorIndex,
+			stats.mirrorPortalCandidates,
+			stats.selectedMirrorWallIndex,
 			stats.viewpointMatchesLocalPlayer ? "yes" : "no",
 			stats.rawFacingSprites,
 			stats.rawVoxelSprites,
@@ -566,6 +572,63 @@ public:
 
 		stats.totalDrawItems = stats.wallDrawItems + stats.flatDrawItems + stats.spriteDrawItems;
 		sceneView.stats = stats;
+	}
+
+	static HWPortal* SelectPrimaryMirrorPortal(const HWDrawInfo& di, uint32_t& outCandidateCount, int32_t& outSelectedWallIndex)
+	{
+		outCandidateCount = 0;
+		outSelectedWallIndex = -1;
+		const DVector2 cameraPos(di.Viewpoint.Pos.X, -di.Viewpoint.Pos.Y);
+		const DVector2 cameraDir = di.Viewpoint.ViewVector;
+		HWPortal* bestPortal = nullptr;
+		double bestScore = -std::numeric_limits<double>::infinity();
+		for (HWPortal* portal : di.Portals)
+		{
+			if (portal == nullptr || portal->GetType() != PORTAL_WALL_MIRROR)
+			{
+				continue;
+			}
+
+			outCandidateCount++;
+			auto* mirrorLine = static_cast<walltype*>(portal->GetSource());
+			if (mirrorLine == nullptr)
+			{
+				continue;
+			}
+
+			const walltype* next = mirrorLine->point2Wall();
+			if (next == nullptr)
+			{
+				continue;
+			}
+
+			const DVector2 midpoint(
+				(mirrorLine->pos.X + next->pos.X) * 0.5,
+				(-mirrorLine->pos.Y - next->pos.Y) * 0.5);
+			const DVector2 toMirror = midpoint - cameraPos;
+			const double distanceSquared = toMirror.LengthSquared();
+			if (distanceSquared <= 0.0001)
+			{
+				continue;
+			}
+
+			const DVector2 toMirrorDir = toMirror / sqrt(distanceSquared);
+			const double facing = cameraDir | toMirrorDir;
+			if (facing <= 0.0)
+			{
+				continue;
+			}
+
+			const double score = facing * 1000.0 - sqrt(distanceSquared);
+			if (score > bestScore)
+			{
+				bestScore = score;
+				bestPortal = portal;
+				outSelectedWallIndex = wall.IndexOf(mirrorLine);
+			}
+		}
+
+		return bestPortal;
 	}
 
 	struct MirrorBillboardLayout
@@ -741,35 +804,31 @@ public:
 
 	static bool AppendMirrorPlayerSurfaces(const HWDrawInfo& di, const nri_scene::SceneView& sourceView, nri_scene::SceneView& outView)
 	{
+		uint32_t mirrorPortalCandidates = 0;
+		int32_t selectedMirrorWallIndex = -1;
+		HWPortal* portal = SelectPrimaryMirrorPortal(di, mirrorPortalCandidates, selectedMirrorWallIndex);
 		bool appendedBillboards = false;
-		for (HWPortal* portal : di.Portals)
+		if (portal != nullptr)
 		{
-			if (portal == nullptr || portal->GetType() != PORTAL_WALL_MIRROR)
-			{
-				continue;
-			}
-
 			auto* mirrorLine = static_cast<walltype*>(portal->GetSource());
-			if (mirrorLine == nullptr)
+			if (mirrorLine != nullptr)
 			{
-				continue;
-			}
-
-			for (const nri_scene::SurfaceRef& sourceSurface : sourceView.opaqueSprites)
-			{
-				if ((sourceSurface.material.flags & nri_scene::MaterialFlag_FacingBillboard) == 0)
+				for (const nri_scene::SurfaceRef& sourceSurface : sourceView.opaqueSprites)
 				{
-					continue;
-				}
+					if ((sourceSurface.material.flags & nri_scene::MaterialFlag_FacingBillboard) == 0)
+					{
+						continue;
+					}
 
-				nri_scene::SurfaceRef billboardSurface;
-				if (!ReorientFacingBillboardForMirror(di, *mirrorLine, sourceSurface, billboardSurface))
-				{
-					continue;
-				}
+					nri_scene::SurfaceRef billboardSurface;
+					if (!ReorientFacingBillboardForMirror(di, *mirrorLine, sourceSurface, billboardSurface))
+					{
+						continue;
+					}
 
-				outView.opaqueSprites.push_back(std::move(billboardSurface));
-				appendedBillboards = true;
+					outView.opaqueSprites.push_back(std::move(billboardSurface));
+					appendedBillboards = true;
+				}
 			}
 		}
 
@@ -812,6 +871,7 @@ public:
 		const int32_t actorIndex = (int32_t)localPlayerActor->GetIndex();
 		captureStats.localPlayerActorIndex = actorIndex;
 		captureStats.viewpointMatchesLocalPlayer = di.Viewpoint.CameraActor == localPlayerActor;
+		SelectPrimaryMirrorPortal(di, captureStats.mirrorPortalCandidates, captureStats.selectedMirrorWallIndex);
 		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
 		captureDi->visibility = di.visibility;
 		captureDi->rellight = di.rellight;
