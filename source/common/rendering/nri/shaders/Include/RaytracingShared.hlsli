@@ -149,7 +149,9 @@ bool TryResolveHitTangentFrame(uint dataSource, uint primitiveIndex, float3 geom
 	tangent = tangentRaw * rsqrt(tangentLengthSq);
 	bitangent = normalize(cross(geometricNormal, tangent));
 	const float handedness = dot(cross(geometricNormal, tangent), bitangentRaw) < 0.0 ? -1.0 : 1.0;
-	bitangent *= handedness;
+	// Match the raster normal-map orientation: the PT geometric frame was
+	// effectively interpreting tangent-space Y upside-down on wall relief.
+	bitangent *= -handedness;
 	return true;
 }
 
