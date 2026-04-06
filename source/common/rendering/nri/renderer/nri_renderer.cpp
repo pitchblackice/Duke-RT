@@ -2052,8 +2052,9 @@ namespace
 			material.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
 			material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
 			material.emissiveTextureIndex = material.textureIndex;
-			material.emissiveIntensity = fullbrightBoost;
+			material.emissiveIntensity = 1.0f;
 			material.emissiveMaskScale = 1.0f;
+			material.emissiveReserved = fullbrightBoost;
 			material.emissiveColor[0] = 1.0f;
 			material.emissiveColor[1] = 1.0f;
 			material.emissiveColor[2] = 1.0f;
@@ -2063,8 +2064,9 @@ namespace
 			metadata.lightLevel = 1.0f;
 			metadata.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
 			metadata.emissiveTextureIndex = material.textureIndex;
-			metadata.emissiveIntensity = fullbrightBoost;
+			metadata.emissiveIntensity = 1.0f;
 			metadata.emissiveMaskScale = 1.0f;
+			metadata.visibleFullbrightBoost = fullbrightBoost;
 			metadata.emissiveColor[0] = 1.0f;
 			metadata.emissiveColor[1] = 1.0f;
 			metadata.emissiveColor[2] = 1.0f;
@@ -8634,8 +8636,9 @@ void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBri
 			material.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
 			material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
 			material.emissiveTextureIndex = material.textureIndex;
-			material.emissiveIntensity = fullbrightBoost;
+			material.emissiveIntensity = 1.0f;
 			material.emissiveMaskScale = 1.0f;
+			material.emissiveReserved = fullbrightBoost;
 			material.emissiveColor[0] = 1.0f;
 			material.emissiveColor[1] = 1.0f;
 			material.emissiveColor[2] = 1.0f;

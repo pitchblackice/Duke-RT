@@ -81,6 +81,7 @@ struct MaterialLightingMetadata
 	float emissiveColor[3] = {};
 	float emissiveIntensity = 0.0f;
 	float emissiveMaskScale = 0.0f;
+	float visibleFullbrightBoost = 1.0f;
 };
 
 struct TextureUpload

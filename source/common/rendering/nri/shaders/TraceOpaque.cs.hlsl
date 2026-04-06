@@ -884,7 +884,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			{
 				diffuse = 0.0;
 				specular = 0.0;
-				directEmission = albedo.rgb;
+				directEmission = albedo.rgb * max(material.emissiveReserved, 1.0);
 			}
 			else
 			{

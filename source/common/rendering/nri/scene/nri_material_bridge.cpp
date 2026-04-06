@@ -328,7 +328,7 @@ namespace
 		return intensity;
 	}
 
-	float GetSampledFullbrightEmissiveIntensity()
+	float GetVisibleFullbrightBoost()
 	{
 		return std::clamp((float)nri_ptfullbrightboost, 0.50f, 8.00f);
 	}
@@ -416,8 +416,9 @@ namespace
 		{
 			metadata.emissiveMode = MaterialEmissiveMode_UseBaseTexture;
 			metadata.emissiveTextureIndex = material.textureIndex;
-			metadata.emissiveIntensity = GetSampledFullbrightEmissiveIntensity();
+			metadata.emissiveIntensity = 1.0f;
 			metadata.emissiveMaskScale = 1.0f;
+			metadata.visibleFullbrightBoost = GetVisibleFullbrightBoost();
 			metadata.emissiveColor[0] = 1.0f;
 			metadata.emissiveColor[1] = 1.0f;
 			metadata.emissiveColor[2] = 1.0f;
@@ -503,6 +504,7 @@ namespace
 			roughnessTextureIndex,
 			roughnessContentKey);
 		outMaterials.materials.back().lightingFlags = metadata.lightingFlags;
+		outMaterials.materials.back().emissiveReserved = metadata.visibleFullbrightBoost;
 		outMaterials.lightMetadata.push_back(metadata);
 	}
 
