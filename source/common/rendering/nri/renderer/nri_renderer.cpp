@@ -568,66 +568,180 @@ public:
 		sceneView.stats = stats;
 	}
 
-	static bool TryReflectMirrorPoint(const walltype& mirrorLine, float& ioX, float& ioY)
+	struct MirrorBillboardLayout
 	{
-		const double ax = mirrorLine.pos.X;
-		const double ay = -mirrorLine.pos.Y;
+		nri_scene::CapturedVertex topLeft = {};
+		nri_scene::CapturedVertex bottomLeft = {};
+		nri_scene::CapturedVertex topRight = {};
+		nri_scene::CapturedVertex bottomRight = {};
+		float topCenter[3] = {};
+		float bottomCenter[3] = {};
+		float prevTopCenter[3] = {};
+		float prevBottomCenter[3] = {};
+		float halfWidth = 0.0f;
+		float prevHalfWidth = 0.0f;
+	};
+
+	static void AverageCapturedVertexPair(const nri_scene::CapturedVertex& a, const nri_scene::CapturedVertex& b, float outPosition[3], float outPrevPosition[3])
+	{
+		for (int i = 0; i < 3; ++i)
+		{
+			outPosition[i] = (a.position[i] + b.position[i]) * 0.5f;
+			outPrevPosition[i] = (a.prevPosition[i] + b.prevPosition[i]) * 0.5f;
+		}
+	}
+
+	static float ComputeCapturedHorizontalDistance(const nri_scene::CapturedVertex& a, const float center[3], bool previous)
+	{
+		const float dx = (previous ? a.prevPosition[0] : a.position[0]) - center[0];
+		const float dz = (previous ? a.prevPosition[2] : a.position[2]) - center[2];
+		return sqrtf(dx * dx + dz * dz);
+	}
+
+	static bool ExtractMirrorBillboardLayout(const nri_scene::SurfaceRef& sourceSurface, MirrorBillboardLayout& outLayout)
+	{
+		if (sourceSurface.vertices.size() != 4 ||
+			(sourceSurface.material.flags & nri_scene::MaterialFlag_FacingBillboard) == 0)
+		{
+			return false;
+		}
+
+		std::array<nri_scene::CapturedVertex, 4> vertices = {
+			sourceSurface.vertices[0],
+			sourceSurface.vertices[1],
+			sourceSurface.vertices[2],
+			sourceSurface.vertices[3]
+		};
+
+		std::sort(vertices.begin(), vertices.end(), [](const auto& a, const auto& b)
+		{
+			return a.position[1] > b.position[1];
+		});
+
+		std::array<nri_scene::CapturedVertex, 2> topPair = { vertices[0], vertices[1] };
+		std::array<nri_scene::CapturedVertex, 2> bottomPair = { vertices[2], vertices[3] };
+
+		const float axisX = topPair[1].position[0] - topPair[0].position[0];
+		const float axisZ = topPair[1].position[2] - topPair[0].position[2];
+		const float axisLength = sqrtf(axisX * axisX + axisZ * axisZ);
+		if (axisLength <= 0.0001f)
+		{
+			return false;
+		}
+
+		const float invAxisLength = 1.0f / axisLength;
+		const float normAxisX = axisX * invAxisLength;
+		const float normAxisZ = axisZ * invAxisLength;
+
+		auto horizontalProjection = [normAxisX, normAxisZ](const nri_scene::CapturedVertex& vertex)
+		{
+			return vertex.position[0] * normAxisX + vertex.position[2] * normAxisZ;
+		};
+
+		if (horizontalProjection(topPair[0]) > horizontalProjection(topPair[1]))
+		{
+			std::swap(topPair[0], topPair[1]);
+		}
+		if (horizontalProjection(bottomPair[0]) > horizontalProjection(bottomPair[1]))
+		{
+			std::swap(bottomPair[0], bottomPair[1]);
+		}
+
+		outLayout.topLeft = topPair[0];
+		outLayout.topRight = topPair[1];
+		outLayout.bottomLeft = bottomPair[0];
+		outLayout.bottomRight = bottomPair[1];
+		AverageCapturedVertexPair(outLayout.topLeft, outLayout.topRight, outLayout.topCenter, outLayout.prevTopCenter);
+		AverageCapturedVertexPair(outLayout.bottomLeft, outLayout.bottomRight, outLayout.bottomCenter, outLayout.prevBottomCenter);
+		outLayout.halfWidth =
+			(ComputeCapturedHorizontalDistance(outLayout.topLeft, outLayout.topCenter, false) +
+				ComputeCapturedHorizontalDistance(outLayout.bottomLeft, outLayout.bottomCenter, false)) * 0.5f;
+		outLayout.prevHalfWidth =
+			(ComputeCapturedHorizontalDistance(outLayout.topLeft, outLayout.prevTopCenter, true) +
+				ComputeCapturedHorizontalDistance(outLayout.bottomLeft, outLayout.prevBottomCenter, true)) * 0.5f;
+		return outLayout.halfWidth > 0.0001f;
+	}
+
+	static bool ComputeMirroredViewVector(const HWDrawInfo& di, const walltype& mirrorLine, float& outViewX, float& outViewY)
+	{
 		const walltype* next = mirrorLine.point2Wall();
 		if (next == nullptr)
 		{
 			return false;
 		}
 
-		const double bx = next->pos.X;
-		const double by = -next->pos.Y;
-		const double dx = bx - ax;
-		const double dy = by - ay;
-		const double lengthSquared = dx * dx + dy * dy;
-		if (lengthSquared <= 0.0)
+		float lineX = (float)(next->pos.X - mirrorLine.pos.X);
+		float lineY = (float)(-next->pos.Y + mirrorLine.pos.Y);
+		const float lineLength = sqrtf(lineX * lineX + lineY * lineY);
+		if (lineLength <= 0.0001f)
 		{
 			return false;
 		}
 
-		const double px = ioX;
-		const double py = ioY;
-		const double projection = ((px - ax) * dx + (py - ay) * dy) / lengthSquared;
-		const double projectedX = ax + dx * projection;
-		const double projectedY = ay + dy * projection;
-		ioX = (float)(projectedX * 2.0 - px);
-		ioY = (float)(projectedY * 2.0 - py);
+		lineX /= lineLength;
+		lineY /= lineLength;
+		const float viewX = (float)di.Viewpoint.ViewVector.X;
+		const float viewY = (float)di.Viewpoint.ViewVector.Y;
+		const float projection = viewX * lineX + viewY * lineY;
+		outViewX = lineX * (projection * 2.0f) - viewX;
+		outViewY = lineY * (projection * 2.0f) - viewY;
+		const float reflectedLength = sqrtf(outViewX * outViewX + outViewY * outViewY);
+		if (reflectedLength <= 0.0001f)
+		{
+			return false;
+		}
+
+		outViewX /= reflectedLength;
+		outViewY /= reflectedLength;
 		return true;
 	}
 
-	static bool ReflectCapturedSurfaceAcrossMirror(const walltype& mirrorLine, nri_scene::SurfaceRef& surface)
+	static nri_scene::CapturedVertex MakeMirrorBillboardVertex(const nri_scene::CapturedVertex& source, const float center[3], float widthAxisX, float widthAxisY, float halfWidth, bool rightSide, bool previous)
 	{
-		bool reflected = false;
-		for (nri_scene::CapturedVertex& vertex : surface.vertices)
-		{
-			float x = vertex.position[0];
-			float y = vertex.position[2];
-			if (TryReflectMirrorPoint(mirrorLine, x, y))
-			{
-				vertex.position[0] = x;
-				vertex.position[2] = y;
-				reflected = true;
-			}
-
-			x = vertex.prevPosition[0];
-			y = vertex.prevPosition[2];
-			if (TryReflectMirrorPoint(mirrorLine, x, y))
-			{
-				vertex.prevPosition[0] = x;
-				vertex.prevPosition[2] = y;
-				reflected = true;
-			}
-		}
-
-		return reflected;
+		nri_scene::CapturedVertex result = source;
+		const float side = rightSide ? 1.0f : -1.0f;
+		float* destination = previous ? result.prevPosition : result.position;
+		destination[0] = center[0] + widthAxisX * halfWidth * side;
+		destination[1] = center[1];
+		destination[2] = center[2] + widthAxisY * halfWidth * side;
+		return result;
 	}
 
-	static bool AppendReflectedMirrorPlayerSurfaces(const HWDrawInfo& di, const nri_scene::SceneView& sourceView, nri_scene::SceneView& outView)
+	static bool ReorientFacingBillboardForMirror(const HWDrawInfo& di, const walltype& mirrorLine, const nri_scene::SurfaceRef& sourceSurface, nri_scene::SurfaceRef& outSurface)
 	{
-		bool appended = false;
+		MirrorBillboardLayout layout = {};
+		if (!ExtractMirrorBillboardLayout(sourceSurface, layout))
+		{
+			return false;
+		}
+
+		float mirroredViewX = 0.0f;
+		float mirroredViewY = 0.0f;
+		if (!ComputeMirroredViewVector(di, mirrorLine, mirroredViewX, mirroredViewY))
+		{
+			return false;
+		}
+
+		const float widthAxisX = -mirroredViewY;
+		const float widthAxisY = mirroredViewX;
+		const float prevHalfWidth = layout.prevHalfWidth > 0.0001f ? layout.prevHalfWidth : layout.halfWidth;
+
+		outSurface = sourceSurface;
+		outSurface.vertices.resize(4);
+		outSurface.vertices[0] = MakeMirrorBillboardVertex(layout.topLeft, layout.topCenter, widthAxisX, widthAxisY, layout.halfWidth, false, false);
+		outSurface.vertices[1] = MakeMirrorBillboardVertex(layout.bottomLeft, layout.bottomCenter, widthAxisX, widthAxisY, layout.halfWidth, false, false);
+		outSurface.vertices[2] = MakeMirrorBillboardVertex(layout.topRight, layout.topCenter, widthAxisX, widthAxisY, layout.halfWidth, true, false);
+		outSurface.vertices[3] = MakeMirrorBillboardVertex(layout.bottomRight, layout.bottomCenter, widthAxisX, widthAxisY, layout.halfWidth, true, false);
+		outSurface.vertices[0] = MakeMirrorBillboardVertex(outSurface.vertices[0], layout.prevTopCenter, widthAxisX, widthAxisY, prevHalfWidth, false, true);
+		outSurface.vertices[1] = MakeMirrorBillboardVertex(outSurface.vertices[1], layout.prevBottomCenter, widthAxisX, widthAxisY, prevHalfWidth, false, true);
+		outSurface.vertices[2] = MakeMirrorBillboardVertex(outSurface.vertices[2], layout.prevTopCenter, widthAxisX, widthAxisY, prevHalfWidth, true, true);
+		outSurface.vertices[3] = MakeMirrorBillboardVertex(outSurface.vertices[3], layout.prevBottomCenter, widthAxisX, widthAxisY, prevHalfWidth, true, true);
+		return true;
+	}
+
+	static bool AppendMirrorPlayerSurfaces(const HWDrawInfo& di, const nri_scene::SceneView& sourceView, nri_scene::SceneView& outView)
+	{
+		bool appendedBillboards = false;
 		for (HWPortal* portal : di.Portals)
 		{
 			if (portal == nullptr || portal->GetType() != PORTAL_WALL_MIRROR)
@@ -643,18 +757,35 @@ public:
 
 			for (const nri_scene::SurfaceRef& sourceSurface : sourceView.opaqueSprites)
 			{
-				nri_scene::SurfaceRef reflectedSurface = sourceSurface;
-				if (!ReflectCapturedSurfaceAcrossMirror(*mirrorLine, reflectedSurface))
+				if ((sourceSurface.material.flags & nri_scene::MaterialFlag_FacingBillboard) == 0)
 				{
 					continue;
 				}
 
-				outView.opaqueSprites.push_back(std::move(reflectedSurface));
-				appended = true;
+				nri_scene::SurfaceRef billboardSurface;
+				if (!ReorientFacingBillboardForMirror(di, *mirrorLine, sourceSurface, billboardSurface))
+				{
+					continue;
+				}
+
+				outView.opaqueSprites.push_back(std::move(billboardSurface));
+				appendedBillboards = true;
 			}
 		}
 
-		return appended;
+		bool appendedNonBillboards = false;
+		for (const nri_scene::SurfaceRef& sourceSurface : sourceView.opaqueSprites)
+		{
+			if ((sourceSurface.material.flags & nri_scene::MaterialFlag_FacingBillboard) != 0)
+			{
+				continue;
+			}
+
+			outView.opaqueSprites.push_back(sourceSurface);
+			appendedNonBillboards = true;
+		}
+
+		return appendedBillboards || appendedNonBillboards;
 	}
 
 	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, nri_scene::SceneView& outView)
@@ -693,7 +824,7 @@ public:
 		nri_scene::SceneView capturedView;
 		const bool hasCapture = nri_scene::CaptureActorSpriteScene(*captureDi, actorIndex, capturedView);
 		captureDi->EndDrawInfo();
-		if (!hasCapture || !AppendReflectedMirrorPlayerSurfaces(di, capturedView, outView))
+		if (!hasCapture || !AppendMirrorPlayerSurfaces(di, capturedView, outView))
 		{
 			TraceMirrorPlayerCaptureStats(captureStats);
 			outView = {};
