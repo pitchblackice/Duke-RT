@@ -581,6 +581,7 @@ public:
 		outCandidateCount = 0;
 		outSelectedWallIndex = -1;
 		const DVector2 cameraPos(di.Viewpoint.Pos.X, -di.Viewpoint.Pos.Y);
+		const DVector2 cameraPosRaw = di.Viewpoint.Pos.XY();
 		const DVector2 cameraDir = di.Viewpoint.ViewVector;
 		HWPortal* preferredPortal = nullptr;
 		HWPortal* closestCenterHitPortal = nullptr;
@@ -632,25 +633,47 @@ public:
 				}
 			}
 
-			const double distanceSquared = SquareDistToWall(di.Viewpoint.Pos.X, di.Viewpoint.Pos.Y, mirrorLine);
+			double distanceSquared = std::numeric_limits<double>::infinity();
+			DVector2 nearestVisiblePoint = cameraPosRaw;
+			for (const HWWall& line : portal->lines)
+			{
+				const DVector2 lineStart(line.glseg.x1, line.glseg.y1);
+				const DVector2 lineDelta(line.glseg.x2 - line.glseg.x1, line.glseg.y2 - line.glseg.y1);
+				const double lineLengthSquared = lineDelta.LengthSquared();
+				if (lineLengthSquared <= 1.0e-6)
+				{
+					continue;
+				}
+
+				const double t = clamp<double>(((cameraPosRaw - lineStart) | lineDelta) / lineLengthSquared, 0.0, 1.0);
+				const DVector2 candidatePoint = lineStart + lineDelta * t;
+				const double candidateDistanceSquared = (cameraPosRaw - candidatePoint).LengthSquared();
+				if (candidateDistanceSquared < distanceSquared)
+				{
+					distanceSquared = candidateDistanceSquared;
+					nearestVisiblePoint = candidatePoint;
+				}
+			}
+			if (!std::isfinite(distanceSquared))
+			{
+				distanceSquared = SquareDistToWall(di.Viewpoint.Pos.X, di.Viewpoint.Pos.Y, mirrorLine);
+			}
 			if (distanceSquared <= 0.0001)
 			{
 				outSelectedWallIndex = mirrorWallIndex;
 				return portal;
 			}
 
-			const DVector2 midpoint(
-				(mirrorLine->pos.X + next->pos.X) * 0.5,
-				(-mirrorLine->pos.Y - next->pos.Y) * 0.5);
-			const DVector2 toMirror = midpoint - cameraPos;
-			const double midpointDistanceSquared = toMirror.LengthSquared();
-			if (midpointDistanceSquared <= 0.0001)
+			const DVector2 nearestVisiblePointFlipped(nearestVisiblePoint.X, -nearestVisiblePoint.Y);
+			const DVector2 toMirror = nearestVisiblePointFlipped - cameraPos;
+			const double visibleDistanceSquared = toMirror.LengthSquared();
+			if (visibleDistanceSquared <= 0.0001)
 			{
 				outSelectedWallIndex = mirrorWallIndex;
 				return portal;
 			}
 
-			const DVector2 toMirrorDir = toMirror / sqrt(midpointDistanceSquared);
+			const DVector2 toMirrorDir = toMirror / sqrt(visibleDistanceSquared);
 			const double facing = cameraDir | toMirrorDir;
 			if (distanceSquared < bestDistanceSquared - 0.0001 ||
 				(std::abs(distanceSquared - bestDistanceSquared) <= 0.0001 && facing > bestFacing))
