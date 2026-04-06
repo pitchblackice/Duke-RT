@@ -582,8 +582,12 @@ public:
 		outSelectedWallIndex = -1;
 		const DVector2 cameraPos(di.Viewpoint.Pos.X, -di.Viewpoint.Pos.Y);
 		const DVector2 cameraDir = di.Viewpoint.ViewVector;
+		HWPortal* closestCenterHitPortal = nullptr;
+		double closestCenterHitDistance = std::numeric_limits<double>::infinity();
+		int32_t closestCenterHitWallIndex = -1;
 		HWPortal* bestPortal = nullptr;
 		double bestScore = -std::numeric_limits<double>::infinity();
+		int32_t bestPortalWallIndex = -1;
 		for (HWPortal* portal : di.Portals)
 		{
 			if (portal == nullptr || portal->GetType() != PORTAL_WALL_MIRROR)
@@ -604,6 +608,22 @@ public:
 				continue;
 			}
 
+			const DVector2 segmentStart(mirrorLine->pos.X, -mirrorLine->pos.Y);
+			const DVector2 segmentDelta(next->pos.X - mirrorLine->pos.X, -next->pos.Y + mirrorLine->pos.Y);
+			const double denominator = cameraDir.X * segmentDelta.Y - cameraDir.Y * segmentDelta.X;
+			if (std::abs(denominator) > 1.0e-6)
+			{
+				const DVector2 fromCamera = segmentStart - cameraPos;
+				const double rayDistance = (fromCamera.X * segmentDelta.Y - fromCamera.Y * segmentDelta.X) / denominator;
+				const double segmentFraction = (fromCamera.X * cameraDir.Y - fromCamera.Y * cameraDir.X) / denominator;
+				if (rayDistance >= 0.0 && segmentFraction >= 0.0 && segmentFraction <= 1.0 && rayDistance < closestCenterHitDistance)
+				{
+					closestCenterHitDistance = rayDistance;
+					closestCenterHitPortal = portal;
+					closestCenterHitWallIndex = wall.IndexOf(mirrorLine);
+				}
+			}
+
 			const DVector2 midpoint(
 				(mirrorLine->pos.X + next->pos.X) * 0.5,
 				(-mirrorLine->pos.Y - next->pos.Y) * 0.5);
@@ -621,10 +641,17 @@ public:
 			{
 				bestScore = score;
 				bestPortal = portal;
-				outSelectedWallIndex = wall.IndexOf(mirrorLine);
+				bestPortalWallIndex = wall.IndexOf(mirrorLine);
 			}
 		}
 
+		if (closestCenterHitPortal != nullptr)
+		{
+			outSelectedWallIndex = closestCenterHitWallIndex;
+			return closestCenterHitPortal;
+		}
+
+		outSelectedWallIndex = bestPortalWallIndex;
 		return bestPortal;
 	}
 
