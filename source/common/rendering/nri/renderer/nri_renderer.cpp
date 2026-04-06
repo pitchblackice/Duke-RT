@@ -10,6 +10,7 @@
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
 #include "coreactor.h"
+#include "coreplayer.h"
 #include "gamecontrol.h"
 #include "lightoverlay.h"
 #include "mapinfo.h"
@@ -331,6 +332,136 @@ namespace
 	static uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView)
 	{
 		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
+	}
+
+	class ScopedMirrorPlayerVisibilityCaptureOverride
+	{
+	public:
+		explicit ScopedMirrorPlayerVisibilityCaptureOverride(bool enabled)
+		{
+			if (enabled && gi != nullptr)
+			{
+				mEnabled = true;
+				gi->SetMirrorPlayerVisibilityCaptureOverride(true);
+			}
+		}
+
+		~ScopedMirrorPlayerVisibilityCaptureOverride()
+		{
+			if (mEnabled && gi != nullptr)
+			{
+				gi->SetMirrorPlayerVisibilityCaptureOverride(false);
+			}
+		}
+
+		ScopedMirrorPlayerVisibilityCaptureOverride(const ScopedMirrorPlayerVisibilityCaptureOverride&) = delete;
+		ScopedMirrorPlayerVisibilityCaptureOverride& operator=(const ScopedMirrorPlayerVisibilityCaptureOverride&) = delete;
+
+	private:
+		bool mEnabled = false;
+	};
+
+	static void RebuildSceneViewStats(nri_scene::SceneView& sceneView)
+	{
+		nri_scene::SceneDebugStats stats = {};
+		stats.wallDrawItems = (uint32_t)sceneView.opaqueWalls.size();
+		stats.flatDrawItems = (uint32_t)sceneView.opaqueFlats.size();
+		stats.spriteDrawItems = (uint32_t)sceneView.opaqueSprites.size();
+
+		for (const nri_scene::SurfaceRef& wall : sceneView.opaqueWalls)
+		{
+			stats.triangleEstimate += wall.vertices.size() >= 3 ? (uint32_t)wall.vertices.size() - 2u : 0u;
+			stats.materialRefs++;
+			if (wall.provenance.sourceType == nri_scene::SurfaceSourceType::MirrorWall)
+			{
+				stats.mirrorSurfaces++;
+			}
+		}
+
+		for (const nri_scene::SurfaceRef& flat : sceneView.opaqueFlats)
+		{
+			stats.triangleEstimate += (uint32_t)(flat.vertices.size() / 3u);
+			stats.materialRefs++;
+		}
+
+		for (const nri_scene::SurfaceRef& sprite : sceneView.opaqueSprites)
+		{
+			stats.triangleEstimate += (uint32_t)(sprite.vertices.size() / 3u);
+			stats.materialRefs++;
+			if (sprite.provenance.sourceType == nri_scene::SurfaceSourceType::VoxelProxySprite)
+			{
+				stats.modelDrawItems++;
+				stats.voxelProxyDrawItems++;
+			}
+			else
+			{
+				stats.translucentDrawItems++;
+			}
+		}
+
+		stats.totalDrawItems = stats.wallDrawItems + stats.flatDrawItems + stats.spriteDrawItems;
+		sceneView.stats = stats;
+	}
+
+	static bool FilterSceneViewToActor(nri_scene::SceneView& sceneView, int32_t actorIndex)
+	{
+		auto retainActorSurfaces = [actorIndex](auto& surfaces)
+		{
+			surfaces.erase(
+				std::remove_if(
+					surfaces.begin(),
+					surfaces.end(),
+					[actorIndex](const auto& surface)
+					{
+						return surface.provenance.actorIndex != actorIndex;
+					}),
+				surfaces.end());
+		};
+
+		retainActorSurfaces(sceneView.opaqueWalls);
+		retainActorSurfaces(sceneView.opaqueFlats);
+		retainActorSurfaces(sceneView.opaqueSprites);
+		RebuildSceneViewStats(sceneView);
+		return CountSceneViewSurfaces(sceneView) > 0;
+	}
+
+	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, nri_scene::SceneView& outView)
+	{
+		outView = {};
+		if (gi == nullptr || di.Viewpoint.CameraActor == nullptr)
+		{
+			return false;
+		}
+
+		DCorePlayer* localPlayer = PlayerArray[myconnectindex];
+		if (localPlayer == nullptr || localPlayer->GetActor() != di.Viewpoint.CameraActor)
+		{
+			return false;
+		}
+
+		const int32_t actorIndex = (int32_t)di.Viewpoint.CameraActor->GetIndex();
+		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
+		captureDi->visibility = di.visibility;
+		captureDi->rellight = di.rellight;
+
+		const ScopedMirrorPlayerVisibilityCaptureOverride mirrorCaptureOverride(true);
+		captureDi->CreateScene(false);
+		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, outView);
+		captureDi->EndDrawInfo();
+		if (!hasCapture)
+		{
+			outView = {};
+			return false;
+		}
+
+		outView.drawInfo = &di;
+		if (!FilterSceneViewToActor(outView, actorIndex))
+		{
+			outView = {};
+			return false;
+		}
+
+		return true;
 	}
 
 	static bool RequiresExclusiveMaterialOnlyChunkReplacement(uint32_t reasonMask)
@@ -4549,6 +4680,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::MaterialBridgeData runtimeMutationMaterialBridge;
 	nri_scene::MaterialBridgeData runtimeSpaceLinkMaterialBridge;
 	nri_scene::MaterialBridgeData dynamicMaterialBridge;
+	nri_scene::MaterialBridgeData mirrorPlayerMaterialBridge;
 	nri_scene::MaterialBridgeData mergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData debugSphereMaterialBridge;
 	nri_scene::MaterialBridgeData overlayMaterialBridge;
@@ -4564,10 +4696,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::MaterialBridgeData* sceneLightCapturedMaterials = nullptr;
 	const nri_scene::SceneView* sceneLightDynamicView = nullptr;
 	const nri_scene::MaterialBridgeData* sceneLightDynamicMaterials = nullptr;
+	nri_scene::SceneView mirrorPlayerSceneView;
 	nri_scene::SceneView mergedDynamicSceneView;
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
+	nri_scene::GeometryData mirrorPlayerGeometry;
 	uint32_t activeStaticProbePrimitiveCount = 0;
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	bool sceneLightUsesStaticMapScene = false;
@@ -4611,6 +4745,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicCaptureMs);
 			return nri_scene::CaptureDynamicScene(di, dynamicSceneView);
 		}();
+		const bool hasMirrorPlayerScene = !deferOverlayThisFrame && CaptureMirrorPlayerDynamicScene(di, mirrorPlayerSceneView);
 		if (hasDynamicScene)
 		{
 			{
@@ -4637,6 +4772,20 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentDynamicMs);
 				return RebuildPersistentDynamicEmissiveCache(dynamicSceneView, dynamicMaterialBridge);
 			}();
+		}
+		if (hasMirrorPlayerScene)
+		{
+			{
+				Clocker clock(NriPTGeometryBuild);
+				nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry);
+				AssignGeometryPortalIndices(mMapWorld, mirrorPlayerGeometry);
+			}
+
+			if (!mirrorPlayerGeometry.primitives.empty())
+			{
+				Clocker clock(NriPTMaterialBuild);
+				BuildMaterialsWithActorOverrides(mirrorPlayerSceneView, mirrorPlayerMaterialBridge);
+			}
 		}
 
 		PrunePersistentDynamicEmissiveCacheToLiveActors();
@@ -4851,6 +5000,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					mDynamicSceneLastFrame.materialCount = (uint32_t)activeDynamicMaterials->materials.size();
 					mDynamicSceneLastFrame.modelCount = activeDynamicSceneView->stats.modelDrawItems;
 					mDynamicSceneLastFrame.unsupportedModelCount = activeDynamicSceneView->stats.unsupportedModelDrawItems;
+				}
+				if (hasMirrorPlayerScene)
+				{
+					mDynamicSceneLastFrame.mirrorPlayerSurfaceCount = CountSceneViewSurfaces(mirrorPlayerSceneView);
+					mDynamicSceneLastFrame.mirrorPlayerPrimitiveCount = (uint32_t)mirrorPlayerGeometry.primitives.size();
+					mDynamicSceneLastFrame.mirrorPlayerMaterialCount = (uint32_t)mirrorPlayerMaterialBridge.materials.size();
+					mDynamicSceneLastFrame.mirrorPlayerModelCount = mirrorPlayerSceneView.stats.modelDrawItems;
+					mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount = mirrorPlayerSceneView.stats.unsupportedModelDrawItems;
 				}
 				if (!overlayGeometry.primitives.empty())
 				{
@@ -6713,13 +6870,18 @@ void NRIRenderer::PrintStaticMapSceneStatus() const
 
 void NRIRenderer::PrintDynamicSceneStatus() const
 {
-	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u dynamic_as_builds=%u last_frame_as_build=%s active_tlas_instances=%u emissive_cache=%s cache_surfaces=%u cache_tris=%u cache_materials=%u\n",
+	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u mirror_player_surfaces=%u mirror_player_tris=%u mirror_player_materials=%u mirror_player_models=%u mirror_player_unsupported_models=%u dynamic_as_builds=%u last_frame_as_build=%s active_tlas_instances=%u emissive_cache=%s cache_surfaces=%u cache_tris=%u cache_materials=%u\n",
 		mUsedDynamicSceneLastFrame ? "yes" : "no",
 		mDynamicSceneLastFrame.spriteSurfaceCount,
 		mDynamicSceneLastFrame.primitiveCount,
 		mDynamicSceneLastFrame.materialCount,
 		mDynamicSceneLastFrame.modelCount,
 		mDynamicSceneLastFrame.unsupportedModelCount,
+		mDynamicSceneLastFrame.mirrorPlayerSurfaceCount,
+		mDynamicSceneLastFrame.mirrorPlayerPrimitiveCount,
+		mDynamicSceneLastFrame.mirrorPlayerMaterialCount,
+		mDynamicSceneLastFrame.mirrorPlayerModelCount,
+		mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount,
 		mDynamicSceneLastFrame.asBuildCount,
 		mBuiltDynamicSceneASLastFrame ? "yes" : "no",
 		mActiveTlasInstanceCount,

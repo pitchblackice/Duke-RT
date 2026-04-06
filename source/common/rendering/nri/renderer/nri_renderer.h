@@ -465,6 +465,11 @@ private:
 		uint32_t materialCount = 0;
 		uint32_t modelCount = 0;
 		uint32_t unsupportedModelCount = 0;
+		uint32_t mirrorPlayerSurfaceCount = 0;
+		uint32_t mirrorPlayerPrimitiveCount = 0;
+		uint32_t mirrorPlayerMaterialCount = 0;
+		uint32_t mirrorPlayerModelCount = 0;
+		uint32_t mirrorPlayerUnsupportedModelCount = 0;
 		uint32_t asBuildCount = 0;
 	};
 
