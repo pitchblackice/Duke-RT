@@ -465,6 +465,11 @@ private:
 		uint32_t materialCount = 0;
 		uint32_t modelCount = 0;
 		uint32_t unsupportedModelCount = 0;
+		uint32_t mirrorExtendedSurfaceCount = 0;
+		uint32_t mirrorExtendedPrimitiveCount = 0;
+		uint32_t mirrorExtendedMaterialCount = 0;
+		uint32_t mirrorExtendedModelCount = 0;
+		uint32_t mirrorExtendedUnsupportedModelCount = 0;
 		uint32_t mirrorPlayerSurfaceCount = 0;
 		uint32_t mirrorPlayerPrimitiveCount = 0;
 		uint32_t mirrorPlayerMaterialCount = 0;
@@ -945,6 +950,7 @@ private:
 	bool mHasLoggedFallback = false;
 	bool mUsedStaticMapSceneLastFrame = false;
 	bool mUsedDynamicSceneLastFrame = false;
+	bool mHasVisibleMirrorPortalLastFrame = false;
 	bool mGpuSceneHasDynamicOverlay = false;
 	bool mUploadedStaticMapSceneLastFrame = false;
 	bool mBuiltStaticMapSceneASLastFrame = false;

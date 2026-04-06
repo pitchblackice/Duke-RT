@@ -35,6 +35,7 @@
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <windows.h>
 
 CVAR(Int, nri_ptdebug, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -47,6 +48,7 @@ CVAR(Bool, nri_pttaa, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, nri_ptscenestats)
+EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
 CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -795,6 +797,67 @@ public:
 		return true;
 	}
 
+	static uint64_t BuildDynamicSurfaceMergeKey(const nri_scene::SurfaceRef& surface)
+	{
+		float center[3] = {};
+		ComputeCapturedSurfaceCenter(surface, center);
+		return SceneLightSystem::ComputeSurfaceIdentityKey(
+			SceneLightRecordSource::DynamicScene,
+			surface.provenance,
+			center);
+	}
+
+	static float ComputeSurfaceDistanceSquaredToViewpoint(const FRenderViewpoint& viewpoint, const nri_scene::SurfaceRef& surface)
+	{
+		float center[3] = {};
+		ComputeCapturedSurfaceCenter(surface, center);
+		const float dx = center[0] - (float)viewpoint.Pos.X;
+		const float dy = center[1] - (float)viewpoint.Pos.Z;
+		const float dz = center[2] - (float)viewpoint.Pos.Y;
+		return dx * dx + dy * dy + dz * dz;
+	}
+
+	static void SeedDynamicSurfaceMergeKeys(const nri_scene::SceneView& sceneView, std::unordered_set<uint64_t>& outKeys)
+	{
+		auto append = [&outKeys](const auto& surfaces)
+		{
+			for (const auto& surface : surfaces)
+			{
+				outKeys.insert(BuildDynamicSurfaceMergeKey(surface));
+			}
+		};
+
+		append(sceneView.opaqueWalls);
+		append(sceneView.opaqueFlats);
+		append(sceneView.opaqueSprites);
+	}
+
+	static void AppendMirrorExtendedSurfaceList(
+		const std::vector<nri_scene::SurfaceRef>& source,
+		const FRenderViewpoint& viewpoint,
+		float maxDistance,
+		std::unordered_set<uint64_t>& existingKeys,
+		std::vector<nri_scene::SurfaceRef>& destination)
+	{
+		const float maxDistanceSquared = maxDistance > 0.0f ? maxDistance * maxDistance : 0.0f;
+		for (const nri_scene::SurfaceRef& surface : source)
+		{
+			if (maxDistanceSquared > 0.0f &&
+				ComputeSurfaceDistanceSquaredToViewpoint(viewpoint, surface) > maxDistanceSquared)
+			{
+				continue;
+			}
+
+			const uint64_t key = BuildDynamicSurfaceMergeKey(surface);
+			if (!existingKeys.insert(key).second)
+			{
+				continue;
+			}
+
+			destination.push_back(surface);
+		}
+	}
+
 	static nri_scene::CapturedVertex MakeMirrorBillboardVertex(const nri_scene::CapturedVertex& source, const float center[3], float widthAxisX, float widthAxisY, float halfWidth, bool rightSide, bool previous)
 	{
 		nri_scene::CapturedVertex result = source;
@@ -846,6 +909,78 @@ public:
 		}
 
 		return !outView.opaqueSprites.empty();
+	}
+
+	static bool CaptureMirrorExtendedDynamicScene(
+		HWDrawInfo& di,
+		HWPortal* mirrorPortal,
+		const nri_scene::SceneView* baseDynamicSceneView,
+		nri_scene::SceneView& outView)
+	{
+		outView = {};
+		if (mirrorPortal == nullptr || nri_ptmirrordynamicdistance <= 0.0f)
+		{
+			return false;
+		}
+
+		auto* mirrorLine = static_cast<walltype*>(mirrorPortal->GetSource());
+		if (mirrorLine == nullptr)
+		{
+			return false;
+		}
+
+		HWDrawInfo* captureDi = HWDrawInfo::StartDrawInfo(&di, di.Viewpoint, &di.VPUniforms);
+		captureDi->visibility = di.visibility;
+		captureDi->rellight = di.rellight;
+		if (!ApplyWallMirrorViewpoint(*mirrorLine, captureDi->Viewpoint))
+		{
+			captureDi->EndDrawInfo();
+			return false;
+		}
+
+		captureDi->CreateScene(false);
+		nri_scene::SceneView capturedView;
+		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, capturedView);
+		captureDi->EndDrawInfo();
+		if (!hasCapture)
+		{
+			return false;
+		}
+
+		std::unordered_set<uint64_t> existingKeys;
+		if (baseDynamicSceneView != nullptr)
+		{
+			SeedDynamicSurfaceMergeKeys(*baseDynamicSceneView, existingKeys);
+		}
+
+		outView.drawInfo = &di;
+		AppendMirrorExtendedSurfaceList(
+			capturedView.opaqueWalls,
+			di.Viewpoint,
+			nri_ptmirrordynamicdistance,
+			existingKeys,
+			outView.opaqueWalls);
+		AppendMirrorExtendedSurfaceList(
+			capturedView.opaqueFlats,
+			di.Viewpoint,
+			nri_ptmirrordynamicdistance,
+			existingKeys,
+			outView.opaqueFlats);
+		AppendMirrorExtendedSurfaceList(
+			capturedView.opaqueSprites,
+			di.Viewpoint,
+			nri_ptmirrordynamicdistance,
+			existingKeys,
+			outView.opaqueSprites);
+		if (outView.opaqueWalls.empty() && outView.opaqueFlats.empty() && outView.opaqueSprites.empty())
+		{
+			outView = {};
+			return false;
+		}
+
+		outView.primitiveFlags = nri_scene::PrimitiveFlag_ReflectionOnly;
+		RebuildSceneViewStats(outView);
+		return true;
 	}
 
 	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, nri_scene::SceneView& outView)
@@ -1724,6 +1859,13 @@ CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -5102,6 +5244,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::ResetSkyPerfStats();
 	mUsedStaticMapSceneLastFrame = false;
 	mUsedDynamicSceneLastFrame = false;
+	mHasVisibleMirrorPortalLastFrame = false;
 	mUploadedStaticMapSceneLastFrame = false;
 	mBuiltStaticMapSceneASLastFrame = false;
 	mBuiltDynamicSceneASLastFrame = false;
@@ -5184,6 +5327,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::GeometryData runtimeMutationGeometry;
 	nri_scene::GeometryData runtimeSpaceLinkGeometry;
 	nri_scene::GeometryData dynamicGeometry;
+	nri_scene::GeometryData mirrorExtendedDynamicGeometry;
 	nri_scene::GeometryData mergedDynamicGeometry;
 	nri_scene::GeometryData debugSphereGeometry;
 	nri_scene::GeometryData overlayGeometry;
@@ -5192,7 +5336,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::MaterialBridgeData runtimeMutationMaterialBridge;
 	nri_scene::MaterialBridgeData runtimeSpaceLinkMaterialBridge;
 	nri_scene::MaterialBridgeData dynamicMaterialBridge;
+	nri_scene::MaterialBridgeData mirrorExtendedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData mirrorPlayerMaterialBridge;
+	nri_scene::MaterialBridgeData sceneLightMergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData mergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData debugSphereMaterialBridge;
 	nri_scene::MaterialBridgeData overlayMaterialBridge;
@@ -5208,7 +5354,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::MaterialBridgeData* sceneLightCapturedMaterials = nullptr;
 	const nri_scene::SceneView* sceneLightDynamicView = nullptr;
 	const nri_scene::MaterialBridgeData* sceneLightDynamicMaterials = nullptr;
+	nri_scene::SceneView mirrorExtendedDynamicSceneView;
 	nri_scene::SceneView mirrorPlayerSceneView;
+	nri_scene::SceneView sceneLightMergedDynamicSceneView;
 	nri_scene::SceneView mergedDynamicSceneView;
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
@@ -5257,6 +5405,19 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicCaptureMs);
 			return nri_scene::CaptureDynamicScene(di, dynamicSceneView);
 		}();
+		uint32_t visibleMirrorPortalCandidates = 0;
+		int32_t selectedVisibleMirrorWallIndex = -1;
+		HWPortal* const visibleMirrorPortal = !deferOverlayThisFrame ?
+			SelectPrimaryMirrorPortal(di, visibleMirrorPortalCandidates, selectedVisibleMirrorWallIndex) :
+			nullptr;
+		mHasVisibleMirrorPortalLastFrame = visibleMirrorPortal != nullptr;
+		const bool hasMirrorExtendedDynamicScene =
+			!deferOverlayThisFrame &&
+			CaptureMirrorExtendedDynamicScene(
+				di,
+				visibleMirrorPortal,
+				hasDynamicScene ? &dynamicSceneView : nullptr,
+				mirrorExtendedDynamicSceneView);
 		const bool hasMirrorPlayerScene =
 			!deferOverlayThisFrame &&
 			IsMirrorPlayerPreviewCaptureEnabled() &&
@@ -5287,6 +5448,46 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentDynamicMs);
 				return RebuildPersistentDynamicEmissiveCache(dynamicSceneView, dynamicMaterialBridge);
 			}();
+		}
+		if (hasMirrorExtendedDynamicScene)
+		{
+			{
+				Clocker clock(NriPTGeometryBuild);
+				nri_scene::BuildGeometry(mirrorExtendedDynamicSceneView, mirrorExtendedDynamicGeometry);
+				AssignGeometryPortalIndices(mMapWorld, mirrorExtendedDynamicGeometry);
+			}
+
+			if (!mirrorExtendedDynamicGeometry.primitives.empty())
+			{
+				Clocker clock(NriPTMaterialBuild);
+				BuildMaterialsWithActorOverrides(mirrorExtendedDynamicSceneView, mirrorExtendedDynamicMaterialBridge);
+			}
+
+			if (hasDynamicScene)
+			{
+				sceneLightMergedDynamicSceneView = dynamicSceneView;
+				sceneLightMergedDynamicSceneView.opaqueWalls.insert(
+					sceneLightMergedDynamicSceneView.opaqueWalls.end(),
+					mirrorExtendedDynamicSceneView.opaqueWalls.begin(),
+					mirrorExtendedDynamicSceneView.opaqueWalls.end());
+				sceneLightMergedDynamicSceneView.opaqueFlats.insert(
+					sceneLightMergedDynamicSceneView.opaqueFlats.end(),
+					mirrorExtendedDynamicSceneView.opaqueFlats.begin(),
+					mirrorExtendedDynamicSceneView.opaqueFlats.end());
+				sceneLightMergedDynamicSceneView.opaqueSprites.insert(
+					sceneLightMergedDynamicSceneView.opaqueSprites.end(),
+					mirrorExtendedDynamicSceneView.opaqueSprites.begin(),
+					mirrorExtendedDynamicSceneView.opaqueSprites.end());
+				RebuildSceneViewStats(sceneLightMergedDynamicSceneView);
+				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge);
+				sceneLightDynamicView = &sceneLightMergedDynamicSceneView;
+				sceneLightDynamicMaterials = &sceneLightMergedDynamicMaterialBridge;
+			}
+			else
+			{
+				sceneLightDynamicView = &mirrorExtendedDynamicSceneView;
+				sceneLightDynamicMaterials = &mirrorExtendedDynamicMaterialBridge;
+			}
 		}
 		if (hasMirrorPlayerScene)
 		{
@@ -5350,14 +5551,46 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				activeDynamicMaterials = &mPersistentDynamicEmissiveCache.materialBridge;
 			}
 
-			sceneLightDynamicView = activeDynamicSceneView;
-			sceneLightDynamicMaterials = activeDynamicMaterials;
+			if (hasMirrorExtendedDynamicScene && activeDynamicSceneView != nullptr && activeDynamicMaterials != nullptr)
+			{
+				sceneLightMergedDynamicSceneView = *activeDynamicSceneView;
+				sceneLightMergedDynamicSceneView.opaqueWalls.insert(
+					sceneLightMergedDynamicSceneView.opaqueWalls.end(),
+					mirrorExtendedDynamicSceneView.opaqueWalls.begin(),
+					mirrorExtendedDynamicSceneView.opaqueWalls.end());
+				sceneLightMergedDynamicSceneView.opaqueFlats.insert(
+					sceneLightMergedDynamicSceneView.opaqueFlats.end(),
+					mirrorExtendedDynamicSceneView.opaqueFlats.begin(),
+					mirrorExtendedDynamicSceneView.opaqueFlats.end());
+				sceneLightMergedDynamicSceneView.opaqueSprites.insert(
+					sceneLightMergedDynamicSceneView.opaqueSprites.end(),
+					mirrorExtendedDynamicSceneView.opaqueSprites.begin(),
+					mirrorExtendedDynamicSceneView.opaqueSprites.end());
+				RebuildSceneViewStats(sceneLightMergedDynamicSceneView);
+				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge);
+				sceneLightDynamicView = &sceneLightMergedDynamicSceneView;
+				sceneLightDynamicMaterials = &sceneLightMergedDynamicMaterialBridge;
+			}
+			else if (activeDynamicSceneView != nullptr && activeDynamicMaterials != nullptr)
+			{
+				sceneLightDynamicView = activeDynamicSceneView;
+				sceneLightDynamicMaterials = activeDynamicMaterials;
+			}
+			else if (hasMirrorExtendedDynamicScene)
+			{
+				sceneLightDynamicView = &mirrorExtendedDynamicSceneView;
+				sceneLightDynamicMaterials = &mirrorExtendedDynamicMaterialBridge;
+			}
 		}
 
 		const bool hasActiveDynamicOverlay =
 			activeDynamicGeometry != nullptr &&
 			!activeDynamicGeometry->primitives.empty() &&
 			activeDynamicMaterials != nullptr;
+		const bool hasMirrorExtendedDynamicOverlay =
+			hasMirrorExtendedDynamicScene &&
+			!mirrorExtendedDynamicGeometry.primitives.empty() &&
+			!mirrorExtendedDynamicMaterialBridge.materials.empty();
 		const bool hasMirrorPlayerOverlay =
 			hasMirrorPlayerScene &&
 			!mirrorPlayerGeometry.primitives.empty() &&
@@ -5368,7 +5601,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			return BuildRuntimeDebugSphereOverlay(debugSphereGeometry, debugSphereMaterialBridge);
 		}();
 
-		if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasMirrorPlayerOverlay || hasRuntimeDebugSphereOverlay)
+		if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay || hasRuntimeDebugSphereOverlay)
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.overlayAssembleMs);
 			overlayGeometry = {};
@@ -5396,6 +5629,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			{
 				AppendGeometry(*activeDynamicGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
 				AppendMaterialBridge(*activeDynamicMaterials, overlayMaterialBridge);
+			}
+
+			if (hasMirrorExtendedDynamicOverlay)
+			{
+				AppendGeometry(mirrorExtendedDynamicGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
+				AppendMaterialBridge(mirrorExtendedDynamicMaterialBridge, overlayMaterialBridge);
 			}
 
 			if (hasMirrorPlayerOverlay)
@@ -5516,7 +5755,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 			if (paletteReady && texturesReady && buffersReady && accelerationReady)
 			{
-				mUsedDynamicSceneLastFrame = hasActiveDynamicOverlay || hasMirrorPlayerOverlay;
+				mUsedDynamicSceneLastFrame = hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay;
 				mGpuSceneHasDynamicOverlay = true;
 				if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
 				{
@@ -5525,6 +5764,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					mDynamicSceneLastFrame.materialCount = (uint32_t)activeDynamicMaterials->materials.size();
 					mDynamicSceneLastFrame.modelCount = activeDynamicSceneView->stats.modelDrawItems;
 					mDynamicSceneLastFrame.unsupportedModelCount = activeDynamicSceneView->stats.unsupportedModelDrawItems;
+				}
+				if (hasMirrorExtendedDynamicScene)
+				{
+					mDynamicSceneLastFrame.mirrorExtendedSurfaceCount = CountSceneViewSurfaces(mirrorExtendedDynamicSceneView);
+					mDynamicSceneLastFrame.mirrorExtendedPrimitiveCount = (uint32_t)mirrorExtendedDynamicGeometry.primitives.size();
+					mDynamicSceneLastFrame.mirrorExtendedMaterialCount = (uint32_t)mirrorExtendedDynamicMaterialBridge.materials.size();
+					mDynamicSceneLastFrame.mirrorExtendedModelCount = mirrorExtendedDynamicSceneView.stats.modelDrawItems;
+					mDynamicSceneLastFrame.mirrorExtendedUnsupportedModelCount = mirrorExtendedDynamicSceneView.stats.unsupportedModelDrawItems;
 				}
 				if (hasMirrorPlayerScene)
 				{
@@ -5563,13 +5810,17 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					activeMaterialBridge = &mStaticMapScene.materialBridge;
 				}
 
-				activeStats = MergeSceneStats(
-					mStaticMapScene.sceneView.stats,
-					hasMirrorPlayerScene ?
-						MergeSceneStats(
-							activeDynamicSceneView != nullptr ? activeDynamicSceneView->stats : nri_scene::SceneDebugStats{},
-							mirrorPlayerSceneView.stats) :
-						(activeDynamicSceneView != nullptr ? activeDynamicSceneView->stats : nri_scene::SceneDebugStats{}));
+				nri_scene::SceneDebugStats dynamicOverlayStats =
+					activeDynamicSceneView != nullptr ? activeDynamicSceneView->stats : nri_scene::SceneDebugStats{};
+				if (hasMirrorExtendedDynamicScene)
+				{
+					dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorExtendedDynamicSceneView.stats);
+				}
+				if (hasMirrorPlayerScene)
+				{
+					dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorPlayerSceneView.stats);
+				}
+				activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
 			}
 			else
 			{
@@ -7403,18 +7654,24 @@ void NRIRenderer::PrintStaticMapSceneStatus() const
 
 void NRIRenderer::PrintDynamicSceneStatus() const
 {
-	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u mirror_player_surfaces=%u mirror_player_tris=%u mirror_player_materials=%u mirror_player_models=%u mirror_player_unsupported_models=%u dynamic_as_builds=%u last_frame_as_build=%s active_tlas_instances=%u emissive_cache=%s cache_surfaces=%u cache_tris=%u cache_materials=%u\n",
+	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u mirror_extended_surfaces=%u mirror_extended_tris=%u mirror_extended_materials=%u mirror_extended_models=%u mirror_extended_unsupported_models=%u mirror_player_surfaces=%u mirror_player_tris=%u mirror_player_materials=%u mirror_player_models=%u mirror_player_unsupported_models=%u mirror_distance=%.1f dynamic_as_builds=%u last_frame_as_build=%s active_tlas_instances=%u emissive_cache=%s cache_surfaces=%u cache_tris=%u cache_materials=%u\n",
 		mUsedDynamicSceneLastFrame ? "yes" : "no",
 		mDynamicSceneLastFrame.spriteSurfaceCount,
 		mDynamicSceneLastFrame.primitiveCount,
 		mDynamicSceneLastFrame.materialCount,
 		mDynamicSceneLastFrame.modelCount,
 		mDynamicSceneLastFrame.unsupportedModelCount,
+		mDynamicSceneLastFrame.mirrorExtendedSurfaceCount,
+		mDynamicSceneLastFrame.mirrorExtendedPrimitiveCount,
+		mDynamicSceneLastFrame.mirrorExtendedMaterialCount,
+		mDynamicSceneLastFrame.mirrorExtendedModelCount,
+		mDynamicSceneLastFrame.mirrorExtendedUnsupportedModelCount,
 		mDynamicSceneLastFrame.mirrorPlayerSurfaceCount,
 		mDynamicSceneLastFrame.mirrorPlayerPrimitiveCount,
 		mDynamicSceneLastFrame.mirrorPlayerMaterialCount,
 		mDynamicSceneLastFrame.mirrorPlayerModelCount,
 		mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount,
+		(double)nri_ptmirrordynamicdistance,
 		mDynamicSceneLastFrame.asBuildCount,
 		mBuiltDynamicSceneASLastFrame ? "yes" : "no",
 		mActiveTlasInstanceCount,
@@ -10718,6 +10975,11 @@ void NRIRenderer::BuildRuntimeLightClusterUpload(
 	};
 
 	std::vector<std::vector<uint32_t>> tileLights(tileCount);
+	const bool mirrorExtendedLightCoverage =
+		mHasVisibleMirrorPortalLastFrame &&
+		nri_ptmirrordynamicdistance > 0.0f;
+	const float mirrorExtendedLightDistanceSq =
+		mirrorExtendedLightCoverage ? nri_ptmirrordynamicdistance * nri_ptmirrordynamicdistance : 0.0f;
 	for (uint32_t lightIndex = 0; lightIndex < activeLightCount; ++lightIndex)
 	{
 		const SceneLightSystem::SceneAnalyticLight& light = activeLights[lightIndex];
@@ -10734,7 +10996,14 @@ void NRIRenderer::BuildRuntimeLightClusterUpload(
 		const float viewX = dot3(toLight, mCurrentCameraRight);
 		const float viewY = dot3(toLight, mCurrentCameraUp);
 		const float viewZ = dot3(toLight, mCurrentCameraForward);
-		if (viewZ <= -light.radius)
+		const float lightDistanceSq =
+			toLight[0] * toLight[0] +
+			toLight[1] * toLight[1] +
+			toLight[2] * toLight[2];
+		const bool forceMirrorFullscreen =
+			mirrorExtendedLightCoverage &&
+			lightDistanceSq <= mirrorExtendedLightDistanceSq;
+		if (!forceMirrorFullscreen && viewZ <= -light.radius)
 		{
 			continue;
 		}
@@ -10744,7 +11013,8 @@ void NRIRenderer::BuildRuntimeLightClusterUpload(
 		int32_t maxTileX = (int32_t)outTileCountX - 1;
 		int32_t maxTileY = (int32_t)outTileCountY - 1;
 
-		if (viewZ > light.radius &&
+		if (!forceMirrorFullscreen &&
+			viewZ > light.radius &&
 			mCurrentTanHalfFovX > 0.0f &&
 			mCurrentTanHalfFovY > 0.0f)
 		{
