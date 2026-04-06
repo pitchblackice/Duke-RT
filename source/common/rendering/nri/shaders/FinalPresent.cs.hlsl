@@ -1,44 +1,7 @@
 #include "NRI.hlsl"
+#include "Include/PresentConstants.hlsli"
 
-struct NRITraceConstants
-{
-	float3 CameraPos;
-	uint RenderWidth;
-	float3 CameraForward;
-	uint RenderHeight;
-	float3 CameraRight;
-	float TanHalfFovX;
-	float3 CameraUp;
-	float TanHalfFovY;
-	float3 PrevCameraPos;
-	uint DisplayWidth;
-	float3 PrevCameraForward;
-	uint DisplayHeight;
-	float3 PrevCameraRight;
-	float PrevTanHalfFovX;
-	float3 PrevCameraUp;
-	float PrevTanHalfFovY;
-	float3 LightDirection;
-	uint SceneInstanceCount;
-	float3 SkyColor;
-	uint DebugMode;
-	float3 GroundColor;
-	uint StaticPrimitiveCount;
-	uint FrameIndex;
-	uint DynamicPrimitiveCount;
-	uint Flags;
-	uint StaticMaterialCount;
-	uint BootstrapMode;
-	uint DynamicMaterialCount;
-	uint BounceCounts;
-	uint PortalCount;
-	uint RuntimeLightCount;
-	uint PortalDepth;
-	uint ReservedTrace0;
-	uint ReservedTrace1;
-};
-
-NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
+NRI_ROOT_CONSTANTS(NRIPresentConstants, gPresentConstants, 0, 2);
 
 Texture2D<float4> gInputTexture : register(t0, space0);
 Texture2D<float4> gUnused1 : register(t1, space0);
@@ -51,7 +14,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
 	uint2 targetSize;
 	gOutputTexture.GetDimensions(targetSize.x, targetSize.y);
-	const uint packedSceneOrigin = gTraceConstants.ReservedTrace0;
+	const uint packedSceneOrigin = gPresentConstants.PackedSceneOrigin;
 	const int2 sceneOrigin = int2((int)(packedSceneOrigin << 16) >> 16, (int)packedSceneOrigin >> 16);
 	if (dispatchThreadId.x >= targetSize.x || dispatchThreadId.y >= targetSize.y)
 	{
@@ -59,7 +22,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 
 	const uint2 targetPixelPos = dispatchThreadId.xy;
-	const uint2 outputSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
+	const uint2 outputSize = uint2(max(gPresentConstants.DisplayWidth, 1u), max(gPresentConstants.DisplayHeight, 1u));
 	const int2 pixelPos = int2(targetPixelPos) - sceneOrigin;
 	if (pixelPos.x < 0 || pixelPos.y < 0 || pixelPos.x >= (int)outputSize.x || pixelPos.y >= (int)outputSize.y)
 	{
@@ -67,10 +30,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	const uint packedInputSize = gTraceConstants.ReservedTrace1;
-	const uint2 inputSize = uint2(max(packedInputSize & 0xffffu, 1u), max(packedInputSize >> 16u, 1u));
+	const uint2 inputSize = uint2(max(gPresentConstants.InputWidth, 1u), max(gPresentConstants.InputHeight, 1u));
 	const uint2 samplePos = min((uint2(pixelPos) * inputSize) / outputSize, inputSize - 1u);
-	// Phase 0/1 HDR plumbing: output-policy constants are now available here.
+	// Phase 2A: FinalPresent now has a dedicated present-constants contract.
 	// Real SDR tonemap / HDR output mapping lands in the later display-mapping phases.
 	const float3 color = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
 	gOutputTexture[targetPixelPos] = color;

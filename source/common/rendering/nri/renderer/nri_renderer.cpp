@@ -1079,6 +1079,10 @@ namespace
 	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
 	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
 	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
+	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_INFO_AVAILABLE = 0x1u;
+	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_HDR_SUPPORTED = 0x2u;
+	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE = 0x4u;
+	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_OFFSCREEN_HDR_TARGET = 0x8u;
 	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
 	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
@@ -1088,6 +1092,33 @@ namespace
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
+
+	enum class NRIPresentRouteKind
+	{
+		BootstrapFinal,
+		ResolvedBeauty,
+		ComposedDebug,
+		PostCompositionDebug,
+		UpscalerTraceTransparentProbe,
+		UpscalerPrepassProbe,
+		UpscalerVendorProbe,
+		UpscalerVendorFinalProbe,
+		UpscalerPostSharpenProbe,
+		ValidationRaw,
+		DenoisedRaw,
+		ShadowFinal,
+		FinalDebug,
+		RawTraceDebug,
+		FallbackFinal,
+	};
+
+	struct NRIPresentRouteInfo
+	{
+		NRIPresentRouteKind kind = NRIPresentRouteKind::FallbackFinal;
+		const char* routeName = "fallback_final";
+		const char* presenterName = "Final";
+		const char* ownerName = "fallback";
+	};
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
@@ -1903,6 +1934,89 @@ namespace
 	static uint32_t GetEffectivePtDebugMode()
 	{
 		return (nri_ptdebug >= 0 && nri_ptdebug <= (int)NRI_PTDEBUG_UPSCALER_POST_SHARPEN_OUTPUT) ? (uint32_t)nri_ptdebug : 0u;
+	}
+
+	static uint32_t GetBootstrapMode();
+
+	static bool IsUpscalerPrepassProbeDebugMode(uint32_t debugMode)
+	{
+		return
+			debugMode == NRI_PTDEBUG_UPSCALER_SR_INPUT ||
+			debugMode == NRI_PTDEBUG_UPSCALER_SR_DEPTH ||
+			debugMode == NRI_PTDEBUG_UPSCALER_RR_INPUT ||
+			debugMode == NRI_PTDEBUG_UPSCALER_RR_DIFFUSE_ALBEDO ||
+			debugMode == NRI_PTDEBUG_UPSCALER_RR_SPECULAR_ALBEDO ||
+			debugMode == NRI_PTDEBUG_UPSCALER_RR_NORMAL_ROUGHNESS ||
+			debugMode == NRI_PTDEBUG_UPSCALER_RR_SPECULAR_HIT_DISTANCE;
+	}
+
+	static NRIPresentRouteInfo ResolvePresentRouteInfo(uint32_t debugMode, bool bootstrap)
+	{
+		if (bootstrap)
+		{
+			const uint32_t bootstrapMode = GetBootstrapMode();
+			if (bootstrapMode == 11u || bootstrapMode == 12u)
+			{
+				return { NRIPresentRouteKind::BootstrapFinal, "bootstrap_raw_trace", "Final", "bootstrap" };
+			}
+
+			return { NRIPresentRouteKind::FallbackFinal, "bootstrap_fallback", "Final", "bootstrap" };
+		}
+
+		if (debugMode == 0u)
+		{
+			return { NRIPresentRouteKind::ResolvedBeauty, "resolved_beauty", "FinalPresent", "beauty" };
+		}
+		if (debugMode == 15u)
+		{
+			return { NRIPresentRouteKind::ComposedDebug, "composition_probe", "FinalPresent", "debug-composition" };
+		}
+		if (debugMode == 13u || debugMode == 14u)
+		{
+			return { NRIPresentRouteKind::PostCompositionDebug, "temporal_probe", "FinalPresent", "debug-temporal" };
+		}
+		if (debugMode == NRI_PTDEBUG_UPSCALER_TRACE_TRANSPARENT)
+		{
+			return { NRIPresentRouteKind::UpscalerTraceTransparentProbe, "upscaler_trace_transparent", "RawPresent", "debug-upscaler" };
+		}
+		if (IsUpscalerPrepassProbeDebugMode(debugMode))
+		{
+			return { NRIPresentRouteKind::UpscalerPrepassProbe, "upscaler_prepass_probe", "RawPresent", "debug-upscaler" };
+		}
+		if (debugMode == NRI_PTDEBUG_UPSCALER_VENDOR_OUTPUT)
+		{
+			return { NRIPresentRouteKind::UpscalerVendorProbe, "upscaler_vendor_output", "RawPresent", "debug-upscaler" };
+		}
+		if (debugMode == NRI_PTDEBUG_UPSCALER_VENDOR_FINAL_PRESENT)
+		{
+			return { NRIPresentRouteKind::UpscalerVendorFinalProbe, "upscaler_vendor_final", "FinalPresent", "debug-upscaler" };
+		}
+		if (debugMode == NRI_PTDEBUG_UPSCALER_POST_SHARPEN_OUTPUT)
+		{
+			return { NRIPresentRouteKind::UpscalerPostSharpenProbe, "upscaler_post_sharpen", "RawPresent", "debug-upscaler" };
+		}
+		if (debugMode == 9u)
+		{
+			return { NRIPresentRouteKind::ValidationRaw, "validation_raw", "RawPresent", "debug-nrd" };
+		}
+		if (debugMode == 16u || debugMode == 17u)
+		{
+			return { NRIPresentRouteKind::DenoisedRaw, "denoised_raw", "RawPresent", "debug-nrd" };
+		}
+		if (debugMode >= 21u && debugMode <= 23u)
+		{
+			return { NRIPresentRouteKind::ShadowFinal, "shadow_debug", "Final", "debug-shadow" };
+		}
+		if ((debugMode >= 6u && debugMode <= 8u) || (debugMode >= 18u && debugMode <= 20u) || debugMode == 24u || debugMode == 25u)
+		{
+			return { NRIPresentRouteKind::FinalDebug, "final_debug", "Final", "debug-final" };
+		}
+		if ((debugMode >= 1u && debugMode <= 5u) || (debugMode >= 10u && debugMode <= 12u) || (debugMode >= 26u && debugMode <= 33u))
+		{
+			return { NRIPresentRouteKind::RawTraceDebug, "raw_trace_debug", "RawPresent", "debug-trace" };
+		}
+
+		return { NRIPresentRouteKind::FallbackFinal, "fallback_final", "Final", "fallback" };
 	}
 
 	static NRINrdDenoiserMode GetSelectedNrdDenoiserMode()
@@ -2896,7 +3010,7 @@ namespace
 		}
 	}
 
-	struct NRITraceConstants
+	struct NRITraceSceneConstants
 	{
 		float CameraPos[3] = {};
 		uint32_t RenderWidth = 0;
@@ -2934,6 +3048,34 @@ namespace
 		uint32_t ReservedTrace1 = 0;
 	};
 
+	struct NRITemporalConstants
+	{
+		uint32_t RenderWidth = 0;
+		uint32_t RenderHeight = 0;
+		uint32_t FrameIndex = 0;
+		uint32_t Flags = 0;
+	};
+
+	struct NRIPresentConstants
+	{
+		uint32_t InputWidth = 0;
+		uint32_t InputHeight = 0;
+		uint32_t DisplayWidth = 0;
+		uint32_t DisplayHeight = 0;
+		uint32_t PackedSceneOrigin = 0;
+		uint32_t FrameIndex = 0;
+		uint32_t DebugMode = 0;
+		uint32_t Flags = 0;
+		uint32_t DenoiserMode = 0;
+		uint32_t OutputMode = 0;
+		uint32_t TonemapMode = 0;
+		uint32_t OutputFlags = 0;
+		float Exposure = 1.0f;
+		float PaperWhiteNits = 200.0f;
+		float DisplayMaxLuminance = 80.0f;
+		float DisplaySdrLuminance = 80.0f;
+	};
+
 	struct NRIReprojectionData
 	{
 		float currentViewToClip[16] = {};
@@ -2942,10 +3084,28 @@ namespace
 		float previousWorldToView[16] = {};
 	};
 
-	static void ApplyOutputPolicyToConstants(const NRIPTOutputPolicy& policy, NRITraceConstants& constants)
+	static_assert(sizeof(NRITraceSceneConstants) <= 224, "NRITraceSceneConstants must stay within the validated shared root-constant budget.");
+	static_assert(sizeof(NRITemporalConstants) <= 32, "NRITemporalConstants must stay compact.");
+	static_assert(sizeof(NRIPresentConstants) <= 64, "NRIPresentConstants must stay compact.");
+
+	static uint32_t PackPresentSceneOrigin(int sceneLeft, int sceneTop)
 	{
-		(void)policy;
-		(void)constants;
+		return (uint16_t)(int16_t)sceneLeft | ((uint32_t)(uint16_t)(int16_t)sceneTop << 16);
+	}
+
+	static void ApplyOutputPolicyToPresentConstants(const NRIPTOutputPolicy& policy, NRIPresentConstants& constants)
+	{
+		constants.OutputMode = (uint32_t)policy.resolvedMode;
+		constants.TonemapMode = (uint32_t)policy.tonemapMode;
+		constants.OutputFlags =
+			(policy.displayInfoAvailable ? NRI_PRESENT_OUTPUT_FLAG_DISPLAY_INFO_AVAILABLE : 0u) |
+			(policy.displayHdrSupported ? NRI_PRESENT_OUTPUT_FLAG_DISPLAY_HDR_SUPPORTED : 0u) |
+			(policy.hdrSwapChainActive ? NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE : 0u) |
+			(policy.offscreenHdrTarget ? NRI_PRESENT_OUTPUT_FLAG_OFFSCREEN_HDR_TARGET : 0u);
+		constants.Exposure = policy.exposure;
+		constants.PaperWhiteNits = policy.paperWhiteNits;
+		constants.DisplayMaxLuminance = policy.displayMaxLuminance;
+		constants.DisplaySdrLuminance = policy.displaySdrLuminance;
 	}
 
 	static bool IsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
@@ -2994,7 +3154,7 @@ namespace
 		v[2] /= length;
 	}
 
-	static void ApplyDirectionalLightStateToConstants(const NRIDirectionalLightState& state, NRITraceConstants& constants)
+	static void ApplyDirectionalLightStateToConstants(const NRIDirectionalLightState& state, NRITraceSceneConstants& constants)
 	{
 		constants.LightDirection[0] = state.direction[0];
 		constants.LightDirection[1] = state.direction[1];
@@ -3582,7 +3742,7 @@ bool NRIRenderer::Initialize()
 		return true;
 	}
 
-	return CreatePipelineLayout() && CreateTaaPipelineLayout() && AllocateDescriptorSets() && UpdateSamplerSet() && CreatePipelines();
+	return CreatePipelineLayout() && CreateTaaPipelineLayout() && CreatePresentPipelineLayout() && AllocateDescriptorSets() && UpdateSamplerSet() && CreatePipelines();
 }
 
 void NRIRenderer::Shutdown()
@@ -3634,6 +3794,11 @@ void NRIRenderer::Shutdown()
 	{
 		mFrameBuffer->mCore.DestroyPipelineLayout(mTaaPipelineLayout);
 		mTaaPipelineLayout = nullptr;
+	}
+	if (mPresentPipelineLayout != nullptr)
+	{
+		mFrameBuffer->mCore.DestroyPipelineLayout(mPresentPipelineLayout);
+		mPresentPipelineLayout = nullptr;
 	}
 
 	mSamplerSet = nullptr;
@@ -5668,6 +5833,7 @@ void NRIRenderer::PrintStatus() const
 	const NRITextureResource& postSharpenOutput = GetFrameTexture(FrameTextureSlot::PostSharpenOutput);
 	const auto& frameGenPolicy = mFrameBuffer->mFrameGeneration.GetPolicy();
 	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
+	const NRIPresentRouteInfo presentRoute = ResolvePresentRouteInfo(GetEffectivePtDebugMode(), !!nri_ptbootstrap);
 	const bool hasFrameGenDesc = mFrameBuffer->mFrameGeneration.HasFrameDesc();
 	const auto& frameGenDesc = mFrameBuffer->mFrameGeneration.GetFrameDesc();
 	const auto& frameGenAudit = mFrameBuffer->mFrameGeneration.GetInputAudit();
@@ -5700,6 +5866,14 @@ void NRIRenderer::PrintStatus() const
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,
 		outputPolicy.displayMaxLuminance);
+	Printf("NRI PT routing: debug=%u route=%s presenter=%s owner=%s root_bytes=scene:%u temporal:%u present:%u\n",
+		GetEffectivePtDebugMode(),
+		presentRoute.routeName,
+		presentRoute.presenterName,
+		presentRoute.ownerName,
+		(unsigned)sizeof(NRITraceSceneConstants),
+		(unsigned)sizeof(NRITemporalConstants),
+		(unsigned)sizeof(NRIPresentConstants));
 	Printf("NRI PT features: bootstrap=%s denoise=%s validation=%s api_validation=%s dred=%s main_upscaler=%s->%s post_sharpen=%s->%s requested_mode=%s resolved_mode=%s requested_render_scale=%.3f resolved_render_scale=%.3f sharpness=%.3f\n",
 		nri_ptbootstrap ? "on" : "off",
 		nri_denoise ? "on" : "off",
@@ -8410,7 +8584,8 @@ const char* NRIRenderer::GetAvailabilityReason() const
 		return "required ray tracing capability is unavailable on this device/API";
 	}
 
-	if (deviceDesc.pipelineLayout.rootConstantMaxSize < sizeof(NRITraceConstants) ||
+	const size_t requiredRootConstantSize = std::max({ sizeof(NRITraceSceneConstants), sizeof(NRITemporalConstants), sizeof(NRIPresentConstants) });
+	if (deviceDesc.pipelineLayout.rootConstantMaxSize < requiredRootConstantSize ||
 		deviceDesc.pipelineLayout.rootDescriptorMaxNum < 1 ||
 		deviceDesc.pipelineLayout.descriptorSetMaxNum < 5)
 	{
@@ -8434,8 +8609,9 @@ bool NRIRenderer::CheckPathTracingSupport()
 	}
 
 	const nri::DeviceDesc& deviceDesc = mFrameBuffer->mCore.GetDeviceDesc(*mFrameBuffer->mDevice);
+	const size_t requiredRootConstantSize = std::max({ sizeof(NRITraceSceneConstants), sizeof(NRITemporalConstants), sizeof(NRIPresentConstants) });
 	if (deviceDesc.tiers.rayTracing == 0 ||
-		deviceDesc.pipelineLayout.rootConstantMaxSize < sizeof(NRITraceConstants) ||
+		deviceDesc.pipelineLayout.rootConstantMaxSize < requiredRootConstantSize ||
 		deviceDesc.pipelineLayout.rootDescriptorMaxNum < 1 ||
 		deviceDesc.pipelineLayout.descriptorSetMaxNum < 5)
 	{
@@ -8623,7 +8799,7 @@ bool NRIRenderer::CreatePipelineLayout()
 
 	nri::RootConstantDesc rootConstant = {};
 	rootConstant.registerIndex = 0;
-	rootConstant.size = sizeof(NRITraceConstants);
+	rootConstant.size = sizeof(NRITraceSceneConstants);
 	rootConstant.shaderStages = NRIComputeStage();
 
 	nri::RootDescriptorDesc rootDescriptors[1] = {};
@@ -8672,7 +8848,7 @@ bool NRIRenderer::CreateTaaPipelineLayout()
 
 	nri::RootConstantDesc rootConstant = {};
 	rootConstant.registerIndex = 0;
-	rootConstant.size = sizeof(NRITraceConstants);
+	rootConstant.size = sizeof(NRITemporalConstants);
 	rootConstant.shaderStages = NRIComputeStage();
 
 	nri::PipelineLayoutDesc desc = {};
@@ -8684,6 +8860,48 @@ bool NRIRenderer::CreateTaaPipelineLayout()
 	desc.shaderStages = NRIComputeStage();
 
 	return mFrameBuffer->mCore.CreatePipelineLayout(*mFrameBuffer->mDevice, desc, mTaaPipelineLayout) == nri::Result::SUCCESS;
+}
+
+bool NRIRenderer::CreatePresentPipelineLayout()
+{
+	nri::DescriptorRangeDesc inputRange = {};
+	inputRange.baseRegisterIndex = 0;
+	inputRange.descriptorNum = 3;
+	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
+	inputRange.shaderStages = NRIComputeStage();
+	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorRangeDesc outputRange = {};
+	outputRange.baseRegisterIndex = 0;
+	outputRange.descriptorNum = 1;
+	outputRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
+	outputRange.shaderStages = NRIComputeStage();
+	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorSetDesc descriptorSets[2] = {};
+	descriptorSets[0].registerSpace = 0;
+	descriptorSets[0].ranges = &inputRange;
+	descriptorSets[0].rangeNum = 1;
+	descriptorSets[0].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+	descriptorSets[1].registerSpace = 1;
+	descriptorSets[1].ranges = &outputRange;
+	descriptorSets[1].rangeNum = 1;
+	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::RootConstantDesc rootConstant = {};
+	rootConstant.registerIndex = 0;
+	rootConstant.size = sizeof(NRIPresentConstants);
+	rootConstant.shaderStages = NRIComputeStage();
+
+	nri::PipelineLayoutDesc desc = {};
+	desc.rootRegisterSpace = 2;
+	desc.rootConstants = &rootConstant;
+	desc.rootConstantNum = 1;
+	desc.descriptorSets = descriptorSets;
+	desc.descriptorSetNum = (uint32_t)std::size(descriptorSets);
+	desc.shaderStages = NRIComputeStage();
+
+	return mFrameBuffer->mCore.CreatePipelineLayout(*mFrameBuffer->mDevice, desc, mPresentPipelineLayout) == nri::Result::SUCCESS;
 }
 
 bool NRIRenderer::CreatePipelines()
@@ -8727,8 +8945,8 @@ bool NRIRenderer::CreatePipelines()
 		createPipeline(composition.GetChars(), PipelineSlot::Composition, mPipelineLayout) &&
 		createPipeline(traceTransparent.GetChars(), PipelineSlot::TraceTransparent, mPipelineLayout) &&
 		createPipeline(taa.GetChars(), PipelineSlot::Taa, mTaaPipelineLayout) &&
-		createPipeline(rawPresent.GetChars(), PipelineSlot::RawPresent, mTaaPipelineLayout) &&
-		createPipeline(finalPresent.GetChars(), PipelineSlot::FinalPresent, mTaaPipelineLayout) &&
+		createPipeline(rawPresent.GetChars(), PipelineSlot::RawPresent, mPresentPipelineLayout) &&
+		createPipeline(finalPresent.GetChars(), PipelineSlot::FinalPresent, mPresentPipelineLayout) &&
 		createPipeline(dlssSrBefore.GetChars(), PipelineSlot::DlssSrBefore, mPipelineLayout) &&
 		createPipeline(dlssBefore.GetChars(), PipelineSlot::DlssBefore, mPipelineLayout) &&
 		createPipeline(dlssAfter.GetChars(), PipelineSlot::DlssAfter, mPipelineLayout) &&
@@ -8749,10 +8967,10 @@ bool NRIRenderer::AllocateDescriptorSets()
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &mUpscalerPrepassOutputSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mTaaFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 1, &mTaaOutputSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mRawPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 1, &mRawPresentOutputSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mFinalPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 1, &mFinalPresentOutputSet, 1, 0) == nri::Result::SUCCESS;
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPresentPipelineLayout, 0, &mRawPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPresentPipelineLayout, 1, &mRawPresentOutputSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPresentPipelineLayout, 0, &mFinalPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
+		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPresentPipelineLayout, 1, &mFinalPresentOutputSet, 1, 0) == nri::Result::SUCCESS;
 }
 
 bool NRIRenderer::UpdateSamplerSet()
@@ -10052,7 +10270,7 @@ bool NRIRenderer::DispatchBootstrapView()
 	}
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
-	NRITraceConstants constants = {};
+	NRITraceSceneConstants constants = {};
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
@@ -12393,35 +12611,33 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	static bool sLoggedRawTraceBypass = false;
 	static bool sLoggedPhaseHRrInputPath = false;
 	const int ptDebugMode = (int)GetEffectivePtDebugMode();
-	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
-	const bool bootstrapRawTracePresent = nri_ptbootstrap && (bootstrapMode == 11u || bootstrapMode == 12u);
-	const bool useResolvedPresent = !nri_ptbootstrap && ptDebugMode == 0;
-	const bool useComposedDebugPresent = !nri_ptbootstrap && ptDebugMode == 15;
-	const bool usePostCompositionDebugPresent = !nri_ptbootstrap && (ptDebugMode == 13 || ptDebugMode == 14);
-	const bool useUpscalerTraceTransparentProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_TRACE_TRANSPARENT;
+	const NRIPresentRouteInfo presentRoute = ResolvePresentRouteInfo((uint32_t)ptDebugMode, !!nri_ptbootstrap);
+	const bool bootstrapRawTracePresent = presentRoute.kind == NRIPresentRouteKind::BootstrapFinal;
+	const bool useResolvedPresent = presentRoute.kind == NRIPresentRouteKind::ResolvedBeauty;
+	const bool useComposedDebugPresent = presentRoute.kind == NRIPresentRouteKind::ComposedDebug;
+	const bool usePostCompositionDebugPresent = presentRoute.kind == NRIPresentRouteKind::PostCompositionDebug;
+	const bool useUpscalerTraceTransparentProbe = presentRoute.kind == NRIPresentRouteKind::UpscalerTraceTransparentProbe;
 	const bool useUpscalerSrInputProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_INPUT;
 	const bool useUpscalerSrDepthProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_SR_DEPTH;
-	const bool useUpscalerVendorProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_VENDOR_OUTPUT;
-	const bool useUpscalerVendorFinalProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_VENDOR_FINAL_PRESENT;
+	const bool useUpscalerVendorProbe = presentRoute.kind == NRIPresentRouteKind::UpscalerVendorProbe;
+	const bool useUpscalerVendorFinalProbe = presentRoute.kind == NRIPresentRouteKind::UpscalerVendorFinalProbe;
 	const bool useUpscalerRrInputProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_INPUT;
 	const bool useUpscalerRrDiffuseAlbedoProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_DIFFUSE_ALBEDO;
 	const bool useUpscalerRrSpecularAlbedoProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_SPECULAR_ALBEDO;
 	const bool useUpscalerRrNormalRoughnessProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_NORMAL_ROUGHNESS;
 	const bool useUpscalerRrSpecularHitDistanceProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_RR_SPECULAR_HIT_DISTANCE;
-	const bool useUpscalerPostSharpenProbe = !nri_ptbootstrap && ptDebugMode == (int)NRI_PTDEBUG_UPSCALER_POST_SHARPEN_OUTPUT;
+	const bool useUpscalerPostSharpenProbe = presentRoute.kind == NRIPresentRouteKind::UpscalerPostSharpenProbe;
 	const bool useUpscalerPrepassProbe = useUpscalerSrInputProbe || useUpscalerSrDepthProbe || useUpscalerRrInputProbe ||
 		useUpscalerRrDiffuseAlbedoProbe || useUpscalerRrSpecularAlbedoProbe || useUpscalerRrNormalRoughnessProbe ||
 		useUpscalerRrSpecularHitDistanceProbe;
 	const bool useCompositionPath = useResolvedPresent || useComposedDebugPresent || usePostCompositionDebugPresent ||
 		useUpscalerTraceTransparentProbe || useUpscalerPrepassProbe || useUpscalerVendorProbe || useUpscalerVendorFinalProbe ||
 		useUpscalerPostSharpenProbe;
-	const bool useValidationPresent = !nri_ptbootstrap && ptDebugMode == 9;
-	const bool useDenoisedDebugPresent = !nri_ptbootstrap && (ptDebugMode == 16 || ptDebugMode == 17);
-	const bool useShadowDebugPresent = !nri_ptbootstrap && (ptDebugMode >= 21 && ptDebugMode <= 23);
-	const bool useFinalDebugPresent = !nri_ptbootstrap &&
-		((ptDebugMode >= 6 && ptDebugMode <= 8) || (ptDebugMode >= 18 && ptDebugMode <= 20) || useShadowDebugPresent || ptDebugMode == 24 || ptDebugMode == 25);
-	const bool rawTraceDirectPresent = !nri_ptbootstrap &&
-		((ptDebugMode >= 1 && ptDebugMode <= 5) || (ptDebugMode >= 10 && ptDebugMode <= 12) || (ptDebugMode >= 26 && ptDebugMode <= 33));
+	const bool useValidationPresent = presentRoute.kind == NRIPresentRouteKind::ValidationRaw;
+	const bool useDenoisedDebugPresent = presentRoute.kind == NRIPresentRouteKind::DenoisedRaw;
+	const bool useShadowDebugPresent = presentRoute.kind == NRIPresentRouteKind::ShadowFinal;
+	const bool useFinalDebugPresent = presentRoute.kind == NRIPresentRouteKind::FinalDebug || useShadowDebugPresent;
+	const bool rawTraceDirectPresent = presentRoute.kind == NRIPresentRouteKind::RawTraceDebug;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
@@ -12829,7 +13045,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		return false;
 	}
 
-	NRITraceConstants constants = {};
+	NRITraceSceneConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
 	const bool useTemporalJitter = !nri_ptbootstrap && ShouldUseTemporalJitter(ResolveMainUpscalerKind(false));
@@ -12991,7 +13207,7 @@ bool NRIRenderer::DispatchComposition(FrameTextureSlot outputSlot)
 {
 	Clocker clock(NriPTComposition);
 
-	NRITraceConstants constants = {};
+	NRITraceSceneConstants constants = {};
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
@@ -13164,7 +13380,7 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 		return false;
 	}
 
-	NRITraceConstants constants = {};
+	NRITraceSceneConstants constants = {};
 	constants.RenderWidth = mRenderWidth;
 	constants.RenderHeight = mRenderHeight;
 	constants.DisplayWidth = mOutputWidth;
@@ -13193,18 +13409,18 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 {
 	Clocker clock(NriPTRawPresent);
 
-	NRITraceConstants constants = {};
-	ApplyOutputPolicyToConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
+	NRIPresentConstants constants = {};
+	ApplyOutputPolicyToPresentConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
 	constants.DisplayWidth = mOutputWidth;
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
 	constants.DebugMode = GetEffectivePtDebugMode();
-	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
-	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
+	constants.PackedSceneOrigin = PackPresentSceneOrigin(mSceneLeft, mSceneTop);
+	constants.DenoiserMode = (uint32_t)GetSelectedNrdDenoiserMode();
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
-	constants.RenderWidth = input.width;
-	constants.RenderHeight = input.height;
+	constants.InputWidth = input.width;
+	constants.InputHeight = input.height;
 	const bool addSecondary = secondarySlot != FrameTextureSlot::Count;
 	NRITextureResource& secondary = GetFrameTexture(addSecondary ? secondarySlot : inputSlot);
 	const bool hasTertiary = tertiarySlot != FrameTextureSlot::Count;
@@ -13240,7 +13456,7 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 	outputUpdate.descriptorNum = (uint32_t)std::size(outputs);
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&outputUpdate, 1);
 
-	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mTaaPipelineLayout);
+	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPresentPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mRawPresentFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mRawPresentOutputSet, nri::BindPoint::COMPUTE });
@@ -13253,19 +13469,18 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 {
 	Clocker clock(NriPTFinalPresent);
 
-	NRITraceConstants constants = {};
-	ApplyOutputPolicyToConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
-	constants.RenderWidth = mRenderWidth;
-	constants.RenderHeight = mRenderHeight;
+	NRIPresentConstants constants = {};
+	ApplyOutputPolicyToPresentConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
 	constants.DisplayWidth = mOutputWidth;
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
 	constants.DebugMode = GetEffectivePtDebugMode();
-	constants.ReservedTrace0 = (uint16_t)(int16_t)mSceneLeft | ((uint32_t)(uint16_t)(int16_t)mSceneTop << 16);
+	constants.PackedSceneOrigin = PackPresentSceneOrigin(mSceneLeft, mSceneTop);
 
 	NRITextureResource& input = GetFrameTexture(inputSlot);
 	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
-	constants.ReservedTrace1 = PackUInt16Pair(input.width, input.height);
+	constants.InputWidth = input.width;
+	constants.InputHeight = input.height;
 
 	mFrameBuffer->TransitionTexture(input, NRIComputeShaderResourceState());
 	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
@@ -13290,7 +13505,7 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 	outputUpdate.descriptorNum = (uint32_t)std::size(outputs);
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&outputUpdate, 1);
 
-	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mTaaPipelineLayout);
+	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPresentPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mFinalPresentFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mFinalPresentOutputSet, nri::BindPoint::COMPUTE });
@@ -13316,13 +13531,10 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 	if (runAppTaa)
 	{
-		NRITraceConstants constants = {};
+		NRITemporalConstants constants = {};
 		constants.RenderWidth = mRenderWidth;
 		constants.RenderHeight = mRenderHeight;
-		constants.DisplayWidth = mOutputWidth;
-		constants.DisplayHeight = mOutputHeight;
 		constants.FrameIndex = mFrameIndex;
-		constants.DebugMode = GetEffectivePtDebugMode();
 		constants.Flags =
 			(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 			(runAppTaa ? NRI_FLAG_USE_JITTER : 0u);
@@ -13482,8 +13694,7 @@ bool NRIRenderer::DispatchFinal()
 {
 	Clocker clock(NriPTFinal);
 
-	NRITraceConstants constants = {};
-	ApplyOutputPolicyToConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
+	NRITraceSceneConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool presentRawTrace = (!nri_ptbootstrap && !mUseUpscaledInFinal) || bootstrapMode >= 13u;
 	Copy3(mCurrentCameraPos, constants.CameraPos);

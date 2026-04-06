@@ -582,6 +582,7 @@ private:
 
 	bool CreatePipelineLayout();
 	bool CreateTaaPipelineLayout();
+	bool CreatePresentPipelineLayout();
 	bool CreatePipelines();
 	bool AllocateDescriptorSets();
 	bool EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
@@ -754,6 +755,7 @@ private:
 	NRIRenderDevice* mFrameBuffer = nullptr;
 	nri::PipelineLayout* mPipelineLayout = nullptr;
 	nri::PipelineLayout* mTaaPipelineLayout = nullptr;
+	nri::PipelineLayout* mPresentPipelineLayout = nullptr;
 	std::array<nri::Pipeline*, (size_t)PipelineSlot::Count> mPipelines = {};
 	nri::DescriptorSet* mSamplerSet = nullptr;
 	nri::DescriptorSet* mSceneTextureSet = nullptr;

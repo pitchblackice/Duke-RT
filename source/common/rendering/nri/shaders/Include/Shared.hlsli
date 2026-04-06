@@ -3,6 +3,7 @@
 
 #include "NRI.hlsl"
 #include "NRD.hlsli"
+#include "TraceConstants.hlsli"
 
 #define SET_SAMPLERS 0
 #define SET_SCENE_TEXTURES 1
@@ -31,44 +32,6 @@
 
 #define MATERIAL_LIGHTING_FLAG_NO_SHADOW_RECEIVE 32
 #define MATERIAL_LIGHTING_FLAG_NO_SHADOW_CAST 64
-
-struct NRITraceConstants
-{
-	float3 CameraPos;
-	uint RenderWidth;
-	float3 CameraForward;
-	uint RenderHeight;
-	float3 CameraRight;
-	float TanHalfFovX;
-	float3 CameraUp;
-	float TanHalfFovY;
-	float3 PrevCameraPos;
-	uint DisplayWidth;
-	float3 PrevCameraForward;
-	uint DisplayHeight;
-	float3 PrevCameraRight;
-	float PrevTanHalfFovX;
-	float3 PrevCameraUp;
-	float PrevTanHalfFovY;
-	float3 LightDirection;
-	uint SceneInstanceCount;
-	float3 SkyColor;
-	uint DebugMode;
-	float3 GroundColor;
-	uint StaticPrimitiveCount;
-	uint FrameIndex;
-	uint DynamicPrimitiveCount;
-	uint Flags;
-	uint StaticMaterialCount;
-	uint BootstrapMode;
-	uint DynamicMaterialCount;
-	uint BounceCounts;
-	uint PortalCount;
-	uint RuntimeLightCount;
-	uint PortalDepth;
-	uint ReservedTrace0;
-	uint ReservedTrace1;
-};
 
 struct SceneVertex
 {
@@ -196,7 +159,7 @@ struct ReprojectionData
 	float4 previousWorldToViewMatrix[4];
 };
 
-NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, SET_ROOT);
+NRI_ROOT_CONSTANTS(NRITraceSceneConstants, gTraceConstants, 0, SET_ROOT);
 
 float3 GetDirectionalPlaceholderColor()
 {

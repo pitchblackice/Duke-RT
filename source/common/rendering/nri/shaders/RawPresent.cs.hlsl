@@ -1,47 +1,8 @@
 #include "NRI.hlsl"
 #include "NRD.hlsli"
+#include "Include/PresentConstants.hlsli"
 
-struct NRITraceConstants
-{
-	float3 CameraPos;
-	uint RenderWidth;
-	float3 CameraForward;
-	uint RenderHeight;
-	float3 CameraRight;
-	float TanHalfFovX;
-	float3 CameraUp;
-	float TanHalfFovY;
-	float3 PrevCameraPos;
-	uint DisplayWidth;
-	float3 PrevCameraForward;
-	uint DisplayHeight;
-	float3 PrevCameraRight;
-	float PrevTanHalfFovX;
-	float3 PrevCameraUp;
-	float PrevTanHalfFovY;
-	float3 LightDirection;
-	uint SceneInstanceCount;
-	float3 SkyColor;
-	uint DebugMode;
-	float3 GroundColor;
-	uint StaticPrimitiveCount;
-	uint FrameIndex;
-	uint DynamicPrimitiveCount;
-	uint Flags;
-	uint StaticMaterialCount;
-	uint BootstrapMode;
-	uint DynamicMaterialCount;
-	uint BounceCounts;
-	uint PortalCount;
-	uint RuntimeLightCount;
-	uint PortalDepth;
-	uint ReservedTrace0;
-	uint ReservedTrace1;
-};
-
-NRI_ROOT_CONSTANTS(NRITraceConstants, gTraceConstants, 0, 2);
-
-static const uint NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
+NRI_ROOT_CONSTANTS(NRIPresentConstants, gPresentConstants, 0, 2);
 
 Texture2D<float4> gInputTexture : register(t0, space0);
 Texture2D<float4> gUnused1 : register(t1, space0);
@@ -86,7 +47,7 @@ float3 VisualizeHdrProbe(float3 value)
 
 bool UseRelaxDenoiser()
 {
-	return (gTraceConstants.ReservedTrace1 & 0xffu) == 1u;
+	return gPresentConstants.DenoiserMode == 1u;
 }
 
 float3 UnpackDebugRadiance(float4 packed)
@@ -101,7 +62,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
 	uint2 targetSize;
 	gOutputTexture.GetDimensions(targetSize.x, targetSize.y);
-	const uint packedSceneOrigin = gTraceConstants.ReservedTrace0;
+	const uint packedSceneOrigin = gPresentConstants.PackedSceneOrigin;
 	const int2 sceneOrigin = int2((int)(packedSceneOrigin << 16) >> 16, (int)packedSceneOrigin >> 16);
 	if (dispatchThreadId.x >= targetSize.x || dispatchThreadId.y >= targetSize.y)
 	{
@@ -109,7 +70,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 
 	const uint2 targetPixelPos = dispatchThreadId.xy;
-	const uint2 outputSize = uint2(max(gTraceConstants.DisplayWidth, 1u), max(gTraceConstants.DisplayHeight, 1u));
+	const uint2 outputSize = uint2(max(gPresentConstants.DisplayWidth, 1u), max(gPresentConstants.DisplayHeight, 1u));
 	const int2 pixelPos = int2(targetPixelPos) - sceneOrigin;
 	if (pixelPos.x < 0 || pixelPos.y < 0 || pixelPos.x >= (int)outputSize.x || pixelPos.y >= (int)outputSize.y)
 	{
@@ -117,19 +78,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	const uint2 inputSize = uint2(max(gTraceConstants.RenderWidth, 1u), max(gTraceConstants.RenderHeight, 1u));
+	const uint2 inputSize = uint2(max(gPresentConstants.InputWidth, 1u), max(gPresentConstants.InputHeight, 1u));
 	const uint2 samplePos = min((uint2(pixelPos) * inputSize) / outputSize, inputSize - 1u);
 	float3 color = gInputTexture.Load(int3(samplePos, 0)).rgb;
-	if ((gTraceConstants.Flags & NRI_FLAG_RAW_PRESENT_ADD_SECONDARY) != 0u)
+	if ((gPresentConstants.Flags & NRI_PRESENT_FLAG_ADD_SECONDARY) != 0u)
 	{
 		color += gUnused1.Load(int3(samplePos, 0)).rgb;
 	}
-	if (gTraceConstants.DebugMode == 10u || gTraceConstants.DebugMode == 11u || gTraceConstants.DebugMode == 16u || gTraceConstants.DebugMode == 17u)
+	if (gPresentConstants.DebugMode == 10u || gPresentConstants.DebugMode == 11u || gPresentConstants.DebugMode == 16u || gPresentConstants.DebugMode == 17u)
 	{
 		color = ToneMapDebugRadiance(UnpackDebugRadiance(gInputTexture.Load(int3(samplePos, 0))));
 	}
 	else
-	if (gTraceConstants.DebugMode == 12u)
+	if (gPresentConstants.DebugMode == 12u)
 	{
 		const float viewZ = abs(gUnused1.Load(int3(samplePos, 0)).x);
 		if (viewZ >= NRD_INF * 0.5)
@@ -153,12 +114,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 	else
-	if (gTraceConstants.DebugMode == 34u || gTraceConstants.DebugMode == 35u || gTraceConstants.DebugMode == 37u || gTraceConstants.DebugMode == 38u || gTraceConstants.DebugMode == 39u || gTraceConstants.DebugMode == 44u)
+	if (gPresentConstants.DebugMode == 34u || gPresentConstants.DebugMode == 35u || gPresentConstants.DebugMode == 37u || gPresentConstants.DebugMode == 38u || gPresentConstants.DebugMode == 39u || gPresentConstants.DebugMode == 44u)
 	{
 		color = VisualizeHdrProbe(gInputTexture.Load(int3(samplePos, 0)).rgb);
 	}
 	else
-	if (gTraceConstants.DebugMode == 36u)
+	if (gPresentConstants.DebugMode == 36u)
 	{
 		const float depth = gInputTexture.Load(int3(samplePos, 0)).x;
 		if (isnan(depth) || isinf(depth))
@@ -175,13 +136,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 	else
-	if (gTraceConstants.DebugMode == 40u)
+	if (gPresentConstants.DebugMode == 40u)
 	{
 		const float3 guide = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
 		color = sqrt(guide);
 	}
 	else
-	if (gTraceConstants.DebugMode == 41u)
+	if (gPresentConstants.DebugMode == 41u)
 	{
 		const float3 guide = max(gInputTexture.Load(int3(samplePos, 0)).rgb, 0.0);
 		if (AnyNonFinite(guide))
@@ -208,7 +169,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 	else
-	if (gTraceConstants.DebugMode == 42u)
+	if (gPresentConstants.DebugMode == 42u)
 	{
 		const float4 packed = gInputTexture.Load(int3(samplePos, 0));
 		const float3 normalVis = saturate(packed.xyz * 0.5 + 0.5);
@@ -216,7 +177,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		color = lerp(normalVis, roughness.xxx, 0.35);
 	}
 	else
-	if (gTraceConstants.DebugMode == 43u)
+	if (gPresentConstants.DebugMode == 43u)
 	{
 		const float hitDistance = gInputTexture.Load(int3(samplePos, 0)).x;
 		if (NonFinite1(hitDistance))
