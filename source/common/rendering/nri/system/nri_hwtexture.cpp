@@ -216,7 +216,7 @@ void NRIHardwareTexture::EnsureTexture(FTexture* tex, int translation, int flags
 	mContentId = hasMetadataSignature ? signature.key : texBuffer.mContentId;
 }
 
-void NRIHardwareTexture::EnsureCanvas(FTexture* tex)
+void NRIHardwareTexture::EnsureCanvas(FTexture* tex, nri::Format format)
 {
 	if (tex == nullptr)
 	{
@@ -233,12 +233,13 @@ void NRIHardwareTexture::EnsureCanvas(FTexture* tex)
 	if (mResource.texture != nullptr &&
 		mResource.width == width &&
 		mResource.height == height &&
+		mResource.format == format &&
 		mResource.colorAttachmentView != nullptr)
 	{
 		return;
 	}
 
-	CreateTextureResource(width, height, nri::Format::BGRA8_UNORM, nri::TextureUsageBits::SHADER_RESOURCE | nri::TextureUsageBits::COLOR_ATTACHMENT);
+	CreateTextureResource(width, height, format, nri::TextureUsageBits::SHADER_RESOURCE | nri::TextureUsageBits::COLOR_ATTACHMENT);
 	mContentId = 0;
 }
 

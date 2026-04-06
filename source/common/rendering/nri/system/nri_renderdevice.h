@@ -245,7 +245,7 @@ private:
 	uint32_t GetFrameGenerationSceneBlendPrefixCount() const;
 	bool EnsureFrameGenerationUiTexture(uint32_t width, uint32_t height);
 	NRITextureResource* GetFrameGenerationUiTargetResource() const;
-	bool EnsureViewSnapshotTexture(uint32_t width, uint32_t height);
+	bool EnsureViewSnapshotTexture(uint32_t width, uint32_t height, nri::Format format);
 	NRITextureResource* GetViewSnapshotTargetResource() const;
 	void ClearTargetColor(NRITextureResource& target, float red, float green, float blue, float alpha);
 	void BeginFrameGenerationUiTarget();

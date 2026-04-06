@@ -2217,7 +2217,7 @@ NRITextureResource* NRIRenderDevice::GetFrameGenerationUiTargetResource() const
 	return &hwTex->GetResource();
 }
 
-bool NRIRenderDevice::EnsureViewSnapshotTexture(uint32_t width, uint32_t height)
+bool NRIRenderDevice::EnsureViewSnapshotTexture(uint32_t width, uint32_t height, nri::Format format)
 {
 	if (width == 0 || height == 0)
 	{
@@ -2235,7 +2235,15 @@ bool NRIRenderDevice::EnsureViewSnapshotTexture(uint32_t width, uint32_t height)
 		return false;
 	}
 
-	if (wrapper->GetWidth() != (int)width || wrapper->GetHeight() != (int)height)
+	auto* hwTex = static_cast<NRIHardwareTexture*>(wrapper->GetSystemTexture());
+	if (hwTex == nullptr)
+	{
+		return false;
+	}
+
+	if (wrapper->GetWidth() != (int)width ||
+		wrapper->GetHeight() != (int)height ||
+		(hwTex->GetResource().texture != nullptr && hwTex->GetResource().format != format))
 	{
 		delete mViewSnapshotTexture;
 		mViewSnapshotTexture = MakeGameTexture(new FWrapperTexture((int)width, (int)height, 1), nullptr, ETextureType::SWCanvas);
@@ -2244,15 +2252,14 @@ bool NRIRenderDevice::EnsureViewSnapshotTexture(uint32_t width, uint32_t height)
 		{
 			return false;
 		}
+		hwTex = static_cast<NRIHardwareTexture*>(wrapper->GetSystemTexture());
+		if (hwTex == nullptr)
+		{
+			return false;
+		}
 	}
 
-	auto* hwTex = static_cast<NRIHardwareTexture*>(wrapper->GetSystemTexture());
-	if (hwTex == nullptr)
-	{
-		return false;
-	}
-
-	hwTex->EnsureCanvas(wrapper);
+	hwTex->EnsureCanvas(wrapper, format);
 	return hwTex->GetResource().texture != nullptr && hwTex->GetResource().colorAttachmentView != nullptr;
 }
 
@@ -5477,7 +5484,7 @@ bool NRIRenderDevice::SnapshotTextureToCanvas(FCanvasTexture* tex, NRITextureRes
 	}
 	canvasHwTex->EnsureCanvas(tex);
 
-	if (!EnsureViewSnapshotTexture(source.width, source.height))
+	if (!EnsureViewSnapshotTexture(source.width, source.height, source.format))
 	{
 		return false;
 	}

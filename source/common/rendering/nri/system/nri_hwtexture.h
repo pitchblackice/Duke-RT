@@ -19,7 +19,7 @@ public:
 	unsigned int CreateTexture(unsigned char* buffer, int w, int h, int texunit, bool mipmap, const char* name) override;
 
 	void EnsureTexture(FTexture* tex, int translation, int flags);
-	void EnsureCanvas(FTexture* tex);
+	void EnsureCanvas(FTexture* tex, nri::Format format = nri::Format::BGRA8_UNORM);
 	void CreateWipeTexture(int w, int h, const char* name);
 	void Reset();
 
