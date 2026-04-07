@@ -1180,6 +1180,75 @@ public:
 		return (int)nri_ptactorspritetrace >= 1 && (int)nri_pttraceframes > 0;
 	}
 
+	static bool ShouldTraceActorSpriteCoherency()
+	{
+		return (int)nri_ptactorspritetrace > 0 && (int)nri_pttraceframes > 0;
+	}
+
+	static uint64_t CoherencyHashCombine64(uint64_t hash, uint64_t value)
+	{
+		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
+	}
+
+	static uint32_t CoherencyFloatBits(float value)
+	{
+		static_assert(sizeof(uint32_t) == sizeof(float), "unexpected float size");
+		uint32_t bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		return bits;
+	}
+
+	static uint64_t HashDescriptorList(const nri::Descriptor* const* descriptors, size_t count)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, (uint64_t)count);
+		for (size_t i = 0; i < count; ++i)
+		{
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uintptr_t)descriptors[i]);
+		}
+		return hash;
+	}
+
+	static uint64_t HashMaterialBridgeSummary(const nri_scene::MaterialBridgeData& materials)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, (uint64_t)materials.materials.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)materials.lightMetadata.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)materials.textures.size());
+		for (size_t i = 0; i < materials.materials.size(); ++i)
+		{
+			const auto& material = materials.materials[i];
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.textureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.paletteIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.flags);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.lightingFlags);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.emissiveMode);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.emissiveTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(material.alpha));
+		}
+
+		for (const auto& metadata : materials.lightMetadata)
+		{
+			hash = CoherencyHashCombine64(hash, metadata.materialKey);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.textureId);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.actorIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.textureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.paletteIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.emissiveMode);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.emissiveTextureIndex);
+		}
+
+		for (const auto& texture : materials.textures)
+		{
+			hash = CoherencyHashCombine64(hash, texture.key);
+			hash = CoherencyHashCombine64(hash, (uint64_t)texture.width);
+			hash = CoherencyHashCombine64(hash, (uint64_t)texture.height);
+			hash = CoherencyHashCombine64(hash, texture.indexed ? 1ull : 0ull);
+		}
+
+		return hash;
+	}
+
 	static const char* GetActorSpriteTraceStageName(PathTracingActorSpriteTraceStage stage)
 	{
 		switch (stage)
@@ -5795,7 +5864,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			{
 				{
 					Clocker clock(NriPTMaterialBuild);
-					BuildMaterialsWithActorOverrides(dynamicSceneView, dynamicMaterialBridge);
+					BuildMaterialsWithActorOverrides(dynamicSceneView, dynamicMaterialBridge, "dynamic_live");
 				}
 			}
 
@@ -5821,7 +5890,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			if (!mirrorExtendedDynamicGeometry.primitives.empty())
 			{
 				Clocker clock(NriPTMaterialBuild);
-				BuildMaterialsWithActorOverrides(mirrorExtendedDynamicSceneView, mirrorExtendedDynamicMaterialBridge);
+				BuildMaterialsWithActorOverrides(mirrorExtendedDynamicSceneView, mirrorExtendedDynamicMaterialBridge, "mirror_extended");
 			}
 
 			if (hasDynamicScene)
@@ -5840,7 +5909,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					mirrorExtendedDynamicSceneView.opaqueSprites.begin(),
 					mirrorExtendedDynamicSceneView.opaqueSprites.end());
 				RebuildSceneViewStats(sceneLightMergedDynamicSceneView);
-				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge);
+				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge, "scene_light_merged_dynamic");
 				sceneLightDynamicView = &sceneLightMergedDynamicSceneView;
 				sceneLightDynamicMaterials = &sceneLightMergedDynamicMaterialBridge;
 			}
@@ -5861,7 +5930,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			if (!mirrorPlayerGeometry.primitives.empty())
 			{
 				Clocker clock(NriPTMaterialBuild);
-				BuildMaterialsWithActorOverrides(mirrorPlayerSceneView, mirrorPlayerMaterialBridge);
+				BuildMaterialsWithActorOverrides(mirrorPlayerSceneView, mirrorPlayerMaterialBridge, "mirror_player");
 			}
 		}
 
@@ -5915,7 +5984,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 				{
 					Clocker clock(NriPTMaterialBuild);
-					BuildMaterialsWithActorOverrides(mergedDynamicSceneView, mergedDynamicMaterialBridge);
+					BuildMaterialsWithActorOverrides(mergedDynamicSceneView, mergedDynamicMaterialBridge, "dynamic_with_persistent_emissive");
 				}
 
 				if (!mergedDynamicGeometry.primitives.empty())
@@ -5948,7 +6017,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					mirrorExtendedDynamicSceneView.opaqueSprites.begin(),
 					mirrorExtendedDynamicSceneView.opaqueSprites.end());
 				RebuildSceneViewStats(sceneLightMergedDynamicSceneView);
-				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge);
+				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge, "scene_light_merged_persistent");
 				sceneLightDynamicView = &sceneLightMergedDynamicSceneView;
 				sceneLightDynamicMaterials = &sceneLightMergedDynamicMaterialBridge;
 			}
@@ -6055,7 +6124,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						(uint32_t)mStaticMapScene.geometry.primitives.size(),
 						0u,
 						(uint32_t)mStaticMapScene.gpuMaterials.size(),
-						0u);
+						0u,
+						"static_only_scene");
 				if (accelerationReady && hasRuntimeMutationOverlay)
 				{
 					mBuiltStaticMapSceneASLastFrame = false;
@@ -6070,7 +6140,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				{
 					gRendererSkyPerfTraceStats.combinedOverlayTextureBuilds++;
 				}
-				texturesReady = paletteReady && EnsureSceneTextures(mStaticMapScene.sceneView, combinedMaterialBridge, combinedGpuMaterials, false);
+				texturesReady = paletteReady && EnsureSceneTextures(mStaticMapScene.sceneView, combinedMaterialBridge, combinedGpuMaterials, false, "static_map_overlay_combined");
 				dynamicGpuMaterials.clear();
 				if (texturesReady)
 				{
@@ -6125,7 +6195,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							(uint32_t)mStaticMapScene.geometry.primitives.size(),
 							(uint32_t)overlayGeometry.primitives.size(),
 							(uint32_t)mStaticMapScene.gpuMaterials.size(),
-							(uint32_t)dynamicGpuMaterials.size());
+							(uint32_t)dynamicGpuMaterials.size(),
+							"static_plus_overlay_scene");
 				}
 			}
 
@@ -6273,14 +6344,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 		{
 			Clocker clock(NriPTMaterialBuild);
-			BuildMaterialsWithActorOverrides(capturedSceneView, materialBridge);
+			BuildMaterialsWithActorOverrides(capturedSceneView, materialBridge, "captured_scene");
 		}
 		sceneLightCapturedMaterials = &materialBridge;
 
 		const bool needsFallbackMaterials = bootstrapCapturedDiagnostics || bootstrapCapturedFlat;
 		const bool needsRealTextures = !nri_ptbootstrap || bootstrapCapturedBaseColor || bootstrapMode >= 13u;
 		paletteReady = needsRealTextures ? EnsurePaletteTexture(materialBridge) : true;
-		texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures(preserveHistory) : (needsRealTextures ? (paletteReady && EnsureSceneTextures(capturedSceneView, materialBridge, capturedGpuMaterials, preserveHistory)) : EnsureSkyTexture(capturedSceneView, preserveHistory));
+		texturesReady = needsFallbackMaterials ? UseFallbackSceneTextures(preserveHistory, "captured_scene_fallback") : (needsRealTextures ? (paletteReady && EnsureSceneTextures(capturedSceneView, materialBridge, capturedGpuMaterials, preserveHistory, "captured_scene")) : EnsureSkyTexture(capturedSceneView, preserveHistory));
 		if (needsFallbackMaterials)
 		{
 			capturedGpuMaterials = materialBridge.materials;
@@ -6320,7 +6391,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				0u,
 				(uint32_t)capturedGeometry.primitives.size(),
 				0u,
-				(uint32_t)capturedGpuMaterials.size());
+				(uint32_t)capturedGpuMaterials.size(),
+				"captured_scene");
 		}
 		if (texturesReady)
 		{
@@ -6414,7 +6486,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					(uint32_t)mStaticMapScene.geometry.primitives.size(),
 					(uint32_t)overlayGeometry.primitives.size(),
 					(uint32_t)mStaticMapScene.gpuMaterials.size(),
-					(uint32_t)dynamicGpuMaterials.size()))
+					(uint32_t)dynamicGpuMaterials.size(),
+					"resident_overlay_material_refresh"))
 			{
 				LogFallback("PT runtime overlay material refresh failed after scene-light rebuild.");
 				if (preserveHistory)
@@ -8132,6 +8205,24 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mSceneTextureOverflowStats.emissiveTextureClampCountLastBuild,
 		(unsigned long long)mSceneTextureOverflowStats.totalOverflowBuilds,
 		mSceneTextureOverflowStats.warningLogged ? "yes" : "no");
+	Printf("NRI PT binding diag: label=%s materials=%u textures=%u actor_surfaces=%u actor_count=%u bridge_hash=0x%llx actor_hash=0x%llx scene_tex_updates=%llu scene_tex_hash=0x%llx scene_tex_reason=%s qframe=%u outstanding=%u scene_data_updates=%llu scene_data_hash=0x%llx scene_data_reason=%s qframe=%u outstanding=%u\n",
+		mDescriptorCoherencyDebugStats.lastMaterialBuildLabel.empty() ? "none" : mDescriptorCoherencyDebugStats.lastMaterialBuildLabel.c_str(),
+		mDescriptorCoherencyDebugStats.lastMaterialCount,
+		mDescriptorCoherencyDebugStats.lastTextureCount,
+		mDescriptorCoherencyDebugStats.lastActorSpriteSurfaceCount,
+		mDescriptorCoherencyDebugStats.lastActorSpriteActorCount,
+		(unsigned long long)mDescriptorCoherencyDebugStats.lastMaterialBridgeHash,
+		(unsigned long long)mDescriptorCoherencyDebugStats.lastActorSpriteMaterialHash,
+		(unsigned long long)mDescriptorCoherencyDebugStats.sceneTextureSetUpdates,
+		(unsigned long long)mDescriptorCoherencyDebugStats.lastSceneTextureDescriptorHash,
+		mDescriptorCoherencyDebugStats.lastSceneTextureReason.empty() ? "none" : mDescriptorCoherencyDebugStats.lastSceneTextureReason.c_str(),
+		mDescriptorCoherencyDebugStats.lastSceneTextureQueuedFrameIndex,
+		mDescriptorCoherencyDebugStats.lastSceneTextureOutstandingQueuedFrames,
+		(unsigned long long)mDescriptorCoherencyDebugStats.sceneDataSetUpdates,
+		(unsigned long long)mDescriptorCoherencyDebugStats.lastSceneDataDescriptorHash,
+		mDescriptorCoherencyDebugStats.lastSceneDataReason.empty() ? "none" : mDescriptorCoherencyDebugStats.lastSceneDataReason.c_str(),
+		mDescriptorCoherencyDebugStats.lastSceneDataQueuedFrameIndex,
+		mDescriptorCoherencyDebugStats.lastSceneDataOutstandingQueuedFrames);
 }
 
 void NRIRenderer::ResetPersistentDynamicEmissiveCache()
@@ -8322,7 +8413,7 @@ void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 	}
 	{
 		Clocker clock(NriPTMaterialBuild);
-		BuildMaterialsWithActorOverrides(next.sceneView, next.materialBridge);
+		BuildMaterialsWithActorOverrides(next.sceneView, next.materialBridge, "persistent_emissive_cache_prune");
 	}
 
 	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
@@ -8422,7 +8513,7 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 	}
 	{
 		Clocker clock(NriPTMaterialBuild);
-		BuildMaterialsWithActorOverrides(next.sceneView, next.materialBridge);
+		BuildMaterialsWithActorOverrides(next.sceneView, next.materialBridge, "persistent_emissive_cache_rebuild");
 	}
 
 	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
@@ -10201,7 +10292,7 @@ void NRIRenderer::ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridge
 	}
 }
 
-void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials) const
+void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel)
 {
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	if (HasActorFullbrightOverrides(resolvedLightOverlays))
@@ -10252,11 +10343,13 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 			{
 				*saved.flags = saved.value;
 			}
+			TraceActorSpriteMaterialAssignments(sceneView, outMaterials, traceLabel);
 			return;
 		}
 	}
 
 	nri_scene::BuildMaterials(sceneView, outMaterials);
+	TraceActorSpriteMaterialAssignments(sceneView, outMaterials, traceLabel);
 }
 
 void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const
@@ -10325,7 +10418,7 @@ void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
 	}
 
 	if (!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
-		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false) ||
+		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false, "static_map_scene") ||
 		!EnsureStructuredBuffer(
 			mStaticMaterialBuffer,
 			mMaterialBufferStats,
@@ -10870,7 +10963,7 @@ bool NRIRenderer::UpdateSamplerSet()
 	return true;
 }
 
-bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors)
+bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors, const char* reason)
 {
 	nri::UpdateDescriptorRangeDesc update = {};
 	update.descriptorSet = mSceneTextureSet;
@@ -10878,6 +10971,12 @@ bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& des
 	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(descriptors.data());
 	update.descriptorNum = (uint32_t)descriptors.size();
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	TraceSharedDescriptorRewrite(
+		"scene_textures",
+		reason != nullptr ? reason : "unlabeled",
+		HashDescriptorList(reinterpret_cast<const nri::Descriptor* const*>(descriptors.data()), descriptors.size()),
+		(uint32_t)descriptors.size(),
+		true);
 	return true;
 }
 
@@ -11381,12 +11480,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 
 	if (descriptorsReady)
 	{
-		nri::UpdateDescriptorRangeDesc update = {};
-		update.descriptorSet = mSceneDataSet;
-		update.rangeIndex = 0;
-		update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
-		update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-		mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+		CommitSceneDataDescriptors("emissive_sampling_refresh");
 	}
 	mEmissiveSamplingPayloadCacheValid = true;
 	mEmissiveSamplingPayloadHash = payloadHash;
@@ -11427,12 +11521,7 @@ bool NRIRenderer::UpdateReprojectionBuffer()
 
 		if (descriptorsReady)
 		{
-			nri::UpdateDescriptorRangeDesc update = {};
-			update.descriptorSet = mSceneDataSet;
-			update.rangeIndex = 0;
-			update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
-			update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-			mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+			CommitSceneDataDescriptors("reprojection_refresh");
 		}
 	}
 
@@ -11471,12 +11560,7 @@ bool NRIRenderer::UpdateVisibleChunkBuffer()
 
 		if (descriptorsReady)
 		{
-			nri::UpdateDescriptorRangeDesc update = {};
-			update.descriptorSet = mSceneDataSet;
-			update.rangeIndex = 0;
-			update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
-			update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-			mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+			CommitSceneDataDescriptors("visible_chunk_refresh");
 		}
 	}
 
@@ -11515,12 +11599,7 @@ bool NRIRenderer::UpdateVisibleFlatPlaneBuffer()
 
 		if (descriptorsReady)
 		{
-			nri::UpdateDescriptorRangeDesc update = {};
-			update.descriptorSet = mSceneDataSet;
-			update.rangeIndex = 0;
-			update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
-			update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-			mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+			CommitSceneDataDescriptors("visible_flat_refresh");
 		}
 	}
 
@@ -11668,7 +11747,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 	uint32_t staticPrimitiveCount,
 	uint32_t dynamicPrimitiveCount,
 	uint32_t staticMaterialCount,
-	uint32_t dynamicMaterialCount)
+	uint32_t dynamicMaterialCount,
+	const char* reason)
 {
 	mSceneDataDescriptorsInitialized = false;
 
@@ -11923,13 +12003,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 		}
 	}
 
-	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = mSceneDataSet;
-	update.rangeIndex = 0;
-	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
-	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
-	mSceneDataDescriptorsInitialized = true;
+	if (!CommitSceneDataDescriptors(reason != nullptr ? reason : "scene_data_full_rebuild"))
+	{
+		return false;
+	}
 
 	mBoundStaticPrimitiveCount = staticPrimitiveCount;
 	mBoundDynamicPrimitiveCount = dynamicPrimitiveCount;
@@ -11942,6 +12019,32 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundRuntimeLightTileSize = NRI_RUNTIME_LIGHT_TILE_SIZE;
 	mBoundRuntimeLightTileIndexCount = runtimeLightTileIndexCount;
 	mBoundRuntimeLightMaxTileOccupancy = runtimeLightMaxTileOccupancy;
+	return true;
+}
+
+bool NRIRenderer::CommitSceneDataDescriptors(const char* reason)
+{
+	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
+	{
+		if (descriptor == nullptr)
+		{
+			return false;
+		}
+	}
+
+	nri::UpdateDescriptorRangeDesc update = {};
+	update.descriptorSet = mSceneDataSet;
+	update.rangeIndex = 0;
+	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
+	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
+	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	mSceneDataDescriptorsInitialized = true;
+	TraceSharedDescriptorRewrite(
+		"scene_data",
+		reason != nullptr ? reason : "unlabeled",
+		HashDescriptorList(reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data()), mSceneDataDescriptors.size()),
+		NRI_SCENE_DATA_DESCRIPTOR_NUM,
+		false);
 	return true;
 }
 
@@ -12374,7 +12477,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 			}
 		{
 			Clocker clock(NriPTMaterialBuild);
-			BuildMaterialsWithActorOverrides(chunkSceneView, chunkMaterials);
+			BuildMaterialsWithActorOverrides(chunkSceneView, chunkMaterials, "static_map_chunk");
 		}
 		if (chunkGeometry.primitives.empty())
 		{
@@ -12405,7 +12508,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 
 	if (mStaticMapScene.geometry.primitives.empty() ||
 		!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
-		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false) ||
+		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false, "static_map_scene") ||
 		!UploadSceneBuffers(
 			mStaticVertexBuffer,
 			mStaticIndexBuffer,
@@ -12671,7 +12774,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 	return true;
 }
 
-bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky)
+bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason)
 {
 	Clocker clock(NriPTSceneTextures);
 	static bool sLoggedActiveCanvasTextureReuse = false;
@@ -12839,10 +12942,10 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		}
 	}
 
-	return UpdateSceneTextureSet(descriptors);
+	return UpdateSceneTextureSet(descriptors, reason);
 }
 
-bool NRIRenderer::UseFallbackSceneTextures(bool preserveExistingSky)
+bool NRIRenderer::UseFallbackSceneTextures(bool preserveExistingSky, const char* reason)
 {
 	if (!preserveExistingSky || GetActiveSkyTexture() == nullptr)
 	{
@@ -12851,7 +12954,181 @@ bool NRIRenderer::UseFallbackSceneTextures(bool preserveExistingSky)
 	std::vector<nri::Descriptor*> descriptors(NRI_SCENE_DESCRIPTOR_NUM, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
 	descriptors[0] = mFrameBuffer->mWhiteTexture->GetResource().shaderView;
 	descriptors[1] = GetActiveSkyTexture() != nullptr && GetActiveSkyTexture()->shaderView != nullptr ? GetActiveSkyTexture()->shaderView : mFrameBuffer->mWhiteTexture->GetResource().shaderView;
-	return UpdateSceneTextureSet(descriptors);
+	return UpdateSceneTextureSet(descriptors, reason != nullptr ? reason : "fallback");
+}
+
+uint32_t NRIRenderer::CountPotentialOutstandingQueuedFrames() const
+{
+	if (mFrameBuffer == nullptr)
+	{
+		return 0;
+	}
+
+	uint32_t count = 0;
+	for (uint32_t i = 0; i < (uint32_t)mFrameBuffer->mQueuedFrames.size(); ++i)
+	{
+		if (i == mFrameBuffer->mCurrentQueuedFrameIndex)
+		{
+			continue;
+		}
+
+		const auto& queuedFrame = mFrameBuffer->mQueuedFrames[i];
+		if (queuedFrame.hasSubmittedWork && queuedFrame.lastSubmittedFenceValue != 0)
+		{
+			count++;
+		}
+	}
+
+	return count;
+}
+
+void NRIRenderer::TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet)
+{
+	if (sceneTextureSet)
+	{
+		mDescriptorCoherencyDebugStats.sceneTextureSetUpdates++;
+		mDescriptorCoherencyDebugStats.lastSceneTextureDescriptorHash = descriptorHash;
+		mDescriptorCoherencyDebugStats.lastSceneTextureDescriptorCount = descriptorCount;
+		mDescriptorCoherencyDebugStats.lastSceneTextureReason = reason != nullptr ? reason : "unlabeled";
+	}
+	else
+	{
+		mDescriptorCoherencyDebugStats.sceneDataSetUpdates++;
+		mDescriptorCoherencyDebugStats.lastSceneDataDescriptorHash = descriptorHash;
+		mDescriptorCoherencyDebugStats.lastSceneDataDescriptorCount = descriptorCount;
+		mDescriptorCoherencyDebugStats.lastSceneDataReason = reason != nullptr ? reason : "unlabeled";
+	}
+
+	uint32_t queuedFrameIndex = 0;
+	uint64_t queuedFrameFence = 0;
+	uint64_t submittedFence = 0;
+	if (mFrameBuffer != nullptr)
+	{
+		queuedFrameIndex = mFrameBuffer->mCurrentQueuedFrameIndex;
+		submittedFence = mFrameBuffer->mSubmittedFenceValue;
+		if (queuedFrameIndex < mFrameBuffer->mQueuedFrames.size())
+		{
+			queuedFrameFence = mFrameBuffer->mQueuedFrames[queuedFrameIndex].lastSubmittedFenceValue;
+		}
+	}
+
+	const uint32_t outstandingQueuedFrames = CountPotentialOutstandingQueuedFrames();
+	if (sceneTextureSet)
+	{
+		mDescriptorCoherencyDebugStats.lastSceneTextureQueuedFrameIndex = queuedFrameIndex;
+		mDescriptorCoherencyDebugStats.lastSceneTextureQueuedFrameFence = queuedFrameFence;
+		mDescriptorCoherencyDebugStats.lastSceneTextureSubmittedFence = submittedFence;
+		mDescriptorCoherencyDebugStats.lastSceneTextureOutstandingQueuedFrames = outstandingQueuedFrames;
+	}
+	else
+	{
+		mDescriptorCoherencyDebugStats.lastSceneDataQueuedFrameIndex = queuedFrameIndex;
+		mDescriptorCoherencyDebugStats.lastSceneDataQueuedFrameFence = queuedFrameFence;
+		mDescriptorCoherencyDebugStats.lastSceneDataSubmittedFence = submittedFence;
+		mDescriptorCoherencyDebugStats.lastSceneDataOutstandingQueuedFrames = outstandingQueuedFrames;
+	}
+
+	if (!ShouldTraceActorSpriteCoherency())
+	{
+		return;
+	}
+
+	Printf("NRI PT descriptor rewrite: frame=%u set=%s reason=%s hash=0x%llx descriptors=%u qframe=%u slot_fence=%llu submitted_fence=%llu outstanding_slots=%u\n",
+		mFrameIndex,
+		setName != nullptr ? setName : "unknown",
+		reason != nullptr ? reason : "unlabeled",
+		(unsigned long long)descriptorHash,
+		descriptorCount,
+		queuedFrameIndex,
+		(unsigned long long)queuedFrameFence,
+		(unsigned long long)submittedFence,
+		outstandingQueuedFrames);
+}
+
+void NRIRenderer::TraceActorSpriteMaterialAssignments(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel)
+{
+	mDescriptorCoherencyDebugStats.actorMaterialBuilds++;
+	mDescriptorCoherencyDebugStats.lastMaterialBuildLabel = traceLabel != nullptr ? traceLabel : "unlabeled";
+	mDescriptorCoherencyDebugStats.lastMaterialCount = (uint32_t)outMaterials.materials.size();
+	mDescriptorCoherencyDebugStats.lastTextureCount = (uint32_t)outMaterials.textures.size();
+	mDescriptorCoherencyDebugStats.lastMaterialBridgeHash = HashMaterialBridgeSummary(outMaterials);
+
+	const uint32_t spriteMaterialBase = (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size());
+	uint32_t actorSurfaceCount = 0;
+	uint64_t actorHash = 1469598103934665603ull;
+	std::unordered_set<int32_t> actorIndices;
+	actorIndices.reserve(sceneView.opaqueSprites.size());
+	uint32_t printed = 0;
+
+	for (uint32_t spriteIndex = 0; spriteIndex < (uint32_t)sceneView.opaqueSprites.size(); ++spriteIndex)
+	{
+		const auto& surface = sceneView.opaqueSprites[spriteIndex];
+		if (surface.provenance.actorIndex < 0)
+		{
+			continue;
+		}
+
+		const uint32_t materialIndex = spriteMaterialBase + spriteIndex;
+		if (materialIndex >= outMaterials.materials.size() || materialIndex >= outMaterials.lightMetadata.size())
+		{
+			continue;
+		}
+
+		const auto& material = outMaterials.materials[materialIndex];
+		const auto& metadata = outMaterials.lightMetadata[materialIndex];
+		actorSurfaceCount++;
+		actorIndices.insert(surface.provenance.actorIndex);
+		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)surface.provenance.actorIndex);
+		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)(uint32_t)surface.provenance.sourceType);
+		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)materialIndex);
+		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)metadata.textureId);
+		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)material.textureIndex);
+		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)material.paletteIndex);
+		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)material.emissiveMode);
+		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)material.emissiveTextureIndex);
+		actorHash = CoherencyHashCombine64(actorHash, metadata.materialKey);
+
+		if (ShouldTraceActorSpriteVerbose() && printed < 32)
+		{
+			Printf("NRI PT actor-sprite material: frame=%u label=%s actor=%d source=%s material=%u tex_id=%u tex_index=%u emissive_mode=%u emissive_tex=%u palette=%u flags=0x%x light_flags=0x%x material_key=0x%llx tex_ptr=%p\n",
+				mFrameIndex,
+				traceLabel != nullptr ? traceLabel : "unlabeled",
+				surface.provenance.actorIndex,
+				GetSurfaceSourceTypeName(surface.provenance.sourceType),
+				materialIndex,
+				metadata.textureId,
+				material.textureIndex,
+				material.emissiveMode,
+				material.emissiveTextureIndex,
+				material.paletteIndex,
+				material.flags,
+				material.lightingFlags,
+				(unsigned long long)metadata.materialKey,
+				metadata.texture);
+			printed++;
+		}
+	}
+
+	mDescriptorCoherencyDebugStats.lastActorSpriteSurfaceCount = actorSurfaceCount;
+	mDescriptorCoherencyDebugStats.lastActorSpriteActorCount = (uint32_t)actorIndices.size();
+	mDescriptorCoherencyDebugStats.lastActorSpriteMaterialHash = actorHash;
+
+	if (actorSurfaceCount == 0 || !ShouldTraceActorSpriteCoherency())
+	{
+		return;
+	}
+
+	Printf("NRI PT actor-sprite materials: frame=%u label=%s materials=%u textures=%u actor_surfaces=%u actor_count=%u bridge_hash=0x%llx actor_hash=0x%llx qframe=%u outstanding_slots=%u\n",
+		mFrameIndex,
+		traceLabel != nullptr ? traceLabel : "unlabeled",
+		(uint32_t)outMaterials.materials.size(),
+		(uint32_t)outMaterials.textures.size(),
+		actorSurfaceCount,
+		(uint32_t)actorIndices.size(),
+		(unsigned long long)mDescriptorCoherencyDebugStats.lastMaterialBridgeHash,
+		(unsigned long long)actorHash,
+		mFrameBuffer != nullptr ? mFrameBuffer->mCurrentQueuedFrameIndex : 0u,
+		CountPotentialOutstandingQueuedFrames());
 }
 
 void NRIRenderer::TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& event)
@@ -13252,7 +13529,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 			(uint32_t)mStaticMapScene.geometry.primitives.size(),
 			0u,
 			(uint32_t)mStaticMapScene.gpuMaterials.size(),
-			0u);
+			0u,
+			"build_static_map_scene");
 }
 
 void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask) const
@@ -13730,7 +14008,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 			{
 				Clocker clock(NriPTMaterialBuild);
-				BuildMaterialsWithActorOverrides(liveChunkView, liveMaterials);
+				BuildMaterialsWithActorOverrides(liveChunkView, liveMaterials, "runtime_mutation_chunk");
 			}
 
 			replacement.sceneView = liveChunkView;
@@ -14210,7 +14488,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		}
 		{
 			Clocker clock(NriPTMaterialBuild);
-			BuildMaterialsWithActorOverrides(liveChunkView, chunkMaterials);
+			BuildMaterialsWithActorOverrides(liveChunkView, chunkMaterials, "runtime_space_link_chunk");
 		}
 
 		if (!chunkGeometry.primitives.empty())
@@ -14252,7 +14530,8 @@ bool NRIRenderer::RestoreStaticTopLevelScene()
 			(uint32_t)mStaticMapScene.geometry.primitives.size(),
 			0u,
 			(uint32_t)mStaticMapScene.gpuMaterials.size(),
-			0u);
+			0u,
+			"restore_static_scene");
 }
 
 bool NRIRenderer::RefreshResidentStaticSceneDataSet()
@@ -14274,7 +14553,8 @@ bool NRIRenderer::RefreshResidentStaticSceneDataSet()
 		(uint32_t)mStaticMapScene.geometry.primitives.size(),
 		0u,
 		(uint32_t)mStaticMapScene.gpuMaterials.size(),
-		0u);
+		0u,
+		"refresh_resident_static_scene");
 }
 
 bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry)

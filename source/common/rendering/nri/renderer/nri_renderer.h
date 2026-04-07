@@ -523,6 +523,34 @@ private:
 		bool warningLogged = false;
 	};
 
+	struct DescriptorCoherencyDebugStats
+	{
+		uint64_t actorMaterialBuilds = 0;
+		uint64_t sceneTextureSetUpdates = 0;
+		uint64_t sceneDataSetUpdates = 0;
+		uint64_t lastMaterialBridgeHash = 0;
+		uint64_t lastActorSpriteMaterialHash = 0;
+		uint64_t lastSceneTextureDescriptorHash = 0;
+		uint64_t lastSceneDataDescriptorHash = 0;
+		uint32_t lastMaterialCount = 0;
+		uint32_t lastTextureCount = 0;
+		uint32_t lastActorSpriteSurfaceCount = 0;
+		uint32_t lastActorSpriteActorCount = 0;
+		uint32_t lastSceneTextureDescriptorCount = 0;
+		uint32_t lastSceneDataDescriptorCount = 0;
+		uint32_t lastSceneTextureQueuedFrameIndex = 0;
+		uint32_t lastSceneDataQueuedFrameIndex = 0;
+		uint32_t lastSceneTextureOutstandingQueuedFrames = 0;
+		uint32_t lastSceneDataOutstandingQueuedFrames = 0;
+		uint64_t lastSceneTextureQueuedFrameFence = 0;
+		uint64_t lastSceneDataQueuedFrameFence = 0;
+		uint64_t lastSceneTextureSubmittedFence = 0;
+		uint64_t lastSceneDataSubmittedFence = 0;
+		std::string lastMaterialBuildLabel;
+		std::string lastSceneTextureReason;
+		std::string lastSceneDataReason;
+	};
+
 	struct RuntimeMapMutationCache
 	{
 		struct ChunkReplacement
@@ -652,9 +680,9 @@ private:
 	bool AllocateDescriptorSets();
 	bool EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
 	bool DispatchBootstrapView();
-	bool UseFallbackSceneTextures(bool preserveExistingSky);
+	bool UseFallbackSceneTextures(bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
-	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky);
+	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
@@ -704,7 +732,12 @@ private:
 		uint32_t staticPrimitiveCount,
 		uint32_t dynamicPrimitiveCount,
 		uint32_t staticMaterialCount,
-		uint32_t dynamicMaterialCount);
+		uint32_t dynamicMaterialCount,
+		const char* reason = nullptr);
+	bool CommitSceneDataDescriptors(const char* reason);
+	void TraceActorSpriteMaterialAssignments(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel);
+	void TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet);
+	uint32_t CountPotentialOutstandingQueuedFrames() const;
 	void BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr) const;
 	void BuildFilteredStaticMapGeometry(const std::vector<uint8_t>& replacedChunkMask, nri_scene::GeometryData& outGeometry) const;
 	bool RestoreStaticTopLevelScene();
@@ -757,7 +790,7 @@ private:
 	void PrunePersistentDynamicEmissiveCacheToLiveActors();
 	bool RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials);
 	void RebuildStartupMutationBaseline();
-	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials) const;
+	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel = nullptr);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void QueueStaticMapSceneLightingInvalidation();
@@ -794,7 +827,7 @@ private:
 		uint32_t& outTileIndexCount,
 		uint32_t& outMaxTileOccupancy) const;
 	bool UpdateSamplerSet();
-	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors);
+	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors, const char* reason = nullptr);
 	bool UpdateFrameTextureSet();
 	bool UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 14>& descriptors);
 	bool UpdateOutputSet();
@@ -907,6 +940,7 @@ private:
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};
+	DescriptorCoherencyDebugStats mDescriptorCoherencyDebugStats = {};
 	RuntimeMapMutationFrameState mRuntimeMapLastFrame = {};
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
