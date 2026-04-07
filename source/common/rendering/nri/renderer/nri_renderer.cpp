@@ -62,7 +62,6 @@ CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 2;
 	}
 }
-CVAR(Bool, nri_ptdescriptorsync, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -8274,12 +8273,6 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mDescriptorCoherencyDebugStats.lastSceneDataReason.empty() ? "none" : mDescriptorCoherencyDebugStats.lastSceneDataReason.c_str(),
 		mDescriptorCoherencyDebugStats.lastSceneDataQueuedFrameIndex,
 		mDescriptorCoherencyDebugStats.lastSceneDataOutstandingQueuedFrames);
-	Printf("NRI PT binding sync: forced=%s scene_tex_forced=%llu last_scene_tex_forced=%s scene_data_forced=%llu last_scene_data_forced=%s\n",
-		nri_ptdescriptorsync ? "on" : "off",
-		(unsigned long long)mDescriptorCoherencyDebugStats.forcedSceneTextureSyncs,
-		mDescriptorCoherencyDebugStats.lastSceneTextureForcedSync ? "yes" : "no",
-		(unsigned long long)mDescriptorCoherencyDebugStats.forcedSceneDataSyncs,
-		mDescriptorCoherencyDebugStats.lastSceneDataForcedSync ? "yes" : "no");
 }
 
 void NRIRenderer::ResetPersistentDynamicEmissiveCache()
@@ -11040,12 +11033,6 @@ bool NRIRenderer::UpdateSamplerSet()
 
 bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors, const char* reason)
 {
-	if (nri_ptdescriptorsync)
-	{
-		WaitForCommandsTracked();
-		mDescriptorCoherencyDebugStats.forcedSceneTextureSyncs++;
-	}
-
 	nri::DescriptorSet* sceneTextureSet = GetCurrentSceneTextureSet();
 	if (sceneTextureSet == nullptr)
 	{
@@ -12117,12 +12104,6 @@ bool NRIRenderer::CommitSceneDataDescriptors(const char* reason)
 		{
 			return false;
 		}
-	}
-
-	if (nri_ptdescriptorsync)
-	{
-		WaitForCommandsTracked();
-		mDescriptorCoherencyDebugStats.forcedSceneDataSyncs++;
 	}
 
 	nri::DescriptorSet* sceneDataSet = GetCurrentSceneDataSet();
@@ -13267,16 +13248,6 @@ void NRIRenderer::TraceSharedDescriptorRewrite(const char* setName, const char* 
 		mDescriptorCoherencyDebugStats.lastSceneDataReason = reason != nullptr ? reason : "unlabeled";
 	}
 
-	const bool forcedSync = !!nri_ptdescriptorsync;
-	if (sceneTextureSet)
-	{
-		mDescriptorCoherencyDebugStats.lastSceneTextureForcedSync = forcedSync;
-	}
-	else
-	{
-		mDescriptorCoherencyDebugStats.lastSceneDataForcedSync = forcedSync;
-	}
-
 	uint32_t queuedFrameIndex = 0;
 	uint64_t queuedFrameFence = 0;
 	uint64_t submittedFence = 0;
@@ -13321,14 +13292,6 @@ void NRIRenderer::TraceSharedDescriptorRewrite(const char* setName, const char* 
 		(unsigned long long)queuedFrameFence,
 		(unsigned long long)submittedFence,
 		outstandingQueuedFrames);
-	if (forcedSync)
-	{
-		Printf("NRI PT descriptor sync: frame=%u set=%s reason=%s action=wait-for-idle outstanding_slots=%u\n",
-			mFrameIndex,
-			setName != nullptr ? setName : "unknown",
-			reason != nullptr ? reason : "unlabeled",
-			outstandingQueuedFrames);
-	}
 }
 
 void NRIRenderer::TraceActorSpriteMaterialAssignments(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel)

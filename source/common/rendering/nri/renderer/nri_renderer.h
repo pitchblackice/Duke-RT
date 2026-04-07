@@ -534,8 +534,6 @@ private:
 		uint64_t actorMaterialBuilds = 0;
 		uint64_t sceneTextureSetUpdates = 0;
 		uint64_t sceneDataSetUpdates = 0;
-		uint64_t forcedSceneTextureSyncs = 0;
-		uint64_t forcedSceneDataSyncs = 0;
 		uint64_t lastMaterialBridgeHash = 0;
 		uint64_t lastActorSpriteMaterialHash = 0;
 		uint64_t lastSceneTextureDescriptorHash = 0;
@@ -554,8 +552,6 @@ private:
 		uint64_t lastSceneDataQueuedFrameFence = 0;
 		uint64_t lastSceneTextureSubmittedFence = 0;
 		uint64_t lastSceneDataSubmittedFence = 0;
-		bool lastSceneTextureForcedSync = false;
-		bool lastSceneDataForcedSync = false;
 		std::string lastMaterialBuildLabel;
 		std::string lastSceneTextureReason;
 		std::string lastSceneDataReason;
