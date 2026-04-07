@@ -450,6 +450,7 @@ private:
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t animatedGeometrySignature = 0;
 			bool hasAnimatedTextureCandidates = false;
+			bool animatedRefreshSuppressed = false;
 			nri_scene::MaterialBridgeData materialBridge;
 			NRIAccelerationStructureResource accelerationStructure;
 		};
@@ -466,6 +467,7 @@ private:
 		uint32_t animatedRefreshCount = 0;
 		uint32_t animatedRefreshUploadCount = 0;
 		uint32_t animatedGeometryFallbackCount = 0;
+		uint32_t animatedRefreshSuppressedChunkCount = 0;
 		uint32_t reuseCount = 0;
 		nri_scene::SceneView sceneView;
 		std::vector<nri_scene::SceneView> lightChunkViews;

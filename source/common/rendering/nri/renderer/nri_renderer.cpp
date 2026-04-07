@@ -8285,7 +8285,7 @@ void NRIRenderer::PrintPortalTraversalStatus() const
 void NRIRenderer::PrintStaticMapSceneStatus() const
 {
 	const char* source = mUsedStaticMapSceneLastFrame ? "authoritative-map-world" : "captured-scene";
-	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u animated_candidate_chunks=%u animated_refreshes=%u animated_refresh_uploads=%u animated_geometry_fallbacks=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s chunks=%u tlas_instances=%u tris=%u materials=%u\n",
+	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u animated_candidate_chunks=%u animated_refreshes=%u animated_refresh_uploads=%u animated_geometry_fallbacks=%u animated_refresh_suppressed=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s chunks=%u tlas_instances=%u tris=%u materials=%u\n",
 		source,
 		(mStaticMapScene.valid && mStaticMapScene.texturesResident && mStaticMapScene.buffersResident && mStaticMapScene.accelerationResident) ? "yes" : "no",
 		(unsigned long long)mStaticMapScene.buildSerial,
@@ -8296,6 +8296,7 @@ void NRIRenderer::PrintStaticMapSceneStatus() const
 		mStaticMapScene.animatedRefreshCount,
 		mStaticMapScene.animatedRefreshUploadCount,
 		mStaticMapScene.animatedGeometryFallbackCount,
+		mStaticMapScene.animatedRefreshSuppressedChunkCount,
 		mStaticMapScene.reuseCount,
 		mUploadedStaticMapSceneLastFrame ? "yes" : "no",
 		mBuiltStaticMapSceneASLastFrame ? "yes" : "no",
@@ -12622,6 +12623,19 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 		: nullptr;
 	bool refreshedAnyChunk = false;
 	uint32_t refreshedChunkCount = 0;
+	const auto suppressAnimatedChunkRefresh = [&](StaticMapSceneCache::ChunkCache& targetChunk, const char* reason)
+	{
+		if (targetChunk.animatedRefreshSuppressed)
+		{
+			return;
+		}
+
+		targetChunk.animatedRefreshSuppressed = true;
+		mStaticMapScene.animatedRefreshSuppressedChunkCount++;
+		Printf("NRI PT static scene anim: suppressing chunk=%u resident animated refresh (%s).\n",
+			targetChunk.chunkIndex,
+			reason != nullptr ? reason : "unknown");
+	};
 
 	for (size_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
 	{
@@ -12634,7 +12648,9 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 			mPreservedStaticMapSky = {};
 			return EnsureStaticMapScene();
 		}
-		if (!chunkCache.hasAnimatedTextureCandidates || !IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunkCache.chunkIndex))
+		if (!chunkCache.hasAnimatedTextureCandidates ||
+			chunkCache.animatedRefreshSuppressed ||
+			!IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunkCache.chunkIndex))
 		{
 			continue;
 		}
@@ -12642,11 +12658,8 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 		nri_scene::SceneView liveChunkView = mStaticMapScene.lightChunkViews[chunkListIndex];
 		if (!RefreshAnimatedBindingsForStaticMapChunk(mMapWorld, mMapWorld.chunks[chunkCache.chunkIndex], liveChunkView))
 		{
-			DestroyStaticMapSceneCache();
-			mStaticMapScene = {};
-			mStaticAccelerationBuildSerial = 0;
-			mPreservedStaticMapSky = {};
-			return EnsureStaticMapScene();
+			suppressAnimatedChunkRefresh(chunkCache, "surface-mapping-mismatch");
+			continue;
 		}
 		const uint64_t liveAnimatedMaterialSignature = ComputeAnimatedMaterialSignature(liveChunkView);
 		if (liveAnimatedMaterialSignature == chunkCache.animatedMaterialSignature)
@@ -12658,11 +12671,8 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 		if (liveAnimatedGeometrySignature != chunkCache.animatedGeometrySignature)
 		{
 			mStaticMapScene.animatedGeometryFallbackCount++;
-			DestroyStaticMapSceneCache();
-			mStaticMapScene = {};
-			mStaticAccelerationBuildSerial = 0;
-			mPreservedStaticMapSky = {};
-			return EnsureStaticMapScene();
+			suppressAnimatedChunkRefresh(chunkCache, "display-metric-mismatch");
+			continue;
 		}
 
 		nri_scene::MaterialBridgeData liveChunkMaterials;
@@ -12673,11 +12683,8 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 		if ((uint32_t)liveChunkMaterials.materials.size() != chunkCache.materialCount)
 		{
 			mStaticMapScene.animatedGeometryFallbackCount++;
-			DestroyStaticMapSceneCache();
-			mStaticMapScene = {};
-			mStaticAccelerationBuildSerial = 0;
-			mPreservedStaticMapSky = {};
-			return EnsureStaticMapScene();
+			suppressAnimatedChunkRefresh(chunkCache, "material-slice-mismatch");
+			continue;
 		}
 
 		mStaticMapScene.lightChunkViews[chunkListIndex] = std::move(liveChunkView);
@@ -12840,6 +12847,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 		chunkCache.animatedMaterialSignature = ComputeAnimatedMaterialSignature(chunkSceneView);
 		chunkCache.animatedGeometrySignature = ComputeAnimatedGeometrySignature(chunkSceneView);
 		chunkCache.hasAnimatedTextureCandidates = ChunkHasAnimatedStaticMapSurfaceCandidates(mMapWorld, chunk);
+		chunkCache.animatedRefreshSuppressed = false;
 
 		AppendGeometry(chunkGeometry, chunkCache.materialOffset, mStaticMapScene.geometry);
 		AppendMaterialBridge(chunkMaterials, mStaticMapScene.materialBridge);
