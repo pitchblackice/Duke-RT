@@ -449,6 +449,7 @@ private:
 			uint32_t materialCount = 0;
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t animatedGeometrySignature = 0;
+			bool hasAnimatedTextureCandidates = false;
 			nri_scene::MaterialBridgeData materialBridge;
 			NRIAccelerationStructureResource accelerationStructure;
 		};
@@ -461,6 +462,7 @@ private:
 		uint32_t sceneBuildCount = 0;
 		uint32_t gpuUploadCount = 0;
 		uint32_t accelerationBuildCount = 0;
+		uint32_t animatedCandidateChunkCount = 0;
 		uint32_t animatedRefreshCount = 0;
 		uint32_t animatedRefreshUploadCount = 0;
 		uint32_t animatedGeometryFallbackCount = 0;

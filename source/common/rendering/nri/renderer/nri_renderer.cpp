@@ -4754,6 +4754,130 @@ namespace
 		return hash;
 	}
 
+	static FTextureID ResolveAuthoredTextureIdForStaticMapSurface(const nri_scene::PTMapSurface& surface)
+	{
+		switch (surface.kind)
+		{
+		case nri_scene::PTMapSurfaceKind::Floor:
+		{
+			const int32_t sectorIndex = surface.surface.provenance.sectorIndex;
+			return sectorIndex >= 0 && (unsigned)sectorIndex < sector.Size() ? sector[(unsigned)sectorIndex].floortexture : FNullTextureID();
+		}
+		case nri_scene::PTMapSurfaceKind::Ceiling:
+		{
+			const int32_t sectorIndex = surface.surface.provenance.sectorIndex;
+			return sectorIndex >= 0 && (unsigned)sectorIndex < sector.Size() ? sector[(unsigned)sectorIndex].ceilingtexture : FNullTextureID();
+		}
+		case nri_scene::PTMapSurfaceKind::WallOneSided:
+		{
+			const int32_t wallIndex = surface.surface.provenance.wallIndex;
+			if (wallIndex < 0 || (unsigned)wallIndex >= wall.Size())
+			{
+				return FNullTextureID();
+			}
+
+			const walltype& wal = wall[(unsigned)wallIndex];
+			return ((wal.cstat & CSTAT_WALL_1WAY) != 0 && wal.nextwall != -1) ? wal.overtexture : wal.walltexture;
+		}
+		case nri_scene::PTMapSurfaceKind::WallUpper:
+		{
+			const int32_t wallIndex = surface.surface.provenance.wallIndex;
+			return wallIndex >= 0 && (unsigned)wallIndex < wall.Size() ? wall[(unsigned)wallIndex].walltexture : FNullTextureID();
+		}
+		case nri_scene::PTMapSurfaceKind::WallMiddle:
+		{
+			const int32_t wallIndex = surface.surface.provenance.wallIndex;
+			return wallIndex >= 0 && (unsigned)wallIndex < wall.Size() ? wall[(unsigned)wallIndex].overtexture : FNullTextureID();
+		}
+		case nri_scene::PTMapSurfaceKind::WallLower:
+		{
+			const int32_t wallIndex = surface.surface.provenance.wallIndex;
+			if (wallIndex < 0 || (unsigned)wallIndex >= wall.Size())
+			{
+				return FNullTextureID();
+			}
+
+			const walltype& wal = wall[(unsigned)wallIndex];
+			if ((wal.cstat & CSTAT_WALL_BOTTOM_SWAP) != 0 && wal.nextwall >= 0 && (unsigned)wal.nextwall < wall.Size())
+			{
+				return wall[(unsigned)wal.nextwall].walltexture;
+			}
+			return wal.walltexture;
+		}
+		default:
+			return FNullTextureID();
+		}
+	}
+
+	static bool IsAnimatedStaticMapSurfaceCandidate(const nri_scene::PTMapSurface& surface)
+	{
+		const FTextureID textureId = ResolveAuthoredTextureIdForStaticMapSurface(surface);
+		return textureId.isValid() && GetExtInfo(textureId).picanm.type() != 0;
+	}
+
+	static bool ChunkHasAnimatedStaticMapSurfaceCandidates(const nri_scene::PTMapWorld& mapWorld, const nri_scene::PTMapChunk& chunk)
+	{
+		const uint32_t endSurface = std::min<uint32_t>(chunk.firstSurface + chunk.surfaceCount, (uint32_t)mapWorld.surfaces.size());
+		for (uint32_t surfaceIndex = chunk.firstSurface; surfaceIndex < endSurface; ++surfaceIndex)
+		{
+			if (IsAnimatedStaticMapSurfaceCandidate(mapWorld.surfaces[surfaceIndex]))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	static bool RefreshAnimatedBindingsForStaticMapChunk(
+		const nri_scene::PTMapWorld& mapWorld,
+		const nri_scene::PTMapChunk& chunk,
+		nri_scene::SceneView& ioChunkView)
+	{
+		uint32_t wallSurfaceIndex = 0;
+		uint32_t flatSurfaceIndex = 0;
+		const uint32_t endSurface = std::min<uint32_t>(chunk.firstSurface + chunk.surfaceCount, (uint32_t)mapWorld.surfaces.size());
+		for (uint32_t surfaceIndex = chunk.firstSurface; surfaceIndex < endSurface; ++surfaceIndex)
+		{
+			const auto& mapSurface = mapWorld.surfaces[surfaceIndex];
+			if ((mapSurface.surface.material.flags & nri_scene::MaterialFlag_Sky) != 0 && mapSurface.surface.material.texture != nullptr)
+			{
+				continue;
+			}
+
+			nri_scene::SurfaceRef* targetSurface = nullptr;
+			switch (mapSurface.kind)
+			{
+			case nri_scene::PTMapSurfaceKind::Floor:
+			case nri_scene::PTMapSurfaceKind::Ceiling:
+				if (flatSurfaceIndex >= ioChunkView.opaqueFlats.size())
+				{
+					return false;
+				}
+				targetSurface = &ioChunkView.opaqueFlats[flatSurfaceIndex++];
+				break;
+			default:
+				if (wallSurfaceIndex >= ioChunkView.opaqueWalls.size())
+				{
+					return false;
+				}
+				targetSurface = &ioChunkView.opaqueWalls[wallSurfaceIndex++];
+				break;
+			}
+
+			if (!IsAnimatedStaticMapSurfaceCandidate(mapSurface))
+			{
+				continue;
+			}
+
+			const FTextureID textureId = ResolveAuthoredTextureIdForStaticMapSurface(mapSurface);
+			FGameTexture* liveTexture = textureId.isValid() ? TexMan.GetGameTexture(textureId, true) : nullptr;
+			targetSurface->material.texture = liveTexture;
+		}
+
+		return wallSurfaceIndex == ioChunkView.opaqueWalls.size() && flatSurfaceIndex == ioChunkView.opaqueFlats.size();
+	}
+
 	static uint64_t BuildEmissiveTlasInstancePayloadHash(const std::vector<nri::TopLevelInstance>& instances)
 	{
 		uint64_t hash = 1469598103934665603ull;
@@ -8161,13 +8285,14 @@ void NRIRenderer::PrintPortalTraversalStatus() const
 void NRIRenderer::PrintStaticMapSceneStatus() const
 {
 	const char* source = mUsedStaticMapSceneLastFrame ? "authoritative-map-world" : "captured-scene";
-	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u animated_refreshes=%u animated_refresh_uploads=%u animated_geometry_fallbacks=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s chunks=%u tlas_instances=%u tris=%u materials=%u\n",
+	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u animated_candidate_chunks=%u animated_refreshes=%u animated_refresh_uploads=%u animated_geometry_fallbacks=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s chunks=%u tlas_instances=%u tris=%u materials=%u\n",
 		source,
 		(mStaticMapScene.valid && mStaticMapScene.texturesResident && mStaticMapScene.buffersResident && mStaticMapScene.accelerationResident) ? "yes" : "no",
 		(unsigned long long)mStaticMapScene.buildSerial,
 		mStaticMapScene.sceneBuildCount,
 		mStaticMapScene.gpuUploadCount,
 		mStaticMapScene.accelerationBuildCount,
+		mStaticMapScene.animatedCandidateChunkCount,
 		mStaticMapScene.animatedRefreshCount,
 		mStaticMapScene.animatedRefreshUploadCount,
 		mStaticMapScene.animatedGeometryFallbackCount,
@@ -12509,9 +12634,20 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 			mPreservedStaticMapSky = {};
 			return EnsureStaticMapScene();
 		}
+		if (!chunkCache.hasAnimatedTextureCandidates || !IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunkCache.chunkIndex))
+		{
+			continue;
+		}
 
-		nri_scene::SceneView liveChunkView;
-		nri_scene::BuildMapChunkSceneView(mMapWorld, mMapWorld.chunks[chunkCache.chunkIndex], liveChunkView, preservedSkyView);
+		nri_scene::SceneView liveChunkView = mStaticMapScene.lightChunkViews[chunkListIndex];
+		if (!RefreshAnimatedBindingsForStaticMapChunk(mMapWorld, mMapWorld.chunks[chunkCache.chunkIndex], liveChunkView))
+		{
+			DestroyStaticMapSceneCache();
+			mStaticMapScene = {};
+			mStaticAccelerationBuildSerial = 0;
+			mPreservedStaticMapSky = {};
+			return EnsureStaticMapScene();
+		}
 		const uint64_t liveAnimatedMaterialSignature = ComputeAnimatedMaterialSignature(liveChunkView);
 		if (liveAnimatedMaterialSignature == chunkCache.animatedMaterialSignature)
 		{
@@ -12703,10 +12839,15 @@ bool NRIRenderer::EnsureStaticMapScene()
 		chunkCache.materialCount = (uint32_t)chunkMaterials.materials.size();
 		chunkCache.animatedMaterialSignature = ComputeAnimatedMaterialSignature(chunkSceneView);
 		chunkCache.animatedGeometrySignature = ComputeAnimatedGeometrySignature(chunkSceneView);
+		chunkCache.hasAnimatedTextureCandidates = ChunkHasAnimatedStaticMapSurfaceCandidates(mMapWorld, chunk);
 
 		AppendGeometry(chunkGeometry, chunkCache.materialOffset, mStaticMapScene.geometry);
 		AppendMaterialBridge(chunkMaterials, mStaticMapScene.materialBridge);
 		chunkCache.materialBridge = std::move(chunkMaterials);
+		if (chunkCache.hasAnimatedTextureCandidates)
+		{
+			mStaticMapScene.animatedCandidateChunkCount++;
+		}
 		mStaticMapScene.lightChunkViews.push_back(std::move(chunkSceneView));
 		mStaticMapScene.chunks.push_back(std::move(chunkCache));
 	}
