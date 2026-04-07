@@ -2819,6 +2819,25 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.persistentDynamicFlatSurfaceCount,
 			shell.persistentDynamicSpriteSurfaceCount);
 		Printf(
+			"PERF pt mutation detail NRI: frame=%llu structural_ms=%.3f material_refresh_ms=%.3f structural=%u material_refresh=%u refresh_delta=%u refresh_delta_mask=0x%x refresh_hwcanvas=%u refresh_animated=%u struct_delta=%u struct_delta_mask=0x%x struct_view=%u struct_static_anim_flip=%u struct_excl_static_flip=%u struct_force_topology=%u struct_invalid=%u hwcanvas_chunks=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeMutationStructuralRebuildMs,
+			shell.runtimeMutationMaterialRefreshMs,
+			shell.runtimeMutationStructuralRebuildChunks,
+			shell.runtimeMutationMaterialRefreshChunks,
+			shell.runtimeMutationMaterialRefreshReplacementDeltaChunks,
+			shell.runtimeMutationMaterialRefreshReasonMaskOr,
+			shell.runtimeMutationMaterialRefreshHardwareCanvasChunks,
+			shell.runtimeMutationMaterialRefreshAnimatedChunks,
+			shell.runtimeMutationStructuralReplacementDeltaChunks,
+			shell.runtimeMutationStructuralReplacementDeltaReasonMaskOr,
+			shell.runtimeMutationStructuralReplacementViewChangedChunks,
+			shell.runtimeMutationStructuralStaticAnimatedModeFlipChunks,
+			shell.runtimeMutationStructuralExcludeStaticFlipChunks,
+			shell.runtimeMutationStructuralForcedTopologyChunks,
+			shell.runtimeMutationStructuralInvalidChunks,
+			shell.runtimeMutationHardwareCanvasChunkCount);
+		Printf(
 			"PERF pt texture detail NRI: frame=%llu cache=%u misses=%u inserts=%u transitions=%u lookup_ms=%.3f realize_ms=%.3f descriptor_ms=%.3f transition_ms=%.3f material_builds=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneTextureCacheCount,

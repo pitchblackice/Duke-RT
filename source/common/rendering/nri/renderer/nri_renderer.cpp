@@ -8754,6 +8754,23 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mLastPerfShellTraceStats.actorOverrideMapBuildCalls,
 		mLastPerfShellTraceStats.actorOverrideMapBuildMs,
 		mLastPerfShellTraceStats.materialBuildMs);
+	Printf("NRI PT mutation detail: structural_ms=%.3f material_refresh_ms=%.3f structural=%u material_refresh=%u refresh_delta=%u refresh_delta_mask=0x%x refresh_hwcanvas=%u refresh_animated=%u struct_delta=%u struct_delta_mask=0x%x struct_view=%u struct_static_anim_flip=%u struct_excl_static_flip=%u struct_force_topology=%u struct_invalid=%u hwcanvas_chunks=%u\n",
+		mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs,
+		mLastPerfShellTraceStats.runtimeMutationMaterialRefreshMs,
+		mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks,
+		mLastPerfShellTraceStats.runtimeMutationMaterialRefreshChunks,
+		mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReplacementDeltaChunks,
+		mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr,
+		mLastPerfShellTraceStats.runtimeMutationMaterialRefreshHardwareCanvasChunks,
+		mLastPerfShellTraceStats.runtimeMutationMaterialRefreshAnimatedChunks,
+		mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaChunks,
+		mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaReasonMaskOr,
+		mLastPerfShellTraceStats.runtimeMutationStructuralReplacementViewChangedChunks,
+		mLastPerfShellTraceStats.runtimeMutationStructuralStaticAnimatedModeFlipChunks,
+		mLastPerfShellTraceStats.runtimeMutationStructuralExcludeStaticFlipChunks,
+		mLastPerfShellTraceStats.runtimeMutationStructuralForcedTopologyChunks,
+		mLastPerfShellTraceStats.runtimeMutationStructuralInvalidChunks,
+		mLastPerfShellTraceStats.runtimeMutationHardwareCanvasChunkCount);
 	for (size_t index = 0; index < NRIRenderer::MaterialBuildTraceSlotCount; ++index)
 	{
 		const auto& entry = mLastPerfShellTraceStats.materialBuildByLabel[index];
@@ -14831,10 +14848,26 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	bool startupMaterialOnlyMutationDetected = false;
 	uint32_t stableRetireEligibleChunkCount = 0;
 	uint32_t maxStableMutationFrames = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationRebuiltChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationHeldChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationReplacedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshAnimatedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReplacementDeltaChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshHardwareCanvasChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralReplacementViewChangedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralStaticAnimatedModeFlipChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralExcludeStaticFlipChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralForcedTopologyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralInvalidChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationHardwareCanvasChunkCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr = 0;
 	mLastPerfShellTraceStats.runtimeMutationActiveChunkCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationValidChunkCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationExcludedStaticChunkCount = 0;
@@ -15131,20 +15164,57 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			useStaticAnimatedReplacement ||
 			!materialOnlyReplacement ||
 			exclusiveMaterialOnlyReplacement;
-		const bool needsStructuralRebuild =
-			!replacement.valid ||
-			forceTopologyInvalidation ||
+		const bool structuralInvalid = !replacement.valid;
+		const bool structuralReplacementDelta =
 			!analyzedReplacementDelta ||
-			(replacementDelta.reasonMask & structuralReasonMask) != 0 ||
-			replacementViewChanged ||
-			replacement.excludeStaticChunk != desiredExcludeStaticChunk ||
+			(replacementDelta.reasonMask & structuralReasonMask) != 0;
+		const bool structuralStaticAnimatedModeFlip =
 			replacement.staticAnimatedReplacement != useStaticAnimatedReplacement;
+		const bool structuralExcludeStaticFlip =
+			replacement.excludeStaticChunk != desiredExcludeStaticChunk;
+		const bool needsStructuralRebuild =
+			structuralInvalid ||
+			forceTopologyInvalidation ||
+			structuralReplacementDelta ||
+			replacementViewChanged ||
+			structuralExcludeStaticFlip ||
+			structuralStaticAnimatedModeFlip;
 
 		if (needsStructuralRebuild)
 		{
+			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks++;
+			if (structuralReplacementDelta)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaChunks++;
+				if (analyzedReplacementDelta)
+				{
+					mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaReasonMaskOr |= replacementDelta.reasonMask;
+				}
+			}
+			if (replacementViewChanged)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralReplacementViewChangedChunks++;
+			}
+			if (structuralStaticAnimatedModeFlip)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralStaticAnimatedModeFlipChunks++;
+			}
+			if (structuralExcludeStaticFlip)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralExcludeStaticFlipChunks++;
+			}
+			if (forceTopologyInvalidation)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralForcedTopologyChunks++;
+			}
+			if (structuralInvalid)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralInvalidChunks++;
+			}
 			const bool builtChunk = [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationRebuildMs);
+				ScopedPtPerfTimer structuralPerfTimer(mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs);
 				if (!prepareLiveChunkView())
 				{
 					return false;
@@ -15174,6 +15244,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		else
 		{
 			replacement.active = true;
+			bool activeHardwareCanvasChunk = false;
 			// Build tile animation can change the resolved PT texture binding
 			// without mutating the authored wall/sector fields tracked above.
 			const bool refreshedAnimatedChunk = [&]()
@@ -15186,8 +15257,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					return false;
 				}
 
+				activeHardwareCanvasChunk = SceneViewUsesHardwareCanvasTexture(liveChunkView);
 				const bool forceHardwareCanvasRefresh =
-					SceneViewUsesHardwareCanvasTexture(liveChunkView) &&
+					activeHardwareCanvasChunk &&
 					IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
 				const uint64_t liveAnimatedMaterialSignature =
 					ComputeAnimatedMaterialSignature(liveChunkView);
@@ -15199,13 +15271,25 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				}
 
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationRebuildMs);
+				ScopedPtPerfTimer materialRefreshPerfTimer(mLastPerfShellTraceStats.runtimeMutationMaterialRefreshMs);
 				if (!refreshReplacementMaterialsFromPreparedLiveChunk())
 				{
 					return false;
 				}
 
-				if (!forceReplacementMaterialRefresh)
+				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshChunks++;
+				if (forceReplacementMaterialRefresh)
 				{
+					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReplacementDeltaChunks++;
+					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr |= replacementDelta.reasonMask;
+				}
+				if (forceHardwareCanvasRefresh)
+				{
+					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshHardwareCanvasChunks++;
+				}
+				if (!forceReplacementMaterialRefresh && !forceHardwareCanvasRefresh)
+				{
+					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshAnimatedChunks++;
 					replacement.animationOnlyRefreshed = true;
 					mRuntimeMapLastFrame.animatedRefreshChunkCount++;
 				}
@@ -15217,6 +15301,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				mRuntimeMapLastFrame.heldChunkCount++;
 				mLastPerfShellTraceStats.runtimeMutationHeldChunks++;
 			}
+		}
+
+		if (replacement.active &&
+			SceneViewUsesHardwareCanvasTexture(replacement.sceneView))
+		{
+			mLastPerfShellTraceStats.runtimeMutationHardwareCanvasChunkCount++;
 		}
 
 		const uint32_t transientReasonMask =
