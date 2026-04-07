@@ -581,10 +581,12 @@ private:
 			bool dragged = false;
 			bool blindSpot = false;
 			bool excludeStaticChunk = false;
+			bool staticAnimatedReplacement = false;
 			bool lastTraceActive = false;
 			bool lastTraceBlindSpot = false;
 			bool animationOnlyRefreshed = false;
 			bool lastTraceAnimationOnlyRefreshed = false;
+			bool lastTraceStaticAnimatedReplacement = false;
 			uint32_t surfaceCount = 0;
 			uint32_t triangleCount = 0;
 			SceneLightSystem::SurfaceIdentityOverrides lightIdentityOverrides;

@@ -9023,18 +9023,20 @@ void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapC
 		replacement.lastTraceReasonMask != replacement.reasonMask ||
 		replacement.lastTraceActive != replacement.active ||
 		replacement.lastTraceBlindSpot != replacement.blindSpot ||
-		replacement.lastTraceAnimationOnlyRefreshed != replacement.animationOnlyRefreshed;
+		replacement.lastTraceAnimationOnlyRefreshed != replacement.animationOnlyRefreshed ||
+		replacement.lastTraceStaticAnimatedReplacement != replacement.staticAnimatedReplacement;
 	if (!changed)
 	{
 		return;
 	}
 
 	const std::string reasons = GetRuntimeMapMutationReasonSummary(replacement.reasonMask);
-	Printf("NRI PT runtime map trace: chunk=%u sector=%d active=%s blind_spot=%s signature_changed=%s anim_refresh=%s baseline_sig=0x%llx live_sig=0x%llx anim_sig=0x%llx reasons=%s section_dirty=%u sector_dirty=%s dragged=%s surfaces=%u tris=%u materials=%u\n",
+	Printf("NRI PT runtime map trace: chunk=%u sector=%d active=%s blind_spot=%s static_anim=%s signature_changed=%s anim_refresh=%s baseline_sig=0x%llx live_sig=0x%llx anim_sig=0x%llx reasons=%s section_dirty=%u sector_dirty=%s dragged=%s surfaces=%u tris=%u materials=%u\n",
 		mapChunk.chunkIndex,
 		mapChunk.sectorIndex,
 		replacement.active ? "yes" : "no",
 		replacement.blindSpot ? "yes" : "no",
+		replacement.staticAnimatedReplacement ? "yes" : "no",
 		replacement.liveSignature != replacement.baselineSignature ? "yes" : "no",
 		replacement.animationOnlyRefreshed ? "yes" : "no",
 		(unsigned long long)replacement.baselineSignature,
@@ -9054,6 +9056,7 @@ void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapC
 	replacement.lastTraceActive = replacement.active;
 	replacement.lastTraceBlindSpot = replacement.blindSpot;
 	replacement.lastTraceAnimationOnlyRefreshed = replacement.animationOnlyRefreshed;
+	replacement.lastTraceStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
 	replacement.traceCount++;
 }
 
@@ -12806,6 +12809,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 			replacement.dragged = false;
 			replacement.blindSpot = false;
 			replacement.excludeStaticChunk = false;
+			replacement.staticAnimatedReplacement = false;
 			replacement.lastTraceSignature = UINT64_MAX;
 			replacement.lastTraceAnimatedMaterialSignature = UINT64_MAX;
 			replacement.lastTraceReasonMask = UINT32_MAX;
@@ -12813,6 +12817,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 			replacement.lastTraceBlindSpot = false;
 			replacement.animationOnlyRefreshed = false;
 			replacement.lastTraceAnimationOnlyRefreshed = false;
+			replacement.lastTraceStaticAnimatedReplacement = false;
 			replacement.traceCount = 0;
 		}
 
@@ -14249,6 +14254,27 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	}
 
 	std::fill(mRuntimeMapMutations.replacedChunkMask.begin(), mRuntimeMapMutations.replacedChunkMask.end(), 0u);
+	const auto isVisibleSuppressedStaticAnimatedChunk = [&](uint32_t mapChunkIndex) -> bool
+	{
+		if (!IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunkIndex))
+		{
+			return false;
+		}
+
+		for (const auto& staticChunk : mStaticMapScene.chunks)
+		{
+			if (staticChunk.chunkIndex != mapChunkIndex)
+			{
+				continue;
+			}
+
+			return
+				staticChunk.hasAnimatedTextureCandidates &&
+				staticChunk.animatedRefreshSuppressed;
+		}
+
+		return false;
+	};
 
 	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
 	{
@@ -14270,6 +14296,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.dragged = false;
 			replacement.blindSpot = false;
 			replacement.excludeStaticChunk = false;
+			replacement.staticAnimatedReplacement = false;
 			replacement.animationOnlyRefreshed = false;
 			replacement.animatedMaterialSignature = 0;
 			replacement.lightIdentityOverrides.Clear();
@@ -14283,6 +14310,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		replacement.sectionDirtyCount = analysis.sectionDirtyCount;
 		replacement.sectorDirty = analysis.sectorDirty;
 		replacement.dragged = analysis.dragged;
+		replacement.staticAnimatedReplacement = false;
 		replacement.blindSpot = analysis.reasonMask != nri_scene::PTMapChunkMutationReason_None && !analysis.signatureChanged;
 		// Section dirty alone is too broad for PT runtime replacement because
 		// the raster path can mark transient warped sections dirty during draw
@@ -14332,10 +14360,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mRuntimeMapLastFrame.draggedChunkCount++;
 		}
 
-		if (analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None)
+		const bool useStaticAnimatedReplacement =
+			analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None &&
+			isVisibleSuppressedStaticAnimatedChunk(mapChunk.chunkIndex);
+		if (analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None && !useStaticAnimatedReplacement)
 		{
 			replacement.active = false;
 			replacement.excludeStaticChunk = false;
+			replacement.staticAnimatedReplacement = false;
 			replacement.animationOnlyRefreshed = false;
 			replacement.animatedMaterialSignature = 0;
 			replacement.lightIdentityOverrides.Clear();
@@ -14344,11 +14376,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			continue;
 		}
 
-		mRuntimeMapLastFrame.dirtyChunkCount++;
-		mLastPerfShellTraceStats.runtimeMutationDirtyChunks++;
-		if (replacement.blindSpot)
+		if (!useStaticAnimatedReplacement)
 		{
-			mRuntimeMapLastFrame.blindSpotChunkCount++;
+			mRuntimeMapLastFrame.dirtyChunkCount++;
+			mLastPerfShellTraceStats.runtimeMutationDirtyChunks++;
+			if (replacement.blindSpot)
+			{
+				mRuntimeMapLastFrame.blindSpotChunkCount++;
+			}
 		}
 
 		const bool materialOnlyReplacement = IsMaterialOnlyChunkReplacement(analysis.reasonMask);
@@ -14390,6 +14425,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
 				RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
+			const bool excludeStaticChunk =
+				useStaticAnimatedReplacement ||
+				!materialOnlyReplacement ||
+				exclusiveMaterialOnlyReplacement;
 			BuildRuntimeMutationLightIdentityOverrides(
 				mMapWorld,
 				mapChunk,
@@ -14417,7 +14456,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.animatedMaterialSignature = ComputeAnimatedMaterialSignature(replacement.sceneView);
 			replacement.valid = true;
 			replacement.active = true;
-			replacement.excludeStaticChunk = !materialOnlyReplacement || exclusiveMaterialOnlyReplacement;
+			replacement.excludeStaticChunk = excludeStaticChunk;
+			replacement.staticAnimatedReplacement = useStaticAnimatedReplacement;
 			if (countAsStructuralRebuild)
 			{
 				mRuntimeMapLastFrame.rebuiltChunkCount++;
@@ -14425,10 +14465,19 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 			return true;
 		};
+		const bool exclusiveMaterialOnlyReplacement =
+			materialOnlyReplacement &&
+			RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
+		const bool desiredExcludeStaticChunk =
+			useStaticAnimatedReplacement ||
+			!materialOnlyReplacement ||
+			exclusiveMaterialOnlyReplacement;
 		const bool needsStructuralRebuild =
 			!replacement.valid ||
 			cachedSignature != replacement.liveSignature ||
-			forceTopologyInvalidation;
+			forceTopologyInvalidation ||
+			replacement.excludeStaticChunk != desiredExcludeStaticChunk ||
+			replacement.staticAnimatedReplacement != useStaticAnimatedReplacement;
 
 		if (needsStructuralRebuild)
 		{
@@ -14451,6 +14500,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				replacement.active = false;
 				replacement.excludeStaticChunk = false;
+				replacement.staticAnimatedReplacement = false;
 				replacement.animationOnlyRefreshed = false;
 				replacement.animatedMaterialSignature = 0;
 				replacement.lightIdentityOverrides.Clear();
