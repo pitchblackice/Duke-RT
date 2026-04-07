@@ -749,6 +749,11 @@ private:
 	void TraceActorSpriteMaterialAssignments(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel);
 	void TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet);
 	uint32_t CountPotentialOutstandingQueuedFrames() const;
+	uint32_t GetCurrentQueuedFrameIndex() const;
+	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
+	nri::DescriptorSet* GetCurrentSceneDataSet() const;
+	bool IsCurrentSceneDataDescriptorsInitialized() const;
+	void SetCurrentSceneDataDescriptorsInitialized(bool value);
 	void BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr) const;
 	void BuildFilteredStaticMapGeometry(const std::vector<uint8_t>& replacedChunkMask, nri_scene::GeometryData& outGeometry) const;
 	bool RestoreStaticTopLevelScene();
@@ -869,8 +874,8 @@ private:
 	nri::PipelineLayout* mPresentPipelineLayout = nullptr;
 	std::array<nri::Pipeline*, (size_t)PipelineSlot::Count> mPipelines = {};
 	nri::DescriptorSet* mSamplerSet = nullptr;
-	nri::DescriptorSet* mSceneTextureSet = nullptr;
-	nri::DescriptorSet* mSceneDataSet = nullptr;
+	std::vector<nri::DescriptorSet*> mSceneTextureSets;
+	std::vector<nri::DescriptorSet*> mSceneDataSets;
 	nri::DescriptorSet* mFrameTextureSet = nullptr;
 	nri::DescriptorSet* mOutputSet = nullptr;
 	nri::DescriptorSet* mCompositionFrameTextureSet = nullptr;
@@ -1060,7 +1065,7 @@ private:
 	uint32_t mBoundRuntimeLightTileSize = 0;
 	uint32_t mBoundRuntimeLightTileIndexCount = 0;
 	uint32_t mBoundRuntimeLightMaxTileOccupancy = 0;
-	bool mSceneDataDescriptorsInitialized = false;
+	std::vector<uint8_t> mSceneDataDescriptorsInitialized;
 	bool mRuntimeLightPayloadCacheValid = false;
 	uint64_t mRuntimeLightPayloadHash = 0;
 	bool mRuntimeLightClusterCacheValid = false;

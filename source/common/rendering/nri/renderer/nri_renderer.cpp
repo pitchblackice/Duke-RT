@@ -5272,7 +5272,8 @@ void NRIRenderer::Shutdown()
 	}
 
 	mSamplerSet = nullptr;
-	mSceneTextureSet = nullptr;
+	mSceneTextureSets.clear();
+	mSceneDataSets.clear();
 	mFrameTextureSet = nullptr;
 	mOutputSet = nullptr;
 	mCompositionFrameTextureSet = nullptr;
@@ -5285,6 +5286,7 @@ void NRIRenderer::Shutdown()
 	mRawPresentOutputSet = nullptr;
 	mFinalPresentFrameTextureSet = nullptr;
 	mFinalPresentOutputSet = nullptr;
+	mSceneDataDescriptorsInitialized.clear();
 }
 
 void NRIRenderer::RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightOverlaySet& resolvedLightOverlays)
@@ -10983,10 +10985,28 @@ bool NRIRenderer::CreatePipelines()
 
 bool NRIRenderer::AllocateDescriptorSets()
 {
+	const uint32_t queuedFrameCount = mFrameBuffer != nullptr ? std::max(1u, (uint32_t)mFrameBuffer->mQueuedFrames.size()) : 1u;
+	mSceneTextureSets.assign(queuedFrameCount, nullptr);
+	mSceneDataSets.assign(queuedFrameCount, nullptr);
+	mSceneDataDescriptorsInitialized.assign(queuedFrameCount, 0u);
+
+	auto allocateQueuedSets = [&](nri::PipelineLayout* layout, uint32_t setIndex, std::vector<nri::DescriptorSet*>& sets) -> bool
+	{
+		for (nri::DescriptorSet*& set : sets)
+		{
+			if (mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *layout, setIndex, &set, 1, 0) != nri::Result::SUCCESS)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	};
+
 	return
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 0, &mSamplerSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 1, &mSceneTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 2, &mSceneDataSet, 1, 0) == nri::Result::SUCCESS &&
+		allocateQueuedSets(mPipelineLayout, 1, mSceneTextureSets) &&
+		allocateQueuedSets(mPipelineLayout, 2, mSceneDataSets) &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &mOutputSet, 1, 0) == nri::Result::SUCCESS &&
 		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mCompositionFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
@@ -11026,8 +11046,14 @@ bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& des
 		mDescriptorCoherencyDebugStats.forcedSceneTextureSyncs++;
 	}
 
+	nri::DescriptorSet* sceneTextureSet = GetCurrentSceneTextureSet();
+	if (sceneTextureSet == nullptr)
+	{
+		return false;
+	}
+
 	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = mSceneTextureSet;
+	update.descriptorSet = sceneTextureSet;
 	update.rangeIndex = 0;
 	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(descriptors.data());
 	update.descriptorNum = (uint32_t)descriptors.size();
@@ -11526,7 +11552,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	mSceneDataDescriptors[14] = mEmissivePrimitiveBuffer.shaderView;
 	mSceneDataDescriptors[15] = mEmissivePrimitiveCdfBuffer.shaderView;
 
-	bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
+	bool descriptorsReady = IsCurrentSceneDataDescriptorsInitialized() && GetCurrentSceneDataSet() != nullptr;
 	if (descriptorsReady)
 	{
 		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
@@ -11570,7 +11596,7 @@ bool NRIRenderer::UpdateReprojectionBuffer()
 	if (mSceneDataDescriptors[18] != mReprojectionBuffer.shaderView)
 	{
 		mSceneDataDescriptors[18] = mReprojectionBuffer.shaderView;
-		bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
+		bool descriptorsReady = IsCurrentSceneDataDescriptorsInitialized() && GetCurrentSceneDataSet() != nullptr;
 		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 		{
 			if (descriptor == nullptr)
@@ -11609,7 +11635,7 @@ bool NRIRenderer::UpdateVisibleChunkBuffer()
 	if (mSceneDataDescriptors[19] != mVisibleChunkBuffer.shaderView)
 	{
 		mSceneDataDescriptors[19] = mVisibleChunkBuffer.shaderView;
-		bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
+		bool descriptorsReady = IsCurrentSceneDataDescriptorsInitialized() && GetCurrentSceneDataSet() != nullptr;
 		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 		{
 			if (descriptor == nullptr)
@@ -11648,7 +11674,7 @@ bool NRIRenderer::UpdateVisibleFlatPlaneBuffer()
 	if (mSceneDataDescriptors[20] != mVisibleFlatPlaneBuffer.shaderView)
 	{
 		mSceneDataDescriptors[20] = mVisibleFlatPlaneBuffer.shaderView;
-		bool descriptorsReady = mSceneDataDescriptorsInitialized && mSceneDataSet != nullptr;
+		bool descriptorsReady = IsCurrentSceneDataDescriptorsInitialized() && GetCurrentSceneDataSet() != nullptr;
 		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 		{
 			if (descriptor == nullptr)
@@ -11811,7 +11837,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	uint32_t dynamicMaterialCount,
 	const char* reason)
 {
-	mSceneDataDescriptorsInitialized = false;
+	SetCurrentSceneDataDescriptorsInitialized(false);
 
 	if (!UpdateReprojectionBuffer())
 	{
@@ -12099,13 +12125,19 @@ bool NRIRenderer::CommitSceneDataDescriptors(const char* reason)
 		mDescriptorCoherencyDebugStats.forcedSceneDataSyncs++;
 	}
 
+	nri::DescriptorSet* sceneDataSet = GetCurrentSceneDataSet();
+	if (sceneDataSet == nullptr)
+	{
+		return false;
+	}
+
 	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = mSceneDataSet;
+	update.descriptorSet = sceneDataSet;
 	update.rangeIndex = 0;
 	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
 	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
-	mSceneDataDescriptorsInitialized = true;
+	SetCurrentSceneDataDescriptorsInitialized(true);
 	TraceSharedDescriptorRewrite(
 		"scene_data",
 		reason != nullptr ? reason : "unlabeled",
@@ -12411,8 +12443,8 @@ bool NRIRenderer::DispatchBootstrapView()
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	BindSceneRootDescriptors();
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Final));
@@ -13177,6 +13209,45 @@ uint32_t NRIRenderer::CountPotentialOutstandingQueuedFrames() const
 	}
 
 	return count;
+}
+
+uint32_t NRIRenderer::GetCurrentQueuedFrameIndex() const
+{
+	if (mFrameBuffer == nullptr || mFrameBuffer->mQueuedFrames.empty())
+	{
+		return 0;
+	}
+
+	return std::min<uint32_t>(mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mFrameBuffer->mQueuedFrames.size() - 1u);
+}
+
+nri::DescriptorSet* NRIRenderer::GetCurrentSceneTextureSet() const
+{
+	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
+	return queuedFrameIndex < mSceneTextureSets.size() ? mSceneTextureSets[queuedFrameIndex] : nullptr;
+}
+
+nri::DescriptorSet* NRIRenderer::GetCurrentSceneDataSet() const
+{
+	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
+	return queuedFrameIndex < mSceneDataSets.size() ? mSceneDataSets[queuedFrameIndex] : nullptr;
+}
+
+bool NRIRenderer::IsCurrentSceneDataDescriptorsInitialized() const
+{
+	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
+	return queuedFrameIndex < mSceneDataDescriptorsInitialized.size() && mSceneDataDescriptorsInitialized[queuedFrameIndex] != 0;
+}
+
+void NRIRenderer::SetCurrentSceneDataDescriptorsInitialized(bool value)
+{
+	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
+	if (queuedFrameIndex >= mSceneDataDescriptorsInitialized.size())
+	{
+		return;
+	}
+
+	mSceneDataDescriptorsInitialized[queuedFrameIndex] = value ? 1u : 0u;
 }
 
 void NRIRenderer::TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet)
@@ -15719,8 +15790,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	BindSceneRootDescriptors();
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::TraceOpaque));
@@ -15875,8 +15946,8 @@ bool NRIRenderer::DispatchComposition(FrameTextureSlot outputSlot)
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	BindSceneRootDescriptors();
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mCompositionFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mCompositionOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Composition));
@@ -15978,8 +16049,8 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	BindSceneRootDescriptors();
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mUpscalerPrepassFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mUpscalerPrepassOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(useSrPrepass ? PipelineSlot::DlssSrBefore : PipelineSlot::DlssBefore));
@@ -16375,8 +16446,8 @@ bool NRIRenderer::DispatchFinal()
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
 	BindSceneRootDescriptors();
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mSamplerSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, mSceneTextureSet, nri::BindPoint::COMPUTE });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, mSceneDataSet, nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::Final));
@@ -16954,7 +17025,10 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
-	mSceneDataDescriptorsInitialized = false;
+	for (uint8_t& initialized : mSceneDataDescriptorsInitialized)
+	{
+		initialized = 0u;
+	}
 	mSceneDataDescriptors.fill(nullptr);
 	mBoundStaticPrimitiveCount = 0;
 	mBoundDynamicPrimitiveCount = 0;
