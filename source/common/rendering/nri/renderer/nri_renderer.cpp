@@ -1274,12 +1274,18 @@ public:
 
 	static const char* GetSurfaceSourceTypeName(nri_scene::SurfaceSourceType sourceType);
 
+	static FTextureID GetLiveActorDisplayTextureId(const DCoreActor& actor)
+	{
+		return actor.dispictex.isValid() ? actor.dispictex : actor.spr.spritetexture();
+	}
+
 	static FGameTexture* GetLiveActorSurfaceTexture(const DCoreActor& actor, nri_scene::SurfaceSourceType sourceType)
 	{
 		switch (sourceType)
 		{
+		case nri_scene::SurfaceSourceType::DrawListWall:
 		case nri_scene::SurfaceSourceType::FacingSprite:
-			return TexMan.GetGameTexture(actor.spr.spritetexture());
+			return TexMan.GetGameTexture(GetLiveActorDisplayTextureId(actor));
 
 		case nri_scene::SurfaceSourceType::VoxelProxySprite:
 		{
@@ -1302,6 +1308,25 @@ public:
 		}
 	}
 
+	static bool SurfaceUsesLiveActorTextureValidation(const nri_scene::SurfaceRef& surface)
+	{
+		if (surface.provenance.actorIndex < 0)
+		{
+			return false;
+		}
+
+		switch (surface.provenance.sourceType)
+		{
+		case nri_scene::SurfaceSourceType::DrawListWall:
+			return (surface.material.flags & nri_scene::MaterialFlag_Sprite) != 0;
+		case nri_scene::SurfaceSourceType::FacingSprite:
+		case nri_scene::SurfaceSourceType::VoxelProxySprite:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	static ActorSpriteLiveMatchDetails EvaluateCachedSurfaceMatchAgainstLiveActor(const nri_scene::SurfaceRef& surface, const DCoreActor& actor)
 	{
 		ActorSpriteLiveMatchDetails details = {};
@@ -1311,6 +1336,7 @@ public:
 
 		switch (surface.provenance.sourceType)
 		{
+		case nri_scene::SurfaceSourceType::DrawListWall:
 		case nri_scene::SurfaceSourceType::FacingSprite:
 		case nri_scene::SurfaceSourceType::VoxelProxySprite:
 		{
@@ -8462,8 +8488,7 @@ void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 	{
 		for (const auto& surface : surfaces)
 		{
-			if (surface.provenance.sourceType == nri_scene::SurfaceSourceType::FacingSprite ||
-				surface.provenance.sourceType == nri_scene::SurfaceSourceType::VoxelProxySprite)
+			if (SurfaceUsesLiveActorTextureValidation(surface))
 			{
 				mActorSpriteDebugStats.lastPruneChecks++;
 				if (surface.provenance.actorIndex < 0)
@@ -8567,8 +8592,7 @@ void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 	{
 		for (const auto& surface : source)
 		{
-			if (surface.provenance.sourceType == nri_scene::SurfaceSourceType::FacingSprite ||
-				surface.provenance.sourceType == nri_scene::SurfaceSourceType::VoxelProxySprite)
+			if (SurfaceUsesLiveActorTextureValidation(surface))
 			{
 				if (surface.provenance.actorIndex < 0)
 				{
