@@ -697,6 +697,7 @@ private:
 			uint64_t lastTraceAnimatedMaterialSignature = UINT64_MAX;
 			uint32_t reasonMask = 0;
 			uint32_t sectionDirtyCount = 0;
+			uint32_t stableMutationFrameCount = 0;
 			uint32_t lastTraceReasonMask = UINT32_MAX;
 			uint32_t traceCount = 0;
 			bool active = false;
@@ -932,6 +933,7 @@ private:
 	void PrunePersistentDynamicEmissiveCacheToLiveActors();
 	bool RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials);
 	void RebuildStartupMutationBaseline();
+	void RebuildRuntimeMutationBaseline();
 	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel = nullptr);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials);
@@ -1187,8 +1189,13 @@ private:
 	bool mPendingStaticMapLightingInvalidation = false;
 	bool mAllowStartupMutationRebaseline = false;
 	bool mPendingStartupMutationRebaseline = false;
+	bool mPendingRuntimeMutationRebaseline = false;
+	bool mHasRuntimeMutationRebaseline = false;
 	uint64_t mObservedMapWorldBuildSerial = 0;
 	uint64_t mStartupMutationRebaselineDeadlineFrame = 0;
+	uint64_t mLastRuntimeMutationRebaselineFrame = 0;
+	uint32_t mPendingRuntimeMutationRebaselineActiveChunkCount = 0;
+	uint32_t mPendingRuntimeMutationRebaselineStableChunkCount = 0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
 	uint32_t mActiveTlasInstanceCount = 0;
 	uint32_t mBoundStaticPrimitiveCount = 0;

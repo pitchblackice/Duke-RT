@@ -2615,6 +2615,11 @@ namespace
 		return (size_t)slot;
 	}
 
+	constexpr uint32_t NRI_RUNTIME_MUTATION_REBASELINE_STABLE_FRAMES = 120u;
+	constexpr uint32_t NRI_RUNTIME_MUTATION_REBASELINE_MIN_ACTIVE_CHUNKS = 32u;
+	constexpr uint32_t NRI_RUNTIME_MUTATION_REBASELINE_MIN_STABLE_CHUNKS = 8u;
+	constexpr uint32_t NRI_RUNTIME_MUTATION_REBASELINE_COOLDOWN_FRAMES = 600u;
+
 	const char* GetMaterialBuildTraceSlotNameInternal(NRIRenderer::MaterialBuildTraceSlot slot)
 	{
 		switch (slot)
@@ -5941,6 +5946,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	{
 		RebuildStartupMutationBaseline();
 	}
+	if (mPendingRuntimeMutationRebaseline)
+	{
+		RebuildRuntimeMutationBaseline();
+	}
 	if (mPendingStaticMapLightingInvalidation)
 	{
 		if (ShouldTraceSkyPerf())
@@ -7040,6 +7049,10 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 	if (mPendingStartupMutationRebaseline)
 	{
 		RebuildStartupMutationBaseline();
+	}
+	if (mPendingRuntimeMutationRebaseline)
+	{
+		RebuildRuntimeMutationBaseline();
 	}
 	if (!mMapWorld.valid)
 	{
@@ -11217,6 +11230,11 @@ void NRIRenderer::RefreshMapWorld()
 		mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
 		mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
 		mRuntimeMutationCacheHighWaterStats = {};
+		mPendingRuntimeMutationRebaseline = false;
+		mHasRuntimeMutationRebaseline = false;
+		mLastRuntimeMutationRebaselineFrame = 0;
+		mPendingRuntimeMutationRebaselineActiveChunkCount = 0;
+		mPendingRuntimeMutationRebaselineStableChunkCount = 0;
 	}
 	if (levelChanged && mSceneLights.GetManualAnalyticLightCount() > 0)
 	{
@@ -11286,6 +11304,11 @@ void NRIRenderer::RebuildStartupMutationBaseline()
 
 	mPendingStartupMutationRebaseline = false;
 	mAllowStartupMutationRebaseline = false;
+	mPendingRuntimeMutationRebaseline = false;
+	mHasRuntimeMutationRebaseline = false;
+	mLastRuntimeMutationRebaselineFrame = 0;
+	mPendingRuntimeMutationRebaselineActiveChunkCount = 0;
+	mPendingRuntimeMutationRebaselineStableChunkCount = 0;
 
 	nri_scene::PTMapWorld world;
 	if (!nri_scene::BuildMapWorld(world))
@@ -11306,6 +11329,56 @@ void NRIRenderer::RebuildStartupMutationBaseline()
 	const auto& stats = mMapWorld.stats;
 	Printf("NRI PT startup mutation rebaseline: level=%s build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
+		(unsigned long long)mMapWorld.buildSerial,
+		stats.chunkCount,
+		stats.surfaceCount,
+		stats.wallSurfaceCount,
+		stats.flatSurfaceCount,
+		stats.portalSurfaceCount,
+		stats.skySurfaceCount,
+		stats.triangleCount);
+}
+
+void NRIRenderer::RebuildRuntimeMutationBaseline()
+{
+	if (!mPendingRuntimeMutationRebaseline)
+	{
+		return;
+	}
+
+	const uint32_t activeChunkCount = mPendingRuntimeMutationRebaselineActiveChunkCount;
+	const uint32_t stableChunkCount = mPendingRuntimeMutationRebaselineStableChunkCount;
+	mPendingRuntimeMutationRebaseline = false;
+	mPendingRuntimeMutationRebaselineActiveChunkCount = 0;
+	mPendingRuntimeMutationRebaselineStableChunkCount = 0;
+	mHasRuntimeMutationRebaseline = true;
+	mLastRuntimeMutationRebaselineFrame = mFrameIndex;
+	mAllowStartupMutationRebaseline = false;
+
+	nri_scene::PTMapWorld world;
+	if (!nri_scene::BuildMapWorld(world))
+	{
+		Printf(TEXTCOLOR_RED "NRI PT runtime mutation rebaseline: authoritative rebuild failed for %s active_chunks=%u stable_chunks=%u.\n",
+			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+			activeChunkCount,
+			stableChunkCount);
+		return;
+	}
+
+	DestroyStaticMapSceneCache();
+	mStaticMapScene = {};
+	mStaticAccelerationBuildSerial = 0;
+	mPreservedStaticMapSky = {};
+	mMapWorld = std::move(world);
+	mObservedMapWorldBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
+	RequestHistoryReset("runtime-mutation-rebaseline");
+
+	const auto& stats = mMapWorld.stats;
+	Printf("NRI PT runtime mutation rebaseline: level=%s frame=%u active_chunks=%u stable_chunks=%u build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
+		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
+		mFrameIndex,
+		activeChunkCount,
+		stableChunkCount,
 		(unsigned long long)mMapWorld.buildSerial,
 		stats.chunkCount,
 		stats.surfaceCount,
@@ -13241,6 +13314,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 			replacement.animatedMaterialSignature = 0;
 			replacement.reasonMask = 0;
 			replacement.sectionDirtyCount = 0;
+			replacement.stableMutationFrameCount = 0;
 			replacement.sectorDirty = false;
 			replacement.dragged = false;
 			replacement.blindSpot = false;
@@ -14754,6 +14828,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	outMaterials = {};
 	mRuntimeMapLastFrame = {};
 	bool startupMaterialOnlyMutationDetected = false;
+	uint32_t stableRetireEligibleChunkCount = 0;
+	uint32_t maxStableMutationFrames = 0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationRebuiltChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationHeldChunks = 0;
@@ -14802,6 +14878,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
 		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
 		const uint64_t cachedSignature = replacement.liveSignature;
+		const uint32_t previousReasonMask = replacement.reasonMask;
 		nri_scene::PTMapChunkMutationAnalysis analysis = {};
 		const bool analyzed = [&]()
 		{
@@ -14813,6 +14890,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.active = false;
 			replacement.reasonMask = nri_scene::PTMapChunkMutationReason_None;
 			replacement.sectionDirtyCount = 0;
+			replacement.stableMutationFrameCount = 0;
 			replacement.sectorDirty = false;
 			replacement.dragged = false;
 			replacement.blindSpot = false;
@@ -14891,6 +14969,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.staticAnimatedReplacement = false;
 			replacement.animationOnlyRefreshed = false;
 			replacement.animatedMaterialSignature = 0;
+			replacement.stableMutationFrameCount = 0;
 			replacement.lightIdentityOverrides.Clear();
 			replacement.sceneView = {};
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
@@ -15024,6 +15103,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.staticAnimatedReplacement = false;
 				replacement.animationOnlyRefreshed = false;
 				replacement.animatedMaterialSignature = 0;
+				replacement.stableMutationFrameCount = 0;
 				replacement.lightIdentityOverrides.Clear();
 				replacement.sceneView = {};
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
@@ -15071,6 +15151,34 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 		}
 
+		const uint32_t transientReasonMask =
+			nri_scene::PTMapChunkMutationReason_SectorDirty |
+			nri_scene::PTMapChunkMutationReason_SectionDirty |
+			nri_scene::PTMapChunkMutationReason_Dragged;
+		const bool stableRetireCandidate =
+			replacement.active &&
+			replacement.valid &&
+			!replacement.staticAnimatedReplacement &&
+			!replacement.animationOnlyRefreshed &&
+			!needsStructuralRebuild &&
+			analysis.reasonMask != nri_scene::PTMapChunkMutationReason_None &&
+			(analysis.reasonMask & transientReasonMask) == 0 &&
+			cachedSignature == replacement.liveSignature &&
+			previousReasonMask == replacement.reasonMask;
+		if (stableRetireCandidate)
+		{
+			replacement.stableMutationFrameCount++;
+		}
+		else
+		{
+			replacement.stableMutationFrameCount = 0;
+		}
+		maxStableMutationFrames = std::max(maxStableMutationFrames, replacement.stableMutationFrameCount);
+		if (replacement.stableMutationFrameCount >= NRI_RUNTIME_MUTATION_REBASELINE_STABLE_FRAMES)
+		{
+			stableRetireEligibleChunkCount++;
+		}
+
 		mRuntimeMapMutations.replacedChunkMask[chunkIndex] = replacement.excludeStaticChunk ? 1u : 0u;
 		mRuntimeMapLastFrame.replacedChunkCount++;
 		mLastPerfShellTraceStats.runtimeMutationReplacedChunks++;
@@ -15116,6 +15224,27 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mRuntimeMutationCacheHighWaterStats.cachedSurfaceCount = std::max(mRuntimeMutationCacheHighWaterStats.cachedSurfaceCount, cacheStats.cachedSurfaceCount);
 	mRuntimeMutationCacheHighWaterStats.cachedTriangleCount = std::max(mRuntimeMutationCacheHighWaterStats.cachedTriangleCount, cacheStats.cachedTriangleCount);
 	mRuntimeMutationCacheHighWaterStats.cachedMaterialCount = std::max(mRuntimeMutationCacheHighWaterStats.cachedMaterialCount, cacheStats.cachedMaterialCount);
+	if (!mPendingRuntimeMutationRebaseline &&
+		!mPendingStartupMutationRebaseline &&
+		!mAllowStartupMutationRebaseline &&
+		cacheStats.activeChunkCount >= NRI_RUNTIME_MUTATION_REBASELINE_MIN_ACTIVE_CHUNKS &&
+		stableRetireEligibleChunkCount >= NRI_RUNTIME_MUTATION_REBASELINE_MIN_STABLE_CHUNKS &&
+		(!mHasRuntimeMutationRebaseline ||
+			mFrameIndex >= mLastRuntimeMutationRebaselineFrame + NRI_RUNTIME_MUTATION_REBASELINE_COOLDOWN_FRAMES))
+	{
+		mPendingRuntimeMutationRebaseline = true;
+		mPendingRuntimeMutationRebaselineActiveChunkCount = cacheStats.activeChunkCount;
+		mPendingRuntimeMutationRebaselineStableChunkCount = stableRetireEligibleChunkCount;
+		Printf("NRI PT runtime mutation rebaseline queued: level=%s frame=%u active_chunks=%u stable_chunks=%u max_stable_frames=%u cached_surfaces=%u cached_tris=%u cached_materials=%u\n",
+			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+			mFrameIndex,
+			cacheStats.activeChunkCount,
+			stableRetireEligibleChunkCount,
+			maxStableMutationFrames,
+			cacheStats.cachedSurfaceCount,
+			cacheStats.cachedTriangleCount,
+			cacheStats.cachedMaterialCount);
+	}
 	mLastPerfShellTraceStats.runtimeMutationPrimitiveCount = (uint32_t)outGeometry.primitives.size();
 	mLastPerfShellTraceStats.runtimeMutationMaterialCount = (uint32_t)outMaterials.materials.size();
 	return mRuntimeMapLastFrame.active;
