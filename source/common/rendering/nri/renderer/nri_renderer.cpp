@@ -8332,6 +8332,50 @@ NRIRenderer::MaterialBuildTraceSlot NRIRenderer::ResolveMaterialBuildTraceSlot(c
 	return MaterialBuildTraceSlot::Unknown;
 }
 
+const std::unordered_map<int32_t, uint32_t>& NRIRenderer::GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot)
+{
+	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	const bool hasActorRules =
+		resolvedLightOverlays.actorRules.Size() > 0 ||
+		resolvedLightOverlays.actorOverrideRules.Size() > 0;
+	const bool hasFullbrightOverrides = HasActorFullbrightOverrides(resolvedLightOverlays);
+	if (mActorMaterialOverrideCache.valid &&
+		mActorMaterialOverrideCache.frameIndex == mFrameIndex &&
+		mActorMaterialOverrideCache.resolvedGeneration == resolvedLightOverlays.resolvedGeneration &&
+		mActorMaterialOverrideCache.hasFullbrightOverrides == hasFullbrightOverrides)
+	{
+		return mActorMaterialOverrideCache.overrides;
+	}
+
+	mActorMaterialOverrideCache.valid = true;
+	mActorMaterialOverrideCache.frameIndex = mFrameIndex;
+	mActorMaterialOverrideCache.resolvedGeneration = resolvedLightOverlays.resolvedGeneration;
+	mActorMaterialOverrideCache.hasFullbrightOverrides = hasFullbrightOverrides;
+	mActorMaterialOverrideCache.overrides.clear();
+	if (!hasActorRules)
+	{
+		return mActorMaterialOverrideCache.overrides;
+	}
+
+	mLastPerfShellTraceStats.actorOverrideMapBuildCalls++;
+	auto& materialTraceEntry = mLastPerfShellTraceStats.materialBuildByLabel[GetMaterialBuildTraceSlotIndex(traceSlot)];
+	materialTraceEntry.overrideBuildCalls++;
+	if (ShouldTracePtPerf())
+	{
+		const auto start = std::chrono::steady_clock::now();
+		BuildActorMaterialOverrideMap(resolvedLightOverlays, mActorMaterialOverrideCache.overrides);
+		const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
+		mLastPerfShellTraceStats.actorOverrideMapBuildMs += elapsedMs;
+		materialTraceEntry.overrideBuildMs += elapsedMs;
+	}
+	else
+	{
+		BuildActorMaterialOverrideMap(resolvedLightOverlays, mActorMaterialOverrideCache.overrides);
+	}
+
+	return mActorMaterialOverrideCache.overrides;
+}
+
 void NRIRenderer::PrintTemporalStatus() const
 {
 	SyncLegacyUpscalerConfig(false);
@@ -10830,21 +10874,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	if (HasActorFullbrightOverrides(resolvedLightOverlays))
 	{
-		std::unordered_map<int32_t, uint32_t> actorOverrides;
-		mLastPerfShellTraceStats.actorOverrideMapBuildCalls++;
-		materialTraceEntry.overrideBuildCalls++;
-		if (tracePerf)
-		{
-			const auto start = std::chrono::steady_clock::now();
-			BuildActorMaterialOverrideMap(resolvedLightOverlays, actorOverrides);
-			const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
-			mLastPerfShellTraceStats.actorOverrideMapBuildMs += elapsedMs;
-			materialTraceEntry.overrideBuildMs += elapsedMs;
-		}
-		else
-		{
-			BuildActorMaterialOverrideMap(resolvedLightOverlays, actorOverrides);
-		}
+		const auto& actorOverrides = GetActorMaterialOverrideMapForFrame(materialTraceSlot);
 		if (!actorOverrides.empty())
 		{
 			struct SavedMaterialFlags
@@ -10920,7 +10950,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	TraceActorSpriteMaterialAssignments(sceneView, outMaterials, traceLabel);
 }
 
-void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const
+void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials)
 {
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	if (resolvedLightOverlays.actorRules.Size() == 0 && resolvedLightOverlays.actorOverrideRules.Size() == 0)
@@ -10928,8 +10958,7 @@ void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBri
 		return;
 	}
 
-	std::unordered_map<int32_t, uint32_t> actorOverrides;
-	BuildActorMaterialOverrideMap(resolvedLightOverlays, actorOverrides);
+	const auto& actorOverrides = GetActorMaterialOverrideMapForFrame();
 	if (actorOverrides.empty())
 	{
 		return;

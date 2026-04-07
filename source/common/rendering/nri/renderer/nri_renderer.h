@@ -622,6 +622,15 @@ private:
 		uint32_t cachedMaterialCount = 0;
 	};
 
+	struct ActorMaterialOverrideCache
+	{
+		bool valid = false;
+		uint32_t frameIndex = UINT32_MAX;
+		uint32_t resolvedGeneration = 0;
+		bool hasFullbrightOverrides = false;
+		std::unordered_map<int32_t, uint32_t> overrides;
+	};
+
 	struct SceneTextureOverflowDebugStats
 	{
 		uint32_t textureCountLastBuild = 0;
@@ -925,12 +934,13 @@ private:
 	void RebuildStartupMutationBaseline();
 	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel = nullptr);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
-	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
+	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials);
 	void QueueStaticMapSceneLightingInvalidation();
 	void InvalidateStaticMapSceneForMaterialLighting();
 	PersistentDynamicSurfaceStats GatherPersistentDynamicEmissiveSurfaceStats() const;
 	RuntimeMutationCacheStats GatherRuntimeMutationCacheStats() const;
 	static MaterialBuildTraceSlot ResolveMaterialBuildTraceSlot(const char* traceLabel);
+	const std::unordered_map<int32_t, uint32_t>& GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot = MaterialBuildTraceSlot::Unknown);
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
 	void UpdateFrameGenerationFrameDesc();
@@ -1075,6 +1085,7 @@ private:
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
+	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};
 	SceneTextureCacheDebugStats mSceneTextureCacheDebugStats = {};
 	DescriptorCoherencyDebugStats mDescriptorCoherencyDebugStats = {};
