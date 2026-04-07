@@ -690,6 +690,7 @@ private:
 		struct ChunkReplacement
 		{
 			nri_scene::PTMapChunkMutationBaseline baseline;
+			nri_scene::PTMapChunkMutationBaseline replacementBaseline;
 			uint64_t baselineSignature = 0;
 			uint64_t liveSignature = 0;
 			uint64_t animatedMaterialSignature = 0;

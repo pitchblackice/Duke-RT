@@ -13309,6 +13309,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 		{
 			auto& replacement = mRuntimeMapMutations.chunks[chunk.chunkIndex];
 			nri_scene::CaptureMapChunkMutationBaseline(chunk, replacement.baseline);
+			replacement.replacementBaseline = replacement.baseline;
 			replacement.baselineSignature = replacement.baseline.signature;
 			replacement.liveSignature = replacement.baselineSignature;
 			replacement.animatedMaterialSignature = 0;
@@ -14987,6 +14988,27 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		}
 
 		const bool materialOnlyReplacement = IsMaterialOnlyChunkReplacement(analysis.reasonMask);
+		nri_scene::PTMapChunkMutationAnalysis replacementDelta = {};
+		const bool analyzedReplacementDelta =
+			replacement.valid &&
+			nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement.replacementBaseline, replacementDelta);
+		const uint32_t structuralReasonMask =
+			nri_scene::PTMapChunkMutationReason_SectorGeometry |
+			nri_scene::PTMapChunkMutationReason_WallGeometry |
+			nri_scene::PTMapChunkMutationReason_SectorDirty |
+			nri_scene::PTMapChunkMutationReason_SectionDirty |
+			nri_scene::PTMapChunkMutationReason_Dragged;
+		const uint32_t replacementViewReasonMask =
+			nri_scene::PTMapChunkMutationReason_SectorGeometry |
+			nri_scene::PTMapChunkMutationReason_SectorMaterial |
+			nri_scene::PTMapChunkMutationReason_WallGeometry |
+			nri_scene::PTMapChunkMutationReason_WallMaterial |
+			nri_scene::PTMapChunkMutationReason_SectorDirty |
+			nri_scene::PTMapChunkMutationReason_SectionDirty |
+			nri_scene::PTMapChunkMutationReason_Dragged;
+		const bool replacementViewChanged =
+			(previousReasonMask & replacementViewReasonMask) !=
+			(analysis.reasonMask & replacementViewReasonMask);
 		replacement.animationOnlyRefreshed = false;
 		nri_scene::PTMapWorld liveWorld = {};
 		nri_scene::SceneView liveChunkView;
@@ -15047,10 +15069,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				Clocker clock(NriPTMaterialBuild);
 				BuildMaterialsWithActorOverrides(liveChunkView, liveMaterials, "runtime_mutation_chunk");
 			}
+			nri_scene::PTMapChunkMutationBaseline liveBaseline;
+			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
+			{
+				return false;
+			}
 
 			replacement.sceneView = liveChunkView;
 			replacement.geometry = std::move(liveGeometry);
 			replacement.materialBridge = std::move(liveMaterials);
+			replacement.replacementBaseline = std::move(liveBaseline);
 			replacement.surfaceCount = CountSceneViewSurfaces(replacement.sceneView);
 			replacement.triangleCount = (uint32_t)replacement.geometry.primitives.size();
 			replacement.animatedMaterialSignature = ComputeAnimatedMaterialSignature(replacement.sceneView);
@@ -15065,6 +15093,37 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 			return true;
 		};
+		const auto refreshReplacementMaterialsFromPreparedLiveChunk = [&]() -> bool
+		{
+			const bool exclusiveMaterialOnlyReplacement =
+				materialOnlyReplacement &&
+				RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
+			const bool excludeStaticChunk =
+				useStaticAnimatedReplacement ||
+				!materialOnlyReplacement ||
+				exclusiveMaterialOnlyReplacement;
+			nri_scene::MaterialBridgeData liveMaterials;
+			{
+				Clocker clock(NriPTMaterialBuild);
+				BuildMaterialsWithActorOverrides(liveChunkView, liveMaterials, "runtime_mutation_chunk");
+			}
+			nri_scene::PTMapChunkMutationBaseline liveBaseline;
+			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
+			{
+				return false;
+			}
+
+			replacement.sceneView = liveChunkView;
+			replacement.materialBridge = std::move(liveMaterials);
+			replacement.replacementBaseline = std::move(liveBaseline);
+			replacement.surfaceCount = CountSceneViewSurfaces(replacement.sceneView);
+			replacement.animatedMaterialSignature = ComputeAnimatedMaterialSignature(replacement.sceneView);
+			replacement.valid = true;
+			replacement.active = true;
+			replacement.excludeStaticChunk = excludeStaticChunk;
+			replacement.staticAnimatedReplacement = useStaticAnimatedReplacement;
+			return true;
+		};
 		const bool exclusiveMaterialOnlyReplacement =
 			materialOnlyReplacement &&
 			RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
@@ -15074,8 +15133,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			exclusiveMaterialOnlyReplacement;
 		const bool needsStructuralRebuild =
 			!replacement.valid ||
-			cachedSignature != replacement.liveSignature ||
 			forceTopologyInvalidation ||
+			!analyzedReplacementDelta ||
+			(replacementDelta.reasonMask & structuralReasonMask) != 0 ||
+			replacementViewChanged ||
 			replacement.excludeStaticChunk != desiredExcludeStaticChunk ||
 			replacement.staticAnimatedReplacement != useStaticAnimatedReplacement;
 
@@ -15117,6 +15178,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			// without mutating the authored wall/sector fields tracked above.
 			const bool refreshedAnimatedChunk = [&]()
 			{
+				const bool forceReplacementMaterialRefresh =
+					analyzedReplacementDelta &&
+					replacementDelta.reasonMask != nri_scene::PTMapChunkMutationReason_None;
 				if (!prepareLiveChunkView())
 				{
 					return false;
@@ -15127,20 +15191,24 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
 				const uint64_t liveAnimatedMaterialSignature =
 					ComputeAnimatedMaterialSignature(liveChunkView);
-				if (!forceHardwareCanvasRefresh &&
+				if (!forceReplacementMaterialRefresh &&
+					!forceHardwareCanvasRefresh &&
 					liveAnimatedMaterialSignature == replacement.animatedMaterialSignature)
 				{
 					return true;
 				}
 
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationRebuildMs);
-				if (!rebuildReplacementFromPreparedLiveChunk(false))
+				if (!refreshReplacementMaterialsFromPreparedLiveChunk())
 				{
 					return false;
 				}
 
-				replacement.animationOnlyRefreshed = true;
-				mRuntimeMapLastFrame.animatedRefreshChunkCount++;
+				if (!forceReplacementMaterialRefresh)
+				{
+					replacement.animationOnlyRefreshed = true;
+					mRuntimeMapLastFrame.animatedRefreshChunkCount++;
+				}
 				return true;
 			}();
 			if (!refreshedAnimatedChunk)
