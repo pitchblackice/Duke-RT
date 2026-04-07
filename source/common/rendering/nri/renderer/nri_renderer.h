@@ -447,6 +447,9 @@ private:
 			uint32_t primitiveCount = 0;
 			uint32_t materialOffset = 0;
 			uint32_t materialCount = 0;
+			uint64_t animatedMaterialSignature = 0;
+			uint64_t animatedGeometrySignature = 0;
+			nri_scene::MaterialBridgeData materialBridge;
 			NRIAccelerationStructureResource accelerationStructure;
 		};
 
@@ -458,6 +461,9 @@ private:
 		uint32_t sceneBuildCount = 0;
 		uint32_t gpuUploadCount = 0;
 		uint32_t accelerationBuildCount = 0;
+		uint32_t animatedRefreshCount = 0;
+		uint32_t animatedRefreshUploadCount = 0;
+		uint32_t animatedGeometryFallbackCount = 0;
 		uint32_t reuseCount = 0;
 		nri_scene::SceneView sceneView;
 		std::vector<nri_scene::SceneView> lightChunkViews;
@@ -685,6 +691,7 @@ private:
 	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
+	bool RefreshStaticMapAnimatedMaterials();
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool UploadSceneBuffers(
 		NRIBufferResource& vertexBuffer,

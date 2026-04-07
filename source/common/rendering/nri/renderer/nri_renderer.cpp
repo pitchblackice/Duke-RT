@@ -4654,34 +4654,50 @@ namespace
 		return hash;
 	}
 
-	static uint32_t GetRuntimeMutationTextureId(FGameTexture* texture)
+	static uint32_t GetAnimatedTextureId(FGameTexture* texture)
 	{
 		return texture != nullptr ? (uint32_t)texture->GetID().GetIndex() : 0u;
 	}
 
-	static uint64_t HashRuntimeMutationLayerTexture(FTexture* texture)
+	static uint64_t HashAnimatedLayerTexture(FTexture* texture)
 	{
 		return texture != nullptr ? (uint64_t)(uintptr_t)texture : 0ull;
 	}
 
-	static uint64_t HashRuntimeMutationTextureSignature(FGameTexture* texture)
+	static uint64_t HashAnimatedTextureBindingSignature(FGameTexture* texture)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, (uint64_t)GetRuntimeMutationTextureId(texture));
+		hash = HashCombine64(hash, (uint64_t)GetAnimatedTextureId(texture));
 		if (texture == nullptr)
 		{
 			return hash;
 		}
 
-		hash = HashCombine64(hash, HashRuntimeMutationLayerTexture(texture->GetGlowmap()));
-		hash = HashCombine64(hash, HashRuntimeMutationLayerTexture(texture->GetNormalmap()));
-		hash = HashCombine64(hash, HashRuntimeMutationLayerTexture(texture->GetMetallic()));
-		hash = HashCombine64(hash, HashRuntimeMutationLayerTexture(texture->GetRoughness()));
+		hash = HashCombine64(hash, HashAnimatedLayerTexture(texture->GetGlowmap()));
+		hash = HashCombine64(hash, HashAnimatedLayerTexture(texture->GetNormalmap()));
+		hash = HashCombine64(hash, HashAnimatedLayerTexture(texture->GetMetallic()));
+		hash = HashCombine64(hash, HashAnimatedLayerTexture(texture->GetRoughness()));
+		return hash;
+	}
+
+	static uint64_t HashAnimatedTextureDisplaySignature(FGameTexture* texture)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)GetAnimatedTextureId(texture));
+		if (texture == nullptr)
+		{
+			return hash;
+		}
+
+		hash = HashCombine64(hash, (uint64_t)texture->GetDisplayWidth());
+		hash = HashCombine64(hash, (uint64_t)texture->GetDisplayHeight());
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)texture->GetDisplayLeftOffset());
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)texture->GetDisplayTopOffset());
 		return hash;
 	}
 
 	template <typename SurfaceContainer>
-	static void HashRuntimeMutationAnimatedSurfaces(const SurfaceContainer& surfaces, uint64_t& hash)
+	static void HashAnimatedSurfaces(const SurfaceContainer& surfaces, uint64_t& hash, bool includeDisplaySignature)
 	{
 		hash = HashCombine64(hash, (uint64_t)surfaces.size());
 		for (const auto& surface : surfaces)
@@ -4696,16 +4712,45 @@ namespace
 			hash = HashCombine64(hash, (uint64_t)(uint32_t)surface.material.palette);
 			hash = HashCombine64(hash, (uint64_t)(uint32_t)surface.material.shade);
 			hash = HashCombine64(hash, (uint64_t)FloatBits(surface.material.alpha));
-			hash = HashCombine64(hash, HashRuntimeMutationTextureSignature(surface.material.texture));
+			hash = HashCombine64(hash, HashAnimatedTextureBindingSignature(surface.material.texture));
+			if (includeDisplaySignature)
+			{
+				hash = HashCombine64(hash, HashAnimatedTextureDisplaySignature(surface.material.texture));
+			}
 		}
 	}
 
-	static uint64_t ComputeRuntimeMutationAnimatedMaterialSignature(const nri_scene::SceneView& sceneView)
+	template <typename SurfaceContainer>
+	static void HashAnimatedGeometrySurfaces(const SurfaceContainer& surfaces, uint64_t& hash)
+	{
+		hash = HashCombine64(hash, (uint64_t)surfaces.size());
+		for (const auto& surface : surfaces)
+		{
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)surface.provenance.sourceType);
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectorIndex + 1));
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.wallIndex + 1));
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectionIndex + 1));
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.actorIndex + 1));
+			hash = HashCombine64(hash, (uint64_t)surface.provenance.cstat);
+			hash = HashCombine64(hash, HashAnimatedTextureDisplaySignature(surface.material.texture));
+		}
+	}
+
+	static uint64_t ComputeAnimatedMaterialSignature(const nri_scene::SceneView& sceneView)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		HashRuntimeMutationAnimatedSurfaces(sceneView.opaqueWalls, hash);
-		HashRuntimeMutationAnimatedSurfaces(sceneView.opaqueFlats, hash);
-		HashRuntimeMutationAnimatedSurfaces(sceneView.opaqueSprites, hash);
+		HashAnimatedSurfaces(sceneView.opaqueWalls, hash, false);
+		HashAnimatedSurfaces(sceneView.opaqueFlats, hash, false);
+		HashAnimatedSurfaces(sceneView.opaqueSprites, hash, false);
+		return hash;
+	}
+
+	static uint64_t ComputeAnimatedGeometrySignature(const nri_scene::SceneView& sceneView)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		HashAnimatedGeometrySurfaces(sceneView.opaqueWalls, hash);
+		HashAnimatedGeometrySurfaces(sceneView.opaqueFlats, hash);
+		HashAnimatedGeometrySurfaces(sceneView.opaqueSprites, hash);
 		return hash;
 	}
 
@@ -8114,13 +8159,16 @@ void NRIRenderer::PrintPortalTraversalStatus() const
 void NRIRenderer::PrintStaticMapSceneStatus() const
 {
 	const char* source = mUsedStaticMapSceneLastFrame ? "authoritative-map-world" : "captured-scene";
-	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s chunks=%u tlas_instances=%u tris=%u materials=%u\n",
+	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u animated_refreshes=%u animated_refresh_uploads=%u animated_geometry_fallbacks=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s chunks=%u tlas_instances=%u tris=%u materials=%u\n",
 		source,
 		(mStaticMapScene.valid && mStaticMapScene.texturesResident && mStaticMapScene.buffersResident && mStaticMapScene.accelerationResident) ? "yes" : "no",
 		(unsigned long long)mStaticMapScene.buildSerial,
 		mStaticMapScene.sceneBuildCount,
 		mStaticMapScene.gpuUploadCount,
 		mStaticMapScene.accelerationBuildCount,
+		mStaticMapScene.animatedRefreshCount,
+		mStaticMapScene.animatedRefreshUploadCount,
+		mStaticMapScene.animatedGeometryFallbackCount,
 		mStaticMapScene.reuseCount,
 		mUploadedStaticMapSceneLastFrame ? "yes" : "no",
 		mBuiltStaticMapSceneASLastFrame ? "yes" : "no",
@@ -12400,6 +12448,129 @@ void NRIRenderer::BindSceneRootDescriptors()
 	}
 }
 
+bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
+{
+	if (!mStaticMapScene.valid ||
+		!mStaticMapScene.texturesResident ||
+		!mStaticMapScene.buffersResident ||
+		!mStaticMapScene.accelerationResident ||
+		mStaticMapScene.buildSerial != mMapWorld.buildSerial)
+	{
+		return true;
+	}
+
+	const nri_scene::SceneView* preservedSkyView =
+		(mPreservedStaticMapSky.valid && mPreservedStaticMapSky.buildSerial == mMapWorld.buildSerial)
+		? &mPreservedStaticMapSky.sceneView
+		: nullptr;
+	bool refreshedAnyChunk = false;
+	uint32_t refreshedChunkCount = 0;
+
+	for (size_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
+	{
+		auto& chunkCache = mStaticMapScene.chunks[chunkListIndex];
+		if (chunkListIndex >= mStaticMapScene.lightChunkViews.size() || chunkCache.chunkIndex >= mMapWorld.chunks.size())
+		{
+			DestroyStaticMapSceneCache();
+			mStaticMapScene = {};
+			mStaticAccelerationBuildSerial = 0;
+			mPreservedStaticMapSky = {};
+			return EnsureStaticMapScene();
+		}
+
+		nri_scene::SceneView liveChunkView;
+		nri_scene::BuildMapChunkSceneView(mMapWorld, mMapWorld.chunks[chunkCache.chunkIndex], liveChunkView, preservedSkyView);
+		const uint64_t liveAnimatedMaterialSignature = ComputeAnimatedMaterialSignature(liveChunkView);
+		if (liveAnimatedMaterialSignature == chunkCache.animatedMaterialSignature)
+		{
+			continue;
+		}
+
+		const uint64_t liveAnimatedGeometrySignature = ComputeAnimatedGeometrySignature(liveChunkView);
+		if (liveAnimatedGeometrySignature != chunkCache.animatedGeometrySignature)
+		{
+			mStaticMapScene.animatedGeometryFallbackCount++;
+			DestroyStaticMapSceneCache();
+			mStaticMapScene = {};
+			mStaticAccelerationBuildSerial = 0;
+			mPreservedStaticMapSky = {};
+			return EnsureStaticMapScene();
+		}
+
+		nri_scene::MaterialBridgeData liveChunkMaterials;
+		{
+			Clocker clock(NriPTMaterialBuild);
+			BuildMaterialsWithActorOverrides(liveChunkView, liveChunkMaterials, "static_map_anim_chunk");
+		}
+		if ((uint32_t)liveChunkMaterials.materials.size() != chunkCache.materialCount)
+		{
+			mStaticMapScene.animatedGeometryFallbackCount++;
+			DestroyStaticMapSceneCache();
+			mStaticMapScene = {};
+			mStaticAccelerationBuildSerial = 0;
+			mPreservedStaticMapSky = {};
+			return EnsureStaticMapScene();
+		}
+
+		mStaticMapScene.lightChunkViews[chunkListIndex] = std::move(liveChunkView);
+		chunkCache.materialBridge = std::move(liveChunkMaterials);
+		chunkCache.animatedMaterialSignature = liveAnimatedMaterialSignature;
+		refreshedAnyChunk = true;
+		refreshedChunkCount++;
+	}
+
+	if (!refreshedAnyChunk)
+	{
+		return true;
+	}
+
+	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView, preservedSkyView);
+	mStaticMapScene.materialBridge = {};
+	for (auto& chunkCache : mStaticMapScene.chunks)
+	{
+		const uint32_t nextMaterialOffset = (uint32_t)mStaticMapScene.materialBridge.materials.size();
+		if (nextMaterialOffset != chunkCache.materialOffset)
+		{
+			mStaticMapScene.animatedGeometryFallbackCount++;
+			DestroyStaticMapSceneCache();
+			mStaticMapScene = {};
+			mStaticAccelerationBuildSerial = 0;
+			mPreservedStaticMapSky = {};
+			return EnsureStaticMapScene();
+		}
+
+		chunkCache.materialOffset = nextMaterialOffset;
+		chunkCache.materialCount = (uint32_t)chunkCache.materialBridge.materials.size();
+		AppendMaterialBridge(chunkCache.materialBridge, mStaticMapScene.materialBridge);
+	}
+
+	if (!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
+		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false, "static_map_scene_anim") ||
+		!EnsureStructuredBuffer(
+			mStaticMaterialBuffer,
+			mMaterialBufferStats,
+			mStaticMapScene.gpuMaterials.data(),
+			mStaticMapScene.gpuMaterials.size() * sizeof(nri_scene::MaterialData),
+			sizeof(nri_scene::MaterialData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess()))
+	{
+		DestroyStaticMapSceneCache();
+		mStaticMapScene = {};
+		mStaticAccelerationBuildSerial = 0;
+		mPreservedStaticMapSky = {};
+		return EnsureStaticMapScene();
+	}
+
+	mStaticMapScene.texturesResident = true;
+	mStaticMapScene.buffersResident = true;
+	mStaticMapScene.gpuUploadCount++;
+	mStaticMapScene.animatedRefreshCount += refreshedChunkCount;
+	mStaticMapScene.animatedRefreshUploadCount++;
+	mUploadedStaticMapSceneLastFrame = true;
+	return true;
+}
+
 bool NRIRenderer::EnsureStaticMapScene()
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.staticSceneMs);
@@ -12422,6 +12593,10 @@ bool NRIRenderer::EnsureStaticMapScene()
 		mStaticMapScene.accelerationResident &&
 		mStaticMapScene.buildSerial == mMapWorld.buildSerial)
 	{
+		if (!RefreshStaticMapAnimatedMaterials())
+		{
+			return false;
+		}
 		mStaticMapScene.reuseCount++;
 		return true;
 	}
@@ -12494,9 +12669,12 @@ bool NRIRenderer::EnsureStaticMapScene()
 		chunkCache.primitiveCount = (uint32_t)chunkGeometry.primitives.size();
 		chunkCache.materialOffset = (uint32_t)mStaticMapScene.materialBridge.materials.size();
 		chunkCache.materialCount = (uint32_t)chunkMaterials.materials.size();
+		chunkCache.animatedMaterialSignature = ComputeAnimatedMaterialSignature(chunkSceneView);
+		chunkCache.animatedGeometrySignature = ComputeAnimatedGeometrySignature(chunkSceneView);
 
 		AppendGeometry(chunkGeometry, chunkCache.materialOffset, mStaticMapScene.geometry);
 		AppendMaterialBridge(chunkMaterials, mStaticMapScene.materialBridge);
+		chunkCache.materialBridge = std::move(chunkMaterials);
 		mStaticMapScene.lightChunkViews.push_back(std::move(chunkSceneView));
 		mStaticMapScene.chunks.push_back(std::move(chunkCache));
 	}
@@ -14016,7 +14194,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.materialBridge = std::move(liveMaterials);
 			replacement.surfaceCount = CountSceneViewSurfaces(replacement.sceneView);
 			replacement.triangleCount = (uint32_t)replacement.geometry.primitives.size();
-			replacement.animatedMaterialSignature = ComputeRuntimeMutationAnimatedMaterialSignature(replacement.sceneView);
+			replacement.animatedMaterialSignature = ComputeAnimatedMaterialSignature(replacement.sceneView);
 			replacement.valid = true;
 			replacement.active = true;
 			replacement.excludeStaticChunk = !materialOnlyReplacement || exclusiveMaterialOnlyReplacement;
@@ -14074,7 +14252,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				}
 
 				const uint64_t liveAnimatedMaterialSignature =
-					ComputeRuntimeMutationAnimatedMaterialSignature(liveChunkView);
+					ComputeAnimatedMaterialSignature(liveChunkView);
 				if (liveAnimatedMaterialSignature == replacement.animatedMaterialSignature)
 				{
 					return true;
