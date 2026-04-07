@@ -2833,6 +2833,23 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.actorOverrideMapBuildCalls,
 			shell.actorOverrideMapBuildMs,
 			shell.materialBuildMs);
+		for (size_t index = 0; index < NRIRenderer::MaterialBuildTraceSlotCount; ++index)
+		{
+			const auto& entry = shell.materialBuildByLabel[index];
+			if (entry.calls == 0 && entry.overrideBuildCalls == 0)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt material detail NRI: frame=%llu label=%s calls=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				NRIRenderer::GetMaterialBuildTraceSlotName((NRIRenderer::MaterialBuildTraceSlot)index),
+				entry.calls,
+				entry.overrideBuildCalls,
+				entry.overrideBuildMs,
+				entry.materialBuildMs);
+		}
 		Printf(
 			"PERF pt resource trace NRI: frame=%llu waits=%u wait_ms=%.3f grow=%u overwrite=%u scene_uploads=%u scene_bytes=%llu data_uploads=%u data_bytes=%llu emissive_uploads=%u emissive_bytes=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,

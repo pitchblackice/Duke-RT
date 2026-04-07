@@ -55,6 +55,35 @@ struct NRIPTNightVisionState
 class NRIRenderer
 {
 public:
+	enum class MaterialBuildTraceSlot : uint32_t
+	{
+		DynamicLive = 0,
+		MirrorExtended,
+		SceneLightMergedDynamic,
+		MirrorPlayer,
+		DynamicWithPersistentEmissive,
+		SceneLightMergedPersistent,
+		CapturedScene,
+		PersistentEmissiveCachePrune,
+		PersistentEmissiveCacheRebuild,
+		StaticMapAnimChunk,
+		StaticMapChunk,
+		RuntimeMutationChunk,
+		RuntimeSpaceLinkChunk,
+		Unknown,
+		Count,
+	};
+
+	struct MaterialBuildTraceEntry
+	{
+		uint32_t calls = 0;
+		uint32_t overrideBuildCalls = 0;
+		double overrideBuildMs = 0.0;
+		double materialBuildMs = 0.0;
+	};
+
+	static constexpr size_t MaterialBuildTraceSlotCount = (size_t)MaterialBuildTraceSlot::Count;
+
 	struct PerfShellTraceStats
 	{
 		double totalMs = 0.0;
@@ -150,6 +179,7 @@ public:
 		bool usedStaticMapScene = false;
 		bool usedDynamicOverlay = false;
 		bool usedPersistentDynamicEmissiveCache = false;
+		std::array<MaterialBuildTraceEntry, MaterialBuildTraceSlotCount> materialBuildByLabel = {};
 	};
 
 	struct PerfResourceTraceStats
@@ -224,6 +254,7 @@ public:
 	const PerfShellTraceStats& GetLastPerfShellTraceStats() const { return mLastPerfShellTraceStats; }
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
 	MemoryTelemetry GetMemoryTelemetry() const;
+	static const char* GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot);
 
 private:
 	enum class FrameTextureSlot : uint32_t
@@ -899,6 +930,7 @@ private:
 	void InvalidateStaticMapSceneForMaterialLighting();
 	PersistentDynamicSurfaceStats GatherPersistentDynamicEmissiveSurfaceStats() const;
 	RuntimeMutationCacheStats GatherRuntimeMutationCacheStats() const;
+	static MaterialBuildTraceSlot ResolveMaterialBuildTraceSlot(const char* traceLabel);
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
 	void UpdateFrameGenerationFrameDesc();

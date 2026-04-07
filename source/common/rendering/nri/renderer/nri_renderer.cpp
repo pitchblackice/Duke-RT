@@ -2610,6 +2610,35 @@ namespace
 		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
 	}
 
+	size_t GetMaterialBuildTraceSlotIndex(NRIRenderer::MaterialBuildTraceSlot slot)
+	{
+		return (size_t)slot;
+	}
+
+	const char* GetMaterialBuildTraceSlotNameInternal(NRIRenderer::MaterialBuildTraceSlot slot)
+	{
+		switch (slot)
+		{
+		case NRIRenderer::MaterialBuildTraceSlot::DynamicLive: return "dynamic_live";
+		case NRIRenderer::MaterialBuildTraceSlot::MirrorExtended: return "mirror_extended";
+		case NRIRenderer::MaterialBuildTraceSlot::SceneLightMergedDynamic: return "scene_light_merged_dynamic";
+		case NRIRenderer::MaterialBuildTraceSlot::MirrorPlayer: return "mirror_player";
+		case NRIRenderer::MaterialBuildTraceSlot::DynamicWithPersistentEmissive: return "dynamic_with_persistent_emissive";
+		case NRIRenderer::MaterialBuildTraceSlot::SceneLightMergedPersistent: return "scene_light_merged_persistent";
+		case NRIRenderer::MaterialBuildTraceSlot::CapturedScene: return "captured_scene";
+		case NRIRenderer::MaterialBuildTraceSlot::PersistentEmissiveCachePrune: return "persistent_emissive_cache_prune";
+		case NRIRenderer::MaterialBuildTraceSlot::PersistentEmissiveCacheRebuild: return "persistent_emissive_cache_rebuild";
+		case NRIRenderer::MaterialBuildTraceSlot::StaticMapAnimChunk: return "static_map_anim_chunk";
+		case NRIRenderer::MaterialBuildTraceSlot::StaticMapChunk: return "static_map_chunk";
+		case NRIRenderer::MaterialBuildTraceSlot::RuntimeMutationChunk: return "runtime_mutation_chunk";
+		case NRIRenderer::MaterialBuildTraceSlot::RuntimeSpaceLinkChunk: return "runtime_space_link_chunk";
+		case NRIRenderer::MaterialBuildTraceSlot::Unknown: return "unknown";
+		case NRIRenderer::MaterialBuildTraceSlot::Count: break;
+		}
+
+		return "unknown";
+	}
+
 	class ScopedPtPerfTimer
 	{
 	public:
@@ -8279,6 +8308,30 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	return telemetry;
 }
 
+const char* NRIRenderer::GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot)
+{
+	return GetMaterialBuildTraceSlotNameInternal(slot);
+}
+
+NRIRenderer::MaterialBuildTraceSlot NRIRenderer::ResolveMaterialBuildTraceSlot(const char* traceLabel)
+{
+	if (traceLabel == nullptr || traceLabel[0] == '\0')
+	{
+		return MaterialBuildTraceSlot::Unknown;
+	}
+
+	for (size_t index = 0; index < GetMaterialBuildTraceSlotIndex(MaterialBuildTraceSlot::Count); ++index)
+	{
+		const MaterialBuildTraceSlot slot = (MaterialBuildTraceSlot)index;
+		if (std::strcmp(traceLabel, GetMaterialBuildTraceSlotNameInternal(slot)) == 0)
+		{
+			return slot;
+		}
+	}
+
+	return MaterialBuildTraceSlot::Unknown;
+}
+
 void NRIRenderer::PrintTemporalStatus() const
 {
 	SyncLegacyUpscalerConfig(false);
@@ -8644,6 +8697,21 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mLastPerfShellTraceStats.actorOverrideMapBuildCalls,
 		mLastPerfShellTraceStats.actorOverrideMapBuildMs,
 		mLastPerfShellTraceStats.materialBuildMs);
+	for (size_t index = 0; index < NRIRenderer::MaterialBuildTraceSlotCount; ++index)
+	{
+		const auto& entry = mLastPerfShellTraceStats.materialBuildByLabel[index];
+		if (entry.calls == 0 && entry.overrideBuildCalls == 0)
+		{
+			continue;
+		}
+
+		Printf("NRI PT material detail: label=%s calls=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
+			GetMaterialBuildTraceSlotName((MaterialBuildTraceSlot)index),
+			entry.calls,
+			entry.overrideBuildCalls,
+			entry.overrideBuildMs,
+			entry.materialBuildMs);
+	}
 }
 
 void NRIRenderer::ResetPersistentDynamicEmissiveCache()
@@ -10756,16 +10824,22 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 {
 	mLastPerfShellTraceStats.materialBuildCalls++;
 	const bool tracePerf = ShouldTracePtPerf();
+	const MaterialBuildTraceSlot materialTraceSlot = ResolveMaterialBuildTraceSlot(traceLabel);
+	auto& materialTraceEntry = mLastPerfShellTraceStats.materialBuildByLabel[GetMaterialBuildTraceSlotIndex(materialTraceSlot)];
+	materialTraceEntry.calls++;
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	if (HasActorFullbrightOverrides(resolvedLightOverlays))
 	{
 		std::unordered_map<int32_t, uint32_t> actorOverrides;
 		mLastPerfShellTraceStats.actorOverrideMapBuildCalls++;
+		materialTraceEntry.overrideBuildCalls++;
 		if (tracePerf)
 		{
 			const auto start = std::chrono::steady_clock::now();
 			BuildActorMaterialOverrideMap(resolvedLightOverlays, actorOverrides);
-			mLastPerfShellTraceStats.actorOverrideMapBuildMs += DurationMs(start, std::chrono::steady_clock::now());
+			const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
+			mLastPerfShellTraceStats.actorOverrideMapBuildMs += elapsedMs;
+			materialTraceEntry.overrideBuildMs += elapsedMs;
 		}
 		else
 		{
@@ -10813,7 +10887,9 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 			{
 				const auto start = std::chrono::steady_clock::now();
 				nri_scene::BuildMaterials(sceneView, outMaterials);
-				mLastPerfShellTraceStats.materialBuildMs += DurationMs(start, std::chrono::steady_clock::now());
+				const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
+				mLastPerfShellTraceStats.materialBuildMs += elapsedMs;
+				materialTraceEntry.materialBuildMs += elapsedMs;
 			}
 			else
 			{
@@ -10833,7 +10909,9 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	{
 		const auto start = std::chrono::steady_clock::now();
 		nri_scene::BuildMaterials(sceneView, outMaterials);
-		mLastPerfShellTraceStats.materialBuildMs += DurationMs(start, std::chrono::steady_clock::now());
+		const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
+		mLastPerfShellTraceStats.materialBuildMs += elapsedMs;
+		materialTraceEntry.materialBuildMs += elapsedMs;
 	}
 	else
 	{
