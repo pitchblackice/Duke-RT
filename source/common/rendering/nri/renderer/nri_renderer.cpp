@@ -8166,6 +8166,86 @@ void NRIRenderer::PrintStatus() const
 	PrintSurfaceProbeStatus();
 }
 
+NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
+{
+	MemoryTelemetry telemetry = {};
+	telemetry.renderWidth = mRenderWidth;
+	telemetry.renderHeight = mRenderHeight;
+	telemetry.outputWidth = mOutputWidth;
+	telemetry.outputHeight = mOutputHeight;
+
+	const auto accumulateTexture = [](const NRITextureResource& resource, uint64_t& total)
+	{
+		total += resource.memorySize;
+	};
+	const auto accumulateBuffer = [](const NRIBufferResource& resource, uint64_t& total)
+	{
+		total += resource.memorySize;
+	};
+	const auto accumulateAs = [](const NRIAccelerationStructureResource& resource, uint64_t& total)
+	{
+		total += resource.memorySize;
+	};
+
+	for (const NRITextureResource& texture : mFrameTextures)
+	{
+		accumulateTexture(texture, telemetry.frameTextureBytes);
+	}
+
+	accumulateTexture(mPaletteTexture, telemetry.sceneTextureBytes);
+	for (const CachedTexture& texture : mTextureCache)
+	{
+		accumulateTexture(texture.resource, telemetry.sceneTextureBytes);
+	}
+
+	for (const CachedSkyTexture& texture : mSkyTextureCache)
+	{
+		accumulateTexture(texture.resource, telemetry.skyTextureBytes);
+	}
+
+	accumulateBuffer(mVertexBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mIndexBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mPrimitiveBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mMaterialBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mStaticVertexBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mStaticIndexBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mStaticPrimitiveBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mStaticMaterialBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mTlasInstanceBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mSceneInstanceBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mPortalBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mRuntimeLightBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mRuntimeLightTileHeaderBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mRuntimeLightTileIndexBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mEmissivePrimitiveHeaderBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mEmissivePrimitiveBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mEmissivePrimitiveCdfBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mEmissiveTlasInstanceBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mSectorLightHeaderBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mSectorLightBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mReprojectionBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mVisibleChunkBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mVisibleFlatPlaneBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mScratchBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mTopLevelScratchBuffer, telemetry.sceneBufferBytes);
+
+	accumulateAs(mDynamicBottomLevelAS, telemetry.accelerationStructureBytes);
+	accumulateAs(mTopLevelAS, telemetry.accelerationStructureBytes);
+	accumulateAs(mEmissiveTopLevelAS, telemetry.accelerationStructureBytes);
+	for (const auto& chunk : mStaticMapScene.chunks)
+	{
+		accumulateAs(chunk.accelerationStructure, telemetry.accelerationStructureBytes);
+	}
+
+	telemetry.totalTrackedBytes =
+		telemetry.frameTextureBytes +
+		telemetry.sceneTextureBytes +
+		telemetry.skyTextureBytes +
+		telemetry.sceneBufferBytes +
+		telemetry.accelerationStructureBytes;
+	return telemetry;
+}
+
 void NRIRenderer::PrintTemporalStatus() const
 {
 	SyncLegacyUpscalerConfig(false);
@@ -13624,7 +13704,11 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 		return false;
 	}
 
+	nri::MemoryDesc memoryDesc = {};
+	mFrameBuffer->mCore.GetBufferMemoryDesc(*resource.buffer, nri::MemoryLocation::DEVICE_UPLOAD, memoryDesc);
 	resource.size = desc.size;
+	resource.memorySize = memoryDesc.size;
+	resource.memoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
 	resource.usedSize = size;
 	resource.stride = stride;
 
@@ -13706,7 +13790,11 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 			return false;
 		}
 
+		nri::MemoryDesc memoryDesc = {};
+		mFrameBuffer->mCore.GetBufferMemoryDesc(*resource.buffer, nri::MemoryLocation::DEVICE_UPLOAD, memoryDesc);
 		resource.size = desc.size;
+		resource.memorySize = memoryDesc.size;
+		resource.memoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
 		resource.usedSize = size;
 		resource.stride = stride;
 
@@ -13784,7 +13872,11 @@ bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t 
 		return false;
 	}
 
+	nri::MemoryDesc memoryDesc = {};
+	mFrameBuffer->mCore.GetBufferMemoryDesc(*resource.buffer, nri::MemoryLocation::DEVICE, memoryDesc);
 	resource.size = desc.size;
+	resource.memorySize = memoryDesc.size;
+	resource.memoryLocation = nri::MemoryLocation::DEVICE;
 	resource.usedSize = size;
 	resource.stride = stride;
 	return true;
@@ -13895,6 +13987,11 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		{
 			return false;
 		}
+
+		nri::MemoryDesc memoryDesc = {};
+		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		chunk.accelerationStructure.memorySize = memoryDesc.size;
+		chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
 
 		maxScratchSize = std::max(maxScratchSize, mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
 	}
@@ -15097,6 +15194,13 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 		return false;
 	}
 
+	{
+		nri::MemoryDesc memoryDesc = {};
+		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*mDynamicBottomLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		mDynamicBottomLevelAS.memorySize = memoryDesc.size;
+		mDynamicBottomLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
+	}
+
 	uint64_t requiredScratchSize = 0;
 	{
 		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsScratchMs);
@@ -15313,6 +15417,13 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 		return false;
 	}
 
+	{
+		nri::MemoryDesc memoryDesc = {};
+		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*mEmissiveTopLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		mEmissiveTopLevelAS.memorySize = memoryDesc.size;
+		mEmissiveTopLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
+	}
+
 	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mEmissiveTopLevelAS.accelerationStructure);
 	if (mTopLevelScratchBuffer.buffer == nullptr || mTopLevelScratchBuffer.size < requiredScratchSize)
 	{
@@ -15383,6 +15494,13 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopL
 	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, mTopLevelAS.accelerationStructure) != nri::Result::SUCCESS)
 	{
 		return false;
+	}
+
+	{
+		nri::MemoryDesc memoryDesc = {};
+		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*mTopLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		mTopLevelAS.memorySize = memoryDesc.size;
+		mTopLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
 	}
 
 	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mTopLevelAS.accelerationStructure);
@@ -17355,8 +17473,10 @@ void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)
 	}
 
 	resource.size = 0;
+	resource.memorySize = 0;
 	resource.usedSize = 0;
 	resource.stride = 0;
+	resource.memoryLocation = nri::MemoryLocation::DEVICE;
 }
 
 void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureResource& resource)
@@ -17372,6 +17492,9 @@ void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureR
 		mFrameBuffer->mRayTracing.DestroyAccelerationStructure(resource.accelerationStructure);
 		resource.accelerationStructure = nullptr;
 	}
+
+	resource.memorySize = 0;
+	resource.memoryLocation = nri::MemoryLocation::DEVICE;
 }
 
 bool NRIRenderer::IsMainUpscalerSupported(NRIMainUpscalerKind kind) const

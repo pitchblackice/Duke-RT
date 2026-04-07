@@ -131,6 +131,20 @@ public:
 		uint64_t emissiveUploadBytes = 0;
 	};
 
+	struct MemoryTelemetry
+	{
+		uint64_t frameTextureBytes = 0;
+		uint64_t sceneTextureBytes = 0;
+		uint64_t skyTextureBytes = 0;
+		uint64_t sceneBufferBytes = 0;
+		uint64_t accelerationStructureBytes = 0;
+		uint64_t totalTrackedBytes = 0;
+		uint32_t renderWidth = 0;
+		uint32_t renderHeight = 0;
+		uint32_t outputWidth = 0;
+		uint32_t outputHeight = 0;
+	};
+
 	explicit NRIRenderer(NRIRenderDevice* frameBuffer);
 	~NRIRenderer();
 
@@ -174,6 +188,7 @@ public:
 	const char* GetAvailabilityReason() const;
 	const PerfShellTraceStats& GetLastPerfShellTraceStats() const { return mLastPerfShellTraceStats; }
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
+	MemoryTelemetry GetMemoryTelemetry() const;
 
 private:
 	enum class FrameTextureSlot : uint32_t

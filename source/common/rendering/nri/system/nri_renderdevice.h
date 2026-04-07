@@ -181,6 +181,8 @@ private:
 		uint64_t totalResourceCreates = 0;
 		uint64_t totalResourceRecreates = 0;
 		uint64_t totalUploadedBytes = 0;
+		uint64_t residentBytes = 0;
+		uint64_t peakResidentBytes = 0;
 	};
 
 	using PFN_nriEnumerateAdapters = nri::Result(NRI_CALL*)(nri::AdapterDesc*, uint32_t&);
@@ -226,6 +228,7 @@ private:
 	void PrintSwapChainStatus() const;
 	void PrintFrameShellStatus() const;
 	void Print2DTextureStatus() const;
+	void PrintVramTelemetryStatus() const;
 	const char* DescribeTextureTarget(const NRITextureResource* target) const;
 	void RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64_t submittedFenceValue, nri::Result presentResult);
 	void Reset2DTextureFrameStats();
@@ -234,6 +237,7 @@ private:
 	void Note2DTextureCacheMiss();
 	void Note2DTextureUploadAttempt(uint64_t bytes, bool success);
 	void Note2DTextureResourceCreate(bool recreated);
+	void Note2DTextureResidentBytesChanged(uint64_t oldBytes, uint64_t newBytes);
 	void NoteSwapChainAcquire(uint32_t imageIndex);
 	void NoteSwapChainPresent(uint32_t imageIndex);
 	void NoteSwapChainAbandon(uint32_t imageIndex);
@@ -357,6 +361,8 @@ private:
 	FrameSequenceEntry mFrameSequenceHistory[FrameSequenceHistorySize] = {};
 	uint32_t mFrameSequenceWriteIndex = 0;
 	Texture2DDebugStats mTexture2DDebugStats;
+	uint64_t mAdapterLocalBudgetBytes = 0;
+	uint64_t mAdapterNonLocalBudgetBytes = 0;
 	bool mTraceThisFrame = false;
 	TArray<PathTracingWeaponLightEvent> mPendingPathTracingWeaponLightEvents;
 	uint64_t mNextPathTracingWeaponLightEventSerial = 1;

@@ -259,7 +259,9 @@ void NRIHardwareTexture::Reset()
 {
 	if (mFrameBuffer != nullptr)
 	{
+		const uint64_t oldBytes = mResource.memorySize;
 		mFrameBuffer->DestroyTextureResource(mResource);
+		mFrameBuffer->Note2DTextureResidentBytesChanged(oldBytes, 0);
 	}
 
 	mStagingPixels.clear();
@@ -284,6 +286,7 @@ void NRIHardwareTexture::CreateTextureResource(uint32_t width, uint32_t height, 
 	}
 
 	const bool recreated = mResource.texture != nullptr;
+	const uint64_t oldBytes = mResource.memorySize;
 	if (recreated)
 	{
 		mFrameBuffer->WaitForCommands(true);
@@ -293,6 +296,7 @@ void NRIHardwareTexture::CreateTextureResource(uint32_t width, uint32_t height, 
 	{
 		mFrameBuffer->Note2DTextureResourceCreate(recreated);
 	}
+	mFrameBuffer->Note2DTextureResidentBytesChanged(oldBytes, mResource.memorySize);
 }
 
 bool NRIHardwareTexture::UploadTextureData(const void* data, uint32_t width, uint32_t height, nri::Format format, uint32_t rowPitch)

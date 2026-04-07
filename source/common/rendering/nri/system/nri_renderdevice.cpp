@@ -3181,6 +3181,7 @@ void NRIRenderDevice::PrintPathTracingStatus() const
 	PrintSwapChainStatus();
 	PrintFrameShellStatus();
 	Print2DTextureStatus();
+	PrintVramTelemetryStatus();
 	if (mRenderer != nullptr)
 	{
 		mRenderer->PrintStatus();
@@ -3300,6 +3301,7 @@ void NRIRenderDevice::PrintPathTracingBuffers() const
 	PrintSwapChainStatus();
 	PrintFrameShellStatus();
 	Print2DTextureStatus();
+	PrintVramTelemetryStatus();
 	if (mRenderer != nullptr)
 	{
 		mRenderer->PrintSceneBufferStatus();
@@ -3560,7 +3562,7 @@ void NRIRenderDevice::RecordFrameSequence(uint32_t releaseSemaphoreIndex, uint64
 void NRIRenderDevice::Print2DTextureStatus() const
 {
 	const auto& stats = mTexture2DDebugStats;
-	Printf("NRI 2D textures: frame=%llu ensure=%u canvas=%u hits=%u misses=%u uploads=%u failures=%u create=%u recreate=%u bytes=%llu total_bytes=%llu\n",
+	Printf("NRI 2D textures: frame=%llu ensure=%u canvas=%u hits=%u misses=%u uploads=%u failures=%u create=%u recreate=%u bytes=%llu total_bytes=%llu resident_bytes=%llu peak_resident=%llu\n",
 		(unsigned long long)stats.frameNumber,
 		stats.ensureCalls,
 		stats.canvasEnsures,
@@ -3571,7 +3573,9 @@ void NRIRenderDevice::Print2DTextureStatus() const
 		stats.resourceCreates,
 		stats.resourceRecreates,
 		(unsigned long long)stats.uploadedBytes,
-		(unsigned long long)stats.totalUploadedBytes);
+		(unsigned long long)stats.totalUploadedBytes,
+		(unsigned long long)stats.residentBytes,
+		(unsigned long long)stats.peakResidentBytes);
 	Printf("NRI 2D totals: ensures=%llu canvas=%llu hits=%llu misses=%llu uploads=%llu failures=%llu create=%llu recreate=%llu\n",
 		(unsigned long long)stats.totalEnsureCalls,
 		(unsigned long long)stats.totalCanvasEnsures,
@@ -3581,6 +3585,43 @@ void NRIRenderDevice::Print2DTextureStatus() const
 		(unsigned long long)stats.totalUploadFailures,
 		(unsigned long long)stats.totalResourceCreates,
 		(unsigned long long)stats.totalResourceRecreates);
+}
+
+void NRIRenderDevice::PrintVramTelemetryStatus() const
+{
+	const NRIRenderer::MemoryTelemetry rendererMemory = mRenderer != nullptr ? mRenderer->GetMemoryTelemetry() : NRIRenderer::MemoryTelemetry{};
+	const uint64_t trackedLocalUsageBytes =
+		rendererMemory.totalTrackedBytes +
+		mTexture2DDebugStats.residentBytes;
+	const uint64_t trackedNonLocalUsageBytes = 0;
+	const double localPressurePct =
+		mAdapterLocalBudgetBytes > 0 ?
+		(100.0 * (double)trackedLocalUsageBytes / (double)mAdapterLocalBudgetBytes) : 0.0;
+	const bool is4KMode =
+		rendererMemory.outputWidth >= 3840 ||
+		rendererMemory.outputHeight >= 2160 ||
+		rendererMemory.renderWidth >= 3840 ||
+		rendererMemory.renderHeight >= 2160;
+
+	Printf("NRI PT vram budget: local=%llu nonlocal=%llu tracked_local=%llu tracked_nonlocal=%llu local_pressure=%.1f%%\n",
+		(unsigned long long)mAdapterLocalBudgetBytes,
+		(unsigned long long)mAdapterNonLocalBudgetBytes,
+		(unsigned long long)trackedLocalUsageBytes,
+		(unsigned long long)trackedNonLocalUsageBytes,
+		localPressurePct);
+	Printf("NRI PT vram families: frame=%llu scene=%llu sky=%llu tex2d=%llu buffers=%llu accel=%llu total=%llu\n",
+		(unsigned long long)rendererMemory.frameTextureBytes,
+		(unsigned long long)rendererMemory.sceneTextureBytes,
+		(unsigned long long)rendererMemory.skyTextureBytes,
+		(unsigned long long)mTexture2DDebugStats.residentBytes,
+		(unsigned long long)rendererMemory.sceneBufferBytes,
+		(unsigned long long)rendererMemory.accelerationStructureBytes,
+		(unsigned long long)trackedLocalUsageBytes);
+
+	if (is4KMode && mAdapterLocalBudgetBytes > 0 && localPressurePct >= 80.0)
+	{
+		Printf(TEXTCOLOR_ORANGE "NRI PT vram warning: 4K tracked local usage is at %.1f%% of local budget.\n", localPressurePct);
+	}
 }
 
 void NRIRenderDevice::Reset2DTextureFrameStats()
@@ -3645,6 +3686,20 @@ void NRIRenderDevice::Note2DTextureResourceCreate(bool recreated)
 		mTexture2DDebugStats.resourceCreates++;
 		mTexture2DDebugStats.totalResourceCreates++;
 	}
+}
+
+void NRIRenderDevice::Note2DTextureResidentBytesChanged(uint64_t oldBytes, uint64_t newBytes)
+{
+	if (newBytes >= oldBytes)
+	{
+		mTexture2DDebugStats.residentBytes += newBytes - oldBytes;
+	}
+	else
+	{
+		mTexture2DDebugStats.residentBytes -= oldBytes - newBytes;
+	}
+
+	mTexture2DDebugStats.peakResidentBytes = (std::max)(mTexture2DDebugStats.peakResidentBytes, mTexture2DDebugStats.residentBytes);
 }
 
 void NRIRenderDevice::NoteSwapChainAcquire(uint32_t imageIndex)
@@ -4287,6 +4342,8 @@ bool NRIRenderDevice::CreateDevice()
 	nri::DeviceCreationDesc creationDesc = {};
 	creationDesc.graphicsAPI = selectedApi;
 	creationDesc.adapterDesc = &adapters[0];
+	mAdapterLocalBudgetBytes = adapters[0].videoMemorySize;
+	mAdapterNonLocalBudgetBytes = adapters[0].sharedSystemMemorySize;
 	creationDesc.callbackInterface.MessageCallback = &NriMessageCallback;
 	creationDesc.enableGraphicsAPIValidation = enableGraphicsApiValidation;
 	creationDesc.enableNRIValidation = !!nri_validation;
@@ -5313,6 +5370,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		PrintSwapChainStatus();
 		PrintFrameShellStatus();
 		Print2DTextureStatus();
+		PrintVramTelemetryStatus();
 		tracePrintMs = I_msTimeF() - stageStartMs;
 		const int remainingTraceFrames = (int)nri_pttraceframes - 1;
 		nri_pttraceframes = remainingTraceFrames > 0 ? remainingTraceFrames : 0;
@@ -5563,6 +5621,8 @@ void NRIRenderDevice::DestroyTextureResource(NRITextureResource& resource)
 	resource.height = 0;
 	resource.layerNum = 1;
 	resource.format = nri::Format::UNKNOWN;
+	resource.memorySize = 0;
+	resource.memoryLocation = nri::MemoryLocation::DEVICE;
 	resource.type = nri::TextureType::TEXTURE_2D;
 	resource.shaderViewType = nri::TextureView::TEXTURE;
 	resource.usage = nri::TextureUsageBits::NONE;
@@ -5663,6 +5723,10 @@ bool NRIRenderDevice::CreateOwnedTexture(NRITextureResource& resource, uint32_t 
 	resource.height = height;
 	resource.layerNum = layerNum;
 	resource.format = format;
+	nri::MemoryDesc memoryDesc = {};
+	mCore.GetTextureMemoryDesc(*resource.texture, nri::MemoryLocation::DEVICE, memoryDesc);
+	resource.memorySize = memoryDesc.size;
+	resource.memoryLocation = nri::MemoryLocation::DEVICE;
 	resource.type = type;
 	resource.shaderViewType = shaderViewType;
 	resource.usage = usage;
