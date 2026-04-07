@@ -530,7 +530,9 @@ private:
 			nri_scene::PTMapChunkMutationBaseline baseline;
 			uint64_t baselineSignature = 0;
 			uint64_t liveSignature = 0;
+			uint64_t animatedMaterialSignature = 0;
 			uint64_t lastTraceSignature = UINT64_MAX;
+			uint64_t lastTraceAnimatedMaterialSignature = UINT64_MAX;
 			uint32_t reasonMask = 0;
 			uint32_t sectionDirtyCount = 0;
 			uint32_t lastTraceReasonMask = UINT32_MAX;
@@ -543,6 +545,8 @@ private:
 			bool excludeStaticChunk = false;
 			bool lastTraceActive = false;
 			bool lastTraceBlindSpot = false;
+			bool animationOnlyRefreshed = false;
+			bool lastTraceAnimationOnlyRefreshed = false;
 			uint32_t surfaceCount = 0;
 			uint32_t triangleCount = 0;
 			SceneLightSystem::SurfaceIdentityOverrides lightIdentityOverrides;
@@ -570,6 +574,7 @@ private:
 		uint32_t sectorDirtyChunkCount = 0;
 		uint32_t sectionDirtyChunkCount = 0;
 		uint32_t draggedChunkCount = 0;
+		uint32_t animatedRefreshChunkCount = 0;
 		uint32_t replacementSurfaceCount = 0;
 		uint32_t replacementTriangleCount = 0;
 		uint32_t materialCount = 0;
