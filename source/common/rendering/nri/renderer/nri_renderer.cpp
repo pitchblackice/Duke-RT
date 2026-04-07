@@ -14948,11 +14948,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		// Section dirty alone is too broad for PT runtime replacement because
 		// the raster path can mark transient warped sections dirty during draw
 		// prep without producing a stable gameplay map mutation. Keep explicit
-		// forced invalidation for sector-dirty and dragged ownership, and let
-		// section-dirty-only cases fall back to signature-backed replacement.
+		// forced invalidation for sector-dirty, but do not let the sticky
+		// dragged-sector ownership bit force perpetual rebuilds once PT already
+		// has a valid replacement baseline for the chunk.
 		const bool forceTopologyInvalidation =
-			(analysis.reasonMask & (nri_scene::PTMapChunkMutationReason_SectorDirty |
-				nri_scene::PTMapChunkMutationReason_Dragged)) != 0;
+			(analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0;
 		const uint32_t materialOnlyReasonMask =
 			nri_scene::PTMapChunkMutationReason_SectorMaterial |
 			nri_scene::PTMapChunkMutationReason_WallMaterial;
@@ -15029,8 +15029,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			nri_scene::PTMapChunkMutationReason_SectorGeometry |
 			nri_scene::PTMapChunkMutationReason_WallGeometry |
 			nri_scene::PTMapChunkMutationReason_SectorDirty |
-			nri_scene::PTMapChunkMutationReason_SectionDirty |
-			nri_scene::PTMapChunkMutationReason_Dragged;
+			nri_scene::PTMapChunkMutationReason_SectionDirty;
 		const uint32_t replacementViewReasonMask =
 			nri_scene::PTMapChunkMutationReason_SectorGeometry |
 			nri_scene::PTMapChunkMutationReason_SectorMaterial |
