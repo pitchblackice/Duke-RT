@@ -12530,19 +12530,7 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 		}
 
 		nri_scene::SceneView liveChunkView;
-		nri_scene::PTMapWorld liveWorld = {};
-		nri_scene::PTMapWorldStats liveStats = {};
-		if (!nri_scene::BuildLiveMapChunkWorld(mMapWorld.chunks[chunkCache.chunkIndex], liveWorld, &liveStats) ||
-			liveWorld.chunks.empty())
-		{
-			DestroyStaticMapSceneCache();
-			mStaticMapScene = {};
-			mStaticAccelerationBuildSerial = 0;
-			mPreservedStaticMapSky = {};
-			return EnsureStaticMapScene();
-		}
-
-		nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], liveChunkView, preservedSkyView);
+		nri_scene::BuildMapChunkSceneView(mMapWorld, mMapWorld.chunks[chunkCache.chunkIndex], liveChunkView, preservedSkyView);
 		const uint64_t liveAnimatedMaterialSignature = ComputeAnimatedMaterialSignature(liveChunkView);
 		if (liveAnimatedMaterialSignature == chunkCache.animatedMaterialSignature)
 		{
