@@ -13179,11 +13179,6 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	for (uint32_t i = 0; i < std::min<uint32_t>((uint32_t)materials.textures.size(), NRI_MAX_SCENE_TEXTURES); ++i)
 	{
 		const auto& upload = materials.textures[i];
-		if (upload.width == 0 || upload.height == 0)
-		{
-			continue;
-		}
-
 		if (upload.sourceTexture != nullptr && upload.sourceTexture->isHardwareCanvas())
 		{
 			auto* hardwareTexture = static_cast<NRIHardwareTexture*>(upload.sourceTexture->GetHardwareTexture(0, 0));
@@ -13196,6 +13191,11 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 					continue;
 				}
 			}
+		}
+
+		if (upload.width == 0 || upload.height == 0)
+		{
+			continue;
 		}
 
 		auto it = std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; });
