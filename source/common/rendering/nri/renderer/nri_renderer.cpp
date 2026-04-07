@@ -4754,6 +4754,29 @@ namespace
 		return hash;
 	}
 
+	template <typename SurfaceContainer>
+	static bool SurfaceContainerUsesHardwareCanvasTexture(const SurfaceContainer& surfaces)
+	{
+		for (const auto& surface : surfaces)
+		{
+			if (surface.material.texture != nullptr &&
+				surface.material.texture->isHardwareCanvas())
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	static bool SceneViewUsesHardwareCanvasTexture(const nri_scene::SceneView& sceneView)
+	{
+		return
+			SurfaceContainerUsesHardwareCanvasTexture(sceneView.opaqueWalls) ||
+			SurfaceContainerUsesHardwareCanvasTexture(sceneView.opaqueFlats) ||
+			SurfaceContainerUsesHardwareCanvasTexture(sceneView.opaqueSprites);
+	}
+
 	static FTextureID ResolveAuthoredTextureIdForStaticMapSurface(const nri_scene::PTMapSurface& surface)
 	{
 		switch (surface.kind)
@@ -14521,9 +14544,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					return false;
 				}
 
+				const bool forceHardwareCanvasRefresh =
+					SceneViewUsesHardwareCanvasTexture(liveChunkView) &&
+					IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
 				const uint64_t liveAnimatedMaterialSignature =
 					ComputeAnimatedMaterialSignature(liveChunkView);
-				if (liveAnimatedMaterialSignature == replacement.animatedMaterialSignature)
+				if (!forceHardwareCanvasRefresh &&
+					liveAnimatedMaterialSignature == replacement.animatedMaterialSignature)
 				{
 					return true;
 				}
