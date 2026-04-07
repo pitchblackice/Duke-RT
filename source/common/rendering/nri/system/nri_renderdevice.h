@@ -74,6 +74,7 @@ public:
 	void PrintPathTracingStatus() const;
 	void PrintPathTracingBuffers() const;
 	void ResetPathTracingHistory();
+	void NotifyPathTracingCameraCut(const char* reason) override;
 	bool SpawnPathTracingPointLight(float red, float green, float blue, float intensity, float radius, float offset, uint32_t& outId);
 	bool RemovePathTracingPointLight(uint32_t id);
 	void ClearPathTracingPointLights();

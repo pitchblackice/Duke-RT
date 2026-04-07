@@ -138,6 +138,7 @@ public:
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
 	bool PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
 	void ResetHistory();
+	void NotifyCameraCut(const char* reason);
 	void PrintStatus() const;
 	void PrintSceneBufferStatus() const;
 	void PrintSceneLightDump(float radius, uint32_t limit) const;

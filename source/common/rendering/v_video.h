@@ -280,6 +280,7 @@ public:
 	virtual bool FlipSavePic() const { return false; }
 	virtual void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc) {}
 	virtual void SnapshotCurrentViewToCanvas(FCanvasTexture* tex) {}
+	virtual void NotifyPathTracingCameraCut(const char* reason) {}
 	virtual bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const { return false; }
 	virtual bool RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal) { return false; }
 	virtual bool HasActiveSceneFrame() const { return true; }

@@ -81,6 +81,15 @@ void GameInterface::UpdateCameras(double smoothratio)
 	auto p = getPlayer(screenpeek);
 	if (p->newOwner != nullptr)
 	{
+		if (sPreviousViewCamera == nullptr)
+		{
+			screen->NotifyPathTracingCameraCut("camera-enter");
+		}
+		else if (sPreviousViewCamera != p->newOwner)
+		{
+			screen->NotifyPathTracingCameraCut("camera-switch");
+		}
+
 		// Active camera use already renders the main view from the camera actor.
 		// Updating the offscreen monitor canvas in the same frame forces a second
 		// render at a different size, which is unsupported by the current NRI PT path.
@@ -90,6 +99,8 @@ void GameInterface::UpdateCameras(double smoothratio)
 	}
 	if (sPreviousViewCamera != nullptr)
 	{
+		screen->NotifyPathTracingCameraCut("camera-exit");
+
 		// The first frame after leaving camera view still renders the normal main
 		// scene at window size. Skip the monitor refresh in that transition frame
 		// so NRI PT does not bounce between offscreen and main-view frame sizes.

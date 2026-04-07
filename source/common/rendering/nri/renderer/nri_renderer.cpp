@@ -6613,6 +6613,11 @@ void NRIRenderer::ResetHistory()
 	RequestHistoryReset("history-reset", true, true);
 }
 
+void NRIRenderer::NotifyCameraCut(const char* reason)
+{
+	RequestHistoryReset((reason != nullptr && *reason != '\0') ? reason : "camera-cut", true, false);
+}
+
 void NRIRenderer::RequestHistoryReset(const char* reason, bool clearPreviousCameraState, bool clearRuntimeChunkTranslationHistory)
 {
 	ArmTemporalTraceBudget(reason);
