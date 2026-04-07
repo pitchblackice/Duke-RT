@@ -126,6 +126,7 @@ protected:
 
 class IHardwareTexture;
 class FTexture;
+class FGameTexture;
 
 struct PathTracingWeaponLightEvent
 {
@@ -139,6 +140,31 @@ struct PathTracingWeaponLightEvent
 	bool hasBasis = false;
 	double absoluteTimeSeconds = 0.0;
 	uint64_t serial = 0;
+};
+
+enum class PathTracingActorSpriteTraceStage : uint32_t
+{
+	Draw = 0,
+	CaptureScene = 1,
+	CaptureActorScene = 2
+};
+
+struct PathTracingActorSpriteTraceEvent
+{
+	PathTracingActorSpriteTraceStage stage = PathTracingActorSpriteTraceStage::Draw;
+	int32_t actorIndex = -1;
+	int32_t spriteStatnum = -1;
+	int32_t spritePicnum = -1;
+	int32_t baseTextureId = -1;
+	int32_t resolvedTextureId = -1;
+	int32_t palette = 0;
+	int32_t shade = 0;
+	uint32_t cstat = 0;
+	uint32_t cstat2 = 0;
+	uint32_t drawListType = 0;
+	bool noAnimate = false;
+	bool fullbright = false;
+	const FGameTexture* resolvedGameTexture = nullptr;
 };
 
 class DFrameBuffer
@@ -290,6 +316,7 @@ public:
 	virtual void CancelPathTracingLevelPreload() {}
 	virtual void SetActiveRenderTarget() {}
 	virtual void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event);
+	virtual void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event);
 	virtual void PrintPathTracingSurfaceProbeStatus() const;
 
 	// Screen wiping

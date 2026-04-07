@@ -23,6 +23,7 @@
 
 class NRIRenderDevice;
 struct MapRecord;
+struct PathTracingActorSpriteTraceEvent;
 
 struct NRIDirectionalLightState
 {
@@ -167,6 +168,7 @@ public:
 	void PrintSurfaceProbeStatus() const;
 	void PrintMapChunkDump(int32_t chunkIndex) const;
 	void PrintMapChunkCompare(int32_t chunkIndex) const;
+	void TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& event);
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	bool RefreshPathTracingAvailability();
 	const char* GetAvailabilityReason() const;
@@ -495,6 +497,30 @@ private:
 		nri_scene::SceneView sceneView;
 		nri_scene::GeometryData geometry;
 		nri_scene::MaterialBridgeData materialBridge;
+	};
+
+	struct ActorSpriteDebugStats
+	{
+		uint32_t lastPruneChecks = 0;
+		uint32_t lastPruneMatches = 0;
+		uint32_t lastPruneDroppedMissingActor = 0;
+		uint32_t lastPruneDroppedMissingActorIndex = 0;
+		uint32_t lastPruneDroppedNullLiveTexture = 0;
+		uint32_t lastPruneDroppedTextureMismatch = 0;
+		uint32_t lastPruneDroppedPaletteMismatch = 0;
+	};
+
+	struct SceneTextureOverflowDebugStats
+	{
+		uint32_t textureCountLastBuild = 0;
+		uint32_t truncatedTextureCountLastBuild = 0;
+		uint32_t baseTextureClampCountLastBuild = 0;
+		uint32_t normalTextureClampCountLastBuild = 0;
+		uint32_t metallicTextureClampCountLastBuild = 0;
+		uint32_t roughnessTextureClampCountLastBuild = 0;
+		uint32_t emissiveTextureClampCountLastBuild = 0;
+		uint64_t totalOverflowBuilds = 0;
+		bool warningLogged = false;
 	};
 
 	struct RuntimeMapMutationCache
@@ -874,6 +900,8 @@ private:
 	RuntimeMapMutationCache mRuntimeMapMutations;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
+	ActorSpriteDebugStats mActorSpriteDebugStats = {};
+	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};
 	RuntimeMapMutationFrameState mRuntimeMapLastFrame = {};
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};

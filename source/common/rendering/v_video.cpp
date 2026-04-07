@@ -195,6 +195,10 @@ void DFrameBuffer::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightE
 {
 }
 
+void DFrameBuffer::EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent&)
+{
+}
+
 
 CUSTOM_CVAR(Int, uiscale, 0, CVAR_ARCHIVE | CVAR_NOINITCALL)
 {

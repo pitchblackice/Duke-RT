@@ -9,6 +9,7 @@
 #include "image.h"
 #include "model_kvx.h"
 #include "skyboxtexture.h"
+#include "gametexture.h"
 #include "texturemanager.h"
 #include "textures.h"
 #include "v_video.h"
@@ -17,6 +18,7 @@
 #include <windows.h>
 
 EXTERN_CVAR(Int, nri_pttraceframes)
+EXTERN_CVAR(Int, nri_ptactorspritetrace)
 
 namespace
 {
@@ -1221,6 +1223,25 @@ namespace
 			if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
 			{
 				ApplyActorPreviousTransform(surface, sprite->Sprite->ownerActor);
+				if ((int)nri_ptactorspritetrace > 0 && (int)nri_pttraceframes > 0 && screen != nullptr)
+				{
+					PathTracingActorSpriteTraceEvent event = {};
+					event.stage = PathTracingActorSpriteTraceStage::CaptureScene;
+					event.actorIndex = sprite->Sprite->ownerActor->GetIndex();
+					event.spriteStatnum = sprite->Sprite->statnum;
+					event.spritePicnum = sprite->Sprite->picnum;
+					event.baseTextureId = sprite->Sprite->spritetexture().GetIndex();
+					event.resolvedTextureId = sprite->texture != nullptr ? sprite->texture->GetID().GetIndex() : -1;
+					event.palette = sprite->palette;
+					event.shade = sprite->shade;
+					event.cstat = sprite->Sprite->cstat;
+					event.cstat2 = sprite->Sprite->cstat2;
+					event.drawListType = drawListType;
+					event.noAnimate = (sprite->Sprite->cstat2 & CSTAT2_SPRITE_NOANIMATE) != 0;
+					event.fullbright = (sprite->Sprite->cstat2 & CSTAT2_SPRITE_FULLBRIGHT) != 0;
+					event.resolvedGameTexture = sprite->texture;
+					screen->EmitPathTracingActorSpriteTraceEvent(event);
+				}
 			}
 
 			outSprites.push_back(std::move(surface));
@@ -1269,6 +1290,25 @@ namespace
 			if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
 			{
 				ApplyActorPreviousTransform(surface, sprite->Sprite->ownerActor);
+				if ((int)nri_ptactorspritetrace > 0 && (int)nri_pttraceframes > 0 && screen != nullptr)
+				{
+					PathTracingActorSpriteTraceEvent event = {};
+					event.stage = PathTracingActorSpriteTraceStage::CaptureActorScene;
+					event.actorIndex = sprite->Sprite->ownerActor->GetIndex();
+					event.spriteStatnum = sprite->Sprite->statnum;
+					event.spritePicnum = sprite->Sprite->picnum;
+					event.baseTextureId = sprite->Sprite->spritetexture().GetIndex();
+					event.resolvedTextureId = sprite->texture != nullptr ? sprite->texture->GetID().GetIndex() : -1;
+					event.palette = sprite->palette;
+					event.shade = sprite->shade;
+					event.cstat = sprite->Sprite->cstat;
+					event.cstat2 = sprite->Sprite->cstat2;
+					event.drawListType = drawListType;
+					event.noAnimate = (sprite->Sprite->cstat2 & CSTAT2_SPRITE_NOANIMATE) != 0;
+					event.fullbright = (sprite->Sprite->cstat2 & CSTAT2_SPRITE_FULLBRIGHT) != 0;
+					event.resolvedGameTexture = sprite->texture;
+					screen->EmitPathTracingActorSpriteTraceEvent(event);
+				}
 			}
 
 			outSprites.push_back(std::move(surface));

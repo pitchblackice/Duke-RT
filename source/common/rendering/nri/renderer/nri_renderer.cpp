@@ -21,6 +21,7 @@
 #include "texinfo.h"
 #include "texturemanager.h"
 #include "d_eventbase.h"
+#include "v_video.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -49,6 +50,18 @@ CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
+EXTERN_CVAR(Int, nri_pttraceframes)
+CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 2)
+	{
+		self = 2;
+	}
+}
 CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -1139,6 +1152,59 @@ public:
 		return true;
 	}
 
+	enum class ActorSpriteLiveMatchResult : uint32_t
+	{
+		Match = 0,
+		NullLiveTexture,
+		TextureMismatch,
+		PaletteMismatch
+	};
+
+	struct ActorSpriteLiveMatchDetails
+	{
+		ActorSpriteLiveMatchResult result = ActorSpriteLiveMatchResult::Match;
+		FGameTexture* liveTexture = nullptr;
+		int32_t liveTextureId = -1;
+		int32_t surfaceTextureId = -1;
+		int32_t livePalette = 0;
+		int32_t surfacePalette = 0;
+	};
+
+	static bool ShouldTraceActorSpriteVerbose()
+	{
+		return (int)nri_ptactorspritetrace == 1 && (int)nri_pttraceframes > 0;
+	}
+
+	static bool ShouldTraceActorSpriteMismatch()
+	{
+		return (int)nri_ptactorspritetrace >= 1 && (int)nri_pttraceframes > 0;
+	}
+
+	static const char* GetActorSpriteTraceStageName(PathTracingActorSpriteTraceStage stage)
+	{
+		switch (stage)
+		{
+		case PathTracingActorSpriteTraceStage::Draw: return "draw";
+		case PathTracingActorSpriteTraceStage::CaptureScene: return "capture_scene";
+		case PathTracingActorSpriteTraceStage::CaptureActorScene: return "capture_actor_scene";
+		default: return "unknown";
+		}
+	}
+
+	static const char* GetActorSpriteLiveMatchResultName(ActorSpriteLiveMatchResult result)
+	{
+		switch (result)
+		{
+		case ActorSpriteLiveMatchResult::Match: return "match";
+		case ActorSpriteLiveMatchResult::NullLiveTexture: return "null_live_texture";
+		case ActorSpriteLiveMatchResult::TextureMismatch: return "texture_mismatch";
+		case ActorSpriteLiveMatchResult::PaletteMismatch: return "palette_mismatch";
+		default: return "unknown";
+		}
+	}
+
+	static const char* GetSurfaceSourceTypeName(nri_scene::SurfaceSourceType sourceType);
+
 	static FGameTexture* GetLiveActorSurfaceTexture(const DCoreActor& actor, nri_scene::SurfaceSourceType sourceType)
 	{
 		switch (sourceType)
@@ -1167,23 +1233,43 @@ public:
 		}
 	}
 
-	static bool CachedSurfaceMatchesLiveActor(const nri_scene::SurfaceRef& surface, const DCoreActor& actor)
+	static ActorSpriteLiveMatchDetails EvaluateCachedSurfaceMatchAgainstLiveActor(const nri_scene::SurfaceRef& surface, const DCoreActor& actor)
 	{
+		ActorSpriteLiveMatchDetails details = {};
+		details.surfaceTextureId = surface.material.texture != nullptr ? surface.material.texture->GetID().GetIndex() : -1;
+		details.surfacePalette = surface.material.palette;
+		details.livePalette = actor.spr.pal;
+
 		switch (surface.provenance.sourceType)
 		{
 		case nri_scene::SurfaceSourceType::FacingSprite:
 		case nri_scene::SurfaceSourceType::VoxelProxySprite:
 		{
-			FGameTexture* const liveTexture = GetLiveActorSurfaceTexture(actor, surface.provenance.sourceType);
-			return
-				liveTexture != nullptr &&
-				surface.material.texture == liveTexture &&
-				surface.material.palette == actor.spr.pal;
+			details.liveTexture = GetLiveActorSurfaceTexture(actor, surface.provenance.sourceType);
+			details.liveTextureId = details.liveTexture != nullptr ? details.liveTexture->GetID().GetIndex() : -1;
+			if (details.liveTexture == nullptr)
+			{
+				details.result = ActorSpriteLiveMatchResult::NullLiveTexture;
+			}
+			else if (surface.material.texture != details.liveTexture)
+			{
+				details.result = ActorSpriteLiveMatchResult::TextureMismatch;
+			}
+			else if (surface.material.palette != actor.spr.pal)
+			{
+				details.result = ActorSpriteLiveMatchResult::PaletteMismatch;
+			}
+			return details;
 		}
 
 		default:
-			return true;
+			return details;
 		}
+	}
+
+	static bool CachedSurfaceMatchesLiveActor(const nri_scene::SurfaceRef& surface, const DCoreActor& actor)
+	{
+		return EvaluateCachedSurfaceMatchAgainstLiveActor(surface, actor).result == ActorSpriteLiveMatchResult::Match;
 	}
 
 	static uint64_t HashPersistentSurfaceTaggedSignedValue(uint64_t hash, uint64_t tag, int32_t value)
@@ -7918,6 +8004,33 @@ void NRIRenderer::PrintStaticMapSceneStatus() const
 
 void NRIRenderer::PrintDynamicSceneStatus() const
 {
+	uint32_t persistentActorFacingSpriteCount = 0;
+	uint32_t persistentActorVoxelSpriteCount = 0;
+	if (mPersistentDynamicEmissiveCache.valid)
+	{
+		auto countActorOwnedSurfaces = [&persistentActorFacingSpriteCount, &persistentActorVoxelSpriteCount](const auto& surfaces)
+		{
+			for (const auto& surface : surfaces)
+			{
+				if (surface.provenance.actorIndex < 0)
+				{
+					continue;
+				}
+
+				switch (surface.provenance.sourceType)
+				{
+				case nri_scene::SurfaceSourceType::FacingSprite: persistentActorFacingSpriteCount++; break;
+				case nri_scene::SurfaceSourceType::VoxelProxySprite: persistentActorVoxelSpriteCount++; break;
+				default: break;
+				}
+			}
+		};
+
+		countActorOwnedSurfaces(mPersistentDynamicEmissiveCache.sceneView.opaqueWalls);
+		countActorOwnedSurfaces(mPersistentDynamicEmissiveCache.sceneView.opaqueFlats);
+		countActorOwnedSurfaces(mPersistentDynamicEmissiveCache.sceneView.opaqueSprites);
+	}
+
 	Printf("NRI PT dynamic scene: active=%s sprite_surfaces=%u tris=%u materials=%u models=%u unsupported_models=%u mirror_extended_surfaces=%u mirror_extended_tris=%u mirror_extended_materials=%u mirror_extended_models=%u mirror_extended_unsupported_models=%u mirror_player_surfaces=%u mirror_player_tris=%u mirror_player_materials=%u mirror_player_models=%u mirror_player_unsupported_models=%u mirror_distance=%.1f dynamic_as_builds=%u last_frame_as_build=%s active_tlas_instances=%u emissive_cache=%s cache_surfaces=%u cache_tris=%u cache_materials=%u\n",
 		mUsedDynamicSceneLastFrame ? "yes" : "no",
 		mDynamicSceneLastFrame.spriteSurfaceCount,
@@ -7943,15 +8056,38 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mPersistentDynamicEmissiveCache.surfaceCount,
 		mPersistentDynamicEmissiveCache.primitiveCount,
 		mPersistentDynamicEmissiveCache.materialCount);
+	Printf("NRI PT actor sprite diag: trace=%d cache_actor_facing=%u cache_actor_voxel=%u prune_checks=%u prune_matches=%u drop_missing_actor=%u drop_missing_actor_index=%u drop_null_live_texture=%u drop_texture_mismatch=%u drop_palette_mismatch=%u\n",
+		(int)nri_ptactorspritetrace,
+		persistentActorFacingSpriteCount,
+		persistentActorVoxelSpriteCount,
+		mActorSpriteDebugStats.lastPruneChecks,
+		mActorSpriteDebugStats.lastPruneMatches,
+		mActorSpriteDebugStats.lastPruneDroppedMissingActor,
+		mActorSpriteDebugStats.lastPruneDroppedMissingActorIndex,
+		mActorSpriteDebugStats.lastPruneDroppedNullLiveTexture,
+		mActorSpriteDebugStats.lastPruneDroppedTextureMismatch,
+		mActorSpriteDebugStats.lastPruneDroppedPaletteMismatch);
+	Printf("NRI PT scene texture overflow: textures=%u truncated=%u clamps=base:%u normal:%u metallic:%u roughness:%u emissive:%u builds=%llu warned=%s\n",
+		mSceneTextureOverflowStats.textureCountLastBuild,
+		mSceneTextureOverflowStats.truncatedTextureCountLastBuild,
+		mSceneTextureOverflowStats.baseTextureClampCountLastBuild,
+		mSceneTextureOverflowStats.normalTextureClampCountLastBuild,
+		mSceneTextureOverflowStats.metallicTextureClampCountLastBuild,
+		mSceneTextureOverflowStats.roughnessTextureClampCountLastBuild,
+		mSceneTextureOverflowStats.emissiveTextureClampCountLastBuild,
+		(unsigned long long)mSceneTextureOverflowStats.totalOverflowBuilds,
+		mSceneTextureOverflowStats.warningLogged ? "yes" : "no");
 }
 
 void NRIRenderer::ResetPersistentDynamicEmissiveCache()
 {
 	mPersistentDynamicEmissiveCache = {};
+	mActorSpriteDebugStats = {};
 }
 
 void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 {
+	mActorSpriteDebugStats = {};
 	if (!mPersistentDynamicEmissiveCache.valid)
 	{
 		return;
@@ -7977,31 +8113,93 @@ void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 	}
 
 	bool needsPrune = false;
-	auto detectStaleActorOwnership = [&needsPrune, &liveActorIndices, &liveActorsByIndex](const auto& surfaces)
+	auto detectStaleActorOwnership = [this, &needsPrune, &liveActorIndices, &liveActorsByIndex](const auto& surfaces)
 	{
 		for (const auto& surface : surfaces)
 		{
 			if (surface.provenance.sourceType == nri_scene::SurfaceSourceType::FacingSprite ||
 				surface.provenance.sourceType == nri_scene::SurfaceSourceType::VoxelProxySprite)
 			{
+				mActorSpriteDebugStats.lastPruneChecks++;
 				if (surface.provenance.actorIndex < 0)
 				{
+					mActorSpriteDebugStats.lastPruneDroppedMissingActorIndex++;
+					if (ShouldTraceActorSpriteMismatch())
+					{
+						Printf("NRI PT actor-sprite cache: action=drop reason=missing_actor_index source=%s actor=%d surface_tex=%d surface_ptr=%p surface_pal=%d\n",
+							GetSurfaceSourceTypeName(surface.provenance.sourceType),
+							surface.provenance.actorIndex,
+							surface.material.texture != nullptr ? surface.material.texture->GetID().GetIndex() : -1,
+							surface.material.texture,
+							surface.material.palette);
+					}
 					needsPrune = true;
-					return;
+					continue;
 				}
 
 				auto liveActorIt = liveActorsByIndex.find(surface.provenance.actorIndex);
-				if (liveActorIt == liveActorsByIndex.end() || !CachedSurfaceMatchesLiveActor(surface, *liveActorIt->second))
+				if (liveActorIt == liveActorsByIndex.end())
 				{
+					mActorSpriteDebugStats.lastPruneDroppedMissingActor++;
+					if (ShouldTraceActorSpriteMismatch())
+					{
+						Printf("NRI PT actor-sprite cache: action=drop reason=missing_actor source=%s actor=%d surface_tex=%d surface_ptr=%p surface_pal=%d\n",
+							GetSurfaceSourceTypeName(surface.provenance.sourceType),
+							surface.provenance.actorIndex,
+							surface.material.texture != nullptr ? surface.material.texture->GetID().GetIndex() : -1,
+							surface.material.texture,
+							surface.material.palette);
+					}
 					needsPrune = true;
-					return;
+					continue;
 				}
+
+				const ActorSpriteLiveMatchDetails match = EvaluateCachedSurfaceMatchAgainstLiveActor(surface, *liveActorIt->second);
+				if (match.result == ActorSpriteLiveMatchResult::Match)
+				{
+					mActorSpriteDebugStats.lastPruneMatches++;
+					if (ShouldTraceActorSpriteVerbose())
+					{
+						Printf("NRI PT actor-sprite cache: action=keep reason=%s source=%s actor=%d surface_tex=%d surface_ptr=%p live_tex=%d live_ptr=%p surface_pal=%d live_pal=%d\n",
+							GetActorSpriteLiveMatchResultName(match.result),
+							GetSurfaceSourceTypeName(surface.provenance.sourceType),
+							surface.provenance.actorIndex,
+							match.surfaceTextureId,
+							surface.material.texture,
+							match.liveTextureId,
+							match.liveTexture,
+							match.surfacePalette,
+							match.livePalette);
+					}
+					continue;
+				}
+
+				switch (match.result)
+				{
+				case ActorSpriteLiveMatchResult::NullLiveTexture: mActorSpriteDebugStats.lastPruneDroppedNullLiveTexture++; break;
+				case ActorSpriteLiveMatchResult::TextureMismatch: mActorSpriteDebugStats.lastPruneDroppedTextureMismatch++; break;
+				case ActorSpriteLiveMatchResult::PaletteMismatch: mActorSpriteDebugStats.lastPruneDroppedPaletteMismatch++; break;
+				default: break;
+				}
+				if (ShouldTraceActorSpriteMismatch())
+				{
+					Printf("NRI PT actor-sprite cache: action=drop reason=%s source=%s actor=%d surface_tex=%d surface_ptr=%p live_tex=%d live_ptr=%p surface_pal=%d live_pal=%d\n",
+						GetActorSpriteLiveMatchResultName(match.result),
+						GetSurfaceSourceTypeName(surface.provenance.sourceType),
+						surface.provenance.actorIndex,
+						match.surfaceTextureId,
+						surface.material.texture,
+						match.liveTextureId,
+						match.liveTexture,
+						match.surfacePalette,
+						match.livePalette);
+				}
+				needsPrune = true;
 			}
 			else if (surface.provenance.actorIndex >= 0 &&
 				liveActorIndices.find(surface.provenance.actorIndex) == liveActorIndices.end())
 			{
 				needsPrune = true;
-				return;
 			}
 		}
 	};
@@ -12411,6 +12609,15 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 {
 	Clocker clock(NriPTSceneTextures);
 	static bool sLoggedActiveCanvasTextureReuse = false;
+	mSceneTextureOverflowStats.textureCountLastBuild = (uint32_t)materials.textures.size();
+	mSceneTextureOverflowStats.truncatedTextureCountLastBuild =
+		mSceneTextureOverflowStats.textureCountLastBuild > NRI_MAX_SCENE_TEXTURES ?
+		mSceneTextureOverflowStats.textureCountLastBuild - NRI_MAX_SCENE_TEXTURES : 0;
+	mSceneTextureOverflowStats.baseTextureClampCountLastBuild = 0;
+	mSceneTextureOverflowStats.normalTextureClampCountLastBuild = 0;
+	mSceneTextureOverflowStats.metallicTextureClampCountLastBuild = 0;
+	mSceneTextureOverflowStats.roughnessTextureClampCountLastBuild = 0;
+	mSceneTextureOverflowStats.emissiveTextureClampCountLastBuild = 0;
 	if (ShouldTraceSkyPerf())
 	{
 		gRendererSkyPerfTraceStats.ensureSceneTexturesCalls++;
@@ -12516,23 +12723,53 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	{
 		if (material.textureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
+			mSceneTextureOverflowStats.baseTextureClampCountLastBuild++;
 			material.textureIndex = 0;
 		}
 		if (material.normalTextureIndex != UINT32_MAX && material.normalTextureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
+			mSceneTextureOverflowStats.normalTextureClampCountLastBuild++;
 			material.normalTextureIndex = UINT32_MAX;
 		}
 		if (material.metallicTextureIndex != UINT32_MAX && material.metallicTextureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
+			mSceneTextureOverflowStats.metallicTextureClampCountLastBuild++;
 			material.metallicTextureIndex = UINT32_MAX;
 		}
 		if (material.roughnessTextureIndex != UINT32_MAX && material.roughnessTextureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
+			mSceneTextureOverflowStats.roughnessTextureClampCountLastBuild++;
 			material.roughnessTextureIndex = UINT32_MAX;
 		}
 		if (material.emissiveTextureIndex != UINT32_MAX && material.emissiveTextureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
+			mSceneTextureOverflowStats.emissiveTextureClampCountLastBuild++;
 			material.emissiveTextureIndex = 0;
+		}
+	}
+
+	const bool sceneTextureOverflow =
+		mSceneTextureOverflowStats.truncatedTextureCountLastBuild > 0 ||
+		mSceneTextureOverflowStats.baseTextureClampCountLastBuild > 0 ||
+		mSceneTextureOverflowStats.normalTextureClampCountLastBuild > 0 ||
+		mSceneTextureOverflowStats.metallicTextureClampCountLastBuild > 0 ||
+		mSceneTextureOverflowStats.roughnessTextureClampCountLastBuild > 0 ||
+		mSceneTextureOverflowStats.emissiveTextureClampCountLastBuild > 0;
+	if (sceneTextureOverflow)
+	{
+		mSceneTextureOverflowStats.totalOverflowBuilds++;
+		if (!mSceneTextureOverflowStats.warningLogged || (int)nri_pttraceframes > 0 || (int)nri_ptactorspritetrace > 0 || nri_ptdebug > 0)
+		{
+			Printf(TEXTCOLOR_ORANGE "NRI PT scene textures: requested=%u cap=%u truncated=%u clamps=base:%u normal:%u metallic:%u roughness:%u emissive:%u\n",
+				mSceneTextureOverflowStats.textureCountLastBuild,
+				NRI_MAX_SCENE_TEXTURES,
+				mSceneTextureOverflowStats.truncatedTextureCountLastBuild,
+				mSceneTextureOverflowStats.baseTextureClampCountLastBuild,
+				mSceneTextureOverflowStats.normalTextureClampCountLastBuild,
+				mSceneTextureOverflowStats.metallicTextureClampCountLastBuild,
+				mSceneTextureOverflowStats.roughnessTextureClampCountLastBuild,
+				mSceneTextureOverflowStats.emissiveTextureClampCountLastBuild);
+			mSceneTextureOverflowStats.warningLogged = true;
 		}
 	}
 
@@ -12549,6 +12786,30 @@ bool NRIRenderer::UseFallbackSceneTextures(bool preserveExistingSky)
 	descriptors[0] = mFrameBuffer->mWhiteTexture->GetResource().shaderView;
 	descriptors[1] = GetActiveSkyTexture() != nullptr && GetActiveSkyTexture()->shaderView != nullptr ? GetActiveSkyTexture()->shaderView : mFrameBuffer->mWhiteTexture->GetResource().shaderView;
 	return UpdateSceneTextureSet(descriptors);
+}
+
+void NRIRenderer::TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& event)
+{
+	if (!ShouldTraceActorSpriteVerbose())
+	{
+		return;
+	}
+
+	Printf("NRI PT actor-sprite %s: actor=%d stat=%d pic=%d base_tex=%d resolved_tex=%d pal=%d shade=%d cstat=0x%x cstat2=0x%x noanimate=%s fullbright=%s drawlist=%u tex_ptr=%p\n",
+		GetActorSpriteTraceStageName(event.stage),
+		event.actorIndex,
+		event.spriteStatnum,
+		event.spritePicnum,
+		event.baseTextureId,
+		event.resolvedTextureId,
+		event.palette,
+		event.shade,
+		event.cstat,
+		event.cstat2,
+		event.noAnimate ? "yes" : "no",
+		event.fullbright ? "yes" : "no",
+		event.drawListType,
+		event.resolvedGameTexture);
 }
 
 bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after)

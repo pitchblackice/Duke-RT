@@ -3332,6 +3332,14 @@ void NRIRenderDevice::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLig
 	mPathTracingWeaponLightEventsEnqueuedThisFrame++;
 }
 
+void NRIRenderDevice::EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event)
+{
+	if (mRenderer != nullptr)
+	{
+		mRenderer->TraceActorSpriteEvent(event);
+	}
+}
+
 void NRIRenderDevice::ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeaponLightEvent>& outEvents)
 {
 	outEvents.Clear();

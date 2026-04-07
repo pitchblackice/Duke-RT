@@ -57,6 +57,7 @@ public:
 	bool IsPathTracingLevelPreloadPending() const override;
 	void CancelPathTracingLevelPreload() override;
 	void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event) override;
+	void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event) override;
 	void PrintPathTracingSurfaceProbeStatus() const override;
 	void ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeaponLightEvent>& outEvents);
 	uint32_t GetPendingPathTracingWeaponLightEventCount() const;
