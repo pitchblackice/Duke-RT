@@ -113,8 +113,7 @@ void animatesprites_d(tspriteArray& tsprites, const DVector2& viewVec, DAngle vi
 
 		if (res)
 		{
-			if (h->dispictex.isValid())
-				h->dispictex = t->spritetexture();
+			h->dispictex = t->spritetexture();
 			continue;
 		}
 

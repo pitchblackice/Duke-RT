@@ -210,8 +210,7 @@ void applyanimations(tspritetype* t, DDukeActor* h, const DVector2& viewVec, DAn
 			}
 			else t->setspritetexture(tex->GetID());
 
-			if (h->dispictex.isValid())
-				h->dispictex = t->spritetexture();
+			h->dispictex = t->spritetexture();
 		}
 
 		if (h->flags4 & SFLAG4_FLASHFRAME0)
