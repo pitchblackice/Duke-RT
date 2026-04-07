@@ -82,7 +82,7 @@ inline const char* GetNRIPTOutputModeName(NRIPTOutputMode mode)
 	switch (mode)
 	{
 	case NRIPTOutputMode::SDR: return "sdr";
-	case NRIPTOutputMode::HDRAuto: return "hdr-auto";
+	case NRIPTOutputMode::HDRAuto: return "hdr";
 	case NRIPTOutputMode::HDRLinear16: return "hdr-linear16";
 	case NRIPTOutputMode::HDR10PQ: return "hdr10-pq";
 	default: return "unknown";

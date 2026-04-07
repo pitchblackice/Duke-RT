@@ -68,9 +68,9 @@ CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	{
 		self = 0;
 	}
-	else if (self > 3)
+	else if (self > 1)
 	{
-		self = 3;
+		self = 1;
 	}
 }
 CUSTOM_CVAR(Int, nri_pttonemap, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

@@ -960,8 +960,6 @@ namespace
 		switch ((int)nri_ptoutputmode)
 		{
 		case 1: return NRIPTOutputMode::HDRAuto;
-		case 2: return NRIPTOutputMode::HDRLinear16;
-		case 3: return NRIPTOutputMode::HDR10PQ;
 		default: return NRIPTOutputMode::SDR;
 		}
 	}

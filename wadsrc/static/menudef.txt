@@ -1830,9 +1830,7 @@ OptionValue NRIFrameGenUI
 OptionValue NRIPTOutputMode
 {
 	0, "SDR"
-	1, "HDR Auto"
-	2, "HDR Linear 16-bit"
-	3, "HDR10 PQ"
+	1, "HDR"
 }
 
 OptionValue NRIPTTonemap
