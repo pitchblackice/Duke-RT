@@ -98,6 +98,34 @@ CUSTOM_CVAR(Int, nri_ptnudgetrace, 0, 0)
 
 namespace
 {
+	static HRESULT CreateDxgiFactoryForTelemetry(IDXGIFactory4** factory)
+	{
+		if (factory == nullptr)
+		{
+			return E_POINTER;
+		}
+
+		*factory = nullptr;
+		HMODULE dxgiModule = GetModuleHandleA("dxgi.dll");
+		if (dxgiModule == nullptr)
+		{
+			dxgiModule = LoadLibraryA("dxgi.dll");
+			if (dxgiModule == nullptr)
+			{
+				return HRESULT_FROM_WIN32(GetLastError());
+			}
+		}
+
+		using PfnCreateDXGIFactory2 = HRESULT(WINAPI*)(UINT flags, REFIID riid, void** factory);
+		auto createFactory2 = reinterpret_cast<PfnCreateDXGIFactory2>(GetProcAddress(dxgiModule, "CreateDXGIFactory2"));
+		if (createFactory2 == nullptr)
+		{
+			return E_NOINTERFACE;
+		}
+
+		return createFactory2(0u, IID_PPV_ARGS(factory));
+	}
+
 	static bool IsFullscreenPaletteBlendCommand(const F2DDrawer& drawer, const F2DDrawer::RenderCommand& cmd)
 	{
 		if (cmd.isSpecial != SpecialDrawCommand::NotSpecial ||
@@ -3590,11 +3618,15 @@ void NRIRenderDevice::Print2DTextureStatus() const
 void NRIRenderDevice::PrintVramTelemetryStatus() const
 {
 	const NRIRenderer::MemoryTelemetry rendererMemory = mRenderer != nullptr ? mRenderer->GetMemoryTelemetry() : NRIRenderer::MemoryTelemetry{};
+	const uint64_t shellTextureBytes =
+		mSceneTarget.memorySize +
+		mSaveTarget.memorySize;
 	const uint64_t trackedLocalUsageBytes =
 		rendererMemory.totalTrackedBytes +
+		shellTextureBytes +
 		mTexture2DDebugStats.residentBytes;
 	const uint64_t trackedNonLocalUsageBytes = 0;
-	const double localPressurePct =
+	double localPressurePct =
 		mAdapterLocalBudgetBytes > 0 ?
 		(100.0 * (double)trackedLocalUsageBytes / (double)mAdapterLocalBudgetBytes) : 0.0;
 	const bool is4KMode =
@@ -3602,6 +3634,44 @@ void NRIRenderDevice::PrintVramTelemetryStatus() const
 		rendererMemory.outputHeight >= 2160 ||
 		rendererMemory.renderWidth >= 3840 ||
 		rendererMemory.renderHeight >= 2160;
+	uint64_t liveLocalBudgetBytes = 0;
+	uint64_t liveLocalUsageBytes = 0;
+	uint64_t liveNonLocalBudgetBytes = 0;
+	uint64_t liveNonLocalUsageBytes = 0;
+	bool hasLiveDxgiTelemetry = false;
+
+#ifdef _WIN32
+	if (GetSelectedAPI() == nri::GraphicsAPI::D3D12 && mNativeD3D12Device != nullptr)
+	{
+		IDXGIFactory4* factory = nullptr;
+		if (SUCCEEDED(CreateDxgiFactoryForTelemetry(&factory)) && factory != nullptr)
+		{
+			IDXGIAdapter3* adapter = nullptr;
+			const LUID adapterLuid = mNativeD3D12Device->GetAdapterLuid();
+			if (SUCCEEDED(factory->EnumAdapterByLuid(adapterLuid, IID_PPV_ARGS(&adapter))) && adapter != nullptr)
+			{
+				DXGI_QUERY_VIDEO_MEMORY_INFO localInfo = {};
+				DXGI_QUERY_VIDEO_MEMORY_INFO nonLocalInfo = {};
+				if (SUCCEEDED(adapter->QueryVideoMemoryInfo(0u, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &localInfo)) &&
+					SUCCEEDED(adapter->QueryVideoMemoryInfo(0u, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &nonLocalInfo)))
+				{
+					liveLocalBudgetBytes = localInfo.Budget;
+					liveLocalUsageBytes = localInfo.CurrentUsage;
+					liveNonLocalBudgetBytes = nonLocalInfo.Budget;
+					liveNonLocalUsageBytes = nonLocalInfo.CurrentUsage;
+					hasLiveDxgiTelemetry = true;
+				}
+				adapter->Release();
+			}
+			factory->Release();
+		}
+	}
+#endif
+
+	if (hasLiveDxgiTelemetry && liveLocalBudgetBytes > 0)
+	{
+		localPressurePct = 100.0 * (double)liveLocalUsageBytes / (double)liveLocalBudgetBytes;
+	}
 
 	Printf("NRI PT vram budget: local=%llu nonlocal=%llu tracked_local=%llu tracked_nonlocal=%llu local_pressure=%.1f%%\n",
 		(unsigned long long)mAdapterLocalBudgetBytes,
@@ -3609,18 +3679,35 @@ void NRIRenderDevice::PrintVramTelemetryStatus() const
 		(unsigned long long)trackedLocalUsageBytes,
 		(unsigned long long)trackedNonLocalUsageBytes,
 		localPressurePct);
-	Printf("NRI PT vram families: frame=%llu scene=%llu sky=%llu tex2d=%llu buffers=%llu accel=%llu total=%llu\n",
+	Printf("NRI PT vram families: frame=%llu scene=%llu sky=%llu shell=%llu tex2d=%llu buffers=%llu accel=%llu total=%llu\n",
 		(unsigned long long)rendererMemory.frameTextureBytes,
 		(unsigned long long)rendererMemory.sceneTextureBytes,
 		(unsigned long long)rendererMemory.skyTextureBytes,
+		(unsigned long long)shellTextureBytes,
 		(unsigned long long)mTexture2DDebugStats.residentBytes,
 		(unsigned long long)rendererMemory.sceneBufferBytes,
 		(unsigned long long)rendererMemory.accelerationStructureBytes,
 		(unsigned long long)trackedLocalUsageBytes);
-
-	if (is4KMode && mAdapterLocalBudgetBytes > 0 && localPressurePct >= 80.0)
+	if (hasLiveDxgiTelemetry)
 	{
-		Printf(TEXTCOLOR_ORANGE "NRI PT vram warning: 4K tracked local usage is at %.1f%% of local budget.\n", localPressurePct);
+		Printf("NRI PT vram live: source=dxgi local_usage=%llu local_budget=%llu nonlocal_usage=%llu nonlocal_budget=%llu\n",
+			(unsigned long long)liveLocalUsageBytes,
+			(unsigned long long)liveLocalBudgetBytes,
+			(unsigned long long)liveNonLocalUsageBytes,
+			(unsigned long long)liveNonLocalBudgetBytes);
+	}
+	else
+	{
+		Printf("NRI PT vram live: unavailable source=%s\n",
+			GetSelectedAPI() == nri::GraphicsAPI::D3D12 ? "dxgi-query-failed" : "unsupported-api");
+	}
+	Printf("NRI PT vram wrapped: swapchain=%u framegen_present=%u tracked_bytes=unknown\n",
+		(uint32_t)mSwapChainImages.size(),
+		(uint32_t)mFrameGenerationPresentImages.size());
+
+	if (is4KMode && localPressurePct >= 80.0)
+	{
+		Printf(TEXTCOLOR_ORANGE "NRI PT vram warning: 4K local usage is at %.1f%% of budget.\n", localPressurePct);
 	}
 }
 
