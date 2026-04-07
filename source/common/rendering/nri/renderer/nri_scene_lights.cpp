@@ -979,6 +979,7 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 {
 	mFrameSerial = frameSerial;
 	mSurfaceRecords.clear();
+	mFrameAppendStats = {};
 	mAnalyticLights.matchedSurfaceCount = 0;
 	mAnalyticLights.actorOverlayRuleCount = 0;
 	mAnalyticLights.actorOverlayMatchedSurfaceCount = 0;
@@ -1843,6 +1844,24 @@ void SceneLightSystem::AppendSurfaceList(
 			BuildSurfaceIdentityKey(record);
 
 		mSurfaceRecords.push_back(record);
+		mFrameAppendStats.totalRecordCount++;
+		switch (source)
+		{
+		case SceneLightRecordSource::StaticMapScene:
+			mFrameAppendStats.staticRecordCount++;
+			break;
+		case SceneLightRecordSource::RuntimeMutationScene:
+			mFrameAppendStats.runtimeMutationRecordCount++;
+			break;
+		case SceneLightRecordSource::DynamicScene:
+			mFrameAppendStats.dynamicRecordCount++;
+			break;
+		case SceneLightRecordSource::CapturedScene:
+			mFrameAppendStats.capturedRecordCount++;
+			break;
+		default:
+			break;
+		}
 		++inOutLocalMaterialIndex;
 	}
 }

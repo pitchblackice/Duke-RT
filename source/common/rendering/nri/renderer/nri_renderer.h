@@ -74,6 +74,13 @@ public:
 		double runtimeMutationAnalyzeMs = 0.0;
 		double runtimeMutationRebuildMs = 0.0;
 		double runtimeMutationAppendMs = 0.0;
+		double sceneLightStaticAppendMs = 0.0;
+		double sceneLightRuntimeMutationAppendMs = 0.0;
+		double sceneLightCapturedAppendMs = 0.0;
+		double sceneLightDynamicAppendMs = 0.0;
+		double sceneLightAnalyticMs = 0.0;
+		double sceneLightEmissiveMs = 0.0;
+		double sceneLightSectorMs = 0.0;
 		double runtimeSpaceLinkMs = 0.0;
 		double runtimeDebugSphereMs = 0.0;
 		double runtimeDebugSphereViewMs = 0.0;
@@ -90,12 +97,29 @@ public:
 		double dynamicAsBarrierMs = 0.0;
 		double restoreStaticSceneMs = 0.0;
 		double copyFinalMs = 0.0;
+		double sceneTextureLookupMs = 0.0;
+		double sceneTextureRealizeMs = 0.0;
+		double sceneTextureDescriptorMs = 0.0;
+		double sceneTextureTransitionMs = 0.0;
+		double actorOverrideMapBuildMs = 0.0;
+		double materialBuildMs = 0.0;
 		uint32_t runtimeMutationDirtyChunks = 0;
 		uint32_t runtimeMutationRebuiltChunks = 0;
 		uint32_t runtimeMutationHeldChunks = 0;
 		uint32_t runtimeMutationReplacedChunks = 0;
+		uint32_t runtimeMutationActiveChunkCount = 0;
+		uint32_t runtimeMutationValidChunkCount = 0;
+		uint32_t runtimeMutationExcludedStaticChunkCount = 0;
+		uint32_t runtimeMutationCachedSurfaceCount = 0;
+		uint32_t runtimeMutationCachedTriangleCount = 0;
+		uint32_t runtimeMutationCachedMaterialCount = 0;
 		uint32_t runtimeMutationPrimitiveCount = 0;
 		uint32_t runtimeMutationMaterialCount = 0;
+		uint32_t sceneLightSurfaceRecordCount = 0;
+		uint32_t sceneLightStaticRecordCount = 0;
+		uint32_t sceneLightRuntimeMutationRecordCount = 0;
+		uint32_t sceneLightDynamicRecordCount = 0;
+		uint32_t sceneLightCapturedRecordCount = 0;
 		uint32_t runtimeSpaceLinkPrimitiveCount = 0;
 		uint32_t runtimeSpaceLinkMaterialCount = 0;
 		uint32_t runtimeDebugSphereCount = 0;
@@ -108,6 +132,17 @@ public:
 		uint32_t dynamicAsPrimitiveCount = 0;
 		uint32_t dynamicAsVertexCount = 0;
 		uint32_t dynamicAsIndexCount = 0;
+		uint32_t sceneTextureCacheCount = 0;
+		uint32_t sceneTextureCacheMisses = 0;
+		uint32_t sceneTextureCacheInserts = 0;
+		uint32_t sceneTextureTransitionCount = 0;
+		uint32_t materialBuildCalls = 0;
+		uint32_t actorOverrideMapBuildCalls = 0;
+		uint32_t persistentDynamicActorSurfaceCount = 0;
+		uint32_t persistentDynamicNonActorSurfaceCount = 0;
+		uint32_t persistentDynamicWallSurfaceCount = 0;
+		uint32_t persistentDynamicFlatSurfaceCount = 0;
+		uint32_t persistentDynamicSpriteSurfaceCount = 0;
 		uint32_t activePrimitiveCount = 0;
 		uint32_t dynamicPrimitiveCount = 0;
 		uint32_t activeMaterialCount = 0;
@@ -535,6 +570,27 @@ private:
 		uint32_t lastPruneDroppedPaletteMismatch = 0;
 	};
 
+	struct PersistentDynamicSurfaceStats
+	{
+		uint32_t actorSurfaceCount = 0;
+		uint32_t nonActorSurfaceCount = 0;
+		uint32_t wallSurfaceCount = 0;
+		uint32_t flatSurfaceCount = 0;
+		uint32_t spriteSurfaceCount = 0;
+		uint32_t actorFacingSpriteCount = 0;
+		uint32_t actorVoxelSpriteCount = 0;
+	};
+
+	struct RuntimeMutationCacheStats
+	{
+		uint32_t activeChunkCount = 0;
+		uint32_t validChunkCount = 0;
+		uint32_t excludedStaticChunkCount = 0;
+		uint32_t cachedSurfaceCount = 0;
+		uint32_t cachedTriangleCount = 0;
+		uint32_t cachedMaterialCount = 0;
+	};
+
 	struct SceneTextureOverflowDebugStats
 	{
 		uint32_t textureCountLastBuild = 0;
@@ -546,6 +602,19 @@ private:
 		uint32_t emissiveTextureClampCountLastBuild = 0;
 		uint64_t totalOverflowBuilds = 0;
 		bool warningLogged = false;
+	};
+
+	struct SceneTextureCacheDebugStats
+	{
+		uint32_t cacheEntriesLastBuild = 0;
+		uint32_t cacheEntriesHighWater = 0;
+		uint32_t lookupMissesLastBuild = 0;
+		uint32_t insertCountLastBuild = 0;
+		uint32_t transitionCountLastFrame = 0;
+		double lookupMsLastBuild = 0.0;
+		double realizeMsLastBuild = 0.0;
+		double descriptorMsLastBuild = 0.0;
+		double transitionMsLastFrame = 0.0;
 	};
 
 	struct DescriptorCoherencyDebugStats
@@ -828,6 +897,8 @@ private:
 	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void QueueStaticMapSceneLightingInvalidation();
 	void InvalidateStaticMapSceneForMaterialLighting();
+	PersistentDynamicSurfaceStats GatherPersistentDynamicEmissiveSurfaceStats() const;
+	RuntimeMutationCacheStats GatherRuntimeMutationCacheStats() const;
 	void LogFallback(const char* reason);
 	void CopyFinalToActiveTarget();
 	void UpdateFrameGenerationFrameDesc();
@@ -973,11 +1044,17 @@ private:
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};
+	SceneTextureCacheDebugStats mSceneTextureCacheDebugStats = {};
 	DescriptorCoherencyDebugStats mDescriptorCoherencyDebugStats = {};
 	RuntimeMapMutationFrameState mRuntimeMapLastFrame = {};
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
 	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
+	PersistentDynamicSurfaceStats mPersistentDynamicEmissiveHighWaterStats = {};
+	uint32_t mPersistentDynamicEmissiveHighWaterSurfaceCount = 0;
+	uint32_t mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
+	uint32_t mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
+	RuntimeMutationCacheStats mRuntimeMutationCacheHighWaterStats = {};
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
 	NRIDirectionalLightState mDirectionalLightState = {};

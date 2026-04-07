@@ -249,6 +249,15 @@ public:
 		nri_scene::MaterialLightingMetadata material = {};
 	};
 
+	struct FrameAppendStats
+	{
+		uint32_t totalRecordCount = 0;
+		uint32_t staticRecordCount = 0;
+		uint32_t runtimeMutationRecordCount = 0;
+		uint32_t dynamicRecordCount = 0;
+		uint32_t capturedRecordCount = 0;
+	};
+
 	void Reset();
 	void BeginFrame(uint64_t frameSerial);
 	void AppendSceneView(
@@ -284,6 +293,7 @@ public:
 	bool HasRecords() const { return !mSurfaceRecords.empty(); }
 	uint64_t GetFrameSerial() const { return mFrameSerial; }
 	const std::vector<SurfaceRecord>& GetSurfaceRecords() const { return mSurfaceRecords; }
+	const FrameAppendStats& GetFrameAppendStats() const { return mFrameAppendStats; }
 	static uint64_t ComputeSurfaceIdentityKey(
 		SceneLightRecordSource source,
 		const nri_scene::SurfaceProvenance& provenance,
@@ -317,5 +327,6 @@ private:
 	SectorLightingRegistry mSectorLighting = {};
 	EnvironmentLightingState mEnvironmentLighting = {};
 	std::vector<SurfaceRecord> mSurfaceRecords;
+	FrameAppendStats mFrameAppendStats = {};
 	uint64_t mFrameSerial = 0;
 };
