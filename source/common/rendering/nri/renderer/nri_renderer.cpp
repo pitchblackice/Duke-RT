@@ -6816,6 +6816,11 @@ bool NRIRenderer::AddRuntimeDebugSphere(const float center[3], float diameter, f
 	sphere.diameter = diameter;
 	sphere.metalness = clamp(metalness, 0.0f, 1.0f);
 	sphere.roughness = clamp(roughness, 0.0f, 1.0f);
+	if (!EnsureRuntimeDebugSphereCache(sphere))
+	{
+		return false;
+	}
+
 	mRuntimeDebugSpheres.push_back(sphere);
 	outId = sphere.id;
 	RequestHistoryReset("runtime-debug-sphere-change");
@@ -6970,6 +6975,13 @@ void NRIRenderer::NotifyMaterialLightingCalibrationChange()
 
 void NRIRenderer::NotifyDebugSphereTessellationChange()
 {
+	for (RuntimeDebugSphere& sphere : mRuntimeDebugSpheres)
+	{
+		sphere.cacheValid = false;
+		sphere.cachedLongitudeSegments = 0;
+		sphere.cachedLatitudeSegments = 0;
+	}
+
 	RequestHistoryReset("debug-sphere-tessellation-change");
 }
 
@@ -12995,56 +13007,48 @@ bool NRIRenderer::BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeo
 		return false;
 	}
 
-	nri_scene::SceneView sphereView = {};
-	{
-		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereViewMs);
-		AppendRuntimeDebugSpheresToSceneView(sphereView);
-	}
+	size_t totalVertexCount = 0;
+	size_t totalIndexCount = 0;
+	size_t totalPrimitiveCount = 0;
+	size_t totalProvenanceCount = 0;
+	size_t totalMaterialCount = 0;
+	size_t totalLightMetadataCount = 0;
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereGeoMs);
-		nri_scene::BuildGeometry(sphereView, outGeometry);
+		for (RuntimeDebugSphere& sphere : mRuntimeDebugSpheres)
+		{
+			if (!EnsureRuntimeDebugSphereCache(sphere))
+			{
+				continue;
+			}
+
+			totalVertexCount += sphere.geometry.vertices.size();
+			totalIndexCount += sphere.geometry.indices.size();
+			totalPrimitiveCount += sphere.geometry.primitives.size();
+			totalProvenanceCount += sphere.geometry.primitiveProvenance.size();
+			totalMaterialCount += sphere.materialBridge.materials.size();
+			totalLightMetadataCount += sphere.materialBridge.lightMetadata.size();
+		}
 	}
+
+	outGeometry.vertices.reserve(totalVertexCount);
+	outGeometry.indices.reserve(totalIndexCount);
+	outGeometry.primitives.reserve(totalPrimitiveCount);
+	outGeometry.primitiveProvenance.reserve(totalProvenanceCount);
+	outMaterials.materials.reserve(totalMaterialCount);
+	outMaterials.lightMetadata.reserve(totalLightMetadataCount);
+
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereMaterialMs);
-		nri_scene::BuildMaterials(sphereView, outMaterials);
-	}
-
-	const size_t materialCount = std::min(mRuntimeDebugSpheres.size(), outMaterials.materials.size());
-	{
-		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereTuneMs);
-		for (size_t i = 0; i < materialCount; ++i)
+		for (RuntimeDebugSphere& sphere : mRuntimeDebugSpheres)
 		{
-			const RuntimeDebugSphere& sphere = mRuntimeDebugSpheres[i];
-			nri_scene::MaterialData& material = outMaterials.materials[i];
-			material.lightLevel = 1.0f;
-			material.alpha = 1.0f;
-			material.metalnessHint = sphere.metalness;
-			material.roughnessHint = sphere.roughness;
-			material.materialClass = 0;
-
-			if (i < outMaterials.lightMetadata.size())
+			if (!sphere.cacheValid)
 			{
-				nri_scene::MaterialLightingMetadata& metadata = outMaterials.lightMetadata[i];
-				metadata.texture = nullptr;
-				metadata.textureId = 0;
-				metadata.materialFlags = material.flags;
-				metadata.materialClass = material.materialClass;
-				metadata.alpha = material.alpha;
-				metadata.lightLevel = material.lightLevel;
-				metadata.averageColor[0] = 1.0f;
-				metadata.averageColor[1] = 1.0f;
-				metadata.averageColor[2] = 1.0f;
-
-				uint32_t diameterBits = 0;
-				uint32_t metalnessBits = 0;
-				uint32_t roughnessBits = 0;
-				std::memcpy(&diameterBits, &sphere.diameter, sizeof(diameterBits));
-				std::memcpy(&metalnessBits, &sphere.metalness, sizeof(metalnessBits));
-				std::memcpy(&roughnessBits, &sphere.roughness, sizeof(roughnessBits));
-				metadata.materialKey = HashCombine64(metadata.materialKey, sphere.id);
-				metadata.materialKey = HashCombine64(metadata.materialKey, ((uint64_t)diameterBits << 32u) | (uint64_t)metalnessBits);
-				metadata.materialKey = HashCombine64(metadata.materialKey, (uint64_t)roughnessBits);
+				continue;
 			}
+
+			AppendGeometry(sphere.geometry, (uint32_t)outMaterials.materials.size(), outGeometry);
+			AppendMaterialBridge(sphere.materialBridge, outMaterials);
 		}
 	}
 
@@ -13054,21 +13058,84 @@ bool NRIRenderer::BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeo
 	return !outGeometry.primitives.empty() && !outMaterials.materials.empty();
 }
 
-void NRIRenderer::AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sceneView) const
+bool NRIRenderer::EnsureRuntimeDebugSphereCache(RuntimeDebugSphere& sphere)
 {
-	if (mRuntimeDebugSpheres.empty())
-	{
-		return;
-	}
-
 	const uint32_t longitudeSegments = GetRuntimeDebugSphereLongitudeSegments();
 	const uint32_t latitudeSegments = GetRuntimeDebugSphereLatitudeSegments();
-	sceneView.opaqueFlats.reserve(sceneView.opaqueFlats.size() + mRuntimeDebugSpheres.size());
-	sceneView.stats.totalDrawItems += (unsigned int)mRuntimeDebugSpheres.size();
-	sceneView.stats.flatDrawItems += (unsigned int)mRuntimeDebugSpheres.size();
-	sceneView.stats.materialRefs += (unsigned int)mRuntimeDebugSpheres.size();
-	sceneView.stats.triangleEstimate += (unsigned int)(mRuntimeDebugSpheres.size() * GetRuntimeDebugSphereTriangleCount());
+	if (sphere.cacheValid &&
+		sphere.cachedLongitudeSegments == longitudeSegments &&
+		sphere.cachedLatitudeSegments == latitudeSegments &&
+		!sphere.geometry.primitives.empty() &&
+		!sphere.materialBridge.materials.empty())
+	{
+		return true;
+	}
 
+	nri_scene::SceneView sphereView = {};
+	sphere.geometry = {};
+	sphere.materialBridge = {};
+	sphereView.opaqueFlats.reserve(1u);
+	sphereView.stats.totalDrawItems = 1;
+	sphereView.stats.flatDrawItems = 1;
+	sphereView.stats.materialRefs = 1;
+	sphereView.stats.triangleEstimate = (unsigned int)GetRuntimeDebugSphereTriangleCount();
+	AppendRuntimeDebugSphereToSceneView(sphere, sphereView);
+	nri_scene::BuildGeometry(sphereView, sphere.geometry);
+	nri_scene::BuildMaterials(sphereView, sphere.materialBridge);
+
+	const size_t materialCount = sphere.materialBridge.materials.size();
+	if (sphere.geometry.primitives.empty() || materialCount == 0)
+	{
+		sphere.cacheValid = false;
+		sphere.cachedLongitudeSegments = 0;
+		sphere.cachedLatitudeSegments = 0;
+		return false;
+	}
+
+	for (size_t i = 0; i < materialCount; ++i)
+	{
+		nri_scene::MaterialData& material = sphere.materialBridge.materials[i];
+		material.lightLevel = 1.0f;
+		material.alpha = 1.0f;
+		material.metalnessHint = sphere.metalness;
+		material.roughnessHint = sphere.roughness;
+		material.materialClass = 0;
+
+		if (i < sphere.materialBridge.lightMetadata.size())
+		{
+			nri_scene::MaterialLightingMetadata& metadata = sphere.materialBridge.lightMetadata[i];
+			metadata.texture = nullptr;
+			metadata.textureId = 0;
+			metadata.materialFlags = material.flags;
+			metadata.materialClass = material.materialClass;
+			metadata.alpha = material.alpha;
+			metadata.lightLevel = material.lightLevel;
+			metadata.averageColor[0] = 1.0f;
+			metadata.averageColor[1] = 1.0f;
+			metadata.averageColor[2] = 1.0f;
+
+			uint32_t diameterBits = 0;
+			uint32_t metalnessBits = 0;
+			uint32_t roughnessBits = 0;
+			std::memcpy(&diameterBits, &sphere.diameter, sizeof(diameterBits));
+			std::memcpy(&metalnessBits, &sphere.metalness, sizeof(metalnessBits));
+			std::memcpy(&roughnessBits, &sphere.roughness, sizeof(roughnessBits));
+			metadata.materialKey = HashCombine64(metadata.materialKey, sphere.id);
+			metadata.materialKey = HashCombine64(metadata.materialKey, ((uint64_t)diameterBits << 32u) | (uint64_t)metalnessBits);
+			metadata.materialKey = HashCombine64(metadata.materialKey, (uint64_t)roughnessBits);
+		}
+	}
+
+	sphere.cachedLongitudeSegments = longitudeSegments;
+	sphere.cachedLatitudeSegments = latitudeSegments;
+	sphere.cacheValid = true;
+	return true;
+}
+
+void NRIRenderer::AppendRuntimeDebugSphereToSceneView(const RuntimeDebugSphere& sphere, nri_scene::SceneView& sceneView) const
+{
+	const uint32_t longitudeSegments = GetRuntimeDebugSphereLongitudeSegments();
+	const uint32_t latitudeSegments = GetRuntimeDebugSphereLatitudeSegments();
 	constexpr float Pi = 3.14159265358979323846f;
 	auto makeVertex = [Pi](const RuntimeDebugSphere& sphere, float u, float v) -> nri_scene::CapturedVertex
 	{
@@ -13118,47 +13185,44 @@ void NRIRenderer::AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sce
 		surface.vertices.push_back(v2);
 	};
 
-	for (const RuntimeDebugSphere& sphere : mRuntimeDebugSpheres)
+	nri_scene::SurfaceRef surface = {};
+	surface.material.texture = nullptr;
+	surface.material.palette = 0;
+	surface.material.shade = 0;
+	surface.material.alpha = 1.0f;
+	surface.material.flags = nri_scene::MaterialFlag_None;
+	surface.provenance.sourceType = nri_scene::SurfaceSourceType::DebugSphere;
+
+	for (uint32_t lat = 0; lat < latitudeSegments; ++lat)
 	{
-		nri_scene::SurfaceRef surface = {};
-		surface.material.texture = nullptr;
-		surface.material.palette = 0;
-		surface.material.shade = 0;
-		surface.material.alpha = 1.0f;
-		surface.material.flags = nri_scene::MaterialFlag_None;
-		surface.provenance.sourceType = nri_scene::SurfaceSourceType::DebugSphere;
-
-		for (uint32_t lat = 0; lat < latitudeSegments; ++lat)
+		const float v0 = (float)lat / (float)latitudeSegments;
+		const float v1 = (float)(lat + 1u) / (float)latitudeSegments;
+		for (uint32_t lon = 0; lon < longitudeSegments; ++lon)
 		{
-			const float v0 = (float)lat / (float)latitudeSegments;
-			const float v1 = (float)(lat + 1u) / (float)latitudeSegments;
-			for (uint32_t lon = 0; lon < longitudeSegments; ++lon)
-			{
-				const float u0 = (float)lon / (float)longitudeSegments;
-				const float u1 = (float)(lon + 1u) / (float)longitudeSegments;
-				const auto p00 = makeVertex(sphere, u0, v0);
-				const auto p01 = makeVertex(sphere, u1, v0);
-				const auto p10 = makeVertex(sphere, u0, v1);
-				const auto p11 = makeVertex(sphere, u1, v1);
+			const float u0 = (float)lon / (float)longitudeSegments;
+			const float u1 = (float)(lon + 1u) / (float)longitudeSegments;
+			const auto p00 = makeVertex(sphere, u0, v0);
+			const auto p01 = makeVertex(sphere, u1, v0);
+			const auto p10 = makeVertex(sphere, u0, v1);
+			const auto p11 = makeVertex(sphere, u1, v1);
 
-				if (lat == 0u)
-				{
-					appendTriangle(surface, sphere, p00, p10, p11);
-				}
-				else if (lat + 1u == latitudeSegments)
-				{
-					appendTriangle(surface, sphere, p00, p10, p01);
-				}
-				else
-				{
-					appendTriangle(surface, sphere, p00, p10, p11);
-					appendTriangle(surface, sphere, p00, p11, p01);
-				}
+			if (lat == 0u)
+			{
+				appendTriangle(surface, sphere, p00, p10, p11);
+			}
+			else if (lat + 1u == latitudeSegments)
+			{
+				appendTriangle(surface, sphere, p00, p10, p01);
+			}
+			else
+			{
+				appendTriangle(surface, sphere, p00, p10, p11);
+				appendTriangle(surface, sphere, p00, p11, p01);
 			}
 		}
-
-		sceneView.opaqueFlats.push_back(std::move(surface));
 	}
+
+	sceneView.opaqueFlats.push_back(std::move(surface));
 }
 
 bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)

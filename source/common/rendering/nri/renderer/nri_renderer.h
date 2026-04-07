@@ -327,6 +327,11 @@ private:
 		float diameter = 0.0f;
 		float metalness = 1.0f;
 		float roughness = 0.05f;
+		uint32_t cachedLongitudeSegments = 0;
+		uint32_t cachedLatitudeSegments = 0;
+		bool cacheValid = false;
+		nri_scene::GeometryData geometry;
+		nri_scene::MaterialBridgeData materialBridge;
 	};
 
 	struct TransientMuzzleFlashSlot
@@ -705,7 +710,8 @@ private:
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	SurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const SurfaceProbeResult& probe) const;
 	bool BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
-	void AppendRuntimeDebugSpheresToSceneView(nri_scene::SceneView& sceneView) const;
+	bool EnsureRuntimeDebugSphereCache(RuntimeDebugSphere& sphere);
+	void AppendRuntimeDebugSphereToSceneView(const RuntimeDebugSphere& sphere, nri_scene::SceneView& sceneView) const;
 	void RefreshSceneLightSystem(
 		bool usedStaticMapScene,
 		const nri_scene::SceneView* capturedSceneView,
