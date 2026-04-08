@@ -254,6 +254,9 @@ private:
 	nri::SwapChainBits GetEffectiveRequestedSwapChainFlags() const;
 	void ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& outRequestedFormat, nri::SwapChainFormat& outResolvedFormat, const char*& outReason) const;
 	bool ShouldUseFrameGenerationUiTarget() const;
+	bool ShouldHandoffFrameGenerationUiTexture() const;
+	bool ShouldUseFrameGenerationUiLocalCompositeFallback() const;
+	const char* GetFrameGenerationUiRouteName() const;
 	uint32_t GetFrameGenerationSceneBlendPrefixCount() const;
 	bool EnsureFrameGenerationUiTexture(uint32_t width, uint32_t height);
 	NRITextureResource* GetFrameGenerationUiTargetResource() const;

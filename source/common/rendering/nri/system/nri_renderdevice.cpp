@@ -1742,6 +1742,7 @@ void NRIRenderDevice::Update()
 		double stageStartMs = I_msTimeF();
 		if (mFrameGenerationUiTargetActive)
 		{
+			const bool useUiLocalCompositeFallback = ShouldUseFrameGenerationUiLocalCompositeFallback();
 			const uint32_t sceneBlendPrefixCount = GetFrameGenerationSceneBlendPrefixCount();
 			if (sceneBlendPrefixCount > 0u)
 			{
@@ -1757,7 +1758,7 @@ void NRIRenderDevice::Update()
 			Draw2D();
 			twod->Clear();
 			FinalizeFrameGenerationUiTarget();
-			if (!IsFrameGenerationPresentPathActive())
+			if (useUiLocalCompositeFallback)
 			{
 				CompositeFrameGenerationUiTexture();
 				Draw2D();
@@ -2256,6 +2257,41 @@ bool NRIRenderDevice::ShouldUseFrameGenerationUiTarget() const
 		policy.resolvedUiMode == NRIFrameGenerationUiMode::UiTexture;
 }
 
+bool NRIRenderDevice::ShouldHandoffFrameGenerationUiTexture() const
+{
+#ifdef _WIN32
+	return ShouldUseFrameGenerationUiTarget() && IsFrameGenerationPresentPathActive();
+#else
+	return false;
+#endif
+}
+
+bool NRIRenderDevice::ShouldUseFrameGenerationUiLocalCompositeFallback() const
+{
+	return ShouldUseFrameGenerationUiTarget() && !ShouldHandoffFrameGenerationUiTexture();
+}
+
+const char* NRIRenderDevice::GetFrameGenerationUiRouteName() const
+{
+	const auto& policy = mFrameGeneration.GetPolicy();
+	const bool uiTextureRouteRequested =
+		mInitialized &&
+		!mUsingSaveTarget &&
+		policy.requestedEnabled &&
+		policy.requestedProvider != NRIFrameGenerationProvider::Off &&
+		policy.resolvedUiMode == NRIFrameGenerationUiMode::UiTexture;
+	if (!uiTextureRouteRequested)
+	{
+		return "off";
+	}
+
+#ifdef _WIN32
+	return IsFrameGenerationPresentPathActive() ? "provider" : "local-composite";
+#else
+	return "local-composite";
+#endif
+}
+
 uint32_t NRIRenderDevice::GetFrameGenerationSceneBlendPrefixCount() const
 {
 	if (twod == nullptr)
@@ -2476,7 +2512,10 @@ void NRIRenderDevice::FinalizeFrameGenerationUiTarget()
 	if (uiTarget != nullptr)
 	{
 		TransitionTexture(*uiTarget, NRIShaderResourceState());
-		mFrameGeneration.SetUiTexture(uiTarget);
+		if (ShouldHandoffFrameGenerationUiTexture() || ShouldUseFrameGenerationUiLocalCompositeFallback())
+		{
+			mFrameGeneration.SetUiTexture(uiTarget);
+		}
 	}
 
 	mRenderState->EndFrame();
@@ -3219,7 +3258,7 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		(int)nri_ptportaldepth);
 	const auto& frameGenPolicy = mFrameGeneration.GetPolicy();
 	const auto& frameGenPresentContract = mFrameGeneration.GetPresentContract();
-	Printf("NRI PT framegen caps: requested=%s provider=%s resolved=%s output=%s->%s contract=%s scope=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
+	Printf("NRI PT framegen caps: requested=%s provider=%s resolved=%s output=%s->%s contract=%s scope=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s(route=%s) swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
 		frameGenPolicy.requestedEnabled ? "on" : "off",
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.resolvedProvider),
@@ -3241,6 +3280,7 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.asyncWorkloadAvailable),
 		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.requestedUiMode),
 		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.resolvedUiMode),
+		GetFrameGenerationUiRouteName(),
 		frameGenPolicy.swapChainReady ? "ready" : "cold",
 		frameGenPolicy.nativeDeviceAvailable ? "ok" : "missing",
 		frameGenPolicy.nativeGraphicsQueueAvailable ? "ok" : "missing",
@@ -4469,7 +4509,7 @@ void NRIRenderDevice::LogStartup()
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLSR) ? "yes" : "no",
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLRR) ? "yes" : "no");
 	const auto& frameGenPolicy = mFrameGeneration.GetPolicy();
-	Printf("Frame generation policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
+	Printf("Frame generation policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s(route=%s) swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
 		frameGenPolicy.requestedEnabled ? "on" : "off",
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.resolvedProvider),
@@ -4487,6 +4527,7 @@ void NRIRenderDevice::LogStartup()
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.asyncWorkloadAvailable),
 		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.requestedUiMode),
 		NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.resolvedUiMode),
+		GetFrameGenerationUiRouteName(),
 		frameGenPolicy.swapChainReady ? "ready" : "cold",
 		frameGenPolicy.nativeDeviceAvailable ? "ok" : "missing",
 		frameGenPolicy.nativeGraphicsQueueAvailable ? "ok" : "missing",
