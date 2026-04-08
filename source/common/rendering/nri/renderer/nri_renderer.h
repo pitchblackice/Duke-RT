@@ -91,6 +91,7 @@ public:
 		BuildingStaticSceneCache,
 		RealizingStaticSceneTextures,
 		UploadingStaticSceneBuffers,
+		PreparingStaticSceneBlasResources,
 		BuildingStaticSceneBlas,
 		BuildingStaticSceneTlas,
 		ReadyToSwap
@@ -152,9 +153,11 @@ public:
 		double runtimeMutationRebaselineBuildStaticSceneCacheMs = 0.0;
 		double runtimeMutationRebaselineRealizeStaticSceneTexturesMs = 0.0;
 		double runtimeMutationRebaselineUploadStaticSceneBuffersMs = 0.0;
+		double runtimeMutationRebaselinePrepareStaticSceneBlasMs = 0.0;
 		double runtimeMutationRebaselineBuildStaticSceneBlasMs = 0.0;
 		double runtimeMutationRebaselineBuildStaticSceneTlasMs = 0.0;
 		double runtimeMutationRebaselineSwapMs = 0.0;
+		double runtimeMutationRebaselineRetireMs = 0.0;
 		uint32_t runtimeMutationDirtyChunks = 0;
 		uint32_t runtimeMutationRebuiltChunks = 0;
 		uint32_t runtimeMutationHeldChunks = 0;
@@ -218,11 +221,16 @@ public:
 		uint32_t runtimeMutationRebaselineStableChunkCount = 0;
 		uint32_t runtimeMutationRebaselineFramesQueued = 0;
 		uint32_t runtimeMutationRebaselineState = 0;
+		uint32_t runtimeMutationRebaselineCandidateCacheBuilt = 0;
+		uint32_t runtimeMutationRebaselineCandidateCacheTotal = 0;
+		uint32_t runtimeMutationRebaselineCandidateBlasPrepared = 0;
+		uint32_t runtimeMutationRebaselineCandidateBlasPrepareTotal = 0;
 		uint32_t runtimeMutationRebaselineCandidateBlasBuilt = 0;
 		uint32_t runtimeMutationRebaselineCandidateBlasTotal = 0;
 		uint32_t runtimeMutationRebaselineCandidateSceneChunkCount = 0;
 		uint32_t runtimeMutationRebaselineCandidateSceneSurfaceCount = 0;
 		uint32_t runtimeMutationRebaselineCandidateSceneTriangleCount = 0;
+		uint32_t runtimeMutationRebaselineRetiredSceneCount = 0;
 		uint64_t runtimeMutationRebaselineCandidateBuildSerial = 0;
 		bool runtimeMutationRebaselineQueued = false;
 		bool usedStaticMapScene = false;
@@ -884,8 +892,13 @@ private:
 		RuntimeMapMutationCache runtimeMutations;
 		StaticMapSceneResources staticResources;
 		uint64_t pendingGeometryBuildSerial = 0;
+		uint32_t cacheBuildCursor = 0;
+		uint32_t cacheBuildCount = 0;
+		uint32_t blasPrepareCursor = 0;
+		uint32_t blasPrepareCount = 0;
 		uint32_t blasBuildCursor = 0;
 		uint32_t blasBuildCount = 0;
+		uint64_t blasScratchSize = 0;
 	};
 
 	struct RuntimeMutationRebaselineRetiredStaticScene
@@ -893,6 +906,8 @@ private:
 		bool valid = false;
 		StaticMapSceneCache staticScene;
 		StaticMapSceneResources staticResources;
+		uint64_t retireAfterFrame = 0;
+		uint32_t destroyChunkCursor = 0;
 	};
 
 	bool CreatePipelineLayout();
@@ -910,6 +925,17 @@ private:
 	bool BuildStaticMapSceneCache(
 		const nri_scene::PTMapWorld& mapWorld,
 		const PreservedStaticMapSkyState* preservedSkyState,
+		StaticMapSceneCache& outStaticScene,
+		RuntimeMapMutationCache& outRuntimeMutations);
+	void InitializeStaticMapSceneCacheBuild(
+		const nri_scene::PTMapWorld& mapWorld,
+		const PreservedStaticMapSkyState* preservedSkyState,
+		StaticMapSceneCache& outStaticScene,
+		RuntimeMapMutationCache& outRuntimeMutations);
+	void AppendStaticMapSceneCacheChunk(
+		const nri_scene::PTMapWorld& mapWorld,
+		const nri_scene::PTMapChunk& chunk,
+		const nri_scene::SceneView* preservedSkyView,
 		StaticMapSceneCache& outStaticScene,
 		RuntimeMapMutationCache& outRuntimeMutations);
 	bool RefreshStaticMapAnimatedMaterials();
@@ -1047,6 +1073,7 @@ private:
 	bool AdvanceRuntimeMutationRebaselineStaticSceneBlas();
 	bool BuildRuntimeMutationRebaselineStaticSceneTlas();
 	bool SwapRuntimeMutationRebaselineCandidate();
+	void DrainRetiredRuntimeMutationRebaselineStaticScenes();
 	void TraceRuntimeMutationRebaselineProgress(const char* eventLabel) const;
 	void ResetRuntimeMutationRebaselineState(bool destroyCandidateResources);
 	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel = nullptr);
@@ -1201,7 +1228,7 @@ private:
 	nri_scene::PTMapWorld mMapWorld;
 	StaticMapSceneCache mStaticMapScene;
 	RuntimeMutationRebaselineCandidate mRuntimeMutationRebaselineCandidate = {};
-	RuntimeMutationRebaselineRetiredStaticScene mRetiredRuntimeMutationRebaselineStaticScene = {};
+	std::vector<RuntimeMutationRebaselineRetiredStaticScene> mRetiredRuntimeMutationRebaselineStaticScenes;
 	RuntimeMapMutationCache mRuntimeMapMutations;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
@@ -1323,9 +1350,11 @@ private:
 	double mRuntimeMutationRebaselineBuildStaticSceneCacheMs = 0.0;
 	double mRuntimeMutationRebaselineRealizeStaticSceneTexturesMs = 0.0;
 	double mRuntimeMutationRebaselineUploadStaticSceneBuffersMs = 0.0;
+	double mRuntimeMutationRebaselinePrepareStaticSceneBlasMs = 0.0;
 	double mRuntimeMutationRebaselineBuildStaticSceneBlasMs = 0.0;
 	double mRuntimeMutationRebaselineBuildStaticSceneTlasMs = 0.0;
 	double mRuntimeMutationRebaselineSwapMs = 0.0;
+	double mRuntimeMutationRebaselineRetireMs = 0.0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
 	uint32_t mActiveTlasInstanceCount = 0;
 	uint32_t mBoundStaticPrimitiveCount = 0;
