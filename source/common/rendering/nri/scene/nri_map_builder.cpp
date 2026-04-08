@@ -1172,6 +1172,11 @@ namespace
 		{
 			const PTMapWallMutationSnapshot& baselineWall = baseline.walls[wallIndex];
 			const walltype& liveWall = sec.walls[(unsigned)wallIndex];
+			const uint16_t baselineCstat = baselineWall.cstat;
+			const uint16_t liveCstat = (uint16_t)liveWall.cstat;
+			static constexpr uint16_t kWallTopologyMutationCstatMask =
+				CSTAT_WALL_MASKED |
+				CSTAT_WALL_1WAY;
 
 			if (baselineWall.pos != liveWall.pos ||
 				baselineWall.point2 != liveWall.point2 ||
@@ -1181,7 +1186,13 @@ namespace
 				outAnalysis.reasonMask |= PTMapChunkMutationReason_WallGeometry;
 			}
 
-			if (baselineWall.cstat != (uint16_t)liveWall.cstat ||
+			if (((baselineCstat ^ liveCstat) & kWallTopologyMutationCstatMask) != 0 ||
+				baselineWall.portalflags != liveWall.portalflags)
+			{
+				outAnalysis.reasonMask |= PTMapChunkMutationReason_WallGeometry;
+			}
+
+			if (baselineCstat != liveCstat ||
 				baselineWall.portalflags != liveWall.portalflags ||
 				baselineWall.walltexture != liveWall.walltexture.GetIndex() ||
 				baselineWall.overtexture != liveWall.overtexture.GetIndex() ||

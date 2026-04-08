@@ -11619,7 +11619,7 @@ bool NRIRenderer::BuildRuntimeMutationRebaselineStaticSceneCache()
 
 	candidate.cacheBuildCursor = buildEnd;
 	candidate.cacheBuildCount = buildEnd;
-	return candidate.cacheBuildCursor >= totalChunkCount && !candidate.staticScene.geometry.primitives.empty();
+	return true;
 }
 
 bool NRIRenderer::RealizeRuntimeMutationRebaselineStaticSceneTextures()
