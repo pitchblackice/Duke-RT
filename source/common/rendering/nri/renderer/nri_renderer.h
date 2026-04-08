@@ -88,7 +88,11 @@ public:
 		Queued,
 		BuildingAuthoritativeWorld,
 		WorldReady,
-		PreparingStaticScene,
+		BuildingStaticSceneCache,
+		RealizingStaticSceneTextures,
+		UploadingStaticSceneBuffers,
+		BuildingStaticSceneBlas,
+		BuildingStaticSceneTlas,
 		ReadyToSwap
 	};
 
@@ -145,7 +149,11 @@ public:
 		double actorOverrideMapBuildMs = 0.0;
 		double materialBuildMs = 0.0;
 		double runtimeMutationRebaselineBuildWorldMs = 0.0;
-		double runtimeMutationRebaselinePrepareStaticSceneMs = 0.0;
+		double runtimeMutationRebaselineBuildStaticSceneCacheMs = 0.0;
+		double runtimeMutationRebaselineRealizeStaticSceneTexturesMs = 0.0;
+		double runtimeMutationRebaselineUploadStaticSceneBuffersMs = 0.0;
+		double runtimeMutationRebaselineBuildStaticSceneBlasMs = 0.0;
+		double runtimeMutationRebaselineBuildStaticSceneTlasMs = 0.0;
 		double runtimeMutationRebaselineSwapMs = 0.0;
 		uint32_t runtimeMutationDirtyChunks = 0;
 		uint32_t runtimeMutationRebuiltChunks = 0;
@@ -210,6 +218,11 @@ public:
 		uint32_t runtimeMutationRebaselineStableChunkCount = 0;
 		uint32_t runtimeMutationRebaselineFramesQueued = 0;
 		uint32_t runtimeMutationRebaselineState = 0;
+		uint32_t runtimeMutationRebaselineCandidateBlasBuilt = 0;
+		uint32_t runtimeMutationRebaselineCandidateBlasTotal = 0;
+		uint32_t runtimeMutationRebaselineCandidateSceneChunkCount = 0;
+		uint32_t runtimeMutationRebaselineCandidateSceneSurfaceCount = 0;
+		uint32_t runtimeMutationRebaselineCandidateSceneTriangleCount = 0;
 		uint64_t runtimeMutationRebaselineCandidateBuildSerial = 0;
 		bool runtimeMutationRebaselineQueued = false;
 		bool usedStaticMapScene = false;
@@ -871,6 +884,8 @@ private:
 		RuntimeMapMutationCache runtimeMutations;
 		StaticMapSceneResources staticResources;
 		uint64_t pendingGeometryBuildSerial = 0;
+		uint32_t blasBuildCursor = 0;
+		uint32_t blasBuildCount = 0;
 	};
 
 	struct RuntimeMutationRebaselineRetiredStaticScene
@@ -1025,7 +1040,12 @@ private:
 	void RebuildStartupMutationBaseline();
 	void RebuildRuntimeMutationBaseline();
 	void AdvanceRuntimeMutationRebaseline();
-	bool PrepareRuntimeMutationRebaselineStaticScene();
+	bool BuildRuntimeMutationRebaselineStaticSceneCache();
+	bool RealizeRuntimeMutationRebaselineStaticSceneTextures();
+	bool UploadRuntimeMutationRebaselineStaticSceneBuffers();
+	bool PrepareRuntimeMutationRebaselineStaticSceneBlas();
+	bool AdvanceRuntimeMutationRebaselineStaticSceneBlas();
+	bool BuildRuntimeMutationRebaselineStaticSceneTlas();
 	bool SwapRuntimeMutationRebaselineCandidate();
 	void ResetRuntimeMutationRebaselineState(bool destroyCandidateResources);
 	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel = nullptr);
@@ -1299,7 +1319,11 @@ private:
 	uint32_t mRuntimeMutationRebaselineLastAdvanceFrame = UINT32_MAX;
 	uint64_t mRuntimeMutationRebaselineExpectedGeometryBuildSerial = 0;
 	double mRuntimeMutationRebaselineBuildWorldMs = 0.0;
-	double mRuntimeMutationRebaselinePrepareStaticSceneMs = 0.0;
+	double mRuntimeMutationRebaselineBuildStaticSceneCacheMs = 0.0;
+	double mRuntimeMutationRebaselineRealizeStaticSceneTexturesMs = 0.0;
+	double mRuntimeMutationRebaselineUploadStaticSceneBuffersMs = 0.0;
+	double mRuntimeMutationRebaselineBuildStaticSceneBlasMs = 0.0;
+	double mRuntimeMutationRebaselineBuildStaticSceneTlasMs = 0.0;
 	double mRuntimeMutationRebaselineSwapMs = 0.0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
 	uint32_t mActiveTlasInstanceCount = 0;

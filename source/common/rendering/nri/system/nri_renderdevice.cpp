@@ -2859,7 +2859,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationStructuralInvalidChunks,
 			shell.runtimeMutationHardwareCanvasChunkCount);
 		Printf(
-			"PERF pt runtime rebaseline detail NRI: frame=%llu queued=%u state=%s queue_frame=%u frames_queued=%u active_chunks=%u stable_chunks=%u candidate_build_serial=%llu build_world_ms=%.3f prepare_static_scene_ms=%.3f swap_ms=%.3f\n",
+			"PERF pt runtime rebaseline detail NRI: frame=%llu queued=%u state=%s queue_frame=%u frames_queued=%u active_chunks=%u stable_chunks=%u candidate_build_serial=%llu scene_chunks=%u scene_surfaces=%u scene_tris=%u blas=%u/%u build_world_ms=%.3f build_static_scene_cache_ms=%.3f realize_static_scene_textures_ms=%.3f upload_static_scene_buffers_ms=%.3f build_static_scene_blas_ms=%.3f build_static_scene_tlas_ms=%.3f swap_ms=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationRebaselineQueued ? 1u : 0u,
 			NRIRenderer::GetRuntimeMutationRebaselineStateName((NRIRenderer::RuntimeMutationRebaselineState)shell.runtimeMutationRebaselineState),
@@ -2868,8 +2868,17 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationRebaselineActiveChunkCount,
 			shell.runtimeMutationRebaselineStableChunkCount,
 			(unsigned long long)shell.runtimeMutationRebaselineCandidateBuildSerial,
+			shell.runtimeMutationRebaselineCandidateSceneChunkCount,
+			shell.runtimeMutationRebaselineCandidateSceneSurfaceCount,
+			shell.runtimeMutationRebaselineCandidateSceneTriangleCount,
+			shell.runtimeMutationRebaselineCandidateBlasBuilt,
+			shell.runtimeMutationRebaselineCandidateBlasTotal,
 			shell.runtimeMutationRebaselineBuildWorldMs,
-			shell.runtimeMutationRebaselinePrepareStaticSceneMs,
+			shell.runtimeMutationRebaselineBuildStaticSceneCacheMs,
+			shell.runtimeMutationRebaselineRealizeStaticSceneTexturesMs,
+			shell.runtimeMutationRebaselineUploadStaticSceneBuffersMs,
+			shell.runtimeMutationRebaselineBuildStaticSceneBlasMs,
+			shell.runtimeMutationRebaselineBuildStaticSceneTlasMs,
 			shell.runtimeMutationRebaselineSwapMs);
 		Printf(
 			"PERF pt texture detail NRI: frame=%llu cache=%u misses=%u inserts=%u transitions=%u lookup_ms=%.3f realize_ms=%.3f descriptor_ms=%.3f transition_ms=%.3f material_builds=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
