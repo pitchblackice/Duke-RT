@@ -2160,6 +2160,25 @@ void NRIRenderDevice::Draw2D()
 			rsTrace.beginRenderingMs,
 			rsTrace.bindStateMs,
 			rsTrace.drawCallMs);
+		Printf(
+			"PERF twod bind detail NRI: frame=%llu viewport_change=%u viewport_noop=%u scissor_change=%u scissor_noop=%u root_change=%u root_noop=%u sampler_change=%u sampler_noop=%u texture_change=%u texture_noop=%u pipeline_change=%u pipeline_noop=%u vbuf_change=%u vbuf_noop=%u ibuf_change=%u ibuf_noop=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			rsTrace.viewportChanges,
+			rsTrace.viewportNoops,
+			rsTrace.scissorChanges,
+			rsTrace.scissorNoops,
+			rsTrace.rootConstantChanges,
+			rsTrace.rootConstantNoops,
+			rsTrace.samplerSetChanges,
+			rsTrace.samplerSetNoops,
+			rsTrace.textureSetChanges,
+			rsTrace.textureSetNoops,
+			rsTrace.pipelineChanges,
+			rsTrace.pipelineNoops,
+			rsTrace.vertexBufferChanges,
+			rsTrace.vertexBufferNoops,
+			rsTrace.indexBufferChanges,
+			rsTrace.indexBufferNoops);
 		mRenderState->ResetPerfTraceStats();
 	}
 }

@@ -93,11 +93,38 @@ struct PerfLoop2DProducerDelta
 	double ms = 0.0;
 };
 
+enum class PerfLoop2DTextLabel : uint8_t
+{
+	Other = 0,
+	ConsoleVersion,
+	ConsoleBody,
+	ConsoleCommandLine,
+	Hud,
+	Stats,
+	Rate,
+};
+
+struct PerfLoop2DTextTraceCounter
+{
+	uint32_t calls = 0;
+	uint32_t glyphs = 0;
+	uint32_t commands = 0;
+};
+
 struct PerfLoop2DProducerTraceStats
 {
 	PerfLoop2DProducerDelta statusBar;
 	PerfLoop2DProducerDelta altHud;
 	PerfLoop2DProducerDelta crosshair;
+	uint32_t consoleVisibleLines = 0;
+	uint32_t consoleBackgroundCommands = 0;
+	PerfLoop2DTextTraceCounter consoleVersionText;
+	PerfLoop2DTextTraceCounter consoleBodyText;
+	PerfLoop2DTextTraceCounter consoleCommandLineText;
+	PerfLoop2DTextTraceCounter hudText;
+	PerfLoop2DTextTraceCounter statsText;
+	PerfLoop2DTextTraceCounter rateText;
+	PerfLoop2DTextTraceCounter otherText;
 };
 
 struct PerfLoopCameraTraceStats
@@ -155,6 +182,28 @@ void PerfLoopTraceNoteRenderAngles(float yawDegrees, float pitchDegrees);
 void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta);
 void PerfLoopTraceNoteAltHud2D(const PerfLoop2DProducerDelta& delta);
 void PerfLoopTraceNoteCrosshair2D(const PerfLoop2DProducerDelta& delta);
+PerfLoop2DTextLabel PerfLoopTracePush2DTextLabel(PerfLoop2DTextLabel label);
+void PerfLoopTracePop2DTextLabel(PerfLoop2DTextLabel previous);
+void PerfLoopTraceNote2DTextDraw(uint32_t glyphs, uint32_t commands);
+void PerfLoopTraceNoteConsoleVisibleLines(uint32_t visibleLines);
+void PerfLoopTraceNoteConsoleBackgroundCommands(uint32_t commands);
+
+class PerfLoop2DTextScope
+{
+public:
+	explicit PerfLoop2DTextScope(PerfLoop2DTextLabel label)
+		: mPrevious(PerfLoopTracePush2DTextLabel(label))
+	{
+	}
+
+	~PerfLoop2DTextScope()
+	{
+		PerfLoopTracePop2DTextLabel(mPrevious);
+	}
+
+private:
+	PerfLoop2DTextLabel mPrevious;
+};
 
 struct FUiEvent
 {

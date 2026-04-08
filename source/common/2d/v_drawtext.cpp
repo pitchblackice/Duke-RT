@@ -38,6 +38,7 @@
 #include <wctype.h>
 
 #include "v_text.h"
+#include "d_eventbase.h"
 #include "utf8.h"
 #include "v_draw.h"
 #include "gstrings.h"
@@ -173,6 +174,9 @@ void DrawChar(F2DDrawer *drawer, FFont* font, int normalcolor, double x, double 
 
 	FGameTexture* pic;
 	int dummy;
+	const bool traceActive = PerfLoopTraceActive() && drawer != nullptr;
+	const uint32_t beforeCommands = traceActive ? (uint32_t)drawer->mData.Size() : 0u;
+	uint32_t emittedGlyphs = 0;
 
 	if (NULL != (pic = font->GetChar(character, normalcolor, &dummy)))
 	{
@@ -190,6 +194,13 @@ void DrawChar(F2DDrawer *drawer, FFont* font, int normalcolor, double x, double 
 		if (!palettetrans) parms.TranslationId = font->GetColorTranslation((EColorRange)normalcolor, &color);
 		parms.color = PalEntry((color.a * parms.color.a) / 255, (color.r * parms.color.r) / 255, (color.g * parms.color.g) / 255, (color.b * parms.color.b) / 255);
 		drawer->AddTexture(pic, parms);
+		emittedGlyphs = 1;
+	}
+
+	if (traceActive && emittedGlyphs != 0)
+	{
+		const uint32_t afterCommands = (uint32_t)drawer->mData.Size();
+		PerfLoopTraceNote2DTextDraw(emittedGlyphs, afterCommands - beforeCommands);
 	}
 }
 
@@ -203,6 +214,9 @@ void DrawChar(F2DDrawer *drawer,  FFont *font, int normalcolor, double x, double
 
 	FGameTexture *pic;
 	int dummy;
+	const bool traceActive = PerfLoopTraceActive() && drawer != nullptr;
+	const uint32_t beforeCommands = traceActive ? (uint32_t)drawer->mData.Size() : 0u;
+	uint32_t emittedGlyphs = 0;
 
 	if (NULL != (pic = font->GetChar(character, normalcolor, &dummy)))
 	{
@@ -215,6 +229,13 @@ void DrawChar(F2DDrawer *drawer,  FFont *font, int normalcolor, double x, double
 		if (!palettetrans) parms.TranslationId = font->GetColorTranslation((EColorRange)normalcolor, &color);
 		parms.color = PalEntry((color.a * parms.color.a) / 255, (color.r * parms.color.r) / 255, (color.g * parms.color.g) / 255, (color.b * parms.color.b) / 255);
 		drawer->AddTexture(pic, parms);
+		emittedGlyphs = 1;
+	}
+
+	if (traceActive && emittedGlyphs != 0)
+	{
+		const uint32_t afterCommands = (uint32_t)drawer->mData.Size();
+		PerfLoopTraceNote2DTextDraw(emittedGlyphs, afterCommands - beforeCommands);
 	}
 }
 
@@ -306,6 +327,9 @@ void DrawTextCommon(F2DDrawer *drawer, FFont *font, int normalcolor, double x, d
 
 
 	auto currentcolor = normalcolor;
+	const bool traceActive = PerfLoopTraceActive() && drawer != nullptr;
+	const uint32_t beforeCommands = traceActive ? (uint32_t)drawer->mData.Size() : 0u;
+	uint32_t emittedGlyphs = 0;
 	while (ch - string < parms.maxstrlen)
 	{
 		c = GetCharFromString(ch);
@@ -350,6 +374,7 @@ void DrawTextCommon(F2DDrawer *drawer, FFont *font, int normalcolor, double x, d
 				parms.left = w;
 
 			drawer->AddTexture(pic, parms);
+			emittedGlyphs++;
 		}
 		if (parms.monospace == EMonospacing::Off)
 		{
@@ -360,6 +385,12 @@ void DrawTextCommon(F2DDrawer *drawer, FFont *font, int normalcolor, double x, d
 			cx += (parms.spacing) * scalex;
 		}
 
+	}
+
+	if (traceActive && emittedGlyphs != 0)
+	{
+		const uint32_t afterCommands = (uint32_t)drawer->mData.Size();
+		PerfLoopTraceNote2DTextDraw(emittedGlyphs, afterCommands - beforeCommands);
 	}
 }
 

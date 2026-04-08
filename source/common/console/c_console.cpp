@@ -38,6 +38,7 @@
 #include "version.h"
 #include "c_bind.h"
 #include "c_console.h"
+#include "d_eventbase.h"
 #include "c_cvars.h"
 #include "c_dispatch.h"
 #include "gamestate.h"
@@ -586,6 +587,7 @@ void C_DrawConsole ()
 	}
 	else if (ConBottom)
 	{
+		const uint32_t backgroundCommandsBefore = (PerfLoopTraceActive() && twod != nullptr) ? (uint32_t)twod->mData.Size() : 0u;
 		int visheight;
 
 		visheight = ConBottom;
@@ -620,8 +622,15 @@ void C_DrawConsole ()
 			twod->AddColorOnlyQuad(0, visheight, screen->GetWidth(), 1, 0xff000000);
 		}
 
+		if (PerfLoopTraceActive() && twod != nullptr)
+		{
+			const uint32_t backgroundCommandsAfter = (uint32_t)twod->mData.Size();
+			PerfLoopTraceNoteConsoleBackgroundCommands(backgroundCommandsAfter - backgroundCommandsBefore);
+		}
+
 		if (ConBottom >= 12)
 		{
+			PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleVersion);
 			if (textScale == 1)
 				DrawText(twod, CurrentConsoleFont, CR_ORANGE, twod->GetWidth() - 8 -
 					CurrentConsoleFont->StringWidth (GetVersionString()),
@@ -637,7 +646,6 @@ void C_DrawConsole ()
 					DTA_KeepRatio, true, TAG_DONE);
 
 		}
-
 	}
 
 	if (menuactive != MENU_Off)
@@ -654,47 +662,59 @@ void C_DrawConsole ()
 		if (blines != nullptr)
 		{
 			FBrokenLines* printline = blines + consolelines - 1 - RowAdjust;
+			uint32_t visibleLines = 0;
 
 			int bottomline = ConBottom / textScale - CurrentConsoleFont->GetHeight() * 2 - 4;
 
-			for (FBrokenLines* p = printline; p >= blines && lines > 0; p--, lines--)
 			{
-				if (textScale == 1)
+				PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleBody);
+				for (FBrokenLines* p = printline; p >= blines && lines > 0; p--, lines--)
 				{
-					DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + lines * CurrentConsoleFont->GetHeight(), p->Text.GetChars(), TAG_DONE);
+					visibleLines++;
+					if (textScale == 1)
+					{
+						DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + lines * CurrentConsoleFont->GetHeight(), p->Text.GetChars(), TAG_DONE);
+					}
+					else
+					{
+						DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + lines * CurrentConsoleFont->GetHeight(), p->Text.GetChars(),
+							DTA_VirtualWidth, twod->GetWidth() / textScale,
+							DTA_VirtualHeight, twod->GetHeight() / textScale,
+							DTA_KeepRatio, true, TAG_DONE);
+					}
 				}
-				else
-				{
-					DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + lines * CurrentConsoleFont->GetHeight(), p->Text.GetChars(),
-						DTA_VirtualWidth, twod->GetWidth() / textScale,
-						DTA_VirtualHeight, twod->GetHeight() / textScale,
-						DTA_KeepRatio, true, TAG_DONE);
-				}
+			}
+			if (visibleLines != 0)
+			{
+				PerfLoopTraceNoteConsoleVisibleLines(visibleLines);
 			}
 
 			if (ConBottom >= 20)
 			{
-				if (gamestate != GS_STARTUP)
 				{
-					auto now = I_msTime();
-					if (now > CursorTicker)
+					PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleCommandLine);
+					if (gamestate != GS_STARTUP)
 					{
-						CursorTicker = now + 500;
-						cursoron = !cursoron;
+						auto now = I_msTime();
+						if (now > CursorTicker)
+						{
+							CursorTicker = now + 500;
+							cursoron = !cursoron;
+						}
+						CmdLine.Draw(left, bottomline, textScale, cursoron);
 					}
-					CmdLine.Draw(left, bottomline, textScale, cursoron);
-				}
-				if (RowAdjust && ConBottom >= CurrentConsoleFont->GetHeight() * 7 / 2)
-				{
-					// Indicate that the view has been scrolled up (10)
-					// and if we can scroll no further (12)
-					if (textScale == 1)
-						DrawChar(twod, CurrentConsoleFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10, TAG_DONE);
-					else
-						DrawChar(twod, CurrentConsoleFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10,
-							DTA_VirtualWidth, twod->GetWidth() / textScale,
-							DTA_VirtualHeight, twod->GetHeight() / textScale,
-							DTA_KeepRatio, true, TAG_DONE);
+					if (RowAdjust && ConBottom >= CurrentConsoleFont->GetHeight() * 7 / 2)
+					{
+						// Indicate that the view has been scrolled up (10)
+						// and if we can scroll no further (12)
+						if (textScale == 1)
+							DrawChar(twod, CurrentConsoleFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10, TAG_DONE);
+						else
+							DrawChar(twod, CurrentConsoleFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10,
+								DTA_VirtualWidth, twod->GetWidth() / textScale,
+								DTA_VirtualHeight, twod->GetHeight() / textScale,
+								DTA_KeepRatio, true, TAG_DONE);
+					}
 				}
 			}
 		}
@@ -1184,4 +1204,3 @@ CCMD(toggleconsole)
 {
 	C_ToggleConsole();
 }
-

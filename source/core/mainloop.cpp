@@ -564,7 +564,11 @@ void DrawOverlays()
 			perf2DProducerTraceStats.chat = Trace2DProducer([]() { CT_Drawer(); });
 			perf2DProducerTraceStats.console = Trace2DProducer([]() { C_DrawConsole(); });
 			perf2DProducerTraceStats.menu = Trace2DProducer([]() { M_Drawer(); });
-			perf2DProducerTraceStats.stats = Trace2DProducer([]() { FStat::PrintStat(twod); });
+			perf2DProducerTraceStats.stats = Trace2DProducer([]()
+			{
+				PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::Stats);
+				FStat::PrintStat(twod);
+			});
 		}
 		else
 		{
@@ -1181,6 +1185,47 @@ void MainLoop ()
 					perf2DProducerTraceStats.rate.ms,
 					perf2DProducerTraceStats.drawtile.commands,
 					perf2DProducerTraceStats.drawtile.ms);
+				const auto twodProducerStats = PerfLoopTraceGet2DProducerStats();
+				const auto consoleVisibleGlyphs =
+					twodProducerStats.consoleVersionText.glyphs +
+					twodProducerStats.consoleBodyText.glyphs +
+					twodProducerStats.consoleCommandLineText.glyphs;
+				Printf(
+					"PERF twod text trace: frame=%llu console_version_calls=%u console_version_glyphs=%u console_version_cmds=%u console_body_calls=%u console_body_glyphs=%u console_body_cmds=%u console_cmd_calls=%u console_cmd_glyphs=%u console_cmd_cmds=%u hud_calls=%u hud_glyphs=%u hud_cmds=%u stats_calls=%u stats_glyphs=%u stats_cmds=%u rate_calls=%u rate_glyphs=%u rate_cmds=%u other_calls=%u other_glyphs=%u other_cmds=%u\n",
+					(unsigned long long)traceFrame,
+					twodProducerStats.consoleVersionText.calls,
+					twodProducerStats.consoleVersionText.glyphs,
+					twodProducerStats.consoleVersionText.commands,
+					twodProducerStats.consoleBodyText.calls,
+					twodProducerStats.consoleBodyText.glyphs,
+					twodProducerStats.consoleBodyText.commands,
+					twodProducerStats.consoleCommandLineText.calls,
+					twodProducerStats.consoleCommandLineText.glyphs,
+					twodProducerStats.consoleCommandLineText.commands,
+					twodProducerStats.hudText.calls,
+					twodProducerStats.hudText.glyphs,
+					twodProducerStats.hudText.commands,
+					twodProducerStats.statsText.calls,
+					twodProducerStats.statsText.glyphs,
+					twodProducerStats.statsText.commands,
+					twodProducerStats.rateText.calls,
+					twodProducerStats.rateText.glyphs,
+					twodProducerStats.rateText.commands,
+					twodProducerStats.otherText.calls,
+					twodProducerStats.otherText.glyphs,
+					twodProducerStats.otherText.commands);
+				Printf(
+					"PERF twod console detail: frame=%llu visible_lines=%u visible_glyphs=%u bg_cmds=%u version_cmds=%u body_cmds=%u cmdline_cmds=%u version_glyphs=%u body_glyphs=%u cmdline_glyphs=%u\n",
+					(unsigned long long)traceFrame,
+					twodProducerStats.consoleVisibleLines,
+					consoleVisibleGlyphs,
+					twodProducerStats.consoleBackgroundCommands,
+					twodProducerStats.consoleVersionText.commands,
+					twodProducerStats.consoleBodyText.commands,
+					twodProducerStats.consoleCommandLineText.commands,
+					twodProducerStats.consoleVersionText.glyphs,
+					twodProducerStats.consoleBodyText.glyphs,
+					twodProducerStats.consoleCommandLineText.glyphs);
 				Printf(
 					"PERF input trace: frame=%llu getevent=%u starttic_calls=%u handleevents=%u msgs=%u burst=%u raw_input=%u raw_keyboard=%u raw_mouse=%u raw_mouse_moves=%u raw_mouse_drop=%u posted_mouse=%u dispatched_mouse=%u sampled_mouse=%u route_yaw=%u route_strafe=%u route_pitch=%u route_aimmove=%u ticcmds=%u yaw_apply=%u pitch_apply=%u fast_camera=%u posted_delta=(%.1f,%.1f) dispatched_delta=(%.1f,%.1f) sampled_delta=(%.1f,%.1f) ticcmd_deg=(%.3f,%.3f) applied_deg=(%.3f,%.3f) fast_camera_deg=(%.3f,%.3f) key_down=%u key_up=%u device_change=%u queue_hw=%u queue_overflow=%u\n",
 					(unsigned long long)traceFrame,

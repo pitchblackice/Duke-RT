@@ -14,6 +14,24 @@
 
 namespace
 {
+	static bool ViewportEquals(const nri::Viewport& a, const nri::Viewport& b)
+	{
+		return a.x == b.x &&
+			a.y == b.y &&
+			a.width == b.width &&
+			a.height == b.height &&
+			a.depthMin == b.depthMin &&
+			a.depthMax == b.depthMax;
+	}
+
+	static bool RectEquals(const nri::Rect& a, const nri::Rect& b)
+	{
+		return a.x == b.x &&
+			a.y == b.y &&
+			a.width == b.width &&
+			a.height == b.height;
+	}
+
 	template<typename T>
 	static T NRIFlags(T a, T b)
 	{
@@ -233,6 +251,25 @@ void NRIRenderState::BeginFrame()
 	mLastIndexBuffer = nullptr;
 	mLastVertexStream = {};
 	mLastIndexStream = {};
+	mLastBoundViewport = {};
+	mLastBoundScissor = {};
+	mLastBoundConstants = {};
+	mLastBoundSamplerSet = nullptr;
+	mLastBoundTextureSet = nullptr;
+	mLastBoundPipeline = nullptr;
+	mLastBoundVertexBufferResource = nullptr;
+	mLastBoundVertexOffset = 0;
+	mLastBoundVertexStride = 0;
+	mLastBoundIndexBufferResource = nullptr;
+	mLastBoundIndexOffset = 0;
+	mHasBoundViewport = false;
+	mHasBoundScissor = false;
+	mHasBoundConstants = false;
+	mHasBoundSamplerSet = false;
+	mHasBoundTextureSet = false;
+	mHasBoundPipeline = false;
+	mHasBoundVertexBuffer = false;
+	mHasBoundIndexBuffer = false;
 	mRendering = false;
 	mNeedsClear = true;
 	mClearTargets = CT_Color;
@@ -444,14 +481,57 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 	{
 		stageStartMs = I_msTimeF();
 	}
+	auto* samplerSet = mFrameBuffer->GetSamplerSet(GetSamplerMode());
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::GRAPHICS, *mFrameBuffer->mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetViewports(*mFrameBuffer->mCommandBuffer, &viewport, 1);
 	mFrameBuffer->mCore.CmdSetScissors(*mFrameBuffer->mCommandBuffer, &scissor, 1);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::GRAPHICS });
-	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, mFrameBuffer->GetSamplerSet(GetSamplerMode()), nri::BindPoint::GRAPHICS });
+	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 0, samplerSet, nri::BindPoint::GRAPHICS });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 1, textureSet, nri::BindPoint::GRAPHICS });
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *pipeline);
 	mFrameBuffer->mCore.CmdSetVertexBuffers(*mFrameBuffer->mCommandBuffer, 0, &vertexDesc, 1);
+	if (traceActive)
+	{
+		if (!mHasBoundViewport || !ViewportEquals(mLastBoundViewport, viewport)) mPerfTraceStats.viewportChanges++;
+		else mPerfTraceStats.viewportNoops++;
+		if (!mHasBoundScissor || !RectEquals(mLastBoundScissor, scissor)) mPerfTraceStats.scissorChanges++;
+		else mPerfTraceStats.scissorNoops++;
+		if (!mHasBoundConstants || std::memcmp(&mLastBoundConstants, &constants, sizeof(constants)) != 0) mPerfTraceStats.rootConstantChanges++;
+		else mPerfTraceStats.rootConstantNoops++;
+		if (!mHasBoundSamplerSet || mLastBoundSamplerSet != samplerSet) mPerfTraceStats.samplerSetChanges++;
+		else mPerfTraceStats.samplerSetNoops++;
+		if (!mHasBoundTextureSet || mLastBoundTextureSet != textureSet) mPerfTraceStats.textureSetChanges++;
+		else mPerfTraceStats.textureSetNoops++;
+		if (!mHasBoundPipeline || mLastBoundPipeline != pipeline) mPerfTraceStats.pipelineChanges++;
+		else mPerfTraceStats.pipelineNoops++;
+		if (!mHasBoundVertexBuffer ||
+			mLastBoundVertexBufferResource != vertexDesc.buffer ||
+			mLastBoundVertexOffset != vertexDesc.offset ||
+			mLastBoundVertexStride != vertexDesc.stride)
+		{
+			mPerfTraceStats.vertexBufferChanges++;
+		}
+		else
+		{
+			mPerfTraceStats.vertexBufferNoops++;
+		}
+	}
+	mLastBoundViewport = viewport;
+	mLastBoundScissor = scissor;
+	mLastBoundConstants = constants;
+	mLastBoundSamplerSet = samplerSet;
+	mLastBoundTextureSet = textureSet;
+	mLastBoundPipeline = pipeline;
+	mLastBoundVertexBufferResource = vertexDesc.buffer;
+	mLastBoundVertexOffset = vertexDesc.offset;
+	mLastBoundVertexStride = vertexDesc.stride;
+	mHasBoundViewport = true;
+	mHasBoundScissor = true;
+	mHasBoundConstants = true;
+	mHasBoundSamplerSet = true;
+	mHasBoundTextureSet = true;
+	mHasBoundPipeline = true;
+	mHasBoundVertexBuffer = true;
 	if (traceActive)
 	{
 		mPerfTraceStats.bindStateMs += I_msTimeF() - stageStartMs;
@@ -480,6 +560,22 @@ void NRIRenderState::Apply(int dt, bool indexed, int firstIndex, int count)
 		}
 		mFrameBuffer->mCore.CmdSetIndexBuffer(*mFrameBuffer->mCommandBuffer, *indexStream.buffer, indexStream.offset, nri::IndexType::UINT32);
 		mFrameBuffer->mCore.CmdDrawIndexed(*mFrameBuffer->mCommandBuffer, { (uint32_t)count, 1, (uint32_t)firstIndex, 0, 0 });
+		if (traceActive)
+		{
+			if (!mHasBoundIndexBuffer ||
+				mLastBoundIndexBufferResource != indexStream.buffer ||
+				mLastBoundIndexOffset != indexStream.offset)
+			{
+				mPerfTraceStats.indexBufferChanges++;
+			}
+			else
+			{
+				mPerfTraceStats.indexBufferNoops++;
+			}
+		}
+		mLastBoundIndexBufferResource = indexStream.buffer;
+		mLastBoundIndexOffset = indexStream.offset;
+		mHasBoundIndexBuffer = true;
 		if (traceActive)
 		{
 			mPerfTraceStats.drawCallMs += I_msTimeF() - stageStartMs;

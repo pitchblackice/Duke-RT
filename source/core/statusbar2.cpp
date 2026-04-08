@@ -38,6 +38,7 @@
 #include "build.h"
 
 #include "statusbar.h"
+#include "d_eventbase.h"
 #include "c_cvars.h"
 #include "c_dispatch.h"
 #include "c_console.h"
@@ -233,11 +234,14 @@ void UpdateStatusBar(SummaryInfo* info)
 
 	if (hud_size == Hud_Althud)
 	{
-		DrawAltHUD(info);
-		IFVIRTUALPTRNAME(StatusBar, NAME_RazeStatusBar, AltHUDOverlay)
 		{
-			VMValue params[] = { StatusBar, info };
-			VMCall(func, params, 2, nullptr, 0);
+			PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::Hud);
+			DrawAltHUD(info);
+			IFVIRTUALPTRNAME(StatusBar, NAME_RazeStatusBar, AltHUDOverlay)
+			{
+				VMValue params[] = { StatusBar, info };
+				VMCall(func, params, 2, nullptr, 0);
+			}
 		}
 		if (PerfLoopTraceActive())
 		{
@@ -253,6 +257,7 @@ void UpdateStatusBar(SummaryInfo* info)
 	}
 	IFVIRTUALPTRNAME(StatusBar, NAME_RazeStatusBar, UpdateStatusBar)
 	{
+		PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::Hud);
 		VMValue params[] = { StatusBar, info };
 		VMCall(func, params, 2, nullptr, 0);
 	}

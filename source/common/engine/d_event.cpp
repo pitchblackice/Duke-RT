@@ -71,9 +71,32 @@ CVAR(Bool, invertmousex, false,	CVAR_GLOBALCONFIG | CVAR_ARCHIVE);  // Invert mo
 static PerfLoopInputTraceStats perfLoopInputTraceStats;
 static PerfLoop2DProducerTraceStats perfLoop2DProducerTraceStats;
 static PerfLoopCameraTraceStats perfLoopCameraTraceStats;
+static PerfLoop2DTextLabel perfLoop2DCurrentTextLabel = PerfLoop2DTextLabel::Other;
 static bool perfLoopHasLastRenderAngles = false;
 static float perfLoopLastRenderYawDegrees = 0.0f;
 static float perfLoopLastRenderPitchDegrees = 0.0f;
+
+static PerfLoop2DTextTraceCounter& Get2DTextTraceCounter(PerfLoop2DTextLabel label)
+{
+	switch (label)
+	{
+	case PerfLoop2DTextLabel::ConsoleVersion:
+		return perfLoop2DProducerTraceStats.consoleVersionText;
+	case PerfLoop2DTextLabel::ConsoleBody:
+		return perfLoop2DProducerTraceStats.consoleBodyText;
+	case PerfLoop2DTextLabel::ConsoleCommandLine:
+		return perfLoop2DProducerTraceStats.consoleCommandLineText;
+	case PerfLoop2DTextLabel::Hud:
+		return perfLoop2DProducerTraceStats.hudText;
+	case PerfLoop2DTextLabel::Stats:
+		return perfLoop2DProducerTraceStats.statsText;
+	case PerfLoop2DTextLabel::Rate:
+		return perfLoop2DProducerTraceStats.rateText;
+	case PerfLoop2DTextLabel::Other:
+	default:
+		return perfLoop2DProducerTraceStats.otherText;
+	}
+}
 
 static float NormalizeAngleDeltaDegrees(float degrees)
 {
@@ -100,6 +123,7 @@ PerfLoopInputTraceStats PerfLoopTraceGetInputStats()
 void PerfLoopTraceReset2DProducerStats()
 {
 	perfLoop2DProducerTraceStats = {};
+	perfLoop2DCurrentTextLabel = PerfLoop2DTextLabel::Other;
 }
 
 PerfLoop2DProducerTraceStats PerfLoopTraceGet2DProducerStats()
@@ -347,6 +371,51 @@ void PerfLoopTraceNoteCrosshair2D(const PerfLoop2DProducerDelta& delta)
 		return;
 
 	perfLoop2DProducerTraceStats.crosshair = delta;
+}
+
+PerfLoop2DTextLabel PerfLoopTracePush2DTextLabel(PerfLoop2DTextLabel label)
+{
+	const auto previous = perfLoop2DCurrentTextLabel;
+	if (PerfLoopTraceActive())
+	{
+		perfLoop2DCurrentTextLabel = label;
+	}
+	return previous;
+}
+
+void PerfLoopTracePop2DTextLabel(PerfLoop2DTextLabel previous)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DCurrentTextLabel = previous;
+}
+
+void PerfLoopTraceNote2DTextDraw(uint32_t glyphs, uint32_t commands)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	auto& counter = Get2DTextTraceCounter(perfLoop2DCurrentTextLabel);
+	counter.calls++;
+	counter.glyphs += glyphs;
+	counter.commands += commands;
+}
+
+void PerfLoopTraceNoteConsoleVisibleLines(uint32_t visibleLines)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.consoleVisibleLines += visibleLines;
+}
+
+void PerfLoopTraceNoteConsoleBackgroundCommands(uint32_t commands)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.consoleBackgroundCommands += commands;
 }
 
 
