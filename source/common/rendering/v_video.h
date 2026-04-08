@@ -173,6 +173,14 @@ private:
 	int Width = 0;
 	int Height = 0;
 
+	struct Queued2DTextureRender
+	{
+		FGameTexture* texture = nullptr;
+		F2DDrawer* drawer = nullptr;
+	};
+
+	TArray<Queued2DTextureRender> mQueued2DTextureRenders;
+
 public:
 	// Hardware render state that needs to be exposed to the API independent part of the renderer. For ease of access this is stored in the base class.
 	int hwcaps = 0;								// Capability flags
@@ -294,6 +302,7 @@ public:
 	void SetClearColor(int color);
 	virtual int Backend() { return 0; }
 	virtual const char* DeviceName() const { return "Unknown"; }
+	virtual bool SupportsQueued2DTextureRenders() const { return false; }
 	virtual void AmbientOccludeScene(float m5) {}
 	virtual void FirstEye() {}
 	virtual void NextEye(int eyecount) {}
@@ -305,7 +314,10 @@ public:
 	virtual void CopyScreenToBuffer(int width, int height, uint8_t* buffer)	{ memset(buffer, 0, width* height); }
 	virtual bool FlipSavePic() const { return false; }
 	virtual void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc) {}
+	virtual void RenderTextureView(FGameTexture* tex, std::function<void(IntRect&)> renderFunc) {}
 	virtual void SnapshotCurrentViewToCanvas(FCanvasTexture* tex) {}
+	void Queue2DTextureRender(FGameTexture* tex, F2DDrawer* drawer);
+	void FlushQueued2DTextureRenders();
 	virtual void NotifyPathTracingCameraCut(const char* reason) {}
 	virtual bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const { return false; }
 	virtual bool RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal) { return false; }

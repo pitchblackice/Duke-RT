@@ -2024,6 +2024,8 @@ void NRIRenderDevice::Draw2D()
 		return;
 	}
 
+	FlushQueued2DTextureRenders();
+
 	struct Draw2DTraceStats
 	{
 		uint32_t commands = 0;
@@ -5623,6 +5625,37 @@ void NRIRenderDevice::RenderTextureView(FCanvasTexture* tex, std::function<void(
 	mActiveCanvasTexture = previousCanvasTexture;
 	mActiveCanvasSourceTexture = previousCanvasSourceTexture;
 	tex->SetUpdated(true);
+}
+
+void NRIRenderDevice::RenderTextureView(FGameTexture* tex, std::function<void(IntRect&)> renderFunc)
+{
+	if (!mInitialized || tex == nullptr || tex->GetTexture() == nullptr)
+	{
+		return;
+	}
+
+	FTexture* source = tex->GetTexture();
+	auto* hwTex = static_cast<NRIHardwareTexture*>(source->GetHardwareTexture(0, 0));
+	hwTex->EnsureCanvas(source);
+
+	NRITextureResource* previousTarget = mActiveTarget;
+	FCanvasTexture* previousCanvasTexture = mActiveCanvasTexture;
+	FTexture* previousCanvasSourceTexture = mActiveCanvasSourceTexture;
+	mRenderState->EndFrame();
+	mActiveTarget = &hwTex->GetResource();
+	mActiveCanvasTexture = nullptr;
+	mActiveCanvasSourceTexture = source;
+
+	IntRect bounds = {};
+	bounds.width = source->GetWidth();
+	bounds.height = source->GetHeight();
+	renderFunc(bounds);
+
+	mRenderState->EndFrame();
+	TransitionTexture(hwTex->GetResource(), NRIShaderResourceState());
+	mActiveTarget = previousTarget;
+	mActiveCanvasTexture = previousCanvasTexture;
+	mActiveCanvasSourceTexture = previousCanvasSourceTexture;
 }
 
 void NRIRenderDevice::SnapshotCurrentViewToCanvas(FCanvasTexture* tex)

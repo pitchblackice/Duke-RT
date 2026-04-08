@@ -61,6 +61,7 @@ void VkHardwareTexture::Reset()
 
 		mImage.Reset(fb);
 		mDepthStencil.Reset(fb);
+		mIsRenderTarget = false;
 	}
 }
 
@@ -110,6 +111,7 @@ void VkHardwareTexture::CreateImage(FTexture *tex, int translation, int flags)
 		FTextureBuffer texbuffer = tex->CreateTexBuffer(translation, flags | CTF_ProcessData);
 		bool indexed = flags & CTF_Indexed;
 		CreateTexture(texbuffer.mWidth, texbuffer.mHeight,indexed? 1 : 4, indexed? VK_FORMAT_R8_UNORM : VK_FORMAT_B8G8R8A8_UNORM, texbuffer.mBuffer, !indexed);
+		mIsRenderTarget = false;
 	}
 	else
 	{
@@ -132,7 +134,52 @@ void VkHardwareTexture::CreateImage(FTexture *tex, int translation, int flags)
 		VkImageTransition()
 			.AddImage(&mImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, true)
 			.Execute(fb->GetCommands()->GetTransferCommands());
+		mIsRenderTarget = true;
 	}
+}
+
+void VkHardwareTexture::EnsureRenderTarget(FTexture* tex)
+{
+	if (tex == nullptr)
+	{
+		return;
+	}
+
+	const int w = tex->GetWidth();
+	const int h = tex->GetHeight();
+	if (w <= 0 || h <= 0)
+	{
+		return;
+	}
+
+	if (mImage.Image &&
+		mImage.Image->width == w &&
+		mImage.Image->height == h &&
+		mIsRenderTarget)
+	{
+		return;
+	}
+
+	Reset();
+
+	VkFormat format = tex->IsHDR() ? VK_FORMAT_R32G32B32A32_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
+	mImage.Image = ImageBuilder()
+		.Format(format)
+		.Size(w, h)
+		.Usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+		.DebugName("VkHardwareTexture.mImage")
+		.Create(fb->device.get());
+
+	mImage.View = ImageViewBuilder()
+		.Image(mImage.Image.get(), format)
+		.DebugName("VkHardwareTexture.mImageView")
+		.Create(fb->device.get());
+
+	VkImageTransition()
+		.AddImage(&mImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, true)
+		.Execute(fb->GetCommands()->GetTransferCommands());
+
+	mIsRenderTarget = true;
 }
 
 void VkHardwareTexture::CreateTexture(int w, int h, int pixelsize, VkFormat format, const void *pixels, bool mipmap)
@@ -184,6 +231,8 @@ void VkHardwareTexture::CreateTexture(int w, int h, int pixelsize, VkFormat form
 	fb->GetCommands()->TransferDeleteList->Add(std::move(stagingBuffer));
 	if (fb->GetCommands()->TransferDeleteList->TotalSize > 64 * 1024 * 1024)
 		fb->GetCommands()->WaitForCommands(false, true);
+
+	mIsRenderTarget = false;
 }
 
 int VkHardwareTexture::GetMipLevels(int w, int h)
@@ -384,4 +433,3 @@ VulkanDescriptorSet* VkMaterial::GetDescriptorSet(const FMaterialState& state)
 	mDescriptorSets.emplace_back(clampmode, translationp, std::move(descriptor));
 	return mDescriptorSets.back().descriptor.get();
 }
-

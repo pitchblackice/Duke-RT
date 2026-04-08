@@ -39,6 +39,7 @@ public:
 	bool CompileNextShader() override;
 	int GetShaderCount() override;
 	int Backend() override { return 4; }
+	bool SupportsQueued2DTextureRenders() const override { return true; }
 	const char* DeviceName() const override;
 	void BeginFrame() override;
 	FRenderState* RenderState() override;
@@ -204,6 +205,7 @@ private:
 	void EndFrameAndPresent();
 	void LogD3D12FailureDiagnostics(const char* context);
 	void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc) override;
+	void RenderTextureView(FGameTexture* tex, std::function<void(IntRect&)> renderFunc) override;
 	void SnapshotCurrentViewToCanvas(FCanvasTexture* tex) override;
 	void CopyScreenToBuffer(int width, int height, uint8_t* buffer) override;
 	void TransitionTexture(NRITextureResource& texture, nri::AccessLayoutStage after);

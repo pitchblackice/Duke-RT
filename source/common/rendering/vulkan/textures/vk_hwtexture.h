@@ -41,6 +41,7 @@ public:
 
 	VkTextureImage *GetImage(FTexture *tex, int translation, int flags);
 	VkTextureImage *GetDepthStencil(FTexture *tex);
+	void EnsureRenderTarget(FTexture* tex);
 
 	VulkanRenderDevice* fb = nullptr;
 	std::list<VkHardwareTexture*>::iterator it;
@@ -53,6 +54,7 @@ private:
 
 	VkTextureImage mImage;
 	int mTexelsize = 4;
+	bool mIsRenderTarget = false;
 
 	VkTextureImage mDepthStencil;
 

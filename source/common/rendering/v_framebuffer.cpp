@@ -50,6 +50,7 @@
 #include "flatvertices.h"
 #include "version.h"
 #include "hw_material.h"
+#include "hwrenderer/data/hw_renderstate.h"
 
 #include <chrono>
 #include <thread>
@@ -77,6 +78,63 @@ DFrameBuffer::DFrameBuffer (int width, int height)
 
 DFrameBuffer::~DFrameBuffer()
 {
+}
+
+void DFrameBuffer::Queue2DTextureRender(FGameTexture* tex, F2DDrawer* drawer)
+{
+	if (tex == nullptr || drawer == nullptr)
+	{
+		return;
+	}
+
+	mQueued2DTextureRenders.Push({ tex, drawer });
+}
+
+void DFrameBuffer::FlushQueued2DTextureRenders()
+{
+	if (mQueued2DTextureRenders.Size() == 0)
+	{
+		return;
+	}
+
+	FRenderState* state = RenderState();
+	if (state == nullptr)
+	{
+		mQueued2DTextureRenders.Clear();
+		return;
+	}
+
+	float savedClearColor[4] =
+	{
+		mSceneClearColor[0],
+		mSceneClearColor[1],
+		mSceneClearColor[2],
+		mSceneClearColor[3]
+	};
+	mSceneClearColor[0] = 0.0f;
+	mSceneClearColor[1] = 0.0f;
+	mSceneClearColor[2] = 0.0f;
+	mSceneClearColor[3] = 0.0f;
+
+	for (auto& request : mQueued2DTextureRenders)
+	{
+		if (request.texture == nullptr || request.drawer == nullptr)
+		{
+			continue;
+		}
+
+		RenderTextureView(request.texture, [&](IntRect&)
+		{
+			state->Clear(CT_Color);
+			::Draw2D(request.drawer, *state, 0, 0, request.drawer->GetWidth(), request.drawer->GetHeight());
+		});
+	}
+
+	mSceneClearColor[0] = savedClearColor[0];
+	mSceneClearColor[1] = savedClearColor[1];
+	mSceneClearColor[2] = savedClearColor[2];
+	mSceneClearColor[3] = savedClearColor[3];
+	mQueued2DTextureRenders.Clear();
 }
 
 void DFrameBuffer::SetSize(int width, int height)
@@ -319,4 +377,3 @@ DEFINE_ACTION_FUNCTION(_Screen, PaletteColor)
 	else index = GPalette.BaseColors[index];
 	ACTION_RETURN_INT(index);
 }
-
