@@ -15038,6 +15038,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			nri_scene::PTMapChunkMutationReason_SectorDirty |
 			nri_scene::PTMapChunkMutationReason_SectionDirty |
 			nri_scene::PTMapChunkMutationReason_Dragged;
+		const uint32_t replacementRefreshReasonMask =
+			replacementDelta.reasonMask & ~nri_scene::PTMapChunkMutationReason_Dragged;
 		const bool replacementViewChanged =
 			(previousReasonMask & replacementViewReasonMask) !=
 			(analysis.reasonMask & replacementViewReasonMask);
@@ -15250,7 +15252,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				const bool forceReplacementMaterialRefresh =
 					analyzedReplacementDelta &&
-					replacementDelta.reasonMask != nri_scene::PTMapChunkMutationReason_None;
+					replacementRefreshReasonMask != nri_scene::PTMapChunkMutationReason_None;
 				if (!prepareLiveChunkView())
 				{
 					return false;
@@ -15280,7 +15282,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				if (forceReplacementMaterialRefresh)
 				{
 					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReplacementDeltaChunks++;
-					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr |= replacementDelta.reasonMask;
+					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr |= replacementRefreshReasonMask;
 				}
 				if (forceHardwareCanvasRefresh)
 				{
