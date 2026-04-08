@@ -1126,6 +1126,7 @@ private:
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
 	void TrackLiveSceneTextureResource(NRITextureResource& resource);
+	nri::Format ResolveFinalSceneFormat() const;
 	void ResetPerfTraceStats();
 	void UpdateRuntimeMutationRebaselinePerfStats();
 	void WaitForCommandsTracked();
@@ -1272,7 +1273,7 @@ private:
 	uint32_t mTargetHeight = 0;
 	int32_t mSceneLeft = 0;
 	int32_t mSceneTop = 0;
-	nri::Format mOutputFormat = nri::Format::UNKNOWN;
+	nri::Format mFinalSceneFormat = nri::Format::UNKNOWN;
 	float mCurrentCameraPos[3] = {};
 	float mCurrentCameraForward[3] = {};
 	float mCurrentCameraRight[3] = {};

@@ -7918,10 +7918,12 @@ void NRIRenderer::PrintStatus() const
 	const NRITextureResource& upscalerDepth = GetFrameTexture(FrameTextureSlot::UpscalerDepth);
 	const NRITextureResource& vendorOutput = GetFrameTexture(FrameTextureSlot::VendorOutput);
 	const NRITextureResource& postSharpenOutput = GetFrameTexture(FrameTextureSlot::PostSharpenOutput);
+	const NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
 	const auto& frameGenPolicy = mFrameBuffer->mFrameGeneration.GetPolicy();
 	const auto& frameGenPresentContract = mFrameBuffer->mFrameGeneration.GetPresentContract();
 	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
 	const NRIPresentRouteInfo presentRoute = ResolvePresentRouteInfo(GetEffectivePtDebugMode(), !!nri_ptbootstrap);
+	const nri::Format expectedFinalFormat = ResolveFinalSceneFormat();
 	const bool hasFrameGenDesc = mFrameBuffer->mFrameGeneration.HasFrameDesc();
 	const auto& frameGenDesc = mFrameBuffer->mFrameGeneration.GetFrameDesc();
 	const auto& frameGenAudit = mFrameBuffer->mFrameGeneration.GetInputAudit();
@@ -8057,6 +8059,13 @@ void NRIRenderer::PrintStatus() const
 		frameGenPresentContract.maxLuminance,
 		frameGenPresentContract.hdrPaperWhiteScale,
 		frameGenPresentContract.resolvedReason);
+	Printf("NRI PT final surface: expected=%s allocated=%s contract=%s active=%s size=%ux%u\n",
+		NRIFrameGenerationContext::GetNriFormatName(expectedFinalFormat),
+		NRIFrameGenerationContext::GetNriFormatName(final.format),
+		NRIFrameGenerationContext::GetNriFormatName(frameGenPresentContract.resolvedTextureFormat),
+		NRIFrameGenerationContext::GetNriFormatName(frameGenPresentContract.activePresentTargetFormat),
+		final.width,
+		final.height);
 	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s swapctx=%s bridge=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s fg_dispatch=%s ui_reg=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu fg:%llu frames=%llu/%llu query=%s/%s create=%s/%s config=%s/%s prepare=%s dispatch=%s vram=fg:%s:%llu/%llu sc:%s:%llu/%llu resets=%llu last_reset=%s present=%s/%s count=%llu reason=%s\n",
 		frameGenProvider.runtimeLoaded ? "yes" : "no",
 		frameGenProvider.runtimeFunctionsLoaded ? "yes" : "no",
@@ -13722,6 +13731,27 @@ void NRIRenderer::TrackLiveSceneTextureResource(NRITextureResource& resource)
 	mLiveSceneTextureResources.push_back(&resource);
 }
 
+nri::Format NRIRenderer::ResolveFinalSceneFormat() const
+{
+	if (mFrameBuffer == nullptr)
+	{
+		return nri::Format::BGRA8_UNORM;
+	}
+
+	const NRIFrameGenerationPresentContract& presentContract = mFrameBuffer->mFrameGeneration.GetPresentContract();
+	if (presentContract.resolvedTextureFormat != nri::Format::UNKNOWN)
+	{
+		return presentContract.resolvedTextureFormat;
+	}
+
+	if (mFrameBuffer->mResolvedSwapChainTextureFormat != nri::Format::UNKNOWN)
+	{
+		return mFrameBuffer->mResolvedSwapChainTextureFormat;
+	}
+
+	return nri::Format::BGRA8_UNORM;
+}
+
 bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
 {
 	Clocker clock(NriPTFrameResources);
@@ -13741,13 +13771,15 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(mainUpscalerKind, requestedUpscalerMode);
 	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
 	const float renderScale = ResolveRenderScaleForMain(mainUpscalerKind, requestedUpscalerMode, requestedRenderScale);
+	const NRIFrameGenerationPresentContract& presentContract = mFrameBuffer->mFrameGeneration.GetPresentContract();
 
 	const uint32_t renderWidth = std::max(1u, (uint32_t)std::lround((double)outputWidth * renderScale));
 	const uint32_t renderHeight = std::max(1u, (uint32_t)std::lround((double)outputHeight * renderScale));
-	const nri::Format outputFormat =
+	const nri::Format finalFormat = ResolveFinalSceneFormat();
+	const nri::Format activeTargetFormat =
 		(mFrameBuffer->mActiveTarget != nullptr && mFrameBuffer->mActiveTarget->format != nri::Format::UNKNOWN)
 		? mFrameBuffer->mActiveTarget->format
-		: nri::Format::BGRA8_UNORM;
+		: nri::Format::UNKNOWN;
 
 	const bool upToDate =
 		mRenderWidth == renderWidth &&
@@ -13758,7 +13790,7 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		mTargetHeight == targetHeight &&
 		mSceneLeft == sceneLeft &&
 		mSceneTop == sceneTop &&
-		mOutputFormat == outputFormat &&
+		mFinalSceneFormat == finalFormat &&
 		GetFrameTexture(FrameTextureSlot::Final).texture != nullptr;
 
 	if (upToDate)
@@ -13786,9 +13818,9 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	mTargetHeight = targetHeight;
 	mSceneLeft = sceneLeft;
 	mSceneTop = sceneTop;
-	mOutputFormat = outputFormat;
+	mFinalSceneFormat = finalFormat;
 	RequestHistoryReset(dimensionsChanged ? "resize" : "frame-resources");
-	Printf("NRI PT frame resources: main=%s policy=%s requested_mode=%s resolved_mode=%s requested_render_scale=%.3f resolved_render_scale=%.3f render=%ux%u output=%ux%u jitter=%s phases=%u\n",
+	Printf("NRI PT frame resources: main=%s policy=%s requested_mode=%s resolved_mode=%s requested_render_scale=%.3f resolved_render_scale=%.3f render=%ux%u output=%ux%u final=%s contract=%s active=%s jitter=%s phases=%u\n",
 		GetMainUpscalerName(mainUpscalerKind),
 		GetRenderResolutionPolicyName(mainUpscalerKind),
 		GetUpscalerModeName(requestedUpscalerMode),
@@ -13799,6 +13831,9 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		renderHeight,
 		outputWidth,
 		outputHeight,
+		NRIFrameGenerationContext::GetNriFormatName(finalFormat),
+		NRIFrameGenerationContext::GetNriFormatName(presentContract.resolvedTextureFormat),
+		NRIFrameGenerationContext::GetNriFormatName(activeTargetFormat),
 		(mainUpscalerKind == NRIMainUpscalerKind::DLSR || mainUpscalerKind == NRIMainUpscalerKind::DLRR) ? "upscaler" : (ShouldRunAppTaa(mainUpscalerKind) ? "taa" : "off"),
 		(mainUpscalerKind == NRIMainUpscalerKind::DLSR || mainUpscalerKind == NRIMainUpscalerKind::DLRR) ? GetUpscalerJitterPhaseCount(resolvedUpscalerMode) : NRI_TAA_JITTER_PHASE_COUNT);
 
@@ -13808,7 +13843,6 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	const nri::Format rrGuideAlbedoFormat = nri::Format::R10_G10_B10_A2_UNORM;
 	const nri::Format rrGuideSpecHitDistanceFormat = nri::Format::R16_SFLOAT;
 	const nri::Format rrGuideNormalRoughnessFormat = nri::Format::RGBA16_SFLOAT;
-	const nri::Format finalFormat = outputFormat;
 
 	return
 		CreateFrameTexture(FrameTextureSlot::ViewZ, renderWidth, renderHeight, colorFormat) &&
@@ -19116,7 +19150,7 @@ void NRIRenderer::DestroyFrameTextures()
 	mTargetHeight = 0;
 	mSceneLeft = 0;
 	mSceneTop = 0;
-	mOutputFormat = nri::Format::UNKNOWN;
+	mFinalSceneFormat = nri::Format::UNKNOWN;
 }
 
 void NRIRenderer::DestroySceneBuffers()
