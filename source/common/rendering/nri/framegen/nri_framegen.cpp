@@ -524,9 +524,10 @@ bool NRIFrameGenerationContext::ShouldUsePresentBridge() const
 {
 	return
 		IsPresentBridgeActive() &&
-		mPolicy.requestedEnabled &&
-		mPolicy.requestedProvider == NRIFrameGenerationProvider::FSR3 &&
-		mPolicy.windowModeSupported;
+		mProviderState.presentBridgeReady &&
+		mPresentContract.proxyAllowed &&
+		mPolicy.resolvedEnabled &&
+		mPolicy.resolvedProvider == NRIFrameGenerationProvider::FSR3;
 }
 
 #ifdef _WIN32
@@ -543,6 +544,7 @@ void NRIFrameGenerationContext::Initialize(const NRIRenderDevice& frameBuffer)
 	ResetLowLatencyState();
 	ResetProviderState();
 	EnsureProviderRuntime(frameBuffer);
+	RefreshPolicy(frameBuffer, false);
 	EnsureProviderPresentBridge(frameBuffer);
 	RefreshPolicy(frameBuffer, true);
 }
@@ -564,8 +566,8 @@ void NRIFrameGenerationContext::Shutdown()
 
 void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer, bool logChanges)
 {
-	const NRIFrameGenerationPolicy newPolicy = BuildPolicy(frameBuffer);
 	const NRIFrameGenerationPresentContract newPresentContract = BuildPresentContract(frameBuffer);
+	const NRIFrameGenerationPolicy newPolicy = BuildPolicy(frameBuffer, newPresentContract);
 	const bool changed = !ArePoliciesEquivalent(mPolicy, newPolicy);
 	mPolicy = newPolicy;
 	mPresentContract = newPresentContract;
@@ -608,10 +610,9 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 	mHasLoggedPolicy = true;
 }
 
-NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderDevice& frameBuffer) const
+NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationPresentContract& presentContract) const
 {
 	NRIFrameGenerationPolicy policy = {};
-	const NRIPTOutputPolicy outputPolicy = frameBuffer.GetPathTracingOutputPolicy();
 	policy.initialized = true;
 	policy.requestedEnabled = !!nri_framegen;
 	policy.requestedProvider = GetRequestedProvider();
@@ -619,8 +620,8 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 	policy.requestedAsync = !!nri_framegenasync;
 	policy.requestedLowLatency = !!nri_framegenlatency;
 	policy.resolvedUiMode = ResolveUiMode(policy.requestedUiMode);
-	policy.requestedOutputMode = outputPolicy.requestedMode;
-	policy.resolvedOutputMode = outputPolicy.resolvedMode;
+	policy.requestedOutputMode = presentContract.requestedOutputMode;
+	policy.resolvedOutputMode = presentContract.resolvedOutputMode;
 	policy.outputContractScope = "d3d12-windowed-sdr";
 	policy.swapChainReady = mSwapChainReady;
 	policy.fullscreenActive = frameBuffer.IsFullscreenModeActive();
@@ -682,19 +683,11 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 		return policy;
 	}
 
-	if (policy.requestedOutputMode != NRIPTOutputMode::SDR)
+	if (!presentContract.proxyAllowed)
 	{
 		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
 		policy.resolvedOutputContract = NRIFrameGenerationOutputContract::Unsupported;
-		policy.resolvedReason = "requested-output-not-sdr";
-		return policy;
-	}
-
-	if (policy.resolvedOutputMode != NRIPTOutputMode::SDR)
-	{
-		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
-		policy.resolvedOutputContract = NRIFrameGenerationOutputContract::Unsupported;
-		policy.resolvedReason = "resolved-output-not-sdr";
+		policy.resolvedReason = presentContract.resolvedReason;
 		return policy;
 	}
 
@@ -857,6 +850,7 @@ void NRIFrameGenerationContext::OnSwapChainCreated(const NRIRenderDevice& frameB
 	mSwapChainReady = true;
 	ResetLowLatencyState();
 	EnsureProviderRuntime(frameBuffer);
+	RefreshPolicy(frameBuffer, false);
 	EnsureProviderPresentBridge(frameBuffer);
 	RefreshPolicy(frameBuffer, false);
 	ConfigureLowLatencyMode(frameBuffer);
@@ -875,6 +869,7 @@ void NRIFrameGenerationContext::OnSwapChainDestroyed(const NRIRenderDevice& fram
 void NRIFrameGenerationContext::BeginFrame(const NRIRenderDevice& frameBuffer)
 {
 	EnsureProviderRuntime(frameBuffer);
+	RefreshPolicy(frameBuffer, false);
 	EnsureProviderPresentBridge(frameBuffer);
 	RefreshPolicy(frameBuffer, true);
 	mLowLatencyState.sleepInvoked = false;
@@ -1371,7 +1366,14 @@ bool NRIFrameGenerationContext::EnsureProviderPresentBridge(const NRIRenderDevic
 		return false;
 	}
 
-	const NRIFrameGenerationPresentContract presentContract = BuildPresentContract(frameBuffer);
+	if (!mPresentContract.initialized)
+	{
+		std::strncpy(mProviderState.lastStatusReason, "present-contract-uninitialized", std::size(mProviderState.lastStatusReason) - 1u);
+		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		return false;
+	}
+
+	const NRIFrameGenerationPresentContract& presentContract = mPresentContract;
 	if (!presentContract.proxyAllowed)
 	{
 		CopyString(mProviderState.lastStatusReason, std::size(mProviderState.lastStatusReason), presentContract.resolvedReason);
@@ -1643,10 +1645,16 @@ void NRIFrameGenerationContext::ConfigureAndPrepareProvider(const NRIRenderDevic
 	mProviderState.frameGenerationDispatchedThisFrame = false;
 	mProviderState.uiResourceRegisteredThisFrame = false;
 
-	if (!mInitialized || !mPolicy.requestedEnabled || mPolicy.requestedProvider != NRIFrameGenerationProvider::FSR3)
+	if (!mInitialized || !mPolicy.resolvedEnabled || mPolicy.resolvedProvider != NRIFrameGenerationProvider::FSR3)
 	{
-		std::strncpy(mProviderState.lastStatusReason, "provider-not-requested", std::size(mProviderState.lastStatusReason) - 1u);
-		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
+		CopyString(mProviderState.lastStatusReason, std::size(mProviderState.lastStatusReason), mPolicy.resolvedReason);
+		return;
+	}
+
+	if (!mPresentContract.initialized || !mPresentContract.proxyAllowed)
+	{
+		CopyString(mProviderState.lastStatusReason, std::size(mProviderState.lastStatusReason),
+			mPresentContract.initialized ? mPresentContract.resolvedReason : "present-contract-uninitialized");
 		return;
 	}
 
@@ -1695,8 +1703,8 @@ void NRIFrameGenerationContext::ConfigureAndPrepareProvider(const NRIRenderDevic
 	const auto configure = reinterpret_cast<PfnFfxConfigure>(mFfxConfigureFn);
 	const auto query = reinterpret_cast<PfnFfxQuery>(mFfxQueryFn);
 	const auto dispatch = reinterpret_cast<PfnFfxDispatch>(mFfxDispatchFn);
-	const bool usePresentBridge = IsPresentBridgeActive();
-	const NRIFrameGenerationPresentContract presentContract = BuildPresentContract(frameBuffer);
+	const bool usePresentBridge = ShouldUsePresentBridge();
+	const NRIFrameGenerationPresentContract& presentContract = mPresentContract;
 	const uint32_t frameGenFlags = usePresentBridge ? 0u : NRI_FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY;
 
 	ffxConfigureDescFrameGeneration configureDesc = {};

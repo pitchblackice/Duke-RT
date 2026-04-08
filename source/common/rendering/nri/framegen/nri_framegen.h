@@ -325,7 +325,7 @@ public:
 	static const char* GetPresentResultName(nri::Result result);
 
 private:
-	NRIFrameGenerationPolicy BuildPolicy(const NRIRenderDevice& frameBuffer) const;
+	NRIFrameGenerationPolicy BuildPolicy(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationPresentContract& presentContract) const;
 	NRIFrameGenerationPresentContract BuildPresentContract(const NRIRenderDevice& frameBuffer) const;
 	NRIFrameGenerationInputAudit BuildInputAudit(const NRIFrameGenerationFrameDesc& desc) const;
 	bool IsLowLatencyOperational(const NRIRenderDevice& frameBuffer) const;
