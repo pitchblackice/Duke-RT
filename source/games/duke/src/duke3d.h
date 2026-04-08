@@ -58,7 +58,6 @@ struct GameInterface : public ::GameInterface
 	void LeavePortal(DCoreActor* viewer, int type) override;
 	void SetMirrorPlayerVisibilityCaptureOverride(bool enabled) override;
 	bool GetMirrorPlayerVisibilityCaptureOverride() const override;
-	bool IsPathTracingViewscreenActor(const DCoreActor* actor) const override;
 	bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) override;
 	bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) override;
 	bool GetNightVisionState(RuntimeNightVisionState* state) override;

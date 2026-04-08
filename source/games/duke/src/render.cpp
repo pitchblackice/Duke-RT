@@ -159,34 +159,6 @@ bool GameInterface::GetMirrorPlayerVisibilityCaptureOverride() const
 	return IsMirrorPlayerVisibilityCaptureActive();
 }
 
-bool GameInterface::IsPathTracingViewscreenActor(const DCoreActor* actor) const
-{
-	if (actor == nullptr)
-	{
-		return false;
-	}
-
-	auto dukeActor = const_cast<DDukeActor*>(static_cast<const DDukeActor*>(actor));
-	const FTextureID spriteTexture = dukeActor->spr.spritetexture();
-	const bool isViewscreenTile =
-		spriteTexture == tileGetTextureID(VIEWSCREEN_DUKE) ||
-		spriteTexture == tileGetTextureID(VIEWSCREEN_RR);
-	if (!isViewscreenTile)
-	{
-		return false;
-	}
-
-	// Only pin PT to VIEWSCR while the monitor actor is actually carrying a live
-	// camera owner. Idle monitor walls should continue using their animated wall
-	// textures instead of an empty canvas.
-	if (dukeActor->GetOwner() != nullptr)
-	{
-		return true;
-	}
-
-	return camsprite != nullptr && actor == camsprite && camsprite->GetOwner() != nullptr;
-}
-
 bool GameInterface::GetGeoEffect(GeoEffect* eff, sectortype* viewsector)
 {
 	if (isRR() && viewsector->lotag == 848)

@@ -10,7 +10,6 @@
 #include "model_kvx.h"
 #include "skyboxtexture.h"
 #include "gametexture.h"
-#include "gamestruct.h"
 #include "texturemanager.h"
 #include "textures.h"
 #include "v_video.h"
@@ -976,33 +975,6 @@ namespace
 		}
 	}
 
-	FGameTexture* ResolveLiveDrawListWallTexture(const HWWall& wall)
-	{
-		if (wall.Sprite == nullptr || wall.Sprite->ownerActor == nullptr)
-		{
-			return wall.texture;
-		}
-
-		if (gi != nullptr && gi->IsPathTracingViewscreenActor(wall.Sprite->ownerActor))
-		{
-			if (FGameTexture* viewscreen = TexMan.FindGameTexture("VIEWSCR", ETextureType::Any))
-			{
-				return viewscreen;
-			}
-		}
-
-		const auto& actor = *wall.Sprite->ownerActor;
-		if (actor.dispictex.isValid())
-		{
-			if (FGameTexture* liveTexture = TexMan.GetGameTexture(actor.dispictex))
-			{
-				return liveTexture;
-			}
-		}
-
-		return wall.texture;
-	}
-
 	void CaptureWalls(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats, SceneView& outView)
 	{
 		for (auto* wall : list.walls)
@@ -1036,8 +1008,7 @@ namespace
 			{
 				extraFlags |= MaterialFlag_AlphaClip;
 			}
-			FGameTexture* capturedTexture = ResolveLiveDrawListWallTexture(*wall);
-			surface.material = MakeMaterialRef(capturedTexture, wall->palette, wall->shade, wall->alpha, extraFlags);
+			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, extraFlags);
 			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::DrawListWall, drawListType, GetOwnerActorIndex(*wall), surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
 			surface.vertices.reserve(wall->vertcount);
