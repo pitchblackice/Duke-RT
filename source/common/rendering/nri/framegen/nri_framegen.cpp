@@ -327,28 +327,6 @@ namespace
 			a.resolvedLowLatency == b.resolvedLowLatency;
 	}
 
-	static bool ArePresentContractsEquivalent(const NRIFrameGenerationPresentContract& a, const NRIFrameGenerationPresentContract& b)
-	{
-		return
-			a.initialized == b.initialized &&
-			a.proxyAllowed == b.proxyAllowed &&
-			a.usesHdrSwapChain == b.usesHdrSwapChain &&
-			a.resolvedDxgiFormatValid == b.resolvedDxgiFormatValid &&
-			a.activePresentTargetDxgiFormatValid == b.activePresentTargetDxgiFormatValid &&
-			a.requestedOutputMode == b.requestedOutputMode &&
-			a.resolvedOutputMode == b.resolvedOutputMode &&
-			a.createdSwapChainFormat == b.createdSwapChainFormat &&
-			a.resolvedTextureFormat == b.resolvedTextureFormat &&
-			a.activePresentTargetFormat == b.activePresentTargetFormat &&
-			a.resolvedDxgiFormat == b.resolvedDxgiFormat &&
-			a.activePresentTargetDxgiFormat == b.activePresentTargetDxgiFormat &&
-			a.transferFunction == b.transferFunction &&
-			a.minLuminance == b.minLuminance &&
-			a.maxLuminance == b.maxLuminance &&
-			a.hdrPaperWhiteScale == b.hdrPaperWhiteScale &&
-			a.resolvedReason == b.resolvedReason;
-	}
-
 }
 
 const char* NRIFrameGenerationContext::GetProviderName(NRIFrameGenerationProvider provider)
@@ -588,9 +566,7 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 {
 	const NRIFrameGenerationPolicy newPolicy = BuildPolicy(frameBuffer);
 	const NRIFrameGenerationPresentContract newPresentContract = BuildPresentContract(frameBuffer);
-	const bool changed =
-		!ArePoliciesEquivalent(mPolicy, newPolicy) ||
-		!ArePresentContractsEquivalent(mPresentContract, newPresentContract);
+	const bool changed = !ArePoliciesEquivalent(mPolicy, newPolicy);
 	mPolicy = newPolicy;
 	mPresentContract = newPresentContract;
 	mLowLatencyState.interfaceAvailable = mPolicy.lowLatencyInterfaceAvailable;
@@ -627,21 +603,6 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 			GetAvailabilityName(mPolicy.waitableSwapChainAvailable),
 			GetAvailabilityName(mPolicy.providerRuntimeSupported),
 			mPolicy.resolvedReason);
-		Printf("NRI frame generation present contract: output=%s->%s proxy=%s hdr_swapchain=%s swapchain=%s texture=%s active=%s dxgi=%s active_dxgi=%s transfer=%s luminance=%.3f..%.3f hdr_scale=%.3f reason=%s\n",
-			GetNRIPTOutputModeName(mPresentContract.requestedOutputMode),
-			GetNRIPTOutputModeName(mPresentContract.resolvedOutputMode),
-			GetAvailabilityName(mPresentContract.proxyAllowed),
-			GetAvailabilityName(mPresentContract.usesHdrSwapChain),
-			GetSwapChainFormatName(mPresentContract.createdSwapChainFormat),
-			GetNriFormatName(mPresentContract.resolvedTextureFormat),
-			GetNriFormatName(mPresentContract.activePresentTargetFormat),
-			mPresentContract.resolvedDxgiFormatValid ? GetDxgiFormatName(mPresentContract.resolvedDxgiFormat) : "unknown",
-			mPresentContract.activePresentTargetDxgiFormatValid ? GetDxgiFormatName(mPresentContract.activePresentTargetDxgiFormat) : "unknown",
-			GetPresentTransferFunctionName(mPresentContract.transferFunction),
-			mPresentContract.minLuminance,
-			mPresentContract.maxLuminance,
-			mPresentContract.hdrPaperWhiteScale,
-			mPresentContract.resolvedReason);
 	}
 
 	mHasLoggedPolicy = true;
