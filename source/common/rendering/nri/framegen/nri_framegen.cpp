@@ -312,11 +312,15 @@ namespace
 			a.nativeSwapChainAvailable == b.nativeSwapChainAvailable &&
 			a.shaderModel == b.shaderModel &&
 			a.selectedApiName == b.selectedApiName &&
+			a.outputContractScope == b.outputContractScope &&
 			a.resolvedReason == b.resolvedReason &&
 			a.requestedProvider == b.requestedProvider &&
 			a.resolvedProvider == b.resolvedProvider &&
 			a.requestedUiMode == b.requestedUiMode &&
 			a.resolvedUiMode == b.resolvedUiMode &&
+			a.requestedOutputMode == b.requestedOutputMode &&
+			a.resolvedOutputMode == b.resolvedOutputMode &&
+			a.resolvedOutputContract == b.resolvedOutputContract &&
 			a.requestedAsync == b.requestedAsync &&
 			a.resolvedAsync == b.resolvedAsync &&
 			a.requestedLowLatency == b.requestedLowLatency &&
@@ -398,6 +402,17 @@ const char* NRIFrameGenerationContext::GetAdapterRequirementName(NRIFrameGenerat
 	case NRIFrameGenerationAdapterRequirement::MotionVectors: return "motion";
 	case NRIFrameGenerationAdapterRequirement::Depth: return "depth";
 	case NRIFrameGenerationAdapterRequirement::MotionAndDepth: return "motion+depth";
+	}
+}
+
+const char* NRIFrameGenerationContext::GetOutputContractName(NRIFrameGenerationOutputContract contract)
+{
+	switch (contract)
+	{
+	default:
+	case NRIFrameGenerationOutputContract::None: return "none";
+	case NRIFrameGenerationOutputContract::SDRDisplayReady: return "sdr-display-ready";
+	case NRIFrameGenerationOutputContract::Unsupported: return "unsupported";
 	}
 }
 
@@ -497,10 +512,14 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 
 	if (logChanges && (!mHasLoggedPolicy || changed))
 	{
-		Printf("NRI frame generation policy: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
+		Printf("NRI frame generation policy: requested=%s provider=%s resolved=%s output=%s->%s contract=%s scope=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
 			mPolicy.requestedEnabled ? "on" : "off",
 			GetProviderName(mPolicy.requestedProvider),
 			GetProviderName(mPolicy.resolvedProvider),
+			GetNRIPTOutputModeName(mPolicy.requestedOutputMode),
+			GetNRIPTOutputModeName(mPolicy.resolvedOutputMode),
+			GetOutputContractName(mPolicy.resolvedOutputContract),
+			mPolicy.outputContractScope,
 			mPolicy.selectedApiName,
 			mPolicy.shaderModel / 10u,
 			mPolicy.shaderModel % 10u,
@@ -530,6 +549,7 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderDevice& frameBuffer) const
 {
 	NRIFrameGenerationPolicy policy = {};
+	const NRIPTOutputPolicy outputPolicy = frameBuffer.GetPathTracingOutputPolicy();
 	policy.initialized = true;
 	policy.requestedEnabled = !!nri_framegen;
 	policy.requestedProvider = GetRequestedProvider();
@@ -537,6 +557,9 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 	policy.requestedAsync = !!nri_framegenasync;
 	policy.requestedLowLatency = !!nri_framegenlatency;
 	policy.resolvedUiMode = ResolveUiMode(policy.requestedUiMode);
+	policy.requestedOutputMode = outputPolicy.requestedMode;
+	policy.resolvedOutputMode = outputPolicy.resolvedMode;
+	policy.outputContractScope = "d3d12-windowed-sdr";
 	policy.swapChainReady = mSwapChainReady;
 	policy.fullscreenActive = frameBuffer.IsFullscreenModeActive();
 	policy.windowModeSupported = !policy.fullscreenActive;
@@ -596,6 +619,24 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 		policy.resolvedReason = "device-unavailable";
 		return policy;
 	}
+
+	if (policy.requestedOutputMode != NRIPTOutputMode::SDR)
+	{
+		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
+		policy.resolvedOutputContract = NRIFrameGenerationOutputContract::Unsupported;
+		policy.resolvedReason = "requested-output-not-sdr";
+		return policy;
+	}
+
+	if (policy.resolvedOutputMode != NRIPTOutputMode::SDR)
+	{
+		policy.resolvedProvider = NRIFrameGenerationProvider::Off;
+		policy.resolvedOutputContract = NRIFrameGenerationOutputContract::Unsupported;
+		policy.resolvedReason = "resolved-output-not-sdr";
+		return policy;
+	}
+
+	policy.resolvedOutputContract = NRIFrameGenerationOutputContract::SDRDisplayReady;
 
 	if (!policy.apiSupported)
 	{

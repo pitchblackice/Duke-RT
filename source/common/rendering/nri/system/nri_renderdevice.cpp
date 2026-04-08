@@ -3218,10 +3218,14 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLRR) ? "yes" : "no",
 		(int)nri_ptportaldepth);
 	const auto& frameGenPolicy = mFrameGeneration.GetPolicy();
-	Printf("NRI PT framegen caps: requested=%s provider=%s resolved=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
+	Printf("NRI PT framegen caps: requested=%s provider=%s resolved=%s output=%s->%s contract=%s scope=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
 		frameGenPolicy.requestedEnabled ? "on" : "off",
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.resolvedProvider),
+		GetNRIPTOutputModeName(frameGenPolicy.requestedOutputMode),
+		GetNRIPTOutputModeName(frameGenPolicy.resolvedOutputMode),
+		NRIFrameGenerationContext::GetOutputContractName(frameGenPolicy.resolvedOutputContract),
+		frameGenPolicy.outputContractScope,
 		frameGenPolicy.selectedApiName,
 		frameGenPolicy.shaderModel / 10u,
 		frameGenPolicy.shaderModel % 10u,

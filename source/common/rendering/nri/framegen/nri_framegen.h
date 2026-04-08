@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../nri_output.h"
 #include "../renderer/nri_resources.h"
 #include "../system/nri_local.h"
 
@@ -58,6 +59,13 @@ enum class NRIFrameGenerationAdapterRequirement : uint32_t
 	MotionAndDepth = 3,
 };
 
+enum class NRIFrameGenerationOutputContract : uint32_t
+{
+	None = 0,
+	SDRDisplayReady = 1,
+	Unsupported = 2,
+};
+
 struct NRIFrameGenerationRect
 {
 	uint32_t left = 0;
@@ -87,11 +95,15 @@ struct NRIFrameGenerationPolicy
 	bool nativeSwapChainAvailable = false;
 	uint32_t shaderModel = 0;
 	const char* selectedApiName = "unknown";
+	const char* outputContractScope = "unknown";
 	const char* resolvedReason = "not-initialized";
 	NRIFrameGenerationProvider requestedProvider = NRIFrameGenerationProvider::Off;
 	NRIFrameGenerationProvider resolvedProvider = NRIFrameGenerationProvider::Off;
 	NRIFrameGenerationUiMode requestedUiMode = NRIFrameGenerationUiMode::Auto;
 	NRIFrameGenerationUiMode resolvedUiMode = NRIFrameGenerationUiMode::Auto;
+	NRIPTOutputMode requestedOutputMode = NRIPTOutputMode::SDR;
+	NRIPTOutputMode resolvedOutputMode = NRIPTOutputMode::SDR;
+	NRIFrameGenerationOutputContract resolvedOutputContract = NRIFrameGenerationOutputContract::None;
 	bool requestedAsync = false;
 	bool resolvedAsync = false;
 	bool requestedLowLatency = false;
@@ -272,6 +284,7 @@ public:
 	static const char* GetMotionVectorDirectionName(NRIFrameGenerationMotionVectorDirection direction);
 	static const char* GetDepthTypeName(NRIFrameGenerationDepthType type);
 	static const char* GetAdapterRequirementName(NRIFrameGenerationAdapterRequirement requirement);
+	static const char* GetOutputContractName(NRIFrameGenerationOutputContract contract);
 	static const char* GetWindowModeName(bool fullscreen);
 	static const char* GetAvailabilityName(bool available);
 	static const char* GetProviderReturnCodeName(uint32_t result);
