@@ -1298,6 +1298,14 @@ public:
 
 	static FTextureID GetLiveActorDisplayTextureId(const DCoreActor& actor)
 	{
+		if (gi != nullptr && gi->IsPathTracingViewscreenActor(&actor))
+		{
+			if (FGameTexture* viewscreen = TexMan.FindGameTexture("VIEWSCR", ETextureType::Any))
+			{
+				return viewscreen->GetID();
+			}
+		}
+
 		return actor.dispictex.isValid() ? actor.dispictex : actor.spr.spritetexture();
 	}
 

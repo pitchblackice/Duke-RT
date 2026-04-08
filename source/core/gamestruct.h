@@ -146,6 +146,7 @@ struct GameInterface
 	virtual void LeavePortal(DCoreActor* viewer, int type) {}
 	virtual void SetMirrorPlayerVisibilityCaptureOverride(bool enabled) {}
 	virtual bool GetMirrorPlayerVisibilityCaptureOverride() const { return false; }
+	virtual bool IsPathTracingViewscreenActor(const DCoreActor* actor) const { return false; }
 	virtual bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) { return false; }
 	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
 	virtual bool GetNightVisionState(RuntimeNightVisionState* state) { return false; }

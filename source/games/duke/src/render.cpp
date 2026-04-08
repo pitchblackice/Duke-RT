@@ -159,6 +159,11 @@ bool GameInterface::GetMirrorPlayerVisibilityCaptureOverride() const
 	return IsMirrorPlayerVisibilityCaptureActive();
 }
 
+bool GameInterface::IsPathTracingViewscreenActor(const DCoreActor* actor) const
+{
+	return actor != nullptr && camsprite != nullptr && actor == camsprite;
+}
+
 bool GameInterface::GetGeoEffect(GeoEffect* eff, sectortype* viewsector)
 {
 	if (isRR() && viewsector->lotag == 848)

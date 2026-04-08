@@ -10,6 +10,7 @@
 #include "model_kvx.h"
 #include "skyboxtexture.h"
 #include "gametexture.h"
+#include "gamestruct.h"
 #include "texturemanager.h"
 #include "textures.h"
 #include "v_video.h"
@@ -980,6 +981,14 @@ namespace
 		if (wall.Sprite == nullptr || wall.Sprite->ownerActor == nullptr)
 		{
 			return wall.texture;
+		}
+
+		if (gi != nullptr && gi->IsPathTracingViewscreenActor(wall.Sprite->ownerActor))
+		{
+			if (FGameTexture* viewscreen = TexMan.FindGameTexture("VIEWSCR", ETextureType::Any))
+			{
+				return viewscreen;
+			}
 		}
 
 		const auto& actor = *wall.Sprite->ownerActor;
