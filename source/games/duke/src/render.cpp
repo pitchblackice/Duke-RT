@@ -161,7 +161,19 @@ bool GameInterface::GetMirrorPlayerVisibilityCaptureOverride() const
 
 bool GameInterface::IsPathTracingViewscreenActor(const DCoreActor* actor) const
 {
-	return actor != nullptr && camsprite != nullptr && actor == camsprite;
+	if (actor == nullptr)
+	{
+		return false;
+	}
+
+	if (camsprite != nullptr && actor == camsprite)
+	{
+		return true;
+	}
+
+	const FTextureID spriteTexture = actor->spr.spritetexture();
+	return spriteTexture == tileGetTextureID(VIEWSCREEN_DUKE) ||
+		spriteTexture == tileGetTextureID(VIEWSCREEN_RR);
 }
 
 bool GameInterface::GetGeoEffect(GeoEffect* eff, sectortype* viewsector)
