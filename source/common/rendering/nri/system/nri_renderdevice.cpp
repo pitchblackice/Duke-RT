@@ -2859,6 +2859,19 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationStructuralInvalidChunks,
 			shell.runtimeMutationHardwareCanvasChunkCount);
 		Printf(
+			"PERF pt runtime rebaseline detail NRI: frame=%llu queued=%u state=%s queue_frame=%u frames_queued=%u active_chunks=%u stable_chunks=%u candidate_build_serial=%llu build_world_ms=%.3f prepare_static_scene_ms=%.3f swap_ms=%.3f\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeMutationRebaselineQueued ? 1u : 0u,
+			NRIRenderer::GetRuntimeMutationRebaselineStateName((NRIRenderer::RuntimeMutationRebaselineState)shell.runtimeMutationRebaselineState),
+			shell.runtimeMutationRebaselineQueueFrame,
+			shell.runtimeMutationRebaselineFramesQueued,
+			shell.runtimeMutationRebaselineActiveChunkCount,
+			shell.runtimeMutationRebaselineStableChunkCount,
+			(unsigned long long)shell.runtimeMutationRebaselineCandidateBuildSerial,
+			shell.runtimeMutationRebaselineBuildWorldMs,
+			shell.runtimeMutationRebaselinePrepareStaticSceneMs,
+			shell.runtimeMutationRebaselineSwapMs);
+		Printf(
 			"PERF pt texture detail NRI: frame=%llu cache=%u misses=%u inserts=%u transitions=%u lookup_ms=%.3f realize_ms=%.3f descriptor_ms=%.3f transition_ms=%.3f material_builds=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneTextureCacheCount,

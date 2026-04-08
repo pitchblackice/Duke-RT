@@ -2644,6 +2644,21 @@ namespace
 		return "unknown";
 	}
 
+	const char* GetRuntimeMutationRebaselineStateNameInternal(NRIRenderer::RuntimeMutationRebaselineState state)
+	{
+		switch (state)
+		{
+		case NRIRenderer::RuntimeMutationRebaselineState::Idle: return "idle";
+		case NRIRenderer::RuntimeMutationRebaselineState::Queued: return "queued";
+		case NRIRenderer::RuntimeMutationRebaselineState::BuildingAuthoritativeWorld: return "building_authoritative_world";
+		case NRIRenderer::RuntimeMutationRebaselineState::WorldReady: return "world_ready";
+		case NRIRenderer::RuntimeMutationRebaselineState::PreparingStaticScene: return "preparing_static_scene";
+		case NRIRenderer::RuntimeMutationRebaselineState::ReadyToSwap: return "ready_to_swap";
+		}
+
+		return "unknown";
+	}
+
 	class ScopedPtPerfTimer
 	{
 	public:
@@ -5737,6 +5752,25 @@ void NRIRenderer::ResetPerfTraceStats()
 {
 	mLastPerfShellTraceStats = {};
 	mLastPerfResourceTraceStats = {};
+	UpdateRuntimeMutationRebaselinePerfStats();
+}
+
+void NRIRenderer::UpdateRuntimeMutationRebaselinePerfStats()
+{
+	mLastPerfShellTraceStats.runtimeMutationRebaselineQueued = mRuntimeMutationRebaselineState != RuntimeMutationRebaselineState::Idle;
+	mLastPerfShellTraceStats.runtimeMutationRebaselineState = (uint32_t)mRuntimeMutationRebaselineState;
+	mLastPerfShellTraceStats.runtimeMutationRebaselineQueueFrame = mRuntimeMutationRebaselineQueueFrame;
+	mLastPerfShellTraceStats.runtimeMutationRebaselineActiveChunkCount = mPendingRuntimeMutationRebaselineActiveChunkCount;
+	mLastPerfShellTraceStats.runtimeMutationRebaselineStableChunkCount = mPendingRuntimeMutationRebaselineStableChunkCount;
+	mLastPerfShellTraceStats.runtimeMutationRebaselineFramesQueued =
+		(mRuntimeMutationRebaselineState != RuntimeMutationRebaselineState::Idle && mFrameIndex >= mRuntimeMutationRebaselineQueueFrame)
+		? (mFrameIndex - mRuntimeMutationRebaselineQueueFrame)
+		: 0u;
+	mLastPerfShellTraceStats.runtimeMutationRebaselineCandidateBuildSerial =
+		mRuntimeMutationRebaselineCandidate.valid ? mRuntimeMutationRebaselineCandidate.world.buildSerial : 0ull;
+	mLastPerfShellTraceStats.runtimeMutationRebaselineBuildWorldMs = mRuntimeMutationRebaselineBuildWorldMs;
+	mLastPerfShellTraceStats.runtimeMutationRebaselinePrepareStaticSceneMs = mRuntimeMutationRebaselinePrepareStaticSceneMs;
+	mLastPerfShellTraceStats.runtimeMutationRebaselineSwapMs = mRuntimeMutationRebaselineSwapMs;
 }
 
 void NRIRenderer::WaitForCommandsTracked()
@@ -5946,9 +5980,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	{
 		RebuildStartupMutationBaseline();
 	}
-	if (mPendingRuntimeMutationRebaseline)
+	if (mPendingRuntimeMutationRebaseline || mRuntimeMutationRebaselineState != RuntimeMutationRebaselineState::Idle)
 	{
-		RebuildRuntimeMutationBaseline();
+		AdvanceRuntimeMutationRebaseline();
 	}
 	if (mPendingStaticMapLightingInvalidation)
 	{
@@ -7050,9 +7084,9 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 	{
 		RebuildStartupMutationBaseline();
 	}
-	if (mPendingRuntimeMutationRebaseline)
+	if (mPendingRuntimeMutationRebaseline || mRuntimeMutationRebaselineState != RuntimeMutationRebaselineState::Idle)
 	{
-		RebuildRuntimeMutationBaseline();
+		AdvanceRuntimeMutationRebaseline();
 	}
 	if (!mMapWorld.valid)
 	{
@@ -8326,6 +8360,11 @@ const char* NRIRenderer::GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot sl
 	return GetMaterialBuildTraceSlotNameInternal(slot);
 }
 
+const char* NRIRenderer::GetRuntimeMutationRebaselineStateName(RuntimeMutationRebaselineState state)
+{
+	return GetRuntimeMutationRebaselineStateNameInternal(state);
+}
+
 NRIRenderer::MaterialBuildTraceSlot NRIRenderer::ResolveMaterialBuildTraceSlot(const char* traceLabel)
 {
 	if (traceLabel == nullptr || traceLabel[0] == '\0')
@@ -8771,6 +8810,17 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mLastPerfShellTraceStats.runtimeMutationStructuralForcedTopologyChunks,
 		mLastPerfShellTraceStats.runtimeMutationStructuralInvalidChunks,
 		mLastPerfShellTraceStats.runtimeMutationHardwareCanvasChunkCount);
+	Printf("NRI PT runtime mutation rebaseline state: queued=%s state=%s queue_frame=%u frames_queued=%u active_chunks=%u stable_chunks=%u candidate_build_serial=%llu build_world_ms=%.3f prepare_static_scene_ms=%.3f swap_ms=%.3f\n",
+		mRuntimeMutationRebaselineState != RuntimeMutationRebaselineState::Idle ? "yes" : "no",
+		GetRuntimeMutationRebaselineStateName(mRuntimeMutationRebaselineState),
+		mRuntimeMutationRebaselineQueueFrame,
+		(mRuntimeMutationRebaselineState != RuntimeMutationRebaselineState::Idle && mFrameIndex >= mRuntimeMutationRebaselineQueueFrame) ? (mFrameIndex - mRuntimeMutationRebaselineQueueFrame) : 0u,
+		mPendingRuntimeMutationRebaselineActiveChunkCount,
+		mPendingRuntimeMutationRebaselineStableChunkCount,
+		(unsigned long long)(mRuntimeMutationRebaselineCandidate.valid ? mRuntimeMutationRebaselineCandidate.world.buildSerial : 0ull),
+		mRuntimeMutationRebaselineBuildWorldMs,
+		mRuntimeMutationRebaselinePrepareStaticSceneMs,
+		mRuntimeMutationRebaselineSwapMs);
 	for (size_t index = 0; index < NRIRenderer::MaterialBuildTraceSlotCount; ++index)
 	{
 		const auto& entry = mLastPerfShellTraceStats.materialBuildByLabel[index];
@@ -11233,6 +11283,39 @@ void NRIRenderer::LogFallback(const char* reason)
 	mHasLoggedFallback = true;
 }
 
+void NRIRenderer::ResetRuntimeMutationRebaselineState(bool destroyCandidateResources)
+{
+	mPendingRuntimeMutationRebaseline = false;
+	mPendingRuntimeMutationRebaselineActiveChunkCount = 0;
+	mPendingRuntimeMutationRebaselineStableChunkCount = 0;
+	mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::Idle;
+	mRuntimeMutationRebaselineQueueFrame = 0;
+	mRuntimeMutationRebaselineLastAdvanceFrame = UINT32_MAX;
+	mRuntimeMutationRebaselineExpectedGeometryBuildSerial = 0;
+	mRuntimeMutationRebaselineBuildWorldMs = 0.0;
+	mRuntimeMutationRebaselinePrepareStaticSceneMs = 0.0;
+	mRuntimeMutationRebaselineSwapMs = 0.0;
+	mRuntimeMutationRebaselineCandidate.valid = false;
+	mRuntimeMutationRebaselineCandidate.world = {};
+	mRuntimeMutationRebaselineCandidate.pendingGeometryBuildSerial = 0;
+
+	if (destroyCandidateResources)
+	{
+		DestroyStaticMapSceneResources(
+			mRuntimeMutationRebaselineCandidate.staticScene,
+			mRuntimeMutationRebaselineCandidate.staticResources,
+			true);
+		mRuntimeMutationRebaselineCandidate.runtimeMutations = {};
+		DestroyStaticMapSceneResources(
+			mRetiredRuntimeMutationRebaselineStaticScene.staticScene,
+			mRetiredRuntimeMutationRebaselineStaticScene.staticResources,
+			true);
+		mRetiredRuntimeMutationRebaselineStaticScene = {};
+	}
+
+	UpdateRuntimeMutationRebaselinePerfStats();
+}
+
 void NRIRenderer::RefreshMapWorld()
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.mapWorldMs);
@@ -11247,11 +11330,9 @@ void NRIRenderer::RefreshMapWorld()
 		mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
 		mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
 		mRuntimeMutationCacheHighWaterStats = {};
-		mPendingRuntimeMutationRebaseline = false;
+		ResetRuntimeMutationRebaselineState(true);
 		mHasRuntimeMutationRebaseline = false;
 		mLastRuntimeMutationRebaselineFrame = 0;
-		mPendingRuntimeMutationRebaselineActiveChunkCount = 0;
-		mPendingRuntimeMutationRebaselineStableChunkCount = 0;
 	}
 	if (levelChanged && mSceneLights.GetManualAnalyticLightCount() > 0)
 	{
@@ -11274,6 +11355,11 @@ void NRIRenderer::RefreshMapWorld()
 			mPendingStartupMutationRebaseline = false;
 		}
 		return;
+	}
+
+	if (!levelChanged && pendingBuildSerial != mObservedMapWorldBuildSerial)
+	{
+		ResetRuntimeMutationRebaselineState(true);
 	}
 
 	ResetPersistentDynamicEmissiveCache();
@@ -11321,11 +11407,9 @@ void NRIRenderer::RebuildStartupMutationBaseline()
 
 	mPendingStartupMutationRebaseline = false;
 	mAllowStartupMutationRebaseline = false;
-	mPendingRuntimeMutationRebaseline = false;
+	ResetRuntimeMutationRebaselineState(true);
 	mHasRuntimeMutationRebaseline = false;
 	mLastRuntimeMutationRebaselineFrame = 0;
-	mPendingRuntimeMutationRebaselineActiveChunkCount = 0;
-	mPendingRuntimeMutationRebaselineStableChunkCount = 0;
 
 	nri_scene::PTMapWorld world;
 	if (!nri_scene::BuildMapWorld(world))
@@ -11358,44 +11442,130 @@ void NRIRenderer::RebuildStartupMutationBaseline()
 
 void NRIRenderer::RebuildRuntimeMutationBaseline()
 {
-	if (!mPendingRuntimeMutationRebaseline)
+	AdvanceRuntimeMutationRebaseline();
+}
+
+bool NRIRenderer::PrepareRuntimeMutationRebaselineStaticScene()
+{
+	auto& candidate = mRuntimeMutationRebaselineCandidate;
+	if (!candidate.valid || !candidate.world.valid)
 	{
-		return;
+		return false;
 	}
 
-	const uint32_t activeChunkCount = mPendingRuntimeMutationRebaselineActiveChunkCount;
-	const uint32_t stableChunkCount = mPendingRuntimeMutationRebaselineStableChunkCount;
-	mPendingRuntimeMutationRebaseline = false;
-	mPendingRuntimeMutationRebaselineActiveChunkCount = 0;
-	mPendingRuntimeMutationRebaselineStableChunkCount = 0;
+	DestroyStaticMapSceneResources(candidate.staticScene, candidate.staticResources, false);
+	candidate.runtimeMutations = {};
+	if (!BuildStaticMapSceneCache(candidate.world, nullptr, candidate.staticScene, candidate.runtimeMutations))
+	{
+		return false;
+	}
+
+	if (candidate.staticScene.geometry.primitives.empty() ||
+		!EnsurePaletteTexture(candidate.staticScene.materialBridge) ||
+		!EnsureSceneTextures(candidate.staticScene.sceneView, candidate.staticScene.materialBridge, candidate.staticScene.gpuMaterials, false, "runtime_mutation_rebaseline_candidate") ||
+		!UploadSceneBuffers(
+			candidate.staticResources.vertexBuffer,
+			candidate.staticResources.indexBuffer,
+			candidate.staticResources.primitiveBuffer,
+			candidate.staticResources.materialBuffer,
+			candidate.staticScene.geometry,
+			candidate.staticScene.gpuMaterials) ||
+		!BuildStaticMapAccelerationStructures(candidate.staticScene, candidate.staticResources, false))
+	{
+		return false;
+	}
+
+	candidate.staticScene.valid = true;
+	candidate.staticScene.texturesResident = true;
+	candidate.staticScene.buffersResident = true;
+	candidate.staticScene.accelerationResident = true;
+	candidate.staticScene.buildSerial = candidate.world.buildSerial;
+	candidate.staticScene.tlasInstanceCount = candidate.staticResources.tlasInstanceCount;
+	candidate.staticScene.sceneBuildCount++;
+	candidate.staticScene.gpuUploadCount++;
+	candidate.staticScene.accelerationBuildCount++;
+	return true;
+}
+
+bool NRIRenderer::SwapRuntimeMutationRebaselineCandidate()
+{
+	auto& candidate = mRuntimeMutationRebaselineCandidate;
+	if (!candidate.valid ||
+		!candidate.world.valid ||
+		!candidate.staticScene.valid ||
+		candidate.staticResources.topLevelAS.accelerationStructure == nullptr)
+	{
+		return false;
+	}
+
+	if (mRetiredRuntimeMutationRebaselineStaticScene.valid)
+	{
+		DestroyStaticMapSceneResources(
+			mRetiredRuntimeMutationRebaselineStaticScene.staticScene,
+			mRetiredRuntimeMutationRebaselineStaticScene.staticResources,
+			true);
+		mRetiredRuntimeMutationRebaselineStaticScene = {};
+	}
+
+	mRetiredRuntimeMutationRebaselineStaticScene.valid = true;
+	mRetiredRuntimeMutationRebaselineStaticScene.staticScene = std::move(mStaticMapScene);
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.vertexBuffer = std::move(mStaticVertexBuffer);
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.indexBuffer = std::move(mStaticIndexBuffer);
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.primitiveBuffer = std::move(mStaticPrimitiveBuffer);
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.materialBuffer = std::move(mStaticMaterialBuffer);
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.tlasInstanceBuffer = std::move(mTlasInstanceBuffer);
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.scratchBuffer = std::move(mScratchBuffer);
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.topLevelScratchBuffer = std::move(mTopLevelScratchBuffer);
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.topLevelAS = std::move(mTopLevelAS);
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.accelerationBuildSerial = mStaticAccelerationBuildSerial;
+	mRetiredRuntimeMutationRebaselineStaticScene.staticResources.tlasInstanceCount = mActiveTlasInstanceCount;
+
+	mStaticMapScene = std::move(candidate.staticScene);
+	mStaticVertexBuffer = std::move(candidate.staticResources.vertexBuffer);
+	mStaticIndexBuffer = std::move(candidate.staticResources.indexBuffer);
+	mStaticPrimitiveBuffer = std::move(candidate.staticResources.primitiveBuffer);
+	mStaticMaterialBuffer = std::move(candidate.staticResources.materialBuffer);
+	mTlasInstanceBuffer = std::move(candidate.staticResources.tlasInstanceBuffer);
+	mScratchBuffer = std::move(candidate.staticResources.scratchBuffer);
+	mTopLevelScratchBuffer = std::move(candidate.staticResources.topLevelScratchBuffer);
+	mTopLevelAS = std::move(candidate.staticResources.topLevelAS);
+	mStaticAccelerationBuildSerial = candidate.staticResources.accelerationBuildSerial;
+	mActiveTlasInstanceCount = candidate.staticResources.tlasInstanceCount;
+	mMapWorld = std::move(candidate.world);
+	mRuntimeMapMutations = std::move(candidate.runtimeMutations);
+	mObservedMapWorldBuildSerial = candidate.pendingGeometryBuildSerial;
+
+	if (!UpdateSceneDataSet(
+		mStaticVertexBuffer,
+		mStaticIndexBuffer,
+		mStaticPrimitiveBuffer,
+		mStaticMaterialBuffer,
+		mStaticVertexBuffer,
+		mStaticIndexBuffer,
+		mStaticPrimitiveBuffer,
+		mStaticMaterialBuffer,
+		candidate.staticResources.sceneInstances,
+		(uint32_t)mStaticMapScene.geometry.primitives.size(),
+		0u,
+		(uint32_t)mStaticMapScene.gpuMaterials.size(),
+		0u,
+		"runtime_mutation_rebaseline_swap"))
+	{
+		return false;
+	}
+
+	mPreservedStaticMapSky = {};
 	mHasRuntimeMutationRebaseline = true;
 	mLastRuntimeMutationRebaselineFrame = mFrameIndex;
 	mAllowStartupMutationRebaseline = false;
-
-	nri_scene::PTMapWorld world;
-	if (!nri_scene::BuildMapWorld(world))
-	{
-		Printf(TEXTCOLOR_RED "NRI PT runtime mutation rebaseline: authoritative rebuild failed for %s active_chunks=%u stable_chunks=%u.\n",
-			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
-			activeChunkCount,
-			stableChunkCount);
-		return;
-	}
-
-	DestroyStaticMapSceneCache();
-	mStaticMapScene = {};
-	mStaticAccelerationBuildSerial = 0;
-	mPreservedStaticMapSky = {};
-	mMapWorld = std::move(world);
-	mObservedMapWorldBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
 	RequestHistoryReset("runtime-mutation-rebaseline");
 
 	const auto& stats = mMapWorld.stats;
 	Printf("NRI PT runtime mutation rebaseline: level=%s frame=%u active_chunks=%u stable_chunks=%u build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
 		mFrameIndex,
-		activeChunkCount,
-		stableChunkCount,
+		mPendingRuntimeMutationRebaselineActiveChunkCount,
+		mPendingRuntimeMutationRebaselineStableChunkCount,
 		(unsigned long long)mMapWorld.buildSerial,
 		stats.chunkCount,
 		stats.surfaceCount,
@@ -11404,6 +11574,110 @@ void NRIRenderer::RebuildRuntimeMutationBaseline()
 		stats.portalSurfaceCount,
 		stats.skySurfaceCount,
 		stats.triangleCount);
+
+	candidate = {};
+	return true;
+}
+
+void NRIRenderer::AdvanceRuntimeMutationRebaseline()
+{
+	if (mRuntimeMutationRebaselineLastAdvanceFrame == mFrameIndex)
+	{
+		return;
+	}
+	mRuntimeMutationRebaselineLastAdvanceFrame = mFrameIndex;
+
+	if (mPendingRuntimeMutationRebaseline && mRuntimeMutationRebaselineState == RuntimeMutationRebaselineState::Idle)
+	{
+		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::Queued;
+		mRuntimeMutationRebaselineQueueFrame = mFrameIndex;
+		mRuntimeMutationRebaselineExpectedGeometryBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
+		mRuntimeMutationRebaselineBuildWorldMs = 0.0;
+		mRuntimeMutationRebaselinePrepareStaticSceneMs = 0.0;
+		mRuntimeMutationRebaselineSwapMs = 0.0;
+		Printf("NRI PT runtime mutation rebaseline state: level=%s frame=%u state=%s queue_frame=%u active_chunks=%u stable_chunks=%u expected_build_serial=%llu\n",
+			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+			mFrameIndex,
+			GetRuntimeMutationRebaselineStateName(mRuntimeMutationRebaselineState),
+			mRuntimeMutationRebaselineQueueFrame,
+			mPendingRuntimeMutationRebaselineActiveChunkCount,
+			mPendingRuntimeMutationRebaselineStableChunkCount,
+			(unsigned long long)mRuntimeMutationRebaselineExpectedGeometryBuildSerial);
+		UpdateRuntimeMutationRebaselinePerfStats();
+		return;
+	}
+
+	switch (mRuntimeMutationRebaselineState)
+	{
+	case RuntimeMutationRebaselineState::Idle:
+		break;
+	case RuntimeMutationRebaselineState::Queued:
+		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::BuildingAuthoritativeWorld;
+		break;
+	case RuntimeMutationRebaselineState::BuildingAuthoritativeWorld:
+	{
+		auto start = std::chrono::steady_clock::now();
+		auto& candidate = mRuntimeMutationRebaselineCandidate;
+		DestroyStaticMapSceneResources(candidate.staticScene, candidate.staticResources, false);
+		candidate = {};
+		nri_scene::PTMapWorld world;
+		if (!nri_scene::BuildMapWorld(world))
+		{
+			Printf(TEXTCOLOR_RED "NRI PT runtime mutation rebaseline: authoritative rebuild failed for %s active_chunks=%u stable_chunks=%u.\n",
+				currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+				mPendingRuntimeMutationRebaselineActiveChunkCount,
+				mPendingRuntimeMutationRebaselineStableChunkCount);
+			ResetRuntimeMutationRebaselineState(true);
+			return;
+		}
+
+		candidate.valid = true;
+		candidate.world = std::move(world);
+		candidate.pendingGeometryBuildSerial = mRuntimeMutationRebaselineExpectedGeometryBuildSerial;
+		mRuntimeMutationRebaselineBuildWorldMs = DurationMs(start, std::chrono::steady_clock::now());
+		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::WorldReady;
+		break;
+	}
+	case RuntimeMutationRebaselineState::WorldReady:
+		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::PreparingStaticScene;
+		break;
+	case RuntimeMutationRebaselineState::PreparingStaticScene:
+	{
+		auto start = std::chrono::steady_clock::now();
+		if (!PrepareRuntimeMutationRebaselineStaticScene())
+		{
+			Printf(TEXTCOLOR_RED "NRI PT runtime mutation rebaseline: static-scene preparation failed for %s active_chunks=%u stable_chunks=%u.\n",
+				currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+				mPendingRuntimeMutationRebaselineActiveChunkCount,
+				mPendingRuntimeMutationRebaselineStableChunkCount);
+			ResetRuntimeMutationRebaselineState(true);
+			return;
+		}
+
+		mRuntimeMutationRebaselinePrepareStaticSceneMs = DurationMs(start, std::chrono::steady_clock::now());
+		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::ReadyToSwap;
+		break;
+	}
+	case RuntimeMutationRebaselineState::ReadyToSwap:
+	{
+		auto start = std::chrono::steady_clock::now();
+		if (!SwapRuntimeMutationRebaselineCandidate())
+		{
+			Printf(TEXTCOLOR_RED "NRI PT runtime mutation rebaseline: swap failed for %s active_chunks=%u stable_chunks=%u.\n",
+				currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+				mPendingRuntimeMutationRebaselineActiveChunkCount,
+				mPendingRuntimeMutationRebaselineStableChunkCount);
+			ResetRuntimeMutationRebaselineState(true);
+			return;
+		}
+
+		mRuntimeMutationRebaselineSwapMs = DurationMs(start, std::chrono::steady_clock::now());
+		ResetRuntimeMutationRebaselineState(false);
+		break;
+	}
+	}
+
+	UpdateRuntimeMutationRebaselinePerfStats();
 }
 
 bool NRIRenderer::CreatePipelineLayout()
@@ -13305,92 +13579,13 @@ bool NRIRenderer::EnsureStaticMapScene()
 		return true;
 	}
 
-	const nri_scene::SceneView* preservedSkyView =
-		(mPreservedStaticMapSky.valid && mPreservedStaticMapSky.buildSerial == mMapWorld.buildSerial)
-		? &mPreservedStaticMapSky.sceneView
-		: nullptr;
-	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView, preservedSkyView);
-	mStaticMapScene.lightChunkViews.clear();
-	mStaticMapScene.geometry = {};
-	mStaticMapScene.materialBridge = {};
-	mStaticMapScene.chunks.clear();
-	mStaticMapScene.lightChunkViews.reserve(mMapWorld.chunks.size());
-	mStaticMapScene.chunks.reserve(mMapWorld.chunks.size());
-	mRuntimeMapMutations.chunks.clear();
-	mRuntimeMapMutations.chunks.resize(mMapWorld.chunks.size());
-	mRuntimeMapMutations.replacedChunkMask.assign(mMapWorld.chunks.size(), 0u);
-
-	for (const nri_scene::PTMapChunk& chunk : mMapWorld.chunks)
+	if (!BuildStaticMapSceneCache(
+		mMapWorld,
+		(mPreservedStaticMapSky.valid && mPreservedStaticMapSky.buildSerial == mMapWorld.buildSerial) ? &mPreservedStaticMapSky : nullptr,
+		mStaticMapScene,
+		mRuntimeMapMutations))
 	{
-		if (chunk.chunkIndex < mRuntimeMapMutations.chunks.size())
-		{
-			auto& replacement = mRuntimeMapMutations.chunks[chunk.chunkIndex];
-			nri_scene::CaptureMapChunkMutationBaseline(chunk, replacement.baseline);
-			replacement.replacementBaseline = replacement.baseline;
-			replacement.baselineSignature = replacement.baseline.signature;
-			replacement.liveSignature = replacement.baselineSignature;
-			replacement.animatedMaterialSignature = 0;
-			replacement.reasonMask = 0;
-			replacement.sectionDirtyCount = 0;
-			replacement.stableMutationFrameCount = 0;
-			replacement.sectorDirty = false;
-			replacement.dragged = false;
-			replacement.blindSpot = false;
-			replacement.excludeStaticChunk = false;
-			replacement.staticAnimatedReplacement = false;
-			replacement.lastTraceSignature = UINT64_MAX;
-			replacement.lastTraceAnimatedMaterialSignature = UINT64_MAX;
-			replacement.lastTraceReasonMask = UINT32_MAX;
-			replacement.lastTraceActive = false;
-			replacement.lastTraceBlindSpot = false;
-			replacement.animationOnlyRefreshed = false;
-			replacement.lastTraceAnimationOnlyRefreshed = false;
-			replacement.lastTraceStaticAnimatedReplacement = false;
-			replacement.traceCount = 0;
-		}
-
-		nri_scene::SceneView chunkSceneView;
-		nri_scene::GeometryData chunkGeometry;
-		nri_scene::MaterialBridgeData chunkMaterials;
-		nri_scene::BuildMapChunkSceneView(mMapWorld, chunk, chunkSceneView, preservedSkyView);
-			{
-				Clocker clock(NriPTGeometryBuild);
-				nri_scene::BuildGeometry(chunkSceneView, chunkGeometry);
-				AssignGeometryPortalIndices(mMapWorld, chunkGeometry);
-			}
-		{
-			Clocker clock(NriPTMaterialBuild);
-			BuildMaterialsWithActorOverrides(chunkSceneView, chunkMaterials, "static_map_chunk");
-		}
-		if (chunkGeometry.primitives.empty())
-		{
-			continue;
-		}
-
-		StaticMapSceneCache::ChunkCache chunkCache = {};
-		chunkCache.chunkIndex = chunk.chunkIndex;
-		chunkCache.vertexOffset = (uint32_t)mStaticMapScene.geometry.vertices.size();
-		chunkCache.vertexCount = (uint32_t)chunkGeometry.vertices.size();
-		chunkCache.indexOffset = (uint32_t)mStaticMapScene.geometry.indices.size();
-		chunkCache.indexCount = (uint32_t)chunkGeometry.indices.size();
-		chunkCache.primitiveOffset = (uint32_t)mStaticMapScene.geometry.primitives.size();
-		chunkCache.primitiveCount = (uint32_t)chunkGeometry.primitives.size();
-		chunkCache.materialOffset = (uint32_t)mStaticMapScene.materialBridge.materials.size();
-		chunkCache.materialCount = (uint32_t)chunkMaterials.materials.size();
-		chunkCache.animatedMaterialSignature = ComputeAnimatedMaterialSignature(chunkSceneView);
-		chunkCache.animatedGeometrySignature = ComputeAnimatedGeometrySignature(chunkSceneView);
-		chunkCache.hasAnimatedTextureCandidates = ChunkHasAnimatedStaticMapSurfaceCandidates(mMapWorld, chunk);
-		chunkCache.animatedRefreshSuppressed = false;
-
-		AppendGeometry(chunkGeometry, chunkCache.materialOffset, mStaticMapScene.geometry);
-		AppendMaterialBridge(chunkMaterials, mStaticMapScene.materialBridge);
-		chunkCache.materialBridge = std::move(chunkMaterials);
-		if (chunkCache.hasAnimatedTextureCandidates)
-		{
-			mStaticMapScene.animatedCandidateChunkCount++;
-		}
-		mStaticMapScene.lightChunkViews.push_back(std::move(chunkSceneView));
-		mStaticMapScene.chunks.push_back(std::move(chunkCache));
+		return false;
 	}
 
 	if (ShouldTraceSkyPerf())
@@ -13435,6 +13630,130 @@ bool NRIRenderer::EnsureStaticMapScene()
 		mStaticMapScene.gpuUploadCount,
 		mStaticMapScene.accelerationBuildCount);
 	return true;
+}
+
+bool NRIRenderer::BuildStaticMapSceneCache(
+	const nri_scene::PTMapWorld& mapWorld,
+	const PreservedStaticMapSkyState* preservedSkyState,
+	StaticMapSceneCache& outStaticScene,
+	RuntimeMapMutationCache& outRuntimeMutations)
+{
+	if (!mapWorld.valid)
+	{
+		return false;
+	}
+
+	outStaticScene.valid = false;
+	outStaticScene.texturesResident = false;
+	outStaticScene.buffersResident = false;
+	outStaticScene.accelerationResident = false;
+	outStaticScene.buildSerial = mapWorld.buildSerial;
+	outStaticScene.sceneBuildCount = 0;
+	outStaticScene.gpuUploadCount = 0;
+	outStaticScene.accelerationBuildCount = 0;
+	outStaticScene.animatedCandidateChunkCount = 0;
+	outStaticScene.animatedRefreshCount = 0;
+	outStaticScene.animatedRefreshUploadCount = 0;
+	outStaticScene.animatedGeometryFallbackCount = 0;
+	outStaticScene.animatedRefreshSuppressedChunkCount = 0;
+	outStaticScene.reuseCount = 0;
+	outStaticScene.sceneView = {};
+	outStaticScene.lightChunkViews.clear();
+	outStaticScene.geometry = {};
+	outStaticScene.materialBridge = {};
+	outStaticScene.gpuMaterials.clear();
+	outStaticScene.chunks.clear();
+	outStaticScene.tlasInstanceCount = 0;
+	outStaticScene.lightChunkViews.reserve(mapWorld.chunks.size());
+	outStaticScene.chunks.reserve(mapWorld.chunks.size());
+
+	outRuntimeMutations.chunks.clear();
+	outRuntimeMutations.chunks.resize(mapWorld.chunks.size());
+	outRuntimeMutations.replacedChunkMask.assign(mapWorld.chunks.size(), 0u);
+
+	const nri_scene::SceneView* preservedSkyView = preservedSkyState != nullptr ? &preservedSkyState->sceneView : nullptr;
+	nri_scene::BuildMapSceneView(mapWorld, outStaticScene.sceneView, preservedSkyView);
+
+	for (const nri_scene::PTMapChunk& chunk : mapWorld.chunks)
+	{
+		if (chunk.chunkIndex < outRuntimeMutations.chunks.size())
+		{
+			auto& replacement = outRuntimeMutations.chunks[chunk.chunkIndex];
+			nri_scene::CaptureMapChunkMutationBaseline(chunk, replacement.baseline);
+			replacement.replacementBaseline = replacement.baseline;
+			replacement.baselineSignature = replacement.baseline.signature;
+			replacement.liveSignature = replacement.baselineSignature;
+			replacement.animatedMaterialSignature = 0;
+			replacement.reasonMask = 0;
+			replacement.sectionDirtyCount = 0;
+			replacement.stableMutationFrameCount = 0;
+			replacement.sectorDirty = false;
+			replacement.dragged = false;
+			replacement.blindSpot = false;
+			replacement.excludeStaticChunk = false;
+			replacement.staticAnimatedReplacement = false;
+			replacement.lastTraceSignature = UINT64_MAX;
+			replacement.lastTraceAnimatedMaterialSignature = UINT64_MAX;
+			replacement.lastTraceReasonMask = UINT32_MAX;
+			replacement.lastTraceActive = false;
+			replacement.lastTraceBlindSpot = false;
+			replacement.animationOnlyRefreshed = false;
+			replacement.lastTraceAnimationOnlyRefreshed = false;
+			replacement.lastTraceStaticAnimatedReplacement = false;
+			replacement.traceCount = 0;
+			replacement.surfaceCount = 0;
+			replacement.triangleCount = 0;
+			replacement.sceneView = {};
+			replacement.geometry = {};
+			replacement.materialBridge = {};
+			replacement.lightIdentityOverrides = {};
+		}
+
+		nri_scene::SceneView chunkSceneView;
+		nri_scene::GeometryData chunkGeometry;
+		nri_scene::MaterialBridgeData chunkMaterials;
+		nri_scene::BuildMapChunkSceneView(mapWorld, chunk, chunkSceneView, preservedSkyView);
+			{
+				Clocker clock(NriPTGeometryBuild);
+				nri_scene::BuildGeometry(chunkSceneView, chunkGeometry);
+				AssignGeometryPortalIndices(mapWorld, chunkGeometry);
+			}
+		{
+			Clocker clock(NriPTMaterialBuild);
+			BuildMaterialsWithActorOverrides(chunkSceneView, chunkMaterials, "static_map_chunk");
+		}
+		if (chunkGeometry.primitives.empty())
+		{
+			continue;
+		}
+
+		StaticMapSceneCache::ChunkCache chunkCache = {};
+		chunkCache.chunkIndex = chunk.chunkIndex;
+		chunkCache.vertexOffset = (uint32_t)outStaticScene.geometry.vertices.size();
+		chunkCache.vertexCount = (uint32_t)chunkGeometry.vertices.size();
+		chunkCache.indexOffset = (uint32_t)outStaticScene.geometry.indices.size();
+		chunkCache.indexCount = (uint32_t)chunkGeometry.indices.size();
+		chunkCache.primitiveOffset = (uint32_t)outStaticScene.geometry.primitives.size();
+		chunkCache.primitiveCount = (uint32_t)chunkGeometry.primitives.size();
+		chunkCache.materialOffset = (uint32_t)outStaticScene.materialBridge.materials.size();
+		chunkCache.materialCount = (uint32_t)chunkMaterials.materials.size();
+		chunkCache.animatedMaterialSignature = ComputeAnimatedMaterialSignature(chunkSceneView);
+		chunkCache.animatedGeometrySignature = ComputeAnimatedGeometrySignature(chunkSceneView);
+		chunkCache.hasAnimatedTextureCandidates = ChunkHasAnimatedStaticMapSurfaceCandidates(mapWorld, chunk);
+		chunkCache.animatedRefreshSuppressed = false;
+
+		AppendGeometry(chunkGeometry, chunkCache.materialOffset, outStaticScene.geometry);
+		AppendMaterialBridge(chunkMaterials, outStaticScene.materialBridge);
+		chunkCache.materialBridge = std::move(chunkMaterials);
+		if (chunkCache.hasAnimatedTextureCandidates)
+		{
+			outStaticScene.animatedCandidateChunkCount++;
+		}
+		outStaticScene.lightChunkViews.push_back(std::move(chunkSceneView));
+		outStaticScene.chunks.push_back(std::move(chunkCache));
+	}
+
+	return !outStaticScene.geometry.primitives.empty();
 }
 
 bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky)
@@ -14406,7 +14725,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		mTlasInstanceBuffer.buffer != nullptr ||
 		mEmissiveTlasInstanceBuffer.buffer != nullptr ||
 		mSceneInstanceBuffer.buffer != nullptr ||
-		mScratchBuffer.buffer != nullptr;
+		mScratchBuffer.buffer != nullptr ||
+		mTopLevelScratchBuffer.buffer != nullptr;
 	if (needsWait)
 	{
 		WaitForCommandsTracked();
@@ -14416,6 +14736,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);
 	DestroyBufferResource(mScratchBuffer);
+	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
@@ -14492,8 +14813,6 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 
 		if (chunkIndex + 1 < mStaticMapScene.chunks.size())
 		{
-			// The static chunk path deliberately reuses one scratch buffer across many BLAS builds.
-			// Serialize reuse explicitly so later builds do not stomp scratch data that the GPU is still consuming.
 			nri::BufferBarrierDesc scratchBarrier = {};
 			scratchBarrier.buffer = mScratchBuffer.buffer;
 			scratchBarrier.before = NRIAccelerationStructureScratchAccess();
@@ -14543,16 +14862,166 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 			"build_static_map_scene");
 }
 
+bool NRIRenderer::BuildStaticMapAccelerationStructures(
+	StaticMapSceneCache& staticScene,
+	StaticMapSceneResources& staticResources,
+	bool updateLiveState)
+{
+	Clocker clock(NriPTAcceleration);
+
+	if (staticScene.chunks.empty())
+	{
+		return false;
+	}
+
+	const bool needsWait =
+		staticResources.topLevelAS.accelerationStructure != nullptr ||
+		staticResources.tlasInstanceBuffer.buffer != nullptr ||
+		staticResources.scratchBuffer.buffer != nullptr ||
+		staticResources.topLevelScratchBuffer.buffer != nullptr;
+	if (needsWait)
+	{
+		WaitForCommandsTracked();
+	}
+
+	DestroyBufferResource(staticResources.tlasInstanceBuffer);
+	DestroyBufferResource(staticResources.scratchBuffer);
+	DestroyBufferResource(staticResources.topLevelScratchBuffer);
+	DestroyAccelerationStructureResource(staticResources.topLevelAS);
+
+	for (auto& chunk : staticScene.chunks)
+	{
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+	}
+
+	uint64_t maxScratchSize = 0;
+	for (auto& chunk : staticScene.chunks)
+	{
+		nri::BottomLevelGeometryDesc geometryDesc = {};
+		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+		geometryDesc.triangles.vertexBuffer = staticResources.vertexBuffer.buffer;
+		geometryDesc.triangles.vertexOffset = 0;
+		geometryDesc.triangles.vertexNum = (uint32_t)staticScene.geometry.vertices.size();
+		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+		geometryDesc.triangles.indexBuffer = staticResources.indexBuffer.buffer;
+		geometryDesc.triangles.indexOffset = (uint64_t)chunk.indexOffset * sizeof(uint32_t);
+		geometryDesc.triangles.indexNum = chunk.indexCount;
+		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+
+		nri::AccelerationStructureDesc blasDesc = {};
+		blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
+		blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+		blasDesc.geometryOrInstanceNum = 1;
+		blasDesc.geometries = &geometryDesc;
+		if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, chunk.accelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
+
+		nri::MemoryDesc memoryDesc = {};
+		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		chunk.accelerationStructure.memorySize = memoryDesc.size;
+		chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
+
+		maxScratchSize = std::max(maxScratchSize, mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
+	}
+
+	if (!CreateBufferWithoutView(staticResources.scratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+	{
+		return false;
+	}
+
+	std::vector<nri::BufferBarrierDesc> blasBarriers;
+	blasBarriers.reserve(staticScene.chunks.size());
+	for (size_t chunkIndex = 0; chunkIndex < staticScene.chunks.size(); ++chunkIndex)
+	{
+		auto& chunk = staticScene.chunks[chunkIndex];
+		nri::BottomLevelGeometryDesc geometryDesc = {};
+		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+		geometryDesc.triangles.vertexBuffer = staticResources.vertexBuffer.buffer;
+		geometryDesc.triangles.vertexOffset = 0;
+		geometryDesc.triangles.vertexNum = (uint32_t)staticScene.geometry.vertices.size();
+		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+		geometryDesc.triangles.indexBuffer = staticResources.indexBuffer.buffer;
+		geometryDesc.triangles.indexOffset = (uint64_t)chunk.indexOffset * sizeof(uint32_t);
+		geometryDesc.triangles.indexNum = chunk.indexCount;
+		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+
+		nri::BuildBottomLevelAccelerationStructureDesc build = {};
+		build.dst = chunk.accelerationStructure.accelerationStructure;
+		build.geometries = &geometryDesc;
+		build.geometryNum = 1;
+		build.scratchBuffer = staticResources.scratchBuffer.buffer;
+		build.scratchOffset = 0;
+		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
+
+		if (chunkIndex + 1 < staticScene.chunks.size())
+		{
+			// The static chunk path deliberately reuses one scratch buffer across many BLAS builds.
+			// Serialize reuse explicitly so later builds do not stomp scratch data that the GPU is still consuming.
+			nri::BufferBarrierDesc scratchBarrier = {};
+			scratchBarrier.buffer = staticResources.scratchBuffer.buffer;
+			scratchBarrier.before = NRIAccelerationStructureScratchAccess();
+			scratchBarrier.after = NRIAccelerationStructureScratchAccess();
+
+			nri::BarrierDesc scratchBarrierDesc = {};
+			scratchBarrierDesc.buffers = &scratchBarrier;
+			scratchBarrierDesc.bufferNum = 1;
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, scratchBarrierDesc);
+		}
+
+		nri::BufferBarrierDesc barrier = {};
+		barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
+		barrier.before = NRIAccelerationStructureWriteAccess();
+		barrier.after = NRIAccelerationStructureReadAccess();
+		blasBarriers.push_back(barrier);
+	}
+
+	if (!blasBarriers.empty())
+	{
+		nri::BarrierDesc blasBarrierDesc = {};
+		blasBarrierDesc.buffers = blasBarriers.data();
+		blasBarrierDesc.bufferNum = (uint32_t)blasBarriers.size();
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, blasBarrierDesc);
+	}
+
+	std::vector<nri::TopLevelInstance> instances;
+	std::vector<SceneInstanceData> sceneInstances;
+	BuildStaticMapInstances(staticScene, instances, sceneInstances);
+	staticResources.sceneInstances = sceneInstances;
+	staticResources.accelerationBuildSerial = staticScene.buildSerial;
+	return
+		BuildTopLevelAccelerationStructure(
+			instances,
+			SceneDataBufferMask_Static,
+			staticResources.topLevelAS,
+			staticResources.tlasInstanceBuffer,
+			staticResources.topLevelScratchBuffer,
+			&staticResources.vertexBuffer,
+			&staticResources.indexBuffer,
+			&staticResources.tlasInstanceCount,
+			updateLiveState);
+}
+
 void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask) const
+{
+	BuildStaticMapInstances(mStaticMapScene, outTlasInstances, outSceneInstances, replacedChunkMask);
+}
+
+void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask) const
 {
 	outTlasInstances.clear();
 	outSceneInstances.clear();
-	outTlasInstances.reserve(mStaticMapScene.chunks.size());
-	outSceneInstances.reserve(mStaticMapScene.chunks.size());
+	outTlasInstances.reserve(staticScene.chunks.size());
+	outSceneInstances.reserve(staticScene.chunks.size());
 
-	for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)mStaticMapScene.chunks.size(); ++chunkIndex)
+	for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)staticScene.chunks.size(); ++chunkIndex)
 	{
-		const auto& chunk = mStaticMapScene.chunks[chunkIndex];
+		const auto& chunk = staticScene.chunks[chunkIndex];
 		if (replacedChunkMask != nullptr &&
 			chunk.chunkIndex < replacedChunkMask->size() &&
 			(*replacedChunkMask)[chunk.chunkIndex] != 0)
@@ -16145,16 +16614,39 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 
 bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask)
 {
+	return BuildTopLevelAccelerationStructure(
+		instances,
+		sceneBufferMask,
+		mTopLevelAS,
+		mTlasInstanceBuffer,
+		mTopLevelScratchBuffer,
+		&mStaticVertexBuffer,
+		&mStaticIndexBuffer,
+		&mActiveTlasInstanceCount,
+		true);
+}
+
+bool NRIRenderer::BuildTopLevelAccelerationStructure(
+	const std::vector<nri::TopLevelInstance>& instances,
+	uint32_t sceneBufferMask,
+	NRIAccelerationStructureResource& topLevelAS,
+	NRIBufferResource& tlasInstanceBuffer,
+	NRIBufferResource& topLevelScratchBuffer,
+	const NRIBufferResource* staticVertexBuffer,
+	const NRIBufferResource* staticIndexBuffer,
+	uint32_t* outTlasInstanceCount,
+	bool updateLiveState)
+{
 	if (instances.empty())
 	{
 		return false;
 	}
 
-	DestroyAccelerationStructureResource(mTopLevelAS);
+	DestroyAccelerationStructureResource(topLevelAS);
 
 	static SceneBufferDebugStats sTlasInstanceStats = { "TLASInstance" };
 	if (!EnsureStructuredBuffer(
-		mTlasInstanceBuffer,
+		tlasInstanceBuffer,
 		sTlasInstanceStats,
 		instances.data(),
 		instances.size() * sizeof(nri::TopLevelInstance),
@@ -16169,60 +16661,60 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopL
 	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
 	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
 	tlasDesc.geometryOrInstanceNum = (uint32_t)instances.size();
-	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, mTopLevelAS.accelerationStructure) != nri::Result::SUCCESS)
+	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, topLevelAS.accelerationStructure) != nri::Result::SUCCESS)
 	{
 		return false;
 	}
 
 	{
 		nri::MemoryDesc memoryDesc = {};
-		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*mTopLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-		mTopLevelAS.memorySize = memoryDesc.size;
-		mTopLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
+		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*topLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		topLevelAS.memorySize = memoryDesc.size;
+		topLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
 	}
 
-	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mTopLevelAS.accelerationStructure);
-	if (mTopLevelScratchBuffer.buffer == nullptr || mTopLevelScratchBuffer.size < requiredScratchSize)
+	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*topLevelAS.accelerationStructure);
+	if (topLevelScratchBuffer.buffer == nullptr || topLevelScratchBuffer.size < requiredScratchSize)
 	{
-		DestroyBufferResource(mTopLevelScratchBuffer);
-		if (!CreateBufferWithoutView(mTopLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		DestroyBufferResource(topLevelScratchBuffer);
+		if (!CreateBufferWithoutView(topLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
 		{
 			return false;
 		}
 	}
 
-	if (mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*mTopLevelAS.accelerationStructure, mTopLevelAS.descriptor) != nri::Result::SUCCESS)
+	if (mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*topLevelAS.accelerationStructure, topLevelAS.descriptor) != nri::Result::SUCCESS)
 	{
 		return false;
 	}
 
 	nri::BuildTopLevelAccelerationStructureDesc tlasBuild = {};
-	tlasBuild.dst = mTopLevelAS.accelerationStructure;
+	tlasBuild.dst = topLevelAS.accelerationStructure;
 	tlasBuild.instanceNum = (uint32_t)instances.size();
-	tlasBuild.instanceBuffer = mTlasInstanceBuffer.buffer;
+	tlasBuild.instanceBuffer = tlasInstanceBuffer.buffer;
 	tlasBuild.instanceOffset = 0;
-	tlasBuild.scratchBuffer = mTopLevelScratchBuffer.buffer;
+	tlasBuild.scratchBuffer = topLevelScratchBuffer.buffer;
 	tlasBuild.scratchOffset = 0;
 	mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
 
 	nri::BufferBarrierDesc tlasBarrier = {};
-	tlasBarrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*mTopLevelAS.accelerationStructure);
+	tlasBarrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*topLevelAS.accelerationStructure);
 	tlasBarrier.before = NRIAccelerationStructureWriteAccess();
 	tlasBarrier.after = NRIComputeAccelerationStructureReadAccess();
 
 	std::vector<nri::BufferBarrierDesc> barriers;
 	barriers.reserve(5);
 	barriers.push_back(tlasBarrier);
-	if ((sceneBufferMask & SceneDataBufferMask_Static) != 0)
+	if ((sceneBufferMask & SceneDataBufferMask_Static) != 0 && staticVertexBuffer != nullptr && staticIndexBuffer != nullptr)
 	{
 		nri::BufferBarrierDesc vertexBarrier = {};
-		vertexBarrier.buffer = mStaticVertexBuffer.buffer;
+		vertexBarrier.buffer = staticVertexBuffer->buffer;
 		vertexBarrier.before = NRIAccelerationStructureBuildInputAccess();
 		vertexBarrier.after = NRIComputeShaderResourceAccess();
 		barriers.push_back(vertexBarrier);
 
 		nri::BufferBarrierDesc indexBarrier = {};
-		indexBarrier.buffer = mStaticIndexBuffer.buffer;
+		indexBarrier.buffer = staticIndexBuffer->buffer;
 		indexBarrier.before = NRIAccelerationStructureBuildInputAccess();
 		indexBarrier.after = NRIComputeShaderResourceAccess();
 		barriers.push_back(indexBarrier);
@@ -16247,13 +16739,21 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopL
 	barrierDesc.bufferNum = (uint32_t)barriers.size();
 	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
 
-	mActiveTlasInstanceCount = (uint32_t)instances.size();
-	if ((sceneBufferMask & SceneDataBufferMask_Static) != 0 &&
-		(sceneBufferMask & SceneDataBufferMask_Dynamic) == 0)
+	if (outTlasInstanceCount != nullptr)
 	{
-		mStaticMapScene.tlasInstanceCount = (uint32_t)instances.size();
-		mStaticMapScene.accelerationResident = true;
-		mBuiltStaticMapSceneASLastFrame = true;
+		*outTlasInstanceCount = (uint32_t)instances.size();
+	}
+
+	if (updateLiveState)
+	{
+		mActiveTlasInstanceCount = (uint32_t)instances.size();
+		if ((sceneBufferMask & SceneDataBufferMask_Static) != 0 &&
+			(sceneBufferMask & SceneDataBufferMask_Dynamic) == 0)
+		{
+			mStaticMapScene.tlasInstanceCount = (uint32_t)instances.size();
+			mStaticMapScene.accelerationResident = true;
+			mBuiltStaticMapSceneASLastFrame = true;
+		}
 	}
 	return true;
 }
@@ -18007,6 +18507,17 @@ void NRIRenderer::DestroyFrameTextures()
 void NRIRenderer::DestroySceneBuffers()
 {
 	mStaticMapScene.buffersResident = false;
+	DestroyStaticMapSceneResources(
+		mRuntimeMutationRebaselineCandidate.staticScene,
+		mRuntimeMutationRebaselineCandidate.staticResources,
+		false);
+	mRuntimeMutationRebaselineCandidate.runtimeMutations = {};
+	mRuntimeMutationRebaselineCandidate = {};
+	DestroyStaticMapSceneResources(
+		mRetiredRuntimeMutationRebaselineStaticScene.staticScene,
+		mRetiredRuntimeMutationRebaselineStaticScene.staticResources,
+		false);
+	mRetiredRuntimeMutationRebaselineStaticScene = {};
 	ResetPersistentDynamicEmissiveCache();
 	DestroyBufferResource(mStaticVertexBuffer);
 	DestroyBufferResource(mStaticIndexBuffer);
@@ -18084,6 +18595,16 @@ void NRIRenderer::DestroySceneBuffers()
 void NRIRenderer::DestroyAccelerationStructures()
 {
 	mStaticMapScene.accelerationResident = false;
+	for (auto& chunk : mRuntimeMutationRebaselineCandidate.staticScene.chunks)
+	{
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+	}
+	for (auto& chunk : mRetiredRuntimeMutationRebaselineStaticScene.staticScene.chunks)
+	{
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+	}
+	DestroyAccelerationStructureResource(mRuntimeMutationRebaselineCandidate.staticResources.topLevelAS);
+	DestroyAccelerationStructureResource(mRetiredRuntimeMutationRebaselineStaticScene.staticResources.topLevelAS);
 	for (auto& chunk : mStaticMapScene.chunks)
 	{
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
@@ -18099,6 +18620,41 @@ void NRIRenderer::DestroyAccelerationStructures()
 	mEmissiveTlasBuildCount = 0;
 	mEmissiveTlasInstancePayloadCacheValid = false;
 	mEmissiveTlasInstancePayloadHash = 0;
+}
+
+void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScene, StaticMapSceneResources& staticResources, bool waitForCommands)
+{
+	const bool hasResidentResources =
+		!staticScene.chunks.empty() ||
+		staticResources.vertexBuffer.buffer != nullptr ||
+		staticResources.indexBuffer.buffer != nullptr ||
+		staticResources.primitiveBuffer.buffer != nullptr ||
+		staticResources.materialBuffer.buffer != nullptr ||
+		staticResources.tlasInstanceBuffer.buffer != nullptr ||
+		staticResources.scratchBuffer.buffer != nullptr ||
+		staticResources.topLevelScratchBuffer.buffer != nullptr ||
+		staticResources.topLevelAS.accelerationStructure != nullptr;
+	if (waitForCommands && hasResidentResources && mFrameBuffer != nullptr)
+	{
+		WaitForCommandsTracked();
+	}
+
+	for (auto& chunk : staticScene.chunks)
+	{
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+	}
+
+	DestroyAccelerationStructureResource(staticResources.topLevelAS);
+	DestroyBufferResource(staticResources.vertexBuffer);
+	DestroyBufferResource(staticResources.indexBuffer);
+	DestroyBufferResource(staticResources.primitiveBuffer);
+	DestroyBufferResource(staticResources.materialBuffer);
+	DestroyBufferResource(staticResources.tlasInstanceBuffer);
+	DestroyBufferResource(staticResources.scratchBuffer);
+	DestroyBufferResource(staticResources.topLevelScratchBuffer);
+
+	staticScene = {};
+	staticResources = {};
 }
 
 void NRIRenderer::DestroyStaticMapSceneCache()

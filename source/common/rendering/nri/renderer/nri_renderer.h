@@ -82,6 +82,16 @@ public:
 		double materialBuildMs = 0.0;
 	};
 
+	enum class RuntimeMutationRebaselineState : uint32_t
+	{
+		Idle,
+		Queued,
+		BuildingAuthoritativeWorld,
+		WorldReady,
+		PreparingStaticScene,
+		ReadyToSwap
+	};
+
 	static constexpr size_t MaterialBuildTraceSlotCount = (size_t)MaterialBuildTraceSlot::Count;
 
 	struct PerfShellTraceStats
@@ -134,6 +144,9 @@ public:
 		double sceneTextureTransitionMs = 0.0;
 		double actorOverrideMapBuildMs = 0.0;
 		double materialBuildMs = 0.0;
+		double runtimeMutationRebaselineBuildWorldMs = 0.0;
+		double runtimeMutationRebaselinePrepareStaticSceneMs = 0.0;
+		double runtimeMutationRebaselineSwapMs = 0.0;
 		uint32_t runtimeMutationDirtyChunks = 0;
 		uint32_t runtimeMutationRebuiltChunks = 0;
 		uint32_t runtimeMutationHeldChunks = 0;
@@ -192,6 +205,13 @@ public:
 		uint32_t dynamicPrimitiveCount = 0;
 		uint32_t activeMaterialCount = 0;
 		uint32_t sceneInstanceCount = 0;
+		uint32_t runtimeMutationRebaselineQueueFrame = 0;
+		uint32_t runtimeMutationRebaselineActiveChunkCount = 0;
+		uint32_t runtimeMutationRebaselineStableChunkCount = 0;
+		uint32_t runtimeMutationRebaselineFramesQueued = 0;
+		uint32_t runtimeMutationRebaselineState = 0;
+		uint64_t runtimeMutationRebaselineCandidateBuildSerial = 0;
+		bool runtimeMutationRebaselineQueued = false;
 		bool usedStaticMapScene = false;
 		bool usedDynamicOverlay = false;
 		bool usedPersistentDynamicEmissiveCache = false;
@@ -271,6 +291,7 @@ public:
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
 	MemoryTelemetry GetMemoryTelemetry() const;
 	static const char* GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot);
+	static const char* GetRuntimeMutationRebaselineStateName(RuntimeMutationRebaselineState state);
 
 private:
 	enum class FrameTextureSlot : uint32_t
@@ -820,11 +841,43 @@ private:
 		uint32_t reserved1 = 0;
 	};
 
+	struct StaticMapSceneResources
+	{
+		NRIBufferResource vertexBuffer;
+		NRIBufferResource indexBuffer;
+		NRIBufferResource primitiveBuffer;
+		NRIBufferResource materialBuffer;
+		NRIBufferResource tlasInstanceBuffer;
+		NRIBufferResource scratchBuffer;
+		NRIBufferResource topLevelScratchBuffer;
+		NRIAccelerationStructureResource topLevelAS;
+		uint64_t accelerationBuildSerial = 0;
+		uint32_t tlasInstanceCount = 0;
+		std::vector<SceneInstanceData> sceneInstances;
+	};
+
 	enum SceneDataBufferMask : uint32_t
 	{
 		SceneDataBufferMask_None = 0,
 		SceneDataBufferMask_Static = 1 << 0,
 		SceneDataBufferMask_Dynamic = 1 << 1,
+	};
+
+	struct RuntimeMutationRebaselineCandidate
+	{
+		bool valid = false;
+		nri_scene::PTMapWorld world;
+		StaticMapSceneCache staticScene;
+		RuntimeMapMutationCache runtimeMutations;
+		StaticMapSceneResources staticResources;
+		uint64_t pendingGeometryBuildSerial = 0;
+	};
+
+	struct RuntimeMutationRebaselineRetiredStaticScene
+	{
+		bool valid = false;
+		StaticMapSceneCache staticScene;
+		StaticMapSceneResources staticResources;
 	};
 
 	bool CreatePipelineLayout();
@@ -839,6 +892,11 @@ private:
 	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
+	bool BuildStaticMapSceneCache(
+		const nri_scene::PTMapWorld& mapWorld,
+		const PreservedStaticMapSkyState* preservedSkyState,
+		StaticMapSceneCache& outStaticScene,
+		RuntimeMapMutationCache& outRuntimeMutations);
 	bool RefreshStaticMapAnimatedMaterials();
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool UploadSceneBuffers(
@@ -849,7 +907,21 @@ private:
 		const nri_scene::GeometryData& geometry,
 		const std::vector<nri_scene::MaterialData>& materials);
 	bool BuildStaticMapAccelerationStructures();
+	bool BuildStaticMapAccelerationStructures(
+		StaticMapSceneCache& staticScene,
+		StaticMapSceneResources& staticResources,
+		bool updateLiveState);
 	bool BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask);
+	bool BuildTopLevelAccelerationStructure(
+		const std::vector<nri::TopLevelInstance>& instances,
+		uint32_t sceneBufferMask,
+		NRIAccelerationStructureResource& topLevelAS,
+		NRIBufferResource& tlasInstanceBuffer,
+		NRIBufferResource& topLevelScratchBuffer,
+		const NRIBufferResource* staticVertexBuffer,
+		const NRIBufferResource* staticIndexBuffer,
+		uint32_t* outTlasInstanceCount,
+		bool updateLiveState);
 	bool BuildEmissiveTopLevelAccelerationStructure();
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
 	bool RefreshResidentStaticSceneDataSet();
@@ -899,6 +971,7 @@ private:
 	bool IsCurrentSceneDataDescriptorsInitialized() const;
 	void SetCurrentSceneDataDescriptorsInitialized(bool value);
 	void BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr) const;
+	void BuildStaticMapInstances(const StaticMapSceneCache& staticScene, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr) const;
 	void BuildFilteredStaticMapGeometry(const std::vector<uint8_t>& replacedChunkMask, nri_scene::GeometryData& outGeometry) const;
 	bool RestoreStaticTopLevelScene();
 	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
@@ -951,6 +1024,10 @@ private:
 	bool RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials);
 	void RebuildStartupMutationBaseline();
 	void RebuildRuntimeMutationBaseline();
+	void AdvanceRuntimeMutationRebaseline();
+	bool PrepareRuntimeMutationRebaselineStaticScene();
+	bool SwapRuntimeMutationRebaselineCandidate();
+	void ResetRuntimeMutationRebaselineState(bool destroyCandidateResources);
 	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel = nullptr);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials);
@@ -973,6 +1050,7 @@ private:
 	void DestroySceneBuffers();
 	void DestroyAccelerationStructures();
 	void DestroyStaticMapSceneCache();
+	void DestroyStaticMapSceneResources(StaticMapSceneCache& staticScene, StaticMapSceneResources& staticResources, bool waitForCommands);
 	void DestroyBufferResource(NRIBufferResource& resource);
 	void DestroyAccelerationStructureResource(NRIAccelerationStructureResource& resource);
 	const NRIBufferResource& GetActiveVertexBuffer() const;
@@ -1000,6 +1078,7 @@ private:
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
 	void ResetPerfTraceStats();
+	void UpdateRuntimeMutationRebaselinePerfStats();
 	void WaitForCommandsTracked();
 	void NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth);
 	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) { return mFrameTextures[(size_t)slot]; }
@@ -1100,6 +1179,8 @@ private:
 	NRIUpscalerContext mUpscaler;
 	nri_scene::PTMapWorld mMapWorld;
 	StaticMapSceneCache mStaticMapScene;
+	RuntimeMutationRebaselineCandidate mRuntimeMutationRebaselineCandidate = {};
+	RuntimeMutationRebaselineRetiredStaticScene mRetiredRuntimeMutationRebaselineStaticScene = {};
 	RuntimeMapMutationCache mRuntimeMapMutations;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
@@ -1208,11 +1289,18 @@ private:
 	bool mPendingStartupMutationRebaseline = false;
 	bool mPendingRuntimeMutationRebaseline = false;
 	bool mHasRuntimeMutationRebaseline = false;
+	RuntimeMutationRebaselineState mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::Idle;
 	uint64_t mObservedMapWorldBuildSerial = 0;
 	uint64_t mStartupMutationRebaselineDeadlineFrame = 0;
 	uint64_t mLastRuntimeMutationRebaselineFrame = 0;
 	uint32_t mPendingRuntimeMutationRebaselineActiveChunkCount = 0;
 	uint32_t mPendingRuntimeMutationRebaselineStableChunkCount = 0;
+	uint32_t mRuntimeMutationRebaselineQueueFrame = 0;
+	uint32_t mRuntimeMutationRebaselineLastAdvanceFrame = UINT32_MAX;
+	uint64_t mRuntimeMutationRebaselineExpectedGeometryBuildSerial = 0;
+	double mRuntimeMutationRebaselineBuildWorldMs = 0.0;
+	double mRuntimeMutationRebaselinePrepareStaticSceneMs = 0.0;
+	double mRuntimeMutationRebaselineSwapMs = 0.0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
 	uint32_t mActiveTlasInstanceCount = 0;
 	uint32_t mBoundStaticPrimitiveCount = 0;
