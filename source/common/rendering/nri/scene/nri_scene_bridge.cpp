@@ -975,6 +975,25 @@ namespace
 		}
 	}
 
+	FGameTexture* ResolveLiveDrawListWallTexture(const HWWall& wall)
+	{
+		if (wall.Sprite == nullptr || wall.Sprite->ownerActor == nullptr)
+		{
+			return wall.texture;
+		}
+
+		const auto& actor = *wall.Sprite->ownerActor;
+		if (actor.dispictex.isValid())
+		{
+			if (FGameTexture* liveTexture = TexMan.GetGameTexture(actor.dispictex))
+			{
+				return liveTexture;
+			}
+		}
+
+		return wall.texture;
+	}
+
 	void CaptureWalls(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outWalls, SceneDebugStats& stats, SceneView& outView)
 	{
 		for (auto* wall : list.walls)
@@ -1008,7 +1027,8 @@ namespace
 			{
 				extraFlags |= MaterialFlag_AlphaClip;
 			}
-			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, extraFlags);
+			FGameTexture* capturedTexture = ResolveLiveDrawListWallTexture(*wall);
+			surface.material = MakeMaterialRef(capturedTexture, wall->palette, wall->shade, wall->alpha, extraFlags);
 			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::DrawListWall, drawListType, GetOwnerActorIndex(*wall), surface.material.flags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
 			surface.vertices.reserve(wall->vertcount);
