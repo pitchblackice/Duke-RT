@@ -53,6 +53,7 @@ FConsoleBuffer::FConsoleBuffer()
 	mLastLineNeedsUpdate = false;
 	mTextLines = 0;
 	mBufferWasCleared = true;
+	mContentGeneration = 1;
 	mBrokenStart.Push(0);
 }
 
@@ -112,6 +113,7 @@ void FConsoleBuffer::AddText(int printlevel, const char *text)
 	// don't bother with linefeeds etc. inside the text, we'll let the formatter sort this out later.
 	build.AppendCStrPart(text, textsize);
 	mConsoleText.Push(build);
+	mContentGeneration++;
 }
 
 //==========================================================================
@@ -174,6 +176,6 @@ void FConsoleBuffer::ResizeBuffer(unsigned newsize)
 		unsigned todelete = mConsoleText.Size() - newsize;
 		mConsoleText.Delete(0, todelete);
 		mBufferWasCleared = true;
+		mContentGeneration++;
 	}
 }
-

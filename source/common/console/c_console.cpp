@@ -66,6 +66,8 @@
 #include "g_input.h"
 #include "c_commandbuffer.h"
 #include "vm.h"
+#include "gametexture.h"
+#include "textures.h"
 
 #define LEFTMARGIN 8
 #define RIGHTMARGIN 8
@@ -110,6 +112,149 @@ DEFINE_GLOBAL(ConsoleState)
 static int TopLine, InsertLine;
 
 static void ClearConsole ();
+
+struct ConsoleBodyCache
+{
+	FGameTexture* texture = nullptr;
+	int width = 0;
+	int height = 0;
+	int textScale = 0;
+	int conBottom = 0;
+	int rowAdjust = 0;
+	int visibleLines = 0;
+	int offset = 0;
+	int displayWidth = 0;
+	uint64_t contentGeneration = 0;
+	FFont* font = nullptr;
+
+	void InvalidateLayout()
+	{
+		textScale = 0;
+		conBottom = 0;
+		rowAdjust = 0;
+		visibleLines = 0;
+		offset = 0;
+		displayWidth = 0;
+		contentGeneration = 0;
+		font = nullptr;
+	}
+
+	void ResetTexture()
+	{
+		if (texture != nullptr)
+		{
+			delete texture;
+			texture = nullptr;
+		}
+		width = 0;
+		height = 0;
+		InvalidateLayout();
+	}
+
+	FCanvasTexture* EnsureTexture(int newWidth, int newHeight)
+	{
+		if (newWidth <= 0 || newHeight <= 0)
+		{
+			ResetTexture();
+			return nullptr;
+		}
+
+		if (texture == nullptr || width != newWidth || height != newHeight)
+		{
+			ResetTexture();
+			texture = MakeGameTexture(new FCanvasTexture(newWidth, newHeight), nullptr, ETextureType::SWCanvas);
+			if (texture == nullptr)
+			{
+				return nullptr;
+			}
+			width = newWidth;
+			height = newHeight;
+			texture->SetDisplaySize((float)newWidth, (float)newHeight);
+			InvalidateLayout();
+		}
+
+		return static_cast<FCanvasTexture*>(texture->GetTexture());
+	}
+
+	bool MatchesLayout(FFont* currentFont, int currentTextScale, int currentConBottom, int currentRowAdjust, int currentVisibleLines, int currentOffset, int currentDisplayWidth, uint64_t currentContentGeneration) const
+	{
+		return texture != nullptr &&
+			font == currentFont &&
+			textScale == currentTextScale &&
+			conBottom == currentConBottom &&
+			rowAdjust == currentRowAdjust &&
+			visibleLines == currentVisibleLines &&
+			offset == currentOffset &&
+			displayWidth == currentDisplayWidth &&
+			contentGeneration == currentContentGeneration;
+	}
+
+	void StoreLayout(FFont* currentFont, int currentTextScale, int currentConBottom, int currentRowAdjust, int currentVisibleLines, int currentOffset, int currentDisplayWidth, uint64_t currentContentGeneration)
+	{
+		font = currentFont;
+		textScale = currentTextScale;
+		conBottom = currentConBottom;
+		rowAdjust = currentRowAdjust;
+		visibleLines = currentVisibleLines;
+		offset = currentOffset;
+		displayWidth = currentDisplayWidth;
+		contentGeneration = currentContentGeneration;
+	}
+};
+
+static ConsoleBodyCache gConsoleBodyCache;
+
+static bool RebuildConsoleBodyCache(FConsoleBuffer* buffer, FBrokenLines* blines, FBrokenLines* printline, int visibleLines, int textScale, int offset, int displayWidth)
+{
+	if (screen == nullptr || twod == nullptr || buffer == nullptr || blines == nullptr || printline == nullptr || CurrentConsoleFont == nullptr)
+	{
+		return false;
+	}
+
+	FRenderState* renderState = screen->RenderState();
+	if (renderState == nullptr)
+	{
+		return false;
+	}
+
+	FCanvasTexture* cacheTexture = gConsoleBodyCache.EnsureTexture(twod->GetWidth(), twod->GetHeight());
+	if (cacheTexture == nullptr)
+	{
+		return false;
+	}
+
+	F2DDrawer cacheDrawer;
+	cacheDrawer.Begin(twod->GetWidth(), twod->GetHeight());
+	cacheDrawer.ClearScreen(0x00000000);
+
+	{
+		PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleBody);
+		int linesRemaining = visibleLines;
+		for (FBrokenLines* line = printline; line >= blines && linesRemaining > 0; line--, linesRemaining--)
+		{
+			if (textScale == 1)
+			{
+				DrawText(&cacheDrawer, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + linesRemaining * CurrentConsoleFont->GetHeight(), line->Text.GetChars(), TAG_DONE);
+			}
+			else
+			{
+				DrawText(&cacheDrawer, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + linesRemaining * CurrentConsoleFont->GetHeight(), line->Text.GetChars(),
+					DTA_VirtualWidth, twod->GetWidth() / textScale,
+					DTA_VirtualHeight, twod->GetHeight() / textScale,
+					DTA_KeepRatio, true, TAG_DONE);
+			}
+		}
+	}
+
+	cacheDrawer.End();
+	screen->RenderTextureView(cacheTexture, [&](IntRect&)
+	{
+		::Draw2D(&cacheDrawer, *renderState, 0, 0, twod->GetWidth(), twod->GetHeight());
+	});
+
+	gConsoleBodyCache.StoreLayout(CurrentConsoleFont, textScale, ConBottom, RowAdjust, visibleLines, offset, displayWidth, buffer->GetContentGeneration());
+	return true;
+}
 
 struct GameAtExit
 {
@@ -656,31 +801,57 @@ void C_DrawConsole ()
 	if (lines > 0)
 	{
 		// No more enqueuing because adding new text to the console won't touch the actual print data.
-		conbuffer->FormatText(CurrentConsoleFont, ConWidth / textScale);
+		const int displayWidth = ConWidth / textScale;
+		conbuffer->FormatText(CurrentConsoleFont, displayWidth);
 		unsigned int consolelines = conbuffer->GetFormattedLineCount();
 		FBrokenLines *blines = conbuffer->GetLines();
 		if (blines != nullptr)
 		{
 			FBrokenLines* printline = blines + consolelines - 1 - RowAdjust;
 			uint32_t visibleLines = 0;
+			int visibleLineCount = 0;
 
 			int bottomline = ConBottom / textScale - CurrentConsoleFont->GetHeight() * 2 - 4;
-
+			for (FBrokenLines* p = printline; p >= blines && visibleLineCount < lines; p--)
 			{
-				PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleBody);
-				for (FBrokenLines* p = printline; p >= blines && lines > 0; p--, lines--)
+				visibleLineCount++;
+			}
+
+			if (visibleLineCount > 0)
+			{
+				const bool cacheValid = gConsoleBodyCache.MatchesLayout(CurrentConsoleFont, textScale, ConBottom, RowAdjust, visibleLineCount, offset, displayWidth, conbuffer->GetContentGeneration());
+				if (!cacheValid)
 				{
-					visibleLines++;
-					if (textScale == 1)
+					RebuildConsoleBodyCache(conbuffer, blines, printline, visibleLineCount, textScale, offset, displayWidth);
+				}
+
+				if (gConsoleBodyCache.texture != nullptr && gConsoleBodyCache.MatchesLayout(CurrentConsoleFont, textScale, ConBottom, RowAdjust, visibleLineCount, offset, displayWidth, conbuffer->GetContentGeneration()))
+				{
+					DrawTexture(twod, gConsoleBodyCache.texture, false, 0, 0,
+						DTA_DestWidth, twod->GetWidth(),
+						DTA_DestHeight, twod->GetHeight(),
+						DTA_Masked, false,
+						TAG_DONE);
+					visibleLines = (uint32_t)visibleLineCount;
+				}
+				else
+				{
+					PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleBody);
+					int linesRemaining = lines;
+					for (FBrokenLines* p = printline; p >= blines && linesRemaining > 0; p--, linesRemaining--)
 					{
-						DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + lines * CurrentConsoleFont->GetHeight(), p->Text.GetChars(), TAG_DONE);
-					}
-					else
-					{
-						DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + lines * CurrentConsoleFont->GetHeight(), p->Text.GetChars(),
-							DTA_VirtualWidth, twod->GetWidth() / textScale,
-							DTA_VirtualHeight, twod->GetHeight() / textScale,
-							DTA_KeepRatio, true, TAG_DONE);
+						visibleLines++;
+						if (textScale == 1)
+						{
+							DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + linesRemaining * CurrentConsoleFont->GetHeight(), p->Text.GetChars(), TAG_DONE);
+						}
+						else
+						{
+							DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + linesRemaining * CurrentConsoleFont->GetHeight(), p->Text.GetChars(),
+								DTA_VirtualWidth, twod->GetWidth() / textScale,
+								DTA_VirtualHeight, twod->GetHeight() / textScale,
+								DTA_KeepRatio, true, TAG_DONE);
+						}
 					}
 				}
 			}

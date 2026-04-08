@@ -57,6 +57,7 @@ class FConsoleBuffer
 	EAddType mAddType;
 	int mTextLines;
 	bool mBufferWasCleared;
+	uint64_t mContentGeneration;
 
 	FFont *mLastFont;
 	int mLastDisplayWidth;
@@ -72,8 +73,9 @@ public:
 	{
 		mBufferWasCleared = true;
 		mConsoleText.Clear();
+		mContentGeneration++;
 	}
 	int GetFormattedLineCount() { return mTextLines; }
 	FBrokenLines *GetLines() { return &mBrokenLines[0]; }
+	uint64_t GetContentGeneration() const { return mContentGeneration; }
 };
-
