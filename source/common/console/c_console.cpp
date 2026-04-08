@@ -206,13 +206,7 @@ static ConsoleBodyCache gConsoleBodyCache;
 
 static bool RebuildConsoleBodyCache(FConsoleBuffer* buffer, FBrokenLines* blines, FBrokenLines* printline, int visibleLines, int textScale, int offset, int displayWidth)
 {
-	if (screen == nullptr || twod == nullptr || buffer == nullptr || blines == nullptr || printline == nullptr || CurrentConsoleFont == nullptr)
-	{
-		return false;
-	}
-
-	FRenderState* renderState = screen->RenderState();
-	if (renderState == nullptr)
+	if (twod == nullptr || buffer == nullptr || blines == nullptr || printline == nullptr || CurrentConsoleFont == nullptr)
 	{
 		return false;
 	}
@@ -223,7 +217,15 @@ static bool RebuildConsoleBodyCache(FConsoleBuffer* buffer, FBrokenLines* blines
 		return false;
 	}
 
-	F2DDrawer cacheDrawer;
+	if (cacheTexture->Canvas == nullptr)
+	{
+		cacheTexture->Canvas = Create<FCanvas>();
+		cacheTexture->Canvas->Tex = cacheTexture;
+		cacheTexture->Canvas->Drawer.SetSize(twod->GetWidth(), twod->GetHeight());
+	}
+
+	F2DDrawer& cacheDrawer = cacheTexture->Canvas->Drawer;
+	cacheDrawer.Clear();
 	cacheDrawer.Begin(twod->GetWidth(), twod->GetHeight());
 	cacheDrawer.ClearScreen(0x00000000);
 
@@ -247,10 +249,7 @@ static bool RebuildConsoleBodyCache(FConsoleBuffer* buffer, FBrokenLines* blines
 	}
 
 	cacheDrawer.End();
-	screen->RenderTextureView(cacheTexture, [&](IntRect&)
-	{
-		::Draw2D(&cacheDrawer, *renderState, 0, 0, twod->GetWidth(), twod->GetHeight());
-	});
+	cacheTexture->NeedUpdate();
 
 	gConsoleBodyCache.StoreLayout(CurrentConsoleFont, textScale, ConBottom, RowAdjust, visibleLines, offset, displayWidth, buffer->GetContentGeneration());
 	return true;
