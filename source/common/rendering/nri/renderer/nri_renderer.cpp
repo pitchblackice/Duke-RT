@@ -13687,12 +13687,39 @@ void NRIRenderer::PrepareSceneTextureInputsForCompute()
 		}
 	}
 
+	for (NRITextureResource* resource : mLiveSceneTextureResources)
+	{
+		if (resource != nullptr && resource->texture != nullptr)
+		{
+			transitionCount++;
+			mFrameBuffer->TransitionTexture(*resource, NRIComputeShaderResourceState());
+		}
+	}
+
 	const double transitionMs = tracePerf ? DurationMs(transitionStart, std::chrono::steady_clock::now()) : 0.0;
 	mSceneTextureCacheDebugStats.transitionCountLastFrame = transitionCount;
 	mSceneTextureCacheDebugStats.transitionMsLastFrame = transitionMs;
 	mLastPerfShellTraceStats.sceneTextureCacheCount = (uint32_t)mTextureCache.size();
 	mLastPerfShellTraceStats.sceneTextureTransitionCount = transitionCount;
 	mLastPerfShellTraceStats.sceneTextureTransitionMs = transitionMs;
+}
+
+void NRIRenderer::TrackLiveSceneTextureResource(NRITextureResource& resource)
+{
+	if (resource.texture == nullptr)
+	{
+		return;
+	}
+
+	for (NRITextureResource* existing : mLiveSceneTextureResources)
+	{
+		if (existing == &resource)
+		{
+			return;
+		}
+	}
+
+	mLiveSceneTextureResources.push_back(&resource);
 }
 
 bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
@@ -14592,6 +14619,7 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	mSceneTextureCacheDebugStats.lookupMsLastBuild = 0.0;
 	mSceneTextureCacheDebugStats.realizeMsLastBuild = 0.0;
 	mSceneTextureCacheDebugStats.descriptorMsLastBuild = 0.0;
+	mLiveSceneTextureResources.clear();
 	mLastPerfShellTraceStats.sceneTextureCacheCount = (uint32_t)mTextureCache.size();
 	mLastPerfShellTraceStats.sceneTextureCacheMisses = 0;
 	mLastPerfShellTraceStats.sceneTextureCacheInserts = 0;
@@ -14626,6 +14654,17 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	for (uint32_t i = 0; i < std::min<uint32_t>((uint32_t)materials.textures.size(), NRI_MAX_SCENE_TEXTURES); ++i)
 	{
 		const auto& upload = materials.textures[i];
+		if (mFrameBuffer->mActiveCanvasSourceTexture != nullptr &&
+			upload.sourceTexture == mFrameBuffer->mActiveCanvasSourceTexture)
+		{
+			if (!sLoggedActiveCanvasTextureReuse || nri_ptdebug > 0)
+			{
+				Printf(TEXTCOLOR_ORANGE "NRI PT textures: using a fallback descriptor for the canvas currently being rendered to avoid self-referential camera-texture uploads.\n");
+				sLoggedActiveCanvasTextureReuse = true;
+			}
+			continue;
+		}
+
 		if (upload.sourceTexture != nullptr && upload.sourceTexture->isHardwareCanvas())
 		{
 			auto* hardwareTexture = static_cast<NRIHardwareTexture*>(upload.sourceTexture->GetHardwareTexture(0, 0));
@@ -14635,6 +14674,7 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 				if (hardwareTexture->GetResource().shaderView != nullptr)
 				{
 					descriptors[2 + i] = hardwareTexture->GetResource().shaderView;
+					TrackLiveSceneTextureResource(hardwareTexture->GetResource());
 					continue;
 				}
 			}
@@ -14659,17 +14699,6 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		if (it == mTextureCache.end())
 		{
 			lookupMisses++;
-		}
-		if (mFrameBuffer->mActiveCanvasSourceTexture != nullptr &&
-			upload.sourceTexture == mFrameBuffer->mActiveCanvasSourceTexture &&
-			it == mTextureCache.end())
-		{
-			if (!sLoggedActiveCanvasTextureReuse || nri_ptdebug > 0)
-			{
-				Printf(TEXTCOLOR_ORANGE "NRI PT textures: using a fallback descriptor for the canvas currently being rendered to avoid self-referential camera-texture uploads.\n");
-				sLoggedActiveCanvasTextureReuse = true;
-			}
-			continue;
 		}
 		if (it == mTextureCache.end())
 		{
@@ -14802,6 +14831,7 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 
 bool NRIRenderer::UseFallbackSceneTextures(bool preserveExistingSky, const char* reason)
 {
+	mLiveSceneTextureResources.clear();
 	if (!preserveExistingSky || GetActiveSkyTexture() == nullptr)
 	{
 		EnsureSkyTexture(nri_scene::SceneView{}, false);

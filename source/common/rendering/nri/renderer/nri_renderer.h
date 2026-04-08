@@ -1125,6 +1125,7 @@ private:
 	bool UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors);
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
+	void TrackLiveSceneTextureResource(NRITextureResource& resource);
 	void ResetPerfTraceStats();
 	void UpdateRuntimeMutationRebaselinePerfStats();
 	void WaitForCommandsTracked();
@@ -1222,6 +1223,7 @@ private:
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
 	std::vector<CachedTexture> mTextureCache;
+	std::vector<NRITextureResource*> mLiveSceneTextureResources;
 	std::vector<CachedSkyTexture> mSkyTextureCache;
 	NRINrdContext mNrd;
 	NRIUpscalerContext mUpscaler;
