@@ -162,7 +162,7 @@ struct ConsoleBodyCache
 		if (texture == nullptr || width != newWidth || height != newHeight)
 		{
 			ResetTexture();
-			texture = MakeGameTexture(new FCanvasTexture(newWidth, newHeight), nullptr, ETextureType::SWCanvas);
+			texture = MakeGameTexture(new FCanvasTexture(newWidth, newHeight), nullptr, ETextureType::Any);
 			if (texture == nullptr)
 			{
 				return nullptr;
