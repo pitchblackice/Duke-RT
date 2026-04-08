@@ -3218,6 +3218,7 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		mUpscaler.IsUpscalerSupported(*mDevice, nri::UpscalerType::DLRR) ? "yes" : "no",
 		(int)nri_ptportaldepth);
 	const auto& frameGenPolicy = mFrameGeneration.GetPolicy();
+	const auto& frameGenPresentContract = mFrameGeneration.GetPresentContract();
 	Printf("NRI PT framegen caps: requested=%s provider=%s resolved=%s output=%s->%s contract=%s scope=%s api=%s shader_model=%u.%u window=%s low_latency=%s->%s(avail=%s iface=%s swapchain=%s) async=%s->%s(avail=%s) ui=%s->%s swapchain=%s native=device:%s queue:%s swapchain:%s waitable=%s runtime=%s reason=%s\n",
 		frameGenPolicy.requestedEnabled ? "on" : "off",
 		NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
@@ -3247,6 +3248,21 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.waitableSwapChainAvailable),
 		NRIFrameGenerationContext::GetAvailabilityName(frameGenPolicy.providerRuntimeSupported),
 		frameGenPolicy.resolvedReason);
+	Printf("NRI PT framegen present contract: output=%s->%s proxy=%s hdr_swapchain=%s swapchain=%s texture=%s active=%s dxgi=%s active_dxgi=%s transfer=%s luminance=%.3f..%.3f hdr_scale=%.3f reason=%s\n",
+		GetNRIPTOutputModeName(frameGenPresentContract.requestedOutputMode),
+		GetNRIPTOutputModeName(frameGenPresentContract.resolvedOutputMode),
+		NRIFrameGenerationContext::GetAvailabilityName(frameGenPresentContract.proxyAllowed),
+		NRIFrameGenerationContext::GetAvailabilityName(frameGenPresentContract.usesHdrSwapChain),
+		NRIFrameGenerationContext::GetSwapChainFormatName(frameGenPresentContract.createdSwapChainFormat),
+		NRIFrameGenerationContext::GetNriFormatName(frameGenPresentContract.resolvedTextureFormat),
+		NRIFrameGenerationContext::GetNriFormatName(frameGenPresentContract.activePresentTargetFormat),
+		frameGenPresentContract.resolvedDxgiFormatValid ? NRIFrameGenerationContext::GetDxgiFormatName(frameGenPresentContract.resolvedDxgiFormat) : "unknown",
+		frameGenPresentContract.activePresentTargetDxgiFormatValid ? NRIFrameGenerationContext::GetDxgiFormatName(frameGenPresentContract.activePresentTargetDxgiFormat) : "unknown",
+		NRIFrameGenerationContext::GetPresentTransferFunctionName(frameGenPresentContract.transferFunction),
+		frameGenPresentContract.minLuminance,
+		frameGenPresentContract.maxLuminance,
+		frameGenPresentContract.hdrPaperWhiteScale,
+		frameGenPresentContract.resolvedReason);
 	Printf("NRI PT framegen native: device=%s queue=%s swapchain=%s path=%s\n",
 		mNativeD3D12Device != nullptr ? "ok" : "missing",
 		mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",

@@ -327,6 +327,28 @@ namespace
 			a.resolvedLowLatency == b.resolvedLowLatency;
 	}
 
+	static bool ArePresentContractsEquivalent(const NRIFrameGenerationPresentContract& a, const NRIFrameGenerationPresentContract& b)
+	{
+		return
+			a.initialized == b.initialized &&
+			a.proxyAllowed == b.proxyAllowed &&
+			a.usesHdrSwapChain == b.usesHdrSwapChain &&
+			a.resolvedDxgiFormatValid == b.resolvedDxgiFormatValid &&
+			a.activePresentTargetDxgiFormatValid == b.activePresentTargetDxgiFormatValid &&
+			a.requestedOutputMode == b.requestedOutputMode &&
+			a.resolvedOutputMode == b.resolvedOutputMode &&
+			a.createdSwapChainFormat == b.createdSwapChainFormat &&
+			a.resolvedTextureFormat == b.resolvedTextureFormat &&
+			a.activePresentTargetFormat == b.activePresentTargetFormat &&
+			a.resolvedDxgiFormat == b.resolvedDxgiFormat &&
+			a.activePresentTargetDxgiFormat == b.activePresentTargetDxgiFormat &&
+			a.transferFunction == b.transferFunction &&
+			a.minLuminance == b.minLuminance &&
+			a.maxLuminance == b.maxLuminance &&
+			a.hdrPaperWhiteScale == b.hdrPaperWhiteScale &&
+			a.resolvedReason == b.resolvedReason;
+	}
+
 }
 
 const char* NRIFrameGenerationContext::GetProviderName(NRIFrameGenerationProvider provider)
@@ -416,6 +438,65 @@ const char* NRIFrameGenerationContext::GetOutputContractName(NRIFrameGenerationO
 	}
 }
 
+const char* NRIFrameGenerationContext::GetPresentTransferFunctionName(NRIFrameGenerationPresentTransferFunction transferFunction)
+{
+	switch (transferFunction)
+	{
+	default:
+	case NRIFrameGenerationPresentTransferFunction::Unknown: return "unknown";
+	case NRIFrameGenerationPresentTransferFunction::SRGB: return "srgb";
+	case NRIFrameGenerationPresentTransferFunction::PQ: return "pq";
+	case NRIFrameGenerationPresentTransferFunction::ScRGB: return "scrgb";
+	}
+}
+
+const char* NRIFrameGenerationContext::GetSwapChainFormatName(nri::SwapChainFormat format)
+{
+	switch (format)
+	{
+	default: return "unknown";
+	case nri::SwapChainFormat::BT709_G10_16BIT: return "BT709_G10_16BIT";
+	case nri::SwapChainFormat::BT709_G22_8BIT: return "BT709_G22_8BIT";
+	case nri::SwapChainFormat::BT709_G22_10BIT: return "BT709_G22_10BIT";
+	case nri::SwapChainFormat::BT2020_G2084_10BIT: return "BT2020_G2084_10BIT";
+	}
+}
+
+const char* NRIFrameGenerationContext::GetNriFormatName(nri::Format format)
+{
+	switch (format)
+	{
+	default: return "unknown";
+	case nri::Format::BGRA8_UNORM: return "BGRA8_UNORM";
+	case nri::Format::RGBA8_UNORM: return "RGBA8_UNORM";
+	case nri::Format::BGRA8_SRGB: return "BGRA8_SRGB";
+	case nri::Format::RGBA8_SRGB: return "RGBA8_SRGB";
+	case nri::Format::R10_G10_B10_A2_UNORM: return "R10_G10_B10_A2_UNORM";
+	case nri::Format::RGBA16_SFLOAT: return "RGBA16_SFLOAT";
+	case nri::Format::UNKNOWN: return "UNKNOWN";
+	}
+}
+
+const char* NRIFrameGenerationContext::GetDxgiFormatName(uint32_t format)
+{
+#ifdef _WIN32
+	switch ((DXGI_FORMAT)format)
+	{
+	default: return "unknown";
+	case DXGI_FORMAT_UNKNOWN: return "UNKNOWN";
+	case DXGI_FORMAT_B8G8R8A8_UNORM: return "B8G8R8A8_UNORM";
+	case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return "B8G8R8A8_UNORM_SRGB";
+	case DXGI_FORMAT_R8G8B8A8_UNORM: return "R8G8B8A8_UNORM";
+	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return "R8G8B8A8_UNORM_SRGB";
+	case DXGI_FORMAT_R10G10B10A2_UNORM: return "R10G10B10A2_UNORM";
+	case DXGI_FORMAT_R16G16B16A16_FLOAT: return "R16G16B16A16_FLOAT";
+	}
+#else
+	(void)format;
+	return "unsupported";
+#endif
+}
+
 const char* NRIFrameGenerationContext::GetWindowModeName(bool fullscreen)
 {
 	return fullscreen ? "fullscreen" : "windowed";
@@ -496,6 +577,7 @@ void NRIFrameGenerationContext::Shutdown()
 	mHasFrameDesc = false;
 	mHasLoggedPolicy = false;
 	mPolicy = {};
+	mPresentContract = {};
 	mLastFrameDesc = {};
 	mLastInputAudit = {};
 	ResetLowLatencyState();
@@ -505,8 +587,12 @@ void NRIFrameGenerationContext::Shutdown()
 void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer, bool logChanges)
 {
 	const NRIFrameGenerationPolicy newPolicy = BuildPolicy(frameBuffer);
-	const bool changed = !ArePoliciesEquivalent(mPolicy, newPolicy);
+	const NRIFrameGenerationPresentContract newPresentContract = BuildPresentContract(frameBuffer);
+	const bool changed =
+		!ArePoliciesEquivalent(mPolicy, newPolicy) ||
+		!ArePresentContractsEquivalent(mPresentContract, newPresentContract);
 	mPolicy = newPolicy;
+	mPresentContract = newPresentContract;
 	mLowLatencyState.interfaceAvailable = mPolicy.lowLatencyInterfaceAvailable;
 	mLowLatencyState.swapChainEnabled = mPolicy.lowLatencySwapChainEnabled;
 
@@ -541,6 +627,21 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 			GetAvailabilityName(mPolicy.waitableSwapChainAvailable),
 			GetAvailabilityName(mPolicy.providerRuntimeSupported),
 			mPolicy.resolvedReason);
+		Printf("NRI frame generation present contract: output=%s->%s proxy=%s hdr_swapchain=%s swapchain=%s texture=%s active=%s dxgi=%s active_dxgi=%s transfer=%s luminance=%.3f..%.3f hdr_scale=%.3f reason=%s\n",
+			GetNRIPTOutputModeName(mPresentContract.requestedOutputMode),
+			GetNRIPTOutputModeName(mPresentContract.resolvedOutputMode),
+			GetAvailabilityName(mPresentContract.proxyAllowed),
+			GetAvailabilityName(mPresentContract.usesHdrSwapChain),
+			GetSwapChainFormatName(mPresentContract.createdSwapChainFormat),
+			GetNriFormatName(mPresentContract.resolvedTextureFormat),
+			GetNriFormatName(mPresentContract.activePresentTargetFormat),
+			mPresentContract.resolvedDxgiFormatValid ? GetDxgiFormatName(mPresentContract.resolvedDxgiFormat) : "unknown",
+			mPresentContract.activePresentTargetDxgiFormatValid ? GetDxgiFormatName(mPresentContract.activePresentTargetDxgiFormat) : "unknown",
+			GetPresentTransferFunctionName(mPresentContract.transferFunction),
+			mPresentContract.minLuminance,
+			mPresentContract.maxLuminance,
+			mPresentContract.hdrPaperWhiteScale,
+			mPresentContract.resolvedReason);
 	}
 
 	mHasLoggedPolicy = true;
@@ -700,6 +801,94 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 	policy.resolvedProvider = policy.requestedProvider;
 	policy.resolvedReason = "enabled";
 	return policy;
+}
+
+NRIFrameGenerationPresentContract NRIFrameGenerationContext::BuildPresentContract(const NRIRenderDevice& frameBuffer) const
+{
+	NRIFrameGenerationPresentContract contract = {};
+	const NRIPTOutputPolicy outputPolicy = frameBuffer.GetPathTracingOutputPolicy();
+	contract.initialized = true;
+	contract.requestedOutputMode = outputPolicy.requestedMode;
+	contract.resolvedOutputMode = outputPolicy.resolvedMode;
+	contract.createdSwapChainFormat = frameBuffer.mCreatedSwapChainFormat;
+	contract.resolvedTextureFormat = frameBuffer.mResolvedSwapChainTextureFormat;
+	contract.usesHdrSwapChain = outputPolicy.hdrSwapChainActive;
+	contract.hdrPaperWhiteScale = GetNRIPTHdrPaperWhiteScale(outputPolicy);
+
+#ifdef _WIN32
+	switch (contract.createdSwapChainFormat)
+	{
+	case nri::SwapChainFormat::BT709_G22_8BIT:
+		contract.resolvedDxgiFormat = (uint32_t)DXGI_FORMAT_B8G8R8A8_UNORM;
+		contract.resolvedDxgiFormatValid = true;
+		contract.transferFunction = NRIFrameGenerationPresentTransferFunction::SRGB;
+		contract.minLuminance = 0.0f;
+		contract.maxLuminance = 1.0f;
+		break;
+	case nri::SwapChainFormat::BT709_G22_10BIT:
+		contract.resolvedDxgiFormat = (uint32_t)DXGI_FORMAT_R10G10B10A2_UNORM;
+		contract.resolvedDxgiFormatValid = true;
+		contract.transferFunction = NRIFrameGenerationPresentTransferFunction::SRGB;
+		contract.minLuminance = 0.0f;
+		contract.maxLuminance = 1.0f;
+		break;
+	case nri::SwapChainFormat::BT709_G10_16BIT:
+		contract.resolvedDxgiFormat = (uint32_t)DXGI_FORMAT_R16G16B16A16_FLOAT;
+		contract.resolvedDxgiFormatValid = true;
+		contract.transferFunction = NRIFrameGenerationPresentTransferFunction::ScRGB;
+		contract.minLuminance = 0.0f;
+		contract.maxLuminance = GetNRIPTHdrMaxOutputScale(outputPolicy);
+		break;
+	case nri::SwapChainFormat::BT2020_G2084_10BIT:
+		contract.resolvedDxgiFormat = (uint32_t)DXGI_FORMAT_R10G10B10A2_UNORM;
+		contract.resolvedDxgiFormatValid = true;
+		contract.transferFunction = NRIFrameGenerationPresentTransferFunction::PQ;
+		contract.minLuminance = 0.0f;
+		contract.maxLuminance = 1.0f;
+		break;
+	default:
+		break;
+	}
+
+	if (frameBuffer.mCurrentPresentTarget != nullptr)
+	{
+		contract.activePresentTargetFormat = frameBuffer.mCurrentPresentTarget->format;
+		if (ID3D12Resource* nativePresentTarget = GetNativeTexture(frameBuffer.mCore, frameBuffer.mCurrentPresentTarget))
+		{
+			contract.activePresentTargetDxgiFormat = (uint32_t)nativePresentTarget->GetDesc().Format;
+			contract.activePresentTargetDxgiFormatValid = true;
+		}
+	}
+#else
+	(void)outputPolicy;
+	contract.minLuminance = 0.0f;
+	contract.maxLuminance = 1.0f;
+#endif
+
+	if (!contract.resolvedDxgiFormatValid)
+	{
+		contract.proxyAllowed = false;
+		contract.resolvedReason = "swapchain-format-unmapped";
+		return contract;
+	}
+
+	if (contract.requestedOutputMode != NRIPTOutputMode::SDR)
+	{
+		contract.proxyAllowed = false;
+		contract.resolvedReason = "requested-output-not-sdr";
+		return contract;
+	}
+
+	if (contract.resolvedOutputMode != NRIPTOutputMode::SDR)
+	{
+		contract.proxyAllowed = false;
+		contract.resolvedReason = "resolved-output-not-sdr";
+		return contract;
+	}
+
+	contract.proxyAllowed = true;
+	contract.resolvedReason = "proxy-sdr-display-ready";
+	return contract;
 }
 
 void NRIFrameGenerationContext::OnSwapChainCreated(const NRIRenderDevice& frameBuffer)
@@ -1221,6 +1410,13 @@ bool NRIFrameGenerationContext::EnsureProviderPresentBridge(const NRIRenderDevic
 		return false;
 	}
 
+	const NRIFrameGenerationPresentContract presentContract = BuildPresentContract(frameBuffer);
+	if (!presentContract.proxyAllowed)
+	{
+		CopyString(mProviderState.lastStatusReason, std::size(mProviderState.lastStatusReason), presentContract.resolvedReason);
+		return false;
+	}
+
 	if (frameBuffer.GetNativeD3D12GraphicsQueue() == nullptr || mainwindow.GetHandle() == nullptr)
 	{
 		std::strncpy(mProviderState.lastStatusReason, "present-bridge-prereq-missing", std::size(mProviderState.lastStatusReason) - 1u);
@@ -1258,7 +1454,7 @@ bool NRIFrameGenerationContext::EnsureProviderPresentBridge(const NRIRenderDevic
 	auto& mutableFrameBuffer = const_cast<NRIRenderDevice&>(frameBuffer);
 	desc1.Width = (UINT)(std::max)(mutableFrameBuffer.GetClientWidth(), 1);
 	desc1.Height = (UINT)(std::max)(mutableFrameBuffer.GetClientHeight(), 1);
-	desc1.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+	desc1.Format = (DXGI_FORMAT)presentContract.resolvedDxgiFormat;
 	desc1.Stereo = FALSE;
 	desc1.SampleDesc.Count = 1;
 	desc1.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT;
@@ -1539,6 +1735,7 @@ void NRIFrameGenerationContext::ConfigureAndPrepareProvider(const NRIRenderDevic
 	const auto query = reinterpret_cast<PfnFfxQuery>(mFfxQueryFn);
 	const auto dispatch = reinterpret_cast<PfnFfxDispatch>(mFfxDispatchFn);
 	const bool usePresentBridge = IsPresentBridgeActive();
+	const NRIFrameGenerationPresentContract presentContract = BuildPresentContract(frameBuffer);
 	const uint32_t frameGenFlags = usePresentBridge ? 0u : NRI_FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY;
 
 	ffxConfigureDescFrameGeneration configureDesc = {};
@@ -1673,9 +1870,22 @@ void NRIFrameGenerationContext::ConfigureAndPrepareProvider(const NRIRenderDevic
 	dispatchDesc.outputs[0] = interpolationOutput;
 	dispatchDesc.numGeneratedFrames = 1u;
 	dispatchDesc.reset = desc.resetHistory;
-	dispatchDesc.backbufferTransferFunction = NRI_FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
-	dispatchDesc.minMaxLuminance[0] = 0.0f;
-	dispatchDesc.minMaxLuminance[1] = 1.0f;
+	switch (presentContract.transferFunction)
+	{
+	default:
+	case NRIFrameGenerationPresentTransferFunction::Unknown:
+	case NRIFrameGenerationPresentTransferFunction::SRGB:
+		dispatchDesc.backbufferTransferFunction = NRI_FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
+		break;
+	case NRIFrameGenerationPresentTransferFunction::PQ:
+		dispatchDesc.backbufferTransferFunction = NRI_FFX_API_BACKBUFFER_TRANSFER_FUNCTION_PQ;
+		break;
+	case NRIFrameGenerationPresentTransferFunction::ScRGB:
+		dispatchDesc.backbufferTransferFunction = NRI_FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SCRGB;
+		break;
+	}
+	dispatchDesc.minMaxLuminance[0] = presentContract.minLuminance;
+	dispatchDesc.minMaxLuminance[1] = presentContract.maxLuminance;
 	dispatchDesc.generationRect = configureDesc.generationRect;
 	dispatchDesc.frameID = desc.frameId;
 

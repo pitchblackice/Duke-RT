@@ -66,6 +66,14 @@ enum class NRIFrameGenerationOutputContract : uint32_t
 	Unsupported = 2,
 };
 
+enum class NRIFrameGenerationPresentTransferFunction : uint32_t
+{
+	Unknown = 0,
+	SRGB = 1,
+	PQ = 2,
+	ScRGB = 3,
+};
+
 struct NRIFrameGenerationRect
 {
 	uint32_t left = 0;
@@ -108,6 +116,27 @@ struct NRIFrameGenerationPolicy
 	bool resolvedAsync = false;
 	bool requestedLowLatency = false;
 	bool resolvedLowLatency = false;
+};
+
+struct NRIFrameGenerationPresentContract
+{
+	bool initialized = false;
+	bool proxyAllowed = false;
+	bool usesHdrSwapChain = false;
+	bool resolvedDxgiFormatValid = false;
+	bool activePresentTargetDxgiFormatValid = false;
+	NRIPTOutputMode requestedOutputMode = NRIPTOutputMode::SDR;
+	NRIPTOutputMode resolvedOutputMode = NRIPTOutputMode::SDR;
+	nri::SwapChainFormat createdSwapChainFormat = nri::SwapChainFormat::BT709_G22_8BIT;
+	nri::Format resolvedTextureFormat = nri::Format::UNKNOWN;
+	nri::Format activePresentTargetFormat = nri::Format::UNKNOWN;
+	uint32_t resolvedDxgiFormat = 0;
+	uint32_t activePresentTargetDxgiFormat = 0;
+	NRIFrameGenerationPresentTransferFunction transferFunction = NRIFrameGenerationPresentTransferFunction::Unknown;
+	float minLuminance = 0.0f;
+	float maxLuminance = 1.0f;
+	float hdrPaperWhiteScale = 1.0f;
+	const char* resolvedReason = "not-initialized";
 };
 
 struct NRIFrameGenerationFrameDesc
@@ -266,6 +295,7 @@ public:
 	bool ConsumeNativeFallbackRequest();
 
 	const NRIFrameGenerationPolicy& GetPolicy() const { return mPolicy; }
+	const NRIFrameGenerationPresentContract& GetPresentContract() const { return mPresentContract; }
 	const NRIFrameGenerationFrameDesc& GetFrameDesc() const { return mLastFrameDesc; }
 	const NRIFrameGenerationInputAudit& GetInputAudit() const { return mLastInputAudit; }
 	const NRIFrameGenerationLowLatencyState& GetLowLatencyState() const { return mLowLatencyState; }
@@ -285,6 +315,10 @@ public:
 	static const char* GetDepthTypeName(NRIFrameGenerationDepthType type);
 	static const char* GetAdapterRequirementName(NRIFrameGenerationAdapterRequirement requirement);
 	static const char* GetOutputContractName(NRIFrameGenerationOutputContract contract);
+	static const char* GetPresentTransferFunctionName(NRIFrameGenerationPresentTransferFunction transferFunction);
+	static const char* GetSwapChainFormatName(nri::SwapChainFormat format);
+	static const char* GetNriFormatName(nri::Format format);
+	static const char* GetDxgiFormatName(uint32_t format);
 	static const char* GetWindowModeName(bool fullscreen);
 	static const char* GetAvailabilityName(bool available);
 	static const char* GetProviderReturnCodeName(uint32_t result);
@@ -292,6 +326,7 @@ public:
 
 private:
 	NRIFrameGenerationPolicy BuildPolicy(const NRIRenderDevice& frameBuffer) const;
+	NRIFrameGenerationPresentContract BuildPresentContract(const NRIRenderDevice& frameBuffer) const;
 	NRIFrameGenerationInputAudit BuildInputAudit(const NRIFrameGenerationFrameDesc& desc) const;
 	bool IsLowLatencyOperational(const NRIRenderDevice& frameBuffer) const;
 	void ConfigureLowLatencyMode(const NRIRenderDevice& frameBuffer);
@@ -310,6 +345,7 @@ private:
 	bool mHasFrameDesc = false;
 	bool mHasLoggedPolicy = false;
 	NRIFrameGenerationPolicy mPolicy = {};
+	NRIFrameGenerationPresentContract mPresentContract = {};
 	NRIFrameGenerationFrameDesc mLastFrameDesc = {};
 	NRIFrameGenerationInputAudit mLastInputAudit = {};
 	NRIFrameGenerationLowLatencyState mLowLatencyState = {};
