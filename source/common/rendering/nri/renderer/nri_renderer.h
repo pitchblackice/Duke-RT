@@ -1047,6 +1047,7 @@ private:
 	bool AdvanceRuntimeMutationRebaselineStaticSceneBlas();
 	bool BuildRuntimeMutationRebaselineStaticSceneTlas();
 	bool SwapRuntimeMutationRebaselineCandidate();
+	void TraceRuntimeMutationRebaselineProgress(const char* eventLabel) const;
 	void ResetRuntimeMutationRebaselineState(bool destroyCandidateResources);
 	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel = nullptr);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;

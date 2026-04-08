@@ -2245,6 +2245,7 @@ CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptruntimelinktrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptrebaselinetrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissiveheuristics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissiveautoonly, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -2449,6 +2450,11 @@ namespace
 	bool ShouldEmitTemporalTraceLogs()
 	{
 		return !!nri_pttemporaltrace && nri_pttraceframes > 0;
+	}
+
+	bool ShouldTraceRuntimeMutationRebaseline()
+	{
+		return !!nri_ptrebaselinetrace;
 	}
 
 	bool ShouldTracePtPerf()
@@ -5797,6 +5803,45 @@ void NRIRenderer::UpdateRuntimeMutationRebaselinePerfStats()
 	mLastPerfShellTraceStats.runtimeMutationRebaselineSwapMs = mRuntimeMutationRebaselineSwapMs;
 }
 
+void NRIRenderer::TraceRuntimeMutationRebaselineProgress(const char* eventLabel) const
+{
+	if (!ShouldTraceRuntimeMutationRebaseline())
+	{
+		return;
+	}
+
+	const auto& candidate = mRuntimeMutationRebaselineCandidate;
+	const uint32_t totalBlasChunks = (uint32_t)candidate.staticScene.chunks.size();
+	const uint32_t framesQueued =
+		(mRuntimeMutationRebaselineState != RuntimeMutationRebaselineState::Idle && mFrameIndex >= mRuntimeMutationRebaselineQueueFrame)
+		? (mFrameIndex - mRuntimeMutationRebaselineQueueFrame)
+		: 0u;
+	Printf(
+		"NRI PT runtime mutation rebaseline trace: event=%s level=%s frame=%u state=%s queue_frame=%u frames_queued=%u active_chunks=%u stable_chunks=%u candidate_build_serial=%llu scene_chunks=%u scene_surfaces=%u scene_tris=%u blas=%u/%u blas_budget=%d build_world_ms=%.3f build_static_scene_cache_ms=%.3f realize_static_scene_textures_ms=%.3f upload_static_scene_buffers_ms=%.3f build_static_scene_blas_ms=%.3f build_static_scene_tlas_ms=%.3f swap_ms=%.3f\n",
+		eventLabel != nullptr ? eventLabel : "progress",
+		currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+		mFrameIndex,
+		GetRuntimeMutationRebaselineStateName(mRuntimeMutationRebaselineState),
+		mRuntimeMutationRebaselineQueueFrame,
+		framesQueued,
+		mPendingRuntimeMutationRebaselineActiveChunkCount,
+		mPendingRuntimeMutationRebaselineStableChunkCount,
+		(unsigned long long)(candidate.valid ? candidate.world.buildSerial : 0ull),
+		totalBlasChunks,
+		candidate.valid ? candidate.world.stats.surfaceCount : 0u,
+		candidate.valid ? candidate.world.stats.triangleCount : 0u,
+		candidate.blasBuildCount,
+		totalBlasChunks,
+		(int)nri_ptrebaselineblasperframe,
+		mRuntimeMutationRebaselineBuildWorldMs,
+		mRuntimeMutationRebaselineBuildStaticSceneCacheMs,
+		mRuntimeMutationRebaselineRealizeStaticSceneTexturesMs,
+		mRuntimeMutationRebaselineUploadStaticSceneBuffersMs,
+		mRuntimeMutationRebaselineBuildStaticSceneBlasMs,
+		mRuntimeMutationRebaselineBuildStaticSceneTlasMs,
+		mRuntimeMutationRebaselineSwapMs);
+}
+
 void NRIRenderer::WaitForCommandsTracked()
 {
 	if (mFrameBuffer == nullptr)
@@ -8159,6 +8204,9 @@ void NRIRenderer::PrintStatus() const
 		(int)nri_ptmutationtracechunk,
 		(int)nri_ptmutationtracesector);
 	Printf("NRI PT runtime link trace: %s\n", nri_ptruntimelinktrace ? "on" : "off");
+	Printf("NRI PT runtime mutation rebaseline trace: %s blas_per_frame=%d\n",
+		nri_ptrebaselinetrace ? "on" : "off",
+		(int)nri_ptrebaselineblasperframe);
 	Printf("NRI PT analytic lights: active=%u manual=%u muzzle_slots=%u muzzle_active=%u rules=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
 		(uint32_t)mSceneLights.GetAnalyticLights().activeLights.size(),
 		(uint32_t)mSceneLights.GetAnalyticLights().manualLights.size(),
@@ -11821,21 +11869,6 @@ bool NRIRenderer::SwapRuntimeMutationRebaselineCandidate()
 	mAllowStartupMutationRebaseline = false;
 	RequestHistoryReset("runtime-mutation-rebaseline");
 
-	const auto& stats = mMapWorld.stats;
-	Printf("NRI PT runtime mutation rebaseline: level=%s frame=%u active_chunks=%u stable_chunks=%u build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
-		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
-		mFrameIndex,
-		mPendingRuntimeMutationRebaselineActiveChunkCount,
-		mPendingRuntimeMutationRebaselineStableChunkCount,
-		(unsigned long long)mMapWorld.buildSerial,
-		stats.chunkCount,
-		stats.surfaceCount,
-		stats.wallSurfaceCount,
-		stats.flatSurfaceCount,
-		stats.portalSurfaceCount,
-		stats.skySurfaceCount,
-		stats.triangleCount);
-
 	candidate = {};
 	return true;
 }
@@ -11860,15 +11893,8 @@ void NRIRenderer::AdvanceRuntimeMutationRebaseline()
 		mRuntimeMutationRebaselineBuildStaticSceneBlasMs = 0.0;
 		mRuntimeMutationRebaselineBuildStaticSceneTlasMs = 0.0;
 		mRuntimeMutationRebaselineSwapMs = 0.0;
-		Printf("NRI PT runtime mutation rebaseline state: level=%s frame=%u state=%s queue_frame=%u active_chunks=%u stable_chunks=%u expected_build_serial=%llu\n",
-			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
-			mFrameIndex,
-			GetRuntimeMutationRebaselineStateName(mRuntimeMutationRebaselineState),
-			mRuntimeMutationRebaselineQueueFrame,
-			mPendingRuntimeMutationRebaselineActiveChunkCount,
-			mPendingRuntimeMutationRebaselineStableChunkCount,
-			(unsigned long long)mRuntimeMutationRebaselineExpectedGeometryBuildSerial);
 		UpdateRuntimeMutationRebaselinePerfStats();
+		TraceRuntimeMutationRebaselineProgress("queued");
 		return;
 	}
 
@@ -11878,6 +11904,7 @@ void NRIRenderer::AdvanceRuntimeMutationRebaseline()
 		break;
 	case RuntimeMutationRebaselineState::Queued:
 		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::BuildingAuthoritativeWorld;
+		TraceRuntimeMutationRebaselineProgress("enter_building_authoritative_world");
 		break;
 	case RuntimeMutationRebaselineState::BuildingAuthoritativeWorld:
 	{
@@ -11903,10 +11930,12 @@ void NRIRenderer::AdvanceRuntimeMutationRebaseline()
 		candidate.blasBuildCount = 0;
 		mRuntimeMutationRebaselineBuildWorldMs = DurationMs(start, std::chrono::steady_clock::now());
 		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::WorldReady;
+		TraceRuntimeMutationRebaselineProgress("world_ready");
 		break;
 	}
 	case RuntimeMutationRebaselineState::WorldReady:
 		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::BuildingStaticSceneCache;
+		TraceRuntimeMutationRebaselineProgress("enter_building_static_scene_cache");
 		break;
 	case RuntimeMutationRebaselineState::BuildingStaticSceneCache:
 	{
@@ -11923,6 +11952,7 @@ void NRIRenderer::AdvanceRuntimeMutationRebaseline()
 
 		mRuntimeMutationRebaselineBuildStaticSceneCacheMs = DurationMs(start, std::chrono::steady_clock::now());
 		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::RealizingStaticSceneTextures;
+		TraceRuntimeMutationRebaselineProgress("static_scene_cache_ready");
 		break;
 	}
 	case RuntimeMutationRebaselineState::RealizingStaticSceneTextures:
@@ -11940,6 +11970,7 @@ void NRIRenderer::AdvanceRuntimeMutationRebaseline()
 
 		mRuntimeMutationRebaselineRealizeStaticSceneTexturesMs = DurationMs(start, std::chrono::steady_clock::now());
 		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::UploadingStaticSceneBuffers;
+		TraceRuntimeMutationRebaselineProgress("static_scene_textures_ready");
 		break;
 	}
 	case RuntimeMutationRebaselineState::UploadingStaticSceneBuffers:
@@ -11957,6 +11988,7 @@ void NRIRenderer::AdvanceRuntimeMutationRebaseline()
 
 		mRuntimeMutationRebaselineUploadStaticSceneBuffersMs = DurationMs(start, std::chrono::steady_clock::now());
 		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::BuildingStaticSceneBlas;
+		TraceRuntimeMutationRebaselineProgress("static_scene_buffers_ready");
 		break;
 	}
 	case RuntimeMutationRebaselineState::BuildingStaticSceneBlas:
@@ -11993,6 +12025,11 @@ void NRIRenderer::AdvanceRuntimeMutationRebaseline()
 			mRuntimeMutationRebaselineCandidate.staticResources.scratchBuffer.buffer != nullptr)
 		{
 			mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::BuildingStaticSceneTlas;
+			TraceRuntimeMutationRebaselineProgress("static_scene_blas_complete");
+		}
+		else
+		{
+			TraceRuntimeMutationRebaselineProgress("static_scene_blas_progress");
 		}
 		break;
 	}
@@ -12011,6 +12048,7 @@ void NRIRenderer::AdvanceRuntimeMutationRebaseline()
 
 		mRuntimeMutationRebaselineBuildStaticSceneTlasMs = DurationMs(start, std::chrono::steady_clock::now());
 		mRuntimeMutationRebaselineState = RuntimeMutationRebaselineState::ReadyToSwap;
+		TraceRuntimeMutationRebaselineProgress("static_scene_tlas_ready");
 		break;
 	}
 	case RuntimeMutationRebaselineState::ReadyToSwap:
@@ -12027,6 +12065,7 @@ void NRIRenderer::AdvanceRuntimeMutationRebaseline()
 		}
 
 		mRuntimeMutationRebaselineSwapMs = DurationMs(start, std::chrono::steady_clock::now());
+		TraceRuntimeMutationRebaselineProgress("complete");
 		ResetRuntimeMutationRebaselineState(false);
 		break;
 	}
@@ -16218,15 +16257,18 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		mPendingRuntimeMutationRebaseline = true;
 		mPendingRuntimeMutationRebaselineActiveChunkCount = cacheStats.activeChunkCount;
 		mPendingRuntimeMutationRebaselineStableChunkCount = stableRetireEligibleChunkCount;
-		Printf("NRI PT runtime mutation rebaseline queued: level=%s frame=%u active_chunks=%u stable_chunks=%u max_stable_frames=%u cached_surfaces=%u cached_tris=%u cached_materials=%u\n",
-			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
-			mFrameIndex,
-			cacheStats.activeChunkCount,
-			stableRetireEligibleChunkCount,
-			maxStableMutationFrames,
-			cacheStats.cachedSurfaceCount,
-			cacheStats.cachedTriangleCount,
-			cacheStats.cachedMaterialCount);
+		if (ShouldTraceRuntimeMutationRebaseline())
+		{
+			Printf("NRI PT runtime mutation rebaseline trigger: level=%s frame=%u active_chunks=%u stable_chunks=%u max_stable_frames=%u cached_surfaces=%u cached_tris=%u cached_materials=%u\n",
+				currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+				mFrameIndex,
+				cacheStats.activeChunkCount,
+				stableRetireEligibleChunkCount,
+				maxStableMutationFrames,
+				cacheStats.cachedSurfaceCount,
+				cacheStats.cachedTriangleCount,
+				cacheStats.cachedMaterialCount);
+		}
 	}
 	mLastPerfShellTraceStats.runtimeMutationPrimitiveCount = (uint32_t)outGeometry.primitives.size();
 	mLastPerfShellTraceStats.runtimeMutationMaterialCount = (uint32_t)outMaterials.materials.size();
