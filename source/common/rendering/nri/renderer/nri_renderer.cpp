@@ -2421,7 +2421,7 @@ EXTERN_CVAR(Int, nri_pttraceframes)
 
 namespace
 {
-	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 256;
+	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 1024;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
 	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 21;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
@@ -2434,6 +2434,68 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_DIRECT = 28;
 	constexpr uint32_t NRI_PTDEBUG_SECTOR_AMBIENT = 29;
+
+	struct NriSceneTextureLimitValidation
+	{
+		uint32_t requiredSceneTextureCap = NRI_MAX_SCENE_TEXTURES;
+		uint32_t requiredSceneTextureSetDescriptors = NRI_SCENE_DESCRIPTOR_NUM;
+		uint32_t requiredStageTextureDescriptors = NRI_SCENE_DESCRIPTOR_NUM + NRI_INPUT_DESCRIPTOR_NUM;
+		bool descriptorSetTextureLimitOk = false;
+		bool descriptorSetUpdateAfterSetTextureLimitOk = false;
+		bool shaderStageTextureLimitOk = false;
+		bool shaderStageUpdateAfterSetTextureLimitOk = false;
+	};
+
+	static NriSceneTextureLimitValidation ValidateSceneTextureDescriptorLimits(const nri::DeviceDesc& deviceDesc)
+	{
+		NriSceneTextureLimitValidation validation = {};
+		validation.descriptorSetTextureLimitOk =
+			deviceDesc.descriptorSet.textureMaxNum >= validation.requiredSceneTextureSetDescriptors;
+		validation.descriptorSetUpdateAfterSetTextureLimitOk =
+			deviceDesc.descriptorSet.updateAfterSet.textureMaxNum >= validation.requiredSceneTextureSetDescriptors;
+		validation.shaderStageTextureLimitOk =
+			deviceDesc.shaderStage.descriptorTextureMaxNum >= validation.requiredStageTextureDescriptors;
+		validation.shaderStageUpdateAfterSetTextureLimitOk =
+			deviceDesc.shaderStage.updateAfterSet.descriptorTextureMaxNum >= validation.requiredStageTextureDescriptors;
+		return validation;
+	}
+
+	static const char* GetSceneTextureDescriptorLimitFailureReason(const nri::DeviceDesc& deviceDesc)
+	{
+		const NriSceneTextureLimitValidation validation = ValidateSceneTextureDescriptorLimits(deviceDesc);
+		if (!validation.descriptorSetTextureLimitOk)
+		{
+			return "descriptor-set texture limit is below the NRI PT 1024-scene-texture requirement";
+		}
+		if (!validation.descriptorSetUpdateAfterSetTextureLimitOk)
+		{
+			return "update-after-set texture limit is below the NRI PT 1024-scene-texture requirement";
+		}
+		if (!validation.shaderStageTextureLimitOk)
+		{
+			return "per-stage texture descriptor limit is below the NRI PT 1024-scene-texture requirement";
+		}
+		if (!validation.shaderStageUpdateAfterSetTextureLimitOk)
+		{
+			return "per-stage update-after-set texture descriptor limit is below the NRI PT 1024-scene-texture requirement";
+		}
+		return nullptr;
+	}
+
+	static void LogSceneTextureDescriptorLimits(const nri::DeviceDesc& deviceDesc)
+	{
+		const NriSceneTextureLimitValidation validation = ValidateSceneTextureDescriptorLimits(deviceDesc);
+		Printf(
+			"NRI PT scene texture cap: cap=%u scene_set=%u stage_textures=%u limits=set:%u set_uas:%u stage:%u stage_uas:%u supported=%s\n",
+			validation.requiredSceneTextureCap,
+			validation.requiredSceneTextureSetDescriptors,
+			validation.requiredStageTextureDescriptors,
+			deviceDesc.descriptorSet.textureMaxNum,
+			deviceDesc.descriptorSet.updateAfterSet.textureMaxNum,
+			deviceDesc.shaderStage.descriptorTextureMaxNum,
+			deviceDesc.shaderStage.updateAfterSet.descriptorTextureMaxNum,
+			GetSceneTextureDescriptorLimitFailureReason(deviceDesc) == nullptr ? "yes" : "no");
+	}
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_SAMPLE_UV = 30;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_SAMPLE_RADIANCE = 31;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_SAMPLE_PRIMITIVE = 32;
@@ -5548,6 +5610,12 @@ bool NRIRenderer::Initialize()
 		return false;
 	}
 
+	if (!mSceneTextureLimitLogPrinted)
+	{
+		LogSceneTextureDescriptorLimits(mFrameBuffer->mCore.GetDeviceDesc(*mFrameBuffer->mDevice));
+		mSceneTextureLimitLogPrinted = true;
+	}
+
 	if (!CheckPathTracingSupport())
 	{
 		return true;
@@ -5588,6 +5656,7 @@ void NRIRenderer::Shutdown()
 	mPendingFrameGenerationRealFrameTimeMs = 0.0f;
 	mLastFrameGenerationTimestamp = {};
 	mPendingFrameGenerationTimestamp = {};
+	mSceneTextureLimitLogPrinted = false;
 	mLastFrameGenerationRequestedEnabled = false;
 	mLastFrameGenerationRequestedProvider = NRIFrameGenerationProvider::Off;
 	mLastFrameGenerationResolvedUiMode = NRIFrameGenerationUiMode::Auto;
@@ -11519,6 +11588,11 @@ const char* NRIRenderer::GetAvailabilityReason() const
 		return "device pipeline layout limits are below the NRI PT backend requirements";
 	}
 
+	if (const char* sceneTextureLimitReason = GetSceneTextureDescriptorLimitFailureReason(deviceDesc))
+	{
+		return sceneTextureLimitReason;
+	}
+
 	return "path tracing is unavailable";
 }
 
@@ -11544,6 +11618,11 @@ bool NRIRenderer::CheckPathTracingSupport()
 	{
 		mPathTracingSupported = false;
 		LogFallback(GetAvailabilityReason());
+	}
+	else if (const char* sceneTextureLimitReason = GetSceneTextureDescriptorLimitFailureReason(deviceDesc))
+	{
+		mPathTracingSupported = false;
+		LogFallback(sceneTextureLimitReason);
 	}
 
 	return mPathTracingSupported;

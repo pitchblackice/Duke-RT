@@ -1333,6 +1333,7 @@ private:
 	bool mHasPendingFrameGenerationRealFrameTime = false;
 	bool mHasFrameGenerationTimestamp = false;
 	bool mHasFrameGenerationConfigState = false;
+	bool mSceneTextureLimitLogPrinted = false;
 	bool mHasDirectionalLightState = false;
 	bool mPathTracingSupported = true;
 	bool mHasOutputPolicyState = false;
