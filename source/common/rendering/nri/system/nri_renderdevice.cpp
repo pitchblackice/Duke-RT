@@ -2927,8 +2927,17 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationRebaselineSwapMs,
 			shell.runtimeMutationRebaselineRetireMs);
 		Printf(
-			"PERF pt texture detail NRI: frame=%llu cache=%u misses=%u inserts=%u transitions=%u lookup_ms=%.3f realize_ms=%.3f descriptor_ms=%.3f transition_ms=%.3f material_builds=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
+			"PERF pt texture detail NRI: frame=%llu reason=%s requested=%u actor_materials=%u base=%u glow=%u normal=%u metallic=%u roughness=%u emissive=%u cache=%u misses=%u inserts=%u transitions=%u lookup_ms=%.3f realize_ms=%.3f descriptor_ms=%.3f transition_ms=%.3f material_builds=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneTextureReason.empty() ? "none" : shell.sceneTextureReason.c_str(),
+			shell.sceneTextureRequestedCount,
+			shell.sceneTextureReferencedActorMaterialCount,
+			shell.sceneTextureReferencedBaseCount,
+			shell.sceneTextureReferencedGlowCount,
+			shell.sceneTextureReferencedNormalCount,
+			shell.sceneTextureReferencedMetallicCount,
+			shell.sceneTextureReferencedRoughnessCount,
+			shell.sceneTextureReferencedEmissiveCount,
 			shell.sceneTextureCacheCount,
 			shell.sceneTextureCacheMisses,
 			shell.sceneTextureCacheInserts,
@@ -2950,14 +2959,33 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			}
 
 			Printf(
-				"PERF pt material detail NRI: frame=%llu label=%s calls=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
+				"PERF pt material detail NRI: frame=%llu label=%s calls=%u override_builds=%u materials=%u actor_materials=%u textures=%u base=%u glow=%u normal=%u metallic=%u roughness=%u emissive=%u override_ms=%.3f material_ms=%.3f\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				NRIRenderer::GetMaterialBuildTraceSlotName((NRIRenderer::MaterialBuildTraceSlot)index),
 				entry.calls,
 				entry.overrideBuildCalls,
+				entry.materialCount,
+				entry.actorMaterialCount,
+				entry.textureCount,
+				entry.baseTextureCount,
+				entry.glowTextureCount,
+				entry.normalTextureCount,
+				entry.metallicTextureCount,
+				entry.roughnessTextureCount,
+				entry.emissiveTextureCount,
 				entry.overrideBuildMs,
 				entry.materialBuildMs);
 		}
+		Printf(
+			"PERF pt actor overflow summary NRI: frame=%llu materials=%u base=%u normal=%u metallic=%u roughness=%u emissive=%u omitted=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.actorOverflowMaterialCount,
+			shell.actorOverflowBaseClampCount,
+			shell.actorOverflowNormalClampCount,
+			shell.actorOverflowMetallicClampCount,
+			shell.actorOverflowRoughnessClampCount,
+			shell.actorOverflowEmissiveClampCount,
+			shell.actorOverflowTraceOmittedCount);
 		Printf(
 			"PERF pt resource trace NRI: frame=%llu waits=%u wait_ms=%.3f grow=%u overwrite=%u scene_uploads=%u scene_bytes=%llu data_uploads=%u data_bytes=%llu emissive_uploads=%u emissive_bytes=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,

@@ -51,6 +51,7 @@ CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
 EXTERN_CVAR(Int, nri_pttraceframes)
+EXTERN_CVAR(Int, perf_looptraceframes)
 CUSTOM_CVAR(Int, nri_ptrebaselinecachechunksperframe, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 1)
@@ -1205,6 +1206,97 @@ public:
 	static bool ShouldTraceActorSpriteCoherency()
 	{
 		return (int)nri_ptactorspritetrace > 0 && (int)nri_pttraceframes > 0;
+	}
+
+	struct MaterialTextureAttributionCounts
+	{
+		uint32_t materialCount = 0;
+		uint32_t actorMaterialCount = 0;
+		uint32_t textureCount = 0;
+		uint32_t baseTextureCount = 0;
+		uint32_t glowTextureCount = 0;
+		uint32_t normalTextureCount = 0;
+		uint32_t metallicTextureCount = 0;
+		uint32_t roughnessTextureCount = 0;
+		uint32_t emissiveTextureCount = 0;
+	};
+
+	static bool ShouldTraceActorOverflow()
+	{
+		return (int)perf_looptraceframes > 0;
+	}
+
+	static constexpr uint32_t NRI_MAX_ACTOR_OVERFLOW_TRACE_LINES = 16;
+
+	static MaterialTextureAttributionCounts GatherMaterialTextureAttribution(
+		const std::vector<nri_scene::MaterialData>& materials,
+		const std::vector<nri_scene::MaterialLightingMetadata>& lightMetadata,
+		size_t textureCount)
+	{
+		MaterialTextureAttributionCounts counts = {};
+		counts.materialCount = (uint32_t)materials.size();
+		counts.textureCount = (uint32_t)textureCount;
+
+		std::unordered_set<uint32_t> baseTextures;
+		std::unordered_set<uint32_t> glowTextures;
+		std::unordered_set<uint32_t> normalTextures;
+		std::unordered_set<uint32_t> metallicTextures;
+		std::unordered_set<uint32_t> roughnessTextures;
+		std::unordered_set<uint32_t> emissiveTextures;
+		baseTextures.reserve(materials.size());
+		glowTextures.reserve(lightMetadata.size());
+		normalTextures.reserve(materials.size());
+		metallicTextures.reserve(materials.size());
+		roughnessTextures.reserve(materials.size());
+		emissiveTextures.reserve(materials.size());
+
+		const auto addTextureIndex = [textureCount](std::unordered_set<uint32_t>& destination, uint32_t textureIndex)
+		{
+			if (textureIndex != UINT32_MAX && (size_t)textureIndex < textureCount)
+			{
+				destination.insert(textureIndex);
+			}
+		};
+
+		for (uint32_t materialIndex = 0; materialIndex < (uint32_t)materials.size(); ++materialIndex)
+		{
+			const auto& material = materials[materialIndex];
+			addTextureIndex(baseTextures, material.textureIndex);
+			addTextureIndex(normalTextures, material.normalTextureIndex);
+			addTextureIndex(metallicTextures, material.metallicTextureIndex);
+			addTextureIndex(roughnessTextures, material.roughnessTextureIndex);
+			addTextureIndex(emissiveTextures, material.emissiveTextureIndex);
+			if (materialIndex < lightMetadata.size())
+			{
+				const auto& metadata = lightMetadata[materialIndex];
+				addTextureIndex(glowTextures, metadata.glowmapTextureIndex);
+				if (metadata.actorIndex >= 0)
+				{
+					counts.actorMaterialCount++;
+				}
+			}
+		}
+
+		counts.baseTextureCount = (uint32_t)baseTextures.size();
+		counts.glowTextureCount = (uint32_t)glowTextures.size();
+		counts.normalTextureCount = (uint32_t)normalTextures.size();
+		counts.metallicTextureCount = (uint32_t)metallicTextures.size();
+		counts.roughnessTextureCount = (uint32_t)roughnessTextures.size();
+		counts.emissiveTextureCount = (uint32_t)emissiveTextures.size();
+		return counts;
+	}
+
+	static void AccumulateMaterialTextureAttribution(NRIRenderer::MaterialBuildTraceEntry& entry, const MaterialTextureAttributionCounts& counts)
+	{
+		entry.materialCount += counts.materialCount;
+		entry.actorMaterialCount += counts.actorMaterialCount;
+		entry.textureCount += counts.textureCount;
+		entry.baseTextureCount += counts.baseTextureCount;
+		entry.glowTextureCount += counts.glowTextureCount;
+		entry.normalTextureCount += counts.normalTextureCount;
+		entry.metallicTextureCount += counts.metallicTextureCount;
+		entry.roughnessTextureCount += counts.roughnessTextureCount;
+		entry.emissiveTextureCount += counts.emissiveTextureCount;
 	}
 
 	static uint64_t CoherencyHashCombine64(uint64_t hash, uint64_t value)
@@ -8894,6 +8986,24 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mSceneTextureOverflowStats.emissiveTextureClampCountLastBuild,
 		(unsigned long long)mSceneTextureOverflowStats.totalOverflowBuilds,
 		mSceneTextureOverflowStats.warningLogged ? "yes" : "no");
+	Printf("NRI PT scene texture attribution: reason=%s requested=%u actor_materials=%u base=%u glow=%u normal=%u metallic=%u roughness=%u emissive=%u\n",
+		mLastPerfShellTraceStats.sceneTextureReason.empty() ? "none" : mLastPerfShellTraceStats.sceneTextureReason.c_str(),
+		mLastPerfShellTraceStats.sceneTextureRequestedCount,
+		mLastPerfShellTraceStats.sceneTextureReferencedActorMaterialCount,
+		mLastPerfShellTraceStats.sceneTextureReferencedBaseCount,
+		mLastPerfShellTraceStats.sceneTextureReferencedGlowCount,
+		mLastPerfShellTraceStats.sceneTextureReferencedNormalCount,
+		mLastPerfShellTraceStats.sceneTextureReferencedMetallicCount,
+		mLastPerfShellTraceStats.sceneTextureReferencedRoughnessCount,
+		mLastPerfShellTraceStats.sceneTextureReferencedEmissiveCount);
+	Printf("NRI PT actor overflow: materials=%u clamps=base:%u normal:%u metallic:%u roughness:%u emissive:%u omitted=%u\n",
+		mLastPerfShellTraceStats.actorOverflowMaterialCount,
+		mLastPerfShellTraceStats.actorOverflowBaseClampCount,
+		mLastPerfShellTraceStats.actorOverflowNormalClampCount,
+		mLastPerfShellTraceStats.actorOverflowMetallicClampCount,
+		mLastPerfShellTraceStats.actorOverflowRoughnessClampCount,
+		mLastPerfShellTraceStats.actorOverflowEmissiveClampCount,
+		mLastPerfShellTraceStats.actorOverflowTraceOmittedCount);
 	Printf("NRI PT scene texture cache: entries=%u highwater=%u misses=%u inserts=%u transitions=%u lookup_ms=%.3f realize_ms=%.3f descriptor_ms=%.3f transition_ms=%.3f\n",
 		mSceneTextureCacheDebugStats.cacheEntriesLastBuild,
 		mSceneTextureCacheDebugStats.cacheEntriesHighWater,
@@ -8985,6 +9095,17 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 			entry.overrideBuildCalls,
 			entry.overrideBuildMs,
 			entry.materialBuildMs);
+		Printf("NRI PT material textures: label=%s materials=%u actor_materials=%u textures=%u base=%u glow=%u normal=%u metallic=%u roughness=%u emissive=%u\n",
+			GetMaterialBuildTraceSlotName((MaterialBuildTraceSlot)index),
+			entry.materialCount,
+			entry.actorMaterialCount,
+			entry.textureCount,
+			entry.baseTextureCount,
+			entry.glowTextureCount,
+			entry.normalTextureCount,
+			entry.metallicTextureCount,
+			entry.roughnessTextureCount,
+			entry.emissiveTextureCount);
 	}
 }
 
@@ -11160,6 +11281,9 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 			{
 				*saved.flags = saved.value;
 			}
+			AccumulateMaterialTextureAttribution(
+				materialTraceEntry,
+				GatherMaterialTextureAttribution(outMaterials.materials, outMaterials.lightMetadata, outMaterials.textures.size()));
 			TraceActorSpriteMaterialAssignments(sceneView, outMaterials, traceLabel);
 			return;
 		}
@@ -11177,6 +11301,9 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	{
 		nri_scene::BuildMaterials(sceneView, outMaterials);
 	}
+	AccumulateMaterialTextureAttribution(
+		materialTraceEntry,
+		GatherMaterialTextureAttribution(outMaterials.materials, outMaterials.lightMetadata, outMaterials.textures.size()));
 	TraceActorSpriteMaterialAssignments(sceneView, outMaterials, traceLabel);
 }
 
@@ -14660,6 +14787,22 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	mLastPerfShellTraceStats.sceneTextureLookupMs = 0.0;
 	mLastPerfShellTraceStats.sceneTextureRealizeMs = 0.0;
 	mLastPerfShellTraceStats.sceneTextureDescriptorMs = 0.0;
+	mLastPerfShellTraceStats.sceneTextureReason = reason != nullptr ? reason : "none";
+	mLastPerfShellTraceStats.sceneTextureRequestedCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedActorMaterialCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedBaseCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedGlowCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedNormalCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedMetallicCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedRoughnessCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedEmissiveCount = 0;
+	mLastPerfShellTraceStats.actorOverflowMaterialCount = 0;
+	mLastPerfShellTraceStats.actorOverflowBaseClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowNormalClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowMetallicClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowRoughnessClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowEmissiveClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowTraceOmittedCount = 0;
 	if (ShouldTraceSkyPerf())
 	{
 		gRendererSkyPerfTraceStats.ensureSceneTexturesCalls++;
@@ -14676,6 +14819,16 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	outGpuMaterials = materials.materials;
 	ApplyEmissiveMaterialOverrides(materials, outGpuMaterials);
 	ApplyActorShadowMaterialOverrides(materials, outGpuMaterials);
+	const MaterialTextureAttributionCounts sceneTextureAttribution =
+		GatherMaterialTextureAttribution(outGpuMaterials, materials.lightMetadata, materials.textures.size());
+	mLastPerfShellTraceStats.sceneTextureRequestedCount = sceneTextureAttribution.textureCount;
+	mLastPerfShellTraceStats.sceneTextureReferencedActorMaterialCount = sceneTextureAttribution.actorMaterialCount;
+	mLastPerfShellTraceStats.sceneTextureReferencedBaseCount = sceneTextureAttribution.baseTextureCount;
+	mLastPerfShellTraceStats.sceneTextureReferencedGlowCount = sceneTextureAttribution.glowTextureCount;
+	mLastPerfShellTraceStats.sceneTextureReferencedNormalCount = sceneTextureAttribution.normalTextureCount;
+	mLastPerfShellTraceStats.sceneTextureReferencedMetallicCount = sceneTextureAttribution.metallicTextureCount;
+	mLastPerfShellTraceStats.sceneTextureReferencedRoughnessCount = sceneTextureAttribution.roughnessTextureCount;
+	mLastPerfShellTraceStats.sceneTextureReferencedEmissiveCount = sceneTextureAttribution.emissiveTextureCount;
 	if (!EnsureSkyTexture(sceneView, preserveExistingSky))
 	{
 		return false;
@@ -14782,33 +14935,125 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		descriptors[2 + i] = it->resource.shaderView;
 	}
 
-	for (auto& material : outGpuMaterials)
+	uint32_t actorOverflowTraceLines = 0;
+	for (uint32_t materialIndex = 0; materialIndex < (uint32_t)outGpuMaterials.size(); ++materialIndex)
 	{
+		auto& material = outGpuMaterials[materialIndex];
+		const uint32_t originalTextureIndex = material.textureIndex;
+		const uint32_t originalNormalTextureIndex = material.normalTextureIndex;
+		const uint32_t originalMetallicTextureIndex = material.metallicTextureIndex;
+		const uint32_t originalRoughnessTextureIndex = material.roughnessTextureIndex;
+		const uint32_t originalEmissiveTextureIndex = material.emissiveTextureIndex;
+		bool baseClamped = false;
+		bool normalClamped = false;
+		bool metallicClamped = false;
+		bool roughnessClamped = false;
+		bool emissiveClamped = false;
 		if (material.textureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
 			mSceneTextureOverflowStats.baseTextureClampCountLastBuild++;
 			material.textureIndex = 0;
+			baseClamped = true;
 		}
 		if (material.normalTextureIndex != UINT32_MAX && material.normalTextureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
 			mSceneTextureOverflowStats.normalTextureClampCountLastBuild++;
 			material.normalTextureIndex = UINT32_MAX;
+			normalClamped = true;
 		}
 		if (material.metallicTextureIndex != UINT32_MAX && material.metallicTextureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
 			mSceneTextureOverflowStats.metallicTextureClampCountLastBuild++;
 			material.metallicTextureIndex = UINT32_MAX;
+			metallicClamped = true;
 		}
 		if (material.roughnessTextureIndex != UINT32_MAX && material.roughnessTextureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
 			mSceneTextureOverflowStats.roughnessTextureClampCountLastBuild++;
 			material.roughnessTextureIndex = UINT32_MAX;
+			roughnessClamped = true;
 		}
 		if (material.emissiveTextureIndex != UINT32_MAX && material.emissiveTextureIndex >= NRI_MAX_SCENE_TEXTURES)
 		{
 			mSceneTextureOverflowStats.emissiveTextureClampCountLastBuild++;
 			material.emissiveTextureIndex = 0;
+			emissiveClamped = true;
 		}
+
+		if (!(baseClamped || normalClamped || metallicClamped || roughnessClamped || emissiveClamped))
+		{
+			continue;
+		}
+
+		const nri_scene::MaterialLightingMetadata* metadata =
+			materialIndex < materials.lightMetadata.size() ? &materials.lightMetadata[materialIndex] : nullptr;
+		if (metadata == nullptr || metadata->actorIndex < 0)
+		{
+			continue;
+		}
+
+		mLastPerfShellTraceStats.actorOverflowMaterialCount++;
+		if (baseClamped)
+		{
+			mLastPerfShellTraceStats.actorOverflowBaseClampCount++;
+		}
+		if (normalClamped)
+		{
+			mLastPerfShellTraceStats.actorOverflowNormalClampCount++;
+		}
+		if (metallicClamped)
+		{
+			mLastPerfShellTraceStats.actorOverflowMetallicClampCount++;
+		}
+		if (roughnessClamped)
+		{
+			mLastPerfShellTraceStats.actorOverflowRoughnessClampCount++;
+		}
+		if (emissiveClamped)
+		{
+			mLastPerfShellTraceStats.actorOverflowEmissiveClampCount++;
+		}
+
+		if (!ShouldTraceActorOverflow())
+		{
+			continue;
+		}
+
+		if (actorOverflowTraceLines < NRI_MAX_ACTOR_OVERFLOW_TRACE_LINES)
+		{
+			Printf(
+				"PERF pt actor overflow NRI: frame=%llu reason=%s actor=%d source=%s material=%u texture_id=%u base=%u->%u normal=%u->%u metallic=%u->%u roughness=%u->%u emissive=%u->%u\n",
+				(unsigned long long)mFrameIndex,
+				mLastPerfShellTraceStats.sceneTextureReason.empty() ? "none" : mLastPerfShellTraceStats.sceneTextureReason.c_str(),
+				metadata->actorIndex,
+				GetSurfaceSourceTypeName(metadata->sourceType),
+				materialIndex,
+				metadata->textureId,
+				originalTextureIndex,
+				material.textureIndex,
+				originalNormalTextureIndex,
+				material.normalTextureIndex,
+				originalMetallicTextureIndex,
+				material.metallicTextureIndex,
+				originalRoughnessTextureIndex,
+				material.roughnessTextureIndex,
+				originalEmissiveTextureIndex,
+				material.emissiveTextureIndex);
+			actorOverflowTraceLines++;
+		}
+		else
+		{
+			mLastPerfShellTraceStats.actorOverflowTraceOmittedCount++;
+		}
+	}
+	if (mLastPerfShellTraceStats.actorOverflowTraceOmittedCount > 0 && ShouldTraceActorOverflow())
+	{
+		Printf(
+			"PERF pt actor overflow NRI: frame=%llu reason=%s omitted=%u limit=%u\n",
+			(unsigned long long)mFrameIndex,
+			mLastPerfShellTraceStats.sceneTextureReason.empty() ? "none" : mLastPerfShellTraceStats.sceneTextureReason.c_str(),
+			mLastPerfShellTraceStats.actorOverflowTraceOmittedCount,
+			NRI_MAX_ACTOR_OVERFLOW_TRACE_LINES);
 	}
 
 	const bool sceneTextureOverflow =
@@ -14866,6 +15111,22 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 bool NRIRenderer::UseFallbackSceneTextures(bool preserveExistingSky, const char* reason)
 {
 	mLiveSceneTextureResources.clear();
+	mLastPerfShellTraceStats.sceneTextureReason = reason != nullptr ? reason : "fallback";
+	mLastPerfShellTraceStats.sceneTextureRequestedCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedActorMaterialCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedBaseCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedGlowCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedNormalCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedMetallicCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedRoughnessCount = 0;
+	mLastPerfShellTraceStats.sceneTextureReferencedEmissiveCount = 0;
+	mLastPerfShellTraceStats.actorOverflowMaterialCount = 0;
+	mLastPerfShellTraceStats.actorOverflowBaseClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowNormalClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowMetallicClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowRoughnessClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowEmissiveClampCount = 0;
+	mLastPerfShellTraceStats.actorOverflowTraceOmittedCount = 0;
 	if (!preserveExistingSky || GetActiveSkyTexture() == nullptr)
 	{
 		EnsureSkyTexture(nri_scene::SceneView{}, false);

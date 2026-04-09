@@ -78,6 +78,15 @@ public:
 	{
 		uint32_t calls = 0;
 		uint32_t overrideBuildCalls = 0;
+		uint32_t materialCount = 0;
+		uint32_t actorMaterialCount = 0;
+		uint32_t textureCount = 0;
+		uint32_t baseTextureCount = 0;
+		uint32_t glowTextureCount = 0;
+		uint32_t normalTextureCount = 0;
+		uint32_t metallicTextureCount = 0;
+		uint32_t roughnessTextureCount = 0;
+		uint32_t emissiveTextureCount = 0;
 		double overrideBuildMs = 0.0;
 		double materialBuildMs = 0.0;
 	};
@@ -205,8 +214,23 @@ public:
 		uint32_t sceneTextureCacheMisses = 0;
 		uint32_t sceneTextureCacheInserts = 0;
 		uint32_t sceneTextureTransitionCount = 0;
+		uint32_t sceneTextureRequestedCount = 0;
+		uint32_t sceneTextureReferencedActorMaterialCount = 0;
+		uint32_t sceneTextureReferencedBaseCount = 0;
+		uint32_t sceneTextureReferencedGlowCount = 0;
+		uint32_t sceneTextureReferencedNormalCount = 0;
+		uint32_t sceneTextureReferencedMetallicCount = 0;
+		uint32_t sceneTextureReferencedRoughnessCount = 0;
+		uint32_t sceneTextureReferencedEmissiveCount = 0;
 		uint32_t materialBuildCalls = 0;
 		uint32_t actorOverrideMapBuildCalls = 0;
+		uint32_t actorOverflowMaterialCount = 0;
+		uint32_t actorOverflowBaseClampCount = 0;
+		uint32_t actorOverflowNormalClampCount = 0;
+		uint32_t actorOverflowMetallicClampCount = 0;
+		uint32_t actorOverflowRoughnessClampCount = 0;
+		uint32_t actorOverflowEmissiveClampCount = 0;
+		uint32_t actorOverflowTraceOmittedCount = 0;
 		uint32_t persistentDynamicActorSurfaceCount = 0;
 		uint32_t persistentDynamicNonActorSurfaceCount = 0;
 		uint32_t persistentDynamicWallSurfaceCount = 0;
@@ -236,6 +260,7 @@ public:
 		bool usedStaticMapScene = false;
 		bool usedDynamicOverlay = false;
 		bool usedPersistentDynamicEmissiveCache = false;
+		std::string sceneTextureReason;
 		std::array<MaterialBuildTraceEntry, MaterialBuildTraceSlotCount> materialBuildByLabel = {};
 	};
 

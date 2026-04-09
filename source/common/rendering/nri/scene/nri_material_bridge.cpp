@@ -356,6 +356,7 @@ namespace
 		metadata.roughnessTextureIndex = roughnessTextureIndex;
 		metadata.paletteIndex = material.paletteIndex;
 		metadata.materialFlags = material.flags;
+		metadata.sourceType = surface.provenance.sourceType;
 		metadata.sectorIndex = surface.provenance.sectorIndex;
 		metadata.actorIndex = surface.provenance.actorIndex;
 		metadata.shade = surface.material.shade;
