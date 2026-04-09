@@ -4,8 +4,10 @@
 
 enum class NRIPTOutputMode : uint32_t
 {
+	// `SDR` and `HDR` are the current user-facing request modes.
+	// `HDRLinear16` and `HDR10PQ` remain internal resolved transport states.
 	SDR = 0,
-	HDRAuto = 1,
+	HDR = 1,
 	HDRLinear16 = 2,
 	HDR10PQ = 3
 };
@@ -82,7 +84,7 @@ inline const char* GetNRIPTOutputModeName(NRIPTOutputMode mode)
 	switch (mode)
 	{
 	case NRIPTOutputMode::SDR: return "sdr";
-	case NRIPTOutputMode::HDRAuto: return "hdr";
+	case NRIPTOutputMode::HDR: return "hdr";
 	case NRIPTOutputMode::HDRLinear16: return "hdr-linear16";
 	case NRIPTOutputMode::HDR10PQ: return "hdr10-pq";
 	default: return "unknown";

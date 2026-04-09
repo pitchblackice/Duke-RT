@@ -987,7 +987,7 @@ namespace
 	{
 		switch ((int)nri_ptoutputmode)
 		{
-		case 1: return NRIPTOutputMode::HDRAuto;
+		case 1: return NRIPTOutputMode::HDR;
 		default: return NRIPTOutputMode::SDR;
 		}
 	}
@@ -3449,25 +3449,25 @@ void NRIRenderDevice::ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& ou
 	const bool supportsHdrPresent = GetSelectedAPI() == nri::GraphicsAPI::D3D12;
 	switch (requestedMode)
 	{
-	case NRIPTOutputMode::HDRAuto:
+	case NRIPTOutputMode::HDR:
 		outRequestedFormat = nri::SwapChainFormat::BT709_G10_16BIT;
 		if (!supportsHdrPresent)
 		{
-			outReason = "hdr-auto-unsupported-api";
+			outReason = "hdr-unsupported-api";
 			return;
 		}
 		if (!mHasSwapChainDisplayDesc)
 		{
-			outReason = "hdr-auto-await-display-desc";
+			outReason = "hdr-await-display-desc";
 			return;
 		}
 		if (!mSwapChainDisplayDesc.isHDR)
 		{
-			outReason = "hdr-auto-display-sdr";
+			outReason = "hdr-display-sdr";
 			return;
 		}
 		outResolvedFormat = outRequestedFormat;
-		outReason = "hdr-auto-linear16";
+		outReason = "hdr-resolved-linear16";
 		return;
 
 	case NRIPTOutputMode::HDRLinear16:
