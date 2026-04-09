@@ -8486,7 +8486,7 @@ void NRIRenderer::PrintStatus() const
 			nrdDiffusePrepass,
 			nrdSpecularPrepass);
 	}
-	Printf("NRI PT NRD guides: diffuse_signal=receiver_shaded_emissive_plus_material_folded_indirect specular_signal=receiver_shaded_emissive_plus_material_folded_indirect hit_distance=%s roughness=material_hint metalness=material_hint material_id=semantic_class\n",
+	Printf("NRI PT NRD guides: diffuse_signal=primary_demodulated_radiance specular_signal=primary_demodulated_radiance hit_distance=%s roughness=material_hint metalness=material_hint material_id=semantic_class\n",
 		nrdDenoiserMode == NRINrdDenoiserMode::Relax ? "secondary_transport_linear_hitdist" : "secondary_transport_reblur_norm");
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",

@@ -78,6 +78,18 @@ float3 GetSurfaceDiffuseColor(float3 albedo, float metalness)
 	return albedo * (1.0 - metalness);
 }
 
+float3 GetSurfaceSpecularColor(float3 albedo, float metalness)
+{
+	return lerp(float3(0.04, 0.04, 0.04), albedo, metalness);
+}
+
+void GetNrdPrimaryMaterialFactors(float3 normal, float3 viewDir, float3 baseColor, float metalness, float roughness, out float3 diffuseFactor, out float3 specularFactor)
+{
+	const float3 albedo = GetSurfaceDiffuseColor(baseColor, metalness);
+	const float3 rf0 = GetSurfaceSpecularColor(baseColor, metalness);
+	NRD_MaterialFactors(normalize(normal), normalize(viewDir), albedo, rf0, roughness, diffuseFactor, specularFactor);
+}
+
 float3 EvaluateSunSpecular(float3 albedo, float metalness, float3 normal, float3 viewDir, float3 lightDir, float shadow)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
@@ -122,7 +134,7 @@ void ApplyShadowAwareDirectLightingCorrection(uint2 pixelPos, float materialID, 
 	directLighting += EvaluateSunSpecular(albedo, metalness, normal, viewDir, lightDir, 1.0) * GetDirectionalPlaceholderColor() * shadowDelta;
 }
 
-float3 ComposeLighting(uint2 pixelPos, float3 diffuseSignal, float3 specularSignal, float3 directLighting, float3 directEmission)
+float3 ComposeLighting(uint2 pixelPos, float3 diffuseSignal, float3 specularSignal, float3 directLighting, float3 directEmission, float3 normal, float3 albedo, float metalness, float roughness, float3 viewDir)
 {
 	const float viewZ = abs(gViewZInput.Load(int3(pixelPos, 0)).x);
 	if (viewZ >= NRD_INF * 0.5)
@@ -130,15 +142,20 @@ float3 ComposeLighting(uint2 pixelPos, float3 diffuseSignal, float3 specularSign
 		return directEmission;
 	}
 
-	// Current composition contract after slices 1-3:
-	// - diffuse/specular: current NRD output bucket
-	//   * receiver-shaped sampled emissive terms
-	//   * material-folded indirect terms
-	//   * not yet sample-style demodulated transport
+	// Phase-2 composition contract:
+	// - diffuse/specular: primary-hit demodulated radiance from NRD
 	// - directLighting: direct-composition bucket (ambient + placeholder sun + runtime point lights)
 	//   with composition optionally correcting only the placeholder-sun shadow from raw to filtered SIGMA output
 	// - directEmission: actual emissive-hit / fullbright surface output
-	return directEmission + directLighting + diffuseSignal + specularSignal;
+	float3 diffuseFactor = 1.0;
+	float3 specularFactor = 1.0;
+	GetNrdPrimaryMaterialFactors(normal, viewDir, albedo, metalness, roughness, diffuseFactor, specularFactor);
+	const float3 shadedDiffuse = diffuseSignal * diffuseFactor;
+	const float3 shadedSpecular = specularSignal * specularFactor;
+
+	// This remodulates the NRD-facing transport back into the beauty signal using the same
+	// primary material factors that TraceOpaque used for de-modulation.
+	return directEmission + directLighting + shadedDiffuse + shadedSpecular;
 }
 
 [numthreads(8, 8, 1)]
@@ -163,9 +180,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 filteredSpecular = SanitizeColor(UnpackDenoisedRadiance(gGuideSpecularInput.Load(int3(pixelPos, 0))));
 	const float3 composedDirectLighting = SanitizeColor(gDirectLightingInput.Load(int3(pixelPos, 0)).rgb);
 	const float3 surfaceDirectEmission = SanitizeColor(gDirectEmissionInput.Load(int3(pixelPos, 0)).rgb);
-	const float materialID = GetMaterialID(pixelPos);
 	const float4 baseColorMetalness = gBaseColorInput.Load(int3(pixelPos, 0));
-	const float3 normal = NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos]).xyz;
+	float materialID = 0.0;
+	const float4 unpackedNormalRoughness = NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput[pixelPos], materialID);
+	const float3 normal = unpackedNormalRoughness.xyz;
+	const float roughness = saturate(unpackedNormalRoughness.w);
 	const float metalness = saturate(baseColorMetalness.a);
 	const float3 albedo = SanitizeColor(baseColorMetalness.rgb);
 	const float3 viewDir = normalize(-GeneratePrimaryRay(pixelPos));
@@ -175,8 +194,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	ApplyShadowAwareDirectLightingCorrection(pixelPos, materialID, normal, albedo, metalness, viewDir, false, adjustedRawDirectLighting);
 	ApplyShadowAwareDirectLightingCorrection(pixelPos, materialID, normal, albedo, metalness, viewDir, true, adjustedFilteredDirectLighting);
 
-	const float3 filteredComposed = ComposeLighting(pixelPos, filteredDiffuseSignal, filteredSpecular, adjustedFilteredDirectLighting, surfaceDirectEmission);
-	const float3 rawComposed = ComposeLighting(pixelPos, rawDiffuseSignal, rawSpecular, adjustedRawDirectLighting, surfaceDirectEmission);
+	const float3 filteredComposed = ComposeLighting(pixelPos, filteredDiffuseSignal, filteredSpecular, adjustedFilteredDirectLighting, surfaceDirectEmission, normal, albedo, metalness, roughness, viewDir);
+	const float3 rawComposed = ComposeLighting(pixelPos, rawDiffuseSignal, rawSpecular, adjustedRawDirectLighting, surfaceDirectEmission, normal, albedo, metalness, roughness, viewDir);
 	const bool specialMaterialRawFallback = UseSplitShadowDenoiser() && IsSpecularSpecialMaterial(materialID);
 	float3 composed = specialMaterialRawFallback ? rawComposed : filteredComposed;
 	const uint splitMode = gTraceConstants.ReservedTrace0;

@@ -517,6 +517,13 @@ float3 GetSurfaceSpecularColor(float3 albedo, float metalness)
 	return lerp(float3(0.04, 0.04, 0.04), albedo, metalness);
 }
 
+void GetNrdPrimaryMaterialFactors(float3 normal, float3 viewDir, float3 baseColor, float metalness, float roughness, out float3 diffuseFactor, out float3 specularFactor)
+{
+	const float3 albedo = GetSurfaceDiffuseColor(baseColor, metalness);
+	const float3 rf0 = GetSurfaceSpecularColor(baseColor, metalness);
+	NRD_MaterialFactors(normalize(normal), normalize(viewDir), albedo, rf0, roughness, diffuseFactor, specularFactor);
+}
+
 float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixelPos, uint frameIndex, uint bounceCount, out float outHitDistance)
 {
 	outHitDistance = 0.0;
@@ -828,15 +835,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 specular = 0.0;
 		float3 directLighting = 0.0;
 		float3 directEmission = 0.0;
-		// Explicit lighting ownership after composition slices 1-3:
+		// Explicit lighting ownership after phase-2 demodulation:
 		// - directLighting: stable raw direct-composition bucket only
 		//   * ambient / sector ambient
 		//   * placeholder directional sun diffuse/specular (already shadowed)
 		//   * runtime point-light direct terms
-		// - diffuse/specular: current NRD-facing shaded-light bucket
-		//   * receiver-shaped sampled emissive diffuse/specular
-		//   * material-folded indirect diffuse/specular
-		//   * not yet sample-style demodulated transport
+		// - diffuse/specular: NRD-facing primary-hit demodulated radiance
+		//   * sampled emissive and indirect transport are divided by primary material factors
+		//   * composition remodulates them later using the same factor model
 		// - directEmission: additive self-emission term plus any legacy fullbright override
 		float3 ambientDirectLighting = 0.0;
 		float3 runtimePointDirectLighting = 0.0;
@@ -895,6 +901,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float3 directionalLightColor = GetDirectionalPlaceholderColor();
 				const float3 viewDir = normalize(-visibleRayDirection);
 				const float3 shadingNormal = ResolveViewFacingShadingNormal(material, hit.normal, viewDir);
+				float3 nrdDiffuseFactor = 1.0;
+				float3 nrdSpecularFactor = 1.0;
+				GetNrdPrimaryMaterialFactors(hit.normal, viewDir, albedo.rgb, metalness, roughness, nrdDiffuseFactor, nrdSpecularFactor);
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
 				const float3 directionalShadingNormal = ResolveLightFacingShadingNormal(material, shadingNormal, lightDir);
 				float shadowHitDistance = 0.0;
@@ -1024,19 +1033,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				emissiveSampleDiffuse *= invEmissiveSampleCount;
 				emissiveSampleSpecular *= invEmissiveSampleCount;
 				emissiveDirectLighting += emissiveSampleDiffuse + emissiveSampleSpecular;
-				sampledEmissiveTransportDiffuse = emissiveSampleDiffuse;
-				sampledEmissiveTransportSpecular = emissiveSampleSpecular;
+				sampledEmissiveTransportDiffuse = emissiveSampleDiffuse / nrdDiffuseFactor;
+				sampledEmissiveTransportSpecular = emissiveSampleSpecular / nrdSpecularFactor;
 
 				const uint lightBounceCount = GetLightBounceCount();
 				if (!directSceneTrace && lightBounceCount > 0u)
 				{
-					indirectTransportDiffuse = TraceIndirectDiffuse(hit, diffuseAlbedo, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance);
-					indirectTransportSpecular = TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, metalness, lightBounceCount, specularHitDistance);
+					indirectTransportDiffuse = TraceIndirectDiffuse(hit, diffuseAlbedo, pixelPos, gTraceConstants.FrameIndex, lightBounceCount, diffuseHitDistance) / nrdDiffuseFactor;
+					indirectTransportSpecular = TraceIndirectSpecular(hit, albedo, viewDir, pixelPos, gTraceConstants.FrameIndex, roughness, metalness, lightBounceCount, specularHitDistance) / nrdSpecularFactor;
 				}
 
 				diffuse += sampledEmissiveTransportDiffuse + indirectTransportDiffuse;
 				specular += sampledEmissiveTransportSpecular + indirectTransportSpecular;
-				// Keep the placeholder sun out of the current NRD-facing shaded-light bucket so its
+				// Keep the placeholder sun out of the primary-hit demodulated NRD bucket so its
 				// hard shadow structure does not get spatially mixed back into REBLUR/RELAX history.
 				directLighting += ambientDirectLighting + sunTransportDiffuse + sunTransportSpecular + runtimePointDirectLighting;
 				if (emissiveMaterial)
