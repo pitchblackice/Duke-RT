@@ -2421,7 +2421,7 @@ EXTERN_CVAR(Int, nri_pttraceframes)
 
 namespace
 {
-	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 1024;
+	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 512;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
 	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 21;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
