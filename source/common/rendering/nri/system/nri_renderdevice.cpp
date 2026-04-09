@@ -1007,6 +1007,16 @@ namespace
 		return format == nri::SwapChainFormat::BT709_G10_16BIT || format == nri::SwapChainFormat::BT2020_G2084_10BIT;
 	}
 
+	static nri::Format GetExpectedResolvedTextureFormatForSwapChainFormat(nri::SwapChainFormat format)
+	{
+		switch (format)
+		{
+		case nri::SwapChainFormat::BT709_G10_16BIT: return nri::Format::RGBA16_SFLOAT;
+		case nri::SwapChainFormat::BT2020_G2084_10BIT: return nri::Format::R10_G10_B10_A2_UNORM;
+		default: return nri::Format::UNKNOWN;
+		}
+	}
+
 	static NRIPTOutputMode GetResolvedPathTracingOutputModeForSwapChainFormat(nri::SwapChainFormat format)
 	{
 		switch (format)
@@ -3446,12 +3456,11 @@ void NRIRenderDevice::ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& ou
 		return;
 	}
 
-	const bool supportsHdrPresent = GetSelectedAPI() == nri::GraphicsAPI::D3D12;
 	switch (requestedMode)
 	{
 	case NRIPTOutputMode::HDR:
 		outRequestedFormat = nri::SwapChainFormat::BT709_G10_16BIT;
-		if (!supportsHdrPresent)
+		if (GetSelectedAPI() != nri::GraphicsAPI::D3D12 && GetSelectedAPI() != nri::GraphicsAPI::VK)
 		{
 			outReason = "hdr-unsupported-api";
 			return;
@@ -3472,7 +3481,7 @@ void NRIRenderDevice::ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& ou
 
 	case NRIPTOutputMode::HDRLinear16:
 		outRequestedFormat = nri::SwapChainFormat::BT709_G10_16BIT;
-		if (!supportsHdrPresent)
+		if (GetSelectedAPI() != nri::GraphicsAPI::D3D12)
 		{
 			outReason = "hdr-linear16-unsupported-api";
 			return;
@@ -3493,7 +3502,7 @@ void NRIRenderDevice::ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& ou
 
 	case NRIPTOutputMode::HDR10PQ:
 		outRequestedFormat = nri::SwapChainFormat::BT2020_G2084_10BIT;
-		if (!supportsHdrPresent)
+		if (GetSelectedAPI() != nri::GraphicsAPI::D3D12)
 		{
 			outReason = "hdr10-pq-unsupported-api";
 			return;
@@ -4995,158 +5004,192 @@ bool NRIRenderDevice::CreateSwapChain()
 		!IsFullscreenModeActive() &&
 		!mFrameGeneration.ConsumeNativeFallbackRequest();
 
-	mRequestedSwapChainFormat = requestedOutputFormat;
-	mCreatedSwapChainFormat = swapChainDesc.format;
-	mResolvedSwapChainTextureFormat = nri::Format::UNKNOWN;
-	mSwapChainDisplayDesc = {};
-	mSwapChainDisplayDescResult = nri::Result::FAILURE;
-	mHasSwapChainDisplayDesc = false;
-	mSwapChainOutputResolveReason = outputResolveReason;
-	mSwapChainFlags = swapChainDesc.flags;
-	mSwapChainQueuedFrameNum = swapChainDesc.queuedFrameNum;
-	mSwapChainTextureCount = 0;
-	mObservedSwapChainAcquireMask = 0;
-	mObservedSwapChainPresentMask = 0;
-	mSwapChainAcquireCounts.clear();
-	mSwapChainPresentCounts.clear();
-	mSwapChainAbandonCounts.clear();
-	mHasPresentedSwapChainFrame = false;
-
-	if (tryFrameGenPresentBridge)
+	const auto resetCreateState = [&](nri::SwapChainFormat createdFormat, const char* reason)
 	{
+		mRequestedSwapChainFormat = requestedOutputFormat;
+		mCreatedSwapChainFormat = createdFormat;
+		mResolvedSwapChainTextureFormat = nri::Format::UNKNOWN;
+		mSwapChainDisplayDesc = {};
+		mSwapChainDisplayDescResult = nri::Result::FAILURE;
+		mHasSwapChainDisplayDesc = false;
+		mSwapChainOutputResolveReason = reason;
+		mSwapChainFlags = swapChainDesc.flags;
+		mSwapChainQueuedFrameNum = swapChainDesc.queuedFrameNum;
+		mSwapChainTextureCount = 0;
+		mObservedSwapChainAcquireMask = 0;
+		mObservedSwapChainPresentMask = 0;
+		mSwapChainAcquireCounts.clear();
+		mSwapChainPresentCounts.clear();
+		mSwapChainAbandonCounts.clear();
+		mHasPresentedSwapChainFrame = false;
+	};
+
+	const char* activeOutputResolveReason = outputResolveReason;
+	bool forcingSdrFallback = false;
+	for (;;)
+	{
+		swapChainDesc.format = forcingSdrFallback ? nri::SwapChainFormat::BT709_G22_8BIT : resolvedOutputFormat;
+		resetCreateState(swapChainDesc.format, activeOutputResolveReason);
+
+		if (tryFrameGenPresentBridge)
+		{
+			RefreshNativeFrameGenerationSwapChain();
+			mFrameGeneration.OnSwapChainCreated(*this);
+			if (mFrameGeneration.IsPresentBridgeActive() && RefreshFrameGenerationPresentTargets())
+			{
+				mSwapChainTextureCount = (uint8_t)(std::min<size_t>)(mFrameGenerationPresentImages.size(), 255u);
+				mSwapChainAcquireCounts.assign(mFrameGenerationPresentImages.size(), 0);
+				mSwapChainPresentCounts.assign(mFrameGenerationPresentImages.size(), 0);
+				mSwapChainAbandonCounts.assign(mFrameGenerationPresentImages.size(), 0);
+				Printf("NRI framegen proxy swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s wait_present=%s size=%ux%u requested_mode=%s requested_format=%s created_format=%s reason=%s\n",
+					(uint32_t)mSwapChainTextureCount,
+					(uint32_t)mSwapChainQueuedFrameNum,
+					vid_vsync ? "on" : "off",
+					DescribeSwapChainFlags(mSwapChainFlags).GetChars(),
+					nri_ptwaitpresent ? "on" : "off",
+					width,
+					height,
+					GetNRIPTOutputModeName(requestedOutputMode),
+					GetSwapChainFormatName(mRequestedSwapChainFormat),
+					GetSwapChainFormatName(mCreatedSwapChainFormat),
+					mSwapChainOutputResolveReason.GetChars());
+				Printf("NRI framegen native handles: api=%s device=%s queue=%s swapchain=%s\n",
+					(const char*)nri_api,
+					mNativeD3D12Device != nullptr ? "ok" : "missing",
+					mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
+					mNativeD3D12SwapChain != nullptr ? "ok" : "missing");
+				return true;
+			}
+
+			DestroyFrameGenerationPresentTargets();
+			mFrameGeneration.OnSwapChainDestroyed(*this);
+			Printf(TEXTCOLOR_YELLOW "NRI framegen proxy swapchain creation failed; falling back to the native NRI swapchain path.\n");
+		}
+
+		nri::Result createSwapChainResult = mSwapChainInterface.CreateSwapChain(*mDevice, swapChainDesc, mSwapChain);
+		if (createSwapChainResult != nri::Result::SUCCESS)
+		{
+			if (swapChainDesc.format != nri::SwapChainFormat::BT709_G22_8BIT)
+			{
+				Printf(TEXTCOLOR_YELLOW "NRI swapchain create fallback: requested_mode=%s requested_format=%s created_format=%s failed (%s); retrying SDR.\n",
+					GetNRIPTOutputModeName(requestedOutputMode),
+					GetSwapChainFormatName(mRequestedSwapChainFormat),
+					GetSwapChainFormatName(swapChainDesc.format),
+					GetNriResultName(createSwapChainResult));
+				forcingSdrFallback = true;
+				activeOutputResolveReason =
+					requestedOutputMode == NRIPTOutputMode::HDR ?
+						"hdr-swapchain-create-failed-fallback-sdr" :
+						"swapchain-create-failed-fallback-sdr";
+				continue;
+			}
+
+			Printf(TEXTCOLOR_RED "Failed to create NRI swapchain.\n");
+			return false;
+		}
+
 		RefreshNativeFrameGenerationSwapChain();
 		mFrameGeneration.OnSwapChainCreated(*this);
-		if (mFrameGeneration.IsPresentBridgeActive() && RefreshFrameGenerationPresentTargets())
+		if (mFrameGeneration.IsPresentBridgeActive() && !RefreshFrameGenerationPresentTargets())
 		{
-			mSwapChainTextureCount = (uint8_t)(std::min<size_t>)(mFrameGenerationPresentImages.size(), 255u);
-			mSwapChainAcquireCounts.assign(mFrameGenerationPresentImages.size(), 0);
-			mSwapChainPresentCounts.assign(mFrameGenerationPresentImages.size(), 0);
-			mSwapChainAbandonCounts.assign(mFrameGenerationPresentImages.size(), 0);
-			Printf("NRI framegen proxy swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s wait_present=%s size=%ux%u requested_mode=%s requested_format=%s created_format=%s reason=%s\n",
-				(uint32_t)mSwapChainTextureCount,
-				(uint32_t)mSwapChainQueuedFrameNum,
-				vid_vsync ? "on" : "off",
-				DescribeSwapChainFlags(mSwapChainFlags).GetChars(),
-				nri_ptwaitpresent ? "on" : "off",
-				width,
-				height,
+			Printf(TEXTCOLOR_RED "NRI framegen present bridge is active but proxy backbuffer wrapping failed; falling back to native present path.\n");
+		}
+		SetNriDebugName(mCore, mSwapChain, "Raze.SwapChain");
+
+		uint32_t textureCount = 0;
+		nri::Texture* const* textures = mSwapChainInterface.GetSwapChainTextures(*mSwapChain, textureCount);
+		mSwapChainImages.resize(textureCount);
+		mSwapChainQueuedFrameNum = swapChainDesc.queuedFrameNum;
+		mSwapChainTextureCount = (uint8_t)(std::min<uint32_t>)(textureCount, 255u);
+		mObservedSwapChainAcquireMask = 0;
+		mObservedSwapChainPresentMask = 0;
+		mSwapChainAcquireCounts.assign(textureCount, 0);
+		mSwapChainPresentCounts.assign(textureCount, 0);
+		mSwapChainAbandonCounts.assign(textureCount, 0);
+		mHasPresentedSwapChainFrame = false;
+
+		for (uint32_t i = 0; i < textureCount; ++i)
+		{
+			auto& image = mSwapChainImages[i];
+			image.target.texture = textures[i];
+			image.target.owned = false;
+			const std::string imageName = "Raze.SwapChainImage[" + std::to_string(i) + "]";
+			SetNriDebugName(mCore, image.target.texture, imageName.c_str());
+
+			const nri::TextureDesc& desc = mCore.GetTextureDesc(*textures[i]);
+			image.target.width = desc.width;
+			image.target.height = desc.height;
+			image.target.format = desc.format;
+			mResolvedSwapChainTextureFormat = desc.format;
+			image.target.usage = desc.usage;
+			image.target.state = {};
+
+			if (!CreateTextureViews(image.target))
+			{
+				return false;
+			}
+
+			if (mCore.CreateFence(*mDevice, nri::SWAPCHAIN_SEMAPHORE, image.acquireSemaphore) != nri::Result::SUCCESS ||
+				mCore.CreateFence(*mDevice, nri::SWAPCHAIN_SEMAPHORE, image.releaseSemaphore) != nri::Result::SUCCESS)
+			{
+				return false;
+			}
+			const std::string acquireFenceName = "Raze.SwapChainAcquire[" + std::to_string(i) + "]";
+			const std::string releaseFenceName = "Raze.SwapChainRelease[" + std::to_string(i) + "]";
+			SetNriDebugName(mCore, image.acquireSemaphore, acquireFenceName.c_str());
+			SetNriDebugName(mCore, image.releaseSemaphore, releaseFenceName.c_str());
+		}
+
+		mSwapChainDisplayDescResult = mSwapChainInterface.GetDisplayDesc(*mSwapChain, mSwapChainDisplayDesc);
+		mHasSwapChainDisplayDesc = mSwapChainDisplayDescResult == nri::Result::SUCCESS;
+
+		const nri::Format expectedResolvedTextureFormat = GetExpectedResolvedTextureFormatForSwapChainFormat(mCreatedSwapChainFormat);
+		if (swapChainDesc.format != nri::SwapChainFormat::BT709_G22_8BIT &&
+			expectedResolvedTextureFormat != nri::Format::UNKNOWN &&
+			mResolvedSwapChainTextureFormat != expectedResolvedTextureFormat)
+		{
+			Printf(TEXTCOLOR_YELLOW "NRI swapchain wrap fallback: requested_mode=%s requested_format=%s created_format=%s resolved_texture_format=%s expected_texture_format=%s; retrying SDR.\n",
 				GetNRIPTOutputModeName(requestedOutputMode),
 				GetSwapChainFormatName(mRequestedSwapChainFormat),
 				GetSwapChainFormatName(mCreatedSwapChainFormat),
-				mSwapChainOutputResolveReason.GetChars());
-			Printf("NRI framegen native handles: api=%s device=%s queue=%s swapchain=%s\n",
-				(const char*)nri_api,
-				mNativeD3D12Device != nullptr ? "ok" : "missing",
-				mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
-				mNativeD3D12SwapChain != nullptr ? "ok" : "missing");
-			return true;
+				GetNriFormatName(mResolvedSwapChainTextureFormat),
+				GetNriFormatName(expectedResolvedTextureFormat));
+			DestroySwapChain();
+			forcingSdrFallback = true;
+			activeOutputResolveReason =
+				requestedOutputMode == NRIPTOutputMode::HDR ?
+					"hdr-wrap-format-mismatch-fallback-sdr" :
+					"swapchain-wrap-format-mismatch-fallback-sdr";
+			continue;
 		}
 
-		DestroyFrameGenerationPresentTargets();
-		mFrameGeneration.OnSwapChainDestroyed(*this);
-		Printf(TEXTCOLOR_YELLOW "NRI framegen proxy swapchain creation failed; falling back to the native NRI swapchain path.\n");
-	}
-
-	nri::Result createSwapChainResult = mSwapChainInterface.CreateSwapChain(*mDevice, swapChainDesc, mSwapChain);
-	if (createSwapChainResult != nri::Result::SUCCESS && swapChainDesc.format != nri::SwapChainFormat::BT709_G22_8BIT)
-	{
-		Printf(TEXTCOLOR_YELLOW "NRI swapchain create fallback: requested_mode=%s requested_format=%s created_format=%s failed (%s); retrying SDR.\n",
+		Printf("NRI swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s requested_mode=%s requested_format=%s created_format=%s resolved_texture_format=%s texture_override=%d flag_override=%s wait_present=%s size=%ux%u display_desc=%s hdr=%s sdr_nits=%.1f max_nits=%.1f reason=%s\n",
+			(uint32_t)mSwapChainTextureCount,
+			(uint32_t)mSwapChainQueuedFrameNum,
+			vid_vsync ? "on" : "off",
+			DescribeSwapChainFlags(mSwapChainFlags).GetChars(),
 			GetNRIPTOutputModeName(requestedOutputMode),
 			GetSwapChainFormatName(mRequestedSwapChainFormat),
-			GetSwapChainFormatName(swapChainDesc.format),
-			GetNriResultName(createSwapChainResult));
-		swapChainDesc.format = nri::SwapChainFormat::BT709_G22_8BIT;
-		mCreatedSwapChainFormat = swapChainDesc.format;
-		mSwapChainOutputResolveReason = "swapchain-create-failed-fallback-sdr";
-		createSwapChainResult = mSwapChainInterface.CreateSwapChain(*mDevice, swapChainDesc, mSwapChain);
+			GetSwapChainFormatName(mCreatedSwapChainFormat),
+			GetNriFormatName(mResolvedSwapChainTextureFormat),
+			(int)nri_ptswaptextures,
+			DescribeSwapChainFlagOverride(),
+			nri_ptwaitpresent ? "on" : "off",
+			width,
+			height,
+			GetNriResultName(mSwapChainDisplayDescResult),
+			mHasSwapChainDisplayDesc && mSwapChainDisplayDesc.isHDR ? "yes" : "no",
+			mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.sdrLuminance : 80.0f,
+			mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.maxLuminance : 80.0f,
+			mSwapChainOutputResolveReason.GetChars());
+		Printf("NRI framegen native handles: api=%s device=%s queue=%s swapchain=%s\n",
+			(const char*)nri_api,
+			mNativeD3D12Device != nullptr ? "ok" : "missing",
+			mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
+			mNativeD3D12SwapChain != nullptr ? "ok" : "missing");
+
+		return true;
 	}
-
-	if (createSwapChainResult != nri::Result::SUCCESS)
-	{
-		Printf(TEXTCOLOR_RED "Failed to create NRI swapchain.\n");
-		return false;
-	}
-	RefreshNativeFrameGenerationSwapChain();
-	mFrameGeneration.OnSwapChainCreated(*this);
-	if (mFrameGeneration.IsPresentBridgeActive() && !RefreshFrameGenerationPresentTargets())
-	{
-		Printf(TEXTCOLOR_RED "NRI framegen present bridge is active but proxy backbuffer wrapping failed; falling back to native present path.\n");
-	}
-	SetNriDebugName(mCore, mSwapChain, "Raze.SwapChain");
-
-	uint32_t textureCount = 0;
-	nri::Texture* const* textures = mSwapChainInterface.GetSwapChainTextures(*mSwapChain, textureCount);
-	mSwapChainImages.resize(textureCount);
-	mSwapChainQueuedFrameNum = swapChainDesc.queuedFrameNum;
-	mSwapChainTextureCount = (uint8_t)(std::min<uint32_t>)(textureCount, 255u);
-	mObservedSwapChainAcquireMask = 0;
-	mObservedSwapChainPresentMask = 0;
-	mSwapChainAcquireCounts.assign(textureCount, 0);
-	mSwapChainPresentCounts.assign(textureCount, 0);
-	mSwapChainAbandonCounts.assign(textureCount, 0);
-	mHasPresentedSwapChainFrame = false;
-
-	for (uint32_t i = 0; i < textureCount; ++i)
-	{
-		auto& image = mSwapChainImages[i];
-		image.target.texture = textures[i];
-		image.target.owned = false;
-		const std::string imageName = "Raze.SwapChainImage[" + std::to_string(i) + "]";
-		SetNriDebugName(mCore, image.target.texture, imageName.c_str());
-
-		const nri::TextureDesc& desc = mCore.GetTextureDesc(*textures[i]);
-		image.target.width = desc.width;
-		image.target.height = desc.height;
-		image.target.format = desc.format;
-		mResolvedSwapChainTextureFormat = desc.format;
-		image.target.usage = desc.usage;
-		image.target.state = {};
-
-		if (!CreateTextureViews(image.target))
-		{
-			return false;
-		}
-
-		if (mCore.CreateFence(*mDevice, nri::SWAPCHAIN_SEMAPHORE, image.acquireSemaphore) != nri::Result::SUCCESS ||
-			mCore.CreateFence(*mDevice, nri::SWAPCHAIN_SEMAPHORE, image.releaseSemaphore) != nri::Result::SUCCESS)
-		{
-			return false;
-		}
-		const std::string acquireFenceName = "Raze.SwapChainAcquire[" + std::to_string(i) + "]";
-		const std::string releaseFenceName = "Raze.SwapChainRelease[" + std::to_string(i) + "]";
-		SetNriDebugName(mCore, image.acquireSemaphore, acquireFenceName.c_str());
-		SetNriDebugName(mCore, image.releaseSemaphore, releaseFenceName.c_str());
-	}
-
-	mSwapChainDisplayDescResult = mSwapChainInterface.GetDisplayDesc(*mSwapChain, mSwapChainDisplayDesc);
-	mHasSwapChainDisplayDesc = mSwapChainDisplayDescResult == nri::Result::SUCCESS;
-
-	Printf("NRI swapchain created: textures=%u queued_frames=%u vsync=%s flags=%s requested_mode=%s requested_format=%s created_format=%s resolved_texture_format=%s texture_override=%d flag_override=%s wait_present=%s size=%ux%u display_desc=%s hdr=%s sdr_nits=%.1f max_nits=%.1f reason=%s\n",
-		(uint32_t)mSwapChainTextureCount,
-		(uint32_t)mSwapChainQueuedFrameNum,
-		vid_vsync ? "on" : "off",
-		DescribeSwapChainFlags(mSwapChainFlags).GetChars(),
-		GetNRIPTOutputModeName(requestedOutputMode),
-		GetSwapChainFormatName(mRequestedSwapChainFormat),
-		GetSwapChainFormatName(mCreatedSwapChainFormat),
-		GetNriFormatName(mResolvedSwapChainTextureFormat),
-		(int)nri_ptswaptextures,
-		DescribeSwapChainFlagOverride(),
-		nri_ptwaitpresent ? "on" : "off",
-		width,
-		height,
-		GetNriResultName(mSwapChainDisplayDescResult),
-		mHasSwapChainDisplayDesc && mSwapChainDisplayDesc.isHDR ? "yes" : "no",
-		mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.sdrLuminance : 80.0f,
-		mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.maxLuminance : 80.0f,
-		mSwapChainOutputResolveReason.GetChars());
-	Printf("NRI framegen native handles: api=%s device=%s queue=%s swapchain=%s\n",
-		(const char*)nri_api,
-		mNativeD3D12Device != nullptr ? "ok" : "missing",
-		mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
-		mNativeD3D12SwapChain != nullptr ? "ok" : "missing");
-
-	return true;
 }
 
 bool NRIRenderDevice::CreateQueuedFrames()
