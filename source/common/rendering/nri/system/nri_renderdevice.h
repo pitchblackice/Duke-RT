@@ -222,6 +222,7 @@ private:
 	const void* GetVertexShaderBytecode(size_t& size) const;
 	const void* GetPixelShaderBytecode(size_t& size) const;
 	nri::GraphicsAPI GetSelectedAPI() const;
+	nri::GraphicsAPI GetLiveAPI() const;
 	NRISamplerMode GetSamplerMode(int clampMode) const;
 	nri::DescriptorSet* GetSamplerSet(NRISamplerMode mode) const;
 	nri::DescriptorSet* CreateTextureSet(nri::Descriptor* shaderView);
@@ -328,6 +329,7 @@ private:
 	std::vector<uint8_t> mVertexShaderBlob;
 	std::vector<uint8_t> mPixelShaderBlob;
 	FString mDeviceName = "NRI";
+	nri::GraphicsAPI mCreatedDeviceApi = nri::GraphicsAPI::VK;
 	nri::SwapChainBits mSwapChainFlags = nri::SwapChainBits::NONE;
 	nri::SwapChainFormat mRequestedSwapChainFormat = nri::SwapChainFormat::BT709_G22_8BIT;
 	nri::SwapChainFormat mCreatedSwapChainFormat = nri::SwapChainFormat::BT709_G22_8BIT;

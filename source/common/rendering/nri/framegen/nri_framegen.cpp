@@ -627,7 +627,7 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 	policy.fullscreenActive = frameBuffer.IsFullscreenModeActive();
 	policy.windowModeSupported = !policy.fullscreenActive;
 
-	const nri::GraphicsAPI api = frameBuffer.GetSelectedAPI();
+	const nri::GraphicsAPI api = frameBuffer.GetLiveAPI();
 	policy.selectedApiName = GetApiName(api);
 	policy.apiSupported = api == nri::GraphicsAPI::D3D12;
 
@@ -761,7 +761,7 @@ NRIFrameGenerationPresentContract NRIFrameGenerationContext::BuildPresentContrac
 {
 	NRIFrameGenerationPresentContract contract = {};
 	const NRIPTOutputPolicy outputPolicy = frameBuffer.GetPathTracingOutputPolicy();
-	const nri::GraphicsAPI api = frameBuffer.GetSelectedAPI();
+	const nri::GraphicsAPI api = frameBuffer.GetLiveAPI();
 	contract.initialized = true;
 	contract.requestedOutputMode = outputPolicy.requestedMode;
 	contract.resolvedOutputMode = outputPolicy.resolvedMode;
@@ -1270,7 +1270,7 @@ bool NRIFrameGenerationContext::EnsureProviderRuntime(const NRIRenderDevice& fra
 		return false;
 	}
 
-	if (frameBuffer.GetSelectedAPI() != nri::GraphicsAPI::D3D12)
+	if (frameBuffer.GetLiveAPI() != nri::GraphicsAPI::D3D12)
 	{
 		std::strncpy(mProviderState.lastStatusReason, "api-not-d3d12", std::size(mProviderState.lastStatusReason) - 1u);
 		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
@@ -1360,7 +1360,7 @@ bool NRIFrameGenerationContext::EnsureProviderPresentBridge(const NRIRenderDevic
 		return false;
 	}
 
-	if (frameBuffer.GetSelectedAPI() != nri::GraphicsAPI::D3D12)
+	if (frameBuffer.GetLiveAPI() != nri::GraphicsAPI::D3D12)
 	{
 		std::strncpy(mProviderState.lastStatusReason, "api-not-d3d12", std::size(mProviderState.lastStatusReason) - 1u);
 		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';

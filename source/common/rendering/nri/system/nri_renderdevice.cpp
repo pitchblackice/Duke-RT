@@ -2271,7 +2271,7 @@ bool NRIRenderDevice::ShouldRequestFrameGenerationLowLatencySwapChain() const
 		return false;
 	}
 
-	if (GetSelectedAPI() != nri::GraphicsAPI::D3D12 || IsFullscreenModeActive())
+	if (GetLiveAPI() != nri::GraphicsAPI::D3D12 || IsFullscreenModeActive())
 	{
 		return false;
 	}
@@ -3215,7 +3215,7 @@ void NRIRenderDevice::RefreshNativeFrameGenerationHandles()
 	mNativeD3D12Device = nullptr;
 	mNativeD3D12GraphicsQueue = nullptr;
 
-	if (GetSelectedAPI() != nri::GraphicsAPI::D3D12)
+	if (GetLiveAPI() != nri::GraphicsAPI::D3D12)
 	{
 		return;
 	}
@@ -3391,7 +3391,7 @@ void NRIRenderDevice::PrintPathTracingCaps() const
 		mNativeD3D12Device != nullptr ? "ok" : "missing",
 		mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
 		mNativeD3D12SwapChain != nullptr ? "ok" : "missing",
-		GetSelectedAPI() == nri::GraphicsAPI::D3D12 ? "nri-public-device-queue-only" : "unsupported-api");
+		GetLiveAPI() == nri::GraphicsAPI::D3D12 ? "nri-public-device-queue-only" : "unsupported-api");
 	const auto& frameGenProvider = mFrameGeneration.GetProviderState();
 	Printf("NRI PT framegen provider: runtime=%s funcs=%s context=%s swapctx=%s bridge=%s debug=%s no_swapchain_notify=%s cfg=%s prepare=%s fg_dispatch=%s ui_reg=%s camera=%s lib=%s version=%s dims=render:%ux%u display:%ux%u counts=cfg:%llu prep:%llu fg:%llu frames=%llu/%llu query=%s/%s create=%s/%s config=%s/%s prepare=%s dispatch=%s vram=fg:%s:%llu/%llu sc:%s:%llu/%llu resets=%llu last_reset=%s present=%s/%s count=%llu reason=%s\n",
 		frameGenProvider.runtimeLoaded ? "yes" : "no",
@@ -3939,7 +3939,7 @@ void NRIRenderDevice::PrintVramTelemetryStatus() const
 	bool hasLiveDxgiTelemetry = false;
 
 #ifdef _WIN32
-	if (GetSelectedAPI() == nri::GraphicsAPI::D3D12 && mNativeD3D12Device != nullptr)
+	if (GetLiveAPI() == nri::GraphicsAPI::D3D12 && mNativeD3D12Device != nullptr)
 	{
 		IDXGIFactory4* factory = nullptr;
 		if (SUCCEEDED(CreateDxgiFactoryForTelemetry(&factory)) && factory != nullptr)
@@ -3997,7 +3997,7 @@ void NRIRenderDevice::PrintVramTelemetryStatus() const
 	else
 	{
 		Printf("NRI PT vram live: unavailable source=%s\n",
-			GetSelectedAPI() == nri::GraphicsAPI::D3D12 ? "dxgi-query-failed" : "unsupported-api");
+			GetLiveAPI() == nri::GraphicsAPI::D3D12 ? "dxgi-query-failed" : "unsupported-api");
 	}
 	Printf("NRI PT vram wrapped: swapchain=%u framegen_present=%u tracked_bytes=unknown\n",
 		(uint32_t)mSwapChainImages.size(),
@@ -4757,6 +4757,8 @@ bool NRIRenderDevice::CreateDevice()
 		return false;
 	}
 
+	mCreatedDeviceApi = selectedApi;
+
 	if (mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::CoreInterface), &mCore) != nri::Result::SUCCESS ||
 		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::HelperInterface), &mHelper) != nri::Result::SUCCESS ||
 		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::RayTracingInterface), &mRayTracing) != nri::Result::SUCCESS ||
@@ -4828,7 +4830,7 @@ bool NRIRenderDevice::CreateDevice()
 
 void NRIRenderDevice::LogD3D12FailureDiagnostics(const char* context)
 {
-	if (GetSelectedAPI() != nri::GraphicsAPI::D3D12)
+	if (GetLiveAPI() != nri::GraphicsAPI::D3D12)
 	{
 		return;
 	}
@@ -5048,7 +5050,7 @@ bool NRIRenderDevice::CreateSwapChain()
 		nri_framegen &&
 		requestedOutputMode == NRIPTOutputMode::SDR &&
 		HasRequestedFrameGenerationProvider() &&
-		GetSelectedAPI() == nri::GraphicsAPI::D3D12 &&
+		GetLiveAPI() == nri::GraphicsAPI::D3D12 &&
 		!IsFullscreenModeActive() &&
 		!mFrameGeneration.ConsumeNativeFallbackRequest();
 
@@ -6442,6 +6444,11 @@ const void* NRIRenderDevice::GetPixelShaderBytecode(size_t& size) const
 nri::GraphicsAPI NRIRenderDevice::GetSelectedAPI() const
 {
 	return FString(V_GetStartupNriAPI()).CompareNoCase("d3d12") == 0 ? nri::GraphicsAPI::D3D12 : nri::GraphicsAPI::VK;
+}
+
+nri::GraphicsAPI NRIRenderDevice::GetLiveAPI() const
+{
+	return mDevice != nullptr ? mCreatedDeviceApi : GetSelectedAPI();
 }
 
 NRISamplerMode NRIRenderDevice::GetSamplerMode(int clampMode) const
