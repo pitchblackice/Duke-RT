@@ -761,6 +761,7 @@ NRIFrameGenerationPresentContract NRIFrameGenerationContext::BuildPresentContrac
 {
 	NRIFrameGenerationPresentContract contract = {};
 	const NRIPTOutputPolicy outputPolicy = frameBuffer.GetPathTracingOutputPolicy();
+	const nri::GraphicsAPI api = frameBuffer.GetSelectedAPI();
 	contract.initialized = true;
 	contract.requestedOutputMode = outputPolicy.requestedMode;
 	contract.resolvedOutputMode = outputPolicy.resolvedMode;
@@ -770,6 +771,13 @@ NRIFrameGenerationPresentContract NRIFrameGenerationContext::BuildPresentContrac
 	contract.hdrPaperWhiteScale = GetNRIPTHdrPaperWhiteScale(outputPolicy);
 
 #ifdef _WIN32
+	if (api != nri::GraphicsAPI::D3D12)
+	{
+		contract.proxyAllowed = false;
+		contract.resolvedReason = "api-not-d3d12";
+		return contract;
+	}
+
 	switch (contract.createdSwapChainFormat)
 	{
 	case nri::SwapChainFormat::BT709_G22_8BIT:
