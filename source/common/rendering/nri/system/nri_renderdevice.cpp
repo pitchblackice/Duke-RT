@@ -36,6 +36,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <string>
 
@@ -1025,6 +1026,19 @@ namespace
 		case nri::SwapChainFormat::BT2020_G2084_10BIT: return NRIPTOutputMode::HDR10PQ;
 		default: return NRIPTOutputMode::SDR;
 		}
+	}
+
+	static bool DisplayLuminanceChanged(float previousValue, float currentValue)
+	{
+		return std::fabs(previousValue - currentValue) > 0.05f;
+	}
+
+	static bool HasDisplayDescChanged(const nri::DisplayDesc& previousDesc, const nri::DisplayDesc& currentDesc)
+	{
+		return
+			previousDesc.isHDR != currentDesc.isHDR ||
+			DisplayLuminanceChanged(previousDesc.sdrLuminance, currentDesc.sdrLuminance) ||
+			DisplayLuminanceChanged(previousDesc.maxLuminance, currentDesc.maxLuminance);
 	}
 
 	static FString DescribeSwapChainImageMask(uint64_t mask, uint32_t textureCount)
@@ -5140,8 +5154,7 @@ bool NRIRenderDevice::CreateSwapChain()
 			SetNriDebugName(mCore, image.releaseSemaphore, releaseFenceName.c_str());
 		}
 
-		mSwapChainDisplayDescResult = mSwapChainInterface.GetDisplayDesc(*mSwapChain, mSwapChainDisplayDesc);
-		mHasSwapChainDisplayDesc = mSwapChainDisplayDescResult == nri::Result::SUCCESS;
+		RefreshSwapChainDisplayDesc(false);
 
 		const nri::Format expectedResolvedTextureFormat = GetExpectedResolvedTextureFormatForSwapChainFormat(mCreatedSwapChainFormat);
 		if (swapChainDesc.format != nri::SwapChainFormat::BT709_G22_8BIT &&
@@ -5501,6 +5514,11 @@ bool NRIRenderDevice::BeginCommandList(const char* reason, bool waitForSlotReuse
 
 bool NRIRenderDevice::EnsureSwapChainSize()
 {
+	if (mSwapChain != nullptr)
+	{
+		RefreshSwapChainDisplayDesc(true);
+	}
+
 	const NRIPTOutputMode requestedOutputMode = GetRequestedPathTracingOutputMode();
 	nri::SwapChainFormat requestedOutputFormat = nri::SwapChainFormat::BT709_G22_8BIT;
 	nri::SwapChainFormat resolvedOutputFormat = nri::SwapChainFormat::BT709_G22_8BIT;
@@ -5569,6 +5587,56 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 			(mSwapChainFlags != requestedFlags ? "swapchain-flags-change" : "swapchain-format-change"));
 	WaitForCommands(true);
 	return CreateSwapChain();
+}
+
+bool NRIRenderDevice::RefreshSwapChainDisplayDesc(bool logChanges)
+{
+	if (mSwapChain == nullptr)
+	{
+		return false;
+	}
+
+	const nri::Result previousResult = mSwapChainDisplayDescResult;
+	const bool hadDisplayDesc = mHasSwapChainDisplayDesc;
+	const nri::DisplayDesc previousDesc = mSwapChainDisplayDesc;
+
+	nri::DisplayDesc refreshedDesc = {};
+	const nri::Result refreshResult = mSwapChainInterface.GetDisplayDesc(*mSwapChain, refreshedDesc);
+	mSwapChainDisplayDescResult = refreshResult;
+
+	if (refreshResult == nri::Result::SUCCESS)
+	{
+		const bool descChanged = !hadDisplayDesc || HasDisplayDescChanged(previousDesc, refreshedDesc);
+		mSwapChainDisplayDesc = refreshedDesc;
+		mHasSwapChainDisplayDesc = true;
+
+		if (logChanges && (previousResult != nri::Result::SUCCESS || descChanged))
+		{
+			Printf("NRI swapchain display change: created_format=%s display_desc=%s->%s hdr=%s->%s sdr_nits=%.1f->%.1f max_nits=%.1f->%.1f\n",
+				GetSwapChainFormatName(mCreatedSwapChainFormat),
+				GetNriResultName(previousResult),
+				GetNriResultName(refreshResult),
+				hadDisplayDesc && previousDesc.isHDR ? "yes" : "no",
+				refreshedDesc.isHDR ? "yes" : "no",
+				hadDisplayDesc ? previousDesc.sdrLuminance : 80.0f,
+				refreshedDesc.sdrLuminance,
+				hadDisplayDesc ? previousDesc.maxLuminance : 80.0f,
+				refreshedDesc.maxLuminance);
+		}
+
+		return true;
+	}
+
+	if (logChanges && previousResult == nri::Result::SUCCESS)
+	{
+		Printf(TEXTCOLOR_YELLOW "NRI swapchain display refresh failed (%s); preserving cached display state hdr=%s sdr_nits=%.1f max_nits=%.1f\n",
+			GetNriResultName(refreshResult),
+			hadDisplayDesc && previousDesc.isHDR ? "yes" : "no",
+			hadDisplayDesc ? previousDesc.sdrLuminance : 80.0f,
+			hadDisplayDesc ? previousDesc.maxLuminance : 80.0f);
+	}
+
+	return mHasSwapChainDisplayDesc;
 }
 
 void NRIRenderDevice::EndFrameAndPresent()

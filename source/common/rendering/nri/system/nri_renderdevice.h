@@ -253,6 +253,7 @@ private:
 	void DestroyFrameGenerationPresentTargets();
 	bool ShouldRequestFrameGenerationLowLatencySwapChain() const;
 	nri::SwapChainBits GetEffectiveRequestedSwapChainFlags() const;
+	bool RefreshSwapChainDisplayDesc(bool logChanges);
 	void ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& outRequestedFormat, nri::SwapChainFormat& outResolvedFormat, const char*& outReason) const;
 	bool ShouldUseFrameGenerationUiTarget() const;
 	bool ShouldHandoffFrameGenerationUiTexture() const;
