@@ -462,22 +462,6 @@ void EvaluateSampledEmissiveLighting(
 	outSpecular = EvaluateSunSpecular(albedo, metalness, receiverLightNormal, viewDir, lightDir, 1.0) * lightColor * sampleWeight;
 }
 
-float3 GetEmissivePrimitiveDebugColor(uint primitiveIndex, uint dataSource)
-{
-	if (primitiveIndex == 0xffffffffu)
-	{
-		return 0.0;
-	}
-
-	const float seed = (float)(primitiveIndex + 1u);
-	const float3 hashedColor = 0.15 + 0.85 * float3(
-		frac(seed * 0.1031),
-		frac(seed * 0.11369 + 0.17),
-		frac(seed * 0.13787 + 0.31));
-	const float3 sourceTint = dataSource == 0u ? float3(1.0, 0.85, 0.55) : float3(0.55, 0.9, 1.0);
-	return saturate(hashedColor * sourceTint);
-}
-
 float3 EvaluateSectorLightingSource(MaterialData material, float3 normal)
 {
 	if ((gSectorLightHeaders[0].flags & 0x1u) == 0u)
@@ -854,10 +838,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 indirectTransportSpecular = 0.0;
 		float3 analyticDirectLighting = 0.0;
 		float3 emissiveDirectLighting = 0.0;
-		float2 emissiveSampleUv = 0.0;
-		float3 emissiveSampleRadiance = 0.0;
-		uint emissiveSamplePrimitiveIndex = 0xffffffffu;
-		uint emissiveSampleDataSource = 0u;
 		float emissiveSampleVisibleFraction = 0.0;
 		float emissiveSampleOccludedFraction = 0.0;
 		float3 sectorSourceLighting = 0.0;
@@ -1001,18 +981,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 						sampleUv,
 						sampleRadiance);
 
-					if (emissiveSamplePrimitiveIndex == 0xffffffffu && samplePrimitiveIndex != 0xffffffffu)
-					{
-						emissiveSamplePrimitiveIndex = samplePrimitiveIndex;
-						emissiveSampleDataSource = sampleDataSource;
-					}
-
-					if (all(emissiveSampleRadiance <= 0.0) && any(sampleRadiance > 0.0))
-					{
-						emissiveSampleUv = sampleUv;
-						emissiveSampleRadiance = sampleRadiance;
-					}
-
 					const bool sampleContributed = any((sampleDiffuse + sampleSpecular) > 0.0);
 					if (sampleOccluded)
 					{
@@ -1111,18 +1079,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		else if (gTraceConstants.DebugMode == 29)
 		{
 			color = float4(sectorSourceLighting, 1.0);
-		}
-		else if (gTraceConstants.DebugMode == 30)
-		{
-			color = float4(frac(emissiveSampleUv), 0.0, 1.0);
-		}
-		else if (gTraceConstants.DebugMode == 31)
-		{
-			color = float4(emissiveSampleRadiance, 1.0);
-		}
-		else if (gTraceConstants.DebugMode == 32)
-		{
-			color = float4(GetEmissivePrimitiveDebugColor(emissiveSamplePrimitiveIndex, emissiveSampleDataSource), 1.0);
 		}
 		else if (gTraceConstants.DebugMode == 33)
 		{

@@ -686,21 +686,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	if (gTraceConstants.DebugMode == 6)
-	{
-		const float viewZ = abs(gViewZInput.Load(int3(samplePos, 0)).x);
-		const float normalized = saturate(viewZ / 4096.0);
-		composed = float4(normalized.xxx, 1.0);
-	}
-	else if (gTraceConstants.DebugMode == 7)
-	{
-		composed = float4(saturate(gBaseColorInput.Load(int3(samplePos, 0)).rgb), 1.0);
-	}
-	else if (gTraceConstants.DebugMode == 8)
-	{
-		composed = float4(NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput.Load(int3(samplePos, 0))).xyz * 0.5 + 0.5, 1.0);
-	}
-	else if (gTraceConstants.DebugMode == 9)
+	if (gTraceConstants.DebugMode == 9)
 	{
 		composed = float4(saturate(gValidationInput.Load(int3(samplePos, 0)).rgb), 1.0);
 	}
@@ -720,21 +706,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float hitMetric = saturate(viewZ / 4096.0);
 		composed = float4(hitMetric.xxx, 1.0);
 	}
-	else if (gTraceConstants.DebugMode == 13)
-	{
-		composed = float4(gHistoryInput.Load(int3(pixelPosU, 0)).rgb, 1.0);
-		useRadianceDisplayMapping = true;
-	}
-	else if (gTraceConstants.DebugMode == 14)
-	{
-		composed = float4(gUpscaledInput.Load(int3(pixelPosU, 0)).rgb, 1.0);
-		useRadianceDisplayMapping = true;
-	}
-	else if (gTraceConstants.DebugMode == 15)
-	{
-		composed = float4(gComposedInput.Load(int3(samplePos, 0)).rgb, 1.0);
-		useRadianceDisplayMapping = true;
-	}
 	else if (gTraceConstants.DebugMode == 18)
 	{
 		const float metalness = saturate(gBaseColorInput.Load(int3(samplePos, 0)).a);
@@ -745,14 +716,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float materialID = 0.0;
 		const float roughness = NRD_FrontEnd_UnpackNormalAndRoughness(gNormalRoughnessInput.Load(int3(samplePos, 0)), materialID).w;
 		composed = float4(roughness.xxx, 1.0);
-	}
-	else if (gTraceConstants.DebugMode == 20)
-	{
-		const float motionZ = gMotionInput.Load(int3(samplePos, 0)).z;
-		const float magnitude = saturate(abs(motionZ) / 256.0);
-		const float3 positive = float3(0.5 + 0.5 * magnitude, 0.5 - 0.5 * magnitude, 0.5 - 0.5 * magnitude);
-		const float3 negative = float3(0.5 - 0.5 * magnitude, 0.5 - 0.5 * magnitude, 0.5 + 0.5 * magnitude);
-		composed = float4(motionZ >= 0.0 ? positive : negative, 1.0);
 	}
 	else if (gTraceConstants.DebugMode == 21)
 	{

@@ -167,13 +167,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 
 	const uint2 pixelPos = dispatchThreadId.xy;
-	if (gTraceConstants.DebugMode == 15u)
-	{
-		const uint checker = ((pixelPos.x / 32u) ^ (pixelPos.y / 32u)) & 1u;
-		gComposedOutput[pixelPos] = checker != 0u ? float4(0.95, 0.95, 0.95, 1.0) : float4(0.08, 0.08, 0.08, 1.0);
-		return;
-	}
-
 	const float3 rawDiffuseSignal = SanitizeColor(UnpackDenoisedRadiance(gComposedInput.Load(int3(pixelPos, 0))));
 	const float3 rawSpecular = SanitizeColor(UnpackDenoisedRadiance(gUpscaledInput.Load(int3(pixelPos, 0))));
 	const float3 filteredDiffuseSignal = SanitizeColor(UnpackDenoisedRadiance(gGuideDiffuseInput.Load(int3(pixelPos, 0))));

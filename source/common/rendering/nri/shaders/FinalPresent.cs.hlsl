@@ -37,13 +37,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const bool hdrSwapChainActive =
 		gPresentConstants.OutputMode != NRI_PT_OUTPUT_MODE_SDR &&
 		(gPresentConstants.OutputFlags & NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE) != 0u;
-	if (gPresentConstants.DebugMode == 13u || gPresentConstants.DebugMode == 14u || gPresentConstants.DebugMode == 15u || gPresentConstants.DebugMode == 45u)
+	if (gPresentConstants.DebugMode == 45u)
 	{
 		float3 debugColor = SanitizeFiniteColor(inputColor);
-		if (gPresentConstants.DebugMode == 45u)
-		{
-			debugColor = ApplyManualExposure(debugColor, gPresentConstants.Exposure);
-		}
+		debugColor = ApplyManualExposure(debugColor, gPresentConstants.Exposure);
 
 		gOutputTexture[targetPixelPos] = hdrSwapChainActive ?
 			ApplyHdrOutputMapping(

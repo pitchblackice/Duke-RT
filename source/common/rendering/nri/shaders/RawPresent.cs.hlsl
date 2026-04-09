@@ -22,11 +22,6 @@ bool AnyNonFinite(float3 value)
 	return any(isnan(value)) || any(isinf(value));
 }
 
-bool NonFinite1(float value)
-{
-	return isnan(value) || isinf(value);
-}
-
 float3 VisualizeHdrProbe(float3 value)
 {
 	if (AnyNonFinite(value))
@@ -114,81 +109,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 	else
-	if (gPresentConstants.DebugMode == 34u || gPresentConstants.DebugMode == 35u || gPresentConstants.DebugMode == 37u || gPresentConstants.DebugMode == 38u || gPresentConstants.DebugMode == 39u || gPresentConstants.DebugMode == 44u)
+	if (gPresentConstants.DebugMode == 34u)
 	{
 		color = VisualizeHdrProbe(gInputTexture.Load(int3(samplePos, 0)).rgb);
-	}
-	else
-	if (gPresentConstants.DebugMode == 36u)
-	{
-		const float depth = gInputTexture.Load(int3(samplePos, 0)).x;
-		if (isnan(depth) || isinf(depth))
-		{
-			color = float3(1.0, 0.0, 1.0);
-		}
-		else if (depth >= 0.9999)
-		{
-			color = float3(0.0, 0.0, 1.0);
-		}
-		else
-		{
-			color = saturate(depth).xxx;
-		}
-	}
-	else
-	if (gPresentConstants.DebugMode == 40u)
-	{
-		const float3 guide = saturate(gInputTexture.Load(int3(samplePos, 0)).rgb);
-		color = sqrt(guide);
-	}
-	else
-	if (gPresentConstants.DebugMode == 41u)
-	{
-		const float3 guide = max(gInputTexture.Load(int3(samplePos, 0)).rgb, 0.0);
-		if (AnyNonFinite(guide))
-		{
-			color = float3(1.0, 0.0, 1.0);
-		}
-		else
-		{
-			// RR specular albedo is often much darker than the diffuse guide on dielectric-heavy scenes.
-			// Use a stronger log exposure here so a healthy-but-small guide does not read as fully black.
-			float3 guideVis = saturate(log2(1.0 + guide * 256.0) / 8.0);
-
-			// If the actual RR specular albedo guide is still effectively black, fall back to a base-color/metalness
-			// F0 proxy so the probe can still reveal where specular-capable materials exist.
-			const float4 baseColorMetalness = gUnused1.Load(int3(samplePos, 0));
-			const float viewZ = abs(gUnused2.Load(int3(samplePos, 0)).x);
-			const bool isSky = viewZ >= NRD_INF * 0.5;
-			const float metalness = saturate(baseColorMetalness.w);
-			const float3 specularF0 = lerp(float3(0.04, 0.04, 0.04), saturate(baseColorMetalness.rgb), metalness);
-			const float proxyLuma = dot(specularF0, float3(0.299, 0.587, 0.114));
-			const float3 proxyVis = isSky ? 0.0 : saturate(log2(1.0 + proxyLuma * 256.0) / 8.0).xxx;
-
-			color = max(guideVis, proxyVis);
-		}
-	}
-	else
-	if (gPresentConstants.DebugMode == 42u)
-	{
-		const float4 packed = gInputTexture.Load(int3(samplePos, 0));
-		const float3 normalVis = saturate(packed.xyz * 0.5 + 0.5);
-		const float roughness = saturate(packed.w);
-		color = lerp(normalVis, roughness.xxx, 0.35);
-	}
-	else
-	if (gPresentConstants.DebugMode == 43u)
-	{
-		const float hitDistance = gInputTexture.Load(int3(samplePos, 0)).x;
-		if (NonFinite1(hitDistance))
-		{
-			color = float3(1.0, 0.0, 1.0);
-		}
-		else
-		{
-			const float mapped = saturate(log2(1.0 + max(hitDistance, 0.0)) / 12.0);
-			color = mapped.xxx;
-		}
 	}
 	else
 	{
