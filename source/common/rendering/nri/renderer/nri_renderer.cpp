@@ -39,7 +39,83 @@
 #include <unordered_set>
 #include <windows.h>
 
-CVAR(Int, nri_ptdebug, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+static constexpr int kPtDebugMenuModes[] = {
+	0, 1, 2, 3, 4, 5,
+	9, 10, 11, 12,
+	16, 17, 18, 19,
+	21, 22, 23, 24, 25,
+	26, 27, 28, 29,
+	33, 34, 45
+};
+
+static int ClampPtDebugMenuIndex(int index)
+{
+	return std::clamp(index, 0, (int)std::size(kPtDebugMenuModes) - 1);
+}
+
+static int FindPtDebugMenuIndex(int debugMode)
+{
+	for (int i = 0; i < (int)std::size(kPtDebugMenuModes); ++i)
+	{
+		if (kPtDebugMenuModes[i] == debugMode)
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+static int ResolvePtDebugModeFromMenuIndex(int index)
+{
+	return kPtDebugMenuModes[ClampPtDebugMenuIndex(index)];
+}
+
+static int ResolvePtDebugMenuIndexFromMode(int debugMode)
+{
+	const int index = FindPtDebugMenuIndex(debugMode);
+	return index >= 0 ? index : 0;
+}
+
+static bool gSyncingPtDebugMenu = false;
+
+EXTERN_CVAR(Int, nri_ptdebugmenu)
+CUSTOM_CVAR(Int, nri_ptdebug, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	const int resolvedMode = ResolvePtDebugModeFromMenuIndex(ResolvePtDebugMenuIndexFromMode(self));
+	if (self != resolvedMode)
+	{
+		self = resolvedMode;
+		return;
+	}
+
+	if (gSyncingPtDebugMenu)
+	{
+		return;
+	}
+
+	gSyncingPtDebugMenu = true;
+	nri_ptdebugmenu = ResolvePtDebugMenuIndexFromMode(self);
+	gSyncingPtDebugMenu = false;
+}
+CUSTOM_CVAR(Int, nri_ptdebugmenu, 0, CVAR_GLOBALCONFIG)
+{
+	const int clampedIndex = ClampPtDebugMenuIndex(self);
+	if (self != clampedIndex)
+	{
+		self = clampedIndex;
+		return;
+	}
+
+	if (gSyncingPtDebugMenu)
+	{
+		return;
+	}
+
+	gSyncingPtDebugMenu = true;
+	nri_ptdebug = ResolvePtDebugModeFromMenuIndex(self);
+	gSyncingPtDebugMenu = false;
+}
 CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrddenoiser, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_upscaler, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -3488,38 +3564,7 @@ namespace
 
 	static bool IsSupportedPtDebugMode(uint32_t debugMode)
 	{
-		switch (debugMode)
-		{
-		case 0u:
-		case 1u:
-		case 2u:
-		case 3u:
-		case 4u:
-		case 5u:
-		case 9u:
-		case 10u:
-		case 11u:
-		case 12u:
-		case 16u:
-		case 17u:
-		case 18u:
-		case 19u:
-		case 21u:
-		case 22u:
-		case 23u:
-		case 24u:
-		case 25u:
-		case NRI_PTDEBUG_ANALYTIC_DIRECT:
-		case NRI_PTDEBUG_EMISSIVE_TAGS:
-		case NRI_PTDEBUG_EMISSIVE_DIRECT:
-		case NRI_PTDEBUG_SECTOR_AMBIENT:
-		case NRI_PTDEBUG_EMISSIVE_SAMPLE_VISIBILITY:
-		case NRI_PTDEBUG_UPSCALER_TRACE_TRANSPARENT:
-		case NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT:
-			return true;
-		default:
-			return false;
-		}
+		return FindPtDebugMenuIndex((int)debugMode) >= 0;
 	}
 
 	static bool IsFinalShaderDebugMode(uint32_t debugMode)
