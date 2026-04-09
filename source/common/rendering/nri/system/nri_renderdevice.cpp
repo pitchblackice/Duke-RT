@@ -3539,6 +3539,29 @@ NRIPTOutputPolicy NRIRenderDevice::GetPathTracingOutputPolicy() const
 	return policy;
 }
 
+void NRIRenderDevice::PrintPathTracingOutputModeChange(uint32_t frameIndex, NRIPTOutputMode previousRequestedMode, NRIPTOutputMode previousResolvedMode) const
+{
+	const NRIPTOutputPolicy outputPolicy = GetPathTracingOutputPolicy();
+	nri::SwapChainFormat requestedOutputFormat = nri::SwapChainFormat::BT709_G22_8BIT;
+	nri::SwapChainFormat resolvedOutputFormat = nri::SwapChainFormat::BT709_G22_8BIT;
+	const char* outputResolveReason = "requested-sdr";
+	ResolvePathTracingSwapChainOutput(requestedOutputFormat, resolvedOutputFormat, outputResolveReason);
+
+	Printf("NRI PT output policy change: frame=%u api=%s requested_mode=%s->%s resolved_mode=%s->%s requested_format=%s desired_format=%s created_format=%s display_desc=%s display_hdr=%s reason=%s\n",
+		frameIndex,
+		(const char*)nri_api,
+		GetNRIPTOutputModeName(previousRequestedMode),
+		GetNRIPTOutputModeName(outputPolicy.requestedMode),
+		GetNRIPTOutputModeName(previousResolvedMode),
+		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
+		GetSwapChainFormatName(requestedOutputFormat),
+		GetSwapChainFormatName(resolvedOutputFormat),
+		GetSwapChainFormatName(mCreatedSwapChainFormat),
+		GetNriResultName(mSwapChainDisplayDescResult),
+		outputPolicy.displayHdrSupported ? "yes" : "no",
+		outputResolveReason);
+}
+
 void NRIRenderDevice::PrintPathTracingBuffers() const
 {
 	PrintPathTracingCaps();

@@ -63,6 +63,7 @@ public:
 	void ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeaponLightEvent>& outEvents);
 	uint32_t GetPendingPathTracingWeaponLightEventCount() const;
 	NRIPTOutputPolicy GetPathTracingOutputPolicy() const;
+	void PrintPathTracingOutputModeChange(uint32_t frameIndex, NRIPTOutputMode previousRequestedMode, NRIPTOutputMode previousResolvedMode) const;
 
 	IHardwareTexture* CreateHardwareTexture(int numchannels) override;
 	IVertexBuffer* CreateVertexBuffer() override;

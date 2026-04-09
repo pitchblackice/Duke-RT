@@ -19265,6 +19265,7 @@ void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFra
 	else if (outputPolicy.requestedMode != mLastOutputRequestedMode || outputPolicy.resolvedMode != mLastOutputResolvedMode)
 	{
 		RequestHistoryReset("output-mode-change");
+		mFrameBuffer->PrintPathTracingOutputModeChange(mFrameIndex, mLastOutputRequestedMode, mLastOutputResolvedMode);
 		if (ShouldEmitTemporalTraceLogs())
 		{
 			Printf("NRI PT temporal reset: reason=output-mode-change frame=%u requested_output=%s->%s resolved_output=%s->%s\n",
