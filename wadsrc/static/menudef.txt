@@ -1257,6 +1257,7 @@ OptionMenu "NRIOptions" protected
 	Slider "Glow Scale",						"nri_ptglowscale",				0.0, 8.0, 0.25, 2
 	Slider "Glow Reach",						"nri_ptglowreach",				0.0, 16.0, 0.25, 2
 	Slider "Glow Falloff",						"nri_ptglowfalloff",			0.25, 4.0, 0.05, 2
+	Slider "Sector Light Intensity",			"nri_ptsectorlightmultiplier",	0.0, 3.0, 0.05, 2
 	Slider "Emissive Samples",					"nri_ptemissivesamples",		1, 4, 1, 0
 	Option "Emissive Fast Shadow",				"nri_ptemissivefastshadow",		"OnOff"
 	StaticText "----------------"
