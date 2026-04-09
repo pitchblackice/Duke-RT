@@ -1217,13 +1217,25 @@ OptionMenu "NRIOptions" protected
 	StaticText "----------------"
 	StaticText "HDR / Output"
 	Option "Output Mode",						"nri_ptoutputmode",				"NRIPTOutputMode"
+	StaticText "----------------"
+	StaticText "SDR Output"
 	Option "Tonemap",							"nri_pttonemap",				"NRIPTTonemap"
 	Slider "Exposure",							"nri_ptexposure",				0.125, 8.0, 0.125, 3
 	Slider "Contrast",							"nri_ptcontrast",				0.50, 1.50, 0.05, 2
 	Slider "Saturation",						"nri_ptsaturation",				0.00, 2.00, 0.05, 2
 	Slider "Highlight Shoulder",				"nri_ptshoulder",				0.50, 1.50, 0.05, 2
 	Slider "Shadow Toe",						"nri_pttoe",					0.50, 1.50, 0.05, 2
+	StaticText "Applies to active SDR output and HDR requests that fall back to SDR."
+	StaticText "----------------"
+	StaticText "HDR Output"
+	Option "Tonemap",							"nri_pthdrtonemap",				"NRIPTTonemap"
+	Slider "Exposure",							"nri_pthdrexposure",			0.125, 8.0, 0.125, 3
+	Slider "Contrast",							"nri_pthdrcontrast",			0.50, 1.50, 0.05, 2
+	Slider "Saturation",						"nri_pthdrsaturation",			0.00, 2.00, 0.05, 2
+	Slider "Highlight Shoulder",				"nri_pthdrshoulder",			0.50, 1.50, 0.05, 2
+	Slider "Shadow Toe",						"nri_pthdrtoe",					0.50, 1.50, 0.05, 2
 	Slider "Paper White",						"nri_ptpaperwhite",				80.0, 400.0, 5.0, 1
+	StaticText "Applies only while a real HDR swapchain is active."
 	Slider "Fullbright Boost",					"nri_ptfullbrightboost",		0.50, 8.00, 0.25, 2
 	StaticText "Output calibration affects final present; light energy remains upstream."
 	StaticText "Output-mode changes reset PT history."

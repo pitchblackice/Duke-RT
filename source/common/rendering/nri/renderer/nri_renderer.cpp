@@ -173,6 +173,72 @@ CUSTOM_CVAR(Float, nri_ptpaperwhite, 200.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 400.0f;
 	}
 }
+CUSTOM_CVAR(Int, nri_pthdrtonemap, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 2)
+	{
+		self = 2;
+	}
+}
+CUSTOM_CVAR(Float, nri_pthdrexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.125f)
+	{
+		self = 0.125f;
+	}
+	else if (self > 8.0f)
+	{
+		self = 8.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_pthdrcontrast, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.50f)
+	{
+		self = 0.50f;
+	}
+	else if (self > 1.50f)
+	{
+		self = 1.50f;
+	}
+}
+CUSTOM_CVAR(Float, nri_pthdrsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.00f)
+	{
+		self = 0.00f;
+	}
+	else if (self > 2.00f)
+	{
+		self = 2.00f;
+	}
+}
+CUSTOM_CVAR(Float, nri_pthdrshoulder, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.50f)
+	{
+		self = 0.50f;
+	}
+	else if (self > 1.50f)
+	{
+		self = 1.50f;
+	}
+}
+CUSTOM_CVAR(Float, nri_pthdrtoe, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.50f)
+	{
+		self = 0.50f;
+	}
+	else if (self > 1.50f)
+	{
+		self = 1.50f;
+	}
+}
 CVAR(Bool, nri_ptnightvision, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, nri_ptnightvisionexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
@@ -3443,9 +3509,9 @@ namespace
 		return (nri_ptdebug >= 0 && nri_ptdebug <= (int)NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT) ? (uint32_t)nri_ptdebug : 0u;
 	}
 
-	static float GetTemporalExposure()
+	static float GetTemporalExposure(const NRIPTOutputPolicy& outputPolicy)
 	{
-		return std::max((float)nri_ptexposure, 0.125f);
+		return std::max(outputPolicy.exposure, 0.125f);
 	}
 
 	static float GetFullbrightBoostScale()
@@ -8105,9 +8171,10 @@ void NRIRenderer::PrintStatus() const
 		mOutputHeight,
 		mHasPreviousCameraState ? "yes" : "no",
 		mResetHistory ? "yes" : "no");
-	Printf("NRI PT output: requested_mode=%s resolved_mode=%s tonemap=%s exposure=%.3f contrast=%.3f saturation=%.3f shoulder=%.3f toe=%.3f paper_white=%.1f offscreen_hdr=%s hdr_swapchain=%s display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f\n",
+	Printf("NRI PT output: requested_mode=%s resolved_mode=%s control_block=%s tonemap=%s exposure=%.3f contrast=%.3f saturation=%.3f shoulder=%.3f toe=%.3f paper_white=%.1f offscreen_hdr=%s hdr_swapchain=%s display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f\n",
 		GetNRIPTOutputModeName(outputPolicy.requestedMode),
 		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
+		GetNRIPTOutputControlBlockName(outputPolicy),
 		GetNRIPTTonemapModeName(outputPolicy.tonemapMode),
 		outputPolicy.exposure,
 		outputPolicy.contrast,
@@ -8726,11 +8793,12 @@ const std::unordered_map<int32_t, uint32_t>& NRIRenderer::GetActorMaterialOverri
 void NRIRenderer::PrintTemporalStatus() const
 {
 	SyncLegacyUpscalerConfig(false);
+	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
 	const NRIMainUpscalerKind requestedMain = GetSelectedMainUpscalerKind();
 	const NRIMainUpscalerKind resolvedMain = GetResolvedMainUpscalerKindForStatus();
 	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
-	const float exposure = GetTemporalExposure();
+	const float exposure = GetTemporalExposure(outputPolicy);
 	const float exposureStops = std::log2(std::max(exposure, 0.125f));
 	const FrameTextureSlot presentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
 	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
@@ -8810,7 +8878,7 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 		GetMainUpscalerName(resolvedMainUpscaler),
 		GetPostSharpenName(resolvedPostSharpen),
 		runAppTaa ? "yes" : "no",
-		GetTemporalExposure(),
+		GetTemporalExposure(mFrameBuffer->GetPathTracingOutputPolicy()),
 		mResetHistory ? "yes" : "no",
 		mLastHistoryResetReason.c_str(),
 		mHasPreviousCameraState ? "yes" : "no",
@@ -18690,7 +18758,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		constants.Flags =
 			(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 			(runAppTaa ? NRI_FLAG_USE_JITTER : 0u);
-		constants.Exposure = GetTemporalExposure();
+		constants.Exposure = GetTemporalExposure(mFrameBuffer->GetPathTracingOutputPolicy());
 
 		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
@@ -19279,7 +19347,7 @@ void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFra
 		mLastOutputResolvedMode = outputPolicy.resolvedMode;
 	}
 
-	const float temporalExposure = GetTemporalExposure();
+	const float temporalExposure = GetTemporalExposure(outputPolicy);
 	if (!mHasTemporalExposureState)
 	{
 		mHasTemporalExposureState = true;

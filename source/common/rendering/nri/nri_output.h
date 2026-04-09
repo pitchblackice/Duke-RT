@@ -79,6 +79,16 @@ inline float GetNRIPTHdrMaxOutputScale(const NRIPTOutputPolicy& policy)
 	return GetNRIPTHdrPaperWhiteScale(policy) * GetNRIPTHdrHeadroomInPaperWhites(policy);
 }
 
+inline bool IsNRIPTHdrOutputActive(const NRIPTOutputPolicy& policy)
+{
+	return policy.hdrSwapChainActive;
+}
+
+inline const char* GetNRIPTOutputControlBlockName(const NRIPTOutputPolicy& policy)
+{
+	return IsNRIPTHdrOutputActive(policy) ? "hdr" : "sdr";
+}
+
 inline const char* GetNRIPTOutputModeName(NRIPTOutputMode mode)
 {
 	switch (mode)

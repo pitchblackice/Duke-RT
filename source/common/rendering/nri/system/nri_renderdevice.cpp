@@ -63,6 +63,12 @@ EXTERN_CVAR(Float, nri_ptsaturation)
 EXTERN_CVAR(Float, nri_ptshoulder)
 EXTERN_CVAR(Float, nri_pttoe)
 EXTERN_CVAR(Float, nri_ptpaperwhite)
+EXTERN_CVAR(Int, nri_pthdrtonemap)
+EXTERN_CVAR(Float, nri_pthdrexposure)
+EXTERN_CVAR(Float, nri_pthdrcontrast)
+EXTERN_CVAR(Float, nri_pthdrsaturation)
+EXTERN_CVAR(Float, nri_pthdrshoulder)
+EXTERN_CVAR(Float, nri_pthdrtoe)
 EXTERN_CVAR(Float, nri_ptsectorclamp)
 EXTERN_CVAR(Int, nri_ptsectorfilterpal)
 EXTERN_CVAR(Int, nri_ptsectorfilterminshade)
@@ -993,14 +999,40 @@ namespace
 		}
 	}
 
-	static NRIPTTonemapMode GetRequestedPathTracingTonemapMode()
+	static NRIPTTonemapMode GetRequestedPathTracingTonemapMode(bool hdrControlsActive)
 	{
-		switch ((int)nri_pttonemap)
+		const int tonemapValue = hdrControlsActive ? (int)nri_pthdrtonemap : (int)nri_pttonemap;
+		switch (tonemapValue)
 		{
 		case 1: return NRIPTTonemapMode::ACESFitted;
 		case 2: return NRIPTTonemapMode::Reinhard;
 		default: return NRIPTTonemapMode::Hable;
 		}
+	}
+
+	static float GetRequestedPathTracingExposure(bool hdrControlsActive)
+	{
+		return hdrControlsActive ? (float)nri_pthdrexposure : (float)nri_ptexposure;
+	}
+
+	static float GetRequestedPathTracingContrast(bool hdrControlsActive)
+	{
+		return hdrControlsActive ? (float)nri_pthdrcontrast : (float)nri_ptcontrast;
+	}
+
+	static float GetRequestedPathTracingSaturation(bool hdrControlsActive)
+	{
+		return hdrControlsActive ? (float)nri_pthdrsaturation : (float)nri_ptsaturation;
+	}
+
+	static float GetRequestedPathTracingShoulder(bool hdrControlsActive)
+	{
+		return hdrControlsActive ? (float)nri_pthdrshoulder : (float)nri_ptshoulder;
+	}
+
+	static float GetRequestedPathTracingToe(bool hdrControlsActive)
+	{
+		return hdrControlsActive ? (float)nri_pthdrtoe : (float)nri_pttoe;
 	}
 
 	static bool IsHdrSwapChainFormat(nri::SwapChainFormat format)
@@ -3543,21 +3575,22 @@ void NRIRenderDevice::ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& ou
 NRIPTOutputPolicy NRIRenderDevice::GetPathTracingOutputPolicy() const
 {
 	NRIPTOutputPolicy policy = {};
+	policy.resolvedMode = GetResolvedPathTracingOutputModeForSwapChainFormat(mCreatedSwapChainFormat);
+	policy.hdrSwapChainActive = IsHdrSwapChainFormat(mCreatedSwapChainFormat);
+	const bool hdrControlsActive = policy.hdrSwapChainActive;
 	policy.requestedMode = GetRequestedPathTracingOutputMode();
-	policy.tonemapMode = GetRequestedPathTracingTonemapMode();
-	policy.exposure = (float)nri_ptexposure;
-	policy.contrast = (float)nri_ptcontrast;
-	policy.saturation = (float)nri_ptsaturation;
-	policy.shoulder = (float)nri_ptshoulder;
-	policy.toe = (float)nri_pttoe;
+	policy.tonemapMode = GetRequestedPathTracingTonemapMode(hdrControlsActive);
+	policy.exposure = GetRequestedPathTracingExposure(hdrControlsActive);
+	policy.contrast = GetRequestedPathTracingContrast(hdrControlsActive);
+	policy.saturation = GetRequestedPathTracingSaturation(hdrControlsActive);
+	policy.shoulder = GetRequestedPathTracingShoulder(hdrControlsActive);
+	policy.toe = GetRequestedPathTracingToe(hdrControlsActive);
 	policy.paperWhiteNits = (float)nri_ptpaperwhite;
 	policy.displayInfoAvailable = mHasSwapChainDisplayDesc;
 	policy.displayHdrSupported = mHasSwapChainDisplayDesc && mSwapChainDisplayDesc.isHDR;
 	policy.displayMaxLuminance = mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.maxLuminance : 80.0f;
 	policy.displaySdrLuminance = mHasSwapChainDisplayDesc ? mSwapChainDisplayDesc.sdrLuminance : 80.0f;
 	policy.offscreenHdrTarget = true;
-	policy.resolvedMode = GetResolvedPathTracingOutputModeForSwapChainFormat(mCreatedSwapChainFormat);
-	policy.hdrSwapChainActive = IsHdrSwapChainFormat(mCreatedSwapChainFormat);
 
 	return policy;
 }
@@ -3749,9 +3782,10 @@ void NRIRenderDevice::PrintSwapChainStatus() const
 		CountSetBits(mObservedSwapChainPresentMask),
 		(uint32_t)mSwapChainTextureCount,
 		presentedImages.GetChars());
-	Printf("NRI PT swapchain output: requested_mode=%s resolved_mode=%s requested_format=%s created_format=%s resolved_texture_format=%s tonemap=%s exposure=%.3f contrast=%.3f saturation=%.3f shoulder=%.3f toe=%.3f paper_white=%.1f hdr_paper_scale=%.3f hdr_headroom=%.3f hdr_max_scale=%.3f display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f display_desc_result=%s reason=%s\n",
+	Printf("NRI PT swapchain output: requested_mode=%s resolved_mode=%s control_block=%s requested_format=%s created_format=%s resolved_texture_format=%s tonemap=%s exposure=%.3f contrast=%.3f saturation=%.3f shoulder=%.3f toe=%.3f paper_white=%.1f hdr_paper_scale=%.3f hdr_headroom=%.3f hdr_max_scale=%.3f display_info=%s display_hdr=%s display_sdr_nits=%.1f display_max_nits=%.1f display_desc_result=%s reason=%s\n",
 		GetNRIPTOutputModeName(outputPolicy.requestedMode),
 		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
+		GetNRIPTOutputControlBlockName(outputPolicy),
 		GetSwapChainFormatName(mRequestedSwapChainFormat),
 		GetSwapChainFormatName(mCreatedSwapChainFormat),
 		GetNriFormatName(mResolvedSwapChainTextureFormat),
