@@ -833,9 +833,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		//   * ambient / sector ambient
 		//   * placeholder directional sun diffuse/specular (already shadowed)
 		//   * runtime point-light direct terms
-		// - diffuse/specular transport: denoised transport bucket
-		//   * sampled emissive diffuse/specular
-		//   * indirect diffuse/specular
+		// - diffuse/specular: current NRD-facing shaded-light bucket
+		//   * receiver-shaped sampled emissive diffuse/specular
+		//   * material-folded indirect diffuse/specular
+		//   * not yet sample-style demodulated transport
 		// - directEmission: additive self-emission term plus any legacy fullbright override
 		float3 ambientDirectLighting = 0.0;
 		float3 runtimePointDirectLighting = 0.0;
@@ -1035,8 +1036,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 				diffuse += sampledEmissiveTransportDiffuse + indirectTransportDiffuse;
 				specular += sampledEmissiveTransportSpecular + indirectTransportSpecular;
-				// Keep the placeholder sun out of the denoised transport bucket so its hard shadow
-				// structure does not get spatially mixed back into REBLUR/RELAX radiance history.
+				// Keep the placeholder sun out of the current NRD-facing shaded-light bucket so its
+				// hard shadow structure does not get spatially mixed back into REBLUR/RELAX history.
 				directLighting += ambientDirectLighting + sunTransportDiffuse + sunTransportSpecular + runtimePointDirectLighting;
 				if (emissiveMaterial)
 				{

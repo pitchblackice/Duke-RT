@@ -131,7 +131,10 @@ float3 ComposeLighting(uint2 pixelPos, float3 diffuseSignal, float3 specularSign
 	}
 
 	// Current composition contract after slices 1-3:
-	// - diffuse/specular: denoised transport (sampled emissive, indirect)
+	// - diffuse/specular: current NRD output bucket
+	//   * receiver-shaped sampled emissive terms
+	//   * material-folded indirect terms
+	//   * not yet sample-style demodulated transport
 	// - directLighting: direct-composition bucket (ambient + placeholder sun + runtime point lights)
 	//   with composition optionally correcting only the placeholder-sun shadow from raw to filtered SIGMA output
 	// - directEmission: actual emissive-hit / fullbright surface output

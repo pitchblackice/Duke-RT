@@ -8486,7 +8486,7 @@ void NRIRenderer::PrintStatus() const
 			nrdDiffusePrepass,
 			nrdSpecularPrepass);
 	}
-	Printf("NRI PT NRD guides: diffuse_signal=demodulated_illumination hit_distance=%s roughness=material_hint metalness=material_hint material_id=semantic_class\n",
+	Printf("NRI PT NRD guides: diffuse_signal=receiver_shaded_emissive_plus_material_folded_indirect specular_signal=receiver_shaded_emissive_plus_material_folded_indirect hit_distance=%s roughness=material_hint metalness=material_hint material_id=semantic_class\n",
 		nrdDenoiserMode == NRINrdDenoiserMode::Relax ? "secondary_transport_linear_hitdist" : "secondary_transport_reblur_norm");
 	Printf("NRI PT scene stats: %s\n", nri_ptscenestats ? "on" : "off");
 	Printf("NRI PT mutation trace: chunk=%d sector=%d\n",
@@ -8830,7 +8830,8 @@ void NRIRenderer::PrintTemporalStatus() const
 		GetFrameTextureSlotName(presentSlot),
 		GetFrameTextureSlotName(mUpscaledInputSlot),
 		mUseUpscaledInFinal ? "yes" : "no");
-	Printf("NRI PT temporal domain: history=pre_exposed_hdr exposure=%.3f exposure_stops=%.3f reset_threshold_stops=%.3f inspect_scene=15 inspect_pre_exposed=45 inspect_post_taa=13 inspect_post_upscale=14\n",
+	Printf("NRI PT beauty path: nrd_and_composition -> pre_exposed_hdr_temporal -> final_display_mapping inspect_scene=15 inspect_pre_exposed=45 inspect_post_taa=13 inspect_post_upscale=14\n");
+	Printf("NRI PT temporal domain: history=pre_exposed_hdr exposure=%.3f exposure_stops=%.3f reset_threshold_stops=%.3f\n",
 		exposure,
 		exposureStops,
 		NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS);
