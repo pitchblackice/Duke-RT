@@ -7503,16 +7503,6 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		LogFallback("PT preload resident static scene build failed.");
 		return true;
 	}
-	if (!ApplyStartupMapWorldCorrectionIfNeeded("preload"))
-	{
-		LogFallback("PT preload startup world correction failed.");
-		return true;
-	}
-	if (!EnsureStaticMapScene())
-	{
-		LogFallback("PT preload resident static scene rebuild after startup correction failed.");
-		return true;
-	}
 
 	RefreshSceneLightSystem(true, nullptr, nullptr, nullptr, nullptr);
 	if (!mGpuSceneHasDynamicOverlay)
