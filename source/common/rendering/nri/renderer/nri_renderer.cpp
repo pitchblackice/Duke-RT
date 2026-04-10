@@ -17620,7 +17620,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			nri_scene::PTMapChunkMutationReason_Dragged;
 		const uint32_t replacementRefreshReasonMask =
 			replacementDelta.reasonMask & ~nri_scene::PTMapChunkMutationReason_Dragged;
+		const bool useOverlayReplacementState = replacement.valid;
 		const bool replacementViewChanged =
+			useOverlayReplacementState &&
 			(previousReasonMask & replacementViewReasonMask) !=
 			(normalizedReasonMask & replacementViewReasonMask);
 		replacement.animationOnlyRefreshed = false;
@@ -17752,6 +17754,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		const bool structuralStaticAnimatedModeFlip =
 			replacement.staticAnimatedReplacement != useStaticAnimatedReplacement;
 		const bool structuralExcludeStaticFlip =
+			useOverlayReplacementState &&
 			replacement.excludeStaticChunk != desiredExcludeStaticChunk;
 		const bool needsStructuralRebuild =
 			structuralInvalid ||
