@@ -7531,11 +7531,14 @@ void NRIRenderer::SetGuiCaptureState(bool active)
 	}
 
 	mGuiCaptureActive = active;
+	const char* resetReason = mGuiCaptureActive ? "gui-capture-enter" : "gui-capture-exit";
+	RequestHistoryReset(resetReason, true, false);
 	if (ShouldEmitTemporalTraceLogs())
 	{
-		Printf("NRI PT gui capture: frame=%u active=%s\n",
+		Printf("NRI PT gui capture: frame=%u active=%s reset=yes reason=%s\n",
 			mFrameIndex,
-			mGuiCaptureActive ? "yes" : "no");
+			mGuiCaptureActive ? "yes" : "no",
+			resetReason);
 	}
 }
 
