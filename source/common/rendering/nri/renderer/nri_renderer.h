@@ -1062,6 +1062,7 @@ private:
 	bool EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas);
 	bool RebuildResidentStaticCpuAtlasMirror(StaticMapSceneCache& staticScene, const StaticMapChunkAtlas& atlas) const;
 	bool RebuildResidentStaticMaterialBridgeFromChunks();
+	bool RefreshResidentStaticMaterialSlices(const std::vector<uint32_t>& chunkListIndices, const char* reason);
 	void UploadChunkGeometryToAtlas(
 		const nri_scene::GeometryData& sourceGeometry,
 		const StaticMapSceneCache::ChunkCache& sourceChunk,

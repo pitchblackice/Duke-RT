@@ -4504,6 +4504,94 @@ namespace
 		}
 	}
 
+	static void RemapMaterialBridgeAgainstTextureTable(
+		const nri_scene::MaterialBridgeData& source,
+		nri_scene::MaterialBridgeData& inOutTextureTable,
+		nri_scene::MaterialBridgeData& outRemapped,
+		bool* outTextureTableGrew = nullptr)
+	{
+		if (outTextureTableGrew != nullptr)
+		{
+			*outTextureTableGrew = false;
+		}
+
+		std::unordered_map<uint64_t, uint32_t> textureLookup;
+		textureLookup.reserve(inOutTextureTable.textures.size() + source.textures.size());
+		for (uint32_t i = 0; i < (uint32_t)inOutTextureTable.textures.size(); ++i)
+		{
+			textureLookup.emplace(inOutTextureTable.textures[i].key, i);
+		}
+
+		auto remapTextureIndex = [&source, &inOutTextureTable, &textureLookup, outTextureTableGrew](uint32_t textureIndex) -> uint32_t
+		{
+			if (textureIndex == UINT32_MAX)
+			{
+				return UINT32_MAX;
+			}
+			if (textureIndex >= source.textures.size())
+			{
+				return textureIndex;
+			}
+
+			const auto& texture = source.textures[textureIndex];
+			auto it = textureLookup.find(texture.key);
+			if (it != textureLookup.end())
+			{
+				return it->second;
+			}
+
+			const uint32_t newIndex = (uint32_t)inOutTextureTable.textures.size();
+			textureLookup.emplace(texture.key, newIndex);
+			inOutTextureTable.textures.push_back(texture);
+			if (outTextureTableGrew != nullptr)
+			{
+				*outTextureTableGrew = true;
+			}
+			return newIndex;
+		};
+
+		outRemapped = {};
+		outRemapped.materials.reserve(source.materials.size());
+		outRemapped.lightMetadata.reserve(source.lightMetadata.size());
+
+		for (size_t materialIndex = 0; materialIndex < source.materials.size(); ++materialIndex)
+		{
+			const auto& material = source.materials[materialIndex];
+			nri_scene::MaterialData copy = material;
+			copy.textureIndex = remapTextureIndex(material.textureIndex);
+			copy.normalTextureIndex = remapTextureIndex(material.normalTextureIndex);
+			copy.metallicTextureIndex = remapTextureIndex(material.metallicTextureIndex);
+			copy.roughnessTextureIndex = remapTextureIndex(material.roughnessTextureIndex);
+			copy.emissiveTextureIndex = remapTextureIndex(material.emissiveTextureIndex);
+			outRemapped.materials.push_back(copy);
+
+			if (materialIndex < source.lightMetadata.size())
+			{
+				nri_scene::MaterialLightingMetadata metadata = source.lightMetadata[materialIndex];
+				metadata.textureIndex = remapTextureIndex(metadata.textureIndex);
+				metadata.glowmapTextureIndex = remapTextureIndex(metadata.glowmapTextureIndex);
+				metadata.normalTextureIndex = remapTextureIndex(metadata.normalTextureIndex);
+				metadata.metallicTextureIndex = remapTextureIndex(metadata.metallicTextureIndex);
+				metadata.roughnessTextureIndex = remapTextureIndex(metadata.roughnessTextureIndex);
+				metadata.emissiveTextureIndex = remapTextureIndex(metadata.emissiveTextureIndex);
+				outRemapped.lightMetadata.push_back(metadata);
+			}
+		}
+
+		if (!source.paletteLookup.empty())
+		{
+			outRemapped.paletteLookup = source.paletteLookup;
+			outRemapped.paletteWidth = source.paletteWidth;
+			outRemapped.paletteHeight = source.paletteHeight;
+			if (inOutTextureTable.paletteLookup.empty())
+			{
+				inOutTextureTable.paletteLookup = source.paletteLookup;
+				inOutTextureTable.paletteWidth = source.paletteWidth;
+				inOutTextureTable.paletteHeight = source.paletteHeight;
+			}
+		}
+	}
+
 	static bool MaterialDataEqual(const nri_scene::MaterialData& a, const nri_scene::MaterialData& b)
 	{
 		return
@@ -17404,6 +17492,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	bool residentMaterialDirty = false;
 	bool residentGeometryDirty = false;
 	bool residentWritesWaitedFor = false;
+	std::vector<uint32_t> residentMaterialChunkListIndices;
 	std::vector<uint32_t> residentGeometryChunkListIndices;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshMs = 0.0;
@@ -17913,6 +18002,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				{
 					residentMaterialDirty = true;
 					mRuntimeMapLastFrame.residentMaterialChunkCount++;
+					if (residentChunkListIndex != UINT32_MAX)
+					{
+						residentMaterialChunkListIndices.push_back(residentChunkListIndex);
+					}
 				}
 				if (residentChunkGeometryDirty)
 				{
@@ -17967,7 +18060,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		bool residentRefreshOkay = true;
 		if (residentMaterialDirty)
 		{
-			residentRefreshOkay = RebuildResidentStaticMaterialState("resident_runtime_mutation_static");
+			std::sort(residentMaterialChunkListIndices.begin(), residentMaterialChunkListIndices.end());
+			residentMaterialChunkListIndices.erase(
+				std::unique(residentMaterialChunkListIndices.begin(), residentMaterialChunkListIndices.end()),
+				residentMaterialChunkListIndices.end());
+			residentRefreshOkay = RefreshResidentStaticMaterialSlices(
+				residentMaterialChunkListIndices,
+				"resident_runtime_mutation_static");
 		}
 		if (residentRefreshOkay && residentGeometryDirty)
 		{
@@ -18432,8 +18531,106 @@ bool NRIRenderer::RefreshResidentStaticSceneDataSet()
 		(uint32_t)mStaticMapScene.geometry.primitives.size(),
 		0u,
 		(uint32_t)mStaticMapScene.gpuMaterials.size(),
-		0u,
-		"refresh_resident_static_scene");
+			0u,
+			"refresh_resident_static_scene");
+}
+
+bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t>& chunkListIndices, const char* reason)
+{
+	if (chunkListIndices.empty())
+	{
+		return true;
+	}
+	if (!mStaticMapScene.valid ||
+		!mStaticMapScene.buffersResident ||
+		!mStaticMapChunkAtlas.valid)
+	{
+		return false;
+	}
+
+	bool textureTableGrew = false;
+	for (uint32_t chunkListIndex : chunkListIndices)
+	{
+		if (chunkListIndex >= mStaticMapScene.chunks.size() ||
+			chunkListIndex >= mStaticMapChunkAtlas.chunks.size())
+		{
+			return false;
+		}
+
+		auto& chunkCache = mStaticMapScene.chunks[chunkListIndex];
+		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+		if (!chunkCache.active || !atlasChunk.valid || atlasChunk.materialCount == 0)
+		{
+			continue;
+		}
+		if (atlasChunk.materialOffset + atlasChunk.materialCount > mStaticMapScene.materialBridge.materials.size() ||
+			atlasChunk.materialOffset + atlasChunk.materialCount > mStaticMapScene.materialBridge.lightMetadata.size() ||
+			atlasChunk.materialOffset + atlasChunk.materialCount > mStaticMapScene.gpuMaterials.size())
+		{
+			return false;
+		}
+
+		nri_scene::MaterialBridgeData remappedChunkBridge;
+		bool chunkTextureTableGrew = false;
+		RemapMaterialBridgeAgainstTextureTable(
+			chunkCache.materialBridge,
+			mStaticMapScene.materialBridge,
+			remappedChunkBridge,
+			&chunkTextureTableGrew);
+		textureTableGrew = textureTableGrew || chunkTextureTableGrew;
+		if ((uint32_t)remappedChunkBridge.materials.size() != atlasChunk.materialCount ||
+			(uint32_t)remappedChunkBridge.lightMetadata.size() != atlasChunk.materialCount)
+		{
+			return false;
+		}
+
+		std::copy_n(
+			remappedChunkBridge.materials.data(),
+			atlasChunk.materialCount,
+			mStaticMapScene.materialBridge.materials.data() + atlasChunk.materialOffset);
+		std::copy_n(
+			remappedChunkBridge.lightMetadata.data(),
+			atlasChunk.materialCount,
+			mStaticMapScene.materialBridge.lightMetadata.data() + atlasChunk.materialOffset);
+
+		std::vector<nri_scene::MaterialData> remappedGpuMaterials = remappedChunkBridge.materials;
+		ApplyEmissiveMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
+		ApplyActorShadowMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
+		std::copy_n(
+			remappedGpuMaterials.data(),
+			atlasChunk.materialCount,
+			mStaticMapScene.gpuMaterials.data() + atlasChunk.materialOffset);
+
+		if (!textureTableGrew &&
+			!UpdateStructuredBufferRange(
+				mStaticMaterialBuffer,
+				(uint64_t)atlasChunk.materialOffset * sizeof(nri_scene::MaterialData),
+				remappedGpuMaterials.data(),
+				(uint64_t)atlasChunk.materialCount * sizeof(nri_scene::MaterialData),
+				NRIComputeShaderResourceAccess()))
+		{
+			return false;
+		}
+	}
+
+	if (!textureTableGrew)
+	{
+		return true;
+	}
+
+	return
+		EnsurePaletteTexture(mStaticMapScene.materialBridge) &&
+		EnsureSceneTextures(
+			mStaticMapScene.sceneView,
+			mStaticMapScene.materialBridge,
+			mStaticMapScene.gpuMaterials,
+			false,
+			reason != nullptr ? reason : "resident_runtime_mutation_static") &&
+		UploadStaticMapChunkMaterialAtlas(
+			mStaticMaterialBuffer,
+			mStaticMapChunkAtlas,
+			mStaticMapScene,
+			mStaticMapScene.gpuMaterials);
 }
 
 bool NRIRenderer::RebuildResidentStaticMaterialState(const char* reason)
@@ -18722,6 +18919,8 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		{
 			auto& mutableChunk = mStaticMapScene.chunks[chunkListIndex];
 			const auto& oldAtlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+			const uint32_t oldMaterialOffset = oldAtlasChunk.materialOffset;
+			const uint32_t oldMaterialCount = oldAtlasChunk.materialCount;
 			DestroyAccelerationStructureResource(mutableChunk.accelerationStructure);
 			ReleaseChunkAtlasRange(mStaticMapChunkAtlas.freeVertexRanges, oldAtlasChunk.vertexOffset, oldAtlasChunk.vertexCount);
 			ReleaseChunkAtlasRange(mStaticMapChunkAtlas.freeIndexRanges, oldAtlasChunk.indexOffset, oldAtlasChunk.indexCount);
@@ -18743,6 +18942,40 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			if (chunkListIndex < mStaticMapScene.lightChunkViews.size())
 			{
 				mStaticMapScene.lightChunkViews[chunkListIndex] = {};
+			}
+			if (oldMaterialOffset + oldMaterialCount <= mStaticMapScene.materialBridge.materials.size())
+			{
+				std::fill_n(
+					mStaticMapScene.materialBridge.materials.begin() + oldMaterialOffset,
+					oldMaterialCount,
+					nri_scene::MaterialData{});
+			}
+			if (oldMaterialOffset + oldMaterialCount <= mStaticMapScene.materialBridge.lightMetadata.size())
+			{
+				std::fill_n(
+					mStaticMapScene.materialBridge.lightMetadata.begin() + oldMaterialOffset,
+					oldMaterialCount,
+					nri_scene::MaterialLightingMetadata{});
+			}
+			if (oldMaterialOffset + oldMaterialCount <= mStaticMapScene.gpuMaterials.size())
+			{
+				std::fill_n(
+					mStaticMapScene.gpuMaterials.begin() + oldMaterialOffset,
+					oldMaterialCount,
+					nri_scene::MaterialData{});
+			}
+			if (oldMaterialCount > 0)
+			{
+				std::vector<nri_scene::MaterialData> clearedMaterials(oldMaterialCount);
+				if (!UpdateStructuredBufferRange(
+						mStaticMaterialBuffer,
+						(uint64_t)oldMaterialOffset * sizeof(nri_scene::MaterialData),
+						clearedMaterials.data(),
+						(uint64_t)oldMaterialCount * sizeof(nri_scene::MaterialData),
+						NRIComputeShaderResourceAccess()))
+				{
+					return false;
+				}
 			}
 			outGeometryDirty = true;
 			outMaterialDirty = true;
