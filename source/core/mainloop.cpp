@@ -1303,6 +1303,11 @@ void MainLoop ()
 					cameraTrace.renderPitchDegrees,
 					cameraTrace.renderFrameDeltaYawDegrees,
 					cameraTrace.renderFrameDeltaPitchDegrees);
+				if (renderTrace.nriActive)
+				{
+					Printf("----------end perf trace frame %llu\n",
+						(unsigned long long)traceFrame);
+				}
 				const int remainingTraceFrames = (int)perf_looptraceframes - 1;
 				perf_looptraceframes = remainingTraceFrames > 0 ? remainingTraceFrames : 0;
 			}

@@ -2841,6 +2841,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 	{
 		const auto& shell = mRenderer->GetLastPerfShellTraceStats();
 		const auto& resource = mRenderer->GetLastPerfResourceTraceStats();
+		Printf("----------perf trace frame %llu\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber);
 		Printf(
 			"PERF pt shell trace NRI: frame=%llu total=%.3f init=%.3f map=%.3f state=%.3f select=%.3f lights=%.3f resident=%.3f emissive=%.3f emissive_tlas=%.3f surface=%.3f graph=%.3f other=%.3f used_static=%d used_dynamic=%d persistent=%d prims=%u dyn_prims=%u mats=%u scene_instances=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
