@@ -268,6 +268,24 @@ public:
 	{
 		uint32_t waitCalls = 0;
 		double waitMs = 0.0;
+		uint32_t residentChunkWriteWaitCalls = 0;
+		double residentChunkWriteWaitMs = 0.0;
+		uint32_t sceneDataUploadWaitCalls = 0;
+		double sceneDataUploadWaitMs = 0.0;
+		uint32_t sceneBufferUploadWaitCalls = 0;
+		double sceneBufferUploadWaitMs = 0.0;
+		uint32_t emissiveSamplingUploadWaitCalls = 0;
+		double emissiveSamplingUploadWaitMs = 0.0;
+		uint32_t worldTlasInstanceUploadWaitCalls = 0;
+		double worldTlasInstanceUploadWaitMs = 0.0;
+		uint32_t worldTlasScratchResizeWaitCalls = 0;
+		double worldTlasScratchResizeWaitMs = 0.0;
+		uint32_t emissiveTlasInstanceUploadWaitCalls = 0;
+		double emissiveTlasInstanceUploadWaitMs = 0.0;
+		uint32_t emissiveTlasScratchResizeWaitCalls = 0;
+		double emissiveTlasScratchResizeWaitMs = 0.0;
+		uint32_t otherWaitCalls = 0;
+		double otherWaitMs = 0.0;
 		uint32_t growEvents = 0;
 		uint32_t overwriteEvents = 0;
 		uint32_t sceneUploadCalls = 0;
@@ -1269,7 +1287,7 @@ private:
 	void BindSceneRootDescriptors();
 
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
-	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced = false);
+	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced = false, const char* waitReason = nullptr);
 	bool UpdateStructuredBufferRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after);
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
 	void BuildRuntimeLightClusterUpload(
@@ -1291,7 +1309,7 @@ private:
 	nri::Format ResolveFinalSceneFormat() const;
 	void ResetPerfTraceStats();
 	void UpdateRuntimeMutationRebaselinePerfStats();
-	void WaitForCommandsTracked();
+	void WaitForCommandsTracked(const char* reason = nullptr);
 	void NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth);
 	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) { return mFrameTextures[(size_t)slot]; }
 	const NRITextureResource& GetFrameTexture(FrameTextureSlot slot) const { return mFrameTextures[(size_t)slot]; }

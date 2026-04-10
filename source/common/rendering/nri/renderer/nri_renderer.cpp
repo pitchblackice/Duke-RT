@@ -6282,7 +6282,7 @@ void NRIRenderer::TraceRuntimeMutationRebaselineProgress(const char* eventLabel)
 		mRuntimeMutationRebaselineRetireMs);
 }
 
-void NRIRenderer::WaitForCommandsTracked()
+void NRIRenderer::WaitForCommandsTracked(const char* reason)
 {
 	if (mFrameBuffer == nullptr)
 	{
@@ -6294,8 +6294,62 @@ void NRIRenderer::WaitForCommandsTracked()
 	mFrameBuffer->WaitForCommands(true);
 	if (trace)
 	{
+		const double waitMs = DurationMs(start, std::chrono::steady_clock::now());
 		mLastPerfResourceTraceStats.waitCalls++;
-		mLastPerfResourceTraceStats.waitMs += DurationMs(start, std::chrono::steady_clock::now());
+		mLastPerfResourceTraceStats.waitMs += waitMs;
+		if (reason != nullptr)
+		{
+			if (std::strcmp(reason, "resident_chunk_write") == 0)
+			{
+				mLastPerfResourceTraceStats.residentChunkWriteWaitCalls++;
+				mLastPerfResourceTraceStats.residentChunkWriteWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "scene_data_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.sceneDataUploadWaitCalls++;
+				mLastPerfResourceTraceStats.sceneDataUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "scene_buffer_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.sceneBufferUploadWaitCalls++;
+				mLastPerfResourceTraceStats.sceneBufferUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "emissive_sampling_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.emissiveSamplingUploadWaitCalls++;
+				mLastPerfResourceTraceStats.emissiveSamplingUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "world_tlas_instance_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.worldTlasInstanceUploadWaitCalls++;
+				mLastPerfResourceTraceStats.worldTlasInstanceUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "world_tlas_scratch_resize") == 0)
+			{
+				mLastPerfResourceTraceStats.worldTlasScratchResizeWaitCalls++;
+				mLastPerfResourceTraceStats.worldTlasScratchResizeWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "emissive_tlas_instance_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.emissiveTlasInstanceUploadWaitCalls++;
+				mLastPerfResourceTraceStats.emissiveTlasInstanceUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "emissive_tlas_scratch_resize") == 0)
+			{
+				mLastPerfResourceTraceStats.emissiveTlasScratchResizeWaitCalls++;
+				mLastPerfResourceTraceStats.emissiveTlasScratchResizeWaitMs += waitMs;
+			}
+			else
+			{
+				mLastPerfResourceTraceStats.otherWaitCalls++;
+				mLastPerfResourceTraceStats.otherWaitMs += waitMs;
+			}
+		}
+		else
+		{
+			mLastPerfResourceTraceStats.otherWaitCalls++;
+			mLastPerfResourceTraceStats.otherWaitMs += waitMs;
+		}
 	}
 }
 
@@ -14211,11 +14265,11 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 			!*ioWaitedForWrites &&
 			StructuredBufferUpdateNeedsWait(resource, data, size, stride))
 		{
-			WaitForCommandsTracked();
+			WaitForCommandsTracked("emissive_sampling_upload");
 			*ioWaitedForWrites = true;
 		}
 
-		return EnsureStructuredBuffer(resource, stats, data, size, stride, usage, after, ioWaitedForWrites != nullptr && *ioWaitedForWrites);
+		return EnsureStructuredBuffer(resource, stats, data, size, stride, usage, after, ioWaitedForWrites != nullptr && *ioWaitedForWrites, "emissive_sampling_upload");
 	};
 
 	if (!ensureStructuredBufferBatched(
@@ -14304,7 +14358,7 @@ bool NRIRenderer::UpdateReprojectionBuffer(bool* ioWaitedForWrites)
 			sizeof(data),
 			sizeof(data)))
 	{
-		WaitForCommandsTracked();
+		WaitForCommandsTracked("scene_data_upload");
 		*ioWaitedForWrites = true;
 	}
 	if (!EnsureStructuredBuffer(
@@ -14315,7 +14369,8 @@ bool NRIRenderer::UpdateReprojectionBuffer(bool* ioWaitedForWrites)
 		sizeof(data),
 		nri::BufferUsageBits::SHADER_RESOURCE,
 		NRIComputeShaderResourceAccess(),
-		ioWaitedForWrites != nullptr && *ioWaitedForWrites))
+		ioWaitedForWrites != nullptr && *ioWaitedForWrites,
+		"scene_data_upload"))
 	{
 		return false;
 	}
@@ -14355,7 +14410,7 @@ bool NRIRenderer::UpdateVisibleChunkBuffer(bool* ioWaitedForWrites)
 			visibleChunkSize,
 			sizeof(uint32_t)))
 	{
-		WaitForCommandsTracked();
+		WaitForCommandsTracked("scene_data_upload");
 		*ioWaitedForWrites = true;
 	}
 	if (!EnsureStructuredBuffer(
@@ -14366,7 +14421,8 @@ bool NRIRenderer::UpdateVisibleChunkBuffer(bool* ioWaitedForWrites)
 		sizeof(uint32_t),
 		nri::BufferUsageBits::SHADER_RESOURCE,
 		NRIComputeShaderResourceAccess(),
-		ioWaitedForWrites != nullptr && *ioWaitedForWrites))
+		ioWaitedForWrites != nullptr && *ioWaitedForWrites,
+		"scene_data_upload"))
 	{
 		return false;
 	}
@@ -14406,7 +14462,7 @@ bool NRIRenderer::UpdateVisibleFlatPlaneBuffer(bool* ioWaitedForWrites)
 			visibleFlatPlaneSize,
 			sizeof(uint32_t)))
 	{
-		WaitForCommandsTracked();
+		WaitForCommandsTracked("scene_data_upload");
 		*ioWaitedForWrites = true;
 	}
 	if (!EnsureStructuredBuffer(
@@ -14417,7 +14473,8 @@ bool NRIRenderer::UpdateVisibleFlatPlaneBuffer(bool* ioWaitedForWrites)
 		sizeof(uint32_t),
 		nri::BufferUsageBits::SHADER_RESOURCE,
 		NRIComputeShaderResourceAccess(),
-		ioWaitedForWrites != nullptr && *ioWaitedForWrites))
+		ioWaitedForWrites != nullptr && *ioWaitedForWrites,
+		"scene_data_upload"))
 	{
 		return false;
 	}
@@ -14594,11 +14651,11 @@ bool NRIRenderer::UpdateSceneDataSet(
 	{
 		if (!waitedForWrites && StructuredBufferUpdateNeedsWait(resource, data, size, stride))
 		{
-			WaitForCommandsTracked();
+			WaitForCommandsTracked("scene_data_upload");
 			waitedForWrites = true;
 		}
 
-		return EnsureStructuredBuffer(resource, stats, data, size, stride, usage, after, waitedForWrites);
+		return EnsureStructuredBuffer(resource, stats, data, size, stride, usage, after, waitedForWrites, "scene_data_upload");
 	};
 
 	if (!UpdateReprojectionBuffer(&waitedForWrites))
@@ -16629,7 +16686,7 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 	return true;
 }
 
-bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced)
+bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced, const char* waitReason)
 {
 	const uint64_t requiredSize = std::max<uint64_t>(size, stride);
 	const bool needsGrowth =
@@ -16650,7 +16707,7 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
 		if (!writesQuiesced && (resource.buffer != nullptr || resource.shaderView != nullptr))
 		{
-			WaitForCommandsTracked();
+			WaitForCommandsTracked(waitReason);
 		}
 		DestroyBufferResource(resource);
 
@@ -16699,7 +16756,7 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 		{
 			// Scene buffers are reused persistent DEVICE_UPLOAD allocations. Fence before
 			// overwriting them so prior queued frames cannot read partially updated data.
-			WaitForCommandsTracked();
+			WaitForCommandsTracked(waitReason);
 		}
 
 		void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, 0, resource.size);
@@ -16835,11 +16892,11 @@ bool NRIRenderer::UploadSceneBuffers(
 	{
 		if (!waitedForWrites && StructuredBufferUpdateNeedsWait(resource, bufferData, bufferSize, bufferStride))
 		{
-			WaitForCommandsTracked();
+			WaitForCommandsTracked("scene_buffer_upload");
 			waitedForWrites = true;
 		}
 
-		return EnsureStructuredBuffer(resource, stats, bufferData, bufferSize, bufferStride, usageBits, afterAccess, waitedForWrites);
+		return EnsureStructuredBuffer(resource, stats, bufferData, bufferSize, bufferStride, usageBits, afterAccess, waitedForWrites, "scene_buffer_upload");
 	};
 
 	return
@@ -18976,7 +19033,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 
 	if (!ioWaitedForWrites)
 	{
-		WaitForCommandsTracked();
+		WaitForCommandsTracked("resident_chunk_write");
 		ioWaitedForWrites = true;
 	}
 
@@ -19553,7 +19610,9 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 		instances.size() * sizeof(nri::TopLevelInstance),
 		sizeof(nri::TopLevelInstance),
 		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
-		NRIAccelerationStructureBuildInputAccess()))
+		NRIAccelerationStructureBuildInputAccess(),
+		false,
+		"emissive_tlas_instance_upload"))
 	{
 		return false;
 	}
@@ -19579,7 +19638,7 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 	{
 		if (mEmissiveTopLevelScratchBuffer.buffer != nullptr)
 		{
-			WaitForCommandsTracked();
+			WaitForCommandsTracked("emissive_tlas_scratch_resize");
 		}
 		DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
 		if (!CreateBufferWithoutView(mEmissiveTopLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
@@ -19659,7 +19718,9 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 		instances.size() * sizeof(nri::TopLevelInstance),
 		sizeof(nri::TopLevelInstance),
 		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
-		NRIAccelerationStructureBuildInputAccess()))
+		NRIAccelerationStructureBuildInputAccess(),
+		false,
+		"world_tlas_instance_upload"))
 	{
 		return false;
 	}
@@ -19685,7 +19746,7 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	{
 		if (topLevelScratchBuffer.buffer != nullptr)
 		{
-			WaitForCommandsTracked();
+			WaitForCommandsTracked("world_tlas_scratch_resize");
 		}
 		DestroyBufferResource(topLevelScratchBuffer);
 		if (!CreateBufferWithoutView(topLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
