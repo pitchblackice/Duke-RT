@@ -8796,6 +8796,7 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mVisibleChunkBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mVisibleFlatPlaneBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mScratchBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mResidentStaticBlasScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 
 	accumulateAs(mDynamicBottomLevelAS, telemetry.accelerationStructureBytes);
@@ -17586,14 +17587,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			residentGeometryChunkListIndices.erase(
 				std::unique(residentGeometryChunkListIndices.begin(), residentGeometryChunkListIndices.end()),
 				residentGeometryChunkListIndices.end());
-			for (uint32_t chunkListIndex : residentGeometryChunkListIndices)
-			{
-				if (!RebuildResidentStaticMapChunkBlas(chunkListIndex))
-				{
-					residentRefreshOkay = false;
-					break;
-				}
-			}
+			residentRefreshOkay = RebuildResidentStaticMapChunkBlases(residentGeometryChunkListIndices);
 		}
 
 		if (residentRefreshOkay)
@@ -18089,77 +18083,129 @@ bool NRIRenderer::RebuildResidentStaticMaterialState(const char* reason)
 			mStaticMapScene.gpuMaterials);
 }
 
-bool NRIRenderer::RebuildResidentStaticMapChunkBlas(uint32_t chunkListIndex)
+bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices)
 {
-	if (chunkListIndex >= mStaticMapScene.chunks.size() ||
-		chunkListIndex >= mStaticMapChunkAtlas.chunks.size())
+	if (chunkListIndices.empty())
 	{
-		return false;
+		return true;
 	}
 
-	auto& chunk = mStaticMapScene.chunks[chunkListIndex];
-	const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
-	if (atlasChunk.indexCount == 0)
+	uint64_t maxScratchSize = 0;
+	for (uint32_t chunkListIndex : chunkListIndices)
 	{
-		return false;
+		if (chunkListIndex >= mStaticMapScene.chunks.size() ||
+			chunkListIndex >= mStaticMapChunkAtlas.chunks.size())
+		{
+			return false;
+		}
+
+		auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+		if (atlasChunk.indexCount == 0)
+		{
+			return false;
+		}
+
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+
+		nri::BottomLevelGeometryDesc geometryDesc = {};
+		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+		geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
+		geometryDesc.triangles.vertexOffset = 0;
+		geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
+		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+		geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
+		geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+		geometryDesc.triangles.indexNum = atlasChunk.indexCount;
+		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+
+		nri::AccelerationStructureDesc blasDesc = {};
+		blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
+		blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+		blasDesc.geometryOrInstanceNum = 1;
+		blasDesc.geometries = &geometryDesc;
+		if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, chunk.accelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
+
+		nri::MemoryDesc memoryDesc = {};
+		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		chunk.accelerationStructure.memorySize = memoryDesc.size;
+		chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
+
+		maxScratchSize = std::max(
+			maxScratchSize,
+			mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
 	}
 
-	DestroyAccelerationStructureResource(chunk.accelerationStructure);
-
-	nri::BottomLevelGeometryDesc geometryDesc = {};
-	geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-	geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-	geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
-	geometryDesc.triangles.vertexOffset = 0;
-	geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
-	geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-	geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-	geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
-	geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
-	geometryDesc.triangles.indexNum = atlasChunk.indexCount;
-	geometryDesc.triangles.indexType = nri::IndexType::UINT32;
-
-	nri::AccelerationStructureDesc blasDesc = {};
-	blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
-	blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
-	blasDesc.geometryOrInstanceNum = 1;
-	blasDesc.geometries = &geometryDesc;
-	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, chunk.accelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
+	if (mResidentStaticBlasScratchBuffer.buffer == nullptr || mResidentStaticBlasScratchBuffer.size < maxScratchSize)
 	{
-		return false;
-	}
-
-	nri::MemoryDesc memoryDesc = {};
-	mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-	chunk.accelerationStructure.memorySize = memoryDesc.size;
-	chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
-
-	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure);
-	if (mScratchBuffer.buffer == nullptr || mScratchBuffer.size < requiredScratchSize)
-	{
-		DestroyBufferResource(mScratchBuffer);
-		if (!CreateBufferWithoutView(mScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		if (mResidentStaticBlasScratchBuffer.buffer != nullptr)
+		{
+			WaitForCommandsTracked();
+		}
+		DestroyBufferResource(mResidentStaticBlasScratchBuffer);
+		if (!CreateBufferWithoutView(mResidentStaticBlasScratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
 		{
 			return false;
 		}
 	}
 
-	nri::BuildBottomLevelAccelerationStructureDesc build = {};
-	build.dst = chunk.accelerationStructure.accelerationStructure;
-	build.geometries = &geometryDesc;
-	build.geometryNum = 1;
-	build.scratchBuffer = mScratchBuffer.buffer;
-	build.scratchOffset = 0;
-	mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
+	std::vector<nri::BufferBarrierDesc> blasBarriers;
+	blasBarriers.reserve(chunkListIndices.size());
+	for (size_t i = 0; i < chunkListIndices.size(); ++i)
+	{
+		const uint32_t chunkListIndex = chunkListIndices[i];
+		auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
 
-	nri::BufferBarrierDesc barrier = {};
-	barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
-	barrier.before = NRIAccelerationStructureWriteAccess();
-	barrier.after = NRIAccelerationStructureReadAccess();
+		nri::BottomLevelGeometryDesc geometryDesc = {};
+		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+		geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
+		geometryDesc.triangles.vertexOffset = 0;
+		geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
+		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+		geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
+		geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+		geometryDesc.triangles.indexNum = atlasChunk.indexCount;
+		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+
+		nri::BuildBottomLevelAccelerationStructureDesc build = {};
+		build.dst = chunk.accelerationStructure.accelerationStructure;
+		build.geometries = &geometryDesc;
+		build.geometryNum = 1;
+		build.scratchBuffer = mResidentStaticBlasScratchBuffer.buffer;
+		build.scratchOffset = 0;
+		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
+
+		if (i + 1 < chunkListIndices.size())
+		{
+			nri::BufferBarrierDesc scratchBarrier = {};
+			scratchBarrier.buffer = mResidentStaticBlasScratchBuffer.buffer;
+			scratchBarrier.before = NRIAccelerationStructureScratchAccess();
+			scratchBarrier.after = NRIAccelerationStructureScratchAccess();
+
+			nri::BarrierDesc scratchBarrierDesc = {};
+			scratchBarrierDesc.buffers = &scratchBarrier;
+			scratchBarrierDesc.bufferNum = 1;
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, scratchBarrierDesc);
+		}
+
+		nri::BufferBarrierDesc barrier = {};
+		barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
+		barrier.before = NRIAccelerationStructureWriteAccess();
+		barrier.after = NRIAccelerationStructureReadAccess();
+		blasBarriers.push_back(barrier);
+	}
 
 	nri::BarrierDesc barrierDesc = {};
-	barrierDesc.buffers = &barrier;
-	barrierDesc.bufferNum = 1;
+	barrierDesc.buffers = blasBarriers.data();
+	barrierDesc.bufferNum = (uint32_t)blasBarriers.size();
 	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
 	return true;
 }
@@ -20521,6 +20567,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mVisibleChunkBuffer);
 	DestroyBufferResource(mVisibleFlatPlaneBuffer);
 	DestroyBufferResource(mScratchBuffer);
+	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	for (uint8_t& initialized : mSceneDataDescriptorsInitialized)

@@ -1105,7 +1105,7 @@ private:
 		bool& outGeometryDirty,
 		bool& ioWaitedForWrites);
 	bool RebuildResidentStaticMaterialState(const char* reason);
-	bool RebuildResidentStaticMapChunkBlas(uint32_t chunkListIndex);
+	bool RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const;
 	uint64_t BuildRuntimeLightPayloadHash() const;
@@ -1339,6 +1339,7 @@ private:
 	NRIBufferResource mVisibleChunkBuffer;
 	NRIBufferResource mVisibleFlatPlaneBuffer;
 	NRIBufferResource mScratchBuffer;
+	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
 	SceneBufferDebugStats mIndexBufferStats = { "Index" };
