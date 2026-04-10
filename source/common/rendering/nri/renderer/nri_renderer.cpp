@@ -8793,6 +8793,7 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mResidentStaticBlasScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mTopLevelScratchBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mEmissiveTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 
 	accumulateAs(mDynamicBottomLevelAS, telemetry.accelerationStructureBytes);
 	accumulateAs(mTopLevelAS, telemetry.accelerationStructureBytes);
@@ -9272,7 +9273,9 @@ bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
 	}
 
 	nri_scene::MaterialBridgeData bridge = {};
-	for (size_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
+	std::vector<uint32_t> chunkListIndices;
+	chunkListIndices.reserve(mStaticMapScene.chunks.size());
+	for (uint32_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
 	{
 		const auto& chunkCache = mStaticMapScene.chunks[chunkListIndex];
 		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
@@ -9280,6 +9283,29 @@ bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
 		{
 			continue;
 		}
+
+		chunkListIndices.push_back(chunkListIndex);
+	}
+
+	std::sort(
+		chunkListIndices.begin(),
+		chunkListIndices.end(),
+		[this](uint32_t lhs, uint32_t rhs)
+		{
+			const auto& lhsChunk = mStaticMapChunkAtlas.chunks[lhs];
+			const auto& rhsChunk = mStaticMapChunkAtlas.chunks[rhs];
+			if (lhsChunk.materialOffset != rhsChunk.materialOffset)
+			{
+				return lhsChunk.materialOffset < rhsChunk.materialOffset;
+			}
+
+			return lhs < rhs;
+		});
+
+	for (uint32_t chunkListIndex : chunkListIndices)
+	{
+		const auto& chunkCache = mStaticMapScene.chunks[chunkListIndex];
+		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
 
 		if (bridge.materials.size() < atlasChunk.materialOffset)
 		{
@@ -9291,6 +9317,15 @@ bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
 		if (nextMaterialOffset != atlasChunk.materialOffset ||
 			(uint32_t)chunkCache.materialBridge.materials.size() != atlasChunk.materialCount)
 		{
+			if (ShouldTracePtPerf())
+			{
+				Printf("NRI PT static scene trace: event=resident_material_bridge_failed chunk=%u atlas_offset=%u next_offset=%u atlas_count=%u bridge_count=%u\n",
+					chunkCache.chunkIndex,
+					atlasChunk.materialOffset,
+					nextMaterialOffset,
+					atlasChunk.materialCount,
+					(uint32_t)chunkCache.materialBridge.materials.size());
+			}
 			return false;
 		}
 
@@ -16652,7 +16687,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		mEmissiveTlasInstanceBuffer.buffer != nullptr ||
 		mSceneInstanceBuffer.buffer != nullptr ||
 		mScratchBuffer.buffer != nullptr ||
-		mTopLevelScratchBuffer.buffer != nullptr;
+		mTopLevelScratchBuffer.buffer != nullptr ||
+		mEmissiveTopLevelScratchBuffer.buffer != nullptr;
 	if (needsWait)
 	{
 		WaitForCommandsTracked();
@@ -16663,6 +16699,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	DestroyBufferResource(mSceneInstanceBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
+	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
@@ -19160,10 +19197,14 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 	}
 
 	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mEmissiveTopLevelAS.accelerationStructure);
-	if (mTopLevelScratchBuffer.buffer == nullptr || mTopLevelScratchBuffer.size < requiredScratchSize)
+	if (mEmissiveTopLevelScratchBuffer.buffer == nullptr || mEmissiveTopLevelScratchBuffer.size < requiredScratchSize)
 	{
-		DestroyBufferResource(mTopLevelScratchBuffer);
-		if (!CreateBufferWithoutView(mTopLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		if (mEmissiveTopLevelScratchBuffer.buffer != nullptr)
+		{
+			WaitForCommandsTracked();
+		}
+		DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
+		if (!CreateBufferWithoutView(mEmissiveTopLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
 		{
 			return false;
 		}
@@ -19179,7 +19220,7 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 	tlasBuild.instanceNum = (uint32_t)instances.size();
 	tlasBuild.instanceBuffer = mEmissiveTlasInstanceBuffer.buffer;
 	tlasBuild.instanceOffset = 0;
-	tlasBuild.scratchBuffer = mTopLevelScratchBuffer.buffer;
+	tlasBuild.scratchBuffer = mEmissiveTopLevelScratchBuffer.buffer;
 	tlasBuild.scratchOffset = 0;
 	mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
 
@@ -19264,6 +19305,10 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*topLevelAS.accelerationStructure);
 	if (topLevelScratchBuffer.buffer == nullptr || topLevelScratchBuffer.size < requiredScratchSize)
 	{
+		if (topLevelScratchBuffer.buffer != nullptr)
+		{
+			WaitForCommandsTracked();
+		}
 		DestroyBufferResource(topLevelScratchBuffer);
 		if (!CreateBufferWithoutView(topLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
 		{
@@ -21030,6 +21075,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
+	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	for (uint8_t& initialized : mSceneDataDescriptorsInitialized)
 	{

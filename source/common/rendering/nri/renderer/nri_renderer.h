@@ -1359,6 +1359,7 @@ private:
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
+	NRIBufferResource mEmissiveTopLevelScratchBuffer;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
 	SceneBufferDebugStats mIndexBufferStats = { "Index" };
 	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };
