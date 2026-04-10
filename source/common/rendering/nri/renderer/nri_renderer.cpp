@@ -7561,11 +7561,15 @@ void NRIRenderer::SetGuiCaptureState(bool active)
 	}
 
 	mGuiCaptureActive = active;
-	if (ShouldEmitTemporalTraceLogs())
+	if (nri_ptscenestats)
 	{
-		Printf("NRI PT gui capture: frame=%u active=%s\n",
+		const NRIMainUpscalerKind resolvedMain = ResolveMainUpscalerKind(false);
+		const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMain, GetSelectedUpscalerMode());
+		Printf("NRI PT gui capture: frame=%u active=%s jitter=%s phases=%u\n",
 			mFrameIndex,
-			mGuiCaptureActive ? "yes" : "no");
+			mGuiCaptureActive ? "yes" : "no",
+			GetTemporalJitterModeName(resolvedMain, mGuiCaptureActive),
+			GetTemporalJitterPhaseCount(resolvedMain, resolvedUpscalerMode, mGuiCaptureActive));
 	}
 }
 
