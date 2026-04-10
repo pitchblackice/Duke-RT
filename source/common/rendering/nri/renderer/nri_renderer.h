@@ -883,6 +883,10 @@ private:
 		bool active = false;
 		uint32_t dirtyChunkCount = 0;
 		uint32_t replacedChunkCount = 0;
+		uint32_t residentAppliedChunkCount = 0;
+		uint32_t residentGeometryChunkCount = 0;
+		uint32_t residentMaterialChunkCount = 0;
+		uint32_t residentFallbackChunkCount = 0;
 		uint32_t rebuiltChunkCount = 0;
 		uint32_t heldChunkCount = 0;
 		uint32_t blindSpotChunkCount = 0;
@@ -1092,7 +1096,16 @@ private:
 	bool BuildEmissiveTopLevelAccelerationStructure();
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
 	bool RefreshResidentStaticSceneDataSet();
-	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
+	bool TryApplyRuntimeMutationChunkToResidentScene(
+		const nri_scene::PTMapChunk& mapChunk,
+		RuntimeMapMutationCache::ChunkReplacement& replacement,
+		uint32_t& outStaticSceneChunkListIndex,
+		bool& outMaterialDirty,
+		bool& outGeometryDirty,
+		bool& ioWaitedForWrites);
+	bool RebuildResidentStaticMaterialState(const char* reason);
+	bool RebuildResidentStaticMapChunkBlas(uint32_t chunkListIndex);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const;
 	uint64_t BuildRuntimeLightPayloadHash() const;
@@ -1237,6 +1250,7 @@ private:
 
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
 	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
+	bool UpdateStructuredBufferRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after);
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
 	void BuildRuntimeLightClusterUpload(
 		std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
