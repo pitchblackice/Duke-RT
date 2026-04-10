@@ -1129,6 +1129,7 @@ private:
 	bool DispatchUpscaleChain();
 	bool DispatchFinal();
 	void RefreshMapWorld();
+	bool ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger);
 	bool CheckPathTracingSupport();
 	void UpdatePerFrameState(HWDrawInfo& di);
 	void UpdateNightVisionState();
@@ -1431,8 +1432,10 @@ private:
 	bool mBuiltStaticMapSceneASLastFrame = false;
 	bool mBuiltDynamicSceneASLastFrame = false;
 	bool mPendingStaticMapLightingInvalidation = false;
+	bool mAllowStartupMapWorldCorrection = false;
 	uint64_t mObservedMapWorldBuildSerial = 0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
+	uint32_t mStartupMapWorldCorrectionDeadlineFrame = 0;
 	uint32_t mActiveTlasInstanceCount = 0;
 	uint32_t mBoundStaticPrimitiveCount = 0;
 	uint32_t mBoundDynamicPrimitiveCount = 0;

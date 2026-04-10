@@ -6404,6 +6404,15 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	UpdateFrameGenerationHistoryPolicy(debugMode, mFrameBuffer->mFrameGeneration.GetPolicy(), preserveHistory);
 
 	RefreshMapWorld();
+	if (!ApplyStartupMapWorldCorrectionIfNeeded("render-frame-start"))
+	{
+		LogFallback("PT startup world correction failed.");
+		if (preserveHistory)
+		{
+			restoreHistory();
+		}
+		return false;
+	}
 	if (mPendingStaticMapLightingInvalidation)
 	{
 		if (ShouldTraceSkyPerf())
@@ -7492,6 +7501,16 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 	if (!EnsureStaticMapScene())
 	{
 		LogFallback("PT preload resident static scene build failed.");
+		return true;
+	}
+	if (!ApplyStartupMapWorldCorrectionIfNeeded("preload"))
+	{
+		LogFallback("PT preload startup world correction failed.");
+		return true;
+	}
+	if (!EnsureStaticMapScene())
+	{
+		LogFallback("PT preload resident static scene rebuild after startup correction failed.");
 		return true;
 	}
 
@@ -12494,10 +12513,16 @@ void NRIRenderer::RefreshMapWorld()
 	const bool needsBuild = !mMapWorld.valid || levelChanged || pendingBuildSerial != mObservedMapWorldBuildSerial;
 	if (!needsBuild)
 	{
+		if (mAllowStartupMapWorldCorrection && mFrameIndex > mStartupMapWorldCorrectionDeadlineFrame)
+		{
+			mAllowStartupMapWorldCorrection = false;
+		}
 		return;
 	}
 
 	ResetPersistentDynamicEmissiveCache();
+	mAllowStartupMapWorldCorrection = true;
+	mStartupMapWorldCorrectionDeadlineFrame = mFrameIndex + 4u;
 
 	nri_scene::PTMapWorld world;
 	if (!nri_scene::BuildMapWorld(world))
@@ -12510,6 +12535,8 @@ void NRIRenderer::RefreshMapWorld()
 		mMapWorld.Reset();
 		mMapWorld.level = currentLevel;
 		mObservedMapWorldBuildSerial = pendingBuildSerial;
+		mAllowStartupMapWorldCorrection = false;
+		mStartupMapWorldCorrectionDeadlineFrame = 0;
 		return;
 	}
 
@@ -12526,6 +12553,112 @@ void NRIRenderer::RefreshMapWorld()
 		stats.portalSurfaceCount,
 		stats.skySurfaceCount,
 		stats.triangleCount);
+}
+
+bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
+{
+	if (!mAllowStartupMapWorldCorrection)
+	{
+		return true;
+	}
+
+	if (mFrameIndex > mStartupMapWorldCorrectionDeadlineFrame)
+	{
+		mAllowStartupMapWorldCorrection = false;
+		return true;
+	}
+
+	if (!mMapWorld.valid ||
+		!mStaticMapScene.valid ||
+		mRuntimeMapMutations.chunks.size() != mMapWorld.chunks.size())
+	{
+		return true;
+	}
+
+	uint32_t dirtyChunkCount = 0;
+	uint32_t geometryChunkCount = 0;
+	uint32_t materialChunkCount = 0;
+	for (size_t chunkListIndex = 0; chunkListIndex < mMapWorld.chunks.size(); ++chunkListIndex)
+	{
+		const auto& mapChunk = mMapWorld.chunks[chunkListIndex];
+		const auto& replacement = mRuntimeMapMutations.chunks[chunkListIndex];
+		nri_scene::PTMapChunkMutationAnalysis analysis = {};
+		if (!nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement.baseline, analysis))
+		{
+			continue;
+		}
+
+		const uint32_t startupNoiseMask =
+			nri_scene::PTMapChunkMutationReason_SectionDirty |
+			nri_scene::PTMapChunkMutationReason_Dragged;
+		const uint32_t effectiveReasonMask = analysis.reasonMask & ~startupNoiseMask;
+		if (!analysis.signatureChanged && effectiveReasonMask == nri_scene::PTMapChunkMutationReason_None)
+		{
+			continue;
+		}
+
+		dirtyChunkCount++;
+		if ((effectiveReasonMask & (
+				nri_scene::PTMapChunkMutationReason_SectorGeometry |
+				nri_scene::PTMapChunkMutationReason_WallGeometry |
+				nri_scene::PTMapChunkMutationReason_SectorDirty)) != 0 ||
+			analysis.signatureChanged)
+		{
+			geometryChunkCount++;
+		}
+		if ((effectiveReasonMask & (
+				nri_scene::PTMapChunkMutationReason_SectorMaterial |
+				nri_scene::PTMapChunkMutationReason_WallMaterial)) != 0)
+		{
+			materialChunkCount++;
+		}
+	}
+
+	if (dirtyChunkCount == 0)
+	{
+		return true;
+	}
+
+	nri_scene::PTMapWorld correctedWorld = {};
+	if (!nri_scene::BuildMapWorld(correctedWorld))
+	{
+		Printf(TEXTCOLOR_RED "NRI PT startup world correction: authoritative rebuild failed for %s trigger=%s frame=%u dirty_chunks=%u.\n",
+			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
+			trigger != nullptr ? trigger : "unknown",
+			mFrameIndex,
+			dirtyChunkCount);
+		mAllowStartupMapWorldCorrection = false;
+		mStartupMapWorldCorrectionDeadlineFrame = 0;
+		return true;
+	}
+
+	DestroyStaticMapSceneCache("startup-world-correction");
+	mStaticMapScene = {};
+	mStaticAccelerationBuildSerial = 0;
+	mPreservedStaticMapSky = {};
+	mMapWorld = std::move(correctedWorld);
+	mObservedMapWorldBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
+	mAllowStartupMapWorldCorrection = false;
+	mStartupMapWorldCorrectionDeadlineFrame = 0;
+	RequestHistoryReset("startup-world-correction");
+
+	const auto& stats = mMapWorld.stats;
+	Printf("NRI PT startup world correction: trigger=%s level=%s frame=%u build_serial=%llu dirty_chunks=%u geometry_chunks=%u material_chunks=%u chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
+		trigger != nullptr ? trigger : "unknown",
+		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
+		mFrameIndex,
+		(unsigned long long)mMapWorld.buildSerial,
+		dirtyChunkCount,
+		geometryChunkCount,
+		materialChunkCount,
+		stats.chunkCount,
+		stats.surfaceCount,
+		stats.wallSurfaceCount,
+		stats.flatSurfaceCount,
+		stats.portalSurfaceCount,
+		stats.skySurfaceCount,
+		stats.triangleCount);
+	return true;
 }
 
 bool NRIRenderer::CreatePipelineLayout()
