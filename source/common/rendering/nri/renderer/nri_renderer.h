@@ -643,6 +643,44 @@ private:
 		uint32_t tlasInstanceCount = 0;
 	};
 
+	struct ResidentMapChunkRegistry
+	{
+		struct Entry
+		{
+			uint32_t chunkIndex = UINT32_MAX;
+			uint32_t staticSceneChunkListIndex = UINT32_MAX;
+			uint32_t vertexOffset = 0;
+			uint32_t vertexCount = 0;
+			uint32_t indexOffset = 0;
+			uint32_t indexCount = 0;
+			uint32_t primitiveOffset = 0;
+			uint32_t primitiveCount = 0;
+			uint32_t materialOffset = 0;
+			uint32_t materialCount = 0;
+			uint64_t baselineSignature = 0;
+			uint64_t liveSignature = 0;
+			uint64_t animatedMaterialSignature = 0;
+			uint64_t animatedGeometrySignature = 0;
+			bool valid = false;
+			bool active = false;
+			bool mappedInStaticScene = false;
+			bool accelerationResident = false;
+			bool hasAnimatedTextureCandidates = false;
+			bool animatedRefreshSuppressed = false;
+			nri_scene::PTMapChunkMutationBaseline appliedBaseline;
+		};
+
+		bool valid = false;
+		uint64_t buildSerial = 0;
+		uint32_t chunkCount = 0;
+		uint32_t activeChunkCount = 0;
+		uint32_t mappedChunkCount = 0;
+		uint32_t accelerationResidentChunkCount = 0;
+		uint32_t animatedCandidateChunkCount = 0;
+		uint32_t animatedRefreshSuppressedChunkCount = 0;
+		std::vector<Entry> entries;
+	};
+
 	struct DynamicSceneFrameState
 	{
 		uint32_t spriteSurfaceCount = 0;
@@ -964,6 +1002,8 @@ private:
 		const nri_scene::SceneView* preservedSkyView,
 		StaticMapSceneCache& outStaticScene,
 		RuntimeMapMutationCache& outRuntimeMutations);
+	void ResetResidentMapChunkRegistry();
+	void SyncResidentMapChunkRegistryFromStaticScene();
 	bool RefreshStaticMapAnimatedMaterials();
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool UploadSceneBuffers(
@@ -1060,6 +1100,7 @@ private:
 	void PrintMapWorldStatus() const;
 	void PrintPortalTraversalStatus() const;
 	void PrintStaticMapSceneStatus() const;
+	void PrintResidentMapChunkRegistryStatus() const;
 	void PrintDynamicSceneStatus() const;
 	void PrintTemporalStatus() const;
 	void PrintRuntimeMapMutationStatus() const;
@@ -1256,6 +1297,7 @@ private:
 	NRIUpscalerContext mUpscaler;
 	nri_scene::PTMapWorld mMapWorld;
 	StaticMapSceneCache mStaticMapScene;
+	ResidentMapChunkRegistry mResidentMapChunkRegistry = {};
 	RuntimeMutationRebaselineCandidate mRuntimeMutationRebaselineCandidate = {};
 	std::vector<RuntimeMutationRebaselineRetiredStaticScene> mRetiredRuntimeMutationRebaselineStaticScenes;
 	RuntimeMapMutationCache mRuntimeMapMutations;

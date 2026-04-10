@@ -8722,6 +8722,7 @@ void NRIRenderer::PrintStatus() const
 	PrintMapWorldStatus();
 	PrintPortalTraversalStatus();
 	PrintStaticMapSceneStatus();
+	PrintResidentMapChunkRegistryStatus();
 	PrintDynamicSceneStatus();
 	PrintTemporalStatus();
 	PrintRuntimeMapMutationStatus();
@@ -8955,6 +8956,83 @@ void NRIRenderer::ArmTemporalTraceBudget(const char* reason)
 		GetPostSharpenName(resolvedPost));
 }
 
+void NRIRenderer::ResetResidentMapChunkRegistry()
+{
+	mResidentMapChunkRegistry = {};
+}
+
+void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
+{
+	ResetResidentMapChunkRegistry();
+	if (!mMapWorld.valid)
+	{
+		return;
+	}
+
+	auto& registry = mResidentMapChunkRegistry;
+	registry.valid = true;
+	registry.buildSerial = mMapWorld.buildSerial;
+	registry.chunkCount = (uint32_t)mMapWorld.chunks.size();
+	registry.entries.resize(mMapWorld.chunks.size());
+
+	for (size_t chunkListIndex = 0; chunkListIndex < mMapWorld.chunks.size(); ++chunkListIndex)
+	{
+		const auto& mapChunk = mMapWorld.chunks[chunkListIndex];
+		auto& entry = registry.entries[chunkListIndex];
+		entry.valid = true;
+		entry.chunkIndex = mapChunk.chunkIndex;
+		if (chunkListIndex < mRuntimeMapMutations.chunks.size())
+		{
+			const auto& replacement = mRuntimeMapMutations.chunks[chunkListIndex];
+			entry.appliedBaseline = replacement.baseline;
+			entry.baselineSignature = replacement.baselineSignature;
+			entry.liveSignature = replacement.liveSignature != 0 ? replacement.liveSignature : replacement.baselineSignature;
+		}
+	}
+
+	for (size_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
+	{
+		const auto& staticChunk = mStaticMapScene.chunks[chunkListIndex];
+		if (staticChunk.chunkIndex >= registry.entries.size())
+		{
+			continue;
+		}
+
+		auto& entry = registry.entries[staticChunk.chunkIndex];
+		entry.active = true;
+		entry.mappedInStaticScene = true;
+		entry.staticSceneChunkListIndex = (uint32_t)chunkListIndex;
+		entry.vertexOffset = staticChunk.vertexOffset;
+		entry.vertexCount = staticChunk.vertexCount;
+		entry.indexOffset = staticChunk.indexOffset;
+		entry.indexCount = staticChunk.indexCount;
+		entry.primitiveOffset = staticChunk.primitiveOffset;
+		entry.primitiveCount = staticChunk.primitiveCount;
+		entry.materialOffset = staticChunk.materialOffset;
+		entry.materialCount = staticChunk.materialCount;
+		entry.animatedMaterialSignature = staticChunk.animatedMaterialSignature;
+		entry.animatedGeometrySignature = staticChunk.animatedGeometrySignature;
+		entry.hasAnimatedTextureCandidates = staticChunk.hasAnimatedTextureCandidates;
+		entry.animatedRefreshSuppressed = staticChunk.animatedRefreshSuppressed;
+		entry.accelerationResident = staticChunk.accelerationStructure.accelerationStructure != nullptr;
+
+		registry.activeChunkCount++;
+		registry.mappedChunkCount++;
+		if (entry.accelerationResident)
+		{
+			registry.accelerationResidentChunkCount++;
+		}
+		if (entry.hasAnimatedTextureCandidates)
+		{
+			registry.animatedCandidateChunkCount++;
+		}
+		if (entry.animatedRefreshSuppressed)
+		{
+			registry.animatedRefreshSuppressedChunkCount++;
+		}
+	}
+}
+
 void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const
 {
 	if (!ShouldEmitTemporalTraceLogs())
@@ -9074,6 +9152,24 @@ void NRIRenderer::PrintStaticMapSceneStatus() const
 		mStaticMapScene.tlasInstanceCount,
 		(uint32_t)mStaticMapScene.geometry.primitives.size(),
 		(uint32_t)mStaticMapScene.gpuMaterials.size());
+}
+
+void NRIRenderer::PrintResidentMapChunkRegistryStatus() const
+{
+	if (!mResidentMapChunkRegistry.valid)
+	{
+		Printf("NRI PT resident chunk registry: unavailable.\n");
+		return;
+	}
+
+	Printf("NRI PT resident chunk registry: build_serial=%llu chunks=%u active=%u mapped=%u acceleration_resident=%u animated_candidates=%u animated_refresh_suppressed=%u\n",
+		(unsigned long long)mResidentMapChunkRegistry.buildSerial,
+		mResidentMapChunkRegistry.chunkCount,
+		mResidentMapChunkRegistry.activeChunkCount,
+		mResidentMapChunkRegistry.mappedChunkCount,
+		mResidentMapChunkRegistry.accelerationResidentChunkCount,
+		mResidentMapChunkRegistry.animatedCandidateChunkCount,
+		mResidentMapChunkRegistry.animatedRefreshSuppressedChunkCount);
 }
 
 NRIRenderer::PersistentDynamicSurfaceStats NRIRenderer::GatherPersistentDynamicEmissiveSurfaceStats() const
@@ -12324,6 +12420,7 @@ bool NRIRenderer::SwapRuntimeMutationRebaselineCandidate()
 	mMapWorld = std::move(candidate.world);
 	mRuntimeMapMutations = std::move(candidate.runtimeMutations);
 	mObservedMapWorldBuildSerial = candidate.pendingGeometryBuildSerial;
+	SyncResidentMapChunkRegistryFromStaticScene();
 
 	if (!UpdateSceneDataSet(
 		mStaticVertexBuffer,
@@ -14539,6 +14636,7 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 	mStaticMapScene.gpuUploadCount++;
 	mStaticMapScene.animatedRefreshCount += refreshedChunkCount;
 	mStaticMapScene.animatedRefreshUploadCount++;
+	SyncResidentMapChunkRegistryFromStaticScene();
 	mUploadedStaticMapSceneLastFrame = true;
 	return true;
 }
@@ -14611,6 +14709,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 	mStaticMapScene.sceneBuildCount++;
 	mStaticMapScene.gpuUploadCount++;
 	mStaticMapScene.accelerationBuildCount++;
+	SyncResidentMapChunkRegistryFromStaticScene();
 	mUploadedStaticMapSceneLastFrame = true;
 	mBuiltStaticMapSceneASLastFrame = true;
 	mPreservedStaticMapSky = {};
@@ -16159,7 +16258,54 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 
 void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask) const
 {
-	BuildStaticMapInstances(mStaticMapScene, outTlasInstances, outSceneInstances, replacedChunkMask);
+	if (!mResidentMapChunkRegistry.valid ||
+		mResidentMapChunkRegistry.buildSerial != mStaticMapScene.buildSerial ||
+		mResidentMapChunkRegistry.entries.empty())
+	{
+		BuildStaticMapInstances(mStaticMapScene, outTlasInstances, outSceneInstances, replacedChunkMask);
+		return;
+	}
+
+	outTlasInstances.clear();
+	outSceneInstances.clear();
+	outTlasInstances.reserve(mResidentMapChunkRegistry.activeChunkCount);
+	outSceneInstances.reserve(mResidentMapChunkRegistry.activeChunkCount);
+
+	for (const auto& entry : mResidentMapChunkRegistry.entries)
+	{
+		if (!entry.valid ||
+			!entry.active ||
+			!entry.mappedInStaticScene ||
+			entry.staticSceneChunkListIndex >= mStaticMapScene.chunks.size())
+		{
+			continue;
+		}
+
+		if (replacedChunkMask != nullptr &&
+			entry.chunkIndex < replacedChunkMask->size() &&
+			(*replacedChunkMask)[entry.chunkIndex] != 0)
+		{
+			continue;
+		}
+
+		const auto& chunk = mStaticMapScene.chunks[entry.staticSceneChunkListIndex];
+		if (chunk.accelerationStructure.accelerationStructure == nullptr)
+		{
+			continue;
+		}
+
+		nri::TopLevelInstance instance = {};
+		instance.transform[0][0] = 1.0f;
+		instance.transform[1][1] = 1.0f;
+		instance.transform[2][2] = 1.0f;
+		instance.instanceId = (uint32_t)outSceneInstances.size();
+		instance.mask = 0xFF;
+		instance.shaderBindingTableLocalOffset = 0;
+		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		outTlasInstances.push_back(instance);
+		outSceneInstances.push_back({ entry.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, 0u, 0u });
+	}
 }
 
 void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask) const
@@ -19552,6 +19698,7 @@ void NRIRenderer::DestroyFrameTextures()
 void NRIRenderer::DestroySceneBuffers()
 {
 	mStaticMapScene.buffersResident = false;
+	ResetResidentMapChunkRegistry();
 	DestroyStaticMapSceneResources(
 		mRuntimeMutationRebaselineCandidate.staticScene,
 		mRuntimeMutationRebaselineCandidate.staticResources,
@@ -19671,6 +19818,7 @@ void NRIRenderer::DestroyAccelerationStructures()
 	mEmissiveTlasBuildCount = 0;
 	mEmissiveTlasInstancePayloadCacheValid = false;
 	mEmissiveTlasInstancePayloadHash = 0;
+	SyncResidentMapChunkRegistryFromStaticScene();
 }
 
 void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScene, StaticMapSceneResources& staticResources, bool waitForCommands)
@@ -19741,6 +19889,7 @@ void NRIRenderer::DestroyStaticMapSceneCache()
 	mRuntimeMapMutations.chunks.clear();
 	mRuntimeMapMutations.replacedChunkMask.clear();
 	mRuntimeMapLastFrame = {};
+	ResetResidentMapChunkRegistry();
 }
 
 void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)
