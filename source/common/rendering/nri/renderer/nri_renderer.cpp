@@ -12512,7 +12512,7 @@ void NRIRenderer::RefreshMapWorld()
 
 	ResetPersistentDynamicEmissiveCache();
 	mAllowStartupMapWorldCorrection = true;
-	mStartupMapWorldCorrectionDeadlineFrame = mFrameIndex + 4u;
+	mStartupMapWorldCorrectionDeadlineFrame = mFrameIndex + 8u;
 
 	nri_scene::PTMapWorld world;
 	if (!nri_scene::BuildMapWorld(world))
@@ -12628,8 +12628,6 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	mPreservedStaticMapSky = {};
 	mMapWorld = std::move(correctedWorld);
 	mObservedMapWorldBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
-	mAllowStartupMapWorldCorrection = false;
-	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	RequestHistoryReset("startup-world-correction");
 
 	const auto& stats = mMapWorld.stats;
