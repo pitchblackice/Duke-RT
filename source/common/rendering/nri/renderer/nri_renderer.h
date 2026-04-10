@@ -681,6 +681,37 @@ private:
 		std::vector<Entry> entries;
 	};
 
+	struct StaticMapChunkAtlas
+	{
+		struct ChunkEntry
+		{
+			uint32_t chunkIndex = UINT32_MAX;
+			uint32_t staticSceneChunkListIndex = UINT32_MAX;
+			uint32_t vertexOffset = 0;
+			uint32_t vertexCount = 0;
+			uint32_t indexOffset = 0;
+			uint32_t indexCount = 0;
+			uint32_t primitiveOffset = 0;
+			uint32_t primitiveCount = 0;
+			uint32_t materialOffset = 0;
+			uint32_t materialCount = 0;
+			bool valid = false;
+		};
+
+		bool valid = false;
+		uint64_t buildSerial = 0;
+		uint32_t chunkCount = 0;
+		uint32_t vertexCount = 0;
+		uint32_t indexCount = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialCount = 0;
+		uint32_t vertexCapacity = 0;
+		uint32_t indexCapacity = 0;
+		uint32_t primitiveCapacity = 0;
+		uint32_t materialCapacity = 0;
+		std::vector<ChunkEntry> chunks;
+	};
+
 	struct DynamicSceneFrameState
 	{
 		uint32_t spriteSurfaceCount = 0;
@@ -932,6 +963,7 @@ private:
 		NRIBufferResource indexBuffer;
 		NRIBufferResource primitiveBuffer;
 		NRIBufferResource materialBuffer;
+		StaticMapChunkAtlas chunkAtlas;
 		NRIBufferResource tlasInstanceBuffer;
 		NRIBufferResource scratchBuffer;
 		NRIBufferResource topLevelScratchBuffer;
@@ -1004,6 +1036,34 @@ private:
 		RuntimeMapMutationCache& outRuntimeMutations);
 	void ResetResidentMapChunkRegistry();
 	void SyncResidentMapChunkRegistryFromStaticScene();
+	void ResetStaticMapChunkAtlas(StaticMapChunkAtlas& atlas) const;
+	uint32_t AllocateChunkAtlasSlice(uint32_t count, uint32_t alignment, uint32_t& cursor) const;
+	bool BuildStaticMapChunkAtlasLayout(const StaticMapSceneCache& staticScene, StaticMapChunkAtlas& outAtlas) const;
+	void UploadChunkGeometryToAtlas(
+		const nri_scene::GeometryData& sourceGeometry,
+		const StaticMapSceneCache::ChunkCache& sourceChunk,
+		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+		std::vector<nri_scene::SceneVertex>& outVertices,
+		std::vector<uint32_t>& outIndices,
+		std::vector<nri_scene::PrimitiveData>& outPrimitives) const;
+	void UploadChunkMaterialsToAtlas(
+		const std::vector<nri_scene::MaterialData>& sourceMaterials,
+		const StaticMapSceneCache::ChunkCache& sourceChunk,
+		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+		std::vector<nri_scene::MaterialData>& outMaterials) const;
+	bool UploadStaticMapChunkAtlas(
+		NRIBufferResource& vertexBuffer,
+		NRIBufferResource& indexBuffer,
+		NRIBufferResource& primitiveBuffer,
+		NRIBufferResource& materialBuffer,
+		StaticMapChunkAtlas& atlas,
+		const StaticMapSceneCache& staticScene,
+		const std::vector<nri_scene::MaterialData>& gpuMaterials);
+	bool UploadStaticMapChunkMaterialAtlas(
+		NRIBufferResource& materialBuffer,
+		const StaticMapChunkAtlas& atlas,
+		const StaticMapSceneCache& staticScene,
+		const std::vector<nri_scene::MaterialData>& gpuMaterials);
 	bool RefreshStaticMapAnimatedMaterials();
 	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool UploadSceneBuffers(
@@ -1079,6 +1139,7 @@ private:
 	void SetCurrentSceneDataDescriptorsInitialized(bool value);
 	void BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr) const;
 	void BuildStaticMapInstances(const StaticMapSceneCache& staticScene, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr) const;
+	void BuildStaticMapInstances(const StaticMapSceneCache& staticScene, const StaticMapChunkAtlas& atlas, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances, const std::vector<uint8_t>* replacedChunkMask = nullptr) const;
 	void BuildFilteredStaticMapGeometry(const std::vector<uint8_t>& replacedChunkMask, nri_scene::GeometryData& outGeometry) const;
 	bool RestoreStaticTopLevelScene();
 	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
@@ -1297,6 +1358,7 @@ private:
 	NRIUpscalerContext mUpscaler;
 	nri_scene::PTMapWorld mMapWorld;
 	StaticMapSceneCache mStaticMapScene;
+	StaticMapChunkAtlas mStaticMapChunkAtlas = {};
 	ResidentMapChunkRegistry mResidentMapChunkRegistry = {};
 	RuntimeMutationRebaselineCandidate mRuntimeMutationRebaselineCandidate = {};
 	std::vector<RuntimeMutationRebaselineRetiredStaticScene> mRetiredRuntimeMutationRebaselineStaticScenes;
