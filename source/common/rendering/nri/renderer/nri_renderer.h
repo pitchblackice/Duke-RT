@@ -614,6 +614,7 @@ private:
 			uint32_t materialCount = 0;
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t animatedGeometrySignature = 0;
+			bool active = true;
 			bool hasAnimatedTextureCandidates = false;
 			bool animatedRefreshSuppressed = false;
 			nri_scene::MaterialBridgeData materialBridge;
@@ -683,6 +684,12 @@ private:
 
 	struct StaticMapChunkAtlas
 	{
+		struct FreeRange
+		{
+			uint32_t offset = 0;
+			uint32_t count = 0;
+		};
+
 		struct ChunkEntry
 		{
 			uint32_t chunkIndex = UINT32_MAX;
@@ -710,6 +717,10 @@ private:
 		uint32_t primitiveCapacity = 0;
 		uint32_t materialCapacity = 0;
 		std::vector<ChunkEntry> chunks;
+		std::vector<FreeRange> freeVertexRanges;
+		std::vector<FreeRange> freeIndexRanges;
+		std::vector<FreeRange> freePrimitiveRanges;
+		std::vector<FreeRange> freeMaterialRanges;
 	};
 
 	struct DynamicSceneFrameState
@@ -1041,8 +1052,13 @@ private:
 	void ResetResidentMapChunkRegistry();
 	void SyncResidentMapChunkRegistryFromStaticScene();
 	void ResetStaticMapChunkAtlas(StaticMapChunkAtlas& atlas) const;
+	uint32_t GetChunkAtlasCapacity(uint32_t usedCount) const;
 	uint32_t AllocateChunkAtlasSlice(uint32_t count, uint32_t alignment, uint32_t& cursor) const;
+	uint32_t AllocateChunkAtlasRange(uint32_t count, uint32_t capacity, std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t& cursor) const;
+	void ReleaseChunkAtlasRange(std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t offset, uint32_t count) const;
 	bool BuildStaticMapChunkAtlasLayout(const StaticMapSceneCache& staticScene, StaticMapChunkAtlas& outAtlas) const;
+	bool RebuildResidentStaticCpuAtlasMirror(StaticMapSceneCache& staticScene, const StaticMapChunkAtlas& atlas) const;
+	bool RebuildResidentStaticMaterialBridgeFromChunks();
 	void UploadChunkGeometryToAtlas(
 		const nri_scene::GeometryData& sourceGeometry,
 		const StaticMapSceneCache::ChunkCache& sourceChunk,
