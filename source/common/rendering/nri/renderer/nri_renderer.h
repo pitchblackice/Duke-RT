@@ -1138,14 +1138,14 @@ private:
 		std::vector<EmissivePrimitiveGpuData>& outPrimitives,
 		std::vector<float>& outCdf,
 		std::vector<EmissivePrimitiveDebugRecord>& outDebugRecords) const;
-	bool UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context);
+	bool UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context, bool* ioWaitedForWrites = nullptr);
 	void UpdateBoundSectorLightingState();
 	void BuildSectorLightingUpload(
 		SectorLightHeaderGpuData& outHeader,
 		std::vector<SectorLightGpuData>& outSectors);
-	bool UpdateReprojectionBuffer();
-	bool UpdateVisibleChunkBuffer();
-	bool UpdateVisibleFlatPlaneBuffer();
+	bool UpdateReprojectionBuffer(bool* ioWaitedForWrites = nullptr);
+	bool UpdateVisibleChunkBuffer(bool* ioWaitedForWrites = nullptr);
+	bool UpdateVisibleFlatPlaneBuffer(bool* ioWaitedForWrites = nullptr);
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
@@ -1269,7 +1269,7 @@ private:
 	void BindSceneRootDescriptors();
 
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
-	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
+	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced = false);
 	bool UpdateStructuredBufferRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after);
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
 	void BuildRuntimeLightClusterUpload(

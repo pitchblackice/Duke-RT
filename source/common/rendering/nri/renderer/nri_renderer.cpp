@@ -4592,6 +4592,26 @@ namespace
 		}
 	}
 
+	static bool StructuredBufferUpdateNeedsWait(
+		const NRIBufferResource& resource,
+		const void* data,
+		uint64_t size,
+		uint32_t stride)
+	{
+		const uint64_t requiredSize = std::max<uint64_t>(size, stride);
+		const bool needsGrowth =
+			resource.buffer == nullptr ||
+			resource.shaderView == nullptr ||
+			resource.stride != stride ||
+			resource.size < requiredSize;
+		if (needsGrowth)
+		{
+			return resource.buffer != nullptr || resource.shaderView != nullptr;
+		}
+
+		return data != nullptr && size != 0;
+	}
+
 	static bool MaterialDataEqual(const nri_scene::MaterialData& a, const nri_scene::MaterialData& b)
 	{
 		return
@@ -14166,7 +14186,7 @@ void NRIRenderer::UpdateBoundSectorLightingState()
 	}
 }
 
-bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context)
+bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context, bool* ioWaitedForWrites)
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.emissiveUpdateMs);
 	const uint64_t payloadHash = BuildEmissiveSamplingPayloadHash(context);
@@ -14185,7 +14205,20 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	std::vector<EmissivePrimitiveDebugRecord> emissiveDebugRecords;
 	BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveDebugRecords);
 
-	if (!EnsureStructuredBuffer(
+	const auto ensureStructuredBufferBatched = [this, ioWaitedForWrites](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
+	{
+		if (ioWaitedForWrites != nullptr &&
+			!*ioWaitedForWrites &&
+			StructuredBufferUpdateNeedsWait(resource, data, size, stride))
+		{
+			WaitForCommandsTracked();
+			*ioWaitedForWrites = true;
+		}
+
+		return EnsureStructuredBuffer(resource, stats, data, size, stride, usage, after, ioWaitedForWrites != nullptr && *ioWaitedForWrites);
+	};
+
+	if (!ensureStructuredBufferBatched(
 		mEmissivePrimitiveHeaderBuffer,
 		mEmissivePrimitiveHeaderBufferStats,
 		&emissiveHeader,
@@ -14197,7 +14230,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 		return false;
 	}
 
-	if (!EnsureStructuredBuffer(
+	if (!ensureStructuredBufferBatched(
 		mEmissivePrimitiveBuffer,
 		mEmissivePrimitiveBufferStats,
 		emissivePrimitives.empty() ? nullptr : emissivePrimitives.data(),
@@ -14209,7 +14242,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 		return false;
 	}
 
-	if (!EnsureStructuredBuffer(
+	if (!ensureStructuredBufferBatched(
 		mEmissivePrimitiveCdfBuffer,
 		mEmissivePrimitiveCdfBufferStats,
 		emissiveCdf.data(),
@@ -14256,13 +14289,24 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	return true;
 }
 
-bool NRIRenderer::UpdateReprojectionBuffer()
+bool NRIRenderer::UpdateReprojectionBuffer(bool* ioWaitedForWrites)
 {
 	NRIReprojectionData data = {};
 	std::memcpy(data.currentViewToClip, mCurrentViewToClip, sizeof(data.currentViewToClip));
 	std::memcpy(data.previousViewToClip, mPreviousViewToClip, sizeof(data.previousViewToClip));
 	std::memcpy(data.currentWorldToView, mCurrentWorldToView, sizeof(data.currentWorldToView));
 	std::memcpy(data.previousWorldToView, mPreviousWorldToView, sizeof(data.previousWorldToView));
+	if (ioWaitedForWrites != nullptr &&
+		!*ioWaitedForWrites &&
+		StructuredBufferUpdateNeedsWait(
+			mReprojectionBuffer,
+			&data,
+			sizeof(data),
+			sizeof(data)))
+	{
+		WaitForCommandsTracked();
+		*ioWaitedForWrites = true;
+	}
 	if (!EnsureStructuredBuffer(
 		mReprojectionBuffer,
 		mReprojectionBufferStats,
@@ -14270,7 +14314,8 @@ bool NRIRenderer::UpdateReprojectionBuffer()
 		sizeof(data),
 		sizeof(data),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+		NRIComputeShaderResourceAccess(),
+		ioWaitedForWrites != nullptr && *ioWaitedForWrites))
 	{
 		return false;
 	}
@@ -14297,11 +14342,22 @@ bool NRIRenderer::UpdateReprojectionBuffer()
 	return true;
 }
 
-bool NRIRenderer::UpdateVisibleChunkBuffer()
+bool NRIRenderer::UpdateVisibleChunkBuffer(bool* ioWaitedForWrites)
 {
 	const uint32_t defaultVisibleChunkWord = 0u;
 	const void* visibleChunkData = mCurrentVisibleChunkWords.empty() ? (const void*)&defaultVisibleChunkWord : mCurrentVisibleChunkWords.data();
 	const size_t visibleChunkSize = mCurrentVisibleChunkWords.empty() ? sizeof(uint32_t) : mCurrentVisibleChunkWords.size() * sizeof(uint32_t);
+	if (ioWaitedForWrites != nullptr &&
+		!*ioWaitedForWrites &&
+		StructuredBufferUpdateNeedsWait(
+			mVisibleChunkBuffer,
+			visibleChunkData,
+			visibleChunkSize,
+			sizeof(uint32_t)))
+	{
+		WaitForCommandsTracked();
+		*ioWaitedForWrites = true;
+	}
 	if (!EnsureStructuredBuffer(
 		mVisibleChunkBuffer,
 		mVisibleChunkBufferStats,
@@ -14309,7 +14365,8 @@ bool NRIRenderer::UpdateVisibleChunkBuffer()
 		visibleChunkSize,
 		sizeof(uint32_t),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+		NRIComputeShaderResourceAccess(),
+		ioWaitedForWrites != nullptr && *ioWaitedForWrites))
 	{
 		return false;
 	}
@@ -14336,11 +14393,22 @@ bool NRIRenderer::UpdateVisibleChunkBuffer()
 	return true;
 }
 
-bool NRIRenderer::UpdateVisibleFlatPlaneBuffer()
+bool NRIRenderer::UpdateVisibleFlatPlaneBuffer(bool* ioWaitedForWrites)
 {
 	const uint32_t defaultVisibleFlatPlaneWord = 0u;
 	const void* visibleFlatPlaneData = mCurrentVisibleFlatPlaneWords.empty() ? (const void*)&defaultVisibleFlatPlaneWord : mCurrentVisibleFlatPlaneWords.data();
 	const size_t visibleFlatPlaneSize = mCurrentVisibleFlatPlaneWords.empty() ? sizeof(uint32_t) : mCurrentVisibleFlatPlaneWords.size() * sizeof(uint32_t);
+	if (ioWaitedForWrites != nullptr &&
+		!*ioWaitedForWrites &&
+		StructuredBufferUpdateNeedsWait(
+			mVisibleFlatPlaneBuffer,
+			visibleFlatPlaneData,
+			visibleFlatPlaneSize,
+			sizeof(uint32_t)))
+	{
+		WaitForCommandsTracked();
+		*ioWaitedForWrites = true;
+	}
 	if (!EnsureStructuredBuffer(
 		mVisibleFlatPlaneBuffer,
 		mVisibleFlatPlaneBufferStats,
@@ -14348,7 +14416,8 @@ bool NRIRenderer::UpdateVisibleFlatPlaneBuffer()
 		visibleFlatPlaneSize,
 		sizeof(uint32_t),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+		NRIComputeShaderResourceAccess(),
+		ioWaitedForWrites != nullptr && *ioWaitedForWrites))
 	{
 		return false;
 	}
@@ -14520,18 +14589,29 @@ bool NRIRenderer::UpdateSceneDataSet(
 	const char* reason)
 {
 	SetCurrentSceneDataDescriptorsInitialized(false);
+	bool waitedForWrites = false;
+	const auto ensureStructuredBufferBatched = [&](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
+	{
+		if (!waitedForWrites && StructuredBufferUpdateNeedsWait(resource, data, size, stride))
+		{
+			WaitForCommandsTracked();
+			waitedForWrites = true;
+		}
 
-	if (!UpdateReprojectionBuffer())
+		return EnsureStructuredBuffer(resource, stats, data, size, stride, usage, after, waitedForWrites);
+	};
+
+	if (!UpdateReprojectionBuffer(&waitedForWrites))
 	{
 		return false;
 	}
 
-	if (!UpdateVisibleFlatPlaneBuffer())
+	if (!UpdateVisibleFlatPlaneBuffer(&waitedForWrites))
 	{
 		return false;
 	}
 
-	if (!UpdateVisibleChunkBuffer())
+	if (!UpdateVisibleChunkBuffer(&waitedForWrites))
 	{
 		return false;
 	}
@@ -14543,7 +14623,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 
 	mBoundRuntimeLightCount = 0;
 
-	if (!EnsureStructuredBuffer(
+	if (!ensureStructuredBufferBatched(
 		mSceneInstanceBuffer,
 		mSceneInstanceBufferStats,
 		sceneInstances.data(),
@@ -14557,7 +14637,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundSceneInstances = sceneInstances;
 
 	const std::vector<ScenePortalData> scenePortals = BuildScenePortalData(mMapWorld);
-	if (!EnsureStructuredBuffer(
+	if (!ensureStructuredBufferBatched(
 		mPortalBuffer,
 		mPortalBufferStats,
 		scenePortals.data(),
@@ -14577,7 +14657,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	{
 		std::vector<RuntimePointLightGpuData> runtimeLights;
 		BuildRuntimePointLightUpload(runtimeLights);
-		if (!EnsureStructuredBuffer(
+		if (!ensureStructuredBufferBatched(
 			mRuntimeLightBuffer,
 			mRuntimeLightBufferStats,
 			runtimeLights.empty() ? nullptr : runtimeLights.data(),
@@ -14614,7 +14694,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			runtimeLightTileCountY,
 			runtimeLightTileIndexCount,
 			runtimeLightMaxTileOccupancy);
-		if (!EnsureStructuredBuffer(
+		if (!ensureStructuredBufferBatched(
 			mRuntimeLightTileHeaderBuffer,
 			mRuntimeLightTileHeaderBufferStats,
 			runtimeLightTileHeaders.data(),
@@ -14626,7 +14706,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			return false;
 		}
 
-		if (!EnsureStructuredBuffer(
+		if (!ensureStructuredBufferBatched(
 			mRuntimeLightTileIndexBuffer,
 			mRuntimeLightTileIndexBufferStats,
 			runtimeLightTileIndices.data(),
@@ -14660,7 +14740,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		std::vector<float> emissiveCdf;
 		std::vector<EmissivePrimitiveDebugRecord> ignoredEmissiveDebugRecords;
 		BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, ignoredEmissiveDebugRecords);
-		if (!EnsureStructuredBuffer(
+		if (!ensureStructuredBufferBatched(
 			mEmissivePrimitiveHeaderBuffer,
 			mEmissivePrimitiveHeaderBufferStats,
 			&emissiveHeader,
@@ -14672,7 +14752,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			return false;
 		}
 
-		if (!EnsureStructuredBuffer(
+		if (!ensureStructuredBufferBatched(
 			mEmissivePrimitiveBuffer,
 			mEmissivePrimitiveBufferStats,
 			emissivePrimitives.empty() ? nullptr : emissivePrimitives.data(),
@@ -14684,7 +14764,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			return false;
 		}
 
-		if (!EnsureStructuredBuffer(
+		if (!ensureStructuredBufferBatched(
 			mEmissivePrimitiveCdfBuffer,
 			mEmissivePrimitiveCdfBufferStats,
 			emissiveCdf.data(),
@@ -14707,7 +14787,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		SectorLightHeaderGpuData sectorLightHeader = {};
 		std::vector<SectorLightGpuData> sectorLights;
 		BuildSectorLightingUpload(sectorLightHeader, sectorLights);
-		if (!EnsureStructuredBuffer(
+		if (!ensureStructuredBufferBatched(
 			mSectorLightHeaderBuffer,
 			mSectorLightHeaderBufferStats,
 			&sectorLightHeader,
@@ -14719,7 +14799,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			return false;
 		}
 
-		if (!EnsureStructuredBuffer(
+		if (!ensureStructuredBufferBatched(
 			mSectorLightBuffer,
 			mSectorLightBufferStats,
 			sectorLights.empty() ? nullptr : sectorLights.data(),
@@ -16549,7 +16629,7 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 	return true;
 }
 
-bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after)
+bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced)
 {
 	const uint64_t requiredSize = std::max<uint64_t>(size, stride);
 	const bool needsGrowth =
@@ -16568,7 +16648,7 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 	if (needsGrowth)
 	{
 		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
-		if (resource.buffer != nullptr || resource.shaderView != nullptr)
+		if (!writesQuiesced && (resource.buffer != nullptr || resource.shaderView != nullptr))
 		{
 			WaitForCommandsTracked();
 		}
@@ -16615,7 +16695,7 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 
 	if (data != nullptr && size != 0)
 	{
-		if (!needsGrowth)
+		if (!needsGrowth && !writesQuiesced)
 		{
 			// Scene buffers are reused persistent DEVICE_UPLOAD allocations. Fence before
 			// overwriting them so prior queued frames cannot read partially updated data.
@@ -16750,11 +16830,23 @@ bool NRIRenderer::UploadSceneBuffers(
 		gpuPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
 	}
 
+	bool waitedForWrites = false;
+	const auto ensureStructuredBufferBatched = [&](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* bufferData, uint64_t bufferSize, uint32_t bufferStride, nri::BufferUsageBits usageBits, nri::AccessStage afterAccess) -> bool
+	{
+		if (!waitedForWrites && StructuredBufferUpdateNeedsWait(resource, bufferData, bufferSize, bufferStride))
+		{
+			WaitForCommandsTracked();
+			waitedForWrites = true;
+		}
+
+		return EnsureStructuredBuffer(resource, stats, bufferData, bufferSize, bufferStride, usageBits, afterAccess, waitedForWrites);
+	};
+
 	return
-		EnsureStructuredBuffer(vertexBuffer, mVertexBufferStats, geometry.vertices.data(), geometry.vertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
-		EnsureStructuredBuffer(indexBuffer, mIndexBufferStats, geometry.indices.data(), geometry.indices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
-		EnsureStructuredBuffer(primitiveBuffer, mPrimitiveBufferStats, gpuPrimitives.data(), gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
-		EnsureStructuredBuffer(materialBuffer, mMaterialBufferStats, materials.data(), materials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess());
+		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, geometry.vertices.data(), geometry.vertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
+		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, geometry.indices.data(), geometry.indices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, gpuPrimitives.data(), gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
+		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materials.data(), materials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess());
 }
 
 bool NRIRenderer::BuildStaticMapAccelerationStructures()
