@@ -1122,7 +1122,8 @@ private:
 		RuntimeMapMutationCache::ChunkReplacement& replacement,
 		uint32_t& outStaticSceneChunkListIndex,
 		bool& outMaterialDirty,
-		bool& outGeometryDirty);
+		bool& outGeometryDirty,
+		bool& ioWaitedForWrites);
 	bool RebuildResidentStaticMaterialState(const char* reason);
 	bool RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
@@ -1270,7 +1271,6 @@ private:
 	bool CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
 	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced = false);
 	bool UpdateStructuredBufferRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after);
-	bool StreamStructuredBufferRangeUpdate(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage before, nri::AccessStage after);
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
 	void BuildRuntimeLightClusterUpload(
 		std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,

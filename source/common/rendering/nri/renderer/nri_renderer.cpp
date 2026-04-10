@@ -16764,58 +16764,6 @@ bool NRIRenderer::UpdateStructuredBufferRange(NRIBufferResource& resource, uint6
 	return true;
 }
 
-bool NRIRenderer::StreamStructuredBufferRangeUpdate(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage before, nri::AccessStage after)
-{
-	if (resource.buffer == nullptr ||
-		data == nullptr ||
-		size == 0 ||
-		byteOffset > resource.size ||
-		size > resource.size - byteOffset)
-	{
-		return false;
-	}
-
-	if (mFrameBuffer == nullptr ||
-		mFrameBuffer->mCommandBuffer == nullptr ||
-		mFrameBuffer->mStreamerInstance == nullptr)
-	{
-		return UpdateStructuredBufferRange(resource, byteOffset, data, size, after);
-	}
-
-	nri::DataSize dataChunk = { data, size };
-	nri::StreamBufferDataDesc streamDesc = {};
-	streamDesc.dataChunks = &dataChunk;
-	streamDesc.dataChunkNum = 1;
-	streamDesc.placementAlignment = 16;
-	streamDesc.dstBuffer = resource.buffer;
-	streamDesc.dstOffset = byteOffset;
-	mFrameBuffer->mStreamer.StreamBufferData(*mFrameBuffer->mStreamerInstance, streamDesc);
-
-	nri::AccessStage copyDestination = { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
-	nri::BufferBarrierDesc preBarrier = {};
-	preBarrier.buffer = resource.buffer;
-	preBarrier.before = before;
-	preBarrier.after = copyDestination;
-
-	nri::BarrierDesc preBarrierDesc = {};
-	preBarrierDesc.buffers = &preBarrier;
-	preBarrierDesc.bufferNum = 1;
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, preBarrierDesc);
-
-	mFrameBuffer->mStreamer.CmdCopyStreamedData(*mFrameBuffer->mCommandBuffer, *mFrameBuffer->mStreamerInstance);
-
-	nri::BufferBarrierDesc postBarrier = {};
-	postBarrier.buffer = resource.buffer;
-	postBarrier.before = copyDestination;
-	postBarrier.after = after;
-
-	nri::BarrierDesc postBarrierDesc = {};
-	postBarrierDesc.buffers = &postBarrier;
-	postBarrierDesc.bufferNum = 1;
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, postBarrierDesc);
-	return true;
-}
-
 bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage)
 {
 	if (resource.buffer != nullptr)
@@ -17635,6 +17583,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	bool residentStaticSceneChanged = false;
 	bool residentMaterialDirty = false;
 	bool residentGeometryDirty = false;
+	bool residentWritesWaitedFor = false;
 	std::vector<uint32_t> residentMaterialChunkListIndices;
 	std::vector<uint32_t> residentGeometryChunkListIndices;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs = 0.0;
@@ -18136,7 +18085,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement,
 				residentChunkListIndex,
 				residentChunkMaterialDirty,
-				residentChunkGeometryDirty))
+				residentChunkGeometryDirty,
+				residentWritesWaitedFor))
 			{
 				residentStaticSceneChanged = true;
 				mRuntimeMapLastFrame.residentAppliedChunkCount++;
@@ -18744,12 +18694,11 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 			mStaticMapScene.gpuMaterials.data() + atlasChunk.materialOffset);
 
 		if (!textureTableGrew &&
-			!StreamStructuredBufferRangeUpdate(
+			!UpdateStructuredBufferRange(
 				mStaticMaterialBuffer,
 				(uint64_t)atlasChunk.materialOffset * sizeof(nri_scene::MaterialData),
 				remappedGpuMaterials.data(),
 				(uint64_t)atlasChunk.materialCount * sizeof(nri_scene::MaterialData),
-				NRIComputeShaderResourceAccess(),
 				NRIComputeShaderResourceAccess()))
 		{
 			return false;
@@ -18936,7 +18885,8 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	RuntimeMapMutationCache::ChunkReplacement& replacement,
 	uint32_t& outStaticSceneChunkListIndex,
 	bool& outMaterialDirty,
-	bool& outGeometryDirty)
+	bool& outGeometryDirty,
+	bool& ioWaitedForWrites)
 {
 	outStaticSceneChunkListIndex = UINT32_MAX;
 	outMaterialDirty = false;
@@ -19024,6 +18974,12 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		appliedBaseline = replacement.replacementBaseline;
 	}
 
+	if (!ioWaitedForWrites)
+	{
+		WaitForCommandsTracked();
+		ioWaitedForWrites = true;
+	}
+
 	const uint32_t appliedReasonMask = replacement.reasonMask;
 	const bool appliedStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
 	const bool appliedAnimationOnlyRefreshed = replacement.animationOnlyRefreshed;
@@ -19103,12 +19059,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			if (oldMaterialCount > 0)
 			{
 				std::vector<nri_scene::MaterialData> clearedMaterials(oldMaterialCount);
-				if (!StreamStructuredBufferRangeUpdate(
+				if (!UpdateStructuredBufferRange(
 						mStaticMaterialBuffer,
 						(uint64_t)oldMaterialOffset * sizeof(nri_scene::MaterialData),
 						clearedMaterials.data(),
 						(uint64_t)oldMaterialCount * sizeof(nri_scene::MaterialData),
-						NRIComputeShaderResourceAccess(),
 						NRIComputeShaderResourceAccess()))
 				{
 					return false;
@@ -19257,26 +19212,23 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				atlasVertices,
 				atlasIndices,
 				atlasPrimitives);
-			if (!StreamStructuredBufferRangeUpdate(
+			if (!UpdateStructuredBufferRange(
 					mStaticVertexBuffer,
 					(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
 					atlasVertices.data() + nextAtlasChunk.vertexOffset,
 					(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
-					NRIAccelerationStructureBuildInputAccess(),
 					NRIAccelerationStructureBuildInputAccess()) ||
-				!StreamStructuredBufferRangeUpdate(
+				!UpdateStructuredBufferRange(
 					mStaticIndexBuffer,
 					(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
 					atlasIndices.data() + nextAtlasChunk.indexOffset,
 					(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t),
-					NRIAccelerationStructureBuildInputAccess(),
 					NRIAccelerationStructureBuildInputAccess()) ||
-				!StreamStructuredBufferRangeUpdate(
+				!UpdateStructuredBufferRange(
 					mStaticPrimitiveBuffer,
 					(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
 					atlasPrimitives.data() + nextAtlasChunk.primitiveOffset,
 					(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData),
-					NRIComputeShaderResourceAccess(),
 					NRIComputeShaderResourceAccess()))
 			{
 				return false;
