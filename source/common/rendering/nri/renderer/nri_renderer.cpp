@@ -19146,6 +19146,13 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		StaticMapChunkAtlas nextAtlasState = {};
 		StaticMapChunkAtlas::ChunkEntry nextAtlasChunk = {};
 		bool keptGeometrySlices = false;
+		const bool previousAnimatedRefreshSuppressed =
+			hasResidentChunk &&
+			mStaticMapScene.chunks[chunkListIndex].animatedRefreshSuppressed;
+		const uint64_t previousAnimatedGeometrySignature =
+			hasResidentChunk ?
+			mStaticMapScene.chunks[chunkListIndex].animatedGeometrySignature :
+			0;
 		for (;;)
 		{
 			nextAtlasState = mStaticMapChunkAtlas;
@@ -19308,7 +19315,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mutableChunk.animatedMaterialSignature = ComputeAnimatedMaterialSignature(residentSceneView);
 		mutableChunk.animatedGeometrySignature = ComputeAnimatedGeometrySignature(residentSceneView);
 		mutableChunk.hasAnimatedTextureCandidates = ChunkHasAnimatedStaticMapSurfaceCandidates(mMapWorld, mapChunk);
-		mutableChunk.animatedRefreshSuppressed = false;
+		mutableChunk.animatedRefreshSuppressed =
+			previousAnimatedRefreshSuppressed &&
+			mutableChunk.animatedGeometrySignature == previousAnimatedGeometrySignature;
 		mStaticMapScene.lightChunkViews[chunkListIndex] = residentSceneView;
 		outStaticSceneChunkListIndex = chunkListIndex;
 		outMaterialDirty = true;
