@@ -1256,7 +1256,7 @@ private:
 	void DestroyFrameTextures();
 	void DestroySceneBuffers();
 	void DestroyAccelerationStructures();
-	void DestroyStaticMapSceneCache();
+	void DestroyStaticMapSceneCache(const char* reason = nullptr);
 	void DestroyStaticMapSceneResources(StaticMapSceneCache& staticScene, StaticMapSceneResources& staticResources, bool waitForCommands);
 	void DestroyBufferResource(NRIBufferResource& resource);
 	void DestroyAccelerationStructureResource(NRIAccelerationStructureResource& resource);

@@ -12309,7 +12309,7 @@ void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
 	{
 		// Fall back to a full resident-scene rebuild on the next frame if the
 		// targeted material refresh path fails for any reason.
-		DestroyStaticMapSceneCache();
+		DestroyStaticMapSceneCache("material-lighting-refresh-failed");
 		mStaticMapScene = {};
 		mStaticAccelerationBuildSerial = 0;
 		return;
@@ -12649,7 +12649,7 @@ void NRIRenderer::RebuildStartupMutationBaseline()
 		return;
 	}
 
-	DestroyStaticMapSceneCache();
+	DestroyStaticMapSceneCache("startup-mutation-rebaseline");
 	mStaticMapScene = {};
 	mStaticAccelerationBuildSerial = 0;
 	mPreservedStaticMapSky = {};
@@ -15152,7 +15152,7 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 		auto& chunkCache = mStaticMapScene.chunks[chunkListIndex];
 		if (chunkListIndex >= mStaticMapScene.lightChunkViews.size() || chunkCache.chunkIndex >= mMapWorld.chunks.size())
 		{
-			DestroyStaticMapSceneCache();
+			DestroyStaticMapSceneCache("animated-refresh-layout-mismatch");
 			mStaticMapScene = {};
 			mStaticAccelerationBuildSerial = 0;
 			mPreservedStaticMapSky = {};
@@ -15217,7 +15217,7 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 	if (!RebuildResidentStaticMaterialBridgeFromChunks())
 	{
 		mStaticMapScene.animatedGeometryFallbackCount++;
-		DestroyStaticMapSceneCache();
+		DestroyStaticMapSceneCache("animated-refresh-material-bridge-failed");
 		mStaticMapScene = {};
 		mStaticAccelerationBuildSerial = 0;
 		mPreservedStaticMapSky = {};
@@ -15232,7 +15232,7 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 			mStaticMapScene,
 			mStaticMapScene.gpuMaterials))
 	{
-		DestroyStaticMapSceneCache();
+		DestroyStaticMapSceneCache("animated-refresh-upload-failed");
 		mStaticMapScene = {};
 		mStaticAccelerationBuildSerial = 0;
 		mPreservedStaticMapSky = {};
@@ -15257,9 +15257,11 @@ bool NRIRenderer::EnsureStaticMapScene()
 		return false;
 	}
 
+	const char* rebuildReason = nullptr;
 	if (mStaticMapScene.buildSerial != mMapWorld.buildSerial)
 	{
-		DestroyStaticMapSceneCache();
+		rebuildReason = "build-serial-mismatch";
+		DestroyStaticMapSceneCache("ensure-static-scene-build-serial-mismatch");
 		mStaticMapScene = {};
 		mStaticAccelerationBuildSerial = 0;
 		mPreservedStaticMapSky = {};
@@ -15277,6 +15279,29 @@ bool NRIRenderer::EnsureStaticMapScene()
 		}
 		mStaticMapScene.reuseCount++;
 		return true;
+	}
+
+	if (rebuildReason == nullptr)
+	{
+		rebuildReason =
+			!mStaticMapScene.valid ? "scene-invalid" :
+			!mStaticMapScene.texturesResident ? "textures-not-resident" :
+			!mStaticMapScene.buffersResident ? "buffers-not-resident" :
+			!mStaticMapScene.accelerationResident ? "acceleration-not-resident" :
+			"resident-rebuild";
+	}
+	if (ShouldTracePtPerf())
+	{
+		Printf("NRI PT static scene trace: event=rebuild reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",
+			rebuildReason,
+			mFrameIndex,
+			YesNo(mStaticMapScene.valid),
+			YesNo(mStaticMapScene.texturesResident),
+			YesNo(mStaticMapScene.buffersResident),
+			YesNo(mStaticMapScene.accelerationResident),
+			(unsigned long long)mStaticMapScene.buildSerial,
+			(unsigned long long)mMapWorld.buildSerial,
+			(uint32_t)mStaticMapScene.chunks.size());
 	}
 
 	if (!BuildStaticMapSceneCache(
@@ -17905,7 +17930,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		}
 		else
 		{
-			DestroyStaticMapSceneCache();
+			DestroyStaticMapSceneCache("runtime-mutation-resident-refresh-failed");
 			mStaticMapScene = {};
 			mStaticAccelerationBuildSerial = 0;
 			mPreservedStaticMapSky = {};
@@ -21122,8 +21147,22 @@ void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScen
 	staticResources = {};
 }
 
-void NRIRenderer::DestroyStaticMapSceneCache()
+void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 {
+	if (ShouldTracePtPerf())
+	{
+		Printf("NRI PT static scene trace: event=destroy reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",
+			reason != nullptr ? reason : "unspecified",
+			mFrameIndex,
+			YesNo(mStaticMapScene.valid),
+			YesNo(mStaticMapScene.texturesResident),
+			YesNo(mStaticMapScene.buffersResident),
+			YesNo(mStaticMapScene.accelerationResident),
+			(unsigned long long)mStaticMapScene.buildSerial,
+			(unsigned long long)mMapWorld.buildSerial,
+			(uint32_t)mStaticMapScene.chunks.size());
+	}
+
 	ResetPersistentDynamicEmissiveCache();
 	const bool hasResidentStaticSceneResources =
 		!mStaticMapScene.chunks.empty() ||
