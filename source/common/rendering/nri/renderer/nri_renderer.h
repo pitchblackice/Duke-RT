@@ -897,6 +897,7 @@ private:
 		uint32_t residentAppliedChunkCount = 0;
 		uint32_t residentGeometryChunkCount = 0;
 		uint32_t residentMaterialChunkCount = 0;
+		uint32_t residentAtlasGrowCount = 0;
 		uint32_t residentFallbackChunkCount = 0;
 		uint32_t rebuiltChunkCount = 0;
 		uint32_t heldChunkCount = 0;
@@ -1057,6 +1058,7 @@ private:
 	uint32_t AllocateChunkAtlasRange(uint32_t count, uint32_t capacity, std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t& cursor) const;
 	void ReleaseChunkAtlasRange(std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t offset, uint32_t count) const;
 	bool BuildStaticMapChunkAtlasLayout(const StaticMapSceneCache& staticScene, StaticMapChunkAtlas& outAtlas) const;
+	bool EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas);
 	bool RebuildResidentStaticCpuAtlasMirror(StaticMapSceneCache& staticScene, const StaticMapChunkAtlas& atlas) const;
 	bool RebuildResidentStaticMaterialBridgeFromChunks();
 	void UploadChunkGeometryToAtlas(
