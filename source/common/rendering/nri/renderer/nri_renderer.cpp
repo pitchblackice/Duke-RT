@@ -3725,10 +3725,6 @@ namespace
 		{
 			return { NRIPresentRouteKind::DenoisedRaw, "denoised_raw", "RawPresent", "debug-nrd" };
 		}
-		if (debugMode >= 21u && debugMode <= 22u)
-		{
-			return { NRIPresentRouteKind::ShadowFinal, "shadow_debug", "Final", "debug-shadow" };
-		}
 		if (IsFinalShaderDebugMode(debugMode))
 		{
 			return { NRIPresentRouteKind::FinalDebug, "final_debug", "Final", "debug-final" };
