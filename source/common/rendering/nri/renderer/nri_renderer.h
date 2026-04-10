@@ -867,6 +867,7 @@ private:
 			uint32_t traceCount = 0;
 			bool active = false;
 			bool valid = false;
+			bool residentAuthoritative = false;
 			bool sectorDirty = false;
 			bool dragged = false;
 			bool blindSpot = false;

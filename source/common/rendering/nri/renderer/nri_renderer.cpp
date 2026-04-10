@@ -15471,6 +15471,7 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 		replacement.traceCount = 0;
 		replacement.surfaceCount = 0;
 		replacement.triangleCount = 0;
+		replacement.residentAuthoritative = true;
 		replacement.sceneView = {};
 		replacement.geometry = {};
 		replacement.materialBridge = {};
@@ -17507,12 +17508,30 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		}
 
 		replacement.liveSignature = analysis.signature;
-		replacement.reasonMask = analysis.reasonMask;
-		replacement.sectionDirtyCount = analysis.sectionDirtyCount;
-		replacement.sectorDirty = analysis.sectorDirty;
-		replacement.dragged = analysis.dragged;
+		uint32_t normalizedReasonMask = analysis.reasonMask;
+		uint32_t normalizedSectionDirtyCount = analysis.sectionDirtyCount;
+		bool normalizedSectorDirty = analysis.sectorDirty;
+		bool normalizedDragged = analysis.dragged;
+		const uint32_t residentNoiseReasonMask =
+			nri_scene::PTMapChunkMutationReason_SectorDirty |
+			nri_scene::PTMapChunkMutationReason_SectionDirty |
+			nri_scene::PTMapChunkMutationReason_Dragged;
+		if (replacement.residentAuthoritative &&
+			!analysis.signatureChanged &&
+			analysis.signature == replacement.baselineSignature &&
+			(normalizedReasonMask & ~residentNoiseReasonMask) == 0)
+		{
+			normalizedReasonMask = nri_scene::PTMapChunkMutationReason_None;
+			normalizedSectionDirtyCount = 0;
+			normalizedSectorDirty = false;
+			normalizedDragged = false;
+		}
+		replacement.reasonMask = normalizedReasonMask;
+		replacement.sectionDirtyCount = normalizedSectionDirtyCount;
+		replacement.sectorDirty = normalizedSectorDirty;
+		replacement.dragged = normalizedDragged;
 		replacement.staticAnimatedReplacement = false;
-		replacement.blindSpot = analysis.reasonMask != nri_scene::PTMapChunkMutationReason_None && !analysis.signatureChanged;
+		replacement.blindSpot = normalizedReasonMask != nri_scene::PTMapChunkMutationReason_None && !analysis.signatureChanged;
 		// Section dirty alone is too broad for PT runtime replacement because
 		// the raster path can mark transient warped sections dirty during draw
 		// prep without producing a stable gameplay map mutation. Keep explicit
@@ -17520,46 +17539,49 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		// dragged-sector ownership bit force perpetual rebuilds once PT already
 		// has a valid replacement baseline for the chunk.
 		const bool forceTopologyInvalidation =
-			(analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0;
-		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0)
+			(normalizedReasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0;
+		if ((normalizedReasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0)
 		{
 			mRuntimeMapLastFrame.sectorGeometryChunkCount++;
 		}
-		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0)
+		if ((normalizedReasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0)
 		{
 			mRuntimeMapLastFrame.sectorMaterialChunkCount++;
 		}
-		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_WallGeometry) != 0)
+		if ((normalizedReasonMask & nri_scene::PTMapChunkMutationReason_WallGeometry) != 0)
 		{
 			mRuntimeMapLastFrame.wallGeometryChunkCount++;
 		}
-		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0)
+		if ((normalizedReasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0)
 		{
 			mRuntimeMapLastFrame.wallMaterialChunkCount++;
 		}
-		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0)
+		if ((normalizedReasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0)
 		{
 			mRuntimeMapLastFrame.sectorDirtyChunkCount++;
 		}
-		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_SectionDirty) != 0)
+		if ((normalizedReasonMask & nri_scene::PTMapChunkMutationReason_SectionDirty) != 0)
 		{
 			mRuntimeMapLastFrame.sectionDirtyChunkCount++;
 		}
-		if ((analysis.reasonMask & nri_scene::PTMapChunkMutationReason_Dragged) != 0)
+		if ((normalizedReasonMask & nri_scene::PTMapChunkMutationReason_Dragged) != 0)
 		{
 			mRuntimeMapLastFrame.draggedChunkCount++;
 		}
 
 		const bool useStaticAnimatedReplacement =
-			analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None &&
+			normalizedReasonMask == nri_scene::PTMapChunkMutationReason_None &&
 			isVisibleSuppressedStaticAnimatedChunk(mapChunk.chunkIndex);
-		if (analysis.reasonMask == nri_scene::PTMapChunkMutationReason_None && !useStaticAnimatedReplacement)
+		if (normalizedReasonMask == nri_scene::PTMapChunkMutationReason_None && !useStaticAnimatedReplacement)
 		{
 			replacement.active = false;
 			replacement.excludeStaticChunk = false;
 			replacement.staticAnimatedReplacement = false;
 			replacement.animationOnlyRefreshed = false;
-			replacement.animatedMaterialSignature = 0;
+			if (!replacement.residentAuthoritative)
+			{
+				replacement.animatedMaterialSignature = 0;
+			}
 			replacement.stableMutationFrameCount = 0;
 			replacement.lightIdentityOverrides.Clear();
 			replacement.sceneView = {};
@@ -17577,10 +17599,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 		}
 
-		const bool materialOnlyReplacement = IsMaterialOnlyChunkReplacement(analysis.reasonMask);
+		const bool materialOnlyReplacement = IsMaterialOnlyChunkReplacement(normalizedReasonMask);
 		nri_scene::PTMapChunkMutationAnalysis replacementDelta = {};
+		const bool haveReplacementBaseline = replacement.valid || replacement.residentAuthoritative;
 		const bool analyzedReplacementDelta =
-			replacement.valid &&
+			haveReplacementBaseline &&
 			nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement.replacementBaseline, replacementDelta);
 		const uint32_t structuralReasonMask =
 			nri_scene::PTMapChunkMutationReason_SectorGeometry |
@@ -17599,7 +17622,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacementDelta.reasonMask & ~nri_scene::PTMapChunkMutationReason_Dragged;
 		const bool replacementViewChanged =
 			(previousReasonMask & replacementViewReasonMask) !=
-			(analysis.reasonMask & replacementViewReasonMask);
+			(normalizedReasonMask & replacementViewReasonMask);
 		replacement.animationOnlyRefreshed = false;
 		nri_scene::PTMapWorld liveWorld = {};
 		nri_scene::SceneView liveChunkView;
@@ -17620,14 +17643,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], liveChunkView);
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
-				RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
+				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
 			if (replacement.blindSpot && replacement.dragged)
 			{
 				NudgeBlindSpotReplacementFlats(liveChunkView);
 			}
 			if (materialOnlyReplacement && !exclusiveMaterialOnlyReplacement)
 			{
-				FilterMaterialOnlyReplacementSceneView(liveChunkView, analysis.reasonMask);
+				FilterMaterialOnlyReplacementSceneView(liveChunkView, normalizedReasonMask);
 			}
 
 			havePreparedLiveChunkView = true;
@@ -17637,7 +17660,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
-				RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
+				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
 			const bool excludeStaticChunk =
 				useStaticAnimatedReplacement ||
 				!materialOnlyReplacement ||
@@ -17688,7 +17711,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
-				RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
+				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
 			const bool excludeStaticChunk =
 				useStaticAnimatedReplacement ||
 				!materialOnlyReplacement ||
@@ -17717,12 +17740,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		};
 		const bool exclusiveMaterialOnlyReplacement =
 			materialOnlyReplacement &&
-			RequiresExclusiveMaterialOnlyChunkReplacement(analysis.reasonMask);
+			RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
 		const bool desiredExcludeStaticChunk =
 			useStaticAnimatedReplacement ||
 			!materialOnlyReplacement ||
 			exclusiveMaterialOnlyReplacement;
-		const bool structuralInvalid = !replacement.valid;
+		const bool structuralInvalid = !replacement.valid && !replacement.residentAuthoritative;
 		const bool structuralReplacementDelta =
 			!analyzedReplacementDelta ||
 			(replacementDelta.reasonMask & structuralReasonMask) != 0;
@@ -18900,8 +18923,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	replacement.staticAnimatedReplacement = false;
 	replacement.active = false;
 	replacement.valid = false;
+	replacement.residentAuthoritative = true;
 	replacement.animationOnlyRefreshed = false;
-	replacement.animatedMaterialSignature = 0;
+	replacement.animatedMaterialSignature = ComputeAnimatedMaterialSignature(residentSceneView);
 	replacement.surfaceCount = 0;
 	replacement.triangleCount = 0;
 	replacement.lightIdentityOverrides.Clear();
