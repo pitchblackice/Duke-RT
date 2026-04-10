@@ -18072,6 +18072,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			const bool refreshedAnimatedChunk = [&]()
 			{
 				const bool forceReplacementMaterialRefresh =
+					useOverlayReplacementState &&
 					analyzedReplacementDelta &&
 					replacementRefreshReasonMask != nri_scene::PTMapChunkMutationReason_None;
 				if (!prepareLiveChunkView())
