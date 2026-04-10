@@ -4868,6 +4868,36 @@ namespace
 		return ShouldRunAppTaa(kind) || kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR;
 	}
 
+	static const char* GetTemporalJitterModeName(NRIMainUpscalerKind kind, bool guiCaptureActive)
+	{
+		if (guiCaptureActive)
+		{
+			return "off-gui-capture";
+		}
+
+		if (kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR)
+		{
+			return "upscaler";
+		}
+
+		return ShouldRunAppTaa(kind) ? "taa" : "off";
+	}
+
+	static uint32_t GetTemporalJitterPhaseCount(NRIMainUpscalerKind kind, nri::UpscalerMode mode, bool guiCaptureActive)
+	{
+		if (guiCaptureActive)
+		{
+			return 0u;
+		}
+
+		if (kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR)
+		{
+			return GetUpscalerJitterPhaseCount(mode);
+		}
+
+		return NRI_TAA_JITTER_PHASE_COUNT;
+	}
+
 	static float GetHaltonSample(uint32_t index, uint32_t base)
 	{
 		float inverseBase = 1.0f / (float)base;
@@ -8188,8 +8218,6 @@ void NRIRenderer::PrintStatus() const
 	const bool runAppTaa = ShouldRunAppTaa(resolvedMain);
 	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
 	const float resolvedRenderScale = ResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
-	const bool expectsUpscalerJitter = resolvedMain == NRIMainUpscalerKind::DLSR || resolvedMain == NRIMainUpscalerKind::DLRR;
-	const uint32_t expectedJitterPhases = expectsUpscalerJitter ? GetUpscalerJitterPhaseCount(resolvedUpscalerMode) : NRI_TAA_JITTER_PHASE_COUNT;
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	const uint32_t nrdMaxFrames = ClampNrdHistoryFrameCount((int)nri_nrdmaxframes);
 	const uint32_t nrdFastFrames = ClampNrdFastFrameCount((int)nri_nrdfastframes, nrdMaxFrames);
@@ -8459,8 +8487,8 @@ void NRIRenderer::PrintStatus() const
 		mRenderHeight,
 		mOutputWidth,
 		mOutputHeight,
-		expectsUpscalerJitter ? "upscaler" : (ShouldRunAppTaa(resolvedMain) ? "taa" : "off"),
-		expectedJitterPhases);
+		GetTemporalJitterModeName(resolvedMain, mGuiCaptureActive),
+		GetTemporalJitterPhaseCount(resolvedMain, resolvedUpscalerMode, mGuiCaptureActive));
 	Printf("NRI PT output shell: family=%s sr_input=%ux%u rr_input=%ux%u guides=%ux%u vendor=%ux%u post_output=%ux%u post=%s active=%s last_reset_reason=%s\n",
 		GetUpscalerFamilyName(resolvedMain, runAppTaa),
 		srInput.width,
@@ -14172,8 +14200,8 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		NRIFrameGenerationContext::GetNriFormatName(finalFormat),
 		NRIFrameGenerationContext::GetNriFormatName(presentContract.resolvedTextureFormat),
 		NRIFrameGenerationContext::GetNriFormatName(activeTargetFormat),
-		(mainUpscalerKind == NRIMainUpscalerKind::DLSR || mainUpscalerKind == NRIMainUpscalerKind::DLRR) ? "upscaler" : (ShouldRunAppTaa(mainUpscalerKind) ? "taa" : "off"),
-		(mainUpscalerKind == NRIMainUpscalerKind::DLSR || mainUpscalerKind == NRIMainUpscalerKind::DLRR) ? GetUpscalerJitterPhaseCount(resolvedUpscalerMode) : NRI_TAA_JITTER_PHASE_COUNT);
+		GetTemporalJitterModeName(mainUpscalerKind, mGuiCaptureActive),
+		GetTemporalJitterPhaseCount(mainUpscalerKind, resolvedUpscalerMode, mGuiCaptureActive));
 
 	const nri::Format colorFormat = nri::Format::RGBA16_SFLOAT;
 	const nri::Format normalRoughnessFormat = nri::Format::R10_G10_B10_A2_UNORM;
@@ -18214,7 +18242,10 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	NRITraceSceneConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
-	const bool useTemporalJitter = !nri_ptbootstrap && ShouldUseTemporalJitter(ResolveMainUpscalerKind(false));
+	const bool useTemporalJitter =
+		!nri_ptbootstrap &&
+		!mGuiCaptureActive &&
+		ShouldUseTemporalJitter(ResolveMainUpscalerKind(false));
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
@@ -18692,6 +18723,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 	const NRIMainUpscalerKind mainKind = ResolveMainUpscalerKind(true);
 	const NRIPostSharpenKind postSharpenKind = ResolvePostSharpenKind(true);
 	const bool runAppTaa = ShouldRunAppTaa(mainKind);
+	const bool useAppTaaJitter = runAppTaa && !mGuiCaptureActive;
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::TraceTransparentOutput);
 	const FrameTextureSlot vendorSourceSlot =
 		mainKind == NRIMainUpscalerKind::DLRR ? FrameTextureSlot::RrInput :
@@ -18708,7 +18740,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		constants.FrameIndex = mFrameIndex;
 		constants.Flags =
 			(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
-			(runAppTaa ? NRI_FLAG_USE_JITTER : 0u);
+			(useAppTaaJitter ? NRI_FLAG_USE_JITTER : 0u);
 		constants.Exposure = GetTemporalExposure(mFrameBuffer->GetPathTracingOutputPolicy());
 
 		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
@@ -19059,7 +19091,7 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 		mCurrentTanHalfFovY = tanHalfFovX * ((float)mRenderHeight / std::max(1.0f, (float)mRenderWidth));
 	}
 	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
-	if (!nri_ptbootstrap && ShouldUseTemporalJitter(resolvedMainUpscaler))
+	if (!nri_ptbootstrap && !mGuiCaptureActive && ShouldUseTemporalJitter(resolvedMainUpscaler))
 	{
 		ComputeTemporalJitter(mFrameIndex, mCurrentJitter);
 	}
