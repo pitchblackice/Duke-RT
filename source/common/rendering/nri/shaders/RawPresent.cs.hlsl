@@ -45,6 +45,11 @@ bool UseRelaxDenoiser()
 	return gPresentConstants.DenoiserMode == 1u;
 }
 
+bool UseSplitShadowDenoiser()
+{
+	return (gPresentConstants.Flags & NRI_PRESENT_FLAG_SPLIT_SHADOW_DENOISER) != 0u;
+}
+
 float3 UnpackDebugRadiance(float4 packed)
 {
 	return UseRelaxDenoiser() ? RELAX_BackEnd_UnpackRadiance(packed).rgb : REBLUR_BackEnd_UnpackRadianceAndNormHitDist(packed).rgb;
@@ -107,6 +112,51 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const float mapped = saturate(log2(1.0 + max(hitDistance, 0.0)) / 12.0);
 			color = mapped.xxx;
 		}
+	}
+	else
+	if (gPresentConstants.DebugMode == 18u)
+	{
+		const float metalness = saturate(gInputTexture.Load(int3(samplePos, 0)).a);
+		color = metalness.xxx;
+	}
+	else
+	if (gPresentConstants.DebugMode == 19u)
+	{
+		float materialID = 0.0;
+		const float roughness = NRD_FrontEnd_UnpackNormalAndRoughness(gInputTexture.Load(int3(samplePos, 0)), materialID).w;
+		color = saturate(roughness).xxx;
+	}
+	else
+	if (gPresentConstants.DebugMode == 21u)
+	{
+		if (!UseSplitShadowDenoiser())
+		{
+			color = float3(1.0, 0.0, 1.0);
+		}
+		else
+		{
+			const float penumbra = max(gInputTexture.Load(int3(samplePos, 0)).x, 0.0);
+			const float mapped = saturate(log2(1.0 + penumbra) / 8.0);
+			color = mapped.xxx;
+		}
+	}
+	else
+	if (gPresentConstants.DebugMode == 22u)
+	{
+		if (!UseSplitShadowDenoiser())
+		{
+			color = float3(1.0, 0.0, 1.0);
+		}
+		else
+		{
+			const float rawShadow = saturate(gInputTexture.Load(int3(samplePos, 0)).y);
+			color = rawShadow.xxx;
+		}
+	}
+	else
+	if (gPresentConstants.DebugMode == 24u || gPresentConstants.DebugMode == 25u)
+	{
+		color = VisualizeHdrProbe(gInputTexture.Load(int3(samplePos, 0)).rgb);
 	}
 	else
 	if (gPresentConstants.DebugMode == 34u)

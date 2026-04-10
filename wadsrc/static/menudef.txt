@@ -1263,7 +1263,7 @@ OptionMenu "NRIOptions" protected
 	StaticText "----------------"
 	StaticText "Debug / Inspection"
 	Option "PT Debug View",						"nri_ptdebugmenu",				"NRIPTDebug"
-	Slider "PT Debug Index",					"nri_ptdebugmenu",				0, 25, 1, 0
+	Slider "PT Debug Index",					"nri_ptdebugmenu",				0, 24, 1, 0
 	StaticText ""
 
 	StaticText "Commands"
@@ -1891,16 +1891,15 @@ OptionValue NRIPTDebug
 	13, "Roughness"
 	14, "Raw Penumbra"
 	15, "Raw Shadow"
-	16, "Denoised Shadow"
-	17, "Direct Lighting"
-	18, "Direct Emission"
-	19, "Analytic Direct"
-	20, "Emissive Tags"
-	21, "Emissive Direct"
-	22, "Sector Ambient"
-	23, "Emissive Visibility"
-	24, "TraceTransparent Output"
-	25, "Pre-Exposed Input"
+	16, "Direct Lighting"
+	17, "Direct Emission"
+	18, "Analytic Direct"
+	19, "Emissive Tags"
+	20, "Emissive Direct"
+	21, "Sector Ambient"
+	22, "Emissive Visibility"
+	23, "TraceTransparent Output"
+	24, "Pre-Exposed Input"
 }
 
 OptionValue NRIPTBootstrapMode

@@ -43,7 +43,7 @@ static constexpr int kPtDebugMenuModes[] = {
 	0, 1, 2, 3, 4, 5,
 	9, 10, 11, 12,
 	16, 17, 18, 19,
-	21, 22, 23, 24, 25,
+	21, 22, 24, 25,
 	26, 27, 28, 29,
 	33, 34, 45
 };
@@ -2655,6 +2655,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
 	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
 	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
+	constexpr uint32_t NRI_PRESENT_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
 	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_INFO_AVAILABLE = 0x1u;
 	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_HDR_SUPPORTED = 0x2u;
 	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE = 0x4u;
@@ -3569,7 +3570,7 @@ namespace
 
 	static bool IsFinalShaderDebugMode(uint32_t debugMode)
 	{
-		return debugMode == 18u || debugMode == 19u || debugMode == 24u || debugMode == 25u;
+		return false;
 	}
 
 	static bool IsRawTraceDebugMode(uint32_t debugMode)
@@ -3577,6 +3578,10 @@ namespace
 		return
 			(debugMode >= 1u && debugMode <= 5u) ||
 			(debugMode >= 10u && debugMode <= 12u) ||
+			debugMode == 18u ||
+			debugMode == 19u ||
+			(debugMode >= 21u && debugMode <= 22u) ||
+			(debugMode >= 24u && debugMode <= 25u) ||
 			(debugMode >= NRI_PTDEBUG_ANALYTIC_DIRECT && debugMode <= NRI_PTDEBUG_SECTOR_AMBIENT) ||
 			debugMode == NRI_PTDEBUG_EMISSIVE_SAMPLE_VISIBILITY;
 	}
@@ -3720,7 +3725,7 @@ namespace
 		{
 			return { NRIPresentRouteKind::DenoisedRaw, "denoised_raw", "RawPresent", "debug-nrd" };
 		}
-		if (debugMode >= 21u && debugMode <= 23u)
+		if (debugMode >= 21u && debugMode <= 22u)
 		{
 			return { NRIPresentRouteKind::ShadowFinal, "shadow_debug", "Final", "debug-shadow" };
 		}
@@ -17885,13 +17890,14 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const bool useShadowDebugPresent = presentRoute.kind == NRIPresentRouteKind::ShadowFinal;
 	const bool useFinalDebugPresent = presentRoute.kind == NRIPresentRouteKind::FinalDebug || useShadowDebugPresent;
 	const bool rawTraceDirectPresent = presentRoute.kind == NRIPresentRouteKind::RawTraceDebug;
+	const bool useSplitShadowDebugProbe = rawTraceDirectPresent && ptDebugMode >= 21 && ptDebugMode <= 22;
 	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
 	mUseUpscaledInFinal = false;
 	mUseDenoisedCompositionInputs = false;
 	const bool directionalLightShadowEnabled = mDirectionalLightState.enabled && mDirectionalLightState.shadow;
-	mUseSplitShadowDenoiser = directionalLightShadowEnabled && (useShadowDebugPresent || (useCompositionPath && nri_denoise));
+	mUseSplitShadowDenoiser = directionalLightShadowEnabled && (useShadowDebugPresent || useSplitShadowDebugProbe || (useCompositionPath && nri_denoise));
 
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
@@ -18124,19 +18130,40 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		}
 
 		FrameTextureSlot rawPresentSlot = FrameTextureSlot::UnfilteredDiffuse;
+		FrameTextureSlot rawPresentSecondarySlot = FrameTextureSlot::Count;
+		FrameTextureSlot rawPresentTertiarySlot = FrameTextureSlot::Count;
 		if (ptDebugMode == 11 || ptDebugMode == 12)
 		{
 			rawPresentSlot = FrameTextureSlot::UnfilteredSpecular;
 		}
+		else if (ptDebugMode == 18)
+		{
+			rawPresentSlot = FrameTextureSlot::BaseColorMetalness;
+		}
+		else if (ptDebugMode == 19)
+		{
+			rawPresentSlot = FrameTextureSlot::NormalRoughness;
+		}
+		else if (ptDebugMode == 21 || ptDebugMode == 22)
+		{
+			rawPresentSlot = FrameTextureSlot::UnfilteredPenumbra;
+		}
+		else if (ptDebugMode == 24)
+		{
+			rawPresentSlot = FrameTextureSlot::DirectLighting;
+		}
+		else if (ptDebugMode == 25)
+		{
+			rawPresentSlot = FrameTextureSlot::DirectEmission;
+		}
 
 		if (ptDebugMode == 12)
 		{
-			if (!DispatchRawPresent(rawPresentSlot, FrameTextureSlot::ViewZ, FrameTextureSlot::NormalRoughness))
-			{
-				return false;
-			}
+			rawPresentSecondarySlot = FrameTextureSlot::ViewZ;
+			rawPresentTertiarySlot = FrameTextureSlot::NormalRoughness;
 		}
-		else if (!DispatchRawPresent(rawPresentSlot))
+
+		if (!DispatchRawPresent(rawPresentSlot, rawPresentSecondarySlot, rawPresentTertiarySlot))
 		{
 			return false;
 		}
@@ -18554,6 +18581,10 @@ bool NRIRenderer::DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlo
 	if (addSecondary)
 	{
 		constants.Flags |= NRI_FLAG_RAW_PRESENT_ADD_SECONDARY;
+	}
+	if (mUseSplitShadowDenoiser)
+	{
+		constants.Flags |= NRI_PRESENT_FLAG_SPLIT_SHADOW_DENOISER;
 	}
 
 	mFrameBuffer->TransitionTexture(input, NRIComputeShaderResourceState());
