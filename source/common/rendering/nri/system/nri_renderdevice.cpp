@@ -4141,6 +4141,15 @@ void NRIRenderDevice::NotifyPathTracingCameraCut(const char* reason)
 	}
 }
 
+void NRIRenderDevice::SetPathTracingGuiCaptureState(bool active)
+{
+	mPathTracingGuiCaptureActive = active;
+	if (mRenderer != nullptr)
+	{
+		mRenderer->SetGuiCaptureState(active);
+	}
+}
+
 bool NRIRenderDevice::SpawnPathTracingPointLight(float red, float green, float blue, float intensity, float radius, float offset, uint32_t& outId)
 {
 	if (mRenderer == nullptr)

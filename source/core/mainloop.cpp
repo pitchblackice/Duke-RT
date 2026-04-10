@@ -613,7 +613,18 @@ CVAR(String, drawtile, "", 0)	// debug stuff. Draws the tile with the given numb
 
 void Display()
 {
-	if (screen == nullptr || (!AppActive && (screen->IsFullscreen() || !vid_activeinbackground)))
+	if (screen == nullptr)
+	{
+		perfDisplayTraceStats.skippedInactive = true;
+		return;
+	}
+
+	const bool pathTracingGuiCaptureActive =
+		gamestate == GS_LEVEL &&
+		(M_Active() || System_WantGuiCapture());
+	screen->SetPathTracingGuiCaptureState(pathTracingGuiCaptureActive);
+
+	if (!AppActive && (screen->IsFullscreen() || !vid_activeinbackground))
 	{
 		perfDisplayTraceStats.skippedInactive = true;
 		return;

@@ -7523,6 +7523,22 @@ void NRIRenderer::NotifyCameraCut(const char* reason)
 	RequestHistoryReset((reason != nullptr && *reason != '\0') ? reason : "camera-cut", true, false);
 }
 
+void NRIRenderer::SetGuiCaptureState(bool active)
+{
+	if (mGuiCaptureActive == active)
+	{
+		return;
+	}
+
+	mGuiCaptureActive = active;
+	if (ShouldEmitTemporalTraceLogs())
+	{
+		Printf("NRI PT gui capture: frame=%u active=%s\n",
+			mFrameIndex,
+			mGuiCaptureActive ? "yes" : "no");
+	}
+}
+
 void NRIRenderer::RequestHistoryReset(const char* reason, bool clearPreviousCameraState, bool clearRuntimeChunkTranslationHistory)
 {
 	ArmTemporalTraceBudget(reason);
@@ -8848,13 +8864,14 @@ void NRIRenderer::PrintTemporalStatus() const
 	const FrameTextureSlot presentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
 	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
-	Printf("NRI PT temporal: debug=%d requested_main=%s resolved_main=%s requested_post=%s resolved_post=%s taa=%s last_debug=%d last_main=%s last_post=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
+	Printf("NRI PT temporal: debug=%d requested_main=%s resolved_main=%s requested_post=%s resolved_post=%s taa=%s gui_capture=%s last_debug=%d last_main=%s last_post=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
 		(int)nri_ptdebug,
 		GetMainUpscalerName(requestedMain),
 		GetMainUpscalerName(resolvedMain),
 		GetPostSharpenName(requestedPost),
 		GetPostSharpenName(resolvedPost),
 		nri_pttaa ? "on" : "off",
+		mGuiCaptureActive ? "yes" : "no",
 		mLastDebugMode,
 		GetMainUpscalerName(mLastTemporalHistoryMainUpscaler),
 		GetPostSharpenName(mLastTemporalPostSharpen),
@@ -8917,13 +8934,14 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
 	const NRITextureResource& primary = GetFrameTexture(primarySlot);
 	const NRITextureResource& secondary = secondarySlot == FrameTextureSlot::Count ? GetFrameTexture(mHistoryOutputSlot) : GetFrameTexture(secondarySlot);
-	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s domain=pre_exposed_hdr exposure=%.3f reset=%s reset_reason=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
+	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s gui_capture=%s domain=pre_exposed_hdr exposure=%.3f reset=%s reset_reason=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
 		stage != nullptr ? stage : "unknown",
 		mFrameIndex,
 		(int)nri_ptdebug,
 		GetMainUpscalerName(resolvedMainUpscaler),
 		GetPostSharpenName(resolvedPostSharpen),
 		runAppTaa ? "yes" : "no",
+		mGuiCaptureActive ? "yes" : "no",
 		GetTemporalExposure(mFrameBuffer->GetPathTracingOutputPolicy()),
 		mResetHistory ? "yes" : "no",
 		mLastHistoryResetReason.c_str(),

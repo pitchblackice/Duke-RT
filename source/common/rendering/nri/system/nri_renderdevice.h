@@ -78,6 +78,7 @@ public:
 	void PrintPathTracingBuffers() const;
 	void ResetPathTracingHistory();
 	void NotifyPathTracingCameraCut(const char* reason) override;
+	void SetPathTracingGuiCaptureState(bool active) override;
 	bool SpawnPathTracingPointLight(float red, float green, float blue, float intensity, float radius, float offset, uint32_t& outId);
 	bool RemovePathTracingPointLight(uint32_t id);
 	void ClearPathTracingPointLights();
@@ -358,6 +359,7 @@ private:
 	bool mHasPresentedSwapChainFrame = false;
 	bool mHasSwapChainDisplayDesc = false;
 	bool mFrameGenerationUiTargetActive = false;
+	bool mPathTracingGuiCaptureActive = false;
 	uint32_t mCurrentSwapChainImage = 0;
 	uint32_t mCurrentQueuedFrameIndex = 0;
 	uint32_t mAcquireSemaphoreIndex = 0;

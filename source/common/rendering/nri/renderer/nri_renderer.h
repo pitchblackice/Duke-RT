@@ -301,6 +301,7 @@ public:
 	bool PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
 	void ResetHistory();
 	void NotifyCameraCut(const char* reason);
+	void SetGuiCaptureState(bool active);
 	void PrintStatus() const;
 	void PrintSceneBufferStatus() const;
 	void PrintSceneLightDump(float radius, uint32_t limit) const;
@@ -1336,6 +1337,7 @@ private:
 	bool mSceneTextureLimitLogPrinted = false;
 	bool mHasDirectionalLightState = false;
 	bool mPathTracingSupported = true;
+	bool mGuiCaptureActive = false;
 	bool mHasOutputPolicyState = false;
 	bool mHasRuntimeLinkTraceState = false;
 	SurfaceProbeFrameState mSurfaceProbeFrame = {};
