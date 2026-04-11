@@ -272,6 +272,7 @@ void G_BuildTiccmd(ticcmd_t* cmd)
 //==========================================================================
 bool newGameStarted;
 static bool gPendingPathTracingLevelPreload = false;
+static uint64_t gLevelTransitionSerial = 0;
 
 static void CancelPendingPathTracingLevelPreload()
 {
@@ -279,6 +280,53 @@ static void CancelPendingPathTracingLevelPreload()
 	if (screen != nullptr)
 	{
 		screen->CancelPathTracingLevelPreload();
+	}
+}
+
+static FString GetLevelTransitionMapName(MapRecord* map)
+{
+	if (map == nullptr)
+	{
+		return FString();
+	}
+	return FString(map->LabelName());
+}
+
+LevelTransitionInfo G_BeginLevelTransition(LevelTransitionReason reason, MapRecord* newLevel)
+{
+	LevelTransitionInfo info;
+	info.reason = reason;
+	info.serial = ++gLevelTransitionSerial;
+	info.oldLevel = currentLevel;
+	info.newLevel = newLevel;
+	info.oldLevelName = GetLevelTransitionMapName(info.oldLevel);
+	info.newLevelName = GetLevelTransitionMapName(info.newLevel);
+
+	CancelPendingPathTracingLevelPreload();
+	if (screen != nullptr)
+	{
+		screen->NotifyLevelUnloadBegin(info);
+	}
+	return info;
+}
+
+void G_CompleteLevelUnload(const LevelTransitionInfo& info)
+{
+	gi->FreeLevelData();
+	if (screen != nullptr)
+	{
+		screen->NotifyLevelUnloadComplete(info);
+	}
+}
+
+void G_NotifyLevelLoadBegin(const LevelTransitionInfo& info, MapRecord* loadedLevel)
+{
+	LevelTransitionInfo loadInfo = info;
+	loadInfo.newLevel = loadedLevel != nullptr ? loadedLevel : currentLevel;
+	loadInfo.newLevelName = GetLevelTransitionMapName(loadInfo.newLevel);
+	if (screen != nullptr)
+	{
+		screen->NotifyLevelLoadBegin(loadInfo);
 	}
 }
 
@@ -308,11 +356,12 @@ static bool BeginPathTracingLevelPreloadGate()
 
 void NewGame(MapRecord* map, int skill, bool ns = false)
 {
-	gi->FreeLevelData();
-	CancelPendingPathTracingLevelPreload();
+	const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::NewGame, map);
+	G_CompleteLevelUnload(transition);
 	newGameStarted = true;
 	ShowIntermission(nullptr, map, nullptr, [=](bool) { 
-		gi->NewGame(map, skill, ns); 
+		gi->NewGame(map, skill, ns);
+		G_NotifyLevelLoadBegin(transition);
 		if (!BeginPathTracingLevelPreloadGate())
 		{
 			FinalizePendingLevelStart();
@@ -360,12 +409,16 @@ static void GameTicker()
 			break;
 
 		case ga_nextlevel:
-			gi->FreeLevelData();
+		{
+			const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::NextLevel, g_nextmap);
+			G_CompleteLevelUnload(transition);
 			gameaction = ga_level;
 			gi->NextLevel(g_nextmap, g_nextskill);
+			G_NotifyLevelLoadBegin(transition);
 			ResetStatusBar();
 			if (!isBlood()) M_Autosave();
 			break;
+		}
 
 		case ga_newgame:
 			FX_StopAllSounds();
@@ -379,30 +432,35 @@ static void GameTicker()
 			break;
 
 		case ga_startup:
-			CancelPendingPathTracingLevelPreload();
 			Mus_Stop();
 			FX_StopAllSounds();
-			gi->FreeLevelData();
+			{
+				const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::Startup);
+				G_CompleteLevelUnload(transition);
+			}
 			gamestate = GS_STARTUP;
 			break;
 
 		case ga_mainmenu:
-			CancelPendingPathTracingLevelPreload();
 			FX_StopAllSounds();
 			if (isBlood()) Mus_Stop();
 			[[fallthrough]];
 		case ga_mainmenunostopsound:
-			CancelPendingPathTracingLevelPreload();
-			gi->FreeLevelData();
+			{
+				const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::MainMenu);
+				G_CompleteLevelUnload(transition);
+			}
 			gamestate = GS_MENUSCREEN;
 			M_StartControlPanel(ga == ga_mainmenu);
 			M_SetMenu(NAME_Mainmenu);
 			break;
 
 		case ga_creditsmenu:
-			CancelPendingPathTracingLevelPreload();
 			FX_StopAllSounds();
-			gi->FreeLevelData();
+			{
+				const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::Credits);
+				G_CompleteLevelUnload(transition);
+			}
 			gamestate = GS_MENUSCREEN;
 			M_StartControlPanel(false);
 			M_SetMenu(NAME_Mainmenu);
@@ -419,7 +477,6 @@ static void GameTicker()
 		case ga_loadgame:
 		case ga_loadgamehidecon:
 		//case ga_autoloadgame:
-			CancelPendingPathTracingLevelPreload();
 			G_DoLoadGame();
 			break;
 

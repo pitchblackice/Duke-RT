@@ -752,9 +752,11 @@ CUSTOM_CVAR(Int, quicksavecount, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 void DoLoadGame(const char* name)
 {
-	gi->FreeLevelData();
+	const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::SaveGameLoad);
+	G_CompleteLevelUnload(transition);
 	if (ReadSavegame(name))
 	{
+		G_NotifyLevelLoadBegin(transition);
 		gameaction = ga_level;
 	}
 	else
@@ -955,4 +957,3 @@ UNSAFE_CCMD(save)
 	FString fname = G_BuildSaveName(argv[1]);
 	G_SaveGame(fname.GetChars(), argv.argc() > 2 ? argv[2] : argv[1]);
 }
-
