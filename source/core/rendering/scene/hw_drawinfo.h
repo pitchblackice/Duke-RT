@@ -166,6 +166,7 @@ public:
 	}
 
 	HWPortal * FindPortal(const void * src);
+	void ClearOwnedPortals();
 
 	static HWDrawInfo *StartDrawInfo(HWDrawInfo *parent, FRenderViewpoint &parentvp, HWViewpointUniforms *uniforms);
 	void StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uniforms);
@@ -218,4 +219,3 @@ inline int hw_ClampLight(int lightlevel)
 {
 	return clamp(lightlevel, 0, 255);
 }
-

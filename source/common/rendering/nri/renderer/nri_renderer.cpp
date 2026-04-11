@@ -737,6 +737,8 @@ public:
 	{
 		outCandidateCount = 0;
 		outSelectedWallIndex = -1;
+		const walltype* wallData = wall.Size() > 0 ? wall.Data() : nullptr;
+		const walltype* wallDataEnd = wallData != nullptr ? wallData + wall.Size() : nullptr;
 		const DVector2 cameraPos(di.Viewpoint.Pos.X, -di.Viewpoint.Pos.Y);
 		const DVector2 cameraPosRaw = di.Viewpoint.Pos.XY();
 		const DVector2 cameraDir = di.Viewpoint.ViewVector;
@@ -758,6 +760,14 @@ public:
 			outCandidateCount++;
 			auto* mirrorLine = static_cast<walltype*>(portal->GetSource());
 			if (mirrorLine == nullptr)
+			{
+				continue;
+			}
+			if (wallData == nullptr || mirrorLine < wallData || mirrorLine >= wallDataEnd)
+			{
+				continue;
+			}
+			if (!validWallIndex(mirrorLine->point2))
 			{
 				continue;
 			}

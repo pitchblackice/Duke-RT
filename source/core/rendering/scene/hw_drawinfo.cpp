@@ -178,6 +178,7 @@ HWDrawInfo *HWDrawInfo::EndDrawInfo()
 {
 	assert(this == gl_drawinfo);
 	for (int i = 0; i < GLDL_TYPES; i++) drawlists[i].Reset();
+	assert(Portals.Size() == 0);
 	gl_drawinfo = outer;
 	di_list.Release(this);
 	if (gl_drawinfo == nullptr)
@@ -192,8 +193,26 @@ HWDrawInfo *HWDrawInfo::EndDrawInfo()
 //
 //==========================================================================
 
+void HWDrawInfo::ClearOwnedPortals()
+{
+	HWPortal* portal = nullptr;
+	while (Portals.Pop(portal))
+	{
+		delete portal;
+	}
+	assert(Portals.Size() == 0);
+}
+
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 void HWDrawInfo::ClearBuffers()
 {
+	ClearOwnedPortals();
 	spriteindex = 0;
 	mClipPortal = nullptr;
 	mCurrentPortal = nullptr;
@@ -748,6 +767,7 @@ void HWDrawInfo::DrawScene(int drawmode, bool portal)
 	{
 		if (screen->RenderPathTracedScene(*this, drawmode, portal))
 		{
+			ClearOwnedPortals();
 			return;
 		}
 	}
@@ -755,6 +775,7 @@ void HWDrawInfo::DrawScene(int drawmode, bool portal)
 	CreateScene(portal);
 	if (screen->RenderPathTracedScene(*this, drawmode, portal))
 	{
+		ClearOwnedPortals();
 		return;
 	}
 
