@@ -16784,6 +16784,28 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	{
 		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
 		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
+		const bool chunkVisibleNow = IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
+		ResidentMapChunkRegistry::Entry* residentEntry =
+			mapChunk.chunkIndex < mResidentMapChunkRegistry.entries.size() ?
+			&mResidentMapChunkRegistry.entries[mapChunk.chunkIndex] :
+			nullptr;
+		if (residentEntry != nullptr && residentEntry->valid)
+		{
+			if (!chunkVisibleNow)
+			{
+				residentEntry->wasVisibleLastFrame = false;
+				residentEntry->visibleValidationFramesRemaining = 0;
+			}
+			else
+			{
+				static constexpr uint8_t kVisibleResidentValidationWindow = 8;
+				if (!residentEntry->wasVisibleLastFrame)
+				{
+					residentEntry->visibleValidationFramesRemaining = kVisibleResidentValidationWindow;
+				}
+				residentEntry->wasVisibleLastFrame = true;
+			}
+		}
 		const uint32_t previousReasonMask = replacement.reasonMask;
 		nri_scene::PTMapChunkMutationAnalysis analysis = {};
 		const bool analyzed = [&]()
@@ -16875,6 +16897,39 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		const bool useStaticAnimatedReplacement =
 			normalizedReasonMask == nri_scene::PTMapChunkMutationReason_None &&
 			isVisibleSuppressedStaticAnimatedChunk(mapChunk.chunkIndex);
+		if (normalizedReasonMask == nri_scene::PTMapChunkMutationReason_None &&
+			!useStaticAnimatedReplacement &&
+			replacement.residentAuthoritative &&
+			chunkVisibleNow &&
+			residentEntry != nullptr &&
+			residentEntry->valid &&
+			residentEntry->visibleValidationFramesRemaining > 0)
+		{
+			nri_scene::SceneView liveVisibleChunkView;
+			nri_scene::PTMapWorldStats ignoredVisibleStats = {};
+			if (nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveVisibleChunkView, &ignoredVisibleStats))
+			{
+				const uint64_t liveVisibleGeometrySignature = ComputeAnimatedGeometrySignature(liveVisibleChunkView);
+				const uint64_t liveVisibleMaterialSignature = ComputeAnimatedMaterialSignature(liveVisibleChunkView);
+				if (liveVisibleGeometrySignature != residentEntry->animatedGeometrySignature)
+				{
+					normalizedReasonMask |= nri_scene::PTMapChunkMutationReason_SectionDirty;
+				}
+				else if (liveVisibleMaterialSignature != residentEntry->animatedMaterialSignature)
+				{
+					normalizedReasonMask |= nri_scene::PTMapChunkMutationReason_SectorMaterial;
+				}
+				else
+				{
+					residentEntry->visibleValidationFramesRemaining = 0;
+				}
+			}
+
+			if (residentEntry->visibleValidationFramesRemaining > 0)
+			{
+				residentEntry->visibleValidationFramesRemaining--;
+			}
+		}
 		if (normalizedReasonMask == nri_scene::PTMapChunkMutationReason_None && !useStaticAnimatedReplacement)
 		{
 			replacement.active = false;
@@ -17211,6 +17266,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				residentChunkGeometryDirty,
 				residentWritesWaitedFor))
 			{
+				if (residentEntry != nullptr)
+				{
+					residentEntry->visibleValidationFramesRemaining = 0;
+				}
 				residentStaticSceneChanged = true;
 				mRuntimeMapLastFrame.residentAppliedChunkCount++;
 				if (residentChunkMaterialDirty)

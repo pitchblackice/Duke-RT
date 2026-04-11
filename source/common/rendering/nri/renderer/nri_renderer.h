@@ -640,6 +640,8 @@ private:
 			bool accelerationResident = false;
 			bool hasAnimatedTextureCandidates = false;
 			bool animatedRefreshSuppressed = false;
+			bool wasVisibleLastFrame = false;
+			uint8_t visibleValidationFramesRemaining = 0;
 			nri_scene::PTMapChunkMutationBaseline appliedBaseline;
 		};
 
