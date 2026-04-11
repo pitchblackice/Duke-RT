@@ -18626,46 +18626,113 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const uint32_t chunkListIndex = hasChunkSlot ?
 		resolvedChunkListIndex :
 		(uint32_t)mStaticMapScene.chunks.size();
-	const uint32_t residentVertexCount =
-		fastResidentMaterialOnlyUpdate && hasResidentChunk ?
-		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].vertexCount :
-		(uint32_t)residentGeometry.vertices.size();
-	const uint32_t residentIndexCount =
-		fastResidentMaterialOnlyUpdate && hasResidentChunk ?
-		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].indexCount :
-		(uint32_t)residentGeometry.indices.size();
-	const uint32_t residentPrimitiveCount =
-		fastResidentMaterialOnlyUpdate && hasResidentChunk ?
-		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].primitiveCount :
-		(uint32_t)residentGeometry.primitives.size();
-	const uint32_t residentMaterialCount = (uint32_t)residentMaterials.materials.size();
-	const bool preserveResidentGeometryForMaterialOnlyUpdate =
-		materialOnlyReplacement &&
-		!exclusiveMaterialOnlyReplacement &&
-		hasResidentChunk &&
-		residentPrimitiveCount == 0 &&
-		residentMaterialCount != 0 &&
-		resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
-		residentMaterialCount == mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount;
-	const uint32_t effectiveResidentVertexCount =
-		preserveResidentGeometryForMaterialOnlyUpdate ?
-		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].vertexCount :
-		residentVertexCount;
-	const uint32_t effectiveResidentIndexCount =
-		preserveResidentGeometryForMaterialOnlyUpdate ?
-		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].indexCount :
-		residentIndexCount;
-	const uint32_t effectiveResidentPrimitiveCount =
-		preserveResidentGeometryForMaterialOnlyUpdate ?
-		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].primitiveCount :
-		residentPrimitiveCount;
-	const bool chunkBecomesEmpty = effectiveResidentPrimitiveCount == 0 || residentMaterialCount == 0;
+	uint32_t residentVertexCount = 0;
+	uint32_t residentIndexCount = 0;
+	uint32_t residentPrimitiveCount = 0;
+	uint32_t residentMaterialCount = 0;
+	bool preserveResidentGeometryForMaterialOnlyUpdate = false;
+	uint32_t effectiveResidentVertexCount = 0;
+	uint32_t effectiveResidentIndexCount = 0;
+	uint32_t effectiveResidentPrimitiveCount = 0;
+	bool chunkBecomesEmpty = false;
+	bool recoveredFullLiveResidentChunk = false;
+	const auto recomputeResidentCounts = [&]()
+	{
+		residentVertexCount =
+			fastResidentMaterialOnlyUpdate && !recoveredFullLiveResidentChunk && hasResidentChunk ?
+			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].vertexCount :
+			(uint32_t)residentGeometry.vertices.size();
+		residentIndexCount =
+			fastResidentMaterialOnlyUpdate && !recoveredFullLiveResidentChunk && hasResidentChunk ?
+			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].indexCount :
+			(uint32_t)residentGeometry.indices.size();
+		residentPrimitiveCount =
+			fastResidentMaterialOnlyUpdate && !recoveredFullLiveResidentChunk && hasResidentChunk ?
+			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].primitiveCount :
+			(uint32_t)residentGeometry.primitives.size();
+		residentMaterialCount = (uint32_t)residentMaterials.materials.size();
+		preserveResidentGeometryForMaterialOnlyUpdate =
+			materialOnlyReplacement &&
+			!exclusiveMaterialOnlyReplacement &&
+			hasResidentChunk &&
+			residentPrimitiveCount == 0 &&
+			residentMaterialCount != 0 &&
+			resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
+			residentMaterialCount == mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount;
+		effectiveResidentVertexCount =
+			preserveResidentGeometryForMaterialOnlyUpdate ?
+			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].vertexCount :
+			residentVertexCount;
+		effectiveResidentIndexCount =
+			preserveResidentGeometryForMaterialOnlyUpdate ?
+			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].indexCount :
+			residentIndexCount;
+		effectiveResidentPrimitiveCount =
+			preserveResidentGeometryForMaterialOnlyUpdate ?
+			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].primitiveCount :
+			residentPrimitiveCount;
+		chunkBecomesEmpty = effectiveResidentPrimitiveCount == 0 || residentMaterialCount == 0;
+	};
+	recomputeResidentCounts();
 	const uint32_t residentChunkRemovalReasonMask =
 		nri_scene::PTMapChunkMutationReason_SectorGeometry |
 		nri_scene::PTMapChunkMutationReason_WallGeometry |
 		nri_scene::PTMapChunkMutationReason_SectorDirty |
 		nri_scene::PTMapChunkMutationReason_SectionDirty |
 		nri_scene::PTMapChunkMutationReason_Dragged;
+	const auto rebuildFullLiveResidentChunk = [&]() -> bool
+	{
+		nri_scene::PTMapWorld liveWorld = {};
+		nri_scene::PTMapWorldStats ignoredStats = {};
+		nri_scene::SceneView fullLiveSceneView;
+		nri_scene::GeometryData fullLiveGeometry;
+		nri_scene::MaterialBridgeData fullLiveMaterials;
+		nri_scene::PTMapChunkMutationBaseline fullLiveBaseline;
+		if (!nri_scene::BuildLiveMapChunkWorld(mapChunk, liveWorld, &ignoredStats))
+		{
+			return false;
+		}
+
+		nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], fullLiveSceneView);
+		{
+			Clocker clock(NriPTGeometryBuild);
+			nri_scene::BuildGeometry(fullLiveSceneView, fullLiveGeometry);
+			AssignGeometryPortalIndices(mMapWorld, fullLiveGeometry);
+		}
+		{
+			Clocker clock(NriPTMaterialBuild);
+			BuildMaterialsWithActorOverrides(fullLiveSceneView, fullLiveMaterials, "resident_runtime_mutation_chunk_recover");
+		}
+		if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, fullLiveBaseline))
+		{
+			return false;
+		}
+
+		if (fullLiveGeometry.primitives.empty() || fullLiveMaterials.materials.empty())
+		{
+			return false;
+		}
+
+		if (ShouldTracePtPerf())
+		{
+			Printf("NRI PT resident chunk trace: event=recover-empty chunk=%u reason_mask=0x%x recovered_prims=%u recovered_mats=%u\n",
+				mapChunk.chunkIndex,
+				appliedReasonMask,
+				(uint32_t)fullLiveGeometry.primitives.size(),
+				(uint32_t)fullLiveMaterials.materials.size());
+		}
+
+		residentSceneView = std::move(fullLiveSceneView);
+		residentGeometry = std::move(fullLiveGeometry);
+		residentMaterials = std::move(fullLiveMaterials);
+		appliedBaseline = std::move(fullLiveBaseline);
+		recoveredFullLiveResidentChunk = true;
+		return true;
+	};
+	if (chunkBecomesEmpty && rebuildFullLiveResidentChunk())
+	{
+		recomputeResidentCounts();
+	}
 	const bool suspiciousNonStructuralChunkRemoval =
 		chunkBecomesEmpty &&
 		hasResidentChunk &&
