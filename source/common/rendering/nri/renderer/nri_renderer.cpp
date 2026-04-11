@@ -12961,6 +12961,8 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	mPreservedStaticMapSky = {};
 	mMapWorld = std::move(correctedWorld);
 	mObservedMapWorldBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
+	mAllowStartupMapWorldCorrection = false;
+	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	if (mPendingStartupVisibleChunkValidation.size() < mMapWorld.chunks.size())
 	{
 		mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
