@@ -17721,7 +17721,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				"resident_runtime_mutation_static");
 			if (!residentRefreshOkay)
 			{
-				residentRefreshFailureReason = "runtime-mutation-resident-material-refresh-failed";
+				Printf("NRI PT static scene trace: event=resident_material_refresh_fallback frame=%u chunks=%u\n",
+					mFrameIndex,
+					(uint32_t)residentMaterialChunkListIndices.size());
+				residentRefreshOkay = RebuildResidentStaticMaterialState("resident_runtime_mutation_static_recover");
+				if (!residentRefreshOkay)
+				{
+					residentRefreshFailureReason = "runtime-mutation-resident-material-refresh-failed";
+				}
 			}
 		}
 		if (residentRefreshOkay && residentGeometryDirty)
@@ -18208,6 +18215,11 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 		!mStaticMapScene.buffersResident ||
 		!mStaticMapChunkAtlas.valid)
 	{
+		Printf("NRI PT static scene trace: event=resident_material_refresh_failed reason=precondition scene_valid=%s buffers=%s atlas=%s chunks=%u\n",
+			YesNo(mStaticMapScene.valid),
+			YesNo(mStaticMapScene.buffersResident),
+			YesNo(mStaticMapChunkAtlas.valid),
+			(uint32_t)chunkListIndices.size());
 		return false;
 	}
 
@@ -18217,6 +18229,10 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 		if (chunkListIndex >= mStaticMapScene.chunks.size() ||
 			chunkListIndex >= mStaticMapChunkAtlas.chunks.size())
 		{
+			Printf("NRI PT static scene trace: event=resident_material_refresh_failed reason=chunk-index-oob chunk_list_index=%u scene_chunks=%u atlas_chunks=%u\n",
+				chunkListIndex,
+				(uint32_t)mStaticMapScene.chunks.size(),
+				(uint32_t)mStaticMapChunkAtlas.chunks.size());
 			return false;
 		}
 
@@ -18230,6 +18246,14 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 			atlasChunk.materialOffset + atlasChunk.materialCount > mStaticMapScene.materialBridge.lightMetadata.size() ||
 			atlasChunk.materialOffset + atlasChunk.materialCount > mStaticMapScene.gpuMaterials.size())
 		{
+			Printf("NRI PT static scene trace: event=resident_material_refresh_failed reason=atlas-range-oob chunk=%u chunk_list_index=%u material_offset=%u material_count=%u bridge=%u light_meta=%u gpu=%u\n",
+				chunkCache.chunkIndex,
+				chunkListIndex,
+				atlasChunk.materialOffset,
+				atlasChunk.materialCount,
+				(uint32_t)mStaticMapScene.materialBridge.materials.size(),
+				(uint32_t)mStaticMapScene.materialBridge.lightMetadata.size(),
+				(uint32_t)mStaticMapScene.gpuMaterials.size());
 			return false;
 		}
 
@@ -18244,6 +18268,12 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 		if ((uint32_t)remappedChunkBridge.materials.size() != atlasChunk.materialCount ||
 			(uint32_t)remappedChunkBridge.lightMetadata.size() != atlasChunk.materialCount)
 		{
+			Printf("NRI PT static scene trace: event=resident_material_refresh_failed reason=material-count-mismatch chunk=%u chunk_list_index=%u remapped_materials=%u remapped_light=%u atlas_materials=%u\n",
+				chunkCache.chunkIndex,
+				chunkListIndex,
+				(uint32_t)remappedChunkBridge.materials.size(),
+				(uint32_t)remappedChunkBridge.lightMetadata.size(),
+				atlasChunk.materialCount);
 			return false;
 		}
 
@@ -18272,6 +18302,11 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 				(uint64_t)atlasChunk.materialCount * sizeof(nri_scene::MaterialData),
 				NRIComputeShaderResourceAccess()))
 		{
+			Printf("NRI PT static scene trace: event=resident_material_refresh_failed reason=buffer-update chunk=%u chunk_list_index=%u material_offset=%u material_count=%u\n",
+				chunkCache.chunkIndex,
+				chunkListIndex,
+				atlasChunk.materialOffset,
+				atlasChunk.materialCount);
 			return false;
 		}
 	}
@@ -18281,7 +18316,7 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 		return true;
 	}
 
-	return
+	const bool rebuiltOkay =
 		EnsurePaletteTexture(mStaticMapScene.materialBridge) &&
 		EnsureSceneTextures(
 			mStaticMapScene.sceneView,
@@ -18294,6 +18329,11 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 			mStaticMapChunkAtlas,
 			mStaticMapScene,
 			mStaticMapScene.gpuMaterials);
+	if (!rebuiltOkay)
+	{
+		Printf("NRI PT static scene trace: event=resident_material_refresh_failed reason=texture-table-rebuild\n");
+	}
+	return rebuiltOkay;
 }
 
 bool NRIRenderer::RebuildResidentStaticMaterialState(const char* reason)
@@ -18599,7 +18639,27 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].primitiveCount :
 		(uint32_t)residentGeometry.primitives.size();
 	const uint32_t residentMaterialCount = (uint32_t)residentMaterials.materials.size();
-	const bool chunkBecomesEmpty = residentPrimitiveCount == 0 || residentMaterialCount == 0;
+	const bool preserveResidentGeometryForMaterialOnlyUpdate =
+		materialOnlyReplacement &&
+		!exclusiveMaterialOnlyReplacement &&
+		hasResidentChunk &&
+		residentPrimitiveCount == 0 &&
+		residentMaterialCount != 0 &&
+		resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
+		residentMaterialCount == mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount;
+	const uint32_t effectiveResidentVertexCount =
+		preserveResidentGeometryForMaterialOnlyUpdate ?
+		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].vertexCount :
+		residentVertexCount;
+	const uint32_t effectiveResidentIndexCount =
+		preserveResidentGeometryForMaterialOnlyUpdate ?
+		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].indexCount :
+		residentIndexCount;
+	const uint32_t effectiveResidentPrimitiveCount =
+		preserveResidentGeometryForMaterialOnlyUpdate ?
+		mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].primitiveCount :
+		residentPrimitiveCount;
+	const bool chunkBecomesEmpty = effectiveResidentPrimitiveCount == 0 || residentMaterialCount == 0;
 	const uint32_t residentChunkRemovalReasonMask =
 		nri_scene::PTMapChunkMutationReason_SectorGeometry |
 		nri_scene::PTMapChunkMutationReason_WallGeometry |
@@ -18696,11 +18756,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	{
 		StaticMapSceneCache::ChunkCache sourceChunk = {};
 		sourceChunk.vertexOffset = 0;
-		sourceChunk.vertexCount = (uint32_t)residentGeometry.vertices.size();
+		sourceChunk.vertexCount = effectiveResidentVertexCount;
 		sourceChunk.indexOffset = 0;
-		sourceChunk.indexCount = (uint32_t)residentGeometry.indices.size();
+		sourceChunk.indexCount = effectiveResidentIndexCount;
 		sourceChunk.primitiveOffset = 0;
-		sourceChunk.primitiveCount = (uint32_t)residentGeometry.primitives.size();
+		sourceChunk.primitiveCount = effectiveResidentPrimitiveCount;
 		sourceChunk.materialOffset = 0;
 		sourceChunk.materialCount = (uint32_t)residentMaterials.materials.size();
 
@@ -18725,9 +18785,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			const auto oldAtlasChunk = hasResidentChunk ? nextAtlasState.chunks[chunkListIndex] : StaticMapChunkAtlas::ChunkEntry{};
 			const bool keepGeometrySlices =
 				hasResidentGeometry &&
-				oldAtlasChunk.vertexCount == residentVertexCount &&
-				oldAtlasChunk.indexCount == residentIndexCount &&
-				oldAtlasChunk.primitiveCount == residentPrimitiveCount;
+				oldAtlasChunk.vertexCount == effectiveResidentVertexCount &&
+				oldAtlasChunk.indexCount == effectiveResidentIndexCount &&
+				oldAtlasChunk.primitiveCount == effectiveResidentPrimitiveCount;
 			const bool keepMaterialSlice =
 				hasResidentGeometry &&
 				oldAtlasChunk.materialCount == residentMaterialCount;
@@ -18747,19 +18807,19 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			nextAtlasChunk.valid = true;
 			nextAtlasChunk.chunkIndex = mapChunk.chunkIndex;
 			nextAtlasChunk.staticSceneChunkListIndex = chunkListIndex;
-			nextAtlasChunk.vertexCount = residentVertexCount;
-			nextAtlasChunk.indexCount = residentIndexCount;
-			nextAtlasChunk.primitiveCount = residentPrimitiveCount;
+			nextAtlasChunk.vertexCount = effectiveResidentVertexCount;
+			nextAtlasChunk.indexCount = effectiveResidentIndexCount;
+			nextAtlasChunk.primitiveCount = effectiveResidentPrimitiveCount;
 			nextAtlasChunk.materialCount = residentMaterialCount;
 			nextAtlasChunk.vertexOffset = keepGeometrySlices ?
 				oldAtlasChunk.vertexOffset :
-				AllocateChunkAtlasRange(residentVertexCount, nextAtlasState.vertexCapacity, nextAtlasState.freeVertexRanges, nextAtlasState.vertexCount);
+				AllocateChunkAtlasRange(effectiveResidentVertexCount, nextAtlasState.vertexCapacity, nextAtlasState.freeVertexRanges, nextAtlasState.vertexCount);
 			nextAtlasChunk.indexOffset = keepGeometrySlices ?
 				oldAtlasChunk.indexOffset :
-				AllocateChunkAtlasRange(residentIndexCount, nextAtlasState.indexCapacity, nextAtlasState.freeIndexRanges, nextAtlasState.indexCount);
+				AllocateChunkAtlasRange(effectiveResidentIndexCount, nextAtlasState.indexCapacity, nextAtlasState.freeIndexRanges, nextAtlasState.indexCount);
 			nextAtlasChunk.primitiveOffset = keepGeometrySlices ?
 				oldAtlasChunk.primitiveOffset :
-				AllocateChunkAtlasRange(residentPrimitiveCount, nextAtlasState.primitiveCapacity, nextAtlasState.freePrimitiveRanges, nextAtlasState.primitiveCount);
+				AllocateChunkAtlasRange(effectiveResidentPrimitiveCount, nextAtlasState.primitiveCapacity, nextAtlasState.freePrimitiveRanges, nextAtlasState.primitiveCount);
 			nextAtlasChunk.materialOffset = keepMaterialSlice ?
 				oldAtlasChunk.materialOffset :
 				AllocateChunkAtlasRange(residentMaterialCount, nextAtlasState.materialCapacity, nextAtlasState.freeMaterialRanges, nextAtlasState.materialCount);
@@ -18774,15 +18834,15 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 
 			if (nextAtlasChunk.vertexOffset == UINT32_MAX)
 			{
-				nextAtlasState.vertexCapacity = GetChunkAtlasCapacity(nextAtlasState.vertexCount + residentVertexCount);
+				nextAtlasState.vertexCapacity = GetChunkAtlasCapacity(nextAtlasState.vertexCount + effectiveResidentVertexCount);
 			}
 			if (nextAtlasChunk.indexOffset == UINT32_MAX)
 			{
-				nextAtlasState.indexCapacity = GetChunkAtlasCapacity(nextAtlasState.indexCount + residentIndexCount);
+				nextAtlasState.indexCapacity = GetChunkAtlasCapacity(nextAtlasState.indexCount + effectiveResidentIndexCount);
 			}
 			if (nextAtlasChunk.primitiveOffset == UINT32_MAX)
 			{
-				nextAtlasState.primitiveCapacity = GetChunkAtlasCapacity(nextAtlasState.primitiveCount + residentPrimitiveCount);
+				nextAtlasState.primitiveCapacity = GetChunkAtlasCapacity(nextAtlasState.primitiveCount + effectiveResidentPrimitiveCount);
 			}
 			if (nextAtlasChunk.materialOffset == UINT32_MAX)
 			{
@@ -18810,7 +18870,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mStaticMapScene.geometry.primitives.resize(std::max<size_t>(mStaticMapScene.geometry.primitives.size(), mStaticMapChunkAtlas.primitiveCount));
 		mStaticMapScene.geometry.primitiveProvenance.resize(std::max<size_t>(mStaticMapScene.geometry.primitiveProvenance.size(), mStaticMapChunkAtlas.primitiveCount));
 
-		if (!fastResidentMaterialOnlyUpdate)
+		if (!fastResidentMaterialOnlyUpdate && !preserveResidentGeometryForMaterialOnlyUpdate)
 		{
 			UploadChunkGeometryToAtlas(
 				residentGeometry,
@@ -18883,12 +18943,12 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		outStaticSceneChunkListIndex = chunkListIndex;
 		outMaterialDirty = true;
 		outGeometryDirty =
-			!keptGeometrySlices ||
+			((!preserveResidentGeometryForMaterialOnlyUpdate && !keptGeometrySlices) ||
 			(appliedReasonMask & (
 				nri_scene::PTMapChunkMutationReason_SectorGeometry |
 				nri_scene::PTMapChunkMutationReason_WallGeometry |
 				nri_scene::PTMapChunkMutationReason_SectorDirty |
-				nri_scene::PTMapChunkMutationReason_SectionDirty)) != 0;
+				nri_scene::PTMapChunkMutationReason_SectionDirty)) != 0);
 	}
 
 	replacement.baseline = appliedBaseline;
