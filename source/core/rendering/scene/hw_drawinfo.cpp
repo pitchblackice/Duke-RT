@@ -60,6 +60,11 @@ CVAR(Float, gl_mask_sprite_threshold, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 BitArray gotsector;
 
+namespace
+{
+	std::atomic<uint32_t> gHwDrawInfoPortalCleanupAnomalyCount = 0;
+}
+
 //==========================================================================
 //
 //
@@ -203,6 +208,11 @@ void HWDrawInfo::ClearOwnedPortals()
 	assert(Portals.Size() == 0);
 }
 
+uint32_t HWDrawInfo::ConsumePortalCleanupAnomalyCount()
+{
+	return gHwDrawInfoPortalCleanupAnomalyCount.exchange(0, std::memory_order_relaxed);
+}
+
 
 //==========================================================================
 //
@@ -212,6 +222,10 @@ void HWDrawInfo::ClearOwnedPortals()
 
 void HWDrawInfo::ClearBuffers()
 {
+	if (Portals.Size() > 0)
+	{
+		gHwDrawInfoPortalCleanupAnomalyCount.fetch_add((uint32_t)Portals.Size(), std::memory_order_relaxed);
+	}
 	ClearOwnedPortals();
 	spriteindex = 0;
 	mClipPortal = nullptr;

@@ -280,6 +280,7 @@ private:
 	bool SnapshotTextureToCanvas(FCanvasTexture* tex, NRITextureResource& source);
 	void ResetLevelTransitionShellState();
 	uint32_t ClearPendingPathTracingWeaponLightEvents();
+	void LogLevelTransitionSnapshot(const char* phase, const LevelTransitionInfo& info, bool preloadPending, uint32_t clearedWeaponLightEvents) const;
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;

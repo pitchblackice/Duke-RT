@@ -167,6 +167,7 @@ public:
 
 	HWPortal * FindPortal(const void * src);
 	void ClearOwnedPortals();
+	static uint32_t ConsumePortalCleanupAnomalyCount();
 
 	static HWDrawInfo *StartDrawInfo(HWDrawInfo *parent, FRenderViewpoint &parentvp, HWViewpointUniforms *uniforms);
 	void StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uniforms);

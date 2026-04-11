@@ -107,6 +107,17 @@ CUSTOM_CVAR(Int, nri_ptnudgetrace, 0, 0)
 
 namespace
 {
+	struct LevelTransitionDeviceSnapshot
+	{
+		bool initialized = false;
+		bool transitionInProgress = false;
+		bool preloadPending = false;
+		bool frameBegun = false;
+		bool activeTarget = false;
+		uint32_t pendingWeaponLightEvents = 0;
+		uint32_t weaponLightEventsEnqueuedThisFrame = 0;
+	};
+
 	static const char* GetLevelTransitionReasonName(LevelTransitionReason reason)
 	{
 		switch (reason)
@@ -3148,6 +3159,79 @@ void NRIRenderDevice::CancelPathTracingLevelPreload()
 	mPathTracingLevelPreloadPending = false;
 }
 
+void NRIRenderDevice::LogLevelTransitionSnapshot(const char* phase, const LevelTransitionInfo& info, bool preloadPending, uint32_t clearedWeaponLightEvents) const
+{
+	if (!nri_ptscenestats)
+	{
+		return;
+	}
+
+	LevelTransitionDeviceSnapshot deviceSnapshot = {};
+	deviceSnapshot.initialized = mInitialized;
+	deviceSnapshot.transitionInProgress = mLevelTransitionInProgress;
+	deviceSnapshot.preloadPending = mPathTracingLevelPreloadPending;
+	deviceSnapshot.frameBegun = mFrameBegun;
+	deviceSnapshot.activeTarget = mActiveTarget != nullptr;
+	deviceSnapshot.pendingWeaponLightEvents = (uint32_t)mPendingPathTracingWeaponLightEvents.Size();
+	deviceSnapshot.weaponLightEventsEnqueuedThisFrame = mPathTracingWeaponLightEventsEnqueuedThisFrame;
+
+	const NRIRenderer::LevelTransitionSnapshot rendererSnapshot =
+		mRenderer != nullptr ? mRenderer->BuildLevelTransitionSnapshot() : NRIRenderer::LevelTransitionSnapshot{};
+	const uint32_t portalCleanupAnomalies = HWDrawInfo::ConsumePortalCleanupAnomalyCount();
+
+	Printf(
+		"NRI PT level transition: phase=%s serial=%llu reason=%s old=%s new=%s dev_init=%s dev_transition=%s preload_pending=%s pending_weapon_events=%u cleared_weapon_events=%u weapon_events_enqueued=%u frame_begun=%s active_target=%s map_valid=%s map_build_serial=%llu map_chunks=%u map_surfaces=%u static_valid=%s static_build_serial=%llu static_chunks=%u static_materials=%u static_tex=%s static_buf=%s static_as=%s texture_cache=%u sky_texture_cache=%u mutation_chunks=%u mutation_active=%u mutation_valid=%u registry_valid=%s registry_entries=%u registry_chunks=%u registry_active=%u registry_mapped=%u registry_as=%u lighting_invalidation=%s probe_valid=%s probe_hit=%s probe_wall=%d probe_chunk=%d muzzle_slots=%u muzzle_active=%u lights_analytic=%u lights_manual=%u lights_emissive=%u lights_sector=%u debug_spheres=%u test_lights=%u portal_cleanup_anomalies=%u\n",
+		phase != nullptr ? phase : "unknown",
+		(unsigned long long)info.serial,
+		GetLevelTransitionReasonName(info.reason),
+		info.oldLevelName.IsNotEmpty() ? info.oldLevelName.GetChars() : "(none)",
+		info.newLevelName.IsNotEmpty() ? info.newLevelName.GetChars() : "(none)",
+		deviceSnapshot.initialized ? "yes" : "no",
+		deviceSnapshot.transitionInProgress ? "yes" : "no",
+		preloadPending ? "yes" : "no",
+		deviceSnapshot.pendingWeaponLightEvents,
+		clearedWeaponLightEvents,
+		deviceSnapshot.weaponLightEventsEnqueuedThisFrame,
+		deviceSnapshot.frameBegun ? "yes" : "no",
+		deviceSnapshot.activeTarget ? "yes" : "no",
+		rendererSnapshot.mapWorldValid ? "yes" : "no",
+		(unsigned long long)rendererSnapshot.mapWorldBuildSerial,
+		rendererSnapshot.mapWorldChunkCount,
+		rendererSnapshot.mapWorldSurfaceCount,
+		rendererSnapshot.staticSceneValid ? "yes" : "no",
+		(unsigned long long)rendererSnapshot.staticSceneBuildSerial,
+		rendererSnapshot.staticSceneChunkCount,
+		rendererSnapshot.staticSceneMaterialCount,
+		rendererSnapshot.staticSceneTexturesResident ? "yes" : "no",
+		rendererSnapshot.staticSceneBuffersResident ? "yes" : "no",
+		rendererSnapshot.staticSceneAccelerationResident ? "yes" : "no",
+		rendererSnapshot.textureCacheCount,
+		rendererSnapshot.skyTextureCacheCount,
+		rendererSnapshot.runtimeMutationChunkCount,
+		rendererSnapshot.runtimeMutationActiveChunkCount,
+		rendererSnapshot.runtimeMutationValidChunkCount,
+		rendererSnapshot.residentChunkRegistryValid ? "yes" : "no",
+		rendererSnapshot.residentChunkRegistryEntryCount,
+		rendererSnapshot.residentChunkRegistryChunkCount,
+		rendererSnapshot.residentChunkRegistryActiveChunkCount,
+		rendererSnapshot.residentChunkRegistryMappedChunkCount,
+		rendererSnapshot.residentChunkRegistryAccelerationResidentChunkCount,
+		rendererSnapshot.pendingStaticMapLightingInvalidation ? "yes" : "no",
+		rendererSnapshot.surfaceProbeValid ? "yes" : "no",
+		rendererSnapshot.surfaceProbeHit ? "yes" : "no",
+		rendererSnapshot.surfaceProbeWallIndex,
+		rendererSnapshot.surfaceProbeMapChunkIndex,
+		rendererSnapshot.transientMuzzleFlashSlotCount,
+		rendererSnapshot.transientMuzzleFlashActiveCount,
+		rendererSnapshot.analyticLightCount,
+		rendererSnapshot.manualLightCount,
+		rendererSnapshot.emissiveSurfaceCount,
+		rendererSnapshot.activeSectorLightCount,
+		rendererSnapshot.runtimeDebugSphereCount,
+		rendererSnapshot.runtimeTestLightCount,
+		portalCleanupAnomalies);
+}
+
 void NRIRenderDevice::NotifyLevelUnloadBegin(const LevelTransitionInfo& info)
 {
 	mCurrentLevelTransition = info;
@@ -3167,18 +3251,7 @@ void NRIRenderDevice::NotifyLevelUnloadBegin(const LevelTransitionInfo& info)
 	{
 		mRenderer->OnLevelUnloadBegin(info);
 	}
-
-	if (nri_ptscenestats)
-	{
-		Printf("NRI PT level transition: phase=unload-begin serial=%llu reason=%s old=%s new=%s preload_pending=%s cleared_weapon_events=%u initialized=%s\n",
-			(unsigned long long)info.serial,
-			GetLevelTransitionReasonName(info.reason),
-			info.oldLevelName.IsNotEmpty() ? info.oldLevelName.GetChars() : "(none)",
-			info.newLevelName.IsNotEmpty() ? info.newLevelName.GetChars() : "(none)",
-			hadPendingPreload ? "yes" : "no",
-			clearedWeaponLightEvents,
-			mInitialized ? "yes" : "no");
-	}
+	LogLevelTransitionSnapshot("unload-begin", info, hadPendingPreload, clearedWeaponLightEvents);
 }
 
 void NRIRenderDevice::NotifyLevelUnloadComplete(const LevelTransitionInfo& info)
@@ -3190,18 +3263,7 @@ void NRIRenderDevice::NotifyLevelUnloadComplete(const LevelTransitionInfo& info)
 	{
 		mRenderer->OnLevelUnloadComplete(info);
 	}
-
-	if (nri_ptscenestats)
-	{
-		Printf("NRI PT level transition: phase=unload-complete serial=%llu reason=%s old=%s new=%s pending_weapon_events=%u frame_begun=%s active_target=%s\n",
-			(unsigned long long)info.serial,
-			GetLevelTransitionReasonName(info.reason),
-			info.oldLevelName.IsNotEmpty() ? info.oldLevelName.GetChars() : "(none)",
-			info.newLevelName.IsNotEmpty() ? info.newLevelName.GetChars() : "(none)",
-			(uint32_t)mPendingPathTracingWeaponLightEvents.Size(),
-			mFrameBegun ? "yes" : "no",
-			mActiveTarget != nullptr ? "yes" : "no");
-	}
+	LogLevelTransitionSnapshot("unload-complete", info, mPathTracingLevelPreloadPending, 0);
 }
 
 void NRIRenderDevice::NotifyLevelLoadBegin(const LevelTransitionInfo& info)
@@ -3215,17 +3277,7 @@ void NRIRenderDevice::NotifyLevelLoadBegin(const LevelTransitionInfo& info)
 	mPathTracingLevelPreloadPending = false;
 	mNextPathTracingWeaponLightEventSerial = 1;
 	mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
-
-	if (nri_ptscenestats)
-	{
-		Printf("NRI PT level transition: phase=load-begin serial=%llu reason=%s old=%s new=%s preload_pending=%s pending_weapon_events=%u\n",
-			(unsigned long long)info.serial,
-			GetLevelTransitionReasonName(info.reason),
-			info.oldLevelName.IsNotEmpty() ? info.oldLevelName.GetChars() : "(none)",
-			info.newLevelName.IsNotEmpty() ? info.newLevelName.GetChars() : "(none)",
-			mPathTracingLevelPreloadPending ? "yes" : "no",
-			(uint32_t)mPendingPathTracingWeaponLightEvents.Size());
-	}
+	LogLevelTransitionSnapshot("load-begin", info, mPathTracingLevelPreloadPending, 0);
 }
 
 bool NRIRenderDevice::ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const

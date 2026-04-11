@@ -269,6 +269,45 @@ public:
 		uint32_t outputHeight = 0;
 	};
 
+	struct LevelTransitionSnapshot
+	{
+		bool mapWorldValid = false;
+		uint64_t mapWorldBuildSerial = 0;
+		uint32_t mapWorldChunkCount = 0;
+		uint32_t mapWorldSurfaceCount = 0;
+		bool staticSceneValid = false;
+		bool staticSceneTexturesResident = false;
+		bool staticSceneBuffersResident = false;
+		bool staticSceneAccelerationResident = false;
+		uint64_t staticSceneBuildSerial = 0;
+		uint32_t staticSceneChunkCount = 0;
+		uint32_t staticSceneMaterialCount = 0;
+		uint32_t textureCacheCount = 0;
+		uint32_t skyTextureCacheCount = 0;
+		uint32_t runtimeMutationChunkCount = 0;
+		uint32_t runtimeMutationActiveChunkCount = 0;
+		uint32_t runtimeMutationValidChunkCount = 0;
+		bool residentChunkRegistryValid = false;
+		uint32_t residentChunkRegistryEntryCount = 0;
+		uint32_t residentChunkRegistryChunkCount = 0;
+		uint32_t residentChunkRegistryActiveChunkCount = 0;
+		uint32_t residentChunkRegistryMappedChunkCount = 0;
+		uint32_t residentChunkRegistryAccelerationResidentChunkCount = 0;
+		bool pendingStaticMapLightingInvalidation = false;
+		bool surfaceProbeValid = false;
+		bool surfaceProbeHit = false;
+		int32_t surfaceProbeWallIndex = -1;
+		int32_t surfaceProbeMapChunkIndex = -1;
+		uint32_t transientMuzzleFlashSlotCount = 0;
+		uint32_t transientMuzzleFlashActiveCount = 0;
+		uint32_t analyticLightCount = 0;
+		uint32_t manualLightCount = 0;
+		uint32_t emissiveSurfaceCount = 0;
+		uint32_t activeSectorLightCount = 0;
+		uint32_t runtimeDebugSphereCount = 0;
+		uint32_t runtimeTestLightCount = 0;
+	};
+
 	explicit NRIRenderer(NRIRenderDevice* frameBuffer);
 	~NRIRenderer();
 
@@ -277,6 +316,7 @@ public:
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
 	bool PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
 	void ResetHistory();
+	LevelTransitionSnapshot BuildLevelTransitionSnapshot() const;
 	void OnLevelUnloadBegin(const LevelTransitionInfo& info);
 	void OnLevelUnloadComplete(const LevelTransitionInfo& info);
 	void OnLevelLoadBegin(const LevelTransitionInfo& info);

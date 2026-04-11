@@ -6300,6 +6300,62 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	}
 }
 
+NRIRenderer::LevelTransitionSnapshot NRIRenderer::BuildLevelTransitionSnapshot() const
+{
+	LevelTransitionSnapshot snapshot = {};
+	snapshot.mapWorldValid = mMapWorld.valid;
+	snapshot.mapWorldBuildSerial = mMapWorld.buildSerial;
+	snapshot.mapWorldChunkCount = (uint32_t)mMapWorld.chunks.size();
+	snapshot.mapWorldSurfaceCount = (uint32_t)mMapWorld.surfaces.size();
+	snapshot.staticSceneValid = mStaticMapScene.valid;
+	snapshot.staticSceneTexturesResident = mStaticMapScene.texturesResident;
+	snapshot.staticSceneBuffersResident = mStaticMapScene.buffersResident;
+	snapshot.staticSceneAccelerationResident = mStaticMapScene.accelerationResident;
+	snapshot.staticSceneBuildSerial = mStaticMapScene.buildSerial;
+	snapshot.staticSceneChunkCount = (uint32_t)mStaticMapScene.chunks.size();
+	snapshot.staticSceneMaterialCount = (uint32_t)mStaticMapScene.gpuMaterials.size();
+	snapshot.textureCacheCount = (uint32_t)mTextureCache.size();
+	snapshot.skyTextureCacheCount = (uint32_t)mSkyTextureCache.size();
+	snapshot.runtimeMutationChunkCount = (uint32_t)mRuntimeMapMutations.chunks.size();
+	for (const auto& replacement : mRuntimeMapMutations.chunks)
+	{
+		if (replacement.active)
+		{
+			snapshot.runtimeMutationActiveChunkCount++;
+		}
+		if (replacement.valid)
+		{
+			snapshot.runtimeMutationValidChunkCount++;
+		}
+	}
+	snapshot.residentChunkRegistryValid = mResidentMapChunkRegistry.valid;
+	snapshot.residentChunkRegistryEntryCount = (uint32_t)mResidentMapChunkRegistry.entries.size();
+	snapshot.residentChunkRegistryChunkCount = mResidentMapChunkRegistry.chunkCount;
+	snapshot.residentChunkRegistryActiveChunkCount = mResidentMapChunkRegistry.activeChunkCount;
+	snapshot.residentChunkRegistryMappedChunkCount = mResidentMapChunkRegistry.mappedChunkCount;
+	snapshot.residentChunkRegistryAccelerationResidentChunkCount = mResidentMapChunkRegistry.accelerationResidentChunkCount;
+	snapshot.pendingStaticMapLightingInvalidation = mPendingStaticMapLightingInvalidation;
+	snapshot.surfaceProbeValid = mLastSurfaceProbe.valid;
+	snapshot.surfaceProbeHit = mLastSurfaceProbe.hit;
+	snapshot.surfaceProbeWallIndex = mLastSurfaceProbe.provenance.wallIndex;
+	snapshot.surfaceProbeMapChunkIndex = mLastSurfaceProbe.provenance.mapChunkIndex;
+	snapshot.transientMuzzleFlashSlotCount = (uint32_t)mTransientMuzzleFlashSlots.size();
+	for (const TransientMuzzleFlashSlot& slot : mTransientMuzzleFlashSlots)
+	{
+		if (slot.occupied)
+		{
+			snapshot.transientMuzzleFlashActiveCount++;
+		}
+	}
+	snapshot.analyticLightCount = (uint32_t)mSceneLights.GetAnalyticLights().activeLights.size();
+	snapshot.manualLightCount = mSceneLights.GetManualAnalyticLightCount();
+	snapshot.emissiveSurfaceCount = (uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size();
+	snapshot.activeSectorLightCount = mSceneLights.GetSectorLighting().activeSectorCount;
+	snapshot.runtimeDebugSphereCount = (uint32_t)mRuntimeDebugSpheres.size();
+	snapshot.runtimeTestLightCount = mSceneLights.GetManualAnalyticLightCount();
+	return snapshot;
+}
+
 void NRIRenderer::RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightOverlaySet& resolvedLightOverlays)
 {
 	mResolvedMuzzleFlashRuleLookup.clear();
