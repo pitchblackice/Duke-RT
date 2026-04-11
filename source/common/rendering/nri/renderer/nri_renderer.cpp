@@ -16847,6 +16847,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				residentEntry->wasVisibleLastFrame = false;
 				residentEntry->visibleValidationFramesRemaining = 0;
+				residentEntry->visibleValidationTraceEmitted = false;
 			}
 			else
 			{
@@ -16964,12 +16965,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			residentEntry->valid &&
 			residentEntry->visibleValidationFramesRemaining > 0)
 		{
+			uint64_t liveVisibleGeometrySignature = 0;
+			uint64_t liveVisibleMaterialSignature = 0;
 			nri_scene::SceneView liveVisibleChunkView;
 			nri_scene::PTMapWorldStats ignoredVisibleStats = {};
 			if (nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveVisibleChunkView, &ignoredVisibleStats))
 			{
-				const uint64_t liveVisibleGeometrySignature = ComputeAnimatedGeometrySignature(liveVisibleChunkView);
-				const uint64_t liveVisibleMaterialSignature = ComputeAnimatedMaterialSignature(liveVisibleChunkView);
+				liveVisibleGeometrySignature = ComputeAnimatedGeometrySignature(liveVisibleChunkView);
+				liveVisibleMaterialSignature = ComputeAnimatedMaterialSignature(liveVisibleChunkView);
 				if (liveVisibleGeometrySignature != residentEntry->animatedGeometrySignature)
 				{
 					normalizedReasonMask |= nri_scene::PTMapChunkMutationReason_SectionDirty;
@@ -16987,6 +16990,23 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			if (residentEntry->visibleValidationFramesRemaining > 0 && !chunkHasUnresolvedAuthoredTextures)
 			{
 				residentEntry->visibleValidationFramesRemaining--;
+			}
+			if (normalizedReasonMask != nri_scene::PTMapChunkMutationReason_None &&
+				ShouldTracePtPerf() &&
+				!residentEntry->visibleValidationTraceEmitted)
+			{
+				Printf("NRI PT visible resident validation: chunk=%u sector=%d reason_mask=0x%x unresolved_textures=%s validation_frames=%u static_geom_sig=0x%llx live_geom_sig=0x%llx static_mat_sig=0x%llx live_mat_sig=0x%llx\n",
+					mapChunk.chunkIndex,
+					mapChunk.sectorIndex,
+					normalizedReasonMask,
+					YesNo(chunkHasUnresolvedAuthoredTextures),
+					(uint32_t)residentEntry->visibleValidationFramesRemaining,
+					(unsigned long long)residentEntry->animatedGeometrySignature,
+					(unsigned long long)liveVisibleGeometrySignature,
+					(unsigned long long)residentEntry->animatedMaterialSignature,
+					(unsigned long long)liveVisibleMaterialSignature);
+				PrintMapChunkCompare((int32_t)mapChunk.chunkIndex);
+				residentEntry->visibleValidationTraceEmitted = true;
 			}
 		}
 		if (normalizedReasonMask == nri_scene::PTMapChunkMutationReason_None && !useStaticAnimatedReplacement)

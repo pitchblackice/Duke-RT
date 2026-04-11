@@ -641,6 +641,7 @@ private:
 			bool hasAnimatedTextureCandidates = false;
 			bool animatedRefreshSuppressed = false;
 			bool wasVisibleLastFrame = false;
+			bool visibleValidationTraceEmitted = false;
 			uint8_t visibleValidationFramesRemaining = 0;
 			nri_scene::PTMapChunkMutationBaseline appliedBaseline;
 		};
