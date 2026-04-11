@@ -6535,7 +6535,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			}();
 			mLastPerfShellTraceStats.runtimeSpaceLinkPrimitiveCount = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
 			mLastPerfShellTraceStats.runtimeSpaceLinkMaterialCount = (uint32_t)runtimeSpaceLinkMaterialBridge.materials.size();
-			const bool hasRuntimeMutationOverlay = !deferOverlayThisFrame && [&]()
+			const bool hasRuntimeMutationOverlay = [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationMs);
 				return BuildRuntimeMapMutationOverlay(
@@ -7017,10 +7017,6 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				accelerationReady = true;
 			}
 		}
-		else if (deferOverlayThisFrame)
-		{
-			Printf("NRI PT dynamic scene deferred: skipping dynamic overlay on the same frame that rebuilt resident static map assets.\n");
-		}
 		else if (mGpuSceneHasDynamicOverlay || residentStaticWorldGeometryChanged)
 		{
 			DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
@@ -7041,6 +7037,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			activeGpuMaterials = &mStaticMapScene.gpuMaterials;
 			activeMaterialBridge = &mStaticMapScene.materialBridge;
 			activeStats = mStaticMapScene.sceneView.stats;
+		}
+		else if (deferOverlayThisFrame)
+		{
+			Printf("NRI PT dynamic scene deferred: skipping non-map dynamic overlay on the same frame that rebuilt resident static map assets.\n");
 		}
 		else
 		{
