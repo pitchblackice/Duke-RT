@@ -18978,6 +18978,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mStaticMapScene.geometry.indices.resize(std::max<size_t>(mStaticMapScene.geometry.indices.size(), mStaticMapChunkAtlas.indexCount));
 		mStaticMapScene.geometry.primitives.resize(std::max<size_t>(mStaticMapScene.geometry.primitives.size(), mStaticMapChunkAtlas.primitiveCount));
 		mStaticMapScene.geometry.primitiveProvenance.resize(std::max<size_t>(mStaticMapScene.geometry.primitiveProvenance.size(), mStaticMapChunkAtlas.primitiveCount));
+		mStaticMapScene.materialBridge.materials.resize(std::max<size_t>(mStaticMapScene.materialBridge.materials.size(), mStaticMapChunkAtlas.materialCount));
+		mStaticMapScene.materialBridge.lightMetadata.resize(std::max<size_t>(mStaticMapScene.materialBridge.lightMetadata.size(), mStaticMapChunkAtlas.materialCount));
+		mStaticMapScene.gpuMaterials.resize(std::max<size_t>(mStaticMapScene.gpuMaterials.size(), mStaticMapChunkAtlas.materialCount));
 
 		if (!fastResidentMaterialOnlyUpdate && !preserveResidentGeometryForMaterialOnlyUpdate)
 		{
