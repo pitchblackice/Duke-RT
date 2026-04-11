@@ -4344,6 +4344,7 @@ namespace
 		bool portalTargetCountMismatch = false;
 		bool statsMismatch = false;
 		std::vector<StartupMapWorldChunkDiffSample> chunkSamples;
+		std::vector<uint32_t> lateVisibleValidationChunks;
 	};
 
 	static bool StartupMapWorldSurfaceDiffers(
@@ -4411,6 +4412,7 @@ namespace
 
 		const size_t chunkCount = std::min(currentWorld.chunks.size(), rebuiltWorld.chunks.size());
 		details.chunkSamples.reserve(std::min<size_t>(chunkCount, 12u));
+		details.lateVisibleValidationChunks.reserve(std::min<size_t>(chunkCount, 64u));
 		for (size_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
 		{
 			const auto& currentChunk = currentWorld.chunks[chunkIndex];
@@ -4454,6 +4456,15 @@ namespace
 			if (chunkMetadataDiff || chunkSurfaceDiffCount > 0u)
 			{
 				outChunkDiffCount++;
+				const bool lateVisibleValidationCandidate =
+					chunkSurfaceDiffCount > 0u &&
+					currentAvailableSurfaceCount == rebuiltAvailableSurfaceCount &&
+					currentChunk.triangleCount == rebuiltChunk.triangleCount &&
+					currentChunk.chunkIndex == rebuiltChunk.chunkIndex;
+				if (lateVisibleValidationCandidate)
+				{
+					details.lateVisibleValidationChunks.push_back(currentChunk.chunkIndex);
+				}
 				if (details.chunkSamples.size() < 12u)
 				{
 					StartupMapWorldChunkDiffSample sample = {};
@@ -12743,6 +12754,7 @@ void NRIRenderer::RefreshMapWorld()
 		mMapWorld.Reset();
 		mMapWorld.level = currentLevel;
 		mObservedMapWorldBuildSerial = pendingBuildSerial;
+		mPendingStartupVisibleChunkValidation.clear();
 		mAllowStartupMapWorldCorrection = false;
 		mStartupMapWorldCorrectionDeadlineFrame = 0;
 		mAllowStartupMutationRebaseline = false;
@@ -12753,6 +12765,8 @@ void NRIRenderer::RefreshMapWorld()
 
 	mMapWorld = std::move(world);
 	mObservedMapWorldBuildSerial = pendingBuildSerial;
+	mPendingStartupVisibleChunkValidation.clear();
+	mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
 	const auto& stats = mMapWorld.stats;
 	Printf("NRI PT map world built: level=%s build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
@@ -12790,6 +12804,8 @@ void NRIRenderer::RebuildStartupMutationBaseline()
 	mPreservedStaticMapSky = {};
 	mMapWorld = std::move(world);
 	mObservedMapWorldBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
+	mPendingStartupVisibleChunkValidation.clear();
+	mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
 	RequestHistoryReset("startup-mutation-rebaseline");
 
 	const auto& stats = mMapWorld.stats;
@@ -12851,6 +12867,17 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	mPreservedStaticMapSky = {};
 	mMapWorld = std::move(correctedWorld);
 	mObservedMapWorldBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
+	if (mPendingStartupVisibleChunkValidation.size() < mMapWorld.chunks.size())
+	{
+		mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
+	}
+	for (uint32_t chunkIndex : diffDetails.lateVisibleValidationChunks)
+	{
+		if (chunkIndex < mPendingStartupVisibleChunkValidation.size())
+		{
+			mPendingStartupVisibleChunkValidation[chunkIndex] = 1u;
+		}
+	}
 	RequestHistoryReset("startup-world-correction");
 
 	const auto& stats = mMapWorld.stats;
@@ -12875,6 +12902,13 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 		reasonSummary.c_str(),
 		(uint32_t)diffDetails.chunkSamples.size(),
 		chunkDiffCount);
+	if (!diffDetails.lateVisibleValidationChunks.empty())
+	{
+		Printf("NRI PT startup world correction late-visible: trigger=%s frame=%u chunks=%u\n",
+			trigger != nullptr ? trigger : "unknown",
+			mFrameIndex,
+			(uint32_t)diffDetails.lateVisibleValidationChunks.size());
+	}
 	for (size_t sampleIndex = 0; sampleIndex < diffDetails.chunkSamples.size(); ++sampleIndex)
 	{
 		const auto& sample = diffDetails.chunkSamples[sampleIndex];
@@ -17013,6 +17047,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
 		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
 		const bool chunkVisibleNow = IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
+		const bool startupVisibleValidationPending =
+			mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size() &&
+			mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] != 0u;
 		const bool chunkHasUnresolvedAuthoredTextures =
 			chunkVisibleNow &&
 			ChunkHasUnresolvedAuthoredTextures(mapChunk);
@@ -17032,9 +17069,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				static constexpr uint8_t kVisibleResidentValidationWindow = 8;
 				static constexpr uint8_t kVisibleResidentUnresolvedTextureValidationWindow = 64;
+				static constexpr uint8_t kStartupVisibleResidentValidationWindow = 64;
 				if (!residentEntry->wasVisibleLastFrame)
 				{
 					residentEntry->visibleValidationFramesRemaining = kVisibleResidentValidationWindow;
+				}
+				if (startupVisibleValidationPending)
+				{
+					residentEntry->visibleValidationFramesRemaining = std::max<uint8_t>(
+						residentEntry->visibleValidationFramesRemaining,
+						kStartupVisibleResidentValidationWindow);
 				}
 				if (chunkHasUnresolvedAuthoredTextures)
 				{
@@ -17172,6 +17216,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				}
 				else if (!chunkHasUnresolvedAuthoredTextures)
 				{
+					if (startupVisibleValidationPending &&
+						mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size())
+					{
+						mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] = 0u;
+					}
 					residentEntry->visibleValidationFramesRemaining = 0;
 				}
 			}
@@ -17184,11 +17233,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				ShouldTracePtPerf() &&
 				!residentEntry->visibleValidationTraceEmitted)
 			{
-				Printf("NRI PT visible resident validation: chunk=%u sector=%d reason_mask=0x%x unresolved_textures=%s validation_frames=%u static_geom_sig=0x%llx live_geom_sig=0x%llx static_mat_sig=0x%llx live_mat_sig=0x%llx\n",
+				Printf("NRI PT visible resident validation: chunk=%u sector=%d reason_mask=0x%x unresolved_textures=%s startup_pending=%s validation_frames=%u static_geom_sig=0x%llx live_geom_sig=0x%llx static_mat_sig=0x%llx live_mat_sig=0x%llx\n",
 					mapChunk.chunkIndex,
 					mapChunk.sectorIndex,
 					normalizedReasonMask,
 					YesNo(chunkHasUnresolvedAuthoredTextures),
+					YesNo(startupVisibleValidationPending),
 					(uint32_t)residentEntry->visibleValidationFramesRemaining,
 					(unsigned long long)residentEntry->animatedGeometrySignature,
 					(unsigned long long)liveVisibleGeometrySignature,
