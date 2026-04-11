@@ -23,6 +23,7 @@
 
 class NRIRenderDevice;
 struct MapRecord;
+struct LevelTransitionInfo;
 struct PathTracingActorSpriteTraceEvent;
 
 struct NRIDirectionalLightState
@@ -276,6 +277,9 @@ public:
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
 	bool PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
 	void ResetHistory();
+	void OnLevelUnloadBegin(const LevelTransitionInfo& info);
+	void OnLevelUnloadComplete(const LevelTransitionInfo& info);
+	void OnLevelLoadBegin(const LevelTransitionInfo& info);
 	void NotifyCameraCut(const char* reason);
 	void SetGuiCaptureState(bool active);
 	void PrintStatus() const;

@@ -3163,6 +3163,10 @@ void NRIRenderDevice::NotifyLevelUnloadBegin(const LevelTransitionInfo& info)
 
 	const uint32_t clearedWeaponLightEvents = ClearPendingPathTracingWeaponLightEvents();
 	ResetLevelTransitionShellState();
+	if (mRenderer != nullptr)
+	{
+		mRenderer->OnLevelUnloadBegin(info);
+	}
 
 	if (nri_ptscenestats)
 	{
@@ -3182,6 +3186,10 @@ void NRIRenderDevice::NotifyLevelUnloadComplete(const LevelTransitionInfo& info)
 	mCurrentLevelTransition = info;
 	ResetLevelTransitionShellState();
 	assert(mPendingPathTracingWeaponLightEvents.Size() == 0);
+	if (mRenderer != nullptr)
+	{
+		mRenderer->OnLevelUnloadComplete(info);
+	}
 
 	if (nri_ptscenestats)
 	{
@@ -3199,6 +3207,10 @@ void NRIRenderDevice::NotifyLevelUnloadComplete(const LevelTransitionInfo& info)
 void NRIRenderDevice::NotifyLevelLoadBegin(const LevelTransitionInfo& info)
 {
 	mCurrentLevelTransition = info;
+	if (mRenderer != nullptr)
+	{
+		mRenderer->OnLevelLoadBegin(info);
+	}
 	mLevelTransitionInProgress = false;
 	mPathTracingLevelPreloadPending = false;
 	mNextPathTracingWeaponLightEventSerial = 1;

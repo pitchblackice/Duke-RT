@@ -972,6 +972,58 @@ void SceneLightSystem::Reset()
 	mSectorLighting = {};
 	mEnvironmentLighting = {};
 	mSurfaceRecords.clear();
+	mFrameAppendStats = {};
+	mFrameSerial = 0;
+}
+
+void SceneLightSystem::ResetLevelState()
+{
+	mAnalyticLights.manualLights.clear();
+	mAnalyticLights.transientLights.clear();
+	mAnalyticLights.activeLights.clear();
+	mAnalyticLights.activeTopologyKeys.clear();
+	mAnalyticLights.activePropertyHashes.clear();
+	mAnalyticLights.activeBindingHashes.clear();
+	mAnalyticLights.activeDiagnosticFlags.clear();
+	mAnalyticLights.addedTopologyKeys.clear();
+	mAnalyticLights.removedTopologyKeys.clear();
+	mAnalyticLights.reboundTopologyKeys.clear();
+	mAnalyticLights.matchedSurfaceCount = 0;
+	mAnalyticLights.actorOverlayRuleCount = 0;
+	mAnalyticLights.actorOverlayMatchedSurfaceCount = 0;
+	mAnalyticLights.mapOverlayRuleCount = 0;
+	mAnalyticLights.transientMuzzleSlotCount = 0;
+	mAnalyticLights.transientMuzzleActiveCount = 0;
+	mAnalyticLights.dedupedMatchCount = 0;
+	mAnalyticLights.truncatedLightCount = 0;
+	mAnalyticLights.topologyChanged = false;
+	mAnalyticLights.propertiesChanged = false;
+	mAnalyticLights.lastBuildTopologyChanged = false;
+	mAnalyticLights.lastBuildPropertiesChanged = false;
+
+	mEmissiveSurfaces.activeSurfaces.clear();
+	mEmissiveSurfaces.activeTopologyKeys.clear();
+	mEmissiveSurfaces.activePropertyHashes.clear();
+	mEmissiveSurfaces.activeBindingHashes.clear();
+	mEmissiveSurfaces.activeDiagnosticFlags.clear();
+	mEmissiveSurfaces.addedTopologyKeys.clear();
+	mEmissiveSurfaces.removedTopologyKeys.clear();
+	mEmissiveSurfaces.reboundTopologyKeys.clear();
+	mEmissiveSurfaces.totalPowerEstimate = 0.0f;
+	mEmissiveSurfaces.autoTaggedCount = 0;
+	mEmissiveSurfaces.explicitRuleMatchCount = 0;
+	mEmissiveSurfaces.truncatedSurfaceCount = 0;
+	mEmissiveSurfaces.topologyChanged = false;
+	mEmissiveSurfaces.propertiesChanged = false;
+	mEmissiveSurfaces.materialBindingChanged = false;
+	mEmissiveSurfaces.materialPropertiesChanged = false;
+	mEmissiveSurfaces.lastBuildTopologyChanged = false;
+	mEmissiveSurfaces.lastBuildPropertiesChanged = false;
+
+	mSectorLighting = {};
+	mEnvironmentLighting = {};
+	mSurfaceRecords.clear();
+	mFrameAppendStats = {};
 	mFrameSerial = 0;
 }
 

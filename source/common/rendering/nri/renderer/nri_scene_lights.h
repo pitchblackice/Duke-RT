@@ -259,6 +259,7 @@ public:
 	};
 
 	void Reset();
+	void ResetLevelState();
 	void BeginFrame(uint64_t frameSerial);
 	void AppendSceneView(
 		const nri_scene::SceneView& sceneView,

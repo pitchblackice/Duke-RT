@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -6117,6 +6118,176 @@ void NRIRenderer::Shutdown()
 	mFinalPresentFrameTextureSet = nullptr;
 	mFinalPresentOutputSet = nullptr;
 	mSceneDataDescriptorsInitialized.clear();
+}
+
+void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
+{
+	WaitForCommandsTracked("level-unload");
+	RequestHistoryReset("level-unload", true, true);
+
+	DestroyStaticMapSceneCache("level-unload");
+	mStaticMapScene = {};
+	mStaticAccelerationBuildSerial = 0;
+	mPreservedStaticMapSky = {};
+
+	mMapWorld = {};
+	mObservedMapWorldBuildSerial = 0;
+
+	DestroyCachedTextures();
+	ResetPersistentDynamicEmissiveCache();
+	ResetMuzzleFlashOverlayState("level-unload");
+	mLastResolvedLightOverlayGeneration = 0;
+
+	ClearRuntimePointLights();
+	ClearRuntimeDebugSpheres();
+	mSceneLights.ResetLevelState();
+
+	mPendingStaticMapLightingInvalidation = false;
+	mAllowStartupMapWorldCorrection = false;
+	mAllowStartupMutationRebaseline = false;
+	mPendingStartupMutationRebaseline = false;
+	mPendingStartupVisibleChunkValidation.clear();
+	mStartupMapWorldCorrectionDeadlineFrame = 0;
+	mStartupMutationRebaselineDeadlineFrame = 0;
+
+	mCurrentVisibleChunkWords.clear();
+	mCurrentVisibleFlatPlaneWords.clear();
+	mLastSurfaceProbe = {};
+	mLastLoggedSurfaceProbe = {};
+	mSurfaceProbeFrame = {};
+	mDynamicSceneLastFrame = {};
+	mRuntimeMapLastFrame = {};
+	mRuntimeSpaceLinkLastFrame = {};
+	mLastRuntimeLinkTraceState = {};
+	mHasRuntimeLinkTraceState = false;
+	mRuntimeChunkTranslationHistory.clear();
+	mLastStats = {};
+	mHasLoggedStats = false;
+
+	mSceneTextureCacheDebugStats = {};
+	mPersistentDynamicEmissiveHighWaterStats = {};
+	mPersistentDynamicEmissiveHighWaterSurfaceCount = 0;
+	mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
+	mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
+	mRuntimeMutationCacheHighWaterStats = {};
+
+	mUsedStaticMapSceneLastFrame = false;
+	mUsedDynamicSceneLastFrame = false;
+	mHasVisibleMirrorPortalLastFrame = false;
+	mGpuSceneHasDynamicOverlay = false;
+	mUploadedStaticMapSceneLastFrame = false;
+	mBuiltStaticMapSceneASLastFrame = false;
+	mBuiltDynamicSceneASLastFrame = false;
+
+	mActiveTlasInstanceCount = 0;
+	mBoundStaticPrimitiveCount = 0;
+	mBoundDynamicPrimitiveCount = 0;
+	mBoundStaticMaterialCount = 0;
+	mBoundDynamicMaterialCount = 0;
+	mBoundPortalCount = 0;
+	mBoundRuntimeLightCount = 0;
+	mBoundRuntimeLightTileCountX = 0;
+	mBoundRuntimeLightTileCountY = 0;
+	mBoundRuntimeLightTileSize = 0;
+	mBoundRuntimeLightTileIndexCount = 0;
+	mBoundRuntimeLightMaxTileOccupancy = 0;
+	mRuntimeLightPayloadCacheValid = false;
+	mRuntimeLightPayloadHash = 0;
+	mRuntimeLightClusterCacheValid = false;
+	mRuntimeLightClusterPayloadHash = 0;
+	mRuntimeLightClusterCameraHash = 0;
+	mBoundEmissivePrimitiveCount = 0;
+	mBoundEmissiveDominantPrimitive = UINT32_MAX;
+	mBoundEmissiveDominantTile = 0;
+	mBoundEmissiveDominantFlags = 0;
+	mBoundEmissiveDominantDataSource = 0;
+	mEmissiveSamplingPayloadCacheValid = false;
+	mEmissiveSamplingPayloadHash = 0;
+	mEmissiveTlasInstanceCount = 0;
+	mEmissiveTlasStaticInstanceCount = 0;
+	mEmissiveTlasDynamicInstanceCount = 0;
+	mEmissiveTlasBuildCount = 0;
+	mEmissiveTlasInstancePayloadCacheValid = false;
+	mEmissiveTlasInstancePayloadHash = 0;
+	mBoundEmissiveTotalPower = 0.0f;
+	mBoundEmissiveDominantPower = 0.0f;
+	mBoundEmissivePrimitiveRecords.clear();
+	mSectorLightingPayloadCacheValid = false;
+	mSectorLightingPayloadHash = 0;
+	mBoundSectorLightSectorCount = 0;
+	mBoundSectorLightActiveCount = 0;
+	mBoundSectorLightPulsingCount = 0;
+	mBoundSectorLightDominantSector = UINT32_MAX;
+	mBoundSectorLightDominantContribution = 0.0f;
+
+	if (info.newLevel == nullptr)
+	{
+		mNextRuntimePointLightId = 1;
+		mNextRuntimeDebugSphereId = 1;
+	}
+}
+
+void NRIRenderer::OnLevelUnloadComplete(const LevelTransitionInfo& info)
+{
+	assert(!mMapWorld.valid);
+	assert(!mStaticMapScene.valid);
+	assert(!mStaticMapScene.texturesResident);
+	assert(!mStaticMapScene.buffersResident);
+	assert(!mStaticMapScene.accelerationResident);
+	assert(mStaticMapScene.chunks.empty());
+	assert(!mStaticMapChunkAtlas.valid);
+	assert(mStaticMapChunkAtlas.chunks.empty());
+	assert(!mResidentMapChunkRegistry.valid);
+	assert(mResidentMapChunkRegistry.entries.empty());
+	assert(mRuntimeMapMutations.chunks.empty());
+	assert(!mPendingStaticMapLightingInvalidation);
+	assert(!mLastSurfaceProbe.valid);
+	assert(!mLastLoggedSurfaceProbe.valid);
+	assert(mRuntimeDebugSpheres.empty());
+	assert(mSceneLights.GetManualAnalyticLightCount() == 0);
+
+	if (info.newLevel == nullptr)
+	{
+		mCurrentVisibleChunkWords.clear();
+		mCurrentVisibleFlatPlaneWords.clear();
+	}
+}
+
+void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
+{
+	mMapWorld = {};
+	mObservedMapWorldBuildSerial = 0;
+	mAllowStartupMapWorldCorrection = false;
+	mAllowStartupMutationRebaseline = false;
+	mPendingStartupMutationRebaseline = false;
+	mPendingStartupVisibleChunkValidation.clear();
+	mStartupMapWorldCorrectionDeadlineFrame = 0;
+	mStartupMutationRebaselineDeadlineFrame = 0;
+	mLastSurfaceProbe = {};
+	mLastLoggedSurfaceProbe = {};
+	mSurfaceProbeFrame = {};
+	mDynamicSceneLastFrame = {};
+	mRuntimeMapLastFrame = {};
+	mRuntimeSpaceLinkLastFrame = {};
+	mRuntimeChunkTranslationHistory.clear();
+	mSceneTextureCacheDebugStats = {};
+	mPersistentDynamicEmissiveHighWaterStats = {};
+	mPersistentDynamicEmissiveHighWaterSurfaceCount = 0;
+	mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
+	mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
+	mRuntimeMutationCacheHighWaterStats = {};
+	mLastStats = {};
+	mHasLoggedStats = false;
+	mLastRuntimeLinkTraceState = {};
+	mHasRuntimeLinkTraceState = false;
+	mNextRuntimePointLightId = 1;
+	mNextRuntimeDebugSphereId = 1;
+
+	if (info.newLevel == nullptr)
+	{
+		mCurrentVisibleChunkWords.clear();
+		mCurrentVisibleFlatPlaneWords.clear();
+	}
 }
 
 void NRIRenderer::RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightOverlaySet& resolvedLightOverlays)
@@ -12798,18 +12969,6 @@ void NRIRenderer::RefreshMapWorld()
 		mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
 		mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
 		mRuntimeMutationCacheHighWaterStats = {};
-	}
-	if (levelChanged && mSceneLights.GetManualAnalyticLightCount() > 0)
-	{
-		const uint32_t clearedCount = mSceneLights.GetManualAnalyticLightCount();
-		ClearRuntimePointLights();
-		Printf("NRI PT test lights cleared: count=%u reason=level-change\n", clearedCount);
-	}
-	if (levelChanged && !mRuntimeDebugSpheres.empty())
-	{
-		const uint32_t clearedCount = (uint32_t)mRuntimeDebugSpheres.size();
-		ClearRuntimeDebugSpheres();
-		Printf("NRI PT debug spheres cleared: count=%u reason=level-change\n", clearedCount);
 	}
 	const bool needsBuild = !mMapWorld.valid || levelChanged || pendingBuildSerial != mObservedMapWorldBuildSerial;
 	if (!needsBuild)
