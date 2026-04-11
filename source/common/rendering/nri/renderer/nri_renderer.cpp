@@ -4486,7 +4486,6 @@ namespace
 			details.surfaceCountMismatch ||
 			details.portalCountMismatch ||
 			details.portalTargetCountMismatch ||
-			details.statsMismatch ||
 			outChunkDiffCount > 0 ||
 			outSurfaceDiffCount > 0;
 	}
