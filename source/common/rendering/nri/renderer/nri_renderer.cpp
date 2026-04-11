@@ -17443,6 +17443,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				useStaticAnimatedReplacement ||
 				!materialOnlyReplacement ||
 				exclusiveMaterialOnlyReplacement;
+			nri_scene::GeometryData liveGeometry;
+			if (exclusiveMaterialOnlyReplacement)
+			{
+				Clocker clock(NriPTGeometryBuild);
+				nri_scene::BuildGeometry(liveChunkView, liveGeometry);
+				AssignGeometryPortalIndices(mMapWorld, liveGeometry);
+			}
 			nri_scene::MaterialBridgeData liveMaterials;
 			{
 				Clocker clock(NriPTMaterialBuild);
@@ -17454,6 +17461,17 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				return false;
 			}
 
+			if (exclusiveMaterialOnlyReplacement)
+			{
+				BuildRuntimeMutationLightIdentityOverrides(
+					mMapWorld,
+					mapChunk,
+					liveWorld,
+					liveWorld.chunks[0],
+					replacement.lightIdentityOverrides);
+				replacement.geometry = std::move(liveGeometry);
+				replacement.triangleCount = (uint32_t)replacement.geometry.primitives.size();
+			}
 			replacement.sceneView = liveChunkView;
 			replacement.materialBridge = std::move(liveMaterials);
 			replacement.replacementBaseline = std::move(liveBaseline);
