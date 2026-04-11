@@ -1000,6 +1000,9 @@ private:
 		RuntimeMapMutationCache& outRuntimeMutations);
 	void ResetResidentMapChunkRegistry();
 	void SyncResidentMapChunkRegistryFromStaticScene();
+	uint32_t GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex) const;
+	uint32_t FindPreferredStaticSceneChunkListIndex(uint32_t chunkIndex) const;
+	uint32_t CountStaticSceneChunkSlots(uint32_t chunkIndex) const;
 	void ResetStaticMapChunkAtlas(StaticMapChunkAtlas& atlas) const;
 	uint32_t GetChunkAtlasCapacity(uint32_t usedCount) const;
 	uint32_t AllocateChunkAtlasSlice(uint32_t count, uint32_t alignment, uint32_t& cursor) const;
