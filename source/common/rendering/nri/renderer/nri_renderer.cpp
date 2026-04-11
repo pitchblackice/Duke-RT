@@ -17554,6 +17554,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			replacement.active = true;
 			bool activeHardwareCanvasChunk = false;
+			bool suppressedAnimatedResidentAlreadySynchronized = false;
 			// Build tile animation can change the resolved PT texture binding
 			// without mutating the authored wall/sector fields tracked above.
 			const bool refreshedAnimatedChunk = [&]()
@@ -17571,8 +17572,21 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				const bool forceHardwareCanvasRefresh =
 					activeHardwareCanvasChunk &&
 					IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
+				const uint64_t liveAnimatedGeometrySignature =
+					ComputeAnimatedGeometrySignature(liveChunkView);
 				const uint64_t liveAnimatedMaterialSignature =
 					ComputeAnimatedMaterialSignature(liveChunkView);
+				suppressedAnimatedResidentAlreadySynchronized =
+					useStaticAnimatedReplacement &&
+					residentEntry != nullptr &&
+					residentEntry->valid &&
+					residentEntry->animatedRefreshSuppressed &&
+					residentEntry->animatedGeometrySignature == liveAnimatedGeometrySignature &&
+					residentEntry->animatedMaterialSignature == liveAnimatedMaterialSignature;
+				if (suppressedAnimatedResidentAlreadySynchronized)
+				{
+					return true;
+				}
 				if (!forceReplacementMaterialRefresh &&
 					!forceHardwareCanvasRefresh &&
 					liveAnimatedMaterialSignature == replacement.animatedMaterialSignature)
@@ -17610,6 +17624,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.active = true;
 				mRuntimeMapLastFrame.heldChunkCount++;
 				mLastPerfShellTraceStats.runtimeMutationHeldChunks++;
+			}
+			else if (suppressedAnimatedResidentAlreadySynchronized)
+			{
+				replacement.active = false;
+				replacement.excludeStaticChunk = false;
+				replacement.staticAnimatedReplacement = false;
+				replacement.animationOnlyRefreshed = false;
+				replacement.stableMutationFrameCount = 0;
+				TraceRuntimeMapMutationChunk(mapChunk, replacement);
+				continue;
 			}
 		}
 
@@ -19005,7 +19029,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mutableChunk.hasAnimatedTextureCandidates = ChunkHasAnimatedStaticMapSurfaceCandidates(mMapWorld, mapChunk);
 		mutableChunk.animatedRefreshSuppressed =
 			previousAnimatedRefreshSuppressed &&
-			mutableChunk.animatedGeometrySignature == previousAnimatedGeometrySignature;
+			(appliedStaticAnimatedReplacement ||
+			 appliedAnimationOnlyRefreshed ||
+			 mutableChunk.animatedGeometrySignature == previousAnimatedGeometrySignature);
 		mStaticMapScene.lightChunkViews[chunkListIndex] = residentSceneView;
 		outStaticSceneChunkListIndex = chunkListIndex;
 		outMaterialDirty = true;
