@@ -36,6 +36,7 @@
 #endif
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <fstream>
 #include <string>
@@ -76,6 +77,7 @@ EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
 EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
+EXTERN_CVAR(Bool, nri_ptscenestats)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
 
@@ -105,6 +107,20 @@ CUSTOM_CVAR(Int, nri_ptnudgetrace, 0, 0)
 
 namespace
 {
+	static const char* GetLevelTransitionReasonName(LevelTransitionReason reason)
+	{
+		switch (reason)
+		{
+		case LevelTransitionReason::NewGame: return "newgame";
+		case LevelTransitionReason::NextLevel: return "nextlevel";
+		case LevelTransitionReason::SaveGameLoad: return "savegame";
+		case LevelTransitionReason::Startup: return "startup";
+		case LevelTransitionReason::MainMenu: return "mainmenu";
+		case LevelTransitionReason::Credits: return "credits";
+		default: return "unknown";
+		}
+	}
+
 	static HRESULT CreateDxgiFactoryForTelemetry(IDXGIFactory4** factory)
 	{
 		if (factory == nullptr)
@@ -2769,6 +2785,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 		return false;
 	}
 
+	if (mLevelTransitionInProgress)
+	{
+		return true;
+	}
+
 	if (nri_ptdebug > 0 && !sLoggedFirstSceneAttempt)
 	{
 		Printf("NRI RenderPathTracedScene: drawmode=%d portal=%s active_target=%s size=%ux%u\n",
@@ -3059,6 +3080,12 @@ bool NRIRenderDevice::HasActiveSceneFrame() const
 
 bool NRIRenderDevice::StartPathTracingLevelPreload()
 {
+	if (mLevelTransitionInProgress)
+	{
+		mPathTracingLevelPreloadPending = false;
+		return false;
+	}
+
 	if (!mInitialized || mRenderer == nullptr)
 	{
 		mPathTracingLevelPreloadPending = false;
@@ -3079,6 +3106,12 @@ bool NRIRenderDevice::TickPathTracingLevelPreload()
 {
 	if (!mPathTracingLevelPreloadPending)
 	{
+		return true;
+	}
+
+	if (mLevelTransitionInProgress)
+	{
+		mPathTracingLevelPreloadPending = false;
 		return true;
 	}
 
@@ -3113,6 +3146,74 @@ bool NRIRenderDevice::IsPathTracingLevelPreloadPending() const
 void NRIRenderDevice::CancelPathTracingLevelPreload()
 {
 	mPathTracingLevelPreloadPending = false;
+}
+
+void NRIRenderDevice::NotifyLevelUnloadBegin(const LevelTransitionInfo& info)
+{
+	mCurrentLevelTransition = info;
+	mLevelTransitionInProgress = true;
+
+	const bool hadPendingPreload = mPathTracingLevelPreloadPending;
+	CancelPathTracingLevelPreload();
+
+	if (mInitialized)
+	{
+		WaitForCommands(true);
+	}
+
+	const uint32_t clearedWeaponLightEvents = ClearPendingPathTracingWeaponLightEvents();
+	ResetLevelTransitionShellState();
+
+	if (nri_ptscenestats)
+	{
+		Printf("NRI PT level transition: phase=unload-begin serial=%llu reason=%s old=%s new=%s preload_pending=%s cleared_weapon_events=%u initialized=%s\n",
+			(unsigned long long)info.serial,
+			GetLevelTransitionReasonName(info.reason),
+			info.oldLevelName.IsNotEmpty() ? info.oldLevelName.GetChars() : "(none)",
+			info.newLevelName.IsNotEmpty() ? info.newLevelName.GetChars() : "(none)",
+			hadPendingPreload ? "yes" : "no",
+			clearedWeaponLightEvents,
+			mInitialized ? "yes" : "no");
+	}
+}
+
+void NRIRenderDevice::NotifyLevelUnloadComplete(const LevelTransitionInfo& info)
+{
+	mCurrentLevelTransition = info;
+	ResetLevelTransitionShellState();
+	assert(mPendingPathTracingWeaponLightEvents.Size() == 0);
+
+	if (nri_ptscenestats)
+	{
+		Printf("NRI PT level transition: phase=unload-complete serial=%llu reason=%s old=%s new=%s pending_weapon_events=%u frame_begun=%s active_target=%s\n",
+			(unsigned long long)info.serial,
+			GetLevelTransitionReasonName(info.reason),
+			info.oldLevelName.IsNotEmpty() ? info.oldLevelName.GetChars() : "(none)",
+			info.newLevelName.IsNotEmpty() ? info.newLevelName.GetChars() : "(none)",
+			(uint32_t)mPendingPathTracingWeaponLightEvents.Size(),
+			mFrameBegun ? "yes" : "no",
+			mActiveTarget != nullptr ? "yes" : "no");
+	}
+}
+
+void NRIRenderDevice::NotifyLevelLoadBegin(const LevelTransitionInfo& info)
+{
+	mCurrentLevelTransition = info;
+	mLevelTransitionInProgress = false;
+	mPathTracingLevelPreloadPending = false;
+	mNextPathTracingWeaponLightEventSerial = 1;
+	mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
+
+	if (nri_ptscenestats)
+	{
+		Printf("NRI PT level transition: phase=load-begin serial=%llu reason=%s old=%s new=%s preload_pending=%s pending_weapon_events=%u\n",
+			(unsigned long long)info.serial,
+			GetLevelTransitionReasonName(info.reason),
+			info.oldLevelName.IsNotEmpty() ? info.oldLevelName.GetChars() : "(none)",
+			info.newLevelName.IsNotEmpty() ? info.newLevelName.GetChars() : "(none)",
+			mPathTracingLevelPreloadPending ? "yes" : "no",
+			(uint32_t)mPendingPathTracingWeaponLightEvents.Size());
+	}
 }
 
 bool NRIRenderDevice::ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const
@@ -3639,7 +3740,7 @@ void NRIRenderDevice::PrintPathTracingSurfaceProbeStatus() const
 
 void NRIRenderDevice::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event)
 {
-	if (event.eventId.IsEmpty())
+	if (mLevelTransitionInProgress || event.eventId.IsEmpty())
 	{
 		return;
 	}
@@ -3652,6 +3753,11 @@ void NRIRenderDevice::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLig
 
 void NRIRenderDevice::EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event)
 {
+	if (mLevelTransitionInProgress)
+	{
+		return;
+	}
+
 	if (mRenderer != nullptr)
 	{
 		mRenderer->TraceActorSpriteEvent(event);
@@ -3662,6 +3768,14 @@ void NRIRenderDevice::ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeap
 {
 	outEvents.Clear();
 	outEvents.Swap(mPendingPathTracingWeaponLightEvents);
+}
+
+uint32_t NRIRenderDevice::ClearPendingPathTracingWeaponLightEvents()
+{
+	const uint32_t clearedCount = (uint32_t)mPendingPathTracingWeaponLightEvents.Size();
+	mPendingPathTracingWeaponLightEvents.Clear();
+	mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
+	return clearedCount;
 }
 
 uint32_t NRIRenderDevice::GetPendingPathTracingWeaponLightEventCount() const
@@ -6503,6 +6617,17 @@ void NRIRenderDevice::ResetFrameTracking(bool presentedAcquiredImage)
 	mFrameGenerationUiTargetActive = false;
 	mHasAcquiredSwapChainImage = false;
 	mCurrentSwapChainImage = 0;
+}
+
+void NRIRenderDevice::ResetLevelTransitionShellState()
+{
+	ResetFrameTracking(false);
+	mUsingSaveTarget = false;
+	mActiveCanvasTexture = nullptr;
+	mActiveCanvasSourceTexture = nullptr;
+	mPendingViewSnapshotCanvas = nullptr;
+	mPathTracingLevelPreloadPending = false;
+	mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
 }
 
 uint32_t NRIRenderDevice::GetQueuedFrameIndex(uint64_t frameIndex) const

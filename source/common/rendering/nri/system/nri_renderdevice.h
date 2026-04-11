@@ -57,6 +57,9 @@ public:
 	bool TickPathTracingLevelPreload() override;
 	bool IsPathTracingLevelPreloadPending() const override;
 	void CancelPathTracingLevelPreload() override;
+	void NotifyLevelUnloadBegin(const LevelTransitionInfo& info) override;
+	void NotifyLevelUnloadComplete(const LevelTransitionInfo& info) override;
+	void NotifyLevelLoadBegin(const LevelTransitionInfo& info) override;
 	void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event) override;
 	void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event) override;
 	void PrintPathTracingSurfaceProbeStatus() const override;
@@ -275,6 +278,8 @@ private:
 	void DestroyViewSnapshotTexture();
 	bool CopyTextureToTexture(NRITextureResource& destination, NRITextureResource& source);
 	bool SnapshotTextureToCanvas(FCanvasTexture* tex, NRITextureResource& source);
+	void ResetLevelTransitionShellState();
+	uint32_t ClearPendingPathTracingWeaponLightEvents();
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
@@ -378,4 +383,6 @@ private:
 	TArray<PathTracingWeaponLightEvent> mPendingPathTracingWeaponLightEvents;
 	uint64_t mNextPathTracingWeaponLightEventSerial = 1;
 	uint32_t mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
+	bool mLevelTransitionInProgress = false;
+	LevelTransitionInfo mCurrentLevelTransition = {};
 };
