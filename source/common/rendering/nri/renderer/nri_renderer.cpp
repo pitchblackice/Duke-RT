@@ -5357,6 +5357,55 @@ namespace
 		return textureId.isValid() && GetExtInfo(textureId).picanm.type() != 0;
 	}
 
+	static bool IsAuthoredTextureCurrentlyUnresolved(FTextureID textureId)
+	{
+		if (!textureId.isValid())
+		{
+			return false;
+		}
+
+		FGameTexture* texture = TexMan.GetGameTexture(textureId, true);
+		return texture == nullptr || !texture->isValid();
+	}
+
+	static bool ChunkHasUnresolvedAuthoredTextures(const nri_scene::PTMapChunk& chunk)
+	{
+		if (chunk.kind != nri_scene::PTMapChunkKind::Sector ||
+			chunk.sectorIndex < 0 ||
+			(unsigned)chunk.sectorIndex >= sector.Size())
+		{
+			return false;
+		}
+
+		const sectortype& sec = sector[(unsigned)chunk.sectorIndex];
+		if (IsAuthoredTextureCurrentlyUnresolved(sec.floortexture) ||
+			IsAuthoredTextureCurrentlyUnresolved(sec.ceilingtexture))
+		{
+			return true;
+		}
+
+		for (const walltype& wal : sec.walls)
+		{
+			if (IsAuthoredTextureCurrentlyUnresolved(wal.walltexture) ||
+				IsAuthoredTextureCurrentlyUnresolved(wal.overtexture))
+			{
+				return true;
+			}
+
+			if (wal.nextwall >= 0 && (unsigned)wal.nextwall < wall.Size())
+			{
+				const walltype& nextWall = wall[(unsigned)wal.nextwall];
+				if (IsAuthoredTextureCurrentlyUnresolved(nextWall.walltexture) ||
+					IsAuthoredTextureCurrentlyUnresolved(nextWall.overtexture))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
 	static bool ChunkHasAnimatedStaticMapSurfaceCandidates(const nri_scene::PTMapWorld& mapWorld, const nri_scene::PTMapChunk& chunk)
 	{
 		const uint32_t endSurface = std::min<uint32_t>(chunk.firstSurface + chunk.surfaceCount, (uint32_t)mapWorld.surfaces.size());
@@ -16785,6 +16834,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
 		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
 		const bool chunkVisibleNow = IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
+		const bool chunkHasUnresolvedAuthoredTextures =
+			chunkVisibleNow &&
+			ChunkHasUnresolvedAuthoredTextures(mapChunk);
 		ResidentMapChunkRegistry::Entry* residentEntry =
 			mapChunk.chunkIndex < mResidentMapChunkRegistry.entries.size() ?
 			&mResidentMapChunkRegistry.entries[mapChunk.chunkIndex] :
@@ -16799,9 +16851,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			else
 			{
 				static constexpr uint8_t kVisibleResidentValidationWindow = 8;
+				static constexpr uint8_t kVisibleResidentUnresolvedTextureValidationWindow = 64;
 				if (!residentEntry->wasVisibleLastFrame)
 				{
 					residentEntry->visibleValidationFramesRemaining = kVisibleResidentValidationWindow;
+				}
+				if (chunkHasUnresolvedAuthoredTextures)
+				{
+					residentEntry->visibleValidationFramesRemaining = std::max<uint8_t>(
+						residentEntry->visibleValidationFramesRemaining,
+						kVisibleResidentUnresolvedTextureValidationWindow);
 				}
 				residentEntry->wasVisibleLastFrame = true;
 			}
@@ -16919,13 +16978,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				{
 					normalizedReasonMask |= nri_scene::PTMapChunkMutationReason_SectorMaterial;
 				}
-				else
+				else if (!chunkHasUnresolvedAuthoredTextures)
 				{
 					residentEntry->visibleValidationFramesRemaining = 0;
 				}
 			}
 
-			if (residentEntry->visibleValidationFramesRemaining > 0)
+			if (residentEntry->visibleValidationFramesRemaining > 0 && !chunkHasUnresolvedAuthoredTextures)
 			{
 				residentEntry->visibleValidationFramesRemaining--;
 			}
