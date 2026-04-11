@@ -18600,6 +18600,28 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		(uint32_t)residentGeometry.primitives.size();
 	const uint32_t residentMaterialCount = (uint32_t)residentMaterials.materials.size();
 	const bool chunkBecomesEmpty = residentPrimitiveCount == 0 || residentMaterialCount == 0;
+	const uint32_t residentChunkRemovalReasonMask =
+		nri_scene::PTMapChunkMutationReason_SectorGeometry |
+		nri_scene::PTMapChunkMutationReason_WallGeometry |
+		nri_scene::PTMapChunkMutationReason_SectorDirty |
+		nri_scene::PTMapChunkMutationReason_SectionDirty |
+		nri_scene::PTMapChunkMutationReason_Dragged;
+	const bool suspiciousNonStructuralChunkRemoval =
+		chunkBecomesEmpty &&
+		hasResidentChunk &&
+		(appliedReasonMask & residentChunkRemovalReasonMask) == 0;
+	if (suspiciousNonStructuralChunkRemoval)
+	{
+		if (ShouldTracePtPerf())
+		{
+			Printf("NRI PT resident chunk trace: event=reject-empty-nonstructural chunk=%u reason_mask=0x%x resident_prims=%u resident_mats=%u\n",
+				mapChunk.chunkIndex,
+				appliedReasonMask,
+				residentPrimitiveCount,
+				residentMaterialCount);
+		}
+		return false;
+	}
 
 	if (chunkBecomesEmpty)
 	{
