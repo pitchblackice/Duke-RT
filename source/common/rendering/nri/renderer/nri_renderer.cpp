@@ -12814,32 +12814,29 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 		stats.portalSurfaceCount,
 		stats.skySurfaceCount,
 		stats.triangleCount);
-	if (ShouldTracePtPerf())
+	const std::string reasonSummary = BuildStartupMapWorldDiffReasonSummary(diffDetails);
+	Printf("NRI PT startup world correction detail: trigger=%s frame=%u reasons=%s sampled_chunks=%u/%u\n",
+		trigger != nullptr ? trigger : "unknown",
+		mFrameIndex,
+		reasonSummary.c_str(),
+		(uint32_t)diffDetails.chunkSamples.size(),
+		chunkDiffCount);
+	for (size_t sampleIndex = 0; sampleIndex < diffDetails.chunkSamples.size(); ++sampleIndex)
 	{
-		const std::string reasonSummary = BuildStartupMapWorldDiffReasonSummary(diffDetails);
-		Printf("NRI PT startup world correction detail: trigger=%s frame=%u reasons=%s sampled_chunks=%u/%u\n",
+		const auto& sample = diffDetails.chunkSamples[sampleIndex];
+		Printf("NRI PT startup world correction chunk: trigger=%s frame=%u sample=%u/%u chunk=%u sector=%d->%d surfaces=%u->%u tris=%u->%u surface_diffs=%u\n",
 			trigger != nullptr ? trigger : "unknown",
 			mFrameIndex,
-			reasonSummary.c_str(),
+			(uint32_t)(sampleIndex + 1u),
 			(uint32_t)diffDetails.chunkSamples.size(),
-			chunkDiffCount);
-		for (size_t sampleIndex = 0; sampleIndex < diffDetails.chunkSamples.size(); ++sampleIndex)
-		{
-			const auto& sample = diffDetails.chunkSamples[sampleIndex];
-			Printf("NRI PT startup world correction chunk: trigger=%s frame=%u sample=%u/%u chunk=%u sector=%d->%d surfaces=%u->%u tris=%u->%u surface_diffs=%u\n",
-				trigger != nullptr ? trigger : "unknown",
-				mFrameIndex,
-				(uint32_t)(sampleIndex + 1u),
-				(uint32_t)diffDetails.chunkSamples.size(),
-				sample.chunkIndex,
-				sample.currentSectorIndex,
-				sample.rebuiltSectorIndex,
-				sample.currentSurfaceCount,
-				sample.rebuiltSurfaceCount,
-				sample.currentTriangleCount,
-				sample.rebuiltTriangleCount,
-				sample.surfaceDiffCount);
-		}
+			sample.chunkIndex,
+			sample.currentSectorIndex,
+			sample.rebuiltSectorIndex,
+			sample.currentSurfaceCount,
+			sample.rebuiltSurfaceCount,
+			sample.currentTriangleCount,
+			sample.rebuiltTriangleCount,
+			sample.surfaceDiffCount);
 	}
 	return true;
 }
