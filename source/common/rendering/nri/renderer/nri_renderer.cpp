@@ -4323,6 +4323,64 @@ namespace
 		destination.primitiveProvenance.insert(destination.primitiveProvenance.end(), source.primitiveProvenance.begin(), source.primitiveProvenance.end());
 	}
 
+	static bool StartupMapWorldStructureDiffers(
+		const nri_scene::PTMapWorld& currentWorld,
+		const nri_scene::PTMapWorld& rebuiltWorld,
+		uint32_t& outChunkDiffCount,
+		uint32_t& outSurfaceDiffCount)
+	{
+		outChunkDiffCount = 0;
+		outSurfaceDiffCount = 0;
+
+		if (currentWorld.valid != rebuiltWorld.valid ||
+			currentWorld.chunks.size() != rebuiltWorld.chunks.size() ||
+			currentWorld.surfaces.size() != rebuiltWorld.surfaces.size() ||
+			currentWorld.portals.size() != rebuiltWorld.portals.size() ||
+			currentWorld.portalTargets.size() != rebuiltWorld.portalTargets.size() ||
+			std::memcmp(&currentWorld.stats, &rebuiltWorld.stats, sizeof(currentWorld.stats)) != 0)
+		{
+			return true;
+		}
+
+		for (size_t chunkIndex = 0; chunkIndex < currentWorld.chunks.size(); ++chunkIndex)
+		{
+			const auto& currentChunk = currentWorld.chunks[chunkIndex];
+			const auto& rebuiltChunk = rebuiltWorld.chunks[chunkIndex];
+			if (currentChunk.kind != rebuiltChunk.kind ||
+				currentChunk.chunkIndex != rebuiltChunk.chunkIndex ||
+				currentChunk.sectorIndex != rebuiltChunk.sectorIndex ||
+				currentChunk.localSpaceIndex != rebuiltChunk.localSpaceIndex ||
+				currentChunk.firstSurface != rebuiltChunk.firstSurface ||
+				currentChunk.surfaceCount != rebuiltChunk.surfaceCount ||
+				currentChunk.triangleCount != rebuiltChunk.triangleCount)
+			{
+				outChunkDiffCount++;
+			}
+		}
+
+		for (size_t surfaceIndex = 0; surfaceIndex < currentWorld.surfaces.size(); ++surfaceIndex)
+		{
+			const auto& currentSurface = currentWorld.surfaces[surfaceIndex];
+			const auto& rebuiltSurface = rebuiltWorld.surfaces[surfaceIndex];
+			const auto& a = currentSurface.surface;
+			const auto& b = rebuiltSurface.surface;
+			if (currentSurface.kind != rebuiltSurface.kind ||
+				a.vertices.size() != b.vertices.size() ||
+				a.material.flags != b.material.flags ||
+				a.material.texture != b.material.texture ||
+				a.material.palette != b.material.palette ||
+				a.provenance.sourceType != b.provenance.sourceType ||
+				a.provenance.sectorIndex != b.provenance.sectorIndex ||
+				a.provenance.wallIndex != b.provenance.wallIndex ||
+				a.provenance.sectionIndex != b.provenance.sectionIndex)
+			{
+				outSurfaceDiffCount++;
+			}
+		}
+
+		return outChunkDiffCount > 0 || outSurfaceDiffCount > 0;
+	}
+
 	static void AppendGeometryChunk(
 		const nri_scene::GeometryData& source,
 		uint32_t sourceVertexOffset,
@@ -12565,60 +12623,22 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 		return true;
 	}
 
-	uint32_t dirtyChunkCount = 0;
-	uint32_t geometryChunkCount = 0;
-	uint32_t materialChunkCount = 0;
-	for (size_t chunkListIndex = 0; chunkListIndex < mMapWorld.chunks.size(); ++chunkListIndex)
-	{
-		const auto& mapChunk = mMapWorld.chunks[chunkListIndex];
-		const auto& replacement = mRuntimeMapMutations.chunks[chunkListIndex];
-		nri_scene::PTMapChunkMutationAnalysis analysis = {};
-		if (!nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement.baseline, analysis))
-		{
-			continue;
-		}
-
-		const uint32_t startupNoiseMask =
-			nri_scene::PTMapChunkMutationReason_SectionDirty |
-			nri_scene::PTMapChunkMutationReason_Dragged;
-		const uint32_t effectiveReasonMask = analysis.reasonMask & ~startupNoiseMask;
-		if (!analysis.signatureChanged && effectiveReasonMask == nri_scene::PTMapChunkMutationReason_None)
-		{
-			continue;
-		}
-
-		dirtyChunkCount++;
-		if ((effectiveReasonMask & (
-				nri_scene::PTMapChunkMutationReason_SectorGeometry |
-				nri_scene::PTMapChunkMutationReason_WallGeometry |
-				nri_scene::PTMapChunkMutationReason_SectorDirty)) != 0 ||
-			analysis.signatureChanged)
-		{
-			geometryChunkCount++;
-		}
-		if ((effectiveReasonMask & (
-				nri_scene::PTMapChunkMutationReason_SectorMaterial |
-				nri_scene::PTMapChunkMutationReason_WallMaterial)) != 0)
-		{
-			materialChunkCount++;
-		}
-	}
-
-	if (dirtyChunkCount == 0)
-	{
-		return true;
-	}
-
 	nri_scene::PTMapWorld correctedWorld = {};
 	if (!nri_scene::BuildMapWorld(correctedWorld))
 	{
-		Printf(TEXTCOLOR_RED "NRI PT startup world correction: authoritative rebuild failed for %s trigger=%s frame=%u dirty_chunks=%u.\n",
+		Printf(TEXTCOLOR_RED "NRI PT startup world correction: authoritative rebuild failed for %s trigger=%s frame=%u.\n",
 			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
 			trigger != nullptr ? trigger : "unknown",
-			mFrameIndex,
-			dirtyChunkCount);
+			mFrameIndex);
 		mAllowStartupMapWorldCorrection = false;
 		mStartupMapWorldCorrectionDeadlineFrame = 0;
+		return true;
+	}
+
+	uint32_t chunkDiffCount = 0;
+	uint32_t surfaceDiffCount = 0;
+	if (!StartupMapWorldStructureDiffers(mMapWorld, correctedWorld, chunkDiffCount, surfaceDiffCount))
+	{
 		return true;
 	}
 
@@ -12631,14 +12651,13 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	RequestHistoryReset("startup-world-correction");
 
 	const auto& stats = mMapWorld.stats;
-	Printf("NRI PT startup world correction: trigger=%s level=%s frame=%u build_serial=%llu dirty_chunks=%u geometry_chunks=%u material_chunks=%u chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
+	Printf("NRI PT startup world correction: trigger=%s level=%s frame=%u build_serial=%llu chunk_diffs=%u surface_diffs=%u chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
 		trigger != nullptr ? trigger : "unknown",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
 		mFrameIndex,
 		(unsigned long long)mMapWorld.buildSerial,
-		dirtyChunkCount,
-		geometryChunkCount,
-		materialChunkCount,
+		chunkDiffCount,
+		surfaceDiffCount,
 		stats.chunkCount,
 		stats.surfaceCount,
 		stats.wallSurfaceCount,
