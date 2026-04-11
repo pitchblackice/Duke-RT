@@ -4323,62 +4323,161 @@ namespace
 		destination.primitiveProvenance.insert(destination.primitiveProvenance.end(), source.primitiveProvenance.begin(), source.primitiveProvenance.end());
 	}
 
+	struct StartupMapWorldChunkDiffSample
+	{
+		uint32_t chunkIndex = 0;
+		int32_t currentSectorIndex = -1;
+		int32_t rebuiltSectorIndex = -1;
+		uint32_t currentSurfaceCount = 0;
+		uint32_t rebuiltSurfaceCount = 0;
+		uint32_t currentTriangleCount = 0;
+		uint32_t rebuiltTriangleCount = 0;
+		uint32_t surfaceDiffCount = 0;
+	};
+
+	struct StartupMapWorldDiffDetails
+	{
+		bool validMismatch = false;
+		bool chunkCountMismatch = false;
+		bool surfaceCountMismatch = false;
+		bool portalCountMismatch = false;
+		bool portalTargetCountMismatch = false;
+		bool statsMismatch = false;
+		std::vector<StartupMapWorldChunkDiffSample> chunkSamples;
+	};
+
+	static bool StartupMapWorldSurfaceDiffers(
+		const nri_scene::PTMapSurface& currentSurface,
+		const nri_scene::PTMapSurface& rebuiltSurface)
+	{
+		const auto& a = currentSurface.surface;
+		const auto& b = rebuiltSurface.surface;
+		return currentSurface.kind != rebuiltSurface.kind ||
+			a.vertices.size() != b.vertices.size() ||
+			a.material.flags != b.material.flags ||
+			a.material.texture != b.material.texture ||
+			a.material.palette != b.material.palette ||
+			a.provenance.sourceType != b.provenance.sourceType ||
+			a.provenance.sectorIndex != b.provenance.sectorIndex ||
+			a.provenance.wallIndex != b.provenance.wallIndex ||
+			a.provenance.sectionIndex != b.provenance.sectionIndex;
+	}
+
+	static std::string BuildStartupMapWorldDiffReasonSummary(const StartupMapWorldDiffDetails& details)
+	{
+		std::string summary;
+		auto appendReason = [&summary](const char* reason)
+		{
+			if (reason == nullptr || reason[0] == '\0')
+			{
+				return;
+			}
+			if (!summary.empty())
+			{
+				summary += ",";
+			}
+			summary += reason;
+		};
+
+		appendReason(details.validMismatch ? "valid" : nullptr);
+		appendReason(details.chunkCountMismatch ? "chunk-count" : nullptr);
+		appendReason(details.surfaceCountMismatch ? "surface-count" : nullptr);
+		appendReason(details.portalCountMismatch ? "portal-count" : nullptr);
+		appendReason(details.portalTargetCountMismatch ? "portal-target-count" : nullptr);
+		appendReason(details.statsMismatch ? "stats" : nullptr);
+		return summary.empty() ? "chunk-or-surface" : summary;
+	}
+
 	static bool StartupMapWorldStructureDiffers(
 		const nri_scene::PTMapWorld& currentWorld,
 		const nri_scene::PTMapWorld& rebuiltWorld,
 		uint32_t& outChunkDiffCount,
-		uint32_t& outSurfaceDiffCount)
+		uint32_t& outSurfaceDiffCount,
+		StartupMapWorldDiffDetails* outDetails = nullptr)
 	{
 		outChunkDiffCount = 0;
 		outSurfaceDiffCount = 0;
 
-		if (currentWorld.valid != rebuiltWorld.valid ||
-			currentWorld.chunks.size() != rebuiltWorld.chunks.size() ||
-			currentWorld.surfaces.size() != rebuiltWorld.surfaces.size() ||
-			currentWorld.portals.size() != rebuiltWorld.portals.size() ||
-			currentWorld.portalTargets.size() != rebuiltWorld.portalTargets.size() ||
-			std::memcmp(&currentWorld.stats, &rebuiltWorld.stats, sizeof(currentWorld.stats)) != 0)
-		{
-			return true;
-		}
+		StartupMapWorldDiffDetails localDetails = {};
+		StartupMapWorldDiffDetails& details = outDetails != nullptr ? *outDetails : localDetails;
+		details = {};
 
-		for (size_t chunkIndex = 0; chunkIndex < currentWorld.chunks.size(); ++chunkIndex)
+		details.validMismatch = currentWorld.valid != rebuiltWorld.valid;
+		details.chunkCountMismatch = currentWorld.chunks.size() != rebuiltWorld.chunks.size();
+		details.surfaceCountMismatch = currentWorld.surfaces.size() != rebuiltWorld.surfaces.size();
+		details.portalCountMismatch = currentWorld.portals.size() != rebuiltWorld.portals.size();
+		details.portalTargetCountMismatch = currentWorld.portalTargets.size() != rebuiltWorld.portalTargets.size();
+		details.statsMismatch = std::memcmp(&currentWorld.stats, &rebuiltWorld.stats, sizeof(currentWorld.stats)) != 0;
+
+		const size_t chunkCount = std::min(currentWorld.chunks.size(), rebuiltWorld.chunks.size());
+		details.chunkSamples.reserve(std::min<size_t>(chunkCount, 12u));
+		for (size_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
 		{
 			const auto& currentChunk = currentWorld.chunks[chunkIndex];
 			const auto& rebuiltChunk = rebuiltWorld.chunks[chunkIndex];
-			if (currentChunk.kind != rebuiltChunk.kind ||
+			const bool chunkMetadataDiff =
+				currentChunk.kind != rebuiltChunk.kind ||
 				currentChunk.chunkIndex != rebuiltChunk.chunkIndex ||
 				currentChunk.sectorIndex != rebuiltChunk.sectorIndex ||
 				currentChunk.localSpaceIndex != rebuiltChunk.localSpaceIndex ||
 				currentChunk.firstSurface != rebuiltChunk.firstSurface ||
 				currentChunk.surfaceCount != rebuiltChunk.surfaceCount ||
-				currentChunk.triangleCount != rebuiltChunk.triangleCount)
+				currentChunk.triangleCount != rebuiltChunk.triangleCount;
+
+			const uint32_t currentAvailableSurfaceCount =
+				currentChunk.firstSurface < currentWorld.surfaces.size() ?
+				(uint32_t)std::min<size_t>(currentChunk.surfaceCount, currentWorld.surfaces.size() - currentChunk.firstSurface) :
+				0u;
+			const uint32_t rebuiltAvailableSurfaceCount =
+				rebuiltChunk.firstSurface < rebuiltWorld.surfaces.size() ?
+				(uint32_t)std::min<size_t>(rebuiltChunk.surfaceCount, rebuiltWorld.surfaces.size() - rebuiltChunk.firstSurface) :
+				0u;
+			const uint32_t comparableSurfaceCount = std::min(currentAvailableSurfaceCount, rebuiltAvailableSurfaceCount);
+
+			uint32_t chunkSurfaceDiffCount = 0;
+			for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < comparableSurfaceCount; ++localSurfaceIndex)
+			{
+				const auto& currentSurface = currentWorld.surfaces[currentChunk.firstSurface + localSurfaceIndex];
+				const auto& rebuiltSurface = rebuiltWorld.surfaces[rebuiltChunk.firstSurface + localSurfaceIndex];
+				if (StartupMapWorldSurfaceDiffers(currentSurface, rebuiltSurface))
+				{
+					chunkSurfaceDiffCount++;
+				}
+			}
+
+			chunkSurfaceDiffCount +=
+				currentAvailableSurfaceCount > rebuiltAvailableSurfaceCount ?
+				(currentAvailableSurfaceCount - rebuiltAvailableSurfaceCount) :
+				(rebuiltAvailableSurfaceCount - currentAvailableSurfaceCount);
+
+			outSurfaceDiffCount += chunkSurfaceDiffCount;
+			if (chunkMetadataDiff || chunkSurfaceDiffCount > 0u)
 			{
 				outChunkDiffCount++;
+				if (details.chunkSamples.size() < 12u)
+				{
+					StartupMapWorldChunkDiffSample sample = {};
+					sample.chunkIndex = (uint32_t)chunkIndex;
+					sample.currentSectorIndex = currentChunk.sectorIndex;
+					sample.rebuiltSectorIndex = rebuiltChunk.sectorIndex;
+					sample.currentSurfaceCount = currentAvailableSurfaceCount;
+					sample.rebuiltSurfaceCount = rebuiltAvailableSurfaceCount;
+					sample.currentTriangleCount = currentChunk.triangleCount;
+					sample.rebuiltTriangleCount = rebuiltChunk.triangleCount;
+					sample.surfaceDiffCount = chunkSurfaceDiffCount;
+					details.chunkSamples.push_back(sample);
+				}
 			}
 		}
 
-		for (size_t surfaceIndex = 0; surfaceIndex < currentWorld.surfaces.size(); ++surfaceIndex)
-		{
-			const auto& currentSurface = currentWorld.surfaces[surfaceIndex];
-			const auto& rebuiltSurface = rebuiltWorld.surfaces[surfaceIndex];
-			const auto& a = currentSurface.surface;
-			const auto& b = rebuiltSurface.surface;
-			if (currentSurface.kind != rebuiltSurface.kind ||
-				a.vertices.size() != b.vertices.size() ||
-				a.material.flags != b.material.flags ||
-				a.material.texture != b.material.texture ||
-				a.material.palette != b.material.palette ||
-				a.provenance.sourceType != b.provenance.sourceType ||
-				a.provenance.sectorIndex != b.provenance.sectorIndex ||
-				a.provenance.wallIndex != b.provenance.wallIndex ||
-				a.provenance.sectionIndex != b.provenance.sectionIndex)
-			{
-				outSurfaceDiffCount++;
-			}
-		}
-
-		return outChunkDiffCount > 0 || outSurfaceDiffCount > 0;
+		return details.validMismatch ||
+			details.chunkCountMismatch ||
+			details.surfaceCountMismatch ||
+			details.portalCountMismatch ||
+			details.portalTargetCountMismatch ||
+			details.statsMismatch ||
+			outChunkDiffCount > 0 ||
+			outSurfaceDiffCount > 0;
 	}
 
 	static void AppendGeometryChunk(
@@ -12686,7 +12785,8 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 
 	uint32_t chunkDiffCount = 0;
 	uint32_t surfaceDiffCount = 0;
-	if (!StartupMapWorldStructureDiffers(mMapWorld, correctedWorld, chunkDiffCount, surfaceDiffCount))
+	StartupMapWorldDiffDetails diffDetails = {};
+	if (!StartupMapWorldStructureDiffers(mMapWorld, correctedWorld, chunkDiffCount, surfaceDiffCount, &diffDetails))
 	{
 		return true;
 	}
@@ -12714,6 +12814,33 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 		stats.portalSurfaceCount,
 		stats.skySurfaceCount,
 		stats.triangleCount);
+	if (ShouldTracePtPerf())
+	{
+		const std::string reasonSummary = BuildStartupMapWorldDiffReasonSummary(diffDetails);
+		Printf("NRI PT startup world correction detail: trigger=%s frame=%u reasons=%s sampled_chunks=%u/%u\n",
+			trigger != nullptr ? trigger : "unknown",
+			mFrameIndex,
+			reasonSummary.c_str(),
+			(uint32_t)diffDetails.chunkSamples.size(),
+			chunkDiffCount);
+		for (size_t sampleIndex = 0; sampleIndex < diffDetails.chunkSamples.size(); ++sampleIndex)
+		{
+			const auto& sample = diffDetails.chunkSamples[sampleIndex];
+			Printf("NRI PT startup world correction chunk: trigger=%s frame=%u sample=%u/%u chunk=%u sector=%d->%d surfaces=%u->%u tris=%u->%u surface_diffs=%u\n",
+				trigger != nullptr ? trigger : "unknown",
+				mFrameIndex,
+				(uint32_t)(sampleIndex + 1u),
+				(uint32_t)diffDetails.chunkSamples.size(),
+				sample.chunkIndex,
+				sample.currentSectorIndex,
+				sample.rebuiltSectorIndex,
+				sample.currentSurfaceCount,
+				sample.rebuiltSurfaceCount,
+				sample.currentTriangleCount,
+				sample.rebuiltTriangleCount,
+				sample.surfaceDiffCount);
+		}
+	}
 	return true;
 }
 
