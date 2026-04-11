@@ -14999,19 +14999,16 @@ bool NRIRenderer::EnsureStaticMapScene()
 			!mStaticMapScene.accelerationResident ? "acceleration-not-resident" :
 			"resident-rebuild";
 	}
-	if (ShouldTracePtPerf())
-	{
-		Printf("NRI PT static scene trace: event=rebuild reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",
-			rebuildReason,
-			mFrameIndex,
-			YesNo(mStaticMapScene.valid),
-			YesNo(mStaticMapScene.texturesResident),
-			YesNo(mStaticMapScene.buffersResident),
-			YesNo(mStaticMapScene.accelerationResident),
-			(unsigned long long)mStaticMapScene.buildSerial,
-			(unsigned long long)mMapWorld.buildSerial,
-			(uint32_t)mStaticMapScene.chunks.size());
-	}
+	Printf("NRI PT static scene trace: event=rebuild reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",
+		rebuildReason,
+		mFrameIndex,
+		YesNo(mStaticMapScene.valid),
+		YesNo(mStaticMapScene.texturesResident),
+		YesNo(mStaticMapScene.buffersResident),
+		YesNo(mStaticMapScene.accelerationResident),
+		(unsigned long long)mStaticMapScene.buildSerial,
+		(unsigned long long)mMapWorld.buildSerial,
+		(uint32_t)mStaticMapScene.chunks.size());
 
 	if (!BuildStaticMapSceneCache(
 		mMapWorld,
@@ -17712,6 +17709,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	if (residentStaticSceneChanged)
 	{
 		bool residentRefreshOkay = true;
+		const char* residentRefreshFailureReason = nullptr;
 		if (residentMaterialDirty)
 		{
 			std::sort(residentMaterialChunkListIndices.begin(), residentMaterialChunkListIndices.end());
@@ -17721,6 +17719,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			residentRefreshOkay = RefreshResidentStaticMaterialSlices(
 				residentMaterialChunkListIndices,
 				"resident_runtime_mutation_static");
+			if (!residentRefreshOkay)
+			{
+				residentRefreshFailureReason = "runtime-mutation-resident-material-refresh-failed";
+			}
 		}
 		if (residentRefreshOkay && residentGeometryDirty)
 		{
@@ -17729,6 +17731,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				std::unique(residentGeometryChunkListIndices.begin(), residentGeometryChunkListIndices.end()),
 				residentGeometryChunkListIndices.end());
 			residentRefreshOkay = RebuildResidentStaticMapChunkBlases(residentGeometryChunkListIndices);
+			if (!residentRefreshOkay)
+			{
+				residentRefreshFailureReason = "runtime-mutation-resident-blas-refresh-failed";
+			}
 		}
 
 		if (residentRefreshOkay)
@@ -17746,7 +17752,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		}
 		else
 		{
-			DestroyStaticMapSceneCache("runtime-mutation-resident-refresh-failed");
+			DestroyStaticMapSceneCache(
+				residentRefreshFailureReason != nullptr ?
+					residentRefreshFailureReason :
+					"runtime-mutation-resident-refresh-failed");
 			mStaticMapScene = {};
 			mStaticAccelerationBuildSerial = 0;
 			mPreservedStaticMapSky = {};
@@ -18322,7 +18331,8 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 		return true;
 	}
 
-	uint64_t maxScratchSize = 0;
+	std::vector<uint32_t> activeChunkListIndices;
+	activeChunkListIndices.reserve(chunkListIndices.size());
 	for (uint32_t chunkListIndex : chunkListIndices)
 	{
 		if (chunkListIndex >= mStaticMapScene.chunks.size() ||
@@ -18331,12 +18341,26 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 			return false;
 		}
 
+		const auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+		if (!chunk.active || !atlasChunk.valid || atlasChunk.indexCount == 0 || atlasChunk.primitiveCount == 0)
+		{
+			continue;
+		}
+
+		activeChunkListIndices.push_back(chunkListIndex);
+	}
+
+	if (activeChunkListIndices.empty())
+	{
+		return true;
+	}
+
+	uint64_t maxScratchSize = 0;
+	for (uint32_t chunkListIndex : activeChunkListIndices)
+	{
 		auto& chunk = mStaticMapScene.chunks[chunkListIndex];
 		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
-		if (atlasChunk.indexCount == 0)
-		{
-			return false;
-		}
 
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
 
@@ -18387,10 +18411,10 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 	}
 
 	std::vector<nri::BufferBarrierDesc> blasBarriers;
-	blasBarriers.reserve(chunkListIndices.size());
-	for (size_t i = 0; i < chunkListIndices.size(); ++i)
+	blasBarriers.reserve(activeChunkListIndices.size());
+	for (size_t i = 0; i < activeChunkListIndices.size(); ++i)
 	{
-		const uint32_t chunkListIndex = chunkListIndices[i];
+		const uint32_t chunkListIndex = activeChunkListIndices[i];
 		auto& chunk = mStaticMapScene.chunks[chunkListIndex];
 		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
 
@@ -18415,7 +18439,7 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 		build.scratchOffset = 0;
 		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
 
-		if (i + 1 < chunkListIndices.size())
+		if (i + 1 < activeChunkListIndices.size())
 		{
 			nri::BufferBarrierDesc scratchBarrier = {};
 			scratchBarrier.buffer = mResidentStaticBlasScratchBuffer.buffer;
@@ -21160,19 +21184,16 @@ void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScen
 
 void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 {
-	if (ShouldTracePtPerf())
-	{
-		Printf("NRI PT static scene trace: event=destroy reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",
-			reason != nullptr ? reason : "unspecified",
-			mFrameIndex,
-			YesNo(mStaticMapScene.valid),
-			YesNo(mStaticMapScene.texturesResident),
-			YesNo(mStaticMapScene.buffersResident),
-			YesNo(mStaticMapScene.accelerationResident),
-			(unsigned long long)mStaticMapScene.buildSerial,
-			(unsigned long long)mMapWorld.buildSerial,
-			(uint32_t)mStaticMapScene.chunks.size());
-	}
+	Printf("NRI PT static scene trace: event=destroy reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",
+		reason != nullptr ? reason : "unspecified",
+		mFrameIndex,
+		YesNo(mStaticMapScene.valid),
+		YesNo(mStaticMapScene.texturesResident),
+		YesNo(mStaticMapScene.buffersResident),
+		YesNo(mStaticMapScene.accelerationResident),
+		(unsigned long long)mStaticMapScene.buildSerial,
+		(unsigned long long)mMapWorld.buildSerial,
+		(uint32_t)mStaticMapScene.chunks.size());
 
 	ResetPersistentDynamicEmissiveCache();
 	const bool hasResidentStaticSceneResources =
