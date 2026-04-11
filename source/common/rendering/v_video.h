@@ -62,6 +62,7 @@ class FMaterial;
 class FGameTexture;
 class FRenderState;
 class BoneBuffer;
+struct MapRecord;
 
 enum EHWCaps
 {
@@ -165,6 +166,27 @@ struct PathTracingActorSpriteTraceEvent
 	bool noAnimate = false;
 	bool fullbright = false;
 	const FGameTexture* resolvedGameTexture = nullptr;
+};
+
+enum class LevelTransitionReason : uint8_t
+{
+	Unknown = 0,
+	NewGame,
+	NextLevel,
+	SaveGameLoad,
+	Startup,
+	MainMenu,
+	Credits
+};
+
+struct LevelTransitionInfo
+{
+	LevelTransitionReason reason = LevelTransitionReason::Unknown;
+	uint64_t serial = 0;
+	MapRecord* oldLevel = nullptr;
+	MapRecord* newLevel = nullptr;
+	FString oldLevelName;
+	FString newLevelName;
 };
 
 class DFrameBuffer
@@ -327,6 +349,9 @@ public:
 	virtual bool TickPathTracingLevelPreload() { return true; }
 	virtual bool IsPathTracingLevelPreloadPending() const { return false; }
 	virtual void CancelPathTracingLevelPreload() {}
+	virtual void NotifyLevelUnloadBegin(const LevelTransitionInfo& info) {}
+	virtual void NotifyLevelUnloadComplete(const LevelTransitionInfo& info) {}
+	virtual void NotifyLevelLoadBegin(const LevelTransitionInfo& info) {}
 	virtual void SetActiveRenderTarget() {}
 	virtual void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event);
 	virtual void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event);
