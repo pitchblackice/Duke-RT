@@ -6323,14 +6323,14 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 	const uint8_t* pixels = (const uint8_t*)mCore.MapBuffer(*readbackBuffer, 0, slicePitch);
 	for (int y = 0; y < height; ++y)
 	{
-		const uint8_t* src = pixels + (size_t)(height - y - 1) * rowPitch;
+		const uint8_t* src = pixels + (size_t)y * rowPitch;
 		uint8_t* dst = buffer + (size_t)y * (size_t)width * 3u;
 
 		for (int x = 0; x < width; ++x)
 		{
-			dst[x * 3 + 0] = src[x * 4 + 2];
+			dst[x * 3 + 0] = src[x * 4 + 0];
 			dst[x * 3 + 1] = src[x * 4 + 1];
-			dst[x * 3 + 2] = src[x * 4 + 0];
+			dst[x * 3 + 2] = src[x * 4 + 2];
 		}
 	}
 
