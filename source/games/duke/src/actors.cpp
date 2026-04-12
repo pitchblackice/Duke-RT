@@ -48,13 +48,28 @@ This file is a combination of code from the following sources:
 #include "stats.h"
 #include "constants.h"
 #include "dukeactor.h"
+#include "v_video.h"
+
+#include <cstring>
 
 EXTERN_CVAR(Bool, nri_ptruntimelinktrace)
 
 BEGIN_DUKE_NS
 
+static bool PTTransportModeRequiresHistoryReset(const char* mode)
+{
+	return mode != nullptr &&
+		(std::strcmp(mode, "no_effect_ground") == 0 ||
+			std::strcmp(mode, "teleport_160_161") == 0);
+}
+
 void TracePTRuntimeTransportEvent(const char* mode, DDukePlayer* player, DDukeActor* transporter, DDukeActor* owner, DDukeActor* transported, int triggerLotag, int onfloorz)
 {
+	if (player != nullptr && player->pnum == screenpeek && screen != nullptr && PTTransportModeRequiresHistoryReset(mode))
+	{
+		screen->NotifyPathTracingCameraCut("teleporter");
+	}
+
 	if (!nri_ptruntimelinktrace || player == nullptr || transported == nullptr)
 	{
 		return;
