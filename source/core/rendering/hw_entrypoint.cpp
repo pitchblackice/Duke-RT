@@ -360,6 +360,12 @@ void render_drawrooms(DCoreActor* playersprite, const DVector3& position, sector
 	FRenderViewpoint r_viewpoint = SetupViewpoint(playersprite, position, sectindex(sect), angles, fov);
 	r_viewpoint.TicFrac = !cl_capfps ? interpfrac : 1.;
 
+	if (writingsavepic) // hack alert! The save code should not go through render_drawrooms, but we can only clean up the game side when Polymost is gone for good.
+	{
+		RenderToSavePic(r_viewpoint, savefile, savewidth, saveheight);
+		return;
+	}
+
 	if (!HasRequiredHWSceneBuffers())
 	{
 		return;
@@ -368,12 +374,6 @@ void render_drawrooms(DCoreActor* playersprite, const DVector3& position, sector
 	screen->mLights->Clear();
 	screen->mViewpoints->Clear();
 	screen->mVertexData->Reset();
-
-	if (writingsavepic) // hack alert! The save code should not go through render_drawrooms, but we can only clean up the game side when Polymost is gone for good.
-	{
-		RenderToSavePic(r_viewpoint, savefile, savewidth, saveheight);
-		return;
-	}
 
 	// Shader start time does not need to be handled per level. Just use the one from the camera to render from.
 	auto RenderState = screen->RenderState();
