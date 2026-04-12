@@ -287,11 +287,17 @@ void RenderToSavePic(FRenderViewpoint& vp, FileWriter* file, int width, int heig
 	bounds.height = height;
 	auto& RenderState = *screen->RenderState();
 
+	if (!screen->PrepareSavePicScene(width, height))
+	{
+		return;
+	}
+
 	// we must be sure the GPU finished reading from the buffer before we fill it with new data.
 	screen->WaitForCommands(false);
 
 	if (!HasRequiredHWSceneBuffers())
 	{
+		screen->FinishSavePicScene();
 		return;
 	}
 
@@ -318,6 +324,7 @@ void RenderToSavePic(FRenderViewpoint& vp, FileWriter* file, int width, int heig
 	// Switch back the screen render buffers
 	screen->SetViewportRects(nullptr);
 	screen->SetSaveBuffers(false);
+	screen->FinishSavePicScene();
 }
 
 //===========================================================================

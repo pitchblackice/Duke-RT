@@ -2630,6 +2630,22 @@ void NRIRenderDevice::DestroyViewSnapshotTexture()
 	mViewSnapshotTexture = nullptr;
 }
 
+bool NRIRenderDevice::EnsureSaveTarget(uint32_t width, uint32_t height)
+{
+	if (width == 0 || height == 0)
+	{
+		return false;
+	}
+
+	if (mSaveTarget.texture != nullptr && mSaveTarget.width == width && mSaveTarget.height == height)
+	{
+		return true;
+	}
+
+	DestroyTextureResource(mSaveTarget);
+	return CreateOwnedTexture(mSaveTarget, width, height, nri::Format::BGRA8_UNORM, NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::COLOR_ATTACHMENT));
+}
+
 void NRIRenderDevice::WaitForCommands(bool finish)
 {
 	if (mDevice == nullptr)
@@ -2660,6 +2676,42 @@ void NRIRenderDevice::WaitForCommands(bool finish)
 	}
 }
 
+bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
+{
+	if (mCommandBuffer == nullptr || !mCommandBufferOpen)
+	{
+		return true;
+	}
+
+	mCore.EndCommandBuffer(*mCommandBuffer);
+	mCommandBufferOpen = false;
+
+	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
+	nri::Fence* submitFence = nullptr;
+	if (mCore.CreateFence(*mDevice, 0, submitFence) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+
+	nri::FenceSubmitDesc signalFence = {};
+	signalFence.fence = submitFence;
+	signalFence.value = 1;
+
+	nri::QueueSubmitDesc submitDesc = {};
+	submitDesc.commandBuffers = commandBuffers;
+	submitDesc.commandBufferNum = 1;
+	submitDesc.signalFences = &signalFence;
+	submitDesc.signalFenceNum = 1;
+	const nri::Result submitResult = mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
+	if (submitResult == nri::Result::SUCCESS)
+	{
+		mCore.Wait(*submitFence, signalFence.value);
+	}
+
+	mCore.DestroyFence(submitFence);
+	return submitResult == nri::Result::SUCCESS;
+}
+
 void NRIRenderDevice::SetSaveBuffers(bool yes)
 {
 	mUsingSaveTarget = yes;
@@ -2668,15 +2720,77 @@ void NRIRenderDevice::SetSaveBuffers(bool yes)
 		return;
 	}
 
-	if (yes && (mSaveTarget.texture == nullptr || mSaveTarget.width != SAVEPICWIDTH || mSaveTarget.height != SAVEPICHEIGHT))
+	const uint32_t saveWidth = mRequestedSaveTargetWidth != 0 ? mRequestedSaveTargetWidth : SAVEPICWIDTH;
+	const uint32_t saveHeight = mRequestedSaveTargetHeight != 0 ? mRequestedSaveTargetHeight : SAVEPICHEIGHT;
+	if (yes && !EnsureSaveTarget(saveWidth, saveHeight))
 	{
-		DestroyTextureResource(mSaveTarget);
-		CreateOwnedTexture(mSaveTarget, SAVEPICWIDTH, SAVEPICHEIGHT, nri::Format::BGRA8_UNORM, NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::COLOR_ATTACHMENT));
+		Printf(TEXTCOLOR_RED "NRI failed to create the savepic render target.\n");
+		mActiveTarget = mCurrentPresentTarget;
+		return;
 	}
 
 	mRenderState->EndFrame();
 	mActiveTarget = yes ? &mSaveTarget : mCurrentPresentTarget;
 	mFrameGenerationUiTargetActive = false;
+}
+
+bool NRIRenderDevice::PrepareSavePicScene(int width, int height)
+{
+	if (!mInitialized || width <= 0 || height <= 0)
+	{
+		return false;
+	}
+
+	mRequestedSaveTargetWidth = (uint32_t)width;
+	mRequestedSaveTargetHeight = (uint32_t)height;
+	if (!EnsureSaveTarget(mRequestedSaveTargetWidth, mRequestedSaveTargetHeight))
+	{
+		Printf(TEXTCOLOR_RED "NRI failed to prepare the savepic render target (%dx%d).\n", width, height);
+		return false;
+	}
+
+	if (mFrameBegun)
+	{
+		return true;
+	}
+
+	mStandaloneSavePicFrame = true;
+	SelectQueuedFrame(GetQueuedFrameIndex(mFrameIndex));
+	if (!BeginCommandList("PrepareSavePicScene", true))
+	{
+		mStandaloneSavePicFrame = false;
+		return false;
+	}
+
+	mRenderState->BeginFrame();
+	if (mViewpoints != nullptr)
+	{
+		mViewpoints->Clear();
+	}
+
+	mCurrentPresentTarget = nullptr;
+	mActiveTarget = &mSaveTarget;
+	mFrameGenerationUiTargetActive = false;
+	mFrameBegun = true;
+	return true;
+}
+
+void NRIRenderDevice::FinishSavePicScene()
+{
+	if (!mStandaloneSavePicFrame)
+	{
+		mRequestedSaveTargetWidth = 0;
+		mRequestedSaveTargetHeight = 0;
+		return;
+	}
+
+	mRenderState->EndFrame();
+	SubmitAndWaitCurrentCommandBuffer();
+	ResetFrameTracking(false);
+	mUsingSaveTarget = false;
+	mStandaloneSavePicFrame = false;
+	mRequestedSaveTargetWidth = 0;
+	mRequestedSaveTargetHeight = 0;
 }
 
 void NRIRenderDevice::ImageTransitionScene(bool)
@@ -6161,12 +6275,13 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 		return;
 	}
 
+	const bool useStandaloneSavePicFrame = mStandaloneSavePicFrame && mFrameBegun && mCommandBuffer != nullptr && mCommandBufferOpen;
 	if (mFrameBegun)
 	{
 		mRenderState->EndFrame();
 	}
 
-	if (!BeginCommandList("CopyScreenToBuffer", !mFrameBegun))
+	if (!useStandaloneSavePicFrame && !BeginCommandList("CopyScreenToBuffer", !mFrameBegun))
 	{
 		memset(buffer, 0, (size_t)width * (size_t)height * 3);
 		return;
@@ -6198,28 +6313,12 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 	layout.slicePitch = slicePitch;
 
 	mCore.CmdReadbackTextureToBuffer(*mCommandBuffer, *readbackBuffer, layout, *source->texture, region);
-	mCore.EndCommandBuffer(*mCommandBuffer);
-	mCommandBufferOpen = false;
-
-	const nri::CommandBuffer* commandBuffers[] = { mCommandBuffer };
-	nri::Fence* readbackFence = nullptr;
-	if (mCore.CreateFence(*mDevice, 0, readbackFence) != nri::Result::SUCCESS)
+	if (!SubmitAndWaitCurrentCommandBuffer())
 	{
 		mCore.DestroyBuffer(readbackBuffer);
 		memset(buffer, 0, (size_t)width * (size_t)height * 3);
 		return;
 	}
-	nri::FenceSubmitDesc frameFence = {};
-	frameFence.fence = readbackFence;
-	frameFence.value = 1;
-
-	nri::QueueSubmitDesc submitDesc = {};
-	submitDesc.commandBuffers = commandBuffers;
-	submitDesc.commandBufferNum = 1;
-	submitDesc.signalFences = &frameFence;
-	submitDesc.signalFenceNum = 1;
-	mCore.QueueSubmit(*mGraphicsQueue, submitDesc);
-	mCore.Wait(*readbackFence, frameFence.value);
 
 	const uint8_t* pixels = (const uint8_t*)mCore.MapBuffer(*readbackBuffer, 0, slicePitch);
 	for (int y = 0; y < height; ++y)
@@ -6236,7 +6335,6 @@ void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
 	}
 
 	mCore.UnmapBuffer(*readbackBuffer);
-	mCore.DestroyFence(readbackFence);
 	mCore.DestroyBuffer(readbackBuffer);
 }
 
@@ -6681,6 +6779,7 @@ void NRIRenderDevice::ResetFrameTracking(bool presentedAcquiredImage)
 	mFrameGenerationUiTargetActive = false;
 	mHasAcquiredSwapChainImage = false;
 	mCurrentSwapChainImage = 0;
+	mStandaloneSavePicFrame = false;
 }
 
 void NRIRenderDevice::ResetLevelTransitionShellState()

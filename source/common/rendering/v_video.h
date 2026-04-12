@@ -332,6 +332,8 @@ public:
 	virtual void UpdateShadowMap() {}
 	virtual void WaitForCommands(bool finish) {}
 	virtual void SetSaveBuffers(bool yes) {}
+	virtual bool PrepareSavePicScene(int width, int height) { return true; }
+	virtual void FinishSavePicScene() {}
 	virtual void ImageTransitionScene(bool unknown) {}
 	virtual void CopyScreenToBuffer(int width, int height, uint8_t* buffer)	{ memset(buffer, 0, width* height); }
 	virtual bool FlipSavePic() const { return false; }

@@ -47,6 +47,8 @@ public:
 	void WaitForCommands(bool finish) override;
 	void SetVSync(bool vsync) override;
 	void SetSaveBuffers(bool yes) override;
+	bool PrepareSavePicScene(int width, int height) override;
+	void FinishSavePicScene() override;
 	void ImageTransitionScene(bool unknown) override;
 	void SetSceneRenderTarget(bool useSSAO) override;
 	void SetActiveRenderTarget() override;
@@ -276,6 +278,8 @@ private:
 	void CompositeFrameGenerationUiTexture();
 	void DestroyFrameGenerationUiTexture();
 	void DestroyViewSnapshotTexture();
+	bool EnsureSaveTarget(uint32_t width, uint32_t height);
+	bool SubmitAndWaitCurrentCommandBuffer();
 	bool CopyTextureToTexture(NRITextureResource& destination, NRITextureResource& source);
 	bool SnapshotTextureToCanvas(FCanvasTexture* tex, NRITextureResource& source);
 	void ResetLevelTransitionShellState();
@@ -360,6 +364,7 @@ private:
 	uint64_t mSubmittedFenceValue = 0;
 	bool mFrameBegun = false;
 	bool mUsingSaveTarget = false;
+	bool mStandaloneSavePicFrame = false;
 	bool mPathTracingLevelPreloadPending = false;
 	bool mHasAcquiredSwapChainImage = false;
 	bool mHasPresentedSwapChainFrame = false;
@@ -369,6 +374,8 @@ private:
 	uint32_t mCurrentSwapChainImage = 0;
 	uint32_t mCurrentQueuedFrameIndex = 0;
 	uint32_t mAcquireSemaphoreIndex = 0;
+	uint32_t mRequestedSaveTargetWidth = 0;
+	uint32_t mRequestedSaveTargetHeight = 0;
 	FString mSwapChainOutputResolveReason = "requested-sdr";
 	bool mCommandBufferOpen = false;
 	bool mInitialized = false;
