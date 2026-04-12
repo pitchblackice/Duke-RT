@@ -1541,6 +1541,14 @@ if( WIN32 )
 		endif()
 	endfunction()
 
+	function( raze_stage_runtime_file target_name runtime_file label )
+		if( EXISTS "${runtime_file}" )
+			add_custom_command(TARGET ${target_name} POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different "${runtime_file}" "$<TARGET_FILE_DIR:${target_name}>"
+				COMMENT "Copying ${label} ${runtime_file}" VERBATIM)
+		endif()
+	endfunction()
+
 	set( RAZE_RUNTIME_DLL_DIR "${CMAKE_SOURCE_DIR}/bin/windows/runtime-deps" CACHE PATH "Directory containing prebaked runtime DLLs to stage beside raze.exe." )
 	raze_stage_runtime_artifacts(${PROJECT_NAME} "${RAZE_RUNTIME_DLL_DIR}" "runtime dependency")
 	if( NOT EXISTS "${RAZE_RUNTIME_DLL_DIR}" )
@@ -1566,6 +1574,43 @@ if( WIN32 )
 		endif()
 	else()
 		message(STATUS "Could not infer a ZMusic runtime directory from ZMUSIC_LIBRARIES; automatic zmusiclite.dll staging is disabled for this configure.")
+	endif()
+
+	if( DYN_OPENAL AND NOT NO_OPENAL )
+		set( _raze_openal_dll_candidates
+			"${CMAKE_SOURCE_DIR}/bin/windows/runtime-deps/OpenAL32.dll"
+			"${VCPKG_INSTALLED_DIR}/x64-windows/bin/OpenAL32.dll"
+			"${_VCPKG_INSTALLED_DIR}/x64-windows/bin/OpenAL32.dll"
+			"${Z_VCPKG_ROOT_DIR}/packages/openal-soft_x64-windows/bin/OpenAL32.dll"
+			"${CMAKE_SOURCE_DIR}/build/vcpkg/packages/openal-soft_x64-windows/bin/OpenAL32.dll"
+		)
+		set( _raze_openal_pdb_candidates
+			"${CMAKE_SOURCE_DIR}/bin/windows/runtime-deps/OpenAL32.pdb"
+			"${VCPKG_INSTALLED_DIR}/x64-windows/bin/OpenAL32.pdb"
+			"${_VCPKG_INSTALLED_DIR}/x64-windows/bin/OpenAL32.pdb"
+			"${Z_VCPKG_ROOT_DIR}/packages/openal-soft_x64-windows/bin/OpenAL32.pdb"
+			"${CMAKE_SOURCE_DIR}/build/vcpkg/packages/openal-soft_x64-windows/bin/OpenAL32.pdb"
+		)
+
+		set( _raze_openal_dll_found FALSE )
+		foreach(_openal_candidate IN LISTS _raze_openal_dll_candidates)
+			if( EXISTS "${_openal_candidate}" )
+				raze_stage_runtime_file(${PROJECT_NAME} "${_openal_candidate}" "OpenAL runtime dependency")
+				set( _raze_openal_dll_found TRUE )
+				break()
+			endif()
+		endforeach()
+
+		foreach(_openal_candidate IN LISTS _raze_openal_pdb_candidates)
+			if( EXISTS "${_openal_candidate}" )
+				raze_stage_runtime_file(${PROJECT_NAME} "${_openal_candidate}" "OpenAL runtime dependency")
+				break()
+			endif()
+		endforeach()
+
+		if( NOT _raze_openal_dll_found )
+			message(STATUS "Could not locate OpenAL32.dll for dynamic audio; runtime sound init may fall back to nosound.")
+		endif()
 	endif()
 
 	if( HAVE_NRI )
