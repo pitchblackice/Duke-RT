@@ -10492,6 +10492,7 @@ NRIRenderer::RuntimeMutationCacheStats NRIRenderer::GatherRuntimeMutationCacheSt
 	RuntimeMutationCacheStats stats = {};
 	for (const auto& replacement : mRuntimeMapMutations.chunks)
 	{
+		stats.cachedMaterialStateCount += (uint32_t)replacement.materialStateCache.size();
 		if (!replacement.active)
 		{
 			continue;
@@ -11015,19 +11016,21 @@ void NRIRenderer::PrintRuntimeMapMutationStatus() const
 		mRuntimeMapLastFrame.replacementSurfaceCount,
 		mRuntimeMapLastFrame.replacementTriangleCount,
 		mRuntimeMapLastFrame.materialCount);
-	Printf("NRI PT runtime map cache: active_chunks=%u valid_chunks=%u exclude_static=%u cached_surfaces=%u cached_tris=%u cached_materials=%u highwater=active:%u valid:%u exclude_static:%u surfaces:%u tris:%u mats:%u\n",
+	Printf("NRI PT runtime map cache: active_chunks=%u valid_chunks=%u exclude_static=%u cached_surfaces=%u cached_tris=%u cached_materials=%u cached_states=%u highwater=active:%u valid:%u exclude_static:%u surfaces:%u tris:%u mats:%u states:%u\n",
 		cacheStats.activeChunkCount,
 		cacheStats.validChunkCount,
 		cacheStats.excludedStaticChunkCount,
 		cacheStats.cachedSurfaceCount,
 		cacheStats.cachedTriangleCount,
 		cacheStats.cachedMaterialCount,
+		cacheStats.cachedMaterialStateCount,
 		mRuntimeMutationCacheHighWaterStats.activeChunkCount,
 		mRuntimeMutationCacheHighWaterStats.validChunkCount,
 		mRuntimeMutationCacheHighWaterStats.excludedStaticChunkCount,
 		mRuntimeMutationCacheHighWaterStats.cachedSurfaceCount,
 		mRuntimeMutationCacheHighWaterStats.cachedTriangleCount,
-		mRuntimeMutationCacheHighWaterStats.cachedMaterialCount);
+		mRuntimeMutationCacheHighWaterStats.cachedMaterialCount,
+		mRuntimeMutationCacheHighWaterStats.cachedMaterialStateCount);
 }
 
 void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
@@ -17444,6 +17447,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationCachedSurfaceCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationCachedTriangleCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationCachedMaterialCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationCachedMaterialStateCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialCacheHitCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialCacheMissCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationPrimitiveCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationTopEntries = {};
@@ -17941,6 +17948,79 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			havePreparedLiveChunkView = true;
 			return true;
 		};
+		static constexpr size_t kRuntimeMutationMaterialStateCacheCapacity = 8;
+		const auto tryGetCachedRuntimeMutationMaterials =
+			[&replacement](uint64_t animatedGeometrySignature,
+				uint64_t animatedMaterialSignature,
+				uint32_t surfaceCount,
+				nri_scene::MaterialBridgeData& outMaterials) -> bool
+		{
+			auto& cache = replacement.materialStateCache;
+			for (size_t index = 0; index < cache.size(); ++index)
+			{
+				const auto& entry = cache[index];
+				if (entry.animatedGeometrySignature != animatedGeometrySignature ||
+					entry.animatedMaterialSignature != animatedMaterialSignature ||
+					entry.surfaceCount != surfaceCount)
+				{
+					continue;
+				}
+
+				if (index != 0)
+				{
+					auto hotEntry = std::move(cache[index]);
+					cache.erase(cache.begin() + (ptrdiff_t)index);
+					cache.insert(cache.begin(), std::move(hotEntry));
+				}
+				outMaterials = cache.front().materialBridge;
+				return true;
+			}
+
+			return false;
+		};
+		const auto storeCachedRuntimeMutationMaterials =
+			[&replacement](uint64_t animatedGeometrySignature,
+				uint64_t animatedMaterialSignature,
+				uint32_t surfaceCount,
+				const nri_scene::MaterialBridgeData& materials)
+		{
+			if (materials.materials.empty())
+			{
+				return;
+			}
+
+			auto& cache = replacement.materialStateCache;
+			for (size_t index = 0; index < cache.size(); ++index)
+			{
+				auto& entry = cache[index];
+				if (entry.animatedGeometrySignature != animatedGeometrySignature ||
+					entry.animatedMaterialSignature != animatedMaterialSignature ||
+					entry.surfaceCount != surfaceCount)
+				{
+					continue;
+				}
+
+				entry.materialBridge = materials;
+				if (index != 0)
+				{
+					auto hotEntry = std::move(entry);
+					cache.erase(cache.begin() + (ptrdiff_t)index);
+					cache.insert(cache.begin(), std::move(hotEntry));
+				}
+				return;
+			}
+
+			RuntimeMapMutationCache::ChunkReplacement::MaterialStateCacheEntry entry = {};
+			entry.animatedGeometrySignature = animatedGeometrySignature;
+			entry.animatedMaterialSignature = animatedMaterialSignature;
+			entry.surfaceCount = surfaceCount;
+			entry.materialBridge = materials;
+			cache.insert(cache.begin(), std::move(entry));
+			if (cache.size() > kRuntimeMutationMaterialStateCacheCapacity)
+			{
+				cache.pop_back();
+			}
+		};
 		const auto captureSectorDirtyTruth = [&]()
 		{
 			if (!ShouldTracePtPerf() ||
@@ -17999,6 +18079,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				useStaticAnimatedReplacement ||
 				!materialOnlyReplacement ||
 				exclusiveMaterialOnlyReplacement;
+			const uint64_t liveAnimatedGeometrySignature =
+				ComputeAnimatedGeometrySignature(liveChunkView);
+			const uint64_t liveAnimatedMaterialSignature =
+				ComputeAnimatedMaterialSignature(liveChunkView);
+			const uint32_t liveSurfaceCount = CountSceneViewSurfaces(liveChunkView);
 			BuildRuntimeMutationLightIdentityOverrides(
 				mMapWorld,
 				mapChunk,
@@ -18013,9 +18098,27 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				nri_scene::BuildGeometry(liveChunkView, liveGeometry);
 				AssignGeometryPortalIndices(mMapWorld, liveGeometry);
 			}
+			if (tryGetCachedRuntimeMutationMaterials(
+				liveAnimatedGeometrySignature,
+				liveAnimatedMaterialSignature,
+				liveSurfaceCount,
+				liveMaterials))
 			{
-				Clocker clock(NriPTMaterialBuild);
-				BuildMaterialsWithActorOverrides(liveChunkView, liveMaterials, "runtime_mutation_chunk");
+				mLastPerfShellTraceStats.runtimeMutationMaterialCacheHitCount++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialCacheMissCount++;
+				{
+					Clocker clock(NriPTMaterialBuild);
+					BuildMaterialsWithActorOverrides(liveChunkView, liveMaterials, "runtime_mutation_chunk");
+				}
+				storeCachedRuntimeMutationMaterials(
+					liveAnimatedGeometrySignature,
+					liveAnimatedMaterialSignature,
+					liveSurfaceCount,
+					liveMaterials);
+				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
 			}
 			nri_scene::PTMapChunkMutationBaseline liveBaseline;
 			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
@@ -18027,9 +18130,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.geometry = std::move(liveGeometry);
 			replacement.materialBridge = std::move(liveMaterials);
 			replacement.replacementBaseline = std::move(liveBaseline);
-			replacement.surfaceCount = CountSceneViewSurfaces(replacement.sceneView);
+			replacement.surfaceCount = liveSurfaceCount;
 			replacement.triangleCount = (uint32_t)replacement.geometry.primitives.size();
-			replacement.animatedMaterialSignature = ComputeAnimatedMaterialSignature(replacement.sceneView);
+			replacement.animatedMaterialSignature = liveAnimatedMaterialSignature;
 			replacement.valid = true;
 			replacement.active = true;
 			replacement.excludeStaticChunk = excludeStaticChunk;
@@ -18050,6 +18153,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				useStaticAnimatedReplacement ||
 				!materialOnlyReplacement ||
 				exclusiveMaterialOnlyReplacement;
+			const uint64_t liveAnimatedGeometrySignature =
+				ComputeAnimatedGeometrySignature(liveChunkView);
+			const uint64_t liveAnimatedMaterialSignature =
+				ComputeAnimatedMaterialSignature(liveChunkView);
+			const uint32_t liveSurfaceCount = CountSceneViewSurfaces(liveChunkView);
 			nri_scene::GeometryData liveGeometry;
 			if (exclusiveMaterialOnlyReplacement)
 			{
@@ -18058,9 +18166,27 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				AssignGeometryPortalIndices(mMapWorld, liveGeometry);
 			}
 			nri_scene::MaterialBridgeData liveMaterials;
+			if (tryGetCachedRuntimeMutationMaterials(
+				liveAnimatedGeometrySignature,
+				liveAnimatedMaterialSignature,
+				liveSurfaceCount,
+				liveMaterials))
 			{
-				Clocker clock(NriPTMaterialBuild);
-				BuildMaterialsWithActorOverrides(liveChunkView, liveMaterials, "runtime_mutation_chunk");
+				mLastPerfShellTraceStats.runtimeMutationMaterialCacheHitCount++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialCacheMissCount++;
+				{
+					Clocker clock(NriPTMaterialBuild);
+					BuildMaterialsWithActorOverrides(liveChunkView, liveMaterials, "runtime_mutation_chunk");
+				}
+				storeCachedRuntimeMutationMaterials(
+					liveAnimatedGeometrySignature,
+					liveAnimatedMaterialSignature,
+					liveSurfaceCount,
+					liveMaterials);
+				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
 			}
 			nri_scene::PTMapChunkMutationBaseline liveBaseline;
 			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
@@ -18082,8 +18208,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.sceneView = liveChunkView;
 			replacement.materialBridge = std::move(liveMaterials);
 			replacement.replacementBaseline = std::move(liveBaseline);
-			replacement.surfaceCount = CountSceneViewSurfaces(replacement.sceneView);
-			replacement.animatedMaterialSignature = ComputeAnimatedMaterialSignature(replacement.sceneView);
+			replacement.surfaceCount = liveSurfaceCount;
+			replacement.animatedMaterialSignature = liveAnimatedMaterialSignature;
 			replacement.valid = true;
 			replacement.active = true;
 			replacement.excludeStaticChunk = excludeStaticChunk;
@@ -18459,12 +18585,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationCachedSurfaceCount = cacheStats.cachedSurfaceCount;
 	mLastPerfShellTraceStats.runtimeMutationCachedTriangleCount = cacheStats.cachedTriangleCount;
 	mLastPerfShellTraceStats.runtimeMutationCachedMaterialCount = cacheStats.cachedMaterialCount;
+	mLastPerfShellTraceStats.runtimeMutationCachedMaterialStateCount = cacheStats.cachedMaterialStateCount;
 	mRuntimeMutationCacheHighWaterStats.activeChunkCount = std::max(mRuntimeMutationCacheHighWaterStats.activeChunkCount, cacheStats.activeChunkCount);
 	mRuntimeMutationCacheHighWaterStats.validChunkCount = std::max(mRuntimeMutationCacheHighWaterStats.validChunkCount, cacheStats.validChunkCount);
 	mRuntimeMutationCacheHighWaterStats.excludedStaticChunkCount = std::max(mRuntimeMutationCacheHighWaterStats.excludedStaticChunkCount, cacheStats.excludedStaticChunkCount);
 	mRuntimeMutationCacheHighWaterStats.cachedSurfaceCount = std::max(mRuntimeMutationCacheHighWaterStats.cachedSurfaceCount, cacheStats.cachedSurfaceCount);
 	mRuntimeMutationCacheHighWaterStats.cachedTriangleCount = std::max(mRuntimeMutationCacheHighWaterStats.cachedTriangleCount, cacheStats.cachedTriangleCount);
 	mRuntimeMutationCacheHighWaterStats.cachedMaterialCount = std::max(mRuntimeMutationCacheHighWaterStats.cachedMaterialCount, cacheStats.cachedMaterialCount);
+	mRuntimeMutationCacheHighWaterStats.cachedMaterialStateCount = std::max(mRuntimeMutationCacheHighWaterStats.cachedMaterialStateCount, cacheStats.cachedMaterialStateCount);
 	for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)mResidentMapChunkRegistry.entries.size(); ++chunkIndex)
 	{
 		const auto& entry = mResidentMapChunkRegistry.entries[chunkIndex];

@@ -3082,7 +3082,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneLightEmissiveMs,
 			shell.sceneLightSectorMs);
 		Printf(
-			"PERF pt cache detail NRI: frame=%llu mutation_active=%u mutation_valid=%u mutation_excl_static=%u mutation_cached_surfaces=%u mutation_cached_tris=%u mutation_cached_mats=%u persistent_actor=%u persistent_non_actor=%u persistent_walls=%u persistent_flats=%u persistent_sprites=%u\n",
+			"PERF pt cache detail NRI: frame=%llu mutation_active=%u mutation_valid=%u mutation_excl_static=%u mutation_cached_surfaces=%u mutation_cached_tris=%u mutation_cached_mats=%u mutation_cached_states=%u mutation_mat_cache_hits=%u mutation_mat_cache_misses=%u mutation_mat_cache_stores=%u persistent_actor=%u persistent_non_actor=%u persistent_walls=%u persistent_flats=%u persistent_sprites=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationActiveChunkCount,
 			shell.runtimeMutationValidChunkCount,
@@ -3090,6 +3090,10 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationCachedSurfaceCount,
 			shell.runtimeMutationCachedTriangleCount,
 			shell.runtimeMutationCachedMaterialCount,
+			shell.runtimeMutationCachedMaterialStateCount,
+			shell.runtimeMutationMaterialCacheHitCount,
+			shell.runtimeMutationMaterialCacheMissCount,
+			shell.runtimeMutationMaterialCacheStoreCount,
 			shell.persistentDynamicActorSurfaceCount,
 			shell.persistentDynamicNonActorSurfaceCount,
 			shell.persistentDynamicWallSurfaceCount,

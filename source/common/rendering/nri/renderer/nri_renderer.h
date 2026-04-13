@@ -248,6 +248,10 @@ public:
 		uint32_t runtimeMutationCachedSurfaceCount = 0;
 		uint32_t runtimeMutationCachedTriangleCount = 0;
 		uint32_t runtimeMutationCachedMaterialCount = 0;
+		uint32_t runtimeMutationCachedMaterialStateCount = 0;
+		uint32_t runtimeMutationMaterialCacheHitCount = 0;
+		uint32_t runtimeMutationMaterialCacheMissCount = 0;
+		uint32_t runtimeMutationMaterialCacheStoreCount = 0;
 		uint32_t runtimeMutationPrimitiveCount = 0;
 		uint32_t runtimeMutationMaterialCount = 0;
 		uint32_t sceneLightSurfaceRecordCount = 0;
@@ -901,6 +905,7 @@ private:
 		uint32_t cachedSurfaceCount = 0;
 		uint32_t cachedTriangleCount = 0;
 		uint32_t cachedMaterialCount = 0;
+		uint32_t cachedMaterialStateCount = 0;
 	};
 
 	struct ActorMaterialOverrideCache
@@ -970,6 +975,14 @@ private:
 	{
 		struct ChunkReplacement
 		{
+			struct MaterialStateCacheEntry
+			{
+				uint64_t animatedGeometrySignature = 0;
+				uint64_t animatedMaterialSignature = 0;
+				uint32_t surfaceCount = 0;
+				nri_scene::MaterialBridgeData materialBridge;
+			};
+
 			nri_scene::PTMapChunkMutationBaseline baseline;
 			nri_scene::PTMapChunkMutationBaseline replacementBaseline;
 			uint64_t baselineSignature = 0;
@@ -1001,6 +1014,7 @@ private:
 			nri_scene::SceneView sceneView;
 			nri_scene::GeometryData geometry;
 			nri_scene::MaterialBridgeData materialBridge;
+			std::vector<MaterialStateCacheEntry> materialStateCache;
 		};
 
 		std::vector<ChunkReplacement> chunks;
