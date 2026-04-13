@@ -17990,6 +17990,58 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				liveStats.triangleCount);
 			sectorDirtyTruthCaptured = true;
 		};
+		const auto settleResidentAuthoritativeNoOp = [&](uint64_t liveGeometrySignature,
+			uint64_t liveMaterialSignature,
+			uint32_t liveSurfaceCount,
+			uint32_t liveTriangleCount) -> bool
+		{
+			if (!replacement.residentAuthoritative ||
+				useStaticAnimatedReplacement ||
+				chunkHasUnresolvedAuthoredTextures ||
+				residentEntry == nullptr ||
+				!residentEntry->valid ||
+				liveGeometrySignature != residentEntry->animatedGeometrySignature ||
+				liveMaterialSignature != residentEntry->animatedMaterialSignature ||
+				liveSurfaceCount != residentEntry->materialCount ||
+				liveTriangleCount != residentEntry->primitiveCount)
+			{
+				return false;
+			}
+
+			nri_scene::PTMapChunkMutationBaseline settledBaseline;
+			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, settledBaseline))
+			{
+				return false;
+			}
+
+			replacement.baseline = settledBaseline;
+			replacement.replacementBaseline = settledBaseline;
+			replacement.baselineSignature = settledBaseline.signature;
+			replacement.liveSignature = settledBaseline.signature;
+			replacement.animatedMaterialSignature = liveMaterialSignature;
+			replacement.reasonMask = nri_scene::PTMapChunkMutationReason_None;
+			replacement.sectionDirtyCount = 0;
+			replacement.stableMutationFrameCount = 0;
+			replacement.active = false;
+			replacement.valid = false;
+			replacement.sectorDirty = false;
+			replacement.dragged = false;
+			replacement.blindSpot = false;
+			replacement.excludeStaticChunk = false;
+			replacement.staticAnimatedReplacement = false;
+			replacement.animationOnlyRefreshed = false;
+			replacement.surfaceCount = 0;
+			replacement.triangleCount = 0;
+			replacement.lightIdentityOverrides.Clear();
+			replacement.sceneView = {};
+			replacement.geometry = {};
+			replacement.materialBridge = {};
+
+			residentEntry->appliedBaseline = settledBaseline;
+			residentEntry->baselineSignature = settledBaseline.signature;
+			residentEntry->liveSignature = settledBaseline.signature;
+			return true;
+		};
 		const auto rebuildReplacementFromPreparedLiveChunk = [&](bool countAsStructuralRebuild) -> bool
 		{
 			const bool exclusiveMaterialOnlyReplacement =
@@ -18158,8 +18210,34 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					return false;
 				}
 				captureSectorDirtyTruth();
+				const uint64_t liveGeometrySignature = ComputeAnimatedGeometrySignature(liveChunkView);
+				const uint64_t liveMaterialSignature = ComputeAnimatedMaterialSignature(liveChunkView);
+				const uint32_t liveSurfaceCount = CountSceneViewSurfaces(liveChunkView);
+				if (settleResidentAuthoritativeNoOp(
+					liveGeometrySignature,
+					liveMaterialSignature,
+					liveSurfaceCount,
+					liveStats.triangleCount))
+				{
+					mLastPerfShellTraceStats.runtimeMutationInvalidSyncSkipCount++;
+					chunkTraceAction = RuntimeMutationTraceAction::SyncSkip;
+					chunkTraceSurfaceCount = liveSurfaceCount;
+					chunkTraceTriangleCount = liveStats.triangleCount;
+					chunkTraceMaterialCount = liveSurfaceCount;
+					return true;
+				}
 				return rebuildReplacementFromPreparedLiveChunk(true);
 			}();
+			if (chunkTraceAction == RuntimeMutationTraceAction::SyncSkip)
+			{
+				if (mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks > 0)
+				{
+					mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks--;
+				}
+				TraceRuntimeMapMutationChunk(mapChunk, replacement);
+				emitChunkTrace();
+				continue;
+			}
 			if (!builtChunk && replacement.valid)
 			{
 				replacement.active = true;
@@ -18197,6 +18275,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.active = true;
 			bool activeHardwareCanvasChunk = false;
 			bool suppressedAnimatedResidentAlreadySynchronized = false;
+			bool unsuppressedAnimatedResidentAlreadySynchronized = false;
 			// Build tile animation can change the resolved PT texture binding
 			// without mutating the authored wall/sector fields tracked above.
 			const bool refreshedAnimatedChunk = [&]()
@@ -18236,6 +18315,21 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				}
 				if (suppressedAnimatedResidentAlreadySynchronized)
 				{
+					return true;
+				}
+				unsuppressedAnimatedResidentAlreadySynchronized =
+					!useStaticAnimatedReplacement &&
+					residentEntry != nullptr &&
+					residentEntry->valid &&
+					!residentEntry->animatedRefreshSuppressed &&
+					settleResidentAuthoritativeNoOp(
+						liveAnimatedGeometrySignature,
+						liveAnimatedMaterialSignature,
+						CountSceneViewSurfaces(liveChunkView),
+						liveStats.triangleCount);
+				if (unsuppressedAnimatedResidentAlreadySynchronized)
+				{
+					recordRuntimeAnimatedFrame(mapChunk.chunkIndex, false, false, true, false, true);
 					return true;
 				}
 				if (!forceReplacementMaterialRefresh &&
@@ -18301,6 +18395,22 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				chunkTraceSurfaceCount = CountSceneViewSurfaces(liveChunkView);
 				chunkTraceTriangleCount = liveStats.triangleCount;
 				chunkTraceMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
+				TraceRuntimeMapMutationChunk(mapChunk, replacement);
+				emitChunkTrace();
+				continue;
+			}
+			else if (unsuppressedAnimatedResidentAlreadySynchronized)
+			{
+				replacement.active = false;
+				replacement.excludeStaticChunk = false;
+				replacement.staticAnimatedReplacement = false;
+				replacement.animationOnlyRefreshed = false;
+				replacement.stableMutationFrameCount = 0;
+				mLastPerfShellTraceStats.runtimeMutationInvalidSyncSkipCount++;
+				chunkTraceAction = RuntimeMutationTraceAction::SyncSkip;
+				chunkTraceSurfaceCount = residentEntry != nullptr ? residentEntry->materialCount : 0u;
+				chunkTraceTriangleCount = residentEntry != nullptr ? residentEntry->primitiveCount : 0u;
+				chunkTraceMaterialCount = residentEntry != nullptr ? residentEntry->materialCount : 0u;
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
 				emitChunkTrace();
 				continue;
