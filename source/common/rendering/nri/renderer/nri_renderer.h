@@ -93,6 +93,69 @@ public:
 	};
 
 	static constexpr size_t MaterialBuildTraceSlotCount = (size_t)MaterialBuildTraceSlot::Count;
+	static constexpr size_t RuntimeMutationTopTraceCount = 8;
+	static constexpr size_t RuntimeSectorDirtyTruthTraceCount = 8;
+	static constexpr size_t RuntimeAnimatedChurnTraceCount = 4;
+
+	enum class RuntimeMutationTraceAction : uint8_t
+	{
+		None,
+		StructuralRebuild,
+		MaterialRefresh,
+		ResidentApply,
+		ResidentFallback,
+		Held,
+		SyncSkip,
+		Failed
+	};
+
+	struct RuntimeMutationTopTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t reasonMask = 0;
+		uint32_t sectionDirtyCount = 0;
+		uint32_t surfaceCount = 0;
+		uint32_t triangleCount = 0;
+		uint32_t materialCount = 0;
+		RuntimeMutationTraceAction action = RuntimeMutationTraceAction::None;
+		bool forceTopology = false;
+		bool residentMaterialDirty = false;
+		bool residentGeometryDirty = false;
+		bool recoveredEmpty = false;
+	};
+
+	struct RuntimeSectorDirtyTruthTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t reasonMask = 0;
+		bool forceTopology = false;
+		bool baselineChanged = false;
+		bool geometryChanged = false;
+		bool materialChanged = false;
+		uint32_t previousSurfaceCount = 0;
+		uint32_t liveSurfaceCount = 0;
+		uint32_t previousTriangleCount = 0;
+		uint32_t liveTriangleCount = 0;
+	};
+
+	struct RuntimeAnimatedChurnTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		bool suppressed = false;
+		uint32_t suppressionEmits = 0;
+		uint32_t runtimeAttempts = 0;
+		uint32_t residentApplies = 0;
+		uint32_t syncSkips = 0;
+	};
 
 	struct PerfShellTraceStats
 	{
@@ -161,6 +224,17 @@ public:
 		uint32_t runtimeMutationHardwareCanvasChunkCount = 0;
 		uint32_t runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
 		uint32_t runtimeMutationMaterialRefreshReasonMaskOr = 0;
+		uint32_t runtimeMutationInvalidForceTopologyCount = 0;
+		uint32_t runtimeMutationInvalidAppliedCount = 0;
+		uint32_t runtimeMutationInvalidFailedCount = 0;
+		uint32_t runtimeMutationInvalidSyncSkipCount = 0;
+		uint32_t runtimeMutationValidMaterialCount = 0;
+		uint32_t runtimeMutationValidStructuralCount = 0;
+		uint32_t runtimeAnimatedSuppressedActiveCount = 0;
+		uint32_t runtimeAnimatedSuppressionEmitCount = 0;
+		uint32_t runtimeAnimatedAttemptCount = 0;
+		uint32_t runtimeAnimatedResidentApplyCount = 0;
+		uint32_t runtimeAnimatedSyncSkipCount = 0;
 		uint32_t runtimeMutationActiveChunkCount = 0;
 		uint32_t runtimeMutationValidChunkCount = 0;
 		uint32_t runtimeMutationExcludedStaticChunkCount = 0;
@@ -221,6 +295,9 @@ public:
 		bool usedPersistentDynamicEmissiveCache = false;
 		std::string sceneTextureReason;
 		std::array<MaterialBuildTraceEntry, MaterialBuildTraceSlotCount> materialBuildByLabel = {};
+		std::array<RuntimeMutationTopTraceEntry, RuntimeMutationTopTraceCount> runtimeMutationTopEntries = {};
+		std::array<RuntimeSectorDirtyTruthTraceEntry, RuntimeSectorDirtyTruthTraceCount> runtimeSectorDirtyTruthEntries = {};
+		std::array<RuntimeAnimatedChurnTraceEntry, RuntimeAnimatedChurnTraceCount> runtimeAnimatedChurnEntries = {};
 	};
 
 	struct PerfResourceTraceStats
@@ -250,9 +327,19 @@ public:
 		uint32_t sceneUploadCalls = 0;
 		uint32_t sceneDataUploadCalls = 0;
 		uint32_t emissiveUploadCalls = 0;
+		uint32_t residentChunkBatchChunkCount = 0;
+		uint32_t residentChunkBatchGeometryDirtyCount = 0;
+		uint32_t residentChunkBatchMaterialDirtyCount = 0;
+		uint32_t residentChunkBatchRecoverEmptyCount = 0;
+		uint32_t residentChunkBatchMaterialFallbackCount = 0;
+		uint32_t residentChunkBatchBlasRebuildCount = 0;
 		uint64_t sceneUploadBytes = 0;
 		uint64_t sceneDataUploadBytes = 0;
 		uint64_t emissiveUploadBytes = 0;
+		uint64_t residentChunkBatchVertexBytes = 0;
+		uint64_t residentChunkBatchIndexBytes = 0;
+		uint64_t residentChunkBatchPrimitiveBytes = 0;
+		uint64_t residentChunkBatchMaterialBytes = 0;
 	};
 
 	struct MemoryTelemetry
@@ -687,6 +774,10 @@ private:
 			bool wasVisibleLastFrame = false;
 			bool visibleValidationTraceEmitted = false;
 			uint8_t visibleValidationFramesRemaining = 0;
+			uint32_t animatedSuppressionEmitCount = 0;
+			uint32_t runtimeAnimatedAttemptCount = 0;
+			uint32_t runtimeAnimatedResidentApplyCount = 0;
+			uint32_t runtimeAnimatedSyncSkipCount = 0;
 			nri_scene::PTMapChunkMutationBaseline appliedBaseline;
 		};
 
@@ -1117,6 +1208,7 @@ private:
 		uint32_t& outStaticSceneChunkListIndex,
 		bool& outMaterialDirty,
 		bool& outGeometryDirty,
+		bool& outRecoveredEmpty,
 		bool& ioWaitedForWrites);
 	bool RebuildResidentStaticMaterialState(const char* reason);
 	bool RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices);

@@ -2987,6 +2987,20 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 	{
 		const auto& shell = mRenderer->GetLastPerfShellTraceStats();
 		const auto& resource = mRenderer->GetLastPerfResourceTraceStats();
+		const auto getRuntimeMutationTraceActionName = [](NRIRenderer::RuntimeMutationTraceAction action) -> const char*
+		{
+			switch (action)
+			{
+			case NRIRenderer::RuntimeMutationTraceAction::StructuralRebuild: return "rebuild";
+			case NRIRenderer::RuntimeMutationTraceAction::MaterialRefresh: return "material-refresh";
+			case NRIRenderer::RuntimeMutationTraceAction::ResidentApply: return "resident-apply";
+			case NRIRenderer::RuntimeMutationTraceAction::ResidentFallback: return "fallback";
+			case NRIRenderer::RuntimeMutationTraceAction::Held: return "held";
+			case NRIRenderer::RuntimeMutationTraceAction::SyncSkip: return "sync-skip";
+			case NRIRenderer::RuntimeMutationTraceAction::Failed: return "failed";
+			default: return "none";
+			}
+		};
 		Printf("----------perf trace frame %llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber);
 		Printf(
@@ -3101,6 +3115,92 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationStructuralInvalidChunks,
 			shell.runtimeMutationHardwareCanvasChunkCount);
 		Printf(
+			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u invalid_applied=%u invalid_failed=%u invalid_sync_skip=%u valid_structural=%u valid_material=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeMutationInvalidForceTopologyCount,
+			shell.runtimeMutationInvalidAppliedCount,
+			shell.runtimeMutationInvalidFailedCount,
+			shell.runtimeMutationInvalidSyncSkipCount,
+			shell.runtimeMutationValidStructuralCount,
+			shell.runtimeMutationValidMaterialCount);
+		for (size_t index = 0; index < NRIRenderer::RuntimeMutationTopTraceCount; ++index)
+		{
+			const auto& entry = shell.runtimeMutationTopEntries[index];
+			if (!entry.valid)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt mutation top NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x section_dirty=%u surfaces=%u tris=%u mats=%u action=%s force_topology=%u resident_mat=%u resident_geo=%u recovered_empty=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned)(index + 1),
+				entry.chunkIndex,
+				entry.sectorIndex,
+				entry.reasonMask,
+				entry.sectionDirtyCount,
+				entry.surfaceCount,
+				entry.triangleCount,
+				entry.materialCount,
+				getRuntimeMutationTraceActionName(entry.action),
+				entry.forceTopology ? 1u : 0u,
+				entry.residentMaterialDirty ? 1u : 0u,
+				entry.residentGeometryDirty ? 1u : 0u,
+				entry.recoveredEmpty ? 1u : 0u);
+		}
+		for (size_t index = 0; index < NRIRenderer::RuntimeSectorDirtyTruthTraceCount; ++index)
+		{
+			const auto& entry = shell.runtimeSectorDirtyTruthEntries[index];
+			if (!entry.valid)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt sector dirty truth NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x force_topology=%u baseline_changed=%u geometry_changed=%u material_changed=%u prev_surfaces=%u live_surfaces=%u prev_tris=%u live_tris=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned)(index + 1),
+				entry.chunkIndex,
+				entry.sectorIndex,
+				entry.reasonMask,
+				entry.forceTopology ? 1u : 0u,
+				entry.baselineChanged ? 1u : 0u,
+				entry.geometryChanged ? 1u : 0u,
+				entry.materialChanged ? 1u : 0u,
+				entry.previousSurfaceCount,
+				entry.liveSurfaceCount,
+				entry.previousTriangleCount,
+				entry.liveTriangleCount);
+		}
+		Printf(
+			"PERF pt animated steady NRI: frame=%llu suppressed_active=%u suppressions=%u attempts=%u resident_apply=%u sync_skip=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeAnimatedSuppressedActiveCount,
+			shell.runtimeAnimatedSuppressionEmitCount,
+			shell.runtimeAnimatedAttemptCount,
+			shell.runtimeAnimatedResidentApplyCount,
+			shell.runtimeAnimatedSyncSkipCount);
+		for (size_t index = 0; index < NRIRenderer::RuntimeAnimatedChurnTraceCount; ++index)
+		{
+			const auto& entry = shell.runtimeAnimatedChurnEntries[index];
+			if (!entry.valid)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt animated top NRI: frame=%llu rank=%u chunk=%u sector=%d suppressed=%u suppressions=%u attempts=%u resident_apply=%u sync_skip=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned)(index + 1),
+				entry.chunkIndex,
+				entry.sectorIndex,
+				entry.suppressed ? 1u : 0u,
+				entry.suppressionEmits,
+				entry.runtimeAttempts,
+				entry.residentApplies,
+				entry.syncSkips);
+		}
+		Printf(
 			"PERF pt texture detail NRI: frame=%llu reason=%s requested=%u actor_materials=%u base=%u glow=%u normal=%u metallic=%u roughness=%u emissive=%u cache=%u misses=%u inserts=%u transitions=%u lookup_ms=%.3f realize_ms=%.3f descriptor_ms=%.3f transition_ms=%.3f material_builds=%u override_builds=%u override_ms=%.3f material_ms=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneTextureReason.empty() ? "none" : shell.sceneTextureReason.c_str(),
@@ -3194,6 +3294,19 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			resource.emissiveTlasScratchResizeWaitMs,
 			resource.otherWaitCalls,
 			resource.otherWaitMs);
+		Printf(
+			"PERF pt resident write batch NRI: frame=%llu chunks=%u geom_dirty=%u mat_dirty=%u recover_empty=%u mat_fallback=%u blas_rebuild=%u vertex_bytes=%llu index_bytes=%llu prim_bytes=%llu material_bytes=%llu\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			resource.residentChunkBatchChunkCount,
+			resource.residentChunkBatchGeometryDirtyCount,
+			resource.residentChunkBatchMaterialDirtyCount,
+			resource.residentChunkBatchRecoverEmptyCount,
+			resource.residentChunkBatchMaterialFallbackCount,
+			resource.residentChunkBatchBlasRebuildCount,
+			(unsigned long long)resource.residentChunkBatchVertexBytes,
+			(unsigned long long)resource.residentChunkBatchIndexBytes,
+			(unsigned long long)resource.residentChunkBatchPrimitiveBytes,
+			(unsigned long long)resource.residentChunkBatchMaterialBytes);
 	}
 	return rendered;
 }
