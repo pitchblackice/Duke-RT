@@ -152,6 +152,7 @@ public:
 		int32_t sectorIndex = -1;
 		bool suppressed = false;
 		uint32_t suppressionEmits = 0;
+		uint32_t materialRefreshes = 0;
 		uint32_t runtimeAttempts = 0;
 		uint32_t residentApplies = 0;
 		uint32_t syncSkips = 0;
@@ -232,8 +233,14 @@ public:
 		uint32_t runtimeMutationValidStructuralCount = 0;
 		uint32_t runtimeAnimatedSuppressedActiveCount = 0;
 		uint32_t runtimeAnimatedSuppressionEmitCount = 0;
+		uint32_t runtimeAnimatedUniqueTouchedCount = 0;
+		uint32_t runtimeAnimatedMaterialRefreshCount = 0;
 		uint32_t runtimeAnimatedAttemptCount = 0;
+		uint32_t runtimeAnimatedSuppressedAttemptCount = 0;
+		uint32_t runtimeAnimatedUnsuppressedAttemptCount = 0;
 		uint32_t runtimeAnimatedResidentApplyCount = 0;
+		uint32_t runtimeAnimatedSuppressedResidentApplyCount = 0;
+		uint32_t runtimeAnimatedUnsuppressedResidentApplyCount = 0;
 		uint32_t runtimeAnimatedSyncSkipCount = 0;
 		uint32_t runtimeMutationActiveChunkCount = 0;
 		uint32_t runtimeMutationValidChunkCount = 0;
@@ -1208,6 +1215,9 @@ private:
 		uint32_t& outStaticSceneChunkListIndex,
 		bool& outMaterialDirty,
 		bool& outGeometryDirty,
+		uint32_t& outSurfaceCount,
+		uint32_t& outTriangleCount,
+		uint32_t& outMaterialCount,
 		bool& outRecoveredEmpty,
 		bool& ioWaitedForWrites);
 	bool RebuildResidentStaticMaterialState(const char* reason);

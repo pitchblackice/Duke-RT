@@ -2818,7 +2818,8 @@ namespace
 
 	uint32_t ScoreRuntimeAnimatedChurnTraceEntry(const NRIRenderer::RuntimeAnimatedChurnTraceEntry& entry)
 	{
-		uint32_t score = entry.runtimeAttempts * 64u +
+		uint32_t score = entry.materialRefreshes * 96u +
+			entry.runtimeAttempts * 64u +
 			entry.residentApplies * 48u +
 			entry.syncSkips * 32u +
 			entry.suppressionEmits * 16u;
@@ -15209,6 +15210,7 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 			mResidentMapChunkRegistry.entries[targetChunk.chunkIndex].animatedRefreshSuppressed = true;
 			mResidentMapChunkRegistry.entries[targetChunk.chunkIndex].animatedSuppressionEmitCount++;
 		}
+		mLastPerfShellTraceStats.runtimeAnimatedSuppressionEmitCount++;
 		if (nri_ptscenestats)
 		{
 			Printf("NRI PT static scene anim: suppressing chunk=%u resident animated refresh (%s).\n",
@@ -17427,8 +17429,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationValidStructuralCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedSuppressedActiveCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedSuppressionEmitCount = 0;
+	mLastPerfShellTraceStats.runtimeAnimatedUniqueTouchedCount = 0;
+	mLastPerfShellTraceStats.runtimeAnimatedMaterialRefreshCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedAttemptCount = 0;
+	mLastPerfShellTraceStats.runtimeAnimatedSuppressedAttemptCount = 0;
+	mLastPerfShellTraceStats.runtimeAnimatedUnsuppressedAttemptCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedResidentApplyCount = 0;
+	mLastPerfShellTraceStats.runtimeAnimatedSuppressedResidentApplyCount = 0;
+	mLastPerfShellTraceStats.runtimeAnimatedUnsuppressedResidentApplyCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedSyncSkipCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationActiveChunkCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationValidChunkCount = 0;
@@ -17441,6 +17449,74 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationTopEntries = {};
 	mLastPerfShellTraceStats.runtimeSectorDirtyTruthEntries = {};
 	mLastPerfShellTraceStats.runtimeAnimatedChurnEntries = {};
+	struct RuntimeAnimatedFrameTraceStats
+	{
+		bool touched = false;
+		bool suppressed = false;
+		uint32_t materialRefreshes = 0;
+		uint32_t runtimeAttempts = 0;
+		uint32_t residentApplies = 0;
+		uint32_t syncSkips = 0;
+	};
+	std::vector<RuntimeAnimatedFrameTraceStats> runtimeAnimatedFrameStats;
+	runtimeAnimatedFrameStats.resize(mResidentMapChunkRegistry.entries.size());
+	const auto recordRuntimeAnimatedFrame =
+		[this, &runtimeAnimatedFrameStats](uint32_t chunkIndex,
+			bool suppressed,
+			bool materialRefresh,
+			bool attempted,
+			bool residentApply,
+			bool syncSkip)
+	{
+		if (chunkIndex >= runtimeAnimatedFrameStats.size())
+		{
+			return;
+		}
+
+		auto& entry = runtimeAnimatedFrameStats[chunkIndex];
+		if (!entry.touched)
+		{
+			entry.touched = true;
+			mLastPerfShellTraceStats.runtimeAnimatedUniqueTouchedCount++;
+		}
+		entry.suppressed = entry.suppressed || suppressed;
+		if (materialRefresh)
+		{
+			entry.materialRefreshes++;
+			mLastPerfShellTraceStats.runtimeAnimatedMaterialRefreshCount++;
+		}
+		if (attempted)
+		{
+			entry.runtimeAttempts++;
+			mLastPerfShellTraceStats.runtimeAnimatedAttemptCount++;
+			if (suppressed)
+			{
+				mLastPerfShellTraceStats.runtimeAnimatedSuppressedAttemptCount++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeAnimatedUnsuppressedAttemptCount++;
+			}
+		}
+		if (residentApply)
+		{
+			entry.residentApplies++;
+			mLastPerfShellTraceStats.runtimeAnimatedResidentApplyCount++;
+			if (suppressed)
+			{
+				mLastPerfShellTraceStats.runtimeAnimatedSuppressedResidentApplyCount++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeAnimatedUnsuppressedResidentApplyCount++;
+			}
+		}
+		if (syncSkip)
+		{
+			entry.syncSkips++;
+			mLastPerfShellTraceStats.runtimeAnimatedSyncSkipCount++;
+		}
+	};
 
 	const auto recordRuntimeMutationTopEntry =
 		[this](uint32_t chunkIndex,
@@ -17655,6 +17731,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		bool chunkTraceResidentMaterialDirty = false;
 		bool chunkTraceResidentGeometryDirty = false;
 		bool chunkTraceRecoveredEmpty = false;
+		uint32_t chunkTraceSurfaceCount = replacement.surfaceCount;
+		uint32_t chunkTraceTriangleCount = replacement.triangleCount;
+		uint32_t chunkTraceMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
+		bool sectorDirtyTruthCaptured = false;
 		const uint32_t previousReplacementSurfaceCount = replacement.surfaceCount;
 		const uint32_t previousReplacementTriangleCount = replacement.triangleCount;
 		auto emitChunkTrace = [&]()
@@ -17664,9 +17744,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				mapChunk.sectorIndex,
 				normalizedReasonMask,
 				replacement.sectionDirtyCount,
-				replacement.surfaceCount,
-				replacement.triangleCount,
-				(uint32_t)replacement.materialBridge.materials.size(),
+				chunkTraceSurfaceCount,
+				chunkTraceTriangleCount,
+				chunkTraceMaterialCount,
 				chunkTraceAction,
 				forceTopologyInvalidation,
 				chunkTraceResidentMaterialDirty,
@@ -17861,6 +17941,55 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			havePreparedLiveChunkView = true;
 			return true;
 		};
+		const auto captureSectorDirtyTruth = [&]()
+		{
+			if (!ShouldTracePtPerf() ||
+				sectorDirtyTruthCaptured ||
+				(normalizedReasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) == 0 ||
+				!havePreparedLiveChunkView)
+			{
+				return;
+			}
+
+			uint64_t liveBaselineSignature = 0;
+			nri_scene::PTMapChunkMutationBaseline truthBaseline;
+			if (nri_scene::CaptureMapChunkMutationBaseline(mapChunk, truthBaseline))
+			{
+				liveBaselineSignature = truthBaseline.signature;
+			}
+
+			uint64_t previousGeometrySignature = 0;
+			uint64_t previousMaterialSignature = 0;
+			bool havePreviousSignatures = false;
+			if (replacement.valid)
+			{
+				previousGeometrySignature = ComputeAnimatedGeometrySignature(replacement.sceneView);
+				previousMaterialSignature = replacement.animatedMaterialSignature;
+				havePreviousSignatures = true;
+			}
+			else if (residentEntry != nullptr && residentEntry->valid)
+			{
+				previousGeometrySignature = residentEntry->animatedGeometrySignature;
+				previousMaterialSignature = residentEntry->animatedMaterialSignature;
+				havePreviousSignatures = true;
+			}
+
+			recordSectorDirtyTruthEntry(
+				mapChunk.chunkIndex,
+				mapChunk.sectorIndex,
+				normalizedReasonMask,
+				forceTopologyInvalidation,
+				liveBaselineSignature != replacement.replacementBaseline.signature,
+				!havePreviousSignatures ||
+					ComputeAnimatedGeometrySignature(liveChunkView) != previousGeometrySignature,
+				!havePreviousSignatures ||
+					ComputeAnimatedMaterialSignature(liveChunkView) != previousMaterialSignature,
+				previousReplacementSurfaceCount,
+				CountSceneViewSurfaces(liveChunkView),
+				previousReplacementTriangleCount,
+				liveStats.triangleCount);
+			sectorDirtyTruthCaptured = true;
+		};
 		const auto rebuildReplacementFromPreparedLiveChunk = [&](bool countAsStructuralRebuild) -> bool
 		{
 			const bool exclusiveMaterialOnlyReplacement =
@@ -18028,6 +18157,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				{
 					return false;
 				}
+				captureSectorDirtyTruth();
 				return rebuildReplacementFromPreparedLiveChunk(true);
 			}();
 			if (!builtChunk && replacement.valid)
@@ -18057,6 +18187,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				mLastPerfShellTraceStats.runtimeMutationValidStructuralCount++;
 				chunkTraceAction = RuntimeMutationTraceAction::StructuralRebuild;
+				chunkTraceSurfaceCount = replacement.surfaceCount;
+				chunkTraceTriangleCount = replacement.triangleCount;
+				chunkTraceMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
 			}
 		}
 		else
@@ -18064,7 +18197,6 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.active = true;
 			bool activeHardwareCanvasChunk = false;
 			bool suppressedAnimatedResidentAlreadySynchronized = false;
-			bool sectorDirtyTruthCaptured = false;
 			// Build tile animation can change the resolved PT texture binding
 			// without mutating the authored wall/sector fields tracked above.
 			const bool refreshedAnimatedChunk = [&]()
@@ -18086,34 +18218,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					ComputeAnimatedGeometrySignature(liveChunkView);
 				const uint64_t liveAnimatedMaterialSignature =
 					ComputeAnimatedMaterialSignature(liveChunkView);
-				if (ShouldTracePtPerf() &&
-					(normalizedReasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0 &&
-					!sectorDirtyTruthCaptured)
-				{
-					uint64_t liveBaselineSignature = 0;
-					nri_scene::PTMapChunkMutationBaseline truthBaseline;
-					if (nri_scene::CaptureMapChunkMutationBaseline(mapChunk, truthBaseline))
-					{
-						liveBaselineSignature = truthBaseline.signature;
-					}
-					recordSectorDirtyTruthEntry(
-						mapChunk.chunkIndex,
-						mapChunk.sectorIndex,
-						normalizedReasonMask,
-						forceTopologyInvalidation,
-						liveBaselineSignature != replacement.replacementBaseline.signature,
-						residentEntry != nullptr && residentEntry->valid ?
-							liveAnimatedGeometrySignature != residentEntry->animatedGeometrySignature :
-							true,
-						residentEntry != nullptr && residentEntry->valid ?
-							liveAnimatedMaterialSignature != residentEntry->animatedMaterialSignature :
-							true,
-						previousReplacementSurfaceCount,
-						CountSceneViewSurfaces(liveChunkView),
-						previousReplacementTriangleCount,
-						liveStats.triangleCount);
-					sectorDirtyTruthCaptured = true;
-				}
+				captureSectorDirtyTruth();
 				suppressedAnimatedResidentAlreadySynchronized =
 					useStaticAnimatedReplacement &&
 					residentEntry != nullptr &&
@@ -18127,6 +18232,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					residentEntry->animatedRefreshSuppressed)
 				{
 					residentEntry->runtimeAnimatedAttemptCount++;
+					recordRuntimeAnimatedFrame(mapChunk.chunkIndex, true, false, true, false, false);
 				}
 				if (suppressedAnimatedResidentAlreadySynchronized)
 				{
@@ -18162,6 +18268,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					replacement.animationOnlyRefreshed = true;
 					mRuntimeMapLastFrame.animatedRefreshChunkCount++;
 				}
+				recordRuntimeAnimatedFrame(
+					mapChunk.chunkIndex,
+					useStaticAnimatedReplacement,
+					true,
+					!useStaticAnimatedReplacement,
+					false,
+					false);
 				return true;
 			}();
 			if (!refreshedAnimatedChunk)
@@ -18183,7 +18296,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				{
 					residentEntry->runtimeAnimatedSyncSkipCount++;
 				}
+				recordRuntimeAnimatedFrame(mapChunk.chunkIndex, true, false, false, false, true);
 				chunkTraceAction = RuntimeMutationTraceAction::SyncSkip;
+				chunkTraceSurfaceCount = CountSceneViewSurfaces(liveChunkView);
+				chunkTraceTriangleCount = liveStats.triangleCount;
+				chunkTraceMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
 				emitChunkTrace();
 				continue;
@@ -18192,6 +18309,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				mLastPerfShellTraceStats.runtimeMutationValidMaterialCount++;
 				chunkTraceAction = RuntimeMutationTraceAction::MaterialRefresh;
+				chunkTraceSurfaceCount = replacement.surfaceCount;
+				chunkTraceTriangleCount = replacement.triangleCount;
+				chunkTraceMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
 			}
 		}
 
@@ -18206,16 +18326,27 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			uint32_t residentChunkListIndex = UINT32_MAX;
 			bool residentChunkMaterialDirty = false;
 			bool residentChunkGeometryDirty = false;
+			uint32_t residentChunkSurfaceCount = 0;
+			uint32_t residentChunkTriangleCount = 0;
+			uint32_t residentChunkMaterialCount = 0;
 			bool residentChunkRecoveredEmpty = false;
 			const uint32_t appliedReasonMask = replacement.reasonMask;
 			const bool attemptedStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
 			const bool attemptedAnimationOnlyRefresh = replacement.animationOnlyRefreshed;
+			const bool attemptedSuppressedAnimatedResidentApply =
+				attemptedStaticAnimatedReplacement &&
+				residentEntry != nullptr &&
+				residentEntry->valid &&
+				residentEntry->animatedRefreshSuppressed;
 			if (TryApplyRuntimeMutationChunkToResidentScene(
 				mapChunk,
 				replacement,
 				residentChunkListIndex,
 				residentChunkMaterialDirty,
 				residentChunkGeometryDirty,
+				residentChunkSurfaceCount,
+				residentChunkTriangleCount,
+				residentChunkMaterialCount,
 				residentChunkRecoveredEmpty,
 				residentWritesWaitedFor))
 			{
@@ -18238,6 +18369,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					residentEntry->valid)
 				{
 					residentEntry->runtimeAnimatedResidentApplyCount++;
+				}
+				if (attemptedStaticAnimatedReplacement || attemptedAnimationOnlyRefresh)
+				{
+					recordRuntimeAnimatedFrame(
+						mapChunk.chunkIndex,
+						attemptedSuppressedAnimatedResidentApply,
+						false,
+						false,
+						true,
+						false);
 				}
 				if (residentEntry != nullptr)
 				{
@@ -18268,6 +18409,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				chunkTraceResidentMaterialDirty = residentChunkMaterialDirty;
 				chunkTraceResidentGeometryDirty = residentChunkGeometryDirty;
 				chunkTraceRecoveredEmpty = residentChunkRecoveredEmpty;
+				chunkTraceSurfaceCount = residentChunkSurfaceCount;
+				chunkTraceTriangleCount = residentChunkTriangleCount;
+				chunkTraceMaterialCount = residentChunkMaterialCount;
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
 				emitChunkTrace();
 				continue;
@@ -18282,6 +18426,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.stableMutationFrameCount = 0;
 			mLastPerfShellTraceStats.runtimeMutationInvalidFailedCount++;
 			chunkTraceAction = RuntimeMutationTraceAction::ResidentFallback;
+			chunkTraceSurfaceCount = replacement.surfaceCount;
+			chunkTraceTriangleCount = replacement.triangleCount;
+			chunkTraceMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
 			emitChunkTrace();
 			continue;
@@ -18330,20 +18477,17 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			mLastPerfShellTraceStats.runtimeAnimatedSuppressedActiveCount++;
 		}
-		mLastPerfShellTraceStats.runtimeAnimatedSuppressionEmitCount += entry.animatedSuppressionEmitCount;
-		mLastPerfShellTraceStats.runtimeAnimatedAttemptCount += entry.runtimeAnimatedAttemptCount;
-		mLastPerfShellTraceStats.runtimeAnimatedResidentApplyCount += entry.runtimeAnimatedResidentApplyCount;
-		mLastPerfShellTraceStats.runtimeAnimatedSyncSkipCount += entry.runtimeAnimatedSyncSkipCount;
-
 		if (!ShouldTracePtPerf())
 		{
 			continue;
 		}
-		if (!entry.animatedRefreshSuppressed &&
-			entry.animatedSuppressionEmitCount == 0 &&
-			entry.runtimeAnimatedAttemptCount == 0 &&
-			entry.runtimeAnimatedResidentApplyCount == 0 &&
-			entry.runtimeAnimatedSyncSkipCount == 0)
+		if (chunkIndex >= runtimeAnimatedFrameStats.size())
+		{
+			continue;
+		}
+
+		const auto& frameEntry = runtimeAnimatedFrameStats[chunkIndex];
+		if (!frameEntry.touched && !entry.animatedRefreshSuppressed)
 		{
 			continue;
 		}
@@ -18353,11 +18497,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		animatedEntry.chunkIndex = chunkIndex;
 		animatedEntry.sectorIndex =
 			chunkIndex < mMapWorld.chunks.size() ? mMapWorld.chunks[chunkIndex].sectorIndex : -1;
-		animatedEntry.suppressed = entry.animatedRefreshSuppressed;
-		animatedEntry.suppressionEmits = entry.animatedSuppressionEmitCount;
-		animatedEntry.runtimeAttempts = entry.runtimeAnimatedAttemptCount;
-		animatedEntry.residentApplies = entry.runtimeAnimatedResidentApplyCount;
-		animatedEntry.syncSkips = entry.runtimeAnimatedSyncSkipCount;
+		animatedEntry.suppressed = entry.animatedRefreshSuppressed || frameEntry.suppressed;
+		animatedEntry.materialRefreshes = frameEntry.materialRefreshes;
+		animatedEntry.runtimeAttempts = frameEntry.runtimeAttempts;
+		animatedEntry.residentApplies = frameEntry.residentApplies;
+		animatedEntry.syncSkips = frameEntry.syncSkips;
 		InsertRankedTraceEntry(
 			mLastPerfShellTraceStats.runtimeAnimatedChurnEntries,
 			animatedEntry,
@@ -19199,12 +19343,18 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	uint32_t& outStaticSceneChunkListIndex,
 	bool& outMaterialDirty,
 	bool& outGeometryDirty,
+	uint32_t& outSurfaceCount,
+	uint32_t& outTriangleCount,
+	uint32_t& outMaterialCount,
 	bool& outRecoveredEmpty,
 	bool& ioWaitedForWrites)
 {
 	outStaticSceneChunkListIndex = UINT32_MAX;
 	outMaterialDirty = false;
 	outGeometryDirty = false;
+	outSurfaceCount = 0;
+	outTriangleCount = 0;
+	outMaterialCount = 0;
 	outRecoveredEmpty = false;
 	if (!mStaticMapScene.valid ||
 		!mStaticMapScene.buffersResident ||
@@ -19298,6 +19448,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		residentMaterials = replacement.materialBridge;
 		appliedBaseline = replacement.replacementBaseline;
 	}
+	outSurfaceCount = CountSceneViewSurfaces(residentSceneView);
+	outTriangleCount = (uint32_t)residentGeometry.primitives.size();
+	outMaterialCount = (uint32_t)residentMaterials.materials.size();
 
 	if (!ioWaitedForWrites)
 	{

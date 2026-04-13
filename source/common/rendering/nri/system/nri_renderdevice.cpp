@@ -3173,12 +3173,18 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.liveTriangleCount);
 		}
 		Printf(
-			"PERF pt animated steady NRI: frame=%llu suppressed_active=%u suppressions=%u attempts=%u resident_apply=%u sync_skip=%u\n",
+			"PERF pt animated steady NRI: frame=%llu suppressed_active=%u suppressions=%u unique_touched=%u material_refresh=%u attempts=%u suppressed_attempts=%u unsuppressed_attempts=%u resident_apply=%u suppressed_resident_apply=%u unsuppressed_resident_apply=%u sync_skip=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeAnimatedSuppressedActiveCount,
 			shell.runtimeAnimatedSuppressionEmitCount,
+			shell.runtimeAnimatedUniqueTouchedCount,
+			shell.runtimeAnimatedMaterialRefreshCount,
 			shell.runtimeAnimatedAttemptCount,
+			shell.runtimeAnimatedSuppressedAttemptCount,
+			shell.runtimeAnimatedUnsuppressedAttemptCount,
 			shell.runtimeAnimatedResidentApplyCount,
+			shell.runtimeAnimatedSuppressedResidentApplyCount,
+			shell.runtimeAnimatedUnsuppressedResidentApplyCount,
 			shell.runtimeAnimatedSyncSkipCount);
 		for (size_t index = 0; index < NRIRenderer::RuntimeAnimatedChurnTraceCount; ++index)
 		{
@@ -3189,13 +3195,13 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			}
 
 			Printf(
-				"PERF pt animated top NRI: frame=%llu rank=%u chunk=%u sector=%d suppressed=%u suppressions=%u attempts=%u resident_apply=%u sync_skip=%u\n",
+				"PERF pt animated top NRI: frame=%llu rank=%u chunk=%u sector=%d suppressed=%u material_refresh=%u attempts=%u resident_apply=%u sync_skip=%u\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				(unsigned)(index + 1),
 				entry.chunkIndex,
 				entry.sectorIndex,
 				entry.suppressed ? 1u : 0u,
-				entry.suppressionEmits,
+				entry.materialRefreshes,
 				entry.runtimeAttempts,
 				entry.residentApplies,
 				entry.syncSkips);
