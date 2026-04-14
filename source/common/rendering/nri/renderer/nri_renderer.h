@@ -1039,6 +1039,22 @@ private:
 		std::vector<ChunkReplacement> chunks;
 	};
 
+	struct ResidentBufferUploadScratch
+	{
+		NRIBufferResource buffer;
+		uint64_t cursor = 0;
+		bool copySourceActive = false;
+	};
+
+	struct ResidentUploadScratchFrame
+	{
+		uint64_t frameIndex = UINT64_MAX;
+		ResidentBufferUploadScratch vertex;
+		ResidentBufferUploadScratch index;
+		ResidentBufferUploadScratch primitive;
+		ResidentBufferUploadScratch material;
+	};
+
 	struct RuntimeMapMutationFrameState
 	{
 		bool active = false;
@@ -1251,8 +1267,7 @@ private:
 		uint32_t& outSurfaceCount,
 		uint32_t& outTriangleCount,
 		uint32_t& outMaterialCount,
-		bool& outRecoveredEmpty,
-		bool& ioWaitedForWrites);
+		bool& outRecoveredEmpty);
 	bool RebuildResidentStaticMaterialState(const char* reason);
 	bool RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
@@ -1389,6 +1404,10 @@ private:
 	bool EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced = false, const char* waitReason = nullptr);
 	bool UpdateStructuredBufferRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after);
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
+	bool CreateBufferWithoutViewAtLocation(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::MemoryLocation memoryLocation);
+	bool EnsureResidentUploadScratchBuffer(NRIBufferResource& resource, uint64_t requiredSize);
+	bool EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind);
+	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
 	void BuildRuntimeLightClusterUpload(
 		std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 		std::vector<uint32_t>& outIndices,
@@ -1478,6 +1497,7 @@ private:
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
+	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
 	SceneBufferDebugStats mIndexBufferStats = { "Index" };
 	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };

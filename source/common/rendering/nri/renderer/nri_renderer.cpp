@@ -3587,6 +3587,16 @@ namespace
 		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
 	}
 
+	static nri::AccessStage NRICopySourceAccess()
+	{
+		return { nri::AccessBits::COPY_SOURCE, nri::StageBits::COPY };
+	}
+
+	static nri::AccessStage NRICopyDestinationAccess()
+	{
+		return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
+	}
+
 	static nri::AccessStage NRIAccelerationStructureBuildInputAccess()
 	{
 		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::ALL_SHADERS };
@@ -3606,6 +3616,14 @@ namespace
 	{
 		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
 	}
+
+	enum ResidentUploadKind
+	{
+		ResidentUploadKind_Vertex = 0,
+		ResidentUploadKind_Index = 1,
+		ResidentUploadKind_Primitive = 2,
+		ResidentUploadKind_Material = 3,
+	};
 
 	static uint32_t ClampNrdHistoryFrameCount(int value)
 	{
@@ -9802,14 +9820,16 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		{
 			std::copy_n(mStaticMapScene.geometry.vertices.data(), copyCount, uploadVertices.data());
 		}
-		if (!EnsureStructuredBuffer(
+		if (!EnsureResidentStructuredBuffer(
 				mStaticVertexBuffer,
 				mVertexBufferStats,
 				uploadVertices.data(),
 				(uint64_t)uploadVertices.size() * sizeof(nri_scene::SceneVertex),
 				sizeof(nri_scene::SceneVertex),
 				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
-				NRIAccelerationStructureBuildInputAccess()))
+				NRIAccelerationStructureBuildInputAccess(),
+				"resident_chunk_write",
+				ResidentUploadKind_Vertex))
 		{
 			return false;
 		}
@@ -9824,14 +9844,16 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		{
 			std::copy_n(mStaticMapScene.geometry.indices.data(), copyCount, uploadIndices.data());
 		}
-		if (!EnsureStructuredBuffer(
+		if (!EnsureResidentStructuredBuffer(
 				mStaticIndexBuffer,
 				mIndexBufferStats,
 				uploadIndices.data(),
 				(uint64_t)uploadIndices.size() * sizeof(uint32_t),
 				sizeof(uint32_t),
 				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
-				NRIAccelerationStructureBuildInputAccess()))
+				NRIAccelerationStructureBuildInputAccess(),
+				"resident_chunk_write",
+				ResidentUploadKind_Index))
 		{
 			return false;
 		}
@@ -9846,14 +9868,16 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		{
 			std::copy_n(mStaticMapScene.geometry.primitives.data(), copyCount, uploadPrimitives.data());
 		}
-		if (!EnsureStructuredBuffer(
+		if (!EnsureResidentStructuredBuffer(
 				mStaticPrimitiveBuffer,
 				mPrimitiveBufferStats,
 				uploadPrimitives.data(),
 				(uint64_t)uploadPrimitives.size() * sizeof(nri_scene::PrimitiveData),
 				sizeof(nri_scene::PrimitiveData),
 				nri::BufferUsageBits::SHADER_RESOURCE,
-				NRIComputeShaderResourceAccess()))
+				NRIComputeShaderResourceAccess(),
+				"resident_chunk_write",
+				ResidentUploadKind_Primitive))
 		{
 			return false;
 		}
@@ -9868,14 +9892,16 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		{
 			std::copy_n(mStaticMapScene.gpuMaterials.data(), copyCount, uploadMaterials.data());
 		}
-		if (!EnsureStructuredBuffer(
+		if (!EnsureResidentStructuredBuffer(
 				mStaticMaterialBuffer,
 				mMaterialBufferStats,
 				uploadMaterials.data(),
 				(uint64_t)uploadMaterials.size() * sizeof(nri_scene::MaterialData),
 				sizeof(nri_scene::MaterialData),
 				nri::BufferUsageBits::SHADER_RESOURCE,
-				NRIComputeShaderResourceAccess()))
+				NRIComputeShaderResourceAccess(),
+				"resident_chunk_write",
+				ResidentUploadKind_Material))
 		{
 			return false;
 		}
@@ -10160,10 +10186,10 @@ bool NRIRenderer::UploadStaticMapChunkAtlas(
 	}
 
 	return
-		EnsureStructuredBuffer(vertexBuffer, mVertexBufferStats, atlasVertices.data(), atlasVertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
-		EnsureStructuredBuffer(indexBuffer, mIndexBufferStats, atlasIndices.data(), atlasIndices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess()) &&
-		EnsureStructuredBuffer(primitiveBuffer, mPrimitiveBufferStats, atlasPrimitives.data(), atlasPrimitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess()) &&
-		EnsureStructuredBuffer(materialBuffer, mMaterialBufferStats, atlasMaterials.data(), atlasMaterials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess());
+		EnsureResidentStructuredBuffer(vertexBuffer, mVertexBufferStats, atlasVertices.data(), atlasVertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), "resident_chunk_write", ResidentUploadKind_Vertex) &&
+		EnsureResidentStructuredBuffer(indexBuffer, mIndexBufferStats, atlasIndices.data(), atlasIndices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), "resident_chunk_write", ResidentUploadKind_Index) &&
+		EnsureResidentStructuredBuffer(primitiveBuffer, mPrimitiveBufferStats, atlasPrimitives.data(), atlasPrimitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), "resident_chunk_write", ResidentUploadKind_Primitive) &&
+		EnsureResidentStructuredBuffer(materialBuffer, mMaterialBufferStats, atlasMaterials.data(), atlasMaterials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), "resident_chunk_write", ResidentUploadKind_Material);
 }
 
 bool NRIRenderer::UploadStaticMapChunkMaterialAtlas(
@@ -10187,14 +10213,16 @@ bool NRIRenderer::UploadStaticMapChunkMaterialAtlas(
 			atlasMaterials);
 	}
 
-	return EnsureStructuredBuffer(
+	return EnsureResidentStructuredBuffer(
 		materialBuffer,
 		mMaterialBufferStats,
 		atlasMaterials.data(),
 		atlasMaterials.size() * sizeof(nri_scene::MaterialData),
 		sizeof(nri_scene::MaterialData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess());
+		NRIComputeShaderResourceAccess(),
+		"resident_chunk_write",
+		ResidentUploadKind_Material);
 }
 
 void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
@@ -16667,6 +16695,217 @@ bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t 
 	return true;
 }
 
+bool NRIRenderer::CreateBufferWithoutViewAtLocation(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::MemoryLocation memoryLocation)
+{
+	DestroyBufferResource(resource);
+
+	nri::BufferDesc desc = {};
+	desc.size = std::max<uint64_t>(size, stride);
+	desc.structureStride = stride;
+	desc.usage = usage;
+	if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, memoryLocation, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
+	{
+		return false;
+	}
+
+	nri::MemoryDesc memoryDesc = {};
+	mFrameBuffer->mCore.GetBufferMemoryDesc(*resource.buffer, memoryLocation, memoryDesc);
+	resource.size = desc.size;
+	resource.memorySize = memoryDesc.size;
+	resource.usedSize = size;
+	resource.stride = stride;
+	resource.memoryLocation = memoryLocation;
+	return true;
+}
+
+bool NRIRenderer::EnsureResidentUploadScratchBuffer(NRIBufferResource& resource, uint64_t requiredSize)
+{
+	constexpr uint32_t kResidentUploadScratchStride = 16u;
+	const uint64_t alignedRequiredSize = std::max<uint64_t>(requiredSize, kResidentUploadScratchStride);
+	if (resource.buffer != nullptr &&
+		resource.memoryLocation == nri::MemoryLocation::DEVICE_UPLOAD &&
+		resource.size >= alignedRequiredSize)
+	{
+		return true;
+	}
+
+	const uint64_t grownSize = GetGrownBufferSize(resource.size, alignedRequiredSize, kResidentUploadScratchStride);
+	return CreateBufferWithoutViewAtLocation(
+		resource,
+		grownSize,
+		kResidentUploadScratchStride,
+		nri::BufferUsageBits::NONE,
+		nri::MemoryLocation::DEVICE_UPLOAD);
+}
+
+bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind)
+{
+	if (resource.buffer == nullptr ||
+		data == nullptr ||
+		size == 0 ||
+		byteOffset > resource.size ||
+		size > resource.size - byteOffset)
+	{
+		return false;
+	}
+
+	if (mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr)
+	{
+		return false;
+	}
+
+	constexpr uint64_t kResidentUploadScratchAlignment = 16u;
+	const uint32_t frameSlot = GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size();
+	auto& frameScratch = mResidentUploadScratchFrames[frameSlot];
+	if (frameScratch.frameIndex != mFrameIndex)
+	{
+		frameScratch.frameIndex = mFrameIndex;
+		frameScratch.vertex.cursor = 0;
+		frameScratch.vertex.copySourceActive = false;
+		frameScratch.index.cursor = 0;
+		frameScratch.index.copySourceActive = false;
+		frameScratch.primitive.cursor = 0;
+		frameScratch.primitive.copySourceActive = false;
+		frameScratch.material.cursor = 0;
+		frameScratch.material.copySourceActive = false;
+	}
+
+	ResidentBufferUploadScratch* scratch = nullptr;
+	switch (uploadKind)
+	{
+	case ResidentUploadKind_Vertex: scratch = &frameScratch.vertex; break;
+	case ResidentUploadKind_Index: scratch = &frameScratch.index; break;
+	case ResidentUploadKind_Primitive: scratch = &frameScratch.primitive; break;
+	case ResidentUploadKind_Material: scratch = &frameScratch.material; break;
+	default: return false;
+	}
+
+	const uint64_t scratchOffset =
+		(scratch->cursor + kResidentUploadScratchAlignment - 1u) &
+		~(kResidentUploadScratchAlignment - 1u);
+	const uint64_t requiredSize = scratchOffset + size;
+	if (!EnsureResidentUploadScratchBuffer(scratch->buffer, requiredSize))
+	{
+		return false;
+	}
+
+	void* mapped = mFrameBuffer->mCore.MapBuffer(*scratch->buffer.buffer, scratchOffset, size);
+	if (mapped == nullptr)
+	{
+		return false;
+	}
+
+	std::memcpy(mapped, data, (size_t)size);
+	mFrameBuffer->mCore.UnmapBuffer(*scratch->buffer.buffer);
+
+	if (!scratch->copySourceActive)
+	{
+		nri::BufferBarrierDesc sourceBarrier = {};
+		sourceBarrier.buffer = scratch->buffer.buffer;
+		sourceBarrier.before = {};
+		sourceBarrier.after = NRICopySourceAccess();
+
+		nri::BarrierDesc sourceBarrierDesc = {};
+		sourceBarrierDesc.buffers = &sourceBarrier;
+		sourceBarrierDesc.bufferNum = 1;
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, sourceBarrierDesc);
+		scratch->copySourceActive = true;
+	}
+
+	nri::BufferBarrierDesc beforeCopyBarrier = {};
+	beforeCopyBarrier.buffer = resource.buffer;
+	beforeCopyBarrier.before = after;
+	beforeCopyBarrier.after = NRICopyDestinationAccess();
+
+	nri::BarrierDesc beforeCopyBarrierDesc = {};
+	beforeCopyBarrierDesc.buffers = &beforeCopyBarrier;
+	beforeCopyBarrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeCopyBarrierDesc);
+
+	mFrameBuffer->mCore.CmdCopyBuffer(
+		*mFrameBuffer->mCommandBuffer,
+		*resource.buffer,
+		byteOffset,
+		*scratch->buffer.buffer,
+		scratchOffset,
+		size);
+
+	nri::BufferBarrierDesc afterCopyBarrier = {};
+	afterCopyBarrier.buffer = resource.buffer;
+	afterCopyBarrier.before = NRICopyDestinationAccess();
+	afterCopyBarrier.after = after;
+
+	nri::BarrierDesc afterCopyBarrierDesc = {};
+	afterCopyBarrierDesc.buffers = &afterCopyBarrier;
+	afterCopyBarrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterCopyBarrierDesc);
+
+	scratch->cursor = scratchOffset + size;
+	return true;
+}
+
+bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind)
+{
+	const uint64_t requiredSize = std::max<uint64_t>(size, stride);
+	const bool needsGrowth =
+		resource.buffer == nullptr ||
+		resource.shaderView == nullptr ||
+		resource.memoryLocation != nri::MemoryLocation::DEVICE ||
+		resource.stride != stride ||
+		resource.size < requiredSize;
+
+	stats.bytesUploadedLastFrame = size;
+	stats.growEventsLastFrame = 0;
+	stats.overwriteEventsLastFrame = 0;
+	stats.uploadCount++;
+	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
+	NotePerfBufferUpload(&stats, size, needsGrowth);
+
+	if (needsGrowth)
+	{
+		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
+		if (resource.buffer != nullptr || resource.shaderView != nullptr)
+		{
+			WaitForCommandsTracked(waitReason);
+		}
+		DestroyBufferResource(resource);
+		if (!CreateBufferWithoutViewAtLocation(resource, grownSize, stride, usage, nri::MemoryLocation::DEVICE))
+		{
+			return false;
+		}
+
+		nri::BufferViewDesc viewDesc = {};
+		viewDesc.buffer = resource.buffer;
+		viewDesc.type = nri::BufferView::STRUCTURED_BUFFER;
+		viewDesc.offset = 0;
+		viewDesc.size = nri::WHOLE_SIZE;
+		viewDesc.structureStride = stride;
+		if (mFrameBuffer->mCore.CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
+
+		stats.growthCount++;
+		stats.growEventsLastFrame = 1;
+	}
+	else
+	{
+		stats.overwriteCount++;
+		stats.overwriteEventsLastFrame = 1;
+	}
+
+	resource.usedSize = size;
+	if (data != nullptr && size != 0)
+	{
+		if (!StageResidentBufferCopyRange(resource, 0, data, size, after, uploadKind))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 bool NRIRenderer::UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
 	return UploadSceneBuffers(mVertexBuffer, mIndexBuffer, mPrimitiveBuffer, mMaterialBuffer, geometry, materials);
@@ -17406,7 +17645,6 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	bool residentMaterialDirty = false;
 	bool residentGeometryDirty = false;
 	bool startupMaterialOnlyMutationDetected = false;
-	bool residentWritesWaitedFor = false;
 	std::vector<uint32_t> residentMaterialChunkListIndices;
 	std::vector<uint32_t> residentGeometryChunkListIndices;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs = 0.0;
@@ -18659,8 +18897,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				residentChunkSurfaceCount,
 				residentChunkTriangleCount,
 				residentChunkMaterialCount,
-				residentChunkRecoveredEmpty,
-				residentWritesWaitedFor))
+				residentChunkRecoveredEmpty))
 			{
 				mLastPerfShellTraceStats.runtimeMutationInvalidAppliedCount++;
 				mLastPerfResourceTraceStats.residentChunkBatchChunkCount++;
@@ -19429,12 +19666,13 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 			mStaticMapScene.gpuMaterials.data() + atlasChunk.materialOffset);
 
 		if (!textureTableGrew &&
-			!UpdateStructuredBufferRange(
+			!StageResidentBufferCopyRange(
 				mStaticMaterialBuffer,
 				(uint64_t)atlasChunk.materialOffset * sizeof(nri_scene::MaterialData),
 				remappedGpuMaterials.data(),
 				(uint64_t)atlasChunk.materialCount * sizeof(nri_scene::MaterialData),
-				NRIComputeShaderResourceAccess()))
+				NRIComputeShaderResourceAccess(),
+				ResidentUploadKind_Material))
 		{
 			if (nri_ptscenestats)
 			{
@@ -19660,8 +19898,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	uint32_t& outSurfaceCount,
 	uint32_t& outTriangleCount,
 	uint32_t& outMaterialCount,
-	bool& outRecoveredEmpty,
-	bool& ioWaitedForWrites)
+	bool& outRecoveredEmpty)
 {
 	outStaticSceneChunkListIndex = UINT32_MAX;
 	outMaterialDirty = false;
@@ -19765,12 +20002,6 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	outSurfaceCount = CountSceneViewSurfaces(residentSceneView);
 	outTriangleCount = (uint32_t)residentGeometry.primitives.size();
 	outMaterialCount = (uint32_t)residentMaterials.materials.size();
-
-	if (!ioWaitedForWrites)
-	{
-		WaitForCommandsTracked("resident_chunk_write");
-		ioWaitedForWrites = true;
-	}
 
 	const uint32_t appliedReasonMask = replacement.reasonMask;
 	const bool appliedStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
@@ -19961,12 +20192,13 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			if (oldMaterialCount > 0)
 			{
 				std::vector<nri_scene::MaterialData> clearedMaterials(oldMaterialCount);
-				if (!UpdateStructuredBufferRange(
+				if (!StageResidentBufferCopyRange(
 						mStaticMaterialBuffer,
 						(uint64_t)oldMaterialOffset * sizeof(nri_scene::MaterialData),
 						clearedMaterials.data(),
 						(uint64_t)oldMaterialCount * sizeof(nri_scene::MaterialData),
-						NRIComputeShaderResourceAccess()))
+						NRIComputeShaderResourceAccess(),
+						ResidentUploadKind_Material))
 				{
 					return false;
 				}
@@ -20127,24 +20359,27 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				atlasVertices,
 				atlasIndices,
 				atlasPrimitives);
-			if (!UpdateStructuredBufferRange(
+			if (!StageResidentBufferCopyRange(
 					mStaticVertexBuffer,
 					(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
 					atlasVertices.data() + nextAtlasChunk.vertexOffset,
 					(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
-					NRIAccelerationStructureBuildInputAccess()) ||
-				!UpdateStructuredBufferRange(
+					NRIAccelerationStructureBuildInputAccess(),
+					ResidentUploadKind_Vertex) ||
+				!StageResidentBufferCopyRange(
 					mStaticIndexBuffer,
 					(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
 					atlasIndices.data() + nextAtlasChunk.indexOffset,
 					(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t),
-					NRIAccelerationStructureBuildInputAccess()) ||
-				!UpdateStructuredBufferRange(
+					NRIAccelerationStructureBuildInputAccess(),
+					ResidentUploadKind_Index) ||
+				!StageResidentBufferCopyRange(
 					mStaticPrimitiveBuffer,
 					(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
 					atlasPrimitives.data() + nextAtlasChunk.primitiveOffset,
 					(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData),
-					NRIComputeShaderResourceAccess()))
+					NRIComputeShaderResourceAccess(),
+					ResidentUploadKind_Primitive))
 			{
 				return false;
 			}
@@ -22397,6 +22632,14 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
+	for (auto& frameScratch : mResidentUploadScratchFrames)
+	{
+		DestroyBufferResource(frameScratch.vertex.buffer);
+		DestroyBufferResource(frameScratch.index.buffer);
+		DestroyBufferResource(frameScratch.primitive.buffer);
+		DestroyBufferResource(frameScratch.material.buffer);
+		frameScratch = {};
+	}
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	for (uint8_t& initialized : mSceneDataDescriptorsInitialized)
 	{
