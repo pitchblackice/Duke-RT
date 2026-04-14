@@ -16718,20 +16718,27 @@ bool NRIRenderer::CreateBufferWithoutViewAtLocation(NRIBufferResource& resource,
 	return true;
 }
 
-bool NRIRenderer::EnsureResidentUploadScratchBuffer(NRIBufferResource& resource, uint64_t requiredSize)
+bool NRIRenderer::EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch& scratch, ResidentUploadScratchFrame& frameScratch, uint64_t requiredSize)
 {
 	constexpr uint32_t kResidentUploadScratchStride = 16u;
 	const uint64_t alignedRequiredSize = std::max<uint64_t>(requiredSize, kResidentUploadScratchStride);
-	if (resource.buffer != nullptr &&
-		resource.memoryLocation == nri::MemoryLocation::DEVICE_UPLOAD &&
-		resource.size >= alignedRequiredSize)
+	if (scratch.buffer.buffer != nullptr &&
+		scratch.buffer.memoryLocation == nri::MemoryLocation::DEVICE_UPLOAD &&
+		scratch.buffer.size >= alignedRequiredSize)
 	{
 		return true;
 	}
 
-	const uint64_t grownSize = GetGrownBufferSize(resource.size, alignedRequiredSize, kResidentUploadScratchStride);
+	const uint64_t grownSize = GetGrownBufferSize(scratch.buffer.size, alignedRequiredSize, kResidentUploadScratchStride);
+	if (scratch.buffer.buffer != nullptr || scratch.buffer.shaderView != nullptr)
+	{
+		frameScratch.retiredBuffers.push_back(scratch.buffer);
+		scratch.buffer = {};
+		scratch.cursor = 0;
+		scratch.copySourceActive = false;
+	}
 	return CreateBufferWithoutViewAtLocation(
-		resource,
+		scratch.buffer,
 		grownSize,
 		kResidentUploadScratchStride,
 		nri::BufferUsageBits::NONE,
@@ -16759,6 +16766,11 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 	auto& frameScratch = mResidentUploadScratchFrames[frameSlot];
 	if (frameScratch.frameIndex != mFrameIndex)
 	{
+		for (NRIBufferResource& retired : frameScratch.retiredBuffers)
+		{
+			DestroyBufferResource(retired);
+		}
+		frameScratch.retiredBuffers.clear();
 		frameScratch.frameIndex = mFrameIndex;
 		frameScratch.vertex.cursor = 0;
 		frameScratch.vertex.copySourceActive = false;
@@ -16784,7 +16796,7 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 		(scratch->cursor + kResidentUploadScratchAlignment - 1u) &
 		~(kResidentUploadScratchAlignment - 1u);
 	const uint64_t requiredSize = scratchOffset + size;
-	if (!EnsureResidentUploadScratchBuffer(scratch->buffer, requiredSize))
+	if (!EnsureResidentUploadScratchBuffer(*scratch, frameScratch, requiredSize))
 	{
 		return false;
 	}
@@ -22638,6 +22650,10 @@ void NRIRenderer::DestroySceneBuffers()
 		DestroyBufferResource(frameScratch.index.buffer);
 		DestroyBufferResource(frameScratch.primitive.buffer);
 		DestroyBufferResource(frameScratch.material.buffer);
+		for (NRIBufferResource& retired : frameScratch.retiredBuffers)
+		{
+			DestroyBufferResource(retired);
+		}
 		frameScratch = {};
 	}
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);

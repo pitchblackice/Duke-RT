@@ -1053,6 +1053,7 @@ private:
 		ResidentBufferUploadScratch index;
 		ResidentBufferUploadScratch primitive;
 		ResidentBufferUploadScratch material;
+		std::vector<NRIBufferResource> retiredBuffers;
 	};
 
 	struct RuntimeMapMutationFrameState
@@ -1405,7 +1406,7 @@ private:
 	bool UpdateStructuredBufferRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after);
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
 	bool CreateBufferWithoutViewAtLocation(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::MemoryLocation memoryLocation);
-	bool EnsureResidentUploadScratchBuffer(NRIBufferResource& resource, uint64_t requiredSize);
+	bool EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch& scratch, ResidentUploadScratchFrame& frameScratch, uint64_t requiredSize);
 	bool EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind);
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
 	void BuildRuntimeLightClusterUpload(
