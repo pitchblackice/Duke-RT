@@ -103,6 +103,7 @@ public:
 		StructuralRebuild,
 		MaterialRefresh,
 		ResidentApply,
+		ResidentNoopSkip,
 		ResidentFallback,
 		Held,
 		SyncSkip,
@@ -235,6 +236,7 @@ public:
 		uint32_t runtimeMutationMaterialRefreshReasonMaskOr = 0;
 		uint32_t runtimeMutationInvalidForceTopologyCount = 0;
 		uint32_t runtimeMutationInvalidAppliedCount = 0;
+		uint32_t runtimeMutationResidentNoopSkipCount = 0;
 		uint32_t runtimeMutationInvalidFailedCount = 0;
 		uint32_t runtimeMutationInvalidSyncSkipCount = 0;
 		uint32_t runtimeMutationResidentNoopCandidateCount = 0;

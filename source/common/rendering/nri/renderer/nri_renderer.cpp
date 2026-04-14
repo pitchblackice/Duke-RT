@@ -2742,6 +2742,7 @@ namespace
 		case NRIRenderer::RuntimeMutationTraceAction::StructuralRebuild: return "rebuild";
 		case NRIRenderer::RuntimeMutationTraceAction::MaterialRefresh: return "material-refresh";
 		case NRIRenderer::RuntimeMutationTraceAction::ResidentApply: return "resident-apply";
+		case NRIRenderer::RuntimeMutationTraceAction::ResidentNoopSkip: return "resident-noop-skip";
 		case NRIRenderer::RuntimeMutationTraceAction::ResidentFallback: return "fallback";
 		case NRIRenderer::RuntimeMutationTraceAction::Held: return "held";
 		case NRIRenderer::RuntimeMutationTraceAction::SyncSkip: return "sync-skip";
@@ -2774,17 +2775,20 @@ namespace
 		case NRIRenderer::RuntimeMutationTraceAction::ResidentFallback:
 			score += 1u << 16;
 			break;
-		case NRIRenderer::RuntimeMutationTraceAction::ResidentApply:
+		case NRIRenderer::RuntimeMutationTraceAction::ResidentNoopSkip:
 			score += 1u << 15;
 			break;
-		case NRIRenderer::RuntimeMutationTraceAction::StructuralRebuild:
+		case NRIRenderer::RuntimeMutationTraceAction::ResidentApply:
 			score += 1u << 14;
 			break;
-		case NRIRenderer::RuntimeMutationTraceAction::MaterialRefresh:
+		case NRIRenderer::RuntimeMutationTraceAction::StructuralRebuild:
 			score += 1u << 13;
 			break;
-		case NRIRenderer::RuntimeMutationTraceAction::SyncSkip:
+		case NRIRenderer::RuntimeMutationTraceAction::MaterialRefresh:
 			score += 1u << 12;
+			break;
+		case NRIRenderer::RuntimeMutationTraceAction::SyncSkip:
+			score += 1u << 11;
 			break;
 		default:
 			break;
@@ -17426,6 +17430,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidForceTopologyCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidAppliedCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopSkipCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidFailedCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidSyncSkipCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentNoopCandidateCount = 0;
@@ -18492,6 +18497,80 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				residentEntry != nullptr &&
 				residentEntry->valid &&
 				residentEntry->animatedRefreshSuppressed;
+			const auto settleResidentNoopReplacement = [&]()
+			{
+				const nri_scene::PTMapChunkMutationBaseline appliedBaseline = replacement.replacementBaseline;
+				replacement.baseline = appliedBaseline;
+				replacement.replacementBaseline = appliedBaseline;
+				replacement.baselineSignature = appliedBaseline.signature;
+				replacement.liveSignature = appliedBaseline.signature;
+				replacement.reasonMask = nri_scene::PTMapChunkMutationReason_None;
+				replacement.sectionDirtyCount = 0;
+				replacement.stableMutationFrameCount = 0;
+				replacement.sectorDirty = false;
+				replacement.dragged = false;
+				replacement.blindSpot = false;
+				replacement.excludeStaticChunk = false;
+				replacement.staticAnimatedReplacement = false;
+				replacement.active = false;
+				replacement.valid = false;
+				replacement.residentAuthoritative = true;
+				replacement.animationOnlyRefreshed = false;
+				replacement.animatedMaterialSignature =
+					residentEntry != nullptr ? residentEntry->animatedMaterialSignature : replacement.animatedMaterialSignature;
+				replacement.surfaceCount = 0;
+				replacement.triangleCount = 0;
+				replacement.lightIdentityOverrides.Clear();
+				replacement.sceneView = {};
+				replacement.geometry = {};
+				replacement.materialBridge = {};
+				if (residentEntry != nullptr)
+				{
+					residentEntry->appliedBaseline = appliedBaseline;
+					residentEntry->baselineSignature = appliedBaseline.signature;
+					residentEntry->liveSignature = appliedBaseline.signature;
+					residentEntry->visibleValidationFramesRemaining = 0;
+				}
+			};
+			const bool residentNoopExactMatch =
+				replacement.residentAuthoritative &&
+				residentEntry != nullptr &&
+				residentEntry->valid &&
+				residentEntry->active &&
+				residentEntry->mappedInStaticScene &&
+				replacement.valid &&
+				!replacement.excludeStaticChunk &&
+				replacement.surfaceCount == residentEntry->materialCount &&
+				replacement.triangleCount == residentEntry->primitiveCount &&
+				(uint32_t)replacement.materialBridge.materials.size() == residentEntry->materialCount &&
+				ComputeAnimatedGeometrySignature(replacement.sceneView) == residentEntry->animatedGeometrySignature &&
+				replacement.animatedMaterialSignature == residentEntry->animatedMaterialSignature;
+			if (residentNoopExactMatch)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentNoopSkipCount++;
+				mLastPerfShellTraceStats.runtimeMutationInvalidSyncSkipCount++;
+				if ((attemptedStaticAnimatedReplacement || attemptedAnimationOnlyRefresh) &&
+					residentEntry != nullptr &&
+					residentEntry->valid)
+				{
+					residentEntry->runtimeAnimatedSyncSkipCount++;
+					recordRuntimeAnimatedFrame(
+						mapChunk.chunkIndex,
+						attemptedSuppressedAnimatedResidentApply,
+						false,
+						false,
+						false,
+						true);
+				}
+				settleResidentNoopReplacement();
+				chunkTraceAction = RuntimeMutationTraceAction::ResidentNoopSkip;
+				chunkTraceSurfaceCount = residentEntry != nullptr ? residentEntry->materialCount : 0;
+				chunkTraceTriangleCount = residentEntry != nullptr ? residentEntry->primitiveCount : 0;
+				chunkTraceMaterialCount = residentEntry != nullptr ? residentEntry->materialCount : 0;
+				TraceRuntimeMapMutationChunk(mapChunk, replacement);
+				emitChunkTrace();
+				continue;
+			}
 			if (TryApplyRuntimeMutationChunkToResidentScene(
 				mapChunk,
 				replacement,

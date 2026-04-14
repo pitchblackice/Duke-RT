@@ -2994,6 +2994,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			case NRIRenderer::RuntimeMutationTraceAction::StructuralRebuild: return "rebuild";
 			case NRIRenderer::RuntimeMutationTraceAction::MaterialRefresh: return "material-refresh";
 			case NRIRenderer::RuntimeMutationTraceAction::ResidentApply: return "resident-apply";
+			case NRIRenderer::RuntimeMutationTraceAction::ResidentNoopSkip: return "resident-noop-skip";
 			case NRIRenderer::RuntimeMutationTraceAction::ResidentFallback: return "fallback";
 			case NRIRenderer::RuntimeMutationTraceAction::Held: return "held";
 			case NRIRenderer::RuntimeMutationTraceAction::SyncSkip: return "sync-skip";
@@ -3129,10 +3130,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationStructuralInvalidChunks,
 			shell.runtimeMutationHardwareCanvasChunkCount);
 		Printf(
-			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u invalid_applied=%u invalid_failed=%u invalid_sync_skip=%u resident_noop_candidates=%u resident_noop_mask=0x%x valid_structural=%u valid_material=%u\n",
+			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u invalid_applied=%u resident_noop_skips=%u invalid_failed=%u invalid_sync_skip=%u resident_noop_candidates=%u resident_noop_mask=0x%x valid_structural=%u valid_material=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationInvalidForceTopologyCount,
 			shell.runtimeMutationInvalidAppliedCount,
+			shell.runtimeMutationResidentNoopSkipCount,
 			shell.runtimeMutationInvalidFailedCount,
 			shell.runtimeMutationInvalidSyncSkipCount,
 			shell.runtimeMutationResidentNoopCandidateCount,
