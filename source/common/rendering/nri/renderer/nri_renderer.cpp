@@ -19791,6 +19791,21 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 		return true;
 	}
 
+	bool needsWaitForResidentBlasTeardown = false;
+	for (uint32_t chunkListIndex : activeChunkListIndices)
+	{
+		if (mStaticMapScene.chunks[chunkListIndex].accelerationStructure.accelerationStructure != nullptr ||
+			mStaticMapScene.chunks[chunkListIndex].accelerationStructure.descriptor != nullptr)
+		{
+			needsWaitForResidentBlasTeardown = true;
+			break;
+		}
+	}
+	if (needsWaitForResidentBlasTeardown)
+	{
+		WaitForCommandsTracked("resident_chunk_blas_rebuild");
+	}
+
 	uint64_t maxScratchSize = 0;
 	for (uint32_t chunkListIndex : activeChunkListIndices)
 	{
