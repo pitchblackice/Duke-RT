@@ -18367,6 +18367,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.active = true;
 			bool activeHardwareCanvasChunk = false;
 			bool suppressedAnimatedResidentAlreadySynchronized = false;
+			bool unsuppressedAnimatedResidentAlreadySynchronized = false;
 			// Build tile animation can change the resolved PT texture binding
 			// without mutating the authored wall/sector fields tracked above.
 			const bool refreshedAnimatedChunk = [&]()
@@ -18389,13 +18390,20 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				const uint64_t liveAnimatedMaterialSignature =
 					ComputeAnimatedMaterialSignature(liveChunkView);
 				captureSectorDirtyTruth();
-				suppressedAnimatedResidentAlreadySynchronized =
-					useStaticAnimatedReplacement &&
+				const bool residentAnimatedAlreadySynchronized =
+					!forceReplacementMaterialRefresh &&
+					!forceHardwareCanvasRefresh &&
 					residentEntry != nullptr &&
 					residentEntry->valid &&
-					residentEntry->animatedRefreshSuppressed &&
 					residentEntry->animatedGeometrySignature == liveAnimatedGeometrySignature &&
 					residentEntry->animatedMaterialSignature == liveAnimatedMaterialSignature;
+				suppressedAnimatedResidentAlreadySynchronized =
+					useStaticAnimatedReplacement &&
+					residentAnimatedAlreadySynchronized &&
+					residentEntry->animatedRefreshSuppressed;
+				unsuppressedAnimatedResidentAlreadySynchronized =
+					!useStaticAnimatedReplacement &&
+					residentAnimatedAlreadySynchronized;
 				if (useStaticAnimatedReplacement &&
 					residentEntry != nullptr &&
 					residentEntry->valid &&
@@ -18404,7 +18412,15 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					residentEntry->runtimeAnimatedAttemptCount++;
 					recordRuntimeAnimatedFrame(mapChunk.chunkIndex, true, false, true, false, false);
 				}
-				if (suppressedAnimatedResidentAlreadySynchronized)
+				else if (unsuppressedAnimatedResidentAlreadySynchronized &&
+					residentEntry != nullptr &&
+					residentEntry->valid)
+				{
+					residentEntry->runtimeAnimatedAttemptCount++;
+					recordRuntimeAnimatedFrame(mapChunk.chunkIndex, false, false, true, false, false);
+				}
+				if (suppressedAnimatedResidentAlreadySynchronized ||
+					unsuppressedAnimatedResidentAlreadySynchronized)
 				{
 					return true;
 				}
@@ -18454,7 +18470,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				mLastPerfShellTraceStats.runtimeMutationHeldChunks++;
 				chunkTraceAction = RuntimeMutationTraceAction::Held;
 			}
-			else if (suppressedAnimatedResidentAlreadySynchronized)
+			else if (suppressedAnimatedResidentAlreadySynchronized ||
+				unsuppressedAnimatedResidentAlreadySynchronized)
 			{
 				replacement.active = false;
 				replacement.excludeStaticChunk = false;
@@ -18466,7 +18483,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				{
 					residentEntry->runtimeAnimatedSyncSkipCount++;
 				}
-				recordRuntimeAnimatedFrame(mapChunk.chunkIndex, true, false, false, false, true);
+				recordRuntimeAnimatedFrame(
+					mapChunk.chunkIndex,
+					suppressedAnimatedResidentAlreadySynchronized,
+					false,
+					false,
+					false,
+					true);
 				chunkTraceAction = RuntimeMutationTraceAction::SyncSkip;
 				chunkTraceSurfaceCount = CountSceneViewSurfaces(liveChunkView);
 				chunkTraceTriangleCount = liveStats.triangleCount;
