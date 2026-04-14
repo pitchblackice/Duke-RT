@@ -336,6 +336,8 @@ public:
 		double waitMs = 0.0;
 		uint32_t residentChunkWriteWaitCalls = 0;
 		double residentChunkWriteWaitMs = 0.0;
+		uint32_t residentChunkBlasRebuildWaitCalls = 0;
+		double residentChunkBlasRebuildWaitMs = 0.0;
 		uint32_t sceneDataUploadWaitCalls = 0;
 		double sceneDataUploadWaitMs = 0.0;
 		uint32_t sceneBufferUploadWaitCalls = 0;

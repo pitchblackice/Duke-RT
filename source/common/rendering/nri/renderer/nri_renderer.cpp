@@ -6766,6 +6766,11 @@ void NRIRenderer::WaitForCommandsTracked(const char* reason)
 				mLastPerfResourceTraceStats.residentChunkWriteWaitCalls++;
 				mLastPerfResourceTraceStats.residentChunkWriteWaitMs += waitMs;
 			}
+			else if (std::strcmp(reason, "resident_chunk_blas_rebuild") == 0)
+			{
+				mLastPerfResourceTraceStats.residentChunkBlasRebuildWaitCalls++;
+				mLastPerfResourceTraceStats.residentChunkBlasRebuildWaitMs += waitMs;
+			}
 			else if (std::strcmp(reason, "scene_data_upload") == 0)
 			{
 				mLastPerfResourceTraceStats.sceneDataUploadWaitCalls++;
