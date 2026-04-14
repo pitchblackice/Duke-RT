@@ -3001,6 +3001,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			default: return "none";
 			}
 		};
+		const auto getRuntimeSectorDirtyPreviousStateSourceName =
+			[](NRIRenderer::RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource source) -> const char*
+		{
+			switch (source)
+			{
+			case NRIRenderer::RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::Replacement: return "replacement";
+			case NRIRenderer::RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::Resident: return "resident";
+			default: return "none";
+			}
+		};
 		Printf("----------perf trace frame %llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber);
 		Printf(
@@ -3119,12 +3129,14 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationStructuralInvalidChunks,
 			shell.runtimeMutationHardwareCanvasChunkCount);
 		Printf(
-			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u invalid_applied=%u invalid_failed=%u invalid_sync_skip=%u valid_structural=%u valid_material=%u\n",
+			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u invalid_applied=%u invalid_failed=%u invalid_sync_skip=%u resident_noop_candidates=%u resident_noop_mask=0x%x valid_structural=%u valid_material=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationInvalidForceTopologyCount,
 			shell.runtimeMutationInvalidAppliedCount,
 			shell.runtimeMutationInvalidFailedCount,
 			shell.runtimeMutationInvalidSyncSkipCount,
+			shell.runtimeMutationResidentNoopCandidateCount,
+			shell.runtimeMutationResidentNoopCandidateReasonMaskOr,
 			shell.runtimeMutationValidStructuralCount,
 			shell.runtimeMutationValidMaterialCount);
 		for (size_t index = 0; index < NRIRenderer::RuntimeMutationTopTraceCount; ++index)
@@ -3161,12 +3173,13 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			}
 
 			Printf(
-				"PERF pt sector dirty truth NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x force_topology=%u baseline_changed=%u geometry_changed=%u material_changed=%u prev_surfaces=%u live_surfaces=%u prev_tris=%u live_tris=%u\n",
+				"PERF pt sector dirty truth NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x prev_source=%s force_topology=%u baseline_changed=%u geometry_changed=%u material_changed=%u prev_surfaces=%u live_surfaces=%u prev_tris=%u live_tris=%u\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				(unsigned)(index + 1),
 				entry.chunkIndex,
 				entry.sectorIndex,
 				entry.reasonMask,
+				getRuntimeSectorDirtyPreviousStateSourceName(entry.previousStateSource),
 				entry.forceTopology ? 1u : 0u,
 				entry.baselineChanged ? 1u : 0u,
 				entry.geometryChanged ? 1u : 0u,

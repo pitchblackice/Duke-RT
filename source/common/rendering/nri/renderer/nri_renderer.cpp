@@ -17428,6 +17428,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationInvalidAppliedCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidFailedCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationInvalidSyncSkipCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopCandidateCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopCandidateReasonMaskOr = 0;
 	mLastPerfShellTraceStats.runtimeMutationValidMaterialCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationValidStructuralCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedSuppressedActiveCount = 0;
@@ -17568,6 +17570,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		[this](uint32_t chunkIndex,
 			int32_t sectorIndex,
 			uint32_t reasonMask,
+			RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource previousStateSource,
 			bool forceTopology,
 			bool baselineChanged,
 			bool geometryChanged,
@@ -17587,6 +17590,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		entry.chunkIndex = chunkIndex;
 		entry.sectorIndex = sectorIndex;
 		entry.reasonMask = reasonMask;
+		entry.previousStateSource = previousStateSource;
 		entry.forceTopology = forceTopology;
 		entry.baselineChanged = baselineChanged;
 		entry.geometryChanged = geometryChanged;
@@ -18040,33 +18044,57 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 			uint64_t previousGeometrySignature = 0;
 			uint64_t previousMaterialSignature = 0;
+			RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource previousStateSource =
+				RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::None;
 			bool havePreviousSignatures = false;
+			uint32_t previousSurfaceCount = 0;
+			uint32_t previousTriangleCount = 0;
 			if (replacement.valid)
 			{
 				previousGeometrySignature = ComputeAnimatedGeometrySignature(replacement.sceneView);
 				previousMaterialSignature = replacement.animatedMaterialSignature;
+				previousStateSource = RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::Replacement;
 				havePreviousSignatures = true;
+				previousSurfaceCount = previousReplacementSurfaceCount;
+				previousTriangleCount = previousReplacementTriangleCount;
 			}
 			else if (residentEntry != nullptr && residentEntry->valid)
 			{
 				previousGeometrySignature = residentEntry->animatedGeometrySignature;
 				previousMaterialSignature = residentEntry->animatedMaterialSignature;
+				previousStateSource = RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::Resident;
 				havePreviousSignatures = true;
+				previousSurfaceCount = residentEntry->materialCount;
+				previousTriangleCount = residentEntry->primitiveCount;
+			}
+
+			const bool liveGeometryChanged =
+				!havePreviousSignatures ||
+				ComputeAnimatedGeometrySignature(liveChunkView) != previousGeometrySignature;
+			const bool liveMaterialChanged =
+				!havePreviousSignatures ||
+				ComputeAnimatedMaterialSignature(liveChunkView) != previousMaterialSignature;
+			if (forceTopologyInvalidation &&
+				previousStateSource == RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::Resident &&
+				!liveGeometryChanged &&
+				!liveMaterialChanged)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentNoopCandidateCount++;
+				mLastPerfShellTraceStats.runtimeMutationResidentNoopCandidateReasonMaskOr |= normalizedReasonMask;
 			}
 
 			recordSectorDirtyTruthEntry(
 				mapChunk.chunkIndex,
 				mapChunk.sectorIndex,
 				normalizedReasonMask,
+				previousStateSource,
 				forceTopologyInvalidation,
 				liveBaselineSignature != replacement.replacementBaseline.signature,
-				!havePreviousSignatures ||
-					ComputeAnimatedGeometrySignature(liveChunkView) != previousGeometrySignature,
-				!havePreviousSignatures ||
-					ComputeAnimatedMaterialSignature(liveChunkView) != previousMaterialSignature,
-				previousReplacementSurfaceCount,
+				liveGeometryChanged,
+				liveMaterialChanged,
+				previousSurfaceCount,
 				CountSceneViewSurfaces(liveChunkView),
-				previousReplacementTriangleCount,
+				previousTriangleCount,
 				liveStats.triangleCount);
 			sectorDirtyTruthCaptured = true;
 		};

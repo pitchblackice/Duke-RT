@@ -129,11 +129,19 @@ public:
 
 	struct RuntimeSectorDirtyTruthTraceEntry
 	{
+		enum class PreviousStateSource : uint8_t
+		{
+			None,
+			Replacement,
+			Resident,
+		};
+
 		bool valid = false;
 		uint32_t score = 0;
 		uint32_t chunkIndex = UINT32_MAX;
 		int32_t sectorIndex = -1;
 		uint32_t reasonMask = 0;
+		PreviousStateSource previousStateSource = PreviousStateSource::None;
 		bool forceTopology = false;
 		bool baselineChanged = false;
 		bool geometryChanged = false;
@@ -229,6 +237,8 @@ public:
 		uint32_t runtimeMutationInvalidAppliedCount = 0;
 		uint32_t runtimeMutationInvalidFailedCount = 0;
 		uint32_t runtimeMutationInvalidSyncSkipCount = 0;
+		uint32_t runtimeMutationResidentNoopCandidateCount = 0;
+		uint32_t runtimeMutationResidentNoopCandidateReasonMaskOr = 0;
 		uint32_t runtimeMutationValidMaterialCount = 0;
 		uint32_t runtimeMutationValidStructuralCount = 0;
 		uint32_t runtimeAnimatedSuppressedActiveCount = 0;
