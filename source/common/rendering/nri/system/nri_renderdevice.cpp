@@ -3130,7 +3130,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationStructuralInvalidChunks,
 			shell.runtimeMutationHardwareCanvasChunkCount);
 		Printf(
-			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u invalid_applied=%u resident_noop_skips=%u invalid_failed=%u invalid_sync_skip=%u resident_noop_candidates=%u resident_noop_mask=0x%x valid_structural=%u valid_material=%u\n",
+			"PERF pt mutation outcomes NRI: frame=%llu invalid_force_topology=%u invalid_applied=%u resident_noop_skips=%u invalid_failed=%u invalid_sync_skip=%u resident_noop_candidates=%u resident_noop_mask=0x%x noop_block_not_authoritative=%u noop_block_resident_unavailable=%u noop_block_replacement_invalid=%u noop_block_exclude_static=%u noop_block_surface_count=%u noop_block_material_count=%u noop_block_primitive_count=%u valid_structural=%u valid_material=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationInvalidForceTopologyCount,
 			shell.runtimeMutationInvalidAppliedCount,
@@ -3139,6 +3139,13 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationInvalidSyncSkipCount,
 			shell.runtimeMutationResidentNoopCandidateCount,
 			shell.runtimeMutationResidentNoopCandidateReasonMaskOr,
+			shell.runtimeMutationResidentNoopBlockNotAuthoritativeCount,
+			shell.runtimeMutationResidentNoopBlockResidentUnavailableCount,
+			shell.runtimeMutationResidentNoopBlockReplacementInvalidCount,
+			shell.runtimeMutationResidentNoopBlockExcludeStaticCount,
+			shell.runtimeMutationResidentNoopBlockSurfaceCountMismatch,
+			shell.runtimeMutationResidentNoopBlockMaterialCountMismatch,
+			shell.runtimeMutationResidentNoopBlockPrimitiveCountMismatch,
 			shell.runtimeMutationValidStructuralCount,
 			shell.runtimeMutationValidMaterialCount);
 		for (size_t index = 0; index < NRIRenderer::RuntimeMutationTopTraceCount; ++index)

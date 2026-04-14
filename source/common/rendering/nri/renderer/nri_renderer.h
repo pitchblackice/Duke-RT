@@ -241,6 +241,13 @@ public:
 		uint32_t runtimeMutationInvalidSyncSkipCount = 0;
 		uint32_t runtimeMutationResidentNoopCandidateCount = 0;
 		uint32_t runtimeMutationResidentNoopCandidateReasonMaskOr = 0;
+		uint32_t runtimeMutationResidentNoopBlockNotAuthoritativeCount = 0;
+		uint32_t runtimeMutationResidentNoopBlockResidentUnavailableCount = 0;
+		uint32_t runtimeMutationResidentNoopBlockReplacementInvalidCount = 0;
+		uint32_t runtimeMutationResidentNoopBlockExcludeStaticCount = 0;
+		uint32_t runtimeMutationResidentNoopBlockSurfaceCountMismatch = 0;
+		uint32_t runtimeMutationResidentNoopBlockMaterialCountMismatch = 0;
+		uint32_t runtimeMutationResidentNoopBlockPrimitiveCountMismatch = 0;
 		uint32_t runtimeMutationValidMaterialCount = 0;
 		uint32_t runtimeMutationValidStructuralCount = 0;
 		uint32_t runtimeAnimatedSuppressedActiveCount = 0;

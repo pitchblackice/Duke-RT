@@ -17435,6 +17435,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationInvalidSyncSkipCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentNoopCandidateCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentNoopCandidateReasonMaskOr = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockNotAuthoritativeCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockResidentUnavailableCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockReplacementInvalidCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockExcludeStaticCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockSurfaceCountMismatch = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockMaterialCountMismatch = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockPrimitiveCountMismatch = 0;
 	mLastPerfShellTraceStats.runtimeMutationValidMaterialCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationValidStructuralCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedSuppressedActiveCount = 0;
@@ -18054,6 +18061,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			bool havePreviousSignatures = false;
 			uint32_t previousSurfaceCount = 0;
 			uint32_t previousTriangleCount = 0;
+			uint32_t liveBuiltTriangleCount = liveStats.triangleCount;
 			if (replacement.valid)
 			{
 				previousGeometrySignature = ComputeAnimatedGeometrySignature(replacement.sceneView);
@@ -18079,6 +18087,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			const bool liveMaterialChanged =
 				!havePreviousSignatures ||
 				ComputeAnimatedMaterialSignature(liveChunkView) != previousMaterialSignature;
+			nri_scene::GeometryData liveTruthGeometry;
+			nri_scene::BuildGeometry(liveChunkView, liveTruthGeometry);
+			liveBuiltTriangleCount = (uint32_t)liveTruthGeometry.primitives.size();
 			if (forceTopologyInvalidation &&
 				previousStateSource == RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::Resident &&
 				!liveGeometryChanged &&
@@ -18100,7 +18111,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				previousSurfaceCount,
 				CountSceneViewSurfaces(liveChunkView),
 				previousTriangleCount,
-				liveStats.triangleCount);
+				liveBuiltTriangleCount);
 			sectorDirtyTruthCaptured = true;
 		};
 		const auto rebuildReplacementFromPreparedLiveChunk = [&](bool countAsStructuralRebuild) -> bool
@@ -18532,12 +18543,22 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					residentEntry->visibleValidationFramesRemaining = 0;
 				}
 			};
-			const bool residentNoopExactMatch =
-				replacement.residentAuthoritative &&
+			const bool residentNoopResidentAvailable =
 				residentEntry != nullptr &&
 				residentEntry->valid &&
 				residentEntry->active &&
-				residentEntry->mappedInStaticScene &&
+				residentEntry->mappedInStaticScene;
+			const bool residentNoopSignatureCandidate =
+				forceTopologyInvalidation &&
+				replacement.residentAuthoritative &&
+				residentEntry != nullptr &&
+				residentEntry->valid &&
+				replacement.valid &&
+				ComputeAnimatedGeometrySignature(replacement.sceneView) == residentEntry->animatedGeometrySignature &&
+				replacement.animatedMaterialSignature == residentEntry->animatedMaterialSignature;
+			const bool residentNoopExactMatch =
+				replacement.residentAuthoritative &&
+				residentNoopResidentAvailable &&
 				replacement.valid &&
 				!replacement.excludeStaticChunk &&
 				replacement.surfaceCount == residentEntry->materialCount &&
@@ -18545,6 +18566,40 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				(uint32_t)replacement.materialBridge.materials.size() == residentEntry->materialCount &&
 				ComputeAnimatedGeometrySignature(replacement.sceneView) == residentEntry->animatedGeometrySignature &&
 				replacement.animatedMaterialSignature == residentEntry->animatedMaterialSignature;
+			if (residentNoopSignatureCandidate && !residentNoopExactMatch)
+			{
+				if (!replacement.residentAuthoritative)
+				{
+					mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockNotAuthoritativeCount++;
+				}
+				if (!residentNoopResidentAvailable)
+				{
+					mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockResidentUnavailableCount++;
+				}
+				if (!replacement.valid)
+				{
+					mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockReplacementInvalidCount++;
+				}
+				if (replacement.excludeStaticChunk)
+				{
+					mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockExcludeStaticCount++;
+				}
+				if (residentEntry != nullptr)
+				{
+					if (replacement.surfaceCount != residentEntry->materialCount)
+					{
+						mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockSurfaceCountMismatch++;
+					}
+					if ((uint32_t)replacement.materialBridge.materials.size() != residentEntry->materialCount)
+					{
+						mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockMaterialCountMismatch++;
+					}
+					if (replacement.triangleCount != residentEntry->primitiveCount)
+					{
+						mLastPerfShellTraceStats.runtimeMutationResidentNoopBlockPrimitiveCountMismatch++;
+					}
+				}
+			}
 			if (residentNoopExactMatch)
 			{
 				mLastPerfShellTraceStats.runtimeMutationResidentNoopSkipCount++;
