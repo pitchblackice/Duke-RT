@@ -18548,6 +18548,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				residentEntry->valid &&
 				residentEntry->active &&
 				residentEntry->mappedInStaticScene;
+			const bool residentNoopIgnoreExcludeStatic = forceTopologyInvalidation;
 			const bool residentNoopSignatureCandidate =
 				forceTopologyInvalidation &&
 				replacement.residentAuthoritative &&
@@ -18560,7 +18561,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.residentAuthoritative &&
 				residentNoopResidentAvailable &&
 				replacement.valid &&
-				!replacement.excludeStaticChunk &&
+				(!replacement.excludeStaticChunk || residentNoopIgnoreExcludeStatic) &&
 				replacement.surfaceCount == residentEntry->materialCount &&
 				replacement.triangleCount == residentEntry->primitiveCount &&
 				(uint32_t)replacement.materialBridge.materials.size() == residentEntry->materialCount &&
