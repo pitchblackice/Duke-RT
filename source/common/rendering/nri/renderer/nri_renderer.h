@@ -753,8 +753,8 @@ private:
 				uint64_t animatedGeometrySignature = 0;
 				uint64_t animatedMaterialSignature = 0;
 				uint64_t materialBridgeHash = 0;
-				uint32_t actorOverrideGeneration = 0;
-				uint32_t emissiveMaterialGeneration = 0;
+				uint64_t actorOverrideHash = 0;
+				uint64_t emissiveOverrideHash = 0;
 				uint32_t materialCount = 0;
 				nri_scene::MaterialBridgeData remappedMaterialBridge;
 				std::vector<nri_scene::MaterialData> gpuMaterials;
@@ -1403,6 +1403,8 @@ private:
 	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel = nullptr);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials);
+	uint64_t ComputeChunkActorOverrideHash(const nri_scene::MaterialBridgeData& materials);
+	uint64_t ComputeChunkEmissiveOverrideHash(const nri_scene::MaterialBridgeData& materials) const;
 	void QueueStaticMapSceneLightingInvalidation();
 	void InvalidateStaticMapSceneForMaterialLighting();
 	PersistentDynamicSurfaceStats GatherPersistentDynamicEmissiveSurfaceStats() const;
@@ -1595,7 +1597,6 @@ private:
 	std::vector<uint32_t> mCurrentVisibleChunkWords;
 	std::vector<uint32_t> mCurrentVisibleFlatPlaneWords;
 	uint32_t mLastResolvedLightOverlayGeneration = 0;
-	uint32_t mEmissiveMaterialGeneration = 1;
 	uint32_t mFrameIndex = 0;
 	uint64_t mFrameGenerationFrameId = 0;
 	uint32_t mRenderWidth = 0;

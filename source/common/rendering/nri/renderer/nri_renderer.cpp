@@ -6203,7 +6203,6 @@ void NRIRenderer::Shutdown()
 {
 	ResetMuzzleFlashOverlayState("renderer-shutdown");
 	mLastResolvedLightOverlayGeneration = 0;
-	mEmissiveMaterialGeneration = 1;
 
 	if (mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
 	{
@@ -6292,7 +6291,6 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	ResetPersistentDynamicEmissiveCache();
 	ResetMuzzleFlashOverlayState("level-unload");
 	mLastResolvedLightOverlayGeneration = 0;
-	mEmissiveMaterialGeneration = 1;
 
 	ClearRuntimePointLights();
 	ClearRuntimeDebugSpheres();
@@ -12763,17 +12761,6 @@ void NRIRenderer::RefreshSceneLightSystem(
 	const bool emissiveMaterialBindingChanged = mSceneLights.ConsumeEmissiveMaterialBindingChanged();
 	const bool emissiveMaterialPropertiesChanged = mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
 	const bool sectorLightingTopologyChanged = mSceneLights.ConsumeSectorLightingTopologyChanged();
-	if (emissiveSurfaceTopologyChanged ||
-		emissiveSurfacePropertiesChanged ||
-		emissiveMaterialBindingChanged ||
-		emissiveMaterialPropertiesChanged)
-	{
-		mEmissiveMaterialGeneration++;
-		if (mEmissiveMaterialGeneration == 0)
-		{
-			mEmissiveMaterialGeneration = 1;
-		}
-	}
 
 	if (analyticLightTopologyChanged)
 	{
@@ -12988,6 +12975,72 @@ void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBri
 			material.emissiveColor[2] = 1.0f;
 		}
 	}
+}
+
+uint64_t NRIRenderer::ComputeChunkActorOverrideHash(const nri_scene::MaterialBridgeData& materials)
+{
+	const auto& actorOverrides = GetActorMaterialOverrideMapForFrame();
+	if (actorOverrides.empty() || materials.lightMetadata.empty())
+	{
+		return 0;
+	}
+
+	uint64_t hash = 1469598103934665603ull;
+	bool touched = false;
+	for (const auto& metadata : materials.lightMetadata)
+	{
+		if (metadata.actorIndex < 0)
+		{
+			continue;
+		}
+
+		auto it = actorOverrides.find(metadata.actorIndex);
+		if (it == actorOverrides.end() || it->second == ActorMaterialOverride_None)
+		{
+			continue;
+		}
+
+		touched = true;
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)metadata.actorIndex);
+		hash = CoherencyHashCombine64(hash, (uint64_t)it->second);
+	}
+
+	return touched ? hash : 0;
+}
+
+uint64_t NRIRenderer::ComputeChunkEmissiveOverrideHash(const nri_scene::MaterialBridgeData& materials) const
+{
+	const uint32_t count = std::min<uint32_t>((uint32_t)materials.materials.size(), (uint32_t)materials.lightMetadata.size());
+	if (count == 0)
+	{
+		return 0;
+	}
+
+	uint64_t hash = 1469598103934665603ull;
+	bool touched = false;
+	for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
+	{
+		nri_scene::MaterialData effectiveMaterial = materials.materials[materialIndex];
+		const bool emissiveApplied = mSceneLights.ApplyEmissiveMaterialSettings(materials.lightMetadata[materialIndex], effectiveMaterial);
+		if (!emissiveApplied)
+		{
+			continue;
+		}
+
+		touched = true;
+		hash = CoherencyHashCombine64(hash, (uint64_t)materialIndex);
+		hash = CoherencyHashCombine64(hash, (uint64_t)effectiveMaterial.materialClass);
+		hash = CoherencyHashCombine64(hash, (uint64_t)effectiveMaterial.emissiveMode);
+		hash = CoherencyHashCombine64(hash, (uint64_t)effectiveMaterial.emissiveTextureIndex);
+		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveColor[0]));
+		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveColor[1]));
+		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveColor[2]));
+		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveIntensity));
+		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveMaskScale));
+		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveReserved));
+	}
+
+	return touched ? hash : 0;
 }
 
 void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
@@ -19695,8 +19748,6 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 	const std::vector<uint32_t>* animatedApplyChunkListIndices)
 {
 	static constexpr size_t ResidentAnimatedMaterialSliceCacheLimit = 4;
-	const uint32_t actorOverrideGeneration = mLastResolvedLightOverlayGeneration;
-	const uint32_t emissiveMaterialGeneration = mEmissiveMaterialGeneration;
 
 	if (chunkListIndices.empty())
 	{
@@ -19760,11 +19811,13 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 		nri_scene::MaterialBridgeData remappedChunkBridge;
 		std::vector<nri_scene::MaterialData> remappedGpuMaterials;
 		const uint64_t materialBridgeHash = HashMaterialBridgeSummary(chunkCache.materialBridge);
+		uint64_t actorOverrideHash = 0;
+		uint64_t emissiveOverrideHash = 0;
 		bool chunkTextureTableGrew = false;
 		bool reusedCachedRemap = false;
 		bool reusedCachedGpuPayload = false;
 		const StaticMapSceneCache::ChunkCache::ResidentMaterialSliceCacheEntry* remapCacheEntry = nullptr;
-		const StaticMapSceneCache::ChunkCache::ResidentMaterialSliceCacheEntry* gpuPayloadCacheEntry = nullptr;
+		size_t gpuPayloadCacheEntryIndex = chunkCache.residentMaterialSliceCache.size();
 		for (const auto& cacheEntry : chunkCache.residentMaterialSliceCache)
 		{
 			if (cacheEntry.animatedGeometrySignature != chunkCache.animatedGeometrySignature ||
@@ -19779,23 +19832,11 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			{
 				remapCacheEntry = &cacheEntry;
 			}
-			if (cacheEntry.actorOverrideGeneration == actorOverrideGeneration &&
-				cacheEntry.emissiveMaterialGeneration == emissiveMaterialGeneration &&
-				cacheEntry.gpuMaterials.size() == atlasChunk.materialCount)
-			{
-				gpuPayloadCacheEntry = &cacheEntry;
-				break;
-			}
 		}
 		if (remapCacheEntry != nullptr)
 		{
 			remappedChunkBridge = remapCacheEntry->remappedMaterialBridge;
 			reusedCachedRemap = true;
-		}
-		if (gpuPayloadCacheEntry != nullptr)
-		{
-			remappedGpuMaterials = gpuPayloadCacheEntry->gpuMaterials;
-			reusedCachedGpuPayload = true;
 		}
 		const bool animatedApplyChunk =
 			animatedApplyChunkListIndices != nullptr &&
@@ -19823,6 +19864,30 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 				mStaticMapScene.materialBridge,
 				remappedChunkBridge,
 				&chunkTextureTableGrew);
+		}
+		actorOverrideHash = ComputeChunkActorOverrideHash(remappedChunkBridge);
+		emissiveOverrideHash = ComputeChunkEmissiveOverrideHash(remappedChunkBridge);
+		for (size_t cacheIndex = 0; cacheIndex < chunkCache.residentMaterialSliceCache.size(); ++cacheIndex)
+		{
+			const auto& cacheEntry = chunkCache.residentMaterialSliceCache[cacheIndex];
+			if (cacheEntry.animatedGeometrySignature != chunkCache.animatedGeometrySignature ||
+				cacheEntry.animatedMaterialSignature != chunkCache.animatedMaterialSignature ||
+				cacheEntry.materialBridgeHash != materialBridgeHash ||
+				cacheEntry.materialCount != atlasChunk.materialCount ||
+				cacheEntry.actorOverrideHash != actorOverrideHash ||
+				cacheEntry.emissiveOverrideHash != emissiveOverrideHash ||
+				cacheEntry.gpuMaterials.size() != atlasChunk.materialCount)
+			{
+				continue;
+			}
+
+			gpuPayloadCacheEntryIndex = cacheIndex;
+			break;
+		}
+		if (gpuPayloadCacheEntryIndex < chunkCache.residentMaterialSliceCache.size())
+		{
+			remappedGpuMaterials = chunkCache.residentMaterialSliceCache[gpuPayloadCacheEntryIndex].gpuMaterials;
+			reusedCachedGpuPayload = true;
 		}
 		if (reusedCachedGpuPayload)
 		{
@@ -19872,8 +19937,8 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			cacheEntry.animatedGeometrySignature = chunkCache.animatedGeometrySignature;
 			cacheEntry.animatedMaterialSignature = chunkCache.animatedMaterialSignature;
 			cacheEntry.materialBridgeHash = materialBridgeHash;
-			cacheEntry.actorOverrideGeneration = actorOverrideGeneration;
-			cacheEntry.emissiveMaterialGeneration = emissiveMaterialGeneration;
+			cacheEntry.actorOverrideHash = actorOverrideHash;
+			cacheEntry.emissiveOverrideHash = emissiveOverrideHash;
 			cacheEntry.materialCount = atlasChunk.materialCount;
 			cacheEntry.remappedMaterialBridge = remappedChunkBridge;
 			cacheEntry.gpuMaterials = remappedGpuMaterials;
