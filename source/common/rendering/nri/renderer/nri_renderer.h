@@ -271,6 +271,10 @@ public:
 		uint32_t runtimeMutationMaterialCacheHitCount = 0;
 		uint32_t runtimeMutationMaterialCacheMissCount = 0;
 		uint32_t runtimeMutationMaterialCacheStoreCount = 0;
+		uint32_t staticAnimatedResidentSliceCacheEntryCount = 0;
+		uint32_t staticAnimatedResidentSliceCacheHitCount = 0;
+		uint32_t staticAnimatedResidentSliceCacheMissCount = 0;
+		uint32_t staticAnimatedResidentSliceCacheStoreCount = 0;
 		uint32_t runtimeMutationPrimitiveCount = 0;
 		uint32_t runtimeMutationMaterialCount = 0;
 		uint32_t sceneLightSurfaceRecordCount = 0;
@@ -738,6 +742,15 @@ private:
 	{
 		struct ChunkCache
 		{
+			struct ResidentMaterialSliceCacheEntry
+			{
+				uint64_t animatedGeometrySignature = 0;
+				uint64_t animatedMaterialSignature = 0;
+				uint64_t materialBridgeHash = 0;
+				uint32_t materialCount = 0;
+				nri_scene::MaterialBridgeData remappedMaterialBridge;
+			};
+
 			uint32_t chunkIndex = UINT32_MAX;
 			uint32_t vertexOffset = 0;
 			uint32_t vertexCount = 0;
@@ -753,6 +766,7 @@ private:
 			bool hasAnimatedTextureCandidates = false;
 			bool animatedRefreshSuppressed = false;
 			nri_scene::MaterialBridgeData materialBridge;
+			std::vector<ResidentMaterialSliceCacheEntry> residentMaterialSliceCache;
 			NRIAccelerationStructureResource accelerationStructure;
 		};
 

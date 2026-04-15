@@ -17744,6 +17744,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationMaterialCacheHitCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialCacheMissCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount = 0;
+	mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheEntryCount = 0;
+	mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheHitCount = 0;
+	mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheMissCount = 0;
+	mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheStoreCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationPrimitiveCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationTopEntries = {};
@@ -19050,6 +19054,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationCachedTriangleCount = cacheStats.cachedTriangleCount;
 	mLastPerfShellTraceStats.runtimeMutationCachedMaterialCount = cacheStats.cachedMaterialCount;
 	mLastPerfShellTraceStats.runtimeMutationCachedMaterialStateCount = cacheStats.cachedMaterialStateCount;
+	for (const auto& chunk : mStaticMapScene.chunks)
+	{
+		mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheEntryCount +=
+			(uint32_t)chunk.residentMaterialSliceCache.size();
+	}
 	mRuntimeMutationCacheHighWaterStats.activeChunkCount = std::max(mRuntimeMutationCacheHighWaterStats.activeChunkCount, cacheStats.activeChunkCount);
 	mRuntimeMutationCacheHighWaterStats.validChunkCount = std::max(mRuntimeMutationCacheHighWaterStats.validChunkCount, cacheStats.validChunkCount);
 	mRuntimeMutationCacheHighWaterStats.excludedStaticChunkCount = std::max(mRuntimeMutationCacheHighWaterStats.excludedStaticChunkCount, cacheStats.excludedStaticChunkCount);
@@ -19607,6 +19616,8 @@ bool NRIRenderer::RefreshResidentStaticSceneDataSet()
 
 bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t>& chunkListIndices, const char* reason)
 {
+	static constexpr size_t ResidentAnimatedMaterialSliceCacheLimit = 4;
+
 	if (chunkListIndices.empty())
 	{
 		return true;
@@ -19667,12 +19678,36 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 		}
 
 		nri_scene::MaterialBridgeData remappedChunkBridge;
+		const uint64_t materialBridgeHash = HashMaterialBridgeSummary(chunkCache.materialBridge);
 		bool chunkTextureTableGrew = false;
-		RemapMaterialBridgeAgainstTextureTable(
-			chunkCache.materialBridge,
-			mStaticMapScene.materialBridge,
-			remappedChunkBridge,
-			&chunkTextureTableGrew);
+		bool reusedCachedRemap = false;
+		for (const auto& cacheEntry : chunkCache.residentMaterialSliceCache)
+		{
+			if (cacheEntry.animatedGeometrySignature != chunkCache.animatedGeometrySignature ||
+				cacheEntry.animatedMaterialSignature != chunkCache.animatedMaterialSignature ||
+				cacheEntry.materialBridgeHash != materialBridgeHash ||
+				cacheEntry.materialCount != atlasChunk.materialCount)
+			{
+				continue;
+			}
+
+			remappedChunkBridge = cacheEntry.remappedMaterialBridge;
+			reusedCachedRemap = true;
+			break;
+		}
+		if (reusedCachedRemap)
+		{
+			mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheHitCount++;
+		}
+		else
+		{
+			mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheMissCount++;
+			RemapMaterialBridgeAgainstTextureTable(
+				chunkCache.materialBridge,
+				mStaticMapScene.materialBridge,
+				remappedChunkBridge,
+				&chunkTextureTableGrew);
+		}
 		textureTableGrew = textureTableGrew || chunkTextureTableGrew;
 		if ((uint32_t)remappedChunkBridge.materials.size() != atlasChunk.materialCount ||
 			(uint32_t)remappedChunkBridge.lightMetadata.size() != atlasChunk.materialCount)
@@ -19687,6 +19722,21 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(const std::vector<uint32_t
 					atlasChunk.materialCount);
 			}
 			return false;
+		}
+		if (!reusedCachedRemap)
+		{
+			StaticMapSceneCache::ChunkCache::ResidentMaterialSliceCacheEntry cacheEntry = {};
+			cacheEntry.animatedGeometrySignature = chunkCache.animatedGeometrySignature;
+			cacheEntry.animatedMaterialSignature = chunkCache.animatedMaterialSignature;
+			cacheEntry.materialBridgeHash = materialBridgeHash;
+			cacheEntry.materialCount = atlasChunk.materialCount;
+			cacheEntry.remappedMaterialBridge = remappedChunkBridge;
+			if (chunkCache.residentMaterialSliceCache.size() >= ResidentAnimatedMaterialSliceCacheLimit)
+			{
+				chunkCache.residentMaterialSliceCache.erase(chunkCache.residentMaterialSliceCache.begin());
+			}
+			chunkCache.residentMaterialSliceCache.push_back(std::move(cacheEntry));
+			mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheStoreCount++;
 		}
 
 		std::copy_n(
