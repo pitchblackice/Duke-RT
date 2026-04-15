@@ -313,7 +313,8 @@ float3 EvaluateVisibleMaterialEmission(uint materialIndex, uint dataSource, Mate
 	if (material.emissiveMode == 3u)
 	{
 		const float3 glow = SampleMaterialEmissionSource(materialIndex, dataSource, uv);
-		return OverlayBlend(albedo, glow) * material.emissiveIntensity;
+		const float visibleBlend = max(material.emissiveReserved, 0.0);
+		return OverlayBlend(albedo, glow) * material.emissiveIntensity * visibleBlend;
 	}
 
 	return EvaluateMaterialEmission(materialIndex, dataSource, material, uv);

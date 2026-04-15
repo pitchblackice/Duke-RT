@@ -2511,6 +2511,18 @@ CUSTOM_CVAR(Float, nri_ptglowfalloff, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 	NotifyActiveGlowControlChange();
 }
+CUSTOM_CVAR(Float, nri_ptglowblend, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	else if (self > 3.0f)
+	{
+		self = 3.0f;
+	}
+	NotifyActiveGlowControlChange();
+}
 CUSTOM_CVAR(Float, nri_ptfullbrightboost, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
@@ -3707,6 +3719,11 @@ namespace
 	static float GetFullbrightBoostScale()
 	{
 		return std::clamp((float)nri_ptfullbrightboost, 0.50f, 8.00f);
+	}
+
+	static float GetGlowmapVisibleBlendScale()
+	{
+		return std::clamp((float)nri_ptglowblend, 0.0f, 3.0f);
 	}
 
 	static bool IsGlowDrivenEmissiveForSampling(uint32_t sourceFlags, uint32_t emissiveMode)
@@ -8575,7 +8592,7 @@ void NRIRenderer::UpdateNightVisionState()
 void NRIRenderer::PrintTextureEmissiveHeuristics() const
 {
 	const auto& emissive = mSceneLights.GetEmissiveSurfaces();
-	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u active=%u total_power=%.3f glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f truncated=%u\n",
+	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u active=%u total_power=%.3f glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f truncated=%u\n",
 		(uint32_t)emissive.textureRules.size(),
 		emissive.autoTaggedCount,
 		emissive.explicitRuleMatchCount,
@@ -8584,6 +8601,7 @@ void NRIRenderer::PrintTextureEmissiveHeuristics() const
 		(float)nri_ptglowscale,
 		(float)nri_ptglowreach,
 		(float)nri_ptglowfalloff,
+		(float)nri_ptglowblend,
 		emissive.truncatedSurfaceCount);
 	for (const auto& rule : emissive.textureRules)
 	{
@@ -9209,7 +9227,7 @@ void NRIRenderer::PrintStatus() const
 		mBoundRuntimeLightTileIndexCount,
 		mBoundRuntimeLightMaxTileOccupancy,
 		NRI_PTDEBUG_ANALYTIC_DIRECT);
-	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f\n",
+	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f\n",
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().textureRules.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
@@ -9228,7 +9246,8 @@ void NRIRenderer::PrintStatus() const
 		nri_ptemissiveautoonly ? "on" : "off",
 		(float)nri_ptglowscale,
 		(float)nri_ptglowreach,
-		(float)nri_ptglowfalloff);
+		(float)nri_ptglowfalloff,
+		(float)nri_ptglowblend);
 	const auto& appendStats = mSceneLights.GetFrameAppendStats();
 	Printf("NRI PT scene-light ingest: records=%u static=%u mutation=%u captured=%u dynamic=%u append_ms=static:%.3f mutation:%.3f captured:%.3f dynamic:%.3f rebuild_ms=analytic:%.3f emissive:%.3f sector:%.3f\n",
 		appendStats.totalRecordCount,
@@ -12824,7 +12843,12 @@ void NRIRenderer::ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridge
 	const uint32_t count = std::min<uint32_t>((uint32_t)inOutGpuMaterials.size(), (uint32_t)materials.lightMetadata.size());
 	for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
 	{
-		mSceneLights.ApplyEmissiveMaterialSettings(materials.lightMetadata[materialIndex], inOutGpuMaterials[materialIndex]);
+		nri_scene::MaterialData& material = inOutGpuMaterials[materialIndex];
+		mSceneLights.ApplyEmissiveMaterialSettings(materials.lightMetadata[materialIndex], material);
+		if (material.emissiveMode == nri_scene::MaterialEmissiveMode_UseGlowmapTexture)
+		{
+			material.emissiveReserved = GetGlowmapVisibleBlendScale();
+		}
 	}
 }
 
