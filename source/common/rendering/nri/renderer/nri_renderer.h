@@ -275,6 +275,9 @@ public:
 		uint32_t staticAnimatedResidentSliceCacheHitCount = 0;
 		uint32_t staticAnimatedResidentSliceCacheMissCount = 0;
 		uint32_t staticAnimatedResidentSliceCacheStoreCount = 0;
+		uint32_t staticAnimatedResidentSliceApplyHitCount = 0;
+		uint32_t staticAnimatedResidentSliceApplyMissCount = 0;
+		uint32_t staticAnimatedResidentSliceSyncSkipHitCount = 0;
 		uint32_t runtimeMutationPrimitiveCount = 0;
 		uint32_t runtimeMutationMaterialCount = 0;
 		uint32_t sceneLightSurfaceRecordCount = 0;
@@ -1221,7 +1224,10 @@ private:
 	bool EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas);
 	bool RebuildResidentStaticCpuAtlasMirror(StaticMapSceneCache& staticScene, const StaticMapChunkAtlas& atlas) const;
 	bool RebuildResidentStaticMaterialBridgeFromChunks();
-	bool RefreshResidentStaticMaterialSlices(const std::vector<uint32_t>& chunkListIndices, const char* reason);
+	bool RefreshResidentStaticMaterialSlices(
+		const std::vector<uint32_t>& chunkListIndices,
+		const char* reason,
+		const std::vector<uint32_t>* animatedApplyChunkListIndices = nullptr);
 	void UploadChunkGeometryToAtlas(
 		const nri_scene::GeometryData& sourceGeometry,
 		const StaticMapSceneCache::ChunkCache& sourceChunk,
