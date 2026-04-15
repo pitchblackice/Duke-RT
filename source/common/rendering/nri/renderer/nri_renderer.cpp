@@ -16265,6 +16265,36 @@ uint32_t NRIRenderer::GetCurrentQueuedFrameIndex() const
 	return std::min<uint32_t>(mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mFrameBuffer->mQueuedFrames.size() - 1u);
 }
 
+NRIRenderer::ResidentUploadScratchFrame& NRIRenderer::GetResidentUploadScratchFrame()
+{
+	const uint32_t frameSlot = GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size();
+	auto& frameScratch = mResidentUploadScratchFrames[frameSlot];
+	if (frameScratch.frameIndex != mFrameIndex)
+	{
+		for (NRIBufferResource& retired : frameScratch.retiredBuffers)
+		{
+			DestroyBufferResource(retired);
+		}
+		frameScratch.retiredBuffers.clear();
+		for (NRIAccelerationStructureResource& retired : frameScratch.retiredAccelerationStructures)
+		{
+			DestroyAccelerationStructureResource(retired);
+		}
+		frameScratch.retiredAccelerationStructures.clear();
+		frameScratch.frameIndex = mFrameIndex;
+		frameScratch.vertex.cursor = 0;
+		frameScratch.vertex.copySourceActive = false;
+		frameScratch.index.cursor = 0;
+		frameScratch.index.copySourceActive = false;
+		frameScratch.primitive.cursor = 0;
+		frameScratch.primitive.copySourceActive = false;
+		frameScratch.material.cursor = 0;
+		frameScratch.material.copySourceActive = false;
+	}
+
+	return frameScratch;
+}
+
 nri::DescriptorSet* NRIRenderer::GetCurrentSceneTextureSet() const
 {
 	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
@@ -16767,25 +16797,7 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 	}
 
 	constexpr uint64_t kResidentUploadScratchAlignment = 16u;
-	const uint32_t frameSlot = GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size();
-	auto& frameScratch = mResidentUploadScratchFrames[frameSlot];
-	if (frameScratch.frameIndex != mFrameIndex)
-	{
-		for (NRIBufferResource& retired : frameScratch.retiredBuffers)
-		{
-			DestroyBufferResource(retired);
-		}
-		frameScratch.retiredBuffers.clear();
-		frameScratch.frameIndex = mFrameIndex;
-		frameScratch.vertex.cursor = 0;
-		frameScratch.vertex.copySourceActive = false;
-		frameScratch.index.cursor = 0;
-		frameScratch.index.copySourceActive = false;
-		frameScratch.primitive.cursor = 0;
-		frameScratch.primitive.copySourceActive = false;
-		frameScratch.material.cursor = 0;
-		frameScratch.material.copySourceActive = false;
-	}
+	auto& frameScratch = GetResidentUploadScratchFrame();
 
 	ResidentBufferUploadScratch* scratch = nullptr;
 	switch (uploadKind)
@@ -16859,6 +16871,18 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 
 	scratch->cursor = scratchOffset + size;
 	return true;
+}
+
+void NRIRenderer::RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource)
+{
+	if (resource.accelerationStructure == nullptr && resource.descriptor == nullptr)
+	{
+		return;
+	}
+
+	auto& frameScratch = GetResidentUploadScratchFrame();
+	frameScratch.retiredAccelerationStructures.push_back(resource);
+	resource = {};
 }
 
 bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind)
@@ -19796,28 +19820,13 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 		return true;
 	}
 
-	bool needsWaitForResidentBlasTeardown = false;
-	for (uint32_t chunkListIndex : activeChunkListIndices)
-	{
-		if (mStaticMapScene.chunks[chunkListIndex].accelerationStructure.accelerationStructure != nullptr ||
-			mStaticMapScene.chunks[chunkListIndex].accelerationStructure.descriptor != nullptr)
-		{
-			needsWaitForResidentBlasTeardown = true;
-			break;
-		}
-	}
-	if (needsWaitForResidentBlasTeardown)
-	{
-		WaitForCommandsTracked("resident_chunk_blas_rebuild");
-	}
-
 	uint64_t maxScratchSize = 0;
 	for (uint32_t chunkListIndex : activeChunkListIndices)
 	{
 		auto& chunk = mStaticMapScene.chunks[chunkListIndex];
 		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
 
-		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+		RetireResidentAccelerationStructure(chunk.accelerationStructure);
 
 		nri::BottomLevelGeometryDesc geometryDesc = {};
 		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
@@ -22673,6 +22682,10 @@ void NRIRenderer::DestroySceneBuffers()
 		for (NRIBufferResource& retired : frameScratch.retiredBuffers)
 		{
 			DestroyBufferResource(retired);
+		}
+		for (NRIAccelerationStructureResource& retired : frameScratch.retiredAccelerationStructures)
+		{
+			DestroyAccelerationStructureResource(retired);
 		}
 		frameScratch = {};
 	}

@@ -1056,6 +1056,7 @@ private:
 		ResidentBufferUploadScratch primitive;
 		ResidentBufferUploadScratch material;
 		std::vector<NRIBufferResource> retiredBuffers;
+		std::vector<NRIAccelerationStructureResource> retiredAccelerationStructures;
 	};
 
 	struct RuntimeMapMutationFrameState
@@ -1313,6 +1314,7 @@ private:
 	void TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet);
 	uint32_t CountPotentialOutstandingQueuedFrames() const;
 	uint32_t GetCurrentQueuedFrameIndex() const;
+	ResidentUploadScratchFrame& GetResidentUploadScratchFrame();
 	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
 	nri::DescriptorSet* GetCurrentSceneDataSet() const;
 	bool IsCurrentSceneDataDescriptorsInitialized() const;
@@ -1411,6 +1413,7 @@ private:
 	bool EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch& scratch, ResidentUploadScratchFrame& frameScratch, uint64_t requiredSize);
 	bool EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind);
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
+	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void BuildRuntimeLightClusterUpload(
 		std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 		std::vector<uint32_t>& outIndices,
