@@ -6203,6 +6203,7 @@ void NRIRenderer::Shutdown()
 {
 	ResetMuzzleFlashOverlayState("renderer-shutdown");
 	mLastResolvedLightOverlayGeneration = 0;
+	mEmissiveMaterialGeneration = 1;
 
 	if (mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
 	{
@@ -6291,6 +6292,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	ResetPersistentDynamicEmissiveCache();
 	ResetMuzzleFlashOverlayState("level-unload");
 	mLastResolvedLightOverlayGeneration = 0;
+	mEmissiveMaterialGeneration = 1;
 
 	ClearRuntimePointLights();
 	ClearRuntimeDebugSpheres();
@@ -12761,6 +12763,17 @@ void NRIRenderer::RefreshSceneLightSystem(
 	const bool emissiveMaterialBindingChanged = mSceneLights.ConsumeEmissiveMaterialBindingChanged();
 	const bool emissiveMaterialPropertiesChanged = mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
 	const bool sectorLightingTopologyChanged = mSceneLights.ConsumeSectorLightingTopologyChanged();
+	if (emissiveSurfaceTopologyChanged ||
+		emissiveSurfacePropertiesChanged ||
+		emissiveMaterialBindingChanged ||
+		emissiveMaterialPropertiesChanged)
+	{
+		mEmissiveMaterialGeneration++;
+		if (mEmissiveMaterialGeneration == 0)
+		{
+			mEmissiveMaterialGeneration = 1;
+		}
+	}
 
 	if (analyticLightTopologyChanged)
 	{
@@ -17752,6 +17765,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.staticAnimatedResidentSliceApplyHitCount = 0;
 	mLastPerfShellTraceStats.staticAnimatedResidentSliceApplyMissCount = 0;
 	mLastPerfShellTraceStats.staticAnimatedResidentSliceSyncSkipHitCount = 0;
+	mLastPerfShellTraceStats.staticAnimatedResidentGpuPayloadCacheHitCount = 0;
+	mLastPerfShellTraceStats.staticAnimatedResidentGpuPayloadCacheMissCount = 0;
+	mLastPerfShellTraceStats.staticAnimatedResidentGpuPayloadCacheStoreCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationPrimitiveCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationTopEntries = {};
@@ -19679,6 +19695,8 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 	const std::vector<uint32_t>* animatedApplyChunkListIndices)
 {
 	static constexpr size_t ResidentAnimatedMaterialSliceCacheLimit = 4;
+	const uint32_t actorOverrideGeneration = mLastResolvedLightOverlayGeneration;
+	const uint32_t emissiveMaterialGeneration = mEmissiveMaterialGeneration;
 
 	if (chunkListIndices.empty())
 	{
@@ -19740,9 +19758,13 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 		}
 
 		nri_scene::MaterialBridgeData remappedChunkBridge;
+		std::vector<nri_scene::MaterialData> remappedGpuMaterials;
 		const uint64_t materialBridgeHash = HashMaterialBridgeSummary(chunkCache.materialBridge);
 		bool chunkTextureTableGrew = false;
 		bool reusedCachedRemap = false;
+		bool reusedCachedGpuPayload = false;
+		const StaticMapSceneCache::ChunkCache::ResidentMaterialSliceCacheEntry* remapCacheEntry = nullptr;
+		const StaticMapSceneCache::ChunkCache::ResidentMaterialSliceCacheEntry* gpuPayloadCacheEntry = nullptr;
 		for (const auto& cacheEntry : chunkCache.residentMaterialSliceCache)
 		{
 			if (cacheEntry.animatedGeometrySignature != chunkCache.animatedGeometrySignature ||
@@ -19753,9 +19775,27 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 				continue;
 			}
 
-			remappedChunkBridge = cacheEntry.remappedMaterialBridge;
+			if (remapCacheEntry == nullptr)
+			{
+				remapCacheEntry = &cacheEntry;
+			}
+			if (cacheEntry.actorOverrideGeneration == actorOverrideGeneration &&
+				cacheEntry.emissiveMaterialGeneration == emissiveMaterialGeneration &&
+				cacheEntry.gpuMaterials.size() == atlasChunk.materialCount)
+			{
+				gpuPayloadCacheEntry = &cacheEntry;
+				break;
+			}
+		}
+		if (remapCacheEntry != nullptr)
+		{
+			remappedChunkBridge = remapCacheEntry->remappedMaterialBridge;
 			reusedCachedRemap = true;
-			break;
+		}
+		if (gpuPayloadCacheEntry != nullptr)
+		{
+			remappedGpuMaterials = gpuPayloadCacheEntry->gpuMaterials;
+			reusedCachedGpuPayload = true;
 		}
 		const bool animatedApplyChunk =
 			animatedApplyChunkListIndices != nullptr &&
@@ -19784,6 +19824,14 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 				remappedChunkBridge,
 				&chunkTextureTableGrew);
 		}
+		if (reusedCachedGpuPayload)
+		{
+			mLastPerfShellTraceStats.staticAnimatedResidentGpuPayloadCacheHitCount++;
+		}
+		else
+		{
+			mLastPerfShellTraceStats.staticAnimatedResidentGpuPayloadCacheMissCount++;
+		}
 		textureTableGrew = textureTableGrew || chunkTextureTableGrew;
 		if ((uint32_t)remappedChunkBridge.materials.size() != atlasChunk.materialCount ||
 			(uint32_t)remappedChunkBridge.lightMetadata.size() != atlasChunk.materialCount)
@@ -19799,22 +19847,6 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			}
 			return false;
 		}
-		if (!reusedCachedRemap)
-		{
-			StaticMapSceneCache::ChunkCache::ResidentMaterialSliceCacheEntry cacheEntry = {};
-			cacheEntry.animatedGeometrySignature = chunkCache.animatedGeometrySignature;
-			cacheEntry.animatedMaterialSignature = chunkCache.animatedMaterialSignature;
-			cacheEntry.materialBridgeHash = materialBridgeHash;
-			cacheEntry.materialCount = atlasChunk.materialCount;
-			cacheEntry.remappedMaterialBridge = remappedChunkBridge;
-			if (chunkCache.residentMaterialSliceCache.size() >= ResidentAnimatedMaterialSliceCacheLimit)
-			{
-				chunkCache.residentMaterialSliceCache.erase(chunkCache.residentMaterialSliceCache.begin());
-			}
-			chunkCache.residentMaterialSliceCache.push_back(std::move(cacheEntry));
-			mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheStoreCount++;
-		}
-
 		std::copy_n(
 			remappedChunkBridge.materials.data(),
 			atlasChunk.materialCount,
@@ -19824,13 +19856,41 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			atlasChunk.materialCount,
 			mStaticMapScene.materialBridge.lightMetadata.data() + atlasChunk.materialOffset);
 
-		std::vector<nri_scene::MaterialData> remappedGpuMaterials = remappedChunkBridge.materials;
-		ApplyEmissiveMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
-		ApplyActorShadowMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
+		if (!reusedCachedGpuPayload)
+		{
+			remappedGpuMaterials = remappedChunkBridge.materials;
+			ApplyEmissiveMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
+			ApplyActorShadowMaterialOverrides(remappedChunkBridge, remappedGpuMaterials);
+		}
 		std::copy_n(
 			remappedGpuMaterials.data(),
 			atlasChunk.materialCount,
 			mStaticMapScene.gpuMaterials.data() + atlasChunk.materialOffset);
+		if (!reusedCachedRemap || !reusedCachedGpuPayload)
+		{
+			StaticMapSceneCache::ChunkCache::ResidentMaterialSliceCacheEntry cacheEntry = {};
+			cacheEntry.animatedGeometrySignature = chunkCache.animatedGeometrySignature;
+			cacheEntry.animatedMaterialSignature = chunkCache.animatedMaterialSignature;
+			cacheEntry.materialBridgeHash = materialBridgeHash;
+			cacheEntry.actorOverrideGeneration = actorOverrideGeneration;
+			cacheEntry.emissiveMaterialGeneration = emissiveMaterialGeneration;
+			cacheEntry.materialCount = atlasChunk.materialCount;
+			cacheEntry.remappedMaterialBridge = remappedChunkBridge;
+			cacheEntry.gpuMaterials = remappedGpuMaterials;
+			if (chunkCache.residentMaterialSliceCache.size() >= ResidentAnimatedMaterialSliceCacheLimit)
+			{
+				chunkCache.residentMaterialSliceCache.erase(chunkCache.residentMaterialSliceCache.begin());
+			}
+			chunkCache.residentMaterialSliceCache.push_back(std::move(cacheEntry));
+			if (!reusedCachedRemap)
+			{
+				mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheStoreCount++;
+			}
+			if (!reusedCachedGpuPayload)
+			{
+				mLastPerfShellTraceStats.staticAnimatedResidentGpuPayloadCacheStoreCount++;
+			}
+		}
 
 		if (!textureTableGrew &&
 			!StageResidentBufferCopyRange(

@@ -3093,7 +3093,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneLightEmissiveMs,
 			shell.sceneLightSectorMs);
 		Printf(
-			"PERF pt cache detail NRI: frame=%llu mutation_active=%u mutation_valid=%u mutation_excl_static=%u mutation_cached_surfaces=%u mutation_cached_tris=%u mutation_cached_mats=%u mutation_cached_states=%u mutation_mat_cache_hits=%u mutation_mat_cache_misses=%u mutation_mat_cache_stores=%u anim_slice_cached_states=%u anim_slice_cache_hits=%u anim_slice_cache_misses=%u anim_slice_cache_stores=%u anim_slice_apply_hits=%u anim_slice_apply_misses=%u anim_slice_sync_skip_hits=%u persistent_actor=%u persistent_non_actor=%u persistent_walls=%u persistent_flats=%u persistent_sprites=%u\n",
+			"PERF pt cache detail NRI: frame=%llu mutation_active=%u mutation_valid=%u mutation_excl_static=%u mutation_cached_surfaces=%u mutation_cached_tris=%u mutation_cached_mats=%u mutation_cached_states=%u mutation_mat_cache_hits=%u mutation_mat_cache_misses=%u mutation_mat_cache_stores=%u anim_slice_cached_states=%u anim_slice_cache_hits=%u anim_slice_cache_misses=%u anim_slice_cache_stores=%u anim_slice_apply_hits=%u anim_slice_apply_misses=%u anim_slice_sync_skip_hits=%u anim_gpu_cache_hits=%u anim_gpu_cache_misses=%u anim_gpu_cache_stores=%u persistent_actor=%u persistent_non_actor=%u persistent_walls=%u persistent_flats=%u persistent_sprites=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationActiveChunkCount,
 			shell.runtimeMutationValidChunkCount,
@@ -3112,6 +3112,9 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.staticAnimatedResidentSliceApplyHitCount,
 			shell.staticAnimatedResidentSliceApplyMissCount,
 			shell.staticAnimatedResidentSliceSyncSkipHitCount,
+			shell.staticAnimatedResidentGpuPayloadCacheHitCount,
+			shell.staticAnimatedResidentGpuPayloadCacheMissCount,
+			shell.staticAnimatedResidentGpuPayloadCacheStoreCount,
 			shell.persistentDynamicActorSurfaceCount,
 			shell.persistentDynamicNonActorSurfaceCount,
 			shell.persistentDynamicWallSurfaceCount,

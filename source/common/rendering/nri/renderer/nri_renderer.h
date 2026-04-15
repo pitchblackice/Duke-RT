@@ -278,6 +278,9 @@ public:
 		uint32_t staticAnimatedResidentSliceApplyHitCount = 0;
 		uint32_t staticAnimatedResidentSliceApplyMissCount = 0;
 		uint32_t staticAnimatedResidentSliceSyncSkipHitCount = 0;
+		uint32_t staticAnimatedResidentGpuPayloadCacheHitCount = 0;
+		uint32_t staticAnimatedResidentGpuPayloadCacheMissCount = 0;
+		uint32_t staticAnimatedResidentGpuPayloadCacheStoreCount = 0;
 		uint32_t runtimeMutationPrimitiveCount = 0;
 		uint32_t runtimeMutationMaterialCount = 0;
 		uint32_t sceneLightSurfaceRecordCount = 0;
@@ -750,8 +753,11 @@ private:
 				uint64_t animatedGeometrySignature = 0;
 				uint64_t animatedMaterialSignature = 0;
 				uint64_t materialBridgeHash = 0;
+				uint32_t actorOverrideGeneration = 0;
+				uint32_t emissiveMaterialGeneration = 0;
 				uint32_t materialCount = 0;
 				nri_scene::MaterialBridgeData remappedMaterialBridge;
+				std::vector<nri_scene::MaterialData> gpuMaterials;
 			};
 
 			uint32_t chunkIndex = UINT32_MAX;
@@ -1589,6 +1595,7 @@ private:
 	std::vector<uint32_t> mCurrentVisibleChunkWords;
 	std::vector<uint32_t> mCurrentVisibleFlatPlaneWords;
 	uint32_t mLastResolvedLightOverlayGeneration = 0;
+	uint32_t mEmissiveMaterialGeneration = 1;
 	uint32_t mFrameIndex = 0;
 	uint64_t mFrameGenerationFrameId = 0;
 	uint32_t mRenderWidth = 0;
