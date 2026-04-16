@@ -1107,7 +1107,7 @@ OptionMenu "VideoOptions" protected
 
 	Submenu "$OPTMNU_HUD", "HUDOptions"
 	Submenu "$RENDER_OPTIONS", "RenderOptions"
-	Submenu "NRI Renderer", "NRIOptions"
+	Submenu "RT Renderer", "NRIOptions"
 	Submenu "$AUTOMAPMNU_TITLE", "AutomapOptions"
 	Submenu "$GLMNU_POSTPROCESS", "PostProcessMenu"
 	Submenu "$GLTEXMNU_TITLE", "GLTextureGLOptions"
@@ -1164,19 +1164,14 @@ OptionMenu "VideoOptions" protected
 
 OptionMenu "NRIOptions" protected
 {
-	Title "NRI Renderer"
+	Title "RT Renderer"
 
 	StaticText "Backend / API"
 	Option "Preferred Rendering API",			"vid_preferbackend",			"PreferBackend"
-	Option "NRI Graphics API",					"nri_api",						"NRIAPI"
+	Option "RT Graphics API",					"nri_api",						"NRIAPI"
 	StaticText "Backend and API changes require a restart."
 	StaticText ""
 
-	StaticText "Tracing / Runtime"
-	Option "Bootstrap View",						"nri_ptbootstrap",				"OnOff"
-	Option "Bootstrap Mode",						"nri_ptbootstrapmode",			"NRIPTBootstrapMode"
-	Slider "Bootstrap Mode Index",				"nri_ptbootstrapmode",			0, 13, 1, 0
-	StaticText "----------------"
 	StaticText "NRD / Core"
 	Option "Denoiser",							"nri_denoise",					"OnOff"
 	Option "NRD Method",						"nri_nrddenoiser",				"NRDDenoiser"
