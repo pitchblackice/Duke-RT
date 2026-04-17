@@ -769,6 +769,7 @@ private:
 			uint32_t primitiveCount = 0;
 			uint32_t materialOffset = 0;
 			uint32_t materialCount = 0;
+			uint64_t exactGeometrySignature = 0;
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t animatedGeometrySignature = 0;
 			bool active = true;
@@ -818,6 +819,7 @@ private:
 			uint32_t materialCount = 0;
 			uint64_t baselineSignature = 0;
 			uint64_t liveSignature = 0;
+			uint64_t exactGeometrySignature = 0;
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t animatedGeometrySignature = 0;
 			bool valid = false;

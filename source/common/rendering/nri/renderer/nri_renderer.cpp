@@ -5536,6 +5536,28 @@ namespace
 		}
 	}
 
+	template <typename SurfaceContainer>
+	static void HashExactGeometrySurfaces(const SurfaceContainer& surfaces, uint64_t& hash)
+	{
+		hash = HashCombine64(hash, (uint64_t)surfaces.size());
+		for (const auto& surface : surfaces)
+		{
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)surface.provenance.sourceType);
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectorIndex + 1));
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.wallIndex + 1));
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectionIndex + 1));
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.actorIndex + 1));
+			hash = HashCombine64(hash, (uint64_t)surface.provenance.cstat);
+			hash = HashCombine64(hash, (uint64_t)surface.vertices.size());
+			for (const auto& vertex : surface.vertices)
+			{
+				hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[0]));
+				hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[1]));
+				hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[2]));
+			}
+		}
+	}
+
 	static uint64_t ComputeAnimatedMaterialSignature(const nri_scene::SceneView& sceneView)
 	{
 		uint64_t hash = 1469598103934665603ull;
@@ -5551,6 +5573,17 @@ namespace
 		HashAnimatedGeometrySurfaces(sceneView.opaqueWalls, hash);
 		HashAnimatedGeometrySurfaces(sceneView.opaqueFlats, hash);
 		HashAnimatedGeometrySurfaces(sceneView.opaqueSprites, hash);
+		return hash;
+	}
+
+	// This is intentionally separate from the animated/display signature above.
+	// Resident validation and resident no-op write skipping need true vertex motion.
+	static uint64_t ComputeExactGeometrySignature(const nri_scene::SceneView& sceneView)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		HashExactGeometrySurfaces(sceneView.opaqueWalls, hash);
+		HashExactGeometrySurfaces(sceneView.opaqueFlats, hash);
+		HashExactGeometrySurfaces(sceneView.opaqueSprites, hash);
 		return hash;
 	}
 
@@ -10335,6 +10368,7 @@ void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
 		}
 		entry.animatedMaterialSignature = staticChunk.animatedMaterialSignature;
 		entry.animatedGeometrySignature = staticChunk.animatedGeometrySignature;
+		entry.exactGeometrySignature = staticChunk.exactGeometrySignature;
 		entry.hasAnimatedTextureCandidates = staticChunk.hasAnimatedTextureCandidates;
 		entry.animatedRefreshSuppressed = staticChunk.animatedRefreshSuppressed;
 		entry.accelerationResident = staticChunk.active && staticChunk.accelerationStructure.accelerationStructure != nullptr;
@@ -15672,6 +15706,7 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 	chunkCache.primitiveCount = (uint32_t)chunkGeometry.primitives.size();
 	chunkCache.materialOffset = (uint32_t)outStaticScene.materialBridge.materials.size();
 	chunkCache.materialCount = (uint32_t)chunkMaterials.materials.size();
+	chunkCache.exactGeometrySignature = ComputeExactGeometrySignature(chunkSceneView);
 	chunkCache.animatedMaterialSignature = ComputeAnimatedMaterialSignature(chunkSceneView);
 	chunkCache.animatedGeometrySignature = ComputeAnimatedGeometrySignature(chunkSceneView);
 	chunkCache.hasAnimatedTextureCandidates = ChunkHasAnimatedStaticMapSurfaceCandidates(mapWorld, chunk);
@@ -18242,9 +18277,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			nri_scene::PTMapWorldStats ignoredVisibleStats = {};
 			if (nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveVisibleChunkView, &ignoredVisibleStats))
 			{
-				liveVisibleGeometrySignature = ComputeAnimatedGeometrySignature(liveVisibleChunkView);
+				liveVisibleGeometrySignature = ComputeExactGeometrySignature(liveVisibleChunkView);
 				liveVisibleMaterialSignature = ComputeAnimatedMaterialSignature(liveVisibleChunkView);
-				if (liveVisibleGeometrySignature != residentEntry->animatedGeometrySignature)
+				if (liveVisibleGeometrySignature != residentEntry->exactGeometrySignature)
 				{
 					normalizedReasonMask |= nri_scene::PTMapChunkMutationReason_SectionDirty;
 				}
@@ -18278,7 +18313,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					YesNo(chunkHasUnresolvedAuthoredTextures),
 					YesNo(startupVisibleValidationPending),
 					(uint32_t)residentEntry->visibleValidationFramesRemaining,
-					(unsigned long long)residentEntry->animatedGeometrySignature,
+					(unsigned long long)residentEntry->exactGeometrySignature,
 					(unsigned long long)liveVisibleGeometrySignature,
 					(unsigned long long)residentEntry->animatedMaterialSignature,
 					(unsigned long long)liveVisibleMaterialSignature);
@@ -18474,7 +18509,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			uint32_t liveBuiltTriangleCount = liveStats.triangleCount;
 			if (replacement.valid)
 			{
-				previousGeometrySignature = ComputeAnimatedGeometrySignature(replacement.sceneView);
+				previousGeometrySignature = ComputeExactGeometrySignature(replacement.sceneView);
 				previousMaterialSignature = replacement.animatedMaterialSignature;
 				previousStateSource = RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::Replacement;
 				havePreviousSignatures = true;
@@ -18483,7 +18518,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 			else if (residentEntry != nullptr && residentEntry->valid)
 			{
-				previousGeometrySignature = residentEntry->animatedGeometrySignature;
+				previousGeometrySignature = residentEntry->exactGeometrySignature;
 				previousMaterialSignature = residentEntry->animatedMaterialSignature;
 				previousStateSource = RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::Resident;
 				havePreviousSignatures = true;
@@ -18493,7 +18528,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 			const bool liveGeometryChanged =
 				!havePreviousSignatures ||
-				ComputeAnimatedGeometrySignature(liveChunkView) != previousGeometrySignature;
+				ComputeExactGeometrySignature(liveChunkView) != previousGeometrySignature;
 			const bool liveMaterialChanged =
 				!havePreviousSignatures ||
 				ComputeAnimatedMaterialSignature(liveChunkView) != previousMaterialSignature;
@@ -18996,7 +19031,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				residentEntry != nullptr &&
 				residentEntry->valid &&
 				replacement.valid &&
-				ComputeAnimatedGeometrySignature(replacement.sceneView) == residentEntry->animatedGeometrySignature &&
+				ComputeExactGeometrySignature(replacement.sceneView) == residentEntry->exactGeometrySignature &&
 				replacement.animatedMaterialSignature == residentEntry->animatedMaterialSignature;
 			const bool residentNoopExactMatch =
 				replacement.residentAuthoritative &&
@@ -19006,7 +19041,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.surfaceCount == residentEntry->materialCount &&
 				replacement.triangleCount == residentEntry->primitiveCount &&
 				(uint32_t)replacement.materialBridge.materials.size() == residentEntry->materialCount &&
-				ComputeAnimatedGeometrySignature(replacement.sceneView) == residentEntry->animatedGeometrySignature &&
+				ComputeExactGeometrySignature(replacement.sceneView) == residentEntry->exactGeometrySignature &&
 				replacement.animatedMaterialSignature == residentEntry->animatedMaterialSignature;
 			if (residentNoopSignatureCandidate && !residentNoopExactMatch)
 			{
@@ -20476,6 +20511,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			mutableChunk.primitiveCount = 0;
 			mutableChunk.materialCount = 0;
 			mutableChunk.materialBridge = {};
+			mutableChunk.exactGeometrySignature = 0;
 			mutableChunk.animatedMaterialSignature = 0;
 			mutableChunk.animatedGeometrySignature = 0;
 			mutableChunk.hasAnimatedTextureCandidates = false;
@@ -20719,6 +20755,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mutableChunk.materialCount = nextAtlasChunk.materialCount;
 		mutableChunk.active = true;
 		mutableChunk.materialBridge = residentMaterials;
+		mutableChunk.exactGeometrySignature = ComputeExactGeometrySignature(residentSceneView);
 		mutableChunk.animatedMaterialSignature = ComputeAnimatedMaterialSignature(residentSceneView);
 		mutableChunk.animatedGeometrySignature = ComputeAnimatedGeometrySignature(residentSceneView);
 		mutableChunk.hasAnimatedTextureCandidates = ChunkHasAnimatedStaticMapSurfaceCandidates(mMapWorld, mapChunk);
@@ -20769,6 +20806,8 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].staticSceneChunkListIndex = chunkListIndex;
 	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].active = !chunkBecomesEmpty;
 	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].mappedInStaticScene = !chunkBecomesEmpty;
+	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].exactGeometrySignature =
+		!chunkBecomesEmpty ? mStaticMapScene.chunks[chunkListIndex].exactGeometrySignature : 0;
 	if (!chunkBecomesEmpty)
 	{
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].vertexOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].vertexOffset;
