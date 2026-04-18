@@ -2968,6 +2968,44 @@ namespace
 		return score;
 	}
 
+	enum RuntimeStructuralRebuildTriggerBits : uint32_t
+	{
+		RuntimeStructuralRebuildTrigger_ReplacementDelta = 1u << 0,
+		RuntimeStructuralRebuildTrigger_ViewChanged = 1u << 1,
+		RuntimeStructuralRebuildTrigger_StaticAnimatedFlip = 1u << 2,
+		RuntimeStructuralRebuildTrigger_ExcludeStaticFlip = 1u << 3,
+		RuntimeStructuralRebuildTrigger_ForceTopology = 1u << 4,
+		RuntimeStructuralRebuildTrigger_Invalid = 1u << 5,
+	};
+
+	uint32_t ScoreRuntimeStructuralRebuildTraceEntry(const NRIRenderer::RuntimeStructuralRebuildTraceEntry& entry)
+	{
+		uint32_t score = entry.triangleCount * 8u;
+		score += entry.surfaceCount * 4u;
+		score += entry.materialCount * 2u;
+		if ((entry.triggerMask & RuntimeStructuralRebuildTrigger_ForceTopology) != 0)
+		{
+			score += 1u << 20;
+		}
+		if ((entry.triggerMask & RuntimeStructuralRebuildTrigger_StaticAnimatedFlip) != 0)
+		{
+			score += 1u << 19;
+		}
+		if ((entry.triggerMask & RuntimeStructuralRebuildTrigger_ExcludeStaticFlip) != 0)
+		{
+			score += 1u << 18;
+		}
+		if (entry.mixedMaterialOnly)
+		{
+			score += 1u << 17;
+		}
+		if (entry.geometryOrDirty)
+		{
+			score += 1u << 16;
+		}
+		return score;
+	}
+
 	template <typename Entry, size_t N, typename ScoreFn>
 	void InsertRankedTraceEntry(std::array<Entry, N>& entries, Entry entry, ScoreFn scoreFn)
 	{
@@ -18114,6 +18152,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationStructuralExcludeStaticFlipChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralForcedTopologyChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralInvalidChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralMaterialOnlyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralSectorMaterialOnlyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralWallMaterialOnlyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralMixedMaterialOnlyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralGeometryOrDirtyChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationHardwareCanvasChunkCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr = 0;
@@ -18213,6 +18256,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMaterialOnlyMismatchEntries = {};
 	mLastPerfShellTraceStats.runtimeResidentBlasRecreateEntries = {};
 	mLastPerfShellTraceStats.runtimeResidentBlasRefitRejectEntries = {};
+	mLastPerfShellTraceStats.runtimeStructuralRebuildEntries = {};
 	struct RuntimeAnimatedFrameTraceStats
 	{
 		bool touched = false;
@@ -18424,6 +18468,46 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeMaterialOnlyMismatchEntries,
 			entry,
 			ScoreRuntimeMaterialOnlyMismatchTraceEntry);
+	};
+	const auto recordStructuralRebuildEntry =
+		[this](uint32_t chunkIndex,
+			int32_t sectorIndex,
+			uint32_t reasonMask,
+			uint32_t triggerMask,
+			uint32_t surfaceCount,
+			uint32_t triangleCount,
+			uint32_t materialCount,
+			RuntimeMutationTraceAction action,
+			bool materialOnly,
+			bool sectorMaterialOnly,
+			bool wallMaterialOnly,
+			bool mixedMaterialOnly,
+			bool geometryOrDirty)
+	{
+		if (!ShouldTracePtPerf())
+		{
+			return;
+		}
+
+		RuntimeStructuralRebuildTraceEntry entry = {};
+		entry.valid = true;
+		entry.chunkIndex = chunkIndex;
+		entry.sectorIndex = sectorIndex;
+		entry.reasonMask = reasonMask;
+		entry.triggerMask = triggerMask;
+		entry.surfaceCount = surfaceCount;
+		entry.triangleCount = triangleCount;
+		entry.materialCount = materialCount;
+		entry.action = action;
+		entry.materialOnly = materialOnly;
+		entry.sectorMaterialOnly = sectorMaterialOnly;
+		entry.wallMaterialOnly = wallMaterialOnly;
+		entry.mixedMaterialOnly = mixedMaterialOnly;
+		entry.geometryOrDirty = geometryOrDirty;
+		InsertRankedTraceEntry(
+			mLastPerfShellTraceStats.runtimeStructuralRebuildEntries,
+			entry,
+			ScoreRuntimeStructuralRebuildTraceEntry);
 	};
 	if (!mStaticMapScene.valid ||
 		mRuntimeMapMutations.chunks.size() != mMapWorld.chunks.size())
@@ -19300,6 +19384,42 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 		if (needsStructuralRebuild)
 		{
+			const bool structuralMaterialOnly = materialOnlyReplacement;
+			const bool structuralSectorMaterialOnly =
+				normalizedReasonMask == nri_scene::PTMapChunkMutationReason_SectorMaterial;
+			const bool structuralWallMaterialOnly =
+				normalizedReasonMask == nri_scene::PTMapChunkMutationReason_WallMaterial;
+			const bool structuralMixedMaterialOnly =
+				structuralMaterialOnly &&
+				!structuralSectorMaterialOnly &&
+				!structuralWallMaterialOnly;
+			const bool structuralGeometryOrDirty =
+				(normalizedReasonMask & structuralReasonMask) != 0;
+			uint32_t structuralTriggerMask = 0;
+			if (structuralReplacementDelta)
+			{
+				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_ReplacementDelta;
+			}
+			if (replacementViewChanged)
+			{
+				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_ViewChanged;
+			}
+			if (structuralStaticAnimatedModeFlip)
+			{
+				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_StaticAnimatedFlip;
+			}
+			if (structuralExcludeStaticFlip)
+			{
+				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_ExcludeStaticFlip;
+			}
+			if (forceTopologyInvalidation)
+			{
+				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_ForceTopology;
+			}
+			if (structuralInvalid)
+			{
+				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_Invalid;
+			}
 			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks++;
 			if (structuralReplacementDelta)
 			{
@@ -19329,6 +19449,26 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				mLastPerfShellTraceStats.runtimeMutationStructuralInvalidChunks++;
 			}
+			if (structuralMaterialOnly)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralMaterialOnlyChunks++;
+			}
+			if (structuralSectorMaterialOnly)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralSectorMaterialOnlyChunks++;
+			}
+			if (structuralWallMaterialOnly)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralWallMaterialOnlyChunks++;
+			}
+			if (structuralMixedMaterialOnly)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralMixedMaterialOnlyChunks++;
+			}
+			if (structuralGeometryOrDirty)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralGeometryOrDirtyChunks++;
+			}
 			const bool builtChunk = [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationRebuildMs);
@@ -19346,6 +19486,20 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				mRuntimeMapLastFrame.heldChunkCount++;
 				mLastPerfShellTraceStats.runtimeMutationHeldChunks++;
 				chunkTraceAction = RuntimeMutationTraceAction::Held;
+				recordStructuralRebuildEntry(
+					mapChunk.chunkIndex,
+					mapChunk.sectorIndex,
+					normalizedReasonMask,
+					structuralTriggerMask,
+					replacement.surfaceCount,
+					replacement.triangleCount,
+					(uint32_t)replacement.materialBridge.materials.size(),
+					chunkTraceAction,
+					structuralMaterialOnly,
+					structuralSectorMaterialOnly,
+					structuralWallMaterialOnly,
+					structuralMixedMaterialOnly,
+					structuralGeometryOrDirty);
 			}
 			else if (!builtChunk)
 			{
@@ -19359,6 +19513,20 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.sceneView = {};
 				mLastPerfShellTraceStats.runtimeMutationInvalidFailedCount++;
 				chunkTraceAction = RuntimeMutationTraceAction::Failed;
+				recordStructuralRebuildEntry(
+					mapChunk.chunkIndex,
+					mapChunk.sectorIndex,
+					normalizedReasonMask,
+					structuralTriggerMask,
+					0,
+					0,
+					0,
+					chunkTraceAction,
+					structuralMaterialOnly,
+					structuralSectorMaterialOnly,
+					structuralWallMaterialOnly,
+					structuralMixedMaterialOnly,
+					structuralGeometryOrDirty);
 				TraceRuntimeMapMutationChunk(mapChunk, replacement);
 				emitChunkTrace();
 				continue;
@@ -19370,6 +19538,20 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				chunkTraceSurfaceCount = replacement.surfaceCount;
 				chunkTraceTriangleCount = replacement.triangleCount;
 				chunkTraceMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
+				recordStructuralRebuildEntry(
+					mapChunk.chunkIndex,
+					mapChunk.sectorIndex,
+					normalizedReasonMask,
+					structuralTriggerMask,
+					replacement.surfaceCount,
+					replacement.triangleCount,
+					(uint32_t)replacement.materialBridge.materials.size(),
+					chunkTraceAction,
+					structuralMaterialOnly,
+					structuralSectorMaterialOnly,
+					structuralWallMaterialOnly,
+					structuralMixedMaterialOnly,
+					structuralGeometryOrDirty);
 			}
 		}
 		else

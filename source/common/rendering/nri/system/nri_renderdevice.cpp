@@ -3261,6 +3261,47 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.hadAccelerationStructure ? 1u : 0u);
 		}
 		Printf(
+			"PERF pt structural rebuild summary NRI: frame=%llu total=%u delta=%u view_changed=%u static_anim_flip=%u excl_static_flip=%u force_topology=%u invalid=%u material_only=%u sector_mat_only=%u wall_mat_only=%u mixed_mat=%u geometry_or_dirty=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeMutationStructuralRebuildChunks,
+			shell.runtimeMutationStructuralReplacementDeltaChunks,
+			shell.runtimeMutationStructuralReplacementViewChangedChunks,
+			shell.runtimeMutationStructuralStaticAnimatedModeFlipChunks,
+			shell.runtimeMutationStructuralExcludeStaticFlipChunks,
+			shell.runtimeMutationStructuralForcedTopologyChunks,
+			shell.runtimeMutationStructuralInvalidChunks,
+			shell.runtimeMutationStructuralMaterialOnlyChunks,
+			shell.runtimeMutationStructuralSectorMaterialOnlyChunks,
+			shell.runtimeMutationStructuralWallMaterialOnlyChunks,
+			shell.runtimeMutationStructuralMixedMaterialOnlyChunks,
+			shell.runtimeMutationStructuralGeometryOrDirtyChunks);
+		for (size_t index = 0; index < NRIRenderer::RuntimeStructuralRebuildTraceCount; ++index)
+		{
+			const auto& entry = shell.runtimeStructuralRebuildEntries[index];
+			if (!entry.valid)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt structural rebuild top NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x triggers=0x%x surfaces=%u tris=%u mats=%u action=%s material_only=%u sector_mat_only=%u wall_mat_only=%u mixed_mat=%u geometry_or_dirty=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned)(index + 1),
+				entry.chunkIndex,
+				entry.sectorIndex,
+				entry.reasonMask,
+				entry.triggerMask,
+				entry.surfaceCount,
+				entry.triangleCount,
+				entry.materialCount,
+				getRuntimeMutationTraceActionName(entry.action),
+				entry.materialOnly ? 1u : 0u,
+				entry.sectorMaterialOnly ? 1u : 0u,
+				entry.wallMaterialOnly ? 1u : 0u,
+				entry.mixedMaterialOnly ? 1u : 0u,
+				entry.geometryOrDirty ? 1u : 0u);
+		}
+		Printf(
 			"PERF pt material-only mismatch summary NRI: frame=%llu mismatches=%u refresh=%u rebuild=%u filtered_wall_only=%u filtered_flat_only=%u filtered_mixed=%u resident_wall_only=%u resident_flat_only=%u resident_mixed=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationMaterialOnlyMismatchCount,

@@ -101,6 +101,7 @@ public:
 	static constexpr size_t RuntimeMaterialOnlyMismatchTraceCount = 8;
 	static constexpr size_t RuntimeResidentBlasRecreateTraceCount = 8;
 	static constexpr size_t RuntimeResidentBlasRefitRejectTraceCount = 8;
+	static constexpr size_t RuntimeStructuralRebuildTraceCount = 8;
 
 	enum class RuntimeMutationTraceAction : uint8_t
 	{
@@ -222,6 +223,25 @@ public:
 		bool hadAccelerationStructure = false;
 	};
 
+	struct RuntimeStructuralRebuildTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t reasonMask = 0;
+		uint32_t triggerMask = 0;
+		uint32_t surfaceCount = 0;
+		uint32_t triangleCount = 0;
+		uint32_t materialCount = 0;
+		RuntimeMutationTraceAction action = RuntimeMutationTraceAction::None;
+		bool materialOnly = false;
+		bool sectorMaterialOnly = false;
+		bool wallMaterialOnly = false;
+		bool mixedMaterialOnly = false;
+		bool geometryOrDirty = false;
+	};
+
 	struct PerfShellTraceStats
 	{
 		double totalMs = 0.0;
@@ -298,6 +318,11 @@ public:
 		uint32_t runtimeMutationStructuralExcludeStaticFlipChunks = 0;
 		uint32_t runtimeMutationStructuralForcedTopologyChunks = 0;
 		uint32_t runtimeMutationStructuralInvalidChunks = 0;
+		uint32_t runtimeMutationStructuralMaterialOnlyChunks = 0;
+		uint32_t runtimeMutationStructuralSectorMaterialOnlyChunks = 0;
+		uint32_t runtimeMutationStructuralWallMaterialOnlyChunks = 0;
+		uint32_t runtimeMutationStructuralMixedMaterialOnlyChunks = 0;
+		uint32_t runtimeMutationStructuralGeometryOrDirtyChunks = 0;
 		uint32_t runtimeMutationHardwareCanvasChunkCount = 0;
 		uint32_t runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
 		uint32_t runtimeMutationMaterialRefreshReasonMaskOr = 0;
@@ -449,6 +474,7 @@ public:
 		std::array<RuntimeMaterialOnlyMismatchTraceEntry, RuntimeMaterialOnlyMismatchTraceCount> runtimeMaterialOnlyMismatchEntries = {};
 		std::array<RuntimeResidentBlasRecreateTraceEntry, RuntimeResidentBlasRecreateTraceCount> runtimeResidentBlasRecreateEntries = {};
 		std::array<RuntimeResidentBlasRefitRejectTraceEntry, RuntimeResidentBlasRefitRejectTraceCount> runtimeResidentBlasRefitRejectEntries = {};
+		std::array<RuntimeStructuralRebuildTraceEntry, RuntimeStructuralRebuildTraceCount> runtimeStructuralRebuildEntries = {};
 	};
 
 	struct PerfResourceTraceStats
