@@ -2922,6 +2922,52 @@ namespace
 		return score;
 	}
 
+	enum RuntimeResidentBlasRefitRejectBits : uint32_t
+	{
+		RuntimeResidentBlasRefitReject_NoPreviousAs = 1u << 0,
+		RuntimeResidentBlasRefitReject_IndexCountMismatch = 1u << 1,
+		RuntimeResidentBlasRefitReject_PrimitiveCountMismatch = 1u << 2,
+		RuntimeResidentBlasRefitReject_ZeroIndexCount = 1u << 3,
+		RuntimeResidentBlasRefitReject_ZeroPrimitiveCount = 1u << 4,
+	};
+
+	uint32_t ScoreRuntimeResidentBlasRefitRejectTraceEntry(const NRIRenderer::RuntimeResidentBlasRefitRejectTraceEntry& entry)
+	{
+		const uint32_t indexDelta =
+			entry.previousIndexCount > entry.liveIndexCount ?
+			entry.previousIndexCount - entry.liveIndexCount :
+			entry.liveIndexCount - entry.previousIndexCount;
+		const uint32_t primitiveDelta =
+			entry.previousPrimitiveCount > entry.livePrimitiveCount ?
+			entry.previousPrimitiveCount - entry.livePrimitiveCount :
+			entry.livePrimitiveCount - entry.previousPrimitiveCount;
+		uint32_t score = indexDelta * 16u;
+		score += primitiveDelta * 16u;
+		score += entry.livePrimitiveCount * 4u;
+		score += entry.liveIndexCount * 2u;
+		if ((entry.rejectMask & RuntimeResidentBlasRefitReject_IndexCountMismatch) != 0)
+		{
+			score += 1u << 20;
+		}
+		if ((entry.rejectMask & RuntimeResidentBlasRefitReject_PrimitiveCountMismatch) != 0)
+		{
+			score += 1u << 19;
+		}
+		if ((entry.rejectMask & RuntimeResidentBlasRefitReject_NoPreviousAs) != 0)
+		{
+			score += 1u << 18;
+		}
+		if ((entry.rejectMask & RuntimeResidentBlasRefitReject_ZeroIndexCount) != 0)
+		{
+			score += 1u << 17;
+		}
+		if ((entry.rejectMask & RuntimeResidentBlasRefitReject_ZeroPrimitiveCount) != 0)
+		{
+			score += 1u << 16;
+		}
+		return score;
+	}
+
 	template <typename Entry, size_t N, typename ScoreFn>
 	void InsertRankedTraceEntry(std::array<Entry, N>& entries, Entry entry, ScoreFn scoreFn)
 	{
@@ -18101,6 +18147,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasReuseCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasUpdateCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitOnlyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitProbeCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectNoPreviousAsCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectIndexCountMismatchCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectPrimitiveCountMismatchCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectZeroIndexCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectZeroPrimitiveCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateNoPreviousAsCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateRecoveredEmptyCount = 0;
@@ -18160,6 +18212,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeAnimatedChurnEntries = {};
 	mLastPerfShellTraceStats.runtimeMaterialOnlyMismatchEntries = {};
 	mLastPerfShellTraceStats.runtimeResidentBlasRecreateEntries = {};
+	mLastPerfShellTraceStats.runtimeResidentBlasRefitRejectEntries = {};
 	struct RuntimeAnimatedFrameTraceStats
 	{
 		bool touched = false;
@@ -21400,15 +21453,61 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				hasResidentChunk &&
 				keptGeometrySlices &&
 				previousGeometryTopologySignature == residentGeometryTopologySignature;
-			preserveResidentBlasRefitOnly =
+			const bool probeResidentBlasRefitOnly =
 				!preserveResidentIndexSlice &&
 				!materialOnlyReplacement &&
-				hasResidentChunk &&
-				mStaticMapScene.chunks[chunkListIndex].accelerationStructure.accelerationStructure != nullptr &&
-				entry.indexCount == effectiveResidentIndexCount &&
-				entry.primitiveCount == effectiveResidentPrimitiveCount &&
-				entry.indexCount != 0 &&
-				entry.primitiveCount != 0;
+				hasResidentChunk;
+			if (probeResidentBlasRefitOnly)
+			{
+				uint32_t rejectMask = 0;
+				const bool hadAccelerationStructure =
+					mStaticMapScene.chunks[chunkListIndex].accelerationStructure.accelerationStructure != nullptr;
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitProbeCount++;
+				if (!hadAccelerationStructure)
+				{
+					rejectMask |= RuntimeResidentBlasRefitReject_NoPreviousAs;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectNoPreviousAsCount++;
+				}
+				if (entry.indexCount != effectiveResidentIndexCount)
+				{
+					rejectMask |= RuntimeResidentBlasRefitReject_IndexCountMismatch;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectIndexCountMismatchCount++;
+				}
+				if (entry.primitiveCount != effectiveResidentPrimitiveCount)
+				{
+					rejectMask |= RuntimeResidentBlasRefitReject_PrimitiveCountMismatch;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectPrimitiveCountMismatchCount++;
+				}
+				if (entry.indexCount == 0 || effectiveResidentIndexCount == 0)
+				{
+					rejectMask |= RuntimeResidentBlasRefitReject_ZeroIndexCount;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectZeroIndexCount++;
+				}
+				if (entry.primitiveCount == 0 || effectiveResidentPrimitiveCount == 0)
+				{
+					rejectMask |= RuntimeResidentBlasRefitReject_ZeroPrimitiveCount;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitRejectZeroPrimitiveCount++;
+				}
+				preserveResidentBlasRefitOnly = rejectMask == 0;
+				if (rejectMask != 0 && ShouldTracePtPerf())
+				{
+					RuntimeResidentBlasRefitRejectTraceEntry traceEntry = {};
+					traceEntry.valid = true;
+					traceEntry.chunkIndex = mapChunk.chunkIndex;
+					traceEntry.sectorIndex = mapChunk.sectorIndex;
+					traceEntry.reasonMask = appliedReasonMask;
+					traceEntry.rejectMask = rejectMask;
+					traceEntry.previousIndexCount = entry.indexCount;
+					traceEntry.liveIndexCount = effectiveResidentIndexCount;
+					traceEntry.previousPrimitiveCount = entry.primitiveCount;
+					traceEntry.livePrimitiveCount = effectiveResidentPrimitiveCount;
+					traceEntry.hadAccelerationStructure = hadAccelerationStructure;
+					InsertRankedTraceEntry(
+						mLastPerfShellTraceStats.runtimeResidentBlasRefitRejectEntries,
+						traceEntry,
+						ScoreRuntimeResidentBlasRefitRejectTraceEntry);
+				}
+			}
 			if (preserveResidentIndexSlice)
 			{
 				mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount++;

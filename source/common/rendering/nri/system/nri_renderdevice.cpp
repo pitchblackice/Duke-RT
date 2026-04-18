@@ -3203,6 +3203,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationResidentApplyBlasRecreateSliceMovedCount,
 			shell.runtimeMutationResidentApplyBlasRecreateTopologyChangedCount,
 			shell.runtimeMutationResidentApplyBlasRecreateForceTopologyCount);
+		Printf(
+			"PERF pt resident blas refit summary NRI: frame=%llu probes=%u hits=%u reject_no_prev_as=%u reject_index_count=%u reject_primitive_count=%u reject_zero_index=%u reject_zero_primitive=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeMutationResidentApplyBlasRefitProbeCount,
+			shell.runtimeMutationResidentApplyBlasRefitOnlyCount,
+			shell.runtimeMutationResidentApplyBlasRefitRejectNoPreviousAsCount,
+			shell.runtimeMutationResidentApplyBlasRefitRejectIndexCountMismatchCount,
+			shell.runtimeMutationResidentApplyBlasRefitRejectPrimitiveCountMismatchCount,
+			shell.runtimeMutationResidentApplyBlasRefitRejectZeroIndexCount,
+			shell.runtimeMutationResidentApplyBlasRefitRejectZeroPrimitiveCount);
 		for (size_t index = 0; index < NRIRenderer::RuntimeResidentBlasRecreateTraceCount; ++index)
 		{
 			const auto& entry = shell.runtimeResidentBlasRecreateEntries[index];
@@ -3226,6 +3236,28 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.recoveredEmpty ? 1u : 0u,
 				entry.keptGeometrySlice ? 1u : 0u,
 				entry.topologyChanged ? 1u : 0u,
+				entry.hadAccelerationStructure ? 1u : 0u);
+		}
+		for (size_t index = 0; index < NRIRenderer::RuntimeResidentBlasRefitRejectTraceCount; ++index)
+		{
+			const auto& entry = shell.runtimeResidentBlasRefitRejectEntries[index];
+			if (!entry.valid)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt resident blas refit top NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x reject=0x%x prev_indices=%u live_indices=%u prev_prims=%u live_prims=%u had_as=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned)(index + 1),
+				entry.chunkIndex,
+				entry.sectorIndex,
+				entry.reasonMask,
+				entry.rejectMask,
+				entry.previousIndexCount,
+				entry.liveIndexCount,
+				entry.previousPrimitiveCount,
+				entry.livePrimitiveCount,
 				entry.hadAccelerationStructure ? 1u : 0u);
 		}
 		Printf(

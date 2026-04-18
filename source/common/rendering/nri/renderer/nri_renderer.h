@@ -100,6 +100,7 @@ public:
 	static constexpr size_t RuntimeAnimatedChurnTraceCount = 4;
 	static constexpr size_t RuntimeMaterialOnlyMismatchTraceCount = 8;
 	static constexpr size_t RuntimeResidentBlasRecreateTraceCount = 8;
+	static constexpr size_t RuntimeResidentBlasRefitRejectTraceCount = 8;
 
 	enum class RuntimeMutationTraceAction : uint8_t
 	{
@@ -203,6 +204,21 @@ public:
 		bool recoveredEmpty = false;
 		bool keptGeometrySlice = false;
 		bool topologyChanged = false;
+		bool hadAccelerationStructure = false;
+	};
+
+	struct RuntimeResidentBlasRefitRejectTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t reasonMask = 0;
+		uint32_t rejectMask = 0;
+		uint32_t previousIndexCount = 0;
+		uint32_t liveIndexCount = 0;
+		uint32_t previousPrimitiveCount = 0;
+		uint32_t livePrimitiveCount = 0;
 		bool hadAccelerationStructure = false;
 	};
 
@@ -315,6 +331,12 @@ public:
 		uint32_t runtimeMutationResidentApplyBlasReuseCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasUpdateCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRefitOnlyCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRefitProbeCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRefitRejectNoPreviousAsCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRefitRejectIndexCountMismatchCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRefitRejectPrimitiveCountMismatchCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRefitRejectZeroIndexCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRefitRejectZeroPrimitiveCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRecreateCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRecreateNoPreviousAsCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRecreateRecoveredEmptyCount = 0;
@@ -426,6 +448,7 @@ public:
 		std::array<RuntimeAnimatedChurnTraceEntry, RuntimeAnimatedChurnTraceCount> runtimeAnimatedChurnEntries = {};
 		std::array<RuntimeMaterialOnlyMismatchTraceEntry, RuntimeMaterialOnlyMismatchTraceCount> runtimeMaterialOnlyMismatchEntries = {};
 		std::array<RuntimeResidentBlasRecreateTraceEntry, RuntimeResidentBlasRecreateTraceCount> runtimeResidentBlasRecreateEntries = {};
+		std::array<RuntimeResidentBlasRefitRejectTraceEntry, RuntimeResidentBlasRefitRejectTraceCount> runtimeResidentBlasRefitRejectEntries = {};
 	};
 
 	struct PerfResourceTraceStats
