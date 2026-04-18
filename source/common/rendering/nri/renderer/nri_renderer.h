@@ -70,6 +70,8 @@ public:
 		StaticMapAnimChunk,
 		StaticMapChunk,
 		RuntimeMutationChunk,
+		ResidentRuntimeMutationChunk,
+		ResidentRuntimeMutationChunkRecover,
 		RuntimeSpaceLinkChunk,
 		Unknown,
 		Count,
@@ -187,6 +189,12 @@ public:
 		double runtimeMutationRebuildMs = 0.0;
 		double runtimeMutationStructuralRebuildMs = 0.0;
 		double runtimeMutationMaterialRefreshMs = 0.0;
+		double runtimeMutationResidentApplyMs = 0.0;
+		double runtimeMutationResidentApplyLiveBuildMs = 0.0;
+		double runtimeMutationResidentApplyGeometryBuildMs = 0.0;
+		double runtimeMutationResidentApplyMaterialBuildMs = 0.0;
+		double runtimeMutationResidentApplyBaselineCaptureMs = 0.0;
+		double runtimeMutationResidentApplyAtlasMs = 0.0;
 		double runtimeMutationAppendMs = 0.0;
 		double sceneLightStaticAppendMs = 0.0;
 		double sceneLightRuntimeMutationAppendMs = 0.0;
@@ -250,6 +258,22 @@ public:
 		uint32_t runtimeMutationResidentNoopBlockPrimitiveCountMismatch = 0;
 		uint32_t runtimeMutationValidMaterialCount = 0;
 		uint32_t runtimeMutationValidStructuralCount = 0;
+		uint32_t runtimeMutationResidentApplyCount = 0;
+		uint32_t runtimeMutationResidentApplyMaterialOnlyCount = 0;
+		uint32_t runtimeMutationResidentApplyStructuralCount = 0;
+		uint32_t runtimeMutationResidentApplyFastMaterialOnlyCount = 0;
+		uint32_t runtimeMutationResidentApplySlowMaterialOnlyCount = 0;
+		uint32_t runtimeMutationResidentApplyMaterialOnlyExclusiveCount = 0;
+		uint32_t runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount = 0;
+		uint32_t runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount = 0;
+		uint32_t runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
+		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
+		uint32_t runtimeMutationResidentApplyKeepGeometrySliceCount = 0;
+		uint32_t runtimeMutationResidentApplyKeepMaterialSliceCount = 0;
+		uint32_t runtimeMutationResidentApplyEmptyRemovalCount = 0;
+		uint32_t runtimeMutationResidentApplyRecoverAttemptCount = 0;
+		uint32_t runtimeMutationResidentApplyRecoverSuccessCount = 0;
+		uint32_t runtimeMutationResidentApplyAtlasGrowCount = 0;
 		uint32_t runtimeAnimatedSuppressedActiveCount = 0;
 		uint32_t runtimeAnimatedSuppressionEmitCount = 0;
 		uint32_t runtimeAnimatedUniqueTouchedCount = 0;

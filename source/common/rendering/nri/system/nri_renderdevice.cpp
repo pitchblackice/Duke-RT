@@ -3158,6 +3158,31 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationResidentNoopBlockPrimitiveCountMismatch,
 			shell.runtimeMutationValidStructuralCount,
 			shell.runtimeMutationValidMaterialCount);
+		Printf(
+			"PERF pt resident apply detail NRI: frame=%llu total_ms=%.3f live_build_ms=%.3f geometry_ms=%.3f material_ms=%.3f baseline_ms=%.3f atlas_ms=%.3f calls=%u material_only=%u structural=%u fast_material_only=%u slow_material_only=%u material_only_exclusive=%u block_no_resident=%u block_replacement_invalid=%u block_material_count=%u preserve_geo=%u keep_geo_slice=%u keep_mat_slice=%u empty_remove=%u recover_attempts=%u recover_success=%u atlas_grows=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeMutationResidentApplyMs,
+			shell.runtimeMutationResidentApplyLiveBuildMs,
+			shell.runtimeMutationResidentApplyGeometryBuildMs,
+			shell.runtimeMutationResidentApplyMaterialBuildMs,
+			shell.runtimeMutationResidentApplyBaselineCaptureMs,
+			shell.runtimeMutationResidentApplyAtlasMs,
+			shell.runtimeMutationResidentApplyCount,
+			shell.runtimeMutationResidentApplyMaterialOnlyCount,
+			shell.runtimeMutationResidentApplyStructuralCount,
+			shell.runtimeMutationResidentApplyFastMaterialOnlyCount,
+			shell.runtimeMutationResidentApplySlowMaterialOnlyCount,
+			shell.runtimeMutationResidentApplyMaterialOnlyExclusiveCount,
+			shell.runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount,
+			shell.runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount,
+			shell.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount,
+			shell.runtimeMutationResidentApplyPreserveGeometryCount,
+			shell.runtimeMutationResidentApplyKeepGeometrySliceCount,
+			shell.runtimeMutationResidentApplyKeepMaterialSliceCount,
+			shell.runtimeMutationResidentApplyEmptyRemovalCount,
+			shell.runtimeMutationResidentApplyRecoverAttemptCount,
+			shell.runtimeMutationResidentApplyRecoverSuccessCount,
+			shell.runtimeMutationResidentApplyAtlasGrowCount);
 		for (size_t index = 0; index < NRIRenderer::RuntimeMutationTopTraceCount; ++index)
 		{
 			const auto& entry = shell.runtimeMutationTopEntries[index];
