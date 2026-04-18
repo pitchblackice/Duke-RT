@@ -20782,6 +20782,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const uint32_t appliedReasonMask = replacement.reasonMask;
 	const bool appliedStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
 	const bool appliedAnimationOnlyRefreshed = replacement.animationOnlyRefreshed;
+	const uint32_t materialReasonMask =
+		nri_scene::PTMapChunkMutationReason_SectorMaterial |
+		nri_scene::PTMapChunkMutationReason_WallMaterial;
 	const bool hasResidentGeometry =
 		hasResidentChunk &&
 		mStaticMapScene.chunks[resolvedChunkListIndex].active &&
@@ -21027,6 +21030,10 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		StaticMapChunkAtlas::ChunkEntry nextAtlasChunk = {};
 		bool keptGeometrySlices = false;
 		bool keptMaterialSlice = false;
+		const uint64_t previousAnimatedMaterialSignature =
+			hasResidentChunk ?
+			mStaticMapScene.chunks[chunkListIndex].animatedMaterialSignature :
+			0;
 		const bool previousAnimatedRefreshSuppressed =
 			hasResidentChunk &&
 			mStaticMapScene.chunks[chunkListIndex].animatedRefreshSuppressed;
@@ -21132,6 +21139,14 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		{
 			mStaticMapScene.lightChunkViews.resize(chunkListIndex + 1);
 		}
+		const bool preserveResidentMaterialSlice =
+			!materialOnlyReplacement &&
+			(appliedReasonMask & materialReasonMask) == 0 &&
+			!appliedStaticAnimatedReplacement &&
+			!appliedAnimationOnlyRefreshed &&
+			hasResidentChunk &&
+			keptMaterialSlice &&
+			previousAnimatedMaterialSignature == ComputeAnimatedMaterialSignature(residentSceneView);
 
 		mStaticMapChunkAtlas = std::move(nextAtlasState);
 		mStaticMapChunkAtlas.chunks[chunkListIndex] = nextAtlasChunk;
@@ -21203,7 +21218,10 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mutableChunk.materialOffset = nextAtlasChunk.materialOffset;
 		mutableChunk.materialCount = nextAtlasChunk.materialCount;
 		mutableChunk.active = true;
-		mutableChunk.materialBridge = residentMaterials;
+		if (!preserveResidentMaterialSlice)
+		{
+			mutableChunk.materialBridge = residentMaterials;
+		}
 		mutableChunk.exactGeometrySignature = ComputeExactGeometrySignature(residentSceneView);
 		mutableChunk.animatedMaterialSignature = ComputeAnimatedMaterialSignature(residentSceneView);
 		mutableChunk.animatedGeometrySignature = ComputeAnimatedGeometrySignature(residentSceneView);
@@ -21215,7 +21233,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			 mutableChunk.animatedGeometrySignature == previousAnimatedGeometrySignature);
 		mStaticMapScene.lightChunkViews[chunkListIndex] = residentSceneView;
 		outStaticSceneChunkListIndex = chunkListIndex;
-		outMaterialDirty = true;
+		outMaterialDirty = !preserveResidentMaterialSlice;
 		outGeometryDirty =
 			((!preserveResidentGeometryForMaterialOnlyUpdate && !keptGeometrySlices) ||
 			(appliedReasonMask & (
