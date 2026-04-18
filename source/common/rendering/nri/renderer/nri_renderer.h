@@ -386,6 +386,7 @@ public:
 		uint32_t runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
+		uint32_t runtimeMutationResidentApplyPreservePrimitiveCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasReuseCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasUpdateCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRefitOnlyCount = 0;
@@ -941,6 +942,7 @@ private:
 			uint32_t materialOffset = 0;
 			uint32_t materialCount = 0;
 			uint64_t geometryTopologySignature = 0;
+			uint64_t primitiveLayoutSignature = 0;
 			uint64_t exactGeometrySignature = 0;
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t animatedGeometrySignature = 0;
