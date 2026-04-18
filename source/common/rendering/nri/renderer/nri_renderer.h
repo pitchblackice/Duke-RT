@@ -293,6 +293,9 @@ public:
 		uint32_t runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasReuseCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasUpdateCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRecreateCount = 0;
 		uint32_t runtimeMutationResidentApplyKeepGeometrySliceCount = 0;
 		uint32_t runtimeMutationResidentApplyKeepMaterialSliceCount = 0;
 		uint32_t runtimeMutationResidentApplyEmptyRemovalCount = 0;
@@ -833,6 +836,7 @@ private:
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t animatedGeometrySignature = 0;
 			bool active = true;
+			bool blasUpdateEligible = false;
 			bool hasAnimatedTextureCandidates = false;
 			bool animatedRefreshSuppressed = false;
 			nri_scene::MaterialBridgeData materialBridge;
