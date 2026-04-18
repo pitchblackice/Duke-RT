@@ -176,6 +176,7 @@ public:
 		uint32_t score = 0;
 		uint32_t chunkIndex = UINT32_MAX;
 		int32_t sectorIndex = -1;
+		bool refreshPath = false;
 		uint32_t reasonMask = 0;
 		uint32_t filteredSurfaceCount = 0;
 		uint32_t filteredMaterialCount = 0;
@@ -292,6 +293,8 @@ public:
 		uint32_t runtimeMutationResidentApplyRecoverSuccessCount = 0;
 		uint32_t runtimeMutationResidentApplyAtlasGrowCount = 0;
 		uint32_t runtimeMutationMaterialOnlyMismatchCount = 0;
+		uint32_t runtimeMutationMaterialOnlyMismatchRefreshCount = 0;
+		uint32_t runtimeMutationMaterialOnlyMismatchRebuildCount = 0;
 		uint32_t runtimeMutationMaterialOnlyMismatchFilteredWallOnlyCount = 0;
 		uint32_t runtimeMutationMaterialOnlyMismatchFilteredFlatOnlyCount = 0;
 		uint32_t runtimeMutationMaterialOnlyMismatchFilteredMixedCount = 0;

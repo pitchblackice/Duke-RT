@@ -17895,6 +17895,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyRecoverSuccessCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasGrowCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchRefreshCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchRebuildCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredWallOnlyCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredFlatOnlyCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredMixedCount = 0;
@@ -18117,6 +18119,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	const auto recordMaterialOnlyMismatchEntry =
 		[this](uint32_t chunkIndex,
 			int32_t sectorIndex,
+			bool refreshPath,
 			uint32_t reasonMask,
 			uint32_t filteredSurfaceCount,
 			uint32_t filteredMaterialCount,
@@ -18135,6 +18138,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		entry.valid = true;
 		entry.chunkIndex = chunkIndex;
 		entry.sectorIndex = sectorIndex;
+		entry.refreshPath = refreshPath;
 		entry.reasonMask = reasonMask;
 		entry.filteredSurfaceCount = filteredSurfaceCount;
 		entry.filteredMaterialCount = filteredMaterialCount;
@@ -18496,6 +18500,97 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			havePreparedLiveChunkView = true;
 			return true;
 		};
+		const auto recordPreparedLiveChunkMaterialOnlyMismatch =
+			[&](const nri_scene::SceneView& preparedLiveChunkView,
+				const nri_scene::MaterialBridgeData& preparedLiveMaterials,
+				bool refreshPath)
+		{
+			const bool exclusiveMaterialOnlyReplacement =
+				materialOnlyReplacement &&
+				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
+			if (exclusiveMaterialOnlyReplacement ||
+				residentEntry == nullptr ||
+				!residentEntry->valid)
+			{
+				return;
+			}
+
+			const uint32_t filteredMaterialCount = (uint32_t)preparedLiveMaterials.materials.size();
+			const uint32_t residentMaterialCount = residentEntry->materialCount;
+			if (filteredMaterialCount == residentMaterialCount)
+			{
+				return;
+			}
+
+			uint32_t residentWallCount = 0;
+			uint32_t residentFlatCount = 0;
+			uint32_t residentChunkListIndex = residentEntry->staticSceneChunkListIndex;
+			const bool residentChunkListIndexValid =
+				residentChunkListIndex < mStaticMapScene.chunks.size() &&
+				mStaticMapScene.chunks[residentChunkListIndex].chunkIndex == mapChunk.chunkIndex;
+			if (!residentChunkListIndexValid)
+			{
+				residentChunkListIndex = FindPreferredStaticSceneChunkListIndex(mapChunk.chunkIndex);
+			}
+			if (residentChunkListIndex < mStaticMapScene.chunks.size() &&
+				residentChunkListIndex < mStaticMapScene.lightChunkViews.size() &&
+				mStaticMapScene.chunks[residentChunkListIndex].active)
+			{
+				const auto& residentChunkView = mStaticMapScene.lightChunkViews[residentChunkListIndex];
+				residentWallCount = (uint32_t)residentChunkView.opaqueWalls.size();
+				residentFlatCount = (uint32_t)residentChunkView.opaqueFlats.size();
+			}
+
+			const uint32_t filteredWallCount = (uint32_t)preparedLiveChunkView.opaqueWalls.size();
+			const uint32_t filteredFlatCount = (uint32_t)preparedLiveChunkView.opaqueFlats.size();
+			mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchCount++;
+			if (refreshPath)
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchRefreshCount++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchRebuildCount++;
+			}
+			if (filteredWallCount != 0 && filteredFlatCount == 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredWallOnlyCount++;
+			}
+			else if (filteredFlatCount != 0 && filteredWallCount == 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredFlatOnlyCount++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredMixedCount++;
+			}
+
+			if (residentWallCount != 0 && residentFlatCount == 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentWallOnlyCount++;
+			}
+			else if (residentFlatCount != 0 && residentWallCount == 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentFlatOnlyCount++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentMixedCount++;
+			}
+
+			recordMaterialOnlyMismatchEntry(
+				mapChunk.chunkIndex,
+				mapChunk.sectorIndex,
+				refreshPath,
+				normalizedReasonMask,
+				CountSceneViewSurfaces(preparedLiveChunkView),
+				filteredMaterialCount,
+				residentMaterialCount,
+				filteredWallCount,
+				filteredFlatCount,
+				residentWallCount,
+				residentFlatCount);
+		};
 		static constexpr size_t kRuntimeMutationMaterialStateCacheCapacity = 8;
 		const auto tryGetCachedRuntimeMutationMaterials =
 			[&replacement](uint64_t animatedGeometrySignature,
@@ -18696,75 +18791,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					liveMaterials);
 				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
 			}
-			if (!exclusiveMaterialOnlyReplacement &&
-				residentEntry != nullptr &&
-				residentEntry->valid)
-			{
-				const uint32_t filteredMaterialCount = (uint32_t)liveMaterials.materials.size();
-				const uint32_t residentMaterialCount = residentEntry->materialCount;
-				if (filteredMaterialCount != residentMaterialCount)
-				{
-					uint32_t residentWallCount = 0;
-					uint32_t residentFlatCount = 0;
-					uint32_t residentChunkListIndex = residentEntry->staticSceneChunkListIndex;
-					const bool residentChunkListIndexValid =
-						residentChunkListIndex < mStaticMapScene.chunks.size() &&
-						mStaticMapScene.chunks[residentChunkListIndex].chunkIndex == mapChunk.chunkIndex;
-					if (!residentChunkListIndexValid)
-					{
-						residentChunkListIndex = FindPreferredStaticSceneChunkListIndex(mapChunk.chunkIndex);
-					}
-					if (residentChunkListIndex < mStaticMapScene.chunks.size() &&
-						residentChunkListIndex < mStaticMapScene.lightChunkViews.size() &&
-						mStaticMapScene.chunks[residentChunkListIndex].active)
-					{
-						const auto& residentChunkView = mStaticMapScene.lightChunkViews[residentChunkListIndex];
-						residentWallCount = (uint32_t)residentChunkView.opaqueWalls.size();
-						residentFlatCount = (uint32_t)residentChunkView.opaqueFlats.size();
-					}
-
-					const uint32_t filteredWallCount = (uint32_t)liveChunkView.opaqueWalls.size();
-					const uint32_t filteredFlatCount = (uint32_t)liveChunkView.opaqueFlats.size();
-					mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchCount++;
-					if (filteredWallCount != 0 && filteredFlatCount == 0)
-					{
-						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredWallOnlyCount++;
-					}
-					else if (filteredFlatCount != 0 && filteredWallCount == 0)
-					{
-						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredFlatOnlyCount++;
-					}
-					else
-					{
-						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredMixedCount++;
-					}
-
-					if (residentWallCount != 0 && residentFlatCount == 0)
-					{
-						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentWallOnlyCount++;
-					}
-					else if (residentFlatCount != 0 && residentWallCount == 0)
-					{
-						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentFlatOnlyCount++;
-					}
-					else
-					{
-						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentMixedCount++;
-					}
-
-					recordMaterialOnlyMismatchEntry(
-						mapChunk.chunkIndex,
-						mapChunk.sectorIndex,
-						normalizedReasonMask,
-						liveSurfaceCount,
-						filteredMaterialCount,
-						residentMaterialCount,
-						filteredWallCount,
-						filteredFlatCount,
-						residentWallCount,
-						residentFlatCount);
-				}
-			}
+			recordPreparedLiveChunkMaterialOnlyMismatch(liveChunkView, liveMaterials, false);
 			nri_scene::PTMapChunkMutationBaseline liveBaseline;
 			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
 			{
@@ -18833,6 +18860,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					liveMaterials);
 				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
 			}
+			recordPreparedLiveChunkMaterialOnlyMismatch(liveChunkView, liveMaterials, true);
 			nri_scene::PTMapChunkMutationBaseline liveBaseline;
 			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
 			{
