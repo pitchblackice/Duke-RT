@@ -1754,6 +1754,19 @@ public:
 		return reasonMask == nri_scene::PTMapChunkMutationReason_SectorMaterial;
 	}
 
+	static bool SceneViewHasSectorDrivenWallBands(const nri_scene::SceneView& sceneView)
+	{
+		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
+		{
+			if (surface.provenance.sourceType == nri_scene::SurfaceSourceType::MapWallBand)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	static uint64_t HashLightOverlayText(uint64_t hash, const char* text)
 	{
 		if (text == nullptr)
@@ -18669,6 +18682,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			const nri_scene::SceneView* residentChunkView = nullptr;
 			if (!tryResolveResidentChunkState(residentChunkListIndex, residentChunkCache, residentChunkView) ||
 				residentChunkView == nullptr)
+			{
+				return nullptr;
+			}
+			// Pure sector-material chunks can still animate sector-driven wall bands.
+			// Replacing the live wall set with resident walls hides those updates and
+			// can make the chunk look synchronized after a single frame.
+			if (SceneViewHasSectorDrivenWallBands(*residentChunkView))
 			{
 				return nullptr;
 			}
