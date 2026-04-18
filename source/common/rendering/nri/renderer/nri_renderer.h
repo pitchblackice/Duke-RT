@@ -102,6 +102,7 @@ public:
 	static constexpr size_t RuntimeResidentBlasRecreateTraceCount = 8;
 	static constexpr size_t RuntimeResidentBlasRefitRejectTraceCount = 8;
 	static constexpr size_t RuntimeStructuralRebuildTraceCount = 8;
+	static constexpr size_t RuntimeGeometryDirtyTraceCount = 8;
 
 	enum class RuntimeMutationTraceAction : uint8_t
 	{
@@ -242,6 +243,28 @@ public:
 		bool geometryOrDirty = false;
 	};
 
+	struct RuntimeGeometryDirtyTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t reasonMask = 0;
+		uint32_t familyMask = 0;
+		uint32_t previousWallCount = 0;
+		uint32_t liveWallCount = 0;
+		uint32_t previousFlatCount = 0;
+		uint32_t liveFlatCount = 0;
+		uint32_t previousTriangleCount = 0;
+		uint32_t liveTriangleCount = 0;
+		uint32_t previousMaterialCount = 0;
+		uint32_t liveMaterialCount = 0;
+		bool forceTopology = false;
+		bool countChanged = false;
+		bool wallsChanged = false;
+		bool flatsChanged = false;
+	};
+
 	struct PerfShellTraceStats
 	{
 		double totalMs = 0.0;
@@ -323,6 +346,16 @@ public:
 		uint32_t runtimeMutationStructuralWallMaterialOnlyChunks = 0;
 		uint32_t runtimeMutationStructuralMixedMaterialOnlyChunks = 0;
 		uint32_t runtimeMutationStructuralGeometryOrDirtyChunks = 0;
+		uint32_t runtimeMutationGeometryDirtySectorGeometryOnlyChunks = 0;
+		uint32_t runtimeMutationGeometryDirtyWallGeometryOnlyChunks = 0;
+		uint32_t runtimeMutationGeometryDirtySectorWallGeometryChunks = 0;
+		uint32_t runtimeMutationGeometryDirtyDirtyOnlyChunks = 0;
+		uint32_t runtimeMutationGeometryDirtyGeometryDirtyMixedChunks = 0;
+		uint32_t runtimeMutationGeometryDirtyForceTopologyOnlyChunks = 0;
+		uint32_t runtimeMutationGeometryDirtyRealCountChangeChunks = 0;
+		uint32_t runtimeMutationGeometryDirtyWallsOnlyChangedChunks = 0;
+		uint32_t runtimeMutationGeometryDirtyFlatsOnlyChangedChunks = 0;
+		uint32_t runtimeMutationGeometryDirtyWallsAndFlatsChangedChunks = 0;
 		uint32_t runtimeMutationHardwareCanvasChunkCount = 0;
 		uint32_t runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
 		uint32_t runtimeMutationMaterialRefreshReasonMaskOr = 0;
@@ -475,6 +508,7 @@ public:
 		std::array<RuntimeResidentBlasRecreateTraceEntry, RuntimeResidentBlasRecreateTraceCount> runtimeResidentBlasRecreateEntries = {};
 		std::array<RuntimeResidentBlasRefitRejectTraceEntry, RuntimeResidentBlasRefitRejectTraceCount> runtimeResidentBlasRefitRejectEntries = {};
 		std::array<RuntimeStructuralRebuildTraceEntry, RuntimeStructuralRebuildTraceCount> runtimeStructuralRebuildEntries = {};
+		std::array<RuntimeGeometryDirtyTraceEntry, RuntimeGeometryDirtyTraceCount> runtimeGeometryDirtyEntries = {};
 	};
 
 	struct PerfResourceTraceStats

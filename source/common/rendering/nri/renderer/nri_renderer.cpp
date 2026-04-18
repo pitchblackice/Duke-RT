@@ -3006,6 +3006,52 @@ namespace
 		return score;
 	}
 
+	enum RuntimeGeometryDirtyFamilyBits : uint32_t
+	{
+		RuntimeGeometryDirtyFamily_SectorGeometryOnly = 1u << 0,
+		RuntimeGeometryDirtyFamily_WallGeometryOnly = 1u << 1,
+		RuntimeGeometryDirtyFamily_SectorWallGeometry = 1u << 2,
+		RuntimeGeometryDirtyFamily_DirtyOnly = 1u << 3,
+		RuntimeGeometryDirtyFamily_GeometryDirtyMixed = 1u << 4,
+	};
+
+	uint32_t ScoreRuntimeGeometryDirtyTraceEntry(const NRIRenderer::RuntimeGeometryDirtyTraceEntry& entry)
+	{
+		const uint32_t triangleDelta =
+			entry.previousTriangleCount > entry.liveTriangleCount ?
+			entry.previousTriangleCount - entry.liveTriangleCount :
+			entry.liveTriangleCount - entry.previousTriangleCount;
+		const uint32_t materialDelta =
+			entry.previousMaterialCount > entry.liveMaterialCount ?
+			entry.previousMaterialCount - entry.liveMaterialCount :
+			entry.liveMaterialCount - entry.previousMaterialCount;
+		uint32_t score = triangleDelta * 32u;
+		score += materialDelta * 16u;
+		score += entry.liveTriangleCount * 4u;
+		score += entry.liveMaterialCount * 2u;
+		if ((entry.familyMask & RuntimeGeometryDirtyFamily_GeometryDirtyMixed) != 0)
+		{
+			score += 1u << 20;
+		}
+		if ((entry.familyMask & RuntimeGeometryDirtyFamily_SectorWallGeometry) != 0)
+		{
+			score += 1u << 19;
+		}
+		if (entry.forceTopology)
+		{
+			score += 1u << 18;
+		}
+		if (entry.countChanged)
+		{
+			score += 1u << 17;
+		}
+		if (entry.wallsChanged && entry.flatsChanged)
+		{
+			score += 1u << 16;
+		}
+		return score;
+	}
+
 	template <typename Entry, size_t N, typename ScoreFn>
 	void InsertRankedTraceEntry(std::array<Entry, N>& entries, Entry entry, ScoreFn scoreFn)
 	{
@@ -18157,6 +18203,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationStructuralWallMaterialOnlyChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralMixedMaterialOnlyChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralGeometryOrDirtyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtySectorGeometryOnlyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyWallGeometryOnlyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtySectorWallGeometryChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyDirtyOnlyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyGeometryDirtyMixedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyForceTopologyOnlyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyRealCountChangeChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyWallsOnlyChangedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyFlatsOnlyChangedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyWallsAndFlatsChangedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationHardwareCanvasChunkCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr = 0;
@@ -18257,6 +18313,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeResidentBlasRecreateEntries = {};
 	mLastPerfShellTraceStats.runtimeResidentBlasRefitRejectEntries = {};
 	mLastPerfShellTraceStats.runtimeStructuralRebuildEntries = {};
+	mLastPerfShellTraceStats.runtimeGeometryDirtyEntries = {};
 	struct RuntimeAnimatedFrameTraceStats
 	{
 		bool touched = false;
@@ -18508,6 +18565,111 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeStructuralRebuildEntries,
 			entry,
 			ScoreRuntimeStructuralRebuildTraceEntry);
+	};
+	const auto recordGeometryDirtyEntry =
+		[this](uint32_t chunkIndex,
+			int32_t sectorIndex,
+			uint32_t reasonMask,
+			uint32_t previousWallCount,
+			uint32_t liveWallCount,
+			uint32_t previousFlatCount,
+			uint32_t liveFlatCount,
+			uint32_t previousTriangleCount,
+			uint32_t liveTriangleCount,
+			uint32_t previousMaterialCount,
+			uint32_t liveMaterialCount,
+			bool forceTopology)
+	{
+		const bool sectorGeometry = (reasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0;
+		const bool wallGeometry = (reasonMask & nri_scene::PTMapChunkMutationReason_WallGeometry) != 0;
+		const bool dirtyOnlyBits =
+			(reasonMask &
+				(nri_scene::PTMapChunkMutationReason_SectorDirty |
+				 nri_scene::PTMapChunkMutationReason_SectionDirty |
+				 nri_scene::PTMapChunkMutationReason_Dragged)) != 0;
+		const bool wallsChanged = previousWallCount != liveWallCount;
+		const bool flatsChanged = previousFlatCount != liveFlatCount;
+		const bool countChanged =
+			wallsChanged ||
+			flatsChanged ||
+			previousTriangleCount != liveTriangleCount ||
+			previousMaterialCount != liveMaterialCount;
+
+		uint32_t familyMask = 0;
+		if (sectorGeometry && !wallGeometry && !dirtyOnlyBits)
+		{
+			familyMask |= RuntimeGeometryDirtyFamily_SectorGeometryOnly;
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtySectorGeometryOnlyChunks++;
+		}
+		else if (!sectorGeometry && wallGeometry && !dirtyOnlyBits)
+		{
+			familyMask |= RuntimeGeometryDirtyFamily_WallGeometryOnly;
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtyWallGeometryOnlyChunks++;
+		}
+		else if (sectorGeometry && wallGeometry && !dirtyOnlyBits)
+		{
+			familyMask |= RuntimeGeometryDirtyFamily_SectorWallGeometry;
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtySectorWallGeometryChunks++;
+		}
+		else if (!sectorGeometry && !wallGeometry && dirtyOnlyBits)
+		{
+			familyMask |= RuntimeGeometryDirtyFamily_DirtyOnly;
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtyDirtyOnlyChunks++;
+		}
+		else
+		{
+			familyMask |= RuntimeGeometryDirtyFamily_GeometryDirtyMixed;
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtyGeometryDirtyMixedChunks++;
+		}
+
+		if (forceTopology && !countChanged)
+		{
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtyForceTopologyOnlyChunks++;
+		}
+		if (countChanged)
+		{
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtyRealCountChangeChunks++;
+		}
+		if (wallsChanged && !flatsChanged)
+		{
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtyWallsOnlyChangedChunks++;
+		}
+		else if (!wallsChanged && flatsChanged)
+		{
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtyFlatsOnlyChangedChunks++;
+		}
+		else if (wallsChanged && flatsChanged)
+		{
+			mLastPerfShellTraceStats.runtimeMutationGeometryDirtyWallsAndFlatsChangedChunks++;
+		}
+
+		if (!ShouldTracePtPerf())
+		{
+			return;
+		}
+
+		RuntimeGeometryDirtyTraceEntry entry = {};
+		entry.valid = true;
+		entry.chunkIndex = chunkIndex;
+		entry.sectorIndex = sectorIndex;
+		entry.reasonMask = reasonMask;
+		entry.familyMask = familyMask;
+		entry.previousWallCount = previousWallCount;
+		entry.liveWallCount = liveWallCount;
+		entry.previousFlatCount = previousFlatCount;
+		entry.liveFlatCount = liveFlatCount;
+		entry.previousTriangleCount = previousTriangleCount;
+		entry.liveTriangleCount = liveTriangleCount;
+		entry.previousMaterialCount = previousMaterialCount;
+		entry.liveMaterialCount = liveMaterialCount;
+		entry.forceTopology = forceTopology;
+		entry.countChanged = countChanged;
+		entry.wallsChanged = wallsChanged;
+		entry.flatsChanged = flatsChanged;
+		InsertRankedTraceEntry(
+			mLastPerfShellTraceStats.runtimeGeometryDirtyEntries,
+			entry,
+			ScoreRuntimeGeometryDirtyTraceEntry);
 	};
 	if (!mStaticMapScene.valid ||
 		mRuntimeMapMutations.chunks.size() != mMapWorld.chunks.size())
@@ -19395,6 +19557,35 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				!structuralWallMaterialOnly;
 			const bool structuralGeometryOrDirty =
 				(normalizedReasonMask & structuralReasonMask) != 0;
+			uint32_t previousGeometryDirtyWallCount = 0;
+			uint32_t previousGeometryDirtyFlatCount = 0;
+			uint32_t previousGeometryDirtyTriangleCount = 0;
+			uint32_t previousGeometryDirtyMaterialCount = 0;
+			if (structuralGeometryOrDirty)
+			{
+				if (replacement.valid)
+				{
+					previousGeometryDirtyWallCount = (uint32_t)replacement.sceneView.opaqueWalls.size();
+					previousGeometryDirtyFlatCount = (uint32_t)replacement.sceneView.opaqueFlats.size();
+					previousGeometryDirtyTriangleCount = replacement.triangleCount;
+					previousGeometryDirtyMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
+				}
+				else
+				{
+					uint32_t residentChunkListIndex = UINT32_MAX;
+					const StaticMapSceneCache::ChunkCache* residentChunkCache = nullptr;
+					const nri_scene::SceneView* residentChunkView = nullptr;
+					if (tryResolveResidentChunkState(residentChunkListIndex, residentChunkCache, residentChunkView) &&
+						residentChunkCache != nullptr &&
+						residentChunkView != nullptr)
+					{
+						previousGeometryDirtyWallCount = (uint32_t)residentChunkView->opaqueWalls.size();
+						previousGeometryDirtyFlatCount = (uint32_t)residentChunkView->opaqueFlats.size();
+						previousGeometryDirtyTriangleCount = residentChunkCache->primitiveCount;
+						previousGeometryDirtyMaterialCount = residentChunkCache->materialCount;
+					}
+				}
+			}
 			uint32_t structuralTriggerMask = 0;
 			if (structuralReplacementDelta)
 			{
@@ -19552,6 +19743,22 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					structuralWallMaterialOnly,
 					structuralMixedMaterialOnly,
 					structuralGeometryOrDirty);
+				if (structuralGeometryOrDirty)
+				{
+					recordGeometryDirtyEntry(
+						mapChunk.chunkIndex,
+						mapChunk.sectorIndex,
+						normalizedReasonMask,
+						previousGeometryDirtyWallCount,
+						(uint32_t)replacement.sceneView.opaqueWalls.size(),
+						previousGeometryDirtyFlatCount,
+						(uint32_t)replacement.sceneView.opaqueFlats.size(),
+						previousGeometryDirtyTriangleCount,
+						replacement.triangleCount,
+						previousGeometryDirtyMaterialCount,
+						(uint32_t)replacement.materialBridge.materials.size(),
+						forceTopologyInvalidation);
+				}
 			}
 		}
 		else
