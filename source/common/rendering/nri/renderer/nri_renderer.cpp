@@ -10248,13 +10248,12 @@ bool NRIRenderer::RebuildResidentStaticCpuAtlasMirror(StaticMapSceneCache& stati
 	return true;
 }
 
-void NRIRenderer::UploadChunkGeometryToAtlas(
+void NRIRenderer::UploadChunkVertexAndIndexDataToAtlas(
 	const nri_scene::GeometryData& sourceGeometry,
 	const StaticMapSceneCache::ChunkCache& sourceChunk,
 	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
 	std::vector<nri_scene::SceneVertex>& outVertices,
-	std::vector<uint32_t>& outIndices,
-	std::vector<nri_scene::PrimitiveData>& outPrimitives) const
+	std::vector<uint32_t>& outIndices) const
 {
 	if (!atlasChunk.valid)
 	{
@@ -10279,6 +10278,18 @@ void NRIRenderer::UploadChunkGeometryToAtlas(
 			outIndices[atlasChunk.indexOffset + i] = atlasChunk.vertexOffset + sourceIndex - sourceChunk.vertexOffset;
 		}
 	}
+}
+
+void NRIRenderer::UploadChunkPrimitiveDataToAtlas(
+	const nri_scene::GeometryData& sourceGeometry,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<nri_scene::PrimitiveData>& outPrimitives) const
+{
+	if (!atlasChunk.valid)
+	{
+		return;
+	}
 
 	if (sourceChunk.primitiveOffset + sourceChunk.primitiveCount <= sourceGeometry.primitives.size() &&
 		atlasChunk.primitiveOffset + atlasChunk.primitiveCount <= outPrimitives.size())
@@ -10299,6 +10310,27 @@ void NRIRenderer::UploadChunkGeometryToAtlas(
 			outPrimitives[atlasChunk.primitiveOffset + i] = primitive;
 		}
 	}
+}
+
+void NRIRenderer::UploadChunkGeometryToAtlas(
+	const nri_scene::GeometryData& sourceGeometry,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<nri_scene::SceneVertex>& outVertices,
+	std::vector<uint32_t>& outIndices,
+	std::vector<nri_scene::PrimitiveData>& outPrimitives) const
+{
+	UploadChunkVertexAndIndexDataToAtlas(
+		sourceGeometry,
+		sourceChunk,
+		atlasChunk,
+		outVertices,
+		outIndices);
+	UploadChunkPrimitiveDataToAtlas(
+		sourceGeometry,
+		sourceChunk,
+		atlasChunk,
+		outPrimitives);
 }
 
 void NRIRenderer::UploadChunkMaterialsToAtlas(
@@ -17939,6 +17971,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialBuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBaselineCaptureMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasBookkeepingMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveRewriteMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasSetupMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationRebuiltChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationHeldChunks = 0;
@@ -20490,143 +20528,150 @@ bool NRIRenderer::RebuildResidentStaticMaterialState(const char* reason)
 
 bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices)
 {
+	ScopedPtPerfTimer totalPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasMs);
 	if (chunkListIndices.empty())
 	{
 		return true;
 	}
 
 	std::vector<uint32_t> activeChunkListIndices;
-	activeChunkListIndices.reserve(chunkListIndices.size());
-	for (uint32_t chunkListIndex : chunkListIndices)
 	{
-		if (chunkListIndex >= mStaticMapScene.chunks.size() ||
-			chunkListIndex >= mStaticMapChunkAtlas.chunks.size())
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasSetupMs);
+		activeChunkListIndices.reserve(chunkListIndices.size());
+		for (uint32_t chunkListIndex : chunkListIndices)
 		{
-			return false;
+			if (chunkListIndex >= mStaticMapScene.chunks.size() ||
+				chunkListIndex >= mStaticMapChunkAtlas.chunks.size())
+			{
+				return false;
+			}
+
+			const auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+			const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+			if (!chunk.active || !atlasChunk.valid || atlasChunk.indexCount == 0 || atlasChunk.primitiveCount == 0)
+			{
+				continue;
+			}
+
+			activeChunkListIndices.push_back(chunkListIndex);
 		}
 
-		const auto& chunk = mStaticMapScene.chunks[chunkListIndex];
-		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
-		if (!chunk.active || !atlasChunk.valid || atlasChunk.indexCount == 0 || atlasChunk.primitiveCount == 0)
+		if (activeChunkListIndices.empty())
 		{
-			continue;
+			return true;
 		}
 
-		activeChunkListIndices.push_back(chunkListIndex);
-	}
-
-	if (activeChunkListIndices.empty())
-	{
-		return true;
-	}
-
-	uint64_t maxScratchSize = 0;
-	for (uint32_t chunkListIndex : activeChunkListIndices)
-	{
-		auto& chunk = mStaticMapScene.chunks[chunkListIndex];
-		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
-
-		RetireResidentAccelerationStructure(chunk.accelerationStructure);
-
-		nri::BottomLevelGeometryDesc geometryDesc = {};
-		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-		geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
-		geometryDesc.triangles.vertexOffset = 0;
-		geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
-		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-		geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
-		geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
-		geometryDesc.triangles.indexNum = atlasChunk.indexCount;
-		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
-
-		nri::AccelerationStructureDesc blasDesc = {};
-		blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
-		blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
-		blasDesc.geometryOrInstanceNum = 1;
-		blasDesc.geometries = &geometryDesc;
-		if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, chunk.accelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
+		uint64_t maxScratchSize = 0;
+		for (uint32_t chunkListIndex : activeChunkListIndices)
 		{
-			return false;
+			auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+			const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+
+			RetireResidentAccelerationStructure(chunk.accelerationStructure);
+
+			nri::BottomLevelGeometryDesc geometryDesc = {};
+			geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+			geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+			geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
+			geometryDesc.triangles.vertexOffset = 0;
+			geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
+			geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+			geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+			geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
+			geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+			geometryDesc.triangles.indexNum = atlasChunk.indexCount;
+			geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+
+			nri::AccelerationStructureDesc blasDesc = {};
+			blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
+			blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
+			blasDesc.geometryOrInstanceNum = 1;
+			blasDesc.geometries = &geometryDesc;
+			if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, chunk.accelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
+			{
+				return false;
+			}
+
+			nri::MemoryDesc memoryDesc = {};
+			mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+			chunk.accelerationStructure.memorySize = memoryDesc.size;
+			chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
+
+			maxScratchSize = std::max(
+				maxScratchSize,
+				mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
 		}
 
-		nri::MemoryDesc memoryDesc = {};
-		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-		chunk.accelerationStructure.memorySize = memoryDesc.size;
-		chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
-
-		maxScratchSize = std::max(
-			maxScratchSize,
-			mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
-	}
-
-	if (mResidentStaticBlasScratchBuffer.buffer == nullptr || mResidentStaticBlasScratchBuffer.size < maxScratchSize)
-	{
-		if (mResidentStaticBlasScratchBuffer.buffer != nullptr)
+		if (mResidentStaticBlasScratchBuffer.buffer == nullptr || mResidentStaticBlasScratchBuffer.size < maxScratchSize)
 		{
-			WaitForCommandsTracked();
-		}
-		DestroyBufferResource(mResidentStaticBlasScratchBuffer);
-		if (!CreateBufferWithoutView(mResidentStaticBlasScratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
-		{
-			return false;
+			if (mResidentStaticBlasScratchBuffer.buffer != nullptr)
+			{
+				WaitForCommandsTracked();
+			}
+			DestroyBufferResource(mResidentStaticBlasScratchBuffer);
+			if (!CreateBufferWithoutView(mResidentStaticBlasScratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+			{
+				return false;
+			}
 		}
 	}
 
 	std::vector<nri::BufferBarrierDesc> blasBarriers;
-	blasBarriers.reserve(activeChunkListIndices.size());
-	for (size_t i = 0; i < activeChunkListIndices.size(); ++i)
 	{
-		const uint32_t chunkListIndex = activeChunkListIndices[i];
-		auto& chunk = mStaticMapScene.chunks[chunkListIndex];
-		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
-
-		nri::BottomLevelGeometryDesc geometryDesc = {};
-		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-		geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
-		geometryDesc.triangles.vertexOffset = 0;
-		geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
-		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-		geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
-		geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
-		geometryDesc.triangles.indexNum = atlasChunk.indexCount;
-		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
-
-		nri::BuildBottomLevelAccelerationStructureDesc build = {};
-		build.dst = chunk.accelerationStructure.accelerationStructure;
-		build.geometries = &geometryDesc;
-		build.geometryNum = 1;
-		build.scratchBuffer = mResidentStaticBlasScratchBuffer.buffer;
-		build.scratchOffset = 0;
-		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
-
-		if (i + 1 < activeChunkListIndices.size())
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBuildMs);
+		blasBarriers.reserve(activeChunkListIndices.size());
+		for (size_t i = 0; i < activeChunkListIndices.size(); ++i)
 		{
-			nri::BufferBarrierDesc scratchBarrier = {};
-			scratchBarrier.buffer = mResidentStaticBlasScratchBuffer.buffer;
-			scratchBarrier.before = NRIAccelerationStructureScratchAccess();
-			scratchBarrier.after = NRIAccelerationStructureScratchAccess();
+			const uint32_t chunkListIndex = activeChunkListIndices[i];
+			auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+			const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
 
-			nri::BarrierDesc scratchBarrierDesc = {};
-			scratchBarrierDesc.buffers = &scratchBarrier;
-			scratchBarrierDesc.bufferNum = 1;
-			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, scratchBarrierDesc);
+			nri::BottomLevelGeometryDesc geometryDesc = {};
+			geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+			geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+			geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
+			geometryDesc.triangles.vertexOffset = 0;
+			geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
+			geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+			geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+			geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
+			geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+			geometryDesc.triangles.indexNum = atlasChunk.indexCount;
+			geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+
+			nri::BuildBottomLevelAccelerationStructureDesc build = {};
+			build.dst = chunk.accelerationStructure.accelerationStructure;
+			build.geometries = &geometryDesc;
+			build.geometryNum = 1;
+			build.scratchBuffer = mResidentStaticBlasScratchBuffer.buffer;
+			build.scratchOffset = 0;
+			mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
+
+			if (i + 1 < activeChunkListIndices.size())
+			{
+				nri::BufferBarrierDesc scratchBarrier = {};
+				scratchBarrier.buffer = mResidentStaticBlasScratchBuffer.buffer;
+				scratchBarrier.before = NRIAccelerationStructureScratchAccess();
+				scratchBarrier.after = NRIAccelerationStructureScratchAccess();
+
+				nri::BarrierDesc scratchBarrierDesc = {};
+				scratchBarrierDesc.buffers = &scratchBarrier;
+				scratchBarrierDesc.bufferNum = 1;
+				mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, scratchBarrierDesc);
+			}
+
+			nri::BufferBarrierDesc barrier = {};
+			barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
+			barrier.before = NRIAccelerationStructureWriteAccess();
+			barrier.after = NRIAccelerationStructureReadAccess();
+			blasBarriers.push_back(barrier);
 		}
 
-		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
-		barrier.before = NRIAccelerationStructureWriteAccess();
-		barrier.after = NRIAccelerationStructureReadAccess();
-		blasBarriers.push_back(barrier);
+		nri::BarrierDesc barrierDesc = {};
+		barrierDesc.buffers = blasBarriers.data();
+		barrierDesc.bufferNum = (uint32_t)blasBarriers.size();
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
 	}
-
-	nri::BarrierDesc barrierDesc = {};
-	barrierDesc.buffers = blasBarriers.data();
-	barrierDesc.bufferNum = (uint32_t)blasBarriers.size();
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
 	return true;
 }
 
@@ -21037,15 +21082,6 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasMs);
 		StaticMapSceneCache::ChunkCache sourceChunk = {};
-		sourceChunk.vertexOffset = 0;
-		sourceChunk.vertexCount = effectiveResidentVertexCount;
-		sourceChunk.indexOffset = 0;
-		sourceChunk.indexCount = effectiveResidentIndexCount;
-		sourceChunk.primitiveOffset = 0;
-		sourceChunk.primitiveCount = effectiveResidentPrimitiveCount;
-		sourceChunk.materialOffset = 0;
-		sourceChunk.materialCount = (uint32_t)residentMaterials.materials.size();
-
 		StaticMapChunkAtlas nextAtlasState = {};
 		StaticMapChunkAtlas::ChunkEntry nextAtlasChunk = {};
 		bool keptGeometrySlices = false;
@@ -21059,165 +21095,191 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			mStaticMapScene.chunks[chunkListIndex].animatedRefreshSuppressed;
 		const uint64_t previousAnimatedGeometrySignature =
 			hasResidentChunk ?
-			mStaticMapScene.chunks[chunkListIndex].animatedGeometrySignature :
-			0;
-		for (;;)
+				mStaticMapScene.chunks[chunkListIndex].animatedGeometrySignature :
+				0;
+		bool preserveResidentMaterialSlice = false;
 		{
-			nextAtlasState = mStaticMapChunkAtlas;
-			if (chunkListIndex >= nextAtlasState.chunks.size())
-			{
-				nextAtlasState.chunks.resize(chunkListIndex + 1);
-			}
-			nextAtlasState.chunkCount = (uint32_t)nextAtlasState.chunks.size();
-			const auto oldAtlasChunk = hasResidentChunk ? nextAtlasState.chunks[chunkListIndex] : StaticMapChunkAtlas::ChunkEntry{};
-			const bool keepGeometrySlices =
-				hasResidentGeometry &&
-				oldAtlasChunk.vertexCount == effectiveResidentVertexCount &&
-				oldAtlasChunk.indexCount == effectiveResidentIndexCount &&
-				oldAtlasChunk.primitiveCount == effectiveResidentPrimitiveCount;
-			const bool keepMaterialSlice =
-				hasResidentGeometry &&
-				oldAtlasChunk.materialCount == residentMaterialCount;
+			ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasBookkeepingMs);
+			sourceChunk.vertexOffset = 0;
+			sourceChunk.vertexCount = effectiveResidentVertexCount;
+			sourceChunk.indexOffset = 0;
+			sourceChunk.indexCount = effectiveResidentIndexCount;
+			sourceChunk.primitiveOffset = 0;
+			sourceChunk.primitiveCount = effectiveResidentPrimitiveCount;
+			sourceChunk.materialOffset = 0;
+			sourceChunk.materialCount = (uint32_t)residentMaterials.materials.size();
 
-			if (hasResidentGeometry && !keepGeometrySlices)
+			for (;;)
 			{
-				ReleaseChunkAtlasRange(nextAtlasState.freeVertexRanges, oldAtlasChunk.vertexOffset, oldAtlasChunk.vertexCount);
-				ReleaseChunkAtlasRange(nextAtlasState.freeIndexRanges, oldAtlasChunk.indexOffset, oldAtlasChunk.indexCount);
-				ReleaseChunkAtlasRange(nextAtlasState.freePrimitiveRanges, oldAtlasChunk.primitiveOffset, oldAtlasChunk.primitiveCount);
+				nextAtlasState = mStaticMapChunkAtlas;
+				if (chunkListIndex >= nextAtlasState.chunks.size())
+				{
+					nextAtlasState.chunks.resize(chunkListIndex + 1);
+				}
+				nextAtlasState.chunkCount = (uint32_t)nextAtlasState.chunks.size();
+				const auto oldAtlasChunk = hasResidentChunk ? nextAtlasState.chunks[chunkListIndex] : StaticMapChunkAtlas::ChunkEntry{};
+				const bool keepGeometrySlices =
+					hasResidentGeometry &&
+					oldAtlasChunk.vertexCount == effectiveResidentVertexCount &&
+					oldAtlasChunk.indexCount == effectiveResidentIndexCount &&
+					oldAtlasChunk.primitiveCount == effectiveResidentPrimitiveCount;
+				const bool keepMaterialSlice =
+					hasResidentGeometry &&
+					oldAtlasChunk.materialCount == residentMaterialCount;
+
+				if (hasResidentGeometry && !keepGeometrySlices)
+				{
+					ReleaseChunkAtlasRange(nextAtlasState.freeVertexRanges, oldAtlasChunk.vertexOffset, oldAtlasChunk.vertexCount);
+					ReleaseChunkAtlasRange(nextAtlasState.freeIndexRanges, oldAtlasChunk.indexOffset, oldAtlasChunk.indexCount);
+					ReleaseChunkAtlasRange(nextAtlasState.freePrimitiveRanges, oldAtlasChunk.primitiveOffset, oldAtlasChunk.primitiveCount);
+				}
+				if (hasResidentGeometry && !keepMaterialSlice)
+				{
+					ReleaseChunkAtlasRange(nextAtlasState.freeMaterialRanges, oldAtlasChunk.materialOffset, oldAtlasChunk.materialCount);
+				}
+
+				nextAtlasChunk = {};
+				nextAtlasChunk.valid = true;
+				nextAtlasChunk.chunkIndex = mapChunk.chunkIndex;
+				nextAtlasChunk.staticSceneChunkListIndex = chunkListIndex;
+				nextAtlasChunk.vertexCount = effectiveResidentVertexCount;
+				nextAtlasChunk.indexCount = effectiveResidentIndexCount;
+				nextAtlasChunk.primitiveCount = effectiveResidentPrimitiveCount;
+				nextAtlasChunk.materialCount = residentMaterialCount;
+				nextAtlasChunk.vertexOffset = keepGeometrySlices ?
+					oldAtlasChunk.vertexOffset :
+					AllocateChunkAtlasRange(effectiveResidentVertexCount, nextAtlasState.vertexCapacity, nextAtlasState.freeVertexRanges, nextAtlasState.vertexCount);
+				nextAtlasChunk.indexOffset = keepGeometrySlices ?
+					oldAtlasChunk.indexOffset :
+					AllocateChunkAtlasRange(effectiveResidentIndexCount, nextAtlasState.indexCapacity, nextAtlasState.freeIndexRanges, nextAtlasState.indexCount);
+				nextAtlasChunk.primitiveOffset = keepGeometrySlices ?
+					oldAtlasChunk.primitiveOffset :
+					AllocateChunkAtlasRange(effectiveResidentPrimitiveCount, nextAtlasState.primitiveCapacity, nextAtlasState.freePrimitiveRanges, nextAtlasState.primitiveCount);
+				nextAtlasChunk.materialOffset = keepMaterialSlice ?
+					oldAtlasChunk.materialOffset :
+					AllocateChunkAtlasRange(residentMaterialCount, nextAtlasState.materialCapacity, nextAtlasState.freeMaterialRanges, nextAtlasState.materialCount);
+				if (nextAtlasChunk.vertexOffset != UINT32_MAX &&
+					nextAtlasChunk.indexOffset != UINT32_MAX &&
+					nextAtlasChunk.primitiveOffset != UINT32_MAX &&
+					nextAtlasChunk.materialOffset != UINT32_MAX)
+				{
+					keptGeometrySlices = keepGeometrySlices;
+					keptMaterialSlice = keepMaterialSlice;
+					break;
+				}
+
+				if (nextAtlasChunk.vertexOffset == UINT32_MAX)
+				{
+					nextAtlasState.vertexCapacity = GetChunkAtlasCapacity(nextAtlasState.vertexCount + effectiveResidentVertexCount);
+				}
+				if (nextAtlasChunk.indexOffset == UINT32_MAX)
+				{
+					nextAtlasState.indexCapacity = GetChunkAtlasCapacity(nextAtlasState.indexCount + effectiveResidentIndexCount);
+				}
+				if (nextAtlasChunk.primitiveOffset == UINT32_MAX)
+				{
+					nextAtlasState.primitiveCapacity = GetChunkAtlasCapacity(nextAtlasState.primitiveCount + effectiveResidentPrimitiveCount);
+				}
+				if (nextAtlasChunk.materialOffset == UINT32_MAX)
+				{
+					nextAtlasState.materialCapacity = GetChunkAtlasCapacity(nextAtlasState.materialCount + residentMaterialCount);
+				}
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasGrowCount++;
+				if (!EnsureResidentStaticMapChunkAtlasBufferCapacity(nextAtlasState))
+				{
+					return false;
+				}
 			}
-			if (hasResidentGeometry && !keepMaterialSlice)
+			if (keptGeometrySlices)
 			{
-				ReleaseChunkAtlasRange(nextAtlasState.freeMaterialRanges, oldAtlasChunk.materialOffset, oldAtlasChunk.materialCount);
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepGeometrySliceCount++;
+			}
+			if (keptMaterialSlice)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepMaterialSliceCount++;
 			}
 
-			nextAtlasChunk = {};
-			nextAtlasChunk.valid = true;
-			nextAtlasChunk.chunkIndex = mapChunk.chunkIndex;
-			nextAtlasChunk.staticSceneChunkListIndex = chunkListIndex;
-			nextAtlasChunk.vertexCount = effectiveResidentVertexCount;
-			nextAtlasChunk.indexCount = effectiveResidentIndexCount;
-			nextAtlasChunk.primitiveCount = effectiveResidentPrimitiveCount;
-			nextAtlasChunk.materialCount = residentMaterialCount;
-			nextAtlasChunk.vertexOffset = keepGeometrySlices ?
-				oldAtlasChunk.vertexOffset :
-				AllocateChunkAtlasRange(effectiveResidentVertexCount, nextAtlasState.vertexCapacity, nextAtlasState.freeVertexRanges, nextAtlasState.vertexCount);
-			nextAtlasChunk.indexOffset = keepGeometrySlices ?
-				oldAtlasChunk.indexOffset :
-				AllocateChunkAtlasRange(effectiveResidentIndexCount, nextAtlasState.indexCapacity, nextAtlasState.freeIndexRanges, nextAtlasState.indexCount);
-			nextAtlasChunk.primitiveOffset = keepGeometrySlices ?
-				oldAtlasChunk.primitiveOffset :
-				AllocateChunkAtlasRange(effectiveResidentPrimitiveCount, nextAtlasState.primitiveCapacity, nextAtlasState.freePrimitiveRanges, nextAtlasState.primitiveCount);
-			nextAtlasChunk.materialOffset = keepMaterialSlice ?
-				oldAtlasChunk.materialOffset :
-				AllocateChunkAtlasRange(residentMaterialCount, nextAtlasState.materialCapacity, nextAtlasState.freeMaterialRanges, nextAtlasState.materialCount);
-			if (nextAtlasChunk.vertexOffset != UINT32_MAX &&
-				nextAtlasChunk.indexOffset != UINT32_MAX &&
-				nextAtlasChunk.primitiveOffset != UINT32_MAX &&
-				nextAtlasChunk.materialOffset != UINT32_MAX)
+			if (chunkListIndex >= mStaticMapScene.chunks.size())
 			{
-				keptGeometrySlices = keepGeometrySlices;
-				keptMaterialSlice = keepMaterialSlice;
-				break;
+				mStaticMapScene.chunks.resize(chunkListIndex + 1);
 			}
+			if (chunkListIndex >= mStaticMapScene.lightChunkViews.size())
+			{
+				mStaticMapScene.lightChunkViews.resize(chunkListIndex + 1);
+			}
+			preserveResidentMaterialSlice =
+				!materialOnlyReplacement &&
+				(appliedReasonMask & materialReasonMask) == 0 &&
+				!appliedStaticAnimatedReplacement &&
+				!appliedAnimationOnlyRefreshed &&
+				hasResidentChunk &&
+				keptMaterialSlice &&
+				previousAnimatedMaterialSignature == ComputeAnimatedMaterialSignature(residentSceneView);
 
-			if (nextAtlasChunk.vertexOffset == UINT32_MAX)
-			{
-				nextAtlasState.vertexCapacity = GetChunkAtlasCapacity(nextAtlasState.vertexCount + effectiveResidentVertexCount);
-			}
-			if (nextAtlasChunk.indexOffset == UINT32_MAX)
-			{
-				nextAtlasState.indexCapacity = GetChunkAtlasCapacity(nextAtlasState.indexCount + effectiveResidentIndexCount);
-			}
-			if (nextAtlasChunk.primitiveOffset == UINT32_MAX)
-			{
-				nextAtlasState.primitiveCapacity = GetChunkAtlasCapacity(nextAtlasState.primitiveCount + effectiveResidentPrimitiveCount);
-			}
-			if (nextAtlasChunk.materialOffset == UINT32_MAX)
-			{
-				nextAtlasState.materialCapacity = GetChunkAtlasCapacity(nextAtlasState.materialCount + residentMaterialCount);
-			}
-			mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasGrowCount++;
-			if (!EnsureResidentStaticMapChunkAtlasBufferCapacity(nextAtlasState))
-			{
-				return false;
-			}
+			mStaticMapChunkAtlas = std::move(nextAtlasState);
+			mStaticMapChunkAtlas.chunks[chunkListIndex] = nextAtlasChunk;
+			mStaticMapScene.geometry.vertices.resize(std::max<size_t>(mStaticMapScene.geometry.vertices.size(), mStaticMapChunkAtlas.vertexCount));
+			mStaticMapScene.geometry.indices.resize(std::max<size_t>(mStaticMapScene.geometry.indices.size(), mStaticMapChunkAtlas.indexCount));
+			mStaticMapScene.geometry.primitives.resize(std::max<size_t>(mStaticMapScene.geometry.primitives.size(), mStaticMapChunkAtlas.primitiveCount));
+			mStaticMapScene.geometry.primitiveProvenance.resize(std::max<size_t>(mStaticMapScene.geometry.primitiveProvenance.size(), mStaticMapChunkAtlas.primitiveCount));
+			mStaticMapScene.materialBridge.materials.resize(std::max<size_t>(mStaticMapScene.materialBridge.materials.size(), mStaticMapChunkAtlas.materialCount));
+			mStaticMapScene.materialBridge.lightMetadata.resize(std::max<size_t>(mStaticMapScene.materialBridge.lightMetadata.size(), mStaticMapChunkAtlas.materialCount));
+			mStaticMapScene.gpuMaterials.resize(std::max<size_t>(mStaticMapScene.gpuMaterials.size(), mStaticMapChunkAtlas.materialCount));
 		}
-		if (keptGeometrySlices)
-		{
-			mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepGeometrySliceCount++;
-		}
-		if (keptMaterialSlice)
-		{
-			mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepMaterialSliceCount++;
-		}
-
-		if (chunkListIndex >= mStaticMapScene.chunks.size())
-		{
-			mStaticMapScene.chunks.resize(chunkListIndex + 1);
-		}
-		if (chunkListIndex >= mStaticMapScene.lightChunkViews.size())
-		{
-			mStaticMapScene.lightChunkViews.resize(chunkListIndex + 1);
-		}
-		const bool preserveResidentMaterialSlice =
-			!materialOnlyReplacement &&
-			(appliedReasonMask & materialReasonMask) == 0 &&
-			!appliedStaticAnimatedReplacement &&
-			!appliedAnimationOnlyRefreshed &&
-			hasResidentChunk &&
-			keptMaterialSlice &&
-			previousAnimatedMaterialSignature == ComputeAnimatedMaterialSignature(residentSceneView);
-
-		mStaticMapChunkAtlas = std::move(nextAtlasState);
-		mStaticMapChunkAtlas.chunks[chunkListIndex] = nextAtlasChunk;
-		mStaticMapScene.geometry.vertices.resize(std::max<size_t>(mStaticMapScene.geometry.vertices.size(), mStaticMapChunkAtlas.vertexCount));
-		mStaticMapScene.geometry.indices.resize(std::max<size_t>(mStaticMapScene.geometry.indices.size(), mStaticMapChunkAtlas.indexCount));
-		mStaticMapScene.geometry.primitives.resize(std::max<size_t>(mStaticMapScene.geometry.primitives.size(), mStaticMapChunkAtlas.primitiveCount));
-		mStaticMapScene.geometry.primitiveProvenance.resize(std::max<size_t>(mStaticMapScene.geometry.primitiveProvenance.size(), mStaticMapChunkAtlas.primitiveCount));
-		mStaticMapScene.materialBridge.materials.resize(std::max<size_t>(mStaticMapScene.materialBridge.materials.size(), mStaticMapChunkAtlas.materialCount));
-		mStaticMapScene.materialBridge.lightMetadata.resize(std::max<size_t>(mStaticMapScene.materialBridge.lightMetadata.size(), mStaticMapChunkAtlas.materialCount));
-		mStaticMapScene.gpuMaterials.resize(std::max<size_t>(mStaticMapScene.gpuMaterials.size(), mStaticMapChunkAtlas.materialCount));
 
 		if (!fastResidentMaterialOnlyUpdate && !preserveResidentGeometryForMaterialOnlyUpdate)
 		{
-			UploadChunkGeometryToAtlas(
-				residentGeometry,
-				sourceChunk,
-				nextAtlasChunk,
-				mStaticMapScene.geometry.vertices,
-				mStaticMapScene.geometry.indices,
-				mStaticMapScene.geometry.primitives);
-			if (residentGeometry.primitiveProvenance.size() >= nextAtlasChunk.primitiveCount &&
-				nextAtlasChunk.primitiveOffset + nextAtlasChunk.primitiveCount <= mStaticMapScene.geometry.primitiveProvenance.size())
 			{
-				std::copy_n(
-					residentGeometry.primitiveProvenance.data(),
-					nextAtlasChunk.primitiveCount,
-					mStaticMapScene.geometry.primitiveProvenance.data() + nextAtlasChunk.primitiveOffset);
+				ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs);
+				UploadChunkVertexAndIndexDataToAtlas(
+					residentGeometry,
+					sourceChunk,
+					nextAtlasChunk,
+					mStaticMapScene.geometry.vertices,
+					mStaticMapScene.geometry.indices);
+				if (!StageResidentBufferCopyRange(
+						mStaticVertexBuffer,
+						(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
+						mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
+						(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
+						NRIAccelerationStructureBuildInputAccess(),
+						ResidentUploadKind_Vertex) ||
+					!StageResidentBufferCopyRange(
+						mStaticIndexBuffer,
+						(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
+						mStaticMapScene.geometry.indices.data() + nextAtlasChunk.indexOffset,
+						(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t),
+						NRIAccelerationStructureBuildInputAccess(),
+						ResidentUploadKind_Index))
+				{
+					return false;
+				}
 			}
-			if (!StageResidentBufferCopyRange(
-					mStaticVertexBuffer,
-					(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
-					mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
-					(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
-					NRIAccelerationStructureBuildInputAccess(),
-					ResidentUploadKind_Vertex) ||
-				!StageResidentBufferCopyRange(
-					mStaticIndexBuffer,
-					(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
-					mStaticMapScene.geometry.indices.data() + nextAtlasChunk.indexOffset,
-					(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t),
-					NRIAccelerationStructureBuildInputAccess(),
-					ResidentUploadKind_Index) ||
-				!StageResidentBufferCopyRange(
-					mStaticPrimitiveBuffer,
-					(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
-					mStaticMapScene.geometry.primitives.data() + nextAtlasChunk.primitiveOffset,
-					(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData),
-					NRIComputeShaderResourceAccess(),
-					ResidentUploadKind_Primitive))
 			{
-				return false;
+				ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveRewriteMs);
+				UploadChunkPrimitiveDataToAtlas(
+					residentGeometry,
+					sourceChunk,
+					nextAtlasChunk,
+					mStaticMapScene.geometry.primitives);
+				if (residentGeometry.primitiveProvenance.size() >= nextAtlasChunk.primitiveCount &&
+					nextAtlasChunk.primitiveOffset + nextAtlasChunk.primitiveCount <= mStaticMapScene.geometry.primitiveProvenance.size())
+				{
+					std::copy_n(
+						residentGeometry.primitiveProvenance.data(),
+						nextAtlasChunk.primitiveCount,
+						mStaticMapScene.geometry.primitiveProvenance.data() + nextAtlasChunk.primitiveOffset);
+				}
+				if (!StageResidentBufferCopyRange(
+						mStaticPrimitiveBuffer,
+						(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
+						mStaticMapScene.geometry.primitives.data() + nextAtlasChunk.primitiveOffset,
+						(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData),
+						NRIComputeShaderResourceAccess(),
+						ResidentUploadKind_Primitive))
+				{
+					return false;
+				}
 			}
 			mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=
 				(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);

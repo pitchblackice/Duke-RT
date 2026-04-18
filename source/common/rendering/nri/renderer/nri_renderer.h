@@ -213,6 +213,12 @@ public:
 		double runtimeMutationResidentApplyMaterialBuildMs = 0.0;
 		double runtimeMutationResidentApplyBaselineCaptureMs = 0.0;
 		double runtimeMutationResidentApplyAtlasMs = 0.0;
+		double runtimeMutationResidentApplyAtlasBookkeepingMs = 0.0;
+		double runtimeMutationResidentApplyVertexIndexCopyMs = 0.0;
+		double runtimeMutationResidentApplyPrimitiveRewriteMs = 0.0;
+		double runtimeMutationResidentApplyDownstreamBlasMs = 0.0;
+		double runtimeMutationResidentApplyDownstreamBlasSetupMs = 0.0;
+		double runtimeMutationResidentApplyDownstreamBlasBuildMs = 0.0;
 		double runtimeMutationAppendMs = 0.0;
 		double sceneLightStaticAppendMs = 0.0;
 		double sceneLightRuntimeMutationAppendMs = 0.0;
@@ -1288,6 +1294,17 @@ private:
 		const std::vector<uint32_t>& chunkListIndices,
 		const char* reason,
 		const std::vector<uint32_t>* animatedApplyChunkListIndices = nullptr);
+	void UploadChunkVertexAndIndexDataToAtlas(
+		const nri_scene::GeometryData& sourceGeometry,
+		const StaticMapSceneCache::ChunkCache& sourceChunk,
+		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+		std::vector<nri_scene::SceneVertex>& outVertices,
+		std::vector<uint32_t>& outIndices) const;
+	void UploadChunkPrimitiveDataToAtlas(
+		const nri_scene::GeometryData& sourceGeometry,
+		const StaticMapSceneCache::ChunkCache& sourceChunk,
+		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+		std::vector<nri_scene::PrimitiveData>& outPrimitives) const;
 	void UploadChunkGeometryToAtlas(
 		const nri_scene::GeometryData& sourceGeometry,
 		const StaticMapSceneCache::ChunkCache& sourceChunk,
