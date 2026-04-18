@@ -18553,6 +18553,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		nri_scene::SceneView liveChunkView;
 		nri_scene::PTMapWorldStats liveStats = {};
 		bool havePreparedLiveChunkView = false;
+		bool attemptedResidentComparableLiveChunkView = false;
+		bool haveResidentComparableLiveChunkView = false;
+		nri_scene::SceneView residentComparableLiveChunkView;
 		const auto prepareLiveChunkView = [&]() -> bool
 		{
 			if (havePreparedLiveChunkView)
@@ -18645,6 +18648,41 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 			inOutPreparedLiveMaterials = std::move(mergedMaterials);
 			return true;
+		};
+		const auto getResidentComparableLiveChunkView =
+			[&]() -> const nri_scene::SceneView*
+		{
+			if (attemptedResidentComparableLiveChunkView)
+			{
+				return haveResidentComparableLiveChunkView ? &residentComparableLiveChunkView : nullptr;
+			}
+
+			attemptedResidentComparableLiveChunkView = true;
+			haveResidentComparableLiveChunkView = false;
+			if (!IsPureSectorMaterialOnlyChunkReplacement(normalizedReasonMask))
+			{
+				return nullptr;
+			}
+
+			uint32_t residentChunkListIndex = UINT32_MAX;
+			const StaticMapSceneCache::ChunkCache* residentChunkCache = nullptr;
+			const nri_scene::SceneView* residentChunkView = nullptr;
+			if (!tryResolveResidentChunkState(residentChunkListIndex, residentChunkCache, residentChunkView) ||
+				residentChunkView == nullptr)
+			{
+				return nullptr;
+			}
+
+			if (!TryBuildMergedSectorMaterialOnlySceneView(
+				*residentChunkView,
+				liveChunkView,
+				residentComparableLiveChunkView))
+			{
+				return nullptr;
+			}
+
+			haveResidentComparableLiveChunkView = true;
+			return &residentComparableLiveChunkView;
 		};
 		const auto recordPreparedLiveChunkMaterialOnlyMismatch =
 			[&](const nri_scene::SceneView& preparedLiveChunkView,
@@ -18887,10 +18925,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				useStaticAnimatedReplacement ||
 				!materialOnlyReplacement ||
 				exclusiveMaterialOnlyReplacement;
+			const nri_scene::SceneView* residentComparableView = getResidentComparableLiveChunkView();
+			const nri_scene::SceneView& animatedSignatureSceneView =
+				residentComparableView != nullptr ? *residentComparableView : liveChunkView;
 			const uint64_t liveAnimatedGeometrySignature =
-				ComputeAnimatedGeometrySignature(liveChunkView);
+				ComputeAnimatedGeometrySignature(animatedSignatureSceneView);
 			const uint64_t liveAnimatedMaterialSignature =
-				ComputeAnimatedMaterialSignature(liveChunkView);
+				ComputeAnimatedMaterialSignature(animatedSignatureSceneView);
 			const uint32_t liveSurfaceCount = CountSceneViewSurfaces(liveChunkView);
 			BuildRuntimeMutationLightIdentityOverrides(
 				mMapWorld,
@@ -18963,10 +19004,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				useStaticAnimatedReplacement ||
 				!materialOnlyReplacement ||
 				exclusiveMaterialOnlyReplacement;
+			const nri_scene::SceneView* residentComparableView = getResidentComparableLiveChunkView();
+			const nri_scene::SceneView& animatedSignatureSceneView =
+				residentComparableView != nullptr ? *residentComparableView : liveChunkView;
 			const uint64_t liveAnimatedGeometrySignature =
-				ComputeAnimatedGeometrySignature(liveChunkView);
+				ComputeAnimatedGeometrySignature(animatedSignatureSceneView);
 			const uint64_t liveAnimatedMaterialSignature =
-				ComputeAnimatedMaterialSignature(liveChunkView);
+				ComputeAnimatedMaterialSignature(animatedSignatureSceneView);
 			const uint32_t liveSurfaceCount = CountSceneViewSurfaces(liveChunkView);
 			nri_scene::GeometryData liveGeometry;
 			if (exclusiveMaterialOnlyReplacement)
@@ -19153,10 +19197,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				const bool forceHardwareCanvasRefresh =
 					activeHardwareCanvasChunk &&
 					IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
+				const nri_scene::SceneView* residentComparableView = getResidentComparableLiveChunkView();
+				const nri_scene::SceneView& animatedSignatureSceneView =
+					residentComparableView != nullptr ? *residentComparableView : liveChunkView;
 				const uint64_t liveAnimatedGeometrySignature =
-					ComputeAnimatedGeometrySignature(liveChunkView);
+					ComputeAnimatedGeometrySignature(animatedSignatureSceneView);
 				const uint64_t liveAnimatedMaterialSignature =
-					ComputeAnimatedMaterialSignature(liveChunkView);
+					ComputeAnimatedMaterialSignature(animatedSignatureSceneView);
 				captureSectorDirtyTruth();
 				const bool residentAnimatedAlreadySynchronized =
 					!forceReplacementMaterialRefresh &&
