@@ -18100,6 +18100,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasReuseCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasUpdateCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitOnlyCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateNoPreviousAsCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateRecoveredEmptyCount = 0;
@@ -21276,6 +21277,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				0;
 		bool preserveResidentMaterialSlice = false;
 		bool preserveResidentIndexSlice = false;
+		bool preserveResidentBlasRefitOnly = false;
 		{
 			ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasBookkeepingMs);
 			sourceChunk.vertexOffset = 0;
@@ -21398,9 +21400,22 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				hasResidentChunk &&
 				keptGeometrySlices &&
 				previousGeometryTopologySignature == residentGeometryTopologySignature;
+			preserveResidentBlasRefitOnly =
+				!preserveResidentIndexSlice &&
+				!materialOnlyReplacement &&
+				hasResidentChunk &&
+				mStaticMapScene.chunks[chunkListIndex].accelerationStructure.accelerationStructure != nullptr &&
+				entry.indexCount == effectiveResidentIndexCount &&
+				entry.primitiveCount == effectiveResidentPrimitiveCount &&
+				entry.indexCount != 0 &&
+				entry.primitiveCount != 0;
 			if (preserveResidentIndexSlice)
 			{
 				mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount++;
+			}
+			if (preserveResidentBlasRefitOnly)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitOnlyCount++;
 			}
 
 			mStaticMapChunkAtlas = std::move(nextAtlasState);
@@ -21511,7 +21526,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mutableChunk.materialOffset = nextAtlasChunk.materialOffset;
 		mutableChunk.materialCount = nextAtlasChunk.materialCount;
 		mutableChunk.active = true;
-		mutableChunk.blasUpdateEligible = preserveResidentIndexSlice;
+		mutableChunk.blasUpdateEligible = preserveResidentIndexSlice || preserveResidentBlasRefitOnly;
 		mutableChunk.lastResidentBlasReasonMask = appliedReasonMask;
 		mutableChunk.lastResidentBlasSurfaceCount = outSurfaceCount;
 		mutableChunk.lastResidentBlasTriangleCount = outTriangleCount;

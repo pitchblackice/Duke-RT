@@ -314,6 +314,7 @@ public:
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasReuseCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasUpdateCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRefitOnlyCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRecreateCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRecreateNoPreviousAsCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRecreateRecoveredEmptyCount = 0;
