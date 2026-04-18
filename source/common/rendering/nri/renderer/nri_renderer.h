@@ -386,6 +386,7 @@ public:
 		uint32_t runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
+		uint32_t runtimeMutationResidentApplyPreservePrimitiveCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasReuseCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasUpdateCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRefitOnlyCount = 0;
