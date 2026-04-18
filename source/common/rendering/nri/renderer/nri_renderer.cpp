@@ -2885,6 +2885,43 @@ namespace
 		return score;
 	}
 
+	enum RuntimeResidentBlasRecreateFallbackBits : uint32_t
+	{
+		RuntimeResidentBlasRecreateFallback_NoPreviousAs = 1u << 0,
+		RuntimeResidentBlasRecreateFallback_RecoveredEmpty = 1u << 1,
+		RuntimeResidentBlasRecreateFallback_SliceMoved = 1u << 2,
+		RuntimeResidentBlasRecreateFallback_TopologyChanged = 1u << 3,
+		RuntimeResidentBlasRecreateFallback_ForceTopology = 1u << 4,
+	};
+
+	uint32_t ScoreRuntimeResidentBlasRecreateTraceEntry(const NRIRenderer::RuntimeResidentBlasRecreateTraceEntry& entry)
+	{
+		uint32_t score = entry.triangleCount * 8u;
+		score += entry.surfaceCount * 4u;
+		score += entry.materialCount * 2u;
+		if ((entry.fallbackMask & RuntimeResidentBlasRecreateFallback_TopologyChanged) != 0)
+		{
+			score += 1u << 20;
+		}
+		if ((entry.fallbackMask & RuntimeResidentBlasRecreateFallback_ForceTopology) != 0)
+		{
+			score += 1u << 19;
+		}
+		if ((entry.fallbackMask & RuntimeResidentBlasRecreateFallback_SliceMoved) != 0)
+		{
+			score += 1u << 18;
+		}
+		if ((entry.fallbackMask & RuntimeResidentBlasRecreateFallback_NoPreviousAs) != 0)
+		{
+			score += 1u << 17;
+		}
+		if ((entry.fallbackMask & RuntimeResidentBlasRecreateFallback_RecoveredEmpty) != 0)
+		{
+			score += 1u << 16;
+		}
+		return score;
+	}
+
 	template <typename Entry, size_t N, typename ScoreFn>
 	void InsertRankedTraceEntry(std::array<Entry, N>& entries, Entry entry, ScoreFn scoreFn)
 	{
@@ -18061,6 +18098,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveGeometryCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasReuseCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasUpdateCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateNoPreviousAsCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateRecoveredEmptyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateSliceMovedCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateTopologyChangedCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateForceTopologyCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepGeometrySliceCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepMaterialSliceCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyEmptyRemovalCount = 0;
@@ -18113,6 +18158,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeSectorDirtyTruthEntries = {};
 	mLastPerfShellTraceStats.runtimeAnimatedChurnEntries = {};
 	mLastPerfShellTraceStats.runtimeMaterialOnlyMismatchEntries = {};
+	mLastPerfShellTraceStats.runtimeResidentBlasRecreateEntries = {};
 	struct RuntimeAnimatedFrameTraceStats
 	{
 		bool touched = false;
@@ -18325,7 +18371,6 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			entry,
 			ScoreRuntimeMaterialOnlyMismatchTraceEntry);
 	};
-
 	if (!mStaticMapScene.valid ||
 		mRuntimeMapMutations.chunks.size() != mMapWorld.chunks.size())
 	{
@@ -20607,10 +20652,11 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 		{
 			auto& chunk = mStaticMapScene.chunks[chunkListIndex];
 			const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+			const bool hadAccelerationStructure = chunk.accelerationStructure.accelerationStructure != nullptr;
 
 			const bool canUpdateResidentBlas =
 				chunk.blasUpdateEligible &&
-				chunk.accelerationStructure.accelerationStructure != nullptr;
+				hadAccelerationStructure;
 			chunk.blasUpdateEligible = canUpdateResidentBlas;
 			if (canUpdateResidentBlas)
 			{
@@ -20623,6 +20669,56 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 			else
 			{
 				mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateCount++;
+				uint32_t fallbackMask = 0;
+				if (!hadAccelerationStructure)
+				{
+					fallbackMask |= RuntimeResidentBlasRecreateFallback_NoPreviousAs;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateNoPreviousAsCount++;
+				}
+				if (chunk.lastResidentBlasRecoveredEmpty)
+				{
+					fallbackMask |= RuntimeResidentBlasRecreateFallback_RecoveredEmpty;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateRecoveredEmptyCount++;
+				}
+				if (!chunk.lastResidentBlasKeptGeometrySlice)
+				{
+					fallbackMask |= RuntimeResidentBlasRecreateFallback_SliceMoved;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateSliceMovedCount++;
+				}
+				if (chunk.lastResidentBlasTopologyChanged)
+				{
+					fallbackMask |= RuntimeResidentBlasRecreateFallback_TopologyChanged;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateTopologyChangedCount++;
+				}
+				if (chunk.lastResidentBlasForceTopology)
+				{
+					fallbackMask |= RuntimeResidentBlasRecreateFallback_ForceTopology;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateForceTopologyCount++;
+				}
+				if (ShouldTracePtPerf())
+				{
+					RuntimeResidentBlasRecreateTraceEntry entry = {};
+					entry.valid = true;
+					entry.chunkIndex = chunk.chunkIndex;
+					entry.sectorIndex =
+						chunk.chunkIndex < mMapWorld.chunks.size() ?
+						mMapWorld.chunks[chunk.chunkIndex].sectorIndex :
+						-1;
+					entry.reasonMask = chunk.lastResidentBlasReasonMask;
+					entry.fallbackMask = fallbackMask;
+					entry.surfaceCount = chunk.lastResidentBlasSurfaceCount;
+					entry.triangleCount = chunk.lastResidentBlasTriangleCount;
+					entry.materialCount = chunk.lastResidentBlasMaterialCount;
+					entry.forceTopology = chunk.lastResidentBlasForceTopology;
+					entry.recoveredEmpty = chunk.lastResidentBlasRecoveredEmpty;
+					entry.keptGeometrySlice = chunk.lastResidentBlasKeptGeometrySlice;
+					entry.topologyChanged = chunk.lastResidentBlasTopologyChanged;
+					entry.hadAccelerationStructure = hadAccelerationStructure;
+					InsertRankedTraceEntry(
+						mLastPerfShellTraceStats.runtimeResidentBlasRecreateEntries,
+						entry,
+						ScoreRuntimeResidentBlasRecreateTraceEntry);
+				}
 				RetireResidentAccelerationStructure(chunk.accelerationStructure);
 
 				nri::BottomLevelGeometryDesc geometryDesc = {};
@@ -20909,6 +21005,13 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const uint32_t materialReasonMask =
 		nri_scene::PTMapChunkMutationReason_SectorMaterial |
 		nri_scene::PTMapChunkMutationReason_WallMaterial;
+	const bool appliedForceTopology =
+		(appliedReasonMask & (
+			nri_scene::PTMapChunkMutationReason_SectorGeometry |
+			nri_scene::PTMapChunkMutationReason_WallGeometry |
+			nri_scene::PTMapChunkMutationReason_SectorDirty |
+			nri_scene::PTMapChunkMutationReason_SectionDirty |
+			nri_scene::PTMapChunkMutationReason_Dragged)) != 0;
 	const bool hasResidentGeometry =
 		hasResidentChunk &&
 		mStaticMapScene.chunks[resolvedChunkListIndex].active &&
@@ -21083,6 +21186,14 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			mStaticMapChunkAtlas.chunks[chunkListIndex].staticSceneChunkListIndex = chunkListIndex;
 			mutableChunk.active = false;
 			mutableChunk.blasUpdateEligible = false;
+			mutableChunk.lastResidentBlasReasonMask = 0;
+			mutableChunk.lastResidentBlasSurfaceCount = 0;
+			mutableChunk.lastResidentBlasTriangleCount = 0;
+			mutableChunk.lastResidentBlasMaterialCount = 0;
+			mutableChunk.lastResidentBlasForceTopology = false;
+			mutableChunk.lastResidentBlasRecoveredEmpty = false;
+			mutableChunk.lastResidentBlasKeptGeometrySlice = false;
+			mutableChunk.lastResidentBlasTopologyChanged = false;
 			mutableChunk.vertexCount = 0;
 			mutableChunk.indexCount = 0;
 			mutableChunk.primitiveCount = 0;
@@ -21401,6 +21512,16 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mutableChunk.materialCount = nextAtlasChunk.materialCount;
 		mutableChunk.active = true;
 		mutableChunk.blasUpdateEligible = preserveResidentIndexSlice;
+		mutableChunk.lastResidentBlasReasonMask = appliedReasonMask;
+		mutableChunk.lastResidentBlasSurfaceCount = outSurfaceCount;
+		mutableChunk.lastResidentBlasTriangleCount = outTriangleCount;
+		mutableChunk.lastResidentBlasMaterialCount = outMaterialCount;
+		mutableChunk.lastResidentBlasForceTopology = appliedForceTopology;
+		mutableChunk.lastResidentBlasRecoveredEmpty = outRecoveredEmpty;
+		mutableChunk.lastResidentBlasKeptGeometrySlice = keptGeometrySlices;
+		mutableChunk.lastResidentBlasTopologyChanged =
+			hasResidentChunk &&
+			previousGeometryTopologySignature != residentGeometryTopologySignature;
 		if (!preserveResidentMaterialSlice)
 		{
 			mutableChunk.materialBridge = residentMaterials;

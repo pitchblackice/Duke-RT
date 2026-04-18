@@ -3194,6 +3194,40 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationResidentApplyRecoverSuccessCount,
 			shell.runtimeMutationResidentApplyAtlasGrowCount);
 		Printf(
+			"PERF pt resident blas recreate summary NRI: frame=%llu recreates=%u no_prev_as=%u recovered_empty=%u slice_moved=%u topology_changed=%u force_topology=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeMutationResidentApplyBlasRecreateCount,
+			shell.runtimeMutationResidentApplyBlasRecreateNoPreviousAsCount,
+			shell.runtimeMutationResidentApplyBlasRecreateRecoveredEmptyCount,
+			shell.runtimeMutationResidentApplyBlasRecreateSliceMovedCount,
+			shell.runtimeMutationResidentApplyBlasRecreateTopologyChangedCount,
+			shell.runtimeMutationResidentApplyBlasRecreateForceTopologyCount);
+		for (size_t index = 0; index < NRIRenderer::RuntimeResidentBlasRecreateTraceCount; ++index)
+		{
+			const auto& entry = shell.runtimeResidentBlasRecreateEntries[index];
+			if (!entry.valid)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt resident blas recreate top NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x fallback=0x%x surfaces=%u tris=%u mats=%u force_topology=%u recovered_empty=%u kept_slice=%u topology_changed=%u had_as=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned)(index + 1),
+				entry.chunkIndex,
+				entry.sectorIndex,
+				entry.reasonMask,
+				entry.fallbackMask,
+				entry.surfaceCount,
+				entry.triangleCount,
+				entry.materialCount,
+				entry.forceTopology ? 1u : 0u,
+				entry.recoveredEmpty ? 1u : 0u,
+				entry.keptGeometrySlice ? 1u : 0u,
+				entry.topologyChanged ? 1u : 0u,
+				entry.hadAccelerationStructure ? 1u : 0u);
+		}
+		Printf(
 			"PERF pt material-only mismatch summary NRI: frame=%llu mismatches=%u refresh=%u rebuild=%u filtered_wall_only=%u filtered_flat_only=%u filtered_mixed=%u resident_wall_only=%u resident_flat_only=%u resident_mixed=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationMaterialOnlyMismatchCount,

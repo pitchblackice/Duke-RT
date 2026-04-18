@@ -99,6 +99,7 @@ public:
 	static constexpr size_t RuntimeSectorDirtyTruthTraceCount = 8;
 	static constexpr size_t RuntimeAnimatedChurnTraceCount = 4;
 	static constexpr size_t RuntimeMaterialOnlyMismatchTraceCount = 8;
+	static constexpr size_t RuntimeResidentBlasRecreateTraceCount = 8;
 
 	enum class RuntimeMutationTraceAction : uint8_t
 	{
@@ -185,6 +186,24 @@ public:
 		uint32_t filteredFlatCount = 0;
 		uint32_t residentWallCount = 0;
 		uint32_t residentFlatCount = 0;
+	};
+
+	struct RuntimeResidentBlasRecreateTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t reasonMask = 0;
+		uint32_t fallbackMask = 0;
+		uint32_t surfaceCount = 0;
+		uint32_t triangleCount = 0;
+		uint32_t materialCount = 0;
+		bool forceTopology = false;
+		bool recoveredEmpty = false;
+		bool keptGeometrySlice = false;
+		bool topologyChanged = false;
+		bool hadAccelerationStructure = false;
 	};
 
 	struct PerfShellTraceStats
@@ -296,6 +315,11 @@ public:
 		uint32_t runtimeMutationResidentApplyBlasReuseCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasUpdateCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRecreateCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRecreateNoPreviousAsCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRecreateRecoveredEmptyCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRecreateSliceMovedCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRecreateTopologyChangedCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasRecreateForceTopologyCount = 0;
 		uint32_t runtimeMutationResidentApplyKeepGeometrySliceCount = 0;
 		uint32_t runtimeMutationResidentApplyKeepMaterialSliceCount = 0;
 		uint32_t runtimeMutationResidentApplyEmptyRemovalCount = 0;
@@ -400,6 +424,7 @@ public:
 		std::array<RuntimeSectorDirtyTruthTraceEntry, RuntimeSectorDirtyTruthTraceCount> runtimeSectorDirtyTruthEntries = {};
 		std::array<RuntimeAnimatedChurnTraceEntry, RuntimeAnimatedChurnTraceCount> runtimeAnimatedChurnEntries = {};
 		std::array<RuntimeMaterialOnlyMismatchTraceEntry, RuntimeMaterialOnlyMismatchTraceCount> runtimeMaterialOnlyMismatchEntries = {};
+		std::array<RuntimeResidentBlasRecreateTraceEntry, RuntimeResidentBlasRecreateTraceCount> runtimeResidentBlasRecreateEntries = {};
 	};
 
 	struct PerfResourceTraceStats
@@ -837,6 +862,14 @@ private:
 			uint64_t animatedGeometrySignature = 0;
 			bool active = true;
 			bool blasUpdateEligible = false;
+			uint32_t lastResidentBlasReasonMask = 0;
+			uint32_t lastResidentBlasSurfaceCount = 0;
+			uint32_t lastResidentBlasTriangleCount = 0;
+			uint32_t lastResidentBlasMaterialCount = 0;
+			bool lastResidentBlasForceTopology = false;
+			bool lastResidentBlasRecoveredEmpty = false;
+			bool lastResidentBlasKeptGeometrySlice = false;
+			bool lastResidentBlasTopologyChanged = false;
 			bool hasAnimatedTextureCandidates = false;
 			bool animatedRefreshSuppressed = false;
 			nri_scene::MaterialBridgeData materialBridge;
