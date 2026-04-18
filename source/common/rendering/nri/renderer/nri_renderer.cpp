@@ -18243,7 +18243,6 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveGeometryCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount = 0;
-	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreservePrimitiveCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasReuseCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasUpdateCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRefitOnlyCount = 0;
@@ -21720,7 +21719,6 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				0;
 		bool preserveResidentMaterialSlice = false;
 		bool preserveResidentIndexSlice = false;
-		bool preserveResidentPrimitiveSlice = false;
 		bool preserveResidentBlasRefitOnly = false;
 		{
 			ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasBookkeepingMs);
@@ -21844,11 +21842,6 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				hasResidentChunk &&
 				keptGeometrySlices &&
 				previousGeometryTopologySignature == residentGeometryTopologySignature;
-			preserveResidentPrimitiveSlice =
-				preserveResidentIndexSlice &&
-				preserveResidentMaterialSlice &&
-				hasResidentChunk &&
-				keptGeometrySlices;
 			const bool probeResidentBlasRefitOnly =
 				!preserveResidentIndexSlice &&
 				!materialOnlyReplacement &&
@@ -21907,10 +21900,6 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			if (preserveResidentIndexSlice)
 			{
 				mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount++;
-			}
-			if (preserveResidentPrimitiveSlice)
-			{
-				mLastPerfShellTraceStats.runtimeMutationResidentApplyPreservePrimitiveCount++;
 			}
 			if (preserveResidentBlasRefitOnly)
 			{
@@ -21979,31 +21968,28 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			}
 			{
 				ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveRewriteMs);
-				if (!preserveResidentPrimitiveSlice)
+				UploadChunkPrimitiveDataToAtlas(
+					residentGeometry,
+					sourceChunk,
+					nextAtlasChunk,
+					mStaticMapScene.geometry.primitives);
+				if (residentGeometry.primitiveProvenance.size() >= nextAtlasChunk.primitiveCount &&
+					nextAtlasChunk.primitiveOffset + nextAtlasChunk.primitiveCount <= mStaticMapScene.geometry.primitiveProvenance.size())
 				{
-					UploadChunkPrimitiveDataToAtlas(
-						residentGeometry,
-						sourceChunk,
-						nextAtlasChunk,
-						mStaticMapScene.geometry.primitives);
-					if (residentGeometry.primitiveProvenance.size() >= nextAtlasChunk.primitiveCount &&
-						nextAtlasChunk.primitiveOffset + nextAtlasChunk.primitiveCount <= mStaticMapScene.geometry.primitiveProvenance.size())
-					{
-						std::copy_n(
-							residentGeometry.primitiveProvenance.data(),
-							nextAtlasChunk.primitiveCount,
-							mStaticMapScene.geometry.primitiveProvenance.data() + nextAtlasChunk.primitiveOffset);
-					}
-					if (!StageResidentBufferCopyRange(
-							mStaticPrimitiveBuffer,
-							(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
-							mStaticMapScene.geometry.primitives.data() + nextAtlasChunk.primitiveOffset,
-							(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData),
-							NRIComputeShaderResourceAccess(),
-							ResidentUploadKind_Primitive))
-					{
-						return false;
-					}
+					std::copy_n(
+						residentGeometry.primitiveProvenance.data(),
+						nextAtlasChunk.primitiveCount,
+						mStaticMapScene.geometry.primitiveProvenance.data() + nextAtlasChunk.primitiveOffset);
+				}
+				if (!StageResidentBufferCopyRange(
+						mStaticPrimitiveBuffer,
+						(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
+						mStaticMapScene.geometry.primitives.data() + nextAtlasChunk.primitiveOffset,
+						(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData),
+						NRIComputeShaderResourceAccess(),
+						ResidentUploadKind_Primitive))
+				{
+					return false;
 				}
 			}
 			mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=
@@ -22013,11 +21999,8 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				mLastPerfResourceTraceStats.residentChunkBatchIndexBytes +=
 					(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t);
 			}
-			if (!preserveResidentPrimitiveSlice)
-			{
-				mLastPerfResourceTraceStats.residentChunkBatchPrimitiveBytes +=
-					(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
-			}
+			mLastPerfResourceTraceStats.residentChunkBatchPrimitiveBytes +=
+				(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
 		}
 
 		auto& mutableChunk = mStaticMapScene.chunks[chunkListIndex];

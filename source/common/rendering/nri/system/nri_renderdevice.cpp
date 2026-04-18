@@ -3159,7 +3159,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationValidStructuralCount,
 			shell.runtimeMutationValidMaterialCount);
 		Printf(
-			"PERF pt resident apply detail NRI: frame=%llu total_ms=%.3f live_build_ms=%.3f geometry_ms=%.3f material_ms=%.3f baseline_ms=%.3f atlas_ms=%.3f atlas_bookkeeping_ms=%.3f vertex_index_copy_ms=%.3f primitive_rewrite_ms=%.3f downstream_blas_ms=%.3f downstream_blas_setup_ms=%.3f downstream_blas_build_ms=%.3f calls=%u material_only=%u structural=%u fast_material_only=%u slow_material_only=%u material_only_exclusive=%u block_no_resident=%u block_replacement_invalid=%u block_material_count=%u preserve_geo=%u preserve_index=%u preserve_primitive=%u blas_reuse=%u blas_update=%u blas_refit_only=%u blas_recreate=%u keep_geo_slice=%u keep_mat_slice=%u empty_remove=%u recover_attempts=%u recover_success=%u atlas_grows=%u\n",
+			"PERF pt resident apply detail NRI: frame=%llu total_ms=%.3f live_build_ms=%.3f geometry_ms=%.3f material_ms=%.3f baseline_ms=%.3f atlas_ms=%.3f atlas_bookkeeping_ms=%.3f vertex_index_copy_ms=%.3f primitive_rewrite_ms=%.3f downstream_blas_ms=%.3f downstream_blas_setup_ms=%.3f downstream_blas_build_ms=%.3f calls=%u material_only=%u structural=%u fast_material_only=%u slow_material_only=%u material_only_exclusive=%u block_no_resident=%u block_replacement_invalid=%u block_material_count=%u preserve_geo=%u preserve_index=%u blas_reuse=%u blas_update=%u blas_refit_only=%u blas_recreate=%u keep_geo_slice=%u keep_mat_slice=%u empty_remove=%u recover_attempts=%u recover_success=%u atlas_grows=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationResidentApplyMs,
 			shell.runtimeMutationResidentApplyLiveBuildMs,
@@ -3184,7 +3184,6 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount,
 			shell.runtimeMutationResidentApplyPreserveGeometryCount,
 			shell.runtimeMutationResidentApplyPreserveIndexCount,
-			shell.runtimeMutationResidentApplyPreservePrimitiveCount,
 			shell.runtimeMutationResidentApplyBlasReuseCount,
 			shell.runtimeMutationResidentApplyBlasUpdateCount,
 			shell.runtimeMutationResidentApplyBlasRefitOnlyCount,
