@@ -2846,6 +2846,27 @@ namespace
 		return score;
 	}
 
+	uint32_t ScoreRuntimeMaterialOnlyMismatchTraceEntry(const NRIRenderer::RuntimeMaterialOnlyMismatchTraceEntry& entry)
+	{
+		const uint32_t materialDelta =
+			entry.residentMaterialCount > entry.filteredMaterialCount ?
+			entry.residentMaterialCount - entry.filteredMaterialCount :
+			entry.filteredMaterialCount - entry.residentMaterialCount;
+		uint32_t score = materialDelta * 128u;
+		score += entry.residentMaterialCount * 16u;
+		score += entry.filteredSurfaceCount * 8u;
+		score += (entry.filteredWallCount + entry.filteredFlatCount) * 4u;
+		if (entry.filteredWallCount != 0 && entry.filteredFlatCount != 0)
+		{
+			score += 1u << 18;
+		}
+		if (entry.residentWallCount != 0 && entry.residentFlatCount != 0)
+		{
+			score += 1u << 17;
+		}
+		return score;
+	}
+
 	template <typename Entry, size_t N, typename ScoreFn>
 	void InsertRankedTraceEntry(std::array<Entry, N>& entries, Entry entry, ScoreFn scoreFn)
 	{
@@ -17873,6 +17894,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyRecoverAttemptCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyRecoverSuccessCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasGrowCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredWallOnlyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredFlatOnlyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredMixedCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentWallOnlyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentFlatOnlyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentMixedCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedSuppressedActiveCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedSuppressionEmitCount = 0;
 	mLastPerfShellTraceStats.runtimeAnimatedUniqueTouchedCount = 0;
@@ -17909,6 +17937,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationTopEntries = {};
 	mLastPerfShellTraceStats.runtimeSectorDirtyTruthEntries = {};
 	mLastPerfShellTraceStats.runtimeAnimatedChurnEntries = {};
+	mLastPerfShellTraceStats.runtimeMaterialOnlyMismatchEntries = {};
 	struct RuntimeAnimatedFrameTraceStats
 	{
 		bool touched = false;
@@ -18084,6 +18113,40 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeSectorDirtyTruthEntries,
 			entry,
 			ScoreRuntimeSectorDirtyTruthEntry);
+	};
+	const auto recordMaterialOnlyMismatchEntry =
+		[this](uint32_t chunkIndex,
+			int32_t sectorIndex,
+			uint32_t reasonMask,
+			uint32_t filteredSurfaceCount,
+			uint32_t filteredMaterialCount,
+			uint32_t residentMaterialCount,
+			uint32_t filteredWallCount,
+			uint32_t filteredFlatCount,
+			uint32_t residentWallCount,
+			uint32_t residentFlatCount)
+	{
+		if (!ShouldTracePtPerf())
+		{
+			return;
+		}
+
+		RuntimeMaterialOnlyMismatchTraceEntry entry = {};
+		entry.valid = true;
+		entry.chunkIndex = chunkIndex;
+		entry.sectorIndex = sectorIndex;
+		entry.reasonMask = reasonMask;
+		entry.filteredSurfaceCount = filteredSurfaceCount;
+		entry.filteredMaterialCount = filteredMaterialCount;
+		entry.residentMaterialCount = residentMaterialCount;
+		entry.filteredWallCount = filteredWallCount;
+		entry.filteredFlatCount = filteredFlatCount;
+		entry.residentWallCount = residentWallCount;
+		entry.residentFlatCount = residentFlatCount;
+		InsertRankedTraceEntry(
+			mLastPerfShellTraceStats.runtimeMaterialOnlyMismatchEntries,
+			entry,
+			ScoreRuntimeMaterialOnlyMismatchTraceEntry);
 	};
 
 	if (!mStaticMapScene.valid ||
@@ -18632,6 +18695,75 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					liveSurfaceCount,
 					liveMaterials);
 				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
+			}
+			if (!exclusiveMaterialOnlyReplacement &&
+				residentEntry != nullptr &&
+				residentEntry->valid)
+			{
+				const uint32_t filteredMaterialCount = (uint32_t)liveMaterials.materials.size();
+				const uint32_t residentMaterialCount = residentEntry->materialCount;
+				if (filteredMaterialCount != residentMaterialCount)
+				{
+					uint32_t residentWallCount = 0;
+					uint32_t residentFlatCount = 0;
+					uint32_t residentChunkListIndex = residentEntry->staticSceneChunkListIndex;
+					const bool residentChunkListIndexValid =
+						residentChunkListIndex < mStaticMapScene.chunks.size() &&
+						mStaticMapScene.chunks[residentChunkListIndex].chunkIndex == mapChunk.chunkIndex;
+					if (!residentChunkListIndexValid)
+					{
+						residentChunkListIndex = FindPreferredStaticSceneChunkListIndex(mapChunk.chunkIndex);
+					}
+					if (residentChunkListIndex < mStaticMapScene.chunks.size() &&
+						residentChunkListIndex < mStaticMapScene.lightChunkViews.size() &&
+						mStaticMapScene.chunks[residentChunkListIndex].active)
+					{
+						const auto& residentChunkView = mStaticMapScene.lightChunkViews[residentChunkListIndex];
+						residentWallCount = (uint32_t)residentChunkView.opaqueWalls.size();
+						residentFlatCount = (uint32_t)residentChunkView.opaqueFlats.size();
+					}
+
+					const uint32_t filteredWallCount = (uint32_t)liveChunkView.opaqueWalls.size();
+					const uint32_t filteredFlatCount = (uint32_t)liveChunkView.opaqueFlats.size();
+					mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchCount++;
+					if (filteredWallCount != 0 && filteredFlatCount == 0)
+					{
+						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredWallOnlyCount++;
+					}
+					else if (filteredFlatCount != 0 && filteredWallCount == 0)
+					{
+						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredFlatOnlyCount++;
+					}
+					else
+					{
+						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchFilteredMixedCount++;
+					}
+
+					if (residentWallCount != 0 && residentFlatCount == 0)
+					{
+						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentWallOnlyCount++;
+					}
+					else if (residentFlatCount != 0 && residentWallCount == 0)
+					{
+						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentFlatOnlyCount++;
+					}
+					else
+					{
+						mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchResidentMixedCount++;
+					}
+
+					recordMaterialOnlyMismatchEntry(
+						mapChunk.chunkIndex,
+						mapChunk.sectorIndex,
+						normalizedReasonMask,
+						liveSurfaceCount,
+						filteredMaterialCount,
+						residentMaterialCount,
+						filteredWallCount,
+						filteredFlatCount,
+						residentWallCount,
+						residentFlatCount);
+				}
 			}
 			nri_scene::PTMapChunkMutationBaseline liveBaseline;
 			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))

@@ -3183,6 +3183,39 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.runtimeMutationResidentApplyRecoverAttemptCount,
 			shell.runtimeMutationResidentApplyRecoverSuccessCount,
 			shell.runtimeMutationResidentApplyAtlasGrowCount);
+		Printf(
+			"PERF pt material-only mismatch summary NRI: frame=%llu mismatches=%u filtered_wall_only=%u filtered_flat_only=%u filtered_mixed=%u resident_wall_only=%u resident_flat_only=%u resident_mixed=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeMutationMaterialOnlyMismatchCount,
+			shell.runtimeMutationMaterialOnlyMismatchFilteredWallOnlyCount,
+			shell.runtimeMutationMaterialOnlyMismatchFilteredFlatOnlyCount,
+			shell.runtimeMutationMaterialOnlyMismatchFilteredMixedCount,
+			shell.runtimeMutationMaterialOnlyMismatchResidentWallOnlyCount,
+			shell.runtimeMutationMaterialOnlyMismatchResidentFlatOnlyCount,
+			shell.runtimeMutationMaterialOnlyMismatchResidentMixedCount);
+		for (size_t index = 0; index < NRIRenderer::RuntimeMaterialOnlyMismatchTraceCount; ++index)
+		{
+			const auto& entry = shell.runtimeMaterialOnlyMismatchEntries[index];
+			if (!entry.valid)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt material-only mismatch top NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x filtered_surfaces=%u filtered_mats=%u resident_mats=%u filtered_walls=%u filtered_flats=%u resident_walls=%u resident_flats=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned)(index + 1),
+				entry.chunkIndex,
+				entry.sectorIndex,
+				entry.reasonMask,
+				entry.filteredSurfaceCount,
+				entry.filteredMaterialCount,
+				entry.residentMaterialCount,
+				entry.filteredWallCount,
+				entry.filteredFlatCount,
+				entry.residentWallCount,
+				entry.residentFlatCount);
+		}
 		for (size_t index = 0; index < NRIRenderer::RuntimeMutationTopTraceCount; ++index)
 		{
 			const auto& entry = shell.runtimeMutationTopEntries[index];

@@ -98,6 +98,7 @@ public:
 	static constexpr size_t RuntimeMutationTopTraceCount = 8;
 	static constexpr size_t RuntimeSectorDirtyTruthTraceCount = 8;
 	static constexpr size_t RuntimeAnimatedChurnTraceCount = 4;
+	static constexpr size_t RuntimeMaterialOnlyMismatchTraceCount = 8;
 
 	enum class RuntimeMutationTraceAction : uint8_t
 	{
@@ -167,6 +168,22 @@ public:
 		uint32_t runtimeAttempts = 0;
 		uint32_t residentApplies = 0;
 		uint32_t syncSkips = 0;
+	};
+
+	struct RuntimeMaterialOnlyMismatchTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t reasonMask = 0;
+		uint32_t filteredSurfaceCount = 0;
+		uint32_t filteredMaterialCount = 0;
+		uint32_t residentMaterialCount = 0;
+		uint32_t filteredWallCount = 0;
+		uint32_t filteredFlatCount = 0;
+		uint32_t residentWallCount = 0;
+		uint32_t residentFlatCount = 0;
 	};
 
 	struct PerfShellTraceStats
@@ -274,6 +291,13 @@ public:
 		uint32_t runtimeMutationResidentApplyRecoverAttemptCount = 0;
 		uint32_t runtimeMutationResidentApplyRecoverSuccessCount = 0;
 		uint32_t runtimeMutationResidentApplyAtlasGrowCount = 0;
+		uint32_t runtimeMutationMaterialOnlyMismatchCount = 0;
+		uint32_t runtimeMutationMaterialOnlyMismatchFilteredWallOnlyCount = 0;
+		uint32_t runtimeMutationMaterialOnlyMismatchFilteredFlatOnlyCount = 0;
+		uint32_t runtimeMutationMaterialOnlyMismatchFilteredMixedCount = 0;
+		uint32_t runtimeMutationMaterialOnlyMismatchResidentWallOnlyCount = 0;
+		uint32_t runtimeMutationMaterialOnlyMismatchResidentFlatOnlyCount = 0;
+		uint32_t runtimeMutationMaterialOnlyMismatchResidentMixedCount = 0;
 		uint32_t runtimeAnimatedSuppressedActiveCount = 0;
 		uint32_t runtimeAnimatedSuppressionEmitCount = 0;
 		uint32_t runtimeAnimatedUniqueTouchedCount = 0;
@@ -362,6 +386,7 @@ public:
 		std::array<RuntimeMutationTopTraceEntry, RuntimeMutationTopTraceCount> runtimeMutationTopEntries = {};
 		std::array<RuntimeSectorDirtyTruthTraceEntry, RuntimeSectorDirtyTruthTraceCount> runtimeSectorDirtyTruthEntries = {};
 		std::array<RuntimeAnimatedChurnTraceEntry, RuntimeAnimatedChurnTraceCount> runtimeAnimatedChurnEntries = {};
+		std::array<RuntimeMaterialOnlyMismatchTraceEntry, RuntimeMaterialOnlyMismatchTraceCount> runtimeMaterialOnlyMismatchEntries = {};
 	};
 
 	struct PerfResourceTraceStats
