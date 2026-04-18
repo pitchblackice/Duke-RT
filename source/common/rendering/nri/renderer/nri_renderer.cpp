@@ -20803,24 +20803,35 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 					nextAtlasChunk.primitiveCount,
 					mStaticMapScene.geometry.primitiveProvenance.data() + nextAtlasChunk.primitiveOffset);
 			}
+
+			std::vector<nri_scene::SceneVertex> atlasVertices(nextAtlasChunk.vertexOffset + nextAtlasChunk.vertexCount);
+			std::vector<uint32_t> atlasIndices(nextAtlasChunk.indexOffset + nextAtlasChunk.indexCount);
+			std::vector<nri_scene::PrimitiveData> atlasPrimitives(nextAtlasChunk.primitiveOffset + nextAtlasChunk.primitiveCount);
+			UploadChunkGeometryToAtlas(
+				residentGeometry,
+				sourceChunk,
+				nextAtlasChunk,
+				atlasVertices,
+				atlasIndices,
+				atlasPrimitives);
 			if (!StageResidentBufferCopyRange(
 					mStaticVertexBuffer,
 					(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
-					mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
+					atlasVertices.data() + nextAtlasChunk.vertexOffset,
 					(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
 					NRIAccelerationStructureBuildInputAccess(),
 					ResidentUploadKind_Vertex) ||
 				!StageResidentBufferCopyRange(
 					mStaticIndexBuffer,
 					(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
-					mStaticMapScene.geometry.indices.data() + nextAtlasChunk.indexOffset,
+					atlasIndices.data() + nextAtlasChunk.indexOffset,
 					(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t),
 					NRIAccelerationStructureBuildInputAccess(),
 					ResidentUploadKind_Index) ||
 				!StageResidentBufferCopyRange(
 					mStaticPrimitiveBuffer,
 					(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
-					mStaticMapScene.geometry.primitives.data() + nextAtlasChunk.primitiveOffset,
+					atlasPrimitives.data() + nextAtlasChunk.primitiveOffset,
 					(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData),
 					NRIComputeShaderResourceAccess(),
 					ResidentUploadKind_Primitive))
