@@ -1749,6 +1749,11 @@ public:
 		}
 	}
 
+	static bool IsPureSectorMaterialOnlyChunkReplacement(uint32_t reasonMask)
+	{
+		return reasonMask == nri_scene::PTMapChunkMutationReason_SectorMaterial;
+	}
+
 	static uint64_t HashLightOverlayText(uint64_t hash, const char* text)
 	{
 		if (text == nullptr)
@@ -4904,6 +4909,82 @@ namespace
 				inOutTextureTable.paletteHeight = source.paletteHeight;
 			}
 		}
+	}
+
+	static bool TryBuildMergedSectorMaterialOnlyBridge(
+		const nri_scene::SceneView& residentChunkView,
+		const nri_scene::MaterialBridgeData& residentChunkMaterials,
+		const nri_scene::SceneView& filteredLiveChunkView,
+		const nri_scene::MaterialBridgeData& filteredLiveMaterials,
+		nri_scene::MaterialBridgeData& outMergedMaterials)
+	{
+		if (!filteredLiveChunkView.opaqueWalls.empty())
+		{
+			return false;
+		}
+
+		const uint32_t residentWallCount = (uint32_t)residentChunkView.opaqueWalls.size();
+		const uint32_t residentFlatCount = (uint32_t)residentChunkView.opaqueFlats.size();
+		if (residentFlatCount == 0 ||
+			filteredLiveChunkView.opaqueFlats.size() != residentFlatCount ||
+			filteredLiveMaterials.materials.size() != residentFlatCount ||
+			filteredLiveMaterials.lightMetadata.size() != residentFlatCount)
+		{
+			return false;
+		}
+
+		if (residentChunkMaterials.materials.size() != residentChunkMaterials.lightMetadata.size() ||
+			residentWallCount + residentFlatCount > residentChunkMaterials.materials.size())
+		{
+			return false;
+		}
+
+		outMergedMaterials = residentChunkMaterials;
+		nri_scene::MaterialBridgeData remappedFlatMaterials;
+		RemapMaterialBridgeAgainstTextureTable(
+			filteredLiveMaterials,
+			outMergedMaterials,
+			remappedFlatMaterials);
+		if (remappedFlatMaterials.materials.size() != residentFlatCount ||
+			remappedFlatMaterials.lightMetadata.size() != residentFlatCount)
+		{
+			return false;
+		}
+
+		std::copy_n(
+			remappedFlatMaterials.materials.data(),
+			residentFlatCount,
+			outMergedMaterials.materials.begin() + residentWallCount);
+		std::copy_n(
+			remappedFlatMaterials.lightMetadata.data(),
+			residentFlatCount,
+			outMergedMaterials.lightMetadata.begin() + residentWallCount);
+		return true;
+	}
+
+	static bool TryBuildMergedSectorMaterialOnlySceneView(
+		const nri_scene::SceneView& residentChunkView,
+		const nri_scene::SceneView& filteredLiveChunkView,
+		nri_scene::SceneView& outMergedSceneView)
+	{
+		if (!filteredLiveChunkView.opaqueWalls.empty() ||
+			residentChunkView.opaqueFlats.size() != filteredLiveChunkView.opaqueFlats.size())
+		{
+			return false;
+		}
+
+		outMergedSceneView = filteredLiveChunkView;
+		outMergedSceneView.opaqueWalls = residentChunkView.opaqueWalls;
+		outMergedSceneView.opaqueSprites = residentChunkView.opaqueSprites;
+		outMergedSceneView.stats.totalDrawItems =
+			(unsigned)(outMergedSceneView.opaqueWalls.size() +
+				outMergedSceneView.opaqueFlats.size() +
+				outMergedSceneView.opaqueSprites.size());
+		outMergedSceneView.stats.wallDrawItems = (unsigned)outMergedSceneView.opaqueWalls.size();
+		outMergedSceneView.stats.flatDrawItems = (unsigned)outMergedSceneView.opaqueFlats.size();
+		outMergedSceneView.stats.spriteDrawItems = (unsigned)outMergedSceneView.opaqueSprites.size();
+		outMergedSceneView.stats.materialRefs = outMergedSceneView.stats.totalDrawItems;
+		return true;
 	}
 
 	static bool StructuredBufferUpdateNeedsWait(
@@ -18500,6 +18581,71 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			havePreparedLiveChunkView = true;
 			return true;
 		};
+		const auto tryResolveResidentChunkState =
+			[&](uint32_t& outResidentChunkListIndex,
+				const StaticMapSceneCache::ChunkCache*& outResidentChunkCache,
+				const nri_scene::SceneView*& outResidentChunkView) -> bool
+		{
+			outResidentChunkListIndex = UINT32_MAX;
+			outResidentChunkCache = nullptr;
+			outResidentChunkView = nullptr;
+			if (residentEntry == nullptr || !residentEntry->valid)
+			{
+				return false;
+			}
+
+			outResidentChunkListIndex = residentEntry->staticSceneChunkListIndex;
+			const bool residentChunkListIndexValid =
+				outResidentChunkListIndex < mStaticMapScene.chunks.size() &&
+				mStaticMapScene.chunks[outResidentChunkListIndex].chunkIndex == mapChunk.chunkIndex;
+			if (!residentChunkListIndexValid)
+			{
+				outResidentChunkListIndex = FindPreferredStaticSceneChunkListIndex(mapChunk.chunkIndex);
+			}
+			if (outResidentChunkListIndex >= mStaticMapScene.chunks.size() ||
+				outResidentChunkListIndex >= mStaticMapScene.lightChunkViews.size() ||
+				!mStaticMapScene.chunks[outResidentChunkListIndex].active)
+			{
+				return false;
+			}
+
+			outResidentChunkCache = &mStaticMapScene.chunks[outResidentChunkListIndex];
+			outResidentChunkView = &mStaticMapScene.lightChunkViews[outResidentChunkListIndex];
+			return true;
+		};
+		const auto tryMergeSectorMaterialOnlyPreparedMaterials =
+			[&](const nri_scene::SceneView& preparedLiveChunkView,
+				nri_scene::MaterialBridgeData& inOutPreparedLiveMaterials) -> bool
+		{
+			if (!IsPureSectorMaterialOnlyChunkReplacement(normalizedReasonMask))
+			{
+				return false;
+			}
+
+			uint32_t residentChunkListIndex = UINT32_MAX;
+			const StaticMapSceneCache::ChunkCache* residentChunkCache = nullptr;
+			const nri_scene::SceneView* residentChunkView = nullptr;
+			if (!tryResolveResidentChunkState(residentChunkListIndex, residentChunkCache, residentChunkView) ||
+				residentChunkCache == nullptr ||
+				residentChunkView == nullptr)
+			{
+				return false;
+			}
+
+			nri_scene::MaterialBridgeData mergedMaterials;
+			if (!TryBuildMergedSectorMaterialOnlyBridge(
+				*residentChunkView,
+				residentChunkCache->materialBridge,
+				preparedLiveChunkView,
+				inOutPreparedLiveMaterials,
+				mergedMaterials))
+			{
+				return false;
+			}
+
+			inOutPreparedLiveMaterials = std::move(mergedMaterials);
+			return true;
+		};
 		const auto recordPreparedLiveChunkMaterialOnlyMismatch =
 			[&](const nri_scene::SceneView& preparedLiveChunkView,
 				const nri_scene::MaterialBridgeData& preparedLiveMaterials,
@@ -18508,39 +18654,30 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
 				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
-			if (exclusiveMaterialOnlyReplacement ||
-				residentEntry == nullptr ||
-				!residentEntry->valid)
+			if (exclusiveMaterialOnlyReplacement)
 			{
 				return;
 			}
 
 			const uint32_t filteredMaterialCount = (uint32_t)preparedLiveMaterials.materials.size();
-			const uint32_t residentMaterialCount = residentEntry->materialCount;
+			uint32_t residentChunkListIndex = UINT32_MAX;
+			const StaticMapSceneCache::ChunkCache* residentChunkCache = nullptr;
+			const nri_scene::SceneView* residentChunkView = nullptr;
+			if (!tryResolveResidentChunkState(residentChunkListIndex, residentChunkCache, residentChunkView) ||
+				residentChunkCache == nullptr ||
+				residentChunkView == nullptr)
+			{
+				return;
+			}
+
+			const uint32_t residentMaterialCount = residentChunkCache->materialCount;
 			if (filteredMaterialCount == residentMaterialCount)
 			{
 				return;
 			}
 
-			uint32_t residentWallCount = 0;
-			uint32_t residentFlatCount = 0;
-			uint32_t residentChunkListIndex = residentEntry->staticSceneChunkListIndex;
-			const bool residentChunkListIndexValid =
-				residentChunkListIndex < mStaticMapScene.chunks.size() &&
-				mStaticMapScene.chunks[residentChunkListIndex].chunkIndex == mapChunk.chunkIndex;
-			if (!residentChunkListIndexValid)
-			{
-				residentChunkListIndex = FindPreferredStaticSceneChunkListIndex(mapChunk.chunkIndex);
-			}
-			if (residentChunkListIndex < mStaticMapScene.chunks.size() &&
-				residentChunkListIndex < mStaticMapScene.lightChunkViews.size() &&
-				mStaticMapScene.chunks[residentChunkListIndex].active)
-			{
-				const auto& residentChunkView = mStaticMapScene.lightChunkViews[residentChunkListIndex];
-				residentWallCount = (uint32_t)residentChunkView.opaqueWalls.size();
-				residentFlatCount = (uint32_t)residentChunkView.opaqueFlats.size();
-			}
-
+			const uint32_t residentWallCount = (uint32_t)residentChunkView->opaqueWalls.size();
+			const uint32_t residentFlatCount = (uint32_t)residentChunkView->opaqueFlats.size();
 			const uint32_t filteredWallCount = (uint32_t)preparedLiveChunkView.opaqueWalls.size();
 			const uint32_t filteredFlatCount = (uint32_t)preparedLiveChunkView.opaqueFlats.size();
 			mLastPerfShellTraceStats.runtimeMutationMaterialOnlyMismatchCount++;
@@ -18791,6 +18928,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					liveMaterials);
 				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
 			}
+			tryMergeSectorMaterialOnlyPreparedMaterials(liveChunkView, liveMaterials);
 			recordPreparedLiveChunkMaterialOnlyMismatch(liveChunkView, liveMaterials, false);
 			nri_scene::PTMapChunkMutationBaseline liveBaseline;
 			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
@@ -18860,6 +18998,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					liveMaterials);
 				mLastPerfShellTraceStats.runtimeMutationMaterialCacheStoreCount++;
 			}
+			tryMergeSectorMaterialOnlyPreparedMaterials(liveChunkView, liveMaterials);
 			recordPreparedLiveChunkMaterialOnlyMismatch(liveChunkView, liveMaterials, true);
 			nri_scene::PTMapChunkMutationBaseline liveBaseline;
 			if (!nri_scene::CaptureMapChunkMutationBaseline(mapChunk, liveBaseline))
@@ -20531,7 +20670,18 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 
 	if (fastResidentMaterialOnlyUpdate)
 	{
-		residentSceneView = replacement.sceneView;
+		const bool mergedSectorMaterialOnlyFastPath =
+			IsPureSectorMaterialOnlyChunkReplacement(replacement.reasonMask) &&
+			hasResidentChunk &&
+			resolvedChunkListIndex < mStaticMapScene.lightChunkViews.size() &&
+			TryBuildMergedSectorMaterialOnlySceneView(
+				mStaticMapScene.lightChunkViews[resolvedChunkListIndex],
+				replacement.sceneView,
+				residentSceneView);
+		if (!mergedSectorMaterialOnlyFastPath)
+		{
+			residentSceneView = replacement.sceneView;
+		}
 		residentMaterials = replacement.materialBridge;
 		appliedBaseline = replacement.replacementBaseline;
 	}
