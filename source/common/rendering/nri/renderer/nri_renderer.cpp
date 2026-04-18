@@ -5571,6 +5571,19 @@ namespace
 		return hash;
 	}
 
+	static uint64_t ComputeGeometryTopologySignature(const nri_scene::GeometryData& geometry)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)geometry.vertices.size());
+		hash = HashCombine64(hash, (uint64_t)geometry.indices.size());
+		hash = HashCombine64(hash, (uint64_t)geometry.primitives.size());
+		for (uint32_t index : geometry.indices)
+		{
+			hash = HashCombine64(hash, (uint64_t)index);
+		}
+		return hash;
+	}
+
 	static uint32_t GetAnimatedTextureId(FGameTexture* texture)
 	{
 		return texture != nullptr ? (uint32_t)texture->GetID().GetIndex() : 0u;
@@ -10248,12 +10261,11 @@ bool NRIRenderer::RebuildResidentStaticCpuAtlasMirror(StaticMapSceneCache& stati
 	return true;
 }
 
-void NRIRenderer::UploadChunkVertexAndIndexDataToAtlas(
+void NRIRenderer::UploadChunkVertexDataToAtlas(
 	const nri_scene::GeometryData& sourceGeometry,
 	const StaticMapSceneCache::ChunkCache& sourceChunk,
 	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
-	std::vector<nri_scene::SceneVertex>& outVertices,
-	std::vector<uint32_t>& outIndices) const
+	std::vector<nri_scene::SceneVertex>& outVertices) const
 {
 	if (!atlasChunk.valid)
 	{
@@ -10268,6 +10280,25 @@ void NRIRenderer::UploadChunkVertexAndIndexDataToAtlas(
 			sourceChunk.vertexCount,
 			outVertices.data() + atlasChunk.vertexOffset);
 	}
+}
+
+void NRIRenderer::UploadChunkVertexAndIndexDataToAtlas(
+	const nri_scene::GeometryData& sourceGeometry,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<nri_scene::SceneVertex>& outVertices,
+	std::vector<uint32_t>& outIndices) const
+{
+	if (!atlasChunk.valid)
+	{
+		return;
+	}
+
+	UploadChunkVertexDataToAtlas(
+		sourceGeometry,
+		sourceChunk,
+		atlasChunk,
+		outVertices);
 
 	if (sourceChunk.indexOffset + sourceChunk.indexCount <= sourceGeometry.indices.size() &&
 		atlasChunk.indexOffset + atlasChunk.indexCount <= outIndices.size())
@@ -10515,6 +10546,7 @@ void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
 			entry.materialOffset = staticChunk.materialOffset;
 			entry.materialCount = staticChunk.materialCount;
 		}
+		entry.geometryTopologySignature = staticChunk.geometryTopologySignature;
 		entry.animatedMaterialSignature = staticChunk.animatedMaterialSignature;
 		entry.animatedGeometrySignature = staticChunk.animatedGeometrySignature;
 		entry.exactGeometrySignature = staticChunk.exactGeometrySignature;
@@ -15855,6 +15887,7 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 	chunkCache.primitiveCount = (uint32_t)chunkGeometry.primitives.size();
 	chunkCache.materialOffset = (uint32_t)outStaticScene.materialBridge.materials.size();
 	chunkCache.materialCount = (uint32_t)chunkMaterials.materials.size();
+	chunkCache.geometryTopologySignature = ComputeGeometryTopologySignature(chunkGeometry);
 	chunkCache.exactGeometrySignature = ComputeExactGeometrySignature(chunkSceneView);
 	chunkCache.animatedMaterialSignature = ComputeAnimatedMaterialSignature(chunkSceneView);
 	chunkCache.animatedGeometrySignature = ComputeAnimatedGeometrySignature(chunkSceneView);
@@ -18020,6 +18053,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveGeometryCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepGeometrySliceCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepMaterialSliceCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyEmptyRemovalCount = 0;
@@ -20847,6 +20881,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const uint32_t appliedReasonMask = replacement.reasonMask;
 	const bool appliedStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
 	const bool appliedAnimationOnlyRefreshed = replacement.animationOnlyRefreshed;
+	uint64_t residentGeometryTopologySignature = ComputeGeometryTopologySignature(residentGeometry);
 	const uint32_t materialReasonMask =
 		nri_scene::PTMapChunkMutationReason_SectorMaterial |
 		nri_scene::PTMapChunkMutationReason_WallMaterial;
@@ -20979,6 +21014,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mLastPerfShellTraceStats.runtimeMutationResidentApplyRecoverAttemptCount++;
 		if (rebuildFullLiveResidentChunk())
 		{
+			residentGeometryTopologySignature = ComputeGeometryTopologySignature(residentGeometry);
 			recomputeResidentCounts();
 			if (preserveResidentGeometryForMaterialOnlyUpdate)
 			{
@@ -21027,6 +21063,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			mutableChunk.primitiveCount = 0;
 			mutableChunk.materialCount = 0;
 			mutableChunk.materialBridge = {};
+			mutableChunk.geometryTopologySignature = 0;
 			mutableChunk.exactGeometrySignature = 0;
 			mutableChunk.animatedMaterialSignature = 0;
 			mutableChunk.animatedGeometrySignature = 0;
@@ -21097,7 +21134,12 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			hasResidentChunk ?
 				mStaticMapScene.chunks[chunkListIndex].animatedGeometrySignature :
 				0;
+		const uint64_t previousGeometryTopologySignature =
+			hasResidentChunk ?
+				mStaticMapScene.chunks[chunkListIndex].geometryTopologySignature :
+				0;
 		bool preserveResidentMaterialSlice = false;
+		bool preserveResidentIndexSlice = false;
 		{
 			ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasBookkeepingMs);
 			sourceChunk.vertexOffset = 0;
@@ -21215,6 +21257,15 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				hasResidentChunk &&
 				keptMaterialSlice &&
 				previousAnimatedMaterialSignature == ComputeAnimatedMaterialSignature(residentSceneView);
+			preserveResidentIndexSlice =
+				!materialOnlyReplacement &&
+				hasResidentChunk &&
+				keptGeometrySlices &&
+				previousGeometryTopologySignature == residentGeometryTopologySignature;
+			if (preserveResidentIndexSlice)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount++;
+			}
 
 			mStaticMapChunkAtlas = std::move(nextAtlasState);
 			mStaticMapChunkAtlas.chunks[chunkListIndex] = nextAtlasChunk;
@@ -21231,28 +21282,49 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		{
 			{
 				ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs);
-				UploadChunkVertexAndIndexDataToAtlas(
-					residentGeometry,
-					sourceChunk,
-					nextAtlasChunk,
-					mStaticMapScene.geometry.vertices,
-					mStaticMapScene.geometry.indices);
-				if (!StageResidentBufferCopyRange(
-						mStaticVertexBuffer,
-						(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
-						mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
-						(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
-						NRIAccelerationStructureBuildInputAccess(),
-						ResidentUploadKind_Vertex) ||
-					!StageResidentBufferCopyRange(
-						mStaticIndexBuffer,
-						(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
-						mStaticMapScene.geometry.indices.data() + nextAtlasChunk.indexOffset,
-						(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t),
-						NRIAccelerationStructureBuildInputAccess(),
-						ResidentUploadKind_Index))
+				if (preserveResidentIndexSlice)
 				{
-					return false;
+					UploadChunkVertexDataToAtlas(
+						residentGeometry,
+						sourceChunk,
+						nextAtlasChunk,
+						mStaticMapScene.geometry.vertices);
+					if (!StageResidentBufferCopyRange(
+							mStaticVertexBuffer,
+							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
+							mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
+							(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
+							NRIAccelerationStructureBuildInputAccess(),
+							ResidentUploadKind_Vertex))
+					{
+						return false;
+					}
+				}
+				else
+				{
+					UploadChunkVertexAndIndexDataToAtlas(
+						residentGeometry,
+						sourceChunk,
+						nextAtlasChunk,
+						mStaticMapScene.geometry.vertices,
+						mStaticMapScene.geometry.indices);
+					if (!StageResidentBufferCopyRange(
+							mStaticVertexBuffer,
+							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
+							mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
+							(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
+							NRIAccelerationStructureBuildInputAccess(),
+							ResidentUploadKind_Vertex) ||
+						!StageResidentBufferCopyRange(
+							mStaticIndexBuffer,
+							(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
+							mStaticMapScene.geometry.indices.data() + nextAtlasChunk.indexOffset,
+							(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t),
+							NRIAccelerationStructureBuildInputAccess(),
+							ResidentUploadKind_Index))
+					{
+						return false;
+					}
 				}
 			}
 			{
@@ -21283,8 +21355,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			}
 			mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=
 				(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
-			mLastPerfResourceTraceStats.residentChunkBatchIndexBytes +=
-				(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t);
+			if (!preserveResidentIndexSlice)
+			{
+				mLastPerfResourceTraceStats.residentChunkBatchIndexBytes +=
+					(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t);
+			}
 			mLastPerfResourceTraceStats.residentChunkBatchPrimitiveBytes +=
 				(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
 		}
@@ -21304,6 +21379,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		{
 			mutableChunk.materialBridge = residentMaterials;
 		}
+		mutableChunk.geometryTopologySignature = residentGeometryTopologySignature;
 		mutableChunk.exactGeometrySignature = ComputeExactGeometrySignature(residentSceneView);
 		mutableChunk.animatedMaterialSignature = ComputeAnimatedMaterialSignature(residentSceneView);
 		mutableChunk.animatedGeometrySignature = ComputeAnimatedGeometrySignature(residentSceneView);
@@ -21357,6 +21433,8 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].mappedInStaticScene = !chunkBecomesEmpty;
 	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].exactGeometrySignature =
 		!chunkBecomesEmpty ? mStaticMapScene.chunks[chunkListIndex].exactGeometrySignature : 0;
+	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].geometryTopologySignature =
+		!chunkBecomesEmpty ? mStaticMapScene.chunks[chunkListIndex].geometryTopologySignature : 0;
 	if (!chunkBecomesEmpty)
 	{
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].vertexOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].vertexOffset;

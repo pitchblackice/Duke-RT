@@ -292,6 +292,7 @@ public:
 		uint32_t runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount = 0;
 		uint32_t runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
+		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
 		uint32_t runtimeMutationResidentApplyKeepGeometrySliceCount = 0;
 		uint32_t runtimeMutationResidentApplyKeepMaterialSliceCount = 0;
 		uint32_t runtimeMutationResidentApplyEmptyRemovalCount = 0;
@@ -827,6 +828,7 @@ private:
 			uint32_t primitiveCount = 0;
 			uint32_t materialOffset = 0;
 			uint32_t materialCount = 0;
+			uint64_t geometryTopologySignature = 0;
 			uint64_t exactGeometrySignature = 0;
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t animatedGeometrySignature = 0;
@@ -875,6 +877,7 @@ private:
 			uint32_t primitiveCount = 0;
 			uint32_t materialOffset = 0;
 			uint32_t materialCount = 0;
+			uint64_t geometryTopologySignature = 0;
 			uint64_t baselineSignature = 0;
 			uint64_t liveSignature = 0;
 			uint64_t exactGeometrySignature = 0;
@@ -1294,6 +1297,11 @@ private:
 		const std::vector<uint32_t>& chunkListIndices,
 		const char* reason,
 		const std::vector<uint32_t>* animatedApplyChunkListIndices = nullptr);
+	void UploadChunkVertexDataToAtlas(
+		const nri_scene::GeometryData& sourceGeometry,
+		const StaticMapSceneCache::ChunkCache& sourceChunk,
+		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+		std::vector<nri_scene::SceneVertex>& outVertices) const;
 	void UploadChunkVertexAndIndexDataToAtlas(
 		const nri_scene::GeometryData& sourceGeometry,
 		const StaticMapSceneCache::ChunkCache& sourceChunk,
