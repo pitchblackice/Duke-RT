@@ -126,7 +126,7 @@ CUSTOM_CVAR(Int, vid_preferbackend, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_N
 	Printf("Changing the video backend requires a restart for " GAMENAME ".\n");
 }
 
-CUSTOM_CVAR(String, nri_api, "vulkan", CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+CUSTOM_CVAR(String, nri_api, "d3d12", CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
 	const char *api = self;
 	if (stricmp(api, "vulkan") != 0 && stricmp(api, "d3d12") != 0)

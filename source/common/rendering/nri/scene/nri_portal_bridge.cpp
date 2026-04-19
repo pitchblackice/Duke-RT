@@ -12,7 +12,7 @@
 #define NOMINMAX
 #include <windows.h>
 
-CVAR(Int, nri_ptportaldepth, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptportaldepth, 6, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {

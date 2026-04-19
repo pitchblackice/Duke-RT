@@ -117,14 +117,14 @@ CUSTOM_CVAR(Int, nri_ptdebugmenu, 0, CVAR_GLOBALCONFIG)
 	nri_ptdebug = ResolvePtDebugModeFromMenuIndex(self);
 	gSyncingPtDebugMenu = false;
 }
-CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_nrddenoiser, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_upscaler, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_denoise, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrddenoiser, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_upscaler, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_postsharpen, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_upscalermode, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_pttaa, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_upscalermode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_pttaa, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_sharpness, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_sharpness, 0.1375f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
 EXTERN_CVAR(Int, nri_pttraceframes)
@@ -140,7 +140,7 @@ CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 2;
 	}
 }
-CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_ptoutputmode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
 	{
@@ -151,7 +151,7 @@ CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 1;
 	}
 }
-CUSTOM_CVAR(Int, nri_pttonemap, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_pttonemap, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
 	{
@@ -162,7 +162,7 @@ CUSTOM_CVAR(Int, nri_pttonemap, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 2;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptexposure, 1.28164f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.125f)
 	{
@@ -173,7 +173,7 @@ CUSTOM_CVAR(Float, nri_ptexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 8.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptcontrast, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptcontrast, 1.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
@@ -184,7 +184,7 @@ CUSTOM_CVAR(Float, nri_ptcontrast, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 1.50f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsaturation, 1.75f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.00f)
 	{
@@ -195,7 +195,7 @@ CUSTOM_CVAR(Float, nri_ptsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 2.00f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptshoulder, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptshoulder, 1.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
@@ -206,7 +206,7 @@ CUSTOM_CVAR(Float, nri_ptshoulder, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 1.50f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pttoe, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pttoe, 1.43438f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
@@ -217,7 +217,7 @@ CUSTOM_CVAR(Float, nri_pttoe, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 1.50f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptpaperwhite, 200.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptpaperwhite, 300.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 80.0f)
 	{
@@ -228,7 +228,7 @@ CUSTOM_CVAR(Float, nri_ptpaperwhite, 200.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 400.0f;
 	}
 }
-CUSTOM_CVAR(Int, nri_pthdrtonemap, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_pthdrtonemap, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
 	{
@@ -239,7 +239,7 @@ CUSTOM_CVAR(Int, nri_pthdrtonemap, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 2;
 	}
 }
-CUSTOM_CVAR(Float, nri_pthdrexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pthdrexposure, 0.986328f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.125f)
 	{
@@ -250,7 +250,7 @@ CUSTOM_CVAR(Float, nri_pthdrexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 8.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pthdrcontrast, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pthdrcontrast, 1.10312f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
@@ -261,7 +261,7 @@ CUSTOM_CVAR(Float, nri_pthdrcontrast, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 1.50f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pthdrsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pthdrsaturation, 1.75f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.00f)
 	{
@@ -272,7 +272,7 @@ CUSTOM_CVAR(Float, nri_pthdrsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 2.00f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pthdrshoulder, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pthdrshoulder, 0.84375f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
@@ -283,7 +283,7 @@ CUSTOM_CVAR(Float, nri_pthdrshoulder, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 1.50f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pthdrtoe, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pthdrtoe, 1.29688f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
@@ -295,7 +295,7 @@ CUSTOM_CVAR(Float, nri_pthdrtoe, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 CVAR(Bool, nri_ptnightvision, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CUSTOM_CVAR(Float, nri_ptnightvisionexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptnightvisionexposure, 1.39844f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.25f)
 	{
@@ -306,7 +306,7 @@ CUSTOM_CVAR(Float, nri_ptnightvisionexposure, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCO
 		self = 4.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptnightvisioncontrast, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptnightvisioncontrast, 0.971875f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.25f)
 	{
@@ -317,7 +317,7 @@ CUSTOM_CVAR(Float, nri_ptnightvisioncontrast, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCO
 		self = 2.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptnightvisionsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptnightvisionsaturation, 1.10625f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -328,7 +328,7 @@ CUSTOM_CVAR(Float, nri_ptnightvisionsaturation, 1.0f, CVAR_ARCHIVE | CVAR_GLOBAL
 		self = 2.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptnightvisionred, 0.18f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptnightvisionred, 0.46875f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -339,7 +339,7 @@ CUSTOM_CVAR(Float, nri_ptnightvisionred, 0.18f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 		self = 2.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptnightvisiongreen, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptnightvisiongreen, 1.0625f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -350,7 +350,7 @@ CUSTOM_CVAR(Float, nri_ptnightvisiongreen, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFI
 		self = 2.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptnightvisionblue, 0.22f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptnightvisionblue, 0.16875f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -2404,7 +2404,7 @@ CUSTOM_CVAR(Bool, nri_framegen, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	RefreshActiveFrameGenerationSwapChain();
 }
 
-CUSTOM_CVAR(Int, nri_ptspherelongs, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_ptspherelongs, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 8)
 	{
@@ -2419,7 +2419,7 @@ CUSTOM_CVAR(Int, nri_ptspherelongs, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	NotifyActiveDebugSphereTessellationChange();
 }
 
-CUSTOM_CVAR(Int, nri_ptspherelats, 32, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_ptspherelats, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 4)
 	{
@@ -2447,7 +2447,7 @@ CUSTOM_CVAR(Int, nri_framegenprovider, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 	RefreshActiveFrameGenerationSwapChain();
 }
-CUSTOM_CVAR(Int, nri_framegenui, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_framegenui, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
 	{
@@ -2458,32 +2458,32 @@ CUSTOM_CVAR(Int, nri_framegenui, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 3;
 	}
 }
-CVAR(Bool, nri_framegenasync, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_framegenasync, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Bool, nri_framegenlatency, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	RefreshActiveFrameGenerationSwapChain();
 }
-CVAR(Int, nri_nrdmaxframes, 31, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_nrdfastframes, 7, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_nrdstabilizationframes, 31, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdmaxframes, 13, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdfastframes, 20, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdstabilizationframes, 48, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_nrdantifirefly, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrdhitdistrecon, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_nrdsplit, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_nrdfasthistorysigma, 1.25f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_nrdprepassdiffuse, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_nrdprepassspecular, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdfasthistorysigma, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdprepassdiffuse, 3.45f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdprepassspecular, 3.675f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_nrdblurmin, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_nrdblurmax, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_nrdsigmastabilization, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_nrdsigmaplanedistance, 0.01f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_apivalidation, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdblurmax, 2.025f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrdsigmastabilization, 5, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_nrdsigmaplanedistance, 0.0418375f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_apivalidation, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_dred, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptbootstrap, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptbootstrapmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptbootstrap, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptbootstrapmode, 13, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptlightbounces, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptmirrorbounces, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptlightbounces, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptmirrorbounces, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
@@ -2493,15 +2493,15 @@ CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLO
 }
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptscenestats, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptmutationtracechunk, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptmutationtracesector, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptmutationtracechunk, 66, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptmutationtracesector, 198, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptruntimelinktrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissiveheuristics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissiveautoonly, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminsurface, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CUSTOM_CVAR(Float, nri_ptglowscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptglowscale, 3.025f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -2509,7 +2509,7 @@ CUSTOM_CVAR(Float, nri_ptglowscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 	NotifyActiveGlowControlChange();
 }
-CUSTOM_CVAR(Float, nri_ptglowreach, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptglowreach, 16.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -2517,7 +2517,7 @@ CUSTOM_CVAR(Float, nri_ptglowreach, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 	NotifyActiveGlowControlChange();
 }
-CUSTOM_CVAR(Float, nri_ptglowfalloff, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptglowfalloff, 0.847656f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.25f)
 	{
@@ -2529,7 +2529,7 @@ CUSTOM_CVAR(Float, nri_ptglowfalloff, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 	NotifyActiveGlowControlChange();
 }
-CUSTOM_CVAR(Float, nri_ptglowblend, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptglowblend, 0.20625f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -2541,7 +2541,7 @@ CUSTOM_CVAR(Float, nri_ptglowblend, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 	NotifyActiveGlowControlChange();
 }
-CUSTOM_CVAR(Float, nri_ptfullbrightboost, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptfullbrightboost, 1.50781f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
@@ -2555,9 +2555,9 @@ CUSTOM_CVAR(Float, nri_ptfullbrightboost, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 }
 CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptemissivesamples, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptemissivesamples, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CUSTOM_CVAR(Float, nri_ptsectorlightmultiplier, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectorlightmultiplier, 1.00312f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -2572,8 +2572,8 @@ CVAR(Int, nri_ptsectorfilterpal, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfilterminshade, -128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfiltermaxshade, 127, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfilterlotag, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptsectorpulseframes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsectorpulseamount, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsectorpulseframes, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsectorpulseamount, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptvisiblechunkgate, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
