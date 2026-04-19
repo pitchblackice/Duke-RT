@@ -1087,6 +1087,20 @@ namespace
 		}
 	}
 
+	static bool IsHdrRequestDefinitivelyUnavailableReason(const char* reason)
+	{
+		if (reason == nullptr || *reason == '\0')
+		{
+			return false;
+		}
+
+		return
+			stricmp(reason, "hdr-display-sdr") == 0 ||
+			stricmp(reason, "hdr-unsupported-api") == 0 ||
+			stricmp(reason, "hdr-swapchain-create-failed-fallback-sdr") == 0 ||
+			stricmp(reason, "hdr-wrap-format-mismatch-fallback-sdr") == 0;
+	}
+
 	static bool DisplayLuminanceChanged(float previousValue, float currentValue)
 	{
 		return std::fabs(previousValue - currentValue) > 0.05f;
@@ -4284,6 +4298,36 @@ NRIPTOutputPolicy NRIRenderDevice::GetPathTracingOutputPolicy() const
 	return policy;
 }
 
+void NRIRenderDevice::SyncPathTracingOutputModeCVarWithSwapChainState(const char* evaluatedResolveReason)
+{
+	if (GetRequestedPathTracingOutputMode() == NRIPTOutputMode::SDR)
+	{
+		return;
+	}
+
+	if (mCreatedSwapChainFormat != nri::SwapChainFormat::BT709_G22_8BIT)
+	{
+		return;
+	}
+
+	const char* reason =
+		evaluatedResolveReason != nullptr && *evaluatedResolveReason != '\0' ?
+			evaluatedResolveReason :
+			mSwapChainOutputResolveReason.GetChars();
+	const bool displayForcesSdr = mHasSwapChainDisplayDesc && !mSwapChainDisplayDesc.isHDR;
+	if (!displayForcesSdr && !IsHdrRequestDefinitivelyUnavailableReason(reason))
+	{
+		return;
+	}
+
+	Printf("NRI PT output sync: requested=%s created_format=%s display_hdr=%s reason=%s; updating nri_ptoutputmode to SDR.\n",
+		GetNRIPTOutputModeName(GetRequestedPathTracingOutputMode()),
+		GetSwapChainFormatName(mCreatedSwapChainFormat),
+		!mHasSwapChainDisplayDesc ? "unknown" : (mSwapChainDisplayDesc.isHDR ? "yes" : "no"),
+		reason != nullptr && *reason != '\0' ? reason : "unknown");
+	nri_ptoutputmode = 0;
+}
+
 void NRIRenderDevice::PrintPathTracingOutputModeChange(uint32_t frameIndex, NRIPTOutputMode previousRequestedMode, NRIPTOutputMode previousResolvedMode) const
 {
 	const NRIPTOutputPolicy outputPolicy = GetPathTracingOutputPolicy();
@@ -5947,6 +5991,7 @@ bool NRIRenderDevice::CreateSwapChain()
 			mNativeD3D12Device != nullptr ? "ok" : "missing",
 			mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
 			mNativeD3D12SwapChain != nullptr ? "ok" : "missing");
+		SyncPathTracingOutputModeCVarWithSwapChainState();
 
 		return true;
 	}
@@ -6271,6 +6316,7 @@ bool NRIRenderDevice::EnsureSwapChainSize()
 	nri::SwapChainFormat resolvedOutputFormat = nri::SwapChainFormat::BT709_G22_8BIT;
 	const char* outputResolveReason = "requested-sdr";
 	ResolvePathTracingSwapChainOutput(requestedOutputFormat, resolvedOutputFormat, outputResolveReason);
+	SyncPathTracingOutputModeCVarWithSwapChainState(outputResolveReason);
 
 	if (mSwapChain == nullptr)
 	{

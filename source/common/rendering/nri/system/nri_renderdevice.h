@@ -262,6 +262,7 @@ private:
 	nri::SwapChainBits GetEffectiveRequestedSwapChainFlags() const;
 	bool RefreshSwapChainDisplayDesc(bool logChanges);
 	void ResolvePathTracingSwapChainOutput(nri::SwapChainFormat& outRequestedFormat, nri::SwapChainFormat& outResolvedFormat, const char*& outReason) const;
+	void SyncPathTracingOutputModeCVarWithSwapChainState(const char* evaluatedResolveReason = nullptr);
 	bool ShouldUseFrameGenerationUiTarget() const;
 	bool ShouldHandoffFrameGenerationUiTexture() const;
 	bool ShouldUseFrameGenerationUiLocalCompositeFallback() const;
