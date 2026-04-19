@@ -103,6 +103,7 @@ public:
 	static constexpr size_t RuntimeResidentBlasRefitRejectTraceCount = 8;
 	static constexpr size_t RuntimeStructuralRebuildTraceCount = 8;
 	static constexpr size_t RuntimeGeometryDirtyTraceCount = 8;
+	static constexpr size_t RuntimeRecurringChunkTraceCount = 8;
 
 	enum class RuntimeMutationTraceAction : uint8_t
 	{
@@ -265,6 +266,26 @@ public:
 		bool flatsChanged = false;
 	};
 
+	struct RuntimeRecurringChunkTraceEntry
+	{
+		bool valid = false;
+		uint32_t score = 0;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t lastReasonMask = 0;
+		uint32_t visitCount = 0;
+		uint32_t uniqueStateCount = 0;
+		uint32_t transitionCount = 0;
+		uint32_t repeatedStateHitCount = 0;
+		uint32_t abaRecurrenceCount = 0;
+		uint32_t lastWallCount = 0;
+		uint32_t lastFlatCount = 0;
+		uint32_t lastTriangleCount = 0;
+		uint32_t lastMaterialCount = 0;
+		uint64_t previousStateSignature = 0;
+		uint64_t lastStateSignature = 0;
+	};
+
 	struct PerfShellTraceStats
 	{
 		double totalMs = 0.0;
@@ -356,6 +377,14 @@ public:
 		uint32_t runtimeMutationGeometryDirtyWallsOnlyChangedChunks = 0;
 		uint32_t runtimeMutationGeometryDirtyFlatsOnlyChangedChunks = 0;
 		uint32_t runtimeMutationGeometryDirtyWallsAndFlatsChangedChunks = 0;
+		uint32_t runtimeRecurringChunkTrackedCount = 0;
+		uint32_t runtimeRecurringChunkRecurringCount = 0;
+		uint32_t runtimeRecurringChunkVisitCount = 0;
+		uint32_t runtimeRecurringChunkUniqueStateCount = 0;
+		uint32_t runtimeRecurringChunkTransitionCount = 0;
+		uint32_t runtimeRecurringChunkRepeatedStateHitCount = 0;
+		uint32_t runtimeRecurringChunkAbaRecurrenceCount = 0;
+		uint32_t runtimeRecurringChunkMaxUniqueStateCount = 0;
 		uint32_t runtimeMutationHardwareCanvasChunkCount = 0;
 		uint32_t runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
 		uint32_t runtimeMutationMaterialRefreshReasonMaskOr = 0;
@@ -510,6 +539,7 @@ public:
 		std::array<RuntimeResidentBlasRefitRejectTraceEntry, RuntimeResidentBlasRefitRejectTraceCount> runtimeResidentBlasRefitRejectEntries = {};
 		std::array<RuntimeStructuralRebuildTraceEntry, RuntimeStructuralRebuildTraceCount> runtimeStructuralRebuildEntries = {};
 		std::array<RuntimeGeometryDirtyTraceEntry, RuntimeGeometryDirtyTraceCount> runtimeGeometryDirtyEntries = {};
+		std::array<RuntimeRecurringChunkTraceEntry, RuntimeRecurringChunkTraceCount> runtimeRecurringChunkEntries = {};
 	};
 
 	struct PerfResourceTraceStats
@@ -1780,6 +1810,27 @@ private:
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
 	std::vector<RuntimeChunkTranslationState> mRuntimeChunkTranslationHistory;
+	struct RuntimeRecurringChunkTracker
+	{
+		bool valid = false;
+		uint32_t chunkIndex = UINT32_MAX;
+		int32_t sectorIndex = -1;
+		uint32_t lastReasonMask = 0;
+		uint32_t visitCount = 0;
+		uint32_t uniqueStateCount = 0;
+		uint32_t transitionCount = 0;
+		uint32_t repeatedStateHitCount = 0;
+		uint32_t abaRecurrenceCount = 0;
+		uint32_t lastWallCount = 0;
+		uint32_t lastFlatCount = 0;
+		uint32_t lastTriangleCount = 0;
+		uint32_t lastMaterialCount = 0;
+		uint64_t previousStateSignature = 0;
+		uint64_t lastStateSignature = 0;
+		std::array<uint64_t, 8> seenStateSignatures = {};
+	};
+	uint64_t mRuntimeRecurringChunkTrackerBuildSerial = 0;
+	std::vector<RuntimeRecurringChunkTracker> mRuntimeRecurringChunkTrackers;
 	PersistentDynamicSurfaceStats mPersistentDynamicEmissiveHighWaterStats = {};
 	uint32_t mPersistentDynamicEmissiveHighWaterSurfaceCount = 0;
 	uint32_t mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;

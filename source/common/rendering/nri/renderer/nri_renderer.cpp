@@ -3052,6 +3052,18 @@ namespace
 		return score;
 	}
 
+	uint32_t ScoreRuntimeRecurringChunkTraceEntry(const NRIRenderer::RuntimeRecurringChunkTraceEntry& entry)
+	{
+		uint32_t score = entry.repeatedStateHitCount * 256u;
+		score += entry.abaRecurrenceCount * 192u;
+		score += entry.transitionCount * 64u;
+		score += entry.uniqueStateCount * 32u;
+		score += entry.visitCount * 8u;
+		score += entry.lastTriangleCount * 4u;
+		score += entry.lastMaterialCount * 2u;
+		return score;
+	}
+
 	template <typename Entry, size_t N, typename ScoreFn>
 	void InsertRankedTraceEntry(std::array<Entry, N>& entries, Entry entry, ScoreFn scoreFn)
 	{
@@ -5789,6 +5801,22 @@ namespace
 				hash = HashCombine64(hash, (uint64_t)provenance.materialFlags);
 			}
 		}
+		return hash;
+	}
+
+	static uint64_t ComputeRecurringChunkStateSignature(
+		uint32_t reasonMask,
+		uint32_t liveWallCount,
+		uint32_t liveFlatCount,
+		uint32_t liveTriangleCount,
+		uint32_t liveMaterialCount)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)reasonMask);
+		hash = HashCombine64(hash, (uint64_t)liveWallCount);
+		hash = HashCombine64(hash, (uint64_t)liveFlatCount);
+		hash = HashCombine64(hash, (uint64_t)liveTriangleCount);
+		hash = HashCombine64(hash, (uint64_t)liveMaterialCount);
 		return hash;
 	}
 
@@ -18255,6 +18283,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyWallsOnlyChangedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyFlatsOnlyChangedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationGeometryDirtyWallsAndFlatsChangedChunks = 0;
+	mLastPerfShellTraceStats.runtimeRecurringChunkTrackedCount = 0;
+	mLastPerfShellTraceStats.runtimeRecurringChunkRecurringCount = 0;
+	mLastPerfShellTraceStats.runtimeRecurringChunkVisitCount = 0;
+	mLastPerfShellTraceStats.runtimeRecurringChunkUniqueStateCount = 0;
+	mLastPerfShellTraceStats.runtimeRecurringChunkTransitionCount = 0;
+	mLastPerfShellTraceStats.runtimeRecurringChunkRepeatedStateHitCount = 0;
+	mLastPerfShellTraceStats.runtimeRecurringChunkAbaRecurrenceCount = 0;
+	mLastPerfShellTraceStats.runtimeRecurringChunkMaxUniqueStateCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationHardwareCanvasChunkCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaReasonMaskOr = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReasonMaskOr = 0;
@@ -18357,6 +18393,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeResidentBlasRefitRejectEntries = {};
 	mLastPerfShellTraceStats.runtimeStructuralRebuildEntries = {};
 	mLastPerfShellTraceStats.runtimeGeometryDirtyEntries = {};
+	mLastPerfShellTraceStats.runtimeRecurringChunkEntries = {};
+	if (mRuntimeRecurringChunkTrackerBuildSerial != mMapWorld.buildSerial)
+	{
+		mRuntimeRecurringChunkTrackerBuildSerial = mMapWorld.buildSerial;
+		mRuntimeRecurringChunkTrackers.clear();
+	}
+	if (mRuntimeRecurringChunkTrackers.size() != mMapWorld.chunks.size())
+	{
+		mRuntimeRecurringChunkTrackers.resize(mMapWorld.chunks.size());
+	}
 	struct RuntimeAnimatedFrameTraceStats
 	{
 		bool touched = false;
@@ -18684,6 +18730,60 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		else if (wallsChanged && flatsChanged)
 		{
 			mLastPerfShellTraceStats.runtimeMutationGeometryDirtyWallsAndFlatsChangedChunks++;
+		}
+
+		if (countChanged &&
+			chunkIndex < mRuntimeRecurringChunkTrackers.size())
+		{
+			auto& tracker = mRuntimeRecurringChunkTrackers[chunkIndex];
+			const uint64_t stateSignature = ComputeRecurringChunkStateSignature(
+				reasonMask,
+				liveWallCount,
+				liveFlatCount,
+				liveTriangleCount,
+				liveMaterialCount);
+			if (!tracker.valid)
+			{
+				tracker.valid = true;
+				tracker.chunkIndex = chunkIndex;
+				tracker.sectorIndex = sectorIndex;
+			}
+			tracker.lastReasonMask = reasonMask;
+			tracker.visitCount++;
+			tracker.lastWallCount = liveWallCount;
+			tracker.lastFlatCount = liveFlatCount;
+			tracker.lastTriangleCount = liveTriangleCount;
+			tracker.lastMaterialCount = liveMaterialCount;
+
+			bool seenBefore = false;
+			for (uint32_t i = 0; i < tracker.uniqueStateCount; ++i)
+			{
+				if (tracker.seenStateSignatures[i] == stateSignature)
+				{
+					seenBefore = true;
+					break;
+				}
+			}
+			if (!seenBefore && tracker.uniqueStateCount < tracker.seenStateSignatures.size())
+			{
+				tracker.seenStateSignatures[tracker.uniqueStateCount++] = stateSignature;
+			}
+			if (tracker.lastStateSignature != 0 &&
+				tracker.lastStateSignature != stateSignature)
+			{
+				tracker.transitionCount++;
+				if (seenBefore)
+				{
+					tracker.repeatedStateHitCount++;
+				}
+				if (tracker.previousStateSignature != 0 &&
+					tracker.previousStateSignature == stateSignature)
+				{
+					tracker.abaRecurrenceCount++;
+				}
+			}
+			tracker.previousStateSignature = tracker.lastStateSignature;
+			tracker.lastStateSignature = stateSignature;
 		}
 
 		if (!ShouldTracePtPerf())
@@ -20209,6 +20309,53 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			emitChunkTrace();
 			continue;
 		}
+	}
+
+	for (const auto& tracker : mRuntimeRecurringChunkTrackers)
+	{
+		if (!tracker.valid)
+		{
+			continue;
+		}
+
+		mLastPerfShellTraceStats.runtimeRecurringChunkTrackedCount++;
+		mLastPerfShellTraceStats.runtimeRecurringChunkVisitCount += tracker.visitCount;
+		mLastPerfShellTraceStats.runtimeRecurringChunkUniqueStateCount += tracker.uniqueStateCount;
+		mLastPerfShellTraceStats.runtimeRecurringChunkTransitionCount += tracker.transitionCount;
+		mLastPerfShellTraceStats.runtimeRecurringChunkRepeatedStateHitCount += tracker.repeatedStateHitCount;
+		mLastPerfShellTraceStats.runtimeRecurringChunkAbaRecurrenceCount += tracker.abaRecurrenceCount;
+		mLastPerfShellTraceStats.runtimeRecurringChunkMaxUniqueStateCount =
+			std::max(mLastPerfShellTraceStats.runtimeRecurringChunkMaxUniqueStateCount, tracker.uniqueStateCount);
+		if (tracker.uniqueStateCount > 1 || tracker.repeatedStateHitCount > 0 || tracker.abaRecurrenceCount > 0)
+		{
+			mLastPerfShellTraceStats.runtimeRecurringChunkRecurringCount++;
+		}
+
+		if (!ShouldTracePtPerf())
+		{
+			continue;
+		}
+
+		RuntimeRecurringChunkTraceEntry entry = {};
+		entry.valid = true;
+		entry.chunkIndex = tracker.chunkIndex;
+		entry.sectorIndex = tracker.sectorIndex;
+		entry.lastReasonMask = tracker.lastReasonMask;
+		entry.visitCount = tracker.visitCount;
+		entry.uniqueStateCount = tracker.uniqueStateCount;
+		entry.transitionCount = tracker.transitionCount;
+		entry.repeatedStateHitCount = tracker.repeatedStateHitCount;
+		entry.abaRecurrenceCount = tracker.abaRecurrenceCount;
+		entry.lastWallCount = tracker.lastWallCount;
+		entry.lastFlatCount = tracker.lastFlatCount;
+		entry.lastTriangleCount = tracker.lastTriangleCount;
+		entry.lastMaterialCount = tracker.lastMaterialCount;
+		entry.previousStateSignature = tracker.previousStateSignature;
+		entry.lastStateSignature = tracker.lastStateSignature;
+		InsertRankedTraceEntry(
+			mLastPerfShellTraceStats.runtimeRecurringChunkEntries,
+			entry,
+			ScoreRuntimeRecurringChunkTraceEntry);
 	}
 
 	mRuntimeMapLastFrame.active =

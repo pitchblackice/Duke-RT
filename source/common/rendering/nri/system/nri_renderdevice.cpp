@@ -3345,6 +3345,44 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.flatsChanged ? 1u : 0u);
 		}
 		Printf(
+			"PERF pt recurring-chunk summary NRI: frame=%llu tracked=%u recurring=%u visits=%u unique_states=%u transitions=%u repeated_state_hits=%u aba_hits=%u max_unique_states=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.runtimeRecurringChunkTrackedCount,
+			shell.runtimeRecurringChunkRecurringCount,
+			shell.runtimeRecurringChunkVisitCount,
+			shell.runtimeRecurringChunkUniqueStateCount,
+			shell.runtimeRecurringChunkTransitionCount,
+			shell.runtimeRecurringChunkRepeatedStateHitCount,
+			shell.runtimeRecurringChunkAbaRecurrenceCount,
+			shell.runtimeRecurringChunkMaxUniqueStateCount);
+		for (size_t index = 0; index < NRIRenderer::RuntimeRecurringChunkTraceCount; ++index)
+		{
+			const auto& entry = shell.runtimeRecurringChunkEntries[index];
+			if (!entry.valid)
+			{
+				continue;
+			}
+
+			Printf(
+				"PERF pt recurring-chunk top NRI: frame=%llu rank=%u chunk=%u sector=%d reasons=0x%x visits=%u unique_states=%u transitions=%u repeated_state_hits=%u aba_hits=%u prev_sig=0x%llx last_sig=0x%llx walls=%u flats=%u tris=%u mats=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned)(index + 1),
+				entry.chunkIndex,
+				entry.sectorIndex,
+				entry.lastReasonMask,
+				entry.visitCount,
+				entry.uniqueStateCount,
+				entry.transitionCount,
+				entry.repeatedStateHitCount,
+				entry.abaRecurrenceCount,
+				(unsigned long long)entry.previousStateSignature,
+				(unsigned long long)entry.lastStateSignature,
+				entry.lastWallCount,
+				entry.lastFlatCount,
+				entry.lastTriangleCount,
+				entry.lastMaterialCount);
+		}
+		Printf(
 			"PERF pt material-only mismatch summary NRI: frame=%llu mismatches=%u refresh=%u rebuild=%u filtered_wall_only=%u filtered_flat_only=%u filtered_mixed=%u resident_wall_only=%u resident_flat_only=%u resident_mixed=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.runtimeMutationMaterialOnlyMismatchCount,
