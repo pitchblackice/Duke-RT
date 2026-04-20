@@ -1,8 +1,69 @@
-# Welcome to Raze!
+# Duke-RT
 
-[![Continuous Integration](https://github.com/ZDoom/Raze/actions/workflows/continuous_integration.yml/badge.svg)](https://github.com/ZDoom/Raze/actions/workflows/continuous_integration.yml)
+![1080p splash](images/1080p-splash.png)
 
-## Raze is a fork of Build engine games backed by GZDoom tech and combines Duke Nukem 3D, Blood, Redneck Rampage, Shadow Warrior and Exhumed/Powerslave in a single package. It is also capable of playing Nam and WW2 GI.
+Duke-RT is a fork of Raze that adds a new ray-tracing render backend based on [NVIDIA NRI](https://github.com/NVIDIA-RTX/NRI). The existing Build-engine game support from Raze remains the foundation, while this fork focuses on path tracing, RT renderer bring-up, lighting authoring, custom material authoring, denoising/upscaling integration, and backend diagnostics. It also includes tooling and overlay workflows so users can create their own material and lighting rules for Duke content. It only works on Windows due to reliance on libraries for DLSS, frame generation, denoising, etc.
+
+The renderer supports both Direct3D 12 and Vulkan, although feature support is more complete for D3D12. It's recommended that you play in D3D12 and HDR if possible!
+
+![bar emissive](images/bar-emissive.png)
+
+**Check out the linked project docs below to make your own lighting rules and material overrides!**
+
+## How To Run
+
+- Launch `launch-duke-rt.cmd` from the packaged release folder instead of starting `raze.exe` directly.
+- You should own and have installed `Duke Nukem 3D: 20th Anniversary World Tour` on the same machine for the intended Duke-RT content path.
+- When the launcher detects World Tour normals, let it copy them into the packaged `release-overlay`. That is the intended setup for the current visual baseline.
+- Duke-RT can still run without those copied normals, but the presentation will be less complete because the overlay will be missing that extra normal-map data.
+- Other Build-engine games may possibly launch because the underlying Raze game support is still present, but that path is not tested here and is not supported yet.
+
+## Current Status
+
+Duke-RT is work in progress. The core renderer is in, with full support for modern graphics APIs and libraries like D3D12, DLSS Super Resolution and Ray Reconstruction, etc. I've also gone through and **remastered Duke episode 1 with PBR materials (based on the originals) as well as updated lighting**. Episodes 2 and 3 are not yet done. There are some known issues that are on my radar but I have yet to tackle.
+
+![metal materials](images/metal-materials.png)
+
+Known high-priority issues:
+- broken transport-driven non-euclidean behavior in `E5L1`
+- coplanar z-fighting/holes cause broken floors and some ceilings in `E2L1`
+- voxels don't display correctly
+- slow CPU-side perf on `E1L4` due to rapid chunk state oscillation
+
+Known lower-priority issues:
+- flickering material state for the vent at the start of `E1L4`
+- Duke is facing the wrong way in metal reflections
+- the last scene panning sequence no longer appears on surveillance camera screens
+- coplanar geometry holes on the `E1L1` spiral stairs and the ceiling under them
+- some room-over-room geometry intrusions not on the visible list still block lights in `E1L1`
+- emission flips on either side of the cinema sign emitter sprite in `E1L1`
+- framegen only works with D3D12
+
+I also have a bunch of features I'd like to tackle in the future, including some renderer improvements, as well as a complete pass on the other main Duke 3D episodes.
+
+Upcoming feature work:
+- thorough material and lighting pass on Episodes 2 and 3
+- volumetrics such as rocket smoke
+- auto exposure
+- water surfaces
+- proper mirror replacements
+- better glass
+
+## Tools and Guides
+
+![cropped spheres](images/cropped-spheres.png)
+
+Check these out if you want runtime commands, authoring tools, and the current workflows to add your own custom materials and lights.
+
+- [RT renderer debug commands](RT-DEBUG-COMMANDS.md): runtime backend selection, path-tracing debug views, frame generation controls, lighting diagnostics, repro workflows, and useful command-line/logging tools while validating custom content.
+- [LIGHTOVR authoring guide](LIGHTOVR-AUTHORING.md): the light overlay format and authoring workflow for creating your own custom lighting rules, including load/reload behavior, writable loose-overlay setup, and actor light edit mode.
+- [Material overlay authoring guide](MATERIAL-OVERLAY-AUTHORING.md): the material-overlay authoring workflow for creating your own PBR companion maps, including Duke tile naming, supported map types, and how to add custom metallic, roughness, specular, normal, and glow textures.
+
+## Original Raze Background
+
+[![Upstream Raze Continuous Integration](https://github.com/ZDoom/Raze/actions/workflows/continuous_integration.yml/badge.svg)](https://github.com/ZDoom/Raze/actions/workflows/continuous_integration.yml)
+
+Raze is a fork of Build engine games backed by GZDoom tech and combines Duke Nukem 3D, Blood, Redneck Rampage, Shadow Warrior and Exhumed/Powerslave in a single package. It is also capable of playing Nam and WW2 GI.
 
 The game modules are based on the following sources:
 
@@ -40,13 +101,177 @@ Special thanks to Coraline of the 3DGE team for allowing us to use her README.md
 ##### https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 ---
 
-## How to build Raze
+## How to build Duke-RT
 
-To build Raze, please see the [wiki](https://zdoom.org/wiki/) and see the "Programmer's Corner" on the bottom-right corner of the page to build for your platform - use this repository instead of GZDoom's.
+These are a bit of a mess and I haven't revalidated them for a newcomer to the repo recently. Also please note that only Windows is supported for Duke-RT!
 
-# Resources
-- https://raze.zdoom.org/ - Home Page
-- https://forum.zdoom.org/viewforum.php?f=351 - Forum
-- https://raze.zdoom.org/wiki/ - Wiki
-- https://dsc.gg/zdoom - Discord Server
-- https://docs.google.com/spreadsheets/d/1pvwXEgytkor9SClCiDn4j5AH7FedyXS-ocCbsuQIXDU/edit?usp=sharing - Translation sheet (Google Docs)
+### Windows Build Instructions
+
+#### Prerequisites
+
+- Git, and CMake (at least 3.16) available in `PATH`
+- Win 10 probably preferred for decent Terminal, although the toolchain mostly just needs a 64-bit OS
+- Visual Studio 2022 with the “Desktop development with C++” workload (MSVC, Ninja, and the Windows 10+ SDK)
+- Internet access for submodules and [vcpkg](https://github.com/microsoft/vcpkg) bootstrap
+
+#### Recommended Windows setup
+
+This is the current Windows flow for this repo. Run all commands from the repository root.
+
+Important repo-specific rules:
+
+- Enter the Visual Studio developer environment before configure or build commands that use MSVC.
+- Build ZMusic first, then build Duke-RT.
+- ZMusic uses `x64-windows` dependencies, while the main Duke-RT project uses `x64-windows-static`.
+- The verified terminal output path is `build\terminal-ninja\raze.exe`.
+
+##### Exact environment variables
+
+If you are using `cmd.exe`:
+
+```bat
+set "REPO_ROOT=%CD%"
+set "VCPKG_ROOT=%REPO_ROOT%\build\vcpkg"
+set "VCPKG_OVERLAY_PORTS=%REPO_ROOT%\vcpkg-overlays"
+set "VCPKG_CMAKE_CONFIGURE_OPTIONS=-DCMAKE_POLICY_DEFAULT_CMP0026=OLD"
+set "VCPKG_KEEP_ENV_VARS=VCPKG_CMAKE_CONFIGURE_OPTIONS"
+```
+
+If you are using PowerShell:
+
+```powershell
+$RepoRoot = (Resolve-Path .).Path
+$env:VCPKG_ROOT = "$RepoRoot\build\vcpkg"
+$env:VCPKG_OVERLAY_PORTS = "$RepoRoot\vcpkg-overlays"
+$env:VCPKG_CMAKE_CONFIGURE_OPTIONS = "-DCMAKE_POLICY_DEFAULT_CMP0026=OLD"
+$env:VCPKG_KEEP_ENV_VARS = "VCPKG_CMAKE_CONFIGURE_OPTIONS"
+```
+
+The configure and build examples below intentionally use `cmd /c`, so `%REPO_ROOT%`, `%VCPKG_ROOT%`, and `%VCPKG_OVERLAY_PORTS%` expand correctly even when launched from PowerShell.
+
+What those variables are for:
+
+- `VCPKG_ROOT`: local `build\vcpkg` checkout
+- `VCPKG_OVERLAY_PORTS`: required overlay ports for this repo
+- `VCPKG_CMAKE_CONFIGURE_OPTIONS`: keeps the ZMusic/vcpkg configure path working with the older yasm port behavior
+- `VCPKG_KEEP_ENV_VARS`: tells `vcpkg` to preserve `VCPKG_CMAKE_CONFIGURE_OPTIONS` for child CMake invocations
+
+##### One-time dependency bootstrap
+
+Bootstrap `vcpkg`:
+
+```powershell
+git clone https://github.com/microsoft/vcpkg build\vcpkg
+git -C build\vcpkg checkout 74e6536215718009aae747d86d84b78376bf9e09
+cmd /c "build\vcpkg\bootstrap-vcpkg.bat -disableMetrics"
+```
+
+Install the `x64-windows` runtime-side dependency set used by ZMusic and the shared Windows DLL cache:
+
+```powershell
+cmd /c "build\vcpkg\vcpkg.exe install --triplet x64-windows"
+```
+
+Clone ZMusic if needed:
+
+```powershell
+git clone https://github.com/zdoom/zmusic build\zmusic
+```
+
+##### Configure and build ZMusic
+
+These are Powershell commands. When running, be sure to replace the path for the call to wherever you installed your copy of VS 2022.
+
+Configure:
+
+```powershell
+cmd /c "call C:\PROGRA~1\MICROS~1\2022\COMMUN~1\Common7\Tools\VsDevCmd.bat -arch=x64 -host_arch=x64 && cmake -G Ninja -S build\zmusic -B build\zmusic\build-ninja-ovl2 -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake -DVCPKG_LIBSNDFILE=1 -DVCPKG_INSTALLED_DIR=%REPO_ROOT%\vcpkg_installed -DVCPKG_OVERLAY_PORTS=%VCPKG_OVERLAY_PORTS%"
+```
+
+Build:
+
+```powershell
+cmd /c "call C:\PROGRA~1\MICROS~1\2022\COMMUN~1\Common7\Tools\VsDevCmd.bat -arch=x64 -host_arch=x64 && cmake --build build\zmusic\build-ninja-ovl2 --config Release --target zmusiclite"
+```
+
+Important outputs:
+
+- `build\zmusic\include`
+- `build\zmusic\build-ninja-ovl2\source\zmusiclite.lib`
+- `build\zmusic\build-ninja-ovl2\source\zmusiclite.dll`
+
+##### Configure and build Duke-RT
+
+More Powershell commands. Also be sure to replace the C: in the path as necessary for your install of VS 2022 here as well.
+
+Configure:
+
+```powershell
+cmd /c "call C:\PROGRA~1\MICROS~1\2022\COMMUN~1\Common7\Tools\VsDevCmd.bat -arch=x64 -host_arch=x64 && cmake -G Ninja -S . -B build\terminal-ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake -DVCPKG_INSTALLED_DIR=%REPO_ROOT%\vcpkg_installed -DVCPKG_OVERLAY_PORTS=%VCPKG_OVERLAY_PORTS% -DZMUSIC_INCLUDE_DIR=%REPO_ROOT%\build\zmusic\include -DZMUSIC_LIBRARIES=%REPO_ROOT%\build\zmusic\build-ninja-ovl2\source\zmusiclite.lib"
+```
+
+Build:
+
+```powershell
+cmd /c "call C:\PROGRA~1\MICROS~1\2022\COMMUN~1\Common7\Tools\VsDevCmd.bat -arch=x64 -host_arch=x64 && cmake --build build\terminal-ninja --config RelWithDebInfo --target raze"
+```
+
+The resulting output is:
+
+- `build\terminal-ninja\raze.exe`
+- `build\terminal-ninja\raze.pk3`
+
+The Windows CMake also stages the required audio runtime beside `raze.exe`:
+
+- `zmusiclite.dll` and the adjacent codec DLLs from the local ZMusic build
+- `OpenAL32.dll` from `bin\windows\runtime-deps` or the known local vcpkg locations
+
+##### Windows release package
+
+To build a stripped `Release` tree and stage a redistributable folder plus zip in one command, run:
+
+```powershell
+.\tools\dist\Build-WindowsReleasePackage.cmd
+```
+
+Default outputs:
+
+- `build\terminal-release\raze.exe`
+- `out\release\raze-windows-release\`
+- `out\release\raze-windows-release.zip`
+
+To restage or re-zip an already-built `Release` tree without rebuilding, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\dist\Build-WindowsReleasePackage.ps1 -SkipBuild
+```
+
+The staged package includes:
+
+- `raze.exe` and `raze.pk3` from the `Release` build
+- staged runtime DLLs such as `zmusiclite.dll`, `OpenAL32.dll`, NRI/NRD/FFX runtimes, and codec DLLs
+- `launch-duke-rt.cmd`
+- `tools\dist\Prepare-CommercialNormals.ps1`
+- `release-overlay`
+
+The staged package includes `package\windows\launch-duke-rt.cmd`, `tools\dist\Prepare-CommercialNormals.ps1`, and `release-overlay`, and removes `*.pdb` files from the staged package.
+
+##### Fast rebuild command
+
+Once `build\terminal-ninja` is configured, this is the normal rebuild command (Powershell, path needs updating for your install):
+
+```powershell
+cmd /c "call C:\PROGRA~1\MICROS~1\2022\COMMUN~1\Common7\Tools\VsDevCmd.bat -arch=x64 -host_arch=x64 && cmake --build build\terminal-ninja --config RelWithDebInfo --target raze"
+```
+
+##### Launch
+
+```powershell
+build\terminal-ninja\raze.exe
+```
+
+Example local overlay launch:
+
+```powershell
+build\terminal-ninja\raze.exe -file M:\Raze\default-overlay
+```
