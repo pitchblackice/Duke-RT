@@ -56,7 +56,12 @@ struct GameInterface : public ::GameInterface
 	void UpdateCameras(double smoothratio) override;
 	void EnterPortal(DCoreActor* viewer, int type) override;
 	void LeavePortal(DCoreActor* viewer, int type) override;
+	void SetMirrorPlayerVisibilityCaptureOverride(bool enabled) override;
+	bool GetMirrorPlayerVisibilityCaptureOverride() const override;
 	bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) override;
+	bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) override;
+	bool GetNightVisionState(RuntimeNightVisionState* state) override;
+	bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) override;
 	void AddExcludedEpisode(const FString& episode) override;
 	int GetCurrentSkill() override;
 	bool WantEscape() override;
@@ -115,4 +120,3 @@ PClassActor* CallGetRadiusDamageType(DDukeActor* actor, int targhealth);
 extern FTextureID mirrortex, foftex;
 
 END_DUKE_NS
-

@@ -50,6 +50,7 @@ public:
 	VulkanRenderDevice(void *hMonitor, bool fullscreen, std::shared_ptr<VulkanSurface> surface);
 	~VulkanRenderDevice();
 	bool IsVulkan() override { return true; }
+	bool SupportsQueued2DTextureRenders() const override { return true; }
 
 	void Update() override;
 
@@ -95,6 +96,7 @@ public:
 
 private:
 	void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect &)> renderFunc) override;
+	void RenderTextureView(FGameTexture* tex, std::function<void(IntRect&)> renderFunc) override;
 	void PrintStartupLog();
 	void CopyScreenToBuffer(int w, int h, uint8_t *data) override;
 

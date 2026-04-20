@@ -49,6 +49,7 @@
 #include "texinfo.h"
 
 #include "buildtiles.h"
+#include "d_eventbase.h"
 
 
 F2DDrawer twodpsp;
@@ -131,6 +132,7 @@ void DrawRateStuff()
 		int textScale = active_con_scale(twod);
 		int rate_x = screen->GetWidth() / textScale - NewConsoleFont->StringWidth(&fpsbuff[0]);
 		twod->AddColorOnlyQuad(rate_x * textScale, 0, screen->GetWidth(), NewConsoleFont->GetHeight() * textScale, MAKEARGB(255, 0, 0, 0));
+		PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::Rate);
 		DrawText(twod, NewConsoleFont, CR_WHITE, rate_x, 0, (char*)&fpsbuff[0],
 			DTA_VirtualWidth, screen->GetWidth() / textScale,
 			DTA_VirtualHeight, screen->GetHeight() / textScale,
@@ -138,4 +140,3 @@ void DrawRateStuff()
 
 	}
 }
-

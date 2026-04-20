@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include "c_cvars.h"
 #include "zstring.h"
@@ -31,6 +32,8 @@ extern cycle_t drawtime, actortime, thinktime, gameupdatetime;
 extern bool r_NoInterpolate;
 
 struct MapRecord;
+enum class LevelTransitionReason : uint8_t;
+struct LevelTransitionInfo;
 extern MapRecord* g_nextmap;
 extern int g_nextskill;	
 extern int g_bossexit;
@@ -46,6 +49,9 @@ void updatePauseStatus();
 void DeferredStartGame(MapRecord* map, int skill, bool nostopsound = false);
 void ChangeLevel(MapRecord* map, int skill, bool bossexit = false);
 void CompleteLevel(MapRecord* map);
+LevelTransitionInfo G_BeginLevelTransition(LevelTransitionReason reason, MapRecord* newLevel = nullptr);
+void G_CompleteLevelUnload(const LevelTransitionInfo& info);
+void G_NotifyLevelLoadBegin(const LevelTransitionInfo& info, MapRecord* loadedLevel = nullptr);
 bool CheckCheatmode(bool printmsg = true, bool sponly = false);
 void setVideoMode();
 
@@ -274,4 +280,3 @@ enum gameaction_t : int
 	ga_fullconsole,
 };
 extern gameaction_t		gameaction;
-

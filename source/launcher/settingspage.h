@@ -37,6 +37,9 @@ private:
 	CheckboxLabel* VulkanCheckbox = nullptr;
 	CheckboxLabel* OpenGLCheckbox = nullptr;
 	CheckboxLabel* GLESCheckbox = nullptr;
+#ifdef HAVE_NRI
+	CheckboxLabel* NRICheckbox = nullptr;
+#endif
 #endif
 	ListView* LangList = nullptr;
 

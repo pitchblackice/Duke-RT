@@ -42,6 +42,22 @@ BEGIN_DUKE_NS
 
 int operateTripbomb(DDukePlayer* const p);
 
+static const char* GetWW2GIMuzzleFlashEventId(DDukePlayer* const p)
+{
+	switch (aplWeaponWorksLike(p->curr_weapon, p))
+	{
+	case PISTOL_WEAPON: return "duke.pistol.primary";
+	case SHOTGUN_WEAPON: return "duke.shotgun.primary";
+	case CHAINGUN_WEAPON: return "duke.chaingun.primary";
+	case RPG_WEAPON: return "duke.rpg.primary";
+	case SHRINKER_WEAPON: return "duke.shrinker.primary";
+	case GROW_WEAPON: return "duke.grower.primary";
+	case FREEZE_WEAPON: return "duke.freezer.primary";
+	case DEVISTATOR_WEAPON: return "duke.devastator.primary";
+	default: return nullptr;
+	}
+}
+
 //---------------------------------------------------------------------------
 //
 //
@@ -72,6 +88,10 @@ static void DoFire(DDukePlayer* const p)
 		{
 			p->ammo_amount[p->curr_weapon]--;
 		}
+	}
+	if (const char* muzzleFlashEventId = GetWW2GIMuzzleFlashEventId(p))
+	{
+		EmitPathTracingPlayerWeaponLightEvent(p, muzzleFlashEventId);
 	}
 
 	if (!(aplWeaponFlags(p->curr_weapon, p) & WEAPON_FLAG_NOVISIBLE))

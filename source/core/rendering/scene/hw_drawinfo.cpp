@@ -44,10 +44,14 @@
 #include "hw_voxels.h"
 #include "coreactor.h"
 #include "tiletexture.h"
+#include "texturemanager.h"
+#include "v_video.h"
 
 #include "buildtiles.h"
 
 EXTERN_CVAR(Float, r_visibility)
+EXTERN_CVAR(Int, nri_pttraceframes)
+EXTERN_CVAR(Int, nri_ptactorspritetrace)
 CVAR(Bool, gl_no_skyclear, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, gl_texture, true, 0)
@@ -55,6 +59,11 @@ CVAR(Float, gl_mask_threshold, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, gl_mask_sprite_threshold, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 BitArray gotsector;
+
+namespace
+{
+	std::atomic<uint32_t> gHwDrawInfoPortalCleanupAnomalyCount = 0;
+}
 
 //==========================================================================
 //
@@ -174,6 +183,7 @@ HWDrawInfo *HWDrawInfo::EndDrawInfo()
 {
 	assert(this == gl_drawinfo);
 	for (int i = 0; i < GLDL_TYPES; i++) drawlists[i].Reset();
+	assert(Portals.Size() == 0);
 	gl_drawinfo = outer;
 	di_list.Release(this);
 	if (gl_drawinfo == nullptr)
@@ -188,8 +198,35 @@ HWDrawInfo *HWDrawInfo::EndDrawInfo()
 //
 //==========================================================================
 
+void HWDrawInfo::ClearOwnedPortals()
+{
+	HWPortal* portal = nullptr;
+	while (Portals.Pop(portal))
+	{
+		delete portal;
+	}
+	assert(Portals.Size() == 0);
+}
+
+uint32_t HWDrawInfo::ConsumePortalCleanupAnomalyCount()
+{
+	return gHwDrawInfoPortalCleanupAnomalyCount.exchange(0, std::memory_order_relaxed);
+}
+
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
 void HWDrawInfo::ClearBuffers()
 {
+	if (Portals.Size() > 0)
+	{
+		gHwDrawInfoPortalCleanupAnomalyCount.fetch_add((uint32_t)Portals.Size(), std::memory_order_relaxed);
+	}
+	ClearOwnedPortals();
 	spriteindex = 0;
 	mClipPortal = nullptr;
 	mCurrentPortal = nullptr;
@@ -280,7 +317,8 @@ void HWDrawInfo::DispatchSprites()
 	{
 		auto tspr = tsprites.get(i);
 		auto actor = tspr->ownerActor;
-		auto texid = tspr->spritetexture();
+		auto baseTexId = tspr->spritetexture();
+		auto texid = baseTexId;
 
 		if (actor == nullptr || tspr->scale.X == 0 || tspr->scale.Y == 0 || !texid.isValid()) continue;
 
@@ -293,6 +331,24 @@ void HWDrawInfo::DispatchSprites()
 		if (tspr->cstat2 & CSTAT2_SPRITE_FULLBRIGHT)
 			tspr->shade = -127;
 		tspr->setspritetexture(texid);
+		if ((int)nri_ptactorspritetrace > 0 && (int)nri_pttraceframes > 0 && screen != nullptr)
+		{
+			PathTracingActorSpriteTraceEvent event = {};
+			event.stage = PathTracingActorSpriteTraceStage::Draw;
+			event.actorIndex = actor->GetIndex();
+			event.spriteStatnum = tspr->statnum;
+			event.spritePicnum = tspr->picnum;
+			event.baseTextureId = baseTexId.GetIndex();
+			event.resolvedTextureId = texid.GetIndex();
+			event.palette = tspr->pal;
+			event.shade = tspr->shade;
+			event.cstat = tspr->cstat;
+			event.cstat2 = tspr->cstat2;
+			event.noAnimate = (tspr->cstat2 & CSTAT2_SPRITE_NOANIMATE) != 0;
+			event.fullbright = (tspr->cstat2 & CSTAT2_SPRITE_FULLBRIGHT) != 0;
+			event.resolvedGameTexture = TexMan.GetGameTexture(texid);
+			screen->EmitPathTracingActorSpriteTraceEvent(event);
+		}
 
 		if (!(actor->sprext.renderflags & SPREXT_NOTMD) && !(tspr->cstat2 & CSTAT2_SPRITE_NOMODEL))
 		{
@@ -721,7 +777,22 @@ void HWDrawInfo::DrawScene(int drawmode, bool portal)
 		ssao_portals_available--;
 	}
 
+	if (screen->ShouldSkipSceneBuildForPathTracedScene(drawmode, portal))
+	{
+		if (screen->RenderPathTracedScene(*this, drawmode, portal))
+		{
+			ClearOwnedPortals();
+			return;
+		}
+	}
+
 	CreateScene(portal);
+	if (screen->RenderPathTracedScene(*this, drawmode, portal))
+	{
+		ClearOwnedPortals();
+		return;
+	}
+
 	auto& RenderState = *screen->RenderState();
 
 	RenderState.SetDepthMask(true);

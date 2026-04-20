@@ -1094,6 +1094,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 		if (p->kickback_pic == 1)
 		{
 			shoot(pact, DukeShotSparkClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "duke.pistol.primary");
 			S_PlayActorSound(PISTOL_FIRE, pact);
 			lastvisinc = PlayClock + 32;
 			p->visibility = 0;
@@ -1145,6 +1146,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 		{
 			for(int ii = 0; ii < 7; ii++)
 				shoot(pact, DukeShotgunShotClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "duke.shotgun.primary");
 			p->ammo_amount[SHOTGUN_WEAPON]--;
 
 			S_PlayActorSound(SHOTGUN_FIRE, pact);
@@ -1214,6 +1216,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 
 				S_PlayActorSound(CHAINGUN_FIRE, pact);
 				shoot(pact, DukeChaingunShotClass);
+				EmitPathTracingPlayerWeaponLightEvent(p, "duke.chaingun.primary");
 				lastvisinc = PlayClock + 32;
 				p->visibility = 0;
 				checkavailweapon(p);
@@ -1258,6 +1261,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 				p->okickback_pic = p->kickback_pic = 0;
 			p->ammo_amount[p->curr_weapon]--;
 			shoot(pact, DukeGrowSparkClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "duke.grower.primary");
 
 			if (!isNam())
 			{
@@ -1287,6 +1291,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 
 			p->ammo_amount[SHRINKER_WEAPON]--;
 			shoot(pact, DukeShrinkerClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "duke.shrinker.primary");
 
 			if (!isNam())
 			{
@@ -1320,6 +1325,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 					p->visibility = 0;
 					lastvisinc = PlayClock + 32;
 					shoot(pact, DukeRPGClass);
+					EmitPathTracingPlayerWeaponLightEvent(p, "duke.devastator.primary");
 					p->ammo_amount[DEVISTATOR_WEAPON]--;
 					checkavailweapon(p);
 				}
@@ -1330,6 +1336,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 				p->visibility = 0;
 				lastvisinc = PlayClock + 32;
 				shoot(pact, DukeRPGClass);
+				EmitPathTracingPlayerWeaponLightEvent(p, "duke.devastator.primary");
 				p->ammo_amount[DEVISTATOR_WEAPON]--;
 				checkavailweapon(p);
 				if (p->ammo_amount[DEVISTATOR_WEAPON] <= 0) p->okickback_pic = p->kickback_pic = 0;
@@ -1350,6 +1357,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 				p->visibility = 0;
 				lastvisinc = PlayClock + 32;
 				shoot(pact, DukeFreezeBlastClass);
+				EmitPathTracingPlayerWeaponLightEvent(p, "duke.freezer.primary");
 				checkavailweapon(p);
 			}
 			if (pact->spr.scale.X < 0.5)
@@ -1378,6 +1386,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 			{
 				p->ammo_amount[FLAMETHROWER_WEAPON]--;
 				shoot(pact, DukeFireballClass);
+				EmitPathTracingPlayerWeaponLightEvent(p, "duke.flamethrower.primary");
 			}
 			checkavailweapon(p);
 		}
@@ -1432,6 +1441,7 @@ static void operateweapon(DDukePlayer* const p, ESyncBits actions)
 			lastvisinc = PlayClock + 32;
 			p->visibility = 0;
 			shoot(pact, DukeRPGClass);
+			EmitPathTracingPlayerWeaponLightEvent(p, "duke.rpg.primary");
 			checkavailweapon(p);
 		}
 		else if (p->kickback_pic == 20)
@@ -1972,4 +1982,3 @@ HORIZONLY:
 }
 
 END_DUKE_NS
-

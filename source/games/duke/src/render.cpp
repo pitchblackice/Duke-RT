@@ -41,6 +41,11 @@ extern float GlobalFogDensity;
 
 BEGIN_DUKE_NS
 
+namespace
+{
+	bool gMirrorPlayerVisibilityCaptureOverride = false;
+}
+
 //---------------------------------------------------------------------------
 //
 // Floor Over Floor
@@ -68,12 +73,40 @@ BEGIN_DUKE_NS
 void GameInterface::UpdateCameras(double smoothratio)
 {
 	const int VIEWSCREEN_ACTIVE_DISTANCE = 1024;
+	static TObjPtr<DDukeActor*> sPreviousViewCamera;
 
 	if (camsprite == nullptr)
 		return;
 
 	auto p = getPlayer(screenpeek);
-	if (p->newOwner != nullptr) camsprite->SetOwner(p->newOwner);
+	if (p->newOwner != nullptr)
+	{
+		if (sPreviousViewCamera == nullptr)
+		{
+			screen->NotifyPathTracingCameraCut("camera-enter");
+		}
+		else if (sPreviousViewCamera != p->newOwner)
+		{
+			screen->NotifyPathTracingCameraCut("camera-switch");
+		}
+
+		// Active camera use already renders the main view from the camera actor.
+		// Updating the offscreen monitor canvas in the same frame forces a second
+		// render at a different size, which is unsupported by the current NRI PT path.
+		camsprite->SetOwner(p->newOwner);
+		sPreviousViewCamera = p->newOwner;
+		return;
+	}
+	if (sPreviousViewCamera != nullptr)
+	{
+		screen->NotifyPathTracingCameraCut("camera-exit");
+
+		// The first frame after leaving camera view still renders the normal main
+		// scene at window size. Skip the monitor refresh in that transition frame
+		// so NRI PT does not bounce between offscreen and main-view frame sizes.
+		sPreviousViewCamera = nullptr;
+		return;
+	}
 
 	if (camsprite->GetOwner() && (p->GetActor()->spr.pos - camsprite->spr.pos).Length() < VIEWSCREEN_ACTIVE_DISTANCE)
 	{
@@ -95,6 +128,17 @@ void GameInterface::UpdateCameras(double smoothratio)
 	}
 }
 
+static FCanvasTexture* GetViewscreenCanvas()
+{
+	auto tex = TexMan.FindGameTexture("VIEWSCR", ETextureType::Any);
+	if (tex == nullptr || tex->GetTexture() == nullptr || !tex->GetTexture()->isCanvas())
+	{
+		return nullptr;
+	}
+
+	return static_cast<FCanvasTexture*>(tex->GetTexture());
+}
+
 void GameInterface::EnterPortal(DCoreActor* viewer, int type)
 {
 	if (type == PORTAL_WALL_MIRROR) display_mirror++;
@@ -103,6 +147,16 @@ void GameInterface::EnterPortal(DCoreActor* viewer, int type)
 void GameInterface::LeavePortal(DCoreActor* viewer, int type) 
 {
 	if (type == PORTAL_WALL_MIRROR) display_mirror--;
+}
+
+void GameInterface::SetMirrorPlayerVisibilityCaptureOverride(bool enabled)
+{
+	SetMirrorPlayerVisibilityCaptureActive(enabled);
+}
+
+bool GameInterface::GetMirrorPlayerVisibilityCaptureOverride() const
+{
+	return IsMirrorPlayerVisibilityCaptureActive();
 }
 
 bool GameInterface::GetGeoEffect(GeoEffect* eff, sectortype* viewsector)
@@ -120,6 +174,121 @@ bool GameInterface::GetGeoEffect(GeoEffect* eff, sectortype* viewsector)
 		return true;
 	}
 	return false;
+}
+
+bool GameInterface::GetRuntimeLinkDebugState(RuntimeLinkDebugState* state)
+{
+	if (state == nullptr)
+	{
+		return false;
+	}
+
+	*state = {};
+
+	const auto p = getPlayer(screenpeek);
+	if (p == nullptr || !p->insector())
+	{
+		return false;
+	}
+
+	const auto playerSector = p->cursector;
+	const auto actor = p->GetActor();
+	const auto actorSector = actor != nullptr ? actor->sector() : nullptr;
+	if (playerSector == nullptr || actor == nullptr)
+	{
+		return false;
+	}
+
+	int effectiveLotag = playerSector->lotag;
+	bool specialWaterSector = false;
+	if (effectiveLotag == 867)
+	{
+		DukeSectIterator it(playerSector);
+		while (auto act = it.Next())
+		{
+			if (act->GetClass() == RedneckWaterSurfaceClass && act->spr.pos.Z - 8 < actor->getOffsetZ())
+			{
+				effectiveLotag = ST_2_UNDERWATER;
+				break;
+			}
+		}
+	}
+	else if (effectiveLotag == 848 && tilesurface(playerSector->floortexture) == TSURF_SPECIALWATER)
+	{
+		effectiveLotag = ST_1_ABOVE_WATER;
+		specialWaterSector = true;
+	}
+
+	state->available = true;
+	state->specialWaterSector = specialWaterSector;
+	state->playerSectorIndex = sectindex(playerSector);
+	state->playerSectorLotag = playerSector->lotag;
+	state->playerSectorHitag = playerSector->hitag;
+	state->effectiveSectorLotag = effectiveLotag;
+	state->actorSectorIndex = actorSector != nullptr ? sectindex(actorSector) : -1;
+	state->actorSectorLotag = actorSector != nullptr ? actorSector->lotag : 0;
+	state->actorSectorHitag = actorSector != nullptr ? actorSector->hitag : 0;
+	state->onWarpingSector = p->on_warping_sector;
+	state->transporterHold = p->transporter_hold;
+	state->rrGeoCount = geocnt;
+	return true;
+}
+
+bool GameInterface::GetNightVisionState(RuntimeNightVisionState* state)
+{
+	if (state == nullptr)
+	{
+		return false;
+	}
+
+	*state = {};
+
+	const auto p = getPlayer(screenpeek);
+	if (p == nullptr)
+	{
+		return false;
+	}
+
+	state->available = true;
+	state->mode = RuntimeNightVisionMode::Duke;
+	state->viewEligible = p->newOwner == nullptr && ud.cameraactor == nullptr;
+	state->remainingSeconds = max((int)p->heat_amount, 0) * (1.0f / 120.0f);
+	state->enabled = state->viewEligible && p->heat_on != 0 && p->heat_amount > 0;
+	state->strength01 = state->enabled ? 1.0f : 0.0f;
+	return true;
+}
+
+bool GameInterface::GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info)
+{
+	if (info == nullptr || sectorIndex < 0 || (unsigned)sectorIndex >= sector.Size())
+	{
+		return false;
+	}
+
+	*info = {};
+	auto* sect = &sector[(unsigned)sectorIndex];
+	info->available = true;
+	info->sectorIndex = sectorIndex;
+	info->lotag = sect->lotag;
+	info->hitag = sect->hitag;
+
+	DukeSectIterator it(sect);
+	while (auto act = it.Next())
+	{
+		if (!iseffector(act))
+		{
+			continue;
+		}
+
+		if (info->effectorCount < countof(info->effectorLotags))
+		{
+			info->effectorLotags[info->effectorCount] = act->spr.lotag;
+			info->effectorHitags[info->effectorCount] = act->spr.hitag;
+		}
+		info->effectorCount++;
+	}
+
+	return true;
 }
 
 //---------------------------------------------------------------------------
@@ -336,6 +505,13 @@ void displayrooms(int snum, double interpfrac, bool sceneonly)
 	if (camview) viewer->spr.cstat = CSTAT_SPRITE_INVISIBLE;
 	if (!sceneonly) drawweapon(interpfrac);
 	render_drawrooms(viewer, cpos, sect, cangles, interpfrac, fov);
+	if (p->newOwner != nullptr)
+	{
+		if (auto* canvas = GetViewscreenCanvas(); canvas != nullptr)
+		{
+			screen->SnapshotCurrentViewToCanvas(canvas);
+		}
+	}
 	viewer->spr.cstat = cstat;
 
 	//GLInterface.SetMapFog(false);
@@ -361,6 +537,16 @@ bool GameInterface::GenerateSavePic()
 void GameInterface::processSprites(tspriteArray& tsprites, const DVector3& view, DAngle viewang, double interpfrac)
 {
 	fi.animatesprites(tsprites, view.XY(), viewang, interpfrac);
+}
+
+bool IsMirrorPlayerVisibilityCaptureActive()
+{
+	return gMirrorPlayerVisibilityCaptureOverride;
+}
+
+void SetMirrorPlayerVisibilityCaptureActive(bool active)
+{
+	gMirrorPlayerVisibilityCaptureOverride = active;
 }
 
 

@@ -38,6 +38,7 @@
 #include "version.h"
 #include "c_bind.h"
 #include "c_console.h"
+#include "d_eventbase.h"
 #include "c_cvars.h"
 #include "c_dispatch.h"
 #include "gamestate.h"
@@ -53,6 +54,7 @@
 #include "v_font.h"
 #include "printf.h"
 #include "i_time.h"
+#include "textures.h"
 #include "texturemanager.h"
 #include "v_draw.h"
 #include "i_interface.h"
@@ -89,6 +91,44 @@ void C_SetNotifyFontScale(double scale)
 
 
 FConsoleBuffer *conbuffer;
+
+struct ConsoleBodyCache
+{
+	FGameTexture* texture = nullptr;
+	F2DDrawer drawer;
+	uint64_t contentGeneration = 0;
+	int logicalWidth = 0;
+	int logicalHeight = 0;
+	int formattedWidth = 0;
+	int visibleLines = 0;
+	int lastBottomLineIndex = -1;
+	int textScale = 0;
+	int rowAdjust = 0;
+	FFont* font = nullptr;
+
+	void ResetState()
+	{
+		contentGeneration = 0;
+		logicalWidth = 0;
+		logicalHeight = 0;
+		formattedWidth = 0;
+		visibleLines = 0;
+		lastBottomLineIndex = -1;
+		textScale = 0;
+		rowAdjust = 0;
+		font = nullptr;
+	}
+
+	void DestroyTexture()
+	{
+		delete texture;
+		texture = nullptr;
+		drawer.Clear();
+		ResetState();
+	}
+};
+
+static ConsoleBodyCache gConsoleBodyCache;
 
 static FTextureID conback;
 static FTextureID conflat;
@@ -127,6 +167,71 @@ static GameAtExit *ExitCmdList;
 // Buffer for AddToConsole()
 static char *work = NULL;
 static int worklen = 0;
+
+static bool ShouldUseConsoleBodyCache()
+{
+	return screen != nullptr &&
+		screen->SupportsQueued2DTextureRenders() &&
+		screen->RenderState() != nullptr;
+}
+
+static bool EnsureConsoleBodyCacheTexture(int logicalWidth, int logicalHeight)
+{
+	if (!ShouldUseConsoleBodyCache() || logicalWidth <= 0 || logicalHeight <= 0)
+	{
+		gConsoleBodyCache.DestroyTexture();
+		return false;
+	}
+
+	if (gConsoleBodyCache.texture != nullptr &&
+		gConsoleBodyCache.logicalWidth == logicalWidth &&
+		gConsoleBodyCache.logicalHeight == logicalHeight)
+	{
+		return true;
+	}
+
+	delete gConsoleBodyCache.texture;
+	gConsoleBodyCache.texture = MakeGameTexture(new FWrapperTexture(logicalWidth, logicalHeight, 1), nullptr, ETextureType::SWCanvas);
+	gConsoleBodyCache.drawer.Clear();
+	gConsoleBodyCache.ResetState();
+	gConsoleBodyCache.logicalWidth = logicalWidth;
+	gConsoleBodyCache.logicalHeight = logicalHeight;
+	return gConsoleBodyCache.texture != nullptr;
+}
+
+static bool RebuildConsoleBodyCache(FBrokenLines* blines, int offset, int visibleLines, int textScale, int logicalWidth, int logicalHeight, int bottomLineIndex)
+{
+	if (blines == nullptr || visibleLines <= 0 || !EnsureConsoleBodyCacheTexture(logicalWidth, logicalHeight))
+	{
+		return false;
+	}
+
+	gConsoleBodyCache.drawer.Clear();
+	gConsoleBodyCache.drawer.Begin(logicalWidth, logicalHeight);
+
+	FBrokenLines* printline = blines + bottomLineIndex;
+	{
+		PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleBody);
+		int line = visibleLines;
+		for (FBrokenLines* p = printline; p >= blines && line > 0; --p, --line)
+		{
+			DrawText(&gConsoleBodyCache.drawer, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + line * CurrentConsoleFont->GetHeight(), p->Text.GetChars(), TAG_DONE);
+		}
+	}
+
+	gConsoleBodyCache.drawer.End();
+	screen->Queue2DTextureRender(gConsoleBodyCache.texture, &gConsoleBodyCache.drawer);
+	gConsoleBodyCache.contentGeneration = conbuffer != nullptr ? conbuffer->GetContentGeneration() : 0;
+	gConsoleBodyCache.formattedWidth = ConWidth / textScale;
+	gConsoleBodyCache.visibleLines = visibleLines;
+	gConsoleBodyCache.lastBottomLineIndex = bottomLineIndex;
+	gConsoleBodyCache.textScale = textScale;
+	gConsoleBodyCache.rowAdjust = RowAdjust;
+	gConsoleBodyCache.font = CurrentConsoleFont;
+	gConsoleBodyCache.logicalWidth = logicalWidth;
+	gConsoleBodyCache.logicalHeight = logicalHeight;
+	return true;
+}
 
 CUSTOM_CVAR(Int, con_scale, 0, CVAR_ARCHIVE)
 {
@@ -586,6 +691,7 @@ void C_DrawConsole ()
 	}
 	else if (ConBottom)
 	{
+		const uint32_t backgroundCommandsBefore = (PerfLoopTraceActive() && twod != nullptr) ? (uint32_t)twod->mData.Size() : 0u;
 		int visheight;
 
 		visheight = ConBottom;
@@ -620,8 +726,15 @@ void C_DrawConsole ()
 			twod->AddColorOnlyQuad(0, visheight, screen->GetWidth(), 1, 0xff000000);
 		}
 
+		if (PerfLoopTraceActive() && twod != nullptr)
+		{
+			const uint32_t backgroundCommandsAfter = (uint32_t)twod->mData.Size();
+			PerfLoopTraceNoteConsoleBackgroundCommands(backgroundCommandsAfter - backgroundCommandsBefore);
+		}
+
 		if (ConBottom >= 12)
 		{
+			PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleVersion);
 			if (textScale == 1)
 				DrawText(twod, CurrentConsoleFont, CR_ORANGE, twod->GetWidth() - 8 -
 					CurrentConsoleFont->StringWidth (GetVersionString()),
@@ -637,7 +750,6 @@ void C_DrawConsole ()
 					DTA_KeepRatio, true, TAG_DONE);
 
 		}
-
 	}
 
 	if (menuactive != MENU_Off)
@@ -653,48 +765,123 @@ void C_DrawConsole ()
 		FBrokenLines *blines = conbuffer->GetLines();
 		if (blines != nullptr)
 		{
-			FBrokenLines* printline = blines + consolelines - 1 - RowAdjust;
+			const int bottomLineIndex = (int)consolelines - 1 - RowAdjust;
+			FBrokenLines* printline = blines + bottomLineIndex;
+			uint32_t visibleLines = 0;
+			const int bodyLines = lines;
 
 			int bottomline = ConBottom / textScale - CurrentConsoleFont->GetHeight() * 2 - 4;
+			const int logicalWidth = twod->GetWidth() / textScale;
+			const int logicalHeight = ConBottom / textScale;
+			const uint64_t contentGeneration = conbuffer->GetContentGeneration();
+			const bool canUseBodyCache =
+				ShouldUseConsoleBodyCache() &&
+				logicalWidth > 0 &&
+				logicalHeight > 0;
 
-			for (FBrokenLines* p = printline; p >= blines && lines > 0; p--, lines--)
+			for (FBrokenLines* p = printline; p >= blines && visibleLines < (uint32_t)bodyLines; --p)
 			{
-				if (textScale == 1)
+				visibleLines++;
+			}
+
+			const bool cacheDirty =
+				!canUseBodyCache ||
+				gConsoleBodyCache.texture == nullptr ||
+				gConsoleBodyCache.contentGeneration != contentGeneration ||
+				gConsoleBodyCache.font != CurrentConsoleFont ||
+				gConsoleBodyCache.formattedWidth != ConWidth / textScale ||
+				gConsoleBodyCache.visibleLines != (int)visibleLines ||
+				gConsoleBodyCache.lastBottomLineIndex != bottomLineIndex ||
+				gConsoleBodyCache.textScale != textScale ||
+				gConsoleBodyCache.rowAdjust != RowAdjust ||
+				gConsoleBodyCache.logicalWidth != logicalWidth ||
+				gConsoleBodyCache.logicalHeight != logicalHeight;
+
+			if (canUseBodyCache && visibleLines > 0)
+			{
+				if (cacheDirty)
 				{
-					DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + lines * CurrentConsoleFont->GetHeight(), p->Text.GetChars(), TAG_DONE);
+					RebuildConsoleBodyCache(blines, offset, (int)visibleLines, textScale, logicalWidth, logicalHeight, bottomLineIndex);
+				}
+
+				if (gConsoleBodyCache.texture != nullptr)
+				{
+					DrawTexture(twod, gConsoleBodyCache.texture, 0, 0,
+						DTA_DestWidth, twod->GetWidth(),
+						DTA_DestHeight, ConBottom,
+						DTA_Masked, false,
+						TAG_DONE);
 				}
 				else
 				{
-					DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + lines * CurrentConsoleFont->GetHeight(), p->Text.GetChars(),
-						DTA_VirtualWidth, twod->GetWidth() / textScale,
-						DTA_VirtualHeight, twod->GetHeight() / textScale,
-						DTA_KeepRatio, true, TAG_DONE);
+					PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleBody);
+					int bodyLine = bodyLines;
+					for (FBrokenLines* p = printline; p >= blines && bodyLine > 0; p--, bodyLine--)
+					{
+						if (textScale == 1)
+						{
+							DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + bodyLine * CurrentConsoleFont->GetHeight(), p->Text.GetChars(), TAG_DONE);
+						}
+						else
+						{
+							DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + bodyLine * CurrentConsoleFont->GetHeight(), p->Text.GetChars(),
+								DTA_VirtualWidth, twod->GetWidth() / textScale,
+								DTA_VirtualHeight, twod->GetHeight() / textScale,
+								DTA_KeepRatio, true, TAG_DONE);
+						}
+					}
 				}
+			}
+			else
+			{
+				PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleBody);
+				int bodyLine = bodyLines;
+				for (FBrokenLines* p = printline; p >= blines && bodyLine > 0; p--, bodyLine--)
+				{
+					if (textScale == 1)
+					{
+						DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + bodyLine * CurrentConsoleFont->GetHeight(), p->Text.GetChars(), TAG_DONE);
+					}
+					else
+					{
+						DrawText(twod, CurrentConsoleFont, CR_TAN, LEFTMARGIN, offset + bodyLine * CurrentConsoleFont->GetHeight(), p->Text.GetChars(),
+							DTA_VirtualWidth, twod->GetWidth() / textScale,
+							DTA_VirtualHeight, twod->GetHeight() / textScale,
+							DTA_KeepRatio, true, TAG_DONE);
+					}
+				}
+			}
+			if (visibleLines != 0)
+			{
+				PerfLoopTraceNoteConsoleVisibleLines(visibleLines);
 			}
 
 			if (ConBottom >= 20)
 			{
-				if (gamestate != GS_STARTUP)
 				{
-					auto now = I_msTime();
-					if (now > CursorTicker)
+					PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::ConsoleCommandLine);
+					if (gamestate != GS_STARTUP)
 					{
-						CursorTicker = now + 500;
-						cursoron = !cursoron;
+						auto now = I_msTime();
+						if (now > CursorTicker)
+						{
+							CursorTicker = now + 500;
+							cursoron = !cursoron;
+						}
+						CmdLine.Draw(left, bottomline, textScale, cursoron);
 					}
-					CmdLine.Draw(left, bottomline, textScale, cursoron);
-				}
-				if (RowAdjust && ConBottom >= CurrentConsoleFont->GetHeight() * 7 / 2)
-				{
-					// Indicate that the view has been scrolled up (10)
-					// and if we can scroll no further (12)
-					if (textScale == 1)
-						DrawChar(twod, CurrentConsoleFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10, TAG_DONE);
-					else
-						DrawChar(twod, CurrentConsoleFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10,
-							DTA_VirtualWidth, twod->GetWidth() / textScale,
-							DTA_VirtualHeight, twod->GetHeight() / textScale,
-							DTA_KeepRatio, true, TAG_DONE);
+					if (RowAdjust && ConBottom >= CurrentConsoleFont->GetHeight() * 7 / 2)
+					{
+						// Indicate that the view has been scrolled up (10)
+						// and if we can scroll no further (12)
+						if (textScale == 1)
+							DrawChar(twod, CurrentConsoleFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10, TAG_DONE);
+						else
+							DrawChar(twod, CurrentConsoleFont, CR_GREEN, 0, bottomline, RowAdjust == conbuffer->GetFormattedLineCount() ? 12 : 10,
+								DTA_VirtualWidth, twod->GetWidth() / textScale,
+								DTA_VirtualHeight, twod->GetHeight() / textScale,
+								DTA_KeepRatio, true, TAG_DONE);
+					}
 				}
 			}
 		}
@@ -1184,4 +1371,3 @@ CCMD(toggleconsole)
 {
 	C_ToggleConsole();
 }
-

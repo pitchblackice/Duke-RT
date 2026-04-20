@@ -1,0 +1,596 @@
+#include "nri_material_bridge.h"
+
+#include "nri_texture_signature.h"
+
+#include "palette.h"
+#include "tiletexture.h"
+#include "textures.h"
+
+#include <algorithm>
+#include <array>
+#include <unordered_map>
+
+EXTERN_CVAR(Int, hw_lightmode)
+EXTERN_CVAR(Float, nri_ptfullbrightboost)
+
+namespace
+{
+	using namespace nri_scene;
+
+	enum MaterialClass : uint32_t
+	{
+		MaterialClass_DefaultDiffuse = 0,
+		MaterialClass_UnstableDiffuse = 1,
+		MaterialClass_Emissive = 2,
+		MaterialClass_SpecularSpecial = 3,
+	};
+
+	float ComputeLightLevel(const MaterialRef& material)
+	{
+		const float shadeDiv = lookups.tables[clamp(material.palette, 0, MAXPALOOKUPS - 1)].ShadeFactor;
+		const bool fullbright = (material.flags & MaterialFlag_Fullbright) != 0 || shadeDiv < 1.0f / 1000.0f || material.shade < -numshades;
+		if (fullbright)
+		{
+			return 1.0f;
+		}
+
+		float inverseLight = material.shade * 255.0f / numshades;
+		inverseLight /= shadeDiv;
+		const float lightLevel = clamp(255.0f - inverseLight, 0.0f, 255.0f);
+		return lightLevel / 255.0f;
+	}
+
+	float ComputeRoughnessHint(const MaterialRef& materialRef, float lightLevel)
+	{
+		const uint32_t flags = materialRef.flags;
+		if ((flags & MaterialFlag_Mirror) != 0)
+		{
+			return 0.02f;
+		}
+
+		if ((flags & MaterialFlag_Portal) != 0)
+		{
+			return 0.04f;
+		}
+
+		if ((flags & MaterialFlag_Fullbright) != 0)
+		{
+			if ((flags & MaterialFlag_Sprite) != 0)
+			{
+				return 0.45f;
+			}
+			if ((flags & MaterialFlag_Flat) != 0)
+			{
+				return 0.60f;
+			}
+			return 0.55f;
+		}
+
+		float roughness = 0.45f;
+		if ((flags & MaterialFlag_Sprite) != 0)
+		{
+			roughness = 0.85f;
+		}
+		else if ((flags & MaterialFlag_Flat) != 0)
+		{
+			roughness = 0.65f;
+		}
+		else if ((flags & MaterialFlag_Indexed) != 0)
+		{
+			roughness = 0.55f;
+		}
+
+		if ((flags & MaterialFlag_OneWay) != 0)
+		{
+			roughness = std::max(roughness, 0.70f);
+		}
+
+		if (materialRef.alpha < 0.999f)
+		{
+			roughness = std::max(roughness, 0.85f);
+		}
+
+		if (lightLevel < 0.25f)
+		{
+			roughness = std::min(1.0f, roughness + 0.05f);
+		}
+
+		return clamp(roughness, 0.02f, 1.0f);
+	}
+
+	float ComputeMetalnessHint(const MaterialRef&)
+	{
+		// Build surfaces are overwhelmingly non-metallic. Keep this explicit and conservative.
+		return 0.0f;
+	}
+
+	uint32_t ComputeMaterialClass(const MaterialRef& materialRef)
+	{
+		const uint32_t flags = materialRef.flags;
+		if ((flags & (MaterialFlag_Mirror | MaterialFlag_Portal)) != 0)
+		{
+			return MaterialClass_SpecularSpecial;
+		}
+
+		if ((flags & (MaterialFlag_Sprite | MaterialFlag_Indexed | MaterialFlag_OneWay | MaterialFlag_AlphaClip)) != 0 || materialRef.alpha < 0.999f)
+		{
+			return MaterialClass_UnstableDiffuse;
+		}
+
+		return MaterialClass_DefaultDiffuse;
+	}
+
+	uint64_t Fnv1a64(const uint8_t* data, size_t size)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		for (size_t i = 0; i < size; ++i)
+		{
+			hash ^= (uint64_t)data[i];
+			hash *= 1099511628211ull;
+		}
+		return hash;
+	}
+
+	void Fnv1a64Append(uint64_t& hash, const void* data, size_t size)
+	{
+		const uint8_t* bytes = static_cast<const uint8_t*>(data);
+		for (size_t i = 0; i < size; ++i)
+		{
+			hash ^= (uint64_t)bytes[i];
+			hash *= 1099511628211ull;
+		}
+	}
+
+	uint64_t MakeTextureKey(FGameTexture* texture, bool indexed)
+	{
+		return (uint64_t)(uintptr_t)texture ^ (indexed ? 1ull : 0ull);
+	}
+
+	uint64_t MakeTextureKey(FTexture* texture, bool indexed)
+	{
+		return ((uint64_t)(uintptr_t)texture ^ (indexed ? 1ull : 0ull)) ^ 0x4000000000000000ull;
+	}
+
+	bool TryBuildSharedTextureContentKey(FGameTexture* gameTexture, FTexture* baseTexture, bool indexed, uint64_t& outKey, uint32_t& outWidth, uint32_t& outHeight)
+	{
+		outKey = 0;
+		outWidth = 0;
+		outHeight = 0;
+
+		if (indexed)
+		{
+			return false;
+		}
+
+		TextureSignatureRequest request = {};
+		request.contentKind = TextureSignatureContentKind::ProcessedBGRA;
+		request.translation = 0;
+		request.flags = TextureSignatureRequestFlag_None;
+
+		TextureSignature signature = {};
+		bool success = false;
+		if (gameTexture != nullptr)
+		{
+			success = TryBuildTextureSignature(gameTexture, request, signature);
+		}
+		else if (baseTexture != nullptr)
+		{
+			success = TryBuildImageTextureSignature(baseTexture, request, signature);
+		}
+
+		if (!success || !signature.valid || !signature.persistentEligible || signature.width == 0 || signature.height == 0)
+		{
+			return false;
+		}
+
+		outKey = signature.key;
+		outWidth = signature.width;
+		outHeight = signature.height;
+		return true;
+	}
+
+	TextureUpload BuildTextureUpload(FGameTexture* gameTexture, FTexture* texture, bool indexed)
+	{
+		TextureUpload upload = {};
+		upload.indexed = indexed;
+		upload.sourceTexture = texture;
+		upload.key = gameTexture != nullptr ? MakeTextureKey(gameTexture, indexed) : MakeTextureKey(texture, indexed);
+
+		if (texture == nullptr)
+		{
+			return upload;
+		}
+
+		uint64_t sharedKey = 0;
+		uint32_t sharedWidth = 0;
+		uint32_t sharedHeight = 0;
+		const bool hasSharedKey = TryBuildSharedTextureContentKey(gameTexture, texture, indexed, sharedKey, sharedWidth, sharedHeight);
+
+		const bool deferRealization = hasSharedKey && !indexed;
+		if (indexed)
+		{
+			FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_Indexed);
+			if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
+			{
+				upload.width = (uint32_t)texBuffer.mWidth;
+				upload.height = (uint32_t)texBuffer.mHeight;
+				upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight);
+				upload.key = Fnv1a64(upload.pixels.data(), upload.pixels.size());
+			}
+		}
+		else
+		{
+			if (deferRealization)
+			{
+				upload.width = sharedWidth;
+				upload.height = sharedHeight;
+				upload.key = sharedKey;
+			}
+			else
+			{
+				FTextureBuffer texBuffer = texture->CreateTexBuffer(0, CTF_ProcessData);
+				if (texBuffer.mBuffer != nullptr && texBuffer.mWidth > 0 && texBuffer.mHeight > 0)
+				{
+					upload.width = (uint32_t)texBuffer.mWidth;
+					upload.height = (uint32_t)texBuffer.mHeight;
+					upload.pixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
+					upload.key = hasSharedKey ? sharedKey : Fnv1a64(upload.pixels.data(), upload.pixels.size());
+				}
+			}
+		}
+
+		if (hasSharedKey && upload.width != 0 && upload.height != 0)
+		{
+			upload.width = sharedWidth;
+			upload.height = sharedHeight;
+			upload.key = sharedKey;
+		}
+		else if (upload.width != 0 && upload.height != 0)
+		{
+			upload.key ^= ((uint64_t)upload.width << 32) | (uint64_t)upload.height;
+			upload.key ^= indexed ? (1ull << 63) : 0ull;
+		}
+
+		return upload;
+	}
+
+	TextureUpload BuildTextureUpload(FTexture* texture, bool indexed)
+	{
+		return BuildTextureUpload(nullptr, texture, indexed);
+	}
+
+	TextureUpload BuildTextureUpload(FGameTexture* texture, bool indexed)
+	{
+		return texture != nullptr ? BuildTextureUpload(texture, texture->GetTexture(), indexed) : TextureUpload{};
+	}
+
+	uint32_t EnsureTextureUploadIndex(FGameTexture* texture, bool indexed, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
+	{
+		const uint64_t textureKey = MakeTextureKey(texture, indexed);
+		auto it = textureLookup.find(textureKey);
+		if (it == textureLookup.end())
+		{
+			const uint32_t textureIndex = (uint32_t)outMaterials.textures.size();
+			textureLookup.emplace(textureKey, textureIndex);
+			outMaterials.textures.push_back(BuildTextureUpload(texture, indexed));
+			return textureIndex;
+		}
+
+		return it->second;
+	}
+
+	uint32_t EnsureTextureUploadIndex(FTexture* texture, bool indexed, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
+	{
+		const uint64_t textureKey = MakeTextureKey(texture, indexed);
+		auto it = textureLookup.find(textureKey);
+		if (it == textureLookup.end())
+		{
+			const uint32_t textureIndex = (uint32_t)outMaterials.textures.size();
+			textureLookup.emplace(textureKey, textureIndex);
+			outMaterials.textures.push_back(BuildTextureUpload(texture, indexed));
+			return textureIndex;
+		}
+
+		return it->second;
+	}
+
+	uint64_t ComputeMaterialKey(const MaterialRef& materialRef, const MaterialLightingMetadata& metadata)
+	{
+		uint64_t key = 1469598103934665603ull;
+		Fnv1a64Append(key, &metadata.textureContentKey, sizeof(metadata.textureContentKey));
+		Fnv1a64Append(key, &metadata.glowmapContentKey, sizeof(metadata.glowmapContentKey));
+		Fnv1a64Append(key, &metadata.normalContentKey, sizeof(metadata.normalContentKey));
+		Fnv1a64Append(key, &metadata.metallicContentKey, sizeof(metadata.metallicContentKey));
+		Fnv1a64Append(key, &metadata.roughnessContentKey, sizeof(metadata.roughnessContentKey));
+		Fnv1a64Append(key, &metadata.textureId, sizeof(metadata.textureId));
+		Fnv1a64Append(key, &metadata.paletteIndex, sizeof(metadata.paletteIndex));
+		Fnv1a64Append(key, &metadata.materialFlags, sizeof(metadata.materialFlags));
+		Fnv1a64Append(key, &metadata.lightingFlags, sizeof(metadata.lightingFlags));
+		Fnv1a64Append(key, &materialRef.alpha, sizeof(materialRef.alpha));
+		return key;
+	}
+
+	float ComputeGlowEmissiveIntensity(const MaterialLightingMetadata& metadata)
+	{
+		float intensity = 0.0f;
+		if ((metadata.lightingFlags & MaterialLightingFlag_TextureGlowing) != 0)
+		{
+			intensity = std::max(intensity, 1.25f);
+		}
+		if ((metadata.lightingFlags & MaterialLightingFlag_TextureAutoGlowing) != 0)
+		{
+			intensity = std::max(intensity, 1.10f);
+		}
+		if ((metadata.lightingFlags & MaterialLightingFlag_HasGlowmap) != 0)
+		{
+			intensity = std::max(intensity, 1.50f);
+		}
+		return intensity;
+	}
+
+	float GetVisibleFullbrightBoost()
+	{
+		return std::clamp((float)nri_ptfullbrightboost, 0.50f, 8.00f);
+	}
+
+	MaterialLightingMetadata BuildMaterialLightingMetadata(
+		const SurfaceRef& surface,
+		const MaterialData& material,
+		uint64_t textureContentKey,
+		uint32_t glowmapTextureIndex,
+		uint64_t glowmapContentKey,
+		uint32_t normalTextureIndex,
+		uint64_t normalContentKey,
+		uint32_t metallicTextureIndex,
+		uint64_t metallicContentKey,
+		uint32_t roughnessTextureIndex,
+		uint64_t roughnessContentKey)
+	{
+		MaterialLightingMetadata metadata = {};
+		metadata.texture = surface.material.texture;
+		metadata.textureContentKey = textureContentKey;
+		metadata.textureIndex = material.textureIndex;
+		metadata.glowmapTextureIndex = glowmapTextureIndex;
+		metadata.normalTextureIndex = normalTextureIndex;
+		metadata.metallicTextureIndex = metallicTextureIndex;
+		metadata.roughnessTextureIndex = roughnessTextureIndex;
+		metadata.paletteIndex = material.paletteIndex;
+		metadata.materialFlags = material.flags;
+		metadata.sourceType = surface.provenance.sourceType;
+		metadata.sectorIndex = surface.provenance.sectorIndex;
+		metadata.actorIndex = surface.provenance.actorIndex;
+		metadata.shade = surface.material.shade;
+		metadata.alpha = material.alpha;
+		metadata.lightLevel = material.lightLevel;
+		metadata.materialClass = material.materialClass;
+		metadata.normalContentKey = normalContentKey;
+		metadata.metallicContentKey = metallicContentKey;
+		metadata.roughnessContentKey = roughnessContentKey;
+
+		const bool materialFullbright = (material.flags & MaterialFlag_Fullbright) != 0;
+		if (materialFullbright)
+		{
+			metadata.lightingFlags |= MaterialLightingFlag_MaterialFullbright;
+		}
+
+		if (surface.material.texture != nullptr)
+		{
+			metadata.textureId = (uint32_t)surface.material.texture->GetID().GetIndex();
+			if (surface.material.texture->isFullbright())
+			{
+				metadata.lightingFlags |= MaterialLightingFlag_TextureFullbright;
+			}
+			if (surface.material.texture->isGlowing())
+			{
+				metadata.lightingFlags |= MaterialLightingFlag_TextureGlowing;
+				surface.material.texture->GetGlowColor(metadata.glowColor);
+			}
+			if (surface.material.texture->isAutoGlowing())
+			{
+				metadata.lightingFlags |= MaterialLightingFlag_TextureAutoGlowing;
+			}
+			if (surface.material.texture->GetGlowmap() != nullptr)
+			{
+				metadata.lightingFlags |= MaterialLightingFlag_HasGlowmap;
+				metadata.glowmapContentKey = glowmapContentKey;
+			}
+
+			if (!TryGetAverageTextureColor(surface.material.texture, metadata.averageColor))
+			{
+				metadata.averageColor[0] = 1.0f;
+				metadata.averageColor[1] = 1.0f;
+				metadata.averageColor[2] = 1.0f;
+			}
+			if ((metadata.lightingFlags & MaterialLightingFlag_TextureGlowing) == 0 &&
+				(metadata.lightingFlags & MaterialLightingFlag_HasGlowmap) != 0)
+			{
+				metadata.glowColor[0] = metadata.averageColor[0];
+				metadata.glowColor[1] = metadata.averageColor[1];
+				metadata.glowColor[2] = metadata.averageColor[2];
+			}
+		}
+
+		const bool sampledEmissive =
+			(metadata.lightingFlags & MaterialLightingFlag_MaterialFullbright) != 0 ||
+			(metadata.lightingFlags & MaterialLightingFlag_TextureFullbright) != 0;
+		if (sampledEmissive)
+		{
+			metadata.emissiveMode = MaterialEmissiveMode_UseBaseTexture;
+			metadata.emissiveTextureIndex = material.textureIndex;
+			metadata.emissiveIntensity = 1.0f;
+			metadata.emissiveMaskScale = 1.0f;
+			metadata.visibleFullbrightBoost = GetVisibleFullbrightBoost();
+			metadata.emissiveColor[0] = 1.0f;
+			metadata.emissiveColor[1] = 1.0f;
+			metadata.emissiveColor[2] = 1.0f;
+		}
+		else
+		{
+			const float glowIntensity = ComputeGlowEmissiveIntensity(metadata);
+			if (glowIntensity > 0.0f)
+			{
+				metadata.emissiveMode = glowmapTextureIndex != UINT32_MAX ? MaterialEmissiveMode_UseGlowmapTexture : MaterialEmissiveMode_UseConstantColor;
+				metadata.emissiveTextureIndex = glowmapTextureIndex;
+				metadata.emissiveIntensity = glowIntensity;
+				metadata.emissiveMaskScale = 1.0f;
+				metadata.emissiveColor[0] = metadata.glowColor[0] > 0.0f ? metadata.glowColor[0] : metadata.averageColor[0];
+				metadata.emissiveColor[1] = metadata.glowColor[1] > 0.0f ? metadata.glowColor[1] : metadata.averageColor[1];
+				metadata.emissiveColor[2] = metadata.glowColor[2] > 0.0f ? metadata.glowColor[2] : metadata.averageColor[2];
+			}
+		}
+
+		metadata.materialKey = ComputeMaterialKey(surface.material, metadata);
+		return metadata;
+	}
+
+	void AppendSurfaceMaterial(const SurfaceRef& surface, std::unordered_map<uint64_t, uint32_t>& textureLookup, MaterialBridgeData& outMaterials)
+	{
+		const MaterialRef& materialRef = surface.material;
+		MaterialData material = {};
+		material.flags = materialRef.flags;
+		material.paletteIndex = (uint32_t)clamp(materialRef.palette, 0, MAXPALOOKUPS - 1);
+		material.lightLevel = ComputeLightLevel(materialRef);
+		material.alpha = materialRef.alpha;
+		material.roughnessHint = ComputeRoughnessHint(materialRef, material.lightLevel);
+		material.metalnessHint = ComputeMetalnessHint(materialRef);
+		material.materialClass = ComputeMaterialClass(materialRef);
+
+		const bool indexed = (materialRef.flags & MaterialFlag_Indexed) != 0;
+		material.textureIndex = EnsureTextureUploadIndex(materialRef.texture, indexed, textureLookup, outMaterials);
+
+		material.sectorIndex = surface.provenance.sectorIndex >= 0 ? (uint32_t)surface.provenance.sectorIndex : UINT32_MAX;
+		outMaterials.materials.push_back(material);
+		uint32_t glowmapTextureIndex = UINT32_MAX;
+		uint64_t glowmapContentKey = 0;
+		uint32_t normalTextureIndex = UINT32_MAX;
+		uint64_t normalContentKey = 0;
+		uint32_t metallicTextureIndex = UINT32_MAX;
+		uint64_t metallicContentKey = 0;
+		uint32_t roughnessTextureIndex = UINT32_MAX;
+		uint64_t roughnessContentKey = 0;
+		if (materialRef.texture != nullptr && materialRef.texture->GetGlowmap() != nullptr)
+		{
+			glowmapTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetGlowmap(), false, textureLookup, outMaterials);
+			glowmapContentKey = outMaterials.textures[glowmapTextureIndex].key;
+		}
+		if (materialRef.texture != nullptr && materialRef.texture->GetMetallic() != nullptr)
+		{
+			metallicTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetMetallic(), false, textureLookup, outMaterials);
+			metallicContentKey = outMaterials.textures[metallicTextureIndex].key;
+			outMaterials.materials.back().metallicTextureIndex = metallicTextureIndex;
+		}
+		if (materialRef.texture != nullptr && materialRef.texture->GetNormalmap() != nullptr)
+		{
+			normalTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetNormalmap(), false, textureLookup, outMaterials);
+			normalContentKey = outMaterials.textures[normalTextureIndex].key;
+			outMaterials.materials.back().normalTextureIndex = normalTextureIndex;
+		}
+		if (materialRef.texture != nullptr && materialRef.texture->GetRoughness() != nullptr)
+		{
+			roughnessTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetRoughness(), false, textureLookup, outMaterials);
+			roughnessContentKey = outMaterials.textures[roughnessTextureIndex].key;
+			outMaterials.materials.back().roughnessTextureIndex = roughnessTextureIndex;
+		}
+
+		MaterialLightingMetadata metadata = BuildMaterialLightingMetadata(
+			surface,
+			outMaterials.materials.back(),
+			outMaterials.textures[material.textureIndex].key,
+			glowmapTextureIndex,
+			glowmapContentKey,
+			normalTextureIndex,
+			normalContentKey,
+			metallicTextureIndex,
+			metallicContentKey,
+			roughnessTextureIndex,
+			roughnessContentKey);
+		outMaterials.materials.back().lightingFlags = metadata.lightingFlags;
+		outMaterials.materials.back().emissiveReserved = metadata.visibleFullbrightBoost;
+		outMaterials.lightMetadata.push_back(metadata);
+	}
+
+	void BuildPaletteLookup(MaterialBridgeData& outMaterials)
+	{
+		outMaterials.paletteWidth = 256;
+		outMaterials.paletteHeight = MAXPALOOKUPS;
+		outMaterials.paletteLookup.resize((size_t)outMaterials.paletteWidth * (size_t)outMaterials.paletteHeight * 4u);
+
+		for (uint32_t paletteIndex = 0; paletteIndex < outMaterials.paletteHeight; ++paletteIndex)
+		{
+			const uint8_t* table = lookups.getTable((int)paletteIndex);
+			for (uint32_t colorIndex = 0; colorIndex < outMaterials.paletteWidth; ++colorIndex)
+			{
+				const uint8_t remappedIndex = table != nullptr ? table[colorIndex] : (uint8_t)colorIndex;
+				const PalEntry color = GPalette.BaseColors[remappedIndex];
+				const size_t pixelIndex = ((size_t)paletteIndex * outMaterials.paletteWidth + colorIndex) * 4u;
+				outMaterials.paletteLookup[pixelIndex + 0] = color.b;
+				outMaterials.paletteLookup[pixelIndex + 1] = color.g;
+				outMaterials.paletteLookup[pixelIndex + 2] = color.r;
+				outMaterials.paletteLookup[pixelIndex + 3] = 255;
+			}
+		}
+	}
+}
+
+namespace nri_scene
+{
+bool RealizeTextureUploadPayload(const TextureUpload& upload, std::vector<uint8_t>& outPixels, uint32_t& outWidth, uint32_t& outHeight)
+{
+	outPixels.clear();
+	outWidth = 0;
+	outHeight = 0;
+
+	if (upload.sourceTexture == nullptr)
+	{
+		return false;
+	}
+
+	if (upload.indexed)
+	{
+		FTextureBuffer texBuffer = upload.sourceTexture->CreateTexBuffer(0, CTF_Indexed);
+		if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+		{
+			return false;
+		}
+
+		outWidth = (uint32_t)texBuffer.mWidth;
+		outHeight = (uint32_t)texBuffer.mHeight;
+		outPixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight);
+		return !outPixels.empty();
+	}
+
+	FTextureBuffer texBuffer = upload.sourceTexture->CreateTexBuffer(0, CTF_ProcessData);
+	if (texBuffer.mBuffer == nullptr || texBuffer.mWidth <= 0 || texBuffer.mHeight <= 0)
+	{
+		return false;
+	}
+
+	outWidth = (uint32_t)texBuffer.mWidth;
+	outHeight = (uint32_t)texBuffer.mHeight;
+	outPixels.assign(texBuffer.mBuffer, texBuffer.mBuffer + (size_t)texBuffer.mWidth * (size_t)texBuffer.mHeight * 4u);
+	return !outPixels.empty();
+}
+
+void BuildMaterials(const SceneView& sceneView, MaterialBridgeData& outMaterials)
+{
+	outMaterials = {};
+	std::unordered_map<uint64_t, uint32_t> textureLookup;
+
+	for (const SurfaceRef& wall : sceneView.opaqueWalls)
+	{
+		AppendSurfaceMaterial(wall, textureLookup, outMaterials);
+	}
+
+	for (const SurfaceRef& flat : sceneView.opaqueFlats)
+	{
+		AppendSurfaceMaterial(flat, textureLookup, outMaterials);
+	}
+
+	for (const SurfaceRef& sprite : sceneView.opaqueSprites)
+	{
+		AppendSurfaceMaterial(sprite, textureLookup, outMaterials);
+	}
+
+	BuildPaletteLookup(outMaterials);
+}
+}

@@ -33,6 +33,8 @@
 **
 */ 
 
+#include <algorithm>
+
 #include "c_bind.h"
 #include "d_eventbase.h"
 #include "c_console.h"
@@ -43,15 +45,378 @@
 #include "vm.h"
 #include "gamestate.h"
 #include "i_interface.h"
+#include "c_cvars.h"
 
 int eventhead;
 int eventtail;
 event_t events[MAXEVENTS];
 
+CUSTOM_CVAR(Int, perf_looptraceframes, 0, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 600)
+	{
+		self = 600;
+	}
+}
+
 CVAR(Float, m_sensitivity_x, 2.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, m_sensitivity_y, 2.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, invertmouse, false, CVAR_GLOBALCONFIG | CVAR_ARCHIVE);  // Invert mouse look down/up?
 CVAR(Bool, invertmousex, false,	CVAR_GLOBALCONFIG | CVAR_ARCHIVE);  // Invert mouse look left/right?
+
+static PerfLoopInputTraceStats perfLoopInputTraceStats;
+static PerfLoop2DProducerTraceStats perfLoop2DProducerTraceStats;
+static PerfLoopCameraTraceStats perfLoopCameraTraceStats;
+static PerfLoop2DTextLabel perfLoop2DCurrentTextLabel = PerfLoop2DTextLabel::Other;
+static bool perfLoopHasLastRenderAngles = false;
+static float perfLoopLastRenderYawDegrees = 0.0f;
+static float perfLoopLastRenderPitchDegrees = 0.0f;
+
+static PerfLoop2DTextTraceCounter& Get2DTextTraceCounter(PerfLoop2DTextLabel label)
+{
+	switch (label)
+	{
+	case PerfLoop2DTextLabel::ConsoleVersion:
+		return perfLoop2DProducerTraceStats.consoleVersionText;
+	case PerfLoop2DTextLabel::ConsoleBody:
+		return perfLoop2DProducerTraceStats.consoleBodyText;
+	case PerfLoop2DTextLabel::ConsoleCommandLine:
+		return perfLoop2DProducerTraceStats.consoleCommandLineText;
+	case PerfLoop2DTextLabel::Hud:
+		return perfLoop2DProducerTraceStats.hudText;
+	case PerfLoop2DTextLabel::Stats:
+		return perfLoop2DProducerTraceStats.statsText;
+	case PerfLoop2DTextLabel::Rate:
+		return perfLoop2DProducerTraceStats.rateText;
+	case PerfLoop2DTextLabel::Other:
+	default:
+		return perfLoop2DProducerTraceStats.otherText;
+	}
+}
+
+static float NormalizeAngleDeltaDegrees(float degrees)
+{
+	while (degrees <= -180.0f) degrees += 360.0f;
+	while (degrees > 180.0f) degrees -= 360.0f;
+	return degrees;
+}
+
+bool PerfLoopTraceActive()
+{
+	return perf_looptraceframes > 0;
+}
+
+void PerfLoopTraceResetInputStats()
+{
+	perfLoopInputTraceStats = {};
+}
+
+PerfLoopInputTraceStats PerfLoopTraceGetInputStats()
+{
+	return perfLoopInputTraceStats;
+}
+
+void PerfLoopTraceReset2DProducerStats()
+{
+	perfLoop2DProducerTraceStats = {};
+	perfLoop2DCurrentTextLabel = PerfLoop2DTextLabel::Other;
+}
+
+PerfLoop2DProducerTraceStats PerfLoopTraceGet2DProducerStats()
+{
+	return perfLoop2DProducerTraceStats;
+}
+
+void PerfLoopTraceResetCameraStats()
+{
+	perfLoopCameraTraceStats = {};
+}
+
+PerfLoopCameraTraceStats PerfLoopTraceGetCameraStats()
+{
+	return perfLoopCameraTraceStats;
+}
+
+void PerfLoopTraceNoteHandleevents()
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.handleeventsCalls++;
+}
+
+void PerfLoopTraceNoteIStartTic()
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.startTicCalls++;
+}
+
+void PerfLoopTraceNoteIGetEvent(uint32_t peekedMessages)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.iGetEventCalls++;
+	perfLoopInputTraceStats.peekedMessages += peekedMessages;
+	perfLoopInputTraceStats.maxMessageBurst = std::max(perfLoopInputTraceStats.maxMessageBurst, peekedMessages);
+}
+
+void PerfLoopTraceNoteRawInputMessage(bool isMouse, bool isKeyboard)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.rawInputMessages++;
+	if (isMouse) perfLoopInputTraceStats.rawMousePackets++;
+	if (isKeyboard) perfLoopInputTraceStats.rawKeyboardPackets++;
+}
+
+void PerfLoopTraceNoteRawMousePacket(bool accepted, int dx, int dy)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	if (!accepted)
+	{
+		perfLoopInputTraceStats.rawMouseDroppedPackets++;
+		return;
+	}
+
+	if (dx != 0 || dy != 0)
+	{
+		perfLoopInputTraceStats.rawMouseMovePackets++;
+	}
+}
+
+void PerfLoopTraceNoteMousePost(float x, float y)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.postedMouseMoves++;
+	perfLoopInputTraceStats.postedMouseX += x;
+	perfLoopInputTraceStats.postedMouseY += y;
+}
+
+void PerfLoopTraceNoteMouseDispatch(float x, float y)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.dispatchedMouseMoves++;
+	perfLoopInputTraceStats.dispatchedMouseX += x;
+	perfLoopInputTraceStats.dispatchedMouseY += y;
+}
+
+void PerfLoopTraceNoteMouseRoute(bool yawLook, bool pitchLook, float x, float y)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	if (x != 0.0f)
+	{
+		if (yawLook) perfLoopInputTraceStats.mouseYawLookSamples++;
+		else perfLoopInputTraceStats.mouseStrafeSamples++;
+	}
+	if (y != 0.0f)
+	{
+		if (pitchLook) perfLoopInputTraceStats.mousePitchLookSamples++;
+		else perfLoopInputTraceStats.mouseAimMoveSamples++;
+	}
+}
+
+void PerfLoopTraceNoteGameInputSample(float x, float y)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.sampledMouseInputs++;
+	perfLoopInputTraceStats.sampledMouseX += x;
+	perfLoopInputTraceStats.sampledMouseY += y;
+}
+
+void PerfLoopTraceNoteTiccmdBuild(float yawDegrees, float pitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.ticcmdBuilds++;
+	perfLoopInputTraceStats.ticcmdYawDegrees += yawDegrees;
+	perfLoopInputTraceStats.ticcmdPitchDegrees += pitchDegrees;
+}
+
+void PerfLoopTraceNotePlayerYawApply(float yawDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.yawApplyCalls++;
+	perfLoopInputTraceStats.appliedYawDegrees += yawDegrees;
+}
+
+void PerfLoopTraceNotePlayerPitchApply(float pitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.pitchApplyCalls++;
+	perfLoopInputTraceStats.appliedPitchDegrees += pitchDegrees;
+}
+
+void PerfLoopTraceNoteFastCameraApply(float yawDegrees, float pitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopInputTraceStats.fastCameraApplyCalls++;
+	perfLoopInputTraceStats.fastCameraYawDegrees += yawDegrees;
+	perfLoopInputTraceStats.fastCameraPitchDegrees += pitchDegrees;
+}
+
+void PerfLoopTraceNoteInputMode(bool syncInput, double inputScale)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopCameraTraceStats.syncInput = syncInput;
+	perfLoopCameraTraceStats.inputScale = inputScale;
+}
+
+void PerfLoopTraceNoteCommandSync(bool syncInput)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopCameraTraceStats.cmdSyncInput = syncInput;
+}
+
+void PerfLoopTraceNoteActorYaw(float cmdYawDegrees, float deltaYawDegrees, float currentYawDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopCameraTraceStats.actorYawCalls++;
+	perfLoopCameraTraceStats.consumedCmdYawDegrees += cmdYawDegrees;
+	perfLoopCameraTraceStats.actorYawDeltaDegrees += deltaYawDegrees;
+	perfLoopCameraTraceStats.actorYawDegrees = currentYawDegrees;
+}
+
+void PerfLoopTraceNoteActorPitch(float cmdPitchDegrees, float deltaPitchDegrees, float currentPitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoopCameraTraceStats.actorPitchCalls++;
+	perfLoopCameraTraceStats.consumedCmdPitchDegrees += cmdPitchDegrees;
+	perfLoopCameraTraceStats.actorPitchDeltaDegrees += deltaPitchDegrees;
+	perfLoopCameraTraceStats.actorPitchDegrees = currentPitchDegrees;
+}
+
+void PerfLoopTraceNoteCameraAngles(float deltaYawDegrees, float deltaPitchDegrees, float currentYawDegrees, float currentPitchDegrees, bool reset)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	if (reset) perfLoopCameraTraceStats.cameraResetCalls++;
+	else perfLoopCameraTraceStats.cameraUpdateCalls++;
+	perfLoopCameraTraceStats.cameraYawDeltaDegrees += deltaYawDegrees;
+	perfLoopCameraTraceStats.cameraPitchDeltaDegrees += deltaPitchDegrees;
+	perfLoopCameraTraceStats.cameraYawDegrees = currentYawDegrees;
+	perfLoopCameraTraceStats.cameraPitchDegrees = currentPitchDegrees;
+}
+
+void PerfLoopTraceNoteRenderAngles(float yawDegrees, float pitchDegrees)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	if (perfLoopCameraTraceStats.renderCalls == 0 && perfLoopHasLastRenderAngles)
+	{
+		perfLoopCameraTraceStats.renderFrameDeltaYawDegrees = NormalizeAngleDeltaDegrees(yawDegrees - perfLoopLastRenderYawDegrees);
+		perfLoopCameraTraceStats.renderFrameDeltaPitchDegrees = pitchDegrees - perfLoopLastRenderPitchDegrees;
+	}
+	perfLoopCameraTraceStats.renderCalls++;
+	perfLoopCameraTraceStats.renderYawDegrees = yawDegrees;
+	perfLoopCameraTraceStats.renderPitchDegrees = pitchDegrees;
+	perfLoopHasLastRenderAngles = true;
+	perfLoopLastRenderYawDegrees = yawDegrees;
+	perfLoopLastRenderPitchDegrees = pitchDegrees;
+}
+
+void PerfLoopTraceNoteStatusBar2D(const PerfLoop2DProducerDelta& delta)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.statusBar = delta;
+}
+
+void PerfLoopTraceNoteAltHud2D(const PerfLoop2DProducerDelta& delta)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.altHud = delta;
+}
+
+void PerfLoopTraceNoteCrosshair2D(const PerfLoop2DProducerDelta& delta)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.crosshair = delta;
+}
+
+PerfLoop2DTextLabel PerfLoopTracePush2DTextLabel(PerfLoop2DTextLabel label)
+{
+	const auto previous = perfLoop2DCurrentTextLabel;
+	if (PerfLoopTraceActive())
+	{
+		perfLoop2DCurrentTextLabel = label;
+	}
+	return previous;
+}
+
+void PerfLoopTracePop2DTextLabel(PerfLoop2DTextLabel previous)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DCurrentTextLabel = previous;
+}
+
+void PerfLoopTraceNote2DTextDraw(uint32_t glyphs, uint32_t commands)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	auto& counter = Get2DTextTraceCounter(perfLoop2DCurrentTextLabel);
+	counter.calls++;
+	counter.glyphs += glyphs;
+	counter.commands += commands;
+}
+
+void PerfLoopTraceNoteConsoleVisibleLines(uint32_t visibleLines)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.consoleVisibleLines += visibleLines;
+}
+
+void PerfLoopTraceNoteConsoleBackgroundCommands(uint32_t commands)
+{
+	if (!PerfLoopTraceActive())
+		return;
+
+	perfLoop2DProducerTraceStats.consoleBackgroundCommands += commands;
+}
 
 
 //==========================================================================
@@ -161,6 +526,23 @@ void D_PostEvent(event_t* ev)
 	if (sysCallbacks.DispatchEvent && sysCallbacks.DispatchEvent(ev))
 		return;
 
+	if (PerfLoopTraceActive())
+	{
+		if (ev->type == EV_KeyDown) perfLoopInputTraceStats.keyDownEvents++;
+		else if (ev->type == EV_KeyUp) perfLoopInputTraceStats.keyUpEvents++;
+		else if (ev->type == EV_DeviceChange) perfLoopInputTraceStats.deviceChangeEvents++;
+
+		int occupancy = eventhead - eventtail;
+		if (occupancy < 0) occupancy += MAXEVENTS;
+		perfLoopInputTraceStats.eventQueueHighWater = std::max(perfLoopInputTraceStats.eventQueueHighWater, (uint32_t)occupancy);
+
+		const int nexthead = (eventhead + 1) & (MAXEVENTS - 1);
+		if (nexthead == eventtail)
+		{
+			perfLoopInputTraceStats.eventQueueOverflows++;
+		}
+	}
+
 	events[eventhead] = *ev;
 	eventhead = (eventhead + 1) & (MAXEVENTS - 1);
 }
@@ -179,6 +561,7 @@ void PostMouseMove(int xx, int yy)
 	if (ev.x || ev.y)
 	{
 		ev.type = EV_Mouse;
+		PerfLoopTraceNoteMousePost(ev.x, ev.y);
 		D_PostEvent(&ev);
 	}
 }
@@ -266,4 +649,3 @@ DEFINE_FIELD_X(InputEvent, FInputEvent, KeyString);
 DEFINE_FIELD_X(InputEvent, FInputEvent, KeyChar);
 DEFINE_FIELD_X(InputEvent, FInputEvent, MouseX);
 DEFINE_FIELD_X(InputEvent, FInputEvent, MouseY);
-

@@ -40,6 +40,7 @@
 #include "i_time.h"
 #include "i_interface.h"
 #include "printf.h"
+#include "d_eventbase.h"
 
 glcycle_t RenderWall,SetupWall,ClipWall;
 glcycle_t RenderFlat,SetupFlat;
@@ -51,6 +52,12 @@ glcycle_t Dirty;
 glcycle_t drawcalls;
 glcycle_t twoD, Flush3D;
 glcycle_t MTWait, WTTotal;
+glcycle_t NriPTAll, NriPTInitialize, NriPTFrameResources, NriPTUpdateState;
+glcycle_t NriPTSceneCapture, NriPTGeometryBuild, NriPTMaterialBuild;
+glcycle_t NriPTPaletteUpload, NriPTSceneTextures, NriPTSceneBuffers, NriPTAcceleration;
+glcycle_t NriPTFrameWait, NriPTWaitPresent, NriPTAcquireSwap, NriPTQueueSubmit, NriPTQueuePresent;
+glcycle_t NriPTBootstrapDispatch, NriPTFrameGraph, NriPTTraceOpaque, NriPTDenoiser;
+glcycle_t NriPTComposition, NriPTRawPresent, NriPTFinalPresent, NriPTUpscale, NriPTFinal, NriPTCopyFinal;
 int vertexcount, flatvertices, flatprimitives;
 
 int rendered_lines,rendered_flats,rendered_sprites,render_vertexsplit,render_texsplit,rendered_decals, rendered_portals, rendered_commandbuffers;
@@ -60,6 +67,7 @@ void ResetProfilingData()
 {
 	All.Reset();
 	All.Clock();
+	Finish.Reset();
 	Bsp.Reset();
 	PortalAll.Reset();
 	RenderAll.Reset();
@@ -72,9 +80,38 @@ void ResetProfilingData()
 	SetupFlat.Reset();
 	RenderSprite.Reset();
 	SetupSprite.Reset();
+	Dirty.Reset();
 	drawcalls.Reset();
+	twoD.Reset();
+	Flush3D.Reset();
 	MTWait.Reset();
 	WTTotal.Reset();
+	NriPTAll.Reset();
+	NriPTInitialize.Reset();
+	NriPTFrameResources.Reset();
+	NriPTUpdateState.Reset();
+	NriPTSceneCapture.Reset();
+	NriPTGeometryBuild.Reset();
+	NriPTMaterialBuild.Reset();
+	NriPTPaletteUpload.Reset();
+	NriPTSceneTextures.Reset();
+	NriPTSceneBuffers.Reset();
+	NriPTAcceleration.Reset();
+	NriPTFrameWait.Reset();
+	NriPTWaitPresent.Reset();
+	NriPTAcquireSwap.Reset();
+	NriPTQueueSubmit.Reset();
+	NriPTQueuePresent.Reset();
+	NriPTBootstrapDispatch.Reset();
+	NriPTFrameGraph.Reset();
+	NriPTTraceOpaque.Reset();
+	NriPTDenoiser.Reset();
+	NriPTComposition.Reset();
+	NriPTRawPresent.Reset();
+	NriPTFinalPresent.Reset();
+	NriPTUpscale.Reset();
+	NriPTFinal.Reset();
+	NriPTCopyFinal.Reset();
 
 	flatvertices=flatprimitives=vertexcount=0;
 	render_texsplit=render_vertexsplit=rendered_lines=rendered_flats=rendered_sprites=rendered_decals=rendered_portals = 0;
@@ -106,6 +143,39 @@ static void AppendRenderTimes(FString &str)
 		twoD.TimeMS(), Flush3D.TimeMS() - twoD.TimeMS(),
 		MTWait.TimeMS() + Bsp.TimeMS(), MTWait.TimeMS(), WTTotal.TimeMS(), WTTotal.TimeMS() - setupwall - SetupFlat.TimeMS() - SetupSprite.TimeMS(),
 		All.TimeMS() + Finish.TimeMS(), RenderAll.TimeMS(),	ProcessAll.TimeMS(), PortalAll.TimeMS(), drawcalls.TimeMS(), PostProcess.TimeMS(), Finish.TimeMS());
+
+	if (NriPTAll.TimeMS() > 0.0)
+	{
+		str.AppendFormat(
+			"NRI PT: Total=%2.3f Init=%2.3f Res=%2.3f State=%2.3f Capture=%2.3f Geo=%2.3f Mats=%2.3f Palette=%2.3f Textures=%2.3f Buffers=%2.3f AS=%2.3f Bootstrap=%2.3f Graph=%2.3f Copy=%2.3f\n"
+			"        Wait=%2.3f WaitPresent=%2.3f Acquire=%2.3f Submit=%2.3f Present=%2.3f Trace=%2.3f Denoise=%2.3f Compose=%2.3f Upscale=%2.3f Final=%2.3f RawPresent=%2.3f FinalPresent=%2.3f\n",
+			NriPTAll.TimeMS(),
+			NriPTInitialize.TimeMS(),
+			NriPTFrameResources.TimeMS(),
+			NriPTUpdateState.TimeMS(),
+			NriPTSceneCapture.TimeMS(),
+			NriPTGeometryBuild.TimeMS(),
+			NriPTMaterialBuild.TimeMS(),
+			NriPTPaletteUpload.TimeMS(),
+			NriPTSceneTextures.TimeMS(),
+			NriPTSceneBuffers.TimeMS(),
+			NriPTAcceleration.TimeMS(),
+			NriPTBootstrapDispatch.TimeMS(),
+			NriPTFrameGraph.TimeMS(),
+			NriPTCopyFinal.TimeMS(),
+			NriPTFrameWait.TimeMS(),
+			NriPTWaitPresent.TimeMS(),
+			NriPTAcquireSwap.TimeMS(),
+			NriPTQueueSubmit.TimeMS(),
+			NriPTQueuePresent.TimeMS(),
+			NriPTTraceOpaque.TimeMS(),
+			NriPTDenoiser.TimeMS(),
+			NriPTComposition.TimeMS(),
+			NriPTUpscale.TimeMS(),
+			NriPTFinal.TimeMS(),
+			NriPTRawPresent.TimeMS(),
+			NriPTFinalPresent.TimeMS());
+	}
 }
 
 static void AppendRenderStats(FString &out)
@@ -120,6 +190,66 @@ static void AppendLightStats(FString &out)
 {
 	out.AppendFormat("DLight - Walls: %d processed, %d rendered - Flats: %d processed, %d rendered\n", 
 		iter_dlight, draw_dlight, iter_dlightf, draw_dlightf );
+}
+
+PerfRenderTraceStats GetPerfRenderTraceStats()
+{
+	PerfRenderTraceStats stats;
+	stats.allMs = All.TimeMS();
+	stats.finishMs = Finish.TimeMS();
+	stats.renderAllMs = RenderAll.TimeMS();
+	stats.processAllMs = ProcessAll.TimeMS();
+	stats.portalAllMs = PortalAll.TimeMS();
+	stats.postProcessMs = PostProcess.TimeMS();
+	stats.drawCallsMs = drawcalls.TimeMS();
+	stats.renderWallMs = RenderWall.TimeMS();
+	stats.setupWallMs = SetupWall.TimeMS();
+	stats.clipWallMs = ClipWall.TimeMS();
+	stats.bspMs = Bsp.TimeMS() - stats.clipWallMs;
+	stats.renderFlatMs = RenderFlat.TimeMS();
+	stats.setupFlatMs = SetupFlat.TimeMS();
+	stats.renderSpriteMs = RenderSprite.TimeMS();
+	stats.setupSpriteMs = SetupSprite.TimeMS();
+	stats.twoDMs = twoD.TimeMS();
+	stats.finish3DMs = Flush3D.TimeMS() - stats.twoDMs;
+	stats.mtWaitMs = MTWait.TimeMS();
+	stats.wtTotalMs = WTTotal.TimeMS();
+	stats.renderedWalls = rendered_lines;
+	stats.renderedFlats = rendered_flats;
+	stats.renderedSprites = rendered_sprites;
+	stats.renderedDecals = rendered_decals;
+	stats.renderedPortals = rendered_portals;
+	stats.renderedVertices = vertexcount;
+	stats.flatVertexCount = flatvertices;
+	stats.flatPrimitiveCount = flatprimitives;
+	stats.nriAllMs = NriPTAll.TimeMS();
+	stats.nriActive = stats.nriAllMs > 0.0;
+	stats.nriInitializeMs = NriPTInitialize.TimeMS();
+	stats.nriFrameResourcesMs = NriPTFrameResources.TimeMS();
+	stats.nriUpdateStateMs = NriPTUpdateState.TimeMS();
+	stats.nriSceneCaptureMs = NriPTSceneCapture.TimeMS();
+	stats.nriGeometryBuildMs = NriPTGeometryBuild.TimeMS();
+	stats.nriMaterialBuildMs = NriPTMaterialBuild.TimeMS();
+	stats.nriPaletteUploadMs = NriPTPaletteUpload.TimeMS();
+	stats.nriSceneTexturesMs = NriPTSceneTextures.TimeMS();
+	stats.nriSceneBuffersMs = NriPTSceneBuffers.TimeMS();
+	stats.nriAccelerationMs = NriPTAcceleration.TimeMS();
+	stats.nriBootstrapDispatchMs = NriPTBootstrapDispatch.TimeMS();
+	stats.nriFrameGraphMs = NriPTFrameGraph.TimeMS();
+	stats.nriCopyFinalMs = NriPTCopyFinal.TimeMS();
+	stats.nriFrameWaitMs = NriPTFrameWait.TimeMS();
+	stats.nriWaitPresentMs = NriPTWaitPresent.TimeMS();
+	stats.nriAcquireSwapMs = NriPTAcquireSwap.TimeMS();
+	stats.nriQueueSubmitMs = NriPTQueueSubmit.TimeMS();
+	stats.nriQueuePresentMs = NriPTQueuePresent.TimeMS();
+	stats.nriTraceOpaqueMs = NriPTTraceOpaque.TimeMS();
+	stats.nriDenoiserMs = NriPTDenoiser.TimeMS();
+	stats.nriCompositionMs = NriPTComposition.TimeMS();
+	stats.nriUpscaleMs = NriPTUpscale.TimeMS();
+	stats.nriFinalMs = NriPTFinal.TimeMS();
+	stats.nriRawPresentMs = NriPTRawPresent.TimeMS();
+	stats.nriFinalPresentMs = NriPTFinalPresent.TimeMS();
+	return stats;
 }
 
 ADD_STAT(rendertimes)
@@ -206,6 +336,5 @@ bool glcycle_t::active = false;
 void  checkBenchActive()
 {
 	FStat *stat = FStat::FindStat("rendertimes");
-	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats);
+	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats || PerfLoopTraceActive());
 }
-

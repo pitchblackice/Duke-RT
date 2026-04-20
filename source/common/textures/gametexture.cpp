@@ -50,8 +50,106 @@
 #include "c_cvars.h"
 #include "hw_material.h"
 #include "cmdlib.h"
+#include "m_argv.h"
+
+CVAR(String, material_overlay_trace, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 FTexture *CreateBrightmapTexture(FImageSource*);
+
+static void PrintMaterialOverlayProbeLayer(const FString& searchname, bool fullname, const char* layerPath)
+{
+	FStringf lookup("%s%s%s", layerPath, fullname ? "" : "auto/", searchname.GetChars());
+	auto lump = fileSystem.CheckNumForFullName(lookup.GetChars(), false, FileSys::ns_global, true);
+	if (lump == -1)
+	{
+		Printf("  %s: miss lookup=%s\n", layerPath, lookup.GetChars());
+		return;
+	}
+
+	const char* lumpName = fileSystem.GetFileFullName(lump);
+	auto overlay = TexMan.FindGameTexture(lumpName, ETextureType::Any, FTextureManager::TEXMAN_TryAny);
+	if (overlay == nullptr)
+	{
+		Printf("  %s: found=%s materialize=failed\n", layerPath, lumpName);
+		return;
+	}
+
+	Printf("  %s: found=%s attached=%s size=%dx%d\n",
+		layerPath,
+		lumpName,
+		overlay->GetName().GetChars(),
+		overlay->GetTexture() ? overlay->GetTexture()->GetWidth() : 0,
+		overlay->GetTexture() ? overlay->GetTexture()->GetHeight() : 0);
+}
+
+static const char* DescribeMaterialLayerTexture(FTexture* tex)
+{
+	if (tex == nullptr) return "none";
+	auto lump = tex->GetSourceLump();
+	if (lump >= 0)
+	{
+		auto fullname = fileSystem.GetFileFullName(lump);
+		if (fullname != nullptr) return fullname;
+	}
+	return "(generated)";
+}
+
+CCMD(materialoverlayprobe)
+{
+	if (argv.argc() != 2)
+	{
+		Printf("usage: materialoverlayprobe <texture-name>\n");
+		return;
+	}
+
+	auto tex = TexMan.FindGameTexture(argv[1], ETextureType::Any, FTextureManager::TEXMAN_TryAny);
+	if (tex == nullptr)
+	{
+		Printf("material overlay probe: texture '%s' not found\n", argv[1]);
+		return;
+	}
+
+	FString searchname = tex->GetName();
+	const bool fullname = tex->isFullNameTexture();
+	if (fullname)
+	{
+		auto dot = searchname.LastIndexOf('.');
+		auto slash = searchname.LastIndexOf('/');
+		if (dot > slash) searchname.Truncate(dot);
+	}
+
+	Printf("material overlay probe: texture=%s resolved=%s fullname=%s source_lump=%d source=%s\n",
+		argv[1],
+		searchname.GetChars(),
+		fullname ? "yes" : "no",
+		tex->GetSourceLump(),
+		(tex->GetSourceLump() >= 0 && fileSystem.GetFileFullName(tex->GetSourceLump()) != nullptr) ? fileSystem.GetFileFullName(tex->GetSourceLump()) : "(generated)");
+
+	tex->AddAutoMaterials();
+
+	PrintMaterialOverlayProbeLayer(searchname, fullname, "brightmaps/");
+	PrintMaterialOverlayProbeLayer(searchname, fullname, "materials/brightmaps/");
+	PrintMaterialOverlayProbeLayer(searchname, fullname, "materials/detailmaps/");
+	PrintMaterialOverlayProbeLayer(searchname, fullname, "materials/glowmaps/");
+	PrintMaterialOverlayProbeLayer(searchname, fullname, "materials/normalmaps/");
+	PrintMaterialOverlayProbeLayer(searchname, fullname, "materials/specular/");
+	PrintMaterialOverlayProbeLayer(searchname, fullname, "materials/metallic/");
+	PrintMaterialOverlayProbeLayer(searchname, fullname, "materials/roughness/");
+	PrintMaterialOverlayProbeLayer(searchname, fullname, "materials/ao/");
+
+	auto brightmap = tex->GetBrightmap();
+	auto glowmap = tex->GetGlowmap();
+	auto normalmap = tex->GetNormalmap();
+	auto metallic = tex->GetMetallic();
+	auto roughness = tex->GetRoughness();
+
+	Printf("material overlay probe: brightmap=%s glowmap=%s normalmap=%s metallic=%s roughness=%s\n",
+		DescribeMaterialLayerTexture(brightmap),
+		DescribeMaterialLayerTexture(glowmap),
+		DescribeMaterialLayerTexture(normalmap),
+		DescribeMaterialLayerTexture(metallic),
+		DescribeMaterialLayerTexture(roughness));
+}
 
 
 FGameTexture::FGameTexture(FTexture* wrap, const char* name) : Name(name)
@@ -175,6 +273,8 @@ void FGameTexture::AddAutoMaterials()
 		auto slash = searchname.LastIndexOf('/');
 		if (dot > slash) searchname.Truncate(dot);
 	}
+	const char* traceName = *material_overlay_trace;
+	const bool traceAutoMaterials = traceName[0] != 0 && searchname.CompareNoCase(traceName) == 0;
 
 	for (size_t i = 0; i < countof(autosearchpaths); i++)
 	{
@@ -182,14 +282,34 @@ void FGameTexture::AddAutoMaterials()
 		if (this->*(layer.pointer) == nullptr)	// only if no explicit assignment had been done.
 		{
 			FStringf lookup("%s%s%s", layer.path, fullname ? "" : "auto/", searchname.GetChars());
+			if (traceAutoMaterials)
+			{
+				DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' lookup='%s'\n", searchname.GetChars(), layer.path, lookup.GetChars());
+			}
 			auto lump = fileSystem.CheckNumForFullName(lookup.GetChars(), false, FileSys::ns_global, true);
 			if (lump != -1)
 			{
+				if (traceAutoMaterials)
+				{
+					DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' found lump='%s'\n", searchname.GetChars(), layer.path, fileSystem.GetFileFullName(lump));
+				}
 				auto bmtex = TexMan.FindGameTexture(fileSystem.GetFileFullName(lump), ETextureType::Any, FTextureManager::TEXMAN_TryAny);
 				if (bmtex != nullptr)
 				{
 					this->*(layer.pointer) = bmtex->GetTexture();
+					if (traceAutoMaterials)
+					{
+						DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' attached texture='%s'\n", searchname.GetChars(), layer.path, bmtex->GetName().GetChars());
+					}
 				}
+				else if (traceAutoMaterials)
+				{
+					DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' failed to materialize lump='%s'\n", searchname.GetChars(), layer.path, fileSystem.GetFileFullName(lump));
+				}
+			}
+			else if (traceAutoMaterials)
+			{
+				DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' miss\n", searchname.GetChars(), layer.path);
 			}
 		}
 	}
@@ -199,15 +319,35 @@ void FGameTexture::AddAutoMaterials()
 		if (!this->Layers || this->Layers.get()->*(layer.pointer) == nullptr)	// only if no explicit assignment had been done.
 		{
 			FStringf lookup("%s%s%s", layer.path, fullname ? "" : "auto/", searchname.GetChars());
+			if (traceAutoMaterials)
+			{
+				DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' lookup='%s'\n", searchname.GetChars(), layer.path, lookup.GetChars());
+			}
 			auto lump = fileSystem.CheckNumForFullName(lookup.GetChars(), false, FileSys::ns_global, true);
 			if (lump != -1)
 			{
+				if (traceAutoMaterials)
+				{
+					DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' found lump='%s'\n", searchname.GetChars(), layer.path, fileSystem.GetFileFullName(lump));
+				}
 				auto bmtex = TexMan.FindGameTexture(fileSystem.GetFileFullName(lump), ETextureType::Any, FTextureManager::TEXMAN_TryAny);
 				if (bmtex != nullptr)
 				{
 					if (this->Layers == nullptr) this->Layers = std::make_unique<FMaterialLayers>();
 					this->Layers.get()->* (layer.pointer) = bmtex->GetTexture();
+					if (traceAutoMaterials)
+					{
+						DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' attached texture='%s'\n", searchname.GetChars(), layer.path, bmtex->GetName().GetChars());
+					}
 				}
+				else if (traceAutoMaterials)
+				{
+					DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' failed to materialize lump='%s'\n", searchname.GetChars(), layer.path, fileSystem.GetFileFullName(lump));
+				}
+			}
+			else if (traceAutoMaterials)
+			{
+				DPrintf(DMSG_NOTIFY, "material overlay trace: texture='%s' layer='%s' miss\n", searchname.GetChars(), layer.path);
 			}
 		}
 	}
@@ -544,4 +684,3 @@ void FTexCoordInfo::GetFromTexture(FGameTexture *tex, float x, float y, bool for
 	mWorldPanning = tex->useWorldPanning() || forceworldpanning;
 	mWidth = tex->GetTexelWidth();
 }
-

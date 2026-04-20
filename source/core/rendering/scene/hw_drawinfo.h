@@ -166,6 +166,8 @@ public:
 	}
 
 	HWPortal * FindPortal(const void * src);
+	void ClearOwnedPortals();
+	static uint32_t ConsumePortalCleanupAnomalyCount();
 
 	static HWDrawInfo *StartDrawInfo(HWDrawInfo *parent, FRenderViewpoint &parentvp, HWViewpointUniforms *uniforms);
 	void StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uniforms);
@@ -191,6 +193,7 @@ public:
 	angle_t FrustumAngle();
 
 	void DrawPlayerSprites(bool hudModelStep, FRenderState &state);
+	const BitArray& GetVisibleSectors() const { return mDrawer.GotSector(); }
 
 	//void AddSubsectorToPortal(FSectorPortalGroup *portal, sectortype *sub);
 
@@ -217,5 +220,3 @@ inline int hw_ClampLight(int lightlevel)
 {
 	return clamp(lightlevel, 0, 255);
 }
-
-

@@ -742,6 +742,17 @@ ptrdiff_t FileSystem::FileLength (int lump) const
 	return (int)lump_p.resfile->Length(lump_p.resindex);
 }
 
+bool FileSystem::RefreshFile(int lump)
+{
+	if ((size_t)lump >= NumEntries)
+	{
+		return false;
+	}
+
+	auto& lump_p = FileInfo[lump];
+	return lump_p.resfile->RefreshEntry(lump_p.resindex);
+}
+
 //==========================================================================
 //
 // 

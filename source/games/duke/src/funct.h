@@ -115,6 +115,7 @@ void playerAimDown(DDukePlayer* const p, ESyncBits actions);
 DDukeActor* aim(DDukeActor* s, int aang, bool force = true, bool* b = nullptr);
 DDukeActor* aim_(DDukeActor* actor, DDukeActor* weapon, double aimangle, bool* b = nullptr);
 void shoot(DDukeActor* actor, PClass* cls);
+void EmitPathTracingPlayerWeaponLightEvent(DDukePlayer* p, const char* eventId);
 void checkweapons(DDukePlayer* const p);
 int findotherplayer(int p, double* d);
 void quickkill(DDukePlayer* p);
@@ -143,6 +144,7 @@ void tearitup(sectortype* sect);
 void destroyit(DDukeActor* actor);
 void mamaspawn(DDukeActor* actor);
 void forceplayerangle(DDukePlayer* snum);
+void TracePTRuntimeTransportEvent(const char* mode, DDukePlayer* player, DDukeActor* transporter, DDukeActor* owner, DDukeActor* transported, int triggerLotag, int onfloorz);
 
 
 bool checkhitceiling(sectortype* sectp);

@@ -1107,6 +1107,7 @@ OptionMenu "VideoOptions" protected
 
 	Submenu "$OPTMNU_HUD", "HUDOptions"
 	Submenu "$RENDER_OPTIONS", "RenderOptions"
+	Submenu "RT Renderer", "NRIOptions"
 	Submenu "$AUTOMAPMNU_TITLE", "AutomapOptions"
 	Submenu "$GLMNU_POSTPROCESS", "PostProcessMenu"
 	Submenu "$GLTEXMNU_TITLE", "GLTextureGLOptions"
@@ -1159,6 +1160,112 @@ OptionMenu "VideoOptions" protected
 	StaticText " "
 	Option "$GLPREFMNU_MULTISAMPLE", 			gl_multisample,					"Multisample"
 
+}
+
+OptionMenu "NRIOptions" protected
+{
+	Title "RT Renderer"
+
+	StaticText "Backend / API"
+	Option "Preferred Rendering API",			"vid_preferbackend",			"PreferBackend"
+	Option "RT Graphics API",					"nri_api",						"NRIAPI"
+	StaticText "Backend and API changes require a restart."
+	StaticText ""
+
+	StaticText "NRD / Core"
+	Option "Denoiser",							"nri_denoise",					"OnOff"
+	Option "NRD Method",						"nri_nrddenoiser",				"NRDDenoiser"
+	Option "Validation",						"nri_validation",				"OnOff"
+	Option "NRD Raw/Denoised Split",			"nri_nrdsplit",					"NRDInputSplit"
+	Option "NRD Anti-Firefly",					"nri_nrdantifirefly",			"OnOff"
+	Option "NRD HitT Recon",					"nri_nrdhitdistrecon",			"NRDHitDistanceReconstruction"
+	StaticText "----------------"
+	StaticText "NRD / History"
+	Slider "NRD Max Frames",					"nri_nrdmaxframes",				0, 63, 1, 0
+	Slider "NRD Fast Frames",					"nri_nrdfastframes",			0, 63, 1, 0
+	Slider "NRD Stabilization",					"nri_nrdstabilizationframes",	0, 63, 1, 0
+	Slider "NRD Fast Sigma",					"nri_nrdfasthistorysigma",		1.0, 3.0, 0.05, 2
+	StaticText "----------------"
+	StaticText "NRD / Spatial"
+	Slider "NRD Diffuse Prepass",				"nri_nrdprepassdiffuse",		0.0, 24.0, 0.5, 2
+	Slider "NRD Specular Prepass",				"nri_nrdprepassspecular",		0.0, 24.0, 0.5, 2
+	Slider "NRD Min Blur",						"nri_nrdblurmin",				0.0, 12.0, 0.25, 2
+	Slider "NRD Max Blur",						"nri_nrdblurmax",				0.0, 24.0, 0.25, 2
+	StaticText "----------------"
+	StaticText "SIGMA / Shadows"
+	Slider "SIGMA Stabilization",				"nri_nrdsigmastabilization",	0, 7, 1, 0
+	Slider "SIGMA Plane Dist",					"nri_nrdsigmaplanedistance",	0.001, 0.100, 0.001, 3
+	StaticText "----------------"
+	StaticText "Upscaling"
+	Option "TAA",								"nri_pttaa",					"OnOff"
+	Option "Main Upscaler",						"nri_upscaler",					"NRIMainUpscaler"
+	Option "Post Sharpen",						"nri_postsharpen",				"NRIPostSharpen"
+	Option "Upscaler Mode",						"nri_upscalermode",				"NRIUpscalerMode"
+	Option "Frame Generation",					"nri_framegen",					"OnOff"
+	Option "Frame Gen Provider",				"nri_framegenprovider",			"NRIFrameGenProvider"
+	Option "Frame Gen UI",						"nri_framegenui",				"NRIFrameGenUI"
+	Option "Frame Gen Low Latency",				"nri_framegenlatency",			"OnOff"
+	Option "Frame Gen Async",					"nri_framegenasync",			"OnOff"
+	Slider "Render Scale",						"nri_renderscale",				0.33, 1.0, 0.01, 2
+	Slider "Sharpness",							"nri_sharpness",				0.0, 1.0, 0.05, 2
+	StaticText "Frame generation currently targets windowed D3D12."
+	StaticText "----------------"
+	StaticText "HDR / Output"
+	Option "Output Mode",						"nri_ptoutputmode",				"NRIPTOutputMode"
+	StaticText "----------------"
+	StaticText "SDR Output"
+	Option "Tonemap",							"nri_pttonemap",				"NRIPTTonemap"
+	Slider "Exposure",							"nri_ptexposure",				0.125, 8.0, 0.125, 3
+	Slider "Contrast",							"nri_ptcontrast",				0.50, 1.50, 0.05, 2
+	Slider "Saturation",						"nri_ptsaturation",				0.00, 2.00, 0.05, 2
+	Slider "Highlight Shoulder",				"nri_ptshoulder",				0.50, 1.50, 0.05, 2
+	Slider "Shadow Toe",						"nri_pttoe",					0.50, 1.50, 0.05, 2
+	StaticText "Applies to active SDR output and HDR requests that fall back to SDR."
+	StaticText "----------------"
+	StaticText "HDR Output"
+	Option "Tonemap",							"nri_pthdrtonemap",				"NRIPTTonemap"
+	Slider "Exposure",							"nri_pthdrexposure",			0.125, 8.0, 0.125, 3
+	Slider "Contrast",							"nri_pthdrcontrast",			0.50, 1.50, 0.05, 2
+	Slider "Saturation",						"nri_pthdrsaturation",			0.00, 2.00, 0.05, 2
+	Slider "Highlight Shoulder",				"nri_pthdrshoulder",			0.50, 1.50, 0.05, 2
+	Slider "Shadow Toe",						"nri_pthdrtoe",					0.50, 1.50, 0.05, 2
+	Slider "Paper White",						"nri_ptpaperwhite",				80.0, 400.0, 5.0, 1
+	StaticText "Applies only while a real HDR swapchain is active."
+	Slider "Fullbright Boost",					"nri_ptfullbrightboost",		0.50, 8.00, 0.25, 2
+	StaticText "Output calibration affects final present; light energy remains upstream."
+	StaticText "Output-mode changes reset PT history."
+	StaticText "----------------"
+	StaticText "Night Vision"
+	Option "Night Vision Presenter",			"nri_ptnightvision",			"OnOff"
+	Slider "Night Vision Exposure",			"nri_ptnightvisionexposure",	0.25, 4.00, 0.05, 2
+	Slider "Night Vision Contrast",			"nri_ptnightvisioncontrast",	0.25, 2.00, 0.05, 2
+	Slider "Night Vision Saturation",			"nri_ptnightvisionsaturation",	0.00, 2.00, 0.05, 2
+	Slider "Night Vision Red",				"nri_ptnightvisionred",		0.00, 2.00, 0.05, 2
+	Slider "Night Vision Green",				"nri_ptnightvisiongreen",		0.00, 2.00, 0.05, 2
+	Slider "Night Vision Blue",				"nri_ptnightvisionblue",		0.00, 2.00, 0.05, 2
+	StaticText "These multipliers only apply while PT night vision is active."
+	StaticText "----------------"
+	StaticText "Traversal / Lighting"
+	Slider "Portal Depth",						"nri_ptportaldepth",			0, 6, 1, 0
+	Slider "Light Bounces",						"nri_ptlightbounces",			0, 4, 1, 0
+	Slider "Mirror Bounces",					"nri_ptmirrorbounces",			0, 8, 1, 0
+	Slider "Glow Scale",						"nri_ptglowscale",				0.0, 8.0, 0.25, 2
+	Slider "Glow Reach",						"nri_ptglowreach",				0.0, 16.0, 0.25, 2
+	Slider "Glow Falloff",						"nri_ptglowfalloff",			0.25, 4.0, 0.05, 2
+	Slider "Glow Blend",						"nri_ptglowblend",				0.0, 3.0, 0.05, 2
+	Slider "Sector Light Intensity",			"nri_ptsectorlightmultiplier",	0.0, 3.0, 0.05, 2
+	Slider "Emissive Samples",					"nri_ptemissivesamples",		1, 4, 1, 0
+	Option "Emissive Fast Shadow",				"nri_ptemissivefastshadow",		"OnOff"
+	StaticText "----------------"
+	StaticText "Debug / Inspection"
+	Option "PT Debug View",						"nri_ptdebugmenu",				"NRIPTDebug"
+	Slider "PT Debug Index",					"nri_ptdebugmenu",				0, 24, 1, 0
+	StaticText ""
+
+	StaticText "Commands"
+	Command "Print PT Caps",					"nri_ptcaps"
+	Command "Print PT Status",					"nri_ptstatus"
+	Command "Reset PT History",					"nri_ptreset"
 }
 
 OptionValue "DitherModes"
@@ -1683,6 +1790,130 @@ OptionValue PreferBackend
 	0, "$OPTVAL_OPENGL"
 	1, "$OPTVAL_VULKAN"
 	2, "$OPTVAL_OPENGLES"
+	4, "$OPTVAL_NRI"
+}
+
+OptionString NRIAPI
+{
+	"vulkan", "$OPTVAL_VULKAN"
+	"d3d12", "D3D12"
+}
+
+OptionValue NRIMainUpscaler
+{
+	0, "$OPTVAL_OFF"
+	2, "DLSS-SR"
+	3, "DLRR"
+}
+
+OptionValue NRIPostSharpen
+{
+	0, "$OPTVAL_OFF"
+	1, "NIS"
+}
+
+OptionValue NRIUpscalerMode
+{
+	0, "Native"
+	1, "Ultra Quality"
+	2, "Quality"
+	3, "Balanced"
+	4, "Performance"
+	5, "Ultra Performance"
+}
+
+OptionValue NRIFrameGenProvider
+{
+	0, "$OPTVAL_OFF"
+	1, "FSR3"
+}
+
+OptionValue NRIFrameGenUI
+{
+	0, "Auto"
+	1, "HUD-less"
+	2, "UI Texture"
+	3, "Present Callback"
+}
+
+OptionValue NRIPTOutputMode
+{
+	0, "SDR"
+	1, "HDR"
+}
+
+OptionValue NRIPTTonemap
+{
+	0, "Hable / Uncharted"
+	1, "ACES Fitted"
+	2, "Reinhard"
+}
+
+OptionValue NRDHitDistanceReconstruction
+{
+	0, "Off"
+	1, "Area 3x3"
+	2, "Area 5x5"
+}
+
+OptionValue NRDInputSplit
+{
+	0, "Off"
+	1, "Raw | Denoised"
+	2, "Denoised | Raw"
+}
+
+OptionValue NRDDenoiser
+{
+	0, "REBLUR"
+	1, "RELAX"
+}
+
+OptionValue NRIPTDebug
+{
+	0, "Lit"
+	1, "Surface Normals"
+	2, "UV"
+	3, "Material ID"
+	4, "Primitive ID"
+	5, "Motion Vectors"
+	6, "Validation"
+	7, "Raw Diffuse"
+	8, "Raw Specular"
+	9, "Hit Distance"
+	10, "Denoised Diffuse"
+	11, "Denoised Specular"
+	12, "Metalness"
+	13, "Roughness"
+	14, "Raw Penumbra"
+	15, "Raw Shadow"
+	16, "Direct Lighting"
+	17, "Direct Emission"
+	18, "Analytic Direct"
+	19, "Emissive Tags"
+	20, "Emissive Direct"
+	21, "Sector Ambient"
+	22, "Emissive Visibility"
+	23, "TraceTransparent Output"
+	24, "Pre-Exposed Input"
+}
+
+OptionValue NRIPTBootstrapMode
+{
+	0, "Pattern"
+	1, "Analytic Plane"
+	2, "Triangle"
+	3, "Textured Quad"
+	4, "Scene Signature"
+	5, "Raw Vertex Scatter"
+	6, "Raw Primitive Scatter"
+	7, "Scene Points"
+	8, "Scene Centroids"
+	9, "Scene Wireframe"
+	10, "First Scene Triangle"
+	11, "Scene Flat"
+	12, "Scene Base Color"
+	13, "Full PT"
 }
 
 OptionMenu VideoModeMenu protected
@@ -2165,4 +2396,3 @@ OptionMenu "EngineCredits3"
 	StaticText "Ryan Gordon       Stephen Anthony   tueidj           ", 0
 	StaticText "Pär \"Parkar\" Karlsson", 0
 }
-

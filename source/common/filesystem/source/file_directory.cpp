@@ -36,6 +36,7 @@
 
 #include <sys/stat.h>
 
+#include "cmdlib.h"
 #include "resourcefile.h"
 #include "fs_findfile.h"
 #include "fs_stringpool.h"
@@ -63,6 +64,7 @@ public:
 	FDirectory(const char * dirname, StringPool* sp, bool nosubdirflag = false);
 	bool Open(LumpFilterInfo* filter, FileSystemMessageFunc Printf);
 	FileReader GetEntryReader(uint32_t entry, int, int) override;
+	bool RefreshEntry(uint32_t entry) override;
 };
 
 
@@ -185,6 +187,27 @@ FileReader FDirectory::GetEntryReader(uint32_t entry, int readertype, int)
 		}
 	}
 	return fr;
+}
+
+bool FDirectory::RefreshEntry(uint32_t entry)
+{
+	if (entry >= NumLumps)
+	{
+		return false;
+	}
+
+	std::string fn = mBasePath;
+	fn += SystemFilePath[Entries[entry].Position];
+
+	size_t size = 0;
+	if (!GetFileInfo(fn.c_str(), &size, nullptr))
+	{
+		return false;
+	}
+
+	Entries[entry].Length = size;
+	Entries[entry].CompressedSize = size;
+	return true;
 }
 
 //==========================================================================

@@ -49,17 +49,76 @@ goto aftercopyright
 
 :aftercopyright
 
-setlocal enableextensions
+setlocal enableextensions enabledelayedexpansion
+
+set "PROJECT_ROOT=%~dp0"
+set "WINDOWS_RUNTIME_DLL_DIR=%PROJECT_ROOT%bin\windows\runtime-deps"
+if not exist "%PROJECT_ROOT%bin" mkdir "%PROJECT_ROOT%bin"
+if not exist "%PROJECT_ROOT%bin\windows" mkdir "%PROJECT_ROOT%bin\windows"
+if not exist "%WINDOWS_RUNTIME_DLL_DIR%" mkdir "%WINDOWS_RUNTIME_DLL_DIR%"
+
+rem Work around modern CMake disallowing LOCATION lookups inside old ports (yasm)
+set "VCPKG_CMAKE_CONFIGURE_OPTIONS=-DCMAKE_POLICY_DEFAULT_CMP0026=OLD"
+set "VCPKG_KEEP_ENV_VARS=VCPKG_CMAKE_CONFIGURE_OPTIONS"
 
 rem -- Always operate within the build folder
 if not exist "%~dp0\build" mkdir "%~dp0\build"
 pushd "%~dp0\build"
 
-if exist vcpkg if exist vcpkg\* git -C ./vcpkg pull
-if not exist vcpkg git clone https://github.com/microsoft/vcpkg
+set "VCPKG_ROOT=%CD%\vcpkg"
+set "PATH=%VCPKG_ROOT%;%PATH%"
+set "VCPKG_OVERLAY_PORTS=%~dp0vcpkg-overlays"
 
-if exist zmusic if exist vcpkg\* git -C ./zmusic pull
-if not exist zmusic git clone https://github.com/zdoom/zmusic
+echo ===========================
+echo === Bootstrapping vcpkg ===
+echo ===========================
+
+if exist vcpkg (
+	git -C ./vcpkg pull
+) else (
+	git clone https://github.com/microsoft/vcpkg
+)
+git -C ./vcpkg checkout 74e6536215718009aae747d86d84b78376bf9e09
+
+if not exist vcpkg\vcpkg.exe (
+	call .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+	if errorlevel 1 (
+		echo Failed to bootstrap vcpkg.
+		exit /b 1
+	)
+)
+
+echo =====================================
+echo === Install and copying OpenAL ===
+echo =====================================
+
+.\vcpkg\vcpkg.exe install --triplet x64-windows
+if errorlevel 1 (
+	echo vcpkg install failed.
+	exit /b 1
+)
+
+set "OPENAL_DLL=.\vcpkg\packages\openal-soft_x64-windows\bin\OpenAL32.dll"
+if exist "%OPENAL_DLL%" (
+	if not exist RelWithDebInfo mkdir RelWithDebInfo
+	copy /Y "%OPENAL_DLL%" "RelWithDebInfo\OpenAL32.dll" >nul
+	copy /Y "%OPENAL_DLL%" "%WINDOWS_RUNTIME_DLL_DIR%\OpenAL32.dll" >nul
+)
+set "OPENAL_PDB=.\vcpkg\packages\openal-soft_x64-windows\bin\OpenAL32.pdb"
+if exist "%OPENAL_PDB%" (
+	copy /Y "%OPENAL_PDB%" "RelWithDebInfo\OpenAL32.pdb" >nul
+	copy /Y "%OPENAL_PDB%" "%WINDOWS_RUNTIME_DLL_DIR%\OpenAL32.pdb" >nul
+)
+
+echo =======================
+echo === Build ZMusic ===
+echo =======================
+
+if exist zmusic (
+	git -C ./zmusic pull
+) else (
+	git clone https://github.com/zdoom/zmusic
+)
 
 if not exist "%~dp0\build\zmusic\build" mkdir "%~dp0\build\zmusic\build"
 if not exist "%~dp0\build\vcpkg_installed" mkdir "%~dp0\build\vcpkg_installed"
@@ -67,16 +126,43 @@ if not exist "%~dp0\build\vcpkg_installed" mkdir "%~dp0\build\vcpkg_installed"
 cmake -A x64 -S ./zmusic -B ./zmusic/build ^
 	-DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake ^
 	-DVCPKG_LIBSNDFILE=1 ^
-	-DVCPKG_INSTALLLED_DIR=../vcpkg_installed/
+	-DVCPKG_INSTALLED_DIR=../vcpkg_installed/
 cmake --build ./zmusic/build --config Release -- -maxcpucount -verbosity:minimal
 
 cmake -A x64 -S .. -B . ^
 	-DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake ^
 	-DZMUSIC_INCLUDE_DIR=./zmusic/include ^
 	-DZMUSIC_LIBRARIES=./zmusic/build/source/Release/zmusiclite.lib ^
-	-DVCPKG_INSTALLLED_DIR=./vcpkg_installed/
+	-DVCPKG_INSTALLED_DIR=./vcpkg_installed/
 cmake --build . --config RelWithDebInfo -- -maxcpucount -verbosity:minimal
+
+echo =============================================
+echo === Copy ZMusic and audio-related DLLs ===
+echo =============================================
+
+set "DEP_BIN_DIR=..\vcpkg_installed\x64-windows\bin"
+set "DEP_BIN_DEBUG_DIR=..\vcpkg_installed\x64-windows\debug\bin"
+set "DEP_DLLS=FLAC.dll FLAC.pdb libmp3lame.dll libmp3lame.pdb mpg123.dll mpg123.pdb ogg.dll ogg.pdb opus.dll opus.pdb out123.dll out123.pdb sndfile.dll sndfile.pdb syn123.dll syn123.pdb vorbis.dll vorbis.pdb vorbisenc.dll vorbisenc.pdb vorbisfile.dll vorbisfile.pdb zlib1.dll zlib1.pdb zmusiclite.dll zmusiclite.pdb"
+if not exist RelWithDebInfo mkdir RelWithDebInfo
+for %%D in (%DEP_DLLS%) do (
+	set "SRC="
+	if exist "%DEP_BIN_DEBUG_DIR%\%%D" (
+		set "SRC=%DEP_BIN_DEBUG_DIR%\%%D"
+	) else if exist "%DEP_BIN_DIR%\%%D" (
+		set "SRC=%DEP_BIN_DIR%\%%D"
+	)
+	if defined SRC (
+		copy /Y "!SRC!" "RelWithDebInfo\%%D" >nul
+		copy /Y "!SRC!" "%WINDOWS_RUNTIME_DLL_DIR%\%%D" >nul
+	)
+)
+
+set "ZMUSIC_DLL=.\zmusic\build\source\Release\zmusiclite.dll"
+if exist "%ZMUSIC_DLL%" (
+	if not exist RelWithDebInfo mkdir RelWithDebInfo
+	copy /Y "%ZMUSIC_DLL%" "RelWithDebInfo\zmusiclite.dll" >nul
+	copy /Y "%ZMUSIC_DLL%" "%WINDOWS_RUNTIME_DLL_DIR%\zmusiclite.dll" >nul
+)
 
 rem -- If successful, show the build
 if not errorlevel 1 if exist RelWithDebInfo\raze.exe explorer.exe RelWithDebInfo
-

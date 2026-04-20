@@ -46,6 +46,7 @@
 #include "hw_levelmesh.h"
 #include "buffers.h"
 #include "files.h"
+#include "zstring.h"
 
 
 struct FPortalSceneState;
@@ -61,6 +62,7 @@ class FMaterial;
 class FGameTexture;
 class FRenderState;
 class BoneBuffer;
+struct MapRecord;
 
 enum EHWCaps
 {
@@ -82,6 +84,8 @@ extern int DisplayWidth, DisplayHeight;
 
 void V_UpdateModeSize (int width, int height);
 void V_OutputResized (int width, int height);
+int V_GetBackend();
+const char* V_GetStartupNriAPI();
 
 EXTERN_CVAR(Bool, vid_fullscreen)
 EXTERN_CVAR(Int, win_x)
@@ -123,13 +127,81 @@ protected:
 
 class IHardwareTexture;
 class FTexture;
+class FGameTexture;
 
+struct PathTracingWeaponLightEvent
+{
+	FString eventId;
+	int32_t emitterActorIndex = -1;
+	bool hasEmitterActorIndex = false;
+	DVector3 worldPosition;
+	DVector3 basisRight;
+	DVector3 basisForward;
+	DVector3 basisUp;
+	bool hasBasis = false;
+	double absoluteTimeSeconds = 0.0;
+	uint64_t serial = 0;
+};
+
+enum class PathTracingActorSpriteTraceStage : uint32_t
+{
+	Draw = 0,
+	CaptureScene = 1,
+	CaptureActorScene = 2
+};
+
+struct PathTracingActorSpriteTraceEvent
+{
+	PathTracingActorSpriteTraceStage stage = PathTracingActorSpriteTraceStage::Draw;
+	int32_t actorIndex = -1;
+	int32_t spriteStatnum = -1;
+	int32_t spritePicnum = -1;
+	int32_t baseTextureId = -1;
+	int32_t resolvedTextureId = -1;
+	int32_t palette = 0;
+	int32_t shade = 0;
+	uint32_t cstat = 0;
+	uint32_t cstat2 = 0;
+	uint32_t drawListType = 0;
+	bool noAnimate = false;
+	bool fullbright = false;
+	const FGameTexture* resolvedGameTexture = nullptr;
+};
+
+enum class LevelTransitionReason : uint8_t
+{
+	Unknown = 0,
+	NewGame,
+	NextLevel,
+	SaveGameLoad,
+	Startup,
+	MainMenu,
+	Credits
+};
+
+struct LevelTransitionInfo
+{
+	LevelTransitionReason reason = LevelTransitionReason::Unknown;
+	uint64_t serial = 0;
+	MapRecord* oldLevel = nullptr;
+	MapRecord* newLevel = nullptr;
+	FString oldLevelName;
+	FString newLevelName;
+};
 
 class DFrameBuffer
 {
 private:
 	int Width = 0;
 	int Height = 0;
+
+	struct Queued2DTextureRender
+	{
+		FGameTexture* texture = nullptr;
+		F2DDrawer* drawer = nullptr;
+	};
+
+	TArray<Queued2DTextureRender> mQueued2DTextureRenders;
 
 public:
 	// Hardware render state that needs to be exposed to the API independent part of the renderer. For ease of access this is stored in the base class.
@@ -252,6 +324,7 @@ public:
 	void SetClearColor(int color);
 	virtual int Backend() { return 0; }
 	virtual const char* DeviceName() const { return "Unknown"; }
+	virtual bool SupportsQueued2DTextureRenders() const { return false; }
 	virtual void AmbientOccludeScene(float m5) {}
 	virtual void FirstEye() {}
 	virtual void NextEye(int eyecount) {}
@@ -259,11 +332,32 @@ public:
 	virtual void UpdateShadowMap() {}
 	virtual void WaitForCommands(bool finish) {}
 	virtual void SetSaveBuffers(bool yes) {}
+	virtual bool PrepareSavePicScene(int width, int height) { return true; }
+	virtual void FinishSavePicScene() {}
 	virtual void ImageTransitionScene(bool unknown) {}
 	virtual void CopyScreenToBuffer(int width, int height, uint8_t* buffer)	{ memset(buffer, 0, width* height); }
 	virtual bool FlipSavePic() const { return false; }
 	virtual void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect&)> renderFunc) {}
+	virtual void RenderTextureView(FGameTexture* tex, std::function<void(IntRect&)> renderFunc) {}
+	virtual void SnapshotCurrentViewToCanvas(FCanvasTexture* tex) {}
+	void Queue2DTextureRender(FGameTexture* tex, F2DDrawer* drawer);
+	void FlushQueued2DTextureRenders();
+	virtual void NotifyPathTracingCameraCut(const char* reason) {}
+	virtual void SetPathTracingGuiCaptureState(bool active) {}
+	virtual bool ShouldSkipSceneBuildForPathTracedScene(int drawmode, bool portal) const { return false; }
+	virtual bool RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal) { return false; }
+	virtual bool HasActiveSceneFrame() const { return true; }
+	virtual bool StartPathTracingLevelPreload() { return false; }
+	virtual bool TickPathTracingLevelPreload() { return true; }
+	virtual bool IsPathTracingLevelPreloadPending() const { return false; }
+	virtual void CancelPathTracingLevelPreload() {}
+	virtual void NotifyLevelUnloadBegin(const LevelTransitionInfo& info) {}
+	virtual void NotifyLevelUnloadComplete(const LevelTransitionInfo& info) {}
+	virtual void NotifyLevelLoadBegin(const LevelTransitionInfo& info) {}
 	virtual void SetActiveRenderTarget() {}
+	virtual void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event);
+	virtual void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event);
+	virtual void PrintPathTracingSurfaceProbeStatus() const;
 
 	// Screen wiping
 	virtual FTexture *WipeStartScreen();

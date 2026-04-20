@@ -47,6 +47,7 @@
 #include "hw_viewpointbuffer.h"
 #include "hw_voxels.h"
 #include "buildtiles.h"
+#include "gi.h"
 
 //==========================================================================
 //
@@ -340,7 +341,8 @@ void HWSprite::Process(HWDrawInfo* di, tspritetype* spr, sectortype* sector, int
 	y = -spr->pos.Y;
 	auto vp = di->Viewpoint;
 
-	if ((vp.Pos.XY() - DVector2(x, y)).LengthSquared() < 0.125) return;
+	const bool mirrorPlayerCaptureOverride = gi != nullptr && gi->GetMirrorPlayerVisibilityCaptureOverride();
+	if (!mirrorPlayerCaptureOverride && (vp.Pos.XY() - DVector2(x, y)).LengthSquared() < 0.125) return;
 
 	if (modelframe == 0)
 	{

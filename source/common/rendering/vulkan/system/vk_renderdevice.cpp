@@ -271,6 +271,44 @@ void VulkanRenderDevice::RenderTextureView(FCanvasTexture* tex, std::function<vo
 	tex->SetUpdated(true);
 }
 
+void VulkanRenderDevice::RenderTextureView(FGameTexture* tex, std::function<void(IntRect&)> renderFunc)
+{
+	if (tex == nullptr || tex->GetTexture() == nullptr)
+	{
+		return;
+	}
+
+	FTexture* source = tex->GetTexture();
+	auto BaseLayer = static_cast<VkHardwareTexture*>(source->GetHardwareTexture(0, 0));
+	BaseLayer->EnsureRenderTarget(source);
+
+	VkTextureImage* image = BaseLayer->GetImage(source, 0, 0);
+	VkTextureImage* depthStencil = BaseLayer->GetDepthStencil(source);
+
+	mRenderState->EndRenderPass();
+
+	VkImageTransition()
+		.AddImage(image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
+		.Execute(mCommands->GetDrawCommands());
+
+	mRenderState->SetRenderTarget(image, depthStencil->View.get(), image->Image->width, image->Image->height, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT);
+
+	IntRect bounds;
+	bounds.left = bounds.top = 0;
+	bounds.width = min(source->GetWidth(), image->Image->width);
+	bounds.height = min(source->GetHeight(), image->Image->height);
+
+	renderFunc(bounds);
+
+	mRenderState->EndRenderPass();
+
+	VkImageTransition()
+		.AddImage(image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+		.Execute(mCommands->GetDrawCommands());
+
+	mRenderState->SetRenderTarget(&GetBuffers()->SceneColor, GetBuffers()->SceneDepthStencil.View.get(), GetBuffers()->GetWidth(), GetBuffers()->GetHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, GetBuffers()->GetSceneSamples());
+}
+
 void VulkanRenderDevice::PostProcessScene(bool swscene, int fixedcm, float flash, const std::function<void()> &afterBloomDrawEndScene2D)
 {
 	if (!swscene) mPostprocess->BlitSceneToPostprocess(); // Copy the resulting scene to the current post process texture
@@ -483,6 +521,7 @@ void VulkanRenderDevice::InitLightmap(int LMTextureSize, int LMTextureCount, TAr
 
 void VulkanRenderDevice::Draw2D()
 {
+	FlushQueued2DTextureRenders();
 	::Draw2D(twod, *mRenderState);
 }
 

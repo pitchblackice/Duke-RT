@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "menu.h"
 #include "gameinput.h"
 #include "g_input.h"
+#include "d_eventbase.h"
 
 //---------------------------------------------------------------------------
 //
@@ -123,6 +124,8 @@ void GameInput::processMovement(const double turnscale, const bool allowstrafe, 
 	InputPacket thisInput{};
 	keymove = 1 << int(!!(inputBuffer.actions & SB_RUN));
 	const auto hidspeed = getTicrateAngle(YAW_TURNSPEEDS[2]);
+	const bool yawUsesMouseLook = !(buttonMap.ButtonDown(gamefunc_Strafe) && allowstrafe);
+	const bool pitchUsesMouseLook = !(inputBuffer.actions & SB_AIMMODE);
 
 	// get all input amounts.
 	const auto turning = buttonMap.ButtonDown(gamefunc_Turn_Right) -
@@ -140,8 +143,10 @@ void GameInput::processMovement(const double turnscale, const bool allowstrafe, 
 		buttonMap.ButtonDown(gamefunc_Move_Down) +
 		joyAxes[JOYAXIS_Up] * scaleAdjust;
 
+	PerfLoopTraceNoteMouseRoute(yawUsesMouseLook, pitchUsesMouseLook, mouseInput.X, mouseInput.Y);
+
 	// process player yaw input.
-	if (!(buttonMap.ButtonDown(gamefunc_Strafe) && allowstrafe))
+	if (yawUsesMouseLook)
 	{
 		const double turndir = clamp(turning + strafing * !allowstrafe, -1., 1.);
 		const double tttscale = (cl_noturnscaling || isTurboTurnTime()) ? 1 : PRETURBOTURNSCALE;
@@ -160,7 +165,7 @@ void GameInput::processMovement(const double turnscale, const bool allowstrafe, 
 	}
 
 	// process player pitch input.
-	if (!(inputBuffer.actions & SB_AIMMODE))
+	if (pitchUsesMouseLook)
 	{
 		thisInput.ang.Pitch -= MOUSE_SCALE * mouseInput.Y * m_pitch;
 		thisInput.ang.Pitch -= hidspeed * joyAxes[JOYAXIS_Pitch] * scaleAdjust;
@@ -187,10 +192,13 @@ void GameInput::processMovement(const double turnscale, const bool allowstrafe, 
 	inputBuffer.vel += thisInput.vel;
 	inputBuffer.ang += thisInput.ang;
 
-	// directly update player angles if we can.
-	if (scaleAdjust < 1)
+	// In unsynced mode, local view response must always be driven from this path.
+	// Lagged frames can push scaleAdjust above 1, so gating on the fraction creates
+	// a dead zone where ticcmds are built but neither the local camera nor actor moves.
+	if (!SyncInput())
 	{
 		PlayerArray[myconnectindex]->CameraAngles += thisInput.ang;
+		PerfLoopTraceNoteFastCameraApply((float)thisInput.ang.Yaw.Degrees(), (float)thisInput.ang.Pitch.Degrees());
 	}
 }
 
@@ -250,10 +258,11 @@ void GameInput::processVehicle(const double baseVel, const double velScale, cons
 		turnheldtime = 0;
 	}
 
-	// directly update player angles if we can.
-	if (scaleAdjust < 1)
+	// Unsynced vehicle turning uses the same immediate local-camera path.
+	if (!SyncInput())
 	{
 		PlayerArray[myconnectindex]->CameraAngles += thisInput.ang;
+		PerfLoopTraceNoteFastCameraApply((float)thisInput.ang.Yaw.Degrees(), 0.0f);
 	}
 }
 
@@ -377,12 +386,14 @@ void GameInput::getInput(InputPacket* packet)
 	I_GetAxes(joyAxes);
 	processInputBits();
 	if (!paused) gi->doPlayerMovement();
+	PerfLoopTraceNoteGameInputSample(mouseInput.X, mouseInput.Y);
 	mouseInput.Zero();
 
 	if (packet)
 	{
 		const DVector3& maxVel = MAXVEL[keymove];
 		*packet = {	clamp(inputBuffer.vel, -maxVel, maxVel), clamp(inputBuffer.ang, -MAXANG, MAXANG), inputBuffer.actions };
+		PerfLoopTraceNoteTiccmdBuild((float)packet->ang.Yaw.Degrees(), (float)packet->ang.Pitch.Degrees());
 		inputBuffer = {};
 	}
 }

@@ -343,14 +343,16 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			uint8_t *buffer = array.data();
 			if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, buffer, &size, sizeof(RAWINPUTHEADER)) == size)
 			{
+				auto *raw = (RAWINPUT *)buffer;
+				PerfLoopTraceNoteRawInputMessage(raw->header.dwType == RIM_TYPEMOUSE, raw->header.dwType == RIM_TYPEKEYBOARD);
 				int code = GET_RAWINPUT_CODE_WPARAM(wParam);
-				if (Keyboard == NULL || !Keyboard->ProcessRawInput((RAWINPUT *)buffer, code))
+				if (Keyboard == NULL || !Keyboard->ProcessRawInput(raw, code))
 				{
-					if (Mouse == NULL || !Mouse->ProcessRawInput((RAWINPUT *)buffer, code))
+					if (Mouse == NULL || !Mouse->ProcessRawInput(raw, code))
 					{
 						if (JoyDevices[INPUT_RawPS2] != NULL)
 						{
-							JoyDevices[INPUT_RawPS2]->ProcessRawInput((RAWINPUT *)buffer, code);
+							JoyDevices[INPUT_RawPS2]->ProcessRawInput(raw, code);
 						}
 					}
 				}
@@ -582,6 +584,7 @@ void I_ShutdownInput ()
 void I_GetEvent ()
 {
 	MSG mess;
+	uint32_t peekedMessages = 0;
 
 	// Briefly enter an alertable state so that if a secondary thread
 	// crashed, we will execute the APC it sent now.
@@ -589,6 +592,7 @@ void I_GetEvent ()
 
 	while (PeekMessage (&mess, NULL, 0, 0, PM_REMOVE))
 	{
+		peekedMessages++;
 		if (mess.message == WM_QUIT)
 			throw CExitEvent(mess.wParam);
 
@@ -598,6 +602,7 @@ void I_GetEvent ()
 		}
 		DispatchMessage (&mess);
 	}
+	PerfLoopTraceNoteIGetEvent(peekedMessages);
 
 	if (Keyboard != NULL)
 	{
@@ -616,6 +621,7 @@ void I_StartTic ()
 {
 	BlockMouseMove--;
 	buttonMap.ResetButtonTriggers ();
+	PerfLoopTraceNoteIStartTic();
 	I_CheckGUICapture ();
 	EventHandlerResultForNativeMouse = sysCallbacks.WantNativeMouse && sysCallbacks.WantNativeMouse();
 	I_CheckNativeMouse (false, EventHandlerResultForNativeMouse);
@@ -786,4 +792,3 @@ bool FInputDevice::WndProcHook(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
 {
 	return false;
 }
-

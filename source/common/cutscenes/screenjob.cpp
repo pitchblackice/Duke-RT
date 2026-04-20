@@ -51,10 +51,12 @@
 #include "s_music.h"
 #include "m_argv.h"
 #include "i_interface.h"
+#include "mapinfo.h"
 
 CVAR(Bool, inter_subtitles, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 CutsceneState cutscene;
+static PType* maprecordtype;
 static int ticks;
 
 //=============================================================================
@@ -74,6 +76,7 @@ void Job_Init()
 	cutscene.runnerclass = PClass::FindClass("ScreenJobRunner");
 	if (!cutscene.runnerclass) I_FatalError("ScreenJobRunner not defined");
 	cutscene.runnerclasstype = NewPointer(cutscene.runnerclass);
+	maprecordtype = NewPointer(NewStruct("MapRecord", nullptr, true));
 }
 
 //=============================================================================
@@ -111,10 +114,19 @@ VMFunction* LookupFunction(const char* qname, bool validate)
 void CallCreateFunction(const char* qname, DObject* runner)
 {
 	auto func = LookupFunction(qname);
-	if (func->Proto->ArgumentTypes.Size() != 1) I_Error("Bad cutscene function %s. Must receive precisely one argument.", qname);
-	if (func->Proto->ArgumentTypes[0] != cutscene.runnerclasstype) I_Error("Bad cutscene function %s. Must receive ScreenJobRunner reference.", qname);
-	VMValue val = runner;
-	VMCall(func, &val, 1, nullptr, 0);
+	const auto& argumentTypes = func->Proto->ArgumentTypes;
+	if (argumentTypes.Size() == 1)
+	{
+		if (argumentTypes[0] != cutscene.runnerclasstype) I_Error("Bad cutscene function %s. Must receive ScreenJobRunner reference.", qname);
+		VMValue val = runner;
+		VMCall(func, &val, 1, nullptr, 0);
+		return;
+	}
+	if (argumentTypes.Size() != 2) I_Error("Bad cutscene function %s. Must receive precisely one or two arguments.", qname);
+	if (argumentTypes[0] != cutscene.runnerclasstype || argumentTypes[1] != maprecordtype)
+		I_Error("Bad cutscene function %s. Must receive ScreenJobRunner and MapRecord reference.", qname);
+	VMValue val[2] = { runner, currentLevel };
+	VMCall(func, val, 2, nullptr, 0);
 }
 
 //=============================================================================
@@ -400,6 +412,5 @@ CCMD(testcutscene)
 		Printf(TEXTCOLOR_RED "Unable to play cutscene: %s\n", err.what());
 	}
 }
-
 
 

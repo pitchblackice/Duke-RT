@@ -114,6 +114,11 @@ CUSTOM_CVAR(Int, vid_preferbackend, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_N
 		Printf("Selecting Vulkan backend...\n");
 		break;
 #endif
+#ifdef HAVE_NRI
+	case 4:
+		Printf("Selecting NRI backend...\n");
+		break;
+#endif
 	default:
 		Printf("Selecting OpenGL backend...\n");
 	}
@@ -121,12 +126,77 @@ CUSTOM_CVAR(Int, vid_preferbackend, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_N
 	Printf("Changing the video backend requires a restart for " GAMENAME ".\n");
 }
 
+CUSTOM_CVAR(String, nri_api, "d3d12", CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+{
+	const char *api = self;
+	if (stricmp(api, "vulkan") != 0 && stricmp(api, "d3d12") != 0)
+	{
+		Printf("Unknown NRI API '%s'; using Vulkan.\n", api);
+		self = "vulkan";
+	}
+}
+
+static const char* GetStartupSetOverride(const char* name)
+{
+	if (Args == nullptr || name == nullptr || *name == '\0')
+	{
+		return nullptr;
+	}
+
+	const char* value = nullptr;
+	for (int i = 1; i + 2 < Args->NumArgs(); ++i)
+	{
+		const char* arg = Args->GetArg(i);
+		if (arg == nullptr || stricmp(arg, "+set") != 0)
+		{
+			continue;
+		}
+
+		const char* key = Args->GetArg(i + 1);
+		const char* candidate = Args->GetArg(i + 2);
+		if (key == nullptr || candidate == nullptr)
+		{
+			continue;
+		}
+
+		if (stricmp(key, name) == 0)
+		{
+			value = candidate;
+		}
+	}
+
+	return value;
+}
+
 int V_GetBackend()
 {
 	int v = vid_preferbackend;
+	if (const char* override = GetStartupSetOverride("vid_preferbackend"))
+	{
+		v = (int)strtol(override, nullptr, 0);
+	}
 	if (v == 3) vid_preferbackend = v = 2;
-	else if (v < 0 || v > 3) v = 0;
+	else if (v < 0 || v > 4) v = 0;
 	return v;
+}
+
+const char* V_GetStartupNriAPI()
+{
+	const char* api = GetStartupSetOverride("nri_api");
+	return (api != nullptr && *api != '\0') ? api : (const char*)nri_api;
+}
+
+void DFrameBuffer::PrintPathTracingSurfaceProbeStatus() const
+{
+	Printf("NRI PT surface probe is only available while using the NRI renderer.\n");
+}
+
+void DFrameBuffer::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent&)
+{
+}
+
+void DFrameBuffer::EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent&)
+{
 }
 
 
@@ -506,4 +576,3 @@ CUSTOM_CVAR(Float, transsouls, 0.75f, CVAR_ARCHIVE)
 		self = 1.f;
 	}
 }
-

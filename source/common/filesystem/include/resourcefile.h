@@ -191,6 +191,7 @@ public:
 	}
 
 	virtual FileData Read(uint32_t entry);
+	virtual bool RefreshEntry(uint32_t entry);
 
 	virtual FCompressedBuffer GetRawData(uint32_t entry);
 

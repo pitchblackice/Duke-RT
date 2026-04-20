@@ -420,6 +420,10 @@ if (HAVE_VULKAN)
 	set (PLAT_WIN32_SOURCES ${PLAT_WIN32_SOURCES} common/platform/win32/win32vulkanvideo.cpp )
 endif()
 
+if (HAVE_NRI)
+	set (PLAT_WIN32_SOURCES ${PLAT_WIN32_SOURCES} common/platform/win32/win32nrivideo.cpp )
+endif()
+
 # todo: implement an actual crash catcher for ARM
 # for now this is purely experimental
 if (NOT ${TARGET_ARCHITECTURE} MATCHES "arm" )
@@ -599,6 +603,9 @@ file( GLOB HEADER_FILES
 	common/rendering/vulkan/renderer/*.h
 	common/rendering/vulkan/shaders/*.h
 	common/rendering/vulkan/textures/*.h
+	common/rendering/nri/system/*.h
+	common/rendering/nri/framegen/*.h
+	common/rendering/nri/renderer/*.h
 	common/scripting/core/*h
 	common/scripting/vm/*h
 	common/scripting/jit/*h
@@ -621,6 +628,13 @@ file( GLOB HEADER_FILES
 	core/models/*.h
 	core/textures/formats/*.h
 	core/vmstubs.cpp
+)
+
+file(GLOB NRI_SHADER_FILES
+	common/rendering/nri/shaders/*.cfg
+	common/rendering/nri/shaders/*.hlsl
+	common/rendering/nri/shaders/*.hlsli
+	common/rendering/nri/shaders/Include/*.hlsli
 )
 
 
@@ -903,6 +917,34 @@ set (VULKAN_SOURCES
 	common/rendering/vulkan/textures/vk_framebuffer.cpp
 )
 
+set (NRI_SOURCES
+	common/rendering/nri/system/nri_renderdevice.cpp
+	common/rendering/nri/system/nri_hwbuffer.cpp
+	common/rendering/nri/system/nri_hwtexture.cpp
+	common/rendering/nri/framegen/nri_framegen.cpp
+	common/rendering/nri/renderer/nri_nrd.cpp
+	common/rendering/nri/renderer/nri_renderstate.cpp
+	common/rendering/nri/renderer/nri_resources.cpp
+	common/rendering/nri/renderer/nri_renderer.cpp
+	common/rendering/nri/renderer/nri_scene_lights.cpp
+	common/rendering/nri/renderer/nri_upscaler.cpp
+	common/rendering/nri/scene/nri_map_world.cpp
+	common/rendering/nri/scene/nri_map_builder.cpp
+	common/rendering/nri/scene/nri_texture_signature.cpp
+	common/rendering/nri/scene/nri_scene_bridge.cpp
+	common/rendering/nri/scene/nri_portal_bridge.cpp
+	common/rendering/nri/scene/nri_geometry_bridge.cpp
+	common/rendering/nri/scene/nri_material_bridge.cpp
+	../libraries/ShaderMake/ShaderMake/ShaderBlob.cpp
+	../libraries/NRD/Source/Wrapper.cpp
+	../libraries/NRD/Source/InstanceImpl.cpp
+	../libraries/NRD/Source/Reblur.cpp
+	../libraries/NRD/Source/Relax.cpp
+	../libraries/NRD/Source/Sigma.cpp
+	../libraries/NRD/Source/Reference.cpp
+	../libraries/NRD/Source/Timer.cpp
+)
+
 if (HAVE_GLES2)
 	set (GLES_SOURCES
 		common/rendering/gles/gles_system.cpp
@@ -961,6 +1003,8 @@ set (PCH_SOURCES
 	core/gamefuncs.cpp
 	core/gameinput.cpp
 	core/g_mapinfo.cpp
+	core/lightoverlay.cpp
+	core/lightoverlay_editor.cpp
 	core/interpolate.cpp
 	core/inputstate.cpp
 	core/maphack.cpp
@@ -1246,6 +1290,10 @@ else()
 	set( NOT_COMPILED_SOURCE_FILES ${NOT_COMPILED_SOURCE_FILES} ${VM_JIT_SOURCES} )
 endif()
 
+if (HAVE_NRI)
+	set( PCH_SOURCES ${PCH_SOURCES} ${NRI_SOURCES} )
+endif()
+
 set( GAME_SOURCES
 	${HEADER_FILES}
 	${NOT_COMPILED_SOURCE_FILES}
@@ -1306,6 +1354,153 @@ list( REMOVE_ITEM GAME_NONPCH_SOURCES ${PCH_SOURCES} )
 
 add_executable( ${PROJECT_NAME} WIN32 MACOSX_BUNDLE ${GAME_SOURCES} )
 
+if (HAVE_NRI)
+	add_compile_definitions(
+		NRD_NORMAL_ENCODING=2
+		NRD_ROUGHNESS_ENCODING=1
+		NRD_SUPPORTS_VIEWPORT_OFFSET=0
+		NRD_SUPPORTS_CHECKERBOARD=0
+		NRD_SUPPORTS_HISTORY_CONFIDENCE=0
+		NRD_SUPPORTS_DISOCCLUSION_THRESHOLD_MIX=0
+		NRD_SUPPORTS_BASECOLOR_METALNESS=1
+		NRD_SUPPORTS_ANTIFIREFLY=0
+		REBLUR_PERFORMANCE_MODE=0
+		NRD_EMBEDS_DXBC_SHADERS=1
+		NRD_EMBEDS_DXIL_SHADERS=1
+		NRD_EMBEDS_SPIRV_SHADERS=1
+		SPIRV_SREG_OFFSET=0
+		SPIRV_BREG_OFFSET=2
+		SPIRV_UREG_OFFSET=3
+		SPIRV_TREG_OFFSET=20
+	)
+endif()
+
+if (HAVE_NRI)
+	set(RAZE_NRI_SHADER_OUTPUT_DIR "${COMPILE_OUTPUT_DIRECTORY}/shaders/nri")
+	if (DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/Bin/dxc.exe")
+		set(RAZE_DXC_EXECUTABLE "$ENV{VULKAN_SDK}/Bin/dxc.exe" CACHE FILEPATH "DXC executable used for NRI shader compilation." FORCE)
+	elseif (DEFINED ENV{VULKAN_SDK} AND EXISTS "$ENV{VULKAN_SDK}/Bin32/dxc.exe")
+		set(RAZE_DXC_EXECUTABLE "$ENV{VULKAN_SDK}/Bin32/dxc.exe" CACHE FILEPATH "DXC executable used for NRI shader compilation." FORCE)
+	else()
+		find_program(RAZE_DXC_EXECUTABLE NAMES dxc REQUIRED)
+	endif()
+	set(RAZE_NRI_COMMON_SHADER_ARGS
+		-HV 2021
+		-Wno-for-redefinition
+		-I "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders"
+		-I "${CMAKE_SOURCE_DIR}/libraries/NRD/Shaders"
+		-I "${CMAKE_SOURCE_DIR}/libraries/NRIFramework/External/NRI/Include")
+	add_custom_command(
+		OUTPUT
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceTransparent.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceTransparent.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/RawPresent.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/RawPresent.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/FinalPresent.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/FinalPresent.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssSrBefore.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssSrBefore.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${RAZE_NRI_SHADER_OUTPUT_DIR}"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T vs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T ps_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T vs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T ps_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_6 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceOpaque.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -fspv-extension=SPV_KHR_ray_query -T cs_6_6 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceOpaque.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Composition.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Composition.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceTransparent.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceTransparent.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceTransparent.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceTransparent.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Taa.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Taa.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/RawPresent.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/RawPresent.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/RawPresent.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/RawPresent.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/FinalPresent.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/FinalPresent.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/FinalPresent.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/FinalPresent.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssSrBefore.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssSrBefore.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssSrBefore.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssSrBefore.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssBefore.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssBefore.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssAfter.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssAfter.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
+		DEPENDS
+			${NRI_SHADER_FILES}
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceOpaque.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Composition.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/TraceTransparent.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Taa.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/RawPresent.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/FinalPresent.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssSrBefore.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssBefore.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssAfter.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
+		VERBATIM)
+	add_custom_target(raze_nri_shaders ALL
+		DEPENDS
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceOpaque.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Composition.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceTransparent.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/TraceTransparent.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Taa.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/RawPresent.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/RawPresent.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/FinalPresent.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/FinalPresent.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssSrBefore.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssSrBefore.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssBefore.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv"
+		SOURCES ${NRI_SHADER_FILES}
+		VERBATIM)
+	set_target_properties(raze_nri_shaders PROPERTIES FOLDER "Shaders")
+	add_dependencies(${PROJECT_NAME} raze_nri_shaders)
+endif()
+
+get_property(_raze_pk3_targets GLOBAL PROPERTY RAZE_PK3_TARGETS)
+if(_raze_pk3_targets)
+	add_dependencies(${PROJECT_NAME} ${_raze_pk3_targets})
+	get_property(_raze_pk3_files GLOBAL PROPERTY RAZE_PK3_FILES)
+	foreach(_pk3 ${_raze_pk3_files})
+		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				"${COMPILE_OUTPUT_DIRECTORY}/${_pk3}"
+				"$<TARGET_FILE_DIR:${PROJECT_NAME}>/${_pk3}"
+			COMMENT "Copying ${_pk3} to runtime output directory")
+	endforeach()
+endif()
+
 target_precompile_headers( ${PROJECT_NAME} PRIVATE g_pch.h )
 
 #set_source_files_properties( ${FASTMATH_SOURCES} PROPERTIES COMPILE_FLAGS ${DEM_FASTMATH_FLAG} )
@@ -1327,6 +1522,124 @@ if( UNIX )
 endif()
 
 target_link_libraries( ${PROJECT_NAME} ${PROJECT_LIBRARIES} ${ZMUSIC_LIBRARIES} lzma )
+
+if( WIN32 )
+	function( raze_stage_runtime_artifacts target_name source_dir label )
+		if( EXISTS "${source_dir}" )
+			file(GLOB _runtime_files LIST_DIRECTORIES FALSE "${source_dir}/*.dll" "${source_dir}/*.pdb")
+			if( _runtime_files )
+				foreach(_runtime_file IN LISTS _runtime_files)
+					add_custom_command(TARGET ${target_name} POST_BUILD
+						COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_runtime_file}" "$<TARGET_FILE_DIR:${target_name}>"
+						COMMENT "Copying ${label} ${_runtime_file}" VERBATIM)
+				endforeach()
+			else()
+				message(STATUS "No ${label} files found under ${source_dir}; skipping copy step.")
+			endif()
+		else()
+			message(STATUS "${label} directory ${source_dir} not found; skipping copy step.")
+		endif()
+	endfunction()
+
+	function( raze_stage_runtime_file target_name runtime_file label )
+		if( EXISTS "${runtime_file}" )
+			add_custom_command(TARGET ${target_name} POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different "${runtime_file}" "$<TARGET_FILE_DIR:${target_name}>"
+				COMMENT "Copying ${label} ${runtime_file}" VERBATIM)
+		endif()
+	endfunction()
+
+	set( RAZE_RUNTIME_DLL_DIR "${CMAKE_SOURCE_DIR}/bin/windows/runtime-deps" CACHE PATH "Directory containing prebaked runtime DLLs to stage beside raze.exe." )
+	raze_stage_runtime_artifacts(${PROJECT_NAME} "${RAZE_RUNTIME_DLL_DIR}" "runtime dependency")
+	if( NOT EXISTS "${RAZE_RUNTIME_DLL_DIR}" )
+		message(STATUS "Visual Studio debugging may require running auto-setup-windows.cmd first so ${RAZE_RUNTIME_DLL_DIR} is populated.")
+	endif()
+
+	set( _raze_zmusic_runtime_dir "" )
+	foreach(_zmusic_lib IN LISTS ZMUSIC_LIBRARIES)
+		if( IS_ABSOLUTE "${_zmusic_lib}" AND EXISTS "${_zmusic_lib}" )
+			get_filename_component(_zmusic_lib_ext "${_zmusic_lib}" EXT)
+			if( _zmusic_lib_ext STREQUAL ".lib" )
+				get_filename_component(_zmusic_candidate_dir "${_zmusic_lib}" DIRECTORY)
+				if( EXISTS "${_zmusic_candidate_dir}/zmusiclite.dll" )
+					set( _raze_zmusic_runtime_dir "${_zmusic_candidate_dir}" )
+					break()
+				endif()
+			endif()
+		endif()
+	endforeach()
+	if( _raze_zmusic_runtime_dir )
+		if( NOT "${_raze_zmusic_runtime_dir}" STREQUAL "${RAZE_RUNTIME_DLL_DIR}" )
+			raze_stage_runtime_artifacts(${PROJECT_NAME} "${_raze_zmusic_runtime_dir}" "ZMusic runtime dependency")
+		endif()
+	else()
+		message(STATUS "Could not infer a ZMusic runtime directory from ZMUSIC_LIBRARIES; automatic zmusiclite.dll staging is disabled for this configure.")
+	endif()
+
+	if( DYN_OPENAL AND NOT NO_OPENAL )
+		set( _raze_openal_dll_candidates
+			"${CMAKE_SOURCE_DIR}/bin/windows/runtime-deps/OpenAL32.dll"
+			"${VCPKG_INSTALLED_DIR}/x64-windows/bin/OpenAL32.dll"
+			"${_VCPKG_INSTALLED_DIR}/x64-windows/bin/OpenAL32.dll"
+			"${Z_VCPKG_ROOT_DIR}/packages/openal-soft_x64-windows/bin/OpenAL32.dll"
+			"${CMAKE_SOURCE_DIR}/build/vcpkg/packages/openal-soft_x64-windows/bin/OpenAL32.dll"
+		)
+		set( _raze_openal_pdb_candidates
+			"${CMAKE_SOURCE_DIR}/bin/windows/runtime-deps/OpenAL32.pdb"
+			"${VCPKG_INSTALLED_DIR}/x64-windows/bin/OpenAL32.pdb"
+			"${_VCPKG_INSTALLED_DIR}/x64-windows/bin/OpenAL32.pdb"
+			"${Z_VCPKG_ROOT_DIR}/packages/openal-soft_x64-windows/bin/OpenAL32.pdb"
+			"${CMAKE_SOURCE_DIR}/build/vcpkg/packages/openal-soft_x64-windows/bin/OpenAL32.pdb"
+		)
+
+		set( _raze_openal_dll_found FALSE )
+		foreach(_openal_candidate IN LISTS _raze_openal_dll_candidates)
+			if( EXISTS "${_openal_candidate}" )
+				raze_stage_runtime_file(${PROJECT_NAME} "${_openal_candidate}" "OpenAL runtime dependency")
+				set( _raze_openal_dll_found TRUE )
+				break()
+			endif()
+		endforeach()
+
+		foreach(_openal_candidate IN LISTS _raze_openal_pdb_candidates)
+			if( EXISTS "${_openal_candidate}" )
+				raze_stage_runtime_file(${PROJECT_NAME} "${_openal_candidate}" "OpenAL runtime dependency")
+				break()
+			endif()
+		endforeach()
+
+		if( NOT _raze_openal_dll_found )
+			message(STATUS "Could not locate OpenAL32.dll for dynamic audio; runtime sound init may fall back to nosound.")
+		endif()
+	endif()
+
+	if( HAVE_NRI )
+		set( RAZE_NRI_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../NRD-Sample/_Bin/Release" CACHE PATH "Directory containing NRI/NRD runtime DLLs to stage beside raze.exe." )
+		if( EXISTS "${RAZE_NRI_RUNTIME_DIR}" )
+			file(GLOB RAZE_NRI_RUNTIME_DLLS LIST_DIRECTORIES FALSE "${RAZE_NRI_RUNTIME_DIR}/*.dll" )
+			if( RAZE_NRI_RUNTIME_DLLS )
+				foreach(_dll IN LISTS RAZE_NRI_RUNTIME_DLLS)
+					add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+						COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+						COMMENT "Copying NRI runtime dependency ${_dll}" VERBATIM)
+				endforeach()
+			else()
+				message(STATUS "No NRI runtime DLLs found under ${RAZE_NRI_RUNTIME_DIR}; Visual Studio debugging may require staging NRI/NRD runtimes manually.")
+			endif()
+
+			set( RAZE_NRI_AGILITY_RUNTIME_DIR "${RAZE_NRI_RUNTIME_DIR}/AgilitySDK" )
+			if( EXISTS "${RAZE_NRI_AGILITY_RUNTIME_DIR}" )
+				add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+					COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${RAZE_NRI_AGILITY_RUNTIME_DIR}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/AgilitySDK"
+					COMMENT "Copying NRI AgilitySDK runtime ${RAZE_NRI_AGILITY_RUNTIME_DIR}" VERBATIM)
+			else()
+				message(STATUS "NRI AgilitySDK directory ${RAZE_NRI_AGILITY_RUNTIME_DIR} not found; D3D12 backend initialization may fail without it.")
+			endif()
+		else()
+			message(STATUS "NRI runtime dependency directory ${RAZE_NRI_RUNTIME_DIR} not found; skipping NRI DLL copy step.")
+		endif()
+	endif()
+endif()
 
 include_directories(
 	BEFORE
@@ -1387,6 +1700,12 @@ include_directories(
 	common/scripting/backend
 	launcher
 	../libraries/ZVulkan/include
+	../libraries/NRIFramework/External/NRI/Include
+	../libraries/NRIFramework/External/MathLib
+	../libraries/ShaderMake
+	../libraries/NRD/Include
+	../libraries/NRD/Integration
+	../libraries/NRD/_Shaders
 	../libraries/ZWidget/include
 	../libraries/webp/include
 	${SYSTEM_SOURCES_DIR}
@@ -1556,6 +1875,10 @@ source_group("Common\\Rendering\\Hardware Renderer\\Postprocessing" REGULAR_EXPR
 source_group("Common\\Rendering\\OpenGL Loader" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/gl_load/.+")
 source_group("Common\\Rendering\\OpenGL Backend" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/gl/.+")
 source_group("Common\\Rendering\\GLES Backend" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/gles/.+")
+source_group("Common\\Rendering\\NRI Renderer\\System" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/system/.+")
+source_group("Common\\Rendering\\NRI Renderer\\Framegen" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/framegen/.+")
+source_group("Common\\Rendering\\NRI Renderer\\Renderer" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/renderer/.+")
+source_group("Common\\Rendering\\NRI Renderer\\Shaders" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/.+")
 source_group("Common\\Rendering\\Vulkan Renderer\\System" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/vulkan/system/.+")
 source_group("Common\\Rendering\\Vulkan Renderer\\Renderer" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/vulkan/renderer/.+")
 source_group("Common\\Rendering\\Vulkan Renderer\\Shaders" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/vulkan/shaders/.+")

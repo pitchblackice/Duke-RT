@@ -33,8 +33,10 @@
 */
 
 #include "build.h"
+#include "c_dispatch.h"
 #include "coreactor.h"
 #include "gamefuncs.h"
+#include "printf.h"
 #include "raze_sound.h"
 #include "vm.h"
 #include "texturemanager.h"
@@ -516,6 +518,201 @@ void SetActorZ(DCoreActor* actor, const DVector3& newpos)
 		ChangeActorSect(actor, tempsector);
 }
 
+namespace
+{
+	constexpr int kDefaultListActorsLimit = 64;
+
+	int ClampListActorsLimit(int value)
+	{
+		return clamp(value, 1, 4096);
+	}
+
+	bool TryParseInteger(const char* text, int& outValue)
+	{
+		if (text == nullptr || *text == '\0')
+		{
+			return false;
+		}
+
+		char* end = nullptr;
+		const long parsed = strtol(text, &end, 10);
+		if (end == text || *end != '\0')
+		{
+			return false;
+		}
+
+		outValue = (int)parsed;
+		return true;
+	}
+
+	bool TryParseActorListLimit(const char* text, int& outLimit)
+	{
+		int parsed = 0;
+		if (!TryParseInteger(text, parsed))
+		{
+			return false;
+		}
+
+		outLimit = ClampListActorsLimit(parsed);
+		return true;
+	}
+
+	void PrintActorListHeader(const char* name, const char* filterText, int limit)
+	{
+		Printf("%s: filter=%s limit=%d\n", name, filterText != nullptr ? filterText : "(none)", limit);
+	}
+
+	void PrintActorListEntry(const DCoreActor* actor)
+	{
+		const char* className = actor->GetClass() != nullptr ? actor->GetClass()->TypeName.GetChars() : "(null)";
+		Printf("actor %d: class=%s stat=%d sector=%d type=%d pal=%d cstat=0x%x pos=(%.2f, %.2f, %.2f)\n",
+			actor->GetIndex(),
+			className,
+			(int)actor->spr.statnum,
+			actor->sectno(),
+			(int)actor->spr.type,
+			(int)actor->spr.pal,
+			(unsigned int)actor->spr.cstat,
+			actor->spr.pos.X,
+			actor->spr.pos.Y,
+			actor->spr.pos.Z);
+	}
+}
+
+CCMD(listactors)
+{
+	PClassActor* classFilter = nullptr;
+	const char* filterText = "(all)";
+	int limit = kDefaultListActorsLimit;
+
+	if (argv.argc() > 3)
+	{
+		Printf("usage: listactors [class|limit] [limit]\n");
+		return;
+	}
+
+	if (argv.argc() >= 2)
+	{
+		if (!TryParseActorListLimit(argv[1], limit))
+		{
+			classFilter = PClass::FindActor(argv[1]);
+			if (classFilter == nullptr)
+			{
+				Printf("listactors: unknown actor class '%s'\n", argv[1]);
+				return;
+			}
+			filterText = classFilter->TypeName.GetChars();
+		}
+	}
+
+	if (argv.argc() == 3)
+	{
+		if (!TryParseActorListLimit(argv[2], limit))
+		{
+			Printf("listactors: invalid limit '%s'\n", argv[2]);
+			return;
+		}
+	}
+
+	PrintActorListHeader("listactors", filterText, limit);
+
+	int totalMatches = 0;
+	int printed = 0;
+	TSpriteIterator<DCoreActor> it;
+	while (auto actor = it.Next())
+	{
+		if (actor == nullptr ||
+			!actor->exists() ||
+			(actor->ObjectFlags & OF_EuthanizeMe) != 0)
+		{
+			continue;
+		}
+
+		if (classFilter != nullptr)
+		{
+			auto actorClass = actor->GetClass();
+			if (actorClass == nullptr ||
+				(actorClass != classFilter && !actorClass->IsDescendantOf(classFilter)))
+			{
+				continue;
+			}
+		}
+
+		totalMatches++;
+		if (printed < limit)
+		{
+			PrintActorListEntry(actor);
+			printed++;
+		}
+	}
+
+	Printf("listactors: matched=%d printed=%d%s\n",
+		totalMatches,
+		printed,
+		totalMatches > printed ? " truncated=yes" : "");
+}
+
+CCMD(listactors_stat)
+{
+	if (argv.argc() < 2 || argv.argc() > 3)
+	{
+		Printf("usage: listactors_stat <statnum> [limit]\n");
+		return;
+	}
+
+	int statFilter = 0;
+	if (!TryParseInteger(argv[1], statFilter))
+	{
+		Printf("listactors_stat: invalid statnum '%s'\n", argv[1]);
+		return;
+	}
+
+	const int requestedStat = statFilter;
+	const int maxStat = MAXSTATUS - 1;
+	if (requestedStat < 0 || requestedStat > maxStat)
+	{
+		Printf("listactors_stat: statnum must be in range 0..%d\n", maxStat);
+		return;
+	}
+
+	int limit = kDefaultListActorsLimit;
+	if (argv.argc() == 3 && !TryParseActorListLimit(argv[2], limit))
+	{
+		Printf("listactors_stat: invalid limit '%s'\n", argv[2]);
+		return;
+	}
+
+	FString filterText;
+	filterText.Format("stat=%d", requestedStat);
+	PrintActorListHeader("listactors_stat", filterText.GetChars(), limit);
+
+	int totalMatches = 0;
+	int printed = 0;
+	TSpriteIterator<DCoreActor> it;
+	while (auto actor = it.Next())
+	{
+		if (actor == nullptr ||
+			!actor->exists() ||
+			(actor->ObjectFlags & OF_EuthanizeMe) != 0 ||
+			(int)actor->spr.statnum != requestedStat)
+		{
+			continue;
+		}
+
+		totalMatches++;
+		if (printed < limit)
+		{
+			PrintActorListEntry(actor);
+			printed++;
+		}
+	}
+
+	Printf("listactors_stat: matched=%d printed=%d%s\n",
+		totalMatches,
+		printed,
+		totalMatches > printed ? " truncated=yes" : "");
+}
+
 
 IMPLEMENT_CLASS(DCoreActor, false, false)
 
@@ -537,4 +734,3 @@ double DCoreActor::GetOffsetAndHeight(double& height)
 	double zofs = (spr.cstat & CSTAT_SPRITE_YCENTER) ? height * 0.5 : 0;
 	return zofs - tex->GetDisplayTopOffset() * yscale;
 }
-

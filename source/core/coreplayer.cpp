@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 //------------------------------------------------------------------------- 
 
 #include "gameinput.h"
+#include "d_eventbase.h"
 
 
 //---------------------------------------------------------------------------
@@ -114,10 +115,18 @@ CUSTOM_CVAR(Int, cl_viewtilting, 0, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)
 
 void DCorePlayer::doPitchInput()
 {
+	const DAngle startPitch = actor->spr.Angles.Pitch;
+	const DAngle cmdPitch = cmd.ucmd.ang.Pitch;
+
 	// Add player's mouse/device input.
 	if (cmd.ucmd.ang.Pitch.Degrees())
 	{
-		actor->spr.Angles.Pitch += cmd.ucmd.ang.Pitch * gameInput.SyncInput();
+		const DAngle appliedPitch = cmd.ucmd.ang.Pitch * (pnum == myconnectindex ? cmdSyncInput : gameInput.SyncInput());
+		actor->spr.Angles.Pitch += appliedPitch;
+		if (pnum == myconnectindex)
+		{
+			PerfLoopTraceNotePlayerPitchApply((float)appliedPitch.Degrees());
+		}
 		cmd.ucmd.actions &= ~SB_CENTERVIEW;
 	}
 
@@ -154,6 +163,13 @@ void DCorePlayer::doPitchInput()
 	const auto maximum = GetMaxPitch() - ViewAngles.Pitch * (ViewAngles.Pitch < nullAngle);
 	const auto minimum = GetMinPitch() - ViewAngles.Pitch * (ViewAngles.Pitch > nullAngle);
 	actor->spr.Angles.Pitch = clamp(actor->spr.Angles.Pitch, maximum, minimum);
+	if (pnum == myconnectindex)
+	{
+		PerfLoopTraceNoteActorPitch(
+			(float)cmdPitch.Degrees(),
+			(float)(actor->spr.Angles.Pitch - startPitch).Degrees(),
+			(float)actor->spr.Angles.Pitch.Degrees());
+	}
 }
 
 
@@ -165,8 +181,16 @@ void DCorePlayer::doPitchInput()
 
 void DCorePlayer::doYawInput()
 {
+	const DAngle startYaw = actor->spr.Angles.Yaw;
+	const DAngle cmdYaw = cmd.ucmd.ang.Yaw;
+
 	// Add player's mouse/device input.
-	actor->spr.Angles.Yaw += cmd.ucmd.ang.Yaw * gameInput.SyncInput();
+	const DAngle appliedYaw = cmd.ucmd.ang.Yaw * (pnum == myconnectindex ? cmdSyncInput : gameInput.SyncInput());
+	actor->spr.Angles.Yaw += appliedYaw;
+	if (pnum == myconnectindex)
+	{
+		PerfLoopTraceNotePlayerYawApply((float)appliedYaw.Degrees());
+	}
 
 	if (cmd.ucmd.actions & SB_TURNAROUND)
 	{
@@ -190,6 +214,13 @@ void DCorePlayer::doYawInput()
 			YawSpin = nullAngle;
 		}
 		actor->spr.Angles.Yaw += add;
+	}
+	if (pnum == myconnectindex)
+	{
+		PerfLoopTraceNoteActorYaw(
+			(float)cmdYaw.Degrees(),
+			(float)deltaangle(startYaw, actor->spr.Angles.Yaw).Degrees(),
+			(float)actor->spr.Angles.Yaw.Degrees());
 	}
 }
 
@@ -317,7 +348,7 @@ void DCorePlayer::doRollInput(const bool bUnderwater)
 	else
 	{
 		// Add player's device input.
-		actor->spr.Angles.Roll += cmd.ucmd.ang.Roll * gameInput.SyncInput();
+		actor->spr.Angles.Roll += cmd.ucmd.ang.Roll * (pnum == myconnectindex ? cmdSyncInput : gameInput.SyncInput());
 	}
 }
 

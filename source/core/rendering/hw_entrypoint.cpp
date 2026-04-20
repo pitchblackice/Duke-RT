@@ -59,6 +59,28 @@ float GlobalFogDensity = 350.f;
 TArray<PortalDesc> allPortals;
 void Draw2D(F2DDrawer* drawer, FRenderState& state);
 
+static bool HasRequiredHWSceneBuffers()
+{
+	if (screen == nullptr)
+	{
+		return false;
+	}
+
+	if (screen->mVertexData != nullptr && screen->mLights != nullptr && screen->mViewpoints != nullptr)
+	{
+		if (screen->HasActiveSceneFrame())
+		{
+			return true;
+		}
+
+		Printf(TEXTCOLOR_RED "Hardware scene frame is unavailable on backend '%s'; skipping scene render.\n", screen->DeviceName());
+		return false;
+	}
+
+	Printf(TEXTCOLOR_RED "Hardware scene buffers are unavailable on backend '%s'; skipping scene render.\n", screen->DeviceName());
+	return false;
+}
+
 CVARD(Bool, hw_hightile, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "enable/disable hightile texture rendering")
 bool hw_int_useindexedcolortextures;
 CUSTOM_CVARD(Bool, hw_useindexedcolortextures, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "enable/disable indexed color texture rendering")
@@ -265,8 +287,19 @@ void RenderToSavePic(FRenderViewpoint& vp, FileWriter* file, int width, int heig
 	bounds.height = height;
 	auto& RenderState = *screen->RenderState();
 
+	if (!screen->PrepareSavePicScene(width, height))
+	{
+		return;
+	}
+
 	// we must be sure the GPU finished reading from the buffer before we fill it with new data.
 	screen->WaitForCommands(false);
+
+	if (!HasRequiredHWSceneBuffers())
+	{
+		screen->FinishSavePicScene();
+		return;
+	}
 
 	// Switch to render buffers dimensioned for the savepic
 	screen->SetSaveBuffers(true);
@@ -291,6 +324,7 @@ void RenderToSavePic(FRenderViewpoint& vp, FileWriter* file, int width, int heig
 	// Switch back the screen render buffers
 	screen->SetViewportRects(nullptr);
 	screen->SetSaveBuffers(false);
+	screen->FinishSavePicScene();
 }
 
 //===========================================================================
@@ -326,15 +360,20 @@ void render_drawrooms(DCoreActor* playersprite, const DVector3& position, sector
 	FRenderViewpoint r_viewpoint = SetupViewpoint(playersprite, position, sectindex(sect), angles, fov);
 	r_viewpoint.TicFrac = !cl_capfps ? interpfrac : 1.;
 
-	screen->mLights->Clear();
-	screen->mViewpoints->Clear();
-	screen->mVertexData->Reset();
-
 	if (writingsavepic) // hack alert! The save code should not go through render_drawrooms, but we can only clean up the game side when Polymost is gone for good.
 	{
 		RenderToSavePic(r_viewpoint, savefile, savewidth, saveheight);
 		return;
 	}
+
+	if (!HasRequiredHWSceneBuffers())
+	{
+		return;
+	}
+
+	screen->mLights->Clear();
+	screen->mViewpoints->Clear();
+	screen->mVertexData->Reset();
 
 	// Shader start time does not need to be handled per level. Just use the one from the camera to render from.
 	auto RenderState = screen->RenderState();

@@ -17,12 +17,14 @@ class OpenGLFrameBuffer : public SystemGLFrameBuffer
 	typedef SystemGLFrameBuffer Super;
 
 	void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect &)> renderFunc) override;
+	void RenderTextureView(FGameTexture* tex, std::function<void(IntRect&)> renderFunc) override;
 
 public:
 
 	OpenGLFrameBuffer(void *hMonitor, bool fullscreen) ;
 	~OpenGLFrameBuffer();
 	int Backend() override { return 2; }
+	bool SupportsQueued2DTextureRenders() const override { return true; }
 	bool CompileNextShader() override;
 	void InitializeState() override;
 	void Update() override;

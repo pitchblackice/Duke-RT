@@ -97,16 +97,9 @@ function( add_pk3 PK3_NAME PK3_DIR )
 	# Generate target name. Just use "pk3" for main pk3 target.
 	string( REPLACE "." "_" PK3_TARGET ${PK3_NAME} )
 
-	if( NOT COMPILE_OUTPUT_OLDSTYLE )
-		add_custom_command( OUTPUT ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME}
-			COMMAND zipdir -udf ${PK3_ZIPDIR_OPTIONS} ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME} ${PK3_DIR}
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME} $<TARGET_FILE_DIR:${PROJECT_NAME}>/${PK3_NAME}
-			DEPENDS zipdir )
-	else()
-		add_custom_command( OUTPUT ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME}
-			COMMAND zipdir -udf ${PK3_ZIPDIR_OPTIONS} ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME} ${PK3_DIR}
-			DEPENDS zipdir )
-	endif()
+	add_custom_command( OUTPUT ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME}
+		COMMAND zipdir -udf ${PK3_ZIPDIR_OPTIONS} ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME} ${PK3_DIR}
+		DEPENDS zipdir )
 	# Create a list of source files for this PK3, for use in the IDE
 	# Phase 1: Create a list of all source files for this PK3 archive, except
 	#  for a couple of strife image file names that confuse CMake.
@@ -132,6 +125,8 @@ function( add_pk3 PK3_NAME PK3_DIR )
 		COMMAND ${CMAKE_COMMAND} -E touch $<TARGET_FILE:zipdir>
 		DEPENDS ${COMPILE_OUTPUT_DIRECTORY}/${PK3_NAME}
 		SOURCES ${PK3_SRCS})
+	set_property(GLOBAL APPEND PROPERTY RAZE_PK3_TARGETS ${PK3_TARGET})
+	set_property(GLOBAL APPEND PROPERTY RAZE_PK3_FILES ${PK3_NAME})
 	# Phase 3: Assign source files to a nice folder structure in the IDE
 	assort_pk3_source_folder("Source Files" ${PK3_DIR})
 	# Phase 4: Add the resulting PK3 to the install target.
@@ -236,6 +231,16 @@ endif()
 
 option (HAVE_VULKAN "Enable Vulkan support" ON)
 option (HAVE_GLES2 "Enable GLES2 support" ON)
+if (WIN32)
+	set(_raze_have_nri_default ON)
+else()
+	set(_raze_have_nri_default OFF)
+endif()
+option (HAVE_NRI "Enable the NRI backend shell" ${_raze_have_nri_default})
+set(RAZE_NRIFRAMEWORK_DIR "${CMAKE_SOURCE_DIR}/libraries/NRIFramework" CACHE PATH "Path to the vendored NRIFramework checkout.")
+set(RAZE_NRD_DIR "${CMAKE_SOURCE_DIR}/libraries/NRD" CACHE PATH "Path to the vendored NRD checkout.")
+set(RAZE_SHARC_DIR "${CMAKE_SOURCE_DIR}/libraries/SHARC" CACHE PATH "Path to the vendored SHARC checkout.")
+set(RAZE_SHADERMAKE_DIR "${CMAKE_SOURCE_DIR}/libraries/ShaderMake" CACHE PATH "Path to the vendored ShaderMake checkout.")
 
 # no, we're not using external asmjit for now, we made too many modifications to our's.
 # if the asmjit author uses our changes then we'll update this.
@@ -260,6 +265,10 @@ if( MSVC )
 
 	if ( HAVE_GLES2 )
 		set( ALL_C_FLAGS "${ALL_C_FLAGS} /DHAVE_GLES2" )
+	endif()
+
+	if ( HAVE_NRI )
+		set( ALL_C_FLAGS "${ALL_C_FLAGS} /DHAVE_NRI" )
 	endif()
 
 	# Use SSE 2 as minimum always as the true color drawers needs it for __vectorcall
@@ -317,6 +326,10 @@ else()
 
 	if ( HAVE_GLES2 )
 		set( ALL_C_FLAGS "${ALL_C_FLAGS} -DHAVE_GLES2" )
+	endif()
+
+	if ( HAVE_NRI )
+		set( ALL_C_FLAGS "${ALL_C_FLAGS} -DHAVE_NRI" )
 	endif()
 
 	if ( UNIX )

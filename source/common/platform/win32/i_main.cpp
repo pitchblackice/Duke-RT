@@ -44,6 +44,11 @@
 #include <processenv.h>
 #include <shellapi.h>
 #include <VersionHelpers.h>
+#include <cstdint>
+
+#if defined(HAVE_NRI)
+#include "NRIAgilitySDK.h"
+#endif
 
 #ifdef _MSC_VER
 #pragma warning(disable:4244)

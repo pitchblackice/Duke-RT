@@ -59,6 +59,7 @@
 #include "render.h"
 #include "hw_sections.h"
 #include "sectorgeometry.h"
+#include "../common/rendering/nri/scene/nri_map_builder.h"
 #include "d_net.h"
 #include "i_protocol.h"
 #include "ns.h"
@@ -720,6 +721,7 @@ void SerializeMap(FSerializer& arc)
 		setWallSectors();
 		hw_CreateSections();
 		sectionGeometry.SetSize(sections.Size());
+		nri_scene::NotifyLevelGeometryReady();
 	}
 }
 
@@ -750,9 +752,11 @@ CUSTOM_CVAR(Int, quicksavecount, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 void DoLoadGame(const char* name)
 {
-	gi->FreeLevelData();
+	const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::SaveGameLoad);
+	G_CompleteLevelUnload(transition);
 	if (ReadSavegame(name))
 	{
+		G_NotifyLevelLoadBegin(transition);
 		gameaction = ga_level;
 	}
 	else
@@ -953,5 +957,3 @@ UNSAFE_CCMD(save)
 	FString fname = G_BuildSaveName(argv[1]);
 	G_SaveGame(fname.GetChars(), argv.argc() > 2 ? argv[2] : argv[1]);
 }
-
-

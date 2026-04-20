@@ -64,6 +64,15 @@
 #include "hwrenderer/data/buffers.h"
 #include "version.h"
 
+namespace
+{
+	static bool IsUsableSkyFace(FGameTexture* texture)
+	{
+		const intptr_t value = (intptr_t)texture;
+		return value > 0x10000 && value != -1;
+	}
+}
+
 //-----------------------------------------------------------------------------
 //
 // Shamelessly lifted from Doomsday (written by Jaakko Keränen)
@@ -525,6 +534,12 @@ void FSkyVertexBuffer::RenderDome(FRenderState& state, FGameTexture* tex, float 
 void FSkyVertexBuffer::RenderBox(FRenderState& state, FSkyBox* tex, float x_offset, bool sky2, float stretch, const FVector3& skyrotatevector, const FVector3& skyrotatevector2, PalEntry color)
 {
 	int faces;
+	FGameTexture* skyFaces[6] = {};
+	for (int i = 0; i < 6; ++i)
+	{
+		FGameTexture* face = tex != nullptr ? tex->GetSkyFace(i) : nullptr;
+		skyFaces[i] = IsUsableSkyFace(face) ? face : nullptr;
+	}
 
 	state.SetObjectColor(color);
 	state.EnableModelMatrix(true);
@@ -536,42 +551,62 @@ void FSkyVertexBuffer::RenderBox(FRenderState& state, FSkyBox* tex, float x_offs
 	else
 		state.mModelMatrix.rotate(-180.0f + x_offset, skyrotatevector2.X, skyrotatevector2.Z, skyrotatevector2.Y);
 
-	if (tex->GetSkyFace(5))
+	if (skyFaces[5] != nullptr)
 	{
 		faces = 4;
 
 		// north
-		state.SetMaterial(tex->GetSkyFace(0), UF_Texture, 0, CLAMP_XY, 0, -1);
-		state.Draw(DT_TriangleStrip, FaceStart(0), 4);
+		if (skyFaces[0] != nullptr)
+		{
+			state.SetMaterial(skyFaces[0], UF_Texture, 0, CLAMP_XY, 0, -1);
+			state.Draw(DT_TriangleStrip, FaceStart(0), 4);
+		}
 
 		// east
-		state.SetMaterial(tex->GetSkyFace(1), UF_Texture, 0, CLAMP_XY, 0, -1);
-		state.Draw(DT_TriangleStrip, FaceStart(1), 4);
+		if (skyFaces[1] != nullptr)
+		{
+			state.SetMaterial(skyFaces[1], UF_Texture, 0, CLAMP_XY, 0, -1);
+			state.Draw(DT_TriangleStrip, FaceStart(1), 4);
+		}
 
 		// south
-		state.SetMaterial(tex->GetSkyFace(2), UF_Texture, 0, CLAMP_XY, 0, -1);
-		state.Draw(DT_TriangleStrip, FaceStart(2), 4);
+		if (skyFaces[2] != nullptr)
+		{
+			state.SetMaterial(skyFaces[2], UF_Texture, 0, CLAMP_XY, 0, -1);
+			state.Draw(DT_TriangleStrip, FaceStart(2), 4);
+		}
 
 		// west
-		state.SetMaterial(tex->GetSkyFace(3), UF_Texture, 0, CLAMP_XY, 0, -1);
-		state.Draw(DT_TriangleStrip, FaceStart(3), 4);
+		if (skyFaces[3] != nullptr)
+		{
+			state.SetMaterial(skyFaces[3], UF_Texture, 0, CLAMP_XY, 0, -1);
+			state.Draw(DT_TriangleStrip, FaceStart(3), 4);
+		}
 	}
 	else
 	{
 		faces = 1;
-		state.SetMaterial(tex->GetSkyFace(0), UF_Texture, 0, CLAMP_XY, 0, -1);
-		state.Draw(DT_TriangleStrip, FaceStart(-1), 10);
+		if (skyFaces[0] != nullptr)
+		{
+			state.SetMaterial(skyFaces[0], UF_Texture, 0, CLAMP_XY, 0, -1);
+			state.Draw(DT_TriangleStrip, FaceStart(-1), 10);
+		}
 	}
 
 	// top
-	state.SetMaterial(tex->GetSkyFace(faces), UF_Texture, 0, CLAMP_XY, 0, -1);
-	state.Draw(DT_TriangleStrip, FaceStart(tex->GetSkyFlip() ? 6 : 5), 4);
+	if (skyFaces[faces] != nullptr)
+	{
+		state.SetMaterial(skyFaces[faces], UF_Texture, 0, CLAMP_XY, 0, -1);
+		state.Draw(DT_TriangleStrip, FaceStart(tex->GetSkyFlip() ? 6 : 5), 4);
+	}
 
 	// bottom
-	state.SetMaterial(tex->GetSkyFace(faces + 1), UF_Texture, 0, CLAMP_XY, 0, -1);
-	state.Draw(DT_TriangleStrip, FaceStart(4), 4);
+	if (skyFaces[faces + 1] != nullptr)
+	{
+		state.SetMaterial(skyFaces[faces + 1], UF_Texture, 0, CLAMP_XY, 0, -1);
+		state.Draw(DT_TriangleStrip, FaceStart(4), 4);
+	}
 
 	state.EnableModelMatrix(false);
 	state.SetObjectColor(0xffffffff);
 }
-

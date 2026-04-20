@@ -73,6 +73,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "gi.h"
 #include "vm.h"
 #include "g_mapinfo.h"
+#include "lightoverlay.h"
 #include "gamefuncs.h"
 #include "hw_voxels.h"
 #include "hw_palmanager.h"
@@ -217,6 +218,7 @@ bool System_DispatchEvent(event_t* ev)
 {
 	if (ev->type == EV_Mouse && !System_WantGuiCapture())
 	{
+		PerfLoopTraceNoteMouseDispatch(ev->x, ev->y);
 		gameInput.MouseAddToPos(ev->x, ev->y);
 		return true;
 	}
@@ -1161,6 +1163,7 @@ int RunGame()
 	StartWindow->Progress();
 	G_ParseMapInfo();
 	ParseGLDefs();
+	ParseLightOverlays();
 	ReplaceMusics(true);
 	CreateStatusBar();
 	SetDefaultMenuColors();

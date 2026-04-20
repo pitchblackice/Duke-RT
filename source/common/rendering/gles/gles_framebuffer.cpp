@@ -218,6 +218,26 @@ void OpenGLFrameBuffer::RenderTextureView(FCanvasTexture* tex, std::function<voi
 	static_cast<OpenGLFrameBuffer*>(screen)->camtexcount++;
 }
 
+void OpenGLFrameBuffer::RenderTextureView(FGameTexture* tex, std::function<void(IntRect&)> renderFunc)
+{
+	if (tex == nullptr || tex->GetTexture() == nullptr)
+	{
+		return;
+	}
+
+	FTexture* source = tex->GetTexture();
+	GLRenderer->StartOffscreen();
+	GLRenderer->BindToFrameBuffer(source);
+
+	IntRect bounds;
+	bounds.left = bounds.top = 0;
+	bounds.width = FHardwareTexture::GetTexDimension(source->GetWidth());
+	bounds.height = FHardwareTexture::GetTexDimension(source->GetHeight());
+
+	renderFunc(bounds);
+	GLRenderer->EndOffscreen();
+}
+
 //===========================================================================
 //
 // 
@@ -439,6 +459,8 @@ void OpenGLFrameBuffer::Draw2D()
 {
 	if (GLRenderer != nullptr)
 	{
+		GLRenderer->mBuffers->BindCurrentFB();
+		FlushQueued2DTextureRenders();
 		GLRenderer->mBuffers->BindCurrentFB();
 		::Draw2D(twod, gl_RenderState);
 	}

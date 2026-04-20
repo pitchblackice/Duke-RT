@@ -69,6 +69,7 @@ void Net_ClearFifo(void);
 extern	doomcom_t		doomcom;
 
 extern	struct ticcmd_t	localcmds[LOCALCMDTICS];
+extern bool localcmdsync[LOCALCMDTICS];
 
 extern	int 			maketic;
 extern	int 			nettics[MAXNETNODES];
@@ -76,6 +77,7 @@ extern	int				netdelay[MAXNETNODES][BACKUPTICS];
 extern	int 			nodeforplayer[MAXPLAYERS];
 
 extern	ticcmd_t		netcmds[MAXPLAYERS][BACKUPTICS];
+extern bool netcmdsync[MAXPLAYERS][BACKUPTICS];
 extern	int 			ticdup;
 extern bool 			nodeingame[MAXNETNODES];				// set false as nodes leave game
 extern bool			hadlate;

@@ -226,6 +226,7 @@ void ReadTicCmd (TArrayView<uint8_t>& stream, int player, int tic)
 
 	tcmd = &netcmds[player][ticmod];
 	tcmd->consistency = ReadInt16 (stream);
+	netcmdsync[player][ticmod] = false;
 
 	start = stream.Data();
 
@@ -249,6 +250,12 @@ void ReadTicCmd (TArrayView<uint8_t>& stream, int player, int tic)
 		{
 			memset (&tcmd->ucmd, 0, sizeof(tcmd->ucmd));
 		}
+	}
+
+	if (player == myconnectindex && doomcom.remotenode == 0)
+	{
+		const int localstart = (tic * ticdup) % LOCALCMDTICS;
+		netcmdsync[player][ticmod] = localcmdsync[localstart];
 	}
 #if 0
 	if (player==consoleplayer&&tic>BACKUPTICS)

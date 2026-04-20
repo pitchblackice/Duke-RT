@@ -56,6 +56,49 @@ struct GeoEffect
 
 };
 
+struct RuntimeLinkDebugState
+{
+	bool available = false;
+	bool specialWaterSector = false;
+	int32_t playerSectorIndex = -1;
+	int32_t playerSectorLotag = 0;
+	int32_t playerSectorHitag = 0;
+	int32_t effectiveSectorLotag = 0;
+	int32_t actorSectorIndex = -1;
+	int32_t actorSectorLotag = 0;
+	int32_t actorSectorHitag = 0;
+	int32_t onWarpingSector = 0;
+	int32_t transporterHold = 0;
+	int32_t rrGeoCount = 0;
+};
+
+enum class RuntimeNightVisionMode : uint32_t
+{
+	None = 0,
+	Duke = 1,
+};
+
+struct RuntimeNightVisionState
+{
+	bool available = false;
+	RuntimeNightVisionMode mode = RuntimeNightVisionMode::None;
+	bool viewEligible = false;
+	bool enabled = false;
+	float strength01 = 0.0f;
+	float remainingSeconds = 0.0f;
+};
+
+struct RuntimeTaggedSectorDebugInfo
+{
+	bool available = false;
+	int32_t sectorIndex = -1;
+	int32_t lotag = 0;
+	int32_t hitag = 0;
+	uint32_t effectorCount = 0;
+	int32_t effectorLotags[4] = {};
+	int32_t effectorHitags[4] = {};
+};
+
 struct GameInterface
 {
 	virtual const char* Name() { return "$"; }
@@ -101,7 +144,12 @@ struct GameInterface
 	virtual void UpdateCameras(double smoothratio) {}
 	virtual void EnterPortal(DCoreActor* viewer, int type) {}
 	virtual void LeavePortal(DCoreActor* viewer, int type) {}
+	virtual void SetMirrorPlayerVisibilityCaptureOverride(bool enabled) {}
+	virtual bool GetMirrorPlayerVisibilityCaptureOverride() const { return false; }
 	virtual bool GetGeoEffect(GeoEffect* eff, sectortype* viewsector) { return false; }
+	virtual bool GetRuntimeLinkDebugState(RuntimeLinkDebugState* state) { return false; }
+	virtual bool GetNightVisionState(RuntimeNightVisionState* state) { return false; }
+	virtual bool GetRuntimeLinkDebugTaggedSectorInfo(int sectorIndex, RuntimeTaggedSectorDebugInfo* info) { return false; }
 	virtual int Voxelize(int sprnum) { return -1; }
 	virtual void AddExcludedEpisode(const FString& episode) {}
 	virtual int GetCurrentSkill() { return -1; }

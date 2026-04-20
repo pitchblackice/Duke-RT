@@ -66,6 +66,7 @@
 #include "i_time.h"
 #include "d_net.h"
 #include "gamecontrol.h"
+#include "lightoverlay_editor.h"
 #include "c_console.h"
 #include "razemenu.h"
 #include "i_system.h"
@@ -77,9 +78,10 @@
 #include "c_console.h"
 #include "uiinput.h"
 #include "v_video.h"
+#include "mapinfo.h"
+#include "gamecvars.h"
 #include "palette.h"
 #include "build.h"
-#include "mapinfo.h"
 #include "automap.h"
 #include "statusbar.h"
 #include "gamestruct.h"
@@ -91,6 +93,8 @@
 #include "texinfo.h"
 #include "texturemanager.h"
 #include "gameinput.h"
+#include "d_eventbase.h"
+#include "hw_clock.h"
 
 CVAR(Bool, vid_activeinbackground, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, r_ticstability, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -99,6 +103,7 @@ EXTERN_CVAR(Bool, cl_capfps)
 CVAR(Bool, cl_resumesavegame, true, CVAR_ARCHIVE)
 EXTERN_CVAR (Bool, vid_vsync)
 EXTERN_CVAR (Int, vid_maxfps)
+EXTERN_CVAR (Int, perf_looptraceframes)
 
 static uint64_t stabilityticduration = 0;
 static uint64_t stabilitystarttime = 0;
@@ -130,6 +135,114 @@ bool sendsave;
 FString	savedescription;
 FString	savegamefile;
 
+namespace
+{
+	struct PerfTryRunTicsTraceStats
+	{
+		bool doWait = false;
+		bool pausedReturn = false;
+		bool zeroCountReturn = false;
+		bool waitLoopReturn = false;
+		int realtics = 0;
+		int availabletics = 0;
+		int counts = 0;
+		int lowtic = 0;
+		int waitLoopIterations = 0;
+		int ticksRun = 0;
+		double durationMs = 0.0;
+	};
+
+	struct PerfDisplayTraceStats
+	{
+		bool skippedInactive = false;
+		bool levelRendered = false;
+		double beginFrameMs = 0.0;
+		double renderMs = 0.0;
+		double overlayMs = 0.0;
+		double updateMs = 0.0;
+	};
+
+	struct Perf2DProducerDelta
+	{
+		int commands = 0;
+		int vertices = 0;
+		int indices = 0;
+		double ms = 0.0;
+	};
+
+	struct Perf2DProducerTraceStats
+	{
+		bool introSkipped = false;
+		Perf2DProducerDelta fullscreenBlends;
+		Perf2DProducerDelta mapTitle;
+		Perf2DProducerDelta chat;
+		Perf2DProducerDelta console;
+		Perf2DProducerDelta menu;
+		Perf2DProducerDelta stats;
+		Perf2DProducerDelta rate;
+		Perf2DProducerDelta drawtile;
+		Perf2DProducerDelta overlays;
+		int totalCommands = 0;
+		int totalVertices = 0;
+		int totalIndices = 0;
+	};
+
+	static PerfTryRunTicsTraceStats perfTryRunTicsTraceStats;
+	static PerfDisplayTraceStats perfDisplayTraceStats;
+	static Perf2DProducerTraceStats perf2DProducerTraceStats;
+
+	struct Perf2DSnapshot
+	{
+		int commands = 0;
+		int vertices = 0;
+		int indices = 0;
+	};
+
+	static Perf2DSnapshot Capture2DSnapshot()
+	{
+		if (twod == nullptr)
+		{
+			return {};
+		}
+
+		Perf2DSnapshot snapshot;
+		snapshot.commands = twod->mData.Size();
+		snapshot.vertices = twod->mVertices.Size();
+		snapshot.indices = twod->mIndices.Size();
+		return snapshot;
+	}
+
+	template<typename Func>
+	static Perf2DProducerDelta Trace2DProducer(Func&& func)
+	{
+		const auto before = Capture2DSnapshot();
+		const double startMs = I_msTimeF();
+		func();
+		const auto after = Capture2DSnapshot();
+
+		Perf2DProducerDelta delta;
+		delta.commands = after.commands - before.commands;
+		delta.vertices = after.vertices - before.vertices;
+		delta.indices = after.indices - before.indices;
+		delta.ms = I_msTimeF() - startMs;
+		return delta;
+	}
+
+	static const char* GetGameStateName(int state)
+	{
+		switch (state)
+		{
+		case GS_STARTUP: return "startup";
+		case GS_LEVEL: return "level";
+		case GS_MENUSCREEN: return "menu";
+		case GS_FULLCONSOLE: return "console";
+		case GS_CUTSCENE: return "cutscene";
+		case GS_INTRO: return "intro";
+		default: return "unknown";
+		}
+	}
+}
+
 //==========================================================================
 //
 // 
@@ -148,6 +261,7 @@ void G_BuildTiccmd(ticcmd_t* cmd)
 	}
 	cmd->ucmd = {};
 	gameInput.getInput(&cmd->ucmd);
+	localcmdsync[maketic % LOCALCMDTICS] = gameInput.SyncInput();
 	cmd->consistency = consistency[myconnectindex][(maketic / ticdup) % BACKUPTICS];
 }
 
@@ -157,16 +271,101 @@ void G_BuildTiccmd(ticcmd_t* cmd)
 //
 //==========================================================================
 bool newGameStarted;
+static bool gPendingPathTracingLevelPreload = false;
+static uint64_t gLevelTransitionSerial = 0;
+
+static void CancelPendingPathTracingLevelPreload()
+{
+	gPendingPathTracingLevelPreload = false;
+	if (screen != nullptr)
+	{
+		screen->CancelPathTracingLevelPreload();
+	}
+}
+
+static FString GetLevelTransitionMapName(MapRecord* map)
+{
+	if (map == nullptr)
+	{
+		return FString();
+	}
+	return FString(map->LabelName());
+}
+
+LevelTransitionInfo G_BeginLevelTransition(LevelTransitionReason reason, MapRecord* newLevel)
+{
+	LevelTransitionInfo info;
+	info.reason = reason;
+	info.serial = ++gLevelTransitionSerial;
+	info.oldLevel = currentLevel;
+	info.newLevel = newLevel;
+	info.oldLevelName = GetLevelTransitionMapName(info.oldLevel);
+	info.newLevelName = GetLevelTransitionMapName(info.newLevel);
+
+	CancelPendingPathTracingLevelPreload();
+	if (screen != nullptr)
+	{
+		screen->NotifyLevelUnloadBegin(info);
+	}
+	return info;
+}
+
+void G_CompleteLevelUnload(const LevelTransitionInfo& info)
+{
+	gi->FreeLevelData();
+	if (screen != nullptr)
+	{
+		screen->NotifyLevelUnloadComplete(info);
+	}
+}
+
+void G_NotifyLevelLoadBegin(const LevelTransitionInfo& info, MapRecord* loadedLevel)
+{
+	LevelTransitionInfo loadInfo = info;
+	loadInfo.newLevel = loadedLevel != nullptr ? loadedLevel : currentLevel;
+	loadInfo.newLevelName = GetLevelTransitionMapName(loadInfo.newLevel);
+	if (screen != nullptr)
+	{
+		screen->NotifyLevelLoadBegin(loadInfo);
+	}
+}
+
+static void FinalizePendingLevelStart()
+{
+	CancelPendingPathTracingLevelPreload();
+	gameaction = ga_level;
+	ResetStatusBar();
+	gameInput.resetCrouchToggle();
+}
+
+static bool BeginPathTracingLevelPreloadGate()
+{
+	if (screen == nullptr || !screen->StartPathTracingLevelPreload())
+	{
+		return false;
+	}
+
+	gPendingPathTracingLevelPreload = true;
+	if (cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined())
+	{
+		StartCutscene(globalCutscenes.LoadingScreen, SJ_BLOCKUI, [](bool) {});
+	}
+	gameaction = ga_intermission;
+	return true;
+}
 
 void NewGame(MapRecord* map, int skill, bool ns = false)
 {
-	gi->FreeLevelData();
+	const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::NewGame, map);
+	G_CompleteLevelUnload(transition);
 	newGameStarted = true;
 	ShowIntermission(nullptr, map, nullptr, [=](bool) { 
-		gi->NewGame(map, skill, ns); 
-		gameaction = ga_level;
-		ResetStatusBar();
-		gameInput.resetCrouchToggle();
+		gi->NewGame(map, skill, ns);
+		G_NotifyLevelLoadBegin(transition);
+		if (!BeginPathTracingLevelPreloadGate())
+		{
+			FinalizePendingLevelStart();
+		}
 		});
 }
 
@@ -210,12 +409,16 @@ static void GameTicker()
 			break;
 
 		case ga_nextlevel:
-			gi->FreeLevelData();
+		{
+			const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::NextLevel, g_nextmap);
+			G_CompleteLevelUnload(transition);
 			gameaction = ga_level;
 			gi->NextLevel(g_nextmap, g_nextskill);
+			G_NotifyLevelLoadBegin(transition);
 			ResetStatusBar();
 			if (!isBlood()) M_Autosave();
 			break;
+		}
 
 		case ga_newgame:
 			FX_StopAllSounds();
@@ -231,7 +434,10 @@ static void GameTicker()
 		case ga_startup:
 			Mus_Stop();
 			FX_StopAllSounds();
-			gi->FreeLevelData();
+			{
+				const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::Startup);
+				G_CompleteLevelUnload(transition);
+			}
 			gamestate = GS_STARTUP;
 			break;
 
@@ -240,7 +446,10 @@ static void GameTicker()
 			if (isBlood()) Mus_Stop();
 			[[fallthrough]];
 		case ga_mainmenunostopsound:
-			gi->FreeLevelData();
+			{
+				const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::MainMenu);
+				G_CompleteLevelUnload(transition);
+			}
 			gamestate = GS_MENUSCREEN;
 			M_StartControlPanel(ga == ga_mainmenu);
 			M_SetMenu(NAME_Mainmenu);
@@ -248,7 +457,10 @@ static void GameTicker()
 
 		case ga_creditsmenu:
 			FX_StopAllSounds();
-			gi->FreeLevelData();
+			{
+				const LevelTransitionInfo transition = G_BeginLevelTransition(LevelTransitionReason::Credits);
+				G_CompleteLevelUnload(transition);
+			}
 			gamestate = GS_MENUSCREEN;
 			M_StartControlPanel(false);
 			M_SetMenu(NAME_Mainmenu);
@@ -274,6 +486,7 @@ static void GameTicker()
 			break;
 
 		case ga_level:
+			CancelPendingPathTracingLevelPreload();
 			Net_ClearFifo();
 			inputState.ClearAllInput();
 			gameInput.Clear();
@@ -337,6 +550,11 @@ static void GameTicker()
 #endif
 			{
 				*cmd = *newcmd;
+				PlayerArray[i]->cmdSyncInput = netcmdsync[i][buf];
+				if (i == myconnectindex && PerfLoopTraceActive())
+				{
+					PerfLoopTraceNoteCommandSync(PlayerArray[i]->cmdSyncInput);
+				}
 			}
 
 
@@ -393,16 +611,54 @@ static void GameTicker()
 void DrawOverlays()
 {
 	NetUpdate();			// send out any new accumulation
+	TickActorLightEditor();
 
+	const auto overlayStart = Capture2DSnapshot();
 	if (gamestate != GS_INTRO) // do not draw overlays on the intros
 	{
-		// Draw overlay elements
-		CT_Drawer();
-		C_DrawConsole();
-		M_Drawer();
-		FStat::PrintStat(twod);
+		if (PerfLoopTraceActive())
+		{
+			perf2DProducerTraceStats.chat = Trace2DProducer([]() { CT_Drawer(); });
+			perf2DProducerTraceStats.console = Trace2DProducer([]() { C_DrawConsole(); });
+			perf2DProducerTraceStats.menu = Trace2DProducer([]() { M_Drawer(); });
+			perf2DProducerTraceStats.stats = Trace2DProducer([]()
+			{
+				PerfLoop2DTextScope textScope(PerfLoop2DTextLabel::Stats);
+				FStat::PrintStat(twod);
+			});
+		}
+		else
+		{
+			// Draw overlay elements
+			CT_Drawer();
+			C_DrawConsole();
+			M_Drawer();
+			FStat::PrintStat(twod);
+		}
 	}
-	DrawRateStuff();
+	else if (PerfLoopTraceActive())
+	{
+		perf2DProducerTraceStats.introSkipped = true;
+	}
+
+	if (PerfLoopTraceActive())
+	{
+		perf2DProducerTraceStats.rate = Trace2DProducer([]() { DrawRateStuff(); });
+		const auto overlayEnd = Capture2DSnapshot();
+		perf2DProducerTraceStats.overlays.commands = overlayEnd.commands - overlayStart.commands;
+		perf2DProducerTraceStats.overlays.vertices = overlayEnd.vertices - overlayStart.vertices;
+		perf2DProducerTraceStats.overlays.indices = overlayEnd.indices - overlayStart.indices;
+		perf2DProducerTraceStats.overlays.ms =
+			perf2DProducerTraceStats.chat.ms +
+			perf2DProducerTraceStats.console.ms +
+			perf2DProducerTraceStats.menu.ms +
+			perf2DProducerTraceStats.stats.ms +
+			perf2DProducerTraceStats.rate.ms;
+	}
+	else
+	{
+		DrawRateStuff();
+	}
 }
 
 //==========================================================================
@@ -414,8 +670,20 @@ CVAR(String, drawtile, "", 0)	// debug stuff. Draws the tile with the given numb
 
 void Display()
 {
-	if (screen == nullptr || (!AppActive && (screen->IsFullscreen() || !vid_activeinbackground)))
+	if (screen == nullptr)
 	{
+		perfDisplayTraceStats.skippedInactive = true;
+		return;
+	}
+
+	const bool pathTracingGuiCaptureActive =
+		gamestate == GS_LEVEL &&
+		(M_Active() || System_WantGuiCapture());
+	screen->SetPathTracingGuiCaptureState(pathTracingGuiCaptureActive);
+
+	if (!AppActive && (screen->IsFullscreen() || !vid_activeinbackground))
+	{
+		perfDisplayTraceStats.skippedInactive = true;
 		return;
 	}
 	
@@ -425,9 +693,11 @@ void Display()
 		wipestart = screen->WipeStartScreen();
 	}
 
+	double stageStart = I_msTimeF();
 	screen->FrameTime = I_msTimeFS();
 	tileUpdateAnimations();
 	screen->BeginFrame();
+	perfDisplayTraceStats.beginFrameMs += I_msTimeF() - stageStart;
 	twodpsp.Clear();
 	twodpsp.SetSize(screen->GetWidth(), screen->GetHeight());
 	twodpsp.ClearClipRect();
@@ -445,18 +715,40 @@ void Display()
 	case GS_INTRO:
 	case GS_CUTSCENE:
 		ScreenJobDraw();
+		if (gPendingPathTracingLevelPreload && screen != nullptr && screen->IsPathTracingLevelPreloadPending())
+		{
+			if (screen->TickPathTracingLevelPreload())
+			{
+				if (cutscene.runner != nullptr)
+				{
+					EndScreenJob();
+				}
+				FinalizePendingLevelStart();
+			}
+		}
 		break;
 
 	case GS_LEVEL:
 		if (gametic != 0)
 		{
+			perfDisplayTraceStats.levelRendered = true;
+			stageStart = I_msTimeF();
 			screen->FrameTime = I_msTimeFS();
 			screen->BeginFrame();
 			screen->SetSceneRenderTarget(gl_ssao != 0);
 			//updateModelInterpolation();
 			gi->Render();
-			DrawFullscreenBlends();
-			drawMapTitle();
+			if (PerfLoopTraceActive())
+			{
+				perf2DProducerTraceStats.fullscreenBlends = Trace2DProducer([]() { DrawFullscreenBlends(); });
+				perf2DProducerTraceStats.mapTitle = Trace2DProducer([]() { drawMapTitle(); });
+			}
+			else
+			{
+				DrawFullscreenBlends();
+				drawMapTitle();
+			}
+			perfDisplayTraceStats.renderMs += I_msTimeF() - stageStart;
 			break;
 		}
 		[[fallthrough]];
@@ -466,33 +758,45 @@ void Display()
 		break;
 	}
 	
+	stageStart = I_msTimeF();
 	if (nextwipe == wipe_None)
 	{
 		DrawOverlays();
 		if (drawtile[0])
 		{
-			auto tex = TexMan.CheckForTexture(drawtile, ETextureType::Any);
-			if (!tex.isValid()) tex = tileGetTextureID(atoi(drawtile));
-			if (tex.isValid())
+			auto drawTileFunc = []()
 			{
-				auto tx = TexMan.GetGameTexture(tex, true);
-				if (tx)
+				auto tex = TexMan.CheckForTexture(drawtile, ETextureType::Any);
+				if (!tex.isValid()) tex = tileGetTextureID(atoi(drawtile));
+				if (tex.isValid())
 				{
-					int width = (int)tx->GetDisplayWidth();
-					int height = (int)tx->GetDisplayHeight();
-					int dwidth, dheight;
-					if (width > height)
+					auto tx = TexMan.GetGameTexture(tex, true);
+					if (tx)
 					{
-						dwidth = screen->GetWidth() / 4;
-						dheight = height * dwidth / width;
+						int width = (int)tx->GetDisplayWidth();
+						int height = (int)tx->GetDisplayHeight();
+						int dwidth, dheight;
+						if (width > height)
+						{
+							dwidth = screen->GetWidth() / 4;
+							dheight = height * dwidth / width;
+						}
+						else
+						{
+							dheight = screen->GetHeight() / 4;
+							dwidth = width * dheight / height;
+						}
+						DrawTexture(twod, tx, 0, 0, DTA_DestWidth, dwidth, DTA_DestHeight, dheight, TAG_DONE);
 					}
-					else
-					{
-						dheight = screen->GetHeight() / 4;
-						dwidth = width * dheight / height;
-					}
-					DrawTexture(twod, tx, 0, 0, DTA_DestWidth, dwidth, DTA_DestHeight, dheight, TAG_DONE);
 				}
+			};
+			if (PerfLoopTraceActive())
+			{
+				perf2DProducerTraceStats.drawtile = Trace2DProducer(drawTileFunc);
+			}
+			else
+			{
+				drawTileFunc();
 			}
 		}
 	}
@@ -501,8 +805,18 @@ void Display()
 		PerformWipe(wipestart, screen->WipeEndScreen(), nextwipe, true, DrawOverlays);
 		nextwipe = wipe_None;
 	}
+	perfDisplayTraceStats.overlayMs += I_msTimeF() - stageStart;
 
+	stageStart = I_msTimeF();
+	if (PerfLoopTraceActive())
+	{
+		const auto preUpdate2D = Capture2DSnapshot();
+		perf2DProducerTraceStats.totalCommands = preUpdate2D.commands;
+		perf2DProducerTraceStats.totalVertices = preUpdate2D.vertices;
+		perf2DProducerTraceStats.totalIndices = preUpdate2D.indices;
+	}
 	screen->Update();
+	perfDisplayTraceStats.updateMs += I_msTimeF() - stageStart;
 }
 
 //==========================================================================
@@ -559,6 +873,8 @@ void TryRunTics (void)
 	int 		availabletics;
 	int 		counts;
 	int 		numplaying;
+	const double traceStartMs = I_msTimeF();
+	perfTryRunTicsTraceStats = {};
 
 	// If paused, do not eat more CPU time than we need, because it
 	// will all be wasted anyway.
@@ -566,6 +882,7 @@ void TryRunTics (void)
 
 	if (vid_dontdowait && ((vid_maxfps > 0) || (vid_vsync == true)))
 		doWait = false;
+	perfTryRunTicsTraceStats.doWait = doWait;
 
 	// get real tics
 	if (doWait)
@@ -578,12 +895,17 @@ void TryRunTics (void)
 	}
 	realtics = entertic - oldentertics;
 	oldentertics = entertic;
+	perfTryRunTicsTraceStats.realtics = realtics;
 
 	// get available tics
 	NetUpdate ();
 
 	if (pauseext)
+	{
+		perfTryRunTicsTraceStats.pausedReturn = true;
+		perfTryRunTicsTraceStats.durationMs = I_msTimeF() - traceStartMs;
 		return;
+	}
 
 	lowtic = INT_MAX;
 	numplaying = 0;
@@ -598,6 +920,8 @@ void TryRunTics (void)
 	}
 
 	availabletics = lowtic - gametic / ticdup;
+	perfTryRunTicsTraceStats.availabletics = availabletics;
+	perfTryRunTicsTraceStats.lowtic = lowtic;
 
 	// decide how many tics to run
 	if (realtics < availabletics-1)
@@ -606,6 +930,7 @@ void TryRunTics (void)
 		counts = realtics;
 	else
 		counts = availabletics;
+	perfTryRunTicsTraceStats.counts = counts;
 
 	// Uncapped framerate needs seprate checks
 	if (counts == 0 && !doWait)
@@ -628,6 +953,8 @@ void TryRunTics (void)
 		{
 			gameInput.getInput();
 		}
+		perfTryRunTicsTraceStats.zeroCountReturn = true;
+		perfTryRunTicsTraceStats.durationMs = I_msTimeF() - traceStartMs;
 		return;
 	}
 
@@ -637,6 +964,7 @@ void TryRunTics (void)
 	// wait for new tics if needed
 	while (lowtic < gametic + counts)
 	{
+		perfTryRunTicsTraceStats.waitLoopIterations++;
 		NetUpdate ();
 		lowtic = INT_MAX;
 
@@ -666,6 +994,8 @@ void TryRunTics (void)
 			gi->Unpredict();
 			gi->Predict(myconnectindex);
 #endif
+			perfTryRunTicsTraceStats.waitLoopReturn = true;
+			perfTryRunTicsTraceStats.durationMs = I_msTimeF() - traceStartMs;
 			return;
 		}
 	}
@@ -686,6 +1016,7 @@ void TryRunTics (void)
 #endif
 		while (counts--)
 		{
+			perfTryRunTicsTraceStats.ticksRun++;
 			TicStabilityBegin();
 			if (gametic > lowtic)
 			{
@@ -715,6 +1046,7 @@ void TryRunTics (void)
 	{
 		TicStabilityWait();
 	}
+	perfTryRunTicsTraceStats.durationMs = I_msTimeF() - traceStartMs;
 }
 
 
@@ -727,6 +1059,7 @@ void TryRunTics (void)
 void MainLoop ()
 {
 	int lasttic = 0;
+	uint64_t traceFrame = 0;
 
 	// Clamp the timer to TICRATE until the playloop has been entered.
 	r_NoInterpolate = true;
@@ -749,26 +1082,302 @@ void MainLoop ()
 	{
 		try
 		{
+			traceFrame++;
+			if (PerfLoopTraceActive())
+			{
+				PerfLoopTraceResetInputStats();
+				PerfLoopTraceReset2DProducerStats();
+				PerfLoopTraceResetCameraStats();
+				perfTryRunTicsTraceStats = {};
+				perfDisplayTraceStats = {};
+				perf2DProducerTraceStats = {};
+			}
+
 			// frame syncronous IO operations
+			const double frameStartMs = I_msTimeF();
+			double startFrameMs = 0.0;
 			if (gametic > lasttic)
 			{
+				const double stageStartMs = I_msTimeF();
 				lasttic = gametic;
 				I_StartFrame ();
+				startFrameMs = I_msTimeF() - stageStartMs;
 			}
 			I_SetFrameTime();
 
 			// update the scale factor for unsynchronised input here.
 			gameInput.UpdateInputScale();
+			if (PerfLoopTraceActive())
+			{
+				PerfLoopTraceNoteInputMode(gameInput.SyncInput(), gameInput.GetInputScale());
+			}
 
+			const double tryRunStartMs = I_msTimeF();
 			TryRunTics (); // will run at least one tic
+			const double tryRunMs = I_msTimeF() - tryRunStartMs;
 			// Update display, next frame, with current state.
+			const double startTicStartMs = I_msTimeF();
 			I_StartTic();
+			const double startTicMs = I_msTimeF() - startTicStartMs;
 
+			const double displayStartMs = I_msTimeF();
 			Display();
+			const double displayMs = I_msTimeF() - displayStartMs;
+			const double musicStartMs = I_msTimeF();
 			Mus_UpdateMusic();		// must be at the end.
+			const double musicMs = I_msTimeF() - musicStartMs;
+
+			if (PerfLoopTraceActive())
+			{
+				const auto inputTrace = PerfLoopTraceGetInputStats();
+				const auto cameraTrace = PerfLoopTraceGetCameraStats();
+				const auto renderTrace = GetPerfRenderTraceStats();
+				const double frameMs = I_msTimeF() - frameStartMs;
+				Printf(
+					"PERF loop trace: frame=%llu state=%s gametic=%d startframe_ms=%.3f try_ms=%.3f try_traced_ms=%.3f display_ms=%.3f display_begin_ms=%.3f display_render_ms=%.3f display_overlay_ms=%.3f display_update_ms=%.3f starttic_ms=%.3f music_ms=%.3f frame_ms=%.3f do_wait=%d realtics=%d avail=%d counts=%d ticks=%d wait_loops=%d zero_return=%d wait_return=%d paused_return=%d display_skip=%d level_rendered=%d\n",
+					(unsigned long long)traceFrame,
+					GetGameStateName(gamestate),
+					gametic,
+					startFrameMs,
+					tryRunMs,
+					perfTryRunTicsTraceStats.durationMs,
+					displayMs,
+					perfDisplayTraceStats.beginFrameMs,
+					perfDisplayTraceStats.renderMs,
+					perfDisplayTraceStats.overlayMs,
+					perfDisplayTraceStats.updateMs,
+					startTicMs,
+					musicMs,
+					frameMs,
+					perfTryRunTicsTraceStats.doWait ? 1 : 0,
+					perfTryRunTicsTraceStats.realtics,
+					perfTryRunTicsTraceStats.availabletics,
+					perfTryRunTicsTraceStats.counts,
+					perfTryRunTicsTraceStats.ticksRun,
+					perfTryRunTicsTraceStats.waitLoopIterations,
+					perfTryRunTicsTraceStats.zeroCountReturn ? 1 : 0,
+					perfTryRunTicsTraceStats.waitLoopReturn ? 1 : 0,
+					perfTryRunTicsTraceStats.pausedReturn ? 1 : 0,
+					perfDisplayTraceStats.skippedInactive ? 1 : 0,
+					perfDisplayTraceStats.levelRendered ? 1 : 0);
+				Printf(
+					"PERF render trace: frame=%llu hw_all=%.3f hw_finish=%.3f hw_render=%.3f hw_setup=%.3f hw_portal=%.3f hw_post=%.3f hw_drawcalls=%.3f wall_render=%.3f wall_setup=%.3f wall_clip=%.3f bsp=%.3f flat_render=%.3f flat_setup=%.3f sprite_render=%.3f sprite_setup=%.3f twod=%.3f finish3d=%.3f mt_wait=%.3f wt_total=%.3f walls=%d flats=%d sprites=%d decals=%d portals=%d verts=%d flat_verts=%d flat_prims=%d\n",
+					(unsigned long long)traceFrame,
+					renderTrace.allMs,
+					renderTrace.finishMs,
+					renderTrace.renderAllMs,
+					renderTrace.processAllMs,
+					renderTrace.portalAllMs,
+					renderTrace.postProcessMs,
+					renderTrace.drawCallsMs,
+					renderTrace.renderWallMs,
+					renderTrace.setupWallMs,
+					renderTrace.clipWallMs,
+					renderTrace.bspMs,
+					renderTrace.renderFlatMs,
+					renderTrace.setupFlatMs,
+					renderTrace.renderSpriteMs,
+					renderTrace.setupSpriteMs,
+					renderTrace.twoDMs,
+					renderTrace.finish3DMs,
+					renderTrace.mtWaitMs,
+					renderTrace.wtTotalMs,
+					renderTrace.renderedWalls,
+					renderTrace.renderedFlats,
+					renderTrace.renderedSprites,
+					renderTrace.renderedDecals,
+					renderTrace.renderedPortals,
+					renderTrace.renderedVertices,
+					renderTrace.flatVertexCount,
+					renderTrace.flatPrimitiveCount);
+				if (renderTrace.nriActive)
+				{
+					Printf(
+						"PERF render trace NRI: frame=%llu total=%.3f init=%.3f res=%.3f state=%.3f capture=%.3f geo=%.3f mats=%.3f palette=%.3f textures=%.3f buffers=%.3f as=%.3f bootstrap=%.3f graph=%.3f copy=%.3f wait=%.3f wait_present=%.3f acquire=%.3f submit=%.3f present=%.3f trace=%.3f denoise=%.3f compose=%.3f upscale=%.3f final=%.3f raw_present=%.3f final_present=%.3f\n",
+						(unsigned long long)traceFrame,
+						renderTrace.nriAllMs,
+						renderTrace.nriInitializeMs,
+						renderTrace.nriFrameResourcesMs,
+						renderTrace.nriUpdateStateMs,
+						renderTrace.nriSceneCaptureMs,
+						renderTrace.nriGeometryBuildMs,
+						renderTrace.nriMaterialBuildMs,
+						renderTrace.nriPaletteUploadMs,
+						renderTrace.nriSceneTexturesMs,
+						renderTrace.nriSceneBuffersMs,
+						renderTrace.nriAccelerationMs,
+						renderTrace.nriBootstrapDispatchMs,
+						renderTrace.nriFrameGraphMs,
+						renderTrace.nriCopyFinalMs,
+						renderTrace.nriFrameWaitMs,
+						renderTrace.nriWaitPresentMs,
+						renderTrace.nriAcquireSwapMs,
+						renderTrace.nriQueueSubmitMs,
+						renderTrace.nriQueuePresentMs,
+						renderTrace.nriTraceOpaqueMs,
+						renderTrace.nriDenoiserMs,
+						renderTrace.nriCompositionMs,
+						renderTrace.nriUpscaleMs,
+						renderTrace.nriFinalMs,
+						renderTrace.nriRawPresentMs,
+						renderTrace.nriFinalPresentMs);
+				}
+				Printf(
+					"PERF twod producer trace: frame=%llu total_cmds=%d total_verts=%d total_indices=%d intro_skip=%d overlays_cmds=%d overlays_ms=%.3f fsblend_cmds=%d fsblend_ms=%.3f maptitle_cmds=%d maptitle_ms=%.3f statusbar_cmds=%d statusbar_ms=%.3f althud_cmds=%d althud_ms=%.3f crosshair_cmds=%d crosshair_ms=%.3f chat_cmds=%d chat_ms=%.3f console_cmds=%d console_ms=%.3f menu_cmds=%d menu_ms=%.3f stats_cmds=%d stats_ms=%.3f rate_cmds=%d rate_ms=%.3f drawtile_cmds=%d drawtile_ms=%.3f\n",
+					(unsigned long long)traceFrame,
+					perf2DProducerTraceStats.totalCommands,
+					perf2DProducerTraceStats.totalVertices,
+					perf2DProducerTraceStats.totalIndices,
+					perf2DProducerTraceStats.introSkipped ? 1 : 0,
+					perf2DProducerTraceStats.overlays.commands,
+					perf2DProducerTraceStats.overlays.ms,
+					perf2DProducerTraceStats.fullscreenBlends.commands,
+					perf2DProducerTraceStats.fullscreenBlends.ms,
+					perf2DProducerTraceStats.mapTitle.commands,
+					perf2DProducerTraceStats.mapTitle.ms,
+					PerfLoopTraceGet2DProducerStats().statusBar.commands,
+					PerfLoopTraceGet2DProducerStats().statusBar.ms,
+					PerfLoopTraceGet2DProducerStats().altHud.commands,
+					PerfLoopTraceGet2DProducerStats().altHud.ms,
+					PerfLoopTraceGet2DProducerStats().crosshair.commands,
+					PerfLoopTraceGet2DProducerStats().crosshair.ms,
+					perf2DProducerTraceStats.chat.commands,
+					perf2DProducerTraceStats.chat.ms,
+					perf2DProducerTraceStats.console.commands,
+					perf2DProducerTraceStats.console.ms,
+					perf2DProducerTraceStats.menu.commands,
+					perf2DProducerTraceStats.menu.ms,
+					perf2DProducerTraceStats.stats.commands,
+					perf2DProducerTraceStats.stats.ms,
+					perf2DProducerTraceStats.rate.commands,
+					perf2DProducerTraceStats.rate.ms,
+					perf2DProducerTraceStats.drawtile.commands,
+					perf2DProducerTraceStats.drawtile.ms);
+				const auto twodProducerStats = PerfLoopTraceGet2DProducerStats();
+				const auto consoleVisibleGlyphs =
+					twodProducerStats.consoleVersionText.glyphs +
+					twodProducerStats.consoleBodyText.glyphs +
+					twodProducerStats.consoleCommandLineText.glyphs;
+				Printf(
+					"PERF twod text trace: frame=%llu console_version_calls=%u console_version_glyphs=%u console_version_cmds=%u console_body_calls=%u console_body_glyphs=%u console_body_cmds=%u console_cmd_calls=%u console_cmd_glyphs=%u console_cmd_cmds=%u hud_calls=%u hud_glyphs=%u hud_cmds=%u stats_calls=%u stats_glyphs=%u stats_cmds=%u rate_calls=%u rate_glyphs=%u rate_cmds=%u other_calls=%u other_glyphs=%u other_cmds=%u\n",
+					(unsigned long long)traceFrame,
+					twodProducerStats.consoleVersionText.calls,
+					twodProducerStats.consoleVersionText.glyphs,
+					twodProducerStats.consoleVersionText.commands,
+					twodProducerStats.consoleBodyText.calls,
+					twodProducerStats.consoleBodyText.glyphs,
+					twodProducerStats.consoleBodyText.commands,
+					twodProducerStats.consoleCommandLineText.calls,
+					twodProducerStats.consoleCommandLineText.glyphs,
+					twodProducerStats.consoleCommandLineText.commands,
+					twodProducerStats.hudText.calls,
+					twodProducerStats.hudText.glyphs,
+					twodProducerStats.hudText.commands,
+					twodProducerStats.statsText.calls,
+					twodProducerStats.statsText.glyphs,
+					twodProducerStats.statsText.commands,
+					twodProducerStats.rateText.calls,
+					twodProducerStats.rateText.glyphs,
+					twodProducerStats.rateText.commands,
+					twodProducerStats.otherText.calls,
+					twodProducerStats.otherText.glyphs,
+					twodProducerStats.otherText.commands);
+				Printf(
+					"PERF twod console detail: frame=%llu visible_lines=%u visible_glyphs=%u bg_cmds=%u version_cmds=%u body_cmds=%u cmdline_cmds=%u version_glyphs=%u body_glyphs=%u cmdline_glyphs=%u\n",
+					(unsigned long long)traceFrame,
+					twodProducerStats.consoleVisibleLines,
+					consoleVisibleGlyphs,
+					twodProducerStats.consoleBackgroundCommands,
+					twodProducerStats.consoleVersionText.commands,
+					twodProducerStats.consoleBodyText.commands,
+					twodProducerStats.consoleCommandLineText.commands,
+					twodProducerStats.consoleVersionText.glyphs,
+					twodProducerStats.consoleBodyText.glyphs,
+					twodProducerStats.consoleCommandLineText.glyphs);
+				Printf(
+					"PERF input trace: frame=%llu getevent=%u starttic_calls=%u handleevents=%u msgs=%u burst=%u raw_input=%u raw_keyboard=%u raw_mouse=%u raw_mouse_moves=%u raw_mouse_drop=%u posted_mouse=%u dispatched_mouse=%u sampled_mouse=%u route_yaw=%u route_strafe=%u route_pitch=%u route_aimmove=%u ticcmds=%u yaw_apply=%u pitch_apply=%u fast_camera=%u posted_delta=(%.1f,%.1f) dispatched_delta=(%.1f,%.1f) sampled_delta=(%.1f,%.1f) ticcmd_deg=(%.3f,%.3f) applied_deg=(%.3f,%.3f) fast_camera_deg=(%.3f,%.3f) key_down=%u key_up=%u device_change=%u queue_hw=%u queue_overflow=%u\n",
+					(unsigned long long)traceFrame,
+					inputTrace.iGetEventCalls,
+					inputTrace.startTicCalls,
+					inputTrace.handleeventsCalls,
+					inputTrace.peekedMessages,
+					inputTrace.maxMessageBurst,
+					inputTrace.rawInputMessages,
+					inputTrace.rawKeyboardPackets,
+					inputTrace.rawMousePackets,
+					inputTrace.rawMouseMovePackets,
+					inputTrace.rawMouseDroppedPackets,
+					inputTrace.postedMouseMoves,
+					inputTrace.dispatchedMouseMoves,
+					inputTrace.sampledMouseInputs,
+					inputTrace.mouseYawLookSamples,
+					inputTrace.mouseStrafeSamples,
+					inputTrace.mousePitchLookSamples,
+					inputTrace.mouseAimMoveSamples,
+					inputTrace.ticcmdBuilds,
+					inputTrace.yawApplyCalls,
+					inputTrace.pitchApplyCalls,
+					inputTrace.fastCameraApplyCalls,
+					inputTrace.postedMouseX,
+					inputTrace.postedMouseY,
+					inputTrace.dispatchedMouseX,
+					inputTrace.dispatchedMouseY,
+					inputTrace.sampledMouseX,
+					inputTrace.sampledMouseY,
+					inputTrace.ticcmdYawDegrees,
+					inputTrace.ticcmdPitchDegrees,
+					inputTrace.appliedYawDegrees,
+					inputTrace.appliedPitchDegrees,
+					inputTrace.fastCameraYawDegrees,
+					inputTrace.fastCameraPitchDegrees,
+					inputTrace.keyDownEvents,
+					inputTrace.keyUpEvents,
+					inputTrace.deviceChangeEvents,
+					inputTrace.eventQueueHighWater,
+					inputTrace.eventQueueOverflows);
+				Printf(
+					"PERF camera trace: frame=%llu sync=%d cmd_sync=%d input_scale=%.6f actor_yaw_calls=%u actor_pitch_calls=%u cam_updates=%u cam_resets=%u render_calls=%u cmd_deg=(%.3f,%.3f) actor_delta=(%.3f,%.3f) actor=(%.3f,%.3f) camera_delta=(%.3f,%.3f) camera=(%.3f,%.3f) render=(%.3f,%.3f) render_frame_delta=(%.3f,%.3f)\n",
+					(unsigned long long)traceFrame,
+					cameraTrace.syncInput ? 1 : 0,
+					cameraTrace.cmdSyncInput ? 1 : 0,
+					cameraTrace.inputScale,
+					cameraTrace.actorYawCalls,
+					cameraTrace.actorPitchCalls,
+					cameraTrace.cameraUpdateCalls,
+					cameraTrace.cameraResetCalls,
+					cameraTrace.renderCalls,
+					cameraTrace.consumedCmdYawDegrees,
+					cameraTrace.consumedCmdPitchDegrees,
+					cameraTrace.actorYawDeltaDegrees,
+					cameraTrace.actorPitchDeltaDegrees,
+					cameraTrace.actorYawDegrees,
+					cameraTrace.actorPitchDegrees,
+					cameraTrace.cameraYawDeltaDegrees,
+					cameraTrace.cameraPitchDeltaDegrees,
+					cameraTrace.cameraYawDegrees,
+					cameraTrace.cameraPitchDegrees,
+					cameraTrace.renderYawDegrees,
+					cameraTrace.renderPitchDegrees,
+					cameraTrace.renderFrameDeltaYawDegrees,
+					cameraTrace.renderFrameDeltaPitchDegrees);
+				if (renderTrace.nriActive)
+				{
+					Printf("----------end perf trace frame %llu\n",
+						(unsigned long long)traceFrame);
+				}
+				const int remainingTraceFrames = (int)perf_looptraceframes - 1;
+				perf_looptraceframes = remainingTraceFrames > 0 ? remainingTraceFrames : 0;
+			}
 		}
 		catch (CRecoverableError &error)
 		{
+			if (PerfLoopTraceActive())
+			{
+				Printf("PERF loop trace caught: frame=%llu type=recoverable state=%s gametic=%d\n",
+					(unsigned long long)traceFrame,
+					GetGameStateName(gamestate),
+					gametic);
+			}
 			if (error.GetMessage ())
 			{
 				Printf (PRINT_BOLD, "\n%s\n", error.GetMessage());
@@ -780,6 +1389,13 @@ void MainLoop ()
 		}
 		catch (CVMAbortException &error)
 		{
+			if (PerfLoopTraceActive())
+			{
+				Printf("PERF loop trace caught: frame=%llu type=vmabort state=%s gametic=%d\n",
+					(unsigned long long)traceFrame,
+					GetGameStateName(gamestate),
+					gametic);
+			}
 			error.MaybePrintMessage();
 			Printf("%s", error.stacktrace.GetChars());
 			gi->ErrorCleanup();
@@ -789,4 +1405,3 @@ void MainLoop ()
 		}
 	}
 }
-
