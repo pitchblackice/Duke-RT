@@ -5,15 +5,18 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%.") do set "SCRIPT_DIR=%%~fI"
 
 set "DIST_ROOT=%SCRIPT_DIR%"
-set "OVERLAY_DIR=%DIST_ROOT%\default-overlay"
+set "OVERLAY_DIR=%DIST_ROOT%\release-overlay"
+if not exist "%OVERLAY_DIR%" set "OVERLAY_DIR=%DIST_ROOT%\default-overlay"
 set "RAZE_EXE=%DIST_ROOT%\raze.exe"
 set "PREFLIGHT_PS1=%DIST_ROOT%\tools\dist\Prepare-CommercialNormals.ps1"
 
 if not exist "%RAZE_EXE%" (
     set "DIST_ROOT=%SCRIPT_DIR%\..\.."
     for %%I in ("%DIST_ROOT%") do set "DIST_ROOT=%%~fI"
-    set "OVERLAY_DIR=%DIST_ROOT%\default-overlay"
-    set "RAZE_EXE=%DIST_ROOT%\build\terminal-ninja\raze.exe"
+    set "OVERLAY_DIR=%DIST_ROOT%\release-overlay"
+    if not exist "%OVERLAY_DIR%" set "OVERLAY_DIR=%DIST_ROOT%\default-overlay"
+    set "RAZE_EXE=%DIST_ROOT%\build\terminal-release\raze.exe"
+    if not exist "%RAZE_EXE%" set "RAZE_EXE=%DIST_ROOT%\build\terminal-ninja\raze.exe"
     set "PREFLIGHT_PS1=%DIST_ROOT%\tools\dist\Prepare-CommercialNormals.ps1"
 )
 
