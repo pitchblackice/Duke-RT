@@ -29,6 +29,8 @@ Known high-priority issues:
 - coplanar z-fighting/holes cause broken floors and some ceilings in `E2L1`
 - voxels don't display correctly
 - slow CPU-side perf on `E1L4` due to rapid chunk state oscillation
+- sometimes you get stuck on the level end screen rather than transitioning to the next level
+- there's an occasional crash on multiple level transitions in a session
 
 Known lower-priority issues:
 - flickering material state for the vent at the start of `E1L4`
