@@ -292,6 +292,16 @@ void FGameConfigFile::DoGlobalSetup ()
 	{
 		ReadCVars (CVAR_GLOBALCONFIG);
 	}
+	if (auto var = FindCVar("nri_dred", nullptr))
+	{
+		// Avoid carrying forward the prior bad shipped default from raze.ini.
+		var->SetGenericRep(false, CVAR_Bool);
+	}
+	if (auto var = FindCVar("nri_apivalidation", nullptr))
+	{
+		// Avoid carrying forward the prior bad shipped default from raze.ini.
+		var->SetGenericRep(false, CVAR_Bool);
+	}
 	if (SetSection ("LastRun"))
 	{
 		const char *lastver = GetValueForKey ("Version");
