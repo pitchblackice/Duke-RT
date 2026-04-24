@@ -23021,7 +23021,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		{
 			if (!sLoggedPhaseHRrInputPath)
 			{
-				Printf("NRI Phase H: DLRR now builds a separate noisy RrInput before NRD and bypasses opaque denoising for the vendor RR branch.\n");
+				Printf("DLRR now builds a separate noisy RrInput before NRD and bypasses opaque denoising for the vendor RR branch.\n");
 				sLoggedPhaseHRrInputPath = true;
 			}
 
@@ -23041,7 +23041,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		{
 			if (!sLoggedPhaseFDenoiserPath)
 			{
-				Printf("NRI Phase F: the Composition-backed PT paths now route through NRD before Composition when nri_denoise is enabled.\n");
+				Printf("The Composition-backed PT paths now route through NRD before Composition when nri_denoise is enabled.\n");
 				sLoggedPhaseFDenoiserPath = true;
 			}
 
@@ -23049,7 +23049,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			{
 				if (!sLoggedPhaseFDenoiserFallback)
 				{
-					Printf(TEXTCOLOR_ORANGE "NRI Phase F: NRD dispatch failed in the composition path; falling back to raw trace inputs for this frame.\n");
+					Printf(TEXTCOLOR_ORANGE "NRD dispatch failed in the composition path; falling back to raw trace inputs for this frame.\n");
 					sLoggedPhaseFDenoiserFallback = true;
 				}
 			}
@@ -23067,7 +23067,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 		if (!sLoggedPhaseFTraceTransparentPath)
 		{
-			Printf("NRI Phase F.5: Composition-backed PT paths now pass through placeholder TraceTransparent before output-resolution dispatch.\n");
+			Printf("Composition-backed PT paths now pass through placeholder TraceTransparent before output-resolution dispatch.\n");
 			sLoggedPhaseFTraceTransparentPath = true;
 		}
 
@@ -23083,7 +23083,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedPhaseGResolvedPresentPath)
 		{
-			Printf("NRI Phase G: ptdebug 0 now routes through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
+			Printf("ptdebug 0 now routes through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
 			sLoggedPhaseGResolvedPresentPath = true;
 		}
 
