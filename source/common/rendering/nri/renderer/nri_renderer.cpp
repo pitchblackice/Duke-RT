@@ -757,6 +757,7 @@ public:
 
 	static void RebuildSceneViewStats(nri_scene::SceneView& sceneView)
 	{
+		const nri_scene::SceneDebugStats preservedStats = sceneView.stats;
 		nri_scene::SceneDebugStats stats = {};
 		stats.wallDrawItems = (uint32_t)sceneView.opaqueWalls.size();
 		stats.flatDrawItems = (uint32_t)sceneView.opaqueFlats.size();
@@ -794,6 +795,11 @@ public:
 		}
 
 		stats.totalDrawItems = stats.wallDrawItems + stats.flatDrawItems + stats.spriteDrawItems;
+		stats.voxelStableCandidates = preservedStats.voxelStableCandidates;
+		stats.voxelStableUncacheable = preservedStats.voxelStableUncacheable;
+		stats.voxelStableSignatureHits = preservedStats.voxelStableSignatureHits;
+		stats.voxelStableSignatureMisses = preservedStats.voxelStableSignatureMisses;
+		stats.voxelStableSignatureChanges = preservedStats.voxelStableSignatureChanges;
 		sceneView.stats = stats;
 	}
 
