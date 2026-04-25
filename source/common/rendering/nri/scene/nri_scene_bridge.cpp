@@ -4,6 +4,7 @@
 #include "nri_texture_signature.h"
 
 #include "c_cvars.h"
+#include "coreactor.h"
 #include "hw_portal.h"
 #include "hw_voxels.h"
 #include "image.h"
@@ -11,14 +12,17 @@
 #include "skyboxtexture.h"
 #include "gametexture.h"
 #include "texturemanager.h"
+#include "texinfo.h"
 #include "textures.h"
 #include "v_video.h"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
+#include <unordered_set>
 #include <windows.h>
 
+EXTERN_CVAR(Bool, r_voxels)
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptactorspritetrace)
 CVAR(Int, nri_ptvoxeltrianglebudget, 250000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -59,6 +63,11 @@ namespace
 	struct VoxelActorCacheEntry
 	{
 		uint64_t signature = 0;
+		uint64_t identityKey = 0;
+		int32_t actorIndex = -1;
+		uintptr_t actorPtr = 0;
+		uintptr_t voxelPtr = 0;
+		uintptr_t voxelModelPtr = 0;
 		SurfaceRef surface;
 		uint64_t lastSeenFrame = 0;
 		uint32_t primitiveCount = 0;
@@ -87,6 +96,10 @@ namespace
 		VoxelActorStability stability = VoxelActorStability::Uncacheable;
 		uint64_t identityKey = 0;
 		uint64_t signature = 0;
+		int32_t actorIndex = -1;
+		uintptr_t actorPtr = 0;
+		uintptr_t voxelPtr = 0;
+		uintptr_t voxelModelPtr = 0;
 		VoxelActorCacheEntry* entry = nullptr;
 	};
 
@@ -1484,9 +1497,23 @@ namespace
 		return (uint64_t)std::llround(value * scale);
 	}
 
-	bool TryBuildVoxelActorIdentityKey(const HWSprite& sprite, uint64_t& outKey)
+	uint64_t BuildVoxelActorIdentityKey(int32_t actorIndex, const DCoreActor* actor, const voxmodel_t* voxel)
 	{
-		outKey = 0;
+		if (actorIndex < 0 || actor == nullptr || voxel == nullptr || voxel->model == nullptr)
+		{
+			return 0;
+		}
+
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)actorIndex);
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)actor);
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)voxel);
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)voxel->model);
+		return hash;
+	}
+
+	bool TryBuildVoxelActorIdentity(const HWSprite& sprite, VoxelActorCacheLookup& lookup)
+	{
 		if (sprite.Sprite == nullptr || sprite.Sprite->ownerActor == nullptr || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
 		{
 			return false;
@@ -1498,12 +1525,16 @@ namespace
 			return false;
 		}
 
-		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)actorIndex);
-		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.Sprite->ownerActor);
-		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel);
-		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel->model);
-		outKey = hash;
+		lookup.identityKey = BuildVoxelActorIdentityKey(actorIndex, sprite.Sprite->ownerActor, sprite.voxel);
+		if (lookup.identityKey == 0)
+		{
+			return false;
+		}
+
+		lookup.actorIndex = actorIndex;
+		lookup.actorPtr = (uintptr_t)sprite.Sprite->ownerActor;
+		lookup.voxelPtr = (uintptr_t)sprite.voxel;
+		lookup.voxelModelPtr = (uintptr_t)sprite.voxel->model;
 		return true;
 	}
 
@@ -1541,8 +1572,7 @@ namespace
 	VoxelActorCacheLookup TrackVoxelActorSignature(const HWSprite& sprite, uint32_t drawListType, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material, SceneDebugStats& stats)
 	{
 		VoxelActorCacheLookup lookup = {};
-		uint64_t identityKey = 0;
-		if (!TryBuildVoxelActorIdentityKey(sprite, identityKey))
+		if (!TryBuildVoxelActorIdentity(sprite, lookup))
 		{
 			stats.voxelStableUncacheable++;
 			stats.voxelStableSplitLive++;
@@ -1551,9 +1581,8 @@ namespace
 
 		stats.voxelStableCandidates++;
 		const uint64_t signature = BuildVoxelActorSignature(sprite, drawListType, voxelTexture, mesh, material);
-		lookup.identityKey = identityKey;
 		lookup.signature = signature;
-		auto found = gVoxelActorCache.find(identityKey);
+		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end())
 		{
 			stats.voxelStableSignatureMisses++;
@@ -1564,6 +1593,11 @@ namespace
 
 		lookup.entry = &found->second;
 		lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
+		lookup.entry->identityKey = lookup.identityKey;
+		lookup.entry->actorIndex = lookup.actorIndex;
+		lookup.entry->actorPtr = lookup.actorPtr;
+		lookup.entry->voxelPtr = lookup.voxelPtr;
+		lookup.entry->voxelModelPtr = lookup.voxelModelPtr;
 		if (lookup.entry->signature == signature && lookup.entry->hasSurface)
 		{
 			if (!lookup.entry->persistentReady)
@@ -1613,6 +1647,11 @@ namespace
 		VoxelActorCacheEntry& entry = gVoxelActorCache[lookup.identityKey];
 		const bool hadSurface = entry.hasSurface;
 		entry.signature = lookup.signature;
+		entry.identityKey = lookup.identityKey;
+		entry.actorIndex = lookup.actorIndex;
+		entry.actorPtr = lookup.actorPtr;
+		entry.voxelPtr = lookup.voxelPtr;
+		entry.voxelModelPtr = lookup.voxelModelPtr;
 		entry.surface = liveSurface;
 		NormalizeCachedSurfacePreviousPositions(entry.surface);
 		entry.lastSeenFrame = gVoxelActorCacheFrame;
@@ -1628,6 +1667,42 @@ namespace
 		else if (lookup.stability == VoxelActorStability::Changed)
 		{
 			stats.voxelCacheSurfaceRebuilds++;
+		}
+	}
+
+	void BuildLiveVoxelActorIdentityKeys(std::unordered_set<uint64_t>& outKeys)
+	{
+		outKeys.clear();
+		if (!r_voxels)
+		{
+			return;
+		}
+
+		TSpriteIterator<DCoreActor> it;
+		while (DCoreActor* actor = it.Next())
+		{
+			if (actor == nullptr || !actor->exists() || (actor->ObjectFlags & OF_EuthanizeMe) != 0)
+			{
+				continue;
+			}
+
+			const int32_t actorIndex = (int32_t)actor->GetIndex();
+			if (actorIndex < 0)
+			{
+				continue;
+			}
+
+			const int voxelIndex = GetExtInfo(actor->spr.spritetexture()).tiletovox;
+			if (voxelIndex < 0 || voxelIndex >= MAXVOXELS || voxmodels[voxelIndex] == nullptr || voxmodels[voxelIndex]->model == nullptr)
+			{
+				continue;
+			}
+
+			const uint64_t identityKey = BuildVoxelActorIdentityKey(actorIndex, actor, voxmodels[voxelIndex]);
+			if (identityKey != 0)
+			{
+				outKeys.insert(identityKey);
+			}
 		}
 	}
 
@@ -1647,9 +1722,12 @@ namespace
 
 	void PruneVoxelActorCache(SceneDebugStats& stats)
 	{
+		std::unordered_set<uint64_t> liveActorKeys;
+		BuildLiveVoxelActorIdentityKeys(liveActorKeys);
+
 		for (auto it = gVoxelActorCache.begin(); it != gVoxelActorCache.end(); )
 		{
-			if (it->second.lastSeenFrame != gVoxelActorCacheFrame)
+			if (liveActorKeys.find(it->first) == liveActorKeys.end())
 			{
 				it = gVoxelActorCache.erase(it);
 				stats.voxelCacheSurfaceRemoves++;

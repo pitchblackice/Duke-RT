@@ -1141,6 +1141,8 @@ private:
 		{
 			uint64_t identityKey = 0;
 			uint64_t signature = 0;
+			bool active = true;
+			nri_scene::SurfaceRef surface;
 			uint32_t primitiveOffset = 0;
 			uint32_t primitiveCount = 0;
 			uint32_t indexOffset = 0;
@@ -1155,6 +1157,7 @@ private:
 		uint32_t surfaceCount = 0;
 		uint32_t primitiveCount = 0;
 		uint32_t materialCount = 0;
+		uint32_t activeActorCount = 0;
 		uint32_t rebuildCount = 0;
 		nri_scene::SceneView sceneView;
 		nri_scene::GeometryData geometry;
