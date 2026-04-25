@@ -11461,7 +11461,7 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 	DestroyBufferResource(mPersistentVoxelIndexBuffer);
 	DestroyBufferResource(mPersistentVoxelPrimitiveBuffer);
 	DestroyBufferResource(mPersistentVoxelMaterialBuffer);
-	mPersistentVoxelSceneBufferSerial = 0;
+	mPersistentVoxelGeometryUploadHash = 0;
 	mPersistentVoxelMaterialUploadHash = 0;
 	mBoundPersistentVoxelPrimitiveCount = 0;
 	mBoundPersistentVoxelMaterialCount = 0;
@@ -11601,6 +11601,25 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return false;
 	}
 
+	uint64_t geometryUploadHash = 1469598103934665603ull;
+	geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)next.actors.size());
+	geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)next.geometry.vertices.size());
+	geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)next.geometry.indices.size());
+	geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)next.geometry.primitives.size());
+	geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)next.materialBridge.materials.size());
+	for (const PersistentVoxelBatch::ActorEntry& actor : next.actors)
+	{
+		geometryUploadHash = HashCombine64(geometryUploadHash, actor.identityKey);
+		geometryUploadHash = HashCombine64(geometryUploadHash, actor.signature);
+		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.primitiveOffset);
+		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.primitiveCount);
+		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.indexOffset);
+		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.indexCount);
+		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.materialOffset);
+		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.materialCount);
+	}
+	next.geometryUploadHash = geometryUploadHash;
+
 	mPersistentVoxelBatch = std::move(next);
 	return true;
 }
@@ -11617,7 +11636,7 @@ bool NRIRenderer::UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene:
 		HashCombine64(1469598103934665603ull, 0ull) :
 		HashBytes64(reinterpret_cast<const uint8_t*>(materials.data()), materials.size() * sizeof(nri_scene::MaterialData));
 	const bool uploadGeometry =
-		mPersistentVoxelSceneBufferSerial != mPersistentVoxelBatch.sourceSerial ||
+		mPersistentVoxelGeometryUploadHash != mPersistentVoxelBatch.geometryUploadHash ||
 		mPersistentVoxelVertexBuffer.buffer == nullptr ||
 		mPersistentVoxelIndexBuffer.buffer == nullptr ||
 		mPersistentVoxelPrimitiveBuffer.buffer == nullptr;
@@ -11692,7 +11711,7 @@ bool NRIRenderer::UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene:
 		return false;
 	}
 
-	mPersistentVoxelSceneBufferSerial = mPersistentVoxelBatch.sourceSerial;
+	mPersistentVoxelGeometryUploadHash = mPersistentVoxelBatch.geometryUploadHash;
 	mPersistentVoxelMaterialUploadHash = materialHash;
 	return true;
 }
@@ -25187,7 +25206,7 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundDynamicMaterialCount = 0;
 	mBoundPersistentVoxelPrimitiveCount = 0;
 	mBoundPersistentVoxelMaterialCount = 0;
-	mPersistentVoxelSceneBufferSerial = 0;
+	mPersistentVoxelGeometryUploadHash = 0;
 	mPersistentVoxelMaterialUploadHash = 0;
 	mBoundPortalCount = 0;
 	mBoundRuntimeLightCount = 0;

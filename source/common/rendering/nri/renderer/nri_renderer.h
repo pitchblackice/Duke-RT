@@ -1151,6 +1151,7 @@ private:
 
 		bool valid = false;
 		uint64_t sourceSerial = 0;
+		uint64_t geometryUploadHash = 0;
 		uint32_t surfaceCount = 0;
 		uint32_t primitiveCount = 0;
 		uint32_t materialCount = 0;
@@ -1869,7 +1870,7 @@ private:
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	PersistentVoxelBatch mPersistentVoxelBatch = {};
 	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
-	uint64_t mPersistentVoxelSceneBufferSerial = 0;
+	uint64_t mPersistentVoxelGeometryUploadHash = 0;
 	uint64_t mPersistentVoxelMaterialUploadHash = 0;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
