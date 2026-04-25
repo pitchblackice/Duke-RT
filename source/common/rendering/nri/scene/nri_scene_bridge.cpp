@@ -62,6 +62,7 @@ namespace
 		SurfaceRef surface;
 		uint64_t lastSeenFrame = 0;
 		uint32_t primitiveCount = 0;
+		bool persistentReady = false;
 		bool hasSurface = false;
 	};
 
@@ -1565,6 +1566,11 @@ namespace
 		lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
 		if (lookup.entry->signature == signature && lookup.entry->hasSurface)
 		{
+			if (!lookup.entry->persistentReady)
+			{
+				lookup.entry->persistentReady = true;
+				++gVoxelActorCacheSerial;
+			}
 			stats.voxelStableSignatureHits++;
 			stats.voxelStableSplitStable++;
 			stats.voxelCacheSurfaceHits++;
@@ -1611,6 +1617,7 @@ namespace
 		NormalizeCachedSurfacePreviousPositions(entry.surface);
 		entry.lastSeenFrame = gVoxelActorCacheFrame;
 		entry.primitiveCount = CountSurfacePrimitives(entry.surface);
+		entry.persistentReady = false;
 		entry.hasSurface = true;
 		++gVoxelActorCacheSerial;
 
@@ -2132,7 +2139,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 	sortedEntries.reserve(gVoxelActorCache.size());
 	for (const auto& pair : gVoxelActorCache)
 	{
-		if (pair.second.hasSurface)
+		if (pair.second.hasSurface && pair.second.persistentReady)
 		{
 			sortedEntries.emplace_back(pair.first, &pair.second);
 		}
