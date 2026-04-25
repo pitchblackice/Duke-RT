@@ -19,6 +19,7 @@ struct HitData
 
 static const uint SCENE_DATA_SOURCE_STATIC = 0u;
 static const uint SCENE_DATA_SOURCE_DYNAMIC = 1u;
+static const uint SCENE_DATA_SOURCE_PERSISTENT_VOXEL = 2u;
 static const uint PORTAL_TRAVERSAL_CLASS_NONE = 0u;
 static const uint PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
 static const uint PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
@@ -43,12 +44,28 @@ SceneInstanceData GetSceneInstanceData(uint instanceId)
 
 uint GetPrimitiveCount(uint dataSource)
 {
-	return dataSource == SCENE_DATA_SOURCE_DYNAMIC ? gTraceConstants.DynamicPrimitiveCount : gTraceConstants.StaticPrimitiveCount;
+	if (dataSource == SCENE_DATA_SOURCE_DYNAMIC)
+	{
+		return gTraceConstants.DynamicPrimitiveCount;
+	}
+	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		return 0u;
+	}
+	return gTraceConstants.StaticPrimitiveCount;
 }
 
 uint GetMaterialCount(uint dataSource)
 {
-	return dataSource == SCENE_DATA_SOURCE_DYNAMIC ? gTraceConstants.DynamicMaterialCount : gTraceConstants.StaticMaterialCount;
+	if (dataSource == SCENE_DATA_SOURCE_DYNAMIC)
+	{
+		return gTraceConstants.DynamicMaterialCount;
+	}
+	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		return 0u;
+	}
+	return gTraceConstants.StaticMaterialCount;
 }
 
 PrimitiveData GetPrimitiveData(uint dataSource, uint primitiveIndex)
@@ -56,6 +73,10 @@ PrimitiveData GetPrimitiveData(uint dataSource, uint primitiveIndex)
 	if (dataSource == SCENE_DATA_SOURCE_DYNAMIC)
 	{
 		return gDynamicPrimitives[min(primitiveIndex, max(gTraceConstants.DynamicPrimitiveCount, 1u) - 1u)];
+	}
+	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		return gPersistentVoxelPrimitives[primitiveIndex];
 	}
 
 	return gStaticPrimitives[min(primitiveIndex, max(gTraceConstants.StaticPrimitiveCount, 1u) - 1u)];
@@ -67,6 +88,10 @@ SceneVertex GetVertexData(uint dataSource, uint vertexIndex)
 	{
 		return gDynamicVertices[vertexIndex];
 	}
+	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		return gPersistentVoxelVertices[vertexIndex];
+	}
 
 	return gStaticVertices[vertexIndex];
 }
@@ -76,6 +101,10 @@ MaterialData GetMaterialData(uint materialIndex, uint dataSource)
 	if (dataSource == SCENE_DATA_SOURCE_DYNAMIC)
 	{
 		return gDynamicMaterials[min(materialIndex, max(gTraceConstants.DynamicMaterialCount, 1u) - 1u)];
+	}
+	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		return gPersistentVoxelMaterials[materialIndex];
 	}
 
 	return gStaticMaterials[min(materialIndex, max(gTraceConstants.StaticMaterialCount, 1u) - 1u)];

@@ -2669,7 +2669,7 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 512;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 21;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 25;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
@@ -2747,6 +2747,7 @@ namespace
 	constexpr uint32_t NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT = 45;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
+	constexpr uint32_t NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL = 2;
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_UNKNOWN = 0;
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_STATIC_MAP = 1;
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_CAPTURED_SCENE = 2;
@@ -3449,6 +3450,7 @@ namespace
 		{
 		case NRI_SCENE_DATA_SOURCE_STATIC: return "static";
 		case NRI_SCENE_DATA_SOURCE_DYNAMIC: return "dynamic";
+		case NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL: return "persistent_voxel";
 		default: return "unknown";
 		}
 	}
@@ -6870,6 +6872,8 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
+	mBoundPersistentVoxelPrimitiveCount = 0;
+	mBoundPersistentVoxelMaterialCount = 0;
 	mBoundPortalCount = 0;
 	mBoundRuntimeLightCount = 0;
 	mBoundRuntimeLightTileCountX = 0;
@@ -7618,6 +7622,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::MaterialBridgeData combinedMaterialBridge;
 	std::vector<nri_scene::MaterialData> capturedGpuMaterials;
 	std::vector<nri_scene::MaterialData> dynamicGpuMaterials;
+	std::vector<nri_scene::MaterialData> persistentVoxelGpuMaterials;
 	std::vector<nri_scene::MaterialData> combinedGpuMaterials;
 	const nri_scene::SceneView* activeSceneView = nullptr;
 	const nri_scene::GeometryData* activeGeometry = nullptr;
@@ -7964,12 +7969,6 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			overlayGeometry = {};
 			overlayMaterialBridge = {};
 
-			if (hasPersistentVoxelOverlay)
-			{
-				AppendGeometry(mPersistentVoxelBatch.geometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
-				AppendMaterialBridge(mPersistentVoxelBatch.materialBridge, overlayMaterialBridge);
-			}
-
 			if (hasRuntimeSpaceLinkOverlay)
 			{
 				if (!runtimeSpaceLinkGeometry.primitives.empty())
@@ -8019,7 +8018,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			std::vector<SceneInstanceData> sceneInstances;
 			BuildStaticMapInstances(instances, sceneInstances);
 
-			if (overlayGeometry.primitives.empty())
+			if (overlayGeometry.primitives.empty() && !hasPersistentVoxelOverlay)
 			{
 				accelerationReady =
 					BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static) &&
@@ -8046,6 +8045,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			else
 			{
 				combinedMaterialBridge = mStaticMapScene.materialBridge;
+				if (hasPersistentVoxelOverlay)
+				{
+					AppendMaterialBridge(mPersistentVoxelBatch.materialBridge, combinedMaterialBridge);
+				}
 				AppendMaterialBridge(overlayMaterialBridge, combinedMaterialBridge);
 				paletteReady = EnsurePaletteTexture(combinedMaterialBridge);
 				if (ShouldTraceSkyPerf())
@@ -8054,25 +8057,31 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 				texturesReady = paletteReady && EnsureSceneTextures(mStaticMapScene.sceneView, combinedMaterialBridge, combinedGpuMaterials, false, "static_map_overlay_combined");
 				dynamicGpuMaterials.clear();
+				persistentVoxelGpuMaterials.clear();
 				if (texturesReady)
 				{
 					const size_t staticMaterialCount = mStaticMapScene.gpuMaterials.size();
-					if (combinedGpuMaterials.size() < staticMaterialCount)
+					const size_t persistentVoxelMaterialCount = hasPersistentVoxelOverlay ? mPersistentVoxelBatch.materialBridge.materials.size() : 0u;
+					if (combinedGpuMaterials.size() < staticMaterialCount + persistentVoxelMaterialCount)
 					{
 						texturesReady = false;
 					}
 					else
 					{
-						dynamicGpuMaterials.assign(combinedGpuMaterials.begin() + staticMaterialCount, combinedGpuMaterials.end());
+						persistentVoxelGpuMaterials.assign(
+							combinedGpuMaterials.begin() + staticMaterialCount,
+							combinedGpuMaterials.begin() + staticMaterialCount + persistentVoxelMaterialCount);
+						dynamicGpuMaterials.assign(combinedGpuMaterials.begin() + staticMaterialCount + persistentVoxelMaterialCount, combinedGpuMaterials.end());
 					}
 				}
-				buffersReady = texturesReady && UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials);
+				buffersReady =
+					texturesReady &&
+					UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) &&
+					(!hasPersistentVoxelOverlay || UploadPersistentVoxelSceneBuffers(persistentVoxelGpuMaterials));
 				accelerationReady = false;
-				const uint32_t persistentVoxelPrimitiveCount = hasPersistentVoxelOverlay ? (uint32_t)mPersistentVoxelBatch.geometry.primitives.size() : 0u;
-				const uint32_t persistentVoxelIndexCount = hasPersistentVoxelOverlay ? (uint32_t)mPersistentVoxelBatch.geometry.indices.size() : 0u;
-				const uint32_t liveOverlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size() - persistentVoxelPrimitiveCount;
-				const uint32_t liveOverlayIndexOffset = persistentVoxelIndexCount;
-				const uint32_t liveOverlayIndexCount = (uint32_t)overlayGeometry.indices.size() - persistentVoxelIndexCount;
+				const uint32_t liveOverlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
+				const uint32_t liveOverlayIndexOffset = 0u;
+				const uint32_t liveOverlayIndexCount = (uint32_t)overlayGeometry.indices.size();
 				if (buffersReady)
 				{
 					bool persistentVoxelAsReady = true;
@@ -8102,11 +8111,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					}
 					accelerationReady = persistentVoxelAsReady && dynamicAsReady;
 				}
-				const uint32_t persistentVoxelPrimitiveBase = hasPersistentVoxelOverlay ? (uint32_t)mPersistentVoxelBatch.geometry.primitives.size() : 0u;
 				emissiveSamplingContext.runtimeMutationGeometry = hasRuntimeMutationOverlay ? &runtimeMutationGeometry : nullptr;
-				emissiveSamplingContext.runtimeMutationPrimitiveBaseOffset = persistentVoxelPrimitiveBase + (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
+				emissiveSamplingContext.runtimeMutationPrimitiveBaseOffset = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
 				emissiveSamplingContext.dynamicGeometry = hasActiveDynamicOverlay ? activeDynamicGeometry : nullptr;
-				emissiveSamplingContext.dynamicPrimitiveBaseOffset = persistentVoxelPrimitiveBase + (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationGeometry.primitives.size());
+				emissiveSamplingContext.dynamicPrimitiveBaseOffset = (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationGeometry.primitives.size());
 				if (accelerationReady)
 				{
 					if (hasPersistentVoxelOverlay)
@@ -8130,7 +8138,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 							persistentVoxelInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*resourceIt->second.accelerationStructure.accelerationStructure);
 							instances.push_back(persistentVoxelInstance);
-							sceneInstances.push_back({ actor.primitiveOffset, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
+							sceneInstances.push_back({ actor.primitiveOffset, NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL, 0u, 0u });
 						}
 					}
 
@@ -8146,7 +8154,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
 						instances.push_back(dynamicInstance);
-						sceneInstances.push_back({ persistentVoxelPrimitiveCount, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
+						sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
 					}
 
 					accelerationReady =
@@ -11449,6 +11457,15 @@ void NRIRenderer::ResetPersistentDynamicEmissiveCache()
 void NRIRenderer::ResetPersistentVoxelBatch()
 {
 	mPersistentVoxelBatch = {};
+	DestroyBufferResource(mPersistentVoxelVertexBuffer);
+	DestroyBufferResource(mPersistentVoxelIndexBuffer);
+	DestroyBufferResource(mPersistentVoxelPrimitiveBuffer);
+	DestroyBufferResource(mPersistentVoxelMaterialBuffer);
+	mPersistentVoxelSceneBufferSerial = 0;
+	mPersistentVoxelMaterialUploadHash = 0;
+	mBoundPersistentVoxelPrimitiveCount = 0;
+	mBoundPersistentVoxelMaterialCount = 0;
+	SetCurrentSceneDataDescriptorsInitialized(false);
 	for (auto& pair : mPersistentVoxelActorResources)
 	{
 		DestroyBufferResource(pair.second.vertexBuffer);
@@ -11585,6 +11602,98 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	}
 
 	mPersistentVoxelBatch = std::move(next);
+	return true;
+}
+
+bool NRIRenderer::UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene::MaterialData>& materials)
+{
+	if (!mPersistentVoxelBatch.valid)
+	{
+		return true;
+	}
+
+	const uint64_t materialHash =
+		materials.empty() ?
+		HashCombine64(1469598103934665603ull, 0ull) :
+		HashBytes64(reinterpret_cast<const uint8_t*>(materials.data()), materials.size() * sizeof(nri_scene::MaterialData));
+	const bool uploadGeometry =
+		mPersistentVoxelSceneBufferSerial != mPersistentVoxelBatch.sourceSerial ||
+		mPersistentVoxelVertexBuffer.buffer == nullptr ||
+		mPersistentVoxelIndexBuffer.buffer == nullptr ||
+		mPersistentVoxelPrimitiveBuffer.buffer == nullptr;
+	const bool uploadMaterials =
+		uploadGeometry ||
+		mPersistentVoxelMaterialUploadHash != materialHash ||
+		mPersistentVoxelMaterialBuffer.buffer == nullptr;
+
+	std::vector<nri_scene::PrimitiveData> gpuPrimitives;
+	if (uploadGeometry)
+	{
+		gpuPrimitives = mPersistentVoxelBatch.geometry.primitives;
+		const size_t primitiveCount = std::min(gpuPrimitives.size(), mPersistentVoxelBatch.geometry.primitiveProvenance.size());
+		for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+		{
+			const int32_t chunkIndex = mPersistentVoxelBatch.geometry.primitiveProvenance[primitiveIndex].mapChunkIndex;
+			gpuPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+		}
+		for (size_t primitiveIndex = primitiveCount; primitiveIndex < gpuPrimitives.size(); ++primitiveIndex)
+		{
+			gpuPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+		}
+	}
+
+	if (uploadGeometry &&
+		(!EnsureResidentStructuredBuffer(
+				mPersistentVoxelVertexBuffer,
+				mVertexBufferStats,
+				mPersistentVoxelBatch.geometry.vertices.data(),
+				mPersistentVoxelBatch.geometry.vertices.size() * sizeof(nri_scene::SceneVertex),
+				sizeof(nri_scene::SceneVertex),
+				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+				NRIAccelerationStructureBuildInputAccess(),
+				"persistent_voxel_scene_upload",
+				ResidentUploadKind_Vertex) ||
+			!EnsureResidentStructuredBuffer(
+				mPersistentVoxelIndexBuffer,
+				mIndexBufferStats,
+				mPersistentVoxelBatch.geometry.indices.data(),
+				mPersistentVoxelBatch.geometry.indices.size() * sizeof(uint32_t),
+				sizeof(uint32_t),
+				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+				NRIAccelerationStructureBuildInputAccess(),
+				"persistent_voxel_scene_upload",
+				ResidentUploadKind_Index) ||
+			!EnsureResidentStructuredBuffer(
+				mPersistentVoxelPrimitiveBuffer,
+				mPrimitiveBufferStats,
+				gpuPrimitives.data(),
+				gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData),
+				sizeof(nri_scene::PrimitiveData),
+				nri::BufferUsageBits::SHADER_RESOURCE,
+				NRIComputeShaderResourceAccess(),
+				"persistent_voxel_scene_upload",
+				ResidentUploadKind_Primitive)))
+	{
+		return false;
+	}
+
+	if (uploadMaterials &&
+		!EnsureResidentStructuredBuffer(
+			mPersistentVoxelMaterialBuffer,
+			mMaterialBufferStats,
+			materials.data(),
+			materials.size() * sizeof(nri_scene::MaterialData),
+			sizeof(nri_scene::MaterialData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			"persistent_voxel_scene_upload",
+			ResidentUploadKind_Material))
+	{
+		return false;
+	}
+
+	mPersistentVoxelSceneBufferSerial = mPersistentVoxelBatch.sourceSerial;
+	mPersistentVoxelMaterialUploadHash = materialHash;
 	return true;
 }
 
@@ -15749,6 +15858,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mReprojectionBuffer.shaderView,
 		mVisibleChunkBuffer.shaderView,
 		mVisibleFlatPlaneBuffer.shaderView,
+		selectView(mPersistentVoxelVertexBuffer, dynamicVertexBuffer),
+		selectView(mPersistentVoxelIndexBuffer, dynamicIndexBuffer),
+		selectView(mPersistentVoxelPrimitiveBuffer, dynamicPrimitiveBuffer),
+		selectView(mPersistentVoxelMaterialBuffer, dynamicMaterialBuffer),
 	};
 
 	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
@@ -15768,6 +15881,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundDynamicPrimitiveCount = dynamicPrimitiveCount;
 	mBoundStaticMaterialCount = staticMaterialCount;
 	mBoundDynamicMaterialCount = dynamicMaterialCount;
+	mBoundPersistentVoxelPrimitiveCount = mPersistentVoxelBatch.valid ? mPersistentVoxelBatch.primitiveCount : 0u;
+	mBoundPersistentVoxelMaterialCount = mPersistentVoxelBatch.valid ? mPersistentVoxelBatch.materialCount : 0u;
 	mBoundPortalCount = mMapWorld.valid ? (uint32_t)mMapWorld.portals.size() : 0u;
 	mBoundRuntimeLightCount = activeRuntimeLightCount;
 	mBoundRuntimeLightTileCountX = runtimeLightTileCountX;
@@ -25010,6 +25125,10 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mStaticIndexBuffer);
 	DestroyBufferResource(mStaticPrimitiveBuffer);
 	DestroyBufferResource(mStaticMaterialBuffer);
+	DestroyBufferResource(mPersistentVoxelVertexBuffer);
+	DestroyBufferResource(mPersistentVoxelIndexBuffer);
+	DestroyBufferResource(mPersistentVoxelPrimitiveBuffer);
+	DestroyBufferResource(mPersistentVoxelMaterialBuffer);
 	DestroyBufferResource(mVertexBuffer);
 	DestroyBufferResource(mIndexBuffer);
 	DestroyBufferResource(mPrimitiveBuffer);
@@ -25059,6 +25178,10 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
+	mBoundPersistentVoxelPrimitiveCount = 0;
+	mBoundPersistentVoxelMaterialCount = 0;
+	mPersistentVoxelSceneBufferSerial = 0;
+	mPersistentVoxelMaterialUploadHash = 0;
 	mBoundPortalCount = 0;
 	mBoundRuntimeLightCount = 0;
 	mBoundRuntimeLightTileCountX = 0;
@@ -25197,6 +25320,8 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
+	mBoundPersistentVoxelPrimitiveCount = 0;
+	mBoundPersistentVoxelMaterialCount = 0;
 	mBoundPortalCount = 0;
 	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	mRuntimeMapMutations.chunks.clear();

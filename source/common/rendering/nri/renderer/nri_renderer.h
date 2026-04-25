@@ -1579,6 +1579,7 @@ private:
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch();
 	bool BuildPersistentVoxelActorAccelerationStructures(const nri_scene::GeometryData& geometry);
+	bool UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
 	bool TryApplyRuntimeMutationChunkToResidentScene(
@@ -1805,6 +1806,10 @@ private:
 	NRIBufferResource mStaticIndexBuffer;
 	NRIBufferResource mStaticPrimitiveBuffer;
 	NRIBufferResource mStaticMaterialBuffer;
+	NRIBufferResource mPersistentVoxelVertexBuffer;
+	NRIBufferResource mPersistentVoxelIndexBuffer;
+	NRIBufferResource mPersistentVoxelPrimitiveBuffer;
+	NRIBufferResource mPersistentVoxelMaterialBuffer;
 	NRIBufferResource mTlasInstanceBuffer;
 	NRIBufferResource mSceneInstanceBuffer;
 	NRIBufferResource mPortalBuffer;
@@ -1864,6 +1869,8 @@ private:
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	PersistentVoxelBatch mPersistentVoxelBatch = {};
 	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
+	uint64_t mPersistentVoxelSceneBufferSerial = 0;
+	uint64_t mPersistentVoxelMaterialUploadHash = 0;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};
@@ -1906,7 +1913,7 @@ private:
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneLightSystem::SceneAnalyticLight> mTransientMuzzleFlashLights;
-	std::array<nri::Descriptor*, 21> mSceneDataDescriptors = {};
+	std::array<nri::Descriptor*, 25> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;
@@ -2001,6 +2008,8 @@ private:
 	uint32_t mBoundDynamicPrimitiveCount = 0;
 	uint32_t mBoundStaticMaterialCount = 0;
 	uint32_t mBoundDynamicMaterialCount = 0;
+	uint32_t mBoundPersistentVoxelPrimitiveCount = 0;
+	uint32_t mBoundPersistentVoxelMaterialCount = 0;
 	uint32_t mBoundPortalCount = 0;
 	uint32_t mBoundRuntimeLightCount = 0;
 	uint32_t mBoundRuntimeLightTileCountX = 0;
