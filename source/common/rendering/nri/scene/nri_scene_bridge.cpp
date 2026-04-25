@@ -29,7 +29,6 @@ namespace
 	using namespace nri_scene;
 
 	constexpr float kAttachedWallSpriteDepthNudge = 0.01f;
-	constexpr uint64_t kVoxelActorCacheRetainFrames = 300;
 
 	SkyPerfStats gSkyPerfStats = {};
 	struct AverageColorCacheEntry
@@ -1650,9 +1649,7 @@ namespace
 	{
 		for (auto it = gVoxelActorCache.begin(); it != gVoxelActorCache.end(); )
 		{
-			const bool frameWrapped = gVoxelActorCacheFrame < it->second.lastSeenFrame;
-			const uint64_t missedFrames = frameWrapped ? kVoxelActorCacheRetainFrames + 1u : gVoxelActorCacheFrame - it->second.lastSeenFrame;
-			if (missedFrames > kVoxelActorCacheRetainFrames)
+			if (it->second.lastSeenFrame != gVoxelActorCacheFrame)
 			{
 				it = gVoxelActorCache.erase(it);
 				stats.voxelCacheSurfaceRemoves++;
