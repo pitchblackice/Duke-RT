@@ -473,6 +473,70 @@ namespace
 		return true;
 	}
 
+	struct MapCeilingNudgeStats
+	{
+		uint32_t surfaceCount = 0;
+		uint32_t vertexCount = 0;
+		uint32_t skippedNormalCount = 0;
+	};
+
+	static MapCeilingNudgeStats NudgeMapCeilingSections(nri_scene::SceneView& sceneView, float depthNudge)
+	{
+		MapCeilingNudgeStats stats = {};
+		if (depthNudge <= 0.0f)
+		{
+			return stats;
+		}
+
+		for (nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
+		{
+			if (surface.provenance.sourceType != nri_scene::SurfaceSourceType::MapCeilingSection)
+			{
+				continue;
+			}
+
+			const uint32_t flags = surface.material.flags;
+			if ((flags & nri_scene::MaterialFlag_Flat) == 0 ||
+				(flags & (nri_scene::MaterialFlag_Sprite | nri_scene::MaterialFlag_Mirror | nri_scene::MaterialFlag_Sky | nri_scene::MaterialFlag_Portal)) != 0)
+			{
+				continue;
+			}
+
+			float normal[3] = {};
+			if (!TryComputeCapturedSurfaceNormal(surface, normal))
+			{
+				stats.skippedNormalCount++;
+				continue;
+			}
+
+			if (normal[1] > 0.0f)
+			{
+				normal[0] = -normal[0];
+				normal[1] = -normal[1];
+				normal[2] = -normal[2];
+			}
+			if (normal[1] >= 0.0f)
+			{
+				stats.skippedNormalCount++;
+				continue;
+			}
+
+			for (nri_scene::CapturedVertex& vertex : surface.vertices)
+			{
+				vertex.position[0] += normal[0] * depthNudge;
+				vertex.position[1] += normal[1] * depthNudge;
+				vertex.position[2] += normal[2] * depthNudge;
+				vertex.prevPosition[0] += normal[0] * depthNudge;
+				vertex.prevPosition[1] += normal[1] * depthNudge;
+				vertex.prevPosition[2] += normal[2] * depthNudge;
+				stats.vertexCount++;
+			}
+			stats.surfaceCount++;
+		}
+
+		return stats;
+	}
+
 	static void NudgeBlindSpotReplacementFlats(nri_scene::SceneView& sceneView)
 	{
 		static constexpr float kBlindSpotFlatDepthNudge = 0.01f;
@@ -2494,6 +2558,14 @@ CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLO
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptceilingnudge, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptceilingnudgedistance, 0.01f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
 CVAR(Int, nri_ptmutationtracechunk, 66, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, 198, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptruntimelinktrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -9533,12 +9605,14 @@ void NRIRenderer::PrintStatus() const
 		GetPostSharpenName(resolvedPost),
 		resolvedPost == NRIPostSharpenKind::Off ? "pre-post" : "post-sharpen-output",
 		mLastHistoryResetReason.c_str());
-	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u portal_depth=%u surface_probe=%d\n",
+	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u portal_depth=%u surface_probe=%d ceiling_nudge=%s ceiling_nudge_distance=%.4f\n",
 		nri_ptdirectscene ? "on" : "off",
 		ClampTraceBounceCount((int)nri_ptlightbounces, 4u),
 		ClampTraceBounceCount((int)nri_ptmirrorbounces, 8u),
 		ClampTraceBounceCount((int)nri_ptportaldepth, 8u),
-		(int)nri_ptsurfaceprobe);
+		(int)nri_ptsurfaceprobe,
+		nri_ptceilingnudge ? "on" : "off",
+		(float)nri_ptceilingnudgedistance);
 	Printf("NRI PT lighting shell: directional=%s sector=%s emissive_heuristics=%s\n",
 		mDirectionalLightState.enabled ? "on" : "off",
 		nri_ptsectorlighting ? "on" : "off",
@@ -16106,6 +16180,10 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 	nri_scene::GeometryData chunkGeometry;
 	nri_scene::MaterialBridgeData chunkMaterials;
 	nri_scene::BuildMapChunkSceneView(mapWorld, chunk, chunkSceneView, preservedSkyView);
+	if (nri_ptceilingnudge)
+	{
+		NudgeMapCeilingSections(chunkSceneView, (float)nri_ptceilingnudgedistance);
+	}
 	{
 		Clocker clock(NriPTGeometryBuild);
 		nri_scene::BuildGeometry(chunkSceneView, chunkGeometry);
@@ -19029,6 +19107,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			nri_scene::PTMapWorldStats ignoredVisibleStats = {};
 			if (nri_scene::BuildLiveMapChunkSceneView(mapChunk, liveVisibleChunkView, &ignoredVisibleStats))
 			{
+				if (nri_ptceilingnudge)
+				{
+					NudgeMapCeilingSections(liveVisibleChunkView, (float)nri_ptceilingnudgedistance);
+				}
 				liveVisibleGeometrySignature = ComputeExactGeometrySignature(liveVisibleChunkView);
 				liveVisibleMaterialSignature = ComputeAnimatedMaterialSignature(liveVisibleChunkView);
 				if (liveVisibleGeometrySignature != residentEntry->exactGeometrySignature)
@@ -19152,9 +19234,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
 				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
-			if (replacement.blindSpot && replacement.dragged)
+			const bool blindSpotReplacementNudged = replacement.blindSpot && replacement.dragged;
+			if (blindSpotReplacementNudged)
 			{
 				NudgeBlindSpotReplacementFlats(liveChunkView);
+			}
+			else if (nri_ptceilingnudge)
+			{
+				NudgeMapCeilingSections(liveChunkView, (float)nri_ptceilingnudgedistance);
 			}
 			if (materialOnlyReplacement && !exclusiveMaterialOnlyReplacement)
 			{
@@ -20868,6 +20955,10 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		{
 			continue;
 		}
+		if (nri_ptceilingnudge)
+		{
+			NudgeMapCeilingSections(liveChunkView, (float)nri_ptceilingnudgedistance);
+		}
 
 		nri_scene::GeometryData chunkGeometry;
 		nri_scene::MaterialBridgeData chunkMaterials;
@@ -21596,9 +21687,14 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			}
 
 			nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], residentSceneView);
-			if (replacement.blindSpot && replacement.dragged)
+			const bool blindSpotReplacementNudged = replacement.blindSpot && replacement.dragged;
+			if (blindSpotReplacementNudged)
 			{
 				NudgeBlindSpotReplacementFlats(residentSceneView);
+			}
+			else if (nri_ptceilingnudge)
+			{
+				NudgeMapCeilingSections(residentSceneView, (float)nri_ptceilingnudgedistance);
 			}
 		}
 		{
@@ -21727,6 +21823,10 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			}
 
 			nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], fullLiveSceneView);
+			if (nri_ptceilingnudge)
+			{
+				NudgeMapCeilingSections(fullLiveSceneView, (float)nri_ptceilingnudgedistance);
+			}
 		}
 		{
 			Clocker clock(NriPTGeometryBuild);
@@ -22921,7 +23021,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		{
 			if (!sLoggedPhaseHRrInputPath)
 			{
-				Printf("NRI Phase H: DLRR now builds a separate noisy RrInput before NRD and bypasses opaque denoising for the vendor RR branch.\n");
+				Printf("DLRR now builds a separate noisy RrInput before NRD and bypasses opaque denoising for the vendor RR branch.\n");
 				sLoggedPhaseHRrInputPath = true;
 			}
 
@@ -22941,7 +23041,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		{
 			if (!sLoggedPhaseFDenoiserPath)
 			{
-				Printf("NRI Phase F: the Composition-backed PT paths now route through NRD before Composition when nri_denoise is enabled.\n");
+				Printf("The Composition-backed PT paths now route through NRD before Composition when nri_denoise is enabled.\n");
 				sLoggedPhaseFDenoiserPath = true;
 			}
 
@@ -22949,7 +23049,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 			{
 				if (!sLoggedPhaseFDenoiserFallback)
 				{
-					Printf(TEXTCOLOR_ORANGE "NRI Phase F: NRD dispatch failed in the composition path; falling back to raw trace inputs for this frame.\n");
+					Printf(TEXTCOLOR_ORANGE "NRD dispatch failed in the composition path; falling back to raw trace inputs for this frame.\n");
 					sLoggedPhaseFDenoiserFallback = true;
 				}
 			}
@@ -22967,7 +23067,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 		if (!sLoggedPhaseFTraceTransparentPath)
 		{
-			Printf("NRI Phase F.5: Composition-backed PT paths now pass through placeholder TraceTransparent before output-resolution dispatch.\n");
+			Printf("Composition-backed PT paths now pass through placeholder TraceTransparent before output-resolution dispatch.\n");
 			sLoggedPhaseFTraceTransparentPath = true;
 		}
 
@@ -22983,7 +23083,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	{
 		if (!sLoggedPhaseGResolvedPresentPath)
 		{
-			Printf("NRI Phase G: ptdebug 0 now routes through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
+			Printf("ptdebug 0 now routes through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
 			sLoggedPhaseGResolvedPresentPath = true;
 		}
 
