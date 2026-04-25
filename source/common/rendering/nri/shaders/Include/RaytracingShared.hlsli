@@ -76,7 +76,11 @@ PrimitiveData GetPrimitiveData(uint dataSource, uint primitiveIndex)
 	}
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
+#if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
 		return gPersistentVoxelPrimitives[primitiveIndex];
+#else
+		return gDynamicPrimitives[min(primitiveIndex, max(gTraceConstants.DynamicPrimitiveCount, 1u) - 1u)];
+#endif
 	}
 
 	return gStaticPrimitives[min(primitiveIndex, max(gTraceConstants.StaticPrimitiveCount, 1u) - 1u)];
@@ -90,7 +94,11 @@ SceneVertex GetVertexData(uint dataSource, uint vertexIndex)
 	}
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
+#if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
 		return gPersistentVoxelVertices[vertexIndex];
+#else
+		return gDynamicVertices[vertexIndex];
+#endif
 	}
 
 	return gStaticVertices[vertexIndex];
@@ -104,7 +112,11 @@ MaterialData GetMaterialData(uint materialIndex, uint dataSource)
 	}
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
+#if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
 		return gPersistentVoxelMaterials[materialIndex];
+#else
+		return gDynamicMaterials[min(materialIndex, max(gTraceConstants.DynamicMaterialCount, 1u) - 1u)];
+#endif
 	}
 
 	return gStaticMaterials[min(materialIndex, max(gTraceConstants.StaticMaterialCount, 1u) - 1u)];

@@ -688,15 +688,56 @@ nri::Pipeline* NRIRenderState::GetPipeline(int dt)
 	}
 
 	nri::VertexAttributeDesc attributes[VATTR_MAX] = {};
+	uint8_t attributeCount = 0;
+	bool hasPosition = false;
+	bool hasTexCoord = false;
+	bool hasColor = false;
 	for (int i = 0; i < vertexBuffer->GetAttributeCount(); ++i)
 	{
 		const FVertexBufferAttribute& attr = vertexBuffer->GetAttributes()[i];
-		attributes[i].d3d.semanticName = ToSemanticName(attr.location);
-		attributes[i].d3d.semanticIndex = ToSemanticIndex(attr.location);
-		attributes[i].vk.location = (uint32_t)i;
-		attributes[i].offset = attr.offset;
-		attributes[i].format = ToVertexFormat(attr.format);
-		attributes[i].streamIndex = 0;
+		if (attr.location != VATTR_VERTEX && attr.location != VATTR_TEXCOORD && attr.location != VATTR_COLOR)
+		{
+			continue;
+		}
+
+		if (attr.binding != 0)
+		{
+			continue;
+		}
+
+		nri::Format format = ToVertexFormat(attr.format);
+		if (format == nri::Format::UNKNOWN)
+		{
+			continue;
+		}
+
+		nri::VertexAttributeDesc& outAttr = attributes[attributeCount++];
+		outAttr.d3d.semanticName = ToSemanticName(attr.location);
+		outAttr.d3d.semanticIndex = ToSemanticIndex(attr.location);
+		outAttr.vk.location = (uint32_t)attr.location;
+		outAttr.offset = attr.offset;
+		outAttr.format = format;
+		outAttr.streamIndex = 0;
+
+		hasPosition |= attr.location == VATTR_VERTEX;
+		hasTexCoord |= attr.location == VATTR_TEXCOORD;
+		hasColor |= attr.location == VATTR_COLOR;
+	}
+
+	if (!hasPosition || !hasTexCoord || !hasColor)
+	{
+		static bool sLoggedUnsupportedLayout = false;
+		if (!sLoggedUnsupportedLayout)
+		{
+			Printf("NRI 2D graphics pipeline skipped unsupported vertex layout: attrs=%u position=%u texcoord=%u color=%u layout=0x%llx\n",
+				(uint32_t)vertexBuffer->GetAttributeCount(),
+				hasPosition ? 1u : 0u,
+				hasTexCoord ? 1u : 0u,
+				hasColor ? 1u : 0u,
+				(unsigned long long)vertexBuffer->GetLayoutHash());
+			sLoggedUnsupportedLayout = true;
+		}
+		return nullptr;
 	}
 
 	nri::VertexStreamDesc streamDesc = {};
@@ -705,7 +746,7 @@ nri::Pipeline* NRIRenderState::GetPipeline(int dt)
 
 	nri::VertexInputDesc vertexInput = {};
 	vertexInput.attributes = attributes;
-	vertexInput.attributeNum = (uint8_t)vertexBuffer->GetAttributeCount();
+	vertexInput.attributeNum = attributeCount;
 	vertexInput.streams = &streamDesc;
 	vertexInput.streamNum = 1;
 

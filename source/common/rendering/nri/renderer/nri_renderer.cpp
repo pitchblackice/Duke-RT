@@ -14662,6 +14662,7 @@ bool NRIRenderer::CreatePipelines()
 		std::vector<uint8_t> shaderBlob;
 		if (!mFrameBuffer->LoadShaderBlob(fileName, shaderBlob))
 		{
+			Printf("NRI PT pipeline create failed: shader=%s reason=load\n", fileName);
 			return false;
 		}
 
@@ -14674,7 +14675,13 @@ bool NRIRenderer::CreatePipelines()
 		nri::ComputePipelineDesc pipelineDesc = {};
 		pipelineDesc.pipelineLayout = layout;
 		pipelineDesc.shader = shader;
-		return mFrameBuffer->mCore.CreateComputePipeline(*mFrameBuffer->mDevice, pipelineDesc, mPipelines[(size_t)slot]) == nri::Result::SUCCESS;
+		const nri::Result result = mFrameBuffer->mCore.CreateComputePipeline(*mFrameBuffer->mDevice, pipelineDesc, mPipelines[(size_t)slot]);
+		if (result != nri::Result::SUCCESS)
+		{
+			Printf("NRI PT pipeline create failed: shader=%s slot=%u result=%d\n", fileName, (unsigned)slot, (int)result);
+			return false;
+		}
+		return true;
 	};
 
 	const bool d3d12 = mFrameBuffer->GetSelectedAPI() == nri::GraphicsAPI::D3D12;

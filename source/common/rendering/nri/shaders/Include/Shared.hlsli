@@ -246,10 +246,12 @@ StructuredBuffer<SectorLightData> gSectorLights : register(t17, space2);
 StructuredBuffer<ReprojectionData> gReprojectionDataBuffer : register(t18, space2);
 StructuredBuffer<uint> gVisibleChunkWords : register(t19, space2);
 StructuredBuffer<uint> gVisibleFlatPlaneWords : register(t20, space2);
+#if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
 StructuredBuffer<SceneVertex> gPersistentVoxelVertices : register(t21, space2);
 StructuredBuffer<uint> gPersistentVoxelIndices : register(t22, space2);
 StructuredBuffer<PrimitiveData> gPersistentVoxelPrimitives : register(t23, space2);
 StructuredBuffer<MaterialData> gPersistentVoxelMaterials : register(t24, space2);
+#endif
 
 SamplerState gLinearWrap : register(s0, space0);
 SamplerState gLinearClamp : register(s1, space0);
