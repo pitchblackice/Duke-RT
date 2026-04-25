@@ -72,6 +72,7 @@ public:
 	void BeginFrame();
 	void EndFrame();
 	void NotifyExternalTargetWrite();
+	bool NeedsClear() const { return mNeedsClear; }
 	void ResetPerfTraceStats();
 	PerfTraceStats GetPerfTraceStats() const;
 

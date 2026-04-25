@@ -273,6 +273,7 @@ private:
 	bool EnsureViewSnapshotTexture(uint32_t width, uint32_t height, nri::Format format);
 	NRITextureResource* GetViewSnapshotTargetResource() const;
 	void ClearTargetColor(NRITextureResource& target, float red, float green, float blue, float alpha);
+	void ClearActiveTargetIfPending();
 	void BeginFrameGenerationUiTarget();
 	void DrawFrameGenerationSceneBlendPrefix();
 	void FinalizeFrameGenerationUiTarget();

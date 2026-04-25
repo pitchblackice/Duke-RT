@@ -2117,12 +2117,23 @@ FRenderState* NRIRenderDevice::RenderState()
 
 void NRIRenderDevice::Draw2D()
 {
-	if (!mInitialized || twod == nullptr)
+	if (!mInitialized)
 	{
 		return;
 	}
 
+	if (twod == nullptr)
+	{
+		ClearActiveTargetIfPending();
+		return;
+	}
+
+	const bool restorePendingClearAfterOffscreenFlush = mRenderState->NeedsClear();
 	FlushQueued2DTextureRenders();
+	if (restorePendingClearAfterOffscreenFlush)
+	{
+		mRenderState->Clear(CT_Color);
+	}
 
 	struct Draw2DTraceStats
 	{
@@ -2207,6 +2218,7 @@ void NRIRenderDevice::Draw2D()
 		const uint32_t sceneBlendPrefixCount = GetFrameGenerationSceneBlendPrefixCount();
 		if (sceneBlendPrefixCount >= twod->mData.Size())
 		{
+			ClearActiveTargetIfPending();
 			return;
 		}
 
@@ -2221,6 +2233,7 @@ void NRIRenderDevice::Draw2D()
 
 	const auto traceStats = collectTraceStats(activeDrawer);
 	::Draw2D(activeDrawer, *mRenderState);
+	ClearActiveTargetIfPending();
 
 	if (PerfLoopTraceActive())
 	{
@@ -2555,6 +2568,16 @@ void NRIRenderDevice::ClearTargetColor(NRITextureResource& target, float red, fl
 	mCore.CmdEndRendering(*mCommandBuffer);
 	mActiveTarget = &target;
 	mRenderState->NotifyExternalTargetWrite();
+}
+
+void NRIRenderDevice::ClearActiveTargetIfPending()
+{
+	if (mActiveTarget == nullptr || mRenderState == nullptr || !mRenderState->NeedsClear())
+	{
+		return;
+	}
+
+	ClearTargetColor(*mActiveTarget, mSceneClearColor[0], mSceneClearColor[1], mSceneClearColor[2], mSceneClearColor[3]);
 }
 
 void NRIRenderDevice::BeginFrameGenerationUiTarget()
