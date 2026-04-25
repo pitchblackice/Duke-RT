@@ -445,9 +445,10 @@ void EvaluateSampledEmissiveLighting(
 
 	if (traceVisibility)
 	{
+		TraceShaderStatAdd(TRACE_STAT_EMISSIVE_SHADOW_RAYS, 1u);
 		const float visibility = UseFastEmissiveShadow() ?
 			ComputeFastPointLightShadow(position, receiverLightNormal, lightDir, lightDistance) :
-			ComputePointLightShadow(position, receiverLightNormal, lightDir, lightDistance);
+			ComputePointLightShadowTagged(position, receiverLightNormal, lightDir, lightDistance, TRACE_STATS_KIND_EMISSIVE);
 		if (visibility <= 0.0)
 		{
 			outOccluded = true;
@@ -905,6 +906,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				[loop]
 				for (uint runtimeLightCandidate = 0u; runtimeLightCandidate < runtimeLightTile.indexCount; ++runtimeLightCandidate)
 				{
+					TraceShaderStatAdd(TRACE_STAT_RUNTIME_CANDIDATES, 1u);
 					const uint runtimeLightIndex = gRuntimeLightTileIndices[runtimeLightTile.indexOffset + runtimeLightCandidate];
 					if (runtimeLightIndex >= gTraceConstants.RuntimeLightCount)
 					{
@@ -924,6 +926,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					{
 						continue;
 					}
+					TraceShaderStatAdd(TRACE_STAT_RUNTIME_DISTANCE, 1u);
 
 					const float3 runtimeLightDir = toLight / lightDistance;
 					const float3 runtimeShadingNormal = ResolveLightFacingShadingNormal(material, shadingNormal, runtimeLightDir);
@@ -932,7 +935,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					{
 						continue;
 					}
+					TraceShaderStatAdd(TRACE_STAT_RUNTIME_LAMBERT, 1u);
 
+					if (!directSceneTrace && receivesShadow)
+					{
+						TraceShaderStatAdd(TRACE_STAT_RUNTIME_SHADOW_RAYS, 1u);
+					}
 					const float runtimeShadow = (directSceneTrace || !receivesShadow) ? 1.0 : ComputePointLightShadow(hit.position, runtimeShadingNormal, runtimeLightDir, lightDistance);
 					if (runtimeShadow <= 0.0)
 					{
@@ -959,6 +967,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				[loop]
 				for (uint emissiveSampleIndex = 0u; emissiveSampleIndex < emissiveSampleCount; ++emissiveSampleIndex)
 				{
+					TraceShaderStatAdd(TRACE_STAT_EMISSIVE_SAMPLES, 1u);
 					float3 sampleDiffuse = 0.0;
 					float3 sampleSpecular = 0.0;
 					uint samplePrimitiveIndex = 0xffffffffu;

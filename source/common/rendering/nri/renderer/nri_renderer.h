@@ -526,6 +526,15 @@ public:
 		uint32_t dynamicPrimitiveCount = 0;
 		uint32_t activeMaterialCount = 0;
 		uint32_t sceneInstanceCount = 0;
+		uint32_t sceneInstanceStaticCount = 0;
+		uint32_t sceneInstanceDynamicCount = 0;
+		uint32_t sceneInstancePersistentVoxelCount = 0;
+		uint32_t persistentVoxelActorResourceCount = 0;
+		uint32_t persistentVoxelActorActiveCount = 0;
+		uint32_t persistentVoxelActorPrimitiveCount = 0;
+		uint32_t persistentVoxelActorMaterialCount = 0;
+		uint32_t persistentVoxelActorMinPrimitiveCount = 0;
+		uint32_t persistentVoxelActorMaxPrimitiveCount = 0;
 		bool usedStaticMapScene = false;
 		bool usedDynamicOverlay = false;
 		bool usedPersistentDynamicEmissiveCache = false;
@@ -600,6 +609,14 @@ public:
 		uint64_t residentChunkBatchIndexBytes = 0;
 		uint64_t residentChunkBatchPrimitiveBytes = 0;
 		uint64_t residentChunkBatchMaterialBytes = 0;
+	};
+
+	static constexpr uint32_t TraceShaderStatCount = 48;
+	struct PerfTraceShaderStats
+	{
+		bool valid = false;
+		uint64_t frameNumber = 0;
+		std::array<uint32_t, TraceShaderStatCount> counters = {};
 	};
 
 	struct MemoryTelemetry
@@ -703,6 +720,7 @@ public:
 	const char* GetAvailabilityReason() const;
 	const PerfShellTraceStats& GetLastPerfShellTraceStats() const { return mLastPerfShellTraceStats; }
 	const PerfResourceTraceStats& GetLastPerfResourceTraceStats() const { return mLastPerfResourceTraceStats; }
+	const PerfTraceShaderStats& GetLastPerfTraceShaderStats() const { return mLastPerfTraceShaderStats; }
 	MemoryTelemetry GetMemoryTelemetry() const;
 	static const char* GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot);
 private:
@@ -1777,6 +1795,10 @@ private:
 	bool UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 14>& descriptors);
 	bool UpdateOutputSet();
 	bool UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors);
+	bool EnsureTraceShaderStatsResources();
+	void ResetTraceShaderStatsBuffer();
+	void CopyTraceShaderStatsForReadback(uint64_t frameNumber);
+	void ReadbackTraceShaderStats();
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
 	void TrackLiveSceneTextureResource(NRITextureResource& resource);
@@ -1853,6 +1875,9 @@ private:
 	NRIBufferResource mReprojectionBuffer;
 	NRIBufferResource mVisibleChunkBuffer;
 	NRIBufferResource mVisibleFlatPlaneBuffer;
+	NRIBufferResource mTraceShaderStatsBuffer;
+	NRIBufferResource mTraceShaderStatsReadbackBuffer;
+	NRIBufferResource mTraceShaderStatsZeroBuffer;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
@@ -1878,6 +1903,8 @@ private:
 	SceneBufferDebugStats mVisibleFlatPlaneBufferStats = { "VisibleFlatPlane" };
 	PerfShellTraceStats mLastPerfShellTraceStats = {};
 	PerfResourceTraceStats mLastPerfResourceTraceStats = {};
+	PerfTraceShaderStats mLastPerfTraceShaderStats = {};
+	uint64_t mPendingTraceShaderStatsFrame = 0;
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;

@@ -3024,6 +3024,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 	{
 		const auto& shell = mRenderer->GetLastPerfShellTraceStats();
 		const auto& resource = mRenderer->GetLastPerfResourceTraceStats();
+		const auto& shader = mRenderer->GetLastPerfTraceShaderStats();
 		const auto getRuntimeMutationTraceActionName = [](NRIRenderer::RuntimeMutationTraceAction action) -> const char*
 		{
 			switch (action)
@@ -3073,6 +3074,34 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicPrimitiveCount,
 			shell.activeMaterialCount,
 			shell.sceneInstanceCount);
+		Printf(
+			"PERF pt scene composition NRI: frame=%llu inst_static=%u inst_dynamic=%u inst_persistent_voxel=%u voxel_resources=%u voxel_active=%u voxel_prims=%u voxel_mats=%u voxel_prim_min=%u voxel_prim_max=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneInstanceStaticCount,
+			shell.sceneInstanceDynamicCount,
+			shell.sceneInstancePersistentVoxelCount,
+			shell.persistentVoxelActorResourceCount,
+			shell.persistentVoxelActorActiveCount,
+			shell.persistentVoxelActorPrimitiveCount,
+			shell.persistentVoxelActorMaterialCount,
+			shell.persistentVoxelActorMinPrimitiveCount,
+			shell.persistentVoxelActorMaxPrimitiveCount);
+		if (shader.valid)
+		{
+			const auto& c = shader.counters;
+			Printf(
+				"PERF pt shader trace NRI: frame=%llu stats_frame=%llu trace_calls=%u primary=%u ungated=%u sun=%u point=%u emissive=%u fast_emissive=%u committed=%u miss=%u accept_static=%u accept_dynamic=%u accept_voxel=%u skips=%u max_skip=%u limit=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned long long)shader.frameNumber,
+				c[0], c[1], c[2], c[3], c[4], c[5], c[6],
+				c[7], c[8], c[9], c[10], c[11], c[12], c[13], c[14]);
+			Printf(
+				"PERF pt shader reject NRI: frame=%llu stats_frame=%llu reflection=%u visible=%u hidden_flat=%u oneway=%u transparent=%u noshadow=%u reject_static=%u reject_dynamic=%u reject_voxel=%u runtime_candidates=%u runtime_dist=%u runtime_lambert=%u runtime_shadow_rays=%u emissive_samples=%u emissive_shadow_rays=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned long long)shader.frameNumber,
+				c[15], c[16], c[17], c[18], c[19], c[20], c[21], c[22], c[23],
+				c[24], c[25], c[26], c[27], c[28], c[29]);
+		}
 		Printf(
 			"PERF pt shell detail NRI: frame=%llu static_scene=%.3f mutation=%.3f mutation_analyze=%.3f mutation_rebuild=%.3f mutation_append=%.3f mutation_dirty=%u mutation_rebuilt=%u mutation_held=%u mutation_prims=%u mutation_mats=%u spacelink=%.3f spacelink_prims=%u spacelink_mats=%u debug_sphere=%.3f debug_view=%.3f debug_geo=%.3f debug_mats=%.3f debug_tune=%.3f debug_spheres=%u debug_lons=%u debug_lats=%u debug_prims=%u debug_mats_out=%u overlay=%.3f overlay_prims=%u overlay_mats=%u dynamic_capture=%.3f persistent=%.3f dynamic_as=%.3f dynamic_as_create=%.3f dynamic_as_scratch=%.3f dynamic_as_build=%.3f dynamic_as_barrier=%.3f dynamic_as_prims=%u dynamic_as_verts=%u dynamic_as_indices=%u restore_static=%.3f copy_final=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
@@ -6203,6 +6232,7 @@ bool NRIRenderDevice::CreateRenderResources()
 	poolDesc.textureMaxNum = 16384;
 	poolDesc.storageTextureMaxNum = 64;
 	poolDesc.structuredBufferMaxNum = 64;
+	poolDesc.storageStructuredBufferMaxNum = 16;
 	poolDesc.accelerationStructureMaxNum = 8;
 
 	if (mCore.CreateDescriptorPool(*mDevice, poolDesc, mDescriptorPool) != nri::Result::SUCCESS)

@@ -17,6 +17,7 @@
 #define NRI_FLAG_FAST_EMISSIVE_SHADOW 0x100u
 #define NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS 0x200u
 #define NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW 0x400u
+#define NRI_FLAG_TRACE_SHADER_STATS 0x800u
 #define NRI_TAA_JITTER_PHASE_COUNT 8u
 
 #define MATERIAL_FLAG_INDEXED 1
@@ -301,5 +302,6 @@ NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gGuideSpecHitOutput, u, 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gShadowPenumbraOutput, u, 12, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gDirectLightingOutput, u, 13, SET_OUTPUTS);
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gDirectEmissionOutput, u, 14, SET_OUTPUTS);
+RWStructuredBuffer<uint> gTraceShaderStats : register(u15, space4);
 
 #endif

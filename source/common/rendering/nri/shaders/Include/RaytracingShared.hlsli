@@ -27,6 +27,85 @@ static const uint PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
 static const float TRACE_MIN_DISTANCE = 1e-4;
 static const float TRACE_FILTER_CONTINUE_BIAS = 1e-6;
 static const uint TRACE_FILTER_SKIP_LIMIT = 64u;
+static const uint TRACE_STATS_KIND_PRIMARY = 0u;
+static const uint TRACE_STATS_KIND_UNGATED = 1u;
+static const uint TRACE_STATS_KIND_SUN = 2u;
+static const uint TRACE_STATS_KIND_POINT = 3u;
+static const uint TRACE_STATS_KIND_EMISSIVE = 4u;
+static const uint TRACE_STATS_KIND_FAST_EMISSIVE = 5u;
+static const uint TRACE_STAT_CALLS = 0u;
+static const uint TRACE_STAT_PRIMARY_CALLS = 1u;
+static const uint TRACE_STAT_UNGATED_CALLS = 2u;
+static const uint TRACE_STAT_SUN_CALLS = 3u;
+static const uint TRACE_STAT_POINT_CALLS = 4u;
+static const uint TRACE_STAT_EMISSIVE_CALLS = 5u;
+static const uint TRACE_STAT_FAST_EMISSIVE_CALLS = 6u;
+static const uint TRACE_STAT_COMMITTED = 7u;
+static const uint TRACE_STAT_MISS = 8u;
+static const uint TRACE_STAT_ACCEPT_STATIC = 9u;
+static const uint TRACE_STAT_ACCEPT_DYNAMIC = 10u;
+static const uint TRACE_STAT_ACCEPT_VOXEL = 11u;
+static const uint TRACE_STAT_FILTER_SKIPS = 12u;
+static const uint TRACE_STAT_MAX_SKIP = 13u;
+static const uint TRACE_STAT_SKIP_LIMIT = 14u;
+static const uint TRACE_STAT_REJECT_REFLECTION = 15u;
+static const uint TRACE_STAT_REJECT_VISIBLE = 16u;
+static const uint TRACE_STAT_REJECT_HIDDEN_FLAT = 17u;
+static const uint TRACE_STAT_REJECT_ONEWAY = 18u;
+static const uint TRACE_STAT_REJECT_TRANSPARENT = 19u;
+static const uint TRACE_STAT_REJECT_NO_SHADOW = 20u;
+static const uint TRACE_STAT_REJECT_STATIC = 21u;
+static const uint TRACE_STAT_REJECT_DYNAMIC = 22u;
+static const uint TRACE_STAT_REJECT_VOXEL = 23u;
+static const uint TRACE_STAT_RUNTIME_CANDIDATES = 24u;
+static const uint TRACE_STAT_RUNTIME_DISTANCE = 25u;
+static const uint TRACE_STAT_RUNTIME_LAMBERT = 26u;
+static const uint TRACE_STAT_RUNTIME_SHADOW_RAYS = 27u;
+static const uint TRACE_STAT_EMISSIVE_SAMPLES = 28u;
+static const uint TRACE_STAT_EMISSIVE_SHADOW_RAYS = 29u;
+
+bool TraceShaderStatsEnabled()
+{
+	return (gTraceConstants.Flags & NRI_FLAG_TRACE_SHADER_STATS) != 0u;
+}
+
+void TraceShaderStatAdd(uint index, uint value)
+{
+	if (TraceShaderStatsEnabled())
+	{
+		InterlockedAdd(gTraceShaderStats[index], value);
+	}
+}
+
+void TraceShaderStatMax(uint index, uint value)
+{
+	if (TraceShaderStatsEnabled())
+	{
+		InterlockedMax(gTraceShaderStats[index], value);
+	}
+}
+
+void TraceShaderStatCall(uint kind)
+{
+	TraceShaderStatAdd(TRACE_STAT_CALLS, 1u);
+	TraceShaderStatAdd(TRACE_STAT_PRIMARY_CALLS + min(kind, TRACE_STATS_KIND_FAST_EMISSIVE), 1u);
+}
+
+void TraceShaderStatSource(uint staticIndex, uint dynamicIndex, uint voxelIndex, uint dataSource)
+{
+	if (dataSource == SCENE_DATA_SOURCE_DYNAMIC)
+	{
+		TraceShaderStatAdd(dynamicIndex, 1u);
+	}
+	else if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		TraceShaderStatAdd(voxelIndex, 1u);
+	}
+	else
+	{
+		TraceShaderStatAdd(staticIndex, 1u);
+	}
+}
 
 HitData MakeEmptyHitData()
 {
@@ -664,10 +743,11 @@ HitData TraceBootstrapGeometry(float3 origin, float3 direction)
 	return TraceBootstrapGeometry(origin, direction, false);
 }
 
-bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, bool gateVisibleChunks, bool ignoreNoShadowCast, bool allowReflectionOnlySurfaces, out HitData hitData)
+bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, bool gateVisibleChunks, bool ignoreNoShadowCast, bool allowReflectionOnlySurfaces, uint statsKind, out HitData hitData)
 {
 	hitData = MakeEmptyHitData();
 	float accumulatedDistance = 0.0;
+	TraceShaderStatCall(statsKind);
 
 	[loop]
 	// Runtime replacement overlays can stack many filtered hits in front of the
@@ -694,8 +774,10 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 
 		if (rayQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
 		{
+			TraceShaderStatAdd(TRACE_STAT_MISS, 1u);
 			return false;
 		}
+		TraceShaderStatAdd(TRACE_STAT_COMMITTED, 1u);
 
 		const SceneInstanceData instanceData = GetSceneInstanceData(rayQuery.CommittedInstanceID());
 		const uint primitiveIndex = ResolvePrimitiveIndex(instanceData, rayQuery.CommittedPrimitiveIndex());
@@ -703,24 +785,40 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const float committedDistance = rayQuery.CommittedRayT();
 		if (!allowReflectionOnlySurfaces && IsReflectionOnlyPrimitive(primitive))
 		{
+			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
+			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
+			TraceShaderStatAdd(TRACE_STAT_REJECT_REFLECTION, 1u);
+			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
 			accumulatedDistance = committedDistance;
 			continue;
 		}
 
 		if (gateVisibleChunks && !IsVisibleChunk(primitive.reserved0))
 		{
+			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
+			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
+			TraceShaderStatAdd(TRACE_STAT_REJECT_VISIBLE, 1u);
+			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
 			accumulatedDistance = committedDistance;
 			continue;
 		}
 
 		if (gateVisibleChunks && ShouldRejectHiddenStaticFlat(primitive.materialIndex, instanceData.dataSource, primitive))
 		{
+			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
+			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
+			TraceShaderStatAdd(TRACE_STAT_REJECT_HIDDEN_FLAT, 1u);
+			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
 			accumulatedDistance = committedDistance;
 			continue;
 		}
 
 		if (ShouldIgnoreOneWayHit(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction))
 		{
+			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
+			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
+			TraceShaderStatAdd(TRACE_STAT_REJECT_ONEWAY, 1u);
+			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
 			accumulatedDistance = committedDistance;
 			continue;
 		}
@@ -730,12 +828,20 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const float2 uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
 		if (IsTransparentSurfaceSample(primitive.materialIndex, instanceData.dataSource, uv))
 		{
+			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
+			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
+			TraceShaderStatAdd(TRACE_STAT_REJECT_TRANSPARENT, 1u);
+			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
 			accumulatedDistance = committedDistance;
 			continue;
 		}
 
 		if (ignoreNoShadowCast && !MaterialCastsShadow(GetMaterialData(primitive.materialIndex, instanceData.dataSource)))
 		{
+			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
+			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
+			TraceShaderStatAdd(TRACE_STAT_REJECT_NO_SHADOW, 1u);
+			TraceShaderStatSource(TRACE_STAT_REJECT_STATIC, TRACE_STAT_REJECT_DYNAMIC, TRACE_STAT_REJECT_VOXEL, instanceData.dataSource);
 			accumulatedDistance = committedDistance;
 			continue;
 		}
@@ -751,13 +857,15 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.uv = uv;
 		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, primitiveIndex, primitive.normal, uv);
 		hitData.materialIndex = primitive.materialIndex;
+		TraceShaderStatSource(TRACE_STAT_ACCEPT_STATIC, TRACE_STAT_ACCEPT_DYNAMIC, TRACE_STAT_ACCEPT_VOXEL, instanceData.dataSource);
 		return true;
 	}
 
+	TraceShaderStatAdd(TRACE_STAT_SKIP_LIMIT, 1u);
 	return false;
 }
 
-bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, bool gateVisibleChunks, bool ignoreNoShadowCast, bool allowReflectionOnlySurfaces, out HitData hitData, out float3 exitDirection)
+bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, bool gateVisibleChunks, bool ignoreNoShadowCast, bool allowReflectionOnlySurfaces, uint statsKind, out HitData hitData, out float3 exitDirection)
 {
 	hitData = MakeEmptyHitData();
 	exitDirection = startDirection;
@@ -768,7 +876,7 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 	[loop]
 	for (uint continuationStep = 0u; continuationStep < 32u; ++continuationStep)
 	{
-		if (!TraceClosestSurface(origin, direction, remainingDistance, gateVisibleChunks, ignoreNoShadowCast, allowReflectionOnlySurfaces, hitData))
+		if (!TraceClosestSurface(origin, direction, remainingDistance, gateVisibleChunks, ignoreNoShadowCast, allowReflectionOnlySurfaces, statsKind, hitData))
 		{
 			exitDirection = direction;
 			return false;
@@ -812,14 +920,14 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 
 bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance, uint mirrorBudget, uint portalBudget, out HitData hitData, out float3 exitDirection)
 {
-	return TraceScenePath(startOrigin, startDirection, maxDistance, mirrorBudget, portalBudget, false, false, false, hitData, exitDirection);
+	return TraceScenePath(startOrigin, startDirection, maxDistance, mirrorBudget, portalBudget, false, false, false, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
 }
 
 HitData TracePrimary(float3 origin, float3 direction, bool gateVisibleChunks, out float3 exitDirection)
 {
 	HitData hitData = MakeEmptyHitData();
 	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 4u) & 0xfu);
-	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), gateVisibleChunks, false, false, hitData, exitDirection);
+	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), gateVisibleChunks, false, false, TRACE_STATS_KIND_PRIMARY, hitData, exitDirection);
 	return hitData;
 }
 
@@ -832,7 +940,7 @@ HitData TracePrimaryUngated(float3 origin, float3 direction, out float3 exitDire
 {
 	HitData hitData = MakeEmptyHitData();
 	const uint mirrorBudget = max(1u, (gTraceConstants.BounceCounts >> 4u) & 0xfu);
-	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), false, false, true, hitData, exitDirection);
+	TraceScenePath(origin, direction, 100000.0, mirrorBudget, GetPortalTraversalDepth(), false, false, true, TRACE_STATS_KIND_UNGATED, hitData, exitDirection);
 	return hitData;
 }
 
@@ -846,7 +954,7 @@ float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, ou
 {
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
-	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), false, true, false, shadowHit, ignoredDirection);
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), false, true, false, TRACE_STATS_KIND_SUN, shadowHit, ignoredDirection);
 	shadowHitDistance = blocked ? shadowHit.distance : NRD_FP16_MAX;
 	return blocked ? 0.0 : 1.0;
 }
@@ -857,7 +965,7 @@ float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection)
 	return ComputeSunShadow(position, normal, lightDirection, shadowHitDistance);
 }
 
-float ComputePointLightShadow(float3 position, float3 normal, float3 lightDirection, float lightDistance)
+float ComputePointLightShadowTagged(float3 position, float3 normal, float3 lightDirection, float lightDistance, uint statsKind)
 {
 	if (lightDistance <= 0.051)
 	{
@@ -867,13 +975,18 @@ float ComputePointLightShadow(float3 position, float3 normal, float3 lightDirect
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
-	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, 0u, GetPortalTraversalDepth(), false, true, false, shadowHit, ignoredDirection);
+	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, maxDistance, 0u, GetPortalTraversalDepth(), false, true, false, statsKind, shadowHit, ignoredDirection);
 	return blocked ? 0.0 : 1.0;
+}
+
+float ComputePointLightShadow(float3 position, float3 normal, float3 lightDirection, float lightDistance)
+{
+	return ComputePointLightShadowTagged(position, normal, lightDirection, lightDistance, TRACE_STATS_KIND_POINT);
 }
 
 bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance, out HitData hitData)
 {
-	return TraceClosestSurface(startOrigin, direction, maxDistance, false, false, false, hitData);
+	return TraceClosestSurface(startOrigin, direction, maxDistance, false, false, false, TRACE_STATS_KIND_UNGATED, hitData);
 }
 
 float ComputeFastPointLightShadow(float3 position, float3 normal, float3 lightDirection, float lightDistance)
@@ -885,7 +998,7 @@ float ComputeFastPointLightShadow(float3 position, float3 normal, float3 lightDi
 
 	HitData shadowHit = MakeEmptyHitData();
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
-	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, false, true, false, shadowHit);
+	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, false, true, false, TRACE_STATS_KIND_FAST_EMISSIVE, shadowHit);
 	return blocked ? 0.0 : 1.0;
 }
 

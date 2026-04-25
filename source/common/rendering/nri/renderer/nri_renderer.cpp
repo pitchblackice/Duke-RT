@@ -2662,6 +2662,7 @@ CVAR(Int, nri_ptsectorfilterlotag, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorpulseframes, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorpulseamount, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptvisiblechunkgate, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptshaderstats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
 EXTERN_CVAR(Int, nri_pttraceframes)
@@ -2673,6 +2674,8 @@ namespace
 	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 25;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
+	constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
+	constexpr uint32_t NRI_TRACE_SHADER_STATS_COUNTER_COUNT = NRIRenderer::TraceShaderStatCount;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
 	constexpr uint32_t NRI_MAX_EMISSIVE_PRIMITIVES = 16384;
@@ -2772,6 +2775,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_FAST_EMISSIVE_SHADOW = 0x100u;
 	constexpr uint32_t NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS = 0x200u;
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW = 0x400u;
+	constexpr uint32_t NRI_FLAG_TRACE_SHADER_STATS = 0x800u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr float NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS = 0.5f;
@@ -2851,6 +2855,11 @@ namespace
 	bool ShouldTracePtPerf()
 	{
 		return PerfLoopTraceActive() || ShouldEmitTemporalTraceLogs();
+	}
+
+	bool ShouldCollectTraceShaderStats()
+	{
+		return !!nri_ptshaderstats && ShouldTracePtPerf();
 	}
 
 	const char* GetRuntimeMutationTraceActionName(NRIRenderer::RuntimeMutationTraceAction action)
@@ -8702,6 +8711,49 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mLastPerfShellTraceStats.dynamicPrimitiveCount = activeDynamicGeometry != nullptr ? (uint32_t)activeDynamicGeometry->primitives.size() : 0u;
 		mLastPerfShellTraceStats.activeMaterialCount = (uint32_t)activeGpuMaterials->size();
 		mLastPerfShellTraceStats.sceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
+		mLastPerfShellTraceStats.sceneInstanceStaticCount = 0;
+		mLastPerfShellTraceStats.sceneInstanceDynamicCount = 0;
+		mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount = 0;
+		for (const SceneInstanceData& instance : mBoundSceneInstances)
+		{
+			if (instance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+			{
+				mLastPerfShellTraceStats.sceneInstanceStaticCount++;
+			}
+			else if (instance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC)
+			{
+				mLastPerfShellTraceStats.sceneInstanceDynamicCount++;
+			}
+			else if (instance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+			{
+				mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount++;
+			}
+		}
+		mLastPerfShellTraceStats.persistentVoxelActorResourceCount = (uint32_t)mPersistentVoxelActorResources.size();
+		mLastPerfShellTraceStats.persistentVoxelActorActiveCount = 0;
+		mLastPerfShellTraceStats.persistentVoxelActorPrimitiveCount = 0;
+		mLastPerfShellTraceStats.persistentVoxelActorMaterialCount = 0;
+		mLastPerfShellTraceStats.persistentVoxelActorMinPrimitiveCount = UINT32_MAX;
+		mLastPerfShellTraceStats.persistentVoxelActorMaxPrimitiveCount = 0;
+		for (const auto& resourcePair : mPersistentVoxelActorResources)
+		{
+			const PersistentVoxelActorResource& resource = resourcePair.second;
+			if (resource.primitiveCount == 0)
+			{
+				continue;
+			}
+			mLastPerfShellTraceStats.persistentVoxelActorActiveCount++;
+			mLastPerfShellTraceStats.persistentVoxelActorPrimitiveCount += resource.primitiveCount;
+			mLastPerfShellTraceStats.persistentVoxelActorMaterialCount += resource.materialCount;
+			mLastPerfShellTraceStats.persistentVoxelActorMinPrimitiveCount =
+				std::min(mLastPerfShellTraceStats.persistentVoxelActorMinPrimitiveCount, resource.primitiveCount);
+			mLastPerfShellTraceStats.persistentVoxelActorMaxPrimitiveCount =
+				std::max(mLastPerfShellTraceStats.persistentVoxelActorMaxPrimitiveCount, resource.primitiveCount);
+		}
+		if (mLastPerfShellTraceStats.persistentVoxelActorActiveCount == 0)
+		{
+			mLastPerfShellTraceStats.persistentVoxelActorMinPrimitiveCount = 0;
+		}
 		mLastPerfShellTraceStats.usedStaticMapScene = mUsedStaticMapSceneLastFrame;
 		mLastPerfShellTraceStats.usedDynamicOverlay = mGpuSceneHasDynamicOverlay;
 		mLastPerfShellTraceStats.usedPersistentDynamicEmissiveCache = usingPersistentDynamicEmissiveCache;
@@ -14930,6 +14982,15 @@ bool NRIRenderer::CreatePipelineLayout()
 	outputRange.shaderStages = NRIComputeStage();
 	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
+	nri::DescriptorRangeDesc traceStatsRange = {};
+	traceStatsRange.baseRegisterIndex = NRI_OUTPUT_DESCRIPTOR_NUM;
+	traceStatsRange.descriptorNum = NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM;
+	traceStatsRange.descriptorType = nri::DescriptorType::STORAGE_STRUCTURED_BUFFER;
+	traceStatsRange.shaderStages = NRIComputeStage();
+	traceStatsRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
+
+	nri::DescriptorRangeDesc outputRanges[2] = { outputRange, traceStatsRange };
+
 	nri::DescriptorSetDesc descriptorSets[5] = {};
 	descriptorSets[0].registerSpace = 0;
 	descriptorSets[0].ranges = &samplerRange;
@@ -14947,8 +15008,8 @@ bool NRIRenderer::CreatePipelineLayout()
 	descriptorSets[3].rangeNum = 1;
 	descriptorSets[3].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 	descriptorSets[4].registerSpace = 4;
-	descriptorSets[4].ranges = &outputRange;
-	descriptorSets[4].rangeNum = 1;
+	descriptorSets[4].ranges = outputRanges;
+	descriptorSets[4].rangeNum = (uint32_t)std::size(outputRanges);
 	descriptorSets[4].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::RootConstantDesc rootConstant = {};
@@ -16363,6 +16424,11 @@ bool NRIRenderer::UpdateOutputSet()
 
 bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors)
 {
+	if (!EnsureTraceShaderStatsResources())
+	{
+		return false;
+	}
+
 	const nri::Descriptor* rawDescriptors[NRI_OUTPUT_DESCRIPTOR_NUM] = {};
 	for (size_t i = 0; i < NRI_OUTPUT_DESCRIPTOR_NUM; ++i)
 	{
@@ -16375,7 +16441,176 @@ bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri:
 	update.descriptors = rawDescriptors;
 	update.descriptorNum = NRI_OUTPUT_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+
+	const nri::Descriptor* traceStatsDescriptor = mTraceShaderStatsBuffer.shaderView;
+	nri::UpdateDescriptorRangeDesc statsUpdate = {};
+	statsUpdate.descriptorSet = set;
+	statsUpdate.rangeIndex = 1;
+	statsUpdate.descriptors = &traceStatsDescriptor;
+	statsUpdate.descriptorNum = NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM;
+	mFrameBuffer->mCore.UpdateDescriptorRanges(&statsUpdate, 1);
 	return true;
+}
+
+bool NRIRenderer::EnsureTraceShaderStatsResources()
+{
+	constexpr uint32_t kStride = sizeof(uint32_t);
+	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * kStride;
+	if (mTraceShaderStatsBuffer.buffer == nullptr || mTraceShaderStatsBuffer.shaderView == nullptr)
+	{
+		DestroyBufferResource(mTraceShaderStatsBuffer);
+		nri::BufferDesc desc = {};
+		desc.size = byteSize;
+		desc.structureStride = kStride;
+		desc.usage = NRIFlags(
+			nri::BufferUsageBits::SHADER_RESOURCE_STORAGE,
+			nri::BufferUsageBits::SHADER_RESOURCE);
+		if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, desc, mTraceShaderStatsBuffer.buffer) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
+
+		nri::MemoryDesc memoryDesc = {};
+		mFrameBuffer->mCore.GetBufferMemoryDesc(*mTraceShaderStatsBuffer.buffer, nri::MemoryLocation::DEVICE, memoryDesc);
+		mTraceShaderStatsBuffer.size = desc.size;
+		mTraceShaderStatsBuffer.memorySize = memoryDesc.size;
+		mTraceShaderStatsBuffer.memoryLocation = nri::MemoryLocation::DEVICE;
+		mTraceShaderStatsBuffer.usedSize = byteSize;
+		mTraceShaderStatsBuffer.stride = kStride;
+
+		nri::BufferViewDesc viewDesc = {};
+		viewDesc.buffer = mTraceShaderStatsBuffer.buffer;
+		viewDesc.type = nri::BufferView::STORAGE_STRUCTURED_BUFFER;
+		viewDesc.offset = 0;
+		viewDesc.size = nri::WHOLE_SIZE;
+		viewDesc.structureStride = kStride;
+		if (mFrameBuffer->mCore.CreateBufferView(viewDesc, mTraceShaderStatsBuffer.shaderView) != nri::Result::SUCCESS)
+		{
+			return false;
+		}
+	}
+
+	if (mTraceShaderStatsReadbackBuffer.buffer == nullptr)
+	{
+		if (!CreateBufferWithoutViewAtLocation(
+			mTraceShaderStatsReadbackBuffer,
+			byteSize,
+			kStride,
+			nri::BufferUsageBits::NONE,
+			nri::MemoryLocation::HOST_READBACK))
+		{
+			return false;
+		}
+	}
+
+	if (mTraceShaderStatsZeroBuffer.buffer == nullptr)
+	{
+		if (!CreateBufferWithoutViewAtLocation(
+			mTraceShaderStatsZeroBuffer,
+			byteSize,
+			kStride,
+			nri::BufferUsageBits::NONE,
+			nri::MemoryLocation::DEVICE_UPLOAD))
+		{
+			return false;
+		}
+
+		void* mapped = mFrameBuffer->mCore.MapBuffer(*mTraceShaderStatsZeroBuffer.buffer, 0, byteSize);
+		if (mapped == nullptr)
+		{
+			return false;
+		}
+		std::memset(mapped, 0, (size_t)byteSize);
+		mFrameBuffer->mCore.UnmapBuffer(*mTraceShaderStatsZeroBuffer.buffer);
+	}
+
+	return true;
+}
+
+void NRIRenderer::ResetTraceShaderStatsBuffer()
+{
+	if (!ShouldCollectTraceShaderStats() || mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || !EnsureTraceShaderStatsResources())
+	{
+		return;
+	}
+
+	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * sizeof(uint32_t);
+	nri::BufferBarrierDesc beforeBarriers[2] = {};
+	beforeBarriers[0].buffer = mTraceShaderStatsZeroBuffer.buffer;
+	beforeBarriers[0].before = {};
+	beforeBarriers[0].after = NRICopySourceAccess();
+	beforeBarriers[1].buffer = mTraceShaderStatsBuffer.buffer;
+	beforeBarriers[1].before = {};
+	beforeBarriers[1].after = NRICopyDestinationAccess();
+	nri::BarrierDesc beforeDesc = {};
+	beforeDesc.buffers = beforeBarriers;
+	beforeDesc.bufferNum = 2;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeDesc);
+	mFrameBuffer->mCore.CmdCopyBuffer(
+		*mFrameBuffer->mCommandBuffer,
+		*mTraceShaderStatsBuffer.buffer,
+		0,
+		*mTraceShaderStatsZeroBuffer.buffer,
+		0,
+		byteSize);
+
+	nri::BufferBarrierDesc afterBarrier = {};
+	afterBarrier.buffer = mTraceShaderStatsBuffer.buffer;
+	afterBarrier.before = NRICopyDestinationAccess();
+	afterBarrier.after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+	nri::BarrierDesc afterDesc = {};
+	afterDesc.buffers = &afterBarrier;
+	afterDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterDesc);
+}
+
+void NRIRenderer::CopyTraceShaderStatsForReadback(uint64_t frameNumber)
+{
+	if (!ShouldCollectTraceShaderStats() || mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || !EnsureTraceShaderStatsResources())
+	{
+		return;
+	}
+
+	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * sizeof(uint32_t);
+	nri::BufferBarrierDesc beforeBarrier = {};
+	beforeBarrier.buffer = mTraceShaderStatsBuffer.buffer;
+	beforeBarrier.before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
+	beforeBarrier.after = NRICopySourceAccess();
+	nri::BarrierDesc beforeDesc = {};
+	beforeDesc.buffers = &beforeBarrier;
+	beforeDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeDesc);
+	mFrameBuffer->mCore.CmdCopyBuffer(
+		*mFrameBuffer->mCommandBuffer,
+		*mTraceShaderStatsReadbackBuffer.buffer,
+		0,
+		*mTraceShaderStatsBuffer.buffer,
+		0,
+		byteSize);
+	mPendingTraceShaderStatsFrame = frameNumber;
+}
+
+void NRIRenderer::ReadbackTraceShaderStats()
+{
+	if (!nri_ptshaderstats || mPendingTraceShaderStatsFrame == 0 || mTraceShaderStatsReadbackBuffer.buffer == nullptr)
+	{
+		return;
+	}
+
+	WaitForCommandsTracked("trace_shader_stats_readback");
+	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * sizeof(uint32_t);
+	const void* mapped = mFrameBuffer->mCore.MapBuffer(*mTraceShaderStatsReadbackBuffer.buffer, 0, byteSize);
+	if (mapped == nullptr)
+	{
+		mPendingTraceShaderStatsFrame = 0;
+		return;
+	}
+
+	mLastPerfTraceShaderStats.valid = true;
+	mLastPerfTraceShaderStats.frameNumber = mPendingTraceShaderStatsFrame;
+	std::memcpy(mLastPerfTraceShaderStats.counters.data(), mapped, (size_t)byteSize);
+	mFrameBuffer->mCore.UnmapBuffer(*mTraceShaderStatsReadbackBuffer.buffer);
+	mPendingTraceShaderStatsFrame = 0;
 }
 
 bool NRIRenderer::CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format)
@@ -24288,6 +24523,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
 	Clocker clock(NriPTTraceOpaque);
+	ReadbackTraceShaderStats();
 
 	if (!UpdateReprojectionBuffer())
 	{
@@ -24330,6 +24566,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		(mDirectionalLightState.enabled && mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u) |
 		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
+		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
@@ -24393,8 +24630,10 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
+	ResetTraceShaderStatsBuffer();
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::TraceOpaque));
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
+	CopyTraceShaderStatsForReadback((uint64_t)mFrameIndex);
 	return true;
 }
 
@@ -25648,6 +25887,9 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mReprojectionBuffer);
 	DestroyBufferResource(mVisibleChunkBuffer);
 	DestroyBufferResource(mVisibleFlatPlaneBuffer);
+	DestroyBufferResource(mTraceShaderStatsBuffer);
+	DestroyBufferResource(mTraceShaderStatsReadbackBuffer);
+	DestroyBufferResource(mTraceShaderStatsZeroBuffer);
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
