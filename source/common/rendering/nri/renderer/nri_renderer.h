@@ -1135,6 +1135,19 @@ private:
 		nri_scene::MaterialBridgeData materialBridge;
 	};
 
+	struct PersistentVoxelBatch
+	{
+		bool valid = false;
+		uint64_t sourceSerial = 0;
+		uint32_t surfaceCount = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialCount = 0;
+		uint32_t rebuildCount = 0;
+		nri_scene::SceneView sceneView;
+		nri_scene::GeometryData geometry;
+		nri_scene::MaterialBridgeData materialBridge;
+	};
+
 	struct ActorSpriteDebugStats
 	{
 		uint32_t lastPruneChecks = 0;
@@ -1518,6 +1531,15 @@ private:
 		bool updateLiveState);
 	bool BuildEmissiveTopLevelAccelerationStructure();
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
+	bool BuildDynamicAccelerationStructure(
+		const nri_scene::GeometryData& geometry,
+		uint32_t indexOffset,
+		uint32_t indexCount,
+		uint32_t primitiveCount,
+		NRIAccelerationStructureResource& outAccelerationStructure,
+		bool updateDynamicPerfStats);
+	bool EnsurePersistentVoxelBatch();
+	void ResetPersistentVoxelBatch();
 	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
 	bool TryApplyRuntimeMutationChunkToResidentScene(
@@ -1786,6 +1808,8 @@ private:
 	PerfResourceTraceStats mLastPerfResourceTraceStats = {};
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
+	NRIAccelerationStructureResource mPersistentVoxelBottomLevelAS;
+	uint64_t mPersistentVoxelBottomLevelASSerial = 0;
 	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
@@ -1801,6 +1825,7 @@ private:
 	RuntimeMapMutationCache mRuntimeMapMutations;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
+	PersistentVoxelBatch mPersistentVoxelBatch = {};
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};

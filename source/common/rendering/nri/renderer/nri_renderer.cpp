@@ -7645,6 +7645,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	bool accelerationReady = true;
 	bool usingPersistentDynamicEmissiveCache = false;
 	bool liveDynamicHasEmissive = false;
+	bool hasPersistentVoxelBatch = false;
 
 	{
 		ScopedPtPerfTimer sceneSelectTimer(mLastPerfShellTraceStats.sceneSelectMs);
@@ -7793,6 +7794,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			}
 		}
 
+		hasPersistentVoxelBatch = !deferOverlayThisFrame && EnsurePersistentVoxelBatch();
+
 		PrunePersistentDynamicEmissiveCacheToLiveActors();
 		const PersistentDynamicSurfaceStats persistentDynamicStats = GatherPersistentDynamicEmissiveSurfaceStats();
 		mLastPerfShellTraceStats.persistentDynamicActorSurfaceCount = persistentDynamicStats.actorSurfaceCount;
@@ -7911,10 +7914,36 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			}
 		}
 
+		if (hasPersistentVoxelBatch && mPersistentVoxelBatch.valid)
+		{
+			if (sceneLightDynamicView != nullptr)
+			{
+				sceneLightMergedDynamicSceneView = *sceneLightDynamicView;
+				sceneLightMergedDynamicSceneView.opaqueSprites.insert(
+					sceneLightMergedDynamicSceneView.opaqueSprites.end(),
+					mPersistentVoxelBatch.sceneView.opaqueSprites.begin(),
+					mPersistentVoxelBatch.sceneView.opaqueSprites.end());
+				RebuildSceneViewStats(sceneLightMergedDynamicSceneView);
+				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge, "scene_light_merged_voxels");
+				sceneLightDynamicView = &sceneLightMergedDynamicSceneView;
+				sceneLightDynamicMaterials = &sceneLightMergedDynamicMaterialBridge;
+			}
+			else
+			{
+				sceneLightDynamicView = &mPersistentVoxelBatch.sceneView;
+				sceneLightDynamicMaterials = &mPersistentVoxelBatch.materialBridge;
+			}
+		}
+
 		const bool hasActiveDynamicOverlay =
 			activeDynamicGeometry != nullptr &&
 			!activeDynamicGeometry->primitives.empty() &&
 			activeDynamicMaterials != nullptr;
+		const bool hasPersistentVoxelOverlay =
+			hasPersistentVoxelBatch &&
+			mPersistentVoxelBatch.valid &&
+			!mPersistentVoxelBatch.geometry.primitives.empty() &&
+			!mPersistentVoxelBatch.materialBridge.materials.empty();
 		const bool hasMirrorExtendedDynamicOverlay =
 			hasMirrorExtendedDynamicScene &&
 			!mirrorExtendedDynamicGeometry.primitives.empty() &&
@@ -7929,11 +7958,17 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			return BuildRuntimeDebugSphereOverlay(debugSphereGeometry, debugSphereMaterialBridge);
 		}();
 
-		if (hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay || hasRuntimeDebugSphereOverlay)
+		if (hasPersistentVoxelOverlay || hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay || hasRuntimeDebugSphereOverlay)
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.overlayAssembleMs);
 			overlayGeometry = {};
 			overlayMaterialBridge = {};
+
+			if (hasPersistentVoxelOverlay)
+			{
+				AppendGeometry(mPersistentVoxelBatch.geometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
+				AppendMaterialBridge(mPersistentVoxelBatch.materialBridge, overlayMaterialBridge);
+			}
 
 			if (hasRuntimeSpaceLinkOverlay)
 			{
@@ -8033,29 +8068,97 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 				buffersReady = texturesReady && UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials);
 				accelerationReady = false;
+				const uint32_t persistentVoxelPrimitiveCount = hasPersistentVoxelOverlay ? (uint32_t)mPersistentVoxelBatch.geometry.primitives.size() : 0u;
+				const uint32_t persistentVoxelIndexCount = hasPersistentVoxelOverlay ? (uint32_t)mPersistentVoxelBatch.geometry.indices.size() : 0u;
+				const uint32_t liveOverlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size() - persistentVoxelPrimitiveCount;
+				const uint32_t liveOverlayIndexOffset = persistentVoxelIndexCount;
+				const uint32_t liveOverlayIndexCount = (uint32_t)overlayGeometry.indices.size() - persistentVoxelIndexCount;
 				if (buffersReady)
 				{
-					accelerationReady =
-						BuildDynamicAccelerationStructure(overlayGeometry) &&
-						mDynamicBottomLevelAS.accelerationStructure != nullptr;
+					bool persistentVoxelAsReady = true;
+					bool dynamicAsReady = true;
+					if (hasPersistentVoxelOverlay)
+					{
+						if (mPersistentVoxelBottomLevelAS.accelerationStructure == nullptr ||
+							mPersistentVoxelBottomLevelASSerial != mPersistentVoxelBatch.sourceSerial)
+						{
+							persistentVoxelAsReady =
+								BuildDynamicAccelerationStructure(
+									overlayGeometry,
+									0u,
+									persistentVoxelIndexCount,
+									persistentVoxelPrimitiveCount,
+									mPersistentVoxelBottomLevelAS,
+									false) &&
+								mPersistentVoxelBottomLevelAS.accelerationStructure != nullptr;
+							if (persistentVoxelAsReady)
+							{
+								mPersistentVoxelBottomLevelASSerial = mPersistentVoxelBatch.sourceSerial;
+							}
+						}
+					}
+					else
+					{
+						DestroyAccelerationStructureResource(mPersistentVoxelBottomLevelAS);
+						mPersistentVoxelBottomLevelASSerial = 0;
+					}
+					if (liveOverlayPrimitiveCount > 0)
+					{
+						dynamicAsReady =
+							BuildDynamicAccelerationStructure(
+								overlayGeometry,
+								liveOverlayIndexOffset,
+								liveOverlayIndexCount,
+								liveOverlayPrimitiveCount,
+								mDynamicBottomLevelAS,
+								true) &&
+							mDynamicBottomLevelAS.accelerationStructure != nullptr;
+					}
+					else
+					{
+						DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+						mLastPerfShellTraceStats.dynamicAsPrimitiveCount = 0;
+						mLastPerfShellTraceStats.dynamicAsVertexCount = 0;
+						mLastPerfShellTraceStats.dynamicAsIndexCount = 0;
+					}
+					accelerationReady = persistentVoxelAsReady && dynamicAsReady;
 				}
+				const uint32_t persistentVoxelPrimitiveBase = hasPersistentVoxelOverlay ? (uint32_t)mPersistentVoxelBatch.geometry.primitives.size() : 0u;
 				emissiveSamplingContext.runtimeMutationGeometry = hasRuntimeMutationOverlay ? &runtimeMutationGeometry : nullptr;
-				emissiveSamplingContext.runtimeMutationPrimitiveBaseOffset = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
+				emissiveSamplingContext.runtimeMutationPrimitiveBaseOffset = persistentVoxelPrimitiveBase + (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
 				emissiveSamplingContext.dynamicGeometry = hasActiveDynamicOverlay ? activeDynamicGeometry : nullptr;
-				emissiveSamplingContext.dynamicPrimitiveBaseOffset = (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationGeometry.primitives.size());
+				emissiveSamplingContext.dynamicPrimitiveBaseOffset = persistentVoxelPrimitiveBase + (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationGeometry.primitives.size());
 				if (accelerationReady)
 				{
-					nri::TopLevelInstance dynamicInstance = {};
-					dynamicInstance.transform[0][0] = 1.0f;
-					dynamicInstance.transform[1][1] = 1.0f;
-					dynamicInstance.transform[2][2] = 1.0f;
-					dynamicInstance.instanceId = (uint32_t)sceneInstances.size();
-					dynamicInstance.mask = 0xFF;
-					dynamicInstance.shaderBindingTableLocalOffset = 0;
-					dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-					dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
-					instances.push_back(dynamicInstance);
-					sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
+					if (hasPersistentVoxelOverlay && mPersistentVoxelBottomLevelAS.accelerationStructure != nullptr)
+					{
+						nri::TopLevelInstance persistentVoxelInstance = {};
+						persistentVoxelInstance.transform[0][0] = 1.0f;
+						persistentVoxelInstance.transform[1][1] = 1.0f;
+						persistentVoxelInstance.transform[2][2] = 1.0f;
+						persistentVoxelInstance.instanceId = (uint32_t)sceneInstances.size();
+						persistentVoxelInstance.mask = 0xFF;
+						persistentVoxelInstance.shaderBindingTableLocalOffset = 0;
+						persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+						persistentVoxelInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mPersistentVoxelBottomLevelAS.accelerationStructure);
+						instances.push_back(persistentVoxelInstance);
+						sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
+					}
+
+					if (liveOverlayPrimitiveCount > 0 && mDynamicBottomLevelAS.accelerationStructure != nullptr)
+					{
+						nri::TopLevelInstance dynamicInstance = {};
+						dynamicInstance.transform[0][0] = 1.0f;
+						dynamicInstance.transform[1][1] = 1.0f;
+						dynamicInstance.transform[2][2] = 1.0f;
+						dynamicInstance.instanceId = (uint32_t)sceneInstances.size();
+						dynamicInstance.mask = 0xFF;
+						dynamicInstance.shaderBindingTableLocalOffset = 0;
+						dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
+						instances.push_back(dynamicInstance);
+						sceneInstances.push_back({ persistentVoxelPrimitiveCount, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
+					}
 
 					accelerationReady =
 						BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static | SceneDataBufferMask_Dynamic) &&
@@ -8084,7 +8187,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 			if (paletteReady && texturesReady && buffersReady && accelerationReady)
 			{
-				mUsedDynamicSceneLastFrame = hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay;
+				mUsedDynamicSceneLastFrame = hasPersistentVoxelOverlay || hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay;
 				mGpuSceneHasDynamicOverlay = true;
 				if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
 				{
@@ -8127,7 +8230,29 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 
 				nri_scene::SceneDebugStats dynamicOverlayStats =
-					activeDynamicSceneView != nullptr ? activeDynamicSceneView->stats : nri_scene::SceneDebugStats{};
+					!deferOverlayThisFrame ? dynamicSceneView.stats : nri_scene::SceneDebugStats{};
+				if (activeDynamicSceneView != nullptr)
+				{
+					dynamicOverlayStats = activeDynamicSceneView->stats;
+				}
+				if (hasPersistentVoxelOverlay)
+				{
+					nri_scene::SceneDebugStats persistentVoxelStats = mPersistentVoxelBatch.sceneView.stats;
+					persistentVoxelStats.voxelStableCandidates = 0;
+					persistentVoxelStats.voxelStableUncacheable = 0;
+					persistentVoxelStats.voxelStableSignatureHits = 0;
+					persistentVoxelStats.voxelStableSignatureMisses = 0;
+					persistentVoxelStats.voxelStableSignatureChanges = 0;
+					persistentVoxelStats.voxelStableSplitStable = 0;
+					persistentVoxelStats.voxelStableSplitLive = 0;
+					persistentVoxelStats.voxelCacheEntries = 0;
+					persistentVoxelStats.voxelCacheSurfaceHits = 0;
+					persistentVoxelStats.voxelCacheSurfaceStores = 0;
+					persistentVoxelStats.voxelCacheSurfaceRebuilds = 0;
+					persistentVoxelStats.voxelCacheSurfaceRemoves = 0;
+					persistentVoxelStats.voxelCachePrimitives = 0;
+					dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, persistentVoxelStats);
+				}
 				if (hasMirrorExtendedDynamicScene)
 				{
 					dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorExtendedDynamicSceneView.stats);
@@ -8420,7 +8545,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	mSurfaceProbeFrame.staticPrimitiveCount = mUsedStaticMapSceneLastFrame ? activeStaticProbePrimitiveCount : 0u;
 	mSurfaceProbeFrame.runtimeSpaceLinkPrimitiveCount = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
 	mSurfaceProbeFrame.runtimeMutationPrimitiveCount = (uint32_t)runtimeMutationGeometry.primitives.size();
-	mSurfaceProbeFrame.dynamicPrimitiveCount = activeDynamicGeometry != nullptr ? (uint32_t)activeDynamicGeometry->primitives.size() : 0u;
+	mSurfaceProbeFrame.dynamicPrimitiveCount = !overlayGeometry.primitives.empty() ? (uint32_t)overlayGeometry.primitives.size() : (activeDynamicGeometry != nullptr ? (uint32_t)activeDynamicGeometry->primitives.size() : 0u);
 
 	if (!preserveHistory)
 	{
@@ -9943,6 +10068,7 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mEmissiveTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 
 	accumulateAs(mDynamicBottomLevelAS, telemetry.accelerationStructureBytes);
+	accumulateAs(mPersistentVoxelBottomLevelAS, telemetry.accelerationStructureBytes);
 	accumulateAs(mTopLevelAS, telemetry.accelerationStructureBytes);
 	accumulateAs(mEmissiveTopLevelAS, telemetry.accelerationStructureBytes);
 	for (const auto& chunk : mStaticMapScene.chunks)
@@ -11324,6 +11450,56 @@ void NRIRenderer::ResetPersistentDynamicEmissiveCache()
 {
 	mPersistentDynamicEmissiveCache = {};
 	mActorSpriteDebugStats = {};
+}
+
+void NRIRenderer::ResetPersistentVoxelBatch()
+{
+	mPersistentVoxelBatch = {};
+	DestroyAccelerationStructureResource(mPersistentVoxelBottomLevelAS);
+	mPersistentVoxelBottomLevelASSerial = 0;
+}
+
+bool NRIRenderer::EnsurePersistentVoxelBatch()
+{
+	const uint64_t cacheSerial = nri_scene::GetPersistentVoxelCacheSerial();
+	if (mPersistentVoxelBatch.valid && mPersistentVoxelBatch.sourceSerial == cacheSerial)
+	{
+		return true;
+	}
+
+	nri_scene::SceneView voxelSceneView;
+	if (!nri_scene::BuildPersistentVoxelCacheSceneView(voxelSceneView))
+	{
+		ResetPersistentVoxelBatch();
+		return false;
+	}
+
+	PersistentVoxelBatch next = {};
+	next.sourceSerial = cacheSerial;
+	next.sceneView = std::move(voxelSceneView);
+	next.surfaceCount = (uint32_t)next.sceneView.opaqueSprites.size();
+	{
+		Clocker clock(NriPTGeometryBuild);
+		nri_scene::BuildGeometry(next.sceneView, next.geometry);
+		AssignGeometryPortalIndices(mMapWorld, next.geometry);
+	}
+	{
+		Clocker clock(NriPTMaterialBuild);
+		BuildMaterialsWithActorOverrides(next.sceneView, next.materialBridge, "persistent_voxel");
+	}
+
+	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
+	next.materialCount = (uint32_t)next.materialBridge.materials.size();
+	next.rebuildCount = mPersistentVoxelBatch.rebuildCount + 1u;
+	next.valid = next.surfaceCount > 0 && next.primitiveCount > 0 && next.materialCount > 0;
+	if (!next.valid)
+	{
+		ResetPersistentVoxelBatch();
+		return false;
+	}
+
+	mPersistentVoxelBatch = std::move(next);
+	return true;
 }
 
 void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
@@ -17719,6 +17895,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+	DestroyAccelerationStructureResource(mPersistentVoxelBottomLevelAS);
+	mPersistentVoxelBottomLevelASSerial = 0;
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 
@@ -22500,11 +22678,31 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 
 bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry)
 {
+	return BuildDynamicAccelerationStructure(
+		geometry,
+		0u,
+		(uint32_t)geometry.indices.size(),
+		(uint32_t)geometry.primitives.size(),
+		mDynamicBottomLevelAS,
+		true);
+}
+
+bool NRIRenderer::BuildDynamicAccelerationStructure(
+	const nri_scene::GeometryData& geometry,
+	uint32_t indexOffset,
+	uint32_t indexCount,
+	uint32_t primitiveCount,
+	NRIAccelerationStructureResource& outAccelerationStructure,
+	bool updateDynamicPerfStats)
+{
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicAsMs);
-	mLastPerfShellTraceStats.dynamicAsPrimitiveCount = (uint32_t)geometry.primitives.size();
-	mLastPerfShellTraceStats.dynamicAsVertexCount = (uint32_t)geometry.vertices.size();
-	mLastPerfShellTraceStats.dynamicAsIndexCount = (uint32_t)geometry.indices.size();
-	if (geometry.primitives.empty() || geometry.vertices.empty() || geometry.indices.empty())
+	if (updateDynamicPerfStats)
+	{
+		mLastPerfShellTraceStats.dynamicAsPrimitiveCount = primitiveCount;
+		mLastPerfShellTraceStats.dynamicAsVertexCount = (uint32_t)geometry.vertices.size();
+		mLastPerfShellTraceStats.dynamicAsIndexCount = indexCount;
+	}
+	if (primitiveCount == 0 || geometry.vertices.empty() || indexCount == 0 || indexOffset > geometry.indices.size() || indexOffset + indexCount > geometry.indices.size())
 	{
 		return false;
 	}
@@ -22518,11 +22716,11 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 	dynamicGeometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
 	dynamicGeometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
 	dynamicGeometryDesc.triangles.indexBuffer = mIndexBuffer.buffer;
-	dynamicGeometryDesc.triangles.indexOffset = 0;
-	dynamicGeometryDesc.triangles.indexNum = (uint32_t)geometry.indices.size();
+	dynamicGeometryDesc.triangles.indexOffset = (uint64_t)indexOffset * sizeof(uint32_t);
+	dynamicGeometryDesc.triangles.indexNum = indexCount;
 	dynamicGeometryDesc.triangles.indexType = nri::IndexType::UINT32;
 
-	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+	DestroyAccelerationStructureResource(outAccelerationStructure);
 
 	nri::AccelerationStructureDesc blasDesc = {};
 	blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
@@ -22532,7 +22730,7 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 	const bool createdAs = [&]()
 	{
 		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsCreateMs);
-		return mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, mDynamicBottomLevelAS.accelerationStructure) == nri::Result::SUCCESS;
+		return mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, outAccelerationStructure.accelerationStructure) == nri::Result::SUCCESS;
 	}();
 	if (!createdAs)
 	{
@@ -22541,15 +22739,15 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 
 	{
 		nri::MemoryDesc memoryDesc = {};
-		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*mDynamicBottomLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-		mDynamicBottomLevelAS.memorySize = memoryDesc.size;
-		mDynamicBottomLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
+		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*outAccelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		outAccelerationStructure.memorySize = memoryDesc.size;
+		outAccelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
 	}
 
 	uint64_t requiredScratchSize = 0;
 	{
 		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsScratchMs);
-		requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mDynamicBottomLevelAS.accelerationStructure);
+		requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*outAccelerationStructure.accelerationStructure);
 	}
 	if (mScratchBuffer.buffer == nullptr || mScratchBuffer.size < requiredScratchSize)
 	{
@@ -22564,7 +22762,7 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 	}
 
 	nri::BuildBottomLevelAccelerationStructureDesc dynamicBuild = {};
-	dynamicBuild.dst = mDynamicBottomLevelAS.accelerationStructure;
+	dynamicBuild.dst = outAccelerationStructure.accelerationStructure;
 	dynamicBuild.geometries = &dynamicGeometryDesc;
 	dynamicBuild.geometryNum = 1;
 	dynamicBuild.scratchBuffer = mScratchBuffer.buffer;
@@ -22575,7 +22773,7 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 	}
 
 	nri::BufferBarrierDesc barrier = {};
-	barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*mDynamicBottomLevelAS.accelerationStructure);
+	barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*outAccelerationStructure.accelerationStructure);
 	barrier.before = NRIAccelerationStructureWriteAccess();
 	barrier.after = NRIAccelerationStructureReadAccess();
 
@@ -22587,7 +22785,10 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
 	}
 	mBuiltDynamicSceneASLastFrame = true;
-	mDynamicSceneLastFrame.asBuildCount++;
+	if (updateDynamicPerfStats)
+	{
+		mDynamicSceneLastFrame.asBuildCount++;
+	}
 	return true;
 }
 
@@ -24717,6 +24918,8 @@ void NRIRenderer::DestroyAccelerationStructures()
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
 	}
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+	DestroyAccelerationStructureResource(mPersistentVoxelBottomLevelAS);
+	mPersistentVoxelBottomLevelASSerial = 0;
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;

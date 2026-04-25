@@ -188,4 +188,6 @@ SkyPerfStats ConsumeSkyPerfStats();
 bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView);
 bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
+bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
+uint64_t GetPersistentVoxelCacheSerial();
 }

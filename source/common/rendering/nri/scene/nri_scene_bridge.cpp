@@ -54,6 +54,7 @@ namespace
 	std::unordered_map<const FVoxelModel*, FVoxelMeshData> gVoxelMeshCache;
 	uint64_t gVoxelActorCacheFrame = 0;
 	uint32_t gVoxelActorCacheCaptureDepth = 0;
+	uint64_t gVoxelActorCacheSerial = 1;
 
 	struct VoxelActorCacheEntry
 	{
@@ -1611,6 +1612,7 @@ namespace
 		entry.lastSeenFrame = gVoxelActorCacheFrame;
 		entry.primitiveCount = CountSurfacePrimitives(entry.surface);
 		entry.hasSurface = true;
+		++gVoxelActorCacheSerial;
 
 		if (lookup.stability == VoxelActorStability::New || !hadSurface)
 		{
@@ -1644,6 +1646,7 @@ namespace
 			{
 				it = gVoxelActorCache.erase(it);
 				stats.voxelCacheSurfaceRemoves++;
+				++gVoxelActorCacheSerial;
 				continue;
 			}
 			++it;
@@ -1778,7 +1781,6 @@ namespace
 		const VoxelActorCacheLookup cacheLookup = updatePersistentCache ? TrackVoxelActorSignature(sprite, drawListType, voxelTexture, *mesh, voxelMaterial, stats) : VoxelActorCacheLookup{};
 		if (cacheLookup.stability == VoxelActorStability::Stable && cacheLookup.entry != nullptr && cacheLookup.entry->hasSurface)
 		{
-			outSprites.push_back(cacheLookup.entry->surface);
 			return true;
 		}
 
@@ -2085,6 +2087,57 @@ bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outV
 	}
 
 	return !outView.opaqueSprites.empty();
+}
+
+uint64_t GetPersistentVoxelCacheSerial()
+{
+	return gVoxelActorCacheSerial;
+}
+
+bool BuildPersistentVoxelCacheSceneView(SceneView& outView)
+{
+	outView = {};
+	if (gVoxelActorCache.empty())
+	{
+		return false;
+	}
+
+	std::vector<std::pair<uint64_t, const VoxelActorCacheEntry*>> entries;
+	entries.reserve(gVoxelActorCache.size());
+	for (const auto& pair : gVoxelActorCache)
+	{
+		if (pair.second.hasSurface)
+		{
+			entries.emplace_back(pair.first, &pair.second);
+		}
+	}
+
+	if (entries.empty())
+	{
+		return false;
+	}
+
+	std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b)
+	{
+		return a.first < b.first;
+	});
+
+	outView.opaqueSprites.reserve(entries.size());
+	outView.stats.voxelCacheEntries = (unsigned int)entries.size();
+	for (const auto& entry : entries)
+	{
+		outView.opaqueSprites.push_back(entry.second->surface);
+		const uint32_t primitiveCount = entry.second->primitiveCount;
+		outView.stats.triangleEstimate += primitiveCount;
+		outView.stats.voxelCachePrimitives += primitiveCount;
+		outView.stats.materialRefs++;
+	}
+
+	outView.stats.spriteDrawItems = (unsigned int)outView.opaqueSprites.size();
+	outView.stats.modelDrawItems = outView.stats.spriteDrawItems;
+	outView.stats.voxelProxyDrawItems = outView.stats.spriteDrawItems;
+	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
+	return true;
 }
 
 bool CaptureScene(HWDrawInfo& di, SceneView& outView)
