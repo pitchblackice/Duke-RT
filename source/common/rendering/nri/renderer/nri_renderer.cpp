@@ -22956,14 +22956,17 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &dynamicBuild, 1);
 	}
 
-	nri::BufferBarrierDesc barrier = {};
-	barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*outAccelerationStructure.accelerationStructure);
-	barrier.before = NRIAccelerationStructureWriteAccess();
-	barrier.after = NRIAccelerationStructureReadAccess();
+	nri::BufferBarrierDesc barriers[2] = {};
+	barriers[0].buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*outAccelerationStructure.accelerationStructure);
+	barriers[0].before = NRIAccelerationStructureWriteAccess();
+	barriers[0].after = NRIAccelerationStructureReadAccess();
+	barriers[1].buffer = mScratchBuffer.buffer;
+	barriers[1].before = NRIAccelerationStructureScratchAccess();
+	barriers[1].after = NRIAccelerationStructureScratchAccess();
 
 	nri::BarrierDesc barrierDesc = {};
-	barrierDesc.buffers = &barrier;
-	barrierDesc.bufferNum = 1;
+	barrierDesc.buffers = barriers;
+	barrierDesc.bufferNum = 2;
 	{
 		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsBarrierMs);
 		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
