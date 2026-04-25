@@ -117,6 +117,16 @@ namespace
 			return false;
 		}
 
+		const uint32_t vertexBase = (uint32_t)outGeometry.vertices.size();
+		outGeometry.vertices.reserve(outGeometry.vertices.size() + surface.vertices.size());
+		for (const CapturedVertex& vertex : surface.vertices)
+		{
+			outGeometry.vertices.push_back(MakeVertex(vertex));
+		}
+
+		outGeometry.indices.reserve(outGeometry.indices.size() + surface.indices.size());
+		outGeometry.primitives.reserve(outGeometry.primitives.size() + surface.indices.size() / 3u);
+		outGeometry.primitiveProvenance.reserve(outGeometry.primitiveProvenance.size() + surface.indices.size() / 3u);
 		for (uint32_t i = 0; i + 2 < surface.indices.size(); i += 3)
 		{
 			const uint32_t i0 = surface.indices[i + 0];
@@ -127,14 +137,39 @@ namespace
 				continue;
 			}
 
-			AppendTriangle(
-				MakeVertex(surface.vertices[i0]),
-				MakeVertex(surface.vertices[i1]),
-				MakeVertex(surface.vertices[i2]),
-				materialIndex,
-				flags,
-				surface.provenance,
-				outGeometry);
+			const uint32_t gi0 = vertexBase + i0;
+			const uint32_t gi1 = vertexBase + i1;
+			const uint32_t gi2 = vertexBase + i2;
+			outGeometry.indices.push_back(gi0);
+			outGeometry.indices.push_back(gi1);
+			outGeometry.indices.push_back(gi2);
+
+			const SceneVertex& v0 = outGeometry.vertices[gi0];
+			const SceneVertex& v1 = outGeometry.vertices[gi1];
+			const SceneVertex& v2 = outGeometry.vertices[gi2];
+
+			PrimitiveData primitive = {};
+			primitive.indices[0] = gi0;
+			primitive.indices[1] = gi1;
+			primitive.indices[2] = gi2;
+			primitive.materialIndex = materialIndex;
+			primitive.uv0[0] = v0.uv[0];
+			primitive.uv0[1] = v0.uv[1];
+			primitive.uv1[0] = v1.uv[0];
+			primitive.uv1[1] = v1.uv[1];
+			primitive.uv2[0] = v2.uv[0];
+			primitive.uv2[1] = v2.uv[1];
+			primitive.flags = flags;
+			primitive.portalIndex = UINT32_MAX;
+			ComputeNormal(v0, v1, v2, primitive.normal);
+			if (ShouldFlipFlatNormal(flags, surface.provenance, primitive.normal))
+			{
+				primitive.normal[0] = -primitive.normal[0];
+				primitive.normal[1] = -primitive.normal[1];
+				primitive.normal[2] = -primitive.normal[2];
+			}
+			outGeometry.primitives.push_back(primitive);
+			outGeometry.primitiveProvenance.push_back(surface.provenance);
 		}
 		return true;
 	}

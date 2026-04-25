@@ -14,11 +14,14 @@
 #include "textures.h"
 #include "v_video.h"
 #include <chrono>
+#include <algorithm>
 #include <unordered_map>
 #include <windows.h>
 
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptactorspritetrace)
+CVAR(Int, nri_ptvoxeltrianglebudget, 250000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelmaxtriangles, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -48,6 +51,12 @@ namespace
 	std::unordered_map<uint64_t, AverageColorCacheEntry> gPersistentAverageTextureColorCache;
 	std::unordered_map<const FGameTexture*, CachedSkyInspection> gSkyInspectionCache;
 	std::unordered_map<const FVoxelModel*, FVoxelMeshData> gVoxelMeshCache;
+
+	struct VoxelCaptureBudget
+	{
+		uint32_t remainingTriangles = 0;
+		bool unlimited = false;
+	};
 
 	bool IsUsableGameTexturePointer(FGameTexture* texture);
 
@@ -1358,6 +1367,67 @@ namespace
 		return vertex;
 	}
 
+	void AddVoxelProxyFace(const VSMatrix& matrix, const float* extents, const int* indices, SurfaceRef& outSurface)
+	{
+		static const float corners[8][3] = {
+			{ 0.0f, 0.0f, 0.0f },
+			{ 1.0f, 0.0f, 0.0f },
+			{ 1.0f, 1.0f, 0.0f },
+			{ 0.0f, 1.0f, 0.0f },
+			{ 0.0f, 0.0f, 1.0f },
+			{ 1.0f, 0.0f, 1.0f },
+			{ 1.0f, 1.0f, 1.0f },
+			{ 0.0f, 1.0f, 1.0f },
+		};
+
+		static const float uvs[4][2] = {
+			{ 0.0f, 0.0f },
+			{ 1.0f, 0.0f },
+			{ 1.0f, 1.0f },
+			{ 0.0f, 1.0f },
+		};
+
+		for (int i = 0; i < 4; ++i)
+		{
+			const float* local = corners[indices[i]];
+			CapturedVertex vertex = {};
+			TransformModelPoint(matrix, local[0] * extents[0], local[1] * extents[1], local[2] * extents[2], vertex, uvs[i][0], uvs[i][1]);
+			outSurface.vertices.push_back(vertex);
+		}
+	}
+
+	void CaptureVoxelProxySprite(const HWSprite& sprite, uint32_t drawListType, FGameTexture* voxelTexture, std::vector<SurfaceRef>& outSprites)
+	{
+		static const int faces[6][4] = {
+			{ 0, 1, 2, 3 },
+			{ 4, 5, 6, 7 },
+			{ 0, 4, 7, 3 },
+			{ 1, 5, 6, 2 },
+			{ 3, 2, 6, 7 },
+			{ 0, 1, 5, 4 },
+		};
+
+		const float extents[3] = {
+			(float)sprite.voxel->siz.X,
+			(float)sprite.voxel->siz.Z,
+			(float)sprite.voxel->siz.Y
+		};
+
+		for (const auto& face : faces)
+		{
+			SurfaceRef surface = {};
+			surface.material = MakeMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
+			surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
+			surface.vertices.reserve(4);
+			AddVoxelProxyFace(sprite.rotmat, extents, face, surface);
+			if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
+			{
+				ApplyActorPreviousTransform(surface, sprite.Sprite->ownerActor);
+			}
+			outSprites.push_back(std::move(surface));
+		}
+	}
+
 	const FVoxelMeshData* GetCachedVoxelMesh(FVoxelModel* model)
 	{
 		if (model == nullptr)
@@ -1377,7 +1447,28 @@ namespace
 		return mesh.vertices.Size() > 0 && mesh.indices.Size() >= 3 ? &mesh : nullptr;
 	}
 
-	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, std::vector<SurfaceRef>& outSprites)
+	bool TrySpendVoxelTriangleBudget(uint32_t triangleCount, VoxelCaptureBudget& budget)
+	{
+		if ((int)nri_ptvoxelmaxtriangles > 0 && triangleCount > (uint32_t)(int)nri_ptvoxelmaxtriangles)
+		{
+			return false;
+		}
+
+		if (budget.unlimited)
+		{
+			return true;
+		}
+
+		if (triangleCount > budget.remainingTriangles)
+		{
+			return false;
+		}
+
+		budget.remainingTriangles -= triangleCount;
+		return true;
+	}
+
+	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites)
 	{
 		if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
 		{
@@ -1396,6 +1487,13 @@ namespace
 			return false;
 		}
 
+		const unsigned int indexCount = mesh->indices.Size();
+		if (!TrySpendVoxelTriangleBudget(indexCount / 3u, budget))
+		{
+			CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
+			return true;
+		}
+
 		SurfaceRef surface = {};
 		surface.material = MakeMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
 		surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
@@ -1406,7 +1504,6 @@ namespace
 		}
 
 		const unsigned int vertexCount = mesh->vertices.Size();
-		const unsigned int indexCount = mesh->indices.Size();
 		surface.indices.reserve(indexCount);
 		for (unsigned int i = 0; i + 2u < indexCount; i += 3u)
 		{
@@ -1436,9 +1533,40 @@ namespace
 		return true;
 	}
 
-	void CaptureModelSprites(HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
+	VoxelCaptureBudget MakeVoxelCaptureBudget()
 	{
+		VoxelCaptureBudget budget = {};
+		budget.unlimited = (int)nri_ptvoxeltrianglebudget <= 0;
+		budget.remainingTriangles = budget.unlimited ? 0u : (uint32_t)(int)nri_ptvoxeltrianglebudget;
+		return budget;
+	}
+
+	void CaptureModelSprites(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
+	{
+		std::vector<HWSprite*> sprites;
+		sprites.reserve(list.sprites.Size());
 		for (auto* sprite : list.sprites)
+		{
+			if (sprite != nullptr)
+			{
+				sprites.push_back(sprite);
+			}
+		}
+
+		const DVector3& viewPos = di.Viewpoint.Pos;
+		std::stable_sort(sprites.begin(), sprites.end(), [&viewPos](const HWSprite* a, const HWSprite* b)
+		{
+			const double adx = (double)a->x - viewPos.X;
+			const double ady = (double)a->y + viewPos.Y;
+			const double adz = (double)a->z + viewPos.Z;
+			const double bdx = (double)b->x - viewPos.X;
+			const double bdy = (double)b->y + viewPos.Y;
+			const double bdz = (double)b->z + viewPos.Z;
+			return adx * adx + ady * ady + adz * adz < bdx * bdx + bdy * bdy + bdz * bdz;
+		});
+
+		VoxelCaptureBudget budget = MakeVoxelCaptureBudget();
+		for (auto* sprite : sprites)
 		{
 			if (sprite == nullptr)
 			{
@@ -1458,7 +1586,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, outSprites))
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites))
 			{
 				stats.voxelProxyDrawItems++;
 			}
@@ -1467,6 +1595,7 @@ namespace
 
 	void CaptureActorModelSprites(HWDrawList& list, uint32_t drawListType, int32_t actorIndex, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
 	{
+		VoxelCaptureBudget budget = MakeVoxelCaptureBudget();
 		for (auto* sprite : list.sprites)
 		{
 			if (sprite == nullptr || !IsOwnedByActor(*sprite, actorIndex))
@@ -1487,7 +1616,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, outSprites))
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites))
 			{
 				stats.voxelProxyDrawItems++;
 			}
@@ -1639,7 +1768,7 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDFLATS], GLDL_MASKEDFLATS, outView.opaqueFlats);
 	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats);
 	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
-	CaptureModelSprites(di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
+	CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
 
 	for (const auto& wall : outView.opaqueWalls)
 	{
@@ -1705,7 +1834,7 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats);
 
 	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
-	CaptureModelSprites(di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
+	CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
 	CapturePortalViews(di, outView);
 
 	for (const auto& wall : outView.opaqueWalls)
