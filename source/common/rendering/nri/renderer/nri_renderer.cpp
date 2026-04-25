@@ -802,6 +802,12 @@ public:
 		stats.voxelStableSignatureChanges = preservedStats.voxelStableSignatureChanges;
 		stats.voxelStableSplitStable = preservedStats.voxelStableSplitStable;
 		stats.voxelStableSplitLive = preservedStats.voxelStableSplitLive;
+		stats.voxelCacheEntries = preservedStats.voxelCacheEntries;
+		stats.voxelCacheSurfaceHits = preservedStats.voxelCacheSurfaceHits;
+		stats.voxelCacheSurfaceStores = preservedStats.voxelCacheSurfaceStores;
+		stats.voxelCacheSurfaceRebuilds = preservedStats.voxelCacheSurfaceRebuilds;
+		stats.voxelCacheSurfaceRemoves = preservedStats.voxelCacheSurfaceRemoves;
+		stats.voxelCachePrimitives = preservedStats.voxelCachePrimitives;
 		sceneView.stats = stats;
 	}
 
@@ -4615,6 +4621,12 @@ namespace
 		merged.voxelStableSignatureChanges = a.voxelStableSignatureChanges + b.voxelStableSignatureChanges;
 		merged.voxelStableSplitStable = a.voxelStableSplitStable + b.voxelStableSplitStable;
 		merged.voxelStableSplitLive = a.voxelStableSplitLive + b.voxelStableSplitLive;
+		merged.voxelCacheEntries = a.voxelCacheEntries + b.voxelCacheEntries;
+		merged.voxelCacheSurfaceHits = a.voxelCacheSurfaceHits + b.voxelCacheSurfaceHits;
+		merged.voxelCacheSurfaceStores = a.voxelCacheSurfaceStores + b.voxelCacheSurfaceStores;
+		merged.voxelCacheSurfaceRebuilds = a.voxelCacheSurfaceRebuilds + b.voxelCacheSurfaceRebuilds;
+		merged.voxelCacheSurfaceRemoves = a.voxelCacheSurfaceRemoves + b.voxelCacheSurfaceRemoves;
+		merged.voxelCachePrimitives = a.voxelCachePrimitives + b.voxelCachePrimitives;
 		return merged;
 	}
 
@@ -9820,7 +9832,7 @@ void NRIRenderer::PrintStatus() const
 	if (mHasLoggedStats)
 	{
 		const auto& stats = mLastStats;
-		Printf("NRI PT last scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
+		Printf("NRI PT last scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u entries:%u surface_hits:%u stores:%u rebuilds:%u removes:%u cached_prims:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
 			stats.wallDrawItems,
 			stats.flatDrawItems,
 			stats.spriteDrawItems,
@@ -9835,6 +9847,12 @@ void NRIRenderer::PrintStatus() const
 			stats.voxelStableSignatureChanges,
 			stats.voxelStableSplitStable,
 			stats.voxelStableSplitLive,
+			stats.voxelCacheEntries,
+			stats.voxelCacheSurfaceHits,
+			stats.voxelCacheSurfaceStores,
+			stats.voxelCacheSurfaceRebuilds,
+			stats.voxelCacheSurfaceRemoves,
+			stats.voxelCachePrimitives,
 			stats.mirrorSurfaces,
 			stats.skySurfaces,
 			stats.portalViews,
@@ -24254,7 +24272,7 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 
 	if (!mHasLoggedStats || StatsDiffer(mLastStats, stats))
 	{
-		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
+		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u entries:%u surface_hits:%u stores:%u rebuilds:%u removes:%u cached_prims:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
 			stats.wallDrawItems,
 			stats.flatDrawItems,
 			stats.spriteDrawItems,
@@ -24269,6 +24287,12 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 			stats.voxelStableSignatureChanges,
 			stats.voxelStableSplitStable,
 			stats.voxelStableSplitLive,
+			stats.voxelCacheEntries,
+			stats.voxelCacheSurfaceHits,
+			stats.voxelCacheSurfaceStores,
+			stats.voxelCacheSurfaceRebuilds,
+			stats.voxelCacheSurfaceRemoves,
+			stats.voxelCachePrimitives,
 			stats.mirrorSurfaces,
 			stats.skySurfaces,
 			stats.portalViews,

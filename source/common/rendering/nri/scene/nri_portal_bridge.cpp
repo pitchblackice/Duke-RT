@@ -132,6 +132,12 @@ namespace
 		outView.stats.voxelStableSignatureChanges += source.stats.voxelStableSignatureChanges;
 		outView.stats.voxelStableSplitStable += source.stats.voxelStableSplitStable;
 		outView.stats.voxelStableSplitLive += source.stats.voxelStableSplitLive;
+		outView.stats.voxelCacheEntries += source.stats.voxelCacheEntries;
+		outView.stats.voxelCacheSurfaceHits += source.stats.voxelCacheSurfaceHits;
+		outView.stats.voxelCacheSurfaceStores += source.stats.voxelCacheSurfaceStores;
+		outView.stats.voxelCacheSurfaceRebuilds += source.stats.voxelCacheSurfaceRebuilds;
+		outView.stats.voxelCacheSurfaceRemoves += source.stats.voxelCacheSurfaceRemoves;
+		outView.stats.voxelCachePrimitives += source.stats.voxelCachePrimitives;
 		outView.stats.portalCapturesSkipped += source.stats.portalCapturesSkipped;
 		if (source.sky.priority > outView.sky.priority)
 		{

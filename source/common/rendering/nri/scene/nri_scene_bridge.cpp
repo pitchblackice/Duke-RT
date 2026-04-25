@@ -52,7 +52,19 @@ namespace
 	std::unordered_map<uint64_t, AverageColorCacheEntry> gPersistentAverageTextureColorCache;
 	std::unordered_map<const FGameTexture*, CachedSkyInspection> gSkyInspectionCache;
 	std::unordered_map<const FVoxelModel*, FVoxelMeshData> gVoxelMeshCache;
-	std::unordered_map<uint64_t, uint64_t> gVoxelActorSignatureHistory;
+	uint64_t gVoxelActorCacheFrame = 0;
+	uint32_t gVoxelActorCacheCaptureDepth = 0;
+
+	struct VoxelActorCacheEntry
+	{
+		uint64_t signature = 0;
+		SurfaceRef surface;
+		uint64_t lastSeenFrame = 0;
+		uint32_t primitiveCount = 0;
+		bool hasSurface = false;
+	};
+
+	std::unordered_map<uint64_t, VoxelActorCacheEntry> gVoxelActorCache;
 
 	struct VoxelCaptureBudget
 	{
@@ -66,6 +78,14 @@ namespace
 		New,
 		Stable,
 		Changed,
+	};
+
+	struct VoxelActorCacheLookup
+	{
+		VoxelActorStability stability = VoxelActorStability::Uncacheable;
+		uint64_t identityKey = 0;
+		uint64_t signature = 0;
+		VoxelActorCacheEntry* entry = nullptr;
 	};
 
 	bool IsUsableGameTexturePointer(FGameTexture* texture);
@@ -1515,38 +1535,140 @@ namespace
 		return hash;
 	}
 
-	VoxelActorStability TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material, SceneDebugStats& stats)
+	VoxelActorCacheLookup TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material, SceneDebugStats& stats)
 	{
+		VoxelActorCacheLookup lookup = {};
 		uint64_t identityKey = 0;
 		if (!TryBuildVoxelActorIdentityKey(sprite, identityKey))
 		{
 			stats.voxelStableUncacheable++;
 			stats.voxelStableSplitLive++;
-			return VoxelActorStability::Uncacheable;
+			return lookup;
 		}
 
 		stats.voxelStableCandidates++;
 		const uint64_t signature = BuildVoxelActorSignature(sprite, voxelTexture, mesh, material);
-		auto found = gVoxelActorSignatureHistory.find(identityKey);
-		if (found == gVoxelActorSignatureHistory.end())
+		lookup.identityKey = identityKey;
+		lookup.signature = signature;
+		auto found = gVoxelActorCache.find(identityKey);
+		if (found == gVoxelActorCache.end())
 		{
-			gVoxelActorSignatureHistory.emplace(identityKey, signature);
 			stats.voxelStableSignatureMisses++;
 			stats.voxelStableSplitLive++;
-			return VoxelActorStability::New;
+			lookup.stability = VoxelActorStability::New;
+			return lookup;
 		}
 
-		if (found->second == signature)
+		lookup.entry = &found->second;
+		lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
+		if (lookup.entry->signature == signature && lookup.entry->hasSurface)
 		{
 			stats.voxelStableSignatureHits++;
 			stats.voxelStableSplitStable++;
-			return VoxelActorStability::Stable;
+			stats.voxelCacheSurfaceHits++;
+			lookup.stability = VoxelActorStability::Stable;
+			return lookup;
 		}
 
-		found->second = signature;
 		stats.voxelStableSignatureChanges++;
 		stats.voxelStableSplitLive++;
-		return VoxelActorStability::Changed;
+		lookup.stability = VoxelActorStability::Changed;
+		return lookup;
+	}
+
+	void NormalizeCachedSurfacePreviousPositions(SurfaceRef& surface)
+	{
+		for (CapturedVertex& vertex : surface.vertices)
+		{
+			vertex.prevPosition[0] = vertex.position[0];
+			vertex.prevPosition[1] = vertex.position[1];
+			vertex.prevPosition[2] = vertex.position[2];
+		}
+	}
+
+	uint32_t CountSurfacePrimitives(const SurfaceRef& surface)
+	{
+		if (!surface.indices.empty())
+		{
+			return (uint32_t)(surface.indices.size() / 3u);
+		}
+		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2u : 0u;
+	}
+
+	void StoreVoxelActorCacheSurface(const VoxelActorCacheLookup& lookup, const SurfaceRef& liveSurface, SceneDebugStats& stats)
+	{
+		if (lookup.identityKey == 0)
+		{
+			return;
+		}
+
+		VoxelActorCacheEntry& entry = gVoxelActorCache[lookup.identityKey];
+		const bool hadSurface = entry.hasSurface;
+		entry.signature = lookup.signature;
+		entry.surface = liveSurface;
+		NormalizeCachedSurfacePreviousPositions(entry.surface);
+		entry.lastSeenFrame = gVoxelActorCacheFrame;
+		entry.primitiveCount = CountSurfacePrimitives(entry.surface);
+		entry.hasSurface = true;
+
+		if (lookup.stability == VoxelActorStability::New || !hadSurface)
+		{
+			stats.voxelCacheSurfaceStores++;
+		}
+		else if (lookup.stability == VoxelActorStability::Changed)
+		{
+			stats.voxelCacheSurfaceRebuilds++;
+		}
+	}
+
+	bool BeginVoxelActorCacheFrame()
+	{
+		const bool rootCapture = gVoxelActorCacheCaptureDepth++ == 0;
+		if (rootCapture)
+		{
+			++gVoxelActorCacheFrame;
+			if (gVoxelActorCacheFrame == 0)
+			{
+				gVoxelActorCacheFrame = 1;
+			}
+		}
+		return rootCapture;
+	}
+
+	void PruneVoxelActorCache(SceneDebugStats& stats)
+	{
+		for (auto it = gVoxelActorCache.begin(); it != gVoxelActorCache.end(); )
+		{
+			if (it->second.lastSeenFrame != gVoxelActorCacheFrame)
+			{
+				it = gVoxelActorCache.erase(it);
+				stats.voxelCacheSurfaceRemoves++;
+				continue;
+			}
+			++it;
+		}
+
+		stats.voxelCacheEntries = (unsigned int)gVoxelActorCache.size();
+		stats.voxelCachePrimitives = 0;
+		for (const auto& pair : gVoxelActorCache)
+		{
+			if (pair.second.hasSurface)
+			{
+				stats.voxelCachePrimitives += pair.second.primitiveCount;
+			}
+		}
+	}
+
+	void EndVoxelActorCacheFrame(SceneDebugStats& stats, bool rootCapture)
+	{
+		if (gVoxelActorCacheCaptureDepth > 0)
+		{
+			--gVoxelActorCacheCaptureDepth;
+		}
+		if (rootCapture)
+		{
+			PruneVoxelActorCache(stats);
+		}
 	}
 
 	const FVoxelMeshData* GetCachedVoxelMesh(FVoxelModel* model)
@@ -1589,7 +1711,7 @@ namespace
 		return true;
 	}
 
-	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
+	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats, bool updatePersistentCache)
 	{
 		if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
 		{
@@ -1611,8 +1733,7 @@ namespace
 		}
 
 		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
-		const VoxelActorStability stability = TrackVoxelActorSignature(sprite, voxelTexture, *mesh, voxelMaterial, stats);
-		(void)stability;
+		const VoxelActorCacheLookup cacheLookup = updatePersistentCache ? TrackVoxelActorSignature(sprite, voxelTexture, *mesh, voxelMaterial, stats) : VoxelActorCacheLookup{};
 
 		const unsigned int indexCount = mesh->indices.Size();
 		if (!TrySpendVoxelTriangleBudget(indexCount / 3u, budget))
@@ -1655,6 +1776,10 @@ namespace
 		if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
 		{
 			ApplyActorPreviousTransform(surface, sprite.Sprite->ownerActor);
+		}
+		if (updatePersistentCache && cacheLookup.stability != VoxelActorStability::Stable)
+		{
+			StoreVoxelActorCacheSurface(cacheLookup, surface, stats);
 		}
 		outSprites.push_back(std::move(surface));
 		return true;
@@ -1713,7 +1838,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats))
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats, true))
 			{
 				stats.voxelProxyDrawItems++;
 			}
@@ -1743,7 +1868,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats))
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats, false))
 			{
 				stats.voxelProxyDrawItems++;
 			}
@@ -1875,6 +2000,7 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 {
 	outView = {};
 	outView.drawInfo = &di;
+	const bool rootVoxelCacheFrame = BeginVoxelActorCacheFrame();
 	outView.stats.wallDrawItems =
 		CountDrawListItems(di, GLDL_MASKEDWALLSS) +
 		CountDrawListItems(di, GLDL_MASKEDWALLSD) +
@@ -1896,6 +2022,7 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats);
 	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
 	CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
+	EndVoxelActorCacheFrame(outView.stats, rootVoxelCacheFrame);
 
 	for (const auto& wall : outView.opaqueWalls)
 	{
@@ -1944,6 +2071,7 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 {
 	outView = {};
 	outView.drawInfo = &di;
+	const bool rootVoxelCacheFrame = BeginVoxelActorCacheFrame();
 	outView.stats = CollectDebugStats(di);
 
 	CaptureWalls(di, di.drawlists[GLDL_PLAINWALLS], GLDL_PLAINWALLS, outView.opaqueWalls, outView.stats, outView);
@@ -1963,6 +2091,7 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
 	CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
 	CapturePortalViews(di, outView);
+	EndVoxelActorCacheFrame(outView.stats, rootVoxelCacheFrame);
 
 	for (const auto& wall : outView.opaqueWalls)
 	{

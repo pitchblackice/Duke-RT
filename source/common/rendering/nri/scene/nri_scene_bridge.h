@@ -116,6 +116,12 @@ struct SceneDebugStats
 	unsigned int voxelStableSignatureChanges = 0;
 	unsigned int voxelStableSplitStable = 0;
 	unsigned int voxelStableSplitLive = 0;
+	unsigned int voxelCacheEntries = 0;
+	unsigned int voxelCacheSurfaceHits = 0;
+	unsigned int voxelCacheSurfaceStores = 0;
+	unsigned int voxelCacheSurfaceRebuilds = 0;
+	unsigned int voxelCacheSurfaceRemoves = 0;
+	unsigned int voxelCachePrimitives = 0;
 };
 
 struct SkyPerfStats
