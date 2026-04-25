@@ -8218,7 +8218,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 							persistentVoxelInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*resourceIt->second.accelerationStructure.accelerationStructure);
 							instances.push_back(persistentVoxelInstance);
-							sceneInstances.push_back({ resourceIt->second.primitiveOffset, NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL, 0u, 0u });
+							sceneInstances.push_back({ resourceIt->second.primitiveOffset, NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL, 0u, UINT32_MAX });
 						}
 					}
 
@@ -8234,7 +8234,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
 						instances.push_back(dynamicInstance);
-						sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
+						sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
 					}
 
 					accelerationReady =
@@ -8444,7 +8444,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		std::vector<SceneInstanceData> sceneInstances;
 		if (buffersReady)
 		{
-			sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
+			sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
 			buffersReady = UpdateSceneDataSet(
 				mVertexBuffer,
 				mIndexBuffer,
@@ -16694,8 +16694,16 @@ void NRIRenderer::ReadbackTraceShaderStats()
 		hot.dataSource = instance.dataSource;
 		hot.primitiveOffset = instance.primitiveOffset;
 		hot.primitiveCount = estimateInstancePrimitiveCount(instance);
+		hot.metadata0 = instance.reserved0;
+		hot.metadata1 = instance.reserved1;
 		hot.committed = candidate.committed;
 		hot.accepted = candidate.accepted;
+		hot.primaryCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 0u * TraceShaderInstanceBucketCount + candidate.instanceId];
+		hot.ungatedCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 1u * TraceShaderInstanceBucketCount + candidate.instanceId];
+		hot.sunCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 2u * TraceShaderInstanceBucketCount + candidate.instanceId];
+		hot.pointCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 3u * TraceShaderInstanceBucketCount + candidate.instanceId];
+		hot.emissiveCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 4u * TraceShaderInstanceBucketCount + candidate.instanceId];
+		hot.fastEmissiveCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 5u * TraceShaderInstanceBucketCount + candidate.instanceId];
 	}
 	mFrameBuffer->mCore.UnmapBuffer(*mTraceShaderStatsReadbackBuffer.buffer);
 	mPendingTraceShaderStatsFrame = 0;
@@ -19317,8 +19325,12 @@ void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& ou
 		instance.shaderBindingTableLocalOffset = 0;
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		const uint32_t sectorIndex =
+			entry.chunkIndex < mMapWorld.chunks.size() && mMapWorld.chunks[entry.chunkIndex].sectorIndex >= 0 ?
+			(uint32_t)mMapWorld.chunks[entry.chunkIndex].sectorIndex :
+			UINT32_MAX;
 		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ entry.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, 0u, 0u });
+		outSceneInstances.push_back({ entry.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, entry.chunkIndex, sectorIndex });
 	}
 }
 
@@ -19350,8 +19362,12 @@ void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene
 		instance.shaderBindingTableLocalOffset = 0;
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		const uint32_t sectorIndex =
+			chunk.chunkIndex < mMapWorld.chunks.size() && mMapWorld.chunks[chunk.chunkIndex].sectorIndex >= 0 ?
+			(uint32_t)mMapWorld.chunks[chunk.chunkIndex].sectorIndex :
+			UINT32_MAX;
 		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, 0u, 0u });
+		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, chunk.chunkIndex, sectorIndex });
 	}
 }
 
@@ -19390,8 +19406,12 @@ void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene
 		instance.shaderBindingTableLocalOffset = 0;
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		const uint32_t sectorIndex =
+			atlasChunk.chunkIndex < mMapWorld.chunks.size() && mMapWorld.chunks[atlasChunk.chunkIndex].sectorIndex >= 0 ?
+			(uint32_t)mMapWorld.chunks[atlasChunk.chunkIndex].sectorIndex :
+			UINT32_MAX;
 		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ atlasChunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, 0u, 0u });
+		outSceneInstances.push_back({ atlasChunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, atlasChunk.chunkIndex, sectorIndex });
 	}
 }
 

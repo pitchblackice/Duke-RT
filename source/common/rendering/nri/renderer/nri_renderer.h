@@ -613,9 +613,11 @@ public:
 
 	static constexpr uint32_t TraceShaderScalarStatCount = 64;
 	static constexpr uint32_t TraceShaderInstanceBucketCount = 1024;
+	static constexpr uint32_t TraceShaderRayKindCount = 6;
 	static constexpr uint32_t TraceShaderInstanceCommittedBase = TraceShaderScalarStatCount;
 	static constexpr uint32_t TraceShaderInstanceAcceptedBase = TraceShaderInstanceCommittedBase + TraceShaderInstanceBucketCount;
-	static constexpr uint32_t TraceShaderStatCount = TraceShaderInstanceAcceptedBase + TraceShaderInstanceBucketCount;
+	static constexpr uint32_t TraceShaderInstanceKindCommittedBase = TraceShaderInstanceAcceptedBase + TraceShaderInstanceBucketCount;
+	static constexpr uint32_t TraceShaderStatCount = TraceShaderInstanceKindCommittedBase + TraceShaderRayKindCount * TraceShaderInstanceBucketCount;
 	static constexpr uint32_t TraceShaderHotInstanceCount = 8;
 	struct PerfTraceShaderHotInstance
 	{
@@ -623,8 +625,16 @@ public:
 		uint32_t dataSource = 0;
 		uint32_t primitiveOffset = 0;
 		uint32_t primitiveCount = 0;
+		uint32_t metadata0 = 0;
+		uint32_t metadata1 = 0;
 		uint32_t committed = 0;
 		uint32_t accepted = 0;
+		uint32_t primaryCommitted = 0;
+		uint32_t ungatedCommitted = 0;
+		uint32_t sunCommitted = 0;
+		uint32_t pointCommitted = 0;
+		uint32_t emissiveCommitted = 0;
+		uint32_t fastEmissiveCommitted = 0;
 	};
 
 	struct PerfTraceShaderStats

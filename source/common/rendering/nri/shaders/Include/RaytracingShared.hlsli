@@ -33,6 +33,7 @@ static const uint TRACE_STATS_KIND_SUN = 2u;
 static const uint TRACE_STATS_KIND_POINT = 3u;
 static const uint TRACE_STATS_KIND_EMISSIVE = 4u;
 static const uint TRACE_STATS_KIND_FAST_EMISSIVE = 5u;
+static const uint TRACE_STATS_KIND_COUNT = 6u;
 static const uint TRACE_STAT_CALLS = 0u;
 static const uint TRACE_STAT_PRIMARY_CALLS = 1u;
 static const uint TRACE_STAT_UNGATED_CALLS = 2u;
@@ -68,6 +69,7 @@ static const uint TRACE_STAT_INSTANCE_ACCEPTED_OVERFLOW = 31u;
 static const uint TRACE_STAT_INSTANCE_BUCKET_COUNT = 1024u;
 static const uint TRACE_STAT_INSTANCE_COMMITTED_BASE = 64u;
 static const uint TRACE_STAT_INSTANCE_ACCEPTED_BASE = TRACE_STAT_INSTANCE_COMMITTED_BASE + TRACE_STAT_INSTANCE_BUCKET_COUNT;
+static const uint TRACE_STAT_INSTANCE_KIND_COMMITTED_BASE = TRACE_STAT_INSTANCE_ACCEPTED_BASE + TRACE_STAT_INSTANCE_BUCKET_COUNT;
 
 bool TraceShaderStatsEnabled()
 {
@@ -121,6 +123,15 @@ void TraceShaderStatInstance(uint baseIndex, uint overflowIndex, uint instanceId
 	else
 	{
 		TraceShaderStatAdd(overflowIndex, 1u);
+	}
+}
+
+void TraceShaderStatInstanceKind(uint kind, uint instanceId)
+{
+	if (instanceId < TRACE_STAT_INSTANCE_BUCKET_COUNT)
+	{
+		const uint clampedKind = min(kind, TRACE_STATS_KIND_FAST_EMISSIVE);
+		TraceShaderStatAdd(TRACE_STAT_INSTANCE_KIND_COMMITTED_BASE + clampedKind * TRACE_STAT_INSTANCE_BUCKET_COUNT + instanceId, 1u);
 	}
 }
 
@@ -798,6 +809,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 
 		const uint committedInstanceId = rayQuery.CommittedInstanceID();
 		TraceShaderStatInstance(TRACE_STAT_INSTANCE_COMMITTED_BASE, TRACE_STAT_INSTANCE_COMMITTED_OVERFLOW, committedInstanceId);
+		TraceShaderStatInstanceKind(statsKind, committedInstanceId);
 		const SceneInstanceData instanceData = GetSceneInstanceData(committedInstanceId);
 		const uint primitiveIndex = ResolvePrimitiveIndex(instanceData, rayQuery.CommittedPrimitiveIndex());
 		const PrimitiveData primitive = GetPrimitiveData(instanceData.dataSource, primitiveIndex);

@@ -3115,7 +3115,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			{
 				const auto& hot = shader.hotInstances[hotIndex];
 				Printf(
-					"PERF pt shader hot instance NRI: frame=%llu stats_frame=%llu rank=%u instance=%u source=%s primitive_offset=%u primitive_count=%u committed=%u accepted=%u\n",
+					"PERF pt shader hot instance NRI: frame=%llu stats_frame=%llu rank=%u instance=%u source=%s primitive_offset=%u primitive_count=%u metadata0=%u metadata1=%u committed=%u accepted=%u primary=%u ungated=%u sun=%u point=%u emissive=%u fast_emissive=%u\n",
 					(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 					(unsigned long long)shader.frameNumber,
 					hotIndex + 1u,
@@ -3123,8 +3123,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 					getSceneDataSourceName(hot.dataSource),
 					hot.primitiveOffset,
 					hot.primitiveCount,
+					hot.metadata0,
+					hot.metadata1,
 					hot.committed,
-					hot.accepted);
+					hot.accepted,
+					hot.primaryCommitted,
+					hot.ungatedCommitted,
+					hot.sunCommitted,
+					hot.pointCommitted,
+					hot.emissiveCommitted,
+					hot.fastEmissiveCommitted);
 			}
 		}
 		Printf(
