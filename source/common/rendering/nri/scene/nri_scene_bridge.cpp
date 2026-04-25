@@ -1538,12 +1538,11 @@ namespace
 		return true;
 	}
 
-	uint64_t BuildVoxelActorSignature(const HWSprite& sprite, uint32_t drawListType, FGameTexture* voxelTexture, const MaterialRef& material)
+	uint64_t BuildVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const MaterialRef& material)
 	{
 		uint64_t hash = 1469598103934665603ull;
 		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel);
 		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel->model);
-		hash = HashCombine64(hash, (uint64_t)drawListType);
 		hash = HashCombine64(hash, voxelTexture != nullptr ? (uint64_t)(uint32_t)voxelTexture->GetID().GetIndex() : 0ull);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.palette);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.shade);
@@ -1567,7 +1566,7 @@ namespace
 		return hash;
 	}
 
-	VoxelActorCacheLookup TrackVoxelActorSignature(const HWSprite& sprite, uint32_t drawListType, FGameTexture* voxelTexture, const MaterialRef& material, SceneDebugStats& stats)
+	VoxelActorCacheLookup TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const MaterialRef& material, SceneDebugStats& stats)
 	{
 		VoxelActorCacheLookup lookup = {};
 		if (!TryBuildVoxelActorIdentity(sprite, lookup))
@@ -1578,7 +1577,7 @@ namespace
 		}
 
 		stats.voxelStableCandidates++;
-		const uint64_t signature = BuildVoxelActorSignature(sprite, drawListType, voxelTexture, material);
+		const uint64_t signature = BuildVoxelActorSignature(sprite, voxelTexture, material);
 		lookup.signature = signature;
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end())
@@ -1865,7 +1864,7 @@ namespace
 		}
 
 		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
-		const VoxelActorCacheLookup cacheLookup = updatePersistentCache ? TrackVoxelActorSignature(sprite, drawListType, voxelTexture, voxelMaterial, stats) : VoxelActorCacheLookup{};
+		const VoxelActorCacheLookup cacheLookup = updatePersistentCache ? TrackVoxelActorSignature(sprite, voxelTexture, voxelMaterial, stats) : VoxelActorCacheLookup{};
 		if (cacheLookup.stability == VoxelActorStability::Stable && cacheLookup.entry != nullptr && cacheLookup.entry->hasSurface)
 		{
 			return true;
