@@ -401,6 +401,7 @@ void EvaluateSampledEmissiveLighting(
 	const uint candidateIndex = SampleEmissivePrimitiveIndex(rngState);
 	if (candidateIndex == 0xffffffffu)
 	{
+		TraceShaderStatAdd(TRACE_STAT_EMISSIVE_CANDIDATE_NONE, 1u);
 		return;
 	}
 
@@ -418,6 +419,7 @@ void EvaluateSampledEmissiveLighting(
 	outEmitterRadiance = lightColor;
 	if (all(lightColor <= 0.0))
 	{
+		TraceShaderStatAdd(TRACE_STAT_EMISSIVE_LIGHT_ZERO, 1u);
 		return;
 	}
 
@@ -425,6 +427,7 @@ void EvaluateSampledEmissiveLighting(
 	const float lightDistanceSq = dot(toLight, toLight);
 	if (lightDistanceSq <= 0.0001)
 	{
+		TraceShaderStatAdd(TRACE_STAT_EMISSIVE_DISTANCE_REJECT, 1u);
 		return;
 	}
 
@@ -434,26 +437,34 @@ void EvaluateSampledEmissiveLighting(
 	const float lambert = max(dot(receiverLightNormal, lightDir), 0.0);
 	if (lambert <= 0.0)
 	{
+		TraceShaderStatAdd(TRACE_STAT_EMISSIVE_RECEIVER_LAMBERT_REJECT, 1u);
 		return;
 	}
 
 	const float emitterLambert = max(dot(lightNormal, -lightDir), 0.0);
 	if (emitterLambert <= 0.0)
 	{
+		TraceShaderStatAdd(TRACE_STAT_EMISSIVE_EMITTER_LAMBERT_REJECT, 1u);
 		return;
 	}
 
 	if (traceVisibility)
 	{
 		TraceShaderStatAdd(TRACE_STAT_EMISSIVE_SHADOW_RAYS, 1u);
+		if (!UseFastEmissiveShadow())
+		{
+			TraceShaderStatAdd(TRACE_STAT_TRACED_EMISSIVE_SHADOW_CALLS, 1u);
+		}
 		const float visibility = UseFastEmissiveShadow() ?
 			ComputeFastPointLightShadow(position, receiverLightNormal, lightDir, lightDistance) :
 			ComputePointLightShadowTagged(position, receiverLightNormal, lightDir, lightDistance, TRACE_STATS_KIND_EMISSIVE);
 		if (visibility <= 0.0)
 		{
+			TraceShaderStatAdd(TRACE_STAT_EMISSIVE_VISIBILITY_OCCLUDED, 1u);
 			outOccluded = true;
 			return;
 		}
+		TraceShaderStatAdd(TRACE_STAT_EMISSIVE_VISIBILITY_VISIBLE, 1u);
 	}
 
 	const float pdf = max(candidate.selectionPdf, 1e-4);
@@ -463,6 +474,7 @@ void EvaluateSampledEmissiveLighting(
 	const float sampleWeight = min(solidAngleEstimate / pdf, 16.0);
 	outDiffuse = GetSurfaceDiffuseColor(albedo, metalness) * (lambert * 0.80) * lightColor * sampleWeight;
 	outSpecular = EvaluateSunSpecular(albedo, metalness, receiverLightNormal, viewDir, lightDir, 1.0) * lightColor * sampleWeight;
+	TraceShaderStatAdd(TRACE_STAT_EMISSIVE_CONTRIBUTED, 1u);
 }
 
 float3 EvaluateSectorLightingSource(MaterialData material, float3 normal)
@@ -518,6 +530,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 	{
 		return 0.0;
 	}
+	TraceShaderStatAdd(TRACE_STAT_INDIRECT_DIFFUSE_CALLS, 1u);
 
 	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u ^ 0x9e3779b9u;
 	float3 throughput = surfaceAlbedo;
@@ -530,10 +543,12 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 	[loop]
 	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
 	{
+		TraceShaderStatAdd(TRACE_STAT_INDIRECT_DIFFUSE_BOUNCES, 1u);
 		float3 tracedDirection = direction;
 		const HitData bounceHit = TracePrimaryUngated(origin, direction, tracedDirection);
 		if (!bounceHit.hit)
 		{
+			TraceShaderStatAdd(TRACE_STAT_INDIRECT_DIFFUSE_MISSES, 1u);
 			if (!hasSecondaryHitDistance)
 			{
 				accumulatedSecondaryHitDistance = NRD_INF;
@@ -617,6 +632,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	{
 		return 0.0;
 	}
+	TraceShaderStatAdd(TRACE_STAT_INDIRECT_SPECULAR_CALLS, 1u);
 
 	uint rngState = pixelPos.x * 73856093u ^ pixelPos.y * 19349663u ^ (frameIndex + 1u) * 83492791u ^ 0x85ebca6bu;
 	float3 throughput = GetSurfaceSpecularColor(surfaceAlbedo.rgb, metalness);
@@ -628,10 +644,12 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	[loop]
 	for (uint bounce = 0u; bounce < bounceCount; ++bounce)
 	{
+		TraceShaderStatAdd(TRACE_STAT_INDIRECT_SPECULAR_BOUNCES, 1u);
 		float3 tracedDirection = direction;
 		const HitData bounceHit = TracePrimaryUngated(origin, direction, tracedDirection);
 		if (!bounceHit.hit)
 		{
+			TraceShaderStatAdd(TRACE_STAT_INDIRECT_SPECULAR_MISSES, 1u);
 			if (!hasSecondaryHitDistance)
 			{
 				outHitDistance = NRD_INF;
@@ -746,6 +764,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float4 color = 0.0;
 	if (!hit.hit)
 	{
+		TraceShaderStatAdd(TRACE_STAT_PRIMARY_MISS_PIXELS, 1u);
 		if (bootstrapFlat || bootstrapBaseColor)
 		{
 			const float3 sentinel = bootstrapFlat ? float3(1.0, 0.0, 1.0) : float3(1.0, 0.5, 0.0);
@@ -792,6 +811,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	else
 	{
+		TraceShaderStatAdd(TRACE_STAT_PRIMARY_HIT_PIXELS, 1u);
+		TraceShaderStatSource(TRACE_STAT_PRIMARY_HIT_STATIC, TRACE_STAT_PRIMARY_HIT_DYNAMIC, TRACE_STAT_PRIMARY_HIT_VOXEL, hit.dataSource);
 		const float3 currentHitPosition = ResolveHitVertexPosition(hit, false);
 		const float currentViewZ = dot(currentHitPosition - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
 		const float2 currentJitter = GetCurrentTemporalJitter();
@@ -861,6 +882,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 			const MaterialData material = GetMaterialData(hit.materialIndex, hit.dataSource);
 			const bool fullbright = (material.flags & MATERIAL_FLAG_FULLBRIGHT) != 0;
 			const bool emissiveMaterial = IsMaterialEmissive(material);
+			if (fullbright)
+			{
+				TraceShaderStatAdd(TRACE_STAT_MATERIAL_FULLBRIGHT, 1u);
+			}
+			if (emissiveMaterial)
+			{
+				TraceShaderStatAdd(TRACE_STAT_MATERIAL_EMISSIVE, 1u);
+			}
 			const bool receivesShadow = MaterialReceivesShadow(material);
 			roughness = GetSurfaceRoughness(material, hit.uv);
 			const float metalness = GetSurfaceMetalness(material, hit.uv);
@@ -890,6 +919,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
 				const float3 directionalShadingNormal = ResolveLightFacingShadingNormal(material, shadingNormal, lightDir);
 				float shadowHitDistance = 0.0;
+				if (useDirectionalLight && useDirectionalShadow && !directSceneTrace)
+				{
+					TraceShaderStatAdd(TRACE_STAT_DIRECTIONAL_SHADOW_TESTS, 1u);
+				}
 				const float shadow = useDirectionalLight ? ((directSceneTrace || !useDirectionalShadow) ? 1.0 : ComputeSunShadow(hit.position, directionalShadingNormal, lightDir, shadowHitDistance)) : 0.0;
 				shadowVisibility = shadow;
 				if (useDirectionalLight && useDirectionalShadow && !directSceneTrace)
@@ -903,6 +936,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				sunTransportSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, directionalShadingNormal, viewDir, lightDir, 1.0) * directionalLightColor * shadow : 0.0;
 
 				const RuntimeLightTileHeaderData runtimeLightTile = GetRuntimeLightTileHeader(pixelPos);
+				if (runtimeLightTile.indexCount > 0u)
+				{
+					TraceShaderStatAdd(TRACE_STAT_RUNTIME_TILE_NONEMPTY, 1u);
+					TraceShaderStatMax(TRACE_STAT_RUNTIME_TILE_MAX, runtimeLightTile.indexCount);
+				}
 				[loop]
 				for (uint runtimeLightCandidate = 0u; runtimeLightCandidate < runtimeLightTile.indexCount; ++runtimeLightCandidate)
 				{
@@ -944,8 +982,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					const float runtimeShadow = (directSceneTrace || !receivesShadow) ? 1.0 : ComputePointLightShadow(hit.position, runtimeShadingNormal, runtimeLightDir, lightDistance);
 					if (runtimeShadow <= 0.0)
 					{
+						TraceShaderStatAdd(TRACE_STAT_RUNTIME_SHADOW_OCCLUDED, 1u);
 						continue;
 					}
+					TraceShaderStatAdd(TRACE_STAT_RUNTIME_SHADOW_VISIBLE, 1u);
 
 					const float attenuation = EvaluatePointLightAttenuation(lightDistance, runtimeLight.radius, runtimeLight.intensity);
 					if (attenuation <= 0.0)

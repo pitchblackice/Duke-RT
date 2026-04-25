@@ -3111,6 +3111,18 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				(unsigned long long)shader.frameNumber,
 				c[15], c[16], c[17], c[18], c[19], c[20], c[21], c[22], c[23],
 				c[24], c[25], c[26], c[27], c[28], c[29], c[30], c[31]);
+			Printf(
+				"PERF pt shader phase NRI: frame=%llu stats_frame=%llu primary_hit=%u primary_miss=%u hit_static=%u hit_dynamic=%u hit_voxel=%u fullbright=%u emissive_material=%u dir_shadow_tests=%u runtime_tile_nonempty=%u runtime_tile_max=%u runtime_shadow_visible=%u runtime_shadow_occluded=%u indirect_diffuse_calls=%u indirect_diffuse_bounces=%u indirect_diffuse_misses=%u indirect_specular_calls=%u indirect_specular_bounces=%u indirect_specular_misses=%u sun_shadow_calls=%u point_shadow_calls=%u fast_emissive_shadow_calls=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned long long)shader.frameNumber,
+				c[32], c[33], c[34], c[35], c[36], c[37], c[38], c[39],
+				c[40], c[41], c[42], c[43], c[52], c[53], c[56], c[54], c[55], c[57],
+				c[61], c[60], c[58]);
+			Printf(
+				"PERF pt shader emissive detail NRI: frame=%llu stats_frame=%llu candidate_none=%u light_zero=%u distance_reject=%u receiver_lambert_reject=%u emitter_lambert_reject=%u visibility_visible=%u visibility_occluded=%u contributed=%u traced_shadow_calls=%u fast_shadow_calls=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				(unsigned long long)shader.frameNumber,
+				c[44], c[45], c[46], c[47], c[48], c[49], c[50], c[51], c[59], c[58]);
 			for (uint32_t hotIndex = 0; hotIndex < shader.hotInstanceCount; ++hotIndex)
 			{
 				const auto& hot = shader.hotInstances[hotIndex];

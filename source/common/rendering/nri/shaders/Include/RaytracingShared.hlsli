@@ -66,6 +66,36 @@ static const uint TRACE_STAT_EMISSIVE_SAMPLES = 28u;
 static const uint TRACE_STAT_EMISSIVE_SHADOW_RAYS = 29u;
 static const uint TRACE_STAT_INSTANCE_COMMITTED_OVERFLOW = 30u;
 static const uint TRACE_STAT_INSTANCE_ACCEPTED_OVERFLOW = 31u;
+static const uint TRACE_STAT_PRIMARY_HIT_PIXELS = 32u;
+static const uint TRACE_STAT_PRIMARY_MISS_PIXELS = 33u;
+static const uint TRACE_STAT_PRIMARY_HIT_STATIC = 34u;
+static const uint TRACE_STAT_PRIMARY_HIT_DYNAMIC = 35u;
+static const uint TRACE_STAT_PRIMARY_HIT_VOXEL = 36u;
+static const uint TRACE_STAT_MATERIAL_FULLBRIGHT = 37u;
+static const uint TRACE_STAT_MATERIAL_EMISSIVE = 38u;
+static const uint TRACE_STAT_DIRECTIONAL_SHADOW_TESTS = 39u;
+static const uint TRACE_STAT_RUNTIME_TILE_NONEMPTY = 40u;
+static const uint TRACE_STAT_RUNTIME_TILE_MAX = 41u;
+static const uint TRACE_STAT_RUNTIME_SHADOW_VISIBLE = 42u;
+static const uint TRACE_STAT_RUNTIME_SHADOW_OCCLUDED = 43u;
+static const uint TRACE_STAT_EMISSIVE_CANDIDATE_NONE = 44u;
+static const uint TRACE_STAT_EMISSIVE_LIGHT_ZERO = 45u;
+static const uint TRACE_STAT_EMISSIVE_DISTANCE_REJECT = 46u;
+static const uint TRACE_STAT_EMISSIVE_RECEIVER_LAMBERT_REJECT = 47u;
+static const uint TRACE_STAT_EMISSIVE_EMITTER_LAMBERT_REJECT = 48u;
+static const uint TRACE_STAT_EMISSIVE_VISIBILITY_VISIBLE = 49u;
+static const uint TRACE_STAT_EMISSIVE_VISIBILITY_OCCLUDED = 50u;
+static const uint TRACE_STAT_EMISSIVE_CONTRIBUTED = 51u;
+static const uint TRACE_STAT_INDIRECT_DIFFUSE_CALLS = 52u;
+static const uint TRACE_STAT_INDIRECT_DIFFUSE_BOUNCES = 53u;
+static const uint TRACE_STAT_INDIRECT_SPECULAR_CALLS = 54u;
+static const uint TRACE_STAT_INDIRECT_SPECULAR_BOUNCES = 55u;
+static const uint TRACE_STAT_INDIRECT_DIFFUSE_MISSES = 56u;
+static const uint TRACE_STAT_INDIRECT_SPECULAR_MISSES = 57u;
+static const uint TRACE_STAT_FAST_EMISSIVE_SHADOW_CALLS = 58u;
+static const uint TRACE_STAT_TRACED_EMISSIVE_SHADOW_CALLS = 59u;
+static const uint TRACE_STAT_POINT_SHADOW_CALLS = 60u;
+static const uint TRACE_STAT_SUN_SHADOW_CALLS = 61u;
 static const uint TRACE_STAT_INSTANCE_BUCKET_COUNT = 1024u;
 static const uint TRACE_STAT_INSTANCE_COMMITTED_BASE = 64u;
 static const uint TRACE_STAT_INSTANCE_ACCEPTED_BASE = TRACE_STAT_INSTANCE_COMMITTED_BASE + TRACE_STAT_INSTANCE_BUCKET_COUNT;
@@ -984,6 +1014,7 @@ HitData TracePrimary(float3 origin, float3 direction)
 
 float ComputeSunShadow(float3 position, float3 normal, float3 lightDirection, out float shadowHitDistance)
 {
+	TraceShaderStatAdd(TRACE_STAT_SUN_SHADOW_CALLS, 1u);
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
 	const bool blocked = TraceScenePath(position + normal * 0.05, lightDirection, 100000.0, 0u, GetPortalTraversalDepth(), false, true, false, TRACE_STATS_KIND_SUN, shadowHit, ignoredDirection);
@@ -1004,6 +1035,7 @@ float ComputePointLightShadowTagged(float3 position, float3 normal, float3 light
 		return 1.0;
 	}
 
+	TraceShaderStatAdd(TRACE_STAT_POINT_SHADOW_CALLS, 1u);
 	HitData shadowHit = MakeEmptyHitData();
 	float3 ignoredDirection = lightDirection;
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
@@ -1028,6 +1060,7 @@ float ComputeFastPointLightShadow(float3 position, float3 normal, float3 lightDi
 		return 1.0;
 	}
 
+	TraceShaderStatAdd(TRACE_STAT_FAST_EMISSIVE_SHADOW_CALLS, 1u);
 	HitData shadowHit = MakeEmptyHitData();
 	const float maxDistance = max(lightDistance - 0.05, 0.001);
 	const bool blocked = TraceClosestSurface(position + normal * 0.05, lightDirection, maxDistance, false, true, false, TRACE_STATS_KIND_FAST_EMISSIVE, shadowHit);
