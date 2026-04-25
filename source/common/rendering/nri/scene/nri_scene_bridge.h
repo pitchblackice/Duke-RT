@@ -109,6 +109,11 @@ struct SceneDebugStats
 	unsigned int modelDrawItems = 0;
 	unsigned int voxelProxyDrawItems = 0;
 	unsigned int unsupportedModelDrawItems = 0;
+	unsigned int voxelStableCandidates = 0;
+	unsigned int voxelStableUncacheable = 0;
+	unsigned int voxelStableSignatureHits = 0;
+	unsigned int voxelStableSignatureMisses = 0;
+	unsigned int voxelStableSignatureChanges = 0;
 };
 
 struct SkyPerfStats

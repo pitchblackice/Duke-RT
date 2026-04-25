@@ -125,6 +125,11 @@ namespace
 		outView.stats.modelDrawItems += source.stats.modelDrawItems;
 		outView.stats.voxelProxyDrawItems += source.stats.voxelProxyDrawItems;
 		outView.stats.unsupportedModelDrawItems += source.stats.unsupportedModelDrawItems;
+		outView.stats.voxelStableCandidates += source.stats.voxelStableCandidates;
+		outView.stats.voxelStableUncacheable += source.stats.voxelStableUncacheable;
+		outView.stats.voxelStableSignatureHits += source.stats.voxelStableSignatureHits;
+		outView.stats.voxelStableSignatureMisses += source.stats.voxelStableSignatureMisses;
+		outView.stats.voxelStableSignatureChanges += source.stats.voxelStableSignatureChanges;
 		outView.stats.portalCapturesSkipped += source.stats.portalCapturesSkipped;
 		if (source.sky.priority > outView.sky.priority)
 		{

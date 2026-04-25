@@ -15,6 +15,7 @@
 #include "v_video.h"
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 #include <unordered_map>
 #include <windows.h>
 
@@ -51,6 +52,7 @@ namespace
 	std::unordered_map<uint64_t, AverageColorCacheEntry> gPersistentAverageTextureColorCache;
 	std::unordered_map<const FGameTexture*, CachedSkyInspection> gSkyInspectionCache;
 	std::unordered_map<const FVoxelModel*, FVoxelMeshData> gVoxelMeshCache;
+	std::unordered_map<uint64_t, uint64_t> gVoxelActorSignatureHistory;
 
 	struct VoxelCaptureBudget
 	{
@@ -1437,6 +1439,103 @@ namespace
 		return material;
 	}
 
+	uint64_t HashCombine64(uint64_t hash, uint64_t value)
+	{
+		hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6u) + (hash >> 2u);
+		return hash;
+	}
+
+	uint64_t QuantizeSignatureFloat(double value, double scale)
+	{
+		if (!std::isfinite(value))
+		{
+			return 0ull;
+		}
+		return (uint64_t)std::llround(value * scale);
+	}
+
+	bool TryBuildVoxelActorIdentityKey(const HWSprite& sprite, uint64_t& outKey)
+	{
+		outKey = 0;
+		if (sprite.Sprite == nullptr || sprite.Sprite->ownerActor == nullptr || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
+		{
+			return false;
+		}
+
+		const int32_t actorIndex = (int32_t)sprite.Sprite->ownerActor->GetIndex();
+		if (actorIndex < 0)
+		{
+			return false;
+		}
+
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)actorIndex);
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.Sprite->ownerActor);
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel);
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel->model);
+		outKey = hash;
+		return true;
+	}
+
+	uint64_t BuildVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel);
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel->model);
+		hash = HashCombine64(hash, voxelTexture != nullptr ? (uint64_t)(uint32_t)voxelTexture->GetID().GetIndex() : 0ull);
+		hash = HashCombine64(hash, (uint64_t)mesh.vertices.Size());
+		hash = HashCombine64(hash, (uint64_t)mesh.indices.Size());
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.palette);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.shade);
+		hash = HashCombine64(hash, QuantizeSignatureFloat(material.alpha, 65535.0));
+		hash = HashCombine64(hash, (uint64_t)material.flags);
+
+		if (sprite.Sprite != nullptr)
+		{
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)sprite.Sprite->picnum);
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)sprite.Sprite->statnum);
+			hash = HashCombine64(hash, (uint64_t)sprite.Sprite->cstat);
+			hash = HashCombine64(hash, (uint64_t)sprite.Sprite->cstat2);
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)sprite.Sprite->spritetexture().GetIndex());
+		}
+
+		const FLOATTYPE* matrix = sprite.rotmat.get();
+		for (int i = 0; i < 16; ++i)
+		{
+			hash = HashCombine64(hash, QuantizeSignatureFloat((double)matrix[i], 4096.0));
+		}
+		return hash;
+	}
+
+	void TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material, SceneDebugStats& stats)
+	{
+		uint64_t identityKey = 0;
+		if (!TryBuildVoxelActorIdentityKey(sprite, identityKey))
+		{
+			stats.voxelStableUncacheable++;
+			return;
+		}
+
+		stats.voxelStableCandidates++;
+		const uint64_t signature = BuildVoxelActorSignature(sprite, voxelTexture, mesh, material);
+		auto found = gVoxelActorSignatureHistory.find(identityKey);
+		if (found == gVoxelActorSignatureHistory.end())
+		{
+			gVoxelActorSignatureHistory.emplace(identityKey, signature);
+			stats.voxelStableSignatureMisses++;
+			return;
+		}
+
+		if (found->second == signature)
+		{
+			stats.voxelStableSignatureHits++;
+			return;
+		}
+
+		found->second = signature;
+		stats.voxelStableSignatureChanges++;
+	}
+
 	const FVoxelMeshData* GetCachedVoxelMesh(FVoxelModel* model)
 	{
 		if (model == nullptr)
@@ -1477,7 +1576,7 @@ namespace
 		return true;
 	}
 
-	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites)
+	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
 	{
 		if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
 		{
@@ -1487,14 +1586,19 @@ namespace
 		FGameTexture* voxelTexture = TexMan.GetGameTexture(sprite.voxel->model->GetPaletteTexture());
 		if (voxelTexture == nullptr || !voxelTexture->isValid())
 		{
+			stats.voxelStableUncacheable++;
 			return false;
 		}
 
 		const FVoxelMeshData* mesh = GetCachedVoxelMesh(sprite.voxel->model);
 		if (mesh == nullptr)
 		{
+			stats.voxelStableUncacheable++;
 			return false;
 		}
+
+		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
+		TrackVoxelActorSignature(sprite, voxelTexture, *mesh, voxelMaterial, stats);
 
 		const unsigned int indexCount = mesh->indices.Size();
 		if (!TrySpendVoxelTriangleBudget(indexCount / 3u, budget))
@@ -1504,7 +1608,7 @@ namespace
 		}
 
 		SurfaceRef surface = {};
-		surface.material = MakeVoxelPaletteMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
+		surface.material = voxelMaterial;
 		surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
 		surface.vertices.reserve(mesh->vertices.Size());
 		for (unsigned int i = 0; i < mesh->vertices.Size(); ++i)
@@ -1595,7 +1699,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites))
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats))
 			{
 				stats.voxelProxyDrawItems++;
 			}
@@ -1625,7 +1729,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites))
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats))
 			{
 				stats.voxelProxyDrawItems++;
 			}
