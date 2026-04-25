@@ -16609,6 +16609,94 @@ void NRIRenderer::ReadbackTraceShaderStats()
 	mLastPerfTraceShaderStats.valid = true;
 	mLastPerfTraceShaderStats.frameNumber = mPendingTraceShaderStatsFrame;
 	std::memcpy(mLastPerfTraceShaderStats.counters.data(), mapped, (size_t)byteSize);
+	mLastPerfTraceShaderStats.hotInstanceCount = 0;
+	mLastPerfTraceShaderStats.hotInstances = {};
+	struct TraceShaderHotCandidate
+	{
+		uint32_t instanceId = 0;
+		uint32_t committed = 0;
+		uint32_t accepted = 0;
+	};
+	std::vector<TraceShaderHotCandidate> hotCandidates;
+	const uint32_t instanceBucketCount = std::min<uint32_t>((uint32_t)mBoundSceneInstances.size(), TraceShaderInstanceBucketCount);
+	hotCandidates.reserve(instanceBucketCount);
+	for (uint32_t instanceId = 0; instanceId < instanceBucketCount; ++instanceId)
+	{
+		const uint32_t committed = mLastPerfTraceShaderStats.counters[TraceShaderInstanceCommittedBase + instanceId];
+		const uint32_t accepted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceAcceptedBase + instanceId];
+		if (committed == 0 && accepted == 0)
+		{
+			continue;
+		}
+		hotCandidates.push_back({ instanceId, committed, accepted });
+	}
+	std::sort(
+		hotCandidates.begin(),
+		hotCandidates.end(),
+		[](const TraceShaderHotCandidate& a, const TraceShaderHotCandidate& b)
+		{
+			if (a.committed != b.committed)
+			{
+				return a.committed > b.committed;
+			}
+			return a.accepted > b.accepted;
+		});
+	auto getDataSourcePrimitiveTotal = [this](uint32_t dataSource) -> uint32_t
+	{
+		switch (dataSource)
+		{
+		case NRI_SCENE_DATA_SOURCE_STATIC: return mBoundStaticPrimitiveCount;
+		case NRI_SCENE_DATA_SOURCE_DYNAMIC: return mBoundDynamicPrimitiveCount;
+		case NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL: return mBoundPersistentVoxelPrimitiveCount;
+		default: return 0;
+		}
+	};
+	auto estimateInstancePrimitiveCount = [this, &getDataSourcePrimitiveTotal](const SceneInstanceData& instance) -> uint32_t
+	{
+		if (instance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+		{
+			for (const auto& pair : mPersistentVoxelActorResources)
+			{
+				const PersistentVoxelActorResource& resource = pair.second;
+				if (resource.primitiveOffset == instance.primitiveOffset && resource.primitiveCount > 0)
+				{
+					return resource.primitiveCount;
+				}
+			}
+		}
+
+		const uint32_t total = getDataSourcePrimitiveTotal(instance.dataSource);
+		if (instance.primitiveOffset >= total)
+		{
+			return 0;
+		}
+
+		uint32_t endOffset = total;
+		for (const SceneInstanceData& other : mBoundSceneInstances)
+		{
+			if (other.dataSource == instance.dataSource &&
+				other.primitiveOffset > instance.primitiveOffset &&
+				other.primitiveOffset < endOffset)
+			{
+				endOffset = other.primitiveOffset;
+			}
+		}
+		return endOffset - instance.primitiveOffset;
+	};
+	const uint32_t hotCount = std::min<uint32_t>((uint32_t)hotCandidates.size(), TraceShaderHotInstanceCount);
+	mLastPerfTraceShaderStats.hotInstanceCount = hotCount;
+	for (uint32_t hotIndex = 0; hotIndex < hotCount; ++hotIndex)
+	{
+		const TraceShaderHotCandidate& candidate = hotCandidates[hotIndex];
+		const SceneInstanceData& instance = mBoundSceneInstances[candidate.instanceId];
+		PerfTraceShaderHotInstance& hot = mLastPerfTraceShaderStats.hotInstances[hotIndex];
+		hot.instanceId = candidate.instanceId;
+		hot.dataSource = instance.dataSource;
+		hot.primitiveOffset = instance.primitiveOffset;
+		hot.primitiveCount = estimateInstancePrimitiveCount(instance);
+		hot.committed = candidate.committed;
+		hot.accepted = candidate.accepted;
+	}
 	mFrameBuffer->mCore.UnmapBuffer(*mTraceShaderStatsReadbackBuffer.buffer);
 	mPendingTraceShaderStatsFrame = 0;
 }

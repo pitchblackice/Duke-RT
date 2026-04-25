@@ -3050,6 +3050,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			default: return "none";
 			}
 		};
+		const auto getSceneDataSourceName = [](uint32_t dataSource) -> const char*
+		{
+			switch (dataSource)
+			{
+			case 0: return "static";
+			case 1: return "dynamic";
+			case 2: return "persistent_voxel";
+			default: return "unknown";
+			}
+		};
 		Printf("----------perf trace frame %llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber);
 		Printf(
@@ -3096,11 +3106,26 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				c[0], c[1], c[2], c[3], c[4], c[5], c[6],
 				c[7], c[8], c[9], c[10], c[11], c[12], c[13], c[14]);
 			Printf(
-				"PERF pt shader reject NRI: frame=%llu stats_frame=%llu reflection=%u visible=%u hidden_flat=%u oneway=%u transparent=%u noshadow=%u reject_static=%u reject_dynamic=%u reject_voxel=%u runtime_candidates=%u runtime_dist=%u runtime_lambert=%u runtime_shadow_rays=%u emissive_samples=%u emissive_shadow_rays=%u\n",
+				"PERF pt shader reject NRI: frame=%llu stats_frame=%llu reflection=%u visible=%u hidden_flat=%u oneway=%u transparent=%u noshadow=%u reject_static=%u reject_dynamic=%u reject_voxel=%u runtime_candidates=%u runtime_dist=%u runtime_lambert=%u runtime_shadow_rays=%u emissive_samples=%u emissive_shadow_rays=%u instance_committed_overflow=%u instance_accepted_overflow=%u\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				(unsigned long long)shader.frameNumber,
 				c[15], c[16], c[17], c[18], c[19], c[20], c[21], c[22], c[23],
-				c[24], c[25], c[26], c[27], c[28], c[29]);
+				c[24], c[25], c[26], c[27], c[28], c[29], c[30], c[31]);
+			for (uint32_t hotIndex = 0; hotIndex < shader.hotInstanceCount; ++hotIndex)
+			{
+				const auto& hot = shader.hotInstances[hotIndex];
+				Printf(
+					"PERF pt shader hot instance NRI: frame=%llu stats_frame=%llu rank=%u instance=%u source=%s primitive_offset=%u primitive_count=%u committed=%u accepted=%u\n",
+					(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+					(unsigned long long)shader.frameNumber,
+					hotIndex + 1u,
+					hot.instanceId,
+					getSceneDataSourceName(hot.dataSource),
+					hot.primitiveOffset,
+					hot.primitiveCount,
+					hot.committed,
+					hot.accepted);
+			}
 		}
 		Printf(
 			"PERF pt shell detail NRI: frame=%llu static_scene=%.3f mutation=%.3f mutation_analyze=%.3f mutation_rebuild=%.3f mutation_append=%.3f mutation_dirty=%u mutation_rebuilt=%u mutation_held=%u mutation_prims=%u mutation_mats=%u spacelink=%.3f spacelink_prims=%u spacelink_mats=%u debug_sphere=%.3f debug_view=%.3f debug_geo=%.3f debug_mats=%.3f debug_tune=%.3f debug_spheres=%u debug_lons=%u debug_lats=%u debug_prims=%u debug_mats_out=%u overlay=%.3f overlay_prims=%u overlay_mats=%u dynamic_capture=%.3f persistent=%.3f dynamic_as=%.3f dynamic_as_create=%.3f dynamic_as_scratch=%.3f dynamic_as_build=%.3f dynamic_as_barrier=%.3f dynamic_as_prims=%u dynamic_as_verts=%u dynamic_as_indices=%u restore_static=%.3f copy_final=%.3f\n",

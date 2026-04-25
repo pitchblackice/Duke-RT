@@ -63,6 +63,11 @@ static const uint TRACE_STAT_RUNTIME_LAMBERT = 26u;
 static const uint TRACE_STAT_RUNTIME_SHADOW_RAYS = 27u;
 static const uint TRACE_STAT_EMISSIVE_SAMPLES = 28u;
 static const uint TRACE_STAT_EMISSIVE_SHADOW_RAYS = 29u;
+static const uint TRACE_STAT_INSTANCE_COMMITTED_OVERFLOW = 30u;
+static const uint TRACE_STAT_INSTANCE_ACCEPTED_OVERFLOW = 31u;
+static const uint TRACE_STAT_INSTANCE_BUCKET_COUNT = 1024u;
+static const uint TRACE_STAT_INSTANCE_COMMITTED_BASE = 64u;
+static const uint TRACE_STAT_INSTANCE_ACCEPTED_BASE = TRACE_STAT_INSTANCE_COMMITTED_BASE + TRACE_STAT_INSTANCE_BUCKET_COUNT;
 
 bool TraceShaderStatsEnabled()
 {
@@ -104,6 +109,18 @@ void TraceShaderStatSource(uint staticIndex, uint dynamicIndex, uint voxelIndex,
 	else
 	{
 		TraceShaderStatAdd(staticIndex, 1u);
+	}
+}
+
+void TraceShaderStatInstance(uint baseIndex, uint overflowIndex, uint instanceId)
+{
+	if (instanceId < TRACE_STAT_INSTANCE_BUCKET_COUNT)
+	{
+		TraceShaderStatAdd(baseIndex + instanceId, 1u);
+	}
+	else
+	{
+		TraceShaderStatAdd(overflowIndex, 1u);
 	}
 }
 
@@ -779,7 +796,9 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		}
 		TraceShaderStatAdd(TRACE_STAT_COMMITTED, 1u);
 
-		const SceneInstanceData instanceData = GetSceneInstanceData(rayQuery.CommittedInstanceID());
+		const uint committedInstanceId = rayQuery.CommittedInstanceID();
+		TraceShaderStatInstance(TRACE_STAT_INSTANCE_COMMITTED_BASE, TRACE_STAT_INSTANCE_COMMITTED_OVERFLOW, committedInstanceId);
+		const SceneInstanceData instanceData = GetSceneInstanceData(committedInstanceId);
 		const uint primitiveIndex = ResolvePrimitiveIndex(instanceData, rayQuery.CommittedPrimitiveIndex());
 		const PrimitiveData primitive = GetPrimitiveData(instanceData.dataSource, primitiveIndex);
 		const float committedDistance = rayQuery.CommittedRayT();
@@ -858,6 +877,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, primitiveIndex, primitive.normal, uv);
 		hitData.materialIndex = primitive.materialIndex;
 		TraceShaderStatSource(TRACE_STAT_ACCEPT_STATIC, TRACE_STAT_ACCEPT_DYNAMIC, TRACE_STAT_ACCEPT_VOXEL, instanceData.dataSource);
+		TraceShaderStatInstance(TRACE_STAT_INSTANCE_ACCEPTED_BASE, TRACE_STAT_INSTANCE_ACCEPTED_OVERFLOW, committedInstanceId);
 		return true;
 	}
 

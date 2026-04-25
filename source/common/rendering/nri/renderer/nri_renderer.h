@@ -611,12 +611,29 @@ public:
 		uint64_t residentChunkBatchMaterialBytes = 0;
 	};
 
-	static constexpr uint32_t TraceShaderStatCount = 48;
+	static constexpr uint32_t TraceShaderScalarStatCount = 64;
+	static constexpr uint32_t TraceShaderInstanceBucketCount = 1024;
+	static constexpr uint32_t TraceShaderInstanceCommittedBase = TraceShaderScalarStatCount;
+	static constexpr uint32_t TraceShaderInstanceAcceptedBase = TraceShaderInstanceCommittedBase + TraceShaderInstanceBucketCount;
+	static constexpr uint32_t TraceShaderStatCount = TraceShaderInstanceAcceptedBase + TraceShaderInstanceBucketCount;
+	static constexpr uint32_t TraceShaderHotInstanceCount = 8;
+	struct PerfTraceShaderHotInstance
+	{
+		uint32_t instanceId = 0;
+		uint32_t dataSource = 0;
+		uint32_t primitiveOffset = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t committed = 0;
+		uint32_t accepted = 0;
+	};
+
 	struct PerfTraceShaderStats
 	{
 		bool valid = false;
 		uint64_t frameNumber = 0;
 		std::array<uint32_t, TraceShaderStatCount> counters = {};
+		uint32_t hotInstanceCount = 0;
+		std::array<PerfTraceShaderHotInstance, TraceShaderHotInstanceCount> hotInstances = {};
 	};
 
 	struct MemoryTelemetry
