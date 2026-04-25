@@ -1137,6 +1137,18 @@ private:
 
 	struct PersistentVoxelBatch
 	{
+		struct ActorEntry
+		{
+			uint64_t identityKey = 0;
+			uint64_t signature = 0;
+			uint32_t primitiveOffset = 0;
+			uint32_t primitiveCount = 0;
+			uint32_t indexOffset = 0;
+			uint32_t indexCount = 0;
+			uint32_t materialOffset = 0;
+			uint32_t materialCount = 0;
+		};
+
 		bool valid = false;
 		uint64_t sourceSerial = 0;
 		uint32_t surfaceCount = 0;
@@ -1146,6 +1158,23 @@ private:
 		nri_scene::SceneView sceneView;
 		nri_scene::GeometryData geometry;
 		nri_scene::MaterialBridgeData materialBridge;
+		std::vector<ActorEntry> actors;
+	};
+
+	struct PersistentVoxelActorResource
+	{
+		uint64_t signature = 0;
+		uint32_t primitiveOffset = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t indexOffset = 0;
+		uint32_t indexCount = 0;
+		uint32_t materialOffset = 0;
+		uint32_t materialCount = 0;
+		uint64_t sourceSerial = 0;
+		uint32_t vertexCount = 0;
+		NRIBufferResource vertexBuffer;
+		NRIBufferResource indexBuffer;
+		NRIAccelerationStructureResource accelerationStructure;
 	};
 
 	struct ActorSpriteDebugStats
@@ -1538,8 +1567,18 @@ private:
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure,
 		bool updateDynamicPerfStats);
+	bool BuildBottomLevelAccelerationStructure(
+		const NRIBufferResource& vertexBuffer,
+		const NRIBufferResource& indexBuffer,
+		uint32_t vertexCount,
+		uint32_t indexOffset,
+		uint32_t indexCount,
+		uint32_t primitiveCount,
+		NRIAccelerationStructureResource& outAccelerationStructure,
+		bool updateDynamicPerfStats);
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch();
+	bool BuildPersistentVoxelActorAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
 	bool TryApplyRuntimeMutationChunkToResidentScene(
@@ -1808,8 +1847,6 @@ private:
 	PerfResourceTraceStats mLastPerfResourceTraceStats = {};
 
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
-	NRIAccelerationStructureResource mPersistentVoxelBottomLevelAS;
-	uint64_t mPersistentVoxelBottomLevelASSerial = 0;
 	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
@@ -1826,6 +1863,7 @@ private:
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	PersistentVoxelBatch mPersistentVoxelBatch = {};
+	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};

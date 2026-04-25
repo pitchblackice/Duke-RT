@@ -2097,39 +2097,19 @@ uint64_t GetPersistentVoxelCacheSerial()
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView)
 {
 	outView = {};
-	if (gVoxelActorCache.empty())
+	std::vector<PersistentVoxelCacheEntryView> entries;
+	if (!BuildPersistentVoxelCacheEntries(entries))
 	{
 		return false;
 	}
-
-	std::vector<std::pair<uint64_t, const VoxelActorCacheEntry*>> entries;
-	entries.reserve(gVoxelActorCache.size());
-	for (const auto& pair : gVoxelActorCache)
-	{
-		if (pair.second.hasSurface)
-		{
-			entries.emplace_back(pair.first, &pair.second);
-		}
-	}
-
-	if (entries.empty())
-	{
-		return false;
-	}
-
-	std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b)
-	{
-		return a.first < b.first;
-	});
 
 	outView.opaqueSprites.reserve(entries.size());
 	outView.stats.voxelCacheEntries = (unsigned int)entries.size();
 	for (const auto& entry : entries)
 	{
-		outView.opaqueSprites.push_back(entry.second->surface);
-		const uint32_t primitiveCount = entry.second->primitiveCount;
-		outView.stats.triangleEstimate += primitiveCount;
-		outView.stats.voxelCachePrimitives += primitiveCount;
+		outView.opaqueSprites.push_back(entry.surface);
+		outView.stats.triangleEstimate += entry.primitiveCount;
+		outView.stats.voxelCachePrimitives += entry.primitiveCount;
 		outView.stats.materialRefs++;
 	}
 
@@ -2137,6 +2117,48 @@ bool BuildPersistentVoxelCacheSceneView(SceneView& outView)
 	outView.stats.modelDrawItems = outView.stats.spriteDrawItems;
 	outView.stats.voxelProxyDrawItems = outView.stats.spriteDrawItems;
 	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
+	return true;
+}
+
+bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries)
+{
+	outEntries.clear();
+	if (gVoxelActorCache.empty())
+	{
+		return false;
+	}
+
+	std::vector<std::pair<uint64_t, const VoxelActorCacheEntry*>> sortedEntries;
+	sortedEntries.reserve(gVoxelActorCache.size());
+	for (const auto& pair : gVoxelActorCache)
+	{
+		if (pair.second.hasSurface)
+		{
+			sortedEntries.emplace_back(pair.first, &pair.second);
+		}
+	}
+
+	if (sortedEntries.empty())
+	{
+		return false;
+	}
+
+	std::sort(sortedEntries.begin(), sortedEntries.end(), [](const auto& a, const auto& b)
+	{
+		return a.first < b.first;
+	});
+
+	outEntries.reserve(sortedEntries.size());
+	for (const auto& entry : sortedEntries)
+	{
+		PersistentVoxelCacheEntryView view = {};
+		view.identityKey = entry.first;
+		view.signature = entry.second->signature;
+		view.primitiveCount = entry.second->primitiveCount;
+		view.surface = entry.second->surface;
+		outEntries.push_back(std::move(view));
+	}
+
 	return true;
 }
 

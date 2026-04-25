@@ -8079,28 +8079,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					bool dynamicAsReady = true;
 					if (hasPersistentVoxelOverlay)
 					{
-						if (mPersistentVoxelBottomLevelAS.accelerationStructure == nullptr ||
-							mPersistentVoxelBottomLevelASSerial != mPersistentVoxelBatch.sourceSerial)
-						{
-							persistentVoxelAsReady =
-								BuildDynamicAccelerationStructure(
-									overlayGeometry,
-									0u,
-									persistentVoxelIndexCount,
-									persistentVoxelPrimitiveCount,
-									mPersistentVoxelBottomLevelAS,
-									false) &&
-								mPersistentVoxelBottomLevelAS.accelerationStructure != nullptr;
-							if (persistentVoxelAsReady)
-							{
-								mPersistentVoxelBottomLevelASSerial = mPersistentVoxelBatch.sourceSerial;
-							}
-						}
-					}
-					else
-					{
-						DestroyAccelerationStructureResource(mPersistentVoxelBottomLevelAS);
-						mPersistentVoxelBottomLevelASSerial = 0;
+						persistentVoxelAsReady = BuildPersistentVoxelActorAccelerationStructures(overlayGeometry);
 					}
 					if (liveOverlayPrimitiveCount > 0)
 					{
@@ -8130,19 +8109,29 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				emissiveSamplingContext.dynamicPrimitiveBaseOffset = persistentVoxelPrimitiveBase + (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationGeometry.primitives.size());
 				if (accelerationReady)
 				{
-					if (hasPersistentVoxelOverlay && mPersistentVoxelBottomLevelAS.accelerationStructure != nullptr)
+					if (hasPersistentVoxelOverlay)
 					{
-						nri::TopLevelInstance persistentVoxelInstance = {};
-						persistentVoxelInstance.transform[0][0] = 1.0f;
-						persistentVoxelInstance.transform[1][1] = 1.0f;
-						persistentVoxelInstance.transform[2][2] = 1.0f;
-						persistentVoxelInstance.instanceId = (uint32_t)sceneInstances.size();
-						persistentVoxelInstance.mask = 0xFF;
-						persistentVoxelInstance.shaderBindingTableLocalOffset = 0;
-						persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-						persistentVoxelInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mPersistentVoxelBottomLevelAS.accelerationStructure);
-						instances.push_back(persistentVoxelInstance);
-						sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
+						for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+						{
+							auto resourceIt = mPersistentVoxelActorResources.find(actor.identityKey);
+							if (resourceIt == mPersistentVoxelActorResources.end() ||
+								resourceIt->second.accelerationStructure.accelerationStructure == nullptr)
+							{
+								continue;
+							}
+
+							nri::TopLevelInstance persistentVoxelInstance = {};
+							persistentVoxelInstance.transform[0][0] = 1.0f;
+							persistentVoxelInstance.transform[1][1] = 1.0f;
+							persistentVoxelInstance.transform[2][2] = 1.0f;
+							persistentVoxelInstance.instanceId = (uint32_t)sceneInstances.size();
+							persistentVoxelInstance.mask = 0xFF;
+							persistentVoxelInstance.shaderBindingTableLocalOffset = 0;
+							persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+							persistentVoxelInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*resourceIt->second.accelerationStructure.accelerationStructure);
+							instances.push_back(persistentVoxelInstance);
+							sceneInstances.push_back({ actor.primitiveOffset, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, 0u });
+						}
 					}
 
 					if (liveOverlayPrimitiveCount > 0 && mDynamicBottomLevelAS.accelerationStructure != nullptr)
@@ -10068,7 +10057,12 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mEmissiveTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 
 	accumulateAs(mDynamicBottomLevelAS, telemetry.accelerationStructureBytes);
-	accumulateAs(mPersistentVoxelBottomLevelAS, telemetry.accelerationStructureBytes);
+	for (const auto& pair : mPersistentVoxelActorResources)
+	{
+		accumulateBuffer(pair.second.vertexBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(pair.second.indexBuffer, telemetry.sceneBufferBytes);
+		accumulateAs(pair.second.accelerationStructure, telemetry.accelerationStructureBytes);
+	}
 	accumulateAs(mTopLevelAS, telemetry.accelerationStructureBytes);
 	accumulateAs(mEmissiveTopLevelAS, telemetry.accelerationStructureBytes);
 	for (const auto& chunk : mStaticMapScene.chunks)
@@ -11455,8 +11449,13 @@ void NRIRenderer::ResetPersistentDynamicEmissiveCache()
 void NRIRenderer::ResetPersistentVoxelBatch()
 {
 	mPersistentVoxelBatch = {};
-	DestroyAccelerationStructureResource(mPersistentVoxelBottomLevelAS);
-	mPersistentVoxelBottomLevelASSerial = 0;
+	for (auto& pair : mPersistentVoxelActorResources)
+	{
+		DestroyBufferResource(pair.second.vertexBuffer);
+		DestroyBufferResource(pair.second.indexBuffer);
+		DestroyAccelerationStructureResource(pair.second.accelerationStructure);
+	}
+	mPersistentVoxelActorResources.clear();
 }
 
 bool NRIRenderer::EnsurePersistentVoxelBatch()
@@ -11467,8 +11466,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return true;
 	}
 
-	nri_scene::SceneView voxelSceneView;
-	if (!nri_scene::BuildPersistentVoxelCacheSceneView(voxelSceneView))
+	std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
+	if (!nri_scene::BuildPersistentVoxelCacheEntries(cacheEntries))
 	{
 		ResetPersistentVoxelBatch();
 		return false;
@@ -11476,22 +11475,109 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 	PersistentVoxelBatch next = {};
 	next.sourceSerial = cacheSerial;
-	next.sceneView = std::move(voxelSceneView);
-	next.surfaceCount = (uint32_t)next.sceneView.opaqueSprites.size();
+	next.actors.reserve(cacheEntries.size());
+	next.sceneView.opaqueSprites.reserve(cacheEntries.size());
+
+	Clocker geometryClock(NriPTGeometryBuild);
+	for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
 	{
-		Clocker clock(NriPTGeometryBuild);
-		nri_scene::BuildGeometry(next.sceneView, next.geometry);
-		AssignGeometryPortalIndices(mMapWorld, next.geometry);
-	}
-	{
-		Clocker clock(NriPTMaterialBuild);
-		BuildMaterialsWithActorOverrides(next.sceneView, next.materialBridge, "persistent_voxel");
+		nri_scene::SceneView actorSceneView = {};
+		actorSceneView.opaqueSprites.push_back(cacheEntry.surface);
+		actorSceneView.stats.spriteDrawItems = 1;
+		actorSceneView.stats.modelDrawItems = 1;
+		actorSceneView.stats.voxelProxyDrawItems = 1;
+		actorSceneView.stats.totalDrawItems = 1;
+		actorSceneView.stats.materialRefs = 1;
+		actorSceneView.stats.triangleEstimate = cacheEntry.primitiveCount;
+		actorSceneView.stats.voxelCachePrimitives = cacheEntry.primitiveCount;
+
+		nri_scene::GeometryData actorGeometry;
+		nri_scene::BuildGeometry(actorSceneView, actorGeometry);
+		AssignGeometryPortalIndices(mMapWorld, actorGeometry);
+		if (actorGeometry.primitives.empty() || actorGeometry.indices.empty())
+		{
+			continue;
+		}
+
+		nri_scene::MaterialBridgeData actorMaterials;
+		{
+			Clocker materialClock(NriPTMaterialBuild);
+			BuildMaterialsWithActorOverrides(actorSceneView, actorMaterials, "persistent_voxel_actor");
+		}
+		if (actorMaterials.materials.empty())
+		{
+			continue;
+		}
+
+		PersistentVoxelActorResource& resource = mPersistentVoxelActorResources[cacheEntry.identityKey];
+		const bool actorGeometryChanged =
+			resource.signature != cacheEntry.signature ||
+			resource.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
+			resource.indexCount != (uint32_t)actorGeometry.indices.size() ||
+			resource.primitiveCount != (uint32_t)actorGeometry.primitives.size();
+		if (actorGeometryChanged)
+		{
+			if (!EnsureResidentStructuredBuffer(
+					resource.vertexBuffer,
+					mVertexBufferStats,
+					actorGeometry.vertices.data(),
+					actorGeometry.vertices.size() * sizeof(nri_scene::SceneVertex),
+					sizeof(nri_scene::SceneVertex),
+					NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+					NRIAccelerationStructureBuildInputAccess(),
+					"persistent_voxel_actor_vertex",
+					ResidentUploadKind_Vertex) ||
+				!EnsureResidentStructuredBuffer(
+					resource.indexBuffer,
+					mIndexBufferStats,
+					actorGeometry.indices.data(),
+					actorGeometry.indices.size() * sizeof(uint32_t),
+					sizeof(uint32_t),
+					NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+					NRIAccelerationStructureBuildInputAccess(),
+					"persistent_voxel_actor_index",
+					ResidentUploadKind_Index))
+			{
+				ResetPersistentVoxelBatch();
+				return false;
+			}
+			DestroyAccelerationStructureResource(resource.accelerationStructure);
+			resource.signature = cacheEntry.signature;
+			resource.vertexCount = (uint32_t)actorGeometry.vertices.size();
+			resource.indexCount = (uint32_t)actorGeometry.indices.size();
+			resource.primitiveCount = (uint32_t)actorGeometry.primitives.size();
+			resource.sourceSerial = 0;
+		}
+
+		PersistentVoxelBatch::ActorEntry actor = {};
+		actor.identityKey = cacheEntry.identityKey;
+		actor.signature = cacheEntry.signature;
+		actor.primitiveOffset = (uint32_t)next.geometry.primitives.size();
+		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
+		actor.indexOffset = (uint32_t)next.geometry.indices.size();
+		actor.indexCount = (uint32_t)actorGeometry.indices.size();
+		actor.materialOffset = (uint32_t)next.materialBridge.materials.size();
+		actor.materialCount = (uint32_t)actorMaterials.materials.size();
+
+		AppendGeometry(actorGeometry, actor.materialOffset, next.geometry);
+		AppendMaterialBridge(actorMaterials, next.materialBridge);
+		next.actors.push_back(actor);
+		next.sceneView.opaqueSprites.push_back(cacheEntry.surface);
+		next.sceneView.stats.triangleEstimate += cacheEntry.primitiveCount;
+		next.sceneView.stats.voxelCachePrimitives += cacheEntry.primitiveCount;
+		next.sceneView.stats.materialRefs += actor.materialCount;
 	}
 
 	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
 	next.materialCount = (uint32_t)next.materialBridge.materials.size();
+	next.surfaceCount = (uint32_t)next.sceneView.opaqueSprites.size();
+	next.sceneView.stats.spriteDrawItems = next.surfaceCount;
+	next.sceneView.stats.modelDrawItems = next.surfaceCount;
+	next.sceneView.stats.voxelProxyDrawItems = next.surfaceCount;
+	next.sceneView.stats.voxelCacheEntries = next.surfaceCount;
+	next.sceneView.stats.totalDrawItems = next.surfaceCount;
 	next.rebuildCount = mPersistentVoxelBatch.rebuildCount + 1u;
-	next.valid = next.surfaceCount > 0 && next.primitiveCount > 0 && next.materialCount > 0;
+	next.valid = next.surfaceCount > 0 && next.primitiveCount > 0 && next.materialCount > 0 && !next.actors.empty();
 	if (!next.valid)
 	{
 		ResetPersistentVoxelBatch();
@@ -11499,6 +11585,80 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	}
 
 	mPersistentVoxelBatch = std::move(next);
+	return true;
+}
+
+bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scene::GeometryData& geometry)
+{
+	(void)geometry;
+	if (!mPersistentVoxelBatch.valid || mPersistentVoxelBatch.actors.empty())
+	{
+		ResetPersistentVoxelBatch();
+		return true;
+	}
+
+	std::unordered_set<uint64_t> activeKeys;
+	activeKeys.reserve(mPersistentVoxelBatch.actors.size());
+	for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+	{
+		activeKeys.insert(actor.identityKey);
+	}
+
+	for (auto it = mPersistentVoxelActorResources.begin(); it != mPersistentVoxelActorResources.end(); )
+	{
+		if (activeKeys.find(it->first) == activeKeys.end())
+		{
+			DestroyBufferResource(it->second.vertexBuffer);
+			DestroyBufferResource(it->second.indexBuffer);
+			DestroyAccelerationStructureResource(it->second.accelerationStructure);
+			it = mPersistentVoxelActorResources.erase(it);
+			continue;
+		}
+		++it;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+	{
+		PersistentVoxelActorResource& resource = mPersistentVoxelActorResources[actor.identityKey];
+		const bool needsBuild =
+			resource.accelerationStructure.accelerationStructure == nullptr ||
+			resource.signature != actor.signature ||
+			resource.primitiveCount != actor.primitiveCount ||
+			resource.indexCount != actor.indexCount ||
+			resource.vertexBuffer.buffer == nullptr ||
+			resource.indexBuffer.buffer == nullptr;
+		if (!needsBuild)
+		{
+			resource.primitiveOffset = actor.primitiveOffset;
+			resource.indexOffset = actor.indexOffset;
+			resource.materialOffset = actor.materialOffset;
+			resource.materialCount = actor.materialCount;
+			continue;
+		}
+
+		if (!BuildBottomLevelAccelerationStructure(
+			resource.vertexBuffer,
+			resource.indexBuffer,
+			resource.vertexCount,
+			0u,
+			actor.indexCount,
+			actor.primitiveCount,
+			resource.accelerationStructure,
+			false))
+		{
+			return false;
+		}
+
+		resource.signature = actor.signature;
+		resource.primitiveOffset = actor.primitiveOffset;
+		resource.primitiveCount = actor.primitiveCount;
+		resource.indexOffset = actor.indexOffset;
+		resource.indexCount = actor.indexCount;
+		resource.materialOffset = actor.materialOffset;
+		resource.materialCount = actor.materialCount;
+		resource.sourceSerial = mPersistentVoxelBatch.sourceSerial;
+	}
+
 	return true;
 }
 
@@ -17895,8 +18055,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
-	DestroyAccelerationStructureResource(mPersistentVoxelBottomLevelAS);
-	mPersistentVoxelBottomLevelASSerial = 0;
+	ResetPersistentVoxelBatch();
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 
@@ -22695,14 +22854,39 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(
 	NRIAccelerationStructureResource& outAccelerationStructure,
 	bool updateDynamicPerfStats)
 {
+	if (indexOffset > geometry.indices.size() || indexOffset + indexCount > geometry.indices.size())
+	{
+		return false;
+	}
+	return BuildBottomLevelAccelerationStructure(
+		mVertexBuffer,
+		mIndexBuffer,
+		(uint32_t)geometry.vertices.size(),
+		indexOffset,
+		indexCount,
+		primitiveCount,
+		outAccelerationStructure,
+		updateDynamicPerfStats);
+}
+
+bool NRIRenderer::BuildBottomLevelAccelerationStructure(
+	const NRIBufferResource& vertexBuffer,
+	const NRIBufferResource& indexBuffer,
+	uint32_t vertexCount,
+	uint32_t indexOffset,
+	uint32_t indexCount,
+	uint32_t primitiveCount,
+	NRIAccelerationStructureResource& outAccelerationStructure,
+	bool updateDynamicPerfStats)
+{
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicAsMs);
 	if (updateDynamicPerfStats)
 	{
 		mLastPerfShellTraceStats.dynamicAsPrimitiveCount = primitiveCount;
-		mLastPerfShellTraceStats.dynamicAsVertexCount = (uint32_t)geometry.vertices.size();
+		mLastPerfShellTraceStats.dynamicAsVertexCount = vertexCount;
 		mLastPerfShellTraceStats.dynamicAsIndexCount = indexCount;
 	}
-	if (primitiveCount == 0 || geometry.vertices.empty() || indexCount == 0 || indexOffset > geometry.indices.size() || indexOffset + indexCount > geometry.indices.size())
+	if (primitiveCount == 0 || vertexCount == 0 || indexCount == 0 || vertexBuffer.buffer == nullptr || indexBuffer.buffer == nullptr)
 	{
 		return false;
 	}
@@ -22710,12 +22894,12 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(
 	nri::BottomLevelGeometryDesc dynamicGeometryDesc = {};
 	dynamicGeometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
 	dynamicGeometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-	dynamicGeometryDesc.triangles.vertexBuffer = mVertexBuffer.buffer;
+	dynamicGeometryDesc.triangles.vertexBuffer = vertexBuffer.buffer;
 	dynamicGeometryDesc.triangles.vertexOffset = 0;
-	dynamicGeometryDesc.triangles.vertexNum = (uint32_t)geometry.vertices.size();
+	dynamicGeometryDesc.triangles.vertexNum = vertexCount;
 	dynamicGeometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
 	dynamicGeometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-	dynamicGeometryDesc.triangles.indexBuffer = mIndexBuffer.buffer;
+	dynamicGeometryDesc.triangles.indexBuffer = indexBuffer.buffer;
 	dynamicGeometryDesc.triangles.indexOffset = (uint64_t)indexOffset * sizeof(uint32_t);
 	dynamicGeometryDesc.triangles.indexNum = indexCount;
 	dynamicGeometryDesc.triangles.indexType = nri::IndexType::UINT32;
@@ -24918,8 +25102,7 @@ void NRIRenderer::DestroyAccelerationStructures()
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
 	}
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
-	DestroyAccelerationStructureResource(mPersistentVoxelBottomLevelAS);
-	mPersistentVoxelBottomLevelASSerial = 0;
+	ResetPersistentVoxelBatch();
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;

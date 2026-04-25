@@ -180,6 +180,14 @@ struct SceneView
 	float groundColor[3] = { 0.08f, 0.08f, 0.08f };
 };
 
+struct PersistentVoxelCacheEntryView
+{
+	uint64_t identityKey = 0;
+	uint64_t signature = 0;
+	uint32_t primitiveCount = 0;
+	SurfaceRef surface;
+};
+
 SceneDebugStats CollectDebugStats(HWDrawInfo& di);
 MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float alpha, uint32_t extraFlags);
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType);
@@ -189,5 +197,6 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView);
 bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
+bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries);
 uint64_t GetPersistentVoxelCacheSerial();
 }
