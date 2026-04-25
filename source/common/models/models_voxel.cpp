@@ -184,12 +184,12 @@ FVoxelModel::~FVoxelModel()
 //
 //===========================================================================
 
-unsigned int FVoxelModel::AddVertex(FModelVertex &vert, FVoxelMap &check)
+unsigned int FVoxelModel::AddVertex(FModelVertex &vert, FVoxelMap &check, TArray<FModelVertex>& vertices) const
 {
 	unsigned int index = check[vert];
 	if (index == 0xffffffff)
 	{
-		index = check[vert] =mVertices.Push(vert);
+		index = check[vert] = vertices.Push(vert);
 	}
 	return index;
 }
@@ -200,7 +200,7 @@ unsigned int FVoxelModel::AddVertex(FModelVertex &vert, FVoxelMap &check)
 //
 //===========================================================================
 
-void FVoxelModel::AddFace(int x1, int y1, int z1, int x2, int y2, int z2, int x3, int y3, int z3, int x4, int y4, int z4, uint8_t col, FVoxelMap &check)
+void FVoxelModel::AddFace(int x1, int y1, int z1, int x2, int y2, int z2, int x3, int y3, int z3, int x4, int y4, int z4, uint8_t col, FVoxelMap &check, TArray<FModelVertex>& vertices, TArray<unsigned int>& indices) const
 {
 	float PivotX = mVoxel->Mips[0].Pivot.X;
 	float PivotY = mVoxel->Mips[0].Pivot.Y;
@@ -215,30 +215,30 @@ void FVoxelModel::AddFace(int x1, int y1, int z1, int x2, int y2, int z2, int x3
 	vert.x =  x1 - PivotX;
 	vert.z = -y1 + PivotY;
 	vert.y = -z1 + PivotZ;
-	indx[0] = AddVertex(vert, check);
+	indx[0] = AddVertex(vert, check, vertices);
 
 	vert.x =  x2 - PivotX;
 	vert.z = -y2 + PivotY;
 	vert.y = -z2 + PivotZ;
-	indx[1] = AddVertex(vert, check);
+	indx[1] = AddVertex(vert, check, vertices);
 
 	vert.x =  x4 - PivotX;
 	vert.z = -y4 + PivotY;
 	vert.y = -z4 + PivotZ;
-	indx[2] = AddVertex(vert, check);
+	indx[2] = AddVertex(vert, check, vertices);
 
 	vert.x =  x3 - PivotX;
 	vert.z = -y3 + PivotY;
 	vert.y = -z3 + PivotZ;
-	indx[3] = AddVertex(vert, check);
+	indx[3] = AddVertex(vert, check, vertices);
 
 
-	mIndices.Push(indx[0]);
-	mIndices.Push(indx[1]);
-	mIndices.Push(indx[3]);
-	mIndices.Push(indx[1]);
-	mIndices.Push(indx[2]);
-	mIndices.Push(indx[3]);
+	indices.Push(indx[0]);
+	indices.Push(indx[1]);
+	indices.Push(indx[3]);
+	indices.Push(indx[1]);
+	indices.Push(indx[2]);
+	indices.Push(indx[3]);
 }
 
 //===========================================================================
@@ -247,7 +247,7 @@ void FVoxelModel::AddFace(int x1, int y1, int z1, int x2, int y2, int z2, int x3
 //
 //===========================================================================
 
-void FVoxelModel::MakeSlabPolys(int x, int y, kvxslab_t *voxptr, FVoxelMap &check)
+void FVoxelModel::MakeSlabPolys(int x, int y, kvxslab_t *voxptr, FVoxelMap &check, TArray<FModelVertex>& vertices, TArray<unsigned int>& indices) const
 {
 	const uint8_t *col = voxptr->col;
 	int zleng = voxptr->zleng;
@@ -256,7 +256,7 @@ void FVoxelModel::MakeSlabPolys(int x, int y, kvxslab_t *voxptr, FVoxelMap &chec
 
 	if (cull & 16)
 	{
-		AddFace(x, y, ztop, x+1, y, ztop, x, y+1, ztop, x+1, y+1, ztop, *col, check);
+		AddFace(x, y, ztop, x+1, y, ztop, x, y+1, ztop, x+1, y+1, ztop, *col, check, vertices, indices);
 	}
 	int z = ztop;
 	while (z < ztop+zleng)
@@ -266,19 +266,19 @@ void FVoxelModel::MakeSlabPolys(int x, int y, kvxslab_t *voxptr, FVoxelMap &chec
 
 		if (cull & 1)
 		{
-			AddFace(x, y, z, x, y+1, z, x, y, z+c, x, y+1, z+c, *col, check);
+			AddFace(x, y, z, x, y+1, z, x, y, z+c, x, y+1, z+c, *col, check, vertices, indices);
 		}
 		if (cull & 2)
 		{
-			AddFace(x+1, y+1, z, x+1, y, z, x+1, y+1, z+c, x+1, y, z+c, *col, check);
+			AddFace(x+1, y+1, z, x+1, y, z, x+1, y+1, z+c, x+1, y, z+c, *col, check, vertices, indices);
 		}
 		if (cull & 4)
 		{
-			AddFace(x+1, y, z, x, y, z, x+1, y, z+c, x, y, z+c, *col, check);
+			AddFace(x+1, y, z, x, y, z, x+1, y, z+c, x, y, z+c, *col, check, vertices, indices);
 		}
 		if (cull & 8)
 		{
-			AddFace(x, y+1, z, x+1, y+1, z, x, y+1, z+c, x+1, y+1, z+c, *col, check);
+			AddFace(x, y+1, z, x+1, y+1, z, x, y+1, z+c, x+1, y+1, z+c, *col, check, vertices, indices);
 		}	
 		z+=c;
 		col+=c;
@@ -286,7 +286,7 @@ void FVoxelModel::MakeSlabPolys(int x, int y, kvxslab_t *voxptr, FVoxelMap &chec
 	if (cull & 32)
 	{
 		int zz = ztop+zleng-1;
-		AddFace(x+1, y, zz+1, x, y, zz+1, x+1, y+1, zz+1, x, y+1, zz+1, voxptr->col[zleng-1], check);
+		AddFace(x+1, y, zz+1, x, y, zz+1, x+1, y+1, zz+1, x, y+1, zz+1, voxptr->col[zleng-1], check, vertices, indices);
 	}
 }
 
@@ -296,7 +296,7 @@ void FVoxelModel::MakeSlabPolys(int x, int y, kvxslab_t *voxptr, FVoxelMap &chec
 //
 //===========================================================================
 
-void FVoxelModel::Initialize()
+void FVoxelModel::BuildMesh(TArray<FModelVertex>& vertices, TArray<unsigned int>& indices) const
 {
 	FVoxelMap check;
 	FVoxelMipLevel *mip = &mVoxel->Mips[0];
@@ -310,10 +310,36 @@ void FVoxelModel::Initialize()
 			kvxslab_t *voxend = (kvxslab_t *)(slabxoffs + xyoffs[y+1]);
 			for (; voxptr < voxend; voxptr = (kvxslab_t *)((uint8_t *)voxptr + voxptr->zleng + 3))
 			{
-				MakeSlabPolys(x, y, voxptr, check);
+				MakeSlabPolys(x, y, voxptr, check, vertices, indices);
 			}
 		}
 	}
+}
+
+//===========================================================================
+//
+// 
+//
+//===========================================================================
+
+void FVoxelModel::Initialize()
+{
+	mVertices.Clear();
+	mIndices.Clear();
+	BuildMesh(mVertices, mIndices);
+}
+
+//===========================================================================
+//
+//
+//
+//===========================================================================
+
+void FVoxelModel::BuildCpuMesh(FVoxelMeshData& outMesh) const
+{
+	outMesh.vertices.Clear();
+	outMesh.indices.Clear();
+	BuildMesh(outMesh.vertices, outMesh.indices);
 }
 
 //===========================================================================

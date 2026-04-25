@@ -38,6 +38,11 @@ struct FIndexInit
 
 typedef TMap<FModelVertex, unsigned int, FVoxelVertexHash, FIndexInit> FVoxelMap;
 
+struct FVoxelMeshData
+{
+	TArray<FModelVertex> vertices;
+	TArray<unsigned int> indices;
+};
 
 class FVoxelModel : public FModel
 {
@@ -49,15 +54,17 @@ protected:
 	TArray<FModelVertex> mVertices;
 	TArray<unsigned int> mIndices;
 
-	void MakeSlabPolys(int x, int y, kvxslab_t *voxptr, FVoxelMap &check);
-	void AddFace(int x1, int y1, int z1, int x2, int y2, int z2, int x3, int y3, int z3, int x4, int y4, int z4, uint8_t color, FVoxelMap &check);
-	unsigned int AddVertex(FModelVertex &vert, FVoxelMap &check);
+	void BuildMesh(TArray<FModelVertex>& vertices, TArray<unsigned int>& indices) const;
+	void MakeSlabPolys(int x, int y, kvxslab_t *voxptr, FVoxelMap &check, TArray<FModelVertex>& vertices, TArray<unsigned int>& indices) const;
+	void AddFace(int x1, int y1, int z1, int x2, int y2, int z2, int x3, int y3, int z3, int x4, int y4, int z4, uint8_t color, FVoxelMap &check, TArray<FModelVertex>& vertices, TArray<unsigned int>& indices) const;
+	unsigned int AddVertex(FModelVertex &vert, FVoxelMap &check, TArray<FModelVertex>& vertices) const;
 
 public:
 	FVoxelModel(FVoxel *voxel, bool owned);
 	~FVoxelModel();
 	bool Load(const char * fn, int lumpnum, const char * buffer, int length) override;
 	void Initialize();
+	void BuildCpuMesh(FVoxelMeshData& outMesh) const;
 	virtual int FindFrame(const char* name, bool nodefault) override;
 	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, const TArray<VSMatrix>& boneData, int boneStartPosition) override;
 	virtual void AddSkins(uint8_t *hitlist, const FTextureID* surfaceskinids) override;
@@ -65,5 +72,4 @@ public:
 	void BuildVertexBuffer(FModelRenderer *renderer) override;
 	float getAspectFactor(float vscale) override;
 };
-
 
