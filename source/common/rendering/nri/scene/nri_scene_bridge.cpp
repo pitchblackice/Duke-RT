@@ -609,6 +609,24 @@ namespace
 		return di.drawlists[type].Size();
 	}
 
+	unsigned int CountFanTriangles(const SurfaceRef& surface)
+	{
+		if (!surface.indices.empty())
+		{
+			return (unsigned int)(surface.indices.size() / 3u);
+		}
+		return surface.vertices.size() >= 3 ? (unsigned int)surface.vertices.size() - 2u : 0u;
+	}
+
+	unsigned int CountTriangleListTriangles(const SurfaceRef& surface)
+	{
+		if (!surface.indices.empty())
+		{
+			return (unsigned int)(surface.indices.size() / 3u);
+		}
+		return (unsigned int)(surface.vertices.size() / 3u);
+	}
+
 	void ApplyActorPreviousTransform(SurfaceRef& surface, DCoreActor* actor)
 	{
 		if (actor == nullptr)
@@ -1378,32 +1396,43 @@ namespace
 			return false;
 		}
 
+		SurfaceRef surface = {};
+		surface.material = MakeMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
+		surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
+		surface.vertices.reserve(mesh->vertices.Size());
+		for (unsigned int i = 0; i < mesh->vertices.Size(); ++i)
+		{
+			surface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh->vertices[i]));
+		}
+
+		const unsigned int vertexCount = mesh->vertices.Size();
 		const unsigned int indexCount = mesh->indices.Size();
-		outSprites.reserve(outSprites.size() + indexCount / 3u);
+		surface.indices.reserve(indexCount);
 		for (unsigned int i = 0; i + 2u < indexCount; i += 3u)
 		{
 			const unsigned int i0 = mesh->indices[i + 0u];
 			const unsigned int i1 = mesh->indices[i + 1u];
 			const unsigned int i2 = mesh->indices[i + 2u];
-			if (i0 >= mesh->vertices.Size() || i1 >= mesh->vertices.Size() || i2 >= mesh->vertices.Size())
+			if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
 			{
 				continue;
 			}
 
-			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
-			surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
-			surface.vertices.reserve(3);
-			surface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh->vertices[i0]));
-			surface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh->vertices[i1]));
-			surface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh->vertices[i2]));
-			if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
-			{
-				ApplyActorPreviousTransform(surface, sprite.Sprite->ownerActor);
-			}
-			outSprites.push_back(std::move(surface));
+			surface.indices.push_back(i0);
+			surface.indices.push_back(i1);
+			surface.indices.push_back(i2);
 		}
 
+		if (surface.indices.empty())
+		{
+			return false;
+		}
+
+		if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
+		{
+			ApplyActorPreviousTransform(surface, sprite.Sprite->ownerActor);
+		}
+		outSprites.push_back(std::move(surface));
 		return true;
 	}
 
@@ -1614,19 +1643,19 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 
 	for (const auto& wall : outView.opaqueWalls)
 	{
-		outView.stats.triangleEstimate += wall.vertices.size() >= 3 ? (unsigned int)wall.vertices.size() - 2 : 0;
+		outView.stats.triangleEstimate += CountFanTriangles(wall);
 		outView.stats.materialRefs++;
 	}
 
 	for (const auto& flat : outView.opaqueFlats)
 	{
-		outView.stats.triangleEstimate += (unsigned int)(flat.vertices.size() / 3);
+		outView.stats.triangleEstimate += CountTriangleListTriangles(flat);
 		outView.stats.materialRefs++;
 	}
 
 	for (const auto& sprite : outView.opaqueSprites)
 	{
-		outView.stats.triangleEstimate += sprite.vertices.size() >= 3 ? (unsigned int)sprite.vertices.size() - 2 : 0;
+		outView.stats.triangleEstimate += CountFanTriangles(sprite);
 		outView.stats.materialRefs++;
 	}
 
@@ -1644,7 +1673,7 @@ bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outV
 	outView.stats.totalDrawItems = outView.stats.spriteDrawItems;
 	for (const auto& sprite : outView.opaqueSprites)
 	{
-		outView.stats.triangleEstimate += sprite.vertices.size() >= 3 ? (unsigned int)sprite.vertices.size() - 2 : 0;
+		outView.stats.triangleEstimate += CountFanTriangles(sprite);
 		outView.stats.materialRefs++;
 		if (sprite.provenance.sourceType != SurfaceSourceType::VoxelProxySprite)
 		{
@@ -1681,19 +1710,19 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 
 	for (const auto& wall : outView.opaqueWalls)
 	{
-		outView.stats.triangleEstimate += wall.vertices.size() >= 3 ? (unsigned int)wall.vertices.size() - 2 : 0;
+		outView.stats.triangleEstimate += CountFanTriangles(wall);
 		outView.stats.materialRefs++;
 	}
 
 	for (const auto& flat : outView.opaqueFlats)
 	{
-		outView.stats.triangleEstimate += (unsigned int)(flat.vertices.size() / 3);
+		outView.stats.triangleEstimate += CountTriangleListTriangles(flat);
 		outView.stats.materialRefs++;
 	}
 
 	for (const auto& sprite : outView.opaqueSprites)
 	{
-		outView.stats.triangleEstimate += sprite.vertices.size() >= 3 ? (unsigned int)sprite.vertices.size() - 2 : 0;
+		outView.stats.triangleEstimate += CountFanTriangles(sprite);
 		outView.stats.materialRefs++;
 	}
 

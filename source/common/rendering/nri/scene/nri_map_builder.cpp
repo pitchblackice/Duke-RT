@@ -81,6 +81,10 @@ namespace
 
 	uint32_t CountTriangles(const SurfaceRef& surface)
 	{
+		if (!surface.indices.empty())
+		{
+			return (uint32_t)(surface.indices.size() / 3u);
+		}
 		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2 : 0;
 	}
 

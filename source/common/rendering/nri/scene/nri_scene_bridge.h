@@ -148,6 +148,7 @@ struct CapturedVertex
 struct SurfaceRef
 {
 	std::vector<CapturedVertex> vertices;
+	std::vector<uint32_t> indices;
 	MaterialRef material;
 	SurfaceProvenance provenance;
 };

@@ -109,6 +109,35 @@ namespace
 		outGeometry.primitives.push_back(primitive);
 		outGeometry.primitiveProvenance.push_back(provenance);
 	}
+
+	bool AppendIndexedSurface(const SurfaceRef& surface, uint32_t materialIndex, uint32_t flags, GeometryData& outGeometry)
+	{
+		if (surface.indices.size() < 3)
+		{
+			return false;
+		}
+
+		for (uint32_t i = 0; i + 2 < surface.indices.size(); i += 3)
+		{
+			const uint32_t i0 = surface.indices[i + 0];
+			const uint32_t i1 = surface.indices[i + 1];
+			const uint32_t i2 = surface.indices[i + 2];
+			if (i0 >= surface.vertices.size() || i1 >= surface.vertices.size() || i2 >= surface.vertices.size())
+			{
+				continue;
+			}
+
+			AppendTriangle(
+				MakeVertex(surface.vertices[i0]),
+				MakeVertex(surface.vertices[i1]),
+				MakeVertex(surface.vertices[i2]),
+				materialIndex,
+				flags,
+				surface.provenance,
+				outGeometry);
+		}
+		return true;
+	}
 }
 
 namespace nri_scene
@@ -122,6 +151,12 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 	for (const SurfaceRef& wall : sceneView.opaqueWalls)
 	{
 		if (wall.vertices.size() < 3)
+		{
+			materialIndex++;
+			continue;
+		}
+
+		if (AppendIndexedSurface(wall, materialIndex, wall.material.flags | scenePrimitiveFlags, outGeometry))
 		{
 			materialIndex++;
 			continue;
@@ -144,6 +179,12 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 			continue;
 		}
 
+		if (AppendIndexedSurface(flat, materialIndex, flat.material.flags | scenePrimitiveFlags, outGeometry))
+		{
+			materialIndex++;
+			continue;
+		}
+
 		for (uint32_t i = 0; i + 2 < flat.vertices.size(); i += 3)
 		{
 			AppendTriangle(MakeVertex(flat.vertices[i]), MakeVertex(flat.vertices[i + 1]), MakeVertex(flat.vertices[i + 2]), materialIndex, flat.material.flags | scenePrimitiveFlags, flat.provenance, outGeometry);
@@ -155,6 +196,12 @@ void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
 	for (const SurfaceRef& sprite : sceneView.opaqueSprites)
 	{
 		if (sprite.vertices.size() < 3)
+		{
+			materialIndex++;
+			continue;
+		}
+
+		if (AppendIndexedSurface(sprite, materialIndex, sprite.material.flags | scenePrimitiveFlags, outGeometry))
 		{
 			materialIndex++;
 			continue;

@@ -764,7 +764,7 @@ public:
 
 		for (const nri_scene::SurfaceRef& wall : sceneView.opaqueWalls)
 		{
-			stats.triangleEstimate += wall.vertices.size() >= 3 ? (uint32_t)wall.vertices.size() - 2u : 0u;
+			stats.triangleEstimate += !wall.indices.empty() ? (uint32_t)(wall.indices.size() / 3u) : (wall.vertices.size() >= 3 ? (uint32_t)wall.vertices.size() - 2u : 0u);
 			stats.materialRefs++;
 			if (wall.provenance.sourceType == nri_scene::SurfaceSourceType::MirrorWall)
 			{
@@ -774,13 +774,13 @@ public:
 
 		for (const nri_scene::SurfaceRef& flat : sceneView.opaqueFlats)
 		{
-			stats.triangleEstimate += (uint32_t)(flat.vertices.size() / 3u);
+			stats.triangleEstimate += !flat.indices.empty() ? (uint32_t)(flat.indices.size() / 3u) : (uint32_t)(flat.vertices.size() / 3u);
 			stats.materialRefs++;
 		}
 
 		for (const nri_scene::SurfaceRef& sprite : sceneView.opaqueSprites)
 		{
-			stats.triangleEstimate += sprite.vertices.size() >= 3 ? (uint32_t)sprite.vertices.size() - 2u : 0u;
+			stats.triangleEstimate += !sprite.indices.empty() ? (uint32_t)(sprite.indices.size() / 3u) : (sprite.vertices.size() >= 3 ? (uint32_t)sprite.vertices.size() - 2u : 0u);
 			stats.materialRefs++;
 			if (sprite.provenance.sourceType == nri_scene::SurfaceSourceType::VoxelProxySprite)
 			{
@@ -3454,6 +3454,10 @@ namespace
 
 	uint32_t CountSurfaceTriangles(const nri_scene::SurfaceRef& surface)
 	{
+		if (!surface.indices.empty())
+		{
+			return (uint32_t)(surface.indices.size() / 3u);
+		}
 		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2 : 0u;
 	}
 
@@ -5977,6 +5981,7 @@ namespace
 			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectionIndex + 1));
 			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.actorIndex + 1));
 			hash = HashCombine64(hash, (uint64_t)surface.provenance.cstat);
+			hash = HashCombine64(hash, (uint64_t)surface.indices.size());
 			hash = HashCombine64(hash, HashAnimatedTextureDisplaySignature(surface.material.texture));
 		}
 	}
@@ -5994,11 +5999,16 @@ namespace
 			hash = HashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.actorIndex + 1));
 			hash = HashCombine64(hash, (uint64_t)surface.provenance.cstat);
 			hash = HashCombine64(hash, (uint64_t)surface.vertices.size());
+			hash = HashCombine64(hash, (uint64_t)surface.indices.size());
 			for (const auto& vertex : surface.vertices)
 			{
 				hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[0]));
 				hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[1]));
 				hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[2]));
+			}
+			for (uint32_t index : surface.indices)
+			{
+				hash = HashCombine64(hash, (uint64_t)index);
 			}
 		}
 	}
