@@ -47,6 +47,7 @@ namespace
 	std::unordered_map<const FTexture*, AverageColorCacheEntry> gFrameLocalAverageTextureColorCache;
 	std::unordered_map<uint64_t, AverageColorCacheEntry> gPersistentAverageTextureColorCache;
 	std::unordered_map<const FGameTexture*, CachedSkyInspection> gSkyInspectionCache;
+	std::unordered_map<const FVoxelModel*, FVoxelMeshData> gVoxelMeshCache;
 
 	bool IsUsableGameTexturePointer(FGameTexture* texture);
 
@@ -1332,46 +1333,82 @@ namespace
 		outVertex.uv[1] = v;
 	}
 
-	void AddVoxelFace(const VSMatrix& matrix, const float* extents, const int* indices, SurfaceRef& outSurface)
+	CapturedVertex MakeCapturedModelVertex(const VSMatrix& matrix, const FModelVertex& source)
 	{
-		static const float corners[8][3] = {
-			{ 0.0f, 0.0f, 0.0f },
-			{ 1.0f, 0.0f, 0.0f },
-			{ 1.0f, 1.0f, 0.0f },
-			{ 0.0f, 1.0f, 0.0f },
-			{ 0.0f, 0.0f, 1.0f },
-			{ 1.0f, 0.0f, 1.0f },
-			{ 1.0f, 1.0f, 1.0f },
-			{ 0.0f, 1.0f, 1.0f },
-		};
+		CapturedVertex vertex = {};
+		TransformModelPoint(matrix, source.x, source.y, source.z, vertex, source.u, source.v);
+		return vertex;
+	}
 
-		static const float uvs[4][2] = {
-			{ 0.0f, 0.0f },
-			{ 1.0f, 0.0f },
-			{ 1.0f, 1.0f },
-			{ 0.0f, 1.0f },
-		};
-
-		for (int i = 0; i < 4; ++i)
+	const FVoxelMeshData* GetCachedVoxelMesh(FVoxelModel* model)
+	{
+		if (model == nullptr)
 		{
-			const float* local = corners[indices[i]];
-			CapturedVertex vertex = {};
-			TransformModelPoint(matrix, local[0] * extents[0], local[1] * extents[1], local[2] * extents[2], vertex, uvs[i][0], uvs[i][1]);
-			outSurface.vertices.push_back(vertex);
+			return nullptr;
 		}
+
+		auto found = gVoxelMeshCache.find(model);
+		if (found == gVoxelMeshCache.end())
+		{
+			FVoxelMeshData mesh;
+			model->BuildCpuMesh(mesh);
+			found = gVoxelMeshCache.emplace(model, std::move(mesh)).first;
+		}
+
+		const FVoxelMeshData& mesh = found->second;
+		return mesh.vertices.Size() > 0 && mesh.indices.Size() >= 3 ? &mesh : nullptr;
+	}
+
+	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, std::vector<SurfaceRef>& outSprites)
+	{
+		if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
+		{
+			return false;
+		}
+
+		FGameTexture* voxelTexture = TexMan.GetGameTexture(sprite.voxel->model->GetPaletteTexture());
+		if (voxelTexture == nullptr || !voxelTexture->isValid())
+		{
+			return false;
+		}
+
+		const FVoxelMeshData* mesh = GetCachedVoxelMesh(sprite.voxel->model);
+		if (mesh == nullptr)
+		{
+			return false;
+		}
+
+		const unsigned int indexCount = mesh->indices.Size();
+		outSprites.reserve(outSprites.size() + indexCount / 3u);
+		for (unsigned int i = 0; i + 2u < indexCount; i += 3u)
+		{
+			const unsigned int i0 = mesh->indices[i + 0u];
+			const unsigned int i1 = mesh->indices[i + 1u];
+			const unsigned int i2 = mesh->indices[i + 2u];
+			if (i0 >= mesh->vertices.Size() || i1 >= mesh->vertices.Size() || i2 >= mesh->vertices.Size())
+			{
+				continue;
+			}
+
+			SurfaceRef surface = {};
+			surface.material = MakeMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
+			surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
+			surface.vertices.reserve(3);
+			surface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh->vertices[i0]));
+			surface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh->vertices[i1]));
+			surface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh->vertices[i2]));
+			if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
+			{
+				ApplyActorPreviousTransform(surface, sprite.Sprite->ownerActor);
+			}
+			outSprites.push_back(std::move(surface));
+		}
+
+		return true;
 	}
 
 	void CaptureModelSprites(HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
 	{
-		static const int faces[6][4] = {
-			{ 0, 1, 2, 3 },
-			{ 4, 5, 6, 7 },
-			{ 0, 4, 7, 3 },
-			{ 1, 5, 6, 2 },
-			{ 3, 2, 6, 7 },
-			{ 0, 1, 5, 4 },
-		};
-
 		for (auto* sprite : list.sprites)
 		{
 			if (sprite == nullptr)
@@ -1392,47 +1429,15 @@ namespace
 				continue;
 			}
 
-			FGameTexture* voxelTexture = TexMan.GetGameTexture(sprite->voxel->model->GetPaletteTexture());
-			if (voxelTexture == nullptr || !voxelTexture->isValid())
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, outSprites))
 			{
-				continue;
+				stats.voxelProxyDrawItems++;
 			}
-
-			const float extents[3] = {
-				(float)sprite->voxel->siz.X,
-				(float)sprite->voxel->siz.Z,
-				(float)sprite->voxel->siz.Y
-			};
-
-			for (const auto& face : faces)
-			{
-				SurfaceRef surface = {};
-				surface.material = MakeMaterialRef(voxelTexture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
-				surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
-				surface.vertices.reserve(4);
-				AddVoxelFace(sprite->rotmat, extents, face, surface);
-				if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
-				{
-					ApplyActorPreviousTransform(surface, sprite->Sprite->ownerActor);
-				}
-				outSprites.push_back(std::move(surface));
-			}
-
-			stats.voxelProxyDrawItems++;
 		}
 	}
 
 	void CaptureActorModelSprites(HWDrawList& list, uint32_t drawListType, int32_t actorIndex, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
 	{
-		static const int faces[6][4] = {
-			{ 0, 1, 2, 3 },
-			{ 4, 5, 6, 7 },
-			{ 0, 4, 7, 3 },
-			{ 1, 5, 6, 2 },
-			{ 3, 2, 6, 7 },
-			{ 0, 1, 5, 4 },
-		};
-
 		for (auto* sprite : list.sprites)
 		{
 			if (sprite == nullptr || !IsOwnedByActor(*sprite, actorIndex))
@@ -1453,33 +1458,10 @@ namespace
 				continue;
 			}
 
-			FGameTexture* voxelTexture = TexMan.GetGameTexture(sprite->voxel->model->GetPaletteTexture());
-			if (voxelTexture == nullptr || !voxelTexture->isValid())
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, outSprites))
 			{
-				continue;
+				stats.voxelProxyDrawItems++;
 			}
-
-			const float extents[3] = {
-				(float)sprite->voxel->siz.X,
-				(float)sprite->voxel->siz.Z,
-				(float)sprite->voxel->siz.Y
-			};
-
-			for (const auto& face : faces)
-			{
-				SurfaceRef surface = {};
-				surface.material = MakeMaterialRef(voxelTexture, sprite->palette, sprite->shade, sprite->alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
-				surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
-				surface.vertices.reserve(4);
-				AddVoxelFace(sprite->rotmat, extents, face, surface);
-				if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
-				{
-					ApplyActorPreviousTransform(surface, sprite->Sprite->ownerActor);
-				}
-				outSprites.push_back(std::move(surface));
-			}
-
-			stats.voxelProxyDrawItems++;
 		}
 	}
 }
