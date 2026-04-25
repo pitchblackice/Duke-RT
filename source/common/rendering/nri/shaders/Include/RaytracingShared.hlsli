@@ -314,7 +314,7 @@ float4 SampleMaterialColor(MaterialData material, uint textureIndex, float2 uv, 
 	}
 
 	float4 color = 0.0;
-	if (indexed)
+	if (indexed || (material.flags & MATERIAL_FLAG_POINT_SAMPLED) != 0)
 	{
 		color = gSceneTextures[min(textureIndex, MAX_SCENE_TEXTURES - 1)].SampleLevel(gPointWrap, uv, 0.0);
 	}

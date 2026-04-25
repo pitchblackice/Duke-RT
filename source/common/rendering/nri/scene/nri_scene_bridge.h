@@ -44,6 +44,7 @@ enum MaterialFlags : uint32_t
 	MaterialFlag_OneWay = 1u << 7,
 	MaterialFlag_AlphaClip = 1u << 8,
 	MaterialFlag_FacingBillboard = 1u << 9,
+	MaterialFlag_PointSampled = 1u << 10,
 };
 
 enum PrimitiveFlags : uint32_t
