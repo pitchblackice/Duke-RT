@@ -571,6 +571,10 @@ public:
 		uint32_t sceneUploadCalls = 0;
 		uint32_t sceneDataUploadCalls = 0;
 		uint32_t emissiveUploadCalls = 0;
+		uint32_t dynamicSceneUploadCalls = 0;
+		uint32_t residentSceneUploadCalls = 0;
+		uint32_t persistentVoxelUploadCalls = 0;
+		uint32_t otherSceneUploadCalls = 0;
 		uint32_t residentChunkBatchChunkCount = 0;
 		uint32_t residentChunkBatchGeometryDirtyCount = 0;
 		uint32_t residentChunkBatchMaterialDirtyCount = 0;
@@ -580,6 +584,10 @@ public:
 		uint64_t sceneUploadBytes = 0;
 		uint64_t sceneDataUploadBytes = 0;
 		uint64_t emissiveUploadBytes = 0;
+		uint64_t dynamicSceneUploadBytes = 0;
+		uint64_t residentSceneUploadBytes = 0;
+		uint64_t persistentVoxelUploadBytes = 0;
+		uint64_t otherSceneUploadBytes = 0;
 		uint64_t residentChunkBatchVertexBytes = 0;
 		uint64_t residentChunkBatchIndexBytes = 0;
 		uint64_t residentChunkBatchPrimitiveBytes = 0;
@@ -1756,7 +1764,7 @@ private:
 	nri::Format ResolveFinalSceneFormat() const;
 	void ResetPerfTraceStats();
 	void WaitForCommandsTracked(const char* reason = nullptr);
-	void NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth);
+	void NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth, const char* reason);
 	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) { return mFrameTextures[(size_t)slot]; }
 	const NRITextureResource& GetFrameTexture(FrameTextureSlot slot) const { return mFrameTextures[(size_t)slot]; }
 	nri::Pipeline* GetPipeline(PipelineSlot slot) const { return mPipelines[(size_t)slot]; }

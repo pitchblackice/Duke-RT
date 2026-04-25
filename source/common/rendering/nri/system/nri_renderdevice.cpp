@@ -3613,6 +3613,17 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			resource.emissiveUploadCalls,
 			(unsigned long long)resource.emissiveUploadBytes);
 		Printf(
+			"PERF pt resource upload detail NRI: frame=%llu dynamic=%u/%llu resident=%u/%llu persistent_voxel=%u/%llu other_scene=%u/%llu\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			resource.dynamicSceneUploadCalls,
+			(unsigned long long)resource.dynamicSceneUploadBytes,
+			resource.residentSceneUploadCalls,
+			(unsigned long long)resource.residentSceneUploadBytes,
+			resource.persistentVoxelUploadCalls,
+			(unsigned long long)resource.persistentVoxelUploadBytes,
+			resource.otherSceneUploadCalls,
+			(unsigned long long)resource.otherSceneUploadBytes);
+		Printf(
 			"PERF pt resource waits NRI: frame=%llu resident_chunk=%u/%.3f resident_chunk_blas=%u/%.3f scene_data=%u/%.3f scene_buffer=%u/%.3f emissive_sampling=%u/%.3f world_tlas_instance=%u/%.3f world_tlas_scratch=%u/%.3f emissive_tlas_instance=%u/%.3f emissive_tlas_scratch=%u/%.3f other=%u/%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			resource.residentChunkWriteWaitCalls,

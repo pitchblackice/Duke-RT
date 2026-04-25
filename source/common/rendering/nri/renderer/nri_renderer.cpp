@@ -7356,7 +7356,7 @@ void NRIRenderer::WaitForCommandsTracked(const char* reason)
 	}
 }
 
-void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth)
+void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth, const char* reason)
 {
 	if (!ShouldTracePtPerf() || stats == nullptr)
 	{
@@ -7382,6 +7382,22 @@ void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint6
 	if (stats == &mVertexBufferStats || stats == &mIndexBufferStats || stats == &mPrimitiveBufferStats || stats == &mMaterialBufferStats)
 	{
 		noteBytes(perf.sceneUploadCalls, perf.sceneUploadBytes);
+		if (reason != nullptr && std::strcmp(reason, "scene_buffer_upload") == 0)
+		{
+			noteBytes(perf.dynamicSceneUploadCalls, perf.dynamicSceneUploadBytes);
+		}
+		else if (reason != nullptr && std::strcmp(reason, "resident_chunk_write") == 0)
+		{
+			noteBytes(perf.residentSceneUploadCalls, perf.residentSceneUploadBytes);
+		}
+		else if (reason != nullptr && std::strncmp(reason, "persistent_voxel", 16) == 0)
+		{
+			noteBytes(perf.persistentVoxelUploadCalls, perf.persistentVoxelUploadBytes);
+		}
+		else
+		{
+			noteBytes(perf.otherSceneUploadCalls, perf.otherSceneUploadBytes);
+		}
 	}
 	else if (stats == &mEmissivePrimitiveHeaderBufferStats || stats == &mEmissivePrimitiveBufferStats || stats == &mEmissivePrimitiveCdfBufferStats || stats == &mEmissiveTlasInstanceBufferStats)
 	{
@@ -17740,7 +17756,7 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 	stats.overwriteEventsLastFrame = 0;
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
-	NotePerfBufferUpload(&stats, size, needsGrowth);
+	NotePerfBufferUpload(&stats, size, needsGrowth, waitReason);
 
 	if (needsGrowth)
 	{
@@ -17799,7 +17815,7 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 			WaitForCommandsTracked(waitReason);
 		}
 
-		void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, 0, resource.size);
+		void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, 0, size);
 		if (mapped == nullptr)
 		{
 			return false;
@@ -18059,7 +18075,7 @@ bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, Sc
 	stats.overwriteEventsLastFrame = 0;
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
-	NotePerfBufferUpload(&stats, size, needsGrowth);
+	NotePerfBufferUpload(&stats, size, needsGrowth, waitReason);
 
 	if (needsGrowth)
 	{
