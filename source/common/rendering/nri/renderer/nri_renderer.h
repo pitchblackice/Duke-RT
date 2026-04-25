@@ -1191,9 +1191,13 @@ private:
 		uint32_t materialOffset = 0;
 		uint32_t materialCount = 0;
 		uint64_t sourceSerial = 0;
+		uint64_t materialUploadHash = 0;
 		uint32_t vertexCount = 0;
+		uint32_t descriptorSlot = UINT32_MAX;
 		NRIBufferResource vertexBuffer;
 		NRIBufferResource indexBuffer;
+		NRIBufferResource primitiveBuffer;
+		NRIBufferResource materialBuffer;
 		NRIAccelerationStructureResource accelerationStructure;
 	};
 
@@ -1600,6 +1604,7 @@ private:
 	void ResetPersistentVoxelBatch();
 	bool BuildPersistentVoxelActorAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene::MaterialData>& materials);
+	bool UploadPersistentVoxelActorMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
 	bool TryApplyRuntimeMutationChunkToResidentScene(
@@ -1933,7 +1938,7 @@ private:
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneLightSystem::SceneAnalyticLight> mTransientMuzzleFlashLights;
-	std::array<nri::Descriptor*, 25> mSceneDataDescriptors = {};
+	std::array<nri::Descriptor*, 533> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;

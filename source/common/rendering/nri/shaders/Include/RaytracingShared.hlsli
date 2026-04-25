@@ -27,6 +27,23 @@ static const uint PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
 static const float TRACE_MIN_DISTANCE = 1e-4;
 static const float TRACE_FILTER_CONTINUE_BIAS = 1e-6;
 static const uint TRACE_FILTER_SKIP_LIMIT = 64u;
+static const uint RESIDENT_VOXEL_LOCAL_INDEX_BITS = 20u;
+static const uint RESIDENT_VOXEL_LOCAL_INDEX_MASK = (1u << RESIDENT_VOXEL_LOCAL_INDEX_BITS) - 1u;
+
+uint EncodeResidentVoxelIndex(uint slot, uint localIndex)
+{
+	return (slot << RESIDENT_VOXEL_LOCAL_INDEX_BITS) | (localIndex & RESIDENT_VOXEL_LOCAL_INDEX_MASK);
+}
+
+uint DecodeResidentVoxelSlot(uint encodedIndex)
+{
+	return min(encodedIndex >> RESIDENT_VOXEL_LOCAL_INDEX_BITS, NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP - 1u);
+}
+
+uint DecodeResidentVoxelLocalIndex(uint encodedIndex)
+{
+	return encodedIndex & RESIDENT_VOXEL_LOCAL_INDEX_MASK;
+}
 
 HitData MakeEmptyHitData()
 {
@@ -77,7 +94,13 @@ PrimitiveData GetPrimitiveData(uint dataSource, uint primitiveIndex)
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
 #if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
-		return gPersistentVoxelPrimitives[primitiveIndex];
+		const uint slot = DecodeResidentVoxelSlot(primitiveIndex);
+		PrimitiveData primitive = gPersistentVoxelPrimitives[slot][DecodeResidentVoxelLocalIndex(primitiveIndex)];
+		primitive.indices.x = EncodeResidentVoxelIndex(slot, primitive.indices.x);
+		primitive.indices.y = EncodeResidentVoxelIndex(slot, primitive.indices.y);
+		primitive.indices.z = EncodeResidentVoxelIndex(slot, primitive.indices.z);
+		primitive.materialIndex = EncodeResidentVoxelIndex(slot, primitive.materialIndex);
+		return primitive;
 #else
 		return gDynamicPrimitives[min(primitiveIndex, max(gTraceConstants.DynamicPrimitiveCount, 1u) - 1u)];
 #endif
@@ -95,7 +118,7 @@ SceneVertex GetVertexData(uint dataSource, uint vertexIndex)
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
 #if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
-		return gPersistentVoxelVertices[vertexIndex];
+		return gPersistentVoxelVertices[DecodeResidentVoxelSlot(vertexIndex)][DecodeResidentVoxelLocalIndex(vertexIndex)];
 #else
 		return gDynamicVertices[vertexIndex];
 #endif
@@ -113,7 +136,7 @@ MaterialData GetMaterialData(uint materialIndex, uint dataSource)
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
 #if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
-		return gPersistentVoxelMaterials[materialIndex];
+		return gPersistentVoxelMaterials[DecodeResidentVoxelSlot(materialIndex)][DecodeResidentVoxelLocalIndex(materialIndex)];
 #else
 		return gDynamicMaterials[min(materialIndex, max(gTraceConstants.DynamicMaterialCount, 1u) - 1u)];
 #endif
@@ -561,6 +584,11 @@ bool IsReflectionOnlyPrimitive(PrimitiveData primitive)
 
 uint ResolvePrimitiveIndex(SceneInstanceData instanceData, uint localPrimitiveIndex)
 {
+	if (instanceData.dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		return EncodeResidentVoxelIndex(instanceData.reserved0, localPrimitiveIndex);
+	}
+
 	return instanceData.primitiveOffset + localPrimitiveIndex;
 }
 

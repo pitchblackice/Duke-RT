@@ -13,6 +13,7 @@
 #define SET_ROOT 5
 
 #define MAX_SCENE_TEXTURES 512
+#define NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP 128
 #define NRI_FLAG_USE_JITTER 0x40u
 #define NRI_FLAG_FAST_EMISSIVE_SHADOW 0x100u
 #define NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS 0x200u
@@ -247,10 +248,10 @@ StructuredBuffer<ReprojectionData> gReprojectionDataBuffer : register(t18, space
 StructuredBuffer<uint> gVisibleChunkWords : register(t19, space2);
 StructuredBuffer<uint> gVisibleFlatPlaneWords : register(t20, space2);
 #if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
-StructuredBuffer<SceneVertex> gPersistentVoxelVertices : register(t21, space2);
-StructuredBuffer<uint> gPersistentVoxelIndices : register(t22, space2);
-StructuredBuffer<PrimitiveData> gPersistentVoxelPrimitives : register(t23, space2);
-StructuredBuffer<MaterialData> gPersistentVoxelMaterials : register(t24, space2);
+StructuredBuffer<SceneVertex> gPersistentVoxelVertices[NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP] : register(t21, space2);
+StructuredBuffer<uint> gPersistentVoxelIndices[NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP] : register(t149, space2);
+StructuredBuffer<PrimitiveData> gPersistentVoxelPrimitives[NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP] : register(t277, space2);
+StructuredBuffer<MaterialData> gPersistentVoxelMaterials[NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP] : register(t405, space2);
 #endif
 
 SamplerState gLinearWrap : register(s0, space0);

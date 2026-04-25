@@ -2670,7 +2670,12 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 512;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 25;
+	constexpr uint32_t NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP = 128;
+	constexpr uint32_t NRI_RESIDENT_VOXEL_VERTEX_DESCRIPTOR_BASE = 21;
+	constexpr uint32_t NRI_RESIDENT_VOXEL_INDEX_DESCRIPTOR_BASE = NRI_RESIDENT_VOXEL_VERTEX_DESCRIPTOR_BASE + NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP;
+	constexpr uint32_t NRI_RESIDENT_VOXEL_PRIMITIVE_DESCRIPTOR_BASE = NRI_RESIDENT_VOXEL_INDEX_DESCRIPTOR_BASE + NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP;
+	constexpr uint32_t NRI_RESIDENT_VOXEL_MATERIAL_DESCRIPTOR_BASE = NRI_RESIDENT_VOXEL_PRIMITIVE_DESCRIPTOR_BASE + NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = NRI_RESIDENT_VOXEL_MATERIAL_DESCRIPTOR_BASE + NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
@@ -7425,7 +7430,11 @@ void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint6
 		{
 			noteBytes(perf.scenePersistentVoxelUploadCalls, perf.scenePersistentVoxelUploadBytes);
 		}
-		else if (reason != nullptr && (std::strcmp(reason, "persistent_voxel_actor_vertex") == 0 || std::strcmp(reason, "persistent_voxel_actor_index") == 0))
+		else if (reason != nullptr &&
+			(std::strcmp(reason, "persistent_voxel_actor_vertex") == 0 ||
+				std::strcmp(reason, "persistent_voxel_actor_index") == 0 ||
+				std::strcmp(reason, "persistent_voxel_actor_primitive") == 0 ||
+				std::strcmp(reason, "persistent_voxel_actor_material") == 0))
 		{
 			noteBytes(perf.scenePersistentVoxelActorUploadCalls, perf.scenePersistentVoxelActorUploadBytes);
 		}
@@ -8133,7 +8142,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				buffersReady =
 					texturesReady &&
 					UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) &&
-					(!hasPersistentVoxelOverlay || UploadPersistentVoxelSceneBuffers(persistentVoxelGpuMaterials));
+					(!hasPersistentVoxelOverlay || UploadPersistentVoxelActorMaterialBuffers(persistentVoxelGpuMaterials));
 				accelerationReady = false;
 				const uint32_t liveOverlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
 				const uint32_t liveOverlayIndexOffset = 0u;
@@ -8184,7 +8193,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 							auto resourceIt = mPersistentVoxelActorResources.find(actor.identityKey);
 							if (resourceIt == mPersistentVoxelActorResources.end() ||
-								resourceIt->second.accelerationStructure.accelerationStructure == nullptr)
+								resourceIt->second.accelerationStructure.accelerationStructure == nullptr ||
+								resourceIt->second.descriptorSlot >= NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP ||
+								resourceIt->second.vertexBuffer.shaderView == nullptr ||
+								resourceIt->second.indexBuffer.shaderView == nullptr ||
+								resourceIt->second.primitiveBuffer.shaderView == nullptr ||
+								resourceIt->second.materialBuffer.shaderView == nullptr)
 							{
 								continue;
 							}
@@ -8199,7 +8213,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 							persistentVoxelInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*resourceIt->second.accelerationStructure.accelerationStructure);
 							instances.push_back(persistentVoxelInstance);
-							sceneInstances.push_back({ actor.primitiveOffset, NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL, 0u, 0u });
+							sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL, resourceIt->second.descriptorSlot, 0u });
 						}
 					}
 
@@ -10132,6 +10146,8 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	{
 		accumulateBuffer(pair.second.vertexBuffer, telemetry.sceneBufferBytes);
 		accumulateBuffer(pair.second.indexBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(pair.second.primitiveBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(pair.second.materialBuffer, telemetry.sceneBufferBytes);
 		accumulateAs(pair.second.accelerationStructure, telemetry.accelerationStructureBytes);
 	}
 	accumulateAs(mTopLevelAS, telemetry.accelerationStructureBytes);
@@ -11533,6 +11549,8 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 	{
 		DestroyBufferResource(pair.second.vertexBuffer);
 		DestroyBufferResource(pair.second.indexBuffer);
+		DestroyBufferResource(pair.second.primitiveBuffer);
+		DestroyBufferResource(pair.second.materialBuffer);
 		DestroyAccelerationStructureResource(pair.second.accelerationStructure);
 	}
 	mPersistentVoxelActorResources.clear();
@@ -11633,9 +11651,24 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			resource.signature != cacheEntry.signature ||
 			resource.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
 			resource.indexCount != (uint32_t)actorGeometry.indices.size() ||
-			resource.primitiveCount != (uint32_t)actorGeometry.primitives.size();
+			resource.primitiveCount != (uint32_t)actorGeometry.primitives.size() ||
+			resource.vertexBuffer.buffer == nullptr ||
+			resource.indexBuffer.buffer == nullptr ||
+			resource.primitiveBuffer.buffer == nullptr;
 		if (actorGeometryChanged)
 		{
+			std::vector<nri_scene::PrimitiveData> gpuPrimitives = actorGeometry.primitives;
+			const size_t primitiveCount = std::min(gpuPrimitives.size(), actorGeometry.primitiveProvenance.size());
+			for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+			{
+				const int32_t chunkIndex = actorGeometry.primitiveProvenance[primitiveIndex].mapChunkIndex;
+				gpuPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+			}
+			for (size_t primitiveIndex = primitiveCount; primitiveIndex < gpuPrimitives.size(); ++primitiveIndex)
+			{
+				gpuPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+			}
+
 			if (!EnsureResidentStructuredBuffer(
 					resource.vertexBuffer,
 					mVertexBufferStats,
@@ -11655,7 +11688,17 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
 					NRIAccelerationStructureBuildInputAccess(),
 					"persistent_voxel_actor_index",
-					ResidentUploadKind_Index))
+					ResidentUploadKind_Index) ||
+				!EnsureResidentStructuredBuffer(
+					resource.primitiveBuffer,
+					mPrimitiveBufferStats,
+					gpuPrimitives.data(),
+					gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData),
+					sizeof(nri_scene::PrimitiveData),
+					nri::BufferUsageBits::SHADER_RESOURCE,
+					NRIComputeShaderResourceAccess(),
+					"persistent_voxel_actor_primitive",
+					ResidentUploadKind_Primitive))
 			{
 				ResetPersistentVoxelBatch();
 				return false;
@@ -11873,6 +11916,68 @@ bool NRIRenderer::UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene:
 	return true;
 }
 
+bool NRIRenderer::UploadPersistentVoxelActorMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials)
+{
+	if (!mPersistentVoxelBatch.valid)
+	{
+		return true;
+	}
+
+	uint32_t descriptorSlot = 0;
+	for (PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+	{
+		auto resourceIt = mPersistentVoxelActorResources.find(actor.identityKey);
+		if (resourceIt == mPersistentVoxelActorResources.end())
+		{
+			continue;
+		}
+
+		PersistentVoxelActorResource& resource = resourceIt->second;
+		resource.descriptorSlot = UINT32_MAX;
+		if (!actor.active)
+		{
+			continue;
+		}
+		if (descriptorSlot >= NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP)
+		{
+			continue;
+		}
+		if ((uint64_t)actor.materialOffset + actor.materialCount > materials.size() || actor.materialCount == 0)
+		{
+			continue;
+		}
+
+		const nri_scene::MaterialData* actorMaterials = materials.data() + actor.materialOffset;
+		const uint64_t materialSize = (uint64_t)actor.materialCount * sizeof(nri_scene::MaterialData);
+		const uint64_t materialHash = HashBytes64(reinterpret_cast<const uint8_t*>(actorMaterials), (size_t)materialSize);
+		const bool uploadMaterials =
+			resource.materialBuffer.buffer == nullptr ||
+			resource.materialCount != actor.materialCount ||
+			resource.materialUploadHash != materialHash;
+		if (uploadMaterials &&
+			!EnsureResidentStructuredBuffer(
+				resource.materialBuffer,
+				mMaterialBufferStats,
+				actorMaterials,
+				materialSize,
+				sizeof(nri_scene::MaterialData),
+				nri::BufferUsageBits::SHADER_RESOURCE,
+				NRIComputeShaderResourceAccess(),
+				"persistent_voxel_actor_material",
+				ResidentUploadKind_Material))
+		{
+			return false;
+		}
+
+		resource.materialUploadHash = materialHash;
+		resource.materialOffset = actor.materialOffset;
+		resource.materialCount = actor.materialCount;
+		resource.descriptorSlot = descriptorSlot++;
+	}
+
+	return true;
+}
+
 bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scene::GeometryData& geometry)
 {
 	(void)geometry;
@@ -11898,6 +12003,8 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		{
 			DestroyBufferResource(it->second.vertexBuffer);
 			DestroyBufferResource(it->second.indexBuffer);
+			DestroyBufferResource(it->second.primitiveBuffer);
+			DestroyBufferResource(it->second.materialBuffer);
 			DestroyAccelerationStructureResource(it->second.accelerationStructure);
 			it = mPersistentVoxelActorResources.erase(it);
 			continue;
@@ -11919,7 +12026,8 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 			resource.primitiveCount != actor.primitiveCount ||
 			resource.indexCount != actor.indexCount ||
 			resource.vertexBuffer.buffer == nullptr ||
-			resource.indexBuffer.buffer == nullptr;
+			resource.indexBuffer.buffer == nullptr ||
+			resource.primitiveBuffer.buffer == nullptr;
 		if (!needsBuild)
 		{
 			resource.primitiveOffset = actor.primitiveOffset;
@@ -11941,6 +12049,18 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		{
 			return false;
 		}
+
+		nri::BufferBarrierDesc inputBarriers[2] = {};
+		inputBarriers[0].buffer = resource.vertexBuffer.buffer;
+		inputBarriers[0].before = NRIAccelerationStructureBuildInputAccess();
+		inputBarriers[0].after = NRIComputeShaderResourceAccess();
+		inputBarriers[1].buffer = resource.indexBuffer.buffer;
+		inputBarriers[1].before = NRIAccelerationStructureBuildInputAccess();
+		inputBarriers[1].after = NRIComputeShaderResourceAccess();
+		nri::BarrierDesc inputBarrierDesc = {};
+		inputBarrierDesc.buffers = inputBarriers;
+		inputBarrierDesc.bufferNum = 2;
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, inputBarrierDesc);
 
 		resource.signature = actor.signature;
 		resource.primitiveOffset = actor.primitiveOffset;
@@ -16027,33 +16147,62 @@ bool NRIRenderer::UpdateSceneDataSet(
 		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
 	};
 
-	mSceneDataDescriptors = {
-		selectView(staticVertexBuffer, dynamicVertexBuffer),
-		selectView(staticIndexBuffer, dynamicIndexBuffer),
-		selectView(staticPrimitiveBuffer, dynamicPrimitiveBuffer),
-		selectView(staticMaterialBuffer, dynamicMaterialBuffer),
-		selectView(dynamicVertexBuffer, staticVertexBuffer),
-		selectView(dynamicIndexBuffer, staticIndexBuffer),
-		selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer),
-		selectView(dynamicMaterialBuffer, staticMaterialBuffer),
-		mSceneInstanceBuffer.shaderView,
-		mPortalBuffer.shaderView,
-		mRuntimeLightBuffer.shaderView,
-		mRuntimeLightTileHeaderBuffer.shaderView,
-		mRuntimeLightTileIndexBuffer.shaderView,
-		mEmissivePrimitiveHeaderBuffer.shaderView,
-		mEmissivePrimitiveBuffer.shaderView,
-		mEmissivePrimitiveCdfBuffer.shaderView,
-		mSectorLightHeaderBuffer.shaderView,
-		mSectorLightBuffer.shaderView,
-		mReprojectionBuffer.shaderView,
-		mVisibleChunkBuffer.shaderView,
-		mVisibleFlatPlaneBuffer.shaderView,
-		selectView(mPersistentVoxelVertexBuffer, dynamicVertexBuffer),
-		selectView(mPersistentVoxelIndexBuffer, dynamicIndexBuffer),
-		selectView(mPersistentVoxelPrimitiveBuffer, dynamicPrimitiveBuffer),
-		selectView(mPersistentVoxelMaterialBuffer, dynamicMaterialBuffer),
-	};
+	mSceneDataDescriptors.fill(nullptr);
+	mSceneDataDescriptors[0] = selectView(staticVertexBuffer, dynamicVertexBuffer);
+	mSceneDataDescriptors[1] = selectView(staticIndexBuffer, dynamicIndexBuffer);
+	mSceneDataDescriptors[2] = selectView(staticPrimitiveBuffer, dynamicPrimitiveBuffer);
+	mSceneDataDescriptors[3] = selectView(staticMaterialBuffer, dynamicMaterialBuffer);
+	mSceneDataDescriptors[4] = selectView(dynamicVertexBuffer, staticVertexBuffer);
+	mSceneDataDescriptors[5] = selectView(dynamicIndexBuffer, staticIndexBuffer);
+	mSceneDataDescriptors[6] = selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer);
+	mSceneDataDescriptors[7] = selectView(dynamicMaterialBuffer, staticMaterialBuffer);
+	mSceneDataDescriptors[8] = mSceneInstanceBuffer.shaderView;
+	mSceneDataDescriptors[9] = mPortalBuffer.shaderView;
+	mSceneDataDescriptors[10] = mRuntimeLightBuffer.shaderView;
+	mSceneDataDescriptors[11] = mRuntimeLightTileHeaderBuffer.shaderView;
+	mSceneDataDescriptors[12] = mRuntimeLightTileIndexBuffer.shaderView;
+	mSceneDataDescriptors[13] = mEmissivePrimitiveHeaderBuffer.shaderView;
+	mSceneDataDescriptors[14] = mEmissivePrimitiveBuffer.shaderView;
+	mSceneDataDescriptors[15] = mEmissivePrimitiveCdfBuffer.shaderView;
+	mSceneDataDescriptors[16] = mSectorLightHeaderBuffer.shaderView;
+	mSceneDataDescriptors[17] = mSectorLightBuffer.shaderView;
+	mSceneDataDescriptors[18] = mReprojectionBuffer.shaderView;
+	mSceneDataDescriptors[19] = mVisibleChunkBuffer.shaderView;
+	mSceneDataDescriptors[20] = mVisibleFlatPlaneBuffer.shaderView;
+
+	for (uint32_t slot = 0; slot < NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP; ++slot)
+	{
+		mSceneDataDescriptors[NRI_RESIDENT_VOXEL_VERTEX_DESCRIPTOR_BASE + slot] = selectView(dynamicVertexBuffer, staticVertexBuffer);
+		mSceneDataDescriptors[NRI_RESIDENT_VOXEL_INDEX_DESCRIPTOR_BASE + slot] = selectView(dynamicIndexBuffer, staticIndexBuffer);
+		mSceneDataDescriptors[NRI_RESIDENT_VOXEL_PRIMITIVE_DESCRIPTOR_BASE + slot] = selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer);
+		mSceneDataDescriptors[NRI_RESIDENT_VOXEL_MATERIAL_DESCRIPTOR_BASE + slot] = selectView(dynamicMaterialBuffer, staticMaterialBuffer);
+	}
+	if (mPersistentVoxelBatch.valid)
+	{
+		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+		{
+			if (!actor.active)
+			{
+				continue;
+			}
+			auto resourceIt = mPersistentVoxelActorResources.find(actor.identityKey);
+			if (resourceIt == mPersistentVoxelActorResources.end())
+			{
+				continue;
+			}
+			const PersistentVoxelActorResource& resource = resourceIt->second;
+			if (resource.descriptorSlot >= NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP)
+			{
+				continue;
+			}
+
+			const uint32_t slot = resource.descriptorSlot;
+			mSceneDataDescriptors[NRI_RESIDENT_VOXEL_VERTEX_DESCRIPTOR_BASE + slot] = selectView(resource.vertexBuffer, dynamicVertexBuffer);
+			mSceneDataDescriptors[NRI_RESIDENT_VOXEL_INDEX_DESCRIPTOR_BASE + slot] = selectView(resource.indexBuffer, dynamicIndexBuffer);
+			mSceneDataDescriptors[NRI_RESIDENT_VOXEL_PRIMITIVE_DESCRIPTOR_BASE + slot] = selectView(resource.primitiveBuffer, dynamicPrimitiveBuffer);
+			mSceneDataDescriptors[NRI_RESIDENT_VOXEL_MATERIAL_DESCRIPTOR_BASE + slot] = selectView(resource.materialBuffer, dynamicMaterialBuffer);
+		}
+	}
 
 	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 	{
@@ -25313,6 +25462,7 @@ void NRIRenderer::DestroySceneBuffers()
 	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	ResetResidentMapChunkRegistry();
 	ResetPersistentDynamicEmissiveCache();
+	ResetPersistentVoxelBatch();
 	DestroyBufferResource(mStaticVertexBuffer);
 	DestroyBufferResource(mStaticIndexBuffer);
 	DestroyBufferResource(mStaticPrimitiveBuffer);
