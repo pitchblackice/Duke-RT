@@ -7789,9 +7789,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		{
 			{
 				Clocker clock(NriPTGeometryBuild);
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildDynamicLiveMs);
 				nri_scene::BuildGeometry(dynamicSceneView, dynamicGeometry);
 				AssignGeometryPortalIndices(mMapWorld, dynamicGeometry);
 			}
+			mLastPerfShellTraceStats.geometryBuildDynamicLivePrimitives += (uint32_t)dynamicGeometry.primitives.size();
 
 			if (!dynamicGeometry.primitives.empty())
 			{
@@ -7816,6 +7818,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		{
 			{
 				Clocker clock(NriPTGeometryBuild);
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMirrorExtendedMs);
 				nri_scene::BuildGeometry(mirrorExtendedDynamicSceneView, mirrorExtendedDynamicGeometry);
 				AssignGeometryPortalIndices(mMapWorld, mirrorExtendedDynamicGeometry);
 			}
@@ -7856,6 +7859,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		{
 			{
 				Clocker clock(NriPTGeometryBuild);
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMirrorPlayerMs);
 				nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry);
 				AssignGeometryPortalIndices(mMapWorld, mirrorPlayerGeometry);
 			}
@@ -7933,6 +7937,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 				{
 					Clocker clock(NriPTGeometryBuild);
+					ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMergedDynamicMs);
 					nri_scene::BuildGeometry(mergedDynamicSceneView, mergedDynamicGeometry);
 					AssignGeometryPortalIndices(mMapWorld, mergedDynamicGeometry);
 				}
@@ -8405,6 +8410,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 		{
 			Clocker clock(NriPTGeometryBuild);
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildCapturedMs);
 			nri_scene::BuildGeometry(capturedSceneView, capturedGeometry);
 			AssignGeometryPortalIndices(mMapWorld, capturedGeometry);
 		}
@@ -11677,8 +11683,13 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actorSceneView.stats.voxelCachePrimitives = cacheEntry.primitiveCount;
 
 		nri_scene::GeometryData actorGeometry;
-		nri_scene::BuildGeometry(actorSceneView, actorGeometry);
-		AssignGeometryPortalIndices(mMapWorld, actorGeometry);
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelActorMs);
+			nri_scene::BuildGeometry(actorSceneView, actorGeometry);
+			AssignGeometryPortalIndices(mMapWorld, actorGeometry);
+		}
+		mLastPerfShellTraceStats.geometryBuildPersistentVoxelActorCalls++;
+		mLastPerfShellTraceStats.geometryBuildPersistentVoxelActorPrimitives += (uint32_t)actorGeometry.primitives.size();
 		if (actorGeometry.primitives.empty() || actorGeometry.indices.empty())
 		{
 			return true;
@@ -11931,6 +11942,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			}
 
 			Clocker geometryClock(NriPTGeometryBuild);
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelAppendMs);
 			for (const nri_scene::PersistentVoxelCacheEntryView* addition : additions)
 			{
 				if (!appendActorToBatch(mPersistentVoxelBatch, *addition))
@@ -11956,6 +11968,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 	{
 		Clocker geometryClock(NriPTGeometryBuild);
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelRebuildMs);
 		for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
 		{
 			if (!appendActorToBatch(next, cacheEntry))
@@ -12401,6 +12414,7 @@ void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
 
 	{
 		Clocker clock(NriPTGeometryBuild);
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentEmissivePruneMs);
 		nri_scene::BuildGeometry(next.sceneView, next.geometry);
 		AssignGeometryPortalIndices(mMapWorld, next.geometry);
 	}
@@ -12501,6 +12515,7 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 
 	{
 		Clocker clock(NriPTGeometryBuild);
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentEmissiveRebuildMs);
 		nri_scene::BuildGeometry(next.sceneView, next.geometry);
 		AssignGeometryPortalIndices(mMapWorld, next.geometry);
 	}
@@ -17430,9 +17445,12 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 	}
 	{
 		Clocker clock(NriPTGeometryBuild);
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildStaticChunkMs);
 		nri_scene::BuildGeometry(chunkSceneView, chunkGeometry);
 		AssignGeometryPortalIndices(mapWorld, chunkGeometry);
 	}
+	mLastPerfShellTraceStats.geometryBuildStaticChunkCalls++;
+	mLastPerfShellTraceStats.geometryBuildStaticChunkPrimitives += (uint32_t)chunkGeometry.primitives.size();
 	{
 		Clocker clock(NriPTMaterialBuild);
 		BuildMaterialsWithActorOverrides(chunkSceneView, chunkMaterials, "static_map_chunk");
@@ -19503,7 +19521,10 @@ bool NRIRenderer::EnsureRuntimeDebugSphereCache(RuntimeDebugSphere& sphere)
 	sphereView.stats.materialRefs = 1;
 	sphereView.stats.triangleEstimate = (unsigned int)GetRuntimeDebugSphereTriangleCount();
 	AppendRuntimeDebugSphereToSceneView(sphere, sphereView);
-	nri_scene::BuildGeometry(sphereView, sphere.geometry);
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildDebugSphereMs);
+		nri_scene::BuildGeometry(sphereView, sphere.geometry);
+	}
 	nri_scene::BuildMaterials(sphereView, sphere.materialBridge);
 
 	const size_t materialCount = sphere.materialBridge.materials.size();
@@ -20910,8 +20931,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				!havePreviousSignatures ||
 				ComputeAnimatedMaterialSignature(liveChunkView) != previousMaterialSignature;
 			nri_scene::GeometryData liveTruthGeometry;
-			nri_scene::BuildGeometry(liveChunkView, liveTruthGeometry);
+			{
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeMutationTruthMs);
+				nri_scene::BuildGeometry(liveChunkView, liveTruthGeometry);
+			}
 			liveBuiltTriangleCount = (uint32_t)liveTruthGeometry.primitives.size();
+			mLastPerfShellTraceStats.geometryBuildRuntimeMutationTruthCalls++;
+			mLastPerfShellTraceStats.geometryBuildRuntimeMutationPrimitives += liveBuiltTriangleCount;
 			if (forceTopologyInvalidation &&
 				previousStateSource == RuntimeSectorDirtyTruthTraceEntry::PreviousStateSource::Resident &&
 				!liveGeometryChanged &&
@@ -20964,9 +20990,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			nri_scene::MaterialBridgeData liveMaterials;
 			{
 				Clocker clock(NriPTGeometryBuild);
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildMs);
 				nri_scene::BuildGeometry(liveChunkView, liveGeometry);
 				AssignGeometryPortalIndices(mMapWorld, liveGeometry);
 			}
+			mLastPerfShellTraceStats.geometryBuildRuntimeMutationRebuildCalls++;
+			mLastPerfShellTraceStats.geometryBuildRuntimeMutationPrimitives += (uint32_t)liveGeometry.primitives.size();
 			if (tryGetCachedRuntimeMutationMaterials(
 				liveAnimatedGeometrySignature,
 				liveAnimatedMaterialSignature,
@@ -21036,8 +21065,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			if (exclusiveMaterialOnlyReplacement)
 			{
 				Clocker clock(NriPTGeometryBuild);
+				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeMutationMaterialOnlyMs);
 				nri_scene::BuildGeometry(liveChunkView, liveGeometry);
 				AssignGeometryPortalIndices(mMapWorld, liveGeometry);
+				mLastPerfShellTraceStats.geometryBuildRuntimeMutationMaterialOnlyCalls++;
+				mLastPerfShellTraceStats.geometryBuildRuntimeMutationPrimitives += (uint32_t)liveGeometry.primitives.size();
 			}
 			nri_scene::MaterialBridgeData liveMaterials;
 			if (tryGetCachedRuntimeMutationMaterials(
@@ -22310,10 +22342,13 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		nri_scene::MaterialBridgeData chunkMaterials;
 		{
 			Clocker clock(NriPTGeometryBuild);
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildRuntimeSpaceLinkMs);
 			nri_scene::BuildGeometry(liveChunkView, chunkGeometry);
 			AssignGeometryPortalIndices(mMapWorld, chunkGeometry);
 			TranslateGeometry(chunkGeometry, link.dx, 0.0f, link.dz, link.prevDx, 0.0f, link.prevDz);
 		}
+		mLastPerfShellTraceStats.geometryBuildRuntimeSpaceLinkCalls++;
+		mLastPerfShellTraceStats.geometryBuildRuntimeSpaceLinkPrimitives += (uint32_t)chunkGeometry.primitives.size();
 		{
 			Clocker clock(NriPTMaterialBuild);
 			BuildMaterialsWithActorOverrides(liveChunkView, chunkMaterials, "runtime_space_link_chunk");
@@ -23046,9 +23081,12 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		{
 			Clocker clock(NriPTGeometryBuild);
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryBuildMs);
+			ScopedPtPerfTimer siteTimer(mLastPerfShellTraceStats.geometryBuildResidentApplyMs);
 			nri_scene::BuildGeometry(residentSceneView, residentGeometry);
 			AssignGeometryPortalIndices(mMapWorld, residentGeometry);
 		}
+		mLastPerfShellTraceStats.geometryBuildResidentApplyCalls++;
+		mLastPerfShellTraceStats.geometryBuildResidentPrimitives += (uint32_t)residentGeometry.primitives.size();
 		{
 			Clocker clock(NriPTMaterialBuild);
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialBuildMs);
@@ -23177,9 +23215,12 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		{
 			Clocker clock(NriPTGeometryBuild);
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryBuildMs);
+			ScopedPtPerfTimer siteTimer(mLastPerfShellTraceStats.geometryBuildResidentRecoverMs);
 			nri_scene::BuildGeometry(fullLiveSceneView, fullLiveGeometry);
 			AssignGeometryPortalIndices(mMapWorld, fullLiveGeometry);
 		}
+		mLastPerfShellTraceStats.geometryBuildResidentRecoverCalls++;
+		mLastPerfShellTraceStats.geometryBuildResidentPrimitives += (uint32_t)fullLiveGeometry.primitives.size();
 		{
 			Clocker clock(NriPTMaterialBuild);
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialBuildMs);
