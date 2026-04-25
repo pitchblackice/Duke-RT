@@ -2670,12 +2670,7 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 512;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP = 128;
-	constexpr uint32_t NRI_RESIDENT_VOXEL_VERTEX_DESCRIPTOR_BASE = 21;
-	constexpr uint32_t NRI_RESIDENT_VOXEL_INDEX_DESCRIPTOR_BASE = NRI_RESIDENT_VOXEL_VERTEX_DESCRIPTOR_BASE + NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP;
-	constexpr uint32_t NRI_RESIDENT_VOXEL_PRIMITIVE_DESCRIPTOR_BASE = NRI_RESIDENT_VOXEL_INDEX_DESCRIPTOR_BASE + NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP;
-	constexpr uint32_t NRI_RESIDENT_VOXEL_MATERIAL_DESCRIPTOR_BASE = NRI_RESIDENT_VOXEL_PRIMITIVE_DESCRIPTOR_BASE + NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = NRI_RESIDENT_VOXEL_MATERIAL_DESCRIPTOR_BASE + NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 25;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
@@ -8142,7 +8137,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				buffersReady =
 					texturesReady &&
 					UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) &&
-					(!hasPersistentVoxelOverlay || UploadPersistentVoxelActorMaterialBuffers(persistentVoxelGpuMaterials));
+					(!hasPersistentVoxelOverlay || UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials));
 				accelerationReady = false;
 				const uint32_t liveOverlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
 				const uint32_t liveOverlayIndexOffset = 0u;
@@ -8194,11 +8189,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							auto resourceIt = mPersistentVoxelActorResources.find(actor.identityKey);
 							if (resourceIt == mPersistentVoxelActorResources.end() ||
 								resourceIt->second.accelerationStructure.accelerationStructure == nullptr ||
-								resourceIt->second.descriptorSlot >= NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP ||
-								resourceIt->second.vertexBuffer.shaderView == nullptr ||
 								resourceIt->second.indexBuffer.shaderView == nullptr ||
-								resourceIt->second.primitiveBuffer.shaderView == nullptr ||
-								resourceIt->second.materialBuffer.shaderView == nullptr)
+								resourceIt->second.vertexBuffer.shaderView == nullptr ||
+								mPersistentVoxelVertexBuffer.shaderView == nullptr ||
+								mPersistentVoxelIndexBuffer.shaderView == nullptr ||
+								mPersistentVoxelPrimitiveBuffer.shaderView == nullptr ||
+								mPersistentVoxelMaterialBuffer.shaderView == nullptr)
 							{
 								continue;
 							}
@@ -8213,7 +8209,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 							persistentVoxelInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*resourceIt->second.accelerationStructure.accelerationStructure);
 							instances.push_back(persistentVoxelInstance);
-							sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL, resourceIt->second.descriptorSlot, 0u });
+							sceneInstances.push_back({ resourceIt->second.primitiveOffset, NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL, 0u, 0u });
 						}
 					}
 
@@ -10146,8 +10142,6 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	{
 		accumulateBuffer(pair.second.vertexBuffer, telemetry.sceneBufferBytes);
 		accumulateBuffer(pair.second.indexBuffer, telemetry.sceneBufferBytes);
-		accumulateBuffer(pair.second.primitiveBuffer, telemetry.sceneBufferBytes);
-		accumulateBuffer(pair.second.materialBuffer, telemetry.sceneBufferBytes);
 		accumulateAs(pair.second.accelerationStructure, telemetry.accelerationStructureBytes);
 	}
 	accumulateAs(mTopLevelAS, telemetry.accelerationStructureBytes);
@@ -11542,6 +11536,10 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 	DestroyBufferResource(mPersistentVoxelMaterialBuffer);
 	mPersistentVoxelGeometryUploadHash = 0;
 	mPersistentVoxelMaterialUploadHash = 0;
+	mPersistentVoxelArenaVertexCursor = 0;
+	mPersistentVoxelArenaIndexCursor = 0;
+	mPersistentVoxelArenaPrimitiveCursor = 0;
+	mPersistentVoxelArenaMaterialCursor = 0;
 	mBoundPersistentVoxelPrimitiveCount = 0;
 	mBoundPersistentVoxelMaterialCount = 0;
 	SetCurrentSceneDataDescriptorsInitialized(false);
@@ -11549,8 +11547,6 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 	{
 		DestroyBufferResource(pair.second.vertexBuffer);
 		DestroyBufferResource(pair.second.indexBuffer);
-		DestroyBufferResource(pair.second.primitiveBuffer);
-		DestroyBufferResource(pair.second.materialBuffer);
 		DestroyAccelerationStructureResource(pair.second.accelerationStructure);
 	}
 	mPersistentVoxelActorResources.clear();
@@ -11647,6 +11643,43 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		}
 
 		PersistentVoxelActorResource& resource = mPersistentVoxelActorResources[cacheEntry.identityKey];
+		auto allocateArenaSlice = [](uint32_t count, uint32_t& cursor, uint32_t& offset, uint32_t& capacity) -> bool
+		{
+			if (capacity >= count && count > 0)
+			{
+				return false;
+			}
+
+			offset = cursor;
+			capacity = std::max<uint32_t>(count, capacity > 0 ? capacity * 2u : count);
+			cursor += capacity;
+			return true;
+		};
+		const bool vertexSliceMoved = allocateArenaSlice(
+			(uint32_t)actorGeometry.vertices.size(),
+			mPersistentVoxelArenaVertexCursor,
+			resource.vertexOffset,
+			resource.vertexCapacity);
+		const bool indexSliceMoved = allocateArenaSlice(
+			(uint32_t)actorGeometry.indices.size(),
+			mPersistentVoxelArenaIndexCursor,
+			resource.indexOffset,
+			resource.indexCapacity);
+		const bool primitiveSliceMoved = allocateArenaSlice(
+			(uint32_t)actorGeometry.primitives.size(),
+			mPersistentVoxelArenaPrimitiveCursor,
+			resource.primitiveOffset,
+			resource.primitiveCapacity);
+		const bool materialSliceMoved = allocateArenaSlice(
+			(uint32_t)actorMaterials.materials.size(),
+			mPersistentVoxelArenaMaterialCursor,
+			resource.materialOffset,
+			resource.materialCapacity);
+		if (materialSliceMoved)
+		{
+			resource.materialUploadHash = 0;
+		}
+
 		const bool actorGeometryChanged =
 			resource.signature != cacheEntry.signature ||
 			resource.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
@@ -11654,9 +11687,20 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			resource.primitiveCount != (uint32_t)actorGeometry.primitives.size() ||
 			resource.vertexBuffer.buffer == nullptr ||
 			resource.indexBuffer.buffer == nullptr ||
-			resource.primitiveBuffer.buffer == nullptr;
+			vertexSliceMoved ||
+			indexSliceMoved ||
+			primitiveSliceMoved ||
+			mPersistentVoxelVertexBuffer.buffer == nullptr ||
+			mPersistentVoxelIndexBuffer.buffer == nullptr ||
+			mPersistentVoxelPrimitiveBuffer.buffer == nullptr;
 		if (actorGeometryChanged)
 		{
+			std::vector<uint32_t> gpuIndices = actorGeometry.indices;
+			for (uint32_t& index : gpuIndices)
+			{
+				index += resource.vertexOffset;
+			}
+
 			std::vector<nri_scene::PrimitiveData> gpuPrimitives = actorGeometry.primitives;
 			const size_t primitiveCount = std::min(gpuPrimitives.size(), actorGeometry.primitiveProvenance.size());
 			for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
@@ -11667,6 +11711,13 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			for (size_t primitiveIndex = primitiveCount; primitiveIndex < gpuPrimitives.size(); ++primitiveIndex)
 			{
 				gpuPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+			}
+			for (nri_scene::PrimitiveData& primitive : gpuPrimitives)
+			{
+				primitive.indices[0] += resource.vertexOffset;
+				primitive.indices[1] += resource.vertexOffset;
+				primitive.indices[2] += resource.vertexOffset;
+				primitive.materialIndex += resource.materialOffset;
 			}
 
 			if (!EnsureResidentStructuredBuffer(
@@ -11689,15 +11740,66 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					NRIAccelerationStructureBuildInputAccess(),
 					"persistent_voxel_actor_index",
 					ResidentUploadKind_Index) ||
-				!EnsureResidentStructuredBuffer(
-					resource.primitiveBuffer,
-					mPrimitiveBufferStats,
-					gpuPrimitives.data(),
-					gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData),
+				!EnsureResidentArenaBuffer(
+					mPersistentVoxelVertexBuffer,
+					(uint64_t)mPersistentVoxelArenaVertexCursor * sizeof(nri_scene::SceneVertex),
+					sizeof(nri_scene::SceneVertex),
+					nri::BufferUsageBits::SHADER_RESOURCE,
+					NRIComputeShaderResourceAccess()) ||
+				!EnsureResidentArenaBuffer(
+					mPersistentVoxelIndexBuffer,
+					(uint64_t)mPersistentVoxelArenaIndexCursor * sizeof(uint32_t),
+					sizeof(uint32_t),
+					nri::BufferUsageBits::SHADER_RESOURCE,
+					NRIComputeShaderResourceAccess()) ||
+				!EnsureResidentArenaBuffer(
+					mPersistentVoxelPrimitiveBuffer,
+					(uint64_t)mPersistentVoxelArenaPrimitiveCursor * sizeof(nri_scene::PrimitiveData),
 					sizeof(nri_scene::PrimitiveData),
 					nri::BufferUsageBits::SHADER_RESOURCE,
+					NRIComputeShaderResourceAccess()))
+			{
+				ResetPersistentVoxelBatch();
+				return false;
+			}
+			NotePerfBufferUpload(
+				&mVertexBufferStats,
+				actorGeometry.vertices.size() * sizeof(nri_scene::SceneVertex),
+				false,
+				"persistent_voxel_actor_vertex",
+				ResidentUploadKind_Vertex);
+			NotePerfBufferUpload(
+				&mIndexBufferStats,
+				gpuIndices.size() * sizeof(uint32_t),
+				false,
+				"persistent_voxel_actor_index",
+				ResidentUploadKind_Index);
+			NotePerfBufferUpload(
+				&mPrimitiveBufferStats,
+				gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData),
+				false,
+				"persistent_voxel_actor_primitive",
+				ResidentUploadKind_Primitive);
+			if (!StageResidentBufferCopyRange(
+					mPersistentVoxelVertexBuffer,
+					(uint64_t)resource.vertexOffset * sizeof(nri_scene::SceneVertex),
+					actorGeometry.vertices.data(),
+					actorGeometry.vertices.size() * sizeof(nri_scene::SceneVertex),
 					NRIComputeShaderResourceAccess(),
-					"persistent_voxel_actor_primitive",
+					ResidentUploadKind_Vertex) ||
+				!StageResidentBufferCopyRange(
+					mPersistentVoxelIndexBuffer,
+					(uint64_t)resource.indexOffset * sizeof(uint32_t),
+					gpuIndices.data(),
+					gpuIndices.size() * sizeof(uint32_t),
+					NRIComputeShaderResourceAccess(),
+					ResidentUploadKind_Index) ||
+				!StageResidentBufferCopyRange(
+					mPersistentVoxelPrimitiveBuffer,
+					(uint64_t)resource.primitiveOffset * sizeof(nri_scene::PrimitiveData),
+					gpuPrimitives.data(),
+					gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData),
+					NRIComputeShaderResourceAccess(),
 					ResidentUploadKind_Primitive))
 			{
 				ResetPersistentVoxelBatch();
@@ -11716,14 +11818,14 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.signature = cacheEntry.signature;
 		actor.active = true;
 		actor.surface = cacheEntry.surface;
-		actor.primitiveOffset = (uint32_t)batch.geometry.primitives.size();
+		actor.primitiveOffset = resource.primitiveOffset;
 		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
-		actor.indexOffset = (uint32_t)batch.geometry.indices.size();
+		actor.indexOffset = resource.indexOffset;
 		actor.indexCount = (uint32_t)actorGeometry.indices.size();
 		actor.materialOffset = (uint32_t)batch.materialBridge.materials.size();
 		actor.materialCount = (uint32_t)actorMaterials.materials.size();
 
-		AppendGeometry(actorGeometry, actor.materialOffset, batch.geometry);
+		AppendGeometry(actorGeometry, (uint32_t)batch.materialBridge.materials.size(), batch.geometry);
 		AppendMaterialBridge(actorMaterials, batch.materialBridge);
 		batch.actors.push_back(actor);
 		return true;
@@ -11916,14 +12018,23 @@ bool NRIRenderer::UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene:
 	return true;
 }
 
-bool NRIRenderer::UploadPersistentVoxelActorMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials)
+bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials)
 {
 	if (!mPersistentVoxelBatch.valid)
 	{
 		return true;
 	}
 
-	uint32_t descriptorSlot = 0;
+	if (!EnsureResidentArenaBuffer(
+		mPersistentVoxelMaterialBuffer,
+		(uint64_t)mPersistentVoxelArenaMaterialCursor * sizeof(nri_scene::MaterialData),
+		sizeof(nri_scene::MaterialData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
 	for (PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 	{
 		auto resourceIt = mPersistentVoxelActorResources.find(actor.identityKey);
@@ -11933,12 +12044,7 @@ bool NRIRenderer::UploadPersistentVoxelActorMaterialBuffers(const std::vector<nr
 		}
 
 		PersistentVoxelActorResource& resource = resourceIt->second;
-		resource.descriptorSlot = UINT32_MAX;
 		if (!actor.active)
-		{
-			continue;
-		}
-		if (descriptorSlot >= NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP)
 		{
 			continue;
 		}
@@ -11951,28 +12057,30 @@ bool NRIRenderer::UploadPersistentVoxelActorMaterialBuffers(const std::vector<nr
 		const uint64_t materialSize = (uint64_t)actor.materialCount * sizeof(nri_scene::MaterialData);
 		const uint64_t materialHash = HashBytes64(reinterpret_cast<const uint8_t*>(actorMaterials), (size_t)materialSize);
 		const bool uploadMaterials =
-			resource.materialBuffer.buffer == nullptr ||
 			resource.materialCount != actor.materialCount ||
 			resource.materialUploadHash != materialHash;
-		if (uploadMaterials &&
-			!EnsureResidentStructuredBuffer(
-				resource.materialBuffer,
-				mMaterialBufferStats,
+		if (uploadMaterials)
+		{
+			NotePerfBufferUpload(
+				&mMaterialBufferStats,
+				materialSize,
+				false,
+				"persistent_voxel_actor_material",
+				ResidentUploadKind_Material);
+			if (!StageResidentBufferCopyRange(
+				mPersistentVoxelMaterialBuffer,
+				(uint64_t)resource.materialOffset * sizeof(nri_scene::MaterialData),
 				actorMaterials,
 				materialSize,
-				sizeof(nri_scene::MaterialData),
-				nri::BufferUsageBits::SHADER_RESOURCE,
 				NRIComputeShaderResourceAccess(),
-				"persistent_voxel_actor_material",
 				ResidentUploadKind_Material))
-		{
-			return false;
+			{
+				return false;
+			}
 		}
 
 		resource.materialUploadHash = materialHash;
-		resource.materialOffset = actor.materialOffset;
 		resource.materialCount = actor.materialCount;
-		resource.descriptorSlot = descriptorSlot++;
 	}
 
 	return true;
@@ -12003,8 +12111,6 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		{
 			DestroyBufferResource(it->second.vertexBuffer);
 			DestroyBufferResource(it->second.indexBuffer);
-			DestroyBufferResource(it->second.primitiveBuffer);
-			DestroyBufferResource(it->second.materialBuffer);
 			DestroyAccelerationStructureResource(it->second.accelerationStructure);
 			it = mPersistentVoxelActorResources.erase(it);
 			continue;
@@ -12026,13 +12132,9 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 			resource.primitiveCount != actor.primitiveCount ||
 			resource.indexCount != actor.indexCount ||
 			resource.vertexBuffer.buffer == nullptr ||
-			resource.indexBuffer.buffer == nullptr ||
-			resource.primitiveBuffer.buffer == nullptr;
+			resource.indexBuffer.buffer == nullptr;
 		if (!needsBuild)
 		{
-			resource.primitiveOffset = actor.primitiveOffset;
-			resource.indexOffset = actor.indexOffset;
-			resource.materialOffset = actor.materialOffset;
 			resource.materialCount = actor.materialCount;
 			continue;
 		}
@@ -12063,11 +12165,8 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, inputBarrierDesc);
 
 		resource.signature = actor.signature;
-		resource.primitiveOffset = actor.primitiveOffset;
 		resource.primitiveCount = actor.primitiveCount;
-		resource.indexOffset = actor.indexOffset;
 		resource.indexCount = actor.indexCount;
-		resource.materialOffset = actor.materialOffset;
 		resource.materialCount = actor.materialCount;
 		resource.sourceSerial = mPersistentVoxelBatch.sourceSerial;
 	}
@@ -16169,40 +16268,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mSceneDataDescriptors[18] = mReprojectionBuffer.shaderView;
 	mSceneDataDescriptors[19] = mVisibleChunkBuffer.shaderView;
 	mSceneDataDescriptors[20] = mVisibleFlatPlaneBuffer.shaderView;
-
-	for (uint32_t slot = 0; slot < NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP; ++slot)
-	{
-		mSceneDataDescriptors[NRI_RESIDENT_VOXEL_VERTEX_DESCRIPTOR_BASE + slot] = selectView(dynamicVertexBuffer, staticVertexBuffer);
-		mSceneDataDescriptors[NRI_RESIDENT_VOXEL_INDEX_DESCRIPTOR_BASE + slot] = selectView(dynamicIndexBuffer, staticIndexBuffer);
-		mSceneDataDescriptors[NRI_RESIDENT_VOXEL_PRIMITIVE_DESCRIPTOR_BASE + slot] = selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer);
-		mSceneDataDescriptors[NRI_RESIDENT_VOXEL_MATERIAL_DESCRIPTOR_BASE + slot] = selectView(dynamicMaterialBuffer, staticMaterialBuffer);
-	}
-	if (mPersistentVoxelBatch.valid)
-	{
-		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
-		{
-			if (!actor.active)
-			{
-				continue;
-			}
-			auto resourceIt = mPersistentVoxelActorResources.find(actor.identityKey);
-			if (resourceIt == mPersistentVoxelActorResources.end())
-			{
-				continue;
-			}
-			const PersistentVoxelActorResource& resource = resourceIt->second;
-			if (resource.descriptorSlot >= NRI_RESIDENT_VOXEL_ACTOR_DESCRIPTOR_CAP)
-			{
-				continue;
-			}
-
-			const uint32_t slot = resource.descriptorSlot;
-			mSceneDataDescriptors[NRI_RESIDENT_VOXEL_VERTEX_DESCRIPTOR_BASE + slot] = selectView(resource.vertexBuffer, dynamicVertexBuffer);
-			mSceneDataDescriptors[NRI_RESIDENT_VOXEL_INDEX_DESCRIPTOR_BASE + slot] = selectView(resource.indexBuffer, dynamicIndexBuffer);
-			mSceneDataDescriptors[NRI_RESIDENT_VOXEL_PRIMITIVE_DESCRIPTOR_BASE + slot] = selectView(resource.primitiveBuffer, dynamicPrimitiveBuffer);
-			mSceneDataDescriptors[NRI_RESIDENT_VOXEL_MATERIAL_DESCRIPTOR_BASE + slot] = selectView(resource.materialBuffer, dynamicMaterialBuffer);
-		}
-	}
+	mSceneDataDescriptors[21] = selectView(mPersistentVoxelVertexBuffer, dynamicVertexBuffer);
+	mSceneDataDescriptors[22] = selectView(mPersistentVoxelIndexBuffer, dynamicIndexBuffer);
+	mSceneDataDescriptors[23] = selectView(mPersistentVoxelPrimitiveBuffer, dynamicPrimitiveBuffer);
+	mSceneDataDescriptors[24] = selectView(mPersistentVoxelMaterialBuffer, dynamicMaterialBuffer);
 
 	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 	{
@@ -18223,6 +18292,95 @@ bool NRIRenderer::CreateBufferWithoutViewAtLocation(NRIBufferResource& resource,
 	resource.usedSize = size;
 	resource.stride = stride;
 	resource.memoryLocation = memoryLocation;
+	return true;
+}
+
+bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_t requiredSize, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after)
+{
+	const uint64_t alignedRequiredSize = std::max<uint64_t>(requiredSize, stride);
+	if (resource.buffer != nullptr &&
+		resource.shaderView != nullptr &&
+		resource.memoryLocation == nri::MemoryLocation::DEVICE &&
+		resource.stride == stride &&
+		resource.size >= alignedRequiredSize)
+	{
+		resource.usedSize = std::max(resource.usedSize, requiredSize);
+		return true;
+	}
+
+	NRIBufferResource oldResource = resource;
+	resource = {};
+
+	const uint64_t grownSize = GetGrownBufferSize(oldResource.size, alignedRequiredSize, stride);
+	if (!CreateBufferWithoutViewAtLocation(resource, grownSize, stride, usage, nri::MemoryLocation::DEVICE))
+	{
+		if (oldResource.buffer != nullptr || oldResource.shaderView != nullptr)
+		{
+			DestroyBufferResource(oldResource);
+		}
+		return false;
+	}
+
+	nri::BufferViewDesc viewDesc = {};
+	viewDesc.buffer = resource.buffer;
+	viewDesc.type = nri::BufferView::STRUCTURED_BUFFER;
+	viewDesc.offset = 0;
+	viewDesc.size = nri::WHOLE_SIZE;
+	viewDesc.structureStride = stride;
+	if (mFrameBuffer->mCore.CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
+	{
+		DestroyBufferResource(resource);
+		if (oldResource.buffer != nullptr || oldResource.shaderView != nullptr)
+		{
+			DestroyBufferResource(oldResource);
+		}
+		return false;
+	}
+	resource.usedSize = requiredSize;
+
+	if (oldResource.buffer != nullptr && mFrameBuffer->mCommandBuffer != nullptr)
+	{
+		const uint64_t copySize = std::min(oldResource.usedSize, resource.size);
+		if (copySize > 0)
+		{
+			nri::BufferBarrierDesc beforeBarriers[2] = {};
+			beforeBarriers[0].buffer = oldResource.buffer;
+			beforeBarriers[0].before = after;
+			beforeBarriers[0].after = NRICopySourceAccess();
+			beforeBarriers[1].buffer = resource.buffer;
+			beforeBarriers[1].before = {};
+			beforeBarriers[1].after = NRICopyDestinationAccess();
+			nri::BarrierDesc beforeBarrierDesc = {};
+			beforeBarrierDesc.buffers = beforeBarriers;
+			beforeBarrierDesc.bufferNum = 2;
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeBarrierDesc);
+
+			mFrameBuffer->mCore.CmdCopyBuffer(
+				*mFrameBuffer->mCommandBuffer,
+				*resource.buffer,
+				0,
+				*oldResource.buffer,
+				0,
+				copySize);
+
+			nri::BufferBarrierDesc afterBarrier = {};
+			afterBarrier.buffer = resource.buffer;
+			afterBarrier.before = NRICopyDestinationAccess();
+			afterBarrier.after = after;
+			nri::BarrierDesc afterBarrierDesc = {};
+			afterBarrierDesc.buffers = &afterBarrier;
+			afterBarrierDesc.bufferNum = 1;
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterBarrierDesc);
+		}
+
+		auto& frameScratch = GetResidentUploadScratchFrame();
+		frameScratch.retiredBuffers.push_back(oldResource);
+	}
+	else if (oldResource.buffer != nullptr || oldResource.shaderView != nullptr)
+	{
+		DestroyBufferResource(oldResource);
+	}
+
 	return true;
 }
 

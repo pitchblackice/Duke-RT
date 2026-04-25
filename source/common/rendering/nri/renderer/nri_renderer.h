@@ -1184,6 +1184,7 @@ private:
 	struct PersistentVoxelActorResource
 	{
 		uint64_t signature = 0;
+		uint32_t vertexOffset = 0;
 		uint32_t primitiveOffset = 0;
 		uint32_t primitiveCount = 0;
 		uint32_t indexOffset = 0;
@@ -1193,11 +1194,12 @@ private:
 		uint64_t sourceSerial = 0;
 		uint64_t materialUploadHash = 0;
 		uint32_t vertexCount = 0;
-		uint32_t descriptorSlot = UINT32_MAX;
+		uint32_t vertexCapacity = 0;
+		uint32_t indexCapacity = 0;
+		uint32_t primitiveCapacity = 0;
+		uint32_t materialCapacity = 0;
 		NRIBufferResource vertexBuffer;
 		NRIBufferResource indexBuffer;
-		NRIBufferResource primitiveBuffer;
-		NRIBufferResource materialBuffer;
 		NRIAccelerationStructureResource accelerationStructure;
 	};
 
@@ -1604,7 +1606,7 @@ private:
 	void ResetPersistentVoxelBatch();
 	bool BuildPersistentVoxelActorAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene::MaterialData>& materials);
-	bool UploadPersistentVoxelActorMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
+	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
 	bool TryApplyRuntimeMutationChunkToResidentScene(
@@ -1757,6 +1759,7 @@ private:
 	bool UpdateStructuredBufferRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after);
 	bool CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
 	bool CreateBufferWithoutViewAtLocation(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::MemoryLocation memoryLocation);
+	bool EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_t requiredSize, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
 	bool EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch& scratch, ResidentUploadScratchFrame& frameScratch, uint64_t requiredSize);
 	bool EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind);
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
@@ -1896,6 +1899,10 @@ private:
 	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
 	uint64_t mPersistentVoxelGeometryUploadHash = 0;
 	uint64_t mPersistentVoxelMaterialUploadHash = 0;
+	uint32_t mPersistentVoxelArenaVertexCursor = 0;
+	uint32_t mPersistentVoxelArenaIndexCursor = 0;
+	uint32_t mPersistentVoxelArenaPrimitiveCursor = 0;
+	uint32_t mPersistentVoxelArenaMaterialCursor = 0;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};
@@ -1938,7 +1945,7 @@ private:
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneLightSystem::SceneAnalyticLight> mTransientMuzzleFlashLights;
-	std::array<nri::Descriptor*, 533> mSceneDataDescriptors = {};
+	std::array<nri::Descriptor*, 25> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;
