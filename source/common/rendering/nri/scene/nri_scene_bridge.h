@@ -121,6 +121,7 @@ struct SceneDebugStats
 	unsigned int voxelCacheSurfaceStores = 0;
 	unsigned int voxelCacheSurfaceRebuilds = 0;
 	unsigned int voxelCacheSurfaceRemoves = 0;
+	unsigned int voxelCacheNotCaptured = 0;
 	unsigned int voxelCachePrimitives = 0;
 };
 

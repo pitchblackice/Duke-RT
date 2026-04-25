@@ -1734,6 +1734,10 @@ namespace
 				++gVoxelActorCacheSerial;
 				continue;
 			}
+			if (it->second.hasSurface && it->second.lastSeenFrame != gVoxelActorCacheFrame)
+			{
+				stats.voxelCacheNotCaptured++;
+			}
 			++it;
 		}
 

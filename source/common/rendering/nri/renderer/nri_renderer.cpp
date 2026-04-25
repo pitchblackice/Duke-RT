@@ -807,6 +807,7 @@ public:
 		stats.voxelCacheSurfaceStores = preservedStats.voxelCacheSurfaceStores;
 		stats.voxelCacheSurfaceRebuilds = preservedStats.voxelCacheSurfaceRebuilds;
 		stats.voxelCacheSurfaceRemoves = preservedStats.voxelCacheSurfaceRemoves;
+		stats.voxelCacheNotCaptured = preservedStats.voxelCacheNotCaptured;
 		stats.voxelCachePrimitives = preservedStats.voxelCachePrimitives;
 		sceneView.stats = stats;
 	}
@@ -4628,6 +4629,7 @@ namespace
 		merged.voxelCacheSurfaceStores = a.voxelCacheSurfaceStores + b.voxelCacheSurfaceStores;
 		merged.voxelCacheSurfaceRebuilds = a.voxelCacheSurfaceRebuilds + b.voxelCacheSurfaceRebuilds;
 		merged.voxelCacheSurfaceRemoves = a.voxelCacheSurfaceRemoves + b.voxelCacheSurfaceRemoves;
+		merged.voxelCacheNotCaptured = a.voxelCacheNotCaptured + b.voxelCacheNotCaptured;
 		merged.voxelCachePrimitives = a.voxelCachePrimitives + b.voxelCachePrimitives;
 		return merged;
 	}
@@ -8253,6 +8255,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					persistentVoxelStats.voxelCacheSurfaceStores = 0;
 					persistentVoxelStats.voxelCacheSurfaceRebuilds = 0;
 					persistentVoxelStats.voxelCacheSurfaceRemoves = 0;
+					persistentVoxelStats.voxelCacheNotCaptured = 0;
 					persistentVoxelStats.voxelCachePrimitives = 0;
 					dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, persistentVoxelStats);
 				}
@@ -9960,7 +9963,7 @@ void NRIRenderer::PrintStatus() const
 	if (mHasLoggedStats)
 	{
 		const auto& stats = mLastStats;
-		Printf("NRI PT last scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u entries:%u surface_hits:%u stores:%u rebuilds:%u removes:%u cached_prims:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
+		Printf("NRI PT last scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u entries:%u surface_hits:%u stores:%u rebuilds:%u removes:%u not_captured:%u cached_prims:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
 			stats.wallDrawItems,
 			stats.flatDrawItems,
 			stats.spriteDrawItems,
@@ -9980,6 +9983,7 @@ void NRIRenderer::PrintStatus() const
 			stats.voxelCacheSurfaceStores,
 			stats.voxelCacheSurfaceRebuilds,
 			stats.voxelCacheSurfaceRemoves,
+			stats.voxelCacheNotCaptured,
 			stats.voxelCachePrimitives,
 			stats.mirrorSurfaces,
 			stats.skySurfaces,
@@ -24909,7 +24913,7 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 
 	if (!mHasLoggedStats || StatsDiffer(mLastStats, stats))
 	{
-		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u entries:%u surface_hits:%u stores:%u rebuilds:%u removes:%u cached_prims:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
+		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u entries:%u surface_hits:%u stores:%u rebuilds:%u removes:%u not_captured:%u cached_prims:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
 			stats.wallDrawItems,
 			stats.flatDrawItems,
 			stats.spriteDrawItems,
@@ -24929,6 +24933,7 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 			stats.voxelCacheSurfaceStores,
 			stats.voxelCacheSurfaceRebuilds,
 			stats.voxelCacheSurfaceRemoves,
+			stats.voxelCacheNotCaptured,
 			stats.voxelCachePrimitives,
 			stats.mirrorSurfaces,
 			stats.skySurfaces,
