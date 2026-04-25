@@ -1505,11 +1505,12 @@ namespace
 		return true;
 	}
 
-	uint64_t BuildVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material)
+	uint64_t BuildVoxelActorSignature(const HWSprite& sprite, uint32_t drawListType, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material)
 	{
 		uint64_t hash = 1469598103934665603ull;
 		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel);
 		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel->model);
+		hash = HashCombine64(hash, (uint64_t)drawListType);
 		hash = HashCombine64(hash, voxelTexture != nullptr ? (uint64_t)(uint32_t)voxelTexture->GetID().GetIndex() : 0ull);
 		hash = HashCombine64(hash, (uint64_t)mesh.vertices.Size());
 		hash = HashCombine64(hash, (uint64_t)mesh.indices.Size());
@@ -1535,7 +1536,7 @@ namespace
 		return hash;
 	}
 
-	VoxelActorCacheLookup TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material, SceneDebugStats& stats)
+	VoxelActorCacheLookup TrackVoxelActorSignature(const HWSprite& sprite, uint32_t drawListType, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material, SceneDebugStats& stats)
 	{
 		VoxelActorCacheLookup lookup = {};
 		uint64_t identityKey = 0;
@@ -1547,7 +1548,7 @@ namespace
 		}
 
 		stats.voxelStableCandidates++;
-		const uint64_t signature = BuildVoxelActorSignature(sprite, voxelTexture, mesh, material);
+		const uint64_t signature = BuildVoxelActorSignature(sprite, drawListType, voxelTexture, mesh, material);
 		lookup.identityKey = identityKey;
 		lookup.signature = signature;
 		auto found = gVoxelActorCache.find(identityKey);
@@ -1711,6 +1712,47 @@ namespace
 		return true;
 	}
 
+	bool BuildVoxelMeshSurface(const HWSprite& sprite, uint32_t drawListType, const FVoxelMeshData& mesh, const MaterialRef& voxelMaterial, SurfaceRef& outSurface)
+	{
+		const unsigned int indexCount = mesh.indices.Size();
+		outSurface = {};
+		outSurface.material = voxelMaterial;
+		outSurface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, outSurface.material.flags);
+		outSurface.vertices.reserve(mesh.vertices.Size());
+		for (unsigned int i = 0; i < mesh.vertices.Size(); ++i)
+		{
+			outSurface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh.vertices[i]));
+		}
+
+		const unsigned int vertexCount = mesh.vertices.Size();
+		outSurface.indices.reserve(indexCount);
+		for (unsigned int i = 0; i + 2u < indexCount; i += 3u)
+		{
+			const unsigned int i0 = mesh.indices[i + 0u];
+			const unsigned int i1 = mesh.indices[i + 1u];
+			const unsigned int i2 = mesh.indices[i + 2u];
+			if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
+			{
+				continue;
+			}
+
+			outSurface.indices.push_back(i0);
+			outSurface.indices.push_back(i1);
+			outSurface.indices.push_back(i2);
+		}
+
+		if (outSurface.indices.empty())
+		{
+			return false;
+		}
+
+		if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
+		{
+			ApplyActorPreviousTransform(outSurface, sprite.Sprite->ownerActor);
+		}
+		return true;
+	}
+
 	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats, bool updatePersistentCache)
 	{
 		if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
@@ -1733,7 +1775,24 @@ namespace
 		}
 
 		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
-		const VoxelActorCacheLookup cacheLookup = updatePersistentCache ? TrackVoxelActorSignature(sprite, voxelTexture, *mesh, voxelMaterial, stats) : VoxelActorCacheLookup{};
+		const VoxelActorCacheLookup cacheLookup = updatePersistentCache ? TrackVoxelActorSignature(sprite, drawListType, voxelTexture, *mesh, voxelMaterial, stats) : VoxelActorCacheLookup{};
+		if (cacheLookup.stability == VoxelActorStability::Stable && cacheLookup.entry != nullptr && cacheLookup.entry->hasSurface)
+		{
+			outSprites.push_back(cacheLookup.entry->surface);
+			return true;
+		}
+
+		SurfaceRef exactSurface = {};
+		const bool hasExactSurface = BuildVoxelMeshSurface(sprite, drawListType, *mesh, voxelMaterial, exactSurface);
+		if (!hasExactSurface)
+		{
+			return false;
+		}
+
+		if (updatePersistentCache && cacheLookup.stability != VoxelActorStability::Stable)
+		{
+			StoreVoxelActorCacheSurface(cacheLookup, exactSurface, stats);
+		}
 
 		const unsigned int indexCount = mesh->indices.Size();
 		if (!TrySpendVoxelTriangleBudget(indexCount / 3u, budget))
@@ -1742,46 +1801,7 @@ namespace
 			return true;
 		}
 
-		SurfaceRef surface = {};
-		surface.material = voxelMaterial;
-		surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
-		surface.vertices.reserve(mesh->vertices.Size());
-		for (unsigned int i = 0; i < mesh->vertices.Size(); ++i)
-		{
-			surface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh->vertices[i]));
-		}
-
-		const unsigned int vertexCount = mesh->vertices.Size();
-		surface.indices.reserve(indexCount);
-		for (unsigned int i = 0; i + 2u < indexCount; i += 3u)
-		{
-			const unsigned int i0 = mesh->indices[i + 0u];
-			const unsigned int i1 = mesh->indices[i + 1u];
-			const unsigned int i2 = mesh->indices[i + 2u];
-			if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
-			{
-				continue;
-			}
-
-			surface.indices.push_back(i0);
-			surface.indices.push_back(i1);
-			surface.indices.push_back(i2);
-		}
-
-		if (surface.indices.empty())
-		{
-			return false;
-		}
-
-		if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
-		{
-			ApplyActorPreviousTransform(surface, sprite.Sprite->ownerActor);
-		}
-		if (updatePersistentCache && cacheLookup.stability != VoxelActorStability::Stable)
-		{
-			StoreVoxelActorCacheSurface(cacheLookup, surface, stats);
-		}
-		outSprites.push_back(std::move(surface));
+		outSprites.push_back(std::move(exactSurface));
 		return true;
 	}
 
