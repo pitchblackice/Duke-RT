@@ -3613,6 +3613,25 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			resource.emissiveUploadCalls,
 			(unsigned long long)resource.emissiveUploadBytes);
 		Printf(
+			"PERF pt resource scene detail NRI: frame=%llu dynamic=%u/%llu resident_chunk=%u/%llu persistent_voxel=%u/%llu persistent_actor=%u/%llu static_refresh=%u/%llu other=%u/%llu vertex=%llu index=%llu primitive=%llu material=%llu\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			resource.sceneDynamicUploadCalls,
+			(unsigned long long)resource.sceneDynamicUploadBytes,
+			resource.sceneResidentChunkUploadCalls,
+			(unsigned long long)resource.sceneResidentChunkUploadBytes,
+			resource.scenePersistentVoxelUploadCalls,
+			(unsigned long long)resource.scenePersistentVoxelUploadBytes,
+			resource.scenePersistentVoxelActorUploadCalls,
+			(unsigned long long)resource.scenePersistentVoxelActorUploadBytes,
+			resource.sceneStaticRefreshUploadCalls,
+			(unsigned long long)resource.sceneStaticRefreshUploadBytes,
+			resource.sceneOtherUploadCalls,
+			(unsigned long long)resource.sceneOtherUploadBytes,
+			(unsigned long long)resource.sceneVertexUploadBytes,
+			(unsigned long long)resource.sceneIndexUploadBytes,
+			(unsigned long long)resource.scenePrimitiveUploadBytes,
+			(unsigned long long)resource.sceneMaterialUploadBytes);
+		Printf(
 			"PERF pt resource waits NRI: frame=%llu resident_chunk=%u/%.3f resident_chunk_blas=%u/%.3f scene_data=%u/%.3f scene_buffer=%u/%.3f emissive_sampling=%u/%.3f world_tlas_instance=%u/%.3f world_tlas_scratch=%u/%.3f emissive_tlas_instance=%u/%.3f emissive_tlas_scratch=%u/%.3f other=%u/%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			resource.residentChunkWriteWaitCalls,

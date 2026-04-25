@@ -7358,7 +7358,7 @@ void NRIRenderer::WaitForCommandsTracked(const char* reason)
 	}
 }
 
-void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth)
+void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth, const char* reason, int uploadKind)
 {
 	if (!ShouldTracePtPerf() || stats == nullptr)
 	{
@@ -7384,6 +7384,59 @@ void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint6
 	if (stats == &mVertexBufferStats || stats == &mIndexBufferStats || stats == &mPrimitiveBufferStats || stats == &mMaterialBufferStats)
 	{
 		noteBytes(perf.sceneUploadCalls, perf.sceneUploadBytes);
+		int effectiveUploadKind = uploadKind;
+		if (effectiveUploadKind < 0)
+		{
+			if (stats == &mVertexBufferStats)
+			{
+				effectiveUploadKind = ResidentUploadKind_Vertex;
+			}
+			else if (stats == &mIndexBufferStats)
+			{
+				effectiveUploadKind = ResidentUploadKind_Index;
+			}
+			else if (stats == &mPrimitiveBufferStats)
+			{
+				effectiveUploadKind = ResidentUploadKind_Primitive;
+			}
+			else if (stats == &mMaterialBufferStats)
+			{
+				effectiveUploadKind = ResidentUploadKind_Material;
+			}
+		}
+		switch (effectiveUploadKind)
+		{
+		case ResidentUploadKind_Vertex: perf.sceneVertexUploadBytes += size; break;
+		case ResidentUploadKind_Index: perf.sceneIndexUploadBytes += size; break;
+		case ResidentUploadKind_Primitive: perf.scenePrimitiveUploadBytes += size; break;
+		case ResidentUploadKind_Material: perf.sceneMaterialUploadBytes += size; break;
+		default: break;
+		}
+
+		if (reason != nullptr && std::strcmp(reason, "scene_buffer_upload") == 0)
+		{
+			noteBytes(perf.sceneDynamicUploadCalls, perf.sceneDynamicUploadBytes);
+		}
+		else if (reason != nullptr && std::strcmp(reason, "resident_chunk_write") == 0)
+		{
+			noteBytes(perf.sceneResidentChunkUploadCalls, perf.sceneResidentChunkUploadBytes);
+		}
+		else if (reason != nullptr && std::strcmp(reason, "persistent_voxel_scene_upload") == 0)
+		{
+			noteBytes(perf.scenePersistentVoxelUploadCalls, perf.scenePersistentVoxelUploadBytes);
+		}
+		else if (reason != nullptr && (std::strcmp(reason, "persistent_voxel_actor_vertex") == 0 || std::strcmp(reason, "persistent_voxel_actor_index") == 0))
+		{
+			noteBytes(perf.scenePersistentVoxelActorUploadCalls, perf.scenePersistentVoxelActorUploadBytes);
+		}
+		else if (reason == nullptr)
+		{
+			noteBytes(perf.sceneStaticRefreshUploadCalls, perf.sceneStaticRefreshUploadBytes);
+		}
+		else
+		{
+			noteBytes(perf.sceneOtherUploadCalls, perf.sceneOtherUploadBytes);
+		}
 	}
 	else if (stats == &mEmissivePrimitiveHeaderBufferStats || stats == &mEmissivePrimitiveBufferStats || stats == &mEmissivePrimitiveCdfBufferStats || stats == &mEmissiveTlasInstanceBufferStats)
 	{
@@ -17852,7 +17905,7 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 	stats.overwriteEventsLastFrame = 0;
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
-	NotePerfBufferUpload(&stats, size, needsGrowth);
+	NotePerfBufferUpload(&stats, size, needsGrowth, waitReason, -1);
 
 	if (needsGrowth)
 	{
@@ -18171,7 +18224,7 @@ bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, Sc
 	stats.overwriteEventsLastFrame = 0;
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
-	NotePerfBufferUpload(&stats, size, needsGrowth);
+	NotePerfBufferUpload(&stats, size, needsGrowth, waitReason, uploadKind);
 
 	if (needsGrowth)
 	{
