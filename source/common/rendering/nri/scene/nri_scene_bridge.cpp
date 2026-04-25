@@ -60,6 +60,14 @@ namespace
 		bool unlimited = false;
 	};
 
+	enum class VoxelActorStability : uint8_t
+	{
+		Uncacheable,
+		New,
+		Stable,
+		Changed,
+	};
+
 	bool IsUsableGameTexturePointer(FGameTexture* texture);
 
 	bool ShouldTraceSkyPerf()
@@ -1507,13 +1515,14 @@ namespace
 		return hash;
 	}
 
-	void TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material, SceneDebugStats& stats)
+	VoxelActorStability TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const FVoxelMeshData& mesh, const MaterialRef& material, SceneDebugStats& stats)
 	{
 		uint64_t identityKey = 0;
 		if (!TryBuildVoxelActorIdentityKey(sprite, identityKey))
 		{
 			stats.voxelStableUncacheable++;
-			return;
+			stats.voxelStableSplitLive++;
+			return VoxelActorStability::Uncacheable;
 		}
 
 		stats.voxelStableCandidates++;
@@ -1523,17 +1532,21 @@ namespace
 		{
 			gVoxelActorSignatureHistory.emplace(identityKey, signature);
 			stats.voxelStableSignatureMisses++;
-			return;
+			stats.voxelStableSplitLive++;
+			return VoxelActorStability::New;
 		}
 
 		if (found->second == signature)
 		{
 			stats.voxelStableSignatureHits++;
-			return;
+			stats.voxelStableSplitStable++;
+			return VoxelActorStability::Stable;
 		}
 
 		found->second = signature;
 		stats.voxelStableSignatureChanges++;
+		stats.voxelStableSplitLive++;
+		return VoxelActorStability::Changed;
 	}
 
 	const FVoxelMeshData* GetCachedVoxelMesh(FVoxelModel* model)
@@ -1598,7 +1611,8 @@ namespace
 		}
 
 		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
-		TrackVoxelActorSignature(sprite, voxelTexture, *mesh, voxelMaterial, stats);
+		const VoxelActorStability stability = TrackVoxelActorSignature(sprite, voxelTexture, *mesh, voxelMaterial, stats);
+		(void)stability;
 
 		const unsigned int indexCount = mesh->indices.Size();
 		if (!TrySpendVoxelTriangleBudget(indexCount / 3u, budget))

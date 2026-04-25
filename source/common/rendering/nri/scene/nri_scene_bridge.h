@@ -114,6 +114,8 @@ struct SceneDebugStats
 	unsigned int voxelStableSignatureHits = 0;
 	unsigned int voxelStableSignatureMisses = 0;
 	unsigned int voxelStableSignatureChanges = 0;
+	unsigned int voxelStableSplitStable = 0;
+	unsigned int voxelStableSplitLive = 0;
 };
 
 struct SkyPerfStats

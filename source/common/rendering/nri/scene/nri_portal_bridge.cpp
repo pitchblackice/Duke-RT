@@ -130,6 +130,8 @@ namespace
 		outView.stats.voxelStableSignatureHits += source.stats.voxelStableSignatureHits;
 		outView.stats.voxelStableSignatureMisses += source.stats.voxelStableSignatureMisses;
 		outView.stats.voxelStableSignatureChanges += source.stats.voxelStableSignatureChanges;
+		outView.stats.voxelStableSplitStable += source.stats.voxelStableSplitStable;
+		outView.stats.voxelStableSplitLive += source.stats.voxelStableSplitLive;
 		outView.stats.portalCapturesSkipped += source.stats.portalCapturesSkipped;
 		if (source.sky.priority > outView.sky.priority)
 		{
