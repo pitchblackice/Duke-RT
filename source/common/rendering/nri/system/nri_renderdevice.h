@@ -76,6 +76,7 @@ public:
 	IDataBuffer* CreateDataBuffer(int bindingpoint, bool ssbo, bool needsresize) override;
 	FTexture* WipeStartScreen() override;
 	FTexture* WipeEndScreen() override;
+	bool QueueScreenshot(FileWriter* file) override;
 	TArray<uint8_t> GetScreenshotBuffer(int& pitch, ESSType& color_type, float& gamma) override;
 	bool FlipSavePic() const override { return false; }
 	void PrintPathTracingCaps() const;
@@ -193,6 +194,18 @@ private:
 		uint64_t peakResidentBytes = 0;
 	};
 
+	struct PendingScreenshotCapture
+	{
+		std::unique_ptr<FileWriter> file;
+		nri::Buffer* readbackBuffer = nullptr;
+		uint32_t width = 0;
+		uint32_t height = 0;
+		uint32_t rowPitch = 0;
+		uint32_t slicePitch = 0;
+		nri::Format sourceFormat = nri::Format::UNKNOWN;
+		bool readbackRecorded = false;
+	};
+
 	using PFN_nriEnumerateAdapters = nri::Result(NRI_CALL*)(nri::AdapterDesc*, uint32_t&);
 	using PFN_nriCreateDevice = nri::Result(NRI_CALL*)(const nri::DeviceCreationDesc&, nri::Device*&);
 	using PFN_nriDestroyDevice = void (NRI_CALL*)(nri::Device*);
@@ -284,6 +297,9 @@ private:
 	bool SubmitAndWaitCurrentCommandBuffer();
 	bool CopyTextureToTexture(NRITextureResource& destination, NRITextureResource& source);
 	bool SnapshotTextureToCanvas(FCanvasTexture* tex, NRITextureResource& source);
+	void RecordPendingScreenshotReadbacks();
+	void FinishPendingScreenshotReadbacks(bool submitted, uint64_t submittedFenceValue);
+	void ClearPendingScreenshotReadbacks();
 	void ResetLevelTransitionShellState();
 	uint32_t ClearPendingPathTracingWeaponLightEvents();
 	void LogLevelTransitionSnapshot(const char* phase, const LevelTransitionInfo& info, bool preloadPending, uint32_t clearedWeaponLightEvents) const;
@@ -387,6 +403,7 @@ private:
 	FrameSequenceEntry mFrameSequenceHistory[FrameSequenceHistorySize] = {};
 	uint32_t mFrameSequenceWriteIndex = 0;
 	Texture2DDebugStats mTexture2DDebugStats;
+	std::vector<PendingScreenshotCapture> mPendingScreenshotCaptures;
 	uint64_t mAdapterLocalBudgetBytes = 0;
 	uint64_t mAdapterNonLocalBudgetBytes = 0;
 	bool mTraceThisFrame = false;

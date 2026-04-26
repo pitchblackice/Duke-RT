@@ -39,7 +39,9 @@
 #include <cassert>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <string>
+#include <utility>
 
 EXTERN_CVAR(String, nri_api)
 EXTERN_CVAR(Int, nri_ptportaldepth)
@@ -1012,9 +1014,61 @@ namespace
 		case nri::Format::RGBA16_SFLOAT: return "RGBA16_SFLOAT";
 		case nri::Format::BGRA8_UNORM: return "BGRA8_UNORM";
 		case nri::Format::RGBA8_UNORM: return "RGBA8_UNORM";
+		case nri::Format::BGRA8_SRGB: return "BGRA8_SRGB";
+		case nri::Format::RGBA8_SRGB: return "RGBA8_SRGB";
 		case nri::Format::R10_G10_B10_A2_UNORM: return "R10_G10_B10_A2_UNORM";
 		default: return "other";
 		}
+	}
+
+	static uint32_t GetScreenshotSourceBytesPerPixel(nri::Format format)
+	{
+		switch (format)
+		{
+		case nri::Format::BGRA8_UNORM:
+		case nri::Format::RGBA8_UNORM:
+		case nri::Format::BGRA8_SRGB:
+		case nri::Format::RGBA8_SRGB:
+		case nri::Format::R10_G10_B10_A2_UNORM:
+			return 4;
+		case nri::Format::RGBA16_SFLOAT:
+			return 8;
+		default:
+			return 0;
+		}
+	}
+
+	static float HalfToFloat(uint16_t value)
+	{
+		const uint32_t sign = (value >> 15) & 1u;
+		const uint32_t exponent = (value >> 10) & 0x1fu;
+		const uint32_t mantissa = value & 0x3ffu;
+
+		float result = 0.0f;
+		if (exponent == 0)
+		{
+			result = mantissa == 0 ? 0.0f : std::ldexp((float)mantissa, -24);
+		}
+		else if (exponent == 31)
+		{
+			result = mantissa == 0 ? std::numeric_limits<float>::infinity() : std::numeric_limits<float>::quiet_NaN();
+		}
+		else
+		{
+			result = std::ldexp(1.0f + (float)mantissa / 1024.0f, (int)exponent - 15);
+		}
+
+		return sign ? -result : result;
+	}
+
+	static uint8_t FloatToByte(float value)
+	{
+		if (!std::isfinite(value))
+		{
+			value = 0.0f;
+		}
+		value = std::clamp(value, 0.0f, 1.0f);
+		return (uint8_t)std::lround(value * 255.0f);
 	}
 
 	static NRIPTOutputMode GetRequestedPathTracingOutputMode()
@@ -1875,6 +1929,8 @@ void NRIRenderDevice::Update()
 			mPendingViewSnapshotCanvas = nullptr;
 			SnapshotTextureToCanvas(canvas, *mCurrentPresentTarget);
 		}
+
+		RecordPendingScreenshotReadbacks();
 
 		draw2DMs = I_msTimeF() - stageStartMs;
 		stageStartMs = I_msTimeF();
@@ -4134,6 +4190,26 @@ FTexture* NRIRenderDevice::WipeEndScreen()
 	auto systex = static_cast<NRIHardwareTexture*>(tex->GetSystemTexture());
 	systex->CreateWipeTexture(mScreenViewport.width, mScreenViewport.height, "WipeEndScreen");
 	return tex;
+}
+
+bool NRIRenderDevice::QueueScreenshot(FileWriter* file)
+{
+	if (file == nullptr)
+	{
+		return false;
+	}
+
+	if (!mInitialized)
+	{
+		return false;
+	}
+
+	PendingScreenshotCapture capture;
+	capture.file.reset(file);
+	capture.width = (uint32_t)GetWidth();
+	capture.height = (uint32_t)GetHeight();
+	mPendingScreenshotCaptures.push_back(std::move(capture));
+	return true;
 }
 
 TArray<uint8_t> NRIRenderDevice::GetScreenshotBuffer(int& pitch, ESSType& color_type, float& gamma)
@@ -6458,6 +6534,7 @@ bool NRIRenderDevice::CreateRenderResources()
 
 void NRIRenderDevice::DestroyRenderResources()
 {
+	ClearPendingScreenshotReadbacks();
 	DestroyFrameGenerationPresentTargets();
 	DestroyFrameGenerationUiTexture();
 	DestroyViewSnapshotTexture();
@@ -6833,6 +6910,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		queuedFrame.hasSubmittedWork = true;
 	}
 	RecordFrameSequence(mCurrentSwapChainImage, submittedFenceValue, presentResult);
+	FinishPendingScreenshotReadbacks(submitResult == nri::Result::SUCCESS, submittedFenceValue);
 	const bool tracedGameplayFrame = mTraceThisFrame && (mLastFrameBoundaryStats.pathTracedSceneRendered || mLastFrameBoundaryStats.postProcessInvoked);
 	if (tracedGameplayFrame)
 	{
@@ -6960,6 +7038,181 @@ void NRIRenderDevice::SnapshotCurrentViewToCanvas(FCanvasTexture* tex)
 	{
 		tex->SetUpdated(true);
 	}
+}
+
+void NRIRenderDevice::RecordPendingScreenshotReadbacks()
+{
+	if (mPendingScreenshotCaptures.empty())
+	{
+		return;
+	}
+
+	if (!mFrameBegun || mCommandBuffer == nullptr || mCurrentPresentTarget == nullptr || mCurrentPresentTarget->texture == nullptr)
+	{
+		return;
+	}
+
+	NRITextureResource& source = *mCurrentPresentTarget;
+	const uint32_t bytesPerPixel = GetScreenshotSourceBytesPerPixel(source.format);
+	if (bytesPerPixel == 0)
+	{
+		Printf(TEXTCOLOR_RED "NRI screenshot failed: unsupported source format '%s'.\n", GetNriFormatName(source.format));
+		ClearPendingScreenshotReadbacks();
+		return;
+	}
+
+	mRenderState->EndFrame();
+	TransitionTexture(source, NRICopySourceState());
+
+	const nri::DeviceDesc& deviceDesc = mCore.GetDeviceDesc(*mDevice);
+	for (auto& capture : mPendingScreenshotCaptures)
+	{
+		if (capture.readbackRecorded || capture.readbackBuffer != nullptr)
+		{
+			continue;
+		}
+
+		capture.width = (std::min)(capture.width, source.width);
+		capture.height = (std::min)(capture.height, source.height);
+		if (capture.width == 0 || capture.height == 0)
+		{
+			continue;
+		}
+
+		capture.sourceFormat = source.format;
+		capture.rowPitch = AlignUp(capture.width * bytesPerPixel, deviceDesc.memoryAlignment.uploadBufferTextureRow);
+		capture.slicePitch = AlignUp(capture.rowPitch * capture.height, deviceDesc.memoryAlignment.uploadBufferTextureSlice);
+
+		nri::BufferDesc readbackDesc = {};
+		readbackDesc.size = capture.slicePitch;
+		if (mCore.CreateCommittedBuffer(*mDevice, nri::MemoryLocation::HOST_READBACK, 0.0f, readbackDesc, capture.readbackBuffer) != nri::Result::SUCCESS)
+		{
+			Printf(TEXTCOLOR_RED "NRI screenshot failed: could not create readback buffer.\n");
+			continue;
+		}
+
+		nri::TextureRegionDesc region = {};
+		region.width = capture.width;
+		region.height = capture.height;
+		region.depth = 1;
+		region.planes = nri::PlaneBits::COLOR;
+
+		nri::TextureDataLayoutDesc layout = {};
+		layout.rowPitch = capture.rowPitch;
+		layout.slicePitch = capture.slicePitch;
+
+		mCore.CmdReadbackTextureToBuffer(*mCommandBuffer, *capture.readbackBuffer, layout, *source.texture, region);
+		capture.readbackRecorded = true;
+	}
+}
+
+void NRIRenderDevice::FinishPendingScreenshotReadbacks(bool submitted, uint64_t submittedFenceValue)
+{
+	if (mPendingScreenshotCaptures.empty())
+	{
+		return;
+	}
+
+	if (!submitted || mFrameFence == nullptr)
+	{
+		Printf(TEXTCOLOR_RED "NRI screenshot failed: frame submission did not complete.\n");
+		ClearPendingScreenshotReadbacks();
+		return;
+	}
+
+	mCore.Wait(*mFrameFence, submittedFenceValue);
+
+	for (auto& capture : mPendingScreenshotCaptures)
+	{
+		if (!capture.readbackRecorded || capture.readbackBuffer == nullptr || capture.file == nullptr)
+		{
+			Printf(TEXTCOLOR_RED "NRI screenshot failed: readback was not recorded.\n");
+			continue;
+		}
+
+		const uint8_t* pixels = (const uint8_t*)mCore.MapBuffer(*capture.readbackBuffer, 0, capture.slicePitch);
+		if (pixels == nullptr)
+		{
+			Printf(TEXTCOLOR_RED "NRI screenshot failed: could not map readback buffer.\n");
+			continue;
+		}
+
+		TArray<uint8_t> image(capture.width * capture.height * 3, true);
+		for (uint32_t y = 0; y < capture.height; ++y)
+		{
+			const uint8_t* src = pixels + (size_t)y * capture.rowPitch;
+			uint8_t* dst = image.Data() + (size_t)y * capture.width * 3u;
+
+			for (uint32_t x = 0; x < capture.width; ++x)
+			{
+				switch (capture.sourceFormat)
+				{
+				case nri::Format::BGRA8_UNORM:
+				case nri::Format::BGRA8_SRGB:
+					dst[x * 3 + 0] = src[x * 4 + 2];
+					dst[x * 3 + 1] = src[x * 4 + 1];
+					dst[x * 3 + 2] = src[x * 4 + 0];
+					break;
+				case nri::Format::RGBA8_UNORM:
+				case nri::Format::RGBA8_SRGB:
+					dst[x * 3 + 0] = src[x * 4 + 0];
+					dst[x * 3 + 1] = src[x * 4 + 1];
+					dst[x * 3 + 2] = src[x * 4 + 2];
+					break;
+				case nri::Format::RGBA16_SFLOAT:
+				{
+					const uint16_t* half = (const uint16_t*)(src + x * 8);
+					dst[x * 3 + 0] = FloatToByte(HalfToFloat(half[0]));
+					dst[x * 3 + 1] = FloatToByte(HalfToFloat(half[1]));
+					dst[x * 3 + 2] = FloatToByte(HalfToFloat(half[2]));
+					break;
+				}
+				case nri::Format::R10_G10_B10_A2_UNORM:
+				{
+					const uint32_t packed = *(const uint32_t*)(src + x * 4);
+					dst[x * 3 + 0] = (uint8_t)(((packed >> 0) & 0x3ffu) * 255u / 1023u);
+					dst[x * 3 + 1] = (uint8_t)(((packed >> 10) & 0x3ffu) * 255u / 1023u);
+					dst[x * 3 + 2] = (uint8_t)(((packed >> 20) & 0x3ffu) * 255u / 1023u);
+					break;
+				}
+				default:
+					dst[x * 3 + 0] = 0;
+					dst[x * 3 + 1] = 0;
+					dst[x * 3 + 2] = 0;
+					break;
+				}
+			}
+		}
+
+		mCore.UnmapBuffer(*capture.readbackBuffer);
+
+		FStringf software(GAMENAME " %s", GetVersionString());
+		if (!M_CreatePNG(capture.file.get(), image.Data(), nullptr, SS_RGB, capture.width, capture.height, capture.width * 3, 1.0f) ||
+			!M_AppendPNGText(capture.file.get(), "Software", software.GetChars()) ||
+			!M_FinishPNG(capture.file.get()))
+		{
+			Printf("Failed writing screenshot\n");
+		}
+		else
+		{
+			Printf("screenshot saved\n");
+		}
+	}
+
+	ClearPendingScreenshotReadbacks();
+}
+
+void NRIRenderDevice::ClearPendingScreenshotReadbacks()
+{
+	for (auto& capture : mPendingScreenshotCaptures)
+	{
+		if (capture.readbackBuffer != nullptr && mDevice != nullptr)
+		{
+			mCore.DestroyBuffer(capture.readbackBuffer);
+			capture.readbackBuffer = nullptr;
+		}
+	}
+	mPendingScreenshotCaptures.clear();
 }
 
 void NRIRenderDevice::CopyScreenToBuffer(int width, int height, uint8_t* buffer)
@@ -7486,6 +7739,7 @@ void NRIRenderDevice::ResetFrameTracking(bool presentedAcquiredImage)
 void NRIRenderDevice::ResetLevelTransitionShellState()
 {
 	ResetFrameTracking(false);
+	ClearPendingScreenshotReadbacks();
 	mUsingSaveTarget = false;
 	mActiveCanvasTexture = nullptr;
 	mActiveCanvasSourceTexture = nullptr;
