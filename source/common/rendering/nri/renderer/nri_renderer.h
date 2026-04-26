@@ -573,6 +573,9 @@ public:
 		uint32_t dynamicCaptureVoxelCacheStores = 0;
 		uint32_t dynamicCaptureVoxelCacheRebuilds = 0;
 		uint32_t dynamicCaptureVoxelCacheDeferred = 0;
+		uint32_t dynamicCaptureVoxelMeshBuilds = 0;
+		uint32_t dynamicCaptureVoxelMeshDeferred = 0;
+		uint32_t dynamicCaptureVoxelMeshInvalid = 0;
 		uint32_t dynamicAsPrimitiveCount = 0;
 		uint32_t dynamicAsVertexCount = 0;
 		uint32_t dynamicAsIndexCount = 0;

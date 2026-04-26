@@ -28,6 +28,7 @@ EXTERN_CVAR(Int, nri_ptactorspritetrace)
 CVAR(Int, nri_ptvoxeltrianglebudget, 250000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelmaxtriangles, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelcaptureactors, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -37,6 +38,9 @@ namespace
 
 	SkyPerfStats gSkyPerfStats = {};
 	DynamicCapturePerfStats gDynamicCapturePerfStats = {};
+	uint32_t gVoxelMeshCacheFrame = 0;
+	uint32_t gVoxelMeshCacheCaptureDepth = 0;
+	uint32_t gVoxelMeshBuildsThisFrame = 0;
 
 	double DurationMs(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end)
 	{
@@ -81,7 +85,14 @@ namespace
 	std::unordered_map<const FTexture*, AverageColorCacheEntry> gFrameLocalAverageTextureColorCache;
 	std::unordered_map<uint64_t, AverageColorCacheEntry> gPersistentAverageTextureColorCache;
 	std::unordered_map<const FGameTexture*, CachedSkyInspection> gSkyInspectionCache;
-	std::unordered_map<const FVoxelModel*, FVoxelMeshData> gVoxelMeshCache;
+	struct VoxelMeshCacheEntry
+	{
+		FVoxelMeshData mesh;
+		uint32_t deferredFrame = 0;
+		bool built = false;
+		bool valid = false;
+	};
+	std::unordered_map<const FVoxelModel*, VoxelMeshCacheEntry> gVoxelMeshCache;
 	uint64_t gVoxelActorCacheFrame = 0;
 	uint32_t gVoxelActorCacheCaptureDepth = 0;
 	uint64_t gVoxelActorCacheSerial = 1;
@@ -111,6 +122,7 @@ namespace
 		uint32_t remainingCacheUpdates = 0;
 		bool unlimited = false;
 		bool unlimitedCacheUpdates = false;
+		bool spentTriangleBudget = false;
 	};
 
 	enum class VoxelActorStability : uint8_t
@@ -1831,8 +1843,42 @@ namespace
 		}
 	}
 
-	const FVoxelMeshData* GetCachedVoxelMesh(FVoxelModel* model)
+	bool BeginVoxelMeshCacheFrame()
 	{
+		const bool rootCapture = gVoxelMeshCacheCaptureDepth++ == 0;
+		if (rootCapture)
+		{
+			++gVoxelMeshCacheFrame;
+			if (gVoxelMeshCacheFrame == 0)
+			{
+				gVoxelMeshCacheFrame = 1;
+			}
+			gVoxelMeshBuildsThisFrame = 0;
+		}
+		return rootCapture;
+	}
+
+	void EndVoxelMeshCacheFrame(bool rootCapture)
+	{
+		if (gVoxelMeshCacheCaptureDepth > 0)
+		{
+			--gVoxelMeshCacheCaptureDepth;
+		}
+		if (rootCapture)
+		{
+			gVoxelMeshBuildsThisFrame = 0;
+		}
+	}
+
+	bool CanBuildVoxelMeshThisFrame()
+	{
+		const int buildBudget = (int)nri_ptvoxelmeshbuilds;
+		return buildBudget <= 0 || gVoxelMeshBuildsThisFrame < (uint32_t)buildBudget;
+	}
+
+	const FVoxelMeshData* GetCachedVoxelMesh(FVoxelModel* model, bool& outDeferred)
+	{
+		outDeferred = false;
 		if (model == nullptr)
 		{
 			return nullptr;
@@ -1841,13 +1887,32 @@ namespace
 		auto found = gVoxelMeshCache.find(model);
 		if (found == gVoxelMeshCache.end())
 		{
-			FVoxelMeshData mesh;
-			model->BuildCpuMesh(mesh);
-			found = gVoxelMeshCache.emplace(model, std::move(mesh)).first;
+			if (!CanBuildVoxelMeshThisFrame())
+			{
+				outDeferred = true;
+				gDynamicCapturePerfStats.voxelMeshCacheDeferred++;
+				return nullptr;
+			}
+
+			VoxelMeshCacheEntry entry = {};
+			model->BuildCpuMesh(entry.mesh);
+			entry.built = true;
+			entry.valid = entry.mesh.vertices.Size() > 0 && entry.mesh.indices.Size() >= 3;
+			gVoxelMeshBuildsThisFrame++;
+			gDynamicCapturePerfStats.voxelMeshCacheBuilds++;
+			if (!entry.valid)
+			{
+				gDynamicCapturePerfStats.voxelMeshCacheInvalid++;
+			}
+			found = gVoxelMeshCache.emplace(model, std::move(entry)).first;
 		}
 
-		const FVoxelMeshData& mesh = found->second;
-		return mesh.vertices.Size() > 0 && mesh.indices.Size() >= 3 ? &mesh : nullptr;
+		const VoxelMeshCacheEntry& entry = found->second;
+		if (!entry.built || !entry.valid)
+		{
+			return nullptr;
+		}
+		return &entry.mesh;
 	}
 
 	bool TrySpendVoxelTriangleBudget(uint32_t triangleCount, VoxelCaptureBudget& budget)
@@ -1862,12 +1927,20 @@ namespace
 			return true;
 		}
 
+		if (!budget.spentTriangleBudget && triangleCount > budget.remainingTriangles)
+		{
+			budget.remainingTriangles = 0;
+			budget.spentTriangleBudget = true;
+			return true;
+		}
+
 		if (triangleCount > budget.remainingTriangles)
 		{
 			return false;
 		}
 
 		budget.remainingTriangles -= triangleCount;
+		budget.spentTriangleBudget = true;
 		return true;
 	}
 
@@ -1963,9 +2036,23 @@ namespace
 		}
 
 		const FVoxelMeshData* mesh = nullptr;
+		bool meshDeferred = false;
 		{
 			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelMeshMs);
-			mesh = GetCachedVoxelMesh(sprite.voxel->model);
+			mesh = GetCachedVoxelMesh(sprite.voxel->model, meshDeferred);
+		}
+		if (meshDeferred)
+		{
+			if (cacheSurfaceUpdate)
+			{
+				stats.voxelCacheNotCaptured++;
+				stats.voxelCacheDeferred++;
+				gDynamicCapturePerfStats.voxelCacheDeferred++;
+				return true;
+			}
+
+			CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
+			return true;
 		}
 		if (mesh == nullptr)
 		{
@@ -2029,8 +2116,14 @@ namespace
 
 	void CaptureModelSprites(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
 	{
+		const bool rootMeshCapture = BeginVoxelMeshCacheFrame();
 		std::vector<HWSprite*> sprites;
 		sprites.reserve(list.sprites.Size());
+		auto finish = [&]()
+		{
+			EndVoxelMeshCacheFrame(rootMeshCapture);
+		};
+
 		for (auto* sprite : list.sprites)
 		{
 			if (sprite != nullptr)
@@ -2077,10 +2170,12 @@ namespace
 				stats.voxelProxyDrawItems++;
 			}
 		}
+		finish();
 	}
 
 	void CaptureActorModelSprites(HWDrawList& list, uint32_t drawListType, int32_t actorIndex, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
 	{
+		const bool rootMeshCapture = BeginVoxelMeshCacheFrame();
 		VoxelCaptureBudget budget = MakeVoxelCaptureBudget();
 		for (auto* sprite : list.sprites)
 		{
@@ -2107,6 +2202,7 @@ namespace
 				stats.voxelProxyDrawItems++;
 			}
 		}
+		EndVoxelMeshCacheFrame(rootMeshCapture);
 	}
 }
 

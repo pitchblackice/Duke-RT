@@ -7779,6 +7779,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCacheStores += captureStats.voxelCacheStores;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCacheRebuilds += captureStats.voxelCacheRebuilds;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelCacheDeferred += captureStats.voxelCacheDeferred;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshBuilds += captureStats.voxelMeshCacheBuilds;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshDeferred += captureStats.voxelMeshCacheDeferred;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshInvalid += captureStats.voxelMeshCacheInvalid;
 				mLastPerfShellTraceStats.dynamicCaptureCountMs += captureStats.countMs;
 				mLastPerfShellTraceStats.dynamicCaptureWallsMs += captureStats.wallsMs;
 				mLastPerfShellTraceStats.dynamicCaptureFlatsMs += captureStats.flatsMs;
@@ -12162,6 +12165,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	{
 		mLastPerfShellTraceStats.persistentVoxelOnboardingCandidateCount++;
 		mLastPerfShellTraceStats.persistentVoxelOnboardingEstimatedBytes += estimatedBytes;
+		if (persistentVoxelBuiltActors == 0)
+		{
+			return true;
+		}
 		if (persistentVoxelBuildPrimitiveBudget != 0 && primitiveCount > persistentVoxelBuildPrimitiveBudget)
 		{
 			persistentVoxelBuildPending = true;
@@ -12169,10 +12176,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			mLastPerfShellTraceStats.persistentVoxelOnboardingPrimitiveBudgetHits++;
 			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedBytes;
 			return false;
-		}
-		if (persistentVoxelBuiltActors == 0)
-		{
-			return true;
 		}
 		if (persistentVoxelBuiltActors >= persistentVoxelBuildActorBudget)
 		{

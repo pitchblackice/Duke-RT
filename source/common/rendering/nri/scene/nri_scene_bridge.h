@@ -156,6 +156,9 @@ struct DynamicCapturePerfStats
 	uint32_t voxelCacheStores = 0;
 	uint32_t voxelCacheRebuilds = 0;
 	uint32_t voxelCacheDeferred = 0;
+	uint32_t voxelMeshCacheBuilds = 0;
+	uint32_t voxelMeshCacheDeferred = 0;
+	uint32_t voxelMeshCacheInvalid = 0;
 	double countMs = 0.0;
 	double wallsMs = 0.0;
 	double flatsMs = 0.0;
