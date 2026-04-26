@@ -144,6 +144,23 @@ struct SkyPerfStats
 	uint64_t averageColorTimeUs = 0;
 };
 
+struct DynamicCapturePerfStats
+{
+	uint32_t calls = 0;
+	uint32_t wallSurfaces = 0;
+	uint32_t flatSurfaces = 0;
+	uint32_t spriteSurfaces = 0;
+	uint32_t voxelProxySurfaces = 0;
+	uint32_t unsupportedModelSurfaces = 0;
+	double countMs = 0.0;
+	double wallsMs = 0.0;
+	double flatsMs = 0.0;
+	double facingSpritesMs = 0.0;
+	double modelSpritesMs = 0.0;
+	double voxelFrameMs = 0.0;
+	double statsMs = 0.0;
+};
+
 struct MaterialRef
 {
 	FGameTexture* texture = nullptr;
@@ -196,6 +213,7 @@ MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType);
 void ResetSkyPerfStats();
 SkyPerfStats ConsumeSkyPerfStats();
+DynamicCapturePerfStats ConsumeDynamicCapturePerfStats();
 bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView);
 bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);

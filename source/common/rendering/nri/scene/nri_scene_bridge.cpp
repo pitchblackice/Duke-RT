@@ -35,6 +35,31 @@ namespace
 	constexpr float kAttachedWallSpriteDepthNudge = 0.01f;
 
 	SkyPerfStats gSkyPerfStats = {};
+	DynamicCapturePerfStats gDynamicCapturePerfStats = {};
+
+	double DurationMs(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end)
+	{
+		return std::chrono::duration<double, std::milli>(end - start).count();
+	}
+
+	class ScopedDynamicCaptureTimer
+	{
+	public:
+		explicit ScopedDynamicCaptureTimer(double& targetMs)
+			: mTarget(&targetMs), mStart(std::chrono::steady_clock::now())
+		{
+		}
+
+		~ScopedDynamicCaptureTimer()
+		{
+			*mTarget += DurationMs(mStart, std::chrono::steady_clock::now());
+		}
+
+	private:
+		double* mTarget = nullptr;
+		std::chrono::steady_clock::time_point mStart = {};
+	};
+
 	struct AverageColorCacheEntry
 	{
 		bool success = false;
@@ -2055,6 +2080,13 @@ SkyPerfStats ConsumeSkyPerfStats()
 	return stats;
 }
 
+DynamicCapturePerfStats ConsumeDynamicCapturePerfStats()
+{
+	DynamicCapturePerfStats stats = gDynamicCapturePerfStats;
+	gDynamicCapturePerfStats = {};
+	return stats;
+}
+
 void Copy3(const float* source, float* destination)
 {
 	destination[0] = source[0];
@@ -2159,47 +2191,79 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 {
 	outView = {};
 	outView.drawInfo = &di;
-	const bool rootVoxelCacheFrame = BeginVoxelActorCacheFrame();
-	outView.stats.wallDrawItems =
-		CountDrawListItems(di, GLDL_MASKEDWALLSS) +
-		CountDrawListItems(di, GLDL_MASKEDWALLSD) +
-		CountDrawListItems(di, GLDL_MASKEDWALLSV) +
-		CountDrawListItems(di, GLDL_MASKEDWALLSH);
-	outView.stats.flatDrawItems =
-		CountDrawListItems(di, GLDL_MASKEDFLATS) +
-		CountDrawListItems(di, GLDL_MASKEDSLOPEFLATS);
-	outView.stats.spriteDrawItems = CountDrawListItems(di, GLDL_TRANSLUCENT) + CountDrawListItems(di, GLDL_MODELS);
-	outView.stats.translucentDrawItems = CountDrawListItems(di, GLDL_TRANSLUCENT);
-	outView.stats.modelDrawItems = CountDrawListItems(di, GLDL_MODELS);
+	gDynamicCapturePerfStats.calls++;
+	const bool rootVoxelCacheFrame = [&]()
+	{
+		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.voxelFrameMs);
+		return BeginVoxelActorCacheFrame();
+	}();
+	{
+		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.countMs);
+		outView.stats.wallDrawItems =
+			CountDrawListItems(di, GLDL_MASKEDWALLSS) +
+			CountDrawListItems(di, GLDL_MASKEDWALLSD) +
+			CountDrawListItems(di, GLDL_MASKEDWALLSV) +
+			CountDrawListItems(di, GLDL_MASKEDWALLSH);
+		outView.stats.flatDrawItems =
+			CountDrawListItems(di, GLDL_MASKEDFLATS) +
+			CountDrawListItems(di, GLDL_MASKEDSLOPEFLATS);
+		outView.stats.spriteDrawItems = CountDrawListItems(di, GLDL_TRANSLUCENT) + CountDrawListItems(di, GLDL_MODELS);
+		outView.stats.translucentDrawItems = CountDrawListItems(di, GLDL_TRANSLUCENT);
+		outView.stats.modelDrawItems = CountDrawListItems(di, GLDL_MODELS);
+	}
 	outView.stats.totalDrawItems = outView.stats.wallDrawItems + outView.stats.flatDrawItems + outView.stats.spriteDrawItems;
 
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSS], GLDL_MASKEDWALLSS, outView.opaqueWalls, outView.stats, outView);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSD], GLDL_MASKEDWALLSD, outView.opaqueWalls, outView.stats, outView);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSV], GLDL_MASKEDWALLSV, outView.opaqueWalls, outView.stats, outView);
-	CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSH], GLDL_MASKEDWALLSH, outView.opaqueWalls, outView.stats, outView);
-	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDFLATS], GLDL_MASKEDFLATS, outView.opaqueFlats);
-	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats);
-	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
-	CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
-	EndVoxelActorCacheFrame(outView.stats, rootVoxelCacheFrame);
-
-	for (const auto& wall : outView.opaqueWalls)
 	{
-		outView.stats.triangleEstimate += CountFanTriangles(wall);
-		outView.stats.materialRefs++;
+		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.wallsMs);
+		CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSS], GLDL_MASKEDWALLSS, outView.opaqueWalls, outView.stats, outView);
+		CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSD], GLDL_MASKEDWALLSD, outView.opaqueWalls, outView.stats, outView);
+		CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSV], GLDL_MASKEDWALLSV, outView.opaqueWalls, outView.stats, outView);
+		CaptureWalls(di, di.drawlists[GLDL_MASKEDWALLSH], GLDL_MASKEDWALLSH, outView.opaqueWalls, outView.stats, outView);
+	}
+	{
+		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.flatsMs);
+		CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDFLATS], GLDL_MASKEDFLATS, outView.opaqueFlats);
+		CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats);
+	}
+	{
+		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.facingSpritesMs);
+		CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
+	}
+	{
+		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelSpritesMs);
+		CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
+	}
+	{
+		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.voxelFrameMs);
+		EndVoxelActorCacheFrame(outView.stats, rootVoxelCacheFrame);
 	}
 
-	for (const auto& flat : outView.opaqueFlats)
 	{
-		outView.stats.triangleEstimate += CountTriangleListTriangles(flat);
-		outView.stats.materialRefs++;
+		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.statsMs);
+		for (const auto& wall : outView.opaqueWalls)
+		{
+			outView.stats.triangleEstimate += CountFanTriangles(wall);
+			outView.stats.materialRefs++;
+		}
+
+		for (const auto& flat : outView.opaqueFlats)
+		{
+			outView.stats.triangleEstimate += CountTriangleListTriangles(flat);
+			outView.stats.materialRefs++;
+		}
+
+		for (const auto& sprite : outView.opaqueSprites)
+		{
+			outView.stats.triangleEstimate += CountFanTriangles(sprite);
+			outView.stats.materialRefs++;
+		}
 	}
 
-	for (const auto& sprite : outView.opaqueSprites)
-	{
-		outView.stats.triangleEstimate += CountFanTriangles(sprite);
-		outView.stats.materialRefs++;
-	}
+	gDynamicCapturePerfStats.wallSurfaces += (uint32_t)outView.opaqueWalls.size();
+	gDynamicCapturePerfStats.flatSurfaces += (uint32_t)outView.opaqueFlats.size();
+	gDynamicCapturePerfStats.spriteSurfaces += (uint32_t)outView.opaqueSprites.size();
+	gDynamicCapturePerfStats.voxelProxySurfaces += outView.stats.voxelProxyDrawItems;
+	gDynamicCapturePerfStats.unsupportedModelSurfaces += outView.stats.unsupportedModelDrawItems;
 
 	return !outView.opaqueWalls.empty() || !outView.opaqueFlats.empty() || !outView.opaqueSprites.empty();
 }
