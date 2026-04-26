@@ -9,7 +9,7 @@ set "OVERLAY_DIR=%DIST_ROOT%\release-overlay"
 if not exist "%OVERLAY_DIR%" set "OVERLAY_DIR=%DIST_ROOT%\default-overlay"
 set "RAZE_EXE=%DIST_ROOT%\raze.exe"
 set "PREFLIGHT_PS1=%DIST_ROOT%\tools\dist\Prepare-CommercialNormals.ps1"
-set "LAUNCH_VARS=%DIST_ROOT%\generated-content\state\launch-duke-rt.cmdvars"
+set "LAUNCH_VARS=%DIST_ROOT%\generated-content\state\launch-duke-rt-vars.cmd"
 
 if not exist "%RAZE_EXE%" (
     set "DIST_ROOT=%SCRIPT_DIR%\..\.."
@@ -19,7 +19,7 @@ if not exist "%RAZE_EXE%" (
     set "RAZE_EXE=%DIST_ROOT%\build\terminal-release\raze.exe"
     if not exist "%RAZE_EXE%" set "RAZE_EXE=%DIST_ROOT%\build\terminal-ninja\raze.exe"
     set "PREFLIGHT_PS1=%DIST_ROOT%\tools\dist\Prepare-CommercialNormals.ps1"
-    set "LAUNCH_VARS=%DIST_ROOT%\generated-content\state\launch-duke-rt.cmdvars"
+    set "LAUNCH_VARS=%DIST_ROOT%\generated-content\state\launch-duke-rt-vars.cmd"
 )
 
 if not exist "%RAZE_EXE%" (

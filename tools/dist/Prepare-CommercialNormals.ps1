@@ -33,6 +33,7 @@ function Write-LaunchVars {
     }
 
     $lines = @(
+        "@echo off",
         "set `"DUKE_RT_INSTALL_ROOT=$InstallRoot`"",
         "set `"DUKE_RT_GRP=$GrpPath`"",
         "set `"DUKE_RT_NORMAL_SOURCE=$NormalSourceRoot`""
@@ -656,7 +657,7 @@ if (-not $StatePath) {
 }
 
 if (-not $LaunchVarsPath) {
-    $LaunchVarsPath = Get-FullPathSafe -Base $LaunchRoot -Child "generated-content\state\launch-duke-rt.cmdvars"
+    $LaunchVarsPath = Get-FullPathSafe -Base $LaunchRoot -Child "generated-content\state\launch-duke-rt-vars.cmd"
 } elseif (-not [System.IO.Path]::IsPathRooted($LaunchVarsPath)) {
     $LaunchVarsPath = Get-FullPathSafe -Base $LaunchRoot -Child $LaunchVarsPath
 } else {
