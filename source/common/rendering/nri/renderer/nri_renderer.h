@@ -1282,18 +1282,18 @@ private:
 			uint32_t indexCount = 0;
 			uint32_t materialOffset = 0;
 			uint32_t materialCount = 0;
+			nri_scene::MaterialBridgeData materialBridge;
 		};
 
 		bool valid = false;
 		uint64_t sourceSerial = 0;
-		uint64_t geometryUploadHash = 0;
 		uint32_t surfaceCount = 0;
 		uint32_t primitiveCount = 0;
 		uint32_t materialCount = 0;
 		uint32_t activeActorCount = 0;
 		uint32_t rebuildCount = 0;
+		nri_scene::SceneDebugStats stats;
 		nri_scene::SceneView sceneView;
-		nri_scene::GeometryData geometry;
 		nri_scene::MaterialBridgeData materialBridge;
 		std::vector<ActorEntry> actors;
 	};
@@ -1722,7 +1722,6 @@ private:
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch();
 	bool BuildPersistentVoxelActorAccelerationStructures(const nri_scene::GeometryData& geometry);
-	bool UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
@@ -2023,8 +2022,6 @@ private:
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	PersistentVoxelBatch mPersistentVoxelBatch = {};
 	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
-	uint64_t mPersistentVoxelGeometryUploadHash = 0;
-	uint64_t mPersistentVoxelMaterialUploadHash = 0;
 	uint32_t mPersistentVoxelArenaVertexCursor = 0;
 	uint32_t mPersistentVoxelArenaIndexCursor = 0;
 	uint32_t mPersistentVoxelArenaPrimitiveCursor = 0;

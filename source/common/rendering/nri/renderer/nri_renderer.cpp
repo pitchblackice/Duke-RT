@@ -8383,7 +8383,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 				if (hasPersistentVoxelOverlay)
 				{
-					nri_scene::SceneDebugStats persistentVoxelStats = mPersistentVoxelBatch.sceneView.stats;
+					nri_scene::SceneDebugStats persistentVoxelStats = mPersistentVoxelBatch.stats;
 					persistentVoxelStats.voxelStableCandidates = 0;
 					persistentVoxelStats.voxelStableUncacheable = 0;
 					persistentVoxelStats.voxelStableSignatureHits = 0;
@@ -11656,8 +11656,6 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 	DestroyBufferResource(mPersistentVoxelIndexBuffer);
 	DestroyBufferResource(mPersistentVoxelPrimitiveBuffer);
 	DestroyBufferResource(mPersistentVoxelMaterialBuffer);
-	mPersistentVoxelGeometryUploadHash = 0;
-	mPersistentVoxelMaterialUploadHash = 0;
 	mPersistentVoxelArenaVertexCursor = 0;
 	mPersistentVoxelArenaIndexCursor = 0;
 	mPersistentVoxelArenaPrimitiveCursor = 0;
@@ -11700,34 +11698,33 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			}
 		}
 		batch.surfaceCount = batch.activeActorCount;
-		batch.sceneView.stats = {};
-		batch.sceneView.stats.triangleEstimate = batch.primitiveCount;
-		batch.sceneView.stats.voxelCachePrimitives = batch.primitiveCount;
-		batch.sceneView.stats.materialRefs = batch.materialCount;
-		batch.sceneView.stats.spriteDrawItems = batch.surfaceCount;
-		batch.sceneView.stats.modelDrawItems = batch.surfaceCount;
-		batch.sceneView.stats.voxelProxyDrawItems = batch.surfaceCount;
-		batch.sceneView.stats.voxelCacheEntries = batch.surfaceCount;
-		batch.sceneView.stats.totalDrawItems = batch.surfaceCount;
-
-		uint64_t geometryUploadHash = 1469598103934665603ull;
-		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)batch.actors.size());
-		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)batch.materialBridge.materials.size());
-		for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
-		{
-			geometryUploadHash = HashCombine64(geometryUploadHash, actor.identityKey);
-			geometryUploadHash = HashCombine64(geometryUploadHash, actor.signature);
-			geometryUploadHash = HashCombine64(geometryUploadHash, actor.geometrySignature);
-			geometryUploadHash = HashCombine64(geometryUploadHash, actor.materialSignature);
-			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.primitiveOffset);
-			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.primitiveCount);
-			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.indexOffset);
-			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.indexCount);
-			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.materialOffset);
-			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.materialCount);
-		}
-		batch.geometryUploadHash = geometryUploadHash;
+		batch.stats = {};
+		batch.stats.triangleEstimate = batch.primitiveCount;
+		batch.stats.voxelCachePrimitives = batch.primitiveCount;
+		batch.stats.materialRefs = batch.materialCount;
+		batch.stats.spriteDrawItems = batch.surfaceCount;
+		batch.stats.modelDrawItems = batch.surfaceCount;
+		batch.stats.voxelProxyDrawItems = batch.surfaceCount;
+		batch.stats.voxelCacheEntries = batch.surfaceCount;
+		batch.stats.totalDrawItems = batch.surfaceCount;
+		batch.sceneView.stats = batch.stats;
 		batch.valid = batch.activeActorCount > 0 && batch.primitiveCount > 0 && !batch.materialBridge.materials.empty();
+	};
+
+	auto rebuildBatchMaterialBridge = [](PersistentVoxelBatch& batch)
+	{
+		batch.materialBridge = {};
+		for (PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+		{
+			if (!actor.active)
+			{
+				actor.materialOffset = 0;
+				continue;
+			}
+			actor.materialOffset = (uint32_t)batch.materialBridge.materials.size();
+			actor.materialCount = (uint32_t)actor.materialBridge.materials.size();
+			AppendMaterialBridge(actor.materialBridge, batch.materialBridge);
+		}
 	};
 
 	auto compactBatchSceneView = [](PersistentVoxelBatch& batch)
@@ -11762,6 +11759,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				actor.active = false;
 			}
 			mPersistentVoxelBatch.sourceSerial = cacheSerial;
+			rebuildBatchMaterialBridge(mPersistentVoxelBatch);
 			recomputeBatchState(mPersistentVoxelBatch);
 			return true;
 		}
@@ -11992,7 +11990,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			resource.sourceSerial = 0;
 		}
 
-		const uint32_t aggregateMaterialOffset = (uint32_t)batch.materialBridge.materials.size();
 		PersistentVoxelBatch::ActorEntry actor = existingActor != nullptr ? *existingActor : PersistentVoxelBatch::ActorEntry{};
 		actor.identityKey = cacheEntry.identityKey;
 		actor.signature = cacheEntry.signature;
@@ -12003,10 +12000,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
 		actor.indexOffset = resource.indexOffset;
 		actor.indexCount = (uint32_t)actorGeometry.indices.size();
-		actor.materialOffset = aggregateMaterialOffset;
 		actor.materialCount = (uint32_t)actorMaterials.materials.size();
+		actor.materialBridge = std::move(actorMaterials);
 
-		AppendMaterialBridge(actorMaterials, batch.materialBridge);
 		if (existingActor != nullptr)
 		{
 			if (actor.surfaceIndex < batch.sceneView.opaqueSprites.size())
@@ -12161,6 +12157,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			compactBatchSceneView(mPersistentVoxelBatch);
 		}
 
+		if (hasInactiveActors || updatedActorCount != 0)
+		{
+			rebuildBatchMaterialBridge(mPersistentVoxelBatch);
+		}
 		if (!persistentVoxelBuildPending)
 		{
 			mPersistentVoxelBatch.sourceSerial = cacheSerial;
@@ -12201,6 +12201,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		next.sourceSerial = 0;
 	}
 	next.rebuildCount = mPersistentVoxelBatch.rebuildCount + 1u;
+	rebuildBatchMaterialBridge(next);
 	recomputeBatchState(next);
 	if (!next.valid)
 	{
@@ -12209,98 +12210,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	}
 
 	mPersistentVoxelBatch = std::move(next);
-	return true;
-}
-
-bool NRIRenderer::UploadPersistentVoxelSceneBuffers(const std::vector<nri_scene::MaterialData>& materials)
-{
-	if (!mPersistentVoxelBatch.valid)
-	{
-		return true;
-	}
-
-	const uint64_t materialHash =
-		materials.empty() ?
-		HashCombine64(1469598103934665603ull, 0ull) :
-		HashBytes64(reinterpret_cast<const uint8_t*>(materials.data()), materials.size() * sizeof(nri_scene::MaterialData));
-	const bool uploadGeometry =
-		mPersistentVoxelGeometryUploadHash != mPersistentVoxelBatch.geometryUploadHash ||
-		mPersistentVoxelVertexBuffer.buffer == nullptr ||
-		mPersistentVoxelIndexBuffer.buffer == nullptr ||
-		mPersistentVoxelPrimitiveBuffer.buffer == nullptr;
-	const bool uploadMaterials =
-		uploadGeometry ||
-		mPersistentVoxelMaterialUploadHash != materialHash ||
-		mPersistentVoxelMaterialBuffer.buffer == nullptr;
-
-	std::vector<nri_scene::PrimitiveData> gpuPrimitives;
-	if (uploadGeometry)
-	{
-		gpuPrimitives = mPersistentVoxelBatch.geometry.primitives;
-		const size_t primitiveCount = std::min(gpuPrimitives.size(), mPersistentVoxelBatch.geometry.primitiveProvenance.size());
-		for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
-		{
-			const int32_t chunkIndex = mPersistentVoxelBatch.geometry.primitiveProvenance[primitiveIndex].mapChunkIndex;
-			gpuPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
-		}
-		for (size_t primitiveIndex = primitiveCount; primitiveIndex < gpuPrimitives.size(); ++primitiveIndex)
-		{
-			gpuPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
-		}
-	}
-
-	if (uploadGeometry &&
-		(!EnsureResidentStructuredBuffer(
-				mPersistentVoxelVertexBuffer,
-				mVertexBufferStats,
-				mPersistentVoxelBatch.geometry.vertices.data(),
-				mPersistentVoxelBatch.geometry.vertices.size() * sizeof(nri_scene::SceneVertex),
-				sizeof(nri_scene::SceneVertex),
-				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
-				NRIAccelerationStructureBuildInputAccess(),
-				"persistent_voxel_scene_upload",
-				ResidentUploadKind_Vertex) ||
-			!EnsureResidentStructuredBuffer(
-				mPersistentVoxelIndexBuffer,
-				mIndexBufferStats,
-				mPersistentVoxelBatch.geometry.indices.data(),
-				mPersistentVoxelBatch.geometry.indices.size() * sizeof(uint32_t),
-				sizeof(uint32_t),
-				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
-				NRIAccelerationStructureBuildInputAccess(),
-				"persistent_voxel_scene_upload",
-				ResidentUploadKind_Index) ||
-			!EnsureResidentStructuredBuffer(
-				mPersistentVoxelPrimitiveBuffer,
-				mPrimitiveBufferStats,
-				gpuPrimitives.data(),
-				gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData),
-				sizeof(nri_scene::PrimitiveData),
-				nri::BufferUsageBits::SHADER_RESOURCE,
-				NRIComputeShaderResourceAccess(),
-				"persistent_voxel_scene_upload",
-				ResidentUploadKind_Primitive)))
-	{
-		return false;
-	}
-
-	if (uploadMaterials &&
-		!EnsureResidentStructuredBuffer(
-			mPersistentVoxelMaterialBuffer,
-			mMaterialBufferStats,
-			materials.data(),
-			materials.size() * sizeof(nri_scene::MaterialData),
-			sizeof(nri_scene::MaterialData),
-			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
-			"persistent_voxel_scene_upload",
-			ResidentUploadKind_Material))
-	{
-		return false;
-	}
-
-	mPersistentVoxelGeometryUploadHash = mPersistentVoxelBatch.geometryUploadHash;
-	mPersistentVoxelMaterialUploadHash = materialHash;
 	return true;
 }
 
@@ -26303,8 +26212,6 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundDynamicMaterialCount = 0;
 	mBoundPersistentVoxelPrimitiveCount = 0;
 	mBoundPersistentVoxelMaterialCount = 0;
-	mPersistentVoxelGeometryUploadHash = 0;
-	mPersistentVoxelMaterialUploadHash = 0;
 	mBoundPortalCount = 0;
 	mBoundRuntimeLightCount = 0;
 	mBoundRuntimeLightTileCountX = 0;
