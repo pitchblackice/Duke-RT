@@ -3271,17 +3271,19 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.geometryBuildResidentRecoverCalls,
 			shell.geometryBuildResidentPrimitives);
 		Printf(
-			"PERF pt scene light detail NRI: frame=%llu records=%u static=%u mutation=%u captured=%u dynamic=%u append_static=%.3f append_mutation=%.3f append_captured=%.3f append_dynamic=%.3f rebuild_analytic=%.3f rebuild_emissive=%.3f rebuild_sector=%.3f\n",
+			"PERF pt scene light detail NRI: frame=%llu records=%u static=%u mutation=%u captured=%u dynamic=%u persistent_voxel=%u append_static=%.3f append_mutation=%.3f append_captured=%.3f append_dynamic=%.3f append_persistent_voxel=%.3f rebuild_analytic=%.3f rebuild_emissive=%.3f rebuild_sector=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneLightSurfaceRecordCount,
 			shell.sceneLightStaticRecordCount,
 			shell.sceneLightRuntimeMutationRecordCount,
 			shell.sceneLightCapturedRecordCount,
 			shell.sceneLightDynamicRecordCount,
+			shell.sceneLightPersistentVoxelRecordCount,
 			shell.sceneLightStaticAppendMs,
 			shell.sceneLightRuntimeMutationAppendMs,
 			shell.sceneLightCapturedAppendMs,
 			shell.sceneLightDynamicAppendMs,
+			shell.sceneLightPersistentVoxelAppendMs,
 			shell.sceneLightAnalyticMs,
 			shell.sceneLightEmissiveMs,
 			shell.sceneLightSectorMs);

@@ -323,6 +323,7 @@ public:
 		double sceneLightRuntimeMutationAppendMs = 0.0;
 		double sceneLightCapturedAppendMs = 0.0;
 		double sceneLightDynamicAppendMs = 0.0;
+		double sceneLightPersistentVoxelAppendMs = 0.0;
 		double sceneLightAnalyticMs = 0.0;
 		double sceneLightEmissiveMs = 0.0;
 		double sceneLightSectorMs = 0.0;
@@ -528,6 +529,7 @@ public:
 		uint32_t sceneLightRuntimeMutationRecordCount = 0;
 		uint32_t sceneLightDynamicRecordCount = 0;
 		uint32_t sceneLightCapturedRecordCount = 0;
+		uint32_t sceneLightPersistentVoxelRecordCount = 0;
 		uint32_t runtimeSpaceLinkPrimitiveCount = 0;
 		uint32_t runtimeSpaceLinkMaterialCount = 0;
 		uint32_t runtimeDebugSphereCount = 0;
@@ -1829,7 +1831,8 @@ private:
 		const nri_scene::SceneView* capturedSceneView,
 		const nri_scene::MaterialBridgeData* capturedMaterials,
 		const nri_scene::SceneView* dynamicSceneView,
-		const nri_scene::MaterialBridgeData* dynamicMaterials);
+		const nri_scene::MaterialBridgeData* dynamicMaterials,
+		bool appendPersistentVoxelSceneLights);
 	void RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightOverlaySet& resolvedLightOverlays);
 	void ResetMuzzleFlashOverlayState(const char* reason);
 	const ResolvedLightOverlayMuzzleFlashRule* FindResolvedMuzzleFlashRule(const FString& eventId) const;

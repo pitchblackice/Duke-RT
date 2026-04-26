@@ -14,6 +14,7 @@ enum class SceneLightRecordSource : uint32_t
 	StaticMapScene,
 	RuntimeMutationScene,
 	DynamicScene,
+	PersistentVoxelScene,
 };
 
 enum SceneAnalyticLightSourceFlags : uint32_t
@@ -256,6 +257,7 @@ public:
 		uint32_t runtimeMutationRecordCount = 0;
 		uint32_t dynamicRecordCount = 0;
 		uint32_t capturedRecordCount = 0;
+		uint32_t persistentVoxelRecordCount = 0;
 	};
 
 	void Reset();
@@ -268,6 +270,13 @@ public:
 		uint32_t materialIndexBase = 0,
 		uint32_t materialLookupIndexBase = 0,
 		const SurfaceIdentityOverrides* identityOverrides = nullptr);
+	void AppendSpriteSurfaces(
+		const std::vector<nri_scene::SurfaceRef>& surfaces,
+		const nri_scene::MaterialBridgeData& materials,
+		SceneLightRecordSource source,
+		uint32_t materialIndexBase = 0,
+		uint32_t materialLookupIndexBase = 0,
+		const std::vector<uint64_t>* identityOverrides = nullptr);
 	void RebuildAnalyticLights(
 		uint32_t flickerTimeIndex,
 		uint32_t renderFrameIndex,

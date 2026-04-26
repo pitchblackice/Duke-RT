@@ -6702,9 +6702,10 @@ namespace
 		case SceneLightRecordSource::StaticMapScene: return "static_map_scene";
 		case SceneLightRecordSource::RuntimeMutationScene: return "runtime_mutation_scene";
 		case SceneLightRecordSource::DynamicScene: return "dynamic_scene";
+		case SceneLightRecordSource::PersistentVoxelScene: return "persistent_voxel_scene";
 		default: return "none";
-		}
 	}
+}
 
 }
 
@@ -7721,6 +7722,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	bool usingPersistentDynamicEmissiveCache = false;
 	bool liveDynamicHasEmissive = false;
 	bool hasPersistentVoxelBatch = false;
+	bool appendPersistentVoxelSceneLights = false;
 
 	{
 		ScopedPtPerfTimer sceneSelectTimer(mLastPerfShellTraceStats.sceneSelectMs);
@@ -8034,24 +8036,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 		if (hasPersistentVoxelBatch && mPersistentVoxelBatch.valid)
 		{
-			if (sceneLightDynamicView != nullptr)
-			{
-				ScopedPtPerfTimer mergePerfTimer(mLastPerfShellTraceStats.sceneSelectLightMergeMs);
-				sceneLightMergedDynamicSceneView = *sceneLightDynamicView;
-				sceneLightMergedDynamicSceneView.opaqueSprites.insert(
-					sceneLightMergedDynamicSceneView.opaqueSprites.end(),
-					mPersistentVoxelBatch.sceneView.opaqueSprites.begin(),
-					mPersistentVoxelBatch.sceneView.opaqueSprites.end());
-				RebuildSceneViewStats(sceneLightMergedDynamicSceneView);
-				BuildMaterialsWithActorOverrides(sceneLightMergedDynamicSceneView, sceneLightMergedDynamicMaterialBridge, "scene_light_merged_voxels");
-				sceneLightDynamicView = &sceneLightMergedDynamicSceneView;
-				sceneLightDynamicMaterials = &sceneLightMergedDynamicMaterialBridge;
-			}
-			else
-			{
-				sceneLightDynamicView = &mPersistentVoxelBatch.sceneView;
-				sceneLightDynamicMaterials = &mPersistentVoxelBatch.materialBridge;
-			}
+			appendPersistentVoxelSceneLights = true;
 		}
 
 		const bool hasActiveDynamicOverlay =
@@ -8585,7 +8570,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		sceneLightCapturedView,
 		sceneLightCapturedMaterials,
 		sceneLightDynamicView,
-		sceneLightDynamicMaterials);
+		sceneLightDynamicMaterials,
+		appendPersistentVoxelSceneLights);
 
 	if (mGpuSceneHasDynamicOverlay &&
 		activeMaterialBridge == &combinedMaterialBridge &&
@@ -8954,7 +8940,7 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		return true;
 	}
 
-	RefreshSceneLightSystem(true, nullptr, nullptr, nullptr, nullptr);
+	RefreshSceneLightSystem(true, nullptr, nullptr, nullptr, nullptr, false);
 	if (!mGpuSceneHasDynamicOverlay)
 	{
 		const bool needsResidentStaticLightRefresh =
@@ -14259,7 +14245,8 @@ void NRIRenderer::RefreshSceneLightSystem(
 	const nri_scene::SceneView* capturedSceneView,
 	const nri_scene::MaterialBridgeData* capturedMaterials,
 	const nri_scene::SceneView* dynamicSceneView,
-	const nri_scene::MaterialBridgeData* dynamicMaterials)
+	const nri_scene::MaterialBridgeData* dynamicMaterials,
+	bool appendPersistentVoxelSceneLights)
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneLightsMs);
 	mSceneLights.BeginFrame(mFrameIndex);
@@ -14329,6 +14316,18 @@ void NRIRenderer::RefreshSceneLightSystem(
 	{
 		ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightDynamicAppendMs);
 		mSceneLights.AppendSceneView(*dynamicSceneView, *dynamicMaterials, SceneLightRecordSource::DynamicScene);
+	}
+
+	if (appendPersistentVoxelSceneLights &&
+		mPersistentVoxelBatch.valid &&
+		!mPersistentVoxelBatch.sceneView.opaqueSprites.empty() &&
+		!mPersistentVoxelBatch.materialBridge.materials.empty())
+	{
+		ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightPersistentVoxelAppendMs);
+		mSceneLights.AppendSpriteSurfaces(
+			mPersistentVoxelBatch.sceneView.opaqueSprites,
+			mPersistentVoxelBatch.materialBridge,
+			SceneLightRecordSource::PersistentVoxelScene);
 	}
 
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
@@ -14403,6 +14402,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mLastPerfShellTraceStats.sceneLightRuntimeMutationRecordCount = frameAppendStats.runtimeMutationRecordCount;
 	mLastPerfShellTraceStats.sceneLightDynamicRecordCount = frameAppendStats.dynamicRecordCount;
 	mLastPerfShellTraceStats.sceneLightCapturedRecordCount = frameAppendStats.capturedRecordCount;
+	mLastPerfShellTraceStats.sceneLightPersistentVoxelRecordCount = frameAppendStats.persistentVoxelRecordCount;
 	if (hadDirectionalLightState && directionalLightStateChanged)
 	{
 		NoteLightHistoryChange("directional-light-change");
@@ -15616,6 +15616,8 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			break;
 		case SceneLightRecordSource::DynamicScene:
 			appendSurfacePrimitives(surface, context.dynamicGeometry, dynamicRanges, NRI_SCENE_DATA_SOURCE_DYNAMIC, context.dynamicPrimitiveBaseOffset);
+			break;
+		case SceneLightRecordSource::PersistentVoxelScene:
 			break;
 		default:
 			break;

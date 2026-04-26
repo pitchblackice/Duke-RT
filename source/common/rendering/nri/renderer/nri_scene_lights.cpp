@@ -1088,6 +1088,25 @@ void SceneLightSystem::AppendSceneView(
 		identityOverrides != nullptr ? &identityOverrides->opaqueSprites : nullptr);
 }
 
+void SceneLightSystem::AppendSpriteSurfaces(
+	const std::vector<nri_scene::SurfaceRef>& surfaces,
+	const nri_scene::MaterialBridgeData& materials,
+	SceneLightRecordSource source,
+	uint32_t materialIndexBase,
+	uint32_t materialLookupIndexBase,
+	const std::vector<uint64_t>* identityOverrides)
+{
+	uint32_t localMaterialIndex = 0;
+	AppendSurfaceList(
+		surfaces,
+		materials,
+		source,
+		materialIndexBase,
+		materialLookupIndexBase,
+		localMaterialIndex,
+		identityOverrides);
+}
+
 uint64_t SceneLightSystem::ComputeSurfaceIdentityKey(
 	SceneLightRecordSource source,
 	const nri_scene::SurfaceProvenance& provenance,
@@ -1910,6 +1929,9 @@ void SceneLightSystem::AppendSurfaceList(
 			break;
 		case SceneLightRecordSource::CapturedScene:
 			mFrameAppendStats.capturedRecordCount++;
+			break;
+		case SceneLightRecordSource::PersistentVoxelScene:
+			mFrameAppendStats.persistentVoxelRecordCount++;
 			break;
 		default:
 			break;
