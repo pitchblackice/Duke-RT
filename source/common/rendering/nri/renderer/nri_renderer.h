@@ -1234,6 +1234,8 @@ private:
 		{
 			uint64_t identityKey = 0;
 			uint64_t signature = 0;
+			uint64_t geometrySignature = 0;
+			uint64_t materialSignature = 0;
 			bool active = true;
 			nri_scene::SurfaceRef surface;
 			uint32_t primitiveOffset = 0;

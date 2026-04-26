@@ -11657,6 +11657,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		{
 			geometryUploadHash = HashCombine64(geometryUploadHash, actor.identityKey);
 			geometryUploadHash = HashCombine64(geometryUploadHash, actor.signature);
+			geometryUploadHash = HashCombine64(geometryUploadHash, actor.geometrySignature);
+			geometryUploadHash = HashCombine64(geometryUploadHash, actor.materialSignature);
 			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.primitiveOffset);
 			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.primitiveCount);
 			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.indexOffset);
@@ -11766,7 +11768,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		}
 
 		const bool actorGeometryChanged =
-			resource.signature != cacheEntry.signature ||
+			resource.signature != cacheEntry.geometrySignature ||
 			resource.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
 			resource.indexCount != (uint32_t)actorGeometry.indices.size() ||
 			resource.primitiveCount != (uint32_t)actorGeometry.primitives.size() ||
@@ -11891,7 +11893,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				return false;
 			}
 			DestroyAccelerationStructureResource(resource.accelerationStructure);
-			resource.signature = cacheEntry.signature;
+			resource.signature = cacheEntry.geometrySignature;
 			resource.vertexCount = (uint32_t)actorGeometry.vertices.size();
 			resource.indexCount = (uint32_t)actorGeometry.indices.size();
 			resource.primitiveCount = (uint32_t)actorGeometry.primitives.size();
@@ -11902,6 +11904,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		PersistentVoxelBatch::ActorEntry actor = existingActor != nullptr ? *existingActor : PersistentVoxelBatch::ActorEntry{};
 		actor.identityKey = cacheEntry.identityKey;
 		actor.signature = cacheEntry.signature;
+		actor.geometrySignature = cacheEntry.geometrySignature;
+		actor.materialSignature = cacheEntry.materialSignature;
 		actor.active = true;
 		actor.surface = cacheEntry.surface;
 		actor.primitiveOffset = resource.primitiveOffset;
@@ -11960,6 +11964,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			auto resourceIt = mPersistentVoxelActorResources.find(cacheEntry.identityKey);
 			const bool actorNeedsUpdate =
 				actor.signature != cacheEntry.signature ||
+				actor.geometrySignature != cacheEntry.geometrySignature ||
+				actor.materialSignature != cacheEntry.materialSignature ||
 				resourceIt == mPersistentVoxelActorResources.end() ||
 				resourceIt->second.vertexBuffer.buffer == nullptr ||
 				resourceIt->second.indexBuffer.buffer == nullptr ||
@@ -12224,7 +12230,7 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		PersistentVoxelActorResource& resource = mPersistentVoxelActorResources[actor.identityKey];
 		const bool needsBuild =
 			resource.accelerationStructure.accelerationStructure == nullptr ||
-			resource.signature != actor.signature ||
+			resource.signature != actor.geometrySignature ||
 			resource.primitiveCount != actor.primitiveCount ||
 			resource.indexCount != actor.indexCount ||
 			resource.vertexBuffer.buffer == nullptr ||
@@ -12260,7 +12266,7 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		inputBarrierDesc.bufferNum = 2;
 		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, inputBarrierDesc);
 
-		resource.signature = actor.signature;
+		resource.signature = actor.geometrySignature;
 		resource.primitiveCount = actor.primitiveCount;
 		resource.indexCount = actor.indexCount;
 		resource.materialCount = actor.materialCount;

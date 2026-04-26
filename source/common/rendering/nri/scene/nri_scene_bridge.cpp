@@ -63,6 +63,8 @@ namespace
 	struct VoxelActorCacheEntry
 	{
 		uint64_t signature = 0;
+		uint64_t geometrySignature = 0;
+		uint64_t materialSignature = 0;
 		uint64_t identityKey = 0;
 		int32_t actorIndex = -1;
 		uintptr_t actorPtr = 0;
@@ -96,6 +98,8 @@ namespace
 		VoxelActorStability stability = VoxelActorStability::Uncacheable;
 		uint64_t identityKey = 0;
 		uint64_t signature = 0;
+		uint64_t geometrySignature = 0;
+		uint64_t materialSignature = 0;
 		int32_t actorIndex = -1;
 		uintptr_t actorPtr = 0;
 		uintptr_t voxelPtr = 0;
@@ -1538,16 +1542,11 @@ namespace
 		return true;
 	}
 
-	uint64_t BuildVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const MaterialRef& material)
+	uint64_t BuildVoxelActorGeometrySignature(const HWSprite& sprite)
 	{
 		uint64_t hash = 1469598103934665603ull;
 		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel);
 		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel->model);
-		hash = HashCombine64(hash, voxelTexture != nullptr ? (uint64_t)(uint32_t)voxelTexture->GetID().GetIndex() : 0ull);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.palette);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.shade);
-		hash = HashCombine64(hash, QuantizeSignatureFloat(material.alpha, 65535.0));
-		hash = HashCombine64(hash, (uint64_t)material.flags);
 
 		if (sprite.Sprite != nullptr)
 		{
@@ -1566,6 +1565,25 @@ namespace
 		return hash;
 	}
 
+	uint64_t BuildVoxelActorMaterialSignature(FGameTexture* voxelTexture, const MaterialRef& material)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, voxelTexture != nullptr ? (uint64_t)(uint32_t)voxelTexture->GetID().GetIndex() : 0ull);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.palette);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.shade);
+		hash = HashCombine64(hash, QuantizeSignatureFloat(material.alpha, 65535.0));
+		hash = HashCombine64(hash, (uint64_t)material.flags);
+		return hash;
+	}
+
+	uint64_t BuildVoxelActorSignature(uint64_t geometrySignature, uint64_t materialSignature)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, geometrySignature);
+		hash = HashCombine64(hash, materialSignature);
+		return hash;
+	}
+
 	VoxelActorCacheLookup TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const MaterialRef& material, SceneDebugStats& stats)
 	{
 		VoxelActorCacheLookup lookup = {};
@@ -1577,8 +1595,12 @@ namespace
 		}
 
 		stats.voxelStableCandidates++;
-		const uint64_t signature = BuildVoxelActorSignature(sprite, voxelTexture, material);
+		const uint64_t geometrySignature = BuildVoxelActorGeometrySignature(sprite);
+		const uint64_t materialSignature = BuildVoxelActorMaterialSignature(voxelTexture, material);
+		const uint64_t signature = BuildVoxelActorSignature(geometrySignature, materialSignature);
 		lookup.signature = signature;
+		lookup.geometrySignature = geometrySignature;
+		lookup.materialSignature = materialSignature;
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end())
 		{
@@ -1603,6 +1625,24 @@ namespace
 				++gVoxelActorCacheSerial;
 			}
 			stats.voxelStableSignatureHits++;
+			stats.voxelStableSplitStable++;
+			stats.voxelCacheSurfaceHits++;
+			lookup.stability = VoxelActorStability::Stable;
+			return lookup;
+		}
+
+		if (lookup.entry->geometrySignature == geometrySignature && lookup.entry->hasSurface)
+		{
+			lookup.entry->signature = signature;
+			lookup.entry->materialSignature = materialSignature;
+			lookup.entry->surface.material = material;
+			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
+			if (!lookup.entry->persistentReady)
+			{
+				lookup.entry->persistentReady = true;
+			}
+			++gVoxelActorCacheSerial;
+			stats.voxelStableSignatureChanges++;
 			stats.voxelStableSplitStable++;
 			stats.voxelCacheSurfaceHits++;
 			lookup.stability = VoxelActorStability::Stable;
@@ -1644,6 +1684,8 @@ namespace
 		VoxelActorCacheEntry& entry = gVoxelActorCache[lookup.identityKey];
 		const bool hadSurface = entry.hasSurface;
 		entry.signature = lookup.signature;
+		entry.geometrySignature = lookup.geometrySignature;
+		entry.materialSignature = lookup.materialSignature;
 		entry.identityKey = lookup.identityKey;
 		entry.actorIndex = lookup.actorIndex;
 		entry.actorPtr = lookup.actorPtr;
@@ -2240,6 +2282,8 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		PersistentVoxelCacheEntryView view = {};
 		view.identityKey = entry.first;
 		view.signature = entry.second->signature;
+		view.geometrySignature = entry.second->geometrySignature;
+		view.materialSignature = entry.second->materialSignature;
 		view.primitiveCount = entry.second->primitiveCount;
 		view.surface = entry.second->surface;
 		outEntries.push_back(std::move(view));

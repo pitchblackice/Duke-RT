@@ -185,6 +185,8 @@ struct PersistentVoxelCacheEntryView
 {
 	uint64_t identityKey = 0;
 	uint64_t signature = 0;
+	uint64_t geometrySignature = 0;
+	uint64_t materialSignature = 0;
 	uint32_t primitiveCount = 0;
 	SurfaceRef surface;
 };
