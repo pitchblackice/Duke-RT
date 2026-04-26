@@ -2570,6 +2570,8 @@ CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLO
 		self = 0.0f;
 	}
 }
+CVAR(Int, nri_ptpersistentvoxelbuildactors, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptpersistentvoxelbuildprims, 100000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -11924,6 +11926,39 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return true;
 	};
 
+	const uint32_t persistentVoxelBuildActorBudget = (uint32_t)std::max(1, (int)nri_ptpersistentvoxelbuildactors);
+	const uint32_t persistentVoxelBuildPrimitiveBudget =
+		(int)nri_ptpersistentvoxelbuildprims <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxelbuildprims;
+	uint32_t persistentVoxelBuiltActors = 0;
+	uint32_t persistentVoxelBuiltPrimitives = 0;
+	bool persistentVoxelBuildPending = false;
+
+	auto canBuildPersistentVoxelActor = [&](uint32_t primitiveCount) -> bool
+	{
+		if (persistentVoxelBuiltActors == 0)
+		{
+			return true;
+		}
+		if (persistentVoxelBuiltActors >= persistentVoxelBuildActorBudget)
+		{
+			persistentVoxelBuildPending = true;
+			return false;
+		}
+		if (persistentVoxelBuildPrimitiveBudget != 0 &&
+			persistentVoxelBuiltPrimitives + primitiveCount > persistentVoxelBuildPrimitiveBudget)
+		{
+			persistentVoxelBuildPending = true;
+			return false;
+		}
+		return true;
+	};
+
+	auto notePersistentVoxelActorBuilt = [&](uint32_t primitiveCount)
+	{
+		persistentVoxelBuiltActors++;
+		persistentVoxelBuiltPrimitives += primitiveCount;
+	};
+
 	if (mPersistentVoxelBatch.valid)
 	{
 		mPersistentVoxelBatch.actors.reserve(mPersistentVoxelBatch.actors.size() + cacheEntries.size());
@@ -11945,6 +11980,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			auto found = existingActors.find(cacheEntry.identityKey);
 			if (found == existingActors.end())
 			{
+				if (!canBuildPersistentVoxelActor(cacheEntry.primitiveCount))
+				{
+					continue;
+				}
 				Clocker geometryClock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelAppendMs);
 				if (!appendActorToBatch(mPersistentVoxelBatch, cacheEntry))
@@ -11952,12 +11991,20 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					ResetPersistentVoxelBatch();
 					return false;
 				}
+				notePersistentVoxelActorBuilt(cacheEntry.primitiveCount);
 				updatedActorCount++;
 				continue;
 			}
 
 			PersistentVoxelBatch::ActorEntry& actor = *found->second;
 			auto resourceIt = mPersistentVoxelActorResources.find(cacheEntry.identityKey);
+			const bool actorGeometryNeedsUpdate =
+				actor.geometrySignature != cacheEntry.geometrySignature ||
+				resourceIt == mPersistentVoxelActorResources.end() ||
+				resourceIt->second.vertexBuffer.buffer == nullptr ||
+				resourceIt->second.indexBuffer.buffer == nullptr ||
+				resourceIt->second.primitiveCount != actor.primitiveCount ||
+				resourceIt->second.indexCount != actor.indexCount;
 			const bool actorNeedsUpdate =
 				actor.signature != cacheEntry.signature ||
 				actor.geometrySignature != cacheEntry.geometrySignature ||
@@ -11970,12 +12017,22 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				resourceIt->second.materialCount != actor.materialCount;
 			if (actorNeedsUpdate)
 			{
+				if (actorGeometryNeedsUpdate && !canBuildPersistentVoxelActor(cacheEntry.primitiveCount))
+				{
+					actor.active = true;
+					actor.surface = cacheEntry.surface;
+					continue;
+				}
 				Clocker geometryClock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelAppendMs);
 				if (!appendActorToBatch(mPersistentVoxelBatch, cacheEntry, &actor))
 				{
 					ResetPersistentVoxelBatch();
 					return false;
+				}
+				if (actorGeometryNeedsUpdate)
+				{
+					notePersistentVoxelActorBuilt(cacheEntry.primitiveCount);
 				}
 				updatedActorCount++;
 				continue;
@@ -11985,7 +12042,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.surface = cacheEntry.surface;
 		}
 
-		mPersistentVoxelBatch.sourceSerial = cacheSerial;
+		if (!persistentVoxelBuildPending)
+		{
+			mPersistentVoxelBatch.sourceSerial = cacheSerial;
+		}
 		if (updatedActorCount != 0)
 		{
 			mPersistentVoxelBatch.rebuildCount++;
@@ -12004,14 +12064,23 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelRebuildMs);
 		for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
 		{
+			if (!canBuildPersistentVoxelActor(cacheEntry.primitiveCount))
+			{
+				continue;
+			}
 			if (!appendActorToBatch(next, cacheEntry))
 			{
 				ResetPersistentVoxelBatch();
 				return false;
 			}
+			notePersistentVoxelActorBuilt(cacheEntry.primitiveCount);
 		}
 	}
 
+	if (persistentVoxelBuildPending)
+	{
+		next.sourceSerial = 0;
+	}
 	next.rebuildCount = mPersistentVoxelBatch.rebuildCount + 1u;
 	recomputeBatchState(next);
 	if (!next.valid)

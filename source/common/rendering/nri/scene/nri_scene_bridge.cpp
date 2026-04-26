@@ -1922,6 +1922,7 @@ namespace
 		if (updatePersistentCache && cacheLookup.stability != VoxelActorStability::Stable)
 		{
 			StoreVoxelActorCacheSurface(cacheLookup, exactSurface, stats);
+			return true;
 		}
 
 		const unsigned int indexCount = mesh->indices.Size();
