@@ -4641,6 +4641,7 @@ namespace
 		merged.voxelCacheSurfaceRebuilds = a.voxelCacheSurfaceRebuilds + b.voxelCacheSurfaceRebuilds;
 		merged.voxelCacheSurfaceRemoves = a.voxelCacheSurfaceRemoves + b.voxelCacheSurfaceRemoves;
 		merged.voxelCacheNotCaptured = a.voxelCacheNotCaptured + b.voxelCacheNotCaptured;
+		merged.voxelCacheDeferred = a.voxelCacheDeferred + b.voxelCacheDeferred;
 		merged.voxelCachePrimitives = a.voxelCachePrimitives + b.voxelCachePrimitives;
 		return merged;
 	}
@@ -7772,11 +7773,18 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				mLastPerfShellTraceStats.dynamicCaptureSpriteSurfaces += captureStats.spriteSurfaces;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelProxySurfaces += captureStats.voxelProxySurfaces;
 				mLastPerfShellTraceStats.dynamicCaptureUnsupportedModelSurfaces += captureStats.unsupportedModelSurfaces;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelCacheStores += captureStats.voxelCacheStores;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelCacheRebuilds += captureStats.voxelCacheRebuilds;
+				mLastPerfShellTraceStats.dynamicCaptureVoxelCacheDeferred += captureStats.voxelCacheDeferred;
 				mLastPerfShellTraceStats.dynamicCaptureCountMs += captureStats.countMs;
 				mLastPerfShellTraceStats.dynamicCaptureWallsMs += captureStats.wallsMs;
 				mLastPerfShellTraceStats.dynamicCaptureFlatsMs += captureStats.flatsMs;
 				mLastPerfShellTraceStats.dynamicCaptureFacingSpritesMs += captureStats.facingSpritesMs;
 				mLastPerfShellTraceStats.dynamicCaptureModelSpritesMs += captureStats.modelSpritesMs;
+				mLastPerfShellTraceStats.dynamicCaptureModelClassifyMs += captureStats.modelClassifyMs;
+				mLastPerfShellTraceStats.dynamicCaptureModelMeshMs += captureStats.modelMeshMs;
+				mLastPerfShellTraceStats.dynamicCaptureModelSurfaceMs += captureStats.modelSurfaceMs;
+				mLastPerfShellTraceStats.dynamicCaptureModelStoreMs += captureStats.modelStoreMs;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelFrameMs += captureStats.voxelFrameMs;
 				mLastPerfShellTraceStats.dynamicCaptureStatsMs += captureStats.statsMs;
 				return captured;
@@ -25815,7 +25823,7 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 
 	if (!mHasLoggedStats || StatsDiffer(mLastStats, stats))
 	{
-		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u entries:%u surface_hits:%u stores:%u rebuilds:%u removes:%u not_captured:%u cached_prims:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
+		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u entries:%u surface_hits:%u stores:%u rebuilds:%u removes:%u not_captured:%u deferred:%u cached_prims:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
 			stats.wallDrawItems,
 			stats.flatDrawItems,
 			stats.spriteDrawItems,
@@ -25836,6 +25844,7 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 			stats.voxelCacheSurfaceRebuilds,
 			stats.voxelCacheSurfaceRemoves,
 			stats.voxelCacheNotCaptured,
+			stats.voxelCacheDeferred,
 			stats.voxelCachePrimitives,
 			stats.mirrorSurfaces,
 			stats.skySurfaces,

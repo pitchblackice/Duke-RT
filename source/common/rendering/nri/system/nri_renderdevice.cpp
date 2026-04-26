@@ -3220,7 +3220,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectTexturePrepMs,
 			shell.sceneSelectStateCommitMs);
 		Printf(
-			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f voxel_frame=%.3f stats=%.3f\n",
+			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u voxel_stores=%u voxel_rebuilds=%u voxel_deferred=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f model_classify=%.3f model_mesh=%.3f model_surface=%.3f model_store=%.3f voxel_frame=%.3f stats=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.dynamicCaptureCalls,
 			shell.dynamicCaptureWallSurfaces,
@@ -3228,11 +3228,18 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicCaptureSpriteSurfaces,
 			shell.dynamicCaptureVoxelProxySurfaces,
 			shell.dynamicCaptureUnsupportedModelSurfaces,
+			shell.dynamicCaptureVoxelCacheStores,
+			shell.dynamicCaptureVoxelCacheRebuilds,
+			shell.dynamicCaptureVoxelCacheDeferred,
 			shell.dynamicCaptureCountMs,
 			shell.dynamicCaptureWallsMs,
 			shell.dynamicCaptureFlatsMs,
 			shell.dynamicCaptureFacingSpritesMs,
 			shell.dynamicCaptureModelSpritesMs,
+			shell.dynamicCaptureModelClassifyMs,
+			shell.dynamicCaptureModelMeshMs,
+			shell.dynamicCaptureModelSurfaceMs,
+			shell.dynamicCaptureModelStoreMs,
 			shell.dynamicCaptureVoxelFrameMs,
 			shell.dynamicCaptureStatsMs);
 		Printf(

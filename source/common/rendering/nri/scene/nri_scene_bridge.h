@@ -122,6 +122,7 @@ struct SceneDebugStats
 	unsigned int voxelCacheSurfaceRebuilds = 0;
 	unsigned int voxelCacheSurfaceRemoves = 0;
 	unsigned int voxelCacheNotCaptured = 0;
+	unsigned int voxelCacheDeferred = 0;
 	unsigned int voxelCachePrimitives = 0;
 };
 
@@ -152,11 +153,18 @@ struct DynamicCapturePerfStats
 	uint32_t spriteSurfaces = 0;
 	uint32_t voxelProxySurfaces = 0;
 	uint32_t unsupportedModelSurfaces = 0;
+	uint32_t voxelCacheStores = 0;
+	uint32_t voxelCacheRebuilds = 0;
+	uint32_t voxelCacheDeferred = 0;
 	double countMs = 0.0;
 	double wallsMs = 0.0;
 	double flatsMs = 0.0;
 	double facingSpritesMs = 0.0;
 	double modelSpritesMs = 0.0;
+	double modelClassifyMs = 0.0;
+	double modelMeshMs = 0.0;
+	double modelSurfaceMs = 0.0;
+	double modelStoreMs = 0.0;
 	double voxelFrameMs = 0.0;
 	double statsMs = 0.0;
 };

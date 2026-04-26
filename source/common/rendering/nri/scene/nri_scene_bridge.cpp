@@ -27,6 +27,7 @@ EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptactorspritetrace)
 CVAR(Int, nri_ptvoxeltrianglebudget, 250000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelmaxtriangles, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelcaptureactors, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -107,7 +108,9 @@ namespace
 	struct VoxelCaptureBudget
 	{
 		uint32_t remainingTriangles = 0;
+		uint32_t remainingCacheUpdates = 0;
 		bool unlimited = false;
+		bool unlimitedCacheUpdates = false;
 	};
 
 	enum class VoxelActorStability : uint8_t
@@ -1868,6 +1871,21 @@ namespace
 		return true;
 	}
 
+	bool TrySpendVoxelCacheUpdateBudget(VoxelCaptureBudget& budget)
+	{
+		if (budget.unlimitedCacheUpdates)
+		{
+			return true;
+		}
+		if (budget.remainingCacheUpdates == 0)
+		{
+			return false;
+		}
+
+		--budget.remainingCacheUpdates;
+		return true;
+	}
+
 	bool BuildVoxelMeshSurface(const HWSprite& sprite, uint32_t drawListType, const FVoxelMeshData& mesh, const MaterialRef& voxelMaterial, SurfaceRef& outSurface)
 	{
 		const unsigned int indexCount = mesh.indices.Size();
@@ -1923,28 +1941,47 @@ namespace
 			return false;
 		}
 
-		const FVoxelMeshData* mesh = GetCachedVoxelMesh(sprite.voxel->model);
+		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
+		VoxelActorCacheLookup cacheLookup = {};
+		if (updatePersistentCache)
+		{
+			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelClassifyMs);
+			cacheLookup = TrackVoxelActorSignature(sprite, voxelTexture, voxelMaterial, stats);
+		}
+		if (cacheLookup.stability == VoxelActorStability::Stable && cacheLookup.entry != nullptr && cacheLookup.entry->hasSurface)
+		{
+			return true;
+		}
+
+		const bool cacheSurfaceUpdate = updatePersistentCache && cacheLookup.stability != VoxelActorStability::Stable;
+		if (cacheSurfaceUpdate && !TrySpendVoxelCacheUpdateBudget(budget))
+		{
+			stats.voxelCacheNotCaptured++;
+			stats.voxelCacheDeferred++;
+			gDynamicCapturePerfStats.voxelCacheDeferred++;
+			return true;
+		}
+
+		const FVoxelMeshData* mesh = nullptr;
+		{
+			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelMeshMs);
+			mesh = GetCachedVoxelMesh(sprite.voxel->model);
+		}
 		if (mesh == nullptr)
 		{
 			stats.voxelStableUncacheable++;
 			return false;
 		}
 
-		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
-		const VoxelActorCacheLookup cacheLookup = updatePersistentCache ? TrackVoxelActorSignature(sprite, voxelTexture, voxelMaterial, stats) : VoxelActorCacheLookup{};
-		if (cacheLookup.stability == VoxelActorStability::Stable && cacheLookup.entry != nullptr && cacheLookup.entry->hasSurface)
-		{
-			return true;
-		}
-
 		const unsigned int indexCount = mesh->indices.Size();
 		const uint32_t triangleCount = indexCount / 3u;
-		const bool cacheSurfaceUpdate = updatePersistentCache && cacheLookup.stability != VoxelActorStability::Stable;
 		if (!TrySpendVoxelTriangleBudget(triangleCount, budget))
 		{
 			if (cacheSurfaceUpdate)
 			{
 				stats.voxelCacheNotCaptured++;
+				stats.voxelCacheDeferred++;
+				gDynamicCapturePerfStats.voxelCacheDeferred++;
 				return true;
 			}
 
@@ -1953,7 +1990,11 @@ namespace
 		}
 
 		SurfaceRef exactSurface = {};
-		const bool hasExactSurface = BuildVoxelMeshSurface(sprite, drawListType, *mesh, voxelMaterial, exactSurface);
+		bool hasExactSurface = false;
+		{
+			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelSurfaceMs);
+			hasExactSurface = BuildVoxelMeshSurface(sprite, drawListType, *mesh, voxelMaterial, exactSurface);
+		}
 		if (!hasExactSurface)
 		{
 			return false;
@@ -1961,7 +2002,14 @@ namespace
 
 		if (cacheSurfaceUpdate)
 		{
-			StoreVoxelActorCacheSurface(cacheLookup, exactSurface, stats);
+			const unsigned int previousStores = stats.voxelCacheSurfaceStores;
+			const unsigned int previousRebuilds = stats.voxelCacheSurfaceRebuilds;
+			{
+				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelStoreMs);
+				StoreVoxelActorCacheSurface(cacheLookup, exactSurface, stats);
+			}
+			gDynamicCapturePerfStats.voxelCacheStores += stats.voxelCacheSurfaceStores - previousStores;
+			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheSurfaceRebuilds - previousRebuilds;
 			return true;
 		}
 
@@ -1974,6 +2022,8 @@ namespace
 		VoxelCaptureBudget budget = {};
 		budget.unlimited = (int)nri_ptvoxeltrianglebudget <= 0;
 		budget.remainingTriangles = budget.unlimited ? 0u : (uint32_t)(int)nri_ptvoxeltrianglebudget;
+		budget.unlimitedCacheUpdates = (int)nri_ptvoxelcaptureactors <= 0;
+		budget.remainingCacheUpdates = budget.unlimitedCacheUpdates ? 0u : (uint32_t)(int)nri_ptvoxelcaptureactors;
 		return budget;
 	}
 

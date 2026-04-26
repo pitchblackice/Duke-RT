@@ -356,6 +356,10 @@ public:
 		double dynamicCaptureFlatsMs = 0.0;
 		double dynamicCaptureFacingSpritesMs = 0.0;
 		double dynamicCaptureModelSpritesMs = 0.0;
+		double dynamicCaptureModelClassifyMs = 0.0;
+		double dynamicCaptureModelMeshMs = 0.0;
+		double dynamicCaptureModelSurfaceMs = 0.0;
+		double dynamicCaptureModelStoreMs = 0.0;
 		double dynamicCaptureVoxelFrameMs = 0.0;
 		double dynamicCaptureStatsMs = 0.0;
 		double persistentDynamicMs = 0.0;
@@ -545,6 +549,9 @@ public:
 		uint32_t dynamicCaptureSpriteSurfaces = 0;
 		uint32_t dynamicCaptureVoxelProxySurfaces = 0;
 		uint32_t dynamicCaptureUnsupportedModelSurfaces = 0;
+		uint32_t dynamicCaptureVoxelCacheStores = 0;
+		uint32_t dynamicCaptureVoxelCacheRebuilds = 0;
+		uint32_t dynamicCaptureVoxelCacheDeferred = 0;
 		uint32_t dynamicAsPrimitiveCount = 0;
 		uint32_t dynamicAsVertexCount = 0;
 		uint32_t dynamicAsIndexCount = 0;

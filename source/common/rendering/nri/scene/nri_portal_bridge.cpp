@@ -138,6 +138,7 @@ namespace
 		outView.stats.voxelCacheSurfaceRebuilds += source.stats.voxelCacheSurfaceRebuilds;
 		outView.stats.voxelCacheSurfaceRemoves += source.stats.voxelCacheSurfaceRemoves;
 		outView.stats.voxelCacheNotCaptured += source.stats.voxelCacheNotCaptured;
+		outView.stats.voxelCacheDeferred += source.stats.voxelCacheDeferred;
 		outView.stats.voxelCachePrimitives += source.stats.voxelCachePrimitives;
 		outView.stats.portalCapturesSkipped += source.stats.portalCapturesSkipped;
 		if (source.sky.priority > outView.sky.priority)
