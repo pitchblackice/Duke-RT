@@ -1285,6 +1285,7 @@ private:
 			uint32_t materialOffset = 0;
 			uint32_t materialCount = 0;
 			nri_scene::MaterialBridgeData materialBridge;
+			std::vector<SceneLightSystem::SurfaceRecord> lightRecords;
 		};
 
 		bool valid = false;

@@ -277,6 +277,16 @@ public:
 		uint32_t materialIndexBase = 0,
 		uint32_t materialLookupIndexBase = 0,
 		const std::vector<uint64_t>* identityOverrides = nullptr);
+	void AppendSurfaceRecords(
+		const std::vector<SurfaceRecord>& records,
+		uint32_t materialIndexBase = 0);
+	SurfaceRecord BuildSurfaceRecord(
+		const nri_scene::SurfaceRef& surface,
+		const nri_scene::MaterialBridgeData& materials,
+		SceneLightRecordSource source,
+		uint32_t materialIndex = 0,
+		uint32_t materialLookupIndex = 0,
+		uint64_t identityOverride = 0) const;
 	void RebuildAnalyticLights(
 		uint32_t flickerTimeIndex,
 		uint32_t renderFrameIndex,
@@ -323,6 +333,7 @@ public:
 	bool ConsumeSectorLightingTopologyChanged();
 
 private:
+	void AppendSurfaceRecord(SurfaceRecord record, uint32_t materialIndexBase);
 	void AppendSurfaceList(
 		const std::vector<nri_scene::SurfaceRef>& surfaces,
 		const nri_scene::MaterialBridgeData& materials,

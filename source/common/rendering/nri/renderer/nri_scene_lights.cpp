@@ -1107,6 +1107,48 @@ void SceneLightSystem::AppendSpriteSurfaces(
 		identityOverrides);
 }
 
+SceneLightSystem::SurfaceRecord SceneLightSystem::BuildSurfaceRecord(
+	const nri_scene::SurfaceRef& surface,
+	const nri_scene::MaterialBridgeData& materials,
+	SceneLightRecordSource source,
+	uint32_t materialIndex,
+	uint32_t materialLookupIndex,
+	uint64_t identityOverride) const
+{
+	SurfaceRecord record = {};
+	record.source = source;
+	record.materialIndex = materialIndex;
+	record.provenance = surface.provenance;
+	ComputeSurfaceBounds(surface, record.center, record.boundsRadius);
+	record.surfaceArea = ComputeSurfaceArea(surface);
+
+	if (materialLookupIndex < materials.lightMetadata.size())
+	{
+		record.material = materials.lightMetadata[materialLookupIndex];
+	}
+	else if (materialLookupIndex < materials.materials.size())
+	{
+		record.material.sectorIndex = materials.materials[materialLookupIndex].sectorIndex != UINT32_MAX ? (int32_t)materials.materials[materialLookupIndex].sectorIndex : -1;
+		record.material.paletteIndex = materials.materials[materialLookupIndex].paletteIndex;
+		record.material.materialFlags = materials.materials[materialLookupIndex].flags;
+		record.material.alpha = materials.materials[materialLookupIndex].alpha;
+		record.material.lightLevel = materials.materials[materialLookupIndex].lightLevel;
+	}
+
+	record.identityKey = identityOverride != 0ull ? identityOverride : BuildSurfaceIdentityKey(record);
+	return record;
+}
+
+void SceneLightSystem::AppendSurfaceRecords(
+	const std::vector<SurfaceRecord>& records,
+	uint32_t materialIndexBase)
+{
+	for (SurfaceRecord record : records)
+	{
+		AppendSurfaceRecord(record, materialIndexBase);
+	}
+}
+
 uint64_t SceneLightSystem::ComputeSurfaceIdentityKey(
 	SceneLightRecordSource source,
 	const nri_scene::SurfaceProvenance& provenance,
@@ -1872,6 +1914,37 @@ bool SceneLightSystem::ConsumeSectorLightingTopologyChanged()
 	return changed;
 }
 
+void SceneLightSystem::AppendSurfaceRecord(SurfaceRecord record, uint32_t materialIndexBase)
+{
+	if (record.materialIndex != UINT32_MAX)
+	{
+		record.materialIndex += materialIndexBase;
+	}
+
+	mSurfaceRecords.push_back(record);
+	mFrameAppendStats.totalRecordCount++;
+	switch (record.source)
+	{
+	case SceneLightRecordSource::StaticMapScene:
+		mFrameAppendStats.staticRecordCount++;
+		break;
+	case SceneLightRecordSource::RuntimeMutationScene:
+		mFrameAppendStats.runtimeMutationRecordCount++;
+		break;
+	case SceneLightRecordSource::DynamicScene:
+		mFrameAppendStats.dynamicRecordCount++;
+		break;
+	case SceneLightRecordSource::CapturedScene:
+		mFrameAppendStats.capturedRecordCount++;
+		break;
+	case SceneLightRecordSource::PersistentVoxelScene:
+		mFrameAppendStats.persistentVoxelRecordCount++;
+		break;
+	default:
+		break;
+	}
+}
+
 void SceneLightSystem::AppendSurfaceList(
 	const std::vector<nri_scene::SurfaceRef>& surfaces,
 	const nri_scene::MaterialBridgeData& materials,
@@ -1884,58 +1957,20 @@ void SceneLightSystem::AppendSurfaceList(
 	for (size_t surfaceIndex = 0; surfaceIndex < surfaces.size(); ++surfaceIndex)
 	{
 		const nri_scene::SurfaceRef& surface = surfaces[surfaceIndex];
-		SurfaceRecord record = {};
-		record.source = source;
-		record.materialIndex = materialIndexBase + inOutLocalMaterialIndex;
-		record.provenance = surface.provenance;
-		ComputeSurfaceBounds(surface, record.center, record.boundsRadius);
-		record.surfaceArea = ComputeSurfaceArea(surface);
-
 		const uint32_t materialLookupIndex = materialLookupIndexBase + inOutLocalMaterialIndex;
-		if (materialLookupIndex < materials.lightMetadata.size())
-		{
-			record.material = materials.lightMetadata[materialLookupIndex];
-		}
-		else if (materialLookupIndex < materials.materials.size())
-		{
-			record.material.sectorIndex = materials.materials[materialLookupIndex].sectorIndex != UINT32_MAX ? (int32_t)materials.materials[materialLookupIndex].sectorIndex : -1;
-			record.material.paletteIndex = materials.materials[materialLookupIndex].paletteIndex;
-			record.material.materialFlags = materials.materials[materialLookupIndex].flags;
-			record.material.alpha = materials.materials[materialLookupIndex].alpha;
-			record.material.lightLevel = materials.materials[materialLookupIndex].lightLevel;
-		}
-
 		const uint64_t inheritedIdentityKey =
 			identityOverrides != nullptr && surfaceIndex < identityOverrides->size() ?
 			(*identityOverrides)[surfaceIndex] :
 			0ull;
-		record.identityKey =
-			inheritedIdentityKey != 0ull ?
-			inheritedIdentityKey :
-			BuildSurfaceIdentityKey(record);
+		const SurfaceRecord record = BuildSurfaceRecord(
+			surface,
+			materials,
+			source,
+			inOutLocalMaterialIndex,
+			materialLookupIndex,
+			inheritedIdentityKey);
 
-		mSurfaceRecords.push_back(record);
-		mFrameAppendStats.totalRecordCount++;
-		switch (source)
-		{
-		case SceneLightRecordSource::StaticMapScene:
-			mFrameAppendStats.staticRecordCount++;
-			break;
-		case SceneLightRecordSource::RuntimeMutationScene:
-			mFrameAppendStats.runtimeMutationRecordCount++;
-			break;
-		case SceneLightRecordSource::DynamicScene:
-			mFrameAppendStats.dynamicRecordCount++;
-			break;
-		case SceneLightRecordSource::CapturedScene:
-			mFrameAppendStats.capturedRecordCount++;
-			break;
-		case SceneLightRecordSource::PersistentVoxelScene:
-			mFrameAppendStats.persistentVoxelRecordCount++;
-			break;
-		default:
-			break;
-		}
+		AppendSurfaceRecord(record, materialIndexBase);
 		++inOutLocalMaterialIndex;
 	}
 }

@@ -11988,6 +11988,13 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.indexCount = (uint32_t)actorGeometry.indices.size();
 		actor.materialCount = (uint32_t)actorMaterials.materials.size();
 		actor.materialBridge = std::move(actorMaterials);
+		actor.lightRecords.clear();
+		actor.lightRecords.push_back(mSceneLights.BuildSurfaceRecord(
+			*cacheEntry.surface,
+			actor.materialBridge,
+			SceneLightRecordSource::PersistentVoxelScene,
+			0u,
+			0u));
 
 		if (existingActor != nullptr)
 		{
@@ -14320,14 +14327,18 @@ void NRIRenderer::RefreshSceneLightSystem(
 
 	if (appendPersistentVoxelSceneLights &&
 		mPersistentVoxelBatch.valid &&
-		!mPersistentVoxelBatch.sceneView.opaqueSprites.empty() &&
 		!mPersistentVoxelBatch.materialBridge.materials.empty())
 	{
 		ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightPersistentVoxelAppendMs);
-		mSceneLights.AppendSpriteSurfaces(
-			mPersistentVoxelBatch.sceneView.opaqueSprites,
-			mPersistentVoxelBatch.materialBridge,
-			SceneLightRecordSource::PersistentVoxelScene);
+		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+		{
+			if (!actor.active || actor.lightRecords.empty() || actor.materialCount == 0)
+			{
+				continue;
+			}
+
+			mSceneLights.AppendSurfaceRecords(actor.lightRecords, actor.materialOffset);
+		}
 	}
 
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
