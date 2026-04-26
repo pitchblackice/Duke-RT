@@ -3278,7 +3278,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.geometryBuildResidentRecoverCalls,
 			shell.geometryBuildResidentPrimitives);
 		Printf(
-			"PERF pt persistent voxel onboarding NRI: frame=%llu candidates=%u admitted=%u deferred=%u actor_budget_hits=%u prim_budget_hits=%u byte_budget_hits=%u estimated_bytes=%llu admitted_bytes=%llu deferred_bytes=%llu byte_budget=%llu\n",
+			"PERF pt persistent voxel onboarding NRI: frame=%llu candidates=%u admitted=%u deferred=%u actor_budget_hits=%u prim_budget_hits=%u byte_budget_hits=%u texture_budget_hits=%u estimated_bytes=%llu admitted_bytes=%llu deferred_bytes=%llu byte_budget=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.persistentVoxelOnboardingCandidateCount,
 			shell.persistentVoxelOnboardingAdmittedCount,
@@ -3286,10 +3286,24 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.persistentVoxelOnboardingActorBudgetHits,
 			shell.persistentVoxelOnboardingPrimitiveBudgetHits,
 			shell.persistentVoxelOnboardingByteBudgetHits,
+			shell.persistentVoxelOnboardingTextureBudgetHits,
 			(unsigned long long)shell.persistentVoxelOnboardingEstimatedBytes,
 			(unsigned long long)shell.persistentVoxelOnboardingAdmittedBytes,
 			(unsigned long long)shell.persistentVoxelOnboardingDeferredBytes,
 			(unsigned long long)shell.persistentVoxelOnboardingByteBudget);
+		Printf(
+			"PERF pt persistent voxel texture prewarm NRI: frame=%llu queued=%u processed=%u deferred=%u hits=%u misses=%u estimated_bytes=%llu processed_bytes=%llu deferred_bytes=%llu byte_budget=%llu ms=%.3f\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.persistentVoxelTexturePrewarmQueuedCount,
+			shell.persistentVoxelTexturePrewarmProcessedCount,
+			shell.persistentVoxelTexturePrewarmDeferredCount,
+			shell.persistentVoxelTexturePrewarmHitCount,
+			shell.persistentVoxelTexturePrewarmMissCount,
+			(unsigned long long)shell.persistentVoxelTexturePrewarmEstimatedBytes,
+			(unsigned long long)shell.persistentVoxelTexturePrewarmProcessedBytes,
+			(unsigned long long)shell.persistentVoxelTexturePrewarmDeferredBytes,
+			(unsigned long long)shell.persistentVoxelTexturePrewarmByteBudget,
+			shell.persistentVoxelTexturePrewarmMs);
 		Printf(
 			"PERF pt scene light detail NRI: frame=%llu records=%u static=%u mutation=%u captured=%u dynamic=%u persistent_voxel=%u append_static=%.3f append_mutation=%.3f append_captured=%.3f append_dynamic=%.3f append_persistent_voxel=%.3f rebuild_analytic=%.3f rebuild_emissive=%.3f rebuild_sector=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,

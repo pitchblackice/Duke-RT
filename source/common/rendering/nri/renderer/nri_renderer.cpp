@@ -2573,6 +2573,8 @@ CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLO
 CVAR(Int, nri_ptpersistentvoxelbuildactors, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptpersistentvoxelbuildprims, 100000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptpersistentvoxelbuildbytes, 4 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptpersistentvoxeltextureprewarms, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptpersistentvoxeltexturebytes, 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -11776,8 +11778,101 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return false;
 	}
 
-	auto appendActorToBatch = [&](PersistentVoxelBatch& batch, const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, PersistentVoxelBatch::ActorEntry* existingActor = nullptr) -> bool
+	const bool persistentVoxelTexturePrewarmUnlimited = (int)nri_ptpersistentvoxeltextureprewarms <= 0;
+	const uint32_t persistentVoxelTexturePrewarmBudget =
+		persistentVoxelTexturePrewarmUnlimited ? 0u : (uint32_t)(int)nri_ptpersistentvoxeltextureprewarms;
+	const uint64_t persistentVoxelTexturePrewarmByteBudget =
+		(int)nri_ptpersistentvoxeltexturebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxeltexturebytes;
+	uint32_t persistentVoxelPrewarmedTextures = 0;
+	uint64_t persistentVoxelPrewarmedTextureBytes = 0;
+	mLastPerfShellTraceStats.persistentVoxelTexturePrewarmByteBudget = persistentVoxelTexturePrewarmByteBudget;
+
+	auto estimateTextureUploadBytes = [](const nri_scene::TextureUpload& upload) -> uint64_t
 	{
+		const uint64_t bytesPerPixel = upload.indexed ? 1ull : 4ull;
+		return (uint64_t)upload.width * (uint64_t)upload.height * bytesPerPixel;
+	};
+
+	auto isTextureUploadCached = [&](const nri_scene::TextureUpload& upload) -> bool
+	{
+		return std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; }) != mTextureCache.end();
+	};
+
+	auto canPrewarmTextureUpload = [&](uint64_t estimatedBytes) -> bool
+	{
+		if (persistentVoxelPrewarmedTextures == 0)
+		{
+			return true;
+		}
+		if (!persistentVoxelTexturePrewarmUnlimited &&
+			persistentVoxelPrewarmedTextures >= persistentVoxelTexturePrewarmBudget)
+		{
+			return false;
+		}
+		if (persistentVoxelTexturePrewarmByteBudget != 0 &&
+			persistentVoxelPrewarmedTextureBytes + estimatedBytes > persistentVoxelTexturePrewarmByteBudget)
+		{
+			return false;
+		}
+		return true;
+	};
+
+	auto prewarmPersistentVoxelActorTextures = [&](const nri_scene::MaterialBridgeData& actorMaterials) -> bool
+	{
+		for (const nri_scene::TextureUpload& upload : actorMaterials.textures)
+		{
+			if (upload.width == 0 || upload.height == 0)
+			{
+				continue;
+			}
+			if (mFrameBuffer != nullptr &&
+				mFrameBuffer->mActiveCanvasSourceTexture != nullptr &&
+				upload.sourceTexture == mFrameBuffer->mActiveCanvasSourceTexture)
+			{
+				continue;
+			}
+			if (upload.sourceTexture != nullptr && upload.sourceTexture->isHardwareCanvas())
+			{
+				continue;
+			}
+			if (isTextureUploadCached(upload))
+			{
+				mLastPerfShellTraceStats.persistentVoxelTexturePrewarmHitCount++;
+				continue;
+			}
+
+			const uint64_t estimatedBytes = estimateTextureUploadBytes(upload);
+			mLastPerfShellTraceStats.persistentVoxelTexturePrewarmQueuedCount++;
+			mLastPerfShellTraceStats.persistentVoxelTexturePrewarmMissCount++;
+			mLastPerfShellTraceStats.persistentVoxelTexturePrewarmEstimatedBytes += estimatedBytes;
+			if (!canPrewarmTextureUpload(estimatedBytes))
+			{
+				mLastPerfShellTraceStats.persistentVoxelTexturePrewarmDeferredCount++;
+				mLastPerfShellTraceStats.persistentVoxelTexturePrewarmDeferredBytes += estimatedBytes;
+				return false;
+			}
+
+			double prewarmMs = 0.0;
+			if (!EnsureSceneTextureCacheEntry(upload, &prewarmMs))
+			{
+				return false;
+			}
+			persistentVoxelPrewarmedTextures++;
+			persistentVoxelPrewarmedTextureBytes += estimatedBytes;
+			mLastPerfShellTraceStats.persistentVoxelTexturePrewarmProcessedCount++;
+			mLastPerfShellTraceStats.persistentVoxelTexturePrewarmProcessedBytes += estimatedBytes;
+			mLastPerfShellTraceStats.persistentVoxelTexturePrewarmMs += prewarmMs;
+		}
+
+		return true;
+	};
+
+	auto appendActorToBatch = [&](PersistentVoxelBatch& batch, const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, PersistentVoxelBatch::ActorEntry* existingActor = nullptr, bool* outDeferred = nullptr) -> bool
+	{
+		if (outDeferred != nullptr)
+		{
+			*outDeferred = false;
+		}
 		if (cacheEntry.surface == nullptr)
 		{
 			if (existingActor != nullptr)
@@ -11797,6 +11892,32 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actorSceneView.stats.triangleEstimate = cacheEntry.primitiveCount;
 		actorSceneView.stats.voxelCachePrimitives = cacheEntry.primitiveCount;
 
+		nri_scene::MaterialBridgeData actorMaterials;
+		{
+			Clocker materialClock(NriPTMaterialBuild);
+			BuildMaterialsWithActorOverrides(actorSceneView, actorMaterials, "persistent_voxel_actor");
+		}
+		if (actorMaterials.materials.empty())
+		{
+			if (existingActor != nullptr)
+			{
+				existingActor->active = false;
+			}
+			return true;
+		}
+		if (!prewarmPersistentVoxelActorTextures(actorMaterials))
+		{
+			if (existingActor != nullptr)
+			{
+				existingActor->active = true;
+			}
+			if (outDeferred != nullptr)
+			{
+				*outDeferred = true;
+			}
+			return true;
+		}
+
 		nri_scene::GeometryData actorGeometry;
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelActorMs);
@@ -11806,20 +11927,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		mLastPerfShellTraceStats.geometryBuildPersistentVoxelActorCalls++;
 		mLastPerfShellTraceStats.geometryBuildPersistentVoxelActorPrimitives += (uint32_t)actorGeometry.primitives.size();
 		if (actorGeometry.primitives.empty() || actorGeometry.indices.empty())
-		{
-			if (existingActor != nullptr)
-			{
-				existingActor->active = false;
-			}
-			return true;
-		}
-
-		nri_scene::MaterialBridgeData actorMaterials;
-		{
-			Clocker materialClock(NriPTMaterialBuild);
-			BuildMaterialsWithActorOverrides(actorSceneView, actorMaterials, "persistent_voxel_actor");
-		}
-		if (actorMaterials.materials.empty())
 		{
 			if (existingActor != nullptr)
 			{
@@ -12134,10 +12241,19 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				}
 				Clocker geometryClock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelAppendMs);
-				if (!appendActorToBatch(mPersistentVoxelBatch, cacheEntry))
+				bool actorDeferred = false;
+				if (!appendActorToBatch(mPersistentVoxelBatch, cacheEntry, nullptr, &actorDeferred))
 				{
 					ResetPersistentVoxelBatch();
 					return false;
+				}
+				if (actorDeferred)
+				{
+					persistentVoxelBuildPending = true;
+					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
+					mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits++;
+					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedUploadBytes;
+					continue;
 				}
 				notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 				updatedActorCount++;
@@ -12173,10 +12289,19 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				}
 				Clocker geometryClock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelAppendMs);
-				if (!appendActorToBatch(mPersistentVoxelBatch, cacheEntry, &actor))
+				bool actorDeferred = false;
+				if (!appendActorToBatch(mPersistentVoxelBatch, cacheEntry, &actor, &actorDeferred))
 				{
 					ResetPersistentVoxelBatch();
 					return false;
+				}
+				if (actorDeferred)
+				{
+					persistentVoxelBuildPending = true;
+					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
+					mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits++;
+					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedUploadBytes;
+					continue;
 				}
 				if (actorGeometryNeedsUpdate)
 				{
@@ -12234,10 +12359,19 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			{
 				continue;
 			}
-			if (!appendActorToBatch(next, cacheEntry))
+			bool actorDeferred = false;
+			if (!appendActorToBatch(next, cacheEntry, nullptr, &actorDeferred))
 			{
 				ResetPersistentVoxelBatch();
 				return false;
+			}
+			if (actorDeferred)
+			{
+				persistentVoxelBuildPending = true;
+				mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
+				mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits++;
+				mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedUploadBytes;
+				continue;
 			}
 			notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 		}
@@ -17939,6 +18073,72 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		gRendererSkyPerfTraceStats.solidCreateHits++;
 	}
 	TraceSkyState(sceneView, "create-cached-solid", upload.key);
+	return true;
+}
+
+bool NRIRenderer::EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& upload, double* outRealizeMs)
+{
+	if (upload.width == 0 || upload.height == 0)
+	{
+		return true;
+	}
+
+	if (mFrameBuffer == nullptr)
+	{
+		return false;
+	}
+
+	if (mFrameBuffer->mActiveCanvasSourceTexture != nullptr &&
+		upload.sourceTexture == mFrameBuffer->mActiveCanvasSourceTexture)
+	{
+		return true;
+	}
+
+	if (upload.sourceTexture != nullptr && upload.sourceTexture->isHardwareCanvas())
+	{
+		return true;
+	}
+
+	auto it = std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; });
+	if (it != mTextureCache.end())
+	{
+		return true;
+	}
+
+	const auto realizeStart = outRealizeMs != nullptr ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+	std::vector<uint8_t> realizedPixels;
+	uint32_t realizedWidth = upload.width;
+	uint32_t realizedHeight = upload.height;
+	const uint8_t* pixelData = upload.pixels.data();
+	if (upload.pixels.empty())
+	{
+		if (!nri_scene::RealizeTextureUploadPayload(upload, realizedPixels, realizedWidth, realizedHeight))
+		{
+			return true;
+		}
+		pixelData = realizedPixels.data();
+	}
+
+	if (pixelData == nullptr || realizedWidth == 0 || realizedHeight == 0)
+	{
+		return true;
+	}
+
+	CachedTexture cacheEntry = {};
+	cacheEntry.key = upload.key;
+	const nri::Format format = upload.indexed ? nri::Format::R8_UNORM : nri::Format::BGRA8_UNORM;
+	const uint32_t rowPitch = upload.indexed ? realizedWidth : realizedWidth * 4u;
+	if (!mFrameBuffer->CreateOwnedTexture(cacheEntry.resource, realizedWidth, realizedHeight, format, nri::TextureUsageBits::SHADER_RESOURCE) ||
+		!mFrameBuffer->UploadTextureData(cacheEntry.resource, pixelData, realizedWidth, realizedHeight, rowPitch))
+	{
+		return false;
+	}
+
+	mTextureCache.push_back(cacheEntry);
+	if (outRealizeMs != nullptr)
+	{
+		*outRealizeMs += DurationMs(realizeStart, std::chrono::steady_clock::now());
+	}
 	return true;
 }
 
