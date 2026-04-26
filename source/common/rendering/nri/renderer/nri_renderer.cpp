@@ -11689,7 +11689,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	{
 		batch.primitiveCount = 0;
 		batch.materialCount = 0;
-		batch.sceneView = {};
 		batch.activeActorCount = 0;
 		for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 		{
@@ -11698,13 +11697,13 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				batch.activeActorCount++;
 				batch.primitiveCount += actor.primitiveCount;
 				batch.materialCount += actor.materialCount;
-				batch.sceneView.opaqueSprites.push_back(actor.surface);
-				batch.sceneView.stats.triangleEstimate += actor.primitiveCount;
-				batch.sceneView.stats.voxelCachePrimitives += actor.primitiveCount;
-				batch.sceneView.stats.materialRefs += actor.materialCount;
 			}
 		}
-		batch.surfaceCount = (uint32_t)batch.sceneView.opaqueSprites.size();
+		batch.surfaceCount = batch.activeActorCount;
+		batch.sceneView.stats = {};
+		batch.sceneView.stats.triangleEstimate = batch.primitiveCount;
+		batch.sceneView.stats.voxelCachePrimitives = batch.primitiveCount;
+		batch.sceneView.stats.materialRefs = batch.materialCount;
 		batch.sceneView.stats.spriteDrawItems = batch.surfaceCount;
 		batch.sceneView.stats.modelDrawItems = batch.surfaceCount;
 		batch.sceneView.stats.voxelProxyDrawItems = batch.surfaceCount;
@@ -11731,6 +11730,29 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		batch.valid = batch.activeActorCount > 0 && batch.primitiveCount > 0 && !batch.materialBridge.materials.empty();
 	};
 
+	auto compactBatchSceneView = [](PersistentVoxelBatch& batch)
+	{
+		std::vector<nri_scene::SurfaceRef> activeSprites;
+		activeSprites.reserve(batch.actors.size());
+		for (PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+		{
+			if (!actor.active)
+			{
+				actor.surfaceIndex = UINT32_MAX;
+				continue;
+			}
+			const uint32_t oldSurfaceIndex = actor.surfaceIndex;
+			if (oldSurfaceIndex >= batch.sceneView.opaqueSprites.size())
+			{
+				actor.surfaceIndex = UINT32_MAX;
+				continue;
+			}
+			actor.surfaceIndex = (uint32_t)activeSprites.size();
+			activeSprites.push_back(std::move(batch.sceneView.opaqueSprites[oldSurfaceIndex]));
+		}
+		batch.sceneView.opaqueSprites = std::move(activeSprites);
+	};
+
 	if (!hasPersistentVoxelCacheEntries)
 	{
 		if (mPersistentVoxelBatch.valid)
@@ -11749,8 +11771,17 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 	auto appendActorToBatch = [&](PersistentVoxelBatch& batch, const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, PersistentVoxelBatch::ActorEntry* existingActor = nullptr) -> bool
 	{
+		if (cacheEntry.surface == nullptr)
+		{
+			if (existingActor != nullptr)
+			{
+				existingActor->active = false;
+			}
+			return true;
+		}
+
 		nri_scene::SceneView actorSceneView = {};
-		actorSceneView.opaqueSprites.push_back(cacheEntry.surface);
+		actorSceneView.opaqueSprites.push_back(*cacheEntry.surface);
 		actorSceneView.stats.spriteDrawItems = 1;
 		actorSceneView.stats.modelDrawItems = 1;
 		actorSceneView.stats.voxelProxyDrawItems = 1;
@@ -11968,7 +11999,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.geometrySignature = cacheEntry.geometrySignature;
 		actor.materialSignature = cacheEntry.materialSignature;
 		actor.active = true;
-		actor.surface = cacheEntry.surface;
 		actor.primitiveOffset = resource.primitiveOffset;
 		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
 		actor.indexOffset = resource.indexOffset;
@@ -11979,10 +12009,21 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		AppendMaterialBridge(actorMaterials, batch.materialBridge);
 		if (existingActor != nullptr)
 		{
+			if (actor.surfaceIndex < batch.sceneView.opaqueSprites.size())
+			{
+				batch.sceneView.opaqueSprites[actor.surfaceIndex] = *cacheEntry.surface;
+			}
+			else
+			{
+				actor.surfaceIndex = (uint32_t)batch.sceneView.opaqueSprites.size();
+				batch.sceneView.opaqueSprites.push_back(*cacheEntry.surface);
+			}
 			*existingActor = actor;
 		}
 		else
 		{
+			actor.surfaceIndex = (uint32_t)batch.sceneView.opaqueSprites.size();
+			batch.sceneView.opaqueSprites.push_back(*cacheEntry.surface);
 			batch.actors.push_back(actor);
 		}
 		return true;
@@ -12086,7 +12127,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				if (actorGeometryNeedsUpdate && !canBuildPersistentVoxelActor(cacheEntry.primitiveCount))
 				{
 					actor.active = true;
-					actor.surface = cacheEntry.surface;
 					continue;
 				}
 				Clocker geometryClock(NriPTGeometryBuild);
@@ -12105,7 +12145,20 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			}
 
 			actor.active = true;
-			actor.surface = cacheEntry.surface;
+		}
+
+		bool hasInactiveActors = false;
+		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+		{
+			if (!actor.active)
+			{
+				hasInactiveActors = true;
+				break;
+			}
+		}
+		if (hasInactiveActors)
+		{
+			compactBatchSceneView(mPersistentVoxelBatch);
 		}
 
 		if (!persistentVoxelBuildPending)

@@ -1275,7 +1275,7 @@ private:
 			uint64_t geometrySignature = 0;
 			uint64_t materialSignature = 0;
 			bool active = true;
-			nri_scene::SurfaceRef surface;
+			uint32_t surfaceIndex = UINT32_MAX;
 			uint32_t primitiveOffset = 0;
 			uint32_t primitiveCount = 0;
 			uint32_t indexOffset = 0;

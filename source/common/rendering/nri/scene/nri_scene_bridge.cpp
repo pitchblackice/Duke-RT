@@ -2308,12 +2308,17 @@ bool BuildPersistentVoxelCacheSceneView(SceneView& outView)
 	outView.stats.voxelCacheEntries = (unsigned int)entries.size();
 	for (const auto& entry : entries)
 	{
-		outView.opaqueSprites.push_back(entry.surface);
+		if (entry.surface == nullptr)
+		{
+			continue;
+		}
+		outView.opaqueSprites.push_back(*entry.surface);
 		outView.stats.triangleEstimate += entry.primitiveCount;
 		outView.stats.voxelCachePrimitives += entry.primitiveCount;
 		outView.stats.materialRefs++;
 	}
 
+	outView.stats.voxelCacheEntries = (unsigned int)outView.opaqueSprites.size();
 	outView.stats.spriteDrawItems = (unsigned int)outView.opaqueSprites.size();
 	outView.stats.modelDrawItems = outView.stats.spriteDrawItems;
 	outView.stats.voxelProxyDrawItems = outView.stats.spriteDrawItems;
@@ -2358,7 +2363,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.geometrySignature = entry.second->geometrySignature;
 		view.materialSignature = entry.second->materialSignature;
 		view.primitiveCount = entry.second->primitiveCount;
-		view.surface = entry.second->surface;
+		view.surface = &entry.second->surface;
 		outEntries.push_back(std::move(view));
 	}
 
