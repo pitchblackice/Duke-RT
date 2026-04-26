@@ -2572,6 +2572,7 @@ CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLO
 }
 CVAR(Int, nri_ptpersistentvoxelbuildactors, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptpersistentvoxelbuildprims, 100000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptpersistentvoxelbuildbytes, 4 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -11744,6 +11745,20 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		batch.sceneView.opaqueSprites = std::move(activeSprites);
 	};
 
+	auto estimatePersistentVoxelActorUploadBytes = [](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> uint64_t
+	{
+		if (cacheEntry.surface == nullptr)
+		{
+			return 0;
+		}
+
+		const uint64_t vertexBytes = (uint64_t)cacheEntry.surface->vertices.size() * sizeof(nri_scene::SceneVertex);
+		const uint64_t indexBytes = (uint64_t)cacheEntry.surface->indices.size() * sizeof(uint32_t);
+		const uint64_t primitiveBytes = (uint64_t)cacheEntry.primitiveCount * sizeof(nri_scene::PrimitiveData);
+		const uint64_t materialBytes = sizeof(nri_scene::MaterialData);
+		return vertexBytes + indexBytes + primitiveBytes + materialBytes;
+	};
+
 	if (!hasPersistentVoxelCacheEntries)
 	{
 		if (mPersistentVoxelBatch.valid)
@@ -12029,14 +12044,23 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	const uint32_t persistentVoxelBuildActorBudget = (uint32_t)std::max(1, (int)nri_ptpersistentvoxelbuildactors);
 	const uint32_t persistentVoxelBuildPrimitiveBudget =
 		(int)nri_ptpersistentvoxelbuildprims <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxelbuildprims;
+	const uint64_t persistentVoxelBuildByteBudget =
+		(int)nri_ptpersistentvoxelbuildbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxelbuildbytes;
 	uint32_t persistentVoxelBuiltActors = 0;
 	uint32_t persistentVoxelBuiltPrimitives = 0;
+	uint64_t persistentVoxelBuiltBytes = 0;
 	bool persistentVoxelBuildPending = false;
 
-	auto canBuildPersistentVoxelActor = [&](uint32_t primitiveCount) -> bool
+	auto canBuildPersistentVoxelActor = [&](uint32_t primitiveCount, uint64_t estimatedBytes) -> bool
 	{
+		mLastPerfShellTraceStats.persistentVoxelOnboardingCandidateCount++;
+		mLastPerfShellTraceStats.persistentVoxelOnboardingEstimatedBytes += estimatedBytes;
 		if (persistentVoxelBuildPrimitiveBudget != 0 && primitiveCount > persistentVoxelBuildPrimitiveBudget)
 		{
+			persistentVoxelBuildPending = true;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingPrimitiveBudgetHits++;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedBytes;
 			return false;
 		}
 		if (persistentVoxelBuiltActors == 0)
@@ -12046,22 +12070,41 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		if (persistentVoxelBuiltActors >= persistentVoxelBuildActorBudget)
 		{
 			persistentVoxelBuildPending = true;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingActorBudgetHits++;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedBytes;
 			return false;
 		}
 		if (persistentVoxelBuildPrimitiveBudget != 0 &&
 			persistentVoxelBuiltPrimitives + primitiveCount > persistentVoxelBuildPrimitiveBudget)
 		{
 			persistentVoxelBuildPending = true;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingPrimitiveBudgetHits++;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedBytes;
+			return false;
+		}
+		if (persistentVoxelBuildByteBudget != 0 &&
+			persistentVoxelBuiltBytes + estimatedBytes > persistentVoxelBuildByteBudget)
+		{
+			persistentVoxelBuildPending = true;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingByteBudgetHits++;
+			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedBytes;
 			return false;
 		}
 		return true;
 	};
 
-	auto notePersistentVoxelActorBuilt = [&](uint32_t primitiveCount)
+	auto notePersistentVoxelActorBuilt = [&](uint32_t primitiveCount, uint64_t estimatedBytes)
 	{
 		persistentVoxelBuiltActors++;
 		persistentVoxelBuiltPrimitives += primitiveCount;
+		persistentVoxelBuiltBytes += estimatedBytes;
+		mLastPerfShellTraceStats.persistentVoxelOnboardingAdmittedCount++;
+		mLastPerfShellTraceStats.persistentVoxelOnboardingAdmittedBytes += estimatedBytes;
 	};
+	mLastPerfShellTraceStats.persistentVoxelOnboardingByteBudget = persistentVoxelBuildByteBudget;
 
 	if (mPersistentVoxelBatch.valid)
 	{
@@ -12084,7 +12127,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			auto found = existingActors.find(cacheEntry.identityKey);
 			if (found == existingActors.end())
 			{
-				if (!canBuildPersistentVoxelActor(cacheEntry.primitiveCount))
+				const uint64_t estimatedUploadBytes = estimatePersistentVoxelActorUploadBytes(cacheEntry);
+				if (!canBuildPersistentVoxelActor(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
 					continue;
 				}
@@ -12095,7 +12139,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					ResetPersistentVoxelBatch();
 					return false;
 				}
-				notePersistentVoxelActorBuilt(cacheEntry.primitiveCount);
+				notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 				updatedActorCount++;
 				continue;
 			}
@@ -12121,7 +12165,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				resourceIt->second.materialCount != actor.materialCount;
 			if (actorNeedsUpdate)
 			{
-				if (actorGeometryNeedsUpdate && !canBuildPersistentVoxelActor(cacheEntry.primitiveCount))
+				const uint64_t estimatedUploadBytes = actorGeometryNeedsUpdate ? estimatePersistentVoxelActorUploadBytes(cacheEntry) : 0ull;
+				if (actorGeometryNeedsUpdate && !canBuildPersistentVoxelActor(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
 					actor.active = true;
 					continue;
@@ -12135,7 +12180,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				}
 				if (actorGeometryNeedsUpdate)
 				{
-					notePersistentVoxelActorBuilt(cacheEntry.primitiveCount);
+					notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 				}
 				updatedActorCount++;
 				continue;
@@ -12184,7 +12229,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelRebuildMs);
 		for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
 		{
-			if (!canBuildPersistentVoxelActor(cacheEntry.primitiveCount))
+			const uint64_t estimatedUploadBytes = estimatePersistentVoxelActorUploadBytes(cacheEntry);
+			if (!canBuildPersistentVoxelActor(cacheEntry.primitiveCount, estimatedUploadBytes))
 			{
 				continue;
 			}
@@ -12193,7 +12239,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				ResetPersistentVoxelBatch();
 				return false;
 			}
-			notePersistentVoxelActorBuilt(cacheEntry.primitiveCount);
+			notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 		}
 	}
 

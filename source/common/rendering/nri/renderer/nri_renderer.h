@@ -534,6 +534,16 @@ public:
 		uint32_t sceneLightDynamicRecordCount = 0;
 		uint32_t sceneLightCapturedRecordCount = 0;
 		uint32_t sceneLightPersistentVoxelRecordCount = 0;
+		uint32_t persistentVoxelOnboardingCandidateCount = 0;
+		uint32_t persistentVoxelOnboardingAdmittedCount = 0;
+		uint32_t persistentVoxelOnboardingDeferredCount = 0;
+		uint32_t persistentVoxelOnboardingActorBudgetHits = 0;
+		uint32_t persistentVoxelOnboardingPrimitiveBudgetHits = 0;
+		uint32_t persistentVoxelOnboardingByteBudgetHits = 0;
+		uint64_t persistentVoxelOnboardingEstimatedBytes = 0;
+		uint64_t persistentVoxelOnboardingAdmittedBytes = 0;
+		uint64_t persistentVoxelOnboardingDeferredBytes = 0;
+		uint64_t persistentVoxelOnboardingByteBudget = 0;
 		uint32_t runtimeSpaceLinkPrimitiveCount = 0;
 		uint32_t runtimeSpaceLinkMaterialCount = 0;
 		uint32_t runtimeDebugSphereCount = 0;
