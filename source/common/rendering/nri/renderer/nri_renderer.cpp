@@ -8021,7 +8021,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			hasPersistentVoxelBatch &&
 			mPersistentVoxelBatch.valid &&
 			mPersistentVoxelBatch.activeActorCount > 0 &&
-			!mPersistentVoxelBatch.geometry.primitives.empty() &&
+			mPersistentVoxelBatch.primitiveCount > 0 &&
 			!mPersistentVoxelBatch.materialBridge.materials.empty();
 		const bool hasMirrorExtendedDynamicOverlay =
 			hasMirrorExtendedDynamicScene &&
@@ -11649,9 +11649,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 		uint64_t geometryUploadHash = 1469598103934665603ull;
 		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)batch.actors.size());
-		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)batch.geometry.vertices.size());
-		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)batch.geometry.indices.size());
-		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)batch.geometry.primitives.size());
 		geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)batch.materialBridge.materials.size());
 		for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 		{
@@ -11667,7 +11664,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			geometryUploadHash = HashCombine64(geometryUploadHash, (uint64_t)actor.materialCount);
 		}
 		batch.geometryUploadHash = geometryUploadHash;
-		batch.valid = !batch.actors.empty() && !batch.geometry.primitives.empty() && !batch.materialBridge.materials.empty();
+		batch.valid = batch.activeActorCount > 0 && batch.primitiveCount > 0 && !batch.materialBridge.materials.empty();
 	};
 
 	if (!hasPersistentVoxelCacheEntries)
@@ -11915,7 +11912,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.materialOffset = aggregateMaterialOffset;
 		actor.materialCount = (uint32_t)actorMaterials.materials.size();
 
-		AppendGeometry(actorGeometry, aggregateMaterialOffset, batch.geometry);
 		AppendMaterialBridge(actorMaterials, batch.materialBridge);
 		if (existingActor != nullptr)
 		{
