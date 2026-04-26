@@ -114,6 +114,11 @@ static int SaveScreenshot()
         return -1;
     }
 
+	if (screen->QueueScreenshot(fil))
+	{
+		return 0;
+	}
+
 	float gamma;
 	int pitch;
 	ESSType ctype;
@@ -128,4 +133,3 @@ CCMD(screenshot)
 {
 	SaveScreenshot();
 }
-
