@@ -11935,6 +11935,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 	auto canBuildPersistentVoxelActor = [&](uint32_t primitiveCount) -> bool
 	{
+		if (persistentVoxelBuildPrimitiveBudget != 0 && primitiveCount > persistentVoxelBuildPrimitiveBudget)
+		{
+			return false;
+		}
 		if (persistentVoxelBuiltActors == 0)
 		{
 			return true;
@@ -12256,6 +12260,8 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scene::GeometryData& geometry)
 {
 	(void)geometry;
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelAsMs);
+	mLastPerfShellTraceStats.persistentVoxelAsCalls++;
 	if (!mPersistentVoxelBatch.valid || mPersistentVoxelBatch.actors.empty())
 	{
 		ResetPersistentVoxelBatch();
@@ -12269,6 +12275,7 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		if (actor.active)
 		{
 			activeKeys.insert(actor.identityKey);
+			mLastPerfShellTraceStats.persistentVoxelAsActors++;
 		}
 	}
 
@@ -12306,6 +12313,7 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 			continue;
 		}
 
+		mLastPerfShellTraceStats.persistentVoxelAsBuilds++;
 		if (!BuildBottomLevelAccelerationStructure(
 			resource.vertexBuffer,
 			resource.indexBuffer,
@@ -16192,6 +16200,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 	uint32_t dynamicMaterialCount,
 	const char* reason)
 {
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneDataSetMs);
+	mLastPerfShellTraceStats.sceneDataSetCalls++;
 	SetCurrentSceneDataDescriptorsInitialized(false);
 	bool waitedForWrites = false;
 	const auto ensureStructuredBufferBatched = [&](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
@@ -23978,6 +23988,7 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 	NRIAccelerationStructureResource& outAccelerationStructure,
 	bool updateDynamicPerfStats)
 {
+	Clocker clock(NriPTAcceleration);
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicAsMs);
 	if (updateDynamicPerfStats)
 	{
@@ -24321,6 +24332,10 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	uint32_t* outTlasInstanceCount,
 	bool updateLiveState)
 {
+	Clocker clock(NriPTAcceleration);
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.worldTlasMs);
+	mLastPerfShellTraceStats.worldTlasBuildCalls++;
+	mLastPerfShellTraceStats.worldTlasInstanceCount = (uint32_t)instances.size();
 	if (instances.empty())
 	{
 		return false;

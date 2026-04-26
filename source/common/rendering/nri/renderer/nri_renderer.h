@@ -340,6 +340,9 @@ public:
 		double dynamicAsScratchMs = 0.0;
 		double dynamicAsBuildMs = 0.0;
 		double dynamicAsBarrierMs = 0.0;
+		double persistentVoxelAsMs = 0.0;
+		double worldTlasMs = 0.0;
+		double sceneDataSetMs = 0.0;
 		double restoreStaticSceneMs = 0.0;
 		double copyFinalMs = 0.0;
 		double sceneTextureLookupMs = 0.0;
@@ -514,6 +517,12 @@ public:
 		uint32_t dynamicAsPrimitiveCount = 0;
 		uint32_t dynamicAsVertexCount = 0;
 		uint32_t dynamicAsIndexCount = 0;
+		uint32_t persistentVoxelAsCalls = 0;
+		uint32_t persistentVoxelAsBuilds = 0;
+		uint32_t persistentVoxelAsActors = 0;
+		uint32_t worldTlasBuildCalls = 0;
+		uint32_t worldTlasInstanceCount = 0;
+		uint32_t sceneDataSetCalls = 0;
 		uint32_t sceneTextureCacheCount = 0;
 		uint32_t sceneTextureCacheMisses = 0;
 		uint32_t sceneTextureCacheInserts = 0;

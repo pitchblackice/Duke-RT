@@ -1912,6 +1912,21 @@ namespace
 			return true;
 		}
 
+		const unsigned int indexCount = mesh->indices.Size();
+		const uint32_t triangleCount = indexCount / 3u;
+		const bool cacheSurfaceUpdate = updatePersistentCache && cacheLookup.stability != VoxelActorStability::Stable;
+		if (!TrySpendVoxelTriangleBudget(triangleCount, budget))
+		{
+			if (cacheSurfaceUpdate)
+			{
+				stats.voxelCacheNotCaptured++;
+				return true;
+			}
+
+			CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
+			return true;
+		}
+
 		SurfaceRef exactSurface = {};
 		const bool hasExactSurface = BuildVoxelMeshSurface(sprite, drawListType, *mesh, voxelMaterial, exactSurface);
 		if (!hasExactSurface)
@@ -1919,16 +1934,9 @@ namespace
 			return false;
 		}
 
-		if (updatePersistentCache && cacheLookup.stability != VoxelActorStability::Stable)
+		if (cacheSurfaceUpdate)
 		{
 			StoreVoxelActorCacheSurface(cacheLookup, exactSurface, stats);
-			return true;
-		}
-
-		const unsigned int indexCount = mesh->indices.Size();
-		if (!TrySpendVoxelTriangleBudget(indexCount / 3u, budget))
-		{
-			CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
 			return true;
 		}
 
