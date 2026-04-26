@@ -9,6 +9,7 @@ set "OVERLAY_DIR=%DIST_ROOT%\release-overlay"
 if not exist "%OVERLAY_DIR%" set "OVERLAY_DIR=%DIST_ROOT%\default-overlay"
 set "RAZE_EXE=%DIST_ROOT%\raze.exe"
 set "PREFLIGHT_PS1=%DIST_ROOT%\tools\dist\Prepare-CommercialNormals.ps1"
+set "LAUNCH_VARS=%DIST_ROOT%\generated-content\state\launch-duke-rt.cmdvars"
 
 if not exist "%RAZE_EXE%" (
     set "DIST_ROOT=%SCRIPT_DIR%\..\.."
@@ -18,6 +19,7 @@ if not exist "%RAZE_EXE%" (
     set "RAZE_EXE=%DIST_ROOT%\build\terminal-release\raze.exe"
     if not exist "%RAZE_EXE%" set "RAZE_EXE=%DIST_ROOT%\build\terminal-ninja\raze.exe"
     set "PREFLIGHT_PS1=%DIST_ROOT%\tools\dist\Prepare-CommercialNormals.ps1"
+    set "LAUNCH_VARS=%DIST_ROOT%\generated-content\state\launch-duke-rt.cmdvars"
 )
 
 if not exist "%RAZE_EXE%" (
@@ -71,6 +73,16 @@ if /I "%~1"=="-SourceRoot" (
     shift
     goto parse_args
 )
+if /I "%~1"=="-GameRoot" (
+    if "%~2"=="" (
+        echo [duke-rt] -GameRoot requires a path argument.
+        exit /b 1
+    )
+    set "PREFLIGHT_ARGS=%PREFLIGHT_ARGS% -GameRoot ""%~2"""
+    shift
+    shift
+    goto parse_args
+)
 if /I "%~1"=="-OverlayDir" (
     if "%~2"=="" (
         echo [duke-rt] -OverlayDir requires a path argument.
@@ -94,11 +106,23 @@ if not exist "%OVERLAY_DIR%" (
     exit /b 1
 )
 
-powershell -ExecutionPolicy Bypass -File "%PREFLIGHT_PS1%" -LaunchRoot "%DIST_ROOT%" -OverlayDir "%OVERLAY_DIR%" %PREFLIGHT_ARGS%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PREFLIGHT_PS1%" -LaunchRoot "%DIST_ROOT%" -OverlayDir "%OVERLAY_DIR%" -LaunchVarsPath "%LAUNCH_VARS%" %PREFLIGHT_ARGS%
 if errorlevel 1 (
-    echo [duke-rt] content preflight failed.
+    echo [duke-rt] content preflight failed; a valid DUKE3D.GRP path is required.
     exit /b 1
 )
 
-"%RAZE_EXE%" -file "%OVERLAY_DIR%" %GAME_ARGS%
+if not exist "%LAUNCH_VARS%" (
+    echo [duke-rt] preflight did not write launch state: "%LAUNCH_VARS%"
+    exit /b 1
+)
+
+call "%LAUNCH_VARS%"
+
+if not exist "%DUKE_RT_GRP%" (
+    echo [duke-rt] resolved DUKE3D.GRP was not found: "%DUKE_RT_GRP%"
+    exit /b 1
+)
+
+"%RAZE_EXE%" -gamegrp "%DUKE_RT_GRP%" -file "%OVERLAY_DIR%" %GAME_ARGS%
 exit /b %errorlevel%
