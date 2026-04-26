@@ -12,6 +12,7 @@
 
 EXTERN_CVAR(Int, hw_lightmode)
 EXTERN_CVAR(Float, nri_ptfullbrightboost)
+EXTERN_CVAR(Float, nri_voxelemissionboost)
 
 namespace
 {
@@ -333,6 +334,11 @@ namespace
 		return std::clamp((float)nri_ptfullbrightboost, 0.50f, 8.00f);
 	}
 
+	float GetVoxelEmissionBoostScale()
+	{
+		return 1.0f + std::max((float)nri_voxelemissionboost, 0.0f);
+	}
+
 	MaterialLightingMetadata BuildMaterialLightingMetadata(
 		const SurfaceRef& surface,
 		const MaterialData& material,
@@ -346,8 +352,13 @@ namespace
 		uint32_t roughnessTextureIndex,
 		uint64_t roughnessContentKey)
 	{
+		const MaterialRef& materialRef = surface.material;
+		const bool inheritedEmissiveSource = materialRef.emissiveSourceTexture != nullptr && materialRef.emissiveSourceTexture != materialRef.texture;
+		FGameTexture* lightingTexture = inheritedEmissiveSource ? materialRef.emissiveSourceTexture : materialRef.texture;
+		FGameTexture* averageTexture = materialRef.texture != nullptr ? materialRef.texture : lightingTexture;
+
 		MaterialLightingMetadata metadata = {};
-		metadata.texture = surface.material.texture;
+		metadata.texture = lightingTexture != nullptr ? lightingTexture : materialRef.texture;
 		metadata.textureContentKey = textureContentKey;
 		metadata.textureIndex = material.textureIndex;
 		metadata.glowmapTextureIndex = glowmapTextureIndex;
@@ -359,7 +370,7 @@ namespace
 		metadata.sourceType = surface.provenance.sourceType;
 		metadata.sectorIndex = surface.provenance.sectorIndex;
 		metadata.actorIndex = surface.provenance.actorIndex;
-		metadata.shade = surface.material.shade;
+		metadata.shade = materialRef.shade;
 		metadata.alpha = material.alpha;
 		metadata.lightLevel = material.lightLevel;
 		metadata.materialClass = material.materialClass;
@@ -373,29 +384,29 @@ namespace
 			metadata.lightingFlags |= MaterialLightingFlag_MaterialFullbright;
 		}
 
-		if (surface.material.texture != nullptr)
+		if (lightingTexture != nullptr)
 		{
-			metadata.textureId = (uint32_t)surface.material.texture->GetID().GetIndex();
-			if (surface.material.texture->isFullbright())
+			metadata.textureId = (uint32_t)lightingTexture->GetID().GetIndex();
+			if (lightingTexture->isFullbright())
 			{
 				metadata.lightingFlags |= MaterialLightingFlag_TextureFullbright;
 			}
-			if (surface.material.texture->isGlowing())
+			if (lightingTexture->isGlowing())
 			{
 				metadata.lightingFlags |= MaterialLightingFlag_TextureGlowing;
-				surface.material.texture->GetGlowColor(metadata.glowColor);
+				lightingTexture->GetGlowColor(metadata.glowColor);
 			}
-			if (surface.material.texture->isAutoGlowing())
+			if (lightingTexture->isAutoGlowing())
 			{
 				metadata.lightingFlags |= MaterialLightingFlag_TextureAutoGlowing;
 			}
-			if (surface.material.texture->GetGlowmap() != nullptr)
+			if (lightingTexture->GetGlowmap() != nullptr)
 			{
 				metadata.lightingFlags |= MaterialLightingFlag_HasGlowmap;
 				metadata.glowmapContentKey = glowmapContentKey;
 			}
 
-			if (!TryGetAverageTextureColor(surface.material.texture, metadata.averageColor))
+			if (!TryGetAverageTextureColor(averageTexture, metadata.averageColor))
 			{
 				metadata.averageColor[0] = 1.0f;
 				metadata.averageColor[1] = 1.0f;
@@ -436,6 +447,10 @@ namespace
 				metadata.emissiveColor[0] = metadata.glowColor[0] > 0.0f ? metadata.glowColor[0] : metadata.averageColor[0];
 				metadata.emissiveColor[1] = metadata.glowColor[1] > 0.0f ? metadata.glowColor[1] : metadata.averageColor[1];
 				metadata.emissiveColor[2] = metadata.glowColor[2] > 0.0f ? metadata.glowColor[2] : metadata.averageColor[2];
+				if (inheritedEmissiveSource && (metadata.lightingFlags & MaterialLightingFlag_HasGlowmap) != 0)
+				{
+					metadata.emissiveIntensity *= GetVoxelEmissionBoostScale();
+				}
 			}
 		}
 
@@ -468,10 +483,17 @@ namespace
 		uint64_t metallicContentKey = 0;
 		uint32_t roughnessTextureIndex = UINT32_MAX;
 		uint64_t roughnessContentKey = 0;
-		if (materialRef.texture != nullptr && materialRef.texture->GetGlowmap() != nullptr)
+		const bool inheritedEmissiveSource = materialRef.emissiveSourceTexture != nullptr && materialRef.emissiveSourceTexture != materialRef.texture;
+		FGameTexture* lightingTexture = inheritedEmissiveSource ? materialRef.emissiveSourceTexture : materialRef.texture;
+		if (!inheritedEmissiveSource && materialRef.texture != nullptr && materialRef.texture->GetGlowmap() != nullptr)
 		{
 			glowmapTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetGlowmap(), false, textureLookup, outMaterials);
 			glowmapContentKey = outMaterials.textures[glowmapTextureIndex].key;
+		}
+		else if (inheritedEmissiveSource && lightingTexture != nullptr && lightingTexture->GetGlowmap() != nullptr)
+		{
+			glowmapTextureIndex = material.textureIndex;
+			glowmapContentKey = outMaterials.textures[material.textureIndex].key;
 		}
 		if (materialRef.texture != nullptr && materialRef.texture->GetMetallic() != nullptr)
 		{

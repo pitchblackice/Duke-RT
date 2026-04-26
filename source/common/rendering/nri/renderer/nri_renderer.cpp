@@ -1264,7 +1264,7 @@ public:
 
 		captureDi->CreateScene(false);
 		nri_scene::SceneView capturedView;
-		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, capturedView);
+		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, capturedView, nri_scene::DynamicVoxelCaptureMode::ReadOnlyCache);
 		captureDi->EndDrawInfo();
 		if (!hasCapture)
 		{
@@ -2632,6 +2632,14 @@ CUSTOM_CVAR(Float, nri_ptglowblend, 0.20625f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 3.0f;
 	}
 	NotifyActiveGlowControlChange();
+}
+CUSTOM_CVAR(Float, nri_voxelemissionboost, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+	NotifyActiveMaterialLightingCalibrationChange();
 }
 CUSTOM_CVAR(Float, nri_ptfullbrightboost, 1.50781f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
@@ -9749,8 +9757,9 @@ void NRIRenderer::PrintStatus() const
 		(float)nri_ptnightvisionred,
 		(float)nri_ptnightvisiongreen,
 		(float)nri_ptnightvisionblue);
-	Printf("NRI PT material calibration: fullbright_boost=%.3f\n",
-		(float)nri_ptfullbrightboost);
+	Printf("NRI PT material calibration: fullbright_boost=%.3f voxel_emission_boost=%.3f\n",
+		(float)nri_ptfullbrightboost,
+		(float)nri_voxelemissionboost);
 	if (outputPolicy.hdrSwapChainActive)
 	{
 		const float safeDisplaySdr = std::max(outputPolicy.displaySdrLuminance, 1.0f);

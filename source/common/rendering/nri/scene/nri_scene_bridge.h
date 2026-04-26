@@ -175,6 +175,7 @@ struct DynamicCapturePerfStats
 struct MaterialRef
 {
 	FGameTexture* texture = nullptr;
+	FGameTexture* emissiveSourceTexture = nullptr;
 	int palette = 0;
 	int shade = 0;
 	float alpha = 1.0f;
@@ -219,13 +220,20 @@ struct PersistentVoxelCacheEntryView
 	const SurfaceRef* surface = nullptr;
 };
 
+enum class DynamicVoxelCaptureMode : uint8_t
+{
+	Authoritative,
+	ReadOnlyCache,
+	Transient,
+};
+
 SceneDebugStats CollectDebugStats(HWDrawInfo& di);
 MaterialRef MakeMaterialRef(FGameTexture* texture, int palette, int shade, float alpha, uint32_t extraFlags);
 void UpdateSceneSky(SceneView& outView, FGameTexture* texture, uint32_t fallbackColor, PTSkySourceType sourceType);
 void ResetSkyPerfStats();
 SkyPerfStats ConsumeSkyPerfStats();
 DynamicCapturePerfStats ConsumeDynamicCapturePerfStats();
-bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView);
+bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView, DynamicVoxelCaptureMode voxelCaptureMode = DynamicVoxelCaptureMode::Authoritative);
 bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outView);
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView);

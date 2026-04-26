@@ -1485,6 +1485,17 @@ namespace
 		}
 	}
 
+	FGameTexture* GetVoxelReplacementEmissiveSourceTexture(const HWSprite& sprite)
+	{
+		if (sprite.Sprite == nullptr)
+		{
+			return nullptr;
+		}
+
+		FGameTexture* sourceTexture = TexMan.GetGameTexture(sprite.Sprite->spritetexture());
+		return sourceTexture != nullptr && sourceTexture->isValid() ? sourceTexture : nullptr;
+	}
+
 	void CaptureVoxelProxySprite(const HWSprite& sprite, uint32_t drawListType, FGameTexture* voxelTexture, std::vector<SurfaceRef>& outSprites)
 	{
 		static const int faces[6][4] = {
@@ -1506,6 +1517,7 @@ namespace
 		{
 			SurfaceRef surface = {};
 			surface.material = MakeMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
+			surface.material.emissiveSourceTexture = GetVoxelReplacementEmissiveSourceTexture(sprite);
 			surface.material.flags |= MaterialFlag_PointSampled;
 			surface.material.flags &= ~MaterialFlag_Indexed;
 			surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
@@ -1519,9 +1531,10 @@ namespace
 		}
 	}
 
-	MaterialRef MakeVoxelPaletteMaterialRef(FGameTexture* voxelTexture, int palette, int shade, float alpha, uint32_t extraFlags)
+	MaterialRef MakeVoxelPaletteMaterialRef(FGameTexture* voxelTexture, FGameTexture* emissiveSourceTexture, int palette, int shade, float alpha, uint32_t extraFlags)
 	{
 		MaterialRef material = MakeMaterialRef(voxelTexture, palette, shade, alpha, extraFlags | MaterialFlag_PointSampled);
+		material.emissiveSourceTexture = emissiveSourceTexture;
 		material.flags &= ~MaterialFlag_Indexed;
 		return material;
 	}
@@ -1613,6 +1626,7 @@ namespace
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.shade);
 		hash = HashCombine64(hash, QuantizeSignatureFloat(material.alpha, 65535.0));
 		hash = HashCombine64(hash, (uint64_t)material.flags);
+		hash = HashCombine64(hash, material.emissiveSourceTexture != nullptr ? (uint64_t)(uint32_t)material.emissiveSourceTexture->GetID().GetIndex() : 0ull);
 		return hash;
 	}
 
@@ -1693,6 +1707,47 @@ namespace
 		stats.voxelStableSplitLive++;
 		lookup.stability = VoxelActorStability::Changed;
 		return lookup;
+	}
+
+	bool TryConsumeReadOnlyVoxelActorCacheSurface(const HWSprite& sprite, FGameTexture* voxelTexture, const MaterialRef& material, SceneDebugStats& stats)
+	{
+		VoxelActorCacheLookup lookup = {};
+		if (!TryBuildVoxelActorIdentity(sprite, lookup))
+		{
+			stats.voxelStableUncacheable++;
+			return false;
+		}
+
+		stats.voxelStableCandidates++;
+		const uint64_t geometrySignature = BuildVoxelActorGeometrySignature(sprite);
+		const uint64_t materialSignature = BuildVoxelActorMaterialSignature(voxelTexture, material);
+		const uint64_t signature = BuildVoxelActorSignature(geometrySignature, materialSignature);
+		auto found = gVoxelActorCache.find(lookup.identityKey);
+		if (found == gVoxelActorCache.end() || !found->second.hasSurface)
+		{
+			stats.voxelStableSignatureMisses++;
+			return false;
+		}
+
+		const VoxelActorCacheEntry& entry = found->second;
+		if (entry.signature != signature && entry.geometrySignature != geometrySignature)
+		{
+			stats.voxelStableSignatureChanges++;
+			return false;
+		}
+
+		if (entry.signature != signature)
+		{
+			stats.voxelStableSignatureChanges++;
+		}
+		else
+		{
+			stats.voxelStableSignatureHits++;
+		}
+
+		stats.voxelStableSplitStable++;
+		stats.voxelCacheSurfaceHits++;
+		return true;
 	}
 
 	void NormalizeCachedSurfacePreviousPositions(SurfaceRef& surface)
@@ -2000,7 +2055,7 @@ namespace
 		return true;
 	}
 
-	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats, bool updatePersistentCache)
+	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats, DynamicVoxelCaptureMode captureMode)
 	{
 		if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
 		{
@@ -2014,9 +2069,19 @@ namespace
 			return false;
 		}
 
-		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
+		FGameTexture* emissiveSourceTexture = GetVoxelReplacementEmissiveSourceTexture(sprite);
+		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, emissiveSourceTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
+		if (captureMode == DynamicVoxelCaptureMode::ReadOnlyCache)
+		{
+			if (!TryConsumeReadOnlyVoxelActorCacheSurface(sprite, voxelTexture, voxelMaterial, stats))
+			{
+				stats.voxelCacheNotCaptured++;
+			}
+			return true;
+		}
+
 		VoxelActorCacheLookup cacheLookup = {};
-		if (updatePersistentCache)
+		if (captureMode == DynamicVoxelCaptureMode::Authoritative)
 		{
 			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelClassifyMs);
 			cacheLookup = TrackVoxelActorSignature(sprite, voxelTexture, voxelMaterial, stats);
@@ -2026,7 +2091,7 @@ namespace
 			return true;
 		}
 
-		const bool cacheSurfaceUpdate = updatePersistentCache && cacheLookup.stability != VoxelActorStability::Stable;
+		const bool cacheSurfaceUpdate = captureMode == DynamicVoxelCaptureMode::Authoritative && cacheLookup.stability != VoxelActorStability::Stable;
 		if (cacheSurfaceUpdate && !TrySpendVoxelCacheUpdateBudget(budget))
 		{
 			stats.voxelCacheNotCaptured++;
@@ -2114,7 +2179,7 @@ namespace
 		return budget;
 	}
 
-	void CaptureModelSprites(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
+	void CaptureModelSprites(HWDrawInfo& di, HWDrawList& list, uint32_t drawListType, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats, DynamicVoxelCaptureMode captureMode)
 	{
 		const bool rootMeshCapture = BeginVoxelMeshCacheFrame();
 		std::vector<HWSprite*> sprites;
@@ -2165,7 +2230,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats, true))
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats, captureMode))
 			{
 				stats.voxelProxyDrawItems++;
 			}
@@ -2197,7 +2262,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats, false))
+			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats, DynamicVoxelCaptureMode::Transient))
 			{
 				stats.voxelProxyDrawItems++;
 			}
@@ -2333,13 +2398,17 @@ SceneDebugStats CollectDebugStats(HWDrawInfo& di)
 	return stats;
 }
 
-bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
+bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView, DynamicVoxelCaptureMode voxelCaptureMode)
 {
 	outView = {};
 	outView.drawInfo = &di;
 	gDynamicCapturePerfStats.calls++;
 	const bool rootVoxelCacheFrame = [&]()
 	{
+		if (voxelCaptureMode != DynamicVoxelCaptureMode::Authoritative)
+		{
+			return false;
+		}
 		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.voxelFrameMs);
 		return BeginVoxelActorCacheFrame();
 	}();
@@ -2377,8 +2446,9 @@ bool CaptureDynamicScene(HWDrawInfo& di, SceneView& outView)
 	}
 	{
 		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelSpritesMs);
-		CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
+		CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats, voxelCaptureMode);
 	}
+	if (voxelCaptureMode == DynamicVoxelCaptureMode::Authoritative)
 	{
 		ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.voxelFrameMs);
 		EndVoxelActorCacheFrame(outView.stats, rootVoxelCacheFrame);
@@ -2538,7 +2608,7 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView)
 	CaptureSpriteFlats(di, di.drawlists[GLDL_MASKEDSLOPEFLATS], GLDL_MASKEDSLOPEFLATS, outView.opaqueFlats);
 
 	CaptureFacingSprites(di, di.drawlists[GLDL_TRANSLUCENT], GLDL_TRANSLUCENT, outView.opaqueSprites);
-	CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats);
+	CaptureModelSprites(di, di.drawlists[GLDL_MODELS], GLDL_MODELS, outView.opaqueSprites, outView.stats, DynamicVoxelCaptureMode::Authoritative);
 	CapturePortalViews(di, outView);
 	EndVoxelActorCacheFrame(outView.stats, rootVoxelCacheFrame);
 
