@@ -96,7 +96,19 @@ namespace
 		bool built = false;
 		bool valid = false;
 	};
+
+	struct VoxelMeshVariantSurfaceCacheEntry
+	{
+		SurfaceRef canonicalSurface;
+		uint64_t meshVariantHash = 0;
+		int32_t sourcePicnum = -1;
+		int32_t resolvedVoxelIndex = -1;
+		bool built = false;
+		bool valid = false;
+	};
+
 	std::unordered_map<const FVoxelModel*, VoxelMeshCacheEntry> gVoxelMeshCache;
+	std::unordered_map<uint64_t, VoxelMeshVariantSurfaceCacheEntry> gVoxelMeshVariantSurfaceCache;
 	uint64_t gVoxelActorCacheFrame = 0;
 	uint32_t gVoxelActorCacheCaptureDepth = 0;
 	uint64_t gVoxelActorCacheSerial = 1;
@@ -1522,6 +1534,20 @@ namespace
 		return vertex;
 	}
 
+	CapturedVertex MakeCapturedLocalModelVertex(const FModelVertex& source)
+	{
+		CapturedVertex vertex = {};
+		vertex.position[0] = source.x;
+		vertex.position[1] = source.y;
+		vertex.position[2] = source.z;
+		vertex.prevPosition[0] = source.x;
+		vertex.prevPosition[1] = source.y;
+		vertex.prevPosition[2] = source.z;
+		vertex.uv[0] = source.u;
+		vertex.uv[1] = source.v;
+		return vertex;
+	}
+
 	void AddVoxelProxyFace(const VSMatrix& matrix, const float* extents, const int* indices, SurfaceRef& outSurface)
 	{
 		static const float corners[8][3] = {
@@ -2616,16 +2642,14 @@ namespace
 		return true;
 	}
 
-	bool BuildVoxelMeshSurface(const HWSprite& sprite, uint32_t drawListType, const FVoxelMeshData& mesh, const MaterialRef& voxelMaterial, SurfaceRef& outSurface)
+	bool BuildCanonicalVoxelMeshSurface(const FVoxelMeshData& mesh, SurfaceRef& outSurface)
 	{
 		const unsigned int indexCount = mesh.indices.Size();
 		outSurface = {};
-		outSurface.material = voxelMaterial;
-		outSurface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, outSurface.material.flags);
 		outSurface.vertices.reserve(mesh.vertices.Size());
 		for (unsigned int i = 0; i < mesh.vertices.Size(); ++i)
 		{
-			outSurface.vertices.push_back(MakeCapturedModelVertex(sprite.rotmat, mesh.vertices[i]));
+			outSurface.vertices.push_back(MakeCapturedLocalModelVertex(mesh.vertices[i]));
 		}
 
 		const unsigned int vertexCount = mesh.vertices.Size();
@@ -2650,11 +2674,105 @@ namespace
 			return false;
 		}
 
+		return true;
+	}
+
+	const SurfaceRef* GetCachedVoxelMeshVariantSurface(
+		const VoxelActorCacheLookup& lookup,
+		const FVoxelMeshData& mesh)
+	{
+		if (lookup.meshVariantHash == 0)
+		{
+			return nullptr;
+		}
+
+		auto found = gVoxelMeshVariantSurfaceCache.find(lookup.meshVariantHash);
+		if (found == gVoxelMeshVariantSurfaceCache.end())
+		{
+			VoxelMeshVariantSurfaceCacheEntry entry = {};
+			entry.meshVariantHash = lookup.meshVariantHash;
+			entry.sourcePicnum = lookup.sourcePicnum;
+			entry.resolvedVoxelIndex = lookup.resolvedVoxelIndex;
+			entry.built = true;
+			entry.valid = BuildCanonicalVoxelMeshSurface(mesh, entry.canonicalSurface);
+			gDynamicCapturePerfStats.voxelCanonicalSurfaceBuilds++;
+			if (!entry.valid)
+			{
+				gDynamicCapturePerfStats.voxelCanonicalSurfaceInvalid++;
+			}
+			found = gVoxelMeshVariantSurfaceCache.emplace(lookup.meshVariantHash, std::move(entry)).first;
+		}
+		else
+		{
+			gDynamicCapturePerfStats.voxelCanonicalSurfaceHits++;
+		}
+
+		const VoxelMeshVariantSurfaceCacheEntry& entry = found->second;
+		if (!entry.built || !entry.valid)
+		{
+			return nullptr;
+		}
+		return &entry.canonicalSurface;
+	}
+
+	bool BuildVoxelMeshSurfaceFromCanonical(
+		const HWSprite& sprite,
+		uint32_t drawListType,
+		const SurfaceRef& canonicalSurface,
+		const MaterialRef& voxelMaterial,
+		SurfaceRef& outSurface)
+	{
+		outSurface = {};
+		outSurface.material = voxelMaterial;
+		outSurface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, outSurface.material.flags);
+		outSurface.vertices.reserve(canonicalSurface.vertices.size());
+		for (const CapturedVertex& source : canonicalSurface.vertices)
+		{
+			CapturedVertex vertex = {};
+			TransformModelPoint(sprite.rotmat, source.position[0], source.position[1], source.position[2], vertex, source.uv[0], source.uv[1]);
+			outSurface.vertices.push_back(vertex);
+		}
+		outSurface.indices = canonicalSurface.indices;
+		if (outSurface.indices.empty())
+		{
+			return false;
+		}
+
 		if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
 		{
 			ApplyActorPreviousTransform(outSurface, sprite.Sprite->ownerActor);
 		}
 		return true;
+	}
+
+	bool BuildVoxelMeshSurface(
+		const HWSprite& sprite,
+		uint32_t drawListType,
+		const VoxelActorCacheLookup& lookup,
+		const FVoxelMeshData& mesh,
+		const MaterialRef& voxelMaterial,
+		SurfaceRef& outSurface)
+	{
+		VoxelActorCacheLookup effectiveLookup = lookup;
+		if (effectiveLookup.meshVariantHash == 0)
+		{
+			const VoxelMeshVariantKey meshVariantKey = BuildVoxelMeshVariantKey(sprite);
+			effectiveLookup.meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
+			effectiveLookup.sourcePicnum = sprite.Sprite != nullptr ? sprite.Sprite->spritetexture().GetIndex() : -1;
+			effectiveLookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
+		}
+
+		if (const SurfaceRef* canonicalSurface = GetCachedVoxelMeshVariantSurface(effectiveLookup, mesh))
+		{
+			return BuildVoxelMeshSurfaceFromCanonical(sprite, drawListType, *canonicalSurface, voxelMaterial, outSurface);
+		}
+
+		SurfaceRef canonicalSurface = {};
+		if (!BuildCanonicalVoxelMeshSurface(mesh, canonicalSurface))
+		{
+			return false;
+		}
+		return BuildVoxelMeshSurfaceFromCanonical(sprite, drawListType, canonicalSurface, voxelMaterial, outSurface);
 	}
 
 	bool ShouldUseTransientVoxelActorCapture(const HWSprite& sprite)
@@ -2789,7 +2907,7 @@ namespace
 		bool hasExactSurface = false;
 		{
 			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelSurfaceMs);
-			hasExactSurface = BuildVoxelMeshSurface(sprite, drawListType, *mesh, voxelMaterial, exactSurface);
+			hasExactSurface = BuildVoxelMeshSurface(sprite, drawListType, cacheLookup, *mesh, voxelMaterial, exactSurface);
 		}
 		if (!hasExactSurface)
 		{

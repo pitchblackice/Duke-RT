@@ -3305,7 +3305,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 		if (nri_voxelstats)
 		{
 			Printf(
-				"PERF pt voxel reuse NRI: frame=%llu actor_entries=%u actor_surfaces=%u unique_mesh=%u unique_material=%u actor_prims=%u dup_vertex_bytes=%llu dup_index_bytes=%llu dup_primitive_bytes=%llu dup_total_bytes=%llu mesh_builds=%u surface_bakes=%u persistent_uploads=%u persistent_actor_uploads=%u blas_actor_builds=%u blas_unique_mesh_builds=%u\n",
+				"PERF pt voxel reuse NRI: frame=%llu actor_entries=%u actor_surfaces=%u unique_mesh=%u unique_material=%u actor_prims=%u dup_vertex_bytes=%llu dup_index_bytes=%llu dup_primitive_bytes=%llu dup_total_bytes=%llu mesh_builds=%u canonical_surface_builds=%u canonical_surface_hits=%u canonical_surface_invalid=%u surface_bakes=%u persistent_uploads=%u persistent_actor_uploads=%u blas_actor_builds=%u blas_unique_mesh_builds=%u\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				shell.voxelCacheActorEntries,
 				shell.voxelCacheActorSurfaces,
@@ -3317,6 +3317,9 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				(unsigned long long)shell.voxelCacheDuplicatedPrimitiveBytes,
 				(unsigned long long)shell.voxelCacheDuplicatedTotalBytes,
 				shell.dynamicCaptureVoxelMeshBuilds,
+				shell.dynamicCaptureVoxelCanonicalSurfaceBuilds,
+				shell.dynamicCaptureVoxelCanonicalSurfaceHits,
+				shell.dynamicCaptureVoxelCanonicalSurfaceInvalid,
 				shell.dynamicCaptureVoxelCacheStores + shell.dynamicCaptureVoxelCacheRebuilds,
 				shell.persistentVoxelOnboardingAdmittedCount,
 				resource.scenePersistentVoxelActorUploadCalls,

@@ -576,6 +576,9 @@ public:
 		uint32_t dynamicCaptureVoxelMeshBuilds = 0;
 		uint32_t dynamicCaptureVoxelMeshDeferred = 0;
 		uint32_t dynamicCaptureVoxelMeshInvalid = 0;
+		uint32_t dynamicCaptureVoxelCanonicalSurfaceBuilds = 0;
+		uint32_t dynamicCaptureVoxelCanonicalSurfaceHits = 0;
+		uint32_t dynamicCaptureVoxelCanonicalSurfaceInvalid = 0;
 		uint32_t voxelCacheActorEntries = 0;
 		uint32_t voxelCacheActorSurfaces = 0;
 		uint32_t voxelCacheUniqueMeshKeys = 0;
