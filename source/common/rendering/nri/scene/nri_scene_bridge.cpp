@@ -37,6 +37,7 @@ namespace
 	using namespace nri_scene;
 
 	constexpr float kAttachedWallSpriteDepthNudge = 0.01f;
+	constexpr uint32_t kTransientVoxelLiveSurfacePrimitiveLimit = 20000;
 
 	SkyPerfStats gSkyPerfStats = {};
 	DynamicCapturePerfStats gDynamicCapturePerfStats = {};
@@ -2620,6 +2621,8 @@ namespace
 			const unsigned int previousRebuilds = stats.voxelCacheSurfaceRebuilds;
 			const unsigned int previousTransformRebakes = stats.voxelCacheTransformRebakes;
 			const bool wasPersistentReady = cacheLookup.entry != nullptr && cacheLookup.entry->persistentReady;
+			const bool hadSurface = cacheLookup.entry != nullptr && cacheLookup.entry->hasSurface;
+			const uint32_t exactPrimitiveCount = CountSurfacePrimitives(exactSurface);
 			{
 				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelStoreMs);
 				StoreVoxelActorCacheSurface(cacheLookup, exactSurface, stats);
@@ -2627,7 +2630,8 @@ namespace
 			gDynamicCapturePerfStats.voxelCacheStores += stats.voxelCacheSurfaceStores - previousStores;
 			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheSurfaceRebuilds - previousRebuilds;
 			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheTransformRebakes - previousTransformRebakes;
-			if (!wasPersistentReady)
+			if (!wasPersistentReady &&
+				(hadSurface || exactPrimitiveCount <= kTransientVoxelLiveSurfacePrimitiveLimit))
 			{
 				outSprites.push_back(std::move(exactSurface));
 			}
