@@ -701,6 +701,21 @@ uint ResolvePrimitiveIndex(SceneInstanceData instanceData, uint localPrimitiveIn
 	return instanceData.primitiveOffset + localPrimitiveIndex;
 }
 
+uint ResolvePrimitiveMaterialIndex(SceneInstanceData instanceData, PrimitiveData primitive)
+{
+	if (instanceData.dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		uint localMaterialIndex = primitive.materialIndex;
+		if (instanceData.reserved1 != 0xffffffffu && instanceData.reserved1 > 0u)
+		{
+			localMaterialIndex = min(localMaterialIndex, instanceData.reserved1 - 1u);
+		}
+		return instanceData.reserved0 + localMaterialIndex;
+	}
+
+	return primitive.materialIndex;
+}
+
 bool IntersectPrimitiveTriangle(float3 origin, float3 direction, uint primitiveIndex, out float hitT, out float3 barycentrics)
 {
 	hitT = 0.0;
@@ -843,6 +858,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const SceneInstanceData instanceData = GetSceneInstanceData(committedInstanceId);
 		const uint primitiveIndex = ResolvePrimitiveIndex(instanceData, rayQuery.CommittedPrimitiveIndex());
 		const PrimitiveData primitive = GetPrimitiveData(instanceData.dataSource, primitiveIndex);
+		const uint materialIndex = ResolvePrimitiveMaterialIndex(instanceData, primitive);
 		const float committedDistance = rayQuery.CommittedRayT();
 		if (!allowReflectionOnlySurfaces && IsReflectionOnlyPrimitive(primitive))
 		{
@@ -864,7 +880,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			continue;
 		}
 
-		if (gateVisibleChunks && ShouldRejectHiddenStaticFlat(primitive.materialIndex, instanceData.dataSource, primitive))
+		if (gateVisibleChunks && ShouldRejectHiddenStaticFlat(materialIndex, instanceData.dataSource, primitive))
 		{
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
@@ -874,7 +890,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			continue;
 		}
 
-		if (ShouldIgnoreOneWayHit(primitive.materialIndex, instanceData.dataSource, primitive.normal, direction))
+		if (ShouldIgnoreOneWayHit(materialIndex, instanceData.dataSource, primitive.normal, direction))
 		{
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
@@ -887,7 +903,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const float2 bary = rayQuery.CommittedTriangleBarycentrics();
 		const float3 weights = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
 		const float2 uv = primitive.uv0 * weights.x + primitive.uv1 * weights.y + primitive.uv2 * weights.z;
-		if (IsTransparentSurfaceSample(primitive.materialIndex, instanceData.dataSource, uv))
+		if (IsTransparentSurfaceSample(materialIndex, instanceData.dataSource, uv))
 		{
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
@@ -897,7 +913,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			continue;
 		}
 
-		if (ignoreNoShadowCast && !MaterialCastsShadow(GetMaterialData(primitive.materialIndex, instanceData.dataSource)))
+		if (ignoreNoShadowCast && !MaterialCastsShadow(GetMaterialData(materialIndex, instanceData.dataSource)))
 		{
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
@@ -916,8 +932,8 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
 		hitData.uv = uv;
-		hitData.normal = ResolveHitNormal(primitive.materialIndex, instanceData.dataSource, primitiveIndex, primitive.normal, uv);
-		hitData.materialIndex = primitive.materialIndex;
+		hitData.normal = ResolveHitNormal(materialIndex, instanceData.dataSource, primitiveIndex, primitive.normal, uv);
+		hitData.materialIndex = materialIndex;
 		TraceShaderStatSource(TRACE_STAT_ACCEPT_STATIC, TRACE_STAT_ACCEPT_DYNAMIC, TRACE_STAT_ACCEPT_VOXEL, instanceData.dataSource);
 		TraceShaderStatInstance(TRACE_STAT_INSTANCE_ACCEPTED_BASE, TRACE_STAT_INSTANCE_ACCEPTED_OVERFLOW, committedInstanceId);
 		return true;

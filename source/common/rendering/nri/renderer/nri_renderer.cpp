@@ -8320,7 +8320,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 							persistentVoxelInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*meshResourceIt->second.accelerationStructure.accelerationStructure);
 							instances.push_back(persistentVoxelInstance);
-							sceneInstances.push_back({ actor.primitiveOffset, NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL, 0u, UINT32_MAX });
+							sceneInstances.push_back({
+								actor.primitiveOffset,
+								NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL,
+								(bool)nri_ptvoxelsharedvariants ? actor.materialOffset : 0u,
+								(bool)nri_ptvoxelsharedvariants ? actor.materialCount : UINT32_MAX });
 							meshResourceIt->second.tlasPublished = true;
 						}
 					}
@@ -11879,10 +11883,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		uint64_t hash = 1469598103934665603ull;
 		hash = HashCombine64(hash, cacheEntry.meshKeyHash);
 		hash = HashCombine64(hash, cacheEntry.transformBasisSignature);
-		if ((bool)nri_ptvoxelsharedvariants)
-		{
-			hash = HashCombine64(hash, cacheEntry.materialKeyHash);
-		}
 		return hash;
 	};
 
@@ -12301,7 +12301,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 		auto reusableMeshResourceIt = mPersistentVoxelMeshVariantResources.find(baseMeshResourceKey);
 		if (sharedVoxelVariants &&
-			!materialSliceMoved &&
 			reusableMeshResourceIt != mPersistentVoxelMeshVariantResources.end() &&
 			reusableMeshResourceIt->second.resourceKey == baseMeshResourceKey &&
 			reusableMeshResourceIt->second.vertexCount != 0 &&
@@ -12461,7 +12460,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				primitive.indices[0] += shaderVertexOffset;
 				primitive.indices[1] += shaderVertexOffset;
 				primitive.indices[2] += shaderVertexOffset;
-				primitive.materialIndex += materialResource.materialOffset;
+				if (!sharedVoxelVariants)
+				{
+					primitive.materialIndex += materialResource.materialOffset;
+				}
 			}
 
 			if ((meshResourceChanged &&
