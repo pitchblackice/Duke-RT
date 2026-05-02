@@ -136,6 +136,7 @@ namespace
 		outView.stats.voxelCacheSurfaceHits += source.stats.voxelCacheSurfaceHits;
 		outView.stats.voxelCacheSurfaceStores += source.stats.voxelCacheSurfaceStores;
 		outView.stats.voxelCacheSurfaceRebuilds += source.stats.voxelCacheSurfaceRebuilds;
+		outView.stats.voxelCacheTransformRebakes += source.stats.voxelCacheTransformRebakes;
 		outView.stats.voxelCacheSurfaceRemoves += source.stats.voxelCacheSurfaceRemoves;
 		outView.stats.voxelCacheNotCaptured += source.stats.voxelCacheNotCaptured;
 		outView.stats.voxelCacheDeferred += source.stats.voxelCacheDeferred;

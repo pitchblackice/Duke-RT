@@ -120,6 +120,7 @@ struct SceneDebugStats
 	unsigned int voxelCacheSurfaceHits = 0;
 	unsigned int voxelCacheSurfaceStores = 0;
 	unsigned int voxelCacheSurfaceRebuilds = 0;
+	unsigned int voxelCacheTransformRebakes = 0;
 	unsigned int voxelCacheSurfaceRemoves = 0;
 	unsigned int voxelCacheNotCaptured = 0;
 	unsigned int voxelCacheDeferred = 0;
@@ -215,7 +216,10 @@ struct PersistentVoxelCacheEntryView
 	uint64_t identityKey = 0;
 	uint64_t signature = 0;
 	uint64_t geometrySignature = 0;
+	uint64_t surfaceSignature = 0;
 	uint64_t materialSignature = 0;
+	uint64_t meshKeyHash = 0;
+	uint64_t materialKeyHash = 0;
 	uint32_t primitiveCount = 0;
 	const SurfaceRef* surface = nullptr;
 };

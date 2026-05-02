@@ -1306,7 +1306,10 @@ private:
 			uint64_t identityKey = 0;
 			uint64_t signature = 0;
 			uint64_t geometrySignature = 0;
+			uint64_t surfaceSignature = 0;
 			uint64_t materialSignature = 0;
+			uint64_t meshKeyHash = 0;
+			uint64_t materialKeyHash = 0;
 			bool active = true;
 			uint32_t surfaceIndex = UINT32_MAX;
 			uint32_t primitiveOffset = 0;
@@ -1344,11 +1347,13 @@ private:
 		uint32_t materialCount = 0;
 		uint64_t sourceSerial = 0;
 		uint64_t materialUploadHash = 0;
+		uint32_t tlasReadyFrame = 0;
 		uint32_t vertexCount = 0;
 		uint32_t vertexCapacity = 0;
 		uint32_t indexCapacity = 0;
 		uint32_t primitiveCapacity = 0;
 		uint32_t materialCapacity = 0;
+		bool tlasPublished = false;
 		NRIBufferResource vertexBuffer;
 		NRIBufferResource indexBuffer;
 		NRIAccelerationStructureResource accelerationStructure;
@@ -1915,6 +1920,7 @@ private:
 	bool EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch& scratch, ResidentUploadScratchFrame& frameScratch, uint64_t requiredSize);
 	bool EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind);
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
+	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void BuildRuntimeLightClusterUpload(
 		std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
@@ -2058,6 +2064,7 @@ private:
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	PersistentVoxelBatch mPersistentVoxelBatch = {};
 	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
+	std::unordered_map<uint64_t, uint64_t> mPersistentVoxelActorRejectedSignatures;
 	uint32_t mPersistentVoxelArenaVertexCursor = 0;
 	uint32_t mPersistentVoxelArenaIndexCursor = 0;
 	uint32_t mPersistentVoxelArenaPrimitiveCursor = 0;

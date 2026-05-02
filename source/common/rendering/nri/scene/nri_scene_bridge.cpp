@@ -25,9 +25,11 @@
 EXTERN_CVAR(Bool, r_voxels)
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptactorspritetrace)
+CVAR(Bool, nri_voxelstats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeltrianglebudget, 250000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelmaxtriangles, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelcaptureactors, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelpersistentpromoteframes, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
@@ -97,12 +99,49 @@ namespace
 	uint32_t gVoxelActorCacheCaptureDepth = 0;
 	uint64_t gVoxelActorCacheSerial = 1;
 
+	struct VoxelMeshKey
+	{
+		const voxmodel_t* voxel = nullptr;
+		const FVoxelModel* model = nullptr;
+		FTextureID sourcePicnum = {};
+		int voxelIndex = -1;
+		uint32_t geometryState = 0;
+	};
+
+	struct VoxelMaterialKey
+	{
+		FGameTexture* voxelTexture = nullptr;
+		FGameTexture* emissiveSourceTexture = nullptr;
+		int palette = 0;
+		int shade = 0;
+		uint32_t alphaBits = 0;
+		uint32_t materialFlags = 0;
+	};
+
+	struct VoxelInstanceKey
+	{
+		int32_t actorIndex = -1;
+		DCoreActor* actorPtr = nullptr;
+		uint32_t actorGeneration = 0;
+	};
+
 	struct VoxelActorCacheEntry
 	{
 		uint64_t signature = 0;
 		uint64_t geometrySignature = 0;
+		uint64_t surfaceSignature = 0;
 		uint64_t materialSignature = 0;
 		uint64_t identityKey = 0;
+		uint64_t meshKeyHash = 0;
+		uint64_t materialKeyHash = 0;
+		uint64_t instanceKeyHash = 0;
+		uint64_t desiredSignature = 0;
+		uint64_t desiredMeshKeyHash = 0;
+		uint64_t desiredMaterialKeyHash = 0;
+		uint64_t desiredSurfaceSignature = 0;
+		uint64_t pendingFrame = 0;
+		uint64_t surfaceFrame = 0;
+		uint8_t pendingReason = 0;
 		int32_t actorIndex = -1;
 		uintptr_t actorPtr = 0;
 		uintptr_t voxelPtr = 0;
@@ -130,7 +169,18 @@ namespace
 		Uncacheable,
 		New,
 		Stable,
+		TransformRebake,
 		Changed,
+	};
+
+	enum class VoxelActorPendingReason : uint8_t
+	{
+		None,
+		ActorBudget,
+		MeshDeferred,
+		TriangleBudget,
+		SurfaceBuildFailed,
+		ActorNotLive,
 	};
 
 	struct VoxelActorCacheLookup
@@ -139,7 +189,11 @@ namespace
 		uint64_t identityKey = 0;
 		uint64_t signature = 0;
 		uint64_t geometrySignature = 0;
+		uint64_t surfaceSignature = 0;
 		uint64_t materialSignature = 0;
+		uint64_t meshKeyHash = 0;
+		uint64_t materialKeyHash = 0;
+		uint64_t instanceKeyHash = 0;
 		int32_t actorIndex = -1;
 		uintptr_t actorPtr = 0;
 		uintptr_t voxelPtr = 0;
@@ -1554,18 +1608,105 @@ namespace
 		return (uint64_t)std::llround(value * scale);
 	}
 
-	uint64_t BuildVoxelActorIdentityKey(int32_t actorIndex, const DCoreActor* actor, const voxmodel_t* voxel)
+	uint32_t QuantizeSignatureFloat32(double value, double scale)
 	{
-		if (actorIndex < 0 || actor == nullptr || voxel == nullptr || voxel->model == nullptr)
+		return (uint32_t)std::min<uint64_t>(QuantizeSignatureFloat(value, scale), UINT32_MAX);
+	}
+
+	int ResolveVoxelIndex(const HWSprite& sprite)
+	{
+		if (sprite.voxel == nullptr)
+		{
+			return -1;
+		}
+
+		if (sprite.Sprite != nullptr)
+		{
+			const int textureVoxelIndex = GetExtInfo(sprite.Sprite->spritetexture()).tiletovox;
+			if (textureVoxelIndex >= 0 && textureVoxelIndex < MAXVOXELS && voxmodels[textureVoxelIndex] == sprite.voxel)
+			{
+				return textureVoxelIndex;
+			}
+		}
+
+		for (int i = 0; i < MAXVOXELS; ++i)
+		{
+			if (voxmodels[i] == sprite.voxel)
+			{
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	VoxelMeshKey BuildVoxelMeshKey(const HWSprite& sprite)
+	{
+		VoxelMeshKey key = {};
+		key.voxel = sprite.voxel;
+		key.model = sprite.voxel != nullptr ? sprite.voxel->model : nullptr;
+		key.sourcePicnum = sprite.Sprite != nullptr ? sprite.Sprite->spritetexture() : FTextureID();
+		key.voxelIndex = ResolveVoxelIndex(sprite);
+		key.geometryState = 0;
+		return key;
+	}
+
+	VoxelMaterialKey BuildVoxelMaterialKey(FGameTexture* voxelTexture, const MaterialRef& material)
+	{
+		VoxelMaterialKey key = {};
+		key.voxelTexture = voxelTexture;
+		key.emissiveSourceTexture = material.emissiveSourceTexture;
+		key.palette = material.palette;
+		key.shade = material.shade;
+		key.alphaBits = QuantizeSignatureFloat32(material.alpha, 65535.0);
+		key.materialFlags = material.flags;
+		return key;
+	}
+
+	VoxelInstanceKey BuildVoxelInstanceKey(int32_t actorIndex, DCoreActor* actor)
+	{
+		VoxelInstanceKey key = {};
+		key.actorIndex = actorIndex;
+		key.actorPtr = actor;
+		key.actorGeneration = 0;
+		return key;
+	}
+
+	uint64_t BuildVoxelMeshKeyHash(const VoxelMeshKey& key)
+	{
+		if (key.model == nullptr)
 		{
 			return 0;
 		}
 
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)actorIndex);
-		hash = HashCombine64(hash, (uint64_t)(uintptr_t)actor);
-		hash = HashCombine64(hash, (uint64_t)(uintptr_t)voxel);
-		hash = HashCombine64(hash, (uint64_t)(uintptr_t)voxel->model);
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)key.model);
+		hash = HashCombine64(hash, (uint64_t)key.geometryState);
+		return hash;
+	}
+
+	uint64_t BuildVoxelMaterialKeyHash(const VoxelMaterialKey& key)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, key.voxelTexture != nullptr ? (uint64_t)(uint32_t)key.voxelTexture->GetID().GetIndex() : 0ull);
+		hash = HashCombine64(hash, key.emissiveSourceTexture != nullptr ? (uint64_t)(uint32_t)key.emissiveSourceTexture->GetID().GetIndex() : 0ull);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)key.palette);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)key.shade);
+		hash = HashCombine64(hash, (uint64_t)key.alphaBits);
+		hash = HashCombine64(hash, (uint64_t)key.materialFlags);
+		return hash;
+	}
+
+	uint64_t BuildVoxelInstanceKeyHash(const VoxelInstanceKey& key)
+	{
+		if (key.actorIndex < 0 || key.actorPtr == nullptr)
+		{
+			return 0;
+		}
+
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)key.actorIndex);
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)key.actorPtr);
+		hash = HashCombine64(hash, (uint64_t)key.actorGeneration);
 		return hash;
 	}
 
@@ -1582,7 +1723,8 @@ namespace
 			return false;
 		}
 
-		lookup.identityKey = BuildVoxelActorIdentityKey(actorIndex, sprite.Sprite->ownerActor, sprite.voxel);
+		const VoxelInstanceKey instanceKey = BuildVoxelInstanceKey(actorIndex, sprite.Sprite->ownerActor);
+		lookup.identityKey = BuildVoxelInstanceKeyHash(instanceKey);
 		if (lookup.identityKey == 0)
 		{
 			return false;
@@ -1592,10 +1734,16 @@ namespace
 		lookup.actorPtr = (uintptr_t)sprite.Sprite->ownerActor;
 		lookup.voxelPtr = (uintptr_t)sprite.voxel;
 		lookup.voxelModelPtr = (uintptr_t)sprite.voxel->model;
+		lookup.instanceKeyHash = lookup.identityKey;
 		return true;
 	}
 
-	uint64_t BuildVoxelActorGeometrySignature(const HWSprite& sprite)
+	uint64_t BuildVoxelActorMeshKeyHash(const HWSprite& sprite)
+	{
+		return BuildVoxelMeshKeyHash(BuildVoxelMeshKey(sprite));
+	}
+
+	uint64_t BuildVoxelActorSurfaceSignature(const HWSprite& sprite)
 	{
 		uint64_t hash = 1469598103934665603ull;
 		hash = HashCombine64(hash, (uint64_t)(uintptr_t)sprite.voxel);
@@ -1620,14 +1768,7 @@ namespace
 
 	uint64_t BuildVoxelActorMaterialSignature(FGameTexture* voxelTexture, const MaterialRef& material)
 	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, voxelTexture != nullptr ? (uint64_t)(uint32_t)voxelTexture->GetID().GetIndex() : 0ull);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.palette);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)material.shade);
-		hash = HashCombine64(hash, QuantizeSignatureFloat(material.alpha, 65535.0));
-		hash = HashCombine64(hash, (uint64_t)material.flags);
-		hash = HashCombine64(hash, material.emissiveSourceTexture != nullptr ? (uint64_t)(uint32_t)material.emissiveSourceTexture->GetID().GetIndex() : 0ull);
-		return hash;
+		return BuildVoxelMaterialKeyHash(BuildVoxelMaterialKey(voxelTexture, material));
 	}
 
 	uint64_t BuildVoxelActorSignature(uint64_t geometrySignature, uint64_t materialSignature)
@@ -1636,6 +1777,200 @@ namespace
 		hash = HashCombine64(hash, geometrySignature);
 		hash = HashCombine64(hash, materialSignature);
 		return hash;
+	}
+
+	const char* GetVoxelActorPendingReasonName(VoxelActorPendingReason reason)
+	{
+		switch (reason)
+		{
+		case VoxelActorPendingReason::ActorBudget: return "actor-budget";
+		case VoxelActorPendingReason::MeshDeferred: return "mesh-deferred";
+		case VoxelActorPendingReason::TriangleBudget: return "triangle-budget";
+		case VoxelActorPendingReason::SurfaceBuildFailed: return "surface-build-failed";
+		case VoxelActorPendingReason::ActorNotLive: return "actor-not-live";
+		default: return "none";
+		}
+	}
+
+	const char* GetVoxelActorStabilityName(VoxelActorStability stability)
+	{
+		switch (stability)
+		{
+		case VoxelActorStability::New: return "new";
+		case VoxelActorStability::Stable: return "stable";
+		case VoxelActorStability::TransformRebake: return "transform-rebake";
+		case VoxelActorStability::Changed: return "changed";
+		default: return "uncacheable";
+		}
+	}
+
+	void EmitVoxelActorStateTrace(
+		const HWSprite* sprite,
+		const VoxelActorCacheLookup* lookup,
+		const VoxelActorCacheEntry* entry,
+		const char* action,
+		VoxelActorPendingReason reason = VoxelActorPendingReason::None)
+	{
+		if (!nri_voxelstats)
+		{
+			return;
+		}
+
+		const int actorIndex =
+			lookup != nullptr ? lookup->actorIndex :
+			entry != nullptr ? entry->actorIndex :
+			sprite != nullptr && sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr ? sprite->Sprite->ownerActor->GetIndex() :
+			-1;
+		const int statnum = sprite != nullptr && sprite->Sprite != nullptr ? sprite->Sprite->statnum : -1;
+		const int picnum = sprite != nullptr && sprite->Sprite != nullptr ? sprite->Sprite->picnum : -1;
+		const uint64_t meshKey =
+			lookup != nullptr && lookup->meshKeyHash != 0 ? lookup->meshKeyHash :
+			entry != nullptr ? entry->meshKeyHash :
+			0;
+		const uint64_t materialKey =
+			lookup != nullptr && lookup->materialKeyHash != 0 ? lookup->materialKeyHash :
+			entry != nullptr ? entry->materialKeyHash :
+			0;
+		const uint64_t instanceKey =
+			lookup != nullptr && lookup->instanceKeyHash != 0 ? lookup->instanceKeyHash :
+			entry != nullptr ? entry->instanceKeyHash :
+			0;
+		const uint64_t surfaceSignature =
+			lookup != nullptr && lookup->surfaceSignature != 0 ? lookup->surfaceSignature :
+			entry != nullptr ? entry->surfaceSignature :
+			0;
+		const uint64_t desiredMeshKey = entry != nullptr ? entry->desiredMeshKeyHash : 0;
+		const uint64_t desiredMaterialKey = entry != nullptr ? entry->desiredMaterialKeyHash : 0;
+		const uint64_t desiredSurfaceSignature = entry != nullptr ? entry->desiredSurfaceSignature : 0;
+		const bool hasSurface = entry != nullptr && entry->hasSurface;
+		const bool persistentReady = entry != nullptr && entry->persistentReady;
+		const VoxelActorPendingReason pendingReason =
+			entry != nullptr ? (VoxelActorPendingReason)entry->pendingReason : VoxelActorPendingReason::None;
+		const uint64_t pendingAge =
+			entry != nullptr && entry->pendingFrame != 0 && gVoxelActorCacheFrame >= entry->pendingFrame ?
+			gVoxelActorCacheFrame - entry->pendingFrame :
+			0;
+		const uint64_t surfaceAge =
+			entry != nullptr && entry->surfaceFrame != 0 && gVoxelActorCacheFrame >= entry->surfaceFrame ?
+			gVoxelActorCacheFrame - entry->surfaceFrame :
+			0;
+		const uint32_t primitiveCount = entry != nullptr ? entry->primitiveCount : 0u;
+
+		Printf("PERF pt voxel actor state NRI: frame=%llu actor=%d stat=%d pic=%d action=%s reason=%s stability=%s mesh_key=0x%llx mat_key=0x%llx inst_key=0x%llx surface_sig=0x%llx desired_mesh=0x%llx desired_mat=0x%llx desired_surface=0x%llx persistent=%u has_surface=%u prims=%u pending=%s pending_age=%llu surface_age=%llu last_seen=%llu\n",
+			(unsigned long long)gVoxelActorCacheFrame,
+			actorIndex,
+			statnum,
+			picnum,
+			action != nullptr ? action : "unknown",
+			GetVoxelActorPendingReasonName(reason),
+			lookup != nullptr ? GetVoxelActorStabilityName(lookup->stability) : "n/a",
+			(unsigned long long)meshKey,
+			(unsigned long long)materialKey,
+			(unsigned long long)instanceKey,
+			(unsigned long long)surfaceSignature,
+			(unsigned long long)desiredMeshKey,
+			(unsigned long long)desiredMaterialKey,
+			(unsigned long long)desiredSurfaceSignature,
+			persistentReady ? 1u : 0u,
+			hasSurface ? 1u : 0u,
+			primitiveCount,
+			GetVoxelActorPendingReasonName(pendingReason),
+			(unsigned long long)pendingAge,
+			(unsigned long long)surfaceAge,
+			(unsigned long long)(entry != nullptr ? entry->lastSeenFrame : 0));
+	}
+
+	void EmitVoxelActorKeyTrace(const HWSprite& sprite, const VoxelActorCacheLookup& lookup, const char* action, VoxelActorPendingReason reason = VoxelActorPendingReason::None)
+	{
+		EmitVoxelActorStateTrace(&sprite, &lookup, lookup.entry, action, reason);
+		if ((int)nri_ptactorspritetrace <= 0 || (int)nri_pttraceframes <= 0 || screen == nullptr ||
+			sprite.Sprite == nullptr || sprite.Sprite->ownerActor == nullptr)
+		{
+			return;
+		}
+
+		PathTracingActorSpriteTraceEvent event = {};
+		event.stage = PathTracingActorSpriteTraceStage::CaptureScene;
+		event.actorIndex = sprite.Sprite->ownerActor->GetIndex();
+		event.spriteStatnum = sprite.Sprite->statnum;
+		event.spritePicnum = sprite.Sprite->picnum;
+		event.baseTextureId = sprite.Sprite->spritetexture().GetIndex();
+		event.resolvedTextureId = sprite.voxel != nullptr && sprite.voxel->model != nullptr ? sprite.voxel->model->GetPaletteTexture().GetIndex() : -1;
+		event.palette = sprite.palette;
+		event.shade = sprite.shade;
+		event.cstat = sprite.Sprite->cstat;
+		event.cstat2 = sprite.Sprite->cstat2;
+		event.drawListType = GLDL_MODELS;
+		event.noAnimate = (sprite.Sprite->cstat2 & CSTAT2_SPRITE_NOANIMATE) != 0;
+		event.fullbright = (sprite.Sprite->cstat2 & CSTAT2_SPRITE_FULLBRIGHT) != 0;
+		event.resolvedGameTexture = nullptr;
+		event.hasVoxelKeys = true;
+		event.voxelMeshKeyHash = lookup.meshKeyHash;
+		event.voxelMaterialKeyHash = lookup.materialKeyHash;
+		event.voxelInstanceKeyHash = lookup.instanceKeyHash;
+		event.voxelSurfaceSignature = lookup.surfaceSignature;
+		event.voxelAction = action;
+		screen->EmitPathTracingActorSpriteTraceEvent(event);
+	}
+
+	void InitializeVoxelActorCacheEntryIdentity(VoxelActorCacheEntry& entry, const VoxelActorCacheLookup& lookup)
+	{
+		entry.identityKey = lookup.identityKey;
+		entry.actorIndex = lookup.actorIndex;
+		entry.actorPtr = lookup.actorPtr;
+		entry.voxelPtr = lookup.voxelPtr;
+		entry.voxelModelPtr = lookup.voxelModelPtr;
+		entry.instanceKeyHash = lookup.instanceKeyHash;
+	}
+
+	bool HasLastValidResidentVoxelSurface(const VoxelActorCacheLookup& lookup)
+	{
+		return lookup.entry != nullptr && lookup.entry->hasSurface && lookup.entry->persistentReady;
+	}
+
+	bool CanPromoteVoxelActorCacheEntry(const VoxelActorCacheEntry& entry)
+	{
+		if (entry.persistentReady)
+		{
+			return true;
+		}
+		const int configuredPromoteFrames = (int)nri_ptvoxelpersistentpromoteframes;
+		const int promoteFrames = configuredPromoteFrames > 0 ? configuredPromoteFrames : 0;
+		if (promoteFrames == 0 || entry.surfaceFrame == 0)
+		{
+			return true;
+		}
+		return gVoxelActorCacheFrame >= entry.surfaceFrame &&
+			gVoxelActorCacheFrame - entry.surfaceFrame >= (uint64_t)promoteFrames;
+	}
+
+	void MarkVoxelActorVariantPending(const VoxelActorCacheLookup& lookup, VoxelActorPendingReason reason)
+	{
+		if (lookup.identityKey == 0)
+		{
+			return;
+		}
+
+		VoxelActorCacheEntry& entry = lookup.entry != nullptr ? *lookup.entry : gVoxelActorCache[lookup.identityKey];
+		InitializeVoxelActorCacheEntryIdentity(entry, lookup);
+		entry.desiredSignature = lookup.signature;
+		entry.desiredMeshKeyHash = lookup.meshKeyHash;
+		entry.desiredMaterialKeyHash = lookup.materialKeyHash;
+		entry.desiredSurfaceSignature = lookup.surfaceSignature;
+		entry.pendingReason = (uint8_t)reason;
+		entry.pendingFrame = gVoxelActorCacheFrame;
+		entry.lastSeenFrame = gVoxelActorCacheFrame;
+		EmitVoxelActorStateTrace(nullptr, &lookup, &entry, "build-queued", reason);
+	}
+
+	void TraceVoxelActorFallbackLastValid(const HWSprite& sprite, const VoxelActorCacheLookup& lookup, VoxelActorPendingReason reason)
+	{
+		EmitVoxelActorKeyTrace(sprite, lookup, "fallback-last-valid", reason);
+	}
+
+	void TraceVoxelActorFirstUseFallback(const HWSprite& sprite, const VoxelActorCacheLookup& lookup, VoxelActorPendingReason reason)
+	{
+		EmitVoxelActorKeyTrace(sprite, lookup, "fallback-empty", reason);
 	}
 
 	VoxelActorCacheLookup TrackVoxelActorSignature(const HWSprite& sprite, FGameTexture* voxelTexture, const MaterialRef& material, SceneDebugStats& stats)
@@ -1649,63 +1984,91 @@ namespace
 		}
 
 		stats.voxelStableCandidates++;
-		const uint64_t geometrySignature = BuildVoxelActorGeometrySignature(sprite);
+		const uint64_t surfaceSignature = BuildVoxelActorSurfaceSignature(sprite);
+		const uint64_t meshKeyHash = BuildVoxelActorMeshKeyHash(sprite);
+		const uint64_t geometrySignature = meshKeyHash;
 		const uint64_t materialSignature = BuildVoxelActorMaterialSignature(voxelTexture, material);
 		const uint64_t signature = BuildVoxelActorSignature(geometrySignature, materialSignature);
 		lookup.signature = signature;
 		lookup.geometrySignature = geometrySignature;
+		lookup.surfaceSignature = surfaceSignature;
 		lookup.materialSignature = materialSignature;
+		lookup.meshKeyHash = meshKeyHash;
+		lookup.materialKeyHash = materialSignature;
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end())
 		{
 			stats.voxelStableSignatureMisses++;
 			stats.voxelStableSplitLive++;
 			lookup.stability = VoxelActorStability::New;
+			EmitVoxelActorKeyTrace(sprite, lookup, "new");
 			return lookup;
 		}
 
 		lookup.entry = &found->second;
 		lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
-		lookup.entry->identityKey = lookup.identityKey;
-		lookup.entry->actorIndex = lookup.actorIndex;
-		lookup.entry->actorPtr = lookup.actorPtr;
-		lookup.entry->voxelPtr = lookup.voxelPtr;
-		lookup.entry->voxelModelPtr = lookup.voxelModelPtr;
-		if (lookup.entry->signature == signature && lookup.entry->hasSurface)
+		InitializeVoxelActorCacheEntryIdentity(*lookup.entry, lookup);
+		lookup.entry->desiredSignature = signature;
+		lookup.entry->desiredMeshKeyHash = meshKeyHash;
+		lookup.entry->desiredMaterialKeyHash = materialSignature;
+		lookup.entry->desiredSurfaceSignature = surfaceSignature;
+		if (lookup.entry->signature == signature && lookup.entry->surfaceSignature == surfaceSignature && lookup.entry->hasSurface)
 		{
-			if (!lookup.entry->persistentReady)
+			const bool promoted = !lookup.entry->persistentReady;
+			if (!lookup.entry->persistentReady && CanPromoteVoxelActorCacheEntry(*lookup.entry))
 			{
 				lookup.entry->persistentReady = true;
 				++gVoxelActorCacheSerial;
 			}
+			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
+			lookup.entry->pendingFrame = 0;
 			stats.voxelStableSignatureHits++;
 			stats.voxelStableSplitStable++;
 			stats.voxelCacheSurfaceHits++;
 			lookup.stability = VoxelActorStability::Stable;
+			EmitVoxelActorKeyTrace(sprite, lookup, promoted ? (lookup.entry->persistentReady ? "promote" : "promote-deferred") : "hit");
 			return lookup;
 		}
 
-		if (lookup.entry->geometrySignature == geometrySignature && lookup.entry->hasSurface)
+		if (lookup.entry->geometrySignature == geometrySignature && lookup.entry->surfaceSignature == surfaceSignature && lookup.entry->hasSurface)
 		{
 			lookup.entry->signature = signature;
 			lookup.entry->materialSignature = materialSignature;
+			lookup.entry->materialKeyHash = lookup.materialKeyHash;
 			lookup.entry->surface.material = material;
 			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
-			if (!lookup.entry->persistentReady)
+			const bool promoted = !lookup.entry->persistentReady;
+			if (!lookup.entry->persistentReady && CanPromoteVoxelActorCacheEntry(*lookup.entry))
 			{
 				lookup.entry->persistentReady = true;
 			}
-			++gVoxelActorCacheSerial;
+			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
+			lookup.entry->pendingFrame = 0;
+			if (!promoted || lookup.entry->persistentReady)
+			{
+				++gVoxelActorCacheSerial;
+			}
 			stats.voxelStableSignatureChanges++;
 			stats.voxelStableSplitStable++;
 			stats.voxelCacheSurfaceHits++;
 			lookup.stability = VoxelActorStability::Stable;
+			EmitVoxelActorKeyTrace(sprite, lookup, promoted ? (lookup.entry->persistentReady ? "promote" : "promote-deferred") : "material-only");
 			return lookup;
 		}
 
 		stats.voxelStableSignatureChanges++;
 		stats.voxelStableSplitLive++;
-		lookup.stability = VoxelActorStability::Changed;
+		if (lookup.entry->geometrySignature == geometrySignature)
+		{
+			lookup.stability = VoxelActorStability::TransformRebake;
+			const bool materialChanged = lookup.entry->materialSignature != materialSignature;
+			EmitVoxelActorKeyTrace(sprite, lookup, materialChanged ? "transform-material" : "transform-only");
+		}
+		else
+		{
+			lookup.stability = VoxelActorStability::Changed;
+			EmitVoxelActorKeyTrace(sprite, lookup, "variant-switch");
+		}
 		return lookup;
 	}
 
@@ -1719,30 +2082,49 @@ namespace
 		}
 
 		stats.voxelStableCandidates++;
-		const uint64_t geometrySignature = BuildVoxelActorGeometrySignature(sprite);
+		const uint64_t surfaceSignature = BuildVoxelActorSurfaceSignature(sprite);
+		const uint64_t meshKeyHash = BuildVoxelActorMeshKeyHash(sprite);
+		const uint64_t geometrySignature = meshKeyHash;
 		const uint64_t materialSignature = BuildVoxelActorMaterialSignature(voxelTexture, material);
 		const uint64_t signature = BuildVoxelActorSignature(geometrySignature, materialSignature);
+		lookup.signature = signature;
+		lookup.geometrySignature = geometrySignature;
+		lookup.surfaceSignature = surfaceSignature;
+		lookup.materialSignature = materialSignature;
+		lookup.meshKeyHash = meshKeyHash;
+		lookup.materialKeyHash = materialSignature;
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end() || !found->second.hasSurface)
 		{
 			stats.voxelStableSignatureMisses++;
+			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-miss");
 			return false;
 		}
 
 		const VoxelActorCacheEntry& entry = found->second;
-		if (entry.signature != signature && entry.geometrySignature != geometrySignature)
+		if (entry.geometrySignature != geometrySignature)
 		{
 			stats.voxelStableSignatureChanges++;
-			return false;
+			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-fallback-last-valid");
+			stats.voxelStableSplitStable++;
+			stats.voxelCacheSurfaceHits++;
+			return true;
 		}
 
 		if (entry.signature != signature)
 		{
 			stats.voxelStableSignatureChanges++;
+			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-material");
+		}
+		else if (entry.surfaceSignature != surfaceSignature)
+		{
+			stats.voxelStableSignatureChanges++;
+			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-transform");
 		}
 		else
 		{
 			stats.voxelStableSignatureHits++;
+			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-hit");
 		}
 
 		stats.voxelStableSplitStable++;
@@ -1778,19 +2160,33 @@ namespace
 
 		VoxelActorCacheEntry& entry = gVoxelActorCache[lookup.identityKey];
 		const bool hadSurface = entry.hasSurface;
+		const bool wasPersistentReady = entry.persistentReady;
 		entry.signature = lookup.signature;
 		entry.geometrySignature = lookup.geometrySignature;
+		entry.surfaceSignature = lookup.surfaceSignature;
 		entry.materialSignature = lookup.materialSignature;
-		entry.identityKey = lookup.identityKey;
-		entry.actorIndex = lookup.actorIndex;
-		entry.actorPtr = lookup.actorPtr;
-		entry.voxelPtr = lookup.voxelPtr;
-		entry.voxelModelPtr = lookup.voxelModelPtr;
+		entry.meshKeyHash = lookup.meshKeyHash;
+		entry.materialKeyHash = lookup.materialKeyHash;
+		InitializeVoxelActorCacheEntryIdentity(entry, lookup);
+		entry.desiredSignature = lookup.signature;
+		entry.desiredMeshKeyHash = lookup.meshKeyHash;
+		entry.desiredMaterialKeyHash = lookup.materialKeyHash;
+		entry.desiredSurfaceSignature = lookup.surfaceSignature;
+		entry.pendingReason = (uint8_t)VoxelActorPendingReason::None;
+		entry.pendingFrame = 0;
 		entry.surface = liveSurface;
 		NormalizeCachedSurfacePreviousPositions(entry.surface);
 		entry.lastSeenFrame = gVoxelActorCacheFrame;
+		entry.surfaceFrame = gVoxelActorCacheFrame;
 		entry.primitiveCount = CountSurfacePrimitives(entry.surface);
-		entry.persistentReady = false;
+		// Transform rebakes and state variant switches are transitional updates of an
+		// already valid actor. Keep already-resident actors renderable and let the
+		// persistent actor path update the resource in place. First-use actors still
+		// wait for the normal stable-frame promotion path.
+		entry.persistentReady =
+			wasPersistentReady &&
+			(lookup.stability == VoxelActorStability::TransformRebake ||
+			 lookup.stability == VoxelActorStability::Changed);
 		entry.hasSurface = true;
 		++gVoxelActorCacheSerial;
 
@@ -1798,13 +2194,17 @@ namespace
 		{
 			stats.voxelCacheSurfaceStores++;
 		}
+		else if (lookup.stability == VoxelActorStability::TransformRebake)
+		{
+			stats.voxelCacheTransformRebakes++;
+		}
 		else if (lookup.stability == VoxelActorStability::Changed)
 		{
 			stats.voxelCacheSurfaceRebuilds++;
 		}
 	}
 
-	void BuildLiveVoxelActorIdentityKeys(std::unordered_set<uint64_t>& outKeys)
+	void BuildLiveActorIdentityKeys(std::unordered_set<uint64_t>& outKeys)
 	{
 		outKeys.clear();
 		if (!r_voxels)
@@ -1826,13 +2226,10 @@ namespace
 				continue;
 			}
 
-			const int voxelIndex = GetExtInfo(actor->spr.spritetexture()).tiletovox;
-			if (voxelIndex < 0 || voxelIndex >= MAXVOXELS || voxmodels[voxelIndex] == nullptr || voxmodels[voxelIndex]->model == nullptr)
-			{
-				continue;
-			}
-
-			const uint64_t identityKey = BuildVoxelActorIdentityKey(actorIndex, actor, voxmodels[voxelIndex]);
+			// Cache identity is actor-based, not voxel-state-based. A live actor may
+			// temporarily resolve to no voxel while still owning a valid resident
+			// last-known voxel state, so pruning must not depend on current picnum.
+			const uint64_t identityKey = BuildVoxelInstanceKeyHash(BuildVoxelInstanceKey(actorIndex, actor));
 			if (identityKey != 0)
 			{
 				outKeys.insert(identityKey);
@@ -1857,12 +2254,13 @@ namespace
 	void PruneVoxelActorCache(SceneDebugStats& stats)
 	{
 		std::unordered_set<uint64_t> liveActorKeys;
-		BuildLiveVoxelActorIdentityKeys(liveActorKeys);
+		BuildLiveActorIdentityKeys(liveActorKeys);
 
 		for (auto it = gVoxelActorCache.begin(); it != gVoxelActorCache.end(); )
 		{
 			if (liveActorKeys.find(it->first) == liveActorKeys.end())
 			{
+				EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "remove", VoxelActorPendingReason::ActorNotLive);
 				it = gVoxelActorCache.erase(it);
 				stats.voxelCacheSurfaceRemoves++;
 				++gVoxelActorCacheSerial;
@@ -1871,6 +2269,7 @@ namespace
 			if (it->second.hasSurface && it->second.lastSeenFrame != gVoxelActorCacheFrame)
 			{
 				stats.voxelCacheNotCaptured++;
+				EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "retained-not-captured", VoxelActorPendingReason::None);
 			}
 			++it;
 		}
@@ -2055,6 +2454,20 @@ namespace
 		return true;
 	}
 
+	bool ShouldUseTransientVoxelActorCapture(const HWSprite& sprite)
+	{
+		if (sprite.Sprite == nullptr)
+		{
+			return false;
+		}
+
+		// Duke security cameras (CAMERA1..CAMERA5, tiles 621..625) are actor-driven
+		// camera props. They currently exercise a driver-hung path when promoted
+		// into per-actor persistent BLASes, so keep them in the transient dynamic
+		// overlay until the durable actor/AS representation models this class.
+		return sprite.Sprite->picnum >= 621 && sprite.Sprite->picnum <= 625;
+	}
+
 	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats, DynamicVoxelCaptureMode captureMode)
 	{
 		if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
@@ -2071,6 +2484,11 @@ namespace
 
 		FGameTexture* emissiveSourceTexture = GetVoxelReplacementEmissiveSourceTexture(sprite);
 		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, emissiveSourceTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
+		const bool forceTransientVoxel = ShouldUseTransientVoxelActorCapture(sprite);
+		if (forceTransientVoxel)
+		{
+			captureMode = DynamicVoxelCaptureMode::Transient;
+		}
 		if (captureMode == DynamicVoxelCaptureMode::ReadOnlyCache)
 		{
 			if (!TryConsumeReadOnlyVoxelActorCacheSurface(sprite, voxelTexture, voxelMaterial, stats))
@@ -2092,12 +2510,31 @@ namespace
 		}
 
 		const bool cacheSurfaceUpdate = captureMode == DynamicVoxelCaptureMode::Authoritative && cacheLookup.stability != VoxelActorStability::Stable;
-		if (cacheSurfaceUpdate && !TrySpendVoxelCacheUpdateBudget(budget))
+		const bool transformRebakeAlreadyResident =
+			cacheLookup.stability == VoxelActorStability::TransformRebake &&
+			cacheLookup.entry != nullptr &&
+			cacheLookup.entry->persistentReady;
+		const bool cacheUpdateConsumesActorBudget = cacheSurfaceUpdate && !transformRebakeAlreadyResident;
+		auto deferDesiredVariant = [&](VoxelActorPendingReason reason) -> bool
 		{
-			stats.voxelCacheNotCaptured++;
-			stats.voxelCacheDeferred++;
-			gDynamicCapturePerfStats.voxelCacheDeferred++;
+			if (cacheSurfaceUpdate)
+			{
+				MarkVoxelActorVariantPending(cacheLookup, reason);
+				stats.voxelCacheDeferred++;
+				gDynamicCapturePerfStats.voxelCacheDeferred++;
+				if (HasLastValidResidentVoxelSurface(cacheLookup))
+				{
+					TraceVoxelActorFallbackLastValid(sprite, cacheLookup, reason);
+					return true;
+				}
+			}
+
+			TraceVoxelActorFirstUseFallback(sprite, cacheLookup, reason);
 			return true;
+		};
+		if (cacheUpdateConsumesActorBudget && !TrySpendVoxelCacheUpdateBudget(budget))
+		{
+			return deferDesiredVariant(VoxelActorPendingReason::ActorBudget);
 		}
 
 		const FVoxelMeshData* mesh = nullptr;
@@ -2110,17 +2547,21 @@ namespace
 		{
 			if (cacheSurfaceUpdate)
 			{
-				stats.voxelCacheNotCaptured++;
-				stats.voxelCacheDeferred++;
-				gDynamicCapturePerfStats.voxelCacheDeferred++;
-				return true;
+				return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
 			}
 
-			CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
+			if (!forceTransientVoxel)
+			{
+				CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
+			}
 			return true;
 		}
 		if (mesh == nullptr)
 		{
+			if (cacheSurfaceUpdate)
+			{
+				return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
+			}
 			stats.voxelStableUncacheable++;
 			return false;
 		}
@@ -2131,13 +2572,13 @@ namespace
 		{
 			if (cacheSurfaceUpdate)
 			{
-				stats.voxelCacheNotCaptured++;
-				stats.voxelCacheDeferred++;
-				gDynamicCapturePerfStats.voxelCacheDeferred++;
-				return true;
+				return deferDesiredVariant(VoxelActorPendingReason::TriangleBudget);
 			}
 
-			CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
+			if (!forceTransientVoxel)
+			{
+				CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
+			}
 			return true;
 		}
 
@@ -2149,6 +2590,10 @@ namespace
 		}
 		if (!hasExactSurface)
 		{
+			if (cacheSurfaceUpdate)
+			{
+				return deferDesiredVariant(VoxelActorPendingReason::SurfaceBuildFailed);
+			}
 			return false;
 		}
 
@@ -2156,12 +2601,14 @@ namespace
 		{
 			const unsigned int previousStores = stats.voxelCacheSurfaceStores;
 			const unsigned int previousRebuilds = stats.voxelCacheSurfaceRebuilds;
+			const unsigned int previousTransformRebakes = stats.voxelCacheTransformRebakes;
 			{
 				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelStoreMs);
 				StoreVoxelActorCacheSurface(cacheLookup, exactSurface, stats);
 			}
 			gDynamicCapturePerfStats.voxelCacheStores += stats.voxelCacheSurfaceStores - previousStores;
 			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheSurfaceRebuilds - previousRebuilds;
+			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheTransformRebakes - previousTransformRebakes;
 			return true;
 		}
 
@@ -2577,7 +3024,10 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.identityKey = entry.first;
 		view.signature = entry.second->signature;
 		view.geometrySignature = entry.second->geometrySignature;
+		view.surfaceSignature = entry.second->surfaceSignature;
 		view.materialSignature = entry.second->materialSignature;
+		view.meshKeyHash = entry.second->meshKeyHash;
+		view.materialKeyHash = entry.second->materialKeyHash;
 		view.primitiveCount = entry.second->primitiveCount;
 		view.surface = &entry.second->surface;
 		outEntries.push_back(std::move(view));

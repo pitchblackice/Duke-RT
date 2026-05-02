@@ -166,6 +166,12 @@ struct PathTracingActorSpriteTraceEvent
 	bool noAnimate = false;
 	bool fullbright = false;
 	const FGameTexture* resolvedGameTexture = nullptr;
+	bool hasVoxelKeys = false;
+	uint64_t voxelMeshKeyHash = 0;
+	uint64_t voxelMaterialKeyHash = 0;
+	uint64_t voxelInstanceKeyHash = 0;
+	uint64_t voxelSurfaceSignature = 0;
+	const char* voxelAction = nullptr;
 };
 
 enum class LevelTransitionReason : uint8_t
