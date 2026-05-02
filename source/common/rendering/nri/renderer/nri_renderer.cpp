@@ -11716,6 +11716,7 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 		RetireResidentAccelerationStructure(pair.second.accelerationStructure);
 	}
 	mPersistentVoxelMeshVariantResources.clear();
+	mPersistentVoxelMaterialVariantResources.clear();
 	mPersistentVoxelActorRejectedSignatures.clear();
 }
 
@@ -11741,9 +11742,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			{
 				batch.activeActorCount++;
 				batch.primitiveCount += actor.primitiveCount;
-				batch.materialCount += actor.materialCount;
 			}
 		}
+		batch.materialCount = (uint32_t)batch.materialBridge.materials.size();
 		batch.surfaceCount = batch.activeActorCount;
 		batch.stats = {};
 		batch.stats.triangleEstimate = batch.primitiveCount;
@@ -11758,19 +11759,37 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		batch.valid = batch.activeActorCount > 0 && batch.primitiveCount > 0 && !batch.materialBridge.materials.empty();
 	};
 
-	auto rebuildBatchMaterialBridge = [](PersistentVoxelBatch& batch)
+	auto rebuildBatchMaterialBridge = [&](PersistentVoxelBatch& batch)
 	{
 		batch.materialBridge = {};
+		std::vector<const PersistentVoxelMaterialVariantResource*> materialResources;
+		materialResources.reserve(mPersistentVoxelMaterialVariantResources.size());
+		for (const auto& pair : mPersistentVoxelMaterialVariantResources)
+		{
+			if (pair.second.materialCount > 0)
+			{
+				materialResources.push_back(&pair.second);
+			}
+		}
+		std::sort(materialResources.begin(), materialResources.end(), [](const PersistentVoxelMaterialVariantResource* left, const PersistentVoxelMaterialVariantResource* right)
+			{
+				return left->materialOffset < right->materialOffset;
+			});
+		for (const PersistentVoxelMaterialVariantResource* resource : materialResources)
+		{
+			if (batch.materialBridge.materials.size() < resource->materialOffset)
+			{
+				batch.materialBridge.materials.resize(resource->materialOffset);
+				batch.materialBridge.lightMetadata.resize(resource->materialOffset);
+			}
+			AppendMaterialBridge(resource->materialBridge, batch.materialBridge);
+		}
 		for (PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 		{
 			if (!actor.active)
 			{
 				actor.materialOffset = 0;
-				continue;
 			}
-			actor.materialOffset = (uint32_t)batch.materialBridge.materials.size();
-			actor.materialCount = (uint32_t)actor.materialBridge.materials.size();
-			AppendMaterialBridge(actor.materialBridge, batch.materialBridge);
 		}
 	};
 
@@ -12075,28 +12094,82 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actorSceneView.stats.triangleEstimate = cacheEntry.primitiveCount;
 		actorSceneView.stats.voxelCachePrimitives = cacheEntry.primitiveCount;
 
-		nri_scene::MaterialBridgeData actorMaterials;
+		auto allocateArenaSlice = [](uint32_t count, uint32_t& cursor, uint32_t& offset, uint32_t& capacity) -> bool
 		{
-			Clocker materialClock(NriPTMaterialBuild);
-			BuildMaterialsWithActorOverrides(actorSceneView, actorMaterials, "persistent_voxel_actor");
+			if (capacity >= count && count > 0)
+			{
+				return false;
+			}
+
+			offset = cursor;
+			capacity = std::max<uint32_t>(count, capacity > 0 ? capacity * 2u : count);
+			cursor += capacity;
+			return true;
+		};
+		auto allocateExactArenaSlice = [](uint32_t count, uint32_t& cursor, uint32_t& offset, uint32_t& capacity) -> bool
+		{
+			if (capacity == count && count > 0)
+			{
+				return false;
+			}
+
+			offset = cursor;
+			capacity = count;
+			cursor += capacity;
+			return true;
+		};
+
+		PersistentVoxelMaterialVariantResource& materialResource = mPersistentVoxelMaterialVariantResources[cacheEntry.materialKeyHash];
+		if (materialResource.materialKeyHash != cacheEntry.materialKeyHash ||
+			materialResource.materialBridge.materials.empty())
+		{
+			nri_scene::MaterialBridgeData builtMaterials;
+			{
+				Clocker materialClock(NriPTMaterialBuild);
+				BuildMaterialsWithActorOverrides(actorSceneView, builtMaterials, "persistent_voxel_actor");
+			}
+			if (builtMaterials.materials.empty())
+			{
+				if (existingActor != nullptr)
+				{
+					existingActor->active = false;
+				}
+				return true;
+			}
+			if (!prewarmPersistentVoxelActorTextures(builtMaterials))
+			{
+				if (existingActor != nullptr)
+				{
+					existingActor->active = true;
+				}
+				if (outDeferred != nullptr)
+				{
+					*outDeferred = true;
+				}
+				return true;
+			}
+
+			materialResource.materialKeyHash = cacheEntry.materialKeyHash;
+			materialResource.materialBridge = std::move(builtMaterials);
+			materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
+			materialResource.materialUploadHash = 0;
 		}
-		if (actorMaterials.materials.empty())
+
+		const bool materialSliceMoved = allocateExactArenaSlice(
+			(uint32_t)materialResource.materialBridge.materials.size(),
+			mPersistentVoxelArenaMaterialCursor,
+			materialResource.materialOffset,
+			materialResource.materialCapacity);
+		if (materialSliceMoved)
+		{
+			materialResource.materialUploadHash = 0;
+		}
+		materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
+		if (materialResource.materialCount == 0)
 		{
 			if (existingActor != nullptr)
 			{
 				existingActor->active = false;
-			}
-			return true;
-		}
-		if (!prewarmPersistentVoxelActorTextures(actorMaterials))
-		{
-			if (existingActor != nullptr)
-			{
-				existingActor->active = true;
-			}
-			if (outDeferred != nullptr)
-			{
-				*outDeferred = true;
 			}
 			return true;
 		}
@@ -12130,7 +12203,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			cacheEntry.identityKey,
 			cacheEntry.surfaceSignature,
 			actorGeometry,
-			(uint32_t)actorMaterials.materials.size()))
+			materialResource.materialCount))
 		{
 			if (existingActor != nullptr)
 			{
@@ -12152,18 +12225,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 		PersistentVoxelActorResource& resource = mPersistentVoxelActorResources[cacheEntry.identityKey];
 		PersistentVoxelMeshVariantResource& meshResource = mPersistentVoxelMeshVariantResources[meshResourceKey];
-		auto allocateArenaSlice = [](uint32_t count, uint32_t& cursor, uint32_t& offset, uint32_t& capacity) -> bool
-		{
-			if (capacity >= count && count > 0)
-			{
-				return false;
-			}
-
-			offset = cursor;
-			capacity = std::max<uint32_t>(count, capacity > 0 ? capacity * 2u : count);
-			cursor += capacity;
-			return true;
-		};
 		const bool vertexSliceMoved = allocateArenaSlice(
 			(uint32_t)actorGeometry.vertices.size(),
 			mPersistentVoxelArenaVertexCursor,
@@ -12179,15 +12240,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			mPersistentVoxelArenaPrimitiveCursor,
 			resource.primitiveOffset,
 			resource.primitiveCapacity);
-		const bool materialSliceMoved = allocateArenaSlice(
-			(uint32_t)actorMaterials.materials.size(),
-			mPersistentVoxelArenaMaterialCursor,
-			resource.materialOffset,
-			resource.materialCapacity);
-		if (materialSliceMoved)
-		{
-			resource.materialUploadHash = 0;
-		}
+		resource.materialOffset = materialResource.materialOffset;
+		resource.materialCount = materialResource.materialCount;
 
 		const bool meshResourceChanged =
 			meshResource.resourceKey != meshResourceKey ||
@@ -12234,7 +12288,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				primitive.indices[0] += resource.vertexOffset;
 				primitive.indices[1] += resource.vertexOffset;
 				primitive.indices[2] += resource.vertexOffset;
-				primitive.materialIndex += resource.materialOffset;
+				primitive.materialIndex += materialResource.materialOffset;
 			}
 
 			if ((meshResourceChanged &&
@@ -12377,8 +12431,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
 		actor.indexOffset = resource.indexOffset;
 		actor.indexCount = (uint32_t)actorGeometry.indices.size();
-		actor.materialCount = (uint32_t)actorMaterials.materials.size();
-		actor.materialBridge = std::move(actorMaterials);
+		actor.materialOffset = materialResource.materialOffset;
+		actor.materialCount = materialResource.materialCount;
+		actor.materialBridge = materialResource.materialBridge;
 		actor.lightRecords.clear();
 		actor.lightRecords.push_back(mSceneLights.BuildSurfaceRecord(
 			*cacheEntry.surface,
@@ -12714,29 +12769,22 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		return false;
 	}
 
-	for (PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+	for (auto& pair : mPersistentVoxelMaterialVariantResources)
 	{
-		auto resourceIt = mPersistentVoxelActorResources.find(actor.identityKey);
-		if (resourceIt == mPersistentVoxelActorResources.end())
+		PersistentVoxelMaterialVariantResource& resource = pair.second;
+		if (resource.materialCount == 0)
+		{
+			continue;
+		}
+		if ((uint64_t)resource.materialOffset + resource.materialCount > materials.size())
 		{
 			continue;
 		}
 
-		PersistentVoxelActorResource& resource = resourceIt->second;
-		if (!actor.active)
-		{
-			continue;
-		}
-		if ((uint64_t)actor.materialOffset + actor.materialCount > materials.size() || actor.materialCount == 0)
-		{
-			continue;
-		}
-
-		const nri_scene::MaterialData* actorMaterials = materials.data() + actor.materialOffset;
-		const uint64_t materialSize = (uint64_t)actor.materialCount * sizeof(nri_scene::MaterialData);
+		const nri_scene::MaterialData* actorMaterials = materials.data() + resource.materialOffset;
+		const uint64_t materialSize = (uint64_t)resource.materialCount * sizeof(nri_scene::MaterialData);
 		const uint64_t materialHash = HashBytes64(reinterpret_cast<const uint8_t*>(actorMaterials), (size_t)materialSize);
 		const bool uploadMaterials =
-			resource.materialCount != actor.materialCount ||
 			resource.materialUploadHash != materialHash;
 		if (uploadMaterials)
 		{
@@ -12759,7 +12807,6 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		}
 
 		resource.materialUploadHash = materialHash;
-		resource.materialCount = actor.materialCount;
 	}
 	return true;
 }

@@ -1394,6 +1394,16 @@ private:
 		NRIAccelerationStructureResource accelerationStructure;
 	};
 
+	struct PersistentVoxelMaterialVariantResource
+	{
+		uint64_t materialKeyHash = 0;
+		uint32_t materialOffset = 0;
+		uint32_t materialCount = 0;
+		uint32_t materialCapacity = 0;
+		uint64_t materialUploadHash = 0;
+		nri_scene::MaterialBridgeData materialBridge;
+	};
+
 	struct ActorSpriteDebugStats
 	{
 		uint32_t lastPruneChecks = 0;
@@ -2100,6 +2110,7 @@ private:
 	PersistentVoxelBatch mPersistentVoxelBatch = {};
 	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
 	std::unordered_map<uint64_t, PersistentVoxelMeshVariantResource> mPersistentVoxelMeshVariantResources;
+	std::unordered_map<uint64_t, PersistentVoxelMaterialVariantResource> mPersistentVoxelMaterialVariantResources;
 	std::unordered_map<uint64_t, uint64_t> mPersistentVoxelActorRejectedSignatures;
 	uint32_t mPersistentVoxelArenaVertexCursor = 0;
 	uint32_t mPersistentVoxelArenaIndexCursor = 0;
