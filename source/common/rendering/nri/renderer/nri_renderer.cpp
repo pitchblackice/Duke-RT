@@ -7803,6 +7803,12 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				mLastPerfShellTraceStats.voxelCacheActorSurfaces = dynamicSceneView.stats.voxelCacheActorSurfaces;
 				mLastPerfShellTraceStats.voxelCacheUniqueMeshKeys = dynamicSceneView.stats.voxelCacheUniqueMeshKeys;
 				mLastPerfShellTraceStats.voxelCacheUniqueMaterialKeys = dynamicSceneView.stats.voxelCacheUniqueMaterialKeys;
+				mLastPerfShellTraceStats.voxelCacheLocalSpaceSurfaces = dynamicSceneView.stats.voxelCacheLocalSpaceSurfaces;
+				mLastPerfShellTraceStats.voxelCacheBakedTransformSurfaces = dynamicSceneView.stats.voxelCacheBakedTransformSurfaces;
+				mLastPerfShellTraceStats.voxelCacheUnknownSpaceSurfaces = dynamicSceneView.stats.voxelCacheUnknownSpaceSurfaces;
+				mLastPerfShellTraceStats.voxelCacheTransformKeyedSurfaces = dynamicSceneView.stats.voxelCacheTransformKeyedSurfaces;
+				mLastPerfShellTraceStats.voxelCacheUniqueTransformBases = dynamicSceneView.stats.voxelCacheUniqueTransformBases;
+				mLastPerfShellTraceStats.voxelCacheInvariantWarnings = dynamicSceneView.stats.voxelCacheInvariantWarnings;
 				mLastPerfShellTraceStats.voxelCacheActorPrimitives = dynamicSceneView.stats.voxelCachePrimitives;
 				mLastPerfShellTraceStats.voxelCacheDuplicatedVertexBytes = dynamicSceneView.stats.voxelCacheDuplicatedVertexBytes;
 				mLastPerfShellTraceStats.voxelCacheDuplicatedIndexBytes = dynamicSceneView.stats.voxelCacheDuplicatedIndexBytes;
@@ -12408,6 +12414,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			meshResource.resourceKey != meshResourceKey ||
 			meshResource.meshKeyHash != cacheEntry.meshKeyHash ||
 			meshResource.transformBasisSignature != cacheEntry.transformBasisSignature ||
+			meshResource.meshBakeSpace != cacheEntry.meshBakeSpace ||
 			meshResource.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
 			meshResource.indexCount != (uint32_t)actorGeometry.indices.size() ||
 			meshResource.primitiveCount != (uint32_t)actorGeometry.primitives.size() ||
@@ -12573,6 +12580,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				meshResource.resourceKey = meshResourceKey;
 				meshResource.meshKeyHash = cacheEntry.meshKeyHash;
 				meshResource.transformBasisSignature = cacheEntry.transformBasisSignature;
+				meshResource.meshBakeSpace = cacheEntry.meshBakeSpace;
 				meshResource.vertexCount = (uint32_t)actorGeometry.vertices.size();
 				meshResource.indexCount = (uint32_t)actorGeometry.indices.size();
 				meshResource.primitiveCount = (uint32_t)actorGeometry.primitives.size();

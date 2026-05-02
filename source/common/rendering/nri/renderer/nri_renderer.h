@@ -583,6 +583,12 @@ public:
 		uint32_t voxelCacheActorSurfaces = 0;
 		uint32_t voxelCacheUniqueMeshKeys = 0;
 		uint32_t voxelCacheUniqueMaterialKeys = 0;
+		uint32_t voxelCacheLocalSpaceSurfaces = 0;
+		uint32_t voxelCacheBakedTransformSurfaces = 0;
+		uint32_t voxelCacheUnknownSpaceSurfaces = 0;
+		uint32_t voxelCacheTransformKeyedSurfaces = 0;
+		uint32_t voxelCacheUniqueTransformBases = 0;
+		uint32_t voxelCacheInvariantWarnings = 0;
 		uint32_t voxelCacheActorPrimitives = 0;
 		uint64_t voxelCacheDuplicatedVertexBytes = 0;
 		uint64_t voxelCacheDuplicatedIndexBytes = 0;
@@ -1383,6 +1389,7 @@ private:
 		uint64_t resourceKey = 0;
 		uint64_t meshKeyHash = 0;
 		uint64_t transformBasisSignature = 0;
+		nri_scene::VoxelMeshBakeSpace meshBakeSpace = nri_scene::VoxelMeshBakeSpace::Unknown;
 		uint32_t primitiveCount = 0;
 		uint32_t indexCount = 0;
 		uint32_t vertexCount = 0;

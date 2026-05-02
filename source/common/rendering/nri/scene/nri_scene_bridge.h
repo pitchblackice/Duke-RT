@@ -19,13 +19,24 @@ void Copy3(const float* source, float* destination);
 
 static constexpr uint32_t VoxelDuplicateVariantTraceCount = 8;
 
+enum class VoxelMeshBakeSpace : uint8_t
+{
+	Unknown = 0,
+	LocalSpace,
+	BakedTransform,
+};
+
 struct VoxelDuplicateVariantTraceEntry
 {
 	bool valid = false;
 	uint64_t meshKeyHash = 0;
+	uint64_t exampleBasisSignature = 0;
 	int32_t sourcePicnum = -1;
 	uint32_t actorCount = 0;
 	uint32_t persistentActorCount = 0;
+	uint32_t uniqueBasisSignatureCount = 0;
+	uint32_t transformKeyedActorCount = 0;
+	VoxelMeshBakeSpace bakeSpace = VoxelMeshBakeSpace::Unknown;
 	uint32_t primitiveCountPerActor = 0;
 	uint32_t totalDuplicatedPrimitives = 0;
 	uint64_t duplicatedBytes = 0;
@@ -144,6 +155,12 @@ struct SceneDebugStats
 	unsigned int voxelCacheActorSurfaces = 0;
 	unsigned int voxelCacheUniqueMeshKeys = 0;
 	unsigned int voxelCacheUniqueMaterialKeys = 0;
+	unsigned int voxelCacheLocalSpaceSurfaces = 0;
+	unsigned int voxelCacheBakedTransformSurfaces = 0;
+	unsigned int voxelCacheUnknownSpaceSurfaces = 0;
+	unsigned int voxelCacheTransformKeyedSurfaces = 0;
+	unsigned int voxelCacheUniqueTransformBases = 0;
+	unsigned int voxelCacheInvariantWarnings = 0;
 	uint64_t voxelCacheDuplicatedVertexBytes = 0;
 	uint64_t voxelCacheDuplicatedIndexBytes = 0;
 	uint64_t voxelCacheDuplicatedPrimitiveBytes = 0;
@@ -267,6 +284,7 @@ struct PersistentVoxelCacheEntryView
 	uint64_t materialKeyHash = 0;
 	uint64_t meshVariantHash = 0;
 	uint64_t materialVariantHash = 0;
+	VoxelMeshBakeSpace meshBakeSpace = VoxelMeshBakeSpace::Unknown;
 	int32_t sourcePicnum = -1;
 	int32_t resolvedVoxelIndex = -1;
 	uint32_t primitiveCount = 0;

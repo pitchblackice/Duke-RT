@@ -155,6 +155,7 @@ namespace
 		uint64_t meshVariantHash = 0;
 		uint64_t materialVariantHash = 0;
 		uint64_t instanceKeyHash = 0;
+		VoxelMeshBakeSpace meshBakeSpace = VoxelMeshBakeSpace::Unknown;
 		uint64_t desiredSignature = 0;
 		uint64_t desiredMeshKeyHash = 0;
 		uint64_t desiredMaterialKeyHash = 0;
@@ -270,6 +271,7 @@ namespace
 		uint64_t meshVariantHash = 0;
 		uint64_t materialVariantHash = 0;
 		uint64_t instanceKeyHash = 0;
+		VoxelMeshBakeSpace meshBakeSpace = VoxelMeshBakeSpace::Unknown;
 		int32_t actorIndex = -1;
 		uintptr_t actorPtr = 0;
 		uintptr_t voxelPtr = 0;
@@ -1930,6 +1932,21 @@ namespace
 		}
 	}
 
+	const char* GetVoxelMeshBakeSpaceName(VoxelMeshBakeSpace bakeSpace)
+	{
+		switch (bakeSpace)
+		{
+		case VoxelMeshBakeSpace::LocalSpace: return "local";
+		case VoxelMeshBakeSpace::BakedTransform: return "baked";
+		default: return "unknown";
+		}
+	}
+
+	bool IsVoxelMeshTransformKeyed(VoxelMeshBakeSpace bakeSpace)
+	{
+		return bakeSpace != VoxelMeshBakeSpace::LocalSpace;
+	}
+
 	const char* GetVoxelActorStabilityName(VoxelActorStability stability)
 	{
 		switch (stability)
@@ -1990,6 +2007,14 @@ namespace
 		const uint64_t desiredMeshVariant = entry != nullptr ? entry->desiredMeshVariantHash : 0;
 		const uint64_t desiredMaterialVariant = entry != nullptr ? entry->desiredMaterialVariantHash : 0;
 		const uint64_t desiredSurfaceSignature = entry != nullptr ? entry->desiredSurfaceSignature : 0;
+		const uint64_t transformBasisSignature =
+			lookup != nullptr && lookup->transformBasisSignature != 0 ? lookup->transformBasisSignature :
+			entry != nullptr ? entry->transformBasisSignature :
+			0;
+		const VoxelMeshBakeSpace meshBakeSpace =
+			lookup != nullptr && lookup->meshBakeSpace != VoxelMeshBakeSpace::Unknown ? lookup->meshBakeSpace :
+			entry != nullptr ? entry->meshBakeSpace :
+			VoxelMeshBakeSpace::Unknown;
 		const int32_t resolvedVoxelIndex =
 			lookup != nullptr && lookup->resolvedVoxelIndex >= 0 ? lookup->resolvedVoxelIndex :
 			entry != nullptr ? entry->resolvedVoxelIndex :
@@ -2008,7 +2033,7 @@ namespace
 			0;
 		const uint32_t primitiveCount = entry != nullptr ? entry->primitiveCount : 0u;
 
-		Printf("PERF pt voxel actor state NRI: frame=%llu actor=%d stat=%d pic=%d action=%s reason=%s stability=%s mesh_key=0x%llx mat_key=0x%llx mesh_variant=0x%llx mat_variant=0x%llx inst_key=0x%llx voxel_index=%d surface_sig=0x%llx desired_mesh=0x%llx desired_mat=0x%llx desired_mesh_variant=0x%llx desired_mat_variant=0x%llx desired_surface=0x%llx persistent=%u has_surface=%u prims=%u pending=%s pending_age=%llu surface_age=%llu last_seen=%llu\n",
+		Printf("PERF pt voxel actor state NRI: frame=%llu actor=%d stat=%d pic=%d action=%s reason=%s stability=%s mesh_key=0x%llx mat_key=0x%llx mesh_variant=0x%llx mat_variant=0x%llx inst_key=0x%llx voxel_index=%d basis_sig=0x%llx space=%s transform_keyed=%u surface_sig=0x%llx desired_mesh=0x%llx desired_mat=0x%llx desired_mesh_variant=0x%llx desired_mat_variant=0x%llx desired_surface=0x%llx persistent=%u has_surface=%u prims=%u pending=%s pending_age=%llu surface_age=%llu last_seen=%llu\n",
 			(unsigned long long)gVoxelActorCacheFrame,
 			actorIndex,
 			statnum,
@@ -2022,6 +2047,9 @@ namespace
 			(unsigned long long)materialVariant,
 			(unsigned long long)instanceKey,
 			resolvedVoxelIndex,
+			(unsigned long long)transformBasisSignature,
+			GetVoxelMeshBakeSpaceName(meshBakeSpace),
+			IsVoxelMeshTransformKeyed(meshBakeSpace) ? 1u : 0u,
 			(unsigned long long)surfaceSignature,
 			(unsigned long long)desiredMeshKey,
 			(unsigned long long)desiredMaterialKey,
@@ -2080,6 +2108,7 @@ namespace
 		entry.sourcePicnum = lookup.sourcePicnum;
 		entry.resolvedVoxelIndex = lookup.resolvedVoxelIndex;
 		entry.instanceKeyHash = lookup.instanceKeyHash;
+		entry.meshBakeSpace = lookup.meshBakeSpace;
 	}
 
 	bool HasLastValidResidentVoxelSurface(const VoxelActorCacheLookup& lookup)
@@ -2166,6 +2195,7 @@ namespace
 		lookup.materialKeyHash = materialSignature;
 		lookup.meshVariantHash = meshVariantHash;
 		lookup.materialVariantHash = materialVariantHash;
+		lookup.meshBakeSpace = VoxelMeshBakeSpace::BakedTransform;
 		lookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
 		CopyVoxelActorTranslation(sprite, lookup.currentTranslation);
 		auto found = gVoxelActorCache.find(lookup.identityKey);
@@ -2285,6 +2315,7 @@ namespace
 
 		stats.voxelStableCandidates++;
 		const uint64_t surfaceSignature = BuildVoxelActorSurfaceSignature(sprite);
+		const uint64_t transformBasisSignature = BuildVoxelActorTransformBasisSignature(sprite);
 		const VoxelMeshVariantKey meshVariantKey = BuildVoxelMeshVariantKey(sprite);
 		const VoxelMaterialVariantKey materialVariantKey = BuildVoxelMaterialVariantKey(voxelTexture, material);
 		const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
@@ -2296,11 +2327,13 @@ namespace
 		lookup.signature = signature;
 		lookup.geometrySignature = geometrySignature;
 		lookup.surfaceSignature = surfaceSignature;
+		lookup.transformBasisSignature = transformBasisSignature;
 		lookup.materialSignature = materialSignature;
 		lookup.meshKeyHash = meshKeyHash;
 		lookup.materialKeyHash = materialSignature;
 		lookup.meshVariantHash = meshVariantHash;
 		lookup.materialVariantHash = materialVariantHash;
+		lookup.meshBakeSpace = VoxelMeshBakeSpace::BakedTransform;
 		lookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end() || !found->second.hasSurface)
@@ -2507,12 +2540,18 @@ namespace
 	struct VoxelDuplicateVariantAggregate
 	{
 		uint64_t meshKeyHash = 0;
+		uint64_t exampleBasisSignature = 0;
 		int32_t sourcePicnum = -1;
 		uint32_t actorCount = 0;
 		uint32_t persistentActorCount = 0;
+		uint32_t transformKeyedActorCount = 0;
+		uint32_t localSpaceActorCount = 0;
+		uint32_t bakedTransformActorCount = 0;
+		uint32_t unknownSpaceActorCount = 0;
 		uint32_t primitiveCountPerActor = 0;
 		uint32_t totalDuplicatedPrimitives = 0;
 		uint64_t duplicatedBytes = 0;
+		std::unordered_set<uint64_t> basisSignatures;
 	};
 
 	void CollectVoxelActorCacheDuplicationStats(SceneDebugStats& stats)
@@ -2521,6 +2560,12 @@ namespace
 		stats.voxelCacheActorSurfaces = 0;
 		stats.voxelCacheUniqueMeshKeys = 0;
 		stats.voxelCacheUniqueMaterialKeys = 0;
+		stats.voxelCacheLocalSpaceSurfaces = 0;
+		stats.voxelCacheBakedTransformSurfaces = 0;
+		stats.voxelCacheUnknownSpaceSurfaces = 0;
+		stats.voxelCacheTransformKeyedSurfaces = 0;
+		stats.voxelCacheUniqueTransformBases = 0;
+		stats.voxelCacheInvariantWarnings = 0;
 		stats.voxelCacheDuplicatedVertexBytes = 0;
 		stats.voxelCacheDuplicatedIndexBytes = 0;
 		stats.voxelCacheDuplicatedPrimitiveBytes = 0;
@@ -2530,9 +2575,11 @@ namespace
 
 		std::unordered_set<uint64_t> meshKeys;
 		std::unordered_set<uint64_t> materialKeys;
+		std::unordered_set<uint64_t> basisSignatures;
 		std::unordered_map<uint64_t, VoxelDuplicateVariantAggregate> meshAggregates;
 		meshKeys.reserve(gVoxelActorCache.size());
 		materialKeys.reserve(gVoxelActorCache.size());
+		basisSignatures.reserve(gVoxelActorCache.size());
 		meshAggregates.reserve(gVoxelActorCache.size());
 
 		for (const auto& pair : gVoxelActorCache)
@@ -2554,6 +2601,24 @@ namespace
 			stats.voxelCacheDuplicatedIndexBytes += indexBytes;
 			stats.voxelCacheDuplicatedPrimitiveBytes += primitiveBytes;
 			stats.voxelCacheDuplicatedTotalBytes += totalBytes;
+			basisSignatures.insert(entry.transformBasisSignature);
+
+			switch (entry.meshBakeSpace)
+			{
+			case VoxelMeshBakeSpace::LocalSpace:
+				stats.voxelCacheLocalSpaceSurfaces++;
+				break;
+			case VoxelMeshBakeSpace::BakedTransform:
+				stats.voxelCacheBakedTransformSurfaces++;
+				break;
+			default:
+				stats.voxelCacheUnknownSpaceSurfaces++;
+				break;
+			}
+			if (IsVoxelMeshTransformKeyed(entry.meshBakeSpace))
+			{
+				stats.voxelCacheTransformKeyedSurfaces++;
+			}
 
 			const uint64_t meshVariantHash = entry.meshVariantHash != 0 ? entry.meshVariantHash : entry.meshKeyHash;
 			if (meshVariantHash != 0)
@@ -2563,6 +2628,7 @@ namespace
 				if (aggregate.actorCount == 0)
 				{
 					aggregate.meshKeyHash = meshVariantHash;
+					aggregate.exampleBasisSignature = entry.transformBasisSignature;
 					aggregate.sourcePicnum = entry.sourcePicnum;
 					aggregate.primitiveCountPerActor = entry.primitiveCount;
 				}
@@ -2572,6 +2638,23 @@ namespace
 				}
 				aggregate.actorCount++;
 				aggregate.persistentActorCount += entry.persistentReady ? 1u : 0u;
+				aggregate.basisSignatures.insert(entry.transformBasisSignature);
+				if (IsVoxelMeshTransformKeyed(entry.meshBakeSpace))
+				{
+					aggregate.transformKeyedActorCount++;
+				}
+				switch (entry.meshBakeSpace)
+				{
+				case VoxelMeshBakeSpace::LocalSpace:
+					aggregate.localSpaceActorCount++;
+					break;
+				case VoxelMeshBakeSpace::BakedTransform:
+					aggregate.bakedTransformActorCount++;
+					break;
+				default:
+					aggregate.unknownSpaceActorCount++;
+					break;
+				}
 				aggregate.primitiveCountPerActor = (std::max)(aggregate.primitiveCountPerActor, entry.primitiveCount);
 				aggregate.totalDuplicatedPrimitives += entry.primitiveCount;
 				aggregate.duplicatedBytes += totalBytes;
@@ -2585,11 +2668,27 @@ namespace
 
 		stats.voxelCacheUniqueMeshKeys = (unsigned int)meshKeys.size();
 		stats.voxelCacheUniqueMaterialKeys = (unsigned int)materialKeys.size();
+		stats.voxelCacheUniqueTransformBases = (unsigned int)basisSignatures.size();
 
 		std::vector<VoxelDuplicateVariantAggregate> aggregates;
 		aggregates.reserve(meshAggregates.size());
 		for (const auto& pair : meshAggregates)
 		{
+			if (pair.second.localSpaceActorCount > 0 && pair.second.basisSignatures.size() > 1)
+			{
+				stats.voxelCacheInvariantWarnings++;
+				if (nri_voxelstats)
+				{
+					Printf(
+						"PERF pt voxel invariant warning NRI: frame=%llu mesh_key=0x%llx source_pic=%d actors=%u space=local basis_count=%u example_basis=0x%llx\n",
+						(unsigned long long)gVoxelActorCacheFrame,
+						(unsigned long long)pair.second.meshKeyHash,
+						pair.second.sourcePicnum,
+						pair.second.actorCount,
+						(uint32_t)pair.second.basisSignatures.size(),
+						(unsigned long long)pair.second.exampleBasisSignature);
+				}
+			}
 			if (pair.second.actorCount > 1)
 			{
 				aggregates.push_back(pair.second);
@@ -2616,9 +2715,24 @@ namespace
 			const VoxelDuplicateVariantAggregate& aggregate = aggregates[i];
 			top.valid = true;
 			top.meshKeyHash = aggregate.meshKeyHash;
+			top.exampleBasisSignature = aggregate.exampleBasisSignature;
 			top.sourcePicnum = aggregate.sourcePicnum;
 			top.actorCount = aggregate.actorCount;
 			top.persistentActorCount = aggregate.persistentActorCount;
+			top.uniqueBasisSignatureCount = (uint32_t)aggregate.basisSignatures.size();
+			top.transformKeyedActorCount = aggregate.transformKeyedActorCount;
+			if (aggregate.localSpaceActorCount > 0)
+			{
+				top.bakeSpace = VoxelMeshBakeSpace::LocalSpace;
+			}
+			else if (aggregate.bakedTransformActorCount > 0)
+			{
+				top.bakeSpace = VoxelMeshBakeSpace::BakedTransform;
+			}
+			else
+			{
+				top.bakeSpace = VoxelMeshBakeSpace::Unknown;
+			}
 			top.primitiveCountPerActor = aggregate.primitiveCountPerActor;
 			top.totalDuplicatedPrimitives = aggregate.totalDuplicatedPrimitives;
 			top.duplicatedBytes = aggregate.duplicatedBytes;
@@ -3710,6 +3824,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.materialKeyHash = entry.second->materialKeyHash;
 		view.meshVariantHash = entry.second->meshVariantHash;
 		view.materialVariantHash = entry.second->materialVariantHash;
+		view.meshBakeSpace = entry.second->meshBakeSpace;
 		view.sourcePicnum = entry.second->sourcePicnum;
 		view.resolvedVoxelIndex = entry.second->resolvedVoxelIndex;
 		view.primitiveCount = entry.second->primitiveCount;

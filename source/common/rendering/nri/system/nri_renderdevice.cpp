@@ -3304,13 +3304,28 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicCaptureStatsMs);
 		if (nri_voxelstats)
 		{
+			auto getVoxelMeshBakeSpaceName = [](nri_scene::VoxelMeshBakeSpace bakeSpace) -> const char*
+			{
+				switch (bakeSpace)
+				{
+				case nri_scene::VoxelMeshBakeSpace::LocalSpace: return "local";
+				case nri_scene::VoxelMeshBakeSpace::BakedTransform: return "baked";
+				default: return "unknown";
+				}
+			};
 			Printf(
-				"PERF pt voxel reuse NRI: frame=%llu actor_entries=%u actor_surfaces=%u unique_mesh=%u unique_material=%u actor_prims=%u dup_vertex_bytes=%llu dup_index_bytes=%llu dup_primitive_bytes=%llu dup_total_bytes=%llu mesh_builds=%u canonical_surface_builds=%u canonical_surface_hits=%u canonical_surface_invalid=%u surface_bakes=%u persistent_uploads=%u persistent_actor_uploads=%u blas_actor_builds=%u blas_unique_mesh_builds=%u\n",
+				"PERF pt voxel reuse NRI: frame=%llu actor_entries=%u actor_surfaces=%u unique_mesh=%u unique_material=%u local_space=%u baked_transform=%u unknown_space=%u transform_keyed=%u unique_basis=%u invariant_warnings=%u actor_prims=%u dup_vertex_bytes=%llu dup_index_bytes=%llu dup_primitive_bytes=%llu dup_total_bytes=%llu mesh_builds=%u canonical_surface_builds=%u canonical_surface_hits=%u canonical_surface_invalid=%u surface_bakes=%u persistent_uploads=%u persistent_actor_uploads=%u blas_actor_builds=%u blas_unique_mesh_builds=%u\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				shell.voxelCacheActorEntries,
 				shell.voxelCacheActorSurfaces,
 				shell.voxelCacheUniqueMeshKeys,
 				shell.voxelCacheUniqueMaterialKeys,
+				shell.voxelCacheLocalSpaceSurfaces,
+				shell.voxelCacheBakedTransformSurfaces,
+				shell.voxelCacheUnknownSpaceSurfaces,
+				shell.voxelCacheTransformKeyedSurfaces,
+				shell.voxelCacheUniqueTransformBases,
+				shell.voxelCacheInvariantWarnings,
 				shell.voxelCacheActorPrimitives,
 				(unsigned long long)shell.voxelCacheDuplicatedVertexBytes,
 				(unsigned long long)shell.voxelCacheDuplicatedIndexBytes,
@@ -3333,13 +3348,17 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 					continue;
 				}
 				Printf(
-					"PERF pt voxel duplicate top NRI: frame=%llu rank=%u mesh_key=0x%llx source_pic=%d actors=%u persistent_actors=%u prims_per_actor=%u total_prims=%u dup_bytes=%llu\n",
+					"PERF pt voxel duplicate top NRI: frame=%llu rank=%u mesh_key=0x%llx source_pic=%d actors=%u persistent_actors=%u space=%s transform_keyed=%u basis_count=%u example_basis=0x%llx prims_per_actor=%u total_prims=%u dup_bytes=%llu\n",
 					(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 					duplicateIndex + 1u,
 					(unsigned long long)duplicate.meshKeyHash,
 					duplicate.sourcePicnum,
 					duplicate.actorCount,
 					duplicate.persistentActorCount,
+					getVoxelMeshBakeSpaceName(duplicate.bakeSpace),
+					duplicate.transformKeyedActorCount,
+					duplicate.uniqueBasisSignatureCount,
+					(unsigned long long)duplicate.exampleBasisSignature,
 					duplicate.primitiveCountPerActor,
 					duplicate.totalDuplicatedPrimitives,
 					(unsigned long long)duplicate.duplicatedBytes);
