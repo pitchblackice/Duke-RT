@@ -1845,11 +1845,8 @@ namespace
 
 		if (sprite.Sprite != nullptr)
 		{
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)sprite.Sprite->picnum);
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)sprite.Sprite->statnum);
 			hash = HashCombine64(hash, (uint64_t)sprite.Sprite->cstat);
 			hash = HashCombine64(hash, (uint64_t)sprite.Sprite->cstat2);
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)sprite.Sprite->spritetexture().GetIndex());
 		}
 
 		const FLOATTYPE* matrix = sprite.rotmat.get();
@@ -2090,6 +2087,8 @@ namespace
 		return lookup.entry != nullptr && lookup.entry->hasSurface && lookup.entry->persistentReady;
 	}
 
+	bool IsVoxelMeshVariantSurfaceReady(uint64_t meshVariantHash);
+
 	bool CanPromoteVoxelActorCacheEntry(const VoxelActorCacheEntry& entry)
 	{
 		if (entry.persistentReady)
@@ -2124,7 +2123,7 @@ namespace
 		entry.pendingReason = (uint8_t)reason;
 		entry.pendingFrame = gVoxelActorCacheFrame;
 		entry.lastSeenFrame = gVoxelActorCacheFrame;
-		EmitVoxelActorStateTrace(nullptr, &lookup, &entry, "build-queued", reason);
+		EmitVoxelActorStateTrace(nullptr, &lookup, &entry, "variant-build-queued", reason);
 	}
 
 	void TraceVoxelActorFallbackLastValid(const HWSprite& sprite, const VoxelActorCacheLookup& lookup, VoxelActorPendingReason reason)
@@ -2175,7 +2174,7 @@ namespace
 			stats.voxelStableSignatureMisses++;
 			stats.voxelStableSplitLive++;
 			lookup.stability = VoxelActorStability::New;
-			EmitVoxelActorKeyTrace(sprite, lookup, "new");
+			EmitVoxelActorKeyTrace(sprite, lookup, "variant-miss");
 			return lookup;
 		}
 
@@ -2269,6 +2268,7 @@ namespace
 		else
 		{
 			lookup.stability = VoxelActorStability::Changed;
+			EmitVoxelActorKeyTrace(sprite, lookup, IsVoxelMeshVariantSurfaceReady(lookup.meshVariantHash) ? "variant-hit" : "variant-miss");
 			EmitVoxelActorKeyTrace(sprite, lookup, "variant-switch");
 		}
 		return lookup;
@@ -2815,9 +2815,18 @@ namespace
 		return true;
 	}
 
+	bool IsVoxelMeshVariantSurfaceReady(uint64_t meshVariantHash)
+	{
+		auto found = gVoxelMeshVariantSurfaceCache.find(meshVariantHash);
+		return found != gVoxelMeshVariantSurfaceCache.end() &&
+			found->second.built &&
+			found->second.valid;
+	}
+
 	const SurfaceRef* GetCachedVoxelMeshVariantSurface(
 		const VoxelActorCacheLookup& lookup,
-		const FVoxelMeshData& mesh)
+		const FVoxelMeshData& mesh,
+		bool recordPerf = true)
 	{
 		if (lookup.meshVariantHash == 0)
 		{
@@ -2833,16 +2842,25 @@ namespace
 			entry.resolvedVoxelIndex = lookup.resolvedVoxelIndex;
 			entry.built = true;
 			entry.valid = BuildCanonicalVoxelMeshSurface(mesh, entry.canonicalSurface);
-			gDynamicCapturePerfStats.voxelCanonicalSurfaceBuilds++;
+			if (recordPerf)
+			{
+				gDynamicCapturePerfStats.voxelCanonicalSurfaceBuilds++;
+			}
 			if (!entry.valid)
 			{
-				gDynamicCapturePerfStats.voxelCanonicalSurfaceInvalid++;
+				if (recordPerf)
+				{
+					gDynamicCapturePerfStats.voxelCanonicalSurfaceInvalid++;
+				}
 			}
 			found = gVoxelMeshVariantSurfaceCache.emplace(lookup.meshVariantHash, std::move(entry)).first;
 		}
 		else
 		{
-			gDynamicCapturePerfStats.voxelCanonicalSurfaceHits++;
+			if (recordPerf)
+			{
+				gDynamicCapturePerfStats.voxelCanonicalSurfaceHits++;
+			}
 		}
 
 		const VoxelMeshVariantSurfaceCacheEntry& entry = found->second;
@@ -3304,7 +3322,40 @@ bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats
 	}
 
 	RecordVoxelMeshPrecacheStats(delta, stats);
-	return PrecacheVoxelModelCpuMesh(model, stats);
+	const bool meshReady = PrecacheVoxelModelCpuMesh(model, stats);
+	if (!meshReady)
+	{
+		return false;
+	}
+
+	VoxelMeshVariantKey meshVariantKey = {};
+	meshVariantKey.voxel = voxelIndex >= 0 && voxelIndex < MAXVOXELS ? voxmodels[voxelIndex] : nullptr;
+	meshVariantKey.model = model;
+	meshVariantKey.sourcePicnum = texid;
+	meshVariantKey.resolvedVoxelIndex = voxelIndex;
+	const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
+	auto foundMesh = gVoxelMeshCache.find(model);
+	if (meshVariantHash == 0 || foundMesh == gVoxelMeshCache.end() || !foundMesh->second.built || !foundMesh->second.valid)
+	{
+		return meshReady;
+	}
+
+	VoxelActorCacheLookup lookup = {};
+	lookup.meshVariantHash = meshVariantHash;
+	lookup.sourcePicnum = texid.isValid() ? texid.GetIndex() : -1;
+	lookup.resolvedVoxelIndex = voxelIndex;
+	const bool hadVariantSurface = IsVoxelMeshVariantSurfaceReady(meshVariantHash);
+	const SurfaceRef* surface = GetCachedVoxelMeshVariantSurface(lookup, foundMesh->second.mesh, false);
+	if ((int)nri_ptloadingtrace >= 2)
+	{
+		Printf("NRI PT loading voxel variant: event=%s tex=%d voxel=%d mesh_variant=0x%llx tris=%u\n",
+			hadVariantSurface ? "hit" : (surface != nullptr ? "build" : "invalid"),
+			texid.isValid() ? texid.GetIndex() : -1,
+			voxelIndex,
+			(unsigned long long)meshVariantHash,
+			surface != nullptr ? CountSurfacePrimitives(*surface) : 0u);
+	}
+	return meshReady;
 }
 
 void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
@@ -3342,7 +3393,7 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 			continue;
 		}
 
-		PrecacheVoxelModelCpuMesh(model, stats);
+		PrecacheVoxelTextureCpuMesh(texid, stats);
 	}
 }
 
