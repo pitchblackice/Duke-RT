@@ -2204,6 +2204,23 @@ namespace
 		}
 	}
 
+	bool IsLiveActorVoxelCacheOwner(DCoreActor* actor)
+	{
+		if (actor == nullptr ||
+			!actor->exists() ||
+			(actor->ObjectFlags & OF_EuthanizeMe) != 0)
+		{
+			return false;
+		}
+		if ((actor->sprext.renderflags & (SPREXT_NOTMD | SPREXT_TEMPINVISIBLE)) != 0 ||
+			(actor->spr.cstat2 & CSTAT2_SPRITE_NOMODEL) != 0 ||
+			(actor->spr.cstat & CSTAT_SPRITE_INVISIBLE) != 0)
+		{
+			return false;
+		}
+		return tilehasvoxel(actor->spr.spritetexture()) != 0;
+	}
+
 	void BuildLiveActorIdentityKeys(std::unordered_set<uint64_t>& outKeys)
 	{
 		outKeys.clear();
@@ -2215,7 +2232,7 @@ namespace
 		TSpriteIterator<DCoreActor> it;
 		while (DCoreActor* actor = it.Next())
 		{
-			if (actor == nullptr || !actor->exists() || (actor->ObjectFlags & OF_EuthanizeMe) != 0)
+			if (!IsLiveActorVoxelCacheOwner(actor))
 			{
 				continue;
 			}
@@ -2226,9 +2243,9 @@ namespace
 				continue;
 			}
 
-			// Cache identity is actor-based, not voxel-state-based. A live actor may
-			// temporarily resolve to no voxel while still owning a valid resident
-			// last-known voxel state, so pruning must not depend on current picnum.
+			// Cache identity is actor-based. Retain off-camera voxel-capable actors
+			// for reflections, but do not let an actor that no longer resolves to a
+			// voxel keep stale geometry alive at its last captured transform.
 			const uint64_t identityKey = BuildVoxelInstanceKeyHash(BuildVoxelInstanceKey(actorIndex, actor));
 			if (identityKey != 0)
 			{
@@ -2602,6 +2619,7 @@ namespace
 			const unsigned int previousStores = stats.voxelCacheSurfaceStores;
 			const unsigned int previousRebuilds = stats.voxelCacheSurfaceRebuilds;
 			const unsigned int previousTransformRebakes = stats.voxelCacheTransformRebakes;
+			const bool wasPersistentReady = cacheLookup.entry != nullptr && cacheLookup.entry->persistentReady;
 			{
 				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelStoreMs);
 				StoreVoxelActorCacheSurface(cacheLookup, exactSurface, stats);
@@ -2609,6 +2627,10 @@ namespace
 			gDynamicCapturePerfStats.voxelCacheStores += stats.voxelCacheSurfaceStores - previousStores;
 			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheSurfaceRebuilds - previousRebuilds;
 			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheTransformRebakes - previousTransformRebakes;
+			if (!wasPersistentReady)
+			{
+				outSprites.push_back(std::move(exactSurface));
+			}
 			return true;
 		}
 
