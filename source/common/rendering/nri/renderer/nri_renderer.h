@@ -576,11 +576,22 @@ public:
 		uint32_t dynamicCaptureVoxelMeshBuilds = 0;
 		uint32_t dynamicCaptureVoxelMeshDeferred = 0;
 		uint32_t dynamicCaptureVoxelMeshInvalid = 0;
+		uint32_t voxelCacheActorEntries = 0;
+		uint32_t voxelCacheActorSurfaces = 0;
+		uint32_t voxelCacheUniqueMeshKeys = 0;
+		uint32_t voxelCacheUniqueMaterialKeys = 0;
+		uint32_t voxelCacheActorPrimitives = 0;
+		uint64_t voxelCacheDuplicatedVertexBytes = 0;
+		uint64_t voxelCacheDuplicatedIndexBytes = 0;
+		uint64_t voxelCacheDuplicatedPrimitiveBytes = 0;
+		uint64_t voxelCacheDuplicatedTotalBytes = 0;
+		uint32_t voxelCacheDuplicateTopCount = 0;
 		uint32_t dynamicAsPrimitiveCount = 0;
 		uint32_t dynamicAsVertexCount = 0;
 		uint32_t dynamicAsIndexCount = 0;
 		uint32_t persistentVoxelAsCalls = 0;
 		uint32_t persistentVoxelAsBuilds = 0;
+		uint32_t persistentVoxelAsUniqueMeshBuilds = 0;
 		uint32_t persistentVoxelAsActors = 0;
 		uint32_t worldTlasBuildCalls = 0;
 		uint32_t worldTlasInstanceCount = 0;
@@ -652,6 +663,7 @@ public:
 		std::array<RuntimeStructuralRebuildTraceEntry, RuntimeStructuralRebuildTraceCount> runtimeStructuralRebuildEntries = {};
 		std::array<RuntimeGeometryDirtyTraceEntry, RuntimeGeometryDirtyTraceCount> runtimeGeometryDirtyEntries = {};
 		std::array<RuntimeRecurringChunkTraceEntry, RuntimeRecurringChunkTraceCount> runtimeRecurringChunkEntries = {};
+		std::array<nri_scene::VoxelDuplicateVariantTraceEntry, nri_scene::VoxelDuplicateVariantTraceCount> voxelCacheDuplicateTopEntries = {};
 	};
 
 	struct PerfResourceTraceStats

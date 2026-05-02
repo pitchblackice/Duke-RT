@@ -4,6 +4,7 @@
 #include "hw_drawinfo.h"
 #include "hw_drawstructs.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -14,6 +15,20 @@ namespace nri_scene
 bool TryGetAverageTextureColor(FGameTexture* texture, float* outColor);
 void ResetAverageTextureColorCache();
 void Copy3(const float* source, float* destination);
+
+static constexpr uint32_t VoxelDuplicateVariantTraceCount = 8;
+
+struct VoxelDuplicateVariantTraceEntry
+{
+	bool valid = false;
+	uint64_t meshKeyHash = 0;
+	int32_t sourcePicnum = -1;
+	uint32_t actorCount = 0;
+	uint32_t persistentActorCount = 0;
+	uint32_t primitiveCountPerActor = 0;
+	uint32_t totalDuplicatedPrimitives = 0;
+	uint64_t duplicatedBytes = 0;
+};
 
 enum class SurfaceSourceType : uint32_t
 {
@@ -125,6 +140,15 @@ struct SceneDebugStats
 	unsigned int voxelCacheNotCaptured = 0;
 	unsigned int voxelCacheDeferred = 0;
 	unsigned int voxelCachePrimitives = 0;
+	unsigned int voxelCacheActorSurfaces = 0;
+	unsigned int voxelCacheUniqueMeshKeys = 0;
+	unsigned int voxelCacheUniqueMaterialKeys = 0;
+	uint64_t voxelCacheDuplicatedVertexBytes = 0;
+	uint64_t voxelCacheDuplicatedIndexBytes = 0;
+	uint64_t voxelCacheDuplicatedPrimitiveBytes = 0;
+	uint64_t voxelCacheDuplicatedTotalBytes = 0;
+	unsigned int voxelCacheDuplicateTopCount = 0;
+	std::array<VoxelDuplicateVariantTraceEntry, VoxelDuplicateVariantTraceCount> voxelCacheDuplicateTopEntries = {};
 };
 
 struct SkyPerfStats

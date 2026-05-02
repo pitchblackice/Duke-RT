@@ -7792,6 +7792,17 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshBuilds += captureStats.voxelMeshCacheBuilds;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshDeferred += captureStats.voxelMeshCacheDeferred;
 				mLastPerfShellTraceStats.dynamicCaptureVoxelMeshInvalid += captureStats.voxelMeshCacheInvalid;
+				mLastPerfShellTraceStats.voxelCacheActorEntries = dynamicSceneView.stats.voxelCacheEntries;
+				mLastPerfShellTraceStats.voxelCacheActorSurfaces = dynamicSceneView.stats.voxelCacheActorSurfaces;
+				mLastPerfShellTraceStats.voxelCacheUniqueMeshKeys = dynamicSceneView.stats.voxelCacheUniqueMeshKeys;
+				mLastPerfShellTraceStats.voxelCacheUniqueMaterialKeys = dynamicSceneView.stats.voxelCacheUniqueMaterialKeys;
+				mLastPerfShellTraceStats.voxelCacheActorPrimitives = dynamicSceneView.stats.voxelCachePrimitives;
+				mLastPerfShellTraceStats.voxelCacheDuplicatedVertexBytes = dynamicSceneView.stats.voxelCacheDuplicatedVertexBytes;
+				mLastPerfShellTraceStats.voxelCacheDuplicatedIndexBytes = dynamicSceneView.stats.voxelCacheDuplicatedIndexBytes;
+				mLastPerfShellTraceStats.voxelCacheDuplicatedPrimitiveBytes = dynamicSceneView.stats.voxelCacheDuplicatedPrimitiveBytes;
+				mLastPerfShellTraceStats.voxelCacheDuplicatedTotalBytes = dynamicSceneView.stats.voxelCacheDuplicatedTotalBytes;
+				mLastPerfShellTraceStats.voxelCacheDuplicateTopCount = dynamicSceneView.stats.voxelCacheDuplicateTopCount;
+				mLastPerfShellTraceStats.voxelCacheDuplicateTopEntries = dynamicSceneView.stats.voxelCacheDuplicateTopEntries;
 				mLastPerfShellTraceStats.dynamicCaptureCountMs += captureStats.countMs;
 				mLastPerfShellTraceStats.dynamicCaptureWallsMs += captureStats.wallsMs;
 				mLastPerfShellTraceStats.dynamicCaptureFlatsMs += captureStats.flatsMs;
@@ -12615,7 +12626,6 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		resource.materialUploadHash = materialHash;
 		resource.materialCount = actor.materialCount;
 	}
-
 	return true;
 }
 
@@ -12632,6 +12642,8 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 
 	std::unordered_set<uint64_t> activeKeys;
 	activeKeys.reserve(mPersistentVoxelBatch.actors.size());
+	std::unordered_set<uint64_t> builtMeshKeys;
+	builtMeshKeys.reserve(mPersistentVoxelBatch.actors.size());
 	for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 	{
 		if (actor.active)
@@ -12676,6 +12688,10 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		}
 
 		mLastPerfShellTraceStats.persistentVoxelAsBuilds++;
+		if (actor.meshKeyHash != 0)
+		{
+			builtMeshKeys.insert(actor.meshKeyHash);
+		}
 		if (!BuildBottomLevelAccelerationStructure(
 			resource.vertexBuffer,
 			resource.indexBuffer,
@@ -12712,6 +12728,7 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		}
 	}
 
+	mLastPerfShellTraceStats.persistentVoxelAsUniqueMeshBuilds += (uint32_t)builtMeshKeys.size();
 	return true;
 }
 

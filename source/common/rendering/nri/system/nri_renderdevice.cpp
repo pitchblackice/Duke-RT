@@ -80,6 +80,7 @@ EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
 EXTERN_CVAR(Bool, nri_ptscenestats)
+EXTERN_CVAR(Bool, nri_voxelstats)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
 
@@ -3301,6 +3302,46 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicCaptureModelStoreMs,
 			shell.dynamicCaptureVoxelFrameMs,
 			shell.dynamicCaptureStatsMs);
+		if (nri_voxelstats)
+		{
+			Printf(
+				"PERF pt voxel reuse NRI: frame=%llu actor_entries=%u actor_surfaces=%u unique_mesh=%u unique_material=%u actor_prims=%u dup_vertex_bytes=%llu dup_index_bytes=%llu dup_primitive_bytes=%llu dup_total_bytes=%llu mesh_builds=%u surface_bakes=%u persistent_uploads=%u persistent_actor_uploads=%u blas_actor_builds=%u blas_unique_mesh_builds=%u\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				shell.voxelCacheActorEntries,
+				shell.voxelCacheActorSurfaces,
+				shell.voxelCacheUniqueMeshKeys,
+				shell.voxelCacheUniqueMaterialKeys,
+				shell.voxelCacheActorPrimitives,
+				(unsigned long long)shell.voxelCacheDuplicatedVertexBytes,
+				(unsigned long long)shell.voxelCacheDuplicatedIndexBytes,
+				(unsigned long long)shell.voxelCacheDuplicatedPrimitiveBytes,
+				(unsigned long long)shell.voxelCacheDuplicatedTotalBytes,
+				shell.dynamicCaptureVoxelMeshBuilds,
+				shell.dynamicCaptureVoxelCacheStores + shell.dynamicCaptureVoxelCacheRebuilds,
+				shell.persistentVoxelOnboardingAdmittedCount,
+				resource.scenePersistentVoxelActorUploadCalls,
+				shell.persistentVoxelAsBuilds,
+				shell.persistentVoxelAsUniqueMeshBuilds);
+			for (uint32_t duplicateIndex = 0; duplicateIndex < shell.voxelCacheDuplicateTopCount; ++duplicateIndex)
+			{
+				const auto& duplicate = shell.voxelCacheDuplicateTopEntries[duplicateIndex];
+				if (!duplicate.valid)
+				{
+					continue;
+				}
+				Printf(
+					"PERF pt voxel duplicate top NRI: frame=%llu rank=%u mesh_key=0x%llx source_pic=%d actors=%u persistent_actors=%u prims_per_actor=%u total_prims=%u dup_bytes=%llu\n",
+					(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+					duplicateIndex + 1u,
+					(unsigned long long)duplicate.meshKeyHash,
+					duplicate.sourcePicnum,
+					duplicate.actorCount,
+					duplicate.persistentActorCount,
+					duplicate.primitiveCountPerActor,
+					duplicate.totalDuplicatedPrimitives,
+					(unsigned long long)duplicate.duplicatedBytes);
+			}
+		}
 		Printf(
 			"PERF pt geometry build detail NRI: frame=%llu dynamic_live=%.3f dynamic_live_prims=%u mirror_extended=%.3f mirror_player=%.3f merged_dynamic=%.3f captured=%.3f persistent_voxel_actor=%.3f persistent_voxel_actor_calls=%u persistent_voxel_actor_prims=%u persistent_voxel_append=%.3f persistent_voxel_rebuild=%.3f persistent_emissive_prune=%.3f persistent_emissive_rebuild=%.3f static_chunk=%.3f static_chunk_calls=%u static_chunk_prims=%u debug_sphere=%.3f mutation_truth=%.3f mutation_truth_calls=%u mutation_rebuild=%.3f mutation_rebuild_calls=%u mutation_material_only=%.3f mutation_material_only_calls=%u mutation_prims=%u spacelink=%.3f spacelink_calls=%u spacelink_prims=%u resident_apply=%.3f resident_apply_calls=%u resident_recover=%.3f resident_recover_calls=%u resident_prims=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,

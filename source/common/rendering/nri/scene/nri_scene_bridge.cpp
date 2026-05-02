@@ -1,5 +1,6 @@
 #include "nri_scene_bridge.h"
 
+#include "nri_geometry_bridge.h"
 #include "nri_portal_bridge.h"
 #include "nri_texture_signature.h"
 
@@ -147,6 +148,7 @@ namespace
 		uintptr_t actorPtr = 0;
 		uintptr_t voxelPtr = 0;
 		uintptr_t voxelModelPtr = 0;
+		int32_t sourcePicnum = -1;
 		SurfaceRef surface;
 		uint64_t lastSeenFrame = 0;
 		uint32_t primitiveCount = 0;
@@ -199,6 +201,7 @@ namespace
 		uintptr_t actorPtr = 0;
 		uintptr_t voxelPtr = 0;
 		uintptr_t voxelModelPtr = 0;
+		int32_t sourcePicnum = -1;
 		VoxelActorCacheEntry* entry = nullptr;
 	};
 
@@ -1735,6 +1738,7 @@ namespace
 		lookup.actorPtr = (uintptr_t)sprite.Sprite->ownerActor;
 		lookup.voxelPtr = (uintptr_t)sprite.voxel;
 		lookup.voxelModelPtr = (uintptr_t)sprite.voxel->model;
+		lookup.sourcePicnum = sprite.Sprite->spritetexture().GetIndex();
 		lookup.instanceKeyHash = lookup.identityKey;
 		return true;
 	}
@@ -1921,6 +1925,7 @@ namespace
 		entry.actorPtr = lookup.actorPtr;
 		entry.voxelPtr = lookup.voxelPtr;
 		entry.voxelModelPtr = lookup.voxelModelPtr;
+		entry.sourcePicnum = lookup.sourcePicnum;
 		entry.instanceKeyHash = lookup.instanceKeyHash;
 	}
 
@@ -2269,6 +2274,140 @@ namespace
 		return rootCapture;
 	}
 
+	uint64_t EstimateSurfaceVertexBytes(const SurfaceRef& surface)
+	{
+		return (uint64_t)surface.vertices.size() * (uint64_t)sizeof(CapturedVertex);
+	}
+
+	uint64_t EstimateSurfaceIndexBytes(const SurfaceRef& surface)
+	{
+		return (uint64_t)surface.indices.size() * (uint64_t)sizeof(uint32_t);
+	}
+
+	uint64_t EstimateSurfacePrimitiveBytes(uint32_t primitiveCount)
+	{
+		return (uint64_t)primitiveCount * (uint64_t)sizeof(PrimitiveData);
+	}
+
+	struct VoxelDuplicateVariantAggregate
+	{
+		uint64_t meshKeyHash = 0;
+		int32_t sourcePicnum = -1;
+		uint32_t actorCount = 0;
+		uint32_t persistentActorCount = 0;
+		uint32_t primitiveCountPerActor = 0;
+		uint32_t totalDuplicatedPrimitives = 0;
+		uint64_t duplicatedBytes = 0;
+	};
+
+	void CollectVoxelActorCacheDuplicationStats(SceneDebugStats& stats)
+	{
+		stats.voxelCachePrimitives = 0;
+		stats.voxelCacheActorSurfaces = 0;
+		stats.voxelCacheUniqueMeshKeys = 0;
+		stats.voxelCacheUniqueMaterialKeys = 0;
+		stats.voxelCacheDuplicatedVertexBytes = 0;
+		stats.voxelCacheDuplicatedIndexBytes = 0;
+		stats.voxelCacheDuplicatedPrimitiveBytes = 0;
+		stats.voxelCacheDuplicatedTotalBytes = 0;
+		stats.voxelCacheDuplicateTopCount = 0;
+		stats.voxelCacheDuplicateTopEntries = {};
+
+		std::unordered_set<uint64_t> meshKeys;
+		std::unordered_set<uint64_t> materialKeys;
+		std::unordered_map<uint64_t, VoxelDuplicateVariantAggregate> meshAggregates;
+		meshKeys.reserve(gVoxelActorCache.size());
+		materialKeys.reserve(gVoxelActorCache.size());
+		meshAggregates.reserve(gVoxelActorCache.size());
+
+		for (const auto& pair : gVoxelActorCache)
+		{
+			const VoxelActorCacheEntry& entry = pair.second;
+			if (!entry.hasSurface)
+			{
+				continue;
+			}
+
+			const uint64_t vertexBytes = EstimateSurfaceVertexBytes(entry.surface);
+			const uint64_t indexBytes = EstimateSurfaceIndexBytes(entry.surface);
+			const uint64_t primitiveBytes = EstimateSurfacePrimitiveBytes(entry.primitiveCount);
+			const uint64_t totalBytes = vertexBytes + indexBytes + primitiveBytes;
+
+			stats.voxelCacheActorSurfaces++;
+			stats.voxelCachePrimitives += entry.primitiveCount;
+			stats.voxelCacheDuplicatedVertexBytes += vertexBytes;
+			stats.voxelCacheDuplicatedIndexBytes += indexBytes;
+			stats.voxelCacheDuplicatedPrimitiveBytes += primitiveBytes;
+			stats.voxelCacheDuplicatedTotalBytes += totalBytes;
+
+			if (entry.meshKeyHash != 0)
+			{
+				meshKeys.insert(entry.meshKeyHash);
+				VoxelDuplicateVariantAggregate& aggregate = meshAggregates[entry.meshKeyHash];
+				if (aggregate.actorCount == 0)
+				{
+					aggregate.meshKeyHash = entry.meshKeyHash;
+					aggregate.sourcePicnum = entry.sourcePicnum;
+					aggregate.primitiveCountPerActor = entry.primitiveCount;
+				}
+				else if (aggregate.sourcePicnum != entry.sourcePicnum)
+				{
+					aggregate.sourcePicnum = -1;
+				}
+				aggregate.actorCount++;
+				aggregate.persistentActorCount += entry.persistentReady ? 1u : 0u;
+				aggregate.primitiveCountPerActor = (std::max)(aggregate.primitiveCountPerActor, entry.primitiveCount);
+				aggregate.totalDuplicatedPrimitives += entry.primitiveCount;
+				aggregate.duplicatedBytes += totalBytes;
+			}
+			if (entry.materialKeyHash != 0)
+			{
+				materialKeys.insert(entry.materialKeyHash);
+			}
+		}
+
+		stats.voxelCacheUniqueMeshKeys = (unsigned int)meshKeys.size();
+		stats.voxelCacheUniqueMaterialKeys = (unsigned int)materialKeys.size();
+
+		std::vector<VoxelDuplicateVariantAggregate> aggregates;
+		aggregates.reserve(meshAggregates.size());
+		for (const auto& pair : meshAggregates)
+		{
+			if (pair.second.actorCount > 1)
+			{
+				aggregates.push_back(pair.second);
+			}
+		}
+		std::sort(aggregates.begin(), aggregates.end(), [](const auto& a, const auto& b)
+		{
+			if (a.totalDuplicatedPrimitives != b.totalDuplicatedPrimitives)
+			{
+				return a.totalDuplicatedPrimitives > b.totalDuplicatedPrimitives;
+			}
+			if (a.actorCount != b.actorCount)
+			{
+				return a.actorCount > b.actorCount;
+			}
+			return a.meshKeyHash < b.meshKeyHash;
+		});
+
+		stats.voxelCacheDuplicateTopCount =
+			(unsigned int)(std::min)(aggregates.size(), (size_t)VoxelDuplicateVariantTraceCount);
+		for (uint32_t i = 0; i < stats.voxelCacheDuplicateTopCount; ++i)
+		{
+			VoxelDuplicateVariantTraceEntry& top = stats.voxelCacheDuplicateTopEntries[i];
+			const VoxelDuplicateVariantAggregate& aggregate = aggregates[i];
+			top.valid = true;
+			top.meshKeyHash = aggregate.meshKeyHash;
+			top.sourcePicnum = aggregate.sourcePicnum;
+			top.actorCount = aggregate.actorCount;
+			top.persistentActorCount = aggregate.persistentActorCount;
+			top.primitiveCountPerActor = aggregate.primitiveCountPerActor;
+			top.totalDuplicatedPrimitives = aggregate.totalDuplicatedPrimitives;
+			top.duplicatedBytes = aggregate.duplicatedBytes;
+		}
+	}
+
 	void PruneVoxelActorCache(SceneDebugStats& stats)
 	{
 		std::unordered_set<uint64_t> liveActorKeys;
@@ -2293,14 +2432,7 @@ namespace
 		}
 
 		stats.voxelCacheEntries = (unsigned int)gVoxelActorCache.size();
-		stats.voxelCachePrimitives = 0;
-		for (const auto& pair : gVoxelActorCache)
-		{
-			if (pair.second.hasSurface)
-			{
-				stats.voxelCachePrimitives += pair.second.primitiveCount;
-			}
-		}
+		CollectVoxelActorCacheDuplicationStats(stats);
 	}
 
 	void EndVoxelActorCacheFrame(SceneDebugStats& stats, bool rootCapture)
