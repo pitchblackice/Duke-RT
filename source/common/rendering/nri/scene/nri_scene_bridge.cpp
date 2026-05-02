@@ -2715,6 +2715,27 @@ namespace
 		return &entry.canonicalSurface;
 	}
 
+	const SurfaceRef* FindCachedVoxelMeshVariantSurface(uint64_t meshVariantHash)
+	{
+		if (meshVariantHash == 0)
+		{
+			return nullptr;
+		}
+
+		auto found = gVoxelMeshVariantSurfaceCache.find(meshVariantHash);
+		if (found == gVoxelMeshVariantSurfaceCache.end())
+		{
+			return nullptr;
+		}
+
+		const VoxelMeshVariantSurfaceCacheEntry& entry = found->second;
+		if (!entry.built || !entry.valid)
+		{
+			return nullptr;
+		}
+		return &entry.canonicalSurface;
+	}
+
 	bool BuildVoxelMeshSurfaceFromCanonical(
 		const HWSprite& sprite,
 		uint32_t drawListType,
@@ -2855,6 +2876,29 @@ namespace
 		};
 		if (cacheUpdateConsumesActorBudget && !TrySpendVoxelCacheUpdateBudget(budget))
 		{
+			const SurfaceRef* cachedCanonicalSurface = FindCachedVoxelMeshVariantSurface(cacheLookup.meshVariantHash);
+			const uint32_t cachedPrimitiveCount = cachedCanonicalSurface != nullptr ? CountSurfacePrimitives(*cachedCanonicalSurface) : 0u;
+			if (cachedCanonicalSurface != nullptr &&
+				cachedPrimitiveCount <= kTransientVoxelLiveSurfacePrimitiveLimit &&
+				TrySpendVoxelTriangleBudget(cachedPrimitiveCount, budget))
+			{
+				MarkVoxelActorVariantPending(cacheLookup, VoxelActorPendingReason::ActorBudget);
+				stats.voxelCacheDeferred++;
+				gDynamicCapturePerfStats.voxelCacheDeferred++;
+
+				SurfaceRef transientSurface = {};
+				bool hasTransientSurface = false;
+				{
+					ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelSurfaceMs);
+					hasTransientSurface = BuildVoxelMeshSurfaceFromCanonical(sprite, drawListType, *cachedCanonicalSurface, voxelMaterial, transientSurface);
+				}
+				if (hasTransientSurface)
+				{
+					EmitVoxelActorKeyTrace(sprite, cacheLookup, "fallback-transient", VoxelActorPendingReason::ActorBudget);
+					outSprites.push_back(std::move(transientSurface));
+					return true;
+				}
+			}
 			return deferDesiredVariant(VoxelActorPendingReason::ActorBudget);
 		}
 
