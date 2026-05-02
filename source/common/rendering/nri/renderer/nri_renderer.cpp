@@ -12306,6 +12306,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	{
 		mLastPerfShellTraceStats.persistentVoxelOnboardingCandidateCount++;
 		mLastPerfShellTraceStats.persistentVoxelOnboardingEstimatedBytes += estimatedBytes;
+		if (persistentVoxelBuiltActors == 0)
+		{
+			return true;
+		}
 		if (persistentVoxelBuildPrimitiveBudget != 0 && primitiveCount > persistentVoxelBuildPrimitiveBudget)
 		{
 			persistentVoxelBuildPending = true;
@@ -12321,10 +12325,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			mLastPerfShellTraceStats.persistentVoxelOnboardingByteBudgetHits++;
 			mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedBytes;
 			return false;
-		}
-		if (persistentVoxelBuiltActors == 0)
-		{
-			return true;
 		}
 		if (persistentVoxelBuiltActors >= persistentVoxelBuildActorBudget)
 		{
