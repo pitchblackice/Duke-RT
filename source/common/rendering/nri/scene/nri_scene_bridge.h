@@ -9,6 +9,7 @@
 #include <vector>
 
 class FGameTexture;
+class FVoxelModel;
 
 namespace nri_scene
 {
@@ -200,6 +201,21 @@ struct DynamicCapturePerfStats
 	double statsMs = 0.0;
 };
 
+struct VoxelMeshPrecacheStats
+{
+	uint32_t textureCandidates = 0;
+	uint32_t actorCandidates = 0;
+	uint32_t modelCandidates = 0;
+	uint32_t meshHits = 0;
+	uint32_t meshBuilds = 0;
+	uint32_t meshInvalid = 0;
+	uint32_t meshSkipped = 0;
+	uint32_t vertices = 0;
+	uint32_t indices = 0;
+	uint32_t primitives = 0;
+	double buildMs = 0.0;
+};
+
 struct MaterialRef
 {
 	FGameTexture* texture = nullptr;
@@ -279,4 +295,8 @@ bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
 bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries);
 uint64_t GetPersistentVoxelCacheSerial();
+bool PrecacheVoxelModelCpuMesh(FVoxelModel* model, VoxelMeshPrecacheStats* stats = nullptr);
+bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats = nullptr);
+void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats = nullptr);
+void PrintAndResetLoadingWarmupStats(const char* phase);
 }

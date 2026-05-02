@@ -32,6 +32,7 @@ CVAR(Int, nri_ptvoxelmaxtriangles, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelcaptureactors, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelpersistentpromoteframes, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -42,6 +43,7 @@ namespace
 
 	SkyPerfStats gSkyPerfStats = {};
 	DynamicCapturePerfStats gDynamicCapturePerfStats = {};
+	VoxelMeshPrecacheStats gVoxelLoadingWarmupStats = {};
 	uint32_t gVoxelMeshCacheFrame = 0;
 	uint32_t gVoxelMeshCacheCaptureDepth = 0;
 	uint32_t gVoxelMeshBuildsThisFrame = 0;
@@ -178,6 +180,53 @@ namespace
 	};
 
 	std::unordered_map<uint64_t, VoxelActorCacheEntry> gVoxelActorCache;
+
+	void AddVoxelMeshPrecacheStats(VoxelMeshPrecacheStats& target, const VoxelMeshPrecacheStats& delta)
+	{
+		target.textureCandidates += delta.textureCandidates;
+		target.actorCandidates += delta.actorCandidates;
+		target.modelCandidates += delta.modelCandidates;
+		target.meshHits += delta.meshHits;
+		target.meshBuilds += delta.meshBuilds;
+		target.meshInvalid += delta.meshInvalid;
+		target.meshSkipped += delta.meshSkipped;
+		target.vertices += delta.vertices;
+		target.indices += delta.indices;
+		target.primitives += delta.primitives;
+		target.buildMs += delta.buildMs;
+	}
+
+	void RecordVoxelMeshPrecacheStats(const VoxelMeshPrecacheStats& delta, VoxelMeshPrecacheStats* stats)
+	{
+		if (stats != nullptr)
+		{
+			AddVoxelMeshPrecacheStats(*stats, delta);
+		}
+		AddVoxelMeshPrecacheStats(gVoxelLoadingWarmupStats, delta);
+	}
+
+	FVoxelModel* ResolveVoxelTextureModel(FTextureID texid, int* outVoxelIndex = nullptr)
+	{
+		if (outVoxelIndex != nullptr)
+		{
+			*outVoxelIndex = -1;
+		}
+		if (!texid.isValid())
+		{
+			return nullptr;
+		}
+
+		const int voxelIndex = GetExtInfo(texid).tiletovox;
+		if (outVoxelIndex != nullptr)
+		{
+			*outVoxelIndex = voxelIndex;
+		}
+		if (voxelIndex < 0 || voxelIndex >= MAXVOXELS || voxmodels[voxelIndex] == nullptr)
+		{
+			return nullptr;
+		}
+		return voxmodels[voxelIndex]->model;
+	}
 
 	struct VoxelCaptureBudget
 	{
@@ -3161,6 +3210,166 @@ DynamicCapturePerfStats ConsumeDynamicCapturePerfStats()
 	DynamicCapturePerfStats stats = gDynamicCapturePerfStats;
 	gDynamicCapturePerfStats = {};
 	return stats;
+}
+
+bool PrecacheVoxelModelCpuMesh(FVoxelModel* model, VoxelMeshPrecacheStats* stats)
+{
+	VoxelMeshPrecacheStats delta = {};
+	delta.modelCandidates = 1;
+
+	if (!r_voxels || model == nullptr)
+	{
+		delta.meshSkipped = 1;
+		RecordVoxelMeshPrecacheStats(delta, stats);
+		return false;
+	}
+
+	auto found = gVoxelMeshCache.find(model);
+	if (found != gVoxelMeshCache.end())
+	{
+		if (found->second.built && found->second.valid)
+		{
+			delta.meshHits = 1;
+			delta.vertices = found->second.mesh.vertices.Size();
+			delta.indices = found->second.mesh.indices.Size();
+			delta.primitives = delta.indices / 3;
+			if ((int)nri_ptloadingtrace >= 2)
+			{
+				Printf("NRI PT loading voxel mesh: event=hit model=%p vertices=%u indices=%u tris=%u\n",
+					model,
+					delta.vertices,
+					delta.indices,
+					delta.primitives);
+			}
+			RecordVoxelMeshPrecacheStats(delta, stats);
+			return true;
+		}
+
+		delta.meshInvalid = 1;
+		RecordVoxelMeshPrecacheStats(delta, stats);
+		return false;
+	}
+
+	VoxelMeshCacheEntry entry = {};
+	const auto start = std::chrono::steady_clock::now();
+	model->BuildCpuMesh(entry.mesh);
+	const auto end = std::chrono::steady_clock::now();
+	entry.built = true;
+	entry.valid = entry.mesh.vertices.Size() > 0 && entry.mesh.indices.Size() >= 3;
+
+	delta.meshBuilds = 1;
+	delta.buildMs = DurationMs(start, end);
+	delta.vertices = entry.mesh.vertices.Size();
+	delta.indices = entry.mesh.indices.Size();
+	delta.primitives = delta.indices / 3;
+	if (!entry.valid)
+	{
+		delta.meshInvalid = 1;
+	}
+
+	if ((int)nri_ptloadingtrace >= 2)
+	{
+		Printf("NRI PT loading voxel mesh: event=build model=%p valid=%s vertices=%u indices=%u tris=%u ms=%.3f\n",
+			model,
+			entry.valid ? "true" : "false",
+			delta.vertices,
+			delta.indices,
+			delta.primitives,
+			delta.buildMs);
+	}
+
+	gVoxelMeshCache.emplace(model, std::move(entry));
+	RecordVoxelMeshPrecacheStats(delta, stats);
+	return delta.meshInvalid == 0;
+}
+
+bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats)
+{
+	VoxelMeshPrecacheStats delta = {};
+	delta.textureCandidates = 1;
+
+	int voxelIndex = -1;
+	FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
+	if (model == nullptr)
+	{
+		delta.meshSkipped = 1;
+		if ((int)nri_ptloadingtrace >= 2)
+		{
+			Printf("NRI PT loading voxel mesh: event=skip source=texture tex=%d voxel=%d reason=no-voxel-model\n",
+				texid.isValid() ? texid.GetIndex() : -1,
+				voxelIndex);
+		}
+		RecordVoxelMeshPrecacheStats(delta, stats);
+		return false;
+	}
+
+	RecordVoxelMeshPrecacheStats(delta, stats);
+	return PrecacheVoxelModelCpuMesh(model, stats);
+}
+
+void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
+{
+	if (!r_voxels)
+	{
+		return;
+	}
+
+	std::unordered_set<FVoxelModel*> seenModels;
+	TSpriteIterator<DCoreActor> it;
+	while (DCoreActor* actor = it.Next())
+	{
+		if (!IsLiveActorVoxelCacheOwner(actor))
+		{
+			continue;
+		}
+
+		VoxelMeshPrecacheStats actorDelta = {};
+		actorDelta.actorCandidates = 1;
+		RecordVoxelMeshPrecacheStats(actorDelta, stats);
+
+		const FTextureID texid = actor->spr.spritetexture();
+		FVoxelModel* model = ResolveVoxelTextureModel(texid);
+		if (model == nullptr)
+		{
+			VoxelMeshPrecacheStats skipDelta = {};
+			skipDelta.meshSkipped = 1;
+			RecordVoxelMeshPrecacheStats(skipDelta, stats);
+			continue;
+		}
+
+		if (!seenModels.insert(model).second)
+		{
+			continue;
+		}
+
+		PrecacheVoxelModelCpuMesh(model, stats);
+	}
+}
+
+void PrintAndResetLoadingWarmupStats(const char* phase)
+{
+	if ((int)nri_ptloadingtrace >= 1 &&
+		(gVoxelLoadingWarmupStats.textureCandidates != 0 ||
+		 gVoxelLoadingWarmupStats.actorCandidates != 0 ||
+		 gVoxelLoadingWarmupStats.modelCandidates != 0 ||
+		 gVoxelLoadingWarmupStats.meshHits != 0 ||
+		 gVoxelLoadingWarmupStats.meshBuilds != 0))
+	{
+		Printf("NRI PT loading warmup: phase=%s textures=%u actors=%u models=%u mesh_hits=%u mesh_builds=%u mesh_invalid=%u mesh_skipped=%u vertices=%u indices=%u tris=%u build_ms=%.3f\n",
+			phase != nullptr ? phase : "unknown",
+			gVoxelLoadingWarmupStats.textureCandidates,
+			gVoxelLoadingWarmupStats.actorCandidates,
+			gVoxelLoadingWarmupStats.modelCandidates,
+			gVoxelLoadingWarmupStats.meshHits,
+			gVoxelLoadingWarmupStats.meshBuilds,
+			gVoxelLoadingWarmupStats.meshInvalid,
+			gVoxelLoadingWarmupStats.meshSkipped,
+			gVoxelLoadingWarmupStats.vertices,
+			gVoxelLoadingWarmupStats.indices,
+			gVoxelLoadingWarmupStats.primitives,
+			gVoxelLoadingWarmupStats.buildMs);
+	}
+	gVoxelLoadingWarmupStats = {};
 }
 
 void Copy3(const float* source, float* destination)

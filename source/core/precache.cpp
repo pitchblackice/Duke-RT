@@ -46,6 +46,7 @@
 #include "models/modeldata.h"
 #include "gamefuncs.h"
 #include "texinfo.h"
+#include "../common/rendering/nri/scene/nri_scene_bridge.h"
 
 #include "buildtiles.h"
 
@@ -78,6 +79,7 @@ static void doprecache(FTextureID texid, int palette)
 			{
 				FHWModelRenderer mr(*screen->RenderState(), 0);
 				voxmodels[vox]->model->BuildVertexBuffer(&mr);
+				nri_scene::PrecacheVoxelTextureCpuMesh(texid);
 			}
 		}
 		return;
@@ -154,6 +156,9 @@ void precacheMarkedTiles()
 		auto tex = TexMan.FindGameTexture(pair2->Key.GetChars(), ETextureType::Any);
 		if (tex) PrecacheTex(tex, 0);
 	}
+
+	nri_scene::PrecacheLiveActorVoxelMeshes();
+	nri_scene::PrintAndResetLoadingWarmupStats("precacheMarkedTiles");
 
 	cachemap.Clear();
 }
