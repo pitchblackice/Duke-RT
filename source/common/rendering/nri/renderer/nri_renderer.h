@@ -1386,6 +1386,12 @@ private:
 		uint32_t primitiveCount = 0;
 		uint32_t indexCount = 0;
 		uint32_t vertexCount = 0;
+		uint32_t vertexOffset = 0;
+		uint32_t vertexCapacity = 0;
+		uint32_t indexOffset = 0;
+		uint32_t indexCapacity = 0;
+		uint32_t primitiveOffset = 0;
+		uint32_t primitiveCapacity = 0;
 		uint32_t tlasReadyFrame = 0;
 		bool tlasPublished = false;
 		float bakedTranslation[3] = {};
