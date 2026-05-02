@@ -1404,6 +1404,27 @@ private:
 		nri_scene::MaterialBridgeData materialBridge;
 	};
 
+	struct PersistentVoxelInstanceRecord
+	{
+		uint64_t identityKey = 0;
+		uint64_t signature = 0;
+		uint64_t geometrySignature = 0;
+		uint64_t surfaceSignature = 0;
+		uint64_t bakedSurfaceSignature = 0;
+		uint64_t materialSignature = 0;
+		uint64_t meshKeyHash = 0;
+		uint64_t materialKeyHash = 0;
+		uint64_t meshVariantHash = 0;
+		uint64_t materialVariantHash = 0;
+		uint64_t meshResourceKey = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t lastSeenFrame = 0;
+		bool active = false;
+		bool pending = false;
+		std::array<float, 12> currentTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+		std::array<float, 12> previousTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+	};
+
 	struct ActorSpriteDebugStats
 	{
 		uint32_t lastPruneChecks = 0;
@@ -2111,6 +2132,7 @@ private:
 	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
 	std::unordered_map<uint64_t, PersistentVoxelMeshVariantResource> mPersistentVoxelMeshVariantResources;
 	std::unordered_map<uint64_t, PersistentVoxelMaterialVariantResource> mPersistentVoxelMaterialVariantResources;
+	std::unordered_map<uint64_t, PersistentVoxelInstanceRecord> mPersistentVoxelInstances;
 	std::unordered_map<uint64_t, uint64_t> mPersistentVoxelActorRejectedSignatures;
 	uint32_t mPersistentVoxelArenaVertexCursor = 0;
 	uint32_t mPersistentVoxelArenaIndexCursor = 0;
