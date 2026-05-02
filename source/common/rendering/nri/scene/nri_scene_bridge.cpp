@@ -175,6 +175,8 @@ namespace
 		uint32_t primitiveCount = 0;
 		float currentTranslation[3] = {};
 		float bakedTranslation[3] = {};
+		float currentTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+		float bakedTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		bool persistentReady = false;
 		bool hasSurface = false;
 	};
@@ -277,6 +279,7 @@ namespace
 		int32_t sourcePicnum = -1;
 		int32_t resolvedVoxelIndex = -1;
 		float currentTranslation[3] = {};
+		float currentTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		VoxelActorCacheEntry* entry = nullptr;
 	};
 
@@ -1880,6 +1883,23 @@ namespace
 		outTranslation[2] = (float)matrix[14];
 	}
 
+	void CopyVoxelActorTransform(const HWSprite& sprite, float outTransform[12])
+	{
+		const FLOATTYPE* matrix = sprite.rotmat.get();
+		outTransform[0] = (float)matrix[0];
+		outTransform[1] = (float)matrix[4];
+		outTransform[2] = (float)matrix[8];
+		outTransform[3] = (float)matrix[12];
+		outTransform[4] = (float)matrix[1];
+		outTransform[5] = (float)matrix[5];
+		outTransform[6] = (float)matrix[9];
+		outTransform[7] = (float)matrix[13];
+		outTransform[8] = (float)matrix[2];
+		outTransform[9] = (float)matrix[6];
+		outTransform[10] = (float)matrix[10];
+		outTransform[11] = (float)matrix[14];
+	}
+
 	bool SameVoxelTranslation(const float a[3], const float b[3])
 	{
 		constexpr float Epsilon = 0.0001f;
@@ -1888,20 +1908,83 @@ namespace
 			std::abs(a[2] - b[2]) <= Epsilon;
 	}
 
-	void FillVoxelTranslationInstanceTransform(const float currentTranslation[3], const float bakedTranslation[3], float outTransform[12])
+	bool SameVoxelTransform(const float a[12], const float b[12])
 	{
-		outTransform[0] = 1.0f;
-		outTransform[1] = 0.0f;
-		outTransform[2] = 0.0f;
-		outTransform[3] = currentTranslation[0] - bakedTranslation[0];
-		outTransform[4] = 0.0f;
-		outTransform[5] = 1.0f;
-		outTransform[6] = 0.0f;
-		outTransform[7] = currentTranslation[1] - bakedTranslation[1];
-		outTransform[8] = 0.0f;
-		outTransform[9] = 0.0f;
-		outTransform[10] = 1.0f;
-		outTransform[11] = currentTranslation[2] - bakedTranslation[2];
+		constexpr float Epsilon = 0.0001f;
+		for (int i = 0; i < 12; ++i)
+		{
+			if (std::abs(a[i] - b[i]) > Epsilon)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void FillIdentityVoxelInstanceTransform(float outTransform[12])
+	{
+		outTransform[0] = 1.0f; outTransform[1] = 0.0f; outTransform[2] = 0.0f; outTransform[3] = 0.0f;
+		outTransform[4] = 0.0f; outTransform[5] = 1.0f; outTransform[6] = 0.0f; outTransform[7] = 0.0f;
+		outTransform[8] = 0.0f; outTransform[9] = 0.0f; outTransform[10] = 1.0f; outTransform[11] = 0.0f;
+	}
+
+	bool InvertVoxelAffineTransform(const float transform[12], float inverse[12])
+	{
+		const float a00 = transform[0], a01 = transform[1], a02 = transform[2];
+		const float a10 = transform[4], a11 = transform[5], a12 = transform[6];
+		const float a20 = transform[8], a21 = transform[9], a22 = transform[10];
+		const float determinant =
+			a00 * (a11 * a22 - a12 * a21) -
+			a01 * (a10 * a22 - a12 * a20) +
+			a02 * (a10 * a21 - a11 * a20);
+		if (std::abs(determinant) <= 1.0e-8f)
+		{
+			return false;
+		}
+
+		const float invDet = 1.0f / determinant;
+		inverse[0] = (a11 * a22 - a12 * a21) * invDet;
+		inverse[1] = (a02 * a21 - a01 * a22) * invDet;
+		inverse[2] = (a01 * a12 - a02 * a11) * invDet;
+		inverse[4] = (a12 * a20 - a10 * a22) * invDet;
+		inverse[5] = (a00 * a22 - a02 * a20) * invDet;
+		inverse[6] = (a02 * a10 - a00 * a12) * invDet;
+		inverse[8] = (a10 * a21 - a11 * a20) * invDet;
+		inverse[9] = (a01 * a20 - a00 * a21) * invDet;
+		inverse[10] = (a00 * a11 - a01 * a10) * invDet;
+
+		const float tx = transform[3], ty = transform[7], tz = transform[11];
+		inverse[3] = -(inverse[0] * tx + inverse[1] * ty + inverse[2] * tz);
+		inverse[7] = -(inverse[4] * tx + inverse[5] * ty + inverse[6] * tz);
+		inverse[11] = -(inverse[8] * tx + inverse[9] * ty + inverse[10] * tz);
+		return true;
+	}
+
+	void MultiplyVoxelAffineTransforms(const float a[12], const float b[12], float outTransform[12])
+	{
+		outTransform[0] = a[0] * b[0] + a[1] * b[4] + a[2] * b[8];
+		outTransform[1] = a[0] * b[1] + a[1] * b[5] + a[2] * b[9];
+		outTransform[2] = a[0] * b[2] + a[1] * b[6] + a[2] * b[10];
+		outTransform[3] = a[0] * b[3] + a[1] * b[7] + a[2] * b[11] + a[3];
+		outTransform[4] = a[4] * b[0] + a[5] * b[4] + a[6] * b[8];
+		outTransform[5] = a[4] * b[1] + a[5] * b[5] + a[6] * b[9];
+		outTransform[6] = a[4] * b[2] + a[5] * b[6] + a[6] * b[10];
+		outTransform[7] = a[4] * b[3] + a[5] * b[7] + a[6] * b[11] + a[7];
+		outTransform[8] = a[8] * b[0] + a[9] * b[4] + a[10] * b[8];
+		outTransform[9] = a[8] * b[1] + a[9] * b[5] + a[10] * b[9];
+		outTransform[10] = a[8] * b[2] + a[9] * b[6] + a[10] * b[10];
+		outTransform[11] = a[8] * b[3] + a[9] * b[7] + a[10] * b[11] + a[11];
+	}
+
+	void FillVoxelInstanceTransform(const float currentTransform[12], const float bakedTransform[12], float outTransform[12])
+	{
+		float inverseBaked[12] = {};
+		if (!InvertVoxelAffineTransform(bakedTransform, inverseBaked))
+		{
+			FillIdentityVoxelInstanceTransform(outTransform);
+			return;
+		}
+		MultiplyVoxelAffineTransforms(currentTransform, inverseBaked, outTransform);
 	}
 
 	uint64_t BuildVoxelActorMaterialSignature(FGameTexture* voxelTexture, const MaterialRef& material)
@@ -2168,6 +2251,7 @@ namespace
 		lookup.materialVariantHash = materialVariantHash;
 		lookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
 		CopyVoxelActorTranslation(sprite, lookup.currentTranslation);
+		CopyVoxelActorTransform(sprite, lookup.currentTransform);
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end())
 		{
@@ -2192,15 +2276,16 @@ namespace
 			lookup.entry->persistentReady &&
 			lookup.entry->geometrySignature == geometrySignature &&
 			lookup.entry->materialSignature == materialSignature &&
-			lookup.entry->transformBasisSignature == transformBasisSignature &&
-			!SameVoxelTranslation(lookup.entry->currentTranslation, lookup.currentTranslation);
+			!SameVoxelTransform(lookup.entry->currentTransform, lookup.currentTransform);
 		if (canUpdateByTranslationInstance)
 		{
 			lookup.entry->signature = signature;
 			lookup.entry->surfaceSignature = surfaceSignature;
+			lookup.entry->transformBasisSignature = transformBasisSignature;
 			lookup.entry->currentTranslation[0] = lookup.currentTranslation[0];
 			lookup.entry->currentTranslation[1] = lookup.currentTranslation[1];
 			lookup.entry->currentTranslation[2] = lookup.currentTranslation[2];
+			std::copy(std::begin(lookup.currentTransform), std::end(lookup.currentTransform), std::begin(lookup.entry->currentTransform));
 			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
 			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
 			lookup.entry->pendingFrame = 0;
@@ -2400,6 +2485,8 @@ namespace
 		entry.bakedTranslation[0] = lookup.currentTranslation[0];
 		entry.bakedTranslation[1] = lookup.currentTranslation[1];
 		entry.bakedTranslation[2] = lookup.currentTranslation[2];
+		std::copy(std::begin(lookup.currentTransform), std::end(lookup.currentTransform), std::begin(entry.currentTransform));
+		std::copy(std::begin(lookup.currentTransform), std::end(lookup.currentTransform), std::begin(entry.bakedTransform));
 		// Transform rebakes and state variant switches are transitional updates of an
 		// already valid actor. Keep already-resident actors renderable and let the
 		// persistent actor path update the resource in place. First-use actors still
@@ -3713,7 +3800,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.sourcePicnum = entry.second->sourcePicnum;
 		view.resolvedVoxelIndex = entry.second->resolvedVoxelIndex;
 		view.primitiveCount = entry.second->primitiveCount;
-		FillVoxelTranslationInstanceTransform(entry.second->currentTranslation, entry.second->bakedTranslation, view.instanceTransform);
+		FillVoxelInstanceTransform(entry.second->currentTransform, entry.second->bakedTransform, view.instanceTransform);
 		view.currentTranslation[0] = entry.second->currentTranslation[0];
 		view.currentTranslation[1] = entry.second->currentTranslation[1];
 		view.currentTranslation[2] = entry.second->currentTranslation[2];

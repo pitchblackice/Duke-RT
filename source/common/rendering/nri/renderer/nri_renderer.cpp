@@ -11844,13 +11844,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return true;
 	};
 
-	auto fillPersistentVoxelInstanceTransform = [](const float currentTranslation[3], const float bakedTranslation[3], std::array<float, 12>& target)
-	{
-		target = { 1.0f, 0.0f, 0.0f, currentTranslation[0] - bakedTranslation[0],
-			0.0f, 1.0f, 0.0f, currentTranslation[1] - bakedTranslation[1],
-			0.0f, 0.0f, 1.0f, currentTranslation[2] - bakedTranslation[2] };
-	};
-
 	auto retirePersistentVoxelActorResource = [&](PersistentVoxelActorResource& resource)
 	{
 		RetireResidentBufferResource(resource.vertexBuffer);
@@ -11882,7 +11875,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	{
 		uint64_t hash = 1469598103934665603ull;
 		hash = HashCombine64(hash, cacheEntry.meshKeyHash);
-		hash = HashCombine64(hash, cacheEntry.transformBasisSignature);
 		return hash;
 	};
 
@@ -12254,7 +12246,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.meshKeyHash = cacheEntry.meshKeyHash;
 			actor.materialKeyHash = cacheEntry.materialKeyHash;
 			actor.active = true;
-			fillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, actor.instanceTransform);
+			copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, actor.instanceTransform);
 			actor.primitiveOffset = resource.primitiveOffset;
 			actor.primitiveCount = primitiveCount;
 			actor.indexOffset = resource.indexOffset;
@@ -12407,7 +12399,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		const bool meshResourceChanged =
 			meshResource.resourceKey != meshResourceKey ||
 			meshResource.meshKeyHash != cacheEntry.meshKeyHash ||
-			meshResource.transformBasisSignature != cacheEntry.transformBasisSignature ||
 			meshResource.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
 			meshResource.indexCount != (uint32_t)actorGeometry.indices.size() ||
 			meshResource.primitiveCount != (uint32_t)actorGeometry.primitives.size() ||
@@ -12616,7 +12607,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.meshKeyHash = cacheEntry.meshKeyHash;
 		actor.materialKeyHash = cacheEntry.materialKeyHash;
 		actor.active = true;
-		fillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, actor.instanceTransform);
+		copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, actor.instanceTransform);
 		actor.primitiveOffset = resource.primitiveOffset;
 		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
 		actor.indexOffset = resource.indexOffset;
@@ -12818,10 +12809,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			auto meshResourceIt = actor.meshResourceKey != 0 ? mPersistentVoxelMeshVariantResources.find(actor.meshResourceKey) : mPersistentVoxelMeshVariantResources.end();
 			std::array<float, 12> expectedInstanceTransform = {};
 			copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, expectedInstanceTransform);
-			if (meshResourceIt != mPersistentVoxelMeshVariantResources.end())
-			{
-				fillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResourceIt->second.bakedTranslation, expectedInstanceTransform);
-			}
 			const bool actorGeometryNeedsUpdate =
 				actor.bakedSurfaceSignature != cacheEntry.bakedSurfaceSignature ||
 				actor.meshKeyHash != cacheEntry.meshKeyHash ||
