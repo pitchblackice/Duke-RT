@@ -1322,6 +1322,7 @@ private:
 			uint64_t signature = 0;
 			uint64_t geometrySignature = 0;
 			uint64_t surfaceSignature = 0;
+			uint64_t bakedSurfaceSignature = 0;
 			uint64_t materialSignature = 0;
 			uint64_t meshKeyHash = 0;
 			uint64_t materialKeyHash = 0;
@@ -1333,6 +1334,7 @@ private:
 			uint32_t indexCount = 0;
 			uint32_t materialOffset = 0;
 			uint32_t materialCount = 0;
+			std::array<float, 12> instanceTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 			nri_scene::MaterialBridgeData materialBridge;
 			std::vector<SceneLightSystem::SurfaceRecord> lightRecords;
 		};

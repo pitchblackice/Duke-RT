@@ -8303,9 +8303,13 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							}
 
 							nri::TopLevelInstance persistentVoxelInstance = {};
-							persistentVoxelInstance.transform[0][0] = 1.0f;
-							persistentVoxelInstance.transform[1][1] = 1.0f;
-							persistentVoxelInstance.transform[2][2] = 1.0f;
+							for (uint32_t row = 0; row < 3; ++row)
+							{
+								for (uint32_t column = 0; column < 4; ++column)
+								{
+									persistentVoxelInstance.transform[row][column] = actor.instanceTransform[row * 4u + column];
+								}
+							}
 							persistentVoxelInstance.instanceId = (uint32_t)sceneInstances.size();
 							persistentVoxelInstance.mask = 0xFF;
 							persistentVoxelInstance.shaderBindingTableLocalOffset = 0;
@@ -11784,6 +11788,27 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		batch.sceneView.opaqueSprites = std::move(activeSprites);
 	};
 
+	auto copyPersistentVoxelInstanceTransform = [](const float source[12], std::array<float, 12>& target)
+	{
+		for (size_t i = 0; i < target.size(); ++i)
+		{
+			target[i] = source[i];
+		}
+	};
+
+	auto samePersistentVoxelInstanceTransform = [](const std::array<float, 12>& left, const float right[12]) -> bool
+	{
+		constexpr float Epsilon = 0.0001f;
+		for (size_t i = 0; i < left.size(); ++i)
+		{
+			if (std::abs(left[i] - right[i]) > Epsilon)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+
 	auto estimatePersistentVoxelActorUploadBytes = [](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> uint64_t
 	{
 		if (cacheEntry.surface == nullptr)
@@ -12129,7 +12154,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		}
 
 		const bool actorGeometryChanged =
-			resource.signature != cacheEntry.surfaceSignature ||
+			resource.signature != cacheEntry.bakedSurfaceSignature ||
 			resource.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
 			resource.indexCount != (uint32_t)actorGeometry.indices.size() ||
 			resource.primitiveCount != (uint32_t)actorGeometry.primitives.size() ||
@@ -12254,7 +12279,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				return false;
 			}
 			RetireResidentAccelerationStructure(resource.accelerationStructure);
-			resource.signature = cacheEntry.surfaceSignature;
+			resource.signature = cacheEntry.bakedSurfaceSignature;
 			resource.vertexCount = (uint32_t)actorGeometry.vertices.size();
 			resource.indexCount = (uint32_t)actorGeometry.indices.size();
 			resource.primitiveCount = (uint32_t)actorGeometry.primitives.size();
@@ -12266,10 +12291,12 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.signature = cacheEntry.signature;
 		actor.geometrySignature = cacheEntry.geometrySignature;
 		actor.surfaceSignature = cacheEntry.surfaceSignature;
+		actor.bakedSurfaceSignature = cacheEntry.bakedSurfaceSignature;
 		actor.materialSignature = cacheEntry.materialSignature;
 		actor.meshKeyHash = cacheEntry.meshKeyHash;
 		actor.materialKeyHash = cacheEntry.materialKeyHash;
 		actor.active = true;
+		copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, actor.instanceTransform);
 		actor.primitiveOffset = resource.primitiveOffset;
 		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
 		actor.indexOffset = resource.indexOffset;
@@ -12429,22 +12456,25 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			PersistentVoxelBatch::ActorEntry& actor = *found->second;
 			auto resourceIt = mPersistentVoxelActorResources.find(cacheEntry.identityKey);
 			const bool actorGeometryNeedsUpdate =
-				actor.surfaceSignature != cacheEntry.surfaceSignature ||
+				actor.bakedSurfaceSignature != cacheEntry.bakedSurfaceSignature ||
 				resourceIt == mPersistentVoxelActorResources.end() ||
-				resourceIt->second.signature != cacheEntry.surfaceSignature ||
+				resourceIt->second.signature != cacheEntry.bakedSurfaceSignature ||
 				resourceIt->second.vertexBuffer.buffer == nullptr ||
 				resourceIt->second.indexBuffer.buffer == nullptr ||
 				resourceIt->second.primitiveCount != actor.primitiveCount ||
 				resourceIt->second.indexCount != actor.indexCount;
+			const bool actorInstanceTransformNeedsUpdate = !samePersistentVoxelInstanceTransform(actor.instanceTransform, cacheEntry.instanceTransform);
 			const bool actorNeedsUpdate =
 				actor.signature != cacheEntry.signature ||
 				actor.geometrySignature != cacheEntry.geometrySignature ||
 				actor.surfaceSignature != cacheEntry.surfaceSignature ||
+				actor.bakedSurfaceSignature != cacheEntry.bakedSurfaceSignature ||
 				actor.materialSignature != cacheEntry.materialSignature ||
 				actor.meshKeyHash != cacheEntry.meshKeyHash ||
 				actor.materialKeyHash != cacheEntry.materialKeyHash ||
+				actorInstanceTransformNeedsUpdate ||
 				resourceIt == mPersistentVoxelActorResources.end() ||
-				resourceIt->second.signature != cacheEntry.surfaceSignature ||
+				resourceIt->second.signature != cacheEntry.bakedSurfaceSignature ||
 				resourceIt->second.vertexBuffer.buffer == nullptr ||
 				resourceIt->second.indexBuffer.buffer == nullptr ||
 				resourceIt->second.primitiveCount != actor.primitiveCount ||
@@ -12452,6 +12482,25 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				resourceIt->second.materialCount != actor.materialCount;
 			if (actorNeedsUpdate)
 			{
+				const bool transformOnlyUpdate =
+					!actorGeometryNeedsUpdate &&
+					actorInstanceTransformNeedsUpdate &&
+					actor.signature == cacheEntry.signature &&
+					actor.geometrySignature == cacheEntry.geometrySignature &&
+					actor.materialSignature == cacheEntry.materialSignature &&
+					actor.meshKeyHash == cacheEntry.meshKeyHash &&
+					actor.materialKeyHash == cacheEntry.materialKeyHash &&
+					resourceIt != mPersistentVoxelActorResources.end() &&
+					resourceIt->second.materialCount == actor.materialCount;
+				if (transformOnlyUpdate)
+				{
+					actor.surfaceSignature = cacheEntry.surfaceSignature;
+					copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, actor.instanceTransform);
+					actor.active = true;
+					updatedActorCount++;
+					continue;
+				}
+
 				const uint64_t estimatedUploadBytes = actorGeometryNeedsUpdate ? estimatePersistentVoxelActorUploadBytes(cacheEntry) : 0ull;
 				if (actorGeometryNeedsUpdate && !canBuildPersistentVoxelActor(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
@@ -12679,7 +12728,7 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		PersistentVoxelActorResource& resource = mPersistentVoxelActorResources[actor.identityKey];
 		const bool needsBuild =
 			resource.accelerationStructure.accelerationStructure == nullptr ||
-			resource.signature != actor.surfaceSignature ||
+			resource.signature != actor.bakedSurfaceSignature ||
 			resource.primitiveCount != actor.primitiveCount ||
 			resource.indexCount != actor.indexCount ||
 			resource.vertexBuffer.buffer == nullptr ||
@@ -12720,7 +12769,7 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		inputBarrierDesc.bufferNum = 2;
 		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, inputBarrierDesc);
 
-		resource.signature = actor.surfaceSignature;
+		resource.signature = actor.bakedSurfaceSignature;
 		resource.primitiveCount = actor.primitiveCount;
 		resource.indexCount = actor.indexCount;
 		resource.materialCount = actor.materialCount;

@@ -244,6 +244,7 @@ struct PersistentVoxelCacheEntryView
 	uint64_t signature = 0;
 	uint64_t geometrySignature = 0;
 	uint64_t surfaceSignature = 0;
+	uint64_t bakedSurfaceSignature = 0;
 	uint64_t materialSignature = 0;
 	uint64_t meshKeyHash = 0;
 	uint64_t materialKeyHash = 0;
@@ -252,6 +253,7 @@ struct PersistentVoxelCacheEntryView
 	int32_t sourcePicnum = -1;
 	int32_t resolvedVoxelIndex = -1;
 	uint32_t primitiveCount = 0;
+	float instanceTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 	const SurfaceRef* surface = nullptr;
 };
 

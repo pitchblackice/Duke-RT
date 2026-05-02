@@ -144,7 +144,9 @@ namespace
 		uint64_t signature = 0;
 		uint64_t geometrySignature = 0;
 		uint64_t surfaceSignature = 0;
+		uint64_t bakedSurfaceSignature = 0;
 		uint64_t materialSignature = 0;
+		uint64_t transformBasisSignature = 0;
 		uint64_t identityKey = 0;
 		uint64_t meshKeyHash = 0;
 		uint64_t materialKeyHash = 0;
@@ -169,6 +171,8 @@ namespace
 		SurfaceRef surface;
 		uint64_t lastSeenFrame = 0;
 		uint32_t primitiveCount = 0;
+		float currentTranslation[3] = {};
+		float bakedTranslation[3] = {};
 		bool persistentReady = false;
 		bool hasSurface = false;
 	};
@@ -211,6 +215,7 @@ namespace
 		uint64_t geometrySignature = 0;
 		uint64_t surfaceSignature = 0;
 		uint64_t materialSignature = 0;
+		uint64_t transformBasisSignature = 0;
 		uint64_t meshKeyHash = 0;
 		uint64_t materialKeyHash = 0;
 		uint64_t meshVariantHash = 0;
@@ -222,6 +227,7 @@ namespace
 		uintptr_t voxelModelPtr = 0;
 		int32_t sourcePicnum = -1;
 		int32_t resolvedVoxelIndex = -1;
+		float currentTranslation[3] = {};
 		VoxelActorCacheEntry* entry = nullptr;
 	};
 
@@ -1805,6 +1811,53 @@ namespace
 		return hash;
 	}
 
+	uint64_t BuildVoxelActorTransformBasisSignature(const HWSprite& sprite)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		const FLOATTYPE* matrix = sprite.rotmat.get();
+		for (int i = 0; i < 16; ++i)
+		{
+			if (i == 12 || i == 13 || i == 14)
+			{
+				continue;
+			}
+			hash = HashCombine64(hash, QuantizeSignatureFloat((double)matrix[i], 4096.0));
+		}
+		return hash;
+	}
+
+	void CopyVoxelActorTranslation(const HWSprite& sprite, float outTranslation[3])
+	{
+		const FLOATTYPE* matrix = sprite.rotmat.get();
+		outTranslation[0] = (float)matrix[12];
+		outTranslation[1] = (float)matrix[13];
+		outTranslation[2] = (float)matrix[14];
+	}
+
+	bool SameVoxelTranslation(const float a[3], const float b[3])
+	{
+		constexpr float Epsilon = 0.0001f;
+		return std::abs(a[0] - b[0]) <= Epsilon &&
+			std::abs(a[1] - b[1]) <= Epsilon &&
+			std::abs(a[2] - b[2]) <= Epsilon;
+	}
+
+	void FillVoxelTranslationInstanceTransform(const float currentTranslation[3], const float bakedTranslation[3], float outTransform[12])
+	{
+		outTransform[0] = 1.0f;
+		outTransform[1] = 0.0f;
+		outTransform[2] = 0.0f;
+		outTransform[3] = currentTranslation[0] - bakedTranslation[0];
+		outTransform[4] = 0.0f;
+		outTransform[5] = 1.0f;
+		outTransform[6] = 0.0f;
+		outTransform[7] = currentTranslation[1] - bakedTranslation[1];
+		outTransform[8] = 0.0f;
+		outTransform[9] = 0.0f;
+		outTransform[10] = 1.0f;
+		outTransform[11] = currentTranslation[2] - bakedTranslation[2];
+	}
+
 	uint64_t BuildVoxelActorMaterialSignature(FGameTexture* voxelTexture, const MaterialRef& material)
 	{
 		return BuildVoxelMaterialVariantKeyHash(BuildVoxelMaterialVariantKey(voxelTexture, material));
@@ -2047,6 +2100,7 @@ namespace
 
 		stats.voxelStableCandidates++;
 		const uint64_t surfaceSignature = BuildVoxelActorSurfaceSignature(sprite);
+		const uint64_t transformBasisSignature = BuildVoxelActorTransformBasisSignature(sprite);
 		const VoxelMeshVariantKey meshVariantKey = BuildVoxelMeshVariantKey(sprite);
 		const VoxelMaterialVariantKey materialVariantKey = BuildVoxelMaterialVariantKey(voxelTexture, material);
 		const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
@@ -2058,12 +2112,14 @@ namespace
 		lookup.signature = signature;
 		lookup.geometrySignature = geometrySignature;
 		lookup.surfaceSignature = surfaceSignature;
+		lookup.transformBasisSignature = transformBasisSignature;
 		lookup.materialSignature = materialSignature;
 		lookup.meshKeyHash = meshKeyHash;
 		lookup.materialKeyHash = materialSignature;
 		lookup.meshVariantHash = meshVariantHash;
 		lookup.materialVariantHash = materialVariantHash;
 		lookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
+		CopyVoxelActorTranslation(sprite, lookup.currentTranslation);
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end())
 		{
@@ -2083,6 +2139,31 @@ namespace
 		lookup.entry->desiredMeshVariantHash = meshVariantHash;
 		lookup.entry->desiredMaterialVariantHash = materialVariantHash;
 		lookup.entry->desiredSurfaceSignature = surfaceSignature;
+		const bool canUpdateByTranslationInstance =
+			lookup.entry->hasSurface &&
+			lookup.entry->persistentReady &&
+			lookup.entry->geometrySignature == geometrySignature &&
+			lookup.entry->materialSignature == materialSignature &&
+			lookup.entry->transformBasisSignature == transformBasisSignature &&
+			!SameVoxelTranslation(lookup.entry->currentTranslation, lookup.currentTranslation);
+		if (canUpdateByTranslationInstance)
+		{
+			lookup.entry->signature = signature;
+			lookup.entry->surfaceSignature = surfaceSignature;
+			lookup.entry->currentTranslation[0] = lookup.currentTranslation[0];
+			lookup.entry->currentTranslation[1] = lookup.currentTranslation[1];
+			lookup.entry->currentTranslation[2] = lookup.currentTranslation[2];
+			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
+			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
+			lookup.entry->pendingFrame = 0;
+			stats.voxelStableSignatureChanges++;
+			stats.voxelStableSplitStable++;
+			stats.voxelCacheSurfaceHits++;
+			lookup.stability = VoxelActorStability::Stable;
+			++gVoxelActorCacheSerial;
+			EmitVoxelActorKeyTrace(sprite, lookup, "transform-instance");
+			return lookup;
+		}
 		if (lookup.entry->signature == signature && lookup.entry->surfaceSignature == surfaceSignature && lookup.entry->hasSurface)
 		{
 			const bool promoted = !lookup.entry->persistentReady;
@@ -2243,7 +2324,9 @@ namespace
 		entry.signature = lookup.signature;
 		entry.geometrySignature = lookup.geometrySignature;
 		entry.surfaceSignature = lookup.surfaceSignature;
+		entry.bakedSurfaceSignature = lookup.surfaceSignature;
 		entry.materialSignature = lookup.materialSignature;
+		entry.transformBasisSignature = lookup.transformBasisSignature;
 		entry.meshKeyHash = lookup.meshKeyHash;
 		entry.materialKeyHash = lookup.materialKeyHash;
 		entry.meshVariantHash = lookup.meshVariantHash;
@@ -2262,6 +2345,12 @@ namespace
 		entry.lastSeenFrame = gVoxelActorCacheFrame;
 		entry.surfaceFrame = gVoxelActorCacheFrame;
 		entry.primitiveCount = CountSurfacePrimitives(entry.surface);
+		entry.currentTranslation[0] = lookup.currentTranslation[0];
+		entry.currentTranslation[1] = lookup.currentTranslation[1];
+		entry.currentTranslation[2] = lookup.currentTranslation[2];
+		entry.bakedTranslation[0] = lookup.currentTranslation[0];
+		entry.bakedTranslation[1] = lookup.currentTranslation[1];
+		entry.bakedTranslation[2] = lookup.currentTranslation[2];
 		// Transform rebakes and state variant switches are transitional updates of an
 		// already valid actor. Keep already-resident actors renderable and let the
 		// persistent actor path update the resource in place. First-use actors still
@@ -3354,6 +3443,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.signature = entry.second->signature;
 		view.geometrySignature = entry.second->geometrySignature;
 		view.surfaceSignature = entry.second->surfaceSignature;
+		view.bakedSurfaceSignature = entry.second->bakedSurfaceSignature != 0 ? entry.second->bakedSurfaceSignature : entry.second->surfaceSignature;
 		view.materialSignature = entry.second->materialSignature;
 		view.meshKeyHash = entry.second->meshKeyHash;
 		view.materialKeyHash = entry.second->materialKeyHash;
@@ -3362,6 +3452,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.sourcePicnum = entry.second->sourcePicnum;
 		view.resolvedVoxelIndex = entry.second->resolvedVoxelIndex;
 		view.primitiveCount = entry.second->primitiveCount;
+		FillVoxelTranslationInstanceTransform(entry.second->currentTranslation, entry.second->bakedTranslation, view.instanceTransform);
 		view.surface = &entry.second->surface;
 		outEntries.push_back(std::move(view));
 	}
