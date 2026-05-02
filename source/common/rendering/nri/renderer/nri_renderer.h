@@ -1324,6 +1324,7 @@ private:
 			uint64_t surfaceSignature = 0;
 			uint64_t bakedSurfaceSignature = 0;
 			uint64_t materialSignature = 0;
+			uint64_t meshResourceKey = 0;
 			uint64_t meshKeyHash = 0;
 			uint64_t materialKeyHash = 0;
 			bool active = true;
@@ -1355,6 +1356,7 @@ private:
 	struct PersistentVoxelActorResource
 	{
 		uint64_t signature = 0;
+		uint64_t meshResourceKey = 0;
 		uint32_t vertexOffset = 0;
 		uint32_t primitiveOffset = 0;
 		uint32_t primitiveCount = 0;
@@ -1371,6 +1373,22 @@ private:
 		uint32_t primitiveCapacity = 0;
 		uint32_t materialCapacity = 0;
 		bool tlasPublished = false;
+		NRIBufferResource vertexBuffer;
+		NRIBufferResource indexBuffer;
+		NRIAccelerationStructureResource accelerationStructure;
+	};
+
+	struct PersistentVoxelMeshVariantResource
+	{
+		uint64_t resourceKey = 0;
+		uint64_t meshKeyHash = 0;
+		uint64_t transformBasisSignature = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t indexCount = 0;
+		uint32_t vertexCount = 0;
+		uint32_t tlasReadyFrame = 0;
+		bool tlasPublished = false;
+		float bakedTranslation[3] = {};
 		NRIBufferResource vertexBuffer;
 		NRIBufferResource indexBuffer;
 		NRIAccelerationStructureResource accelerationStructure;
@@ -2081,6 +2099,7 @@ private:
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	PersistentVoxelBatch mPersistentVoxelBatch = {};
 	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
+	std::unordered_map<uint64_t, PersistentVoxelMeshVariantResource> mPersistentVoxelMeshVariantResources;
 	std::unordered_map<uint64_t, uint64_t> mPersistentVoxelActorRejectedSignatures;
 	uint32_t mPersistentVoxelArenaVertexCursor = 0;
 	uint32_t mPersistentVoxelArenaIndexCursor = 0;

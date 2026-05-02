@@ -3445,6 +3445,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.surfaceSignature = entry.second->surfaceSignature;
 		view.bakedSurfaceSignature = entry.second->bakedSurfaceSignature != 0 ? entry.second->bakedSurfaceSignature : entry.second->surfaceSignature;
 		view.materialSignature = entry.second->materialSignature;
+		view.transformBasisSignature = entry.second->transformBasisSignature;
 		view.meshKeyHash = entry.second->meshKeyHash;
 		view.materialKeyHash = entry.second->materialKeyHash;
 		view.meshVariantHash = entry.second->meshVariantHash;
@@ -3453,6 +3454,12 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.resolvedVoxelIndex = entry.second->resolvedVoxelIndex;
 		view.primitiveCount = entry.second->primitiveCount;
 		FillVoxelTranslationInstanceTransform(entry.second->currentTranslation, entry.second->bakedTranslation, view.instanceTransform);
+		view.currentTranslation[0] = entry.second->currentTranslation[0];
+		view.currentTranslation[1] = entry.second->currentTranslation[1];
+		view.currentTranslation[2] = entry.second->currentTranslation[2];
+		view.bakedTranslation[0] = entry.second->bakedTranslation[0];
+		view.bakedTranslation[1] = entry.second->bakedTranslation[1];
+		view.bakedTranslation[2] = entry.second->bakedTranslation[2];
 		view.surface = &entry.second->surface;
 		outEntries.push_back(std::move(view));
 	}
