@@ -216,8 +216,16 @@ struct SceneDebugStats
 	uint64_t dynamicVoxelEscapePrimitiveBytes = 0;
 	uint64_t dynamicVoxelEscapeMaterialBytes = 0;
 	uint64_t dynamicVoxelEscapeTotalBytes = 0;
+	unsigned int dynamicVoxelExpectedEscapeActorCount = 0;
+	unsigned int dynamicVoxelUnexpectedEscapeActorCount = 0;
+	unsigned int dynamicVoxelExpectedEscapePrimitiveCount = 0;
+	unsigned int dynamicVoxelUnexpectedEscapePrimitiveCount = 0;
+	uint64_t dynamicVoxelExpectedEscapeTotalBytes = 0;
+	uint64_t dynamicVoxelUnexpectedEscapeTotalBytes = 0;
 	unsigned int dynamicVoxelEscapeTopCount = 0;
 	std::array<DynamicVoxelEscapeTraceEntry, DynamicVoxelEscapeTraceCount> dynamicVoxelEscapeTopEntries = {};
+	unsigned int dynamicVoxelUnexpectedEscapeTopCount = 0;
+	std::array<DynamicVoxelEscapeTraceEntry, DynamicVoxelEscapeTraceCount> dynamicVoxelUnexpectedEscapeTopEntries = {};
 };
 
 struct SkyPerfStats

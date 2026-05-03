@@ -2002,6 +2002,20 @@ namespace
 			reason == DynamicVoxelEscapeReason::LifecycleTransient;
 	}
 
+	bool IsExpectedDynamicVoxelEscape(DynamicVoxelEscapeReason reason)
+	{
+		switch (reason)
+		{
+		case DynamicVoxelEscapeReason::CameraOrWeaponSpecial:
+		case DynamicVoxelEscapeReason::LifecycleTransient:
+		case DynamicVoxelEscapeReason::ValidationQuarantine:
+		case DynamicVoxelEscapeReason::MissingSurface:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	const char* GetVoxelMeshBakeSpaceName(VoxelMeshBakeSpace bakeSpace)
 	{
 		switch (bakeSpace)
@@ -2629,7 +2643,10 @@ namespace
 		return surface.vertices.empty() ? 0ull : (uint64_t)sizeof(MaterialRef);
 	}
 
-	void InsertDynamicVoxelEscapeTopEntry(SceneDebugStats& stats, const DynamicVoxelEscapeTraceEntry& entry)
+	void InsertDynamicVoxelEscapeTopEntry(
+		std::array<DynamicVoxelEscapeTraceEntry, DynamicVoxelEscapeTraceCount>& entries,
+		unsigned int& count,
+		const DynamicVoxelEscapeTraceEntry& entry)
 	{
 		if (!entry.valid)
 		{
@@ -2639,7 +2656,7 @@ namespace
 		size_t insertIndex = DynamicVoxelEscapeTraceCount;
 		for (size_t i = 0; i < DynamicVoxelEscapeTraceCount; ++i)
 		{
-			const DynamicVoxelEscapeTraceEntry& current = stats.dynamicVoxelEscapeTopEntries[i];
+			const DynamicVoxelEscapeTraceEntry& current = entries[i];
 			if (!current.valid ||
 				entry.totalBytes > current.totalBytes ||
 				(entry.totalBytes == current.totalBytes && entry.primitiveCount > current.primitiveCount))
@@ -2655,10 +2672,10 @@ namespace
 
 		for (size_t i = DynamicVoxelEscapeTraceCount - 1; i > insertIndex; --i)
 		{
-			stats.dynamicVoxelEscapeTopEntries[i] = stats.dynamicVoxelEscapeTopEntries[i - 1];
+			entries[i] = entries[i - 1];
 		}
-		stats.dynamicVoxelEscapeTopEntries[insertIndex] = entry;
-		stats.dynamicVoxelEscapeTopCount = (unsigned int)(std::min<size_t>)(DynamicVoxelEscapeTraceCount, stats.dynamicVoxelEscapeTopCount + 1u);
+		entries[insertIndex] = entry;
+		count = (unsigned int)(std::min<size_t>)(DynamicVoxelEscapeTraceCount, count + 1u);
 	}
 
 	void RecordDynamicVoxelEscape(
@@ -2690,6 +2707,18 @@ namespace
 		{
 			stats.dynamicVoxelEscapeForcedActorCount++;
 		}
+		if (IsExpectedDynamicVoxelEscape(reason))
+		{
+			stats.dynamicVoxelExpectedEscapeActorCount++;
+			stats.dynamicVoxelExpectedEscapePrimitiveCount += primitiveCount;
+			stats.dynamicVoxelExpectedEscapeTotalBytes += totalBytes;
+		}
+		else
+		{
+			stats.dynamicVoxelUnexpectedEscapeActorCount++;
+			stats.dynamicVoxelUnexpectedEscapePrimitiveCount += primitiveCount;
+			stats.dynamicVoxelUnexpectedEscapeTotalBytes += totalBytes;
+		}
 
 		DynamicVoxelEscapeTraceEntry entry = {};
 		entry.valid = true;
@@ -2711,7 +2740,11 @@ namespace
 		entry.totalBytes = totalBytes;
 		entry.persistentReady = lookup.entry != nullptr && lookup.entry->persistentReady;
 		entry.hasCachedSurface = lookup.entry != nullptr && lookup.entry->hasSurface;
-		InsertDynamicVoxelEscapeTopEntry(stats, entry);
+		InsertDynamicVoxelEscapeTopEntry(stats.dynamicVoxelEscapeTopEntries, stats.dynamicVoxelEscapeTopCount, entry);
+		if (!IsExpectedDynamicVoxelEscape(reason))
+		{
+			InsertDynamicVoxelEscapeTopEntry(stats.dynamicVoxelUnexpectedEscapeTopEntries, stats.dynamicVoxelUnexpectedEscapeTopCount, entry);
+		}
 	}
 
 	struct VoxelDuplicateVariantAggregate

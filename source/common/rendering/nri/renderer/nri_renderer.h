@@ -671,7 +671,14 @@ public:
 		uint64_t dynamicVoxelEscapePrimitiveBytes = 0;
 		uint64_t dynamicVoxelEscapeMaterialBytes = 0;
 		uint64_t dynamicVoxelEscapeTotalBytes = 0;
+		uint32_t dynamicVoxelExpectedEscapeActorCount = 0;
+		uint32_t dynamicVoxelUnexpectedEscapeActorCount = 0;
+		uint32_t dynamicVoxelExpectedEscapePrimitiveCount = 0;
+		uint32_t dynamicVoxelUnexpectedEscapePrimitiveCount = 0;
+		uint64_t dynamicVoxelExpectedEscapeTotalBytes = 0;
+		uint64_t dynamicVoxelUnexpectedEscapeTotalBytes = 0;
 		uint32_t dynamicVoxelEscapeTopCount = 0;
+		uint32_t dynamicVoxelUnexpectedEscapeTopCount = 0;
 		bool usedStaticMapScene = false;
 		bool usedDynamicOverlay = false;
 		bool usedPersistentDynamicEmissiveCache = false;
@@ -688,6 +695,7 @@ public:
 		std::array<RuntimeRecurringChunkTraceEntry, RuntimeRecurringChunkTraceCount> runtimeRecurringChunkEntries = {};
 		std::array<nri_scene::VoxelDuplicateVariantTraceEntry, nri_scene::VoxelDuplicateVariantTraceCount> voxelCacheDuplicateTopEntries = {};
 		std::array<nri_scene::DynamicVoxelEscapeTraceEntry, nri_scene::DynamicVoxelEscapeTraceCount> dynamicVoxelEscapeTopEntries = {};
+		std::array<nri_scene::DynamicVoxelEscapeTraceEntry, nri_scene::DynamicVoxelEscapeTraceCount> dynamicVoxelUnexpectedEscapeTopEntries = {};
 	};
 
 	struct PerfResourceTraceStats

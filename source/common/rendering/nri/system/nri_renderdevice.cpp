@@ -3383,6 +3383,15 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				(unsigned long long)shell.dynamicVoxelEscapePrimitiveBytes,
 				(unsigned long long)shell.dynamicVoxelEscapeMaterialBytes,
 				(unsigned long long)shell.dynamicVoxelEscapeTotalBytes);
+			Printf(
+				"PERF pt voxel dynamic classification NRI: frame=%llu expected_actors=%u unexpected_actors=%u expected_prims=%u unexpected_prims=%u expected_bytes=%llu unexpected_bytes=%llu\n",
+				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+				shell.dynamicVoxelExpectedEscapeActorCount,
+				shell.dynamicVoxelUnexpectedEscapeActorCount,
+				shell.dynamicVoxelExpectedEscapePrimitiveCount,
+				shell.dynamicVoxelUnexpectedEscapePrimitiveCount,
+				(unsigned long long)shell.dynamicVoxelExpectedEscapeTotalBytes,
+				(unsigned long long)shell.dynamicVoxelUnexpectedEscapeTotalBytes);
 			for (uint32_t escapeIndex = 0; escapeIndex < shell.dynamicVoxelEscapeTopCount; ++escapeIndex)
 			{
 				const auto& escape = shell.dynamicVoxelEscapeTopEntries[escapeIndex];
@@ -3392,6 +3401,33 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				}
 				Printf(
 					"PERF pt voxel dynamic escape top NRI: frame=%llu rank=%u actor=%d stat=%d pic=%d voxel_index=%d reason=%s mesh_variant=0x%llx mat_variant=0x%llx prims=%u vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu material_bytes=%llu total_bytes=%llu persistent=%u has_surface=%u\n",
+					(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+					escapeIndex + 1u,
+					escape.actorIndex,
+					escape.statnum,
+					escape.sourcePicnum,
+					escape.resolvedVoxelIndex,
+					nri_scene::GetDynamicVoxelEscapeReasonName(escape.reason),
+					(unsigned long long)escape.meshVariantHash,
+					(unsigned long long)escape.materialVariantHash,
+					escape.primitiveCount,
+					(unsigned long long)escape.vertexBytes,
+					(unsigned long long)escape.indexBytes,
+					(unsigned long long)escape.primitiveBytes,
+					(unsigned long long)escape.materialBytes,
+					(unsigned long long)escape.totalBytes,
+					escape.persistentReady ? 1u : 0u,
+					escape.hasCachedSurface ? 1u : 0u);
+			}
+			for (uint32_t escapeIndex = 0; escapeIndex < shell.dynamicVoxelUnexpectedEscapeTopCount; ++escapeIndex)
+			{
+				const auto& escape = shell.dynamicVoxelUnexpectedEscapeTopEntries[escapeIndex];
+				if (!escape.valid)
+				{
+					continue;
+				}
+				Printf(
+					"PERF pt voxel dynamic unexpected top NRI: frame=%llu rank=%u actor=%d stat=%d pic=%d voxel_index=%d reason=%s mesh_variant=0x%llx mat_variant=0x%llx prims=%u vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu material_bytes=%llu total_bytes=%llu persistent=%u has_surface=%u\n",
 					(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 					escapeIndex + 1u,
 					escape.actorIndex,
