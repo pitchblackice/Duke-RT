@@ -9153,6 +9153,7 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 	}
 
 	RefreshSceneLightSystem(true, nullptr, nullptr, nullptr, nullptr, false);
+	bool staticLightRefreshReady = true;
 	if (!mGpuSceneHasDynamicOverlay)
 	{
 		const bool needsResidentStaticLightRefresh =
@@ -9162,17 +9163,17 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 			mBoundSectorLightActiveCount != 0;
 		if (needsResidentStaticLightRefresh && !RefreshResidentStaticSceneDataSet())
 		{
+			staticLightRefreshReady = false;
 			LogFallback("PT preload static scene light refresh failed.");
 			if ((int)nri_ptloadingtrace >= 1)
 			{
-				Printf("NRI PT loading gate: event=renderer-preload result=ready reason=static-light-refresh-failed analytic=%u runtime_bound=%u sector_active=%u sector_bound=%u ms=%.3f\n",
+				Printf("NRI PT loading gate: event=renderer-preload result=continue reason=static-light-refresh-failed analytic=%u runtime_bound=%u sector_active=%u sector_bound=%u ms=%.3f\n",
 					mSceneLights.GetAnalyticLights().activeLights.empty() ? 0u : 1u,
 					mBoundRuntimeLightCount,
 					mSceneLights.GetSectorLighting().activeSectorCount,
 					mBoundSectorLightActiveCount,
 					DurationMs(preloadStart, std::chrono::steady_clock::now()));
 			}
-			return true;
 		}
 	}
 
@@ -9229,7 +9230,8 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		(uint32_t)mStaticMapScene.gpuMaterials.size());
 	if ((int)nri_ptloadingtrace >= 1)
 	{
-		Printf("NRI PT loading gate: event=renderer-preload result=ready reason=complete ms=%.3f\n",
+		Printf("NRI PT loading gate: event=renderer-preload result=ready reason=complete static_light_refresh=%u ms=%.3f\n",
+			staticLightRefreshReady ? 1u : 0u,
 			DurationMs(preloadStart, std::chrono::steady_clock::now()));
 	}
 	return true;
