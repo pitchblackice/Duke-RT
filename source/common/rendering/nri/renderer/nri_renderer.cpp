@@ -11857,6 +11857,19 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			0.0f, 0.0f, 1.0f, currentTranslation[2] - bakedTranslation[2] };
 	};
 
+	auto fillPersistentVoxelActorInstanceTransform = [&](
+		const nri_scene::PersistentVoxelCacheEntryView& cacheEntry,
+		const PersistentVoxelMeshVariantResource& meshResource,
+		std::array<float, 12>& target)
+	{
+		if (cacheEntry.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::LocalSpace)
+		{
+			copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, target);
+			return;
+		}
+		fillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, target);
+	};
+
 	auto retirePersistentVoxelActorResource = [&](PersistentVoxelActorResource& resource)
 	{
 		RetireResidentBufferResource(resource.vertexBuffer);
@@ -12260,7 +12273,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.meshKeyHash = cacheEntry.meshKeyHash;
 			actor.materialKeyHash = cacheEntry.materialKeyHash;
 			actor.active = true;
-			fillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, actor.instanceTransform);
+			fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResource, actor.instanceTransform);
 			actor.primitiveOffset = resource.primitiveOffset;
 			actor.primitiveCount = primitiveCount;
 			actor.indexOffset = resource.indexOffset;
@@ -12270,7 +12283,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.materialBridge = materialResource.materialBridge;
 			actor.lightRecords.clear();
 			actor.lightRecords.push_back(mSceneLights.BuildSurfaceRecord(
-				*cacheEntry.surface,
+				cacheEntry.lightSurface != nullptr ? *cacheEntry.lightSurface : *cacheEntry.surface,
 				actor.materialBridge,
 				SceneLightRecordSource::PersistentVoxelScene,
 				0u,
@@ -12624,7 +12637,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.meshKeyHash = cacheEntry.meshKeyHash;
 		actor.materialKeyHash = cacheEntry.materialKeyHash;
 		actor.active = true;
-		fillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, actor.instanceTransform);
+		fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResource, actor.instanceTransform);
 		actor.primitiveOffset = resource.primitiveOffset;
 		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
 		actor.indexOffset = resource.indexOffset;
@@ -12634,7 +12647,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.materialBridge = materialResource.materialBridge;
 		actor.lightRecords.clear();
 		actor.lightRecords.push_back(mSceneLights.BuildSurfaceRecord(
-			*cacheEntry.surface,
+			cacheEntry.lightSurface != nullptr ? *cacheEntry.lightSurface : *cacheEntry.surface,
 			actor.materialBridge,
 			SceneLightRecordSource::PersistentVoxelScene,
 			0u,
@@ -12828,7 +12841,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, expectedInstanceTransform);
 			if (meshResourceIt != mPersistentVoxelMeshVariantResources.end())
 			{
-				fillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResourceIt->second.bakedTranslation, expectedInstanceTransform);
+				fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResourceIt->second, expectedInstanceTransform);
 			}
 			const bool actorGeometryNeedsUpdate =
 				actor.bakedSurfaceSignature != cacheEntry.bakedSurfaceSignature ||

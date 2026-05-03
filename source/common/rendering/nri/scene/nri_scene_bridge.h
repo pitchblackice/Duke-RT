@@ -292,6 +292,7 @@ struct PersistentVoxelCacheEntryView
 	float currentTranslation[3] = {};
 	float bakedTranslation[3] = {};
 	const SurfaceRef* surface = nullptr;
+	const SurfaceRef* lightSurface = nullptr;
 };
 
 enum class DynamicVoxelCaptureMode : uint8_t

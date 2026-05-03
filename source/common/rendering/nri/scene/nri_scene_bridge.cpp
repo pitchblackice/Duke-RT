@@ -176,8 +176,10 @@ namespace
 		uint32_t primitiveCount = 0;
 		float currentTranslation[3] = {};
 		float bakedTranslation[3] = {};
+		float currentTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		bool persistentReady = false;
 		bool hasSurface = false;
+		SurfaceRef lightSurface;
 	};
 
 	std::unordered_map<uint64_t, VoxelActorCacheEntry> gVoxelActorCache;
@@ -279,6 +281,7 @@ namespace
 		int32_t sourcePicnum = -1;
 		int32_t resolvedVoxelIndex = -1;
 		float currentTranslation[3] = {};
+		float currentTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		VoxelActorCacheEntry* entry = nullptr;
 	};
 
@@ -1851,11 +1854,6 @@ namespace
 			hash = HashCombine64(hash, (uint64_t)sprite.Sprite->cstat2);
 		}
 
-		const FLOATTYPE* matrix = sprite.rotmat.get();
-		for (int i = 0; i < 16; ++i)
-		{
-			hash = HashCombine64(hash, QuantizeSignatureFloat((double)matrix[i], 4096.0));
-		}
 		return hash;
 	}
 
@@ -1882,12 +1880,34 @@ namespace
 		outTranslation[2] = (float)matrix[14];
 	}
 
-	bool SameVoxelTranslation(const float a[3], const float b[3])
+	void CopyVoxelActorTransform(const HWSprite& sprite, float outTransform[12])
+	{
+		const FLOATTYPE* matrix = sprite.rotmat.get();
+		outTransform[0] = (float)matrix[0];
+		outTransform[1] = (float)matrix[4];
+		outTransform[2] = (float)matrix[8];
+		outTransform[3] = (float)matrix[12];
+		outTransform[4] = (float)matrix[1];
+		outTransform[5] = (float)matrix[5];
+		outTransform[6] = (float)matrix[9];
+		outTransform[7] = (float)matrix[13];
+		outTransform[8] = (float)matrix[2];
+		outTransform[9] = (float)matrix[6];
+		outTransform[10] = (float)matrix[10];
+		outTransform[11] = (float)matrix[14];
+	}
+
+	bool SameVoxelTransform(const float a[12], const float b[12])
 	{
 		constexpr float Epsilon = 0.0001f;
-		return std::abs(a[0] - b[0]) <= Epsilon &&
-			std::abs(a[1] - b[1]) <= Epsilon &&
-			std::abs(a[2] - b[2]) <= Epsilon;
+		for (size_t i = 0; i < 12; ++i)
+		{
+			if (std::abs(a[i] - b[i]) > Epsilon)
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	void FillVoxelTranslationInstanceTransform(const float currentTranslation[3], const float bakedTranslation[3], float outTransform[12])
@@ -2195,9 +2215,10 @@ namespace
 		lookup.materialKeyHash = materialSignature;
 		lookup.meshVariantHash = meshVariantHash;
 		lookup.materialVariantHash = materialVariantHash;
-		lookup.meshBakeSpace = VoxelMeshBakeSpace::BakedTransform;
+		lookup.meshBakeSpace = VoxelMeshBakeSpace::LocalSpace;
 		lookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
 		CopyVoxelActorTranslation(sprite, lookup.currentTranslation);
+		CopyVoxelActorTransform(sprite, lookup.currentTransform);
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end())
 		{
@@ -2222,15 +2243,17 @@ namespace
 			lookup.entry->persistentReady &&
 			lookup.entry->geometrySignature == geometrySignature &&
 			lookup.entry->materialSignature == materialSignature &&
-			lookup.entry->transformBasisSignature == transformBasisSignature &&
-			!SameVoxelTranslation(lookup.entry->currentTranslation, lookup.currentTranslation);
+			!SameVoxelTransform(lookup.entry->currentTransform, lookup.currentTransform);
 		if (canUpdateByTranslationInstance)
 		{
 			lookup.entry->signature = signature;
 			lookup.entry->surfaceSignature = surfaceSignature;
+			lookup.entry->transformBasisSignature = transformBasisSignature;
+			lookup.entry->meshBakeSpace = lookup.meshBakeSpace;
 			lookup.entry->currentTranslation[0] = lookup.currentTranslation[0];
 			lookup.entry->currentTranslation[1] = lookup.currentTranslation[1];
 			lookup.entry->currentTranslation[2] = lookup.currentTranslation[2];
+			std::copy(std::begin(lookup.currentTransform), std::end(lookup.currentTransform), std::begin(lookup.entry->currentTransform));
 			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
 			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
 			lookup.entry->pendingFrame = 0;
@@ -2266,7 +2289,9 @@ namespace
 			lookup.entry->materialSignature = materialSignature;
 			lookup.entry->materialKeyHash = lookup.materialKeyHash;
 			lookup.entry->materialVariantHash = lookup.materialVariantHash;
+			lookup.entry->meshBakeSpace = lookup.meshBakeSpace;
 			lookup.entry->surface.material = material;
+			lookup.entry->lightSurface.material = material;
 			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
 			const bool promoted = !lookup.entry->persistentReady;
 			if (!lookup.entry->persistentReady && CanPromoteVoxelActorCacheEntry(*lookup.entry))
@@ -2333,8 +2358,9 @@ namespace
 		lookup.materialKeyHash = materialSignature;
 		lookup.meshVariantHash = meshVariantHash;
 		lookup.materialVariantHash = materialVariantHash;
-		lookup.meshBakeSpace = VoxelMeshBakeSpace::BakedTransform;
+		lookup.meshBakeSpace = VoxelMeshBakeSpace::LocalSpace;
 		lookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
+		CopyVoxelActorTransform(sprite, lookup.currentTransform);
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end() || !found->second.hasSurface)
 		{
@@ -2393,7 +2419,12 @@ namespace
 		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2u : 0u;
 	}
 
-	void StoreVoxelActorCacheSurface(const VoxelActorCacheLookup& lookup, const SurfaceRef& liveSurface, SceneDebugStats& stats)
+	void StoreVoxelActorCacheSurface(
+		const VoxelActorCacheLookup& lookup,
+		const SurfaceRef& meshSurface,
+		const SurfaceRef& lightSurface,
+		VoxelMeshBakeSpace meshBakeSpace,
+		SceneDebugStats& stats)
 	{
 		if (lookup.identityKey == 0)
 		{
@@ -2414,6 +2445,7 @@ namespace
 		entry.meshVariantHash = lookup.meshVariantHash;
 		entry.materialVariantHash = lookup.materialVariantHash;
 		InitializeVoxelActorCacheEntryIdentity(entry, lookup);
+		entry.meshBakeSpace = meshBakeSpace;
 		entry.desiredSignature = lookup.signature;
 		entry.desiredMeshKeyHash = lookup.meshKeyHash;
 		entry.desiredMaterialKeyHash = lookup.materialKeyHash;
@@ -2422,8 +2454,12 @@ namespace
 		entry.desiredSurfaceSignature = lookup.surfaceSignature;
 		entry.pendingReason = (uint8_t)VoxelActorPendingReason::None;
 		entry.pendingFrame = 0;
-		entry.surface = liveSurface;
+		entry.surface = meshSurface;
+		entry.surface.material = lightSurface.material;
+		entry.surface.provenance = lightSurface.provenance;
 		NormalizeCachedSurfacePreviousPositions(entry.surface);
+		entry.lightSurface = lightSurface;
+		NormalizeCachedSurfacePreviousPositions(entry.lightSurface);
 		entry.lastSeenFrame = gVoxelActorCacheFrame;
 		entry.surfaceFrame = gVoxelActorCacheFrame;
 		entry.primitiveCount = CountSurfacePrimitives(entry.surface);
@@ -2433,6 +2469,7 @@ namespace
 		entry.bakedTranslation[0] = lookup.currentTranslation[0];
 		entry.bakedTranslation[1] = lookup.currentTranslation[1];
 		entry.bakedTranslation[2] = lookup.currentTranslation[2];
+		std::copy(std::begin(lookup.currentTransform), std::end(lookup.currentTransform), std::begin(entry.currentTransform));
 		// Transform rebakes and state variant switches are transitional updates of an
 		// already valid actor. Keep already-resident actors renderable and let the
 		// persistent actor path update the resource in place. First-use actors still
@@ -3196,9 +3233,13 @@ namespace
 			const bool wasPersistentReady = cacheLookup.entry != nullptr && cacheLookup.entry->persistentReady;
 			const bool hadSurface = cacheLookup.entry != nullptr && cacheLookup.entry->hasSurface;
 			const uint32_t exactPrimitiveCount = CountSurfacePrimitives(exactSurface);
+			const SurfaceRef* canonicalSurface = GetCachedVoxelMeshVariantSurface(cacheLookup, *mesh, false);
+			const SurfaceRef& storedMeshSurface = canonicalSurface != nullptr ? *canonicalSurface : exactSurface;
+			const VoxelMeshBakeSpace storedBakeSpace =
+				canonicalSurface != nullptr ? VoxelMeshBakeSpace::LocalSpace : VoxelMeshBakeSpace::BakedTransform;
 			{
 				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelStoreMs);
-				StoreVoxelActorCacheSurface(cacheLookup, exactSurface, stats);
+				StoreVoxelActorCacheSurface(cacheLookup, storedMeshSurface, exactSurface, storedBakeSpace, stats);
 			}
 			gDynamicCapturePerfStats.voxelCacheStores += stats.voxelCacheSurfaceStores - previousStores;
 			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheSurfaceRebuilds - previousRebuilds;
@@ -3828,7 +3869,14 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.sourcePicnum = entry.second->sourcePicnum;
 		view.resolvedVoxelIndex = entry.second->resolvedVoxelIndex;
 		view.primitiveCount = entry.second->primitiveCount;
-		FillVoxelTranslationInstanceTransform(entry.second->currentTranslation, entry.second->bakedTranslation, view.instanceTransform);
+		if (entry.second->meshBakeSpace == VoxelMeshBakeSpace::LocalSpace)
+		{
+			std::copy(std::begin(entry.second->currentTransform), std::end(entry.second->currentTransform), std::begin(view.instanceTransform));
+		}
+		else
+		{
+			FillVoxelTranslationInstanceTransform(entry.second->currentTranslation, entry.second->bakedTranslation, view.instanceTransform);
+		}
 		view.currentTranslation[0] = entry.second->currentTranslation[0];
 		view.currentTranslation[1] = entry.second->currentTranslation[1];
 		view.currentTranslation[2] = entry.second->currentTranslation[2];
@@ -3836,6 +3884,7 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.bakedTranslation[1] = entry.second->bakedTranslation[1];
 		view.bakedTranslation[2] = entry.second->bakedTranslation[2];
 		view.surface = &entry.second->surface;
+		view.lightSurface = &entry.second->lightSurface;
 		outEntries.push_back(std::move(view));
 	}
 
