@@ -33,6 +33,7 @@ CVAR(Int, nri_ptvoxelcaptureactors, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelpersistentpromoteframes, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -2620,6 +2621,44 @@ namespace
 		return true;
 	}
 
+	void AddUniqueLoadingActorTextureCandidate(FTextureID texid, std::vector<FTextureID>& candidates, std::unordered_set<int>& seenTextureIds)
+	{
+		if (!texid.isValid())
+		{
+			return;
+		}
+
+		const int textureId = texid.GetIndex();
+		if (seenTextureIds.insert(textureId).second)
+		{
+			candidates.push_back(texid);
+		}
+	}
+
+	void BuildLoadingActorTextureCandidates(DCoreActor* actor, std::vector<FTextureID>& candidates)
+	{
+		candidates.clear();
+		if (actor == nullptr)
+		{
+			return;
+		}
+
+		std::unordered_set<int> seenTextureIds;
+		auto addBaseAndAnimated = [&](FTextureID texid)
+		{
+			AddUniqueLoadingActorTextureCandidate(texid, candidates, seenTextureIds);
+			if (texid.isValid() && (actor->spr.cstat2 & CSTAT2_SPRITE_NOANIMATE) == 0)
+			{
+				FTextureID animatedTexid = texid;
+				tileUpdatePicnum(animatedTexid, actor->GetIndex() & 16383);
+				AddUniqueLoadingActorTextureCandidate(animatedTexid, candidates, seenTextureIds);
+			}
+		};
+
+		addBaseAndAnimated(actor->spr.spritetexture());
+		addBaseAndAnimated(actor->dispictex);
+	}
+
 	void BuildLiveActorIdentityKeys(std::unordered_set<uint64_t>& outKeys)
 	{
 		outKeys.clear();
@@ -3804,12 +3843,13 @@ bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats
 
 void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 {
-	if (!r_voxels)
+	if (!r_voxels || (int)nri_ptloadingvoxelactors <= 0)
 	{
 		return;
 	}
 
 	std::unordered_set<uint64_t> seenMeshVariants;
+	std::vector<FTextureID> candidateTexids;
 	TSpriteIterator<DCoreActor> it;
 	while (DCoreActor* actor = it.Next())
 	{
@@ -3818,19 +3858,10 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 			continue;
 		}
 
-		FTextureID candidateTexids[2] = { actor->spr.spritetexture(), actor->dispictex };
+		BuildLoadingActorTextureCandidates(actor, candidateTexids);
 		bool countedActor = false;
 		for (const FTextureID texid : candidateTexids)
 		{
-			if (!texid.isValid())
-			{
-				continue;
-			}
-			if (texid == candidateTexids[0] && candidateTexids[1].isValid() && texid == candidateTexids[1])
-			{
-				candidateTexids[1] = FNullTextureID();
-			}
-
 			int voxelIndex = -1;
 			FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
 			if (model == nullptr)
