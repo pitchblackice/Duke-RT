@@ -126,6 +126,7 @@ CVAR(Bool, nri_pttaa, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.1375f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, nri_ptscenestats)
+EXTERN_CVAR(Bool, nri_voxelstats)
 EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, perf_looptraceframes)
@@ -138,6 +139,16 @@ CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	else if (self > 2)
 	{
 		self = 2;
+	}
+}
+
+static const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace bakeSpace)
+{
+	switch (bakeSpace)
+	{
+	case nri_scene::VoxelMeshBakeSpace::LocalSpace: return "local";
+	case nri_scene::VoxelMeshBakeSpace::BakedTransform: return "baked";
+	default: return "unknown";
 	}
 }
 CUSTOM_CVAR(Int, nri_ptoutputmode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -8317,20 +8328,65 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							}
 
 							auto meshResourceIt = mPersistentVoxelMeshVariantResources.find(actor.meshResourceKey);
-							if (meshResourceIt == mPersistentVoxelMeshVariantResources.end() ||
-								meshResourceIt->second.accelerationStructure.accelerationStructure == nullptr ||
-								meshResourceIt->second.indexBuffer.shaderView == nullptr ||
-								meshResourceIt->second.vertexBuffer.shaderView == nullptr ||
-								mPersistentVoxelVertexBuffer.shaderView == nullptr ||
+							const char* tlasSkipReason = nullptr;
+							if (meshResourceIt == mPersistentVoxelMeshVariantResources.end())
+							{
+								tlasSkipReason = "missing-mesh";
+							}
+							else if (meshResourceIt->second.accelerationStructure.accelerationStructure == nullptr)
+							{
+								tlasSkipReason = "missing-blas";
+							}
+							else if (meshResourceIt->second.indexBuffer.shaderView == nullptr ||
+								meshResourceIt->second.vertexBuffer.shaderView == nullptr)
+							{
+								tlasSkipReason = "missing-mesh-view";
+							}
+							else if (mPersistentVoxelVertexBuffer.shaderView == nullptr ||
 								mPersistentVoxelIndexBuffer.shaderView == nullptr ||
 								mPersistentVoxelPrimitiveBuffer.shaderView == nullptr ||
 								mPersistentVoxelMaterialBuffer.shaderView == nullptr)
 							{
+								tlasSkipReason = "missing-arena-view";
+							}
+							if (tlasSkipReason != nullptr)
+							{
+								if ((bool)nri_voxelstats)
+								{
+									Printf("PERF pt voxel tlas NRI: frame=%u action=skip reason=%s actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=0 tlas_ready=0 tlas_published=0 ready=0\n",
+										mFrameIndex,
+										tlasSkipReason,
+										(unsigned long long)actor.identityKey,
+										(unsigned long long)actor.meshResourceKey,
+										(unsigned long long)actor.meshKeyHash,
+										(unsigned long long)actor.materialKeyHash,
+										(uint32_t)sceneInstances.size(),
+										actor.primitiveOffset,
+										actor.primitiveCount,
+										actor.materialOffset,
+										actor.materialCount);
+								}
 								continue;
 							}
 							if (!meshResourceIt->second.tlasPublished &&
 								meshResourceIt->second.tlasReadyFrame > mFrameIndex)
 							{
+								if ((bool)nri_voxelstats)
+								{
+									Printf("PERF pt voxel tlas NRI: frame=%u action=skip reason=ready-frame actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=1 tlas_ready=%u tlas_published=%u ready=0\n",
+										mFrameIndex,
+										(unsigned long long)actor.identityKey,
+										(unsigned long long)actor.meshResourceKey,
+										(unsigned long long)actor.meshKeyHash,
+										(unsigned long long)actor.materialKeyHash,
+										(uint32_t)sceneInstances.size(),
+										actor.primitiveOffset,
+										actor.primitiveCount,
+										actor.materialOffset,
+										actor.materialCount,
+										meshResourceIt->second.tlasReadyFrame,
+										meshResourceIt->second.tlasPublished ? 1u : 0u);
+								}
 								continue;
 							}
 
@@ -8360,6 +8416,21 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							}
 							sceneInstances.push_back(sceneInstance);
 							meshResourceIt->second.tlasPublished = true;
+							if ((bool)nri_voxelstats)
+							{
+								Printf("PERF pt voxel tlas NRI: frame=%u action=publish reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=1 tlas_ready=%u tlas_published=1 ready=1\n",
+									mFrameIndex,
+									(unsigned long long)actor.identityKey,
+									(unsigned long long)actor.meshResourceKey,
+									(unsigned long long)actor.meshKeyHash,
+									(unsigned long long)actor.materialKeyHash,
+									persistentVoxelInstance.instanceId,
+									actor.primitiveOffset,
+									actor.primitiveCount,
+									actor.materialOffset,
+									actor.materialCount,
+									meshResourceIt->second.tlasReadyFrame);
+							}
 							persistentVoxelTlasMeshResources.insert(actor.meshResourceKey);
 							mLastPerfShellTraceStats.persistentVoxelTlasInstances++;
 							if (meshResourceIt->second.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace)
@@ -12066,6 +12137,15 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			if (isTextureUploadCached(upload))
 			{
 				mLastPerfShellTraceStats.persistentVoxelTexturePrewarmHitCount++;
+				if ((bool)nri_voxelstats)
+				{
+					Printf("PERF pt voxel preload NRI: frame=%u action=reuse reason=texture-cache texture_key=0x%llx width=%u height=%u indexed=%u upload_bytes=0 ready=1\n",
+						mFrameIndex,
+						(unsigned long long)upload.key,
+						upload.width,
+						upload.height,
+						upload.indexed ? 1u : 0u);
+				}
 				continue;
 			}
 
@@ -12077,12 +12157,32 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			{
 				mLastPerfShellTraceStats.persistentVoxelTexturePrewarmDeferredCount++;
 				mLastPerfShellTraceStats.persistentVoxelTexturePrewarmDeferredBytes += estimatedBytes;
+				if ((bool)nri_voxelstats)
+				{
+					Printf("PERF pt voxel preload NRI: frame=%u action=defer reason=texture-budget texture_key=0x%llx width=%u height=%u indexed=%u upload_bytes=%llu ready=0\n",
+						mFrameIndex,
+						(unsigned long long)upload.key,
+						upload.width,
+						upload.height,
+						upload.indexed ? 1u : 0u,
+						(unsigned long long)estimatedBytes);
+				}
 				return false;
 			}
 
 			double prewarmMs = 0.0;
 			if (!EnsureSceneTextureCacheEntry(upload, &prewarmMs))
 			{
+				if ((bool)nri_voxelstats)
+				{
+					Printf("PERF pt voxel preload NRI: frame=%u action=failed reason=texture-cache texture_key=0x%llx width=%u height=%u indexed=%u upload_bytes=%llu ready=0\n",
+						mFrameIndex,
+						(unsigned long long)upload.key,
+						upload.width,
+						upload.height,
+						upload.indexed ? 1u : 0u,
+						(unsigned long long)estimatedBytes);
+				}
 				return false;
 			}
 			persistentVoxelPrewarmedTextures++;
@@ -12090,6 +12190,17 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			mLastPerfShellTraceStats.persistentVoxelTexturePrewarmProcessedCount++;
 			mLastPerfShellTraceStats.persistentVoxelTexturePrewarmProcessedBytes += estimatedBytes;
 			mLastPerfShellTraceStats.persistentVoxelTexturePrewarmMs += prewarmMs;
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel preload NRI: frame=%u action=upload reason=texture-cache texture_key=0x%llx width=%u height=%u indexed=%u upload_bytes=%llu ms=%.3f ready=1\n",
+					mFrameIndex,
+					(unsigned long long)upload.key,
+					upload.width,
+					upload.height,
+					upload.indexed ? 1u : 0u,
+					(unsigned long long)estimatedBytes,
+					prewarmMs);
+			}
 		}
 
 		return true;
@@ -12110,6 +12221,20 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				(uint32_t)actorGeometry.indices.size(),
 				(uint32_t)actorGeometry.primitives.size(),
 				materialCount);
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel validation NRI: frame=%u action=quarantine reason=%s actor_key=0x%llx surface_sig=0x%llx value=%u limit=%u vertices=%u indices=%u prims=%u materials=%u ready=0\n",
+					mFrameIndex,
+					reason != nullptr ? reason : "unknown",
+					(unsigned long long)identityKey,
+					(unsigned long long)surfaceSignature,
+					value,
+					limit,
+					(uint32_t)actorGeometry.vertices.size(),
+					(uint32_t)actorGeometry.indices.size(),
+					(uint32_t)actorGeometry.primitives.size(),
+					materialCount);
+			}
 			return false;
 		};
 
@@ -12208,6 +12333,31 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		}
 		const bool sharedVoxelVariants = (bool)nri_ptvoxelsharedvariants;
 
+		auto countBatchActorsUsingMeshResource = [&](uint64_t meshResourceKey) -> uint32_t
+		{
+			uint32_t count = 0;
+			for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+			{
+				if (actor.active && actor.meshResourceKey == meshResourceKey)
+				{
+					count++;
+				}
+			}
+			return count;
+		};
+		auto countBatchActorsUsingMaterialVariant = [&](uint64_t materialKeyHash) -> uint32_t
+		{
+			uint32_t count = 0;
+			for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+			{
+				if (actor.active && actor.materialKeyHash == materialKeyHash)
+				{
+					count++;
+				}
+			}
+			return count;
+		};
+
 		nri_scene::SceneView actorSceneView = {};
 		actorSceneView.opaqueSprites.push_back(*cacheEntry.surface);
 		actorSceneView.stats.spriteDrawItems = 1;
@@ -12244,6 +12394,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		};
 
 		PersistentVoxelMaterialVariantResource& materialResource = mPersistentVoxelMaterialVariantResources[cacheEntry.materialKeyHash];
+		const bool materialVariantWasReady =
+			materialResource.materialKeyHash == cacheEntry.materialKeyHash &&
+			!materialResource.materialBridge.materials.empty();
 		if (materialResource.materialKeyHash != cacheEntry.materialKeyHash ||
 			materialResource.materialBridge.materials.empty())
 		{
@@ -12254,6 +12407,17 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			}
 			if (builtMaterials.materials.empty())
 			{
+				if ((bool)nri_voxelstats)
+				{
+					Printf("PERF pt voxel material variant NRI: frame=%u action=invalid reason=empty-materials actor_key=0x%llx mat_key=0x%llx ref_count=%u material_offset=%u material_count=0 material_capacity=%u upload_hash=0x%llx ready=0\n",
+						mFrameIndex,
+						(unsigned long long)cacheEntry.identityKey,
+						(unsigned long long)cacheEntry.materialKeyHash,
+						countBatchActorsUsingMaterialVariant(cacheEntry.materialKeyHash),
+						materialResource.materialOffset,
+						materialResource.materialCapacity,
+						(unsigned long long)materialResource.materialUploadHash);
+				}
 				if (existingActor != nullptr)
 				{
 					existingActor->active = false;
@@ -12262,6 +12426,18 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			}
 			if (!prewarmPersistentVoxelActorTextures(builtMaterials))
 			{
+				if ((bool)nri_voxelstats)
+				{
+					Printf("PERF pt voxel material variant NRI: frame=%u action=defer reason=texture-prewarm actor_key=0x%llx mat_key=0x%llx ref_count=%u material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx ready=0\n",
+						mFrameIndex,
+						(unsigned long long)cacheEntry.identityKey,
+						(unsigned long long)cacheEntry.materialKeyHash,
+						countBatchActorsUsingMaterialVariant(cacheEntry.materialKeyHash),
+						materialResource.materialOffset,
+						(uint32_t)builtMaterials.materials.size(),
+						materialResource.materialCapacity,
+						(unsigned long long)materialResource.materialUploadHash);
+				}
 				if (existingActor != nullptr)
 				{
 					existingActor->active = true;
@@ -12277,6 +12453,18 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			materialResource.materialBridge = std::move(builtMaterials);
 			materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
 			materialResource.materialUploadHash = 0;
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel material variant NRI: frame=%u action=build reason=none actor_key=0x%llx mat_key=0x%llx ref_count=%u material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx ready=1\n",
+					mFrameIndex,
+					(unsigned long long)cacheEntry.identityKey,
+					(unsigned long long)cacheEntry.materialKeyHash,
+					countBatchActorsUsingMaterialVariant(cacheEntry.materialKeyHash),
+					materialResource.materialOffset,
+					materialResource.materialCount,
+					materialResource.materialCapacity,
+					(unsigned long long)materialResource.materialUploadHash);
+			}
 		}
 
 		const bool materialSliceMoved = allocateExactArenaSlice(
@@ -12291,11 +12479,34 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
 		if (materialResource.materialCount == 0)
 		{
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel material variant NRI: frame=%u action=invalid reason=empty-after-allocation actor_key=0x%llx mat_key=0x%llx ref_count=%u material_offset=%u material_count=0 material_capacity=%u upload_hash=0x%llx ready=0\n",
+					mFrameIndex,
+					(unsigned long long)cacheEntry.identityKey,
+					(unsigned long long)cacheEntry.materialKeyHash,
+					countBatchActorsUsingMaterialVariant(cacheEntry.materialKeyHash),
+					materialResource.materialOffset,
+					materialResource.materialCapacity,
+					(unsigned long long)materialResource.materialUploadHash);
+			}
 			if (existingActor != nullptr)
 			{
 				existingActor->active = false;
 			}
 			return true;
+		}
+		if (materialVariantWasReady && (bool)nri_voxelstats)
+		{
+			Printf("PERF pt voxel material variant NRI: frame=%u action=reuse reason=none actor_key=0x%llx mat_key=0x%llx ref_count=%u material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx ready=1\n",
+				mFrameIndex,
+				(unsigned long long)cacheEntry.identityKey,
+				(unsigned long long)cacheEntry.materialKeyHash,
+				countBatchActorsUsingMaterialVariant(cacheEntry.materialKeyHash),
+				materialResource.materialOffset,
+				materialResource.materialCount,
+				materialResource.materialCapacity,
+				(unsigned long long)materialResource.materialUploadHash);
 		}
 
 		const uint64_t baseMeshResourceKey = buildPersistentVoxelMeshResourceKey(cacheEntry);
@@ -12361,6 +12572,25 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				batch.sceneView.opaqueSprites.push_back(*cacheEntry.surface);
 				batch.actors.push_back(actor);
 			}
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel instance NRI: frame=%u action=%s reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=%u primitive_count=%u index_offset=%u index_count=%u material_offset=%u material_count=%u ready=%u pending=0 active=1\n",
+					mFrameIndex,
+					existingActor != nullptr ? "update" : "add",
+					(unsigned long long)cacheEntry.identityKey,
+					(unsigned long long)meshResourceKey,
+					(unsigned long long)cacheEntry.meshKeyHash,
+					(unsigned long long)cacheEntry.materialKeyHash,
+					(unsigned long long)cacheEntry.surfaceSignature,
+					(unsigned long long)cacheEntry.bakedSurfaceSignature,
+					actor.primitiveOffset,
+					actor.primitiveCount,
+					actor.indexOffset,
+					actor.indexCount,
+					actor.materialOffset,
+					actor.materialCount,
+					meshResource.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u);
+			}
 			return true;
 		};
 
@@ -12378,6 +12608,28 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			mPersistentVoxelPrimitiveBuffer.buffer != nullptr)
 		{
 			PersistentVoxelMeshVariantResource& meshResource = reusableMeshResourceIt->second;
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel mesh variant NRI: frame=%u action=reuse reason=none actor_key=0x%llx resource_key=0x%llx mesh_key=0x%llx mat_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u vertex_offset=%u index_offset=%u primitive_offset=%u space=%s basis_sig=0x%llx transform_keyed=%u blas=%u tlas_ready=%u tlas_published=%u upload_bytes=0 ready=1\n",
+					mFrameIndex,
+					(unsigned long long)cacheEntry.identityKey,
+					(unsigned long long)baseMeshResourceKey,
+					(unsigned long long)cacheEntry.meshKeyHash,
+					(unsigned long long)cacheEntry.materialKeyHash,
+					countBatchActorsUsingMeshResource(baseMeshResourceKey),
+					meshResource.primitiveCount,
+					meshResource.vertexCount,
+					meshResource.indexCount,
+					meshResource.vertexOffset,
+					meshResource.indexOffset,
+					meshResource.primitiveOffset,
+					GetPersistentVoxelBakeSpaceName(meshResource.meshBakeSpace),
+					(unsigned long long)meshResource.transformBasisSignature,
+					isPersistentVoxelMeshResourceTransformKeyed(cacheEntry) ? 1u : 0u,
+					meshResource.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u,
+					meshResource.tlasReadyFrame,
+					meshResource.tlasPublished ? 1u : 0u);
+			}
 			PersistentVoxelActorResource& resource = mPersistentVoxelActorResources[cacheEntry.identityKey];
 			resource.signature = cacheEntry.bakedSurfaceSignature;
 			resource.meshResourceKey = baseMeshResourceKey;
@@ -12446,6 +12698,28 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				existingMeshResourceIt->second.indexCount != (uint32_t)actorGeometry.indices.size() ||
 				existingMeshResourceIt->second.primitiveCount != (uint32_t)actorGeometry.primitives.size()))
 		{
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel mesh variant NRI: frame=%u action=key-split reason=count-mismatch actor_key=0x%llx resource_key=0x%llx mesh_key=0x%llx mat_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u existing_prims=%u existing_vertices=%u existing_indices=%u space=%s basis_sig=0x%llx transform_keyed=%u blas=%u tlas_ready=%u tlas_published=%u upload_bytes=0 ready=0\n",
+					mFrameIndex,
+					(unsigned long long)cacheEntry.identityKey,
+					(unsigned long long)meshResourceKey,
+					(unsigned long long)cacheEntry.meshKeyHash,
+					(unsigned long long)cacheEntry.materialKeyHash,
+					countBatchActorsUsingMeshResource(meshResourceKey),
+					(uint32_t)actorGeometry.primitives.size(),
+					(uint32_t)actorGeometry.vertices.size(),
+					(uint32_t)actorGeometry.indices.size(),
+					existingMeshResourceIt->second.primitiveCount,
+					existingMeshResourceIt->second.vertexCount,
+					existingMeshResourceIt->second.indexCount,
+					GetPersistentVoxelBakeSpaceName(cacheEntry.meshBakeSpace),
+					(unsigned long long)cacheEntry.transformBasisSignature,
+					isPersistentVoxelMeshResourceTransformKeyed(cacheEntry) ? 1u : 0u,
+					existingMeshResourceIt->second.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u,
+					existingMeshResourceIt->second.tlasReadyFrame,
+					existingMeshResourceIt->second.tlasPublished ? 1u : 0u);
+			}
 			meshResourceKey = HashCombine64(baseMeshResourceKey, cacheEntry.bakedSurfaceSignature);
 		}
 
@@ -12649,6 +12923,35 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				meshResource.bakedTranslation[2] = cacheEntry.bakedTranslation[2];
 				meshResource.tlasReadyFrame = 0;
 				meshResource.tlasPublished = false;
+			}
+			if ((bool)nri_voxelstats)
+			{
+				const uint64_t uploadBytes =
+					(uint64_t)actorGeometry.vertices.size() * sizeof(nri_scene::SceneVertex) +
+					(uint64_t)gpuIndices.size() * sizeof(uint32_t) +
+					(uint64_t)gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData);
+				Printf("PERF pt voxel mesh variant NRI: frame=%u action=%s reason=none actor_key=0x%llx resource_key=0x%llx mesh_key=0x%llx mat_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u vertex_offset=%u index_offset=%u primitive_offset=%u space=%s basis_sig=0x%llx transform_keyed=%u blas=%u tlas_ready=%u tlas_published=%u upload_bytes=%llu ready=%u\n",
+					mFrameIndex,
+					meshResourceChanged ? "build" : "upload",
+					(unsigned long long)cacheEntry.identityKey,
+					(unsigned long long)meshResourceKey,
+					(unsigned long long)cacheEntry.meshKeyHash,
+					(unsigned long long)cacheEntry.materialKeyHash,
+					countBatchActorsUsingMeshResource(meshResourceKey),
+					meshResource.primitiveCount,
+					meshResource.vertexCount,
+					meshResource.indexCount,
+					meshResource.vertexOffset,
+					meshResource.indexOffset,
+					meshResource.primitiveOffset,
+					GetPersistentVoxelBakeSpaceName(meshResource.meshBakeSpace),
+					(unsigned long long)meshResource.transformBasisSignature,
+					meshResourceTransformKeyed ? 1u : 0u,
+					meshResource.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u,
+					meshResource.tlasReadyFrame,
+					meshResource.tlasPublished ? 1u : 0u,
+					(unsigned long long)uploadBytes,
+					meshResource.vertexBuffer.buffer != nullptr && meshResource.indexBuffer.buffer != nullptr ? 1u : 0u);
 			}
 			resource.signature = cacheEntry.bakedSurfaceSignature;
 			resource.meshResourceKey = meshResourceKey;
@@ -12856,6 +13159,18 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				if (!reusableVariant && !canBuildPersistentVoxelActor(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
+					if ((bool)nri_voxelstats)
+					{
+						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
+							mFrameIndex,
+							(unsigned long long)cacheEntry.identityKey,
+							(unsigned long long)buildPersistentVoxelMeshResourceKey(cacheEntry),
+							(unsigned long long)cacheEntry.meshKeyHash,
+							(unsigned long long)cacheEntry.materialKeyHash,
+							(unsigned long long)cacheEntry.surfaceSignature,
+							(unsigned long long)cacheEntry.bakedSurfaceSignature,
+							cacheEntry.primitiveCount);
+					}
 					continue;
 				}
 				Clocker geometryClock(NriPTGeometryBuild);
@@ -12873,6 +13188,18 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
 					mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits++;
 					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedUploadBytes;
+					if ((bool)nri_voxelstats)
+					{
+						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=texture-prewarm actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=1\n",
+							mFrameIndex,
+							(unsigned long long)cacheEntry.identityKey,
+							(unsigned long long)buildPersistentVoxelMeshResourceKey(cacheEntry),
+							(unsigned long long)cacheEntry.meshKeyHash,
+							(unsigned long long)cacheEntry.materialKeyHash,
+							(unsigned long long)cacheEntry.surfaceSignature,
+							(unsigned long long)cacheEntry.bakedSurfaceSignature,
+							cacheEntry.primitiveCount);
+					}
 					continue;
 				}
 				if (!reusableVariant)
@@ -12942,6 +13269,23 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 						instanceIt->second.currentTransform = actor.instanceTransform;
 						instanceIt->second.pending = false;
 					}
+					if ((bool)nri_voxelstats)
+					{
+						Printf("PERF pt voxel instance NRI: frame=%u action=transform reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=%u primitive_count=%u index_offset=%u index_count=%u material_offset=%u material_count=%u ready=1 pending=0 active=1\n",
+							mFrameIndex,
+							(unsigned long long)cacheEntry.identityKey,
+							(unsigned long long)actor.meshResourceKey,
+							(unsigned long long)actor.meshKeyHash,
+							(unsigned long long)actor.materialKeyHash,
+							(unsigned long long)cacheEntry.surfaceSignature,
+							(unsigned long long)cacheEntry.bakedSurfaceSignature,
+							actor.primitiveOffset,
+							actor.primitiveCount,
+							actor.indexOffset,
+							actor.indexCount,
+							actor.materialOffset,
+							actor.materialCount);
+					}
 					mLastPerfShellTraceStats.persistentVoxelInstanceTransformUpdates++;
 					updatedActorCount++;
 					continue;
@@ -12953,6 +13297,23 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				{
 					actor.active = true;
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
+					if ((bool)nri_voxelstats)
+					{
+						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=%u primitive_count=%u index_offset=%u index_count=%u material_offset=%u material_count=%u ready=0 pending=1 active=1\n",
+							mFrameIndex,
+							(unsigned long long)cacheEntry.identityKey,
+							(unsigned long long)actor.meshResourceKey,
+							(unsigned long long)cacheEntry.meshKeyHash,
+							(unsigned long long)cacheEntry.materialKeyHash,
+							(unsigned long long)cacheEntry.surfaceSignature,
+							(unsigned long long)cacheEntry.bakedSurfaceSignature,
+							actor.primitiveOffset,
+							cacheEntry.primitiveCount,
+							actor.indexOffset,
+							actor.indexCount,
+							actor.materialOffset,
+							actor.materialCount);
+					}
 					continue;
 				}
 				Clocker geometryClock(NriPTGeometryBuild);
@@ -12970,6 +13331,23 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
 					mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits++;
 					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedUploadBytes;
+					if ((bool)nri_voxelstats)
+					{
+						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=texture-prewarm actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=%u primitive_count=%u index_offset=%u index_count=%u material_offset=%u material_count=%u ready=0 pending=1 active=1\n",
+							mFrameIndex,
+							(unsigned long long)cacheEntry.identityKey,
+							(unsigned long long)actor.meshResourceKey,
+							(unsigned long long)cacheEntry.meshKeyHash,
+							(unsigned long long)cacheEntry.materialKeyHash,
+							(unsigned long long)cacheEntry.surfaceSignature,
+							(unsigned long long)cacheEntry.bakedSurfaceSignature,
+							actor.primitiveOffset,
+							cacheEntry.primitiveCount,
+							actor.indexOffset,
+							actor.indexCount,
+							actor.materialOffset,
+							actor.materialCount);
+					}
 					continue;
 				}
 				if (actorGeometryNeedsUpdate && !reusableVariant)
@@ -12989,6 +13367,23 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				instanceIt->second.currentTransform = actor.instanceTransform;
 				instanceIt->second.pending = false;
 			}
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel instance NRI: frame=%u action=hit reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=%u primitive_count=%u index_offset=%u index_count=%u material_offset=%u material_count=%u ready=1 pending=0 active=1\n",
+					mFrameIndex,
+					(unsigned long long)cacheEntry.identityKey,
+					(unsigned long long)actor.meshResourceKey,
+					(unsigned long long)actor.meshKeyHash,
+					(unsigned long long)actor.materialKeyHash,
+					(unsigned long long)cacheEntry.surfaceSignature,
+					(unsigned long long)cacheEntry.bakedSurfaceSignature,
+					actor.primitiveOffset,
+					actor.primitiveCount,
+					actor.indexOffset,
+					actor.indexCount,
+					actor.materialOffset,
+					actor.materialCount);
+			}
 		}
 
 		bool hasInactiveActors = false;
@@ -12997,6 +13392,23 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			if (!actor.active)
 			{
 				hasInactiveActors = true;
+				if ((bool)nri_voxelstats)
+				{
+					Printf("PERF pt voxel instance NRI: frame=%u action=remove reason=not-captured actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=%u primitive_count=%u index_offset=%u index_count=%u material_offset=%u material_count=%u ready=0 pending=0 active=0\n",
+						mFrameIndex,
+						(unsigned long long)actor.identityKey,
+						(unsigned long long)actor.meshResourceKey,
+						(unsigned long long)actor.meshKeyHash,
+						(unsigned long long)actor.materialKeyHash,
+						(unsigned long long)actor.surfaceSignature,
+						(unsigned long long)actor.bakedSurfaceSignature,
+						actor.primitiveOffset,
+						actor.primitiveCount,
+						actor.indexOffset,
+						actor.indexCount,
+						actor.materialOffset,
+						actor.materialCount);
+				}
 				break;
 			}
 		}
@@ -13036,6 +13448,18 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			if (!reusableVariant && !canBuildPersistentVoxelActor(cacheEntry.primitiveCount, estimatedUploadBytes))
 			{
 				mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
+				if ((bool)nri_voxelstats)
+				{
+					Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
+						mFrameIndex,
+						(unsigned long long)cacheEntry.identityKey,
+						(unsigned long long)buildPersistentVoxelMeshResourceKey(cacheEntry),
+						(unsigned long long)cacheEntry.meshKeyHash,
+						(unsigned long long)cacheEntry.materialKeyHash,
+						(unsigned long long)cacheEntry.surfaceSignature,
+						(unsigned long long)cacheEntry.bakedSurfaceSignature,
+						cacheEntry.primitiveCount);
+				}
 				continue;
 			}
 			bool actorDeferred = false;
@@ -13051,6 +13475,18 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
 				mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits++;
 				mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedUploadBytes;
+				if ((bool)nri_voxelstats)
+				{
+					Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=texture-prewarm actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
+						mFrameIndex,
+						(unsigned long long)cacheEntry.identityKey,
+						(unsigned long long)buildPersistentVoxelMeshResourceKey(cacheEntry),
+						(unsigned long long)cacheEntry.meshKeyHash,
+						(unsigned long long)cacheEntry.materialKeyHash,
+						(unsigned long long)cacheEntry.surfaceSignature,
+						(unsigned long long)cacheEntry.bakedSurfaceSignature,
+						cacheEntry.primitiveCount);
+				}
 				continue;
 			}
 			if (!reusableVariant)
@@ -13132,6 +13568,18 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		}
 
 		resource.materialUploadHash = materialHash;
+		if ((bool)nri_voxelstats)
+		{
+			Printf("PERF pt voxel material variant NRI: frame=%u action=%s reason=arena-sync actor_key=0x0 mat_key=0x%llx ref_count=0 material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx upload_bytes=%llu ready=1\n",
+				mFrameIndex,
+				uploadMaterials ? "upload" : "reuse-upload",
+				(unsigned long long)resource.materialKeyHash,
+				resource.materialOffset,
+				resource.materialCount,
+				resource.materialCapacity,
+				(unsigned long long)resource.materialUploadHash,
+				(unsigned long long)(uploadMaterials ? materialSize : 0ull));
+		}
 	}
 	return true;
 }
@@ -13151,6 +13599,18 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 	activeKeys.reserve(mPersistentVoxelBatch.actors.size());
 	std::unordered_set<uint64_t> builtMeshKeys;
 	builtMeshKeys.reserve(mPersistentVoxelBatch.actors.size());
+	auto countActiveActorsUsingMeshResource = [&](uint64_t meshResourceKey) -> uint32_t
+	{
+		uint32_t count = 0;
+		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+		{
+			if (actor.active && actor.meshResourceKey == meshResourceKey)
+			{
+				count++;
+			}
+		}
+		return count;
+	};
 	for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 	{
 		if (actor.active)
@@ -13164,6 +13624,19 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 	{
 		if (activeKeys.find(it->first) == activeKeys.end())
 		{
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel blas NRI: frame=%u action=retire reason=actor-inactive actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x0 ref_count=0 prims=%u vertices=%u indices=%u blas=%u tlas_ready=%u tlas_published=%u ready=0\n",
+					mFrameIndex,
+					(unsigned long long)it->first,
+					(unsigned long long)it->second.meshResourceKey,
+					it->second.primitiveCount,
+					it->second.vertexCount,
+					it->second.indexCount,
+					it->second.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u,
+					it->second.tlasReadyFrame,
+					it->second.tlasPublished ? 1u : 0u);
+			}
 			RetireResidentBufferResource(it->second.vertexBuffer);
 			RetireResidentBufferResource(it->second.indexBuffer);
 			RetireResidentAccelerationStructure(it->second.accelerationStructure);
@@ -13184,6 +13657,16 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		auto meshResourceIt = mPersistentVoxelMeshVariantResources.find(actor.meshResourceKey);
 		if (meshResourceIt == mPersistentVoxelMeshVariantResources.end())
 		{
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel blas NRI: frame=%u action=skip reason=missing-mesh actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=0 prims=%u vertices=0 indices=%u blas=0 tlas_ready=0 tlas_published=0 ready=0\n",
+					mFrameIndex,
+					(unsigned long long)actor.identityKey,
+					(unsigned long long)actor.meshResourceKey,
+					(unsigned long long)actor.meshKeyHash,
+					actor.primitiveCount,
+					actor.indexCount);
+			}
 			continue;
 		}
 		PersistentVoxelMeshVariantResource& meshResource = meshResourceIt->second;
@@ -13194,6 +13677,20 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		if (!needsBuild)
 		{
 			resource.materialCount = actor.materialCount;
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel blas NRI: frame=%u action=reuse reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=1 tlas_ready=%u tlas_published=%u ready=1\n",
+					mFrameIndex,
+					(unsigned long long)actor.identityKey,
+					(unsigned long long)actor.meshResourceKey,
+					(unsigned long long)actor.meshKeyHash,
+					countActiveActorsUsingMeshResource(actor.meshResourceKey),
+					meshResource.primitiveCount,
+					meshResource.vertexCount,
+					meshResource.indexCount,
+					meshResource.tlasReadyFrame,
+					meshResource.tlasPublished ? 1u : 0u);
+			}
 			continue;
 		}
 
@@ -13212,6 +13709,20 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 			meshResource.accelerationStructure,
 			false))
 		{
+			if ((bool)nri_voxelstats)
+			{
+				Printf("PERF pt voxel blas NRI: frame=%u action=failed reason=build actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=0 tlas_ready=%u tlas_published=%u ready=0\n",
+					mFrameIndex,
+					(unsigned long long)actor.identityKey,
+					(unsigned long long)actor.meshResourceKey,
+					(unsigned long long)actor.meshKeyHash,
+					countActiveActorsUsingMeshResource(actor.meshResourceKey),
+					meshResource.primitiveCount,
+					meshResource.vertexCount,
+					meshResource.indexCount,
+					meshResource.tlasReadyFrame,
+					meshResource.tlasPublished ? 1u : 0u);
+			}
 			return false;
 		}
 
@@ -13231,6 +13742,20 @@ bool NRIRenderer::BuildPersistentVoxelActorAccelerationStructures(const nri_scen
 		if (!meshResource.tlasPublished && meshResource.tlasReadyFrame == 0)
 		{
 			meshResource.tlasReadyFrame = mFrameIndex + 1u;
+		}
+		if ((bool)nri_voxelstats)
+		{
+			Printf("PERF pt voxel blas NRI: frame=%u action=build reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=1 tlas_ready=%u tlas_published=%u ready=1\n",
+				mFrameIndex,
+				(unsigned long long)actor.identityKey,
+				(unsigned long long)actor.meshResourceKey,
+				(unsigned long long)actor.meshKeyHash,
+				countActiveActorsUsingMeshResource(actor.meshResourceKey),
+				meshResource.primitiveCount,
+				meshResource.vertexCount,
+				meshResource.indexCount,
+				meshResource.tlasReadyFrame,
+				meshResource.tlasPublished ? 1u : 0u);
 		}
 	}
 

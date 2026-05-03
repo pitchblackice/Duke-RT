@@ -2107,6 +2107,11 @@ namespace
 		const bool persistentReady = entry != nullptr && entry->persistentReady;
 		const VoxelActorPendingReason pendingReason =
 			entry != nullptr ? (VoxelActorPendingReason)entry->pendingReason : VoxelActorPendingReason::None;
+		const char* readyState =
+			persistentReady ? "persistent" :
+			hasSurface ? "surface-only" :
+			pendingReason != VoxelActorPendingReason::None ? "pending" :
+			"missing";
 		const uint64_t pendingAge =
 			entry != nullptr && entry->pendingFrame != 0 && gVoxelActorCacheFrame >= entry->pendingFrame ?
 			gVoxelActorCacheFrame - entry->pendingFrame :
@@ -2117,7 +2122,7 @@ namespace
 			0;
 		const uint32_t primitiveCount = entry != nullptr ? entry->primitiveCount : 0u;
 
-		Printf("PERF pt voxel actor state NRI: frame=%llu actor=%d stat=%d pic=%d action=%s reason=%s stability=%s mesh_key=0x%llx mat_key=0x%llx mesh_variant=0x%llx mat_variant=0x%llx inst_key=0x%llx voxel_index=%d basis_sig=0x%llx space=%s transform_keyed=%u surface_sig=0x%llx desired_mesh=0x%llx desired_mat=0x%llx desired_mesh_variant=0x%llx desired_mat_variant=0x%llx desired_surface=0x%llx persistent=%u has_surface=%u prims=%u pending=%s pending_age=%llu surface_age=%llu last_seen=%llu\n",
+		Printf("PERF pt voxel actor state NRI: frame=%llu actor=%d stat=%d pic=%d action=%s reason=%s stability=%s mesh_key=0x%llx mat_key=0x%llx mesh_variant=0x%llx mat_variant=0x%llx inst_key=0x%llx voxel_index=%d basis_sig=0x%llx space=%s transform_keyed=%u surface_sig=0x%llx desired_mesh=0x%llx desired_mat=0x%llx desired_mesh_variant=0x%llx desired_mat_variant=0x%llx desired_surface=0x%llx persistent=%u has_surface=%u ready=%s prims=%u pending=%s pending_age=%llu surface_age=%llu last_seen=%llu\n",
 			(unsigned long long)gVoxelActorCacheFrame,
 			actorIndex,
 			statnum,
@@ -2142,6 +2147,7 @@ namespace
 			(unsigned long long)desiredSurfaceSignature,
 			persistentReady ? 1u : 0u,
 			hasSurface ? 1u : 0u,
+			readyState,
 			primitiveCount,
 			GetVoxelActorPendingReasonName(pendingReason),
 			(unsigned long long)pendingAge,
