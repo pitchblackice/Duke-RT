@@ -2577,6 +2577,7 @@ CVAR(Int, nri_ptpersistentvoxelbuildbytes, 4 * 1024 * 1024, CVAR_ARCHIVE | CVAR_
 CVAR(Int, nri_ptpersistentvoxeltextureprewarms, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptpersistentvoxeltexturebytes, 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptvoxelsharedvariants, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -11912,11 +11913,20 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		SetCurrentSceneDataDescriptorsInitialized(false);
 	};
 
-	auto buildPersistentVoxelMeshResourceKey = [](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> uint64_t
+	auto isPersistentVoxelMeshResourceTransformKeyed = [](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> bool
+	{
+		return (bool)nri_ptvoxeltransformkeyed ||
+			cacheEntry.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace;
+	};
+
+	auto buildPersistentVoxelMeshResourceKey = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> uint64_t
 	{
 		uint64_t hash = 1469598103934665603ull;
 		hash = HashCombine64(hash, cacheEntry.meshKeyHash);
-		hash = HashCombine64(hash, cacheEntry.transformBasisSignature);
+		if (isPersistentVoxelMeshResourceTransformKeyed(cacheEntry))
+		{
+			hash = HashCombine64(hash, cacheEntry.transformBasisSignature);
+		}
 		return hash;
 	};
 
@@ -12440,10 +12450,11 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		resource.materialOffset = materialResource.materialOffset;
 		resource.materialCount = materialResource.materialCount;
 
+		const bool meshResourceTransformKeyed = isPersistentVoxelMeshResourceTransformKeyed(cacheEntry);
 		const bool meshResourceChanged =
 			meshResource.resourceKey != meshResourceKey ||
 			meshResource.meshKeyHash != cacheEntry.meshKeyHash ||
-			meshResource.transformBasisSignature != cacheEntry.transformBasisSignature ||
+			(meshResourceTransformKeyed && meshResource.transformBasisSignature != cacheEntry.transformBasisSignature) ||
 			meshResource.meshBakeSpace != cacheEntry.meshBakeSpace ||
 			meshResource.vertexCount != (uint32_t)actorGeometry.vertices.size() ||
 			meshResource.indexCount != (uint32_t)actorGeometry.indices.size() ||
