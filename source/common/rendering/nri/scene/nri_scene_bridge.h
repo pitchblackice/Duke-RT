@@ -223,13 +223,18 @@ struct VoxelMeshPrecacheStats
 	uint32_t textureCandidates = 0;
 	uint32_t actorCandidates = 0;
 	uint32_t modelCandidates = 0;
+	uint32_t meshVariantCandidates = 0;
 	uint32_t meshHits = 0;
 	uint32_t meshBuilds = 0;
 	uint32_t meshInvalid = 0;
 	uint32_t meshSkipped = 0;
+	uint32_t meshVariantHits = 0;
+	uint32_t meshVariantBuilds = 0;
+	uint32_t meshVariantInvalid = 0;
 	uint32_t vertices = 0;
 	uint32_t indices = 0;
 	uint32_t primitives = 0;
+	uint32_t variantPrimitives = 0;
 	double buildMs = 0.0;
 };
 

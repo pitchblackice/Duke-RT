@@ -184,18 +184,25 @@ namespace
 
 	std::unordered_map<uint64_t, VoxelActorCacheEntry> gVoxelActorCache;
 
+	uint32_t CountSurfacePrimitives(const SurfaceRef& surface);
+
 	void AddVoxelMeshPrecacheStats(VoxelMeshPrecacheStats& target, const VoxelMeshPrecacheStats& delta)
 	{
 		target.textureCandidates += delta.textureCandidates;
 		target.actorCandidates += delta.actorCandidates;
 		target.modelCandidates += delta.modelCandidates;
+		target.meshVariantCandidates += delta.meshVariantCandidates;
 		target.meshHits += delta.meshHits;
 		target.meshBuilds += delta.meshBuilds;
 		target.meshInvalid += delta.meshInvalid;
 		target.meshSkipped += delta.meshSkipped;
+		target.meshVariantHits += delta.meshVariantHits;
+		target.meshVariantBuilds += delta.meshVariantBuilds;
+		target.meshVariantInvalid += delta.meshVariantInvalid;
 		target.vertices += delta.vertices;
 		target.indices += delta.indices;
 		target.primitives += delta.primitives;
+		target.variantPrimitives += delta.variantPrimitives;
 		target.buildMs += delta.buildMs;
 	}
 
@@ -229,6 +236,17 @@ namespace
 			return nullptr;
 		}
 		return voxmodels[voxelIndex]->model;
+	}
+
+	VoxelMeshVariantKey BuildLoadingVoxelMeshVariantKey(FTextureID texid, FVoxelModel* model, int voxelIndex)
+	{
+		VoxelMeshVariantKey key = {};
+		key.voxel = voxelIndex >= 0 && voxelIndex < MAXVOXELS ? voxmodels[voxelIndex] : nullptr;
+		key.model = model;
+		key.sourcePicnum = texid;
+		key.resolvedVoxelIndex = voxelIndex;
+		key.geometryState = 0;
+		return key;
 	}
 
 	struct VoxelCaptureBudget
@@ -3483,11 +3501,7 @@ bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats
 		return false;
 	}
 
-	VoxelMeshVariantKey meshVariantKey = {};
-	meshVariantKey.voxel = voxelIndex >= 0 && voxelIndex < MAXVOXELS ? voxmodels[voxelIndex] : nullptr;
-	meshVariantKey.model = model;
-	meshVariantKey.sourcePicnum = texid;
-	meshVariantKey.resolvedVoxelIndex = voxelIndex;
+	const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(texid, model, voxelIndex);
 	const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
 	auto foundMesh = gVoxelMeshCache.find(model);
 	if (meshVariantHash == 0 || foundMesh == gVoxelMeshCache.end() || !foundMesh->second.built || !foundMesh->second.valid)
@@ -3495,21 +3509,37 @@ bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats
 		return meshReady;
 	}
 
+	VoxelMeshPrecacheStats variantDelta = {};
+	variantDelta.meshVariantCandidates = 1;
 	VoxelActorCacheLookup lookup = {};
 	lookup.meshVariantHash = meshVariantHash;
 	lookup.sourcePicnum = texid.isValid() ? texid.GetIndex() : -1;
 	lookup.resolvedVoxelIndex = voxelIndex;
 	const bool hadVariantSurface = IsVoxelMeshVariantSurfaceReady(meshVariantHash);
 	const SurfaceRef* surface = GetCachedVoxelMeshVariantSurface(lookup, foundMesh->second.mesh, false);
+	if (hadVariantSurface)
+	{
+		variantDelta.meshVariantHits = 1;
+	}
+	else if (surface != nullptr)
+	{
+		variantDelta.meshVariantBuilds = 1;
+	}
+	else
+	{
+		variantDelta.meshVariantInvalid = 1;
+	}
+	variantDelta.variantPrimitives = surface != nullptr ? CountSurfacePrimitives(*surface) : 0u;
 	if ((int)nri_ptloadingtrace >= 2)
 	{
-		Printf("NRI PT loading voxel variant: event=%s tex=%d voxel=%d mesh_variant=0x%llx tris=%u\n",
+		Printf("NRI PT loading voxel variant: event=%s source=texture tex=%d voxel=%d mesh_variant=0x%llx transform_keyed=0 tris=%u\n",
 			hadVariantSurface ? "hit" : (surface != nullptr ? "build" : "invalid"),
 			texid.isValid() ? texid.GetIndex() : -1,
 			voxelIndex,
 			(unsigned long long)meshVariantHash,
-			surface != nullptr ? CountSurfacePrimitives(*surface) : 0u);
+			variantDelta.variantPrimitives);
 	}
+	RecordVoxelMeshPrecacheStats(variantDelta, stats);
 	return meshReady;
 }
 
@@ -3520,7 +3550,7 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 		return;
 	}
 
-	std::unordered_set<FVoxelModel*> seenModels;
+	std::unordered_set<uint64_t> seenMeshVariants;
 	TSpriteIterator<DCoreActor> it;
 	while (DCoreActor* actor = it.Next())
 	{
@@ -3534,7 +3564,8 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 		RecordVoxelMeshPrecacheStats(actorDelta, stats);
 
 		const FTextureID texid = actor->spr.spritetexture();
-		FVoxelModel* model = ResolveVoxelTextureModel(texid);
+		int voxelIndex = -1;
+		FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
 		if (model == nullptr)
 		{
 			VoxelMeshPrecacheStats skipDelta = {};
@@ -3543,11 +3574,29 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 			continue;
 		}
 
-		if (!seenModels.insert(model).second)
+		const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(texid, model, voxelIndex);
+		const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
+		if (meshVariantHash != 0 && !seenMeshVariants.insert(meshVariantHash).second)
 		{
+			if ((int)nri_ptloadingtrace >= 2)
+			{
+				Printf("NRI PT loading voxel actor: event=variant-hit actor=%d tex=%d voxel=%d mesh_variant=0x%llx transform_keyed=0\n",
+					(int)actor->GetIndex(),
+					texid.isValid() ? texid.GetIndex() : -1,
+					voxelIndex,
+					(unsigned long long)meshVariantHash);
+			}
 			continue;
 		}
 
+		if ((int)nri_ptloadingtrace >= 2)
+		{
+			Printf("NRI PT loading voxel actor: event=variant-request actor=%d tex=%d voxel=%d mesh_variant=0x%llx transform_keyed=0\n",
+				(int)actor->GetIndex(),
+				texid.isValid() ? texid.GetIndex() : -1,
+				voxelIndex,
+				(unsigned long long)meshVariantHash);
+		}
 		PrecacheVoxelTextureCpuMesh(texid, stats);
 	}
 }
@@ -3558,21 +3607,28 @@ void PrintAndResetLoadingWarmupStats(const char* phase)
 		(gVoxelLoadingWarmupStats.textureCandidates != 0 ||
 		 gVoxelLoadingWarmupStats.actorCandidates != 0 ||
 		 gVoxelLoadingWarmupStats.modelCandidates != 0 ||
+		 gVoxelLoadingWarmupStats.meshVariantCandidates != 0 ||
 		 gVoxelLoadingWarmupStats.meshHits != 0 ||
-		 gVoxelLoadingWarmupStats.meshBuilds != 0))
+		 gVoxelLoadingWarmupStats.meshBuilds != 0 ||
+		 gVoxelLoadingWarmupStats.meshVariantBuilds != 0))
 	{
-		Printf("NRI PT loading warmup: phase=%s textures=%u actors=%u models=%u mesh_hits=%u mesh_builds=%u mesh_invalid=%u mesh_skipped=%u vertices=%u indices=%u tris=%u build_ms=%.3f\n",
+		Printf("NRI PT loading warmup: phase=%s textures=%u actors=%u models=%u mesh_variants=%u mesh_hits=%u mesh_builds=%u mesh_invalid=%u mesh_skipped=%u variant_hits=%u variant_builds=%u variant_invalid=%u vertices=%u indices=%u tris=%u variant_tris=%u build_ms=%.3f\n",
 			phase != nullptr ? phase : "unknown",
 			gVoxelLoadingWarmupStats.textureCandidates,
 			gVoxelLoadingWarmupStats.actorCandidates,
 			gVoxelLoadingWarmupStats.modelCandidates,
+			gVoxelLoadingWarmupStats.meshVariantCandidates,
 			gVoxelLoadingWarmupStats.meshHits,
 			gVoxelLoadingWarmupStats.meshBuilds,
 			gVoxelLoadingWarmupStats.meshInvalid,
 			gVoxelLoadingWarmupStats.meshSkipped,
+			gVoxelLoadingWarmupStats.meshVariantHits,
+			gVoxelLoadingWarmupStats.meshVariantBuilds,
+			gVoxelLoadingWarmupStats.meshVariantInvalid,
 			gVoxelLoadingWarmupStats.vertices,
 			gVoxelLoadingWarmupStats.indices,
 			gVoxelLoadingWarmupStats.primitives,
+			gVoxelLoadingWarmupStats.variantPrimitives,
 			gVoxelLoadingWarmupStats.buildMs);
 	}
 	gVoxelLoadingWarmupStats = {};
