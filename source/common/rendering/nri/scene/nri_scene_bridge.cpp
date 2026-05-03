@@ -2601,6 +2601,25 @@ namespace
 		return tilehasvoxel(actor->spr.spritetexture()) != 0;
 	}
 
+	bool IsLiveActorVoxelWarmupCandidate(DCoreActor* actor)
+	{
+		if (actor == nullptr ||
+			!actor->exists() ||
+			(actor->ObjectFlags & OF_EuthanizeMe) != 0)
+		{
+			return false;
+		}
+		if ((actor->sprext.renderflags & (SPREXT_NOTMD | SPREXT_TEMPINVISIBLE)) != 0 ||
+			(actor->spr.cstat2 & CSTAT2_SPRITE_NOMODEL) != 0 ||
+			(actor->spr.cstat & CSTAT_SPRITE_INVISIBLE) != 0 ||
+			actor->spr.scale.X == 0.0 ||
+			actor->spr.scale.Y == 0.0)
+		{
+			return false;
+		}
+		return true;
+	}
+
 	void BuildLiveActorIdentityKeys(std::unordered_set<uint64_t>& outKeys)
 	{
 		outKeys.clear();
@@ -3794,50 +3813,64 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 	TSpriteIterator<DCoreActor> it;
 	while (DCoreActor* actor = it.Next())
 	{
-		if (!IsLiveActorVoxelCacheOwner(actor))
+		if (!IsLiveActorVoxelWarmupCandidate(actor))
 		{
 			continue;
 		}
 
-		VoxelMeshPrecacheStats actorDelta = {};
-		actorDelta.actorCandidates = 1;
-		RecordVoxelMeshPrecacheStats(actorDelta, stats);
-
-		const FTextureID texid = actor->spr.spritetexture();
-		int voxelIndex = -1;
-		FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
-		if (model == nullptr)
+		FTextureID candidateTexids[2] = { actor->spr.spritetexture(), actor->dispictex };
+		bool countedActor = false;
+		for (const FTextureID texid : candidateTexids)
 		{
-			VoxelMeshPrecacheStats skipDelta = {};
-			skipDelta.meshSkipped = 1;
-			RecordVoxelMeshPrecacheStats(skipDelta, stats);
-			continue;
-		}
+			if (!texid.isValid())
+			{
+				continue;
+			}
+			if (texid == candidateTexids[0] && candidateTexids[1].isValid() && texid == candidateTexids[1])
+			{
+				candidateTexids[1] = FNullTextureID();
+			}
 
-		const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(texid, model, voxelIndex);
-		const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
-		if (meshVariantHash != 0 && !seenMeshVariants.insert(meshVariantHash).second)
-		{
+			int voxelIndex = -1;
+			FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
+			if (model == nullptr)
+			{
+				continue;
+			}
+
+			if (!countedActor)
+			{
+				VoxelMeshPrecacheStats actorDelta = {};
+				actorDelta.actorCandidates = 1;
+				RecordVoxelMeshPrecacheStats(actorDelta, stats);
+				countedActor = true;
+			}
+
+			const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(texid, model, voxelIndex);
+			const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
+			if (meshVariantHash != 0 && !seenMeshVariants.insert(meshVariantHash).second)
+			{
+				if ((int)nri_ptloadingtrace >= 2)
+				{
+					Printf("NRI PT loading voxel actor: event=variant-hit actor=%d tex=%d voxel=%d mesh_variant=0x%llx transform_keyed=0\n",
+						(int)actor->GetIndex(),
+						texid.GetIndex(),
+						voxelIndex,
+						(unsigned long long)meshVariantHash);
+				}
+				continue;
+			}
+
 			if ((int)nri_ptloadingtrace >= 2)
 			{
-				Printf("NRI PT loading voxel actor: event=variant-hit actor=%d tex=%d voxel=%d mesh_variant=0x%llx transform_keyed=0\n",
+				Printf("NRI PT loading voxel actor: event=variant-request actor=%d tex=%d voxel=%d mesh_variant=0x%llx transform_keyed=0\n",
 					(int)actor->GetIndex(),
-					texid.isValid() ? texid.GetIndex() : -1,
+					texid.GetIndex(),
 					voxelIndex,
 					(unsigned long long)meshVariantHash);
 			}
-			continue;
+			PrecacheVoxelTextureCpuMesh(texid, stats);
 		}
-
-		if ((int)nri_ptloadingtrace >= 2)
-		{
-			Printf("NRI PT loading voxel actor: event=variant-request actor=%d tex=%d voxel=%d mesh_variant=0x%llx transform_keyed=0\n",
-				(int)actor->GetIndex(),
-				texid.isValid() ? texid.GetIndex() : -1,
-				voxelIndex,
-				(unsigned long long)meshVariantHash);
-		}
-		PrecacheVoxelTextureCpuMesh(texid, stats);
 	}
 }
 
