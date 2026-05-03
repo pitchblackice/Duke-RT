@@ -2202,9 +2202,20 @@ namespace
 
 	bool IsVoxelMeshVariantSurfaceReady(uint64_t meshVariantHash);
 
+	bool IsVoxelActorSharedVariantReady(const VoxelActorCacheEntry& entry)
+	{
+		return entry.hasSurface &&
+			entry.meshBakeSpace == VoxelMeshBakeSpace::LocalSpace &&
+			IsVoxelMeshVariantSurfaceReady(entry.meshVariantHash);
+	}
+
 	bool CanPromoteVoxelActorCacheEntry(const VoxelActorCacheEntry& entry)
 	{
 		if (entry.persistentReady)
+		{
+			return true;
+		}
+		if (IsVoxelActorSharedVariantReady(entry))
 		{
 			return true;
 		}
@@ -2488,6 +2499,7 @@ namespace
 		const SurfaceRef& meshSurface,
 		const SurfaceRef& lightSurface,
 		VoxelMeshBakeSpace meshBakeSpace,
+		bool sharedVariantReady,
 		SceneDebugStats& stats)
 	{
 		if (lookup.identityKey == 0)
@@ -2537,13 +2549,20 @@ namespace
 		// Transform rebakes and state variant switches are transitional updates of an
 		// already valid actor. Keep already-resident actors renderable and let the
 		// persistent actor path update the resource in place. First-use actors still
-		// wait for the normal stable-frame promotion path.
+		// wait for the normal stable-frame promotion path unless the shared canonical
+		// variant is ready, in which case actor promotion latency must not force a
+		// large voxel through the dynamic overlay.
 		entry.persistentReady =
-			wasPersistentReady &&
-			(lookup.stability == VoxelActorStability::TransformRebake ||
-			 lookup.stability == VoxelActorStability::Changed);
+			sharedVariantReady ||
+			(wasPersistentReady &&
+				(lookup.stability == VoxelActorStability::TransformRebake ||
+				 lookup.stability == VoxelActorStability::Changed));
 		entry.hasSurface = true;
 		++gVoxelActorCacheSerial;
+		if (sharedVariantReady && !wasPersistentReady)
+		{
+			EmitVoxelActorStateTrace(nullptr, &lookup, &entry, "shared-variant-promote", VoxelActorPendingReason::None);
+		}
 
 		if (lookup.stability == VoxelActorStability::New || !hadSurface)
 		{
@@ -3410,14 +3429,23 @@ namespace
 			const SurfaceRef& storedMeshSurface = canonicalSurface != nullptr ? *canonicalSurface : exactSurface;
 			const VoxelMeshBakeSpace storedBakeSpace =
 				canonicalSurface != nullptr ? VoxelMeshBakeSpace::LocalSpace : VoxelMeshBakeSpace::BakedTransform;
+			const bool sharedVariantReady =
+				storedBakeSpace == VoxelMeshBakeSpace::LocalSpace &&
+				IsVoxelMeshVariantSurfaceReady(cacheLookup.meshVariantHash);
 			{
 				ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelStoreMs);
-				StoreVoxelActorCacheSurface(cacheLookup, storedMeshSurface, exactSurface, storedBakeSpace, stats);
+				StoreVoxelActorCacheSurface(cacheLookup, storedMeshSurface, exactSurface, storedBakeSpace, sharedVariantReady, stats);
 			}
 			gDynamicCapturePerfStats.voxelCacheStores += stats.voxelCacheSurfaceStores - previousStores;
 			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheSurfaceRebuilds - previousRebuilds;
 			gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheTransformRebakes - previousTransformRebakes;
+			const auto storedEntry = gVoxelActorCache.find(cacheLookup.identityKey);
+			const bool nowPersistentReady =
+				cacheLookup.identityKey != 0 &&
+				storedEntry != gVoxelActorCache.end() &&
+				storedEntry->second.persistentReady;
 			if (!wasPersistentReady &&
+				!nowPersistentReady &&
 				(hadSurface || exactPrimitiveCount <= kTransientVoxelLiveSurfacePrimitiveLimit))
 			{
 				const VoxelActorPendingReason pendingReason =
