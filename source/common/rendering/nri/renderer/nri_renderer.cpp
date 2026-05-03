@@ -9070,12 +9070,44 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 {
 	if (mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)
 	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=wait reason=frame-target-not-ready framebuffer=%u command_buffer=%u active_target=%u output=%ux%u target=%ux%u\n",
+				mFrameBuffer != nullptr ? 1u : 0u,
+				mFrameBuffer != nullptr && mFrameBuffer->mCommandBuffer != nullptr ? 1u : 0u,
+				mFrameBuffer != nullptr && mFrameBuffer->mActiveTarget != nullptr ? 1u : 0u,
+				outputWidth,
+				outputHeight,
+				targetWidth,
+				targetHeight);
+		}
 		return false;
 	}
 
 	if (!RefreshPathTracingAvailability() || !mPathTracingSupported)
 	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=pt-unsupported output=%ux%u target=%ux%u\n",
+				outputWidth,
+				outputHeight,
+				targetWidth,
+				targetHeight);
+		}
 		return true;
+	}
+
+	const auto preloadStart = std::chrono::steady_clock::now();
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=renderer-preload result=begin output=%ux%u target=%ux%u map_valid=%u static_valid=%u static_resident=%u\n",
+			outputWidth,
+			outputHeight,
+			targetWidth,
+			targetHeight,
+			mMapWorld.valid ? 1u : 0u,
+			mStaticMapScene.valid ? 1u : 0u,
+			mStaticMapScene.valid && mStaticMapScene.texturesResident && mStaticMapScene.buffersResident && mStaticMapScene.accelerationResident ? 1u : 0u);
 	}
 
 	ResetPerfTraceStats();
@@ -9084,6 +9116,11 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		if (!Initialize() || !EnsureFrameResources(outputWidth, outputHeight, targetWidth, targetHeight))
 		{
 			LogFallback("PT preload frame resources or pipelines failed to initialize.");
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=renderer-preload result=ready reason=init-failed ms=%.3f\n",
+					DurationMs(preloadStart, std::chrono::steady_clock::now()));
+			}
 			return true;
 		}
 	}
@@ -9096,12 +9133,22 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 	RefreshMapWorld();
 	if (!mMapWorld.valid)
 	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=map-invalid ms=%.3f\n",
+				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+		}
 		return true;
 	}
 
 	if (!PreloadStaticMapResources())
 	{
 		LogFallback("PT preload resident static scene build failed.");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=static-map-failed ms=%.3f\n",
+				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+		}
 		return true;
 	}
 
@@ -9116,6 +9163,15 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		if (needsResidentStaticLightRefresh && !RefreshResidentStaticSceneDataSet())
 		{
 			LogFallback("PT preload static scene light refresh failed.");
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=renderer-preload result=ready reason=static-light-refresh-failed analytic=%u runtime_bound=%u sector_active=%u sector_bound=%u ms=%.3f\n",
+					mSceneLights.GetAnalyticLights().activeLights.empty() ? 0u : 1u,
+					mBoundRuntimeLightCount,
+					mSceneLights.GetSectorLighting().activeSectorCount,
+					mBoundSectorLightActiveCount,
+					DurationMs(preloadStart, std::chrono::steady_clock::now()));
+			}
 			return true;
 		}
 	}
@@ -9123,11 +9179,21 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 	if (!PreloadPersistentVoxelResources())
 	{
 		LogFallback("PT preload persistent voxel resource admission failed.");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=persistent-voxel-failed ms=%.3f\n",
+				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+		}
 		return true;
 	}
 	if (!PreloadMaterialResources())
 	{
 		LogFallback("PT preload material warmup failed.");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=material-failed ms=%.3f\n",
+				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+		}
 		return true;
 	}
 
@@ -9136,11 +9202,21 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 	if (!UpdateEmissiveSamplingBuffers(emissiveSamplingContext))
 	{
 		LogFallback("PT preload emissive primitive update failed.");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=emissive-sampling-failed ms=%.3f\n",
+				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+		}
 		return true;
 	}
 	if (!BuildEmissiveTopLevelAccelerationStructure())
 	{
 		LogFallback("PT preload emissive TLAS update failed.");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=emissive-tlas-failed ms=%.3f\n",
+				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+		}
 		return true;
 	}
 
@@ -9151,6 +9227,11 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		(uint32_t)mStaticMapScene.chunks.size(),
 		(uint32_t)mStaticMapScene.geometry.primitives.size(),
 		(uint32_t)mStaticMapScene.gpuMaterials.size());
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=renderer-preload result=ready reason=complete ms=%.3f\n",
+			DurationMs(preloadStart, std::chrono::steady_clock::now()));
+	}
 	return true;
 }
 

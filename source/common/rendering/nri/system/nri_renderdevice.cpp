@@ -81,6 +81,7 @@ EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Bool, nri_voxelstats)
+EXTERN_CVAR(Int, nri_ptloadingtrace)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
 
@@ -4078,22 +4079,58 @@ bool NRIRenderDevice::StartPathTracingLevelPreload()
 	if (mLevelTransitionInProgress)
 	{
 		mPathTracingLevelPreloadPending = false;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=device-start result=skip reason=level-transition initialized=%u renderer=%u pending=%u frame_begun=%u active_target=%u\n",
+				mInitialized ? 1u : 0u,
+				mRenderer != nullptr ? 1u : 0u,
+				mPathTracingLevelPreloadPending ? 1u : 0u,
+				mFrameBegun ? 1u : 0u,
+				mActiveTarget != nullptr ? 1u : 0u);
+		}
 		return false;
 	}
 
 	if (!mInitialized || mRenderer == nullptr)
 	{
 		mPathTracingLevelPreloadPending = true;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=device-start result=pending reason=renderer-not-ready initialized=%u renderer=%u pending=%u frame_begun=%u active_target=%u\n",
+				mInitialized ? 1u : 0u,
+				mRenderer != nullptr ? 1u : 0u,
+				mPathTracingLevelPreloadPending ? 1u : 0u,
+				mFrameBegun ? 1u : 0u,
+				mActiveTarget != nullptr ? 1u : 0u);
+		}
 		return true;
 	}
 
 	if (!mRenderer->RefreshPathTracingAvailability() || !mRenderer->IsPathTracingSupported())
 	{
 		mPathTracingLevelPreloadPending = false;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=device-start result=skip reason=pt-unsupported initialized=%u renderer=%u pending=%u frame_begun=%u active_target=%u\n",
+				mInitialized ? 1u : 0u,
+				mRenderer != nullptr ? 1u : 0u,
+				mPathTracingLevelPreloadPending ? 1u : 0u,
+				mFrameBegun ? 1u : 0u,
+				mActiveTarget != nullptr ? 1u : 0u);
+		}
 		return false;
 	}
 
 	mPathTracingLevelPreloadPending = true;
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=device-start result=pending reason=ready initialized=%u renderer=%u pending=%u frame_begun=%u active_target=%u\n",
+			mInitialized ? 1u : 0u,
+			mRenderer != nullptr ? 1u : 0u,
+			mPathTracingLevelPreloadPending ? 1u : 0u,
+			mFrameBegun ? 1u : 0u,
+			mActiveTarget != nullptr ? 1u : 0u);
+	}
 	return true;
 }
 
@@ -4101,28 +4138,69 @@ bool NRIRenderDevice::TickPathTracingLevelPreload()
 {
 	if (!mPathTracingLevelPreloadPending)
 	{
+		if ((int)nri_ptloadingtrace >= 2)
+		{
+			Printf("NRI PT loading gate: event=device-tick result=ready reason=no-pending initialized=%u renderer=%u frame_begun=%u active_target=%u\n",
+				mInitialized ? 1u : 0u,
+				mRenderer != nullptr ? 1u : 0u,
+				mFrameBegun ? 1u : 0u,
+				mActiveTarget != nullptr ? 1u : 0u);
+		}
 		return true;
 	}
 
 	if (mLevelTransitionInProgress)
 	{
 		mPathTracingLevelPreloadPending = false;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=device-tick result=ready reason=level-transition initialized=%u renderer=%u frame_begun=%u active_target=%u\n",
+				mInitialized ? 1u : 0u,
+				mRenderer != nullptr ? 1u : 0u,
+				mFrameBegun ? 1u : 0u,
+				mActiveTarget != nullptr ? 1u : 0u);
+		}
 		return true;
 	}
 
 	if (!mInitialized || mRenderer == nullptr)
 	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=device-tick result=wait reason=renderer-not-ready initialized=%u renderer=%u frame_begun=%u active_target=%u\n",
+				mInitialized ? 1u : 0u,
+				mRenderer != nullptr ? 1u : 0u,
+				mFrameBegun ? 1u : 0u,
+				mActiveTarget != nullptr ? 1u : 0u);
+		}
 		return false;
 	}
 
 	if (!mRenderer->RefreshPathTracingAvailability() || !mRenderer->IsPathTracingSupported())
 	{
 		mPathTracingLevelPreloadPending = false;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=device-tick result=ready reason=pt-unsupported initialized=%u renderer=%u frame_begun=%u active_target=%u\n",
+				mInitialized ? 1u : 0u,
+				mRenderer != nullptr ? 1u : 0u,
+				mFrameBegun ? 1u : 0u,
+				mActiveTarget != nullptr ? 1u : 0u);
+		}
 		return true;
 	}
 
 	if (!mFrameBegun || mCommandBuffer == nullptr || mActiveTarget == nullptr)
 	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=device-tick result=wait reason=frame-not-ready initialized=%u renderer=%u frame_begun=%u command_buffer=%u active_target=%u\n",
+				mInitialized ? 1u : 0u,
+				mRenderer != nullptr ? 1u : 0u,
+				mFrameBegun ? 1u : 0u,
+				mCommandBuffer != nullptr ? 1u : 0u,
+				mActiveTarget != nullptr ? 1u : 0u);
+		}
 		return false;
 	}
 
@@ -4135,6 +4213,16 @@ bool NRIRenderDevice::TickPathTracingLevelPreload()
 	{
 		mPathTracingLevelPreloadPending = false;
 	}
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=device-tick result=%s reason=renderer-preload output=%ux%u target=%ux%u pending=%u\n",
+			ready ? "ready" : "wait",
+			outputWidth,
+			outputHeight,
+			targetWidth,
+			targetHeight,
+			mPathTracingLevelPreloadPending ? 1u : 0u);
+	}
 	return ready;
 }
 
@@ -4145,6 +4233,14 @@ bool NRIRenderDevice::IsPathTracingLevelPreloadPending() const
 
 void NRIRenderDevice::CancelPathTracingLevelPreload()
 {
+	if ((int)nri_ptloadingtrace >= 2 && mPathTracingLevelPreloadPending)
+	{
+		Printf("NRI PT loading gate: event=device-cancel pending=1 initialized=%u renderer=%u frame_begun=%u active_target=%u\n",
+			mInitialized ? 1u : 0u,
+			mRenderer != nullptr ? 1u : 0u,
+			mFrameBegun ? 1u : 0u,
+			mActiveTarget != nullptr ? 1u : 0u);
+	}
 	mPathTracingLevelPreloadPending = false;
 }
 

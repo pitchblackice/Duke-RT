@@ -104,6 +104,7 @@ CVAR(Bool, cl_resumesavegame, true, CVAR_ARCHIVE)
 EXTERN_CVAR (Bool, vid_vsync)
 EXTERN_CVAR (Int, vid_maxfps)
 EXTERN_CVAR (Int, perf_looptraceframes)
+EXTERN_CVAR(Int, nri_ptloadingtrace)
 
 static uint64_t stabilityticduration = 0;
 static uint64_t stabilitystarttime = 0;
@@ -272,11 +273,21 @@ void G_BuildTiccmd(ticcmd_t* cmd)
 //==========================================================================
 bool newGameStarted;
 static bool gPendingPathTracingLevelPreload = false;
+static bool gPathTracingLevelPreloadHeldScreenJobCompletion = false;
 static uint64_t gLevelTransitionSerial = 0;
 
 static void CancelPendingPathTracingLevelPreload()
 {
+	if ((int)nri_ptloadingtrace >= 1 && gPendingPathTracingLevelPreload)
+	{
+		Printf("NRI PT loading gate: event=cancel gamestate=%s gameaction=%d screen=%u screen_pending=%u\n",
+			GetGameStateName(gamestate),
+			(int)gameaction,
+			screen != nullptr ? 1u : 0u,
+			screen != nullptr && screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+	}
 	gPendingPathTracingLevelPreload = false;
+	gPathTracingLevelPreloadHeldScreenJobCompletion = false;
 	if (screen != nullptr)
 	{
 		screen->CancelPathTracingLevelPreload();
@@ -332,6 +343,14 @@ void G_NotifyLevelLoadBegin(const LevelTransitionInfo& info, MapRecord* loadedLe
 
 static void FinalizePendingLevelStart()
 {
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=finalize gamestate=%s gameaction=%d pending=%u screen_pending=%u\n",
+			GetGameStateName(gamestate),
+			(int)gameaction,
+			gPendingPathTracingLevelPreload ? 1u : 0u,
+			screen != nullptr && screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+	}
 	CancelPendingPathTracingLevelPreload();
 	gameaction = ga_level;
 	ResetStatusBar();
@@ -342,15 +361,31 @@ static bool BeginPathTracingLevelPreloadGate()
 {
 	if (screen == nullptr || !screen->StartPathTracingLevelPreload())
 	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=begin result=skip reason=%s gamestate=%s gameaction=%d\n",
+				screen == nullptr ? "no-screen" : "start-declined",
+				GetGameStateName(gamestate),
+				(int)gameaction);
+		}
 		return false;
 	}
 
 	gPendingPathTracingLevelPreload = true;
+	gPathTracingLevelPreloadHeldScreenJobCompletion = false;
 	if (cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined())
 	{
 		StartCutscene(globalCutscenes.LoadingScreen, SJ_BLOCKUI, [](bool) {});
 	}
 	gameaction = ga_intermission;
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading gate: event=begin result=pending loading_screen=%u gamestate=%s gameaction=%d screen_pending=%u\n",
+			cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined() ? 1u : 0u,
+			GetGameStateName(gamestate),
+			(int)gameaction,
+			screen != nullptr && screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+	}
 	return true;
 }
 
@@ -602,7 +637,19 @@ static void GameTicker()
 			gPendingPathTracingLevelPreload &&
 			screen != nullptr &&
 			screen->IsPathTracingLevelPreloadPending();
-		if (ScreenJobTick() && !pathTracingPreloadPending)
+		const bool screenJobComplete = ScreenJobTick();
+		if (screenJobComplete && pathTracingPreloadPending && !gPathTracingLevelPreloadHeldScreenJobCompletion)
+		{
+			gPathTracingLevelPreloadHeldScreenJobCompletion = true;
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=screenjob-complete-held gamestate=%s gameaction=%d screen_pending=%u\n",
+					GetGameStateName(gamestate),
+					(int)gameaction,
+					screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+			}
+		}
+		if (screenJobComplete && !pathTracingPreloadPending)
 		{
 			// synchronize termination with the playsim.
 			Net_WriteByte(DEM_ENDSCREENJOB);
@@ -723,7 +770,16 @@ void Display()
 		ScreenJobDraw();
 		if (gPendingPathTracingLevelPreload && screen != nullptr && screen->IsPathTracingLevelPreloadPending())
 		{
-			if (screen->TickPathTracingLevelPreload())
+			const bool preloadReady = screen->TickPathTracingLevelPreload();
+			if ((int)nri_ptloadingtrace >= 2)
+			{
+				Printf("NRI PT loading gate: event=draw-tick ready=%u gamestate=%s gameaction=%d screen_pending=%u\n",
+					preloadReady ? 1u : 0u,
+					GetGameStateName(gamestate),
+					(int)gameaction,
+					screen->IsPathTracingLevelPreloadPending() ? 1u : 0u);
+			}
+			if (preloadReady)
 			{
 				if (cutscene.runner != nullptr)
 				{
