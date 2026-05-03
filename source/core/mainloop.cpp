@@ -274,6 +274,7 @@ void G_BuildTiccmd(ticcmd_t* cmd)
 bool newGameStarted;
 static bool gPendingPathTracingLevelPreload = false;
 static bool gPathTracingLevelPreloadHeldScreenJobCompletion = false;
+static bool gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
 static uint64_t gLevelTransitionSerial = 0;
 
 static void CancelPendingPathTracingLevelPreload()
@@ -373,6 +374,7 @@ static bool BeginPathTracingLevelPreloadGate()
 
 	gPendingPathTracingLevelPreload = true;
 	gPathTracingLevelPreloadHeldScreenJobCompletion = false;
+	gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
 	if (cl_loadingscreens && globalCutscenes.LoadingScreen.isdefined())
 	{
 		StartCutscene(globalCutscenes.LoadingScreen, SJ_BLOCKUI, [](bool) {});
@@ -758,6 +760,7 @@ void Display()
 	//twod->SetSize(screen->GetWidth(), screen->GetHeight());
 	twod->Begin(screen->GetWidth(), screen->GetHeight());
 	twod->ClearClipRect();
+	bool levelRenderedThisFrame = false;
 	switch (gamestate)
 	{
 	case GS_MENUSCREEN:
@@ -781,11 +784,19 @@ void Display()
 			}
 			if (preloadReady)
 			{
-				if (cutscene.runner != nullptr)
-				{
-					EndScreenJob();
-				}
+				const bool keepLoadingScreenUntilLevelFrame = cutscene.runner != nullptr;
 				FinalizePendingLevelStart();
+				if (keepLoadingScreenUntilLevelFrame)
+				{
+					gPathTracingLevelPreloadAwaitingFirstLevelFrame = true;
+					if ((int)nri_ptloadingtrace >= 1)
+					{
+						Printf("NRI PT loading gate: event=preload-ready-await-level-frame gamestate=%s gameaction=%d gametic=%d\n",
+							GetGameStateName(gamestate),
+							(int)gameaction,
+							gametic);
+					}
+				}
 			}
 		}
 		break;
@@ -793,6 +804,7 @@ void Display()
 	case GS_LEVEL:
 		if (gametic != 0)
 		{
+			levelRenderedThisFrame = true;
 			perfDisplayTraceStats.levelRendered = true;
 			stageStart = I_msTimeF();
 			screen->FrameTime = I_msTimeFS();
@@ -818,6 +830,23 @@ void Display()
 	default:
 		twod->ClearScreen();
 		break;
+	}
+
+	if (gPathTracingLevelPreloadAwaitingFirstLevelFrame && gamestate == GS_LEVEL && cutscene.runner != nullptr)
+	{
+		ScreenJobDraw();
+		if (levelRenderedThisFrame)
+		{
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=first-level-frame-release gamestate=%s gameaction=%d gametic=%d\n",
+					GetGameStateName(gamestate),
+					(int)gameaction,
+					gametic);
+			}
+			EndScreenJob();
+			gPathTracingLevelPreloadAwaitingFirstLevelFrame = false;
+		}
 	}
 	
 	stageStart = I_msTimeF();
