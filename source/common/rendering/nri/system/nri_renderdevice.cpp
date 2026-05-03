@@ -4083,8 +4083,8 @@ bool NRIRenderDevice::StartPathTracingLevelPreload()
 
 	if (!mInitialized || mRenderer == nullptr)
 	{
-		mPathTracingLevelPreloadPending = false;
-		return false;
+		mPathTracingLevelPreloadPending = true;
+		return true;
 	}
 
 	if (!mRenderer->RefreshPathTracingAvailability() || !mRenderer->IsPathTracingSupported())
@@ -4111,6 +4111,11 @@ bool NRIRenderDevice::TickPathTracingLevelPreload()
 	}
 
 	if (!mInitialized || mRenderer == nullptr)
+	{
+		return false;
+	}
+
+	if (!mRenderer->RefreshPathTracingAvailability() || !mRenderer->IsPathTracingSupported())
 	{
 		mPathTracingLevelPreloadPending = false;
 		return true;

@@ -597,12 +597,18 @@ static void GameTicker()
 		break;
 	case GS_CUTSCENE:
 	case GS_INTRO:
-		if (ScreenJobTick())
+	{
+		const bool pathTracingPreloadPending =
+			gPendingPathTracingLevelPreload &&
+			screen != nullptr &&
+			screen->IsPathTracingLevelPreloadPending();
+		if (ScreenJobTick() && !pathTracingPreloadPending)
 		{
 			// synchronize termination with the playsim.
 			Net_WriteByte(DEM_ENDSCREENJOB);
 		}
 		break;
+	}
 
 	}
 }
