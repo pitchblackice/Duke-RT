@@ -13568,17 +13568,16 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		}
 
 		resource.materialUploadHash = materialHash;
-		if ((bool)nri_voxelstats)
+		if (uploadMaterials && (bool)nri_voxelstats)
 		{
-			Printf("PERF pt voxel material variant NRI: frame=%u action=%s reason=arena-sync actor_key=0x0 mat_key=0x%llx ref_count=0 material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx upload_bytes=%llu ready=1\n",
+			Printf("PERF pt voxel material variant NRI: frame=%u action=upload reason=arena-sync actor_key=0x0 mat_key=0x%llx ref_count=0 material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx upload_bytes=%llu ready=1\n",
 				mFrameIndex,
-				uploadMaterials ? "upload" : "reuse-upload",
 				(unsigned long long)resource.materialKeyHash,
 				resource.materialOffset,
 				resource.materialCount,
 				resource.materialCapacity,
 				(unsigned long long)resource.materialUploadHash,
-				(unsigned long long)(uploadMaterials ? materialSize : 0ull));
+				(unsigned long long)materialSize);
 		}
 	}
 	return true;
