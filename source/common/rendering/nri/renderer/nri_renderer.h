@@ -1847,6 +1847,7 @@ private:
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure,
 		bool updateDynamicPerfStats);
+	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
