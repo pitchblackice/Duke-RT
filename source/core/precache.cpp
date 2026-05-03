@@ -60,6 +60,19 @@ static void PrecacheTex(FGameTexture* tex, int palid)
 	screen->PrecacheMaterial(mat, palid);
 }
 
+static void PrecacheVoxelForTexture(FTextureID texid)
+{
+	if (!r_voxels || !texid.isValid()) return;
+
+	int vox = GetExtInfo(texid).tiletovox;
+	if (vox >= 0 && vox < MAXVOXELS && voxmodels[vox] && voxmodels[vox]->model)
+	{
+		FHWModelRenderer mr(*screen->RenderState(), 0);
+		voxmodels[vox]->model->BuildVertexBuffer(&mr);
+		nri_scene::PrecacheVoxelTextureCpuMesh(texid);
+	}
+}
+
 static void doprecache(FTextureID texid, int palette)
 {
    if ((palette < (MAXPALOOKUPS - RESERVEDPALS)) && (!lookups.checkTable(palette))) return;
@@ -72,16 +85,7 @@ static void doprecache(FTextureID texid, int palette)
 
 	if (mid < 0)
 	{
-		if (r_voxels)
-		{
-			int vox = GetExtInfo(texid).tiletovox;
-			if (vox >= 0 && vox < MAXVOXELS && voxmodels[vox] && voxmodels[vox]->model)
-			{
-				FHWModelRenderer mr(*screen->RenderState(), 0);
-				voxmodels[vox]->model->BuildVertexBuffer(&mr);
-				nri_scene::PrecacheVoxelTextureCpuMesh(texid);
-			}
-		}
+		PrecacheVoxelForTexture(texid);
 		return;
 	}
 
@@ -154,7 +158,11 @@ void precacheMarkedTiles()
 	while (it2.NextPair(pair2))
 	{
 		auto tex = TexMan.FindGameTexture(pair2->Key.GetChars(), ETextureType::Any);
-		if (tex) PrecacheTex(tex, 0);
+		if (tex)
+		{
+			PrecacheTex(tex, 0);
+			PrecacheVoxelForTexture(tex->GetID());
+		}
 	}
 
 	nri_scene::PrecacheLiveActorVoxelMeshes();
