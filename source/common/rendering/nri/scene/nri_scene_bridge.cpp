@@ -2711,13 +2711,13 @@ namespace
 		aggregates.reserve(meshAggregates.size());
 		for (const auto& pair : meshAggregates)
 		{
-			if (pair.second.localSpaceActorCount > 0 && pair.second.basisSignatures.size() > 1)
+			if (pair.second.bakedTransformActorCount > 0 && pair.second.basisSignatures.size() > 1)
 			{
 				stats.voxelCacheInvariantWarnings++;
 				if (nri_voxelstats)
 				{
 					Printf(
-						"PERF pt voxel invariant warning NRI: frame=%llu mesh_key=0x%llx source_pic=%d actors=%u space=local basis_count=%u example_basis=0x%llx\n",
+						"PERF pt voxel invariant warning NRI: frame=%llu mesh_key=0x%llx source_pic=%d actors=%u space=baked basis_count=%u example_basis=0x%llx\n",
 						(unsigned long long)gVoxelActorCacheFrame,
 						(unsigned long long)pair.second.meshKeyHash,
 						pair.second.sourcePicnum,
