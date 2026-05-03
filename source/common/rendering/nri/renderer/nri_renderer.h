@@ -384,7 +384,7 @@ public:
 		double geometryBuildMirrorPlayerMs = 0.0;
 		double geometryBuildMergedDynamicMs = 0.0;
 		double geometryBuildCapturedMs = 0.0;
-		double geometryBuildPersistentVoxelActorMs = 0.0;
+		double geometryBuildPersistentVoxelVariantMs = 0.0;
 		double geometryBuildPersistentVoxelAppendMs = 0.0;
 		double geometryBuildPersistentVoxelRebuildMs = 0.0;
 		double geometryBuildPersistentEmissivePruneMs = 0.0;
@@ -601,7 +601,7 @@ public:
 		uint32_t persistentVoxelAsCalls = 0;
 		uint32_t persistentVoxelAsBuilds = 0;
 		uint32_t persistentVoxelAsUniqueMeshBuilds = 0;
-		uint32_t persistentVoxelAsActors = 0;
+		uint32_t persistentVoxelAsInstances = 0;
 		uint32_t persistentVoxelSharedMeshResources = 0;
 		uint32_t persistentVoxelTlasInstances = 0;
 		uint32_t persistentVoxelInstanceTransformUpdates = 0;
@@ -642,15 +642,15 @@ public:
 		uint32_t sceneInstanceStaticCount = 0;
 		uint32_t sceneInstanceDynamicCount = 0;
 		uint32_t sceneInstancePersistentVoxelCount = 0;
-		uint32_t persistentVoxelActorResourceCount = 0;
-		uint32_t persistentVoxelActorActiveCount = 0;
-		uint32_t persistentVoxelActorPrimitiveCount = 0;
-		uint32_t persistentVoxelActorMaterialCount = 0;
-		uint32_t persistentVoxelActorMinPrimitiveCount = 0;
-		uint32_t persistentVoxelActorMaxPrimitiveCount = 0;
+		uint32_t persistentVoxelMeshVariantResourceCount = 0;
+		uint32_t persistentVoxelInstanceActiveCount = 0;
+		uint32_t persistentVoxelInstancePrimitiveCount = 0;
+		uint32_t persistentVoxelInstanceMaterialCount = 0;
+		uint32_t persistentVoxelInstanceMinPrimitiveCount = 0;
+		uint32_t persistentVoxelInstanceMaxPrimitiveCount = 0;
 		uint32_t geometryBuildDynamicLivePrimitives = 0;
-		uint32_t geometryBuildPersistentVoxelActorCalls = 0;
-		uint32_t geometryBuildPersistentVoxelActorPrimitives = 0;
+		uint32_t geometryBuildPersistentVoxelVariantCalls = 0;
+		uint32_t geometryBuildPersistentVoxelVariantPrimitives = 0;
 		uint32_t geometryBuildStaticChunkCalls = 0;
 		uint32_t geometryBuildStaticChunkPrimitives = 0;
 		uint32_t geometryBuildRuntimeMutationTruthCalls = 0;
@@ -728,7 +728,7 @@ public:
 		uint32_t sceneDynamicUploadCalls = 0;
 		uint32_t sceneResidentChunkUploadCalls = 0;
 		uint32_t scenePersistentVoxelUploadCalls = 0;
-		uint32_t scenePersistentVoxelActorUploadCalls = 0;
+		uint32_t scenePersistentVoxelVariantUploadCalls = 0;
 		uint32_t sceneStaticRefreshUploadCalls = 0;
 		uint32_t sceneOtherUploadCalls = 0;
 		uint32_t sceneDataUploadCalls = 0;
@@ -743,7 +743,7 @@ public:
 		uint64_t sceneDynamicUploadBytes = 0;
 		uint64_t sceneResidentChunkUploadBytes = 0;
 		uint64_t scenePersistentVoxelUploadBytes = 0;
-		uint64_t scenePersistentVoxelActorUploadBytes = 0;
+		uint64_t scenePersistentVoxelVariantUploadBytes = 0;
 		uint64_t sceneStaticRefreshUploadBytes = 0;
 		uint64_t sceneOtherUploadBytes = 0;
 		uint64_t sceneVertexUploadBytes = 0;
@@ -1357,7 +1357,6 @@ private:
 			uint64_t meshKeyHash = 0;
 			uint64_t materialKeyHash = 0;
 			bool active = true;
-			uint32_t surfaceIndex = UINT32_MAX;
 			uint32_t primitiveOffset = 0;
 			uint32_t primitiveCount = 0;
 			uint32_t indexOffset = 0;
@@ -1378,34 +1377,8 @@ private:
 		uint32_t activeActorCount = 0;
 		uint32_t rebuildCount = 0;
 		nri_scene::SceneDebugStats stats;
-		nri_scene::SceneView sceneView;
 		nri_scene::MaterialBridgeData materialBridge;
 		std::vector<ActorEntry> actors;
-	};
-
-	struct PersistentVoxelActorResource
-	{
-		uint64_t signature = 0;
-		uint64_t meshResourceKey = 0;
-		uint32_t vertexOffset = 0;
-		uint32_t primitiveOffset = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t indexOffset = 0;
-		uint32_t indexCount = 0;
-		uint32_t materialOffset = 0;
-		uint32_t materialCount = 0;
-		uint64_t sourceSerial = 0;
-		uint64_t materialUploadHash = 0;
-		uint32_t tlasReadyFrame = 0;
-		uint32_t vertexCount = 0;
-		uint32_t vertexCapacity = 0;
-		uint32_t indexCapacity = 0;
-		uint32_t primitiveCapacity = 0;
-		uint32_t materialCapacity = 0;
-		bool tlasPublished = false;
-		NRIBufferResource vertexBuffer;
-		NRIBufferResource indexBuffer;
-		NRIAccelerationStructureResource accelerationStructure;
 	};
 
 	struct PersistentVoxelMeshVariantResource
@@ -1876,7 +1849,7 @@ private:
 		bool updateDynamicPerfStats);
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch();
-	bool BuildPersistentVoxelActorAccelerationStructures(const nri_scene::GeometryData& geometry);
+	bool BuildPersistentVoxelVariantAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
@@ -2178,7 +2151,6 @@ private:
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	PersistentVoxelBatch mPersistentVoxelBatch = {};
-	std::unordered_map<uint64_t, PersistentVoxelActorResource> mPersistentVoxelActorResources;
 	std::unordered_map<uint64_t, PersistentVoxelMeshVariantResource> mPersistentVoxelMeshVariantResources;
 	std::unordered_map<uint64_t, PersistentVoxelMaterialVariantResource> mPersistentVoxelMaterialVariantResources;
 	std::unordered_map<uint64_t, PersistentVoxelInstanceRecord> mPersistentVoxelInstances;

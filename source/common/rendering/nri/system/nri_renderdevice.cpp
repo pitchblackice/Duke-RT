@@ -3142,17 +3142,17 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.activeMaterialCount,
 			shell.sceneInstanceCount);
 		Printf(
-			"PERF pt scene composition NRI: frame=%llu inst_static=%u inst_dynamic=%u inst_persistent_voxel=%u voxel_resources=%u voxel_active=%u voxel_prims=%u voxel_mats=%u voxel_prim_min=%u voxel_prim_max=%u\n",
+			"PERF pt scene composition NRI: frame=%llu inst_static=%u inst_dynamic=%u inst_persistent_voxel=%u voxel_mesh_variants=%u voxel_instances=%u voxel_prims=%u voxel_mats=%u voxel_prim_min=%u voxel_prim_max=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneInstanceStaticCount,
 			shell.sceneInstanceDynamicCount,
 			shell.sceneInstancePersistentVoxelCount,
-			shell.persistentVoxelActorResourceCount,
-			shell.persistentVoxelActorActiveCount,
-			shell.persistentVoxelActorPrimitiveCount,
-			shell.persistentVoxelActorMaterialCount,
-			shell.persistentVoxelActorMinPrimitiveCount,
-			shell.persistentVoxelActorMaxPrimitiveCount);
+			shell.persistentVoxelMeshVariantResourceCount,
+			shell.persistentVoxelInstanceActiveCount,
+			shell.persistentVoxelInstancePrimitiveCount,
+			shell.persistentVoxelInstanceMaterialCount,
+			shell.persistentVoxelInstanceMinPrimitiveCount,
+			shell.persistentVoxelInstanceMaxPrimitiveCount);
 		if (shader.valid)
 		{
 			const auto& c = shader.counters;
@@ -3246,12 +3246,12 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.restoreStaticSceneMs,
 			shell.copyFinalMs);
 		Printf(
-			"PERF pt scene select detail NRI: frame=%llu persistent_voxel_as=%.3f persistent_voxel_as_calls=%u persistent_voxel_as_builds=%u persistent_voxel_as_actors=%u persistent_voxel_meshes=%u persistent_voxel_tlas_instances=%u persistent_voxel_transform_updates=%u persistent_voxel_baked_fallback=%u world_tlas=%.3f world_tlas_calls=%u world_tlas_instances=%u scene_data=%.3f scene_data_calls=%u\n",
+			"PERF pt scene select detail NRI: frame=%llu persistent_voxel_as=%.3f persistent_voxel_as_calls=%u persistent_voxel_as_builds=%u persistent_voxel_as_instances=%u persistent_voxel_meshes=%u persistent_voxel_tlas_instances=%u persistent_voxel_transform_updates=%u persistent_voxel_baked_fallback=%u world_tlas=%.3f world_tlas_calls=%u world_tlas_instances=%u scene_data=%.3f scene_data_calls=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.persistentVoxelAsMs,
 			shell.persistentVoxelAsCalls,
 			shell.persistentVoxelAsBuilds,
-			shell.persistentVoxelAsActors,
+			shell.persistentVoxelAsInstances,
 			shell.persistentVoxelSharedMeshResources,
 			shell.persistentVoxelTlasInstances,
 			shell.persistentVoxelInstanceTransformUpdates,
@@ -3318,7 +3318,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				}
 			};
 			Printf(
-				"PERF pt voxel reuse NRI: frame=%llu actor_entries=%u actor_surfaces=%u unique_mesh=%u unique_material=%u local_space=%u baked_transform=%u unknown_space=%u transform_keyed=%u unique_basis=%u invariant_warnings=%u actor_prims=%u dup_vertex_bytes=%llu dup_index_bytes=%llu dup_primitive_bytes=%llu dup_total_bytes=%llu mesh_builds=%u canonical_surface_builds=%u canonical_surface_hits=%u canonical_surface_invalid=%u surface_bakes=%u persistent_uploads=%u persistent_actor_uploads=%u blas_actor_builds=%u blas_unique_mesh_builds=%u shared_mesh_resources=%u tlas_actor_instances=%u transform_only_updates=%u baked_fallback_instances=%u\n",
+				"PERF pt voxel reuse NRI: frame=%llu actor_entries=%u actor_surfaces=%u unique_mesh=%u unique_material=%u local_space=%u baked_transform=%u unknown_space=%u transform_keyed=%u unique_basis=%u invariant_warnings=%u actor_prims=%u dup_vertex_bytes=%llu dup_index_bytes=%llu dup_primitive_bytes=%llu dup_total_bytes=%llu mesh_builds=%u canonical_surface_builds=%u canonical_surface_hits=%u canonical_surface_invalid=%u surface_bakes=%u persistent_uploads=%u persistent_variant_uploads=%u blas_mesh_builds=%u blas_unique_mesh_builds=%u shared_mesh_resources=%u tlas_actor_instances=%u transform_only_updates=%u baked_fallback_instances=%u\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				shell.voxelCacheActorEntries,
 				shell.voxelCacheActorSurfaces,
@@ -3341,7 +3341,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				shell.dynamicCaptureVoxelCanonicalSurfaceInvalid,
 				shell.dynamicCaptureVoxelCacheStores + shell.dynamicCaptureVoxelCacheRebuilds,
 				shell.persistentVoxelOnboardingAdmittedCount,
-				resource.scenePersistentVoxelActorUploadCalls,
+				resource.scenePersistentVoxelVariantUploadCalls,
 				shell.persistentVoxelAsBuilds,
 				shell.persistentVoxelAsUniqueMeshBuilds,
 				shell.persistentVoxelSharedMeshResources,
@@ -3448,7 +3448,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			}
 		}
 		Printf(
-			"PERF pt geometry build detail NRI: frame=%llu dynamic_live=%.3f dynamic_live_prims=%u mirror_extended=%.3f mirror_player=%.3f merged_dynamic=%.3f captured=%.3f persistent_voxel_actor=%.3f persistent_voxel_actor_calls=%u persistent_voxel_actor_prims=%u persistent_voxel_append=%.3f persistent_voxel_rebuild=%.3f persistent_emissive_prune=%.3f persistent_emissive_rebuild=%.3f static_chunk=%.3f static_chunk_calls=%u static_chunk_prims=%u debug_sphere=%.3f mutation_truth=%.3f mutation_truth_calls=%u mutation_rebuild=%.3f mutation_rebuild_calls=%u mutation_material_only=%.3f mutation_material_only_calls=%u mutation_prims=%u spacelink=%.3f spacelink_calls=%u spacelink_prims=%u resident_apply=%.3f resident_apply_calls=%u resident_recover=%.3f resident_recover_calls=%u resident_prims=%u\n",
+			"PERF pt geometry build detail NRI: frame=%llu dynamic_live=%.3f dynamic_live_prims=%u mirror_extended=%.3f mirror_player=%.3f merged_dynamic=%.3f captured=%.3f persistent_voxel_variant=%.3f persistent_voxel_variant_calls=%u persistent_voxel_variant_prims=%u persistent_voxel_append=%.3f persistent_voxel_rebuild=%.3f persistent_emissive_prune=%.3f persistent_emissive_rebuild=%.3f static_chunk=%.3f static_chunk_calls=%u static_chunk_prims=%u debug_sphere=%.3f mutation_truth=%.3f mutation_truth_calls=%u mutation_rebuild=%.3f mutation_rebuild_calls=%u mutation_material_only=%.3f mutation_material_only_calls=%u mutation_prims=%u spacelink=%.3f spacelink_calls=%u spacelink_prims=%u resident_apply=%.3f resident_apply_calls=%u resident_recover=%.3f resident_recover_calls=%u resident_prims=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.geometryBuildDynamicLiveMs,
 			shell.geometryBuildDynamicLivePrimitives,
@@ -3456,9 +3456,9 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.geometryBuildMirrorPlayerMs,
 			shell.geometryBuildMergedDynamicMs,
 			shell.geometryBuildCapturedMs,
-			shell.geometryBuildPersistentVoxelActorMs,
-			shell.geometryBuildPersistentVoxelActorCalls,
-			shell.geometryBuildPersistentVoxelActorPrimitives,
+			shell.geometryBuildPersistentVoxelVariantMs,
+			shell.geometryBuildPersistentVoxelVariantCalls,
+			shell.geometryBuildPersistentVoxelVariantPrimitives,
 			shell.geometryBuildPersistentVoxelAppendMs,
 			shell.geometryBuildPersistentVoxelRebuildMs,
 			shell.geometryBuildPersistentEmissivePruneMs,
@@ -4010,7 +4010,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			resource.emissiveUploadCalls,
 			(unsigned long long)resource.emissiveUploadBytes);
 		Printf(
-			"PERF pt resource scene detail NRI: frame=%llu dynamic=%u/%llu resident_chunk=%u/%llu persistent_voxel=%u/%llu persistent_actor=%u/%llu static_refresh=%u/%llu other=%u/%llu vertex=%llu index=%llu primitive=%llu material=%llu\n",
+			"PERF pt resource scene detail NRI: frame=%llu dynamic=%u/%llu resident_chunk=%u/%llu persistent_voxel=%u/%llu persistent_variant=%u/%llu static_refresh=%u/%llu other=%u/%llu vertex=%llu index=%llu primitive=%llu material=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			resource.sceneDynamicUploadCalls,
 			(unsigned long long)resource.sceneDynamicUploadBytes,
@@ -4018,8 +4018,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)resource.sceneResidentChunkUploadBytes,
 			resource.scenePersistentVoxelUploadCalls,
 			(unsigned long long)resource.scenePersistentVoxelUploadBytes,
-			resource.scenePersistentVoxelActorUploadCalls,
-			(unsigned long long)resource.scenePersistentVoxelActorUploadBytes,
+			resource.scenePersistentVoxelVariantUploadCalls,
+			(unsigned long long)resource.scenePersistentVoxelVariantUploadBytes,
 			resource.sceneStaticRefreshUploadCalls,
 			(unsigned long long)resource.sceneStaticRefreshUploadBytes,
 			resource.sceneOtherUploadCalls,
