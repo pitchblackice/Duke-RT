@@ -18,6 +18,7 @@ void ResetAverageTextureColorCache();
 void Copy3(const float* source, float* destination);
 
 static constexpr uint32_t VoxelDuplicateVariantTraceCount = 8;
+static constexpr uint32_t DynamicVoxelEscapeTraceCount = 8;
 
 enum class VoxelMeshBakeSpace : uint8_t
 {
@@ -40,6 +41,45 @@ struct VoxelDuplicateVariantTraceEntry
 	uint32_t primitiveCountPerActor = 0;
 	uint32_t totalDuplicatedPrimitives = 0;
 	uint64_t duplicatedBytes = 0;
+};
+
+enum class DynamicVoxelEscapeReason : uint8_t
+{
+	Unknown = 0,
+	VariantPending,
+	MaterialPending,
+	ActorBudget,
+	BuildBudget,
+	UnsupportedTransform,
+	NonLocalSpace,
+	CameraOrWeaponSpecial,
+	LifecycleTransient,
+	NotCacheable,
+	ValidationQuarantine,
+	FallbackDisabled,
+	MissingSurface,
+};
+
+const char* GetDynamicVoxelEscapeReasonName(DynamicVoxelEscapeReason reason);
+
+struct DynamicVoxelEscapeTraceEntry
+{
+	bool valid = false;
+	DynamicVoxelEscapeReason reason = DynamicVoxelEscapeReason::Unknown;
+	int32_t actorIndex = -1;
+	int32_t statnum = -1;
+	int32_t sourcePicnum = -1;
+	int32_t resolvedVoxelIndex = -1;
+	uint64_t meshVariantHash = 0;
+	uint64_t materialVariantHash = 0;
+	uint32_t primitiveCount = 0;
+	uint64_t vertexBytes = 0;
+	uint64_t indexBytes = 0;
+	uint64_t primitiveBytes = 0;
+	uint64_t materialBytes = 0;
+	uint64_t totalBytes = 0;
+	bool persistentReady = false;
+	bool hasCachedSurface = false;
 };
 
 enum class SurfaceSourceType : uint32_t
@@ -167,6 +207,17 @@ struct SceneDebugStats
 	uint64_t voxelCacheDuplicatedTotalBytes = 0;
 	unsigned int voxelCacheDuplicateTopCount = 0;
 	std::array<VoxelDuplicateVariantTraceEntry, VoxelDuplicateVariantTraceCount> voxelCacheDuplicateTopEntries = {};
+	unsigned int dynamicVoxelEscapeActorCount = 0;
+	unsigned int dynamicVoxelEscapeEligibleActorCount = 0;
+	unsigned int dynamicVoxelEscapeForcedActorCount = 0;
+	unsigned int dynamicVoxelEscapePrimitiveCount = 0;
+	uint64_t dynamicVoxelEscapeVertexBytes = 0;
+	uint64_t dynamicVoxelEscapeIndexBytes = 0;
+	uint64_t dynamicVoxelEscapePrimitiveBytes = 0;
+	uint64_t dynamicVoxelEscapeMaterialBytes = 0;
+	uint64_t dynamicVoxelEscapeTotalBytes = 0;
+	unsigned int dynamicVoxelEscapeTopCount = 0;
+	std::array<DynamicVoxelEscapeTraceEntry, DynamicVoxelEscapeTraceCount> dynamicVoxelEscapeTopEntries = {};
 };
 
 struct SkyPerfStats

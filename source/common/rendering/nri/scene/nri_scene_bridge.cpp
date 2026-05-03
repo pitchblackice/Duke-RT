@@ -1970,6 +1970,38 @@ namespace
 		}
 	}
 
+	DynamicVoxelEscapeReason GetDynamicVoxelEscapeReasonForPending(VoxelActorPendingReason reason)
+	{
+		switch (reason)
+		{
+		case VoxelActorPendingReason::ActorBudget: return DynamicVoxelEscapeReason::ActorBudget;
+		case VoxelActorPendingReason::MeshDeferred:
+		case VoxelActorPendingReason::TriangleBudget: return DynamicVoxelEscapeReason::BuildBudget;
+		case VoxelActorPendingReason::SurfaceBuildFailed: return DynamicVoxelEscapeReason::MissingSurface;
+		case VoxelActorPendingReason::ActorNotLive: return DynamicVoxelEscapeReason::LifecycleTransient;
+		default: return DynamicVoxelEscapeReason::VariantPending;
+		}
+	}
+
+	bool IsDynamicVoxelEscapeEligibleForPersistent(DynamicVoxelEscapeReason reason)
+	{
+		switch (reason)
+		{
+		case DynamicVoxelEscapeReason::CameraOrWeaponSpecial:
+		case DynamicVoxelEscapeReason::LifecycleTransient:
+		case DynamicVoxelEscapeReason::ValidationQuarantine:
+			return false;
+		default:
+			return true;
+		}
+	}
+
+	bool IsDynamicVoxelEscapeForcedDynamic(DynamicVoxelEscapeReason reason)
+	{
+		return reason == DynamicVoxelEscapeReason::CameraOrWeaponSpecial ||
+			reason == DynamicVoxelEscapeReason::LifecycleTransient;
+	}
+
 	const char* GetVoxelMeshBakeSpaceName(VoxelMeshBakeSpace bakeSpace)
 	{
 		switch (bakeSpace)
@@ -2590,6 +2622,96 @@ namespace
 	uint64_t EstimateSurfacePrimitiveBytes(uint32_t primitiveCount)
 	{
 		return (uint64_t)primitiveCount * (uint64_t)sizeof(PrimitiveData);
+	}
+
+	uint64_t EstimateSurfaceMaterialBytes(const SurfaceRef& surface)
+	{
+		return surface.vertices.empty() ? 0ull : (uint64_t)sizeof(MaterialRef);
+	}
+
+	void InsertDynamicVoxelEscapeTopEntry(SceneDebugStats& stats, const DynamicVoxelEscapeTraceEntry& entry)
+	{
+		if (!entry.valid)
+		{
+			return;
+		}
+
+		size_t insertIndex = DynamicVoxelEscapeTraceCount;
+		for (size_t i = 0; i < DynamicVoxelEscapeTraceCount; ++i)
+		{
+			const DynamicVoxelEscapeTraceEntry& current = stats.dynamicVoxelEscapeTopEntries[i];
+			if (!current.valid ||
+				entry.totalBytes > current.totalBytes ||
+				(entry.totalBytes == current.totalBytes && entry.primitiveCount > current.primitiveCount))
+			{
+				insertIndex = i;
+				break;
+			}
+		}
+		if (insertIndex >= DynamicVoxelEscapeTraceCount)
+		{
+			return;
+		}
+
+		for (size_t i = DynamicVoxelEscapeTraceCount - 1; i > insertIndex; --i)
+		{
+			stats.dynamicVoxelEscapeTopEntries[i] = stats.dynamicVoxelEscapeTopEntries[i - 1];
+		}
+		stats.dynamicVoxelEscapeTopEntries[insertIndex] = entry;
+		stats.dynamicVoxelEscapeTopCount = (unsigned int)(std::min<size_t>)(DynamicVoxelEscapeTraceCount, stats.dynamicVoxelEscapeTopCount + 1u);
+	}
+
+	void RecordDynamicVoxelEscape(
+		SceneDebugStats& stats,
+		const HWSprite& sprite,
+		const VoxelActorCacheLookup& lookup,
+		const SurfaceRef& surface,
+		DynamicVoxelEscapeReason reason)
+	{
+		const uint32_t primitiveCount = CountSurfacePrimitives(surface);
+		const uint64_t vertexBytes = EstimateSurfaceVertexBytes(surface);
+		const uint64_t indexBytes = EstimateSurfaceIndexBytes(surface);
+		const uint64_t primitiveBytes = EstimateSurfacePrimitiveBytes(primitiveCount);
+		const uint64_t materialBytes = EstimateSurfaceMaterialBytes(surface);
+		const uint64_t totalBytes = vertexBytes + indexBytes + primitiveBytes + materialBytes;
+
+		stats.dynamicVoxelEscapeActorCount++;
+		stats.dynamicVoxelEscapePrimitiveCount += primitiveCount;
+		stats.dynamicVoxelEscapeVertexBytes += vertexBytes;
+		stats.dynamicVoxelEscapeIndexBytes += indexBytes;
+		stats.dynamicVoxelEscapePrimitiveBytes += primitiveBytes;
+		stats.dynamicVoxelEscapeMaterialBytes += materialBytes;
+		stats.dynamicVoxelEscapeTotalBytes += totalBytes;
+		if (IsDynamicVoxelEscapeEligibleForPersistent(reason))
+		{
+			stats.dynamicVoxelEscapeEligibleActorCount++;
+		}
+		if (IsDynamicVoxelEscapeForcedDynamic(reason))
+		{
+			stats.dynamicVoxelEscapeForcedActorCount++;
+		}
+
+		DynamicVoxelEscapeTraceEntry entry = {};
+		entry.valid = true;
+		entry.reason = reason;
+		entry.actorIndex =
+			lookup.actorIndex >= 0 ? lookup.actorIndex :
+			sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr ? sprite.Sprite->ownerActor->GetIndex() :
+			-1;
+		entry.statnum = sprite.Sprite != nullptr ? sprite.Sprite->statnum : -1;
+		entry.sourcePicnum = sprite.Sprite != nullptr ? sprite.Sprite->picnum : -1;
+		entry.resolvedVoxelIndex = lookup.resolvedVoxelIndex;
+		entry.meshVariantHash = lookup.meshVariantHash;
+		entry.materialVariantHash = lookup.materialVariantHash;
+		entry.primitiveCount = primitiveCount;
+		entry.vertexBytes = vertexBytes;
+		entry.indexBytes = indexBytes;
+		entry.primitiveBytes = primitiveBytes;
+		entry.materialBytes = materialBytes;
+		entry.totalBytes = totalBytes;
+		entry.persistentReady = lookup.entry != nullptr && lookup.entry->persistentReady;
+		entry.hasCachedSurface = lookup.entry != nullptr && lookup.entry->hasSurface;
+		InsertDynamicVoxelEscapeTopEntry(stats, entry);
 	}
 
 	struct VoxelDuplicateVariantAggregate
@@ -3265,11 +3387,23 @@ namespace
 			if (!wasPersistentReady &&
 				(hadSurface || exactPrimitiveCount <= kTransientVoxelLiveSurfacePrimitiveLimit))
 			{
+				const VoxelActorPendingReason pendingReason =
+					cacheLookup.entry != nullptr ? (VoxelActorPendingReason)cacheLookup.entry->pendingReason : VoxelActorPendingReason::None;
+				const DynamicVoxelEscapeReason escapeReason =
+					cacheLookup.identityKey == 0 ? DynamicVoxelEscapeReason::NotCacheable :
+					GetDynamicVoxelEscapeReasonForPending(pendingReason);
+				RecordDynamicVoxelEscape(stats, sprite, cacheLookup, exactSurface, escapeReason);
 				outSprites.push_back(std::move(exactSurface));
 			}
 			return true;
 		}
 
+		const DynamicVoxelEscapeReason escapeReason =
+			forceTransientVoxel ? DynamicVoxelEscapeReason::CameraOrWeaponSpecial :
+			captureMode == DynamicVoxelCaptureMode::Transient ? DynamicVoxelEscapeReason::LifecycleTransient :
+			cacheLookup.identityKey == 0 ? DynamicVoxelEscapeReason::NotCacheable :
+			DynamicVoxelEscapeReason::Unknown;
+		RecordDynamicVoxelEscape(stats, sprite, cacheLookup, exactSurface, escapeReason);
 		outSprites.push_back(std::move(exactSurface));
 		return true;
 	}
@@ -3378,6 +3512,26 @@ namespace
 
 namespace nri_scene
 {
+const char* GetDynamicVoxelEscapeReasonName(DynamicVoxelEscapeReason reason)
+{
+	switch (reason)
+	{
+	case DynamicVoxelEscapeReason::VariantPending: return "variant-pending";
+	case DynamicVoxelEscapeReason::MaterialPending: return "material-pending";
+	case DynamicVoxelEscapeReason::ActorBudget: return "actor-budget";
+	case DynamicVoxelEscapeReason::BuildBudget: return "build-budget";
+	case DynamicVoxelEscapeReason::UnsupportedTransform: return "unsupported-transform";
+	case DynamicVoxelEscapeReason::NonLocalSpace: return "non-local-space";
+	case DynamicVoxelEscapeReason::CameraOrWeaponSpecial: return "camera-or-weapon-special";
+	case DynamicVoxelEscapeReason::LifecycleTransient: return "lifecycle-transient";
+	case DynamicVoxelEscapeReason::NotCacheable: return "not-cacheable";
+	case DynamicVoxelEscapeReason::ValidationQuarantine: return "validation-quarantine";
+	case DynamicVoxelEscapeReason::FallbackDisabled: return "fallback-disabled";
+	case DynamicVoxelEscapeReason::MissingSurface: return "missing-surface";
+	default: return "unknown";
+	}
+}
+
 void ResetAverageTextureColorCache()
 {
 	gFrameLocalAverageTextureColorCache.clear();
