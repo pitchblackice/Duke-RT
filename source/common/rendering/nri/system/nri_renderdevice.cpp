@@ -3246,12 +3246,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.restoreStaticSceneMs,
 			shell.copyFinalMs);
 		Printf(
-			"PERF pt scene select detail NRI: frame=%llu persistent_voxel_as=%.3f persistent_voxel_as_calls=%u persistent_voxel_as_builds=%u persistent_voxel_as_actors=%u world_tlas=%.3f world_tlas_calls=%u world_tlas_instances=%u scene_data=%.3f scene_data_calls=%u\n",
+			"PERF pt scene select detail NRI: frame=%llu persistent_voxel_as=%.3f persistent_voxel_as_calls=%u persistent_voxel_as_builds=%u persistent_voxel_as_actors=%u persistent_voxel_meshes=%u persistent_voxel_tlas_instances=%u persistent_voxel_transform_updates=%u persistent_voxel_baked_fallback=%u world_tlas=%.3f world_tlas_calls=%u world_tlas_instances=%u scene_data=%.3f scene_data_calls=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.persistentVoxelAsMs,
 			shell.persistentVoxelAsCalls,
 			shell.persistentVoxelAsBuilds,
 			shell.persistentVoxelAsActors,
+			shell.persistentVoxelSharedMeshResources,
+			shell.persistentVoxelTlasInstances,
+			shell.persistentVoxelInstanceTransformUpdates,
+			shell.persistentVoxelBakedFallbackInstances,
 			shell.worldTlasMs,
 			shell.worldTlasBuildCalls,
 			shell.worldTlasInstanceCount,
@@ -3314,7 +3318,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				}
 			};
 			Printf(
-				"PERF pt voxel reuse NRI: frame=%llu actor_entries=%u actor_surfaces=%u unique_mesh=%u unique_material=%u local_space=%u baked_transform=%u unknown_space=%u transform_keyed=%u unique_basis=%u invariant_warnings=%u actor_prims=%u dup_vertex_bytes=%llu dup_index_bytes=%llu dup_primitive_bytes=%llu dup_total_bytes=%llu mesh_builds=%u canonical_surface_builds=%u canonical_surface_hits=%u canonical_surface_invalid=%u surface_bakes=%u persistent_uploads=%u persistent_actor_uploads=%u blas_actor_builds=%u blas_unique_mesh_builds=%u\n",
+				"PERF pt voxel reuse NRI: frame=%llu actor_entries=%u actor_surfaces=%u unique_mesh=%u unique_material=%u local_space=%u baked_transform=%u unknown_space=%u transform_keyed=%u unique_basis=%u invariant_warnings=%u actor_prims=%u dup_vertex_bytes=%llu dup_index_bytes=%llu dup_primitive_bytes=%llu dup_total_bytes=%llu mesh_builds=%u canonical_surface_builds=%u canonical_surface_hits=%u canonical_surface_invalid=%u surface_bakes=%u persistent_uploads=%u persistent_actor_uploads=%u blas_actor_builds=%u blas_unique_mesh_builds=%u shared_mesh_resources=%u tlas_actor_instances=%u transform_only_updates=%u baked_fallback_instances=%u\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				shell.voxelCacheActorEntries,
 				shell.voxelCacheActorSurfaces,
@@ -3339,7 +3343,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				shell.persistentVoxelOnboardingAdmittedCount,
 				resource.scenePersistentVoxelActorUploadCalls,
 				shell.persistentVoxelAsBuilds,
-				shell.persistentVoxelAsUniqueMeshBuilds);
+				shell.persistentVoxelAsUniqueMeshBuilds,
+				shell.persistentVoxelSharedMeshResources,
+				shell.persistentVoxelTlasInstances,
+				shell.persistentVoxelInstanceTransformUpdates,
+				shell.persistentVoxelBakedFallbackInstances);
 			for (uint32_t duplicateIndex = 0; duplicateIndex < shell.voxelCacheDuplicateTopCount; ++duplicateIndex)
 			{
 				const auto& duplicate = shell.voxelCacheDuplicateTopEntries[duplicateIndex];

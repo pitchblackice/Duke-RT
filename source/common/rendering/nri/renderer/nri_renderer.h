@@ -602,6 +602,10 @@ public:
 		uint32_t persistentVoxelAsBuilds = 0;
 		uint32_t persistentVoxelAsUniqueMeshBuilds = 0;
 		uint32_t persistentVoxelAsActors = 0;
+		uint32_t persistentVoxelSharedMeshResources = 0;
+		uint32_t persistentVoxelTlasInstances = 0;
+		uint32_t persistentVoxelInstanceTransformUpdates = 0;
+		uint32_t persistentVoxelBakedFallbackInstances = 0;
 		uint32_t worldTlasBuildCalls = 0;
 		uint32_t worldTlasInstanceCount = 0;
 		uint32_t sceneDataSetCalls = 0;
@@ -1342,6 +1346,7 @@ private:
 			uint32_t materialOffset = 0;
 			uint32_t materialCount = 0;
 			std::array<float, 12> instanceTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+			std::array<float, 12> previousInstanceTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 			nri_scene::MaterialBridgeData materialBridge;
 			std::vector<SceneLightSystem::SurfaceRecord> lightRecords;
 		};
@@ -1682,6 +1687,18 @@ private:
 		uint32_t dataSource = 0;
 		uint32_t reserved0 = 0;
 		uint32_t reserved1 = 0;
+		float currentTransform[12] =
+		{
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 1.0f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f
+		};
+		float previousTransform[12] =
+		{
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 1.0f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f
+		};
 	};
 
 	struct StaticMapSceneResources

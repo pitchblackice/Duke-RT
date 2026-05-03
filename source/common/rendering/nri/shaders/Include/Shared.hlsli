@@ -85,6 +85,12 @@ struct SceneInstanceData
 	uint dataSource;
 	uint reserved0;
 	uint reserved1;
+	float4 currentTransformRow0;
+	float4 currentTransformRow1;
+	float4 currentTransformRow2;
+	float4 previousTransformRow0;
+	float4 previousTransformRow1;
+	float4 previousTransformRow2;
 };
 
 struct PortalData

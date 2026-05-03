@@ -9,6 +9,7 @@ struct HitData
 	uint dataSource;
 	uint primitiveIndex;
 	uint portalIndex;
+	uint instanceId;
 	float2 barycentrics;
 	float distance;
 	float3 position;
@@ -171,12 +172,36 @@ HitData MakeEmptyHitData()
 	hitData.primitiveIndex = 0xffffffffu;
 	hitData.materialIndex = 0xffffffffu;
 	hitData.portalIndex = 0xffffffffu;
+	hitData.instanceId = 0xffffffffu;
 	return hitData;
 }
 
 SceneInstanceData GetSceneInstanceData(uint instanceId)
 {
 	return gSceneInstances[min(instanceId, max(gTraceConstants.SceneInstanceCount, 1u) - 1u)];
+}
+
+float3 TransformSceneInstancePoint(SceneInstanceData instanceData, float3 localPosition, bool previous)
+{
+	const float4 row0 = previous ? instanceData.previousTransformRow0 : instanceData.currentTransformRow0;
+	const float4 row1 = previous ? instanceData.previousTransformRow1 : instanceData.currentTransformRow1;
+	const float4 row2 = previous ? instanceData.previousTransformRow2 : instanceData.currentTransformRow2;
+	const float4 p = float4(localPosition, 1.0);
+	return float3(dot(row0, p), dot(row1, p), dot(row2, p));
+}
+
+float3 TransformSceneInstanceVector(SceneInstanceData instanceData, float3 localVector, bool previous)
+{
+	const float4 row0 = previous ? instanceData.previousTransformRow0 : instanceData.currentTransformRow0;
+	const float4 row1 = previous ? instanceData.previousTransformRow1 : instanceData.currentTransformRow1;
+	const float4 row2 = previous ? instanceData.previousTransformRow2 : instanceData.currentTransformRow2;
+	return float3(dot(row0.xyz, localVector), dot(row1.xyz, localVector), dot(row2.xyz, localVector));
+}
+
+float3 TransformSceneInstanceNormal(SceneInstanceData instanceData, float3 localNormal, bool previous)
+{
+	const float3 transformed = TransformSceneInstanceVector(instanceData, localNormal, previous);
+	return dot(transformed, transformed) > 1e-8 ? normalize(transformed) : normalize(localNormal);
 }
 
 uint GetPrimitiveCount(uint dataSource)
@@ -387,7 +412,12 @@ float3 ResolveHitVertexPosition(HitData hit, bool previous)
 	const float3 p0 = previous ? v0.prevPosition : v0.position;
 	const float3 p1 = previous ? v1.prevPosition : v1.position;
 	const float3 p2 = previous ? v2.prevPosition : v2.position;
-	return p0 * weights.x + p1 * weights.y + p2 * weights.z;
+	const float3 localPosition = p0 * weights.x + p1 * weights.y + p2 * weights.z;
+	if (hit.instanceId == 0xffffffffu)
+	{
+		return localPosition;
+	}
+	return TransformSceneInstancePoint(GetSceneInstanceData(hit.instanceId), localPosition, previous);
 }
 
 float3 GeneratePrimaryRay(uint2 pixelPos)
@@ -890,7 +920,8 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			continue;
 		}
 
-		if (ShouldIgnoreOneWayHit(materialIndex, instanceData.dataSource, primitive.normal, direction))
+		const float3 geometricNormal = TransformSceneInstanceNormal(instanceData, primitive.normal, false);
+		if (ShouldIgnoreOneWayHit(materialIndex, instanceData.dataSource, geometricNormal, direction))
 		{
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
@@ -928,11 +959,12 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		hitData.dataSource = instanceData.dataSource;
 		hitData.primitiveIndex = primitiveIndex;
 		hitData.portalIndex = primitive.portalIndex;
+		hitData.instanceId = committedInstanceId;
 		hitData.barycentrics = bary;
 		hitData.distance = hitDistance;
 		hitData.position = startOrigin + direction * hitDistance;
 		hitData.uv = uv;
-		hitData.normal = ResolveHitNormal(materialIndex, instanceData.dataSource, primitiveIndex, primitive.normal, uv);
+		hitData.normal = TransformSceneInstanceNormal(instanceData, ResolveHitNormal(materialIndex, instanceData.dataSource, primitiveIndex, primitive.normal, uv), false);
 		hitData.materialIndex = materialIndex;
 		TraceShaderStatSource(TRACE_STAT_ACCEPT_STATIC, TRACE_STAT_ACCEPT_DYNAMIC, TRACE_STAT_ACCEPT_VOXEL, instanceData.dataSource);
 		TraceShaderStatInstance(TRACE_STAT_INSTANCE_ACCEPTED_BASE, TRACE_STAT_INSTANCE_ACCEPTED_OVERFLOW, committedInstanceId);

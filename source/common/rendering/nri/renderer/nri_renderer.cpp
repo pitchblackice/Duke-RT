@@ -8287,6 +8287,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					if (hasPersistentVoxelOverlay)
 					{
 						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectInstanceHandlesMs);
+						std::unordered_set<uint64_t> persistentVoxelTlasMeshResources;
+						persistentVoxelTlasMeshResources.reserve(mPersistentVoxelBatch.actors.size());
 						for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 						{
 							if (!actor.active)
@@ -8326,13 +8328,26 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							persistentVoxelInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 							persistentVoxelInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*meshResourceIt->second.accelerationStructure.accelerationStructure);
 							instances.push_back(persistentVoxelInstance);
-							sceneInstances.push_back({
-								actor.primitiveOffset,
-								NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL,
-								(bool)nri_ptvoxelsharedvariants ? actor.materialOffset : 0u,
-								(bool)nri_ptvoxelsharedvariants ? actor.materialCount : UINT32_MAX });
+							SceneInstanceData sceneInstance = {};
+							sceneInstance.primitiveOffset = actor.primitiveOffset;
+							sceneInstance.dataSource = NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL;
+							sceneInstance.reserved0 = (bool)nri_ptvoxelsharedvariants ? actor.materialOffset : 0u;
+							sceneInstance.reserved1 = (bool)nri_ptvoxelsharedvariants ? actor.materialCount : UINT32_MAX;
+							for (uint32_t i = 0; i < 12; ++i)
+							{
+								sceneInstance.currentTransform[i] = actor.instanceTransform[i];
+								sceneInstance.previousTransform[i] = actor.previousInstanceTransform[i];
+							}
+							sceneInstances.push_back(sceneInstance);
 							meshResourceIt->second.tlasPublished = true;
+							persistentVoxelTlasMeshResources.insert(actor.meshResourceKey);
+							mLastPerfShellTraceStats.persistentVoxelTlasInstances++;
+							if (meshResourceIt->second.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace)
+							{
+								mLastPerfShellTraceStats.persistentVoxelBakedFallbackInstances++;
+							}
 						}
+						mLastPerfShellTraceStats.persistentVoxelSharedMeshResources = (uint32_t)persistentVoxelTlasMeshResources.size();
 					}
 
 					if (liveOverlayPrimitiveCount > 0 && mDynamicBottomLevelAS.accelerationStructure != nullptr)
@@ -12274,6 +12289,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.materialKeyHash = cacheEntry.materialKeyHash;
 			actor.active = true;
 			fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResource, actor.instanceTransform);
+			actor.previousInstanceTransform = actor.instanceTransform;
 			actor.primitiveOffset = resource.primitiveOffset;
 			actor.primitiveCount = primitiveCount;
 			actor.indexOffset = resource.indexOffset;
@@ -12291,6 +12307,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
 			if (instanceIt != mPersistentVoxelInstances.end())
 			{
+				actor.previousInstanceTransform = instanceIt->second.previousTransform;
 				instanceIt->second.meshResourceKey = meshResourceKey;
 				instanceIt->second.currentTransform = actor.instanceTransform;
 				instanceIt->second.pending = false;
@@ -12638,6 +12655,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.materialKeyHash = cacheEntry.materialKeyHash;
 		actor.active = true;
 		fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResource, actor.instanceTransform);
+		actor.previousInstanceTransform = actor.instanceTransform;
 		actor.primitiveOffset = resource.primitiveOffset;
 		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
 		actor.indexOffset = resource.indexOffset;
@@ -12655,6 +12673,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
 		if (instanceIt != mPersistentVoxelInstances.end())
 		{
+			actor.previousInstanceTransform = instanceIt->second.previousTransform;
 			instanceIt->second.meshResourceKey = meshResourceKey;
 			instanceIt->second.currentTransform = actor.instanceTransform;
 			instanceIt->second.pending = false;
@@ -12888,10 +12907,12 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
 					if (instanceIt != mPersistentVoxelInstances.end())
 					{
+						actor.previousInstanceTransform = instanceIt->second.previousTransform;
 						instanceIt->second.meshResourceKey = actor.meshResourceKey;
 						instanceIt->second.currentTransform = actor.instanceTransform;
 						instanceIt->second.pending = false;
 					}
+					mLastPerfShellTraceStats.persistentVoxelInstanceTransformUpdates++;
 					updatedActorCount++;
 					continue;
 				}
@@ -12933,6 +12954,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
 			if (instanceIt != mPersistentVoxelInstances.end())
 			{
+				actor.previousInstanceTransform = instanceIt->second.previousTransform;
 				instanceIt->second.meshResourceKey = actor.meshResourceKey;
 				instanceIt->second.currentTransform = actor.instanceTransform;
 				instanceIt->second.pending = false;
