@@ -3632,8 +3632,14 @@ bool PrecacheVoxelModelCpuMesh(FVoxelModel* model, VoxelMeshPrecacheStats* stats
 	if (!r_voxels || model == nullptr)
 	{
 		delta.meshSkipped = 1;
+		if ((int)nri_ptloadingtrace >= 2)
+		{
+			Printf("NRI PT loading voxel mesh: event=skip source=model model=%p reason=%s\n",
+				model,
+				r_voxels ? "null-model" : "voxels-disabled");
+		}
 		RecordVoxelMeshPrecacheStats(delta, stats);
-		return false;
+		return true;
 	}
 
 	auto found = gVoxelMeshCache.find(model);
@@ -3700,6 +3706,19 @@ bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats
 	VoxelMeshPrecacheStats delta = {};
 	delta.textureCandidates = 1;
 
+	if (!r_voxels || !texid.isValid())
+	{
+		delta.meshSkipped = 1;
+		if ((int)nri_ptloadingtrace >= 2)
+		{
+			Printf("NRI PT loading voxel mesh: event=skip source=texture tex=%d voxel=-1 reason=%s\n",
+				texid.isValid() ? texid.GetIndex() : -1,
+				r_voxels ? "invalid-texture" : "voxels-disabled");
+		}
+		RecordVoxelMeshPrecacheStats(delta, stats);
+		return true;
+	}
+
 	int voxelIndex = -1;
 	FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
 	if (model == nullptr)
@@ -3712,7 +3731,7 @@ bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats
 				voxelIndex);
 		}
 		RecordVoxelMeshPrecacheStats(delta, stats);
-		return false;
+		return true;
 	}
 
 	RecordVoxelMeshPrecacheStats(delta, stats);
@@ -3824,17 +3843,11 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 
 void PrintAndResetLoadingWarmupStats(const char* phase)
 {
-	if ((int)nri_ptloadingtrace >= 1 &&
-		(gVoxelLoadingWarmupStats.textureCandidates != 0 ||
-		 gVoxelLoadingWarmupStats.actorCandidates != 0 ||
-		 gVoxelLoadingWarmupStats.modelCandidates != 0 ||
-		 gVoxelLoadingWarmupStats.meshVariantCandidates != 0 ||
-		 gVoxelLoadingWarmupStats.meshHits != 0 ||
-		 gVoxelLoadingWarmupStats.meshBuilds != 0 ||
-		 gVoxelLoadingWarmupStats.meshVariantBuilds != 0))
+	if ((int)nri_ptloadingtrace >= 1)
 	{
-		Printf("NRI PT loading warmup: phase=%s textures=%u actors=%u models=%u mesh_variants=%u mesh_hits=%u mesh_builds=%u mesh_invalid=%u mesh_skipped=%u variant_hits=%u variant_builds=%u variant_invalid=%u vertices=%u indices=%u tris=%u variant_tris=%u build_ms=%.3f\n",
+		Printf("NRI PT loading warmup: phase=%s r_voxels=%u textures=%u actors=%u models=%u mesh_variants=%u mesh_hits=%u mesh_builds=%u mesh_invalid=%u mesh_skipped=%u variant_hits=%u variant_builds=%u variant_invalid=%u vertices=%u indices=%u tris=%u variant_tris=%u build_ms=%.3f\n",
 			phase != nullptr ? phase : "unknown",
+			r_voxels ? 1u : 0u,
 			gVoxelLoadingWarmupStats.textureCandidates,
 			gVoxelLoadingWarmupStats.actorCandidates,
 			gVoxelLoadingWarmupStats.modelCandidates,
