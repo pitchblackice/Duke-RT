@@ -9125,6 +9125,11 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		LogFallback("PT preload persistent voxel resource admission failed.");
 		return true;
 	}
+	if (!PreloadMaterialResources())
+	{
+		LogFallback("PT preload material warmup failed.");
+		return true;
+	}
 
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	emissiveSamplingContext.staticGeometry = &mStaticMapScene.geometry;
@@ -11887,6 +11892,116 @@ bool NRIRenderer::PreloadPersistentVoxelResources()
 			DurationMs(start, end));
 	}
 	return ready;
+}
+
+bool NRIRenderer::PreloadMaterialResources()
+{
+	struct MaterialWarmupStats
+	{
+		uint32_t textureRequests = 0;
+		uint32_t textureHits = 0;
+		uint32_t textureMisses = 0;
+		uint32_t textureInserts = 0;
+		uint64_t estimatedBytes = 0;
+		double realizeMs = 0.0;
+	};
+
+	auto estimateTextureUploadBytes = [](const nri_scene::TextureUpload& upload) -> uint64_t
+	{
+		if (upload.width == 0 || upload.height == 0)
+		{
+			return 0;
+		}
+		const uint64_t bytesPerPixel = upload.indexed ? 1ull : 4ull;
+		return (uint64_t)upload.width * (uint64_t)upload.height * bytesPerPixel;
+	};
+
+	auto isTextureCached = [&](const nri_scene::TextureUpload& upload) -> bool
+	{
+		return std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry)
+		{
+			return entry.key == upload.key;
+		}) != mTextureCache.end();
+	};
+
+	auto warmMaterialTextures = [&](const nri_scene::MaterialBridgeData& materials, MaterialWarmupStats& stats) -> bool
+	{
+		for (const nri_scene::TextureUpload& upload : materials.textures)
+		{
+			if (upload.width == 0 || upload.height == 0)
+			{
+				continue;
+			}
+
+			stats.textureRequests++;
+			const bool wasCached = isTextureCached(upload);
+			if (wasCached)
+			{
+				stats.textureHits++;
+				continue;
+			}
+
+			stats.textureMisses++;
+			stats.estimatedBytes += estimateTextureUploadBytes(upload);
+			double realizeMs = 0.0;
+			if (!EnsureSceneTextureCacheEntry(upload, &realizeMs))
+			{
+				return false;
+			}
+			stats.realizeMs += realizeMs;
+			if (isTextureCached(upload))
+			{
+				stats.textureInserts++;
+			}
+		}
+		return true;
+	};
+
+	const auto start = std::chrono::steady_clock::now();
+	MaterialWarmupStats staticStats = {};
+	MaterialWarmupStats voxelStats = {};
+	const bool hasStaticMaterials = mStaticMapScene.valid && !mStaticMapScene.materialBridge.materials.empty();
+	const bool hasVoxelMaterials = mPersistentVoxelBatch.valid && !mPersistentVoxelBatch.materialBridge.materials.empty();
+	bool paletteReady = true;
+	if (hasStaticMaterials)
+	{
+		paletteReady = EnsurePaletteTexture(mStaticMapScene.materialBridge);
+		if (!paletteReady || !warmMaterialTextures(mStaticMapScene.materialBridge, staticStats))
+		{
+			return false;
+		}
+	}
+	if (hasVoxelMaterials)
+	{
+		paletteReady = paletteReady && EnsurePaletteTexture(mPersistentVoxelBatch.materialBridge);
+		if (!paletteReady || !warmMaterialTextures(mPersistentVoxelBatch.materialBridge, voxelStats))
+		{
+			return false;
+		}
+	}
+
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading material: event=warm palette=%u static_materials=%u static_textures=%u static_hits=%u static_misses=%u static_inserts=%u static_bytes=%llu voxel_materials=%u voxel_variants=%u voxel_textures=%u voxel_hits=%u voxel_misses=%u voxel_inserts=%u voxel_bytes=%llu cache=%u realize_ms=%.3f ms=%.3f\n",
+			paletteReady ? 1u : 0u,
+			hasStaticMaterials ? (uint32_t)mStaticMapScene.materialBridge.materials.size() : 0u,
+			staticStats.textureRequests,
+			staticStats.textureHits,
+			staticStats.textureMisses,
+			staticStats.textureInserts,
+			(unsigned long long)staticStats.estimatedBytes,
+			hasVoxelMaterials ? (uint32_t)mPersistentVoxelBatch.materialBridge.materials.size() : 0u,
+			(uint32_t)mPersistentVoxelMaterialVariantResources.size(),
+			voxelStats.textureRequests,
+			voxelStats.textureHits,
+			voxelStats.textureMisses,
+			voxelStats.textureInserts,
+			(unsigned long long)voxelStats.estimatedBytes,
+			(uint32_t)mTextureCache.size(),
+			staticStats.realizeMs + voxelStats.realizeMs,
+			DurationMs(start, std::chrono::steady_clock::now()));
+	}
+	return true;
 }
 
 bool NRIRenderer::EnsurePersistentVoxelBatch()

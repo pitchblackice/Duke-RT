@@ -1848,6 +1848,7 @@ private:
 		NRIAccelerationStructureResource& outAccelerationStructure,
 		bool updateDynamicPerfStats);
 	bool PreloadPersistentVoxelResources();
+	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch();
 	bool BuildPersistentVoxelVariantAccelerationStructures(const nri_scene::GeometryData& geometry);
