@@ -1847,6 +1847,7 @@ private:
 		uint32_t primitiveCount,
 		NRIAccelerationStructureResource& outAccelerationStructure,
 		bool updateDynamicPerfStats);
+	bool PreloadPersistentVoxelResources();
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch();
 	bool BuildPersistentVoxelVariantAccelerationStructures(const nri_scene::GeometryData& geometry);
@@ -2159,6 +2160,7 @@ private:
 	uint32_t mPersistentVoxelArenaIndexCursor = 0;
 	uint32_t mPersistentVoxelArenaPrimitiveCursor = 0;
 	uint32_t mPersistentVoxelArenaMaterialCursor = 0;
+	bool mPersistentVoxelLoadingWarmupActive = false;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};

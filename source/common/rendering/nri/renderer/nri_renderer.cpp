@@ -129,6 +129,7 @@ EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Bool, nri_voxelstats)
 EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
 EXTERN_CVAR(Int, nri_pttraceframes)
+EXTERN_CVAR(Int, nri_ptloadingtrace)
 EXTERN_CVAR(Int, perf_looptraceframes)
 CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
@@ -9119,6 +9120,12 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		}
 	}
 
+	if (!PreloadPersistentVoxelResources())
+	{
+		LogFallback("PT preload persistent voxel resource admission failed.");
+		return true;
+	}
+
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	emissiveSamplingContext.staticGeometry = &mStaticMapScene.geometry;
 	if (!UpdateEmissiveSamplingBuffers(emissiveSamplingContext))
@@ -11827,6 +11834,61 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 	mPersistentVoxelActorRejectedSignatures.clear();
 }
 
+bool NRIRenderer::PreloadPersistentVoxelResources()
+{
+	std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
+	const bool hasCacheEntries = nri_scene::BuildPersistentVoxelCacheEntries(cacheEntries);
+	if (!hasCacheEntries)
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading voxel resources: event=skip reason=no-durable-entries entries=0 mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
+				(uint32_t)mPersistentVoxelMeshVariantResources.size(),
+				(uint32_t)mPersistentVoxelMaterialVariantResources.size(),
+				(uint32_t)mPersistentVoxelBatch.actors.size(),
+				mPersistentVoxelBatch.activeActorCount,
+				mPersistentVoxelBatch.primitiveCount);
+		}
+		return true;
+	}
+
+	const uint32_t meshResourcesBefore = (uint32_t)mPersistentVoxelMeshVariantResources.size();
+	const uint32_t materialResourcesBefore = (uint32_t)mPersistentVoxelMaterialVariantResources.size();
+	const uint32_t actorsBefore = (uint32_t)mPersistentVoxelBatch.actors.size();
+	const uint32_t activeActorsBefore = mPersistentVoxelBatch.activeActorCount;
+	const uint32_t primitivesBefore = mPersistentVoxelBatch.primitiveCount;
+	const auto start = std::chrono::steady_clock::now();
+
+	struct LoadingWarmupScope
+	{
+		bool& active;
+		explicit LoadingWarmupScope(bool& value) : active(value) { active = true; }
+		~LoadingWarmupScope() { active = false; }
+	} loadingWarmupScope(mPersistentVoxelLoadingWarmupActive);
+
+	const bool ready = EnsurePersistentVoxelBatch();
+	const auto end = std::chrono::steady_clock::now();
+
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading voxel resources: event=%s entries=%u mesh_resources=%u mesh_delta=%d material_resources=%u material_delta=%d actors=%u actor_delta=%d active=%u active_delta=%d prims=%u prim_delta=%d ms=%.3f\n",
+			ready ? "admit" : "defer",
+			(uint32_t)cacheEntries.size(),
+			(uint32_t)mPersistentVoxelMeshVariantResources.size(),
+			(int32_t)mPersistentVoxelMeshVariantResources.size() - (int32_t)meshResourcesBefore,
+			(uint32_t)mPersistentVoxelMaterialVariantResources.size(),
+			(int32_t)mPersistentVoxelMaterialVariantResources.size() - (int32_t)materialResourcesBefore,
+			(uint32_t)mPersistentVoxelBatch.actors.size(),
+			(int32_t)mPersistentVoxelBatch.actors.size() - (int32_t)actorsBefore,
+			mPersistentVoxelBatch.activeActorCount,
+			(int32_t)mPersistentVoxelBatch.activeActorCount - (int32_t)activeActorsBefore,
+			mPersistentVoxelBatch.primitiveCount,
+			(int32_t)mPersistentVoxelBatch.primitiveCount - (int32_t)primitivesBefore,
+			DurationMs(start, end));
+	}
+	return ready;
+}
+
 bool NRIRenderer::EnsurePersistentVoxelBatch()
 {
 	const uint64_t cacheSerial = nri_scene::GetPersistentVoxelCacheSerial();
@@ -12029,11 +12091,13 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		++it;
 	}
 
-	const bool persistentVoxelTexturePrewarmUnlimited = (int)nri_ptpersistentvoxeltextureprewarms <= 0;
+	const bool persistentVoxelTexturePrewarmUnlimited =
+		mPersistentVoxelLoadingWarmupActive ||
+		(int)nri_ptpersistentvoxeltextureprewarms <= 0;
 	const uint32_t persistentVoxelTexturePrewarmBudget =
 		persistentVoxelTexturePrewarmUnlimited ? 0u : (uint32_t)(int)nri_ptpersistentvoxeltextureprewarms;
 	const uint64_t persistentVoxelTexturePrewarmByteBudget =
-		(int)nri_ptpersistentvoxeltexturebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxeltexturebytes;
+		mPersistentVoxelLoadingWarmupActive || (int)nri_ptpersistentvoxeltexturebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxeltexturebytes;
 	uint32_t persistentVoxelPrewarmedTextures = 0;
 	uint64_t persistentVoxelPrewarmedTextureBytes = 0;
 	mLastPerfShellTraceStats.persistentVoxelTexturePrewarmByteBudget = persistentVoxelTexturePrewarmByteBudget;
@@ -12905,11 +12969,12 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return true;
 	};
 
-	const uint32_t persistentVoxelBuildActorBudget = (uint32_t)std::max(1, (int)nri_ptpersistentvoxelbuildactors);
+	const uint32_t persistentVoxelBuildActorBudget =
+		mPersistentVoxelLoadingWarmupActive ? UINT32_MAX : (uint32_t)std::max(1, (int)nri_ptpersistentvoxelbuildactors);
 	const uint32_t persistentVoxelBuildPrimitiveBudget =
-		(int)nri_ptpersistentvoxelbuildprims <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxelbuildprims;
+		mPersistentVoxelLoadingWarmupActive || (int)nri_ptpersistentvoxelbuildprims <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxelbuildprims;
 	const uint64_t persistentVoxelBuildByteBudget =
-		(int)nri_ptpersistentvoxelbuildbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxelbuildbytes;
+		mPersistentVoxelLoadingWarmupActive || (int)nri_ptpersistentvoxelbuildbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxelbuildbytes;
 	uint32_t persistentVoxelBuiltActors = 0;
 	uint32_t persistentVoxelBuiltPrimitives = 0;
 	uint64_t persistentVoxelBuiltBytes = 0;
