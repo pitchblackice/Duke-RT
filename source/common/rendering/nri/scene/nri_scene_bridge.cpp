@@ -3416,7 +3416,14 @@ namespace
 			cacheLookup.stability == VoxelActorStability::TransformRebake &&
 			cacheLookup.entry != nullptr &&
 			cacheLookup.entry->persistentReady;
-		const bool cacheUpdateConsumesActorBudget = cacheSurfaceUpdate && !transformRebakeAlreadyResident;
+		const bool sharedVariantSurfaceReadyForUpdate =
+			cacheSurfaceUpdate &&
+			cacheLookup.meshVariantHash != 0 &&
+			IsVoxelMeshVariantSurfaceReady(cacheLookup.meshVariantHash);
+		const bool cacheUpdateConsumesActorBudget =
+			cacheSurfaceUpdate &&
+			!transformRebakeAlreadyResident &&
+			!sharedVariantSurfaceReadyForUpdate;
 		auto deferDesiredVariant = [&](VoxelActorPendingReason reason) -> bool
 		{
 			if (cacheSurfaceUpdate)

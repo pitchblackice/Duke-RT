@@ -12672,12 +12672,16 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	{
 		mPersistentVoxelBatch = {};
 		mPersistentVoxelInstances.clear();
-		RetireResidentBufferResource(mPersistentVoxelVertexBuffer);
-		RetireResidentBufferResource(mPersistentVoxelIndexBuffer);
-		RetireResidentBufferResource(mPersistentVoxelPrimitiveBuffer);
-		mPersistentVoxelArenaVertexCursor = 0;
-		mPersistentVoxelArenaIndexCursor = 0;
-		mPersistentVoxelArenaPrimitiveCursor = 0;
+		const bool keepSharedVariantArena = !mPersistentVoxelMeshVariantResources.empty();
+		if (!keepSharedVariantArena)
+		{
+			RetireResidentBufferResource(mPersistentVoxelVertexBuffer);
+			RetireResidentBufferResource(mPersistentVoxelIndexBuffer);
+			RetireResidentBufferResource(mPersistentVoxelPrimitiveBuffer);
+			mPersistentVoxelArenaVertexCursor = 0;
+			mPersistentVoxelArenaIndexCursor = 0;
+			mPersistentVoxelArenaPrimitiveCursor = 0;
+		}
 		mBoundPersistentVoxelPrimitiveCount = 0;
 		mBoundPersistentVoxelMaterialCount = 0;
 		SetCurrentSceneDataDescriptorsInitialized(false);
