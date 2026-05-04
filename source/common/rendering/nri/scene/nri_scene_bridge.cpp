@@ -2659,6 +2659,300 @@ namespace
 		addBaseAndAnimated(actor->dispictex);
 	}
 
+	const SurfaceRef* GetCachedVoxelMeshVariantSurface(
+		const VoxelActorCacheLookup& lookup,
+		const FVoxelMeshData& mesh,
+		bool recordPerf);
+
+	bool BuildLoadingActorVoxelTransform(DCoreActor* actor, voxmodel_t* voxel, float outTransform[12], float outTranslation[3], VSMatrix* outMatrix)
+	{
+		if (actor == nullptr || voxel == nullptr)
+		{
+			return false;
+		}
+
+		const auto& spr = actor->spr;
+		if ((spr.cstat & CSTAT_SPRITE_ALIGNMENT_MASK) == CSTAT_SPRITE_ALIGNMENT_FLOOR)
+		{
+			return false;
+		}
+
+		auto ang = spr.Angles.Yaw + actor->sprext.rot.Yaw;
+		if ((spr.clipdist & TSPR_MDLROTATE) != 0)
+		{
+			const int myclock = PlayClock << 3;
+			ang += DAngle::fromBuild(myclock);
+		}
+
+		FVector3 scalevec = { voxel->scale, voxel->scale, voxel->scale };
+		FVector3 translatevec = { 0, 0, voxel->zadd * voxel->scale };
+
+		const float basescale = voxel->bscale;
+		float sprxscale = (float)spr.scale.X * 0.8f * basescale;
+		if ((spr.cstat & CSTAT_SPRITE_ALIGNMENT_MASK) == CSTAT_SPRITE_ALIGNMENT_WALL)
+		{
+			sprxscale *= 1.25f;
+			const auto rvec = actor->sprext.rot.Yaw.ToVector();
+			translatevec.Y -= spr.xoffset * rvec.X / 64;
+			translatevec.X += spr.xoffset * rvec.Y / 64;
+		}
+
+		if (spr.cstat & CSTAT_SPRITE_YFLIP)
+		{
+			scalevec.Z = -scalevec.Z;
+			translatevec.Z = -translatevec.Z;
+		}
+		if (spr.cstat & CSTAT_SPRITE_XFLIP)
+		{
+			scalevec.X = -scalevec.X;
+			translatevec.X = -translatevec.X;
+			translatevec.Y = -translatevec.Y;
+		}
+
+		scalevec.X *= sprxscale;
+		translatevec.X *= sprxscale;
+		scalevec.Y *= sprxscale;
+		translatevec.Y *= sprxscale;
+		const float sprzscale = (float)spr.scale.Y * basescale;
+		scalevec.Z *= sprzscale;
+		translatevec.Z *= sprzscale;
+
+		float zpos = (float)(spr.pos.Z + actor->sprext.position_offset.Z);
+		const float zscale = ((spr.cstat & CSTAT_SPRITE_YFLIP) && (spr.cstat & CSTAT_SPRITE_ALIGNMENT_MASK) != 0) ? -1.f : 1.f;
+		zpos -= (spr.yoffset * spr.scale.Y) * zscale * basescale;
+
+		const float x = (float)(spr.pos.X + actor->sprext.position_offset.X);
+		const float z = -zpos;
+		const float y = (float)-(spr.pos.Y + actor->sprext.position_offset.Y);
+
+		float zoff = voxel->siz.Z * .5f;
+		if (!(spr.cstat & CSTAT_SPRITE_YCENTER))
+		{
+			zoff += voxel->piv.Z;
+		}
+		else if ((spr.cstat & CSTAT_SPRITE_ALIGNMENT_MASK) != CSTAT_SPRITE_ALIGNMENT_SLAB)
+		{
+			zoff += voxel->piv.Z;
+			zoff -= voxel->siz.Z * .5f;
+		}
+		if (spr.cstat & CSTAT_SPRITE_YFLIP)
+		{
+			zoff = voxel->siz.Z - zoff;
+		}
+
+		VSMatrix matrix;
+		matrix.loadIdentity();
+		matrix.translate(x + translatevec.X, z - translatevec.Z, y - translatevec.Y);
+		matrix.rotate(ang.Degrees() - 90., 0, 1, 0);
+		matrix.scale(scalevec.X, scalevec.Z, scalevec.Y);
+		matrix.translate(-voxel->piv.X, zoff, voxel->piv.Y);
+
+		const FLOATTYPE* values = matrix.get();
+		outTranslation[0] = (float)values[12];
+		outTranslation[1] = (float)values[13];
+		outTranslation[2] = (float)values[14];
+		outTransform[0] = (float)values[0];
+		outTransform[1] = (float)values[4];
+		outTransform[2] = (float)values[8];
+		outTransform[3] = (float)values[12];
+		outTransform[4] = (float)values[1];
+		outTransform[5] = (float)values[5];
+		outTransform[6] = (float)values[9];
+		outTransform[7] = (float)values[13];
+		outTransform[8] = (float)values[2];
+		outTransform[9] = (float)values[6];
+		outTransform[10] = (float)values[10];
+		outTransform[11] = (float)values[14];
+		if (outMatrix != nullptr)
+		{
+			*outMatrix = matrix;
+		}
+		return true;
+	}
+
+	uint64_t BuildLoadingActorTransformBasisSignature(const float transform[12])
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, QuantizeSignatureFloat((double)transform[0], 4096.0));
+		hash = HashCombine64(hash, QuantizeSignatureFloat((double)transform[1], 4096.0));
+		hash = HashCombine64(hash, QuantizeSignatureFloat((double)transform[2], 4096.0));
+		hash = HashCombine64(hash, QuantizeSignatureFloat((double)transform[4], 4096.0));
+		hash = HashCombine64(hash, QuantizeSignatureFloat((double)transform[5], 4096.0));
+		hash = HashCombine64(hash, QuantizeSignatureFloat((double)transform[6], 4096.0));
+		hash = HashCombine64(hash, QuantizeSignatureFloat((double)transform[8], 4096.0));
+		hash = HashCombine64(hash, QuantizeSignatureFloat((double)transform[9], 4096.0));
+		hash = HashCombine64(hash, QuantizeSignatureFloat((double)transform[10], 4096.0));
+		return hash;
+	}
+
+	uint64_t BuildLoadingActorSurfaceSignature(DCoreActor* actor, voxmodel_t* voxel)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashCombine64(hash, (uint64_t)(uintptr_t)voxel);
+		hash = HashCombine64(hash, voxel != nullptr ? (uint64_t)(uintptr_t)voxel->model : 0ull);
+		if (actor != nullptr)
+		{
+			hash = HashCombine64(hash, (uint64_t)actor->spr.cstat);
+			hash = HashCombine64(hash, (uint64_t)actor->spr.cstat2);
+		}
+		return hash;
+	}
+
+	SurfaceProvenance MakeLoadingActorVoxelProvenance(DCoreActor* actor, uint32_t materialFlags)
+	{
+		SurfaceProvenance provenance = {};
+		provenance.sourceType = SurfaceSourceType::VoxelProxySprite;
+		provenance.actorIndex = actor != nullptr ? actor->GetIndex() : -1;
+		provenance.drawListType = GLDL_MODELS;
+		provenance.materialFlags = materialFlags;
+		if (actor != nullptr && actor->spr.sectp != nullptr)
+		{
+			provenance.sectorIndex = sector.IndexOf(actor->spr.sectp);
+		}
+		return provenance;
+	}
+
+	bool BuildLoadingActorExactVoxelSurface(
+		const SurfaceRef& canonicalSurface,
+		const VSMatrix& matrix,
+		const MaterialRef& material,
+		const SurfaceProvenance& provenance,
+		SurfaceRef& outSurface)
+	{
+		outSurface = {};
+		outSurface.material = material;
+		outSurface.provenance = provenance;
+		outSurface.vertices.reserve(canonicalSurface.vertices.size());
+		for (const CapturedVertex& source : canonicalSurface.vertices)
+		{
+			CapturedVertex vertex = {};
+			TransformModelPoint(matrix, source.position[0], source.position[1], source.position[2], vertex, source.uv[0], source.uv[1]);
+			outSurface.vertices.push_back(vertex);
+		}
+		outSurface.indices = canonicalSurface.indices;
+		return !outSurface.indices.empty();
+	}
+
+	bool SeedLoadingActorPersistentVoxelEntry(DCoreActor* actor, FTextureID texid)
+	{
+		if (actor == nullptr || !texid.isValid())
+		{
+			return false;
+		}
+
+		int voxelIndex = -1;
+		FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
+		if (model == nullptr || voxelIndex < 0 || voxelIndex >= MAXVOXELS || voxmodels[voxelIndex] == nullptr)
+		{
+			return false;
+		}
+
+		VoxelActorCacheLookup lookup = {};
+		const int32_t actorIndex = (int32_t)actor->GetIndex();
+		if (actorIndex < 0)
+		{
+			return false;
+		}
+		lookup.identityKey = BuildVoxelInstanceKeyHash(BuildVoxelInstanceKey(actorIndex, actor));
+		if (lookup.identityKey == 0)
+		{
+			return false;
+		}
+
+		FGameTexture* voxelTexture = TexMan.GetGameTexture(model->GetPaletteTexture());
+		if (voxelTexture == nullptr || !voxelTexture->isValid())
+		{
+			return false;
+		}
+
+		float alpha = 1.0f;
+		if ((actor->spr.cstat & CSTAT_SPRITE_TRANSLUCENT) != 0)
+		{
+			alpha = GetAlphaFromBlend((actor->spr.cstat & CSTAT_SPRITE_TRANS_FLIP) ? DAMETH_TRANS2 : DAMETH_TRANS1, 0);
+		}
+		alpha *= 1.f - actor->sprext.alpha;
+		FGameTexture* emissiveSourceTexture = TexMan.GetGameTexture(texid);
+		if (emissiveSourceTexture != nullptr && !emissiveSourceTexture->isValid())
+		{
+			emissiveSourceTexture = nullptr;
+		}
+		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(
+			voxelTexture,
+			emissiveSourceTexture,
+			actor->spr.pal,
+			actor->spr.shade,
+			alpha,
+			MaterialFlag_Sprite);
+
+		VSMatrix matrix;
+		float currentTransform[12] = {};
+		float currentTranslation[3] = {};
+		if (!BuildLoadingActorVoxelTransform(actor, voxmodels[voxelIndex], currentTransform, currentTranslation, &matrix))
+		{
+			return false;
+		}
+
+		const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(texid, model, voxelIndex);
+		const VoxelMaterialVariantKey materialVariantKey = BuildVoxelMaterialVariantKey(voxelTexture, voxelMaterial);
+		lookup.stability = VoxelActorStability::New;
+		lookup.actorIndex = actorIndex;
+		lookup.actorPtr = (uintptr_t)actor;
+		lookup.voxelPtr = (uintptr_t)voxmodels[voxelIndex];
+		lookup.voxelModelPtr = (uintptr_t)model;
+		lookup.sourcePicnum = texid.GetIndex();
+		lookup.resolvedVoxelIndex = voxelIndex;
+		lookup.instanceKeyHash = lookup.identityKey;
+		lookup.meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
+		lookup.materialVariantHash = BuildVoxelMaterialVariantKeyHash(materialVariantKey);
+		lookup.meshKeyHash = lookup.meshVariantHash;
+		lookup.materialKeyHash = lookup.materialVariantHash;
+		lookup.geometrySignature = lookup.meshVariantHash;
+		lookup.materialSignature = lookup.materialVariantHash;
+		lookup.signature = BuildVoxelActorSignature(lookup.geometrySignature, lookup.materialSignature);
+		lookup.surfaceSignature = BuildLoadingActorSurfaceSignature(actor, voxmodels[voxelIndex]);
+		lookup.transformBasisSignature = BuildLoadingActorTransformBasisSignature(currentTransform);
+		lookup.meshBakeSpace = VoxelMeshBakeSpace::LocalSpace;
+		std::copy(std::begin(currentTranslation), std::end(currentTranslation), std::begin(lookup.currentTranslation));
+		std::copy(std::begin(currentTransform), std::end(currentTransform), std::begin(lookup.currentTransform));
+
+		auto foundMesh = gVoxelMeshCache.find(model);
+		if (foundMesh == gVoxelMeshCache.end() || !foundMesh->second.built || !foundMesh->second.valid)
+		{
+			return false;
+		}
+
+		VoxelActorCacheLookup surfaceLookup = lookup;
+		const SurfaceRef* canonicalSurface = GetCachedVoxelMeshVariantSurface(surfaceLookup, foundMesh->second.mesh, false);
+		if (canonicalSurface == nullptr)
+		{
+			return false;
+		}
+
+		SurfaceRef meshSurface = *canonicalSurface;
+		meshSurface.material = voxelMaterial;
+		meshSurface.provenance = MakeLoadingActorVoxelProvenance(actor, voxelMaterial.flags);
+		SurfaceRef lightSurface = {};
+		if (!BuildLoadingActorExactVoxelSurface(*canonicalSurface, matrix, voxelMaterial, meshSurface.provenance, lightSurface))
+		{
+			return false;
+		}
+
+		SceneDebugStats stats = {};
+		StoreVoxelActorCacheSurface(lookup, meshSurface, lightSurface, VoxelMeshBakeSpace::LocalSpace, true, stats);
+		if ((int)nri_ptloadingtrace >= 2)
+		{
+			Printf("NRI PT loading voxel actor: event=durable-entry actor=%d tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx inst_key=0x%llx tris=%u transform_keyed=0\n",
+				actorIndex,
+				texid.GetIndex(),
+				voxelIndex,
+				(unsigned long long)lookup.meshVariantHash,
+				(unsigned long long)lookup.materialVariantHash,
+				(unsigned long long)lookup.identityKey,
+				CountSurfacePrimitives(meshSurface));
+		}
+		return true;
+	}
+
 	void BuildLiveActorIdentityKeys(std::unordered_set<uint64_t>& outKeys)
 	{
 		outKeys.clear();
@@ -3859,6 +4153,9 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 		}
 
 		BuildLoadingActorTextureCandidates(actor, candidateTexids);
+		const FTextureID activeTexid = actor->spr.spritetexture();
+		const int activeTextureId = activeTexid.isValid() ? activeTexid.GetIndex() : -1;
+		bool seededDurableEntry = false;
 		bool countedActor = false;
 		for (const FTextureID texid : candidateTexids)
 		{
@@ -3877,6 +4174,7 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 				countedActor = true;
 			}
 
+			const bool seedCurrentActorEntry = !seededDurableEntry && texid.isValid() && texid.GetIndex() == activeTextureId;
 			const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(texid, model, voxelIndex);
 			const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
 			if (meshVariantHash != 0 && !seenMeshVariants.insert(meshVariantHash).second)
@@ -3888,6 +4186,10 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 						texid.GetIndex(),
 						voxelIndex,
 						(unsigned long long)meshVariantHash);
+				}
+				if (seedCurrentActorEntry)
+				{
+					seededDurableEntry = SeedLoadingActorPersistentVoxelEntry(actor, texid);
 				}
 				continue;
 			}
@@ -3901,6 +4203,10 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 					(unsigned long long)meshVariantHash);
 			}
 			PrecacheVoxelTextureCpuMesh(texid, stats);
+			if (seedCurrentActorEntry)
+			{
+				seededDurableEntry = SeedLoadingActorPersistentVoxelEntry(actor, texid);
+			}
 		}
 	}
 }
