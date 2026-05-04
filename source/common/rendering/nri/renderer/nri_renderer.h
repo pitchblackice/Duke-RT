@@ -1849,6 +1849,7 @@ private:
 		bool updateDynamicPerfStats);
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
+	bool PreloadPersistentVoxelVariantResources();
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch();

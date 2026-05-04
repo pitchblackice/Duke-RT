@@ -359,6 +359,19 @@ struct PersistentVoxelCacheEntryView
 	const SurfaceRef* lightSurface = nullptr;
 };
 
+struct PrecachedVoxelVariantView
+{
+	uint64_t meshKeyHash = 0;
+	uint64_t materialKeyHash = 0;
+	uint64_t meshVariantHash = 0;
+	uint64_t materialVariantHash = 0;
+	int32_t sourcePicnum = -1;
+	int32_t resolvedVoxelIndex = -1;
+	uint32_t primitiveCount = 0;
+	const SurfaceRef* surface = nullptr;
+	MaterialRef material;
+};
+
 enum class DynamicVoxelCaptureMode : uint8_t
 {
 	Authoritative,
@@ -377,6 +390,7 @@ bool CaptureActorSpriteScene(HWDrawInfo& di, int32_t actorIndex, SceneView& outV
 bool CaptureScene(HWDrawInfo& di, SceneView& outView);
 bool BuildPersistentVoxelCacheSceneView(SceneView& outView);
 bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>& outEntries);
+bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& outEntries);
 uint64_t GetPersistentVoxelCacheSerial();
 bool PrecacheVoxelModelCpuMesh(FVoxelModel* model, VoxelMeshPrecacheStats* stats = nullptr);
 bool PrecacheVoxelTextureCpuMesh(FTextureID texid, VoxelMeshPrecacheStats* stats = nullptr);

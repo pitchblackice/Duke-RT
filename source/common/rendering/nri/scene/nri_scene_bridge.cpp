@@ -34,6 +34,8 @@ CVAR(Int, nri_ptvoxelpersistentpromoteframes, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFI
 CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelvariants, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelvariantprims, 1000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -2659,6 +2661,22 @@ namespace
 		addBaseAndAnimated(actor->dispictex);
 	}
 
+	float GetLoadingActorAlpha(DCoreActor* actor)
+	{
+		if (actor == nullptr)
+		{
+			return 1.0f;
+		}
+
+		float alpha = 1.0f;
+		if ((actor->spr.cstat & CSTAT_SPRITE_TRANSLUCENT) != 0)
+		{
+			alpha = GetAlphaFromBlend((actor->spr.cstat & CSTAT_SPRITE_TRANS_FLIP) ? DAMETH_TRANS2 : DAMETH_TRANS1, 0);
+		}
+		alpha *= 1.f - actor->sprext.alpha;
+		return alpha;
+	}
+
 	void BuildLiveActorIdentityKeys(std::unordered_set<uint64_t>& outKeys)
 	{
 		outKeys.clear();
@@ -4243,6 +4261,129 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 	}
 
 	return true;
+}
+
+bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& outEntries)
+{
+	outEntries.clear();
+	if (!r_voxels || (int)nri_ptloadingvoxelactors <= 0)
+	{
+		return false;
+	}
+
+	const uint32_t variantLimit = (int)nri_ptloadingvoxelvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelvariants;
+	const uint32_t primitiveLimit = (int)nri_ptloadingvoxelvariantprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelvariantprims;
+	uint32_t primitiveTotal = 0;
+	std::unordered_set<uint64_t> seenVariantPairs;
+	std::vector<FTextureID> candidateTexids;
+
+	TSpriteIterator<DCoreActor> it;
+	while (DCoreActor* actor = it.Next())
+	{
+		if (outEntries.size() >= variantLimit)
+		{
+			break;
+		}
+		if (!IsLiveActorVoxelWarmupCandidate(actor))
+		{
+			continue;
+		}
+
+		BuildLoadingActorTextureCandidates(actor, candidateTexids);
+		for (const FTextureID texid : candidateTexids)
+		{
+			if (outEntries.size() >= variantLimit)
+			{
+				break;
+			}
+
+			int voxelIndex = -1;
+			FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
+			if (model == nullptr)
+			{
+				continue;
+			}
+			FGameTexture* voxelTexture = TexMan.GetGameTexture(model->GetPaletteTexture());
+			if (voxelTexture == nullptr || !voxelTexture->isValid())
+			{
+				continue;
+			}
+
+			const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(texid, model, voxelIndex);
+			const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
+			if (meshVariantHash == 0)
+			{
+				continue;
+			}
+			auto foundMesh = gVoxelMeshCache.find(model);
+			if (foundMesh == gVoxelMeshCache.end() || !foundMesh->second.built || !foundMesh->second.valid)
+			{
+				continue;
+			}
+
+			VoxelActorCacheLookup lookup = {};
+			lookup.meshVariantHash = meshVariantHash;
+			lookup.sourcePicnum = texid.GetIndex();
+			lookup.resolvedVoxelIndex = voxelIndex;
+			const SurfaceRef* surface = GetCachedVoxelMeshVariantSurface(lookup, foundMesh->second.mesh, false);
+			if (surface == nullptr)
+			{
+				continue;
+			}
+
+			FGameTexture* emissiveSourceTexture = TexMan.GetGameTexture(texid);
+			if (emissiveSourceTexture != nullptr && !emissiveSourceTexture->isValid())
+			{
+				emissiveSourceTexture = nullptr;
+			}
+			const MaterialRef material = MakeVoxelPaletteMaterialRef(
+				voxelTexture,
+				emissiveSourceTexture,
+				actor->spr.pal,
+				actor->spr.shade,
+				GetLoadingActorAlpha(actor),
+				MaterialFlag_Sprite);
+			const uint64_t materialVariantHash = BuildVoxelMaterialVariantKeyHash(BuildVoxelMaterialVariantKey(voxelTexture, material));
+			const uint64_t pairHash = HashCombine64(meshVariantHash, materialVariantHash);
+			if (materialVariantHash == 0 || !seenVariantPairs.insert(pairHash).second)
+			{
+				continue;
+			}
+
+			const uint32_t primitiveCount = CountSurfacePrimitives(*surface);
+			if (primitiveLimit != 0 && primitiveTotal != 0 && primitiveTotal + primitiveCount > primitiveLimit)
+			{
+				if ((int)nri_ptloadingtrace >= 2)
+				{
+					Printf("NRI PT loading voxel variant: event=defer reason=preload-budget actor=%d tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx tris=%u prims_used=%u prims_limit=%u\n",
+						(int)actor->GetIndex(),
+						texid.GetIndex(),
+						voxelIndex,
+						(unsigned long long)meshVariantHash,
+						(unsigned long long)materialVariantHash,
+						primitiveCount,
+						primitiveTotal,
+						primitiveLimit);
+				}
+				continue;
+			}
+
+			PrecachedVoxelVariantView view = {};
+			view.meshKeyHash = meshVariantHash;
+			view.materialKeyHash = materialVariantHash;
+			view.meshVariantHash = meshVariantHash;
+			view.materialVariantHash = materialVariantHash;
+			view.sourcePicnum = texid.GetIndex();
+			view.resolvedVoxelIndex = voxelIndex;
+			view.primitiveCount = primitiveCount;
+			view.surface = surface;
+			view.material = material;
+			outEntries.push_back(std::move(view));
+			primitiveTotal += primitiveCount;
+		}
+	}
+
+	return !outEntries.empty();
 }
 
 bool CaptureScene(HWDrawInfo& di, SceneView& outView)
