@@ -34,9 +34,9 @@ CVAR(Int, nri_ptvoxelpersistentpromoteframes, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFI
 CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelvariants, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelvariantprims, 6000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelpicrange, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelvariants, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelvariantprims, 2000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelpicrange, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -3899,11 +3899,19 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 		return;
 	}
 
+	const uint32_t variantLimit = (int)nri_ptloadingvoxelvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelvariants;
+	const uint32_t primitiveLimit = (int)nri_ptloadingvoxelvariantprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelvariantprims;
+	uint32_t warmedVariants = 0;
+	uint32_t primitiveTotal = 0;
 	std::unordered_set<uint64_t> seenMeshVariants;
 	std::vector<FTextureID> candidateTexids;
 	TSpriteIterator<DCoreActor> it;
 	while (DCoreActor* actor = it.Next())
 	{
+		if (warmedVariants >= variantLimit || (primitiveLimit != 0 && primitiveTotal >= primitiveLimit))
+		{
+			break;
+		}
 		if (!IsLiveActorVoxelWarmupCandidate(actor))
 		{
 			continue;
@@ -3913,6 +3921,11 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 		bool countedActor = false;
 		for (const FTextureID texid : candidateTexids)
 		{
+			if (warmedVariants >= variantLimit || (primitiveLimit != 0 && primitiveTotal >= primitiveLimit))
+			{
+				break;
+			}
+
 			int voxelIndex = -1;
 			FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
 			if (model == nullptr)
@@ -3952,6 +3965,20 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 					(unsigned long long)meshVariantHash);
 			}
 			PrecacheVoxelTextureCpuMesh(texid, stats);
+
+			uint32_t primitiveCount = 0;
+			auto foundMesh = gVoxelMeshCache.find(model);
+			if (foundMesh != gVoxelMeshCache.end() && foundMesh->second.built && foundMesh->second.valid)
+			{
+				VoxelActorCacheLookup lookup = {};
+				lookup.meshVariantHash = meshVariantHash;
+				lookup.sourcePicnum = texid.GetIndex();
+				lookup.resolvedVoxelIndex = voxelIndex;
+				const SurfaceRef* surface = GetCachedVoxelMeshVariantSurface(lookup, foundMesh->second.mesh, false);
+				primitiveCount = surface != nullptr ? CountSurfacePrimitives(*surface) : 0u;
+			}
+			primitiveTotal += primitiveCount;
+			++warmedVariants;
 		}
 	}
 }
