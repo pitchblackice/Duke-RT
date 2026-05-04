@@ -34,8 +34,9 @@ CVAR(Int, nri_ptvoxelpersistentpromoteframes, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFI
 CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelvariants, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelvariantprims, 1000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelvariants, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelvariantprims, 6000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelpicrange, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -2637,6 +2638,30 @@ namespace
 		}
 	}
 
+	void AddLoadingActorVoxelTextureRangeCandidates(int centerPicnum, int range, std::vector<FTextureID>& candidates, std::unordered_set<int>& seenTextureIds)
+	{
+		if (range <= 0 || centerPicnum < 0 || centerPicnum >= MAXTILES)
+		{
+			return;
+		}
+
+		const int firstPicnum = (std::max)(0, centerPicnum - range);
+		const int lastPicnum = (std::min)(MAXTILES - 1, centerPicnum + range);
+		for (int picnum = firstPicnum; picnum <= lastPicnum; ++picnum)
+		{
+			FTextureID texid = tileGetTextureID(picnum);
+			if (!texid.isValid())
+			{
+				continue;
+			}
+
+			if (ResolveVoxelTextureModel(texid) != nullptr)
+			{
+				AddUniqueLoadingActorTextureCandidate(texid, candidates, seenTextureIds);
+			}
+		}
+	}
+
 	void BuildLoadingActorTextureCandidates(DCoreActor* actor, std::vector<FTextureID>& candidates)
 	{
 		candidates.clear();
@@ -2659,6 +2684,7 @@ namespace
 
 		addBaseAndAnimated(actor->spr.spritetexture());
 		addBaseAndAnimated(actor->dispictex);
+		AddLoadingActorVoxelTextureRangeCandidates(actor->spr.picnum, (int)nri_ptloadingvoxelpicrange, candidates, seenTextureIds);
 	}
 
 	float GetLoadingActorAlpha(DCoreActor* actor)
