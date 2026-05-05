@@ -130,6 +130,7 @@ EXTERN_CVAR(Bool, nri_voxelstats)
 EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
+EXTERN_CVAR(Bool, nri_ptloadingvoxelgpu)
 EXTERN_CVAR(Int, perf_looptraceframes)
 CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
@@ -12263,6 +12264,20 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources()
 
 bool NRIRenderer::PreloadPersistentVoxelResources()
 {
+	if (!nri_ptloadingvoxelgpu)
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading voxel resources: event=skip reason=gpu-disabled mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
+				(uint32_t)mPersistentVoxelMeshVariantResources.size(),
+				(uint32_t)mPersistentVoxelMaterialVariantResources.size(),
+				(uint32_t)mPersistentVoxelBatch.actors.size(),
+				mPersistentVoxelBatch.activeActorCount,
+				mPersistentVoxelBatch.primitiveCount);
+		}
+		return true;
+	}
+
 	if (!PreloadPersistentVoxelVariantResources())
 	{
 		return false;
