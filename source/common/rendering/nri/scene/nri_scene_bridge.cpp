@@ -6,9 +6,13 @@
 
 #include "c_cvars.h"
 #include "coreactor.h"
+#include "filesystem.h"
+#include "files.h"
+#include "gamecontrol.h"
 #include "hw_portal.h"
 #include "hw_voxels.h"
 #include "image.h"
+#include "mapinfo.h"
 #include "model_kvx.h"
 #include "skyboxtexture.h"
 #include "gametexture.h"
@@ -18,10 +22,14 @@
 #include "v_video.h"
 #include <chrono>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 #include <windows.h>
 
 EXTERN_CVAR(Bool, r_voxels)
@@ -41,6 +49,7 @@ CVAR(Int, nri_ptloadingvoxelpicrange, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelcpumaxvariants, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelcpumaxprims, 2000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelcpumaxms, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptloadingvoxellist, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -241,6 +250,13 @@ namespace
 		uint32_t skippedInvalid = 0;
 		uint32_t skippedDuplicate = 0;
 		uint32_t actorCandidates = 0;
+		uint32_t manifestSources = 0;
+		uint32_t manifestLines = 0;
+		uint32_t manifestRequests = 0;
+		uint32_t manifestSkippedInactive = 0;
+		uint32_t manifestSkippedSyntax = 0;
+		uint32_t manifestSkippedActor = 0;
+		uint32_t manifestSkippedUnsupported = 0;
 	};
 
 	uint32_t CountSurfacePrimitives(const SurfaceRef& surface);
@@ -2748,7 +2764,6 @@ namespace
 			return true;
 		}
 		const uint32_t stableSources =
-			LoadingVoxelRequestSource_MountedVoxelPreload |
 			LoadingVoxelRequestSource_LiveActorCurrent |
 			LoadingVoxelRequestSource_LiveActorAnimated;
 		return (request.sourceBits & stableSources) != 0;
@@ -2933,6 +2948,603 @@ namespace
 		return true;
 	}
 
+	std::string LowerAscii(std::string value)
+	{
+		for (char& ch : value)
+		{
+			ch = (char)std::tolower((unsigned char)ch);
+		}
+		return value;
+	}
+
+	bool TryParseIntToken(const std::string& token, int& outValue)
+	{
+		if (token.empty())
+		{
+			return false;
+		}
+		char* end = nullptr;
+		const long value = std::strtol(token.c_str(), &end, 10);
+		if (end == token.c_str() || *end != 0)
+		{
+			return false;
+		}
+		outValue = (int)value;
+		return true;
+	}
+
+	bool ParseLoadingVoxelPriorityValue(const std::string& value, LoadingVoxelRequestPriority& outPriority)
+	{
+		const std::string lower = LowerAscii(value);
+		if (lower == "force")
+		{
+			outPriority = LoadingVoxelRequestPriority::Force;
+			return true;
+		}
+		if (lower == "high")
+		{
+			outPriority = LoadingVoxelRequestPriority::High;
+			return true;
+		}
+		if (lower == "normal")
+		{
+			outPriority = LoadingVoxelRequestPriority::Normal;
+			return true;
+		}
+		if (lower == "opportunistic")
+		{
+			outPriority = LoadingVoxelRequestPriority::Opportunistic;
+			return true;
+		}
+		return false;
+	}
+
+	struct MountedVoxelPreloadOptions
+	{
+		LoadingVoxelRequestPriority priority = LoadingVoxelRequestPriority::High;
+		bool gpuForce = false;
+		bool gpuPrefer = false;
+	};
+
+	bool IsMountedVoxelPreloadOptionName(const std::string& token)
+	{
+		const std::string lower = LowerAscii(token);
+		const size_t equals = lower.find('=');
+		const std::string name = equals == std::string::npos ? lower : lower.substr(0, equals);
+		return name == "priority" || name == "gpu" || name == "reason";
+	}
+
+	bool TryReadMountedVoxelPreloadOptionValue(const std::vector<std::string>& tokens, size_t& index, std::string& outName, std::string& outValue)
+	{
+		std::string token = tokens[index];
+		const size_t equals = token.find('=');
+		if (equals != std::string::npos)
+		{
+			outName = LowerAscii(token.substr(0, equals));
+			outValue = token.substr(equals + 1);
+			return true;
+		}
+
+		outName = LowerAscii(token);
+		if (index + 1 >= tokens.size())
+		{
+			return false;
+		}
+		if (tokens[index + 1] == "=")
+		{
+			if (index + 2 >= tokens.size())
+			{
+				return false;
+			}
+			outValue = tokens[index + 2];
+			index += 2;
+			return true;
+		}
+		outValue = tokens[index + 1];
+		index += 1;
+		return true;
+	}
+
+	void ParseMountedVoxelPreloadOptions(const std::vector<std::string>& tokens, MountedVoxelPreloadOptions& outOptions)
+	{
+		for (size_t i = 0; i < tokens.size(); ++i)
+		{
+			if (!IsMountedVoxelPreloadOptionName(tokens[i]))
+			{
+				continue;
+			}
+
+			std::string name;
+			std::string value;
+			if (!TryReadMountedVoxelPreloadOptionValue(tokens, i, name, value))
+			{
+				continue;
+			}
+
+			if (name == "priority")
+			{
+				LoadingVoxelRequestPriority priority = outOptions.priority;
+				if (ParseLoadingVoxelPriorityValue(value, priority))
+				{
+					outOptions.priority = priority;
+				}
+			}
+			else if (name == "gpu")
+			{
+				const std::string lower = LowerAscii(value);
+				outOptions.gpuForce = lower == "force";
+				outOptions.gpuPrefer = lower == "prefer";
+				if (lower == "none" || lower == "false" || lower == "0")
+				{
+					outOptions.gpuForce = false;
+					outOptions.gpuPrefer = false;
+				}
+			}
+		}
+	}
+
+	std::vector<std::string> TokenizeMountedVoxelPreloadLine(std::string line)
+	{
+		const size_t hash = line.find('#');
+		if (hash != std::string::npos)
+		{
+			line.resize(hash);
+		}
+		const size_t slashComment = line.find("//");
+		if (slashComment != std::string::npos)
+		{
+			line.resize(slashComment);
+		}
+
+		for (char& ch : line)
+		{
+			if (ch == ',' || ch == '{' || ch == '}' || ch == ';')
+			{
+				ch = ' ';
+			}
+		}
+
+		std::vector<std::string> tokens;
+		std::istringstream stream(line);
+		std::string token;
+		while (stream >> token)
+		{
+			tokens.push_back(token);
+		}
+		return tokens;
+	}
+
+	void AddMountedVoxelTexidRequest(
+		LoadingVoxelPreloadRequestGraph& graph,
+		DCoreActor* actor,
+		FTextureID texid,
+		const MountedVoxelPreloadOptions& options)
+	{
+		LoadingVoxelTextureCandidate candidate = {};
+		candidate.texid = texid;
+		candidate.sourceBits = LoadingVoxelRequestSource_MountedVoxelPreload;
+		candidate.priority = options.priority;
+		candidate.gpuForce = options.gpuForce;
+		candidate.gpuPrefer = options.gpuPrefer;
+		if (AddLoadingVoxelPreloadRequest(graph, actor, candidate))
+		{
+			graph.manifestRequests++;
+		}
+	}
+
+	void AddMountedVoxelPicnumRequest(
+		LoadingVoxelPreloadRequestGraph& graph,
+		DCoreActor* actor,
+		int picnum,
+		const MountedVoxelPreloadOptions& options)
+	{
+		if ((unsigned)picnum >= MAXTILES)
+		{
+			graph.manifestSkippedSyntax++;
+			return;
+		}
+		AddMountedVoxelTexidRequest(graph, actor, tileGetTextureID(picnum), options);
+	}
+
+	void AddMountedVoxelPicnumRangeRequests(
+		LoadingVoxelPreloadRequestGraph& graph,
+		DCoreActor* actor,
+		int firstPicnum,
+		int lastPicnum,
+		const MountedVoxelPreloadOptions& options)
+	{
+		if (firstPicnum > lastPicnum)
+		{
+			std::swap(firstPicnum, lastPicnum);
+		}
+		firstPicnum = (std::max)(0, firstPicnum);
+		lastPicnum = (std::min)(MAXTILES - 1, lastPicnum);
+		for (int picnum = firstPicnum; picnum <= lastPicnum; ++picnum)
+		{
+			FTextureID texid = tileGetTextureID(picnum);
+			if (ResolveVoxelTextureModel(texid) != nullptr)
+			{
+				AddMountedVoxelTexidRequest(graph, actor, texid, options);
+			}
+		}
+	}
+
+	bool TryParseMountedVoxelPicrangeToken(const std::string& token, int& outFirst, int& outLast)
+	{
+		const size_t dash = token.find('-');
+		if (dash == std::string::npos)
+		{
+			return false;
+		}
+		int first = 0;
+		int last = 0;
+		if (!TryParseIntToken(token.substr(0, dash), first) ||
+			!TryParseIntToken(token.substr(dash + 1), last))
+		{
+			return false;
+		}
+		outFirst = first;
+		outLast = last;
+		return true;
+	}
+
+	void AddMountedVoxelPicnumListRequests(
+		LoadingVoxelPreloadRequestGraph& graph,
+		DCoreActor* actor,
+		const std::string& value,
+		const MountedVoxelPreloadOptions& options)
+	{
+		std::string normalized = value;
+		for (char& ch : normalized)
+		{
+			if (ch == ',')
+			{
+				ch = ' ';
+			}
+		}
+
+		std::istringstream stream(normalized);
+		std::string token;
+		while (stream >> token)
+		{
+			int picnum = -1;
+			if (TryParseIntToken(token, picnum))
+			{
+				AddMountedVoxelPicnumRequest(graph, actor, picnum, options);
+			}
+			else
+			{
+				graph.manifestSkippedSyntax++;
+			}
+		}
+	}
+
+	bool IsMountedVoxelPreloadSectionActive(const std::string& section, const std::string& argument)
+	{
+		if (section == "global")
+		{
+			return true;
+		}
+		if (section == "game")
+		{
+			struct GameFilter
+			{
+				const char* name;
+				int flag;
+			};
+			static const GameFilter filters[] =
+			{
+				{ "duke", GAMEFLAG_DUKE },
+				{ "nam", GAMEFLAG_NAM | GAMEFLAG_NAPALM },
+				{ "namonly", GAMEFLAG_NAM },
+				{ "napalm", GAMEFLAG_NAPALM },
+				{ "ww2gi", GAMEFLAG_WW2GI },
+				{ "redneck", GAMEFLAG_RR },
+				{ "redneckrides", GAMEFLAG_RRRA },
+				{ "blood", GAMEFLAG_BLOOD },
+				{ "shadowwarrior", GAMEFLAG_SW },
+				{ "sw", GAMEFLAG_SW },
+				{ "exhumed", GAMEFLAG_POWERSLAVE | GAMEFLAG_EXHUMED },
+				{ "plutopak", GAMEFLAG_PLUTOPAK },
+				{ "worldtour", GAMEFLAG_WORLDTOUR },
+				{ "shareware", GAMEFLAG_SHAREWARE },
+			};
+			const std::string lower = LowerAscii(argument);
+			for (const GameFilter& filter : filters)
+			{
+				if (lower == filter.name)
+				{
+					return (g_gameType & filter.flag) != 0;
+				}
+			}
+			return false;
+		}
+		if (section == "map")
+		{
+			return currentLevel != nullptr && !argument.empty() && currentLevel->labelName.CompareNoCase(argument.c_str()) == 0;
+		}
+		return true;
+	}
+
+	DCoreActor* FindMountedVoxelPreloadActorDefault(const std::string& actorName)
+	{
+		if (actorName.empty())
+		{
+			return nullptr;
+		}
+		PClassActor* cls = PClass::FindActor(FName(actorName.c_str()));
+		return cls != nullptr ? GetDefaultByType(cls) : nullptr;
+	}
+
+	void ParseMountedVoxelPreloadDirective(
+		LoadingVoxelPreloadRequestGraph& graph,
+		const std::vector<std::string>& tokens,
+		bool active,
+		const char* sourceName,
+		int lineNumber)
+	{
+		if (tokens.empty())
+		{
+			return;
+		}
+		if (!active)
+		{
+			graph.manifestSkippedInactive++;
+			return;
+		}
+
+		const std::string directive = LowerAscii(tokens[0]);
+		MountedVoxelPreloadOptions options = {};
+		ParseMountedVoxelPreloadOptions(tokens, options);
+
+		auto logTrace = [&](const char* action, const char* reason)
+		{
+			if ((int)nri_ptloadingtrace >= 2)
+			{
+				Printf("NRI PT loading voxel preload: source=%s line=%d directive=%s action=%s reason=%s priority=%s gpu=%s\n",
+					sourceName != nullptr ? sourceName : "(unknown)",
+					lineNumber,
+					directive.c_str(),
+					action,
+					reason != nullptr ? reason : "none",
+					LoadingVoxelPriorityName(options.priority),
+					options.gpuForce ? "force" : (options.gpuPrefer ? "prefer" : "none"));
+			}
+		};
+
+		if (directive == "pic")
+		{
+			if (tokens.size() < 2)
+			{
+				graph.manifestSkippedSyntax++;
+				logTrace("skip", "missing-picnum");
+				return;
+			}
+			int picnum = -1;
+			if (!TryParseIntToken(tokens[1], picnum))
+			{
+				graph.manifestSkippedSyntax++;
+				logTrace("skip", "bad-picnum");
+				return;
+			}
+			AddMountedVoxelPicnumRequest(graph, nullptr, picnum, options);
+			logTrace("request", "pic");
+			return;
+		}
+
+		if (directive == "texture")
+		{
+			if (tokens.size() < 2)
+			{
+				graph.manifestSkippedSyntax++;
+				logTrace("skip", "missing-texture");
+				return;
+			}
+			int textureId = -1;
+			if (!TryParseIntToken(tokens[1], textureId))
+			{
+				graph.manifestSkippedSyntax++;
+				logTrace("skip", "bad-texture");
+				return;
+			}
+			AddMountedVoxelTexidRequest(graph, nullptr, FSetTextureID(textureId), options);
+			logTrace("request", "texture");
+			return;
+		}
+
+		if (directive == "picrange")
+		{
+			if (tokens.size() < 2)
+			{
+				graph.manifestSkippedSyntax++;
+				logTrace("skip", "missing-picrange");
+				return;
+			}
+			int firstPicnum = -1;
+			int lastPicnum = -1;
+			if (!TryParseMountedVoxelPicrangeToken(tokens[1], firstPicnum, lastPicnum))
+			{
+				if (tokens.size() < 3 ||
+					!TryParseIntToken(tokens[1], firstPicnum) ||
+					!TryParseIntToken(tokens[2], lastPicnum))
+				{
+					graph.manifestSkippedSyntax++;
+					logTrace("skip", "bad-picrange");
+					return;
+				}
+			}
+			AddMountedVoxelPicnumRangeRequests(graph, nullptr, firstPicnum, lastPicnum, options);
+			logTrace("request", "picrange");
+			return;
+		}
+
+		if (directive == "voxel")
+		{
+			graph.manifestSkippedUnsupported++;
+			logTrace("skip", "voxel-reverse-mapping-unsupported");
+			return;
+		}
+
+		if (directive == "actor")
+		{
+			if (tokens.size() < 3)
+			{
+				graph.manifestSkippedSyntax++;
+				logTrace("skip", "missing-actor-args");
+				return;
+			}
+			DCoreActor* actorDefault = FindMountedVoxelPreloadActorDefault(tokens[1]);
+			if (actorDefault == nullptr)
+			{
+				graph.manifestSkippedActor++;
+				logTrace("skip", "actor-not-found");
+				return;
+			}
+
+			const std::string spec = LowerAscii(tokens[2]);
+			if (spec == "allpicnums")
+			{
+				AddMountedVoxelTexidRequest(graph, actorDefault, actorDefault->spr.spritetexture(), options);
+				AddMountedVoxelTexidRequest(graph, actorDefault, actorDefault->dispictex, options);
+				const int range = (int)nri_ptloadingvoxelpicrange;
+				if (range > 0)
+				{
+					AddMountedVoxelPicnumRangeRequests(graph, actorDefault, actorDefault->spr.picnum - range, actorDefault->spr.picnum + range, options);
+				}
+				logTrace("request", "actor-allpicnums-default-range");
+				return;
+			}
+
+			if (spec == "picnums" || spec.rfind("picnums=", 0) == 0)
+			{
+				if (spec.rfind("picnums=", 0) == 0)
+				{
+					AddMountedVoxelPicnumListRequests(graph, actorDefault, tokens[2].substr(8), options);
+				}
+				for (size_t i = 3; i < tokens.size(); ++i)
+				{
+					if (IsMountedVoxelPreloadOptionName(tokens[i]))
+					{
+						break;
+					}
+					AddMountedVoxelPicnumListRequests(graph, actorDefault, tokens[i], options);
+				}
+				logTrace("request", "actor-picnums");
+				return;
+			}
+
+			if (spec == "picrange" || spec.rfind("picrange=", 0) == 0)
+			{
+				int firstPicnum = -1;
+				int lastPicnum = -1;
+				if (spec.rfind("picrange=", 0) == 0)
+				{
+					if (!TryParseMountedVoxelPicrangeToken(tokens[2].substr(9), firstPicnum, lastPicnum))
+					{
+						graph.manifestSkippedSyntax++;
+						logTrace("skip", "bad-actor-picrange");
+						return;
+					}
+				}
+				else if (tokens.size() < 5 ||
+					!TryParseIntToken(tokens[3], firstPicnum) ||
+					!TryParseIntToken(tokens[4], lastPicnum))
+				{
+					graph.manifestSkippedSyntax++;
+					logTrace("skip", "bad-actor-picrange");
+					return;
+				}
+				AddMountedVoxelPicnumRangeRequests(graph, actorDefault, firstPicnum, lastPicnum, options);
+				logTrace("request", "actor-picrange");
+				return;
+			}
+
+			graph.manifestSkippedSyntax++;
+			logTrace("skip", "unknown-actor-spec");
+			return;
+		}
+
+		graph.manifestSkippedUnsupported++;
+		logTrace("skip", "unknown-directive");
+	}
+
+	void ParseMountedVoxelPreloadLump(LoadingVoxelPreloadRequestGraph& graph, int lumpNum)
+	{
+		FileReader reader = fileSystem.OpenFileReader(lumpNum);
+		if (!reader.isOpen())
+		{
+			graph.manifestSkippedSyntax++;
+			return;
+		}
+
+		std::string text;
+		text.resize((size_t)reader.GetLength());
+		if (!text.empty())
+		{
+			reader.Read(text.data(), text.size());
+		}
+
+		const char* sourceName = fileSystem.GetFileFullName(lumpNum);
+		bool active = true;
+		int lineNumber = 0;
+		std::istringstream lines(text);
+		std::string line;
+		while (std::getline(lines, line))
+		{
+			++lineNumber;
+			std::vector<std::string> tokens = TokenizeMountedVoxelPreloadLine(line);
+			if (tokens.empty())
+			{
+				continue;
+			}
+
+			graph.manifestLines++;
+			const std::string first = LowerAscii(tokens[0]);
+			if (first == "voxelpreload")
+			{
+				active = true;
+				continue;
+			}
+			if (first == "global" || first == "game" || first == "map")
+			{
+				const std::string argument = tokens.size() >= 2 ? tokens[1] : "";
+				active = IsMountedVoxelPreloadSectionActive(first, argument);
+				continue;
+			}
+
+			ParseMountedVoxelPreloadDirective(graph, tokens, active, sourceName, lineNumber);
+		}
+	}
+
+	void AddMountedVoxelPreloadRequests(LoadingVoxelPreloadRequestGraph& graph)
+	{
+		if (!r_voxels || !nri_ptloadingvoxellist)
+		{
+			return;
+		}
+
+		static const char* voxelPreloadNames[] = { "VOXELPRELOAD", nullptr };
+		int lastLump = 0;
+		int lumpNum = -1;
+		while ((lumpNum = fileSystem.FindLumpMulti(voxelPreloadNames, &lastLump)) != -1)
+		{
+			graph.manifestSources++;
+			ParseMountedVoxelPreloadLump(graph, lumpNum);
+		}
+
+		if ((int)nri_ptloadingtrace >= 1 && graph.manifestSources != 0)
+		{
+			Printf("NRI PT loading voxel preload list: sources=%u lines=%u requests=%u skipped_inactive=%u skipped_syntax=%u skipped_actor=%u skipped_unsupported=%u\n",
+				graph.manifestSources,
+				graph.manifestLines,
+				graph.manifestRequests,
+				graph.manifestSkippedInactive,
+				graph.manifestSkippedSyntax,
+				graph.manifestSkippedActor,
+				graph.manifestSkippedUnsupported);
+		}
+	}
+
 	void BuildLiveActorVoxelPreloadRequestGraph(LoadingVoxelPreloadRequestGraph& graph)
 	{
 		graph = {};
@@ -2942,6 +3554,8 @@ namespace
 		}
 
 		std::vector<LoadingVoxelTextureCandidate> candidateTexids;
+		AddMountedVoxelPreloadRequests(graph);
+
 		TSpriteIterator<DCoreActor> it;
 		while (DCoreActor* actor = it.Next())
 		{
