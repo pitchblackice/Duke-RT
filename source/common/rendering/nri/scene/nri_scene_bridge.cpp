@@ -19,6 +19,7 @@
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <windows.h>
@@ -37,6 +38,9 @@ CVAR(Int, nri_ptloadingvoxelactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelvariants, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelvariantprims, 2000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelpicrange, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelcpumaxvariants, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelcpumaxprims, 2000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelcpumaxms, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -187,6 +191,57 @@ namespace
 	};
 
 	std::unordered_map<uint64_t, VoxelActorCacheEntry> gVoxelActorCache;
+
+	enum class LoadingVoxelRequestPriority : uint8_t
+	{
+		Force = 0,
+		High = 1,
+		Normal = 2,
+		Opportunistic = 3,
+	};
+
+	enum LoadingVoxelRequestSourceBits : uint32_t
+	{
+		LoadingVoxelRequestSource_None = 0,
+		LoadingVoxelRequestSource_LiveActorCurrent = 1u << 0,
+		LoadingVoxelRequestSource_LiveActorAnimated = 1u << 1,
+		LoadingVoxelRequestSource_LiveActorPicrange = 1u << 2,
+		LoadingVoxelRequestSource_MountedVoxelPreload = 1u << 3,
+	};
+
+	struct LoadingVoxelTextureCandidate
+	{
+		FTextureID texid = {};
+		uint32_t sourceBits = LoadingVoxelRequestSource_None;
+		LoadingVoxelRequestPriority priority = LoadingVoxelRequestPriority::Normal;
+		bool gpuForce = false;
+		bool gpuPrefer = false;
+	};
+
+	struct LoadingVoxelPreloadRequest
+	{
+		FTextureID texid = {};
+		DCoreActor* actor = nullptr;
+		int32_t actorIndex = -1;
+		FVoxelModel* model = nullptr;
+		int32_t resolvedVoxelIndex = -1;
+		uint64_t meshVariantHash = 0;
+		uint32_t sourceBits = LoadingVoxelRequestSource_None;
+		LoadingVoxelRequestPriority priority = LoadingVoxelRequestPriority::Normal;
+		bool gpuForce = false;
+		bool gpuPrefer = false;
+		uint32_t primitiveCount = 0;
+	};
+
+	struct LoadingVoxelPreloadRequestGraph
+	{
+		std::vector<LoadingVoxelPreloadRequest> requests;
+		std::unordered_map<uint64_t, size_t> requestByMeshVariant;
+		uint32_t discovered = 0;
+		uint32_t skippedInvalid = 0;
+		uint32_t skippedDuplicate = 0;
+		uint32_t actorCandidates = 0;
+	};
 
 	uint32_t CountSurfacePrimitives(const SurfaceRef& surface);
 
@@ -2624,7 +2679,109 @@ namespace
 		return true;
 	}
 
-	void AddUniqueLoadingActorTextureCandidate(FTextureID texid, std::vector<FTextureID>& candidates, std::unordered_set<int>& seenTextureIds)
+	uint32_t GetLoadingVoxelCpuVariantLimit()
+	{
+		return (int)nri_ptloadingvoxelcpumaxvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelcpumaxvariants;
+	}
+
+	uint32_t GetLoadingVoxelCpuPrimitiveLimit()
+	{
+		return (int)nri_ptloadingvoxelcpumaxprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelcpumaxprims;
+	}
+
+	const char* LoadingVoxelPriorityName(LoadingVoxelRequestPriority priority)
+	{
+		switch (priority)
+		{
+		case LoadingVoxelRequestPriority::Force: return "force";
+		case LoadingVoxelRequestPriority::High: return "high";
+		case LoadingVoxelRequestPriority::Normal: return "normal";
+		case LoadingVoxelRequestPriority::Opportunistic: return "opportunistic";
+		default: return "unknown";
+		}
+	}
+
+	std::string LoadingVoxelSourceBitsName(uint32_t sourceBits)
+	{
+		std::string result;
+		auto append = [&](uint32_t bit, const char* name)
+		{
+			if ((sourceBits & bit) == 0)
+			{
+				return;
+			}
+			if (!result.empty())
+			{
+				result += "|";
+			}
+			result += name;
+		};
+		append(LoadingVoxelRequestSource_LiveActorCurrent, "live-actor-current");
+		append(LoadingVoxelRequestSource_LiveActorAnimated, "live-actor-animated");
+		append(LoadingVoxelRequestSource_LiveActorPicrange, "live-actor-picrange");
+		append(LoadingVoxelRequestSource_MountedVoxelPreload, "mounted-voxel-preload");
+		return result.empty() ? "none" : result;
+	}
+
+	int LoadingVoxelSourceRank(uint32_t sourceBits)
+	{
+		if ((sourceBits & LoadingVoxelRequestSource_MountedVoxelPreload) != 0 ||
+			(sourceBits & LoadingVoxelRequestSource_LiveActorCurrent) != 0)
+		{
+			return 0;
+		}
+		if ((sourceBits & LoadingVoxelRequestSource_LiveActorAnimated) != 0)
+		{
+			return 1;
+		}
+		if ((sourceBits & LoadingVoxelRequestSource_LiveActorPicrange) != 0)
+		{
+			return 3;
+		}
+		return 2;
+	}
+
+	bool IsLoadingVoxelRequestGpuCandidate(const LoadingVoxelPreloadRequest& request)
+	{
+		if (request.gpuForce || request.gpuPrefer)
+		{
+			return true;
+		}
+		const uint32_t stableSources =
+			LoadingVoxelRequestSource_MountedVoxelPreload |
+			LoadingVoxelRequestSource_LiveActorCurrent |
+			LoadingVoxelRequestSource_LiveActorAnimated;
+		return (request.sourceBits & stableSources) != 0;
+	}
+
+	void SortLoadingVoxelPreloadRequests(LoadingVoxelPreloadRequestGraph& graph)
+	{
+		std::sort(graph.requests.begin(), graph.requests.end(), [](const LoadingVoxelPreloadRequest& a, const LoadingVoxelPreloadRequest& b)
+		{
+			if (a.priority != b.priority)
+			{
+				return (uint8_t)a.priority < (uint8_t)b.priority;
+			}
+			const int sourceRankA = LoadingVoxelSourceRank(a.sourceBits);
+			const int sourceRankB = LoadingVoxelSourceRank(b.sourceBits);
+			if (sourceRankA != sourceRankB)
+			{
+				return sourceRankA < sourceRankB;
+			}
+			if (a.actorIndex != b.actorIndex)
+			{
+				return a.actorIndex < b.actorIndex;
+			}
+			return a.texid.GetIndex() < b.texid.GetIndex();
+		});
+	}
+
+	void AddUniqueLoadingActorTextureCandidate(
+		FTextureID texid,
+		uint32_t sourceBits,
+		LoadingVoxelRequestPriority priority,
+		std::vector<LoadingVoxelTextureCandidate>& candidates,
+		std::unordered_map<int, size_t>& seenTextureIds)
 	{
 		if (!texid.isValid())
 		{
@@ -2632,13 +2789,31 @@ namespace
 		}
 
 		const int textureId = texid.GetIndex();
-		if (seenTextureIds.insert(textureId).second)
+		auto found = seenTextureIds.find(textureId);
+		if (found != seenTextureIds.end())
 		{
-			candidates.push_back(texid);
+			LoadingVoxelTextureCandidate& candidate = candidates[found->second];
+			candidate.sourceBits |= sourceBits;
+			if ((uint8_t)priority < (uint8_t)candidate.priority)
+			{
+				candidate.priority = priority;
+			}
+			return;
 		}
+
+		LoadingVoxelTextureCandidate candidate = {};
+		candidate.texid = texid;
+		candidate.sourceBits = sourceBits;
+		candidate.priority = priority;
+		seenTextureIds.emplace(textureId, candidates.size());
+		candidates.push_back(candidate);
 	}
 
-	void AddLoadingActorVoxelTextureRangeCandidates(int centerPicnum, int range, std::vector<FTextureID>& candidates, std::unordered_set<int>& seenTextureIds)
+	void AddLoadingActorVoxelTextureRangeCandidates(
+		int centerPicnum,
+		int range,
+		std::vector<LoadingVoxelTextureCandidate>& candidates,
+		std::unordered_map<int, size_t>& seenTextureIds)
 	{
 		if (range <= 0 || centerPicnum < 0 || centerPicnum >= MAXTILES)
 		{
@@ -2657,12 +2832,17 @@ namespace
 
 			if (ResolveVoxelTextureModel(texid) != nullptr)
 			{
-				AddUniqueLoadingActorTextureCandidate(texid, candidates, seenTextureIds);
+				AddUniqueLoadingActorTextureCandidate(
+					texid,
+					LoadingVoxelRequestSource_LiveActorPicrange,
+					LoadingVoxelRequestPriority::Opportunistic,
+					candidates,
+					seenTextureIds);
 			}
 		}
 	}
 
-	void BuildLoadingActorTextureCandidates(DCoreActor* actor, std::vector<FTextureID>& candidates)
+	void BuildLoadingActorTextureCandidates(DCoreActor* actor, std::vector<LoadingVoxelTextureCandidate>& candidates)
 	{
 		candidates.clear();
 		if (actor == nullptr)
@@ -2670,21 +2850,118 @@ namespace
 			return;
 		}
 
-		std::unordered_set<int> seenTextureIds;
+		std::unordered_map<int, size_t> seenTextureIds;
 		auto addBaseAndAnimated = [&](FTextureID texid)
 		{
-			AddUniqueLoadingActorTextureCandidate(texid, candidates, seenTextureIds);
+			AddUniqueLoadingActorTextureCandidate(
+				texid,
+				LoadingVoxelRequestSource_LiveActorCurrent,
+				LoadingVoxelRequestPriority::High,
+				candidates,
+				seenTextureIds);
 			if (texid.isValid() && (actor->spr.cstat2 & CSTAT2_SPRITE_NOANIMATE) == 0)
 			{
 				FTextureID animatedTexid = texid;
 				tileUpdatePicnum(animatedTexid, actor->GetIndex() & 16383);
-				AddUniqueLoadingActorTextureCandidate(animatedTexid, candidates, seenTextureIds);
+				AddUniqueLoadingActorTextureCandidate(
+					animatedTexid,
+					LoadingVoxelRequestSource_LiveActorAnimated,
+					LoadingVoxelRequestPriority::Normal,
+					candidates,
+					seenTextureIds);
 			}
 		};
 
 		addBaseAndAnimated(actor->spr.spritetexture());
 		addBaseAndAnimated(actor->dispictex);
 		AddLoadingActorVoxelTextureRangeCandidates(actor->spr.picnum, (int)nri_ptloadingvoxelpicrange, candidates, seenTextureIds);
+	}
+
+	bool AddLoadingVoxelPreloadRequest(
+		LoadingVoxelPreloadRequestGraph& graph,
+		DCoreActor* actor,
+		const LoadingVoxelTextureCandidate& candidate)
+	{
+		graph.discovered++;
+		int voxelIndex = -1;
+		FVoxelModel* model = ResolveVoxelTextureModel(candidate.texid, &voxelIndex);
+		if (model == nullptr)
+		{
+			graph.skippedInvalid++;
+			return false;
+		}
+
+		const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(candidate.texid, model, voxelIndex);
+		const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
+		if (meshVariantHash == 0)
+		{
+			graph.skippedInvalid++;
+			return false;
+		}
+
+		auto found = graph.requestByMeshVariant.find(meshVariantHash);
+		if (found != graph.requestByMeshVariant.end())
+		{
+			LoadingVoxelPreloadRequest& request = graph.requests[found->second];
+			request.sourceBits |= candidate.sourceBits;
+			request.gpuForce = request.gpuForce || candidate.gpuForce;
+			request.gpuPrefer = request.gpuPrefer || candidate.gpuPrefer;
+			if ((uint8_t)candidate.priority < (uint8_t)request.priority)
+			{
+				request.priority = candidate.priority;
+				request.actor = actor;
+				request.actorIndex = actor != nullptr ? (int32_t)actor->GetIndex() : -1;
+				request.texid = candidate.texid;
+			}
+			graph.skippedDuplicate++;
+			return true;
+		}
+
+		LoadingVoxelPreloadRequest request = {};
+		request.texid = candidate.texid;
+		request.actor = actor;
+		request.actorIndex = actor != nullptr ? (int32_t)actor->GetIndex() : -1;
+		request.model = model;
+		request.resolvedVoxelIndex = voxelIndex;
+		request.meshVariantHash = meshVariantHash;
+		request.sourceBits = candidate.sourceBits;
+		request.priority = candidate.priority;
+		request.gpuForce = candidate.gpuForce;
+		request.gpuPrefer = candidate.gpuPrefer;
+		graph.requestByMeshVariant.emplace(meshVariantHash, graph.requests.size());
+		graph.requests.push_back(request);
+		return true;
+	}
+
+	void BuildLiveActorVoxelPreloadRequestGraph(LoadingVoxelPreloadRequestGraph& graph)
+	{
+		graph = {};
+		if (!r_voxels || (int)nri_ptloadingvoxelactors <= 0)
+		{
+			return;
+		}
+
+		std::vector<LoadingVoxelTextureCandidate> candidateTexids;
+		TSpriteIterator<DCoreActor> it;
+		while (DCoreActor* actor = it.Next())
+		{
+			if (!IsLiveActorVoxelWarmupCandidate(actor))
+			{
+				continue;
+			}
+
+			BuildLoadingActorTextureCandidates(actor, candidateTexids);
+			bool countedActor = false;
+			for (const LoadingVoxelTextureCandidate& candidate : candidateTexids)
+			{
+				if (AddLoadingVoxelPreloadRequest(graph, actor, candidate) && !countedActor)
+				{
+					graph.actorCandidates++;
+					countedActor = true;
+				}
+			}
+		}
+		SortLoadingVoxelPreloadRequests(graph);
 	}
 
 	float GetLoadingActorAlpha(DCoreActor* actor)
@@ -3899,87 +4176,141 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 		return;
 	}
 
-	const uint32_t variantLimit = (int)nri_ptloadingvoxelvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelvariants;
-	const uint32_t primitiveLimit = (int)nri_ptloadingvoxelvariantprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelvariantprims;
+	LoadingVoxelPreloadRequestGraph graph;
+	BuildLiveActorVoxelPreloadRequestGraph(graph);
+	if (graph.actorCandidates != 0)
+	{
+		VoxelMeshPrecacheStats actorDelta = {};
+		actorDelta.actorCandidates = graph.actorCandidates;
+		RecordVoxelMeshPrecacheStats(actorDelta, stats);
+	}
+
+	const uint32_t variantLimit = GetLoadingVoxelCpuVariantLimit();
+	const uint32_t primitiveLimit = GetLoadingVoxelCpuPrimitiveLimit();
+	const int timeLimitMs = (int)nri_ptloadingvoxelcpumaxms;
+	const auto start = std::chrono::steady_clock::now();
 	uint32_t warmedVariants = 0;
 	uint32_t primitiveTotal = 0;
+	uint32_t skippedBudget = 0;
+	uint32_t forceRequests = 0;
+	uint32_t highRequests = 0;
+	uint32_t normalRequests = 0;
+	uint32_t opportunisticRequests = 0;
+	uint32_t gpuEligibleRequests = 0;
 	std::unordered_set<uint64_t> seenMeshVariants;
-	std::vector<FTextureID> candidateTexids;
-	TSpriteIterator<DCoreActor> it;
-	while (DCoreActor* actor = it.Next())
+	for (const LoadingVoxelPreloadRequest& request : graph.requests)
 	{
-		if (warmedVariants >= variantLimit || (primitiveLimit != 0 && primitiveTotal >= primitiveLimit))
+		if (IsLoadingVoxelRequestGpuCandidate(request))
 		{
-			break;
+			gpuEligibleRequests++;
 		}
-		if (!IsLiveActorVoxelWarmupCandidate(actor))
+		switch (request.priority)
+		{
+		case LoadingVoxelRequestPriority::Force: forceRequests++; break;
+		case LoadingVoxelRequestPriority::High: highRequests++; break;
+		case LoadingVoxelRequestPriority::Normal: normalRequests++; break;
+		case LoadingVoxelRequestPriority::Opportunistic: opportunisticRequests++; break;
+		default: break;
+		}
+
+		if ((uint8_t)request.priority > (uint8_t)LoadingVoxelRequestPriority::Force &&
+			(warmedVariants >= variantLimit || (primitiveLimit != 0 && primitiveTotal >= primitiveLimit)))
+		{
+			skippedBudget++;
+			if ((int)nri_ptloadingtrace >= 2)
+			{
+				const std::string sourceName = LoadingVoxelSourceBitsName(request.sourceBits);
+				Printf("NRI PT loading voxel request: source=%s priority=%s actor=%d tex=%d voxel=%d mesh_variant=0x%llx tris=%u action=defer reason=cpu-budget variants=%u/%u prims=%u/%u\n",
+					sourceName.c_str(),
+					LoadingVoxelPriorityName(request.priority),
+					request.actorIndex,
+					request.texid.GetIndex(),
+					request.resolvedVoxelIndex,
+					(unsigned long long)request.meshVariantHash,
+					request.primitiveCount,
+					warmedVariants,
+					variantLimit,
+					primitiveTotal,
+					primitiveLimit);
+			}
+			continue;
+		}
+
+		if ((uint8_t)request.priority > (uint8_t)LoadingVoxelRequestPriority::Force &&
+			timeLimitMs > 0 &&
+			DurationMs(start, std::chrono::steady_clock::now()) >= (double)timeLimitMs)
+		{
+			skippedBudget++;
+			if ((int)nri_ptloadingtrace >= 2)
+			{
+				const std::string sourceName = LoadingVoxelSourceBitsName(request.sourceBits);
+				Printf("NRI PT loading voxel request: source=%s priority=%s actor=%d tex=%d voxel=%d mesh_variant=0x%llx tris=%u action=defer reason=cpu-time ms=%.3f limit=%d\n",
+					sourceName.c_str(),
+					LoadingVoxelPriorityName(request.priority),
+					request.actorIndex,
+					request.texid.GetIndex(),
+					request.resolvedVoxelIndex,
+					(unsigned long long)request.meshVariantHash,
+					request.primitiveCount,
+					DurationMs(start, std::chrono::steady_clock::now()),
+					timeLimitMs);
+			}
+			continue;
+		}
+
+		if (request.meshVariantHash != 0 && !seenMeshVariants.insert(request.meshVariantHash).second)
 		{
 			continue;
 		}
 
-		BuildLoadingActorTextureCandidates(actor, candidateTexids);
-		bool countedActor = false;
-		for (const FTextureID texid : candidateTexids)
+		const bool hadVariantSurface = IsVoxelMeshVariantSurfaceReady(request.meshVariantHash);
+		if ((int)nri_ptloadingtrace >= 2)
 		{
-			if (warmedVariants >= variantLimit || (primitiveLimit != 0 && primitiveTotal >= primitiveLimit))
-			{
-				break;
-			}
-
-			int voxelIndex = -1;
-			FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
-			if (model == nullptr)
-			{
-				continue;
-			}
-
-			if (!countedActor)
-			{
-				VoxelMeshPrecacheStats actorDelta = {};
-				actorDelta.actorCandidates = 1;
-				RecordVoxelMeshPrecacheStats(actorDelta, stats);
-				countedActor = true;
-			}
-
-			const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(texid, model, voxelIndex);
-			const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
-			if (meshVariantHash != 0 && !seenMeshVariants.insert(meshVariantHash).second)
-			{
-				if ((int)nri_ptloadingtrace >= 2)
-				{
-					Printf("NRI PT loading voxel actor: event=variant-hit actor=%d tex=%d voxel=%d mesh_variant=0x%llx transform_keyed=0\n",
-						(int)actor->GetIndex(),
-						texid.GetIndex(),
-						voxelIndex,
-						(unsigned long long)meshVariantHash);
-				}
-				continue;
-			}
-
-			if ((int)nri_ptloadingtrace >= 2)
-			{
-				Printf("NRI PT loading voxel actor: event=variant-request actor=%d tex=%d voxel=%d mesh_variant=0x%llx transform_keyed=0\n",
-					(int)actor->GetIndex(),
-					texid.GetIndex(),
-					voxelIndex,
-					(unsigned long long)meshVariantHash);
-			}
-			PrecacheVoxelTextureCpuMesh(texid, stats);
-
-			uint32_t primitiveCount = 0;
-			auto foundMesh = gVoxelMeshCache.find(model);
-			if (foundMesh != gVoxelMeshCache.end() && foundMesh->second.built && foundMesh->second.valid)
-			{
-				VoxelActorCacheLookup lookup = {};
-				lookup.meshVariantHash = meshVariantHash;
-				lookup.sourcePicnum = texid.GetIndex();
-				lookup.resolvedVoxelIndex = voxelIndex;
-				const SurfaceRef* surface = GetCachedVoxelMeshVariantSurface(lookup, foundMesh->second.mesh, false);
-				primitiveCount = surface != nullptr ? CountSurfacePrimitives(*surface) : 0u;
-			}
-			primitiveTotal += primitiveCount;
-			++warmedVariants;
+			const std::string sourceName = LoadingVoxelSourceBitsName(request.sourceBits);
+			Printf("NRI PT loading voxel request: source=%s priority=%s actor=%d tex=%d voxel=%d mesh_variant=0x%llx tris=%u action=%s reason=selected\n",
+				sourceName.c_str(),
+				LoadingVoxelPriorityName(request.priority),
+				request.actorIndex,
+				request.texid.GetIndex(),
+				request.resolvedVoxelIndex,
+				(unsigned long long)request.meshVariantHash,
+				request.primitiveCount,
+				hadVariantSurface ? "cpu-hit" : "cpu-build");
 		}
+
+		PrecacheVoxelTextureCpuMesh(request.texid, stats);
+
+		uint32_t primitiveCount = 0;
+		auto foundMesh = gVoxelMeshCache.find(request.model);
+		if (foundMesh != gVoxelMeshCache.end() && foundMesh->second.built && foundMesh->second.valid)
+		{
+			VoxelActorCacheLookup lookup = {};
+			lookup.meshVariantHash = request.meshVariantHash;
+			lookup.sourcePicnum = request.texid.GetIndex();
+			lookup.resolvedVoxelIndex = request.resolvedVoxelIndex;
+			const SurfaceRef* surface = GetCachedVoxelMeshVariantSurface(lookup, foundMesh->second.mesh, false);
+			primitiveCount = surface != nullptr ? CountSurfacePrimitives(*surface) : 0u;
+		}
+		primitiveTotal += primitiveCount;
+		++warmedVariants;
+	}
+
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading voxel requests: discovered=%u unique=%u force=%u high=%u normal=%u opportunistic=%u cpu_selected=%u gpu_candidates=%u skipped_budget=%u skipped_invalid=%u skipped_duplicate=%u prims=%u ms=%.3f\n",
+			graph.discovered,
+			(uint32_t)graph.requests.size(),
+			forceRequests,
+			highRequests,
+			normalRequests,
+			opportunisticRequests,
+			warmedVariants,
+			gpuEligibleRequests,
+			skippedBudget,
+			graph.skippedInvalid,
+			graph.skippedDuplicate,
+			primitiveTotal,
+			DurationMs(start, std::chrono::steady_clock::now()));
 	}
 }
 
@@ -4334,113 +4665,131 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 	const uint32_t variantLimit = (int)nri_ptloadingvoxelvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelvariants;
 	const uint32_t primitiveLimit = (int)nri_ptloadingvoxelvariantprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelvariantprims;
 	uint32_t primitiveTotal = 0;
+	uint32_t skippedNotCpuReady = 0;
+	uint32_t skippedGpuSource = 0;
+	uint32_t skippedBudget = 0;
+	uint32_t skippedMaterial = 0;
 	std::unordered_set<uint64_t> seenVariantPairs;
-	std::vector<FTextureID> candidateTexids;
 
-	TSpriteIterator<DCoreActor> it;
-	while (DCoreActor* actor = it.Next())
+	LoadingVoxelPreloadRequestGraph graph;
+	BuildLiveActorVoxelPreloadRequestGraph(graph);
+	for (const LoadingVoxelPreloadRequest& request : graph.requests)
 	{
 		if (outEntries.size() >= variantLimit)
 		{
 			break;
 		}
-		if (!IsLiveActorVoxelWarmupCandidate(actor))
+		if (!IsLoadingVoxelRequestGpuCandidate(request))
+		{
+			skippedGpuSource++;
+			if ((int)nri_ptloadingtrace >= 2)
+			{
+				const std::string sourceName = LoadingVoxelSourceBitsName(request.sourceBits);
+				Printf("NRI PT loading voxel variant: event=defer reason=gpu-source source=%s priority=%s actor=%d tex=%d voxel=%d mesh_variant=0x%llx\n",
+					sourceName.c_str(),
+					LoadingVoxelPriorityName(request.priority),
+					request.actorIndex,
+					request.texid.GetIndex(),
+					request.resolvedVoxelIndex,
+					(unsigned long long)request.meshVariantHash);
+			}
+			continue;
+		}
+
+		FGameTexture* voxelTexture = TexMan.GetGameTexture(request.model->GetPaletteTexture());
+		if (voxelTexture == nullptr || !voxelTexture->isValid())
+		{
+			skippedMaterial++;
+			continue;
+		}
+
+		auto foundMesh = gVoxelMeshCache.find(request.model);
+		if (foundMesh == gVoxelMeshCache.end() || !foundMesh->second.built || !foundMesh->second.valid)
+		{
+			skippedNotCpuReady++;
+			continue;
+		}
+
+		VoxelActorCacheLookup lookup = {};
+		lookup.meshVariantHash = request.meshVariantHash;
+		lookup.sourcePicnum = request.texid.GetIndex();
+		lookup.resolvedVoxelIndex = request.resolvedVoxelIndex;
+		const SurfaceRef* surface = GetCachedVoxelMeshVariantSurface(lookup, foundMesh->second.mesh, false);
+		if (surface == nullptr)
+		{
+			skippedNotCpuReady++;
+			continue;
+		}
+
+		FGameTexture* emissiveSourceTexture = TexMan.GetGameTexture(request.texid);
+		if (emissiveSourceTexture != nullptr && !emissiveSourceTexture->isValid())
+		{
+			emissiveSourceTexture = nullptr;
+		}
+		const int palette = request.actor != nullptr ? request.actor->spr.pal : 0;
+		const int shade = request.actor != nullptr ? request.actor->spr.shade : 0;
+		const float alpha = request.actor != nullptr ? GetLoadingActorAlpha(request.actor) : 1.0f;
+		const MaterialRef material = MakeVoxelPaletteMaterialRef(
+			voxelTexture,
+			emissiveSourceTexture,
+			palette,
+			shade,
+			alpha,
+			MaterialFlag_Sprite);
+		const uint64_t materialVariantHash = BuildVoxelMaterialVariantKeyHash(BuildVoxelMaterialVariantKey(voxelTexture, material));
+		const uint64_t pairHash = HashCombine64(request.meshVariantHash, materialVariantHash);
+		if (materialVariantHash == 0 || !seenVariantPairs.insert(pairHash).second)
 		{
 			continue;
 		}
 
-		BuildLoadingActorTextureCandidates(actor, candidateTexids);
-		for (const FTextureID texid : candidateTexids)
+		const uint32_t primitiveCount = CountSurfacePrimitives(*surface);
+		if (primitiveLimit != 0 && primitiveTotal != 0 && primitiveTotal + primitiveCount > primitiveLimit)
 		{
-			if (outEntries.size() >= variantLimit)
+			skippedBudget++;
+			if ((int)nri_ptloadingtrace >= 2)
 			{
-				break;
+				const std::string sourceName = LoadingVoxelSourceBitsName(request.sourceBits);
+				Printf("NRI PT loading voxel variant: event=defer reason=preload-budget source=%s priority=%s actor=%d tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx tris=%u prims_used=%u prims_limit=%u\n",
+					sourceName.c_str(),
+					LoadingVoxelPriorityName(request.priority),
+					request.actorIndex,
+					request.texid.GetIndex(),
+					request.resolvedVoxelIndex,
+					(unsigned long long)request.meshVariantHash,
+					(unsigned long long)materialVariantHash,
+					primitiveCount,
+					primitiveTotal,
+					primitiveLimit);
 			}
-
-			int voxelIndex = -1;
-			FVoxelModel* model = ResolveVoxelTextureModel(texid, &voxelIndex);
-			if (model == nullptr)
-			{
-				continue;
-			}
-			FGameTexture* voxelTexture = TexMan.GetGameTexture(model->GetPaletteTexture());
-			if (voxelTexture == nullptr || !voxelTexture->isValid())
-			{
-				continue;
-			}
-
-			const VoxelMeshVariantKey meshVariantKey = BuildLoadingVoxelMeshVariantKey(texid, model, voxelIndex);
-			const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
-			if (meshVariantHash == 0)
-			{
-				continue;
-			}
-			auto foundMesh = gVoxelMeshCache.find(model);
-			if (foundMesh == gVoxelMeshCache.end() || !foundMesh->second.built || !foundMesh->second.valid)
-			{
-				continue;
-			}
-
-			VoxelActorCacheLookup lookup = {};
-			lookup.meshVariantHash = meshVariantHash;
-			lookup.sourcePicnum = texid.GetIndex();
-			lookup.resolvedVoxelIndex = voxelIndex;
-			const SurfaceRef* surface = GetCachedVoxelMeshVariantSurface(lookup, foundMesh->second.mesh, false);
-			if (surface == nullptr)
-			{
-				continue;
-			}
-
-			FGameTexture* emissiveSourceTexture = TexMan.GetGameTexture(texid);
-			if (emissiveSourceTexture != nullptr && !emissiveSourceTexture->isValid())
-			{
-				emissiveSourceTexture = nullptr;
-			}
-			const MaterialRef material = MakeVoxelPaletteMaterialRef(
-				voxelTexture,
-				emissiveSourceTexture,
-				actor->spr.pal,
-				actor->spr.shade,
-				GetLoadingActorAlpha(actor),
-				MaterialFlag_Sprite);
-			const uint64_t materialVariantHash = BuildVoxelMaterialVariantKeyHash(BuildVoxelMaterialVariantKey(voxelTexture, material));
-			const uint64_t pairHash = HashCombine64(meshVariantHash, materialVariantHash);
-			if (materialVariantHash == 0 || !seenVariantPairs.insert(pairHash).second)
-			{
-				continue;
-			}
-
-			const uint32_t primitiveCount = CountSurfacePrimitives(*surface);
-			if (primitiveLimit != 0 && primitiveTotal != 0 && primitiveTotal + primitiveCount > primitiveLimit)
-			{
-				if ((int)nri_ptloadingtrace >= 2)
-				{
-					Printf("NRI PT loading voxel variant: event=defer reason=preload-budget actor=%d tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx tris=%u prims_used=%u prims_limit=%u\n",
-						(int)actor->GetIndex(),
-						texid.GetIndex(),
-						voxelIndex,
-						(unsigned long long)meshVariantHash,
-						(unsigned long long)materialVariantHash,
-						primitiveCount,
-						primitiveTotal,
-						primitiveLimit);
-				}
-				continue;
-			}
-
-			PrecachedVoxelVariantView view = {};
-			view.meshKeyHash = meshVariantHash;
-			view.materialKeyHash = materialVariantHash;
-			view.meshVariantHash = meshVariantHash;
-			view.materialVariantHash = materialVariantHash;
-			view.sourcePicnum = texid.GetIndex();
-			view.resolvedVoxelIndex = voxelIndex;
-			view.primitiveCount = primitiveCount;
-			view.surface = surface;
-			view.material = material;
-			outEntries.push_back(std::move(view));
-			primitiveTotal += primitiveCount;
+			continue;
 		}
+
+		PrecachedVoxelVariantView view = {};
+		view.meshKeyHash = request.meshVariantHash;
+		view.materialKeyHash = materialVariantHash;
+		view.meshVariantHash = request.meshVariantHash;
+		view.materialVariantHash = materialVariantHash;
+		view.sourcePicnum = request.texid.GetIndex();
+		view.resolvedVoxelIndex = request.resolvedVoxelIndex;
+		view.primitiveCount = primitiveCount;
+		view.surface = surface;
+		view.material = material;
+		outEntries.push_back(std::move(view));
+		primitiveTotal += primitiveCount;
+	}
+
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT loading voxel gpu requests: discovered=%u unique=%u gpu_selected=%u skipped_source=%u skipped_cpu=%u skipped_budget=%u skipped_material=%u prims=%u\n",
+			graph.discovered,
+			(uint32_t)graph.requests.size(),
+			(uint32_t)outEntries.size(),
+			skippedGpuSource,
+			skippedNotCpuReady,
+			skippedBudget,
+			skippedMaterial,
+			primitiveTotal);
 	}
 
 	return !outEntries.empty();
