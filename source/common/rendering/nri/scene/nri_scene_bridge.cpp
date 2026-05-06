@@ -53,9 +53,11 @@ CVAR(Int, nri_ptloadingvoxelactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelvariants, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelvariantprims, 2000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelpicrange, 16, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelcpubudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelcpumaxvariants, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelcpumaxprims, 2000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptloadingvoxelcpumaxms, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptloadingvoxelgpubudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptloadingvoxellist, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
@@ -2702,31 +2704,96 @@ namespace
 		return true;
 	}
 
-	uint32_t GetLoadingVoxelCpuVariantLimit()
+	struct LoadingVoxelCpuBudget
 	{
-		return (int)nri_ptloadingvoxelcpumaxvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelcpumaxvariants;
+		uint32_t variantLimit = UINT32_MAX;
+		uint32_t primitiveLimit = 0;
+		int timeLimitMs = 0;
+		int mode = 0;
+	};
+
+	struct LoadingVoxelGpuBudget
+	{
+		uint32_t minPrimitiveCount = 0;
+		uint32_t variantLimit = UINT32_MAX;
+		uint32_t primitiveLimit = 0;
+		uint64_t byteLimit = 0;
+		int mode = 0;
+	};
+
+	int NormalizeLoadingVoxelBudgetMode(int mode)
+	{
+		return (std::max)(0, (std::min)(4, mode));
 	}
 
-	uint32_t GetLoadingVoxelCpuPrimitiveLimit()
+	LoadingVoxelCpuBudget GetLoadingVoxelCpuBudget()
 	{
-		return (int)nri_ptloadingvoxelcpumaxprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelcpumaxprims;
+		LoadingVoxelCpuBudget budget = {};
+		budget.mode = NormalizeLoadingVoxelBudgetMode((int)nri_ptloadingvoxelcpubudget);
+		switch (budget.mode)
+		{
+		case 1:
+			budget.variantLimit = 64;
+			budget.primitiveLimit = 1000000;
+			return budget;
+		case 2:
+			budget.variantLimit = 128;
+			budget.primitiveLimit = 2000000;
+			return budget;
+		case 3:
+			budget.variantLimit = 256;
+			budget.primitiveLimit = 4000000;
+			return budget;
+		case 4:
+			budget.variantLimit = UINT32_MAX;
+			budget.primitiveLimit = 0;
+			return budget;
+		default:
+			budget.variantLimit = (int)nri_ptloadingvoxelcpumaxvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelcpumaxvariants;
+			budget.primitiveLimit = (int)nri_ptloadingvoxelcpumaxprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelcpumaxprims;
+			budget.timeLimitMs = (int)nri_ptloadingvoxelcpumaxms;
+			return budget;
+		}
 	}
 
-	uint32_t GetLoadingVoxelGpuVariantLimit()
+	LoadingVoxelGpuBudget GetLoadingVoxelGpuBudget()
 	{
-		const uint32_t gpuLimit = (int)nri_ptloadingvoxelgpumaxvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelgpumaxvariants;
-		const uint32_t legacyLimit = (int)nri_ptloadingvoxelvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelvariants;
-		return (std::min)(gpuLimit, legacyLimit);
-	}
-
-	uint32_t GetLoadingVoxelGpuPrimitiveLimit()
-	{
-		return (int)nri_ptloadingvoxelgpumaxprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelgpumaxprims;
-	}
-
-	uint64_t GetLoadingVoxelGpuByteLimit()
-	{
-		return (int)nri_ptloadingvoxelgpumaxbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptloadingvoxelgpumaxbytes;
+		LoadingVoxelGpuBudget budget = {};
+		budget.mode = NormalizeLoadingVoxelBudgetMode((int)nri_ptloadingvoxelgpubudget);
+		switch (budget.mode)
+		{
+		case 1:
+			budget.minPrimitiveCount = 10000;
+			budget.variantLimit = 16;
+			budget.primitiveLimit = 375000;
+			budget.byteLimit = 32ull * 1024ull * 1024ull;
+			return budget;
+		case 2:
+			budget.minPrimitiveCount = 10000;
+			budget.variantLimit = 32;
+			budget.primitiveLimit = 750000;
+			budget.byteLimit = 64ull * 1024ull * 1024ull;
+			return budget;
+		case 3:
+			budget.minPrimitiveCount = 5000;
+			budget.variantLimit = 64;
+			budget.primitiveLimit = 1500000;
+			budget.byteLimit = 128ull * 1024ull * 1024ull;
+			return budget;
+		case 4:
+			budget.minPrimitiveCount = 0;
+			budget.variantLimit = UINT32_MAX;
+			budget.primitiveLimit = 0;
+			budget.byteLimit = 0;
+			return budget;
+		default:
+			budget.minPrimitiveCount = (int)nri_ptloadingvoxelgpuminprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelgpuminprims;
+			budget.variantLimit = (int)nri_ptloadingvoxelgpumaxvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelgpumaxvariants;
+			budget.variantLimit = (std::min)(budget.variantLimit, (int)nri_ptloadingvoxelvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptloadingvoxelvariants);
+			budget.primitiveLimit = (int)nri_ptloadingvoxelgpumaxprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelgpumaxprims;
+			budget.byteLimit = (int)nri_ptloadingvoxelgpumaxbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptloadingvoxelgpumaxbytes;
+			return budget;
+		}
 	}
 
 	const char* LoadingVoxelPriorityName(LoadingVoxelRequestPriority priority)
@@ -4840,9 +4907,10 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 		RecordVoxelMeshPrecacheStats(actorDelta, stats);
 	}
 
-	const uint32_t variantLimit = GetLoadingVoxelCpuVariantLimit();
-	const uint32_t primitiveLimit = GetLoadingVoxelCpuPrimitiveLimit();
-	const int timeLimitMs = (int)nri_ptloadingvoxelcpumaxms;
+	const LoadingVoxelCpuBudget cpuBudget = GetLoadingVoxelCpuBudget();
+	const uint32_t variantLimit = cpuBudget.variantLimit;
+	const uint32_t primitiveLimit = cpuBudget.primitiveLimit;
+	const int timeLimitMs = cpuBudget.timeLimitMs;
 	const auto start = std::chrono::steady_clock::now();
 	uint32_t warmedVariants = 0;
 	uint32_t primitiveTotal = 0;
@@ -4952,7 +5020,7 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 
 	if ((int)nri_ptloadingtrace >= 1)
 	{
-		Printf("NRI PT loading voxel requests: discovered=%u unique=%u force=%u high=%u normal=%u opportunistic=%u cpu_selected=%u gpu_candidates=%u skipped_budget=%u skipped_invalid=%u skipped_duplicate=%u prims=%u ms=%.3f\n",
+		Printf("NRI PT loading voxel requests: discovered=%u unique=%u force=%u high=%u normal=%u opportunistic=%u cpu_selected=%u gpu_candidates=%u skipped_budget=%u skipped_invalid=%u skipped_duplicate=%u prims=%u ms=%.3f cpu_budget=%d max_variants=%u max_prims=%u max_ms=%d\n",
 			graph.discovered,
 			(uint32_t)graph.requests.size(),
 			forceRequests,
@@ -4965,7 +5033,11 @@ void PrecacheLiveActorVoxelMeshes(VoxelMeshPrecacheStats* stats)
 			graph.skippedInvalid,
 			graph.skippedDuplicate,
 			primitiveTotal,
-			DurationMs(start, std::chrono::steady_clock::now()));
+			DurationMs(start, std::chrono::steady_clock::now()),
+			cpuBudget.mode,
+			variantLimit,
+			primitiveLimit,
+			timeLimitMs);
 	}
 }
 
@@ -5327,10 +5399,11 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 		return false;
 	}
 
-	const uint32_t variantLimit = GetLoadingVoxelGpuVariantLimit();
-	const uint32_t primitiveLimit = GetLoadingVoxelGpuPrimitiveLimit();
-	const uint32_t minPrimitiveCount = (int)nri_ptloadingvoxelgpuminprims <= 0 ? 0u : (uint32_t)(int)nri_ptloadingvoxelgpuminprims;
-	const uint64_t byteLimit = GetLoadingVoxelGpuByteLimit();
+	const LoadingVoxelGpuBudget gpuBudget = GetLoadingVoxelGpuBudget();
+	const uint32_t variantLimit = gpuBudget.variantLimit;
+	const uint32_t primitiveLimit = gpuBudget.primitiveLimit;
+	const uint32_t minPrimitiveCount = gpuBudget.minPrimitiveCount;
+	const uint64_t byteLimit = gpuBudget.byteLimit;
 	uint32_t primitiveTotal = 0;
 	uint64_t uploadByteTotal = 0;
 	uint32_t skippedNotCpuReady = 0;
@@ -5499,7 +5572,7 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 
 	if ((int)nri_ptloadingtrace >= 1)
 	{
-		Printf("NRI PT loading voxel gpu requests: discovered=%u unique=%u gpu_selected=%u skipped_source=%u skipped_cpu=%u skipped_budget=%u skipped_material=%u skipped_small=%u forced=%u preferred=%u heuristic=%u prims=%u upload_bytes=%llu whitelist_only=%u min_prims=%u max_prims=%u max_bytes=%llu max_variants=%u\n",
+		Printf("NRI PT loading voxel gpu requests: discovered=%u unique=%u gpu_selected=%u skipped_source=%u skipped_cpu=%u skipped_budget=%u skipped_material=%u skipped_small=%u forced=%u preferred=%u heuristic=%u prims=%u upload_bytes=%llu whitelist_only=%u gpu_budget=%d min_prims=%u max_prims=%u max_bytes=%llu max_variants=%u\n",
 			graph.discovered,
 			(uint32_t)graph.requests.size(),
 			(uint32_t)outEntries.size(),
@@ -5514,6 +5587,7 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			primitiveTotal,
 			(unsigned long long)uploadByteTotal,
 			nri_ptloadingvoxelgpuwhitelistonly ? 1u : 0u,
+			gpuBudget.mode,
 			minPrimitiveCount,
 			primitiveLimit,
 			(unsigned long long)byteLimit,

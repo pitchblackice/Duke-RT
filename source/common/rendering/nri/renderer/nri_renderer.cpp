@@ -2589,6 +2589,7 @@ CVAR(Int, nri_ptpersistentvoxelbuildprims, 100000, CVAR_ARCHIVE | CVAR_GLOBALCON
 CVAR(Int, nri_ptpersistentvoxelbuildbytes, 4 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptpersistentvoxeltextureprewarms, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptpersistentvoxeltexturebytes, 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelruntimebudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -12070,6 +12071,25 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources()
 	uint32_t primitiveCount = 0;
 	uint64_t uploadBytes = 0;
 
+	auto failVariantPreload = [&](const char* reason) -> bool
+	{
+		ResetPersistentVoxelBatch();
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading voxel resources: event=variant-disable reason=%s variants=%u mesh_resources=%u material_resources=%u mesh_warm=%u material_warm=%u prims=%u upload_bytes=%llu ms=%.3f\n",
+				reason,
+				(uint32_t)variants.size(),
+				(uint32_t)mPersistentVoxelMeshVariantResources.size(),
+				(uint32_t)mPersistentVoxelMaterialVariantResources.size(),
+				warmedMeshes,
+				warmedMaterials,
+				primitiveCount,
+				(unsigned long long)uploadBytes,
+				DurationMs(start, std::chrono::steady_clock::now()));
+		}
+		return false;
+	};
+
 	auto allocateArenaSlice = [](uint32_t count, uint32_t& cursor, uint32_t& offset, uint32_t& capacity) -> bool
 	{
 		if (capacity >= count && count > 0)
@@ -12307,8 +12327,7 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources()
 				nri::BufferUsageBits::SHADER_RESOURCE,
 				NRIComputeShaderResourceAccess()))
 		{
-			ResetPersistentVoxelBatch();
-			return false;
+			return failVariantPreload("resource-allocation-failed");
 		}
 
 		const uint64_t vertexBytes = variantGeometry.vertices.size() * sizeof(nri_scene::SceneVertex);
@@ -12339,8 +12358,7 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources()
 				NRIComputeShaderResourceAccess(),
 				ResidentUploadKind_Primitive))
 		{
-			ResetPersistentVoxelBatch();
-			return false;
+			return failVariantPreload("stage-copy-failed");
 		}
 
 		if (meshResourceChanged)
@@ -12402,7 +12420,16 @@ bool NRIRenderer::PreloadPersistentVoxelResources()
 
 	if (!PreloadPersistentVoxelVariantResources())
 	{
-		return false;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading voxel resources: event=skip reason=variant-preload-disabled mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
+				(uint32_t)mPersistentVoxelMeshVariantResources.size(),
+				(uint32_t)mPersistentVoxelMaterialVariantResources.size(),
+				(uint32_t)mPersistentVoxelBatch.actors.size(),
+				mPersistentVoxelBatch.activeActorCount,
+				mPersistentVoxelBatch.primitiveCount);
+		}
+		return true;
 	}
 
 	std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
@@ -12455,7 +12482,7 @@ bool NRIRenderer::PreloadPersistentVoxelResources()
 			(int32_t)mPersistentVoxelBatch.primitiveCount - (int32_t)primitivesBefore,
 			DurationMs(start, end));
 	}
-	return ready;
+	return true;
 }
 
 bool NRIRenderer::PreloadStaticMapResources()
@@ -12903,6 +12930,65 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	uint32_t voxelPromotionGpuReady = 0;
 	uint64_t voxelPromotionUploadBytes = 0;
 
+	struct PersistentVoxelRuntimeBudget
+	{
+		uint32_t buildActors = 0;
+		uint32_t buildPrimitives = 0;
+		uint64_t buildBytes = 0;
+		uint32_t texturePrewarms = 0;
+		uint64_t textureBytes = 0;
+		int mode = 0;
+	};
+
+	auto getPersistentVoxelRuntimeBudget = [&]() -> PersistentVoxelRuntimeBudget
+	{
+		PersistentVoxelRuntimeBudget budget = {};
+		budget.mode = (std::max)(0, (std::min)(4, (int)nri_ptvoxelruntimebudget));
+		if (mPersistentVoxelLoadingWarmupActive)
+		{
+			budget.mode = 4;
+		}
+		switch (budget.mode)
+		{
+		case 1:
+			budget.buildActors = 1;
+			budget.buildPrimitives = 50000;
+			budget.buildBytes = 2ull * 1024ull * 1024ull;
+			budget.texturePrewarms = 1;
+			budget.textureBytes = 512ull * 1024ull;
+			return budget;
+		case 2:
+			budget.buildActors = 2;
+			budget.buildPrimitives = 100000;
+			budget.buildBytes = 4ull * 1024ull * 1024ull;
+			budget.texturePrewarms = 2;
+			budget.textureBytes = 1024ull * 1024ull;
+			return budget;
+		case 3:
+			budget.buildActors = 4;
+			budget.buildPrimitives = 250000;
+			budget.buildBytes = 16ull * 1024ull * 1024ull;
+			budget.texturePrewarms = 4;
+			budget.textureBytes = 4ull * 1024ull * 1024ull;
+			return budget;
+		case 4:
+			budget.buildActors = UINT32_MAX;
+			budget.buildPrimitives = 0;
+			budget.buildBytes = 0;
+			budget.texturePrewarms = 0;
+			budget.textureBytes = 0;
+			return budget;
+		default:
+			budget.buildActors = (uint32_t)std::max(1, (int)nri_ptpersistentvoxelbuildactors);
+			budget.buildPrimitives = (int)nri_ptpersistentvoxelbuildprims <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxelbuildprims;
+			budget.buildBytes = (int)nri_ptpersistentvoxelbuildbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxelbuildbytes;
+			budget.texturePrewarms = (int)nri_ptpersistentvoxeltextureprewarms <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxeltextureprewarms;
+			budget.textureBytes = (int)nri_ptpersistentvoxeltexturebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxeltexturebytes;
+			return budget;
+		}
+	};
+	const PersistentVoxelRuntimeBudget runtimeBudget = getPersistentVoxelRuntimeBudget();
+
 	std::unordered_set<uint64_t> activeInstanceKeys;
 	activeInstanceKeys.reserve(cacheEntries.size());
 	for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
@@ -12940,13 +13026,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		++it;
 	}
 
-	const bool persistentVoxelTexturePrewarmUnlimited =
-		mPersistentVoxelLoadingWarmupActive ||
-		(int)nri_ptpersistentvoxeltextureprewarms <= 0;
+	const bool persistentVoxelTexturePrewarmUnlimited = runtimeBudget.texturePrewarms == 0;
 	const uint32_t persistentVoxelTexturePrewarmBudget =
-		persistentVoxelTexturePrewarmUnlimited ? 0u : (uint32_t)(int)nri_ptpersistentvoxeltextureprewarms;
-	const uint64_t persistentVoxelTexturePrewarmByteBudget =
-		mPersistentVoxelLoadingWarmupActive || (int)nri_ptpersistentvoxeltexturebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxeltexturebytes;
+		persistentVoxelTexturePrewarmUnlimited ? 0u : runtimeBudget.texturePrewarms;
+	const uint64_t persistentVoxelTexturePrewarmByteBudget = runtimeBudget.textureBytes;
 	uint32_t persistentVoxelPrewarmedTextures = 0;
 	uint64_t persistentVoxelPrewarmedTextureBytes = 0;
 	mLastPerfShellTraceStats.persistentVoxelTexturePrewarmByteBudget = persistentVoxelTexturePrewarmByteBudget;
@@ -13823,12 +13906,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return true;
 	};
 
-	const uint32_t persistentVoxelBuildActorBudget =
-		mPersistentVoxelLoadingWarmupActive ? UINT32_MAX : (uint32_t)std::max(1, (int)nri_ptpersistentvoxelbuildactors);
-	const uint32_t persistentVoxelBuildPrimitiveBudget =
-		mPersistentVoxelLoadingWarmupActive || (int)nri_ptpersistentvoxelbuildprims <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxelbuildprims;
-	const uint64_t persistentVoxelBuildByteBudget =
-		mPersistentVoxelLoadingWarmupActive || (int)nri_ptpersistentvoxelbuildbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxelbuildbytes;
+	const uint32_t persistentVoxelBuildActorBudget = runtimeBudget.buildActors;
+	const uint32_t persistentVoxelBuildPrimitiveBudget = runtimeBudget.buildPrimitives;
+	const uint64_t persistentVoxelBuildByteBudget = runtimeBudget.buildBytes;
 	uint32_t persistentVoxelBuiltActors = 0;
 	uint32_t persistentVoxelBuiltPrimitives = 0;
 	uint64_t persistentVoxelBuiltBytes = 0;
@@ -13944,7 +14024,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	{
 		if ((bool)nri_voxelstats)
 		{
-			Printf("PERF pt voxel promotion NRI: frame=%u queued=%u promoted=%u skipped_budget=%u cpu_ready=%u gpu_ready=%u bytes=%llu pending=%u actors=%u active=%u\n",
+			Printf("PERF pt voxel promotion NRI: frame=%u queued=%u promoted=%u skipped_budget=%u cpu_ready=%u gpu_ready=%u bytes=%llu pending=%u actors=%u active=%u runtime_budget=%d actor_budget=%u prim_budget=%u byte_budget=%llu texture_budget=%u texture_bytes=%llu\n",
 				mFrameIndex,
 				voxelPromotionQueued,
 				voxelPromotionPromoted,
@@ -13954,7 +14034,13 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				(unsigned long long)voxelPromotionUploadBytes,
 				persistentVoxelBuildPending ? 1u : 0u,
 				(uint32_t)mPersistentVoxelBatch.actors.size(),
-				mPersistentVoxelBatch.activeActorCount);
+				mPersistentVoxelBatch.activeActorCount,
+				runtimeBudget.mode,
+				persistentVoxelBuildActorBudget,
+				persistentVoxelBuildPrimitiveBudget,
+				(unsigned long long)persistentVoxelBuildByteBudget,
+				persistentVoxelTexturePrewarmBudget,
+				(unsigned long long)persistentVoxelTexturePrewarmByteBudget);
 		}
 	};
 
