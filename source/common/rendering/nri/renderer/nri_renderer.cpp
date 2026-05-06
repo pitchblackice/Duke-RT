@@ -12739,6 +12739,48 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return false;
 	}
 
+	std::unordered_set<uint64_t> currentActorKeys;
+	currentActorKeys.reserve(mPersistentVoxelBatch.actors.size());
+	if (mPersistentVoxelBatch.valid)
+	{
+		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+		{
+			if (actor.active)
+			{
+				currentActorKeys.insert(actor.identityKey);
+			}
+		}
+	}
+	std::sort(cacheEntries.begin(), cacheEntries.end(), [&](const auto& left, const auto& right)
+	{
+		const auto leftPendingIt = mPersistentVoxelInstances.find(left.identityKey);
+		const auto rightPendingIt = mPersistentVoxelInstances.find(right.identityKey);
+		const bool leftPending = leftPendingIt != mPersistentVoxelInstances.end() && leftPendingIt->second.pending;
+		const bool rightPending = rightPendingIt != mPersistentVoxelInstances.end() && rightPendingIt->second.pending;
+		if (leftPending != rightPending)
+		{
+			return leftPending;
+		}
+		const bool leftHasResidentActor = currentActorKeys.find(left.identityKey) != currentActorKeys.end();
+		const bool rightHasResidentActor = currentActorKeys.find(right.identityKey) != currentActorKeys.end();
+		if (leftHasResidentActor != rightHasResidentActor)
+		{
+			return !leftHasResidentActor;
+		}
+		if (left.primitiveCount != right.primitiveCount)
+		{
+			return left.primitiveCount > right.primitiveCount;
+		}
+		return left.identityKey < right.identityKey;
+	});
+
+	uint32_t voxelPromotionQueued = 0;
+	uint32_t voxelPromotionPromoted = 0;
+	uint32_t voxelPromotionSkippedBudget = 0;
+	uint32_t voxelPromotionCpuReady = (uint32_t)cacheEntries.size();
+	uint32_t voxelPromotionGpuReady = 0;
+	uint64_t voxelPromotionUploadBytes = 0;
+
 	std::unordered_set<uint64_t> activeInstanceKeys;
 	activeInstanceKeys.reserve(cacheEntries.size());
 	for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
@@ -13750,6 +13792,45 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			mPersistentVoxelPrimitiveBuffer.buffer != nullptr;
 	};
 
+	auto noteVoxelPromotionDeferred = [&](uint64_t estimatedBytes)
+	{
+		voxelPromotionQueued++;
+		voxelPromotionSkippedBudget++;
+		voxelPromotionUploadBytes += estimatedBytes;
+	};
+
+	auto noteVoxelPromotionPromoted = [&](bool reusableVariant, uint64_t estimatedBytes)
+	{
+		voxelPromotionPromoted++;
+		if (reusableVariant)
+		{
+			voxelPromotionGpuReady++;
+		}
+		else
+		{
+			voxelPromotionQueued++;
+			voxelPromotionUploadBytes += estimatedBytes;
+		}
+	};
+
+	auto emitVoxelPromotionTrace = [&]()
+	{
+		if ((bool)nri_voxelstats)
+		{
+			Printf("PERF pt voxel promotion NRI: frame=%u queued=%u promoted=%u skipped_budget=%u cpu_ready=%u gpu_ready=%u bytes=%llu pending=%u actors=%u active=%u\n",
+				mFrameIndex,
+				voxelPromotionQueued,
+				voxelPromotionPromoted,
+				voxelPromotionSkippedBudget,
+				voxelPromotionCpuReady,
+				voxelPromotionGpuReady,
+				(unsigned long long)voxelPromotionUploadBytes,
+				persistentVoxelBuildPending ? 1u : 0u,
+				(uint32_t)mPersistentVoxelBatch.actors.size(),
+				mPersistentVoxelBatch.activeActorCount);
+		}
+	};
+
 	if (mPersistentVoxelBatch.valid)
 	{
 		mPersistentVoxelBatch.actors.reserve(mPersistentVoxelBatch.actors.size() + cacheEntries.size());
@@ -13776,6 +13857,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				if (!reusableVariant && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
+					noteVoxelPromotionDeferred(estimatedUploadBytes);
 					if ((bool)nri_voxelstats)
 					{
 						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
@@ -13802,6 +13884,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				{
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
 					persistentVoxelBuildPending = true;
+					noteVoxelPromotionDeferred(estimatedUploadBytes);
 					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
 					mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits++;
 					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedUploadBytes;
@@ -13823,6 +13906,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				{
 					notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 				}
+				noteVoxelPromotionPromoted(reusableVariant, estimatedUploadBytes);
 				updatedActorCount++;
 				continue;
 			}
@@ -13902,6 +13986,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				{
 					actor.active = true;
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
+					noteVoxelPromotionDeferred(estimatedUploadBytes);
 					if ((bool)nri_voxelstats)
 					{
 						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=%u primitive_count=%u index_offset=%u index_count=%u material_offset=%u material_count=%u ready=0 pending=1 active=1\n",
@@ -13933,6 +14018,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				{
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
 					persistentVoxelBuildPending = true;
+					noteVoxelPromotionDeferred(estimatedUploadBytes);
 					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
 					mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits++;
 					mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedUploadBytes;
@@ -13959,6 +14045,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				{
 					notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 				}
+				noteVoxelPromotionPromoted(reusableVariant, estimatedUploadBytes);
 				updatedActorCount++;
 				continue;
 			}
@@ -14030,6 +14117,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			mPersistentVoxelBatch.rebuildCount++;
 		}
 		recomputeBatchState(mPersistentVoxelBatch);
+		emitVoxelPromotionTrace();
 		return mPersistentVoxelBatch.valid;
 	}
 
@@ -14047,6 +14135,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			if (!reusableVariant && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
 			{
 				mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
+				noteVoxelPromotionDeferred(estimatedUploadBytes);
 				if ((bool)nri_voxelstats)
 				{
 					Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
@@ -14071,6 +14160,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			{
 				mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
 				persistentVoxelBuildPending = true;
+				noteVoxelPromotionDeferred(estimatedUploadBytes);
 				mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredCount++;
 				mLastPerfShellTraceStats.persistentVoxelOnboardingTextureBudgetHits++;
 				mLastPerfShellTraceStats.persistentVoxelOnboardingDeferredBytes += estimatedUploadBytes;
@@ -14092,6 +14182,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			{
 				notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 			}
+			noteVoxelPromotionPromoted(reusableVariant, estimatedUploadBytes);
 		}
 	}
 
@@ -14109,6 +14200,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	}
 
 	mPersistentVoxelBatch = std::move(next);
+	emitVoxelPromotionTrace();
 	return true;
 }
 
