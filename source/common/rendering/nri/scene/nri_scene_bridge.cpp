@@ -5287,6 +5287,11 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.sourcePicnum = entry.second->sourcePicnum;
 		view.resolvedVoxelIndex = entry.second->resolvedVoxelIndex;
 		view.primitiveCount = entry.second->primitiveCount;
+		view.lastSeenFrame = entry.second->lastSeenFrame;
+		view.capturedThisFrame = entry.second->lastSeenFrame == gVoxelActorCacheFrame;
+		view.retainedFrameAge = entry.second->lastSeenFrame != 0 && gVoxelActorCacheFrame >= entry.second->lastSeenFrame ?
+			gVoxelActorCacheFrame - entry.second->lastSeenFrame :
+			0;
 		if (entry.second->meshBakeSpace == VoxelMeshBakeSpace::LocalSpace)
 		{
 			std::copy(std::begin(entry.second->currentTransform), std::end(entry.second->currentTransform), std::begin(view.instanceTransform));

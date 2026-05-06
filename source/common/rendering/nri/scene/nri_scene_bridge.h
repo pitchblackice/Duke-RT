@@ -352,6 +352,9 @@ struct PersistentVoxelCacheEntryView
 	int32_t sourcePicnum = -1;
 	int32_t resolvedVoxelIndex = -1;
 	uint32_t primitiveCount = 0;
+	uint64_t lastSeenFrame = 0;
+	uint64_t retainedFrameAge = 0;
+	bool capturedThisFrame = false;
 	float instanceTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 	float currentTranslation[3] = {};
 	float bakedTranslation[3] = {};

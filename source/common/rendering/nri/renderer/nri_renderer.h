@@ -1356,6 +1356,11 @@ private:
 			uint64_t meshResourceKey = 0;
 			uint64_t meshKeyHash = 0;
 			uint64_t materialKeyHash = 0;
+			uint64_t lastSeenFrame = 0;
+			uint64_t retainedFrameAge = 0;
+			int32_t sourcePicnum = -1;
+			int32_t resolvedVoxelIndex = -1;
+			bool capturedThisFrame = false;
 			bool active = true;
 			uint32_t primitiveOffset = 0;
 			uint32_t primitiveCount = 0;
