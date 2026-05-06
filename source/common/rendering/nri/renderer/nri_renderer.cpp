@@ -13455,6 +13455,32 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				(unsigned long long)materialResource.materialUploadHash);
 		}
 
+		auto persistentVoxelMaterialNeedsSurfaceRecord = [&](const nri_scene::MaterialBridgeData& materialBridge) -> bool
+		{
+			for (const nri_scene::MaterialLightingMetadata& metadata : materialBridge.lightMetadata)
+			{
+				if (mSceneLights.MaterialWouldEmit(metadata))
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+		auto rebuildPersistentVoxelActorLightRecords = [&](PersistentVoxelBatch::ActorEntry& actor)
+		{
+			actor.lightRecords.clear();
+			if (!persistentVoxelMaterialNeedsSurfaceRecord(actor.materialBridge))
+			{
+				return;
+			}
+			actor.lightRecords.push_back(mSceneLights.BuildSurfaceRecord(
+				cacheEntry.lightSurface != nullptr ? *cacheEntry.lightSurface : *cacheEntry.surface,
+				actor.materialBridge,
+				SceneLightRecordSource::PersistentVoxelScene,
+				0u,
+				0u));
+		};
+
 		const uint64_t baseMeshResourceKey = buildPersistentVoxelMeshResourceKey(cacheEntry);
 		auto publishPersistentVoxelActor = [&](
 			uint64_t meshResourceKey,
@@ -13482,13 +13508,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.materialOffset = materialResource.materialOffset;
 			actor.materialCount = materialResource.materialCount;
 			actor.materialBridge = materialResource.materialBridge;
-			actor.lightRecords.clear();
-			actor.lightRecords.push_back(mSceneLights.BuildSurfaceRecord(
-				cacheEntry.lightSurface != nullptr ? *cacheEntry.lightSurface : *cacheEntry.surface,
-				actor.materialBridge,
-				SceneLightRecordSource::PersistentVoxelScene,
-				0u,
-				0u));
+			rebuildPersistentVoxelActorLightRecords(actor);
 			auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
 			if (instanceIt != mPersistentVoxelInstances.end())
 			{
@@ -13879,13 +13899,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.materialOffset = materialResource.materialOffset;
 		actor.materialCount = materialResource.materialCount;
 		actor.materialBridge = materialResource.materialBridge;
-		actor.lightRecords.clear();
-		actor.lightRecords.push_back(mSceneLights.BuildSurfaceRecord(
-			cacheEntry.lightSurface != nullptr ? *cacheEntry.lightSurface : *cacheEntry.surface,
-			actor.materialBridge,
-			SceneLightRecordSource::PersistentVoxelScene,
-			0u,
-			0u));
+		rebuildPersistentVoxelActorLightRecords(actor);
 		auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
 		if (instanceIt != mPersistentVoxelInstances.end())
 		{
