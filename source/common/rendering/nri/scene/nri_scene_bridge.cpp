@@ -4011,6 +4011,12 @@ namespace
 		{
 			if (liveActorKeys.find(it->first) == liveActorKeys.end())
 			{
+				if (it->second.lastSeenFrame == gVoxelActorCacheFrame)
+				{
+					EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "retained-actor-not-live-current-frame", VoxelActorPendingReason::ActorNotLive);
+					++it;
+					continue;
+				}
 				EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "remove", VoxelActorPendingReason::ActorNotLive);
 				it = gVoxelActorCache.erase(it);
 				stats.voxelCacheSurfaceRemoves++;
