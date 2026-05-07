@@ -205,6 +205,7 @@ namespace
 		float currentTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 		bool persistentReady = false;
 		bool hasSurface = false;
+		bool sharedVariantSurface = false;
 		SurfaceRef lightSurface;
 	};
 
@@ -2455,7 +2456,10 @@ namespace
 			lookup.entry->materialKeyHash = lookup.materialKeyHash;
 			lookup.entry->materialVariantHash = lookup.materialVariantHash;
 			lookup.entry->meshBakeSpace = lookup.meshBakeSpace;
-			lookup.entry->surface.material = material;
+			if (!lookup.entry->sharedVariantSurface)
+			{
+				lookup.entry->surface.material = material;
+			}
 			lookup.entry->lightSurface.material = material;
 			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
 			const bool promoted = !lookup.entry->persistentReady;
@@ -2620,15 +2624,27 @@ namespace
 		entry.desiredSurfaceSignature = lookup.surfaceSignature;
 		entry.pendingReason = (uint8_t)VoxelActorPendingReason::None;
 		entry.pendingFrame = 0;
-		entry.surface = meshSurface;
-		entry.surface.material = lightSurface.material;
-		entry.surface.provenance = lightSurface.provenance;
-		NormalizeCachedSurfacePreviousPositions(entry.surface);
-		entry.lightSurface = lightSurface;
-		NormalizeCachedSurfacePreviousPositions(entry.lightSurface);
+		entry.sharedVariantSurface =
+			sharedVariantReady &&
+			meshBakeSpace == VoxelMeshBakeSpace::LocalSpace &&
+			lookup.meshVariantHash != 0;
+		if (entry.sharedVariantSurface)
+		{
+			entry.surface = {};
+		}
+		else
+		{
+			entry.surface = meshSurface;
+			entry.surface.material = lightSurface.material;
+			entry.surface.provenance = lightSurface.provenance;
+			NormalizeCachedSurfacePreviousPositions(entry.surface);
+		}
+		entry.lightSurface = {};
+		entry.lightSurface.material = lightSurface.material;
+		entry.lightSurface.provenance = lightSurface.provenance;
 		entry.lastSeenFrame = gVoxelActorCacheFrame;
 		entry.surfaceFrame = gVoxelActorCacheFrame;
-		entry.primitiveCount = CountSurfacePrimitives(entry.surface);
+		entry.primitiveCount = CountSurfacePrimitives(meshSurface);
 		entry.currentTranslation[0] = lookup.currentTranslation[0];
 		entry.currentTranslation[1] = lookup.currentTranslation[1];
 		entry.currentTranslation[2] = lookup.currentTranslation[2];
@@ -4273,6 +4289,18 @@ namespace
 			found->second.valid;
 	}
 
+	const SurfaceRef* GetReadyVoxelMeshVariantSurface(uint64_t meshVariantHash)
+	{
+		auto found = gVoxelMeshVariantSurfaceCache.find(meshVariantHash);
+		if (found == gVoxelMeshVariantSurfaceCache.end() ||
+			!found->second.built ||
+			!found->second.valid)
+		{
+			return nullptr;
+		}
+		return &found->second.canonicalSurface;
+	}
+
 	const SurfaceRef* GetCachedVoxelMeshVariantSurface(
 		const VoxelActorCacheLookup& lookup,
 		const FVoxelMeshData& mesh,
@@ -5408,7 +5436,14 @@ bool BuildPersistentVoxelCacheEntries(std::vector<PersistentVoxelCacheEntryView>
 		view.bakedTranslation[0] = entry.second->bakedTranslation[0];
 		view.bakedTranslation[1] = entry.second->bakedTranslation[1];
 		view.bakedTranslation[2] = entry.second->bakedTranslation[2];
-		view.surface = &entry.second->surface;
+		view.sharedVariantSurface = entry.second->sharedVariantSurface;
+		view.surface = entry.second->sharedVariantSurface ?
+			GetReadyVoxelMeshVariantSurface(entry.second->meshVariantHash) :
+			&entry.second->surface;
+		if (view.surface == nullptr)
+		{
+			continue;
+		}
 		view.lightSurface = &entry.second->lightSurface;
 		outEntries.push_back(std::move(view));
 	}

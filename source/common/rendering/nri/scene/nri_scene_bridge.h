@@ -360,6 +360,7 @@ struct PersistentVoxelCacheEntryView
 	float bakedTranslation[3] = {};
 	const SurfaceRef* surface = nullptr;
 	const SurfaceRef* lightSurface = nullptr;
+	bool sharedVariantSurface = false;
 };
 
 struct PrecachedVoxelVariantView

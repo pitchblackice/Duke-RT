@@ -13304,15 +13304,19 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			return count;
 		};
 
-		nri_scene::SceneView actorSceneView = {};
-		actorSceneView.opaqueSprites.push_back(*cacheEntry.surface);
-		actorSceneView.stats.spriteDrawItems = 1;
-		actorSceneView.stats.modelDrawItems = 1;
-		actorSceneView.stats.voxelProxyDrawItems = 1;
-		actorSceneView.stats.totalDrawItems = 1;
-		actorSceneView.stats.materialRefs = 1;
-		actorSceneView.stats.triangleEstimate = cacheEntry.primitiveCount;
-		actorSceneView.stats.voxelCachePrimitives = cacheEntry.primitiveCount;
+		auto buildSingleVoxelSceneView = [&](const nri_scene::SurfaceRef& surface) -> nri_scene::SceneView
+		{
+			nri_scene::SceneView sceneView = {};
+			sceneView.opaqueSprites.push_back(surface);
+			sceneView.stats.spriteDrawItems = 1;
+			sceneView.stats.modelDrawItems = 1;
+			sceneView.stats.voxelProxyDrawItems = 1;
+			sceneView.stats.totalDrawItems = 1;
+			sceneView.stats.materialRefs = 1;
+			sceneView.stats.triangleEstimate = cacheEntry.primitiveCount;
+			sceneView.stats.voxelCachePrimitives = cacheEntry.primitiveCount;
+			return sceneView;
+		};
 
 		auto allocateArenaSlice = [](uint32_t count, uint32_t& cursor, uint32_t& offset, uint32_t& capacity) -> bool
 		{
@@ -13349,7 +13353,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			nri_scene::MaterialBridgeData builtMaterials;
 			{
 				Clocker materialClock(NriPTMaterialBuild);
-				BuildMaterialsWithActorOverrides(actorSceneView, builtMaterials, "persistent_voxel_material_variant");
+				nri_scene::SceneView materialSceneView = buildSingleVoxelSceneView(
+					cacheEntry.lightSurface != nullptr ? *cacheEntry.lightSurface : *cacheEntry.surface);
+				BuildMaterialsWithActorOverrides(materialSceneView, builtMaterials, "persistent_voxel_material_variant");
 			}
 			if (builtMaterials.materials.empty())
 			{
@@ -13531,7 +13537,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			SceneLightSystem::SurfaceRecord record = {};
 			record.source = SceneLightRecordSource::PersistentVoxelScene;
 			record.materialIndex = 0u;
-			record.provenance = sourceSurface.provenance;
+			record.provenance = cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface->provenance : sourceSurface.provenance;
 			transformPersistentVoxelLightCenter(actor.instanceTransform, meshResource.lightTemplateCenter, record.center);
 			const float scale = persistentVoxelLightScale(actor.instanceTransform);
 			record.boundsRadius = meshResource.lightTemplateBoundsRadius * scale;
@@ -13653,6 +13659,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		nri_scene::GeometryData actorGeometry;
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildPersistentVoxelVariantMs);
+			nri_scene::SceneView actorSceneView = buildSingleVoxelSceneView(*cacheEntry.surface);
 			nri_scene::BuildGeometry(actorSceneView, actorGeometry);
 			AssignGeometryPortalIndices(mMapWorld, actorGeometry);
 		}
