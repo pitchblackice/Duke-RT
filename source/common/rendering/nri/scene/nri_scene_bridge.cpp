@@ -4500,6 +4500,36 @@ namespace
 			return false;
 		}
 
+		if (sharedVariantSurfaceReadyForUpdate)
+		{
+			if (const SurfaceRef* canonicalSurface = GetCachedVoxelMeshVariantSurface(cacheLookup, *mesh, false))
+			{
+				const unsigned int previousStores = stats.voxelCacheSurfaceStores;
+				const unsigned int previousRebuilds = stats.voxelCacheSurfaceRebuilds;
+				const unsigned int previousTransformRebakes = stats.voxelCacheTransformRebakes;
+				const bool wasPersistentReady = cacheLookup.entry != nullptr && cacheLookup.entry->persistentReady;
+				SurfaceRef lightSurface = {};
+				lightSurface.material = voxelMaterial;
+				lightSurface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, lightSurface.material.flags);
+				{
+					ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelStoreMs);
+					StoreVoxelActorCacheSurface(cacheLookup, *canonicalSurface, lightSurface, VoxelMeshBakeSpace::LocalSpace, true, stats);
+				}
+				gDynamicCapturePerfStats.voxelCacheStores += stats.voxelCacheSurfaceStores - previousStores;
+				gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheSurfaceRebuilds - previousRebuilds;
+				gDynamicCapturePerfStats.voxelCacheRebuilds += stats.voxelCacheTransformRebakes - previousTransformRebakes;
+				const auto storedEntry = gVoxelActorCache.find(cacheLookup.identityKey);
+				if (!wasPersistentReady &&
+					cacheLookup.identityKey != 0 &&
+					storedEntry != gVoxelActorCache.end() &&
+					storedEntry->second.persistentReady)
+				{
+					EmitVoxelActorKeyTrace(sprite, cacheLookup, "shared-variant-promote");
+				}
+				return true;
+			}
+		}
+
 		const unsigned int indexCount = mesh->indices.Size();
 		const uint32_t triangleCount = indexCount / 3u;
 		if (!TrySpendVoxelTriangleBudget(triangleCount, budget))

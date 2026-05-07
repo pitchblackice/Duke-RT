@@ -1403,6 +1403,10 @@ private:
 		uint32_t primitiveCapacity = 0;
 		uint32_t tlasReadyFrame = 0;
 		bool tlasPublished = false;
+		bool lightTemplateValid = false;
+		float lightTemplateCenter[3] = {};
+		float lightTemplateBoundsRadius = 0.0f;
+		float lightTemplateSurfaceArea = 0.0f;
 		float bakedTranslation[3] = {};
 		NRIBufferResource vertexBuffer;
 		NRIBufferResource indexBuffer;
