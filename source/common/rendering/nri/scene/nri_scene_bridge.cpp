@@ -6,6 +6,7 @@
 
 #include "c_cvars.h"
 #include "coreactor.h"
+#include "coreplayer.h"
 #include "filesystem.h"
 #include "files.h"
 #include "gamecontrol.h"
@@ -77,6 +78,19 @@ namespace
 	double DurationMs(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end)
 	{
 		return std::chrono::duration<double, std::milli>(end - start).count();
+	}
+
+	bool IsLocalPlayerActor(const DCoreActor* actor)
+	{
+		if (actor == nullptr ||
+			myconnectindex < 0 ||
+			myconnectindex >= MAXPLAYERS)
+		{
+			return false;
+		}
+
+		DCorePlayer* localPlayer = PlayerArray[myconnectindex];
+		return localPlayer != nullptr && localPlayer->GetActor() == actor;
 	}
 
 	class ScopedDynamicCaptureTimer
@@ -2688,7 +2702,8 @@ namespace
 	{
 		if (actor == nullptr ||
 			!actor->exists() ||
-			(actor->ObjectFlags & OF_EuthanizeMe) != 0)
+			(actor->ObjectFlags & OF_EuthanizeMe) != 0 ||
+			IsLocalPlayerActor(actor))
 		{
 			return false;
 		}
