@@ -1787,8 +1787,7 @@ namespace
 			SurfaceRef surface = {};
 			surface.material = MakeMaterialRef(voxelTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite | MaterialFlag_AlphaClip);
 			surface.material.emissiveSourceTexture = GetVoxelReplacementEmissiveSourceTexture(sprite);
-			surface.material.flags |= MaterialFlag_PointSampled;
-			surface.material.flags &= ~MaterialFlag_Indexed;
+			surface.material.flags |= MaterialFlag_PointSampled | MaterialFlag_Indexed;
 			surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
 			surface.vertices.reserve(4);
 			AddVoxelProxyFace(sprite.rotmat, extents, face, surface);
@@ -1804,7 +1803,7 @@ namespace
 	{
 		MaterialRef material = MakeMaterialRef(voxelTexture, palette, shade, alpha, extraFlags | MaterialFlag_PointSampled);
 		material.emissiveSourceTexture = emissiveSourceTexture;
-		material.flags &= ~MaterialFlag_Indexed;
+		material.flags |= MaterialFlag_Indexed;
 		return material;
 	}
 

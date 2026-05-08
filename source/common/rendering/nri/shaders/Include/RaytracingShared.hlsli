@@ -587,7 +587,9 @@ float3 SampleMaterialEmissionSource(uint materialIndex, uint dataSource, float2 
 			return material.emissiveColor;
 		}
 
-		return SampleMaterialColor(material, material.emissiveTextureIndex, uv, false, false, false).rgb;
+		const bool emissiveUsesBaseTexture = material.emissiveTextureIndex == material.textureIndex;
+		const bool emissiveIndexed = emissiveUsesBaseTexture && (material.flags & MATERIAL_FLAG_INDEXED) != 0;
+		return SampleMaterialColor(material, material.emissiveTextureIndex, uv, emissiveIndexed, emissiveIndexed, false).rgb;
 	}
 
 	return 0.0;
