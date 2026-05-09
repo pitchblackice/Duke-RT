@@ -634,6 +634,20 @@ namespace
 		return vertex;
 	}
 
+	CapturedVertex MakeCapturedVertex(float x, float y, float z, float u, float v)
+	{
+		CapturedVertex vertex = {};
+		vertex.position[0] = x;
+		vertex.position[1] = y;
+		vertex.position[2] = z;
+		vertex.prevPosition[0] = x;
+		vertex.prevPosition[1] = y;
+		vertex.prevPosition[2] = z;
+		vertex.uv[0] = u;
+		vertex.uv[1] = v;
+		return vertex;
+	}
+
 	uint32_t MakeSkyPriority(PTSkyMode mode, PTSkySourceType sourceType)
 	{
 		uint32_t priority = mode == PTSkyMode::Cubemap ? 100u : (mode == PTSkyMode::SolidColor ? 10u : 0u);
@@ -1711,20 +1725,71 @@ namespace
 			return false;
 		}
 
-		if (sprite.vertexindex < 0)
-		{
-			sprite.CreateVertices(&di);
-		}
-
-		if (sprite.vertexindex < 0)
+		if (sprite.Sprite == nullptr)
 		{
 			return false;
 		}
 
-		const FFlatVertex* vertices = screen->mVertexData->GetBuffer(sprite.vertexindex);
-		if (vertices == nullptr)
+		const tspritetype* spr = sprite.Sprite;
+		int xsize = (int)fallbackTexture->GetDisplayWidth();
+		int ysize = (int)fallbackTexture->GetDisplayHeight();
+		int tilexoff = (int)fallbackTexture->GetDisplayLeftOffset();
+		int tileyoff = (int)fallbackTexture->GetDisplayTopOffset();
+
+		tilexoff += spr->xoffset;
+		tileyoff += spr->yoffset;
+
+		const float sx = (float)spr->scale.X * 0.8f;
+		const float sy = (float)spr->scale.Y;
+		const float width = xsize * sx;
+		const float height = ysize * sy;
+		float xoff = tilexoff * sx;
+		float yoff = tileyoff * sy;
+
+		if ((xsize & 1) != 0)
 		{
-			return false;
+			xoff -= sx * 0.5f;
+		}
+
+		if ((spr->cstat & CSTAT_SPRITE_YCENTER) != 0)
+		{
+			yoff -= height * 0.5f;
+			if ((ysize & 1) != 0)
+			{
+				yoff -= sy * 0.5f;
+			}
+		}
+
+		if ((spr->cstat & CSTAT_SPRITE_XFLIP) != 0)
+		{
+			xoff = -xoff;
+		}
+
+		float ul = (spr->cstat & CSTAT_SPRITE_XFLIP) != 0 ? 0.0f : 1.0f;
+		float ur = (spr->cstat & CSTAT_SPRITE_XFLIP) != 0 ? 1.0f : 0.0f;
+		float vt = (spr->cstat & CSTAT_SPRITE_YFLIP) != 0 ? 0.0f : 1.0f;
+		float vb = (spr->cstat & CSTAT_SPRITE_YFLIP) != 0 ? 1.0f : 0.0f;
+		if (fallbackTexture->isHardwareCanvas())
+		{
+			std::swap(vt, vb);
+		}
+
+		const auto& vp = di.Viewpoint;
+		const float x = (float)spr->pos.X;
+		const float y = (float)-spr->pos.Y;
+		const float z = (float)-spr->pos.Z;
+		const float viewvecX = (float)vp.ViewVector.X;
+		const float viewvecY = (float)vp.ViewVector.Y;
+		const float x1 = x - viewvecY * (xoff - (width * 0.5f));
+		const float x2 = x - viewvecY * (xoff + (width * 0.5f));
+		const float y1 = y + viewvecX * (xoff - (width * 0.5f));
+		const float y2 = y + viewvecX * (xoff + (width * 0.5f));
+		float z1 = z + yoff;
+		float z2 = z + height + yoff;
+		if (z1 < z2)
+		{
+			std::swap(z1, z2);
+			std::swap(vt, vb);
 		}
 
 		SurfaceRef surface = {};
@@ -1736,10 +1801,10 @@ namespace
 		surface.material = MakeMaterialRef(fallbackTexture, sprite.palette, sprite.shade, sprite.alpha, extraFlags);
 		surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::FacingSprite, drawListType, surface.material.flags);
 		surface.vertices.reserve(4);
-		for (uint32_t i = 0; i < 4; ++i)
-		{
-			surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
-		}
+		surface.vertices.push_back(MakeCapturedVertex(x1, y1, z1, ul, vt));
+		surface.vertices.push_back(MakeCapturedVertex(x2, y2, z1, ur, vt));
+		surface.vertices.push_back(MakeCapturedVertex(x1, y1, z2, ul, vb));
+		surface.vertices.push_back(MakeCapturedVertex(x2, y2, z2, ur, vb));
 
 		if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
 		{
