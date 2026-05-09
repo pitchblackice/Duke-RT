@@ -18,6 +18,7 @@ The renderer supports both Direct3D 12 and Vulkan, although feature support is m
 - If auto-detection picks the wrong install, launch with `launch-duke-rt.cmd -GameRoot "D:\path\to\Duke Nukem 3D Twentieth Anniversary World Tour"`.
 - When the launcher detects World Tour normals, let it copy them into the packaged `release-overlay`. That is the intended setup for the current visual baseline.
 - Duke-RT can still run without those copied normals, but the presentation will be less complete because the overlay will be missing that extra normal-map data.
+- The launcher can also guide you through installing Cheello's Voxel Duke 3D pack into the local `release-overlay`. It opens the ModDB page in your browser, asks you to click `Download Now`, then returns to the console to unpack the downloaded archive.
 - Other Build-engine games may possibly launch because the underlying Raze game support is still present, but that path is not tested here and is not supported yet.
 
 ## Current Status
@@ -260,7 +261,7 @@ The staged package includes:
 
 The staged package includes `package\windows\launch-duke-rt.cmd`, `tools\dist\Prepare-CommercialNormals.ps1`, and `release-overlay`, and removes `*.pdb` files from the staged package.
 
-`launch-duke-rt.cmd` resolves a valid `DUKE3D.GRP` once, stores the verified install root under `generated-content\state\content-preferences.json`, and passes the resolved file to Raze with `-gamegrp`. Optional World Tour normal-map import uses the same install root's `textures` folder; failure to find or convert normals does not block launch when `DUKE3D.GRP` is valid.
+`launch-duke-rt.cmd` resolves a valid `DUKE3D.GRP` once, stores the verified install root under `generated-content\state\content-preferences.json`, and passes the resolved file to Raze with `-gamegrp`. Optional World Tour normal-map import uses the same install root's `textures` folder; failure to find or convert normals does not block launch when `DUKE3D.GRP` is valid. Optional Cheello voxel staging can be controlled with `-VoxelAsk`, `-VoxelYes`, `-VoxelNo`, `-VoxelZip "path\to\voxel_duke3d.zip"`, and `-ForceVoxels`.
 
 ##### Fast rebuild command
 

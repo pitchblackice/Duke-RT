@@ -63,6 +63,36 @@ if /I "%~1"=="-Quiet" (
     shift
     goto parse_args
 )
+if /I "%~1"=="-VoxelAsk" (
+    set "PREFLIGHT_ARGS=%PREFLIGHT_ARGS% -VoxelAsk"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-VoxelYes" (
+    set "PREFLIGHT_ARGS=%PREFLIGHT_ARGS% -VoxelYes"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-VoxelNo" (
+    set "PREFLIGHT_ARGS=%PREFLIGHT_ARGS% -VoxelNo"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-ForceVoxels" (
+    set "PREFLIGHT_ARGS=%PREFLIGHT_ARGS% -ForceVoxels"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-VoxelZip" (
+    if "%~2"=="" (
+        echo [duke-rt] -VoxelZip requires a path argument.
+        exit /b 1
+    )
+    set "PREFLIGHT_ARGS=%PREFLIGHT_ARGS% -VoxelZip ""%~2"""
+    shift
+    shift
+    goto parse_args
+)
 if /I "%~1"=="-SourceRoot" (
     if "%~2"=="" (
         echo [duke-rt] -SourceRoot requires a path argument.

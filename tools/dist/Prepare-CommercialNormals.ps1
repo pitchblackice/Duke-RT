@@ -3,11 +3,16 @@ param(
     [string]$OverlayDir = "",
     [string]$GameRoot = "",
     [string]$SourceRoot = "",
+    [string]$VoxelZip = "",
     [string]$StatePath = "",
     [string]$LaunchVarsPath = "",
     [switch]$Yes,
     [switch]$No,
     [switch]$Ask,
+    [switch]$VoxelYes,
+    [switch]$VoxelNo,
+    [switch]$VoxelAsk,
+    [switch]$ForceVoxels,
     [switch]$Force,
     [switch]$Quiet
 )
@@ -110,6 +115,9 @@ function New-DefaultState {
             world_tour_normals = @{
                 prompt = "ask"
             }
+            cheello_voxels = @{
+                prompt = "ask"
+            }
             duke_world_tour = @{}
         }
     }
@@ -126,6 +134,12 @@ function Ensure-StateShape {
     }
     if (-not $State["providers"]["world_tour_normals"].ContainsKey("prompt")) {
         $State["providers"]["world_tour_normals"]["prompt"] = "ask"
+    }
+    if (-not $State["providers"].ContainsKey("cheello_voxels")) {
+        $State["providers"]["cheello_voxels"] = @{ prompt = "ask" }
+    }
+    if (-not $State["providers"]["cheello_voxels"].ContainsKey("prompt")) {
+        $State["providers"]["cheello_voxels"]["prompt"] = "ask"
     }
     if (-not $State["providers"].ContainsKey("duke_world_tour")) {
         $State["providers"]["duke_world_tour"] = @{}
@@ -508,6 +522,299 @@ function Convert-BmpToPng {
     }
 }
 
+function Test-CheelloVoxelInstall {
+    param([string]$OverlayDir)
+
+    return (
+        (Test-Path -LiteralPath (Join-Path $OverlayDir "duke3d.def") -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $OverlayDir "duke3d_voxels.def") -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $OverlayDir "duke3d_maphacks.def") -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $OverlayDir "voxels") -PathType Container) -and
+        (Test-Path -LiteralPath (Join-Path $OverlayDir "maphacks") -PathType Container)
+    )
+}
+
+function Get-DownloadsDirectory {
+    $profile = [Environment]::GetFolderPath("UserProfile")
+    if ([string]::IsNullOrWhiteSpace($profile)) {
+        return ""
+    }
+
+    $downloads = Join-Path $profile "Downloads"
+    if (Test-Path -LiteralPath $downloads -PathType Container) {
+        return [System.IO.Path]::GetFullPath($downloads)
+    }
+
+    return ""
+}
+
+function Find-RecentVoxelArchives {
+    $downloads = Get-DownloadsDirectory
+    if (-not $downloads) {
+        return @()
+    }
+
+    return @(Get-ChildItem -LiteralPath $downloads -File -Filter *.zip |
+        Where-Object {
+            $_.Name -match 'voxel.*duke|duke.*voxel|voxel_duke3d'
+        } |
+        Sort-Object LastWriteTimeUtc -Descending)
+}
+
+function Prompt-ForVoxelZip {
+    param([string]$SuggestedPath)
+
+    if ($SuggestedPath) {
+        $resolvedSuggestion = Normalize-CandidatePath -Path $SuggestedPath
+        if (Test-Path -LiteralPath $resolvedSuggestion -PathType Leaf) {
+            return $resolvedSuggestion
+        }
+    }
+
+    $candidates = Find-RecentVoxelArchives
+    foreach ($candidate in $candidates) {
+        Write-Host ""
+        Write-Info "Found a recent voxel archive in Downloads:"
+        Write-Info "  $($candidate.FullName)"
+        if (Prompt-YesNo -Question "Use this archive") {
+            return $candidate.FullName
+        }
+    }
+
+    while ($true) {
+        $reply = Read-Host "Enter the full path to voxel_duke3d.zip, or leave blank to skip"
+        if ($null -eq $reply -or [string]::IsNullOrWhiteSpace($reply)) {
+            return ""
+        }
+
+        try {
+            $zipPath = Normalize-CandidatePath -Path $reply
+            if ((Test-Path -LiteralPath $zipPath -PathType Leaf) -and $zipPath.EndsWith(".zip", [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $zipPath
+            }
+        }
+        catch {
+        }
+
+        Write-Info "That path was not a readable .zip archive."
+    }
+}
+
+function Test-ZipEntryPathSafe {
+    param([string]$EntryName)
+
+    if ([string]::IsNullOrWhiteSpace($EntryName)) {
+        return $true
+    }
+
+    if ([System.IO.Path]::IsPathRooted($EntryName)) {
+        return $false
+    }
+
+    $parts = $EntryName -split '[\\/]'
+    foreach ($part in $parts) {
+        if ($part -eq "..") {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Assert-SafeZipArchive {
+    param([string]$ZipPath)
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $archive = $null
+    try {
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        foreach ($entry in $archive.Entries) {
+            if (-not (Test-ZipEntryPathSafe -EntryName $entry.FullName)) {
+                throw "Archive contains an unsafe entry path: $($entry.FullName)"
+            }
+        }
+    }
+    finally {
+        if ($archive) {
+            $archive.Dispose()
+        }
+    }
+}
+
+function Find-CheelloVoxelRoot {
+    param([string]$ExtractRoot)
+
+    $dukeDefs = @(Get-ChildItem -LiteralPath $ExtractRoot -Recurse -File -Filter "duke3d.def")
+    foreach ($dukeDef in $dukeDefs) {
+        $candidate = $dukeDef.Directory.FullName
+        if (
+            (Test-Path -LiteralPath (Join-Path $candidate "duke3d_voxels.def") -PathType Leaf) -and
+            (Test-Path -LiteralPath (Join-Path $candidate "duke3d_maphacks.def") -PathType Leaf) -and
+            (Test-Path -LiteralPath (Join-Path $candidate "voxels") -PathType Container) -and
+            (Test-Path -LiteralPath (Join-Path $candidate "maphacks") -PathType Container)
+        ) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    return ""
+}
+
+function Copy-CheelloVoxelContent {
+    param(
+        [string]$LaunchRoot,
+        [string]$OverlayDir,
+        [string]$SourceRoot
+    )
+
+    $items = @(
+        "duke3d.def",
+        "duke3d_voxels.def",
+        "duke3d_maphacks.def",
+        "readme.txt",
+        "voxels",
+        "maphacks"
+    )
+
+    foreach ($item in $items) {
+        $sourcePath = Join-Path $SourceRoot $item
+        if (-not (Test-Path -LiteralPath $sourcePath)) {
+            continue
+        }
+
+        $destinationPath = Get-FullPathSafe -Base $OverlayDir -Child $item
+        Ensure-WithinRoot -RootPath $LaunchRoot -CandidatePath $destinationPath -Label "Voxel target"
+
+        if (Test-Path -LiteralPath $sourcePath -PathType Container) {
+            if (-not (Test-Path -LiteralPath $destinationPath)) {
+                New-Item -ItemType Directory -Path $destinationPath -Force | Out-Null
+            }
+            Get-ChildItem -LiteralPath $sourcePath -Force | Copy-Item -Destination $destinationPath -Recurse -Force
+        } else {
+            if (Test-Path -LiteralPath $destinationPath) {
+                Remove-Item -LiteralPath $destinationPath -Force
+            }
+            Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+        }
+    }
+}
+
+function Invoke-CheelloVoxelImport {
+    param(
+        [string]$LaunchRoot,
+        [string]$OverlayDir,
+        [string]$ExplicitVoxelZip,
+        [hashtable]$State
+    )
+
+    $providerState = $State["providers"]["cheello_voxels"]
+    $downloadPage = "https://www.moddb.com/mods/voxel-duke-nukem-3d/addons/voxel-duke-3d"
+    $expectedMd5 = "38175E125C5630B5191A709329BC75D8"
+
+    if ($VoxelNo) {
+        $providerState["prompt"] = "skip"
+        if (-not $Quiet) {
+            Write-Info "Skipping Cheello voxel install by user request."
+        }
+        return
+    }
+
+    if ((-not $ForceVoxels) -and (Test-CheelloVoxelInstall -OverlayDir $OverlayDir)) {
+        $providerState["installed"] = $true
+        if (-not $Quiet) {
+            Write-Info "Cheello voxel content is already staged in the mounted overlay."
+        }
+        return
+    }
+
+    if (-not $VoxelAsk -and -not $VoxelYes -and -not $ForceVoxels -and $providerState["prompt"] -eq "skip" -and -not $ExplicitVoxelZip) {
+        if (-not $Quiet) {
+            Write-Info "Cheello voxel install is disabled in local content preferences; skipping."
+        }
+        return
+    }
+
+    $consent = $true
+    if (-not $VoxelYes -and -not $ForceVoxels -and -not $ExplicitVoxelZip) {
+        Write-Host ""
+        Write-Info "Duke-RT can guide you through installing Cheello's excellent Voxel Duke 3D work into your local release-overlay."
+        Write-Info "This will open the ModDB page in your default browser. On that page, click Download Now to download the voxel archive."
+        Write-Info "After the download completes, return to this console window to continue voxel unpacking."
+        Write-Info "You should also check out Cheello's work at:"
+        Write-Info "  https://www.youtube.com/@cheello_art"
+        Write-Host ""
+        $consent = Prompt-YesNo -Question "Open the Voxel Duke 3D download page now?"
+
+        if ($consent) {
+            $providerState["prompt"] = "always-yes"
+        } else {
+            $providerState["prompt"] = "skip"
+        }
+    }
+
+    if (-not $consent) {
+        if (-not $Quiet) {
+            Write-Info "Cheello voxel install declined."
+        }
+        return
+    }
+
+    if (-not $ExplicitVoxelZip) {
+        Start-Process $downloadPage
+        Write-Host ""
+        [void](Read-Host "When the voxel archive download has finished, return here and press Enter")
+    }
+
+    $zipPath = Prompt-ForVoxelZip -SuggestedPath $ExplicitVoxelZip
+    if (-not $zipPath) {
+        if (-not $Quiet) {
+            Write-Info "No voxel archive was selected; launch will continue without installing voxels."
+        }
+        return
+    }
+
+    Assert-SafeZipArchive -ZipPath $zipPath
+
+    $actualHash = (Get-FileHash -LiteralPath $zipPath -Algorithm MD5).Hash.ToUpperInvariant()
+    if ($actualHash -ne $expectedMd5) {
+        Write-Warning "Voxel archive MD5 is $actualHash, expected $expectedMd5 for the known ModDB release. Continuing after archive-shape validation."
+    }
+
+    $tempRoot = Get-FullPathSafe -Base $LaunchRoot -Child "generated-content\temp\cheello-voxels"
+    Ensure-WithinRoot -RootPath $LaunchRoot -CandidatePath $tempRoot -Label "Voxel temp"
+
+    if (Test-Path -LiteralPath $tempRoot) {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+    try {
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $tempRoot -Force
+        $contentRoot = Find-CheelloVoxelRoot -ExtractRoot $tempRoot
+        if (-not $contentRoot) {
+            throw "The selected archive did not contain the expected Voxel Duke 3D files."
+        }
+
+        Copy-CheelloVoxelContent -LaunchRoot $LaunchRoot -OverlayDir $OverlayDir -SourceRoot $contentRoot
+
+        $providerState["installed"] = $true
+        $providerState["last_archive"] = $zipPath
+        $providerState["last_archive_md5"] = $actualHash
+        $providerState["last_install_utc"] = [DateTime]::UtcNow.ToString("o")
+
+        if (-not $Quiet) {
+            Write-Info "Cheello voxel install complete. Content was staged into:"
+            Write-Info "  $OverlayDir"
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempRoot) {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force
+        }
+    }
+}
+
 function Invoke-NormalImport {
     param(
         [string]$LaunchRoot,
@@ -678,6 +985,14 @@ try {
 catch {
     Write-Warning "World Tour normals import failed: $($_.Exception.Message)"
     Write-Warning "Launch will continue without imported commercial normals."
+}
+
+try {
+    Invoke-CheelloVoxelImport -LaunchRoot $LaunchRoot -OverlayDir $OverlayDir -ExplicitVoxelZip $VoxelZip -State $state
+}
+catch {
+    Write-Warning "Cheello voxel install failed: $($_.Exception.Message)"
+    Write-Warning "Launch will continue without installed voxels."
 }
 
 Save-DukeInstallState -State $state -ResolvedInstall $resolvedInstall
