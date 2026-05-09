@@ -1695,7 +1695,18 @@ namespace
 
 	bool CaptureMirrorVoxelFallbackSprite(HWDrawInfo& di, HWSprite& sprite, uint32_t drawListType, std::vector<SurfaceRef>& outSprites)
 	{
-		if (sprite.texture == nullptr || !IsEffectivelyOpaque(sprite.RenderStyle, sprite.alpha))
+		if (!IsEffectivelyOpaque(sprite.RenderStyle, sprite.alpha))
+		{
+			return false;
+		}
+
+		FGameTexture* fallbackTexture = sprite.texture;
+		if ((fallbackTexture == nullptr || !fallbackTexture->isValid()) && sprite.Sprite != nullptr)
+		{
+			fallbackTexture = TexMan.GetGameTexture(sprite.Sprite->spritetexture());
+		}
+
+		if (fallbackTexture == nullptr || !fallbackTexture->isValid())
 		{
 			return false;
 		}
@@ -1722,7 +1733,7 @@ namespace
 		{
 			extraFlags |= MaterialFlag_FacingBillboard;
 		}
-		surface.material = MakeMaterialRef(sprite.texture, sprite.palette, sprite.shade, sprite.alpha, extraFlags);
+		surface.material = MakeMaterialRef(fallbackTexture, sprite.palette, sprite.shade, sprite.alpha, extraFlags);
 		surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::FacingSprite, drawListType, surface.material.flags);
 		surface.vertices.reserve(4);
 		for (uint32_t i = 0; i < 4; ++i)
