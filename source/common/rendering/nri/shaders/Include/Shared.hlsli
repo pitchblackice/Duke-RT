@@ -109,7 +109,11 @@ struct RuntimePointLightData
 	float radius;
 	float3 color;
 	float intensity;
+	uint flags;
+	uint3 reserved;
 };
+
+#define RUNTIME_POINT_LIGHT_FLAG_CASTS_SHADOW 0x1u
 
 struct RuntimeLightTileHeaderData
 {

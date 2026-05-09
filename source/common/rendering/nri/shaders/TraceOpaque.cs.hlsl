@@ -975,11 +975,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 					}
 					TraceShaderStatAdd(TRACE_STAT_RUNTIME_LAMBERT, 1u);
 
-					if (!directSceneTrace && receivesShadow)
+					const bool runtimeLightCastsShadow = (runtimeLight.flags & RUNTIME_POINT_LIGHT_FLAG_CASTS_SHADOW) != 0u;
+					if (!directSceneTrace && receivesShadow && runtimeLightCastsShadow)
 					{
 						TraceShaderStatAdd(TRACE_STAT_RUNTIME_SHADOW_RAYS, 1u);
 					}
-					const float runtimeShadow = (directSceneTrace || !receivesShadow) ? 1.0 : ComputePointLightShadow(hit.position, runtimeShadingNormal, runtimeLightDir, lightDistance);
+					const float runtimeShadow = (directSceneTrace || !receivesShadow || !runtimeLightCastsShadow) ? 1.0 : ComputePointLightShadow(hit.position, runtimeShadingNormal, runtimeLightDir, lightDistance);
 					if (runtimeShadow <= 0.0)
 					{
 						TraceShaderStatAdd(TRACE_STAT_RUNTIME_SHADOW_OCCLUDED, 1u);

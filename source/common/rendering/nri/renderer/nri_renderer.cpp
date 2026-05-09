@@ -2353,6 +2353,7 @@ public:
 				actorRule.ruleId = BuildActorOverlayRuleId(resolvedRule);
 				actorRule.hasTileFilter = resolvedRule.hasTileFilter;
 				actorRule.tileFilter = resolvedRule.hasTileFilter && resolvedRule.tileFilter >= 0 ? (uint32_t)resolvedRule.tileFilter : 0u;
+				actorRule.flags = (!resolvedRule.hasShadowCast || resolvedRule.shadowCast) ? SceneAnalyticLightFlag_CastsShadow : SceneAnalyticLightFlag_None;
 				actorRule.color[0] = resolvedRule.color[0];
 				actorRule.color[1] = resolvedRule.color[1];
 				actorRule.color[2] = resolvedRule.color[2];
@@ -9505,7 +9506,7 @@ void NRIRenderer::PrintRuntimePointLights() const
 			"";
 		const auto diagnosticIt = analyticLights.activeDiagnosticFlags.find(light.stableKey);
 		const uint32_t diagnosticFlags = diagnosticIt != analyticLights.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
-		Printf("NRI PT analytic light %u: id=%u topology=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
+		Printf("NRI PT analytic light %u: id=%u topology=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s shadow=%s source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
 			light.id,
 			light.id,
 			(unsigned long long)light.stableKey,
@@ -9513,6 +9514,7 @@ void NRIRenderer::PrintRuntimePointLights() const
 			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Added) != 0),
 			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Rebound) != 0),
 			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PropertyChanged) != 0),
+			YesNo((light.flags & SceneAnalyticLightFlag_CastsShadow) != 0),
 			sourceBase,
 			sourceSuffix,
 			light.sourceRuleId,
@@ -17775,6 +17777,7 @@ void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuD
 		gpuLight.radius = light.radius;
 		Copy3(light.color, gpuLight.color);
 		gpuLight.intensity = light.intensity;
+		gpuLight.flags = light.flags;
 		outLights.push_back(gpuLight);
 	}
 }
@@ -17794,6 +17797,7 @@ uint64_t NRIRenderer::BuildRuntimeLightPayloadHash() const
 		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[2]));
 		hash = HashCombine64(hash, (uint64_t)FloatBits(light.intensity));
 		hash = HashCombine64(hash, (uint64_t)FloatBits(light.radius));
+		hash = HashCombine64(hash, (uint64_t)light.flags);
 	}
 
 	return hash;

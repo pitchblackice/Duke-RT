@@ -272,6 +272,7 @@ namespace
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.source);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.actorIndex);
 		hash = HashCombine64(hash, (uint64_t)light.textureId);
+		hash = HashCombine64(hash, (uint64_t)light.flags);
 		hash = HashQuantizedFloat(hash, light.position[0], 16.0f);
 		hash = HashQuantizedFloat(hash, light.position[1], 16.0f);
 		hash = HashQuantizedFloat(hash, light.position[2], 16.0f);
@@ -1273,6 +1274,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 				light.stableKey = BuildAnalyticTopologyKey(SceneAnalyticLightSourceFlag_ActorOverlay, rule.ruleId, record);
 				light.id = 0;
 				light.sourceFlags = SceneAnalyticLightSourceFlag_ActorOverlay;
+				light.flags = rule.flags;
 				light.sourceRuleId = rule.ruleId;
 				light.source = record.source;
 				light.actorIndex = record.provenance.actorIndex;

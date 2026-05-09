@@ -27,6 +27,12 @@ enum SceneAnalyticLightSourceFlags : uint32_t
 	SceneAnalyticLightSourceFlag_MuzzleFlash = 1u << 4,
 };
 
+enum SceneAnalyticLightFlags : uint32_t
+{
+	SceneAnalyticLightFlag_None = 0,
+	SceneAnalyticLightFlag_CastsShadow = 1u << 0,
+};
+
 enum SceneEmissiveSurfaceSourceFlags : uint32_t
 {
 	SceneEmissiveSurfaceSourceFlag_None = 0,
@@ -77,6 +83,7 @@ public:
 		uint32_t id = 0;
 		uint64_t stableKey = 0;
 		uint32_t sourceFlags = SceneAnalyticLightSourceFlag_None;
+		uint32_t flags = SceneAnalyticLightFlag_CastsShadow;
 		uint32_t sourceRuleId = 0;
 		SceneLightRecordSource source = SceneLightRecordSource::None;
 		int32_t actorIndex = -1;
@@ -104,6 +111,7 @@ public:
 			uint32_t ruleId = 0;
 			bool hasTileFilter = false;
 			uint32_t tileFilter = 0;
+			uint32_t flags = SceneAnalyticLightFlag_CastsShadow;
 			float color[3] = { 1.0f, 1.0f, 1.0f };
 			float intensity = 0.0f;
 			float radius = 0.0f;
