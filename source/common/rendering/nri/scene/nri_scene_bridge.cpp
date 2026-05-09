@@ -4613,6 +4613,12 @@ namespace
 		return sprite.Sprite->picnum >= 621 && sprite.Sprite->picnum <= 625;
 	}
 
+	bool IsVoxelActorCacheAuthoringMode(DynamicVoxelCaptureMode captureMode)
+	{
+		return captureMode == DynamicVoxelCaptureMode::Authoritative ||
+			captureMode == DynamicVoxelCaptureMode::MirrorResidencyRequest;
+	}
+
 	bool CaptureVoxelMeshSprite(HWDrawInfo* di, HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats, DynamicVoxelCaptureMode captureMode)
 	{
 		if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
@@ -4630,6 +4636,12 @@ namespace
 		FGameTexture* emissiveSourceTexture = GetVoxelReplacementEmissiveSourceTexture(sprite);
 		const MaterialRef voxelMaterial = MakeVoxelPaletteMaterialRef(voxelTexture, emissiveSourceTexture, sprite.palette, sprite.shade, sprite.alpha, MaterialFlag_Sprite);
 		const bool forceTransientVoxel = ShouldUseTransientVoxelActorCapture(sprite);
+		const bool requestedMirrorResidency = captureMode == DynamicVoxelCaptureMode::MirrorResidencyRequest;
+		if (requestedMirrorResidency && forceTransientVoxel)
+		{
+			stats.voxelStableUncacheable++;
+			return false;
+		}
 		if (forceTransientVoxel)
 		{
 			captureMode = DynamicVoxelCaptureMode::Transient;
@@ -4641,11 +4653,11 @@ namespace
 			{
 				stats.voxelCacheNotCaptured++;
 			}
-			return di != nullptr && CaptureMirrorVoxelFallbackSprite(*di, sprite, drawListType, outSprites) ? true : consumedCache;
+			return consumedCache;
 		}
 
 		VoxelActorCacheLookup cacheLookup = {};
-		if (captureMode == DynamicVoxelCaptureMode::Authoritative)
+		if (IsVoxelActorCacheAuthoringMode(captureMode))
 		{
 			ScopedDynamicCaptureTimer timer(gDynamicCapturePerfStats.modelClassifyMs);
 			cacheLookup = TrackVoxelActorSignature(sprite, voxelTexture, voxelMaterial, stats);
@@ -4655,7 +4667,8 @@ namespace
 			return true;
 		}
 
-		const bool cacheSurfaceUpdate = captureMode == DynamicVoxelCaptureMode::Authoritative && cacheLookup.stability != VoxelActorStability::Stable;
+		const bool cacheSurfaceUpdate = IsVoxelActorCacheAuthoringMode(captureMode) && cacheLookup.stability != VoxelActorStability::Stable;
+		const bool residencyRequestOnly = captureMode == DynamicVoxelCaptureMode::MirrorResidencyRequest;
 		const bool transformRebakeAlreadyResident =
 			cacheLookup.stability == VoxelActorStability::TransformRebake &&
 			cacheLookup.entry != nullptr &&
@@ -4703,7 +4716,7 @@ namespace
 				return deferDesiredVariant(VoxelActorPendingReason::MeshDeferred);
 			}
 
-			if (!forceTransientVoxel)
+			if (!forceTransientVoxel && !residencyRequestOnly)
 			{
 				CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
 			}
@@ -4758,7 +4771,7 @@ namespace
 				return deferDesiredVariant(VoxelActorPendingReason::TriangleBudget);
 			}
 
-			if (!forceTransientVoxel)
+			if (!forceTransientVoxel && !residencyRequestOnly)
 			{
 				CaptureVoxelProxySprite(sprite, drawListType, voxelTexture, outSprites);
 			}
@@ -4809,6 +4822,7 @@ namespace
 				storedEntry->second.persistentReady;
 			if (!wasPersistentReady &&
 				!nowPersistentReady &&
+				!residencyRequestOnly &&
 				(hadSurface || exactPrimitiveCount <= kTransientVoxelLiveSurfacePrimitiveLimit))
 			{
 				const VoxelActorPendingReason pendingReason =
@@ -4819,6 +4833,11 @@ namespace
 				RecordDynamicVoxelEscape(stats, sprite, cacheLookup, exactSurface, escapeReason);
 				outSprites.push_back(std::move(exactSurface));
 			}
+			return true;
+		}
+
+		if (residencyRequestOnly)
+		{
 			return true;
 		}
 

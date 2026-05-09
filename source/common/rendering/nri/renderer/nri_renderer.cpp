@@ -1343,7 +1343,7 @@ public:
 		captureDi->CreateScene(false);
 		const MirrorExtendedDrawListStats rawDrawListStats = GatherMirrorExtendedDrawListStats(*captureDi, frameIndex);
 		nri_scene::SceneView capturedView;
-		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, capturedView, nri_scene::DynamicVoxelCaptureMode::ReadOnlyCache);
+		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, capturedView, nri_scene::DynamicVoxelCaptureMode::MirrorResidencyRequest);
 		captureDi->EndDrawInfo();
 		if (!hasCapture)
 		{
