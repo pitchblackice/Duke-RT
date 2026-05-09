@@ -2305,13 +2305,6 @@ namespace
 	}
 
 	bool IsVoxelMeshVariantSurfaceReady(uint64_t meshVariantHash);
-	const SurfaceRef* GetReadyVoxelMeshVariantSurface(uint64_t meshVariantHash);
-	bool BuildVoxelMeshSurfaceFromCanonical(
-		const HWSprite& sprite,
-		uint32_t drawListType,
-		const SurfaceRef& canonicalSurface,
-		const MaterialRef& voxelMaterial,
-		SurfaceRef& outSurface);
 
 	bool IsVoxelActorSharedVariantReady(const VoxelActorCacheEntry& entry)
 	{
@@ -2518,7 +2511,7 @@ namespace
 		return lookup;
 	}
 
-	bool TryConsumeReadOnlyVoxelActorCacheSurface(const HWSprite& sprite, uint32_t drawListType, FGameTexture* voxelTexture, const MaterialRef& material, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
+	bool TryConsumeReadOnlyVoxelActorCacheSurface(const HWSprite& sprite, FGameTexture* voxelTexture, const MaterialRef& material, SceneDebugStats& stats)
 	{
 		VoxelActorCacheLookup lookup = {};
 		if (!TryBuildVoxelActorIdentity(sprite, lookup))
@@ -2550,30 +2543,6 @@ namespace
 		lookup.meshBakeSpace = VoxelMeshBakeSpace::LocalSpace;
 		lookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
 		CopyVoxelActorTransform(sprite, lookup.currentTransform);
-
-		auto appendReadOnlySurface = [&](const VoxelActorCacheEntry& entry) -> bool
-		{
-			SurfaceRef surface = {};
-			if (entry.sharedVariantSurface)
-			{
-				const SurfaceRef* canonicalSurface = GetReadyVoxelMeshVariantSurface(entry.meshVariantHash);
-				if (canonicalSurface == nullptr ||
-					!BuildVoxelMeshSurfaceFromCanonical(sprite, drawListType, *canonicalSurface, material, surface))
-				{
-					return false;
-				}
-			}
-			else
-			{
-				surface = entry.surface;
-				surface.material = material;
-				surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::VoxelProxySprite, drawListType, surface.material.flags);
-			}
-			outSprites.push_back(std::move(surface));
-			stats.voxelCacheActorSurfaces++;
-			return true;
-		};
-
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end() || !found->second.hasSurface)
 		{
@@ -2589,7 +2558,7 @@ namespace
 			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-fallback-last-valid");
 			stats.voxelStableSplitStable++;
 			stats.voxelCacheSurfaceHits++;
-			return appendReadOnlySurface(entry);
+			return true;
 		}
 
 		if (entry.signature != signature)
@@ -2610,7 +2579,7 @@ namespace
 
 		stats.voxelStableSplitStable++;
 		stats.voxelCacheSurfaceHits++;
-		return appendReadOnlySurface(entry);
+		return true;
 	}
 
 	void NormalizeCachedSurfacePreviousPositions(SurfaceRef& surface)
@@ -4491,7 +4460,7 @@ namespace
 		}
 		if (captureMode == DynamicVoxelCaptureMode::ReadOnlyCache)
 		{
-			if (!TryConsumeReadOnlyVoxelActorCacheSurface(sprite, drawListType, voxelTexture, voxelMaterial, outSprites, stats))
+			if (!TryConsumeReadOnlyVoxelActorCacheSurface(sprite, voxelTexture, voxelMaterial, stats))
 			{
 				stats.voxelCacheNotCaptured++;
 			}
