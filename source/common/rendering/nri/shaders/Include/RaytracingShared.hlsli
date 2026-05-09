@@ -748,6 +748,11 @@ uint ResolvePrimitiveMaterialIndex(SceneInstanceData instanceData, PrimitiveData
 	return primitive.materialIndex;
 }
 
+uint ResolveVisibilityChunk(SceneInstanceData instanceData, PrimitiveData primitive)
+{
+	return instanceData.visibilityChunk != 0xffffffffu ? instanceData.visibilityChunk : primitive.reserved0;
+}
+
 bool IntersectPrimitiveTriangle(float3 origin, float3 direction, uint primitiveIndex, out float hitT, out float3 barycentrics)
 {
 	hitT = 0.0;
@@ -902,7 +907,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			continue;
 		}
 
-		if (gateVisibleChunks && !IsVisibleChunk(primitive.reserved0))
+		if (gateVisibleChunks && !IsVisibleChunk(ResolveVisibilityChunk(instanceData, primitive)))
 		{
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);

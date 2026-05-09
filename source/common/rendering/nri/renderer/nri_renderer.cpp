@@ -4448,6 +4448,15 @@ namespace
 		return -1;
 	}
 
+	static int32_t ResolveVisibilityChunkIndexForProvenance(const nri_scene::PTMapWorld& mapWorld, const nri_scene::SurfaceProvenance& provenance)
+	{
+		if (provenance.mapChunkIndex >= 0)
+		{
+			return provenance.mapChunkIndex;
+		}
+		return FindMapChunkIndexForSector(mapWorld, provenance.sectorIndex);
+	}
+
 	static void MarkChunkVisible(std::vector<uint32_t>& visibleChunkWords, uint32_t chunkIndex)
 	{
 		const size_t wordIndex = (size_t)(chunkIndex >> 5u);
@@ -8439,6 +8448,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							sceneInstance.dataSource = NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL;
 							sceneInstance.reserved0 = actor.materialOffset;
 							sceneInstance.reserved1 = actor.materialCount;
+							sceneInstance.visibilityChunk = actor.visibilityChunkIndex;
 							for (uint32_t i = 0; i < 12; ++i)
 							{
 								sceneInstance.currentTransform[i] = actor.instanceTransform[i];
@@ -11396,11 +11406,11 @@ void NRIRenderer::UploadChunkPrimitiveDataToAtlas(
 			primitive.indices[2] = atlasChunk.vertexOffset + primitive.indices[2] - sourceChunk.vertexOffset;
 			primitive.materialIndex = atlasChunk.materialOffset + primitive.materialIndex - sourceChunk.materialOffset;
 			const uint32_t provenanceIndex = sourceChunk.primitiveOffset + i;
-			primitive.reserved0 =
-				provenanceIndex < sourceGeometry.primitiveProvenance.size() &&
-				sourceGeometry.primitiveProvenance[provenanceIndex].mapChunkIndex >= 0 ?
-				(uint32_t)sourceGeometry.primitiveProvenance[provenanceIndex].mapChunkIndex :
-				UINT32_MAX;
+			const int32_t visibilityChunk =
+				provenanceIndex < sourceGeometry.primitiveProvenance.size() ?
+				ResolveVisibilityChunkIndexForProvenance(mMapWorld, sourceGeometry.primitiveProvenance[provenanceIndex]) :
+				-1;
+			primitive.reserved0 = visibilityChunk >= 0 ? (uint32_t)visibilityChunk : UINT32_MAX;
 			outPrimitives[atlasChunk.primitiveOffset + i] = primitive;
 		}
 	}
@@ -13257,6 +13267,26 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return true;
 	};
 
+	auto resolvePersistentVoxelActorVisibilityChunk = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> uint32_t
+	{
+		const nri_scene::SurfaceProvenance* provenance = nullptr;
+		if (cacheEntry.lightSurface != nullptr)
+		{
+			provenance = &cacheEntry.lightSurface->provenance;
+		}
+		else if (cacheEntry.surface != nullptr)
+		{
+			provenance = &cacheEntry.surface->provenance;
+		}
+		if (provenance == nullptr)
+		{
+			return UINT32_MAX;
+		}
+
+		const int32_t chunkIndex = ResolveVisibilityChunkIndexForProvenance(mMapWorld, *provenance);
+		return chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+	};
+
 	auto appendActorToBatch = [&](PersistentVoxelBatch& batch, const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, PersistentVoxelBatch::ActorEntry* existingActor = nullptr, bool* outDeferred = nullptr) -> bool
 	{
 		if (outDeferred != nullptr)
@@ -13958,6 +13988,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.retainedFrameAge = cacheEntry.retainedFrameAge;
 		actor.sourcePicnum = cacheEntry.sourcePicnum;
 		actor.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
+		actor.visibilityChunkIndex = resolvePersistentVoxelActorVisibilityChunk(cacheEntry);
 		actor.capturedThisFrame = cacheEntry.capturedThisFrame;
 		actor.active = true;
 		fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResource, actor.instanceTransform);
@@ -14222,6 +14253,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				meshResourceIt == mPersistentVoxelMeshVariantResources.end() ||
 				meshResourceIt->second.accelerationStructure.accelerationStructure == nullptr;
 			const bool actorInstanceTransformNeedsUpdate = !samePersistentVoxelInstanceTransform(actor.instanceTransform, expectedInstanceTransform.data());
+			const uint32_t expectedVisibilityChunkIndex = resolvePersistentVoxelActorVisibilityChunk(cacheEntry);
+			const bool actorVisibilityChunkNeedsUpdate = actor.visibilityChunkIndex != expectedVisibilityChunkIndex;
 			const bool actorNeedsUpdate =
 				actor.signature != cacheEntry.signature ||
 				actor.geometrySignature != cacheEntry.geometrySignature ||
@@ -14230,12 +14263,13 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				actor.materialSignature != cacheEntry.materialSignature ||
 				actor.meshKeyHash != cacheEntry.meshKeyHash ||
 				actor.materialKeyHash != cacheEntry.materialKeyHash ||
-				actorInstanceTransformNeedsUpdate;
+				actorInstanceTransformNeedsUpdate ||
+				actorVisibilityChunkNeedsUpdate;
 			if (actorNeedsUpdate)
 			{
 				const bool transformOnlyUpdate =
 					!actorGeometryNeedsUpdate &&
-					actorInstanceTransformNeedsUpdate &&
+					(actorInstanceTransformNeedsUpdate || actorVisibilityChunkNeedsUpdate) &&
 					actor.signature == cacheEntry.signature &&
 					actor.geometrySignature == cacheEntry.geometrySignature &&
 					actor.materialSignature == cacheEntry.materialSignature &&
@@ -14246,6 +14280,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				{
 					actor.surfaceSignature = cacheEntry.surfaceSignature;
 					actor.instanceTransform = expectedInstanceTransform;
+					actor.visibilityChunkIndex = expectedVisibilityChunkIndex;
 					actor.active = true;
 					auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
 					if (instanceIt != mPersistentVoxelInstances.end())
@@ -14348,6 +14383,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			}
 
 			actor.active = true;
+			actor.visibilityChunkIndex = resolvePersistentVoxelActorVisibilityChunk(cacheEntry);
 			auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
 			if (instanceIt != mPersistentVoxelInstances.end())
 			{
@@ -21578,7 +21614,7 @@ bool NRIRenderer::UploadSceneBuffers(
 	const size_t primitiveCount = std::min(gpuPrimitives.size(), geometry.primitiveProvenance.size());
 	for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 	{
-		const int32_t chunkIndex = geometry.primitiveProvenance[primitiveIndex].mapChunkIndex;
+		const int32_t chunkIndex = ResolveVisibilityChunkIndexForProvenance(mMapWorld, geometry.primitiveProvenance[primitiveIndex]);
 		gpuPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
 	}
 	for (size_t primitiveIndex = primitiveCount; primitiveIndex < gpuPrimitives.size(); ++primitiveIndex)

@@ -1362,6 +1362,7 @@ private:
 			uint64_t retainedFrameAge = 0;
 			int32_t sourcePicnum = -1;
 			int32_t resolvedVoxelIndex = -1;
+			uint32_t visibilityChunkIndex = UINT32_MAX;
 			bool capturedThisFrame = false;
 			bool active = true;
 			uint32_t primitiveOffset = 0;
@@ -1690,6 +1691,8 @@ private:
 		uint32_t dataSource = 0;
 		uint32_t reserved0 = 0;
 		uint32_t reserved1 = 0;
+		uint32_t visibilityChunk = UINT32_MAX;
+		uint32_t reserved2[3] = {};
 		float currentTransform[12] =
 		{
 			1.0f, 0.0f, 0.0f, 0.0f,
