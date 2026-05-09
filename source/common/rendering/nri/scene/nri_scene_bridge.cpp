@@ -4569,100 +4569,6 @@ namespace
 		return true;
 	}
 
-	bool TryCaptureReadOnlyVoxelMeshSurface(HWSprite& sprite, uint32_t drawListType, FGameTexture* voxelTexture, const MaterialRef& material, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats)
-	{
-		VoxelActorCacheLookup lookup = {};
-		if (!TryBuildVoxelActorIdentity(sprite, lookup))
-		{
-			stats.voxelStableUncacheable++;
-			TraceMirrorVoxelCacheDecision(sprite, nullptr, nullptr, "identity-fail");
-			return false;
-		}
-
-		stats.voxelStableCandidates++;
-		const uint64_t surfaceSignature = BuildVoxelActorSurfaceSignature(sprite);
-		const VoxelMeshVariantKey meshVariantKey = BuildVoxelMeshVariantKey(sprite);
-		const VoxelMaterialVariantKey materialVariantKey = BuildVoxelMaterialVariantKey(voxelTexture, material);
-		const uint64_t meshVariantHash = BuildVoxelMeshVariantKeyHash(meshVariantKey);
-		const uint64_t materialVariantHash = BuildVoxelMaterialVariantKeyHash(materialVariantKey);
-		lookup.geometrySignature = meshVariantHash;
-		lookup.surfaceSignature = surfaceSignature;
-		lookup.materialSignature = materialVariantHash;
-		lookup.meshKeyHash = meshVariantHash;
-		lookup.materialKeyHash = materialVariantHash;
-		lookup.meshVariantHash = meshVariantHash;
-		lookup.materialVariantHash = materialVariantHash;
-		lookup.meshBakeSpace = VoxelMeshBakeSpace::LocalSpace;
-		lookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
-		lookup.sourcePicnum = sprite.Sprite != nullptr ? sprite.Sprite->spritetexture().GetIndex() : -1;
-		CopyVoxelActorTransform(sprite, lookup.currentTransform);
-
-		const auto found = gVoxelActorCache.find(lookup.identityKey);
-		const VoxelActorCacheEntry* entry = found != gVoxelActorCache.end() ? &found->second : nullptr;
-		const bool actorCacheUsable =
-			entry != nullptr &&
-			entry->hasSurface &&
-			entry->geometrySignature == lookup.geometrySignature;
-
-		bool meshDeferred = false;
-		const FVoxelMeshData* mesh = GetCachedVoxelMesh(sprite.voxel->model, meshDeferred);
-		if (mesh == nullptr)
-		{
-			stats.voxelStableSignatureMisses++;
-			TraceMirrorVoxelCacheDecision(sprite, &lookup, entry, meshDeferred ? "mesh-deferred" : (actorCacheUsable ? "mesh-unavailable" : "miss"));
-			return false;
-		}
-
-		const SurfaceRef* canonicalSurface = GetCachedVoxelMeshVariantSurface(lookup, *mesh, false);
-		if (canonicalSurface == nullptr)
-		{
-			stats.voxelStableSignatureMisses++;
-			TraceMirrorVoxelCacheDecision(sprite, &lookup, entry, actorCacheUsable ? "canonical-unavailable" : "miss");
-			return false;
-		}
-
-		SurfaceRef placedSurface = {};
-		if (!BuildVoxelMeshSurfaceFromCanonical(sprite, drawListType, *canonicalSurface, material, placedSurface))
-		{
-			stats.voxelStableSignatureMisses++;
-			TraceMirrorVoxelCacheDecision(sprite, &lookup, entry, actorCacheUsable ? "surface-build-failed" : "miss");
-			return false;
-		}
-
-		if (actorCacheUsable)
-		{
-			if (entry->signature != BuildVoxelActorSignature(lookup.geometrySignature, lookup.materialSignature))
-			{
-				stats.voxelStableSignatureChanges++;
-				TraceMirrorVoxelCacheDecision(sprite, &lookup, entry, "material-mismatch");
-				EmitVoxelActorKeyTrace(sprite, lookup, "readonly-material-geometry");
-			}
-			else if (entry->surfaceSignature != lookup.surfaceSignature)
-			{
-				stats.voxelStableSignatureChanges++;
-				TraceMirrorVoxelCacheDecision(sprite, &lookup, entry, "transform-mismatch");
-				EmitVoxelActorKeyTrace(sprite, lookup, "readonly-transform-geometry");
-			}
-			else
-			{
-				stats.voxelStableSignatureHits++;
-				TraceMirrorVoxelCacheDecision(sprite, &lookup, entry, "hit");
-				EmitVoxelActorKeyTrace(sprite, lookup, "readonly-hit-geometry");
-			}
-			stats.voxelCacheSurfaceHits++;
-		}
-		else
-		{
-			stats.voxelStableSignatureMisses++;
-			TraceMirrorVoxelCacheDecision(sprite, &lookup, entry, "canonical-hit");
-			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-canonical-geometry");
-		}
-
-		stats.voxelStableSplitStable++;
-		outSprites.push_back(std::move(placedSurface));
-		return true;
-	}
-
 	bool BuildVoxelMeshSurface(
 		const HWSprite& sprite,
 		uint32_t drawListType,
@@ -4730,12 +4636,12 @@ namespace
 		}
 		if (captureMode == DynamicVoxelCaptureMode::ReadOnlyCache)
 		{
-			const bool capturedGeometry = TryCaptureReadOnlyVoxelMeshSurface(sprite, drawListType, voxelTexture, voxelMaterial, outSprites, stats);
-			if (!capturedGeometry)
+			const bool consumedCache = TryConsumeReadOnlyVoxelActorCacheSurface(sprite, voxelTexture, voxelMaterial, stats);
+			if (!consumedCache)
 			{
 				stats.voxelCacheNotCaptured++;
 			}
-			return capturedGeometry || (di != nullptr && CaptureMirrorVoxelFallbackSprite(*di, sprite, drawListType, outSprites));
+			return di != nullptr && CaptureMirrorVoxelFallbackSprite(*di, sprite, drawListType, outSprites) ? true : consumedCache;
 		}
 
 		VoxelActorCacheLookup cacheLookup = {};
