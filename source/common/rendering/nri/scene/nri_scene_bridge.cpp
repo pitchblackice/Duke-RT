@@ -218,9 +218,11 @@ namespace
 		float currentTranslation[3] = {};
 		float bakedTranslation[3] = {};
 		float currentTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+		float lastActorScenePosition[3] = {};
 		bool persistentReady = false;
 		bool hasSurface = false;
 		bool sharedVariantSurface = false;
+		bool hasLastActorScenePosition = false;
 		SurfaceRef lightSurface;
 	};
 
@@ -400,6 +402,8 @@ namespace
 		int32_t resolvedVoxelIndex = -1;
 		float currentTranslation[3] = {};
 		float currentTransform[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+		float actorScenePosition[3] = {};
+		bool hasActorScenePosition = false;
 		VoxelActorCacheEntry* entry = nullptr;
 	};
 
@@ -2124,6 +2128,23 @@ namespace
 		outTranslation[2] = (float)matrix[14];
 	}
 
+	void CopyLiveActorScenePosition(const DCoreActor& actor, float outPosition[3])
+	{
+		outPosition[0] = (float)actor.spr.pos.X;
+		outPosition[1] = (float)-actor.spr.pos.Y;
+		outPosition[2] = (float)-actor.spr.pos.Z;
+	}
+
+	bool CopyVoxelActorScenePosition(const HWSprite& sprite, float outPosition[3])
+	{
+		if (sprite.Sprite == nullptr || sprite.Sprite->ownerActor == nullptr)
+		{
+			return false;
+		}
+		CopyLiveActorScenePosition(*sprite.Sprite->ownerActor, outPosition);
+		return true;
+	}
+
 	void CopyVoxelActorTransform(const HWSprite& sprite, float outTransform[12])
 	{
 		const FLOATTYPE* matrix = sprite.rotmat.get();
@@ -2469,6 +2490,18 @@ namespace
 		entry.meshBakeSpace = lookup.meshBakeSpace;
 	}
 
+	void UpdateVoxelActorCacheEntryScenePosition(VoxelActorCacheEntry& entry, const VoxelActorCacheLookup& lookup)
+	{
+		if (!lookup.hasActorScenePosition)
+		{
+			return;
+		}
+		entry.lastActorScenePosition[0] = lookup.actorScenePosition[0];
+		entry.lastActorScenePosition[1] = lookup.actorScenePosition[1];
+		entry.lastActorScenePosition[2] = lookup.actorScenePosition[2];
+		entry.hasLastActorScenePosition = true;
+	}
+
 	bool HasLastValidResidentVoxelSurface(const VoxelActorCacheLookup& lookup)
 	{
 		return lookup.entry != nullptr && lookup.entry->hasSurface && lookup.entry->persistentReady;
@@ -2568,6 +2601,7 @@ namespace
 		lookup.resolvedVoxelIndex = meshVariantKey.resolvedVoxelIndex;
 		CopyVoxelActorTranslation(sprite, lookup.currentTranslation);
 		CopyVoxelActorTransform(sprite, lookup.currentTransform);
+		lookup.hasActorScenePosition = CopyVoxelActorScenePosition(sprite, lookup.actorScenePosition);
 		auto found = gVoxelActorCache.find(lookup.identityKey);
 		if (found == gVoxelActorCache.end())
 		{
@@ -2603,6 +2637,7 @@ namespace
 			lookup.entry->currentTranslation[1] = lookup.currentTranslation[1];
 			lookup.entry->currentTranslation[2] = lookup.currentTranslation[2];
 			std::copy(std::begin(lookup.currentTransform), std::end(lookup.currentTransform), std::begin(lookup.entry->currentTransform));
+			UpdateVoxelActorCacheEntryScenePosition(*lookup.entry, lookup);
 			lookup.entry->lastSeenFrame = gVoxelActorCacheFrame;
 			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
 			lookup.entry->pendingFrame = 0;
@@ -2624,6 +2659,7 @@ namespace
 			}
 			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
 			lookup.entry->pendingFrame = 0;
+			UpdateVoxelActorCacheEntryScenePosition(*lookup.entry, lookup);
 			stats.voxelStableSignatureHits++;
 			stats.voxelStableSplitStable++;
 			stats.voxelCacheSurfaceHits++;
@@ -2652,6 +2688,7 @@ namespace
 			}
 			lookup.entry->pendingReason = (uint8_t)VoxelActorPendingReason::None;
 			lookup.entry->pendingFrame = 0;
+			UpdateVoxelActorCacheEntryScenePosition(*lookup.entry, lookup);
 			if (!promoted || lookup.entry->persistentReady)
 			{
 				++gVoxelActorCacheSerial;
@@ -2804,6 +2841,7 @@ namespace
 		entry.meshVariantHash = lookup.meshVariantHash;
 		entry.materialVariantHash = lookup.materialVariantHash;
 		InitializeVoxelActorCacheEntryIdentity(entry, lookup);
+		UpdateVoxelActorCacheEntryScenePosition(entry, lookup);
 		entry.meshBakeSpace = meshBakeSpace;
 		entry.desiredSignature = lookup.signature;
 		entry.desiredMeshKeyHash = lookup.meshKeyHash;
@@ -3902,9 +3940,9 @@ namespace
 		return alpha;
 	}
 
-	void BuildLiveActorIdentityKeys(std::unordered_set<uint64_t>& outKeys)
+	void BuildLiveActorIdentityMap(std::unordered_map<uint64_t, DCoreActor*>& outActors)
 	{
-		outKeys.clear();
+		outActors.clear();
 		if (!r_voxels)
 		{
 			return;
@@ -3930,9 +3968,51 @@ namespace
 			const uint64_t identityKey = BuildVoxelInstanceKeyHash(BuildVoxelInstanceKey(actorIndex, actor));
 			if (identityKey != 0)
 			{
-				outKeys.insert(identityKey);
+				outActors[identityKey] = actor;
 			}
 		}
+	}
+
+	bool SyncRetainedVoxelActorTransform(VoxelActorCacheEntry& entry, DCoreActor* actor)
+	{
+		if (actor == nullptr || !entry.hasSurface || !entry.persistentReady || entry.lastSeenFrame == gVoxelActorCacheFrame)
+		{
+			return false;
+		}
+
+		float actorScenePosition[3] = {};
+		CopyLiveActorScenePosition(*actor, actorScenePosition);
+		if (!entry.hasLastActorScenePosition)
+		{
+			entry.lastActorScenePosition[0] = actorScenePosition[0];
+			entry.lastActorScenePosition[1] = actorScenePosition[1];
+			entry.lastActorScenePosition[2] = actorScenePosition[2];
+			entry.hasLastActorScenePosition = true;
+			return false;
+		}
+
+		const float delta[3] =
+		{
+			actorScenePosition[0] - entry.lastActorScenePosition[0],
+			actorScenePosition[1] - entry.lastActorScenePosition[1],
+			actorScenePosition[2] - entry.lastActorScenePosition[2],
+		};
+		constexpr float Epsilon = 0.0001f;
+		if (std::abs(delta[0]) <= Epsilon && std::abs(delta[1]) <= Epsilon && std::abs(delta[2]) <= Epsilon)
+		{
+			return false;
+		}
+
+		entry.currentTranslation[0] += delta[0];
+		entry.currentTranslation[1] += delta[1];
+		entry.currentTranslation[2] += delta[2];
+		entry.currentTransform[3] += delta[0];
+		entry.currentTransform[7] += delta[1];
+		entry.currentTransform[11] += delta[2];
+		entry.lastActorScenePosition[0] = actorScenePosition[0];
+		entry.lastActorScenePosition[1] = actorScenePosition[1];
+		entry.lastActorScenePosition[2] = actorScenePosition[2];
+		return true;
 	}
 
 	bool BeginVoxelActorCacheFrame()
@@ -4277,12 +4357,13 @@ namespace
 
 	void PruneVoxelActorCache(SceneDebugStats& stats)
 	{
-		std::unordered_set<uint64_t> liveActorKeys;
-		BuildLiveActorIdentityKeys(liveActorKeys);
+		std::unordered_map<uint64_t, DCoreActor*> liveActors;
+		BuildLiveActorIdentityMap(liveActors);
 
 		for (auto it = gVoxelActorCache.begin(); it != gVoxelActorCache.end(); )
 		{
-			if (liveActorKeys.find(it->first) == liveActorKeys.end())
+			auto liveActor = liveActors.find(it->first);
+			if (liveActor == liveActors.end())
 			{
 				if (it->second.lastSeenFrame == gVoxelActorCacheFrame)
 				{
@@ -4298,6 +4379,11 @@ namespace
 			}
 			if (it->second.hasSurface && it->second.lastSeenFrame != gVoxelActorCacheFrame)
 			{
+				if (SyncRetainedVoxelActorTransform(it->second, liveActor->second))
+				{
+					++gVoxelActorCacheSerial;
+					EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "retained-transform-sync", VoxelActorPendingReason::None);
+				}
 				stats.voxelCacheNotCaptured++;
 				EmitVoxelActorStateTrace(nullptr, nullptr, &it->second, "retained-not-captured", VoxelActorPendingReason::None);
 			}
