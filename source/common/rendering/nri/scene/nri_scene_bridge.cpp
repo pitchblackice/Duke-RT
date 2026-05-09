@@ -36,6 +36,7 @@
 EXTERN_CVAR(Bool, r_voxels)
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptactorspritetrace)
+EXTERN_CVAR(Int, perf_looptraceframes)
 CVAR(Bool, nri_voxelstats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeltrianglebudget, 250000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelmaxtriangles, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -407,6 +408,11 @@ namespace
 	bool ShouldTraceSkyPerf()
 	{
 		return nri_pttraceframes > 0;
+	}
+
+	bool ShouldTraceMirrorVoxelCapture()
+	{
+		return nri_voxelstats || (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0;
 	}
 
 	class ScopedSkyPerfTimer
@@ -2332,6 +2338,48 @@ namespace
 		screen->EmitPathTracingActorSpriteTraceEvent(event);
 	}
 
+	void TraceMirrorVoxelCacheDecision(
+		const HWSprite& sprite,
+		const VoxelActorCacheLookup* lookup,
+		const VoxelActorCacheEntry* entry,
+		const char* action)
+	{
+		if (!ShouldTraceMirrorVoxelCapture())
+		{
+			return;
+		}
+
+		const int actorIndex =
+			lookup != nullptr ? lookup->actorIndex :
+			sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr ? sprite.Sprite->ownerActor->GetIndex() :
+			-1;
+		const int statnum = sprite.Sprite != nullptr ? sprite.Sprite->statnum : -1;
+		const int picnum = sprite.Sprite != nullptr ? sprite.Sprite->picnum : -1;
+		const uint64_t identityKey = lookup != nullptr ? lookup->identityKey : 0ull;
+		const uint64_t meshVariant = lookup != nullptr ? lookup->meshVariantHash : 0ull;
+		const uint64_t materialVariant = lookup != nullptr ? lookup->materialVariantHash : 0ull;
+		const uint64_t surfaceSignature = lookup != nullptr ? lookup->surfaceSignature : 0ull;
+		const VoxelActorPendingReason pendingReason =
+			entry != nullptr ? (VoxelActorPendingReason)entry->pendingReason : VoxelActorPendingReason::None;
+
+		Printf("PERF pt mirror voxel cache NRI: frame=%llu actor=%d stat=%d pic=%d action=%s identity=0x%llx mesh_variant=0x%llx mat_variant=0x%llx surface_sig=0x%llx entry=%u has_surface=%u persistent=%u prims=%u pending=%s last_seen=%llu\n",
+			(unsigned long long)gVoxelActorCacheFrame,
+			actorIndex,
+			statnum,
+			picnum,
+			action != nullptr ? action : "unknown",
+			(unsigned long long)identityKey,
+			(unsigned long long)meshVariant,
+			(unsigned long long)materialVariant,
+			(unsigned long long)surfaceSignature,
+			entry != nullptr ? 1u : 0u,
+			entry != nullptr && entry->hasSurface ? 1u : 0u,
+			entry != nullptr && entry->persistentReady ? 1u : 0u,
+			entry != nullptr ? entry->primitiveCount : 0u,
+			GetVoxelActorPendingReasonName(pendingReason),
+			(unsigned long long)(entry != nullptr ? entry->lastSeenFrame : 0ull));
+	}
+
 	void InitializeVoxelActorCacheEntryIdentity(VoxelActorCacheEntry& entry, const VoxelActorCacheLookup& lookup)
 	{
 		entry.identityKey = lookup.identityKey;
@@ -2563,6 +2611,7 @@ namespace
 		if (!TryBuildVoxelActorIdentity(sprite, lookup))
 		{
 			stats.voxelStableUncacheable++;
+			TraceMirrorVoxelCacheDecision(sprite, nullptr, nullptr, "identity-fail");
 			return false;
 		}
 
@@ -2593,6 +2642,7 @@ namespace
 		if (found == gVoxelActorCache.end() || !found->second.hasSurface)
 		{
 			stats.voxelStableSignatureMisses++;
+			TraceMirrorVoxelCacheDecision(sprite, &lookup, found != gVoxelActorCache.end() ? &found->second : nullptr, "miss");
 			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-miss");
 			return false;
 		}
@@ -2601,6 +2651,7 @@ namespace
 		if (entry.geometrySignature != geometrySignature)
 		{
 			stats.voxelStableSignatureChanges++;
+			TraceMirrorVoxelCacheDecision(sprite, &lookup, &entry, "geometry-mismatch");
 			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-fallback-last-valid");
 			stats.voxelStableSplitStable++;
 			stats.voxelCacheSurfaceHits++;
@@ -2610,16 +2661,19 @@ namespace
 		if (entry.signature != signature)
 		{
 			stats.voxelStableSignatureChanges++;
+			TraceMirrorVoxelCacheDecision(sprite, &lookup, &entry, "material-mismatch");
 			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-material");
 		}
 		else if (entry.surfaceSignature != surfaceSignature)
 		{
 			stats.voxelStableSignatureChanges++;
+			TraceMirrorVoxelCacheDecision(sprite, &lookup, &entry, "transform-mismatch");
 			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-transform");
 		}
 		else
 		{
 			stats.voxelStableSignatureHits++;
+			TraceMirrorVoxelCacheDecision(sprite, &lookup, &entry, "hit");
 			EmitVoxelActorKeyTrace(sprite, lookup, "readonly-hit");
 		}
 

@@ -1170,29 +1170,96 @@ public:
 		append(sceneView.opaqueSprites);
 	}
 
+	struct MirrorExtendedAppendStats
+	{
+		uint32_t source = 0;
+		uint32_t accepted = 0;
+		uint32_t rejectedDistance = 0;
+		uint32_t rejectedDuplicate = 0;
+	};
+
+	struct MirrorExtendedDrawListStats
+	{
+		uint32_t modelSprites = 0;
+		uint32_t voxelSprites = 0;
+		uint32_t facingSprites = 0;
+	};
+
+	static bool ShouldTraceMirrorDynamicCapture();
+
+	static MirrorExtendedDrawListStats GatherMirrorExtendedDrawListStats(HWDrawInfo& di, uint32_t frameIndex)
+	{
+		MirrorExtendedDrawListStats stats = {};
+		stats.modelSprites = di.drawlists[GLDL_MODELS].Size();
+		stats.facingSprites = di.drawlists[GLDL_TRANSLUCENT].Size();
+
+		const bool trace = ShouldTraceMirrorDynamicCapture();
+		uint32_t tracedVoxelSprites = 0;
+		for (auto* sprite : di.drawlists[GLDL_MODELS].sprites)
+		{
+			if (sprite == nullptr ||
+				sprite->modelframe >= 0 ||
+				sprite->voxel == nullptr ||
+				sprite->voxel->model == nullptr)
+			{
+				continue;
+			}
+
+			stats.voxelSprites++;
+			if (trace && tracedVoxelSprites < 16u)
+			{
+				const DCoreActor* actor = sprite->Sprite != nullptr ? sprite->Sprite->ownerActor : nullptr;
+				const int actorIndex = actor != nullptr ? actor->GetIndex() : -1;
+				const int statnum = sprite->Sprite != nullptr ? sprite->Sprite->statnum : -1;
+				const int picnum = sprite->Sprite != nullptr ? sprite->Sprite->picnum : -1;
+				Printf("PERF pt mirror voxel drawlist NRI: frame=%u rank=%u actor=%d stat=%d pic=%d tex=%d pos=(%.2f,%.2f,%.2f) alpha=%.3f voxel=%p model=%p\n",
+					frameIndex,
+					tracedVoxelSprites + 1u,
+					actorIndex,
+					statnum,
+					picnum,
+					sprite->texture != nullptr ? sprite->texture->GetID().GetIndex() : -1,
+					(double)sprite->x,
+					(double)sprite->y,
+					(double)sprite->z,
+					(double)sprite->alpha,
+					(void*)sprite->voxel,
+					sprite->voxel != nullptr ? (void*)sprite->voxel->model : nullptr);
+			}
+			tracedVoxelSprites++;
+		}
+
+		return stats;
+	}
+
 	static void AppendMirrorExtendedSurfaceList(
 		const std::vector<nri_scene::SurfaceRef>& source,
 		const FRenderViewpoint& viewpoint,
 		float maxDistance,
 		std::unordered_set<uint64_t>& existingKeys,
-		std::vector<nri_scene::SurfaceRef>& destination)
+		std::vector<nri_scene::SurfaceRef>& destination,
+		MirrorExtendedAppendStats& stats)
 	{
 		const float maxDistanceSquared = maxDistance > 0.0f ? maxDistance * maxDistance : 0.0f;
 		for (const nri_scene::SurfaceRef& surface : source)
 		{
+			stats.source++;
 			if (maxDistanceSquared > 0.0f &&
 				ComputeSurfaceDistanceSquaredToViewpoint(viewpoint, surface) > maxDistanceSquared)
 			{
+				stats.rejectedDistance++;
 				continue;
 			}
 
 			const uint64_t key = BuildDynamicSurfaceMergeKey(surface);
 			if (!existingKeys.insert(key).second)
 			{
+				stats.rejectedDuplicate++;
 				continue;
 			}
 
 			destination.push_back(surface);
+			stats.accepted++;
 		}
 	}
 
@@ -1252,7 +1319,9 @@ public:
 	static bool CaptureMirrorExtendedDynamicScene(
 		HWDrawInfo& di,
 		HWPortal* mirrorPortal,
+		int32_t selectedMirrorWallIndex,
 		const nri_scene::SceneView* baseDynamicSceneView,
+		uint32_t frameIndex,
 		nri_scene::SceneView& outView)
 	{
 		outView = {};
@@ -1277,11 +1346,22 @@ public:
 		}
 
 		captureDi->CreateScene(false);
+		const MirrorExtendedDrawListStats rawDrawListStats = GatherMirrorExtendedDrawListStats(*captureDi, frameIndex);
 		nri_scene::SceneView capturedView;
 		const bool hasCapture = nri_scene::CaptureDynamicScene(*captureDi, capturedView, nri_scene::DynamicVoxelCaptureMode::ReadOnlyCache);
 		captureDi->EndDrawInfo();
 		if (!hasCapture)
 		{
+			if (ShouldTraceMirrorDynamicCapture())
+			{
+				Printf("PERF pt mirror capture NRI: frame=%u result=empty wall=%d distance=%.1f raw_models=%u raw_voxels=%u raw_facing=%u captured_walls=0 captured_flats=0 captured_sprites=0 accepted_walls=0 accepted_flats=0 accepted_sprites=0 dist_rejects=0 duplicate_rejects=0 voxel_candidates=0 voxel_hits=0 voxel_misses=0 voxel_not_captured=0\n",
+					frameIndex,
+					selectedMirrorWallIndex,
+					(double)nri_ptmirrordynamicdistance,
+					rawDrawListStats.modelSprites,
+					rawDrawListStats.voxelSprites,
+					rawDrawListStats.facingSprites);
+			}
 			return false;
 		}
 
@@ -1292,24 +1372,53 @@ public:
 		}
 
 		outView.drawInfo = &di;
+		MirrorExtendedAppendStats wallAppendStats = {};
+		MirrorExtendedAppendStats flatAppendStats = {};
+		MirrorExtendedAppendStats spriteAppendStats = {};
 		AppendMirrorExtendedSurfaceList(
 			capturedView.opaqueWalls,
 			di.Viewpoint,
 			nri_ptmirrordynamicdistance,
 			existingKeys,
-			outView.opaqueWalls);
+			outView.opaqueWalls,
+			wallAppendStats);
 		AppendMirrorExtendedSurfaceList(
 			capturedView.opaqueFlats,
 			di.Viewpoint,
 			nri_ptmirrordynamicdistance,
 			existingKeys,
-			outView.opaqueFlats);
+			outView.opaqueFlats,
+			flatAppendStats);
 		AppendMirrorExtendedSurfaceList(
 			capturedView.opaqueSprites,
 			di.Viewpoint,
 			nri_ptmirrordynamicdistance,
 			existingKeys,
-			outView.opaqueSprites);
+			outView.opaqueSprites,
+			spriteAppendStats);
+		if (ShouldTraceMirrorDynamicCapture())
+		{
+			Printf("PERF pt mirror capture NRI: frame=%u result=%s wall=%d distance=%.1f raw_models=%u raw_voxels=%u raw_facing=%u captured_walls=%u captured_flats=%u captured_sprites=%u accepted_walls=%u accepted_flats=%u accepted_sprites=%u dist_rejects=%u duplicate_rejects=%u voxel_candidates=%u voxel_hits=%u voxel_misses=%u voxel_not_captured=%u\n",
+				frameIndex,
+				(outView.opaqueWalls.empty() && outView.opaqueFlats.empty() && outView.opaqueSprites.empty()) ? "filtered" : "accepted",
+				selectedMirrorWallIndex,
+				(double)nri_ptmirrordynamicdistance,
+				rawDrawListStats.modelSprites,
+				rawDrawListStats.voxelSprites,
+				rawDrawListStats.facingSprites,
+				(uint32_t)capturedView.opaqueWalls.size(),
+				(uint32_t)capturedView.opaqueFlats.size(),
+				(uint32_t)capturedView.opaqueSprites.size(),
+				wallAppendStats.accepted,
+				flatAppendStats.accepted,
+				spriteAppendStats.accepted,
+				wallAppendStats.rejectedDistance + flatAppendStats.rejectedDistance + spriteAppendStats.rejectedDistance,
+				wallAppendStats.rejectedDuplicate + flatAppendStats.rejectedDuplicate + spriteAppendStats.rejectedDuplicate,
+				capturedView.stats.voxelStableCandidates,
+				capturedView.stats.voxelCacheSurfaceHits,
+				capturedView.stats.voxelStableSignatureMisses,
+				capturedView.stats.voxelCacheNotCaptured);
+		}
 		if (outView.opaqueWalls.empty() && outView.opaqueFlats.empty() && outView.opaqueSprites.empty())
 		{
 			outView = {};
@@ -1448,6 +1557,11 @@ public:
 	static bool ShouldTraceActorOverflow()
 	{
 		return (int)perf_looptraceframes > 0;
+	}
+
+	static bool ShouldTraceMirrorDynamicCapture()
+	{
+		return nri_voxelstats || (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0;
 	}
 
 	static constexpr uint32_t NRI_MAX_ACTOR_OVERFLOW_TRACE_LINES = 16;
@@ -7891,7 +8005,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			return CaptureMirrorExtendedDynamicScene(
 				di,
 				visibleMirrorPortal,
+				selectedVisibleMirrorWallIndex,
 				hasDynamicScene ? &dynamicSceneView : nullptr,
+				mFrameIndex,
 				mirrorExtendedDynamicSceneView);
 		}();
 		const bool hasMirrorPlayerScene = !deferOverlayThisFrame && IsMirrorPlayerPreviewCaptureEnabled() && [&]()
