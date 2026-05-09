@@ -1344,6 +1344,7 @@ public:
 			captureDi->EndDrawInfo();
 			return false;
 		}
+		const FRenderViewpoint mirrorCaptureViewpoint = captureDi->Viewpoint;
 
 		captureDi->CreateScene(false);
 		const MirrorExtendedDrawListStats rawDrawListStats = GatherMirrorExtendedDrawListStats(*captureDi, frameIndex);
@@ -1377,21 +1378,21 @@ public:
 		MirrorExtendedAppendStats spriteAppendStats = {};
 		AppendMirrorExtendedSurfaceList(
 			capturedView.opaqueWalls,
-			di.Viewpoint,
+			mirrorCaptureViewpoint,
 			nri_ptmirrordynamicdistance,
 			existingKeys,
 			outView.opaqueWalls,
 			wallAppendStats);
 		AppendMirrorExtendedSurfaceList(
 			capturedView.opaqueFlats,
-			di.Viewpoint,
+			mirrorCaptureViewpoint,
 			nri_ptmirrordynamicdistance,
 			existingKeys,
 			outView.opaqueFlats,
 			flatAppendStats);
 		AppendMirrorExtendedSurfaceList(
 			capturedView.opaqueSprites,
-			di.Viewpoint,
+			mirrorCaptureViewpoint,
 			nri_ptmirrordynamicdistance,
 			existingKeys,
 			outView.opaqueSprites,
