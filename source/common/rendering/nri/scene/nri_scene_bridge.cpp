@@ -1687,6 +1687,52 @@ namespace
 		}
 	}
 
+	bool CaptureMirrorVoxelFallbackSprite(HWDrawInfo& di, HWSprite& sprite, uint32_t drawListType, std::vector<SurfaceRef>& outSprites)
+	{
+		if (sprite.texture == nullptr || !IsEffectivelyOpaque(sprite.RenderStyle, sprite.alpha))
+		{
+			return false;
+		}
+
+		if (sprite.vertexindex < 0)
+		{
+			sprite.CreateVertices(&di);
+		}
+
+		if (sprite.vertexindex < 0)
+		{
+			return false;
+		}
+
+		const FFlatVertex* vertices = screen->mVertexData->GetBuffer(sprite.vertexindex);
+		if (vertices == nullptr)
+		{
+			return false;
+		}
+
+		SurfaceRef surface = {};
+		uint32_t extraFlags = MaterialFlag_Sprite | MaterialFlag_AlphaClip;
+		if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
+		{
+			extraFlags |= MaterialFlag_FacingBillboard;
+		}
+		surface.material = MakeMaterialRef(sprite.texture, sprite.palette, sprite.shade, sprite.alpha, extraFlags);
+		surface.provenance = MakeSpriteProvenance(sprite, SurfaceSourceType::FacingSprite, drawListType, surface.material.flags);
+		surface.vertices.reserve(4);
+		for (uint32_t i = 0; i < 4; ++i)
+		{
+			surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
+		}
+
+		if (sprite.Sprite != nullptr && sprite.Sprite->ownerActor != nullptr)
+		{
+			ApplyActorPreviousTransform(surface, sprite.Sprite->ownerActor);
+		}
+
+		outSprites.push_back(std::move(surface));
+		return true;
+	}
+
 	void TransformModelPoint(const VSMatrix& matrix, float x, float y, float z, CapturedVertex& outVertex, float u, float v)
 	{
 		float point[4] = { x, y, z, 1.0f };
@@ -4437,7 +4483,7 @@ namespace
 		return sprite.Sprite->picnum >= 621 && sprite.Sprite->picnum <= 625;
 	}
 
-	bool CaptureVoxelMeshSprite(const HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats, DynamicVoxelCaptureMode captureMode)
+	bool CaptureVoxelMeshSprite(HWDrawInfo* di, HWSprite& sprite, uint32_t drawListType, VoxelCaptureBudget& budget, std::vector<SurfaceRef>& outSprites, SceneDebugStats& stats, DynamicVoxelCaptureMode captureMode)
 	{
 		if (sprite.modelframe >= 0 || sprite.voxel == nullptr || sprite.voxel->model == nullptr)
 		{
@@ -4460,11 +4506,12 @@ namespace
 		}
 		if (captureMode == DynamicVoxelCaptureMode::ReadOnlyCache)
 		{
-			if (!TryConsumeReadOnlyVoxelActorCacheSurface(sprite, voxelTexture, voxelMaterial, stats))
+			const bool consumedCache = TryConsumeReadOnlyVoxelActorCacheSurface(sprite, voxelTexture, voxelMaterial, stats);
+			if (!consumedCache)
 			{
 				stats.voxelCacheNotCaptured++;
 			}
-			return true;
+			return di != nullptr && CaptureMirrorVoxelFallbackSprite(*di, sprite, drawListType, outSprites) ? true : consumedCache;
 		}
 
 		VoxelActorCacheLookup cacheLookup = {};
@@ -4716,7 +4763,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats, captureMode))
+			if (CaptureVoxelMeshSprite(&di, *sprite, drawListType, budget, outSprites, stats, captureMode))
 			{
 				stats.voxelProxyDrawItems++;
 			}
@@ -4748,7 +4795,7 @@ namespace
 				continue;
 			}
 
-			if (CaptureVoxelMeshSprite(*sprite, drawListType, budget, outSprites, stats, DynamicVoxelCaptureMode::Transient))
+			if (CaptureVoxelMeshSprite(nullptr, *sprite, drawListType, budget, outSprites, stats, DynamicVoxelCaptureMode::Transient))
 			{
 				stats.voxelProxyDrawItems++;
 			}
