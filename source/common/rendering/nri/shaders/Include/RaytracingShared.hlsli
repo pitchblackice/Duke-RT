@@ -897,7 +897,8 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 		const PrimitiveData primitive = GetPrimitiveData(instanceData.dataSource, primitiveIndex);
 		const uint materialIndex = ResolvePrimitiveMaterialIndex(instanceData, primitive);
 		const float committedDistance = rayQuery.CommittedRayT();
-		if (!allowReflectionOnlySurfaces && IsReflectionOnlyPrimitive(primitive))
+		const bool reflectionOnlyPrimitive = IsReflectionOnlyPrimitive(primitive);
+		if (!allowReflectionOnlySurfaces && reflectionOnlyPrimitive)
 		{
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
@@ -907,7 +908,7 @@ bool TraceClosestSurface(float3 startOrigin, float3 direction, float maxDistance
 			continue;
 		}
 
-		if (gateVisibleChunks && !IsVisibleChunk(ResolveVisibilityChunk(instanceData, primitive)))
+		if (gateVisibleChunks && !reflectionOnlyPrimitive && !IsVisibleChunk(ResolveVisibilityChunk(instanceData, primitive)))
 		{
 			TraceShaderStatAdd(TRACE_STAT_FILTER_SKIPS, 1u);
 			TraceShaderStatMax(TRACE_STAT_MAX_SKIP, skipCount + 1u);
