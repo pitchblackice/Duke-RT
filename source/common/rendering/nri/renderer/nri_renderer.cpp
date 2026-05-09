@@ -1155,48 +1155,6 @@ public:
 		return dx * dx + dy * dy + dz * dz;
 	}
 
-	static bool ReflectCapturedScenePositionAcrossMirrorWall(const walltype& mirrorLine, float position[3])
-	{
-		const walltype* next = mirrorLine.point2Wall();
-		if (next == nullptr)
-		{
-			return false;
-		}
-
-		const double x = mirrorLine.pos.X;
-		const double y = mirrorLine.pos.Y;
-		const double dx = next->pos.X - x;
-		const double dy = next->pos.Y - y;
-		const double lengthSq = dx * dx + dy * dy;
-		if (lengthSq <= 0.0001)
-		{
-			return false;
-		}
-
-		const double buildX = position[0];
-		const double buildY = -position[2];
-		const double projection = ((buildX - x) * dx + (buildY - y) * dy) * 2.0;
-		const double mirroredX = x * 2.0 + dx * projection / lengthSq - buildX;
-		const double mirroredY = y * 2.0 + dy * projection / lengthSq - buildY;
-		position[0] = (float)mirroredX;
-		position[2] = (float)-mirroredY;
-		return true;
-	}
-
-	static bool ReflectCapturedSurfaceAcrossMirrorWall(const walltype& mirrorLine, const nri_scene::SurfaceRef& source, nri_scene::SurfaceRef& outSurface)
-	{
-		outSurface = source;
-		for (nri_scene::CapturedVertex& vertex : outSurface.vertices)
-		{
-			if (!ReflectCapturedScenePositionAcrossMirrorWall(mirrorLine, vertex.position) ||
-				!ReflectCapturedScenePositionAcrossMirrorWall(mirrorLine, vertex.prevPosition))
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-
 	static void SeedDynamicSurfaceMergeKeys(const nri_scene::SceneView& sceneView, std::unordered_set<uint64_t>& outKeys)
 	{
 		auto append = [&outKeys](const auto& surfaces)
@@ -1277,38 +1235,24 @@ public:
 	static void AppendMirrorExtendedSurfaceList(
 		const std::vector<nri_scene::SurfaceRef>& source,
 		const FRenderViewpoint& viewpoint,
-		const walltype& mirrorLine,
 		float maxDistance,
 		std::unordered_set<uint64_t>& existingKeys,
 		std::vector<nri_scene::SurfaceRef>& destination,
 		MirrorExtendedAppendStats& stats)
 	{
-		const float maxDistanceSquared = maxDistance > 0.0f ? maxDistance * maxDistance : 0.0f;
+		(void)viewpoint;
+		(void)maxDistance;
 		for (const nri_scene::SurfaceRef& surface : source)
 		{
 			stats.source++;
-			nri_scene::SurfaceRef reflectedSurface;
-			if (!ReflectCapturedSurfaceAcrossMirrorWall(mirrorLine, surface, reflectedSurface))
-			{
-				stats.rejectedDistance++;
-				continue;
-			}
-
-			if (maxDistanceSquared > 0.0f &&
-				ComputeSurfaceDistanceSquaredToViewpoint(viewpoint, reflectedSurface) > maxDistanceSquared)
-			{
-				stats.rejectedDistance++;
-				continue;
-			}
-
-			const uint64_t key = BuildDynamicSurfaceMergeKey(reflectedSurface);
+			const uint64_t key = BuildDynamicSurfaceMergeKey(surface);
 			if (!existingKeys.insert(key).second)
 			{
 				stats.rejectedDuplicate++;
 				continue;
 			}
 
-			destination.push_back(std::move(reflectedSurface));
+			destination.push_back(surface);
 			stats.accepted++;
 		}
 	}
@@ -1429,7 +1373,6 @@ public:
 		AppendMirrorExtendedSurfaceList(
 			capturedView.opaqueWalls,
 			mirrorCaptureViewpoint,
-			*mirrorLine,
 			nri_ptmirrordynamicdistance,
 			existingKeys,
 			outView.opaqueWalls,
@@ -1437,7 +1380,6 @@ public:
 		AppendMirrorExtendedSurfaceList(
 			capturedView.opaqueFlats,
 			mirrorCaptureViewpoint,
-			*mirrorLine,
 			nri_ptmirrordynamicdistance,
 			existingKeys,
 			outView.opaqueFlats,
@@ -1445,7 +1387,6 @@ public:
 		AppendMirrorExtendedSurfaceList(
 			capturedView.opaqueSprites,
 			mirrorCaptureViewpoint,
-			*mirrorLine,
 			nri_ptmirrordynamicdistance,
 			existingKeys,
 			outView.opaqueSprites,
