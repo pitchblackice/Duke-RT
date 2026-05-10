@@ -1435,6 +1435,10 @@ private:
 	enum class PersistentVoxelAdmissionState : uint8_t
 	{
 		Pending,
+		UploadingVertices,
+		UploadingIndices,
+		UploadingPrimitives,
+		BuildingBlas,
 		Ready,
 		Deferred,
 		Failed,
@@ -1455,6 +1459,24 @@ private:
 		uint32_t mapGeneration = 0;
 		uint64_t estimatedBytes = 0;
 		uint64_t bytesUploaded = 0;
+		bool uploadPrepared = false;
+		uint32_t shaderVertexOffset = 0;
+		uint32_t shaderIndexOffset = 0;
+		uint32_t shaderPrimitiveOffset = 0;
+		uint32_t savedVertexCursor = 0;
+		uint32_t savedIndexCursor = 0;
+		uint32_t savedPrimitiveCursor = 0;
+		uint32_t savedMaterialCursor = 0;
+		uint64_t vertexBytesUploaded = 0;
+		uint64_t vertexArenaBytesUploaded = 0;
+		uint64_t indexBytesUploaded = 0;
+		uint64_t indexArenaBytesUploaded = 0;
+		uint64_t primitiveBytesUploaded = 0;
+		nri_scene::GeometryData uploadGeometry;
+		std::vector<uint32_t> uploadGpuIndices;
+		std::vector<nri_scene::PrimitiveData> uploadGpuPrimitives;
+		PersistentVoxelMeshVariantResource uploadMeshResource;
+		PersistentVoxelMaterialVariantResource uploadMaterialResource;
 		const char* lastReason = "none";
 	};
 
@@ -1926,10 +1948,13 @@ private:
 	void CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const;
 	bool PumpPersistentVoxelAdmissionQueue(const char* phase);
 	bool AdmitPersistentVoxelVariantResource(
-		const nri_scene::PrecachedVoxelVariantView& variant,
+		PersistentVoxelAdmissionEntry& entry,
+		uint64_t byteBudget,
+		uint32_t& blasBudget,
 		uint64_t& outUploadBytes,
 		bool& outReusedMesh,
 		bool& outReusedMaterial,
+		bool& outInProgress,
 		const char*& outFailureReason);
 	bool IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool PreloadMaterialResources();

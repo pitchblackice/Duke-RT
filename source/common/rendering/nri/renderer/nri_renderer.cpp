@@ -2704,6 +2704,12 @@ CVAR(Int, nri_ptvoxeladmissionloadvariants, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmissionloadbytes, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmissionruntimevariants, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmissionruntimebytes, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxbytesloading, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxbytesruntime, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxmsloading, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxmsruntime, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxblasloading, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxblasruntime, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelexcludeindex, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelexcludeindex2, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -12881,21 +12887,67 @@ void NRIRenderer::CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, u
 }
 
 bool NRIRenderer::AdmitPersistentVoxelVariantResource(
-	const nri_scene::PrecachedVoxelVariantView& variant,
+	PersistentVoxelAdmissionEntry& entry,
+	uint64_t byteBudget,
+	uint32_t& blasBudget,
 	uint64_t& outUploadBytes,
 	bool& outReusedMesh,
 	bool& outReusedMaterial,
+	bool& outInProgress,
 	const char*& outFailureReason)
 {
 	outUploadBytes = 0;
 	outReusedMesh = false;
 	outReusedMaterial = false;
+	outInProgress = false;
 	outFailureReason = "none";
+	const nri_scene::PrecachedVoxelVariantView& variant = entry.variant;
 	if (variant.surface == nullptr || variant.meshKeyHash == 0 || variant.materialKeyHash == 0)
 	{
 		outFailureReason = "invalid-variant";
 		return false;
 	}
+
+	auto cleanupPendingUpload = [&]()
+	{
+		RetireResidentBufferResource(entry.uploadMeshResource.vertexBuffer);
+		RetireResidentBufferResource(entry.uploadMeshResource.indexBuffer);
+		RetireResidentAccelerationStructure(entry.uploadMeshResource.accelerationStructure);
+		entry.uploadMeshResource = {};
+		entry.uploadMaterialResource = {};
+		entry.uploadGeometry = {};
+		entry.uploadGpuIndices.clear();
+		entry.uploadGpuPrimitives.clear();
+		entry.uploadPrepared = false;
+		entry.vertexBytesUploaded = 0;
+		entry.vertexArenaBytesUploaded = 0;
+		entry.indexBytesUploaded = 0;
+		entry.indexArenaBytesUploaded = 0;
+		entry.primitiveBytesUploaded = 0;
+	};
+
+	auto rollbackAdmission = [&](const char* reason, const char* step) -> bool
+	{
+		outFailureReason = reason != nullptr ? reason : "failed";
+		mPersistentVoxelArenaVertexCursor = entry.savedVertexCursor;
+		mPersistentVoxelArenaIndexCursor = entry.savedIndexCursor;
+		mPersistentVoxelArenaPrimitiveCursor = entry.savedPrimitiveCursor;
+		mPersistentVoxelArenaMaterialCursor = entry.savedMaterialCursor;
+		cleanupPendingUpload();
+		if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
+		{
+			Printf("NRI PT voxel admission transaction: event=rollback reason=%s tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu step=%s\n",
+				outFailureReason,
+				variant.sourcePicnum,
+				variant.resolvedVoxelIndex,
+				(unsigned long long)variant.meshKeyHash,
+				(unsigned long long)variant.materialKeyHash,
+				variant.primitiveCount,
+				(unsigned long long)entry.estimatedBytes,
+				step != nullptr ? step : "unknown");
+		}
+		return false;
+	};
 
 	auto allocateArenaSlice = [](uint32_t count, uint32_t& cursor, uint32_t& offset, uint32_t& capacity) -> bool
 	{
@@ -12944,296 +12996,414 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 		}
 		return true;
 	};
-
-	const uint32_t savedVertexCursor = mPersistentVoxelArenaVertexCursor;
-	const uint32_t savedIndexCursor = mPersistentVoxelArenaIndexCursor;
-	const uint32_t savedPrimitiveCursor = mPersistentVoxelArenaPrimitiveCursor;
-	const uint32_t savedMaterialCursor = mPersistentVoxelArenaMaterialCursor;
-	auto rollbackAdmission = [&](const char* reason, const char* step) -> bool
+	auto createStructuredBufferNoUpload = [&](NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage) -> bool
 	{
-		outFailureReason = reason != nullptr ? reason : "failed";
-		mPersistentVoxelArenaVertexCursor = savedVertexCursor;
-		mPersistentVoxelArenaIndexCursor = savedIndexCursor;
-		mPersistentVoxelArenaPrimitiveCursor = savedPrimitiveCursor;
-		mPersistentVoxelArenaMaterialCursor = savedMaterialCursor;
-		if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
+		if (!CreateBufferWithoutViewAtLocation(resource, size, stride, usage, nri::MemoryLocation::DEVICE))
 		{
-			Printf("NRI PT voxel admission transaction: event=rollback reason=%s tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu step=%s\n",
-				outFailureReason,
+			return false;
+		}
+		nri::BufferViewDesc viewDesc = {};
+		viewDesc.buffer = resource.buffer;
+		viewDesc.type = nri::BufferView::STRUCTURED_BUFFER;
+		viewDesc.offset = 0;
+		viewDesc.size = nri::WHOLE_SIZE;
+		viewDesc.structureStride = stride;
+		if (mFrameBuffer->mCore.CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
+		{
+			DestroyBufferResource(resource);
+			return false;
+		}
+		resource.usedSize = size;
+		return true;
+	};
+	auto traceChunk = [&](const char* stream, uint64_t offset, uint64_t bytes, uint64_t total)
+	{
+		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
+		{
+			Printf("NRI PT voxel admission entry: event=upload-chunk stream=%s offset=%llu bytes=%llu total=%llu tex=%d voxel=%d mesh_variant=0x%llx\n",
+				stream != nullptr ? stream : "unknown",
+				(unsigned long long)offset,
+				(unsigned long long)bytes,
+				(unsigned long long)total,
+				variant.sourcePicnum,
+				variant.resolvedVoxelIndex,
+				(unsigned long long)variant.meshKeyHash);
+		}
+	};
+
+	if (!entry.uploadPrepared)
+	{
+		entry.savedVertexCursor = mPersistentVoxelArenaVertexCursor;
+		entry.savedIndexCursor = mPersistentVoxelArenaIndexCursor;
+		entry.savedPrimitiveCursor = mPersistentVoxelArenaPrimitiveCursor;
+		entry.savedMaterialCursor = mPersistentVoxelArenaMaterialCursor;
+		entry.vertexBytesUploaded = 0;
+		entry.vertexArenaBytesUploaded = 0;
+		entry.indexBytesUploaded = 0;
+		entry.indexArenaBytesUploaded = 0;
+		entry.primitiveBytesUploaded = 0;
+		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
+		{
+			Printf("NRI PT voxel admission transaction: event=begin reason=none tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu step=prepare\n",
 				variant.sourcePicnum,
 				variant.resolvedVoxelIndex,
 				(unsigned long long)variant.meshKeyHash,
 				(unsigned long long)variant.materialKeyHash,
 				variant.primitiveCount,
-				(unsigned long long)(
-					(uint64_t)variant.surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
-					(uint64_t)variant.surface->indices.size() * (uint64_t)sizeof(uint32_t) +
-					(uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData)),
-				step != nullptr ? step : "unknown");
+				(unsigned long long)entry.estimatedBytes);
 		}
-		return false;
+
+		nri_scene::SurfaceRef surface = *variant.surface;
+		surface.material = variant.material;
+		nri_scene::SceneView variantSceneView = {};
+		variantSceneView.opaqueSprites.push_back(std::move(surface));
+		variantSceneView.stats.spriteDrawItems = 1;
+		variantSceneView.stats.modelDrawItems = 1;
+		variantSceneView.stats.voxelProxyDrawItems = 1;
+		variantSceneView.stats.totalDrawItems = 1;
+		variantSceneView.stats.materialRefs = 1;
+		variantSceneView.stats.triangleEstimate = variant.primitiveCount;
+		variantSceneView.stats.voxelCachePrimitives = variant.primitiveCount;
+
+		const auto existingMaterialIt = mPersistentVoxelMaterialVariantResources.find(variant.materialKeyHash);
+		entry.uploadMaterialResource =
+			existingMaterialIt != mPersistentVoxelMaterialVariantResources.end() ? existingMaterialIt->second : PersistentVoxelMaterialVariantResource{};
+		const bool materialReady =
+			entry.uploadMaterialResource.materialKeyHash == variant.materialKeyHash &&
+			entry.uploadMaterialResource.materialCount != 0 &&
+			!entry.uploadMaterialResource.materialBridge.materials.empty();
+		if (materialReady)
+		{
+			outReusedMaterial = true;
+		}
+		else
+		{
+			nri_scene::MaterialBridgeData builtMaterials;
+			{
+				Clocker materialClock(NriPTMaterialBuild);
+				BuildMaterialsWithActorOverrides(variantSceneView, builtMaterials, "persistent_voxel_admission_variant");
+			}
+			if (builtMaterials.materials.empty() || !prewarmVariantTextures(builtMaterials))
+			{
+				return rollbackAdmission("material-build-failed", "materials");
+			}
+			entry.uploadMaterialResource.materialKeyHash = variant.materialKeyHash;
+			entry.uploadMaterialResource.materialBridge = std::move(builtMaterials);
+			entry.uploadMaterialResource.materialCount = (uint32_t)entry.uploadMaterialResource.materialBridge.materials.size();
+			entry.uploadMaterialResource.materialUploadHash = 0;
+		}
+		entry.uploadMaterialResource.lastDesiredMapGeneration = mPersistentVoxelResidencyMapGeneration;
+		entry.uploadMaterialResource.lastUsedMapGeneration = mPersistentVoxelResidencyMapGeneration;
+		entry.uploadMaterialResource.cold = false;
+		if (entry.uploadMaterialResource.materialCount != 0)
+		{
+			const bool materialSliceMoved = allocateExactArenaSlice(
+				entry.uploadMaterialResource.materialCount,
+				mPersistentVoxelArenaMaterialCursor,
+				entry.uploadMaterialResource.materialOffset,
+				entry.uploadMaterialResource.materialCapacity);
+			if (materialSliceMoved)
+			{
+				entry.uploadMaterialResource.materialUploadHash = 0;
+			}
+		}
+
+		const uint64_t meshResourceKey = variant.meshKeyHash;
+		auto existingMeshIt = mPersistentVoxelMeshVariantResources.find(meshResourceKey);
+		const bool existingMeshReady =
+			existingMeshIt != mPersistentVoxelMeshVariantResources.end() &&
+			existingMeshIt->second.resourceKey == meshResourceKey &&
+			existingMeshIt->second.vertexCount != 0 &&
+			existingMeshIt->second.indexCount != 0 &&
+			existingMeshIt->second.primitiveCount != 0 &&
+			existingMeshIt->second.vertexBuffer.buffer != nullptr &&
+			existingMeshIt->second.indexBuffer.buffer != nullptr &&
+			mPersistentVoxelVertexBuffer.buffer != nullptr &&
+			mPersistentVoxelIndexBuffer.buffer != nullptr &&
+			mPersistentVoxelPrimitiveBuffer.buffer != nullptr;
+		if (existingMeshReady)
+		{
+			existingMeshIt->second.lastDesiredMapGeneration = mPersistentVoxelResidencyMapGeneration;
+			existingMeshIt->second.lastUsedMapGeneration = mPersistentVoxelResidencyMapGeneration;
+			existingMeshIt->second.cold = false;
+			mPersistentVoxelMaterialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+			outReusedMesh = true;
+			entry.uploadPrepared = false;
+			if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
+			{
+				Printf("NRI PT voxel admission transaction: event=commit reason=already-resident tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=0 step=publish\n",
+					variant.sourcePicnum,
+					variant.resolvedVoxelIndex,
+					(unsigned long long)variant.meshKeyHash,
+					(unsigned long long)variant.materialKeyHash,
+					variant.primitiveCount);
+			}
+			return true;
+		}
+
+		nri_scene::BuildGeometry(variantSceneView, entry.uploadGeometry);
+		AssignGeometryPortalIndices(mMapWorld, entry.uploadGeometry);
+		if (entry.uploadGeometry.vertices.empty() || entry.uploadGeometry.indices.empty() || entry.uploadGeometry.primitives.empty())
+		{
+			return rollbackAdmission("empty-geometry", "geometry");
+		}
+
+		PersistentVoxelMeshVariantResource& meshResource = entry.uploadMeshResource;
+		allocateArenaSlice((uint32_t)entry.uploadGeometry.vertices.size(), mPersistentVoxelArenaVertexCursor, meshResource.vertexOffset, meshResource.vertexCapacity);
+		allocateArenaSlice((uint32_t)entry.uploadGeometry.indices.size(), mPersistentVoxelArenaIndexCursor, meshResource.indexOffset, meshResource.indexCapacity);
+		allocateArenaSlice((uint32_t)entry.uploadGeometry.primitives.size(), mPersistentVoxelArenaPrimitiveCursor, meshResource.primitiveOffset, meshResource.primitiveCapacity);
+		entry.shaderVertexOffset = meshResource.vertexOffset;
+		entry.shaderIndexOffset = meshResource.indexOffset;
+		entry.shaderPrimitiveOffset = meshResource.primitiveOffset;
+		entry.uploadGpuIndices = entry.uploadGeometry.indices;
+		for (uint32_t& index : entry.uploadGpuIndices)
+		{
+			index += entry.shaderVertexOffset;
+		}
+		entry.uploadGpuPrimitives = entry.uploadGeometry.primitives;
+		for (nri_scene::PrimitiveData& primitive : entry.uploadGpuPrimitives)
+		{
+			primitive.reserved0 = UINT32_MAX;
+			primitive.indices[0] += entry.shaderVertexOffset;
+			primitive.indices[1] += entry.shaderVertexOffset;
+			primitive.indices[2] += entry.shaderVertexOffset;
+		}
+
+		const uint64_t vertexBytes = entry.uploadGeometry.vertices.size() * sizeof(nri_scene::SceneVertex);
+		const uint64_t indexBytes = entry.uploadGeometry.indices.size() * sizeof(uint32_t);
+		if (!createStructuredBufferNoUpload(
+				meshResource.vertexBuffer,
+				vertexBytes,
+				sizeof(nri_scene::SceneVertex),
+				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT)) ||
+			!createStructuredBufferNoUpload(
+				meshResource.indexBuffer,
+				indexBytes,
+				sizeof(uint32_t),
+				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT)) ||
+			!EnsureResidentArenaBuffer(
+				mPersistentVoxelVertexBuffer,
+				(uint64_t)mPersistentVoxelArenaVertexCursor * sizeof(nri_scene::SceneVertex),
+				sizeof(nri_scene::SceneVertex),
+				nri::BufferUsageBits::SHADER_RESOURCE,
+				NRIComputeShaderResourceAccess()) ||
+			!EnsureResidentArenaBuffer(
+				mPersistentVoxelIndexBuffer,
+				(uint64_t)mPersistentVoxelArenaIndexCursor * sizeof(uint32_t),
+				sizeof(uint32_t),
+				nri::BufferUsageBits::SHADER_RESOURCE,
+				NRIComputeShaderResourceAccess()) ||
+			!EnsureResidentArenaBuffer(
+				mPersistentVoxelPrimitiveBuffer,
+				(uint64_t)mPersistentVoxelArenaPrimitiveCursor * sizeof(nri_scene::PrimitiveData),
+				sizeof(nri_scene::PrimitiveData),
+				nri::BufferUsageBits::SHADER_RESOURCE,
+				NRIComputeShaderResourceAccess()))
+		{
+			return rollbackAdmission("buffer-allocation-failed", "buffers");
+		}
+
+		meshResource.resourceKey = meshResourceKey;
+		meshResource.meshKeyHash = variant.meshKeyHash;
+		meshResource.transformBasisSignature = 0;
+		meshResource.meshBakeSpace = nri_scene::VoxelMeshBakeSpace::LocalSpace;
+		meshResource.vertexCount = (uint32_t)entry.uploadGeometry.vertices.size();
+		meshResource.indexCount = (uint32_t)entry.uploadGeometry.indices.size();
+		meshResource.primitiveCount = (uint32_t)entry.uploadGeometry.primitives.size();
+		meshResource.bakedTranslation[0] = 0.0f;
+		meshResource.bakedTranslation[1] = 0.0f;
+		meshResource.bakedTranslation[2] = 0.0f;
+		meshResource.tlasReadyFrame = 0;
+		meshResource.tlasPublished = false;
+		meshResource.lastDesiredMapGeneration = mPersistentVoxelResidencyMapGeneration;
+		meshResource.lastUsedMapGeneration = mPersistentVoxelResidencyMapGeneration;
+		meshResource.cold = false;
+		entry.state = PersistentVoxelAdmissionState::UploadingVertices;
+		entry.uploadPrepared = true;
+	}
+
+	auto budgetAllows = [&](uint64_t bytes) -> bool
+	{
+		return byteBudget == 0 || outUploadBytes + bytes <= byteBudget;
 	};
-	if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
+	auto uploadBytes = [&](const char* stream, NRIBufferResource& target, uint64_t targetOffset, const void* source, uint64_t sourceOffset, uint64_t totalBytes, uint32_t stride, nri::AccessStage after, int uploadKind, uint64_t& uploadedBytes) -> bool
 	{
-		Printf("NRI PT voxel admission transaction: event=begin reason=none tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu step=start\n",
-			variant.sourcePicnum,
-			variant.resolvedVoxelIndex,
-			(unsigned long long)variant.meshKeyHash,
-			(unsigned long long)variant.materialKeyHash,
-			variant.primitiveCount,
-			(unsigned long long)(
-				(uint64_t)variant.surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
-				(uint64_t)variant.surface->indices.size() * (uint64_t)sizeof(uint32_t) +
-				(uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData)));
-	}
-
-	nri_scene::SurfaceRef surface = *variant.surface;
-	surface.material = variant.material;
-	nri_scene::SceneView variantSceneView = {};
-	variantSceneView.opaqueSprites.push_back(std::move(surface));
-	variantSceneView.stats.spriteDrawItems = 1;
-	variantSceneView.stats.modelDrawItems = 1;
-	variantSceneView.stats.voxelProxyDrawItems = 1;
-	variantSceneView.stats.totalDrawItems = 1;
-	variantSceneView.stats.materialRefs = 1;
-	variantSceneView.stats.triangleEstimate = variant.primitiveCount;
-	variantSceneView.stats.voxelCachePrimitives = variant.primitiveCount;
-
-	const auto existingMaterialIt = mPersistentVoxelMaterialVariantResources.find(variant.materialKeyHash);
-	const bool hadMaterialResource = existingMaterialIt != mPersistentVoxelMaterialVariantResources.end();
-	PersistentVoxelMaterialVariantResource materialResource =
-		hadMaterialResource ? existingMaterialIt->second : PersistentVoxelMaterialVariantResource{};
-	const bool materialReady =
-		materialResource.materialKeyHash == variant.materialKeyHash &&
-		materialResource.materialCount != 0 &&
-		!materialResource.materialBridge.materials.empty();
-	if (materialReady)
-	{
-		outReusedMaterial = true;
-	}
-	else
-	{
-		nri_scene::MaterialBridgeData builtMaterials;
+		if (uploadedBytes >= totalBytes)
 		{
-			Clocker materialClock(NriPTMaterialBuild);
-			BuildMaterialsWithActorOverrides(variantSceneView, builtMaterials, "persistent_voxel_admission_variant");
+			return true;
 		}
-		if (builtMaterials.materials.empty() || !prewarmVariantTextures(builtMaterials))
+		const uint64_t remaining = totalBytes - uploadedBytes;
+		uint64_t chunkBytes = remaining;
+		if (byteBudget != 0)
 		{
-			return rollbackAdmission("material-build-failed", "materials");
+			if (outUploadBytes >= byteBudget)
+			{
+				outInProgress = true;
+				return true;
+			}
+			chunkBytes = std::min(chunkBytes, byteBudget - outUploadBytes);
+			if (chunkBytes < stride && remaining >= stride)
+			{
+				outInProgress = true;
+				return true;
+			}
+			chunkBytes -= chunkBytes % stride;
+			if (chunkBytes == 0)
+			{
+				outInProgress = true;
+				return true;
+			}
 		}
-
-		materialResource.materialKeyHash = variant.materialKeyHash;
-		materialResource.materialBridge = std::move(builtMaterials);
-		materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
-		materialResource.materialUploadHash = 0;
-	}
-	materialResource.lastDesiredMapGeneration = mPersistentVoxelResidencyMapGeneration;
-	materialResource.lastUsedMapGeneration = mPersistentVoxelResidencyMapGeneration;
-	materialResource.cold = false;
-
-	if (materialResource.materialCount != 0)
-	{
-		const bool materialSliceMoved = allocateExactArenaSlice(
-			materialResource.materialCount,
-			mPersistentVoxelArenaMaterialCursor,
-			materialResource.materialOffset,
-			materialResource.materialCapacity);
-		if (materialSliceMoved)
+		const uint8_t* bytes = static_cast<const uint8_t*>(source);
+		if (!StageResidentBufferCopyRange(target, targetOffset + uploadedBytes, bytes + sourceOffset + uploadedBytes, chunkBytes, after, uploadKind))
 		{
-			materialResource.materialUploadHash = 0;
+			return false;
 		}
+		NotePerfBufferUpload(
+			uploadKind == ResidentUploadKind_Index ? &mIndexBufferStats : (uploadKind == ResidentUploadKind_Primitive ? &mPrimitiveBufferStats : &mVertexBufferStats),
+			chunkBytes,
+			false,
+			uploadKind == ResidentUploadKind_Index ? "persistent_voxel_mesh_index" : (uploadKind == ResidentUploadKind_Primitive ? "persistent_voxel_mesh_primitive" : "persistent_voxel_mesh_vertex"),
+			uploadKind);
+		traceChunk(stream, uploadedBytes, chunkBytes, totalBytes);
+		uploadedBytes += chunkBytes;
+		outUploadBytes += chunkBytes;
+		outInProgress = uploadedBytes < totalBytes;
+		return true;
+	};
+
+	const uint64_t vertexBytes = entry.uploadGeometry.vertices.size() * sizeof(nri_scene::SceneVertex);
+	const uint64_t indexBytes = entry.uploadGeometry.indices.size() * sizeof(uint32_t);
+	const uint64_t primitiveBytes = entry.uploadGpuPrimitives.size() * sizeof(nri_scene::PrimitiveData);
+	while (entry.state == PersistentVoxelAdmissionState::UploadingVertices)
+	{
+		if (!uploadBytes("vertex-private", entry.uploadMeshResource.vertexBuffer, 0, entry.uploadGeometry.vertices.data(), 0, vertexBytes, sizeof(nri_scene::SceneVertex), NRIAccelerationStructureBuildInputAccess(), ResidentUploadKind_Vertex, entry.vertexBytesUploaded))
+		{
+			return rollbackAdmission("buffer-stage-failed", "vertex-private");
+		}
+		if (outInProgress)
+		{
+			return true;
+		}
+		if (!uploadBytes("vertex-arena", mPersistentVoxelVertexBuffer, (uint64_t)entry.shaderVertexOffset * sizeof(nri_scene::SceneVertex), entry.uploadGeometry.vertices.data(), 0, vertexBytes, sizeof(nri_scene::SceneVertex), NRIComputeShaderResourceAccess(), ResidentUploadKind_Vertex, entry.vertexArenaBytesUploaded))
+		{
+			return rollbackAdmission("buffer-stage-failed", "vertex-arena");
+		}
+		if (outInProgress)
+		{
+			return true;
+		}
+		entry.state = PersistentVoxelAdmissionState::UploadingIndices;
+	}
+	while (entry.state == PersistentVoxelAdmissionState::UploadingIndices)
+	{
+		if (!uploadBytes("index-private", entry.uploadMeshResource.indexBuffer, 0, entry.uploadGeometry.indices.data(), 0, indexBytes, sizeof(uint32_t), NRIAccelerationStructureBuildInputAccess(), ResidentUploadKind_Index, entry.indexBytesUploaded))
+		{
+			return rollbackAdmission("buffer-stage-failed", "index-private");
+		}
+		if (outInProgress)
+		{
+			return true;
+		}
+		if (!uploadBytes("index-arena", mPersistentVoxelIndexBuffer, (uint64_t)entry.shaderIndexOffset * sizeof(uint32_t), entry.uploadGpuIndices.data(), 0, indexBytes, sizeof(uint32_t), NRIComputeShaderResourceAccess(), ResidentUploadKind_Index, entry.indexArenaBytesUploaded))
+		{
+			return rollbackAdmission("buffer-stage-failed", "index-arena");
+		}
+		if (outInProgress)
+		{
+			return true;
+		}
+		entry.state = PersistentVoxelAdmissionState::UploadingPrimitives;
+	}
+	while (entry.state == PersistentVoxelAdmissionState::UploadingPrimitives)
+	{
+		if (!uploadBytes("primitive", mPersistentVoxelPrimitiveBuffer, (uint64_t)entry.shaderPrimitiveOffset * sizeof(nri_scene::PrimitiveData), entry.uploadGpuPrimitives.data(), 0, primitiveBytes, sizeof(nri_scene::PrimitiveData), NRIComputeShaderResourceAccess(), ResidentUploadKind_Primitive, entry.primitiveBytesUploaded))
+		{
+			return rollbackAdmission("buffer-stage-failed", "primitive");
+		}
+		if (outInProgress)
+		{
+			return true;
+		}
+		entry.state = PersistentVoxelAdmissionState::BuildingBlas;
 	}
 
-	const uint64_t meshResourceKey = variant.meshKeyHash;
-	auto existingMeshIt = mPersistentVoxelMeshVariantResources.find(meshResourceKey);
-	const bool existingMeshReady =
-		existingMeshIt != mPersistentVoxelMeshVariantResources.end() &&
-		existingMeshIt->second.resourceKey == meshResourceKey &&
-		existingMeshIt->second.vertexCount != 0 &&
-		existingMeshIt->second.indexCount != 0 &&
-		existingMeshIt->second.primitiveCount != 0 &&
-		existingMeshIt->second.vertexBuffer.buffer != nullptr &&
-		existingMeshIt->second.indexBuffer.buffer != nullptr &&
-		mPersistentVoxelVertexBuffer.buffer != nullptr &&
-		mPersistentVoxelIndexBuffer.buffer != nullptr &&
-		mPersistentVoxelPrimitiveBuffer.buffer != nullptr;
-	if (existingMeshReady)
+	if (entry.state == PersistentVoxelAdmissionState::BuildingBlas)
 	{
-		existingMeshIt->second.lastDesiredMapGeneration = mPersistentVoxelResidencyMapGeneration;
-		existingMeshIt->second.lastUsedMapGeneration = mPersistentVoxelResidencyMapGeneration;
-		existingMeshIt->second.cold = false;
-		mPersistentVoxelMaterialVariantResources[variant.materialKeyHash] = std::move(materialResource);
-		outReusedMesh = true;
+		if (blasBudget == 0)
+		{
+			outInProgress = true;
+			return true;
+		}
+		if (!BuildBottomLevelAccelerationStructure(
+			entry.uploadMeshResource.vertexBuffer,
+			entry.uploadMeshResource.indexBuffer,
+			entry.uploadMeshResource.vertexCount,
+			0u,
+			entry.uploadMeshResource.indexCount,
+			entry.uploadMeshResource.primitiveCount,
+			entry.uploadMeshResource.accelerationStructure,
+			false))
+		{
+			return rollbackAdmission("blas-build-failed", "building_blas");
+		}
+		blasBudget--;
 		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 		{
-			Printf("NRI PT voxel admission transaction: event=commit reason=already-resident tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=0 step=publish\n",
+			Printf("NRI PT voxel admission entry: event=blas-build tex=%d voxel=%d mesh_variant=0x%llx prims=%u bytes=%llu\n",
 				variant.sourcePicnum,
 				variant.resolvedVoxelIndex,
 				(unsigned long long)variant.meshKeyHash,
-				(unsigned long long)variant.materialKeyHash,
-				variant.primitiveCount);
+				entry.uploadMeshResource.primitiveCount,
+				(unsigned long long)(vertexBytes + indexBytes + primitiveBytes));
 		}
-		return true;
+		nri::BufferBarrierDesc inputBarriers[2] = {};
+		inputBarriers[0].buffer = entry.uploadMeshResource.vertexBuffer.buffer;
+		inputBarriers[0].before = NRIAccelerationStructureBuildInputAccess();
+		inputBarriers[0].after = NRIComputeShaderResourceAccess();
+		inputBarriers[1].buffer = entry.uploadMeshResource.indexBuffer.buffer;
+		inputBarriers[1].before = NRIAccelerationStructureBuildInputAccess();
+		inputBarriers[1].after = NRIComputeShaderResourceAccess();
+		nri::BarrierDesc inputBarrierDesc = {};
+		inputBarrierDesc.buffers = inputBarriers;
+		inputBarrierDesc.bufferNum = 2;
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, inputBarrierDesc);
 	}
 
-	nri_scene::GeometryData variantGeometry;
-	nri_scene::BuildGeometry(variantSceneView, variantGeometry);
-	AssignGeometryPortalIndices(mMapWorld, variantGeometry);
-	if (variantGeometry.vertices.empty() || variantGeometry.indices.empty() || variantGeometry.primitives.empty())
-	{
-		return rollbackAdmission("empty-geometry", "geometry");
-	}
-
-	PersistentVoxelMeshVariantResource meshResource = {};
-	const bool vertexSliceMoved = allocateArenaSlice(
-		(uint32_t)variantGeometry.vertices.size(),
-		mPersistentVoxelArenaVertexCursor,
-		meshResource.vertexOffset,
-		meshResource.vertexCapacity);
-	const bool indexSliceMoved = allocateArenaSlice(
-		(uint32_t)variantGeometry.indices.size(),
-		mPersistentVoxelArenaIndexCursor,
-		meshResource.indexOffset,
-		meshResource.indexCapacity);
-	const bool primitiveSliceMoved = allocateArenaSlice(
-		(uint32_t)variantGeometry.primitives.size(),
-		mPersistentVoxelArenaPrimitiveCursor,
-		meshResource.primitiveOffset,
-		meshResource.primitiveCapacity);
-
-	(void)vertexSliceMoved;
-	(void)indexSliceMoved;
-	(void)primitiveSliceMoved;
-
-	const uint32_t shaderVertexOffset = meshResource.vertexOffset;
-	const uint32_t shaderIndexOffset = meshResource.indexOffset;
-	const uint32_t shaderPrimitiveOffset = meshResource.primitiveOffset;
-	std::vector<uint32_t> gpuIndices = variantGeometry.indices;
-	for (uint32_t& index : gpuIndices)
-	{
-		index += shaderVertexOffset;
-	}
-
-	std::vector<nri_scene::PrimitiveData> gpuPrimitives = variantGeometry.primitives;
-	for (nri_scene::PrimitiveData& primitive : gpuPrimitives)
-	{
-		primitive.reserved0 = UINT32_MAX;
-		primitive.indices[0] += shaderVertexOffset;
-		primitive.indices[1] += shaderVertexOffset;
-		primitive.indices[2] += shaderVertexOffset;
-	}
-
-	if (!EnsureResidentStructuredBuffer(
-			meshResource.vertexBuffer,
-			mVertexBufferStats,
-			variantGeometry.vertices.data(),
-			variantGeometry.vertices.size() * sizeof(nri_scene::SceneVertex),
-			sizeof(nri_scene::SceneVertex),
-			NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
-			NRIAccelerationStructureBuildInputAccess(),
-			"persistent_voxel_mesh_vertex",
-			ResidentUploadKind_Vertex) ||
-		!EnsureResidentStructuredBuffer(
-			meshResource.indexBuffer,
-			mIndexBufferStats,
-			variantGeometry.indices.data(),
-			variantGeometry.indices.size() * sizeof(uint32_t),
-			sizeof(uint32_t),
-			NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
-			NRIAccelerationStructureBuildInputAccess(),
-			"persistent_voxel_mesh_index",
-			ResidentUploadKind_Index) ||
-		!EnsureResidentArenaBuffer(
-			mPersistentVoxelVertexBuffer,
-			(uint64_t)mPersistentVoxelArenaVertexCursor * sizeof(nri_scene::SceneVertex),
-			sizeof(nri_scene::SceneVertex),
-			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()) ||
-		!EnsureResidentArenaBuffer(
-			mPersistentVoxelIndexBuffer,
-			(uint64_t)mPersistentVoxelArenaIndexCursor * sizeof(uint32_t),
-			sizeof(uint32_t),
-			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()) ||
-		!EnsureResidentArenaBuffer(
-			mPersistentVoxelPrimitiveBuffer,
-			(uint64_t)mPersistentVoxelArenaPrimitiveCursor * sizeof(nri_scene::PrimitiveData),
-			sizeof(nri_scene::PrimitiveData),
-			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
-	{
-		RetireResidentBufferResource(meshResource.vertexBuffer);
-		RetireResidentBufferResource(meshResource.indexBuffer);
-		return rollbackAdmission("buffer-allocation-failed", "buffers");
-	}
-
-	const uint64_t vertexBytes = variantGeometry.vertices.size() * sizeof(nri_scene::SceneVertex);
-	const uint64_t indexBytes = gpuIndices.size() * sizeof(uint32_t);
-	const uint64_t primitiveBytes = gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData);
-	NotePerfBufferUpload(&mVertexBufferStats, vertexBytes, false, "persistent_voxel_mesh_vertex", ResidentUploadKind_Vertex);
-	NotePerfBufferUpload(&mIndexBufferStats, indexBytes, false, "persistent_voxel_mesh_index", ResidentUploadKind_Index);
-	NotePerfBufferUpload(&mPrimitiveBufferStats, primitiveBytes, false, "persistent_voxel_mesh_primitive", ResidentUploadKind_Primitive);
-	if (!StageResidentBufferCopyRange(
-			mPersistentVoxelVertexBuffer,
-			(uint64_t)shaderVertexOffset * sizeof(nri_scene::SceneVertex),
-			variantGeometry.vertices.data(),
-			vertexBytes,
-			NRIComputeShaderResourceAccess(),
-			ResidentUploadKind_Vertex) ||
-		!StageResidentBufferCopyRange(
-			mPersistentVoxelIndexBuffer,
-			(uint64_t)shaderIndexOffset * sizeof(uint32_t),
-			gpuIndices.data(),
-			indexBytes,
-			NRIComputeShaderResourceAccess(),
-			ResidentUploadKind_Index) ||
-		!StageResidentBufferCopyRange(
-			mPersistentVoxelPrimitiveBuffer,
-			(uint64_t)shaderPrimitiveOffset * sizeof(nri_scene::PrimitiveData),
-			gpuPrimitives.data(),
-			primitiveBytes,
-			NRIComputeShaderResourceAccess(),
-			ResidentUploadKind_Primitive))
-	{
-		RetireResidentBufferResource(meshResource.vertexBuffer);
-		RetireResidentBufferResource(meshResource.indexBuffer);
-		return rollbackAdmission("buffer-stage-failed", "stage");
-	}
-
+	auto existingMeshIt = mPersistentVoxelMeshVariantResources.find(variant.meshKeyHash);
 	if (existingMeshIt != mPersistentVoxelMeshVariantResources.end())
 	{
 		RetireResidentBufferResource(existingMeshIt->second.vertexBuffer);
 		RetireResidentBufferResource(existingMeshIt->second.indexBuffer);
 		RetireResidentAccelerationStructure(existingMeshIt->second.accelerationStructure);
 	}
-	meshResource.resourceKey = meshResourceKey;
-	meshResource.meshKeyHash = variant.meshKeyHash;
-	meshResource.transformBasisSignature = 0;
-	meshResource.meshBakeSpace = nri_scene::VoxelMeshBakeSpace::LocalSpace;
-	meshResource.vertexCount = (uint32_t)variantGeometry.vertices.size();
-	meshResource.indexCount = (uint32_t)variantGeometry.indices.size();
-	meshResource.primitiveCount = (uint32_t)variantGeometry.primitives.size();
-	meshResource.bakedTranslation[0] = 0.0f;
-	meshResource.bakedTranslation[1] = 0.0f;
-	meshResource.bakedTranslation[2] = 0.0f;
-	meshResource.tlasReadyFrame = 0;
-	meshResource.tlasPublished = false;
-	meshResource.lastDesiredMapGeneration = mPersistentVoxelResidencyMapGeneration;
-	meshResource.lastUsedMapGeneration = mPersistentVoxelResidencyMapGeneration;
-	meshResource.cold = false;
-	mPersistentVoxelMeshVariantResources[meshResourceKey] = std::move(meshResource);
-	mPersistentVoxelMaterialVariantResources[variant.materialKeyHash] = std::move(materialResource);
-	outUploadBytes = vertexBytes + indexBytes + primitiveBytes;
+	mPersistentVoxelMeshVariantResources[variant.meshKeyHash] = std::move(entry.uploadMeshResource);
+	mPersistentVoxelMaterialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+	entry.uploadGeometry = {};
+	entry.uploadGpuIndices.clear();
+	entry.uploadGpuPrimitives.clear();
+	entry.uploadPrepared = false;
+	entry.vertexBytesUploaded = 0;
+	entry.vertexArenaBytesUploaded = 0;
+	entry.indexBytesUploaded = 0;
+	entry.indexArenaBytesUploaded = 0;
+	entry.primitiveBytesUploaded = 0;
+	entry.state = PersistentVoxelAdmissionState::Ready;
 	if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 	{
+		Printf("NRI PT voxel admission entry: event=ready tex=%d voxel=%d mesh_variant=0x%llx prims=%u bytes=%llu\n",
+			variant.sourcePicnum,
+			variant.resolvedVoxelIndex,
+			(unsigned long long)variant.meshKeyHash,
+			variant.primitiveCount,
+			(unsigned long long)(vertexBytes + indexBytes + primitiveBytes));
 		Printf("NRI PT voxel admission transaction: event=commit reason=admitted tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu step=publish\n",
 			variant.sourcePicnum,
 			variant.resolvedVoxelIndex,
 			(unsigned long long)variant.meshKeyHash,
 			(unsigned long long)variant.materialKeyHash,
 			variant.primitiveCount,
-			(unsigned long long)outUploadBytes);
+			(unsigned long long)(vertexBytes + indexBytes + primitiveBytes));
 	}
 	return true;
 }
@@ -13244,9 +13414,44 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 	const uint32_t variantBudget = loadingPhase ?
 		((int)nri_ptvoxeladmissionloadvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmissionloadvariants) :
 		((int)nri_ptvoxeladmissionruntimevariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmissionruntimevariants);
-	const uint64_t byteBudget = loadingPhase ?
+	const uint64_t legacyByteBudget = loadingPhase ?
 		((int)nri_ptvoxeladmissionloadbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmissionloadbytes) :
 		((int)nri_ptvoxeladmissionruntimebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmissionruntimebytes);
+	const uint64_t chunkByteBudget = loadingPhase ?
+		((int)nri_ptvoxeladmitmaxbytesloading <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesloading) :
+		((int)nri_ptvoxeladmitmaxbytesruntime <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesruntime);
+	auto combineNonZeroBudget = [](uint64_t left, uint64_t right) -> uint64_t
+	{
+		if (left == 0)
+		{
+			return right;
+		}
+		if (right == 0)
+		{
+			return left;
+		}
+		return std::min(left, right);
+	};
+	const uint64_t byteBudget = combineNonZeroBudget(legacyByteBudget, chunkByteBudget);
+	const double msBudget = loadingPhase ?
+		std::max(0, (int)nri_ptvoxeladmitmaxmsloading) :
+		std::max(0, (int)nri_ptvoxeladmitmaxmsruntime);
+	const uint32_t blasBudgetLimit = loadingPhase ?
+		((int)nri_ptvoxeladmitmaxblasloading <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasloading) :
+		((int)nri_ptvoxeladmitmaxblasruntime <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasruntime);
+	uint32_t blasBudgetRemaining = blasBudgetLimit;
+	const auto pumpStart = std::chrono::steady_clock::now();
+	auto elapsedMs = [&]() -> double
+	{
+		return DurationMs(pumpStart, std::chrono::steady_clock::now());
+	};
+	auto isUploadState = [](PersistentVoxelAdmissionState state) -> bool
+	{
+		return state == PersistentVoxelAdmissionState::UploadingVertices ||
+			state == PersistentVoxelAdmissionState::UploadingIndices ||
+			state == PersistentVoxelAdmissionState::UploadingPrimitives ||
+			state == PersistentVoxelAdmissionState::BuildingBlas;
+	};
 
 	uint32_t requiredPendingAtStart = 0;
 	uint32_t requiredReadyAtStart = 0;
@@ -13300,8 +13505,14 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		candidates.push_back(&entry);
 	}
 
-	std::sort(candidates.begin(), candidates.end(), [](const PersistentVoxelAdmissionEntry* left, const PersistentVoxelAdmissionEntry* right)
+	std::sort(candidates.begin(), candidates.end(), [&](const PersistentVoxelAdmissionEntry* left, const PersistentVoxelAdmissionEntry* right)
 	{
+		const bool leftUploading = isUploadState(left->state);
+		const bool rightUploading = isUploadState(right->state);
+		if (leftUploading != rightUploading)
+		{
+			return leftUploading;
+		}
 		if (left->admissionRank != right->admissionRank)
 		{
 			return left->admissionRank < right->admissionRank;
@@ -13330,32 +13541,47 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 	});
 
 	uint32_t admitted = 0;
+	uint32_t blasUsed = 0;
+	const char* stopReason = "queue-drained";
 	for (PersistentVoxelAdmissionEntry* entry : candidates)
 	{
 		if (requiredOnlyPump && !IsRequiredPersistentVoxelAdmission(*entry))
 		{
 			continue;
 		}
-		if (admitted >= variantBudget)
+		if (msBudget > 0.0 && elapsedMs() >= msBudget)
+		{
+			stopReason = "ms-budget";
+			break;
+		}
+		const bool uploadState = isUploadState(entry->state);
+		if (admitted >= variantBudget && !uploadState)
 		{
 			stats.skippedBudget++;
 			entry->state = PersistentVoxelAdmissionState::Deferred;
 			entry->lastReason = "variant-budget";
 			continue;
 		}
-		if (byteBudget != 0 && stats.bytesUploaded != 0 && stats.bytesUploaded + entry->estimatedBytes > byteBudget)
+		if (byteBudget != 0 && stats.bytesUploaded >= byteBudget)
 		{
 			stats.skippedBudget++;
-			entry->state = PersistentVoxelAdmissionState::Deferred;
+			if (!uploadState)
+			{
+				entry->state = PersistentVoxelAdmissionState::Deferred;
+			}
 			entry->lastReason = "byte-budget";
-			continue;
+			stopReason = "byte-budget";
+			break;
 		}
 
 		uint64_t uploadBytes = 0;
 		bool reusedMesh = false;
 		bool reusedMaterial = false;
+		bool inProgress = false;
 		const char* failureReason = "none";
-		if (!AdmitPersistentVoxelVariantResource(entry->variant, uploadBytes, reusedMesh, reusedMaterial, failureReason))
+		const uint64_t remainingByteBudget = byteBudget == 0 ? 0ull : byteBudget - stats.bytesUploaded;
+		const uint32_t blasBefore = blasBudgetRemaining;
+		if (!AdmitPersistentVoxelVariantResource(*entry, remainingByteBudget, blasBudgetRemaining, uploadBytes, reusedMesh, reusedMaterial, inProgress, failureReason))
 		{
 			entry->state = PersistentVoxelAdmissionState::Failed;
 			entry->retryCount++;
@@ -13380,12 +13606,39 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 			}
 			break;
 		}
+		blasUsed += blasBefore - blasBudgetRemaining;
+		entry->bytesUploaded += uploadBytes;
+		stats.bytesUploaded += uploadBytes;
+		if (inProgress)
+		{
+			entry->lastReason = entry->state == PersistentVoxelAdmissionState::BuildingBlas && blasBudgetRemaining == 0 ? "blas-budget" : "uploading";
+			stopReason = entry->lastReason;
+			if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
+			{
+				Printf("NRI PT voxel admission queue: event=in-progress phase=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu upload_bytes=%llu state=%u reason=%s\n",
+					phase != nullptr ? phase : "unknown",
+					entry->sourceBits,
+					entry->priority,
+					entry->admissionRank,
+					entry->gpuForce ? 1u : 0u,
+					entry->gpuPrefer ? 1u : 0u,
+					entry->runtimeRequested ? 1u : 0u,
+					entry->variant.sourcePicnum,
+					entry->variant.resolvedVoxelIndex,
+					(unsigned long long)entry->variant.meshKeyHash,
+					(unsigned long long)entry->variant.materialKeyHash,
+					entry->variant.primitiveCount,
+					(unsigned long long)entry->estimatedBytes,
+					(unsigned long long)uploadBytes,
+					(uint32_t)entry->state,
+					entry->lastReason);
+			}
+			break;
+		}
 
 		entry->state = PersistentVoxelAdmissionState::Ready;
 		entry->lastReason = reusedMesh && reusedMaterial ? "already-resident" : "admitted";
-		entry->bytesUploaded += uploadBytes;
 		stats.uploaded++;
-		stats.bytesUploaded += uploadBytes;
 		admitted++;
 		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 		{
@@ -13418,7 +13671,7 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		uint32_t optionalPending = 0;
 		uint32_t failed = 0;
 		CountPersistentVoxelAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
-		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u required_pending=%u required_ready=%u optional_pending=%u variants_budget=%u bytes_budget=%llu\n",
+		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u required_pending=%u required_ready=%u optional_pending=%u variants_budget=%u bytes_budget=%llu ms_budget=%.3f ms_used=%.3f blas_budget=%u blas_used=%u stop=%s\n",
 			phase != nullptr ? phase : "unknown",
 			stats.queued,
 			stats.ready,
@@ -13435,7 +13688,12 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 			requiredReady,
 			optionalPending,
 			variantBudget,
-			(unsigned long long)byteBudget);
+			(unsigned long long)byteBudget,
+			msBudget,
+			elapsedMs(),
+			blasBudgetLimit,
+			blasUsed,
+			stopReason);
 	}
 
 	return stats.failedThisPump == 0;
@@ -13459,8 +13717,28 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 		EnqueuePersistentVoxelAdmission(variant, false, "preload");
 	}
 
+	auto hasRequiredUploadInProgress = [&]() -> bool
+	{
+		for (const auto& pair : mPersistentVoxelAdmissionQueue)
+		{
+			const PersistentVoxelAdmissionEntry& entry = pair.second;
+			if (!IsRequiredPersistentVoxelAdmission(entry))
+			{
+				continue;
+			}
+			if (entry.state == PersistentVoxelAdmissionState::UploadingVertices ||
+				entry.state == PersistentVoxelAdmissionState::UploadingIndices ||
+				entry.state == PersistentVoxelAdmissionState::UploadingPrimitives ||
+				entry.state == PersistentVoxelAdmissionState::BuildingBlas)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
 	bool ok = true;
-	const uint32_t maxPumps = (uint32_t)mPersistentVoxelAdmissionQueue.size() + 1u;
+	const uint32_t maxPumps = std::max<uint32_t>(1024u, (uint32_t)mPersistentVoxelAdmissionQueue.size() * 64u + 64u);
 	for (uint32_t pump = 0; pump < maxPumps; ++pump)
 	{
 		uint32_t requiredPendingBefore = 0;
@@ -13514,7 +13792,7 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 			}
 			break;
 		}
-		if (requiredPendingAfter >= requiredPendingBefore && requiredReadyAfter <= requiredReadyBefore)
+		if (requiredPendingAfter >= requiredPendingBefore && requiredReadyAfter <= requiredReadyBefore && !hasRequiredUploadInProgress())
 		{
 			if ((int)nri_ptloadingtrace >= 1)
 			{
