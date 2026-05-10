@@ -2716,26 +2716,6 @@ CUSTOM_CVAR(Float, nri_ptceilingnudgedistance, 0.01f, CVAR_ARCHIVE | CVAR_GLOBAL
 		self = 0.0f;
 	}
 }
-
-static const char* GetPersistentVoxelDiagnosticExclusionReason(int32_t resolvedVoxelIndex, uint32_t primitiveCount)
-{
-	const int32_t excludeIndex0 = (int32_t)nri_ptvoxelexcludeindex;
-	const int32_t excludeIndex1 = (int32_t)nri_ptvoxelexcludeindex2;
-	const int32_t excludeIndex2 = (int32_t)nri_ptvoxelexcludeindex3;
-	if (resolvedVoxelIndex >= 0 &&
-		(resolvedVoxelIndex == excludeIndex0 ||
-			resolvedVoxelIndex == excludeIndex1 ||
-			resolvedVoxelIndex == excludeIndex2))
-	{
-		return "excluded-index";
-	}
-	const uint32_t excludeMinPrims = (uint32_t)std::max(0, (int)nri_ptvoxelexcludeminprims);
-	if (excludeMinPrims > 0 && primitiveCount >= excludeMinPrims)
-	{
-		return "excluded-prims";
-	}
-	return nullptr;
-}
 CVAR(Int, nri_ptmutationtracechunk, 66, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, 198, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptruntimelinktrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -8506,6 +8486,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						uint64_t persistentVoxelTlasInstancePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasUniquePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasMaxRetainedFrameAge = 0;
+						const int32_t persistentVoxelExcludeIndex0 = (int32_t)nri_ptvoxelexcludeindex;
+						const int32_t persistentVoxelExcludeIndex1 = (int32_t)nri_ptvoxelexcludeindex2;
+						const int32_t persistentVoxelExcludeIndex2 = (int32_t)nri_ptvoxelexcludeindex3;
+						const uint32_t persistentVoxelExcludeMinPrims = (uint32_t)std::max(0, (int)nri_ptvoxelexcludeminprims);
 						for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 						{
 							if (!actor.active)
@@ -8513,14 +8497,19 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								continue;
 							}
 							persistentVoxelTlasCandidateCount++;
-							const char* diagnosticExclusionReason = GetPersistentVoxelDiagnosticExclusionReason(actor.resolvedVoxelIndex, actor.primitiveCount);
-							if (diagnosticExclusionReason != nullptr)
+							const bool excludedByIndex = actor.resolvedVoxelIndex >= 0 &&
+								(actor.resolvedVoxelIndex == persistentVoxelExcludeIndex0 ||
+									actor.resolvedVoxelIndex == persistentVoxelExcludeIndex1 ||
+									actor.resolvedVoxelIndex == persistentVoxelExcludeIndex2);
+							const bool excludedByPrimitiveCount = persistentVoxelExcludeMinPrims > 0 &&
+								actor.primitiveCount >= persistentVoxelExcludeMinPrims;
+							if (excludedByIndex || excludedByPrimitiveCount)
 							{
 								if ((bool)nri_voxelstats)
 								{
 									Printf("PERF pt voxel tlas NRI: frame=%u action=skip reason=%s actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx voxel=%d instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=0 tlas_ready=0 tlas_published=0 ready=0\n",
 										mFrameIndex,
-										diagnosticExclusionReason,
+										excludedByIndex ? "excluded-index" : "excluded-prims",
 										(unsigned long long)actor.identityKey,
 										(unsigned long long)actor.meshResourceKey,
 										(unsigned long long)actor.meshKeyHash,
@@ -12341,7 +12330,6 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources()
 	uint32_t warmedMaterials = 0;
 	uint32_t reusedMaterials = 0;
 	uint32_t skippedMeshes = 0;
-	uint32_t skippedExcluded = 0;
 	uint32_t primitiveCount = 0;
 	uint64_t uploadBytes = 0;
 
@@ -12421,24 +12409,6 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources()
 	{
 		if (variant.surface == nullptr || variant.meshKeyHash == 0 || variant.materialKeyHash == 0)
 		{
-			continue;
-		}
-		const char* diagnosticExclusionReason = GetPersistentVoxelDiagnosticExclusionReason(
-			variant.resolvedVoxelIndex,
-			variant.primitiveCount);
-		if (diagnosticExclusionReason != nullptr)
-		{
-			skippedExcluded++;
-			if ((int)nri_ptloadingtrace >= 2)
-			{
-				Printf("NRI PT loading voxel resources: event=variant-skip reason=%s tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx tris=%u\n",
-					diagnosticExclusionReason,
-					variant.sourcePicnum,
-					variant.resolvedVoxelIndex,
-					(unsigned long long)variant.meshVariantHash,
-					(unsigned long long)variant.materialVariantHash,
-					variant.primitiveCount);
-			}
 			continue;
 		}
 
@@ -12676,14 +12646,13 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources()
 
 	if ((int)nri_ptloadingtrace >= 1)
 	{
-		Printf("NRI PT loading voxel resources: event=variant-warm variants=%u mesh_resources=%u mesh_delta=%d mesh_warm=%u mesh_reuse=%u mesh_skip=%u mesh_excluded=%u material_resources=%u material_delta=%d material_warm=%u material_reuse=%u prims=%u upload_bytes=%llu ms=%.3f\n",
+		Printf("NRI PT loading voxel resources: event=variant-warm variants=%u mesh_resources=%u mesh_delta=%d mesh_warm=%u mesh_reuse=%u mesh_skip=%u material_resources=%u material_delta=%d material_warm=%u material_reuse=%u prims=%u upload_bytes=%llu ms=%.3f\n",
 			(uint32_t)variants.size(),
 			(uint32_t)mPersistentVoxelMeshVariantResources.size(),
 			(int32_t)mPersistentVoxelMeshVariantResources.size() - (int32_t)meshResourcesBefore,
 			warmedMeshes,
 			reusedMeshes,
 			skippedMeshes,
-			skippedExcluded,
 			(uint32_t)mPersistentVoxelMaterialVariantResources.size(),
 			(int32_t)mPersistentVoxelMaterialVariantResources.size() - (int32_t)materialResourcesBefore,
 			warmedMaterials,
@@ -13589,36 +13558,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			if (existingActor != nullptr)
 			{
 				existingActor->active = false;
-			}
-			return true;
-		}
-		const char* diagnosticExclusionReason = GetPersistentVoxelDiagnosticExclusionReason(
-			cacheEntry.resolvedVoxelIndex,
-			cacheEntry.primitiveCount);
-		if (diagnosticExclusionReason != nullptr)
-		{
-			if (existingActor != nullptr)
-			{
-				existingActor->active = false;
-			}
-			auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
-			if (instanceIt != mPersistentVoxelInstances.end())
-			{
-				instanceIt->second.pending = false;
-			}
-			if ((bool)nri_voxelstats)
-			{
-				Printf("PERF pt voxel instance NRI: frame=%u action=exclude reason=%s actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx voxel=%d surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=0 active=0\n",
-					mFrameIndex,
-					diagnosticExclusionReason,
-					(unsigned long long)cacheEntry.identityKey,
-					(unsigned long long)buildPersistentVoxelMeshResourceKey(cacheEntry),
-					(unsigned long long)cacheEntry.meshKeyHash,
-					(unsigned long long)cacheEntry.materialKeyHash,
-					cacheEntry.resolvedVoxelIndex,
-					(unsigned long long)cacheEntry.surfaceSignature,
-					(unsigned long long)cacheEntry.bakedSurfaceSignature,
-					cacheEntry.primitiveCount);
 			}
 			return true;
 		}
