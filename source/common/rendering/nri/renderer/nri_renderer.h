@@ -1432,6 +1432,50 @@ private:
 		nri_scene::MaterialBridgeData materialBridge;
 	};
 
+	enum class PersistentVoxelAdmissionState : uint8_t
+	{
+		Pending,
+		Ready,
+		Deferred,
+		Failed,
+	};
+
+	struct PersistentVoxelAdmissionEntry
+	{
+		uint64_t pairKey = 0;
+		nri_scene::PrecachedVoxelVariantView variant;
+		PersistentVoxelAdmissionState state = PersistentVoxelAdmissionState::Pending;
+		uint32_t sourceBits = 0;
+		int32_t priority = 0;
+		bool gpuForce = false;
+		bool gpuPrefer = false;
+		bool runtimeRequested = false;
+		uint32_t retryCount = 0;
+		uint32_t mapGeneration = 0;
+		uint64_t estimatedBytes = 0;
+		uint64_t bytesUploaded = 0;
+		const char* lastReason = "none";
+	};
+
+	struct PersistentVoxelAdmissionStats
+	{
+		uint32_t queued = 0;
+		uint32_t ready = 0;
+		uint32_t deferred = 0;
+		uint32_t failed = 0;
+		uint32_t enqueued = 0;
+		uint32_t deduped = 0;
+		uint32_t promoted = 0;
+		uint32_t uploaded = 0;
+		uint32_t force = 0;
+		uint32_t prefer = 0;
+		uint32_t runtime = 0;
+		uint32_t skippedBudget = 0;
+		uint32_t failedThisPump = 0;
+		uint64_t bytesPending = 0;
+		uint64_t bytesUploaded = 0;
+	};
+
 	struct PersistentVoxelInstanceRecord
 	{
 		uint64_t identityKey = 0;
@@ -1873,6 +1917,17 @@ private:
 		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
 		const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries);
 	bool PreloadPersistentVoxelVariantResources(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants);
+	bool EnqueuePersistentVoxelAdmission(
+		const nri_scene::PrecachedVoxelVariantView& variant,
+		bool runtimeRequested,
+		const char* sourceLabel);
+	bool PumpPersistentVoxelAdmissionQueue(const char* phase);
+	bool AdmitPersistentVoxelVariantResource(
+		const nri_scene::PrecachedVoxelVariantView& variant,
+		uint64_t& outUploadBytes,
+		bool& outReusedMesh,
+		bool& outReusedMaterial);
+	bool IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch();
@@ -2182,6 +2237,7 @@ private:
 	std::unordered_map<uint64_t, PersistentVoxelMaterialVariantResource> mPersistentVoxelMaterialVariantResources;
 	std::unordered_map<uint64_t, PersistentVoxelInstanceRecord> mPersistentVoxelInstances;
 	std::unordered_map<uint64_t, uint64_t> mPersistentVoxelActorRejectedSignatures;
+	std::unordered_map<uint64_t, PersistentVoxelAdmissionEntry> mPersistentVoxelAdmissionQueue;
 	uint32_t mPersistentVoxelArenaVertexCursor = 0;
 	uint32_t mPersistentVoxelArenaIndexCursor = 0;
 	uint32_t mPersistentVoxelArenaPrimitiveCursor = 0;
