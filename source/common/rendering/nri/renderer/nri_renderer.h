@@ -1926,7 +1926,8 @@ private:
 		const nri_scene::PrecachedVoxelVariantView& variant,
 		uint64_t& outUploadBytes,
 		bool& outReusedMesh,
-		bool& outReusedMaterial);
+		bool& outReusedMaterial,
+		const char*& outFailureReason);
 	bool IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
