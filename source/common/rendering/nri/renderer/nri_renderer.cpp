@@ -12330,10 +12330,12 @@ void NRIRenderer::ReconcilePersistentVoxelResidency(
 	const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
 	const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries)
 {
+	bool mapGenerationChanged = false;
 	if (mPersistentVoxelResidencyLastBuildSerial != mMapWorld.buildSerial)
 	{
 		mPersistentVoxelResidencyLastBuildSerial = mMapWorld.buildSerial;
 		mPersistentVoxelResidencyMapGeneration++;
+		mapGenerationChanged = true;
 	}
 	const uint32_t generation = mPersistentVoxelResidencyMapGeneration;
 
@@ -12446,10 +12448,26 @@ void NRIRenderer::ReconcilePersistentVoxelResidency(
 			cacheEntry.surface != nullptr && cacheEntry.primitiveCount != 0);
 	}
 
+	if (mapGenerationChanged && !mPersistentVoxelAdmissionQueue.empty())
+	{
+		if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
+		{
+			Printf("NRI PT voxel admission queue: event=clear-stale reason=map-generation generation=%u entries=%u\n",
+				generation,
+				(uint32_t)mPersistentVoxelAdmissionQueue.size());
+		}
+		for (auto& pair : mPersistentVoxelAdmissionQueue)
+		{
+			DiscardPersistentVoxelAdmissionEntry(pair.second);
+		}
+		mPersistentVoxelAdmissionQueue.clear();
+	}
+
 	for (auto it = mPersistentVoxelAdmissionQueue.begin(); it != mPersistentVoxelAdmissionQueue.end(); )
 	{
 		if (it->second.mapGeneration != generation && desired.find(it->first) == desired.end())
 		{
+			DiscardPersistentVoxelAdmissionEntry(it->second);
 			it = mPersistentVoxelAdmissionQueue.erase(it);
 			continue;
 		}
@@ -12737,6 +12755,32 @@ bool NRIRenderer::IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, 
 		!materialIt->second.materialBridge.materials.empty();
 }
 
+void NRIRenderer::DiscardPersistentVoxelAdmissionEntry(PersistentVoxelAdmissionEntry& entry)
+{
+	RetireResidentBufferResource(entry.uploadMeshResource.vertexBuffer);
+	RetireResidentBufferResource(entry.uploadMeshResource.indexBuffer);
+	RetireResidentAccelerationStructure(entry.uploadMeshResource.accelerationStructure);
+	entry.uploadMeshResource = {};
+	entry.uploadMaterialResource = {};
+	entry.uploadPrepared = false;
+	entry.shaderVertexOffset = 0;
+	entry.shaderIndexOffset = 0;
+	entry.shaderPrimitiveOffset = 0;
+	entry.savedVertexCursor = 0;
+	entry.savedIndexCursor = 0;
+	entry.savedPrimitiveCursor = 0;
+	entry.savedMaterialCursor = 0;
+	entry.vertexBytesUploaded = 0;
+	entry.vertexArenaBytesUploaded = 0;
+	entry.indexBytesUploaded = 0;
+	entry.indexArenaBytesUploaded = 0;
+	entry.primitiveBytesUploaded = 0;
+	entry.bytesUploaded = 0;
+	entry.uploadGeometry = {};
+	entry.uploadGpuIndices.clear();
+	entry.uploadGpuPrimitives.clear();
+}
+
 bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 	const nri_scene::PrecachedVoxelVariantView& variant,
 	bool runtimeRequested,
@@ -12756,6 +12800,12 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		variant.admissionRank != 0 || variant.priority <= 0 ? variant.admissionRank : variant.priority * 10000 + 9900;
 
 	auto found = mPersistentVoxelAdmissionQueue.find(pairKey);
+	if (found != mPersistentVoxelAdmissionQueue.end() && found->second.mapGeneration != mPersistentVoxelResidencyMapGeneration)
+	{
+		DiscardPersistentVoxelAdmissionEntry(found->second);
+		mPersistentVoxelAdmissionQueue.erase(found);
+		found = mPersistentVoxelAdmissionQueue.end();
+	}
 	if (found != mPersistentVoxelAdmissionQueue.end())
 	{
 		PersistentVoxelAdmissionEntry& entry = found->second;
@@ -12934,7 +12984,8 @@ void NRIRenderer::ApplyPersistentVoxelResidencyPressurePolicy(const char* phase)
 	for (const auto& pair : mPersistentVoxelAdmissionQueue)
 	{
 		const PersistentVoxelAdmissionEntry& entry = pair.second;
-		if (entry.state == PersistentVoxelAdmissionState::Failed)
+		if (entry.mapGeneration != mPersistentVoxelResidencyMapGeneration ||
+			entry.state == PersistentVoxelAdmissionState::Failed)
 		{
 			continue;
 		}
@@ -13792,6 +13843,10 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 	for (auto& pair : mPersistentVoxelAdmissionQueue)
 	{
 		PersistentVoxelAdmissionEntry& entry = pair.second;
+		if (entry.mapGeneration != mPersistentVoxelResidencyMapGeneration)
+		{
+			continue;
+		}
 		const bool resourcesReady = IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
 		if (resourcesReady)
 		{

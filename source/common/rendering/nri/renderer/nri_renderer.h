@@ -1958,6 +1958,7 @@ private:
 		const nri_scene::PrecachedVoxelVariantView& variant,
 		bool runtimeRequested,
 		const char* sourceLabel);
+	void DiscardPersistentVoxelAdmissionEntry(PersistentVoxelAdmissionEntry& entry);
 	bool IsRequiredPersistentVoxelAdmission(const PersistentVoxelAdmissionEntry& entry) const;
 	void CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const;
 	void ApplyPersistentVoxelResidencyPressurePolicy(const char* phase);
