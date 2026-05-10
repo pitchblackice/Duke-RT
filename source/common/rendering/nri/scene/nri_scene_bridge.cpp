@@ -257,6 +257,17 @@ namespace
 		bool gpuPrefer = false;
 	};
 
+	struct LoadingVoxelMaterialContext
+	{
+		FTextureID texid = {};
+		DCoreActor* actor = nullptr;
+		int32_t actorIndex = -1;
+		uint32_t sourceBits = LoadingVoxelRequestSource_None;
+		LoadingVoxelRequestPriority priority = LoadingVoxelRequestPriority::Normal;
+		bool gpuForce = false;
+		bool gpuPrefer = false;
+	};
+
 	struct LoadingVoxelPreloadRequest
 	{
 		FTextureID texid = {};
@@ -270,6 +281,7 @@ namespace
 		bool gpuForce = false;
 		bool gpuPrefer = false;
 		uint32_t primitiveCount = 0;
+		std::vector<LoadingVoxelMaterialContext> materialContexts;
 	};
 
 	struct LoadingVoxelPreloadRequestGraph
@@ -3296,6 +3308,15 @@ namespace
 			return false;
 		}
 
+		LoadingVoxelMaterialContext materialContext = {};
+		materialContext.texid = candidate.texid;
+		materialContext.actor = actor;
+		materialContext.actorIndex = actor != nullptr ? (int32_t)actor->GetIndex() : -1;
+		materialContext.sourceBits = candidate.sourceBits;
+		materialContext.priority = candidate.priority;
+		materialContext.gpuForce = candidate.gpuForce;
+		materialContext.gpuPrefer = candidate.gpuPrefer;
+
 		auto found = graph.requestByMeshVariant.find(meshVariantHash);
 		if (found != graph.requestByMeshVariant.end())
 		{
@@ -3303,6 +3324,7 @@ namespace
 			request.sourceBits |= candidate.sourceBits;
 			request.gpuForce = request.gpuForce || candidate.gpuForce;
 			request.gpuPrefer = request.gpuPrefer || candidate.gpuPrefer;
+			request.materialContexts.push_back(materialContext);
 			if ((uint8_t)candidate.priority < (uint8_t)request.priority)
 			{
 				request.priority = candidate.priority;
@@ -3325,6 +3347,7 @@ namespace
 		request.priority = candidate.priority;
 		request.gpuForce = candidate.gpuForce;
 		request.gpuPrefer = candidate.gpuPrefer;
+		request.materialContexts.push_back(materialContext);
 		graph.requestByMeshVariant.emplace(meshVariantHash, graph.requests.size());
 		graph.requests.push_back(request);
 		return true;
@@ -5830,6 +5853,7 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 	uint32_t selectedPreferred = 0;
 	uint32_t selectedHeuristic = 0;
 	std::unordered_set<uint64_t> seenVariantPairs;
+	std::unordered_set<uint64_t> selectedMeshVariants;
 
 	LoadingVoxelPreloadRequestGraph graph;
 	BuildLiveActorVoxelPreloadRequestGraph(graph);
@@ -5877,30 +5901,8 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			continue;
 		}
 
-		FGameTexture* emissiveSourceTexture = TexMan.GetGameTexture(request.texid);
-		if (emissiveSourceTexture != nullptr && !emissiveSourceTexture->isValid())
-		{
-			emissiveSourceTexture = nullptr;
-		}
-		const int palette = request.actor != nullptr ? request.actor->spr.pal : 0;
-		const int shade = request.actor != nullptr ? request.actor->spr.shade : 0;
-		const float alpha = request.actor != nullptr ? GetLoadingActorAlpha(request.actor) : 1.0f;
-		const MaterialRef material = MakeVoxelPaletteMaterialRef(
-			voxelTexture,
-			emissiveSourceTexture,
-			palette,
-			shade,
-			alpha,
-			MaterialFlag_Sprite);
-		const uint64_t materialVariantHash = BuildVoxelMaterialVariantKeyHash(BuildVoxelMaterialVariantKey(voxelTexture, material));
-		const uint64_t pairHash = HashCombine64(request.meshVariantHash, materialVariantHash);
-		if (materialVariantHash == 0 || !seenVariantPairs.insert(pairHash).second)
-		{
-			continue;
-		}
-
 		const uint32_t primitiveCount = CountSurfacePrimitives(*surface);
-		const uint64_t estimatedUploadBytes =
+		const uint64_t estimatedMeshUploadBytes =
 			(uint64_t)surface->vertices.size() * (uint64_t)sizeof(SceneVertex) +
 			(uint64_t)surface->indices.size() * (uint64_t)sizeof(uint32_t) +
 			(uint64_t)primitiveCount * (uint64_t)sizeof(PrimitiveData);
@@ -5915,78 +5917,127 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 			if ((int)nri_ptloadingtrace >= 2)
 			{
 				const std::string sourceName = LoadingVoxelSourceBitsName(request.sourceBits);
-				Printf("NRI PT loading voxel variant: event=defer reason=preload-small source=%s priority=%s actor=%d tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx tris=%u min_tris=%u\n",
+				Printf("NRI PT loading voxel variant: event=defer reason=preload-small source=%s priority=%s actor=%d tex=%d voxel=%d mesh_variant=0x%llx tris=%u min_tris=%u\n",
 					sourceName.c_str(),
 					LoadingVoxelPriorityName(request.priority),
 					request.actorIndex,
 					request.texid.GetIndex(),
 					request.resolvedVoxelIndex,
 					(unsigned long long)request.meshVariantHash,
-					(unsigned long long)materialVariantHash,
 					primitiveCount,
 					minPrimitiveCount);
 			}
 			continue;
 		}
 
-		const bool exceedsVariantBudget = outEntries.size() >= variantLimit;
-		const bool exceedsPrimitiveBudget = primitiveLimit != 0 && primitiveTotal + primitiveCount > primitiveLimit;
-		const bool exceedsByteBudget = byteLimit != 0 && uploadByteTotal + estimatedUploadBytes > byteLimit;
-		if (exceedsVariantBudget || exceedsPrimitiveBudget || exceedsByteBudget)
+		std::vector<LoadingVoxelMaterialContext> contexts = request.materialContexts;
+		if (contexts.empty())
 		{
-			skippedBudget++;
-			if ((int)nri_ptloadingtrace >= 2)
-			{
-				const std::string sourceName = LoadingVoxelSourceBitsName(request.sourceBits);
-				Printf("NRI PT loading voxel variant: event=defer reason=preload-budget source=%s priority=%s actor=%d tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx tris=%u prims_used=%u prims_limit=%u variants_used=%u variants_limit=%u bytes=%llu bytes_used=%llu bytes_limit=%llu\n",
-					sourceName.c_str(),
-					LoadingVoxelPriorityName(request.priority),
-					request.actorIndex,
-					request.texid.GetIndex(),
-					request.resolvedVoxelIndex,
-					(unsigned long long)request.meshVariantHash,
-					(unsigned long long)materialVariantHash,
-					primitiveCount,
-					primitiveTotal,
-					primitiveLimit,
-					(uint32_t)outEntries.size(),
-					variantLimit,
-					(unsigned long long)estimatedUploadBytes,
-					(unsigned long long)uploadByteTotal,
-					(unsigned long long)byteLimit);
-			}
-			continue;
+			LoadingVoxelMaterialContext fallbackContext = {};
+			fallbackContext.texid = request.texid;
+			fallbackContext.actor = request.actor;
+			fallbackContext.actorIndex = request.actorIndex;
+			fallbackContext.sourceBits = request.sourceBits;
+			fallbackContext.priority = request.priority;
+			fallbackContext.gpuForce = request.gpuForce;
+			fallbackContext.gpuPrefer = request.gpuPrefer;
+			contexts.push_back(fallbackContext);
 		}
 
-		PrecachedVoxelVariantView view = {};
-		view.meshKeyHash = request.meshVariantHash;
-		view.materialKeyHash = materialVariantHash;
-		view.meshVariantHash = request.meshVariantHash;
-		view.materialVariantHash = materialVariantHash;
-		view.sourceBits = request.sourceBits;
-		view.priority = (int32_t)request.priority;
-		view.admissionRank = LoadingVoxelAdmissionRank(request);
-		view.sourcePicnum = request.texid.GetIndex();
-		view.resolvedVoxelIndex = request.resolvedVoxelIndex;
-		view.primitiveCount = primitiveCount;
-		view.gpuForce = forcedGpu;
-		view.gpuPrefer = preferredGpu;
-		view.surface = surface;
-		view.material = material;
-		outEntries.push_back(std::move(view));
-		primitiveTotal += primitiveCount;
-		uploadByteTotal += estimatedUploadBytes;
-		if (forcedGpu)
+		for (const LoadingVoxelMaterialContext& context : contexts)
 		{
-			selectedForced++;
-		}
-		else if (preferredGpu)
-		{
-			selectedPreferred++;
-		}
-		else
-		{
-			selectedHeuristic++;
+			FGameTexture* emissiveSourceTexture = TexMan.GetGameTexture(context.texid);
+			if (emissiveSourceTexture != nullptr && !emissiveSourceTexture->isValid())
+			{
+				emissiveSourceTexture = nullptr;
+			}
+			const int palette = context.actor != nullptr ? context.actor->spr.pal : 0;
+			const int shade = context.actor != nullptr ? context.actor->spr.shade : 0;
+			const float alpha = context.actor != nullptr ? GetLoadingActorAlpha(context.actor) : 1.0f;
+			const MaterialRef material = MakeVoxelPaletteMaterialRef(
+				voxelTexture,
+				emissiveSourceTexture,
+				palette,
+				shade,
+				alpha,
+				MaterialFlag_Sprite);
+			const uint64_t materialVariantHash = BuildVoxelMaterialVariantKeyHash(BuildVoxelMaterialVariantKey(voxelTexture, material));
+			const uint64_t pairHash = HashCombine64(request.meshVariantHash, materialVariantHash);
+			if (materialVariantHash == 0 || !seenVariantPairs.insert(pairHash).second)
+			{
+				continue;
+			}
+
+			const bool meshBudgetFirstUse = selectedMeshVariants.find(request.meshVariantHash) == selectedMeshVariants.end();
+			// Additional actor/material variants for an already selected mesh should not
+			// be charged as if they re-upload the shared voxel geometry.
+			const uint64_t estimatedMaterialVariantBytes = 512ull;
+			const uint64_t estimatedUploadBytes = meshBudgetFirstUse ? estimatedMeshUploadBytes : estimatedMaterialVariantBytes;
+			const uint32_t estimatedPrimitiveBudget = meshBudgetFirstUse ? primitiveCount : 0u;
+			const bool exceedsVariantBudget = outEntries.size() >= variantLimit;
+			const bool exceedsPrimitiveBudget = primitiveLimit != 0 && primitiveTotal + estimatedPrimitiveBudget > primitiveLimit;
+			const bool exceedsByteBudget = byteLimit != 0 && uploadByteTotal + estimatedUploadBytes > byteLimit;
+			if (exceedsVariantBudget || exceedsPrimitiveBudget || exceedsByteBudget)
+			{
+				skippedBudget++;
+				if ((int)nri_ptloadingtrace >= 2)
+				{
+					const std::string sourceName = LoadingVoxelSourceBitsName(request.sourceBits | context.sourceBits);
+					Printf("NRI PT loading voxel variant: event=defer reason=preload-budget source=%s priority=%s actor=%d tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx tris=%u prims_used=%u prims_limit=%u variants_used=%u variants_limit=%u bytes=%llu bytes_used=%llu bytes_limit=%llu mesh_reused=%u\n",
+						sourceName.c_str(),
+						LoadingVoxelPriorityName(request.priority),
+						context.actorIndex,
+						context.texid.GetIndex(),
+						request.resolvedVoxelIndex,
+						(unsigned long long)request.meshVariantHash,
+						(unsigned long long)materialVariantHash,
+						primitiveCount,
+						primitiveTotal,
+						primitiveLimit,
+						(uint32_t)outEntries.size(),
+						variantLimit,
+						(unsigned long long)estimatedUploadBytes,
+						(unsigned long long)uploadByteTotal,
+						(unsigned long long)byteLimit,
+						meshBudgetFirstUse ? 0u : 1u);
+				}
+				continue;
+			}
+
+			PrecachedVoxelVariantView view = {};
+			view.meshKeyHash = request.meshVariantHash;
+			view.materialKeyHash = materialVariantHash;
+			view.meshVariantHash = request.meshVariantHash;
+			view.materialVariantHash = materialVariantHash;
+			view.sourceBits = request.sourceBits | context.sourceBits;
+			view.priority = (int32_t)request.priority;
+			view.admissionRank = LoadingVoxelAdmissionRank(request);
+			view.sourcePicnum = context.texid.GetIndex();
+			view.resolvedVoxelIndex = request.resolvedVoxelIndex;
+			view.primitiveCount = primitiveCount;
+			view.gpuForce = forcedGpu;
+			view.gpuPrefer = preferredGpu;
+			view.surface = surface;
+			view.material = material;
+			outEntries.push_back(std::move(view));
+			if (meshBudgetFirstUse)
+			{
+				selectedMeshVariants.insert(request.meshVariantHash);
+				primitiveTotal += primitiveCount;
+			}
+			uploadByteTotal += estimatedUploadBytes;
+			if (forcedGpu)
+			{
+				selectedForced++;
+			}
+			else if (preferredGpu)
+			{
+				selectedPreferred++;
+			}
+			else
+			{
+				selectedHeuristic++;
+			}
 		}
 	}
 
