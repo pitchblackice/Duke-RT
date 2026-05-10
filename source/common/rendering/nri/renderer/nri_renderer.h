@@ -1447,6 +1447,7 @@ private:
 		PersistentVoxelAdmissionState state = PersistentVoxelAdmissionState::Pending;
 		uint32_t sourceBits = 0;
 		int32_t priority = 0;
+		int32_t admissionRank = 0;
 		bool gpuForce = false;
 		bool gpuPrefer = false;
 		bool runtimeRequested = false;
@@ -1921,6 +1922,7 @@ private:
 		const nri_scene::PrecachedVoxelVariantView& variant,
 		bool runtimeRequested,
 		const char* sourceLabel);
+	void CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const;
 	bool PumpPersistentVoxelAdmissionQueue(const char* phase);
 	bool AdmitPersistentVoxelVariantResource(
 		const nri_scene::PrecachedVoxelVariantView& variant,

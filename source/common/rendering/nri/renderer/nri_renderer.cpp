@@ -12729,6 +12729,8 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		(uint64_t)variant.surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
 		(uint64_t)variant.surface->indices.size() * (uint64_t)sizeof(uint32_t) +
 		(uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData);
+	const int32_t variantAdmissionRank =
+		variant.admissionRank != 0 || variant.priority <= 0 ? variant.admissionRank : variant.priority * 10000 + 9900;
 
 	auto found = mPersistentVoxelAdmissionQueue.find(pairKey);
 	if (found != mPersistentVoxelAdmissionQueue.end())
@@ -12741,6 +12743,7 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		entry.gpuPrefer = entry.gpuPrefer || variant.gpuPrefer;
 		entry.runtimeRequested = entry.runtimeRequested || runtimeRequested;
 		entry.priority = std::min(entry.priority, variant.priority);
+		entry.admissionRank = std::min(entry.admissionRank, variantAdmissionRank);
 		if (entry.state == PersistentVoxelAdmissionState::Deferred)
 		{
 			entry.state = PersistentVoxelAdmissionState::Pending;
@@ -12754,12 +12757,13 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		}
 		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 		{
-			Printf("NRI PT voxel admission queue: event=%s source=%s source_bits=0x%x priority=%d old_priority=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu generation=%u\n",
+			Printf("NRI PT voxel admission queue: event=%s source=%s source_bits=0x%x priority=%d old_priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu generation=%u\n",
 				entry.priority != oldPriority ? "promote" : "dedupe",
 				sourceLabel != nullptr ? sourceLabel : "unknown",
 				entry.sourceBits,
 				entry.priority,
 				oldPriority,
+				entry.admissionRank,
 				entry.gpuForce ? 1u : 0u,
 				entry.gpuPrefer ? 1u : 0u,
 				entry.runtimeRequested ? 1u : 0u,
@@ -12782,6 +12786,7 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		PersistentVoxelAdmissionState::Pending;
 	entry.sourceBits = variant.sourceBits;
 	entry.priority = variant.priority;
+	entry.admissionRank = variantAdmissionRank;
 	entry.gpuForce = variant.gpuForce;
 	entry.gpuPrefer = variant.gpuPrefer;
 	entry.runtimeRequested = runtimeRequested;
@@ -12792,11 +12797,12 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 
 	if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 	{
-		Printf("NRI PT voxel admission queue: event=%s source=%s source_bits=0x%x priority=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu generation=%u\n",
+		Printf("NRI PT voxel admission queue: event=%s source=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu generation=%u\n",
 			entry.state == PersistentVoxelAdmissionState::Ready ? "ready" : "enqueue",
 			sourceLabel != nullptr ? sourceLabel : "unknown",
 			entry.sourceBits,
 			entry.priority,
+			entry.admissionRank,
 			entry.gpuForce ? 1u : 0u,
 			entry.gpuPrefer ? 1u : 0u,
 			entry.runtimeRequested ? 1u : 0u,
@@ -12809,6 +12815,52 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 			entry.mapGeneration);
 	}
 	return true;
+}
+
+void NRIRenderer::CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const
+{
+	requiredPending = 0;
+	requiredReady = 0;
+	optionalPending = 0;
+	failed = 0;
+
+	for (const auto& pair : mPersistentVoxelAdmissionQueue)
+	{
+		const PersistentVoxelAdmissionEntry& entry = pair.second;
+		if (entry.mapGeneration != mPersistentVoxelResidencyMapGeneration)
+		{
+			continue;
+		}
+
+		const bool required =
+			!entry.runtimeRequested &&
+			entry.priority <= 0 &&
+			(entry.gpuForce || entry.gpuPrefer);
+		const bool ready =
+			entry.state == PersistentVoxelAdmissionState::Ready ||
+			IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
+		if (ready)
+		{
+			if (required)
+			{
+				requiredReady++;
+			}
+			continue;
+		}
+		if (entry.state == PersistentVoxelAdmissionState::Failed)
+		{
+			failed++;
+			continue;
+		}
+		if (required)
+		{
+			requiredPending++;
+		}
+		else
+		{
+			optionalPending++;
+		}
+	}
 }
 
 bool NRIRenderer::AdmitPersistentVoxelVariantResource(
@@ -13221,6 +13273,10 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 
 	std::sort(candidates.begin(), candidates.end(), [](const PersistentVoxelAdmissionEntry* left, const PersistentVoxelAdmissionEntry* right)
 	{
+		if (left->admissionRank != right->admissionRank)
+		{
+			return left->admissionRank < right->admissionRank;
+		}
 		if (left->priority != right->priority)
 		{
 			return left->priority < right->priority;
@@ -13274,9 +13330,10 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 			stats.failedThisPump++;
 			if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
 			{
-				Printf("NRI PT voxel admission queue: event=failed source_bits=0x%x priority=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu reason=%s\n",
+				Printf("NRI PT voxel admission queue: event=failed source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu reason=%s\n",
 					entry->sourceBits,
 					entry->priority,
+					entry->admissionRank,
 					entry->gpuForce ? 1u : 0u,
 					entry->gpuPrefer ? 1u : 0u,
 					entry->runtimeRequested ? 1u : 0u,
@@ -13299,10 +13356,11 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		admitted++;
 		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 		{
-			Printf("NRI PT voxel admission queue: event=ready phase=%s source_bits=0x%x priority=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu upload_bytes=%llu reused_mesh=%u reused_material=%u\n",
+			Printf("NRI PT voxel admission queue: event=ready phase=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu upload_bytes=%llu reused_mesh=%u reused_material=%u\n",
 				phase != nullptr ? phase : "unknown",
 				entry->sourceBits,
 				entry->priority,
+				entry->admissionRank,
 				entry->gpuForce ? 1u : 0u,
 				entry->gpuPrefer ? 1u : 0u,
 				entry->runtimeRequested ? 1u : 0u,
@@ -13322,7 +13380,12 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 	if (((int)nri_ptloadingtrace >= 1 && (loadingPhase || hasQueueActivity)) ||
 		((bool)nri_voxelstats && hasQueueActivity))
 	{
-		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u variants_budget=%u bytes_budget=%llu\n",
+		uint32_t requiredPending = 0;
+		uint32_t requiredReady = 0;
+		uint32_t optionalPending = 0;
+		uint32_t failed = 0;
+		CountPersistentVoxelAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
+		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u required_pending=%u required_ready=%u optional_pending=%u variants_budget=%u bytes_budget=%llu\n",
 			phase != nullptr ? phase : "unknown",
 			stats.queued,
 			stats.ready,
@@ -13335,6 +13398,9 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 			stats.force,
 			stats.prefer,
 			stats.runtime,
+			requiredPending,
+			requiredReady,
+			optionalPending,
 			variantBudget,
 			(unsigned long long)byteBudget);
 	}
@@ -13359,7 +13425,76 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 	{
 		EnqueuePersistentVoxelAdmission(variant, false, "preload");
 	}
-	return PumpPersistentVoxelAdmissionQueue("loading");
+
+	bool ok = true;
+	const uint32_t maxPumps = (uint32_t)mPersistentVoxelAdmissionQueue.size() + 1u;
+	for (uint32_t pump = 0; pump < maxPumps; ++pump)
+	{
+		uint32_t requiredPendingBefore = 0;
+		uint32_t requiredReadyBefore = 0;
+		uint32_t optionalPendingBefore = 0;
+		uint32_t failedBefore = 0;
+		CountPersistentVoxelAdmissionWork(requiredPendingBefore, requiredReadyBefore, optionalPendingBefore, failedBefore);
+		const bool optionalOnlyFirstPass = requiredPendingBefore == 0 && pump == 0 && optionalPendingBefore != 0;
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT voxel admission pump: phase=loading pass=%u required_pending=%u required_ready=%u optional_pending=%u failed=%u stop=%s\n",
+				pump,
+				requiredPendingBefore,
+				requiredReadyBefore,
+				optionalPendingBefore,
+				failedBefore,
+				requiredPendingBefore == 0 && !optionalOnlyFirstPass ? "required-drained" : "none");
+		}
+		if (requiredPendingBefore == 0 && !optionalOnlyFirstPass)
+		{
+			break;
+		}
+
+		ok = PumpPersistentVoxelAdmissionQueue("loading") && ok;
+
+		uint32_t requiredPendingAfter = 0;
+		uint32_t requiredReadyAfter = 0;
+		uint32_t optionalPendingAfter = 0;
+		uint32_t failedAfter = 0;
+		CountPersistentVoxelAdmissionWork(requiredPendingAfter, requiredReadyAfter, optionalPendingAfter, failedAfter);
+		if (!ok)
+		{
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=continue reason=failure required_pending=%u required_ready=%u optional_pending=%u failed=%u\n",
+					requiredPendingAfter,
+					requiredReadyAfter,
+					optionalPendingAfter,
+					failedAfter);
+			}
+			break;
+		}
+		if (requiredPendingAfter == 0)
+		{
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=required-drained required_pending=0 required_ready=%u optional_pending=%u failed=%u\n",
+					requiredReadyAfter,
+					optionalPendingAfter,
+					failedAfter);
+			}
+			break;
+		}
+		if (requiredPendingAfter >= requiredPendingBefore && requiredReadyAfter <= requiredReadyBefore)
+		{
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=continue reason=no-progress required_pending=%u required_ready=%u optional_pending=%u failed=%u\n",
+					requiredPendingAfter,
+					requiredReadyAfter,
+					optionalPendingAfter,
+					failedAfter);
+			}
+			break;
+		}
+	}
+	return ok;
 
 	const uint32_t meshResourcesBefore = (uint32_t)mPersistentVoxelMeshVariantResources.size();
 	const uint32_t materialResourcesBefore = (uint32_t)mPersistentVoxelMaterialVariantResources.size();
@@ -15009,6 +15144,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			admissionVariant.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
 			admissionVariant.primitiveCount = cacheEntry.primitiveCount;
 			admissionVariant.priority = 1;
+			admissionVariant.admissionRank = admissionVariant.priority * 10000 + 9900;
 			admissionVariant.surface = cacheEntry.surface;
 			admissionVariant.material = cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface->material : cacheEntry.surface->material;
 			EnqueuePersistentVoxelAdmission(admissionVariant, true, "runtime-actor");

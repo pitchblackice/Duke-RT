@@ -243,6 +243,9 @@ namespace
 		LoadingVoxelRequestSource_LiveActorAnimated = 1u << 1,
 		LoadingVoxelRequestSource_LiveActorPicrange = 1u << 2,
 		LoadingVoxelRequestSource_MountedVoxelPreload = 1u << 3,
+		LoadingVoxelRequestSource_MountedVoxelPreloadGlobal = 1u << 4,
+		LoadingVoxelRequestSource_MountedVoxelPreloadGame = 1u << 5,
+		LoadingVoxelRequestSource_MountedVoxelPreloadMap = 1u << 6,
 	};
 
 	struct LoadingVoxelTextureCandidate
@@ -3071,25 +3074,58 @@ namespace
 		append(LoadingVoxelRequestSource_LiveActorAnimated, "live-actor-animated");
 		append(LoadingVoxelRequestSource_LiveActorPicrange, "live-actor-picrange");
 		append(LoadingVoxelRequestSource_MountedVoxelPreload, "mounted-voxel-preload");
+		append(LoadingVoxelRequestSource_MountedVoxelPreloadMap, "mounted-map");
+		append(LoadingVoxelRequestSource_MountedVoxelPreloadGame, "mounted-game");
+		append(LoadingVoxelRequestSource_MountedVoxelPreloadGlobal, "mounted-global");
 		return result.empty() ? "none" : result;
 	}
 
 	int LoadingVoxelSourceRank(uint32_t sourceBits)
 	{
-		if ((sourceBits & LoadingVoxelRequestSource_MountedVoxelPreload) != 0 ||
-			(sourceBits & LoadingVoxelRequestSource_LiveActorCurrent) != 0)
+		if ((sourceBits & LoadingVoxelRequestSource_MountedVoxelPreloadMap) != 0)
 		{
 			return 0;
 		}
-		if ((sourceBits & LoadingVoxelRequestSource_LiveActorAnimated) != 0)
+		if ((sourceBits & LoadingVoxelRequestSource_MountedVoxelPreloadGame) != 0)
 		{
 			return 1;
 		}
-		if ((sourceBits & LoadingVoxelRequestSource_LiveActorPicrange) != 0)
+		if ((sourceBits & LoadingVoxelRequestSource_MountedVoxelPreloadGlobal) != 0 ||
+			(sourceBits & LoadingVoxelRequestSource_MountedVoxelPreload) != 0)
+		{
+			return 2;
+		}
+		if ((sourceBits & LoadingVoxelRequestSource_LiveActorCurrent) != 0)
 		{
 			return 3;
 		}
+		if ((sourceBits & LoadingVoxelRequestSource_LiveActorAnimated) != 0)
+		{
+			return 4;
+		}
+		if ((sourceBits & LoadingVoxelRequestSource_LiveActorPicrange) != 0)
+		{
+			return 6;
+		}
+		return 5;
+	}
+
+	int LoadingVoxelGpuIntentRank(const LoadingVoxelPreloadRequest& request)
+	{
+		if (request.gpuForce)
+		{
+			return 0;
+		}
+		if (request.gpuPrefer)
+		{
+			return 1;
+		}
 		return 2;
+	}
+
+	int LoadingVoxelAdmissionRank(const LoadingVoxelPreloadRequest& request)
+	{
+		return (int)request.priority * 10000 + LoadingVoxelSourceRank(request.sourceBits) * 100 + LoadingVoxelGpuIntentRank(request);
 	}
 
 	bool IsLoadingVoxelRequestGpuCandidate(const LoadingVoxelPreloadRequest& request)
@@ -3348,6 +3384,7 @@ namespace
 	struct MountedVoxelPreloadOptions
 	{
 		LoadingVoxelRequestPriority priority = LoadingVoxelRequestPriority::High;
+		uint32_t sourceBits = LoadingVoxelRequestSource_MountedVoxelPreload | LoadingVoxelRequestSource_MountedVoxelPreloadGlobal;
 		bool gpuForce = false;
 		bool gpuPrefer = false;
 	};
@@ -3468,7 +3505,7 @@ namespace
 	{
 		LoadingVoxelTextureCandidate candidate = {};
 		candidate.texid = texid;
-		candidate.sourceBits = LoadingVoxelRequestSource_MountedVoxelPreload;
+		candidate.sourceBits = options.sourceBits != LoadingVoxelRequestSource_None ? options.sourceBits : LoadingVoxelRequestSource_MountedVoxelPreload;
 		candidate.priority = options.priority;
 		candidate.gpuForce = options.gpuForce;
 		candidate.gpuPrefer = options.gpuPrefer;
@@ -3626,6 +3663,7 @@ namespace
 		LoadingVoxelPreloadRequestGraph& graph,
 		const std::vector<std::string>& tokens,
 		bool active,
+		uint32_t sourceBits,
 		const char* sourceName,
 		int lineNumber)
 	{
@@ -3641,6 +3679,7 @@ namespace
 
 		const std::string directive = LowerAscii(tokens[0]);
 		MountedVoxelPreloadOptions options = {};
+		options.sourceBits = sourceBits != LoadingVoxelRequestSource_None ? sourceBits : options.sourceBits;
 		ParseMountedVoxelPreloadOptions(tokens, options);
 
 		auto logTrace = [&](const char* action, const char* reason)
@@ -3832,6 +3871,7 @@ namespace
 
 		const char* sourceName = fileSystem.GetFileFullName(lumpNum);
 		bool active = true;
+		uint32_t activeSourceBits = LoadingVoxelRequestSource_MountedVoxelPreload | LoadingVoxelRequestSource_MountedVoxelPreloadGlobal;
 		int lineNumber = 0;
 		std::istringstream lines(text);
 		std::string line;
@@ -3849,16 +3889,30 @@ namespace
 			if (first == "voxelpreload")
 			{
 				active = true;
+				activeSourceBits = LoadingVoxelRequestSource_MountedVoxelPreload | LoadingVoxelRequestSource_MountedVoxelPreloadGlobal;
 				continue;
 			}
 			if (first == "global" || first == "game" || first == "map")
 			{
 				const std::string argument = tokens.size() >= 2 ? tokens[1] : "";
 				active = IsMountedVoxelPreloadSectionActive(first, argument);
+				activeSourceBits = LoadingVoxelRequestSource_MountedVoxelPreload;
+				if (first == "map")
+				{
+					activeSourceBits |= LoadingVoxelRequestSource_MountedVoxelPreloadMap;
+				}
+				else if (first == "game")
+				{
+					activeSourceBits |= LoadingVoxelRequestSource_MountedVoxelPreloadGame;
+				}
+				else
+				{
+					activeSourceBits |= LoadingVoxelRequestSource_MountedVoxelPreloadGlobal;
+				}
 				continue;
 			}
 
-			ParseMountedVoxelPreloadDirective(graph, tokens, active, sourceName, lineNumber);
+			ParseMountedVoxelPreloadDirective(graph, tokens, active, activeSourceBits, sourceName, lineNumber);
 		}
 	}
 
@@ -5911,6 +5965,7 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 		view.materialVariantHash = materialVariantHash;
 		view.sourceBits = request.sourceBits;
 		view.priority = (int32_t)request.priority;
+		view.admissionRank = LoadingVoxelAdmissionRank(request);
 		view.sourcePicnum = request.texid.GetIndex();
 		view.resolvedVoxelIndex = request.resolvedVoxelIndex;
 		view.primitiveCount = primitiveCount;

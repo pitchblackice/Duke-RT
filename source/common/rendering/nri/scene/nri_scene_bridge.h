@@ -371,6 +371,7 @@ struct PrecachedVoxelVariantView
 	uint64_t materialVariantHash = 0;
 	uint32_t sourceBits = 0;
 	int32_t priority = 0;
+	int32_t admissionRank = 0;
 	int32_t sourcePicnum = -1;
 	int32_t resolvedVoxelIndex = -1;
 	uint32_t primitiveCount = 0;
