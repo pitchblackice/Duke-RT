@@ -13127,6 +13127,7 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 			existingMeshIt->second.lastUsedMapGeneration = mPersistentVoxelResidencyMapGeneration;
 			existingMeshIt->second.cold = false;
 			mPersistentVoxelMaterialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+			entry.uploadMaterialResource = {};
 			outReusedMesh = true;
 			entry.uploadPrepared = false;
 			if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
@@ -13379,6 +13380,8 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 	}
 	mPersistentVoxelMeshVariantResources[variant.meshKeyHash] = std::move(entry.uploadMeshResource);
 	mPersistentVoxelMaterialVariantResources[variant.materialKeyHash] = std::move(entry.uploadMaterialResource);
+	entry.uploadMeshResource = {};
+	entry.uploadMaterialResource = {};
 	entry.uploadGeometry = {};
 	entry.uploadGpuIndices.clear();
 	entry.uploadGpuPrimitives.clear();
