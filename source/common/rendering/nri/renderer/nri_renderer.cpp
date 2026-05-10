@@ -12817,6 +12817,16 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 	return true;
 }
 
+bool NRIRenderer::IsRequiredPersistentVoxelAdmission(const PersistentVoxelAdmissionEntry& entry) const
+{
+	return
+		entry.mapGeneration == mPersistentVoxelResidencyMapGeneration &&
+		!entry.runtimeRequested &&
+		entry.priority <= 0 &&
+		(entry.gpuForce || entry.gpuPrefer) &&
+		(entry.sourceBits & nri_scene::PrecachedVoxelSourceBit_MountedPreloadMap) != 0;
+}
+
 void NRIRenderer::CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const
 {
 	requiredPending = 0;
@@ -12832,10 +12842,7 @@ void NRIRenderer::CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, u
 			continue;
 		}
 
-		const bool required =
-			!entry.runtimeRequested &&
-			entry.priority <= 0 &&
-			(entry.gpuForce || entry.gpuPrefer);
+		const bool required = IsRequiredPersistentVoxelAdmission(entry);
 		const bool ready =
 			entry.state == PersistentVoxelAdmissionState::Ready ||
 			IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
@@ -13231,6 +13238,13 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		((int)nri_ptvoxeladmissionloadbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmissionloadbytes) :
 		((int)nri_ptvoxeladmissionruntimebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmissionruntimebytes);
 
+	uint32_t requiredPendingAtStart = 0;
+	uint32_t requiredReadyAtStart = 0;
+	uint32_t optionalPendingAtStart = 0;
+	uint32_t failedAtStart = 0;
+	CountPersistentVoxelAdmissionWork(requiredPendingAtStart, requiredReadyAtStart, optionalPendingAtStart, failedAtStart);
+	const bool requiredOnlyPump = loadingPhase && requiredPendingAtStart != 0;
+
 	PersistentVoxelAdmissionStats stats = {};
 	std::vector<PersistentVoxelAdmissionEntry*> candidates;
 	candidates.reserve(mPersistentVoxelAdmissionQueue.size());
@@ -13303,6 +13317,10 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 	uint32_t admitted = 0;
 	for (PersistentVoxelAdmissionEntry* entry : candidates)
 	{
+		if (requiredOnlyPump && !IsRequiredPersistentVoxelAdmission(*entry))
+		{
+			continue;
+		}
 		if (admitted >= variantBudget)
 		{
 			stats.skippedBudget++;

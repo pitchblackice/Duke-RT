@@ -381,6 +381,8 @@ struct PrecachedVoxelVariantView
 	MaterialRef material;
 };
 
+static constexpr uint32_t PrecachedVoxelSourceBit_MountedPreloadMap = 1u << 6;
+
 enum class DynamicVoxelCaptureMode : uint8_t
 {
 	Authoritative,
