@@ -12738,13 +12738,25 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		PersistentVoxelAdmissionEntry& entry = found->second;
 		const int32_t oldPriority = entry.priority;
 		const bool oldForce = entry.gpuForce;
+		const bool wasReady = entry.state == PersistentVoxelAdmissionState::Ready;
 		entry.sourceBits |= variant.sourceBits;
 		entry.gpuForce = entry.gpuForce || variant.gpuForce;
 		entry.gpuPrefer = entry.gpuPrefer || variant.gpuPrefer;
 		entry.runtimeRequested = entry.runtimeRequested || runtimeRequested;
 		entry.priority = std::min(entry.priority, variant.priority);
 		entry.admissionRank = std::min(entry.admissionRank, variantAdmissionRank);
-		if (entry.state == PersistentVoxelAdmissionState::Deferred)
+		const bool resourcesReady = IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
+		if (resourcesReady)
+		{
+			entry.state = PersistentVoxelAdmissionState::Ready;
+			entry.lastReason = "resident";
+		}
+		else if (entry.state == PersistentVoxelAdmissionState::Ready)
+		{
+			entry.state = PersistentVoxelAdmissionState::Pending;
+			entry.lastReason = "stale-ready";
+		}
+		else if (entry.state == PersistentVoxelAdmissionState::Deferred)
 		{
 			entry.state = PersistentVoxelAdmissionState::Pending;
 			entry.lastReason = "reprioritized";
@@ -12758,7 +12770,7 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 		{
 			Printf("NRI PT voxel admission queue: event=%s source=%s source_bits=0x%x priority=%d old_priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu generation=%u\n",
-				entry.priority != oldPriority ? "promote" : "dedupe",
+				wasReady && !resourcesReady ? "repair" : (entry.priority != oldPriority ? "promote" : "dedupe"),
 				sourceLabel != nullptr ? sourceLabel : "unknown",
 				entry.sourceBits,
 				entry.priority,
@@ -12843,9 +12855,7 @@ void NRIRenderer::CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, u
 		}
 
 		const bool required = IsRequiredPersistentVoxelAdmission(entry);
-		const bool ready =
-			entry.state == PersistentVoxelAdmissionState::Ready ||
-			IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
+		const bool ready = IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
 		if (ready)
 		{
 			if (required)
@@ -13251,13 +13261,18 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 	for (auto& pair : mPersistentVoxelAdmissionQueue)
 	{
 		PersistentVoxelAdmissionEntry& entry = pair.second;
-		if (entry.state == PersistentVoxelAdmissionState::Ready ||
-			IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash))
+		const bool resourcesReady = IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
+		if (resourcesReady)
 		{
 			entry.state = PersistentVoxelAdmissionState::Ready;
 			entry.lastReason = "resident";
 			stats.ready++;
 			continue;
+		}
+		if (entry.state == PersistentVoxelAdmissionState::Ready)
+		{
+			entry.state = PersistentVoxelAdmissionState::Pending;
+			entry.lastReason = "stale-ready";
 		}
 		if (entry.state == PersistentVoxelAdmissionState::Failed)
 		{
