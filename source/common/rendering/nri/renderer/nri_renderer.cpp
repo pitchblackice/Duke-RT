@@ -13749,7 +13749,6 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 		uint32_t optionalPendingBefore = 0;
 		uint32_t failedBefore = 0;
 		CountPersistentVoxelAdmissionWork(requiredPendingBefore, requiredReadyBefore, optionalPendingBefore, failedBefore);
-		const bool optionalOnlyFirstPass = requiredPendingBefore == 0 && pump == 0 && optionalPendingBefore != 0;
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT voxel admission pump: phase=loading pass=%u required_pending=%u required_ready=%u optional_pending=%u failed=%u stop=%s\n",
@@ -13758,10 +13757,17 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 				requiredReadyBefore,
 				optionalPendingBefore,
 				failedBefore,
-				requiredPendingBefore == 0 && !optionalOnlyFirstPass ? "required-drained" : "none");
+				requiredPendingBefore == 0 ? "required-drained" : "none");
 		}
-		if (requiredPendingBefore == 0 && !optionalOnlyFirstPass)
+		if (requiredPendingBefore == 0)
 		{
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=required-drained required_pending=0 required_ready=%u optional_pending=%u failed=%u\n",
+					requiredReadyBefore,
+					optionalPendingBefore,
+					failedBefore);
+			}
 			break;
 		}
 
