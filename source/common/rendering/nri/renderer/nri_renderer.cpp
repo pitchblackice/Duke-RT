@@ -15599,14 +15599,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	};
 	mLastPerfShellTraceStats.persistentVoxelOnboardingByteBudget = persistentVoxelBuildByteBudget;
 
-	auto canReusePersistentVoxelVariant = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> bool
+	auto canReusePersistentVoxelMesh = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> bool
 	{
-		auto materialIt = mPersistentVoxelMaterialVariantResources.find(cacheEntry.materialKeyHash);
-		if (materialIt == mPersistentVoxelMaterialVariantResources.end() ||
-			materialIt->second.materialCount == 0)
-		{
-			return false;
-		}
 		const uint64_t meshResourceKey = buildPersistentVoxelMeshResourceKey(cacheEntry);
 		auto meshResourceIt = mPersistentVoxelMeshVariantResources.find(meshResourceKey);
 		return meshResourceIt != mPersistentVoxelMeshVariantResources.end() &&
@@ -15619,6 +15613,14 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			mPersistentVoxelVertexBuffer.buffer != nullptr &&
 			mPersistentVoxelIndexBuffer.buffer != nullptr &&
 			mPersistentVoxelPrimitiveBuffer.buffer != nullptr;
+	};
+
+	auto canReusePersistentVoxelVariant = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> bool
+	{
+		auto materialIt = mPersistentVoxelMaterialVariantResources.find(cacheEntry.materialKeyHash);
+		return materialIt != mPersistentVoxelMaterialVariantResources.end() &&
+			materialIt->second.materialCount != 0 &&
+			canReusePersistentVoxelMesh(cacheEntry);
 	};
 
 	auto noteVoxelPromotionDeferred = [&](uint64_t estimatedBytes)
@@ -15688,8 +15690,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			if (found == existingActors.end())
 			{
 				const bool reusableVariant = canReusePersistentVoxelVariant(cacheEntry);
-				const uint64_t estimatedUploadBytes = reusableVariant ? 0ull : estimatePersistentVoxelActorUploadBytes(cacheEntry);
-				if (!reusableVariant && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
+				const bool reusableMesh = reusableVariant || canReusePersistentVoxelMesh(cacheEntry);
+				const uint64_t estimatedUploadBytes = reusableMesh ? 0ull : estimatePersistentVoxelActorUploadBytes(cacheEntry);
+				if (!reusableMesh && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
 					noteVoxelPromotionDeferred(estimatedUploadBytes);
@@ -15737,7 +15740,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					}
 					continue;
 				}
-				if (!reusableVariant)
+				if (!reusableMesh)
 				{
 					notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 				}
@@ -15820,8 +15823,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				}
 
 				const bool reusableVariant = actorGeometryNeedsUpdate && canReusePersistentVoxelVariant(cacheEntry);
-				const uint64_t estimatedUploadBytes = actorGeometryNeedsUpdate && !reusableVariant ? estimatePersistentVoxelActorUploadBytes(cacheEntry) : 0ull;
-				if (actorGeometryNeedsUpdate && !reusableVariant && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
+				const bool reusableMesh = actorGeometryNeedsUpdate && (reusableVariant || canReusePersistentVoxelMesh(cacheEntry));
+				const uint64_t estimatedUploadBytes = actorGeometryNeedsUpdate && !reusableMesh ? estimatePersistentVoxelActorUploadBytes(cacheEntry) : 0ull;
+				if (actorGeometryNeedsUpdate && !reusableMesh && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
 					actor.active = true;
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
@@ -15880,7 +15884,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					}
 					continue;
 				}
-				if (actorGeometryNeedsUpdate && !reusableVariant)
+				if (actorGeometryNeedsUpdate && !reusableMesh)
 				{
 					notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 				}
@@ -15971,8 +15975,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
 		{
 			const bool reusableVariant = canReusePersistentVoxelVariant(cacheEntry);
-			const uint64_t estimatedUploadBytes = reusableVariant ? 0ull : estimatePersistentVoxelActorUploadBytes(cacheEntry);
-			if (!reusableVariant && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
+			const bool reusableMesh = reusableVariant || canReusePersistentVoxelMesh(cacheEntry);
+			const uint64_t estimatedUploadBytes = reusableMesh ? 0ull : estimatePersistentVoxelActorUploadBytes(cacheEntry);
+			if (!reusableMesh && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
 			{
 				mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
 				noteVoxelPromotionDeferred(estimatedUploadBytes);
@@ -16018,7 +16023,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				}
 				continue;
 			}
-			if (!reusableVariant)
+			if (!reusableMesh)
 			{
 				notePersistentVoxelActorBuilt(cacheEntry.primitiveCount, estimatedUploadBytes);
 			}
