@@ -2701,6 +2701,10 @@ CVAR(Int, nri_ptpersistentvoxeltextureprewarms, 2, CVAR_ARCHIVE | CVAR_GLOBALCON
 CVAR(Int, nri_ptpersistentvoxeltexturebytes, 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelruntimebudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelexcludeindex, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelexcludeindex2, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelexcludeindex3, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxelexcludeminprims, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -8469,17 +8473,23 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						uint32_t persistentVoxelTlasSkippedCount = 0;
 						uint32_t persistentVoxelTlasMissingSkipCount = 0;
 						uint32_t persistentVoxelTlasReadyFrameSkipCount = 0;
+						uint32_t persistentVoxelTlasExcludedSkipCount = 0;
 						uint32_t persistentVoxelTlasNewInstanceCount = 0;
 						uint32_t persistentVoxelTlasNewMeshCount = 0;
 						uint32_t persistentVoxelTlasCapturedCount = 0;
 						uint32_t persistentVoxelTlasRetainedCount = 0;
 						uint64_t persistentVoxelTlasMissingSkipPrimitiveCount = 0;
 						uint64_t persistentVoxelTlasReadyFrameSkipPrimitiveCount = 0;
+						uint64_t persistentVoxelTlasExcludedSkipPrimitiveCount = 0;
 						uint64_t persistentVoxelTlasNewInstancePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasNewUniquePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasInstancePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasUniquePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasMaxRetainedFrameAge = 0;
+						const int32_t persistentVoxelExcludeIndex0 = (int32_t)nri_ptvoxelexcludeindex;
+						const int32_t persistentVoxelExcludeIndex1 = (int32_t)nri_ptvoxelexcludeindex2;
+						const int32_t persistentVoxelExcludeIndex2 = (int32_t)nri_ptvoxelexcludeindex3;
+						const uint32_t persistentVoxelExcludeMinPrims = (uint32_t)std::max(0, (int)nri_ptvoxelexcludeminprims);
 						for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 						{
 							if (!actor.active)
@@ -8487,6 +8497,35 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								continue;
 							}
 							persistentVoxelTlasCandidateCount++;
+							const bool excludedByIndex = actor.resolvedVoxelIndex >= 0 &&
+								(actor.resolvedVoxelIndex == persistentVoxelExcludeIndex0 ||
+									actor.resolvedVoxelIndex == persistentVoxelExcludeIndex1 ||
+									actor.resolvedVoxelIndex == persistentVoxelExcludeIndex2);
+							const bool excludedByPrimitiveCount = persistentVoxelExcludeMinPrims > 0 &&
+								actor.primitiveCount >= persistentVoxelExcludeMinPrims;
+							if (excludedByIndex || excludedByPrimitiveCount)
+							{
+								if ((bool)nri_voxelstats)
+								{
+									Printf("PERF pt voxel tlas NRI: frame=%u action=skip reason=%s actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx voxel=%d instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=0 tlas_ready=0 tlas_published=0 ready=0\n",
+										mFrameIndex,
+										excludedByIndex ? "excluded-index" : "excluded-prims",
+										(unsigned long long)actor.identityKey,
+										(unsigned long long)actor.meshResourceKey,
+										(unsigned long long)actor.meshKeyHash,
+										(unsigned long long)actor.materialKeyHash,
+										actor.resolvedVoxelIndex,
+										(uint32_t)sceneInstances.size(),
+										actor.primitiveOffset,
+										actor.primitiveCount,
+										actor.materialOffset,
+										actor.materialCount);
+								}
+								persistentVoxelTlasSkippedCount++;
+								persistentVoxelTlasExcludedSkipCount++;
+								persistentVoxelTlasExcludedSkipPrimitiveCount += actor.primitiveCount;
+								continue;
+							}
 
 							auto meshResourceIt = mPersistentVoxelMeshVariantResources.find(actor.meshResourceKey);
 							const char* tlasSkipReason = nullptr;
@@ -8689,7 +8728,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								(unsigned long long)persistentVoxelTlasMaxRetainedFrameAge,
 								(uint32_t)mPersistentVoxelBatch.actors.size(),
 								mPersistentVoxelBatch.activeActorCount);
-							Printf("PERF pt voxel tlas pressure NRI: frame=%u new_meshes=%u new_instances=%u new_instance_prims=%llu new_unique_prims=%llu ready_frame_skips=%u ready_frame_skip_prims=%llu missing_skips=%u missing_skip_prims=%llu active_instances=%u active_instance_prims=%llu active_unique_prims=%llu active_unique_meshes=%u actors=%u active=%u\n",
+							Printf("PERF pt voxel tlas pressure NRI: frame=%u new_meshes=%u new_instances=%u new_instance_prims=%llu new_unique_prims=%llu ready_frame_skips=%u ready_frame_skip_prims=%llu missing_skips=%u missing_skip_prims=%llu excluded_skips=%u excluded_skip_prims=%llu active_instances=%u active_instance_prims=%llu active_unique_prims=%llu active_unique_meshes=%u actors=%u active=%u\n",
 								mFrameIndex,
 								persistentVoxelTlasNewMeshCount,
 								persistentVoxelTlasNewInstanceCount,
@@ -8699,6 +8738,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								(unsigned long long)persistentVoxelTlasReadyFrameSkipPrimitiveCount,
 								persistentVoxelTlasMissingSkipCount,
 								(unsigned long long)persistentVoxelTlasMissingSkipPrimitiveCount,
+								persistentVoxelTlasExcludedSkipCount,
+								(unsigned long long)persistentVoxelTlasExcludedSkipPrimitiveCount,
 								persistentVoxelTlasPublishedCount,
 								(unsigned long long)persistentVoxelTlasInstancePrimitiveCount,
 								(unsigned long long)persistentVoxelTlasUniquePrimitiveCount,
