@@ -8449,21 +8449,34 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							uint32_t capturedCount = 0;
 							uint32_t retainedCount = 0;
 							uint64_t instancePrimitiveCount = 0;
+							uint32_t newInstanceCount = 0;
+							uint64_t newInstancePrimitiveCount = 0;
 							uint64_t maxRetainedFrameAge = 0;
 							uint32_t tlasReadyFrame = 0;
 							int32_t resolvedVoxelIndex = -1;
+							bool newlyPublished = false;
 						};
 						const bool tracePersistentVoxelTlasSummary = (bool)nri_voxelstats;
 						std::unordered_map<uint64_t, PersistentVoxelTlasGroupStats> persistentVoxelTlasGroups;
+						std::unordered_set<uint64_t> persistentVoxelTlasNewMeshResources;
 						if (tracePersistentVoxelTlasSummary)
 						{
 							persistentVoxelTlasGroups.reserve(mPersistentVoxelBatch.actors.size());
+							persistentVoxelTlasNewMeshResources.reserve(mPersistentVoxelBatch.actors.size());
 						}
 						uint32_t persistentVoxelTlasCandidateCount = 0;
 						uint32_t persistentVoxelTlasPublishedCount = 0;
 						uint32_t persistentVoxelTlasSkippedCount = 0;
+						uint32_t persistentVoxelTlasMissingSkipCount = 0;
+						uint32_t persistentVoxelTlasReadyFrameSkipCount = 0;
+						uint32_t persistentVoxelTlasNewInstanceCount = 0;
+						uint32_t persistentVoxelTlasNewMeshCount = 0;
 						uint32_t persistentVoxelTlasCapturedCount = 0;
 						uint32_t persistentVoxelTlasRetainedCount = 0;
+						uint64_t persistentVoxelTlasMissingSkipPrimitiveCount = 0;
+						uint64_t persistentVoxelTlasReadyFrameSkipPrimitiveCount = 0;
+						uint64_t persistentVoxelTlasNewInstancePrimitiveCount = 0;
+						uint64_t persistentVoxelTlasNewUniquePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasInstancePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasUniquePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasMaxRetainedFrameAge = 0;
@@ -8515,6 +8528,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 										actor.materialCount);
 								}
 								persistentVoxelTlasSkippedCount++;
+								persistentVoxelTlasMissingSkipCount++;
+								persistentVoxelTlasMissingSkipPrimitiveCount += actor.primitiveCount;
 								continue;
 							}
 							if (!meshResourceIt->second.tlasPublished &&
@@ -8537,8 +8552,13 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 										meshResourceIt->second.tlasPublished ? 1u : 0u);
 								}
 								persistentVoxelTlasSkippedCount++;
+								persistentVoxelTlasReadyFrameSkipCount++;
+								persistentVoxelTlasReadyFrameSkipPrimitiveCount += actor.primitiveCount;
 								continue;
 							}
+							const bool meshResourceFirstPublish = !meshResourceIt->second.tlasPublished;
+							const bool meshResourceNewThisFrame = meshResourceFirstPublish ||
+								(tracePersistentVoxelTlasSummary && persistentVoxelTlasNewMeshResources.find(actor.meshResourceKey) != persistentVoxelTlasNewMeshResources.end());
 
 							nri::TopLevelInstance persistentVoxelInstance = {};
 							for (uint32_t row = 0; row < 3; ++row)
@@ -8566,10 +8586,24 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								sceneInstance.previousTransform[i] = actor.previousInstanceTransform[i];
 							}
 							sceneInstances.push_back(sceneInstance);
+							if (meshResourceFirstPublish)
+							{
+								persistentVoxelTlasNewMeshCount++;
+								persistentVoxelTlasNewUniquePrimitiveCount += actor.primitiveCount;
+								if (tracePersistentVoxelTlasSummary)
+								{
+									persistentVoxelTlasNewMeshResources.insert(actor.meshResourceKey);
+								}
+							}
+							if (meshResourceNewThisFrame)
+							{
+								persistentVoxelTlasNewInstanceCount++;
+								persistentVoxelTlasNewInstancePrimitiveCount += actor.primitiveCount;
+							}
 							meshResourceIt->second.tlasPublished = true;
 							if ((bool)nri_voxelstats)
 							{
-								Printf("PERF pt voxel tlas NRI: frame=%u action=publish reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=1 tlas_ready=%u tlas_published=1 ready=1\n",
+								Printf("PERF pt voxel tlas NRI: frame=%u action=publish reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u blas=1 tlas_ready=%u tlas_published=1 first_publish=%u new_this_frame=%u ready=1\n",
 									mFrameIndex,
 									(unsigned long long)actor.identityKey,
 									(unsigned long long)actor.meshResourceKey,
@@ -8580,7 +8614,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 									actor.primitiveCount,
 									actor.materialOffset,
 									actor.materialCount,
-									meshResourceIt->second.tlasReadyFrame);
+									meshResourceIt->second.tlasReadyFrame,
+									meshResourceFirstPublish ? 1u : 0u,
+									meshResourceNewThisFrame ? 1u : 0u);
 							}
 							persistentVoxelTlasMeshResources.insert(actor.meshResourceKey);
 							persistentVoxelTlasPublishedCount++;
@@ -8607,6 +8643,15 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								}
 								group.instanceCount++;
 								group.instancePrimitiveCount += actor.primitiveCount;
+								if (meshResourceFirstPublish)
+								{
+									group.newlyPublished = true;
+								}
+								if (meshResourceNewThisFrame)
+								{
+									group.newInstanceCount++;
+									group.newInstancePrimitiveCount += actor.primitiveCount;
+								}
 								group.primitiveCount = std::max(group.primitiveCount, actor.primitiveCount);
 								if (actor.capturedThisFrame)
 								{
@@ -8644,6 +8689,22 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								(unsigned long long)persistentVoxelTlasMaxRetainedFrameAge,
 								(uint32_t)mPersistentVoxelBatch.actors.size(),
 								mPersistentVoxelBatch.activeActorCount);
+							Printf("PERF pt voxel tlas pressure NRI: frame=%u new_meshes=%u new_instances=%u new_instance_prims=%llu new_unique_prims=%llu ready_frame_skips=%u ready_frame_skip_prims=%llu missing_skips=%u missing_skip_prims=%llu active_instances=%u active_instance_prims=%llu active_unique_prims=%llu active_unique_meshes=%u actors=%u active=%u\n",
+								mFrameIndex,
+								persistentVoxelTlasNewMeshCount,
+								persistentVoxelTlasNewInstanceCount,
+								(unsigned long long)persistentVoxelTlasNewInstancePrimitiveCount,
+								(unsigned long long)persistentVoxelTlasNewUniquePrimitiveCount,
+								persistentVoxelTlasReadyFrameSkipCount,
+								(unsigned long long)persistentVoxelTlasReadyFrameSkipPrimitiveCount,
+								persistentVoxelTlasMissingSkipCount,
+								(unsigned long long)persistentVoxelTlasMissingSkipPrimitiveCount,
+								persistentVoxelTlasPublishedCount,
+								(unsigned long long)persistentVoxelTlasInstancePrimitiveCount,
+								(unsigned long long)persistentVoxelTlasUniquePrimitiveCount,
+								(uint32_t)persistentVoxelTlasMeshResources.size(),
+								(uint32_t)mPersistentVoxelBatch.actors.size(),
+								mPersistentVoxelBatch.activeActorCount);
 
 							std::vector<PersistentVoxelTlasGroupStats> sortedTlasGroups;
 							sortedTlasGroups.reserve(persistentVoxelTlasGroups.size());
@@ -8679,6 +8740,43 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 									group.primitiveCount,
 									(unsigned long long)group.instancePrimitiveCount,
 									(unsigned long long)group.maxRetainedFrameAge,
+									group.tlasReadyFrame);
+							}
+							std::vector<PersistentVoxelTlasGroupStats> sortedNewTlasGroups;
+							sortedNewTlasGroups.reserve(persistentVoxelTlasGroups.size());
+							for (const PersistentVoxelTlasGroupStats& group : sortedTlasGroups)
+							{
+								if (group.newlyPublished || group.newInstanceCount > 0)
+								{
+									sortedNewTlasGroups.push_back(group);
+								}
+							}
+							std::sort(sortedNewTlasGroups.begin(), sortedNewTlasGroups.end(), [](const PersistentVoxelTlasGroupStats& left, const PersistentVoxelTlasGroupStats& right)
+							{
+								if (left.newInstancePrimitiveCount != right.newInstancePrimitiveCount)
+								{
+									return left.newInstancePrimitiveCount > right.newInstancePrimitiveCount;
+								}
+								if (left.primitiveCount != right.primitiveCount)
+								{
+									return left.primitiveCount > right.primitiveCount;
+								}
+								return left.meshResourceKey < right.meshResourceKey;
+							});
+							const uint32_t topNewCount = std::min<uint32_t>(8u, (uint32_t)sortedNewTlasGroups.size());
+							for (uint32_t i = 0; i < topNewCount; ++i)
+							{
+								const PersistentVoxelTlasGroupStats& group = sortedNewTlasGroups[i];
+								Printf("PERF pt voxel tlas new top NRI: frame=%u rank=%u mesh_resource=0x%llx mesh_key=0x%llx voxel=%d new_mesh=%u new_instances=%u primitive_count=%u new_instance_prims=%llu tlas_ready=%u\n",
+									mFrameIndex,
+									i + 1u,
+									(unsigned long long)group.meshResourceKey,
+									(unsigned long long)group.meshKeyHash,
+									group.resolvedVoxelIndex,
+									group.newlyPublished ? 1u : 0u,
+									group.newInstanceCount,
+									group.primitiveCount,
+									(unsigned long long)group.newInstancePrimitiveCount,
 									group.tlasReadyFrame);
 							}
 						}
