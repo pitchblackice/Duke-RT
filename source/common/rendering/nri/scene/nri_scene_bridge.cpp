@@ -5909,9 +5909,13 @@ bool BuildPrecachedVoxelVariantViews(std::vector<PrecachedVoxelVariantView>& out
 		view.materialKeyHash = materialVariantHash;
 		view.meshVariantHash = request.meshVariantHash;
 		view.materialVariantHash = materialVariantHash;
+		view.sourceBits = request.sourceBits;
+		view.priority = (int32_t)request.priority;
 		view.sourcePicnum = request.texid.GetIndex();
 		view.resolvedVoxelIndex = request.resolvedVoxelIndex;
 		view.primitiveCount = primitiveCount;
+		view.gpuForce = forcedGpu;
+		view.gpuPrefer = preferredGpu;
 		view.surface = surface;
 		view.material = material;
 		outEntries.push_back(std::move(view));

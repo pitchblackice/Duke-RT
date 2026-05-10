@@ -369,9 +369,13 @@ struct PrecachedVoxelVariantView
 	uint64_t materialKeyHash = 0;
 	uint64_t meshVariantHash = 0;
 	uint64_t materialVariantHash = 0;
+	uint32_t sourceBits = 0;
+	int32_t priority = 0;
 	int32_t sourcePicnum = -1;
 	int32_t resolvedVoxelIndex = -1;
 	uint32_t primitiveCount = 0;
+	bool gpuForce = false;
+	bool gpuPrefer = false;
 	const SurfaceRef* surface = nullptr;
 	MaterialRef material;
 };

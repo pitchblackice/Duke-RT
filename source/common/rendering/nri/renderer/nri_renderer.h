@@ -1405,7 +1405,10 @@ private:
 		uint32_t primitiveOffset = 0;
 		uint32_t primitiveCapacity = 0;
 		uint32_t tlasReadyFrame = 0;
+		uint32_t lastDesiredMapGeneration = 0;
+		uint32_t lastUsedMapGeneration = 0;
 		bool tlasPublished = false;
+		bool cold = false;
 		bool lightTemplateValid = false;
 		float lightTemplateCenter[3] = {};
 		float lightTemplateBoundsRadius = 0.0f;
@@ -1422,7 +1425,10 @@ private:
 		uint32_t materialOffset = 0;
 		uint32_t materialCount = 0;
 		uint32_t materialCapacity = 0;
+		uint32_t lastDesiredMapGeneration = 0;
+		uint32_t lastUsedMapGeneration = 0;
 		uint64_t materialUploadHash = 0;
+		bool cold = false;
 		nri_scene::MaterialBridgeData materialBridge;
 	};
 
@@ -1863,7 +1869,10 @@ private:
 		bool updateDynamicPerfStats);
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
-	bool PreloadPersistentVoxelVariantResources();
+	void ReconcilePersistentVoxelResidency(
+		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+		const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries);
+	bool PreloadPersistentVoxelVariantResources(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants);
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch();
@@ -2177,6 +2186,8 @@ private:
 	uint32_t mPersistentVoxelArenaIndexCursor = 0;
 	uint32_t mPersistentVoxelArenaPrimitiveCursor = 0;
 	uint32_t mPersistentVoxelArenaMaterialCursor = 0;
+	uint32_t mPersistentVoxelResidencyMapGeneration = 0;
+	uint64_t mPersistentVoxelResidencyLastBuildSerial = 0;
 	bool mPersistentVoxelLoadingWarmupActive = false;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
