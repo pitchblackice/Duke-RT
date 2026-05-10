@@ -1407,8 +1407,15 @@ private:
 		uint32_t tlasReadyFrame = 0;
 		uint32_t lastDesiredMapGeneration = 0;
 		uint32_t lastUsedMapGeneration = 0;
+		uint32_t lastUsedFrame = 0;
+		uint32_t sourceBits = 0;
+		uint32_t activeActorReferences = 0;
+		int32_t priority = 0;
+		uint64_t residentBytes = 0;
 		bool tlasPublished = false;
 		bool cold = false;
+		bool gpuForce = false;
+		bool gpuPrefer = false;
 		bool lightTemplateValid = false;
 		float lightTemplateCenter[3] = {};
 		float lightTemplateBoundsRadius = 0.0f;
@@ -1427,8 +1434,15 @@ private:
 		uint32_t materialCapacity = 0;
 		uint32_t lastDesiredMapGeneration = 0;
 		uint32_t lastUsedMapGeneration = 0;
+		uint32_t lastUsedFrame = 0;
+		uint32_t sourceBits = 0;
+		uint32_t activeActorReferences = 0;
+		int32_t priority = 0;
+		uint64_t residentBytes = 0;
 		uint64_t materialUploadHash = 0;
 		bool cold = false;
+		bool gpuForce = false;
+		bool gpuPrefer = false;
 		nri_scene::MaterialBridgeData materialBridge;
 	};
 
@@ -1946,6 +1960,7 @@ private:
 		const char* sourceLabel);
 	bool IsRequiredPersistentVoxelAdmission(const PersistentVoxelAdmissionEntry& entry) const;
 	void CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const;
+	void ApplyPersistentVoxelResidencyPressurePolicy(const char* phase);
 	bool PumpPersistentVoxelAdmissionQueue(const char* phase);
 	bool AdmitPersistentVoxelVariantResource(
 		PersistentVoxelAdmissionEntry& entry,

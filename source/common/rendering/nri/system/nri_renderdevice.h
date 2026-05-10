@@ -116,6 +116,8 @@ public:
 	IDXGISwapChain4* GetNativeD3D12SwapChain() const { return mNativeD3D12SwapChain; }
 	bool IsFrameGenerationPresentPathActive() const { return !mFrameGenerationPresentImages.empty() && mFrameGeneration.ShouldUsePresentBridge(); }
 #endif
+	uint64_t GetAdapterLocalBudgetBytes() const { return mAdapterLocalBudgetBytes; }
+	uint64_t GetAdapterNonLocalBudgetBytes() const { return mAdapterNonLocalBudgetBytes; }
 
 private:
 	static constexpr uint32_t FrameSequenceHistorySize = 8;
