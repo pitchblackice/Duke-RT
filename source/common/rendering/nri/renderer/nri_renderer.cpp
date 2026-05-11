@@ -2711,6 +2711,7 @@ CVAR(Int, nri_ptvoxeladmitmaxmsruntime, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxblasloading, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxblasruntime, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxblasprims, 200000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitisolateblasprims, 65536, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelresidentmaxbytes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelresidentminheadroombytes, 512 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelresidentmaxcoldmaps, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -13300,6 +13301,7 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 	bool& outReusedMesh,
 	bool& outReusedMaterial,
 	bool& outInProgress,
+	bool isolateBlasBuild,
 	const char*& outFailureReason)
 {
 	outUploadBytes = 0;
@@ -13330,6 +13332,7 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 		entry.indexBytesUploaded = 0;
 		entry.indexArenaBytesUploaded = 0;
 		entry.primitiveBytesUploaded = 0;
+		entry.uploadSubmittedBeforeBlas = false;
 	};
 
 	auto rollbackAdmission = [&](const char* reason, const char* step) -> bool
@@ -13448,6 +13451,7 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 		entry.indexBytesUploaded = 0;
 		entry.indexArenaBytesUploaded = 0;
 		entry.primitiveBytesUploaded = 0;
+		entry.uploadSubmittedBeforeBlas = false;
 		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 		{
 			Printf("NRI PT voxel admission transaction: event=begin reason=none tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu step=prepare\n",
@@ -13764,6 +13768,28 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 			outInProgress = true;
 			return true;
 		}
+		if (isolateBlasBuild && !entry.uploadSubmittedBeforeBlas)
+		{
+			if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
+			{
+				Printf("NRI PT voxel admission entry: event=pre-blas-submit tex=%d voxel=%d mesh_variant=0x%llx prims=%u upload_bytes=%llu reason=isolate-large-blas\n",
+					variant.sourcePicnum,
+					variant.resolvedVoxelIndex,
+					(unsigned long long)variant.meshKeyHash,
+					entry.uploadMeshResource.primitiveCount,
+					(unsigned long long)(
+						entry.vertexBytesUploaded +
+						entry.vertexArenaBytesUploaded +
+						entry.indexBytesUploaded +
+						entry.indexArenaBytesUploaded +
+						entry.primitiveBytesUploaded));
+			}
+			if (mFrameBuffer == nullptr || !mFrameBuffer->SubmitWaitAndRestartCommandList("voxel-pre-blas-upload"))
+			{
+				return rollbackAdmission("pre-blas-submit-wait-failed", "pre_blas_submit");
+			}
+			entry.uploadSubmittedBeforeBlas = true;
+		}
 		if (!BuildBottomLevelAccelerationStructure(
 			entry.uploadMeshResource.vertexBuffer,
 			entry.uploadMeshResource.indexBuffer,
@@ -14041,7 +14067,12 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		const char* failureReason = "none";
 		const uint64_t remainingByteBudget = byteBudget == 0 ? 0ull : byteBudget - stats.bytesUploaded;
 		const uint32_t blasBefore = blasBudgetRemaining;
-		if (!AdmitPersistentVoxelVariantResource(*entry, remainingByteBudget, blasBudgetRemaining, uploadBytes, reusedMesh, reusedMaterial, inProgress, failureReason))
+		const int isolateBlasPrimitiveThreshold = (int)nri_ptvoxeladmitisolateblasprims;
+		const bool isolateBlasBuild =
+			loadingPhase &&
+			isolateBlasPrimitiveThreshold > 0 &&
+			entry->variant.primitiveCount >= (uint32_t)isolateBlasPrimitiveThreshold;
+		if (!AdmitPersistentVoxelVariantResource(*entry, remainingByteBudget, blasBudgetRemaining, uploadBytes, reusedMesh, reusedMaterial, inProgress, isolateBlasBuild, failureReason))
 		{
 			entry->state = PersistentVoxelAdmissionState::Failed;
 			entry->retryCount++;

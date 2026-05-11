@@ -1486,6 +1486,7 @@ private:
 		uint64_t indexBytesUploaded = 0;
 		uint64_t indexArenaBytesUploaded = 0;
 		uint64_t primitiveBytesUploaded = 0;
+		bool uploadSubmittedBeforeBlas = false;
 		nri_scene::GeometryData uploadGeometry;
 		std::vector<uint32_t> uploadGpuIndices;
 		std::vector<nri_scene::PrimitiveData> uploadGpuPrimitives;
@@ -1972,6 +1973,7 @@ private:
 		bool& outReusedMesh,
 		bool& outReusedMaterial,
 		bool& outInProgress,
+		bool isolateBlasBuild,
 		const char*& outFailureReason);
 	bool IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool PreloadMaterialResources();
