@@ -2710,6 +2710,7 @@ CVAR(Int, nri_ptvoxeladmitmaxmsloading, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxmsruntime, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxblasloading, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxblasruntime, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxblasprims, 200000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelresidentmaxbytes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelresidentminheadroombytes, 512 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelresidentmaxcoldmaps, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -12827,6 +12828,31 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		(uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData);
 	const int32_t variantAdmissionRank =
 		variant.admissionRank != 0 || variant.priority <= 0 ? variant.admissionRank : variant.priority * 10000 + 9900;
+	const uint32_t maxBlasPrimitives =
+		(int)nri_ptvoxeladmitmaxblasprims <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasprims;
+	auto traceAdmissionSkip = [&](const nri_scene::PrecachedVoxelVariantView& skippedVariant, uint64_t skippedBytes, const char* reason)
+	{
+		if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
+		{
+			Printf("NRI PT voxel admission queue: event=skip source=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u max_prims=%u bytes=%llu reason=%s generation=%u\n",
+				sourceLabel != nullptr ? sourceLabel : "unknown",
+				skippedVariant.sourceBits,
+				skippedVariant.priority,
+				variantAdmissionRank,
+				skippedVariant.gpuForce ? 1u : 0u,
+				skippedVariant.gpuPrefer ? 1u : 0u,
+				runtimeRequested ? 1u : 0u,
+				skippedVariant.sourcePicnum,
+				skippedVariant.resolvedVoxelIndex,
+				(unsigned long long)skippedVariant.meshKeyHash,
+				(unsigned long long)skippedVariant.materialKeyHash,
+				skippedVariant.primitiveCount,
+				maxBlasPrimitives,
+				(unsigned long long)skippedBytes,
+				reason != nullptr ? reason : "unknown",
+				mPersistentVoxelResidencyMapGeneration);
+		}
+	};
 
 	auto found = mPersistentVoxelAdmissionQueue.find(pairKey);
 	if (found != mPersistentVoxelAdmissionQueue.end() && found->second.mapGeneration != mPersistentVoxelResidencyMapGeneration)
@@ -12841,13 +12867,20 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		const int32_t oldPriority = entry.priority;
 		const bool oldForce = entry.gpuForce;
 		const bool wasReady = entry.state == PersistentVoxelAdmissionState::Ready;
+		const bool resourcesReady = IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
+		if (!resourcesReady && entry.variant.primitiveCount > maxBlasPrimitives)
+		{
+			traceAdmissionSkip(entry.variant, entry.estimatedBytes, "blas-primitive-budget");
+			DiscardPersistentVoxelAdmissionEntry(entry);
+			mPersistentVoxelAdmissionQueue.erase(found);
+			return false;
+		}
 		entry.sourceBits |= variant.sourceBits;
 		entry.gpuForce = entry.gpuForce || variant.gpuForce;
 		entry.gpuPrefer = entry.gpuPrefer || variant.gpuPrefer;
 		entry.runtimeRequested = entry.runtimeRequested || runtimeRequested;
 		entry.priority = std::min(entry.priority, variant.priority);
 		entry.admissionRank = std::min(entry.admissionRank, variantAdmissionRank);
-		const bool resourcesReady = IsPersistentVoxelSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
 		if (resourcesReady)
 		{
 			entry.state = PersistentVoxelAdmissionState::Ready;
@@ -12892,10 +12925,17 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		return true;
 	}
 
+	const bool resourcesReady = IsPersistentVoxelSharedVariantReady(variant.meshKeyHash, variant.materialKeyHash);
+	if (!resourcesReady && variant.primitiveCount > maxBlasPrimitives)
+	{
+		traceAdmissionSkip(variant, estimatedBytes, "blas-primitive-budget");
+		return false;
+	}
+
 	PersistentVoxelAdmissionEntry entry = {};
 	entry.pairKey = pairKey;
 	entry.variant = variant;
-	entry.state = IsPersistentVoxelSharedVariantReady(variant.meshKeyHash, variant.materialKeyHash) ?
+	entry.state = resourcesReady ?
 		PersistentVoxelAdmissionState::Ready :
 		PersistentVoxelAdmissionState::Pending;
 	entry.sourceBits = variant.sourceBits;
