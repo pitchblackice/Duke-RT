@@ -14251,14 +14251,16 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 			}
 			break;
 		}
-		if ((int)nri_ptloadingtrace >= 2)
+		mPersistentVoxelPreloadPending = true;
+		if ((int)nri_ptloadingtrace >= 1)
 		{
-			Printf("NRI PT loading gate: event=voxel-admission result=pending reason=force-work high_pending=%u opportunistic_pending=%u required_ready=%u failed=%u\n",
+			Printf("NRI PT loading gate: event=voxel-admission result=wait reason=pump-budget required_pending=%u optional_pending=%u required_ready=%u failed=%u\n",
 				requiredPendingAfter,
 				optionalPendingAfter,
 				requiredReadyAfter,
 				failedAfter);
 		}
+		return false;
 	}
 	return ok;
 }
