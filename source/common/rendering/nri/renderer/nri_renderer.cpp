@@ -15005,10 +15005,6 @@ bool NRIRenderer::PreloadMaterialResources()
 bool NRIRenderer::EnsurePersistentVoxelBatch()
 {
 	const uint64_t cacheSerial = nri_scene::GetPersistentVoxelCacheSerial();
-	if (mPersistentVoxelBatch.valid && mPersistentVoxelBatch.sourceSerial == cacheSerial)
-	{
-		return true;
-	}
 
 	std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
 	const bool hasPersistentVoxelCacheEntries = nri_scene::BuildPersistentVoxelCacheEntries(cacheEntries);
@@ -16601,6 +16597,11 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				if (transformOnlyUpdate)
 				{
 					actor.surfaceSignature = cacheEntry.surfaceSignature;
+					actor.lastSeenFrame = cacheEntry.lastSeenFrame;
+					actor.retainedFrameAge = cacheEntry.retainedFrameAge;
+					actor.sourcePicnum = cacheEntry.sourcePicnum;
+					actor.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
+					actor.capturedThisFrame = cacheEntry.capturedThisFrame;
 					actor.instanceTransform = expectedInstanceTransform;
 					actor.visibilityChunkIndex = expectedVisibilityChunkIndex;
 					actor.active = true;
@@ -16640,6 +16641,12 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				if (actorGeometryNeedsUpdate && !reusableMesh && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
 					actor.active = true;
+					actor.lastSeenFrame = cacheEntry.lastSeenFrame;
+					actor.retainedFrameAge = cacheEntry.retainedFrameAge;
+					actor.sourcePicnum = cacheEntry.sourcePicnum;
+					actor.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
+					actor.capturedThisFrame = cacheEntry.capturedThisFrame;
+					actor.visibilityChunkIndex = expectedVisibilityChunkIndex;
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
 					noteVoxelPromotionDeferred(estimatedUploadBytes);
 					if ((bool)nri_voxelstats)
@@ -16706,6 +16713,11 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			}
 
 			actor.active = true;
+			actor.lastSeenFrame = cacheEntry.lastSeenFrame;
+			actor.retainedFrameAge = cacheEntry.retainedFrameAge;
+			actor.sourcePicnum = cacheEntry.sourcePicnum;
+			actor.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
+			actor.capturedThisFrame = cacheEntry.capturedThisFrame;
 			actor.visibilityChunkIndex = resolvePersistentVoxelActorVisibilityChunk(cacheEntry);
 			auto instanceIt = mPersistentVoxelInstances.find(cacheEntry.identityKey);
 			if (instanceIt != mPersistentVoxelInstances.end())
