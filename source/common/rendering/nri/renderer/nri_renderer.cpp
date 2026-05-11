@@ -9578,6 +9578,24 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 
 	if (!PreloadPersistentVoxelResources())
 	{
+		if (mPersistentVoxelPreloadPending)
+		{
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				uint32_t requiredPending = 0;
+				uint32_t requiredReady = 0;
+				uint32_t optionalPending = 0;
+				uint32_t failed = 0;
+				CountPersistentVoxelAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
+				Printf("NRI PT loading gate: event=renderer-preload result=wait reason=persistent-voxel-pending required_pending=%u required_ready=%u optional_pending=%u failed=%u ms=%.3f\n",
+					requiredPending,
+					requiredReady,
+					optionalPending,
+					failed,
+					DurationMs(preloadStart, std::chrono::steady_clock::now()));
+			}
+			return false;
+		}
 		LogFallback("PT preload persistent voxel resource admission failed.");
 		if ((int)nri_ptloadingtrace >= 1)
 		{
@@ -13824,9 +13842,12 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		return std::min(left, right);
 	};
 	const uint64_t byteBudget = combineNonZeroBudget(legacyByteBudget, chunkByteBudget);
-	const double msBudget = loadingPhase ?
+	const int configuredMsBudget = loadingPhase ?
 		std::max(0, (int)nri_ptvoxeladmitmaxmsloading) :
 		std::max(0, (int)nri_ptvoxeladmitmaxmsruntime);
+	const double msBudget = loadingPhase ?
+		(configuredMsBudget > 0 ? (double)configuredMsBudget : 250.0) :
+		(double)configuredMsBudget;
 	const uint32_t blasBudgetLimit = loadingPhase ?
 		((int)nri_ptvoxeladmitmaxblasloading <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasloading) :
 		((int)nri_ptvoxeladmitmaxblasruntime <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasruntime);
@@ -14100,6 +14121,7 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 
 bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants)
 {
+	mPersistentVoxelPreloadPending = false;
 	if (variants.empty())
 	{
 		if ((int)nri_ptloadingtrace >= 1)
@@ -14137,6 +14159,9 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 	};
 
 	bool ok = true;
+	const auto preloadAdmissionStart = std::chrono::steady_clock::now();
+	const int configuredLoadingMsBudget = std::max(0, (int)nri_ptvoxeladmitmaxmsloading);
+	const double preloadTickBudgetMs = configuredLoadingMsBudget > 0 ? (double)configuredLoadingMsBudget : 250.0;
 	const uint32_t maxPumps = std::max<uint32_t>(1024u, (uint32_t)mPersistentVoxelAdmissionQueue.size() * 64u + 64u);
 	for (uint32_t pump = 0; pump < maxPumps; ++pump)
 	{
@@ -14197,6 +14222,23 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 			}
 			break;
 		}
+		const double preloadTickMs = DurationMs(preloadAdmissionStart, std::chrono::steady_clock::now());
+		if (preloadTickBudgetMs > 0.0 && preloadTickMs >= preloadTickBudgetMs)
+		{
+			mPersistentVoxelPreloadPending = true;
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=wait reason=tick-budget pass=%u required_pending=%u required_ready=%u optional_pending=%u failed=%u ms_budget=%.3f ms_used=%.3f\n",
+					pump,
+					requiredPendingAfter,
+					requiredReadyAfter,
+					optionalPendingAfter,
+					failedAfter,
+					preloadTickBudgetMs,
+					preloadTickMs);
+			}
+			return false;
+		}
 		if (requiredPendingAfter >= requiredPendingBefore && requiredReadyAfter <= requiredReadyBefore && !hasRequiredUploadInProgress())
 		{
 			if ((int)nri_ptloadingtrace >= 1)
@@ -14247,6 +14289,28 @@ bool NRIRenderer::PreloadPersistentVoxelResources()
 
 	if (!PreloadPersistentVoxelVariantResources(variants))
 	{
+		if (mPersistentVoxelPreloadPending)
+		{
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				uint32_t requiredPending = 0;
+				uint32_t requiredReady = 0;
+				uint32_t optionalPending = 0;
+				uint32_t failed = 0;
+				CountPersistentVoxelAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
+				Printf("NRI PT loading voxel resources: event=wait reason=variant-admission-pending required_pending=%u required_ready=%u optional_pending=%u failed=%u mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
+					requiredPending,
+					requiredReady,
+					optionalPending,
+					failed,
+					(uint32_t)mPersistentVoxelMeshVariantResources.size(),
+					(uint32_t)mPersistentVoxelMaterialVariantResources.size(),
+					(uint32_t)mPersistentVoxelBatch.actors.size(),
+					mPersistentVoxelBatch.activeActorCount,
+					mPersistentVoxelBatch.primitiveCount);
+			}
+			return false;
+		}
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT loading voxel resources: event=skip reason=variant-preload-disabled mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",

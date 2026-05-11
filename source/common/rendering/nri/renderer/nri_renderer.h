@@ -2291,6 +2291,7 @@ private:
 	uint32_t mPersistentVoxelResidencyMapGeneration = 0;
 	uint64_t mPersistentVoxelResidencyLastBuildSerial = 0;
 	bool mPersistentVoxelLoadingWarmupActive = false;
+	bool mPersistentVoxelPreloadPending = false;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};
