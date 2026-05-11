@@ -115,7 +115,7 @@ function New-DefaultState {
             world_tour_normals = @{
                 prompt = "ask"
             }
-            cheello_voxels = @{
+            voxel_pack = @{
                 prompt = "ask"
             }
             duke_world_tour = @{}
@@ -135,11 +135,11 @@ function Ensure-StateShape {
     if (-not $State["providers"]["world_tour_normals"].ContainsKey("prompt")) {
         $State["providers"]["world_tour_normals"]["prompt"] = "ask"
     }
-    if (-not $State["providers"].ContainsKey("cheello_voxels")) {
-        $State["providers"]["cheello_voxels"] = @{ prompt = "ask" }
+    if (-not $State["providers"].ContainsKey("voxel_pack")) {
+        $State["providers"]["voxel_pack"] = @{ prompt = "ask" }
     }
-    if (-not $State["providers"]["cheello_voxels"].ContainsKey("prompt")) {
-        $State["providers"]["cheello_voxels"]["prompt"] = "ask"
+    if (-not $State["providers"]["voxel_pack"].ContainsKey("prompt")) {
+        $State["providers"]["voxel_pack"]["prompt"] = "ask"
     }
     if (-not $State["providers"].ContainsKey("duke_world_tour")) {
         $State["providers"]["duke_world_tour"] = @{}
@@ -522,7 +522,7 @@ function Convert-BmpToPng {
     }
 }
 
-function Test-CheelloVoxelInstall {
+function Test-VoxelPackInstall {
     param([string]$OverlayDir)
 
     return (
@@ -642,7 +642,7 @@ function Assert-SafeZipArchive {
     }
 }
 
-function Find-CheelloVoxelRoot {
+function Find-VoxelPackRoot {
     param([string]$ExtractRoot)
 
     $dukeDefs = @(Get-ChildItem -LiteralPath $ExtractRoot -Recurse -File -Filter "duke3d.def")
@@ -661,7 +661,7 @@ function Find-CheelloVoxelRoot {
     return ""
 }
 
-function Copy-CheelloVoxelContent {
+function Copy-VoxelPackContent {
     param(
         [string]$LaunchRoot,
         [string]$OverlayDir,
@@ -700,7 +700,7 @@ function Copy-CheelloVoxelContent {
     }
 }
 
-function Invoke-CheelloVoxelImport {
+function Invoke-VoxelPackImport {
     param(
         [string]$LaunchRoot,
         [string]$OverlayDir,
@@ -708,29 +708,29 @@ function Invoke-CheelloVoxelImport {
         [hashtable]$State
     )
 
-    $providerState = $State["providers"]["cheello_voxels"]
+    $providerState = $State["providers"]["voxel_pack"]
     $downloadPage = "https://www.moddb.com/mods/voxel-duke-nukem-3d/addons/voxel-duke-3d"
     $expectedMd5 = "38175E125C5630B5191A709329BC75D8"
 
     if ($VoxelNo) {
         $providerState["prompt"] = "skip"
         if (-not $Quiet) {
-            Write-Info "Skipping Cheello voxel install by user request."
+            Write-Info "Skipping voxel pack install by user request."
         }
         return
     }
 
-    if ((-not $ForceVoxels) -and (Test-CheelloVoxelInstall -OverlayDir $OverlayDir)) {
+    if ((-not $ForceVoxels) -and (Test-VoxelPackInstall -OverlayDir $OverlayDir)) {
         $providerState["installed"] = $true
         if (-not $Quiet) {
-            Write-Info "Cheello voxel content is already staged in the mounted overlay."
+            Write-Info "Voxel pack content is already staged in the mounted overlay."
         }
         return
     }
 
     if (-not $VoxelAsk -and -not $VoxelYes -and -not $ForceVoxels -and $providerState["prompt"] -eq "skip" -and -not $ExplicitVoxelZip) {
         if (-not $Quiet) {
-            Write-Info "Cheello voxel install is disabled in local content preferences; skipping."
+            Write-Info "Voxel pack install is disabled in local content preferences; skipping."
         }
         return
     }
@@ -755,7 +755,7 @@ function Invoke-CheelloVoxelImport {
 
     if (-not $consent) {
         if (-not $Quiet) {
-            Write-Info "Cheello voxel install declined."
+            Write-Info "Voxel pack install declined."
         }
         return
     }
@@ -781,7 +781,7 @@ function Invoke-CheelloVoxelImport {
         Write-Warning "Voxel archive MD5 is $actualHash, expected $expectedMd5 for the known ModDB release. Continuing after archive-shape validation."
     }
 
-    $tempRoot = Get-FullPathSafe -Base $LaunchRoot -Child "generated-content\temp\cheello-voxels"
+    $tempRoot = Get-FullPathSafe -Base $LaunchRoot -Child "generated-content\temp\voxel-pack"
     Ensure-WithinRoot -RootPath $LaunchRoot -CandidatePath $tempRoot -Label "Voxel temp"
 
     if (Test-Path -LiteralPath $tempRoot) {
@@ -791,12 +791,12 @@ function Invoke-CheelloVoxelImport {
 
     try {
         Expand-Archive -LiteralPath $zipPath -DestinationPath $tempRoot -Force
-        $contentRoot = Find-CheelloVoxelRoot -ExtractRoot $tempRoot
+        $contentRoot = Find-VoxelPackRoot -ExtractRoot $tempRoot
         if (-not $contentRoot) {
             throw "The selected archive did not contain the expected Voxel Duke 3D files."
         }
 
-        Copy-CheelloVoxelContent -LaunchRoot $LaunchRoot -OverlayDir $OverlayDir -SourceRoot $contentRoot
+        Copy-VoxelPackContent -LaunchRoot $LaunchRoot -OverlayDir $OverlayDir -SourceRoot $contentRoot
 
         $providerState["installed"] = $true
         $providerState["last_archive"] = $zipPath
@@ -804,7 +804,7 @@ function Invoke-CheelloVoxelImport {
         $providerState["last_install_utc"] = [DateTime]::UtcNow.ToString("o")
 
         if (-not $Quiet) {
-            Write-Info "Cheello voxel install complete. Content was staged into:"
+            Write-Info "Voxel pack install complete. Content was staged into:"
             Write-Info "  $OverlayDir"
         }
     }
@@ -988,10 +988,10 @@ catch {
 }
 
 try {
-    Invoke-CheelloVoxelImport -LaunchRoot $LaunchRoot -OverlayDir $OverlayDir -ExplicitVoxelZip $VoxelZip -State $state
+    Invoke-VoxelPackImport -LaunchRoot $LaunchRoot -OverlayDir $OverlayDir -ExplicitVoxelZip $VoxelZip -State $state
 }
 catch {
-    Write-Warning "Cheello voxel install failed: $($_.Exception.Message)"
+    Write-Warning "Voxel pack install failed: $($_.Exception.Message)"
     Write-Warning "Launch will continue without installed voxels."
 }
 
