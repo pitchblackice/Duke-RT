@@ -62,6 +62,7 @@ Check these out if you want runtime commands, authoring tools, and the current w
 
 - [RT renderer debug commands](RT-DEBUG-COMMANDS.md): runtime backend selection, path-tracing debug views, frame generation controls, lighting diagnostics, repro workflows, and useful command-line/logging tools while validating custom content.
 - [LIGHTOVR authoring guide](LIGHTOVR-AUTHORING.md): the light overlay format and authoring workflow for creating your own custom lighting rules, including load/reload behavior, writable loose-overlay setup, and actor light edit mode.
+- [VOXELPRELOAD authoring guide](VOXELPRELOAD-AUTHORING.md): the mounted voxel preload format for warming important voxel actor variants, map-specific props, projectiles, and animated picnum ranges during map loading.
 - [Material overlay authoring guide](MATERIAL-OVERLAY-AUTHORING.md): the material-overlay authoring workflow for creating your own PBR companion maps, including Duke tile naming, supported map types, and how to add custom metallic, roughness, specular, normal, and glow textures.
 
 ## Original Raze Background
