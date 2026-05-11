@@ -21277,8 +21277,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundDynamicPrimitiveCount = dynamicPrimitiveCount;
 	mBoundStaticMaterialCount = staticMaterialCount;
 	mBoundDynamicMaterialCount = dynamicMaterialCount;
-	mBoundPersistentVoxelPrimitiveCount = mPersistentVoxelBatch.valid ? mPersistentVoxelBatch.primitiveCount : 0u;
-	mBoundPersistentVoxelMaterialCount = mPersistentVoxelBatch.valid ? mPersistentVoxelBatch.materialCount : 0u;
+	mBoundPersistentVoxelPrimitiveCount = mPersistentVoxelPrimitiveBuffer.shaderView != nullptr ? mPersistentVoxelArenaPrimitiveCursor : 0u;
+	mBoundPersistentVoxelMaterialCount = mPersistentVoxelMaterialBuffer.shaderView != nullptr ? mPersistentVoxelArenaMaterialCursor : 0u;
 	mBoundPortalCount = mMapWorld.valid ? (uint32_t)mMapWorld.portals.size() : 0u;
 	mBoundRuntimeLightCount = activeRuntimeLightCount;
 	mBoundRuntimeLightTileCountX = runtimeLightTileCountX;

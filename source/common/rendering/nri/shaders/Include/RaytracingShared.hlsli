@@ -204,6 +204,30 @@ float3 TransformSceneInstanceNormal(SceneInstanceData instanceData, float3 local
 	return dot(transformed, transformed) > 1e-8 ? normalize(transformed) : normalize(localNormal);
 }
 
+uint GetPersistentVoxelPrimitiveCount()
+{
+#if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
+	uint count = 0u;
+	uint stride = 0u;
+	gPersistentVoxelPrimitives.GetDimensions(count, stride);
+	return count;
+#else
+	return gTraceConstants.DynamicPrimitiveCount;
+#endif
+}
+
+uint GetPersistentVoxelMaterialCount()
+{
+#if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
+	uint count = 0u;
+	uint stride = 0u;
+	gPersistentVoxelMaterials.GetDimensions(count, stride);
+	return count;
+#else
+	return gTraceConstants.DynamicMaterialCount;
+#endif
+}
+
 uint GetPrimitiveCount(uint dataSource)
 {
 	if (dataSource == SCENE_DATA_SOURCE_DYNAMIC)
@@ -212,7 +236,7 @@ uint GetPrimitiveCount(uint dataSource)
 	}
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
-		return 0u;
+		return GetPersistentVoxelPrimitiveCount();
 	}
 	return gTraceConstants.StaticPrimitiveCount;
 }
@@ -225,7 +249,7 @@ uint GetMaterialCount(uint dataSource)
 	}
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
-		return 0u;
+		return GetPersistentVoxelMaterialCount();
 	}
 	return gTraceConstants.StaticMaterialCount;
 }
@@ -239,7 +263,7 @@ PrimitiveData GetPrimitiveData(uint dataSource, uint primitiveIndex)
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
 #if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
-		return gPersistentVoxelPrimitives[primitiveIndex];
+		return gPersistentVoxelPrimitives[min(primitiveIndex, max(GetPersistentVoxelPrimitiveCount(), 1u) - 1u)];
 #else
 		return gDynamicPrimitives[min(primitiveIndex, max(gTraceConstants.DynamicPrimitiveCount, 1u) - 1u)];
 #endif
@@ -275,7 +299,7 @@ MaterialData GetMaterialData(uint materialIndex, uint dataSource)
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
 #if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
-		return gPersistentVoxelMaterials[materialIndex];
+		return gPersistentVoxelMaterials[min(materialIndex, max(GetPersistentVoxelMaterialCount(), 1u) - 1u)];
 #else
 		return gDynamicMaterials[min(materialIndex, max(gTraceConstants.DynamicMaterialCount, 1u) - 1u)];
 #endif
