@@ -9625,6 +9625,45 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		return true;
 	}
 
+	if (!ApplyStartupMapWorldCorrectionIfNeeded("renderer-preload"))
+	{
+		LogFallback("PT preload startup map-world correction failed.");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=startup-correction-failed ms=%.3f\n",
+				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+		}
+		return true;
+	}
+	if (!mStaticMapScene.valid ||
+		!mStaticMapScene.texturesResident ||
+		!mStaticMapScene.buffersResident ||
+		!mStaticMapScene.accelerationResident ||
+		mStaticMapScene.buildSerial != mMapWorld.buildSerial)
+	{
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=continue reason=startup-correction-rebuild static_valid=%u textures=%u buffers=%u acceleration=%u scene_build_serial=%llu map_build_serial=%llu ms=%.3f\n",
+				mStaticMapScene.valid ? 1u : 0u,
+				mStaticMapScene.texturesResident ? 1u : 0u,
+				mStaticMapScene.buffersResident ? 1u : 0u,
+				mStaticMapScene.accelerationResident ? 1u : 0u,
+				(unsigned long long)mStaticMapScene.buildSerial,
+				(unsigned long long)mMapWorld.buildSerial,
+				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+		}
+		if (!PreloadStaticMapResources())
+		{
+			LogFallback("PT preload corrected resident static scene build failed.");
+			if ((int)nri_ptloadingtrace >= 1)
+			{
+				Printf("NRI PT loading gate: event=renderer-preload result=ready reason=startup-correction-static-map-failed ms=%.3f\n",
+					DurationMs(preloadStart, std::chrono::steady_clock::now()));
+			}
+			return true;
+		}
+	}
+
 	RefreshSceneLightSystem(true, nullptr, nullptr, nullptr, nullptr, false);
 	bool staticLightRefreshReady = true;
 	if (!mGpuSceneHasDynamicOverlay)
@@ -19726,6 +19765,17 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 		}
 	}
 	RequestHistoryReset("startup-world-correction");
+
+	Printf("NRI PT startup world correction: trigger=%s level=%s frame=%u build_serial=%llu chunk_diffs=%u surface_diffs=%u chunks=%u surfaces=%u tris=%u\n",
+		trigger != nullptr ? trigger : "unknown",
+		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
+		mFrameIndex,
+		(unsigned long long)mMapWorld.buildSerial,
+		chunkDiffCount,
+		surfaceDiffCount,
+		mMapWorld.stats.chunkCount,
+		mMapWorld.stats.surfaceCount,
+		mMapWorld.stats.triangleCount);
 
 	if (nri_ptscenestats)
 	{
