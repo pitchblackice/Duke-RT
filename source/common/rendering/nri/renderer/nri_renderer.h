@@ -19,6 +19,7 @@
 #include <array>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 class NRIRenderDevice;
@@ -1495,6 +1496,30 @@ private:
 		const char* lastReason = "none";
 	};
 
+	struct PersistentVoxelReadinessStatus
+	{
+		const char* reason = "ready";
+		bool ready = false;
+		bool meshPresent = false;
+		bool meshPublished = false;
+		bool meshKeyMatches = false;
+		bool meshCountsValid = false;
+		bool meshPrivateBuffersReady = false;
+		bool meshArenaBuffersReady = false;
+		bool blasReady = false;
+		bool materialPresent = false;
+		bool materialPublished = false;
+		bool materialKeyMatches = false;
+		bool materialCountValid = false;
+		bool materialBridgeReady = false;
+		uint64_t meshResourceKey = 0;
+		uint32_t meshVertexCount = 0;
+		uint32_t meshIndexCount = 0;
+		uint32_t meshPrimitiveCount = 0;
+		uint32_t materialCount = 0;
+		uint32_t materialBridgeCount = 0;
+	};
+
 	struct PersistentVoxelAdmissionStats
 	{
 		uint32_t queued = 0;
@@ -1965,6 +1990,14 @@ private:
 	void CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const;
 	void ApplyPersistentVoxelResidencyPressurePolicy(const char* phase);
 	bool PumpPersistentVoxelAdmissionQueue(const char* phase);
+	PersistentVoxelReadinessStatus GetPersistentVoxelSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
+	void TracePersistentVoxelReadiness(
+		const char* event,
+		const char* phase,
+		const PersistentVoxelAdmissionEntry* entry,
+		uint64_t meshResourceKey,
+		uint64_t materialKeyHash,
+		const PersistentVoxelReadinessStatus& status) const;
 	bool AdmitPersistentVoxelVariantResource(
 		PersistentVoxelAdmissionEntry& entry,
 		uint64_t byteBudget,
@@ -2286,6 +2319,8 @@ private:
 	std::unordered_map<uint64_t, PersistentVoxelInstanceRecord> mPersistentVoxelInstances;
 	std::unordered_map<uint64_t, uint64_t> mPersistentVoxelActorRejectedSignatures;
 	std::unordered_map<uint64_t, PersistentVoxelAdmissionEntry> mPersistentVoxelAdmissionQueue;
+	std::unordered_set<uint64_t> mPersistentVoxelPublishedMeshKeys;
+	std::unordered_set<uint64_t> mPersistentVoxelPublishedMaterialKeys;
 	uint32_t mPersistentVoxelArenaVertexCursor = 0;
 	uint32_t mPersistentVoxelArenaIndexCursor = 0;
 	uint32_t mPersistentVoxelArenaPrimitiveCursor = 0;
