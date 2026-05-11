@@ -12326,17 +12326,40 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 	mPersistentVoxelActorRejectedSignatures.clear();
 }
 
+bool NRIRenderer::SyncPersistentVoxelResidencyMapGeneration(const char* reason)
+{
+	if (mPersistentVoxelResidencyLastBuildSerial == mMapWorld.buildSerial)
+	{
+		return false;
+	}
+
+	mPersistentVoxelResidencyLastBuildSerial = mMapWorld.buildSerial;
+	mPersistentVoxelResidencyMapGeneration++;
+
+	if (!mPersistentVoxelAdmissionQueue.empty())
+	{
+		if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
+		{
+			Printf("NRI PT voxel admission queue: event=clear-stale reason=%s generation=%u entries=%u\n",
+				reason != nullptr ? reason : "map-generation",
+				mPersistentVoxelResidencyMapGeneration,
+				(uint32_t)mPersistentVoxelAdmissionQueue.size());
+		}
+		for (auto& pair : mPersistentVoxelAdmissionQueue)
+		{
+			DiscardPersistentVoxelAdmissionEntry(pair.second);
+		}
+		mPersistentVoxelAdmissionQueue.clear();
+	}
+
+	return true;
+}
+
 void NRIRenderer::ReconcilePersistentVoxelResidency(
 	const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
 	const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries)
 {
-	bool mapGenerationChanged = false;
-	if (mPersistentVoxelResidencyLastBuildSerial != mMapWorld.buildSerial)
-	{
-		mPersistentVoxelResidencyLastBuildSerial = mMapWorld.buildSerial;
-		mPersistentVoxelResidencyMapGeneration++;
-		mapGenerationChanged = true;
-	}
+	SyncPersistentVoxelResidencyMapGeneration("reconcile-map-generation");
 	const uint32_t generation = mPersistentVoxelResidencyMapGeneration;
 
 	struct DesiredVoxelResidency
@@ -12446,21 +12469,6 @@ void NRIRenderer::ReconcilePersistentVoxelResidency(
 			false,
 			false,
 			cacheEntry.surface != nullptr && cacheEntry.primitiveCount != 0);
-	}
-
-	if (mapGenerationChanged && !mPersistentVoxelAdmissionQueue.empty())
-	{
-		if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
-		{
-			Printf("NRI PT voxel admission queue: event=clear-stale reason=map-generation generation=%u entries=%u\n",
-				generation,
-				(uint32_t)mPersistentVoxelAdmissionQueue.size());
-		}
-		for (auto& pair : mPersistentVoxelAdmissionQueue)
-		{
-			DiscardPersistentVoxelAdmissionEntry(pair.second);
-		}
-		mPersistentVoxelAdmissionQueue.clear();
 	}
 
 	for (auto it = mPersistentVoxelAdmissionQueue.begin(); it != mPersistentVoxelAdmissionQueue.end(); )
@@ -12741,6 +12749,7 @@ bool NRIRenderer::IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, 
 		meshResource.primitiveCount == 0 ||
 		meshResource.vertexBuffer.buffer == nullptr ||
 		meshResource.indexBuffer.buffer == nullptr ||
+		meshResource.accelerationStructure.accelerationStructure == nullptr ||
 		mPersistentVoxelVertexBuffer.buffer == nullptr ||
 		mPersistentVoxelIndexBuffer.buffer == nullptr ||
 		mPersistentVoxelPrimitiveBuffer.buffer == nullptr)
@@ -12790,6 +12799,8 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 	{
 		return false;
 	}
+
+	SyncPersistentVoxelResidencyMapGeneration("admission-map-generation");
 
 	const uint64_t pairKey = HashCombine64(variant.meshKeyHash, variant.materialKeyHash);
 	const uint64_t estimatedBytes =
@@ -13461,6 +13472,7 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 			existingMeshIt->second.primitiveCount != 0 &&
 			existingMeshIt->second.vertexBuffer.buffer != nullptr &&
 			existingMeshIt->second.indexBuffer.buffer != nullptr &&
+			existingMeshIt->second.accelerationStructure.accelerationStructure != nullptr &&
 			mPersistentVoxelVertexBuffer.buffer != nullptr &&
 			mPersistentVoxelIndexBuffer.buffer != nullptr &&
 			mPersistentVoxelPrimitiveBuffer.buffer != nullptr;
@@ -13787,6 +13799,7 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 {
 	const bool loadingPhase = phase != nullptr && std::strcmp(phase, "loading") == 0;
+	SyncPersistentVoxelResidencyMapGeneration("pump-map-generation");
 	ApplyPersistentVoxelResidencyPressurePolicy(phase);
 	const uint32_t variantBudget = loadingPhase ?
 		((int)nri_ptvoxeladmissionloadvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmissionloadvariants) :
@@ -13893,6 +13906,10 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		if (leftUploading != rightUploading)
 		{
 			return leftUploading;
+		}
+		if (!loadingPhase && left->runtimeRequested != right->runtimeRequested)
+		{
+			return left->runtimeRequested;
 		}
 		if (left->admissionRank != right->admissionRank)
 		{
