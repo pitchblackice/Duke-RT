@@ -2708,7 +2708,7 @@ CVAR(Int, nri_ptvoxeladmitmaxbytesloading, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR
 CVAR(Int, nri_ptvoxeladmitmaxbytesruntime, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxmsloading, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxmsruntime, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxblasloading, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptvoxeladmitmaxblasloading, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxblasruntime, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxeladmitmaxblasprims, 200000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptvoxelresidentmaxbytes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -14066,7 +14066,8 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 			}
 			break;
 		}
-		blasUsed += blasBefore - blasBudgetRemaining;
+		const uint32_t blasBuiltThisEntry = blasBefore - blasBudgetRemaining;
+		blasUsed += blasBuiltThisEntry;
 		entry->bytesUploaded += uploadBytes;
 		stats.bytesUploaded += uploadBytes;
 		if (inProgress)
@@ -14119,6 +14120,11 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 				(unsigned long long)uploadBytes,
 				reusedMesh ? 1u : 0u,
 				reusedMaterial ? 1u : 0u);
+		}
+		if (loadingPhase && blasBuiltThisEntry != 0)
+		{
+			stopReason = "blas-submit-budget";
+			break;
 		}
 	}
 
