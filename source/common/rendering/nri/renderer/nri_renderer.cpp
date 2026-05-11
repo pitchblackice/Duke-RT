@@ -8545,12 +8545,37 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								0;
 							return std::max(actor.retainedFrameAge, frameAge);
 						};
+						std::vector<const PersistentVoxelBatch::ActorEntry*> persistentVoxelTlasActors;
+						persistentVoxelTlasActors.reserve(mPersistentVoxelBatch.actors.size());
 						for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 						{
-							if (!actor.active)
+							if (actor.active)
 							{
-								continue;
+								persistentVoxelTlasActors.push_back(&actor);
 							}
+						}
+						std::stable_sort(persistentVoxelTlasActors.begin(), persistentVoxelTlasActors.end(),
+							[&](const PersistentVoxelBatch::ActorEntry* left, const PersistentVoxelBatch::ActorEntry* right)
+							{
+								if (left->capturedThisFrame != right->capturedThisFrame)
+								{
+									return left->capturedThisFrame;
+								}
+								const uint64_t leftRetainedAge = computePersistentVoxelRetainedAge(*left);
+								const uint64_t rightRetainedAge = computePersistentVoxelRetainedAge(*right);
+								if (leftRetainedAge != rightRetainedAge)
+								{
+									return leftRetainedAge < rightRetainedAge;
+								}
+								if (left->primitiveCount != right->primitiveCount)
+								{
+									return left->primitiveCount < right->primitiveCount;
+								}
+								return left->identityKey < right->identityKey;
+							});
+						for (const PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
+						{
+							const PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
 							persistentVoxelTlasCandidateCount++;
 							const bool excludedByIndex = actor.resolvedVoxelIndex >= 0 &&
 								(actor.resolvedVoxelIndex == persistentVoxelExcludeIndex0 ||
