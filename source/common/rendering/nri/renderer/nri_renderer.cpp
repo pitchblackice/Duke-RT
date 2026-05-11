@@ -7537,6 +7537,28 @@ void NRIRenderer::WaitForCommandsTracked(const char* reason)
 	}
 }
 
+void NRIRenderer::ReleaseWorldAccelerationBuildScratch(const char* reason)
+{
+	const uint64_t scratchBytes = mScratchBuffer.memorySize + mTopLevelScratchBuffer.memorySize;
+	const uint32_t scratchBuffers =
+		(mScratchBuffer.buffer != nullptr ? 1u : 0u) +
+		(mTopLevelScratchBuffer.buffer != nullptr ? 1u : 0u);
+	if (scratchBuffers == 0)
+	{
+		return;
+	}
+
+	DestroyBufferResource(mScratchBuffer);
+	DestroyBufferResource(mTopLevelScratchBuffer);
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT transient scratch: event=release reason=%s buffers=%u bytes=%llu\n",
+			reason != nullptr ? reason : "unspecified",
+			scratchBuffers,
+			(unsigned long long)scratchBytes);
+	}
+}
+
 void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth, const char* reason, int uploadKind)
 {
 	if (!ShouldTracePtPerf() || stats == nullptr)
@@ -22105,6 +22127,14 @@ bool NRIRenderer::EnsureStaticMapScene()
 		(uint32_t)mStaticMapScene.gpuMaterials.size(),
 		mStaticMapScene.gpuUploadCount,
 		mStaticMapScene.accelerationBuildCount);
+	if (mFrameBuffer != nullptr && mFrameBuffer->mCommandBuffer != nullptr)
+	{
+		if (!mFrameBuffer->SubmitWaitAndRestartCommandList("static-map-scene-build"))
+		{
+			return false;
+		}
+		ReleaseWorldAccelerationBuildScratch("static-map-scene-build");
+	}
 	return true;
 }
 

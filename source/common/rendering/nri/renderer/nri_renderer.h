@@ -2196,6 +2196,7 @@ private:
 	nri::Format ResolveFinalSceneFormat() const;
 	void ResetPerfTraceStats();
 	void WaitForCommandsTracked(const char* reason = nullptr);
+	void ReleaseWorldAccelerationBuildScratch(const char* reason = nullptr);
 	void NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth, const char* reason, int uploadKind);
 	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) { return mFrameTextures[(size_t)slot]; }
 	const NRITextureResource& GetFrameTexture(FrameTextureSlot slot) const { return mFrameTextures[(size_t)slot]; }
