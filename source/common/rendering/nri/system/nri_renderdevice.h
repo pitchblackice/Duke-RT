@@ -223,6 +223,7 @@ private:
 	bool CreateRenderResources();
 	void DestroyRenderResources();
 	bool BeginCommandList(const char* reason, bool waitForSlotReuse = false);
+	bool SubmitWaitAndRestartCommandList(const char* reason);
 	bool EnsureSwapChainSize();
 	void EndFrameAndPresent();
 	void LogD3D12FailureDiagnostics(const char* context);

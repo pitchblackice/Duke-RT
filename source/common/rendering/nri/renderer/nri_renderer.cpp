@@ -12829,7 +12829,7 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 	const int32_t variantAdmissionRank =
 		variant.admissionRank != 0 || variant.priority <= 0 ? variant.admissionRank : variant.priority * 10000 + 9900;
 	const uint32_t maxBlasPrimitives =
-		(int)nri_ptvoxeladmitmaxblasprims <= 0 ? 200000u : (uint32_t)(int)nri_ptvoxeladmitmaxblasprims;
+		(int)nri_ptvoxeladmitmaxblasprims <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasprims;
 	auto traceAdmissionSkip = [&](const nri_scene::PrecachedVoxelVariantView& skippedVariant, uint64_t skippedBytes, const char* reason)
 	{
 		if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
@@ -14123,7 +14123,16 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		}
 		if (loadingPhase && blasBuiltThisEntry != 0)
 		{
-			stopReason = "blas-submit-budget";
+			if (mFrameBuffer == nullptr || !mFrameBuffer->SubmitWaitAndRestartCommandList("voxel-loading-blas"))
+			{
+				entry->state = PersistentVoxelAdmissionState::Failed;
+				entry->retryCount++;
+				entry->lastReason = "blas-submit-wait-failed";
+				stats.failedThisPump++;
+				stopReason = entry->lastReason;
+				break;
+			}
+			stopReason = "blas-submit-wait";
 			break;
 		}
 	}

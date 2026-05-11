@@ -2807,6 +2807,23 @@ bool NRIRenderDevice::SubmitAndWaitCurrentCommandBuffer()
 	return submitResult == nri::Result::SUCCESS;
 }
 
+bool NRIRenderDevice::SubmitWaitAndRestartCommandList(const char* reason)
+{
+	const bool wasOpen = mCommandBufferOpen;
+	if (!SubmitAndWaitCurrentCommandBuffer())
+	{
+		Printf(TEXTCOLOR_RED "NRI SubmitWaitAndRestartCommandList failed (reason=%s).\n",
+			reason != nullptr ? reason : "unknown");
+		LogD3D12FailureDiagnostics(reason != nullptr ? reason : "SubmitWaitAndRestartCommandList");
+		return false;
+	}
+	if (!wasOpen)
+	{
+		return true;
+	}
+	return BeginCommandList(reason != nullptr ? reason : "SubmitWaitAndRestartCommandList", false);
+}
+
 void NRIRenderDevice::SetSaveBuffers(bool yes)
 {
 	mUsingSaveTarget = yes;
