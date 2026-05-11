@@ -2011,7 +2011,7 @@ private:
 	bool IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
-	void ResetPersistentVoxelBatch();
+	void ResetPersistentVoxelBatch(const char* reason = "batch-reset", bool clearSharedResources = true);
 	bool BuildPersistentVoxelVariantAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	bool RefreshResidentStaticSceneDataSet();

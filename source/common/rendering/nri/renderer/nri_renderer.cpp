@@ -12320,16 +12320,22 @@ void NRIRenderer::ResetPersistentDynamicEmissiveCache()
 	mActorSpriteDebugStats = {};
 }
 
-void NRIRenderer::ResetPersistentVoxelBatch()
+void NRIRenderer::ResetPersistentVoxelBatch(const char* reason, bool clearSharedResources)
 {
 	if (((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats) &&
-		(!mPersistentVoxelMeshVariantResources.empty() ||
+		(!mPersistentVoxelBatch.actors.empty() ||
+			!mPersistentVoxelInstances.empty() ||
+			!mPersistentVoxelMeshVariantResources.empty() ||
 			!mPersistentVoxelMaterialVariantResources.empty() ||
 			mPersistentVoxelVertexBuffer.buffer != nullptr ||
 			mPersistentVoxelIndexBuffer.buffer != nullptr ||
 			mPersistentVoxelPrimitiveBuffer.buffer != nullptr))
 	{
-		Printf("NRI PT voxel reset: action=clear-shared reason=batch-reset mesh_resources=%u material_resources=%u arena_vertex=%u arena_index=%u arena_primitive=%u published_mesh=%u published_material=%u\n",
+		Printf("NRI PT voxel reset: action=%s reason=%s actors=%u instances=%u mesh_resources=%u material_resources=%u arena_vertex=%u arena_index=%u arena_primitive=%u published_mesh=%u published_material=%u\n",
+			clearSharedResources ? "clear-shared" : "clear-instances",
+			reason != nullptr ? reason : "unknown",
+			(uint32_t)mPersistentVoxelBatch.actors.size(),
+			(uint32_t)mPersistentVoxelInstances.size(),
 			(uint32_t)mPersistentVoxelMeshVariantResources.size(),
 			(uint32_t)mPersistentVoxelMaterialVariantResources.size(),
 			mPersistentVoxelVertexBuffer.buffer != nullptr ? 1u : 0u,
@@ -12339,6 +12345,15 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 			(uint32_t)mPersistentVoxelPublishedMaterialKeys.size());
 	}
 	mPersistentVoxelBatch = {};
+	mPersistentVoxelInstances.clear();
+	mPersistentVoxelActorRejectedSignatures.clear();
+	mBoundPersistentVoxelPrimitiveCount = 0;
+	mBoundPersistentVoxelMaterialCount = 0;
+	SetCurrentSceneDataDescriptorsInitialized(false);
+	if (!clearSharedResources)
+	{
+		return;
+	}
 	RetireResidentBufferResource(mPersistentVoxelVertexBuffer);
 	RetireResidentBufferResource(mPersistentVoxelIndexBuffer);
 	RetireResidentBufferResource(mPersistentVoxelPrimitiveBuffer);
@@ -12347,9 +12362,6 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 	mPersistentVoxelArenaIndexCursor = 0;
 	mPersistentVoxelArenaPrimitiveCursor = 0;
 	mPersistentVoxelArenaMaterialCursor = 0;
-	mBoundPersistentVoxelPrimitiveCount = 0;
-	mBoundPersistentVoxelMaterialCount = 0;
-	SetCurrentSceneDataDescriptorsInitialized(false);
 	for (auto& pair : mPersistentVoxelMeshVariantResources)
 	{
 		RetireResidentBufferResource(pair.second.vertexBuffer);
@@ -12358,8 +12370,6 @@ void NRIRenderer::ResetPersistentVoxelBatch()
 	}
 	mPersistentVoxelMeshVariantResources.clear();
 	mPersistentVoxelMaterialVariantResources.clear();
-	mPersistentVoxelInstances.clear();
-	mPersistentVoxelActorRejectedSignatures.clear();
 	mPersistentVoxelPublishedMeshKeys.clear();
 	mPersistentVoxelPublishedMaterialKeys.clear();
 }
@@ -16055,7 +16065,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					nri::BufferUsageBits::SHADER_RESOURCE,
 					NRIComputeShaderResourceAccess()))
 			{
-				ResetPersistentVoxelBatch();
+				ResetPersistentVoxelBatch("persistent-voxel-buffer-allocation-failed");
 				return false;
 			}
 			if (meshResourceChanged)
@@ -16113,7 +16123,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					NRIComputeShaderResourceAccess(),
 					ResidentUploadKind_Primitive))
 			{
-				ResetPersistentVoxelBatch();
+				ResetPersistentVoxelBatch("persistent-voxel-buffer-stage-failed");
 				return false;
 			}
 			if (meshResourceChanged)
@@ -16406,7 +16416,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				bool actorDeferred = false;
 				if (!appendActorToBatch(mPersistentVoxelBatch, cacheEntry, nullptr, &actorDeferred))
 				{
-					ResetPersistentVoxelBatch();
+					ResetPersistentVoxelBatch("persistent-voxel-append-failed");
 					return false;
 				}
 				if (actorDeferred)
@@ -16545,7 +16555,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				bool actorDeferred = false;
 				if (!appendActorToBatch(mPersistentVoxelBatch, cacheEntry, &actor, &actorDeferred))
 				{
-					ResetPersistentVoxelBatch();
+					ResetPersistentVoxelBatch("persistent-voxel-update-failed");
 					return false;
 				}
 				if (actorDeferred)
@@ -16689,7 +16699,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			bool actorDeferred = false;
 			if (!appendActorToBatch(next, cacheEntry, nullptr, &actorDeferred))
 			{
-				ResetPersistentVoxelBatch();
+				ResetPersistentVoxelBatch("persistent-voxel-new-actor-failed");
 				return false;
 			}
 			if (actorDeferred)
@@ -16731,7 +16741,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	recomputeBatchState(next);
 	if (!next.valid)
 	{
-		ResetPersistentVoxelBatch();
+		ResetPersistentVoxelBatch("persistent-voxel-invalid-instance-batch", false);
 		return false;
 	}
 
@@ -16817,7 +16827,7 @@ bool NRIRenderer::BuildPersistentVoxelVariantAccelerationStructures(const nri_sc
 	mLastPerfShellTraceStats.persistentVoxelAsCalls++;
 	if (!mPersistentVoxelBatch.valid || mPersistentVoxelBatch.actors.empty())
 	{
-		ResetPersistentVoxelBatch();
+		ResetPersistentVoxelBatch("persistent-voxel-empty-instance-batch", false);
 		return true;
 	}
 
@@ -23882,7 +23892,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
-	ResetPersistentVoxelBatch();
+	ResetPersistentVoxelBatch("static-acceleration-rebuild", false);
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 
@@ -30880,7 +30890,7 @@ void NRIRenderer::DestroySceneBuffers()
 	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	ResetResidentMapChunkRegistry();
 	ResetPersistentDynamicEmissiveCache();
-	ResetPersistentVoxelBatch();
+	ResetPersistentVoxelBatch("destroy-scene-buffers");
 	DestroyBufferResource(mStaticVertexBuffer);
 	DestroyBufferResource(mStaticIndexBuffer);
 	DestroyBufferResource(mStaticPrimitiveBuffer);
@@ -30989,7 +30999,7 @@ void NRIRenderer::DestroyAccelerationStructures()
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
 	}
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
-	ResetPersistentVoxelBatch();
+	ResetPersistentVoxelBatch("destroy-acceleration-structures");
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;
