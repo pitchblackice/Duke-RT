@@ -12920,7 +12920,7 @@ bool NRIRenderer::IsRequiredPersistentVoxelAdmission(const PersistentVoxelAdmiss
 		!entry.runtimeRequested &&
 		entry.priority <= 0 &&
 		(entry.gpuForce || entry.gpuPrefer) &&
-		(entry.sourceBits & nri_scene::PrecachedVoxelSourceBit_MountedPreloadMap) != 0;
+		(entry.sourceBits & nri_scene::PrecachedVoxelSourceBit_MountedVoxelPreload) != 0;
 }
 
 void NRIRenderer::CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const
