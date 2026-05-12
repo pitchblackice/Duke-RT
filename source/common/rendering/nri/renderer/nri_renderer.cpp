@@ -2722,6 +2722,7 @@ CVAR(Int, nri_ptvoxelexcludeindex3, -1, 0)
 CVAR(Int, nri_ptvoxelexcludeminprims, 0, 0)
 CVAR(Int, nri_ptvoxelretainedtlasprims, 131072, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptcrashtrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_pttlasretireholdframes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -24272,6 +24273,85 @@ void NRIRenderer::RetireResidentAccelerationStructure(NRIAccelerationStructureRe
 	resource = {};
 }
 
+void NRIRenderer::DrainDelayedTopLevelRetirements(bool force)
+{
+	if (mDelayedTopLevelRetirements.empty())
+	{
+		return;
+	}
+
+	const uint32_t holdFrames = force ? 0u : (uint32_t)std::max<int>(0, (int)nri_pttlasretireholdframes);
+	for (size_t i = 0; i < mDelayedTopLevelRetirements.size();)
+	{
+		DelayedTopLevelRetirement& delayed = mDelayedTopLevelRetirements[i];
+		const uint32_t age = mFrameIndex - delayed.retireFrame;
+		if (!force && age < holdFrames)
+		{
+			++i;
+			continue;
+		}
+
+		if ((bool)nri_ptcrashtrace)
+		{
+			Printf("PERF pt crash tlas retire-hold NRI: frame=%u action=%s retired_frame=%u age=%u hold_frames=%u as=%p descriptor=%p memory=%llu delayed_before=%u\n",
+				mFrameIndex,
+				force ? "destroy" : "release",
+				delayed.retireFrame,
+				age,
+				holdFrames,
+				(void*)delayed.resource.accelerationStructure,
+				(void*)delayed.resource.descriptor,
+				(unsigned long long)delayed.resource.memorySize,
+				(uint32_t)mDelayedTopLevelRetirements.size());
+		}
+
+		if (force)
+		{
+			DestroyAccelerationStructureResource(delayed.resource);
+		}
+		else
+		{
+			RetireResidentAccelerationStructure(delayed.resource);
+		}
+		mDelayedTopLevelRetirements[i] = mDelayedTopLevelRetirements.back();
+		mDelayedTopLevelRetirements.pop_back();
+	}
+}
+
+void NRIRenderer::RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource)
+{
+	if (resource.accelerationStructure == nullptr && resource.descriptor == nullptr)
+	{
+		return;
+	}
+
+	DrainDelayedTopLevelRetirements(false);
+
+	const int holdFrames = std::max<int>(0, (int)nri_pttlasretireholdframes);
+	if (holdFrames <= 0)
+	{
+		RetireResidentAccelerationStructure(resource);
+		return;
+	}
+
+	DelayedTopLevelRetirement delayed = {};
+	delayed.resource = resource;
+	delayed.retireFrame = mFrameIndex;
+	if ((bool)nri_ptcrashtrace)
+	{
+		Printf("PERF pt crash tlas retire-hold NRI: frame=%u action=hold retired_frame=%u age=0 hold_frames=%d as=%p descriptor=%p memory=%llu delayed_before=%u\n",
+			mFrameIndex,
+			delayed.retireFrame,
+			holdFrames,
+			(void*)delayed.resource.accelerationStructure,
+			(void*)delayed.resource.descriptor,
+			(unsigned long long)delayed.resource.memorySize,
+			(uint32_t)mDelayedTopLevelRetirements.size());
+	}
+	mDelayedTopLevelRetirements.push_back(delayed);
+	resource = {};
+}
+
 bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind)
 {
 	const uint64_t requiredSize = std::max<uint64_t>(size, stride);
@@ -24422,7 +24502,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		mSceneInstanceBuffer.buffer != nullptr ||
 		mScratchBuffer.buffer != nullptr ||
 		mTopLevelScratchBuffer.buffer != nullptr ||
-		mEmissiveTopLevelScratchBuffer.buffer != nullptr;
+		mEmissiveTopLevelScratchBuffer.buffer != nullptr ||
+		!mDelayedTopLevelRetirements.empty();
 	if (needsWait)
 	{
 		WaitForCommandsTracked();
@@ -24434,6 +24515,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
+	DrainDelayedTopLevelRetirements(true);
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 	ResetPersistentVoxelBatch("static-acceleration-rebuild", false);
 	DestroyAccelerationStructureResource(mTopLevelAS);
@@ -29650,7 +29732,7 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	const void* oldTopLevelDescriptor = (const void*)topLevelAS.descriptor;
 	const uint64_t oldTopLevelMemorySize = topLevelAS.memorySize;
 
-	RetireResidentAccelerationStructure(topLevelAS);
+	RetireTopLevelAccelerationStructure(topLevelAS);
 
 	static SceneBufferDebugStats sTlasInstanceStats = { "TLASInstance" };
 	if (!EnsureStructuredBuffer(
@@ -31494,6 +31576,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
+	DrainDelayedTopLevelRetirements(true);
 	for (auto& frameScratch : mResidentUploadScratchFrames)
 	{
 		DestroyBufferResource(frameScratch.vertex.buffer);

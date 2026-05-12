@@ -1724,6 +1724,12 @@ private:
 		std::vector<NRIAccelerationStructureResource> retiredAccelerationStructures;
 	};
 
+	struct DelayedTopLevelRetirement
+	{
+		NRIAccelerationStructureResource resource;
+		uint32_t retireFrame = 0;
+	};
+
 	struct RuntimeMapMutationFrameState
 	{
 		bool active = false;
@@ -2174,6 +2180,8 @@ private:
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
+	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
+	void DrainDelayedTopLevelRetirements(bool force);
 	void BuildRuntimeLightClusterUpload(
 		std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
 		std::vector<uint32_t>& outIndices,
@@ -2302,6 +2310,7 @@ private:
 	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
+	std::vector<DelayedTopLevelRetirement> mDelayedTopLevelRetirements;
 
 	std::vector<CachedTexture> mTextureCache;
 	std::vector<NRITextureResource*> mLiveSceneTextureResources;
