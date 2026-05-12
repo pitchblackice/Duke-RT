@@ -24280,12 +24280,14 @@ void NRIRenderer::DrainDelayedTopLevelRetirements(bool force)
 		return;
 	}
 
-	const uint32_t holdFrames = force ? 0u : (uint32_t)std::max<int>(0, (int)nri_pttlasretireholdframes);
+	const int configuredHoldFrames = (int)nri_pttlasretireholdframes;
+	const bool holdUntilTeardown = !force && configuredHoldFrames < 0;
+	const uint32_t holdFrames = force || holdUntilTeardown ? 0u : (uint32_t)configuredHoldFrames;
 	for (size_t i = 0; i < mDelayedTopLevelRetirements.size();)
 	{
 		DelayedTopLevelRetirement& delayed = mDelayedTopLevelRetirements[i];
 		const uint32_t age = mFrameIndex - delayed.retireFrame;
-		if (!force && age < holdFrames)
+		if (holdUntilTeardown || (!force && age < holdFrames))
 		{
 			++i;
 			continue;
@@ -24293,12 +24295,12 @@ void NRIRenderer::DrainDelayedTopLevelRetirements(bool force)
 
 		if ((bool)nri_ptcrashtrace)
 		{
-			Printf("PERF pt crash tlas retire-hold NRI: frame=%u action=%s retired_frame=%u age=%u hold_frames=%u as=%p descriptor=%p memory=%llu delayed_before=%u\n",
+			Printf("PERF pt crash tlas retire-hold NRI: frame=%u action=%s retired_frame=%u age=%u hold_frames=%d as=%p descriptor=%p memory=%llu delayed_before=%u\n",
 				mFrameIndex,
 				force ? "destroy" : "release",
 				delayed.retireFrame,
 				age,
-				holdFrames,
+				force ? 0 : configuredHoldFrames,
 				(void*)delayed.resource.accelerationStructure,
 				(void*)delayed.resource.descriptor,
 				(unsigned long long)delayed.resource.memorySize,
@@ -24327,8 +24329,8 @@ void NRIRenderer::RetireTopLevelAccelerationStructure(NRIAccelerationStructureRe
 
 	DrainDelayedTopLevelRetirements(false);
 
-	const int holdFrames = std::max<int>(0, (int)nri_pttlasretireholdframes);
-	if (holdFrames <= 0)
+	const int holdFrames = (int)nri_pttlasretireholdframes;
+	if (holdFrames == 0)
 	{
 		RetireResidentAccelerationStructure(resource);
 		return;
