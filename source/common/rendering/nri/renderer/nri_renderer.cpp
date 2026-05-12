@@ -8365,6 +8365,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectStaticInstancesMs);
 				BuildStaticMapInstances(instances, sceneInstances);
 			}
+			const uint32_t staticSceneInstanceBaselineCount = (uint32_t)sceneInstances.size();
+			bool selectedSceneHasDynamicOverlay = false;
 
 			if (overlayGeometry.primitives.empty() && !hasPersistentVoxelOverlay)
 			{
@@ -9113,26 +9115,32 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
 					}
 
+					uint32_t staticSceneInstanceCount = 0;
+					uint32_t dynamicSceneInstanceCount = 0;
+					uint32_t persistentVoxelSceneInstanceCount = 0;
+					for (const SceneInstanceData& sceneInstance : sceneInstances)
+					{
+						if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+						{
+							staticSceneInstanceCount++;
+						}
+						else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC)
+						{
+							dynamicSceneInstanceCount++;
+						}
+						else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+						{
+							persistentVoxelSceneInstanceCount++;
+						}
+					}
+					const bool hasEffectiveOverlayInstances = sceneInstances.size() > staticSceneInstanceBaselineCount;
+					selectedSceneHasDynamicOverlay =
+						liveOverlayPrimitiveCount > 0 ||
+						dynamicSceneInstanceCount > 0 ||
+						persistentVoxelSceneInstanceCount > 0 ||
+						hasEffectiveOverlayInstances;
 					if ((bool)nri_ptcrashtrace)
 					{
-						uint32_t staticSceneInstanceCount = 0;
-						uint32_t dynamicSceneInstanceCount = 0;
-						uint32_t persistentVoxelSceneInstanceCount = 0;
-						for (const SceneInstanceData& sceneInstance : sceneInstances)
-						{
-							if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
-							{
-								staticSceneInstanceCount++;
-							}
-							else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC)
-							{
-								dynamicSceneInstanceCount++;
-							}
-							else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
-							{
-								persistentVoxelSceneInstanceCount++;
-							}
-						}
 						uint32_t visibleChunkCount = 0;
 						for (uint32_t word : mCurrentVisibleChunkWords)
 						{
@@ -9170,23 +9178,46 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							(uint32_t)mirrorPlayerGeometry.primitives.size());
 					}
 
-					accelerationReady =
-						BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static | SceneDataBufferMask_Dynamic) &&
-						UpdateSceneDataSet(
-							mStaticVertexBuffer,
-							mStaticIndexBuffer,
-							mStaticPrimitiveBuffer,
-							mStaticMaterialBuffer,
-							mVertexBuffer,
-							mIndexBuffer,
-							mPrimitiveBuffer,
-							mMaterialBuffer,
-							sceneInstances,
-							(uint32_t)mStaticMapScene.geometry.primitives.size(),
-							(uint32_t)overlayGeometry.primitives.size(),
-							(uint32_t)mStaticMapScene.gpuMaterials.size(),
-							(uint32_t)dynamicGpuMaterials.size(),
-							"static_plus_overlay_scene");
+					if (selectedSceneHasDynamicOverlay)
+					{
+						accelerationReady =
+							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static | SceneDataBufferMask_Dynamic) &&
+							UpdateSceneDataSet(
+								mStaticVertexBuffer,
+								mStaticIndexBuffer,
+								mStaticPrimitiveBuffer,
+								mStaticMaterialBuffer,
+								mVertexBuffer,
+								mIndexBuffer,
+								mPrimitiveBuffer,
+								mMaterialBuffer,
+								sceneInstances,
+								(uint32_t)mStaticMapScene.geometry.primitives.size(),
+								(uint32_t)overlayGeometry.primitives.size(),
+								(uint32_t)mStaticMapScene.gpuMaterials.size(),
+								(uint32_t)dynamicGpuMaterials.size(),
+								"static_plus_overlay_scene");
+					}
+					else
+					{
+						accelerationReady =
+							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static) &&
+							UpdateSceneDataSet(
+								mStaticVertexBuffer,
+								mStaticIndexBuffer,
+								mStaticPrimitiveBuffer,
+								mStaticMaterialBuffer,
+								mStaticVertexBuffer,
+								mStaticIndexBuffer,
+								mStaticPrimitiveBuffer,
+								mStaticMaterialBuffer,
+								sceneInstances,
+								(uint32_t)mStaticMapScene.geometry.primitives.size(),
+								0u,
+								(uint32_t)mStaticMapScene.gpuMaterials.size(),
+								0u,
+								"static_only_effective_scene");
+					}
 				}
 			}
 
@@ -9199,8 +9230,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			if (paletteReady && texturesReady && buffersReady && accelerationReady)
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectStateCommitMs);
-				mUsedDynamicSceneLastFrame = hasPersistentVoxelOverlay || hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay;
-				mGpuSceneHasDynamicOverlay = true;
+				mUsedDynamicSceneLastFrame = selectedSceneHasDynamicOverlay;
+				mGpuSceneHasDynamicOverlay = selectedSceneHasDynamicOverlay;
 				if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
 				{
 					mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)activeDynamicSceneView->opaqueSprites.size();
