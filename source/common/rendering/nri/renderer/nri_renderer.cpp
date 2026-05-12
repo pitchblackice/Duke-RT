@@ -2721,6 +2721,7 @@ CVAR(Int, nri_ptvoxelexcludeindex2, -1, 0)
 CVAR(Int, nri_ptvoxelexcludeindex3, -1, 0)
 CVAR(Int, nri_ptvoxelexcludeminprims, 0, 0)
 CVAR(Int, nri_ptvoxelretainedtlasprims, 131072, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptcrashtrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -8499,7 +8500,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							int32_t resolvedVoxelIndex = -1;
 							bool newlyPublished = false;
 						};
-						const bool tracePersistentVoxelTlasSummary = (bool)nri_voxelstats;
+						const bool tracePersistentVoxelTlasSummary = (bool)nri_voxelstats || (bool)nri_ptcrashtrace;
 						std::unordered_map<uint64_t, PersistentVoxelTlasGroupStats> persistentVoxelTlasGroups;
 						std::unordered_set<uint64_t> persistentVoxelTlasNewMeshResources;
 						if (tracePersistentVoxelTlasSummary)
@@ -9007,6 +9008,57 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 									(unsigned long long)group.newInstancePrimitiveCount,
 									group.tlasReadyFrame);
 							}
+							if ((bool)nri_ptcrashtrace)
+							{
+								std::vector<const PersistentVoxelBatch::ActorEntry*> sortedCrashTraceActors;
+								sortedCrashTraceActors.reserve(persistentVoxelTlasActors.size());
+								for (const PersistentVoxelBatch::ActorEntry* actor : persistentVoxelTlasActors)
+								{
+									if (actor != nullptr && actor->active)
+									{
+										sortedCrashTraceActors.push_back(actor);
+									}
+								}
+								std::sort(sortedCrashTraceActors.begin(), sortedCrashTraceActors.end(),
+									[&](const PersistentVoxelBatch::ActorEntry* left, const PersistentVoxelBatch::ActorEntry* right)
+									{
+										if (left->capturedThisFrame != right->capturedThisFrame)
+										{
+											return left->capturedThisFrame;
+										}
+										if (left->primitiveCount != right->primitiveCount)
+										{
+											return left->primitiveCount > right->primitiveCount;
+										}
+										return left->identityKey < right->identityKey;
+									});
+								const uint32_t actorTopCount = std::min<uint32_t>(12u, (uint32_t)sortedCrashTraceActors.size());
+								for (uint32_t i = 0; i < actorTopCount; ++i)
+								{
+									const PersistentVoxelBatch::ActorEntry& actor = *sortedCrashTraceActors[i];
+									const uint64_t retainedAge = computePersistentVoxelRetainedAge(actor);
+									const bool gateVisible = actor.visibilityChunkIndex == UINT32_MAX ||
+										IsChunkMarkedVisible(mCurrentVisibleChunkWords, actor.visibilityChunkIndex);
+									Printf("PERF pt crash voxel actor top NRI: frame=%u rank=%u actor_key=0x%llx source_pic=%d voxel=%d mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx prims=%u indices=%u mats=%u captured=%u retained_age=%llu last_seen=%llu visibility_chunk=%u gate_visible=%u in_tlas=%u\n",
+										mFrameIndex,
+										i + 1u,
+										(unsigned long long)actor.identityKey,
+										actor.sourcePicnum,
+										actor.resolvedVoxelIndex,
+										(unsigned long long)actor.meshResourceKey,
+										(unsigned long long)actor.meshKeyHash,
+										(unsigned long long)actor.materialKeyHash,
+										actor.primitiveCount,
+										actor.indexCount,
+										actor.materialCount,
+										actor.capturedThisFrame ? 1u : 0u,
+										(unsigned long long)retainedAge,
+										(unsigned long long)actor.lastSeenFrame,
+										actor.visibilityChunkIndex,
+										gateVisible ? 1u : 0u,
+										actor.inWorldTlasThisFrame ? 1u : 0u);
+								}
+							}
 						}
 					}
 
@@ -9024,6 +9076,63 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
 						instances.push_back(dynamicInstance);
 						sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
+					}
+
+					if ((bool)nri_ptcrashtrace)
+					{
+						uint32_t staticSceneInstanceCount = 0;
+						uint32_t dynamicSceneInstanceCount = 0;
+						uint32_t persistentVoxelSceneInstanceCount = 0;
+						for (const SceneInstanceData& sceneInstance : sceneInstances)
+						{
+							if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+							{
+								staticSceneInstanceCount++;
+							}
+							else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC)
+							{
+								dynamicSceneInstanceCount++;
+							}
+							else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+							{
+								persistentVoxelSceneInstanceCount++;
+							}
+						}
+						uint32_t visibleChunkCount = 0;
+						for (uint32_t word : mCurrentVisibleChunkWords)
+						{
+							while (word != 0)
+							{
+								visibleChunkCount += word & 1u;
+								word >>= 1u;
+							}
+						}
+						Printf("PERF pt crash scene NRI: frame=%u tlas_instances=%u scene_instances=%u static_instances=%u dynamic_instances=%u persistent_voxel_instances=%u overlay_prims=%u overlay_mats=%u dynamic_prims=%u dynamic_indices=%u persistent_actors=%u persistent_active=%u persistent_prims=%u persistent_mats=%u persistent_mesh_resources=%u visible_chunks=%u/%u runtime_dragged=%u runtime_dirty=%u runtime_rebuilt=%u dyn_models=%u dyn_voxel_proxies=%u dyn_sprites=%u mirror_ext_prims=%u mirror_player_prims=%u\n",
+							mFrameIndex,
+							(uint32_t)instances.size(),
+							(uint32_t)sceneInstances.size(),
+							staticSceneInstanceCount,
+							dynamicSceneInstanceCount,
+							persistentVoxelSceneInstanceCount,
+							liveOverlayPrimitiveCount,
+							(uint32_t)overlayMaterialBridge.materials.size(),
+							liveOverlayPrimitiveCount,
+							liveOverlayIndexCount,
+							(uint32_t)mPersistentVoxelBatch.actors.size(),
+							mPersistentVoxelBatch.activeActorCount,
+							mPersistentVoxelBatch.primitiveCount,
+							mPersistentVoxelBatch.materialCount,
+							mLastPerfShellTraceStats.persistentVoxelSharedMeshResources,
+							visibleChunkCount,
+							(uint32_t)mCurrentVisibleChunkWords.size() * 32u,
+							mRuntimeMapLastFrame.draggedChunkCount,
+							mRuntimeMapLastFrame.dirtyChunkCount,
+							mRuntimeMapLastFrame.rebuiltChunkCount,
+							hasDynamicScene ? dynamicSceneView.stats.modelDrawItems : 0u,
+							hasDynamicScene ? dynamicSceneView.stats.voxelProxyDrawItems : 0u,
+							hasDynamicScene ? dynamicSceneView.stats.spriteDrawItems : 0u,
+							(uint32_t)mirrorExtendedDynamicGeometry.primitives.size(),
+							(uint32_t)mirrorPlayerGeometry.primitives.size());
 					}
 
 					accelerationReady =
@@ -14155,6 +14264,21 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 						entry.indexArenaBytesUploaded +
 						entry.primitiveBytesUploaded));
 			}
+			if ((bool)nri_ptcrashtrace)
+			{
+				Printf("PERF pt crash admission NRI: event=pre-blas-submit frame=%u tex=%d voxel=%d mesh_variant=0x%llx prims=%u upload_bytes=%llu reason=isolate-large-blas\n",
+					mFrameIndex,
+					variant.sourcePicnum,
+					variant.resolvedVoxelIndex,
+					(unsigned long long)variant.meshKeyHash,
+					entry.uploadMeshResource.primitiveCount,
+					(unsigned long long)(
+						entry.vertexBytesUploaded +
+						entry.vertexArenaBytesUploaded +
+						entry.indexBytesUploaded +
+						entry.indexArenaBytesUploaded +
+						entry.primitiveBytesUploaded));
+			}
 			if (mFrameBuffer == nullptr || !mFrameBuffer->SubmitWaitAndRestartCommandList("voxel-pre-blas-upload"))
 			{
 				return rollbackAdmission("pre-blas-submit-wait-failed", "pre_blas_submit");
@@ -14177,6 +14301,16 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 		{
 			Printf("NRI PT voxel admission entry: event=blas-build tex=%d voxel=%d mesh_variant=0x%llx prims=%u bytes=%llu\n",
+				variant.sourcePicnum,
+				variant.resolvedVoxelIndex,
+				(unsigned long long)variant.meshKeyHash,
+				entry.uploadMeshResource.primitiveCount,
+				(unsigned long long)(vertexBytes + indexBytes + primitiveBytes));
+		}
+		if ((bool)nri_ptcrashtrace)
+		{
+			Printf("PERF pt crash admission NRI: event=blas-build frame=%u tex=%d voxel=%d mesh_variant=0x%llx prims=%u bytes=%llu\n",
+				mFrameIndex,
 				variant.sourcePicnum,
 				variant.resolvedVoxelIndex,
 				(unsigned long long)variant.meshKeyHash,
@@ -14250,6 +14384,18 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 			(unsigned long long)variant.materialKeyHash,
 			variant.primitiveCount,
 			(unsigned long long)(vertexBytes + indexBytes + primitiveBytes));
+	}
+	if ((bool)nri_ptcrashtrace)
+	{
+		Printf("PERF pt crash admission NRI: event=ready frame=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu resident_bytes=%llu\n",
+			mFrameIndex,
+			variant.sourcePicnum,
+			variant.resolvedVoxelIndex,
+			(unsigned long long)variant.meshKeyHash,
+			(unsigned long long)variant.materialKeyHash,
+			variant.primitiveCount,
+			(unsigned long long)(vertexBytes + indexBytes + primitiveBytes),
+			(unsigned long long)mPersistentVoxelMeshVariantResources[variant.meshKeyHash].residentBytes);
 	}
 	return true;
 }
@@ -14500,6 +14646,25 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 					(unsigned long long)entry->estimatedBytes,
 					entry->lastReason);
 			}
+			if ((bool)nri_ptcrashtrace)
+			{
+				Printf("PERF pt crash admission NRI: event=failed frame=%u phase=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu reason=%s\n",
+					mFrameIndex,
+					phase != nullptr ? phase : "unknown",
+					entry->sourceBits,
+					entry->priority,
+					entry->admissionRank,
+					entry->gpuForce ? 1u : 0u,
+					entry->gpuPrefer ? 1u : 0u,
+					entry->runtimeRequested ? 1u : 0u,
+					entry->variant.sourcePicnum,
+					entry->variant.resolvedVoxelIndex,
+					(unsigned long long)entry->variant.meshKeyHash,
+					(unsigned long long)entry->variant.materialKeyHash,
+					entry->variant.primitiveCount,
+					(unsigned long long)entry->estimatedBytes,
+					entry->lastReason);
+			}
 			break;
 		}
 		const uint32_t blasBuiltThisEntry = blasBefore - blasBudgetRemaining;
@@ -14513,6 +14678,27 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 			if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
 			{
 				Printf("NRI PT voxel admission queue: event=in-progress phase=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu upload_bytes=%llu state=%u reason=%s\n",
+					phase != nullptr ? phase : "unknown",
+					entry->sourceBits,
+					entry->priority,
+					entry->admissionRank,
+					entry->gpuForce ? 1u : 0u,
+					entry->gpuPrefer ? 1u : 0u,
+					entry->runtimeRequested ? 1u : 0u,
+					entry->variant.sourcePicnum,
+					entry->variant.resolvedVoxelIndex,
+					(unsigned long long)entry->variant.meshKeyHash,
+					(unsigned long long)entry->variant.materialKeyHash,
+					entry->variant.primitiveCount,
+					(unsigned long long)entry->estimatedBytes,
+					(unsigned long long)uploadBytes,
+					(uint32_t)entry->state,
+					entry->lastReason);
+			}
+			if ((bool)nri_ptcrashtrace)
+			{
+				Printf("PERF pt crash admission NRI: event=in-progress frame=%u phase=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu upload_bytes=%llu state=%u reason=%s\n",
+					mFrameIndex,
 					phase != nullptr ? phase : "unknown",
 					entry->sourceBits,
 					entry->priority,
@@ -14557,6 +14743,28 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 				reusedMesh ? 1u : 0u,
 				reusedMaterial ? 1u : 0u);
 		}
+		if ((bool)nri_ptcrashtrace)
+		{
+			Printf("PERF pt crash admission NRI: event=queue-ready frame=%u phase=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu upload_bytes=%llu reused_mesh=%u reused_material=%u blas_built=%u\n",
+				mFrameIndex,
+				phase != nullptr ? phase : "unknown",
+				entry->sourceBits,
+				entry->priority,
+				entry->admissionRank,
+				entry->gpuForce ? 1u : 0u,
+				entry->gpuPrefer ? 1u : 0u,
+				entry->runtimeRequested ? 1u : 0u,
+				entry->variant.sourcePicnum,
+				entry->variant.resolvedVoxelIndex,
+				(unsigned long long)entry->variant.meshKeyHash,
+				(unsigned long long)entry->variant.materialKeyHash,
+				entry->variant.primitiveCount,
+				(unsigned long long)entry->estimatedBytes,
+				(unsigned long long)uploadBytes,
+				reusedMesh ? 1u : 0u,
+				reusedMaterial ? 1u : 0u,
+				blasBuiltThisEntry);
+		}
 		if (loadingPhase && blasBuiltThisEntry != 0)
 		{
 			if (mFrameBuffer == nullptr || !mFrameBuffer->SubmitWaitAndRestartCommandList("voxel-loading-blas"))
@@ -14583,6 +14791,38 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		uint32_t failed = 0;
 		CountPersistentVoxelAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
 		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u required_pending=%u required_ready=%u optional_pending=%u variants_budget=%u bytes_budget=%llu ms_budget=%.3f ms_used=%.3f blas_budget=%u blas_used=%u stop=%s\n",
+			phase != nullptr ? phase : "unknown",
+			stats.queued,
+			stats.ready,
+			stats.deferred,
+			stats.failed + stats.failedThisPump,
+			stats.uploaded,
+			stats.skippedBudget,
+			(unsigned long long)stats.bytesPending,
+			(unsigned long long)stats.bytesUploaded,
+			stats.force,
+			stats.prefer,
+			stats.runtime,
+			requiredPending,
+			requiredReady,
+			optionalPending,
+			variantBudget,
+			(unsigned long long)byteBudget,
+			msBudget,
+			elapsedMs(),
+			blasBudgetLimit,
+			blasUsed,
+			stopReason);
+	}
+	if ((bool)nri_ptcrashtrace && hasQueueActivity)
+	{
+		uint32_t requiredPending = 0;
+		uint32_t requiredReady = 0;
+		uint32_t optionalPending = 0;
+		uint32_t failed = 0;
+		CountPersistentVoxelAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
+		Printf("PERF pt crash admission summary NRI: frame=%u phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u required_pending=%u required_ready=%u optional_pending=%u variants_budget=%u bytes_budget=%llu ms_budget=%.3f ms_used=%.3f blas_budget=%u blas_used=%u stop=%s\n",
+			mFrameIndex,
 			phase != nullptr ? phase : "unknown",
 			stats.queued,
 			stats.ready,
@@ -23243,6 +23483,20 @@ NRIRenderer::ResidentUploadScratchFrame& NRIRenderer::GetResidentUploadScratchFr
 	auto& frameScratch = mResidentUploadScratchFrames[frameSlot];
 	if (frameScratch.frameIndex != mFrameIndex)
 	{
+		if ((bool)nri_ptcrashtrace &&
+			(!frameScratch.retiredBuffers.empty() || !frameScratch.retiredAccelerationStructures.empty()))
+		{
+			Printf("PERF pt crash retire-drain NRI: frame=%u slot=%u previous_frame=%llu retired_buffers=%u retired_as=%u vertex_scratch=%llu index_scratch=%llu primitive_scratch=%llu material_scratch=%llu\n",
+				mFrameIndex,
+				frameSlot,
+				(unsigned long long)frameScratch.frameIndex,
+				(uint32_t)frameScratch.retiredBuffers.size(),
+				(uint32_t)frameScratch.retiredAccelerationStructures.size(),
+				(unsigned long long)frameScratch.vertex.cursor,
+				(unsigned long long)frameScratch.index.cursor,
+				(unsigned long long)frameScratch.primitive.cursor,
+				(unsigned long long)frameScratch.material.cursor);
+		}
 		for (NRIBufferResource& retired : frameScratch.retiredBuffers)
 		{
 			DestroyBufferResource(retired);
@@ -23965,6 +24219,19 @@ void NRIRenderer::RetireResidentBufferResource(NRIBufferResource& resource)
 		!mResidentUploadScratchFrames.empty())
 	{
 		auto& frameScratch = GetResidentUploadScratchFrame();
+		if ((bool)nri_ptcrashtrace)
+		{
+			Printf("PERF pt crash retire NRI: frame=%u type=buffer slot=%u scratch_frame=%llu buffer=%p view=%p size=%llu memory=%llu retired_buffers_before=%u retired_as_before=%u\n",
+				mFrameIndex,
+				GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size(),
+				(unsigned long long)frameScratch.frameIndex,
+				(void*)resource.buffer,
+				(void*)resource.shaderView,
+				(unsigned long long)resource.size,
+				(unsigned long long)resource.memorySize,
+				(uint32_t)frameScratch.retiredBuffers.size(),
+				(uint32_t)frameScratch.retiredAccelerationStructures.size());
+		}
 		frameScratch.retiredBuffers.push_back(resource);
 		resource = {};
 		return;
@@ -23989,6 +24256,18 @@ void NRIRenderer::RetireResidentAccelerationStructure(NRIAccelerationStructureRe
 	}
 
 	auto& frameScratch = GetResidentUploadScratchFrame();
+	if ((bool)nri_ptcrashtrace)
+	{
+		Printf("PERF pt crash retire NRI: frame=%u type=as slot=%u scratch_frame=%llu as=%p descriptor=%p memory=%llu retired_buffers_before=%u retired_as_before=%u\n",
+			mFrameIndex,
+			GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size(),
+			(unsigned long long)frameScratch.frameIndex,
+			(void*)resource.accelerationStructure,
+			(void*)resource.descriptor,
+			(unsigned long long)resource.memorySize,
+			(uint32_t)frameScratch.retiredBuffers.size(),
+			(uint32_t)frameScratch.retiredAccelerationStructures.size());
+	}
 	frameScratch.retiredAccelerationStructures.push_back(resource);
 	resource = {};
 }
@@ -29367,6 +29646,9 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	{
 		return false;
 	}
+	const void* oldTopLevelAS = (const void*)topLevelAS.accelerationStructure;
+	const void* oldTopLevelDescriptor = (const void*)topLevelAS.descriptor;
+	const uint64_t oldTopLevelMemorySize = topLevelAS.memorySize;
 
 	DestroyAccelerationStructureResource(topLevelAS);
 
@@ -29418,6 +29700,29 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	if (mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*topLevelAS.accelerationStructure, topLevelAS.descriptor) != nri::Result::SUCCESS)
 	{
 		return false;
+	}
+	if ((bool)nri_ptcrashtrace)
+	{
+		Printf("PERF pt crash tlas build NRI: frame=%u instances=%u scene_mask=0x%x update_live=%u old_as=%p old_desc=%p old_memory=%llu new_as=%p new_desc=%p new_memory=%llu instance_buffer=%p instance_buffer_size=%llu scratch_buffer=%p scratch_size=%llu required_scratch=%llu static_vb=%p static_ib=%p dynamic_vb=%p dynamic_ib=%p\n",
+			mFrameIndex,
+			(uint32_t)instances.size(),
+			sceneBufferMask,
+			updateLiveState ? 1u : 0u,
+			oldTopLevelAS,
+			oldTopLevelDescriptor,
+			(unsigned long long)oldTopLevelMemorySize,
+			(void*)topLevelAS.accelerationStructure,
+			(void*)topLevelAS.descriptor,
+			(unsigned long long)topLevelAS.memorySize,
+			(void*)tlasInstanceBuffer.buffer,
+			(unsigned long long)tlasInstanceBuffer.size,
+			(void*)topLevelScratchBuffer.buffer,
+			(unsigned long long)topLevelScratchBuffer.size,
+			(unsigned long long)requiredScratchSize,
+			staticVertexBuffer != nullptr ? (void*)staticVertexBuffer->buffer : nullptr,
+			staticIndexBuffer != nullptr ? (void*)staticIndexBuffer->buffer : nullptr,
+			(void*)mVertexBuffer.buffer,
+			(void*)mIndexBuffer.buffer);
 	}
 
 	nri::BuildTopLevelAccelerationStructureDesc tlasBuild = {};
