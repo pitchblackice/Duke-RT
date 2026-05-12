@@ -29650,7 +29650,7 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	const void* oldTopLevelDescriptor = (const void*)topLevelAS.descriptor;
 	const uint64_t oldTopLevelMemorySize = topLevelAS.memorySize;
 
-	DestroyAccelerationStructureResource(topLevelAS);
+	RetireResidentAccelerationStructure(topLevelAS);
 
 	static SceneBufferDebugStats sTlasInstanceStats = { "TLASInstance" };
 	if (!EnsureStructuredBuffer(
