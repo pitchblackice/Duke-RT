@@ -8679,6 +8679,78 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								persistentVoxelTlasMissingSkipPrimitiveCount += actor.primitiveCount;
 								continue;
 							}
+							auto persistentVoxelTransformFinite = [](const std::array<float, 12>& transform) -> bool
+							{
+								for (float value : transform)
+								{
+									if (!std::isfinite(value))
+									{
+										return false;
+									}
+								}
+								return true;
+							};
+							const bool primitiveArenaRangeValid =
+								(uint64_t)actor.primitiveOffset + (uint64_t)actor.primitiveCount <= (uint64_t)mPersistentVoxelArenaPrimitiveCursor;
+							const bool materialArenaRangeValid =
+								(uint64_t)actor.materialOffset + (uint64_t)actor.materialCount <= (uint64_t)mPersistentVoxelArenaMaterialCursor;
+							const bool meshRangeMatches =
+								actor.primitiveOffset == meshResourceIt->second.primitiveOffset &&
+								actor.primitiveCount == meshResourceIt->second.primitiveCount &&
+								actor.indexOffset == meshResourceIt->second.indexOffset &&
+								actor.indexCount == meshResourceIt->second.indexCount;
+							const bool transformValid =
+								persistentVoxelTransformFinite(actor.instanceTransform) &&
+								persistentVoxelTransformFinite(actor.previousInstanceTransform);
+							const char* invalidTlasReason = nullptr;
+							if (!primitiveArenaRangeValid)
+							{
+								invalidTlasReason = "invalid-primitive-range";
+							}
+							else if (!materialArenaRangeValid)
+							{
+								invalidTlasReason = "invalid-material-range";
+							}
+							else if (!meshRangeMatches)
+							{
+								invalidTlasReason = "mesh-range-mismatch";
+							}
+							else if (!transformValid)
+							{
+								invalidTlasReason = "invalid-transform";
+							}
+							if (invalidTlasReason != nullptr)
+							{
+								if ((bool)nri_voxelstats)
+								{
+									Printf("PERF pt voxel tlas NRI: frame=%u action=skip reason=%s actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx instance_id=%u primitive_offset=%u primitive_count=%u primitive_cursor=%u mesh_primitive_offset=%u mesh_primitive_count=%u index_offset=%u index_count=%u mesh_index_offset=%u mesh_index_count=%u material_offset=%u material_count=%u material_cursor=%u blas=1 tlas_ready=%u tlas_published=%u ready=0\n",
+										mFrameIndex,
+										invalidTlasReason,
+										(unsigned long long)actor.identityKey,
+										(unsigned long long)actor.meshResourceKey,
+										(unsigned long long)actor.meshKeyHash,
+										(unsigned long long)actor.materialKeyHash,
+										(uint32_t)sceneInstances.size(),
+										actor.primitiveOffset,
+										actor.primitiveCount,
+										mPersistentVoxelArenaPrimitiveCursor,
+										meshResourceIt->second.primitiveOffset,
+										meshResourceIt->second.primitiveCount,
+										actor.indexOffset,
+										actor.indexCount,
+										meshResourceIt->second.indexOffset,
+										meshResourceIt->second.indexCount,
+										actor.materialOffset,
+										actor.materialCount,
+										mPersistentVoxelArenaMaterialCursor,
+										meshResourceIt->second.tlasReadyFrame,
+										meshResourceIt->second.tlasPublished ? 1u : 0u);
+								}
+								persistentVoxelTlasSkippedCount++;
+								persistentVoxelTlasMissingSkipCount++;
+								persistentVoxelTlasMissingSkipPrimitiveCount += actor.primitiveCount;
+								continue;
+							}
 							if (!meshResourceIt->second.tlasPublished &&
 								meshResourceIt->second.tlasReadyFrame > mFrameIndex)
 							{
