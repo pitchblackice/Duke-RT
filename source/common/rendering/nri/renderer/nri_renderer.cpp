@@ -24314,6 +24314,11 @@ void NRIRenderer::DrainDelayedTopLevelRetirements(bool force)
 		return;
 	}
 
+	if (force)
+	{
+		WaitForCommandsTracked("world_tlas_retire_force");
+	}
+
 	const int configuredHoldFrames = (int)nri_pttlasretireholdframes;
 	const bool normalRetirement = !force && configuredHoldFrames < 0;
 	const bool holdUntilTeardown = !force && configuredHoldFrames == 0;
