@@ -23479,7 +23479,7 @@ uint32_t NRIRenderer::GetCurrentQueuedFrameIndex() const
 
 NRIRenderer::ResidentUploadScratchFrame& NRIRenderer::GetResidentUploadScratchFrame()
 {
-	const uint32_t frameSlot = GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size();
+	const uint32_t frameSlot = mFrameIndex % (uint32_t)mResidentUploadScratchFrames.size();
 	auto& frameScratch = mResidentUploadScratchFrames[frameSlot];
 	if (frameScratch.frameIndex != mFrameIndex)
 	{
@@ -24223,7 +24223,7 @@ void NRIRenderer::RetireResidentBufferResource(NRIBufferResource& resource)
 		{
 			Printf("PERF pt crash retire NRI: frame=%u type=buffer slot=%u scratch_frame=%llu buffer=%p view=%p size=%llu memory=%llu retired_buffers_before=%u retired_as_before=%u\n",
 				mFrameIndex,
-				GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size(),
+				mFrameIndex % (uint32_t)mResidentUploadScratchFrames.size(),
 				(unsigned long long)frameScratch.frameIndex,
 				(void*)resource.buffer,
 				(void*)resource.shaderView,
@@ -24260,7 +24260,7 @@ void NRIRenderer::RetireResidentAccelerationStructure(NRIAccelerationStructureRe
 	{
 		Printf("PERF pt crash retire NRI: frame=%u type=as slot=%u scratch_frame=%llu as=%p descriptor=%p memory=%llu retired_buffers_before=%u retired_as_before=%u\n",
 			mFrameIndex,
-			GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size(),
+			mFrameIndex % (uint32_t)mResidentUploadScratchFrames.size(),
 			(unsigned long long)frameScratch.frameIndex,
 			(void*)resource.accelerationStructure,
 			(void*)resource.descriptor,
