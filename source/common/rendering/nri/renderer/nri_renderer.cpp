@@ -2722,7 +2722,7 @@ CVAR(Int, nri_ptvoxelexcludeindex3, -1, 0)
 CVAR(Int, nri_ptvoxelexcludeminprims, 0, 0)
 CVAR(Int, nri_ptvoxelretainedtlasprims, 131072, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptcrashtrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_pttlasretireholdframes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_pttlasretireholdframes, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -24281,13 +24281,14 @@ void NRIRenderer::DrainDelayedTopLevelRetirements(bool force)
 	}
 
 	const int configuredHoldFrames = (int)nri_pttlasretireholdframes;
-	const bool holdUntilTeardown = !force && configuredHoldFrames < 0;
-	const uint32_t holdFrames = force || holdUntilTeardown ? 0u : (uint32_t)configuredHoldFrames;
+	const bool normalRetirement = !force && configuredHoldFrames < 0;
+	const bool holdUntilTeardown = !force && configuredHoldFrames == 0;
+	const uint32_t holdFrames = force || holdUntilTeardown || normalRetirement ? 0u : (uint32_t)configuredHoldFrames;
 	for (size_t i = 0; i < mDelayedTopLevelRetirements.size();)
 	{
 		DelayedTopLevelRetirement& delayed = mDelayedTopLevelRetirements[i];
 		const uint32_t age = mFrameIndex - delayed.retireFrame;
-		if (holdUntilTeardown || (!force && age < holdFrames))
+		if (!normalRetirement && (holdUntilTeardown || (!force && age < holdFrames)))
 		{
 			++i;
 			continue;
@@ -24330,7 +24331,7 @@ void NRIRenderer::RetireTopLevelAccelerationStructure(NRIAccelerationStructureRe
 	DrainDelayedTopLevelRetirements(false);
 
 	const int holdFrames = (int)nri_pttlasretireholdframes;
-	if (holdFrames == 0)
+	if (holdFrames < 0)
 	{
 		RetireResidentAccelerationStructure(resource);
 		return;
