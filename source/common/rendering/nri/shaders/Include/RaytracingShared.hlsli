@@ -216,6 +216,18 @@ uint GetPersistentVoxelPrimitiveCount()
 #endif
 }
 
+uint GetPersistentVoxelVertexCount()
+{
+#if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
+	uint count = 0u;
+	uint stride = 0u;
+	gPersistentVoxelVertices.GetDimensions(count, stride);
+	return count;
+#else
+	return gTraceConstants.DynamicVertexCount;
+#endif
+}
+
 uint GetPersistentVoxelMaterialCount()
 {
 #if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
@@ -281,7 +293,7 @@ SceneVertex GetVertexData(uint dataSource, uint vertexIndex)
 	if (dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 	{
 #if defined(NRI_ENABLE_PERSISTENT_VOXEL_SCENE)
-		return gPersistentVoxelVertices[vertexIndex];
+		return gPersistentVoxelVertices[min(vertexIndex, max(GetPersistentVoxelVertexCount(), 1u) - 1u)];
 #else
 		return gDynamicVertices[vertexIndex];
 #endif
