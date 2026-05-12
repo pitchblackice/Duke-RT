@@ -2275,8 +2275,7 @@ private:
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
-	static constexpr uint32_t ResidentUploadScratchFrameCount = 8;
-	std::array<ResidentUploadScratchFrame, ResidentUploadScratchFrameCount> mResidentUploadScratchFrames = {};
+	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
 	SceneBufferDebugStats mIndexBufferStats = { "Index" };
 	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };
