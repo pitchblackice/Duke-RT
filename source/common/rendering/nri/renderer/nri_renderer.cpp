@@ -8545,10 +8545,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								0;
 							return std::max(actor.retainedFrameAge, frameAge);
 						};
-						std::vector<const PersistentVoxelBatch::ActorEntry*> persistentVoxelTlasActors;
+						std::vector<PersistentVoxelBatch::ActorEntry*> persistentVoxelTlasActors;
 						persistentVoxelTlasActors.reserve(mPersistentVoxelBatch.actors.size());
-						for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+						for (PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 						{
+							actor.inWorldTlasThisFrame = false;
 							if (actor.active)
 							{
 								persistentVoxelTlasActors.push_back(&actor);
@@ -8573,9 +8574,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								}
 								return left->identityKey < right->identityKey;
 							});
-						for (const PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
+						for (PersistentVoxelBatch::ActorEntry* actorPtr : persistentVoxelTlasActors)
 						{
-							const PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
+							PersistentVoxelBatch::ActorEntry& actor = *actorPtr;
 							persistentVoxelTlasCandidateCount++;
 							const bool excludedByIndex = actor.resolvedVoxelIndex >= 0 &&
 								(actor.resolvedVoxelIndex == persistentVoxelExcludeIndex0 ||
@@ -8805,6 +8806,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								sceneInstance.previousTransform[i] = actor.previousInstanceTransform[i];
 							}
 							sceneInstances.push_back(sceneInstance);
+							actor.inWorldTlasThisFrame = true;
 							if (meshResourceFirstPublish)
 							{
 								persistentVoxelTlasNewMeshCount++;
@@ -19151,14 +19153,37 @@ void NRIRenderer::RefreshSceneLightSystem(
 		!mPersistentVoxelBatch.materialBridge.materials.empty())
 	{
 		ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightPersistentVoxelAppendMs);
+		uint32_t appendedActors = 0;
+		uint32_t skippedActors = 0;
+		uint32_t appendedRecords = 0;
+		uint32_t skippedRecords = 0;
 		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 		{
 			if (!actor.active || actor.lightRecords.empty() || actor.materialCount == 0)
 			{
 				continue;
 			}
+			if (!actor.inWorldTlasThisFrame)
+			{
+				skippedActors++;
+				skippedRecords += (uint32_t)actor.lightRecords.size();
+				continue;
+			}
 
 			mSceneLights.AppendSurfaceRecords(actor.lightRecords, actor.materialOffset);
+			appendedActors++;
+			appendedRecords += (uint32_t)actor.lightRecords.size();
+		}
+		if ((bool)nri_voxelstats && (appendedActors != 0 || skippedActors != 0))
+		{
+			Printf("PERF pt voxel light NRI: frame=%u appended_actors=%u skipped_not_tlas=%u appended_records=%u skipped_records=%u actors=%u active=%u\n",
+				mFrameIndex,
+				appendedActors,
+				skippedActors,
+				appendedRecords,
+				skippedRecords,
+				(uint32_t)mPersistentVoxelBatch.actors.size(),
+				mPersistentVoxelBatch.activeActorCount);
 		}
 	}
 

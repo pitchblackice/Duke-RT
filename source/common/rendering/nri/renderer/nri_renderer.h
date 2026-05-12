@@ -1365,6 +1365,7 @@ private:
 			int32_t resolvedVoxelIndex = -1;
 			uint32_t visibilityChunkIndex = UINT32_MAX;
 			bool capturedThisFrame = false;
+			bool inWorldTlasThisFrame = false;
 			bool active = true;
 			uint32_t primitiveOffset = 0;
 			uint32_t primitiveCount = 0;
