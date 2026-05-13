@@ -24,6 +24,20 @@ function Write-Info {
     Write-Host "[duke-rt] $Message"
 }
 
+function Write-Section {
+    param([string]$Title)
+
+    if ($Quiet) {
+        return
+    }
+
+    Write-Host ""
+    Write-Host "======================================================="
+    Write-Info $Title
+    Write-Host "======================================================="
+    Write-Host ""
+}
+
 function Write-LaunchVars {
     param(
         [string]$Path,
@@ -738,8 +752,8 @@ function Invoke-VoxelPackImport {
     $consent = $true
     if (-not $VoxelYes -and -not $ForceVoxels -and -not $ExplicitVoxelZip) {
         Write-Host ""
-        Write-Info "Duke-RT can guide you through installing Cheello's excellent Voxel Duke 3D work into your local release-overlay."
-        Write-Info "This will open the ModDB page in your default browser. On that page, click Download Now to download the voxel archive."
+        Write-Info "This final setup step lets you play Duke-RT with voxel replacements by downloading Cheello's excellent Voxel Duke 3D work."
+        Write-Info "We can open Cheello's ModDB page in your default browser. On that page, click Download Now to download the voxel archive."
         Write-Info "After the download completes, return to this console window to continue voxel unpacking."
         Write-Info "You should also check out Cheello's work at:"
         Write-Info "  https://www.youtube.com/@cheello_art"
@@ -976,9 +990,11 @@ Ensure-WithinRoot -RootPath $LaunchRoot -CandidatePath $StatePath -Label "State"
 Ensure-WithinRoot -RootPath $LaunchRoot -CandidatePath $LaunchVarsPath -Label "Launch vars"
 
 $state = Load-State -Path $StatePath
+Write-Section -Title "Step 1: Select your Duke Nukem 3D install"
 $resolvedInstall = Resolve-DukeInstall -State $state -ExplicitGameRoot $GameRoot -LaunchRoot $LaunchRoot
 $resolvedSourceRoot = Resolve-SourceRoot -ExplicitSourceRoot $SourceRoot -InstallRoot $resolvedInstall["install_root"]
 
+Write-Section -Title "Step 2: Import World Tour normal maps"
 try {
     Invoke-NormalImport -LaunchRoot $LaunchRoot -OverlayDir $OverlayDir -SourceRoot $resolvedSourceRoot -State $state
 }
@@ -987,6 +1003,7 @@ catch {
     Write-Warning "Launch will continue without imported commercial normals."
 }
 
+Write-Section -Title "Step 3: Set up the optional voxel pack"
 try {
     Invoke-VoxelPackImport -LaunchRoot $LaunchRoot -OverlayDir $OverlayDir -ExplicitVoxelZip $VoxelZip -State $state
 }
