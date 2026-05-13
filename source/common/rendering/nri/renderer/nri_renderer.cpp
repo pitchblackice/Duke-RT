@@ -8470,7 +8470,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					}
 					else
 					{
-						DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+						RetireResidentAccelerationStructure(mDynamicBottomLevelAS);
 						mLastPerfShellTraceStats.dynamicAsPrimitiveCount = 0;
 						mLastPerfShellTraceStats.dynamicAsVertexCount = 0;
 						mLastPerfShellTraceStats.dynamicAsIndexCount = 0;
@@ -9323,7 +9323,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 		else if (mGpuSceneHasDynamicOverlay || residentStaticWorldGeometryChanged)
 		{
-			DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+			RetireResidentAccelerationStructure(mDynamicBottomLevelAS);
 			if (!RestoreStaticTopLevelScene())
 			{
 				LogFallback("PT static scene restore failed after dynamic overlay or resident chunk rebuild.");
@@ -29475,7 +29475,7 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 	dynamicGeometryDesc.triangles.indexNum = indexCount;
 	dynamicGeometryDesc.triangles.indexType = nri::IndexType::UINT32;
 
-	DestroyAccelerationStructureResource(outAccelerationStructure);
+	RetireResidentAccelerationStructure(outAccelerationStructure);
 
 	nri::AccelerationStructureDesc blasDesc = {};
 	blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
