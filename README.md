@@ -243,8 +243,8 @@ To build a stripped `Release` tree and stage a redistributable folder plus zip i
 Default outputs:
 
 - `build\terminal-release\raze.exe`
-- `out\release\raze-windows-release\`
-- `out\release\raze-windows-release.zip`
+- `out\release\Duke-RT\`
+- `out\release\Duke-RT.zip`
 
 To restage or re-zip an already-built `Release` tree without rebuilding, run:
 

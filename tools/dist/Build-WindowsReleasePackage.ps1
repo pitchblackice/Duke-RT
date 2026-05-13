@@ -125,10 +125,10 @@ if (-not $RazeBuildDir) {
     $RazeBuildDir = Join-Path $repoRoot "build\terminal-release"
 }
 if (-not $PackageDir) {
-    $PackageDir = Join-Path $packageRootDir "raze-windows-release"
+    $PackageDir = Join-Path $packageRootDir "Duke-RT"
 }
 if (-not $ZipPath) {
-    $ZipPath = Join-Path $packageRootDir "raze-windows-release.zip"
+    $ZipPath = Join-Path $packageRootDir "Duke-RT.zip"
 }
 
 $ZMusicSourceDir = [System.IO.Path]::GetFullPath($ZMusicSourceDir)
