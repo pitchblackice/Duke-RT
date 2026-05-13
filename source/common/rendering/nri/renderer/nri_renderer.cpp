@@ -28871,7 +28871,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			const auto& oldAtlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
 			const uint32_t oldMaterialOffset = oldAtlasChunk.materialOffset;
 			const uint32_t oldMaterialCount = oldAtlasChunk.materialCount;
-			DestroyAccelerationStructureResource(mutableChunk.accelerationStructure);
+			RetireResidentAccelerationStructure(mutableChunk.accelerationStructure);
 			ReleaseChunkAtlasRange(mStaticMapChunkAtlas.freeVertexRanges, oldAtlasChunk.vertexOffset, oldAtlasChunk.vertexCount);
 			ReleaseChunkAtlasRange(mStaticMapChunkAtlas.freeIndexRanges, oldAtlasChunk.indexOffset, oldAtlasChunk.indexCount);
 			ReleaseChunkAtlasRange(mStaticMapChunkAtlas.freePrimitiveRanges, oldAtlasChunk.primitiveOffset, oldAtlasChunk.primitiveCount);
@@ -29562,7 +29562,7 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 		mBoundSceneInstances.empty())
 	{
 		DestroyBufferResource(mEmissiveTlasInstanceBuffer);
-		DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+		RetireTopLevelAccelerationStructure(mEmissiveTopLevelAS);
 		mEmissiveTlasInstancePayloadCacheValid = false;
 		mEmissiveTlasInstancePayloadHash = 0;
 		return true;
@@ -29676,7 +29676,7 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 	if (instances.empty())
 	{
 		DestroyBufferResource(mEmissiveTlasInstanceBuffer);
-		DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+		RetireTopLevelAccelerationStructure(mEmissiveTopLevelAS);
 		mEmissiveTlasInstancePayloadCacheValid = false;
 		mEmissiveTlasInstancePayloadHash = 0;
 		return true;
@@ -29692,7 +29692,7 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 		return true;
 	}
 
-	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+	RetireTopLevelAccelerationStructure(mEmissiveTopLevelAS);
 	if (!EnsureStructuredBuffer(
 		mEmissiveTlasInstanceBuffer,
 		mEmissiveTlasInstanceBufferStats,
