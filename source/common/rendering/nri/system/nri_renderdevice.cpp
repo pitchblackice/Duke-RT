@@ -36,6 +36,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <fstream>
@@ -84,6 +85,7 @@ EXTERN_CVAR(Bool, nri_voxelstats)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
 CVAR(Bool, nri_ptsanity, false, 0)
 CVAR(Bool, nri_ptwaitpresent, true, 0)
+CVAR(Bool, nri_ptslowdowntrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CUSTOM_CVAR(Int, nri_pttraceframes, 0, 0)
 {
@@ -94,6 +96,30 @@ CUSTOM_CVAR(Int, nri_pttraceframes, 0, 0)
 	else if (self > 600)
 	{
 		self = 600;
+	}
+}
+
+CUSTOM_CVAR(Int, nri_ptslowdowntraceinterval, 300, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 1)
+	{
+		self = 1;
+	}
+	else if (self > 36000)
+	{
+		self = 36000;
+	}
+}
+
+CUSTOM_CVAR(Int, nri_ptslowdowntop, 5, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 16)
+	{
+		self = 16;
 	}
 }
 
@@ -3504,6 +3530,14 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 		return true;
 	}
 	mLastFrameBoundaryStats.pathTracedSceneRendered = mLastFrameBoundaryStats.pathTracedSceneRendered || rendered;
+	if (rendered && ShouldEmitProgressiveSlowdownTrace(mLastFrameBoundaryStats.frameNumber))
+	{
+		EmitProgressiveSlowdownTrace(
+			mLastFrameBoundaryStats.frameNumber,
+			mRenderer->GetLastPerfShellTraceStats(),
+			mRenderer->GetLastPerfResourceTraceStats(),
+			mRenderer->GetLastPerfTraceShaderStats());
+	}
 	if (rendered && PerfLoopTraceActive())
 	{
 		const auto& shell = mRenderer->GetLastPerfShellTraceStats();

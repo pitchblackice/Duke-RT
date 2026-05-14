@@ -615,6 +615,15 @@ public:
 		uint32_t persistentVoxelTlasInstances = 0;
 		uint32_t persistentVoxelInstanceTransformUpdates = 0;
 		uint32_t persistentVoxelBakedFallbackInstances = 0;
+		uint32_t persistentVoxelBatchActorCount = 0;
+		uint32_t persistentVoxelInstanceRecordCount = 0;
+		uint32_t persistentVoxelPendingInstanceCount = 0;
+		uint32_t persistentVoxelMaterialVariantResourceCount = 0;
+		uint32_t persistentVoxelZeroRefMeshResourceCount = 0;
+		uint32_t persistentVoxelZeroRefMaterialResourceCount = 0;
+		uint32_t persistentVoxelAdmissionQueueCount = 0;
+		uint64_t persistentVoxelResidentResourceBytes = 0;
+		uint64_t persistentVoxelZeroRefResourceBytes = 0;
 		uint32_t worldTlasBuildCalls = 0;
 		uint32_t worldTlasInstanceCount = 0;
 		uint32_t sceneDataSetCalls = 0;
