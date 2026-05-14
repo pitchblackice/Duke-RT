@@ -127,6 +127,7 @@ CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.1375f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Bool, nri_voxelstats)
+EXTERN_CVAR(Bool, nri_ptslowdowntrace)
 EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
@@ -3015,6 +3016,11 @@ namespace
 		return PerfLoopTraceActive() || ShouldEmitTemporalTraceLogs();
 	}
 
+	bool ShouldCollectPtPerfTiming()
+	{
+		return ShouldTracePtPerf() || (bool)nri_ptslowdowntrace;
+	}
+
 	bool ShouldCollectTraceShaderStats()
 	{
 		return !!nri_ptshaderstats && ShouldTracePtPerf();
@@ -3546,7 +3552,7 @@ namespace
 	{
 	public:
 		explicit ScopedPtPerfTimer(double& targetMs)
-			: mTarget(ShouldTracePtPerf() ? &targetMs : nullptr)
+			: mTarget(ShouldCollectPtPerfTiming() ? &targetMs : nullptr)
 		{
 			if (mTarget != nullptr)
 			{
@@ -8482,6 +8488,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					if (hasPersistentVoxelOverlay)
 					{
 						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectInstanceHandlesMs);
+						ScopedPtPerfTimer persistentVoxelTlasTimer(mLastPerfShellTraceStats.persistentVoxelTlasInstanceMs);
 						std::unordered_set<uint64_t> persistentVoxelTlasMeshResources;
 						persistentVoxelTlasMeshResources.reserve(mPersistentVoxelBatch.actors.size());
 						struct PersistentVoxelTlasGroupStats
@@ -9522,40 +9529,85 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mLastPerfShellTraceStats.sceneInstanceStaticCount = 0;
 		mLastPerfShellTraceStats.sceneInstanceDynamicCount = 0;
 		mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount = 0;
-		for (const SceneInstanceData& instance : mBoundSceneInstances)
 		{
-			if (instance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneInstanceStatsMs);
+			for (const SceneInstanceData& instance : mBoundSceneInstances)
 			{
-				mLastPerfShellTraceStats.sceneInstanceStaticCount++;
-			}
-			else if (instance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC)
-			{
-				mLastPerfShellTraceStats.sceneInstanceDynamicCount++;
-			}
-			else if (instance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
-			{
-				mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount++;
+				if (instance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+				{
+					mLastPerfShellTraceStats.sceneInstanceStaticCount++;
+				}
+				else if (instance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC)
+				{
+					mLastPerfShellTraceStats.sceneInstanceDynamicCount++;
+				}
+				else if (instance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+				{
+					mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount++;
+				}
 			}
 		}
 		mLastPerfShellTraceStats.persistentVoxelMeshVariantResourceCount = (uint32_t)mPersistentVoxelMeshVariantResources.size();
+		mLastPerfShellTraceStats.persistentVoxelMaterialVariantResourceCount = (uint32_t)mPersistentVoxelMaterialVariantResources.size();
+		mLastPerfShellTraceStats.persistentVoxelBatchActorCount = (uint32_t)mPersistentVoxelBatch.actors.size();
+		mLastPerfShellTraceStats.persistentVoxelInstanceRecordCount = (uint32_t)mPersistentVoxelInstances.size();
+		mLastPerfShellTraceStats.persistentVoxelAdmissionQueueCount = (uint32_t)mPersistentVoxelAdmissionQueue.size();
+		mLastPerfShellTraceStats.persistentVoxelPendingInstanceCount = 0;
+		mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes = 0;
+		mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes = 0;
+		mLastPerfShellTraceStats.persistentVoxelZeroRefMeshResourceCount = 0;
+		mLastPerfShellTraceStats.persistentVoxelZeroRefMaterialResourceCount = 0;
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelResourceStatsMs);
+			for (const auto& meshPair : mPersistentVoxelMeshVariantResources)
+			{
+				const PersistentVoxelMeshVariantResource& resource = meshPair.second;
+				mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes += resource.residentBytes;
+				if (resource.activeActorReferences == 0)
+				{
+					mLastPerfShellTraceStats.persistentVoxelZeroRefMeshResourceCount++;
+					mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes += resource.residentBytes;
+				}
+			}
+			for (const auto& materialPair : mPersistentVoxelMaterialVariantResources)
+			{
+				const PersistentVoxelMaterialVariantResource& resource = materialPair.second;
+				mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes += resource.residentBytes;
+				if (resource.activeActorReferences == 0)
+				{
+					mLastPerfShellTraceStats.persistentVoxelZeroRefMaterialResourceCount++;
+					mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes += resource.residentBytes;
+				}
+			}
+		}
 		mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount = 0;
 		mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount = 0;
 		mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount = 0;
 		mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount = UINT32_MAX;
 		mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount = 0;
-		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
 		{
-			if (!actor.active || actor.primitiveCount == 0)
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelBatchStatsMs);
+			for (const auto& instancePair : mPersistentVoxelInstances)
 			{
-				continue;
+				if (instancePair.second.pending)
+				{
+					mLastPerfShellTraceStats.persistentVoxelPendingInstanceCount++;
+				}
 			}
-			mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount++;
-			mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount += actor.primitiveCount;
-			mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount += actor.materialCount;
-			mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount =
-				std::min(mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount, actor.primitiveCount);
-			mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount =
-				std::max(mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount, actor.primitiveCount);
+			for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+			{
+				if (!actor.active || actor.primitiveCount == 0)
+				{
+					continue;
+				}
+				mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount++;
+				mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount += actor.primitiveCount;
+				mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount += actor.materialCount;
+				mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount =
+					std::min(mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount, actor.primitiveCount);
+				mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount =
+					std::max(mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount, actor.primitiveCount);
+			}
 		}
 		if (mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount == 0)
 		{
@@ -29838,7 +29890,11 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
 	Clocker clock(NriPTTraceOpaque);
-	ReadbackTraceShaderStats();
+	ScopedPtPerfTimer traceOpaqueTimer(mLastPerfShellTraceStats.traceOpaqueMs);
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.traceOpaqueReadbackMs);
+		ReadbackTraceShaderStats();
+	}
 
 	if (!UpdateReprojectionBuffer())
 	{
@@ -29945,10 +30001,22 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 2, GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 3, mFrameTextureSet, nri::BindPoint::COMPUTE });
 	mFrameBuffer->mCore.CmdSetDescriptorSet(*mFrameBuffer->mCommandBuffer, { 4, mOutputSet, nri::BindPoint::COMPUTE });
-	ResetTraceShaderStatsBuffer();
-	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::TraceOpaque));
-	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mRenderWidth), GetDispatchSize(mRenderHeight), 1 });
-	CopyTraceShaderStatsForReadback((uint64_t)mFrameIndex);
+	const uint32_t dispatchX = GetDispatchSize(mRenderWidth);
+	const uint32_t dispatchY = GetDispatchSize(mRenderHeight);
+	const uint32_t dispatchZ = 1;
+	mLastPerfShellTraceStats.traceOpaqueDispatchX = dispatchX;
+	mLastPerfShellTraceStats.traceOpaqueDispatchY = dispatchY;
+	mLastPerfShellTraceStats.traceOpaqueDispatchZ = dispatchZ;
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.traceOpaqueCommandMs);
+		ResetTraceShaderStatsBuffer();
+		mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::TraceOpaque));
+		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { dispatchX, dispatchY, dispatchZ });
+	}
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.traceOpaqueStatsCopyMs);
+		CopyTraceShaderStatsForReadback((uint64_t)mFrameIndex);
+	}
 	return true;
 }
 

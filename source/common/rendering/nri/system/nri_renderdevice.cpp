@@ -111,6 +111,415 @@ CUSTOM_CVAR(Int, nri_ptnudgetrace, 0, 0)
 
 namespace
 {
+	static int64_t DeltaUnsigned(uint64_t current, uint64_t previous)
+	{
+		return current >= previous ? (int64_t)(current - previous) : -(int64_t)(previous - current);
+	}
+
+	static const char* GetProgressiveRuntimeMutationTraceActionName(NRIRenderer::RuntimeMutationTraceAction action)
+	{
+		switch (action)
+		{
+		case NRIRenderer::RuntimeMutationTraceAction::StructuralRebuild: return "rebuild";
+		case NRIRenderer::RuntimeMutationTraceAction::MaterialRefresh: return "material-refresh";
+		case NRIRenderer::RuntimeMutationTraceAction::ResidentApply: return "resident-apply";
+		case NRIRenderer::RuntimeMutationTraceAction::ResidentNoopSkip: return "resident-noop-skip";
+		case NRIRenderer::RuntimeMutationTraceAction::ResidentFallback: return "fallback";
+		case NRIRenderer::RuntimeMutationTraceAction::Held: return "held";
+		case NRIRenderer::RuntimeMutationTraceAction::SyncSkip: return "sync-skip";
+		case NRIRenderer::RuntimeMutationTraceAction::Failed: return "failed";
+		default: return "none";
+		}
+	}
+
+	static const char* GetProgressiveSceneDataSourceName(uint32_t dataSource)
+	{
+		switch (dataSource)
+		{
+		case 0: return "static";
+		case 1: return "dynamic";
+		case 2: return "persistent_voxel";
+		default: return "unknown";
+		}
+	}
+
+	static bool ShouldEmitProgressiveSlowdownTrace(uint64_t frameNumber)
+	{
+		if (!nri_ptslowdowntrace)
+		{
+			return false;
+		}
+		const uint64_t interval = (uint64_t)(std::max)(1, (int)nri_ptslowdowntraceinterval);
+		return frameNumber == 1 || (interval != 0 && frameNumber % interval == 0);
+	}
+
+	static void EmitProgressiveSlowdownTrace(
+		uint64_t frameNumber,
+		const NRIRenderer::PerfShellTraceStats& shell,
+		const NRIRenderer::PerfResourceTraceStats& resource,
+		const NRIRenderer::PerfTraceShaderStats& shader)
+	{
+		struct PreviousSample
+		{
+			bool initialized = false;
+			uint32_t runtimeMutationActiveChunkCount = 0;
+			uint32_t runtimeMutationCachedTriangleCount = 0;
+			uint32_t dynamicPrimitiveCount = 0;
+			uint32_t sceneInstanceCount = 0;
+			uint32_t persistentVoxelInstanceActiveCount = 0;
+			uint64_t persistentVoxelZeroRefResourceBytes = 0;
+			uint32_t highRuntimeMutationActiveChunkCount = 0;
+			uint32_t highRuntimeMutationCachedTriangleCount = 0;
+			uint32_t highDynamicPrimitiveCount = 0;
+			uint32_t highSceneInstanceCount = 0;
+			uint32_t highPersistentVoxelInstanceActiveCount = 0;
+			uint64_t highPersistentVoxelZeroRefResourceBytes = 0;
+		};
+		static PreviousSample previous = {};
+
+		const int64_t deltaRuntimeChunks = previous.initialized ? DeltaUnsigned(shell.runtimeMutationActiveChunkCount, previous.runtimeMutationActiveChunkCount) : 0;
+		const int64_t deltaRuntimeTris = previous.initialized ? DeltaUnsigned(shell.runtimeMutationCachedTriangleCount, previous.runtimeMutationCachedTriangleCount) : 0;
+		const int64_t deltaDynamicPrims = previous.initialized ? DeltaUnsigned(shell.dynamicPrimitiveCount, previous.dynamicPrimitiveCount) : 0;
+		const int64_t deltaSceneInstances = previous.initialized ? DeltaUnsigned(shell.sceneInstanceCount, previous.sceneInstanceCount) : 0;
+		const int64_t deltaVoxelInstances = previous.initialized ? DeltaUnsigned(shell.persistentVoxelInstanceActiveCount, previous.persistentVoxelInstanceActiveCount) : 0;
+		const int64_t deltaZeroRefBytes = previous.initialized ? DeltaUnsigned(shell.persistentVoxelZeroRefResourceBytes, previous.persistentVoxelZeroRefResourceBytes) : 0;
+		const uint32_t highRuntimeChunks = previous.initialized ? (std::max)(previous.highRuntimeMutationActiveChunkCount, shell.runtimeMutationActiveChunkCount) : shell.runtimeMutationActiveChunkCount;
+		const uint32_t highRuntimeTris = previous.initialized ? (std::max)(previous.highRuntimeMutationCachedTriangleCount, shell.runtimeMutationCachedTriangleCount) : shell.runtimeMutationCachedTriangleCount;
+		const uint32_t highDynamicPrims = previous.initialized ? (std::max)(previous.highDynamicPrimitiveCount, shell.dynamicPrimitiveCount) : shell.dynamicPrimitiveCount;
+		const uint32_t highSceneInstances = previous.initialized ? (std::max)(previous.highSceneInstanceCount, shell.sceneInstanceCount) : shell.sceneInstanceCount;
+		const uint32_t highVoxelInstances = previous.initialized ? (std::max)(previous.highPersistentVoxelInstanceActiveCount, shell.persistentVoxelInstanceActiveCount) : shell.persistentVoxelInstanceActiveCount;
+		const uint64_t highZeroRefBytes = previous.initialized ? (std::max)(previous.highPersistentVoxelZeroRefResourceBytes, shell.persistentVoxelZeroRefResourceBytes) : shell.persistentVoxelZeroRefResourceBytes;
+		const double persistentVoxelCpuMs =
+			shell.sceneSelectPersistentVoxelBatchMs +
+			shell.persistentVoxelTlasInstanceMs +
+			shell.geometryBuildPersistentVoxelVariantMs +
+			shell.geometryBuildPersistentVoxelAppendMs +
+			shell.geometryBuildPersistentVoxelRebuildMs +
+			shell.sceneLightPersistentVoxelAppendMs +
+			shell.persistentVoxelResourceStatsMs +
+			shell.persistentVoxelBatchStatsMs;
+		const double runtimeCpuMs =
+			shell.runtimeMutationMs +
+			shell.runtimeSpaceLinkMs +
+			shell.runtimeMutationResidentApplyMs;
+		const double textureMs =
+			shell.sceneTextureLookupMs +
+			shell.sceneTextureRealizeMs +
+			shell.sceneTextureDescriptorMs +
+			shell.sceneTextureTransitionMs;
+
+		Printf(
+			"PERF pt progressive slowdown NRI: frame=%llu interval=%d total=%.3f select=%.3f lights=%.3f dynamic_capture=%.3f dynamic_as=%.3f persistent_batch=%.3f persistent_voxel_cpu=%.3f persistent_voxel_tlas=%.3f persistent_voxel_stats=%.3f persistent_voxel_as=%.3f world_tlas=%.3f runtime_cpu=%.3f material=%.3f material_override=%.3f texture=%.3f texture_lookup=%.3f texture_realize=%.3f texture_descriptor=%.3f texture_transition=%.3f active_prims=%u dyn_prims=%u delta_dyn_prims=%lld high_dyn_prims=%u scene_instances=%u delta_scene_instances=%lld high_scene_instances=%u runtime_chunks=%u delta_runtime_chunks=%lld high_runtime_chunks=%u runtime_cached_tris=%u delta_runtime_tris=%lld high_runtime_tris=%u voxel_cache_entries=%u voxel_batch_actors=%u voxel_instances=%u delta_voxel_instances=%lld high_voxel_instances=%u voxel_pending=%u voxel_mesh_resources=%u voxel_material_resources=%u voxel_resident_bytes=%llu voxel_zero_ref_meshes=%u voxel_zero_ref_materials=%u voxel_zero_ref_bytes=%llu delta_zero_ref_bytes=%lld high_zero_ref_bytes=%llu admission_queue=%u scene_light_records=%u material_calls=%u texture_cache=%u texture_misses=%u resource_upload_bytes=%llu resource_wait_ms=%.3f\n",
+			(unsigned long long)frameNumber,
+			(int)nri_ptslowdowntraceinterval,
+			shell.totalMs,
+			shell.sceneSelectMs,
+			shell.sceneLightsMs,
+			shell.dynamicCaptureMs,
+			shell.dynamicAsMs,
+			shell.sceneSelectPersistentVoxelBatchMs,
+			persistentVoxelCpuMs,
+			shell.persistentVoxelTlasInstanceMs,
+			shell.persistentVoxelResourceStatsMs + shell.persistentVoxelBatchStatsMs + shell.sceneInstanceStatsMs,
+			shell.persistentVoxelAsMs,
+			shell.worldTlasMs,
+			runtimeCpuMs,
+			shell.materialBuildMs,
+			shell.actorOverrideMapBuildMs,
+			textureMs,
+			shell.sceneTextureLookupMs,
+			shell.sceneTextureRealizeMs,
+			shell.sceneTextureDescriptorMs,
+			shell.sceneTextureTransitionMs,
+			shell.activePrimitiveCount,
+			shell.dynamicPrimitiveCount,
+			(long long)deltaDynamicPrims,
+			highDynamicPrims,
+			shell.sceneInstanceCount,
+			(long long)deltaSceneInstances,
+			highSceneInstances,
+			shell.runtimeMutationActiveChunkCount,
+			(long long)deltaRuntimeChunks,
+			highRuntimeChunks,
+			shell.runtimeMutationCachedTriangleCount,
+			(long long)deltaRuntimeTris,
+			highRuntimeTris,
+			shell.voxelCacheActorEntries,
+			shell.persistentVoxelBatchActorCount,
+			shell.persistentVoxelInstanceActiveCount,
+			(long long)deltaVoxelInstances,
+			highVoxelInstances,
+			shell.persistentVoxelPendingInstanceCount,
+			shell.persistentVoxelMeshVariantResourceCount,
+			shell.persistentVoxelMaterialVariantResourceCount,
+			(unsigned long long)shell.persistentVoxelResidentResourceBytes,
+			shell.persistentVoxelZeroRefMeshResourceCount,
+			shell.persistentVoxelZeroRefMaterialResourceCount,
+			(unsigned long long)shell.persistentVoxelZeroRefResourceBytes,
+			(long long)deltaZeroRefBytes,
+			(unsigned long long)highZeroRefBytes,
+			shell.persistentVoxelAdmissionQueueCount,
+			shell.sceneLightSurfaceRecordCount,
+			shell.materialBuildCalls,
+			shell.sceneTextureCacheCount,
+			shell.sceneTextureCacheMisses,
+			(unsigned long long)resource.sceneUploadBytes,
+			resource.waitMs);
+		Printf(
+			"PERF pt progressive runtime NRI: frame=%llu runtime_cpu=%.3f mutation=%.3f analyze=%.3f rebuild=%.3f structural=%.3f material_refresh=%.3f resident_apply=%.3f resident_live=%.3f resident_geometry=%.3f resident_material=%.3f resident_baseline=%.3f resident_atlas=%.3f resident_atlas_book=%.3f resident_copy=%.3f resident_primitive=%.3f resident_blas=%.3f resident_blas_setup=%.3f resident_blas_build=%.3f spacelink=%.3f debug_sphere=%.3f dirty=%u rebuilt=%u held=%u resident_apply_count=%u resident_recover=%u blas_recreate=%u blas_refit=%u\n",
+			(unsigned long long)frameNumber,
+			runtimeCpuMs,
+			shell.runtimeMutationMs,
+			shell.runtimeMutationAnalyzeMs,
+			shell.runtimeMutationRebuildMs,
+			shell.runtimeMutationStructuralRebuildMs,
+			shell.runtimeMutationMaterialRefreshMs,
+			shell.runtimeMutationResidentApplyMs,
+			shell.runtimeMutationResidentApplyLiveBuildMs,
+			shell.runtimeMutationResidentApplyGeometryBuildMs,
+			shell.runtimeMutationResidentApplyMaterialBuildMs,
+			shell.runtimeMutationResidentApplyBaselineCaptureMs,
+			shell.runtimeMutationResidentApplyAtlasMs,
+			shell.runtimeMutationResidentApplyAtlasBookkeepingMs,
+			shell.runtimeMutationResidentApplyVertexIndexCopyMs,
+			shell.runtimeMutationResidentApplyPrimitiveRewriteMs,
+			shell.runtimeMutationResidentApplyDownstreamBlasMs,
+			shell.runtimeMutationResidentApplyDownstreamBlasSetupMs,
+			shell.runtimeMutationResidentApplyDownstreamBlasBuildMs,
+			shell.runtimeSpaceLinkMs,
+			shell.runtimeDebugSphereMs,
+			shell.runtimeMutationDirtyChunks,
+			shell.runtimeMutationRebuiltChunks,
+			shell.runtimeMutationHeldChunks,
+			shell.runtimeMutationResidentApplyCount,
+			shell.runtimeMutationResidentApplyRecoverAttemptCount,
+			shell.runtimeMutationResidentApplyBlasRecreateCount,
+			shell.runtimeMutationResidentApplyBlasRefitOnlyCount);
+		Printf(
+			"PERF pt progressive gpu NRI: frame=%llu frame_graph=%.3f trace_opaque_cpu=%.3f trace_opaque_readback=%.3f trace_opaque_cmd=%.3f trace_opaque_stats_copy=%.3f trace_dispatch_x=%u trace_dispatch_y=%u trace_dispatch_z=%u\n",
+			(unsigned long long)frameNumber,
+			shell.frameGraphMs,
+			shell.traceOpaqueMs,
+			shell.traceOpaqueReadbackMs,
+			shell.traceOpaqueCommandMs,
+			shell.traceOpaqueStatsCopyMs,
+			shell.traceOpaqueDispatchX,
+			shell.traceOpaqueDispatchY,
+			shell.traceOpaqueDispatchZ);
+		Printf(
+			"PERF pt progressive event NRI: frame=%llu pending_voxels=%u admitted=%u deferred=%u actor_budget_hits=%u prim_budget_hits=%u byte_budget_hits=%u texture_budget_hits=%u prewarm_queued=%u prewarm_deferred=%u runtime_dirty=%u runtime_rebuilt=%u runtime_held=%u resident_apply=%u resident_recover=%u blas_recreate=%u blas_refit=%u dynamic_escape_actors=%u unexpected_dynamic_escape_actors=%u\n",
+			(unsigned long long)frameNumber,
+			shell.persistentVoxelPendingInstanceCount,
+			shell.persistentVoxelOnboardingAdmittedCount,
+			shell.persistentVoxelOnboardingDeferredCount,
+			shell.persistentVoxelOnboardingActorBudgetHits,
+			shell.persistentVoxelOnboardingPrimitiveBudgetHits,
+			shell.persistentVoxelOnboardingByteBudgetHits,
+			shell.persistentVoxelOnboardingTextureBudgetHits,
+			shell.persistentVoxelTexturePrewarmQueuedCount,
+			shell.persistentVoxelTexturePrewarmDeferredCount,
+			shell.runtimeMutationDirtyChunks,
+			shell.runtimeMutationRebuiltChunks,
+			shell.runtimeMutationHeldChunks,
+			shell.runtimeMutationResidentApplyCount,
+			shell.runtimeMutationResidentApplyRecoverAttemptCount,
+			shell.runtimeMutationResidentApplyBlasRecreateCount,
+			shell.runtimeMutationResidentApplyBlasRefitOnlyCount,
+			shell.dynamicVoxelEscapeActorCount,
+			shell.dynamicVoxelUnexpectedEscapeActorCount);
+
+		struct GeometryPath
+		{
+			const char* name;
+			double ms;
+			uint32_t calls;
+			uint32_t prims;
+			uint64_t bytes;
+		};
+		std::array<GeometryPath, 20> geometryPaths = {{
+			{ "dynamic_live", shell.geometryBuildDynamicLiveMs, shell.dynamicCaptureCalls, shell.geometryBuildDynamicLivePrimitives, resource.sceneDynamicUploadBytes },
+			{ "mirror_extended", shell.geometryBuildMirrorExtendedMs, 0, 0, 0 },
+			{ "mirror_player", shell.geometryBuildMirrorPlayerMs, 0, 0, 0 },
+			{ "merged_dynamic", shell.geometryBuildMergedDynamicMs, 0, shell.dynamicPrimitiveCount, resource.sceneDynamicUploadBytes },
+			{ "captured", shell.geometryBuildCapturedMs, 0, shell.activePrimitiveCount, resource.sceneUploadBytes },
+			{ "persistent_voxel_variant", shell.geometryBuildPersistentVoxelVariantMs, shell.geometryBuildPersistentVoxelVariantCalls, shell.geometryBuildPersistentVoxelVariantPrimitives, resource.scenePersistentVoxelVariantUploadBytes },
+			{ "persistent_voxel_append", shell.geometryBuildPersistentVoxelAppendMs, shell.persistentVoxelOnboardingAdmittedCount, shell.persistentVoxelOnboardingAdmittedCount, resource.scenePersistentVoxelUploadBytes },
+			{ "persistent_voxel_rebuild", shell.geometryBuildPersistentVoxelRebuildMs, 0, shell.persistentVoxelInstancePrimitiveCount, resource.scenePersistentVoxelUploadBytes },
+			{ "persistent_voxel_tlas", shell.persistentVoxelTlasInstanceMs, 1, shell.persistentVoxelInstancePrimitiveCount, 0 },
+			{ "persistent_voxel_resource_stats", shell.persistentVoxelResourceStatsMs, 1, shell.persistentVoxelMeshVariantResourceCount + shell.persistentVoxelMaterialVariantResourceCount, 0 },
+			{ "persistent_voxel_batch_stats", shell.persistentVoxelBatchStatsMs, 1, shell.persistentVoxelBatchActorCount, 0 },
+			{ "scene_instance_stats", shell.sceneInstanceStatsMs, 1, shell.sceneInstanceCount, 0 },
+			{ "persistent_emissive_prune", shell.geometryBuildPersistentEmissivePruneMs, 0, shell.persistentDynamicActorSurfaceCount + shell.persistentDynamicNonActorSurfaceCount, 0 },
+			{ "persistent_emissive_rebuild", shell.geometryBuildPersistentEmissiveRebuildMs, 0, shell.persistentDynamicActorSurfaceCount + shell.persistentDynamicNonActorSurfaceCount, 0 },
+			{ "static_chunk", shell.geometryBuildStaticChunkMs, shell.geometryBuildStaticChunkCalls, shell.geometryBuildStaticChunkPrimitives, resource.sceneStaticRefreshUploadBytes },
+			{ "debug_sphere", shell.geometryBuildDebugSphereMs, shell.runtimeDebugSphereCount, shell.runtimeDebugSpherePrimitiveCount, 0 },
+			{ "mutation_rebuild", shell.geometryBuildRuntimeMutationRebuildMs, shell.geometryBuildRuntimeMutationRebuildCalls, shell.geometryBuildRuntimeMutationPrimitives, resource.sceneResidentChunkUploadBytes },
+			{ "mutation_material_only", shell.geometryBuildRuntimeMutationMaterialOnlyMs, shell.geometryBuildRuntimeMutationMaterialOnlyCalls, shell.geometryBuildRuntimeMutationPrimitives, resource.sceneResidentChunkUploadBytes },
+			{ "spacelink", shell.geometryBuildRuntimeSpaceLinkMs, shell.geometryBuildRuntimeSpaceLinkCalls, shell.geometryBuildRuntimeSpaceLinkPrimitives, 0 },
+			{ "resident_apply_recover", shell.geometryBuildResidentApplyMs + shell.geometryBuildResidentRecoverMs, shell.geometryBuildResidentApplyCalls + shell.geometryBuildResidentRecoverCalls, shell.geometryBuildResidentPrimitives, resource.sceneResidentChunkUploadBytes },
+		}};
+		std::sort(geometryPaths.begin(), geometryPaths.end(), [](const GeometryPath& left, const GeometryPath& right)
+		{
+			if (left.ms != right.ms)
+			{
+				return left.ms > right.ms;
+			}
+			return left.prims > right.prims;
+		});
+
+		const uint32_t topCount = (uint32_t)(std::min)((int)geometryPaths.size(), (std::max)(0, (int)nri_ptslowdowntop));
+		for (uint32_t i = 0; i < topCount; ++i)
+		{
+			const GeometryPath& path = geometryPaths[i];
+			if (path.ms <= 0.0 && path.calls == 0 && path.prims == 0 && path.bytes == 0)
+			{
+				continue;
+			}
+			Printf(
+				"PERF pt progressive geometry top NRI: frame=%llu rank=%u path=%s ms=%.3f calls=%u prims=%u bytes=%llu\n",
+				(unsigned long long)frameNumber,
+				i + 1u,
+				path.name,
+				path.ms,
+				path.calls,
+				path.prims,
+				(unsigned long long)path.bytes);
+		}
+
+		Printf(
+			"PERF pt progressive geometry NRI: frame=%llu dynamic_live=%.3f mirror_extended=%.3f mirror_player=%.3f captured=%.3f persistent_voxel_variant=%.3f persistent_voxel_append=%.3f persistent_voxel_rebuild=%.3f persistent_voxel_tlas=%.3f persistent_voxel_resource_stats=%.3f persistent_voxel_batch_stats=%.3f scene_instance_stats=%.3f persistent_emissive=%.3f static_chunk=%.3f mutation_truth=%.3f mutation_rebuild=%.3f mutation_material_only=%.3f spacelink=%.3f resident_apply=%.3f resident_recover=%.3f dynamic_capture_models=%.3f dynamic_capture_model_mesh=%.3f dynamic_capture_model_surface=%.3f dynamic_capture_model_store=%.3f dynamic_walls=%u dynamic_flats=%u dynamic_sprites=%u dynamic_voxel_proxies=%u dynamic_unsupported_models=%u\n",
+			(unsigned long long)frameNumber,
+			shell.geometryBuildDynamicLiveMs,
+			shell.geometryBuildMirrorExtendedMs,
+			shell.geometryBuildMirrorPlayerMs,
+			shell.geometryBuildCapturedMs,
+			shell.geometryBuildPersistentVoxelVariantMs,
+			shell.geometryBuildPersistentVoxelAppendMs,
+			shell.geometryBuildPersistentVoxelRebuildMs,
+			shell.persistentVoxelTlasInstanceMs,
+			shell.persistentVoxelResourceStatsMs,
+			shell.persistentVoxelBatchStatsMs,
+			shell.sceneInstanceStatsMs,
+			shell.geometryBuildPersistentEmissivePruneMs + shell.geometryBuildPersistentEmissiveRebuildMs,
+			shell.geometryBuildStaticChunkMs,
+			shell.geometryBuildRuntimeMutationTruthMs,
+			shell.geometryBuildRuntimeMutationRebuildMs,
+			shell.geometryBuildRuntimeMutationMaterialOnlyMs,
+			shell.geometryBuildRuntimeSpaceLinkMs,
+			shell.geometryBuildResidentApplyMs,
+			shell.geometryBuildResidentRecoverMs,
+			shell.dynamicCaptureModelSpritesMs,
+			shell.dynamicCaptureModelMeshMs,
+			shell.dynamicCaptureModelSurfaceMs,
+			shell.dynamicCaptureModelStoreMs,
+			shell.dynamicCaptureWallSurfaces,
+			shell.dynamicCaptureFlatSurfaces,
+			shell.dynamicCaptureSpriteSurfaces,
+			shell.dynamicCaptureVoxelProxySurfaces,
+			shell.dynamicCaptureUnsupportedModelSurfaces);
+
+		for (uint32_t i = 0; i < topCount && i < NRIRenderer::RuntimeMutationTopTraceCount; ++i)
+		{
+			const auto& entry = shell.runtimeMutationTopEntries[i];
+			if (!entry.valid)
+			{
+				continue;
+			}
+			Printf(
+				"PERF pt progressive resource top NRI: frame=%llu rank=%u type=runtime_mutation chunk=%u sector=%d action=%s reason_mask=0x%x score=%u surfaces=%u tris=%u mats=%u force_topology=%u resident_geo=%u resident_mat=%u\n",
+				(unsigned long long)frameNumber,
+				i + 1u,
+				entry.chunkIndex,
+				entry.sectorIndex,
+				GetProgressiveRuntimeMutationTraceActionName(entry.action),
+				entry.reasonMask,
+				entry.score,
+				entry.surfaceCount,
+				entry.triangleCount,
+				entry.materialCount,
+				entry.forceTopology ? 1u : 0u,
+				entry.residentGeometryDirty ? 1u : 0u,
+				entry.residentMaterialDirty ? 1u : 0u);
+		}
+		for (uint32_t i = 0; i < topCount && i < shell.dynamicVoxelEscapeTopCount; ++i)
+		{
+			const auto& entry = shell.dynamicVoxelEscapeTopEntries[i];
+			if (!entry.valid)
+			{
+				continue;
+			}
+			Printf(
+				"PERF pt progressive resource top NRI: frame=%llu rank=%u type=dynamic_voxel_escape actor=%d stat=%d pic=%d voxel=%d reason=%s prims=%u bytes=%llu persistent=%u has_surface=%u\n",
+				(unsigned long long)frameNumber,
+				i + 1u,
+				entry.actorIndex,
+				entry.statnum,
+				entry.sourcePicnum,
+				entry.resolvedVoxelIndex,
+				nri_scene::GetDynamicVoxelEscapeReasonName(entry.reason),
+				entry.primitiveCount,
+				(unsigned long long)entry.totalBytes,
+				entry.persistentReady ? 1u : 0u,
+				entry.hasCachedSurface ? 1u : 0u);
+		}
+		for (uint32_t i = 0; i < topCount && i < shell.voxelCacheDuplicateTopCount; ++i)
+		{
+			const auto& entry = shell.voxelCacheDuplicateTopEntries[i];
+			if (!entry.valid)
+			{
+				continue;
+			}
+			Printf(
+				"PERF pt progressive resource top NRI: frame=%llu rank=%u type=voxel_duplicate mesh_key=0x%llx pic=%d actors=%u persistent_actors=%u prims_per_actor=%u total_prims=%u dup_bytes=%llu\n",
+				(unsigned long long)frameNumber,
+				i + 1u,
+				(unsigned long long)entry.meshKeyHash,
+				entry.sourcePicnum,
+				entry.actorCount,
+				entry.persistentActorCount,
+				entry.primitiveCountPerActor,
+				entry.totalDuplicatedPrimitives,
+				(unsigned long long)entry.duplicatedBytes);
+		}
+		if (shader.valid)
+		{
+			for (uint32_t i = 0; i < topCount && i < shader.hotInstanceCount; ++i)
+			{
+				const auto& entry = shader.hotInstances[i];
+				Printf(
+					"PERF pt progressive resource top NRI: frame=%llu rank=%u type=shader_hot_instance instance=%u source=%s prim_offset=%u prims=%u committed=%u accepted=%u primary=%u ungated=%u sun=%u point=%u emissive=%u fast_emissive=%u\n",
+					(unsigned long long)frameNumber,
+					i + 1u,
+					entry.instanceId,
+					GetProgressiveSceneDataSourceName(entry.dataSource),
+					entry.primitiveOffset,
+					entry.primitiveCount,
+					entry.committed,
+					entry.accepted,
+					entry.primaryCommitted,
+					entry.ungatedCommitted,
+					entry.sunCommitted,
+					entry.pointCommitted,
+					entry.emissiveCommitted,
+					entry.fastEmissiveCommitted);
+			}
+		}
+
+		previous.initialized = true;
+		previous.runtimeMutationActiveChunkCount = shell.runtimeMutationActiveChunkCount;
+		previous.runtimeMutationCachedTriangleCount = shell.runtimeMutationCachedTriangleCount;
+		previous.dynamicPrimitiveCount = shell.dynamicPrimitiveCount;
+		previous.sceneInstanceCount = shell.sceneInstanceCount;
+		previous.persistentVoxelInstanceActiveCount = shell.persistentVoxelInstanceActiveCount;
+		previous.persistentVoxelZeroRefResourceBytes = shell.persistentVoxelZeroRefResourceBytes;
+		previous.highRuntimeMutationActiveChunkCount = highRuntimeChunks;
+		previous.highRuntimeMutationCachedTriangleCount = highRuntimeTris;
+		previous.highDynamicPrimitiveCount = highDynamicPrims;
+		previous.highSceneInstanceCount = highSceneInstances;
+		previous.highPersistentVoxelInstanceActiveCount = highVoxelInstances;
+		previous.highPersistentVoxelZeroRefResourceBytes = highZeroRefBytes;
+	}
+
 	struct LevelTransitionDeviceSnapshot
 	{
 		bool initialized = false;

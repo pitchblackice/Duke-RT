@@ -300,6 +300,10 @@ public:
 		double emissiveTlasMs = 0.0;
 		double surfaceProbeMs = 0.0;
 		double frameGraphMs = 0.0;
+		double traceOpaqueMs = 0.0;
+		double traceOpaqueReadbackMs = 0.0;
+		double traceOpaqueCommandMs = 0.0;
+		double traceOpaqueStatsCopyMs = 0.0;
 		double otherMs = 0.0;
 		double staticSceneMs = 0.0;
 		double runtimeMutationMs = 0.0;
@@ -370,6 +374,7 @@ public:
 		double dynamicAsBuildMs = 0.0;
 		double dynamicAsBarrierMs = 0.0;
 		double persistentVoxelAsMs = 0.0;
+		double persistentVoxelTlasInstanceMs = 0.0;
 		double worldTlasMs = 0.0;
 		double sceneDataSetMs = 0.0;
 		double restoreStaticSceneMs = 0.0;
@@ -398,6 +403,9 @@ public:
 		double geometryBuildRuntimeSpaceLinkMs = 0.0;
 		double geometryBuildResidentApplyMs = 0.0;
 		double geometryBuildResidentRecoverMs = 0.0;
+		double sceneInstanceStatsMs = 0.0;
+		double persistentVoxelResourceStatsMs = 0.0;
+		double persistentVoxelBatchStatsMs = 0.0;
 		uint32_t runtimeMutationDirtyChunks = 0;
 		uint32_t runtimeMutationRebuiltChunks = 0;
 		uint32_t runtimeMutationHeldChunks = 0;
@@ -636,6 +644,9 @@ public:
 		uint32_t persistentDynamicWallSurfaceCount = 0;
 		uint32_t persistentDynamicFlatSurfaceCount = 0;
 		uint32_t persistentDynamicSpriteSurfaceCount = 0;
+		uint32_t traceOpaqueDispatchX = 0;
+		uint32_t traceOpaqueDispatchY = 0;
+		uint32_t traceOpaqueDispatchZ = 0;
 		uint32_t activePrimitiveCount = 0;
 		uint32_t dynamicPrimitiveCount = 0;
 		uint32_t activeMaterialCount = 0;
