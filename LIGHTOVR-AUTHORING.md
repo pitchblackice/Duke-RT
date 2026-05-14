@@ -194,3 +194,27 @@ Disable edit mode with:
 ```text
 nri_ptactorlighteditmode 0
 ```
+
+## Map Light Edit Mode
+
+The map light editor is a runtime helper for placing map-scoped `light` rules at explicit world positions. It uses the same writable loose-mounted `LIGHTOVR` writeback rules as actor light edit mode.
+
+Recommended setup is the same as actor light editing, then run:
+
+```text
+nri_ptmaplighteditmode 1
+```
+
+While map light edit mode is enabled:
+
+- a white point-light preview floats in front of the local camera
+- `[` moves the preview closer to the camera, clamped at distance `0`
+- `]` moves the preview farther from the camera
+- `p` writes a map-local `light` rule at the preview position, with `type point`, `anchor position`, white color, `intensity 1.0`, `radius 200.0`, and no flicker field, then reloads `LIGHTOVR`
+- `l` reloads `LIGHTOVR` without editing the file
+
+Disable edit mode with:
+
+```text
+nri_ptmaplighteditmode 0
+```

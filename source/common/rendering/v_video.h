@@ -364,6 +364,8 @@ public:
 	virtual void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event);
 	virtual void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event);
 	virtual void PrintPathTracingSurfaceProbeStatus() const;
+	virtual bool SetPathTracingEditorPointLight(const DVector3& worldPosition, const float color[3], float intensity, float radius) { return false; }
+	virtual void ClearPathTracingEditorPointLight() {}
 
 	// Screen wiping
 	virtual FTexture *WipeStartScreen();

@@ -14,16 +14,24 @@
 #include "gamestate.h"
 #include "i_time.h"
 #include "lightoverlay.h"
+#include "mapinfo.h"
 #include "printf.h"
 #include "v_video.h"
 
 CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptmaplighteditmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
 	static ActorLightEditorState GActorLightEditorState;
 	static constexpr uint64_t ActorLightEditorNotifyRepeatMs = 750;
 	static constexpr uint64_t ActorLightEditorNotifyClearGraceMs = 250;
+	static constexpr double MapLightEditorDefaultDistance = 128.0;
+	static constexpr double MapLightEditorDistanceStep = 16.0;
+	static constexpr double MapLightEditorMaxDistance = 4096.0;
+	static constexpr float MapLightEditorColor[3] = { 1.0f, 1.0f, 1.0f };
+	static constexpr float MapLightEditorIntensity = 1.0f;
+	static constexpr float MapLightEditorRadius = 200.0f;
 
 	enum class ActorLightEditorWritableSourceKind : uint8_t
 	{
@@ -258,6 +266,39 @@ namespace
 		return FStringf("%s_%u", baseId.GetChars(), (unsigned)I_msTime());
 	}
 
+	static bool HasMapLightEditorRuleId(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (const auto& rule : database.mapLightRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0 && rule.id.CompareNoCase(id) == 0)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	static FString BuildMapLightEditorUniqueRuleId(const ParsedLightOverlayDatabase& database, const FString& mapName)
+	{
+		const FString baseId = "MapLight";
+		if (!HasMapLightEditorRuleId(database, mapName, baseId))
+		{
+			return baseId;
+		}
+
+		for (int suffix = 2; suffix < 1000000; ++suffix)
+		{
+			FString candidate = FStringf("%s_%d", baseId.GetChars(), suffix);
+			if (!HasMapLightEditorRuleId(database, mapName, candidate))
+			{
+				return candidate;
+			}
+		}
+
+		return FStringf("%s_%u", baseId.GetChars(), (unsigned)I_msTime());
+	}
+
 	static bool WriteActorLightEditorTextFile(const FString& path, const FString& text)
 	{
 		std::unique_ptr<FileWriter> file(FileWriter::Open(path.GetChars()));
@@ -350,6 +391,40 @@ namespace
 
 		const unsigned char ascii = static_cast<unsigned char>(ev->data2 & 0xff);
 		return ascii != 0 && std::tolower(ascii) == key;
+	}
+
+	static bool GetMapLightEditorPreviewPosition(DVector3& outPosition)
+	{
+		DCorePlayer* player = nullptr;
+		DCoreActor* actor = nullptr;
+		DVector3 origin;
+		DRotator viewRotation;
+		sectortype* startSector = nullptr;
+		if (!GetActorLightEditorSamplingContext(player, actor, origin, viewRotation, startSector))
+		{
+			outPosition = {};
+			return false;
+		}
+
+		outPosition = origin + DVector3(viewRotation) * GActorLightEditorState.mapLightPreviewDistance;
+		return true;
+	}
+
+	static void UpdateMapLightEditorPreview()
+	{
+		if (screen == nullptr)
+		{
+			return;
+		}
+
+		DVector3 position;
+		if (!GetMapLightEditorPreviewPosition(position))
+		{
+			screen->ClearPathTracingEditorPointLight();
+			return;
+		}
+
+		screen->SetPathTracingEditorPointLight(position, MapLightEditorColor, MapLightEditorIntensity, MapLightEditorRadius);
 	}
 
 	static void PerformActorLightEditorPrintAction()
@@ -448,6 +523,91 @@ namespace
 		ReloadActorLightEditorOverlays();
 	}
 
+	static void PerformMapLightEditorPlaceAction()
+	{
+		if (currentLevel == nullptr || currentLevel->labelName.IsEmpty())
+		{
+			Printf("NRI PT map light editor: no current map name is available.\n");
+			return;
+		}
+
+		DVector3 position;
+		if (!GetMapLightEditorPreviewPosition(position))
+		{
+			Printf("NRI PT map light editor: no local gameplay sampling context is available.\n");
+			return;
+		}
+
+		FString writablePath;
+		int writableLumpNum = -1;
+		if (!ActorLightEditorResolveWritableSource(writablePath, &writableLumpNum))
+		{
+			PrintActorLightEditorWritableSourceFailure();
+			return;
+		}
+
+		ParsedLightOverlayDatabase database = GetParsedLightOverlayDatabase();
+		ParsedLightOverlayMapLightRule rule = {};
+		rule.mapName = currentLevel->labelName;
+		rule.id = BuildMapLightEditorUniqueRuleId(database, rule.mapName);
+		rule.lightType = "point";
+		rule.anchorType = LightOverlayAnchorType::Position;
+		rule.hasAnchorPosition = true;
+		rule.anchorPosition[0] = (float)position.X;
+		rule.anchorPosition[1] = (float)position.Y;
+		rule.anchorPosition[2] = (float)position.Z;
+		rule.hasColor = true;
+		rule.color[0] = MapLightEditorColor[0];
+		rule.color[1] = MapLightEditorColor[1];
+		rule.color[2] = MapLightEditorColor[2];
+		rule.hasIntensity = true;
+		rule.intensity = MapLightEditorIntensity;
+		rule.hasRadius = true;
+		rule.radius = MapLightEditorRadius;
+		rule.source.lumpNum = writableLumpNum;
+		rule.source.sourceName = FindActorLightEditorSourceNameForLump(database, writableLumpNum);
+
+		bool replaced = false;
+		AddOrReplaceLightOverlayRule(database, rule, &replaced);
+
+		const FString serialized = SerializeLightOverlayDatabase(database);
+		if (!WriteActorLightEditorTextFile(writablePath, serialized))
+		{
+			Printf("NRI PT map light editor: failed to open writable LIGHTOVR '%s'.\n", writablePath.GetChars());
+			return;
+		}
+
+		Printf(
+			"NRI PT map light editor: created map light '%s' for map '%s' at (%.2f, %.2f, %.2f) and wrote %d bytes to %s.\n",
+			rule.id.GetChars(),
+			rule.mapName.GetChars(),
+			position.X,
+			position.Y,
+			position.Z,
+			serialized.Len(),
+			writablePath.GetChars());
+
+		ReloadActorLightEditorOverlays();
+	}
+
+	static void MoveMapLightEditorPreview(double delta)
+	{
+		GActorLightEditorState.mapLightPreviewDistance += delta;
+		if (GActorLightEditorState.mapLightPreviewDistance < 0.0)
+		{
+			GActorLightEditorState.mapLightPreviewDistance = 0.0;
+		}
+		else if (GActorLightEditorState.mapLightPreviewDistance > MapLightEditorMaxDistance)
+		{
+			GActorLightEditorState.mapLightPreviewDistance = MapLightEditorMaxDistance;
+		}
+
+		Printf(
+			"NRI PT map light editor: preview distance %.1f\n",
+			GActorLightEditorState.mapLightPreviewDistance);
+		UpdateMapLightEditorPreview();
+	}
+
 	static void UpdateActorLightEditorNotify()
 	{
 		const uint64_t nowMs = I_msTime();
@@ -488,11 +648,20 @@ bool IsActorLightEditorEnabled()
 	return !!nri_ptactorlighteditmode;
 }
 
+static bool IsMapLightEditorEnabled()
+{
+	return !!nri_ptmaplighteditmode;
+}
+
 void ResetActorLightEditorState()
 {
-	const bool enabled = IsActorLightEditorEnabled();
+	const bool enabled = IsActorLightEditorEnabled() || IsMapLightEditorEnabled();
+	const double previousMapLightDistance = GActorLightEditorState.mapLightPreviewDistance > 0.0 ?
+		GActorLightEditorState.mapLightPreviewDistance :
+		MapLightEditorDefaultDistance;
 	GActorLightEditorState = {};
 	GActorLightEditorState.enabled = enabled;
+	GActorLightEditorState.mapLightPreviewDistance = previousMapLightDistance;
 }
 
 const ActorLightEditorState& GetActorLightEditorState()
@@ -502,11 +671,17 @@ const ActorLightEditorState& GetActorLightEditorState()
 
 void TickActorLightEditor()
 {
-	const bool enabled = IsActorLightEditorEnabled();
+	const bool mapLightEnabled = IsMapLightEditorEnabled();
+	const bool actorLightEnabled = IsActorLightEditorEnabled();
+	const bool enabled = actorLightEnabled || mapLightEnabled;
 	if (!enabled)
 	{
 		if (GActorLightEditorState.enabled)
 		{
+			if (screen != nullptr)
+			{
+				screen->ClearPathTracingEditorPointLight();
+			}
 			ResetActorLightEditorState();
 		}
 		return;
@@ -517,13 +692,105 @@ void TickActorLightEditor()
 		ResetActorLightEditorState();
 	}
 
-	ActorLightEditorSampleTarget(GActorLightEditorState.currentTarget);
-	UpdateActorLightEditorNotify();
+	if (mapLightEnabled)
+	{
+		UpdateMapLightEditorPreview();
+	}
+	else if (screen != nullptr)
+	{
+		screen->ClearPathTracingEditorPointLight();
+	}
+
+	if (actorLightEnabled)
+	{
+		ActorLightEditorSampleTarget(GActorLightEditorState.currentTarget);
+		UpdateActorLightEditorNotify();
+	}
 }
 
 bool ActorLightEditorResponder(event_t* ev)
 {
-	if (!IsActorLightEditorEnabled() || ev == nullptr)
+	if ((!IsActorLightEditorEnabled() && !IsMapLightEditorEnabled()) || ev == nullptr)
+	{
+		return false;
+	}
+
+	if (IsMapLightEditorEnabled())
+	{
+		if (IsActorLightEditorActionKey(ev, '['))
+		{
+			if (ev->type == EV_KeyDown)
+			{
+				if (!GActorLightEditorState.moveMapLightCloserActionPressed)
+				{
+					GActorLightEditorState.moveMapLightCloserActionPressed = true;
+					MoveMapLightEditorPreview(-MapLightEditorDistanceStep);
+				}
+			}
+			else
+			{
+				GActorLightEditorState.moveMapLightCloserActionPressed = false;
+			}
+
+			return true;
+		}
+
+		if (IsActorLightEditorActionKey(ev, ']'))
+		{
+			if (ev->type == EV_KeyDown)
+			{
+				if (!GActorLightEditorState.moveMapLightFartherActionPressed)
+				{
+					GActorLightEditorState.moveMapLightFartherActionPressed = true;
+					MoveMapLightEditorPreview(MapLightEditorDistanceStep);
+				}
+			}
+			else
+			{
+				GActorLightEditorState.moveMapLightFartherActionPressed = false;
+			}
+
+			return true;
+		}
+
+		if (IsActorLightEditorActionKey(ev, 'p'))
+		{
+			if (ev->type == EV_KeyDown)
+			{
+				if (!GActorLightEditorState.placeMapLightActionPressed)
+				{
+					GActorLightEditorState.placeMapLightActionPressed = true;
+					PerformMapLightEditorPlaceAction();
+				}
+			}
+			else
+			{
+				GActorLightEditorState.placeMapLightActionPressed = false;
+			}
+
+			return true;
+		}
+
+		if (IsActorLightEditorActionKey(ev, 'l'))
+		{
+			if (ev->type == EV_KeyDown)
+			{
+				if (!GActorLightEditorState.reloadActionPressed)
+				{
+					GActorLightEditorState.reloadActionPressed = true;
+					PerformActorLightEditorReloadAction();
+				}
+			}
+			else
+			{
+				GActorLightEditorState.reloadActionPressed = false;
+			}
+
+			return true;
+		}
+	}
+
+	if (!IsActorLightEditorEnabled())
 	{
 		return false;
 	}

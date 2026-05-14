@@ -305,6 +305,7 @@ public:
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
 
 	bool AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
+	bool UpdateManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool RemoveManualAnalyticLight(uint32_t id);
 	void ClearManualAnalyticLights();
 	uint32_t GetManualAnalyticLightCount() const { return (uint32_t)mAnalyticLights.manualLights.size(); }

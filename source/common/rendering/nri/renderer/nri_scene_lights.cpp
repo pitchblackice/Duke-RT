@@ -1718,6 +1718,33 @@ bool SceneLightSystem::AddManualAnalyticLight(uint32_t id, const float position[
 	return true;
 }
 
+bool SceneLightSystem::UpdateManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius)
+{
+	if (position == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)
+	{
+		return false;
+	}
+
+	const auto it = std::find_if(mAnalyticLights.manualLights.begin(), mAnalyticLights.manualLights.end(), [id](const SceneAnalyticLight& light)
+	{
+		return light.id == id;
+	});
+	if (it == mAnalyticLights.manualLights.end())
+	{
+		return false;
+	}
+
+	it->position[0] = position[0];
+	it->position[1] = position[1];
+	it->position[2] = position[2];
+	it->color[0] = std::max(color[0], 0.0f);
+	it->color[1] = std::max(color[1], 0.0f);
+	it->color[2] = std::max(color[2], 0.0f);
+	it->intensity = intensity;
+	it->radius = radius;
+	return true;
+}
+
 bool SceneLightSystem::RemoveManualAnalyticLight(uint32_t id)
 {
 	const auto it = std::find_if(mAnalyticLights.manualLights.begin(), mAnalyticLights.manualLights.end(), [id](const SceneAnalyticLight& light)

@@ -5882,6 +5882,54 @@ void NRIRenderDevice::SetPathTracingGuiCaptureState(bool active)
 	}
 }
 
+bool NRIRenderDevice::SetPathTracingEditorPointLight(const DVector3& worldPosition, const float color[3], float intensity, float radius)
+{
+	if (mRenderer == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)
+	{
+		return false;
+	}
+
+	if (!mRenderer->RefreshPathTracingAvailability())
+	{
+		return false;
+	}
+
+	float renderPosition[3] = {};
+	WorldToPathTracingPosition(worldPosition, renderPosition);
+	if (mPathTracingEditorPointLightActive &&
+		mRenderer->UpdateRuntimePointLight(mPathTracingEditorPointLightId, renderPosition, color, intensity, radius))
+	{
+		return true;
+	}
+
+	uint32_t lightId = 0;
+	if (!mRenderer->AddRuntimePointLight(renderPosition, color, intensity, radius, lightId))
+	{
+		mPathTracingEditorPointLightActive = false;
+		mPathTracingEditorPointLightId = 0;
+		return false;
+	}
+
+	mPathTracingEditorPointLightActive = true;
+	mPathTracingEditorPointLightId = lightId;
+	return true;
+}
+
+void NRIRenderDevice::ClearPathTracingEditorPointLight()
+{
+	if (!mPathTracingEditorPointLightActive)
+	{
+		return;
+	}
+
+	if (mRenderer != nullptr)
+	{
+		mRenderer->RemoveRuntimePointLight(mPathTracingEditorPointLightId);
+	}
+	mPathTracingEditorPointLightActive = false;
+	mPathTracingEditorPointLightId = 0;
+}
+
 bool NRIRenderDevice::SpawnPathTracingPointLight(float red, float green, float blue, float intensity, float radius, float offset, uint32_t& outId)
 {
 	if (mRenderer == nullptr)

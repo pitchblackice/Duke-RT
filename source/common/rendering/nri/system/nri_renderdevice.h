@@ -65,6 +65,8 @@ public:
 	void EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event) override;
 	void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event) override;
 	void PrintPathTracingSurfaceProbeStatus() const override;
+	bool SetPathTracingEditorPointLight(const DVector3& worldPosition, const float color[3], float intensity, float radius) override;
+	void ClearPathTracingEditorPointLight() override;
 	void ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeaponLightEvent>& outEvents);
 	uint32_t GetPendingPathTracingWeaponLightEventCount() const;
 	NRIPTOutputPolicy GetPathTracingOutputPolicy() const;
@@ -413,6 +415,8 @@ private:
 	TArray<PathTracingWeaponLightEvent> mPendingPathTracingWeaponLightEvents;
 	uint64_t mNextPathTracingWeaponLightEventSerial = 1;
 	uint32_t mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
+	uint32_t mPathTracingEditorPointLightId = 0;
+	bool mPathTracingEditorPointLightActive = false;
 	bool mLevelTransitionInProgress = false;
 	LevelTransitionInfo mCurrentLevelTransition = {};
 };

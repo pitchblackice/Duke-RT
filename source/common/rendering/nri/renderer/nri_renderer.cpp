@@ -10010,6 +10010,18 @@ bool NRIRenderer::AddRuntimePointLight(const float position[3], const float colo
 	return true;
 }
 
+bool NRIRenderer::UpdateRuntimePointLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius)
+{
+	if (!mSceneLights.UpdateManualAnalyticLight(id, position, color, intensity, radius))
+	{
+		return false;
+	}
+
+	mBoundRuntimeLightCount = 0;
+	NoteLightHistoryChange("runtime-light-change");
+	return true;
+}
+
 bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
 {
 	if (!mSceneLights.RemoveManualAnalyticLight(id))

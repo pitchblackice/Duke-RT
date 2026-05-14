@@ -876,6 +876,7 @@ public:
 	void PrintSceneBufferStatus() const;
 	void PrintSceneLightDump(float radius, uint32_t limit) const;
 	bool AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId);
+	bool UpdateRuntimePointLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool RemoveRuntimePointLight(uint32_t id);
 	void ClearRuntimePointLights();
 	void PrintRuntimePointLights() const;
