@@ -32,6 +32,7 @@ namespace
 	static constexpr float MapLightEditorColor[3] = { 1.0f, 1.0f, 1.0f };
 	static constexpr float MapLightEditorIntensity = 1.0f;
 	static constexpr float MapLightEditorRadius = 200.0f;
+	static constexpr const char* MapLightEditorDirectionalRuleId = "EditorDirectional";
 
 	enum class ActorLightEditorWritableSourceKind : uint8_t
 	{
@@ -299,6 +300,21 @@ namespace
 		return FStringf("%s_%u", baseId.GetChars(), (unsigned)I_msTime());
 	}
 
+	static bool FindMapLightEditorActiveDirectionalRule(const ParsedLightOverlayDatabase& database, const FString& mapName, ParsedLightOverlayDirectionalRule& outRule)
+	{
+		bool found = false;
+		for (const auto& rule : database.directionalRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0)
+			{
+				outRule = rule;
+				found = true;
+			}
+		}
+
+		return found;
+	}
+
 	static bool WriteActorLightEditorTextFile(const FString& path, const FString& text)
 	{
 		std::unique_ptr<FileWriter> file(FileWriter::Open(path.GetChars()));
@@ -407,6 +423,34 @@ namespace
 		}
 
 		outPosition = origin + DVector3(viewRotation) * GActorLightEditorState.mapLightPreviewDistance;
+		return true;
+	}
+
+	static bool GetMapLightEditorDirectionalLightDirection(float outDirection[3])
+	{
+		if (outDirection == nullptr)
+		{
+			return false;
+		}
+
+		DCorePlayer* player = nullptr;
+		DCoreActor* actor = nullptr;
+		DVector3 origin;
+		DRotator viewRotation;
+		sectortype* startSector = nullptr;
+		if (!GetActorLightEditorSamplingContext(player, actor, origin, viewRotation, startSector))
+		{
+			return false;
+		}
+
+		DVector3 direction = DVector3(viewRotation);
+		direction = DVector3(-direction.X, -direction.Y, -direction.Z);
+		direction = DVector3(direction.X, -direction.Z, -direction.Y);
+		direction.MakeUnit();
+
+		outDirection[0] = (float)direction.X;
+		outDirection[1] = (float)direction.Y;
+		outDirection[2] = (float)direction.Z;
 		return true;
 	}
 
@@ -520,6 +564,79 @@ namespace
 
 	static void PerformActorLightEditorReloadAction()
 	{
+		ReloadActorLightEditorOverlays();
+	}
+
+	static void PerformMapLightEditorDirectionalAction()
+	{
+		if (currentLevel == nullptr || currentLevel->labelName.IsEmpty())
+		{
+			Printf("NRI PT map light editor: no current map name is available.\n");
+			return;
+		}
+
+		float direction[3] = {};
+		if (!GetMapLightEditorDirectionalLightDirection(direction))
+		{
+			Printf("NRI PT map light editor: no local gameplay sampling context is available.\n");
+			return;
+		}
+
+		FString writablePath;
+		int writableLumpNum = -1;
+		if (!ActorLightEditorResolveWritableSource(writablePath, &writableLumpNum))
+		{
+			PrintActorLightEditorWritableSourceFailure();
+			return;
+		}
+
+		ParsedLightOverlayDatabase database = GetParsedLightOverlayDatabase();
+		ParsedLightOverlayDirectionalRule rule = {};
+		const bool replaced = FindMapLightEditorActiveDirectionalRule(database, currentLevel->labelName, rule);
+		if (!replaced)
+		{
+			rule.mapName = currentLevel->labelName;
+			rule.id = MapLightEditorDirectionalRuleId;
+			rule.hasColor = true;
+			rule.color[0] = 1.0f;
+			rule.color[1] = 1.0f;
+			rule.color[2] = 1.0f;
+			rule.hasIntensity = true;
+			rule.intensity = 1.0f;
+			rule.hasAngularSize = true;
+			rule.angularSize = 0.03f;
+			rule.hasShadow = true;
+			rule.shadow = true;
+		}
+
+		rule.hasDirection = true;
+		rule.direction[0] = direction[0];
+		rule.direction[1] = direction[1];
+		rule.direction[2] = direction[2];
+		rule.source.lumpNum = writableLumpNum;
+		rule.source.sourceName = FindActorLightEditorSourceNameForLump(database, writableLumpNum);
+
+		bool addReplaced = false;
+		AddOrReplaceLightOverlayRule(database, rule, &addReplaced);
+
+		const FString serialized = SerializeLightOverlayDatabase(database);
+		if (!WriteActorLightEditorTextFile(writablePath, serialized))
+		{
+			Printf("NRI PT map light editor: failed to open writable LIGHTOVR '%s'.\n", writablePath.GetChars());
+			return;
+		}
+
+		Printf(
+			"NRI PT map light editor: %s directional '%s' for map '%s' direction=(%.3f, %.3f, %.3f) and wrote %d bytes to %s.\n",
+			(addReplaced || replaced) ? "updated" : "created",
+			rule.id.GetChars(),
+			rule.mapName.GetChars(),
+			rule.direction[0],
+			rule.direction[1],
+			rule.direction[2],
+			serialized.Len(),
+			writablePath.GetChars());
+
 		ReloadActorLightEditorOverlays();
 	}
 
@@ -766,6 +883,24 @@ bool ActorLightEditorResponder(event_t* ev)
 			else
 			{
 				GActorLightEditorState.placeMapLightActionPressed = false;
+			}
+
+			return true;
+		}
+
+		if (IsActorLightEditorActionKey(ev, 'o'))
+		{
+			if (ev->type == EV_KeyDown)
+			{
+				if (!GActorLightEditorState.setMapDirectionalActionPressed)
+				{
+					GActorLightEditorState.setMapDirectionalActionPressed = true;
+					PerformMapLightEditorDirectionalAction();
+				}
+			}
+			else
+			{
+				GActorLightEditorState.setMapDirectionalActionPressed = false;
 			}
 
 			return true;

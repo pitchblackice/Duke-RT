@@ -55,6 +55,7 @@ struct ActorLightEditorState
 	bool createRuleActionPressed = false;
 	bool reloadActionPressed = false;
 	bool placeMapLightActionPressed = false;
+	bool setMapDirectionalActionPressed = false;
 	bool moveMapLightCloserActionPressed = false;
 	bool moveMapLightFartherActionPressed = false;
 	double mapLightPreviewDistance = 128.0;
