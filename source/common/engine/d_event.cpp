@@ -46,6 +46,8 @@
 #include "gamestate.h"
 #include "i_interface.h"
 #include "c_cvars.h"
+#include "i_time.h"
+#include "keydef.h"
 
 int eventhead;
 int eventtail;
@@ -60,6 +62,75 @@ CUSTOM_CVAR(Int, perf_looptraceframes, 0, 0)
 	else if (self > 600)
 	{
 		self = 600;
+	}
+}
+
+CUSTOM_CVAR(Int, in_uidebouncems, 120, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 500)
+	{
+		self = 500;
+	}
+}
+
+static uint64_t GuiKeySuppressUntil[256];
+
+static int NormalizeGuiDebounceKey(int key)
+{
+	if (key >= 'A' && key <= 'Z')
+	{
+		return key + ('a' - 'A');
+	}
+	return key;
+}
+
+static int GuiDebounceKeyFromRawEvent(const event_t* ev)
+{
+	if (ev->data2 != 0)
+	{
+		return NormalizeGuiDebounceKey(ev->data2);
+	}
+	if (ev->data1 == KEY_ESCAPE)
+	{
+		return GK_ESCAPE;
+	}
+	if (ev->data1 == KEY_GRAVE)
+	{
+		return '`';
+	}
+	return 0;
+}
+
+static bool IsDebouncedGuiKeyEvent(const event_t* ev)
+{
+	if (ev->type != EV_GUI_Event ||
+		(ev->subtype != EV_GUI_KeyDown &&
+		ev->subtype != EV_GUI_KeyRepeat &&
+		ev->subtype != EV_GUI_Char))
+	{
+		return false;
+	}
+	const int key = NormalizeGuiDebounceKey(ev->data1);
+	return key > 0 &&
+		key < 256 &&
+		GuiKeySuppressUntil[key] != 0 &&
+		I_msTime() <= GuiKeySuppressUntil[key];
+}
+
+static void NoteRawKeyForGuiDebounce(const event_t* ev)
+{
+	if (ev->type != EV_KeyDown || in_uidebouncems <= 0)
+	{
+		return;
+	}
+	const int key = GuiDebounceKeyFromRawEvent(ev);
+	if (key > 0 && key < 256)
+	{
+		GuiKeySuppressUntil[key] = I_msTime() + (uint64_t)in_uidebouncems;
 	}
 }
 
@@ -518,6 +589,12 @@ void D_RemoveNextCharEvent()
 
 void D_PostEvent(event_t* ev)
 {
+	if (IsDebouncedGuiKeyEvent(ev))
+	{
+		return;
+	}
+	NoteRawKeyForGuiDebounce(ev);
+
 	// Do not post duplicate consecutive EV_DeviceChange events.
 	if (ev->type == EV_DeviceChange && events[eventhead].type == EV_DeviceChange)
 	{
