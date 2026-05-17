@@ -18,8 +18,8 @@
 #include "printf.h"
 #include "v_video.h"
 
-CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptmaplighteditmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptmaplighteditmode, false, CVAR_GLOBALCONFIG)
 
 namespace
 {

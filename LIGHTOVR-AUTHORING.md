@@ -164,7 +164,7 @@ Useful muzzle-flash diagnostics:
 
 ## Actor Light Edit Mode
 
-The actor light editor is a runtime helper for authoring global `actorrule` placeholders against live actors. It writes only to a writable loose mounted `LIGHTOVR`; archive-backed sources such as `.pk3`, `.zip`, `.wad`, `.grp`, and similar mounted bundles remain readable but are intentionally not edit targets.
+The actor light editor is a runtime helper for authoring global `actorrule` placeholders against live actors. It writes only to a writable loose mounted `LIGHTOVR`; archive-backed sources such as `.pk3`, `.zip`, `.wad`, `.grp`, and similar mounted bundles remain readable but are intentionally not edit targets. Actor and map light edit modes always start disabled on launch and must be enabled at runtime.
 
 Launch with a loose overlay mount so the editor has a file it can rewrite:
 
