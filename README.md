@@ -1,8 +1,10 @@
 # Duke-RT
 
-![1080p splash](images/1080p-splash.png)
+![voxel splash](images/voxel-splash.png)
 
 Duke-RT is a fork of Raze that adds a new ray-tracing render backend based on [NVIDIA NRI](https://github.com/NVIDIA-RTX/NRI). The existing Build-engine game support from Raze remains the foundation, while this fork focuses on path tracing, RT renderer bring-up, lighting authoring, custom material authoring, denoising/upscaling integration, and backend diagnostics. It also includes tooling and overlay workflows so users can create their own material and lighting rules for Duke content. It only works on Windows due to reliance on libraries for DLSS, frame generation, denoising, etc.
+
+![1080p splash](images/1080p-splash.png)
 
 The renderer supports both Direct3D 12 and Vulkan, although feature support is more complete for D3D12. It's recommended that you play in D3D12 and HDR if possible!
 
@@ -23,17 +25,18 @@ The renderer supports both Direct3D 12 and Vulkan, although feature support is m
 
 ## Current Status
 
-Duke-RT is work in progress. The core renderer is in, with full support for modern graphics APIs and libraries like D3D12, DLSS Super Resolution and Ray Reconstruction, etc. I've also gone through and **remastered Duke episode 1 with PBR materials (based on the originals) as well as updated lighting**. Episodes 2 and 3 are not yet done. There are some known issues that are on my radar but I have yet to tackle.
+Duke-RT is work in progress. The core renderer is in, with full support for modern graphics APIs and libraries like D3D12, DLSS Super Resolution and Ray Reconstruction, etc. I've also gone through and **remastered Duke episodes 1 and 2 with PBR materials (based on the originals) as well as updated lighting**. Episode 3 is not yet done. There are some known issues that are on my radar but I have yet to tackle.
 
 ![metal materials](images/metal-materials.png)
 
 Known high-priority issues:
+- slow perf on the start of level 1 due to large voxel objects
+- analytic lights can cause each other to flicker (most apparent when shooting the Devastator)
 - broken transport-driven non-euclidean behavior in `E5L1`
-- coplanar z-fighting/holes cause broken floors and some ceilings in `E2L1`
-- voxels don't display correctly
-- slow CPU-side perf on `E1L4` due to rapid chunk state oscillation
+- slow CPU-side perf on maps with lots of geometry movement like `E1L4` and `E2L7`
 - sometimes you get stuck on the level end screen rather than transitioning to the next level
 - there's an occasional crash on multiple level transitions in a session
+- 
 
 Known lower-priority issues:
 - flickering material state for the vent at the start of `E1L4`
