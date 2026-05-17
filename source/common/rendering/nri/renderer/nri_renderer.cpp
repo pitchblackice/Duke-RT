@@ -2305,6 +2305,13 @@ public:
 		return key;
 	}
 
+	static void ConvertMapOverlayWorldVectorToPathTracing(const float source[3], float destination[3])
+	{
+		destination[0] = source[0];
+		destination[1] = -source[2];
+		destination[2] = -source[1];
+	}
+
 	static bool TryResolveSectorMapOverlayAnchorPosition(const nri_scene::PTMapWorld& mapWorld, int32_t sectorIndex, float outPosition[3])
 	{
 		const nri_scene::PTMapChunk* matchedChunk = nullptr;
@@ -2405,9 +2412,7 @@ public:
 			{
 				return false;
 			}
-			outPosition[0] = rule.anchorPosition[0];
-			outPosition[1] = rule.anchorPosition[1];
-			outPosition[2] = rule.anchorPosition[2];
+			ConvertMapOverlayWorldVectorToPathTracing(rule.anchorPosition, outPosition);
 			return true;
 
 		case LightOverlayAnchorType::Sector:
@@ -2509,11 +2514,13 @@ public:
 			}
 
 			SceneLightSystem::AnalyticLightRegistry::MapOverlayRule overlayRule = {};
+			float offset[3] = {};
+			ConvertMapOverlayWorldVectorToPathTracing(resolvedRule.offset, offset);
 			overlayRule.ruleId = BuildMapOverlayRuleId(resolvedRule);
 			overlayRule.source = SceneLightRecordSource::StaticMapScene;
-			overlayRule.position[0] = anchorPosition[0] + resolvedRule.offset[0];
-			overlayRule.position[1] = anchorPosition[1] + resolvedRule.offset[1];
-			overlayRule.position[2] = anchorPosition[2] + resolvedRule.offset[2];
+			overlayRule.position[0] = anchorPosition[0] + offset[0];
+			overlayRule.position[1] = anchorPosition[1] + offset[1];
+			overlayRule.position[2] = anchorPosition[2] + offset[2];
 			overlayRule.stableKey = BuildMapOverlayStableKey(overlayRule.ruleId, overlayRule.position);
 			overlayRule.color[0] = resolvedRule.color[0];
 			overlayRule.color[1] = resolvedRule.color[1];

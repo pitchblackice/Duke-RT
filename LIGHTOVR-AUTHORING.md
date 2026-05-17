@@ -32,7 +32,7 @@ Current map-local blocks:
 - `directional <id>`
   One authored directional fill/shadow light for a map.
 - `light <id>`
-  A placed analytic point light anchored to a position, sector, or wall.
+  A placed analytic point light anchored to a Build/world position, sector, or wall.
 - `actoroverride <id>`
   Map-local actor shadow override. This adjusts shadow receive/cast policy without creating a light by itself.
 
@@ -54,6 +54,7 @@ Current practical notes:
 - duplicate `actorrule` and `muzzleflashrule` ids are global and last-wins
 - duplicate `directional`, `light`, and `actoroverride` ids are last-wins within the same map
 - actor and map analytic overlays are currently consumed as point lights on the PT path even if extra shape fields such as `range` or `direction` are authored
+- `light` `anchor position` and `offset` values are authored in Build/world coordinates; the NRI renderer converts them to path-tracing render coordinates internally
 - `actorrule fullbright on` forces matching actor sprite and voxel surfaces onto the PT fullbright material path so they ignore scene lighting and render at full brightness
 - `actorrule random <min> <max>` adds a per-render-frame random intensity offset to the base intensity and is an alternative to `flicker`
 - `actoroverride` is applied after `actorrule`, so explicit per-map shadow overrides win
