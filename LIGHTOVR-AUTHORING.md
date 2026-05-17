@@ -212,7 +212,7 @@ While map light edit mode is enabled:
 - `[` moves the preview closer to the camera, clamped at distance `0`
 - `]` moves the preview farther from the camera
 - `p` writes a map-local `light` rule at the preview position, with `type point`, `anchor position`, white color, `intensity 1.0`, `radius 200.0`, and no flicker field, then reloads `LIGHTOVR`
-- `o` sets the map's active `directional` rule to the opposite of the local camera look direction, preserving existing directional color/intensity/shadow/angular-size fields when one already exists
+- `o` sets the map's active `directional` rule to the player camera look direction, preserving existing directional color/intensity/shadow/angular-size fields when one already exists
 - `l` reloads `LIGHTOVR` without editing the file
 
 Disable edit mode with:
