@@ -6931,6 +6931,10 @@ bool NRIRenderDevice::CreateSwapChain()
 					mNativeD3D12Device != nullptr ? "ok" : "missing",
 					mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
 					mNativeD3D12SwapChain != nullptr ? "ok" : "missing");
+				if (mRenderer != nullptr)
+				{
+					mRenderer->PrintSwapChainRenderConfig();
+				}
 				return true;
 			}
 
@@ -7059,6 +7063,10 @@ bool NRIRenderDevice::CreateSwapChain()
 			mNativeD3D12Device != nullptr ? "ok" : "missing",
 			mNativeD3D12GraphicsQueue != nullptr ? "ok" : "missing",
 			mNativeD3D12SwapChain != nullptr ? "ok" : "missing");
+		if (mRenderer != nullptr)
+		{
+			mRenderer->PrintSwapChainRenderConfig();
+		}
 		SyncPathTracingOutputModeCVarWithSwapChainState();
 
 		return true;

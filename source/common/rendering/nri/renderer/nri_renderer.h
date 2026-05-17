@@ -882,6 +882,7 @@ public:
 	void NotifyCameraCut(const char* reason);
 	void SetGuiCaptureState(bool active);
 	void PrintStatus() const;
+	void PrintSwapChainRenderConfig() const;
 	void PrintSceneBufferStatus() const;
 	void PrintSceneLightDump(float radius, uint32_t limit) const;
 	bool AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId);

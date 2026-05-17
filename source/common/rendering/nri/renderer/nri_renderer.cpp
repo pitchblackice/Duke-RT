@@ -11316,6 +11316,58 @@ const std::unordered_map<int32_t, uint32_t>& NRIRenderer::GetActorMaterialOverri
 	return mActorMaterialOverrideCache.overrides;
 }
 
+void NRIRenderer::PrintSwapChainRenderConfig() const
+{
+	SyncLegacyUpscalerConfig(false);
+	const NRIMainUpscalerKind requestedMain = GetSelectedMainUpscalerKind();
+	const NRIMainUpscalerKind resolvedMain = GetResolvedMainUpscalerKindForStatus();
+	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
+	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
+	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
+	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMain, requestedUpscalerMode);
+	const bool runAppTaa = ShouldRunAppTaa(resolvedMain);
+	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
+	const float resolvedRenderScale = ResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
+	const bool beautyDenoiseActive = !!nri_denoise && resolvedMain != NRIMainUpscalerKind::DLRR;
+	NRIPTOutputPolicy outputPolicy = {};
+	if (mFrameBuffer != nullptr)
+	{
+		outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
+	}
+	const bool nisSupported =
+		mFrameBuffer != nullptr &&
+		mFrameBuffer->mDevice != nullptr &&
+		mFrameBuffer->mUpscaler.IsUpscalerSupported(*mFrameBuffer->mDevice, nri::UpscalerType::NIS);
+	const bool dlsrSupported = IsMainUpscalerSupported(NRIMainUpscalerKind::DLSR);
+	const bool dlrrSupported = IsMainUpscalerSupported(NRIMainUpscalerKind::DLRR);
+
+	Printf("NRI swapchain render config: main_upscaler=%s->%s mode=%s->%s post_sharpen=%s->%s support=NIS:%s DLSS-SR:%s DLRR:%s app_taa=requested:%s active:%s denoise=requested:%s beauty_active:%s nrd=%s render_scale=%.3f->%.3f jitter=%s phases=%u output=%s->%s hdr_swapchain=%s display_hdr=%s tonemap=%s sharpness=%.3f\n",
+		GetMainUpscalerName(requestedMain),
+		GetMainUpscalerName(resolvedMain),
+		GetUpscalerModeName(requestedUpscalerMode),
+		GetUpscalerModeName(resolvedUpscalerMode),
+		GetPostSharpenName(requestedPost),
+		GetPostSharpenName(resolvedPost),
+		nisSupported ? "yes" : "no",
+		dlsrSupported ? "yes" : "no",
+		dlrrSupported ? "yes" : "no",
+		nri_pttaa ? "on" : "off",
+		runAppTaa ? "on" : "off",
+		nri_denoise ? "on" : "off",
+		beautyDenoiseActive ? "on" : "off",
+		GetNrdDenoiserModeName(GetSelectedNrdDenoiserMode()),
+		requestedRenderScale,
+		resolvedRenderScale,
+		GetTemporalJitterModeName(resolvedMain, mGuiCaptureActive),
+		GetTemporalJitterPhaseCount(resolvedMain, resolvedUpscalerMode, mGuiCaptureActive),
+		GetNRIPTOutputModeName(outputPolicy.requestedMode),
+		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
+		outputPolicy.hdrSwapChainActive ? "yes" : "no",
+		!outputPolicy.displayInfoAvailable ? "unknown" : (outputPolicy.displayHdrSupported ? "yes" : "no"),
+		GetNRIPTTonemapModeName(outputPolicy.tonemapMode),
+		(float)nri_sharpness);
+}
+
 void NRIRenderer::PrintTemporalStatus() const
 {
 	SyncLegacyUpscalerConfig(false);
