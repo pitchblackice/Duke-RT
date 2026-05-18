@@ -2485,6 +2485,8 @@ private:
 	bool mAllowStartupMutationRebaseline = false;
 	bool mPendingStartupMutationRebaseline = false;
 	std::vector<uint8_t> mPendingStartupVisibleChunkValidation;
+	std::vector<uint8_t> mRuntimeMutationSignatureWatchlist;
+	uint64_t mRuntimeMutationSignatureWatchlistBuildSerial = 0;
 	uint64_t mObservedMapWorldBuildSerial = 0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
 	uint32_t mStartupMapWorldCorrectionDeadlineFrame = 0;

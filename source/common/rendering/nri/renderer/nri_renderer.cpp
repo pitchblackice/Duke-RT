@@ -4588,6 +4588,7 @@ namespace
 		RuntimeMutationWorklistCandidateSource_SectorDirty = 1 << 5,
 		RuntimeMutationWorklistCandidateSource_SectionDirty = 1 << 6,
 		RuntimeMutationWorklistCandidateSource_Dragged = 1 << 7,
+		RuntimeMutationWorklistCandidateSource_SignatureWatchlist = 1 << 8,
 	};
 
 	static std::string GetRuntimeMutationWorklistCandidateSourceSummary(uint32_t sourceMask)
@@ -4624,6 +4625,10 @@ namespace
 		if ((sourceMask & RuntimeMutationWorklistCandidateSource_Dragged) != 0)
 		{
 			AppendMutationReasonToken(text, "dragged");
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_SignatureWatchlist) != 0)
+		{
+			AppendMutationReasonToken(text, "signature_watchlist");
 		}
 		if (text.empty())
 		{
@@ -7095,6 +7100,8 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
 	mPendingStartupVisibleChunkValidation.clear();
+	mRuntimeMutationSignatureWatchlist.clear();
+	mRuntimeMutationSignatureWatchlistBuildSerial = 0;
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	mStartupMutationRebaselineDeadlineFrame = 0;
 
@@ -7211,6 +7218,8 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
 	mPendingStartupVisibleChunkValidation.clear();
+	mRuntimeMutationSignatureWatchlist.clear();
+	mRuntimeMutationSignatureWatchlistBuildSerial = 0;
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	mStartupMutationRebaselineDeadlineFrame = 0;
 	mLastSurfaceProbe = {};
@@ -20019,6 +20028,8 @@ void NRIRenderer::RefreshMapWorld()
 		mMapWorld.level = currentLevel;
 		mObservedMapWorldBuildSerial = pendingBuildSerial;
 		mPendingStartupVisibleChunkValidation.clear();
+		mRuntimeMutationSignatureWatchlist.clear();
+		mRuntimeMutationSignatureWatchlistBuildSerial = 0;
 		mAllowStartupMapWorldCorrection = false;
 		mStartupMapWorldCorrectionDeadlineFrame = 0;
 		mAllowStartupMutationRebaseline = false;
@@ -20031,6 +20042,9 @@ void NRIRenderer::RefreshMapWorld()
 	mObservedMapWorldBuildSerial = pendingBuildSerial;
 	mPendingStartupVisibleChunkValidation.clear();
 	mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
+	mRuntimeMutationSignatureWatchlist.clear();
+	mRuntimeMutationSignatureWatchlist.resize(mMapWorld.chunks.size(), 0u);
+	mRuntimeMutationSignatureWatchlistBuildSerial = mMapWorld.buildSerial;
 	const auto& stats = mMapWorld.stats;
 	Printf("NRI PT map world built: level=%s build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
@@ -20102,6 +20116,9 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	{
 		mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
 	}
+	mRuntimeMutationSignatureWatchlist.clear();
+	mRuntimeMutationSignatureWatchlist.resize(mMapWorld.chunks.size(), 0u);
+	mRuntimeMutationSignatureWatchlistBuildSerial = mMapWorld.buildSerial;
 	for (uint32_t chunkIndex : diffDetails.lateVisibleValidationChunks)
 	{
 		if (chunkIndex < mPendingStartupVisibleChunkValidation.size())
@@ -25652,6 +25669,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	static constexpr uint8_t kVisibleResidentValidationWindow = 8;
 	static constexpr uint8_t kVisibleResidentUnresolvedTextureValidationWindow = 64;
 	static constexpr uint8_t kStartupVisibleResidentValidationWindow = 64;
+	if (mRuntimeMutationSignatureWatchlistBuildSerial != mMapWorld.buildSerial ||
+		mRuntimeMutationSignatureWatchlist.size() != mMapWorld.chunks.size())
+	{
+		mRuntimeMutationSignatureWatchlist.assign(mMapWorld.chunks.size(), 0u);
+		mRuntimeMutationSignatureWatchlistBuildSerial = mMapWorld.buildSerial;
+	}
 	const auto isVisibleSuppressedStaticAnimatedChunk = [&](uint32_t mapChunkIndex) -> bool
 	{
 		if (!IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunkIndex))
@@ -25673,6 +25696,18 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 		return false;
 	};
+	if ((int)nri_ptmutationworklistvalidate > 0)
+	{
+		for (const auto& mapChunk : mMapWorld.chunks)
+		{
+			if (mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size() &&
+				mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] != 0u &&
+				!IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex))
+			{
+				mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] = 0u;
+			}
+		}
+	}
 	struct RuntimeMutationWorklistValidationState
 	{
 		bool enabled = false;
@@ -25682,6 +25717,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		uint32_t falseNegativeCount = 0;
 		uint32_t falsePositiveCount = 0;
 		uint32_t falseNegativeTraceCount = 0;
+		uint32_t signatureWatchlistCandidateCount = 0;
+		uint32_t signatureWatchlistSeedCount = 0;
+		std::array<uint32_t, 128> falseNegativeReasonMaskCounts = {};
 		std::vector<uint32_t> sourceMasks;
 		std::vector<uint8_t> fullDirty;
 	};
@@ -25733,7 +25771,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_VisibleResidentValidation);
 			}
-			if (startupVisibleValidationPending)
+			if (chunkVisibleNow && startupVisibleValidationPending)
 			{
 				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_StartupVisibleValidation);
 			}
@@ -25744,6 +25782,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			if (isVisibleSuppressedStaticAnimatedChunk(mapChunk.chunkIndex))
 			{
 				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed);
+			}
+			if (candidateListIndex < mRuntimeMutationSignatureWatchlist.size() &&
+				mRuntimeMutationSignatureWatchlist[candidateListIndex] != 0u)
+			{
+				const uint64_t liveSignature = nri_scene::ComputeMapChunkGeometrySignature(mapChunk);
+				if (liveSignature != replacement.baselineSignature)
+				{
+					markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_SignatureWatchlist);
+					worklistValidation.signatureWatchlistCandidateCount++;
+				}
 			}
 			if (mapChunk.sectorIndex >= 0 && (unsigned)mapChunk.sectorIndex < sector.Size())
 			{
@@ -25773,9 +25821,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		const auto& mapChunk = mMapWorld.chunks[chunkIndex];
 		auto& replacement = mRuntimeMapMutations.chunks[chunkIndex];
 		const bool chunkVisibleNow = IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
-		const bool startupVisibleValidationPending =
+		bool startupVisibleValidationPending =
 			mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size() &&
 			mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] != 0u;
+		if (!chunkVisibleNow && startupVisibleValidationPending)
+		{
+			mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] = 0u;
+			startupVisibleValidationPending = false;
+		}
 		const bool chunkHasUnresolvedAuthoredTextures =
 			chunkVisibleNow &&
 			ChunkHasUnresolvedAuthoredTextures(mapChunk);
@@ -25787,6 +25840,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			if (!chunkVisibleNow)
 			{
+				if (mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size())
+				{
+					mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] = 0u;
+				}
 				residentEntry->wasVisibleLastFrame = false;
 				residentEntry->visibleValidationFramesRemaining = 0;
 				residentEntry->visibleValidationTraceEmitted = false;
@@ -25872,6 +25929,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				if (worklistValidation.sourceMasks[chunkIndex] == 0)
 				{
 					worklistValidation.falseNegativeCount++;
+					if (normalizedReasonMask < worklistValidation.falseNegativeReasonMaskCounts.size())
+					{
+						worklistValidation.falseNegativeReasonMaskCounts[normalizedReasonMask]++;
+					}
+					if (chunkIndex < mRuntimeMutationSignatureWatchlist.size() &&
+						mRuntimeMutationSignatureWatchlist[chunkIndex] == 0u)
+					{
+						mRuntimeMutationSignatureWatchlist[chunkIndex] = 1u;
+						worklistValidation.signatureWatchlistSeedCount++;
+					}
 					if (worklistValidation.verbosity >= 2 && worklistValidation.falseNegativeTraceCount < 16u)
 					{
 						Printf(
@@ -27312,14 +27379,32 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		if (worklistValidation.falseNegativeCount > 0 || worklistValidation.verbosity >= 2)
 		{
 			Printf(
-				"PERF pt mutation worklist validate NRI: frame=%llu candidates=%u full_dirty=%u false_negatives=%u false_positives=%u chunks=%u verbosity=%d\n",
+				"PERF pt mutation worklist validate NRI: frame=%llu candidates=%u full_dirty=%u false_negatives=%u false_positives=%u chunks=%u signature_watch_candidates=%u signature_watch_seeds=%u signature_watch_total=%u verbosity=%d\n",
 				(unsigned long long)mFrameIndex,
 				worklistValidation.candidateCount,
 				worklistValidation.fullDirtyCount,
 				worklistValidation.falseNegativeCount,
 				worklistValidation.falsePositiveCount,
 				(uint32_t)mMapWorld.chunks.size(),
+				worklistValidation.signatureWatchlistCandidateCount,
+				worklistValidation.signatureWatchlistSeedCount,
+				(uint32_t)std::count(mRuntimeMutationSignatureWatchlist.begin(), mRuntimeMutationSignatureWatchlist.end(), (uint8_t)1u),
 				worklistValidation.verbosity);
+			for (uint32_t reasonMask = 0; reasonMask < (uint32_t)worklistValidation.falseNegativeReasonMaskCounts.size(); ++reasonMask)
+			{
+				const uint32_t count = worklistValidation.falseNegativeReasonMaskCounts[reasonMask];
+				if (count == 0)
+				{
+					continue;
+				}
+
+				Printf(
+					"PERF pt mutation worklist reason NRI: frame=%llu reason_mask=0x%x reasons=%s false_negatives=%u\n",
+					(unsigned long long)mFrameIndex,
+					reasonMask,
+					GetRuntimeMapMutationReasonSummary(reasonMask).c_str(),
+					count);
+			}
 		}
 	}
 
