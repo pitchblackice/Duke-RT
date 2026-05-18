@@ -1875,6 +1875,7 @@ private:
 	bool DispatchBootstrapView();
 	bool UseFallbackSceneTextures(bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
+	uint32_t FindSceneTextureCacheIndex(uint64_t key) const;
 	bool EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
 	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
@@ -2328,6 +2329,7 @@ private:
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
 	std::vector<CachedTexture> mTextureCache;
+	std::unordered_map<uint64_t, uint32_t> mTextureCacheKeyIndex;
 	std::vector<NRITextureResource*> mLiveSceneTextureResources;
 	std::vector<CachedSkyTexture> mSkyTextureCache;
 	NRINrdContext mNrd;

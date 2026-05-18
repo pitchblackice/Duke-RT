@@ -15151,10 +15151,7 @@ bool NRIRenderer::PreloadMaterialResources()
 
 	auto isTextureCached = [&](const nri_scene::TextureUpload& upload) -> bool
 	{
-		return std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry)
-		{
-			return entry.key == upload.key;
-		}) != mTextureCache.end();
+		return FindSceneTextureCacheIndex(upload.key) != UINT32_MAX;
 	};
 
 	auto warmMaterialTextures = [&](const nri_scene::MaterialBridgeData& materials, MaterialWarmupStats& stats) -> bool
@@ -15556,7 +15553,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 	auto isTextureUploadCached = [&](const nri_scene::TextureUpload& upload) -> bool
 	{
-		return std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; }) != mTextureCache.end();
+		return FindSceneTextureCacheIndex(upload.key) != UINT32_MAX;
 	};
 
 	auto canPrewarmTextureUpload = [&](uint64_t estimatedBytes) -> bool
@@ -22899,6 +22896,23 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 	return true;
 }
 
+uint32_t NRIRenderer::FindSceneTextureCacheIndex(uint64_t key) const
+{
+	const auto it = mTextureCacheKeyIndex.find(key);
+	if (it == mTextureCacheKeyIndex.end())
+	{
+		return UINT32_MAX;
+	}
+
+	const uint32_t cacheIndex = it->second;
+	if (cacheIndex >= mTextureCache.size() || mTextureCache[cacheIndex].key != key)
+	{
+		return UINT32_MAX;
+	}
+
+	return cacheIndex;
+}
+
 bool NRIRenderer::EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& upload, double* outRealizeMs)
 {
 	if (upload.width == 0 || upload.height == 0)
@@ -22922,8 +22936,7 @@ bool NRIRenderer::EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& u
 		return true;
 	}
 
-	auto it = std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; });
-	if (it != mTextureCache.end())
+	if (FindSceneTextureCacheIndex(upload.key) != UINT32_MAX)
 	{
 		return true;
 	}
@@ -22957,7 +22970,9 @@ bool NRIRenderer::EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& u
 		return false;
 	}
 
+	const uint32_t cacheIndex = (uint32_t)mTextureCache.size();
 	mTextureCache.push_back(cacheEntry);
+	mTextureCacheKeyIndex[cacheEntry.key] = cacheIndex;
 	if (outRealizeMs != nullptr)
 	{
 		*outRealizeMs += DurationMs(realizeStart, std::chrono::steady_clock::now());
@@ -23082,22 +23097,22 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 			continue;
 		}
 
-		auto it = mTextureCache.end();
+		uint32_t cacheIndex = UINT32_MAX;
 		if (tracePerf)
 		{
 			const auto start = std::chrono::steady_clock::now();
-			it = std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; });
+			cacheIndex = FindSceneTextureCacheIndex(upload.key);
 			lookupMs += DurationMs(start, std::chrono::steady_clock::now());
 		}
 		else
 		{
-			it = std::find_if(mTextureCache.begin(), mTextureCache.end(), [&upload](const CachedTexture& entry) { return entry.key == upload.key; });
+			cacheIndex = FindSceneTextureCacheIndex(upload.key);
 		}
-		if (it == mTextureCache.end())
+		if (cacheIndex == UINT32_MAX)
 		{
 			lookupMisses++;
 		}
-		if (it == mTextureCache.end())
+		if (cacheIndex == UINT32_MAX)
 		{
 			const auto realizeStart = tracePerf ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 			std::vector<uint8_t> realizedPixels;
@@ -23133,16 +23148,17 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 				return false;
 			}
 
+			cacheIndex = (uint32_t)mTextureCache.size();
 			mTextureCache.push_back(cacheEntry);
+			mTextureCacheKeyIndex[cacheEntry.key] = cacheIndex;
 			insertCount++;
 			if (tracePerf)
 			{
 				realizeMs += DurationMs(realizeStart, std::chrono::steady_clock::now());
 			}
-			it = mTextureCache.end() - 1;
 		}
 
-		descriptors[2 + i] = it->resource.shaderView;
+		descriptors[2 + i] = mTextureCache[cacheIndex].resource.shaderView;
 	}
 
 	uint32_t actorOverflowTraceLines = 0;
@@ -31299,6 +31315,7 @@ void NRIRenderer::DestroyCachedTextures()
 		mFrameBuffer->DestroyTextureResource(texture.resource);
 	}
 	mTextureCache.clear();
+	mTextureCacheKeyIndex.clear();
 }
 
 void NRIRenderer::DestroyFrameTextures()
