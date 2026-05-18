@@ -13,6 +13,7 @@
 #include "coreplayer.h"
 #include "hw_voxels.h"
 #include "gamecontrol.h"
+#include "hw_sections.h"
 #include "lightoverlay.h"
 #include "mapinfo.h"
 #include "printf.h"
@@ -133,6 +134,17 @@ EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
 EXTERN_CVAR(Bool, nri_ptloadingvoxelgpu)
 EXTERN_CVAR(Int, perf_looptraceframes)
+CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 2)
+	{
+		self = 2;
+	}
+}
 CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -4556,6 +4568,60 @@ namespace
 			AppendMutationReasonToken(text, "section_dirty");
 		}
 		if ((reasonMask & nri_scene::PTMapChunkMutationReason_Dragged) != 0)
+		{
+			AppendMutationReasonToken(text, "dragged");
+		}
+		if (text.empty())
+		{
+			text = "none";
+		}
+		return text;
+	}
+
+	enum RuntimeMutationWorklistCandidateSourceBits : uint32_t
+	{
+		RuntimeMutationWorklistCandidateSource_ActiveReplacement = 1 << 0,
+		RuntimeMutationWorklistCandidateSource_VisibleResidentValidation = 1 << 1,
+		RuntimeMutationWorklistCandidateSource_StartupVisibleValidation = 1 << 2,
+		RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures = 1 << 3,
+		RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed = 1 << 4,
+		RuntimeMutationWorklistCandidateSource_SectorDirty = 1 << 5,
+		RuntimeMutationWorklistCandidateSource_SectionDirty = 1 << 6,
+		RuntimeMutationWorklistCandidateSource_Dragged = 1 << 7,
+	};
+
+	static std::string GetRuntimeMutationWorklistCandidateSourceSummary(uint32_t sourceMask)
+	{
+		std::string text;
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
+		{
+			AppendMutationReasonToken(text, "active_replacement");
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_VisibleResidentValidation) != 0)
+		{
+			AppendMutationReasonToken(text, "visible_resident_validation");
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_StartupVisibleValidation) != 0)
+		{
+			AppendMutationReasonToken(text, "startup_visible_validation");
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures) != 0)
+		{
+			AppendMutationReasonToken(text, "unresolved_authored_textures");
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed) != 0)
+		{
+			AppendMutationReasonToken(text, "static_animated_suppressed");
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_SectorDirty) != 0)
+		{
+			AppendMutationReasonToken(text, "sector_dirty");
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_SectionDirty) != 0)
+		{
+			AppendMutationReasonToken(text, "section_dirty");
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_Dragged) != 0)
 		{
 			AppendMutationReasonToken(text, "dragged");
 		}
@@ -25583,6 +25649,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	{
 		return false;
 	}
+	static constexpr uint8_t kVisibleResidentValidationWindow = 8;
+	static constexpr uint8_t kVisibleResidentUnresolvedTextureValidationWindow = 64;
+	static constexpr uint8_t kStartupVisibleResidentValidationWindow = 64;
 	const auto isVisibleSuppressedStaticAnimatedChunk = [&](uint32_t mapChunkIndex) -> bool
 	{
 		if (!IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunkIndex))
@@ -25604,6 +25673,100 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 		return false;
 	};
+	struct RuntimeMutationWorklistValidationState
+	{
+		bool enabled = false;
+		int verbosity = 0;
+		uint32_t candidateCount = 0;
+		uint32_t fullDirtyCount = 0;
+		uint32_t falseNegativeCount = 0;
+		uint32_t falsePositiveCount = 0;
+		uint32_t falseNegativeTraceCount = 0;
+		std::vector<uint32_t> sourceMasks;
+		std::vector<uint8_t> fullDirty;
+	};
+	RuntimeMutationWorklistValidationState worklistValidation = {};
+	worklistValidation.verbosity = (int)nri_ptmutationworklistvalidate;
+	worklistValidation.enabled = worklistValidation.verbosity > 0;
+	if (worklistValidation.enabled)
+	{
+		worklistValidation.sourceMasks.resize(mMapWorld.chunks.size(), 0u);
+		worklistValidation.fullDirty.resize(mMapWorld.chunks.size(), 0u);
+		const auto markWorklistCandidate =
+			[&worklistValidation](uint32_t chunkListIndex, uint32_t sourceMask)
+		{
+			if (chunkListIndex >= worklistValidation.sourceMasks.size() || sourceMask == 0)
+			{
+				return;
+			}
+			if (worklistValidation.sourceMasks[chunkListIndex] == 0)
+			{
+				worklistValidation.candidateCount++;
+			}
+			worklistValidation.sourceMasks[chunkListIndex] |= sourceMask;
+		};
+
+		for (uint32_t candidateListIndex = 0; candidateListIndex < (uint32_t)mMapWorld.chunks.size(); ++candidateListIndex)
+		{
+			const auto& mapChunk = mMapWorld.chunks[candidateListIndex];
+			const auto& replacement = mRuntimeMapMutations.chunks[candidateListIndex];
+			if (replacement.active || (replacement.valid && !replacement.residentAuthoritative))
+			{
+				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_ActiveReplacement);
+			}
+
+			const bool chunkVisibleNow = IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
+			const bool startupVisibleValidationPending =
+				mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size() &&
+				mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] != 0u;
+			const bool chunkHasUnresolvedAuthoredTextures =
+				chunkVisibleNow &&
+				ChunkHasUnresolvedAuthoredTextures(mapChunk);
+			const ResidentMapChunkRegistry::Entry* residentEntry =
+				mapChunk.chunkIndex < mResidentMapChunkRegistry.entries.size() ?
+				&mResidentMapChunkRegistry.entries[mapChunk.chunkIndex] :
+				nullptr;
+			if (residentEntry != nullptr &&
+				residentEntry->valid &&
+				chunkVisibleNow &&
+				(!residentEntry->wasVisibleLastFrame || residentEntry->visibleValidationFramesRemaining > 0))
+			{
+				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_VisibleResidentValidation);
+			}
+			if (startupVisibleValidationPending)
+			{
+				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_StartupVisibleValidation);
+			}
+			if (chunkHasUnresolvedAuthoredTextures)
+			{
+				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures);
+			}
+			if (isVisibleSuppressedStaticAnimatedChunk(mapChunk.chunkIndex))
+			{
+				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed);
+			}
+			if (mapChunk.sectorIndex >= 0 && (unsigned)mapChunk.sectorIndex < sector.Size())
+			{
+				const auto& sec = sector[(unsigned)mapChunk.sectorIndex];
+				if (sec.dirty != 0)
+				{
+					markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_SectorDirty);
+				}
+				if ((sec.exflags & SECTOREX_DRAGGED) != 0)
+				{
+					markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_Dragged);
+				}
+			}
+			for (int sectionIndex : replacement.baseline.sectionIndices)
+			{
+				if ((unsigned)sectionIndex < sections.Size() && sections[sectionIndex].dirty != 0)
+				{
+					markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_SectionDirty);
+					break;
+				}
+			}
+		}
+	}
 
 	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
 	{
@@ -25630,9 +25793,6 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 			else
 			{
-				static constexpr uint8_t kVisibleResidentValidationWindow = 8;
-				static constexpr uint8_t kVisibleResidentUnresolvedTextureValidationWindow = 64;
-				static constexpr uint8_t kStartupVisibleResidentValidationWindow = 64;
 				if (!residentEntry->wasVisibleLastFrame)
 				{
 					residentEntry->visibleValidationFramesRemaining = kVisibleResidentValidationWindow;
@@ -25702,6 +25862,41 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		replacement.dragged = normalizedDragged;
 		replacement.staticAnimatedReplacement = false;
 		replacement.blindSpot = normalizedReasonMask != nri_scene::PTMapChunkMutationReason_None && !analysis.signatureChanged;
+		if (worklistValidation.enabled && chunkIndex < worklistValidation.sourceMasks.size())
+		{
+			const bool fullScanSelectedChunk = normalizedReasonMask != nri_scene::PTMapChunkMutationReason_None;
+			if (fullScanSelectedChunk)
+			{
+				worklistValidation.fullDirty[chunkIndex] = 1u;
+				worklistValidation.fullDirtyCount++;
+				if (worklistValidation.sourceMasks[chunkIndex] == 0)
+				{
+					worklistValidation.falseNegativeCount++;
+					if (worklistValidation.verbosity >= 2 && worklistValidation.falseNegativeTraceCount < 16u)
+					{
+						Printf(
+							"PERF pt mutation worklist miss NRI: frame=%llu chunk=%u sector=%d reason_mask=0x%x reasons=%s source_mask=0x%x sources=%s previous_reason_mask=0x%x active=%u valid=%u resident_authoritative=%u visible=%u startup_visible=%u unresolved_textures=%u visible_suppressed_anim=%u signature_changed=%u\n",
+							(unsigned long long)mFrameIndex,
+							mapChunk.chunkIndex,
+							mapChunk.sectorIndex,
+							normalizedReasonMask,
+							GetRuntimeMapMutationReasonSummary(normalizedReasonMask).c_str(),
+							worklistValidation.sourceMasks[chunkIndex],
+							GetRuntimeMutationWorklistCandidateSourceSummary(worklistValidation.sourceMasks[chunkIndex]).c_str(),
+							previousReasonMask,
+							replacement.active ? 1u : 0u,
+							replacement.valid ? 1u : 0u,
+							replacement.residentAuthoritative ? 1u : 0u,
+							chunkVisibleNow ? 1u : 0u,
+							startupVisibleValidationPending ? 1u : 0u,
+							chunkHasUnresolvedAuthoredTextures ? 1u : 0u,
+							isVisibleSuppressedStaticAnimatedChunk(mapChunk.chunkIndex) ? 1u : 0u,
+							analysis.signatureChanged ? 1u : 0u);
+						worklistValidation.falseNegativeTraceCount++;
+					}
+				}
+			}
+		}
 		// Section dirty alone is too broad for PT runtime replacement because
 		// the raster path can mark transient warped sections dirty during draw
 		// prep without producing a stable gameplay map mutation. Keep explicit
@@ -27086,6 +27281,45 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			TraceRuntimeMapMutationChunk(mapChunk, replacement);
 			emitChunkTrace();
 			continue;
+		}
+	}
+
+	if (worklistValidation.enabled)
+	{
+		uint32_t falsePositiveTraceCount = 0;
+		for (uint32_t chunkListIndex = 0; chunkListIndex < (uint32_t)worklistValidation.sourceMasks.size(); ++chunkListIndex)
+		{
+			if (worklistValidation.sourceMasks[chunkListIndex] == 0 ||
+				worklistValidation.fullDirty[chunkListIndex] != 0)
+			{
+				continue;
+			}
+
+			worklistValidation.falsePositiveCount++;
+			if (worklistValidation.verbosity >= 2 && falsePositiveTraceCount < 8u)
+			{
+				const auto& mapChunk = mMapWorld.chunks[chunkListIndex];
+				Printf(
+					"PERF pt mutation worklist extra NRI: frame=%llu chunk=%u sector=%d source_mask=0x%x sources=%s\n",
+					(unsigned long long)mFrameIndex,
+					mapChunk.chunkIndex,
+					mapChunk.sectorIndex,
+					worklistValidation.sourceMasks[chunkListIndex],
+					GetRuntimeMutationWorklistCandidateSourceSummary(worklistValidation.sourceMasks[chunkListIndex]).c_str());
+				falsePositiveTraceCount++;
+			}
+		}
+		if (worklistValidation.falseNegativeCount > 0 || worklistValidation.verbosity >= 2)
+		{
+			Printf(
+				"PERF pt mutation worklist validate NRI: frame=%llu candidates=%u full_dirty=%u false_negatives=%u false_positives=%u chunks=%u verbosity=%d\n",
+				(unsigned long long)mFrameIndex,
+				worklistValidation.candidateCount,
+				worklistValidation.fullDirtyCount,
+				worklistValidation.falseNegativeCount,
+				worklistValidation.falsePositiveCount,
+				(uint32_t)mMapWorld.chunks.size(),
+				worklistValidation.verbosity);
 		}
 	}
 
