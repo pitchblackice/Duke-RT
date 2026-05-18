@@ -308,6 +308,9 @@ public:
 		double staticSceneMs = 0.0;
 		double runtimeMutationMs = 0.0;
 		double runtimeMutationAnalyzeMs = 0.0;
+		uint32_t runtimeMutationCandidateChunks = 0;
+		uint32_t runtimeMutationAnalyzedChunks = 0;
+		uint32_t runtimeMutationBackgroundSweepChunks = 0;
 		double runtimeMutationRebuildMs = 0.0;
 		double runtimeMutationStructuralRebuildMs = 0.0;
 		double runtimeMutationMaterialRefreshMs = 0.0;
@@ -2487,6 +2490,7 @@ private:
 	std::vector<uint8_t> mPendingStartupVisibleChunkValidation;
 	std::vector<uint8_t> mRuntimeMutationSignatureWatchlist;
 	uint64_t mRuntimeMutationSignatureWatchlistBuildSerial = 0;
+	uint32_t mRuntimeMutationWorklistSweepCursor = 0;
 	uint64_t mObservedMapWorldBuildSerial = 0;
 	uint64_t mStaticAccelerationBuildSerial = 0;
 	uint32_t mStartupMapWorldCorrectionDeadlineFrame = 0;

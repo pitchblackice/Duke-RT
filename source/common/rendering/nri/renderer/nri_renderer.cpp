@@ -145,6 +145,8 @@ CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, CVAR_ARCHIVE | CVAR_GLOBALCO
 		self = 2;
 	}
 }
+CVAR(Bool, nri_ptruntimeworklist, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -4589,6 +4591,7 @@ namespace
 		RuntimeMutationWorklistCandidateSource_SectionDirty = 1 << 6,
 		RuntimeMutationWorklistCandidateSource_Dragged = 1 << 7,
 		RuntimeMutationWorklistCandidateSource_SignatureWatchlist = 1 << 8,
+		RuntimeMutationWorklistCandidateSource_BackgroundSweep = 1 << 9,
 	};
 
 	static std::string GetRuntimeMutationWorklistCandidateSourceSummary(uint32_t sourceMask)
@@ -4629,6 +4632,10 @@ namespace
 		if ((sourceMask & RuntimeMutationWorklistCandidateSource_SignatureWatchlist) != 0)
 		{
 			AppendMutationReasonToken(text, "signature_watchlist");
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_BackgroundSweep) != 0)
+		{
+			AppendMutationReasonToken(text, "background_sweep");
 		}
 		if (text.empty())
 		{
@@ -7102,6 +7109,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mPendingStartupVisibleChunkValidation.clear();
 	mRuntimeMutationSignatureWatchlist.clear();
 	mRuntimeMutationSignatureWatchlistBuildSerial = 0;
+	mRuntimeMutationWorklistSweepCursor = 0;
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	mStartupMutationRebaselineDeadlineFrame = 0;
 
@@ -7220,6 +7228,7 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	mPendingStartupVisibleChunkValidation.clear();
 	mRuntimeMutationSignatureWatchlist.clear();
 	mRuntimeMutationSignatureWatchlistBuildSerial = 0;
+	mRuntimeMutationWorklistSweepCursor = 0;
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	mStartupMutationRebaselineDeadlineFrame = 0;
 	mLastSurfaceProbe = {};
@@ -20030,6 +20039,7 @@ void NRIRenderer::RefreshMapWorld()
 		mPendingStartupVisibleChunkValidation.clear();
 		mRuntimeMutationSignatureWatchlist.clear();
 		mRuntimeMutationSignatureWatchlistBuildSerial = 0;
+		mRuntimeMutationWorklistSweepCursor = 0;
 		mAllowStartupMapWorldCorrection = false;
 		mStartupMapWorldCorrectionDeadlineFrame = 0;
 		mAllowStartupMutationRebaseline = false;
@@ -20045,6 +20055,7 @@ void NRIRenderer::RefreshMapWorld()
 	mRuntimeMutationSignatureWatchlist.clear();
 	mRuntimeMutationSignatureWatchlist.resize(mMapWorld.chunks.size(), 0u);
 	mRuntimeMutationSignatureWatchlistBuildSerial = mMapWorld.buildSerial;
+	mRuntimeMutationWorklistSweepCursor = 0;
 	const auto& stats = mMapWorld.stats;
 	Printf("NRI PT map world built: level=%s build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
@@ -20119,6 +20130,7 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	mRuntimeMutationSignatureWatchlist.clear();
 	mRuntimeMutationSignatureWatchlist.resize(mMapWorld.chunks.size(), 0u);
 	mRuntimeMutationSignatureWatchlistBuildSerial = mMapWorld.buildSerial;
+	mRuntimeMutationWorklistSweepCursor = 0;
 	for (uint32_t chunkIndex : diffDetails.lateVisibleValidationChunks)
 	{
 		if (chunkIndex < mPendingStartupVisibleChunkValidation.size())
@@ -25094,6 +25106,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasSetupMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBuildMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationAnalyzedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationBackgroundSweepChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationRebuiltChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationHeldChunks = 0;
@@ -25674,6 +25689,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	{
 		mRuntimeMutationSignatureWatchlist.assign(mMapWorld.chunks.size(), 0u);
 		mRuntimeMutationSignatureWatchlistBuildSerial = mMapWorld.buildSerial;
+		mRuntimeMutationWorklistSweepCursor = 0;
 	}
 	const auto isVisibleSuppressedStaticAnimatedChunk = [&](uint32_t mapChunkIndex) -> bool
 	{
@@ -25682,32 +25698,44 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			return false;
 		}
 
-		for (const auto& staticChunk : mStaticMapScene.chunks)
+		if (mapChunkIndex < mResidentMapChunkRegistry.entries.size())
 		{
-			if (staticChunk.chunkIndex != mapChunkIndex)
-			{
-				continue;
-			}
-
+			const auto& entry = mResidentMapChunkRegistry.entries[mapChunkIndex];
 			return
-				staticChunk.hasAnimatedTextureCandidates &&
-				staticChunk.animatedRefreshSuppressed;
+				entry.valid &&
+				entry.hasAnimatedTextureCandidates &&
+				entry.animatedRefreshSuppressed;
 		}
 
 		return false;
 	};
-	if ((int)nri_ptmutationworklistvalidate > 0)
+	for (const auto& mapChunk : mMapWorld.chunks)
 	{
-		for (const auto& mapChunk : mMapWorld.chunks)
+		if (mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size() &&
+			mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] != 0u &&
+			!IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex))
 		{
-			if (mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size() &&
-				mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] != 0u &&
-				!IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex))
-			{
-				mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] = 0u;
-			}
+			mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] = 0u;
 		}
 	}
+	const bool runtimeMutationWorklistEnabled = (bool)nri_ptruntimeworklist;
+	std::vector<uint32_t> runtimeMutationCandidateSourceMasks(mMapWorld.chunks.size(), 0u);
+	uint32_t runtimeMutationCandidateCount = 0;
+	uint32_t runtimeMutationSignatureWatchlistCandidateCount = 0;
+	uint32_t runtimeMutationBackgroundSweepCandidateCount = 0;
+	const auto markWorklistCandidate =
+		[&](uint32_t chunkListIndex, uint32_t sourceMask)
+	{
+		if (chunkListIndex >= runtimeMutationCandidateSourceMasks.size() || sourceMask == 0)
+		{
+			return;
+		}
+		if (runtimeMutationCandidateSourceMasks[chunkListIndex] == 0)
+		{
+			runtimeMutationCandidateCount++;
+		}
+		runtimeMutationCandidateSourceMasks[chunkListIndex] |= sourceMask;
+	};
 	struct RuntimeMutationWorklistValidationState
 	{
 		bool enabled = false;
@@ -25719,6 +25747,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		uint32_t falseNegativeTraceCount = 0;
 		uint32_t signatureWatchlistCandidateCount = 0;
 		uint32_t signatureWatchlistSeedCount = 0;
+		uint32_t backgroundSweepCandidateCount = 0;
 		std::array<uint32_t, 128> falseNegativeReasonMaskCounts = {};
 		std::vector<uint32_t> sourceMasks;
 		std::vector<uint8_t> fullDirty;
@@ -25726,94 +25755,113 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	RuntimeMutationWorklistValidationState worklistValidation = {};
 	worklistValidation.verbosity = (int)nri_ptmutationworklistvalidate;
 	worklistValidation.enabled = worklistValidation.verbosity > 0;
-	if (worklistValidation.enabled)
+	const auto seedRuntimeMutationSignatureWatchlist = [&](size_t chunkIndex) -> bool
 	{
-		worklistValidation.sourceMasks.resize(mMapWorld.chunks.size(), 0u);
-		worklistValidation.fullDirty.resize(mMapWorld.chunks.size(), 0u);
-		const auto markWorklistCandidate =
-			[&worklistValidation](uint32_t chunkListIndex, uint32_t sourceMask)
+		if (chunkIndex >= mRuntimeMutationSignatureWatchlist.size() ||
+			mRuntimeMutationSignatureWatchlist[chunkIndex] != 0u)
 		{
-			if (chunkListIndex >= worklistValidation.sourceMasks.size() || sourceMask == 0)
-			{
-				return;
-			}
-			if (worklistValidation.sourceMasks[chunkListIndex] == 0)
-			{
-				worklistValidation.candidateCount++;
-			}
-			worklistValidation.sourceMasks[chunkListIndex] |= sourceMask;
-		};
+			return false;
+		}
 
-		for (uint32_t candidateListIndex = 0; candidateListIndex < (uint32_t)mMapWorld.chunks.size(); ++candidateListIndex)
+		mRuntimeMutationSignatureWatchlist[chunkIndex] = 1u;
+		return true;
+	};
+	for (uint32_t candidateListIndex = 0; candidateListIndex < (uint32_t)mMapWorld.chunks.size(); ++candidateListIndex)
+	{
+		const auto& mapChunk = mMapWorld.chunks[candidateListIndex];
+		const auto& replacement = mRuntimeMapMutations.chunks[candidateListIndex];
+		if (replacement.active || (replacement.valid && !replacement.residentAuthoritative))
 		{
-			const auto& mapChunk = mMapWorld.chunks[candidateListIndex];
-			const auto& replacement = mRuntimeMapMutations.chunks[candidateListIndex];
-			if (replacement.active || (replacement.valid && !replacement.residentAuthoritative))
-			{
-				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_ActiveReplacement);
-			}
+			markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_ActiveReplacement);
+		}
 
-			const bool chunkVisibleNow = IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
-			const bool startupVisibleValidationPending =
-				mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size() &&
-				mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] != 0u;
-			const bool chunkHasUnresolvedAuthoredTextures =
-				chunkVisibleNow &&
-				ChunkHasUnresolvedAuthoredTextures(mapChunk);
-			const ResidentMapChunkRegistry::Entry* residentEntry =
-				mapChunk.chunkIndex < mResidentMapChunkRegistry.entries.size() ?
-				&mResidentMapChunkRegistry.entries[mapChunk.chunkIndex] :
-				nullptr;
-			if (residentEntry != nullptr &&
-				residentEntry->valid &&
-				chunkVisibleNow &&
-				(!residentEntry->wasVisibleLastFrame || residentEntry->visibleValidationFramesRemaining > 0))
+		const bool chunkVisibleNow = IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
+		const bool startupVisibleValidationPending =
+			mapChunk.chunkIndex < mPendingStartupVisibleChunkValidation.size() &&
+			mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] != 0u;
+		const bool chunkHasUnresolvedAuthoredTextures =
+			chunkVisibleNow &&
+			ChunkHasUnresolvedAuthoredTextures(mapChunk);
+		const ResidentMapChunkRegistry::Entry* residentEntry =
+			mapChunk.chunkIndex < mResidentMapChunkRegistry.entries.size() ?
+			&mResidentMapChunkRegistry.entries[mapChunk.chunkIndex] :
+			nullptr;
+		if (residentEntry != nullptr &&
+			residentEntry->valid &&
+			chunkVisibleNow &&
+			(!residentEntry->wasVisibleLastFrame || residentEntry->visibleValidationFramesRemaining > 0))
+		{
+			markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_VisibleResidentValidation);
+		}
+		if (chunkVisibleNow && startupVisibleValidationPending)
+		{
+			markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_StartupVisibleValidation);
+		}
+		if (chunkHasUnresolvedAuthoredTextures)
+		{
+			markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures);
+		}
+		if (isVisibleSuppressedStaticAnimatedChunk(mapChunk.chunkIndex))
+		{
+			markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed);
+		}
+		if (candidateListIndex < mRuntimeMutationSignatureWatchlist.size() &&
+			mRuntimeMutationSignatureWatchlist[candidateListIndex] != 0u)
+		{
+			const uint64_t liveSignature = nri_scene::ComputeMapChunkGeometrySignature(mapChunk);
+			if (liveSignature != replacement.baselineSignature)
 			{
-				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_VisibleResidentValidation);
-			}
-			if (chunkVisibleNow && startupVisibleValidationPending)
-			{
-				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_StartupVisibleValidation);
-			}
-			if (chunkHasUnresolvedAuthoredTextures)
-			{
-				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures);
-			}
-			if (isVisibleSuppressedStaticAnimatedChunk(mapChunk.chunkIndex))
-			{
-				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed);
-			}
-			if (candidateListIndex < mRuntimeMutationSignatureWatchlist.size() &&
-				mRuntimeMutationSignatureWatchlist[candidateListIndex] != 0u)
-			{
-				const uint64_t liveSignature = nri_scene::ComputeMapChunkGeometrySignature(mapChunk);
-				if (liveSignature != replacement.baselineSignature)
-				{
-					markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_SignatureWatchlist);
-					worklistValidation.signatureWatchlistCandidateCount++;
-				}
-			}
-			if (mapChunk.sectorIndex >= 0 && (unsigned)mapChunk.sectorIndex < sector.Size())
-			{
-				const auto& sec = sector[(unsigned)mapChunk.sectorIndex];
-				if (sec.dirty != 0)
-				{
-					markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_SectorDirty);
-				}
-				if ((sec.exflags & SECTOREX_DRAGGED) != 0)
-				{
-					markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_Dragged);
-				}
-			}
-			for (int sectionIndex : replacement.baseline.sectionIndices)
-			{
-				if ((unsigned)sectionIndex < sections.Size() && sections[sectionIndex].dirty != 0)
-				{
-					markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_SectionDirty);
-					break;
-				}
+				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_SignatureWatchlist);
+				runtimeMutationSignatureWatchlistCandidateCount++;
 			}
 		}
+		if (mapChunk.sectorIndex >= 0 && (unsigned)mapChunk.sectorIndex < sector.Size())
+		{
+			const auto& sec = sector[(unsigned)mapChunk.sectorIndex];
+			if (sec.dirty != 0)
+			{
+				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_SectorDirty);
+			}
+			if ((sec.exflags & SECTOREX_DRAGGED) != 0)
+			{
+				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_Dragged);
+			}
+		}
+		for (int sectionIndex : replacement.baseline.sectionIndices)
+		{
+			if ((unsigned)sectionIndex < sections.Size() && sections[sectionIndex].dirty != 0)
+			{
+				markWorklistCandidate(candidateListIndex, RuntimeMutationWorklistCandidateSource_SectionDirty);
+				break;
+			}
+		}
+	}
+
+	if (runtimeMutationWorklistEnabled && !mMapWorld.chunks.empty())
+	{
+		const uint32_t sweepBudget = (uint32_t)std::max(0, (int)nri_ptruntimeworklistsweepbudget);
+		const uint32_t chunkCount = (uint32_t)mMapWorld.chunks.size();
+		const uint32_t sweepCount = std::min(sweepBudget, chunkCount);
+		for (uint32_t sweepOffset = 0; sweepOffset < sweepCount; ++sweepOffset)
+		{
+			const uint32_t chunkListIndex = (mRuntimeMutationWorklistSweepCursor + sweepOffset) % chunkCount;
+			if ((runtimeMutationCandidateSourceMasks[chunkListIndex] & RuntimeMutationWorklistCandidateSource_BackgroundSweep) == 0)
+			{
+				runtimeMutationBackgroundSweepCandidateCount++;
+			}
+			markWorklistCandidate(chunkListIndex, RuntimeMutationWorklistCandidateSource_BackgroundSweep);
+		}
+		mRuntimeMutationWorklistSweepCursor = (mRuntimeMutationWorklistSweepCursor + sweepCount) % chunkCount;
+	}
+	mLastPerfShellTraceStats.runtimeMutationCandidateChunks = runtimeMutationCandidateCount;
+	mLastPerfShellTraceStats.runtimeMutationBackgroundSweepChunks = runtimeMutationBackgroundSweepCandidateCount;
+	if (worklistValidation.enabled)
+	{
+		worklistValidation.candidateCount = runtimeMutationCandidateCount;
+		worklistValidation.signatureWatchlistCandidateCount = runtimeMutationSignatureWatchlistCandidateCount;
+		worklistValidation.backgroundSweepCandidateCount = runtimeMutationBackgroundSweepCandidateCount;
+		worklistValidation.sourceMasks = runtimeMutationCandidateSourceMasks;
+		worklistValidation.fullDirty.resize(mMapWorld.chunks.size(), 0u);
 	}
 
 	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
@@ -25869,11 +25917,22 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				residentEntry->wasVisibleLastFrame = true;
 			}
 		}
+		const bool processChunk =
+			!runtimeMutationWorklistEnabled ||
+			worklistValidation.enabled ||
+			(chunkIndex < runtimeMutationCandidateSourceMasks.size() &&
+				runtimeMutationCandidateSourceMasks[chunkIndex] != 0);
+		if (!processChunk)
+		{
+			continue;
+		}
+
 		const uint32_t previousReasonMask = replacement.reasonMask;
 		nri_scene::PTMapChunkMutationAnalysis analysis = {};
 		const bool analyzed = [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationAnalyzeMs);
+			mLastPerfShellTraceStats.runtimeMutationAnalyzedChunks++;
 			return nri_scene::AnalyzeMapChunkMutation(mapChunk, replacement.baseline, analysis);
 		}();
 		if (!analyzed)
@@ -25919,6 +25978,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		replacement.dragged = normalizedDragged;
 		replacement.staticAnimatedReplacement = false;
 		replacement.blindSpot = normalizedReasonMask != nri_scene::PTMapChunkMutationReason_None && !analysis.signatureChanged;
+		if (normalizedReasonMask != nri_scene::PTMapChunkMutationReason_None &&
+			!chunkVisibleNow &&
+			chunkIndex < runtimeMutationCandidateSourceMasks.size() &&
+			(runtimeMutationCandidateSourceMasks[chunkIndex] & RuntimeMutationWorklistCandidateSource_BackgroundSweep) != 0)
+		{
+			seedRuntimeMutationSignatureWatchlist(chunkIndex);
+		}
 		if (worklistValidation.enabled && chunkIndex < worklistValidation.sourceMasks.size())
 		{
 			const bool fullScanSelectedChunk = normalizedReasonMask != nri_scene::PTMapChunkMutationReason_None;
@@ -25933,10 +25999,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					{
 						worklistValidation.falseNegativeReasonMaskCounts[normalizedReasonMask]++;
 					}
-					if (chunkIndex < mRuntimeMutationSignatureWatchlist.size() &&
-						mRuntimeMutationSignatureWatchlist[chunkIndex] == 0u)
+					if (seedRuntimeMutationSignatureWatchlist(chunkIndex))
 					{
-						mRuntimeMutationSignatureWatchlist[chunkIndex] = 1u;
 						worklistValidation.signatureWatchlistSeedCount++;
 					}
 					if (worklistValidation.verbosity >= 2 && worklistValidation.falseNegativeTraceCount < 16u)
@@ -27379,7 +27443,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		if (worklistValidation.falseNegativeCount > 0 || worklistValidation.verbosity >= 2)
 		{
 			Printf(
-				"PERF pt mutation worklist validate NRI: frame=%llu candidates=%u full_dirty=%u false_negatives=%u false_positives=%u chunks=%u signature_watch_candidates=%u signature_watch_seeds=%u signature_watch_total=%u verbosity=%d\n",
+				"PERF pt mutation worklist validate NRI: frame=%llu candidates=%u full_dirty=%u false_negatives=%u false_positives=%u chunks=%u signature_watch_candidates=%u signature_watch_seeds=%u signature_watch_total=%u background_sweep_candidates=%u verbosity=%d\n",
 				(unsigned long long)mFrameIndex,
 				worklistValidation.candidateCount,
 				worklistValidation.fullDirtyCount,
@@ -27389,6 +27453,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				worklistValidation.signatureWatchlistCandidateCount,
 				worklistValidation.signatureWatchlistSeedCount,
 				(uint32_t)std::count(mRuntimeMutationSignatureWatchlist.begin(), mRuntimeMutationSignatureWatchlist.end(), (uint8_t)1u),
+				worklistValidation.backgroundSweepCandidateCount,
 				worklistValidation.verbosity);
 			for (uint32_t reasonMask = 0; reasonMask < (uint32_t)worklistValidation.falseNegativeReasonMaskCounts.size(); ++reasonMask)
 			{

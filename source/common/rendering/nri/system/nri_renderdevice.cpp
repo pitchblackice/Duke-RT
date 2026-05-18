@@ -292,7 +292,7 @@ namespace
 			(unsigned long long)resource.sceneUploadBytes,
 			resource.waitMs);
 		Printf(
-			"PERF pt progressive runtime NRI: frame=%llu runtime_cpu=%.3f mutation=%.3f analyze=%.3f rebuild=%.3f structural=%.3f material_refresh=%.3f resident_apply=%.3f resident_live=%.3f resident_geometry=%.3f resident_material=%.3f resident_baseline=%.3f resident_atlas=%.3f resident_atlas_book=%.3f resident_copy=%.3f resident_primitive=%.3f resident_blas=%.3f resident_blas_setup=%.3f resident_blas_build=%.3f spacelink=%.3f debug_sphere=%.3f dirty=%u rebuilt=%u held=%u resident_apply_count=%u resident_recover=%u blas_recreate=%u blas_refit=%u\n",
+			"PERF pt progressive runtime NRI: frame=%llu runtime_cpu=%.3f mutation=%.3f analyze=%.3f rebuild=%.3f structural=%.3f material_refresh=%.3f resident_apply=%.3f resident_live=%.3f resident_geometry=%.3f resident_material=%.3f resident_baseline=%.3f resident_atlas=%.3f resident_atlas_book=%.3f resident_copy=%.3f resident_primitive=%.3f resident_blas=%.3f resident_blas_setup=%.3f resident_blas_build=%.3f spacelink=%.3f debug_sphere=%.3f candidates=%u analyzed=%u sweep=%u dirty=%u rebuilt=%u held=%u resident_apply_count=%u resident_recover=%u blas_recreate=%u blas_refit=%u\n",
 			(unsigned long long)frameNumber,
 			runtimeCpuMs,
 			shell.runtimeMutationMs,
@@ -314,6 +314,9 @@ namespace
 			shell.runtimeMutationResidentApplyDownstreamBlasBuildMs,
 			shell.runtimeSpaceLinkMs,
 			shell.runtimeDebugSphereMs,
+			shell.runtimeMutationCandidateChunks,
+			shell.runtimeMutationAnalyzedChunks,
+			shell.runtimeMutationBackgroundSweepChunks,
 			shell.runtimeMutationDirtyChunks,
 			shell.runtimeMutationRebuiltChunks,
 			shell.runtimeMutationHeldChunks,
@@ -3666,13 +3669,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			}
 		}
 		Printf(
-			"PERF pt shell detail NRI: frame=%llu static_scene=%.3f mutation=%.3f mutation_analyze=%.3f mutation_rebuild=%.3f mutation_append=%.3f mutation_dirty=%u mutation_rebuilt=%u mutation_held=%u mutation_prims=%u mutation_mats=%u spacelink=%.3f spacelink_prims=%u spacelink_mats=%u debug_sphere=%.3f debug_view=%.3f debug_geo=%.3f debug_mats=%.3f debug_tune=%.3f debug_spheres=%u debug_lons=%u debug_lats=%u debug_prims=%u debug_mats_out=%u overlay=%.3f overlay_prims=%u overlay_mats=%u dynamic_capture=%.3f persistent=%.3f dynamic_as=%.3f dynamic_as_create=%.3f dynamic_as_scratch=%.3f dynamic_as_build=%.3f dynamic_as_barrier=%.3f dynamic_as_prims=%u dynamic_as_verts=%u dynamic_as_indices=%u restore_static=%.3f copy_final=%.3f\n",
+			"PERF pt shell detail NRI: frame=%llu static_scene=%.3f mutation=%.3f mutation_analyze=%.3f mutation_rebuild=%.3f mutation_append=%.3f mutation_candidates=%u mutation_analyzed=%u mutation_sweep=%u mutation_dirty=%u mutation_rebuilt=%u mutation_held=%u mutation_prims=%u mutation_mats=%u spacelink=%.3f spacelink_prims=%u spacelink_mats=%u debug_sphere=%.3f debug_view=%.3f debug_geo=%.3f debug_mats=%.3f debug_tune=%.3f debug_spheres=%u debug_lons=%u debug_lats=%u debug_prims=%u debug_mats_out=%u overlay=%.3f overlay_prims=%u overlay_mats=%u dynamic_capture=%.3f persistent=%.3f dynamic_as=%.3f dynamic_as_create=%.3f dynamic_as_scratch=%.3f dynamic_as_build=%.3f dynamic_as_barrier=%.3f dynamic_as_prims=%u dynamic_as_verts=%u dynamic_as_indices=%u restore_static=%.3f copy_final=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.staticSceneMs,
 			shell.runtimeMutationMs,
 			shell.runtimeMutationAnalyzeMs,
 			shell.runtimeMutationRebuildMs,
 			shell.runtimeMutationAppendMs,
+			shell.runtimeMutationCandidateChunks,
+			shell.runtimeMutationAnalyzedChunks,
+			shell.runtimeMutationBackgroundSweepChunks,
 			shell.runtimeMutationDirtyChunks,
 			shell.runtimeMutationRebuiltChunks,
 			shell.runtimeMutationHeldChunks,
