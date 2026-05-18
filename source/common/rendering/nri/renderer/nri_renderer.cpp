@@ -134,7 +134,7 @@ EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
 EXTERN_CVAR(Bool, nri_ptloadingvoxelgpu)
 EXTERN_CVAR(Int, perf_looptraceframes)
-CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, 0)
 {
 	if (self < 0)
 	{
@@ -145,8 +145,8 @@ CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, CVAR_ARCHIVE | CVAR_GLOBALCO
 		self = 2;
 	}
 }
-CVAR(Bool, nri_ptruntimeworklist, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptruntimeworklist, true, 0)
+CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, 0)
 CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
