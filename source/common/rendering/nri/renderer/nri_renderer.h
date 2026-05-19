@@ -470,6 +470,16 @@ public:
 		uint32_t runtimeMutationStructuralRebuildDeferredPromotedChunks = 0;
 		uint32_t runtimeMutationStructuralRebuildDeferredPendingChunks = 0;
 		uint32_t runtimeMutationStructuralRebuildDeferredBudget = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredNearChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredNearCoalescedChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredNearFlushedChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredNearPendingChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredNearBudget = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredFarChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredFarCoalescedChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredFarFlushedChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredFarPendingChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredFarBudget = 0;
 		uint32_t runtimeMutationMaterialRefreshVisibleChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshInvisibleChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshNearChunks = 0;

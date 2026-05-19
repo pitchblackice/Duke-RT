@@ -80,6 +80,7 @@ EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
 EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
 EXTERN_CVAR(Bool, nri_ptruntimedeferfarmaterial)
 EXTERN_CVAR(Bool, nri_ptruntimedeferfarstructural)
+EXTERN_CVAR(Bool, nri_ptruntimedefernearinvisiblestructural)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
 EXTERN_CVAR(Bool, nri_ptscenestats)
@@ -377,7 +378,7 @@ namespace
 			shell.runtimeMutationResidentApplyFarChunks,
 			shell.runtimeMutationResidentApplyUnknownDistanceChunks);
 		Printf(
-			"PERF pt progressive mutation deferred NRI: frame=%llu material_deferred=%u material_coalesced=%u material_flushed=%u material_pending=%u material_enabled=%u structural_deferred=%u structural_coalesced=%u structural_flushed=%u structural_promoted=%u structural_pending=%u structural_budget=%u structural_enabled=%u\n",
+			"PERF pt progressive mutation deferred NRI: frame=%llu material_deferred=%u material_coalesced=%u material_flushed=%u material_pending=%u material_enabled=%u structural_deferred=%u structural_coalesced=%u structural_flushed=%u structural_promoted=%u structural_pending=%u structural_budget=%u structural_enabled=%u structural_near_deferred=%u structural_near_coalesced=%u structural_near_flushed=%u structural_near_pending=%u structural_near_budget=%u structural_near_enabled=%u structural_far_deferred=%u structural_far_coalesced=%u structural_far_flushed=%u structural_far_pending=%u structural_far_budget=%u structural_far_enabled=%u\n",
 			(unsigned long long)frameNumber,
 			shell.runtimeMutationMaterialRefreshDeferredChunks,
 			shell.runtimeMutationMaterialRefreshDeferredCoalescedChunks,
@@ -390,6 +391,18 @@ namespace
 			shell.runtimeMutationStructuralRebuildDeferredPromotedChunks,
 			shell.runtimeMutationStructuralRebuildDeferredPendingChunks,
 			shell.runtimeMutationStructuralRebuildDeferredBudget,
+			(uint32_t)((bool)nri_ptruntimedefernearinvisiblestructural || (bool)nri_ptruntimedeferfarstructural),
+			shell.runtimeMutationStructuralRebuildDeferredNearChunks,
+			shell.runtimeMutationStructuralRebuildDeferredNearCoalescedChunks,
+			shell.runtimeMutationStructuralRebuildDeferredNearFlushedChunks,
+			shell.runtimeMutationStructuralRebuildDeferredNearPendingChunks,
+			shell.runtimeMutationStructuralRebuildDeferredNearBudget,
+			(uint32_t)(bool)nri_ptruntimedefernearinvisiblestructural,
+			shell.runtimeMutationStructuralRebuildDeferredFarChunks,
+			shell.runtimeMutationStructuralRebuildDeferredFarCoalescedChunks,
+			shell.runtimeMutationStructuralRebuildDeferredFarFlushedChunks,
+			shell.runtimeMutationStructuralRebuildDeferredFarPendingChunks,
+			shell.runtimeMutationStructuralRebuildDeferredFarBudget,
 			(uint32_t)(bool)nri_ptruntimedeferfarstructural);
 		Printf(
 			"PERF pt progressive mutation source NRI: frame=%llu candidate_active=%u candidate_visible_resident=%u candidate_startup_visible=%u candidate_unresolved=%u candidate_static_anim=%u candidate_sector_dirty=%u candidate_section_dirty=%u candidate_dragged=%u candidate_signature_watch=%u candidate_background=%u candidate_deferred_structural=%u dirty_active=%u dirty_background=%u structural_active=%u structural_background=%u material_active=%u material_background=%u resident_active=%u resident_background=%u\n",
