@@ -117,6 +117,7 @@ public:
 		Held,
 		SyncSkip,
 		DeferredMaterialRefresh,
+		DeferredStructuralRebuild,
 		Failed
 	};
 
@@ -448,6 +449,7 @@ public:
 		uint32_t runtimeMutationCandidateDraggedChunks = 0;
 		uint32_t runtimeMutationCandidateSignatureWatchChunks = 0;
 		uint32_t runtimeMutationCandidateBackgroundSweepSourceChunks = 0;
+		uint32_t runtimeMutationCandidateDeferredStructuralChunks = 0;
 		uint32_t runtimeMutationDirtyVisibleChunks = 0;
 		uint32_t runtimeMutationDirtyInvisibleChunks = 0;
 		uint32_t runtimeMutationDirtyNearChunks = 0;
@@ -462,6 +464,12 @@ public:
 		uint32_t runtimeMutationStructuralRebuildUnknownDistanceChunks = 0;
 		uint32_t runtimeMutationStructuralRebuildActiveReplacementChunks = 0;
 		uint32_t runtimeMutationStructuralRebuildBackgroundSweepChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredCoalescedChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredFlushedChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredPromotedChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredPendingChunks = 0;
+		uint32_t runtimeMutationStructuralRebuildDeferredBudget = 0;
 		uint32_t runtimeMutationMaterialRefreshVisibleChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshInvisibleChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshNearChunks = 0;
@@ -1786,6 +1794,8 @@ private:
 			bool lastTraceAnimationOnlyRefreshed = false;
 			bool lastTraceStaticAnimatedReplacement = false;
 			bool deferredMaterialRefresh = false;
+			bool deferredStructuralRebuild = false;
+			uint64_t deferredStructuralFrame = 0;
 			uint32_t surfaceCount = 0;
 			uint32_t triangleCount = 0;
 			SceneLightSystem::SurfaceIdentityOverrides lightIdentityOverrides;
