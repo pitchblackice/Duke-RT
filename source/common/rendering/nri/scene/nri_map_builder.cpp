@@ -108,8 +108,62 @@ namespace
 		return HashMix(hash, bits);
 	}
 
+	void IncludeChunkBoundsPoint(PTMapChunk& chunk, const float position[3])
+	{
+		if (!std::isfinite(position[0]) ||
+			!std::isfinite(position[1]) ||
+			!std::isfinite(position[2]))
+		{
+			return;
+		}
+
+		if (!chunk.bounds.valid)
+		{
+			chunk.bounds.valid = true;
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				chunk.bounds.min[axis] = position[axis];
+				chunk.bounds.max[axis] = position[axis];
+			}
+			return;
+		}
+
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			chunk.bounds.min[axis] = std::min(chunk.bounds.min[axis], position[axis]);
+			chunk.bounds.max[axis] = std::max(chunk.bounds.max[axis], position[axis]);
+		}
+	}
+
+	void IncludeChunkBoundsSurface(PTMapChunk& chunk, const SurfaceRef& surface)
+	{
+		for (const CapturedVertex& vertex : surface.vertices)
+		{
+			IncludeChunkBoundsPoint(chunk, vertex.position);
+		}
+	}
+
+	void FinalizeChunkBounds(PTMapChunk& chunk)
+	{
+		if (!chunk.bounds.valid)
+		{
+			chunk.bounds = {};
+			return;
+		}
+
+		float radiusSquared = 0.0f;
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			chunk.bounds.center[axis] = (chunk.bounds.min[axis] + chunk.bounds.max[axis]) * 0.5f;
+			const float extent = chunk.bounds.max[axis] - chunk.bounds.center[axis];
+			radiusSquared += extent * extent;
+		}
+		chunk.bounds.radius = sqrtf(radiusSquared);
+	}
+
 	void AppendSurface(PTMapWorld& outWorld, PTMapChunk& chunk, PTMapSurface&& surface)
 	{
+		IncludeChunkBoundsSurface(chunk, surface.surface);
 		chunk.triangleCount += CountTriangles(surface.surface);
 		outWorld.surfaces.push_back(std::move(surface));
 	}
@@ -707,6 +761,7 @@ namespace
 		}
 
 		chunk.surfaceCount = (uint32_t)outWorld.surfaces.size() - chunk.firstSurface;
+		FinalizeChunkBounds(chunk);
 		outChunk = chunk;
 		return true;
 	}

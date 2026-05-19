@@ -147,6 +147,13 @@ CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, 0)
 }
 CVAR(Bool, nri_ptruntimeworklist, true, 0)
 CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, 0)
+CUSTOM_CVAR(Float, nri_ptruntimemutationneardistance, 8192.0f, 0)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
 CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -12503,6 +12510,98 @@ void NRIRenderer::PrintResidentMapChunkRegistryStatus() const
 		mResidentMapChunkRegistry.accelerationResidentChunkCount,
 		mResidentMapChunkRegistry.animatedCandidateChunkCount,
 		mResidentMapChunkRegistry.animatedRefreshSuppressedChunkCount);
+
+	const float nearDistance = std::max(0.0f, (float)nri_ptruntimemutationneardistance);
+	const float nearDistanceSquared = nearDistance * nearDistance;
+	uint32_t boundsValidCount = 0;
+	uint32_t boundsInvalidCount = 0;
+	uint32_t visibleCount = 0;
+	uint32_t invisibleNearCount = 0;
+	uint32_t invisibleFarCount = 0;
+	uint32_t invisibleUnknownCount = 0;
+	const nri_scene::PTMapChunk* sampleChunk = nullptr;
+	float sampleDistance = 0.0f;
+	const char* sampleTier = "none";
+	const auto computeChunkDistanceSquared = [&](const nri_scene::PTMapChunk& chunk, float& outDistanceSquared) -> bool
+	{
+		if (!chunk.bounds.valid)
+		{
+			outDistanceSquared = 0.0f;
+			return false;
+		}
+
+		outDistanceSquared = 0.0f;
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			float distance = 0.0f;
+			if (mCurrentCameraPos[axis] < chunk.bounds.min[axis])
+			{
+				distance = chunk.bounds.min[axis] - mCurrentCameraPos[axis];
+			}
+			else if (mCurrentCameraPos[axis] > chunk.bounds.max[axis])
+			{
+				distance = mCurrentCameraPos[axis] - chunk.bounds.max[axis];
+			}
+			outDistanceSquared += distance * distance;
+		}
+		return true;
+	};
+	for (const nri_scene::PTMapChunk& chunk : mMapWorld.chunks)
+	{
+		float distanceSquared = 0.0f;
+		const bool boundsValid = computeChunkDistanceSquared(chunk, distanceSquared);
+		if (boundsValid)
+		{
+			boundsValidCount++;
+		}
+		else
+		{
+			boundsInvalidCount++;
+		}
+
+		const bool visible = IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunk.chunkIndex);
+		if (visible)
+		{
+			visibleCount++;
+		}
+		else if (!boundsValid)
+		{
+			invisibleUnknownCount++;
+		}
+		else if (distanceSquared <= nearDistanceSquared)
+		{
+			invisibleNearCount++;
+		}
+		else
+		{
+			invisibleFarCount++;
+		}
+
+		if (sampleChunk == nullptr && boundsValid)
+		{
+			sampleChunk = &chunk;
+			sampleDistance = sqrtf(distanceSquared);
+			sampleTier =
+				visible ? "visible" :
+				(distanceSquared <= nearDistanceSquared ? "near" : "far");
+		}
+	}
+	Printf("NRI PT map chunk bounds: chunks=%u valid=%u invalid=%u near_distance=%.1f visible=%u invisible_near=%u invisible_far=%u invisible_unknown=%u sample_chunk=%u center=(%.1f,%.1f,%.1f) radius=%.1f distance=%.1f tier=%s\n",
+		(uint32_t)mMapWorld.chunks.size(),
+		boundsValidCount,
+		boundsInvalidCount,
+		(double)nearDistance,
+		visibleCount,
+		invisibleNearCount,
+		invisibleFarCount,
+		invisibleUnknownCount,
+		sampleChunk != nullptr ? sampleChunk->chunkIndex : UINT32_MAX,
+		sampleChunk != nullptr ? (double)sampleChunk->bounds.center[0] : 0.0,
+		sampleChunk != nullptr ? (double)sampleChunk->bounds.center[1] : 0.0,
+		sampleChunk != nullptr ? (double)sampleChunk->bounds.center[2] : 0.0,
+		sampleChunk != nullptr ? (double)sampleChunk->bounds.radius : 0.0,
+		(double)sampleDistance,
+		sampleTier);
 }
 
 NRIRenderer::PersistentDynamicSurfaceStats NRIRenderer::GatherPersistentDynamicEmissiveSurfaceStats() const
@@ -25097,10 +25196,20 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildVisibleMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildInvisibleMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildNearMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildFarMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildUnknownDistanceMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshVisibleMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshInvisibleMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshNearMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshFarMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshUnknownDistanceMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyVisibleMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyInvisibleMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyNearMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyFarMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyUnknownDistanceMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationNearDistance = (float)nri_ptruntimemutationneardistance;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyLiveBuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryBuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialBuildMs = 0.0;
@@ -25122,6 +25231,11 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationCandidateVisibleChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationCandidateInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateNearChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateFarChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateUnknownDistanceChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateBoundsValidChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateBoundsInvalidChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationCandidateActiveReplacementChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationCandidateVisibleResidentValidationChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationCandidateStartupVisibleValidationChunks = 0;
@@ -25134,18 +25248,30 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationCandidateBackgroundSweepSourceChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyVisibleChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationDirtyNearChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationDirtyFarChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationDirtyUnknownDistanceChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyActiveReplacementChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationDirtyBackgroundSweepChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildVisibleChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildNearChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildFarChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildUnknownDistanceChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildActiveReplacementChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildBackgroundSweepChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshVisibleChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshNearChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshFarChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshUnknownDistanceChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshActiveReplacementChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshBackgroundSweepChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyVisibleChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyNearChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyFarChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyUnknownDistanceChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyActiveReplacementChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBackgroundSweepChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshAnimatedChunks = 0;
@@ -25757,6 +25883,49 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	uint32_t runtimeMutationCandidateCount = 0;
 	uint32_t runtimeMutationSignatureWatchlistCandidateCount = 0;
 	uint32_t runtimeMutationBackgroundSweepCandidateCount = 0;
+	enum class RuntimeMutationDistanceTier : uint8_t
+	{
+		Unknown,
+		Near,
+		Far,
+	};
+	const float runtimeMutationNearDistance = std::max(0.0f, (float)nri_ptruntimemutationneardistance);
+	const float runtimeMutationNearDistanceSquared = runtimeMutationNearDistance * runtimeMutationNearDistance;
+	const auto getRuntimeMutationDistanceTier = [&](uint32_t chunkListIndex, bool chunkVisibleNow) -> RuntimeMutationDistanceTier
+	{
+		if (chunkVisibleNow)
+		{
+			return RuntimeMutationDistanceTier::Near;
+		}
+		if (chunkListIndex >= mMapWorld.chunks.size())
+		{
+			return RuntimeMutationDistanceTier::Unknown;
+		}
+
+		const auto& bounds = mMapWorld.chunks[chunkListIndex].bounds;
+		if (!bounds.valid)
+		{
+			return RuntimeMutationDistanceTier::Unknown;
+		}
+
+		float distanceSquared = 0.0f;
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			float distance = 0.0f;
+			if (mCurrentCameraPos[axis] < bounds.min[axis])
+			{
+				distance = bounds.min[axis] - mCurrentCameraPos[axis];
+			}
+			else if (mCurrentCameraPos[axis] > bounds.max[axis])
+			{
+				distance = mCurrentCameraPos[axis] - bounds.max[axis];
+			}
+			distanceSquared += distance * distance;
+		}
+		return distanceSquared <= runtimeMutationNearDistanceSquared ?
+			RuntimeMutationDistanceTier::Near :
+			RuntimeMutationDistanceTier::Far;
+	};
 	const auto markWorklistCandidate =
 		[&](uint32_t chunkListIndex, uint32_t sourceMask)
 	{
@@ -25768,13 +25937,35 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			runtimeMutationCandidateCount++;
 			const uint32_t mapChunkIndex = chunkListIndex < mMapWorld.chunks.size() ? mMapWorld.chunks[chunkListIndex].chunkIndex : chunkListIndex;
-			if (IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunkIndex))
+			const bool chunkVisibleNow = IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunkIndex);
+			const RuntimeMutationDistanceTier distanceTier = getRuntimeMutationDistanceTier(chunkListIndex, chunkVisibleNow);
+			if (chunkVisibleNow)
 			{
 				mLastPerfShellTraceStats.runtimeMutationCandidateVisibleChunks++;
 			}
 			else
 			{
 				mLastPerfShellTraceStats.runtimeMutationCandidateInvisibleChunks++;
+				switch (distanceTier)
+				{
+				case RuntimeMutationDistanceTier::Near:
+					mLastPerfShellTraceStats.runtimeMutationCandidateNearChunks++;
+					break;
+				case RuntimeMutationDistanceTier::Far:
+					mLastPerfShellTraceStats.runtimeMutationCandidateFarChunks++;
+					break;
+				default:
+					mLastPerfShellTraceStats.runtimeMutationCandidateUnknownDistanceChunks++;
+					break;
+				}
+			}
+			if (chunkListIndex < mMapWorld.chunks.size() && mMapWorld.chunks[chunkListIndex].bounds.valid)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateBoundsValidChunks++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateBoundsInvalidChunks++;
 			}
 		}
 		if ((runtimeMutationCandidateSourceMasks[chunkListIndex] & sourceMask) == 0)
@@ -25953,7 +26144,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	{
 		return chunkIndex < runtimeMutationCandidateSourceMasks.size() ? runtimeMutationCandidateSourceMasks[chunkIndex] : 0u;
 	};
-	const auto recordRuntimeMutationDirtyTier = [&](bool chunkVisibleNow, uint32_t sourceMask)
+	const auto recordRuntimeMutationDirtyTier = [&](bool chunkVisibleNow, RuntimeMutationDistanceTier distanceTier, uint32_t sourceMask)
 	{
 		if (chunkVisibleNow)
 		{
@@ -25962,6 +26153,18 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		else
 		{
 			mLastPerfShellTraceStats.runtimeMutationDirtyInvisibleChunks++;
+			switch (distanceTier)
+			{
+			case RuntimeMutationDistanceTier::Near:
+				mLastPerfShellTraceStats.runtimeMutationDirtyNearChunks++;
+				break;
+			case RuntimeMutationDistanceTier::Far:
+				mLastPerfShellTraceStats.runtimeMutationDirtyFarChunks++;
+				break;
+			default:
+				mLastPerfShellTraceStats.runtimeMutationDirtyUnknownDistanceChunks++;
+				break;
+			}
 		}
 		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
 		{
@@ -25972,7 +26175,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeMutationDirtyBackgroundSweepChunks++;
 		}
 	};
-	const auto recordRuntimeMutationStructuralTier = [&](bool chunkVisibleNow, uint32_t sourceMask)
+	const auto recordRuntimeMutationStructuralTier = [&](bool chunkVisibleNow, RuntimeMutationDistanceTier distanceTier, uint32_t sourceMask)
 	{
 		if (chunkVisibleNow)
 		{
@@ -25981,6 +26184,18 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		else
 		{
 			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildInvisibleChunks++;
+			switch (distanceTier)
+			{
+			case RuntimeMutationDistanceTier::Near:
+				mLastPerfShellTraceStats.runtimeMutationStructuralRebuildNearChunks++;
+				break;
+			case RuntimeMutationDistanceTier::Far:
+				mLastPerfShellTraceStats.runtimeMutationStructuralRebuildFarChunks++;
+				break;
+			default:
+				mLastPerfShellTraceStats.runtimeMutationStructuralRebuildUnknownDistanceChunks++;
+				break;
+			}
 		}
 		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
 		{
@@ -25991,7 +26206,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildBackgroundSweepChunks++;
 		}
 	};
-	const auto recordRuntimeMutationMaterialTier = [&](bool chunkVisibleNow, uint32_t sourceMask)
+	const auto recordRuntimeMutationMaterialTier = [&](bool chunkVisibleNow, RuntimeMutationDistanceTier distanceTier, uint32_t sourceMask)
 	{
 		if (chunkVisibleNow)
 		{
@@ -26000,6 +26215,18 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		else
 		{
 			mLastPerfShellTraceStats.runtimeMutationMaterialRefreshInvisibleChunks++;
+			switch (distanceTier)
+			{
+			case RuntimeMutationDistanceTier::Near:
+				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshNearChunks++;
+				break;
+			case RuntimeMutationDistanceTier::Far:
+				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshFarChunks++;
+				break;
+			default:
+				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshUnknownDistanceChunks++;
+				break;
+			}
 		}
 		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
 		{
@@ -26010,7 +26237,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeMutationMaterialRefreshBackgroundSweepChunks++;
 		}
 	};
-	const auto recordRuntimeMutationResidentApplyTier = [&](bool chunkVisibleNow, uint32_t sourceMask)
+	const auto recordRuntimeMutationResidentApplyTier = [&](bool chunkVisibleNow, RuntimeMutationDistanceTier distanceTier, uint32_t sourceMask)
 	{
 		if (chunkVisibleNow)
 		{
@@ -26019,6 +26246,18 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		else
 		{
 			mLastPerfShellTraceStats.runtimeMutationResidentApplyInvisibleChunks++;
+			switch (distanceTier)
+			{
+			case RuntimeMutationDistanceTier::Near:
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyNearChunks++;
+				break;
+			case RuntimeMutationDistanceTier::Far:
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyFarChunks++;
+				break;
+			default:
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyUnknownDistanceChunks++;
+				break;
+			}
 		}
 		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
 		{
@@ -26029,6 +26268,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeMutationResidentApplyBackgroundSweepChunks++;
 		}
 	};
+	double ignoredRuntimeMutationDistanceTierMs = 0.0;
 
 	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
 	{
@@ -26093,6 +26333,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			continue;
 		}
 		const uint32_t runtimeMutationCandidateSourceMask = getRuntimeMutationCandidateSourceMask(chunkIndex);
+		const RuntimeMutationDistanceTier runtimeMutationDistanceTier =
+			getRuntimeMutationDistanceTier((uint32_t)chunkIndex, chunkVisibleNow);
 
 		const uint32_t previousReasonMask = replacement.reasonMask;
 		nri_scene::PTMapChunkMutationAnalysis analysis = {};
@@ -26355,7 +26597,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			mRuntimeMapLastFrame.dirtyChunkCount++;
 			mLastPerfShellTraceStats.runtimeMutationDirtyChunks++;
-			recordRuntimeMutationDirtyTier(chunkVisibleNow, runtimeMutationCandidateSourceMask);
+			recordRuntimeMutationDirtyTier(chunkVisibleNow, runtimeMutationDistanceTier, runtimeMutationCandidateSourceMask);
 			if (replacement.blindSpot)
 			{
 				mRuntimeMapLastFrame.blindSpotChunkCount++;
@@ -27031,7 +27273,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_Invalid;
 			}
 			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks++;
-			recordRuntimeMutationStructuralTier(chunkVisibleNow, runtimeMutationCandidateSourceMask);
+			recordRuntimeMutationStructuralTier(chunkVisibleNow, runtimeMutationDistanceTier, runtimeMutationCandidateSourceMask);
 			if (structuralReplacementDelta)
 			{
 				mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaChunks++;
@@ -27088,6 +27330,15 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					chunkVisibleNow ?
 						mLastPerfShellTraceStats.runtimeMutationStructuralRebuildVisibleMs :
 						mLastPerfShellTraceStats.runtimeMutationStructuralRebuildInvisibleMs);
+				double& structuralDistanceTierMs =
+					chunkVisibleNow ?
+						ignoredRuntimeMutationDistanceTierMs :
+						(runtimeMutationDistanceTier == RuntimeMutationDistanceTier::Near ?
+							mLastPerfShellTraceStats.runtimeMutationStructuralRebuildNearMs :
+							(runtimeMutationDistanceTier == RuntimeMutationDistanceTier::Far ?
+								mLastPerfShellTraceStats.runtimeMutationStructuralRebuildFarMs :
+								mLastPerfShellTraceStats.runtimeMutationStructuralRebuildUnknownDistanceMs));
+				ScopedPtPerfTimer structuralDistanceTierPerfTimer(structuralDistanceTierMs);
 				if (!prepareLiveChunkView())
 				{
 					return false;
@@ -27262,13 +27513,22 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					chunkVisibleNow ?
 						mLastPerfShellTraceStats.runtimeMutationMaterialRefreshVisibleMs :
 						mLastPerfShellTraceStats.runtimeMutationMaterialRefreshInvisibleMs);
+				double& materialRefreshDistanceTierMs =
+					chunkVisibleNow ?
+						ignoredRuntimeMutationDistanceTierMs :
+						(runtimeMutationDistanceTier == RuntimeMutationDistanceTier::Near ?
+							mLastPerfShellTraceStats.runtimeMutationMaterialRefreshNearMs :
+							(runtimeMutationDistanceTier == RuntimeMutationDistanceTier::Far ?
+								mLastPerfShellTraceStats.runtimeMutationMaterialRefreshFarMs :
+								mLastPerfShellTraceStats.runtimeMutationMaterialRefreshUnknownDistanceMs));
+				ScopedPtPerfTimer materialRefreshDistanceTierPerfTimer(materialRefreshDistanceTierMs);
 				if (!refreshReplacementMaterialsFromPreparedLiveChunk())
 				{
 					return false;
 				}
 
 				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshChunks++;
-				recordRuntimeMutationMaterialTier(chunkVisibleNow, runtimeMutationCandidateSourceMask);
+				recordRuntimeMutationMaterialTier(chunkVisibleNow, runtimeMutationDistanceTier, runtimeMutationCandidateSourceMask);
 				if (forceReplacementMaterialRefresh)
 				{
 					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReplacementDeltaChunks++;
@@ -27493,13 +27753,22 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				emitChunkTrace();
 				continue;
 			}
-			recordRuntimeMutationResidentApplyTier(chunkVisibleNow, runtimeMutationCandidateSourceMask);
+			recordRuntimeMutationResidentApplyTier(chunkVisibleNow, runtimeMutationDistanceTier, runtimeMutationCandidateSourceMask);
 			const bool appliedResidentChunk = [&]()
 			{
 				ScopedPtPerfTimer residentApplyTierPerfTimer(
 					chunkVisibleNow ?
 						mLastPerfShellTraceStats.runtimeMutationResidentApplyVisibleMs :
 						mLastPerfShellTraceStats.runtimeMutationResidentApplyInvisibleMs);
+				double& residentApplyDistanceTierMs =
+					chunkVisibleNow ?
+						ignoredRuntimeMutationDistanceTierMs :
+						(runtimeMutationDistanceTier == RuntimeMutationDistanceTier::Near ?
+							mLastPerfShellTraceStats.runtimeMutationResidentApplyNearMs :
+							(runtimeMutationDistanceTier == RuntimeMutationDistanceTier::Far ?
+								mLastPerfShellTraceStats.runtimeMutationResidentApplyFarMs :
+								mLastPerfShellTraceStats.runtimeMutationResidentApplyUnknownDistanceMs));
+				ScopedPtPerfTimer residentApplyDistanceTierPerfTimer(residentApplyDistanceTierMs);
 				return TryApplyRuntimeMutationChunkToResidentScene(
 					mapChunk,
 					replacement,

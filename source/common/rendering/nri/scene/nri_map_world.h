@@ -50,6 +50,15 @@ struct PTMapSurface
 	uint32_t chunkIndex = UINT32_MAX;
 };
 
+struct PTMapChunkBounds
+{
+	bool valid = false;
+	float min[3] = {};
+	float max[3] = {};
+	float center[3] = {};
+	float radius = 0.0f;
+};
+
 struct PTMapChunk
 {
 	PTMapChunkKind kind = PTMapChunkKind::Sector;
@@ -59,6 +68,7 @@ struct PTMapChunk
 	uint32_t firstSurface = 0;
 	uint32_t surfaceCount = 0;
 	uint32_t triangleCount = 0;
+	PTMapChunkBounds bounds;
 };
 
 struct PTMapLocalSpace
