@@ -25095,6 +25095,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildVisibleMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildInvisibleMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshVisibleMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshInvisibleMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyVisibleMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyInvisibleMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyLiveBuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryBuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialBuildMs = 0.0;
@@ -25114,6 +25120,34 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationHeldChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateVisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateActiveReplacementChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateVisibleResidentValidationChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateStartupVisibleValidationChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateUnresolvedTextureChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateStaticAnimatedSuppressedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateSectorDirtyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateSectionDirtyChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateDraggedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateSignatureWatchChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationCandidateBackgroundSweepSourceChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationDirtyVisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationDirtyInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationDirtyActiveReplacementChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationDirtyBackgroundSweepChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildVisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildActiveReplacementChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildBackgroundSweepChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshVisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshActiveReplacementChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshBackgroundSweepChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyVisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyInvisibleChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyActiveReplacementChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBackgroundSweepChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshAnimatedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReplacementDeltaChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshHardwareCanvasChunks = 0;
@@ -25733,6 +25767,58 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		if (runtimeMutationCandidateSourceMasks[chunkListIndex] == 0)
 		{
 			runtimeMutationCandidateCount++;
+			const uint32_t mapChunkIndex = chunkListIndex < mMapWorld.chunks.size() ? mMapWorld.chunks[chunkListIndex].chunkIndex : chunkListIndex;
+			if (IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunkIndex))
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateVisibleChunks++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateInvisibleChunks++;
+			}
+		}
+		if ((runtimeMutationCandidateSourceMasks[chunkListIndex] & sourceMask) == 0)
+		{
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateActiveReplacementChunks++;
+			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_VisibleResidentValidation) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateVisibleResidentValidationChunks++;
+			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_StartupVisibleValidation) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateStartupVisibleValidationChunks++;
+			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateUnresolvedTextureChunks++;
+			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateStaticAnimatedSuppressedChunks++;
+			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_SectorDirty) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateSectorDirtyChunks++;
+			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_SectionDirty) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateSectionDirtyChunks++;
+			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_Dragged) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateDraggedChunks++;
+			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_SignatureWatchlist) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateSignatureWatchChunks++;
+			}
+			if ((sourceMask & RuntimeMutationWorklistCandidateSource_BackgroundSweep) != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationCandidateBackgroundSweepSourceChunks++;
+			}
 		}
 		runtimeMutationCandidateSourceMasks[chunkListIndex] |= sourceMask;
 	};
@@ -25863,6 +25949,86 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		worklistValidation.sourceMasks = runtimeMutationCandidateSourceMasks;
 		worklistValidation.fullDirty.resize(mMapWorld.chunks.size(), 0u);
 	}
+	const auto getRuntimeMutationCandidateSourceMask = [&](size_t chunkIndex) -> uint32_t
+	{
+		return chunkIndex < runtimeMutationCandidateSourceMasks.size() ? runtimeMutationCandidateSourceMasks[chunkIndex] : 0u;
+	};
+	const auto recordRuntimeMutationDirtyTier = [&](bool chunkVisibleNow, uint32_t sourceMask)
+	{
+		if (chunkVisibleNow)
+		{
+			mLastPerfShellTraceStats.runtimeMutationDirtyVisibleChunks++;
+		}
+		else
+		{
+			mLastPerfShellTraceStats.runtimeMutationDirtyInvisibleChunks++;
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
+		{
+			mLastPerfShellTraceStats.runtimeMutationDirtyActiveReplacementChunks++;
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_BackgroundSweep) != 0)
+		{
+			mLastPerfShellTraceStats.runtimeMutationDirtyBackgroundSweepChunks++;
+		}
+	};
+	const auto recordRuntimeMutationStructuralTier = [&](bool chunkVisibleNow, uint32_t sourceMask)
+	{
+		if (chunkVisibleNow)
+		{
+			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildVisibleChunks++;
+		}
+		else
+		{
+			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildInvisibleChunks++;
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
+		{
+			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildActiveReplacementChunks++;
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_BackgroundSweep) != 0)
+		{
+			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildBackgroundSweepChunks++;
+		}
+	};
+	const auto recordRuntimeMutationMaterialTier = [&](bool chunkVisibleNow, uint32_t sourceMask)
+	{
+		if (chunkVisibleNow)
+		{
+			mLastPerfShellTraceStats.runtimeMutationMaterialRefreshVisibleChunks++;
+		}
+		else
+		{
+			mLastPerfShellTraceStats.runtimeMutationMaterialRefreshInvisibleChunks++;
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
+		{
+			mLastPerfShellTraceStats.runtimeMutationMaterialRefreshActiveReplacementChunks++;
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_BackgroundSweep) != 0)
+		{
+			mLastPerfShellTraceStats.runtimeMutationMaterialRefreshBackgroundSweepChunks++;
+		}
+	};
+	const auto recordRuntimeMutationResidentApplyTier = [&](bool chunkVisibleNow, uint32_t sourceMask)
+	{
+		if (chunkVisibleNow)
+		{
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyVisibleChunks++;
+		}
+		else
+		{
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyInvisibleChunks++;
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
+		{
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyActiveReplacementChunks++;
+		}
+		if ((sourceMask & RuntimeMutationWorklistCandidateSource_BackgroundSweep) != 0)
+		{
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyBackgroundSweepChunks++;
+		}
+	};
 
 	for (size_t chunkIndex = 0; chunkIndex < mMapWorld.chunks.size(); ++chunkIndex)
 	{
@@ -25926,6 +26092,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			continue;
 		}
+		const uint32_t runtimeMutationCandidateSourceMask = getRuntimeMutationCandidateSourceMask(chunkIndex);
 
 		const uint32_t previousReasonMask = replacement.reasonMask;
 		nri_scene::PTMapChunkMutationAnalysis analysis = {};
@@ -26188,6 +26355,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			mRuntimeMapLastFrame.dirtyChunkCount++;
 			mLastPerfShellTraceStats.runtimeMutationDirtyChunks++;
+			recordRuntimeMutationDirtyTier(chunkVisibleNow, runtimeMutationCandidateSourceMask);
 			if (replacement.blindSpot)
 			{
 				mRuntimeMapLastFrame.blindSpotChunkCount++;
@@ -26863,6 +27031,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				structuralTriggerMask |= RuntimeStructuralRebuildTrigger_Invalid;
 			}
 			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildChunks++;
+			recordRuntimeMutationStructuralTier(chunkVisibleNow, runtimeMutationCandidateSourceMask);
 			if (structuralReplacementDelta)
 			{
 				mLastPerfShellTraceStats.runtimeMutationStructuralReplacementDeltaChunks++;
@@ -26915,6 +27084,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationRebuildMs);
 				ScopedPtPerfTimer structuralPerfTimer(mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs);
+				ScopedPtPerfTimer structuralTierPerfTimer(
+					chunkVisibleNow ?
+						mLastPerfShellTraceStats.runtimeMutationStructuralRebuildVisibleMs :
+						mLastPerfShellTraceStats.runtimeMutationStructuralRebuildInvisibleMs);
 				if (!prepareLiveChunkView())
 				{
 					return false;
@@ -27085,12 +27258,17 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationRebuildMs);
 				ScopedPtPerfTimer materialRefreshPerfTimer(mLastPerfShellTraceStats.runtimeMutationMaterialRefreshMs);
+				ScopedPtPerfTimer materialRefreshTierPerfTimer(
+					chunkVisibleNow ?
+						mLastPerfShellTraceStats.runtimeMutationMaterialRefreshVisibleMs :
+						mLastPerfShellTraceStats.runtimeMutationMaterialRefreshInvisibleMs);
 				if (!refreshReplacementMaterialsFromPreparedLiveChunk())
 				{
 					return false;
 				}
 
 				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshChunks++;
+				recordRuntimeMutationMaterialTier(chunkVisibleNow, runtimeMutationCandidateSourceMask);
 				if (forceReplacementMaterialRefresh)
 				{
 					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshReplacementDeltaChunks++;
@@ -27315,16 +27493,25 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				emitChunkTrace();
 				continue;
 			}
-			if (TryApplyRuntimeMutationChunkToResidentScene(
-				mapChunk,
-				replacement,
-				residentChunkListIndex,
-				residentChunkMaterialDirty,
-				residentChunkGeometryDirty,
-				residentChunkSurfaceCount,
-				residentChunkTriangleCount,
-				residentChunkMaterialCount,
-				residentChunkRecoveredEmpty))
+			recordRuntimeMutationResidentApplyTier(chunkVisibleNow, runtimeMutationCandidateSourceMask);
+			const bool appliedResidentChunk = [&]()
+			{
+				ScopedPtPerfTimer residentApplyTierPerfTimer(
+					chunkVisibleNow ?
+						mLastPerfShellTraceStats.runtimeMutationResidentApplyVisibleMs :
+						mLastPerfShellTraceStats.runtimeMutationResidentApplyInvisibleMs);
+				return TryApplyRuntimeMutationChunkToResidentScene(
+					mapChunk,
+					replacement,
+					residentChunkListIndex,
+					residentChunkMaterialDirty,
+					residentChunkGeometryDirty,
+					residentChunkSurfaceCount,
+					residentChunkTriangleCount,
+					residentChunkMaterialCount,
+					residentChunkRecoveredEmpty);
+			}();
+			if (appliedResidentChunk)
 			{
 				mLastPerfShellTraceStats.runtimeMutationInvalidAppliedCount++;
 				mLastPerfResourceTraceStats.residentChunkBatchChunkCount++;
