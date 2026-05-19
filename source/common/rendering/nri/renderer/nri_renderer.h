@@ -489,6 +489,11 @@ public:
 		uint32_t runtimeMutationMaterialRefreshDeferredCoalescedChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshDeferredFlushedChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshDeferredPendingChunks = 0;
+		uint32_t runtimeMutationMaterialRefreshDeferredNearChunks = 0;
+		uint32_t runtimeMutationMaterialRefreshDeferredNearCoalescedChunks = 0;
+		uint32_t runtimeMutationMaterialRefreshDeferredNearFlushedChunks = 0;
+		uint32_t runtimeMutationMaterialRefreshDeferredNearPendingChunks = 0;
+		uint32_t runtimeMutationMaterialRefreshDeferredNearBudget = 0;
 		uint32_t runtimeMutationMaterialRefreshActiveReplacementChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshBackgroundSweepChunks = 0;
 		uint32_t runtimeMutationResidentApplyVisibleChunks = 0;
@@ -1804,6 +1809,7 @@ private:
 			bool lastTraceAnimationOnlyRefreshed = false;
 			bool lastTraceStaticAnimatedReplacement = false;
 			bool deferredMaterialRefresh = false;
+			uint64_t deferredMaterialFrame = 0;
 			bool deferredStructuralRebuild = false;
 			uint64_t deferredStructuralFrame = 0;
 			uint32_t surfaceCount = 0;

@@ -148,6 +148,8 @@ CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, 0)
 CVAR(Bool, nri_ptruntimeworklist, true, 0)
 CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, 0)
 CVAR(Bool, nri_ptruntimedeferfarmaterial, true, 0)
+CVAR(Bool, nri_ptruntimedefernearinvisiblematerial, true, 0)
+CVAR(Int, nri_ptruntimenearinvisiblematerialbudget, 4, 0)
 CVAR(Bool, nri_ptruntimedeferfarstructural, true, 0)
 CVAR(Int, nri_ptruntimefarstructuralbudget, 2, 0)
 CVAR(Bool, nri_ptruntimedefernearinvisiblestructural, true, 0)
@@ -18138,6 +18140,7 @@ void NRIRenderer::ClearRuntimeMapMutationReplacementPayload(RuntimeMapMutationCa
 	replacement.geometry = {};
 	replacement.materialBridge = {};
 	replacement.deferredMaterialRefresh = false;
+	replacement.deferredMaterialFrame = 0;
 	replacement.deferredStructuralRebuild = false;
 	replacement.deferredStructuralFrame = 0;
 	if (clearMaterialStateCache)
@@ -25313,6 +25316,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredCoalescedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredFlushedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredPendingChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearCoalescedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearFlushedChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearPendingChunks = 0;
+	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearBudget =
+		(uint32_t)std::max(0, (int)nri_ptruntimenearinvisiblematerialbudget);
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshActiveReplacementChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshBackgroundSweepChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyVisibleChunks = 0;
@@ -26454,6 +26463,110 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 		return false;
 	};
+	const bool deferNearInvisibleMaterialRefreshes = (bool)nri_ptruntimedefernearinvisiblematerial;
+	const uint32_t nearInvisibleMaterialBudget = (uint32_t)std::max(0, (int)nri_ptruntimenearinvisiblematerialbudget);
+	uint32_t nearInvisibleMaterialBudgetReserved = 0;
+	std::vector<uint8_t> nearInvisibleMaterialBudgetAllowed(mMapWorld.chunks.size(), 0u);
+	if (deferNearInvisibleMaterialRefreshes && nearInvisibleMaterialBudget > 0)
+	{
+		struct DeferredMaterialBudgetCandidate
+		{
+			uint64_t deferredFrame = 0;
+			uint32_t chunkListIndex = 0;
+		};
+		std::vector<DeferredMaterialBudgetCandidate> deferredNearMaterialCandidates;
+		for (uint32_t candidateListIndex = 0; candidateListIndex < (uint32_t)mMapWorld.chunks.size(); ++candidateListIndex)
+		{
+			const auto& replacement = mRuntimeMapMutations.chunks[candidateListIndex];
+			if (!replacement.deferredMaterialRefresh)
+			{
+				continue;
+			}
+			const auto& mapChunk = mMapWorld.chunks[candidateListIndex];
+			const bool chunkVisibleNow = IsChunkMarkedVisible(mCurrentVisibleChunkWords, mapChunk.chunkIndex);
+			if (chunkVisibleNow ||
+				getRuntimeMutationDistanceTier(candidateListIndex, false) != RuntimeMutationDistanceTier::Near)
+			{
+				continue;
+			}
+
+			deferredNearMaterialCandidates.push_back({ replacement.deferredMaterialFrame, candidateListIndex });
+		}
+		std::sort(
+			deferredNearMaterialCandidates.begin(),
+			deferredNearMaterialCandidates.end(),
+			[](const DeferredMaterialBudgetCandidate& left, const DeferredMaterialBudgetCandidate& right)
+			{
+				if (left.deferredFrame != right.deferredFrame)
+				{
+					return left.deferredFrame < right.deferredFrame;
+				}
+				return left.chunkListIndex < right.chunkListIndex;
+			});
+		for (const auto& candidate : deferredNearMaterialCandidates)
+		{
+			if (nearInvisibleMaterialBudgetReserved >= nearInvisibleMaterialBudget)
+			{
+				break;
+			}
+			nearInvisibleMaterialBudgetAllowed[candidate.chunkListIndex] = 1u;
+			nearInvisibleMaterialBudgetReserved++;
+		}
+	}
+	const auto reserveNearInvisibleMaterialBudget =
+		[&](size_t chunkIndex) -> bool
+	{
+		if (!deferNearInvisibleMaterialRefreshes || nearInvisibleMaterialBudget == 0)
+		{
+			return false;
+		}
+		if (chunkIndex < nearInvisibleMaterialBudgetAllowed.size() &&
+			nearInvisibleMaterialBudgetAllowed[chunkIndex] != 0u)
+		{
+			return true;
+		}
+		if (nearInvisibleMaterialBudgetReserved >= nearInvisibleMaterialBudget ||
+			chunkIndex >= nearInvisibleMaterialBudgetAllowed.size())
+		{
+			return false;
+		}
+
+		nearInvisibleMaterialBudgetAllowed[chunkIndex] = 1u;
+		nearInvisibleMaterialBudgetReserved++;
+		return true;
+	};
+	const auto recordDeferredMaterialTier =
+		[&](RuntimeMutationDistanceTier distanceTier, bool coalesced)
+	{
+		if (coalesced)
+		{
+			mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredCoalescedChunks++;
+		}
+		else
+		{
+			mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredChunks++;
+		}
+		if (distanceTier == RuntimeMutationDistanceTier::Near)
+		{
+			if (coalesced)
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearCoalescedChunks++;
+			}
+			else
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearChunks++;
+			}
+		}
+	};
+	const auto recordFlushedDeferredMaterialTier =
+		[&](RuntimeMutationDistanceTier distanceTier)
+	{
+		mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredFlushedChunks++;
+		if (distanceTier == RuntimeMutationDistanceTier::Near)
+		{
+			mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearFlushedChunks++;
+		}
+	};
 	const auto recordDeferredStructuralTier =
 		[&](RuntimeMutationDistanceTier distanceTier, bool coalesced)
 	{
@@ -27447,6 +27560,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		if (needsStructuralRebuild)
 		{
 			replacement.deferredMaterialRefresh = false;
+			replacement.deferredMaterialFrame = 0;
 		}
 		const bool activeReplacementStructuralCandidate =
 			(runtimeMutationCandidateSourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0;
@@ -27721,21 +27835,31 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.deferredStructuralRebuild = false;
 				replacement.deferredStructuralFrame = 0;
 			}
+			const bool activeReplacementMaterialCandidate =
+				(runtimeMutationCandidateSourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0;
+			const bool deferNearInvisibleMaterialRefresh =
+				deferNearInvisibleMaterialRefreshes &&
+				materialOnlyReplacement &&
+				!useStaticAnimatedReplacement &&
+				!chunkVisibleNow &&
+				!activeReplacementMaterialCandidate &&
+				runtimeMutationDistanceTier == RuntimeMutationDistanceTier::Near;
 			const bool deferFarInvisibleMaterialRefresh =
 				(bool)nri_ptruntimedeferfarmaterial &&
 				materialOnlyReplacement &&
 				!useStaticAnimatedReplacement &&
 				!chunkVisibleNow &&
 				runtimeMutationDistanceTier == RuntimeMutationDistanceTier::Far;
-			if (deferFarInvisibleMaterialRefresh)
+			const bool deferInvisibleMaterialRefresh =
+				deferFarInvisibleMaterialRefresh ||
+				(deferNearInvisibleMaterialRefresh && !reserveNearInvisibleMaterialBudget(chunkIndex));
+			if (deferInvisibleMaterialRefresh)
 			{
-				if (replacement.deferredMaterialRefresh)
+				const bool hadDeferredMaterialRefresh = replacement.deferredMaterialRefresh;
+				recordDeferredMaterialTier(runtimeMutationDistanceTier, hadDeferredMaterialRefresh);
+				if (!hadDeferredMaterialRefresh)
 				{
-					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredCoalescedChunks++;
-				}
-				else
-				{
-					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredChunks++;
+					replacement.deferredMaterialFrame = mFrameIndex;
 				}
 				replacement.deferredMaterialRefresh = true;
 				replacement.animationOnlyRefreshed = false;
@@ -27839,7 +27963,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshChunks++;
 				if (hadDeferredMaterialRefresh)
 				{
-					mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredFlushedChunks++;
+					recordFlushedDeferredMaterialTier(runtimeMutationDistanceTier);
 				}
 				recordRuntimeMutationMaterialTier(chunkVisibleNow, runtimeMutationDistanceTier, runtimeMutationCandidateSourceMask);
 				if (forceReplacementMaterialRefresh)
@@ -27876,6 +28000,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			else
 			{
 				replacement.deferredMaterialRefresh = false;
+				replacement.deferredMaterialFrame = 0;
 				if (suppressedAnimatedResidentAlreadySynchronized ||
 					unsuppressedAnimatedResidentAlreadySynchronized)
 				{
@@ -28258,7 +28383,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	}
 	for (uint32_t chunkListIndex = 0; chunkListIndex < (uint32_t)mRuntimeMapMutations.chunks.size(); ++chunkListIndex)
 	{
-		if (!mRuntimeMapMutations.chunks[chunkListIndex].deferredStructuralRebuild ||
+		const bool deferredMaterialRefresh = mRuntimeMapMutations.chunks[chunkListIndex].deferredMaterialRefresh;
+		const bool deferredStructuralRebuild = mRuntimeMapMutations.chunks[chunkListIndex].deferredStructuralRebuild;
+		if ((!deferredMaterialRefresh && !deferredStructuralRebuild) ||
 			chunkListIndex >= mMapWorld.chunks.size())
 		{
 			continue;
@@ -28274,10 +28401,20 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		switch (getRuntimeMutationDistanceTier(chunkListIndex, false))
 		{
 		case RuntimeMutationDistanceTier::Near:
-			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredNearPendingChunks++;
+			if (deferredMaterialRefresh)
+			{
+				mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearPendingChunks++;
+			}
+			if (deferredStructuralRebuild)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredNearPendingChunks++;
+			}
 			break;
 		case RuntimeMutationDistanceTier::Far:
-			mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredFarPendingChunks++;
+			if (deferredStructuralRebuild)
+			{
+				mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredFarPendingChunks++;
+			}
 			break;
 		default:
 			break;

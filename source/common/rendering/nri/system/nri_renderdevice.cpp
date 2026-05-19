@@ -79,6 +79,7 @@ EXTERN_CVAR(Int, nri_ptsectorfilterminshade)
 EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
 EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
 EXTERN_CVAR(Bool, nri_ptruntimedeferfarmaterial)
+EXTERN_CVAR(Bool, nri_ptruntimedefernearinvisiblematerial)
 EXTERN_CVAR(Bool, nri_ptruntimedeferfarstructural)
 EXTERN_CVAR(Bool, nri_ptruntimedefernearinvisiblestructural)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
@@ -378,13 +379,19 @@ namespace
 			shell.runtimeMutationResidentApplyFarChunks,
 			shell.runtimeMutationResidentApplyUnknownDistanceChunks);
 		Printf(
-			"PERF pt progressive mutation deferred NRI: frame=%llu material_deferred=%u material_coalesced=%u material_flushed=%u material_pending=%u material_enabled=%u structural_deferred=%u structural_coalesced=%u structural_flushed=%u structural_promoted=%u structural_pending=%u structural_budget=%u structural_enabled=%u structural_near_deferred=%u structural_near_coalesced=%u structural_near_flushed=%u structural_near_pending=%u structural_near_budget=%u structural_near_enabled=%u structural_far_deferred=%u structural_far_coalesced=%u structural_far_flushed=%u structural_far_pending=%u structural_far_budget=%u structural_far_enabled=%u\n",
+			"PERF pt progressive mutation deferred NRI: frame=%llu material_deferred=%u material_coalesced=%u material_flushed=%u material_pending=%u material_enabled=%u material_near_deferred=%u material_near_coalesced=%u material_near_flushed=%u material_near_pending=%u material_near_budget=%u material_near_enabled=%u structural_deferred=%u structural_coalesced=%u structural_flushed=%u structural_promoted=%u structural_pending=%u structural_budget=%u structural_enabled=%u structural_near_deferred=%u structural_near_coalesced=%u structural_near_flushed=%u structural_near_pending=%u structural_near_budget=%u structural_near_enabled=%u structural_far_deferred=%u structural_far_coalesced=%u structural_far_flushed=%u structural_far_pending=%u structural_far_budget=%u structural_far_enabled=%u\n",
 			(unsigned long long)frameNumber,
 			shell.runtimeMutationMaterialRefreshDeferredChunks,
 			shell.runtimeMutationMaterialRefreshDeferredCoalescedChunks,
 			shell.runtimeMutationMaterialRefreshDeferredFlushedChunks,
 			shell.runtimeMutationMaterialRefreshDeferredPendingChunks,
-			(uint32_t)(bool)nri_ptruntimedeferfarmaterial,
+			(uint32_t)((bool)nri_ptruntimedeferfarmaterial || (bool)nri_ptruntimedefernearinvisiblematerial),
+			shell.runtimeMutationMaterialRefreshDeferredNearChunks,
+			shell.runtimeMutationMaterialRefreshDeferredNearCoalescedChunks,
+			shell.runtimeMutationMaterialRefreshDeferredNearFlushedChunks,
+			shell.runtimeMutationMaterialRefreshDeferredNearPendingChunks,
+			shell.runtimeMutationMaterialRefreshDeferredNearBudget,
+			(uint32_t)(bool)nri_ptruntimedefernearinvisiblematerial,
 			shell.runtimeMutationStructuralRebuildDeferredChunks,
 			shell.runtimeMutationStructuralRebuildDeferredCoalescedChunks,
 			shell.runtimeMutationStructuralRebuildDeferredFlushedChunks,
