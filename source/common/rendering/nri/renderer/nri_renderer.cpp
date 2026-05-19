@@ -148,7 +148,7 @@ CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, 0)
 CVAR(Bool, nri_ptruntimeworklist, true, 0)
 CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, 0)
 CVAR(Bool, nri_ptruntimedeferfarmaterial, true, 0)
-CUSTOM_CVAR(Float, nri_ptruntimemutationneardistance, 2048.0f, 0)
+CUSTOM_CVAR(Float, nri_ptruntimemutationneardistance, 1024.0f, 0)
 {
 	if (self < 0.0f)
 	{
