@@ -78,6 +78,7 @@ EXTERN_CVAR(Int, nri_ptsectorfilterpal)
 EXTERN_CVAR(Int, nri_ptsectorfilterminshade)
 EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
 EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
+EXTERN_CVAR(Bool, nri_ptruntimedeferfarmaterial)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
 EXTERN_CVAR(Bool, nri_ptscenestats)
@@ -153,6 +154,7 @@ namespace
 		case NRIRenderer::RuntimeMutationTraceAction::ResidentFallback: return "fallback";
 		case NRIRenderer::RuntimeMutationTraceAction::Held: return "held";
 		case NRIRenderer::RuntimeMutationTraceAction::SyncSkip: return "sync-skip";
+		case NRIRenderer::RuntimeMutationTraceAction::DeferredMaterialRefresh: return "deferred-material-refresh";
 		case NRIRenderer::RuntimeMutationTraceAction::Failed: return "failed";
 		default: return "none";
 		}
@@ -373,6 +375,14 @@ namespace
 			shell.runtimeMutationResidentApplyNearChunks,
 			shell.runtimeMutationResidentApplyFarChunks,
 			shell.runtimeMutationResidentApplyUnknownDistanceChunks);
+		Printf(
+			"PERF pt progressive mutation deferred NRI: frame=%llu material_deferred=%u material_coalesced=%u material_flushed=%u material_pending=%u enabled=%u\n",
+			(unsigned long long)frameNumber,
+			shell.runtimeMutationMaterialRefreshDeferredChunks,
+			shell.runtimeMutationMaterialRefreshDeferredCoalescedChunks,
+			shell.runtimeMutationMaterialRefreshDeferredFlushedChunks,
+			shell.runtimeMutationMaterialRefreshDeferredPendingChunks,
+			(uint32_t)(bool)nri_ptruntimedeferfarmaterial);
 		Printf(
 			"PERF pt progressive mutation source NRI: frame=%llu candidate_active=%u candidate_visible_resident=%u candidate_startup_visible=%u candidate_unresolved=%u candidate_static_anim=%u candidate_sector_dirty=%u candidate_section_dirty=%u candidate_dragged=%u candidate_signature_watch=%u candidate_background=%u dirty_active=%u dirty_background=%u structural_active=%u structural_background=%u material_active=%u material_background=%u resident_active=%u resident_background=%u\n",
 			(unsigned long long)frameNumber,
@@ -3627,6 +3637,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			case NRIRenderer::RuntimeMutationTraceAction::ResidentFallback: return "fallback";
 			case NRIRenderer::RuntimeMutationTraceAction::Held: return "held";
 			case NRIRenderer::RuntimeMutationTraceAction::SyncSkip: return "sync-skip";
+			case NRIRenderer::RuntimeMutationTraceAction::DeferredMaterialRefresh: return "deferred-material-refresh";
 			case NRIRenderer::RuntimeMutationTraceAction::Failed: return "failed";
 			default: return "none";
 			}

@@ -116,6 +116,7 @@ public:
 		ResidentFallback,
 		Held,
 		SyncSkip,
+		DeferredMaterialRefresh,
 		Failed
 	};
 
@@ -466,6 +467,10 @@ public:
 		uint32_t runtimeMutationMaterialRefreshNearChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshFarChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshUnknownDistanceChunks = 0;
+		uint32_t runtimeMutationMaterialRefreshDeferredChunks = 0;
+		uint32_t runtimeMutationMaterialRefreshDeferredCoalescedChunks = 0;
+		uint32_t runtimeMutationMaterialRefreshDeferredFlushedChunks = 0;
+		uint32_t runtimeMutationMaterialRefreshDeferredPendingChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshActiveReplacementChunks = 0;
 		uint32_t runtimeMutationMaterialRefreshBackgroundSweepChunks = 0;
 		uint32_t runtimeMutationResidentApplyVisibleChunks = 0;
@@ -1780,6 +1785,7 @@ private:
 			bool animationOnlyRefreshed = false;
 			bool lastTraceAnimationOnlyRefreshed = false;
 			bool lastTraceStaticAnimatedReplacement = false;
+			bool deferredMaterialRefresh = false;
 			uint32_t surfaceCount = 0;
 			uint32_t triangleCount = 0;
 			SceneLightSystem::SurfaceIdentityOverrides lightIdentityOverrides;
