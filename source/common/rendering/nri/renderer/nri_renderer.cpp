@@ -1725,6 +1725,92 @@ public:
 		return hash;
 	}
 
+	static uint64_t HashResidentMaterialPayload(const nri_scene::MaterialBridgeData& materials)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, (uint64_t)materials.materials.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)materials.lightMetadata.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)materials.textures.size());
+		for (const auto& material : materials.materials)
+		{
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.textureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.paletteIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.flags);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.materialClass);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.lightingFlags);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.normalTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.metallicTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.roughnessTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.sectorIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.emissiveTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(material.lightLevel));
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(material.alpha));
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(material.roughnessHint));
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(material.metalnessHint));
+			for (float color : material.emissiveColor)
+			{
+				hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(color));
+			}
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(material.emissiveIntensity));
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(material.emissiveMaskScale));
+			hash = CoherencyHashCombine64(hash, (uint64_t)material.emissiveMode);
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(material.emissiveReserved));
+		}
+
+		for (const auto& metadata : materials.lightMetadata)
+		{
+			hash = CoherencyHashCombine64(hash, metadata.materialKey);
+			hash = CoherencyHashCombine64(hash, metadata.textureContentKey);
+			hash = CoherencyHashCombine64(hash, metadata.glowmapContentKey);
+			hash = CoherencyHashCombine64(hash, metadata.normalContentKey);
+			hash = CoherencyHashCombine64(hash, metadata.metallicContentKey);
+			hash = CoherencyHashCombine64(hash, metadata.roughnessContentKey);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.textureId);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.textureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.glowmapTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.normalTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.metallicTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.roughnessTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.emissiveTextureIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.paletteIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.materialFlags);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.lightingFlags);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.materialClass);
+			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.emissiveMode);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)metadata.sourceType);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)metadata.sectorIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)metadata.actorIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)metadata.shade);
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(metadata.alpha));
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(metadata.lightLevel));
+			for (float color : metadata.averageColor)
+			{
+				hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(color));
+			}
+			for (float color : metadata.glowColor)
+			{
+				hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(color));
+			}
+			for (float color : metadata.emissiveColor)
+			{
+				hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(color));
+			}
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(metadata.emissiveIntensity));
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(metadata.emissiveMaskScale));
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(metadata.visibleFullbrightBoost));
+		}
+
+		for (const auto& texture : materials.textures)
+		{
+			hash = CoherencyHashCombine64(hash, texture.key);
+			hash = CoherencyHashCombine64(hash, (uint64_t)texture.width);
+			hash = CoherencyHashCombine64(hash, (uint64_t)texture.height);
+			hash = CoherencyHashCombine64(hash, texture.indexed ? 1ull : 0ull);
+		}
+
+		return hash != 0 ? hash : 1;
+	}
+
 	static const char* GetActorSpriteTraceStageName(PathTracingActorSpriteTraceStage stage)
 	{
 		switch (stage)
@@ -12369,6 +12455,7 @@ void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
 		}
 		entry.geometryTopologySignature = staticChunk.geometryTopologySignature;
 		entry.animatedMaterialSignature = staticChunk.animatedMaterialSignature;
+		entry.materialPayloadHash = staticChunk.active ? HashResidentMaterialPayload(staticChunk.materialBridge) : 0;
 		entry.animatedGeometrySignature = staticChunk.animatedGeometrySignature;
 		entry.exactGeometrySignature = staticChunk.exactGeometrySignature;
 		entry.hasAnimatedTextureCandidates = staticChunk.hasAnimatedTextureCandidates;
@@ -25391,6 +25478,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialPayloadHashCheckCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialPayloadHashSkipCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialPayloadHashMissCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialPayloadHashRejectCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveGeometryCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreservePrimitiveCount = 0;
@@ -29932,6 +30023,10 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		}
 		return false;
 	}
+	const uint64_t residentMaterialPayloadHash =
+		!chunkBecomesEmpty ? HashResidentMaterialPayload(residentMaterials) : 0;
+	bool residentMaterialPayloadHashSkip = false;
+	bool appliedPreservedResidentMaterialSlice = false;
 
 	if (chunkBecomesEmpty)
 	{
@@ -30150,6 +30245,26 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			{
 				mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepMaterialSliceCount++;
 			}
+			if (hasResidentChunk && residentMaterialCount != 0)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialPayloadHashCheckCount++;
+				if (keptMaterialSlice && entry.materialPayloadHash != 0)
+				{
+					if (entry.materialPayloadHash == residentMaterialPayloadHash)
+					{
+						residentMaterialPayloadHashSkip = true;
+						mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialPayloadHashSkipCount++;
+					}
+					else
+					{
+						mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialPayloadHashMissCount++;
+					}
+				}
+				else
+				{
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialPayloadHashRejectCount++;
+				}
+			}
 
 			if (chunkListIndex >= mStaticMapScene.chunks.size())
 			{
@@ -30167,6 +30282,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				hasResidentChunk &&
 				keptMaterialSlice &&
 				previousAnimatedMaterialSignature == ComputeAnimatedMaterialSignature(residentSceneView);
+			preserveResidentMaterialSlice = preserveResidentMaterialSlice || residentMaterialPayloadHashSkip;
 			preserveResidentIndexSlice =
 				!materialOnlyReplacement &&
 				hasResidentChunk &&
@@ -30389,6 +30505,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mStaticMapScene.lightChunkViews[chunkListIndex] = residentSceneView;
 		outStaticSceneChunkListIndex = chunkListIndex;
 		outMaterialDirty = !preserveResidentMaterialSlice;
+		appliedPreservedResidentMaterialSlice = preserveResidentMaterialSlice;
 		outGeometryDirty =
 			((!preserveResidentGeometryForMaterialOnlyUpdate && !keptGeometrySlices) ||
 			(appliedReasonMask & (
@@ -30439,6 +30556,10 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].primitiveCount = mStaticMapChunkAtlas.chunks[chunkListIndex].primitiveCount;
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].materialOffset;
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialCount = mStaticMapChunkAtlas.chunks[chunkListIndex].materialCount;
+		if (!appliedPreservedResidentMaterialSlice)
+		{
+			mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialPayloadHash = residentMaterialPayloadHash;
+		}
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].accelerationResident =
 			mStaticMapScene.chunks[chunkListIndex].accelerationStructure.accelerationStructure != nullptr;
 	}
@@ -30452,9 +30573,10 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].primitiveCount = 0;
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialOffset = 0;
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialCount = 0;
+		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialPayloadHash = 0;
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].accelerationResident = false;
 	}
-	if (!outMaterialDirty)
+	if (!outMaterialDirty && !residentMaterialPayloadHashSkip)
 	{
 		outMaterialDirty =
 			(appliedReasonMask & (nri_scene::PTMapChunkMutationReason_SectorMaterial | nri_scene::PTMapChunkMutationReason_WallMaterial)) != 0 ||

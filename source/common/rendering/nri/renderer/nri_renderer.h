@@ -563,6 +563,10 @@ public:
 		uint32_t runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount = 0;
 		uint32_t runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount = 0;
 		uint32_t runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount = 0;
+		uint32_t runtimeMutationResidentApplyMaterialPayloadHashCheckCount = 0;
+		uint32_t runtimeMutationResidentApplyMaterialPayloadHashSkipCount = 0;
+		uint32_t runtimeMutationResidentApplyMaterialPayloadHashMissCount = 0;
+		uint32_t runtimeMutationResidentApplyMaterialPayloadHashRejectCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
 		uint32_t runtimeMutationResidentApplyPreservePrimitiveCount = 0;
@@ -1360,6 +1364,7 @@ private:
 			uint64_t liveSignature = 0;
 			uint64_t exactGeometrySignature = 0;
 			uint64_t animatedMaterialSignature = 0;
+			uint64_t materialPayloadHash = 0;
 			uint64_t animatedGeometrySignature = 0;
 			bool valid = false;
 			bool active = false;
