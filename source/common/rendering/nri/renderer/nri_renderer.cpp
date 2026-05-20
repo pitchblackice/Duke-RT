@@ -1583,6 +1583,11 @@ public:
 		return (int)perf_looptraceframes > 0;
 	}
 
+	static bool ShouldTraceResidentGeometryOrderHash()
+	{
+		return (int)perf_looptraceframes > 0;
+	}
+
 	static bool ShouldTraceMirrorDynamicCapture()
 	{
 		return nri_voxelstats || (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0;
@@ -4796,6 +4801,57 @@ namespace
 		return value >= base ? value - base : UINT32_MAX;
 	}
 
+	static uint64_t HashResidentGeometryVertexPayload(uint64_t hash, const nri_scene::SceneVertex& vertex)
+	{
+		for (float component : vertex.position)
+		{
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(component));
+		}
+		for (float component : vertex.prevPosition)
+		{
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(component));
+		}
+		for (float component : vertex.uv)
+		{
+			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(component));
+		}
+		return hash;
+	}
+
+	static uint64_t HashResidentGeometryProvenancePayload(
+		uint64_t hash,
+		const nri_scene::PTMapWorld& mapWorld,
+		const nri_scene::GeometryData& geometry,
+		const nri_scene::PrimitiveData& primitive,
+		uint32_t primitiveIndex)
+	{
+		const bool hasProvenance = primitiveIndex < geometry.primitiveProvenance.size();
+		const uint32_t visibilityChunk =
+			hasProvenance ?
+			(uint32_t)ResolveVisibilityChunkIndexForProvenance(mapWorld, geometry.primitiveProvenance[primitiveIndex]) :
+			primitive.reserved0;
+		hash = CoherencyHashCombine64(hash, (uint64_t)visibilityChunk);
+		if (hasProvenance)
+		{
+			const auto& provenance = geometry.primitiveProvenance[primitiveIndex];
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sectorIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.wallIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sectionIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.mapChunkIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.nextSectorIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.actorIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.drawListType);
+			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.cstat);
+			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.materialFlags);
+		}
+		else
+		{
+			hash = CoherencyHashCombine64(hash, UINT64_MAX);
+		}
+		return hash;
+	}
+
 	static uint64_t HashResidentGeometryPayload(
 		const nri_scene::PTMapWorld& mapWorld,
 		const nri_scene::GeometryData& geometry,
@@ -4823,18 +4879,7 @@ namespace
 		for (uint32_t i = 0; i < vertexCount; ++i)
 		{
 			const auto& vertex = geometry.vertices[vertexOffset + i];
-			for (float component : vertex.position)
-			{
-				hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(component));
-			}
-			for (float component : vertex.prevPosition)
-			{
-				hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(component));
-			}
-			for (float component : vertex.uv)
-			{
-				hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(component));
-			}
+			hash = HashResidentGeometryVertexPayload(hash, vertex);
 		}
 
 		for (uint32_t i = 0; i < indexCount; ++i)
@@ -4870,32 +4915,70 @@ namespace
 			}
 			hash = CoherencyHashCombine64(hash, (uint64_t)primitive.flags);
 			hash = CoherencyHashCombine64(hash, (uint64_t)primitive.portalIndex);
-			const bool hasProvenance = primitiveIndex < geometry.primitiveProvenance.size();
-			const uint32_t visibilityChunk =
-				hasProvenance ?
-				(uint32_t)ResolveVisibilityChunkIndexForProvenance(mapWorld, geometry.primitiveProvenance[primitiveIndex]) :
-				primitive.reserved0;
-			hash = CoherencyHashCombine64(hash, (uint64_t)visibilityChunk);
-			if (hasProvenance)
-			{
-				const auto& provenance = geometry.primitiveProvenance[primitiveIndex];
-				hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
-				hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sectorIndex);
-				hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.wallIndex);
-				hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sectionIndex);
-				hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.mapChunkIndex);
-				hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.nextSectorIndex);
-				hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.actorIndex);
-				hash = CoherencyHashCombine64(hash, (uint64_t)provenance.drawListType);
-				hash = CoherencyHashCombine64(hash, (uint64_t)provenance.cstat);
-				hash = CoherencyHashCombine64(hash, (uint64_t)provenance.materialFlags);
-			}
-			else
-			{
-				hash = CoherencyHashCombine64(hash, UINT64_MAX);
-			}
+			hash = HashResidentGeometryProvenancePayload(hash, mapWorld, geometry, primitive, primitiveIndex);
 		}
 
+		return hash != 0 ? hash : 1;
+	}
+
+	static uint64_t HashResidentGeometryPayloadOrderIndependent(
+		const nri_scene::PTMapWorld& mapWorld,
+		const nri_scene::GeometryData& geometry,
+		uint32_t vertexOffset,
+		uint32_t vertexCount,
+		uint32_t primitiveOffset,
+		uint32_t primitiveCount,
+		uint32_t materialOffset,
+		uint32_t materialCount)
+	{
+		if (vertexOffset + vertexCount > geometry.vertices.size() ||
+			primitiveOffset + primitiveCount > geometry.primitives.size())
+		{
+			return 0;
+		}
+
+		std::vector<uint64_t> primitiveHashes;
+		primitiveHashes.reserve(primitiveCount);
+		for (uint32_t i = 0; i < primitiveCount; ++i)
+		{
+			const uint32_t primitiveIndex = primitiveOffset + i;
+			const auto& primitive = geometry.primitives[primitiveIndex];
+			uint64_t primitiveHash = 1469598103934665603ull;
+			primitiveHash = CoherencyHashCombine64(primitiveHash, (uint64_t)NormalizeResidentAtlasIndex(primitive.materialIndex, materialOffset));
+			for (float component : primitive.normal)
+			{
+				primitiveHash = CoherencyHashCombine64(primitiveHash, (uint64_t)CoherencyFloatBits(component));
+			}
+			primitiveHash = CoherencyHashCombine64(primitiveHash, (uint64_t)primitive.flags);
+			primitiveHash = CoherencyHashCombine64(primitiveHash, (uint64_t)primitive.portalIndex);
+			primitiveHash = HashResidentGeometryProvenancePayload(primitiveHash, mapWorld, geometry, primitive, primitiveIndex);
+
+			const float* primitiveUvs[3] = { primitive.uv0, primitive.uv1, primitive.uv2 };
+			for (uint32_t corner = 0; corner < 3; ++corner)
+			{
+				const uint32_t vertexIndex = primitive.indices[corner];
+				if (vertexIndex < vertexOffset || vertexIndex >= vertexOffset + vertexCount)
+				{
+					return 0;
+				}
+				primitiveHash = HashResidentGeometryVertexPayload(primitiveHash, geometry.vertices[vertexIndex]);
+				for (uint32_t component = 0; component < 2; ++component)
+				{
+					primitiveHash = CoherencyHashCombine64(primitiveHash, (uint64_t)CoherencyFloatBits(primitiveUvs[corner][component]));
+				}
+			}
+			primitiveHashes.push_back(primitiveHash);
+		}
+
+		std::sort(primitiveHashes.begin(), primitiveHashes.end());
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, (uint64_t)vertexCount);
+		hash = CoherencyHashCombine64(hash, (uint64_t)primitiveCount);
+		hash = CoherencyHashCombine64(hash, (uint64_t)materialCount);
+		for (uint64_t primitiveHash : primitiveHashes)
+		{
+			hash = CoherencyHashCombine64(hash, primitiveHash);
+		}
 		return hash != 0 ? hash : 1;
 	}
 
@@ -12309,6 +12392,28 @@ void NRIRenderer::UploadChunkVertexDataToAtlas(
 	}
 }
 
+void NRIRenderer::UploadChunkIndexDataToAtlas(
+	const nri_scene::GeometryData& sourceGeometry,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<uint32_t>& outIndices) const
+{
+	if (!atlasChunk.valid)
+	{
+		return;
+	}
+
+	if (sourceChunk.indexOffset + sourceChunk.indexCount <= sourceGeometry.indices.size() &&
+		atlasChunk.indexOffset + atlasChunk.indexCount <= outIndices.size())
+	{
+		for (uint32_t i = 0; i < sourceChunk.indexCount; ++i)
+		{
+			const uint32_t sourceIndex = sourceGeometry.indices[sourceChunk.indexOffset + i];
+			outIndices[atlasChunk.indexOffset + i] = atlasChunk.vertexOffset + sourceIndex - sourceChunk.vertexOffset;
+		}
+	}
+}
+
 void NRIRenderer::UploadChunkVertexAndIndexDataToAtlas(
 	const nri_scene::GeometryData& sourceGeometry,
 	const StaticMapSceneCache::ChunkCache& sourceChunk,
@@ -12327,15 +12432,11 @@ void NRIRenderer::UploadChunkVertexAndIndexDataToAtlas(
 		atlasChunk,
 		outVertices);
 
-	if (sourceChunk.indexOffset + sourceChunk.indexCount <= sourceGeometry.indices.size() &&
-		atlasChunk.indexOffset + atlasChunk.indexCount <= outIndices.size())
-	{
-		for (uint32_t i = 0; i < sourceChunk.indexCount; ++i)
-		{
-			const uint32_t sourceIndex = sourceGeometry.indices[sourceChunk.indexOffset + i];
-			outIndices[atlasChunk.indexOffset + i] = atlasChunk.vertexOffset + sourceIndex - sourceChunk.vertexOffset;
-		}
-	}
+	UploadChunkIndexDataToAtlas(
+		sourceGeometry,
+		sourceChunk,
+		atlasChunk,
+		outIndices);
 }
 
 void NRIRenderer::UploadChunkPrimitiveDataToAtlas(
@@ -25462,7 +25563,14 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyAtlasBookkeepingMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexCpuCopyMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexCpuCopyMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveRewriteMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveCpuRewriteMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryOrderHashMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasSetupMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBuildMs = 0.0;
@@ -25619,6 +25727,16 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadHashMissCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadHashRejectCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadHashBlasSkipCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadOrderCheckCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadOrderEquivalentCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadOrderMissCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadOrderRejectCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageRangeCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageRangeCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageRangeCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageBytes = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageBytes = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageBytes = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveGeometryCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreservePrimitiveCount = 0;
@@ -30437,6 +30555,44 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 					else
 					{
 						mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadHashMissCount++;
+						if (ShouldTraceResidentGeometryOrderHash())
+						{
+							ScopedPtPerfTimer orderHashTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryOrderHashMs);
+							mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadOrderCheckCount++;
+							const uint64_t residentGeometryOrderHash = HashResidentGeometryPayloadOrderIndependent(
+								mMapWorld,
+								residentGeometry,
+								sourceChunk.vertexOffset,
+								sourceChunk.vertexCount,
+								sourceChunk.primitiveOffset,
+								sourceChunk.primitiveCount,
+								sourceChunk.materialOffset,
+								sourceChunk.materialCount);
+							const uint64_t currentGeometryOrderHash = HashResidentGeometryPayloadOrderIndependent(
+								mMapWorld,
+								mStaticMapScene.geometry,
+								nextAtlasChunk.vertexOffset,
+								nextAtlasChunk.vertexCount,
+								nextAtlasChunk.primitiveOffset,
+								nextAtlasChunk.primitiveCount,
+								nextAtlasChunk.materialOffset,
+								nextAtlasChunk.materialCount);
+							if (residentGeometryOrderHash != 0 && currentGeometryOrderHash != 0)
+							{
+								if (residentGeometryOrderHash == currentGeometryOrderHash)
+								{
+									mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadOrderEquivalentCount++;
+								}
+								else
+								{
+									mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadOrderMissCount++;
+								}
+							}
+							else
+							{
+								mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryPayloadOrderRejectCount++;
+							}
+						}
 					}
 				}
 				else
@@ -30560,76 +30716,129 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs);
 				if (preserveResidentIndexSlice)
 				{
-					UploadChunkVertexDataToAtlas(
-						residentGeometry,
-						sourceChunk,
-						nextAtlasChunk,
-						mStaticMapScene.geometry.vertices);
-					if (!StageResidentBufferCopyRange(
-							mStaticVertexBuffer,
-							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
-							mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
-							(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
-							NRIAccelerationStructureBuildInputAccess(),
-							ResidentUploadKind_Vertex))
+					{
+						ScopedPtPerfTimer vertexCpuTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexCpuCopyMs);
+						UploadChunkVertexDataToAtlas(
+							residentGeometry,
+							sourceChunk,
+							nextAtlasChunk,
+							mStaticMapScene.geometry.vertices);
+					}
+					const uint64_t vertexBytes = (uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
+					bool stagedVertex = false;
+					{
+						ScopedPtPerfTimer vertexStageTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageMs);
+						stagedVertex = StageResidentBufferCopyRange(
+								mStaticVertexBuffer,
+								(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
+								mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
+								vertexBytes,
+								NRIAccelerationStructureBuildInputAccess(),
+								ResidentUploadKind_Vertex);
+					}
+					if (!stagedVertex)
 					{
 						return false;
 					}
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageRangeCount++;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageBytes += vertexBytes;
 				}
 				else
 				{
-					UploadChunkVertexAndIndexDataToAtlas(
-						residentGeometry,
-						sourceChunk,
-						nextAtlasChunk,
-						mStaticMapScene.geometry.vertices,
-						mStaticMapScene.geometry.indices);
-					if (!StageResidentBufferCopyRange(
-							mStaticVertexBuffer,
-							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
-							mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
-							(uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex),
-							NRIAccelerationStructureBuildInputAccess(),
-							ResidentUploadKind_Vertex) ||
-						!StageResidentBufferCopyRange(
-							mStaticIndexBuffer,
-							(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
-							mStaticMapScene.geometry.indices.data() + nextAtlasChunk.indexOffset,
-							(uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t),
-							NRIAccelerationStructureBuildInputAccess(),
-							ResidentUploadKind_Index))
+					{
+						ScopedPtPerfTimer vertexCpuTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexCpuCopyMs);
+						UploadChunkVertexDataToAtlas(
+							residentGeometry,
+							sourceChunk,
+							nextAtlasChunk,
+							mStaticMapScene.geometry.vertices);
+					}
+					{
+						ScopedPtPerfTimer indexCpuTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexCpuCopyMs);
+						UploadChunkIndexDataToAtlas(
+							residentGeometry,
+							sourceChunk,
+							nextAtlasChunk,
+							mStaticMapScene.geometry.indices);
+					}
+
+					const uint64_t vertexBytes = (uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
+					const uint64_t indexBytes = (uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t);
+					bool stagedVertex = false;
+					{
+						ScopedPtPerfTimer vertexStageTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageMs);
+						stagedVertex = StageResidentBufferCopyRange(
+								mStaticVertexBuffer,
+								(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
+								mStaticMapScene.geometry.vertices.data() + nextAtlasChunk.vertexOffset,
+								vertexBytes,
+								NRIAccelerationStructureBuildInputAccess(),
+								ResidentUploadKind_Vertex);
+					}
+					if (!stagedVertex)
 					{
 						return false;
 					}
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageRangeCount++;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageBytes += vertexBytes;
+
+					bool stagedIndex = false;
+					{
+						ScopedPtPerfTimer indexStageTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageMs);
+						stagedIndex = StageResidentBufferCopyRange(
+								mStaticIndexBuffer,
+								(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
+								mStaticMapScene.geometry.indices.data() + nextAtlasChunk.indexOffset,
+								indexBytes,
+								NRIAccelerationStructureBuildInputAccess(),
+								ResidentUploadKind_Index);
+					}
+					if (!stagedIndex)
+					{
+						return false;
+					}
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageRangeCount++;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageBytes += indexBytes;
 				}
 			}
 			{
 				ScopedPtPerfTimer detailPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveRewriteMs);
 				if (!preserveResidentPrimitiveSlice)
 				{
-					UploadChunkPrimitiveDataToAtlas(
-						residentGeometry,
-						sourceChunk,
-						nextAtlasChunk,
-						mStaticMapScene.geometry.primitives);
-					if (residentGeometry.primitiveProvenance.size() >= nextAtlasChunk.primitiveCount &&
-						nextAtlasChunk.primitiveOffset + nextAtlasChunk.primitiveCount <= mStaticMapScene.geometry.primitiveProvenance.size())
 					{
-						std::copy_n(
-							residentGeometry.primitiveProvenance.data(),
-							nextAtlasChunk.primitiveCount,
-							mStaticMapScene.geometry.primitiveProvenance.data() + nextAtlasChunk.primitiveOffset);
+						ScopedPtPerfTimer primitiveCpuTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveCpuRewriteMs);
+						UploadChunkPrimitiveDataToAtlas(
+							residentGeometry,
+							sourceChunk,
+							nextAtlasChunk,
+							mStaticMapScene.geometry.primitives);
+						if (residentGeometry.primitiveProvenance.size() >= nextAtlasChunk.primitiveCount &&
+							nextAtlasChunk.primitiveOffset + nextAtlasChunk.primitiveCount <= mStaticMapScene.geometry.primitiveProvenance.size())
+						{
+							std::copy_n(
+								residentGeometry.primitiveProvenance.data(),
+								nextAtlasChunk.primitiveCount,
+								mStaticMapScene.geometry.primitiveProvenance.data() + nextAtlasChunk.primitiveOffset);
+						}
 					}
-					if (!StageResidentBufferCopyRange(
-							mStaticPrimitiveBuffer,
-							(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
-							mStaticMapScene.geometry.primitives.data() + nextAtlasChunk.primitiveOffset,
-							(uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData),
-							NRIComputeShaderResourceAccess(),
-							ResidentUploadKind_Primitive))
+					const uint64_t primitiveBytes = (uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
+					bool stagedPrimitive = false;
+					{
+						ScopedPtPerfTimer primitiveStageTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageMs);
+						stagedPrimitive = StageResidentBufferCopyRange(
+								mStaticPrimitiveBuffer,
+								(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
+								mStaticMapScene.geometry.primitives.data() + nextAtlasChunk.primitiveOffset,
+								primitiveBytes,
+								NRIComputeShaderResourceAccess(),
+								ResidentUploadKind_Primitive);
+					}
+					if (!stagedPrimitive)
 					{
 						return false;
 					}
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageRangeCount++;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageBytes += primitiveBytes;
 				}
 			}
 			mLastPerfResourceTraceStats.residentChunkBatchVertexBytes +=

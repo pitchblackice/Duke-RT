@@ -340,7 +340,14 @@ public:
 		double runtimeMutationResidentApplyAtlasMs = 0.0;
 		double runtimeMutationResidentApplyAtlasBookkeepingMs = 0.0;
 		double runtimeMutationResidentApplyVertexIndexCopyMs = 0.0;
+		double runtimeMutationResidentApplyVertexCpuCopyMs = 0.0;
+		double runtimeMutationResidentApplyIndexCpuCopyMs = 0.0;
+		double runtimeMutationResidentApplyVertexStageMs = 0.0;
+		double runtimeMutationResidentApplyIndexStageMs = 0.0;
 		double runtimeMutationResidentApplyPrimitiveRewriteMs = 0.0;
+		double runtimeMutationResidentApplyPrimitiveCpuRewriteMs = 0.0;
+		double runtimeMutationResidentApplyPrimitiveStageMs = 0.0;
+		double runtimeMutationResidentApplyGeometryOrderHashMs = 0.0;
 		double runtimeMutationResidentApplyDownstreamBlasMs = 0.0;
 		double runtimeMutationResidentApplyDownstreamBlasSetupMs = 0.0;
 		double runtimeMutationResidentApplyDownstreamBlasBuildMs = 0.0;
@@ -572,6 +579,16 @@ public:
 		uint32_t runtimeMutationResidentApplyGeometryPayloadHashMissCount = 0;
 		uint32_t runtimeMutationResidentApplyGeometryPayloadHashRejectCount = 0;
 		uint32_t runtimeMutationResidentApplyGeometryPayloadHashBlasSkipCount = 0;
+		uint32_t runtimeMutationResidentApplyGeometryPayloadOrderCheckCount = 0;
+		uint32_t runtimeMutationResidentApplyGeometryPayloadOrderEquivalentCount = 0;
+		uint32_t runtimeMutationResidentApplyGeometryPayloadOrderMissCount = 0;
+		uint32_t runtimeMutationResidentApplyGeometryPayloadOrderRejectCount = 0;
+		uint32_t runtimeMutationResidentApplyVertexStageRangeCount = 0;
+		uint32_t runtimeMutationResidentApplyIndexStageRangeCount = 0;
+		uint32_t runtimeMutationResidentApplyPrimitiveStageRangeCount = 0;
+		uint64_t runtimeMutationResidentApplyVertexStageBytes = 0;
+		uint64_t runtimeMutationResidentApplyIndexStageBytes = 0;
+		uint64_t runtimeMutationResidentApplyPrimitiveStageBytes = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
 		uint32_t runtimeMutationResidentApplyPreservePrimitiveCount = 0;
@@ -2027,6 +2044,11 @@ private:
 		const StaticMapSceneCache::ChunkCache& sourceChunk,
 		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
 		std::vector<nri_scene::SceneVertex>& outVertices) const;
+	void UploadChunkIndexDataToAtlas(
+		const nri_scene::GeometryData& sourceGeometry,
+		const StaticMapSceneCache::ChunkCache& sourceChunk,
+		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+		std::vector<uint32_t>& outIndices) const;
 	void UploadChunkVertexAndIndexDataToAtlas(
 		const nri_scene::GeometryData& sourceGeometry,
 		const StaticMapSceneCache::ChunkCache& sourceChunk,
