@@ -589,6 +589,9 @@ public:
 		uint64_t runtimeMutationResidentApplyVertexStageBytes = 0;
 		uint64_t runtimeMutationResidentApplyIndexStageBytes = 0;
 		uint64_t runtimeMutationResidentApplyPrimitiveStageBytes = 0;
+		uint32_t runtimeMutationResidentApplyCoalescedStageRangeCount = 0;
+		uint32_t runtimeMutationResidentApplyCoalescedStageRejectCount = 0;
+		uint64_t runtimeMutationResidentApplyCoalescedStageBytes = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
 		uint32_t runtimeMutationResidentApplyPreservePrimitiveCount = 0;
@@ -1871,6 +1874,13 @@ private:
 		std::vector<NRIAccelerationStructureResource> retiredAccelerationStructures;
 	};
 
+	struct RuntimeMutationResidentUploadRange
+	{
+		int uploadKind = 0;
+		uint64_t byteOffset = 0;
+		uint64_t size = 0;
+	};
+
 	struct RuntimeMapMutationFrameState
 	{
 		bool active = false;
@@ -2326,6 +2336,8 @@ private:
 	bool EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch& scratch, ResidentUploadScratchFrame& frameScratch, uint64_t requiredSize);
 	bool EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind);
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
+	bool QueueRuntimeMutationResidentGeometryUploadRange(int uploadKind, uint64_t byteOffset, uint64_t size);
+	bool FlushRuntimeMutationResidentGeometryUploadRanges();
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
@@ -2431,6 +2443,7 @@ private:
 	NRIBufferResource mTopLevelScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
 	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};
+	std::vector<RuntimeMutationResidentUploadRange> mRuntimeMutationResidentGeometryUploadRanges;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
 	SceneBufferDebugStats mIndexBufferStats = { "Index" };
 	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };
