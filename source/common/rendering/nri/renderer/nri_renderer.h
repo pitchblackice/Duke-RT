@@ -350,6 +350,10 @@ public:
 		double runtimeMutationResidentApplyGeometryOrderHashMs = 0.0;
 		double runtimeMutationResidentApplyDownstreamBlasMs = 0.0;
 		double runtimeMutationResidentApplyDownstreamBlasSetupMs = 0.0;
+		double runtimeMutationResidentApplyDownstreamBlasFilterMs = 0.0;
+		double runtimeMutationResidentApplyDownstreamBlasCreateMs = 0.0;
+		double runtimeMutationResidentApplyDownstreamBlasScratchMs = 0.0;
+		double runtimeMutationResidentApplyDownstreamBlasBarrierMs = 0.0;
 		double runtimeMutationResidentApplyDownstreamBlasBuildMs = 0.0;
 		double runtimeMutationAppendMs = 0.0;
 		double sceneLightStaticAppendMs = 0.0;
@@ -620,6 +624,12 @@ public:
 		uint32_t runtimeMutationResidentApplyBlasRecreateSliceMovedCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRecreateTopologyChangedCount = 0;
 		uint32_t runtimeMutationResidentApplyBlasRecreateForceTopologyCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasScratchQueryCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasScratchCacheHitCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasScratchCacheMissCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasScratchGrowCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasBuildCommandCount = 0;
+		uint32_t runtimeMutationResidentApplyBlasScratchBarrierCount = 0;
 		uint32_t runtimeMutationResidentApplyKeepGeometrySliceCount = 0;
 		uint32_t runtimeMutationResidentApplyKeepMaterialSliceCount = 0;
 		uint32_t runtimeMutationResidentApplyEmptyRemovalCount = 0;
@@ -1351,6 +1361,9 @@ private:
 			bool lastResidentBlasRecoveredEmpty = false;
 			bool lastResidentBlasKeptGeometrySlice = false;
 			bool lastResidentBlasTopologyChanged = false;
+			nri::AccelerationStructure* residentBlasScratchSizeCacheKey = nullptr;
+			uint64_t residentBlasBuildScratchSize = 0;
+			uint64_t residentBlasUpdateScratchSize = 0;
 			bool hasAnimatedTextureCandidates = false;
 			bool animatedRefreshSuppressed = false;
 			nri_scene::MaterialBridgeData materialBridge;
@@ -2456,6 +2469,8 @@ private:
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
 	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};
 	std::vector<RuntimeMutationResidentUploadRange> mRuntimeMutationResidentGeometryUploadRanges;
+	std::vector<uint32_t> mResidentStaticBlasActiveChunkListIndices;
+	std::vector<nri::BufferBarrierDesc> mResidentStaticBlasBarriers;
 	SceneBufferDebugStats mVertexBufferStats = { "Vertex" };
 	SceneBufferDebugStats mIndexBufferStats = { "Index" };
 	SceneBufferDebugStats mPrimitiveBufferStats = { "Primitive" };

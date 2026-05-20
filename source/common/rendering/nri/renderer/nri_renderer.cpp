@@ -25237,6 +25237,9 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	for (auto& chunk : mStaticMapScene.chunks)
 	{
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = nullptr;
+		chunk.residentBlasBuildScratchSize = 0;
+		chunk.residentBlasUpdateScratchSize = 0;
 	}
 
 	uint64_t maxScratchSize = 0;
@@ -25272,7 +25275,12 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		chunk.accelerationStructure.memorySize = memoryDesc.size;
 		chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
 
-		maxScratchSize = std::max(maxScratchSize, mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
+		const uint64_t scratchSize =
+			mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = chunk.accelerationStructure.accelerationStructure;
+		chunk.residentBlasBuildScratchSize = scratchSize;
+		chunk.residentBlasUpdateScratchSize = 0;
+		maxScratchSize = std::max(maxScratchSize, scratchSize);
 	}
 
 	if (!CreateBufferWithoutView(mScratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
@@ -25390,6 +25398,9 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 	for (auto& chunk : staticScene.chunks)
 	{
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = nullptr;
+		chunk.residentBlasBuildScratchSize = 0;
+		chunk.residentBlasUpdateScratchSize = 0;
 	}
 
 	uint64_t maxScratchSize = 0;
@@ -25425,7 +25436,12 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 		chunk.accelerationStructure.memorySize = memoryDesc.size;
 		chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
 
-		maxScratchSize = std::max(maxScratchSize, mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
+		const uint64_t scratchSize =
+			mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = chunk.accelerationStructure.accelerationStructure;
+		chunk.residentBlasBuildScratchSize = scratchSize;
+		chunk.residentBlasUpdateScratchSize = 0;
+		maxScratchSize = std::max(maxScratchSize, scratchSize);
 	}
 
 	if (!CreateBufferWithoutView(staticResources.scratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
@@ -25937,6 +25953,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryOrderHashMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasSetupMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasFilterMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasCreateMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasScratchMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBarrierMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationCandidateChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationAnalyzedChunks = 0;
@@ -26132,6 +26152,12 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateSliceMovedCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateTopologyChangedCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasRecreateForceTopologyCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchQueryCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchCacheHitCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchCacheMissCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchGrowCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasBuildCommandCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchBarrierCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepGeometrySliceCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyKeepMaterialSliceCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyEmptyRemovalCount = 0;
@@ -30098,26 +30124,30 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 		return true;
 	}
 
-	std::vector<uint32_t> activeChunkListIndices;
+	auto& activeChunkListIndices = mResidentStaticBlasActiveChunkListIndices;
+	activeChunkListIndices.clear();
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasSetupMs);
-		activeChunkListIndices.reserve(chunkListIndices.size());
-		for (uint32_t chunkListIndex : chunkListIndices)
 		{
-			if (chunkListIndex >= mStaticMapScene.chunks.size() ||
-				chunkListIndex >= mStaticMapChunkAtlas.chunks.size())
+			ScopedPtPerfTimer filterPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasFilterMs);
+			activeChunkListIndices.reserve(chunkListIndices.size());
+			for (uint32_t chunkListIndex : chunkListIndices)
 			{
-				return false;
-			}
+				if (chunkListIndex >= mStaticMapScene.chunks.size() ||
+					chunkListIndex >= mStaticMapChunkAtlas.chunks.size())
+				{
+					return false;
+				}
 
-			const auto& chunk = mStaticMapScene.chunks[chunkListIndex];
-			const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
-			if (!chunk.active || !atlasChunk.valid || atlasChunk.indexCount == 0 || atlasChunk.primitiveCount == 0)
-			{
-				continue;
-			}
+				const auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+				const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+				if (!chunk.active || !atlasChunk.valid || atlasChunk.indexCount == 0 || atlasChunk.primitiveCount == 0)
+				{
+					continue;
+				}
 
-			activeChunkListIndices.push_back(chunkListIndex);
+				activeChunkListIndices.push_back(chunkListIndex);
+			}
 		}
 
 		if (activeChunkListIndices.empty())
@@ -30136,13 +30166,31 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 				chunk.blasUpdateEligible &&
 				hadAccelerationStructure;
 			chunk.blasUpdateEligible = canUpdateResidentBlas;
+			auto* accelerationStructure = chunk.accelerationStructure.accelerationStructure;
+			if (chunk.residentBlasScratchSizeCacheKey != accelerationStructure)
+			{
+				chunk.residentBlasScratchSizeCacheKey = accelerationStructure;
+				chunk.residentBlasBuildScratchSize = 0;
+				chunk.residentBlasUpdateScratchSize = 0;
+			}
 			if (canUpdateResidentBlas)
 			{
 				mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasReuseCount++;
 				mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasUpdateCount++;
-				maxScratchSize = std::max(
-					maxScratchSize,
-					mFrameBuffer->mRayTracing.GetAccelerationStructureUpdateScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
+				uint64_t scratchSize = chunk.residentBlasUpdateScratchSize;
+				if (scratchSize != 0)
+				{
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchCacheHitCount++;
+				}
+				else
+				{
+					ScopedPtPerfTimer scratchPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasScratchMs);
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchCacheMissCount++;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchQueryCount++;
+					scratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureUpdateScratchBufferSize(*accelerationStructure);
+					chunk.residentBlasUpdateScratchSize = scratchSize;
+				}
+				maxScratchSize = std::max(maxScratchSize, scratchSize);
 			}
 			else
 			{
@@ -30197,57 +30245,76 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 						entry,
 						ScoreRuntimeResidentBlasRecreateTraceEntry);
 				}
-				RetireResidentAccelerationStructure(chunk.accelerationStructure);
-
-				nri::BottomLevelGeometryDesc geometryDesc = {};
-				geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-				geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-				geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
-				geometryDesc.triangles.vertexOffset = 0;
-				geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
-				geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-				geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-				geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
-				geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
-				geometryDesc.triangles.indexNum = atlasChunk.indexCount;
-				geometryDesc.triangles.indexType = nri::IndexType::UINT32;
-
-				nri::AccelerationStructureDesc blasDesc = {};
-				blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
-				blasDesc.flags = GetStaticMapChunkBlasBuildBits();
-				blasDesc.geometryOrInstanceNum = 1;
-				blasDesc.geometries = &geometryDesc;
-				if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, chunk.accelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
 				{
-					return false;
+					ScopedPtPerfTimer createPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasCreateMs);
+					RetireResidentAccelerationStructure(chunk.accelerationStructure);
+					chunk.residentBlasScratchSizeCacheKey = nullptr;
+					chunk.residentBlasBuildScratchSize = 0;
+					chunk.residentBlasUpdateScratchSize = 0;
+
+					nri::BottomLevelGeometryDesc geometryDesc = {};
+					geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+					geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+					geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
+					geometryDesc.triangles.vertexOffset = 0;
+					geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
+					geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+					geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+					geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
+					geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+					geometryDesc.triangles.indexNum = atlasChunk.indexCount;
+					geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+
+					nri::AccelerationStructureDesc blasDesc = {};
+					blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
+					blasDesc.flags = GetStaticMapChunkBlasBuildBits();
+					blasDesc.geometryOrInstanceNum = 1;
+					blasDesc.geometries = &geometryDesc;
+					if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, chunk.accelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
+					{
+						return false;
+					}
+
+					nri::MemoryDesc memoryDesc = {};
+					mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+					chunk.accelerationStructure.memorySize = memoryDesc.size;
+					chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
 				}
 
-				nri::MemoryDesc memoryDesc = {};
-				mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-				chunk.accelerationStructure.memorySize = memoryDesc.size;
-				chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
-
-				maxScratchSize = std::max(
-					maxScratchSize,
-					mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure));
+				{
+					ScopedPtPerfTimer scratchPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasScratchMs);
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchCacheMissCount++;
+					mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchQueryCount++;
+					const uint64_t scratchSize =
+						mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure);
+					chunk.residentBlasScratchSizeCacheKey = chunk.accelerationStructure.accelerationStructure;
+					chunk.residentBlasBuildScratchSize = scratchSize;
+					chunk.residentBlasUpdateScratchSize = 0;
+					maxScratchSize = std::max(maxScratchSize, scratchSize);
+				}
 			}
 		}
 
-		if (mResidentStaticBlasScratchBuffer.buffer == nullptr || mResidentStaticBlasScratchBuffer.size < maxScratchSize)
 		{
-			if (mResidentStaticBlasScratchBuffer.buffer != nullptr)
+			ScopedPtPerfTimer scratchPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasScratchMs);
+			if (mResidentStaticBlasScratchBuffer.buffer == nullptr || mResidentStaticBlasScratchBuffer.size < maxScratchSize)
 			{
-				WaitForCommandsTracked();
-			}
-			DestroyBufferResource(mResidentStaticBlasScratchBuffer);
-			if (!CreateBufferWithoutView(mResidentStaticBlasScratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
-			{
-				return false;
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchGrowCount++;
+				if (mResidentStaticBlasScratchBuffer.buffer != nullptr)
+				{
+					WaitForCommandsTracked();
+				}
+				DestroyBufferResource(mResidentStaticBlasScratchBuffer);
+				if (!CreateBufferWithoutView(mResidentStaticBlasScratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+				{
+					return false;
+				}
 			}
 		}
 	}
 
-	std::vector<nri::BufferBarrierDesc> blasBarriers;
+	auto& blasBarriers = mResidentStaticBlasBarriers;
+	blasBarriers.clear();
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBuildMs);
 		blasBarriers.reserve(activeChunkListIndices.size());
@@ -30278,9 +30345,11 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 			build.scratchBuffer = mResidentStaticBlasScratchBuffer.buffer;
 			build.scratchOffset = 0;
 			mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasBuildCommandCount++;
 
 			if (i + 1 < activeChunkListIndices.size())
 			{
+				ScopedPtPerfTimer barrierPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBarrierMs);
 				nri::BufferBarrierDesc scratchBarrier = {};
 				scratchBarrier.buffer = mResidentStaticBlasScratchBuffer.buffer;
 				scratchBarrier.before = NRIAccelerationStructureScratchAccess();
@@ -30290,19 +30359,27 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 				scratchBarrierDesc.buffers = &scratchBarrier;
 				scratchBarrierDesc.bufferNum = 1;
 				mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, scratchBarrierDesc);
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyBlasScratchBarrierCount++;
 			}
 
-			nri::BufferBarrierDesc barrier = {};
-			barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
-			barrier.before = NRIAccelerationStructureWriteAccess();
-			barrier.after = NRIAccelerationStructureReadAccess();
-			blasBarriers.push_back(barrier);
+			{
+				ScopedPtPerfTimer barrierPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBarrierMs);
+				nri::BufferBarrierDesc barrier = {};
+				barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
+				barrier.before = NRIAccelerationStructureWriteAccess();
+				barrier.after = NRIAccelerationStructureReadAccess();
+				blasBarriers.push_back(barrier);
+			}
 		}
 
-		nri::BarrierDesc barrierDesc = {};
-		barrierDesc.buffers = blasBarriers.data();
-		barrierDesc.bufferNum = (uint32_t)blasBarriers.size();
-		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+		if (!blasBarriers.empty())
+		{
+			ScopedPtPerfTimer barrierPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBarrierMs);
+			nri::BarrierDesc barrierDesc = {};
+			barrierDesc.buffers = blasBarriers.data();
+			barrierDesc.bufferNum = (uint32_t)blasBarriers.size();
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+		}
 	}
 	return true;
 }
@@ -30696,6 +30773,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			mutableChunk.lastResidentBlasRecoveredEmpty = false;
 			mutableChunk.lastResidentBlasKeptGeometrySlice = false;
 			mutableChunk.lastResidentBlasTopologyChanged = false;
+			mutableChunk.residentBlasScratchSizeCacheKey = nullptr;
+			mutableChunk.residentBlasBuildScratchSize = 0;
+			mutableChunk.residentBlasUpdateScratchSize = 0;
 			mutableChunk.vertexCount = 0;
 			mutableChunk.indexCount = 0;
 			mutableChunk.primitiveCount = 0;
@@ -33664,6 +33744,9 @@ void NRIRenderer::DestroyAccelerationStructures()
 	for (auto& chunk : mStaticMapScene.chunks)
 	{
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = nullptr;
+		chunk.residentBlasBuildScratchSize = 0;
+		chunk.residentBlasUpdateScratchSize = 0;
 	}
 	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
 	ResetPersistentVoxelBatch("destroy-acceleration-structures");
@@ -33700,6 +33783,9 @@ void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScen
 	for (auto& chunk : staticScene.chunks)
 	{
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = nullptr;
+		chunk.residentBlasBuildScratchSize = 0;
+		chunk.residentBlasUpdateScratchSize = 0;
 	}
 
 	DestroyAccelerationStructureResource(staticResources.topLevelAS);
@@ -33748,6 +33834,9 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 	for (auto& chunk : mStaticMapScene.chunks)
 	{
 		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = nullptr;
+		chunk.residentBlasBuildScratchSize = 0;
+		chunk.residentBlasUpdateScratchSize = 0;
 	}
 
 	DestroyBufferResource(mStaticVertexBuffer);
