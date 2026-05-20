@@ -592,6 +592,7 @@ public:
 		uint32_t runtimeMutationResidentApplyCoalescedStageRangeCount = 0;
 		uint32_t runtimeMutationResidentApplyCoalescedStageRejectCount = 0;
 		uint64_t runtimeMutationResidentApplyCoalescedStageBytes = 0;
+		uint64_t runtimeMutationResidentApplyCoalescedStageGapBytes = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
 		uint32_t runtimeMutationResidentApplyPreservePrimitiveCount = 0;
@@ -1879,6 +1880,7 @@ private:
 		int uploadKind = 0;
 		uint64_t byteOffset = 0;
 		uint64_t size = 0;
+		uint64_t dirtySize = 0;
 	};
 
 	struct RuntimeMapMutationFrameState

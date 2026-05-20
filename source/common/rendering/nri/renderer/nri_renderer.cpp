@@ -24679,7 +24679,7 @@ bool NRIRenderer::QueueRuntimeMutationResidentGeometryUploadRange(int uploadKind
 		return false;
 	}
 
-	mRuntimeMutationResidentGeometryUploadRanges.push_back({ uploadKind, byteOffset, size });
+	mRuntimeMutationResidentGeometryUploadRanges.push_back({ uploadKind, byteOffset, size, size });
 	return true;
 }
 
@@ -24691,7 +24691,8 @@ bool NRIRenderer::FlushRuntimeMutationResidentGeometryUploadRanges()
 	}
 
 	ScopedPtPerfTimer residentApplyPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyMs);
-	constexpr uint64_t kResidentUploadCoalesceMaxGapBytes = 64ull * 1024ull;
+	constexpr uint64_t kResidentUploadCoalesceMaxGapBytes = 4ull * 1024ull;
+	constexpr uint64_t kResidentUploadCoalesceMaxByteExpansion = 2;
 	auto clearAndFail = [&]()
 	{
 		mRuntimeMutationResidentGeometryUploadRanges.clear();
@@ -24724,13 +24725,19 @@ bool NRIRenderer::FlushRuntimeMutationResidentGeometryUploadRanges()
 		RuntimeMutationResidentUploadRange& tail = coalescedRanges.back();
 		const uint64_t tailEnd = tail.byteOffset + tail.size;
 		const uint64_t rangeEnd = range.byteOffset + range.size;
-		if (range.byteOffset <= tailEnd ||
-			range.byteOffset - tailEnd <= kResidentUploadCoalesceMaxGapBytes)
+		const uint64_t gapBytes = range.byteOffset > tailEnd ? range.byteOffset - tailEnd : 0;
+		const uint64_t candidateSize = rangeEnd > tailEnd ? rangeEnd - tail.byteOffset : tail.size;
+		const uint64_t candidateDirtySize = tail.dirtySize + range.size;
+		const bool acceptableByteExpansion =
+			candidateDirtySize > UINT64_MAX / kResidentUploadCoalesceMaxByteExpansion ||
+			candidateSize <= candidateDirtySize * kResidentUploadCoalesceMaxByteExpansion;
+		if (gapBytes <= kResidentUploadCoalesceMaxGapBytes && acceptableByteExpansion)
 		{
 			if (rangeEnd > tailEnd)
 			{
 				tail.size = rangeEnd - tail.byteOffset;
 			}
+			tail.dirtySize += range.size;
 			continue;
 		}
 
@@ -24808,6 +24815,10 @@ bool NRIRenderer::FlushRuntimeMutationResidentGeometryUploadRanges()
 		}
 		mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageRangeCount++;
 		mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageBytes += range.size;
+		if (range.size > range.dirtySize)
+		{
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageGapBytes += range.size - range.dirtySize;
+		}
 	}
 
 	mRuntimeMutationResidentGeometryUploadRanges.clear();
@@ -25901,6 +25912,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageRangeCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageRejectCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageBytes = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageGapBytes = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveGeometryCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreservePrimitiveCount = 0;
