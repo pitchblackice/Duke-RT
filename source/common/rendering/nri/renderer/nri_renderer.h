@@ -567,6 +567,11 @@ public:
 		uint32_t runtimeMutationResidentApplyMaterialPayloadHashSkipCount = 0;
 		uint32_t runtimeMutationResidentApplyMaterialPayloadHashMissCount = 0;
 		uint32_t runtimeMutationResidentApplyMaterialPayloadHashRejectCount = 0;
+		uint32_t runtimeMutationResidentApplyGeometryPayloadHashCheckCount = 0;
+		uint32_t runtimeMutationResidentApplyGeometryPayloadHashSkipCount = 0;
+		uint32_t runtimeMutationResidentApplyGeometryPayloadHashMissCount = 0;
+		uint32_t runtimeMutationResidentApplyGeometryPayloadHashRejectCount = 0;
+		uint32_t runtimeMutationResidentApplyGeometryPayloadHashBlasSkipCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
 		uint32_t runtimeMutationResidentApplyPreservePrimitiveCount = 0;
@@ -1303,6 +1308,7 @@ private:
 			uint64_t geometryTopologySignature = 0;
 			uint64_t primitiveLayoutSignature = 0;
 			uint64_t exactGeometrySignature = 0;
+			uint64_t geometryPayloadHash = 0;
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t animatedGeometrySignature = 0;
 			bool active = true;
@@ -1365,6 +1371,7 @@ private:
 			uint64_t exactGeometrySignature = 0;
 			uint64_t animatedMaterialSignature = 0;
 			uint64_t materialPayloadHash = 0;
+			uint64_t geometryPayloadHash = 0;
 			uint64_t animatedGeometrySignature = 0;
 			bool valid = false;
 			bool active = false;
