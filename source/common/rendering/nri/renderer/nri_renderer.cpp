@@ -24553,12 +24553,18 @@ bool NRIRenderer::EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch&
 		scratch.cursor = 0;
 		scratch.copySourceActive = false;
 	}
-	return CreateBufferWithoutViewAtLocation(
+	const bool created = CreateBufferWithoutViewAtLocation(
 		scratch.buffer,
 		grownSize,
 		kResidentUploadScratchStride,
 		nri::BufferUsageBits::NONE,
 		nri::MemoryLocation::DEVICE_UPLOAD);
+	if (created)
+	{
+		mLastPerfShellTraceStats.runtimeMutationResidentApplyStageScratchGrowCount++;
+		mLastPerfShellTraceStats.runtimeMutationResidentApplyStageScratchGrowBytes += grownSize;
+	}
+	return created;
 }
 
 bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind)
@@ -24654,6 +24660,253 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 	return true;
 }
 
+bool NRIRenderer::StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges)
+{
+	if (ranges.empty())
+	{
+		return true;
+	}
+
+	if (mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr)
+	{
+		return false;
+	}
+
+	constexpr uint64_t kResidentUploadScratchAlignment = 16u;
+	auto& frameScratch = GetResidentUploadScratchFrame();
+
+	struct UploadKindState
+	{
+		ResidentBufferUploadScratch* scratch = nullptr;
+		NRIBufferResource* resource = nullptr;
+		const uint8_t* data = nullptr;
+		uint64_t availableBytes = 0;
+		nri::AccessStage after = {};
+		double* aggregateMs = nullptr;
+		double* stageMs = nullptr;
+		uint64_t requiredSize = 0;
+		uint64_t mapStart = UINT64_MAX;
+		uint64_t mapEnd = 0;
+		bool used = false;
+	};
+
+	std::array<UploadKindState, 3> states = {};
+	states[ResidentUploadKind_Vertex] = {
+		&frameScratch.vertex,
+		&mStaticVertexBuffer,
+		reinterpret_cast<const uint8_t*>(mStaticMapScene.geometry.vertices.data()),
+		(uint64_t)mStaticMapScene.geometry.vertices.size() * sizeof(nri_scene::SceneVertex),
+		NRIAccelerationStructureBuildInputAccess(),
+		&mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs,
+		&mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageMs };
+	states[ResidentUploadKind_Index] = {
+		&frameScratch.index,
+		&mStaticIndexBuffer,
+		reinterpret_cast<const uint8_t*>(mStaticMapScene.geometry.indices.data()),
+		(uint64_t)mStaticMapScene.geometry.indices.size() * sizeof(uint32_t),
+		NRIAccelerationStructureBuildInputAccess(),
+		&mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs,
+		&mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageMs };
+	states[ResidentUploadKind_Primitive] = {
+		&frameScratch.primitive,
+		&mStaticPrimitiveBuffer,
+		reinterpret_cast<const uint8_t*>(mStaticMapScene.geometry.primitives.data()),
+		(uint64_t)mStaticMapScene.geometry.primitives.size() * sizeof(nri_scene::PrimitiveData),
+		NRIComputeShaderResourceAccess(),
+		&mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveRewriteMs,
+		&mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageMs };
+
+	for (UploadKindState& state : states)
+	{
+		state.requiredSize = state.scratch != nullptr ? state.scratch->cursor : 0;
+	}
+
+	for (const RuntimeMutationResidentUploadRange& range : ranges)
+	{
+		if (range.uploadKind < ResidentUploadKind_Vertex || range.uploadKind > ResidentUploadKind_Primitive)
+		{
+			return false;
+		}
+		UploadKindState& state = states[range.uploadKind];
+		if (state.resource == nullptr ||
+			state.resource->buffer == nullptr ||
+			state.data == nullptr ||
+			range.size == 0 ||
+			range.byteOffset > state.availableBytes ||
+			range.size > state.availableBytes - range.byteOffset)
+		{
+			return false;
+		}
+
+		state.used = true;
+		state.requiredSize =
+			(state.requiredSize + kResidentUploadScratchAlignment - 1u) &
+			~(kResidentUploadScratchAlignment - 1u);
+		state.requiredSize += range.size;
+	}
+
+	for (UploadKindState& state : states)
+	{
+		if (state.used && !EnsureResidentUploadScratchBuffer(*state.scratch, frameScratch, state.requiredSize))
+		{
+			return false;
+		}
+	}
+
+	struct StagedCopy
+	{
+		UploadKindState* state = nullptr;
+		uint64_t targetOffset = 0;
+		uint64_t scratchOffset = 0;
+		uint64_t size = 0;
+		const uint8_t* data = nullptr;
+	};
+
+	std::vector<StagedCopy> stagedCopies;
+	stagedCopies.reserve(ranges.size());
+	for (const RuntimeMutationResidentUploadRange& range : ranges)
+	{
+		UploadKindState& state = states[range.uploadKind];
+		const uint64_t scratchOffset =
+			(state.scratch->cursor + kResidentUploadScratchAlignment - 1u) &
+			~(kResidentUploadScratchAlignment - 1u);
+		const uint64_t requiredSize = scratchOffset + range.size;
+		if (requiredSize > state.scratch->buffer.size)
+		{
+			return false;
+		}
+
+		state.scratch->cursor = requiredSize;
+		state.mapStart = std::min(state.mapStart, scratchOffset);
+		state.mapEnd = std::max(state.mapEnd, requiredSize);
+		stagedCopies.push_back({ &state, range.byteOffset, scratchOffset, range.size, state.data + range.byteOffset });
+	}
+
+	for (UploadKindState& state : states)
+	{
+		if (!state.used)
+		{
+			continue;
+		}
+
+		const uint64_t mapSize = state.mapEnd - state.mapStart;
+		void* mapped = nullptr;
+		{
+			ScopedPtPerfTimer aggregateTimer(*state.aggregateMs);
+			ScopedPtPerfTimer stageTimer(*state.stageMs);
+			ScopedPtPerfTimer mapTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyStageMapMs);
+			mapped = mFrameBuffer->mCore.MapBuffer(*state.scratch->buffer.buffer, state.mapStart, mapSize);
+		}
+		if (mapped == nullptr)
+		{
+			return false;
+		}
+
+		{
+			ScopedPtPerfTimer aggregateTimer(*state.aggregateMs);
+			ScopedPtPerfTimer stageTimer(*state.stageMs);
+			ScopedPtPerfTimer memcpyTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyStageMemcpyMs);
+			for (const StagedCopy& copy : stagedCopies)
+			{
+				if (copy.state == &state)
+				{
+					std::memcpy(static_cast<uint8_t*>(mapped) + (copy.scratchOffset - state.mapStart), copy.data, (size_t)copy.size);
+				}
+			}
+		}
+
+		{
+			ScopedPtPerfTimer aggregateTimer(*state.aggregateMs);
+			ScopedPtPerfTimer stageTimer(*state.stageMs);
+			ScopedPtPerfTimer mapTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyStageMapMs);
+			mFrameBuffer->mCore.UnmapBuffer(*state.scratch->buffer.buffer);
+		}
+	}
+
+	std::vector<nri::BufferBarrierDesc> sourceBarriers;
+	std::vector<nri::BufferBarrierDesc> beforeCopyBarriers;
+	std::vector<nri::BufferBarrierDesc> afterCopyBarriers;
+	sourceBarriers.reserve(states.size());
+	beforeCopyBarriers.reserve(states.size());
+	afterCopyBarriers.reserve(states.size());
+
+	for (UploadKindState& state : states)
+	{
+		if (!state.used)
+		{
+			continue;
+		}
+
+		if (!state.scratch->copySourceActive)
+		{
+			nri::BufferBarrierDesc sourceBarrier = {};
+			sourceBarrier.buffer = state.scratch->buffer.buffer;
+			sourceBarrier.before = {};
+			sourceBarrier.after = NRICopySourceAccess();
+			sourceBarriers.push_back(sourceBarrier);
+			state.scratch->copySourceActive = true;
+		}
+
+		nri::BufferBarrierDesc beforeCopyBarrier = {};
+		beforeCopyBarrier.buffer = state.resource->buffer;
+		beforeCopyBarrier.before = state.after;
+		beforeCopyBarrier.after = NRICopyDestinationAccess();
+		beforeCopyBarriers.push_back(beforeCopyBarrier);
+
+		nri::BufferBarrierDesc afterCopyBarrier = {};
+		afterCopyBarrier.buffer = state.resource->buffer;
+		afterCopyBarrier.before = NRICopyDestinationAccess();
+		afterCopyBarrier.after = state.after;
+		afterCopyBarriers.push_back(afterCopyBarrier);
+	}
+
+	{
+		ScopedPtPerfTimer commandTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyStageCommandMs);
+		if (!sourceBarriers.empty())
+		{
+			nri::BarrierDesc sourceBarrierDesc = {};
+			sourceBarrierDesc.buffers = sourceBarriers.data();
+			sourceBarrierDesc.bufferNum = (uint32_t)sourceBarriers.size();
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, sourceBarrierDesc);
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyStageBarrierCommandCount++;
+		}
+
+		if (!beforeCopyBarriers.empty())
+		{
+			nri::BarrierDesc beforeCopyBarrierDesc = {};
+			beforeCopyBarrierDesc.buffers = beforeCopyBarriers.data();
+			beforeCopyBarrierDesc.bufferNum = (uint32_t)beforeCopyBarriers.size();
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeCopyBarrierDesc);
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyStageBarrierCommandCount++;
+		}
+
+		for (const StagedCopy& copy : stagedCopies)
+		{
+			mFrameBuffer->mCore.CmdCopyBuffer(
+				*mFrameBuffer->mCommandBuffer,
+				*copy.state->resource->buffer,
+				copy.targetOffset,
+				*copy.state->scratch->buffer.buffer,
+				copy.scratchOffset,
+				copy.size);
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyStageCopyCommandCount++;
+		}
+
+		if (!afterCopyBarriers.empty())
+		{
+			nri::BarrierDesc afterCopyBarrierDesc = {};
+			afterCopyBarrierDesc.buffers = afterCopyBarriers.data();
+			afterCopyBarrierDesc.bufferNum = (uint32_t)afterCopyBarriers.size();
+			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterCopyBarrierDesc);
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyStageBarrierCommandCount++;
+		}
+	}
+
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageBatchCount++;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageBatchRangeCount += (uint32_t)stagedCopies.size();
+	return true;
+}
+
 bool NRIRenderer::QueueRuntimeMutationResidentGeometryUploadRange(int uploadKind, uint64_t byteOffset, uint64_t size)
 {
 	if (size == 0)
@@ -24745,74 +24998,13 @@ bool NRIRenderer::FlushRuntimeMutationResidentGeometryUploadRanges()
 		coalescedRanges.push_back(range);
 	}
 
-	auto stageRange = [&](const RuntimeMutationResidentUploadRange& range) -> bool
+	if (!StageRuntimeMutationResidentGeometryUploadRanges(coalescedRanges))
 	{
-		NRIBufferResource* resource = nullptr;
-		const void* data = nullptr;
-		uint64_t availableBytes = 0;
-		nri::AccessStage after = {};
-		double* stageMs = nullptr;
-		double* aggregateMs = nullptr;
-
-		switch (range.uploadKind)
-		{
-		case ResidentUploadKind_Vertex:
-			resource = &mStaticVertexBuffer;
-			availableBytes = (uint64_t)mStaticMapScene.geometry.vertices.size() * sizeof(nri_scene::SceneVertex);
-			data = mStaticMapScene.geometry.vertices.data();
-			after = NRIAccelerationStructureBuildInputAccess();
-			stageMs = &mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageMs;
-			aggregateMs = &mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs;
-			break;
-		case ResidentUploadKind_Index:
-			resource = &mStaticIndexBuffer;
-			availableBytes = (uint64_t)mStaticMapScene.geometry.indices.size() * sizeof(uint32_t);
-			data = mStaticMapScene.geometry.indices.data();
-			after = NRIAccelerationStructureBuildInputAccess();
-			stageMs = &mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageMs;
-			aggregateMs = &mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs;
-			break;
-		case ResidentUploadKind_Primitive:
-			resource = &mStaticPrimitiveBuffer;
-			availableBytes = (uint64_t)mStaticMapScene.geometry.primitives.size() * sizeof(nri_scene::PrimitiveData);
-			data = mStaticMapScene.geometry.primitives.data();
-			after = NRIComputeShaderResourceAccess();
-			stageMs = &mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageMs;
-			aggregateMs = &mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveRewriteMs;
-			break;
-		default:
-			return false;
-		}
-
-		if (resource == nullptr ||
-			data == nullptr ||
-			range.byteOffset > availableBytes ||
-			range.size > availableBytes - range.byteOffset)
-		{
-			return false;
-		}
-
-		bool staged = false;
-		{
-			ScopedPtPerfTimer aggregateTimer(*aggregateMs);
-			ScopedPtPerfTimer stageTimer(*stageMs);
-			staged = StageResidentBufferCopyRange(
-				*resource,
-				range.byteOffset,
-				static_cast<const uint8_t*>(data) + range.byteOffset,
-				range.size,
-				after,
-				range.uploadKind);
-		}
-		return staged;
-	};
+		return clearAndFail();
+	}
 
 	for (const RuntimeMutationResidentUploadRange& range : coalescedRanges)
 	{
-		if (!stageRange(range))
-		{
-			return clearAndFail();
-		}
 		mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageRangeCount++;
 		mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageBytes += range.size;
 		if (range.size > range.dirtySize)
@@ -25913,6 +26105,15 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageRejectCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageBytes = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageGapBytes = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageMapMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageMemcpyMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageCommandMs = 0.0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageBatchCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageBatchRangeCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageCopyCommandCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageBarrierCommandCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageScratchGrowCount = 0;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStageScratchGrowBytes = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveGeometryCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreserveIndexCount = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyPreservePrimitiveCount = 0;

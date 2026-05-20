@@ -593,6 +593,15 @@ public:
 		uint32_t runtimeMutationResidentApplyCoalescedStageRejectCount = 0;
 		uint64_t runtimeMutationResidentApplyCoalescedStageBytes = 0;
 		uint64_t runtimeMutationResidentApplyCoalescedStageGapBytes = 0;
+		double runtimeMutationResidentApplyStageMapMs = 0.0;
+		double runtimeMutationResidentApplyStageMemcpyMs = 0.0;
+		double runtimeMutationResidentApplyStageCommandMs = 0.0;
+		uint32_t runtimeMutationResidentApplyStageBatchCount = 0;
+		uint32_t runtimeMutationResidentApplyStageBatchRangeCount = 0;
+		uint32_t runtimeMutationResidentApplyStageCopyCommandCount = 0;
+		uint32_t runtimeMutationResidentApplyStageBarrierCommandCount = 0;
+		uint32_t runtimeMutationResidentApplyStageScratchGrowCount = 0;
+		uint64_t runtimeMutationResidentApplyStageScratchGrowBytes = 0;
 		uint32_t runtimeMutationResidentApplyPreserveGeometryCount = 0;
 		uint32_t runtimeMutationResidentApplyPreserveIndexCount = 0;
 		uint32_t runtimeMutationResidentApplyPreservePrimitiveCount = 0;
@@ -2340,6 +2349,7 @@ private:
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
 	bool QueueRuntimeMutationResidentGeometryUploadRange(int uploadKind, uint64_t byteOffset, uint64_t size);
 	bool FlushRuntimeMutationResidentGeometryUploadRanges();
+	bool StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges);
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
