@@ -3789,6 +3789,37 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 					hot.fastEmissiveCommitted);
 			}
 		}
+		const double sceneSelectAccountedMs =
+			shell.sceneSelectStaticMapMs +
+			shell.runtimeSpaceLinkMs +
+			shell.runtimeMutationMs +
+			shell.dynamicCaptureMs +
+			shell.sceneSelectMirrorPortalMs +
+			shell.sceneSelectMirrorCaptureMs +
+			shell.geometryBuildDynamicLiveMs +
+			shell.geometryBuildMirrorExtendedMs +
+			shell.geometryBuildMirrorPlayerMs +
+			shell.sceneSelectPersistentVoxelBatchMs +
+			shell.sceneSelectPersistentEmissiveMs +
+			shell.persistentDynamicMs +
+			shell.sceneSelectDynamicMergeMs +
+			shell.sceneSelectLightMergeMs +
+			shell.runtimeDebugSphereMs +
+			shell.overlayAssembleMs +
+			shell.sceneSelectStaticInstancesMs +
+			shell.sceneSelectMaterialBridgeMs +
+			shell.sceneSelectPaletteMs +
+			shell.sceneSelectTexturesMs +
+			shell.sceneSelectMaterialSplitMs +
+			shell.sceneSelectBufferUploadMs +
+			shell.persistentVoxelAsMs +
+			shell.dynamicAsMs +
+			shell.sceneSelectInstanceHandlesMs +
+			shell.worldTlasMs +
+			shell.sceneDataSetMs +
+			shell.sceneSelectTexturePrepMs +
+			shell.sceneSelectStateCommitMs;
+		const double sceneSelectUnaccountedMs = shell.sceneSelectMs - sceneSelectAccountedMs;
 		Printf(
 			"PERF pt shell detail NRI: frame=%llu static_scene=%.3f mutation=%.3f mutation_analyze=%.3f mutation_rebuild=%.3f mutation_append=%.3f mutation_candidates=%u mutation_analyzed=%u mutation_sweep=%u mutation_dirty=%u mutation_rebuilt=%u mutation_held=%u mutation_prims=%u mutation_mats=%u spacelink=%.3f spacelink_prims=%u spacelink_mats=%u debug_sphere=%.3f debug_view=%.3f debug_geo=%.3f debug_mats=%.3f debug_tune=%.3f debug_spheres=%u debug_lons=%u debug_lats=%u debug_prims=%u debug_mats_out=%u overlay=%.3f overlay_prims=%u overlay_mats=%u dynamic_capture=%.3f persistent=%.3f dynamic_as=%.3f dynamic_as_create=%.3f dynamic_as_scratch=%.3f dynamic_as_build=%.3f dynamic_as_barrier=%.3f dynamic_as_prims=%u dynamic_as_verts=%u dynamic_as_indices=%u restore_static=%.3f copy_final=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
@@ -3866,6 +3897,41 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectMaterialSplitMs,
 			shell.sceneSelectBufferUploadMs,
 			shell.sceneSelectInstanceHandlesMs,
+			shell.sceneSelectTexturePrepMs,
+			shell.sceneSelectStateCommitMs);
+		Printf(
+			"PERF pt scene select accounting NRI: frame=%llu select=%.3f accounted=%.3f unaccounted=%.3f static_map=%.3f spacelink=%.3f mutation=%.3f dynamic_capture=%.3f mirror_portal=%.3f mirror_capture=%.3f dynamic_geo=%.3f mirror_extended_geo=%.3f mirror_player_geo=%.3f persistent_batch=%.3f persistent_emissive=%.3f persistent_dynamic=%.3f dynamic_merge=%.3f light_merge=%.3f debug_sphere=%.3f overlay=%.3f static_instances=%.3f material_bridge=%.3f palette=%.3f textures=%.3f material_split=%.3f buffer_upload=%.3f persistent_voxel_as=%.3f dynamic_as=%.3f instance_handles=%.3f world_tlas=%.3f scene_data=%.3f texture_prep=%.3f state_commit=%.3f\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneSelectMs,
+			sceneSelectAccountedMs,
+			sceneSelectUnaccountedMs,
+			shell.sceneSelectStaticMapMs,
+			shell.runtimeSpaceLinkMs,
+			shell.runtimeMutationMs,
+			shell.dynamicCaptureMs,
+			shell.sceneSelectMirrorPortalMs,
+			shell.sceneSelectMirrorCaptureMs,
+			shell.geometryBuildDynamicLiveMs,
+			shell.geometryBuildMirrorExtendedMs,
+			shell.geometryBuildMirrorPlayerMs,
+			shell.sceneSelectPersistentVoxelBatchMs,
+			shell.sceneSelectPersistentEmissiveMs,
+			shell.persistentDynamicMs,
+			shell.sceneSelectDynamicMergeMs,
+			shell.sceneSelectLightMergeMs,
+			shell.runtimeDebugSphereMs,
+			shell.overlayAssembleMs,
+			shell.sceneSelectStaticInstancesMs,
+			shell.sceneSelectMaterialBridgeMs,
+			shell.sceneSelectPaletteMs,
+			shell.sceneSelectTexturesMs,
+			shell.sceneSelectMaterialSplitMs,
+			shell.sceneSelectBufferUploadMs,
+			shell.persistentVoxelAsMs,
+			shell.dynamicAsMs,
+			shell.sceneSelectInstanceHandlesMs,
+			shell.worldTlasMs,
+			shell.sceneDataSetMs,
 			shell.sceneSelectTexturePrepMs,
 			shell.sceneSelectStateCommitMs);
 		Printf(
