@@ -386,6 +386,7 @@ public:
 		double sceneSelectMaterialSplitMs = 0.0;
 		double sceneSelectBufferUploadMs = 0.0;
 		double sceneSelectBufferUploadPrimitiveRewriteMs = 0.0;
+		double sceneSelectBufferUploadPayloadHashMs = 0.0;
 		double sceneSelectBufferUploadWaitCheckMs = 0.0;
 		double sceneSelectBufferUploadWaitMs = 0.0;
 		double sceneSelectBufferUploadVertexMs = 0.0;
@@ -403,6 +404,19 @@ public:
 		uint32_t sceneSelectBufferUploadPrimitiveOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadMaterialOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialUploads = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashChecks = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashHits = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashSkips = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashMisses = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashUploads = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashRejectMissing = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashRejectSize = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashRejectStride = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashRejectForced = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashVertexHits = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashIndexHits = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashPrimitiveHits = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashMaterialHits = 0;
 		uint64_t sceneSelectBufferUploadVertexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadIndexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadPrimitiveRequestedBytes = 0;

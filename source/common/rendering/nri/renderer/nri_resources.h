@@ -9,7 +9,10 @@ struct NRIBufferResource
 	uint64_t size = 0;
 	uint64_t memorySize = 0;
 	uint64_t usedSize = 0;
+	uint64_t payloadHash = 0;
+	uint64_t payloadSize = 0;
 	uint32_t stride = 0;
+	uint32_t payloadStride = 0;
 	nri::MemoryLocation memoryLocation = nri::MemoryLocation::DEVICE;
 };
 
