@@ -3935,7 +3935,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectTexturePrepMs,
 			shell.sceneSelectStateCommitMs);
 		Printf(
-			"PERF pt scene buffer upload detail NRI: frame=%llu total=%.3f primitive_rewrite=%.3f payload_hash=%.3f hash_checks=%u hash_hits=%u hash_skips=%u hash_misses=%u hash_uploads=%u hash_reject_missing=%u hash_reject_size=%u hash_reject_stride=%u hash_reject_forced=%u vertex_hash_hits=%u index_hash_hits=%u primitive_hash_hits=%u material_hash_hits=%u wait_check=%.3f wait=%.3f wait_count=%u vertex_ms=%.3f vertex_requested=%llu vertex_uploaded=%llu vertex_grow=%u vertex_overwrite=%u index_ms=%.3f index_requested=%llu index_uploaded=%llu index_grow=%u index_overwrite=%u primitive_ms=%.3f primitive_requested=%llu primitive_uploaded=%llu primitive_grow=%u primitive_overwrite=%u material_ms=%.3f material_requested=%llu material_uploaded=%llu material_grow=%u material_overwrite=%u persistent_voxel_material_ms=%.3f persistent_voxel_material_requested=%llu persistent_voxel_material_uploaded=%llu persistent_voxel_material_uploads=%u\n",
+			"PERF pt scene buffer upload detail NRI: frame=%llu total=%.3f primitive_rewrite=%.3f payload_hash=%.3f hash_checks=%u hash_hits=%u hash_skips=%u hash_misses=%u hash_uploads=%u hash_reject_missing=%u hash_reject_size=%u hash_reject_stride=%u hash_reject_forced=%u vertex_hash_hits=%u index_hash_hits=%u primitive_hash_hits=%u material_hash_hits=%u vertex_hash_skips=%u index_hash_skips=%u primitive_hash_skips=%u material_hash_skips=%u vertex_hash_misses=%u index_hash_misses=%u primitive_hash_misses=%u material_hash_misses=%u wait_check=%.3f wait=%.3f wait_count=%u vertex_ms=%.3f vertex_requested=%llu vertex_uploaded=%llu vertex_grow=%u vertex_overwrite=%u index_ms=%.3f index_requested=%llu index_uploaded=%llu index_grow=%u index_overwrite=%u primitive_ms=%.3f primitive_requested=%llu primitive_uploaded=%llu primitive_grow=%u primitive_overwrite=%u material_ms=%.3f material_requested=%llu material_uploaded=%llu material_grow=%u material_overwrite=%u persistent_voxel_material_ms=%.3f persistent_voxel_material_requested=%llu persistent_voxel_material_uploaded=%llu persistent_voxel_material_uploads=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectBufferUploadMs,
 			shell.sceneSelectBufferUploadPrimitiveRewriteMs,
@@ -3953,6 +3953,14 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectBufferUploadPayloadHashIndexHits,
 			shell.sceneSelectBufferUploadPayloadHashPrimitiveHits,
 			shell.sceneSelectBufferUploadPayloadHashMaterialHits,
+			shell.sceneSelectBufferUploadPayloadHashVertexSkips,
+			shell.sceneSelectBufferUploadPayloadHashIndexSkips,
+			shell.sceneSelectBufferUploadPayloadHashPrimitiveSkips,
+			shell.sceneSelectBufferUploadPayloadHashMaterialSkips,
+			shell.sceneSelectBufferUploadPayloadHashVertexMisses,
+			shell.sceneSelectBufferUploadPayloadHashIndexMisses,
+			shell.sceneSelectBufferUploadPayloadHashPrimitiveMisses,
+			shell.sceneSelectBufferUploadPayloadHashMaterialMisses,
 			shell.sceneSelectBufferUploadWaitCheckMs,
 			shell.sceneSelectBufferUploadWaitMs,
 			shell.sceneSelectBufferUploadWaitCount,

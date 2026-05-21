@@ -25379,36 +25379,48 @@ bool NRIRenderer::UploadSceneBuffers(
 			uint64_t payloadHash,
 			uint64_t payloadSize,
 			uint32_t payloadStride,
-			uint32_t& bufferHitCount)
+			uint32_t& bufferHitCount,
+			uint32_t& bufferSkipCount,
+			uint32_t& bufferMissCount) -> bool
 	{
 		mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashChecks++;
 		if (resource.buffer == nullptr || resource.shaderView == nullptr || resource.payloadHash == 0)
 		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMisses++;
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashRejectMissing++;
-			return;
+			bufferMissCount++;
+			return false;
 		}
-		if (resource.payloadSize != payloadSize)
+		const uint64_t requiredSize = std::max<uint64_t>(payloadSize, payloadStride);
+		if (resource.size < requiredSize ||
+			resource.usedSize != payloadSize ||
+			resource.payloadSize != payloadSize)
 		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMisses++;
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashRejectSize++;
-			return;
+			bufferMissCount++;
+			return false;
 		}
-		if (resource.payloadStride != payloadStride)
+		if (resource.stride != payloadStride ||
+			resource.payloadStride != payloadStride)
 		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMisses++;
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashRejectStride++;
-			return;
+			bufferMissCount++;
+			return false;
 		}
 		if (resource.payloadHash == payloadHash)
 		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashHits++;
-			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashRejectForced++;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashSkips++;
 			bufferHitCount++;
-			return;
+			bufferSkipCount++;
+			return true;
 		}
 
 		mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMisses++;
+		bufferMissCount++;
+		return false;
 	};
 	const auto ensureStructuredBufferBatched =
 		[&](NRIBufferResource& resource,
@@ -25417,6 +25429,7 @@ bool NRIRenderer::UploadSceneBuffers(
 			uint64_t bufferSize,
 			uint32_t bufferStride,
 			uint64_t payloadHash,
+			bool skipUpload,
 			nri::BufferUsageBits usageBits,
 			nri::AccessStage afterAccess,
 			double& uploadMs,
@@ -25424,6 +25437,15 @@ bool NRIRenderer::UploadSceneBuffers(
 			uint32_t& growEvents,
 			uint32_t& overwriteEvents) -> bool
 	{
+		if (skipUpload)
+		{
+			resource.usedSize = bufferSize;
+			uploadedBytes = 0;
+			growEvents = 0;
+			overwriteEvents = 0;
+			return true;
+		}
+
 		bool needsWait = false;
 		if (!waitedForWrites)
 		{
@@ -25456,16 +25478,16 @@ bool NRIRenderer::UploadSceneBuffers(
 		return result;
 	};
 
-	notePayloadHashState(vertexBuffer, vertexPayloadHash, vertexSize, sizeof(nri_scene::SceneVertex), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashVertexHits);
-	notePayloadHashState(indexBuffer, indexPayloadHash, indexSize, sizeof(uint32_t), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexHits);
-	notePayloadHashState(primitiveBuffer, primitivePayloadHash, primitiveSize, sizeof(nri_scene::PrimitiveData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveHits);
-	notePayloadHashState(materialBuffer, materialPayloadHash, materialSize, sizeof(nri_scene::MaterialData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialHits);
+	const bool skipVertexUpload = notePayloadHashState(vertexBuffer, vertexPayloadHash, vertexSize, sizeof(nri_scene::SceneVertex), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashVertexHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashVertexSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashVertexMisses);
+	const bool skipIndexUpload = notePayloadHashState(indexBuffer, indexPayloadHash, indexSize, sizeof(uint32_t), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexMisses);
+	const bool skipPrimitiveUpload = notePayloadHashState(primitiveBuffer, primitivePayloadHash, primitiveSize, sizeof(nri_scene::PrimitiveData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveMisses);
+	const bool skipMaterialUpload = notePayloadHashState(materialBuffer, materialPayloadHash, materialSize, sizeof(nri_scene::MaterialData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialMisses);
 
 	return
-		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents) &&
-		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents) &&
-		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, gpuPrimitives.data(), primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents) &&
-		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents);
+		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents) &&
+		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, gpuPrimitives.data(), primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents) &&
+		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents);
 }
 
 bool NRIRenderer::BuildStaticMapAccelerationStructures()

@@ -417,6 +417,14 @@ public:
 		uint32_t sceneSelectBufferUploadPayloadHashIndexHits = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashPrimitiveHits = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashMaterialHits = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashVertexSkips = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashIndexSkips = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashPrimitiveSkips = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashMaterialSkips = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashVertexMisses = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashIndexMisses = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashPrimitiveMisses = 0;
+		uint32_t sceneSelectBufferUploadPayloadHashMaterialMisses = 0;
 		uint64_t sceneSelectBufferUploadVertexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadIndexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadPrimitiveRequestedBytes = 0;
