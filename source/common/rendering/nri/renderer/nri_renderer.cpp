@@ -4822,6 +4822,43 @@ namespace
 		return FindMapChunkIndexForSector(mapWorld, provenance.sectorIndex);
 	}
 
+	static uint64_t HashPrimitiveRewriteProvenancePayload(const std::vector<nri_scene::SurfaceProvenance>& provenanceList)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, (uint64_t)provenanceList.size());
+		for (const nri_scene::SurfaceProvenance& provenance : provenanceList)
+		{
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.drawListType);
+			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.cstat);
+			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.materialFlags);
+		}
+		return hash != 0 ? hash : 1;
+	}
+
+	static uint64_t HashPrimitiveRewriteVisibilityIdentity(const nri_scene::PTMapWorld& mapWorld)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, mapWorld.valid ? 1ull : 0ull);
+		hash = CoherencyHashCombine64(hash, mapWorld.buildSerial);
+		hash = CoherencyHashCombine64(hash, (uint64_t)mapWorld.chunks.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)mapWorld.stats.chunkCount);
+		for (const nri_scene::PTMapChunk& chunk : mapWorld.chunks)
+		{
+			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.chunkIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(chunk.sectorIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.firstSurface);
+			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.surfaceCount);
+		}
+		return hash != 0 ? hash : 1;
+	}
+
 	static uint32_t NormalizeResidentAtlasIndex(uint32_t value, uint32_t base)
 	{
 		return value >= base ? value - base : UINT32_MAX;
@@ -25341,25 +25378,79 @@ bool NRIRenderer::UploadSceneBuffers(
 		mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRequestedBytes = geometry.primitives.size() * sizeof(nri_scene::PrimitiveData);
 		mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRequestedBytes = materials.size() * sizeof(nri_scene::MaterialData);
 	}
-	std::vector<nri_scene::PrimitiveData> gpuPrimitives;
+	const uint64_t primitiveInputSize = geometry.primitives.size() * sizeof(nri_scene::PrimitiveData);
+	uint64_t primitiveInputPayloadHash = 0;
+	uint64_t primitiveProvenanceHash = 0;
+	uint64_t primitiveVisibilityIdentityHash = 0;
+	const std::vector<nri_scene::PrimitiveData>* gpuPrimitives = nullptr;
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteMs);
-		gpuPrimitives = geometry.primitives;
-		const size_t primitiveCount = std::min(gpuPrimitives.size(), geometry.primitiveProvenance.size());
-		for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+		primitiveInputPayloadHash = HashUploadPayloadBytes(geometry.primitives.data(), primitiveInputSize);
+		primitiveProvenanceHash = HashPrimitiveRewriteProvenancePayload(geometry.primitiveProvenance);
+		primitiveVisibilityIdentityHash = HashPrimitiveRewriteVisibilityIdentity(mMapWorld);
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheChecks++;
+		if (mSelectPrimitiveRewriteCache.valid &&
+			mSelectPrimitiveRewriteCache.primitivePayloadHash == primitiveInputPayloadHash &&
+			mSelectPrimitiveRewriteCache.primitiveProvenanceHash == primitiveProvenanceHash &&
+			mSelectPrimitiveRewriteCache.visibilityIdentityHash == primitiveVisibilityIdentityHash &&
+			mSelectPrimitiveRewriteCache.primitiveCount == geometry.primitives.size() &&
+			mSelectPrimitiveRewriteCache.primitives.size() == geometry.primitives.size())
 		{
-			const int32_t chunkIndex = ResolveVisibilityChunkIndexForProvenance(mMapWorld, geometry.primitiveProvenance[primitiveIndex]);
-			gpuPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheHits++;
+			gpuPrimitives = &mSelectPrimitiveRewriteCache.primitives;
 		}
-		for (size_t primitiveIndex = primitiveCount; primitiveIndex < gpuPrimitives.size(); ++primitiveIndex)
+		else
 		{
-			gpuPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+			if (!mSelectPrimitiveRewriteCache.valid)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectInvalid++;
+			}
+			else
+			{
+				if (mSelectPrimitiveRewriteCache.primitivePayloadHash != primitiveInputPayloadHash)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectPrimitive++;
+				}
+				if (mSelectPrimitiveRewriteCache.primitiveProvenanceHash != primitiveProvenanceHash)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectProvenance++;
+				}
+				if (mSelectPrimitiveRewriteCache.visibilityIdentityHash != primitiveVisibilityIdentityHash)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectVisibility++;
+				}
+				if (mSelectPrimitiveRewriteCache.primitiveCount != geometry.primitives.size() ||
+					mSelectPrimitiveRewriteCache.primitives.size() != geometry.primitives.size())
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectCount++;
+				}
+			}
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheMisses++;
+			std::vector<nri_scene::PrimitiveData> rewrittenPrimitives = geometry.primitives;
+			const size_t primitiveCount = std::min(rewrittenPrimitives.size(), geometry.primitiveProvenance.size());
+			for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+			{
+				const int32_t chunkIndex = ResolveVisibilityChunkIndexForProvenance(mMapWorld, geometry.primitiveProvenance[primitiveIndex]);
+				rewrittenPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+			}
+			for (size_t primitiveIndex = primitiveCount; primitiveIndex < rewrittenPrimitives.size(); ++primitiveIndex)
+			{
+				rewrittenPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+			}
+
+			mSelectPrimitiveRewriteCache.valid = true;
+			mSelectPrimitiveRewriteCache.primitivePayloadHash = primitiveInputPayloadHash;
+			mSelectPrimitiveRewriteCache.primitiveProvenanceHash = primitiveProvenanceHash;
+			mSelectPrimitiveRewriteCache.visibilityIdentityHash = primitiveVisibilityIdentityHash;
+			mSelectPrimitiveRewriteCache.primitiveCount = geometry.primitives.size();
+			mSelectPrimitiveRewriteCache.primitives = std::move(rewrittenPrimitives);
+			gpuPrimitives = &mSelectPrimitiveRewriteCache.primitives;
 		}
 	}
 
 	const uint64_t vertexSize = geometry.vertices.size() * sizeof(nri_scene::SceneVertex);
 	const uint64_t indexSize = geometry.indices.size() * sizeof(uint32_t);
-	const uint64_t primitiveSize = gpuPrimitives.size() * sizeof(nri_scene::PrimitiveData);
+	const uint64_t primitiveSize = gpuPrimitives != nullptr ? gpuPrimitives->size() * sizeof(nri_scene::PrimitiveData) : 0;
 	const uint64_t materialSize = materials.size() * sizeof(nri_scene::MaterialData);
 	uint64_t vertexPayloadHash = 0;
 	uint64_t indexPayloadHash = 0;
@@ -25369,7 +25460,7 @@ bool NRIRenderer::UploadSceneBuffers(
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMs);
 		vertexPayloadHash = HashUploadPayloadBytes(geometry.vertices.data(), vertexSize);
 		indexPayloadHash = HashUploadPayloadBytes(geometry.indices.data(), indexSize);
-		primitivePayloadHash = HashUploadPayloadBytes(gpuPrimitives.data(), primitiveSize);
+		primitivePayloadHash = HashUploadPayloadBytes(gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize);
 		materialPayloadHash = HashUploadPayloadBytes(materials.data(), materialSize);
 	}
 
@@ -25486,7 +25577,7 @@ bool NRIRenderer::UploadSceneBuffers(
 	return
 		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents) &&
 		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents) &&
-		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, gpuPrimitives.data(), primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents) &&
 		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents);
 }
 

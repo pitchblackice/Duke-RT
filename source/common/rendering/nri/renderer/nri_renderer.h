@@ -425,6 +425,14 @@ public:
 		uint32_t sceneSelectBufferUploadPayloadHashIndexMisses = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashPrimitiveMisses = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashMaterialMisses = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheChecks = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheHits = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheMisses = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectInvalid = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectPrimitive = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectProvenance = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectVisibility = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectCount = 0;
 		uint64_t sceneSelectBufferUploadVertexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadIndexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadPrimitiveRequestedBytes = 0;
@@ -1243,6 +1251,16 @@ private:
 		uint32_t overwriteEventsLastFrame = 0;
 		uint64_t bytesUploadedLastFrame = 0;
 		uint64_t peakUsedBytes = 0;
+	};
+
+	struct SelectPrimitiveRewriteCache
+	{
+		bool valid = false;
+		uint64_t primitivePayloadHash = 0;
+		uint64_t primitiveProvenanceHash = 0;
+		uint64_t visibilityIdentityHash = 0;
+		uint64_t primitiveCount = 0;
+		std::vector<nri_scene::PrimitiveData> primitives;
 	};
 
 	struct SurfaceProbeResult
@@ -2562,6 +2580,7 @@ private:
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
+	SelectPrimitiveRewriteCache mSelectPrimitiveRewriteCache = {};
 	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};
 	std::vector<RuntimeMutationResidentUploadRange> mRuntimeMutationResidentGeometryUploadRanges;
 	std::vector<uint32_t> mResidentStaticBlasActiveChunkListIndices;
