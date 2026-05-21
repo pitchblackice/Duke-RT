@@ -9473,83 +9473,95 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			if (paletteReady && texturesReady && buffersReady && accelerationReady)
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectStateCommitMs);
-				mUsedDynamicSceneLastFrame = selectedSceneHasDynamicOverlay;
-				mGpuSceneHasDynamicOverlay = selectedSceneHasDynamicOverlay;
-				if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
 				{
-					mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)activeDynamicSceneView->opaqueSprites.size();
-					mDynamicSceneLastFrame.primitiveCount = (uint32_t)activeDynamicGeometry->primitives.size();
-					mDynamicSceneLastFrame.materialCount = (uint32_t)activeDynamicMaterials->materials.size();
-					mDynamicSceneLastFrame.modelCount = activeDynamicSceneView->stats.modelDrawItems;
-					mDynamicSceneLastFrame.unsupportedModelCount = activeDynamicSceneView->stats.unsupportedModelDrawItems;
+					ScopedPtPerfTimer stateFlagsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitFlagsMs);
+					mUsedDynamicSceneLastFrame = selectedSceneHasDynamicOverlay;
+					mGpuSceneHasDynamicOverlay = selectedSceneHasDynamicOverlay;
 				}
-				if (hasMirrorExtendedDynamicScene)
 				{
-					mDynamicSceneLastFrame.mirrorExtendedSurfaceCount = CountSceneViewSurfaces(mirrorExtendedDynamicSceneView);
-					mDynamicSceneLastFrame.mirrorExtendedPrimitiveCount = (uint32_t)mirrorExtendedDynamicGeometry.primitives.size();
-					mDynamicSceneLastFrame.mirrorExtendedMaterialCount = (uint32_t)mirrorExtendedDynamicMaterialBridge.materials.size();
-					mDynamicSceneLastFrame.mirrorExtendedModelCount = mirrorExtendedDynamicSceneView.stats.modelDrawItems;
-					mDynamicSceneLastFrame.mirrorExtendedUnsupportedModelCount = mirrorExtendedDynamicSceneView.stats.unsupportedModelDrawItems;
+					ScopedPtPerfTimer dynamicStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicStateMs);
+					if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
+					{
+						mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)activeDynamicSceneView->opaqueSprites.size();
+						mDynamicSceneLastFrame.primitiveCount = (uint32_t)activeDynamicGeometry->primitives.size();
+						mDynamicSceneLastFrame.materialCount = (uint32_t)activeDynamicMaterials->materials.size();
+						mDynamicSceneLastFrame.modelCount = activeDynamicSceneView->stats.modelDrawItems;
+						mDynamicSceneLastFrame.unsupportedModelCount = activeDynamicSceneView->stats.unsupportedModelDrawItems;
+					}
+					if (hasMirrorExtendedDynamicScene)
+					{
+						mDynamicSceneLastFrame.mirrorExtendedSurfaceCount = CountSceneViewSurfaces(mirrorExtendedDynamicSceneView);
+						mDynamicSceneLastFrame.mirrorExtendedPrimitiveCount = (uint32_t)mirrorExtendedDynamicGeometry.primitives.size();
+						mDynamicSceneLastFrame.mirrorExtendedMaterialCount = (uint32_t)mirrorExtendedDynamicMaterialBridge.materials.size();
+						mDynamicSceneLastFrame.mirrorExtendedModelCount = mirrorExtendedDynamicSceneView.stats.modelDrawItems;
+						mDynamicSceneLastFrame.mirrorExtendedUnsupportedModelCount = mirrorExtendedDynamicSceneView.stats.unsupportedModelDrawItems;
+					}
+					if (hasMirrorPlayerScene)
+					{
+						mDynamicSceneLastFrame.mirrorPlayerSurfaceCount = CountSceneViewSurfaces(mirrorPlayerSceneView);
+						mDynamicSceneLastFrame.mirrorPlayerPrimitiveCount = (uint32_t)mirrorPlayerGeometry.primitives.size();
+						mDynamicSceneLastFrame.mirrorPlayerMaterialCount = (uint32_t)mirrorPlayerMaterialBridge.materials.size();
+						mDynamicSceneLastFrame.mirrorPlayerModelCount = mirrorPlayerSceneView.stats.modelDrawItems;
+						mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount = mirrorPlayerSceneView.stats.unsupportedModelDrawItems;
+					}
 				}
-				if (hasMirrorPlayerScene)
 				{
-					mDynamicSceneLastFrame.mirrorPlayerSurfaceCount = CountSceneViewSurfaces(mirrorPlayerSceneView);
-					mDynamicSceneLastFrame.mirrorPlayerPrimitiveCount = (uint32_t)mirrorPlayerGeometry.primitives.size();
-					mDynamicSceneLastFrame.mirrorPlayerMaterialCount = (uint32_t)mirrorPlayerMaterialBridge.materials.size();
-					mDynamicSceneLastFrame.mirrorPlayerModelCount = mirrorPlayerSceneView.stats.modelDrawItems;
-					mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount = mirrorPlayerSceneView.stats.unsupportedModelDrawItems;
-				}
-				if (!overlayGeometry.primitives.empty())
-				{
-					combinedGeometry = mStaticMapScene.geometry;
-					activeStaticProbePrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
-					AppendGeometry(overlayGeometry, (uint32_t)mStaticMapScene.materialBridge.materials.size(), combinedGeometry);
-					activeGeometry = &combinedGeometry;
-					activeGpuMaterials = &combinedGpuMaterials;
-					activeMaterialBridge = &combinedMaterialBridge;
-				}
-				else
-				{
-					activeGeometry = &mStaticMapScene.geometry;
-					activeGpuMaterials = &mStaticMapScene.gpuMaterials;
-					activeMaterialBridge = &mStaticMapScene.materialBridge;
+					ScopedPtPerfTimer geometryStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStateMs);
+					if (!overlayGeometry.primitives.empty())
+					{
+						combinedGeometry = mStaticMapScene.geometry;
+						activeStaticProbePrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
+						AppendGeometry(overlayGeometry, (uint32_t)mStaticMapScene.materialBridge.materials.size(), combinedGeometry);
+						activeGeometry = &combinedGeometry;
+						activeGpuMaterials = &combinedGpuMaterials;
+						activeMaterialBridge = &combinedMaterialBridge;
+					}
+					else
+					{
+						activeGeometry = &mStaticMapScene.geometry;
+						activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+						activeMaterialBridge = &mStaticMapScene.materialBridge;
+					}
 				}
 
-				nri_scene::SceneDebugStats dynamicOverlayStats =
-					!deferOverlayThisFrame ? dynamicSceneView.stats : nri_scene::SceneDebugStats{};
-				if (activeDynamicSceneView != nullptr)
 				{
-					dynamicOverlayStats = activeDynamicSceneView->stats;
+					ScopedPtPerfTimer statsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMs);
+					nri_scene::SceneDebugStats dynamicOverlayStats =
+						!deferOverlayThisFrame ? dynamicSceneView.stats : nri_scene::SceneDebugStats{};
+					if (activeDynamicSceneView != nullptr)
+					{
+						dynamicOverlayStats = activeDynamicSceneView->stats;
+					}
+					if (hasPersistentVoxelOverlay)
+					{
+						nri_scene::SceneDebugStats persistentVoxelStats = mPersistentVoxelBatch.stats;
+						persistentVoxelStats.voxelStableCandidates = 0;
+						persistentVoxelStats.voxelStableUncacheable = 0;
+						persistentVoxelStats.voxelStableSignatureHits = 0;
+						persistentVoxelStats.voxelStableSignatureMisses = 0;
+						persistentVoxelStats.voxelStableSignatureChanges = 0;
+						persistentVoxelStats.voxelStableSplitStable = 0;
+						persistentVoxelStats.voxelStableSplitLive = 0;
+						persistentVoxelStats.voxelCacheEntries = 0;
+						persistentVoxelStats.voxelCacheSurfaceHits = 0;
+						persistentVoxelStats.voxelCacheSurfaceStores = 0;
+						persistentVoxelStats.voxelCacheSurfaceRebuilds = 0;
+						persistentVoxelStats.voxelCacheTransformRebakes = 0;
+						persistentVoxelStats.voxelCacheSurfaceRemoves = 0;
+						persistentVoxelStats.voxelCacheNotCaptured = 0;
+						persistentVoxelStats.voxelCachePrimitives = 0;
+						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, persistentVoxelStats);
+					}
+					if (hasMirrorExtendedDynamicScene)
+					{
+						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorExtendedDynamicSceneView.stats);
+					}
+					if (hasMirrorPlayerScene)
+					{
+						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorPlayerSceneView.stats);
+					}
+					activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
 				}
-				if (hasPersistentVoxelOverlay)
-				{
-					nri_scene::SceneDebugStats persistentVoxelStats = mPersistentVoxelBatch.stats;
-					persistentVoxelStats.voxelStableCandidates = 0;
-					persistentVoxelStats.voxelStableUncacheable = 0;
-					persistentVoxelStats.voxelStableSignatureHits = 0;
-					persistentVoxelStats.voxelStableSignatureMisses = 0;
-					persistentVoxelStats.voxelStableSignatureChanges = 0;
-					persistentVoxelStats.voxelStableSplitStable = 0;
-					persistentVoxelStats.voxelStableSplitLive = 0;
-					persistentVoxelStats.voxelCacheEntries = 0;
-					persistentVoxelStats.voxelCacheSurfaceHits = 0;
-					persistentVoxelStats.voxelCacheSurfaceStores = 0;
-					persistentVoxelStats.voxelCacheSurfaceRebuilds = 0;
-					persistentVoxelStats.voxelCacheTransformRebakes = 0;
-					persistentVoxelStats.voxelCacheSurfaceRemoves = 0;
-					persistentVoxelStats.voxelCacheNotCaptured = 0;
-					persistentVoxelStats.voxelCachePrimitives = 0;
-					dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, persistentVoxelStats);
-				}
-				if (hasMirrorExtendedDynamicScene)
-				{
-					dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorExtendedDynamicSceneView.stats);
-				}
-				if (hasMirrorPlayerScene)
-				{
-					dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorPlayerSceneView.stats);
-				}
-				activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
 			}
 			else
 			{
@@ -21778,30 +21790,64 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mLastPerfShellTraceStats.sceneDataSetCalls++;
 	SetCurrentSceneDataDescriptorsInitialized(false);
 	bool waitedForWrites = false;
-	const auto ensureStructuredBufferBatched = [&](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
+	const auto noteDataSetUpload = [&](const SceneBufferDebugStats& stats, uint64_t size, uint64_t& requestedBytes, uint64_t& uploadedBytes)
 	{
-		if (!waitedForWrites && StructuredBufferUpdateNeedsWait(resource, data, size, stride))
+		requestedBytes += size;
+		uploadedBytes += stats.bytesUploadedLastFrame;
+		mLastPerfShellTraceStats.sceneDataSetResourceGrowEvents += stats.growEventsLastFrame;
+		mLastPerfShellTraceStats.sceneDataSetResourceOverwriteEvents += stats.overwriteEventsLastFrame;
+	};
+	const auto ensureStructuredBufferBatched = [&](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, double& uploadMs, uint64_t& requestedBytes, uint64_t& uploadedBytes) -> bool
+	{
+		bool needsWait = false;
 		{
-			WaitForCommandsTracked("scene_data_upload");
+			ScopedPtPerfTimer waitCheckTimer(mLastPerfShellTraceStats.sceneDataSetWaitCheckMs);
+			needsWait = !waitedForWrites && StructuredBufferUpdateNeedsWait(resource, data, size, stride);
+		}
+		if (needsWait)
+		{
+			{
+				ScopedPtPerfTimer waitTimer(mLastPerfShellTraceStats.sceneDataSetWaitMs);
+				WaitForCommandsTracked("scene_data_upload");
+			}
+			mLastPerfShellTraceStats.sceneDataSetWaitCount++;
 			waitedForWrites = true;
 		}
 
-		return EnsureStructuredBuffer(resource, stats, data, size, stride, usage, after, waitedForWrites, "scene_data_upload");
+		bool updated = false;
+		{
+			ScopedPtPerfTimer uploadTimer(uploadMs);
+			updated = EnsureStructuredBuffer(resource, stats, data, size, stride, usage, after, waitedForWrites, "scene_data_upload");
+		}
+		if (updated)
+		{
+			noteDataSetUpload(stats, size, requestedBytes, uploadedBytes);
+		}
+		return updated;
 	};
 
-	if (!UpdateReprojectionBuffer(&waitedForWrites))
 	{
-		return false;
+		ScopedPtPerfTimer reprojectionTimer(mLastPerfShellTraceStats.sceneDataSetReprojectionMs);
+		if (!UpdateReprojectionBuffer(&waitedForWrites))
+		{
+			return false;
+		}
 	}
 
-	if (!UpdateVisibleFlatPlaneBuffer(&waitedForWrites))
 	{
-		return false;
+		ScopedPtPerfTimer visibleFlatTimer(mLastPerfShellTraceStats.sceneDataSetVisibleFlatPlaneMs);
+		if (!UpdateVisibleFlatPlaneBuffer(&waitedForWrites))
+		{
+			return false;
+		}
 	}
 
-	if (!UpdateVisibleChunkBuffer(&waitedForWrites))
 	{
-		return false;
+		ScopedPtPerfTimer visibleChunkTimer(mLastPerfShellTraceStats.sceneDataSetVisibleChunkMs);
+		if (!UpdateVisibleChunkBuffer(&waitedForWrites))
+		{
+			return false;
+		}
 	}
 
 	if (sceneInstances.empty())
@@ -21818,13 +21864,20 @@ bool NRIRenderer::UpdateSceneDataSet(
 		sceneInstances.size() * sizeof(SceneInstanceData),
 		sizeof(SceneInstanceData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+		NRIComputeShaderResourceAccess(),
+		mLastPerfShellTraceStats.sceneDataSetSceneInstanceMs,
+		mLastPerfShellTraceStats.sceneDataSetSceneInstanceRequestedBytes,
+		mLastPerfShellTraceStats.sceneDataSetSceneInstanceUploadedBytes))
 	{
 		return false;
 	}
 	mBoundSceneInstances = sceneInstances;
 
-	const std::vector<ScenePortalData> scenePortals = BuildScenePortalData(mMapWorld);
+	std::vector<ScenePortalData> scenePortals;
+	{
+		ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.sceneDataSetPortalMs);
+		scenePortals = BuildScenePortalData(mMapWorld);
+	}
 	if (!ensureStructuredBufferBatched(
 		mPortalBuffer,
 		mPortalBufferStats,
@@ -21832,19 +21885,30 @@ bool NRIRenderer::UpdateSceneDataSet(
 		scenePortals.size() * sizeof(ScenePortalData),
 		sizeof(ScenePortalData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+		NRIComputeShaderResourceAccess(),
+		mLastPerfShellTraceStats.sceneDataSetPortalMs,
+		mLastPerfShellTraceStats.sceneDataSetPortalRequestedBytes,
+		mLastPerfShellTraceStats.sceneDataSetPortalUploadedBytes))
 	{
 		return false;
 	}
 
-	const uint64_t runtimeLightPayloadHash = BuildRuntimeLightPayloadHash();
+	uint64_t runtimeLightPayloadHash = 0;
+	{
+		ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightHashMs);
+		runtimeLightPayloadHash = BuildRuntimeLightPayloadHash();
+	}
 	const uint32_t activeRuntimeLightCount = (uint32_t)mSceneLights.GetAnalyticLights().activeLights.size();
 	if (!mRuntimeLightPayloadCacheValid ||
 		mRuntimeLightPayloadHash != runtimeLightPayloadHash ||
 		mRuntimeLightBuffer.shaderView == nullptr)
 	{
+		mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploads++;
 		std::vector<RuntimePointLightGpuData> runtimeLights;
-		BuildRuntimePointLightUpload(runtimeLights);
+		{
+			ScopedPtPerfTimer runtimeLightTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploadMs);
+			BuildRuntimePointLightUpload(runtimeLights);
+		}
 		if (!ensureStructuredBufferBatched(
 			mRuntimeLightBuffer,
 			mRuntimeLightBufferStats,
@@ -21852,7 +21916,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 			runtimeLights.size() * sizeof(RuntimePointLightGpuData),
 			sizeof(RuntimePointLightGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploadMs,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploadedBytes))
 		{
 			return false;
 		}
@@ -21860,12 +21927,20 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mRuntimeLightPayloadCacheValid = true;
 		mRuntimeLightPayloadHash = runtimeLightPayloadHash;
 	}
+	else
+	{
+		mLastPerfShellTraceStats.sceneDataSetRuntimeLightCacheHits++;
+	}
 
 	uint32_t runtimeLightTileCountX = 0;
 	uint32_t runtimeLightTileCountY = 0;
 	uint32_t runtimeLightTileIndexCount = 0;
 	uint32_t runtimeLightMaxTileOccupancy = 0;
-	const uint64_t runtimeLightClusterCameraHash = BuildRuntimeLightClusterCameraHash();
+	uint64_t runtimeLightClusterCameraHash = 0;
+	{
+		ScopedPtPerfTimer runtimeLightClusterTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs);
+		runtimeLightClusterCameraHash = BuildRuntimeLightClusterCameraHash();
+	}
 	const uint64_t runtimeLightClusterPayloadHash =
 		HashCombine64(runtimeLightPayloadHash, runtimeLightClusterCameraHash);
 	if (!mRuntimeLightClusterCacheValid ||
@@ -21873,15 +21948,19 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mRuntimeLightTileHeaderBuffer.shaderView == nullptr ||
 		mRuntimeLightTileIndexBuffer.shaderView == nullptr)
 	{
+		mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploads++;
 		std::vector<RuntimeLightTileHeaderGpuData> runtimeLightTileHeaders;
 		std::vector<uint32_t> runtimeLightTileIndices;
-		BuildRuntimeLightClusterUpload(
-			runtimeLightTileHeaders,
-			runtimeLightTileIndices,
-			runtimeLightTileCountX,
-			runtimeLightTileCountY,
-			runtimeLightTileIndexCount,
-			runtimeLightMaxTileOccupancy);
+		{
+			ScopedPtPerfTimer runtimeLightClusterTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs);
+			BuildRuntimeLightClusterUpload(
+				runtimeLightTileHeaders,
+				runtimeLightTileIndices,
+				runtimeLightTileCountX,
+				runtimeLightTileCountY,
+				runtimeLightTileIndexCount,
+				runtimeLightMaxTileOccupancy);
+		}
 		if (!ensureStructuredBufferBatched(
 			mRuntimeLightTileHeaderBuffer,
 			mRuntimeLightTileHeaderBufferStats,
@@ -21889,7 +21968,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 			runtimeLightTileHeaders.size() * sizeof(RuntimeLightTileHeaderGpuData),
 			sizeof(RuntimeLightTileHeaderGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploadedBytes))
 		{
 			return false;
 		}
@@ -21901,7 +21983,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 			runtimeLightTileIndices.size() * sizeof(uint32_t),
 			sizeof(uint32_t),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploadedBytes))
 		{
 			return false;
 		}
@@ -21916,6 +22001,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		runtimeLightTileCountY = mBoundRuntimeLightTileCountY;
 		runtimeLightTileIndexCount = mBoundRuntimeLightTileIndexCount;
 		runtimeLightMaxTileOccupancy = mBoundRuntimeLightMaxTileOccupancy;
+		mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterCacheHits++;
 	}
 
 	if (!mEmissiveSamplingPayloadCacheValid ||
@@ -21923,11 +22009,15 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mEmissivePrimitiveBuffer.shaderView == nullptr ||
 		mEmissivePrimitiveCdfBuffer.shaderView == nullptr)
 	{
+		mLastPerfShellTraceStats.sceneDataSetEmissiveUploads++;
 		EmissivePrimitiveHeaderGpuData emissiveHeader = {};
 		std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
 		std::vector<float> emissiveCdf;
 		std::vector<EmissivePrimitiveDebugRecord> ignoredEmissiveDebugRecords;
-		BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, ignoredEmissiveDebugRecords);
+		{
+			ScopedPtPerfTimer emissiveTimer(mLastPerfShellTraceStats.sceneDataSetEmissiveMs);
+			BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, ignoredEmissiveDebugRecords);
+		}
 		if (!ensureStructuredBufferBatched(
 			mEmissivePrimitiveHeaderBuffer,
 			mEmissivePrimitiveHeaderBufferStats,
@@ -21935,7 +22025,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 			sizeof(emissiveHeader),
 			sizeof(EmissivePrimitiveHeaderGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
 		{
 			return false;
 		}
@@ -21947,7 +22040,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 			emissivePrimitives.empty() ? 0u : emissivePrimitives.size() * sizeof(EmissivePrimitiveGpuData),
 			sizeof(EmissivePrimitiveGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
 		{
 			return false;
 		}
@@ -21959,22 +22055,37 @@ bool NRIRenderer::UpdateSceneDataSet(
 			emissiveCdf.size() * sizeof(float),
 			sizeof(float),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
 		{
 			return false;
 		}
 	}
+	else
+	{
+		mLastPerfShellTraceStats.sceneDataSetEmissiveCacheHits++;
+	}
 
-	UpdateBoundSectorLightingState();
-	const uint64_t sectorLightingPayloadHash = BuildSectorLightingPayloadHash();
+	uint64_t sectorLightingPayloadHash = 0;
+	{
+		ScopedPtPerfTimer sectorLightTimer(mLastPerfShellTraceStats.sceneDataSetSectorLightMs);
+		UpdateBoundSectorLightingState();
+		sectorLightingPayloadHash = BuildSectorLightingPayloadHash();
+	}
 	if (!mSectorLightingPayloadCacheValid ||
 		mSectorLightingPayloadHash != sectorLightingPayloadHash ||
 		mSectorLightHeaderBuffer.shaderView == nullptr ||
 		mSectorLightBuffer.shaderView == nullptr)
 	{
+		mLastPerfShellTraceStats.sceneDataSetSectorLightUploads++;
 		SectorLightHeaderGpuData sectorLightHeader = {};
 		std::vector<SectorLightGpuData> sectorLights;
-		BuildSectorLightingUpload(sectorLightHeader, sectorLights);
+		{
+			ScopedPtPerfTimer sectorLightTimer(mLastPerfShellTraceStats.sceneDataSetSectorLightMs);
+			BuildSectorLightingUpload(sectorLightHeader, sectorLights);
+		}
 		if (!ensureStructuredBufferBatched(
 			mSectorLightHeaderBuffer,
 			mSectorLightHeaderBufferStats,
@@ -21982,7 +22093,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 			sizeof(sectorLightHeader),
 			sizeof(SectorLightHeaderGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetSectorLightMs,
+			mLastPerfShellTraceStats.sceneDataSetSectorLightRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetSectorLightUploadedBytes))
 		{
 			return false;
 		}
@@ -21994,7 +22108,10 @@ bool NRIRenderer::UpdateSceneDataSet(
 			sectorLights.empty() ? 0u : sectorLights.size() * sizeof(SectorLightGpuData),
 			sizeof(SectorLightGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetSectorLightMs,
+			mLastPerfShellTraceStats.sceneDataSetSectorLightRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetSectorLightUploadedBytes))
 		{
 			return false;
 		}
@@ -22002,44 +22119,55 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mSectorLightingPayloadCacheValid = true;
 		mSectorLightingPayloadHash = sectorLightingPayloadHash;
 	}
+	else
+	{
+		mLastPerfShellTraceStats.sceneDataSetSectorLightCacheHits++;
+	}
 
 	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
 	{
 		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
 	};
 
-	mSceneDataDescriptors.fill(nullptr);
-	mSceneDataDescriptors[0] = selectView(staticVertexBuffer, dynamicVertexBuffer);
-	mSceneDataDescriptors[1] = selectView(staticIndexBuffer, dynamicIndexBuffer);
-	mSceneDataDescriptors[2] = selectView(staticPrimitiveBuffer, dynamicPrimitiveBuffer);
-	mSceneDataDescriptors[3] = selectView(staticMaterialBuffer, dynamicMaterialBuffer);
-	mSceneDataDescriptors[4] = selectView(dynamicVertexBuffer, staticVertexBuffer);
-	mSceneDataDescriptors[5] = selectView(dynamicIndexBuffer, staticIndexBuffer);
-	mSceneDataDescriptors[6] = selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer);
-	mSceneDataDescriptors[7] = selectView(dynamicMaterialBuffer, staticMaterialBuffer);
-	mSceneDataDescriptors[8] = mSceneInstanceBuffer.shaderView;
-	mSceneDataDescriptors[9] = mPortalBuffer.shaderView;
-	mSceneDataDescriptors[10] = mRuntimeLightBuffer.shaderView;
-	mSceneDataDescriptors[11] = mRuntimeLightTileHeaderBuffer.shaderView;
-	mSceneDataDescriptors[12] = mRuntimeLightTileIndexBuffer.shaderView;
-	mSceneDataDescriptors[13] = mEmissivePrimitiveHeaderBuffer.shaderView;
-	mSceneDataDescriptors[14] = mEmissivePrimitiveBuffer.shaderView;
-	mSceneDataDescriptors[15] = mEmissivePrimitiveCdfBuffer.shaderView;
-	mSceneDataDescriptors[16] = mSectorLightHeaderBuffer.shaderView;
-	mSceneDataDescriptors[17] = mSectorLightBuffer.shaderView;
-	mSceneDataDescriptors[18] = mReprojectionBuffer.shaderView;
-	mSceneDataDescriptors[19] = mVisibleChunkBuffer.shaderView;
-	mSceneDataDescriptors[20] = mVisibleFlatPlaneBuffer.shaderView;
-	mSceneDataDescriptors[21] = selectView(mPersistentVoxelVertexBuffer, dynamicVertexBuffer);
-	mSceneDataDescriptors[22] = selectView(mPersistentVoxelIndexBuffer, dynamicIndexBuffer);
-	mSceneDataDescriptors[23] = selectView(mPersistentVoxelPrimitiveBuffer, dynamicPrimitiveBuffer);
-	mSceneDataDescriptors[24] = selectView(mPersistentVoxelMaterialBuffer, dynamicMaterialBuffer);
-
-	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 	{
-		if (descriptor == nullptr)
+		ScopedPtPerfTimer descriptorBuildTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorBuildMs);
+		mSceneDataDescriptors.fill(nullptr);
+		mSceneDataDescriptors[0] = selectView(staticVertexBuffer, dynamicVertexBuffer);
+		mSceneDataDescriptors[1] = selectView(staticIndexBuffer, dynamicIndexBuffer);
+		mSceneDataDescriptors[2] = selectView(staticPrimitiveBuffer, dynamicPrimitiveBuffer);
+		mSceneDataDescriptors[3] = selectView(staticMaterialBuffer, dynamicMaterialBuffer);
+		mSceneDataDescriptors[4] = selectView(dynamicVertexBuffer, staticVertexBuffer);
+		mSceneDataDescriptors[5] = selectView(dynamicIndexBuffer, staticIndexBuffer);
+		mSceneDataDescriptors[6] = selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer);
+		mSceneDataDescriptors[7] = selectView(dynamicMaterialBuffer, staticMaterialBuffer);
+		mSceneDataDescriptors[8] = mSceneInstanceBuffer.shaderView;
+		mSceneDataDescriptors[9] = mPortalBuffer.shaderView;
+		mSceneDataDescriptors[10] = mRuntimeLightBuffer.shaderView;
+		mSceneDataDescriptors[11] = mRuntimeLightTileHeaderBuffer.shaderView;
+		mSceneDataDescriptors[12] = mRuntimeLightTileIndexBuffer.shaderView;
+		mSceneDataDescriptors[13] = mEmissivePrimitiveHeaderBuffer.shaderView;
+		mSceneDataDescriptors[14] = mEmissivePrimitiveBuffer.shaderView;
+		mSceneDataDescriptors[15] = mEmissivePrimitiveCdfBuffer.shaderView;
+		mSceneDataDescriptors[16] = mSectorLightHeaderBuffer.shaderView;
+		mSceneDataDescriptors[17] = mSectorLightBuffer.shaderView;
+		mSceneDataDescriptors[18] = mReprojectionBuffer.shaderView;
+		mSceneDataDescriptors[19] = mVisibleChunkBuffer.shaderView;
+		mSceneDataDescriptors[20] = mVisibleFlatPlaneBuffer.shaderView;
+		mSceneDataDescriptors[21] = selectView(mPersistentVoxelVertexBuffer, dynamicVertexBuffer);
+		mSceneDataDescriptors[22] = selectView(mPersistentVoxelIndexBuffer, dynamicIndexBuffer);
+		mSceneDataDescriptors[23] = selectView(mPersistentVoxelPrimitiveBuffer, dynamicPrimitiveBuffer);
+		mSceneDataDescriptors[24] = selectView(mPersistentVoxelMaterialBuffer, dynamicMaterialBuffer);
+	}
+
+	{
+		ScopedPtPerfTimer descriptorValidateTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorValidateMs);
+		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 		{
-			return false;
+			if (descriptor == nullptr)
+			{
+				mLastPerfShellTraceStats.sceneDataSetDescriptorNullCount++;
+				return false;
+			}
 		}
 	}
 
@@ -22066,11 +22194,15 @@ bool NRIRenderer::UpdateSceneDataSet(
 
 bool NRIRenderer::CommitSceneDataDescriptors(const char* reason)
 {
-	for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 	{
-		if (descriptor == nullptr)
+		ScopedPtPerfTimer descriptorValidateTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorValidateMs);
+		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
 		{
-			return false;
+			if (descriptor == nullptr)
+			{
+				mLastPerfShellTraceStats.sceneDataSetDescriptorNullCount++;
+				return false;
+			}
 		}
 	}
 
@@ -22085,14 +22217,21 @@ bool NRIRenderer::CommitSceneDataDescriptors(const char* reason)
 	update.rangeIndex = 0;
 	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
 	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	{
+		ScopedPtPerfTimer descriptorUpdateTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorUpdateMs);
+		mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	}
+	mLastPerfShellTraceStats.sceneDataSetDescriptorUpdateCount++;
 	SetCurrentSceneDataDescriptorsInitialized(true);
-	TraceSharedDescriptorRewrite(
-		"scene_data",
-		reason != nullptr ? reason : "unlabeled",
-		HashDescriptorList(reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data()), mSceneDataDescriptors.size()),
-		NRI_SCENE_DATA_DESCRIPTOR_NUM,
-		false);
+	{
+		ScopedPtPerfTimer descriptorHashTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorHashMs);
+		TraceSharedDescriptorRewrite(
+			"scene_data",
+			reason != nullptr ? reason : "unlabeled",
+			HashDescriptorList(reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data()), mSceneDataDescriptors.size()),
+			NRI_SCENE_DATA_DESCRIPTOR_NUM,
+			false);
+	}
 	return true;
 }
 
