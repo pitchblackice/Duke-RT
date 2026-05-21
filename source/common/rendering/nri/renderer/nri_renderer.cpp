@@ -154,6 +154,13 @@ CVAR(Bool, nri_ptruntimedeferfarstructural, true, 0)
 CVAR(Int, nri_ptruntimefarstructuralbudget, 2, 0)
 CVAR(Bool, nri_ptruntimedefernearinvisiblestructural, true, 0)
 CVAR(Int, nri_ptruntimenearinvisiblestructuralbudget, 2, 0)
+CUSTOM_CVAR(Int, nri_ptscenebufferdirtyrangegap, 256, 0)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+}
 CUSTOM_CVAR(Float, nri_ptruntimemutationneardistance, 1024.0f, 0)
 {
 	if (self < 0.0f)
@@ -1584,6 +1591,11 @@ public:
 	}
 
 	static bool ShouldTraceResidentGeometryOrderHash()
+	{
+		return (int)perf_looptraceframes > 0;
+	}
+
+	static bool ShouldTraceSceneBufferDirtyRanges()
 	{
 		return (int)perf_looptraceframes > 0;
 	}
@@ -25528,9 +25540,141 @@ bool NRIRenderer::UploadSceneBuffers(
 		bufferMissCount++;
 		return false;
 	};
+	struct SceneUploadDirtyRangeStats
+	{
+		uint32_t rawRanges = 0;
+		uint32_t coalescedRanges = 0;
+		uint32_t rejectedCoalesces = 0;
+		uint64_t changedBytes = 0;
+		uint64_t uploadedBytes = 0;
+		uint64_t gapBytes = 0;
+	};
+	const auto noteDirtyRanges =
+		[&](const std::vector<uint8_t>& mirror,
+			const void* bufferData,
+			uint64_t bufferSize,
+			bool skipUpload,
+			bool forceFullDirty) -> SceneUploadDirtyRangeStats
+	{
+		SceneUploadDirtyRangeStats result = {};
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeChecks++;
+		if (skipUpload)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeSkips++;
+			return result;
+		}
+		if (bufferSize == 0)
+		{
+			return result;
+		}
+		if (forceFullDirty || bufferData == nullptr || mirror.empty() || mirror.size() != bufferSize)
+		{
+			if (forceFullDirty || bufferData == nullptr)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeForcedFull++;
+			}
+			if (mirror.empty())
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeMissingMirror++;
+			}
+			else if (mirror.size() != bufferSize)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeSizeMismatch++;
+			}
+			result.rawRanges = 1;
+			result.coalescedRanges = 1;
+			result.changedBytes = bufferSize;
+			result.uploadedBytes = bufferSize;
+			return result;
+		}
+
+		const uint64_t maxGapBytes = (uint64_t)(int)nri_ptscenebufferdirtyrangegap;
+		const uint8_t* current = static_cast<const uint8_t*>(bufferData);
+		const uint8_t* previous = mirror.data();
+		const size_t byteCount = (size_t)bufferSize;
+		bool hasCoalescedRange = false;
+		size_t coalescedStart = 0;
+		size_t coalescedEnd = 0;
+		size_t cursor = 0;
+		while (cursor < byteCount)
+		{
+			while (cursor < byteCount && current[cursor] == previous[cursor])
+			{
+				cursor++;
+			}
+			if (cursor >= byteCount)
+			{
+				break;
+			}
+			const size_t rangeStart = cursor;
+			while (cursor < byteCount && current[cursor] != previous[cursor])
+			{
+				cursor++;
+			}
+			const size_t rangeEnd = cursor;
+			result.rawRanges++;
+			result.changedBytes += (uint64_t)(rangeEnd - rangeStart);
+			if (!hasCoalescedRange)
+			{
+				hasCoalescedRange = true;
+				coalescedStart = rangeStart;
+				coalescedEnd = rangeEnd;
+				result.coalescedRanges = 1;
+				continue;
+			}
+
+			const uint64_t gapBytes = (uint64_t)(rangeStart - coalescedEnd);
+			if (gapBytes <= maxGapBytes)
+			{
+				result.gapBytes += gapBytes;
+				coalescedEnd = rangeEnd;
+			}
+			else
+			{
+				result.uploadedBytes += (uint64_t)(coalescedEnd - coalescedStart);
+				result.rejectedCoalesces++;
+				result.coalescedRanges++;
+				coalescedStart = rangeStart;
+				coalescedEnd = rangeEnd;
+			}
+		}
+		if (hasCoalescedRange)
+		{
+			result.uploadedBytes += (uint64_t)(coalescedEnd - coalescedStart);
+		}
+		return result;
+	};
+	const auto addDirtyRangeStats =
+		[&](const SceneUploadDirtyRangeStats& dirtyStats,
+			uint32_t& bufferRangeCount,
+			uint64_t& bufferChangedBytes,
+			uint64_t& bufferUploadedBytes)
+	{
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeRawRanges += dirtyStats.rawRanges;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeCoalescedRanges += dirtyStats.coalescedRanges;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeRejectedCoalesces += dirtyStats.rejectedCoalesces;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeChangedBytes += dirtyStats.changedBytes;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeUploadedBytes += dirtyStats.uploadedBytes;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeGapBytes += dirtyStats.gapBytes;
+		bufferRangeCount = dirtyStats.coalescedRanges;
+		bufferChangedBytes = dirtyStats.changedBytes;
+		bufferUploadedBytes = dirtyStats.uploadedBytes;
+	};
+	const auto updatePayloadMirror =
+		[](std::vector<uint8_t>& mirror, const void* bufferData, uint64_t bufferSize)
+	{
+		if (bufferData == nullptr || bufferSize == 0)
+		{
+			mirror.clear();
+			return;
+		}
+		const uint8_t* bytes = static_cast<const uint8_t*>(bufferData);
+		mirror.assign(bytes, bytes + (size_t)bufferSize);
+	};
 	const auto ensureStructuredBufferBatched =
 		[&](NRIBufferResource& resource,
 			SceneBufferDebugStats& stats,
+			std::vector<uint8_t>& payloadMirror,
 			const void* bufferData,
 			uint64_t bufferSize,
 			uint32_t bufferStride,
@@ -25541,8 +25685,34 @@ bool NRIRenderer::UploadSceneBuffers(
 			double& uploadMs,
 			uint64_t& uploadedBytes,
 			uint32_t& growEvents,
-			uint32_t& overwriteEvents) -> bool
+			uint32_t& overwriteEvents,
+			uint32_t& dirtyRanges,
+			uint64_t& dirtyChangedBytes,
+			uint64_t& dirtyUploadedBytes) -> bool
 	{
+		const uint64_t requiredSize = std::max<uint64_t>(bufferSize, bufferStride);
+		const bool forceFullDirty =
+			resource.buffer == nullptr ||
+			resource.shaderView == nullptr ||
+			resource.payloadHash == 0 ||
+			resource.size < requiredSize ||
+			resource.usedSize != bufferSize ||
+			resource.payloadSize != bufferSize ||
+			resource.stride != bufferStride ||
+			resource.payloadStride != bufferStride;
+		const bool traceDirtyRanges = ShouldTraceSceneBufferDirtyRanges();
+		if (!traceDirtyRanges)
+		{
+			dirtyRanges = 0;
+			dirtyChangedBytes = 0;
+			dirtyUploadedBytes = 0;
+		}
+		else
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeMs);
+			addDirtyRangeStats(noteDirtyRanges(payloadMirror, bufferData, bufferSize, skipUpload, forceFullDirty), dirtyRanges, dirtyChangedBytes, dirtyUploadedBytes);
+		}
+
 		if (skipUpload)
 		{
 			resource.usedSize = bufferSize;
@@ -25579,6 +25749,7 @@ bool NRIRenderer::UploadSceneBuffers(
 			resource.payloadHash = payloadHash;
 			resource.payloadSize = bufferSize;
 			resource.payloadStride = bufferStride;
+			updatePayloadMirror(payloadMirror, bufferData, bufferSize);
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashUploads++;
 		}
 		return result;
@@ -25590,10 +25761,10 @@ bool NRIRenderer::UploadSceneBuffers(
 	const bool skipMaterialUpload = notePayloadHashState(materialBuffer, materialPayloadHash, materialSize, sizeof(nri_scene::MaterialData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialMisses);
 
 	return
-		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents) &&
-		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents) &&
-		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents) &&
-		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents);
+		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, mSceneUploadVertexMirror, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes) &&
+		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, mSceneUploadIndexMirror, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, mSceneUploadPrimitiveMirror, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes) &&
+		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, mSceneUploadMaterialMirror, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes);
 }
 
 bool NRIRenderer::BuildStaticMapAccelerationStructures()
