@@ -2581,6 +2581,15 @@ private:
 	NRIBufferResource mTopLevelScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
 	SelectPrimitiveRewriteCache mSelectPrimitiveRewriteCache = {};
+	std::vector<nri_scene::MaterialData> mSelectCapturedGpuMaterialScratch;
+	std::vector<nri_scene::MaterialData> mSelectDynamicGpuMaterialScratch;
+	std::vector<nri_scene::MaterialData> mSelectPersistentVoxelGpuMaterialScratch;
+	std::vector<nri_scene::MaterialData> mSelectCombinedGpuMaterialScratch;
+	std::vector<nri_scene::MaterialData> mSelectRefreshedCombinedGpuMaterialScratch;
+	std::vector<nri::TopLevelInstance> mSelectTopLevelInstanceScratch;
+	std::vector<SceneInstanceData> mSelectSceneInstanceScratch;
+	std::vector<nri::TopLevelInstance> mSelectCapturedTopLevelInstanceScratch;
+	std::vector<SceneInstanceData> mSelectCapturedSceneInstanceScratch;
 	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};
 	std::vector<RuntimeMutationResidentUploadRange> mRuntimeMutationResidentGeometryUploadRanges;
 	std::vector<uint32_t> mResidentStaticBlasActiveChunkListIndices;

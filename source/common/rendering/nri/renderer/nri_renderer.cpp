@@ -8346,10 +8346,20 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::MaterialBridgeData debugSphereMaterialBridge;
 	nri_scene::MaterialBridgeData overlayMaterialBridge;
 	nri_scene::MaterialBridgeData combinedMaterialBridge;
-	std::vector<nri_scene::MaterialData> capturedGpuMaterials;
-	std::vector<nri_scene::MaterialData> dynamicGpuMaterials;
-	std::vector<nri_scene::MaterialData> persistentVoxelGpuMaterials;
-	std::vector<nri_scene::MaterialData> combinedGpuMaterials;
+	auto& capturedGpuMaterials = mSelectCapturedGpuMaterialScratch;
+	auto& dynamicGpuMaterials = mSelectDynamicGpuMaterialScratch;
+	auto& persistentVoxelGpuMaterials = mSelectPersistentVoxelGpuMaterialScratch;
+	auto& combinedGpuMaterials = mSelectCombinedGpuMaterialScratch;
+	auto& refreshedCombinedGpuMaterials = mSelectRefreshedCombinedGpuMaterialScratch;
+	capturedGpuMaterials.clear();
+	dynamicGpuMaterials.clear();
+	persistentVoxelGpuMaterials.clear();
+	combinedGpuMaterials.clear();
+	refreshedCombinedGpuMaterials.clear();
+	mSelectTopLevelInstanceScratch.clear();
+	mSelectSceneInstanceScratch.clear();
+	mSelectCapturedTopLevelInstanceScratch.clear();
+	mSelectCapturedSceneInstanceScratch.clear();
 	const nri_scene::SceneView* activeSceneView = nullptr;
 	const nri_scene::GeometryData* activeGeometry = nullptr;
 	const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
@@ -8821,8 +8831,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			mLastPerfShellTraceStats.overlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
 			mLastPerfShellTraceStats.overlayMaterialCount = (uint32_t)overlayMaterialBridge.materials.size();
 
-			std::vector<nri::TopLevelInstance> instances;
-			std::vector<SceneInstanceData> sceneInstances;
+			auto& instances = mSelectTopLevelInstanceScratch;
+			auto& sceneInstances = mSelectSceneInstanceScratch;
+			instances.clear();
+			sceneInstances.clear();
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectStaticInstancesMs);
 				BuildStaticMapInstances(instances, sceneInstances);
@@ -9727,7 +9739,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 
 		buffersReady = texturesReady && UploadSceneBuffers(capturedGeometry, capturedGpuMaterials);
-		std::vector<SceneInstanceData> sceneInstances;
+		auto& sceneInstances = mSelectCapturedSceneInstanceScratch;
+		sceneInstances.clear();
 		if (buffersReady)
 		{
 			sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
@@ -9772,7 +9785,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 				instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
 
-				std::vector<nri::TopLevelInstance> instances = { instance };
+				auto& instances = mSelectCapturedTopLevelInstanceScratch;
+				instances.clear();
+				instances.push_back(instance);
 				accelerationReady = BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Dynamic);
 			}
 		}
@@ -9808,7 +9823,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		activeMaterialBridge == &combinedMaterialBridge &&
 		!overlayGeometry.primitives.empty())
 	{
-		std::vector<nri_scene::MaterialData> refreshedCombinedGpuMaterials = combinedMaterialBridge.materials;
+		refreshedCombinedGpuMaterials = combinedMaterialBridge.materials;
 		ApplyEmissiveMaterialOverrides(combinedMaterialBridge, refreshedCombinedGpuMaterials);
 		ApplyActorShadowMaterialOverrides(combinedMaterialBridge, refreshedCombinedGpuMaterials);
 		if (!MaterialDataVectorEqual(refreshedCombinedGpuMaterials, combinedGpuMaterials))
@@ -9824,7 +9839,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				return false;
 			}
 
-			combinedGpuMaterials = std::move(refreshedCombinedGpuMaterials);
+			combinedGpuMaterials.swap(refreshedCombinedGpuMaterials);
 			dynamicGpuMaterials.assign(combinedGpuMaterials.begin() + staticMaterialCount, combinedGpuMaterials.end());
 			if (!UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) ||
 				!UpdateSceneDataSet(
