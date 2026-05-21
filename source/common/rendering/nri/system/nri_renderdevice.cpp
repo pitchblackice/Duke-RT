@@ -3997,7 +3997,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.sceneSelectBufferUploadPersistentVoxelMaterialUploadedBytes,
 			shell.sceneSelectBufferUploadPersistentVoxelMaterialUploads);
 		Printf(
-			"PERF pt scene buffer dirty range detail NRI: frame=%llu dirty_range=%.3f dirty_checks=%u dirty_skips=%u dirty_forced_full=%u dirty_missing_mirror=%u dirty_size_mismatch=%u dirty_raw_ranges=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu dirty_gap=%llu dirty_reject_coalesce=%u vertex_dirty_ranges=%u vertex_dirty_changed=%llu vertex_dirty_uploaded=%llu index_dirty_ranges=%u index_dirty_changed=%llu index_dirty_uploaded=%llu primitive_dirty_ranges=%u primitive_dirty_changed=%llu primitive_dirty_uploaded=%llu material_dirty_ranges=%u material_dirty_changed=%llu material_dirty_uploaded=%llu\n",
+			"PERF pt scene buffer dirty range detail NRI: frame=%llu dirty_range=%.3f dirty_checks=%u dirty_skips=%u dirty_forced_full=%u dirty_missing_mirror=%u dirty_size_mismatch=%u dirty_raw_ranges=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu dirty_gap=%llu dirty_reject_coalesce=%u range_uploads=%u range_upload_bytes=%llu range_fallbacks=%u range_fallback_fragmented=%u range_fallback_large=%u primitive_range_uploads=%u material_range_uploads=%u vertex_dirty_ranges=%u vertex_dirty_changed=%llu vertex_dirty_uploaded=%llu index_dirty_ranges=%u index_dirty_changed=%llu index_dirty_uploaded=%llu primitive_dirty_ranges=%u primitive_dirty_changed=%llu primitive_dirty_uploaded=%llu material_dirty_ranges=%u material_dirty_changed=%llu material_dirty_uploaded=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectBufferUploadDirtyRangeMs,
 			shell.sceneSelectBufferUploadDirtyRangeChecks,
@@ -4011,6 +4011,13 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.sceneSelectBufferUploadDirtyRangeUploadedBytes,
 			(unsigned long long)shell.sceneSelectBufferUploadDirtyRangeGapBytes,
 			shell.sceneSelectBufferUploadDirtyRangeRejectedCoalesces,
+			shell.sceneSelectBufferUploadRangeUploads,
+			(unsigned long long)shell.sceneSelectBufferUploadRangeUploadedBytes,
+			shell.sceneSelectBufferUploadRangeFallbacks,
+			shell.sceneSelectBufferUploadRangeFallbackFragmented,
+			shell.sceneSelectBufferUploadRangeFallbackLarge,
+			shell.sceneSelectBufferUploadPrimitiveRangeUploads,
+			shell.sceneSelectBufferUploadMaterialRangeUploads,
 			shell.sceneSelectBufferUploadVertexDirtyRanges,
 			(unsigned long long)shell.sceneSelectBufferUploadVertexDirtyChangedBytes,
 			(unsigned long long)shell.sceneSelectBufferUploadVertexDirtyUploadedBytes,

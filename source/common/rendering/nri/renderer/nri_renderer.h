@@ -438,6 +438,12 @@ public:
 		uint32_t sceneSelectBufferUploadIndexDirtyRanges = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveDirtyRanges = 0;
 		uint32_t sceneSelectBufferUploadMaterialDirtyRanges = 0;
+		uint32_t sceneSelectBufferUploadRangeUploads = 0;
+		uint32_t sceneSelectBufferUploadRangeFallbacks = 0;
+		uint32_t sceneSelectBufferUploadRangeFallbackFragmented = 0;
+		uint32_t sceneSelectBufferUploadRangeFallbackLarge = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRangeUploads = 0;
+		uint32_t sceneSelectBufferUploadMaterialRangeUploads = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheChecks = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheHits = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheMisses = 0;
@@ -467,6 +473,7 @@ public:
 		uint64_t sceneSelectBufferUploadIndexDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadPrimitiveDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadMaterialDirtyUploadedBytes = 0;
+		uint64_t sceneSelectBufferUploadRangeUploadedBytes = 0;
 		double sceneSelectInstanceHandlesMs = 0.0;
 		double sceneSelectTexturePrepMs = 0.0;
 		double sceneSelectStateCommitMs = 0.0;
@@ -1285,6 +1292,12 @@ private:
 		uint64_t visibilityIdentityHash = 0;
 		uint64_t primitiveCount = 0;
 		std::vector<nri_scene::PrimitiveData> primitives;
+	};
+
+	struct SceneUploadDirtyRange
+	{
+		uint64_t byteOffset = 0;
+		uint64_t size = 0;
 	};
 
 	struct SurfaceProbeResult
@@ -2618,6 +2631,8 @@ private:
 	std::vector<uint8_t> mSceneUploadIndexMirror;
 	std::vector<uint8_t> mSceneUploadPrimitiveMirror;
 	std::vector<uint8_t> mSceneUploadMaterialMirror;
+	std::vector<SceneUploadDirtyRange> mSceneUploadPrimitiveDirtyRangeScratch;
+	std::vector<SceneUploadDirtyRange> mSceneUploadMaterialDirtyRangeScratch;
 	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};
 	std::vector<RuntimeMutationResidentUploadRange> mRuntimeMutationResidentGeometryUploadRanges;
 	std::vector<uint32_t> mResidentStaticBlasActiveChunkListIndices;

@@ -161,6 +161,24 @@ CUSTOM_CVAR(Int, nri_ptscenebufferdirtyrangegap, 256, 0)
 		self = 0;
 	}
 }
+CUSTOM_CVAR(Int, nri_ptscenebufferrangeuploadmaxranges, 256, 0)
+{
+	if (self < 1)
+	{
+		self = 1;
+	}
+}
+CUSTOM_CVAR(Int, nri_ptscenebufferrangeuploadmaxpercent, 75, 0)
+{
+	if (self < 1)
+	{
+		self = 1;
+	}
+	else if (self > 100)
+	{
+		self = 100;
+	}
+}
 CUSTOM_CVAR(Float, nri_ptruntimemutationneardistance, 1024.0f, 0)
 {
 	if (self < 0.0f)
@@ -25554,8 +25572,13 @@ bool NRIRenderer::UploadSceneBuffers(
 			const void* bufferData,
 			uint64_t bufferSize,
 			bool skipUpload,
-			bool forceFullDirty) -> SceneUploadDirtyRangeStats
+			bool forceFullDirty,
+			std::vector<SceneUploadDirtyRange>* outRanges) -> SceneUploadDirtyRangeStats
 	{
+		if (outRanges != nullptr)
+		{
+			outRanges->clear();
+		}
 		SceneUploadDirtyRangeStats result = {};
 		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeChecks++;
 		if (skipUpload)
@@ -25585,6 +25608,10 @@ bool NRIRenderer::UploadSceneBuffers(
 			result.coalescedRanges = 1;
 			result.changedBytes = bufferSize;
 			result.uploadedBytes = bufferSize;
+			if (outRanges != nullptr)
+			{
+				outRanges->push_back({ 0, bufferSize });
+			}
 			return result;
 		}
 
@@ -25632,6 +25659,10 @@ bool NRIRenderer::UploadSceneBuffers(
 			else
 			{
 				result.uploadedBytes += (uint64_t)(coalescedEnd - coalescedStart);
+				if (outRanges != nullptr)
+				{
+					outRanges->push_back({ (uint64_t)coalescedStart, (uint64_t)(coalescedEnd - coalescedStart) });
+				}
 				result.rejectedCoalesces++;
 				result.coalescedRanges++;
 				coalescedStart = rangeStart;
@@ -25641,6 +25672,10 @@ bool NRIRenderer::UploadSceneBuffers(
 		if (hasCoalescedRange)
 		{
 			result.uploadedBytes += (uint64_t)(coalescedEnd - coalescedStart);
+			if (outRanges != nullptr)
+			{
+				outRanges->push_back({ (uint64_t)coalescedStart, (uint64_t)(coalescedEnd - coalescedStart) });
+			}
 		}
 		return result;
 	};
@@ -25671,7 +25706,23 @@ bool NRIRenderer::UploadSceneBuffers(
 		const uint8_t* bytes = static_cast<const uint8_t*>(bufferData);
 		mirror.assign(bytes, bytes + (size_t)bufferSize);
 	};
-	const auto ensureStructuredBufferBatched =
+	const auto updatePayloadMirrorRanges =
+		[](std::vector<uint8_t>& mirror, const void* bufferData, const std::vector<SceneUploadDirtyRange>& ranges)
+	{
+		if (bufferData == nullptr || mirror.empty())
+		{
+			return;
+		}
+		const uint8_t* bytes = static_cast<const uint8_t*>(bufferData);
+		for (const SceneUploadDirtyRange& range : ranges)
+		{
+			if (range.size != 0 && range.byteOffset <= mirror.size() && range.size <= mirror.size() - range.byteOffset)
+			{
+				std::memcpy(mirror.data() + range.byteOffset, bytes + range.byteOffset, (size_t)range.size);
+			}
+		}
+	};
+	const auto updateStructuredBufferRanges =
 		[&](NRIBufferResource& resource,
 			SceneBufferDebugStats& stats,
 			std::vector<uint8_t>& payloadMirror,
@@ -25679,7 +25730,97 @@ bool NRIRenderer::UploadSceneBuffers(
 			uint64_t bufferSize,
 			uint32_t bufferStride,
 			uint64_t payloadHash,
+			const std::vector<SceneUploadDirtyRange>& ranges,
+			nri::AccessStage afterAccess,
+			double& uploadMs,
+			uint64_t& uploadedBytes,
+			uint32_t& growEvents,
+			uint32_t& overwriteEvents,
+			uint32_t& bufferRangeUploadCount) -> bool
+	{
+		const uint8_t* bytes = static_cast<const uint8_t*>(bufferData);
+		uint64_t rangeBytes = 0;
+		for (const SceneUploadDirtyRange& range : ranges)
+		{
+			if (bytes == nullptr ||
+				range.size == 0 ||
+				range.byteOffset > bufferSize ||
+				range.size > bufferSize - range.byteOffset ||
+				range.byteOffset > resource.size ||
+				range.size > resource.size - range.byteOffset)
+			{
+				return false;
+			}
+			rangeBytes += range.size;
+		}
+
+		bool result = true;
+		{
+			ScopedPtPerfTimer perfTimer(uploadMs);
+			for (const SceneUploadDirtyRange& range : ranges)
+			{
+				void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, range.byteOffset, range.size);
+				if (mapped == nullptr)
+				{
+					result = false;
+					break;
+				}
+				std::memcpy(mapped, bytes + range.byteOffset, (size_t)range.size);
+				mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
+			}
+
+			if (result && mFrameBuffer->mCommandBuffer != nullptr && afterAccess.access != nri::AccessBits::NONE)
+			{
+				nri::BufferBarrierDesc barrier = {};
+				barrier.buffer = resource.buffer;
+				barrier.before = {};
+				barrier.after = afterAccess;
+
+				nri::BarrierDesc barrierDesc = {};
+				barrierDesc.buffers = &barrier;
+				barrierDesc.bufferNum = 1;
+				mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+			}
+		}
+		if (!result)
+		{
+			return false;
+		}
+
+		stats.bytesUploadedLastFrame = rangeBytes;
+		stats.growEventsLastFrame = 0;
+		stats.overwriteEventsLastFrame = 1;
+		stats.uploadCount++;
+		stats.overwriteCount++;
+		stats.peakUsedBytes = std::max(stats.peakUsedBytes, bufferSize);
+		NotePerfBufferUpload(&stats, rangeBytes, false, "scene_buffer_upload_range", -1);
+
+		resource.usedSize = bufferSize;
+		resource.payloadHash = payloadHash;
+		resource.payloadSize = bufferSize;
+		resource.payloadStride = bufferStride;
+		updatePayloadMirrorRanges(payloadMirror, bufferData, ranges);
+
+		uploadedBytes = rangeBytes;
+		growEvents = 0;
+		overwriteEvents = 1;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashUploads++;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadRangeUploads++;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadRangeUploadedBytes += rangeBytes;
+		bufferRangeUploadCount++;
+		return true;
+	};
+	const auto ensureStructuredBufferBatched =
+		[&](NRIBufferResource& resource,
+			SceneBufferDebugStats& stats,
+			std::vector<uint8_t>& payloadMirror,
+			std::vector<SceneUploadDirtyRange>* dirtyRangeScratch,
+			const void* bufferData,
+			uint64_t bufferSize,
+			uint32_t bufferStride,
+			uint64_t payloadHash,
 			bool skipUpload,
+			bool allowRangeUpload,
 			nri::BufferUsageBits usageBits,
 			nri::AccessStage afterAccess,
 			double& uploadMs,
@@ -25688,12 +25829,14 @@ bool NRIRenderer::UploadSceneBuffers(
 			uint32_t& overwriteEvents,
 			uint32_t& dirtyRanges,
 			uint64_t& dirtyChangedBytes,
-			uint64_t& dirtyUploadedBytes) -> bool
+			uint64_t& dirtyUploadedBytes,
+			uint32_t& bufferRangeUploadCount) -> bool
 	{
 		const uint64_t requiredSize = std::max<uint64_t>(bufferSize, bufferStride);
 		const bool forceFullDirty =
 			resource.buffer == nullptr ||
 			resource.shaderView == nullptr ||
+			resource.memoryLocation != nri::MemoryLocation::DEVICE_UPLOAD ||
 			resource.payloadHash == 0 ||
 			resource.size < requiredSize ||
 			resource.usedSize != bufferSize ||
@@ -25701,8 +25844,14 @@ bool NRIRenderer::UploadSceneBuffers(
 			resource.stride != bufferStride ||
 			resource.payloadStride != bufferStride;
 		const bool traceDirtyRanges = ShouldTraceSceneBufferDirtyRanges();
-		if (!traceDirtyRanges)
+		SceneUploadDirtyRangeStats dirtyStats = {};
+		const bool collectDirtyRanges = allowRangeUpload && (traceDirtyRanges || (!skipUpload && !forceFullDirty));
+		if (!collectDirtyRanges)
 		{
+			if (dirtyRangeScratch != nullptr)
+			{
+				dirtyRangeScratch->clear();
+			}
 			dirtyRanges = 0;
 			dirtyChangedBytes = 0;
 			dirtyUploadedBytes = 0;
@@ -25710,12 +25859,52 @@ bool NRIRenderer::UploadSceneBuffers(
 		else
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeMs);
-			addDirtyRangeStats(noteDirtyRanges(payloadMirror, bufferData, bufferSize, skipUpload, forceFullDirty), dirtyRanges, dirtyChangedBytes, dirtyUploadedBytes);
+			dirtyStats = noteDirtyRanges(payloadMirror, bufferData, bufferSize, skipUpload, forceFullDirty, dirtyRangeScratch);
+			addDirtyRangeStats(dirtyStats, dirtyRanges, dirtyChangedBytes, dirtyUploadedBytes);
 		}
 
 		if (skipUpload)
 		{
 			resource.usedSize = bufferSize;
+			uploadedBytes = 0;
+			growEvents = 0;
+			overwriteEvents = 0;
+			return true;
+		}
+
+		const bool canRangeUpload =
+			allowRangeUpload &&
+			!forceFullDirty &&
+			dirtyRangeScratch != nullptr &&
+			!dirtyRangeScratch->empty() &&
+			dirtyStats.uploadedBytes != 0 &&
+			dirtyStats.uploadedBytes < bufferSize;
+		bool useRangeUpload = false;
+		if (canRangeUpload)
+		{
+			const uint32_t maxRangeCount = (uint32_t)(int)nri_ptscenebufferrangeuploadmaxranges;
+			const uint32_t maxUploadPercent = (uint32_t)(int)nri_ptscenebufferrangeuploadmaxpercent;
+			if (dirtyStats.coalescedRanges > maxRangeCount)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbacks++;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbackFragmented++;
+			}
+			else if (dirtyStats.uploadedBytes * 100u >= bufferSize * maxUploadPercent)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbacks++;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbackLarge++;
+			}
+			else
+			{
+				useRangeUpload = true;
+			}
+		}
+		else if (allowRangeUpload && !forceFullDirty && dirtyRangeScratch != nullptr && dirtyRangeScratch->empty() && dirtyStats.changedBytes == 0)
+		{
+			resource.usedSize = bufferSize;
+			resource.payloadHash = payloadHash;
+			resource.payloadSize = bufferSize;
+			resource.payloadStride = bufferStride;
 			uploadedBytes = 0;
 			growEvents = 0;
 			overwriteEvents = 0;
@@ -25734,6 +25923,15 @@ bool NRIRenderer::UploadSceneBuffers(
 			mLastPerfShellTraceStats.sceneSelectBufferUploadWaitCount++;
 			WaitForCommandsTracked("scene_buffer_upload");
 			waitedForWrites = true;
+		}
+
+		if (useRangeUpload)
+		{
+			if (updateStructuredBufferRanges(resource, stats, payloadMirror, bufferData, bufferSize, bufferStride, payloadHash, *dirtyRangeScratch, afterAccess, uploadMs, uploadedBytes, growEvents, overwriteEvents, bufferRangeUploadCount))
+			{
+				return true;
+			}
+			mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbacks++;
 		}
 
 		bool result = false;
@@ -25759,12 +25957,13 @@ bool NRIRenderer::UploadSceneBuffers(
 	const bool skipIndexUpload = notePayloadHashState(indexBuffer, indexPayloadHash, indexSize, sizeof(uint32_t), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexMisses);
 	const bool skipPrimitiveUpload = notePayloadHashState(primitiveBuffer, primitivePayloadHash, primitiveSize, sizeof(nri_scene::PrimitiveData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveMisses);
 	const bool skipMaterialUpload = notePayloadHashState(materialBuffer, materialPayloadHash, materialSize, sizeof(nri_scene::MaterialData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialMisses);
+	uint32_t ignoredRangeUploadCount = 0;
 
 	return
-		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, mSceneUploadVertexMirror, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes) &&
-		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, mSceneUploadIndexMirror, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes) &&
-		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, mSceneUploadPrimitiveMirror, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes) &&
-		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, mSceneUploadMaterialMirror, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes);
+		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, mSceneUploadVertexMirror, nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, ignoredRangeUploadCount) &&
+		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, mSceneUploadIndexMirror, nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, ignoredRangeUploadCount) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, mSceneUploadPrimitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads) &&
+		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, mSceneUploadMaterialMirror, &mSceneUploadMaterialDirtyRangeScratch, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads);
 }
 
 bool NRIRenderer::BuildStaticMapAccelerationStructures()
