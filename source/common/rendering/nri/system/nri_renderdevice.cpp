@@ -2611,6 +2611,7 @@ void NRIRenderDevice::BeginFrame()
 		ScopedNriTiming waitTiming(NriPTFrameWait, mLastFrameBoundaryStats.waitMs);
 		WaitForCommands(false);
 	}
+	ReleaseRetiredTextureResources(false);
 	SetViewportRects(nullptr);
 
 	if (!EnsureSwapChainSize())
@@ -7694,6 +7695,8 @@ void NRIRenderDevice::DestroyRenderResources()
 	mWhiteTexture = nullptr;
 	mWhiteTextureSet = nullptr;
 
+	ReleaseRetiredTextureResources(true);
+
 	DestroyTextureResource(mSaveTarget);
 	DestroyTextureResource(mSceneTarget);
 
@@ -8517,6 +8520,67 @@ void NRIRenderDevice::DestroyTextureResource(NRITextureResource& resource)
 	resource.shaderViewType = nri::TextureView::TEXTURE;
 	resource.usage = nri::TextureUsageBits::NONE;
 	resource.state = {};
+}
+
+void NRIRenderDevice::RetireTextureResource(NRITextureResource& resource)
+{
+	if (resource.texture == nullptr &&
+		resource.shaderView == nullptr &&
+		resource.storageView == nullptr &&
+		resource.colorAttachmentView == nullptr)
+	{
+		DestroyTextureResource(resource);
+		return;
+	}
+
+	const uint64_t currentFrameFenceValue = mFrameBegun ? (1 + mFrameIndex) : 0;
+	const uint64_t retireFenceValue = currentFrameFenceValue > mSubmittedFenceValue ? currentFrameFenceValue : mSubmittedFenceValue;
+	if (mDevice == nullptr || mFrameFence == nullptr || retireFenceValue == 0)
+	{
+		DestroyTextureResource(resource);
+		return;
+	}
+
+	RetiredTextureResource retired = {};
+	retired.resource = resource;
+	retired.fenceValue = retireFenceValue;
+	mRetiredTextureResources.push_back(retired);
+	resource = {};
+}
+
+void NRIRenderDevice::ReleaseRetiredTextureResources(bool finish)
+{
+	if (mRetiredTextureResources.empty())
+	{
+		return;
+	}
+
+	uint64_t completedFenceValue = UINT64_MAX;
+	if (!finish)
+	{
+		if (mFrameFence == nullptr)
+		{
+			return;
+		}
+		completedFenceValue = mCore.GetFenceValue(*mFrameFence);
+	}
+	else
+	{
+		WaitForCommands(true);
+	}
+
+	for (size_t i = 0; i < mRetiredTextureResources.size();)
+	{
+		RetiredTextureResource& retired = mRetiredTextureResources[i];
+		if (finish || retired.fenceValue <= completedFenceValue)
+		{
+			DestroyTextureResource(retired.resource);
+			mRetiredTextureResources[i] = mRetiredTextureResources.back();
+			mRetiredTextureResources.pop_back();
+			continue;
+		}
+		i++;
+	}
 }
 
 bool NRIRenderDevice::CreateTextureViews(NRITextureResource& resource)

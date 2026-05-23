@@ -260,7 +260,7 @@ void NRIHardwareTexture::Reset()
 	if (mFrameBuffer != nullptr)
 	{
 		const uint64_t oldBytes = mResource.memorySize;
-		mFrameBuffer->DestroyTextureResource(mResource);
+		mFrameBuffer->RetireTextureResource(mResource);
 		mFrameBuffer->Note2DTextureResidentBytesChanged(oldBytes, 0);
 	}
 

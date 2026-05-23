@@ -134,6 +134,12 @@ private:
 		bool hasSubmittedWork = false;
 	};
 
+	struct RetiredTextureResource
+	{
+		NRITextureResource resource = {};
+		uint64_t fenceValue = 0;
+	};
+
 	struct FrameSequenceEntry
 	{
 		uint64_t frameNumber = 0;
@@ -236,6 +242,8 @@ private:
 	void TransitionTexture(NRITextureResource& texture, nri::AccessLayoutStage after);
 	void PrepareTargetForRendering(NRITextureResource& target, bool clear);
 	void FinishTargetRendering(NRITextureResource& target, nri::AccessLayoutStage after);
+	void RetireTextureResource(NRITextureResource& resource);
+	void ReleaseRetiredTextureResources(bool finish);
 	void DestroyTextureResource(NRITextureResource& resource);
 	bool CreateTextureViews(NRITextureResource& resource);
 	bool CreateOwnedTexture(NRITextureResource& resource, uint32_t width, uint32_t height, nri::Format format, nri::TextureUsageBits usage, nri::TextureType type = nri::TextureType::TEXTURE_2D, uint32_t layerNum = 1, nri::TextureView shaderViewType = nri::TextureView::TEXTURE);
@@ -348,6 +356,7 @@ private:
 	std::vector<NRISwapChainImage> mSwapChainImages;
 	std::vector<NRITextureResource> mFrameGenerationPresentImages;
 	std::vector<QueuedFrame> mQueuedFrames;
+	std::vector<RetiredTextureResource> mRetiredTextureResources;
 	NRITextureResource mSceneTarget;
 	NRITextureResource mSaveTarget;
 	NRITextureResource* mActiveTarget = nullptr;
