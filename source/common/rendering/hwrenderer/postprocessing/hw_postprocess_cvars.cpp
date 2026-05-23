@@ -64,7 +64,7 @@ CUSTOM_CVAR(Int, gl_ssao, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 0;
 }
 
-CUSTOM_CVAR(Int, gl_ssao_portals, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, gl_ssao_portals, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
 		self = 0;
@@ -94,5 +94,4 @@ CUSTOM_CVAR(Bool, gl_paltonemap_reverselookup, true, CVAR_ARCHIVE | CVAR_NOINITC
 	screen->UpdatePalette();
 }
 
-CVAR(Float, gl_menu_blur, -1.0f, CVAR_ARCHIVE)
-
+CVAR(Float, gl_menu_blur, 0.0f, CVAR_ARCHIVE)

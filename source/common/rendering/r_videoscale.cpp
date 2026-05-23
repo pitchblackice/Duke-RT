@@ -190,7 +190,7 @@ CUSTOM_CVAR(Int, vid_scalemode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 0;
 }
 
-CUSTOM_CVAR(Bool, vid_cropaspect, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Bool, vid_cropaspect, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	setsizeneeded = true;
 }

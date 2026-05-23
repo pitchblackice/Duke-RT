@@ -118,9 +118,9 @@ CUSTOM_CVAR(Int, nri_ptdebugmenu, 0, CVAR_GLOBALCONFIG)
 	nri_ptdebug = ResolvePtDebugModeFromMenuIndex(self);
 	gSyncingPtDebugMenu = false;
 }
-CVAR(Bool, nri_denoise, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_nrddenoiser, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_upscaler, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_denoise, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_nrddenoiser, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_upscaler, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_postsharpen, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_upscalermode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttaa, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -207,7 +207,7 @@ static const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace
 	default: return "unknown";
 	}
 }
-CUSTOM_CVAR(Int, nri_ptoutputmode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
 	{
