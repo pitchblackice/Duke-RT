@@ -97,6 +97,9 @@ Result SwapChainD3D12::Create(const SwapChainDesc& swapChainDesc) {
     NRI_RETURN_ON_BAD_HRESULT(&m_Device, hr, "IDXGIFactory::MakeWindowAssociation");
 
     // Color space
+    const bool requiresHdrColorSpace =
+        swapChainDesc.format == SwapChainFormat::BT709_G10_16BIT ||
+        swapChainDesc.format == SwapChainFormat::BT2020_G2084_10BIT;
     if (m_Version >= 3) {
         uint32_t colorSpaceSupport = 0;
         hr = m_SwapChain->CheckColorSpaceSupport(colorSpace, &colorSpaceSupport);
@@ -107,10 +110,20 @@ Result SwapChainD3D12::Create(const SwapChainDesc& swapChainDesc) {
         if (SUCCEEDED(hr))
             hr = m_SwapChain->SetColorSpace1(colorSpace);
 
-        if (FAILED(hr))
+        if (FAILED(hr)) {
+            if (requiresHdrColorSpace) {
+                NRI_REPORT_ERROR(&m_Device, "IDXGISwapChain3::SetColorSpace1() failed for HDR swapchain format!");
+                return GetResultFromHRESULT(hr);
+            }
             NRI_REPORT_WARNING(&m_Device, "IDXGISwapChain3::SetColorSpace1() failed!");
-    } else
+        }
+    } else {
+        if (requiresHdrColorSpace) {
+            NRI_REPORT_ERROR(&m_Device, "IDXGISwapChain3::SetColorSpace1() is required for HDR swapchain format!");
+            return Result::UNSUPPORTED;
+        }
         NRI_REPORT_ERROR(&m_Device, "IDXGISwapChain3::SetColorSpace1() is not supported by the OS!");
+    }
 
     // Background color
     if (m_Version >= 1) {
