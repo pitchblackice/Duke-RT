@@ -294,8 +294,12 @@ void SystemBaseFrameBuffer::PositionWindow(bool fullscreen, bool initialcall)
 			// Set the default windowed size if not specified yet.
 			if (win_w < 0 || win_h < 0)
 			{
-				win_w = int(monRect.right - monRect.left) * 8 / 10;
-				win_h = int(monRect.bottom - monRect.top) * 8 / 10;
+				const LONG windowedStyle = WS_VISIBLE | WS_CLIPSIBLINGS | WS_OVERLAPPEDWINDOW;
+				const LONG windowedExStyle = WS_EX_WINDOWEDGE;
+				RECT defaultWindowRect = { 0, 0, vid_defwidth, vid_defheight };
+				AdjustWindowRectEx(&defaultWindowRect, windowedStyle, false, windowedExStyle);
+				win_w = int(defaultWindowRect.right - defaultWindowRect.left);
+				win_h = int(defaultWindowRect.bottom - defaultWindowRect.top);
 			}
 		}
 	}
