@@ -71,7 +71,7 @@ float GetTemporalHaltonSample(uint index, uint base)
 	return result;
 }
 
-float2 GetCurrentTemporalJitter()
+float2 GetTemporalJitterForFrame(uint frameIndex)
 {
 	if ((gTemporalConstants.Flags & NRI_FLAG_USE_JITTER) == 0u)
 	{
@@ -79,10 +79,21 @@ float2 GetCurrentTemporalJitter()
 	}
 
 	const uint phaseCount = max((gTemporalConstants.Flags >> NRI_JITTER_PHASE_SHIFT) & 0xffu, 1u);
-	const uint sampleIndex = (gTemporalConstants.FrameIndex % phaseCount) + 1u;
+	const uint sampleIndex = (frameIndex % phaseCount) + 1u;
 	return float2(
 		GetTemporalHaltonSample(sampleIndex, 2u) - 0.5,
 		GetTemporalHaltonSample(sampleIndex, 3u) - 0.5);
+}
+
+float2 GetCurrentTemporalJitter()
+{
+	return GetTemporalJitterForFrame(gTemporalConstants.FrameIndex);
+}
+
+float2 GetPreviousTemporalJitter()
+{
+	const uint previousFrameIndex = gTemporalConstants.FrameIndex > 0u ? gTemporalConstants.FrameIndex - 1u : 0u;
+	return GetTemporalJitterForFrame(previousFrameIndex);
 }
 
 [numthreads(8, 8, 1)]
@@ -100,6 +111,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 size = uint2(width, height);
 	const float2 resolution = float2(size);
 	const float2 currentJitter = GetCurrentTemporalJitter();
+	const float2 previousJitter = GetPreviousTemporalJitter();
 	const float2 uv = ((float2)pixelPos + 0.5 + currentJitter) / resolution;
 	const bool resetHistory = (gTemporalConstants.Flags & NRI_FLAG_RESET_HISTORY) != 0u;
 	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);
@@ -140,8 +152,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float3 sigma = sqrt(max(meanSquares - mean * mean, 0.0)) * TAA_SIGMA_SCALE;
 	const float3 clampMin = max(neighborhoodMin, mean - sigma);
 	const float3 clampMax = min(neighborhoodMax, mean + sigma);
-	// The producer writes pixel-space motion, so TAA converts back to UV by dividing by the render resolution.
-	const float2 prevUv = uv + selectedMotion / resolution;
+	// Shared motion excludes temporal jitter; shift from the current jittered sample to the previous jittered history sample.
+	const float2 prevUv = uv + (selectedMotion + previousJitter - currentJitter) / resolution;
 	const bool historyInScreen = !unreliableHistory && all(prevUv >= 0.0) && all(prevUv <= 1.0);
 
 	float4 historySample = float4(currentColor, 0.0);
