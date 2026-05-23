@@ -278,7 +278,7 @@ Texture2D<float4> gSceneTextures[MAX_SCENE_TEXTURES] : register(t2, space1);
 
 Texture2D<float4> gHistoryInput : register(t0, space3);
 // PT motion contract shared by TraceOpaque, NRD, TAA, and the upscaler:
-// - xy: jitter-adjusted screen-space motion in pixel units, with oldUv = newUv + motion.xy / renderSize
+// - xy: jitter-compensated screen-space motion in pixel units, with oldUv = newUv + motion.xy / renderSize
 // - z: 2.5D depth delta, viewZPrev - viewZ
 // - w: Raze-local history/validity metadata. Positive values allow local history consumers to reproject;
 //   current hit paths store current viewZ here, while bootstrap/miss paths write a negative sentinel.
