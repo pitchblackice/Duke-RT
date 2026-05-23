@@ -102,9 +102,7 @@ void ComputeSkyVirtualMotion(float3 rayOrigin, float3 rayDirection, out bool cur
 
 	if (currentUvValid && prevUvValid)
 	{
-		const float2 currentJitter = GetCurrentTemporalJitter();
-		const float2 previousJitter = GetPreviousTemporalJitter();
-		motionPixels = (prevUvRaw - currentUvRaw) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight) + (previousJitter - currentJitter);
+		motionPixels = (prevUvRaw - currentUvRaw) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 	}
 }
 
@@ -815,26 +813,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		TraceShaderStatSource(TRACE_STAT_PRIMARY_HIT_STATIC, TRACE_STAT_PRIMARY_HIT_DYNAMIC, TRACE_STAT_PRIMARY_HIT_VOXEL, hit.dataSource);
 		const float3 currentHitPosition = ResolveHitVertexPosition(hit, false);
 		const float currentViewZ = dot(currentHitPosition - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
-		const float2 currentJitter = GetCurrentTemporalJitter();
-		const float2 previousJitter = GetPreviousTemporalJitter();
 		const float3 previousHitPosition = ResolveHitVertexPosition(hit, true);
-		const float2 basisCurrentUvRaw = ProjectWorldToUvRaw(currentHitPosition, gTraceConstants.CameraPos, gTraceConstants.CameraForward, gTraceConstants.CameraRight, gTraceConstants.CameraUp, gTraceConstants.TanHalfFovX, gTraceConstants.TanHalfFovY);
-		const float2 basisPrevUvRaw = ProjectWorldToUvRaw(previousHitPosition, gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward, gTraceConstants.PrevCameraRight, gTraceConstants.PrevCameraUp, gTraceConstants.PrevTanHalfFovX, gTraceConstants.PrevTanHalfFovY);
 		float2 currentUvRaw = 0.0;
 		float2 prevUvRaw = 0.0;
-		const bool basisCurrentUvValid = all(basisCurrentUvRaw >= 0.0) && all(basisCurrentUvRaw <= 1.0);
-		const bool basisPrevUvValid = all(basisPrevUvRaw >= 0.0) && all(basisPrevUvRaw <= 1.0);
 		const bool currentUvValid = ProjectWorldToUvMatrixRaw(currentHitPosition, false, currentUvRaw);
 		const bool prevUvValid = ProjectWorldToUvMatrixRaw(previousHitPosition, true, prevUvRaw);
-		const float2 basisCurrentUv = ApplyTemporalJitterToUv(basisCurrentUvRaw, currentJitter);
-		const float2 basisPrevUv = ApplyTemporalJitterToUv(basisPrevUvRaw, previousJitter);
-		const float2 currentUv = ApplyTemporalJitterToUv(currentUvRaw, currentJitter);
-		const float2 prevUv = ApplyTemporalJitterToUv(prevUvRaw, previousJitter);
 		const float previousViewZ = dot(previousHitPosition - gTraceConstants.PrevCameraPos, gTraceConstants.PrevCameraForward);
 		float3 motion = 0.0;
 		if (currentUvValid && prevUvValid)
 		{
-			motion.xy = (prevUvRaw - currentUvRaw) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight) + (previousJitter - currentJitter);
+			motion.xy = (prevUvRaw - currentUvRaw) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 			motion.z = previousViewZ - currentViewZ;
 		}
 

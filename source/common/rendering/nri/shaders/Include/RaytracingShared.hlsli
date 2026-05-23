@@ -460,7 +460,7 @@ float3 GeneratePrimaryRay(uint2 pixelPos)
 {
 	float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 	float2 jitter = GetCurrentTemporalJitter();
-	float2 uv = ((float2)pixelPos + 0.5 - jitter) / resolution;
+	float2 uv = ((float2)pixelPos + 0.5 + jitter) / resolution;
 	float2 ndc = uv * 2.0 - 1.0;
 	ndc.y = -ndc.y;
 
@@ -486,26 +486,10 @@ float2 ProjectWorldToUvRaw(float3 worldPos, float3 cameraPos, float3 cameraForwa
 	return float2(ndcX * 0.5 + 0.5, 0.5 - ndcY * 0.5);
 }
 
-float2 ProjectWorldToUv(float3 worldPos, float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp, float tanHalfFovX, float tanHalfFovY, float2 jitter)
-{
-	return ProjectWorldToUvRaw(worldPos, cameraPos, cameraForward, cameraRight, cameraUp, tanHalfFovX, tanHalfFovY)
-		- jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
-}
-
 float2 ResolveProjectedUvRaw(float4 clip)
 {
 	const float2 ndc = clip.xy / clip.w;
 	return float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-}
-
-float2 ResolveProjectedUv(float4 clip, float2 jitter)
-{
-	return ResolveProjectedUvRaw(clip) - jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
-}
-
-float2 ApplyTemporalJitterToUv(float2 uv, float2 jitter)
-{
-	return uv + jitter / float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 }
 
 float4 MultiplyVsMatrixPoint(float4 v, float4 matrixColumns[4])
@@ -534,19 +518,6 @@ bool ProjectWorldToUvMatrixRaw(float3 worldPos, bool previousFrame, out float2 u
 	}
 
 	uv = ResolveProjectedUvRaw(clip);
-	return all(uv >= 0.0) && all(uv <= 1.0);
-}
-
-bool ProjectWorldToUvMatrix(float3 worldPos, bool previousFrame, float2 jitter, out float2 uv)
-{
-	float2 rawUv = 0.0;
-	if (!ProjectWorldToUvMatrixRaw(worldPos, previousFrame, rawUv))
-	{
-		uv = rawUv;
-		return false;
-	}
-
-	uv = ApplyTemporalJitterToUv(rawUv, -jitter);
 	return all(uv >= 0.0) && all(uv <= 1.0);
 }
 

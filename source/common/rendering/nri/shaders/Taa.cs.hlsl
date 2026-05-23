@@ -100,13 +100,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const uint2 size = uint2(width, height);
 	const float2 resolution = float2(size);
 	const float2 currentJitter = GetCurrentTemporalJitter();
-	const float2 uv = ((float2)pixelPos + 0.5 - currentJitter) / resolution;
+	const float2 uv = ((float2)pixelPos + 0.5 + currentJitter) / resolution;
 	const bool resetHistory = (gTemporalConstants.Flags & NRI_FLAG_RESET_HISTORY) != 0u;
 	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);
 
 	const float4 centerMotion = gMotionInput[pixelPos];
 	// TAA consumes the shared PT motion contract from Shared.hlsli:
-	// - xy is jitter-compensated pixel-space old-minus-new reprojection
+	// - xy is pixel-space old-minus-new reprojection, excluding temporal jitter
 	// - w is a Raze-local validity/history signal, not an NRD requirement
 	const bool unreliableHistory = centerMotion.w <= 0.0;
 	const int radius = 1;
