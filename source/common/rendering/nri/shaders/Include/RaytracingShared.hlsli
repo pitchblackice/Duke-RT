@@ -460,7 +460,7 @@ float3 GeneratePrimaryRay(uint2 pixelPos)
 {
 	float2 resolution = float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight);
 	float2 jitter = GetCurrentTemporalJitter();
-	float2 uv = ((float2)pixelPos + 0.5 + jitter) / resolution;
+	float2 uv = ((float2)pixelPos + 0.5 - jitter) / resolution;
 	float2 ndc = uv * 2.0 - 1.0;
 	ndc.y = -ndc.y;
 
