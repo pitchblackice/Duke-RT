@@ -105,7 +105,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const float4 centerMotion = gMotionInput[pixelPos];
 	// TAA consumes the shared PT motion contract from Shared.hlsli:
-	// - xy is jitter-compensated pixel-space old-minus-new reprojection
+	// - xy is jitter-adjusted pixel-space old-minus-new reprojection
 	// - w is a Raze-local validity/history signal, not an NRD requirement
 	const bool unreliableHistory = centerMotion.w <= 0.0;
 	const int radius = 1;
