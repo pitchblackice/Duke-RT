@@ -14,6 +14,7 @@
 
 #define MAX_SCENE_TEXTURES 512
 #define NRI_FLAG_USE_JITTER 0x40u
+#define NRI_JITTER_PHASE_SHIFT 16u
 #define NRI_FLAG_FAST_EMISSIVE_SHADOW 0x100u
 #define NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS 0x200u
 #define NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW 0x400u
@@ -220,7 +221,8 @@ float2 GetTemporalJitterForFrame(uint frameIndex)
 		return 0.0;
 	}
 
-	const uint sampleIndex = (frameIndex % NRI_TAA_JITTER_PHASE_COUNT) + 1u;
+	const uint phaseCount = max((gTraceConstants.Flags >> NRI_JITTER_PHASE_SHIFT) & 0xffu, 1u);
+	const uint sampleIndex = (frameIndex % phaseCount) + 1u;
 	return float2(
 		GetTemporalHaltonSample(sampleIndex, 2u) - 0.5,
 		GetTemporalHaltonSample(sampleIndex, 3u) - 0.5);

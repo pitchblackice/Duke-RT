@@ -4,7 +4,7 @@
 
 #define NRI_FLAG_RESET_HISTORY 0x1u
 #define NRI_FLAG_USE_JITTER 0x40u
-#define NRI_TAA_JITTER_PHASE_COUNT 8u
+#define NRI_JITTER_PHASE_SHIFT 16u
 #define TAA_HISTORY_FRAME_CAP 12.0
 #define TAA_BASE_BLEND (1.0 / TAA_HISTORY_FRAME_CAP)
 #define TAA_SIGMA_SCALE 2.0
@@ -78,7 +78,8 @@ float2 GetCurrentTemporalJitter()
 		return 0.0;
 	}
 
-	const uint sampleIndex = (gTemporalConstants.FrameIndex % NRI_TAA_JITTER_PHASE_COUNT) + 1u;
+	const uint phaseCount = max((gTemporalConstants.Flags >> NRI_JITTER_PHASE_SHIFT) & 0xffu, 1u);
+	const uint sampleIndex = (gTemporalConstants.FrameIndex % phaseCount) + 1u;
 	return float2(
 		GetTemporalHaltonSample(sampleIndex, 2u) - 0.5,
 		GetTemporalHaltonSample(sampleIndex, 3u) - 0.5);

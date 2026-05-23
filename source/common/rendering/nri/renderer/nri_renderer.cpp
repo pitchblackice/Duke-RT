@@ -3117,6 +3117,7 @@ namespace
 	constexpr uint32_t NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS = 0x200u;
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW = 0x400u;
 	constexpr uint32_t NRI_FLAG_TRACE_SHADER_STATS = 0x800u;
+	constexpr uint32_t NRI_JITTER_PHASE_SHIFT = 16u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr float NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS = 0.5f;
@@ -6363,6 +6364,11 @@ namespace
 		return NRI_TAA_JITTER_PHASE_COUNT;
 	}
 
+	static uint32_t PackTemporalJitterPhaseCount(uint32_t jitterPhaseCount)
+	{
+		return (std::min(jitterPhaseCount, 255u) & 0xffu) << NRI_JITTER_PHASE_SHIFT;
+	}
+
 	static float GetHaltonSample(uint32_t index, uint32_t base)
 	{
 		float inverseBase = 1.0f / (float)base;
@@ -6379,9 +6385,10 @@ namespace
 		return result;
 	}
 
-	static void ComputeTemporalJitter(uint32_t frameIndex, float outJitter[2])
+	static void ComputeTemporalJitter(uint32_t frameIndex, uint32_t jitterPhaseCount, float outJitter[2])
 	{
-		const uint32_t sampleIndex = (frameIndex % NRI_TAA_JITTER_PHASE_COUNT) + 1u;
+		jitterPhaseCount = std::max(jitterPhaseCount, 1u);
+		const uint32_t sampleIndex = (frameIndex % jitterPhaseCount) + 1u;
 		outJitter[0] = GetHaltonSample(sampleIndex, 2u) - 0.5f;
 		outJitter[1] = GetHaltonSample(sampleIndex, 3u) - 0.5f;
 	}
@@ -33064,11 +33071,14 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 
 	NRITraceSceneConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
+	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
+	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMainUpscaler, GetSelectedUpscalerMode());
+	const uint32_t jitterPhaseCount = GetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, mGuiCaptureActive);
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
 	const bool useTemporalJitter =
 		!nri_ptbootstrap &&
 		!mGuiCaptureActive &&
-		ShouldUseTemporalJitter(ResolveMainUpscalerKind(false));
+		ShouldUseTemporalJitter(resolvedMainUpscaler);
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
@@ -33099,7 +33109,8 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
-		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u);
+		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
+		PackTemporalJitterPhaseCount(jitterPhaseCount);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
@@ -33578,7 +33589,11 @@ bool NRIRenderer::DispatchUpscaleChain()
 		constants.FrameIndex = mFrameIndex;
 		constants.Flags =
 			(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
-			(useAppTaaJitter ? NRI_FLAG_USE_JITTER : 0u);
+			(useAppTaaJitter ? NRI_FLAG_USE_JITTER : 0u) |
+			PackTemporalJitterPhaseCount(GetTemporalJitterPhaseCount(
+				mainKind,
+				ResolveUpscalerModeForMain(mainKind, GetSelectedUpscalerMode()),
+				mGuiCaptureActive));
 		constants.Exposure = GetTemporalExposure(mFrameBuffer->GetPathTracingOutputPolicy());
 
 		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
@@ -33931,7 +33946,9 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
 	if (!nri_ptbootstrap && !mGuiCaptureActive && ShouldUseTemporalJitter(resolvedMainUpscaler))
 	{
-		ComputeTemporalJitter(mFrameIndex, mCurrentJitter);
+		const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMainUpscaler, GetSelectedUpscalerMode());
+		const uint32_t jitterPhaseCount = GetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, mGuiCaptureActive);
+		ComputeTemporalJitter(mFrameIndex, jitterPhaseCount, mCurrentJitter);
 	}
 	else
 	{
