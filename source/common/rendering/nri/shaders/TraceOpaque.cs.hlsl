@@ -104,7 +104,7 @@ void ComputeSkyVirtualMotion(float3 rayOrigin, float3 rayDirection, out bool cur
 	{
 		const float2 currentJitter = GetCurrentTemporalJitter();
 		const float2 previousJitter = GetPreviousTemporalJitter();
-		motionPixels = (prevUvRaw - currentUvRaw) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight) + (currentJitter - previousJitter);
+		motionPixels = (prevUvRaw - currentUvRaw) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight) + (previousJitter - currentJitter);
 	}
 }
 
@@ -834,7 +834,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float3 motion = 0.0;
 		if (currentUvValid && prevUvValid)
 		{
-			motion.xy = (prevUvRaw - currentUvRaw) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight) + (currentJitter - previousJitter);
+			motion.xy = (prevUvRaw - currentUvRaw) * float2(gTraceConstants.RenderWidth, gTraceConstants.RenderHeight) + (previousJitter - currentJitter);
 			motion.z = previousViewZ - currentViewZ;
 		}
 
