@@ -12,6 +12,7 @@
 
 EXTERN_CVAR(Int, hw_lightmode)
 EXTERN_CVAR(Float, nri_ptfullbrightboost)
+EXTERN_CVAR(Bool, nri_ptignorelightlevel)
 EXTERN_CVAR(Float, nri_voxelemissionboost)
 
 namespace
@@ -28,6 +29,11 @@ namespace
 
 	float ComputeLightLevel(const MaterialRef& material)
 	{
+		if (nri_ptignorelightlevel)
+		{
+			return 1.0f;
+		}
+
 		const float shadeDiv = lookups.tables[clamp(material.palette, 0, MAXPALOOKUPS - 1)].ShadeFactor;
 		const bool fullbright = (material.flags & MaterialFlag_Fullbright) != 0 || shadeDiv < 1.0f / 1000.0f || material.shade < -numshades;
 		if (fullbright)

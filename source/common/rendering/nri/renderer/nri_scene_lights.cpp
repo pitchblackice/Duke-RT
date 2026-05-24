@@ -17,6 +17,7 @@ EXTERN_CVAR(Float, nri_ptemissiveminsurface)
 EXTERN_CVAR(Float, nri_ptglowscale)
 EXTERN_CVAR(Float, nri_ptglowreach)
 EXTERN_CVAR(Float, nri_ptglowfalloff)
+EXTERN_CVAR(Bool, nri_ptignorelightlevel)
 EXTERN_CVAR(Bool, nri_ptsectorlighting)
 EXTERN_CVAR(Float, nri_ptsectorambientscale)
 EXTERN_CVAR(Float, nri_ptsectorhemiscale)
@@ -1625,16 +1626,19 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		const auto& sec = sector[sectorIndex];
 		const int resolvedPalette = sec.floorpal != 0 ? (int)sec.floorpal : (int)sec.ceilingpal;
 		const int averageShade = ((int)sec.floorshade + (int)sec.ceilingshade) / 2;
+		const int lightingAverageShade = nri_ptignorelightlevel ? 0 : averageShade;
+		const int lightingFloorShade = nri_ptignorelightlevel ? 0 : (int)sec.floorshade;
+		const int lightingCeilingShade = nri_ptignorelightlevel ? 0 : (int)sec.ceilingshade;
 		if ((paletteFilter >= 0 && resolvedPalette != paletteFilter) ||
-			(averageShade < minShadeFilter || averageShade > maxShadeFilter) ||
+			(lightingAverageShade < minShadeFilter || lightingAverageShade > maxShadeFilter) ||
 			(lotagFilter >= 0 && sec.lotag != lotagFilter))
 		{
 			continue;
 		}
 
-		const float lightLevel = ComputeBuildLightLevel(averageShade, resolvedPalette);
-		const float floorLight = ComputeBuildLightLevel((int)sec.floorshade, resolvedPalette);
-		const float ceilingLight = ComputeBuildLightLevel((int)sec.ceilingshade, resolvedPalette);
+		const float lightLevel = ComputeBuildLightLevel(lightingAverageShade, resolvedPalette);
+		const float floorLight = ComputeBuildLightLevel(lightingFloorShade, resolvedPalette);
+		const float ceilingLight = ComputeBuildLightLevel(lightingCeilingShade, resolvedPalette);
 		const float hemisphereBias = clamp(ceilingLight - floorLight, -1.0f, 1.0f);
 		float tint[3] = {};
 		float fogStrength = 0.0f;

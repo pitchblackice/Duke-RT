@@ -2981,6 +2981,10 @@ CUSTOM_CVAR(Float, nri_ptfullbrightboost, 1.50781f, CVAR_ARCHIVE | CVAR_GLOBALCO
 	}
 	NotifyActiveMaterialLightingCalibrationChange();
 }
+CUSTOM_CVAR(Bool, nri_ptignorelightlevel, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	NotifyActiveMaterialLightingCalibrationChange();
+}
 CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptemissivesamples, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
