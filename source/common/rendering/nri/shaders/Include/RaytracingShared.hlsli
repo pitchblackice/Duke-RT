@@ -757,6 +757,11 @@ uint ResolvePrimitiveMaterialIndex(SceneInstanceData instanceData, PrimitiveData
 
 uint ResolveVisibilityChunk(SceneInstanceData instanceData, PrimitiveData primitive)
 {
+	if (instanceData.dataSource == SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+	{
+		return instanceData.visibilityChunk;
+	}
+
 	return instanceData.visibilityChunk != 0xffffffffu ? instanceData.visibilityChunk : primitive.reserved0;
 }
 

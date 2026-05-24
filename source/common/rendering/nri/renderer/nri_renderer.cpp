@@ -16409,22 +16409,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 	auto resolvePersistentVoxelActorVisibilityChunk = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> uint32_t
 	{
-		const nri_scene::SurfaceProvenance* provenance = nullptr;
-		if (cacheEntry.lightSurface != nullptr)
-		{
-			provenance = &cacheEntry.lightSurface->provenance;
-		}
-		else if (cacheEntry.surface != nullptr)
-		{
-			provenance = &cacheEntry.surface->provenance;
-		}
-		if (provenance == nullptr)
-		{
-			return UINT32_MAX;
-		}
-
-		const int32_t chunkIndex = ResolveVisibilityChunkIndexForProvenance(mMapWorld, *provenance);
-		return chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+		(void)cacheEntry;
+		// Persistent voxel actors move independently from the cached mesh surface that sourced them.
+		// Let static map geometry own chunk gating; dynamic actor instances stay ray-visible by position.
+		return UINT32_MAX;
 	};
 
 	auto appendActorToBatch = [&](PersistentVoxelBatch& batch, const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, PersistentVoxelBatch::ActorEntry* existingActor = nullptr, bool* outDeferred = nullptr) -> bool

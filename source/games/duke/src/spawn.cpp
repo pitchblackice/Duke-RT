@@ -117,6 +117,13 @@ DDukeActor* CreateActor(sectortype* whatsectp, const DVector3& pos, PClassActor*
 	// spawning out of range sprites will also crash.
 	if (clstype == nullptr) return nullptr;
 
+	sectortype* spawnsectp = whatsectp;
+	updatesector(pos, &spawnsectp);
+	if (spawnsectp != nullptr)
+	{
+		whatsectp = spawnsectp;
+	}
+
 	if (s_stat < 0) s_stat = clstype ? GetDefaultByType(clstype)->spr.statnum : 0;
 
 	auto act = static_cast<DDukeActor*>(InsertActor(clstype? clstype : RUNTIME_CLASS(DDukeActor), whatsectp, s_stat));
