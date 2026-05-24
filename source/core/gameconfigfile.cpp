@@ -45,7 +45,7 @@
 #include "gamecontrol.h"
 #include "version.h"
 
-#define LASTRUNVERSION "4"
+#define LASTRUNVERSION "5"
 
 #if !defined _MSC_VER && !defined __APPLE__
 #include "i_system.h"  // for SHARE_DIR
@@ -341,6 +341,16 @@ void FGameConfigFile::DoGlobalSetup ()
 					{
 						var2->SetGenericRep(v, CVAR_String);
 					}
+				}
+			}
+			if (last < 5)
+			{
+				auto var = FindCVar("nri_ptsectorlightmultiplier", nullptr);
+				if (var != nullptr)
+				{
+					UCVarValue v;
+					v.Float = 0.35f;
+					var->SetGenericRep(v, CVAR_Float);
 				}
 			}
 		}
@@ -665,4 +675,3 @@ void G_SaveConfig()
 	delete GameConfig;
 	GameConfig = nullptr;
 }
-

@@ -2351,7 +2351,7 @@ CCMD(nri_ptsectorlight_filter)
 CCMD(nri_ptsectorlight_clear)
 {
 	nri_ptsectorlighting = true;
-	nri_ptsectorlightmultiplier = 1.0f;
+	nri_ptsectorlightmultiplier = 0.35f;
 	nri_ptsectorambientscale = 0.20f;
 	nri_ptsectorhemiscale = 0.12f;
 	nri_ptsectorfogscale = 0.20f;
