@@ -60,6 +60,8 @@ const char *GetVersionString();
 #define GAMENAME "Raze"
 #define WGAMENAME L"Raze"
 #define GAMENAMELOWERCASE "raze"
+#define GAME_USER_DIR "duke-rt"
+#define GAME_USER_BASENAME "duke-rt"
 #define QUERYIWADDEFAULT true
 #define FORUM_URL "http://forum.zdoom.org/"
 #define BUGS_FORUM_URL	"http://forum.zdoom.org/viewforum.php?f=340"

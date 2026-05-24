@@ -1040,7 +1040,7 @@ int RunGame()
 	FString logfile = Args->TakeValue("+logfile");
 
 	// As long as this engine is still in prerelease mode let's always write a log file.
-	if (logfile.IsEmpty()) logfile.Format("%s" GAMENAMELOWERCASE ".log", M_GetDocumentsPath().GetChars());
+	if (logfile.IsEmpty()) logfile.Format("%s" GAME_USER_BASENAME ".log", M_GetDocumentsPath().GetChars());
 
 	if (logfile.IsNotEmpty())
 	{

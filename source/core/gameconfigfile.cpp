@@ -294,12 +294,12 @@ void FGameConfigFile::DoGlobalSetup ()
 	}
 	if (auto var = FindCVar("nri_dred", nullptr))
 	{
-		// Avoid carrying forward the prior bad shipped default from raze.ini.
+		// Avoid carrying forward the prior bad shipped default from the user config.
 		var->SetGenericRep(false, CVAR_Bool);
 	}
 	if (auto var = FindCVar("nri_apivalidation", nullptr))
 	{
-		// Avoid carrying forward the prior bad shipped default from raze.ini.
+		// Avoid carrying forward the prior bad shipped default from the user config.
 		var->SetGenericRep(false, CVAR_Bool);
 	}
 	if (SetSection ("LastRun"))
