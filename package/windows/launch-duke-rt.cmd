@@ -34,7 +34,6 @@ if not exist "%PREFLIGHT_PS1%" (
 
 set "PREFLIGHT_ARGS="
 set "GAME_ARGS="
-set "RT_MODE_ARGS=+set vid_preferbackend 4"
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -155,5 +154,5 @@ if not exist "%DUKE_RT_GRP%" (
     exit /b 1
 )
 
-"%RAZE_EXE%" -gamegrp "%DUKE_RT_GRP%" -file "%OVERLAY_DIR%" %GAME_ARGS% %RT_MODE_ARGS%
+"%RAZE_EXE%" -gamegrp "%DUKE_RT_GRP%" -file "%OVERLAY_DIR%" %GAME_ARGS%
 exit /b %errorlevel%

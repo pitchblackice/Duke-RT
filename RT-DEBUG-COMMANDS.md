@@ -10,18 +10,17 @@ The RT backend owns the current path-tracing path. Use the in-game console or co
 
 There is also an in-game control panel for these settings under:
 
-- `Options -> Display Options -> RT Renderer`
+- `Options -> Display Options -> Render Options`
 
 Commands:
-- `vid_preferbackend 4`
-  Selects the RT backend. Restart required.
+- RT is selected automatically on NRI-capable builds.
 - `nri_api vulkan` or `nri_api d3d12`
   Selects which graphics API the RT backend uses through NRI on Windows. Restart required.
 - Frame generation currently targets:
   `RT + D3D12 + windowed mode`.
   Exclusive fullscreen currently resolves FG off.
   The in-game menu path is:
-  `Options -> Display Options -> RT Renderer`.
+  `Options -> Display Options -> Render Options`.
   Changing `Frame Generation`, `Frame Gen Provider`, or `Frame Gen Low Latency` while the app is running recreates the active RT swapchain/present path, so a short hitch is expected.
 - `nri_ptdebug 0`
   Default lit path-traced output.
@@ -90,9 +89,9 @@ Symptoms of scene-texture cap overflow:
 
 ## Frame Generation
 
-Frame generation is exposed in the same RT renderer menu:
+Frame generation is exposed in the render options menu:
 
-- `Options -> Display Options -> RT Renderer -> Frame Generation`
+- `Options -> Display Options -> Render Options -> Frame Generation`
 
 Current scope:
 
@@ -346,7 +345,7 @@ Light-debug workflow:
 Useful log output while debugging:
 
 - `Selecting NRI backend...`
-  Current legacy log prefix confirming `vid_preferbackend` is pointing at the RT path.
+  Confirms the RT backend was selected.
 - `NRI device: ...`
 - `NRI graphics API: ...`
   Confirms the adapter and API the backend actually initialized.
@@ -390,7 +389,6 @@ Skybox / RT environment repro workflow:
 Example:
 
 ```text
-vid_preferbackend 4
 nri_api vulkan
 restart
 nri_ptsanity 1

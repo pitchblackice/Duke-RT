@@ -9,10 +9,6 @@
 #include <zwidget/widgets/textlabel/textlabel.h>
 #include <zwidget/widgets/checkboxlabel/checkboxlabel.h>
 
-#ifdef RENDER_BACKENDS
-EXTERN_CVAR(Int, vid_preferbackend);
-#endif
-
 EXTERN_CVAR(String, language)
 EXTERN_CVAR(Bool, queryiwad);
 
@@ -30,16 +26,6 @@ SettingsPage::SettingsPage(LauncherWindow* launcher, int* autoloadflags) : Widge
 	WidescreenCheckbox = new CheckboxLabel(this);
 	*/
 
-#ifdef RENDER_BACKENDS
-	BackendLabel = new TextLabel(this);
-	VulkanCheckbox = new CheckboxLabel(this);
-	OpenGLCheckbox = new CheckboxLabel(this);
-	GLESCheckbox = new CheckboxLabel(this);
-#ifdef HAVE_NRI
-	NRICheckbox = new CheckboxLabel(this);
-#endif
-#endif
-
 	FullscreenCheckbox->SetChecked(vid_fullscreen);
 	DontAskAgainCheckbox->SetChecked(!queryiwad);
 
@@ -50,48 +36,6 @@ SettingsPage::SettingsPage(LauncherWindow* launcher, int* autoloadflags) : Widge
 	BrightmapsCheckbox->SetChecked(flags & 4);
 	WidescreenCheckbox->SetChecked(flags & 8);
 	*/
-
-#ifdef RENDER_BACKENDS
-	OpenGLCheckbox->SetRadioStyle(true);
-	VulkanCheckbox->SetRadioStyle(true);
-	GLESCheckbox->SetRadioStyle(true);
-	OpenGLCheckbox->FuncChanged = [this](bool on) { if (on) { VulkanCheckbox->SetChecked(false); GLESCheckbox->SetChecked(false);
-#ifdef HAVE_NRI
-		NRICheckbox->SetChecked(false);
-#endif
-	}};
-	VulkanCheckbox->FuncChanged = [this](bool on) { if (on) { OpenGLCheckbox->SetChecked(false); GLESCheckbox->SetChecked(false);
-#ifdef HAVE_NRI
-		NRICheckbox->SetChecked(false);
-#endif
-	}};
-	GLESCheckbox->FuncChanged = [this](bool on) { if (on) { VulkanCheckbox->SetChecked(false); OpenGLCheckbox->SetChecked(false);
-#ifdef HAVE_NRI
-		NRICheckbox->SetChecked(false);
-#endif
-	}};
-#ifdef HAVE_NRI
-	NRICheckbox->SetRadioStyle(true);
-	NRICheckbox->FuncChanged = [this](bool on) { if (on) { VulkanCheckbox->SetChecked(false); OpenGLCheckbox->SetChecked(false); GLESCheckbox->SetChecked(false); }};
-#endif
-	switch (vid_preferbackend)
-	{
-	case 0:
-		OpenGLCheckbox->SetChecked(true);
-		break;
-	case 1:
-		VulkanCheckbox->SetChecked(true);
-		break;
-	case 2:
-		GLESCheckbox->SetChecked(true);
-		break;
-#ifdef HAVE_NRI
-	case 4:
-		NRICheckbox->SetChecked(true);
-		break;
-#endif
-	}
-#endif
 
 	LangList = new ListView(this);
 
@@ -121,7 +65,7 @@ SettingsPage::SettingsPage(LauncherWindow* launcher, int* autoloadflags) : Widge
 			}
 		}
 	}
-	catch (const std::exception& ex)
+	catch (const std::exception&)
 	{
 		hideLanguage = true;
 	}
@@ -151,16 +95,6 @@ void SettingsPage::Save()
 	*/
 	*AutoloadFlags = flags;
 
-#ifdef RENDER_BACKENDS
-	int v = 1;
-	if (OpenGLCheckbox->GetChecked()) v = 0;
-	else if (VulkanCheckbox->GetChecked()) v = 1;
-	else if (GLESCheckbox->GetChecked()) v = 2;
-#ifdef HAVE_NRI
-	else if (NRICheckbox->GetChecked()) v = 4;
-#endif
-	if (v != vid_preferbackend) vid_preferbackend = v;
-#endif
 }
 
 void SettingsPage::UpdateLanguage()
@@ -177,15 +111,6 @@ void SettingsPage::UpdateLanguage()
 	WidescreenCheckbox->SetText(GStrings.GetString("PICKER_WIDESCREEN"));
 	*/
 
-#ifdef RENDER_BACKENDS
-	BackendLabel->SetText(GStrings.GetString("PICKER_PREFERBACKEND"));
-	VulkanCheckbox->SetText(GStrings.GetString("OPTVAL_VULKAN"));
-	OpenGLCheckbox->SetText(GStrings.GetString("OPTVAL_OPENGL"));
-	GLESCheckbox->SetText(GStrings.GetString("OPTVAL_OPENGLES"));
-#ifdef HAVE_NRI
-	NRICheckbox->SetText(GStrings.GetString("OPTVAL_NRI"));
-#endif
-#endif
 }
 
 void SettingsPage::OnLanguageChanged(int i)
@@ -199,7 +124,6 @@ void SettingsPage::OnLanguageChanged(int i)
 
 void SettingsPage::OnGeometryChanged()
 {
-	double panelWidth = 200.0;
 	double y = 0.0;
 	double w = GetWidth();
 	double h = GetHeight();
@@ -219,26 +143,6 @@ void SettingsPage::OnGeometryChanged()
 	DontAskAgainCheckbox->SetFrameGeometry(0.0, y, 190.0, DontAskAgainCheckbox->GetPreferredHeight());
 	//WidescreenCheckbox->SetFrameGeometry(w - panelWidth, y, panelWidth, WidescreenCheckbox->GetPreferredHeight());
 	y += DontAskAgainCheckbox->GetPreferredHeight();
-
-#ifdef RENDER_BACKENDS
-	double x = GetWidth() - 20.0 - panelWidth;
-	y = 0;
-	BackendLabel->SetFrameGeometry(x, y, 190.0, BackendLabel->GetPreferredHeight());
-	y += BackendLabel->GetPreferredHeight();
-
-	VulkanCheckbox->SetFrameGeometry(x, y, 190.0, VulkanCheckbox->GetPreferredHeight());
-	y += VulkanCheckbox->GetPreferredHeight();
-
-	OpenGLCheckbox->SetFrameGeometry(x, y, 190.0, OpenGLCheckbox->GetPreferredHeight());
-	y += OpenGLCheckbox->GetPreferredHeight();
-
-	GLESCheckbox->SetFrameGeometry(x, y, 190.0, GLESCheckbox->GetPreferredHeight());
-	y += GLESCheckbox->GetPreferredHeight();
-#ifdef HAVE_NRI
-	NRICheckbox->SetFrameGeometry(x, y, 190.0, NRICheckbox->GetPreferredHeight());
-	y += NRICheckbox->GetPreferredHeight();
-#endif
-#endif
 
 	if (!hideLanguage)
 	{

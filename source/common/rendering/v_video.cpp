@@ -170,6 +170,9 @@ static const char* GetStartupSetOverride(const char* name)
 
 int V_GetBackend()
 {
+#ifdef HAVE_NRI
+	return 4;
+#else
 	int v = vid_preferbackend;
 	if (const char* override = GetStartupSetOverride("vid_preferbackend"))
 	{
@@ -178,6 +181,7 @@ int V_GetBackend()
 	if (v == 3) vid_preferbackend = v = 2;
 	else if (v < 0 || v > 4) v = 0;
 	return v;
+#endif
 }
 
 const char* V_GetStartupNriAPI()

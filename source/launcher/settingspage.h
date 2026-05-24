@@ -2,8 +2,6 @@
 
 #include <zwidget/core/widget.h>
 
-#define RENDER_BACKENDS
-
 class LauncherWindow;
 class TextLabel;
 class CheckboxLabel;
@@ -32,15 +30,6 @@ private:
 	CheckboxLabel* LightsCheckbox = nullptr;
 	CheckboxLabel* BrightmapsCheckbox = nullptr;
 	CheckboxLabel* WidescreenCheckbox = nullptr;
-#ifdef RENDER_BACKENDS
-	TextLabel* BackendLabel = nullptr;
-	CheckboxLabel* VulkanCheckbox = nullptr;
-	CheckboxLabel* OpenGLCheckbox = nullptr;
-	CheckboxLabel* GLESCheckbox = nullptr;
-#ifdef HAVE_NRI
-	CheckboxLabel* NRICheckbox = nullptr;
-#endif
-#endif
 	ListView* LangList = nullptr;
 
 	int* AutoloadFlags = nullptr;

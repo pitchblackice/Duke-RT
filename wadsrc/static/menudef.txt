@@ -1050,42 +1050,6 @@ OptionMenu GameplayOptions protected
 //
 //-------------------------------------------------------------------------------------------
 
-OptionValue "FilterModes"
-{
-	0, "$OPTVAL_NONE"
-	1, "$OPTVAL_NONENEARESTMIPMAP"
-	5, "$OPTVAL_NONELINEARMIPMAP"
-	6, "$OPTVAL_NONETRILINEAR"
-	2, "$OPTVAL_LINEAR_2"
-	3, "$OPTVAL_BILINEAR"
-	4, "$OPTVAL_TRILINEAR"
-}
-
-OptionValue "Anisotropy"
-{
-	1, "$OPTVAL_OFF"
-	2, "$OPTVAL_2X"
-	4, "$OPTVAL_4X"
-	8, "$OPTVAL_8X"
-	16, "$OPTVAL_16X"
-}
-
-OptionValue "Multisample"
-{
-	1, "$OPTVAL_OFF"
-	2, "$OPTVAL_2X"
-	4, "$OPTVAL_4X"
-	8, "$OPTVAL_8X"
-	16, "$OPTVAL_16X"
-	32, "$OPTVAL_32X"
-}
-
-OptionValue "Precision"
-{
-	0, "$OPTVAL_SPEED"
-	1, "$OPTVAL_QUALITY"
-}
-
 OptionValue "ViewBobbing"
 {
 	0, "$OPTVAL_OFF"
@@ -1106,28 +1070,36 @@ OptionMenu "VideoOptions" protected
 	Title "$DSPLYMNU_TITLE"
 
 	Submenu "$OPTMNU_HUD", "HUDOptions"
-	Submenu "$RENDER_OPTIONS", "RenderOptions"
-	Submenu "RT Renderer", "NRIOptions"
+	Submenu "$RENDER_OPTIONS", "NRIOptions"
 	Submenu "$AUTOMAPMNU_TITLE", "AutomapOptions"
-	Submenu "$GLMNU_POSTPROCESS", "PostProcessMenu"
-	Submenu "$GLTEXMNU_TITLE", "GLTextureGLOptions"
 	StaticText ""
 
-	Slider "$DSPLYMNU_GAMMA",					"vid_gamma",					0.75, 3.0, 0.05, 2
-	Slider "$DSPLYMNU_BRIGHTNESS",				"vid_brightness",				-0.8,0.8, 0.05,2
-	Slider "$DSPLYMNU_CONTRAST",				"vid_contrast",	   				0.1, 3.0, 0.1
-	Slider "$DSPLYMNU_SATURATION",				"vid_saturation",  				-3.0, 3.0, 0.25, 2
-	Slider "$DSPLYMNU_AMBIENT_LIGHT",			"r_ambientlight",  				0.5, 4.0, 0.1
-
+	StaticText "HDR / Output"
+	Option "Output Mode",						"nri_ptoutputmode",				"NRIPTOutputMode"
+	StaticText "----------------"
+	StaticText "SDR Output"
+	Option "Tonemap",							"nri_pttonemap",				"NRIPTTonemap"
+	Slider "Exposure",							"nri_ptexposure",				0.125, 8.0, 0.125, 3
+	Slider "Contrast",							"nri_ptcontrast",				0.50, 1.50, 0.05, 2
+	Slider "Saturation",						"nri_ptsaturation",				0.00, 2.00, 0.05, 2
+	Slider "Highlight Shoulder",				"nri_ptshoulder",				0.50, 1.50, 0.05, 2
+	Slider "Shadow Toe",						"nri_pttoe",					0.50, 1.50, 0.05, 2
+	StaticText "Applies to active SDR output and HDR requests that fall back to SDR."
+	StaticText "----------------"
+	StaticText "HDR Output"
+	Option "Tonemap",							"nri_pthdrtonemap",				"NRIPTTonemap"
+	Slider "Exposure",							"nri_pthdrexposure",			0.125, 8.0, 0.125, 3
+	Slider "Contrast",							"nri_pthdrcontrast",			0.50, 1.50, 0.05, 2
+	Slider "Saturation",						"nri_pthdrsaturation",			0.00, 2.00, 0.05, 2
+	Slider "Highlight Shoulder",				"nri_pthdrshoulder",			0.50, 1.50, 0.05, 2
+	Slider "Shadow Toe",						"nri_pthdrtoe",					0.50, 1.50, 0.05, 2
+	Slider "Paper White",						"nri_ptpaperwhite",				80.0, 400.0, 5.0, 1
+	StaticText "Applies only while a real HDR swapchain is active."
+	Slider "Fullbright Boost",					"nri_ptfullbrightboost",		0.50, 8.00, 0.25, 2
+	StaticText "Output calibration affects final present; light energy remains upstream."
+	StaticText "Output-mode changes reset PT history."
 	StaticText ""
-	Option "$DSPLYMNU_VOXELS",					"r_voxels",						"OnOff"
-	Option "$DSPLYMNU_SHADOWS",					"r_shadows",					"OnOff"
-	Option "$DSPLYMNU_SLOPETILT",				"cl_slopetilting",				"OnOff"
-	ifgame(Exhumed)
-	{
-		Slider "$DSPLYMNU_EXVERTPANNING",	"cl_exvertpanscale", 0.5, 10, 0.1
-	}
-	Option "$GLPREFMNU_ENVIRONMENTMAPMIRROR",	gl_mirror_envmap,				"OnOff"
+
 	ifnotgame(Blood, Exhumed)
 	{
 		Option "$DSPLYMNU_VIEWBOB",					"cl_viewbob",					"OnOff"
@@ -1135,42 +1107,20 @@ OptionMenu "VideoOptions" protected
 	ifgame(Exhumed)
 	{
 		Option "$DSPLYMNU_VIEWBOB",					"cl_viewbob",					"ViewBobbing"
-		Slider "$DSPLYMNU_VIEWBOBSPEED",			"cl_exviewbobspeed",			0.0, 10.0, 0.1
-		Slider "$DSPLYMNU_VIEWBOBHEIGHT",			"cl_exviewbobheight",			0.0, 20.0, 0.1
 	}
 	ifgame(Blood)
 	{
 		Option "$DSPLYMNU_VIEWBOB",					"cl_viewvbob",					"OnOff"
-		Option "$DSPLYMNU_VIEWSWAY",				"cl_viewhbob",					"OnOff"
 	}
 	Option "$DSPLYMNU_VIEWTILTING",				"cl_viewtilting",				"ViewTilting"
-	ifgame (RedneckRides)
-	{
-		Option "$DSPLYMNU_VEHTILTING",			"cl_rrvehicletilting",			"OnOff"
-	}
 	Slider "$DSPLYMNU_VIEWTILTSCALE",			"cl_viewtiltscale",				0.0, 2.0, 0.05
 	Slider "$DSPLYMNU_FOV",						"r_fov",						60, 130, 10, 1
-
-	StaticText ""
-	Option "$GLPREFMNU_RENDERQUALITY",			gl_seamless,					"Precision"
-
-	StaticText ""
-	Option "$GLTEXMNU_TEXFILTER",				gl_texture_filter,				"FilterModes"
-	Option "$GLTEXMNU_ANISOTROPIC",				gl_texture_filter_anisotropic,	"Anisotropy"
-	StaticText " "
-	Option "$GLPREFMNU_MULTISAMPLE", 			gl_multisample,					"Multisample"
 
 }
 
 OptionMenu "NRIOptions" protected
 {
-	Title "RT Renderer"
-
-	StaticText "Backend / API"
-	Option "Preferred Rendering API",			"vid_preferbackend",			"PreferBackend"
-	Option "RT Graphics API",					"nri_api",						"NRIAPI"
-	StaticText "Backend and API changes require a restart."
-	StaticText ""
+	Title "$RENDER_OPTIONS"
 
 	StaticText "NRD / Core"
 	Option "Denoiser",							"nri_denoise",					"OnOff"
@@ -1210,31 +1160,6 @@ OptionMenu "NRIOptions" protected
 	Slider "Sharpness",							"nri_sharpness",				0.0, 1.0, 0.05, 2
 	StaticText "Frame generation currently targets windowed D3D12."
 	StaticText "----------------"
-	StaticText "HDR / Output"
-	Option "Output Mode",						"nri_ptoutputmode",				"NRIPTOutputMode"
-	StaticText "----------------"
-	StaticText "SDR Output"
-	Option "Tonemap",							"nri_pttonemap",				"NRIPTTonemap"
-	Slider "Exposure",							"nri_ptexposure",				0.125, 8.0, 0.125, 3
-	Slider "Contrast",							"nri_ptcontrast",				0.50, 1.50, 0.05, 2
-	Slider "Saturation",						"nri_ptsaturation",				0.00, 2.00, 0.05, 2
-	Slider "Highlight Shoulder",				"nri_ptshoulder",				0.50, 1.50, 0.05, 2
-	Slider "Shadow Toe",						"nri_pttoe",					0.50, 1.50, 0.05, 2
-	StaticText "Applies to active SDR output and HDR requests that fall back to SDR."
-	StaticText "----------------"
-	StaticText "HDR Output"
-	Option "Tonemap",							"nri_pthdrtonemap",				"NRIPTTonemap"
-	Slider "Exposure",							"nri_pthdrexposure",			0.125, 8.0, 0.125, 3
-	Slider "Contrast",							"nri_pthdrcontrast",			0.50, 1.50, 0.05, 2
-	Slider "Saturation",						"nri_pthdrsaturation",			0.00, 2.00, 0.05, 2
-	Slider "Highlight Shoulder",				"nri_pthdrshoulder",			0.50, 1.50, 0.05, 2
-	Slider "Shadow Toe",						"nri_pthdrtoe",					0.50, 1.50, 0.05, 2
-	Slider "Paper White",						"nri_ptpaperwhite",				80.0, 400.0, 5.0, 1
-	StaticText "Applies only while a real HDR swapchain is active."
-	Slider "Fullbright Boost",					"nri_ptfullbrightboost",		0.50, 8.00, 0.25, 2
-	StaticText "Output calibration affects final present; light energy remains upstream."
-	StaticText "Output-mode changes reset PT history."
-	StaticText "----------------"
 	StaticText "Night Vision"
 	Option "Night Vision Presenter",			"nri_ptnightvision",			"OnOff"
 	Slider "Night Vision Exposure",			"nri_ptnightvisionexposure",	0.25, 4.00, 0.05, 2
@@ -1268,108 +1193,6 @@ OptionMenu "NRIOptions" protected
 	Command "Reset PT History",					"nri_ptreset"
 }
 
-OptionValue "DitherModes"
-{
-	0, "$OPTVAL_OFF"
-	-1, "$OPTVAL_ON"
-	6, "6 BPC"
-	8, "8 BPC"
-	10, "10 BPC"
-	12, "12 BPC"
-}
-
-OptionValue "FXAAQuality"
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_LOW"
-	2, "$OPTVAL_MEDIUM"
-	3, "$OPTVAL_HIGH"
-	4, "$OPTVAL_EXTREME"
-}
-
-OptionValue "TonemapModes"
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_UNCHARTED2"
-	2, "$OPTVAL_HEJLDAWSON"
-	3, "$OPTVAL_REINHARD"
-	5, "$OPTVAL_PALETTE"
-}
-
-OptionValue "LookupOrder"
-{
-	0, "$OPTVAL_OBVERSEFIRST"
-	1, "$OPTVAL_REVERSEFIRST"
-}
-
-OptionValue "HqResizeModes"
-{
-   0, "$OPTVAL_OFF"
-   1, "$OPTVAL_SCALENX"
-   2, "$OPTVAL_HQNX"
-   3, "$OPTVAL_HQNXMMX"
-   4, "$OPTVAL_NXBRZ"
-   5, "$OPTVAL_OLD_NXBRZ"
-   6, "$OPTVAL_NORMALNX"
-}
-
-OptionValue "HqResizeMultipliers"
-{
-   1, "$OPTVAL_OFF"
-   2, "2x"
-   3, "3x"
-   4, "4x"
-   5, "5x"
-   6, "6x"
-}
-
-OptionValue "HqResizeModesNoMMX"
-{
-   0, "$OPTVAL_OFF"
-   1, "$OPTVAL_SCALENX"
-   2, "$OPTVAL_HQNX"
-   4, "$OPTVAL_NXBRZ"
-   5, "$OPTVAL_OLD_NXBRZ"
-   6, "$OPTVAL_NORMALNX"
-}
-
-OptionValue "FogMode"
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_STANDARD"
-	2, "$OPTVAL_RADIAL"
-}
-
-OptionValue "LightModes"
-{
-	0, "$GLPREFMNU_ORIGINAL"
-	1, "$GLPREFMNU_NATURAL"
-	2, "$GLPREFMNU_HIGHCONTRAST"
-}
-
-OptionValue "SSAOModes"
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_LOW"
-	2, "$OPTVAL_MEDIUM"
-	3, "$OPTVAL_HIGH"
-}
-
-OptionMenu "PostProcessMenu"
-{
-	Title "$GLMNU_POSTPROCESS"
-	Option "$GLPREFMNU_BLOOM",		 			gl_bloom,						"OnOff"
-	Option "$GLPREFMNU_LENS",		 			gl_lens,						"OnOff"
-	Option "$GLPREFMNU_SSAO",		 			gl_ssao,						"SSAOModes"
-	Slider "$GLPREFMNU_SSAO_PORTALS",			gl_ssao_portals,				0.0, 4.0, 1.0, 0
-	Option "$GLPREFMNU_FXAA",		 			gl_fxaa,						"FXAAQuality"
-	Option "$GLPREFMNU_DITHER",		 			gl_dither_bpc,					"DitherModes"
-	Option "$GLPREFMNU_TONEMAP", 				gl_tonemap,						"TonemapModes"
-	StaticText " "
-	Slider "$GLPREFMNU_PALTONEMAPPOWER",		gl_paltonemap_powtable,			0.2, 3.0, 0.1, 1
-	Option "$GLPREFMNU_PALTONEMAPORDER",		gl_paltonemap_reverselookup,	"LookupOrder"
-}
-
 OptionMenu "AutomapOptions"
 {
 	Title "$AUTOMAPMNU_TITLE"
@@ -1395,27 +1218,6 @@ OptionMenu "AutomapOptions"
 
 }
 
-OptionMenu "GLTextureGLOptions" protected
-{
-	Title "$GLTEXMNU_TITLE"
-	ifOption(MMX)
-	{
-		Option "$GLTEXMNU_HQRESIZE",		gl_texture_hqresizemode,		"HqResizeModes"
-	}
-	else
-	{
-		Option "$GLTEXMNU_HQRESIZE",		gl_texture_hqresizemode,		"HqResizeModesNoMMX"
-	}
-	Option "$GLTEXMNU_HQRESIZEMULT",	gl_texture_hqresizemult,		"HqResizeMultipliers"
-	StaticText "!HQRESIZE_WARNING!"
-
-	Option "$GLTEXMNU_RESIZETEX",		gl_texture_hqresize_textures,	"OnOff"
-	Option "$GLTEXMNU_RESIZESPR",		gl_texture_hqresize_sprites,	"OnOff"
-	Option "$GLTEXMNU_RESIZEFNT",		gl_texture_hqresize_fonts,		"OnOff"
-	Option "$GLTEXMNU_RESIZESKN",		gl_texture_hqresize_skins,		"OnOff"
-	Option "$GLTEXMNU_PRECACHETEX",		gl_precache,					"YesNo"
-	Class "GLTextureGLOptions"
-}
 //-------------------------------------------------------------------------------------------
 //
 // HUD options
@@ -1485,30 +1287,6 @@ OptionMenu "HUDOptions" protected
 	Option "$HUDMNU_CROSSHAIRHEALTH",		"crosshairhealth", "CrosshairHealthTypes"
 }
 
-
-//-------------------------------------------------------------------------------------------
-//
-// Render options
-//
-//-------------------------------------------------------------------------------------------
-
-OptionMenu "RenderOptions"
-{
-	Title "Render Options"
-	Option "$RENDER_TC", "hw_hightile", "OnOff"
-	Option "$RENDER_CACHE", "r_precache", "OnOff"
-	StaticText ""
-	// Exhumed's lighting system does not work with the enhanced modes.
-	ifnotgame(Exhumed)
-	{
-		Option "$GLPREFMNU_SECLIGHTMODE",			"hw_lightmode",					"LightModes"
-	}
-	Option "$GLPREFMNU_FOGMODE",				gl_fogmode,						"FogMode"
-	Option "$RENDER_PALETTEEMU",				"hw_useindexedcolortextures",	"OnOff"
-	Option "$RENDER_PALINTER",					"hw_shadeinterpolate",			"OnOff", "hw_useindexedcolortextures"
-	StaticText ""
-	Option "$RENDER_MODELS", "hw_models", "OnOff"
-}
 
 //-------------------------------------------------------------------------------------------
 //
@@ -1785,20 +1563,6 @@ OptionValue MaxFps
 	200, "$OPTVAL_200FPS"
 }
 
-OptionValue PreferBackend
-{
-	0, "$OPTVAL_OPENGL"
-	1, "$OPTVAL_VULKAN"
-	2, "$OPTVAL_OPENGLES"
-	4, "$OPTVAL_NRI"
-}
-
-OptionString NRIAPI
-{
-	"vulkan", "$OPTVAL_VULKAN"
-	"d3d12", "D3D12"
-}
-
 OptionValue NRIMainUpscaler
 {
 	0, "$OPTVAL_OFF"
@@ -1920,8 +1684,6 @@ OptionMenu VideoModeMenu protected
 {
 	Title "$VIDMNU_TITLE"
 
-	Option "$VIDMNU_PREFERBACKEND",		"vid_preferbackend", "PreferBackend"
-	StaticText " "
 	Option "$VIDMNU_FULLSCREEN",		"vid_fullscreen", "YesNo"
 
 	IfOption(Mac)
