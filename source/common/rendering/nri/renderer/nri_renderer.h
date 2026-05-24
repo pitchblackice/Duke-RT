@@ -317,6 +317,8 @@ public:
 			uint64_t dirtyUploadedBytes = 0;
 			uint32_t hashChecks = 0;
 			uint32_t hashMisses = 0;
+			uint32_t stampChecks = 0;
+			uint32_t stampMisses = 0;
 			uint32_t dirtyRanges = 0;
 			double waitMs = 0.0;
 		};
@@ -1860,6 +1862,7 @@ private:
 	struct PersistentVoxelMaterialVariantResource
 	{
 		uint64_t materialKeyHash = 0;
+		uint64_t materialSignature = 0;
 		uint32_t materialOffset = 0;
 		uint32_t materialCount = 0;
 		uint32_t materialCapacity = 0;

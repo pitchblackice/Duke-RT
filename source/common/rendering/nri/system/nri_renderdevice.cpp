@@ -4157,12 +4157,13 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.uploadedBytes == 0 &&
 				entry.dirtyUploadedBytes == 0 &&
 				entry.hashChecks == 0 &&
+				entry.stampChecks == 0 &&
 				entry.waitMs <= 0.0)
 			{
 				continue;
 			}
 			Printf(
-				"PERF pt scene buffer upload domain NRI: frame=%llu domain=%s payload_bytes=%llu vertex_payload=%llu index_payload=%llu primitive_payload=%llu material_payload=%llu hash_checks=%u hash_misses=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu uploaded=%llu primitive_uploaded=%llu material_uploaded=%llu wait_ms=%.3f\n",
+				"PERF pt scene buffer upload domain NRI: frame=%llu domain=%s payload_bytes=%llu vertex_payload=%llu index_payload=%llu primitive_payload=%llu material_payload=%llu hash_checks=%u hash_misses=%u stamp_checks=%u stamp_misses=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu uploaded=%llu primitive_uploaded=%llu material_uploaded=%llu wait_ms=%.3f\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				getSceneBufferUploadDomainName(domain),
 				(unsigned long long)entry.payloadBytes,
@@ -4172,6 +4173,8 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				(unsigned long long)entry.materialPayloadBytes,
 				entry.hashChecks,
 				entry.hashMisses,
+				entry.stampChecks,
+				entry.stampMisses,
 				entry.dirtyRanges,
 				(unsigned long long)entry.dirtyChangedBytes,
 				(unsigned long long)entry.dirtyUploadedBytes,
