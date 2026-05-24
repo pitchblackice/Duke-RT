@@ -949,15 +949,15 @@ namespace
 		outWorld.stats.mirrorPortalCount = 0;
 		outWorld.stats.runtimePortalCount = 0;
 
-		const std::vector<uint32_t> sectorChunkLookup = BuildSectorChunkLookup(outWorld);
-		BuildLocalSpaces(outWorld, sectorChunkLookup);
+		outWorld.sectorChunkLookup = BuildSectorChunkLookup(outWorld);
+		BuildLocalSpaces(outWorld, outWorld.sectorChunkLookup);
 		const std::vector<uint32_t> portalWallSurfaceLookup = BuildPortalWallSurfaceLookup(outWorld);
 		const std::vector<uint32_t> portalPlaneSurfaceLookup = BuildPortalPlaneSurfaceLookup(outWorld);
 
 		for (unsigned sectorIndex = 0; sectorIndex < sector.Size(); ++sectorIndex)
 		{
 			const sectortype& sec = sector[sectorIndex];
-			const uint32_t sourceChunkIndex = sectorIndex < sectorChunkLookup.size() ? sectorChunkLookup[sectorIndex] : UINT32_MAX;
+			const uint32_t sourceChunkIndex = sectorIndex < outWorld.sectorChunkLookup.size() ? outWorld.sectorChunkLookup[sectorIndex] : UINT32_MAX;
 			const uint32_t sourceLocalSpaceIndex = sourceChunkIndex < outWorld.chunks.size() ? outWorld.chunks[sourceChunkIndex].localSpaceIndex : UINT32_MAX;
 
 			for (const walltype& wal : sec.walls)
@@ -997,7 +997,7 @@ namespace
 						auto srcCenter = wal.center();
 						auto dstCenter = destWall.center();
 						SetPortalDeltaPT(portal, dstCenter.X - srcCenter.X, dstCenter.Y - srcCenter.Y, 0.0);
-						AppendPortalTarget(outWorld, portal, sectorChunkLookup, destWall.sector, wal.portalnum);
+						AppendPortalTarget(outWorld, portal, outWorld.sectorChunkLookup, destWall.sector, wal.portalnum);
 					}
 					break;
 
@@ -1042,7 +1042,7 @@ namespace
 					SetPortalDeltaPT(portal, desc.delta.X, desc.delta.Y, desc.delta.Z);
 					for (int targetSectorIndex : desc.targets)
 					{
-						AppendPortalTarget(outWorld, portal, sectorChunkLookup, targetSectorIndex, -1);
+						AppendPortalTarget(outWorld, portal, outWorld.sectorChunkLookup, targetSectorIndex, -1);
 					}
 				}
 
@@ -1361,6 +1361,7 @@ bool BuildLiveMapChunkWorld(const PTMapChunk& chunk, PTMapWorld& outWorld, PTMap
 	}
 
 	outWorld.chunks.push_back(liveChunk);
+	outWorld.sectorChunkLookup = BuildSectorChunkLookup(outWorld);
 	outWorld.stats.chunkCount = 1;
 	outWorld.valid = true;
 	if (outStats != nullptr)

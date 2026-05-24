@@ -78,6 +78,17 @@ public:
 		Count,
 	};
 
+	enum class SceneBufferUploadDomain : uint32_t
+	{
+		StaticOverlay = 0,
+		RuntimeMutation,
+		Dynamic,
+		MirrorExtended,
+		MirrorPlayer,
+		PersistentVoxelMaterial,
+		Count,
+	};
+
 	struct MaterialBuildTraceEntry
 	{
 		uint32_t calls = 0;
@@ -96,6 +107,7 @@ public:
 	};
 
 	static constexpr size_t MaterialBuildTraceSlotCount = (size_t)MaterialBuildTraceSlot::Count;
+	static constexpr size_t SceneBufferUploadDomainCount = (size_t)SceneBufferUploadDomain::Count;
 	static constexpr size_t RuntimeMutationTopTraceCount = 8;
 	static constexpr size_t RuntimeSectorDirtyTruthTraceCount = 8;
 	static constexpr size_t RuntimeAnimatedChurnTraceCount = 4;
@@ -291,6 +303,24 @@ public:
 
 	struct PerfShellTraceStats
 	{
+		struct SceneBufferUploadDomainTraceEntry
+		{
+			uint64_t payloadBytes = 0;
+			uint64_t vertexPayloadBytes = 0;
+			uint64_t indexPayloadBytes = 0;
+			uint64_t primitivePayloadBytes = 0;
+			uint64_t materialPayloadBytes = 0;
+			uint64_t uploadedBytes = 0;
+			uint64_t primitiveUploadedBytes = 0;
+			uint64_t materialUploadedBytes = 0;
+			uint64_t dirtyChangedBytes = 0;
+			uint64_t dirtyUploadedBytes = 0;
+			uint32_t hashChecks = 0;
+			uint32_t hashMisses = 0;
+			uint32_t dirtyRanges = 0;
+			double waitMs = 0.0;
+		};
+
 		double totalMs = 0.0;
 		double initResourcesMs = 0.0;
 		double mapWorldMs = 0.0;
@@ -371,6 +401,28 @@ public:
 		double runtimeDebugSphereMaterialMs = 0.0;
 		double runtimeDebugSphereTuneMs = 0.0;
 		double overlayAssembleMs = 0.0;
+		double overlayAppendMs = 0.0;
+		double overlayAppendResetMs = 0.0;
+		double overlayAppendSourcesMs = 0.0;
+		double overlayAppendBookkeepingMs = 0.0;
+		double overlayRuntimeSpaceLinkMs = 0.0;
+		double overlayRuntimeSpaceLinkGeometryMs = 0.0;
+		double overlayRuntimeSpaceLinkMaterialMs = 0.0;
+		double overlayRuntimeMutationMs = 0.0;
+		double overlayRuntimeMutationGeometryMs = 0.0;
+		double overlayRuntimeMutationMaterialMs = 0.0;
+		double overlayDynamicMs = 0.0;
+		double overlayDynamicGeometryMs = 0.0;
+		double overlayDynamicMaterialMs = 0.0;
+		double overlayMirrorExtendedMs = 0.0;
+		double overlayMirrorExtendedGeometryMs = 0.0;
+		double overlayMirrorExtendedMaterialMs = 0.0;
+		double overlayMirrorPlayerMs = 0.0;
+		double overlayMirrorPlayerGeometryMs = 0.0;
+		double overlayMirrorPlayerMaterialMs = 0.0;
+		double overlayDebugSphereMs = 0.0;
+		double overlayDebugSphereGeometryMs = 0.0;
+		double overlayDebugSphereMaterialMs = 0.0;
 		double dynamicCaptureMs = 0.0;
 		double sceneSelectStaticMapMs = 0.0;
 		double sceneSelectMirrorPortalMs = 0.0;
@@ -386,6 +438,12 @@ public:
 		double sceneSelectMaterialSplitMs = 0.0;
 		double sceneSelectBufferUploadMs = 0.0;
 		double sceneSelectBufferUploadPrimitiveRewriteMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewritePrimitiveHashMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteProvenanceHashMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteVisibilityHashMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteCopyMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteResolveMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteStoreMs = 0.0;
 		double sceneSelectBufferUploadPayloadHashMs = 0.0;
 		double sceneSelectBufferUploadDirtyRangeMs = 0.0;
 		double sceneSelectBufferUploadWaitCheckMs = 0.0;
@@ -426,6 +484,15 @@ public:
 		uint32_t sceneSelectBufferUploadPayloadHashIndexMisses = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashPrimitiveMisses = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashMaterialMisses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampChecks = 0;
+		uint32_t sceneSelectBufferUploadProducerStampUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampFallbacks = 0;
+		uint32_t sceneSelectBufferUploadProducerStampRewritePrimitiveUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampRewriteProvenanceUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampVertexUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampIndexUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampPrimitiveUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampMaterialUses = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeChecks = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeSkips = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeForcedFull = 0;
@@ -452,6 +519,10 @@ public:
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectProvenance = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectVisibility = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectCount = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteResolvePrimitives = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteResolveMapChunk = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteResolveSectorFallback = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteResolveSectorMiss = 0;
 		uint64_t sceneSelectBufferUploadVertexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadIndexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadPrimitiveRequestedBytes = 0;
@@ -474,6 +545,7 @@ public:
 		uint64_t sceneSelectBufferUploadPrimitiveDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadMaterialDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadRangeUploadedBytes = 0;
+		std::array<SceneBufferUploadDomainTraceEntry, SceneBufferUploadDomainCount> sceneSelectBufferUploadDomains = {};
 		double sceneSelectInstanceHandlesMs = 0.0;
 		double sceneSelectTexturePrepMs = 0.0;
 		double sceneSelectStateCommitMs = 0.0;
@@ -848,6 +920,21 @@ public:
 		uint32_t runtimeDebugSphereMaterialCount = 0;
 		uint32_t overlayPrimitiveCount = 0;
 		uint32_t overlayMaterialCount = 0;
+		uint32_t overlayRuntimeSpaceLinkPrimitiveCount = 0;
+		uint32_t overlayRuntimeSpaceLinkMaterialCount = 0;
+		uint32_t overlayRuntimeMutationPrimitiveCount = 0;
+		uint32_t overlayRuntimeMutationMaterialCount = 0;
+		uint32_t overlayDynamicPrimitiveCount = 0;
+		uint32_t overlayDynamicMaterialCount = 0;
+		uint32_t overlayMirrorExtendedPrimitiveCount = 0;
+		uint32_t overlayMirrorExtendedMaterialCount = 0;
+		uint32_t overlayMirrorPlayerPrimitiveCount = 0;
+		uint32_t overlayMirrorPlayerMaterialCount = 0;
+		uint32_t overlayDebugSpherePrimitiveCount = 0;
+		uint32_t overlayDebugSphereMaterialCount = 0;
+		uint32_t overlayPersistentVoxelActorCount = 0;
+		uint32_t overlayPersistentVoxelPrimitiveCount = 0;
+		uint32_t overlayPersistentVoxelMaterialCount = 0;
 		uint32_t dynamicCaptureCalls = 0;
 		uint32_t dynamicCaptureWallSurfaces = 0;
 		uint32_t dynamicCaptureFlatSurfaces = 0;
@@ -1294,10 +1381,33 @@ private:
 		std::vector<nri_scene::PrimitiveData> primitives;
 	};
 
+	struct SceneBufferUploadProducerStamp
+	{
+		uint64_t vertexPayloadStamp = 0;
+		uint64_t indexPayloadStamp = 0;
+		uint64_t primitivePayloadStamp = 0;
+		uint64_t primitiveProvenanceStamp = 0;
+		uint64_t materialPayloadStamp = 0;
+	};
+
 	struct SceneUploadDirtyRange
 	{
 		uint64_t byteOffset = 0;
 		uint64_t size = 0;
+	};
+
+	struct SceneBufferUploadDomainSpan
+	{
+		SceneBufferUploadDomain domain = SceneBufferUploadDomain::StaticOverlay;
+		uint32_t vertexOffset = 0;
+		uint32_t vertexCount = 0;
+		uint32_t indexOffset = 0;
+		uint32_t indexCount = 0;
+		uint32_t primitiveOffset = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialOffset = 0;
+		uint32_t materialCount = 0;
+		SceneBufferUploadProducerStamp stamp = {};
 	};
 
 	struct SurfaceProbeResult
@@ -2270,14 +2380,18 @@ private:
 		const StaticMapSceneCache& staticScene,
 		const std::vector<nri_scene::MaterialData>& gpuMaterials);
 	bool RefreshStaticMapAnimatedMaterials();
-	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
+	bool UploadSceneBuffers(
+		const nri_scene::GeometryData& geometry,
+		const std::vector<nri_scene::MaterialData>& materials,
+		const std::vector<SceneBufferUploadDomainSpan>* domainSpans = nullptr);
 	bool UploadSceneBuffers(
 		NRIBufferResource& vertexBuffer,
 		NRIBufferResource& indexBuffer,
 		NRIBufferResource& primitiveBuffer,
 		NRIBufferResource& materialBuffer,
 		const nri_scene::GeometryData& geometry,
-		const std::vector<nri_scene::MaterialData>& materials);
+		const std::vector<nri_scene::MaterialData>& materials,
+		const std::vector<SceneBufferUploadDomainSpan>* domainSpans = nullptr);
 	bool BuildStaticMapAccelerationStructures();
 	bool BuildStaticMapAccelerationStructures(
 		StaticMapSceneCache& staticScene,

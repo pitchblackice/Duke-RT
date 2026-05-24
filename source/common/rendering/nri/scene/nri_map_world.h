@@ -129,6 +129,7 @@ struct PTMapWorld
 	uint64_t buildSerial = 0;
 	bool valid = false;
 	std::vector<PTMapChunk> chunks;
+	std::vector<uint32_t> sectorChunkLookup;
 	std::vector<PTMapSurface> surfaces;
 	std::vector<PTMapLocalSpace> localSpaces;
 	std::vector<PTMapPortal> portals;
