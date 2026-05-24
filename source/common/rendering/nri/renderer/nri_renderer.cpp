@@ -16240,9 +16240,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	auto rebuildBatchMaterialBridge = [&](PersistentVoxelBatch& batch)
 	{
 		batch.materialBridge = {};
-		std::vector<const PersistentVoxelMaterialVariantResource*> materialResources;
+		std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
 		materialResources.reserve(mPersistentVoxelMaterialVariantResources.size());
-		for (const auto& pair : mPersistentVoxelMaterialVariantResources)
+		for (auto& pair : mPersistentVoxelMaterialVariantResources)
 		{
 			if (pair.second.materialCount > 0)
 			{
@@ -16253,14 +16253,26 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			{
 				return left->materialOffset < right->materialOffset;
 			});
-		for (const PersistentVoxelMaterialVariantResource* resource : materialResources)
+		for (PersistentVoxelMaterialVariantResource* resource : materialResources)
 		{
+			if (resource == nullptr)
+			{
+				continue;
+			}
 			if (batch.materialBridge.materials.size() < resource->materialOffset)
 			{
 				batch.materialBridge.materials.resize(resource->materialOffset);
 				batch.materialBridge.lightMetadata.resize(resource->materialOffset);
 			}
 			AppendMaterialBridge(resource->materialBridge, batch.materialBridge);
+			const uint64_t materialSize = (uint64_t)resource->materialCount * sizeof(nri_scene::MaterialData);
+			if (resource->materialOffset <= batch.materialBridge.materials.size() &&
+				resource->materialCount <= batch.materialBridge.materials.size() - resource->materialOffset)
+			{
+				resource->materialPayloadHash = HashUploadPayloadBytes(
+					batch.materialBridge.materials.data() + resource->materialOffset,
+					materialSize);
+			}
 		}
 		for (PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 		{
