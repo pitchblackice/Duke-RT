@@ -405,6 +405,11 @@ public:
 		double overlayAppendResetMs = 0.0;
 		double overlayAppendSourcesMs = 0.0;
 		double overlayAppendBookkeepingMs = 0.0;
+		double overlayProducerStampCacheKeyMs = 0.0;
+		double overlayProducerStampCacheBuildMs = 0.0;
+		uint32_t overlayProducerStampCacheChecks = 0;
+		uint32_t overlayProducerStampCacheHits = 0;
+		uint32_t overlayProducerStampCacheMisses = 0;
 		double overlayRuntimeSpaceLinkMs = 0.0;
 		double overlayRuntimeSpaceLinkGeometryMs = 0.0;
 		double overlayRuntimeSpaceLinkMaterialMs = 0.0;
@@ -1388,6 +1393,14 @@ private:
 		uint64_t primitivePayloadStamp = 0;
 		uint64_t primitiveProvenanceStamp = 0;
 		uint64_t materialPayloadStamp = 0;
+	};
+
+	struct SceneViewUploadProducerStampCacheEntry
+	{
+		bool valid = false;
+		uint64_t structuralKey = 0;
+		uint64_t exactKey = 0;
+		SceneBufferUploadProducerStamp stamp = {};
 	};
 
 	struct SceneUploadDirtyRange
@@ -2392,6 +2405,9 @@ private:
 		const nri_scene::GeometryData& geometry,
 		const std::vector<nri_scene::MaterialData>& materials,
 		const std::vector<SceneBufferUploadDomainSpan>* domainSpans = nullptr);
+	SceneBufferUploadProducerStamp BuildCachedSceneViewUploadProducerStamp(
+		const nri_scene::SceneView& sceneView,
+		SceneBufferUploadDomain domain);
 	bool BuildStaticMapAccelerationStructures();
 	bool BuildStaticMapAccelerationStructures(
 		StaticMapSceneCache& staticScene,
@@ -2732,6 +2748,7 @@ private:
 	NRIBufferResource mTopLevelScratchBuffer;
 	NRIBufferResource mEmissiveTopLevelScratchBuffer;
 	SelectPrimitiveRewriteCache mSelectPrimitiveRewriteCache = {};
+	std::array<SceneViewUploadProducerStampCacheEntry, SceneBufferUploadDomainCount> mSceneViewUploadProducerStampCache = {};
 	std::vector<nri_scene::MaterialData> mSelectCapturedGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectDynamicGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectPersistentVoxelGpuMaterialScratch;
