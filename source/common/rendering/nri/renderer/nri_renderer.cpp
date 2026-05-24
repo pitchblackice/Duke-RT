@@ -1746,6 +1746,14 @@ public:
 		return hash != 0 ? hash : 1;
 	}
 
+	static uint64_t HashMaterialPayloadData(const nri_scene::MaterialBridgeData& materialBridge)
+	{
+		const uint64_t materialSize = (uint64_t)materialBridge.materials.size() * sizeof(nri_scene::MaterialData);
+		return HashUploadPayloadBytes(
+			materialBridge.materials.empty() ? nullptr : materialBridge.materials.data(),
+			materialSize);
+	}
+
 	struct SceneViewUploadStampBuildResult
 	{
 		uint64_t vertexPayloadStamp = 0;
@@ -14942,6 +14950,11 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 			variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
 		if (materialReady)
 		{
+			if (entry.uploadMaterialResource.materialPayloadHash == 0)
+			{
+				entry.uploadMaterialResource.materialPayloadHash =
+					HashMaterialPayloadData(entry.uploadMaterialResource.materialBridge);
+			}
 			outReusedMaterial = true;
 		}
 		else
@@ -14960,6 +14973,8 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 				variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
 			entry.uploadMaterialResource.materialBridge = std::move(builtMaterials);
 			entry.uploadMaterialResource.materialCount = (uint32_t)entry.uploadMaterialResource.materialBridge.materials.size();
+			entry.uploadMaterialResource.materialPayloadHash =
+				HashMaterialPayloadData(entry.uploadMaterialResource.materialBridge);
 			entry.uploadMaterialResource.materialUploadHash = 0;
 		}
 		entry.uploadMaterialResource.lastDesiredMapGeneration = mPersistentVoxelResidencyMapGeneration;
@@ -16821,6 +16836,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		const bool materialVariantWasReady =
 			materialResource.materialKeyHash == cacheEntry.materialKeyHash &&
 			!materialResource.materialBridge.materials.empty();
+		if (materialVariantWasReady && materialResource.materialPayloadHash == 0)
+		{
+			materialResource.materialPayloadHash = HashMaterialPayloadData(materialResource.materialBridge);
+		}
 		if (materialResource.materialKeyHash != cacheEntry.materialKeyHash ||
 			materialResource.materialBridge.materials.empty())
 		{
@@ -16879,6 +16898,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			materialResource.materialSignature = cacheEntry.materialSignature;
 			materialResource.materialBridge = std::move(builtMaterials);
 			materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
+			materialResource.materialPayloadHash = HashMaterialPayloadData(materialResource.materialBridge);
 			materialResource.materialUploadHash = 0;
 			if ((bool)nri_voxelstats)
 			{
@@ -18073,6 +18093,7 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		const uint64_t producerSignature = resource.materialSignature != 0 ? resource.materialSignature : resource.materialKeyHash;
 		hash = CoherencyHashCombine64(hash, producerSignature);
 		hash = CoherencyHashCombine64(hash, resource.materialKeyHash);
+		hash = CoherencyHashCombine64(hash, resource.materialPayloadHash);
 		hash = CoherencyHashCombine64(hash, (uint64_t)resource.materialOffset);
 		hash = CoherencyHashCombine64(hash, (uint64_t)resource.materialCount);
 		hash = CoherencyHashCombine64(hash, materialSize);
@@ -18099,6 +18120,11 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		persistentVoxelDomain.payloadBytes += materialSize;
 		persistentVoxelDomain.materialPayloadBytes += materialSize;
 		persistentVoxelDomain.stampChecks++;
+		if (resource.materialPayloadHash == 0)
+		{
+			persistentVoxelDomain.hashChecks++;
+			resource.materialPayloadHash = HashUploadPayloadBytes(actorMaterials, materialSize);
+		}
 		const uint64_t materialStamp = buildMaterialUploadStamp(resource, materialSize);
 		const bool uploadMaterials =
 			resource.materialUploadHash != materialStamp;

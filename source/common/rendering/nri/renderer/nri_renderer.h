@@ -1863,6 +1863,7 @@ private:
 	{
 		uint64_t materialKeyHash = 0;
 		uint64_t materialSignature = 0;
+		uint64_t materialPayloadHash = 0;
 		uint32_t materialOffset = 0;
 		uint32_t materialCount = 0;
 		uint32_t materialCapacity = 0;
