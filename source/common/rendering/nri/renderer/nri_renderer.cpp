@@ -1748,8 +1748,6 @@ public:
 
 	struct SceneViewUploadStampBuildResult
 	{
-		uint64_t structuralCacheKey = 0;
-		uint64_t exactCacheKey = 0;
 		uint64_t vertexPayloadStamp = 0;
 		uint64_t indexPayloadStamp = 0;
 		uint64_t primitivePayloadStamp = 0;
@@ -1811,114 +1809,9 @@ public:
 		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2u : 0u;
 	}
 
-	static uint64_t HashSceneViewUploadStampStructuralSurface(
-		uint64_t hash,
-		const nri_scene::SurfaceRef& surface,
-		uint32_t surfaceKind,
-		bool triangleList,
-		uint32_t materialIndex)
-	{
-		hash = CoherencyHashCombine64(hash, (uint64_t)surfaceKind);
-		hash = CoherencyHashCombine64(hash, (uint64_t)materialIndex);
-		hash = CoherencyHashCombine64(hash, (uint64_t)CountStampedSurfacePrimitives(surface, triangleList));
-		hash = CoherencyHashCombine64(hash, (uint64_t)surface.vertices.size());
-		hash = CoherencyHashCombine64(hash, (uint64_t)surface.indices.size());
-		hash = HashSurfaceProvenanceStamp(hash, surface.provenance);
-		hash = HashMaterialRefStamp(hash, surface.material);
-		return hash;
-	}
-
-	static uint64_t BuildSceneViewUploadProducerStampStructuralKey(const nri_scene::SceneView& sceneView, uint64_t mapWorldBuildSerial)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, mapWorldBuildSerial);
-		hash = CoherencyHashCombine64(hash, (uint64_t)sceneView.primitiveFlags);
-		uint32_t materialIndex = 0;
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
-		{
-			hash = HashSceneViewUploadStampStructuralSurface(hash, surface, 0u, false, materialIndex++);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
-		{
-			hash = HashSceneViewUploadStampStructuralSurface(hash, surface, 1u, true, materialIndex++);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueSprites)
-		{
-			hash = HashSceneViewUploadStampStructuralSurface(hash, surface, 2u, false, materialIndex++);
-		}
-		hash = CoherencyHashCombine64(hash, (uint64_t)materialIndex);
-		return hash != 0 ? hash : 1;
-	}
-
-	static uint64_t HashSceneViewUploadStampExactSurface(
-		uint64_t hash,
-		const nri_scene::SurfaceRef& surface,
-		uint32_t surfaceKind,
-		bool triangleList,
-		uint32_t materialIndex,
-		uint32_t primitiveFlags,
-		uint64_t mapWorldBuildSerial)
-	{
-		hash = HashSceneViewUploadStampStructuralSurface(hash, surface, surfaceKind, triangleList, materialIndex);
-		hash = CoherencyHashCombine64(hash, (uint64_t)primitiveFlags);
-		hash = CoherencyHashCombine64(hash, (uint64_t)surface.material.flags);
-		hash = CoherencyHashCombine64(hash, mapWorldBuildSerial);
-		for (const nri_scene::CapturedVertex& vertex : surface.vertices)
-		{
-			hash = HashCapturedVertexStamp(hash, vertex);
-		}
-		for (uint32_t index : surface.indices)
-		{
-			hash = CoherencyHashCombine64(hash, (uint64_t)index);
-		}
-		return hash;
-	}
-
-	static uint64_t BuildSceneViewUploadProducerStampExactKey(const nri_scene::SceneView& sceneView, uint64_t mapWorldBuildSerial)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, mapWorldBuildSerial);
-		hash = CoherencyHashCombine64(hash, (uint64_t)sceneView.primitiveFlags);
-		uint32_t materialIndex = 0;
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
-		{
-			hash = HashSceneViewUploadStampExactSurface(hash, surface, 0u, false, materialIndex++, sceneView.primitiveFlags, mapWorldBuildSerial);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
-		{
-			hash = HashSceneViewUploadStampExactSurface(hash, surface, 1u, true, materialIndex++, sceneView.primitiveFlags, mapWorldBuildSerial);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueSprites)
-		{
-			hash = HashSceneViewUploadStampExactSurface(hash, surface, 2u, false, materialIndex++, sceneView.primitiveFlags, mapWorldBuildSerial);
-		}
-		hash = CoherencyHashCombine64(hash, (uint64_t)materialIndex);
-		return hash != 0 ? hash : 1;
-	}
-
-	static SceneViewUploadStampBuildResult BuildSceneViewUploadProducerStamp(
-		const nri_scene::SceneView& sceneView,
-		uint64_t mapWorldBuildSerial,
-		uint64_t precomputedStructuralKey = 0,
-		uint64_t precomputedExactKey = 0)
+	static SceneViewUploadStampBuildResult BuildSceneViewUploadProducerStamp(const nri_scene::SceneView& sceneView, uint64_t mapWorldBuildSerial)
 	{
 		SceneViewUploadStampBuildResult result = {};
-		result.structuralCacheKey = precomputedStructuralKey;
-		result.exactCacheKey = precomputedExactKey;
-		const bool computeStructuralKey = result.structuralCacheKey == 0;
-		const bool computeExactKey = result.exactCacheKey == 0;
-		if (computeStructuralKey)
-		{
-			result.structuralCacheKey = 1469598103934665603ull;
-			result.structuralCacheKey = CoherencyHashCombine64(result.structuralCacheKey, mapWorldBuildSerial);
-			result.structuralCacheKey = CoherencyHashCombine64(result.structuralCacheKey, (uint64_t)sceneView.primitiveFlags);
-		}
-		if (computeExactKey)
-		{
-			result.exactCacheKey = 1469598103934665603ull;
-			result.exactCacheKey = CoherencyHashCombine64(result.exactCacheKey, mapWorldBuildSerial);
-			result.exactCacheKey = CoherencyHashCombine64(result.exactCacheKey, (uint64_t)sceneView.primitiveFlags);
-		}
 		result.vertexPayloadStamp = 1469598103934665603ull;
 		result.indexPayloadStamp = 1469598103934665603ull;
 		result.primitivePayloadStamp = 1469598103934665603ull;
@@ -1946,26 +1839,6 @@ public:
 			result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, mapWorldBuildSerial);
 			result.primitiveProvenanceStamp = HashSurfaceProvenanceStamp(result.primitiveProvenanceStamp, surface.provenance);
 			result.materialPayloadStamp = HashMaterialRefStamp(result.materialPayloadStamp, surface.material);
-			if (computeStructuralKey)
-			{
-				result.structuralCacheKey = HashSceneViewUploadStampStructuralSurface(
-					result.structuralCacheKey,
-					surface,
-					surfaceKind,
-					triangleList,
-					materialIndex);
-			}
-			if (computeExactKey)
-			{
-				result.exactCacheKey = HashSceneViewUploadStampExactSurface(
-					result.exactCacheKey,
-					surface,
-					surfaceKind,
-					triangleList,
-					materialIndex,
-					sceneView.primitiveFlags,
-					mapWorldBuildSerial);
-			}
 			for (const nri_scene::CapturedVertex& vertex : surface.vertices)
 			{
 				result.vertexPayloadStamp = HashCapturedVertexStamp(result.vertexPayloadStamp, vertex);
@@ -1996,16 +1869,6 @@ public:
 		result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, (uint64_t)materialIndex);
 		result.primitiveProvenanceStamp = CoherencyHashCombine64(result.primitiveProvenanceStamp, (uint64_t)materialIndex);
 		result.materialPayloadStamp = CoherencyHashCombine64(result.materialPayloadStamp, (uint64_t)materialIndex);
-		if (computeStructuralKey)
-		{
-			result.structuralCacheKey = CoherencyHashCombine64(result.structuralCacheKey, (uint64_t)materialIndex);
-		}
-		if (computeExactKey)
-		{
-			result.exactCacheKey = CoherencyHashCombine64(result.exactCacheKey, (uint64_t)materialIndex);
-		}
-		result.structuralCacheKey = result.structuralCacheKey != 0 ? result.structuralCacheKey : 1;
-		result.exactCacheKey = result.exactCacheKey != 0 ? result.exactCacheKey : 1;
 		result.vertexPayloadStamp = result.vertexPayloadStamp != 0 ? result.vertexPayloadStamp : 1;
 		result.indexPayloadStamp = result.indexPayloadStamp != 0 ? result.indexPayloadStamp : 1;
 		result.primitivePayloadStamp = result.primitivePayloadStamp != 0 ? result.primitivePayloadStamp : 1;
@@ -8432,50 +8295,6 @@ void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint6
 	}
 }
 
-NRIRenderer::SceneBufferUploadProducerStamp NRIRenderer::BuildCachedSceneViewUploadProducerStamp(
-	const nri_scene::SceneView& sceneView,
-	SceneBufferUploadDomain domain)
-{
-	mLastPerfShellTraceStats.overlayProducerStampCacheChecks++;
-	const size_t cacheIndex = (size_t)domain;
-	SceneViewUploadProducerStampCacheEntry& cacheEntry = mSceneViewUploadProducerStampCache[cacheIndex];
-
-	uint64_t structuralKey = 0;
-	{
-		ScopedPtPerfTimer keyTimer(mLastPerfShellTraceStats.overlayProducerStampCacheKeyMs);
-		structuralKey = BuildSceneViewUploadProducerStampStructuralKey(sceneView, mMapWorld.buildSerial);
-	}
-
-	uint64_t exactKey = 0;
-	if (cacheEntry.valid && cacheEntry.structuralKey == structuralKey)
-	{
-		ScopedPtPerfTimer keyTimer(mLastPerfShellTraceStats.overlayProducerStampCacheKeyMs);
-		exactKey = BuildSceneViewUploadProducerStampExactKey(sceneView, mMapWorld.buildSerial);
-		if (cacheEntry.exactKey == exactKey)
-		{
-			mLastPerfShellTraceStats.overlayProducerStampCacheHits++;
-			return cacheEntry.stamp;
-		}
-	}
-
-	mLastPerfShellTraceStats.overlayProducerStampCacheMisses++;
-	SceneViewUploadStampBuildResult built = {};
-	{
-		ScopedPtPerfTimer buildTimer(mLastPerfShellTraceStats.overlayProducerStampCacheBuildMs);
-		built = BuildSceneViewUploadProducerStamp(sceneView, mMapWorld.buildSerial, structuralKey, exactKey);
-	}
-
-	cacheEntry.valid = true;
-	cacheEntry.structuralKey = built.structuralCacheKey;
-	cacheEntry.exactKey = built.exactCacheKey;
-	cacheEntry.stamp.vertexPayloadStamp = built.vertexPayloadStamp;
-	cacheEntry.stamp.indexPayloadStamp = built.indexPayloadStamp;
-	cacheEntry.stamp.primitivePayloadStamp = built.primitivePayloadStamp;
-	cacheEntry.stamp.primitiveProvenanceStamp = built.primitiveProvenanceStamp;
-	cacheEntry.stamp.materialPayloadStamp = built.materialPayloadStamp;
-	return cacheEntry.stamp;
-}
-
 bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 {
 	if ((drawmode != DM_MAINVIEW && drawmode != DM_OFFSCREEN) || portal || mFrameBuffer == nullptr ||
@@ -9241,12 +9060,24 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				{
 					ScopedPtPerfTimer sourceAggregateTimer(mLastPerfShellTraceStats.overlayAppendSourcesMs);
 
+					const auto buildProducerStamp =
+						[&](const nri_scene::SceneView& sceneView) -> SceneBufferUploadProducerStamp
+					{
+						const SceneViewUploadStampBuildResult built = BuildSceneViewUploadProducerStamp(sceneView, mMapWorld.buildSerial);
+						SceneBufferUploadProducerStamp stamp = {};
+						stamp.vertexPayloadStamp = built.vertexPayloadStamp;
+						stamp.indexPayloadStamp = built.indexPayloadStamp;
+						stamp.primitivePayloadStamp = built.primitivePayloadStamp;
+						stamp.primitiveProvenanceStamp = built.primitiveProvenanceStamp;
+						stamp.materialPayloadStamp = built.materialPayloadStamp;
+						return stamp;
+					};
 					const SceneBufferUploadProducerStamp dynamicStamp =
-						hasActiveDynamicOverlay && activeDynamicSceneView != nullptr ? BuildCachedSceneViewUploadProducerStamp(*activeDynamicSceneView, SceneBufferUploadDomain::Dynamic) : SceneBufferUploadProducerStamp {};
+						hasActiveDynamicOverlay && activeDynamicSceneView != nullptr ? buildProducerStamp(*activeDynamicSceneView) : SceneBufferUploadProducerStamp {};
 					const SceneBufferUploadProducerStamp mirrorExtendedStamp =
-						hasMirrorExtendedDynamicOverlay ? BuildCachedSceneViewUploadProducerStamp(mirrorExtendedDynamicSceneView, SceneBufferUploadDomain::MirrorExtended) : SceneBufferUploadProducerStamp {};
+						hasMirrorExtendedDynamicOverlay ? buildProducerStamp(mirrorExtendedDynamicSceneView) : SceneBufferUploadProducerStamp {};
 					const SceneBufferUploadProducerStamp mirrorPlayerStamp =
-						hasMirrorPlayerOverlay ? BuildCachedSceneViewUploadProducerStamp(mirrorPlayerSceneView, SceneBufferUploadDomain::MirrorPlayer) : SceneBufferUploadProducerStamp {};
+						hasMirrorPlayerOverlay ? buildProducerStamp(mirrorPlayerSceneView) : SceneBufferUploadProducerStamp {};
 
 					if (hasRuntimeSpaceLinkOverlay)
 					{

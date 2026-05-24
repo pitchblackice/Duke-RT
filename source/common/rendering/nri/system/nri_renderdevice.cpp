@@ -3882,18 +3882,13 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectStateCommitMs;
 		const double overlayPathResidualMs = shell.overlayAssembleMs - overlayPathAccountedMs;
 		Printf(
-			"PERF pt overlay detail NRI: frame=%llu total=%.3f append=%.3f append_reset=%.3f append_sources=%.3f append_bookkeeping=%.3f stamp_key=%.3f stamp_build=%.3f stamp_checks=%u stamp_hits=%u stamp_misses=%u spacelink=%.3f spacelink_geo=%.3f spacelink_mat=%.3f spacelink_prims=%u spacelink_mats=%u mutation=%.3f mutation_geo=%.3f mutation_mat=%.3f mutation_prims=%u mutation_mats=%u dynamic=%.3f dynamic_geo=%.3f dynamic_mat=%.3f dynamic_prims=%u dynamic_mats=%u mirror_ext=%.3f mirror_ext_geo=%.3f mirror_ext_mat=%.3f mirror_ext_prims=%u mirror_ext_mats=%u mirror_player=%.3f mirror_player_geo=%.3f mirror_player_mat=%.3f mirror_player_prims=%u mirror_player_mats=%u debug_sphere=%.3f debug_sphere_geo=%.3f debug_sphere_mat=%.3f debug_sphere_prims=%u debug_sphere_mats=%u persistent_voxel_actors=%u persistent_voxel_prims=%u persistent_voxel_mats=%u overlay_prims=%u overlay_mats=%u\n",
+			"PERF pt overlay detail NRI: frame=%llu total=%.3f append=%.3f append_reset=%.3f append_sources=%.3f append_bookkeeping=%.3f spacelink=%.3f spacelink_geo=%.3f spacelink_mat=%.3f spacelink_prims=%u spacelink_mats=%u mutation=%.3f mutation_geo=%.3f mutation_mat=%.3f mutation_prims=%u mutation_mats=%u dynamic=%.3f dynamic_geo=%.3f dynamic_mat=%.3f dynamic_prims=%u dynamic_mats=%u mirror_ext=%.3f mirror_ext_geo=%.3f mirror_ext_mat=%.3f mirror_ext_prims=%u mirror_ext_mats=%u mirror_player=%.3f mirror_player_geo=%.3f mirror_player_mat=%.3f mirror_player_prims=%u mirror_player_mats=%u debug_sphere=%.3f debug_sphere_geo=%.3f debug_sphere_mat=%.3f debug_sphere_prims=%u debug_sphere_mats=%u persistent_voxel_actors=%u persistent_voxel_prims=%u persistent_voxel_mats=%u overlay_prims=%u overlay_mats=%u\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.overlayAssembleMs,
 			shell.overlayAppendMs,
 			shell.overlayAppendResetMs,
 			shell.overlayAppendSourcesMs,
 			shell.overlayAppendBookkeepingMs,
-			shell.overlayProducerStampCacheKeyMs,
-			shell.overlayProducerStampCacheBuildMs,
-			shell.overlayProducerStampCacheChecks,
-			shell.overlayProducerStampCacheHits,
-			shell.overlayProducerStampCacheMisses,
 			shell.overlayRuntimeSpaceLinkMs,
 			shell.overlayRuntimeSpaceLinkGeometryMs,
 			shell.overlayRuntimeSpaceLinkMaterialMs,
