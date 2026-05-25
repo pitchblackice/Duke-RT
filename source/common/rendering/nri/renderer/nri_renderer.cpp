@@ -12075,6 +12075,10 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mPersistentVoxelPrimitiveBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mPersistentVoxelMaterialBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mTlasInstanceBuffer, telemetry.sceneBufferBytes);
+	for (const NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
+	{
+		accumulateBuffer(tlasInstanceBuffer, telemetry.sceneBufferBytes);
+	}
 	accumulateBuffer(mSceneInstanceBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mPortalBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mRuntimeLightBuffer, telemetry.sceneBufferBytes);
@@ -24721,6 +24725,20 @@ NRIBufferResource& NRIRenderer::GetCurrentDynamicMaterialBuffer()
 	return GetCurrentSceneUploadBufferRingSlot().materialBuffer;
 }
 
+NRIBufferResource& NRIRenderer::GetCurrentTlasInstanceBuffer()
+{
+	const uint32_t queuedFrameCount =
+		mFrameBuffer != nullptr && !mFrameBuffer->mQueuedFrames.empty() ?
+		(uint32_t)mFrameBuffer->mQueuedFrames.size() :
+		1u;
+	if (mTlasInstanceBufferRing.size() < queuedFrameCount)
+	{
+		mTlasInstanceBufferRing.resize(queuedFrameCount);
+	}
+
+	return mTlasInstanceBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mTlasInstanceBufferRing.size()];
+}
+
 const NRIBufferResource& NRIRenderer::GetCurrentDynamicVertexBuffer() const
 {
 	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
@@ -24743,6 +24761,16 @@ const NRIBufferResource& NRIRenderer::GetCurrentDynamicMaterialBuffer() const
 {
 	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
 	return slot != nullptr ? slot->materialBuffer : mMaterialBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentTlasInstanceBuffer() const
+{
+	if (mTlasInstanceBufferRing.empty())
+	{
+		return mTlasInstanceBuffer;
+	}
+
+	return mTlasInstanceBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mTlasInstanceBufferRing.size()];
 }
 
 NRIRenderer::ResidentUploadScratchFrame& NRIRenderer::GetResidentUploadScratchFrame()
@@ -27467,7 +27495,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 			&staticResources.vertexBuffer,
 			&staticResources.indexBuffer,
 			&staticResources.tlasInstanceCount,
-			updateLiveState);
+			updateLiveState,
+			false);
 }
 
 void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
@@ -33753,11 +33782,12 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopL
 		instances,
 		sceneBufferMask,
 		mTopLevelAS,
-		mTlasInstanceBuffer,
+		GetCurrentTlasInstanceBuffer(),
 		mTopLevelScratchBuffer,
 		&mStaticVertexBuffer,
 		&mStaticIndexBuffer,
 		&mActiveTlasInstanceCount,
+		true,
 		true);
 }
 
@@ -33770,7 +33800,8 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	const NRIBufferResource* staticVertexBuffer,
 	const NRIBufferResource* staticIndexBuffer,
 	uint32_t* outTlasInstanceCount,
-	bool updateLiveState)
+	bool updateLiveState,
+	bool tlasInstanceWritesQuiesced)
 {
 	Clocker clock(NriPTAcceleration);
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.worldTlasMs);
@@ -33791,7 +33822,7 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 		sizeof(nri::TopLevelInstance),
 		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
 		NRIAccelerationStructureBuildInputAccess(),
-		false,
+		tlasInstanceWritesQuiesced,
 		"world_tlas_instance_upload"))
 	{
 		return false;
@@ -35638,6 +35669,11 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
+	for (NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
+	{
+		DestroyBufferResource(tlasInstanceBuffer);
+	}
+	mTlasInstanceBufferRing.clear();
 	for (auto& frameScratch : mResidentUploadScratchFrames)
 	{
 		DestroyBufferResource(frameScratch.vertex.buffer);

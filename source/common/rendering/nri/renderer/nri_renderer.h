@@ -2438,7 +2438,8 @@ private:
 		const NRIBufferResource* staticVertexBuffer,
 		const NRIBufferResource* staticIndexBuffer,
 		uint32_t* outTlasInstanceCount,
-		bool updateLiveState);
+		bool updateLiveState,
+		bool tlasInstanceWritesQuiesced);
 	bool BuildEmissiveTopLevelAccelerationStructure();
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
 	bool BuildDynamicAccelerationStructure(
@@ -2557,10 +2558,12 @@ private:
 	NRIBufferResource& GetCurrentDynamicIndexBuffer();
 	NRIBufferResource& GetCurrentDynamicPrimitiveBuffer();
 	NRIBufferResource& GetCurrentDynamicMaterialBuffer();
+	NRIBufferResource& GetCurrentTlasInstanceBuffer();
 	const NRIBufferResource& GetCurrentDynamicVertexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicIndexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicPrimitiveBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicMaterialBuffer() const;
+	const NRIBufferResource& GetCurrentTlasInstanceBuffer() const;
 	ResidentUploadScratchFrame& GetResidentUploadScratchFrame();
 	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
 	nri::DescriptorSet* GetCurrentSceneDataSet() const;
@@ -2752,6 +2755,7 @@ private:
 	NRIBufferResource mPersistentVoxelPrimitiveBuffer;
 	NRIBufferResource mPersistentVoxelMaterialBuffer;
 	NRIBufferResource mTlasInstanceBuffer;
+	std::vector<NRIBufferResource> mTlasInstanceBufferRing;
 	NRIBufferResource mSceneInstanceBuffer;
 	NRIBufferResource mPortalBuffer;
 	NRIBufferResource mRuntimeLightBuffer;
