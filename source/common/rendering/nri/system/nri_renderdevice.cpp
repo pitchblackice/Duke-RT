@@ -4249,6 +4249,58 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectStateCommitDynamicStateMs,
 			shell.sceneSelectStateCommitGeometryStateMs,
 			shell.sceneSelectStateCommitStatsMs);
+		const double stateCommitTopAccounted =
+			shell.sceneSelectStateCommitFlagsMs +
+			shell.sceneSelectStateCommitDynamicStateMs +
+			shell.sceneSelectStateCommitGeometryStateMs +
+			shell.sceneSelectStateCommitStatsMs;
+		const double stateCommitItemizedAccounted =
+			shell.sceneSelectStateCommitFlagsMs +
+			shell.sceneSelectStateCommitDynamicCoreMs +
+			shell.sceneSelectStateCommitDynamicMirrorExtendedMs +
+			shell.sceneSelectStateCommitDynamicMirrorPlayerMs +
+			shell.sceneSelectStateCommitGeometrySelectMs +
+			shell.sceneSelectStateCommitGeometryStaticCopyMs +
+			shell.sceneSelectStateCommitGeometryAppendMs +
+			shell.sceneSelectStateCommitStatsBaseMs +
+			shell.sceneSelectStateCommitStatsPersistentVoxelMs +
+			shell.sceneSelectStateCommitStatsMirrorExtendedMs +
+			shell.sceneSelectStateCommitStatsMirrorPlayerMs +
+			shell.sceneSelectStateCommitStatsMergeMs;
+		Printf(
+			"PERF pt state commit detail NRI: frame=%llu total=%.3f top_accounted=%.3f top_residual=%.3f itemized_accounted=%.3f itemized_residual=%.3f flags=%.3f dynamic=%.3f dynamic_core=%.3f dynamic_mirror_extended=%.3f dynamic_mirror_player=%.3f geometry=%.3f geometry_select=%.3f geometry_static_copy=%.3f geometry_append=%.3f stats=%.3f stats_base=%.3f stats_persistent_voxel=%.3f stats_mirror_extended=%.3f stats_mirror_player=%.3f stats_merge=%.3f selected_dynamic=%u active_dynamic=%u mirror_extended=%u mirror_player=%u geometry_combined=%u geometry_static_only=%u stats_persistent_voxel_count=%u stats_mirror_extended_count=%u stats_mirror_player_count=%u combined_prims=%u combined_mats=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneSelectStateCommitMs,
+			stateCommitTopAccounted,
+			shell.sceneSelectStateCommitMs - stateCommitTopAccounted,
+			stateCommitItemizedAccounted,
+			shell.sceneSelectStateCommitMs - stateCommitItemizedAccounted,
+			shell.sceneSelectStateCommitFlagsMs,
+			shell.sceneSelectStateCommitDynamicStateMs,
+			shell.sceneSelectStateCommitDynamicCoreMs,
+			shell.sceneSelectStateCommitDynamicMirrorExtendedMs,
+			shell.sceneSelectStateCommitDynamicMirrorPlayerMs,
+			shell.sceneSelectStateCommitGeometryStateMs,
+			shell.sceneSelectStateCommitGeometrySelectMs,
+			shell.sceneSelectStateCommitGeometryStaticCopyMs,
+			shell.sceneSelectStateCommitGeometryAppendMs,
+			shell.sceneSelectStateCommitStatsMs,
+			shell.sceneSelectStateCommitStatsBaseMs,
+			shell.sceneSelectStateCommitStatsPersistentVoxelMs,
+			shell.sceneSelectStateCommitStatsMirrorExtendedMs,
+			shell.sceneSelectStateCommitStatsMirrorPlayerMs,
+			shell.sceneSelectStateCommitStatsMergeMs,
+			shell.sceneSelectStateCommitSelectedDynamic,
+			shell.sceneSelectStateCommitActiveDynamic,
+			shell.sceneSelectStateCommitMirrorExtended,
+			shell.sceneSelectStateCommitMirrorPlayer,
+			shell.sceneSelectStateCommitGeometryCombined,
+			shell.sceneSelectStateCommitGeometryStaticOnly,
+			shell.sceneSelectStateCommitStatsPersistentVoxel,
+			shell.sceneSelectStateCommitStatsMirrorExtended,
+			shell.sceneSelectStateCommitStatsMirrorPlayer,
+			shell.sceneSelectStateCommitCombinedPrimitiveCount,
+			shell.sceneSelectStateCommitCombinedMaterialCount);
 		Printf(
 			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u voxel_stores=%u voxel_rebuilds=%u voxel_deferred=%u mesh_builds=%u mesh_deferred=%u mesh_invalid=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f model_classify=%.3f model_mesh=%.3f model_surface=%.3f model_store=%.3f voxel_frame=%.3f stats=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,

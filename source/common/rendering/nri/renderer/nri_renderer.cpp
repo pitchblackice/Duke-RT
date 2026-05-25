@@ -9934,63 +9934,93 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					ScopedPtPerfTimer stateFlagsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitFlagsMs);
 					mUsedDynamicSceneLastFrame = selectedSceneHasDynamicOverlay;
 					mGpuSceneHasDynamicOverlay = selectedSceneHasDynamicOverlay;
+					mLastPerfShellTraceStats.sceneSelectStateCommitSelectedDynamic = selectedSceneHasDynamicOverlay ? 1u : 0u;
 				}
 				{
 					ScopedPtPerfTimer dynamicStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicStateMs);
 					if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
 					{
+						ScopedPtPerfTimer dynamicCoreTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicCoreMs);
 						mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)activeDynamicSceneView->opaqueSprites.size();
 						mDynamicSceneLastFrame.primitiveCount = (uint32_t)activeDynamicGeometry->primitives.size();
 						mDynamicSceneLastFrame.materialCount = (uint32_t)activeDynamicMaterials->materials.size();
 						mDynamicSceneLastFrame.modelCount = activeDynamicSceneView->stats.modelDrawItems;
 						mDynamicSceneLastFrame.unsupportedModelCount = activeDynamicSceneView->stats.unsupportedModelDrawItems;
+						mLastPerfShellTraceStats.sceneSelectStateCommitActiveDynamic = 1;
 					}
 					if (hasMirrorExtendedDynamicScene)
 					{
+						ScopedPtPerfTimer mirrorExtendedTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorExtendedMs);
 						mDynamicSceneLastFrame.mirrorExtendedSurfaceCount = CountSceneViewSurfaces(mirrorExtendedDynamicSceneView);
 						mDynamicSceneLastFrame.mirrorExtendedPrimitiveCount = (uint32_t)mirrorExtendedDynamicGeometry.primitives.size();
 						mDynamicSceneLastFrame.mirrorExtendedMaterialCount = (uint32_t)mirrorExtendedDynamicMaterialBridge.materials.size();
 						mDynamicSceneLastFrame.mirrorExtendedModelCount = mirrorExtendedDynamicSceneView.stats.modelDrawItems;
 						mDynamicSceneLastFrame.mirrorExtendedUnsupportedModelCount = mirrorExtendedDynamicSceneView.stats.unsupportedModelDrawItems;
+						mLastPerfShellTraceStats.sceneSelectStateCommitMirrorExtended = 1;
 					}
 					if (hasMirrorPlayerScene)
 					{
+						ScopedPtPerfTimer mirrorPlayerTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorPlayerMs);
 						mDynamicSceneLastFrame.mirrorPlayerSurfaceCount = CountSceneViewSurfaces(mirrorPlayerSceneView);
 						mDynamicSceneLastFrame.mirrorPlayerPrimitiveCount = (uint32_t)mirrorPlayerGeometry.primitives.size();
 						mDynamicSceneLastFrame.mirrorPlayerMaterialCount = (uint32_t)mirrorPlayerMaterialBridge.materials.size();
 						mDynamicSceneLastFrame.mirrorPlayerModelCount = mirrorPlayerSceneView.stats.modelDrawItems;
 						mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount = mirrorPlayerSceneView.stats.unsupportedModelDrawItems;
+						mLastPerfShellTraceStats.sceneSelectStateCommitMirrorPlayer = 1;
 					}
 				}
 				{
 					ScopedPtPerfTimer geometryStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStateMs);
 					if (!overlayGeometry.primitives.empty())
 					{
-						combinedGeometry = mStaticMapScene.geometry;
-						activeStaticProbePrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
-						AppendGeometry(overlayGeometry, (uint32_t)mStaticMapScene.materialBridge.materials.size(), combinedGeometry);
-						activeGeometry = &combinedGeometry;
-						activeGpuMaterials = &combinedGpuMaterials;
-						activeMaterialBridge = &combinedMaterialBridge;
+						mLastPerfShellTraceStats.sceneSelectStateCommitGeometryCombined = 1;
+						{
+							ScopedPtPerfTimer copyTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStaticCopyMs);
+							combinedGeometry = mStaticMapScene.geometry;
+						}
+						{
+							ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryAppendMs);
+							AppendGeometry(overlayGeometry, (uint32_t)mStaticMapScene.materialBridge.materials.size(), combinedGeometry);
+						}
+						{
+							ScopedPtPerfTimer selectTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometrySelectMs);
+							activeStaticProbePrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
+							activeGeometry = &combinedGeometry;
+							activeGpuMaterials = &combinedGpuMaterials;
+							activeMaterialBridge = &combinedMaterialBridge;
+							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedPrimitiveCount = (uint32_t)combinedGeometry.primitives.size();
+							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedMaterialCount = (uint32_t)combinedGpuMaterials.size();
+						}
 					}
 					else
 					{
-						activeGeometry = &mStaticMapScene.geometry;
-						activeGpuMaterials = &mStaticMapScene.gpuMaterials;
-						activeMaterialBridge = &mStaticMapScene.materialBridge;
+						mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStaticOnly = 1;
+						{
+							ScopedPtPerfTimer selectTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometrySelectMs);
+							activeGeometry = &mStaticMapScene.geometry;
+							activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+							activeMaterialBridge = &mStaticMapScene.materialBridge;
+							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedPrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
+							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedMaterialCount = (uint32_t)mStaticMapScene.gpuMaterials.size();
+						}
 					}
 				}
 
 				{
 					ScopedPtPerfTimer statsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMs);
-					nri_scene::SceneDebugStats dynamicOverlayStats =
-						!deferOverlayThisFrame ? dynamicSceneView.stats : nri_scene::SceneDebugStats{};
-					if (activeDynamicSceneView != nullptr)
+					nri_scene::SceneDebugStats dynamicOverlayStats;
 					{
-						dynamicOverlayStats = activeDynamicSceneView->stats;
+						ScopedPtPerfTimer baseStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsBaseMs);
+						dynamicOverlayStats =
+							!deferOverlayThisFrame ? dynamicSceneView.stats : nri_scene::SceneDebugStats{};
+						if (activeDynamicSceneView != nullptr)
+						{
+							dynamicOverlayStats = activeDynamicSceneView->stats;
+						}
 					}
 					if (hasPersistentVoxelOverlay)
 					{
+						ScopedPtPerfTimer persistentVoxelStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxelMs);
 						nri_scene::SceneDebugStats persistentVoxelStats = mPersistentVoxelBatch.stats;
 						persistentVoxelStats.voxelStableCandidates = 0;
 						persistentVoxelStats.voxelStableUncacheable = 0;
@@ -10008,16 +10038,24 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						persistentVoxelStats.voxelCacheNotCaptured = 0;
 						persistentVoxelStats.voxelCachePrimitives = 0;
 						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, persistentVoxelStats);
+						mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxel = 1;
 					}
 					if (hasMirrorExtendedDynamicScene)
 					{
+						ScopedPtPerfTimer mirrorExtendedStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtendedMs);
 						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorExtendedDynamicSceneView.stats);
+						mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtended = 1;
 					}
 					if (hasMirrorPlayerScene)
 					{
+						ScopedPtPerfTimer mirrorPlayerStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayerMs);
 						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorPlayerSceneView.stats);
+						mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayer = 1;
 					}
-					activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
+					{
+						ScopedPtPerfTimer mergeStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMergeMs);
+						activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
+					}
 				}
 			}
 			else
