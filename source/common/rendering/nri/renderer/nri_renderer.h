@@ -465,6 +465,11 @@ public:
 		uint32_t sceneSelectBufferUploadPrimitiveOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadMaterialOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialUploads = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatches = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatchRanges = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatchRejects = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatchCopyCommands = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashChecks = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashHits = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashSkips = 0;
@@ -530,11 +535,13 @@ public:
 		uint64_t sceneSelectBufferUploadPrimitiveRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadMaterialRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialRequestedBytes = 0;
+		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialDirtyBytes = 0;
 		uint64_t sceneSelectBufferUploadVertexUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadIndexUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadPrimitiveUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadMaterialUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialUploadedBytes = 0;
+		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialBatchGapBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeChangedBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeGapBytes = 0;
@@ -2631,6 +2638,7 @@ private:
 	bool QueueRuntimeMutationResidentGeometryUploadRange(int uploadKind, uint64_t byteOffset, uint64_t size);
 	bool FlushRuntimeMutationResidentGeometryUploadRanges();
 	bool StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges);
+	bool StagePersistentVoxelMaterialUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges, const uint8_t* data, uint64_t availableBytes);
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);

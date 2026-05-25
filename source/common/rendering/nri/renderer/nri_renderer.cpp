@@ -18099,6 +18099,19 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		return false;
 	}
 
+	struct PendingMaterialUpload
+	{
+		PersistentVoxelMaterialVariantResource* resource = nullptr;
+		uint64_t materialHash = 0;
+	};
+
+	std::vector<RuntimeMutationResidentUploadRange> dirtyMaterialRanges;
+	std::vector<PendingMaterialUpload> pendingMaterialUploads;
+	dirtyMaterialRanges.reserve(mPersistentVoxelMaterialVariantResources.size());
+	pendingMaterialUploads.reserve(mPersistentVoxelMaterialVariantResources.size());
+	auto& persistentVoxelDomain =
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDomains[(size_t)SceneBufferUploadDomain::PersistentVoxelMaterial];
+
 	for (auto& pair : mPersistentVoxelMaterialVariantResources)
 	{
 		PersistentVoxelMaterialVariantResource& resource = pair.second;
@@ -18114,8 +18127,6 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		const nri_scene::MaterialData* actorMaterials = materials.data() + resource.materialOffset;
 		const uint64_t materialSize = (uint64_t)resource.materialCount * sizeof(nri_scene::MaterialData);
 		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialRequestedBytes += materialSize;
-		auto& persistentVoxelDomain =
-			mLastPerfShellTraceStats.sceneSelectBufferUploadDomains[(size_t)SceneBufferUploadDomain::PersistentVoxelMaterial];
 		persistentVoxelDomain.payloadBytes += materialSize;
 		persistentVoxelDomain.materialPayloadBytes += materialSize;
 		persistentVoxelDomain.hashChecks++;
@@ -18129,40 +18140,117 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		if (uploadMaterials)
 		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialUploads++;
-			mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialUploadedBytes += materialSize;
-			persistentVoxelDomain.uploadedBytes += materialSize;
-			persistentVoxelDomain.materialUploadedBytes += materialSize;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialDirtyBytes += materialSize;
+			dirtyMaterialRanges.push_back({
+				ResidentUploadKind_Material,
+				(uint64_t)resource.materialOffset * sizeof(nri_scene::MaterialData),
+				materialSize,
+				materialSize });
+			pendingMaterialUploads.push_back({ &resource, materialHash });
+		}
+		else
+		{
+			resource.materialUploadHash = materialHash;
+		}
+	}
+
+	if (!dirtyMaterialRanges.empty())
+	{
+		constexpr uint64_t kMaterialUploadCoalesceMaxGapBytes = 4ull * 1024ull;
+		constexpr uint64_t kMaterialUploadCoalesceMaxByteExpansion = 2ull;
+		std::sort(
+			dirtyMaterialRanges.begin(),
+			dirtyMaterialRanges.end(),
+			[](const RuntimeMutationResidentUploadRange& a, const RuntimeMutationResidentUploadRange& b)
+			{
+				return a.byteOffset < b.byteOffset;
+			});
+
+		std::vector<RuntimeMutationResidentUploadRange> coalescedRanges;
+		coalescedRanges.reserve(dirtyMaterialRanges.size());
+		for (const RuntimeMutationResidentUploadRange& range : dirtyMaterialRanges)
+		{
+			if (coalescedRanges.empty())
+			{
+				coalescedRanges.push_back(range);
+				continue;
+			}
+
+			RuntimeMutationResidentUploadRange& tail = coalescedRanges.back();
+			const uint64_t tailEnd = tail.byteOffset + tail.size;
+			const uint64_t rangeEnd = range.byteOffset + range.size;
+			const uint64_t gapBytes = range.byteOffset > tailEnd ? range.byteOffset - tailEnd : 0;
+			const uint64_t candidateSize = rangeEnd > tailEnd ? rangeEnd - tail.byteOffset : tail.size;
+			const uint64_t candidateDirtySize = tail.dirtySize + range.size;
+			const bool acceptableByteExpansion =
+				candidateDirtySize > UINT64_MAX / kMaterialUploadCoalesceMaxByteExpansion ||
+				candidateSize <= candidateDirtySize * kMaterialUploadCoalesceMaxByteExpansion;
+			if (gapBytes <= kMaterialUploadCoalesceMaxGapBytes && acceptableByteExpansion)
+			{
+				if (rangeEnd > tailEnd)
+				{
+					tail.size = rangeEnd - tail.byteOffset;
+				}
+				tail.dirtySize += range.size;
+				continue;
+			}
+
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchRejects++;
+			coalescedRanges.push_back(range);
+		}
+
+		uint64_t uploadedBytes = 0;
+		for (const RuntimeMutationResidentUploadRange& range : coalescedRanges)
+		{
+			uploadedBytes += range.size;
+			if (range.size > range.dirtySize)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchGapBytes += range.size - range.dirtySize;
+			}
 			NotePerfBufferUpload(
 				&mMaterialBufferStats,
-				materialSize,
+				range.size,
 				false,
 				"persistent_voxel_material_variant",
 				ResidentUploadKind_Material);
-			if (!StageResidentBufferCopyRange(
-				mPersistentVoxelMaterialBuffer,
-				(uint64_t)resource.materialOffset * sizeof(nri_scene::MaterialData),
-				actorMaterials,
-				materialSize,
-				NRIComputeShaderResourceAccess(),
-				ResidentUploadKind_Material))
-			{
-				return false;
-			}
 		}
 
-		resource.materialUploadHash = materialHash;
-		if (uploadMaterials && (bool)nri_voxelstats)
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialUploadedBytes += uploadedBytes;
+		persistentVoxelDomain.uploadedBytes += uploadedBytes;
+		persistentVoxelDomain.materialUploadedBytes += uploadedBytes;
+
+		const uint64_t materialArenaSize = materials.size() * sizeof(nri_scene::MaterialData);
+		if (!StagePersistentVoxelMaterialUploadRanges(
+			coalescedRanges,
+			reinterpret_cast<const uint8_t*>(materials.data()),
+			materialArenaSize))
 		{
-			Printf("PERF pt voxel material variant NRI: frame=%u action=upload reason=arena-sync actor_key=0x0 mat_key=0x%llx ref_count=0 material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx upload_bytes=%llu ready=1\n",
-				mFrameIndex,
-				(unsigned long long)resource.materialKeyHash,
-				resource.materialOffset,
-				resource.materialCount,
-				resource.materialCapacity,
-				(unsigned long long)resource.materialUploadHash,
-				(unsigned long long)materialSize);
+			return false;
+		}
+
+		for (const PendingMaterialUpload& upload : pendingMaterialUploads)
+		{
+			if (upload.resource == nullptr)
+			{
+				continue;
+			}
+			upload.resource->materialUploadHash = upload.materialHash;
+			if ((bool)nri_voxelstats)
+			{
+				const uint64_t materialSize =
+					(uint64_t)upload.resource->materialCount * sizeof(nri_scene::MaterialData);
+				Printf("PERF pt voxel material variant NRI: frame=%u action=upload reason=arena-sync actor_key=0x0 mat_key=0x%llx ref_count=0 material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx upload_bytes=%llu ready=1\n",
+					mFrameIndex,
+					(unsigned long long)upload.resource->materialKeyHash,
+					upload.resource->materialOffset,
+					upload.resource->materialCount,
+					upload.resource->materialCapacity,
+					(unsigned long long)upload.materialHash,
+					(unsigned long long)materialSize);
+			}
 		}
 	}
+
 	return true;
 }
 
@@ -25261,6 +25349,145 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterCopyBarrierDesc);
 
 	scratch->cursor = scratchOffset + size;
+	return true;
+}
+
+bool NRIRenderer::StagePersistentVoxelMaterialUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges, const uint8_t* data, uint64_t availableBytes)
+{
+	if (ranges.empty())
+	{
+		return true;
+	}
+
+	if (mPersistentVoxelMaterialBuffer.buffer == nullptr ||
+		data == nullptr ||
+		mFrameBuffer == nullptr ||
+		mFrameBuffer->mCommandBuffer == nullptr)
+	{
+		return false;
+	}
+
+	constexpr uint64_t kResidentUploadScratchAlignment = 16u;
+	auto& frameScratch = GetResidentUploadScratchFrame();
+	ResidentBufferUploadScratch& scratch = frameScratch.material;
+	uint64_t requiredSize = scratch.cursor;
+	for (const RuntimeMutationResidentUploadRange& range : ranges)
+	{
+		if (range.uploadKind != ResidentUploadKind_Material ||
+			range.size == 0 ||
+			range.byteOffset > availableBytes ||
+			range.size > availableBytes - range.byteOffset ||
+			range.byteOffset > mPersistentVoxelMaterialBuffer.size ||
+			range.size > mPersistentVoxelMaterialBuffer.size - range.byteOffset)
+		{
+			return false;
+		}
+
+		requiredSize =
+			(requiredSize + kResidentUploadScratchAlignment - 1u) &
+			~(kResidentUploadScratchAlignment - 1u);
+		requiredSize += range.size;
+	}
+
+	if (!EnsureResidentUploadScratchBuffer(scratch, frameScratch, requiredSize))
+	{
+		return false;
+	}
+
+	struct StagedCopy
+	{
+		uint64_t targetOffset = 0;
+		uint64_t scratchOffset = 0;
+		uint64_t size = 0;
+		const uint8_t* data = nullptr;
+	};
+
+	std::vector<StagedCopy> stagedCopies;
+	stagedCopies.reserve(ranges.size());
+	uint64_t mapStart = UINT64_MAX;
+	uint64_t mapEnd = 0;
+	for (const RuntimeMutationResidentUploadRange& range : ranges)
+	{
+		const uint64_t scratchOffset =
+			(scratch.cursor + kResidentUploadScratchAlignment - 1u) &
+			~(kResidentUploadScratchAlignment - 1u);
+		const uint64_t rangeEnd = scratchOffset + range.size;
+		if (rangeEnd > scratch.buffer.size)
+		{
+			return false;
+		}
+
+		scratch.cursor = rangeEnd;
+		mapStart = std::min(mapStart, scratchOffset);
+		mapEnd = std::max(mapEnd, rangeEnd);
+		stagedCopies.push_back({ range.byteOffset, scratchOffset, range.size, data + range.byteOffset });
+	}
+
+	const uint64_t mapSize = mapEnd - mapStart;
+	void* mapped = mFrameBuffer->mCore.MapBuffer(*scratch.buffer.buffer, mapStart, mapSize);
+	if (mapped == nullptr)
+	{
+		return false;
+	}
+
+	for (const StagedCopy& copy : stagedCopies)
+	{
+		std::memcpy(static_cast<uint8_t*>(mapped) + (copy.scratchOffset - mapStart), copy.data, (size_t)copy.size);
+	}
+	mFrameBuffer->mCore.UnmapBuffer(*scratch.buffer.buffer);
+
+	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatches++;
+	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchRanges += (uint32_t)stagedCopies.size();
+
+	if (!scratch.copySourceActive)
+	{
+		nri::BufferBarrierDesc sourceBarrier = {};
+		sourceBarrier.buffer = scratch.buffer.buffer;
+		sourceBarrier.before = {};
+		sourceBarrier.after = NRICopySourceAccess();
+
+		nri::BarrierDesc sourceBarrierDesc = {};
+		sourceBarrierDesc.buffers = &sourceBarrier;
+		sourceBarrierDesc.bufferNum = 1;
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, sourceBarrierDesc);
+		scratch.copySourceActive = true;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands++;
+	}
+
+	nri::BufferBarrierDesc beforeCopyBarrier = {};
+	beforeCopyBarrier.buffer = mPersistentVoxelMaterialBuffer.buffer;
+	beforeCopyBarrier.before = NRIComputeShaderResourceAccess();
+	beforeCopyBarrier.after = NRICopyDestinationAccess();
+
+	nri::BarrierDesc beforeCopyBarrierDesc = {};
+	beforeCopyBarrierDesc.buffers = &beforeCopyBarrier;
+	beforeCopyBarrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeCopyBarrierDesc);
+	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands++;
+
+	for (const StagedCopy& copy : stagedCopies)
+	{
+		mFrameBuffer->mCore.CmdCopyBuffer(
+			*mFrameBuffer->mCommandBuffer,
+			*mPersistentVoxelMaterialBuffer.buffer,
+			copy.targetOffset,
+			*scratch.buffer.buffer,
+			copy.scratchOffset,
+			copy.size);
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchCopyCommands++;
+	}
+
+	nri::BufferBarrierDesc afterCopyBarrier = {};
+	afterCopyBarrier.buffer = mPersistentVoxelMaterialBuffer.buffer;
+	afterCopyBarrier.before = NRICopyDestinationAccess();
+	afterCopyBarrier.after = NRIComputeShaderResourceAccess();
+
+	nri::BarrierDesc afterCopyBarrierDesc = {};
+	afterCopyBarrierDesc.buffers = &afterCopyBarrier;
+	afterCopyBarrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterCopyBarrierDesc);
+	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands++;
+
 	return true;
 }
 
