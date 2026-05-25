@@ -2637,6 +2637,7 @@ private:
 	void ResetPersistentVoxelBatch(const char* reason = "batch-reset", bool clearSharedResources = true);
 	bool BuildPersistentVoxelVariantAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
+	void InvalidateRuntimeLightSceneData();
 	bool RefreshResidentStaticSceneDataSet();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
 	bool TryApplyRuntimeMutationChunkToResidentScene(
@@ -3154,6 +3155,7 @@ private:
 	bool mRuntimeLightClusterCacheValid = false;
 	uint64_t mRuntimeLightClusterPayloadHash = 0;
 	uint64_t mRuntimeLightClusterCameraHash = 0;
+	bool mRuntimeLightSceneDataDirty = false;
 	uint32_t mBoundEmissivePrimitiveCount = 0;
 	uint32_t mBoundEmissiveDominantPrimitive = UINT32_MAX;
 	uint32_t mBoundEmissiveDominantTile = 0;
