@@ -1885,6 +1885,40 @@ public:
 		return result;
 	}
 
+	static uint64_t BuildConservativeMirrorPlayerPayloadStamp(
+		uint64_t kind,
+		uint64_t frameIndex,
+		const nri_scene::GeometryData& geometry,
+		const nri_scene::MaterialBridgeData& materials,
+		uint64_t mapWorldBuildSerial)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, kind);
+		hash = CoherencyHashCombine64(hash, frameIndex);
+		hash = CoherencyHashCombine64(hash, mapWorldBuildSerial);
+		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.vertices.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.indices.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.primitives.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.primitiveProvenance.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)materials.materials.size());
+		return hash != 0 ? hash : 1;
+	}
+
+	static SceneViewUploadStampBuildResult BuildMirrorPlayerUploadProducerStamp(
+		const nri_scene::GeometryData& geometry,
+		const nri_scene::MaterialBridgeData& materials,
+		uint64_t frameIndex,
+		uint64_t mapWorldBuildSerial)
+	{
+		SceneViewUploadStampBuildResult stamp = {};
+		stamp.vertexPayloadStamp = BuildConservativeMirrorPlayerPayloadStamp(1u, frameIndex, geometry, materials, mapWorldBuildSerial);
+		stamp.indexPayloadStamp = BuildConservativeMirrorPlayerPayloadStamp(2u, frameIndex, geometry, materials, mapWorldBuildSerial);
+		stamp.primitivePayloadStamp = BuildConservativeMirrorPlayerPayloadStamp(3u, frameIndex, geometry, materials, mapWorldBuildSerial);
+		stamp.primitiveProvenanceStamp = BuildConservativeMirrorPlayerPayloadStamp(4u, frameIndex, geometry, materials, mapWorldBuildSerial);
+		stamp.materialPayloadStamp = HashMaterialPayloadData(materials);
+		return stamp;
+	}
+
 	static uint64_t HashMaterialBridgeSummary(const nri_scene::MaterialBridgeData& materials)
 	{
 		uint64_t hash = 1469598103934665603ull;
@@ -9192,12 +9226,30 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						stamp.materialPayloadStamp = built.materialPayloadStamp;
 						return stamp;
 					};
+					const auto buildMirrorPlayerProducerStamp =
+						[&]() -> SceneBufferUploadProducerStamp
+					{
+						ScopedPtPerfTimer aggregateTimer(mLastPerfShellTraceStats.overlayAppendProducerStampMs);
+						ScopedPtPerfTimer sourceTimer(mLastPerfShellTraceStats.overlayAppendMirrorPlayerStampMs);
+						const SceneViewUploadStampBuildResult built = BuildMirrorPlayerUploadProducerStamp(
+							mirrorPlayerGeometry,
+							mirrorPlayerMaterialBridge,
+							mFrameIndex,
+							mMapWorld.buildSerial);
+						SceneBufferUploadProducerStamp stamp = {};
+						stamp.vertexPayloadStamp = built.vertexPayloadStamp;
+						stamp.indexPayloadStamp = built.indexPayloadStamp;
+						stamp.primitivePayloadStamp = built.primitivePayloadStamp;
+						stamp.primitiveProvenanceStamp = built.primitiveProvenanceStamp;
+						stamp.materialPayloadStamp = built.materialPayloadStamp;
+						return stamp;
+					};
 					const SceneBufferUploadProducerStamp dynamicStamp =
 						hasActiveDynamicOverlay && activeDynamicSceneView != nullptr ? buildProducerStamp(*activeDynamicSceneView, mLastPerfShellTraceStats.overlayAppendDynamicStampMs) : SceneBufferUploadProducerStamp {};
 					const SceneBufferUploadProducerStamp mirrorExtendedStamp =
 						hasMirrorExtendedDynamicOverlay ? buildProducerStamp(mirrorExtendedDynamicSceneView, mLastPerfShellTraceStats.overlayAppendMirrorExtendedStampMs) : SceneBufferUploadProducerStamp {};
 					const SceneBufferUploadProducerStamp mirrorPlayerStamp =
-						hasMirrorPlayerOverlay ? buildProducerStamp(mirrorPlayerSceneView, mLastPerfShellTraceStats.overlayAppendMirrorPlayerStampMs) : SceneBufferUploadProducerStamp {};
+						hasMirrorPlayerOverlay ? buildMirrorPlayerProducerStamp() : SceneBufferUploadProducerStamp {};
 
 					if (hasRuntimeSpaceLinkOverlay)
 					{
