@@ -326,6 +326,15 @@ public:
 			double waitMs = 0.0;
 		};
 
+		struct OverlayAppendSourceTraceEntry
+		{
+			uint64_t byteCount = 0;
+			uint32_t vertexCount = 0;
+			uint32_t indexCount = 0;
+			uint32_t primitiveCount = 0;
+			uint32_t materialCount = 0;
+		};
+
 		double totalMs = 0.0;
 		double initResourcesMs = 0.0;
 		double mapWorldMs = 0.0;
@@ -993,6 +1002,13 @@ public:
 		uint32_t overlayPersistentVoxelActorCount = 0;
 		uint32_t overlayPersistentVoxelPrimitiveCount = 0;
 		uint32_t overlayPersistentVoxelMaterialCount = 0;
+		OverlayAppendSourceTraceEntry overlayRuntimeSpaceLinkAppend = {};
+		OverlayAppendSourceTraceEntry overlayRuntimeMutationAppend = {};
+		OverlayAppendSourceTraceEntry overlayDynamicAppend = {};
+		OverlayAppendSourceTraceEntry overlayMirrorExtendedAppend = {};
+		OverlayAppendSourceTraceEntry overlayMirrorPlayerAppend = {};
+		OverlayAppendSourceTraceEntry overlayDebugSphereAppend = {};
+		OverlayAppendSourceTraceEntry overlayPersistentVoxelAppend = {};
 		uint32_t dynamicCaptureCalls = 0;
 		uint32_t dynamicCaptureWallSurfaces = 0;
 		uint32_t dynamicCaptureFlatSurfaces = 0;

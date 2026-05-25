@@ -5666,6 +5666,29 @@ namespace
 		destination.primitiveProvenance.insert(destination.primitiveProvenance.end(), source.primitiveProvenance.begin(), source.primitiveProvenance.end());
 	}
 
+	static uint64_t EstimateAppendGeometryBytes(const nri_scene::GeometryData* geometry)
+	{
+		if (geometry == nullptr)
+		{
+			return 0;
+		}
+
+		return
+			(uint64_t)geometry->vertices.size() * sizeof(nri_scene::SceneVertex) +
+			(uint64_t)geometry->indices.size() * sizeof(uint32_t) +
+			(uint64_t)geometry->primitives.size() * sizeof(nri_scene::PrimitiveData) +
+			(uint64_t)geometry->primitiveProvenance.size() * sizeof(nri_scene::SurfaceProvenance);
+	}
+
+	static uint64_t EstimateAppendMaterialBridgeBytes(const nri_scene::MaterialBridgeData& materials)
+	{
+		return
+			(uint64_t)materials.materials.size() * sizeof(nri_scene::MaterialData) +
+			(uint64_t)materials.lightMetadata.size() * sizeof(nri_scene::MaterialLightingMetadata) +
+			(uint64_t)materials.textures.size() * sizeof(nri_scene::TextureUpload) +
+			(uint64_t)materials.paletteLookup.size();
+	}
+
 	static void ReplaceGeometryOverlayTail(
 		const nri_scene::GeometryData& source,
 		uint32_t materialIndexOffset,
@@ -9059,11 +9082,16 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						double& materialMs,
 						uint32_t& primitiveCount,
 						uint32_t& materialCount,
+						PerfShellTraceStats::OverlayAppendSourceTraceEntry& sourceTrace,
 						SceneBufferUploadDomain uploadDomain)
 				{
 					ScopedPtPerfTimer sourceTimer(totalMs);
 					primitiveCount = geometry != nullptr ? (uint32_t)geometry->primitives.size() : 0u;
 					materialCount = (uint32_t)materials.materials.size();
+					sourceTrace = {};
+					sourceTrace.primitiveCount = primitiveCount;
+					sourceTrace.materialCount = materialCount;
+					sourceTrace.byteCount = EstimateAppendGeometryBytes(geometry) + EstimateAppendMaterialBridgeBytes(materials);
 					SceneBufferUploadDomainSpan uploadSpan = {};
 					uploadSpan.domain = uploadDomain;
 					uploadSpan.vertexOffset = (uint32_t)overlayGeometry.vertices.size();
@@ -9075,6 +9103,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						uploadSpan.vertexCount = (uint32_t)geometry->vertices.size();
 						uploadSpan.indexCount = (uint32_t)geometry->indices.size();
 						uploadSpan.primitiveCount = (uint32_t)geometry->primitives.size();
+						sourceTrace.vertexCount = uploadSpan.vertexCount;
+						sourceTrace.indexCount = uploadSpan.indexCount;
 					}
 					uploadSpan.materialCount = (uint32_t)materials.materials.size();
 					if (producerStamp != nullptr)
@@ -9170,6 +9200,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMaterialMs,
 							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkPrimitiveCount,
 							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMaterialCount,
+							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend,
 							SceneBufferUploadDomain::StaticOverlay);
 					}
 
@@ -9184,6 +9215,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							mLastPerfShellTraceStats.overlayRuntimeMutationMaterialMs,
 							mLastPerfShellTraceStats.overlayRuntimeMutationPrimitiveCount,
 							mLastPerfShellTraceStats.overlayRuntimeMutationMaterialCount,
+							mLastPerfShellTraceStats.overlayRuntimeMutationAppend,
 							SceneBufferUploadDomain::RuntimeMutation);
 					}
 
@@ -9198,6 +9230,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							mLastPerfShellTraceStats.overlayDynamicMaterialMs,
 							mLastPerfShellTraceStats.overlayDynamicPrimitiveCount,
 							mLastPerfShellTraceStats.overlayDynamicMaterialCount,
+							mLastPerfShellTraceStats.overlayDynamicAppend,
 							SceneBufferUploadDomain::Dynamic);
 					}
 
@@ -9212,6 +9245,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							mLastPerfShellTraceStats.overlayMirrorExtendedMaterialMs,
 							mLastPerfShellTraceStats.overlayMirrorExtendedPrimitiveCount,
 							mLastPerfShellTraceStats.overlayMirrorExtendedMaterialCount,
+							mLastPerfShellTraceStats.overlayMirrorExtendedAppend,
 							SceneBufferUploadDomain::MirrorExtended);
 					}
 
@@ -9226,6 +9260,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							mLastPerfShellTraceStats.overlayMirrorPlayerMaterialMs,
 							mLastPerfShellTraceStats.overlayMirrorPlayerPrimitiveCount,
 							mLastPerfShellTraceStats.overlayMirrorPlayerMaterialCount,
+							mLastPerfShellTraceStats.overlayMirrorPlayerAppend,
 							SceneBufferUploadDomain::MirrorPlayer);
 					}
 
@@ -9240,6 +9275,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							mLastPerfShellTraceStats.overlayDebugSphereMaterialMs,
 							mLastPerfShellTraceStats.overlayDebugSpherePrimitiveCount,
 							mLastPerfShellTraceStats.overlayDebugSphereMaterialCount,
+							mLastPerfShellTraceStats.overlayDebugSphereAppend,
 							SceneBufferUploadDomain::StaticOverlay);
 					}
 				}
@@ -9251,6 +9287,20 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						mLastPerfShellTraceStats.overlayPersistentVoxelActorCount = mPersistentVoxelBatch.activeActorCount;
 						mLastPerfShellTraceStats.overlayPersistentVoxelPrimitiveCount = mPersistentVoxelBatch.primitiveCount;
 						mLastPerfShellTraceStats.overlayPersistentVoxelMaterialCount = (uint32_t)mPersistentVoxelBatch.materialBridge.materials.size();
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.primitiveCount = mPersistentVoxelBatch.primitiveCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.materialCount = (uint32_t)mPersistentVoxelBatch.materialBridge.materials.size();
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.byteCount =
+							(uint64_t)mPersistentVoxelBatch.primitiveCount * sizeof(nri_scene::PrimitiveData) +
+							EstimateAppendMaterialBridgeBytes(mPersistentVoxelBatch.materialBridge);
+						for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+						{
+							if (actor.active)
+							{
+								mLastPerfShellTraceStats.overlayPersistentVoxelAppend.indexCount += actor.indexCount;
+							}
+						}
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.byteCount +=
+							(uint64_t)mLastPerfShellTraceStats.overlayPersistentVoxelAppend.indexCount * sizeof(uint32_t);
 					}
 					mLastPerfShellTraceStats.overlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
 					mLastPerfShellTraceStats.overlayMaterialCount = (uint32_t)overlayMaterialBridge.materials.size();
