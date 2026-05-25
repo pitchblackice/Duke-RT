@@ -1479,16 +1479,30 @@ public:
 		return true;
 	}
 
-	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, HWPortal* mirrorPortal, int32_t selectedMirrorWallIndex, uint32_t mirrorPortalCandidates, nri_scene::SceneView& outView)
+	static bool CaptureMirrorPlayerDynamicScene(
+		HWDrawInfo& di,
+		HWPortal* mirrorPortal,
+		int32_t selectedMirrorWallIndex,
+		uint32_t mirrorPortalCandidates,
+		nri_scene::SceneView& outView,
+		MirrorPlayerCaptureStats* outStats = nullptr)
 	{
 		outView = {};
 		MirrorPlayerCaptureStats captureStats = {};
 		captureStats.viewpointActorIndex = di.Viewpoint.CameraActor != nullptr ? (int32_t)di.Viewpoint.CameraActor->GetIndex() : -1;
+		const auto publishStats = [&]()
+		{
+			if (outStats != nullptr)
+			{
+				*outStats = captureStats;
+			}
+			TraceMirrorPlayerCaptureStats(captureStats);
+		};
 		if (gi == nullptr ||
 			myconnectindex < 0 ||
 			myconnectindex >= MAXPLAYERS)
 		{
-			TraceMirrorPlayerCaptureStats(captureStats);
+			publishStats();
 			return false;
 		}
 
@@ -1496,7 +1510,7 @@ public:
 		DCoreActor* localPlayerActor = localPlayer != nullptr ? localPlayer->GetActor() : nullptr;
 		if (localPlayerActor == nullptr)
 		{
-			TraceMirrorPlayerCaptureStats(captureStats);
+			publishStats();
 			return false;
 		}
 
@@ -1527,7 +1541,7 @@ public:
 		captureDi->EndDrawInfo();
 		if (!hasCapture || !AppendMirrorPlayerSurfaces(di, capturedView, outView))
 		{
-			TraceMirrorPlayerCaptureStats(captureStats);
+			publishStats();
 			outView = {};
 			return false;
 		}
@@ -1545,7 +1559,7 @@ public:
 
 		outView.primitiveFlags = nri_scene::PrimitiveFlag_ReflectionOnly;
 		captureStats.filteredSurfaceCount = captureStats.capturedSurfaceCount;
-		TraceMirrorPlayerCaptureStats(captureStats);
+		publishStats();
 		return true;
 	}
 
@@ -1744,6 +1758,179 @@ public:
 			hash = CoherencyHashCombine64(hash, tail);
 		}
 		return hash != 0 ? hash : 1;
+	}
+
+	static uint64_t HashMaterialPayloadData(const nri_scene::MaterialBridgeData& materialBridge)
+	{
+		const uint64_t materialSize = (uint64_t)materialBridge.materials.size() * sizeof(nri_scene::MaterialData);
+		return HashUploadPayloadBytes(
+			materialBridge.materials.empty() ? nullptr : materialBridge.materials.data(),
+			materialSize);
+	}
+
+	struct SceneViewUploadStampBuildResult
+	{
+		uint64_t vertexPayloadStamp = 0;
+		uint64_t indexPayloadStamp = 0;
+		uint64_t primitivePayloadStamp = 0;
+		uint64_t primitiveProvenanceStamp = 0;
+		uint64_t materialPayloadStamp = 0;
+	};
+
+	static uint64_t HashSurfaceProvenanceStamp(uint64_t hash, const nri_scene::SurfaceProvenance& provenance)
+	{
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
+		hash = CoherencyHashCombine64(hash, (uint64_t)provenance.drawListType);
+		hash = CoherencyHashCombine64(hash, (uint64_t)provenance.cstat);
+		hash = CoherencyHashCombine64(hash, (uint64_t)provenance.materialFlags);
+		return hash;
+	}
+
+	static uint64_t HashCapturedVertexStamp(uint64_t hash, const nri_scene::CapturedVertex& vertex)
+	{
+		for (int i = 0; i < 3; ++i)
+		{
+			hash = CoherencyHashCombine64(hash, CoherencyFloatBits(vertex.position[i]));
+		}
+		for (int i = 0; i < 3; ++i)
+		{
+			hash = CoherencyHashCombine64(hash, CoherencyFloatBits(vertex.prevPosition[i]));
+		}
+		hash = CoherencyHashCombine64(hash, CoherencyFloatBits(vertex.uv[0]));
+		hash = CoherencyHashCombine64(hash, CoherencyFloatBits(vertex.uv[1]));
+		return hash;
+	}
+
+	static uint64_t HashMaterialRefStamp(uint64_t hash, const nri_scene::MaterialRef& material)
+	{
+		hash = CoherencyHashCombine64(hash, material.texture != nullptr ? (uint64_t)(uint32_t)material.texture->GetID().GetIndex() + 1ull : 0ull);
+		hash = CoherencyHashCombine64(hash, material.emissiveSourceTexture != nullptr ? (uint64_t)(uint32_t)material.emissiveSourceTexture->GetID().GetIndex() + 1ull : 0ull);
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(material.palette + 1));
+		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(material.shade + 1));
+		hash = CoherencyHashCombine64(hash, CoherencyFloatBits(material.alpha));
+		hash = CoherencyHashCombine64(hash, (uint64_t)material.flags);
+		return hash;
+	}
+
+	static uint32_t CountStampedSurfacePrimitives(const nri_scene::SurfaceRef& surface, bool triangleList)
+	{
+		if (!surface.indices.empty())
+		{
+			return (uint32_t)(surface.indices.size() / 3u);
+		}
+		if (triangleList)
+		{
+			return (uint32_t)(surface.vertices.size() / 3u);
+		}
+		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2u : 0u;
+	}
+
+	static SceneViewUploadStampBuildResult BuildSceneViewUploadProducerStamp(const nri_scene::SceneView& sceneView, uint64_t mapWorldBuildSerial)
+	{
+		SceneViewUploadStampBuildResult result = {};
+		result.vertexPayloadStamp = 1469598103934665603ull;
+		result.indexPayloadStamp = 1469598103934665603ull;
+		result.primitivePayloadStamp = 1469598103934665603ull;
+		result.primitiveProvenanceStamp = 1469598103934665603ull;
+		result.materialPayloadStamp = 1469598103934665603ull;
+		auto appendSurface =
+			[&](const nri_scene::SurfaceRef& surface, uint32_t surfaceKind, bool triangleList, uint32_t materialIndex)
+		{
+			const uint32_t primitiveCount = CountStampedSurfacePrimitives(surface, triangleList);
+			const uint64_t surfaceHeader =
+				CoherencyHashCombine64(
+					CoherencyHashCombine64(
+						CoherencyHashCombine64(1469598103934665603ull, (uint64_t)surfaceKind),
+						(uint64_t)materialIndex),
+					(uint64_t)primitiveCount);
+			result.vertexPayloadStamp = CoherencyHashCombine64(result.vertexPayloadStamp, surfaceHeader);
+			result.indexPayloadStamp = CoherencyHashCombine64(result.indexPayloadStamp, surfaceHeader);
+			result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, surfaceHeader);
+			result.primitiveProvenanceStamp = CoherencyHashCombine64(result.primitiveProvenanceStamp, surfaceHeader);
+			result.materialPayloadStamp = CoherencyHashCombine64(result.materialPayloadStamp, surfaceHeader);
+			result.vertexPayloadStamp = CoherencyHashCombine64(result.vertexPayloadStamp, (uint64_t)surface.vertices.size());
+			result.indexPayloadStamp = CoherencyHashCombine64(result.indexPayloadStamp, (uint64_t)surface.indices.size());
+			result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, (uint64_t)sceneView.primitiveFlags);
+			result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, (uint64_t)surface.material.flags);
+			result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, mapWorldBuildSerial);
+			result.primitiveProvenanceStamp = HashSurfaceProvenanceStamp(result.primitiveProvenanceStamp, surface.provenance);
+			result.materialPayloadStamp = HashMaterialRefStamp(result.materialPayloadStamp, surface.material);
+			for (const nri_scene::CapturedVertex& vertex : surface.vertices)
+			{
+				result.vertexPayloadStamp = HashCapturedVertexStamp(result.vertexPayloadStamp, vertex);
+				result.primitivePayloadStamp = HashCapturedVertexStamp(result.primitivePayloadStamp, vertex);
+			}
+			for (uint32_t index : surface.indices)
+			{
+				result.indexPayloadStamp = CoherencyHashCombine64(result.indexPayloadStamp, (uint64_t)index);
+				result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, (uint64_t)index);
+			}
+		};
+
+		uint32_t materialIndex = 0;
+		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
+		{
+			appendSurface(surface, 0u, false, materialIndex++);
+		}
+		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
+		{
+			appendSurface(surface, 1u, true, materialIndex++);
+		}
+		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueSprites)
+		{
+			appendSurface(surface, 2u, false, materialIndex++);
+		}
+		result.vertexPayloadStamp = CoherencyHashCombine64(result.vertexPayloadStamp, (uint64_t)materialIndex);
+		result.indexPayloadStamp = CoherencyHashCombine64(result.indexPayloadStamp, (uint64_t)materialIndex);
+		result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, (uint64_t)materialIndex);
+		result.primitiveProvenanceStamp = CoherencyHashCombine64(result.primitiveProvenanceStamp, (uint64_t)materialIndex);
+		result.materialPayloadStamp = CoherencyHashCombine64(result.materialPayloadStamp, (uint64_t)materialIndex);
+		result.vertexPayloadStamp = result.vertexPayloadStamp != 0 ? result.vertexPayloadStamp : 1;
+		result.indexPayloadStamp = result.indexPayloadStamp != 0 ? result.indexPayloadStamp : 1;
+		result.primitivePayloadStamp = result.primitivePayloadStamp != 0 ? result.primitivePayloadStamp : 1;
+		result.primitiveProvenanceStamp = result.primitiveProvenanceStamp != 0 ? result.primitiveProvenanceStamp : 1;
+		result.materialPayloadStamp = result.materialPayloadStamp != 0 ? result.materialPayloadStamp : 1;
+		return result;
+	}
+
+	static uint64_t BuildConservativeMirrorPlayerPayloadStamp(
+		uint64_t kind,
+		uint64_t frameIndex,
+		const nri_scene::GeometryData& geometry,
+		const nri_scene::MaterialBridgeData& materials,
+		uint64_t mapWorldBuildSerial)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, kind);
+		hash = CoherencyHashCombine64(hash, frameIndex);
+		hash = CoherencyHashCombine64(hash, mapWorldBuildSerial);
+		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.vertices.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.indices.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.primitives.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.primitiveProvenance.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)materials.materials.size());
+		return hash != 0 ? hash : 1;
+	}
+
+	static SceneViewUploadStampBuildResult BuildMirrorPlayerUploadProducerStamp(
+		const nri_scene::GeometryData& geometry,
+		const nri_scene::MaterialBridgeData& materials,
+		uint64_t frameIndex,
+		uint64_t mapWorldBuildSerial)
+	{
+		SceneViewUploadStampBuildResult stamp = {};
+		stamp.vertexPayloadStamp = BuildConservativeMirrorPlayerPayloadStamp(1u, frameIndex, geometry, materials, mapWorldBuildSerial);
+		stamp.indexPayloadStamp = BuildConservativeMirrorPlayerPayloadStamp(2u, frameIndex, geometry, materials, mapWorldBuildSerial);
+		stamp.primitivePayloadStamp = BuildConservativeMirrorPlayerPayloadStamp(3u, frameIndex, geometry, materials, mapWorldBuildSerial);
+		stamp.primitiveProvenanceStamp = BuildConservativeMirrorPlayerPayloadStamp(4u, frameIndex, geometry, materials, mapWorldBuildSerial);
+		stamp.materialPayloadStamp = HashMaterialPayloadData(materials);
+		return stamp;
 	}
 
 	static uint64_t HashMaterialBridgeSummary(const nri_scene::MaterialBridgeData& materials)
@@ -4837,6 +5024,14 @@ namespace
 		{
 			return -1;
 		}
+		if ((size_t)sectorIndex < mapWorld.sectorChunkLookup.size())
+		{
+			const uint32_t chunkIndex = mapWorld.sectorChunkLookup[(size_t)sectorIndex];
+			if (chunkIndex != UINT32_MAX)
+			{
+				return (int32_t)chunkIndex;
+			}
+		}
 
 		for (const auto& chunk : mapWorld.chunks)
 		{
@@ -5236,6 +5431,34 @@ namespace
 		return std::max<uint64_t>(newCapacity, stride);
 	}
 
+	static uint64_t GetSceneUploadGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride)
+	{
+		const uint64_t minimumCapacity = std::max<uint64_t>(requiredSize, stride);
+		if (currentCapacity >= minimumCapacity && currentCapacity != 0)
+		{
+			return currentCapacity;
+		}
+		if (currentCapacity == 0)
+		{
+			return minimumCapacity;
+		}
+
+		uint64_t newCapacity = std::max<uint64_t>(currentCapacity, stride);
+		while (newCapacity < minimumCapacity)
+		{
+			const uint64_t doubled =
+				newCapacity <= std::numeric_limits<uint64_t>::max() / 2 ?
+				newCapacity * 2 :
+				std::numeric_limits<uint64_t>::max();
+			if (doubled <= newCapacity)
+			{
+				return minimumCapacity;
+			}
+			newCapacity = doubled;
+		}
+		return newCapacity;
+	}
+
 	static float Clamp01(float value)
 	{
 		return std::max(0.0f, std::min(value, 1.0f));
@@ -5505,6 +5728,65 @@ namespace
 		}
 
 		destination.primitiveProvenance.insert(destination.primitiveProvenance.end(), source.primitiveProvenance.begin(), source.primitiveProvenance.end());
+	}
+
+	static uint64_t EstimateAppendMaterialBridgeBytes(const nri_scene::MaterialBridgeData& materials)
+	{
+		return
+			(uint64_t)materials.materials.size() * sizeof(nri_scene::MaterialData) +
+			(uint64_t)materials.lightMetadata.size() * sizeof(nri_scene::MaterialLightingMetadata) +
+			(uint64_t)materials.textures.size() * sizeof(nri_scene::TextureUpload) +
+			(uint64_t)materials.paletteLookup.size();
+	}
+
+	static void ClearMaterialBridgeRetainingCapacity(nri_scene::MaterialBridgeData& materials)
+	{
+		materials.materials.clear();
+		materials.lightMetadata.clear();
+		materials.textures.clear();
+		materials.paletteLookup.clear();
+		materials.paletteWidth = 256;
+		materials.paletteHeight = 256;
+	}
+
+	static void ReplaceGeometryOverlayTail(
+		const nri_scene::GeometryData& source,
+		uint32_t materialIndexOffset,
+		uint32_t staticVertexCount,
+		uint32_t staticIndexCount,
+		uint32_t staticPrimitiveCount,
+		uint32_t staticPrimitiveProvenanceCount,
+		nri_scene::GeometryData& destination)
+	{
+		const uint32_t vertexBase = staticVertexCount;
+
+		destination.vertices.resize((size_t)staticVertexCount + source.vertices.size());
+		std::copy(source.vertices.begin(), source.vertices.end(), destination.vertices.begin() + staticVertexCount);
+
+		destination.indices.resize((size_t)staticIndexCount + source.indices.size());
+		auto indexOut = destination.indices.begin() + staticIndexCount;
+		for (uint32_t index : source.indices)
+		{
+			*indexOut++ = vertexBase + index;
+		}
+
+		destination.primitives.resize((size_t)staticPrimitiveCount + source.primitives.size());
+		auto primitiveOut = destination.primitives.begin() + staticPrimitiveCount;
+		for (const auto& primitive : source.primitives)
+		{
+			nri_scene::PrimitiveData copy = primitive;
+			copy.indices[0] += vertexBase;
+			copy.indices[1] += vertexBase;
+			copy.indices[2] += vertexBase;
+			copy.materialIndex += materialIndexOffset;
+			*primitiveOut++ = copy;
+		}
+
+		destination.primitiveProvenance.resize((size_t)staticPrimitiveProvenanceCount + source.primitiveProvenance.size());
+		std::copy(
+			source.primitiveProvenance.begin(),
+			source.primitiveProvenance.end(),
+			destination.primitiveProvenance.begin() + staticPrimitiveProvenanceCount);
 	}
 
 	struct StartupMapWorldChunkDiffSample
@@ -8386,8 +8668,6 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::GeometryData mirrorExtendedDynamicGeometry;
 	nri_scene::GeometryData mergedDynamicGeometry;
 	nri_scene::GeometryData debugSphereGeometry;
-	nri_scene::GeometryData overlayGeometry;
-	nri_scene::GeometryData combinedGeometry;
 	nri_scene::MaterialBridgeData materialBridge;
 	nri_scene::MaterialBridgeData runtimeMutationMaterialBridge;
 	nri_scene::MaterialBridgeData runtimeSpaceLinkMaterialBridge;
@@ -8397,7 +8677,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::MaterialBridgeData sceneLightMergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData mergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData debugSphereMaterialBridge;
-	nri_scene::MaterialBridgeData overlayMaterialBridge;
+	nri_scene::GeometryData& overlayGeometry = mSelectOverlayGeometryScratch;
+	nri_scene::MaterialBridgeData& overlayMaterialBridge = mSelectOverlayMaterialBridgeScratch;
 	nri_scene::MaterialBridgeData combinedMaterialBridge;
 	auto& capturedGpuMaterials = mSelectCapturedGpuMaterialScratch;
 	auto& dynamicGpuMaterials = mSelectDynamicGpuMaterialScratch;
@@ -8409,6 +8690,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	persistentVoxelGpuMaterials.clear();
 	combinedGpuMaterials.clear();
 	refreshedCombinedGpuMaterials.clear();
+	nri_scene::ClearGeometryRetainingCapacity(mSelectMirrorPlayerGeometryScratch);
+	nri_scene::ClearGeometryRetainingCapacity(mSelectOverlayGeometryScratch);
+	ClearMaterialBridgeRetainingCapacity(mSelectOverlayMaterialBridgeScratch);
 	mSelectTopLevelInstanceScratch.clear();
 	mSelectSceneInstanceScratch.clear();
 	mSelectCapturedTopLevelInstanceScratch.clear();
@@ -8428,7 +8712,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
-	nri_scene::GeometryData mirrorPlayerGeometry;
+	nri_scene::GeometryData& mirrorPlayerGeometry = mSelectMirrorPlayerGeometryScratch;
+	MirrorPlayerCaptureStats mirrorPlayerCaptureStats = {};
+	nri_scene::GeometryBuildTraceStats mirrorPlayerGeometryTraceStats = {};
+	std::vector<SceneBufferUploadDomainSpan> sceneUploadDomainSpans;
 	uint32_t activeStaticProbePrimitiveCount = 0;
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
 	bool sceneLightUsesStaticMapScene = false;
@@ -8441,6 +8728,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	bool liveDynamicHasEmissive = false;
 	bool hasPersistentVoxelBatch = false;
 	bool appendPersistentVoxelSceneLights = false;
+	uint32_t selectedStaticSceneInstanceCount = 0;
+	uint32_t selectedDynamicSceneInstanceCount = 0;
+	uint32_t selectedPersistentVoxelSceneInstanceCount = 0;
+	uint32_t selectedSceneInstanceCount = 0;
+	uint32_t selectedTlasInstanceCount = 0;
 
 	{
 		ScopedPtPerfTimer sceneSelectTimer(mLastPerfShellTraceStats.sceneSelectMs);
@@ -8578,12 +8870,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		const bool hasMirrorPlayerScene = !deferOverlayThisFrame && IsMirrorPlayerPreviewCaptureEnabled() && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorCaptureMs);
+			ScopedPtPerfTimer mirrorPlayerTimer(mLastPerfShellTraceStats.mirrorPlayerCaptureMs);
 			return CaptureMirrorPlayerDynamicScene(
 				di,
 				visibleMirrorPortal,
 				selectedVisibleMirrorWallIndex,
 				visibleMirrorPortalCandidates,
-				mirrorPlayerSceneView);
+				mirrorPlayerSceneView,
+				&mirrorPlayerCaptureStats);
 		}();
 		if (hasDynamicScene)
 		{
@@ -8661,13 +8955,43 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			{
 				Clocker clock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMirrorPlayerMs);
-				nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry);
-				AssignGeometryPortalIndices(mMapWorld, mirrorPlayerGeometry);
+				{
+					ScopedPtPerfTimer buildTimer(mLastPerfShellTraceStats.mirrorPlayerGeometryBuildMs);
+					nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry, &mirrorPlayerGeometryTraceStats, true);
+				}
+				{
+					ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.mirrorPlayerPortalAssignMs);
+					AssignGeometryPortalIndices(mMapWorld, mirrorPlayerGeometry);
+				}
+				mLastPerfShellTraceStats.mirrorPlayerGeometryBuildWallMs = mirrorPlayerGeometryTraceStats.wallMs;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryBuildFlatMs = mirrorPlayerGeometryTraceStats.flatMs;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryBuildSpriteMs = mirrorPlayerGeometryTraceStats.spriteMs;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureRawFacingSprites = mirrorPlayerCaptureStats.rawFacingSprites;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureRawVoxelSprites = mirrorPlayerCaptureStats.rawVoxelSprites;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureSurfaces = mirrorPlayerCaptureStats.capturedSurfaceCount;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureMatchingActorSurfaces = mirrorPlayerCaptureStats.capturedMatchingActorSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureOtherActorSurfaces = mirrorPlayerCaptureStats.capturedOtherActorSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureActorlessSurfaces = mirrorPlayerCaptureStats.capturedActorlessSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureFilteredSurfaces = mirrorPlayerCaptureStats.filteredSurfaceCount;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryWallSurfaces = mirrorPlayerGeometryTraceStats.wallSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryFlatSurfaces = mirrorPlayerGeometryTraceStats.flatSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySpriteSurfaces = mirrorPlayerGeometryTraceStats.spriteSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryIndexedSurfaces = mirrorPlayerGeometryTraceStats.indexedSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryTriangleFanSurfaces = mirrorPlayerGeometryTraceStats.triangleFanSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySpriteStripSurfaces = mirrorPlayerGeometryTraceStats.spriteStripSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySkippedSurfaces = mirrorPlayerGeometryTraceStats.skippedSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySourceVertices = mirrorPlayerGeometryTraceStats.sourceVertexCount;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySourceIndices = mirrorPlayerGeometryTraceStats.sourceIndexCount;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryVertexGrowths = mirrorPlayerGeometryTraceStats.vertexCapacityGrowths;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryIndexGrowths = mirrorPlayerGeometryTraceStats.indexCapacityGrowths;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryPrimitiveGrowths = mirrorPlayerGeometryTraceStats.primitiveCapacityGrowths;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryProvenanceGrowths = mirrorPlayerGeometryTraceStats.provenanceCapacityGrowths;
 			}
 
 			if (!mirrorPlayerGeometry.primitives.empty())
 			{
 				Clocker clock(NriPTMaterialBuild);
+				ScopedPtPerfTimer materialTimer(mLastPerfShellTraceStats.mirrorPlayerMaterialBuildMs);
 				BuildMaterialsWithActorOverrides(mirrorPlayerSceneView, mirrorPlayerMaterialBridge, "mirror_player");
 			}
 		}
@@ -8836,53 +9160,347 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		if (hasPersistentVoxelOverlay || hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay || hasRuntimeDebugSphereOverlay)
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.overlayAssembleMs);
-			overlayGeometry = {};
-			overlayMaterialBridge = {};
 
-			if (hasRuntimeSpaceLinkOverlay)
 			{
-				if (!runtimeSpaceLinkGeometry.primitives.empty())
+				ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.overlayAppendMs);
 				{
-					AppendGeometry(runtimeSpaceLinkGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
+					ScopedPtPerfTimer resetTimer(mLastPerfShellTraceStats.overlayAppendResetMs);
+					nri_scene::ClearGeometryRetainingCapacity(overlayGeometry);
+					ClearMaterialBridgeRetainingCapacity(overlayMaterialBridge);
 				}
-				AppendMaterialBridge(runtimeSpaceLinkMaterialBridge, overlayMaterialBridge);
-			}
 
-			if (hasRuntimeMutationOverlay)
-			{
-				if (!runtimeMutationGeometry.primitives.empty())
+				auto appendOverlaySource =
+					[&](
+						const nri_scene::GeometryData* geometry,
+						const SceneBufferUploadProducerStamp* producerStamp,
+						const nri_scene::MaterialBridgeData& materials,
+						double& totalMs,
+						double& geometryMs,
+						double& materialMs,
+						uint32_t& primitiveCount,
+						uint32_t& materialCount,
+						PerfShellTraceStats::OverlayAppendSourceTraceEntry& sourceTrace,
+						SceneBufferUploadDomain uploadDomain)
 				{
-					AppendGeometry(runtimeMutationGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
+					ScopedPtPerfTimer sourceTimer(totalMs);
+					primitiveCount = geometry != nullptr ? (uint32_t)geometry->primitives.size() : 0u;
+					materialCount = (uint32_t)materials.materials.size();
+					sourceTrace = {};
+					sourceTrace.primitiveCount = primitiveCount;
+					sourceTrace.materialCount = materialCount;
+					sourceTrace.vertexBytes = geometry != nullptr ? (uint64_t)geometry->vertices.size() * sizeof(nri_scene::SceneVertex) : 0;
+					sourceTrace.indexBytes = geometry != nullptr ? (uint64_t)geometry->indices.size() * sizeof(uint32_t) : 0;
+					sourceTrace.primitiveBytes = geometry != nullptr ?
+						(uint64_t)geometry->primitives.size() * sizeof(nri_scene::PrimitiveData) +
+						(uint64_t)geometry->primitiveProvenance.size() * sizeof(nri_scene::SurfaceProvenance) :
+						0;
+					sourceTrace.materialBytes = EstimateAppendMaterialBridgeBytes(materials);
+					sourceTrace.byteCount =
+						sourceTrace.vertexBytes +
+						sourceTrace.indexBytes +
+						sourceTrace.primitiveBytes +
+						sourceTrace.materialBytes;
+					SceneBufferUploadDomainSpan uploadSpan = {};
+					uploadSpan.domain = uploadDomain;
+					uploadSpan.vertexOffset = (uint32_t)overlayGeometry.vertices.size();
+					uploadSpan.indexOffset = (uint32_t)overlayGeometry.indices.size();
+					uploadSpan.primitiveOffset = (uint32_t)overlayGeometry.primitives.size();
+					uploadSpan.materialOffset = (uint32_t)overlayMaterialBridge.materials.size();
+					if (geometry != nullptr)
+					{
+						uploadSpan.vertexCount = (uint32_t)geometry->vertices.size();
+						uploadSpan.indexCount = (uint32_t)geometry->indices.size();
+						uploadSpan.primitiveCount = (uint32_t)geometry->primitives.size();
+						sourceTrace.vertexCount = uploadSpan.vertexCount;
+						sourceTrace.indexCount = uploadSpan.indexCount;
+					}
+					uploadSpan.materialCount = (uint32_t)materials.materials.size();
+					if (producerStamp != nullptr)
+					{
+						const auto buildSpanStamp = [&](uint64_t sourceStamp, uint64_t offset, uint64_t count, uint64_t byteSize) -> uint64_t
+						{
+							if (sourceStamp == 0 || count == 0)
+							{
+								return 0;
+							}
+							uint64_t hash = 1469598103934665603ull;
+							hash = CoherencyHashCombine64(hash, sourceStamp);
+							hash = CoherencyHashCombine64(hash, (uint64_t)uploadDomain);
+							hash = CoherencyHashCombine64(hash, offset);
+							hash = CoherencyHashCombine64(hash, count);
+							hash = CoherencyHashCombine64(hash, byteSize);
+							return hash != 0 ? hash : 1;
+						};
+						uploadSpan.stamp.vertexPayloadStamp = buildSpanStamp(
+							producerStamp->vertexPayloadStamp,
+							uploadSpan.vertexOffset,
+							uploadSpan.vertexCount,
+							(uint64_t)uploadSpan.vertexCount * sizeof(nri_scene::SceneVertex));
+						uploadSpan.stamp.indexPayloadStamp = buildSpanStamp(
+							producerStamp->indexPayloadStamp,
+							uploadSpan.indexOffset,
+							uploadSpan.indexCount,
+							(uint64_t)uploadSpan.indexCount * sizeof(uint32_t));
+						uploadSpan.stamp.primitivePayloadStamp = buildSpanStamp(
+							producerStamp->primitivePayloadStamp,
+							((uint64_t)uploadSpan.primitiveOffset << 32) ^ (uint64_t)uploadSpan.materialOffset,
+							uploadSpan.primitiveCount,
+							(uint64_t)uploadSpan.primitiveCount * sizeof(nri_scene::PrimitiveData));
+						uploadSpan.stamp.primitiveProvenanceStamp = buildSpanStamp(
+							producerStamp->primitiveProvenanceStamp,
+							uploadSpan.primitiveOffset,
+							uploadSpan.primitiveCount,
+							(uint64_t)uploadSpan.primitiveCount);
+						uploadSpan.stamp.materialPayloadStamp = buildSpanStamp(
+							producerStamp->materialPayloadStamp,
+							uploadSpan.materialOffset,
+							uploadSpan.materialCount,
+							(uint64_t)uploadSpan.materialCount * sizeof(nri_scene::MaterialData));
+					}
+					if (geometry != nullptr && !geometry->primitives.empty())
+					{
+						ScopedPtPerfTimer geometryTimer(geometryMs);
+						sourceTrace.geometryGrowthEvents =
+							(overlayGeometry.vertices.size() + geometry->vertices.size() > overlayGeometry.vertices.capacity() ? 1u : 0u) +
+							(overlayGeometry.indices.size() + geometry->indices.size() > overlayGeometry.indices.capacity() ? 1u : 0u) +
+							(overlayGeometry.primitives.size() + geometry->primitives.size() > overlayGeometry.primitives.capacity() ? 1u : 0u) +
+							(overlayGeometry.primitiveProvenance.size() + geometry->primitiveProvenance.size() > overlayGeometry.primitiveProvenance.capacity() ? 1u : 0u);
+						AppendGeometry(*geometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
+					}
+					{
+						ScopedPtPerfTimer materialTimer(materialMs);
+						sourceTrace.materialGrowthEvents =
+							(overlayMaterialBridge.materials.size() + materials.materials.size() > overlayMaterialBridge.materials.capacity() ? 1u : 0u) +
+							(overlayMaterialBridge.lightMetadata.size() + materials.lightMetadata.size() > overlayMaterialBridge.lightMetadata.capacity() ? 1u : 0u) +
+							(overlayMaterialBridge.textures.size() + materials.textures.size() > overlayMaterialBridge.textures.capacity() ? 1u : 0u) +
+							(overlayMaterialBridge.paletteLookup.size() + materials.paletteLookup.size() > overlayMaterialBridge.paletteLookup.capacity() ? 1u : 0u);
+						AppendMaterialBridge(materials, overlayMaterialBridge);
+					}
+					if (uploadSpan.vertexCount != 0 ||
+						uploadSpan.indexCount != 0 ||
+						uploadSpan.primitiveCount != 0 ||
+						uploadSpan.materialCount != 0)
+					{
+						sceneUploadDomainSpans.push_back(uploadSpan);
+					}
+				};
+
+				{
+					ScopedPtPerfTimer sourceAggregateTimer(mLastPerfShellTraceStats.overlayAppendSourcesMs);
+
+					const auto buildProducerStamp =
+						[&](const nri_scene::SceneView& sceneView, double& timerMs) -> SceneBufferUploadProducerStamp
+					{
+						ScopedPtPerfTimer aggregateTimer(mLastPerfShellTraceStats.overlayAppendProducerStampMs);
+						ScopedPtPerfTimer sourceTimer(timerMs);
+						const SceneViewUploadStampBuildResult built = BuildSceneViewUploadProducerStamp(sceneView, mMapWorld.buildSerial);
+						SceneBufferUploadProducerStamp stamp = {};
+						stamp.vertexPayloadStamp = built.vertexPayloadStamp;
+						stamp.indexPayloadStamp = built.indexPayloadStamp;
+						stamp.primitivePayloadStamp = built.primitivePayloadStamp;
+						stamp.primitiveProvenanceStamp = built.primitiveProvenanceStamp;
+						stamp.materialPayloadStamp = built.materialPayloadStamp;
+						return stamp;
+					};
+					const auto buildMirrorPlayerProducerStamp =
+						[&]() -> SceneBufferUploadProducerStamp
+					{
+						ScopedPtPerfTimer aggregateTimer(mLastPerfShellTraceStats.overlayAppendProducerStampMs);
+						ScopedPtPerfTimer sourceTimer(mLastPerfShellTraceStats.overlayAppendMirrorPlayerStampMs);
+						const SceneViewUploadStampBuildResult built = BuildMirrorPlayerUploadProducerStamp(
+							mirrorPlayerGeometry,
+							mirrorPlayerMaterialBridge,
+							mFrameIndex,
+							mMapWorld.buildSerial);
+						SceneBufferUploadProducerStamp stamp = {};
+						stamp.vertexPayloadStamp = built.vertexPayloadStamp;
+						stamp.indexPayloadStamp = built.indexPayloadStamp;
+						stamp.primitivePayloadStamp = built.primitivePayloadStamp;
+						stamp.primitiveProvenanceStamp = built.primitiveProvenanceStamp;
+						stamp.materialPayloadStamp = built.materialPayloadStamp;
+						return stamp;
+					};
+					const SceneBufferUploadProducerStamp dynamicStamp =
+						hasActiveDynamicOverlay && activeDynamicSceneView != nullptr ? buildProducerStamp(*activeDynamicSceneView, mLastPerfShellTraceStats.overlayAppendDynamicStampMs) : SceneBufferUploadProducerStamp {};
+					const SceneBufferUploadProducerStamp mirrorExtendedStamp =
+						hasMirrorExtendedDynamicOverlay ? buildProducerStamp(mirrorExtendedDynamicSceneView, mLastPerfShellTraceStats.overlayAppendMirrorExtendedStampMs) : SceneBufferUploadProducerStamp {};
+					const SceneBufferUploadProducerStamp mirrorPlayerStamp =
+						hasMirrorPlayerOverlay ? buildMirrorPlayerProducerStamp() : SceneBufferUploadProducerStamp {};
+
+					size_t reserveVertices = 0;
+					size_t reserveIndices = 0;
+					size_t reservePrimitives = 0;
+					size_t reservePrimitiveProvenance = 0;
+					size_t reserveMaterials = 0;
+					size_t reserveLightMetadata = 0;
+					size_t reserveTextures = 0;
+					size_t reservePaletteLookup = 0;
+					auto addOverlayReserve =
+						[&](const nri_scene::GeometryData* geometry, const nri_scene::MaterialBridgeData& materials)
+					{
+						if (geometry != nullptr)
+						{
+							reserveVertices += geometry->vertices.size();
+							reserveIndices += geometry->indices.size();
+							reservePrimitives += geometry->primitives.size();
+							reservePrimitiveProvenance += geometry->primitiveProvenance.size();
+						}
+						reserveMaterials += materials.materials.size();
+						reserveLightMetadata += materials.lightMetadata.size();
+						reserveTextures += materials.textures.size();
+						reservePaletteLookup += materials.paletteLookup.size();
+					};
+
+					if (hasRuntimeSpaceLinkOverlay)
+					{
+						addOverlayReserve(&runtimeSpaceLinkGeometry, runtimeSpaceLinkMaterialBridge);
+					}
+					if (hasRuntimeMutationOverlay)
+					{
+						addOverlayReserve(&runtimeMutationGeometry, runtimeMutationMaterialBridge);
+					}
+					if (hasActiveDynamicOverlay)
+					{
+						addOverlayReserve(activeDynamicGeometry, *activeDynamicMaterials);
+					}
+					if (hasMirrorExtendedDynamicOverlay)
+					{
+						addOverlayReserve(&mirrorExtendedDynamicGeometry, mirrorExtendedDynamicMaterialBridge);
+					}
+					if (hasMirrorPlayerOverlay)
+					{
+						addOverlayReserve(&mirrorPlayerGeometry, mirrorPlayerMaterialBridge);
+					}
+					if (hasRuntimeDebugSphereOverlay)
+					{
+						addOverlayReserve(&debugSphereGeometry, debugSphereMaterialBridge);
+					}
+					overlayGeometry.vertices.reserve(reserveVertices);
+					overlayGeometry.indices.reserve(reserveIndices);
+					overlayGeometry.primitives.reserve(reservePrimitives);
+					overlayGeometry.primitiveProvenance.reserve(reservePrimitiveProvenance);
+					overlayMaterialBridge.materials.reserve(reserveMaterials);
+					overlayMaterialBridge.lightMetadata.reserve(reserveLightMetadata);
+					overlayMaterialBridge.textures.reserve(reserveTextures);
+					overlayMaterialBridge.paletteLookup.reserve(reservePaletteLookup);
+
+					if (hasRuntimeSpaceLinkOverlay)
+					{
+						appendOverlaySource(
+							&runtimeSpaceLinkGeometry,
+							nullptr,
+							runtimeSpaceLinkMaterialBridge,
+							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMs,
+							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkGeometryMs,
+							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMaterialMs,
+							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkPrimitiveCount,
+							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMaterialCount,
+							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend,
+							SceneBufferUploadDomain::StaticOverlay);
+					}
+
+					if (hasRuntimeMutationOverlay)
+					{
+						appendOverlaySource(
+							&runtimeMutationGeometry,
+							nullptr,
+							runtimeMutationMaterialBridge,
+							mLastPerfShellTraceStats.overlayRuntimeMutationMs,
+							mLastPerfShellTraceStats.overlayRuntimeMutationGeometryMs,
+							mLastPerfShellTraceStats.overlayRuntimeMutationMaterialMs,
+							mLastPerfShellTraceStats.overlayRuntimeMutationPrimitiveCount,
+							mLastPerfShellTraceStats.overlayRuntimeMutationMaterialCount,
+							mLastPerfShellTraceStats.overlayRuntimeMutationAppend,
+							SceneBufferUploadDomain::RuntimeMutation);
+					}
+
+					if (hasActiveDynamicOverlay)
+					{
+						appendOverlaySource(
+							activeDynamicGeometry,
+							&dynamicStamp,
+							*activeDynamicMaterials,
+							mLastPerfShellTraceStats.overlayDynamicMs,
+							mLastPerfShellTraceStats.overlayDynamicGeometryMs,
+							mLastPerfShellTraceStats.overlayDynamicMaterialMs,
+							mLastPerfShellTraceStats.overlayDynamicPrimitiveCount,
+							mLastPerfShellTraceStats.overlayDynamicMaterialCount,
+							mLastPerfShellTraceStats.overlayDynamicAppend,
+							SceneBufferUploadDomain::Dynamic);
+					}
+
+					if (hasMirrorExtendedDynamicOverlay)
+					{
+						appendOverlaySource(
+							&mirrorExtendedDynamicGeometry,
+							&mirrorExtendedStamp,
+							mirrorExtendedDynamicMaterialBridge,
+							mLastPerfShellTraceStats.overlayMirrorExtendedMs,
+							mLastPerfShellTraceStats.overlayMirrorExtendedGeometryMs,
+							mLastPerfShellTraceStats.overlayMirrorExtendedMaterialMs,
+							mLastPerfShellTraceStats.overlayMirrorExtendedPrimitiveCount,
+							mLastPerfShellTraceStats.overlayMirrorExtendedMaterialCount,
+							mLastPerfShellTraceStats.overlayMirrorExtendedAppend,
+							SceneBufferUploadDomain::MirrorExtended);
+					}
+
+					if (hasMirrorPlayerOverlay)
+					{
+						appendOverlaySource(
+							&mirrorPlayerGeometry,
+							&mirrorPlayerStamp,
+							mirrorPlayerMaterialBridge,
+							mLastPerfShellTraceStats.overlayMirrorPlayerMs,
+							mLastPerfShellTraceStats.overlayMirrorPlayerGeometryMs,
+							mLastPerfShellTraceStats.overlayMirrorPlayerMaterialMs,
+							mLastPerfShellTraceStats.overlayMirrorPlayerPrimitiveCount,
+							mLastPerfShellTraceStats.overlayMirrorPlayerMaterialCount,
+							mLastPerfShellTraceStats.overlayMirrorPlayerAppend,
+							SceneBufferUploadDomain::MirrorPlayer);
+					}
+
+					if (hasRuntimeDebugSphereOverlay)
+					{
+						appendOverlaySource(
+							&debugSphereGeometry,
+							nullptr,
+							debugSphereMaterialBridge,
+							mLastPerfShellTraceStats.overlayDebugSphereMs,
+							mLastPerfShellTraceStats.overlayDebugSphereGeometryMs,
+							mLastPerfShellTraceStats.overlayDebugSphereMaterialMs,
+							mLastPerfShellTraceStats.overlayDebugSpherePrimitiveCount,
+							mLastPerfShellTraceStats.overlayDebugSphereMaterialCount,
+							mLastPerfShellTraceStats.overlayDebugSphereAppend,
+							SceneBufferUploadDomain::StaticOverlay);
+					}
 				}
-				AppendMaterialBridge(runtimeMutationMaterialBridge, overlayMaterialBridge);
-			}
 
-			if (hasActiveDynamicOverlay)
-			{
-				AppendGeometry(*activeDynamicGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
-				AppendMaterialBridge(*activeDynamicMaterials, overlayMaterialBridge);
+				{
+					ScopedPtPerfTimer bookkeepingTimer(mLastPerfShellTraceStats.overlayAppendBookkeepingMs);
+					if (hasPersistentVoxelOverlay)
+					{
+						mLastPerfShellTraceStats.overlayPersistentVoxelActorCount = mPersistentVoxelBatch.activeActorCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelPrimitiveCount = mPersistentVoxelBatch.primitiveCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelMaterialCount = (uint32_t)mPersistentVoxelBatch.materialBridge.materials.size();
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.primitiveCount = mPersistentVoxelBatch.primitiveCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.materialCount = (uint32_t)mPersistentVoxelBatch.materialBridge.materials.size();
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.byteCount =
+							(uint64_t)mPersistentVoxelBatch.primitiveCount * sizeof(nri_scene::PrimitiveData) +
+							EstimateAppendMaterialBridgeBytes(mPersistentVoxelBatch.materialBridge);
+						for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxelBatch.actors)
+						{
+							if (actor.active)
+							{
+								mLastPerfShellTraceStats.overlayPersistentVoxelAppend.indexCount += actor.indexCount;
+							}
+						}
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.byteCount +=
+							(uint64_t)mLastPerfShellTraceStats.overlayPersistentVoxelAppend.indexCount * sizeof(uint32_t);
+					}
+					mLastPerfShellTraceStats.overlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
+					mLastPerfShellTraceStats.overlayMaterialCount = (uint32_t)overlayMaterialBridge.materials.size();
+				}
 			}
-
-			if (hasMirrorExtendedDynamicOverlay)
-			{
-				AppendGeometry(mirrorExtendedDynamicGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
-				AppendMaterialBridge(mirrorExtendedDynamicMaterialBridge, overlayMaterialBridge);
-			}
-
-			if (hasMirrorPlayerOverlay)
-			{
-				AppendGeometry(mirrorPlayerGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
-				AppendMaterialBridge(mirrorPlayerMaterialBridge, overlayMaterialBridge);
-			}
-
-			if (hasRuntimeDebugSphereOverlay)
-			{
-				AppendGeometry(debugSphereGeometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
-				AppendMaterialBridge(debugSphereMaterialBridge, overlayMaterialBridge);
-			}
-
-			mLastPerfShellTraceStats.overlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
-			mLastPerfShellTraceStats.overlayMaterialCount = (uint32_t)overlayMaterialBridge.materials.size();
 
 			auto& instances = mSelectTopLevelInstanceScratch;
 			auto& sceneInstances = mSelectSceneInstanceScratch;
@@ -8893,6 +9511,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				BuildStaticMapInstances(instances, sceneInstances);
 			}
 			const uint32_t staticSceneInstanceBaselineCount = (uint32_t)sceneInstances.size();
+			selectedStaticSceneInstanceCount = staticSceneInstanceBaselineCount;
+			selectedSceneInstanceCount = (uint32_t)sceneInstances.size();
+			selectedTlasInstanceCount = (uint32_t)instances.size();
 			bool selectedSceneHasDynamicOverlay = false;
 
 			if (overlayGeometry.primitives.empty() && !hasPersistentVoxelOverlay)
@@ -8968,13 +9589,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				buffersReady = texturesReady && [&]()
 				{
 					ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadMs);
-					return UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) &&
+					return UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials, &sceneUploadDomainSpans) &&
 						(!hasPersistentVoxelOverlay || UploadPersistentVoxelArenaMaterialBuffers(persistentVoxelGpuMaterials));
 				}();
 				accelerationReady = false;
 				const uint32_t liveOverlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
 				const uint32_t liveOverlayIndexOffset = 0u;
 				const uint32_t liveOverlayIndexCount = (uint32_t)overlayGeometry.indices.size();
+				NRIAccelerationStructureResource& dynamicBottomLevelAS = GetCurrentDynamicBottomLevelAS();
 				if (buffersReady)
 				{
 					bool persistentVoxelAsReady = true;
@@ -8985,19 +9607,30 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					}
 					if (liveOverlayPrimitiveCount > 0)
 					{
+						mLastPerfShellTraceStats.dynamicAsRuntimeSpaceLinkPrimitives = mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsRuntimeMutationPrimitives = mLastPerfShellTraceStats.overlayRuntimeMutationAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsDynamicPrimitives = mLastPerfShellTraceStats.overlayDynamicAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsMirrorExtendedPrimitives = mLastPerfShellTraceStats.overlayMirrorExtendedAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsMirrorPlayerPrimitives = mLastPerfShellTraceStats.overlayMirrorPlayerAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsDebugSpherePrimitives = mLastPerfShellTraceStats.overlayDebugSphereAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsRuntimeSpaceLinkBytes = mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsRuntimeMutationBytes = mLastPerfShellTraceStats.overlayRuntimeMutationAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsDynamicBytes = mLastPerfShellTraceStats.overlayDynamicAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsMirrorExtendedBytes = mLastPerfShellTraceStats.overlayMirrorExtendedAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsMirrorPlayerBytes = mLastPerfShellTraceStats.overlayMirrorPlayerAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsDebugSphereBytes = mLastPerfShellTraceStats.overlayDebugSphereAppend.byteCount;
 						dynamicAsReady =
 							BuildDynamicAccelerationStructure(
 								overlayGeometry,
 								liveOverlayIndexOffset,
 								liveOverlayIndexCount,
 								liveOverlayPrimitiveCount,
-								mDynamicBottomLevelAS,
+								dynamicBottomLevelAS,
 								true) &&
-							mDynamicBottomLevelAS.accelerationStructure != nullptr;
+							dynamicBottomLevelAS.accelerationStructure != nullptr;
 					}
 					else
 					{
-						RetireResidentAccelerationStructure(mDynamicBottomLevelAS);
 						mLastPerfShellTraceStats.dynamicAsPrimitiveCount = 0;
 						mLastPerfShellTraceStats.dynamicAsVertexCount = 0;
 						mLastPerfShellTraceStats.dynamicAsIndexCount = 0;
@@ -9509,7 +10142,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						}
 					}
 
-					if (liveOverlayPrimitiveCount > 0 && mDynamicBottomLevelAS.accelerationStructure != nullptr)
+					if (liveOverlayPrimitiveCount > 0 && dynamicBottomLevelAS.accelerationStructure != nullptr)
 					{
 						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectInstanceHandlesMs);
 						nri::TopLevelInstance dynamicInstance = {};
@@ -9520,34 +10153,36 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						dynamicInstance.mask = 0xFF;
 						dynamicInstance.shaderBindingTableLocalOffset = 0;
 						dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
+						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS.accelerationStructure);
 						instances.push_back(dynamicInstance);
 						sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
 					}
 
-					uint32_t staticSceneInstanceCount = 0;
-					uint32_t dynamicSceneInstanceCount = 0;
-					uint32_t persistentVoxelSceneInstanceCount = 0;
+					selectedStaticSceneInstanceCount = 0;
+					selectedDynamicSceneInstanceCount = 0;
+					selectedPersistentVoxelSceneInstanceCount = 0;
 					for (const SceneInstanceData& sceneInstance : sceneInstances)
 					{
 						if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
 						{
-							staticSceneInstanceCount++;
+							selectedStaticSceneInstanceCount++;
 						}
 						else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC)
 						{
-							dynamicSceneInstanceCount++;
+							selectedDynamicSceneInstanceCount++;
 						}
 						else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 						{
-							persistentVoxelSceneInstanceCount++;
+							selectedPersistentVoxelSceneInstanceCount++;
 						}
 					}
+					selectedSceneInstanceCount = (uint32_t)sceneInstances.size();
+					selectedTlasInstanceCount = (uint32_t)instances.size();
 					const bool hasEffectiveOverlayInstances = sceneInstances.size() > staticSceneInstanceBaselineCount;
 					selectedSceneHasDynamicOverlay =
 						liveOverlayPrimitiveCount > 0 ||
-						dynamicSceneInstanceCount > 0 ||
-						persistentVoxelSceneInstanceCount > 0 ||
+						selectedDynamicSceneInstanceCount > 0 ||
+						selectedPersistentVoxelSceneInstanceCount > 0 ||
 						hasEffectiveOverlayInstances;
 					if (selectedSceneHasDynamicOverlay)
 					{
@@ -9558,10 +10193,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								mStaticIndexBuffer,
 								mStaticPrimitiveBuffer,
 								mStaticMaterialBuffer,
-								mVertexBuffer,
-								mIndexBuffer,
-								mPrimitiveBuffer,
-								mMaterialBuffer,
+								GetCurrentDynamicVertexBuffer(),
+								GetCurrentDynamicIndexBuffer(),
+								GetCurrentDynamicPrimitiveBuffer(),
+								GetCurrentDynamicMaterialBuffer(),
 								sceneInstances,
 								(uint32_t)mStaticMapScene.geometry.primitives.size(),
 								(uint32_t)overlayGeometry.primitives.size(),
@@ -9605,63 +10240,122 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					ScopedPtPerfTimer stateFlagsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitFlagsMs);
 					mUsedDynamicSceneLastFrame = selectedSceneHasDynamicOverlay;
 					mGpuSceneHasDynamicOverlay = selectedSceneHasDynamicOverlay;
+					mLastPerfShellTraceStats.sceneSelectStateCommitSelectedDynamic = selectedSceneHasDynamicOverlay ? 1u : 0u;
 				}
 				{
 					ScopedPtPerfTimer dynamicStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicStateMs);
 					if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
 					{
+						ScopedPtPerfTimer dynamicCoreTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicCoreMs);
 						mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)activeDynamicSceneView->opaqueSprites.size();
 						mDynamicSceneLastFrame.primitiveCount = (uint32_t)activeDynamicGeometry->primitives.size();
 						mDynamicSceneLastFrame.materialCount = (uint32_t)activeDynamicMaterials->materials.size();
 						mDynamicSceneLastFrame.modelCount = activeDynamicSceneView->stats.modelDrawItems;
 						mDynamicSceneLastFrame.unsupportedModelCount = activeDynamicSceneView->stats.unsupportedModelDrawItems;
+						mLastPerfShellTraceStats.sceneSelectStateCommitActiveDynamic = 1;
 					}
 					if (hasMirrorExtendedDynamicScene)
 					{
+						ScopedPtPerfTimer mirrorExtendedTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorExtendedMs);
 						mDynamicSceneLastFrame.mirrorExtendedSurfaceCount = CountSceneViewSurfaces(mirrorExtendedDynamicSceneView);
 						mDynamicSceneLastFrame.mirrorExtendedPrimitiveCount = (uint32_t)mirrorExtendedDynamicGeometry.primitives.size();
 						mDynamicSceneLastFrame.mirrorExtendedMaterialCount = (uint32_t)mirrorExtendedDynamicMaterialBridge.materials.size();
 						mDynamicSceneLastFrame.mirrorExtendedModelCount = mirrorExtendedDynamicSceneView.stats.modelDrawItems;
 						mDynamicSceneLastFrame.mirrorExtendedUnsupportedModelCount = mirrorExtendedDynamicSceneView.stats.unsupportedModelDrawItems;
+						mLastPerfShellTraceStats.sceneSelectStateCommitMirrorExtended = 1;
 					}
 					if (hasMirrorPlayerScene)
 					{
+						ScopedPtPerfTimer mirrorPlayerTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorPlayerMs);
 						mDynamicSceneLastFrame.mirrorPlayerSurfaceCount = CountSceneViewSurfaces(mirrorPlayerSceneView);
 						mDynamicSceneLastFrame.mirrorPlayerPrimitiveCount = (uint32_t)mirrorPlayerGeometry.primitives.size();
 						mDynamicSceneLastFrame.mirrorPlayerMaterialCount = (uint32_t)mirrorPlayerMaterialBridge.materials.size();
 						mDynamicSceneLastFrame.mirrorPlayerModelCount = mirrorPlayerSceneView.stats.modelDrawItems;
 						mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount = mirrorPlayerSceneView.stats.unsupportedModelDrawItems;
+						mLastPerfShellTraceStats.sceneSelectStateCommitMirrorPlayer = 1;
 					}
 				}
 				{
 					ScopedPtPerfTimer geometryStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStateMs);
 					if (!overlayGeometry.primitives.empty())
 					{
-						combinedGeometry = mStaticMapScene.geometry;
-						activeStaticProbePrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
-						AppendGeometry(overlayGeometry, (uint32_t)mStaticMapScene.materialBridge.materials.size(), combinedGeometry);
-						activeGeometry = &combinedGeometry;
-						activeGpuMaterials = &combinedGpuMaterials;
-						activeMaterialBridge = &combinedMaterialBridge;
+						auto& combinedGeometryCache = mStateCommitCombinedGeometryCache;
+						const uint32_t staticVertexCount = (uint32_t)mStaticMapScene.geometry.vertices.size();
+						const uint32_t staticIndexCount = (uint32_t)mStaticMapScene.geometry.indices.size();
+						const uint32_t staticPrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
+						const uint32_t staticPrimitiveProvenanceCount = (uint32_t)mStaticMapScene.geometry.primitiveProvenance.size();
+						const uint32_t staticMaterialCount = (uint32_t)mStaticMapScene.materialBridge.materials.size();
+						const bool refreshStaticPrefix =
+							!combinedGeometryCache.staticPrefixValid ||
+							combinedGeometryCache.staticBuildSerial != mStaticMapScene.buildSerial ||
+							combinedGeometryCache.staticVertexCount != staticVertexCount ||
+							combinedGeometryCache.staticIndexCount != staticIndexCount ||
+							combinedGeometryCache.staticPrimitiveCount != staticPrimitiveCount ||
+							combinedGeometryCache.staticPrimitiveProvenanceCount != staticPrimitiveProvenanceCount ||
+							combinedGeometryCache.staticMaterialCount != staticMaterialCount;
+						mLastPerfShellTraceStats.sceneSelectStateCommitGeometryCombined = 1;
+						if (refreshStaticPrefix)
+						{
+							ScopedPtPerfTimer copyTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStaticCopyMs);
+							combinedGeometryCache.geometry = mStaticMapScene.geometry;
+							combinedGeometryCache.staticPrefixValid = true;
+							combinedGeometryCache.staticBuildSerial = mStaticMapScene.buildSerial;
+							combinedGeometryCache.staticVertexCount = staticVertexCount;
+							combinedGeometryCache.staticIndexCount = staticIndexCount;
+							combinedGeometryCache.staticPrimitiveCount = staticPrimitiveCount;
+							combinedGeometryCache.staticPrimitiveProvenanceCount = staticPrimitiveProvenanceCount;
+							combinedGeometryCache.staticMaterialCount = staticMaterialCount;
+						}
+						{
+							ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryAppendMs);
+							ReplaceGeometryOverlayTail(
+								overlayGeometry,
+								staticMaterialCount,
+								combinedGeometryCache.staticVertexCount,
+								combinedGeometryCache.staticIndexCount,
+								combinedGeometryCache.staticPrimitiveCount,
+								combinedGeometryCache.staticPrimitiveProvenanceCount,
+								combinedGeometryCache.geometry);
+						}
+						{
+							ScopedPtPerfTimer selectTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometrySelectMs);
+							activeStaticProbePrimitiveCount = combinedGeometryCache.staticPrimitiveCount;
+							activeGeometry = &combinedGeometryCache.geometry;
+							activeGpuMaterials = &combinedGpuMaterials;
+							activeMaterialBridge = &combinedMaterialBridge;
+							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedPrimitiveCount = (uint32_t)combinedGeometryCache.geometry.primitives.size();
+							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedMaterialCount = (uint32_t)combinedGpuMaterials.size();
+						}
 					}
 					else
 					{
-						activeGeometry = &mStaticMapScene.geometry;
-						activeGpuMaterials = &mStaticMapScene.gpuMaterials;
-						activeMaterialBridge = &mStaticMapScene.materialBridge;
+						mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStaticOnly = 1;
+						{
+							ScopedPtPerfTimer selectTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometrySelectMs);
+							activeGeometry = &mStaticMapScene.geometry;
+							activeGpuMaterials = &mStaticMapScene.gpuMaterials;
+							activeMaterialBridge = &mStaticMapScene.materialBridge;
+							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedPrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
+							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedMaterialCount = (uint32_t)mStaticMapScene.gpuMaterials.size();
+						}
 					}
 				}
 
 				{
 					ScopedPtPerfTimer statsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMs);
-					nri_scene::SceneDebugStats dynamicOverlayStats =
-						!deferOverlayThisFrame ? dynamicSceneView.stats : nri_scene::SceneDebugStats{};
-					if (activeDynamicSceneView != nullptr)
+					nri_scene::SceneDebugStats dynamicOverlayStats;
 					{
-						dynamicOverlayStats = activeDynamicSceneView->stats;
+						ScopedPtPerfTimer baseStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsBaseMs);
+						dynamicOverlayStats =
+							!deferOverlayThisFrame ? dynamicSceneView.stats : nri_scene::SceneDebugStats{};
+						if (activeDynamicSceneView != nullptr)
+						{
+							dynamicOverlayStats = activeDynamicSceneView->stats;
+						}
 					}
 					if (hasPersistentVoxelOverlay)
 					{
+						ScopedPtPerfTimer persistentVoxelStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxelMs);
 						nri_scene::SceneDebugStats persistentVoxelStats = mPersistentVoxelBatch.stats;
 						persistentVoxelStats.voxelStableCandidates = 0;
 						persistentVoxelStats.voxelStableUncacheable = 0;
@@ -9679,16 +10373,145 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						persistentVoxelStats.voxelCacheNotCaptured = 0;
 						persistentVoxelStats.voxelCachePrimitives = 0;
 						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, persistentVoxelStats);
+						mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxel = 1;
 					}
 					if (hasMirrorExtendedDynamicScene)
 					{
+						ScopedPtPerfTimer mirrorExtendedStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtendedMs);
 						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorExtendedDynamicSceneView.stats);
+						mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtended = 1;
 					}
 					if (hasMirrorPlayerScene)
 					{
+						ScopedPtPerfTimer mirrorPlayerStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayerMs);
 						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorPlayerSceneView.stats);
+						mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayer = 1;
 					}
-					activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
+					{
+						ScopedPtPerfTimer mergeStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMergeMs);
+						activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
+					}
+				}
+
+				{
+					StateCommitDomainGenerations currentGenerations = {};
+					currentGenerations.staticMap = mStaticMapScene.buildSerial;
+					currentGenerations.runtimeMutation = [&]()
+					{
+						if (!hasRuntimeMutationOverlay && !mRuntimeMapLastFrame.active)
+						{
+							return 0ull;
+						}
+						uint64_t hash = 1469598103934665603ull;
+						hash = HashCombine64(hash, (uint64_t)mRuntimeMapLastFrame.dirtyChunkCount);
+						hash = HashCombine64(hash, (uint64_t)mRuntimeMapLastFrame.residentAppliedChunkCount);
+						hash = HashCombine64(hash, (uint64_t)mRuntimeMapLastFrame.residentGeometryChunkCount);
+						hash = HashCombine64(hash, (uint64_t)mRuntimeMapLastFrame.residentMaterialChunkCount);
+						hash = HashCombine64(hash, (uint64_t)mRuntimeMapLastFrame.rebuiltChunkCount);
+						hash = HashCombine64(hash, (uint64_t)mRuntimeMapLastFrame.heldChunkCount);
+						hash = HashCombine64(hash, (uint64_t)mRuntimeMapLastFrame.replacementTriangleCount);
+						hash = HashCombine64(hash, (uint64_t)mRuntimeMapLastFrame.materialCount);
+						return hash;
+					}();
+					currentGenerations.dynamicActors = activeDynamicSceneView != nullptr ?
+						HashCombine64(
+							HashCombine64(
+								HashCombine64((uint64_t)mFrameIndex, (uint64_t)activeDynamicSceneView->opaqueSprites.size()),
+								activeDynamicGeometry != nullptr ? (uint64_t)activeDynamicGeometry->primitives.size() : 0ull),
+							activeDynamicMaterials != nullptr ? (uint64_t)activeDynamicMaterials->materials.size() : 0ull) :
+						0ull;
+					currentGenerations.mirrorPlayer = hasMirrorPlayerScene ?
+						HashCombine64(
+							HashCombine64((uint64_t)mFrameIndex, (uint64_t)mirrorPlayerGeometry.primitives.size()),
+							(uint64_t)mirrorPlayerMaterialBridge.materials.size()) :
+						0ull;
+					currentGenerations.persistentVoxels = hasPersistentVoxelOverlay ?
+						HashCombine64(
+							HashCombine64(
+								HashCombine64(
+									HashCombine64(mPersistentVoxelBatch.sourceSerial, (uint64_t)mPersistentVoxelBatch.rebuildCount),
+									(uint64_t)mPersistentVoxelBatch.activeActorCount),
+								(uint64_t)mPersistentVoxelBatch.primitiveCount),
+							(uint64_t)mPersistentVoxelBatch.materialCount) :
+						0ull;
+					currentGenerations.materialBridge = activeMaterialBridge != nullptr ?
+						HashCombine64(
+							HashCombine64(
+								HashCombine64(1469598103934665603ull, (uint64_t)activeMaterialBridge->materials.size()),
+								(uint64_t)activeMaterialBridge->lightMetadata.size()),
+							activeGpuMaterials != nullptr ? (uint64_t)activeGpuMaterials->size() : 0ull) :
+						0ull;
+					currentGenerations.textures = activeMaterialBridge != nullptr ?
+						HashCombine64(
+							HashCombine64(1469598103934665603ull, (uint64_t)activeMaterialBridge->textures.size()),
+							(uint64_t)mTextureCache.size()) :
+						0ull;
+					currentGenerations.tlasInstances = HashCombine64(
+						HashCombine64(
+							HashCombine64(
+								HashCombine64(
+									HashCombine64(
+										selectedSceneHasDynamicOverlay ? (uint64_t)mFrameIndex : mStaticAccelerationBuildSerial,
+										(uint64_t)selectedTlasInstanceCount),
+									(uint64_t)selectedSceneInstanceCount),
+								(uint64_t)selectedStaticSceneInstanceCount),
+							(uint64_t)selectedDynamicSceneInstanceCount),
+						(uint64_t)selectedPersistentVoxelSceneInstanceCount);
+					{
+						uint64_t sceneConstantsHash = 1469598103934665603ull;
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)mRenderWidth);
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)mRenderHeight);
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraPos[0]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraPos[1]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraPos[2]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraForward[0]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraForward[1]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraForward[2]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraRight[0]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraRight[1]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraRight[2]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraUp[0]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraUp[1]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraUp[2]));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentTanHalfFovX));
+						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentTanHalfFovY));
+						currentGenerations.sceneConstants = sceneConstantsHash;
+					}
+
+					const auto domainChanged = [&](uint64_t current, uint64_t previous) -> uint32_t
+					{
+						return (!mHasLastStateCommitDomainGenerations || current != previous) ? 1u : 0u;
+					};
+					mLastPerfShellTraceStats.sceneSelectStateCommitGenStaticMap = currentGenerations.staticMap;
+					mLastPerfShellTraceStats.sceneSelectStateCommitGenRuntimeMutation = currentGenerations.runtimeMutation;
+					mLastPerfShellTraceStats.sceneSelectStateCommitGenDynamicActors = currentGenerations.dynamicActors;
+					mLastPerfShellTraceStats.sceneSelectStateCommitGenMirrorPlayer = currentGenerations.mirrorPlayer;
+					mLastPerfShellTraceStats.sceneSelectStateCommitGenPersistentVoxels = currentGenerations.persistentVoxels;
+					mLastPerfShellTraceStats.sceneSelectStateCommitGenMaterialBridge = currentGenerations.materialBridge;
+					mLastPerfShellTraceStats.sceneSelectStateCommitGenTextures = currentGenerations.textures;
+					mLastPerfShellTraceStats.sceneSelectStateCommitGenTlasInstances = currentGenerations.tlasInstances;
+					mLastPerfShellTraceStats.sceneSelectStateCommitGenSceneConstants = currentGenerations.sceneConstants;
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedStaticMap = domainChanged(currentGenerations.staticMap, mLastStateCommitDomainGenerations.staticMap);
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedRuntimeMutation = domainChanged(currentGenerations.runtimeMutation, mLastStateCommitDomainGenerations.runtimeMutation);
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedDynamicActors = domainChanged(currentGenerations.dynamicActors, mLastStateCommitDomainGenerations.dynamicActors);
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedMirrorPlayer = domainChanged(currentGenerations.mirrorPlayer, mLastStateCommitDomainGenerations.mirrorPlayer);
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedPersistentVoxels = domainChanged(currentGenerations.persistentVoxels, mLastStateCommitDomainGenerations.persistentVoxels);
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedMaterialBridge = domainChanged(currentGenerations.materialBridge, mLastStateCommitDomainGenerations.materialBridge);
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedTextures = domainChanged(currentGenerations.textures, mLastStateCommitDomainGenerations.textures);
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedTlasInstances = domainChanged(currentGenerations.tlasInstances, mLastStateCommitDomainGenerations.tlasInstances);
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedSceneConstants = domainChanged(currentGenerations.sceneConstants, mLastStateCommitDomainGenerations.sceneConstants);
+					mLastPerfShellTraceStats.sceneSelectStateCommitChangedDomainCount =
+						mLastPerfShellTraceStats.sceneSelectStateCommitChangedStaticMap +
+						mLastPerfShellTraceStats.sceneSelectStateCommitChangedRuntimeMutation +
+						mLastPerfShellTraceStats.sceneSelectStateCommitChangedDynamicActors +
+						mLastPerfShellTraceStats.sceneSelectStateCommitChangedMirrorPlayer +
+						mLastPerfShellTraceStats.sceneSelectStateCommitChangedPersistentVoxels +
+						mLastPerfShellTraceStats.sceneSelectStateCommitChangedMaterialBridge +
+						mLastPerfShellTraceStats.sceneSelectStateCommitChangedTextures +
+						mLastPerfShellTraceStats.sceneSelectStateCommitChangedTlasInstances +
+						mLastPerfShellTraceStats.sceneSelectStateCommitChangedSceneConstants;
+					mLastStateCommitDomainGenerations = currentGenerations;
+					mHasLastStateCommitDomainGenerations = true;
 				}
 			}
 			else
@@ -9706,7 +10529,6 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 		else if (mGpuSceneHasDynamicOverlay || residentStaticWorldGeometryChanged)
 		{
-			RetireResidentAccelerationStructure(mDynamicBottomLevelAS);
 			if (!RestoreStaticTopLevelScene())
 			{
 				LogFallback("PT static scene restore failed after dynamic overlay or resident chunk rebuild.");
@@ -9798,14 +10620,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		{
 			sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
 			buffersReady = UpdateSceneDataSet(
-				mVertexBuffer,
-				mIndexBuffer,
-				mPrimitiveBuffer,
-				mMaterialBuffer,
-				mVertexBuffer,
-				mIndexBuffer,
-				mPrimitiveBuffer,
-				mMaterialBuffer,
+				GetCurrentDynamicVertexBuffer(),
+				GetCurrentDynamicIndexBuffer(),
+				GetCurrentDynamicPrimitiveBuffer(),
+				GetCurrentDynamicMaterialBuffer(),
+				GetCurrentDynamicVertexBuffer(),
+				GetCurrentDynamicIndexBuffer(),
+				GetCurrentDynamicPrimitiveBuffer(),
+				GetCurrentDynamicMaterialBuffer(),
 				sceneInstances,
 				0u,
 				(uint32_t)capturedGeometry.primitives.size(),
@@ -9823,9 +10645,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 		else if (buffersReady)
 		{
+			NRIAccelerationStructureResource& dynamicBottomLevelAS = GetCurrentDynamicBottomLevelAS();
 			accelerationReady =
 				BuildDynamicAccelerationStructure(capturedGeometry) &&
-				mDynamicBottomLevelAS.accelerationStructure != nullptr;
+				dynamicBottomLevelAS.accelerationStructure != nullptr;
 			if (accelerationReady)
 			{
 				nri::TopLevelInstance instance = {};
@@ -9836,7 +10659,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				instance.mask = 0xFF;
 				instance.shaderBindingTableLocalOffset = 0;
 				instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-				instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
+				instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS.accelerationStructure);
 
 				auto& instances = mSelectCapturedTopLevelInstanceScratch;
 				instances.clear();
@@ -9900,10 +10723,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					mStaticIndexBuffer,
 					mStaticPrimitiveBuffer,
 					mStaticMaterialBuffer,
-					mVertexBuffer,
-					mIndexBuffer,
-					mPrimitiveBuffer,
-					mMaterialBuffer,
+					GetCurrentDynamicVertexBuffer(),
+					GetCurrentDynamicIndexBuffer(),
+					GetCurrentDynamicPrimitiveBuffer(),
+					GetCurrentDynamicMaterialBuffer(),
 					mBoundSceneInstances,
 					(uint32_t)mStaticMapScene.geometry.primitives.size(),
 					(uint32_t)overlayGeometry.primitives.size(),
@@ -11730,6 +12553,14 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mIndexBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mPrimitiveBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mMaterialBuffer, telemetry.sceneBufferBytes);
+	for (const SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
+	{
+		accumulateBuffer(slot.vertexBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.indexBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.primitiveBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.materialBuffer, telemetry.sceneBufferBytes);
+		accumulateAs(slot.dynamicBottomLevelAS, telemetry.accelerationStructureBytes);
+	}
 	accumulateBuffer(mStaticVertexBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mStaticIndexBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mStaticPrimitiveBuffer, telemetry.sceneBufferBytes);
@@ -11739,6 +12570,10 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mPersistentVoxelPrimitiveBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mPersistentVoxelMaterialBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mTlasInstanceBuffer, telemetry.sceneBufferBytes);
+	for (const NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
+	{
+		accumulateBuffer(tlasInstanceBuffer, telemetry.sceneBufferBytes);
+	}
 	accumulateBuffer(mSceneInstanceBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mPortalBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mRuntimeLightBuffer, telemetry.sceneBufferBytes);
@@ -11758,7 +12593,6 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mEmissiveTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 
-	accumulateAs(mDynamicBottomLevelAS, telemetry.accelerationStructureBytes);
 	for (const auto& pair : mPersistentVoxelMeshVariantResources)
 	{
 		accumulateBuffer(pair.second.vertexBuffer, telemetry.sceneBufferBytes);
@@ -14645,8 +15479,15 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 			entry.uploadMaterialResource.materialKeyHash == variant.materialKeyHash &&
 			entry.uploadMaterialResource.materialCount != 0 &&
 			!entry.uploadMaterialResource.materialBridge.materials.empty();
+		entry.uploadMaterialResource.materialSignature =
+			variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
 		if (materialReady)
 		{
+			if (entry.uploadMaterialResource.materialPayloadHash == 0)
+			{
+				entry.uploadMaterialResource.materialPayloadHash =
+					HashMaterialPayloadData(entry.uploadMaterialResource.materialBridge);
+			}
 			outReusedMaterial = true;
 		}
 		else
@@ -14661,8 +15502,12 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 				return rollbackAdmission("material-build-failed", "materials");
 			}
 			entry.uploadMaterialResource.materialKeyHash = variant.materialKeyHash;
+			entry.uploadMaterialResource.materialSignature =
+				variant.materialVariantHash != 0 ? variant.materialVariantHash : variant.materialKeyHash;
 			entry.uploadMaterialResource.materialBridge = std::move(builtMaterials);
 			entry.uploadMaterialResource.materialCount = (uint32_t)entry.uploadMaterialResource.materialBridge.materials.size();
+			entry.uploadMaterialResource.materialPayloadHash =
+				HashMaterialPayloadData(entry.uploadMaterialResource.materialBridge);
 			entry.uploadMaterialResource.materialUploadHash = 0;
 		}
 		entry.uploadMaterialResource.lastDesiredMapGeneration = mPersistentVoxelResidencyMapGeneration;
@@ -15928,9 +16773,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	auto rebuildBatchMaterialBridge = [&](PersistentVoxelBatch& batch)
 	{
 		batch.materialBridge = {};
-		std::vector<const PersistentVoxelMaterialVariantResource*> materialResources;
+		std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
 		materialResources.reserve(mPersistentVoxelMaterialVariantResources.size());
-		for (const auto& pair : mPersistentVoxelMaterialVariantResources)
+		for (auto& pair : mPersistentVoxelMaterialVariantResources)
 		{
 			if (pair.second.materialCount > 0)
 			{
@@ -15941,14 +16786,26 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			{
 				return left->materialOffset < right->materialOffset;
 			});
-		for (const PersistentVoxelMaterialVariantResource* resource : materialResources)
+		for (PersistentVoxelMaterialVariantResource* resource : materialResources)
 		{
+			if (resource == nullptr)
+			{
+				continue;
+			}
 			if (batch.materialBridge.materials.size() < resource->materialOffset)
 			{
 				batch.materialBridge.materials.resize(resource->materialOffset);
 				batch.materialBridge.lightMetadata.resize(resource->materialOffset);
 			}
 			AppendMaterialBridge(resource->materialBridge, batch.materialBridge);
+			const uint64_t materialSize = (uint64_t)resource->materialCount * sizeof(nri_scene::MaterialData);
+			if (resource->materialOffset <= batch.materialBridge.materials.size() &&
+				resource->materialCount <= batch.materialBridge.materials.size() - resource->materialOffset)
+			{
+				resource->materialPayloadHash = HashUploadPayloadBytes(
+					batch.materialBridge.materials.data() + resource->materialOffset,
+					materialSize);
+			}
 		}
 		for (PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 		{
@@ -16520,9 +17377,14 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		};
 
 		PersistentVoxelMaterialVariantResource& materialResource = mPersistentVoxelMaterialVariantResources[cacheEntry.materialKeyHash];
+		materialResource.materialSignature = cacheEntry.materialSignature;
 		const bool materialVariantWasReady =
 			materialResource.materialKeyHash == cacheEntry.materialKeyHash &&
 			!materialResource.materialBridge.materials.empty();
+		if (materialVariantWasReady && materialResource.materialPayloadHash == 0)
+		{
+			materialResource.materialPayloadHash = HashMaterialPayloadData(materialResource.materialBridge);
+		}
 		if (materialResource.materialKeyHash != cacheEntry.materialKeyHash ||
 			materialResource.materialBridge.materials.empty())
 		{
@@ -16578,8 +17440,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			}
 
 			materialResource.materialKeyHash = cacheEntry.materialKeyHash;
+			materialResource.materialSignature = cacheEntry.materialSignature;
 			materialResource.materialBridge = std::move(builtMaterials);
 			materialResource.materialCount = (uint32_t)materialResource.materialBridge.materials.size();
+			materialResource.materialPayloadHash = HashMaterialPayloadData(materialResource.materialBridge);
 			materialResource.materialUploadHash = 0;
 			if ((bool)nri_voxelstats)
 			{
@@ -17768,6 +18632,19 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		return false;
 	}
 
+	struct PendingMaterialUpload
+	{
+		PersistentVoxelMaterialVariantResource* resource = nullptr;
+		uint64_t materialHash = 0;
+	};
+
+	std::vector<RuntimeMutationResidentUploadRange> dirtyMaterialRanges;
+	std::vector<PendingMaterialUpload> pendingMaterialUploads;
+	dirtyMaterialRanges.reserve(mPersistentVoxelMaterialVariantResources.size());
+	pendingMaterialUploads.reserve(mPersistentVoxelMaterialVariantResources.size());
+	auto& persistentVoxelDomain =
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDomains[(size_t)SceneBufferUploadDomain::PersistentVoxelMaterial];
+
 	for (auto& pair : mPersistentVoxelMaterialVariantResources)
 	{
 		PersistentVoxelMaterialVariantResource& resource = pair.second;
@@ -17783,44 +18660,130 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		const nri_scene::MaterialData* actorMaterials = materials.data() + resource.materialOffset;
 		const uint64_t materialSize = (uint64_t)resource.materialCount * sizeof(nri_scene::MaterialData);
 		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialRequestedBytes += materialSize;
-		const uint64_t materialHash = HashBytes64(reinterpret_cast<const uint8_t*>(actorMaterials), (size_t)materialSize);
+		persistentVoxelDomain.payloadBytes += materialSize;
+		persistentVoxelDomain.materialPayloadBytes += materialSize;
+		persistentVoxelDomain.hashChecks++;
+		const uint64_t materialHash = HashUploadPayloadBytes(actorMaterials, materialSize);
 		const bool uploadMaterials =
 			resource.materialUploadHash != materialHash;
 		if (uploadMaterials)
 		{
+			persistentVoxelDomain.hashMisses++;
+		}
+		if (uploadMaterials)
+		{
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialUploads++;
-			mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialUploadedBytes += materialSize;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialDirtyBytes += materialSize;
+			dirtyMaterialRanges.push_back({
+				ResidentUploadKind_Material,
+				(uint64_t)resource.materialOffset * sizeof(nri_scene::MaterialData),
+				materialSize,
+				materialSize });
+			pendingMaterialUploads.push_back({ &resource, materialHash });
+		}
+		else
+		{
+			resource.materialUploadHash = materialHash;
+		}
+	}
+
+	if (!dirtyMaterialRanges.empty())
+	{
+		constexpr uint64_t kMaterialUploadCoalesceMaxGapBytes = 4ull * 1024ull;
+		constexpr uint64_t kMaterialUploadCoalesceMaxByteExpansion = 2ull;
+		std::sort(
+			dirtyMaterialRanges.begin(),
+			dirtyMaterialRanges.end(),
+			[](const RuntimeMutationResidentUploadRange& a, const RuntimeMutationResidentUploadRange& b)
+			{
+				return a.byteOffset < b.byteOffset;
+			});
+
+		std::vector<RuntimeMutationResidentUploadRange> coalescedRanges;
+		coalescedRanges.reserve(dirtyMaterialRanges.size());
+		for (const RuntimeMutationResidentUploadRange& range : dirtyMaterialRanges)
+		{
+			if (coalescedRanges.empty())
+			{
+				coalescedRanges.push_back(range);
+				continue;
+			}
+
+			RuntimeMutationResidentUploadRange& tail = coalescedRanges.back();
+			const uint64_t tailEnd = tail.byteOffset + tail.size;
+			const uint64_t rangeEnd = range.byteOffset + range.size;
+			const uint64_t gapBytes = range.byteOffset > tailEnd ? range.byteOffset - tailEnd : 0;
+			const uint64_t candidateSize = rangeEnd > tailEnd ? rangeEnd - tail.byteOffset : tail.size;
+			const uint64_t candidateDirtySize = tail.dirtySize + range.size;
+			const bool acceptableByteExpansion =
+				candidateDirtySize > UINT64_MAX / kMaterialUploadCoalesceMaxByteExpansion ||
+				candidateSize <= candidateDirtySize * kMaterialUploadCoalesceMaxByteExpansion;
+			if (gapBytes <= kMaterialUploadCoalesceMaxGapBytes && acceptableByteExpansion)
+			{
+				if (rangeEnd > tailEnd)
+				{
+					tail.size = rangeEnd - tail.byteOffset;
+				}
+				tail.dirtySize += range.size;
+				continue;
+			}
+
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchRejects++;
+			coalescedRanges.push_back(range);
+		}
+
+		uint64_t uploadedBytes = 0;
+		for (const RuntimeMutationResidentUploadRange& range : coalescedRanges)
+		{
+			uploadedBytes += range.size;
+			if (range.size > range.dirtySize)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchGapBytes += range.size - range.dirtySize;
+			}
 			NotePerfBufferUpload(
 				&mMaterialBufferStats,
-				materialSize,
+				range.size,
 				false,
 				"persistent_voxel_material_variant",
 				ResidentUploadKind_Material);
-			if (!StageResidentBufferCopyRange(
-				mPersistentVoxelMaterialBuffer,
-				(uint64_t)resource.materialOffset * sizeof(nri_scene::MaterialData),
-				actorMaterials,
-				materialSize,
-				NRIComputeShaderResourceAccess(),
-				ResidentUploadKind_Material))
-			{
-				return false;
-			}
 		}
 
-		resource.materialUploadHash = materialHash;
-		if (uploadMaterials && (bool)nri_voxelstats)
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialUploadedBytes += uploadedBytes;
+		persistentVoxelDomain.uploadedBytes += uploadedBytes;
+		persistentVoxelDomain.materialUploadedBytes += uploadedBytes;
+
+		const uint64_t materialArenaSize = materials.size() * sizeof(nri_scene::MaterialData);
+		if (!StagePersistentVoxelMaterialUploadRanges(
+			coalescedRanges,
+			reinterpret_cast<const uint8_t*>(materials.data()),
+			materialArenaSize))
 		{
-			Printf("PERF pt voxel material variant NRI: frame=%u action=upload reason=arena-sync actor_key=0x0 mat_key=0x%llx ref_count=0 material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx upload_bytes=%llu ready=1\n",
-				mFrameIndex,
-				(unsigned long long)resource.materialKeyHash,
-				resource.materialOffset,
-				resource.materialCount,
-				resource.materialCapacity,
-				(unsigned long long)resource.materialUploadHash,
-				(unsigned long long)materialSize);
+			return false;
+		}
+
+		for (const PendingMaterialUpload& upload : pendingMaterialUploads)
+		{
+			if (upload.resource == nullptr)
+			{
+				continue;
+			}
+			upload.resource->materialUploadHash = upload.materialHash;
+			if ((bool)nri_voxelstats)
+			{
+				const uint64_t materialSize =
+					(uint64_t)upload.resource->materialCount * sizeof(nri_scene::MaterialData);
+				Printf("PERF pt voxel material variant NRI: frame=%u action=upload reason=arena-sync actor_key=0x0 mat_key=0x%llx ref_count=0 material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx upload_bytes=%llu ready=1\n",
+					mFrameIndex,
+					(unsigned long long)upload.resource->materialKeyHash,
+					upload.resource->materialOffset,
+					upload.resource->materialCount,
+					upload.resource->materialCapacity,
+					(unsigned long long)upload.materialHash,
+					(unsigned long long)materialSize);
+			}
 		}
 	}
+
 	return true;
 }
 
@@ -23000,15 +23963,27 @@ void NRIRenderer::ResetSceneBufferFrameStats()
 	mVertexBufferStats.bytesUploadedLastFrame = 0;
 	mVertexBufferStats.growEventsLastFrame = 0;
 	mVertexBufferStats.overwriteEventsLastFrame = 0;
+	mVertexBufferStats.growthOldBytesLastFrame = 0;
+	mVertexBufferStats.growthRequestedBytesLastFrame = 0;
+	mVertexBufferStats.growthAllocatedBytesLastFrame = 0;
 	mIndexBufferStats.bytesUploadedLastFrame = 0;
 	mIndexBufferStats.growEventsLastFrame = 0;
 	mIndexBufferStats.overwriteEventsLastFrame = 0;
+	mIndexBufferStats.growthOldBytesLastFrame = 0;
+	mIndexBufferStats.growthRequestedBytesLastFrame = 0;
+	mIndexBufferStats.growthAllocatedBytesLastFrame = 0;
 	mPrimitiveBufferStats.bytesUploadedLastFrame = 0;
 	mPrimitiveBufferStats.growEventsLastFrame = 0;
 	mPrimitiveBufferStats.overwriteEventsLastFrame = 0;
+	mPrimitiveBufferStats.growthOldBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthRequestedBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthAllocatedBytesLastFrame = 0;
 	mMaterialBufferStats.bytesUploadedLastFrame = 0;
 	mMaterialBufferStats.growEventsLastFrame = 0;
 	mMaterialBufferStats.overwriteEventsLastFrame = 0;
+	mMaterialBufferStats.growthOldBytesLastFrame = 0;
+	mMaterialBufferStats.growthRequestedBytesLastFrame = 0;
+	mMaterialBufferStats.growthAllocatedBytesLastFrame = 0;
 	mPortalBufferStats.bytesUploadedLastFrame = 0;
 	mPortalBufferStats.growEventsLastFrame = 0;
 	mPortalBufferStats.overwriteEventsLastFrame = 0;
@@ -23016,22 +23991,22 @@ void NRIRenderer::ResetSceneBufferFrameStats()
 
 const NRIBufferResource& NRIRenderer::GetActiveVertexBuffer() const
 {
-	return mBoundDynamicPrimitiveCount > 0 ? mVertexBuffer : mStaticVertexBuffer;
+	return mBoundDynamicPrimitiveCount > 0 ? GetCurrentDynamicVertexBuffer() : mStaticVertexBuffer;
 }
 
 const NRIBufferResource& NRIRenderer::GetActiveIndexBuffer() const
 {
-	return mBoundDynamicPrimitiveCount > 0 ? mIndexBuffer : mStaticIndexBuffer;
+	return mBoundDynamicPrimitiveCount > 0 ? GetCurrentDynamicIndexBuffer() : mStaticIndexBuffer;
 }
 
 const NRIBufferResource& NRIRenderer::GetActivePrimitiveBuffer() const
 {
-	return mBoundDynamicPrimitiveCount > 0 ? mPrimitiveBuffer : mStaticPrimitiveBuffer;
+	return mBoundDynamicPrimitiveCount > 0 ? GetCurrentDynamicPrimitiveBuffer() : mStaticPrimitiveBuffer;
 }
 
 const NRIBufferResource& NRIRenderer::GetActiveMaterialBuffer() const
 {
-	return mBoundDynamicMaterialCount > 0 ? mMaterialBuffer : mStaticMaterialBuffer;
+	return mBoundDynamicMaterialCount > 0 ? GetCurrentDynamicMaterialBuffer() : mStaticMaterialBuffer;
 }
 
 void NRIRenderer::BindSceneRootDescriptors()
@@ -24200,6 +25175,131 @@ uint32_t NRIRenderer::GetCurrentQueuedFrameIndex() const
 	return std::min<uint32_t>(mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mFrameBuffer->mQueuedFrames.size() - 1u);
 }
 
+NRIRenderer::SceneUploadBufferRingSlot& NRIRenderer::GetCurrentSceneUploadBufferRingSlot()
+{
+	const uint32_t queuedFrameCount =
+		mFrameBuffer != nullptr && !mFrameBuffer->mQueuedFrames.empty() ?
+		(uint32_t)mFrameBuffer->mQueuedFrames.size() :
+		1u;
+	if (mSceneUploadBufferRing.size() < queuedFrameCount)
+	{
+		mSceneUploadBufferRing.resize(queuedFrameCount);
+	}
+
+	return mSceneUploadBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mSceneUploadBufferRing.size()];
+}
+
+const NRIRenderer::SceneUploadBufferRingSlot* NRIRenderer::GetCurrentSceneUploadBufferRingSlot() const
+{
+	if (mSceneUploadBufferRing.empty())
+	{
+		return nullptr;
+	}
+
+	return &mSceneUploadBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mSceneUploadBufferRing.size()];
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicVertexBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().vertexBuffer;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicIndexBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().indexBuffer;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicPrimitiveBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().primitiveBuffer;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicMaterialBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().materialBuffer;
+}
+
+NRIAccelerationStructureResource& NRIRenderer::GetCurrentDynamicBottomLevelAS()
+{
+	return GetCurrentSceneUploadBufferRingSlot().dynamicBottomLevelAS;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentTlasInstanceBuffer()
+{
+	const uint32_t queuedFrameCount =
+		mFrameBuffer != nullptr && !mFrameBuffer->mQueuedFrames.empty() ?
+		(uint32_t)mFrameBuffer->mQueuedFrames.size() :
+		1u;
+	if (mTlasInstanceBufferRing.size() < queuedFrameCount)
+	{
+		mTlasInstanceBufferRing.resize(queuedFrameCount);
+	}
+
+	return mTlasInstanceBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mTlasInstanceBufferRing.size()];
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicVertexBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->vertexBuffer : mVertexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicIndexBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->indexBuffer : mIndexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicPrimitiveBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->primitiveBuffer : mPrimitiveBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicMaterialBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->materialBuffer : mMaterialBuffer;
+}
+
+const NRIAccelerationStructureResource* NRIRenderer::GetCurrentDynamicBottomLevelAS() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? &slot->dynamicBottomLevelAS : nullptr;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentTlasInstanceBuffer() const
+{
+	if (mTlasInstanceBufferRing.empty())
+	{
+		return mTlasInstanceBuffer;
+	}
+
+	return mTlasInstanceBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mTlasInstanceBufferRing.size()];
+}
+
+bool NRIRenderer::HasAnyDynamicBottomLevelAS() const
+{
+	for (const SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
+	{
+		if (slot.dynamicBottomLevelAS.accelerationStructure != nullptr ||
+			slot.dynamicBottomLevelAS.descriptor != nullptr)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void NRIRenderer::DestroyDynamicBottomLevelAccelerationStructures()
+{
+	for (SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
+	{
+		DestroyAccelerationStructureResource(slot.dynamicBottomLevelAS);
+	}
+}
+
 NRIRenderer::ResidentUploadScratchFrame& NRIRenderer::GetResidentUploadScratchFrame()
 {
 	const uint32_t frameSlot = GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size();
@@ -24539,13 +25639,23 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 	stats.bytesUploadedLastFrame = size;
 	stats.growEventsLastFrame = 0;
 	stats.overwriteEventsLastFrame = 0;
+	stats.growthOldBytesLastFrame = 0;
+	stats.growthRequestedBytesLastFrame = 0;
+	stats.growthAllocatedBytesLastFrame = 0;
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
 	NotePerfBufferUpload(&stats, size, needsGrowth, waitReason, -1);
 
 	if (needsGrowth)
 	{
-		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
+		const bool isSceneBufferUpload =
+			waitReason != nullptr &&
+			std::strcmp(waitReason, "scene_buffer_upload") == 0;
+		const uint64_t oldSize = resource.size;
+		const uint64_t grownSize =
+			isSceneBufferUpload ?
+			GetSceneUploadGrownBufferSize(resource.size, requiredSize, stride) :
+			GetGrownBufferSize(resource.size, requiredSize, stride);
 		if (!writesQuiesced && (resource.buffer != nullptr || resource.shaderView != nullptr))
 		{
 			WaitForCommandsTracked(waitReason);
@@ -24583,6 +25693,9 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 
 		stats.growthCount++;
 		stats.growEventsLastFrame = 1;
+		stats.growthOldBytesLastFrame = oldSize;
+		stats.growthRequestedBytesLastFrame = requiredSize;
+		stats.growthAllocatedBytesLastFrame = desc.size;
 	}
 	else
 	{
@@ -24607,6 +25720,10 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 		}
 
 		std::memcpy(mapped, data, (size_t)size);
+		if (needsGrowth && resource.size > size)
+		{
+			std::memset(static_cast<uint8_t*>(mapped) + size, 0, (size_t)(resource.size - size));
+		}
 		mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
 	}
 
@@ -24919,6 +26036,145 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterCopyBarrierDesc);
 
 	scratch->cursor = scratchOffset + size;
+	return true;
+}
+
+bool NRIRenderer::StagePersistentVoxelMaterialUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges, const uint8_t* data, uint64_t availableBytes)
+{
+	if (ranges.empty())
+	{
+		return true;
+	}
+
+	if (mPersistentVoxelMaterialBuffer.buffer == nullptr ||
+		data == nullptr ||
+		mFrameBuffer == nullptr ||
+		mFrameBuffer->mCommandBuffer == nullptr)
+	{
+		return false;
+	}
+
+	constexpr uint64_t kResidentUploadScratchAlignment = 16u;
+	auto& frameScratch = GetResidentUploadScratchFrame();
+	ResidentBufferUploadScratch& scratch = frameScratch.material;
+	uint64_t requiredSize = scratch.cursor;
+	for (const RuntimeMutationResidentUploadRange& range : ranges)
+	{
+		if (range.uploadKind != ResidentUploadKind_Material ||
+			range.size == 0 ||
+			range.byteOffset > availableBytes ||
+			range.size > availableBytes - range.byteOffset ||
+			range.byteOffset > mPersistentVoxelMaterialBuffer.size ||
+			range.size > mPersistentVoxelMaterialBuffer.size - range.byteOffset)
+		{
+			return false;
+		}
+
+		requiredSize =
+			(requiredSize + kResidentUploadScratchAlignment - 1u) &
+			~(kResidentUploadScratchAlignment - 1u);
+		requiredSize += range.size;
+	}
+
+	if (!EnsureResidentUploadScratchBuffer(scratch, frameScratch, requiredSize))
+	{
+		return false;
+	}
+
+	struct StagedCopy
+	{
+		uint64_t targetOffset = 0;
+		uint64_t scratchOffset = 0;
+		uint64_t size = 0;
+		const uint8_t* data = nullptr;
+	};
+
+	std::vector<StagedCopy> stagedCopies;
+	stagedCopies.reserve(ranges.size());
+	uint64_t mapStart = UINT64_MAX;
+	uint64_t mapEnd = 0;
+	for (const RuntimeMutationResidentUploadRange& range : ranges)
+	{
+		const uint64_t scratchOffset =
+			(scratch.cursor + kResidentUploadScratchAlignment - 1u) &
+			~(kResidentUploadScratchAlignment - 1u);
+		const uint64_t rangeEnd = scratchOffset + range.size;
+		if (rangeEnd > scratch.buffer.size)
+		{
+			return false;
+		}
+
+		scratch.cursor = rangeEnd;
+		mapStart = std::min(mapStart, scratchOffset);
+		mapEnd = std::max(mapEnd, rangeEnd);
+		stagedCopies.push_back({ range.byteOffset, scratchOffset, range.size, data + range.byteOffset });
+	}
+
+	const uint64_t mapSize = mapEnd - mapStart;
+	void* mapped = mFrameBuffer->mCore.MapBuffer(*scratch.buffer.buffer, mapStart, mapSize);
+	if (mapped == nullptr)
+	{
+		return false;
+	}
+
+	for (const StagedCopy& copy : stagedCopies)
+	{
+		std::memcpy(static_cast<uint8_t*>(mapped) + (copy.scratchOffset - mapStart), copy.data, (size_t)copy.size);
+	}
+	mFrameBuffer->mCore.UnmapBuffer(*scratch.buffer.buffer);
+
+	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatches++;
+	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchRanges += (uint32_t)stagedCopies.size();
+
+	if (!scratch.copySourceActive)
+	{
+		nri::BufferBarrierDesc sourceBarrier = {};
+		sourceBarrier.buffer = scratch.buffer.buffer;
+		sourceBarrier.before = {};
+		sourceBarrier.after = NRICopySourceAccess();
+
+		nri::BarrierDesc sourceBarrierDesc = {};
+		sourceBarrierDesc.buffers = &sourceBarrier;
+		sourceBarrierDesc.bufferNum = 1;
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, sourceBarrierDesc);
+		scratch.copySourceActive = true;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands++;
+	}
+
+	nri::BufferBarrierDesc beforeCopyBarrier = {};
+	beforeCopyBarrier.buffer = mPersistentVoxelMaterialBuffer.buffer;
+	beforeCopyBarrier.before = NRIComputeShaderResourceAccess();
+	beforeCopyBarrier.after = NRICopyDestinationAccess();
+
+	nri::BarrierDesc beforeCopyBarrierDesc = {};
+	beforeCopyBarrierDesc.buffers = &beforeCopyBarrier;
+	beforeCopyBarrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeCopyBarrierDesc);
+	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands++;
+
+	for (const StagedCopy& copy : stagedCopies)
+	{
+		mFrameBuffer->mCore.CmdCopyBuffer(
+			*mFrameBuffer->mCommandBuffer,
+			*mPersistentVoxelMaterialBuffer.buffer,
+			copy.targetOffset,
+			*scratch.buffer.buffer,
+			copy.scratchOffset,
+			copy.size);
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchCopyCommands++;
+	}
+
+	nri::BufferBarrierDesc afterCopyBarrier = {};
+	afterCopyBarrier.buffer = mPersistentVoxelMaterialBuffer.buffer;
+	afterCopyBarrier.before = NRICopyDestinationAccess();
+	afterCopyBarrier.after = NRIComputeShaderResourceAccess();
+
+	nri::BarrierDesc afterCopyBarrierDesc = {};
+	afterCopyBarrierDesc.buffers = &afterCopyBarrier;
+	afterCopyBarrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterCopyBarrierDesc);
+	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands++;
+
 	return true;
 }
 
@@ -25279,6 +26535,121 @@ bool NRIRenderer::FlushRuntimeMutationResidentGeometryUploadRanges()
 	return true;
 }
 
+void NRIRenderer::RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices)
+{
+	auto& cache = mStateCommitCombinedGeometryCache;
+	if (!cache.staticPrefixValid)
+	{
+		return;
+	}
+	if (cache.staticBuildSerial != mStaticMapScene.buildSerial)
+	{
+		cache.staticPrefixValid = false;
+		return;
+	}
+
+	nri_scene::GeometryData& destination = cache.geometry;
+	const nri_scene::GeometryData& source = mStaticMapScene.geometry;
+	if (destination.vertices.size() < cache.staticVertexCount ||
+		destination.indices.size() < cache.staticIndexCount ||
+		destination.primitives.size() < cache.staticPrimitiveCount ||
+		destination.primitiveProvenance.size() < cache.staticPrimitiveProvenanceCount)
+	{
+		cache.staticPrefixValid = false;
+		return;
+	}
+
+	const uint32_t staticVertexCount = (uint32_t)source.vertices.size();
+	const uint32_t staticIndexCount = (uint32_t)source.indices.size();
+	const uint32_t staticPrimitiveCount = (uint32_t)source.primitives.size();
+	const uint32_t staticPrimitiveProvenanceCount = (uint32_t)source.primitiveProvenance.size();
+	const uint32_t staticMaterialCount = (uint32_t)mStaticMapScene.materialBridge.materials.size();
+	const bool prefixSizeChanged =
+		cache.staticVertexCount != staticVertexCount ||
+		cache.staticIndexCount != staticIndexCount ||
+		cache.staticPrimitiveCount != staticPrimitiveCount ||
+		cache.staticPrimitiveProvenanceCount != staticPrimitiveProvenanceCount;
+	if (prefixSizeChanged)
+	{
+		destination.vertices.resize(cache.staticVertexCount);
+		destination.indices.resize(cache.staticIndexCount);
+		destination.primitives.resize(cache.staticPrimitiveCount);
+		destination.primitiveProvenance.resize(cache.staticPrimitiveProvenanceCount);
+		destination.vertices.resize(staticVertexCount);
+		destination.indices.resize(staticIndexCount);
+		destination.primitives.resize(staticPrimitiveCount);
+		destination.primitiveProvenance.resize(staticPrimitiveProvenanceCount);
+		cache.staticVertexCount = staticVertexCount;
+		cache.staticIndexCount = staticIndexCount;
+		cache.staticPrimitiveCount = staticPrimitiveCount;
+		cache.staticPrimitiveProvenanceCount = staticPrimitiveProvenanceCount;
+	}
+	cache.staticMaterialCount = staticMaterialCount;
+
+	for (uint32_t chunkListIndex : changedGeometryChunkListIndices)
+	{
+		if (chunkListIndex >= mStaticMapScene.chunks.size())
+		{
+			cache.staticPrefixValid = false;
+			return;
+		}
+		const StaticMapSceneCache::ChunkCache& chunk = mStaticMapScene.chunks[chunkListIndex];
+		if (!chunk.active)
+		{
+			continue;
+		}
+		if (chunk.vertexOffset > source.vertices.size() ||
+			chunk.vertexCount > source.vertices.size() - chunk.vertexOffset ||
+			chunk.vertexOffset > destination.vertices.size() ||
+			chunk.vertexCount > destination.vertices.size() - chunk.vertexOffset ||
+			chunk.indexOffset > source.indices.size() ||
+			chunk.indexCount > source.indices.size() - chunk.indexOffset ||
+			chunk.indexOffset > destination.indices.size() ||
+			chunk.indexCount > destination.indices.size() - chunk.indexOffset ||
+			chunk.primitiveOffset > source.primitives.size() ||
+			chunk.primitiveCount > source.primitives.size() - chunk.primitiveOffset ||
+			chunk.primitiveOffset > destination.primitives.size() ||
+			chunk.primitiveCount > destination.primitives.size() - chunk.primitiveOffset)
+		{
+			cache.staticPrefixValid = false;
+			return;
+		}
+
+		if (chunk.vertexCount != 0)
+		{
+			std::copy_n(
+				source.vertices.data() + chunk.vertexOffset,
+				chunk.vertexCount,
+				destination.vertices.data() + chunk.vertexOffset);
+		}
+		if (chunk.indexCount != 0)
+		{
+			std::copy_n(
+				source.indices.data() + chunk.indexOffset,
+				chunk.indexCount,
+				destination.indices.data() + chunk.indexOffset);
+		}
+		if (chunk.primitiveCount != 0)
+		{
+			std::copy_n(
+				source.primitives.data() + chunk.primitiveOffset,
+				chunk.primitiveCount,
+				destination.primitives.data() + chunk.primitiveOffset);
+		}
+		if (chunk.primitiveOffset <= source.primitiveProvenance.size() &&
+			chunk.primitiveCount <= source.primitiveProvenance.size() - chunk.primitiveOffset &&
+			chunk.primitiveOffset <= destination.primitiveProvenance.size() &&
+			chunk.primitiveCount <= destination.primitiveProvenance.size() - chunk.primitiveOffset &&
+			chunk.primitiveCount != 0)
+		{
+			std::copy_n(
+				source.primitiveProvenance.data() + chunk.primitiveOffset,
+				chunk.primitiveCount,
+				destination.primitiveProvenance.data() + chunk.primitiveOffset);
+		}
+	}
+}
+
 void NRIRenderer::RetireResidentBufferResource(NRIBufferResource& resource)
 {
 	if (resource.buffer == nullptr && resource.shaderView == nullptr)
@@ -25342,12 +26713,16 @@ bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, Sc
 	stats.bytesUploadedLastFrame = size;
 	stats.growEventsLastFrame = 0;
 	stats.overwriteEventsLastFrame = 0;
+	stats.growthOldBytesLastFrame = 0;
+	stats.growthRequestedBytesLastFrame = 0;
+	stats.growthAllocatedBytesLastFrame = 0;
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
 	NotePerfBufferUpload(&stats, size, needsGrowth, waitReason, uploadKind);
 
 	if (needsGrowth)
 	{
+		const uint64_t oldSize = resource.size;
 		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
 		NRIBufferResource oldResource = resource;
 		NRIBufferResource newResource = {};
@@ -25382,6 +26757,9 @@ bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, Sc
 		RetireResidentBufferResource(oldResource);
 		stats.growthCount++;
 		stats.growEventsLastFrame = 1;
+		stats.growthOldBytesLastFrame = oldSize;
+		stats.growthRequestedBytesLastFrame = requiredSize;
+		stats.growthAllocatedBytesLastFrame = grownSize;
 		return true;
 	}
 	else
@@ -25402,38 +26780,410 @@ bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, Sc
 	return true;
 }
 
-bool NRIRenderer::UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
+bool NRIRenderer::UploadSceneBuffers(
+	const nri_scene::GeometryData& geometry,
+	const std::vector<nri_scene::MaterialData>& materials,
+	const std::vector<SceneBufferUploadDomainSpan>* domainSpans)
 {
-	return UploadSceneBuffers(mVertexBuffer, mIndexBuffer, mPrimitiveBuffer, mMaterialBuffer, geometry, materials);
+	return UploadSceneBuffers(GetCurrentSceneUploadBufferRingSlot(), geometry, materials, domainSpans);
 }
 
 bool NRIRenderer::UploadSceneBuffers(
-	NRIBufferResource& vertexBuffer,
-	NRIBufferResource& indexBuffer,
-	NRIBufferResource& primitiveBuffer,
-	NRIBufferResource& materialBuffer,
+	SceneUploadBufferRingSlot& uploadSlot,
 	const nri_scene::GeometryData& geometry,
-	const std::vector<nri_scene::MaterialData>& materials)
+	const std::vector<nri_scene::MaterialData>& materials,
+	const std::vector<SceneBufferUploadDomainSpan>* domainSpans)
 {
 	Clocker clock(NriPTSceneBuffers);
+	NRIBufferResource& vertexBuffer = uploadSlot.vertexBuffer;
+	NRIBufferResource& indexBuffer = uploadSlot.indexBuffer;
+	NRIBufferResource& primitiveBuffer = uploadSlot.primitiveBuffer;
+	NRIBufferResource& materialBuffer = uploadSlot.materialBuffer;
+	std::vector<uint8_t>& vertexMirror = uploadSlot.vertexMirror;
+	std::vector<uint8_t>& indexMirror = uploadSlot.indexMirror;
+	std::vector<uint8_t>& primitiveMirror = uploadSlot.primitiveMirror;
+	std::vector<uint8_t>& materialMirror = uploadSlot.materialMirror;
 	mVertexBufferStats.bytesUploadedLastFrame = 0;
 	mVertexBufferStats.growEventsLastFrame = 0;
 	mVertexBufferStats.overwriteEventsLastFrame = 0;
+	mVertexBufferStats.growthOldBytesLastFrame = 0;
+	mVertexBufferStats.growthRequestedBytesLastFrame = 0;
+	mVertexBufferStats.growthAllocatedBytesLastFrame = 0;
 	mIndexBufferStats.bytesUploadedLastFrame = 0;
 	mIndexBufferStats.growEventsLastFrame = 0;
 	mIndexBufferStats.overwriteEventsLastFrame = 0;
+	mIndexBufferStats.growthOldBytesLastFrame = 0;
+	mIndexBufferStats.growthRequestedBytesLastFrame = 0;
+	mIndexBufferStats.growthAllocatedBytesLastFrame = 0;
 	mPrimitiveBufferStats.bytesUploadedLastFrame = 0;
 	mPrimitiveBufferStats.growEventsLastFrame = 0;
 	mPrimitiveBufferStats.overwriteEventsLastFrame = 0;
+	mPrimitiveBufferStats.growthOldBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthRequestedBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthAllocatedBytesLastFrame = 0;
 	mMaterialBufferStats.bytesUploadedLastFrame = 0;
 	mMaterialBufferStats.growEventsLastFrame = 0;
 	mMaterialBufferStats.overwriteEventsLastFrame = 0;
+	mMaterialBufferStats.growthOldBytesLastFrame = 0;
+	mMaterialBufferStats.growthRequestedBytesLastFrame = 0;
+	mMaterialBufferStats.growthAllocatedBytesLastFrame = 0;
 	{
 		mLastPerfShellTraceStats.sceneSelectBufferUploadVertexRequestedBytes = geometry.vertices.size() * sizeof(nri_scene::SceneVertex);
 		mLastPerfShellTraceStats.sceneSelectBufferUploadIndexRequestedBytes = geometry.indices.size() * sizeof(uint32_t);
 		mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRequestedBytes = geometry.primitives.size() * sizeof(nri_scene::PrimitiveData);
 		mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRequestedBytes = materials.size() * sizeof(nri_scene::MaterialData);
 	}
+	enum class SceneUploadBufferKind
+	{
+		Vertex,
+		Index,
+		Primitive,
+		Material
+	};
+	const auto getDomainEntry = [&](SceneBufferUploadDomain domain) -> PerfShellTraceStats::SceneBufferUploadDomainTraceEntry*
+	{
+		const size_t domainIndex = (size_t)domain;
+		if (domainIndex >= SceneBufferUploadDomainCount)
+		{
+			return nullptr;
+		}
+		return &mLastPerfShellTraceStats.sceneSelectBufferUploadDomains[domainIndex];
+	};
+	const auto getSpanByteRange =
+		[](const SceneBufferUploadDomainSpan& span, SceneUploadBufferKind kind, uint64_t& outOffset, uint64_t& outSize)
+	{
+		switch (kind)
+		{
+		case SceneUploadBufferKind::Vertex:
+			outOffset = (uint64_t)span.vertexOffset * sizeof(nri_scene::SceneVertex);
+			outSize = (uint64_t)span.vertexCount * sizeof(nri_scene::SceneVertex);
+			break;
+		case SceneUploadBufferKind::Index:
+			outOffset = (uint64_t)span.indexOffset * sizeof(uint32_t);
+			outSize = (uint64_t)span.indexCount * sizeof(uint32_t);
+			break;
+		case SceneUploadBufferKind::Primitive:
+			outOffset = (uint64_t)span.primitiveOffset * sizeof(nri_scene::PrimitiveData);
+			outSize = (uint64_t)span.primitiveCount * sizeof(nri_scene::PrimitiveData);
+			break;
+		case SceneUploadBufferKind::Material:
+			outOffset = (uint64_t)span.materialOffset * sizeof(nri_scene::MaterialData);
+			outSize = (uint64_t)span.materialCount * sizeof(nri_scene::MaterialData);
+			break;
+		}
+	};
+	const auto addDomainPayload =
+		[&](SceneUploadBufferKind kind, bool skipped)
+	{
+		if (domainSpans == nullptr)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain == nullptr)
+			{
+				continue;
+			}
+			domain->payloadBytes += size;
+			domain->hashChecks++;
+			if (!skipped)
+			{
+				domain->hashMisses++;
+			}
+			switch (kind)
+			{
+			case SceneUploadBufferKind::Vertex: domain->vertexPayloadBytes += size; break;
+			case SceneUploadBufferKind::Index: domain->indexPayloadBytes += size; break;
+			case SceneUploadBufferKind::Primitive: domain->primitivePayloadBytes += size; break;
+			case SceneUploadBufferKind::Material: domain->materialPayloadBytes += size; break;
+			}
+		}
+	};
+	const auto addDomainFullUpload =
+		[&](SceneUploadBufferKind kind)
+	{
+		if (domainSpans == nullptr)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain == nullptr)
+			{
+				continue;
+			}
+			domain->uploadedBytes += size;
+			if (kind == SceneUploadBufferKind::Primitive)
+			{
+				domain->primitiveUploadedBytes += size;
+			}
+			else if (kind == SceneUploadBufferKind::Material)
+			{
+				domain->materialUploadedBytes += size;
+			}
+		}
+	};
+	const auto addDomainRangeBytes =
+		[&](SceneUploadBufferKind kind, const std::vector<SceneUploadDirtyRange>& ranges, bool countDirty)
+	{
+		if (domainSpans == nullptr)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t spanOffset = 0;
+			uint64_t spanSize = 0;
+			getSpanByteRange(span, kind, spanOffset, spanSize);
+			if (spanSize == 0)
+			{
+				continue;
+			}
+			const uint64_t spanEnd = spanOffset + spanSize;
+			uint64_t domainBytes = 0;
+			uint32_t domainRanges = 0;
+			for (const SceneUploadDirtyRange& range : ranges)
+			{
+				const uint64_t rangeEnd = range.byteOffset + range.size;
+				const uint64_t overlapStart = std::max(spanOffset, range.byteOffset);
+				const uint64_t overlapEnd = std::min(spanEnd, rangeEnd);
+				if (overlapEnd > overlapStart)
+				{
+					domainBytes += overlapEnd - overlapStart;
+					domainRanges++;
+				}
+			}
+			if (domainBytes == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain == nullptr)
+			{
+				continue;
+			}
+			if (countDirty)
+			{
+				domain->dirtyRanges += domainRanges;
+				domain->dirtyChangedBytes += domainBytes;
+				domain->dirtyUploadedBytes += domainBytes;
+			}
+			else
+			{
+				domain->uploadedBytes += domainBytes;
+				if (kind == SceneUploadBufferKind::Primitive)
+				{
+					domain->primitiveUploadedBytes += domainBytes;
+				}
+				else if (kind == SceneUploadBufferKind::Material)
+				{
+					domain->materialUploadedBytes += domainBytes;
+				}
+			}
+		}
+	};
+	const auto addDomainWait =
+		[&](SceneUploadBufferKind kind, double waitMs)
+	{
+		if (domainSpans == nullptr || waitMs <= 0.0)
+		{
+			return;
+		}
+		uint64_t totalBytes = 0;
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			totalBytes += size;
+		}
+		if (totalBytes == 0)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain != nullptr)
+			{
+				domain->waitMs += waitMs * ((double)size / (double)totalBytes);
+			}
+		}
+	};
+	const auto addDomainGrowth =
+		[&](SceneUploadBufferKind kind, uint64_t requestedBytes, uint64_t allocatedBytes)
+	{
+		if (domainSpans == nullptr || requestedBytes == 0 || allocatedBytes == 0)
+		{
+			return;
+		}
+		uint64_t totalBytes = 0;
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			totalBytes += size;
+		}
+		if (totalBytes == 0)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain != nullptr)
+			{
+				domain->growthEvents++;
+				domain->growthRequestedBytes += (uint64_t)((double)requestedBytes * ((double)size / (double)totalBytes));
+				domain->growthAllocatedBytes += (uint64_t)((double)allocatedBytes * ((double)size / (double)totalBytes));
+			}
+		}
+	};
+	const auto buildProducerPayloadHash =
+		[&](SceneUploadBufferKind kind, uint64_t payloadSize, uint32_t payloadStride, uint64_t extraIdentity, uint64_t& outHash) -> bool
+	{
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampChecks++;
+		if (domainSpans == nullptr)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+			return false;
+		}
+		uint64_t coveredBytes = 0;
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, (uint64_t)kind);
+		hash = CoherencyHashCombine64(hash, payloadSize);
+		hash = CoherencyHashCombine64(hash, payloadStride);
+		hash = CoherencyHashCombine64(hash, extraIdentity);
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			uint64_t stamp = 0;
+			switch (kind)
+			{
+			case SceneUploadBufferKind::Vertex:
+				stamp = span.stamp.vertexPayloadStamp;
+				break;
+			case SceneUploadBufferKind::Index:
+				stamp = span.stamp.indexPayloadStamp;
+				break;
+			case SceneUploadBufferKind::Primitive:
+				stamp = span.stamp.primitivePayloadStamp;
+				break;
+			case SceneUploadBufferKind::Material:
+				stamp = span.stamp.materialPayloadStamp;
+				break;
+			}
+			if (stamp == 0)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+				return false;
+			}
+			coveredBytes += size;
+			hash = CoherencyHashCombine64(hash, (uint64_t)span.domain);
+			hash = CoherencyHashCombine64(hash, offset);
+			hash = CoherencyHashCombine64(hash, size);
+			hash = CoherencyHashCombine64(hash, stamp);
+		}
+		if (coveredBytes != payloadSize)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+			return false;
+		}
+		outHash = hash != 0 ? hash : 1;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampUses++;
+		switch (kind)
+		{
+		case SceneUploadBufferKind::Vertex:
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampVertexUses++;
+			break;
+		case SceneUploadBufferKind::Index:
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampIndexUses++;
+			break;
+		case SceneUploadBufferKind::Primitive:
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampPrimitiveUses++;
+			break;
+		case SceneUploadBufferKind::Material:
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampMaterialUses++;
+			break;
+		}
+		return true;
+	};
+	const auto buildProducerProvenanceHash =
+		[&](uint64_t primitiveCount, uint64_t& outHash) -> bool
+	{
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampChecks++;
+		if (domainSpans == nullptr)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+			return false;
+		}
+		uint64_t coveredPrimitives = 0;
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, primitiveCount);
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			if (span.primitiveCount == 0)
+			{
+				continue;
+			}
+			if (span.stamp.primitiveProvenanceStamp == 0)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+				return false;
+			}
+			coveredPrimitives += span.primitiveCount;
+			hash = CoherencyHashCombine64(hash, (uint64_t)span.domain);
+			hash = CoherencyHashCombine64(hash, (uint64_t)span.primitiveOffset);
+			hash = CoherencyHashCombine64(hash, (uint64_t)span.primitiveCount);
+			hash = CoherencyHashCombine64(hash, span.stamp.primitiveProvenanceStamp);
+		}
+		if (coveredPrimitives != primitiveCount)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+			return false;
+		}
+		outHash = hash != 0 ? hash : 1;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampUses++;
+		return true;
+	};
 	const uint64_t primitiveInputSize = geometry.primitives.size() * sizeof(nri_scene::PrimitiveData);
 	uint64_t primitiveInputPayloadHash = 0;
 	uint64_t primitiveProvenanceHash = 0;
@@ -25441,9 +27191,28 @@ bool NRIRenderer::UploadSceneBuffers(
 	const std::vector<nri_scene::PrimitiveData>* gpuPrimitives = nullptr;
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteMs);
-		primitiveInputPayloadHash = HashUploadPayloadBytes(geometry.primitives.data(), primitiveInputSize);
-		primitiveProvenanceHash = HashPrimitiveRewriteProvenancePayload(geometry.primitiveProvenance);
-		primitiveVisibilityIdentityHash = HashPrimitiveRewriteVisibilityIdentity(mMapWorld);
+		if (buildProducerPayloadHash(SceneUploadBufferKind::Primitive, primitiveInputSize, sizeof(nri_scene::PrimitiveData), 0, primitiveInputPayloadHash))
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampRewritePrimitiveUses++;
+		}
+		else
+		{
+			ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewritePrimitiveHashMs);
+			primitiveInputPayloadHash = HashUploadPayloadBytes(geometry.primitives.data(), primitiveInputSize);
+		}
+		if (buildProducerProvenanceHash((uint64_t)geometry.primitiveProvenance.size(), primitiveProvenanceHash))
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampRewriteProvenanceUses++;
+		}
+		else
+		{
+			ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteProvenanceHashMs);
+			primitiveProvenanceHash = HashPrimitiveRewriteProvenancePayload(geometry.primitiveProvenance);
+		}
+		{
+			ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteVisibilityHashMs);
+			primitiveVisibilityIdentityHash = HashPrimitiveRewriteVisibilityIdentity(mMapWorld);
+		}
 		mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheChecks++;
 		if (mSelectPrimitiveRewriteCache.valid &&
 			mSelectPrimitiveRewriteCache.primitivePayloadHash == primitiveInputPayloadHash &&
@@ -25482,24 +27251,48 @@ bool NRIRenderer::UploadSceneBuffers(
 				}
 			}
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheMisses++;
-			std::vector<nri_scene::PrimitiveData> rewrittenPrimitives = geometry.primitives;
-			const size_t primitiveCount = std::min(rewrittenPrimitives.size(), geometry.primitiveProvenance.size());
-			for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
 			{
-				const int32_t chunkIndex = ResolveVisibilityChunkIndexForProvenance(mMapWorld, geometry.primitiveProvenance[primitiveIndex]);
-				rewrittenPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+				ScopedPtPerfTimer copyTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCopyMs);
+				mSelectPrimitiveRewriteCache.primitives.assign(geometry.primitives.begin(), geometry.primitives.end());
 			}
-			for (size_t primitiveIndex = primitiveCount; primitiveIndex < rewrittenPrimitives.size(); ++primitiveIndex)
 			{
-				rewrittenPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+				ScopedPtPerfTimer resolveTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolveMs);
+				std::vector<nri_scene::PrimitiveData>& rewrittenPrimitives = mSelectPrimitiveRewriteCache.primitives;
+				const size_t primitiveCount = std::min(rewrittenPrimitives.size(), geometry.primitiveProvenance.size());
+				for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+				{
+					const nri_scene::SurfaceProvenance& provenance = geometry.primitiveProvenance[primitiveIndex];
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolvePrimitives++;
+					int32_t chunkIndex = provenance.mapChunkIndex;
+					if (chunkIndex >= 0)
+					{
+						mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolveMapChunk++;
+					}
+					else
+					{
+						mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolveSectorFallback++;
+						chunkIndex = FindMapChunkIndexForSector(mMapWorld, provenance.sectorIndex);
+						if (chunkIndex < 0)
+						{
+							mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolveSectorMiss++;
+						}
+					}
+					rewrittenPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+				}
+				for (size_t primitiveIndex = primitiveCount; primitiveIndex < rewrittenPrimitives.size(); ++primitiveIndex)
+				{
+					rewrittenPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+				}
 			}
 
-			mSelectPrimitiveRewriteCache.valid = true;
-			mSelectPrimitiveRewriteCache.primitivePayloadHash = primitiveInputPayloadHash;
-			mSelectPrimitiveRewriteCache.primitiveProvenanceHash = primitiveProvenanceHash;
-			mSelectPrimitiveRewriteCache.visibilityIdentityHash = primitiveVisibilityIdentityHash;
-			mSelectPrimitiveRewriteCache.primitiveCount = geometry.primitives.size();
-			mSelectPrimitiveRewriteCache.primitives = std::move(rewrittenPrimitives);
+			{
+				ScopedPtPerfTimer storeTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteStoreMs);
+				mSelectPrimitiveRewriteCache.valid = true;
+				mSelectPrimitiveRewriteCache.primitivePayloadHash = primitiveInputPayloadHash;
+				mSelectPrimitiveRewriteCache.primitiveProvenanceHash = primitiveProvenanceHash;
+				mSelectPrimitiveRewriteCache.visibilityIdentityHash = primitiveVisibilityIdentityHash;
+				mSelectPrimitiveRewriteCache.primitiveCount = geometry.primitives.size();
+			}
 			gpuPrimitives = &mSelectPrimitiveRewriteCache.primitives;
 		}
 	}
@@ -25514,13 +27307,27 @@ bool NRIRenderer::UploadSceneBuffers(
 	uint64_t materialPayloadHash = 0;
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMs);
-		vertexPayloadHash = HashUploadPayloadBytes(geometry.vertices.data(), vertexSize);
-		indexPayloadHash = HashUploadPayloadBytes(geometry.indices.data(), indexSize);
-		primitivePayloadHash = HashUploadPayloadBytes(gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize);
-		materialPayloadHash = HashUploadPayloadBytes(materials.data(), materialSize);
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Vertex, vertexSize, sizeof(nri_scene::SceneVertex), 0, vertexPayloadHash))
+		{
+			vertexPayloadHash = HashUploadPayloadBytes(geometry.vertices.data(), vertexSize);
+		}
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Index, indexSize, sizeof(uint32_t), 0, indexPayloadHash))
+		{
+			indexPayloadHash = HashUploadPayloadBytes(geometry.indices.data(), indexSize);
+		}
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Primitive, primitiveSize, sizeof(nri_scene::PrimitiveData), primitiveVisibilityIdentityHash, primitivePayloadHash))
+		{
+			primitivePayloadHash = HashUploadPayloadBytes(gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize);
+		}
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Material, materialSize, sizeof(nri_scene::MaterialData), 0, materialPayloadHash))
+		{
+			materialPayloadHash = HashUploadPayloadBytes(materials.data(), materialSize);
+		}
 	}
 
-	bool waitedForWrites = false;
+	// Scene upload buffers are ringed by queued frame. The frame shell waits before
+	// reusing a queued-frame slot, so the selected slot is safe to overwrite here.
+	bool waitedForWrites = true;
 	const auto notePayloadHashState =
 		[&](const NRIBufferResource& resource,
 			uint64_t payloadHash,
@@ -25801,6 +27608,9 @@ bool NRIRenderer::UploadSceneBuffers(
 		stats.bytesUploadedLastFrame = rangeBytes;
 		stats.growEventsLastFrame = 0;
 		stats.overwriteEventsLastFrame = 1;
+		stats.growthOldBytesLastFrame = 0;
+		stats.growthRequestedBytesLastFrame = 0;
+		stats.growthAllocatedBytesLastFrame = 0;
 		stats.uploadCount++;
 		stats.overwriteCount++;
 		stats.peakUsedBytes = std::max(stats.peakUsedBytes, bufferSize);
@@ -25841,7 +27651,8 @@ bool NRIRenderer::UploadSceneBuffers(
 			uint32_t& dirtyRanges,
 			uint64_t& dirtyChangedBytes,
 			uint64_t& dirtyUploadedBytes,
-			uint32_t& bufferRangeUploadCount) -> bool
+			uint32_t& bufferRangeUploadCount,
+			SceneUploadBufferKind bufferKind) -> bool
 	{
 		const uint64_t requiredSize = std::max<uint64_t>(bufferSize, bufferStride);
 		const bool forceFullDirty =
@@ -25872,6 +27683,10 @@ bool NRIRenderer::UploadSceneBuffers(
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeMs);
 			dirtyStats = noteDirtyRanges(payloadMirror, bufferData, bufferSize, skipUpload, forceFullDirty, dirtyRangeScratch);
 			addDirtyRangeStats(dirtyStats, dirtyRanges, dirtyChangedBytes, dirtyUploadedBytes);
+			if (dirtyRangeScratch != nullptr)
+			{
+				addDomainRangeBytes(bufferKind, *dirtyRangeScratch, true);
+			}
 		}
 
 		if (skipUpload)
@@ -25930,9 +27745,11 @@ bool NRIRenderer::UploadSceneBuffers(
 		}
 		if (!waitedForWrites && needsWait)
 		{
+			const auto waitStart = std::chrono::steady_clock::now();
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadWaitMs);
 			mLastPerfShellTraceStats.sceneSelectBufferUploadWaitCount++;
 			WaitForCommandsTracked("scene_buffer_upload");
+			addDomainWait(bufferKind, DurationMs(waitStart, std::chrono::steady_clock::now()));
 			waitedForWrites = true;
 		}
 
@@ -25940,6 +27757,7 @@ bool NRIRenderer::UploadSceneBuffers(
 		{
 			if (updateStructuredBufferRanges(resource, stats, payloadMirror, bufferData, bufferSize, bufferStride, payloadHash, *dirtyRangeScratch, afterAccess, uploadMs, uploadedBytes, growEvents, overwriteEvents, bufferRangeUploadCount))
 			{
+				addDomainRangeBytes(bufferKind, *dirtyRangeScratch, false);
 				return true;
 			}
 			mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbacks++;
@@ -25955,11 +27773,25 @@ bool NRIRenderer::UploadSceneBuffers(
 		overwriteEvents = stats.overwriteEventsLastFrame;
 		if (result)
 		{
+			if (stats.growEventsLastFrame != 0)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthEvents += stats.growEventsLastFrame;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthOldBytes += stats.growthOldBytesLastFrame;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthRequestedBytes += stats.growthRequestedBytesLastFrame;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthAllocatedBytes += stats.growthAllocatedBytesLastFrame;
+				if (stats.growthAllocatedBytesLastFrame > stats.growthRequestedBytesLastFrame)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthHeadroomBytes +=
+						stats.growthAllocatedBytesLastFrame - stats.growthRequestedBytesLastFrame;
+				}
+				addDomainGrowth(bufferKind, stats.growthRequestedBytesLastFrame, stats.growthAllocatedBytesLastFrame);
+			}
 			resource.payloadHash = payloadHash;
 			resource.payloadSize = bufferSize;
 			resource.payloadStride = bufferStride;
 			updatePayloadMirror(payloadMirror, bufferData, bufferSize);
 			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashUploads++;
+			addDomainFullUpload(bufferKind);
 		}
 		return result;
 	};
@@ -25968,13 +27800,17 @@ bool NRIRenderer::UploadSceneBuffers(
 	const bool skipIndexUpload = notePayloadHashState(indexBuffer, indexPayloadHash, indexSize, sizeof(uint32_t), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexMisses);
 	const bool skipPrimitiveUpload = notePayloadHashState(primitiveBuffer, primitivePayloadHash, primitiveSize, sizeof(nri_scene::PrimitiveData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveMisses);
 	const bool skipMaterialUpload = notePayloadHashState(materialBuffer, materialPayloadHash, materialSize, sizeof(nri_scene::MaterialData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialMisses);
+	addDomainPayload(SceneUploadBufferKind::Vertex, skipVertexUpload);
+	addDomainPayload(SceneUploadBufferKind::Index, skipIndexUpload);
+	addDomainPayload(SceneUploadBufferKind::Primitive, skipPrimitiveUpload);
+	addDomainPayload(SceneUploadBufferKind::Material, skipMaterialUpload);
 	uint32_t ignoredRangeUploadCount = 0;
 
 	return
-		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, mSceneUploadVertexMirror, nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, ignoredRangeUploadCount) &&
-		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, mSceneUploadIndexMirror, nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, ignoredRangeUploadCount) &&
-		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, mSceneUploadPrimitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads) &&
-		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, mSceneUploadMaterialMirror, &mSceneUploadMaterialDirtyRangeScratch, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads);
+		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, vertexMirror, nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Vertex) &&
+		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, indexMirror, nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Index) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, primitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads, SceneUploadBufferKind::Primitive) &&
+		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materialMirror, &mSceneUploadMaterialDirtyRangeScratch, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads, SceneUploadBufferKind::Material);
 }
 
 bool NRIRenderer::BuildStaticMapAccelerationStructures()
@@ -25991,7 +27827,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	const bool needsWait =
 		mTopLevelAS.accelerationStructure != nullptr ||
 		mEmissiveTopLevelAS.accelerationStructure != nullptr ||
-		mDynamicBottomLevelAS.accelerationStructure != nullptr ||
+		HasAnyDynamicBottomLevelAS() ||
 		mTlasInstanceBuffer.buffer != nullptr ||
 		mEmissiveTlasInstanceBuffer.buffer != nullptr ||
 		mSceneInstanceBuffer.buffer != nullptr ||
@@ -26009,7 +27845,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
-	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+	DestroyDynamicBottomLevelAccelerationStructures();
 	ResetPersistentVoxelBatch("static-acceleration-rebuild", false);
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
@@ -26301,7 +28137,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 			&staticResources.vertexBuffer,
 			&staticResources.indexBuffer,
 			&staticResources.tlasInstanceCount,
-			updateLiveState);
+			updateLiveState,
+			false);
 }
 
 void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
@@ -30139,6 +31976,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mStaticMapScene.gpuUploadCount += residentMaterialDirty ? 1u : 0u;
 			mStaticMapScene.accelerationBuildCount += (uint32_t)residentGeometryChunkListIndices.size();
 			SyncResidentMapChunkRegistryFromStaticScene();
+			RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(residentGeometryChunkListIndices);
 			if (outResidentStaticSceneChanged != nullptr)
 			{
 				*outResidentStaticSceneChanged = residentGeometryDirty;
@@ -30564,10 +32402,10 @@ bool NRIRenderer::RestoreStaticTopLevelScene()
 			mStaticIndexBuffer,
 			mStaticPrimitiveBuffer,
 			mStaticMaterialBuffer,
-			mVertexBuffer,
-			mIndexBuffer,
-			mPrimitiveBuffer,
-			mMaterialBuffer,
+			GetCurrentDynamicVertexBuffer(),
+			GetCurrentDynamicIndexBuffer(),
+			GetCurrentDynamicPrimitiveBuffer(),
+			GetCurrentDynamicMaterialBuffer(),
 			sceneInstances,
 			(uint32_t)mStaticMapScene.geometry.primitives.size(),
 			0u,
@@ -30587,10 +32425,10 @@ bool NRIRenderer::RefreshResidentStaticSceneDataSet()
 		mStaticIndexBuffer,
 		mStaticPrimitiveBuffer,
 		mStaticMaterialBuffer,
-		mVertexBuffer,
-		mIndexBuffer,
-		mPrimitiveBuffer,
-		mMaterialBuffer,
+		GetCurrentDynamicVertexBuffer(),
+		GetCurrentDynamicIndexBuffer(),
+		GetCurrentDynamicPrimitiveBuffer(),
+		GetCurrentDynamicMaterialBuffer(),
 		sceneInstances,
 		(uint32_t)mStaticMapScene.geometry.primitives.size(),
 		0u,
@@ -32225,7 +34063,7 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryDat
 		0u,
 		(uint32_t)geometry.indices.size(),
 		(uint32_t)geometry.primitives.size(),
-		mDynamicBottomLevelAS,
+		GetCurrentDynamicBottomLevelAS(),
 		true);
 }
 
@@ -32242,8 +34080,8 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(
 		return false;
 	}
 	return BuildBottomLevelAccelerationStructure(
-		mVertexBuffer,
-		mIndexBuffer,
+		GetCurrentDynamicVertexBuffer(),
+		GetCurrentDynamicIndexBuffer(),
 		(uint32_t)geometry.vertices.size(),
 		indexOffset,
 		indexCount,
@@ -32276,28 +34114,56 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 	}
 
 	nri::BottomLevelGeometryDesc dynamicGeometryDesc = {};
-	dynamicGeometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-	dynamicGeometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-	dynamicGeometryDesc.triangles.vertexBuffer = vertexBuffer.buffer;
-	dynamicGeometryDesc.triangles.vertexOffset = 0;
-	dynamicGeometryDesc.triangles.vertexNum = vertexCount;
-	dynamicGeometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-	dynamicGeometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-	dynamicGeometryDesc.triangles.indexBuffer = indexBuffer.buffer;
-	dynamicGeometryDesc.triangles.indexOffset = (uint64_t)indexOffset * sizeof(uint32_t);
-	dynamicGeometryDesc.triangles.indexNum = indexCount;
-	dynamicGeometryDesc.triangles.indexType = nri::IndexType::UINT32;
+	bool reuseAccelerationStructure = false;
+	{
+		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsSetupMs);
+		dynamicGeometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+		dynamicGeometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+		dynamicGeometryDesc.triangles.vertexBuffer = vertexBuffer.buffer;
+		dynamicGeometryDesc.triangles.vertexOffset = 0;
+		dynamicGeometryDesc.triangles.vertexNum = vertexCount;
+		dynamicGeometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+		dynamicGeometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+		dynamicGeometryDesc.triangles.indexBuffer = indexBuffer.buffer;
+		dynamicGeometryDesc.triangles.indexOffset = (uint64_t)indexOffset * sizeof(uint32_t);
+		dynamicGeometryDesc.triangles.indexNum = indexCount;
+		dynamicGeometryDesc.triangles.indexType = nri::IndexType::UINT32;
 
-	RetireResidentAccelerationStructure(outAccelerationStructure);
+		reuseAccelerationStructure =
+			updateDynamicPerfStats &&
+			outAccelerationStructure.accelerationStructure != nullptr &&
+			outAccelerationStructure.buildVertexBuffer == vertexBuffer.buffer &&
+			outAccelerationStructure.buildIndexBuffer == indexBuffer.buffer &&
+			outAccelerationStructure.buildVertexCount == vertexCount &&
+			outAccelerationStructure.buildIndexOffset == indexOffset &&
+			outAccelerationStructure.buildIndexCount == indexCount &&
+			outAccelerationStructure.buildPrimitiveCount == primitiveCount;
+	}
+
+	if (reuseAccelerationStructure)
+	{
+		if (updateDynamicPerfStats)
+		{
+			mLastPerfShellTraceStats.dynamicAsReuseCount++;
+		}
+	}
+	else
+	{
+		RetireResidentAccelerationStructure(outAccelerationStructure);
+	}
 
 	nri::AccelerationStructureDesc blasDesc = {};
 	blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
 	blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_BUILD;
 	blasDesc.geometryOrInstanceNum = 1;
 	blasDesc.geometries = &dynamicGeometryDesc;
-	const bool createdAs = [&]()
+	const bool createdAs = reuseAccelerationStructure || [&]()
 	{
 		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsCreateMs);
+		if (updateDynamicPerfStats)
+		{
+			mLastPerfShellTraceStats.dynamicAsCreateCalls++;
+		}
 		return mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, outAccelerationStructure.accelerationStructure) == nri::Result::SUCCESS;
 	}();
 	if (!createdAs)
@@ -32305,23 +34171,45 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 		return false;
 	}
 
+	if (!reuseAccelerationStructure || outAccelerationStructure.memorySize == 0)
 	{
 		nri::MemoryDesc memoryDesc = {};
 		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*outAccelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
 		outAccelerationStructure.memorySize = memoryDesc.size;
 		outAccelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
 	}
+	if (updateDynamicPerfStats)
+	{
+		mLastPerfShellTraceStats.dynamicAsMemoryBytes = outAccelerationStructure.memorySize;
+	}
 
-	uint64_t requiredScratchSize = 0;
+	uint64_t requiredScratchSize = updateDynamicPerfStats ? outAccelerationStructure.buildScratchSize : 0;
+	if (requiredScratchSize == 0)
 	{
 		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsScratchMs);
+		if (updateDynamicPerfStats)
+		{
+			mLastPerfShellTraceStats.dynamicAsScratchQueries++;
+		}
 		requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*outAccelerationStructure.accelerationStructure);
+		if (updateDynamicPerfStats)
+		{
+			outAccelerationStructure.buildScratchSize = requiredScratchSize;
+		}
+	}
+	if (updateDynamicPerfStats)
+	{
+		mLastPerfShellTraceStats.dynamicAsScratchRequestedBytes = requiredScratchSize;
 	}
 	if (mScratchBuffer.buffer == nullptr || mScratchBuffer.size < requiredScratchSize)
 	{
 		DestroyBufferResource(mScratchBuffer);
 		{
 			ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsScratchMs);
+			if (updateDynamicPerfStats)
+			{
+				mLastPerfShellTraceStats.dynamicAsScratchGrowCount++;
+			}
 			if (!CreateBufferWithoutView(mScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
 			{
 				return false;
@@ -32358,6 +34246,13 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 	mBuiltDynamicSceneASLastFrame = true;
 	if (updateDynamicPerfStats)
 	{
+		outAccelerationStructure.buildVertexBuffer = vertexBuffer.buffer;
+		outAccelerationStructure.buildIndexBuffer = indexBuffer.buffer;
+		outAccelerationStructure.buildVertexCount = vertexCount;
+		outAccelerationStructure.buildIndexOffset = indexOffset;
+		outAccelerationStructure.buildIndexCount = indexCount;
+		outAccelerationStructure.buildPrimitiveCount = primitiveCount;
+		outAccelerationStructure.buildScratchSize = requiredScratchSize;
 		mDynamicSceneLastFrame.asBuildCount++;
 	}
 	return true;
@@ -32399,6 +34294,7 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 
 	std::vector<uint8_t> emissiveStaticChunks(mStaticMapScene.chunks.size(), 0u);
 	bool includeDynamicInstance = false;
+	const NRIAccelerationStructureResource* dynamicBottomLevelAS = &GetCurrentDynamicBottomLevelAS();
 	const auto findStaticChunkIndexForPrimitive = [&](uint32_t primitiveIndex) -> int32_t
 	{
 		for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)mStaticMapScene.chunks.size(); ++chunkIndex)
@@ -32431,7 +34327,8 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 		}
 		else if (record.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC &&
 			dynamicSceneInstanceIndex != UINT32_MAX &&
-			mDynamicBottomLevelAS.accelerationStructure != nullptr)
+			dynamicBottomLevelAS != nullptr &&
+			dynamicBottomLevelAS->accelerationStructure != nullptr)
 		{
 			includeDynamicInstance = true;
 		}
@@ -32481,7 +34378,7 @@ bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 		instance.mask = 0xFF;
 		instance.shaderBindingTableLocalOffset = 0;
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*mDynamicBottomLevelAS.accelerationStructure);
+		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS->accelerationStructure);
 		instances.push_back(instance);
 		mEmissiveTlasDynamicInstanceCount = 1;
 	}
@@ -32587,11 +34484,12 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopL
 		instances,
 		sceneBufferMask,
 		mTopLevelAS,
-		mTlasInstanceBuffer,
+		GetCurrentTlasInstanceBuffer(),
 		mTopLevelScratchBuffer,
 		&mStaticVertexBuffer,
 		&mStaticIndexBuffer,
 		&mActiveTlasInstanceCount,
+		true,
 		true);
 }
 
@@ -32604,7 +34502,8 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	const NRIBufferResource* staticVertexBuffer,
 	const NRIBufferResource* staticIndexBuffer,
 	uint32_t* outTlasInstanceCount,
-	bool updateLiveState)
+	bool updateLiveState,
+	bool tlasInstanceWritesQuiesced)
 {
 	Clocker clock(NriPTAcceleration);
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.worldTlasMs);
@@ -32625,7 +34524,7 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 		sizeof(nri::TopLevelInstance),
 		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
 		NRIAccelerationStructureBuildInputAccess(),
-		false,
+		tlasInstanceWritesQuiesced,
 		"world_tlas_instance_upload"))
 	{
 		return false;
@@ -32699,14 +34598,16 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	}
 	if ((sceneBufferMask & SceneDataBufferMask_Dynamic) != 0)
 	{
+		const NRIBufferResource& dynamicVertexBuffer = GetCurrentDynamicVertexBuffer();
+		const NRIBufferResource& dynamicIndexBuffer = GetCurrentDynamicIndexBuffer();
 		nri::BufferBarrierDesc vertexBarrier = {};
-		vertexBarrier.buffer = mVertexBuffer.buffer;
+		vertexBarrier.buffer = dynamicVertexBuffer.buffer;
 		vertexBarrier.before = NRIAccelerationStructureBuildInputAccess();
 		vertexBarrier.after = NRIComputeShaderResourceAccess();
 		barriers.push_back(vertexBarrier);
 
 		nri::BufferBarrierDesc indexBarrier = {};
-		indexBarrier.buffer = mIndexBuffer.buffer;
+		indexBarrier.buffer = dynamicIndexBuffer.buffer;
 		indexBarrier.before = NRIAccelerationStructureBuildInputAccess();
 		indexBarrier.after = NRIComputeShaderResourceAccess();
 		barriers.push_back(indexBarrier);
@@ -34440,6 +36341,15 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mIndexBuffer);
 	DestroyBufferResource(mPrimitiveBuffer);
 	DestroyBufferResource(mMaterialBuffer);
+	for (SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
+	{
+		DestroyAccelerationStructureResource(slot.dynamicBottomLevelAS);
+		DestroyBufferResource(slot.vertexBuffer);
+		DestroyBufferResource(slot.indexBuffer);
+		DestroyBufferResource(slot.primitiveBuffer);
+		DestroyBufferResource(slot.materialBuffer);
+	}
+	mSceneUploadBufferRing.clear();
 	DestroyBufferResource(mTlasInstanceBuffer);
 	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);
@@ -34462,6 +36372,11 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
+	for (NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
+	{
+		DestroyBufferResource(tlasInstanceBuffer);
+	}
+	mTlasInstanceBufferRing.clear();
 	for (auto& frameScratch : mResidentUploadScratchFrames)
 	{
 		DestroyBufferResource(frameScratch.vertex.buffer);
@@ -34538,7 +36453,7 @@ void NRIRenderer::DestroyAccelerationStructures()
 		chunk.residentBlasBuildScratchSize = 0;
 		chunk.residentBlasUpdateScratchSize = 0;
 	}
-	DestroyAccelerationStructureResource(mDynamicBottomLevelAS);
+	DestroyDynamicBottomLevelAccelerationStructures();
 	ResetPersistentVoxelBatch("destroy-acceleration-structures");
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
@@ -34587,6 +36502,10 @@ void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScen
 	DestroyBufferResource(staticResources.scratchBuffer);
 	DestroyBufferResource(staticResources.topLevelScratchBuffer);
 
+	if (&staticScene == &mStaticMapScene)
+	{
+		mStateCommitCombinedGeometryCache = {};
+	}
 	staticScene = {};
 	staticResources = {};
 }
@@ -34641,6 +36560,7 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 	mBoundPersistentVoxelMaterialCount = 0;
 	mBoundPortalCount = 0;
 	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
+	mStateCommitCombinedGeometryCache = {};
 	mRuntimeMapMutations.chunks.clear();
 	mRuntimeMapLastFrame = {};
 	ResetResidentMapChunkRegistry();
@@ -34685,6 +36605,13 @@ void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureR
 	}
 
 	resource.memorySize = 0;
+	resource.buildScratchSize = 0;
+	resource.buildVertexBuffer = nullptr;
+	resource.buildIndexBuffer = nullptr;
+	resource.buildVertexCount = 0;
+	resource.buildIndexOffset = 0;
+	resource.buildIndexCount = 0;
+	resource.buildPrimitiveCount = 0;
 	resource.memoryLocation = nri::MemoryLocation::DEVICE;
 }
 

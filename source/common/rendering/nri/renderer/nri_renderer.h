@@ -78,6 +78,17 @@ public:
 		Count,
 	};
 
+	enum class SceneBufferUploadDomain : uint32_t
+	{
+		StaticOverlay = 0,
+		RuntimeMutation,
+		Dynamic,
+		MirrorExtended,
+		MirrorPlayer,
+		PersistentVoxelMaterial,
+		Count,
+	};
+
 	struct MaterialBuildTraceEntry
 	{
 		uint32_t calls = 0;
@@ -96,6 +107,7 @@ public:
 	};
 
 	static constexpr size_t MaterialBuildTraceSlotCount = (size_t)MaterialBuildTraceSlot::Count;
+	static constexpr size_t SceneBufferUploadDomainCount = (size_t)SceneBufferUploadDomain::Count;
 	static constexpr size_t RuntimeMutationTopTraceCount = 8;
 	static constexpr size_t RuntimeSectorDirtyTruthTraceCount = 8;
 	static constexpr size_t RuntimeAnimatedChurnTraceCount = 4;
@@ -291,6 +303,44 @@ public:
 
 	struct PerfShellTraceStats
 	{
+		struct SceneBufferUploadDomainTraceEntry
+		{
+			uint64_t payloadBytes = 0;
+			uint64_t vertexPayloadBytes = 0;
+			uint64_t indexPayloadBytes = 0;
+			uint64_t primitivePayloadBytes = 0;
+			uint64_t materialPayloadBytes = 0;
+			uint64_t uploadedBytes = 0;
+			uint64_t primitiveUploadedBytes = 0;
+			uint64_t materialUploadedBytes = 0;
+			uint64_t growthRequestedBytes = 0;
+			uint64_t growthAllocatedBytes = 0;
+			uint64_t dirtyChangedBytes = 0;
+			uint64_t dirtyUploadedBytes = 0;
+			uint32_t hashChecks = 0;
+			uint32_t hashMisses = 0;
+			uint32_t stampChecks = 0;
+			uint32_t stampMisses = 0;
+			uint32_t growthEvents = 0;
+			uint32_t dirtyRanges = 0;
+			double waitMs = 0.0;
+		};
+
+		struct OverlayAppendSourceTraceEntry
+		{
+			uint64_t byteCount = 0;
+			uint64_t vertexBytes = 0;
+			uint64_t indexBytes = 0;
+			uint64_t primitiveBytes = 0;
+			uint64_t materialBytes = 0;
+			uint32_t vertexCount = 0;
+			uint32_t indexCount = 0;
+			uint32_t primitiveCount = 0;
+			uint32_t materialCount = 0;
+			uint32_t geometryGrowthEvents = 0;
+			uint32_t materialGrowthEvents = 0;
+		};
+
 		double totalMs = 0.0;
 		double initResourcesMs = 0.0;
 		double mapWorldMs = 0.0;
@@ -371,7 +421,40 @@ public:
 		double runtimeDebugSphereMaterialMs = 0.0;
 		double runtimeDebugSphereTuneMs = 0.0;
 		double overlayAssembleMs = 0.0;
+		double overlayAppendMs = 0.0;
+		double overlayAppendResetMs = 0.0;
+		double overlayAppendSourcesMs = 0.0;
+		double overlayAppendProducerStampMs = 0.0;
+		double overlayAppendDynamicStampMs = 0.0;
+		double overlayAppendMirrorExtendedStampMs = 0.0;
+		double overlayAppendMirrorPlayerStampMs = 0.0;
+		double overlayAppendBookkeepingMs = 0.0;
+		double overlayRuntimeSpaceLinkMs = 0.0;
+		double overlayRuntimeSpaceLinkGeometryMs = 0.0;
+		double overlayRuntimeSpaceLinkMaterialMs = 0.0;
+		double overlayRuntimeMutationMs = 0.0;
+		double overlayRuntimeMutationGeometryMs = 0.0;
+		double overlayRuntimeMutationMaterialMs = 0.0;
+		double overlayDynamicMs = 0.0;
+		double overlayDynamicGeometryMs = 0.0;
+		double overlayDynamicMaterialMs = 0.0;
+		double overlayMirrorExtendedMs = 0.0;
+		double overlayMirrorExtendedGeometryMs = 0.0;
+		double overlayMirrorExtendedMaterialMs = 0.0;
+		double overlayMirrorPlayerMs = 0.0;
+		double overlayMirrorPlayerGeometryMs = 0.0;
+		double overlayMirrorPlayerMaterialMs = 0.0;
+		double overlayDebugSphereMs = 0.0;
+		double overlayDebugSphereGeometryMs = 0.0;
+		double overlayDebugSphereMaterialMs = 0.0;
 		double dynamicCaptureMs = 0.0;
+		double mirrorPlayerCaptureMs = 0.0;
+		double mirrorPlayerGeometryBuildMs = 0.0;
+		double mirrorPlayerGeometryBuildWallMs = 0.0;
+		double mirrorPlayerGeometryBuildFlatMs = 0.0;
+		double mirrorPlayerGeometryBuildSpriteMs = 0.0;
+		double mirrorPlayerPortalAssignMs = 0.0;
+		double mirrorPlayerMaterialBuildMs = 0.0;
 		double sceneSelectStaticMapMs = 0.0;
 		double sceneSelectMirrorPortalMs = 0.0;
 		double sceneSelectMirrorCaptureMs = 0.0;
@@ -386,6 +469,12 @@ public:
 		double sceneSelectMaterialSplitMs = 0.0;
 		double sceneSelectBufferUploadMs = 0.0;
 		double sceneSelectBufferUploadPrimitiveRewriteMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewritePrimitiveHashMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteProvenanceHashMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteVisibilityHashMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteCopyMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteResolveMs = 0.0;
+		double sceneSelectBufferUploadPrimitiveRewriteStoreMs = 0.0;
 		double sceneSelectBufferUploadPayloadHashMs = 0.0;
 		double sceneSelectBufferUploadDirtyRangeMs = 0.0;
 		double sceneSelectBufferUploadWaitCheckMs = 0.0;
@@ -400,11 +489,17 @@ public:
 		uint32_t sceneSelectBufferUploadIndexGrowEvents = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveGrowEvents = 0;
 		uint32_t sceneSelectBufferUploadMaterialGrowEvents = 0;
+		uint32_t sceneSelectBufferUploadGrowthEvents = 0;
 		uint32_t sceneSelectBufferUploadVertexOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadIndexOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadMaterialOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialUploads = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatches = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatchRanges = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatchRejects = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatchCopyCommands = 0;
+		uint32_t sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashChecks = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashHits = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashSkips = 0;
@@ -426,6 +521,15 @@ public:
 		uint32_t sceneSelectBufferUploadPayloadHashIndexMisses = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashPrimitiveMisses = 0;
 		uint32_t sceneSelectBufferUploadPayloadHashMaterialMisses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampChecks = 0;
+		uint32_t sceneSelectBufferUploadProducerStampUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampFallbacks = 0;
+		uint32_t sceneSelectBufferUploadProducerStampRewritePrimitiveUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampRewriteProvenanceUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampVertexUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampIndexUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampPrimitiveUses = 0;
+		uint32_t sceneSelectBufferUploadProducerStampMaterialUses = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeChecks = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeSkips = 0;
 		uint32_t sceneSelectBufferUploadDirtyRangeForcedFull = 0;
@@ -452,16 +556,26 @@ public:
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectProvenance = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectVisibility = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheRejectCount = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteResolvePrimitives = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteResolveMapChunk = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteResolveSectorFallback = 0;
+		uint32_t sceneSelectBufferUploadPrimitiveRewriteResolveSectorMiss = 0;
 		uint64_t sceneSelectBufferUploadVertexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadIndexRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadPrimitiveRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadMaterialRequestedBytes = 0;
 		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialRequestedBytes = 0;
+		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialDirtyBytes = 0;
 		uint64_t sceneSelectBufferUploadVertexUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadIndexUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadPrimitiveUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadMaterialUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialUploadedBytes = 0;
+		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialBatchGapBytes = 0;
+		uint64_t sceneSelectBufferUploadGrowthOldBytes = 0;
+		uint64_t sceneSelectBufferUploadGrowthRequestedBytes = 0;
+		uint64_t sceneSelectBufferUploadGrowthAllocatedBytes = 0;
+		uint64_t sceneSelectBufferUploadGrowthHeadroomBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeChangedBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeGapBytes = 0;
@@ -474,6 +588,7 @@ public:
 		uint64_t sceneSelectBufferUploadPrimitiveDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadMaterialDirtyUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadRangeUploadedBytes = 0;
+		std::array<SceneBufferUploadDomainTraceEntry, SceneBufferUploadDomainCount> sceneSelectBufferUploadDomains = {};
 		double sceneSelectInstanceHandlesMs = 0.0;
 		double sceneSelectTexturePrepMs = 0.0;
 		double sceneSelectStateCommitMs = 0.0;
@@ -481,6 +596,47 @@ public:
 		double sceneSelectStateCommitDynamicStateMs = 0.0;
 		double sceneSelectStateCommitGeometryStateMs = 0.0;
 		double sceneSelectStateCommitStatsMs = 0.0;
+		double sceneSelectStateCommitDynamicCoreMs = 0.0;
+		double sceneSelectStateCommitDynamicMirrorExtendedMs = 0.0;
+		double sceneSelectStateCommitDynamicMirrorPlayerMs = 0.0;
+		double sceneSelectStateCommitGeometrySelectMs = 0.0;
+		double sceneSelectStateCommitGeometryStaticCopyMs = 0.0;
+		double sceneSelectStateCommitGeometryAppendMs = 0.0;
+		double sceneSelectStateCommitStatsBaseMs = 0.0;
+		double sceneSelectStateCommitStatsPersistentVoxelMs = 0.0;
+		double sceneSelectStateCommitStatsMirrorExtendedMs = 0.0;
+		double sceneSelectStateCommitStatsMirrorPlayerMs = 0.0;
+		double sceneSelectStateCommitStatsMergeMs = 0.0;
+		uint32_t sceneSelectStateCommitSelectedDynamic = 0;
+		uint32_t sceneSelectStateCommitActiveDynamic = 0;
+		uint32_t sceneSelectStateCommitMirrorExtended = 0;
+		uint32_t sceneSelectStateCommitMirrorPlayer = 0;
+		uint32_t sceneSelectStateCommitGeometryCombined = 0;
+		uint32_t sceneSelectStateCommitGeometryStaticOnly = 0;
+		uint32_t sceneSelectStateCommitStatsPersistentVoxel = 0;
+		uint32_t sceneSelectStateCommitStatsMirrorExtended = 0;
+		uint32_t sceneSelectStateCommitStatsMirrorPlayer = 0;
+		uint32_t sceneSelectStateCommitCombinedPrimitiveCount = 0;
+		uint32_t sceneSelectStateCommitCombinedMaterialCount = 0;
+		uint64_t sceneSelectStateCommitGenStaticMap = 0;
+		uint64_t sceneSelectStateCommitGenRuntimeMutation = 0;
+		uint64_t sceneSelectStateCommitGenDynamicActors = 0;
+		uint64_t sceneSelectStateCommitGenMirrorPlayer = 0;
+		uint64_t sceneSelectStateCommitGenPersistentVoxels = 0;
+		uint64_t sceneSelectStateCommitGenMaterialBridge = 0;
+		uint64_t sceneSelectStateCommitGenTextures = 0;
+		uint64_t sceneSelectStateCommitGenTlasInstances = 0;
+		uint64_t sceneSelectStateCommitGenSceneConstants = 0;
+		uint32_t sceneSelectStateCommitChangedStaticMap = 0;
+		uint32_t sceneSelectStateCommitChangedRuntimeMutation = 0;
+		uint32_t sceneSelectStateCommitChangedDynamicActors = 0;
+		uint32_t sceneSelectStateCommitChangedMirrorPlayer = 0;
+		uint32_t sceneSelectStateCommitChangedPersistentVoxels = 0;
+		uint32_t sceneSelectStateCommitChangedMaterialBridge = 0;
+		uint32_t sceneSelectStateCommitChangedTextures = 0;
+		uint32_t sceneSelectStateCommitChangedTlasInstances = 0;
+		uint32_t sceneSelectStateCommitChangedSceneConstants = 0;
+		uint32_t sceneSelectStateCommitChangedDomainCount = 0;
 		double dynamicCaptureCountMs = 0.0;
 		double dynamicCaptureWallsMs = 0.0;
 		double dynamicCaptureFlatsMs = 0.0;
@@ -494,6 +650,7 @@ public:
 		double dynamicCaptureStatsMs = 0.0;
 		double persistentDynamicMs = 0.0;
 		double dynamicAsMs = 0.0;
+		double dynamicAsSetupMs = 0.0;
 		double dynamicAsCreateMs = 0.0;
 		double dynamicAsScratchMs = 0.0;
 		double dynamicAsBuildMs = 0.0;
@@ -848,6 +1005,48 @@ public:
 		uint32_t runtimeDebugSphereMaterialCount = 0;
 		uint32_t overlayPrimitiveCount = 0;
 		uint32_t overlayMaterialCount = 0;
+		uint32_t overlayRuntimeSpaceLinkPrimitiveCount = 0;
+		uint32_t overlayRuntimeSpaceLinkMaterialCount = 0;
+		uint32_t overlayRuntimeMutationPrimitiveCount = 0;
+		uint32_t overlayRuntimeMutationMaterialCount = 0;
+		uint32_t overlayDynamicPrimitiveCount = 0;
+		uint32_t overlayDynamicMaterialCount = 0;
+		uint32_t overlayMirrorExtendedPrimitiveCount = 0;
+		uint32_t overlayMirrorExtendedMaterialCount = 0;
+		uint32_t overlayMirrorPlayerPrimitiveCount = 0;
+		uint32_t overlayMirrorPlayerMaterialCount = 0;
+		uint32_t overlayDebugSpherePrimitiveCount = 0;
+		uint32_t overlayDebugSphereMaterialCount = 0;
+		uint32_t overlayPersistentVoxelActorCount = 0;
+		uint32_t overlayPersistentVoxelPrimitiveCount = 0;
+		uint32_t overlayPersistentVoxelMaterialCount = 0;
+		OverlayAppendSourceTraceEntry overlayRuntimeSpaceLinkAppend = {};
+		OverlayAppendSourceTraceEntry overlayRuntimeMutationAppend = {};
+		OverlayAppendSourceTraceEntry overlayDynamicAppend = {};
+		OverlayAppendSourceTraceEntry overlayMirrorExtendedAppend = {};
+		OverlayAppendSourceTraceEntry overlayMirrorPlayerAppend = {};
+		OverlayAppendSourceTraceEntry overlayDebugSphereAppend = {};
+		OverlayAppendSourceTraceEntry overlayPersistentVoxelAppend = {};
+		uint32_t mirrorPlayerCaptureRawFacingSprites = 0;
+		uint32_t mirrorPlayerCaptureRawVoxelSprites = 0;
+		uint32_t mirrorPlayerCaptureSurfaces = 0;
+		uint32_t mirrorPlayerCaptureMatchingActorSurfaces = 0;
+		uint32_t mirrorPlayerCaptureOtherActorSurfaces = 0;
+		uint32_t mirrorPlayerCaptureActorlessSurfaces = 0;
+		uint32_t mirrorPlayerCaptureFilteredSurfaces = 0;
+		uint32_t mirrorPlayerGeometryWallSurfaces = 0;
+		uint32_t mirrorPlayerGeometryFlatSurfaces = 0;
+		uint32_t mirrorPlayerGeometrySpriteSurfaces = 0;
+		uint32_t mirrorPlayerGeometryIndexedSurfaces = 0;
+		uint32_t mirrorPlayerGeometryTriangleFanSurfaces = 0;
+		uint32_t mirrorPlayerGeometrySpriteStripSurfaces = 0;
+		uint32_t mirrorPlayerGeometrySkippedSurfaces = 0;
+		uint32_t mirrorPlayerGeometrySourceVertices = 0;
+		uint32_t mirrorPlayerGeometrySourceIndices = 0;
+		uint32_t mirrorPlayerGeometryVertexGrowths = 0;
+		uint32_t mirrorPlayerGeometryIndexGrowths = 0;
+		uint32_t mirrorPlayerGeometryPrimitiveGrowths = 0;
+		uint32_t mirrorPlayerGeometryProvenanceGrowths = 0;
 		uint32_t dynamicCaptureCalls = 0;
 		uint32_t dynamicCaptureWallSurfaces = 0;
 		uint32_t dynamicCaptureFlatSurfaces = 0;
@@ -882,6 +1081,24 @@ public:
 		uint32_t dynamicAsPrimitiveCount = 0;
 		uint32_t dynamicAsVertexCount = 0;
 		uint32_t dynamicAsIndexCount = 0;
+		uint32_t dynamicAsRuntimeSpaceLinkPrimitives = 0;
+		uint32_t dynamicAsRuntimeMutationPrimitives = 0;
+		uint32_t dynamicAsDynamicPrimitives = 0;
+		uint32_t dynamicAsMirrorExtendedPrimitives = 0;
+		uint32_t dynamicAsMirrorPlayerPrimitives = 0;
+		uint32_t dynamicAsDebugSpherePrimitives = 0;
+		uint32_t dynamicAsCreateCalls = 0;
+		uint32_t dynamicAsReuseCount = 0;
+		uint32_t dynamicAsScratchQueries = 0;
+		uint32_t dynamicAsScratchGrowCount = 0;
+		uint64_t dynamicAsRuntimeSpaceLinkBytes = 0;
+		uint64_t dynamicAsRuntimeMutationBytes = 0;
+		uint64_t dynamicAsDynamicBytes = 0;
+		uint64_t dynamicAsMirrorExtendedBytes = 0;
+		uint64_t dynamicAsMirrorPlayerBytes = 0;
+		uint64_t dynamicAsDebugSphereBytes = 0;
+		uint64_t dynamicAsScratchRequestedBytes = 0;
+		uint64_t dynamicAsMemoryBytes = 0;
 		uint32_t persistentVoxelAsCalls = 0;
 		uint32_t persistentVoxelAsBuilds = 0;
 		uint32_t persistentVoxelAsUniqueMeshBuilds = 0;
@@ -1281,6 +1498,9 @@ private:
 		uint32_t growEventsLastFrame = 0;
 		uint32_t overwriteEventsLastFrame = 0;
 		uint64_t bytesUploadedLastFrame = 0;
+		uint64_t growthOldBytesLastFrame = 0;
+		uint64_t growthRequestedBytesLastFrame = 0;
+		uint64_t growthAllocatedBytesLastFrame = 0;
 		uint64_t peakUsedBytes = 0;
 	};
 
@@ -1294,10 +1514,45 @@ private:
 		std::vector<nri_scene::PrimitiveData> primitives;
 	};
 
+	struct StateCommitCombinedGeometryCache
+	{
+		bool staticPrefixValid = false;
+		uint64_t staticBuildSerial = 0;
+		uint32_t staticVertexCount = 0;
+		uint32_t staticIndexCount = 0;
+		uint32_t staticPrimitiveCount = 0;
+		uint32_t staticPrimitiveProvenanceCount = 0;
+		uint32_t staticMaterialCount = 0;
+		nri_scene::GeometryData geometry;
+	};
+
+	struct SceneBufferUploadProducerStamp
+	{
+		uint64_t vertexPayloadStamp = 0;
+		uint64_t indexPayloadStamp = 0;
+		uint64_t primitivePayloadStamp = 0;
+		uint64_t primitiveProvenanceStamp = 0;
+		uint64_t materialPayloadStamp = 0;
+	};
+
 	struct SceneUploadDirtyRange
 	{
 		uint64_t byteOffset = 0;
 		uint64_t size = 0;
+	};
+
+	struct SceneBufferUploadDomainSpan
+	{
+		SceneBufferUploadDomain domain = SceneBufferUploadDomain::StaticOverlay;
+		uint32_t vertexOffset = 0;
+		uint32_t vertexCount = 0;
+		uint32_t indexOffset = 0;
+		uint32_t indexCount = 0;
+		uint32_t primitiveOffset = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialOffset = 0;
+		uint32_t materialCount = 0;
+		SceneBufferUploadProducerStamp stamp = {};
 	};
 
 	struct SurfaceProbeResult
@@ -1710,6 +1965,19 @@ private:
 		std::vector<ActorEntry> actors;
 	};
 
+	struct StateCommitDomainGenerations
+	{
+		uint64_t staticMap = 0;
+		uint64_t runtimeMutation = 0;
+		uint64_t dynamicActors = 0;
+		uint64_t mirrorPlayer = 0;
+		uint64_t persistentVoxels = 0;
+		uint64_t materialBridge = 0;
+		uint64_t textures = 0;
+		uint64_t tlasInstances = 0;
+		uint64_t sceneConstants = 0;
+	};
+
 	struct PersistentVoxelMeshVariantResource
 	{
 		uint64_t resourceKey = 0;
@@ -1750,6 +2018,8 @@ private:
 	struct PersistentVoxelMaterialVariantResource
 	{
 		uint64_t materialKeyHash = 0;
+		uint64_t materialSignature = 0;
+		uint64_t materialPayloadHash = 0;
 		uint32_t materialOffset = 0;
 		uint32_t materialCount = 0;
 		uint32_t materialCapacity = 0;
@@ -2168,6 +2438,19 @@ private:
 		std::vector<SceneInstanceData> sceneInstances;
 	};
 
+	struct SceneUploadBufferRingSlot
+	{
+		NRIBufferResource vertexBuffer;
+		NRIBufferResource indexBuffer;
+		NRIBufferResource primitiveBuffer;
+		NRIBufferResource materialBuffer;
+		NRIAccelerationStructureResource dynamicBottomLevelAS;
+		std::vector<uint8_t> vertexMirror;
+		std::vector<uint8_t> indexMirror;
+		std::vector<uint8_t> primitiveMirror;
+		std::vector<uint8_t> materialMirror;
+	};
+
 	enum SceneDataBufferMask : uint32_t
 	{
 		SceneDataBufferMask_None = 0,
@@ -2270,14 +2553,15 @@ private:
 		const StaticMapSceneCache& staticScene,
 		const std::vector<nri_scene::MaterialData>& gpuMaterials);
 	bool RefreshStaticMapAnimatedMaterials();
-	bool UploadSceneBuffers(const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
 	bool UploadSceneBuffers(
-		NRIBufferResource& vertexBuffer,
-		NRIBufferResource& indexBuffer,
-		NRIBufferResource& primitiveBuffer,
-		NRIBufferResource& materialBuffer,
 		const nri_scene::GeometryData& geometry,
-		const std::vector<nri_scene::MaterialData>& materials);
+		const std::vector<nri_scene::MaterialData>& materials,
+		const std::vector<SceneBufferUploadDomainSpan>* domainSpans = nullptr);
+	bool UploadSceneBuffers(
+		SceneUploadBufferRingSlot& uploadSlot,
+		const nri_scene::GeometryData& geometry,
+		const std::vector<nri_scene::MaterialData>& materials,
+		const std::vector<SceneBufferUploadDomainSpan>* domainSpans = nullptr);
 	bool BuildStaticMapAccelerationStructures();
 	bool BuildStaticMapAccelerationStructures(
 		StaticMapSceneCache& staticScene,
@@ -2293,7 +2577,8 @@ private:
 		const NRIBufferResource* staticVertexBuffer,
 		const NRIBufferResource* staticIndexBuffer,
 		uint32_t* outTlasInstanceCount,
-		bool updateLiveState);
+		bool updateLiveState,
+		bool tlasInstanceWritesQuiesced);
 	bool BuildEmissiveTopLevelAccelerationStructure();
 	bool BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry);
 	bool BuildDynamicAccelerationStructure(
@@ -2406,6 +2691,22 @@ private:
 	void TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet);
 	uint32_t CountPotentialOutstandingQueuedFrames() const;
 	uint32_t GetCurrentQueuedFrameIndex() const;
+	SceneUploadBufferRingSlot& GetCurrentSceneUploadBufferRingSlot();
+	const SceneUploadBufferRingSlot* GetCurrentSceneUploadBufferRingSlot() const;
+	NRIBufferResource& GetCurrentDynamicVertexBuffer();
+	NRIBufferResource& GetCurrentDynamicIndexBuffer();
+	NRIBufferResource& GetCurrentDynamicPrimitiveBuffer();
+	NRIBufferResource& GetCurrentDynamicMaterialBuffer();
+	NRIAccelerationStructureResource& GetCurrentDynamicBottomLevelAS();
+	NRIBufferResource& GetCurrentTlasInstanceBuffer();
+	const NRIBufferResource& GetCurrentDynamicVertexBuffer() const;
+	const NRIBufferResource& GetCurrentDynamicIndexBuffer() const;
+	const NRIBufferResource& GetCurrentDynamicPrimitiveBuffer() const;
+	const NRIBufferResource& GetCurrentDynamicMaterialBuffer() const;
+	const NRIAccelerationStructureResource* GetCurrentDynamicBottomLevelAS() const;
+	const NRIBufferResource& GetCurrentTlasInstanceBuffer() const;
+	bool HasAnyDynamicBottomLevelAS() const;
+	void DestroyDynamicBottomLevelAccelerationStructures();
 	ResidentUploadScratchFrame& GetResidentUploadScratchFrame();
 	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
 	nri::DescriptorSet* GetCurrentSceneDataSet() const;
@@ -2513,6 +2814,8 @@ private:
 	bool QueueRuntimeMutationResidentGeometryUploadRange(int uploadKind, uint64_t byteOffset, uint64_t size);
 	bool FlushRuntimeMutationResidentGeometryUploadRanges();
 	bool StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges);
+	bool StagePersistentVoxelMaterialUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges, const uint8_t* data, uint64_t availableBytes);
+	void RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices);
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
@@ -2596,6 +2899,7 @@ private:
 	NRIBufferResource mPersistentVoxelPrimitiveBuffer;
 	NRIBufferResource mPersistentVoxelMaterialBuffer;
 	NRIBufferResource mTlasInstanceBuffer;
+	std::vector<NRIBufferResource> mTlasInstanceBufferRing;
 	NRIBufferResource mSceneInstanceBuffer;
 	NRIBufferResource mPortalBuffer;
 	NRIBufferResource mRuntimeLightBuffer;
@@ -2623,14 +2927,15 @@ private:
 	std::vector<nri_scene::MaterialData> mSelectPersistentVoxelGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectCombinedGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectRefreshedCombinedGpuMaterialScratch;
+	nri_scene::GeometryData mSelectMirrorPlayerGeometryScratch;
+	nri_scene::GeometryData mSelectOverlayGeometryScratch;
+	nri_scene::MaterialBridgeData mSelectOverlayMaterialBridgeScratch;
+	StateCommitCombinedGeometryCache mStateCommitCombinedGeometryCache = {};
 	std::vector<nri::TopLevelInstance> mSelectTopLevelInstanceScratch;
 	std::vector<SceneInstanceData> mSelectSceneInstanceScratch;
 	std::vector<nri::TopLevelInstance> mSelectCapturedTopLevelInstanceScratch;
 	std::vector<SceneInstanceData> mSelectCapturedSceneInstanceScratch;
-	std::vector<uint8_t> mSceneUploadVertexMirror;
-	std::vector<uint8_t> mSceneUploadIndexMirror;
-	std::vector<uint8_t> mSceneUploadPrimitiveMirror;
-	std::vector<uint8_t> mSceneUploadMaterialMirror;
+	std::vector<SceneUploadBufferRingSlot> mSceneUploadBufferRing;
 	std::vector<SceneUploadDirtyRange> mSceneUploadPrimitiveDirtyRangeScratch;
 	std::vector<SceneUploadDirtyRange> mSceneUploadMaterialDirtyRangeScratch;
 	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};
@@ -2660,7 +2965,6 @@ private:
 	PerfTraceShaderStats mLastPerfTraceShaderStats = {};
 	uint64_t mPendingTraceShaderStatsFrame = 0;
 
-	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
@@ -2693,6 +2997,8 @@ private:
 	uint64_t mPersistentVoxelResidencyLastBuildSerial = 0;
 	bool mPersistentVoxelLoadingWarmupActive = false;
 	bool mPersistentVoxelPreloadPending = false;
+	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};
+	bool mHasLastStateCommitDomainGenerations = false;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};

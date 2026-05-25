@@ -66,6 +66,7 @@ void PTMapWorld::Reset()
 	buildSerial = 0;
 	valid = false;
 	chunks.clear();
+	sectorChunkLookup.clear();
 	surfaces.clear();
 	localSpaces.clear();
 	portals.clear();

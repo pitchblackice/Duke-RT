@@ -1,10 +1,24 @@
 #include "nri_geometry_bridge.h"
 
 #include <algorithm>
+#include <chrono>
 
 namespace
 {
 	using namespace nri_scene;
+
+	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
+	{
+		return std::chrono::duration<double, std::milli>(end - start).count();
+	}
+
+	void NoteCapacityGrowth(size_t requiredSize, size_t capacity, uint32_t& growthCount)
+	{
+		if (requiredSize > capacity)
+		{
+			growthCount++;
+		}
+	}
 
 	SceneVertex MakeVertex(const FFlatVertex& source)
 	{
@@ -75,9 +89,16 @@ namespace
 		}
 	}
 
-	void AppendTriangle(const SceneVertex& v0, const SceneVertex& v1, const SceneVertex& v2, uint32_t materialIndex, uint32_t flags, const SurfaceProvenance& provenance, GeometryData& outGeometry)
+	void AppendTriangle(const SceneVertex& v0, const SceneVertex& v1, const SceneVertex& v2, uint32_t materialIndex, uint32_t flags, const SurfaceProvenance& provenance, GeometryData& outGeometry, GeometryBuildTraceStats* traceStats)
 	{
 		const uint32_t vertexBase = (uint32_t)outGeometry.vertices.size();
+		if (traceStats != nullptr)
+		{
+			NoteCapacityGrowth(outGeometry.vertices.size() + 3u, outGeometry.vertices.capacity(), traceStats->vertexCapacityGrowths);
+			NoteCapacityGrowth(outGeometry.indices.size() + 3u, outGeometry.indices.capacity(), traceStats->indexCapacityGrowths);
+			NoteCapacityGrowth(outGeometry.primitives.size() + 1u, outGeometry.primitives.capacity(), traceStats->primitiveCapacityGrowths);
+			NoteCapacityGrowth(outGeometry.primitiveProvenance.size() + 1u, outGeometry.primitiveProvenance.capacity(), traceStats->provenanceCapacityGrowths);
+		}
 		outGeometry.vertices.push_back(v0);
 		outGeometry.vertices.push_back(v1);
 		outGeometry.vertices.push_back(v2);
@@ -110,7 +131,7 @@ namespace
 		outGeometry.primitiveProvenance.push_back(provenance);
 	}
 
-	bool AppendIndexedSurface(const SurfaceRef& surface, uint32_t materialIndex, uint32_t flags, GeometryData& outGeometry)
+	bool AppendIndexedSurface(const SurfaceRef& surface, uint32_t materialIndex, uint32_t flags, GeometryData& outGeometry, GeometryBuildTraceStats* traceStats)
 	{
 		if (surface.indices.size() < 3)
 		{
@@ -118,12 +139,23 @@ namespace
 		}
 
 		const uint32_t vertexBase = (uint32_t)outGeometry.vertices.size();
+		if (traceStats != nullptr)
+		{
+			traceStats->indexedSurfaces++;
+			NoteCapacityGrowth(outGeometry.vertices.size() + surface.vertices.size(), outGeometry.vertices.capacity(), traceStats->vertexCapacityGrowths);
+		}
 		outGeometry.vertices.reserve(outGeometry.vertices.size() + surface.vertices.size());
 		for (const CapturedVertex& vertex : surface.vertices)
 		{
 			outGeometry.vertices.push_back(MakeVertex(vertex));
 		}
 
+		if (traceStats != nullptr)
+		{
+			NoteCapacityGrowth(outGeometry.indices.size() + surface.indices.size(), outGeometry.indices.capacity(), traceStats->indexCapacityGrowths);
+			NoteCapacityGrowth(outGeometry.primitives.size() + surface.indices.size() / 3u, outGeometry.primitives.capacity(), traceStats->primitiveCapacityGrowths);
+			NoteCapacityGrowth(outGeometry.primitiveProvenance.size() + surface.indices.size() / 3u, outGeometry.primitiveProvenance.capacity(), traceStats->provenanceCapacityGrowths);
+		}
 		outGeometry.indices.reserve(outGeometry.indices.size() + surface.indices.size());
 		outGeometry.primitives.reserve(outGeometry.primitives.size() + surface.indices.size() / 3u);
 		outGeometry.primitiveProvenance.reserve(outGeometry.primitiveProvenance.size() + surface.indices.size() / 3u);
@@ -177,87 +209,179 @@ namespace
 
 namespace nri_scene
 {
-void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry)
+void ClearGeometryRetainingCapacity(GeometryData& geometry)
 {
-	outGeometry = {};
+	geometry.vertices.clear();
+	geometry.indices.clear();
+	geometry.primitives.clear();
+	geometry.primitiveProvenance.clear();
+}
+
+void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry, GeometryBuildTraceStats* traceStats, bool retainOutputCapacity)
+{
+	if (retainOutputCapacity)
+	{
+		ClearGeometryRetainingCapacity(outGeometry);
+	}
+	else
+	{
+		outGeometry = {};
+	}
+	if (traceStats != nullptr)
+	{
+		*traceStats = {};
+	}
 	const uint32_t scenePrimitiveFlags = sceneView.primitiveFlags;
 
 	uint32_t materialIndex = 0;
-	for (const SurfaceRef& wall : sceneView.opaqueWalls)
 	{
-		if (wall.vertices.size() < 3)
+		const auto phaseStart = traceStats != nullptr ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
+		for (const SurfaceRef& wall : sceneView.opaqueWalls)
 		{
+			if (traceStats != nullptr)
+			{
+				traceStats->wallSurfaces++;
+				traceStats->sourceVertexCount += (uint32_t)wall.vertices.size();
+				traceStats->sourceIndexCount += (uint32_t)wall.indices.size();
+			}
+			if (wall.vertices.size() < 3)
+			{
+				if (traceStats != nullptr)
+				{
+					traceStats->skippedSurfaces++;
+				}
+				materialIndex++;
+				continue;
+			}
+
+			if (AppendIndexedSurface(wall, materialIndex, wall.material.flags | scenePrimitiveFlags, outGeometry, traceStats))
+			{
+				materialIndex++;
+				continue;
+			}
+
+			if (traceStats != nullptr)
+			{
+				traceStats->triangleFanSurfaces++;
+			}
+			SceneVertex root = MakeVertex(wall.vertices[0]);
+			for (uint32_t i = 1; i + 1 < wall.vertices.size(); ++i)
+			{
+				AppendTriangle(root, MakeVertex(wall.vertices[i]), MakeVertex(wall.vertices[i + 1]), materialIndex, wall.material.flags | scenePrimitiveFlags, wall.provenance, outGeometry, traceStats);
+			}
+
 			materialIndex++;
-			continue;
 		}
-
-		if (AppendIndexedSurface(wall, materialIndex, wall.material.flags | scenePrimitiveFlags, outGeometry))
+		if (traceStats != nullptr)
 		{
-			materialIndex++;
-			continue;
+			traceStats->wallMs += DurationMs(phaseStart, std::chrono::steady_clock::now());
 		}
-
-		SceneVertex root = MakeVertex(wall.vertices[0]);
-		for (uint32_t i = 1; i + 1 < wall.vertices.size(); ++i)
-		{
-			AppendTriangle(root, MakeVertex(wall.vertices[i]), MakeVertex(wall.vertices[i + 1]), materialIndex, wall.material.flags | scenePrimitiveFlags, wall.provenance, outGeometry);
-		}
-
-		materialIndex++;
 	}
 
-	for (const SurfaceRef& flat : sceneView.opaqueFlats)
 	{
-		if (flat.vertices.size() < 3)
+		const auto phaseStart = traceStats != nullptr ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
+		for (const SurfaceRef& flat : sceneView.opaqueFlats)
 		{
+			if (traceStats != nullptr)
+			{
+				traceStats->flatSurfaces++;
+				traceStats->sourceVertexCount += (uint32_t)flat.vertices.size();
+				traceStats->sourceIndexCount += (uint32_t)flat.indices.size();
+			}
+			if (flat.vertices.size() < 3)
+			{
+				if (traceStats != nullptr)
+				{
+					traceStats->skippedSurfaces++;
+				}
+				materialIndex++;
+				continue;
+			}
+
+			if (AppendIndexedSurface(flat, materialIndex, flat.material.flags | scenePrimitiveFlags, outGeometry, traceStats))
+			{
+				materialIndex++;
+				continue;
+			}
+
+			if (traceStats != nullptr)
+			{
+				traceStats->triangleFanSurfaces++;
+			}
+			for (uint32_t i = 0; i + 2 < flat.vertices.size(); i += 3)
+			{
+				AppendTriangle(MakeVertex(flat.vertices[i]), MakeVertex(flat.vertices[i + 1]), MakeVertex(flat.vertices[i + 2]), materialIndex, flat.material.flags | scenePrimitiveFlags, flat.provenance, outGeometry, traceStats);
+			}
+
 			materialIndex++;
-			continue;
 		}
-
-		if (AppendIndexedSurface(flat, materialIndex, flat.material.flags | scenePrimitiveFlags, outGeometry))
+		if (traceStats != nullptr)
 		{
-			materialIndex++;
-			continue;
+			traceStats->flatMs += DurationMs(phaseStart, std::chrono::steady_clock::now());
 		}
-
-		for (uint32_t i = 0; i + 2 < flat.vertices.size(); i += 3)
-		{
-			AppendTriangle(MakeVertex(flat.vertices[i]), MakeVertex(flat.vertices[i + 1]), MakeVertex(flat.vertices[i + 2]), materialIndex, flat.material.flags | scenePrimitiveFlags, flat.provenance, outGeometry);
-		}
-
-		materialIndex++;
 	}
 
-	for (const SurfaceRef& sprite : sceneView.opaqueSprites)
 	{
-		if (sprite.vertices.size() < 3)
+		const auto phaseStart = traceStats != nullptr ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
+		for (const SurfaceRef& sprite : sceneView.opaqueSprites)
 		{
+			if (traceStats != nullptr)
+			{
+				traceStats->spriteSurfaces++;
+				traceStats->sourceVertexCount += (uint32_t)sprite.vertices.size();
+				traceStats->sourceIndexCount += (uint32_t)sprite.indices.size();
+			}
+			if (sprite.vertices.size() < 3)
+			{
+				if (traceStats != nullptr)
+				{
+					traceStats->skippedSurfaces++;
+				}
+				materialIndex++;
+				continue;
+			}
+
+			if (AppendIndexedSurface(sprite, materialIndex, sprite.material.flags | scenePrimitiveFlags, outGeometry, traceStats))
+			{
+				materialIndex++;
+				continue;
+			}
+
+			if (sprite.vertices.size() == 4)
+			{
+				if (traceStats != nullptr)
+				{
+					traceStats->spriteStripSurfaces++;
+				}
+				// Facing sprites come from HWSprite as a 4-vertex triangle strip.
+				AppendTriangle(MakeVertex(sprite.vertices[0]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[2]), materialIndex, sprite.material.flags | scenePrimitiveFlags, sprite.provenance, outGeometry, traceStats);
+				AppendTriangle(MakeVertex(sprite.vertices[2]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[3]), materialIndex, sprite.material.flags | scenePrimitiveFlags, sprite.provenance, outGeometry, traceStats);
+				materialIndex++;
+				continue;
+			}
+
+			if (traceStats != nullptr)
+			{
+				traceStats->triangleFanSurfaces++;
+			}
+			SceneVertex root = MakeVertex(sprite.vertices[0]);
+			for (uint32_t i = 1; i + 1 < sprite.vertices.size(); ++i)
+			{
+				AppendTriangle(root, MakeVertex(sprite.vertices[i]), MakeVertex(sprite.vertices[i + 1]), materialIndex, sprite.material.flags | scenePrimitiveFlags, sprite.provenance, outGeometry, traceStats);
+			}
+
 			materialIndex++;
-			continue;
 		}
-
-		if (AppendIndexedSurface(sprite, materialIndex, sprite.material.flags | scenePrimitiveFlags, outGeometry))
+		if (traceStats != nullptr)
 		{
-			materialIndex++;
-			continue;
+			traceStats->spriteMs += DurationMs(phaseStart, std::chrono::steady_clock::now());
 		}
-
-		if (sprite.vertices.size() == 4)
-		{
-			// Facing sprites come from HWSprite as a 4-vertex triangle strip.
-			AppendTriangle(MakeVertex(sprite.vertices[0]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[2]), materialIndex, sprite.material.flags | scenePrimitiveFlags, sprite.provenance, outGeometry);
-			AppendTriangle(MakeVertex(sprite.vertices[2]), MakeVertex(sprite.vertices[1]), MakeVertex(sprite.vertices[3]), materialIndex, sprite.material.flags | scenePrimitiveFlags, sprite.provenance, outGeometry);
-			materialIndex++;
-			continue;
-		}
-
-		SceneVertex root = MakeVertex(sprite.vertices[0]);
-		for (uint32_t i = 1; i + 1 < sprite.vertices.size(); ++i)
-		{
-			AppendTriangle(root, MakeVertex(sprite.vertices[i]), MakeVertex(sprite.vertices[i + 1]), materialIndex, sprite.material.flags | scenePrimitiveFlags, sprite.provenance, outGeometry);
-		}
-
-		materialIndex++;
+	}
+	if (traceStats != nullptr)
+	{
+		traceStats->outputVertexCount = (uint32_t)outGeometry.vertices.size();
+		traceStats->outputIndexCount = (uint32_t)outGeometry.indices.size();
+		traceStats->outputPrimitiveCount = (uint32_t)outGeometry.primitives.size();
 	}
 }
 }
