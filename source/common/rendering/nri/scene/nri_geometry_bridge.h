@@ -34,5 +34,28 @@ struct GeometryData
 	std::vector<SurfaceProvenance> primitiveProvenance;
 };
 
-void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry);
+struct GeometryBuildTraceStats
+{
+	double wallMs = 0.0;
+	double flatMs = 0.0;
+	double spriteMs = 0.0;
+	uint32_t wallSurfaces = 0;
+	uint32_t flatSurfaces = 0;
+	uint32_t spriteSurfaces = 0;
+	uint32_t indexedSurfaces = 0;
+	uint32_t triangleFanSurfaces = 0;
+	uint32_t spriteStripSurfaces = 0;
+	uint32_t skippedSurfaces = 0;
+	uint32_t sourceVertexCount = 0;
+	uint32_t sourceIndexCount = 0;
+	uint32_t outputVertexCount = 0;
+	uint32_t outputIndexCount = 0;
+	uint32_t outputPrimitiveCount = 0;
+	uint32_t vertexCapacityGrowths = 0;
+	uint32_t indexCapacityGrowths = 0;
+	uint32_t primitiveCapacityGrowths = 0;
+	uint32_t provenanceCapacityGrowths = 0;
+};
+
+void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry, GeometryBuildTraceStats* traceStats = nullptr);
 }

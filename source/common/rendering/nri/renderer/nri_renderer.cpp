@@ -1479,16 +1479,30 @@ public:
 		return true;
 	}
 
-	static bool CaptureMirrorPlayerDynamicScene(HWDrawInfo& di, HWPortal* mirrorPortal, int32_t selectedMirrorWallIndex, uint32_t mirrorPortalCandidates, nri_scene::SceneView& outView)
+	static bool CaptureMirrorPlayerDynamicScene(
+		HWDrawInfo& di,
+		HWPortal* mirrorPortal,
+		int32_t selectedMirrorWallIndex,
+		uint32_t mirrorPortalCandidates,
+		nri_scene::SceneView& outView,
+		MirrorPlayerCaptureStats* outStats = nullptr)
 	{
 		outView = {};
 		MirrorPlayerCaptureStats captureStats = {};
 		captureStats.viewpointActorIndex = di.Viewpoint.CameraActor != nullptr ? (int32_t)di.Viewpoint.CameraActor->GetIndex() : -1;
+		const auto publishStats = [&]()
+		{
+			if (outStats != nullptr)
+			{
+				*outStats = captureStats;
+			}
+			TraceMirrorPlayerCaptureStats(captureStats);
+		};
 		if (gi == nullptr ||
 			myconnectindex < 0 ||
 			myconnectindex >= MAXPLAYERS)
 		{
-			TraceMirrorPlayerCaptureStats(captureStats);
+			publishStats();
 			return false;
 		}
 
@@ -1496,7 +1510,7 @@ public:
 		DCoreActor* localPlayerActor = localPlayer != nullptr ? localPlayer->GetActor() : nullptr;
 		if (localPlayerActor == nullptr)
 		{
-			TraceMirrorPlayerCaptureStats(captureStats);
+			publishStats();
 			return false;
 		}
 
@@ -1527,7 +1541,7 @@ public:
 		captureDi->EndDrawInfo();
 		if (!hasCapture || !AppendMirrorPlayerSurfaces(di, capturedView, outView))
 		{
-			TraceMirrorPlayerCaptureStats(captureStats);
+			publishStats();
 			outView = {};
 			return false;
 		}
@@ -1545,7 +1559,7 @@ public:
 
 		outView.primitiveFlags = nri_scene::PrimitiveFlag_ReflectionOnly;
 		captureStats.filteredSurfaceCount = captureStats.capturedSurfaceCount;
-		TraceMirrorPlayerCaptureStats(captureStats);
+		publishStats();
 		return true;
 	}
 
@@ -5700,20 +5714,6 @@ namespace
 		destination.primitiveProvenance.insert(destination.primitiveProvenance.end(), source.primitiveProvenance.begin(), source.primitiveProvenance.end());
 	}
 
-	static uint64_t EstimateAppendGeometryBytes(const nri_scene::GeometryData* geometry)
-	{
-		if (geometry == nullptr)
-		{
-			return 0;
-		}
-
-		return
-			(uint64_t)geometry->vertices.size() * sizeof(nri_scene::SceneVertex) +
-			(uint64_t)geometry->indices.size() * sizeof(uint32_t) +
-			(uint64_t)geometry->primitives.size() * sizeof(nri_scene::PrimitiveData) +
-			(uint64_t)geometry->primitiveProvenance.size() * sizeof(nri_scene::SurfaceProvenance);
-	}
-
 	static uint64_t EstimateAppendMaterialBridgeBytes(const nri_scene::MaterialBridgeData& materials)
 	{
 		return
@@ -8684,6 +8684,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
 	nri_scene::GeometryData mirrorPlayerGeometry;
+	MirrorPlayerCaptureStats mirrorPlayerCaptureStats = {};
+	nri_scene::GeometryBuildTraceStats mirrorPlayerGeometryTraceStats = {};
 	std::vector<SceneBufferUploadDomainSpan> sceneUploadDomainSpans;
 	uint32_t activeStaticProbePrimitiveCount = 0;
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
@@ -8845,7 +8847,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				visibleMirrorPortal,
 				selectedVisibleMirrorWallIndex,
 				visibleMirrorPortalCandidates,
-				mirrorPlayerSceneView);
+				mirrorPlayerSceneView,
+				&mirrorPlayerCaptureStats);
 		}();
 		if (hasDynamicScene)
 		{
@@ -8925,12 +8928,35 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMirrorPlayerMs);
 				{
 					ScopedPtPerfTimer buildTimer(mLastPerfShellTraceStats.mirrorPlayerGeometryBuildMs);
-					nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry);
+					nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry, &mirrorPlayerGeometryTraceStats);
 				}
 				{
 					ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.mirrorPlayerPortalAssignMs);
 					AssignGeometryPortalIndices(mMapWorld, mirrorPlayerGeometry);
 				}
+				mLastPerfShellTraceStats.mirrorPlayerGeometryBuildWallMs = mirrorPlayerGeometryTraceStats.wallMs;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryBuildFlatMs = mirrorPlayerGeometryTraceStats.flatMs;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryBuildSpriteMs = mirrorPlayerGeometryTraceStats.spriteMs;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureRawFacingSprites = mirrorPlayerCaptureStats.rawFacingSprites;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureRawVoxelSprites = mirrorPlayerCaptureStats.rawVoxelSprites;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureSurfaces = mirrorPlayerCaptureStats.capturedSurfaceCount;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureMatchingActorSurfaces = mirrorPlayerCaptureStats.capturedMatchingActorSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureOtherActorSurfaces = mirrorPlayerCaptureStats.capturedOtherActorSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureActorlessSurfaces = mirrorPlayerCaptureStats.capturedActorlessSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerCaptureFilteredSurfaces = mirrorPlayerCaptureStats.filteredSurfaceCount;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryWallSurfaces = mirrorPlayerGeometryTraceStats.wallSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryFlatSurfaces = mirrorPlayerGeometryTraceStats.flatSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySpriteSurfaces = mirrorPlayerGeometryTraceStats.spriteSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryIndexedSurfaces = mirrorPlayerGeometryTraceStats.indexedSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryTriangleFanSurfaces = mirrorPlayerGeometryTraceStats.triangleFanSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySpriteStripSurfaces = mirrorPlayerGeometryTraceStats.spriteStripSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySkippedSurfaces = mirrorPlayerGeometryTraceStats.skippedSurfaces;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySourceVertices = mirrorPlayerGeometryTraceStats.sourceVertexCount;
+				mLastPerfShellTraceStats.mirrorPlayerGeometrySourceIndices = mirrorPlayerGeometryTraceStats.sourceIndexCount;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryVertexGrowths = mirrorPlayerGeometryTraceStats.vertexCapacityGrowths;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryIndexGrowths = mirrorPlayerGeometryTraceStats.indexCapacityGrowths;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryPrimitiveGrowths = mirrorPlayerGeometryTraceStats.primitiveCapacityGrowths;
+				mLastPerfShellTraceStats.mirrorPlayerGeometryProvenanceGrowths = mirrorPlayerGeometryTraceStats.provenanceCapacityGrowths;
 			}
 
 			if (!mirrorPlayerGeometry.primitives.empty())
@@ -9133,7 +9159,18 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					sourceTrace = {};
 					sourceTrace.primitiveCount = primitiveCount;
 					sourceTrace.materialCount = materialCount;
-					sourceTrace.byteCount = EstimateAppendGeometryBytes(geometry) + EstimateAppendMaterialBridgeBytes(materials);
+					sourceTrace.vertexBytes = geometry != nullptr ? (uint64_t)geometry->vertices.size() * sizeof(nri_scene::SceneVertex) : 0;
+					sourceTrace.indexBytes = geometry != nullptr ? (uint64_t)geometry->indices.size() * sizeof(uint32_t) : 0;
+					sourceTrace.primitiveBytes = geometry != nullptr ?
+						(uint64_t)geometry->primitives.size() * sizeof(nri_scene::PrimitiveData) +
+						(uint64_t)geometry->primitiveProvenance.size() * sizeof(nri_scene::SurfaceProvenance) :
+						0;
+					sourceTrace.materialBytes = EstimateAppendMaterialBridgeBytes(materials);
+					sourceTrace.byteCount =
+						sourceTrace.vertexBytes +
+						sourceTrace.indexBytes +
+						sourceTrace.primitiveBytes +
+						sourceTrace.materialBytes;
 					SceneBufferUploadDomainSpan uploadSpan = {};
 					uploadSpan.domain = uploadDomain;
 					uploadSpan.vertexOffset = (uint32_t)overlayGeometry.vertices.size();
@@ -9194,10 +9231,20 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					if (geometry != nullptr && !geometry->primitives.empty())
 					{
 						ScopedPtPerfTimer geometryTimer(geometryMs);
+						sourceTrace.geometryGrowthEvents =
+							(overlayGeometry.vertices.size() + geometry->vertices.size() > overlayGeometry.vertices.capacity() ? 1u : 0u) +
+							(overlayGeometry.indices.size() + geometry->indices.size() > overlayGeometry.indices.capacity() ? 1u : 0u) +
+							(overlayGeometry.primitives.size() + geometry->primitives.size() > overlayGeometry.primitives.capacity() ? 1u : 0u) +
+							(overlayGeometry.primitiveProvenance.size() + geometry->primitiveProvenance.size() > overlayGeometry.primitiveProvenance.capacity() ? 1u : 0u);
 						AppendGeometry(*geometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
 					}
 					{
 						ScopedPtPerfTimer materialTimer(materialMs);
+						sourceTrace.materialGrowthEvents =
+							(overlayMaterialBridge.materials.size() + materials.materials.size() > overlayMaterialBridge.materials.capacity() ? 1u : 0u) +
+							(overlayMaterialBridge.lightMetadata.size() + materials.lightMetadata.size() > overlayMaterialBridge.lightMetadata.capacity() ? 1u : 0u) +
+							(overlayMaterialBridge.textures.size() + materials.textures.size() > overlayMaterialBridge.textures.capacity() ? 1u : 0u) +
+							(overlayMaterialBridge.paletteLookup.size() + materials.paletteLookup.size() > overlayMaterialBridge.paletteLookup.capacity() ? 1u : 0u);
 						AppendMaterialBridge(materials, overlayMaterialBridge);
 					}
 					if (uploadSpan.vertexCount != 0 ||

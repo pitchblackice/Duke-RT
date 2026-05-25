@@ -329,10 +329,16 @@ public:
 		struct OverlayAppendSourceTraceEntry
 		{
 			uint64_t byteCount = 0;
+			uint64_t vertexBytes = 0;
+			uint64_t indexBytes = 0;
+			uint64_t primitiveBytes = 0;
+			uint64_t materialBytes = 0;
 			uint32_t vertexCount = 0;
 			uint32_t indexCount = 0;
 			uint32_t primitiveCount = 0;
 			uint32_t materialCount = 0;
+			uint32_t geometryGrowthEvents = 0;
+			uint32_t materialGrowthEvents = 0;
 		};
 
 		double totalMs = 0.0;
@@ -444,6 +450,9 @@ public:
 		double dynamicCaptureMs = 0.0;
 		double mirrorPlayerCaptureMs = 0.0;
 		double mirrorPlayerGeometryBuildMs = 0.0;
+		double mirrorPlayerGeometryBuildWallMs = 0.0;
+		double mirrorPlayerGeometryBuildFlatMs = 0.0;
+		double mirrorPlayerGeometryBuildSpriteMs = 0.0;
 		double mirrorPlayerPortalAssignMs = 0.0;
 		double mirrorPlayerMaterialBuildMs = 0.0;
 		double sceneSelectStaticMapMs = 0.0;
@@ -1018,6 +1027,26 @@ public:
 		OverlayAppendSourceTraceEntry overlayMirrorPlayerAppend = {};
 		OverlayAppendSourceTraceEntry overlayDebugSphereAppend = {};
 		OverlayAppendSourceTraceEntry overlayPersistentVoxelAppend = {};
+		uint32_t mirrorPlayerCaptureRawFacingSprites = 0;
+		uint32_t mirrorPlayerCaptureRawVoxelSprites = 0;
+		uint32_t mirrorPlayerCaptureSurfaces = 0;
+		uint32_t mirrorPlayerCaptureMatchingActorSurfaces = 0;
+		uint32_t mirrorPlayerCaptureOtherActorSurfaces = 0;
+		uint32_t mirrorPlayerCaptureActorlessSurfaces = 0;
+		uint32_t mirrorPlayerCaptureFilteredSurfaces = 0;
+		uint32_t mirrorPlayerGeometryWallSurfaces = 0;
+		uint32_t mirrorPlayerGeometryFlatSurfaces = 0;
+		uint32_t mirrorPlayerGeometrySpriteSurfaces = 0;
+		uint32_t mirrorPlayerGeometryIndexedSurfaces = 0;
+		uint32_t mirrorPlayerGeometryTriangleFanSurfaces = 0;
+		uint32_t mirrorPlayerGeometrySpriteStripSurfaces = 0;
+		uint32_t mirrorPlayerGeometrySkippedSurfaces = 0;
+		uint32_t mirrorPlayerGeometrySourceVertices = 0;
+		uint32_t mirrorPlayerGeometrySourceIndices = 0;
+		uint32_t mirrorPlayerGeometryVertexGrowths = 0;
+		uint32_t mirrorPlayerGeometryIndexGrowths = 0;
+		uint32_t mirrorPlayerGeometryPrimitiveGrowths = 0;
+		uint32_t mirrorPlayerGeometryProvenanceGrowths = 0;
 		uint32_t dynamicCaptureCalls = 0;
 		uint32_t dynamicCaptureWallSurfaces = 0;
 		uint32_t dynamicCaptureFlatSurfaces = 0;
