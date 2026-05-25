@@ -1442,6 +1442,18 @@ private:
 		std::vector<nri_scene::PrimitiveData> primitives;
 	};
 
+	struct StateCommitCombinedGeometryCache
+	{
+		bool staticPrefixValid = false;
+		uint64_t staticBuildSerial = 0;
+		uint32_t staticVertexCount = 0;
+		uint32_t staticIndexCount = 0;
+		uint32_t staticPrimitiveCount = 0;
+		uint32_t staticPrimitiveProvenanceCount = 0;
+		uint32_t staticMaterialCount = 0;
+		nri_scene::GeometryData geometry;
+	};
+
 	struct SceneBufferUploadProducerStamp
 	{
 		uint64_t vertexPayloadStamp = 0;
@@ -2837,6 +2849,7 @@ private:
 	std::vector<nri_scene::MaterialData> mSelectPersistentVoxelGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectCombinedGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectRefreshedCombinedGpuMaterialScratch;
+	StateCommitCombinedGeometryCache mStateCommitCombinedGeometryCache = {};
 	std::vector<nri::TopLevelInstance> mSelectTopLevelInstanceScratch;
 	std::vector<SceneInstanceData> mSelectSceneInstanceScratch;
 	std::vector<nri::TopLevelInstance> mSelectCapturedTopLevelInstanceScratch;
