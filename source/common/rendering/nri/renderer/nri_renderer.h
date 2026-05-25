@@ -650,7 +650,6 @@ public:
 		double sceneDataSetDescriptorHashMs = 0.0;
 		uint32_t sceneDataSetWaitCount = 0;
 		uint32_t sceneDataSetDescriptorUpdateCount = 0;
-		uint32_t sceneDataSetDescriptorSkipCount = 0;
 		uint32_t sceneDataSetDescriptorNullCount = 0;
 		uint32_t sceneDataSetRuntimeLightUploads = 0;
 		uint32_t sceneDataSetRuntimeLightCacheHits = 0;
@@ -3071,8 +3070,6 @@ private:
 	uint32_t mBoundRuntimeLightTileIndexCount = 0;
 	uint32_t mBoundRuntimeLightMaxTileOccupancy = 0;
 	std::vector<uint8_t> mSceneDataDescriptorsInitialized;
-	std::vector<uint64_t> mSceneTextureDescriptorHashes;
-	std::vector<uint64_t> mSceneDataDescriptorHashes;
 	bool mRuntimeLightPayloadCacheValid = false;
 	uint64_t mRuntimeLightPayloadHash = 0;
 	bool mRuntimeLightClusterCacheValid = false;

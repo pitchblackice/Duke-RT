@@ -7699,8 +7699,6 @@ void NRIRenderer::Shutdown()
 	mFinalPresentFrameTextureSet = nullptr;
 	mFinalPresentOutputSet = nullptr;
 	mSceneDataDescriptorsInitialized.clear();
-	mSceneTextureDescriptorHashes.clear();
-	mSceneDataDescriptorHashes.clear();
 }
 
 void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
@@ -21715,8 +21713,6 @@ bool NRIRenderer::AllocateDescriptorSets()
 	mSceneTextureSets.assign(queuedFrameCount, nullptr);
 	mSceneDataSets.assign(queuedFrameCount, nullptr);
 	mSceneDataDescriptorsInitialized.assign(queuedFrameCount, 0u);
-	mSceneTextureDescriptorHashes.assign(queuedFrameCount, 0u);
-	mSceneDataDescriptorHashes.assign(queuedFrameCount, 0u);
 
 	auto allocateQueuedSets = [&](nri::PipelineLayout* layout, uint32_t setIndex, std::vector<nri::DescriptorSet*>& sets) -> bool
 	{
@@ -21774,28 +21770,16 @@ bool NRIRenderer::UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& des
 		return false;
 	}
 
-	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
-	const uint64_t descriptorHash = HashDescriptorList(reinterpret_cast<const nri::Descriptor* const*>(descriptors.data()), descriptors.size());
-	if (queuedFrameIndex < mSceneTextureDescriptorHashes.size() &&
-		mSceneTextureDescriptorHashes[queuedFrameIndex] == descriptorHash)
-	{
-		return true;
-	}
-
 	nri::UpdateDescriptorRangeDesc update = {};
 	update.descriptorSet = sceneTextureSet;
 	update.rangeIndex = 0;
 	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(descriptors.data());
 	update.descriptorNum = (uint32_t)descriptors.size();
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
-	if (queuedFrameIndex < mSceneTextureDescriptorHashes.size())
-	{
-		mSceneTextureDescriptorHashes[queuedFrameIndex] = descriptorHash;
-	}
 	TraceSharedDescriptorRewrite(
 		"scene_textures",
 		reason != nullptr ? reason : "unlabeled",
-		descriptorHash,
+		HashDescriptorList(reinterpret_cast<const nri::Descriptor* const*>(descriptors.data()), descriptors.size()),
 		(uint32_t)descriptors.size(),
 		true);
 	return true;
@@ -22629,6 +22613,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneDataSetMs);
 	mLastPerfShellTraceStats.sceneDataSetCalls++;
+	SetCurrentSceneDataDescriptorsInitialized(false);
 	bool waitedForWrites = false;
 	const auto noteDataSetUpload = [&](const SceneBufferDebugStats& stats, uint64_t size, uint64_t& requestedBytes, uint64_t& uploadedBytes)
 	{
@@ -23052,44 +23037,25 @@ bool NRIRenderer::CommitSceneDataDescriptors(const char* reason)
 		return false;
 	}
 
-	uint64_t descriptorHash = 0;
+	nri::UpdateDescriptorRangeDesc update = {};
+	update.descriptorSet = sceneDataSet;
+	update.rangeIndex = 0;
+	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
+	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
+	{
+		ScopedPtPerfTimer descriptorUpdateTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorUpdateMs);
+		mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
+	}
+	mLastPerfShellTraceStats.sceneDataSetDescriptorUpdateCount++;
+	SetCurrentSceneDataDescriptorsInitialized(true);
 	{
 		ScopedPtPerfTimer descriptorHashTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorHashMs);
-		descriptorHash = HashDescriptorList(reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data()), mSceneDataDescriptors.size());
-	}
-
-	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
-	const bool descriptorsUnchanged =
-		queuedFrameIndex < mSceneDataDescriptorHashes.size() &&
-		mSceneDataDescriptorHashes[queuedFrameIndex] == descriptorHash &&
-		IsCurrentSceneDataDescriptorsInitialized();
-	if (descriptorsUnchanged)
-	{
-		mLastPerfShellTraceStats.sceneDataSetDescriptorSkipCount++;
-	}
-	else
-	{
-		nri::UpdateDescriptorRangeDesc update = {};
-		update.descriptorSet = sceneDataSet;
-		update.rangeIndex = 0;
-		update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
-		update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-		{
-			ScopedPtPerfTimer descriptorUpdateTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorUpdateMs);
-			mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
-		}
-		mLastPerfShellTraceStats.sceneDataSetDescriptorUpdateCount++;
 		TraceSharedDescriptorRewrite(
 			"scene_data",
 			reason != nullptr ? reason : "unlabeled",
-			descriptorHash,
+			HashDescriptorList(reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data()), mSceneDataDescriptors.size()),
 			NRI_SCENE_DATA_DESCRIPTOR_NUM,
 			false);
-	}
-	SetCurrentSceneDataDescriptorsInitialized(true);
-	if (queuedFrameIndex < mSceneDataDescriptorHashes.size())
-	{
-		mSceneDataDescriptorHashes[queuedFrameIndex] = descriptorHash;
 	}
 	return true;
 }
@@ -25101,10 +25067,6 @@ void NRIRenderer::SetCurrentSceneDataDescriptorsInitialized(bool value)
 	}
 
 	mSceneDataDescriptorsInitialized[queuedFrameIndex] = value ? 1u : 0u;
-	if (!value && queuedFrameIndex < mSceneDataDescriptorHashes.size())
-	{
-		mSceneDataDescriptorHashes[queuedFrameIndex] = 0u;
-	}
 }
 
 void NRIRenderer::TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet)
@@ -35974,7 +35936,6 @@ void NRIRenderer::CopyTextureToActiveTarget(NRITextureResource& source)
 void NRIRenderer::DestroyCachedTextures()
 {
 	mStaticMapScene.texturesResident = false;
-	std::fill(mSceneTextureDescriptorHashes.begin(), mSceneTextureDescriptorHashes.end(), 0u);
 	for (auto& skyTexture : mSkyTextureCache)
 	{
 		mFrameBuffer->DestroyTextureResource(skyTexture.resource);
@@ -35997,7 +35958,6 @@ void NRIRenderer::DestroyCachedTextures()
 
 void NRIRenderer::DestroyFrameTextures()
 {
-	std::fill(mSceneTextureDescriptorHashes.begin(), mSceneTextureDescriptorHashes.end(), 0u);
 	for (auto& texture : mFrameTextures)
 	{
 		mFrameBuffer->DestroyTextureResource(texture);
@@ -36088,8 +36048,6 @@ void NRIRenderer::DestroySceneBuffers()
 	{
 		initialized = 0u;
 	}
-	std::fill(mSceneTextureDescriptorHashes.begin(), mSceneTextureDescriptorHashes.end(), 0u);
-	std::fill(mSceneDataDescriptorHashes.begin(), mSceneDataDescriptorHashes.end(), 0u);
 	mSceneDataDescriptors.fill(nullptr);
 	mBoundStaticPrimitiveCount = 0;
 	mBoundDynamicPrimitiveCount = 0;
@@ -36264,7 +36222,6 @@ void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)
 	{
 		mFrameBuffer->mCore.DestroyDescriptor(resource.shaderView);
 		resource.shaderView = nullptr;
-		std::fill(mSceneDataDescriptorHashes.begin(), mSceneDataDescriptorHashes.end(), 0u);
 	}
 
 	if (resource.buffer != nullptr)
