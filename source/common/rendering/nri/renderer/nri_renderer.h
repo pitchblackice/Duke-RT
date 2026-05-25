@@ -2300,6 +2300,18 @@ private:
 		std::vector<SceneInstanceData> sceneInstances;
 	};
 
+	struct SceneUploadBufferRingSlot
+	{
+		NRIBufferResource vertexBuffer;
+		NRIBufferResource indexBuffer;
+		NRIBufferResource primitiveBuffer;
+		NRIBufferResource materialBuffer;
+		std::vector<uint8_t> vertexMirror;
+		std::vector<uint8_t> indexMirror;
+		std::vector<uint8_t> primitiveMirror;
+		std::vector<uint8_t> materialMirror;
+	};
+
 	enum SceneDataBufferMask : uint32_t
 	{
 		SceneDataBufferMask_None = 0,
@@ -2407,10 +2419,7 @@ private:
 		const std::vector<nri_scene::MaterialData>& materials,
 		const std::vector<SceneBufferUploadDomainSpan>* domainSpans = nullptr);
 	bool UploadSceneBuffers(
-		NRIBufferResource& vertexBuffer,
-		NRIBufferResource& indexBuffer,
-		NRIBufferResource& primitiveBuffer,
-		NRIBufferResource& materialBuffer,
+		SceneUploadBufferRingSlot& uploadSlot,
 		const nri_scene::GeometryData& geometry,
 		const std::vector<nri_scene::MaterialData>& materials,
 		const std::vector<SceneBufferUploadDomainSpan>* domainSpans = nullptr);
@@ -2542,6 +2551,16 @@ private:
 	void TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet);
 	uint32_t CountPotentialOutstandingQueuedFrames() const;
 	uint32_t GetCurrentQueuedFrameIndex() const;
+	SceneUploadBufferRingSlot& GetCurrentSceneUploadBufferRingSlot();
+	const SceneUploadBufferRingSlot* GetCurrentSceneUploadBufferRingSlot() const;
+	NRIBufferResource& GetCurrentDynamicVertexBuffer();
+	NRIBufferResource& GetCurrentDynamicIndexBuffer();
+	NRIBufferResource& GetCurrentDynamicPrimitiveBuffer();
+	NRIBufferResource& GetCurrentDynamicMaterialBuffer();
+	const NRIBufferResource& GetCurrentDynamicVertexBuffer() const;
+	const NRIBufferResource& GetCurrentDynamicIndexBuffer() const;
+	const NRIBufferResource& GetCurrentDynamicPrimitiveBuffer() const;
+	const NRIBufferResource& GetCurrentDynamicMaterialBuffer() const;
 	ResidentUploadScratchFrame& GetResidentUploadScratchFrame();
 	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
 	nri::DescriptorSet* GetCurrentSceneDataSet() const;
@@ -2764,10 +2783,7 @@ private:
 	std::vector<SceneInstanceData> mSelectSceneInstanceScratch;
 	std::vector<nri::TopLevelInstance> mSelectCapturedTopLevelInstanceScratch;
 	std::vector<SceneInstanceData> mSelectCapturedSceneInstanceScratch;
-	std::vector<uint8_t> mSceneUploadVertexMirror;
-	std::vector<uint8_t> mSceneUploadIndexMirror;
-	std::vector<uint8_t> mSceneUploadPrimitiveMirror;
-	std::vector<uint8_t> mSceneUploadMaterialMirror;
+	std::vector<SceneUploadBufferRingSlot> mSceneUploadBufferRing;
 	std::vector<SceneUploadDirtyRange> mSceneUploadPrimitiveDirtyRangeScratch;
 	std::vector<SceneUploadDirtyRange> mSceneUploadMaterialDirtyRangeScratch;
 	std::array<ResidentUploadScratchFrame, 3> mResidentUploadScratchFrames = {};

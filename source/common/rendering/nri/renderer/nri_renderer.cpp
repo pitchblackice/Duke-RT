@@ -9887,10 +9887,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 								mStaticIndexBuffer,
 								mStaticPrimitiveBuffer,
 								mStaticMaterialBuffer,
-								mVertexBuffer,
-								mIndexBuffer,
-								mPrimitiveBuffer,
-								mMaterialBuffer,
+								GetCurrentDynamicVertexBuffer(),
+								GetCurrentDynamicIndexBuffer(),
+								GetCurrentDynamicPrimitiveBuffer(),
+								GetCurrentDynamicMaterialBuffer(),
 								sceneInstances,
 								(uint32_t)mStaticMapScene.geometry.primitives.size(),
 								(uint32_t)overlayGeometry.primitives.size(),
@@ -10127,14 +10127,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		{
 			sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
 			buffersReady = UpdateSceneDataSet(
-				mVertexBuffer,
-				mIndexBuffer,
-				mPrimitiveBuffer,
-				mMaterialBuffer,
-				mVertexBuffer,
-				mIndexBuffer,
-				mPrimitiveBuffer,
-				mMaterialBuffer,
+				GetCurrentDynamicVertexBuffer(),
+				GetCurrentDynamicIndexBuffer(),
+				GetCurrentDynamicPrimitiveBuffer(),
+				GetCurrentDynamicMaterialBuffer(),
+				GetCurrentDynamicVertexBuffer(),
+				GetCurrentDynamicIndexBuffer(),
+				GetCurrentDynamicPrimitiveBuffer(),
+				GetCurrentDynamicMaterialBuffer(),
 				sceneInstances,
 				0u,
 				(uint32_t)capturedGeometry.primitives.size(),
@@ -10229,10 +10229,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					mStaticIndexBuffer,
 					mStaticPrimitiveBuffer,
 					mStaticMaterialBuffer,
-					mVertexBuffer,
-					mIndexBuffer,
-					mPrimitiveBuffer,
-					mMaterialBuffer,
+					GetCurrentDynamicVertexBuffer(),
+					GetCurrentDynamicIndexBuffer(),
+					GetCurrentDynamicPrimitiveBuffer(),
+					GetCurrentDynamicMaterialBuffer(),
 					mBoundSceneInstances,
 					(uint32_t)mStaticMapScene.geometry.primitives.size(),
 					(uint32_t)overlayGeometry.primitives.size(),
@@ -12059,6 +12059,13 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mIndexBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mPrimitiveBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mMaterialBuffer, telemetry.sceneBufferBytes);
+	for (const SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
+	{
+		accumulateBuffer(slot.vertexBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.indexBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.primitiveBuffer, telemetry.sceneBufferBytes);
+		accumulateBuffer(slot.materialBuffer, telemetry.sceneBufferBytes);
+	}
 	accumulateBuffer(mStaticVertexBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mStaticIndexBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mStaticPrimitiveBuffer, telemetry.sceneBufferBytes);
@@ -23486,22 +23493,22 @@ void NRIRenderer::ResetSceneBufferFrameStats()
 
 const NRIBufferResource& NRIRenderer::GetActiveVertexBuffer() const
 {
-	return mBoundDynamicPrimitiveCount > 0 ? mVertexBuffer : mStaticVertexBuffer;
+	return mBoundDynamicPrimitiveCount > 0 ? GetCurrentDynamicVertexBuffer() : mStaticVertexBuffer;
 }
 
 const NRIBufferResource& NRIRenderer::GetActiveIndexBuffer() const
 {
-	return mBoundDynamicPrimitiveCount > 0 ? mIndexBuffer : mStaticIndexBuffer;
+	return mBoundDynamicPrimitiveCount > 0 ? GetCurrentDynamicIndexBuffer() : mStaticIndexBuffer;
 }
 
 const NRIBufferResource& NRIRenderer::GetActivePrimitiveBuffer() const
 {
-	return mBoundDynamicPrimitiveCount > 0 ? mPrimitiveBuffer : mStaticPrimitiveBuffer;
+	return mBoundDynamicPrimitiveCount > 0 ? GetCurrentDynamicPrimitiveBuffer() : mStaticPrimitiveBuffer;
 }
 
 const NRIBufferResource& NRIRenderer::GetActiveMaterialBuffer() const
 {
-	return mBoundDynamicMaterialCount > 0 ? mMaterialBuffer : mStaticMaterialBuffer;
+	return mBoundDynamicMaterialCount > 0 ? GetCurrentDynamicMaterialBuffer() : mStaticMaterialBuffer;
 }
 
 void NRIRenderer::BindSceneRootDescriptors()
@@ -24668,6 +24675,74 @@ uint32_t NRIRenderer::GetCurrentQueuedFrameIndex() const
 	}
 
 	return std::min<uint32_t>(mFrameBuffer->mCurrentQueuedFrameIndex, (uint32_t)mFrameBuffer->mQueuedFrames.size() - 1u);
+}
+
+NRIRenderer::SceneUploadBufferRingSlot& NRIRenderer::GetCurrentSceneUploadBufferRingSlot()
+{
+	const uint32_t queuedFrameCount =
+		mFrameBuffer != nullptr && !mFrameBuffer->mQueuedFrames.empty() ?
+		(uint32_t)mFrameBuffer->mQueuedFrames.size() :
+		1u;
+	if (mSceneUploadBufferRing.size() < queuedFrameCount)
+	{
+		mSceneUploadBufferRing.resize(queuedFrameCount);
+	}
+
+	return mSceneUploadBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mSceneUploadBufferRing.size()];
+}
+
+const NRIRenderer::SceneUploadBufferRingSlot* NRIRenderer::GetCurrentSceneUploadBufferRingSlot() const
+{
+	if (mSceneUploadBufferRing.empty())
+	{
+		return nullptr;
+	}
+
+	return &mSceneUploadBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mSceneUploadBufferRing.size()];
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicVertexBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().vertexBuffer;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicIndexBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().indexBuffer;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicPrimitiveBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().primitiveBuffer;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicMaterialBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().materialBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicVertexBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->vertexBuffer : mVertexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicIndexBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->indexBuffer : mIndexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicPrimitiveBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->primitiveBuffer : mPrimitiveBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicMaterialBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->materialBuffer : mMaterialBuffer;
 }
 
 NRIRenderer::ResidentUploadScratchFrame& NRIRenderer::GetResidentUploadScratchFrame()
@@ -26040,19 +26115,24 @@ bool NRIRenderer::UploadSceneBuffers(
 	const std::vector<nri_scene::MaterialData>& materials,
 	const std::vector<SceneBufferUploadDomainSpan>* domainSpans)
 {
-	return UploadSceneBuffers(mVertexBuffer, mIndexBuffer, mPrimitiveBuffer, mMaterialBuffer, geometry, materials, domainSpans);
+	return UploadSceneBuffers(GetCurrentSceneUploadBufferRingSlot(), geometry, materials, domainSpans);
 }
 
 bool NRIRenderer::UploadSceneBuffers(
-	NRIBufferResource& vertexBuffer,
-	NRIBufferResource& indexBuffer,
-	NRIBufferResource& primitiveBuffer,
-	NRIBufferResource& materialBuffer,
+	SceneUploadBufferRingSlot& uploadSlot,
 	const nri_scene::GeometryData& geometry,
 	const std::vector<nri_scene::MaterialData>& materials,
 	const std::vector<SceneBufferUploadDomainSpan>* domainSpans)
 {
 	Clocker clock(NriPTSceneBuffers);
+	NRIBufferResource& vertexBuffer = uploadSlot.vertexBuffer;
+	NRIBufferResource& indexBuffer = uploadSlot.indexBuffer;
+	NRIBufferResource& primitiveBuffer = uploadSlot.primitiveBuffer;
+	NRIBufferResource& materialBuffer = uploadSlot.materialBuffer;
+	std::vector<uint8_t>& vertexMirror = uploadSlot.vertexMirror;
+	std::vector<uint8_t>& indexMirror = uploadSlot.indexMirror;
+	std::vector<uint8_t>& primitiveMirror = uploadSlot.primitiveMirror;
+	std::vector<uint8_t>& materialMirror = uploadSlot.materialMirror;
 	mVertexBufferStats.bytesUploadedLastFrame = 0;
 	mVertexBufferStats.growEventsLastFrame = 0;
 	mVertexBufferStats.overwriteEventsLastFrame = 0;
@@ -26575,7 +26655,9 @@ bool NRIRenderer::UploadSceneBuffers(
 		}
 	}
 
-	bool waitedForWrites = false;
+	// Scene upload buffers are ringed by queued frame. The frame shell waits before
+	// reusing a queued-frame slot, so the selected slot is safe to overwrite here.
+	bool waitedForWrites = true;
 	const auto notePayloadHashState =
 		[&](const NRIBufferResource& resource,
 			uint64_t payloadHash,
@@ -27055,10 +27137,10 @@ bool NRIRenderer::UploadSceneBuffers(
 	uint32_t ignoredRangeUploadCount = 0;
 
 	return
-		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, mSceneUploadVertexMirror, nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Vertex) &&
-		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, mSceneUploadIndexMirror, nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Index) &&
-		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, mSceneUploadPrimitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads, SceneUploadBufferKind::Primitive) &&
-		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, mSceneUploadMaterialMirror, &mSceneUploadMaterialDirtyRangeScratch, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads, SceneUploadBufferKind::Material);
+		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, vertexMirror, nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Vertex) &&
+		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, indexMirror, nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Index) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, primitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads, SceneUploadBufferKind::Primitive) &&
+		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materialMirror, &mSceneUploadMaterialDirtyRangeScratch, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads, SceneUploadBufferKind::Material);
 }
 
 bool NRIRenderer::BuildStaticMapAccelerationStructures()
@@ -31648,10 +31730,10 @@ bool NRIRenderer::RestoreStaticTopLevelScene()
 			mStaticIndexBuffer,
 			mStaticPrimitiveBuffer,
 			mStaticMaterialBuffer,
-			mVertexBuffer,
-			mIndexBuffer,
-			mPrimitiveBuffer,
-			mMaterialBuffer,
+			GetCurrentDynamicVertexBuffer(),
+			GetCurrentDynamicIndexBuffer(),
+			GetCurrentDynamicPrimitiveBuffer(),
+			GetCurrentDynamicMaterialBuffer(),
 			sceneInstances,
 			(uint32_t)mStaticMapScene.geometry.primitives.size(),
 			0u,
@@ -31671,10 +31753,10 @@ bool NRIRenderer::RefreshResidentStaticSceneDataSet()
 		mStaticIndexBuffer,
 		mStaticPrimitiveBuffer,
 		mStaticMaterialBuffer,
-		mVertexBuffer,
-		mIndexBuffer,
-		mPrimitiveBuffer,
-		mMaterialBuffer,
+		GetCurrentDynamicVertexBuffer(),
+		GetCurrentDynamicIndexBuffer(),
+		GetCurrentDynamicPrimitiveBuffer(),
+		GetCurrentDynamicMaterialBuffer(),
 		sceneInstances,
 		(uint32_t)mStaticMapScene.geometry.primitives.size(),
 		0u,
@@ -33326,8 +33408,8 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(
 		return false;
 	}
 	return BuildBottomLevelAccelerationStructure(
-		mVertexBuffer,
-		mIndexBuffer,
+		GetCurrentDynamicVertexBuffer(),
+		GetCurrentDynamicIndexBuffer(),
 		(uint32_t)geometry.vertices.size(),
 		indexOffset,
 		indexCount,
@@ -33783,14 +33865,16 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	}
 	if ((sceneBufferMask & SceneDataBufferMask_Dynamic) != 0)
 	{
+		const NRIBufferResource& dynamicVertexBuffer = GetCurrentDynamicVertexBuffer();
+		const NRIBufferResource& dynamicIndexBuffer = GetCurrentDynamicIndexBuffer();
 		nri::BufferBarrierDesc vertexBarrier = {};
-		vertexBarrier.buffer = mVertexBuffer.buffer;
+		vertexBarrier.buffer = dynamicVertexBuffer.buffer;
 		vertexBarrier.before = NRIAccelerationStructureBuildInputAccess();
 		vertexBarrier.after = NRIComputeShaderResourceAccess();
 		barriers.push_back(vertexBarrier);
 
 		nri::BufferBarrierDesc indexBarrier = {};
-		indexBarrier.buffer = mIndexBuffer.buffer;
+		indexBarrier.buffer = dynamicIndexBuffer.buffer;
 		indexBarrier.before = NRIAccelerationStructureBuildInputAccess();
 		indexBarrier.after = NRIComputeShaderResourceAccess();
 		barriers.push_back(indexBarrier);
@@ -35524,6 +35608,14 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mIndexBuffer);
 	DestroyBufferResource(mPrimitiveBuffer);
 	DestroyBufferResource(mMaterialBuffer);
+	for (SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
+	{
+		DestroyBufferResource(slot.vertexBuffer);
+		DestroyBufferResource(slot.indexBuffer);
+		DestroyBufferResource(slot.primitiveBuffer);
+		DestroyBufferResource(slot.materialBuffer);
+	}
+	mSceneUploadBufferRing.clear();
 	DestroyBufferResource(mTlasInstanceBuffer);
 	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
 	DestroyBufferResource(mSceneInstanceBuffer);
