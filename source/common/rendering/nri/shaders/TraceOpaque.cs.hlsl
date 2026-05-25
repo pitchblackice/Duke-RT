@@ -169,14 +169,29 @@ float3 EvaluateSunDiffuseLighting(float3 normal, float3 lightDir, float shadow)
 	return lighting.xxx;
 }
 
+float GetPackedAmbientMultiplier(uint shift)
+{
+	return (float)((gTraceConstants.PortalDepth >> shift) & 0xfffu) * (1.0 / 1024.0);
+}
+
 float GetBaseAmbientMultiplier()
 {
-	return (float)(gTraceConstants.PortalDepth >> 8u) * (1.0 / 65536.0);
+	return GetPackedAmbientMultiplier(8u);
+}
+
+float GetMetalAmbientMultiplier()
+{
+	return GetPackedAmbientMultiplier(20u);
 }
 
 float3 EvaluateAmbientDiffuse(float3 albedo)
 {
 	return albedo * GetBaseAmbientMultiplier();
+}
+
+float3 EvaluateAmbientMetal(float3 albedo, float metalness)
+{
+	return albedo * saturate(metalness) * GetMetalAmbientMultiplier();
 }
 
 float3 GetSurfaceDiffuseColor(float3 albedo, float metalness)
@@ -924,7 +939,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 				sectorSourceLighting = EvaluateSectorLightingSource(material, shadingNormal);
 				sectorAmbientLighting = EvaluateSectorLighting(material, shadingNormal, diffuseAlbedo);
-				ambientDirectLighting = EvaluateAmbientDiffuse(diffuseAlbedo) + sectorAmbientLighting;
+				ambientDirectLighting = EvaluateAmbientDiffuse(diffuseAlbedo) + EvaluateAmbientMetal(albedo.rgb, metalness) + sectorAmbientLighting;
 				sunTransportDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(diffuseAlbedo, directionalShadingNormal, lightDir) * directionalLightColor * shadow : 0.0;
 				sunTransportSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, directionalShadingNormal, viewDir, lightDir, 1.0) * directionalLightColor * shadow : 0.0;
 

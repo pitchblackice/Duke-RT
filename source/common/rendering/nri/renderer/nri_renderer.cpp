@@ -3056,6 +3056,7 @@ CVAR(Int, nri_ptbootstrapmode, 13, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptbaseambient, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptmetalambient, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -5474,10 +5475,22 @@ namespace
 		return std::max(0.0f, (float)nri_ptbaseambient);
 	}
 
-	static uint32_t PackPortalDepthAndBaseAmbient(uint32_t portalDepth, float baseAmbient)
+	static float GetMetalAmbient()
 	{
-		const uint32_t packedBaseAmbient = (uint32_t)std::min(16777215.0f, std::max(0.0f, baseAmbient) * 65536.0f + 0.5f);
-		return (portalDepth & 0xffu) | (packedBaseAmbient << 8u);
+		return std::max(0.0f, (float)nri_ptmetalambient);
+	}
+
+	static uint32_t PackAmbientMultiplier12(float value)
+	{
+		return (uint32_t)std::min(4095.0f, std::max(0.0f, value) * 1024.0f + 0.5f);
+	}
+
+	static uint32_t PackPortalDepthAndAmbientMultipliers(uint32_t portalDepth, float baseAmbient, float metalAmbient)
+	{
+		return
+			(portalDepth & 0xffu) |
+			(PackAmbientMultiplier12(baseAmbient) << 8u) |
+			(PackAmbientMultiplier12(metalAmbient) << 20u);
 	}
 
 	static uint32_t PackTraceBounceCounts(uint32_t lightBounceCount, uint32_t mirrorBounceCount, const float directionalColor[3])
@@ -35025,7 +35038,10 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		mDirectionalLightState.color);
 	constants.PortalCount = mBoundPortalCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
-	constants.PortalDepth = PackPortalDepthAndBaseAmbient(ClampTraceBounceCount((int)nri_ptportaldepth, 8u), GetBaseAmbient());
+	constants.PortalDepth = PackPortalDepthAndAmbientMultipliers(
+		ClampTraceBounceCount((int)nri_ptportaldepth, 8u),
+		GetBaseAmbient(),
+		GetMetalAmbient());
 	constants.ReservedTrace0 = (mBoundRuntimeLightTileCountX & 0xffffu) | ((mBoundRuntimeLightTileCountY & 0xffffu) << 16u);
 	constants.ReservedTrace1 = PackTraceAux1(
 		(uint32_t)GetSelectedNrdDenoiserMode(),
