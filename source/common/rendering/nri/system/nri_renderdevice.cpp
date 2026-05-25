@@ -4101,7 +4101,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.sceneSelectBufferUploadPersistentVoxelMaterialUploadedBytes,
 			shell.sceneSelectBufferUploadPersistentVoxelMaterialUploads);
 		Printf(
-			"PERF pt scene buffer dirty range detail NRI: frame=%llu dirty_range=%.3f dirty_checks=%u dirty_skips=%u dirty_forced_full=%u dirty_missing_mirror=%u dirty_size_mismatch=%u dirty_raw_ranges=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu dirty_gap=%llu dirty_reject_coalesce=%u direct_checks=%u direct_ranges=%u direct_changed=%llu direct_uploaded=%llu direct_mirror_player_ranges=%u direct_mirror_player_changed=%llu direct_mirror_player_uploaded=%llu range_uploads=%u range_upload_bytes=%llu range_fallbacks=%u range_fallback_fragmented=%u range_fallback_large=%u primitive_range_uploads=%u material_range_uploads=%u vertex_dirty_ranges=%u vertex_dirty_changed=%llu vertex_dirty_uploaded=%llu index_dirty_ranges=%u index_dirty_changed=%llu index_dirty_uploaded=%llu primitive_dirty_ranges=%u primitive_dirty_changed=%llu primitive_dirty_uploaded=%llu material_dirty_ranges=%u material_dirty_changed=%llu material_dirty_uploaded=%llu\n",
+			"PERF pt scene buffer dirty range detail NRI: frame=%llu dirty_range=%.3f dirty_checks=%u dirty_skips=%u dirty_forced_full=%u dirty_missing_mirror=%u dirty_size_mismatch=%u dirty_raw_ranges=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu dirty_gap=%llu dirty_reject_coalesce=%u range_uploads=%u range_upload_bytes=%llu range_fallbacks=%u range_fallback_fragmented=%u range_fallback_large=%u primitive_range_uploads=%u material_range_uploads=%u vertex_dirty_ranges=%u vertex_dirty_changed=%llu vertex_dirty_uploaded=%llu index_dirty_ranges=%u index_dirty_changed=%llu index_dirty_uploaded=%llu primitive_dirty_ranges=%u primitive_dirty_changed=%llu primitive_dirty_uploaded=%llu material_dirty_ranges=%u material_dirty_changed=%llu material_dirty_uploaded=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectBufferUploadDirtyRangeMs,
 			shell.sceneSelectBufferUploadDirtyRangeChecks,
@@ -4115,13 +4115,6 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			(unsigned long long)shell.sceneSelectBufferUploadDirtyRangeUploadedBytes,
 			(unsigned long long)shell.sceneSelectBufferUploadDirtyRangeGapBytes,
 			shell.sceneSelectBufferUploadDirtyRangeRejectedCoalesces,
-			shell.sceneSelectBufferUploadDirectDirtyChecks,
-			shell.sceneSelectBufferUploadDirectDirtyRanges,
-			(unsigned long long)shell.sceneSelectBufferUploadDirectDirtyChangedBytes,
-			(unsigned long long)shell.sceneSelectBufferUploadDirectDirtyUploadedBytes,
-			shell.sceneSelectBufferUploadDirectDirtyMirrorPlayerRanges,
-			(unsigned long long)shell.sceneSelectBufferUploadDirectDirtyMirrorPlayerChangedBytes,
-			(unsigned long long)shell.sceneSelectBufferUploadDirectDirtyMirrorPlayerUploadedBytes,
 			shell.sceneSelectBufferUploadRangeUploads,
 			(unsigned long long)shell.sceneSelectBufferUploadRangeUploadedBytes,
 			shell.sceneSelectBufferUploadRangeFallbacks,
@@ -4163,7 +4156,6 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			if (entry.payloadBytes == 0 &&
 				entry.uploadedBytes == 0 &&
 				entry.dirtyUploadedBytes == 0 &&
-				entry.directDirtyUploadedBytes == 0 &&
 				entry.hashChecks == 0 &&
 				entry.stampChecks == 0 &&
 				entry.waitMs <= 0.0)
@@ -4171,7 +4163,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				continue;
 			}
 			Printf(
-				"PERF pt scene buffer upload domain NRI: frame=%llu domain=%s payload_bytes=%llu vertex_payload=%llu index_payload=%llu primitive_payload=%llu material_payload=%llu hash_checks=%u hash_misses=%u stamp_checks=%u stamp_misses=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu direct_dirty_ranges=%u direct_dirty_changed=%llu direct_dirty_uploaded=%llu uploaded=%llu primitive_uploaded=%llu material_uploaded=%llu wait_ms=%.3f\n",
+				"PERF pt scene buffer upload domain NRI: frame=%llu domain=%s payload_bytes=%llu vertex_payload=%llu index_payload=%llu primitive_payload=%llu material_payload=%llu hash_checks=%u hash_misses=%u stamp_checks=%u stamp_misses=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu uploaded=%llu primitive_uploaded=%llu material_uploaded=%llu wait_ms=%.3f\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				getSceneBufferUploadDomainName(domain),
 				(unsigned long long)entry.payloadBytes,
@@ -4186,9 +4178,6 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.dirtyRanges,
 				(unsigned long long)entry.dirtyChangedBytes,
 				(unsigned long long)entry.dirtyUploadedBytes,
-				entry.directDirtyRanges,
-				(unsigned long long)entry.directDirtyChangedBytes,
-				(unsigned long long)entry.directDirtyUploadedBytes,
 				(unsigned long long)entry.uploadedBytes,
 				(unsigned long long)entry.primitiveUploadedBytes,
 				(unsigned long long)entry.materialUploadedBytes,

@@ -8987,8 +8987,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						double& materialMs,
 						uint32_t& primitiveCount,
 						uint32_t& materialCount,
-						SceneBufferUploadDomain uploadDomain,
-						bool collectDirectVertexDirtyRanges = false)
+						SceneBufferUploadDomain uploadDomain)
 				{
 					ScopedPtPerfTimer sourceTimer(totalMs);
 					primitiveCount = geometry != nullptr ? (uint32_t)geometry->primitives.size() : 0u;
@@ -9006,70 +9005,6 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						uploadSpan.primitiveCount = (uint32_t)geometry->primitives.size();
 					}
 					uploadSpan.materialCount = (uint32_t)materials.materials.size();
-					if (collectDirectVertexDirtyRanges &&
-						geometry != nullptr &&
-						!geometry->vertices.empty())
-					{
-						mLastPerfShellTraceStats.sceneSelectBufferUploadDirectDirtyChecks++;
-						const uint64_t sourceByteSize = (uint64_t)geometry->vertices.size() * sizeof(nri_scene::SceneVertex);
-						const uint64_t targetByteOffset = (uint64_t)uploadSpan.vertexOffset * sizeof(nri_scene::SceneVertex);
-						if (targetByteOffset <= mSceneUploadVertexMirror.size() &&
-							sourceByteSize <= mSceneUploadVertexMirror.size() - targetByteOffset)
-						{
-							const uint8_t* current = reinterpret_cast<const uint8_t*>(geometry->vertices.data());
-							const uint8_t* previous = mSceneUploadVertexMirror.data() + targetByteOffset;
-							const size_t byteCount = (size_t)sourceByteSize;
-							const uint64_t maxGapBytes = (uint64_t)(int)nri_ptscenebufferdirtyrangegap;
-							bool hasCoalescedRange = false;
-							size_t coalescedStart = 0;
-							size_t coalescedEnd = 0;
-							size_t cursor = 0;
-							while (cursor < byteCount)
-							{
-								while (cursor < byteCount && current[cursor] == previous[cursor])
-								{
-									cursor++;
-								}
-								if (cursor >= byteCount)
-								{
-									break;
-								}
-								const size_t rangeStart = cursor;
-								while (cursor < byteCount && current[cursor] != previous[cursor])
-								{
-									cursor++;
-								}
-								const size_t rangeEnd = cursor;
-								uploadSpan.directVertexDirtyChangedBytes += (uint64_t)(rangeEnd - rangeStart);
-								if (!hasCoalescedRange)
-								{
-									hasCoalescedRange = true;
-									coalescedStart = rangeStart;
-									coalescedEnd = rangeEnd;
-									continue;
-								}
-								const uint64_t gapBytes = (uint64_t)(rangeStart - coalescedEnd);
-								if (gapBytes <= maxGapBytes)
-								{
-									coalescedEnd = rangeEnd;
-								}
-								else
-								{
-									uploadSpan.directVertexDirtyRanges.push_back({
-										targetByteOffset + (uint64_t)coalescedStart,
-										(uint64_t)(coalescedEnd - coalescedStart) });
-									coalescedStart = rangeStart;
-									coalescedEnd = rangeEnd;
-								}
-							}
-							if (hasCoalescedRange)
-							{
-								uploadSpan.directVertexDirtyRanges.push_back({
-									targetByteOffset + (uint64_t)coalescedStart,
-									(uint64_t)(coalescedEnd - coalescedStart) });
-							}
-						}
-					}
 					if (producerStamp != nullptr)
 					{
 						const auto buildSpanStamp = [&](uint64_t sourceStamp, uint64_t offset, uint64_t count, uint64_t byteSize) -> uint64_t
@@ -9219,8 +9154,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							mLastPerfShellTraceStats.overlayMirrorPlayerMaterialMs,
 							mLastPerfShellTraceStats.overlayMirrorPlayerPrimitiveCount,
 							mLastPerfShellTraceStats.overlayMirrorPlayerMaterialCount,
-							SceneBufferUploadDomain::MirrorPlayer,
-							ShouldTracePtPerf());
+							SceneBufferUploadDomain::MirrorPlayer);
 					}
 
 					if (hasRuntimeDebugSphereOverlay)
@@ -26012,44 +25946,6 @@ bool NRIRenderer::UploadSceneBuffers(
 			}
 		}
 	};
-	const auto addDirectDirtyStats =
-		[&]()
-	{
-		if (domainSpans == nullptr)
-		{
-			return;
-		}
-		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
-		{
-			if (span.directVertexDirtyRanges.empty())
-			{
-				continue;
-			}
-			uint64_t uploadedBytes = 0;
-			for (const SceneUploadDirtyRange& range : span.directVertexDirtyRanges)
-			{
-				uploadedBytes += range.size;
-			}
-			const uint32_t rangeCount = (uint32_t)span.directVertexDirtyRanges.size();
-			mLastPerfShellTraceStats.sceneSelectBufferUploadDirectDirtyRanges += rangeCount;
-			mLastPerfShellTraceStats.sceneSelectBufferUploadDirectDirtyChangedBytes += span.directVertexDirtyChangedBytes;
-			mLastPerfShellTraceStats.sceneSelectBufferUploadDirectDirtyUploadedBytes += uploadedBytes;
-			if (span.domain == SceneBufferUploadDomain::MirrorPlayer)
-			{
-				mLastPerfShellTraceStats.sceneSelectBufferUploadDirectDirtyMirrorPlayerRanges += rangeCount;
-				mLastPerfShellTraceStats.sceneSelectBufferUploadDirectDirtyMirrorPlayerChangedBytes += span.directVertexDirtyChangedBytes;
-				mLastPerfShellTraceStats.sceneSelectBufferUploadDirectDirtyMirrorPlayerUploadedBytes += uploadedBytes;
-			}
-			auto* domain = getDomainEntry(span.domain);
-			if (domain != nullptr)
-			{
-				domain->directDirtyRanges += rangeCount;
-				domain->directDirtyChangedBytes += span.directVertexDirtyChangedBytes;
-				domain->directDirtyUploadedBytes += uploadedBytes;
-			}
-		}
-	};
-	addDirectDirtyStats();
 	const auto addDomainWait =
 		[&](SceneUploadBufferKind kind, double waitMs)
 	{
