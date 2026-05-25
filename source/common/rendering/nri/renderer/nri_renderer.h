@@ -641,6 +641,7 @@ public:
 		double dynamicCaptureStatsMs = 0.0;
 		double persistentDynamicMs = 0.0;
 		double dynamicAsMs = 0.0;
+		double dynamicAsSetupMs = 0.0;
 		double dynamicAsCreateMs = 0.0;
 		double dynamicAsScratchMs = 0.0;
 		double dynamicAsBuildMs = 0.0;
@@ -1057,12 +1058,18 @@ public:
 		uint32_t dynamicAsMirrorExtendedPrimitives = 0;
 		uint32_t dynamicAsMirrorPlayerPrimitives = 0;
 		uint32_t dynamicAsDebugSpherePrimitives = 0;
+		uint32_t dynamicAsCreateCalls = 0;
+		uint32_t dynamicAsReuseCount = 0;
+		uint32_t dynamicAsScratchQueries = 0;
+		uint32_t dynamicAsScratchGrowCount = 0;
 		uint64_t dynamicAsRuntimeSpaceLinkBytes = 0;
 		uint64_t dynamicAsRuntimeMutationBytes = 0;
 		uint64_t dynamicAsDynamicBytes = 0;
 		uint64_t dynamicAsMirrorExtendedBytes = 0;
 		uint64_t dynamicAsMirrorPlayerBytes = 0;
 		uint64_t dynamicAsDebugSphereBytes = 0;
+		uint64_t dynamicAsScratchRequestedBytes = 0;
+		uint64_t dynamicAsMemoryBytes = 0;
 		uint32_t persistentVoxelAsCalls = 0;
 		uint32_t persistentVoxelAsBuilds = 0;
 		uint32_t persistentVoxelAsUniqueMeshBuilds = 0;
@@ -2408,6 +2415,7 @@ private:
 		NRIBufferResource indexBuffer;
 		NRIBufferResource primitiveBuffer;
 		NRIBufferResource materialBuffer;
+		NRIAccelerationStructureResource dynamicBottomLevelAS;
 		std::vector<uint8_t> vertexMirror;
 		std::vector<uint8_t> indexMirror;
 		std::vector<uint8_t> primitiveMirror;
@@ -2660,12 +2668,16 @@ private:
 	NRIBufferResource& GetCurrentDynamicIndexBuffer();
 	NRIBufferResource& GetCurrentDynamicPrimitiveBuffer();
 	NRIBufferResource& GetCurrentDynamicMaterialBuffer();
+	NRIAccelerationStructureResource& GetCurrentDynamicBottomLevelAS();
 	NRIBufferResource& GetCurrentTlasInstanceBuffer();
 	const NRIBufferResource& GetCurrentDynamicVertexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicIndexBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicPrimitiveBuffer() const;
 	const NRIBufferResource& GetCurrentDynamicMaterialBuffer() const;
+	const NRIAccelerationStructureResource* GetCurrentDynamicBottomLevelAS() const;
 	const NRIBufferResource& GetCurrentTlasInstanceBuffer() const;
+	bool HasAnyDynamicBottomLevelAS() const;
+	void DestroyDynamicBottomLevelAccelerationStructures();
 	ResidentUploadScratchFrame& GetResidentUploadScratchFrame();
 	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
 	nri::DescriptorSet* GetCurrentSceneDataSet() const;
@@ -2921,7 +2933,6 @@ private:
 	PerfTraceShaderStats mLastPerfTraceShaderStats = {};
 	uint64_t mPendingTraceShaderStatsFrame = 0;
 
-	NRIAccelerationStructureResource mDynamicBottomLevelAS;
 	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 

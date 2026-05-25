@@ -21,5 +21,12 @@ struct NRIAccelerationStructureResource
 	nri::AccelerationStructure* accelerationStructure = nullptr;
 	nri::Descriptor* descriptor = nullptr;
 	uint64_t memorySize = 0;
+	uint64_t buildScratchSize = 0;
+	nri::Buffer* buildVertexBuffer = nullptr;
+	nri::Buffer* buildIndexBuffer = nullptr;
+	uint32_t buildVertexCount = 0;
+	uint32_t buildIndexOffset = 0;
+	uint32_t buildIndexCount = 0;
+	uint32_t buildPrimitiveCount = 0;
 	nri::MemoryLocation memoryLocation = nri::MemoryLocation::DEVICE;
 };

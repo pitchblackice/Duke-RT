@@ -3822,7 +3822,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectStateCommitMs;
 		const double sceneSelectUnaccountedMs = shell.sceneSelectMs - sceneSelectAccountedMs;
 		Printf(
-			"PERF pt shell detail NRI: frame=%llu static_scene=%.3f mutation=%.3f mutation_analyze=%.3f mutation_rebuild=%.3f mutation_append=%.3f mutation_candidates=%u mutation_analyzed=%u mutation_sweep=%u mutation_dirty=%u mutation_rebuilt=%u mutation_held=%u mutation_prims=%u mutation_mats=%u spacelink=%.3f spacelink_prims=%u spacelink_mats=%u debug_sphere=%.3f debug_view=%.3f debug_geo=%.3f debug_mats=%.3f debug_tune=%.3f debug_spheres=%u debug_lons=%u debug_lats=%u debug_prims=%u debug_mats_out=%u overlay=%.3f overlay_prims=%u overlay_mats=%u dynamic_capture=%.3f persistent=%.3f dynamic_as=%.3f dynamic_as_create=%.3f dynamic_as_scratch=%.3f dynamic_as_build=%.3f dynamic_as_barrier=%.3f dynamic_as_prims=%u dynamic_as_verts=%u dynamic_as_indices=%u restore_static=%.3f copy_final=%.3f\n",
+			"PERF pt shell detail NRI: frame=%llu static_scene=%.3f mutation=%.3f mutation_analyze=%.3f mutation_rebuild=%.3f mutation_append=%.3f mutation_candidates=%u mutation_analyzed=%u mutation_sweep=%u mutation_dirty=%u mutation_rebuilt=%u mutation_held=%u mutation_prims=%u mutation_mats=%u spacelink=%.3f spacelink_prims=%u spacelink_mats=%u debug_sphere=%.3f debug_view=%.3f debug_geo=%.3f debug_mats=%.3f debug_tune=%.3f debug_spheres=%u debug_lons=%u debug_lats=%u debug_prims=%u debug_mats_out=%u overlay=%.3f overlay_prims=%u overlay_mats=%u dynamic_capture=%.3f persistent=%.3f dynamic_as=%.3f dynamic_as_setup=%.3f dynamic_as_create=%.3f dynamic_as_scratch=%.3f dynamic_as_build=%.3f dynamic_as_barrier=%.3f dynamic_as_prims=%u dynamic_as_verts=%u dynamic_as_indices=%u restore_static=%.3f copy_final=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.staticSceneMs,
 			shell.runtimeMutationMs,
@@ -3856,6 +3856,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicCaptureMs,
 			shell.persistentDynamicMs,
 			shell.dynamicAsMs,
+			shell.dynamicAsSetupMs,
 			shell.dynamicAsCreateMs,
 			shell.dynamicAsScratchMs,
 			shell.dynamicAsBuildMs,
@@ -3882,9 +3883,10 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.overlayMirrorPlayerAppend.materialCount,
 			(unsigned long long)shell.overlayMirrorPlayerAppend.byteCount);
 		Printf(
-			"PERF pt dynamic as input NRI: frame=%llu total=%.3f create=%.3f scratch=%.3f build=%.3f barrier=%.3f total_prims=%u total_vertices=%u total_indices=%u spacelink_prims=%u spacelink_bytes=%llu mutation_prims=%u mutation_bytes=%llu dynamic_prims=%u dynamic_bytes=%llu mirror_ext_prims=%u mirror_ext_bytes=%llu mirror_player_prims=%u mirror_player_bytes=%llu debug_sphere_prims=%u debug_sphere_bytes=%llu\n",
+			"PERF pt dynamic as input NRI: frame=%llu total=%.3f setup=%.3f create=%.3f scratch=%.3f build=%.3f barrier=%.3f total_prims=%u total_vertices=%u total_indices=%u creates=%u reuses=%u scratch_queries=%u scratch_grows=%u scratch_requested_bytes=%llu as_bytes=%llu spacelink_prims=%u spacelink_bytes=%llu mutation_prims=%u mutation_bytes=%llu dynamic_prims=%u dynamic_bytes=%llu mirror_ext_prims=%u mirror_ext_bytes=%llu mirror_player_prims=%u mirror_player_bytes=%llu debug_sphere_prims=%u debug_sphere_bytes=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.dynamicAsMs,
+			shell.dynamicAsSetupMs,
 			shell.dynamicAsCreateMs,
 			shell.dynamicAsScratchMs,
 			shell.dynamicAsBuildMs,
@@ -3892,6 +3894,12 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicAsPrimitiveCount,
 			shell.dynamicAsVertexCount,
 			shell.dynamicAsIndexCount,
+			shell.dynamicAsCreateCalls,
+			shell.dynamicAsReuseCount,
+			shell.dynamicAsScratchQueries,
+			shell.dynamicAsScratchGrowCount,
+			(unsigned long long)shell.dynamicAsScratchRequestedBytes,
+			(unsigned long long)shell.dynamicAsMemoryBytes,
 			shell.dynamicAsRuntimeSpaceLinkPrimitives,
 			(unsigned long long)shell.dynamicAsRuntimeSpaceLinkBytes,
 			shell.dynamicAsRuntimeMutationPrimitives,
