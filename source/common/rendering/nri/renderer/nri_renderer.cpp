@@ -8664,6 +8664,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	persistentVoxelGpuMaterials.clear();
 	combinedGpuMaterials.clear();
 	refreshedCombinedGpuMaterials.clear();
+	nri_scene::ClearGeometryRetainingCapacity(mSelectMirrorPlayerGeometryScratch);
 	mSelectTopLevelInstanceScratch.clear();
 	mSelectSceneInstanceScratch.clear();
 	mSelectCapturedTopLevelInstanceScratch.clear();
@@ -8683,7 +8684,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
 	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
 	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
-	nri_scene::GeometryData mirrorPlayerGeometry;
+	nri_scene::GeometryData& mirrorPlayerGeometry = mSelectMirrorPlayerGeometryScratch;
 	MirrorPlayerCaptureStats mirrorPlayerCaptureStats = {};
 	nri_scene::GeometryBuildTraceStats mirrorPlayerGeometryTraceStats = {};
 	std::vector<SceneBufferUploadDomainSpan> sceneUploadDomainSpans;
@@ -8928,7 +8929,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMirrorPlayerMs);
 				{
 					ScopedPtPerfTimer buildTimer(mLastPerfShellTraceStats.mirrorPlayerGeometryBuildMs);
-					nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry, &mirrorPlayerGeometryTraceStats);
+					nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry, &mirrorPlayerGeometryTraceStats, true);
 				}
 				{
 					ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.mirrorPlayerPortalAssignMs);

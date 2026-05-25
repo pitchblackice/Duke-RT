@@ -209,9 +209,24 @@ namespace
 
 namespace nri_scene
 {
-void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry, GeometryBuildTraceStats* traceStats)
+void ClearGeometryRetainingCapacity(GeometryData& geometry)
 {
-	outGeometry = {};
+	geometry.vertices.clear();
+	geometry.indices.clear();
+	geometry.primitives.clear();
+	geometry.primitiveProvenance.clear();
+}
+
+void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry, GeometryBuildTraceStats* traceStats, bool retainOutputCapacity)
+{
+	if (retainOutputCapacity)
+	{
+		ClearGeometryRetainingCapacity(outGeometry);
+	}
+	else
+	{
+		outGeometry = {};
+	}
 	if (traceStats != nullptr)
 	{
 		*traceStats = {};

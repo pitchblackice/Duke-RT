@@ -2927,6 +2927,7 @@ private:
 	std::vector<nri_scene::MaterialData> mSelectPersistentVoxelGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectCombinedGpuMaterialScratch;
 	std::vector<nri_scene::MaterialData> mSelectRefreshedCombinedGpuMaterialScratch;
+	nri_scene::GeometryData mSelectMirrorPlayerGeometryScratch;
 	StateCommitCombinedGeometryCache mStateCommitCombinedGeometryCache = {};
 	std::vector<nri::TopLevelInstance> mSelectTopLevelInstanceScratch;
 	std::vector<SceneInstanceData> mSelectSceneInstanceScratch;

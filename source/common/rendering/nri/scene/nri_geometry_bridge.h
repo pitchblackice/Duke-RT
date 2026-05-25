@@ -57,5 +57,6 @@ struct GeometryBuildTraceStats
 	uint32_t provenanceCapacityGrowths = 0;
 };
 
-void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry, GeometryBuildTraceStats* traceStats = nullptr);
+void ClearGeometryRetainingCapacity(GeometryData& geometry);
+void BuildGeometry(const SceneView& sceneView, GeometryData& outGeometry, GeometryBuildTraceStats* traceStats = nullptr, bool retainOutputCapacity = false);
 }
