@@ -18099,19 +18099,6 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 		return false;
 	}
 
-	const auto buildMaterialUploadStamp = [](const PersistentVoxelMaterialVariantResource& resource, uint64_t materialSize) -> uint64_t
-	{
-		uint64_t hash = 1469598103934665603ull;
-		const uint64_t producerSignature = resource.materialSignature != 0 ? resource.materialSignature : resource.materialKeyHash;
-		hash = CoherencyHashCombine64(hash, producerSignature);
-		hash = CoherencyHashCombine64(hash, resource.materialKeyHash);
-		hash = CoherencyHashCombine64(hash, resource.materialPayloadHash);
-		hash = CoherencyHashCombine64(hash, (uint64_t)resource.materialOffset);
-		hash = CoherencyHashCombine64(hash, (uint64_t)resource.materialCount);
-		hash = CoherencyHashCombine64(hash, materialSize);
-		return hash != 0 ? hash : 1;
-	};
-
 	for (auto& pair : mPersistentVoxelMaterialVariantResources)
 	{
 		PersistentVoxelMaterialVariantResource& resource = pair.second;
@@ -18131,18 +18118,13 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 			mLastPerfShellTraceStats.sceneSelectBufferUploadDomains[(size_t)SceneBufferUploadDomain::PersistentVoxelMaterial];
 		persistentVoxelDomain.payloadBytes += materialSize;
 		persistentVoxelDomain.materialPayloadBytes += materialSize;
-		persistentVoxelDomain.stampChecks++;
-		if (resource.materialPayloadHash == 0)
-		{
-			persistentVoxelDomain.hashChecks++;
-			resource.materialPayloadHash = HashUploadPayloadBytes(actorMaterials, materialSize);
-		}
-		const uint64_t materialStamp = buildMaterialUploadStamp(resource, materialSize);
+		persistentVoxelDomain.hashChecks++;
+		const uint64_t materialHash = HashUploadPayloadBytes(actorMaterials, materialSize);
 		const bool uploadMaterials =
-			resource.materialUploadHash != materialStamp;
+			resource.materialUploadHash != materialHash;
 		if (uploadMaterials)
 		{
-			persistentVoxelDomain.stampMisses++;
+			persistentVoxelDomain.hashMisses++;
 		}
 		if (uploadMaterials)
 		{
@@ -18168,7 +18150,7 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 			}
 		}
 
-		resource.materialUploadHash = materialStamp;
+		resource.materialUploadHash = materialHash;
 		if (uploadMaterials && (bool)nri_voxelstats)
 		{
 			Printf("PERF pt voxel material variant NRI: frame=%u action=upload reason=arena-sync actor_key=0x0 mat_key=0x%llx ref_count=0 material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx upload_bytes=%llu ready=1\n",
