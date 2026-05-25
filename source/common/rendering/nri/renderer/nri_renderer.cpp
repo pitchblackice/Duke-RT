@@ -5723,6 +5723,16 @@ namespace
 			(uint64_t)materials.paletteLookup.size();
 	}
 
+	static void ClearMaterialBridgeRetainingCapacity(nri_scene::MaterialBridgeData& materials)
+	{
+		materials.materials.clear();
+		materials.lightMetadata.clear();
+		materials.textures.clear();
+		materials.paletteLookup.clear();
+		materials.paletteWidth = 256;
+		materials.paletteHeight = 256;
+	}
+
 	static void ReplaceGeometryOverlayTail(
 		const nri_scene::GeometryData& source,
 		uint32_t materialIndexOffset,
@@ -8642,7 +8652,6 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::GeometryData mirrorExtendedDynamicGeometry;
 	nri_scene::GeometryData mergedDynamicGeometry;
 	nri_scene::GeometryData debugSphereGeometry;
-	nri_scene::GeometryData overlayGeometry;
 	nri_scene::MaterialBridgeData materialBridge;
 	nri_scene::MaterialBridgeData runtimeMutationMaterialBridge;
 	nri_scene::MaterialBridgeData runtimeSpaceLinkMaterialBridge;
@@ -8652,7 +8661,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::MaterialBridgeData sceneLightMergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData mergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData debugSphereMaterialBridge;
-	nri_scene::MaterialBridgeData overlayMaterialBridge;
+	nri_scene::GeometryData& overlayGeometry = mSelectOverlayGeometryScratch;
+	nri_scene::MaterialBridgeData& overlayMaterialBridge = mSelectOverlayMaterialBridgeScratch;
 	nri_scene::MaterialBridgeData combinedMaterialBridge;
 	auto& capturedGpuMaterials = mSelectCapturedGpuMaterialScratch;
 	auto& dynamicGpuMaterials = mSelectDynamicGpuMaterialScratch;
@@ -8665,6 +8675,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	combinedGpuMaterials.clear();
 	refreshedCombinedGpuMaterials.clear();
 	nri_scene::ClearGeometryRetainingCapacity(mSelectMirrorPlayerGeometryScratch);
+	nri_scene::ClearGeometryRetainingCapacity(mSelectOverlayGeometryScratch);
+	ClearMaterialBridgeRetainingCapacity(mSelectOverlayMaterialBridgeScratch);
 	mSelectTopLevelInstanceScratch.clear();
 	mSelectSceneInstanceScratch.clear();
 	mSelectCapturedTopLevelInstanceScratch.clear();
@@ -9137,8 +9149,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.overlayAppendMs);
 				{
 					ScopedPtPerfTimer resetTimer(mLastPerfShellTraceStats.overlayAppendResetMs);
-					overlayGeometry = {};
-					overlayMaterialBridge = {};
+					nri_scene::ClearGeometryRetainingCapacity(overlayGeometry);
+					ClearMaterialBridgeRetainingCapacity(overlayMaterialBridge);
 				}
 
 				auto appendOverlaySource =
@@ -9298,6 +9310,63 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						hasMirrorExtendedDynamicOverlay ? buildProducerStamp(mirrorExtendedDynamicSceneView, mLastPerfShellTraceStats.overlayAppendMirrorExtendedStampMs) : SceneBufferUploadProducerStamp {};
 					const SceneBufferUploadProducerStamp mirrorPlayerStamp =
 						hasMirrorPlayerOverlay ? buildMirrorPlayerProducerStamp() : SceneBufferUploadProducerStamp {};
+
+					size_t reserveVertices = 0;
+					size_t reserveIndices = 0;
+					size_t reservePrimitives = 0;
+					size_t reservePrimitiveProvenance = 0;
+					size_t reserveMaterials = 0;
+					size_t reserveLightMetadata = 0;
+					size_t reserveTextures = 0;
+					size_t reservePaletteLookup = 0;
+					auto addOverlayReserve =
+						[&](const nri_scene::GeometryData* geometry, const nri_scene::MaterialBridgeData& materials)
+					{
+						if (geometry != nullptr)
+						{
+							reserveVertices += geometry->vertices.size();
+							reserveIndices += geometry->indices.size();
+							reservePrimitives += geometry->primitives.size();
+							reservePrimitiveProvenance += geometry->primitiveProvenance.size();
+						}
+						reserveMaterials += materials.materials.size();
+						reserveLightMetadata += materials.lightMetadata.size();
+						reserveTextures += materials.textures.size();
+						reservePaletteLookup += materials.paletteLookup.size();
+					};
+
+					if (hasRuntimeSpaceLinkOverlay)
+					{
+						addOverlayReserve(&runtimeSpaceLinkGeometry, runtimeSpaceLinkMaterialBridge);
+					}
+					if (hasRuntimeMutationOverlay)
+					{
+						addOverlayReserve(&runtimeMutationGeometry, runtimeMutationMaterialBridge);
+					}
+					if (hasActiveDynamicOverlay)
+					{
+						addOverlayReserve(activeDynamicGeometry, *activeDynamicMaterials);
+					}
+					if (hasMirrorExtendedDynamicOverlay)
+					{
+						addOverlayReserve(&mirrorExtendedDynamicGeometry, mirrorExtendedDynamicMaterialBridge);
+					}
+					if (hasMirrorPlayerOverlay)
+					{
+						addOverlayReserve(&mirrorPlayerGeometry, mirrorPlayerMaterialBridge);
+					}
+					if (hasRuntimeDebugSphereOverlay)
+					{
+						addOverlayReserve(&debugSphereGeometry, debugSphereMaterialBridge);
+					}
+					overlayGeometry.vertices.reserve(reserveVertices);
+					overlayGeometry.indices.reserve(reserveIndices);
+					overlayGeometry.primitives.reserve(reservePrimitives);
+					overlayGeometry.primitiveProvenance.reserve(reservePrimitiveProvenance);
+					overlayMaterialBridge.materials.reserve(reserveMaterials);
+					overlayMaterialBridge.lightMetadata.reserve(reserveLightMetadata);
+					overlayMaterialBridge.textures.reserve(reserveTextures);
+					overlayMaterialBridge.paletteLookup.reserve(reservePaletteLookup);
 
 					if (hasRuntimeSpaceLinkOverlay)
 					{
