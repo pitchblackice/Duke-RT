@@ -10020,10 +10020,6 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 				{
 					ScopedPtPerfTimer geometryStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStateMs);
-					if (residentStaticWorldGeometryChanged)
-					{
-						mStateCommitCombinedGeometryCache.staticPrefixValid = false;
-					}
 					if (!overlayGeometry.primitives.empty())
 					{
 						auto& combinedGeometryCache = mStateCommitCombinedGeometryCache;
@@ -26249,6 +26245,121 @@ bool NRIRenderer::FlushRuntimeMutationResidentGeometryUploadRanges()
 	return true;
 }
 
+void NRIRenderer::RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices)
+{
+	auto& cache = mStateCommitCombinedGeometryCache;
+	if (!cache.staticPrefixValid)
+	{
+		return;
+	}
+	if (cache.staticBuildSerial != mStaticMapScene.buildSerial)
+	{
+		cache.staticPrefixValid = false;
+		return;
+	}
+
+	nri_scene::GeometryData& destination = cache.geometry;
+	const nri_scene::GeometryData& source = mStaticMapScene.geometry;
+	if (destination.vertices.size() < cache.staticVertexCount ||
+		destination.indices.size() < cache.staticIndexCount ||
+		destination.primitives.size() < cache.staticPrimitiveCount ||
+		destination.primitiveProvenance.size() < cache.staticPrimitiveProvenanceCount)
+	{
+		cache.staticPrefixValid = false;
+		return;
+	}
+
+	const uint32_t staticVertexCount = (uint32_t)source.vertices.size();
+	const uint32_t staticIndexCount = (uint32_t)source.indices.size();
+	const uint32_t staticPrimitiveCount = (uint32_t)source.primitives.size();
+	const uint32_t staticPrimitiveProvenanceCount = (uint32_t)source.primitiveProvenance.size();
+	const uint32_t staticMaterialCount = (uint32_t)mStaticMapScene.materialBridge.materials.size();
+	const bool prefixSizeChanged =
+		cache.staticVertexCount != staticVertexCount ||
+		cache.staticIndexCount != staticIndexCount ||
+		cache.staticPrimitiveCount != staticPrimitiveCount ||
+		cache.staticPrimitiveProvenanceCount != staticPrimitiveProvenanceCount;
+	if (prefixSizeChanged)
+	{
+		destination.vertices.resize(cache.staticVertexCount);
+		destination.indices.resize(cache.staticIndexCount);
+		destination.primitives.resize(cache.staticPrimitiveCount);
+		destination.primitiveProvenance.resize(cache.staticPrimitiveProvenanceCount);
+		destination.vertices.resize(staticVertexCount);
+		destination.indices.resize(staticIndexCount);
+		destination.primitives.resize(staticPrimitiveCount);
+		destination.primitiveProvenance.resize(staticPrimitiveProvenanceCount);
+		cache.staticVertexCount = staticVertexCount;
+		cache.staticIndexCount = staticIndexCount;
+		cache.staticPrimitiveCount = staticPrimitiveCount;
+		cache.staticPrimitiveProvenanceCount = staticPrimitiveProvenanceCount;
+	}
+	cache.staticMaterialCount = staticMaterialCount;
+
+	for (uint32_t chunkListIndex : changedGeometryChunkListIndices)
+	{
+		if (chunkListIndex >= mStaticMapScene.chunks.size())
+		{
+			cache.staticPrefixValid = false;
+			return;
+		}
+		const StaticMapSceneCache::ChunkCache& chunk = mStaticMapScene.chunks[chunkListIndex];
+		if (!chunk.active)
+		{
+			continue;
+		}
+		if (chunk.vertexOffset > source.vertices.size() ||
+			chunk.vertexCount > source.vertices.size() - chunk.vertexOffset ||
+			chunk.vertexOffset > destination.vertices.size() ||
+			chunk.vertexCount > destination.vertices.size() - chunk.vertexOffset ||
+			chunk.indexOffset > source.indices.size() ||
+			chunk.indexCount > source.indices.size() - chunk.indexOffset ||
+			chunk.indexOffset > destination.indices.size() ||
+			chunk.indexCount > destination.indices.size() - chunk.indexOffset ||
+			chunk.primitiveOffset > source.primitives.size() ||
+			chunk.primitiveCount > source.primitives.size() - chunk.primitiveOffset ||
+			chunk.primitiveOffset > destination.primitives.size() ||
+			chunk.primitiveCount > destination.primitives.size() - chunk.primitiveOffset)
+		{
+			cache.staticPrefixValid = false;
+			return;
+		}
+
+		if (chunk.vertexCount != 0)
+		{
+			std::copy_n(
+				source.vertices.data() + chunk.vertexOffset,
+				chunk.vertexCount,
+				destination.vertices.data() + chunk.vertexOffset);
+		}
+		if (chunk.indexCount != 0)
+		{
+			std::copy_n(
+				source.indices.data() + chunk.indexOffset,
+				chunk.indexCount,
+				destination.indices.data() + chunk.indexOffset);
+		}
+		if (chunk.primitiveCount != 0)
+		{
+			std::copy_n(
+				source.primitives.data() + chunk.primitiveOffset,
+				chunk.primitiveCount,
+				destination.primitives.data() + chunk.primitiveOffset);
+		}
+		if (chunk.primitiveOffset <= source.primitiveProvenance.size() &&
+			chunk.primitiveCount <= source.primitiveProvenance.size() - chunk.primitiveOffset &&
+			chunk.primitiveOffset <= destination.primitiveProvenance.size() &&
+			chunk.primitiveCount <= destination.primitiveProvenance.size() - chunk.primitiveOffset &&
+			chunk.primitiveCount != 0)
+		{
+			std::copy_n(
+				source.primitiveProvenance.data() + chunk.primitiveOffset,
+				chunk.primitiveCount,
+				destination.primitiveProvenance.data() + chunk.primitiveOffset);
+		}
+	}
+}
+
 void NRIRenderer::RetireResidentBufferResource(NRIBufferResource& resource)
 {
 	if (resource.buffer == nullptr && resource.shaderView == nullptr)
@@ -31575,6 +31686,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mStaticMapScene.gpuUploadCount += residentMaterialDirty ? 1u : 0u;
 			mStaticMapScene.accelerationBuildCount += (uint32_t)residentGeometryChunkListIndices.size();
 			SyncResidentMapChunkRegistryFromStaticScene();
+			RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(residentGeometryChunkListIndices);
 			if (outResidentStaticSceneChanged != nullptr)
 			{
 				*outResidentStaticSceneChanged = residentGeometryDirty;

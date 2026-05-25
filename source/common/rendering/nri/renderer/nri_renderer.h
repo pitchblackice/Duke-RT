@@ -2738,6 +2738,7 @@ private:
 	bool FlushRuntimeMutationResidentGeometryUploadRanges();
 	bool StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges);
 	bool StagePersistentVoxelMaterialUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges, const uint8_t* data, uint64_t availableBytes);
+	void RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices);
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
