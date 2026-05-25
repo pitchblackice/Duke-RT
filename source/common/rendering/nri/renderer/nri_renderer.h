@@ -315,11 +315,14 @@ public:
 			uint64_t materialUploadedBytes = 0;
 			uint64_t dirtyChangedBytes = 0;
 			uint64_t dirtyUploadedBytes = 0;
+			uint64_t directDirtyChangedBytes = 0;
+			uint64_t directDirtyUploadedBytes = 0;
 			uint32_t hashChecks = 0;
 			uint32_t hashMisses = 0;
 			uint32_t stampChecks = 0;
 			uint32_t stampMisses = 0;
 			uint32_t dirtyRanges = 0;
+			uint32_t directDirtyRanges = 0;
 			double waitMs = 0.0;
 		};
 
@@ -513,6 +516,9 @@ public:
 		uint32_t sceneSelectBufferUploadRangeFallbackLarge = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRangeUploads = 0;
 		uint32_t sceneSelectBufferUploadMaterialRangeUploads = 0;
+		uint32_t sceneSelectBufferUploadDirectDirtyChecks = 0;
+		uint32_t sceneSelectBufferUploadDirectDirtyRanges = 0;
+		uint32_t sceneSelectBufferUploadDirectDirtyMirrorPlayerRanges = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheChecks = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheHits = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveRewriteCacheMisses = 0;
@@ -538,6 +544,10 @@ public:
 		uint64_t sceneSelectBufferUploadDirtyRangeChangedBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeGapBytes = 0;
+		uint64_t sceneSelectBufferUploadDirectDirtyChangedBytes = 0;
+		uint64_t sceneSelectBufferUploadDirectDirtyUploadedBytes = 0;
+		uint64_t sceneSelectBufferUploadDirectDirtyMirrorPlayerChangedBytes = 0;
+		uint64_t sceneSelectBufferUploadDirectDirtyMirrorPlayerUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadVertexDirtyChangedBytes = 0;
 		uint64_t sceneSelectBufferUploadIndexDirtyChangedBytes = 0;
 		uint64_t sceneSelectBufferUploadPrimitiveDirtyChangedBytes = 0;
@@ -1410,6 +1420,8 @@ private:
 		uint32_t materialOffset = 0;
 		uint32_t materialCount = 0;
 		SceneBufferUploadProducerStamp stamp = {};
+		std::vector<SceneUploadDirtyRange> directVertexDirtyRanges;
+		uint64_t directVertexDirtyChangedBytes = 0;
 	};
 
 	struct SurfaceProbeResult
