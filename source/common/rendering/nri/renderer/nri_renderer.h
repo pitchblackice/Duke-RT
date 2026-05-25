@@ -592,6 +592,25 @@ public:
 		uint32_t sceneSelectStateCommitStatsMirrorPlayer = 0;
 		uint32_t sceneSelectStateCommitCombinedPrimitiveCount = 0;
 		uint32_t sceneSelectStateCommitCombinedMaterialCount = 0;
+		uint64_t sceneSelectStateCommitGenStaticMap = 0;
+		uint64_t sceneSelectStateCommitGenRuntimeMutation = 0;
+		uint64_t sceneSelectStateCommitGenDynamicActors = 0;
+		uint64_t sceneSelectStateCommitGenMirrorPlayer = 0;
+		uint64_t sceneSelectStateCommitGenPersistentVoxels = 0;
+		uint64_t sceneSelectStateCommitGenMaterialBridge = 0;
+		uint64_t sceneSelectStateCommitGenTextures = 0;
+		uint64_t sceneSelectStateCommitGenTlasInstances = 0;
+		uint64_t sceneSelectStateCommitGenSceneConstants = 0;
+		uint32_t sceneSelectStateCommitChangedStaticMap = 0;
+		uint32_t sceneSelectStateCommitChangedRuntimeMutation = 0;
+		uint32_t sceneSelectStateCommitChangedDynamicActors = 0;
+		uint32_t sceneSelectStateCommitChangedMirrorPlayer = 0;
+		uint32_t sceneSelectStateCommitChangedPersistentVoxels = 0;
+		uint32_t sceneSelectStateCommitChangedMaterialBridge = 0;
+		uint32_t sceneSelectStateCommitChangedTextures = 0;
+		uint32_t sceneSelectStateCommitChangedTlasInstances = 0;
+		uint32_t sceneSelectStateCommitChangedSceneConstants = 0;
+		uint32_t sceneSelectStateCommitChangedDomainCount = 0;
 		double dynamicCaptureCountMs = 0.0;
 		double dynamicCaptureWallsMs = 0.0;
 		double dynamicCaptureFlatsMs = 0.0;
@@ -1862,6 +1881,19 @@ private:
 		std::vector<ActorEntry> actors;
 	};
 
+	struct StateCommitDomainGenerations
+	{
+		uint64_t staticMap = 0;
+		uint64_t runtimeMutation = 0;
+		uint64_t dynamicActors = 0;
+		uint64_t mirrorPlayer = 0;
+		uint64_t persistentVoxels = 0;
+		uint64_t materialBridge = 0;
+		uint64_t textures = 0;
+		uint64_t tlasInstances = 0;
+		uint64_t sceneConstants = 0;
+	};
+
 	struct PersistentVoxelMeshVariantResource
 	{
 		uint64_t resourceKey = 0;
@@ -2872,6 +2904,8 @@ private:
 	uint64_t mPersistentVoxelResidencyLastBuildSerial = 0;
 	bool mPersistentVoxelLoadingWarmupActive = false;
 	bool mPersistentVoxelPreloadPending = false;
+	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};
+	bool mHasLastStateCommitDomainGenerations = false;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};

@@ -4302,6 +4302,28 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectStateCommitCombinedPrimitiveCount,
 			shell.sceneSelectStateCommitCombinedMaterialCount);
 		Printf(
+			"PERF pt state commit generations NRI: frame=%llu changed_domains=%u static_map_gen=%llu static_map_changed=%u runtime_mutation_gen=%llu runtime_mutation_changed=%u dynamic_actors_gen=%llu dynamic_actors_changed=%u mirror_player_gen=%llu mirror_player_changed=%u persistent_voxels_gen=%llu persistent_voxels_changed=%u material_bridge_gen=%llu material_bridge_changed=%u textures_gen=%llu textures_changed=%u tlas_instances_gen=%llu tlas_instances_changed=%u scene_constants_gen=%llu scene_constants_changed=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.sceneSelectStateCommitChangedDomainCount,
+			(unsigned long long)shell.sceneSelectStateCommitGenStaticMap,
+			shell.sceneSelectStateCommitChangedStaticMap,
+			(unsigned long long)shell.sceneSelectStateCommitGenRuntimeMutation,
+			shell.sceneSelectStateCommitChangedRuntimeMutation,
+			(unsigned long long)shell.sceneSelectStateCommitGenDynamicActors,
+			shell.sceneSelectStateCommitChangedDynamicActors,
+			(unsigned long long)shell.sceneSelectStateCommitGenMirrorPlayer,
+			shell.sceneSelectStateCommitChangedMirrorPlayer,
+			(unsigned long long)shell.sceneSelectStateCommitGenPersistentVoxels,
+			shell.sceneSelectStateCommitChangedPersistentVoxels,
+			(unsigned long long)shell.sceneSelectStateCommitGenMaterialBridge,
+			shell.sceneSelectStateCommitChangedMaterialBridge,
+			(unsigned long long)shell.sceneSelectStateCommitGenTextures,
+			shell.sceneSelectStateCommitChangedTextures,
+			(unsigned long long)shell.sceneSelectStateCommitGenTlasInstances,
+			shell.sceneSelectStateCommitChangedTlasInstances,
+			(unsigned long long)shell.sceneSelectStateCommitGenSceneConstants,
+			shell.sceneSelectStateCommitChangedSceneConstants);
+		Printf(
 			"PERF pt dynamic capture detail NRI: frame=%llu calls=%u walls=%u flats=%u sprites=%u voxel_proxies=%u unsupported_models=%u voxel_stores=%u voxel_rebuilds=%u voxel_deferred=%u mesh_builds=%u mesh_deferred=%u mesh_invalid=%u count=%.3f wall=%.3f flat=%.3f facing=%.3f model=%.3f model_classify=%.3f model_mesh=%.3f model_surface=%.3f model_store=%.3f voxel_frame=%.3f stats=%.3f\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.dynamicCaptureCalls,
