@@ -5378,6 +5378,34 @@ namespace
 		return std::max<uint64_t>(newCapacity, stride);
 	}
 
+	static uint64_t GetSceneUploadGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride)
+	{
+		const uint64_t minimumCapacity = std::max<uint64_t>(requiredSize, stride);
+		if (currentCapacity >= minimumCapacity && currentCapacity != 0)
+		{
+			return currentCapacity;
+		}
+		if (currentCapacity == 0)
+		{
+			return minimumCapacity;
+		}
+
+		uint64_t newCapacity = std::max<uint64_t>(currentCapacity, stride);
+		while (newCapacity < minimumCapacity)
+		{
+			const uint64_t doubled =
+				newCapacity <= std::numeric_limits<uint64_t>::max() / 2 ?
+				newCapacity * 2 :
+				std::numeric_limits<uint64_t>::max();
+			if (doubled <= newCapacity)
+			{
+				return minimumCapacity;
+			}
+			newCapacity = doubled;
+		}
+		return newCapacity;
+	}
+
 	static float Clamp01(float value)
 	{
 		return std::max(0.0f, std::min(value, 1.0f));
@@ -23430,15 +23458,27 @@ void NRIRenderer::ResetSceneBufferFrameStats()
 	mVertexBufferStats.bytesUploadedLastFrame = 0;
 	mVertexBufferStats.growEventsLastFrame = 0;
 	mVertexBufferStats.overwriteEventsLastFrame = 0;
+	mVertexBufferStats.growthOldBytesLastFrame = 0;
+	mVertexBufferStats.growthRequestedBytesLastFrame = 0;
+	mVertexBufferStats.growthAllocatedBytesLastFrame = 0;
 	mIndexBufferStats.bytesUploadedLastFrame = 0;
 	mIndexBufferStats.growEventsLastFrame = 0;
 	mIndexBufferStats.overwriteEventsLastFrame = 0;
+	mIndexBufferStats.growthOldBytesLastFrame = 0;
+	mIndexBufferStats.growthRequestedBytesLastFrame = 0;
+	mIndexBufferStats.growthAllocatedBytesLastFrame = 0;
 	mPrimitiveBufferStats.bytesUploadedLastFrame = 0;
 	mPrimitiveBufferStats.growEventsLastFrame = 0;
 	mPrimitiveBufferStats.overwriteEventsLastFrame = 0;
+	mPrimitiveBufferStats.growthOldBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthRequestedBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthAllocatedBytesLastFrame = 0;
 	mMaterialBufferStats.bytesUploadedLastFrame = 0;
 	mMaterialBufferStats.growEventsLastFrame = 0;
 	mMaterialBufferStats.overwriteEventsLastFrame = 0;
+	mMaterialBufferStats.growthOldBytesLastFrame = 0;
+	mMaterialBufferStats.growthRequestedBytesLastFrame = 0;
+	mMaterialBufferStats.growthAllocatedBytesLastFrame = 0;
 	mPortalBufferStats.bytesUploadedLastFrame = 0;
 	mPortalBufferStats.growEventsLastFrame = 0;
 	mPortalBufferStats.overwriteEventsLastFrame = 0;
@@ -24969,13 +25009,23 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 	stats.bytesUploadedLastFrame = size;
 	stats.growEventsLastFrame = 0;
 	stats.overwriteEventsLastFrame = 0;
+	stats.growthOldBytesLastFrame = 0;
+	stats.growthRequestedBytesLastFrame = 0;
+	stats.growthAllocatedBytesLastFrame = 0;
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
 	NotePerfBufferUpload(&stats, size, needsGrowth, waitReason, -1);
 
 	if (needsGrowth)
 	{
-		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
+		const bool isSceneBufferUpload =
+			waitReason != nullptr &&
+			std::strcmp(waitReason, "scene_buffer_upload") == 0;
+		const uint64_t oldSize = resource.size;
+		const uint64_t grownSize =
+			isSceneBufferUpload ?
+			GetSceneUploadGrownBufferSize(resource.size, requiredSize, stride) :
+			GetGrownBufferSize(resource.size, requiredSize, stride);
 		if (!writesQuiesced && (resource.buffer != nullptr || resource.shaderView != nullptr))
 		{
 			WaitForCommandsTracked(waitReason);
@@ -25013,6 +25063,9 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 
 		stats.growthCount++;
 		stats.growEventsLastFrame = 1;
+		stats.growthOldBytesLastFrame = oldSize;
+		stats.growthRequestedBytesLastFrame = requiredSize;
+		stats.growthAllocatedBytesLastFrame = desc.size;
 	}
 	else
 	{
@@ -25037,6 +25090,10 @@ bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBuffe
 		}
 
 		std::memcpy(mapped, data, (size_t)size);
+		if (needsGrowth && resource.size > size)
+		{
+			std::memset(static_cast<uint8_t*>(mapped) + size, 0, (size_t)(resource.size - size));
+		}
 		mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
 	}
 
@@ -25911,12 +25968,16 @@ bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, Sc
 	stats.bytesUploadedLastFrame = size;
 	stats.growEventsLastFrame = 0;
 	stats.overwriteEventsLastFrame = 0;
+	stats.growthOldBytesLastFrame = 0;
+	stats.growthRequestedBytesLastFrame = 0;
+	stats.growthAllocatedBytesLastFrame = 0;
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
 	NotePerfBufferUpload(&stats, size, needsGrowth, waitReason, uploadKind);
 
 	if (needsGrowth)
 	{
+		const uint64_t oldSize = resource.size;
 		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
 		NRIBufferResource oldResource = resource;
 		NRIBufferResource newResource = {};
@@ -25951,6 +26012,9 @@ bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, Sc
 		RetireResidentBufferResource(oldResource);
 		stats.growthCount++;
 		stats.growEventsLastFrame = 1;
+		stats.growthOldBytesLastFrame = oldSize;
+		stats.growthRequestedBytesLastFrame = requiredSize;
+		stats.growthAllocatedBytesLastFrame = grownSize;
 		return true;
 	}
 	else
@@ -25992,15 +26056,27 @@ bool NRIRenderer::UploadSceneBuffers(
 	mVertexBufferStats.bytesUploadedLastFrame = 0;
 	mVertexBufferStats.growEventsLastFrame = 0;
 	mVertexBufferStats.overwriteEventsLastFrame = 0;
+	mVertexBufferStats.growthOldBytesLastFrame = 0;
+	mVertexBufferStats.growthRequestedBytesLastFrame = 0;
+	mVertexBufferStats.growthAllocatedBytesLastFrame = 0;
 	mIndexBufferStats.bytesUploadedLastFrame = 0;
 	mIndexBufferStats.growEventsLastFrame = 0;
 	mIndexBufferStats.overwriteEventsLastFrame = 0;
+	mIndexBufferStats.growthOldBytesLastFrame = 0;
+	mIndexBufferStats.growthRequestedBytesLastFrame = 0;
+	mIndexBufferStats.growthAllocatedBytesLastFrame = 0;
 	mPrimitiveBufferStats.bytesUploadedLastFrame = 0;
 	mPrimitiveBufferStats.growEventsLastFrame = 0;
 	mPrimitiveBufferStats.overwriteEventsLastFrame = 0;
+	mPrimitiveBufferStats.growthOldBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthRequestedBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthAllocatedBytesLastFrame = 0;
 	mMaterialBufferStats.bytesUploadedLastFrame = 0;
 	mMaterialBufferStats.growEventsLastFrame = 0;
 	mMaterialBufferStats.overwriteEventsLastFrame = 0;
+	mMaterialBufferStats.growthOldBytesLastFrame = 0;
+	mMaterialBufferStats.growthRequestedBytesLastFrame = 0;
+	mMaterialBufferStats.growthAllocatedBytesLastFrame = 0;
 	{
 		mLastPerfShellTraceStats.sceneSelectBufferUploadVertexRequestedBytes = geometry.vertices.size() * sizeof(nri_scene::SceneVertex);
 		mLastPerfShellTraceStats.sceneSelectBufferUploadIndexRequestedBytes = geometry.indices.size() * sizeof(uint32_t);
@@ -26205,6 +26281,43 @@ bool NRIRenderer::UploadSceneBuffers(
 			if (domain != nullptr)
 			{
 				domain->waitMs += waitMs * ((double)size / (double)totalBytes);
+			}
+		}
+	};
+	const auto addDomainGrowth =
+		[&](SceneUploadBufferKind kind, uint64_t requestedBytes, uint64_t allocatedBytes)
+	{
+		if (domainSpans == nullptr || requestedBytes == 0 || allocatedBytes == 0)
+		{
+			return;
+		}
+		uint64_t totalBytes = 0;
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			totalBytes += size;
+		}
+		if (totalBytes == 0)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain != nullptr)
+			{
+				domain->growthEvents++;
+				domain->growthRequestedBytes += (uint64_t)((double)requestedBytes * ((double)size / (double)totalBytes));
+				domain->growthAllocatedBytes += (uint64_t)((double)allocatedBytes * ((double)size / (double)totalBytes));
 			}
 		}
 	};
@@ -26743,6 +26856,9 @@ bool NRIRenderer::UploadSceneBuffers(
 		stats.bytesUploadedLastFrame = rangeBytes;
 		stats.growEventsLastFrame = 0;
 		stats.overwriteEventsLastFrame = 1;
+		stats.growthOldBytesLastFrame = 0;
+		stats.growthRequestedBytesLastFrame = 0;
+		stats.growthAllocatedBytesLastFrame = 0;
 		stats.uploadCount++;
 		stats.overwriteCount++;
 		stats.peakUsedBytes = std::max(stats.peakUsedBytes, bufferSize);
@@ -26905,6 +27021,19 @@ bool NRIRenderer::UploadSceneBuffers(
 		overwriteEvents = stats.overwriteEventsLastFrame;
 		if (result)
 		{
+			if (stats.growEventsLastFrame != 0)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthEvents += stats.growEventsLastFrame;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthOldBytes += stats.growthOldBytesLastFrame;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthRequestedBytes += stats.growthRequestedBytesLastFrame;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthAllocatedBytes += stats.growthAllocatedBytesLastFrame;
+				if (stats.growthAllocatedBytesLastFrame > stats.growthRequestedBytesLastFrame)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthHeadroomBytes +=
+						stats.growthAllocatedBytesLastFrame - stats.growthRequestedBytesLastFrame;
+				}
+				addDomainGrowth(bufferKind, stats.growthRequestedBytesLastFrame, stats.growthAllocatedBytesLastFrame);
+			}
 			resource.payloadHash = payloadHash;
 			resource.payloadSize = bufferSize;
 			resource.payloadStride = bufferStride;

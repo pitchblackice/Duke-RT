@@ -4020,7 +4020,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectTexturePrepMs,
 			shell.sceneSelectStateCommitMs);
 		Printf(
-			"PERF pt scene buffer upload detail NRI: frame=%llu total=%.3f primitive_rewrite=%.3f rewrite_primitive_hash=%.3f rewrite_provenance_hash=%.3f rewrite_visibility_hash=%.3f rewrite_copy=%.3f rewrite_resolve=%.3f rewrite_store=%.3f rewrite_resolve_prims=%u rewrite_resolve_mapchunk=%u rewrite_resolve_sector=%u rewrite_resolve_sector_miss=%u rewrite_cache_checks=%u rewrite_cache_hits=%u rewrite_cache_misses=%u rewrite_cache_invalid=%u rewrite_cache_primitive=%u rewrite_cache_provenance=%u rewrite_cache_visibility=%u rewrite_cache_count=%u payload_hash=%.3f hash_checks=%u hash_hits=%u hash_skips=%u hash_misses=%u hash_uploads=%u hash_reject_missing=%u hash_reject_size=%u hash_reject_stride=%u hash_reject_forced=%u vertex_hash_hits=%u index_hash_hits=%u primitive_hash_hits=%u material_hash_hits=%u vertex_hash_skips=%u index_hash_skips=%u primitive_hash_skips=%u material_hash_skips=%u vertex_hash_misses=%u index_hash_misses=%u primitive_hash_misses=%u material_hash_misses=%u producer_stamp_checks=%u producer_stamp_uses=%u producer_stamp_fallbacks=%u producer_stamp_rewrite_primitive=%u producer_stamp_rewrite_provenance=%u producer_stamp_vertex=%u producer_stamp_index=%u producer_stamp_primitive=%u producer_stamp_material=%u wait_check=%.3f wait=%.3f wait_count=%u vertex_ms=%.3f vertex_requested=%llu vertex_uploaded=%llu vertex_grow=%u vertex_overwrite=%u index_ms=%.3f index_requested=%llu index_uploaded=%llu index_grow=%u index_overwrite=%u primitive_ms=%.3f primitive_requested=%llu primitive_uploaded=%llu primitive_grow=%u primitive_overwrite=%u material_ms=%.3f material_requested=%llu material_uploaded=%llu material_grow=%u material_overwrite=%u persistent_voxel_material_ms=%.3f persistent_voxel_material_requested=%llu persistent_voxel_material_dirty=%llu persistent_voxel_material_uploaded=%llu persistent_voxel_material_uploads=%u persistent_voxel_material_batches=%u persistent_voxel_material_batch_ranges=%u persistent_voxel_material_batch_rejects=%u persistent_voxel_material_batch_copies=%u persistent_voxel_material_batch_barriers=%u persistent_voxel_material_batch_gap=%llu\n",
+			"PERF pt scene buffer upload detail NRI: frame=%llu total=%.3f primitive_rewrite=%.3f rewrite_primitive_hash=%.3f rewrite_provenance_hash=%.3f rewrite_visibility_hash=%.3f rewrite_copy=%.3f rewrite_resolve=%.3f rewrite_store=%.3f rewrite_resolve_prims=%u rewrite_resolve_mapchunk=%u rewrite_resolve_sector=%u rewrite_resolve_sector_miss=%u rewrite_cache_checks=%u rewrite_cache_hits=%u rewrite_cache_misses=%u rewrite_cache_invalid=%u rewrite_cache_primitive=%u rewrite_cache_provenance=%u rewrite_cache_visibility=%u rewrite_cache_count=%u payload_hash=%.3f hash_checks=%u hash_hits=%u hash_skips=%u hash_misses=%u hash_uploads=%u hash_reject_missing=%u hash_reject_size=%u hash_reject_stride=%u hash_reject_forced=%u vertex_hash_hits=%u index_hash_hits=%u primitive_hash_hits=%u material_hash_hits=%u vertex_hash_skips=%u index_hash_skips=%u primitive_hash_skips=%u material_hash_skips=%u vertex_hash_misses=%u index_hash_misses=%u primitive_hash_misses=%u material_hash_misses=%u producer_stamp_checks=%u producer_stamp_uses=%u producer_stamp_fallbacks=%u producer_stamp_rewrite_primitive=%u producer_stamp_rewrite_provenance=%u producer_stamp_vertex=%u producer_stamp_index=%u producer_stamp_primitive=%u producer_stamp_material=%u wait_check=%.3f wait=%.3f wait_count=%u growth_events=%u growth_old=%llu growth_requested=%llu growth_allocated=%llu growth_headroom=%llu vertex_ms=%.3f vertex_requested=%llu vertex_uploaded=%llu vertex_grow=%u vertex_overwrite=%u index_ms=%.3f index_requested=%llu index_uploaded=%llu index_grow=%u index_overwrite=%u primitive_ms=%.3f primitive_requested=%llu primitive_uploaded=%llu primitive_grow=%u primitive_overwrite=%u material_ms=%.3f material_requested=%llu material_uploaded=%llu material_grow=%u material_overwrite=%u persistent_voxel_material_ms=%.3f persistent_voxel_material_requested=%llu persistent_voxel_material_dirty=%llu persistent_voxel_material_uploaded=%llu persistent_voxel_material_uploads=%u persistent_voxel_material_batches=%u persistent_voxel_material_batch_ranges=%u persistent_voxel_material_batch_rejects=%u persistent_voxel_material_batch_copies=%u persistent_voxel_material_batch_barriers=%u persistent_voxel_material_batch_gap=%llu\n",
 			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 			shell.sceneSelectBufferUploadMs,
 			shell.sceneSelectBufferUploadPrimitiveRewriteMs,
@@ -4076,6 +4076,11 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.sceneSelectBufferUploadWaitCheckMs,
 			shell.sceneSelectBufferUploadWaitMs,
 			shell.sceneSelectBufferUploadWaitCount,
+			shell.sceneSelectBufferUploadGrowthEvents,
+			(unsigned long long)shell.sceneSelectBufferUploadGrowthOldBytes,
+			(unsigned long long)shell.sceneSelectBufferUploadGrowthRequestedBytes,
+			(unsigned long long)shell.sceneSelectBufferUploadGrowthAllocatedBytes,
+			(unsigned long long)shell.sceneSelectBufferUploadGrowthHeadroomBytes,
 			shell.sceneSelectBufferUploadVertexMs,
 			(unsigned long long)shell.sceneSelectBufferUploadVertexRequestedBytes,
 			(unsigned long long)shell.sceneSelectBufferUploadVertexUploadedBytes,
@@ -4163,6 +4168,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			if (entry.payloadBytes == 0 &&
 				entry.uploadedBytes == 0 &&
 				entry.dirtyUploadedBytes == 0 &&
+				entry.growthEvents == 0 &&
 				entry.hashChecks == 0 &&
 				entry.stampChecks == 0 &&
 				entry.waitMs <= 0.0)
@@ -4170,7 +4176,7 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				continue;
 			}
 			Printf(
-				"PERF pt scene buffer upload domain NRI: frame=%llu domain=%s payload_bytes=%llu vertex_payload=%llu index_payload=%llu primitive_payload=%llu material_payload=%llu hash_checks=%u hash_misses=%u stamp_checks=%u stamp_misses=%u dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu uploaded=%llu primitive_uploaded=%llu material_uploaded=%llu wait_ms=%.3f\n",
+				"PERF pt scene buffer upload domain NRI: frame=%llu domain=%s payload_bytes=%llu vertex_payload=%llu index_payload=%llu primitive_payload=%llu material_payload=%llu hash_checks=%u hash_misses=%u stamp_checks=%u stamp_misses=%u growth_events=%u growth_requested=%llu growth_allocated=%llu dirty_ranges=%u dirty_changed=%llu dirty_uploaded=%llu uploaded=%llu primitive_uploaded=%llu material_uploaded=%llu wait_ms=%.3f\n",
 				(unsigned long long)mLastFrameBoundaryStats.frameNumber,
 				getSceneBufferUploadDomainName(domain),
 				(unsigned long long)entry.payloadBytes,
@@ -4182,6 +4188,9 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 				entry.hashMisses,
 				entry.stampChecks,
 				entry.stampMisses,
+				entry.growthEvents,
+				(unsigned long long)entry.growthRequestedBytes,
+				(unsigned long long)entry.growthAllocatedBytes,
 				entry.dirtyRanges,
 				(unsigned long long)entry.dirtyChangedBytes,
 				(unsigned long long)entry.dirtyUploadedBytes,

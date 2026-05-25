@@ -313,12 +313,15 @@ public:
 			uint64_t uploadedBytes = 0;
 			uint64_t primitiveUploadedBytes = 0;
 			uint64_t materialUploadedBytes = 0;
+			uint64_t growthRequestedBytes = 0;
+			uint64_t growthAllocatedBytes = 0;
 			uint64_t dirtyChangedBytes = 0;
 			uint64_t dirtyUploadedBytes = 0;
 			uint32_t hashChecks = 0;
 			uint32_t hashMisses = 0;
 			uint32_t stampChecks = 0;
 			uint32_t stampMisses = 0;
+			uint32_t growthEvents = 0;
 			uint32_t dirtyRanges = 0;
 			double waitMs = 0.0;
 		};
@@ -460,6 +463,7 @@ public:
 		uint32_t sceneSelectBufferUploadIndexGrowEvents = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveGrowEvents = 0;
 		uint32_t sceneSelectBufferUploadMaterialGrowEvents = 0;
+		uint32_t sceneSelectBufferUploadGrowthEvents = 0;
 		uint32_t sceneSelectBufferUploadVertexOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadIndexOverwriteEvents = 0;
 		uint32_t sceneSelectBufferUploadPrimitiveOverwriteEvents = 0;
@@ -542,6 +546,10 @@ public:
 		uint64_t sceneSelectBufferUploadMaterialUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadPersistentVoxelMaterialBatchGapBytes = 0;
+		uint64_t sceneSelectBufferUploadGrowthOldBytes = 0;
+		uint64_t sceneSelectBufferUploadGrowthRequestedBytes = 0;
+		uint64_t sceneSelectBufferUploadGrowthAllocatedBytes = 0;
+		uint64_t sceneSelectBufferUploadGrowthHeadroomBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeChangedBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeUploadedBytes = 0;
 		uint64_t sceneSelectBufferUploadDirtyRangeGapBytes = 0;
@@ -1377,6 +1385,9 @@ private:
 		uint32_t growEventsLastFrame = 0;
 		uint32_t overwriteEventsLastFrame = 0;
 		uint64_t bytesUploadedLastFrame = 0;
+		uint64_t growthOldBytesLastFrame = 0;
+		uint64_t growthRequestedBytesLastFrame = 0;
+		uint64_t growthAllocatedBytesLastFrame = 0;
 		uint64_t peakUsedBytes = 0;
 	};
 
