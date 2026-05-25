@@ -2868,6 +2868,7 @@ CVAR(Bool, nri_ptbootstrap, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptbootstrapmode, 13, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptbaseambient, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -5243,6 +5244,17 @@ namespace
 	static uint32_t ClampTraceBounceCount(int value, uint32_t maxValue)
 	{
 		return (uint32_t)std::max(0, std::min(value, (int)maxValue));
+	}
+
+	static float GetBaseAmbient()
+	{
+		return std::max(0.0f, (float)nri_ptbaseambient);
+	}
+
+	static uint32_t PackPortalDepthAndBaseAmbient(uint32_t portalDepth, float baseAmbient)
+	{
+		const uint32_t packedBaseAmbient = (uint32_t)std::min(16777215.0f, std::max(0.0f, baseAmbient) * 65536.0f + 0.5f);
+		return (portalDepth & 0xffu) | (packedBaseAmbient << 8u);
 	}
 
 	static uint32_t PackTraceBounceCounts(uint32_t lightBounceCount, uint32_t mirrorBounceCount, const float directionalColor[3])
@@ -33112,7 +33124,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		mDirectionalLightState.color);
 	constants.PortalCount = mBoundPortalCount;
 	constants.RuntimeLightCount = mBoundRuntimeLightCount;
-	constants.PortalDepth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
+	constants.PortalDepth = PackPortalDepthAndBaseAmbient(ClampTraceBounceCount((int)nri_ptportaldepth, 8u), GetBaseAmbient());
 	constants.ReservedTrace0 = (mBoundRuntimeLightTileCountX & 0xffffu) | ((mBoundRuntimeLightTileCountY & 0xffffu) << 16u);
 	constants.ReservedTrace1 = PackTraceAux1(
 		(uint32_t)GetSelectedNrdDenoiserMode(),

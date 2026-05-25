@@ -169,9 +169,14 @@ float3 EvaluateSunDiffuseLighting(float3 normal, float3 lightDir, float shadow)
 	return lighting.xxx;
 }
 
+float GetBaseAmbientMultiplier()
+{
+	return (float)(gTraceConstants.PortalDepth >> 8u) * (1.0 / 65536.0);
+}
+
 float3 EvaluateAmbientDiffuse(float3 albedo)
 {
-	return albedo * 0.20;
+	return albedo * GetBaseAmbientMultiplier();
 }
 
 float3 GetSurfaceDiffuseColor(float3 albedo, float metalness)

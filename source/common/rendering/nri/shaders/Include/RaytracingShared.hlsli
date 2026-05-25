@@ -649,7 +649,7 @@ bool IsMirrorMaterial(uint materialIndex, uint dataSource)
 
 uint GetPortalTraversalDepth()
 {
-	return gTraceConstants.PortalDepth;
+	return gTraceConstants.PortalDepth & 0xffu;
 }
 
 bool ResolvePortalHit(HitData hit, out PortalData portalData)
