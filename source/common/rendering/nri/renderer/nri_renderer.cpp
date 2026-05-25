@@ -7878,6 +7878,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mRuntimeLightClusterCacheValid = false;
 	mRuntimeLightClusterPayloadHash = 0;
 	mRuntimeLightClusterCameraHash = 0;
+	mRuntimeLightSceneDataDirty = false;
 	mBoundEmissivePrimitiveCount = 0;
 	mBoundEmissiveDominantPrimitive = UINT32_MAX;
 	mBoundEmissiveDominantTile = 0;
@@ -10708,6 +10709,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		sceneLightDynamicMaterials,
 		appendPersistentVoxelSceneLights);
 
+	bool refreshedSceneDataAfterLightRebuild = false;
 	if (mGpuSceneHasDynamicOverlay &&
 		activeMaterialBridge == &combinedMaterialBridge &&
 		!overlayGeometry.primitives.empty())
@@ -10756,12 +10758,70 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			}
 
 			activeGpuMaterials = &combinedGpuMaterials;
+			refreshedSceneDataAfterLightRebuild = true;
+		}
+	}
+
+	if (mRuntimeLightSceneDataDirty && !refreshedSceneDataAfterLightRebuild)
+	{
+		if (mGpuSceneHasDynamicOverlay)
+		{
+			if (!UpdateSceneDataSet(
+				mStaticVertexBuffer,
+				mStaticIndexBuffer,
+				mStaticPrimitiveBuffer,
+				mStaticMaterialBuffer,
+				GetCurrentDynamicVertexBuffer(),
+				GetCurrentDynamicIndexBuffer(),
+				GetCurrentDynamicPrimitiveBuffer(),
+				GetCurrentDynamicMaterialBuffer(),
+				mBoundSceneInstances,
+				(uint32_t)mStaticMapScene.geometry.primitives.size(),
+				(uint32_t)overlayGeometry.primitives.size(),
+				(uint32_t)mStaticMapScene.gpuMaterials.size(),
+				(uint32_t)dynamicGpuMaterials.size(),
+				"runtime_overlay_light_refresh"))
+			{
+				LogFallback("PT runtime overlay light refresh failed after scene-light rebuild.");
+				if (preserveHistory)
+				{
+					restoreHistory();
+				}
+				return false;
+			}
+		}
+		else if (!sceneLightUsesStaticMapScene)
+		{
+			if (!UpdateSceneDataSet(
+				GetCurrentDynamicVertexBuffer(),
+				GetCurrentDynamicIndexBuffer(),
+				GetCurrentDynamicPrimitiveBuffer(),
+				GetCurrentDynamicMaterialBuffer(),
+				GetCurrentDynamicVertexBuffer(),
+				GetCurrentDynamicIndexBuffer(),
+				GetCurrentDynamicPrimitiveBuffer(),
+				GetCurrentDynamicMaterialBuffer(),
+				mBoundSceneInstances,
+				0u,
+				(uint32_t)capturedGeometry.primitives.size(),
+				0u,
+				(uint32_t)capturedGpuMaterials.size(),
+				"captured_scene_light_refresh"))
+			{
+				LogFallback("PT captured scene light refresh failed after scene-light rebuild.");
+				if (preserveHistory)
+				{
+					restoreHistory();
+				}
+				return false;
+			}
 		}
 	}
 
 	if (sceneLightUsesStaticMapScene && !mGpuSceneHasDynamicOverlay)
 	{
 		const bool needsResidentStaticLightRefresh =
+			mRuntimeLightSceneDataDirty ||
 			!mSceneLights.GetAnalyticLights().activeLights.empty() ||
 			mBoundRuntimeLightCount != 0 ||
 			mSceneLights.GetSectorLighting().activeSectorCount > 0 ||
@@ -11364,6 +11424,22 @@ void NRIRenderer::NoteLightHistoryChange(const char* reason)
 	}
 }
 
+void NRIRenderer::InvalidateRuntimeLightSceneData()
+{
+	mBoundRuntimeLightCount = 0;
+	mBoundRuntimeLightTileCountX = 0;
+	mBoundRuntimeLightTileCountY = 0;
+	mBoundRuntimeLightTileSize = 0;
+	mBoundRuntimeLightTileIndexCount = 0;
+	mBoundRuntimeLightMaxTileOccupancy = 0;
+	mRuntimeLightPayloadCacheValid = false;
+	mRuntimeLightPayloadHash = 0;
+	mRuntimeLightClusterCacheValid = false;
+	mRuntimeLightClusterPayloadHash = 0;
+	mRuntimeLightClusterCameraHash = 0;
+	mRuntimeLightSceneDataDirty = true;
+}
+
 bool NRIRenderer::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId)
 {
 	if (position == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)
@@ -11381,7 +11457,7 @@ bool NRIRenderer::AddRuntimePointLight(const float position[3], const float colo
 	{
 		return false;
 	}
-	mBoundRuntimeLightCount = 0;
+	InvalidateRuntimeLightSceneData();
 	NoteLightHistoryChange("runtime-light-change");
 	return true;
 }
@@ -11393,7 +11469,7 @@ bool NRIRenderer::UpdateRuntimePointLight(uint32_t id, const float position[3], 
 		return false;
 	}
 
-	mBoundRuntimeLightCount = 0;
+	InvalidateRuntimeLightSceneData();
 	NoteLightHistoryChange("runtime-light-change");
 	return true;
 }
@@ -11405,7 +11481,7 @@ bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
 		return false;
 	}
 
-	mBoundRuntimeLightCount = 0;
+	InvalidateRuntimeLightSceneData();
 	NoteLightHistoryChange("runtime-light-change");
 	return true;
 }
@@ -11418,7 +11494,7 @@ void NRIRenderer::ClearRuntimePointLights()
 	}
 
 	mSceneLights.ClearManualAnalyticLights();
-	mBoundRuntimeLightCount = 0;
+	InvalidateRuntimeLightSceneData();
 	NoteLightHistoryChange("runtime-light-change");
 }
 
@@ -21046,9 +21122,12 @@ void NRIRenderer::RefreshSceneLightSystem(
 	const bool emissiveMaterialPropertiesChanged = mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
 	const bool sectorLightingTopologyChanged = mSceneLights.ConsumeSectorLightingTopologyChanged();
 
+	if (analyticLightTopologyChanged || analyticLightPropertiesChanged)
+	{
+		InvalidateRuntimeLightSceneData();
+	}
 	if (analyticLightTopologyChanged)
 	{
-		mBoundRuntimeLightCount = 0;
 		if (ShouldTraceSkyPerf())
 		{
 			const auto& analyticLights = mSceneLights.GetAnalyticLights();
@@ -23284,6 +23363,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundRuntimeLightTileSize = NRI_RUNTIME_LIGHT_TILE_SIZE;
 	mBoundRuntimeLightTileIndexCount = runtimeLightTileIndexCount;
 	mBoundRuntimeLightMaxTileOccupancy = runtimeLightMaxTileOccupancy;
+	mRuntimeLightSceneDataDirty = false;
 	return true;
 }
 
@@ -36433,6 +36513,7 @@ void NRIRenderer::DestroySceneBuffers()
 	mRuntimeLightClusterCacheValid = false;
 	mRuntimeLightClusterPayloadHash = 0;
 	mRuntimeLightClusterCameraHash = 0;
+	mRuntimeLightSceneDataDirty = false;
 	mBoundEmissivePrimitiveCount = 0;
 	mBoundEmissiveDominantPrimitive = UINT32_MAX;
 	mBoundEmissiveDominantTile = 0;
