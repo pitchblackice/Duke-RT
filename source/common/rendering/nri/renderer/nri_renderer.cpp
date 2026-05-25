@@ -8805,6 +8805,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		const bool hasMirrorPlayerScene = !deferOverlayThisFrame && IsMirrorPlayerPreviewCaptureEnabled() && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorCaptureMs);
+			ScopedPtPerfTimer mirrorPlayerTimer(mLastPerfShellTraceStats.mirrorPlayerCaptureMs);
 			return CaptureMirrorPlayerDynamicScene(
 				di,
 				visibleMirrorPortal,
@@ -8888,13 +8889,20 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			{
 				Clocker clock(NriPTGeometryBuild);
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.geometryBuildMirrorPlayerMs);
-				nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry);
-				AssignGeometryPortalIndices(mMapWorld, mirrorPlayerGeometry);
+				{
+					ScopedPtPerfTimer buildTimer(mLastPerfShellTraceStats.mirrorPlayerGeometryBuildMs);
+					nri_scene::BuildGeometry(mirrorPlayerSceneView, mirrorPlayerGeometry);
+				}
+				{
+					ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.mirrorPlayerPortalAssignMs);
+					AssignGeometryPortalIndices(mMapWorld, mirrorPlayerGeometry);
+				}
 			}
 
 			if (!mirrorPlayerGeometry.primitives.empty())
 			{
 				Clocker clock(NriPTMaterialBuild);
+				ScopedPtPerfTimer materialTimer(mLastPerfShellTraceStats.mirrorPlayerMaterialBuildMs);
 				BuildMaterialsWithActorOverrides(mirrorPlayerSceneView, mirrorPlayerMaterialBridge, "mirror_player");
 			}
 		}
@@ -9171,8 +9179,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					ScopedPtPerfTimer sourceAggregateTimer(mLastPerfShellTraceStats.overlayAppendSourcesMs);
 
 					const auto buildProducerStamp =
-						[&](const nri_scene::SceneView& sceneView) -> SceneBufferUploadProducerStamp
+						[&](const nri_scene::SceneView& sceneView, double& timerMs) -> SceneBufferUploadProducerStamp
 					{
+						ScopedPtPerfTimer aggregateTimer(mLastPerfShellTraceStats.overlayAppendProducerStampMs);
+						ScopedPtPerfTimer sourceTimer(timerMs);
 						const SceneViewUploadStampBuildResult built = BuildSceneViewUploadProducerStamp(sceneView, mMapWorld.buildSerial);
 						SceneBufferUploadProducerStamp stamp = {};
 						stamp.vertexPayloadStamp = built.vertexPayloadStamp;
@@ -9183,11 +9193,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						return stamp;
 					};
 					const SceneBufferUploadProducerStamp dynamicStamp =
-						hasActiveDynamicOverlay && activeDynamicSceneView != nullptr ? buildProducerStamp(*activeDynamicSceneView) : SceneBufferUploadProducerStamp {};
+						hasActiveDynamicOverlay && activeDynamicSceneView != nullptr ? buildProducerStamp(*activeDynamicSceneView, mLastPerfShellTraceStats.overlayAppendDynamicStampMs) : SceneBufferUploadProducerStamp {};
 					const SceneBufferUploadProducerStamp mirrorExtendedStamp =
-						hasMirrorExtendedDynamicOverlay ? buildProducerStamp(mirrorExtendedDynamicSceneView) : SceneBufferUploadProducerStamp {};
+						hasMirrorExtendedDynamicOverlay ? buildProducerStamp(mirrorExtendedDynamicSceneView, mLastPerfShellTraceStats.overlayAppendMirrorExtendedStampMs) : SceneBufferUploadProducerStamp {};
 					const SceneBufferUploadProducerStamp mirrorPlayerStamp =
-						hasMirrorPlayerOverlay ? buildProducerStamp(mirrorPlayerSceneView) : SceneBufferUploadProducerStamp {};
+						hasMirrorPlayerOverlay ? buildProducerStamp(mirrorPlayerSceneView, mLastPerfShellTraceStats.overlayAppendMirrorPlayerStampMs) : SceneBufferUploadProducerStamp {};
 
 					if (hasRuntimeSpaceLinkOverlay)
 					{
@@ -9411,6 +9421,18 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					}
 					if (liveOverlayPrimitiveCount > 0)
 					{
+						mLastPerfShellTraceStats.dynamicAsRuntimeSpaceLinkPrimitives = mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsRuntimeMutationPrimitives = mLastPerfShellTraceStats.overlayRuntimeMutationAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsDynamicPrimitives = mLastPerfShellTraceStats.overlayDynamicAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsMirrorExtendedPrimitives = mLastPerfShellTraceStats.overlayMirrorExtendedAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsMirrorPlayerPrimitives = mLastPerfShellTraceStats.overlayMirrorPlayerAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsDebugSpherePrimitives = mLastPerfShellTraceStats.overlayDebugSphereAppend.primitiveCount;
+						mLastPerfShellTraceStats.dynamicAsRuntimeSpaceLinkBytes = mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsRuntimeMutationBytes = mLastPerfShellTraceStats.overlayRuntimeMutationAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsDynamicBytes = mLastPerfShellTraceStats.overlayDynamicAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsMirrorExtendedBytes = mLastPerfShellTraceStats.overlayMirrorExtendedAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsMirrorPlayerBytes = mLastPerfShellTraceStats.overlayMirrorPlayerAppend.byteCount;
+						mLastPerfShellTraceStats.dynamicAsDebugSphereBytes = mLastPerfShellTraceStats.overlayDebugSphereAppend.byteCount;
 						dynamicAsReady =
 							BuildDynamicAccelerationStructure(
 								overlayGeometry,

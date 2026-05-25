@@ -3865,6 +3865,45 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.dynamicAsIndexCount,
 			shell.restoreStaticSceneMs,
 			shell.copyFinalMs);
+		Printf(
+			"PERF pt mirror player detail NRI: frame=%llu capture=%.3f geometry_total=%.3f geometry_build=%.3f portal_assign=%.3f material=%.3f append=%.3f append_geo=%.3f append_mat=%.3f vertices=%u indices=%u prims=%u mats=%u bytes=%llu\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.mirrorPlayerCaptureMs,
+			shell.geometryBuildMirrorPlayerMs,
+			shell.mirrorPlayerGeometryBuildMs,
+			shell.mirrorPlayerPortalAssignMs,
+			shell.mirrorPlayerMaterialBuildMs,
+			shell.overlayMirrorPlayerMs,
+			shell.overlayMirrorPlayerGeometryMs,
+			shell.overlayMirrorPlayerMaterialMs,
+			shell.overlayMirrorPlayerAppend.vertexCount,
+			shell.overlayMirrorPlayerAppend.indexCount,
+			shell.overlayMirrorPlayerAppend.primitiveCount,
+			shell.overlayMirrorPlayerAppend.materialCount,
+			(unsigned long long)shell.overlayMirrorPlayerAppend.byteCount);
+		Printf(
+			"PERF pt dynamic as input NRI: frame=%llu total=%.3f create=%.3f scratch=%.3f build=%.3f barrier=%.3f total_prims=%u total_vertices=%u total_indices=%u spacelink_prims=%u spacelink_bytes=%llu mutation_prims=%u mutation_bytes=%llu dynamic_prims=%u dynamic_bytes=%llu mirror_ext_prims=%u mirror_ext_bytes=%llu mirror_player_prims=%u mirror_player_bytes=%llu debug_sphere_prims=%u debug_sphere_bytes=%llu\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.dynamicAsMs,
+			shell.dynamicAsCreateMs,
+			shell.dynamicAsScratchMs,
+			shell.dynamicAsBuildMs,
+			shell.dynamicAsBarrierMs,
+			shell.dynamicAsPrimitiveCount,
+			shell.dynamicAsVertexCount,
+			shell.dynamicAsIndexCount,
+			shell.dynamicAsRuntimeSpaceLinkPrimitives,
+			(unsigned long long)shell.dynamicAsRuntimeSpaceLinkBytes,
+			shell.dynamicAsRuntimeMutationPrimitives,
+			(unsigned long long)shell.dynamicAsRuntimeMutationBytes,
+			shell.dynamicAsDynamicPrimitives,
+			(unsigned long long)shell.dynamicAsDynamicBytes,
+			shell.dynamicAsMirrorExtendedPrimitives,
+			(unsigned long long)shell.dynamicAsMirrorExtendedBytes,
+			shell.dynamicAsMirrorPlayerPrimitives,
+			(unsigned long long)shell.dynamicAsMirrorPlayerBytes,
+			shell.dynamicAsDebugSpherePrimitives,
+			(unsigned long long)shell.dynamicAsDebugSphereBytes);
 		const double overlayPathAccountedMs =
 			shell.overlayAppendMs +
 			shell.sceneSelectStaticInstancesMs +
@@ -3924,6 +3963,16 @@ bool NRIRenderDevice::RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool p
 			shell.overlayPersistentVoxelMaterialCount,
 			shell.overlayPrimitiveCount,
 			shell.overlayMaterialCount);
+		Printf(
+			"PERF pt overlay append stamp NRI: frame=%llu total=%.3f dynamic=%.3f mirror_ext=%.3f mirror_player=%.3f dynamic_prims=%u mirror_ext_prims=%u mirror_player_prims=%u\n",
+			(unsigned long long)mLastFrameBoundaryStats.frameNumber,
+			shell.overlayAppendProducerStampMs,
+			shell.overlayAppendDynamicStampMs,
+			shell.overlayAppendMirrorExtendedStampMs,
+			shell.overlayAppendMirrorPlayerStampMs,
+			shell.overlayDynamicAppend.primitiveCount,
+			shell.overlayMirrorExtendedAppend.primitiveCount,
+			shell.overlayMirrorPlayerAppend.primitiveCount);
 		const auto& spacelinkAppend = shell.overlayRuntimeSpaceLinkAppend;
 		const auto& mutationAppend = shell.overlayRuntimeMutationAppend;
 		const auto& dynamicAppend = shell.overlayDynamicAppend;
