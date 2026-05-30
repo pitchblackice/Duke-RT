@@ -224,6 +224,13 @@ public:
 			int32_t lotag = 0;
 			int32_t hitag = 0;
 			int32_t averageShade = 0;
+			int32_t rawAverageShade = 0;
+			float rawLightLevel = 0.0f;
+			float rawFloorLight = 0.0f;
+			float rawCeilingLight = 0.0f;
+			float rawAmbientIntensity = 0.0f;
+			float rawHemisphereAmount = 0.0f;
+			float rawFogAmount = 0.0f;
 			float ambientColor[3] = {};
 			float ambientIntensity = 0.0f;
 			float hemisphereAmount = 0.0f;
@@ -233,9 +240,12 @@ public:
 
 		std::vector<SectorLightRecord> sectors;
 		std::vector<uint32_t> activeSectorIndices;
+		std::vector<uint32_t> rawActiveSectorIndices;
 		std::vector<uint32_t> activeTopologyKeys;
 		uint32_t sectorCount = 0;
 		uint32_t eligibleSectorCount = 0;
+		uint32_t rawActiveSectorCount = 0;
+		uint32_t rawNonNeutralSectorCount = 0;
 		uint32_t activeSectorCount = 0;
 		uint32_t fogSectorCount = 0;
 		uint32_t pulsingSectorCount = 0;

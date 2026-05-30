@@ -11948,9 +11948,12 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 {
 	const auto& registry = mSceneLights.GetSectorLighting();
 	const float sectorLightMultiplier = GetSectorLightMultiplier();
-	if (registry.activeSectorIndices.empty())
+	if (registry.activeSectorIndices.empty() && registry.rawActiveSectorIndices.empty())
 	{
-		Printf("NRI PT sector lights: no active sector-light records are available.\n");
+		Printf("NRI PT sector lights: no active sector-light records are available. raw_active=%u raw_nonneutral=%u eligible=%u\n",
+			registry.rawActiveSectorCount,
+			registry.rawNonNeutralSectorCount,
+			registry.eligibleSectorCount);
 		return;
 	}
 
@@ -11983,10 +11986,29 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 	}
 
 	std::vector<SectorCandidate> candidates;
-	candidates.reserve(registry.activeSectorIndices.size());
-	const float radiusSq = radius > 0.0f ? radius * radius : std::numeric_limits<float>::max();
+	candidates.reserve(std::max(registry.activeSectorIndices.size(), registry.rawActiveSectorIndices.size()));
+	std::vector<uint8_t> candidateSectors(registry.sectorCount, 0u);
 	for (uint32_t sectorIndex : registry.activeSectorIndices)
 	{
+		if (sectorIndex < candidateSectors.size())
+		{
+			candidateSectors[sectorIndex] = 1u;
+		}
+	}
+	for (uint32_t sectorIndex : registry.rawActiveSectorIndices)
+	{
+		if (sectorIndex < candidateSectors.size())
+		{
+			candidateSectors[sectorIndex] = 1u;
+		}
+	}
+	const float radiusSq = radius > 0.0f ? radius * radius : std::numeric_limits<float>::max();
+	for (uint32_t sectorIndex = 0; sectorIndex < (uint32_t)candidateSectors.size(); ++sectorIndex)
+	{
+		if (candidateSectors[sectorIndex] == 0u)
+		{
+			continue;
+		}
 		if (sectorIndex >= registry.sectorCount || sectorIndex >= centerCounts.size() || centerCounts[sectorIndex] == 0u)
 		{
 			continue;
@@ -12017,8 +12039,10 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 		return a.sectorIndex < b.sectorIndex;
 	});
 
-	Printf("NRI PT sector lights: active=%u eligible=%u fog=%u pulsing=%u radius=%.1f limit=%u multiplier=%.3f scales=(%.3f, %.3f, %.3f) clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
+	Printf("NRI PT sector lights: active=%u raw_active=%u raw_nonneutral=%u eligible=%u fog=%u pulsing=%u radius=%.1f limit=%u multiplier=%.3f scales=(%.3f, %.3f, %.3f) clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
 		registry.activeSectorCount,
+		registry.rawActiveSectorCount,
+		registry.rawNonNeutralSectorCount,
 		registry.eligibleSectorCount,
 		registry.fogSectorCount,
 		registry.pulsingSectorCount,
@@ -12041,7 +12065,7 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 	{
 		const SectorCandidate& candidate = candidates[i];
 		const auto& entry = registry.sectors[candidate.sectorIndex];
-		Printf("NRI PT sector light %u: sector=%u dist=%.2f center=(%.2f, %.2f, %.2f) ambient=(%.3f, %.3f, %.3f)*%.3f hemi=%.3f fog=%.3f pulse=%.3f palette=%d shade=%d lotag=%d hitag=%d flags=0x%x\n",
+		Printf("NRI PT sector light %u: sector=%u dist=%.2f center=(%.2f, %.2f, %.2f) applied=(%.3f, %.3f, %.3f)*%.3f hemi=%.3f fog=%.3f raw_light=%.3f raw_floor=%.3f raw_ceil=%.3f raw_ambient=%.3f raw_hemi=%.3f raw_fog=%.3f pulse=%.3f palette=%d shade=%d raw_shade=%d lotag=%d hitag=%d flags=0x%x\n",
 			i,
 			candidate.sectorIndex,
 			std::sqrt(candidate.distanceSq),
@@ -12054,9 +12078,16 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 			entry.ambientIntensity * sectorLightMultiplier,
 			entry.hemisphereAmount * sectorLightMultiplier,
 			entry.fogAmount * sectorLightMultiplier,
+			entry.rawLightLevel,
+			entry.rawFloorLight,
+			entry.rawCeilingLight,
+			entry.rawAmbientIntensity,
+			entry.rawHemisphereAmount,
+			entry.rawFogAmount,
 			entry.pulseScale,
 			entry.paletteIndex,
 			entry.averageShade,
+			entry.rawAverageShade,
 			entry.lotag,
 			entry.hitag,
 			entry.sourceFlags);
@@ -12064,7 +12095,7 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 
 	if (printCount == 0)
 	{
-		Printf("NRI PT sector lights: no active sector lights matched the requested radius.\n");
+		Printf("NRI PT sector lights: no active or raw sector lights matched the requested radius.\n");
 	}
 }
 
@@ -12525,9 +12556,11 @@ void NRIRenderer::PrintStatus() const
 		mEmissiveTlasStaticInstanceCount,
 		mEmissiveTlasDynamicInstanceCount,
 		mEmissiveTlasBuildCount);
-	Printf("NRI PT sector lighting: enabled=%s active=%u eligible=%u fog=%u pulsing=%u debug_mode=%u multiplier=%.3f scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
+	Printf("NRI PT sector lighting: enabled=%s active=%u raw_active=%u raw_nonneutral=%u eligible=%u fog=%u pulsing=%u debug_mode=%u multiplier=%.3f scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
 		nri_ptsectorlighting ? "on" : "off",
 		mSceneLights.GetSectorLighting().activeSectorCount,
+		mSceneLights.GetSectorLighting().rawActiveSectorCount,
+		mSceneLights.GetSectorLighting().rawNonNeutralSectorCount,
 		mSceneLights.GetSectorLighting().eligibleSectorCount,
 		mSceneLights.GetSectorLighting().fogSectorCount,
 		mSceneLights.GetSectorLighting().pulsingSectorCount,

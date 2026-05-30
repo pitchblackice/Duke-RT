@@ -1566,6 +1566,8 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 {
 	mSectorLighting.sectorCount = sectorCount;
 	mSectorLighting.eligibleSectorCount = 0;
+	mSectorLighting.rawActiveSectorCount = 0;
+	mSectorLighting.rawNonNeutralSectorCount = 0;
 	mSectorLighting.activeSectorCount = 0;
 	mSectorLighting.fogSectorCount = 0;
 	mSectorLighting.pulsingSectorCount = 0;
@@ -1590,6 +1592,8 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 
 	mSectorLighting.activeSectorIndices.clear();
 	mSectorLighting.activeSectorIndices.reserve(sectorCount);
+	mSectorLighting.rawActiveSectorIndices.clear();
+	mSectorLighting.rawActiveSectorIndices.reserve(sectorCount);
 
 	if (!nri_ptsectorlighting || sectorCount == 0)
 	{
@@ -1626,9 +1630,53 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		const auto& sec = sector[sectorIndex];
 		const int resolvedPalette = sec.floorpal != 0 ? (int)sec.floorpal : (int)sec.ceilingpal;
 		const int averageShade = ((int)sec.floorshade + (int)sec.ceilingshade) / 2;
+		const int rawFloorShade = (int)sec.floorshade;
+		const int rawCeilingShade = (int)sec.ceilingshade;
+		const float rawLightLevel = ComputeBuildLightLevel(averageShade, resolvedPalette);
+		const float rawFloorLight = ComputeBuildLightLevel(rawFloorShade, resolvedPalette);
+		const float rawCeilingLight = ComputeBuildLightLevel(rawCeilingShade, resolvedPalette);
+		const float rawHemisphereBias = clamp(rawCeilingLight - rawFloorLight, -1.0f, 1.0f);
 		const int lightingAverageShade = nri_ptignorelightlevel ? 0 : averageShade;
 		const int lightingFloorShade = nri_ptignorelightlevel ? 0 : (int)sec.floorshade;
 		const int lightingCeilingShade = nri_ptignorelightlevel ? 0 : (int)sec.ceilingshade;
+		float tint[3] = {};
+		float fogStrength = 0.0f;
+		ResolveSectorTint(sec, resolvedPalette, tint, fogStrength);
+		const bool sectorPulseEnabled = pulseSelectionFiltered && pulseFrames > 1 && pulseAmount > 0.0f;
+		const float pulseScale = sectorPulseEnabled ? EvaluatePulseScale(0x5EC70B5E00000000ull ^ (uint64_t)sectorIndex, frameIndex, pulseFrames, pulseAmount) : 1.0f;
+		const float rawClampedAmbient = std::min(sectorClamp, ambientScale * (0.10f + rawLightLevel * 0.55f) * pulseScale);
+		const float rawClampedHemisphere = std::min(sectorClamp, hemisphereScale * (0.08f + (0.5f + 0.5f * std::abs(rawHemisphereBias)) * 0.45f) * pulseScale);
+		const float rawClampedFog = std::min(sectorClamp, fogScale * fogStrength * pulseScale);
+
+		SectorLightingRegistry::SectorLightRecord entry = {};
+		entry.sectorIndex = sectorIndex;
+		entry.paletteIndex = resolvedPalette;
+		entry.lotag = sec.lotag;
+		entry.hitag = sec.hitag;
+		entry.averageShade = averageShade;
+		entry.rawAverageShade = averageShade;
+		entry.rawLightLevel = rawLightLevel;
+		entry.rawFloorLight = rawFloorLight;
+		entry.rawCeilingLight = rawCeilingLight;
+		entry.rawAmbientIntensity = rawClampedAmbient;
+		entry.rawHemisphereAmount = rawHemisphereBias * rawClampedHemisphere;
+		entry.rawFogAmount = rawClampedFog;
+		entry.ambientColor[0] = tint[0];
+		entry.ambientColor[1] = tint[1];
+		entry.ambientColor[2] = tint[2];
+		entry.pulseScale = pulseScale;
+
+		const bool rawActive = rawClampedAmbient > 0.0f || rawClampedHemisphere > 0.0f || rawClampedFog > 0.0f;
+		if (rawActive)
+		{
+			mSectorLighting.rawActiveSectorIndices.push_back(sectorIndex);
+		}
+		if (averageShade != 0 || rawFloorShade != 0 || rawCeilingShade != 0)
+		{
+			mSectorLighting.rawNonNeutralSectorCount++;
+		}
+		mSectorLighting.sectors[sectorIndex] = entry;
+
 		if ((paletteFilter >= 0 && resolvedPalette != paletteFilter) ||
 			(lightingAverageShade < minShadeFilter || lightingAverageShade > maxShadeFilter) ||
 			(lotagFilter >= 0 && sec.lotag != lotagFilter))
@@ -1640,11 +1688,6 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		const float floorLight = ComputeBuildLightLevel(lightingFloorShade, resolvedPalette);
 		const float ceilingLight = ComputeBuildLightLevel(lightingCeilingShade, resolvedPalette);
 		const float hemisphereBias = clamp(ceilingLight - floorLight, -1.0f, 1.0f);
-		float tint[3] = {};
-		float fogStrength = 0.0f;
-		ResolveSectorTint(sec, resolvedPalette, tint, fogStrength);
-		const bool sectorPulseEnabled = pulseSelectionFiltered && pulseFrames > 1 && pulseAmount > 0.0f;
-		const float pulseScale = sectorPulseEnabled ? EvaluatePulseScale(0x5EC70B5E00000000ull ^ (uint64_t)sectorIndex, frameIndex, pulseFrames, pulseAmount) : 1.0f;
 		const float clampedAmbient = std::min(sectorClamp, ambientScale * (0.10f + lightLevel * 0.55f) * pulseScale);
 		const float clampedHemisphere = std::min(sectorClamp, hemisphereScale * (0.08f + (0.5f + 0.5f * std::abs(hemisphereBias)) * 0.45f) * pulseScale);
 		const float clampedFog = std::min(sectorClamp, fogScale * fogStrength * pulseScale);
@@ -1653,8 +1696,6 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 			continue;
 		}
 
-		SectorLightingRegistry::SectorLightRecord entry = {};
-		entry.sectorIndex = sectorIndex;
 		entry.sourceFlags = SceneSectorLightSourceFlag_Heuristic;
 		if (paletteFilter >= 0)
 		{
@@ -1675,22 +1716,15 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 			mSectorLighting.pulsingSectorCount++;
 		}
 
-		entry.paletteIndex = resolvedPalette;
-		entry.lotag = sec.lotag;
-		entry.hitag = sec.hitag;
-		entry.averageShade = averageShade;
-		entry.ambientColor[0] = tint[0];
-		entry.ambientColor[1] = tint[1];
-		entry.ambientColor[2] = tint[2];
 		entry.ambientIntensity = clampedAmbient;
 		entry.hemisphereAmount = hemisphereBias * clampedHemisphere;
 		entry.fogAmount = clampedFog;
-		entry.pulseScale = pulseScale;
 
 		mSectorLighting.sectors[sectorIndex] = entry;
 		mSectorLighting.activeSectorIndices.push_back(sectorIndex);
 	}
 
+	mSectorLighting.rawActiveSectorCount = (uint32_t)mSectorLighting.rawActiveSectorIndices.size();
 	mSectorLighting.activeSectorCount = (uint32_t)mSectorLighting.activeSectorIndices.size();
 	std::vector<uint32_t> nextTopologyKeys = mSectorLighting.activeSectorIndices;
 	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
