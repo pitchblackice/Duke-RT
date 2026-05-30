@@ -1566,6 +1566,7 @@ private:
 		uint32_t primitiveFlags = 0;
 		uint32_t materialLightingFlags = 0;
 		uint32_t textureId = 0;
+		uint32_t baseTextureId = 0;
 		uint32_t materialClass = 0;
 		uint32_t emissiveMode = 0;
 		uint32_t emissiveTextureIndex = UINT32_MAX;

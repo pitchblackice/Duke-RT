@@ -365,6 +365,7 @@ namespace
 
 		MaterialLightingMetadata metadata = {};
 		metadata.texture = lightingTexture != nullptr ? lightingTexture : materialRef.texture;
+		metadata.baseTexture = materialRef.texture;
 		metadata.textureContentKey = textureContentKey;
 		metadata.textureIndex = material.textureIndex;
 		metadata.glowmapTextureIndex = glowmapTextureIndex;
@@ -425,6 +426,10 @@ namespace
 				metadata.glowColor[1] = metadata.averageColor[1];
 				metadata.glowColor[2] = metadata.averageColor[2];
 			}
+		}
+		if (materialRef.texture != nullptr)
+		{
+			metadata.baseTextureId = (uint32_t)materialRef.texture->GetID().GetIndex();
 		}
 
 		const bool sampledEmissive =

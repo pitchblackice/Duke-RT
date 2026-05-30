@@ -8738,6 +8738,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	bool texturesReady = true;
 	bool buffersReady = true;
 	bool accelerationReady = true;
+	uint32_t combinedOverlayMaterialOffset = 0;
 	bool usingPersistentDynamicEmissiveCache = false;
 	bool liveDynamicHasEmissive = false;
 	bool hasPersistentVoxelBatch = false;
@@ -9559,9 +9560,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				{
 					ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMaterialBridgeMs);
 					combinedMaterialBridge = mStaticMapScene.materialBridge;
+					combinedOverlayMaterialOffset = (uint32_t)combinedMaterialBridge.materials.size();
 					if (hasPersistentVoxelOverlay)
 					{
 						AppendMaterialBridge(mPersistentVoxelBatch.materialBridge, combinedMaterialBridge);
+						combinedOverlayMaterialOffset = (uint32_t)combinedMaterialBridge.materials.size();
 					}
 					AppendMaterialBridge(overlayMaterialBridge, combinedMaterialBridge);
 				}
@@ -10324,7 +10327,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryAppendMs);
 							ReplaceGeometryOverlayTail(
 								overlayGeometry,
-								staticMaterialCount,
+								combinedOverlayMaterialOffset,
 								combinedGeometryCache.staticVertexCount,
 								combinedGeometryCache.staticIndexCount,
 								combinedGeometryCache.staticPrimitiveCount,
@@ -19838,12 +19841,16 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		}
 	}
 
-	if (result.hit && materials != nullptr && result.materialIndex < materials->lightMetadata.size())
+	if (result.hit &&
+		materials != nullptr &&
+		result.materialIndex < materials->lightMetadata.size() &&
+		result.materialIndex < materials->materials.size())
 	{
 		const auto& metadata = materials->lightMetadata[result.materialIndex];
 		const auto& materialData = materials->materials[result.materialIndex];
 		result.materialLightingFlags = metadata.lightingFlags;
 		result.textureId = metadata.textureId;
+		result.baseTextureId = metadata.baseTextureId != 0 ? metadata.baseTextureId : metadata.textureId;
 		result.materialClass = metadata.materialClass;
 		result.lightLevel = metadata.lightLevel;
 		result.alpha = metadata.alpha;
@@ -19937,6 +19944,7 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 			a.provenance.drawListType == b.provenance.drawListType &&
 			a.provenance.cstat == b.provenance.cstat &&
 			a.textureId == b.textureId &&
+			a.baseTextureId == b.baseTextureId &&
 			a.materialLightingFlags == b.materialLightingFlags &&
 			a.primitiveFlags == b.primitiveFlags &&
 			a.sceneDataSource == b.sceneDataSource &&
@@ -20021,8 +20029,11 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
 	FString textureName;
 	int32_t legacyTile = -1;
-	ResolveSurfaceProbeTextureDebugInfo(result.textureId, textureName, legacyTile);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	ResolveSurfaceProbeTextureDebugInfo(result.baseTextureId != 0 ? result.baseTextureId : result.textureId, textureName, legacyTile);
+	FString lightingTextureName;
+	int32_t lightingLegacyTile = -1;
+	ResolveSurfaceProbeTextureDebugInfo(result.textureId, lightingTextureName, lightingLegacyTile);
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s lighting_texid=%u lighting_legacy_tile=%d lighting_texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(result.sceneOwner),
@@ -20050,9 +20061,12 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		result.provenance.cstat,
 		result.primitiveIndex,
 		result.materialIndex,
-		result.textureId,
+		result.baseTextureId != 0 ? result.baseTextureId : result.textureId,
 		legacyTile,
 		textureName.GetChars(),
+		result.textureId,
+		lightingLegacyTile,
+		lightingTextureName.GetChars(),
 		result.distance,
 		result.position[0], result.position[1], result.position[2],
 		result.normal[0], result.normal[1], result.normal[2],
@@ -20256,7 +20270,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		flatPlaneVisible = IsFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, mLastSurfaceProbe.provenance.sectorIndex, mLastSurfaceProbe.normal[1] < 0.0f);
 	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
-	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u lighting_tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner),
@@ -20284,6 +20298,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		mLastSurfaceProbe.provenance.cstat,
 		mLastSurfaceProbe.primitiveIndex,
 		mLastSurfaceProbe.materialIndex,
+		mLastSurfaceProbe.baseTextureId != 0 ? mLastSurfaceProbe.baseTextureId : mLastSurfaceProbe.textureId,
 		mLastSurfaceProbe.textureId,
 		mLastSurfaceProbe.distance,
 		mLastSurfaceProbe.position[0],
