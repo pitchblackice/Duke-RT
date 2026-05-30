@@ -841,6 +841,7 @@ namespace
 		hash = HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.sectorIndex);
 		hash = HashCombine64(hash, (uint64_t)emissive.textureId);
 		hash = HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
 		hash = HashCombine64(hash, (uint64_t)emissive.emissiveMode);
@@ -864,6 +865,7 @@ namespace
 		hash = HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.sectorIndex);
 		hash = HashCombine64(hash, (uint64_t)emissive.textureId);
 		hash = HashCombine64(hash, (uint64_t)emissive.materialIndex);
 		hash = HashCombine64(hash, (uint64_t)emissive.emissiveMode);
@@ -1472,6 +1474,7 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 		emissive.sourceRuleId = sourceRuleId;
 		emissive.source = record.source;
 		emissive.actorIndex = record.provenance.actorIndex;
+		emissive.sectorIndex = record.provenance.sectorIndex;
 		emissive.textureId = record.material.textureId;
 		emissive.emissiveTextureIndex = emissiveTextureIndex;
 		emissive.materialIndex = record.materialIndex;

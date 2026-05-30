@@ -1668,6 +1668,7 @@ private:
 		float powerEstimate = 0.0f;
 		float selectionWeight = 0.0f;
 		float selectionPdf = 0.0f;
+		float emissionScale = 1.0f;
 		uint32_t stableKeyLo = 0;
 		uint32_t stableKeyHi = 0;
 	};
@@ -1685,6 +1686,7 @@ private:
 		uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
 		uint32_t emissiveTextureIndex = UINT32_MAX;
 		int32_t actorIndex = -1;
+		int32_t sectorIndex = -1;
 		float center[3] = {};
 		float primitiveArea = 0.0f;
 		float powerEstimate = 0.0f;
@@ -1692,6 +1694,8 @@ private:
 		float selectionPdf = 0.0f;
 		float emissiveColor[3] = {};
 		float emissiveIntensity = 0.0f;
+		float sectorResponseScale = 1.0f;
+		bool sectorResponseApplied = false;
 	};
 
 	struct EmissiveSamplingBuildContext

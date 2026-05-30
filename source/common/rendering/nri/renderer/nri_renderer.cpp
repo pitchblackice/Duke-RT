@@ -3195,6 +3195,7 @@ CVAR(Int, nri_ptsectorfiltermaxshade, 127, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfilterlotag, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorpulseframes, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorpulseamount, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptsectoremission, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, nri_ptsectoremissionintensity, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
@@ -6774,6 +6775,31 @@ namespace
 			SceneEmissiveSurfaceSourceFlag_AutoFullbright |
 			SceneEmissiveSurfaceSourceFlag_AutoTextureGlow |
 			SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0;
+	}
+
+	static float ResolveSectorEmissionScale(
+		const SceneLightSystem::SectorLightingRegistry& sectorRegistry,
+		const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface,
+		bool& outApplied)
+	{
+		outApplied = false;
+		if (!nri_ptsectoremission ||
+			!HasAutoEmissiveSourceFlags(surface.sourceFlags) ||
+			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) != 0 ||
+			surface.sectorIndex < 0)
+		{
+			return 1.0f;
+		}
+
+		const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
+		if (sectorIndex >= sectorRegistry.sectors.size())
+		{
+			return 1.0f;
+		}
+
+		const float scale = std::max(0.0f, sectorRegistry.sectors[sectorIndex].emitterResponseScale);
+		outApplied = scale != 1.0f;
+		return scale;
 	}
 
 	struct SkyFaceUpload
@@ -11912,7 +11938,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		return a.distanceSq < b.distanceSq;
 	});
 
-	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u min_surface=%.3f min_power=%.3f sampling_auto_only=%s\n",
+	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u min_surface=%.3f min_power=%.3f sampling_auto_only=%s sector_emission=%s\n",
 		(uint32_t)mBoundEmissivePrimitiveRecords.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
@@ -11925,7 +11951,8 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().reboundTopologyKeys.size(),
 		(float)nri_ptemissiveminsurface,
 		(float)nri_ptemissiveminpower,
-		nri_ptemissiveautoonly ? "on" : "off");
+		nri_ptemissiveautoonly ? "on" : "off",
+		nri_ptsectoremission ? "on" : "off");
 
 	const auto& emissiveSurfaces = mSceneLights.GetEmissiveSurfaces();
 	const uint32_t printCount = std::min<uint32_t>((uint32_t)candidates.size(), limit);
@@ -11934,7 +11961,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		const auto& record = *candidates[i].record;
 		const auto diagnosticIt = emissiveSurfaces.activeDiagnosticFlags.find(record.surfaceStableKey);
 		const uint32_t diagnosticFlags = diagnosticIt != emissiveSurfaces.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
-		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d sector=%d sector_scale=%.3f sector_applied=%s tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
 			i,
 			(unsigned long long)record.stableKey,
 			(unsigned long long)record.surfaceStableKey,
@@ -11948,6 +11975,9 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 			record.sourceFlags,
 			record.sourceRuleId,
 			record.actorIndex,
+			record.sectorIndex,
+			record.sectorResponseScale,
+			YesNo(record.sectorResponseApplied),
 			record.textureId,
 			GetMaterialEmissiveModeName(record.emissiveMode),
 			record.emissiveTextureIndex != UINT32_MAX ? record.emissiveTextureIndex : 0u,
@@ -12529,7 +12559,7 @@ void NRIRenderer::PrintStatus() const
 		mBoundRuntimeLightTileIndexCount,
 		mBoundRuntimeLightMaxTileOccupancy,
 		NRI_PTDEBUG_ANALYTIC_DIRECT);
-	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f\n",
+	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s sector_emission=%s glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f\n",
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().textureRules.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
@@ -12546,6 +12576,7 @@ void NRIRenderer::PrintStatus() const
 		(float)nri_ptemissiveminpower,
 		nri_ptemissiveheuristics ? "on" : "off",
 		nri_ptemissiveautoonly ? "on" : "off",
+		nri_ptsectoremission ? "on" : "off",
 		(float)nri_ptglowscale,
 		(float)nri_ptglowreach,
 		(float)nri_ptglowfalloff,
@@ -22352,6 +22383,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 
 	std::vector<BuiltCandidate> candidates;
 	const auto& activeSurfaces = mSceneLights.GetEmissiveSurfaces().activeSurfaces;
+	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
 	candidates.reserve(activeSurfaces.size());
 
 	auto appendSurfacePrimitives = [&](const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, const nri_scene::GeometryData* geometry, const std::vector<MaterialPrimitiveRange>& ranges, uint32_t dataSource, uint32_t primitiveBase)
@@ -22373,6 +22405,8 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			representativeLuminance = std::max(surface.powerEstimate / (surface.surfaceArea * surface.emissiveIntensity), 0.0f);
 		}
 		const float samplingScale = ResolveGlowSamplingScale(surface.sourceFlags, surface.emissiveMode);
+		bool sectorResponseApplied = false;
+		const float sectorResponseScale = ResolveSectorEmissionScale(sectorRegistry, surface, sectorResponseApplied);
 
 		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
 		{
@@ -22390,8 +22424,9 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.gpu.sourceFlags = surface.sourceFlags;
 			candidate.gpu.textureId = surface.textureId;
 			candidate.gpu.primitiveArea = primitiveArea;
-			candidate.gpu.powerEstimate = std::max(primitiveArea * representativeLuminance * surface.emissiveIntensity, 0.0f);
+			candidate.gpu.powerEstimate = std::max(primitiveArea * representativeLuminance * surface.emissiveIntensity * sectorResponseScale, 0.0f);
 			candidate.gpu.selectionWeight = candidate.gpu.powerEstimate * samplingScale;
+			candidate.gpu.emissionScale = sectorResponseScale;
 
 			candidate.debug.stableKey = HashCombine64(surface.stableKey, ((uint64_t)dataSource << 32u) | primitiveIndex);
 			candidate.debug.surfaceStableKey = surface.stableKey;
@@ -22404,11 +22439,14 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.debug.emissiveMode = surface.emissiveMode;
 			candidate.debug.emissiveTextureIndex = surface.emissiveTextureIndex;
 			candidate.debug.actorIndex = surface.actorIndex;
+			candidate.debug.sectorIndex = surface.sectorIndex;
 			candidate.debug.primitiveArea = primitiveArea;
 			candidate.debug.powerEstimate = candidate.gpu.powerEstimate;
 			candidate.debug.selectionWeight = candidate.gpu.selectionWeight;
 			candidate.debug.selectionPdf = 0.0f;
-			candidate.debug.emissiveIntensity = surface.emissiveIntensity;
+			candidate.debug.emissiveIntensity = surface.emissiveIntensity * sectorResponseScale;
+			candidate.debug.sectorResponseScale = sectorResponseScale;
+			candidate.debug.sectorResponseApplied = sectorResponseApplied;
 			Copy3(surface.emissiveColor, candidate.debug.emissiveColor);
 			ComputePrimitiveCenter(*geometry, localPrimitiveIndex, candidate.debug.center);
 
@@ -22558,6 +22596,7 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 {
 	uint64_t hash = 1469598103934665603ull;
 	hash = HashCombine64(hash, nri_ptemissiveautoonly ? 1ull : 0ull);
+	hash = HashCombine64(hash, nri_ptsectoremission ? 1ull : 0ull);
 	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.staticGeometry));
 	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.capturedGeometry));
 	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.runtimeMutationGeometry));
@@ -22566,6 +22605,7 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 	hash = HashCombine64(hash, (uint64_t)context.dynamicPrimitiveBaseOffset);
 
 	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
+	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
 	hash = HashCombine64(hash, (uint64_t)emissiveRegistry.activeSurfaces.size());
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
 	{
@@ -22576,6 +22616,16 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 
 		const auto bindingIt = emissiveRegistry.activeBindingHashes.find(surface.stableKey);
 		hash = HashCombine64(hash, bindingIt != emissiveRegistry.activeBindingHashes.end() ? bindingIt->second : 0ull);
+
+		if (nri_ptsectoremission &&
+			HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
+			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0 &&
+			surface.sectorIndex >= 0)
+		{
+			const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
+			hash = HashCombine64(hash, (uint64_t)sectorIndex);
+			hash = HashCombine64(hash, (uint64_t)FloatBits(sectorIndex < sectorRegistry.sectors.size() ? sectorRegistry.sectors[sectorIndex].emitterResponseScale : 1.0f));
+		}
 	}
 
 	return hash;

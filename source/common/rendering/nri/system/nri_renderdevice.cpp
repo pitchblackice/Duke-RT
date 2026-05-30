@@ -84,6 +84,7 @@ EXTERN_CVAR(Bool, nri_ptruntimedeferfarstructural)
 EXTERN_CVAR(Bool, nri_ptruntimedefernearinvisiblestructural)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
+EXTERN_CVAR(Bool, nri_ptsectoremission)
 EXTERN_CVAR(Float, nri_ptsectoremissionintensity)
 EXTERN_CVAR(Float, nri_ptsectoremissionmin)
 EXTERN_CVAR(Float, nri_ptsectoremissionmax)
@@ -2365,6 +2366,7 @@ CCMD(nri_ptsectorlight_clear)
 	nri_ptsectorfilterlotag = -1;
 	nri_ptsectorpulseframes = 0;
 	nri_ptsectorpulseamount = 0.0f;
+	nri_ptsectoremission = false;
 	nri_ptsectoremissionintensity = 1.0f;
 	nri_ptsectoremissionmin = 0.25f;
 	nri_ptsectoremissionmax = 3.0f;

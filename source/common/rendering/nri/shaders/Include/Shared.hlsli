@@ -142,6 +142,7 @@ struct EmissivePrimitiveData
 	float powerEstimate;
 	float selectionWeight;
 	float selectionPdf;
+	float emissionScale;
 	uint stableKeyLo;
 	uint stableKeyHi;
 };

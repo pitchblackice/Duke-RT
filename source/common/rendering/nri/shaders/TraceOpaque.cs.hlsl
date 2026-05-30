@@ -440,7 +440,7 @@ void EvaluateSampledEmissiveLighting(
 	const float3 lightPosition = SamplePointOnPrimitive(candidate.dataSource, primitive, rngState, lightUv, lightNormal);
 	outEmitterUv = lightUv;
 	const MaterialData lightMaterial = GetMaterialData(primitive.materialIndex, candidate.dataSource);
-	const float3 lightColor = SampleMaterialEmissionSource(primitive.materialIndex, candidate.dataSource, lightUv) * lightMaterial.emissiveIntensity;
+	const float3 lightColor = SampleMaterialEmissionSource(primitive.materialIndex, candidate.dataSource, lightUv) * lightMaterial.emissiveIntensity * max(candidate.emissionScale, 0.0);
 	const float falloffScale = max(lightMaterial.emissiveMaskScale, 0.25);
 	outEmitterRadiance = lightColor;
 	if (all(lightColor <= 0.0))

@@ -180,6 +180,7 @@ public:
 			uint32_t sourceRuleId = 0;
 			SceneLightRecordSource source = SceneLightRecordSource::None;
 			int32_t actorIndex = -1;
+			int32_t sectorIndex = -1;
 			uint32_t textureId = 0;
 			uint32_t emissiveTextureIndex = UINT32_MAX;
 			uint32_t materialIndex = UINT32_MAX;
