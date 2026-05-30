@@ -2664,6 +2664,7 @@ private:
 	uint64_t BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const;
 	uint64_t BuildEmissiveSectorResponsePayloadHash() const;
 	uint64_t BuildSectorLightingPayloadHash() const;
+	void TraceEmissiveSectorResponseChange();
 	void BuildEmissiveSamplingUpload(
 		const EmissiveSamplingBuildContext& context,
 		EmissivePrimitiveHeaderGpuData& outHeader,
@@ -3171,6 +3172,8 @@ private:
 	uint64_t mEmissiveSamplingPayloadHash = 0;
 	bool mEmissiveSectorResponsePayloadCacheValid = false;
 	uint64_t mEmissiveSectorResponsePayloadHash = 0;
+	bool mEmissiveSectorResponseTraceCacheValid = false;
+	uint64_t mEmissiveSectorResponseTraceHash = 0;
 	uint32_t mEmissiveTlasInstanceCount = 0;
 	uint32_t mEmissiveTlasStaticInstanceCount = 0;
 	uint32_t mEmissiveTlasDynamicInstanceCount = 0;

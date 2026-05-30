@@ -7935,6 +7935,8 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mEmissiveSamplingPayloadHash = 0;
 	mEmissiveSectorResponsePayloadCacheValid = false;
 	mEmissiveSectorResponsePayloadHash = 0;
+	mEmissiveSectorResponseTraceCacheValid = false;
+	mEmissiveSectorResponseTraceHash = 0;
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
@@ -21224,6 +21226,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 		ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightSectorMs);
 		mSceneLights.RebuildSectorLighting(gameplayLightTimeIndex, (uint32_t)sector.Size());
 	}
+	TraceEmissiveSectorResponseChange();
 	const auto& frameAppendStats = mSceneLights.GetFrameAppendStats();
 	mLastPerfShellTraceStats.sceneLightSurfaceRecordCount = frameAppendStats.totalRecordCount;
 	mLastPerfShellTraceStats.sceneLightStaticRecordCount = frameAppendStats.staticRecordCount;
@@ -22661,6 +22664,54 @@ uint64_t NRIRenderer::BuildEmissiveSectorResponsePayloadHash() const
 	}
 
 	return hash;
+}
+
+void NRIRenderer::TraceEmissiveSectorResponseChange()
+{
+	if (!ShouldTracePtPerf())
+	{
+		mEmissiveSectorResponseTraceCacheValid = false;
+		return;
+	}
+
+	const uint64_t sectorResponsePayloadHash = BuildEmissiveSectorResponsePayloadHash();
+	if (!mEmissiveSectorResponseTraceCacheValid)
+	{
+		mEmissiveSectorResponseTraceCacheValid = true;
+		mEmissiveSectorResponseTraceHash = sectorResponsePayloadHash;
+		return;
+	}
+
+	if (mEmissiveSectorResponseTraceHash == sectorResponsePayloadHash)
+	{
+		return;
+	}
+
+	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
+	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
+	uint32_t affectedEmitterCount = 0;
+	for (const auto& surface : emissiveRegistry.activeSurfaces)
+	{
+		if (HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
+			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0 &&
+			surface.sectorIndex >= 0)
+		{
+			affectedEmitterCount++;
+		}
+	}
+
+	Printf("NRI PT sector response change: frame=%u affected_emitters=%u total_emitters=%u sector_response_hash=0x%016llx->0x%016llx response=boost:%u dim:%u neutral:%u sector_emission=%s\n",
+		mFrameIndex,
+		affectedEmitterCount,
+		(uint32_t)emissiveRegistry.activeSurfaces.size(),
+		(unsigned long long)mEmissiveSectorResponseTraceHash,
+		(unsigned long long)sectorResponsePayloadHash,
+		sectorRegistry.responseBoostSectorCount,
+		sectorRegistry.responseDimSectorCount,
+		sectorRegistry.responseNeutralSectorCount,
+		nri_ptsectoremission ? "on" : "off");
+
+	mEmissiveSectorResponseTraceHash = sectorResponsePayloadHash;
 }
 
 uint64_t NRIRenderer::BuildSectorLightingPayloadHash() const
@@ -36720,6 +36771,8 @@ void NRIRenderer::DestroySceneBuffers()
 	mEmissiveSamplingPayloadHash = 0;
 	mEmissiveSectorResponsePayloadCacheValid = false;
 	mEmissiveSectorResponsePayloadHash = 0;
+	mEmissiveSectorResponseTraceCacheValid = false;
+	mEmissiveSectorResponseTraceHash = 0;
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
