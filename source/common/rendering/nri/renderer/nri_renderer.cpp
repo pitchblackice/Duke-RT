@@ -2659,6 +2659,11 @@ public:
 		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
 	}
 
+	static uint32_t BuildEmissiveOverrideRuleId(const ResolvedLightOverlayEmissiveOverrideRule& rule)
+	{
+		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
+	}
+
 	static uint64_t BuildMapOverlayStableKey(uint32_t ruleId, const float position[3])
 	{
 		uint64_t key = 1469598103934665603ull;
@@ -2891,6 +2896,41 @@ public:
 			overlayRule.radius = resolvedRule.radius;
 			overlayRule.flickerFrames = resolvedRule.flickerFrames;
 			outRules.push_back(overlayRule);
+		}
+	}
+
+	static void BuildEmissiveOverrideRules(
+		const ResolvedLightOverlaySet& resolved,
+		std::vector<SceneLightSystem::EmissiveOverrideRule>& outRules)
+	{
+		outRules.clear();
+		outRules.reserve((size_t)resolved.emissiveOverrideRules.Size());
+		for (const auto& resolvedRule : resolved.emissiveOverrideRules)
+		{
+			if (!resolvedRule.hasSectorFilter &&
+				!resolvedRule.hasWallFilter &&
+				!resolvedRule.hasTileFilter)
+			{
+				continue;
+			}
+
+			SceneLightSystem::EmissiveOverrideRule rule = {};
+			rule.ruleId = BuildEmissiveOverrideRuleId(resolvedRule);
+			rule.hasSectorFilter = resolvedRule.hasSectorFilter;
+			rule.sectorFilter = resolvedRule.sectorFilter;
+			rule.hasWallFilter = resolvedRule.hasWallFilter;
+			rule.wallFilter = resolvedRule.wallFilter;
+			rule.hasTileFilter = resolvedRule.hasTileFilter && resolvedRule.tileFilter >= 0;
+			rule.tileFilter = rule.hasTileFilter ? (uint32_t)resolvedRule.tileFilter : 0u;
+			rule.hasIntensityScale = resolvedRule.hasIntensityScale;
+			rule.intensityScale = resolvedRule.intensityScale;
+			rule.hasReachScale = resolvedRule.hasReachScale;
+			rule.reachScale = resolvedRule.reachScale;
+			rule.hasSectorResponse = resolvedRule.hasSectorResponse;
+			rule.sectorResponse = resolvedRule.sectorResponse;
+			rule.hasSignalSector = resolvedRule.hasSignalSector && resolvedRule.signalSector >= 0;
+			rule.signalSector = rule.hasSignalSector ? resolvedRule.signalSector : -1;
+			outRules.push_back(rule);
 		}
 	}
 
@@ -6784,9 +6824,17 @@ namespace
 	{
 		outApplied = false;
 		if (!nri_ptsectoremission ||
-			!HasAutoEmissiveSourceFlags(surface.sourceFlags) ||
-			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) != 0 ||
+			!surface.sectorResponseEnabled ||
 			surface.sectorIndex < 0)
+		{
+			return 1.0f;
+		}
+
+		const bool overrideEligible = (surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0;
+		const bool autoEligible =
+			HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
+			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0;
+		if (!overrideEligible && !autoEligible)
 		{
 			return 1.0f;
 		}
@@ -11882,10 +11930,12 @@ void NRIRenderer::UpdateNightVisionState()
 void NRIRenderer::PrintTextureEmissiveHeuristics() const
 {
 	const auto& emissive = mSceneLights.GetEmissiveSurfaces();
-	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u active=%u total_power=%.3f glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f truncated=%u\n",
+	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u overrides=%u override_matches=%u active=%u total_power=%.3f glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f truncated=%u\n",
 		(uint32_t)emissive.textureRules.size(),
 		emissive.autoTaggedCount,
 		emissive.explicitRuleMatchCount,
+		emissive.overrideRuleCount,
+		emissive.overrideMatchedSurfaceCount,
 		(uint32_t)emissive.activeSurfaces.size(),
 		emissive.totalPowerEstimate,
 		(float)nri_ptglowscale,
@@ -11942,11 +11992,13 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		return a.distanceSq < b.distanceSq;
 	});
 
-	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u min_surface=%.3f min_power=%.3f sampling_auto_only=%s sector_emission=%s\n",
+	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u overrides=%u override_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u min_surface=%.3f min_power=%.3f sampling_auto_only=%s sector_emission=%s\n",
 		(uint32_t)mBoundEmissivePrimitiveRecords.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
 		mSceneLights.GetEmissiveSurfaces().explicitRuleMatchCount,
+		mSceneLights.GetEmissiveSurfaces().overrideRuleCount,
+		mSceneLights.GetEmissiveSurfaces().overrideMatchedSurfaceCount,
 		mBoundEmissiveTotalPower,
 		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildTopologyChanged),
 		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildPropertiesChanged),
@@ -12563,11 +12615,13 @@ void NRIRenderer::PrintStatus() const
 		mBoundRuntimeLightTileIndexCount,
 		mBoundRuntimeLightMaxTileOccupancy,
 		NRI_PTDEBUG_ANALYTIC_DIRECT);
-	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s sector_emission=%s glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f\n",
+	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u overrides=%u override_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s sector_emission=%s glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f\n",
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().textureRules.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
 		mSceneLights.GetEmissiveSurfaces().explicitRuleMatchCount,
+		mSceneLights.GetEmissiveSurfaces().overrideRuleCount,
+		mSceneLights.GetEmissiveSurfaces().overrideMatchedSurfaceCount,
 		mSceneLights.GetEmissiveSurfaces().totalPowerEstimate,
 		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildTopologyChanged),
 		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildPropertiesChanged),
@@ -21200,7 +21254,9 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mHasDirectionalLightState = true;
 	std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>> actorOverlayRules;
 	std::vector<SceneLightSystem::AnalyticLightRegistry::MapOverlayRule> mapOverlayRules;
+	std::vector<SceneLightSystem::EmissiveOverrideRule> emissiveOverrideRules;
 	BuildActorAnalyticOverlayRules(resolvedLightOverlays, actorOverlayRules);
+	BuildEmissiveOverrideRules(resolvedLightOverlays, emissiveOverrideRules);
 	if (mMapWorld.valid)
 	{
 		BuildStaticMapAnalyticOverlayRules(resolvedLightOverlays, mMapWorld, mapOverlayRules);
@@ -21220,7 +21276,9 @@ void NRIRenderer::RefreshSceneLightSystem(
 	}
 	{
 		ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightEmissiveMs);
-		mSceneLights.RebuildEmissiveSurfaces(NRI_MAX_EMISSIVE_SURFACES);
+		mSceneLights.RebuildEmissiveSurfaces(
+			NRI_MAX_EMISSIVE_SURFACES,
+			emissiveOverrideRules.empty() ? nullptr : &emissiveOverrideRules);
 	}
 	{
 		ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightSectorMs);
@@ -22409,7 +22467,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 		{
 			representativeLuminance = std::max(surface.powerEstimate / (surface.surfaceArea * surface.emissiveIntensity), 0.0f);
 		}
-		const float samplingScale = ResolveGlowSamplingScale(surface.sourceFlags, surface.emissiveMode);
+		const float samplingScale = ResolveGlowSamplingScale(surface.sourceFlags, surface.emissiveMode) * std::max(surface.reachScale, 0.0f);
 		bool sectorResponseApplied = false;
 		const float sectorResponseScale = ResolveSectorEmissionScale(sectorRegistry, surface, sectorResponseApplied);
 
@@ -22622,10 +22680,13 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 		const auto bindingIt = emissiveRegistry.activeBindingHashes.find(surface.stableKey);
 		hash = HashCombine64(hash, bindingIt != emissiveRegistry.activeBindingHashes.end() ? bindingIt->second : 0ull);
 
-		if (nri_ptsectoremission &&
-			HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
-			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0 &&
-			surface.sectorIndex >= 0)
+		const bool sectorResponseEligible =
+			surface.sectorResponseEnabled &&
+			surface.sectorIndex >= 0 &&
+			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
+				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
+					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
+		if (nri_ptsectoremission && sectorResponseEligible)
 		{
 			const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
 			hash = HashCombine64(hash, (uint64_t)sectorIndex);
@@ -22649,9 +22710,13 @@ uint64_t NRIRenderer::BuildEmissiveSectorResponsePayloadHash() const
 	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
 	{
-		if (!HasAutoEmissiveSourceFlags(surface.sourceFlags) ||
-			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) != 0 ||
-			surface.sectorIndex < 0)
+		const bool sectorResponseEligible =
+			surface.sectorResponseEnabled &&
+			surface.sectorIndex >= 0 &&
+			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
+				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
+					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
+		if (!sectorResponseEligible)
 		{
 			continue;
 		}
@@ -22692,9 +22757,13 @@ void NRIRenderer::TraceEmissiveSectorResponseChange()
 	uint32_t affectedEmitterCount = 0;
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
 	{
-		if (HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
-			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0 &&
-			surface.sectorIndex >= 0)
+		const bool sectorResponseEligible =
+			surface.sectorResponseEnabled &&
+			surface.sectorIndex >= 0 &&
+			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
+				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
+					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
+		if (sectorResponseEligible)
 		{
 			affectedEmitterCount++;
 		}

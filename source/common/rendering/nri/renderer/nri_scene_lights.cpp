@@ -839,9 +839,12 @@ namespace
 		uint64_t hash = 1469598103934665603ull;
 		hash = HashCombine64(hash, (uint64_t)emissive.sourceFlags);
 		hash = HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
+		hash = HashCombine64(hash, (uint64_t)emissive.overrideRuleId);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.sectorIndex);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.authoredSectorIndex);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.wallIndex);
 		hash = HashCombine64(hash, (uint64_t)emissive.textureId);
 		hash = HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
 		hash = HashCombine64(hash, (uint64_t)emissive.emissiveMode);
@@ -854,7 +857,9 @@ namespace
 		hash = HashQuantizedFloat(hash, emissive.emissiveColor[1], 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.emissiveColor[2], 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.emissiveIntensity, 4096.0f);
+		hash = HashQuantizedFloat(hash, emissive.reachScale, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.powerEstimate, 256.0f);
+		hash = HashCombine64(hash, emissive.sectorResponseEnabled ? 1ull : 0ull);
 		return hash;
 	}
 
@@ -863,14 +868,64 @@ namespace
 		uint64_t hash = 1469598103934665603ull;
 		hash = HashCombine64(hash, (uint64_t)emissive.sourceFlags);
 		hash = HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
+		hash = HashCombine64(hash, (uint64_t)emissive.overrideRuleId);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
 		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.sectorIndex);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.authoredSectorIndex);
+		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.wallIndex);
 		hash = HashCombine64(hash, (uint64_t)emissive.textureId);
 		hash = HashCombine64(hash, (uint64_t)emissive.materialIndex);
 		hash = HashCombine64(hash, (uint64_t)emissive.emissiveMode);
 		hash = HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
 		return hash;
+	}
+
+	bool EmissiveOverrideMatchesSurface(
+		const SceneLightSystem::EmissiveOverrideRule& rule,
+		const SceneLightSystem::SurfaceRecord& record)
+	{
+		if (rule.hasSectorFilter && record.provenance.sectorIndex != rule.sectorFilter)
+		{
+			return false;
+		}
+		if (rule.hasWallFilter && record.provenance.wallIndex != rule.wallFilter)
+		{
+			return false;
+		}
+		if (rule.hasTileFilter && record.material.textureId != rule.tileFilter)
+		{
+			return false;
+		}
+		return rule.hasSectorFilter || rule.hasWallFilter || rule.hasTileFilter;
+	}
+
+	void ApplyEmissiveOverrideRule(
+		const SceneLightSystem::EmissiveOverrideRule& rule,
+		SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive)
+	{
+		emissive.sourceFlags |= SceneEmissiveSurfaceSourceFlag_LightOverlayOverride;
+		emissive.overrideRuleId = rule.ruleId;
+		if (rule.hasIntensityScale)
+		{
+			emissive.emissiveIntensity *= std::max(rule.intensityScale, 0.0f);
+		}
+		if (rule.hasReachScale)
+		{
+			emissive.reachScale *= std::max(rule.reachScale, 0.0f);
+		}
+		if (rule.hasSectorResponse)
+		{
+			emissive.sectorResponseEnabled = rule.sectorResponse;
+		}
+		if (rule.hasSignalSector)
+		{
+			emissive.sectorIndex = rule.signalSector;
+			if (!rule.hasSectorResponse)
+			{
+				emissive.sectorResponseEnabled = true;
+			}
+		}
 	}
 
 	bool EvaluateEmissiveMaterial(
@@ -1420,11 +1475,13 @@ void SceneLightSystem::RebuildAnalyticLights(
 	mAnalyticLights.activeLights = std::move(nextLights);
 }
 
-void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
+void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces, const std::vector<EmissiveOverrideRule>* overrideRules)
 {
 	mEmissiveSurfaces.totalPowerEstimate = 0.0f;
 	mEmissiveSurfaces.autoTaggedCount = 0;
 	mEmissiveSurfaces.explicitRuleMatchCount = 0;
+	mEmissiveSurfaces.overrideRuleCount = overrideRules != nullptr ? (uint32_t)overrideRules->size() : 0u;
+	mEmissiveSurfaces.overrideMatchedSurfaceCount = 0;
 	mEmissiveSurfaces.truncatedSurfaceCount = 0;
 
 	std::vector<EmissiveSurfaceRegistry::EmissiveSurfaceRecord> nextSurfaces;
@@ -1456,8 +1513,39 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 		const float resolvedLuminance = emissiveMode == nri_scene::MaterialEmissiveMode_UseBaseTexture ?
 			ComputeColorLuminance(record.material.averageColor) :
 			ComputeColorLuminance(emissiveColor);
-		const float powerEstimate = record.surfaceArea * resolvedLuminance * emissiveIntensity;
-		if (powerEstimate < minPower)
+
+		EmissiveSurfaceRegistry::EmissiveSurfaceRecord emissive = {};
+		emissive.stableKey = BuildEmissiveTopologyKey(record);
+		emissive.sourceFlags = sourceFlags;
+		emissive.sourceRuleId = sourceRuleId;
+		emissive.source = record.source;
+		emissive.actorIndex = record.provenance.actorIndex;
+		emissive.sectorIndex = record.provenance.sectorIndex;
+		emissive.authoredSectorIndex = record.provenance.sectorIndex;
+		emissive.wallIndex = record.provenance.wallIndex;
+		emissive.textureId = record.material.textureId;
+		emissive.emissiveTextureIndex = emissiveTextureIndex;
+		emissive.materialIndex = record.materialIndex;
+		emissive.emissiveMode = emissiveMode;
+		emissive.surfaceArea = record.surfaceArea;
+		emissive.boundsRadius = record.boundsRadius;
+		Copy3f(record.center, emissive.center);
+		Copy3f(emissiveColor, emissive.emissiveColor);
+		emissive.emissiveIntensity = emissiveIntensity;
+		bool matchedOverride = false;
+		if (overrideRules != nullptr)
+		{
+			for (const EmissiveOverrideRule& rule : *overrideRules)
+			{
+				if (EmissiveOverrideMatchesSurface(rule, record))
+				{
+					ApplyEmissiveOverrideRule(rule, emissive);
+					matchedOverride = true;
+				}
+			}
+		}
+		emissive.powerEstimate = record.surfaceArea * resolvedLuminance * emissive.emissiveIntensity;
+		if (emissive.powerEstimate < minPower)
 		{
 			continue;
 		}
@@ -1467,24 +1555,10 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 			mEmissiveSurfaces.truncatedSurfaceCount++;
 			continue;
 		}
-
-		EmissiveSurfaceRegistry::EmissiveSurfaceRecord emissive = {};
-		emissive.stableKey = BuildEmissiveTopologyKey(record);
-		emissive.sourceFlags = sourceFlags;
-		emissive.sourceRuleId = sourceRuleId;
-		emissive.source = record.source;
-		emissive.actorIndex = record.provenance.actorIndex;
-		emissive.sectorIndex = record.provenance.sectorIndex;
-		emissive.textureId = record.material.textureId;
-		emissive.emissiveTextureIndex = emissiveTextureIndex;
-		emissive.materialIndex = record.materialIndex;
-		emissive.emissiveMode = emissiveMode;
-		emissive.surfaceArea = record.surfaceArea;
-		emissive.boundsRadius = record.boundsRadius;
-		emissive.powerEstimate = powerEstimate;
-		Copy3f(record.center, emissive.center);
-		Copy3f(emissiveColor, emissive.emissiveColor);
-		emissive.emissiveIntensity = emissiveIntensity;
+		if (matchedOverride)
+		{
+			mEmissiveSurfaces.overrideMatchedSurfaceCount++;
+		}
 		nextSurfaces.push_back(emissive);
 
 		if ((sourceFlags & (SceneEmissiveSurfaceSourceFlag_AutoFullbright | SceneEmissiveSurfaceSourceFlag_AutoTextureGlow | SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0)
@@ -1495,7 +1569,7 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces)
 		{
 			mEmissiveSurfaces.explicitRuleMatchCount++;
 		}
-		mEmissiveSurfaces.totalPowerEstimate += powerEstimate;
+		mEmissiveSurfaces.totalPowerEstimate += emissive.powerEstimate;
 	}
 
 	std::vector<uint64_t> nextTopologyKeys;

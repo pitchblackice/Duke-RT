@@ -40,6 +40,7 @@ enum SceneEmissiveSurfaceSourceFlags : uint32_t
 	SceneEmissiveSurfaceSourceFlag_AutoTextureGlow = 1u << 1,
 	SceneEmissiveSurfaceSourceFlag_AutoGlowmap = 1u << 2,
 	SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule = 1u << 3,
+	SceneEmissiveSurfaceSourceFlag_LightOverlayOverride = 1u << 4,
 };
 
 enum SceneSectorLightSourceFlags : uint32_t
@@ -178,9 +179,12 @@ public:
 			uint64_t stableKey = 0;
 			uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
 			uint32_t sourceRuleId = 0;
+			uint32_t overrideRuleId = 0;
 			SceneLightRecordSource source = SceneLightRecordSource::None;
 			int32_t actorIndex = -1;
 			int32_t sectorIndex = -1;
+			int32_t authoredSectorIndex = -1;
+			int32_t wallIndex = -1;
 			uint32_t textureId = 0;
 			uint32_t emissiveTextureIndex = UINT32_MAX;
 			uint32_t materialIndex = UINT32_MAX;
@@ -190,7 +194,9 @@ public:
 			float surfaceArea = 0.0f;
 			float emissiveColor[3] = {};
 			float emissiveIntensity = 0.0f;
+			float reachScale = 1.0f;
 			float powerEstimate = 0.0f;
+			bool sectorResponseEnabled = true;
 		};
 
 		std::vector<EmissiveHeuristicRule> textureRules;
@@ -205,6 +211,8 @@ public:
 		float totalPowerEstimate = 0.0f;
 		uint32_t autoTaggedCount = 0;
 		uint32_t explicitRuleMatchCount = 0;
+		uint32_t overrideRuleCount = 0;
+		uint32_t overrideMatchedSurfaceCount = 0;
 		uint32_t truncatedSurfaceCount = 0;
 		uint32_t nextRuleId = 1;
 		bool topologyChanged = false;
@@ -213,6 +221,25 @@ public:
 		bool materialPropertiesChanged = false;
 		bool lastBuildTopologyChanged = false;
 		bool lastBuildPropertiesChanged = false;
+	};
+
+	struct EmissiveOverrideRule
+	{
+		uint32_t ruleId = 0;
+		bool hasSectorFilter = false;
+		int32_t sectorFilter = -1;
+		bool hasWallFilter = false;
+		int32_t wallFilter = -1;
+		bool hasTileFilter = false;
+		uint32_t tileFilter = 0;
+		bool hasIntensityScale = false;
+		float intensityScale = 1.0f;
+		bool hasReachScale = false;
+		float reachScale = 1.0f;
+		bool hasSectorResponse = false;
+		bool sectorResponse = true;
+		bool hasSignalSector = false;
+		int32_t signalSector = -1;
 	};
 
 	struct SectorLightingRegistry
@@ -317,7 +344,7 @@ public:
 		uint32_t maxActiveLights,
 		const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules = nullptr,
 		const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules = nullptr);
-	void RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces);
+	void RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces, const std::vector<EmissiveOverrideRule>* overrideRules = nullptr);
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
 
 	bool AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);

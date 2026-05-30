@@ -124,6 +124,7 @@ namespace
 		std::unordered_map<std::string, int> directionalRuleLookup;
 		std::unordered_map<std::string, int> muzzleFlashRuleLookup;
 		std::unordered_map<std::string, int> mapLightRuleLookup;
+		std::unordered_map<std::string, int> emissiveOverrideLookup;
 		std::unordered_map<std::string, int> actorOverrideLookup;
 
 		void SetDefaults(const ParsedLightOverlayDefaults& defaults)
@@ -206,6 +207,26 @@ namespace
 			if (existing.source.lumpNum == rule.source.lumpNum)
 			{
 				Printf(TEXTCOLOR_ORANGE "LIGHTOVR warning: duplicate light rule '%s' for map '%s' in %s; using the last definition.\n",
+					rule.id.GetChars(), rule.mapName.GetChars(), rule.source.sourceName.GetChars());
+			}
+			existing = rule;
+		}
+
+		void AddEmissiveOverrideRule(const ParsedLightOverlayEmissiveOverrideRule& rule)
+		{
+			const std::string key = MakeMapScopedKey(rule.mapName, "emissiveoverride", rule.id);
+			auto it = emissiveOverrideLookup.find(key);
+			if (it == emissiveOverrideLookup.end())
+			{
+				emissiveOverrideLookup.emplace(key, database.emissiveOverrideRules.Size());
+				database.emissiveOverrideRules.Push(rule);
+				return;
+			}
+
+			auto& existing = database.emissiveOverrideRules[it->second];
+			if (existing.source.lumpNum == rule.source.lumpNum)
+			{
+				Printf(TEXTCOLOR_ORANGE "LIGHTOVR warning: duplicate emissiveoverride '%s' for map '%s' in %s; using the last definition.\n",
 					rule.id.GetChars(), rule.mapName.GetChars(), rule.source.sourceName.GetChars());
 			}
 			existing = rule;
@@ -660,6 +681,10 @@ namespace
 				{
 					ParseMapLightRule(mapName);
 				}
+				else if (sc.Compare("emissiveoverride"))
+				{
+					ParseEmissiveOverrideRule(mapName);
+				}
 				else if (sc.Compare("actoroverride"))
 				{
 					ParseActorOverrideRule(mapName);
@@ -819,6 +844,89 @@ namespace
 			builder.AddMapLightRule(rule);
 		}
 
+		void ParseEmissiveOverrideRule(const FString& mapName)
+		{
+			sc.MustGetString();
+			ParsedLightOverlayEmissiveOverrideRule rule;
+			rule.mapName = mapName;
+			rule.id = sc.String;
+			rule.source = MakeSourceLocation(sc.GetMessageLine());
+
+			sc.MustGetStringName("{");
+			while (!sc.CheckString("}"))
+			{
+				sc.MustGetString();
+				if (sc.Compare("sector"))
+				{
+					sc.MustGetNumber();
+					rule.hasSectorFilter = true;
+					rule.sectorFilter = sc.Number;
+				}
+				else if (sc.Compare("wall"))
+				{
+					sc.MustGetNumber();
+					rule.hasWallFilter = true;
+					rule.wallFilter = sc.Number;
+				}
+				else if (sc.Compare("tile"))
+				{
+					sc.MustGetNumber();
+					rule.hasTileFilter = true;
+					rule.tileFilter = sc.Number;
+				}
+				else if (sc.Compare("intensityscale"))
+				{
+					sc.MustGetFloat();
+					rule.hasIntensityScale = true;
+					rule.intensityScale = (float)sc.Float;
+				}
+				else if (sc.Compare("reachscale"))
+				{
+					sc.MustGetFloat();
+					rule.hasReachScale = true;
+					rule.reachScale = (float)sc.Float;
+				}
+				else if (sc.Compare("sectorresponse"))
+				{
+					sc.MustGetString();
+					rule.hasSectorResponse = true;
+					if (sc.Compare("on") || sc.Compare("true") || sc.Compare("yes"))
+					{
+						rule.sectorResponse = true;
+					}
+					else if (sc.Compare("off") || sc.Compare("false") || sc.Compare("no"))
+					{
+						rule.sectorResponse = false;
+					}
+					else
+					{
+						sc.ScriptMessage("Invalid sectorresponse value '%s'; expected off/on", sc.String);
+					}
+				}
+				else if (sc.Compare("signal"))
+				{
+					sc.MustGetString();
+					if (sc.Compare("sector"))
+					{
+						sc.MustGetNumber();
+						rule.hasSignalSector = true;
+						rule.signalSector = sc.Number;
+					}
+					else
+					{
+						sc.ScriptMessage("Unknown emissiveoverride signal target '%s'; expected sector", sc.String);
+					}
+				}
+				else
+				{
+					SkipUnknownField("emissiveoverride", sc.String);
+				}
+			}
+
+			FinalizeSourceLocation(rule.source);
+			builder.AddEmissiveOverrideRule(rule);
+		}
+
 		void ParseActorOverrideRule(const FString& mapName)
 		{
 			sc.MustGetString();
@@ -945,6 +1053,7 @@ namespace
 
 		for (const auto& rule : database.directionalRules) addMap(rule.mapName);
 		for (const auto& rule : database.mapLightRules) addMap(rule.mapName);
+		for (const auto& rule : database.emissiveOverrideRules) addMap(rule.mapName);
 		for (const auto& rule : database.actorOverrideRules) addMap(rule.mapName);
 
 		std::sort(mapNames.begin(), mapNames.end(), [](const FString& left, const FString& right)
@@ -1069,6 +1178,20 @@ namespace
 		AppendLine(text, 2, "}");
 	}
 
+	static void AppendEmissiveOverrideRuleBlock(FString& text, const ParsedLightOverlayEmissiveOverrideRule& rule)
+	{
+		AppendLine(text, 2, FStringf("emissiveoverride %s", QuoteLightOverlayString(rule.id).GetChars()));
+		AppendLine(text, 2, "{");
+		if (rule.hasSectorFilter) AppendLine(text, 3, FStringf("sector %d", rule.sectorFilter));
+		if (rule.hasWallFilter) AppendLine(text, 3, FStringf("wall %d", rule.wallFilter));
+		if (rule.hasTileFilter) AppendLine(text, 3, FStringf("tile %d", rule.tileFilter));
+		if (rule.hasIntensityScale) AppendLine(text, 3, FStringf("intensityscale %s", FormatLightOverlayFloat(rule.intensityScale).GetChars()));
+		if (rule.hasReachScale) AppendLine(text, 3, FStringf("reachscale %s", FormatLightOverlayFloat(rule.reachScale).GetChars()));
+		if (rule.hasSectorResponse) AppendShadowStateField(text, 3, "sectorresponse", rule.sectorResponse);
+		if (rule.hasSignalSector) AppendLine(text, 3, FStringf("signal sector %d", rule.signalSector));
+		AppendLine(text, 2, "}");
+	}
+
 	static void AppendActorOverrideRuleBlock(FString& text, const ParsedLightOverlayActorOverrideRule& rule)
 	{
 		AppendLine(text, 2, FStringf("actoroverride %s", QuoteLightOverlayString(rule.id).GetChars()));
@@ -1139,6 +1262,19 @@ namespace
 		return -1;
 	}
 
+	static int32_t FindEmissiveOverrideRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.emissiveOverrideRules.Size(); ++i)
+		{
+			if (database.emissiveOverrideRules[i].mapName.CompareNoCase(mapName) == 0 &&
+				database.emissiveOverrideRules[i].id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
 	static int32_t FindActorOverrideRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
 	{
 		for (unsigned i = 0; i < (unsigned)database.actorOverrideRules.Size(); ++i)
@@ -1165,6 +1301,7 @@ namespace
 		for (const auto& rule : database.directionalRules) update(rule.source);
 		for (const auto& rule : database.muzzleFlashRules) update(rule.source);
 		for (const auto& rule : database.mapLightRules) update(rule.source);
+		for (const auto& rule : database.emissiveOverrideRules) update(rule.source);
 		for (const auto& rule : database.actorOverrideRules) update(rule.source);
 		return nextOrderIndex + 1;
 	}
@@ -1204,12 +1341,13 @@ namespace
 
 	static void DumpParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database)
 	{
-		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d directional=%d actor_overrides=%d parse_errors=%s\n",
+		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d directional=%d actor_overrides=%d parse_errors=%s\n",
 			database.generation,
 			database.sourceFiles.Size(),
 			database.actorRules.Size(),
 			database.muzzleFlashRules.Size(),
 			database.mapLightRules.Size(),
+			database.emissiveOverrideRules.Size(),
 			database.directionalRules.Size(),
 			database.actorOverrideRules.Size(),
 			database.hadParseErrors ? "yes" : "no");
@@ -1298,6 +1436,21 @@ namespace
 			if (rule->hasFlicker) Printf("  flicker_frames=%u\n", rule->flickerFrames);
 		}
 
+		for (const ParsedLightOverlayEmissiveOverrideRule* rule : SortRulesByOrder(database.emissiveOverrideRules))
+		{
+			Printf("LIGHTOVR emissiveoverride %s map=%s source=%s\n",
+				rule->id.GetChars(),
+				rule->mapName.GetChars(),
+				SourceLocationText(rule->source).GetChars());
+			if (rule->hasSectorFilter) Printf("  sector=%d\n", rule->sectorFilter);
+			if (rule->hasWallFilter) Printf("  wall=%d\n", rule->wallFilter);
+			if (rule->hasTileFilter) Printf("  tile=%d\n", rule->tileFilter);
+			if (rule->hasIntensityScale) Printf("  intensityscale=%.3f\n", rule->intensityScale);
+			if (rule->hasReachScale) Printf("  reachscale=%.3f\n", rule->reachScale);
+			if (rule->hasSectorResponse) Printf("  sectorresponse=%s\n", rule->sectorResponse ? "on" : "off");
+			if (rule->hasSignalSector) Printf("  signal_sector=%d\n", rule->signalSector);
+		}
+
 		for (const ParsedLightOverlayActorOverrideRule* rule : SortRulesByOrder(database.actorOverrideRules))
 		{
 			Printf("LIGHTOVR actoroverride %s map=%s actorclass=%s shadowreceive=%s shadowcast=%s source=%s\n",
@@ -1312,7 +1465,7 @@ namespace
 
 	static void DumpResolvedLightOverlaySet(const ResolvedLightOverlaySet& resolved)
 	{
-		Printf("LIGHTOVR resolved: parsed_generation=%u resolved_generation=%u map=%s current_map=%s actor_rules=%d muzzle_flashes=%d map_lights=%d directional=%d actor_overrides=%d\n",
+		Printf("LIGHTOVR resolved: parsed_generation=%u resolved_generation=%u map=%s current_map=%s actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d directional=%d actor_overrides=%d\n",
 			resolved.parsedGeneration,
 			resolved.resolvedGeneration,
 			resolved.activeMapName.IsNotEmpty() ? resolved.activeMapName.GetChars() : "(none)",
@@ -1320,6 +1473,7 @@ namespace
 			resolved.actorRules.Size(),
 			resolved.muzzleFlashRules.Size(),
 			resolved.mapLightRules.Size(),
+			resolved.emissiveOverrideRules.Size(),
 			resolved.directionalRules.Size(),
 			resolved.actorOverrideRules.Size());
 
@@ -1369,6 +1523,14 @@ namespace
 				rule.mapName.GetChars(),
 				rule.lightType.GetChars(),
 				AnchorTypeName(rule.anchorType),
+				SourceLocationText(rule.source).GetChars());
+		}
+
+		for (const auto& rule : resolved.emissiveOverrideRules)
+		{
+			Printf("LIGHTOVR resolved emissiveoverride %s map=%s source=%s\n",
+				rule.id.GetChars(),
+				rule.mapName.GetChars(),
 				SourceLocationText(rule.source).GetChars());
 		}
 
@@ -1497,6 +1659,27 @@ namespace
 		destination.flickerFrames = source.flickerFrames;
 	}
 
+	static void CopyEmissiveOverrideRule(const ParsedLightOverlayEmissiveOverrideRule& source, ResolvedLightOverlayEmissiveOverrideRule& destination)
+	{
+		destination.mapName = source.mapName;
+		destination.id = source.id;
+		destination.source = source.source;
+		destination.hasSectorFilter = source.hasSectorFilter;
+		destination.sectorFilter = source.sectorFilter;
+		destination.hasWallFilter = source.hasWallFilter;
+		destination.wallFilter = source.wallFilter;
+		destination.hasTileFilter = source.hasTileFilter;
+		destination.tileFilter = source.tileFilter;
+		destination.hasIntensityScale = source.hasIntensityScale;
+		destination.intensityScale = source.intensityScale;
+		destination.hasReachScale = source.hasReachScale;
+		destination.reachScale = source.reachScale;
+		destination.hasSectorResponse = source.hasSectorResponse;
+		destination.sectorResponse = source.sectorResponse;
+		destination.hasSignalSector = source.hasSignalSector;
+		destination.signalSector = source.signalSector;
+	}
+
 	static void CopyActorOverrideRule(const ParsedLightOverlayActorOverrideRule& source, ResolvedLightOverlayActorOverrideRule& destination)
 	{
 		destination.mapName = source.mapName;
@@ -1560,6 +1743,16 @@ namespace
 			}
 		}
 
+		for (const auto& source : GLightOverlayDatabase.emissiveOverrideRules)
+		{
+			if (mapName.IsNotEmpty() && source.mapName.CompareNoCase(mapName) == 0)
+			{
+				ResolvedLightOverlayEmissiveOverrideRule destination;
+				CopyEmissiveOverrideRule(source, destination);
+				resolved.emissiveOverrideRules.Push(destination);
+			}
+		}
+
 		for (const auto& source : GLightOverlayDatabase.actorOverrideRules)
 		{
 			if (mapName.IsNotEmpty() && source.mapName.CompareNoCase(mapName) == 0)
@@ -1586,7 +1779,7 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 		AppendLine(text, 1, "defaults");
 		AppendLine(text, 1, "{");
 		AppendLine(text, 1, "}");
-		if (database.actorRules.Size() > 0 || database.muzzleFlashRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
+		if (database.actorRules.Size() > 0 || database.muzzleFlashRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.emissiveOverrideRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
 		{
 			text << "\n";
 		}
@@ -1664,6 +1857,24 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 			AppendMapLightRuleBlock(text, *rule);
 		}
 
+		std::vector<const ParsedLightOverlayEmissiveOverrideRule*> emissiveOverrides;
+		for (const auto& rule : database.emissiveOverrideRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0)
+			{
+				emissiveOverrides.push_back(&rule);
+			}
+		}
+		std::sort(emissiveOverrides.begin(), emissiveOverrides.end(), [](const auto* left, const auto* right)
+		{
+			const int idCompare = left->id.CompareNoCase(right->id);
+			return idCompare != 0 ? idCompare < 0 : left->source.orderIndex < right->source.orderIndex;
+		});
+		for (const auto* rule : emissiveOverrides)
+		{
+			AppendEmissiveOverrideRuleBlock(text, *rule);
+		}
+
 		std::vector<const ParsedLightOverlayActorOverrideRule*> actorOverrides;
 		for (const auto& rule : database.actorOverrideRules)
 		{
@@ -1704,12 +1915,13 @@ bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database,
 
 	if (verbose)
 	{
-		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d directional=%d actor_overrides=%d parse_errors=%s changed=%s\n",
+		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d directional=%d actor_overrides=%d parse_errors=%s changed=%s\n",
 			GLightOverlayDatabase.generation,
 			GLightOverlayDatabase.sourceFiles.Size(),
 			GLightOverlayDatabase.actorRules.Size(),
 			GLightOverlayDatabase.muzzleFlashRules.Size(),
 			GLightOverlayDatabase.mapLightRules.Size(),
+			GLightOverlayDatabase.emissiveOverrideRules.Size(),
 			GLightOverlayDatabase.directionalRules.Size(),
 			GLightOverlayDatabase.actorOverrideRules.Size(),
 			GLightOverlayDatabase.hadParseErrors ? "yes" : "no",
@@ -1788,6 +2000,23 @@ bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const Pa
 	return true;
 }
 
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayEmissiveOverrideRule& rule, bool* outReplaced)
+{
+	ParsedLightOverlayEmissiveOverrideRule nextRule = rule;
+	const int32_t index = FindEmissiveOverrideRuleIndex(database, nextRule.mapName, nextRule.id);
+	if (outReplaced != nullptr) *outReplaced = index >= 0;
+	EnsureEditableSource(database, nextRule.source, index >= 0 ? &database.emissiveOverrideRules[index].source : nullptr);
+	if (index >= 0)
+	{
+		database.emissiveOverrideRules[index] = std::move(nextRule);
+	}
+	else
+	{
+		database.emissiveOverrideRules.Push(std::move(nextRule));
+	}
+	return true;
+}
+
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced)
 {
 	ParsedLightOverlayActorOverrideRule nextRule = rule;
@@ -1827,6 +2056,10 @@ bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRu
 	case LightOverlayRuleKind::MapLight:
 		index = FindMapLightRuleIndex(database, scopedMapName, ruleId);
 		if (index >= 0) database.mapLightRules.Delete(index);
+		return index >= 0;
+	case LightOverlayRuleKind::EmissiveOverride:
+		index = FindEmissiveOverrideRuleIndex(database, scopedMapName, ruleId);
+		if (index >= 0) database.emissiveOverrideRules.Delete(index);
 		return index >= 0;
 	case LightOverlayRuleKind::ActorOverride:
 		index = FindActorOverrideRuleIndex(database, scopedMapName, ruleId);

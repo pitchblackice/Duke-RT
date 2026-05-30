@@ -133,6 +133,27 @@ struct ParsedLightOverlayMapLightRule
 	uint32_t flickerFrames = 0;
 };
 
+struct ParsedLightOverlayEmissiveOverrideRule
+{
+	FString mapName;
+	FString id;
+	LightOverlaySourceLocation source;
+	bool hasSectorFilter = false;
+	int sectorFilter = -1;
+	bool hasWallFilter = false;
+	int wallFilter = -1;
+	bool hasTileFilter = false;
+	int tileFilter = -1;
+	bool hasIntensityScale = false;
+	float intensityScale = 1.0f;
+	bool hasReachScale = false;
+	float reachScale = 1.0f;
+	bool hasSectorResponse = false;
+	bool sectorResponse = true;
+	bool hasSignalSector = false;
+	int signalSector = -1;
+};
+
 struct ParsedLightOverlayActorOverrideRule
 {
 	FString mapName;
@@ -163,6 +184,7 @@ struct ParsedLightOverlayDatabase
 	TArray<ParsedLightOverlayDirectionalRule> directionalRules;
 	TArray<ParsedLightOverlayMuzzleFlashRule> muzzleFlashRules;
 	TArray<ParsedLightOverlayMapLightRule> mapLightRules;
+	TArray<ParsedLightOverlayEmissiveOverrideRule> emissiveOverrideRules;
 	TArray<ParsedLightOverlayActorOverrideRule> actorOverrideRules;
 };
 
@@ -273,6 +295,27 @@ struct ResolvedLightOverlayMapLightRule
 	uint32_t flickerFrames = 0;
 };
 
+struct ResolvedLightOverlayEmissiveOverrideRule
+{
+	FString mapName;
+	FString id;
+	LightOverlaySourceLocation source;
+	bool hasSectorFilter = false;
+	int sectorFilter = -1;
+	bool hasWallFilter = false;
+	int wallFilter = -1;
+	bool hasTileFilter = false;
+	int tileFilter = -1;
+	bool hasIntensityScale = false;
+	float intensityScale = 1.0f;
+	bool hasReachScale = false;
+	float reachScale = 1.0f;
+	bool hasSectorResponse = false;
+	bool sectorResponse = true;
+	bool hasSignalSector = false;
+	int signalSector = -1;
+};
+
 struct ResolvedLightOverlayActorOverrideRule
 {
 	FString mapName;
@@ -297,6 +340,7 @@ struct ResolvedLightOverlaySet
 	TArray<ResolvedLightOverlayDirectionalRule> directionalRules;
 	TArray<ResolvedLightOverlayMuzzleFlashRule> muzzleFlashRules;
 	TArray<ResolvedLightOverlayMapLightRule> mapLightRules;
+	TArray<ResolvedLightOverlayEmissiveOverrideRule> emissiveOverrideRules;
 	TArray<ResolvedLightOverlayActorOverrideRule> actorOverrideRules;
 };
 
@@ -306,6 +350,7 @@ enum class LightOverlayRuleKind : uint8_t
 	Directional,
 	MuzzleFlash,
 	MapLight,
+	EmissiveOverride,
 	ActorOverride,
 };
 
@@ -319,5 +364,6 @@ bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const Pa
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayDirectionalRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMuzzleFlashRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMapLightRule& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayEmissiveOverrideRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced = nullptr);
 bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRuleKind kind, const char* id, const char* mapName = nullptr);
