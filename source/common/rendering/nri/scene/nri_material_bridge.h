@@ -53,7 +53,6 @@ struct MaterialData
 struct MaterialLightingMetadata
 {
 	FGameTexture* texture = nullptr;
-	FGameTexture* baseTexture = nullptr;
 	uint64_t materialKey = 0;
 	uint64_t textureContentKey = 0;
 	uint64_t glowmapContentKey = 0;
