@@ -3195,6 +3195,27 @@ CVAR(Int, nri_ptsectorfiltermaxshade, 127, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfilterlotag, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorpulseframes, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorpulseamount, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectoremissionintensity, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptsectoremissionmin, 0.25f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptsectoremissionmax, 3.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
 CVAR(Bool, nri_ptvisiblechunkgate, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptshaderstats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
@@ -12039,10 +12060,13 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 		return a.sectorIndex < b.sectorIndex;
 	});
 
-	Printf("NRI PT sector lights: active=%u raw_active=%u raw_nonneutral=%u eligible=%u fog=%u pulsing=%u radius=%.1f limit=%u multiplier=%.3f scales=(%.3f, %.3f, %.3f) clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
+	Printf("NRI PT sector lights: active=%u raw_active=%u raw_nonneutral=%u response=boost:%u dim:%u neutral:%u eligible=%u fog=%u pulsing=%u radius=%.1f limit=%u multiplier=%.3f scales=(%.3f, %.3f, %.3f) clamp=%.3f sector_response=%.3f/[%.3f,%.3f] filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
 		registry.activeSectorCount,
 		registry.rawActiveSectorCount,
 		registry.rawNonNeutralSectorCount,
+		registry.responseBoostSectorCount,
+		registry.responseDimSectorCount,
+		registry.responseNeutralSectorCount,
 		registry.eligibleSectorCount,
 		registry.fogSectorCount,
 		registry.pulsingSectorCount,
@@ -12053,6 +12077,9 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 		(float)nri_ptsectorhemiscale,
 		(float)nri_ptsectorfogscale,
 		(float)nri_ptsectorclamp,
+		(float)nri_ptsectoremissionintensity,
+		(float)nri_ptsectoremissionmin,
+		(float)nri_ptsectoremissionmax,
 		(int)nri_ptsectorfilterpal,
 		(int)nri_ptsectorfilterminshade,
 		(int)nri_ptsectorfiltermaxshade,
@@ -12065,7 +12092,7 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 	{
 		const SectorCandidate& candidate = candidates[i];
 		const auto& entry = registry.sectors[candidate.sectorIndex];
-		Printf("NRI PT sector light %u: sector=%u dist=%.2f center=(%.2f, %.2f, %.2f) applied=(%.3f, %.3f, %.3f)*%.3f hemi=%.3f fog=%.3f raw_light=%.3f raw_floor=%.3f raw_ceil=%.3f raw_ambient=%.3f raw_hemi=%.3f raw_fog=%.3f pulse=%.3f palette=%d shade=%d raw_shade=%d lotag=%d hitag=%d flags=0x%x\n",
+		Printf("NRI PT sector light %u: sector=%u dist=%.2f center=(%.2f, %.2f, %.2f) applied=(%.3f, %.3f, %.3f)*%.3f hemi=%.3f fog=%.3f raw_light=%.3f raw_floor=%.3f raw_ceil=%.3f raw_ambient=%.3f raw_hemi=%.3f raw_brightness=%.3f response=%.3f raw_fog=%.3f pulse=%.3f palette=%d shade=%d raw_shade=%d lotag=%d hitag=%d flags=0x%x\n",
 			i,
 			candidate.sectorIndex,
 			std::sqrt(candidate.distanceSq),
@@ -12083,6 +12110,8 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 			entry.rawCeilingLight,
 			entry.rawAmbientIntensity,
 			entry.rawHemisphereAmount,
+			entry.rawResponseBrightness,
+			entry.emitterResponseScale,
 			entry.rawFogAmount,
 			entry.pulseScale,
 			entry.paletteIndex,
@@ -12556,11 +12585,14 @@ void NRIRenderer::PrintStatus() const
 		mEmissiveTlasStaticInstanceCount,
 		mEmissiveTlasDynamicInstanceCount,
 		mEmissiveTlasBuildCount);
-	Printf("NRI PT sector lighting: enabled=%s active=%u raw_active=%u raw_nonneutral=%u eligible=%u fog=%u pulsing=%u debug_mode=%u multiplier=%.3f scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
+	Printf("NRI PT sector lighting: enabled=%s active=%u raw_active=%u raw_nonneutral=%u response=boost:%u dim:%u neutral:%u eligible=%u fog=%u pulsing=%u debug_mode=%u multiplier=%.3f scales=ambient=%.3f hemi=%.3f fog=%.3f clamp=%.3f sector_response=%.3f/[%.3f,%.3f] filter=pal=%d shade=[%d,%d] lotag=%d pulse=%d/%.3f\n",
 		nri_ptsectorlighting ? "on" : "off",
 		mSceneLights.GetSectorLighting().activeSectorCount,
 		mSceneLights.GetSectorLighting().rawActiveSectorCount,
 		mSceneLights.GetSectorLighting().rawNonNeutralSectorCount,
+		mSceneLights.GetSectorLighting().responseBoostSectorCount,
+		mSceneLights.GetSectorLighting().responseDimSectorCount,
+		mSceneLights.GetSectorLighting().responseNeutralSectorCount,
 		mSceneLights.GetSectorLighting().eligibleSectorCount,
 		mSceneLights.GetSectorLighting().fogSectorCount,
 		mSceneLights.GetSectorLighting().pulsingSectorCount,
@@ -12570,6 +12602,9 @@ void NRIRenderer::PrintStatus() const
 		(float)nri_ptsectorhemiscale,
 		(float)nri_ptsectorfogscale,
 		(float)nri_ptsectorclamp,
+		(float)nri_ptsectoremissionintensity,
+		(float)nri_ptsectoremissionmin,
+		(float)nri_ptsectoremissionmax,
 		(int)nri_ptsectorfilterpal,
 		(int)nri_ptsectorfilterminshade,
 		(int)nri_ptsectorfiltermaxshade,

@@ -29,6 +29,9 @@ EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
 EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
+EXTERN_CVAR(Float, nri_ptsectoremissionintensity)
+EXTERN_CVAR(Float, nri_ptsectoremissionmin)
+EXTERN_CVAR(Float, nri_ptsectoremissionmax)
 EXTERN_CVAR(Int, nri_ptnudgetrace)
 
 namespace
@@ -744,6 +747,19 @@ namespace
 		inverseLight /= shadeDiv;
 		const float lightLevel = clamp(255.0f - inverseLight, 0.0f, 255.0f);
 		return lightLevel / 255.0f;
+	}
+
+	float ComputeSectorEmitterResponseScale(float brightness, float neutralBrightness, float intensity, float minScale, float maxScale)
+	{
+		const float clampedMin = std::max(0.0f, minScale);
+		const float clampedMax = std::max(clampedMin, maxScale);
+		if (neutralBrightness <= 0.0001f || intensity <= 0.0f)
+		{
+			return clamp(1.0f, clampedMin, clampedMax);
+		}
+
+		const float normalizedDelta = (brightness - neutralBrightness) / neutralBrightness;
+		return clamp(1.0f + normalizedDelta * intensity, clampedMin, clampedMax);
 	}
 
 	bool IsGlowDrivenEmissive(uint32_t sourceFlags, uint32_t emissiveMode)
@@ -1568,6 +1584,9 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 	mSectorLighting.eligibleSectorCount = 0;
 	mSectorLighting.rawActiveSectorCount = 0;
 	mSectorLighting.rawNonNeutralSectorCount = 0;
+	mSectorLighting.responseBoostSectorCount = 0;
+	mSectorLighting.responseDimSectorCount = 0;
+	mSectorLighting.responseNeutralSectorCount = 0;
 	mSectorLighting.activeSectorCount = 0;
 	mSectorLighting.fogSectorCount = 0;
 	mSectorLighting.pulsingSectorCount = 0;
@@ -1617,6 +1636,10 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		const float hemisphereScale = std::max(0.0f, (float)nri_ptsectorhemiscale);
 		const float fogScale = std::max(0.0f, (float)nri_ptsectorfogscale);
 	const float sectorClamp = std::max(0.0f, (float)nri_ptsectorclamp);
+	const float responseIntensity = std::max(0.0f, (float)nri_ptsectoremissionintensity);
+	const float responseMin = std::max(0.0f, (float)nri_ptsectoremissionmin);
+	const float responseMax = std::max(responseMin, (float)nri_ptsectoremissionmax);
+	const float neutralAmbient = std::min(sectorClamp, ambientScale * (0.10f + 0.75f * 0.55f));
 
 	for (uint32_t sectorIndex = 0; sectorIndex < sectorCount; ++sectorIndex)
 	{
@@ -1647,6 +1670,9 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		const float rawClampedAmbient = std::min(sectorClamp, ambientScale * (0.10f + rawLightLevel * 0.55f) * pulseScale);
 		const float rawClampedHemisphere = std::min(sectorClamp, hemisphereScale * (0.08f + (0.5f + 0.5f * std::abs(rawHemisphereBias)) * 0.45f) * pulseScale);
 		const float rawClampedFog = std::min(sectorClamp, fogScale * fogStrength * pulseScale);
+		const float rawHemisphereAmount = rawHemisphereBias * rawClampedHemisphere;
+		const float rawResponseBrightness = rawClampedAmbient + std::abs(rawHemisphereAmount);
+		const float emitterResponseScale = ComputeSectorEmitterResponseScale(rawResponseBrightness, neutralAmbient, responseIntensity, responseMin, responseMax);
 
 		SectorLightingRegistry::SectorLightRecord entry = {};
 		entry.sectorIndex = sectorIndex;
@@ -1659,8 +1685,10 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		entry.rawFloorLight = rawFloorLight;
 		entry.rawCeilingLight = rawCeilingLight;
 		entry.rawAmbientIntensity = rawClampedAmbient;
-		entry.rawHemisphereAmount = rawHemisphereBias * rawClampedHemisphere;
+		entry.rawHemisphereAmount = rawHemisphereAmount;
 		entry.rawFogAmount = rawClampedFog;
+		entry.rawResponseBrightness = rawResponseBrightness;
+		entry.emitterResponseScale = emitterResponseScale;
 		entry.ambientColor[0] = tint[0];
 		entry.ambientColor[1] = tint[1];
 		entry.ambientColor[2] = tint[2];
@@ -1674,6 +1702,18 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		if (averageShade != 0 || rawFloorShade != 0 || rawCeilingShade != 0)
 		{
 			mSectorLighting.rawNonNeutralSectorCount++;
+		}
+		if (emitterResponseScale > 1.01f)
+		{
+			mSectorLighting.responseBoostSectorCount++;
+		}
+		else if (emitterResponseScale < 0.99f)
+		{
+			mSectorLighting.responseDimSectorCount++;
+		}
+		else
+		{
+			mSectorLighting.responseNeutralSectorCount++;
 		}
 		mSectorLighting.sectors[sectorIndex] = entry;
 

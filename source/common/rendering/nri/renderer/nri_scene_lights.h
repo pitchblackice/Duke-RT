@@ -231,6 +231,8 @@ public:
 			float rawAmbientIntensity = 0.0f;
 			float rawHemisphereAmount = 0.0f;
 			float rawFogAmount = 0.0f;
+			float rawResponseBrightness = 0.0f;
+			float emitterResponseScale = 1.0f;
 			float ambientColor[3] = {};
 			float ambientIntensity = 0.0f;
 			float hemisphereAmount = 0.0f;
@@ -246,6 +248,9 @@ public:
 		uint32_t eligibleSectorCount = 0;
 		uint32_t rawActiveSectorCount = 0;
 		uint32_t rawNonNeutralSectorCount = 0;
+		uint32_t responseBoostSectorCount = 0;
+		uint32_t responseDimSectorCount = 0;
+		uint32_t responseNeutralSectorCount = 0;
 		uint32_t activeSectorCount = 0;
 		uint32_t fogSectorCount = 0;
 		uint32_t pulsingSectorCount = 0;
