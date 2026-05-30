@@ -19814,6 +19814,11 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	for (uint32_t primitiveIndex = 0; primitiveIndex < geometry.primitives.size(); ++primitiveIndex)
 	{
 		const auto& primitive = geometry.primitives[primitiveIndex];
+		if ((primitive.flags & nri_scene::PrimitiveFlag_ReflectionOnly) != 0)
+		{
+			continue;
+		}
+
 		const auto& v0 = geometry.vertices[primitive.indices[0]];
 		const auto& v1 = geometry.vertices[primitive.indices[1]];
 		const auto& v2 = geometry.vertices[primitive.indices[2]];
