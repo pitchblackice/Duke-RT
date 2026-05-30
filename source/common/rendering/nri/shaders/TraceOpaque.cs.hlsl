@@ -194,6 +194,14 @@ float3 EvaluateAmbientMetal(float3 albedo, float metalness)
 	return albedo * saturate(metalness) * GetMetalAmbientMultiplier();
 }
 
+float3 EvaluateAmbientSurface(float3 albedo, float3 diffuseAlbedo, float metalness)
+{
+	static const float MetalAmbientThreshold = 0.5;
+	return metalness >= MetalAmbientThreshold
+		? EvaluateAmbientMetal(albedo, metalness)
+		: EvaluateAmbientDiffuse(diffuseAlbedo);
+}
+
 float3 GetSurfaceDiffuseColor(float3 albedo, float metalness)
 {
 	return albedo * (1.0 - metalness);
@@ -939,7 +947,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 				sectorSourceLighting = EvaluateSectorLightingSource(material, shadingNormal);
 				sectorAmbientLighting = EvaluateSectorLighting(material, shadingNormal, diffuseAlbedo);
-				ambientDirectLighting = EvaluateAmbientDiffuse(diffuseAlbedo) + EvaluateAmbientMetal(albedo.rgb, metalness) + sectorAmbientLighting;
+				ambientDirectLighting = EvaluateAmbientSurface(albedo.rgb, diffuseAlbedo, metalness) + sectorAmbientLighting;
 				sunTransportDiffuse = useDirectionalLight ? EvaluateDirectSunDiffuse(diffuseAlbedo, directionalShadingNormal, lightDir) * directionalLightColor * shadow : 0.0;
 				sunTransportSpecular = useDirectionalLight ? EvaluateSunSpecular(albedo.rgb, metalness, directionalShadingNormal, viewDir, lightDir, 1.0) * directionalLightColor * shadow : 0.0;
 
