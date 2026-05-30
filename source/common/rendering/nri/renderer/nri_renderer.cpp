@@ -7933,6 +7933,8 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mBoundEmissiveDominantDataSource = 0;
 	mEmissiveSamplingPayloadCacheValid = false;
 	mEmissiveSamplingPayloadHash = 0;
+	mEmissiveSectorResponsePayloadCacheValid = false;
+	mEmissiveSectorResponsePayloadHash = 0;
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
@@ -22631,6 +22633,36 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 	return hash;
 }
 
+uint64_t NRIRenderer::BuildEmissiveSectorResponsePayloadHash() const
+{
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashCombine64(hash, nri_ptsectoremission ? 1ull : 0ull);
+	if (!nri_ptsectoremission)
+	{
+		return hash;
+	}
+
+	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
+	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
+	for (const auto& surface : emissiveRegistry.activeSurfaces)
+	{
+		if (!HasAutoEmissiveSourceFlags(surface.sourceFlags) ||
+			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) != 0 ||
+			surface.sectorIndex < 0)
+		{
+			continue;
+		}
+
+		const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
+		const float responseScale = sectorIndex < sectorRegistry.sectors.size() ? sectorRegistry.sectors[sectorIndex].emitterResponseScale : 1.0f;
+		hash = HashCombine64(hash, surface.stableKey);
+		hash = HashCombine64(hash, (uint64_t)sectorIndex);
+		hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
+	}
+
+	return hash;
+}
+
 uint64_t NRIRenderer::BuildSectorLightingPayloadHash() const
 {
 	const auto& registry = mSceneLights.GetSectorLighting();
@@ -22697,12 +22729,21 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.emissiveUpdateMs);
 	const uint64_t payloadHash = BuildEmissiveSamplingPayloadHash(context);
+	const uint64_t sectorResponsePayloadHash = BuildEmissiveSectorResponsePayloadHash();
+	const bool sectorResponseChanged =
+		mEmissiveSectorResponsePayloadCacheValid &&
+		mEmissiveSectorResponsePayloadHash != sectorResponsePayloadHash;
 	if (mEmissiveSamplingPayloadCacheValid &&
 		mEmissiveSamplingPayloadHash == payloadHash &&
 		mEmissivePrimitiveHeaderBuffer.shaderView != nullptr &&
 		mEmissivePrimitiveBuffer.shaderView != nullptr &&
 		mEmissivePrimitiveCdfBuffer.shaderView != nullptr)
 	{
+		if (!mEmissiveSectorResponsePayloadCacheValid)
+		{
+			mEmissiveSectorResponsePayloadCacheValid = true;
+			mEmissiveSectorResponsePayloadHash = sectorResponsePayloadHash;
+		}
 		return true;
 	}
 
@@ -22791,8 +22832,26 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	{
 		CommitSceneDataDescriptors("emissive_sampling_refresh");
 	}
+	if (sectorResponseChanged && ShouldTracePtPerf())
+	{
+		const auto& sectorRegistry = mSceneLights.GetSectorLighting();
+		Printf("NRI PT emissive sampling refresh: frame=%u reason=sector-response-change primitives=%u total_power=%.3f dominant_primitive=%u dominant_tile=%u sector_response_hash=0x%016llx->0x%016llx response=boost:%u dim:%u neutral:%u sector_emission=%s\n",
+			mFrameIndex,
+			mBoundEmissivePrimitiveCount,
+			mBoundEmissiveTotalPower,
+			mBoundEmissiveDominantPrimitive,
+			mBoundEmissiveDominantTile,
+			(unsigned long long)mEmissiveSectorResponsePayloadHash,
+			(unsigned long long)sectorResponsePayloadHash,
+			sectorRegistry.responseBoostSectorCount,
+			sectorRegistry.responseDimSectorCount,
+			sectorRegistry.responseNeutralSectorCount,
+			nri_ptsectoremission ? "on" : "off");
+	}
 	mEmissiveSamplingPayloadCacheValid = true;
 	mEmissiveSamplingPayloadHash = payloadHash;
+	mEmissiveSectorResponsePayloadCacheValid = true;
+	mEmissiveSectorResponsePayloadHash = sectorResponsePayloadHash;
 	return true;
 }
 
@@ -36659,6 +36718,8 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundEmissiveDominantDataSource = 0;
 	mEmissiveSamplingPayloadCacheValid = false;
 	mEmissiveSamplingPayloadHash = 0;
+	mEmissiveSectorResponsePayloadCacheValid = false;
+	mEmissiveSectorResponsePayloadHash = 0;
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;

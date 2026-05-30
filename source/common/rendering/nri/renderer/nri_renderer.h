@@ -2662,6 +2662,7 @@ private:
 	uint64_t BuildRuntimeLightPayloadHash() const;
 	uint64_t BuildRuntimeLightClusterCameraHash() const;
 	uint64_t BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const;
+	uint64_t BuildEmissiveSectorResponsePayloadHash() const;
 	uint64_t BuildSectorLightingPayloadHash() const;
 	void BuildEmissiveSamplingUpload(
 		const EmissiveSamplingBuildContext& context,
@@ -3168,6 +3169,8 @@ private:
 	uint32_t mBoundEmissiveDominantDataSource = 0;
 	bool mEmissiveSamplingPayloadCacheValid = false;
 	uint64_t mEmissiveSamplingPayloadHash = 0;
+	bool mEmissiveSectorResponsePayloadCacheValid = false;
+	uint64_t mEmissiveSectorResponsePayloadHash = 0;
 	uint32_t mEmissiveTlasInstanceCount = 0;
 	uint32_t mEmissiveTlasStaticInstanceCount = 0;
 	uint32_t mEmissiveTlasDynamicInstanceCount = 0;
