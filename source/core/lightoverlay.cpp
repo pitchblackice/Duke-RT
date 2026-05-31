@@ -886,6 +886,24 @@ namespace
 					rule.hasReachScale = true;
 					rule.reachScale = (float)sc.Float;
 				}
+				else if (sc.Compare("responseintensity"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseIntensity = true;
+					rule.responseIntensity = (float)sc.Float;
+				}
+				else if (sc.Compare("responsemin"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseMin = true;
+					rule.responseMin = (float)sc.Float;
+				}
+				else if (sc.Compare("responsemax"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseMax = true;
+					rule.responseMax = (float)sc.Float;
+				}
 				else if (sc.Compare("sectorresponse"))
 				{
 					sc.MustGetString();
@@ -1189,6 +1207,9 @@ namespace
 		if (rule.hasReachScale) AppendLine(text, 3, FStringf("reachscale %s", FormatLightOverlayFloat(rule.reachScale).GetChars()));
 		if (rule.hasSectorResponse) AppendShadowStateField(text, 3, "sectorresponse", rule.sectorResponse);
 		if (rule.hasSignalSector) AppendLine(text, 3, FStringf("signal sector %d", rule.signalSector));
+		if (rule.hasResponseIntensity) AppendLine(text, 3, FStringf("responseintensity %s", FormatLightOverlayFloat(rule.responseIntensity).GetChars()));
+		if (rule.hasResponseMin) AppendLine(text, 3, FStringf("responsemin %s", FormatLightOverlayFloat(rule.responseMin).GetChars()));
+		if (rule.hasResponseMax) AppendLine(text, 3, FStringf("responsemax %s", FormatLightOverlayFloat(rule.responseMax).GetChars()));
 		AppendLine(text, 2, "}");
 	}
 
@@ -1449,6 +1470,9 @@ namespace
 			if (rule->hasReachScale) Printf("  reachscale=%.3f\n", rule->reachScale);
 			if (rule->hasSectorResponse) Printf("  sectorresponse=%s\n", rule->sectorResponse ? "on" : "off");
 			if (rule->hasSignalSector) Printf("  signal_sector=%d\n", rule->signalSector);
+			if (rule->hasResponseIntensity) Printf("  responseintensity=%.3f\n", rule->responseIntensity);
+			if (rule->hasResponseMin) Printf("  responsemin=%.3f\n", rule->responseMin);
+			if (rule->hasResponseMax) Printf("  responsemax=%.3f\n", rule->responseMax);
 		}
 
 		for (const ParsedLightOverlayActorOverrideRule* rule : SortRulesByOrder(database.actorOverrideRules))
@@ -1678,6 +1702,12 @@ namespace
 		destination.sectorResponse = source.sectorResponse;
 		destination.hasSignalSector = source.hasSignalSector;
 		destination.signalSector = source.signalSector;
+		destination.hasResponseIntensity = source.hasResponseIntensity;
+		destination.responseIntensity = source.responseIntensity;
+		destination.hasResponseMin = source.hasResponseMin;
+		destination.responseMin = source.responseMin;
+		destination.hasResponseMax = source.hasResponseMax;
+		destination.responseMax = source.responseMax;
 	}
 
 	static void CopyActorOverrideRule(const ParsedLightOverlayActorOverrideRule& source, ResolvedLightOverlayActorOverrideRule& destination)

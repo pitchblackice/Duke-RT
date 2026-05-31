@@ -858,6 +858,10 @@ namespace
 		hash = HashQuantizedFloat(hash, emissive.emissiveColor[2], 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.emissiveIntensity, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.reachScale, 4096.0f);
+		hash = HashCombine64(hash, emissive.hasSectorResponseParams ? 1ull : 0ull);
+		hash = HashQuantizedFloat(hash, emissive.sectorResponseIntensity, 4096.0f);
+		hash = HashQuantizedFloat(hash, emissive.sectorResponseMin, 4096.0f);
+		hash = HashQuantizedFloat(hash, emissive.sectorResponseMax, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.powerEstimate, 256.0f);
 		hash = HashCombine64(hash, emissive.sectorResponseEnabled ? 1ull : 0ull);
 		return hash;
@@ -925,6 +929,13 @@ namespace
 			{
 				emissive.sectorResponseEnabled = true;
 			}
+		}
+		if (rule.hasResponseIntensity || rule.hasResponseMin || rule.hasResponseMax)
+		{
+			emissive.hasSectorResponseParams = true;
+			emissive.sectorResponseIntensity = rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, (float)nri_ptsectoremissionintensity);
+			emissive.sectorResponseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionmin);
+			emissive.sectorResponseMax = rule.hasResponseMax ? rule.responseMax : std::max(emissive.sectorResponseMin, (float)nri_ptsectoremissionmax);
 		}
 	}
 

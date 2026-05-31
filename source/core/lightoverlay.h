@@ -152,6 +152,12 @@ struct ParsedLightOverlayEmissiveOverrideRule
 	bool sectorResponse = true;
 	bool hasSignalSector = false;
 	int signalSector = -1;
+	bool hasResponseIntensity = false;
+	float responseIntensity = 1.0f;
+	bool hasResponseMin = false;
+	float responseMin = 0.25f;
+	bool hasResponseMax = false;
+	float responseMax = 3.0f;
 };
 
 struct ParsedLightOverlayActorOverrideRule
@@ -314,6 +320,12 @@ struct ResolvedLightOverlayEmissiveOverrideRule
 	bool sectorResponse = true;
 	bool hasSignalSector = false;
 	int signalSector = -1;
+	bool hasResponseIntensity = false;
+	float responseIntensity = 1.0f;
+	bool hasResponseMin = false;
+	float responseMin = 0.25f;
+	bool hasResponseMax = false;
+	float responseMax = 3.0f;
 };
 
 struct ResolvedLightOverlayActorOverrideRule

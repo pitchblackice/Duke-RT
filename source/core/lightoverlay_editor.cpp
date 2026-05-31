@@ -20,6 +20,7 @@
 
 CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptmaplighteditmode, false, CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptemissivelighteditmode, false, 0)
 
 namespace
 {
@@ -298,6 +299,30 @@ namespace
 		}
 
 		return FStringf("%s_%u", baseId.GetChars(), (unsigned)I_msTime());
+	}
+
+	static bool HasEmissiveLightEditorRuleId(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (const auto& rule : database.emissiveOverrideRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0 && rule.id.CompareNoCase(id) == 0)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	static FString BuildEmissiveLightEditorRuleId(const ParsedLightOverlayDatabase& database, const FString& mapName, const PathTracingEmissiveLightEditTarget& target)
+	{
+		FString baseId = FStringf("Emitter_S%d_W%d_T%d", target.sectorIndex, target.wallIndex, target.textureId);
+		if (!HasEmissiveLightEditorRuleId(database, mapName, baseId))
+		{
+			return baseId;
+		}
+
+		return baseId;
 	}
 
 	static bool FindMapLightEditorActiveDirectionalRule(const ParsedLightOverlayDatabase& database, const FString& mapName, ParsedLightOverlayDirectionalRule& outRule)
@@ -707,6 +732,92 @@ namespace
 		ReloadActorLightEditorOverlays();
 	}
 
+	static void PerformEmissiveLightEditorCreateOverrideAction()
+	{
+		if (currentLevel == nullptr || currentLevel->labelName.IsEmpty())
+		{
+			Printf("NRI PT emissive light editor: no current map name is available.\n");
+			return;
+		}
+
+		if (screen == nullptr)
+		{
+			Printf("NRI PT emissive light editor: no screen backend is active.\n");
+			return;
+		}
+
+		PathTracingEmissiveLightEditTarget target = {};
+		if (!screen->BuildPathTracingEmissiveLightEditTarget(target))
+		{
+			Printf(
+				"NRI PT emissive light editor: cannot create override: %s.\n",
+				target.failureReason.IsEmpty() ? "no active emissive surface is aimed" : target.failureReason.GetChars());
+			return;
+		}
+
+		FString writablePath;
+		int writableLumpNum = -1;
+		if (!ActorLightEditorResolveWritableSource(writablePath, &writableLumpNum))
+		{
+			PrintActorLightEditorWritableSourceFailure();
+			return;
+		}
+
+		ParsedLightOverlayDatabase database = GetParsedLightOverlayDatabase();
+		ParsedLightOverlayEmissiveOverrideRule rule = {};
+		rule.mapName = currentLevel->labelName;
+		rule.id = BuildEmissiveLightEditorRuleId(database, rule.mapName, target);
+		rule.hasSectorFilter = target.sectorIndex >= 0;
+		rule.sectorFilter = target.sectorIndex;
+		rule.hasWallFilter = target.wallIndex >= 0;
+		rule.wallFilter = target.wallIndex;
+		rule.hasTileFilter = target.textureId >= 0;
+		rule.tileFilter = target.textureId;
+		rule.hasIntensityScale = true;
+		rule.intensityScale = 1.0f;
+		rule.hasReachScale = true;
+		rule.reachScale = 1.0f;
+		rule.hasSectorResponse = true;
+		rule.sectorResponse = true;
+		rule.hasSignalSector = target.sectorIndex >= 0;
+		rule.signalSector = target.sectorIndex;
+		rule.hasResponseIntensity = true;
+		rule.responseIntensity = target.sectorResponseIntensity;
+		rule.hasResponseMin = true;
+		rule.responseMin = target.sectorResponseMin;
+		rule.hasResponseMax = true;
+		rule.responseMax = target.sectorResponseMax;
+		rule.source.lumpNum = writableLumpNum;
+		rule.source.sourceName = FindActorLightEditorSourceNameForLump(database, writableLumpNum);
+
+		bool replaced = false;
+		AddOrReplaceLightOverlayRule(database, rule, &replaced);
+
+		const FString serialized = SerializeLightOverlayDatabase(database);
+		if (!WriteActorLightEditorTextFile(writablePath, serialized))
+		{
+			Printf("NRI PT emissive light editor: failed to open writable LIGHTOVR '%s'.\n", writablePath.GetChars());
+			return;
+		}
+
+		Printf(
+			"NRI PT emissive light editor: %s emissiveoverride '%s' for map '%s' sector=%d wall=%d tile=%d signal_sector=%d response=%.3f/[%.3f,%.3f] and wrote %d bytes to %s.\n",
+			replaced ? "updated" : "created",
+			rule.id.GetChars(),
+			rule.mapName.GetChars(),
+			target.sectorIndex,
+			target.wallIndex,
+			target.textureId,
+			rule.signalSector,
+			rule.responseIntensity,
+			rule.responseMin,
+			rule.responseMax,
+			serialized.Len(),
+			writablePath.GetChars());
+
+		ReloadActorLightEditorOverlays();
+	}
+
 	static void MoveMapLightEditorPreview(double delta)
 	{
 		GActorLightEditorState.mapLightPreviewDistance += delta;
@@ -770,9 +881,14 @@ static bool IsMapLightEditorEnabled()
 	return !!nri_ptmaplighteditmode;
 }
 
+static bool IsEmissiveLightEditorEnabled()
+{
+	return !!nri_ptemissivelighteditmode;
+}
+
 void ResetActorLightEditorState()
 {
-	const bool enabled = IsActorLightEditorEnabled() || IsMapLightEditorEnabled();
+	const bool enabled = IsActorLightEditorEnabled() || IsMapLightEditorEnabled() || IsEmissiveLightEditorEnabled();
 	const double previousMapLightDistance = GActorLightEditorState.mapLightPreviewDistance > 0.0 ?
 		GActorLightEditorState.mapLightPreviewDistance :
 		MapLightEditorDefaultDistance;
@@ -790,7 +906,8 @@ void TickActorLightEditor()
 {
 	const bool mapLightEnabled = IsMapLightEditorEnabled();
 	const bool actorLightEnabled = IsActorLightEditorEnabled();
-	const bool enabled = actorLightEnabled || mapLightEnabled;
+	const bool emissiveLightEnabled = IsEmissiveLightEditorEnabled();
+	const bool enabled = actorLightEnabled || mapLightEnabled || emissiveLightEnabled;
 	if (!enabled)
 	{
 		if (GActorLightEditorState.enabled)
@@ -827,9 +944,48 @@ void TickActorLightEditor()
 
 bool ActorLightEditorResponder(event_t* ev)
 {
-	if ((!IsActorLightEditorEnabled() && !IsMapLightEditorEnabled()) || ev == nullptr)
+	if ((!IsActorLightEditorEnabled() && !IsMapLightEditorEnabled() && !IsEmissiveLightEditorEnabled()) || ev == nullptr)
 	{
 		return false;
+	}
+
+	if (IsEmissiveLightEditorEnabled())
+	{
+		if (IsActorLightEditorActionKey(ev, 'p'))
+		{
+			if (ev->type == EV_KeyDown)
+			{
+				if (!GActorLightEditorState.createEmissiveOverrideActionPressed)
+				{
+					GActorLightEditorState.createEmissiveOverrideActionPressed = true;
+					PerformEmissiveLightEditorCreateOverrideAction();
+				}
+			}
+			else
+			{
+				GActorLightEditorState.createEmissiveOverrideActionPressed = false;
+			}
+
+			return true;
+		}
+
+		if (IsActorLightEditorActionKey(ev, 'l'))
+		{
+			if (ev->type == EV_KeyDown)
+			{
+				if (!GActorLightEditorState.reloadActionPressed)
+				{
+					GActorLightEditorState.reloadActionPressed = true;
+					PerformActorLightEditorReloadAction();
+				}
+			}
+			else
+			{
+				GActorLightEditorState.reloadActionPressed = false;
+			}
+
+			return true;
+		}
 	}
 
 	if (IsMapLightEditorEnabled())

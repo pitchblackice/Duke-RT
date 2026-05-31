@@ -1,6 +1,6 @@
 # LIGHTOVR Authoring Guide
 
-`LIGHTOVR` is Duke-RT's text overlay database for authored ray-traced lighting behavior. This guide covers the file format, load/reload behavior, and the current in-game actor-light edit workflow.
+`LIGHTOVR` is Duke-RT's text overlay database for authored ray-traced lighting behavior. This guide covers the file format, load/reload behavior, and the current in-game light edit workflows.
 
 ## LIGHTOVR Authoring and Usage
 
@@ -35,6 +35,8 @@ Current map-local blocks:
   A placed analytic point light anchored to a Build/world position, sector, or wall.
 - `actoroverride <id>`
   Map-local actor shadow override. This adjusts shadow receive/cast policy without creating a light by itself.
+- `emissiveoverride <id>`
+  Map-local override for emissive surfaces, used to tune intensity/reach scaling and bind an emitter to a sector-light signal.
 
 Current parser fields by block:
 
@@ -48,6 +50,8 @@ Current parser fields by block:
   `type`, `anchor`, `offset`, `direction`, `color`, `intensity`, `radius`, `range`, `flicker`
 - `actoroverride`
   `actorclass`, `shadowreceive`, `shadowcast`
+- `emissiveoverride`
+  `sector`, `wall`, `tile`, `intensityscale`, `reachscale`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`
 
 Current practical notes:
 
@@ -113,6 +117,20 @@ LIGHTOVR
         {
             actorclass PigCop
             shadowreceive off
+        }
+
+        emissiveoverride "BathroomSwitchEmitter"
+        {
+            sector 32
+            wall 192
+            tile 1287
+            intensityscale 1.0
+            reachscale 1.0
+            sectorresponse on
+            signal sector 31
+            responseintensity 1.0
+            responsemin 0.25
+            responsemax 3.0
         }
     }
 }
@@ -219,4 +237,31 @@ Disable edit mode with:
 
 ```text
 nri_ptmaplighteditmode 0
+```
+
+## Emissive Light Override Edit Mode
+
+The emissive light editor writes map-local `emissiveoverride` rules for surfaces that are already active PT emitters. It uses the same writable loose-mounted `LIGHTOVR` writeback rules as the actor and map light editors. The mode is intentionally non-persistent and always starts disabled on launch.
+
+Enable it at runtime with:
+
+```text
+nri_ptemissivelighteditmode 1
+```
+
+While emissive light edit mode is enabled:
+
+- `p` creates or updates a map-local `emissiveoverride` for the aimed active emitter
+- the generated rule targets the surface with the current sector, wall, and renderer texture id when available
+- new rules start with `intensityscale 1.0`, `reachscale 1.0`, `sectorresponse on`, and `signal sector <aimed sector>`
+- new rules copy the current `nri_ptsectoremissionintensity`, `nri_ptsectoremissionmin`, and `nri_ptsectoremissionmax` values into `responseintensity`, `responsemin`, and `responsemax`
+- `l` reloads `LIGHTOVR` without editing the file
+- nearby sector-emission response changes produce short notify messages naming the affected sector and whether the response is boosted, dimmed, or neutral
+
+Edit the generated `signal sector` when an emitter needs to follow a different sector's switch state, then press `l` to reload.
+
+Disable edit mode with:
+
+```text
+nri_ptemissivelighteditmode 0
 ```

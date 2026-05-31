@@ -6205,6 +6205,18 @@ void NRIRenderDevice::PrintPathTracingSurfaceProbeStatus() const
 	mRenderer->PrintSurfaceProbeStatus();
 }
 
+bool NRIRenderDevice::BuildPathTracingEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const
+{
+	outTarget = {};
+	if (mRenderer == nullptr)
+	{
+		outTarget.failureReason = "renderer is not initialized";
+		return false;
+	}
+
+	return mRenderer->BuildEmissiveLightEditTarget(outTarget);
+}
+
 void NRIRenderDevice::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event)
 {
 	if (mLevelTransitionInProgress || event.eventId.IsEmpty())

@@ -58,6 +58,7 @@ struct ActorLightEditorState
 	bool setMapDirectionalActionPressed = false;
 	bool moveMapLightCloserActionPressed = false;
 	bool moveMapLightFartherActionPressed = false;
+	bool createEmissiveOverrideActionPressed = false;
 	double mapLightPreviewDistance = 128.0;
 };
 

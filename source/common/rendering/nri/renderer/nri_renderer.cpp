@@ -129,6 +129,7 @@ CVAR(Float, nri_sharpness, 0.1375f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Bool, nri_voxelstats)
 EXTERN_CVAR(Bool, nri_ptslowdowntrace)
+EXTERN_CVAR(Bool, nri_ptemissivelighteditmode)
 EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
@@ -2930,6 +2931,12 @@ public:
 			rule.sectorResponse = resolvedRule.sectorResponse;
 			rule.hasSignalSector = resolvedRule.hasSignalSector && resolvedRule.signalSector >= 0;
 			rule.signalSector = rule.hasSignalSector ? resolvedRule.signalSector : -1;
+			rule.hasResponseIntensity = resolvedRule.hasResponseIntensity;
+			rule.responseIntensity = resolvedRule.responseIntensity;
+			rule.hasResponseMin = resolvedRule.hasResponseMin;
+			rule.responseMin = resolvedRule.responseMin;
+			rule.hasResponseMax = resolvedRule.hasResponseMax;
+			rule.responseMax = resolvedRule.responseMax;
 			outRules.push_back(rule);
 		}
 	}
@@ -6817,6 +6824,26 @@ namespace
 			SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0;
 	}
 
+	static float ComputeSectorEmitterResponseScaleForRenderer(float brightness, float neutralBrightness, float intensity, float minScale, float maxScale)
+	{
+		const float clampedMin = std::max(0.0f, minScale);
+		const float clampedMax = std::max(clampedMin, maxScale);
+		if (neutralBrightness <= 0.0001f || intensity <= 0.0f)
+		{
+			return clamp(1.0f, clampedMin, clampedMax);
+		}
+
+		const float normalizedDelta = (brightness - neutralBrightness) / neutralBrightness;
+		return clamp(1.0f + normalizedDelta * intensity, clampedMin, clampedMax);
+	}
+
+	static float GetSectorEmitterNeutralBrightnessForRenderer()
+	{
+		const float sectorClamp = std::max(0.0f, (float)nri_ptsectorclamp);
+		const float ambientScale = std::max(0.0f, (float)nri_ptsectorambientscale);
+		return std::min(sectorClamp, ambientScale * (0.10f + 0.75f * 0.55f));
+	}
+
 	static float ResolveSectorEmissionScale(
 		const SceneLightSystem::SectorLightingRegistry& sectorRegistry,
 		const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface,
@@ -6845,7 +6872,15 @@ namespace
 			return 1.0f;
 		}
 
-		const float scale = std::max(0.0f, sectorRegistry.sectors[sectorIndex].emitterResponseScale);
+		const auto& sector = sectorRegistry.sectors[sectorIndex];
+		const float scale = surface.hasSectorResponseParams ?
+			ComputeSectorEmitterResponseScaleForRenderer(
+				sector.rawResponseBrightness,
+				GetSectorEmitterNeutralBrightnessForRenderer(),
+				std::max(0.0f, surface.sectorResponseIntensity),
+				std::max(0.0f, surface.sectorResponseMin),
+				std::max(surface.sectorResponseMin, surface.sectorResponseMax)) :
+			std::max(0.0f, sector.emitterResponseScale);
 		outApplied = scale != 1.0f;
 		return scale;
 	}
@@ -7985,6 +8020,9 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mEmissiveSectorResponsePayloadHash = 0;
 	mEmissiveSectorResponseTraceCacheValid = false;
 	mEmissiveSectorResponseTraceHash = 0;
+	mEmissiveSectorResponseNotifyCacheValid = false;
+	mLastEmissiveSectorResponseNotifyFrame = 0;
+	mEmissiveSectorResponseNotifyScales.clear();
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
@@ -20508,6 +20546,44 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		mLastSurfaceProbe.glowColor[2]);
 }
 
+bool NRIRenderer::BuildEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const
+{
+	outTarget = {};
+	if (!mLastSurfaceProbe.valid)
+	{
+		outTarget.failureReason = "no sampled center hit has been recorded yet";
+		return false;
+	}
+
+	if (!mLastSurfaceProbe.hit)
+	{
+		outTarget.valid = true;
+		outTarget.failureReason = "last sampled center ray missed translated PT geometry";
+		return false;
+	}
+
+	const SurfaceProbeEmissiveDiagnostics emissiveDiagnostics = BuildSurfaceProbeEmissiveDiagnostics(mLastSurfaceProbe);
+	outTarget.valid = true;
+	outTarget.hit = true;
+	outTarget.emissive = emissiveDiagnostics.activeEmissiveSurfaceMatch;
+	outTarget.sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
+	outTarget.wallIndex = mLastSurfaceProbe.provenance.wallIndex;
+	outTarget.textureId = (int)mLastSurfaceProbe.textureId;
+	outTarget.materialIndex = (int)mLastSurfaceProbe.materialIndex;
+	outTarget.sectorResponseIntensity = std::max(0.0f, (float)nri_ptsectoremissionintensity);
+	outTarget.sectorResponseMin = std::max(0.0f, (float)nri_ptsectoremissionmin);
+	outTarget.sectorResponseMax = std::max(outTarget.sectorResponseMin, (float)nri_ptsectoremissionmax);
+	if (!outTarget.emissive)
+	{
+		outTarget.failureReason = emissiveDiagnostics.sceneLightSurfaceMatch ?
+			"aimed surface is not currently an active emissive surface" :
+			"aimed surface is not present in the scene-light surface registry";
+		return false;
+	}
+
+	return true;
+}
+
 void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
 {
 	if (!mMapWorld.valid)
@@ -22722,7 +22798,8 @@ uint64_t NRIRenderer::BuildEmissiveSectorResponsePayloadHash() const
 		}
 
 		const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
-		const float responseScale = sectorIndex < sectorRegistry.sectors.size() ? sectorRegistry.sectors[sectorIndex].emitterResponseScale : 1.0f;
+		bool applied = false;
+		const float responseScale = ResolveSectorEmissionScale(sectorRegistry, surface, applied);
 		hash = HashCombine64(hash, surface.stableKey);
 		hash = HashCombine64(hash, (uint64_t)sectorIndex);
 		hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
@@ -22731,8 +22808,88 @@ uint64_t NRIRenderer::BuildEmissiveSectorResponsePayloadHash() const
 	return hash;
 }
 
+void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
+{
+	if (!nri_ptemissivelighteditmode)
+	{
+		mEmissiveSectorResponseNotifyCacheValid = false;
+		return;
+	}
+
+	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
+	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
+	if (mEmissiveSectorResponseNotifyScales.size() != sectorRegistry.sectors.size())
+	{
+		mEmissiveSectorResponseNotifyScales.assign(sectorRegistry.sectors.size(), -1.0f);
+		mEmissiveSectorResponseNotifyCacheValid = false;
+	}
+
+	std::vector<float> nextScales(sectorRegistry.sectors.size(), -1.0f);
+	std::vector<uint32_t> changedNearbySectors;
+	constexpr float nearbyRadius = 2048.0f;
+	constexpr float nearbyRadiusSq = nearbyRadius * nearbyRadius;
+
+	for (const auto& surface : emissiveRegistry.activeSurfaces)
+	{
+		const bool sectorResponseEligible =
+			surface.sectorResponseEnabled &&
+			surface.sectorIndex >= 0 &&
+			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
+				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
+					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
+		if (!sectorResponseEligible)
+		{
+			continue;
+		}
+
+		const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
+		if (sectorIndex >= nextScales.size())
+		{
+			continue;
+		}
+
+		bool applied = false;
+		const float scale = ResolveSectorEmissionScale(sectorRegistry, surface, applied);
+		nextScales[sectorIndex] = std::max(nextScales[sectorIndex], scale);
+		const float previousScale = sectorIndex < mEmissiveSectorResponseNotifyScales.size() ? mEmissiveSectorResponseNotifyScales[sectorIndex] : -1.0f;
+		if (!mEmissiveSectorResponseNotifyCacheValid || previousScale < 0.0f || std::abs(previousScale - scale) <= 0.02f)
+		{
+			continue;
+		}
+
+		const float dx = surface.center[0] - mCurrentCameraPos[0];
+		const float dy = surface.center[1] - mCurrentCameraPos[1];
+		const float dz = surface.center[2] - mCurrentCameraPos[2];
+		if (dx * dx + dy * dy + dz * dz > nearbyRadiusSq)
+		{
+			continue;
+		}
+
+		if (std::find(changedNearbySectors.begin(), changedNearbySectors.end(), sectorIndex) == changedNearbySectors.end())
+		{
+			changedNearbySectors.push_back(sectorIndex);
+		}
+	}
+
+	if (!changedNearbySectors.empty() && mFrameIndex - mLastEmissiveSectorResponseNotifyFrame >= 12)
+	{
+		for (uint32_t sectorIndex : changedNearbySectors)
+		{
+			const float scale = sectorIndex < nextScales.size() && nextScales[sectorIndex] >= 0.0f ? nextScales[sectorIndex] : 1.0f;
+			const char* state = scale > 1.01f ? "boosted" : (scale < 0.99f ? "dimmed" : "neutral");
+			Printf(PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG, "NRI PT sector %u emission %s %.2fx\n", sectorIndex, state, scale);
+		}
+		mLastEmissiveSectorResponseNotifyFrame = mFrameIndex;
+	}
+
+	mEmissiveSectorResponseNotifyScales = std::move(nextScales);
+	mEmissiveSectorResponseNotifyCacheValid = true;
+}
+
 void NRIRenderer::TraceEmissiveSectorResponseChange()
 {
+	NotifyEmissiveSectorResponseEditModeChanges();
+
 	if (!ShouldTracePtPerf())
 	{
 		mEmissiveSectorResponseTraceCacheValid = false;
@@ -36842,6 +36999,9 @@ void NRIRenderer::DestroySceneBuffers()
 	mEmissiveSectorResponsePayloadHash = 0;
 	mEmissiveSectorResponseTraceCacheValid = false;
 	mEmissiveSectorResponseTraceHash = 0;
+	mEmissiveSectorResponseNotifyCacheValid = false;
+	mLastEmissiveSectorResponseNotifyFrame = 0;
+	mEmissiveSectorResponseNotifyScales.clear();
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;

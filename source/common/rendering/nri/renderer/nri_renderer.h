@@ -26,6 +26,7 @@ class NRIRenderDevice;
 struct MapRecord;
 struct LevelTransitionInfo;
 struct PathTracingActorSpriteTraceEvent;
+struct PathTracingEmissiveLightEditTarget;
 
 struct NRIDirectionalLightState
 {
@@ -1401,6 +1402,7 @@ public:
 	void PrintEmissiveSurfaceDump(float radius, uint32_t limit) const;
 	void PrintSectorLightDump(float radius, uint32_t limit) const;
 	void PrintSurfaceProbeStatus() const;
+	bool BuildEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const;
 	void PrintMapChunkDump(int32_t chunkIndex) const;
 	void PrintMapChunkCompare(int32_t chunkIndex) const;
 	void TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& event);
@@ -2665,6 +2667,7 @@ private:
 	uint64_t BuildEmissiveSectorResponsePayloadHash() const;
 	uint64_t BuildSectorLightingPayloadHash() const;
 	void TraceEmissiveSectorResponseChange();
+	void NotifyEmissiveSectorResponseEditModeChanges();
 	void BuildEmissiveSamplingUpload(
 		const EmissiveSamplingBuildContext& context,
 		EmissivePrimitiveHeaderGpuData& outHeader,
@@ -3174,6 +3177,9 @@ private:
 	uint64_t mEmissiveSectorResponsePayloadHash = 0;
 	bool mEmissiveSectorResponseTraceCacheValid = false;
 	uint64_t mEmissiveSectorResponseTraceHash = 0;
+	bool mEmissiveSectorResponseNotifyCacheValid = false;
+	uint32_t mLastEmissiveSectorResponseNotifyFrame = 0;
+	std::vector<float> mEmissiveSectorResponseNotifyScales;
 	uint32_t mEmissiveTlasInstanceCount = 0;
 	uint32_t mEmissiveTlasStaticInstanceCount = 0;
 	uint32_t mEmissiveTlasDynamicInstanceCount = 0;

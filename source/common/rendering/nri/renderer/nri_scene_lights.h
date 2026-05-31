@@ -195,6 +195,10 @@ public:
 			float emissiveColor[3] = {};
 			float emissiveIntensity = 0.0f;
 			float reachScale = 1.0f;
+			bool hasSectorResponseParams = false;
+			float sectorResponseIntensity = 1.0f;
+			float sectorResponseMin = 0.25f;
+			float sectorResponseMax = 3.0f;
 			float powerEstimate = 0.0f;
 			bool sectorResponseEnabled = true;
 		};
@@ -240,6 +244,12 @@ public:
 		bool sectorResponse = true;
 		bool hasSignalSector = false;
 		int32_t signalSector = -1;
+		bool hasResponseIntensity = false;
+		float responseIntensity = 1.0f;
+		bool hasResponseMin = false;
+		float responseMin = 0.25f;
+		bool hasResponseMax = false;
+		float responseMax = 3.0f;
 	};
 
 	struct SectorLightingRegistry
