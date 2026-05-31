@@ -8030,6 +8030,9 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mEmissiveSectorResponseNotifyCacheValid = false;
 	mLastEmissiveSectorResponseNotifyFrame = 0;
 	mEmissiveSectorResponseNotifyScales.clear();
+	mSectorLightingEditNotifyCacheValid = false;
+	mLastSectorLightingEditNotifyFrame = 0;
+	mSectorLightingEditNotifyHashes.clear();
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
@@ -22820,11 +22823,132 @@ void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
 	if (!nri_ptemissivelighteditmode)
 	{
 		mEmissiveSectorResponseNotifyCacheValid = false;
+		mSectorLightingEditNotifyCacheValid = false;
 		return;
 	}
 
 	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
 	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
+	const float nearbyRadius = std::max(0.0f, (float)nri_ptemissivelighteditnotifyrange);
+	const float nearbyRadiusSq = nearbyRadius * nearbyRadius;
+	if (mSectorLightingEditNotifyHashes.size() != sectorRegistry.sectorCount)
+	{
+		mSectorLightingEditNotifyHashes.assign(sectorRegistry.sectorCount, 0u);
+		mSectorLightingEditNotifyCacheValid = false;
+	}
+
+	struct SectorSurfaceEditAggregate
+	{
+		uint64_t hash = 1469598103934665603ull;
+		float center[3] = {};
+		int64_t shadeSum = 0;
+		int32_t minShade = std::numeric_limits<int32_t>::max();
+		int32_t maxShade = std::numeric_limits<int32_t>::min();
+		uint32_t count = 0;
+	};
+
+	std::vector<SectorSurfaceEditAggregate> sectorSurfaceAggregates(sectorRegistry.sectorCount);
+	for (const SceneLightSystem::SurfaceRecord& record : mSceneLights.GetSurfaceRecords())
+	{
+		if (record.provenance.sectorIndex < 0)
+		{
+			continue;
+		}
+
+		const uint32_t sectorIndex = (uint32_t)record.provenance.sectorIndex;
+		if (sectorIndex >= sectorSurfaceAggregates.size())
+		{
+			continue;
+		}
+
+		auto& aggregate = sectorSurfaceAggregates[sectorIndex];
+		aggregate.center[0] += record.center[0];
+		aggregate.center[1] += record.center[1];
+		aggregate.center[2] += record.center[2];
+		aggregate.shadeSum += record.material.shade;
+		aggregate.minShade = std::min(aggregate.minShade, record.material.shade);
+		aggregate.maxShade = std::max(aggregate.maxShade, record.material.shade);
+		aggregate.count++;
+		aggregate.hash = HashCombine64(aggregate.hash, (uint64_t)(uint32_t)record.material.shade);
+		aggregate.hash = HashCombine64(aggregate.hash, (uint64_t)record.material.paletteIndex);
+		aggregate.hash = HashCombine64(aggregate.hash, (uint64_t)FloatBits(record.material.lightLevel));
+	}
+
+	std::vector<uint32_t> changedNearbySurfaceSectors;
+	std::vector<uint64_t> nextSurfaceHashes(sectorRegistry.sectorCount, 0u);
+	for (uint32_t sectorIndex = 0; sectorIndex < (uint32_t)sectorSurfaceAggregates.size(); ++sectorIndex)
+	{
+		const auto& aggregate = sectorSurfaceAggregates[sectorIndex];
+		if (aggregate.count == 0)
+		{
+			continue;
+		}
+
+		uint64_t hash = aggregate.hash;
+		if (sectorIndex < sectorRegistry.sectors.size())
+		{
+			const auto& sector = sectorRegistry.sectors[sectorIndex];
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)sector.averageShade);
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)sector.rawAverageShade);
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)sector.paletteIndex);
+			hash = HashCombine64(hash, (uint64_t)FloatBits(sector.rawFloorLight));
+			hash = HashCombine64(hash, (uint64_t)FloatBits(sector.rawCeilingLight));
+			hash = HashCombine64(hash, (uint64_t)FloatBits(sector.emitterResponseScale));
+		}
+		nextSurfaceHashes[sectorIndex] = hash;
+
+		if (!mSectorLightingEditNotifyCacheValid ||
+			sectorIndex >= mSectorLightingEditNotifyHashes.size() ||
+			mSectorLightingEditNotifyHashes[sectorIndex] == 0u ||
+			mSectorLightingEditNotifyHashes[sectorIndex] == hash)
+		{
+			continue;
+		}
+
+		const float invCount = 1.0f / (float)aggregate.count;
+		const float centerX = aggregate.center[0] * invCount;
+		const float centerY = aggregate.center[1] * invCount;
+		const float centerZ = aggregate.center[2] * invCount;
+		const float dx = centerX - mCurrentCameraPos[0];
+		const float dy = centerY - mCurrentCameraPos[1];
+		const float dz = centerZ - mCurrentCameraPos[2];
+		if (dx * dx + dy * dy + dz * dz <= nearbyRadiusSq)
+		{
+			changedNearbySurfaceSectors.push_back(sectorIndex);
+		}
+	}
+
+	if (!changedNearbySurfaceSectors.empty() && mFrameIndex - mLastSectorLightingEditNotifyFrame >= 12)
+	{
+		const uint32_t printCount = std::min<uint32_t>((uint32_t)changedNearbySurfaceSectors.size(), 6u);
+		for (uint32_t i = 0; i < printCount; ++i)
+		{
+			const uint32_t sectorIndex = changedNearbySurfaceSectors[i];
+			const auto& aggregate = sectorSurfaceAggregates[sectorIndex];
+			const int32_t avgShade = aggregate.count > 0 ? (int32_t)(aggregate.shadeSum / (int64_t)aggregate.count) : 0;
+			const SceneLightSystem::SectorLightingRegistry::SectorLightRecord* sector =
+				sectorIndex < sectorRegistry.sectors.size() ? &sectorRegistry.sectors[sectorIndex] : nullptr;
+			Printf(
+				PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG,
+				"NRI PT sector %u surface light changed avg_shade=%d range=[%d,%d] sector_raw=(%.2f,%.2f) response=%.2f\n",
+				sectorIndex,
+				avgShade,
+				aggregate.minShade,
+				aggregate.maxShade,
+				sector != nullptr ? sector->rawFloorLight : 0.0f,
+				sector != nullptr ? sector->rawCeilingLight : 0.0f,
+				sector != nullptr ? sector->emitterResponseScale : 1.0f);
+		}
+		if (changedNearbySurfaceSectors.size() > printCount)
+		{
+			Printf(PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG, "NRI PT sector surface light changed: +%u more nearby sectors\n", (uint32_t)changedNearbySurfaceSectors.size() - printCount);
+		}
+		mLastSectorLightingEditNotifyFrame = mFrameIndex;
+	}
+
+	mSectorLightingEditNotifyHashes = std::move(nextSurfaceHashes);
+	mSectorLightingEditNotifyCacheValid = true;
+
 	if (mEmissiveSectorResponseNotifyScales.size() != sectorRegistry.sectors.size())
 	{
 		mEmissiveSectorResponseNotifyScales.assign(sectorRegistry.sectors.size(), -1.0f);
@@ -22833,8 +22957,6 @@ void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
 
 	std::vector<float> nextScales(sectorRegistry.sectors.size(), -1.0f);
 	std::vector<uint32_t> changedNearbySectors;
-	const float nearbyRadius = std::max(0.0f, (float)nri_ptemissivelighteditnotifyrange);
-	const float nearbyRadiusSq = nearbyRadius * nearbyRadius;
 
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
 	{
@@ -37009,6 +37131,9 @@ void NRIRenderer::DestroySceneBuffers()
 	mEmissiveSectorResponseNotifyCacheValid = false;
 	mLastEmissiveSectorResponseNotifyFrame = 0;
 	mEmissiveSectorResponseNotifyScales.clear();
+	mSectorLightingEditNotifyCacheValid = false;
+	mLastSectorLightingEditNotifyFrame = 0;
+	mSectorLightingEditNotifyHashes.clear();
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;

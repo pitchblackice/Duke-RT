@@ -3180,6 +3180,9 @@ private:
 	bool mEmissiveSectorResponseNotifyCacheValid = false;
 	uint32_t mLastEmissiveSectorResponseNotifyFrame = 0;
 	std::vector<float> mEmissiveSectorResponseNotifyScales;
+	bool mSectorLightingEditNotifyCacheValid = false;
+	uint32_t mLastSectorLightingEditNotifyFrame = 0;
+	std::vector<uint64_t> mSectorLightingEditNotifyHashes;
 	uint32_t mEmissiveTlasInstanceCount = 0;
 	uint32_t mEmissiveTlasStaticInstanceCount = 0;
 	uint32_t mEmissiveTlasDynamicInstanceCount = 0;
