@@ -4,6 +4,7 @@
 #include "../scene/nri_scene_bridge.h"
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -280,6 +281,7 @@ public:
 		uint32_t ruleId = 0;
 		std::vector<uint32_t> textureIds;
 		std::vector<std::pair<uint32_t, uint32_t>> textureRanges;
+		std::vector<std::string> textureNames;
 		bool hasMaterialResponse = false;
 		bool materialResponse = true;
 		bool hasMaterialResponseMin = false;

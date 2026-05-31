@@ -7,8 +7,10 @@
 #include "printf.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
+#include <string>
 #include <unordered_map>
 
 EXTERN_CVAR(Bool, nri_ptemissiveheuristics)
@@ -914,6 +916,23 @@ namespace
 		return rule.hasSectorFilter || rule.hasWallFilter || rule.hasTileFilter;
 	}
 
+	std::string NormalizeMaterialTextureName(const FGameTexture* texture)
+	{
+		std::string normalized = texture != nullptr ? texture->GetName().GetChars() : "";
+		for (char& c : normalized)
+		{
+			c = (char)std::tolower((unsigned char)c);
+		}
+
+		const size_t slash = normalized.find_last_of("/\\");
+		const size_t dot = normalized.find_last_of('.');
+		if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+		{
+			normalized.erase(dot);
+		}
+		return normalized;
+	}
+
 	bool EmissiveMaterialResponseRuleMatchesSurface(
 		const SceneLightSystem::EmissiveMaterialResponseRule& rule,
 		const SceneLightSystem::SurfaceRecord& record)
@@ -931,6 +950,18 @@ namespace
 			if (record.material.textureId >= range.first && record.material.textureId <= range.second)
 			{
 				return true;
+			}
+		}
+
+		if (!rule.textureNames.empty())
+		{
+			const std::string textureName = NormalizeMaterialTextureName(record.material.texture);
+			for (const std::string& ruleTextureName : rule.textureNames)
+			{
+				if (textureName == ruleTextureName)
+				{
+					return true;
+				}
 			}
 		}
 

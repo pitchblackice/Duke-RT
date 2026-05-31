@@ -35,6 +35,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cctype>
 #include <limits>
 #include <string>
 #include <unordered_map>
@@ -2672,6 +2673,23 @@ public:
 		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
 	}
 
+	static std::string NormalizeLightOverlayTextureSelector(const char* value)
+	{
+		std::string normalized = value != nullptr ? value : "";
+		for (char& c : normalized)
+		{
+			c = (char)std::tolower((unsigned char)c);
+		}
+
+		const size_t slash = normalized.find_last_of("/\\");
+		const size_t dot = normalized.find_last_of('.');
+		if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+		{
+			normalized.erase(dot);
+		}
+		return normalized;
+	}
+
 	static uint64_t BuildMapOverlayStableKey(uint32_t ruleId, const float position[3])
 	{
 		uint64_t key = 1469598103934665603ull;
@@ -2986,19 +3004,9 @@ public:
 			}
 			for (const auto& textureName : resolvedRule.textureNames)
 			{
-				const FTextureID textureId = TexMan.CheckForTexture(textureName.GetChars(), ETextureType::Any);
-				if (textureId.isValid())
-				{
-					rule.textureIds.push_back((uint32_t)textureId.GetIndex());
-				}
-				else
-				{
-					Printf(PRINT_LOW, "LIGHTOVR warning: emissivematerialresponse '%s' texture '%s' did not resolve\n",
-						resolvedRule.id.GetChars(),
-						textureName.GetChars());
-				}
+				rule.textureNames.push_back(NormalizeLightOverlayTextureSelector(textureName.GetChars()));
 			}
-			if (rule.textureIds.empty() && rule.textureRanges.empty())
+			if (rule.textureIds.empty() && rule.textureRanges.empty() && rule.textureNames.empty())
 			{
 				continue;
 			}
