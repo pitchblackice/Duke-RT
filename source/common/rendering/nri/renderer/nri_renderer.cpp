@@ -2948,6 +2948,12 @@ public:
 			rule.responseInputMin = resolvedRule.responseInputMin;
 			rule.hasResponseInputMax = resolvedRule.hasResponseInputMax;
 			rule.responseInputMax = resolvedRule.responseInputMax;
+			rule.hasMaterialResponse = resolvedRule.hasMaterialResponse;
+			rule.materialResponse = resolvedRule.materialResponse;
+			rule.hasMaterialResponseMin = resolvedRule.hasMaterialResponseMin;
+			rule.materialResponseMin = resolvedRule.materialResponseMin;
+			rule.hasMaterialResponseMax = resolvedRule.hasMaterialResponseMax;
+			rule.materialResponseMax = resolvedRule.materialResponseMax;
 			outRules.push_back(rule);
 		}
 	}
@@ -3285,7 +3291,7 @@ namespace
 {
 	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 512;
 	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 25;
+	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 26;
 	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
@@ -6917,6 +6923,48 @@ namespace
 		return scale;
 	}
 
+	static float ResolveEmissiveMaterialResponseScale(
+		const SceneLightSystem::SectorLightingRegistry& sectorRegistry,
+		const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface,
+		bool& outApplied)
+	{
+		outApplied = false;
+		if (!nri_ptsectoremission ||
+			!surface.materialResponseEnabled ||
+			surface.sectorIndex < 0)
+		{
+			return 1.0f;
+		}
+
+		const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
+		if (sectorIndex >= sectorRegistry.sectors.size())
+		{
+			return 1.0f;
+		}
+
+		const auto& sector = sectorRegistry.sectors[sectorIndex];
+		const float minScale = std::max(0.0f, surface.materialResponseMin);
+		const float maxScale = std::max(minScale, surface.materialResponseMax);
+		const float scale = surface.hasSectorResponseInputRange ?
+			ComputeSectorEmitterRangeResponseScaleForRenderer(
+				sector.rawResponseSignal,
+				surface.sectorResponseInputMin,
+				surface.sectorResponseInputMax,
+				minScale,
+				maxScale) :
+			surface.hasSectorResponseParams ?
+			ComputeSectorEmitterResponseScaleForRenderer(
+				sector.rawResponseBrightness,
+				GetSectorEmitterNeutralBrightnessForRenderer(),
+				std::max(0.0f, surface.sectorResponseIntensity),
+				minScale,
+				maxScale) :
+			clamp(std::max(0.0f, sector.emitterResponseScale), minScale, maxScale);
+
+		outApplied = scale != 1.0f;
+		return scale;
+	}
+
 	struct SkyFaceUpload
 	{
 		uint32_t width = 0;
@@ -8630,7 +8678,7 @@ void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint6
 			noteBytes(perf.sceneOtherUploadCalls, perf.sceneOtherUploadBytes);
 		}
 	}
-	else if (stats == &mEmissivePrimitiveHeaderBufferStats || stats == &mEmissivePrimitiveBufferStats || stats == &mEmissivePrimitiveCdfBufferStats || stats == &mEmissiveTlasInstanceBufferStats)
+	else if (stats == &mEmissivePrimitiveHeaderBufferStats || stats == &mEmissivePrimitiveBufferStats || stats == &mEmissivePrimitiveCdfBufferStats || stats == &mEmissiveMaterialResponseBufferStats || stats == &mEmissiveTlasInstanceBufferStats)
 	{
 		noteBytes(perf.emissiveUploadCalls, perf.emissiveUploadBytes);
 	}
@@ -12090,7 +12138,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		const auto& record = *candidates[i].record;
 		const auto diagnosticIt = emissiveSurfaces.activeDiagnosticFlags.find(record.surfaceStableKey);
 		const uint32_t diagnosticFlags = diagnosticIt != emissiveSurfaces.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
-		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u override_rule=%u actor=%d sector=%d sector_scale=%.3f sector_applied=%s tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u override_rule=%u actor=%d sector=%d sector_scale=%.3f sector_applied=%s material_response=%s material_scale=%.3f tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
 			i,
 			(unsigned long long)record.stableKey,
 			(unsigned long long)record.surfaceStableKey,
@@ -12108,6 +12156,8 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 			record.sectorIndex,
 			record.sectorResponseScale,
 			YesNo(record.sectorResponseApplied),
+			YesNo(record.materialResponseEnabled),
+			record.materialResponseScale,
 			record.textureId,
 			GetMaterialEmissiveModeName(record.emissiveMode),
 			record.emissiveTextureIndex != UINT32_MAX ? record.emissiveTextureIndex : 0u,
@@ -12905,6 +12955,7 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mEmissivePrimitiveHeaderBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mEmissivePrimitiveBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mEmissivePrimitiveCdfBuffer, telemetry.sceneBufferBytes);
+	accumulateBuffer(mEmissiveMaterialResponseBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mEmissiveTlasInstanceBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mSectorLightHeaderBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mSectorLightBuffer, telemetry.sceneBufferBytes);
@@ -20007,6 +20058,7 @@ void NRIRenderer::PrintSceneBufferStatus() const
 	printBuffer(mEmissivePrimitiveHeaderBuffer, mEmissivePrimitiveHeaderBufferStats);
 	printBuffer(mEmissivePrimitiveBuffer, mEmissivePrimitiveBufferStats);
 	printBuffer(mEmissivePrimitiveCdfBuffer, mEmissivePrimitiveCdfBufferStats);
+	printBuffer(mEmissiveMaterialResponseBuffer, mEmissiveMaterialResponseBufferStats);
 	printBuffer(mSectorLightHeaderBuffer, mSectorLightHeaderBufferStats);
 	printBuffer(mSectorLightBuffer, mSectorLightBufferStats);
 }
@@ -20269,7 +20321,7 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	FString materialTextureName;
 	int32_t materialLegacyTile = -1;
 	ResolveSurfaceProbeTextureDebugInfo(result.baseTextureId, materialTextureName, materialLegacyTile);
-	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s material_texid=%u material_legacy_tile=%d material_texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s material_texid=%u material_legacy_tile=%d material_texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u material_response=%s material_scale=%.3f light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(result.provenance.sourceType),
 		GetDrawListTypeName(result.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(result.sceneOwner),
@@ -20335,6 +20387,8 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		emissiveDiagnostics.sceneLightMaterialIndex != UINT32_MAX ? emissiveDiagnostics.sceneLightMaterialIndex : 0u,
 		YesNo(emissiveDiagnostics.activeEmissiveSurfaceMatch),
 		emissiveDiagnostics.emissivePrimitiveMatchCount,
+		YesNo(emissiveDiagnostics.materialResponseEnabled),
+		emissiveDiagnostics.materialResponseScale,
 		result.lightLevel,
 		result.alpha,
 		result.averageColor[0], result.averageColor[1], result.averageColor[2],
@@ -20433,6 +20487,12 @@ NRIRenderer::SurfaceProbeEmissiveDiagnostics NRIRenderer::BuildSurfaceProbeEmiss
 		{
 			diagnostics.emissivePrimitiveMatchCount++;
 		}
+		if (record.dataSource == probe.sceneDataSource &&
+			record.primitiveIndex == probe.primitiveIndex)
+		{
+			diagnostics.materialResponseEnabled = record.materialResponseEnabled;
+			diagnostics.materialResponseScale = record.materialResponseScale;
+		}
 	}
 
 	return diagnostics;
@@ -20506,7 +20566,7 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		flatPlaneVisible = IsFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, mLastSurfaceProbe.provenance.sectorIndex, mLastSurfaceProbe.normal[1] < 0.0f);
 	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
-	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u material_tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u material_tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u material_response=%s material_scale=%.3f light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 		GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
 		GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
 		GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner),
@@ -20569,6 +20629,8 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		emissiveDiagnostics.sceneLightMaterialIndex != UINT32_MAX ? emissiveDiagnostics.sceneLightMaterialIndex : 0u,
 		YesNo(emissiveDiagnostics.activeEmissiveSurfaceMatch),
 		emissiveDiagnostics.emissivePrimitiveMatchCount,
+		YesNo(emissiveDiagnostics.materialResponseEnabled),
+		emissiveDiagnostics.materialResponseScale,
 		mLastSurfaceProbe.lightLevel,
 		mLastSurfaceProbe.alpha,
 		mLastSurfaceProbe.averageColor[0],
@@ -22499,6 +22561,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 	EmissivePrimitiveHeaderGpuData& outHeader,
 	std::vector<EmissivePrimitiveGpuData>& outPrimitives,
 	std::vector<float>& outCdf,
+	std::vector<EmissiveMaterialResponseGpuData>& outMaterialResponses,
 	std::vector<EmissivePrimitiveDebugRecord>& outDebugRecords) const
 {
 	outHeader = {};
@@ -22506,7 +22569,12 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 	outHeader.flags = nri_ptemissiveautoonly ? NRI_EMISSIVE_SAMPLING_FLAG_AUTO_ONLY : 0u;
 	outPrimitives.clear();
 	outCdf.clear();
+	outMaterialResponses.clear();
 	outDebugRecords.clear();
+	EmissiveMaterialResponseGpuData materialResponseHeader = {};
+	materialResponseHeader.primitiveIndex = UINT32_MAX;
+	materialResponseHeader.materialScale = 1.0f;
+	outMaterialResponses.push_back(materialResponseHeader);
 
 	struct MaterialPrimitiveRange
 	{
@@ -22557,6 +22625,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 	buildRanges(context.dynamicGeometry, dynamicRanges);
 
 	std::vector<BuiltCandidate> candidates;
+	std::unordered_map<uint64_t, uint32_t> materialResponseLookup;
 	const auto& activeSurfaces = mSceneLights.GetEmissiveSurfaces().activeSurfaces;
 	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
 	candidates.reserve(activeSurfaces.size());
@@ -22582,6 +22651,8 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 		const float samplingScale = ResolveGlowSamplingScale(surface.sourceFlags, surface.emissiveMode) * std::max(surface.reachScale, 0.0f);
 		bool sectorResponseApplied = false;
 		const float sectorResponseScale = ResolveSectorEmissionScale(sectorRegistry, surface, sectorResponseApplied);
+		bool materialResponseApplied = false;
+		const float materialResponseScale = ResolveEmissiveMaterialResponseScale(sectorRegistry, surface, materialResponseApplied);
 
 		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
 		{
@@ -22622,6 +22693,8 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.debug.selectionPdf = 0.0f;
 			candidate.debug.emissiveIntensity = surface.emissiveIntensity * sectorResponseScale;
 			candidate.debug.sectorResponseScale = sectorResponseScale;
+			candidate.debug.materialResponseEnabled = surface.materialResponseEnabled;
+			candidate.debug.materialResponseScale = materialResponseScale;
 			candidate.debug.sectorResponseApplied = sectorResponseApplied;
 			Copy3(surface.emissiveColor, candidate.debug.emissiveColor);
 			ComputePrimitiveCenter(*geometry, localPrimitiveIndex, candidate.debug.center);
@@ -22629,6 +22702,20 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.gpu.stableKeyLo = (uint32_t)(candidate.debug.stableKey & 0xffffffffu);
 			candidate.gpu.stableKeyHi = (uint32_t)(candidate.debug.stableKey >> 32u);
 			candidates.push_back(candidate);
+
+			if (surface.materialResponseEnabled)
+			{
+				const uint64_t responseKey = ((uint64_t)dataSource << 32u) | primitiveIndex;
+				if (materialResponseLookup.find(responseKey) == materialResponseLookup.end())
+				{
+					materialResponseLookup.emplace(responseKey, (uint32_t)outMaterialResponses.size());
+					EmissiveMaterialResponseGpuData response = {};
+					response.dataSource = dataSource;
+					response.primitiveIndex = primitiveIndex;
+					response.materialScale = std::max(0.0f, materialResponseScale);
+					outMaterialResponses.push_back(response);
+				}
+			}
 		}
 	};
 
@@ -22704,6 +22791,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 
 	outHeader.activeCount = (uint32_t)outPrimitives.size();
 	outHeader.totalPower = totalPower;
+	outMaterialResponses[0].dataSource = (uint32_t)outMaterialResponses.size() - 1u;
 
 	if (outPrimitives.empty())
 	{
@@ -22806,6 +22894,14 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 			const float responseScale = ResolveSectorEmissionScale(sectorRegistry, surface, applied);
 			hash = HashCombine64(hash, (uint64_t)sectorIndex);
 			hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
+		}
+		if (nri_ptsectoremission && surface.materialResponseEnabled && surface.sectorIndex >= 0)
+		{
+			bool applied = false;
+			const float materialScale = ResolveEmissiveMaterialResponseScale(sectorRegistry, surface, applied);
+			hash = HashCombine64(hash, 0x4d415452455350ull);
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)surface.sectorIndex);
+			hash = HashCombine64(hash, (uint64_t)FloatBits(materialScale));
 		}
 	}
 
@@ -23173,7 +23269,8 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 		mEmissiveSamplingPayloadHash == payloadHash &&
 		mEmissivePrimitiveHeaderBuffer.shaderView != nullptr &&
 		mEmissivePrimitiveBuffer.shaderView != nullptr &&
-		mEmissivePrimitiveCdfBuffer.shaderView != nullptr)
+		mEmissivePrimitiveCdfBuffer.shaderView != nullptr &&
+		mEmissiveMaterialResponseBuffer.shaderView != nullptr)
 	{
 		if (!mEmissiveSectorResponsePayloadCacheValid)
 		{
@@ -23186,8 +23283,9 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	EmissivePrimitiveHeaderGpuData emissiveHeader = {};
 	std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
 	std::vector<float> emissiveCdf;
+	std::vector<EmissiveMaterialResponseGpuData> emissiveMaterialResponses;
 	std::vector<EmissivePrimitiveDebugRecord> emissiveDebugRecords;
-	BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveDebugRecords);
+	BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, emissiveDebugRecords);
 
 	const auto ensureStructuredBufferBatched = [this, ioWaitedForWrites](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
 	{
@@ -23238,6 +23336,18 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 		return false;
 	}
 
+	if (!ensureStructuredBufferBatched(
+		mEmissiveMaterialResponseBuffer,
+		mEmissiveMaterialResponseBufferStats,
+		emissiveMaterialResponses.empty() ? nullptr : emissiveMaterialResponses.data(),
+		emissiveMaterialResponses.empty() ? 0u : emissiveMaterialResponses.size() * sizeof(EmissiveMaterialResponseGpuData),
+		sizeof(EmissiveMaterialResponseGpuData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess()))
+	{
+		return false;
+	}
+
 	mBoundEmissivePrimitiveCount = emissiveHeader.activeCount;
 	mBoundEmissiveTotalPower = emissiveHeader.totalPower;
 	mBoundEmissiveDominantPrimitive = emissiveHeader.dominantIndex != UINT32_MAX && emissiveHeader.dominantIndex < emissiveDebugRecords.size() ? emissiveDebugRecords[emissiveHeader.dominantIndex].primitiveIndex : UINT32_MAX;
@@ -23250,6 +23360,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	mSceneDataDescriptors[13] = mEmissivePrimitiveHeaderBuffer.shaderView;
 	mSceneDataDescriptors[14] = mEmissivePrimitiveBuffer.shaderView;
 	mSceneDataDescriptors[15] = mEmissivePrimitiveCdfBuffer.shaderView;
+	mSceneDataDescriptors[25] = mEmissiveMaterialResponseBuffer.shaderView;
 
 	bool descriptorsReady = IsCurrentSceneDataDescriptorsInitialized() && GetCurrentSceneDataSet() != nullptr;
 	if (descriptorsReady)
@@ -23814,16 +23925,18 @@ bool NRIRenderer::UpdateSceneDataSet(
 	if (!mEmissiveSamplingPayloadCacheValid ||
 		mEmissivePrimitiveHeaderBuffer.shaderView == nullptr ||
 		mEmissivePrimitiveBuffer.shaderView == nullptr ||
-		mEmissivePrimitiveCdfBuffer.shaderView == nullptr)
+		mEmissivePrimitiveCdfBuffer.shaderView == nullptr ||
+		mEmissiveMaterialResponseBuffer.shaderView == nullptr)
 	{
 		mLastPerfShellTraceStats.sceneDataSetEmissiveUploads++;
 		EmissivePrimitiveHeaderGpuData emissiveHeader = {};
 		std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
 		std::vector<float> emissiveCdf;
+		std::vector<EmissiveMaterialResponseGpuData> emissiveMaterialResponses;
 		std::vector<EmissivePrimitiveDebugRecord> ignoredEmissiveDebugRecords;
 		{
 			ScopedPtPerfTimer emissiveTimer(mLastPerfShellTraceStats.sceneDataSetEmissiveMs);
-			BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, ignoredEmissiveDebugRecords);
+			BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, ignoredEmissiveDebugRecords);
 		}
 		if (!ensureStructuredBufferBatched(
 			mEmissivePrimitiveHeaderBuffer,
@@ -23861,6 +23974,21 @@ bool NRIRenderer::UpdateSceneDataSet(
 			emissiveCdf.data(),
 			emissiveCdf.size() * sizeof(float),
 			sizeof(float),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
+		{
+			return false;
+		}
+
+		if (!ensureStructuredBufferBatched(
+			mEmissiveMaterialResponseBuffer,
+			mEmissiveMaterialResponseBufferStats,
+			emissiveMaterialResponses.empty() ? nullptr : emissiveMaterialResponses.data(),
+			emissiveMaterialResponses.empty() ? 0u : emissiveMaterialResponses.size() * sizeof(EmissiveMaterialResponseGpuData),
+			sizeof(EmissiveMaterialResponseGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
 			NRIComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
@@ -23964,6 +24092,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mSceneDataDescriptors[22] = selectView(mPersistentVoxelIndexBuffer, dynamicIndexBuffer);
 		mSceneDataDescriptors[23] = selectView(mPersistentVoxelPrimitiveBuffer, dynamicPrimitiveBuffer);
 		mSceneDataDescriptors[24] = selectView(mPersistentVoxelMaterialBuffer, dynamicMaterialBuffer);
+		mSceneDataDescriptors[25] = mEmissiveMaterialResponseBuffer.shaderView;
 	}
 
 	{
@@ -37089,6 +37218,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mEmissivePrimitiveHeaderBuffer);
 	DestroyBufferResource(mEmissivePrimitiveBuffer);
 	DestroyBufferResource(mEmissivePrimitiveCdfBuffer);
+	DestroyBufferResource(mEmissiveMaterialResponseBuffer);
 	DestroyBufferResource(mSectorLightHeaderBuffer);
 	DestroyBufferResource(mSectorLightBuffer);
 	DestroyBufferResource(mReprojectionBuffer);

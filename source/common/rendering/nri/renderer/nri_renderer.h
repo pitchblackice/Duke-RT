@@ -1594,6 +1594,8 @@ private:
 		bool activeEmissiveSurfaceMatch = false;
 		uint32_t sceneLightMaterialIndex = UINT32_MAX;
 		uint32_t emissivePrimitiveMatchCount = 0;
+		bool materialResponseEnabled = false;
+		float materialResponseScale = 1.0f;
 	};
 
 	struct SurfaceProbeFrameState
@@ -1675,6 +1677,14 @@ private:
 		uint32_t stableKeyHi = 0;
 	};
 
+	struct EmissiveMaterialResponseGpuData
+	{
+		uint32_t dataSource = 0;
+		uint32_t primitiveIndex = UINT32_MAX;
+		float materialScale = 1.0f;
+		uint32_t flags = 0;
+	};
+
 	struct EmissivePrimitiveDebugRecord
 	{
 		uint64_t stableKey = 0;
@@ -1698,6 +1708,8 @@ private:
 		float emissiveColor[3] = {};
 		float emissiveIntensity = 0.0f;
 		float sectorResponseScale = 1.0f;
+		float materialResponseScale = 1.0f;
+		bool materialResponseEnabled = false;
 		bool sectorResponseApplied = false;
 	};
 
@@ -2674,6 +2686,7 @@ private:
 		EmissivePrimitiveHeaderGpuData& outHeader,
 		std::vector<EmissivePrimitiveGpuData>& outPrimitives,
 		std::vector<float>& outCdf,
+		std::vector<EmissiveMaterialResponseGpuData>& outMaterialResponses,
 		std::vector<EmissivePrimitiveDebugRecord>& outDebugRecords) const;
 	bool UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context, bool* ioWaitedForWrites = nullptr);
 	void UpdateBoundSectorLightingState();
@@ -2920,6 +2933,7 @@ private:
 	NRIBufferResource mEmissivePrimitiveHeaderBuffer;
 	NRIBufferResource mEmissivePrimitiveBuffer;
 	NRIBufferResource mEmissivePrimitiveCdfBuffer;
+	NRIBufferResource mEmissiveMaterialResponseBuffer;
 	NRIBufferResource mEmissiveTlasInstanceBuffer;
 	NRIBufferResource mSectorLightHeaderBuffer;
 	NRIBufferResource mSectorLightBuffer;
@@ -2966,6 +2980,7 @@ private:
 	SceneBufferDebugStats mEmissivePrimitiveHeaderBufferStats = { "EmissivePrimitiveHeader" };
 	SceneBufferDebugStats mEmissivePrimitiveBufferStats = { "EmissivePrimitive" };
 	SceneBufferDebugStats mEmissivePrimitiveCdfBufferStats = { "EmissivePrimitiveCdf" };
+	SceneBufferDebugStats mEmissiveMaterialResponseBufferStats = { "EmissiveMaterialResponse" };
 	SceneBufferDebugStats mEmissiveTlasInstanceBufferStats = { "EmissiveTLASInstance" };
 	SceneBufferDebugStats mSectorLightHeaderBufferStats = { "SectorLightHeader" };
 	SceneBufferDebugStats mSectorLightBufferStats = { "SectorLight" };
@@ -3053,7 +3068,7 @@ private:
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneLightSystem::SceneAnalyticLight> mTransientMuzzleFlashLights;
-	std::array<nri::Descriptor*, 25> mSceneDataDescriptors = {};
+	std::array<nri::Descriptor*, 26> mSceneDataDescriptors = {};
 	std::array<nri::Descriptor*, 14> mFrameInputDescriptors = {};
 	std::array<nri::Descriptor*, 15> mOutputDescriptors = {};
 	std::vector<SceneInstanceData> mBoundSceneInstances;

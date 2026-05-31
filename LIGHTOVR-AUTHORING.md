@@ -51,7 +51,7 @@ Current parser fields by block:
 - `actoroverride`
   `actorclass`, `shadowreceive`, `shadowcast`
 - `emissiveoverride`
-  `sector`, `wall`, `tile`, `intensityscale`, `reachscale`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`
+  `sector`, `wall`, `tile`, `intensityscale`, `reachscale`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
 
 Current practical notes:
 
@@ -133,6 +133,9 @@ LIGHTOVR
             responsemax 3.0
             responseinputmin 0.20
             responseinputmax 0.65
+            materialresponse on
+            materialresponsemin 0.0
+            materialresponsemax 1.0
         }
     }
 }
@@ -265,6 +268,8 @@ While emissive light edit mode is enabled:
 Edit the generated `signal sector` when an emitter needs to follow a different sector's switch state, then press `l` to reload.
 
 For switch sectors whose "on" and "off" values are both below the global sector-emission neutral point, add `responseinputmin` and `responseinputmax`. When both fields are present, the raw sector signal maps directly from `responseinputmin` -> `responsemin` to `responseinputmax` -> `responsemax`, instead of using the global neutral response curve. The edit-mode sector-change message prints this authoring value as `signal=...`.
+
+If the switch should also dim the visible emissive surface, add `materialresponse on`. `materialresponsemin` and `materialresponsemax` clamp only the material's visible/direct/indirect emission, so a fixture can cast boosted light through `responsemax` while its visible panel stays within an off-to-normal range such as `0.0` to `1.0`. The material response is opt-in and applies only to matched override surfaces.
 
 Disable edit mode with:
 

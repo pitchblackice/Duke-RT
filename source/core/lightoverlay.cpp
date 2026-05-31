@@ -916,6 +916,35 @@ namespace
 					rule.hasResponseInputMax = true;
 					rule.responseInputMax = (float)sc.Float;
 				}
+				else if (sc.Compare("materialresponse"))
+				{
+					sc.MustGetString();
+					rule.hasMaterialResponse = true;
+					if (sc.Compare("on") || sc.Compare("true") || sc.Compare("yes"))
+					{
+						rule.materialResponse = true;
+					}
+					else if (sc.Compare("off") || sc.Compare("false") || sc.Compare("no"))
+					{
+						rule.materialResponse = false;
+					}
+					else
+					{
+						sc.ScriptMessage("Invalid materialresponse value '%s'; expected off/on", sc.String);
+					}
+				}
+				else if (sc.Compare("materialresponsemin"))
+				{
+					sc.MustGetFloat();
+					rule.hasMaterialResponseMin = true;
+					rule.materialResponseMin = (float)sc.Float;
+				}
+				else if (sc.Compare("materialresponsemax"))
+				{
+					sc.MustGetFloat();
+					rule.hasMaterialResponseMax = true;
+					rule.materialResponseMax = (float)sc.Float;
+				}
 				else if (sc.Compare("sectorresponse"))
 				{
 					sc.MustGetString();
@@ -1224,6 +1253,9 @@ namespace
 		if (rule.hasResponseMax) AppendLine(text, 3, FStringf("responsemax %s", FormatLightOverlayFloat(rule.responseMax).GetChars()));
 		if (rule.hasResponseInputMin) AppendLine(text, 3, FStringf("responseinputmin %s", FormatLightOverlayFloat(rule.responseInputMin).GetChars()));
 		if (rule.hasResponseInputMax) AppendLine(text, 3, FStringf("responseinputmax %s", FormatLightOverlayFloat(rule.responseInputMax).GetChars()));
+		if (rule.hasMaterialResponse) AppendShadowStateField(text, 3, "materialresponse", rule.materialResponse);
+		if (rule.hasMaterialResponseMin) AppendLine(text, 3, FStringf("materialresponsemin %s", FormatLightOverlayFloat(rule.materialResponseMin).GetChars()));
+		if (rule.hasMaterialResponseMax) AppendLine(text, 3, FStringf("materialresponsemax %s", FormatLightOverlayFloat(rule.materialResponseMax).GetChars()));
 		AppendLine(text, 2, "}");
 	}
 
@@ -1489,6 +1521,9 @@ namespace
 			if (rule->hasResponseMax) Printf("  responsemax=%.3f\n", rule->responseMax);
 			if (rule->hasResponseInputMin) Printf("  responseinputmin=%.3f\n", rule->responseInputMin);
 			if (rule->hasResponseInputMax) Printf("  responseinputmax=%.3f\n", rule->responseInputMax);
+			if (rule->hasMaterialResponse) Printf("  materialresponse=%s\n", rule->materialResponse ? "on" : "off");
+			if (rule->hasMaterialResponseMin) Printf("  materialresponsemin=%.3f\n", rule->materialResponseMin);
+			if (rule->hasMaterialResponseMax) Printf("  materialresponsemax=%.3f\n", rule->materialResponseMax);
 		}
 
 		for (const ParsedLightOverlayActorOverrideRule* rule : SortRulesByOrder(database.actorOverrideRules))
@@ -1728,6 +1763,12 @@ namespace
 		destination.responseInputMin = source.responseInputMin;
 		destination.hasResponseInputMax = source.hasResponseInputMax;
 		destination.responseInputMax = source.responseInputMax;
+		destination.hasMaterialResponse = source.hasMaterialResponse;
+		destination.materialResponse = source.materialResponse;
+		destination.hasMaterialResponseMin = source.hasMaterialResponseMin;
+		destination.materialResponseMin = source.materialResponseMin;
+		destination.hasMaterialResponseMax = source.hasMaterialResponseMax;
+		destination.materialResponseMax = source.materialResponseMax;
 	}
 
 	static void CopyActorOverrideRule(const ParsedLightOverlayActorOverrideRule& source, ResolvedLightOverlayActorOverrideRule& destination)

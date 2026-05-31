@@ -865,6 +865,9 @@ namespace
 		hash = HashCombine64(hash, emissive.hasSectorResponseInputRange ? 1ull : 0ull);
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseInputMin, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseInputMax, 4096.0f);
+		hash = HashCombine64(hash, emissive.materialResponseEnabled ? 1ull : 0ull);
+		hash = HashQuantizedFloat(hash, emissive.materialResponseMin, 4096.0f);
+		hash = HashQuantizedFloat(hash, emissive.materialResponseMax, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.powerEstimate, 256.0f);
 		hash = HashCombine64(hash, emissive.sectorResponseEnabled ? 1ull : 0ull);
 		return hash;
@@ -942,6 +945,15 @@ namespace
 			emissive.hasSectorResponseInputRange = rule.hasResponseInputMin && rule.hasResponseInputMax;
 			emissive.sectorResponseInputMin = rule.hasResponseInputMin ? rule.responseInputMin : 0.0f;
 			emissive.sectorResponseInputMax = rule.hasResponseInputMax ? rule.responseInputMax : 1.0f;
+		}
+		if (rule.hasMaterialResponse)
+		{
+			emissive.materialResponseEnabled = rule.materialResponse;
+		}
+		if (rule.hasMaterialResponseMin || rule.hasMaterialResponseMax)
+		{
+			emissive.materialResponseMin = rule.hasMaterialResponseMin ? std::max(0.0f, rule.materialResponseMin) : 0.0f;
+			emissive.materialResponseMax = rule.hasMaterialResponseMax ? std::max(emissive.materialResponseMin, rule.materialResponseMax) : 1.0f;
 		}
 	}
 

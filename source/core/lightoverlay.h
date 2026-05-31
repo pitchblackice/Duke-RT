@@ -162,6 +162,12 @@ struct ParsedLightOverlayEmissiveOverrideRule
 	float responseInputMin = 0.0f;
 	bool hasResponseInputMax = false;
 	float responseInputMax = 1.0f;
+	bool hasMaterialResponse = false;
+	bool materialResponse = false;
+	bool hasMaterialResponseMin = false;
+	float materialResponseMin = 0.0f;
+	bool hasMaterialResponseMax = false;
+	float materialResponseMax = 1.0f;
 };
 
 struct ParsedLightOverlayActorOverrideRule
@@ -334,6 +340,12 @@ struct ResolvedLightOverlayEmissiveOverrideRule
 	float responseInputMin = 0.0f;
 	bool hasResponseInputMax = false;
 	float responseInputMax = 1.0f;
+	bool hasMaterialResponse = false;
+	bool materialResponse = false;
+	bool hasMaterialResponseMin = false;
+	float materialResponseMin = 0.0f;
+	bool hasMaterialResponseMax = false;
+	float materialResponseMax = 1.0f;
 };
 
 struct ResolvedLightOverlayActorOverrideRule

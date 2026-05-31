@@ -202,6 +202,9 @@ public:
 			bool hasSectorResponseInputRange = false;
 			float sectorResponseInputMin = 0.0f;
 			float sectorResponseInputMax = 1.0f;
+			bool materialResponseEnabled = false;
+			float materialResponseMin = 0.0f;
+			float materialResponseMax = 1.0f;
 			float powerEstimate = 0.0f;
 			bool sectorResponseEnabled = true;
 		};
@@ -257,6 +260,12 @@ public:
 		float responseInputMin = 0.0f;
 		bool hasResponseInputMax = false;
 		float responseInputMax = 1.0f;
+		bool hasMaterialResponse = false;
+		bool materialResponse = false;
+		bool hasMaterialResponseMin = false;
+		float materialResponseMin = 0.0f;
+		bool hasMaterialResponseMax = false;
+		float materialResponseMax = 1.0f;
 	};
 
 	struct SectorLightingRegistry

@@ -147,6 +147,14 @@ struct EmissivePrimitiveData
 	uint stableKeyHi;
 };
 
+struct EmissiveMaterialResponseData
+{
+	uint dataSource;
+	uint primitiveIndex;
+	float materialScale;
+	uint flags;
+};
+
 struct SectorLightHeaderData
 {
 	uint sectorCount;
@@ -267,6 +275,7 @@ StructuredBuffer<SceneVertex> gPersistentVoxelVertices : register(t21, space2);
 StructuredBuffer<uint> gPersistentVoxelIndices : register(t22, space2);
 StructuredBuffer<PrimitiveData> gPersistentVoxelPrimitives : register(t23, space2);
 StructuredBuffer<MaterialData> gPersistentVoxelMaterials : register(t24, space2);
+StructuredBuffer<EmissiveMaterialResponseData> gEmissiveMaterialResponses : register(t25, space2);
 #endif
 
 SamplerState gLinearWrap : register(s0, space0);

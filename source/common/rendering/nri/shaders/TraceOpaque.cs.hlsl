@@ -326,25 +326,41 @@ float3 OverlayBlend(float3 target, float3 blend)
 	return lerp(low, high, step(0.5.xxx, target));
 }
 
-float3 EvaluateMaterialEmission(uint materialIndex, uint dataSource, MaterialData material, float2 uv)
+float GetEmissiveMaterialResponseScale(uint dataSource, uint primitiveIndex)
+{
+	const uint responseCount = gEmissiveMaterialResponses[0].dataSource;
+	[loop]
+	for (uint i = 1u; i <= responseCount; ++i)
+	{
+		const EmissiveMaterialResponseData response = gEmissiveMaterialResponses[i];
+		if (response.dataSource == dataSource && response.primitiveIndex == primitiveIndex)
+		{
+			return max(response.materialScale, 0.0);
+		}
+	}
+	return 1.0;
+}
+
+float3 EvaluateMaterialEmission(uint materialIndex, uint dataSource, uint primitiveIndex, MaterialData material, float2 uv)
 {
 	if (material.emissiveMode != 0u)
 	{
-		return SampleMaterialEmissionSource(materialIndex, dataSource, uv) * material.emissiveIntensity;
+		return SampleMaterialEmissionSource(materialIndex, dataSource, uv) * material.emissiveIntensity * GetEmissiveMaterialResponseScale(dataSource, primitiveIndex);
 	}
 	return 0.0;
 }
 
-float3 EvaluateVisibleMaterialEmission(uint materialIndex, uint dataSource, MaterialData material, float3 albedo, float2 uv)
+float3 EvaluateVisibleMaterialEmission(uint materialIndex, uint dataSource, uint primitiveIndex, MaterialData material, float3 albedo, float2 uv)
 {
+	const float materialResponseScale = GetEmissiveMaterialResponseScale(dataSource, primitiveIndex);
 	if (material.emissiveMode == 3u)
 	{
 		const float3 glow = SampleMaterialEmissionSource(materialIndex, dataSource, uv);
 		const float visibleBlend = max(material.emissiveReserved, 0.0);
-		return OverlayBlend(albedo, glow) * material.emissiveIntensity * visibleBlend;
+		return OverlayBlend(albedo, glow) * material.emissiveIntensity * visibleBlend * materialResponseScale;
 	}
 
-	return EvaluateMaterialEmission(materialIndex, dataSource, material, uv);
+	return EvaluateMaterialEmission(materialIndex, dataSource, primitiveIndex, material, uv);
 }
 
 uint GetEmissivePrimitiveCount()
@@ -597,7 +613,7 @@ float3 TraceIndirectDiffuse(HitData surfaceHit, float3 surfaceAlbedo, uint2 pixe
 		const float4 bounceAlbedo = SampleMaterialBaseColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
 		if (IsMaterialEmissive(bounceMaterial))
 		{
-			indirectRadiance += throughput * EvaluateMaterialEmission(bounceHit.materialIndex, bounceHit.dataSource, bounceMaterial, bounceHit.uv);
+			indirectRadiance += throughput * EvaluateMaterialEmission(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.primitiveIndex, bounceMaterial, bounceHit.uv);
 			break;
 		}
 
@@ -702,7 +718,7 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 		const float4 bounceAlbedo = SampleMaterialBaseColor(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.uv);
 		if (IsMaterialEmissive(bounceMaterial))
 		{
-			indirectRadiance += throughput * EvaluateMaterialEmission(bounceHit.materialIndex, bounceHit.dataSource, bounceMaterial, bounceHit.uv);
+			indirectRadiance += throughput * EvaluateMaterialEmission(bounceHit.materialIndex, bounceHit.dataSource, bounceHit.primitiveIndex, bounceMaterial, bounceHit.uv);
 			break;
 		}
 
@@ -1086,7 +1102,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				directLighting += ambientDirectLighting + sunTransportDiffuse + sunTransportSpecular + runtimePointDirectLighting;
 				if (emissiveMaterial)
 				{
-					directEmission = EvaluateVisibleMaterialEmission(hit.materialIndex, hit.dataSource, material, albedo.rgb, hit.uv);
+					directEmission = EvaluateVisibleMaterialEmission(hit.materialIndex, hit.dataSource, hit.primitiveIndex, material, albedo.rgb, hit.uv);
 				}
 			}
 
