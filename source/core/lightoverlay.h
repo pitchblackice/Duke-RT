@@ -162,6 +162,14 @@ struct ParsedLightOverlayEmissiveOverrideRule
 	float responseInputMin = 0.0f;
 	bool hasResponseInputMax = false;
 	float responseInputMax = 1.0f;
+	bool hasResponseIntensityMin = false;
+	float responseIntensityMin = 0.0f;
+	bool hasResponseIntensityMax = false;
+	float responseIntensityMax = 4.0f;
+	bool hasResponseReachMin = false;
+	float responseReachMin = 0.0f;
+	bool hasResponseReachMax = false;
+	float responseReachMax = 24.0f;
 	bool hasMaterialResponse = false;
 	bool materialResponse = false;
 	bool hasMaterialResponseMin = false;
@@ -202,6 +210,8 @@ struct ParsedLightOverlaySurfaceLightRule
 	float normal[3] = { 0.0f, 1.0f, 0.0f };
 	bool hasSize = false;
 	float size[2] = { 64.0f, 16.0f };
+	bool hasRotation = false;
+	float rotation = 0.0f;
 	bool hasOffset = false;
 	float offset = 2.0f;
 	bool hasSector = false;
@@ -413,6 +423,14 @@ struct ResolvedLightOverlayEmissiveOverrideRule
 	float responseInputMin = 0.0f;
 	bool hasResponseInputMax = false;
 	float responseInputMax = 1.0f;
+	bool hasResponseIntensityMin = false;
+	float responseIntensityMin = 0.0f;
+	bool hasResponseIntensityMax = false;
+	float responseIntensityMax = 4.0f;
+	bool hasResponseReachMin = false;
+	float responseReachMin = 0.0f;
+	bool hasResponseReachMax = false;
+	float responseReachMax = 24.0f;
 	bool hasMaterialResponse = false;
 	bool materialResponse = false;
 	bool hasMaterialResponseMin = false;
@@ -447,6 +465,8 @@ struct ResolvedLightOverlaySurfaceLightRule
 	float normal[3] = { 0.0f, 1.0f, 0.0f };
 	bool hasSize = false;
 	float size[2] = { 64.0f, 16.0f };
+	bool hasRotation = false;
+	float rotation = 0.0f;
 	bool hasOffset = false;
 	float offset = 2.0f;
 	bool hasSector = false;

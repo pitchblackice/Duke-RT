@@ -74,6 +74,8 @@ struct PathTracingEmissiveLightEditTarget
 	int textureId = -1;
 	int baseTextureId = -1;
 	int materialIndex = -1;
+	bool surfaceLightOverlay = false;
+	uint32_t surfaceLightRuleId = 0;
 	float position[3] = { 0.0f, 0.0f, 0.0f };
 	float normal[3] = { 0.0f, 1.0f, 0.0f };
 	FString textureName;

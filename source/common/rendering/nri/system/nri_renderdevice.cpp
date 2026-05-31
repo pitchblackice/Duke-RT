@@ -88,6 +88,10 @@ EXTERN_CVAR(Bool, nri_ptsectoremission)
 EXTERN_CVAR(Float, nri_ptsectoremissionintensity)
 EXTERN_CVAR(Float, nri_ptsectoremissionmin)
 EXTERN_CVAR(Float, nri_ptsectoremissionmax)
+EXTERN_CVAR(Float, nri_ptsectoremissionintensitymin)
+EXTERN_CVAR(Float, nri_ptsectoremissionintensitymax)
+EXTERN_CVAR(Float, nri_ptsectoremissionreachmin)
+EXTERN_CVAR(Float, nri_ptsectoremissionreachmax)
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Bool, nri_voxelstats)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
@@ -2370,6 +2374,10 @@ CCMD(nri_ptsectorlight_clear)
 	nri_ptsectoremissionintensity = 16.0f;
 	nri_ptsectoremissionmin = 0.05f;
 	nri_ptsectoremissionmax = 24.0f;
+	nri_ptsectoremissionintensitymin = 0.0f;
+	nri_ptsectoremissionintensitymax = 4.0f;
+	nri_ptsectoremissionreachmin = 0.0f;
+	nri_ptsectoremissionreachmax = 24.0f;
 	Printf("NRI PT sector-light heuristics cleared.\n");
 }
 

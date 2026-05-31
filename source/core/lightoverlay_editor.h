@@ -61,6 +61,9 @@ struct ActorLightEditorState
 	bool createEmissiveOverrideActionPressed = false;
 	bool createSurfaceLightActionPressed = false;
 	double mapLightPreviewDistance = 128.0;
+	FString activeSurfaceLightMapName;
+	FString activeSurfaceLightRuleName;
+	uint32_t activeSurfaceLightRuleId = 0;
 };
 
 bool IsActorLightEditorEnabled();

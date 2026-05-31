@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <memory>
 
 #include "lightoverlay_editor.h"
@@ -14,6 +15,7 @@
 #include "gamefuncs.h"
 #include "gamestate.h"
 #include "i_time.h"
+#include "keydef.h"
 #include "lightoverlay.h"
 #include "mapinfo.h"
 #include "printf.h"
@@ -23,14 +25,14 @@ CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptmaplighteditmode, false, CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivelighteditmode, false, 0)
 CVAR(String, nri_ptsurfacelighttexture, "#00707", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightwidth, 64.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightwidth, 16.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsurfacelightheight, 16.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightoffset, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightoffset, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsurfacelightred, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightgreen, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightblue, 0.55f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightgreen, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightblue, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsurfacelightintensity, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightradius, 256.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightradius, 512.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsurfacelightsectorresponse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
@@ -45,6 +47,25 @@ namespace
 	static constexpr float MapLightEditorIntensity = 1.0f;
 	static constexpr float MapLightEditorRadius = 200.0f;
 	static constexpr const char* MapLightEditorDirectionalRuleId = "EditorDirectional";
+	static constexpr float SurfaceLightEditorRotateStep = 15.0f;
+	static constexpr float SurfaceLightEditorSizeStep = 4.0f;
+	static constexpr float SurfaceLightEditorIntensityStep = 0.5f;
+	static constexpr float SurfaceLightEditorRadiusStep = 32.0f;
+	static constexpr const char* SurfaceLightEditorTextureOptions[] =
+	{
+		"#00124", "#00701", "#00702", "#00703", "#00707", "#00708", "#01206", "#00705", "#00706",
+		"#00704", "#00126", "#00120", "#00121", "#00122", "#00123", "#00127", "#00128"
+	};
+
+	enum class SurfaceLightEditorEditAction : uint8_t
+	{
+		Rotate,
+		SizeX,
+		SizeY,
+		Intensity,
+		Radius,
+		Texture,
+	};
 
 	enum class ActorLightEditorWritableSourceKind : uint8_t
 	{
@@ -369,6 +390,112 @@ namespace
 		return FStringf("%s_%u", baseId.GetChars(), (unsigned)I_msTime());
 	}
 
+	static uint64_t HashSurfaceLightEditorText(uint64_t hash, const char* text)
+	{
+		if (text == nullptr)
+		{
+			return hash;
+		}
+
+		for (const unsigned char* cursor = (const unsigned char*)text; *cursor != '\0'; ++cursor)
+		{
+			hash ^= (uint64_t)(*cursor);
+			hash *= 1099511628211ull;
+		}
+		return hash;
+	}
+
+	static uint32_t BuildSurfaceLightEditorResolvedRuleId(const ParsedLightOverlaySurfaceLightRule& rule)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashSurfaceLightEditorText(hash, rule.id.GetChars());
+		hash = HashSurfaceLightEditorText(hash, rule.mapName.GetChars());
+		hash = HashSurfaceLightEditorText(hash, rule.source.sourceName.GetChars());
+		hash ^= (uint64_t)rule.source.orderIndex + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+		const uint32_t ruleId = (uint32_t)(hash ^ (hash >> 32));
+		return ruleId != 0 ? ruleId : 1u;
+	}
+
+	static int32_t FindSurfaceLightEditorRuleIndexById(const ParsedLightOverlayDatabase& database, const FString& mapName, uint32_t ruleId)
+	{
+		for (unsigned i = 0; i < (unsigned)database.surfaceLightRules.Size(); ++i)
+		{
+			const auto& rule = database.surfaceLightRules[i];
+			if (rule.mapName.CompareNoCase(mapName) == 0 &&
+				BuildSurfaceLightEditorResolvedRuleId(rule) == ruleId)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
+	static int32_t FindSurfaceLightEditorRuleIndexByName(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.surfaceLightRules.Size(); ++i)
+		{
+			const auto& rule = database.surfaceLightRules[i];
+			if (rule.mapName.CompareNoCase(mapName) == 0 && rule.id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
+	static void SetSurfaceLightEditorActiveRule(const ParsedLightOverlaySurfaceLightRule& rule)
+	{
+		GActorLightEditorState.activeSurfaceLightMapName = rule.mapName;
+		GActorLightEditorState.activeSurfaceLightRuleName = rule.id;
+		GActorLightEditorState.activeSurfaceLightRuleId = BuildSurfaceLightEditorResolvedRuleId(rule);
+	}
+
+	static int32_t FindSurfaceLightEditorActiveRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName)
+	{
+		if (GActorLightEditorState.activeSurfaceLightMapName.CompareNoCase(mapName) != 0)
+		{
+			return -1;
+		}
+
+		if (GActorLightEditorState.activeSurfaceLightRuleId != 0u)
+		{
+			const int32_t byId = FindSurfaceLightEditorRuleIndexById(database, mapName, GActorLightEditorState.activeSurfaceLightRuleId);
+			if (byId >= 0)
+			{
+				return byId;
+			}
+		}
+
+		return GActorLightEditorState.activeSurfaceLightRuleName.IsNotEmpty() ?
+			FindSurfaceLightEditorRuleIndexByName(database, mapName, GActorLightEditorState.activeSurfaceLightRuleName) :
+			-1;
+	}
+
+	static float NormalizeSurfaceLightEditorRotation(float degrees)
+	{
+		while (degrees < 0.0f)
+		{
+			degrees += 360.0f;
+		}
+		while (degrees >= 360.0f)
+		{
+			degrees -= 360.0f;
+		}
+		return degrees;
+	}
+
+	static int FindSurfaceLightEditorTextureOption(const FString& texture)
+	{
+		for (unsigned i = 0; i < (unsigned)(sizeof(SurfaceLightEditorTextureOptions) / sizeof(SurfaceLightEditorTextureOptions[0])); ++i)
+		{
+			if (texture.CompareNoCase(SurfaceLightEditorTextureOptions[i]) == 0)
+			{
+				return (int)i;
+			}
+		}
+		return -1;
+	}
+
 	static bool FindMapLightEditorActiveDirectionalRule(const ParsedLightOverlayDatabase& database, const FString& mapName, ParsedLightOverlayDirectionalRule& outRule)
 	{
 		bool found = false;
@@ -613,7 +740,6 @@ namespace
 
 		bool replaced = false;
 		AddOrReplaceLightOverlayRule(database, rule, &replaced);
-
 		const FString serialized = SerializeLightOverlayDatabase(database);
 		if (!WriteActorLightEditorTextFile(writablePath, serialized))
 		{
@@ -755,7 +881,6 @@ namespace
 
 		bool replaced = false;
 		AddOrReplaceLightOverlayRule(database, rule, &replaced);
-
 		const FString serialized = SerializeLightOverlayDatabase(database);
 		if (!WriteActorLightEditorTextFile(writablePath, serialized))
 		{
@@ -836,7 +961,6 @@ namespace
 
 		bool replaced = false;
 		AddOrReplaceLightOverlayRule(database, rule, &replaced);
-
 		const FString serialized = SerializeLightOverlayDatabase(database);
 		if (!WriteActorLightEditorTextFile(writablePath, serialized))
 		{
@@ -948,6 +1072,11 @@ namespace
 
 		bool replaced = false;
 		AddOrReplaceLightOverlayRule(database, rule, &replaced);
+		const int32_t activeIndex = FindSurfaceLightEditorRuleIndexByName(database, rule.mapName, rule.id);
+		if (activeIndex >= 0)
+		{
+			SetSurfaceLightEditorActiveRule(database.surfaceLightRules[activeIndex]);
+		}
 
 		const FString serialized = SerializeLightOverlayDatabase(database);
 		if (!WriteActorLightEditorTextFile(writablePath, serialized))
@@ -980,6 +1109,116 @@ namespace
 			writablePath.GetChars());
 
 		ReloadActorLightEditorOverlays();
+	}
+
+	static bool PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction action, float delta)
+	{
+		if (currentLevel == nullptr || currentLevel->labelName.IsEmpty() || screen == nullptr)
+		{
+			return false;
+		}
+
+		PathTracingEmissiveLightEditTarget target = {};
+		const bool hasAimedSurfaceLight =
+			screen->BuildPathTracingSurfaceLightEditTarget(target) &&
+			target.surfaceLightOverlay &&
+			target.surfaceLightRuleId != 0u;
+
+		FString writablePath;
+		int writableLumpNum = -1;
+		if (!ActorLightEditorResolveWritableSource(writablePath, &writableLumpNum))
+		{
+			PrintActorLightEditorWritableSourceFailure();
+			return true;
+		}
+
+		ParsedLightOverlayDatabase database = GetParsedLightOverlayDatabase();
+		int32_t index = hasAimedSurfaceLight ?
+			FindSurfaceLightEditorRuleIndexById(database, currentLevel->labelName, target.surfaceLightRuleId) :
+			-1;
+		if (index < 0)
+		{
+			index = FindSurfaceLightEditorActiveRuleIndex(database, currentLevel->labelName);
+			if (index < 0)
+			{
+				Printf(PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG, "No placed surfacelight selected; place one with o or aim at one.\n");
+				return true;
+			}
+		}
+
+		ParsedLightOverlaySurfaceLightRule rule = database.surfaceLightRules[index];
+		SetSurfaceLightEditorActiveRule(rule);
+		const bool hadSize = rule.hasSize;
+		const bool hadRotation = rule.hasRotation;
+		const bool hadIntensity = rule.hasIntensity;
+		const bool hadRadius = rule.hasRadius;
+		switch (action)
+		{
+		case SurfaceLightEditorEditAction::Rotate:
+			rule.hasRotation = true;
+			rule.rotation = NormalizeSurfaceLightEditorRotation((hadRotation ? rule.rotation : 0.0f) + delta);
+			break;
+		case SurfaceLightEditorEditAction::SizeX:
+			rule.hasSize = true;
+			rule.size[0] = std::max(1.0f, (hadSize ? rule.size[0] : 16.0f) + delta);
+			break;
+		case SurfaceLightEditorEditAction::SizeY:
+			rule.hasSize = true;
+			rule.size[1] = std::max(1.0f, (hadSize ? rule.size[1] : 16.0f) + delta);
+			break;
+		case SurfaceLightEditorEditAction::Intensity:
+			rule.hasIntensity = true;
+			rule.intensity = std::max(0.0f, (hadIntensity ? rule.intensity : 4.0f) + delta);
+			break;
+		case SurfaceLightEditorEditAction::Radius:
+			rule.hasRadius = true;
+			rule.radius = std::max(0.0f, (hadRadius ? rule.radius : 512.0f) + delta);
+			break;
+		case SurfaceLightEditorEditAction::Texture:
+		{
+			const int optionCount = (int)(sizeof(SurfaceLightEditorTextureOptions) / sizeof(SurfaceLightEditorTextureOptions[0]));
+			const int current = FindSurfaceLightEditorTextureOption(rule.fixtureTexture);
+			const int next = current >= 0 ?
+				(current + (delta >= 0.0f ? 1 : optionCount - 1)) % optionCount :
+				(delta >= 0.0f ? 0 : optionCount - 1);
+			rule.hasFixtureTexture = true;
+			rule.fixtureTexture = SurfaceLightEditorTextureOptions[next];
+			break;
+		}
+		default:
+			return false;
+		}
+
+		rule.source.lumpNum = writableLumpNum;
+		rule.source.sourceName = FindActorLightEditorSourceNameForLump(database, writableLumpNum);
+		bool replaced = false;
+		AddOrReplaceLightOverlayRule(database, rule, &replaced);
+		const int32_t activeIndex = FindSurfaceLightEditorRuleIndexByName(database, rule.mapName, rule.id);
+		if (activeIndex >= 0)
+		{
+			SetSurfaceLightEditorActiveRule(database.surfaceLightRules[activeIndex]);
+		}
+
+		const FString serialized = SerializeLightOverlayDatabase(database);
+		if (!WriteActorLightEditorTextFile(writablePath, serialized))
+		{
+			Printf("NRI PT emissive light editor: failed to open writable LIGHTOVR '%s'.\n", writablePath.GetChars());
+			return true;
+		}
+
+		Printf(
+			PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG,
+			"NRI PT surfacelight '%s': size=(%.1f, %.1f) rotation=%.1f texture=%s intensity=%.2f radius=%.1f\n",
+			rule.id.GetChars(),
+			rule.hasSize ? rule.size[0] : 16.0f,
+			rule.hasSize ? rule.size[1] : 16.0f,
+			rule.hasRotation ? rule.rotation : 0.0f,
+			(rule.hasFixtureTexture && rule.fixtureTexture.IsNotEmpty()) ? rule.fixtureTexture.GetChars() : "(default)",
+			rule.hasIntensity ? rule.intensity : 4.0f,
+			rule.hasRadius ? rule.radius : 512.0f);
+
+		ReloadActorLightEditorOverlays();
+		return true;
 	}
 
 	static void MoveMapLightEditorPreview(double delta)
@@ -1115,6 +1354,52 @@ bool ActorLightEditorResponder(event_t* ev)
 
 	if (IsEmissiveLightEditorEnabled())
 	{
+		if (ev->type == EV_KeyDown)
+		{
+			switch (ev->data1)
+			{
+			case KEY_MWHEELUP:
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::Rotate, SurfaceLightEditorRotateStep);
+			case KEY_MWHEELDOWN:
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::Rotate, -SurfaceLightEditorRotateStep);
+			case KEY_LEFTARROW:
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::SizeX, -SurfaceLightEditorSizeStep);
+			case KEY_RIGHTARROW:
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::SizeX, SurfaceLightEditorSizeStep);
+			case KEY_UPARROW:
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::SizeY, SurfaceLightEditorSizeStep);
+			case KEY_DOWNARROW:
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::SizeY, -SurfaceLightEditorSizeStep);
+			default:
+				break;
+			}
+
+			if (IsActorLightEditorActionKey(ev, ','))
+			{
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::Intensity, -SurfaceLightEditorIntensityStep);
+			}
+			if (IsActorLightEditorActionKey(ev, '.'))
+			{
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::Intensity, SurfaceLightEditorIntensityStep);
+			}
+			if (IsActorLightEditorActionKey(ev, ';'))
+			{
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::Radius, -SurfaceLightEditorRadiusStep);
+			}
+			if (IsActorLightEditorActionKey(ev, '\''))
+			{
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::Radius, SurfaceLightEditorRadiusStep);
+			}
+			if (IsActorLightEditorActionKey(ev, '['))
+			{
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::Texture, -1.0f);
+			}
+			if (IsActorLightEditorActionKey(ev, ']'))
+			{
+				return PerformEmissiveLightEditorModifySurfaceLightAction(SurfaceLightEditorEditAction::Texture, 1.0f);
+			}
+		}
+
 		if (IsActorLightEditorActionKey(ev, 'p'))
 		{
 			if (ev->type == EV_KeyDown)

@@ -966,6 +966,30 @@ namespace
 					rule.hasResponseInputMax = true;
 					rule.responseInputMax = (float)sc.Float;
 				}
+				else if (sc.Compare("responseintensitymin"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseIntensityMin = true;
+					rule.responseIntensityMin = (float)sc.Float;
+				}
+				else if (sc.Compare("responseintensitymax"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseIntensityMax = true;
+					rule.responseIntensityMax = (float)sc.Float;
+				}
+				else if (sc.Compare("responsereachmin"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseReachMin = true;
+					rule.responseReachMin = (float)sc.Float;
+				}
+				else if (sc.Compare("responsereachmax"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseReachMax = true;
+					rule.responseReachMax = (float)sc.Float;
+				}
 				else if (sc.Compare("materialresponse"))
 				{
 					sc.MustGetString();
@@ -1073,6 +1097,12 @@ namespace
 					rule.size[0] = (float)sc.Float;
 					sc.MustGetFloat();
 					rule.size[1] = (float)sc.Float;
+				}
+				else if (sc.Compare("rotation"))
+				{
+					sc.MustGetFloat();
+					rule.hasRotation = true;
+					rule.rotation = (float)sc.Float;
 				}
 				else if (sc.Compare("offset"))
 				{
@@ -1569,6 +1599,10 @@ namespace
 		if (rule.hasResponseMax) AppendLine(text, 3, FStringf("responsemax %s", FormatLightOverlayFloat(rule.responseMax).GetChars()));
 		if (rule.hasResponseInputMin) AppendLine(text, 3, FStringf("responseinputmin %s", FormatLightOverlayFloat(rule.responseInputMin).GetChars()));
 		if (rule.hasResponseInputMax) AppendLine(text, 3, FStringf("responseinputmax %s", FormatLightOverlayFloat(rule.responseInputMax).GetChars()));
+		if (rule.hasResponseIntensityMin) AppendLine(text, 3, FStringf("responseintensitymin %s", FormatLightOverlayFloat(rule.responseIntensityMin).GetChars()));
+		if (rule.hasResponseIntensityMax) AppendLine(text, 3, FStringf("responseintensitymax %s", FormatLightOverlayFloat(rule.responseIntensityMax).GetChars()));
+		if (rule.hasResponseReachMin) AppendLine(text, 3, FStringf("responsereachmin %s", FormatLightOverlayFloat(rule.responseReachMin).GetChars()));
+		if (rule.hasResponseReachMax) AppendLine(text, 3, FStringf("responsereachmax %s", FormatLightOverlayFloat(rule.responseReachMax).GetChars()));
 		if (rule.hasMaterialResponse) AppendShadowStateField(text, 3, "materialresponse", rule.materialResponse);
 		if (rule.hasMaterialResponseMin) AppendLine(text, 3, FStringf("materialresponsemin %s", FormatLightOverlayFloat(rule.materialResponseMin).GetChars()));
 		if (rule.hasMaterialResponseMax) AppendLine(text, 3, FStringf("materialresponsemax %s", FormatLightOverlayFloat(rule.materialResponseMax).GetChars()));
@@ -1588,6 +1622,7 @@ namespace
 				FormatLightOverlayFloat(rule.size[0]).GetChars(),
 				FormatLightOverlayFloat(rule.size[1]).GetChars()));
 		}
+		if (rule.hasRotation) AppendLine(text, 3, FStringf("rotation %s", FormatLightOverlayFloat(rule.rotation).GetChars()));
 		if (rule.hasOffset) AppendLine(text, 3, FStringf("offset %s", FormatLightOverlayFloat(rule.offset).GetChars()));
 		if (rule.hasSector) AppendLine(text, 3, FStringf("sector %d", rule.sector));
 		if (rule.hasWall) AppendLine(text, 3, FStringf("wall %d", rule.wall));
@@ -1923,6 +1958,10 @@ namespace
 			if (rule->hasResponseMax) Printf("  responsemax=%.3f\n", rule->responseMax);
 			if (rule->hasResponseInputMin) Printf("  responseinputmin=%.3f\n", rule->responseInputMin);
 			if (rule->hasResponseInputMax) Printf("  responseinputmax=%.3f\n", rule->responseInputMax);
+			if (rule->hasResponseIntensityMin) Printf("  responseintensitymin=%.3f\n", rule->responseIntensityMin);
+			if (rule->hasResponseIntensityMax) Printf("  responseintensitymax=%.3f\n", rule->responseIntensityMax);
+			if (rule->hasResponseReachMin) Printf("  responsereachmin=%.3f\n", rule->responseReachMin);
+			if (rule->hasResponseReachMax) Printf("  responsereachmax=%.3f\n", rule->responseReachMax);
 			if (rule->hasMaterialResponse) Printf("  materialresponse=%s\n", rule->materialResponse ? "on" : "off");
 			if (rule->hasMaterialResponseMin) Printf("  materialresponsemin=%.3f\n", rule->materialResponseMin);
 			if (rule->hasMaterialResponseMax) Printf("  materialresponsemax=%.3f\n", rule->materialResponseMax);
@@ -2189,6 +2228,14 @@ namespace
 		destination.responseInputMin = source.responseInputMin;
 		destination.hasResponseInputMax = source.hasResponseInputMax;
 		destination.responseInputMax = source.responseInputMax;
+		destination.hasResponseIntensityMin = source.hasResponseIntensityMin;
+		destination.responseIntensityMin = source.responseIntensityMin;
+		destination.hasResponseIntensityMax = source.hasResponseIntensityMax;
+		destination.responseIntensityMax = source.responseIntensityMax;
+		destination.hasResponseReachMin = source.hasResponseReachMin;
+		destination.responseReachMin = source.responseReachMin;
+		destination.hasResponseReachMax = source.hasResponseReachMax;
+		destination.responseReachMax = source.responseReachMax;
 		destination.hasMaterialResponse = source.hasMaterialResponse;
 		destination.materialResponse = source.materialResponse;
 		destination.hasMaterialResponseMin = source.hasMaterialResponseMin;
@@ -2224,6 +2271,8 @@ namespace
 		destination.hasSize = source.hasSize;
 		destination.size[0] = source.size[0];
 		destination.size[1] = source.size[1];
+		destination.hasRotation = source.hasRotation;
+		destination.rotation = source.rotation;
 		destination.hasOffset = source.hasOffset;
 		destination.offset = source.offset;
 		destination.hasSector = source.hasSector;

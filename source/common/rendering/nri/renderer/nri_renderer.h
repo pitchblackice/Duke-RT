@@ -1593,8 +1593,21 @@ private:
 	{
 		bool sceneLightSurfaceMatch = false;
 		bool activeEmissiveSurfaceMatch = false;
+		bool exactEmissivePrimitiveMatch = false;
 		uint32_t sceneLightMaterialIndex = UINT32_MAX;
 		uint32_t emissivePrimitiveMatchCount = 0;
+		uint32_t emissiveSourceFlags = 0;
+		uint32_t emissiveSourceRuleId = 0;
+		uint32_t emissiveOverrideRuleId = 0;
+		int32_t emissiveSectorIndex = -1;
+		float emissivePrimitiveArea = 0.0f;
+		float emissivePowerEstimate = 0.0f;
+		float emissiveSelectionWeight = 0.0f;
+		float emissiveSelectionPdf = 0.0f;
+		float emissiveIntensity = 0.0f;
+		float sectorResponseScale = 1.0f;
+		float sectorReachScale = 1.0f;
+		bool sectorResponseApplied = false;
 		bool materialResponseEnabled = false;
 		float materialResponseScale = 1.0f;
 	};
@@ -1709,6 +1722,7 @@ private:
 		float emissiveColor[3] = {};
 		float emissiveIntensity = 0.0f;
 		float sectorResponseScale = 1.0f;
+		float sectorReachScale = 1.0f;
 		float materialResponseScale = 1.0f;
 		bool materialResponseEnabled = false;
 		bool sectorResponseApplied = false;

@@ -1053,6 +1053,26 @@ namespace
 			emissive.sectorResponseInputMin = rule.hasResponseInputMin ? rule.responseInputMin : 0.0f;
 			emissive.sectorResponseInputMax = rule.hasResponseInputMax ? rule.responseInputMax : 1.0f;
 		}
+		if (rule.hasResponseIntensityMin)
+		{
+			emissive.hasSectorResponseIntensityMin = true;
+			emissive.sectorResponseIntensityMin = rule.responseIntensityMin;
+		}
+		if (rule.hasResponseIntensityMax)
+		{
+			emissive.hasSectorResponseIntensityMax = true;
+			emissive.sectorResponseIntensityMax = rule.responseIntensityMax;
+		}
+		if (rule.hasResponseReachMin)
+		{
+			emissive.hasSectorResponseReachMin = true;
+			emissive.sectorResponseReachMin = rule.responseReachMin;
+		}
+		if (rule.hasResponseReachMax)
+		{
+			emissive.hasSectorResponseReachMax = true;
+			emissive.sectorResponseReachMax = rule.responseReachMax;
+		}
 		if (rule.hasMaterialResponse)
 		{
 			emissive.materialResponseEnabled = rule.materialResponse;
