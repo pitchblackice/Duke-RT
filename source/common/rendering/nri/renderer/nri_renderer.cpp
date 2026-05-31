@@ -20895,6 +20895,14 @@ bool NRIRenderer::BuildSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget
 	outTarget.normal[0] = mLastSurfaceProbe.normal[0];
 	outTarget.normal[1] = mLastSurfaceProbe.normal[1];
 	outTarget.normal[2] = mLastSurfaceProbe.normal[2];
+	float viewDirection[3] = { mCurrentCameraForward[0], mCurrentCameraForward[1], mCurrentCameraForward[2] };
+	Normalize3(viewDirection);
+	if (outTarget.normal[0] * viewDirection[0] + outTarget.normal[1] * viewDirection[1] + outTarget.normal[2] * viewDirection[2] > 0.0f)
+	{
+		outTarget.normal[0] = -outTarget.normal[0];
+		outTarget.normal[1] = -outTarget.normal[1];
+		outTarget.normal[2] = -outTarget.normal[2];
+	}
 	int32_t legacyTile = -1;
 	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.textureId, outTarget.textureName, legacyTile);
 	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.baseTextureId, outTarget.materialTextureName, legacyTile);
@@ -29552,7 +29560,10 @@ bool NRIRenderer::BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry,
 	{
 		nri_scene::MaterialData& material = outMaterials.materials[i];
 		material.flags |= nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat;
-		material.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
+		material.lightingFlags |=
+			nri_scene::MaterialLightingFlag_MaterialFullbright |
+			nri_scene::MaterialLightingFlag_NoShadowReceive |
+			nri_scene::MaterialLightingFlag_NoShadowCast;
 		material.lightLevel = 1.0f;
 		material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
 		material.emissiveTextureIndex = material.textureIndex;
@@ -29564,11 +29575,14 @@ bool NRIRenderer::BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry,
 		{
 			nri_scene::MaterialLightingMetadata& metadata = outMaterials.lightMetadata[i];
 			metadata.materialFlags = material.flags;
-			metadata.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
+			metadata.lightingFlags |=
+				nri_scene::MaterialLightingFlag_MaterialFullbright |
+				nri_scene::MaterialLightingFlag_NoShadowReceive |
+				nri_scene::MaterialLightingFlag_NoShadowCast;
 			metadata.lightLevel = 1.0f;
-			metadata.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
-			metadata.emissiveTextureIndex = material.emissiveTextureIndex;
-			metadata.emissiveIntensity = material.emissiveIntensity;
+			metadata.emissiveMode = nri_scene::MaterialEmissiveMode_None;
+			metadata.emissiveTextureIndex = UINT32_MAX;
+			metadata.emissiveIntensity = 0.0f;
 			metadata.emissiveColor[0] = 1.0f;
 			metadata.emissiveColor[1] = 1.0f;
 			metadata.emissiveColor[2] = 1.0f;
