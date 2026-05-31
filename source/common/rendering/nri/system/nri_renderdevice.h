@@ -66,6 +66,7 @@ public:
 	void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event) override;
 	void PrintPathTracingSurfaceProbeStatus() const override;
 	bool BuildPathTracingEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const override;
+	bool BuildPathTracingSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const override;
 	bool SetPathTracingEditorPointLight(const DVector3& worldPosition, const float color[3], float intensity, float radius) override;
 	void ClearPathTracingEditorPointLight() override;
 	void ConsumePathTracingWeaponLightEvents(TArray<PathTracingWeaponLightEvent>& outEvents);

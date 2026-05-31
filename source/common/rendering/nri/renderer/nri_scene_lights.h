@@ -136,6 +136,20 @@ public:
 			float intensity = 0.0f;
 			float radius = 0.0f;
 			uint32_t flickerFrames = 0;
+			bool hasSectorResponse = false;
+			bool sectorResponse = true;
+			bool hasSignalSector = false;
+			int32_t signalSector = -1;
+			bool hasResponseIntensity = false;
+			float responseIntensity = 1.0f;
+			bool hasResponseMin = false;
+			float responseMin = 0.25f;
+			bool hasResponseMax = false;
+			float responseMax = 3.0f;
+			bool hasResponseInputMin = false;
+			float responseInputMin = 0.0f;
+			bool hasResponseInputMax = false;
+			float responseInputMax = 1.0f;
 		};
 
 		std::vector<SceneAnalyticLight> manualLights;

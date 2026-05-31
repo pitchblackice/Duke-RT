@@ -37,6 +37,8 @@ Current map-local blocks:
   Map-local actor shadow override. This adjusts shadow receive/cast policy without creating a light by itself.
 - `emissiveoverride <id>`
   Map-local override for emissive surfaces, used to tune intensity/reach scaling and bind an emitter to a sector-light signal.
+- `surfacelight <id>`
+  Map-local PT-only visible fixture plus associated analytic point light, usually authored by aiming at a surface in emissive light edit mode and pressing `o`.
 
 Current parser fields by block:
 
@@ -54,6 +56,8 @@ Current parser fields by block:
   `tile`, `tilerange`, `texture`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
 - `emissiveoverride`
   `sector`, `wall`, `tile`, `intensityscale`, `reachscale`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
+- `surfacelight`
+  `anchor surface`, `position`, `normal`, `size`, `offset`, `sector`, `wall`, `tile`, `fixture texture`, `fixturetexture`, `fixturematerialresponse`, `type`, `color`, `intensity`, `radius`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`, `materialresponsemin`, `materialresponsemax`
 
 Current practical notes:
 
@@ -61,6 +65,7 @@ Current practical notes:
 - duplicate `directional`, `light`, and `actoroverride` ids are last-wins within the same map
 - actor and map analytic overlays are currently consumed as point lights on the PT path even if extra shape fields such as `range` or `direction` are authored
 - `light` `anchor position` and `offset` values are authored in Build/world coordinates; the NRI renderer converts them to path-tracing render coordinates internally
+- `surfacelight` `position` and `normal` are authored in path-tracing render coordinates because they are captured directly from the aimed PT surface probe
 - `actorrule fullbright on` forces matching actor sprite and voxel surfaces onto the PT fullbright material path so they ignore scene lighting and render at full brightness
 - `actorrule random <min> <max>` adds a per-render-frame random intensity offset to the base intensity and is an alternative to `flicker`
 - `actoroverride` is applied after `actorrule`, so explicit per-map shadow overrides win
@@ -147,6 +152,29 @@ LIGHTOVR
             responseinputmax 0.65
             materialresponsemin 0.0
             materialresponsemax 1.0
+        }
+
+        surfacelight "BathroomPanel01"
+        {
+            anchor surface
+            position 470.69 31.99 -646.64
+            normal 0.0 -1.0 0.0
+            size 64.0 16.0
+            offset 2.0
+            sector 171
+            wall -1
+            tile 1495
+            fixture texture "#00707"
+            fixturematerialresponse on
+            type point
+            color 1.0 0.85 0.55
+            intensity 4.0
+            radius 256.0
+            sectorresponse on
+            signal sector 171
+            responseintensity 16.0
+            responsemin 0.05
+            responsemax 24.0
         }
     }
 }
@@ -268,6 +296,7 @@ nri_ptemissivelighteditmode 1
 While emissive light edit mode is enabled:
 
 - `p` creates or updates a map-local `emissiveoverride` for the aimed active emitter
+- `o` creates a map-local `surfacelight` for the aimed wall, ceiling, or floor, even if the aimed surface is not already emissive
 - the generated rule targets the surface with the current sector, wall, and renderer texture id when available
 - new rules start with `intensityscale 1.0`, `reachscale 1.0`, `sectorresponse on`, and `signal sector <aimed sector>`
 - new rules copy the current `nri_ptsectoremissionintensity`, `nri_ptsectoremissionmin`, and `nri_ptsectoremissionmax` values into `responseintensity`, `responsemin`, and `responsemax`
@@ -277,6 +306,8 @@ While emissive light edit mode is enabled:
 - `nri_ptemissivelighteditnotifyrange` controls the player-relative range for those sector-change notify messages; the default is `2048.0`
 
 Edit the generated `signal sector` when an emitter needs to follow a different sector's switch state, then press `l` to reload.
+
+`surfacelight` rules use the same sector-response fields as `emissiveoverride`, but they create their own PT-only fixture quad and an associated analytic light. The visible fixture texture defaults to `nri_ptsurfacelighttexture` and the initial dimensions, offset, color, intensity, radius, and sector-response default come from `nri_ptsurfacelightwidth`, `nri_ptsurfacelightheight`, `nri_ptsurfacelightoffset`, `nri_ptsurfacelightred`, `nri_ptsurfacelightgreen`, `nri_ptsurfacelightblue`, `nri_ptsurfacelightintensity`, `nri_ptsurfacelightradius`, and `nri_ptsurfacelightsectorresponse`.
 
 For switch sectors whose "on" and "off" values are both below the global sector-emission neutral point, add `responseinputmin` and `responseinputmax`. When both fields are present, the raw sector signal maps directly from `responseinputmin` -> `responsemin` to `responseinputmax` -> `responsemax`, instead of using the global neutral response curve. The edit-mode sector-change message prints this authoring value as `signal=...`.
 

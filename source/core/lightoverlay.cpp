@@ -126,6 +126,7 @@ namespace
 		std::unordered_map<std::string, int> mapLightRuleLookup;
 		std::unordered_map<std::string, int> emissiveOverrideLookup;
 		std::unordered_map<std::string, int> emissiveMaterialResponseLookup;
+		std::unordered_map<std::string, int> surfaceLightLookup;
 		std::unordered_map<std::string, int> actorOverrideLookup;
 
 		void SetDefaults(const ParsedLightOverlayDefaults& defaults)
@@ -249,6 +250,26 @@ namespace
 			{
 				Printf(TEXTCOLOR_ORANGE "LIGHTOVR warning: duplicate emissivematerialresponse '%s' in %s; using the last definition.\n",
 					rule.id.GetChars(), rule.source.sourceName.GetChars());
+			}
+			existing = rule;
+		}
+
+		void AddSurfaceLightRule(const ParsedLightOverlaySurfaceLightRule& rule)
+		{
+			const std::string key = MakeMapScopedKey(rule.mapName, "surfacelight", rule.id);
+			auto it = surfaceLightLookup.find(key);
+			if (it == surfaceLightLookup.end())
+			{
+				surfaceLightLookup.emplace(key, database.surfaceLightRules.Size());
+				database.surfaceLightRules.Push(rule);
+				return;
+			}
+
+			auto& existing = database.surfaceLightRules[it->second];
+			if (existing.source.lumpNum == rule.source.lumpNum)
+			{
+				Printf(TEXTCOLOR_ORANGE "LIGHTOVR warning: duplicate surfacelight '%s' for map '%s' in %s; using the last definition.\n",
+					rule.id.GetChars(), rule.mapName.GetChars(), rule.source.sourceName.GetChars());
 			}
 			existing = rule;
 		}
@@ -710,6 +731,10 @@ namespace
 				{
 					ParseEmissiveOverrideRule(mapName);
 				}
+				else if (sc.Compare("surfacelight"))
+				{
+					ParseSurfaceLightRule(mapName);
+				}
 				else if (sc.Compare("actoroverride"))
 				{
 					ParseActorOverrideRule(mapName);
@@ -1011,6 +1036,203 @@ namespace
 			builder.AddEmissiveOverrideRule(rule);
 		}
 
+		void ParseSurfaceLightRule(const FString& mapName)
+		{
+			sc.MustGetString();
+			ParsedLightOverlaySurfaceLightRule rule;
+			rule.mapName = mapName;
+			rule.id = sc.String;
+			rule.source = MakeSourceLocation(sc.GetMessageLine());
+
+			sc.MustGetStringName("{");
+			while (!sc.CheckString("}"))
+			{
+				sc.MustGetString();
+				if (sc.Compare("anchor"))
+				{
+					sc.MustGetString();
+					if (!sc.Compare("surface"))
+					{
+						sc.ScriptMessage("Unknown surfacelight anchor '%s'; expected surface", sc.String);
+					}
+				}
+				else if (sc.Compare("position"))
+				{
+					rule.hasPosition = true;
+					MustParseVector3(rule.position);
+				}
+				else if (sc.Compare("normal"))
+				{
+					rule.hasNormal = true;
+					MustParseVector3(rule.normal);
+				}
+				else if (sc.Compare("size"))
+				{
+					sc.MustGetFloat();
+					rule.hasSize = true;
+					rule.size[0] = (float)sc.Float;
+					sc.MustGetFloat();
+					rule.size[1] = (float)sc.Float;
+				}
+				else if (sc.Compare("offset"))
+				{
+					sc.MustGetFloat();
+					rule.hasOffset = true;
+					rule.offset = (float)sc.Float;
+				}
+				else if (sc.Compare("sector"))
+				{
+					sc.MustGetNumber();
+					rule.hasSector = true;
+					rule.sector = sc.Number;
+				}
+				else if (sc.Compare("wall"))
+				{
+					sc.MustGetNumber();
+					rule.hasWall = true;
+					rule.wall = sc.Number;
+				}
+				else if (sc.Compare("tile"))
+				{
+					sc.MustGetNumber();
+					rule.hasTile = true;
+					rule.tile = sc.Number;
+				}
+				else if (sc.Compare("fixture"))
+				{
+					sc.MustGetString();
+					if (sc.Compare("texture"))
+					{
+						sc.MustGetString();
+						rule.hasFixtureTexture = true;
+						rule.fixtureTexture = sc.String;
+					}
+					else
+					{
+						sc.ScriptMessage("Unknown surfacelight fixture field '%s'; expected texture", sc.String);
+					}
+				}
+				else if (sc.Compare("fixturetexture"))
+				{
+					sc.MustGetString();
+					rule.hasFixtureTexture = true;
+					rule.fixtureTexture = sc.String;
+				}
+				else if (sc.Compare("fixturematerialresponse"))
+				{
+					sc.MustGetString();
+					rule.hasFixtureMaterialResponse = ParseOnOffToken(sc.String, rule.fixtureMaterialResponse);
+					if (!rule.hasFixtureMaterialResponse)
+					{
+						sc.ScriptMessage("Invalid fixturematerialresponse value '%s'; expected off/on", sc.String);
+					}
+				}
+				else if (sc.Compare("type"))
+				{
+					sc.MustGetString();
+					rule.lightType = FString(sc.String).MakeLower();
+				}
+				else if (sc.Compare("color"))
+				{
+					rule.hasColor = true;
+					MustParseVector3(rule.color);
+				}
+				else if (sc.Compare("intensity"))
+				{
+					sc.MustGetFloat();
+					rule.hasIntensity = true;
+					rule.intensity = (float)sc.Float;
+				}
+				else if (sc.Compare("radius"))
+				{
+					sc.MustGetFloat();
+					rule.hasRadius = true;
+					rule.radius = (float)sc.Float;
+				}
+				else if (sc.Compare("sectorresponse"))
+				{
+					sc.MustGetString();
+					rule.hasSectorResponse = ParseOnOffToken(sc.String, rule.sectorResponse);
+					if (!rule.hasSectorResponse)
+					{
+						sc.ScriptMessage("Invalid sectorresponse value '%s'; expected off/on", sc.String);
+					}
+				}
+				else if (sc.Compare("signal"))
+				{
+					sc.MustGetString();
+					if (sc.Compare("sector"))
+					{
+						sc.MustGetNumber();
+						rule.hasSignalSector = true;
+						rule.signalSector = sc.Number;
+					}
+					else
+					{
+						sc.ScriptMessage("Unknown surfacelight signal target '%s'; expected sector", sc.String);
+					}
+				}
+				else if (sc.Compare("responseintensity"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseIntensity = true;
+					rule.responseIntensity = (float)sc.Float;
+				}
+				else if (sc.Compare("responsemin"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseMin = true;
+					rule.responseMin = (float)sc.Float;
+				}
+				else if (sc.Compare("responsemax"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseMax = true;
+					rule.responseMax = (float)sc.Float;
+				}
+				else if (sc.Compare("responseinputmin"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseInputMin = true;
+					rule.responseInputMin = (float)sc.Float;
+				}
+				else if (sc.Compare("responseinputmax"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseInputMax = true;
+					rule.responseInputMax = (float)sc.Float;
+				}
+				else if (sc.Compare("materialresponsemin"))
+				{
+					sc.MustGetFloat();
+					rule.hasMaterialResponseMin = true;
+					rule.materialResponseMin = (float)sc.Float;
+				}
+				else if (sc.Compare("materialresponsemax"))
+				{
+					sc.MustGetFloat();
+					rule.hasMaterialResponseMax = true;
+					rule.materialResponseMax = (float)sc.Float;
+				}
+				else
+				{
+					SkipUnknownField("surfacelight", sc.String);
+				}
+			}
+
+			if (!rule.hasPosition)
+			{
+				sc.ScriptMessage("surfacelight '%s' is missing position", rule.id.GetChars());
+			}
+			if (!rule.hasNormal)
+			{
+				sc.ScriptMessage("surfacelight '%s' is missing normal", rule.id.GetChars());
+			}
+
+			FinalizeSourceLocation(rule.source);
+			builder.AddSurfaceLightRule(rule);
+		}
+
 		void ParseEmissiveMaterialResponseRule()
 		{
 			sc.MustGetString();
@@ -1206,6 +1428,7 @@ namespace
 		for (const auto& rule : database.directionalRules) addMap(rule.mapName);
 		for (const auto& rule : database.mapLightRules) addMap(rule.mapName);
 		for (const auto& rule : database.emissiveOverrideRules) addMap(rule.mapName);
+		for (const auto& rule : database.surfaceLightRules) addMap(rule.mapName);
 		for (const auto& rule : database.actorOverrideRules) addMap(rule.mapName);
 
 		std::sort(mapNames.begin(), mapNames.end(), [](const FString& left, const FString& right)
@@ -1352,6 +1575,41 @@ namespace
 		AppendLine(text, 2, "}");
 	}
 
+	static void AppendSurfaceLightRuleBlock(FString& text, const ParsedLightOverlaySurfaceLightRule& rule)
+	{
+		AppendLine(text, 2, FStringf("surfacelight %s", QuoteLightOverlayString(rule.id).GetChars()));
+		AppendLine(text, 2, "{");
+		AppendLine(text, 3, "anchor surface");
+		if (rule.hasPosition) AppendVector3Field(text, 3, "position", rule.position);
+		if (rule.hasNormal) AppendVector3Field(text, 3, "normal", rule.normal);
+		if (rule.hasSize)
+		{
+			AppendLine(text, 3, FStringf("size %s %s",
+				FormatLightOverlayFloat(rule.size[0]).GetChars(),
+				FormatLightOverlayFloat(rule.size[1]).GetChars()));
+		}
+		if (rule.hasOffset) AppendLine(text, 3, FStringf("offset %s", FormatLightOverlayFloat(rule.offset).GetChars()));
+		if (rule.hasSector) AppendLine(text, 3, FStringf("sector %d", rule.sector));
+		if (rule.hasWall) AppendLine(text, 3, FStringf("wall %d", rule.wall));
+		if (rule.hasTile) AppendLine(text, 3, FStringf("tile %d", rule.tile));
+		if (rule.hasFixtureTexture) AppendLine(text, 3, FStringf("fixture texture %s", QuoteLightOverlayString(rule.fixtureTexture).GetChars()));
+		if (rule.hasFixtureMaterialResponse) AppendShadowStateField(text, 3, "fixturematerialresponse", rule.fixtureMaterialResponse);
+		if (rule.lightType.IsNotEmpty()) AppendLine(text, 3, FStringf("type %s", QuoteLightOverlayString(rule.lightType).GetChars()));
+		if (rule.hasColor) AppendVector3Field(text, 3, "color", rule.color);
+		if (rule.hasIntensity) AppendLine(text, 3, FStringf("intensity %s", FormatLightOverlayFloat(rule.intensity).GetChars()));
+		if (rule.hasRadius) AppendLine(text, 3, FStringf("radius %s", FormatLightOverlayFloat(rule.radius).GetChars()));
+		if (rule.hasSectorResponse) AppendShadowStateField(text, 3, "sectorresponse", rule.sectorResponse);
+		if (rule.hasSignalSector) AppendLine(text, 3, FStringf("signal sector %d", rule.signalSector));
+		if (rule.hasResponseIntensity) AppendLine(text, 3, FStringf("responseintensity %s", FormatLightOverlayFloat(rule.responseIntensity).GetChars()));
+		if (rule.hasResponseMin) AppendLine(text, 3, FStringf("responsemin %s", FormatLightOverlayFloat(rule.responseMin).GetChars()));
+		if (rule.hasResponseMax) AppendLine(text, 3, FStringf("responsemax %s", FormatLightOverlayFloat(rule.responseMax).GetChars()));
+		if (rule.hasResponseInputMin) AppendLine(text, 3, FStringf("responseinputmin %s", FormatLightOverlayFloat(rule.responseInputMin).GetChars()));
+		if (rule.hasResponseInputMax) AppendLine(text, 3, FStringf("responseinputmax %s", FormatLightOverlayFloat(rule.responseInputMax).GetChars()));
+		if (rule.hasMaterialResponseMin) AppendLine(text, 3, FStringf("materialresponsemin %s", FormatLightOverlayFloat(rule.materialResponseMin).GetChars()));
+		if (rule.hasMaterialResponseMax) AppendLine(text, 3, FStringf("materialresponsemax %s", FormatLightOverlayFloat(rule.materialResponseMax).GetChars()));
+		AppendLine(text, 2, "}");
+	}
+
 	static void AppendEmissiveMaterialResponseRuleBlock(FString& text, const ParsedLightOverlayEmissiveMaterialResponseRule& rule)
 	{
 		AppendLine(text, 1, FStringf("emissivematerialresponse %s", QuoteLightOverlayString(rule.id).GetChars()));
@@ -1469,6 +1727,19 @@ namespace
 		return -1;
 	}
 
+	static int32_t FindSurfaceLightRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.surfaceLightRules.Size(); ++i)
+		{
+			if (database.surfaceLightRules[i].mapName.CompareNoCase(mapName) == 0 &&
+				database.surfaceLightRules[i].id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
 	static int32_t FindActorOverrideRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
 	{
 		for (unsigned i = 0; i < (unsigned)database.actorOverrideRules.Size(); ++i)
@@ -1497,6 +1768,7 @@ namespace
 		for (const auto& rule : database.mapLightRules) update(rule.source);
 		for (const auto& rule : database.emissiveOverrideRules) update(rule.source);
 		for (const auto& rule : database.emissiveMaterialResponseRules) update(rule.source);
+		for (const auto& rule : database.surfaceLightRules) update(rule.source);
 		for (const auto& rule : database.actorOverrideRules) update(rule.source);
 		return nextOrderIndex + 1;
 	}
@@ -1536,7 +1808,7 @@ namespace
 
 	static void DumpParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database)
 	{
-		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d directional=%d actor_overrides=%d parse_errors=%s\n",
+		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d surface_lights=%d directional=%d actor_overrides=%d parse_errors=%s\n",
 			database.generation,
 			database.sourceFiles.Size(),
 			database.actorRules.Size(),
@@ -1544,6 +1816,7 @@ namespace
 			database.mapLightRules.Size(),
 			database.emissiveOverrideRules.Size(),
 			database.emissiveMaterialResponseRules.Size(),
+			database.surfaceLightRules.Size(),
 			database.directionalRules.Size(),
 			database.actorOverrideRules.Size(),
 			database.hadParseErrors ? "yes" : "no");
@@ -1939,6 +2212,57 @@ namespace
 		destination.materialResponseMax = source.materialResponseMax;
 	}
 
+	static void CopySurfaceLightRule(const ParsedLightOverlaySurfaceLightRule& source, ResolvedLightOverlaySurfaceLightRule& destination)
+	{
+		destination.mapName = source.mapName;
+		destination.id = source.id;
+		destination.source = source.source;
+		destination.hasPosition = source.hasPosition;
+		CopyVector3(source.position, destination.position);
+		destination.hasNormal = source.hasNormal;
+		CopyVector3(source.normal, destination.normal);
+		destination.hasSize = source.hasSize;
+		destination.size[0] = source.size[0];
+		destination.size[1] = source.size[1];
+		destination.hasOffset = source.hasOffset;
+		destination.offset = source.offset;
+		destination.hasSector = source.hasSector;
+		destination.sector = source.sector;
+		destination.hasWall = source.hasWall;
+		destination.wall = source.wall;
+		destination.hasTile = source.hasTile;
+		destination.tile = source.tile;
+		destination.hasFixtureTexture = source.hasFixtureTexture;
+		destination.fixtureTexture = source.fixtureTexture;
+		destination.hasFixtureMaterialResponse = source.hasFixtureMaterialResponse;
+		destination.fixtureMaterialResponse = source.fixtureMaterialResponse;
+		destination.lightType = source.lightType;
+		destination.hasColor = source.hasColor;
+		CopyVector3(source.color, destination.color);
+		destination.hasIntensity = source.hasIntensity;
+		destination.intensity = source.intensity;
+		destination.hasRadius = source.hasRadius;
+		destination.radius = source.radius;
+		destination.hasSectorResponse = source.hasSectorResponse;
+		destination.sectorResponse = source.sectorResponse;
+		destination.hasSignalSector = source.hasSignalSector;
+		destination.signalSector = source.signalSector;
+		destination.hasResponseIntensity = source.hasResponseIntensity;
+		destination.responseIntensity = source.responseIntensity;
+		destination.hasResponseMin = source.hasResponseMin;
+		destination.responseMin = source.responseMin;
+		destination.hasResponseMax = source.hasResponseMax;
+		destination.responseMax = source.responseMax;
+		destination.hasResponseInputMin = source.hasResponseInputMin;
+		destination.responseInputMin = source.responseInputMin;
+		destination.hasResponseInputMax = source.hasResponseInputMax;
+		destination.responseInputMax = source.responseInputMax;
+		destination.hasMaterialResponseMin = source.hasMaterialResponseMin;
+		destination.materialResponseMin = source.materialResponseMin;
+		destination.hasMaterialResponseMax = source.hasMaterialResponseMax;
+		destination.materialResponseMax = source.materialResponseMax;
+	}
+
 	static void CopyActorOverrideRule(const ParsedLightOverlayActorOverrideRule& source, ResolvedLightOverlayActorOverrideRule& destination)
 	{
 		destination.mapName = source.mapName;
@@ -2019,6 +2343,16 @@ namespace
 			resolved.emissiveMaterialResponseRules.Push(destination);
 		}
 
+		for (const auto& source : GLightOverlayDatabase.surfaceLightRules)
+		{
+			if (mapName.IsNotEmpty() && source.mapName.CompareNoCase(mapName) == 0)
+			{
+				ResolvedLightOverlaySurfaceLightRule destination;
+				CopySurfaceLightRule(source, destination);
+				resolved.surfaceLightRules.Push(destination);
+			}
+		}
+
 		for (const auto& source : GLightOverlayDatabase.actorOverrideRules)
 		{
 			if (mapName.IsNotEmpty() && source.mapName.CompareNoCase(mapName) == 0)
@@ -2045,7 +2379,7 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 		AppendLine(text, 1, "defaults");
 		AppendLine(text, 1, "{");
 		AppendLine(text, 1, "}");
-		if (database.actorRules.Size() > 0 || database.muzzleFlashRules.Size() > 0 || database.emissiveMaterialResponseRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.emissiveOverrideRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
+		if (database.actorRules.Size() > 0 || database.muzzleFlashRules.Size() > 0 || database.emissiveMaterialResponseRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.emissiveOverrideRules.Size() > 0 || database.surfaceLightRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
 		{
 			text << "\n";
 		}
@@ -2155,6 +2489,24 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 			AppendEmissiveOverrideRuleBlock(text, *rule);
 		}
 
+		std::vector<const ParsedLightOverlaySurfaceLightRule*> surfaceLights;
+		for (const auto& rule : database.surfaceLightRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0)
+			{
+				surfaceLights.push_back(&rule);
+			}
+		}
+		std::sort(surfaceLights.begin(), surfaceLights.end(), [](const auto* left, const auto* right)
+		{
+			const int idCompare = left->id.CompareNoCase(right->id);
+			return idCompare != 0 ? idCompare < 0 : left->source.orderIndex < right->source.orderIndex;
+		});
+		for (const auto* rule : surfaceLights)
+		{
+			AppendSurfaceLightRuleBlock(text, *rule);
+		}
+
 		std::vector<const ParsedLightOverlayActorOverrideRule*> actorOverrides;
 		for (const auto& rule : database.actorOverrideRules)
 		{
@@ -2195,7 +2547,7 @@ bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database,
 
 	if (verbose)
 	{
-		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d directional=%d actor_overrides=%d parse_errors=%s changed=%s\n",
+		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d surface_lights=%d directional=%d actor_overrides=%d parse_errors=%s changed=%s\n",
 			GLightOverlayDatabase.generation,
 			GLightOverlayDatabase.sourceFiles.Size(),
 			GLightOverlayDatabase.actorRules.Size(),
@@ -2203,6 +2555,7 @@ bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database,
 			GLightOverlayDatabase.mapLightRules.Size(),
 			GLightOverlayDatabase.emissiveOverrideRules.Size(),
 			GLightOverlayDatabase.emissiveMaterialResponseRules.Size(),
+			GLightOverlayDatabase.surfaceLightRules.Size(),
 			GLightOverlayDatabase.directionalRules.Size(),
 			GLightOverlayDatabase.actorOverrideRules.Size(),
 			GLightOverlayDatabase.hadParseErrors ? "yes" : "no",
@@ -2315,6 +2668,23 @@ bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const Pa
 	return true;
 }
 
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlaySurfaceLightRule& rule, bool* outReplaced)
+{
+	ParsedLightOverlaySurfaceLightRule nextRule = rule;
+	const int32_t index = FindSurfaceLightRuleIndex(database, nextRule.mapName, nextRule.id);
+	if (outReplaced != nullptr) *outReplaced = index >= 0;
+	EnsureEditableSource(database, nextRule.source, index >= 0 ? &database.surfaceLightRules[index].source : nullptr);
+	if (index >= 0)
+	{
+		database.surfaceLightRules[index] = std::move(nextRule);
+	}
+	else
+	{
+		database.surfaceLightRules.Push(std::move(nextRule));
+	}
+	return true;
+}
+
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced)
 {
 	ParsedLightOverlayActorOverrideRule nextRule = rule;
@@ -2362,6 +2732,10 @@ bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRu
 	case LightOverlayRuleKind::EmissiveMaterialResponse:
 		index = FindEmissiveMaterialResponseRuleIndex(database, ruleId);
 		if (index >= 0) database.emissiveMaterialResponseRules.Delete(index);
+		return index >= 0;
+	case LightOverlayRuleKind::SurfaceLight:
+		index = FindSurfaceLightRuleIndex(database, scopedMapName, ruleId);
+		if (index >= 0) database.surfaceLightRules.Delete(index);
 		return index >= 0;
 	case LightOverlayRuleKind::ActorOverride:
 		index = FindActorOverrideRuleIndex(database, scopedMapName, ruleId);

@@ -2382,6 +2382,11 @@ public:
 		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
 	}
 
+	static bool IsSupportedSurfaceLightRule(const ResolvedLightOverlaySurfaceLightRule& rule)
+	{
+		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0 || rule.lightType.CompareNoCase("rect") == 0;
+	}
+
 	static bool IsUsableDirectionalVector(const float direction[3])
 	{
 		if (!std::isfinite(direction[0]) || !std::isfinite(direction[1]) || !std::isfinite(direction[2]))
@@ -2673,6 +2678,11 @@ public:
 		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
 	}
 
+	static uint32_t BuildSurfaceLightRuleId(const ResolvedLightOverlaySurfaceLightRule& rule)
+	{
+		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
+	}
+
 	static std::string NormalizeLightOverlayTextureSelector(const char* value)
 	{
 		std::string normalized = value != nullptr ? value : "";
@@ -2921,6 +2931,47 @@ public:
 			overlayRule.intensity = resolvedRule.intensity;
 			overlayRule.radius = resolvedRule.radius;
 			overlayRule.flickerFrames = resolvedRule.flickerFrames;
+			outRules.push_back(overlayRule);
+		}
+
+		for (const auto& resolvedRule : resolved.surfaceLightRules)
+		{
+			if (!IsSupportedSurfaceLightRule(resolvedRule) ||
+				!resolvedRule.hasPosition ||
+				!resolvedRule.hasNormal ||
+				resolvedRule.intensity <= 0.0f ||
+				resolvedRule.radius <= 0.0f)
+			{
+				continue;
+			}
+
+			SceneLightSystem::AnalyticLightRegistry::MapOverlayRule overlayRule = {};
+			const float offset = resolvedRule.hasOffset ? resolvedRule.offset : 0.0f;
+			overlayRule.ruleId = BuildSurfaceLightRuleId(resolvedRule);
+			overlayRule.source = SceneLightRecordSource::DynamicScene;
+			overlayRule.position[0] = resolvedRule.position[0] + resolvedRule.normal[0] * offset;
+			overlayRule.position[1] = resolvedRule.position[1] + resolvedRule.normal[1] * offset;
+			overlayRule.position[2] = resolvedRule.position[2] + resolvedRule.normal[2] * offset;
+			overlayRule.stableKey = BuildMapOverlayStableKey(overlayRule.ruleId, overlayRule.position);
+			overlayRule.color[0] = resolvedRule.color[0];
+			overlayRule.color[1] = resolvedRule.color[1];
+			overlayRule.color[2] = resolvedRule.color[2];
+			overlayRule.intensity = resolvedRule.intensity;
+			overlayRule.radius = resolvedRule.radius;
+			overlayRule.hasSectorResponse = resolvedRule.hasSectorResponse;
+			overlayRule.sectorResponse = resolvedRule.sectorResponse;
+			overlayRule.hasSignalSector = resolvedRule.hasSignalSector;
+			overlayRule.signalSector = resolvedRule.signalSector;
+			overlayRule.hasResponseIntensity = resolvedRule.hasResponseIntensity;
+			overlayRule.responseIntensity = resolvedRule.responseIntensity;
+			overlayRule.hasResponseMin = resolvedRule.hasResponseMin;
+			overlayRule.responseMin = resolvedRule.responseMin;
+			overlayRule.hasResponseMax = resolvedRule.hasResponseMax;
+			overlayRule.responseMax = resolvedRule.responseMax;
+			overlayRule.hasResponseInputMin = resolvedRule.hasResponseInputMin;
+			overlayRule.responseInputMin = resolvedRule.responseInputMin;
+			overlayRule.hasResponseInputMax = resolvedRule.hasResponseInputMax;
+			overlayRule.responseInputMax = resolvedRule.responseInputMax;
 			outRules.push_back(overlayRule);
 		}
 	}
@@ -7939,6 +7990,7 @@ namespace
 		case nri_scene::SurfaceSourceType::MapCeilingSection: return "map_ceiling_section";
 		case nri_scene::SurfaceSourceType::MapPortalSurface: return "map_portal_surface";
 		case nri_scene::SurfaceSourceType::DebugSphere: return "debug_sphere";
+		case nri_scene::SurfaceSourceType::SurfaceLightOverlay: return "surface_light_overlay";
 		default: return "unknown";
 		}
 	}
@@ -8987,6 +9039,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::GeometryData mirrorExtendedDynamicGeometry;
 	nri_scene::GeometryData mergedDynamicGeometry;
 	nri_scene::GeometryData debugSphereGeometry;
+	nri_scene::GeometryData surfaceLightGeometry;
 	nri_scene::MaterialBridgeData materialBridge;
 	nri_scene::MaterialBridgeData runtimeMutationMaterialBridge;
 	nri_scene::MaterialBridgeData runtimeSpaceLinkMaterialBridge;
@@ -8996,6 +9049,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::MaterialBridgeData sceneLightMergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData mergedDynamicMaterialBridge;
 	nri_scene::MaterialBridgeData debugSphereMaterialBridge;
+	nri_scene::MaterialBridgeData surfaceLightMaterialBridge;
 	nri_scene::GeometryData& overlayGeometry = mSelectOverlayGeometryScratch;
 	nri_scene::MaterialBridgeData& overlayMaterialBridge = mSelectOverlayMaterialBridgeScratch;
 	nri_scene::MaterialBridgeData combinedMaterialBridge;
@@ -9476,8 +9530,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereMs);
 			return BuildRuntimeDebugSphereOverlay(debugSphereGeometry, debugSphereMaterialBridge);
 		}();
+		const bool hasSurfaceLightOverlay = !deferOverlayThisFrame &&
+			BuildSurfaceLightOverlay(surfaceLightGeometry, surfaceLightMaterialBridge);
 
-		if (hasPersistentVoxelOverlay || hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay || hasRuntimeDebugSphereOverlay)
+		if (hasPersistentVoxelOverlay || hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay || hasRuntimeDebugSphereOverlay || hasSurfaceLightOverlay)
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.overlayAssembleMs);
 
@@ -9695,6 +9751,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					{
 						addOverlayReserve(&debugSphereGeometry, debugSphereMaterialBridge);
 					}
+					if (hasSurfaceLightOverlay)
+					{
+						addOverlayReserve(&surfaceLightGeometry, surfaceLightMaterialBridge);
+					}
 					overlayGeometry.vertices.reserve(reserveVertices);
 					overlayGeometry.indices.reserve(reserveIndices);
 					overlayGeometry.primitives.reserve(reservePrimitives);
@@ -9791,6 +9851,27 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							mLastPerfShellTraceStats.overlayDebugSpherePrimitiveCount,
 							mLastPerfShellTraceStats.overlayDebugSphereMaterialCount,
 							mLastPerfShellTraceStats.overlayDebugSphereAppend,
+							SceneBufferUploadDomain::StaticOverlay);
+					}
+
+					if (hasSurfaceLightOverlay)
+					{
+						double surfaceLightOverlayMs = 0.0;
+						double surfaceLightGeometryMs = 0.0;
+						double surfaceLightMaterialMs = 0.0;
+						uint32_t surfaceLightPrimitiveCount = 0;
+						uint32_t surfaceLightMaterialCount = 0;
+						PerfShellTraceStats::OverlayAppendSourceTraceEntry surfaceLightAppend = {};
+						appendOverlaySource(
+							&surfaceLightGeometry,
+							nullptr,
+							surfaceLightMaterialBridge,
+							surfaceLightOverlayMs,
+							surfaceLightGeometryMs,
+							surfaceLightMaterialMs,
+							surfaceLightPrimitiveCount,
+							surfaceLightMaterialCount,
+							surfaceLightAppend,
 							SceneBufferUploadDomain::StaticOverlay);
 					}
 				}
@@ -20758,7 +20839,17 @@ bool NRIRenderer::BuildEmissiveLightEditTarget(PathTracingEmissiveLightEditTarge
 	outTarget.sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
 	outTarget.wallIndex = mLastSurfaceProbe.provenance.wallIndex;
 	outTarget.textureId = (int)mLastSurfaceProbe.textureId;
+	outTarget.baseTextureId = (int)mLastSurfaceProbe.baseTextureId;
 	outTarget.materialIndex = (int)mLastSurfaceProbe.materialIndex;
+	outTarget.position[0] = mLastSurfaceProbe.position[0];
+	outTarget.position[1] = mLastSurfaceProbe.position[1];
+	outTarget.position[2] = mLastSurfaceProbe.position[2];
+	outTarget.normal[0] = mLastSurfaceProbe.normal[0];
+	outTarget.normal[1] = mLastSurfaceProbe.normal[1];
+	outTarget.normal[2] = mLastSurfaceProbe.normal[2];
+	int32_t legacyTile = -1;
+	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.textureId, outTarget.textureName, legacyTile);
+	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.baseTextureId, outTarget.materialTextureName, legacyTile);
 	outTarget.sectorResponseIntensity = std::max(0.0f, (float)nri_ptsectoremissionintensity);
 	outTarget.sectorResponseMin = std::max(0.0f, (float)nri_ptsectoremissionmin);
 	outTarget.sectorResponseMax = std::max(outTarget.sectorResponseMin, (float)nri_ptsectoremissionmax);
@@ -20770,6 +20861,46 @@ bool NRIRenderer::BuildEmissiveLightEditTarget(PathTracingEmissiveLightEditTarge
 		return false;
 	}
 
+	return true;
+}
+
+bool NRIRenderer::BuildSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const
+{
+	outTarget = {};
+	if (!mLastSurfaceProbe.valid)
+	{
+		outTarget.failureReason = "no sampled center hit has been recorded yet";
+		return false;
+	}
+
+	if (!mLastSurfaceProbe.hit)
+	{
+		outTarget.valid = true;
+		outTarget.failureReason = "last sampled center ray missed translated PT geometry";
+		return false;
+	}
+
+	const SurfaceProbeEmissiveDiagnostics emissiveDiagnostics = BuildSurfaceProbeEmissiveDiagnostics(mLastSurfaceProbe);
+	outTarget.valid = true;
+	outTarget.hit = true;
+	outTarget.emissive = emissiveDiagnostics.activeEmissiveSurfaceMatch;
+	outTarget.sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
+	outTarget.wallIndex = mLastSurfaceProbe.provenance.wallIndex;
+	outTarget.textureId = (int)mLastSurfaceProbe.textureId;
+	outTarget.baseTextureId = (int)mLastSurfaceProbe.baseTextureId;
+	outTarget.materialIndex = (int)mLastSurfaceProbe.materialIndex;
+	outTarget.position[0] = mLastSurfaceProbe.position[0];
+	outTarget.position[1] = mLastSurfaceProbe.position[1];
+	outTarget.position[2] = mLastSurfaceProbe.position[2];
+	outTarget.normal[0] = mLastSurfaceProbe.normal[0];
+	outTarget.normal[1] = mLastSurfaceProbe.normal[1];
+	outTarget.normal[2] = mLastSurfaceProbe.normal[2];
+	int32_t legacyTile = -1;
+	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.textureId, outTarget.textureName, legacyTile);
+	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.baseTextureId, outTarget.materialTextureName, legacyTile);
+	outTarget.sectorResponseIntensity = std::max(0.0f, (float)nri_ptsectoremissionintensity);
+	outTarget.sectorResponseMin = std::max(0.0f, (float)nri_ptsectoremissionmin);
+	outTarget.sectorResponseMax = std::max(outTarget.sectorResponseMin, (float)nri_ptsectoremissionmax);
 	return true;
 }
 
@@ -29271,6 +29402,178 @@ bool NRIRenderer::BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeo
 
 	mLastPerfShellTraceStats.runtimeDebugSpherePrimitiveCount = (uint32_t)outGeometry.primitives.size();
 	mLastPerfShellTraceStats.runtimeDebugSphereMaterialCount = (uint32_t)outMaterials.materials.size();
+
+	return !outGeometry.primitives.empty() && !outMaterials.materials.empty();
+}
+
+bool NRIRenderer::BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)
+{
+	outGeometry = {};
+	outMaterials = {};
+
+	const ResolvedLightOverlaySet& resolved = GetResolvedLightOverlaySet();
+	if (resolved.surfaceLightRules.Size() == 0)
+	{
+		return false;
+	}
+
+	auto resolveFixtureTexture = [](const ResolvedLightOverlaySurfaceLightRule& rule) -> FGameTexture*
+	{
+		if (rule.hasFixtureTexture && rule.fixtureTexture.IsNotEmpty())
+		{
+			FTextureID textureId = TexMan.CheckForTexture(
+				rule.fixtureTexture.GetChars(),
+				ETextureType::Any,
+				FTextureManager::TEXMAN_TryAny | FTextureManager::TEXMAN_ForceLookup);
+			if (textureId.isValid())
+			{
+				if (FGameTexture* texture = TexMan.GetGameTexture(textureId, true))
+				{
+					return texture;
+				}
+			}
+		}
+		return nullptr;
+	};
+
+	auto normalize3 = [](float vector[3]) -> bool
+	{
+		const float lengthSq = vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2];
+		if (!std::isfinite(lengthSq) || lengthSq <= 0.000001f)
+		{
+			return false;
+		}
+		const float invLength = 1.0f / std::sqrt(lengthSq);
+		vector[0] *= invLength;
+		vector[1] *= invLength;
+		vector[2] *= invLength;
+		return true;
+	};
+
+	auto cross3 = [](const float a[3], const float b[3], float out[3])
+	{
+		out[0] = a[1] * b[2] - a[2] * b[1];
+		out[1] = a[2] * b[0] - a[0] * b[2];
+		out[2] = a[0] * b[1] - a[1] * b[0];
+	};
+
+	nri_scene::SceneView surfaceLightView = {};
+	for (const auto& rule : resolved.surfaceLightRules)
+	{
+		if (!rule.hasPosition || !rule.hasNormal)
+		{
+			continue;
+		}
+
+		float normal[3] = { rule.normal[0], rule.normal[1], rule.normal[2] };
+		if (!normalize3(normal))
+		{
+			continue;
+		}
+
+		const float worldUp[3] = { 0.0f, 1.0f, 0.0f };
+		const float worldRight[3] = { 1.0f, 0.0f, 0.0f };
+		float tangent[3] = {};
+		cross3(worldUp, normal, tangent);
+		if (!normalize3(tangent))
+		{
+			cross3(worldRight, normal, tangent);
+			if (!normalize3(tangent))
+			{
+				continue;
+			}
+		}
+
+		float bitangent[3] = {};
+		cross3(normal, tangent, bitangent);
+		if (!normalize3(bitangent))
+		{
+			continue;
+		}
+
+		const float offset = rule.hasOffset ? std::max(0.0f, rule.offset) : 0.0f;
+		const float halfWidth = std::max(1.0f, rule.hasSize ? rule.size[0] : 64.0f) * 0.5f;
+		const float halfHeight = std::max(1.0f, rule.hasSize ? rule.size[1] : 16.0f) * 0.5f;
+		const float center[3] =
+		{
+			rule.position[0] + normal[0] * offset,
+			rule.position[1] + normal[1] * offset,
+			rule.position[2] + normal[2] * offset,
+		};
+
+		auto makeVertex = [&](float tangentScale, float bitangentScale, float u, float v) -> nri_scene::CapturedVertex
+		{
+			nri_scene::CapturedVertex vertex = {};
+			vertex.position[0] = center[0] + tangent[0] * tangentScale + bitangent[0] * bitangentScale;
+			vertex.position[1] = center[1] + tangent[1] * tangentScale + bitangent[1] * bitangentScale;
+			vertex.position[2] = center[2] + tangent[2] * tangentScale + bitangent[2] * bitangentScale;
+			vertex.prevPosition[0] = vertex.position[0];
+			vertex.prevPosition[1] = vertex.position[1];
+			vertex.prevPosition[2] = vertex.position[2];
+			vertex.uv[0] = u;
+			vertex.uv[1] = v;
+			return vertex;
+		};
+
+		nri_scene::SurfaceRef surface = {};
+		surface.vertices.reserve(6u);
+		const nri_scene::CapturedVertex v00 = makeVertex(-halfWidth, -halfHeight, 0.0f, 1.0f);
+		const nri_scene::CapturedVertex v10 = makeVertex(halfWidth, -halfHeight, 1.0f, 1.0f);
+		const nri_scene::CapturedVertex v11 = makeVertex(halfWidth, halfHeight, 1.0f, 0.0f);
+		const nri_scene::CapturedVertex v01 = makeVertex(-halfWidth, halfHeight, 0.0f, 0.0f);
+		surface.vertices.push_back(v00);
+		surface.vertices.push_back(v10);
+		surface.vertices.push_back(v11);
+		surface.vertices.push_back(v00);
+		surface.vertices.push_back(v11);
+		surface.vertices.push_back(v01);
+		surface.material.texture = resolveFixtureTexture(rule);
+		surface.material.emissiveSourceTexture = surface.material.texture;
+		surface.material.palette = 0;
+		surface.material.shade = 0;
+		surface.material.alpha = 1.0f;
+		surface.material.flags = nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat;
+		surface.provenance.sourceType = nri_scene::SurfaceSourceType::SurfaceLightOverlay;
+		surface.provenance.sectorIndex = rule.hasSector ? rule.sector : -1;
+		surface.provenance.wallIndex = rule.hasWall ? rule.wall : -1;
+		surface.provenance.mapChunkIndex = -1;
+		surfaceLightView.opaqueFlats.push_back(std::move(surface));
+	}
+
+	if (surfaceLightView.opaqueFlats.empty())
+	{
+		return false;
+	}
+
+	RebuildSceneViewStats(surfaceLightView);
+	nri_scene::BuildGeometry(surfaceLightView, outGeometry);
+	nri_scene::BuildMaterials(surfaceLightView, outMaterials);
+	for (size_t i = 0; i < outMaterials.materials.size(); ++i)
+	{
+		nri_scene::MaterialData& material = outMaterials.materials[i];
+		material.flags |= nri_scene::MaterialFlag_Fullbright | nri_scene::MaterialFlag_Flat;
+		material.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
+		material.lightLevel = 1.0f;
+		material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
+		material.emissiveTextureIndex = material.textureIndex;
+		material.emissiveIntensity = 1.0f;
+		material.emissiveColor[0] = 1.0f;
+		material.emissiveColor[1] = 1.0f;
+		material.emissiveColor[2] = 1.0f;
+		if (i < outMaterials.lightMetadata.size())
+		{
+			nri_scene::MaterialLightingMetadata& metadata = outMaterials.lightMetadata[i];
+			metadata.materialFlags = material.flags;
+			metadata.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
+			metadata.lightLevel = 1.0f;
+			metadata.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
+			metadata.emissiveTextureIndex = material.emissiveTextureIndex;
+			metadata.emissiveIntensity = material.emissiveIntensity;
+			metadata.emissiveColor[0] = 1.0f;
+			metadata.emissiveColor[1] = 1.0f;
+			metadata.emissiveColor[2] = 1.0f;
+		}
+	}
 
 	return !outGeometry.primitives.empty() && !outMaterials.materials.empty();
 }

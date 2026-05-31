@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cctype>
 #include <memory>
 
@@ -21,6 +22,16 @@
 CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptmaplighteditmode, false, CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivelighteditmode, false, 0)
+CVAR(String, nri_ptsurfacelighttexture, "#00707", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightwidth, 64.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightheight, 16.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightoffset, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightred, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightgreen, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightblue, 0.55f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightintensity, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightradius, 256.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptsurfacelightsectorresponse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -323,6 +334,39 @@ namespace
 		}
 
 		return baseId;
+	}
+
+	static bool HasSurfaceLightEditorRuleId(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
+	{
+		for (const auto& rule : database.surfaceLightRules)
+		{
+			if (rule.mapName.CompareNoCase(mapName) == 0 && rule.id.CompareNoCase(id) == 0)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	static FString BuildSurfaceLightEditorRuleId(const ParsedLightOverlayDatabase& database, const FString& mapName, const PathTracingEmissiveLightEditTarget& target)
+	{
+		FString baseId = FStringf("SurfaceLight_S%d_W%d_T%d", target.sectorIndex, target.wallIndex, target.textureId);
+		if (!HasSurfaceLightEditorRuleId(database, mapName, baseId))
+		{
+			return baseId;
+		}
+
+		for (int suffix = 2; suffix < 1000000; ++suffix)
+		{
+			FString candidate = FStringf("%s_%d", baseId.GetChars(), suffix);
+			if (!HasSurfaceLightEditorRuleId(database, mapName, candidate))
+			{
+				return candidate;
+			}
+		}
+
+		return FStringf("%s_%u", baseId.GetChars(), (unsigned)I_msTime());
 	}
 
 	static bool FindMapLightEditorActiveDirectionalRule(const ParsedLightOverlayDatabase& database, const FString& mapName, ParsedLightOverlayDirectionalRule& outRule)
@@ -818,6 +862,126 @@ namespace
 		ReloadActorLightEditorOverlays();
 	}
 
+	static void PerformEmissiveLightEditorCreateSurfaceLightAction()
+	{
+		if (currentLevel == nullptr || currentLevel->labelName.IsEmpty())
+		{
+			Printf("NRI PT emissive light editor: no current map name is available.\n");
+			return;
+		}
+
+		if (screen == nullptr)
+		{
+			Printf("NRI PT emissive light editor: no screen backend is active.\n");
+			return;
+		}
+
+		PathTracingEmissiveLightEditTarget target = {};
+		if (!screen->BuildPathTracingSurfaceLightEditTarget(target))
+		{
+			Printf(
+				"NRI PT emissive light editor: cannot create surfacelight: %s.\n",
+				target.failureReason.IsEmpty() ? "no PT surface is aimed" : target.failureReason.GetChars());
+			return;
+		}
+
+		FString writablePath;
+		int writableLumpNum = -1;
+		if (!ActorLightEditorResolveWritableSource(writablePath, &writableLumpNum))
+		{
+			PrintActorLightEditorWritableSourceFailure();
+			return;
+		}
+
+		ParsedLightOverlayDatabase database = GetParsedLightOverlayDatabase();
+		ParsedLightOverlaySurfaceLightRule rule = {};
+		rule.mapName = currentLevel->labelName;
+		rule.id = BuildSurfaceLightEditorRuleId(database, rule.mapName, target);
+		rule.hasPosition = true;
+		rule.position[0] = target.position[0];
+		rule.position[1] = target.position[1];
+		rule.position[2] = target.position[2];
+		rule.hasNormal = true;
+		rule.normal[0] = target.normal[0];
+		rule.normal[1] = target.normal[1];
+		rule.normal[2] = target.normal[2];
+		rule.hasSize = true;
+		rule.size[0] = std::max(1.0f, (float)nri_ptsurfacelightwidth);
+		rule.size[1] = std::max(1.0f, (float)nri_ptsurfacelightheight);
+		rule.hasOffset = true;
+		rule.offset = std::max(0.0f, (float)nri_ptsurfacelightoffset);
+		rule.hasSector = target.sectorIndex >= 0;
+		rule.sector = target.sectorIndex;
+		rule.hasWall = target.wallIndex >= 0;
+		rule.wall = target.wallIndex;
+		rule.hasTile = target.textureId >= 0;
+		rule.tile = target.textureId;
+		rule.hasFixtureTexture = true;
+		rule.fixtureTexture = FString((const char*)nri_ptsurfacelighttexture);
+		if (rule.fixtureTexture.IsEmpty())
+		{
+			rule.fixtureTexture = target.textureName.IsNotEmpty() ? target.textureName : "#00707";
+		}
+		rule.hasFixtureMaterialResponse = true;
+		rule.fixtureMaterialResponse = true;
+		rule.lightType = "point";
+		rule.hasColor = true;
+		rule.color[0] = std::max(0.0f, (float)nri_ptsurfacelightred);
+		rule.color[1] = std::max(0.0f, (float)nri_ptsurfacelightgreen);
+		rule.color[2] = std::max(0.0f, (float)nri_ptsurfacelightblue);
+		rule.hasIntensity = true;
+		rule.intensity = std::max(0.0f, (float)nri_ptsurfacelightintensity);
+		rule.hasRadius = true;
+		rule.radius = std::max(0.0f, (float)nri_ptsurfacelightradius);
+		rule.hasSectorResponse = true;
+		rule.sectorResponse = !!nri_ptsurfacelightsectorresponse;
+		rule.hasSignalSector = target.sectorIndex >= 0;
+		rule.signalSector = target.sectorIndex;
+		rule.hasResponseIntensity = true;
+		rule.responseIntensity = target.sectorResponseIntensity;
+		rule.hasResponseMin = true;
+		rule.responseMin = target.sectorResponseMin;
+		rule.hasResponseMax = true;
+		rule.responseMax = target.sectorResponseMax;
+		rule.source.lumpNum = writableLumpNum;
+		rule.source.sourceName = FindActorLightEditorSourceNameForLump(database, writableLumpNum);
+
+		bool replaced = false;
+		AddOrReplaceLightOverlayRule(database, rule, &replaced);
+
+		const FString serialized = SerializeLightOverlayDatabase(database);
+		if (!WriteActorLightEditorTextFile(writablePath, serialized))
+		{
+			Printf("NRI PT emissive light editor: failed to open writable LIGHTOVR '%s'.\n", writablePath.GetChars());
+			return;
+		}
+
+		Printf(
+			"NRI PT emissive light editor: %s surfacelight '%s' for map '%s' sector=%d wall=%d tile=%d texture=%s pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) size=(%.1f, %.1f) intensity=%.3f radius=%.1f signal_sector=%d and wrote %d bytes to %s.\n",
+			replaced ? "updated" : "created",
+			rule.id.GetChars(),
+			rule.mapName.GetChars(),
+			target.sectorIndex,
+			target.wallIndex,
+			target.textureId,
+			rule.fixtureTexture.GetChars(),
+			rule.position[0],
+			rule.position[1],
+			rule.position[2],
+			rule.normal[0],
+			rule.normal[1],
+			rule.normal[2],
+			rule.size[0],
+			rule.size[1],
+			rule.intensity,
+			rule.radius,
+			rule.signalSector,
+			serialized.Len(),
+			writablePath.GetChars());
+
+		ReloadActorLightEditorOverlays();
+	}
+
 	static void MoveMapLightEditorPreview(double delta)
 	{
 		GActorLightEditorState.mapLightPreviewDistance += delta;
@@ -964,6 +1128,24 @@ bool ActorLightEditorResponder(event_t* ev)
 			else
 			{
 				GActorLightEditorState.createEmissiveOverrideActionPressed = false;
+			}
+
+			return true;
+		}
+
+		if (IsActorLightEditorActionKey(ev, 'o'))
+		{
+			if (ev->type == EV_KeyDown)
+			{
+				if (!GActorLightEditorState.createSurfaceLightActionPressed)
+				{
+					GActorLightEditorState.createSurfaceLightActionPressed = true;
+					PerformEmissiveLightEditorCreateSurfaceLightAction();
+				}
+			}
+			else
+			{
+				GActorLightEditorState.createSurfaceLightActionPressed = false;
 			}
 
 			return true;

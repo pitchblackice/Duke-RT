@@ -1403,6 +1403,7 @@ public:
 	void PrintSectorLightDump(float radius, uint32_t limit) const;
 	void PrintSurfaceProbeStatus() const;
 	bool BuildEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const;
+	bool BuildSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const;
 	void PrintMapChunkDump(int32_t chunkIndex) const;
 	void PrintMapChunkCompare(int32_t chunkIndex) const;
 	void TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& event);
@@ -2778,6 +2779,7 @@ private:
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	SurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const SurfaceProbeResult& probe) const;
 	bool BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	bool BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	bool EnsureRuntimeDebugSphereCache(RuntimeDebugSphere& sphere);
 	void AppendRuntimeDebugSphereToSceneView(const RuntimeDebugSphere& sphere, nri_scene::SceneView& sceneView) const;
 	void RefreshSceneLightSystem(

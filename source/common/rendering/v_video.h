@@ -72,7 +72,12 @@ struct PathTracingEmissiveLightEditTarget
 	int sectorIndex = -1;
 	int wallIndex = -1;
 	int textureId = -1;
+	int baseTextureId = -1;
 	int materialIndex = -1;
+	float position[3] = { 0.0f, 0.0f, 0.0f };
+	float normal[3] = { 0.0f, 1.0f, 0.0f };
+	FString textureName;
+	FString materialTextureName;
 	float sectorResponseIntensity = 1.0f;
 	float sectorResponseMin = 0.25f;
 	float sectorResponseMax = 3.0f;
@@ -380,6 +385,7 @@ public:
 	virtual void EmitPathTracingActorSpriteTraceEvent(const PathTracingActorSpriteTraceEvent& event);
 	virtual void PrintPathTracingSurfaceProbeStatus() const;
 	virtual bool BuildPathTracingEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const { outTarget = {}; return false; }
+	virtual bool BuildPathTracingSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const { outTarget = {}; return false; }
 	virtual bool SetPathTracingEditorPointLight(const DVector3& worldPosition, const float color[3], float intensity, float radius) { return false; }
 	virtual void ClearPathTracingEditorPointLight() {}
 

@@ -31,6 +31,7 @@ EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
 EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
+EXTERN_CVAR(Bool, nri_ptsectoremission)
 EXTERN_CVAR(Float, nri_ptsectoremissionintensity)
 EXTERN_CVAR(Float, nri_ptsectoremissionmin)
 EXTERN_CVAR(Float, nri_ptsectoremissionmax)
@@ -65,6 +66,7 @@ namespace
 		case nri_scene::SurfaceSourceType::MapCeilingSection: return "map_ceiling_section";
 		case nri_scene::SurfaceSourceType::MapPortalSurface: return "map_portal_surface";
 		case nri_scene::SurfaceSourceType::DebugSphere: return "debug_sphere";
+		case nri_scene::SurfaceSourceType::SurfaceLightOverlay: return "surface_light_overlay";
 		default: return "unknown";
 		}
 	}
@@ -762,6 +764,20 @@ namespace
 
 		const float normalizedDelta = (brightness - neutralBrightness) / neutralBrightness;
 		return clamp(1.0f + normalizedDelta * intensity, clampedMin, clampedMax);
+	}
+
+	float ComputeSectorEmitterRangeResponseScale(float signal, float inputMin, float inputMax, float minScale, float maxScale)
+	{
+		const float clampedMin = std::max(0.0f, minScale);
+		const float clampedMax = std::max(clampedMin, maxScale);
+		const float inputRange = inputMax - inputMin;
+		if (std::abs(inputRange) <= 0.0001f)
+		{
+			return clamp(1.0f, clampedMin, clampedMax);
+		}
+
+		const float t = clamp((signal - inputMin) / inputRange, 0.0f, 1.0f);
+		return clampedMin + (clampedMax - clampedMin) * t;
 	}
 
 	bool IsGlowDrivenEmissive(uint32_t sourceFlags, uint32_t emissiveMode)
@@ -1528,7 +1544,37 @@ void SceneLightSystem::RebuildAnalyticLights(
 			light.textureId = 0;
 			Copy3f(rule.position, light.position);
 			Copy3f(rule.color, light.color);
-			light.intensity = rule.intensity * EvaluateFlickerScale(light.stableKey, flickerTimeIndex, rule.flickerFrames);
+			float sectorScale = 1.0f;
+			const int32_t signalSector = rule.hasSignalSector ? rule.signalSector : -1;
+			const bool sectorResponseEnabled = nri_ptsectoremission && (rule.hasSectorResponse ? rule.sectorResponse : false);
+			if (sectorResponseEnabled && signalSector >= 0 && (uint32_t)signalSector < mSectorLighting.sectors.size())
+			{
+				const auto& sectorRecord = mSectorLighting.sectors[(uint32_t)signalSector];
+				if (rule.hasResponseInputMin && rule.hasResponseInputMax)
+				{
+					sectorScale = ComputeSectorEmitterRangeResponseScale(
+						sectorRecord.rawResponseSignal,
+						rule.responseInputMin,
+						rule.responseInputMax,
+						rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionmin),
+						rule.hasResponseMax ? rule.responseMax : std::max(std::max(0.0f, (float)nri_ptsectoremissionmin), (float)nri_ptsectoremissionmax));
+				}
+				else if (rule.hasResponseIntensity || rule.hasResponseMin || rule.hasResponseMax)
+				{
+					const float responseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionmin);
+					sectorScale = ComputeSectorEmitterResponseScale(
+						sectorRecord.rawResponseBrightness,
+						std::min(std::max(0.0f, (float)nri_ptsectorclamp), std::max(0.0f, (float)nri_ptsectorambientscale) * (0.10f + 0.75f * 0.55f)),
+						rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, (float)nri_ptsectoremissionintensity),
+						responseMin,
+						rule.hasResponseMax ? rule.responseMax : std::max(responseMin, (float)nri_ptsectoremissionmax));
+				}
+				else
+				{
+					sectorScale = std::max(0.0f, sectorRecord.emitterResponseScale);
+				}
+			}
+			light.intensity = rule.intensity * sectorScale * EvaluateFlickerScale(light.stableKey, flickerTimeIndex, rule.flickerFrames);
 			light.radius = rule.radius;
 			tryAppendLight(light);
 		}

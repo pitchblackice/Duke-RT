@@ -6217,6 +6217,18 @@ bool NRIRenderDevice::BuildPathTracingEmissiveLightEditTarget(PathTracingEmissiv
 	return mRenderer->BuildEmissiveLightEditTarget(outTarget);
 }
 
+bool NRIRenderDevice::BuildPathTracingSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const
+{
+	outTarget = {};
+	if (mRenderer == nullptr)
+	{
+		outTarget.failureReason = "renderer is not initialized";
+		return false;
+	}
+
+	return mRenderer->BuildSurfaceLightEditTarget(outTarget);
+}
+
 void NRIRenderDevice::EmitPathTracingWeaponLightEvent(const PathTracingWeaponLightEvent& event)
 {
 	if (mLevelTransitionInProgress || event.eventId.IsEmpty())

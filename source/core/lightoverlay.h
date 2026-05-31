@@ -191,6 +191,56 @@ struct ParsedLightOverlayEmissiveMaterialResponseRule
 	float materialResponseMax = 1.0f;
 };
 
+struct ParsedLightOverlaySurfaceLightRule
+{
+	FString mapName;
+	FString id;
+	LightOverlaySourceLocation source;
+	bool hasPosition = false;
+	float position[3] = { 0.0f, 0.0f, 0.0f };
+	bool hasNormal = false;
+	float normal[3] = { 0.0f, 1.0f, 0.0f };
+	bool hasSize = false;
+	float size[2] = { 64.0f, 16.0f };
+	bool hasOffset = false;
+	float offset = 2.0f;
+	bool hasSector = false;
+	int sector = -1;
+	bool hasWall = false;
+	int wall = -1;
+	bool hasTile = false;
+	int tile = -1;
+	bool hasFixtureTexture = false;
+	FString fixtureTexture;
+	bool hasFixtureMaterialResponse = false;
+	bool fixtureMaterialResponse = true;
+	FString lightType;
+	bool hasColor = false;
+	float color[3] = { 1.0f, 0.85f, 0.55f };
+	bool hasIntensity = false;
+	float intensity = 4.0f;
+	bool hasRadius = false;
+	float radius = 256.0f;
+	bool hasSectorResponse = false;
+	bool sectorResponse = true;
+	bool hasSignalSector = false;
+	int signalSector = -1;
+	bool hasResponseIntensity = false;
+	float responseIntensity = 1.0f;
+	bool hasResponseMin = false;
+	float responseMin = 0.25f;
+	bool hasResponseMax = false;
+	float responseMax = 3.0f;
+	bool hasResponseInputMin = false;
+	float responseInputMin = 0.0f;
+	bool hasResponseInputMax = false;
+	float responseInputMax = 1.0f;
+	bool hasMaterialResponseMin = false;
+	float materialResponseMin = 0.0f;
+	bool hasMaterialResponseMax = false;
+	float materialResponseMax = 1.0f;
+};
+
 struct ParsedLightOverlayActorOverrideRule
 {
 	FString mapName;
@@ -223,6 +273,7 @@ struct ParsedLightOverlayDatabase
 	TArray<ParsedLightOverlayMapLightRule> mapLightRules;
 	TArray<ParsedLightOverlayEmissiveOverrideRule> emissiveOverrideRules;
 	TArray<ParsedLightOverlayEmissiveMaterialResponseRule> emissiveMaterialResponseRules;
+	TArray<ParsedLightOverlaySurfaceLightRule> surfaceLightRules;
 	TArray<ParsedLightOverlayActorOverrideRule> actorOverrideRules;
 };
 
@@ -385,6 +436,56 @@ struct ResolvedLightOverlayEmissiveMaterialResponseRule
 	float materialResponseMax = 1.0f;
 };
 
+struct ResolvedLightOverlaySurfaceLightRule
+{
+	FString mapName;
+	FString id;
+	LightOverlaySourceLocation source;
+	bool hasPosition = false;
+	float position[3] = { 0.0f, 0.0f, 0.0f };
+	bool hasNormal = false;
+	float normal[3] = { 0.0f, 1.0f, 0.0f };
+	bool hasSize = false;
+	float size[2] = { 64.0f, 16.0f };
+	bool hasOffset = false;
+	float offset = 2.0f;
+	bool hasSector = false;
+	int sector = -1;
+	bool hasWall = false;
+	int wall = -1;
+	bool hasTile = false;
+	int tile = -1;
+	bool hasFixtureTexture = false;
+	FString fixtureTexture;
+	bool hasFixtureMaterialResponse = false;
+	bool fixtureMaterialResponse = true;
+	FString lightType;
+	bool hasColor = false;
+	float color[3] = { 1.0f, 0.85f, 0.55f };
+	bool hasIntensity = false;
+	float intensity = 4.0f;
+	bool hasRadius = false;
+	float radius = 256.0f;
+	bool hasSectorResponse = false;
+	bool sectorResponse = true;
+	bool hasSignalSector = false;
+	int signalSector = -1;
+	bool hasResponseIntensity = false;
+	float responseIntensity = 1.0f;
+	bool hasResponseMin = false;
+	float responseMin = 0.25f;
+	bool hasResponseMax = false;
+	float responseMax = 3.0f;
+	bool hasResponseInputMin = false;
+	float responseInputMin = 0.0f;
+	bool hasResponseInputMax = false;
+	float responseInputMax = 1.0f;
+	bool hasMaterialResponseMin = false;
+	float materialResponseMin = 0.0f;
+	bool hasMaterialResponseMax = false;
+	float materialResponseMax = 1.0f;
+};
+
 struct ResolvedLightOverlayActorOverrideRule
 {
 	FString mapName;
@@ -411,6 +512,7 @@ struct ResolvedLightOverlaySet
 	TArray<ResolvedLightOverlayMapLightRule> mapLightRules;
 	TArray<ResolvedLightOverlayEmissiveOverrideRule> emissiveOverrideRules;
 	TArray<ResolvedLightOverlayEmissiveMaterialResponseRule> emissiveMaterialResponseRules;
+	TArray<ResolvedLightOverlaySurfaceLightRule> surfaceLightRules;
 	TArray<ResolvedLightOverlayActorOverrideRule> actorOverrideRules;
 };
 
@@ -422,6 +524,7 @@ enum class LightOverlayRuleKind : uint8_t
 	MapLight,
 	EmissiveOverride,
 	EmissiveMaterialResponse,
+	SurfaceLight,
 	ActorOverride,
 };
 
@@ -437,5 +540,6 @@ bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const Pa
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMapLightRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayEmissiveOverrideRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayEmissiveMaterialResponseRule& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlaySurfaceLightRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced = nullptr);
 bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRuleKind kind, const char* id, const char* mapName = nullptr);
