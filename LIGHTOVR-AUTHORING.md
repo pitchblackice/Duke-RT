@@ -55,9 +55,9 @@ Current parser fields by block:
 - `emissivematerialresponse`
   `tile`, `tilerange`, `texture`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
 - `emissiveoverride`
-  `sector`, `wall`, `tile`, `intensityscale`, `reachscale`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
+  `sector`, `wall`, `tile`, `intensityscale`, `reachscale`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`, `responseintensitymin`, `responseintensitymax`, `responsereachmin`, `responsereachmax`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
 - `surfacelight`
-  `anchor surface`, `position`, `normal`, `size`, `offset`, `sector`, `wall`, `tile`, `fixture texture`, `fixturetexture`, `fixturematerialresponse`, `type`, `color`, `intensity`, `radius`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`, `materialresponsemin`, `materialresponsemax`
+  `anchor surface`, `position`, `normal`, `size`, `rotation`, `offset`, `sector`, `wall`, `tile`, `fixture texture`, `fixturetexture`, `fixturematerialresponse`, `type`, `color`, `intensity`, `radius`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`, `materialresponsemin`, `materialresponsemax`
 
 Current practical notes:
 
@@ -159,17 +159,18 @@ LIGHTOVR
             anchor surface
             position 470.69 31.99 -646.64
             normal 0.0 -1.0 0.0
-            size 64.0 16.0
-            offset 2.0
+            size 32.0 32.0
+            rotation 0.0
+            offset 0.5
             sector 171
             wall -1
             tile 1495
             fixture texture "#00707"
             fixturematerialresponse on
             type point
-            color 1.0 0.85 0.55
+            color 1.0 1.0 1.0
             intensity 4.0
-            radius 256.0
+            radius 512.0
             sectorresponse on
             signal sector 171
             responseintensity 16.0
@@ -300,6 +301,7 @@ While emissive light edit mode is enabled:
 - the generated rule targets the surface with the current sector, wall, and renderer texture id when available
 - new rules start with `intensityscale 1.0`, `reachscale 1.0`, `sectorresponse on`, and `signal sector <aimed sector>`
 - new rules copy the current `nri_ptsectoremissionintensity`, `nri_ptsectoremissionmin`, and `nri_ptsectoremissionmax` values into `responseintensity`, `responsemin`, and `responsemax`
+- new `surfacelight` rules default to `size 32.0 32.0`, `offset 0.5`, white `color 1.0 1.0 1.0`, `intensity 4.0`, and `radius 512.0`
 - `l` reloads `LIGHTOVR` without editing the file
 - nearby sector-emission response changes produce short notify messages naming the affected sector and whether the response is boosted, dimmed, or neutral
 - nearby sector surface-lighting changes also produce notify messages, even when no active emitter is currently bound to that sector
@@ -307,7 +309,27 @@ While emissive light edit mode is enabled:
 
 Edit the generated `signal sector` when an emitter needs to follow a different sector's switch state, then press `l` to reload.
 
-`surfacelight` rules use the same sector-response fields as `emissiveoverride`, but they create their own PT-only fixture quad and an associated analytic light. The visible fixture texture defaults to `nri_ptsurfacelighttexture` and the initial dimensions, offset, color, intensity, radius, and sector-response default come from `nri_ptsurfacelightwidth`, `nri_ptsurfacelightheight`, `nri_ptsurfacelightoffset`, `nri_ptsurfacelightred`, `nri_ptsurfacelightgreen`, `nri_ptsurfacelightblue`, `nri_ptsurfacelightintensity`, `nri_ptsurfacelightradius`, and `nri_ptsurfacelightsectorresponse`.
+`surfacelight` rules use the same sector-response fields as `emissiveoverride`, but they create their own PT-only fixture quad and an associated analytic point light. The visible fixture texture defaults to `nri_ptsurfacelighttexture`. The initial dimensions, offset, color, intensity, radius, and sector-response default come from `nri_ptsurfacelightwidth`, `nri_ptsurfacelightheight`, `nri_ptsurfacelightoffset`, `nri_ptsurfacelightred`, `nri_ptsurfacelightgreen`, `nri_ptsurfacelightblue`, `nri_ptsurfacelightintensity`, `nri_ptsurfacelightradius`, and `nri_ptsurfacelightsectorresponse`. The width, height, offset, and color placement cvars are runtime-only editor defaults, so stale config values do not override the built-in 32x32 white fixture default.
+
+Placed `surfacelight` rules can also be edited in-place while `nri_ptemissivelighteditmode 1` is active. Aim at a placed `surfacelight` when possible; if the crosshair probe misses the generated fixture surface, the editor falls back to the most recently placed or successfully edited `surfacelight` on the current map.
+
+Surface-light edit hotkeys:
+
+- mouse wheel up/down rotates the fixture around its surface normal in 15 degree steps and writes `rotation`
+- left/right arrow decreases/increases `size` X in 4 unit steps
+- up/down arrow increases/decreases `size` Y in 4 unit steps
+- `,` and `.` decrease/increase `intensity` in 0.5 steps
+- `;` and `'` decrease/increase `radius` in 32 unit steps
+- `[` and `]` cycle the fixture texture
+
+The surface-light texture cycle is:
+
+```text
+#00124, #00701, #00702, #00703, #00707, #00708, #01206, #00705, #00706,
+#00704, #00126, #00120, #00121, #00122, #00123, #00127, #00128
+```
+
+Each hotkey edit writes the normalized `LIGHTOVR` file, prints the edited rule's current size/rotation/texture/intensity/radius through the native notify path, and reloads overlays immediately.
 
 For switch sectors whose "on" and "off" values are both below the global sector-emission neutral point, add `responseinputmin` and `responseinputmax`. When both fields are present, the raw sector signal maps directly from `responseinputmin` -> `responsemin` to `responseinputmax` -> `responsemax`, instead of using the global neutral response curve. The edit-mode sector-change message prints this authoring value as `signal=...`.
 
