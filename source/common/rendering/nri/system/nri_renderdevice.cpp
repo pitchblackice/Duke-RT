@@ -2366,10 +2366,10 @@ CCMD(nri_ptsectorlight_clear)
 	nri_ptsectorfilterlotag = -1;
 	nri_ptsectorpulseframes = 0;
 	nri_ptsectorpulseamount = 0.0f;
-	nri_ptsectoremission = false;
-	nri_ptsectoremissionintensity = 1.0f;
-	nri_ptsectoremissionmin = 0.25f;
-	nri_ptsectoremissionmax = 3.0f;
+	nri_ptsectoremission = true;
+	nri_ptsectoremissionintensity = 16.0f;
+	nri_ptsectoremissionmin = 0.05f;
+	nri_ptsectoremissionmax = 24.0f;
 	Printf("NRI PT sector-light heuristics cleared.\n");
 }
 
