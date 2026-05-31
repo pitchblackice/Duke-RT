@@ -25,12 +25,12 @@ CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptmaplighteditmode, false, CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivelighteditmode, false, 0)
 CVAR(String, nri_ptsurfacelighttexture, "#00707", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightwidth, 16.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightheight, 16.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightoffset, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightred, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightgreen, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightblue, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsurfacelightwidth, 32.0f, 0)
+CVAR(Float, nri_ptsurfacelightheight, 32.0f, 0)
+CVAR(Float, nri_ptsurfacelightoffset, 0.5f, 0)
+CVAR(Float, nri_ptsurfacelightred, 1.0f, 0)
+CVAR(Float, nri_ptsurfacelightgreen, 1.0f, 0)
+CVAR(Float, nri_ptsurfacelightblue, 1.0f, 0)
 CVAR(Float, nri_ptsurfacelightintensity, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsurfacelightradius, 512.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsurfacelightsectorresponse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -47,6 +47,10 @@ namespace
 	static constexpr float MapLightEditorIntensity = 1.0f;
 	static constexpr float MapLightEditorRadius = 200.0f;
 	static constexpr const char* MapLightEditorDirectionalRuleId = "EditorDirectional";
+	static constexpr float SurfaceLightEditorDefaultWidth = 32.0f;
+	static constexpr float SurfaceLightEditorDefaultHeight = 32.0f;
+	static constexpr float SurfaceLightEditorDefaultIntensity = 4.0f;
+	static constexpr float SurfaceLightEditorDefaultRadius = 512.0f;
 	static constexpr float SurfaceLightEditorRotateStep = 15.0f;
 	static constexpr float SurfaceLightEditorSizeStep = 4.0f;
 	static constexpr float SurfaceLightEditorIntensityStep = 0.5f;
@@ -1160,19 +1164,19 @@ namespace
 			break;
 		case SurfaceLightEditorEditAction::SizeX:
 			rule.hasSize = true;
-			rule.size[0] = std::max(1.0f, (hadSize ? rule.size[0] : 16.0f) + delta);
+			rule.size[0] = std::max(1.0f, (hadSize ? rule.size[0] : SurfaceLightEditorDefaultWidth) + delta);
 			break;
 		case SurfaceLightEditorEditAction::SizeY:
 			rule.hasSize = true;
-			rule.size[1] = std::max(1.0f, (hadSize ? rule.size[1] : 16.0f) + delta);
+			rule.size[1] = std::max(1.0f, (hadSize ? rule.size[1] : SurfaceLightEditorDefaultHeight) + delta);
 			break;
 		case SurfaceLightEditorEditAction::Intensity:
 			rule.hasIntensity = true;
-			rule.intensity = std::max(0.0f, (hadIntensity ? rule.intensity : 4.0f) + delta);
+			rule.intensity = std::max(0.0f, (hadIntensity ? rule.intensity : SurfaceLightEditorDefaultIntensity) + delta);
 			break;
 		case SurfaceLightEditorEditAction::Radius:
 			rule.hasRadius = true;
-			rule.radius = std::max(0.0f, (hadRadius ? rule.radius : 512.0f) + delta);
+			rule.radius = std::max(0.0f, (hadRadius ? rule.radius : SurfaceLightEditorDefaultRadius) + delta);
 			break;
 		case SurfaceLightEditorEditAction::Texture:
 		{
@@ -1210,12 +1214,12 @@ namespace
 			PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG,
 			"NRI PT surfacelight '%s': size=(%.1f, %.1f) rotation=%.1f texture=%s intensity=%.2f radius=%.1f\n",
 			rule.id.GetChars(),
-			rule.hasSize ? rule.size[0] : 16.0f,
-			rule.hasSize ? rule.size[1] : 16.0f,
+			rule.hasSize ? rule.size[0] : SurfaceLightEditorDefaultWidth,
+			rule.hasSize ? rule.size[1] : SurfaceLightEditorDefaultHeight,
 			rule.hasRotation ? rule.rotation : 0.0f,
 			(rule.hasFixtureTexture && rule.fixtureTexture.IsNotEmpty()) ? rule.fixtureTexture.GetChars() : "(default)",
-			rule.hasIntensity ? rule.intensity : 4.0f,
-			rule.hasRadius ? rule.radius : 512.0f);
+			rule.hasIntensity ? rule.intensity : SurfaceLightEditorDefaultIntensity,
+			rule.hasRadius ? rule.radius : SurfaceLightEditorDefaultRadius);
 
 		ReloadActorLightEditorOverlays();
 		return true;

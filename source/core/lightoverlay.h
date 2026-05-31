@@ -209,11 +209,11 @@ struct ParsedLightOverlaySurfaceLightRule
 	bool hasNormal = false;
 	float normal[3] = { 0.0f, 1.0f, 0.0f };
 	bool hasSize = false;
-	float size[2] = { 64.0f, 16.0f };
+	float size[2] = { 32.0f, 32.0f };
 	bool hasRotation = false;
 	float rotation = 0.0f;
 	bool hasOffset = false;
-	float offset = 2.0f;
+	float offset = 0.5f;
 	bool hasSector = false;
 	int sector = -1;
 	bool hasWall = false;
@@ -226,7 +226,7 @@ struct ParsedLightOverlaySurfaceLightRule
 	bool fixtureMaterialResponse = true;
 	FString lightType;
 	bool hasColor = false;
-	float color[3] = { 1.0f, 0.85f, 0.55f };
+	float color[3] = { 1.0f, 1.0f, 1.0f };
 	bool hasIntensity = false;
 	float intensity = 4.0f;
 	bool hasRadius = false;
@@ -464,11 +464,11 @@ struct ResolvedLightOverlaySurfaceLightRule
 	bool hasNormal = false;
 	float normal[3] = { 0.0f, 1.0f, 0.0f };
 	bool hasSize = false;
-	float size[2] = { 64.0f, 16.0f };
+	float size[2] = { 32.0f, 32.0f };
 	bool hasRotation = false;
 	float rotation = 0.0f;
 	bool hasOffset = false;
-	float offset = 2.0f;
+	float offset = 0.5f;
 	bool hasSector = false;
 	int sector = -1;
 	bool hasWall = false;
@@ -481,7 +481,7 @@ struct ResolvedLightOverlaySurfaceLightRule
 	bool fixtureMaterialResponse = true;
 	FString lightType;
 	bool hasColor = false;
-	float color[3] = { 1.0f, 0.85f, 0.55f };
+	float color[3] = { 1.0f, 1.0f, 1.0f };
 	bool hasIntensity = false;
 	float intensity = 4.0f;
 	bool hasRadius = false;

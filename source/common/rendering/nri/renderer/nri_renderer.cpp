@@ -29651,9 +29651,9 @@ bool NRIRenderer::BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry,
 			bitangent[2] = rotatedBitangent[2];
 		}
 
-		const float offset = rule.hasOffset ? std::max(0.0f, rule.offset) : 0.0f;
-		const float halfWidth = std::max(1.0f, rule.hasSize ? rule.size[0] : 64.0f) * 0.5f;
-		const float halfHeight = std::max(1.0f, rule.hasSize ? rule.size[1] : 16.0f) * 0.5f;
+		const float offset = rule.hasOffset ? std::max(0.0f, rule.offset) : 0.5f;
+		const float halfWidth = std::max(1.0f, rule.hasSize ? rule.size[0] : 32.0f) * 0.5f;
+		const float halfHeight = std::max(1.0f, rule.hasSize ? rule.size[1] : 32.0f) * 0.5f;
 		const float center[3] =
 		{
 			rule.position[0] + normal[0] * offset,
