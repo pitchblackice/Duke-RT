@@ -135,6 +135,13 @@ EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
 EXTERN_CVAR(Bool, nri_ptloadingvoxelgpu)
 EXTERN_CVAR(Int, perf_looptraceframes)
+CUSTOM_CVAR(Float, nri_ptemissivelighteditnotifyrange, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
 CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, 0)
 {
 	if (self < 0)
@@ -22826,8 +22833,8 @@ void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
 
 	std::vector<float> nextScales(sectorRegistry.sectors.size(), -1.0f);
 	std::vector<uint32_t> changedNearbySectors;
-	constexpr float nearbyRadius = 2048.0f;
-	constexpr float nearbyRadiusSq = nearbyRadius * nearbyRadius;
+	const float nearbyRadius = std::max(0.0f, (float)nri_ptemissivelighteditnotifyrange);
+	const float nearbyRadiusSq = nearbyRadius * nearbyRadius;
 
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
 	{

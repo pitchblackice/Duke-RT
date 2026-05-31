@@ -257,6 +257,7 @@ While emissive light edit mode is enabled:
 - new rules copy the current `nri_ptsectoremissionintensity`, `nri_ptsectoremissionmin`, and `nri_ptsectoremissionmax` values into `responseintensity`, `responsemin`, and `responsemax`
 - `l` reloads `LIGHTOVR` without editing the file
 - nearby sector-emission response changes produce short notify messages naming the affected sector and whether the response is boosted, dimmed, or neutral
+- `nri_ptemissivelighteditnotifyrange` controls the player-relative range for those sector-change notify messages; the default is `2048.0`
 
 Edit the generated `signal sector` when an emitter needs to follow a different sector's switch state, then press `l` to reload.
 
