@@ -298,6 +298,7 @@ While emissive light edit mode is enabled:
 
 - `p` creates or updates a map-local `emissiveoverride` for the aimed active emitter
 - `o` creates a map-local `surfacelight` for the aimed wall, ceiling, or floor, even if the aimed surface is not already emissive
+- `Ctrl+o` creates a map-local `surfacelight` at the aimed surface using the most recently placed or edited `surfacelight` as a template
 - the generated rule targets the surface with the current sector, wall, and renderer texture id when available
 - new rules start with `intensityscale 1.0`, `reachscale 1.0`, `sectorresponse on`, and `signal sector <aimed sector>`
 - new rules copy the current `nri_ptsectoremissionintensity`, `nri_ptsectoremissionmin`, and `nri_ptsectoremissionmax` values into `responseintensity`, `responsemin`, and `responsemax`
@@ -312,6 +313,8 @@ Edit the generated `signal sector` when an emitter needs to follow a different s
 `surfacelight` rules use the same sector-response fields as `emissiveoverride`, but they create their own PT-only fixture quad and an associated analytic point light. The visible fixture texture defaults to `nri_ptsurfacelighttexture`. The initial dimensions, offset, color, intensity, radius, and sector-response default come from `nri_ptsurfacelightwidth`, `nri_ptsurfacelightheight`, `nri_ptsurfacelightoffset`, `nri_ptsurfacelightred`, `nri_ptsurfacelightgreen`, `nri_ptsurfacelightblue`, `nri_ptsurfacelightintensity`, `nri_ptsurfacelightradius`, and `nri_ptsurfacelightsectorresponse`. The width, height, offset, and color placement cvars are runtime-only editor defaults, so stale config values do not override the built-in 32x32 white fixture default.
 
 Placed `surfacelight` rules can also be edited in-place while `nri_ptemissivelighteditmode 1` is active. Aim at a placed `surfacelight` when possible; if the crosshair probe misses the generated fixture surface, the editor falls back to the most recently placed or successfully edited `surfacelight` on the current map.
+
+Use `Ctrl+o` to repeat-place a tuned fixture. The repeated rule gets a fresh id, position, normal, sector, wall, tile, and signal sector from the newly aimed surface. It copies the active `surfacelight` settings for size, rotation, offset, fixture texture, fixture material response, light type, color, intensity, radius, sector-response enabled state, response curve fields, and material-response clamps.
 
 Surface-light edit hotkeys:
 

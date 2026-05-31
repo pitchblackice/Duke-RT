@@ -475,6 +475,46 @@ namespace
 			-1;
 	}
 
+	static void CopySurfaceLightEditorRepeatSettings(ParsedLightOverlaySurfaceLightRule& destination, const ParsedLightOverlaySurfaceLightRule& source)
+	{
+		destination.hasSize = source.hasSize;
+		destination.size[0] = source.size[0];
+		destination.size[1] = source.size[1];
+		destination.hasRotation = source.hasRotation;
+		destination.rotation = source.rotation;
+		destination.hasOffset = source.hasOffset;
+		destination.offset = source.offset;
+		destination.hasFixtureTexture = source.hasFixtureTexture;
+		destination.fixtureTexture = source.fixtureTexture;
+		destination.hasFixtureMaterialResponse = source.hasFixtureMaterialResponse;
+		destination.fixtureMaterialResponse = source.fixtureMaterialResponse;
+		destination.lightType = source.lightType;
+		destination.hasColor = source.hasColor;
+		destination.color[0] = source.color[0];
+		destination.color[1] = source.color[1];
+		destination.color[2] = source.color[2];
+		destination.hasIntensity = source.hasIntensity;
+		destination.intensity = source.intensity;
+		destination.hasRadius = source.hasRadius;
+		destination.radius = source.radius;
+		destination.hasSectorResponse = source.hasSectorResponse;
+		destination.sectorResponse = source.sectorResponse;
+		destination.hasResponseIntensity = source.hasResponseIntensity;
+		destination.responseIntensity = source.responseIntensity;
+		destination.hasResponseMin = source.hasResponseMin;
+		destination.responseMin = source.responseMin;
+		destination.hasResponseMax = source.hasResponseMax;
+		destination.responseMax = source.responseMax;
+		destination.hasResponseInputMin = source.hasResponseInputMin;
+		destination.responseInputMin = source.responseInputMin;
+		destination.hasResponseInputMax = source.hasResponseInputMax;
+		destination.responseInputMax = source.responseInputMax;
+		destination.hasMaterialResponseMin = source.hasMaterialResponseMin;
+		destination.materialResponseMin = source.materialResponseMin;
+		destination.hasMaterialResponseMax = source.hasMaterialResponseMax;
+		destination.materialResponseMax = source.materialResponseMax;
+	}
+
 	static float NormalizeSurfaceLightEditorRotation(float degrees)
 	{
 		while (degrees < 0.0f)
@@ -990,7 +1030,7 @@ namespace
 		ReloadActorLightEditorOverlays();
 	}
 
-	static void PerformEmissiveLightEditorCreateSurfaceLightAction()
+	static void PerformEmissiveLightEditorCreateSurfaceLightAction(bool repeatActiveSettings)
 	{
 		if (currentLevel == nullptr || currentLevel->labelName.IsEmpty())
 		{
@@ -1022,6 +1062,20 @@ namespace
 		}
 
 		ParsedLightOverlayDatabase database = GetParsedLightOverlayDatabase();
+		ParsedLightOverlaySurfaceLightRule repeatSource = {};
+		bool hasRepeatSource = false;
+		if (repeatActiveSettings)
+		{
+			const int32_t repeatIndex = FindSurfaceLightEditorActiveRuleIndex(database, currentLevel->labelName);
+			if (repeatIndex < 0)
+			{
+				Printf(PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG, "No surfacelight template selected; place or edit one first.\n");
+				return;
+			}
+			repeatSource = database.surfaceLightRules[repeatIndex];
+			hasRepeatSource = true;
+		}
+
 		ParsedLightOverlaySurfaceLightRule rule = {};
 		rule.mapName = currentLevel->labelName;
 		rule.id = BuildSurfaceLightEditorRuleId(database, rule.mapName, target);
@@ -1071,6 +1125,10 @@ namespace
 		rule.responseMin = target.sectorResponseMin;
 		rule.hasResponseMax = true;
 		rule.responseMax = target.sectorResponseMax;
+		if (hasRepeatSource)
+		{
+			CopySurfaceLightEditorRepeatSettings(rule, repeatSource);
+		}
 		rule.source.lumpNum = writableLumpNum;
 		rule.source.sourceName = FindActorLightEditorSourceNameForLump(database, writableLumpNum);
 
@@ -1356,6 +1414,13 @@ bool ActorLightEditorResponder(event_t* ev)
 		return false;
 	}
 
+	if ((ev->type == EV_KeyDown || ev->type == EV_KeyUp) &&
+		(ev->data1 == KEY_LCTRL || ev->data1 == KEY_RCTRL))
+	{
+		GActorLightEditorState.controlKeyDown = ev->type == EV_KeyDown;
+		return false;
+	}
+
 	if (IsEmissiveLightEditorEnabled())
 	{
 		if (ev->type == EV_KeyDown)
@@ -1429,7 +1494,7 @@ bool ActorLightEditorResponder(event_t* ev)
 				if (!GActorLightEditorState.createSurfaceLightActionPressed)
 				{
 					GActorLightEditorState.createSurfaceLightActionPressed = true;
-					PerformEmissiveLightEditorCreateSurfaceLightAction();
+					PerformEmissiveLightEditorCreateSurfaceLightAction(GActorLightEditorState.controlKeyDown || (ev->data3 & GKM_CTRL) != 0);
 				}
 			}
 			else

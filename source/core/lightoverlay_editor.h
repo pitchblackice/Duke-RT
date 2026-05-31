@@ -60,6 +60,7 @@ struct ActorLightEditorState
 	bool moveMapLightFartherActionPressed = false;
 	bool createEmissiveOverrideActionPressed = false;
 	bool createSurfaceLightActionPressed = false;
+	bool controlKeyDown = false;
 	double mapLightPreviewDistance = 128.0;
 	FString activeSurfaceLightMapName;
 	FString activeSurfaceLightRuleName;
