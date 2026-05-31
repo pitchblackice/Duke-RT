@@ -22929,7 +22929,7 @@ void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
 			const SceneLightSystem::SectorLightingRegistry::SectorLightRecord* sector =
 				sectorIndex < sectorRegistry.sectors.size() ? &sectorRegistry.sectors[sectorIndex] : nullptr;
 			Printf(
-				PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG,
+				PRINT_LOW | PRINT_NOTIFY,
 				"NRI PT sector %u surface light changed avg_shade=%d range=[%d,%d] sector_raw=(%.2f,%.2f) response=%.2f\n",
 				sectorIndex,
 				avgShade,
@@ -22941,7 +22941,7 @@ void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
 		}
 		if (changedNearbySurfaceSectors.size() > printCount)
 		{
-			Printf(PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG, "NRI PT sector surface light changed: +%u more nearby sectors\n", (uint32_t)changedNearbySurfaceSectors.size() - printCount);
+			Printf(PRINT_LOW | PRINT_NOTIFY, "NRI PT sector surface light changed: +%u more nearby sectors\n", (uint32_t)changedNearbySurfaceSectors.size() - printCount);
 		}
 		mLastSectorLightingEditNotifyFrame = mFrameIndex;
 	}
@@ -23006,7 +23006,7 @@ void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
 		{
 			const float scale = sectorIndex < nextScales.size() && nextScales[sectorIndex] >= 0.0f ? nextScales[sectorIndex] : 1.0f;
 			const char* state = scale > 1.01f ? "boosted" : (scale < 0.99f ? "dimmed" : "neutral");
-			Printf(PRINT_LOW | PRINT_NOTIFY | PRINT_NOLOG, "NRI PT sector %u emission %s %.2fx\n", sectorIndex, state, scale);
+			Printf(PRINT_LOW | PRINT_NOTIFY, "NRI PT sector %u emission %s %.2fx\n", sectorIndex, state, scale);
 		}
 		mLastEmissiveSectorResponseNotifyFrame = mFrameIndex;
 	}
