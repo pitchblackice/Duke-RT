@@ -62,6 +62,7 @@ Current practical notes:
 - `actorrule fullbright on` forces matching actor sprite and voxel surfaces onto the PT fullbright material path so they ignore scene lighting and render at full brightness
 - `actorrule random <min> <max>` adds a per-render-frame random intensity offset to the base intensity and is an alternative to `flicker`
 - `actoroverride` is applied after `actorrule`, so explicit per-map shadow overrides win
+- sector-linked emissive overrides apply visible material response by default; `nri_ptsectoremissionmaterialmin` and `nri_ptsectoremissionmaterialmax` control the global clamp
 
 Minimal example:
 
@@ -133,7 +134,6 @@ LIGHTOVR
             responsemax 3.0
             responseinputmin 0.20
             responseinputmax 0.65
-            materialresponse on
             materialresponsemin 0.0
             materialresponsemax 1.0
         }
@@ -269,7 +269,7 @@ Edit the generated `signal sector` when an emitter needs to follow a different s
 
 For switch sectors whose "on" and "off" values are both below the global sector-emission neutral point, add `responseinputmin` and `responseinputmax`. When both fields are present, the raw sector signal maps directly from `responseinputmin` -> `responsemin` to `responseinputmax` -> `responsemax`, instead of using the global neutral response curve. The edit-mode sector-change message prints this authoring value as `signal=...`.
 
-If the switch should also dim the visible emissive surface, add `materialresponse on`. `materialresponsemin` and `materialresponsemax` clamp only the material's visible/direct/indirect emission, so a fixture can cast boosted light through `responsemax` while its visible panel stays within an off-to-normal range such as `0.0` to `1.0`. The material response is opt-in and applies only to matched override surfaces.
+Sector-linked emitters dim or brighten their visible emissive material by default. `nri_ptsectoremissionmaterialmin` and `nri_ptsectoremissionmaterialmax` set the global visible-material response clamp, defaulting to `0.0` and `1.0`. `materialresponsemin` and `materialresponsemax` override that clamp for one rule, so a fixture can cast boosted light through `responsemax` while its visible panel stays within an off-to-normal range such as `0.0` to `1.0`. Use `materialresponse off` when a sector-linked emitter should keep its visible material constant.
 
 Disable edit mode with:
 

@@ -3281,6 +3281,20 @@ CUSTOM_CVAR(Float, nri_ptsectoremissionmax, 3.0f, CVAR_ARCHIVE | CVAR_GLOBALCONF
 		self = 0.0f;
 	}
 }
+CUSTOM_CVAR(Float, nri_ptsectoremissionmaterialmin, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_ptsectoremissionmaterialmax, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
 CVAR(Bool, nri_ptvisiblechunkgate, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptshaderstats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(String, nri_api)
@@ -6841,6 +6855,24 @@ namespace
 			SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0;
 	}
 
+	static bool IsEmissiveSurfaceSectorResponseEligible(const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface)
+	{
+		return
+			surface.sectorResponseEnabled &&
+			surface.sectorIndex >= 0 &&
+			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
+				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
+					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
+	}
+
+	static bool IsEmissiveSurfaceMaterialResponseEligible(const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface)
+	{
+		return
+			surface.materialResponseEnabled &&
+			surface.sectorIndex >= 0 &&
+			(surface.materialResponseExplicit || IsEmissiveSurfaceSectorResponseEligible(surface));
+	}
+
 	static float ComputeSectorEmitterResponseScaleForRenderer(float brightness, float neutralBrightness, float intensity, float minScale, float maxScale)
 	{
 		const float clampedMin = std::max(0.0f, minScale);
@@ -6882,17 +6914,7 @@ namespace
 	{
 		outApplied = false;
 		if (!nri_ptsectoremission ||
-			!surface.sectorResponseEnabled ||
-			surface.sectorIndex < 0)
-		{
-			return 1.0f;
-		}
-
-		const bool overrideEligible = (surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0;
-		const bool autoEligible =
-			HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
-			(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0;
-		if (!overrideEligible && !autoEligible)
+			!IsEmissiveSurfaceSectorResponseEligible(surface))
 		{
 			return 1.0f;
 		}
@@ -6930,8 +6952,7 @@ namespace
 	{
 		outApplied = false;
 		if (!nri_ptsectoremission ||
-			!surface.materialResponseEnabled ||
-			surface.sectorIndex < 0)
+			!IsEmissiveSurfaceMaterialResponseEligible(surface))
 		{
 			return 1.0f;
 		}
@@ -6943,8 +6964,10 @@ namespace
 		}
 
 		const auto& sector = sectorRegistry.sectors[sectorIndex];
-		const float minScale = std::max(0.0f, surface.materialResponseMin);
-		const float maxScale = std::max(minScale, surface.materialResponseMax);
+		const float globalMinScale = std::max(0.0f, (float)nri_ptsectoremissionmaterialmin);
+		const float globalMaxScale = std::max(globalMinScale, (float)nri_ptsectoremissionmaterialmax);
+		const float minScale = surface.hasMaterialResponseMin ? std::max(0.0f, surface.materialResponseMin) : globalMinScale;
+		const float maxScale = surface.hasMaterialResponseMax ? std::max(minScale, surface.materialResponseMax) : globalMaxScale;
 		const float scale = surface.hasSectorResponseInputRange ?
 			ComputeSectorEmitterRangeResponseScaleForRenderer(
 				sector.rawResponseSignal,
@@ -22653,6 +22676,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 		const float sectorResponseScale = ResolveSectorEmissionScale(sectorRegistry, surface, sectorResponseApplied);
 		bool materialResponseApplied = false;
 		const float materialResponseScale = ResolveEmissiveMaterialResponseScale(sectorRegistry, surface, materialResponseApplied);
+		const bool materialResponseEligible = nri_ptsectoremission && IsEmissiveSurfaceMaterialResponseEligible(surface);
 
 		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
 		{
@@ -22693,7 +22717,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.debug.selectionPdf = 0.0f;
 			candidate.debug.emissiveIntensity = surface.emissiveIntensity * sectorResponseScale;
 			candidate.debug.sectorResponseScale = sectorResponseScale;
-			candidate.debug.materialResponseEnabled = surface.materialResponseEnabled;
+			candidate.debug.materialResponseEnabled = materialResponseEligible;
 			candidate.debug.materialResponseScale = materialResponseScale;
 			candidate.debug.sectorResponseApplied = sectorResponseApplied;
 			Copy3(surface.emissiveColor, candidate.debug.emissiveColor);
@@ -22703,7 +22727,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.gpu.stableKeyHi = (uint32_t)(candidate.debug.stableKey >> 32u);
 			candidates.push_back(candidate);
 
-			if (surface.materialResponseEnabled)
+			if (materialResponseEligible)
 			{
 				const uint64_t responseKey = ((uint64_t)dataSource << 32u) | primitiveIndex;
 				if (materialResponseLookup.find(responseKey) == materialResponseLookup.end())
@@ -22881,12 +22905,7 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 		const auto bindingIt = emissiveRegistry.activeBindingHashes.find(surface.stableKey);
 		hash = HashCombine64(hash, bindingIt != emissiveRegistry.activeBindingHashes.end() ? bindingIt->second : 0ull);
 
-		const bool sectorResponseEligible =
-			surface.sectorResponseEnabled &&
-			surface.sectorIndex >= 0 &&
-			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
-				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
-					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
+		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
 		if (nri_ptsectoremission && sectorResponseEligible)
 		{
 			const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
@@ -22895,7 +22914,7 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 			hash = HashCombine64(hash, (uint64_t)sectorIndex);
 			hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
 		}
-		if (nri_ptsectoremission && surface.materialResponseEnabled && surface.sectorIndex >= 0)
+		if (nri_ptsectoremission && IsEmissiveSurfaceMaterialResponseEligible(surface))
 		{
 			bool applied = false;
 			const float materialScale = ResolveEmissiveMaterialResponseScale(sectorRegistry, surface, applied);
@@ -22921,12 +22940,7 @@ uint64_t NRIRenderer::BuildEmissiveSectorResponsePayloadHash() const
 	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
 	{
-		const bool sectorResponseEligible =
-			surface.sectorResponseEnabled &&
-			surface.sectorIndex >= 0 &&
-			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
-				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
-					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
+		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
 		if (!sectorResponseEligible)
 		{
 			continue;
@@ -23086,12 +23100,7 @@ void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
 
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
 	{
-		const bool sectorResponseEligible =
-			surface.sectorResponseEnabled &&
-			surface.sectorIndex >= 0 &&
-			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
-				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
-					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
+		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
 		if (!sectorResponseEligible)
 		{
 			continue;
@@ -23169,12 +23178,7 @@ void NRIRenderer::TraceEmissiveSectorResponseChange()
 	uint32_t affectedEmitterCount = 0;
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
 	{
-		const bool sectorResponseEligible =
-			surface.sectorResponseEnabled &&
-			surface.sectorIndex >= 0 &&
-			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
-				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
-					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
+		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
 		if (sectorResponseEligible)
 		{
 			affectedEmitterCount++;

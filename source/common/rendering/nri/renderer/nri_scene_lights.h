@@ -202,7 +202,11 @@ public:
 			bool hasSectorResponseInputRange = false;
 			float sectorResponseInputMin = 0.0f;
 			float sectorResponseInputMax = 1.0f;
-			bool materialResponseEnabled = false;
+			bool materialResponseEnabled = true;
+			bool materialResponseExplicit = false;
+			bool hasMaterialResponseParams = false;
+			bool hasMaterialResponseMin = false;
+			bool hasMaterialResponseMax = false;
 			float materialResponseMin = 0.0f;
 			float materialResponseMax = 1.0f;
 			float powerEstimate = 0.0f;
