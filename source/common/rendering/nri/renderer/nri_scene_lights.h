@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 enum class SceneLightRecordSource : uint32_t
@@ -202,7 +203,7 @@ public:
 			bool hasSectorResponseInputRange = false;
 			float sectorResponseInputMin = 0.0f;
 			float sectorResponseInputMax = 1.0f;
-			bool materialResponseEnabled = true;
+			bool materialResponseEnabled = false;
 			bool materialResponseExplicit = false;
 			bool hasMaterialResponseParams = false;
 			bool hasMaterialResponseMin = false;
@@ -227,6 +228,8 @@ public:
 		uint32_t explicitRuleMatchCount = 0;
 		uint32_t overrideRuleCount = 0;
 		uint32_t overrideMatchedSurfaceCount = 0;
+		uint32_t materialResponseRuleCount = 0;
+		uint32_t materialResponseMatchedSurfaceCount = 0;
 		uint32_t truncatedSurfaceCount = 0;
 		uint32_t nextRuleId = 1;
 		bool topologyChanged = false;
@@ -266,6 +269,19 @@ public:
 		float responseInputMax = 1.0f;
 		bool hasMaterialResponse = false;
 		bool materialResponse = false;
+		bool hasMaterialResponseMin = false;
+		float materialResponseMin = 0.0f;
+		bool hasMaterialResponseMax = false;
+		float materialResponseMax = 1.0f;
+	};
+
+	struct EmissiveMaterialResponseRule
+	{
+		uint32_t ruleId = 0;
+		std::vector<uint32_t> textureIds;
+		std::vector<std::pair<uint32_t, uint32_t>> textureRanges;
+		bool hasMaterialResponse = false;
+		bool materialResponse = true;
 		bool hasMaterialResponseMin = false;
 		float materialResponseMin = 0.0f;
 		bool hasMaterialResponseMax = false;
@@ -375,7 +391,10 @@ public:
 		uint32_t maxActiveLights,
 		const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules = nullptr,
 		const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules = nullptr);
-	void RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces, const std::vector<EmissiveOverrideRule>* overrideRules = nullptr);
+	void RebuildEmissiveSurfaces(
+		uint32_t maxActiveSurfaces,
+		const std::vector<EmissiveOverrideRule>* overrideRules = nullptr,
+		const std::vector<EmissiveMaterialResponseRule>* materialResponseRules = nullptr);
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
 
 	bool AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);

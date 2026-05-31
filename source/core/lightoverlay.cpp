@@ -125,6 +125,7 @@ namespace
 		std::unordered_map<std::string, int> muzzleFlashRuleLookup;
 		std::unordered_map<std::string, int> mapLightRuleLookup;
 		std::unordered_map<std::string, int> emissiveOverrideLookup;
+		std::unordered_map<std::string, int> emissiveMaterialResponseLookup;
 		std::unordered_map<std::string, int> actorOverrideLookup;
 
 		void SetDefaults(const ParsedLightOverlayDefaults& defaults)
@@ -228,6 +229,26 @@ namespace
 			{
 				Printf(TEXTCOLOR_ORANGE "LIGHTOVR warning: duplicate emissiveoverride '%s' for map '%s' in %s; using the last definition.\n",
 					rule.id.GetChars(), rule.mapName.GetChars(), rule.source.sourceName.GetChars());
+			}
+			existing = rule;
+		}
+
+		void AddEmissiveMaterialResponseRule(const ParsedLightOverlayEmissiveMaterialResponseRule& rule)
+		{
+			const std::string key = MakeNormalizedKey(rule.id);
+			auto it = emissiveMaterialResponseLookup.find(key);
+			if (it == emissiveMaterialResponseLookup.end())
+			{
+				emissiveMaterialResponseLookup.emplace(key, database.emissiveMaterialResponseRules.Size());
+				database.emissiveMaterialResponseRules.Push(rule);
+				return;
+			}
+
+			auto& existing = database.emissiveMaterialResponseRules[it->second];
+			if (existing.source.lumpNum == rule.source.lumpNum)
+			{
+				Printf(TEXTCOLOR_ORANGE "LIGHTOVR warning: duplicate emissivematerialresponse '%s' in %s; using the last definition.\n",
+					rule.id.GetChars(), rule.source.sourceName.GetChars());
 			}
 			existing = rule;
 		}
@@ -406,6 +427,10 @@ namespace
 				else if (sc.Compare("muzzleflashrule"))
 				{
 					ParseMuzzleFlashRule();
+				}
+				else if (sc.Compare("emissivematerialresponse"))
+				{
+					ParseEmissiveMaterialResponseRule();
 				}
 				else if (sc.Compare("map"))
 				{
@@ -986,6 +1011,74 @@ namespace
 			builder.AddEmissiveOverrideRule(rule);
 		}
 
+		void ParseEmissiveMaterialResponseRule()
+		{
+			sc.MustGetString();
+			ParsedLightOverlayEmissiveMaterialResponseRule rule;
+			rule.id = sc.String;
+			rule.source = MakeSourceLocation(sc.GetMessageLine());
+
+			sc.MustGetStringName("{");
+			while (!sc.CheckString("}"))
+			{
+				sc.MustGetString();
+				if (sc.Compare("tile"))
+				{
+					sc.MustGetNumber();
+					rule.tileFilters.Push(sc.Number);
+				}
+				else if (sc.Compare("tilerange"))
+				{
+					sc.MustGetNumber();
+					const int first = sc.Number;
+					sc.MustGetNumber();
+					const int second = sc.Number;
+					LightOverlayTileRange range;
+					range.first = std::min(first, second);
+					range.last = std::max(first, second);
+					rule.tileRanges.Push(range);
+				}
+				else if (sc.Compare("texture"))
+				{
+					sc.MustGetString();
+					rule.textureNames.Push(sc.String);
+				}
+				else if (sc.Compare("materialresponse"))
+				{
+					sc.MustGetString();
+					rule.hasMaterialResponse = true;
+					if (!ParseOnOffToken(sc.String, rule.materialResponse))
+					{
+						sc.ScriptMessage("Invalid materialresponse value '%s'; expected off/on", sc.String);
+					}
+				}
+				else if (sc.Compare("materialresponsemin"))
+				{
+					sc.MustGetFloat();
+					rule.hasMaterialResponseMin = true;
+					rule.materialResponseMin = (float)sc.Float;
+				}
+				else if (sc.Compare("materialresponsemax"))
+				{
+					sc.MustGetFloat();
+					rule.hasMaterialResponseMax = true;
+					rule.materialResponseMax = (float)sc.Float;
+				}
+				else
+				{
+					SkipUnknownField("emissivematerialresponse", sc.String);
+				}
+			}
+
+			if (rule.tileFilters.Size() == 0 && rule.tileRanges.Size() == 0 && rule.textureNames.Size() == 0)
+			{
+				sc.ScriptMessage("emissivematerialresponse '%s' has no tile, tilerange, or texture selector", rule.id.GetChars());
+			}
+
+			FinalizeSourceLocation(rule.source);
+			builder.AddEmissiveMaterialResponseRule(rule);
+		}
+
 		void ParseActorOverrideRule(const FString& mapName)
 		{
 			sc.MustGetString();
@@ -1259,6 +1352,28 @@ namespace
 		AppendLine(text, 2, "}");
 	}
 
+	static void AppendEmissiveMaterialResponseRuleBlock(FString& text, const ParsedLightOverlayEmissiveMaterialResponseRule& rule)
+	{
+		AppendLine(text, 1, FStringf("emissivematerialresponse %s", QuoteLightOverlayString(rule.id).GetChars()));
+		AppendLine(text, 1, "{");
+		for (int tile : rule.tileFilters)
+		{
+			AppendLine(text, 2, FStringf("tile %d", tile));
+		}
+		for (const auto& range : rule.tileRanges)
+		{
+			AppendLine(text, 2, FStringf("tilerange %d %d", range.first, range.last));
+		}
+		for (const auto& textureName : rule.textureNames)
+		{
+			AppendLine(text, 2, FStringf("texture %s", QuoteLightOverlayString(textureName).GetChars()));
+		}
+		if (rule.hasMaterialResponse) AppendShadowStateField(text, 2, "materialresponse", rule.materialResponse);
+		if (rule.hasMaterialResponseMin) AppendLine(text, 2, FStringf("materialresponsemin %s", FormatLightOverlayFloat(rule.materialResponseMin).GetChars()));
+		if (rule.hasMaterialResponseMax) AppendLine(text, 2, FStringf("materialresponsemax %s", FormatLightOverlayFloat(rule.materialResponseMax).GetChars()));
+		AppendLine(text, 1, "}");
+	}
+
 	static void AppendActorOverrideRuleBlock(FString& text, const ParsedLightOverlayActorOverrideRule& rule)
 	{
 		AppendLine(text, 2, FStringf("actoroverride %s", QuoteLightOverlayString(rule.id).GetChars()));
@@ -1342,6 +1457,18 @@ namespace
 		return -1;
 	}
 
+	static int32_t FindEmissiveMaterialResponseRuleIndex(const ParsedLightOverlayDatabase& database, const FString& id)
+	{
+		for (unsigned i = 0; i < (unsigned)database.emissiveMaterialResponseRules.Size(); ++i)
+		{
+			if (database.emissiveMaterialResponseRules[i].id.CompareNoCase(id) == 0)
+			{
+				return (int32_t)i;
+			}
+		}
+		return -1;
+	}
+
 	static int32_t FindActorOverrideRuleIndex(const ParsedLightOverlayDatabase& database, const FString& mapName, const FString& id)
 	{
 		for (unsigned i = 0; i < (unsigned)database.actorOverrideRules.Size(); ++i)
@@ -1369,6 +1496,7 @@ namespace
 		for (const auto& rule : database.muzzleFlashRules) update(rule.source);
 		for (const auto& rule : database.mapLightRules) update(rule.source);
 		for (const auto& rule : database.emissiveOverrideRules) update(rule.source);
+		for (const auto& rule : database.emissiveMaterialResponseRules) update(rule.source);
 		for (const auto& rule : database.actorOverrideRules) update(rule.source);
 		return nextOrderIndex + 1;
 	}
@@ -1408,13 +1536,14 @@ namespace
 
 	static void DumpParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database)
 	{
-		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d directional=%d actor_overrides=%d parse_errors=%s\n",
+		Printf("LIGHTOVR: generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d directional=%d actor_overrides=%d parse_errors=%s\n",
 			database.generation,
 			database.sourceFiles.Size(),
 			database.actorRules.Size(),
 			database.muzzleFlashRules.Size(),
 			database.mapLightRules.Size(),
 			database.emissiveOverrideRules.Size(),
+			database.emissiveMaterialResponseRules.Size(),
 			database.directionalRules.Size(),
 			database.actorOverrideRules.Size(),
 			database.hadParseErrors ? "yes" : "no");
@@ -1526,6 +1655,19 @@ namespace
 			if (rule->hasMaterialResponseMax) Printf("  materialresponsemax=%.3f\n", rule->materialResponseMax);
 		}
 
+		for (const ParsedLightOverlayEmissiveMaterialResponseRule* rule : SortRulesByOrder(database.emissiveMaterialResponseRules))
+		{
+			Printf("LIGHTOVR emissivematerialresponse %s: tiles=%d ranges=%d textures=%d materialresponse=%s source=%s\n",
+				rule->id.GetChars(),
+				rule->tileFilters.Size(),
+				rule->tileRanges.Size(),
+				rule->textureNames.Size(),
+				rule->hasMaterialResponse ? (rule->materialResponse ? "on" : "off") : "(default)",
+				SourceLocationText(rule->source).GetChars());
+			if (rule->hasMaterialResponseMin) Printf("  materialresponsemin=%.3f\n", rule->materialResponseMin);
+			if (rule->hasMaterialResponseMax) Printf("  materialresponsemax=%.3f\n", rule->materialResponseMax);
+		}
+
 		for (const ParsedLightOverlayActorOverrideRule* rule : SortRulesByOrder(database.actorOverrideRules))
 		{
 			Printf("LIGHTOVR actoroverride %s map=%s actorclass=%s shadowreceive=%s shadowcast=%s source=%s\n",
@@ -1540,7 +1682,7 @@ namespace
 
 	static void DumpResolvedLightOverlaySet(const ResolvedLightOverlaySet& resolved)
 	{
-		Printf("LIGHTOVR resolved: parsed_generation=%u resolved_generation=%u map=%s current_map=%s actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d directional=%d actor_overrides=%d\n",
+		Printf("LIGHTOVR resolved: parsed_generation=%u resolved_generation=%u map=%s current_map=%s actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d directional=%d actor_overrides=%d\n",
 			resolved.parsedGeneration,
 			resolved.resolvedGeneration,
 			resolved.activeMapName.IsNotEmpty() ? resolved.activeMapName.GetChars() : "(none)",
@@ -1549,6 +1691,7 @@ namespace
 			resolved.muzzleFlashRules.Size(),
 			resolved.mapLightRules.Size(),
 			resolved.emissiveOverrideRules.Size(),
+			resolved.emissiveMaterialResponseRules.Size(),
 			resolved.directionalRules.Size(),
 			resolved.actorOverrideRules.Size());
 
@@ -1606,6 +1749,16 @@ namespace
 			Printf("LIGHTOVR resolved emissiveoverride %s map=%s source=%s\n",
 				rule.id.GetChars(),
 				rule.mapName.GetChars(),
+				SourceLocationText(rule.source).GetChars());
+		}
+
+		for (const auto& rule : resolved.emissiveMaterialResponseRules)
+		{
+			Printf("LIGHTOVR resolved emissivematerialresponse %s: tiles=%d ranges=%d textures=%d source=%s\n",
+				rule.id.GetChars(),
+				rule.tileFilters.Size(),
+				rule.tileRanges.Size(),
+				rule.textureNames.Size(),
 				SourceLocationText(rule.source).GetChars());
 		}
 
@@ -1771,6 +1924,21 @@ namespace
 		destination.materialResponseMax = source.materialResponseMax;
 	}
 
+	static void CopyEmissiveMaterialResponseRule(const ParsedLightOverlayEmissiveMaterialResponseRule& source, ResolvedLightOverlayEmissiveMaterialResponseRule& destination)
+	{
+		destination.id = source.id;
+		destination.source = source.source;
+		destination.tileFilters = source.tileFilters;
+		destination.tileRanges = source.tileRanges;
+		destination.textureNames = source.textureNames;
+		destination.hasMaterialResponse = source.hasMaterialResponse;
+		destination.materialResponse = source.materialResponse;
+		destination.hasMaterialResponseMin = source.hasMaterialResponseMin;
+		destination.materialResponseMin = source.materialResponseMin;
+		destination.hasMaterialResponseMax = source.hasMaterialResponseMax;
+		destination.materialResponseMax = source.materialResponseMax;
+	}
+
 	static void CopyActorOverrideRule(const ParsedLightOverlayActorOverrideRule& source, ResolvedLightOverlayActorOverrideRule& destination)
 	{
 		destination.mapName = source.mapName;
@@ -1844,6 +2012,13 @@ namespace
 			}
 		}
 
+		for (const auto& source : GLightOverlayDatabase.emissiveMaterialResponseRules)
+		{
+			ResolvedLightOverlayEmissiveMaterialResponseRule destination;
+			CopyEmissiveMaterialResponseRule(source, destination);
+			resolved.emissiveMaterialResponseRules.Push(destination);
+		}
+
 		for (const auto& source : GLightOverlayDatabase.actorOverrideRules)
 		{
 			if (mapName.IsNotEmpty() && source.mapName.CompareNoCase(mapName) == 0)
@@ -1870,7 +2045,7 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 		AppendLine(text, 1, "defaults");
 		AppendLine(text, 1, "{");
 		AppendLine(text, 1, "}");
-		if (database.actorRules.Size() > 0 || database.muzzleFlashRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.emissiveOverrideRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
+		if (database.actorRules.Size() > 0 || database.muzzleFlashRules.Size() > 0 || database.emissiveMaterialResponseRules.Size() > 0 || database.directionalRules.Size() > 0 || database.mapLightRules.Size() > 0 || database.emissiveOverrideRules.Size() > 0 || database.actorOverrideRules.Size() > 0)
 		{
 			text << "\n";
 		}
@@ -1900,8 +2075,22 @@ FString SerializeLightOverlayDatabase(const ParsedLightOverlayDatabase& database
 		AppendMuzzleFlashRuleBlock(text, *muzzleFlashRules[i]);
 	}
 
+	const auto emissiveMaterialResponseRules = SortRulesById(database.emissiveMaterialResponseRules);
+	if ((!actorRules.empty() || !muzzleFlashRules.empty()) && !emissiveMaterialResponseRules.empty())
+	{
+		text << "\n";
+	}
+	for (size_t i = 0; i < emissiveMaterialResponseRules.size(); ++i)
+	{
+		if (i > 0)
+		{
+			text << "\n";
+		}
+		AppendEmissiveMaterialResponseRuleBlock(text, *emissiveMaterialResponseRules[i]);
+	}
+
 	const auto mapNames = CollectSortedMapNames(database);
-	if ((!actorRules.empty() || !muzzleFlashRules.empty()) && !mapNames.empty())
+	if ((!actorRules.empty() || !muzzleFlashRules.empty() || !emissiveMaterialResponseRules.empty()) && !mapNames.empty())
 	{
 		text << "\n";
 	}
@@ -2006,13 +2195,14 @@ bool ApplyParsedLightOverlayDatabase(const ParsedLightOverlayDatabase& database,
 
 	if (verbose)
 	{
-		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d directional=%d actor_overrides=%d parse_errors=%s changed=%s\n",
+		Printf("LIGHTOVR: parsed generation=%u files=%d actor_rules=%d muzzle_flashes=%d map_lights=%d emissive_overrides=%d emissive_material_responses=%d directional=%d actor_overrides=%d parse_errors=%s changed=%s\n",
 			GLightOverlayDatabase.generation,
 			GLightOverlayDatabase.sourceFiles.Size(),
 			GLightOverlayDatabase.actorRules.Size(),
 			GLightOverlayDatabase.muzzleFlashRules.Size(),
 			GLightOverlayDatabase.mapLightRules.Size(),
 			GLightOverlayDatabase.emissiveOverrideRules.Size(),
+			GLightOverlayDatabase.emissiveMaterialResponseRules.Size(),
 			GLightOverlayDatabase.directionalRules.Size(),
 			GLightOverlayDatabase.actorOverrideRules.Size(),
 			GLightOverlayDatabase.hadParseErrors ? "yes" : "no",
@@ -2108,6 +2298,23 @@ bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const Pa
 	return true;
 }
 
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayEmissiveMaterialResponseRule& rule, bool* outReplaced)
+{
+	ParsedLightOverlayEmissiveMaterialResponseRule nextRule = rule;
+	const int32_t index = FindEmissiveMaterialResponseRuleIndex(database, nextRule.id);
+	if (outReplaced != nullptr) *outReplaced = index >= 0;
+	EnsureEditableSource(database, nextRule.source, index >= 0 ? &database.emissiveMaterialResponseRules[index].source : nullptr);
+	if (index >= 0)
+	{
+		database.emissiveMaterialResponseRules[index] = std::move(nextRule);
+	}
+	else
+	{
+		database.emissiveMaterialResponseRules.Push(std::move(nextRule));
+	}
+	return true;
+}
+
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced)
 {
 	ParsedLightOverlayActorOverrideRule nextRule = rule;
@@ -2151,6 +2358,10 @@ bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRu
 	case LightOverlayRuleKind::EmissiveOverride:
 		index = FindEmissiveOverrideRuleIndex(database, scopedMapName, ruleId);
 		if (index >= 0) database.emissiveOverrideRules.Delete(index);
+		return index >= 0;
+	case LightOverlayRuleKind::EmissiveMaterialResponse:
+		index = FindEmissiveMaterialResponseRuleIndex(database, ruleId);
+		if (index >= 0) database.emissiveMaterialResponseRules.Delete(index);
 		return index >= 0;
 	case LightOverlayRuleKind::ActorOverride:
 		index = FindActorOverrideRuleIndex(database, scopedMapName, ruleId);

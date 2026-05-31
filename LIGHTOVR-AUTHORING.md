@@ -50,6 +50,8 @@ Current parser fields by block:
   `type`, `anchor`, `offset`, `direction`, `color`, `intensity`, `radius`, `range`, `flicker`
 - `actoroverride`
   `actorclass`, `shadowreceive`, `shadowcast`
+- `emissivematerialresponse`
+  `tile`, `tilerange`, `texture`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
 - `emissiveoverride`
   `sector`, `wall`, `tile`, `intensityscale`, `reachscale`, `sectorresponse`, `signal sector`, `responseintensity`, `responsemin`, `responsemax`, `responseinputmin`, `responseinputmax`, `materialresponse`, `materialresponsemin`, `materialresponsemax`
 
@@ -62,7 +64,7 @@ Current practical notes:
 - `actorrule fullbright on` forces matching actor sprite and voxel surfaces onto the PT fullbright material path so they ignore scene lighting and render at full brightness
 - `actorrule random <min> <max>` adds a per-render-frame random intensity offset to the base intensity and is an alternative to `flicker`
 - `actoroverride` is applied after `actorrule`, so explicit per-map shadow overrides win
-- sector-linked emissive overrides apply visible material response by default; `nri_ptsectoremissionmaterialmin` and `nri_ptsectoremissionmaterialmax` control the global clamp
+- `emissivematerialresponse` is global and is applied before map-local `emissiveoverride`, so a specific surface override can still opt out or change the clamp
 
 Minimal example:
 
@@ -92,6 +94,15 @@ LIGHTOVR
         durationseconds 0.06
         durationrandomseconds -0.01 0.01
         offset 0.0 10.0 0.0
+    }
+
+    emissivematerialresponse "SwitchPanels"
+    {
+        texture "#00707"
+        tile 1495
+        tilerange 1600 1608
+        materialresponsemin 0.0
+        materialresponsemax 1.0
     }
 
     map "E1L1"
@@ -269,7 +280,7 @@ Edit the generated `signal sector` when an emitter needs to follow a different s
 
 For switch sectors whose "on" and "off" values are both below the global sector-emission neutral point, add `responseinputmin` and `responseinputmax`. When both fields are present, the raw sector signal maps directly from `responseinputmin` -> `responsemin` to `responseinputmax` -> `responsemax`, instead of using the global neutral response curve. The edit-mode sector-change message prints this authoring value as `signal=...`.
 
-Sector-linked emitters dim or brighten their visible emissive material by default. `nri_ptsectoremissionmaterialmin` and `nri_ptsectoremissionmaterialmax` set the global visible-material response clamp, defaulting to `0.0` and `1.0`. `materialresponsemin` and `materialresponsemax` override that clamp for one rule, so a fixture can cast boosted light through `responsemax` while its visible panel stays within an off-to-normal range such as `0.0` to `1.0`. Use `materialresponse off` when a sector-linked emitter should keep its visible material constant.
+Visible emissive material response is opt-in. For broad texture-based cases, add a global `emissivematerialresponse` rule with any mix of `texture`, `tile`, and `tilerange` selectors. `texture` resolves by engine texture name, while `tile` and `tilerange` match renderer texture ids like the existing `emissiveoverride tile` field. `materialresponsemin` and `materialresponsemax` clamp only the material's visible/direct/indirect emission, so a fixture can cast boosted light through `responsemax` while its visible panel stays within an off-to-normal range such as `0.0` to `1.0`; if either clamp is omitted, the corresponding `nri_ptsectoremissionmaterialmin` or `nri_ptsectoremissionmaterialmax` cvar supplies the fallback. Map-local `emissiveoverride` entries are applied after the global texture rule; use `materialresponse off` or per-rule `materialresponsemin`/`materialresponsemax` there when one surface needs different behavior.
 
 Disable edit mode with:
 

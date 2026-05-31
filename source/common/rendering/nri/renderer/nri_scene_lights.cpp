@@ -914,6 +914,62 @@ namespace
 		return rule.hasSectorFilter || rule.hasWallFilter || rule.hasTileFilter;
 	}
 
+	bool EmissiveMaterialResponseRuleMatchesSurface(
+		const SceneLightSystem::EmissiveMaterialResponseRule& rule,
+		const SceneLightSystem::SurfaceRecord& record)
+	{
+		for (uint32_t textureId : rule.textureIds)
+		{
+			if (record.material.textureId == textureId)
+			{
+				return true;
+			}
+		}
+
+		for (const auto& range : rule.textureRanges)
+		{
+			if (record.material.textureId >= range.first && record.material.textureId <= range.second)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	void ApplyEmissiveMaterialResponseRule(
+		const SceneLightSystem::EmissiveMaterialResponseRule& rule,
+		SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive)
+	{
+		if (rule.hasMaterialResponse)
+		{
+			emissive.materialResponseEnabled = rule.materialResponse;
+			emissive.materialResponseExplicit = true;
+		}
+		else
+		{
+			emissive.materialResponseEnabled = true;
+		}
+		if (rule.hasMaterialResponseMin || rule.hasMaterialResponseMax)
+		{
+			if (!rule.hasMaterialResponse)
+			{
+				emissive.materialResponseEnabled = true;
+			}
+			emissive.hasMaterialResponseParams = true;
+			emissive.hasMaterialResponseMin = rule.hasMaterialResponseMin;
+			emissive.hasMaterialResponseMax = rule.hasMaterialResponseMax;
+			if (rule.hasMaterialResponseMin)
+			{
+				emissive.materialResponseMin = std::max(0.0f, rule.materialResponseMin);
+			}
+			if (rule.hasMaterialResponseMax)
+			{
+				emissive.materialResponseMax = std::max(0.0f, rule.materialResponseMax);
+			}
+		}
+	}
+
 	void ApplyEmissiveOverrideRule(
 		const SceneLightSystem::EmissiveOverrideRule& rule,
 		SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive)
@@ -957,6 +1013,10 @@ namespace
 		}
 		if (rule.hasMaterialResponseMin || rule.hasMaterialResponseMax)
 		{
+			if (!rule.hasMaterialResponse)
+			{
+				emissive.materialResponseEnabled = true;
+			}
 			emissive.hasMaterialResponseParams = true;
 			emissive.hasMaterialResponseMin = rule.hasMaterialResponseMin;
 			emissive.hasMaterialResponseMax = rule.hasMaterialResponseMax;
@@ -1130,6 +1190,10 @@ void SceneLightSystem::ResetLevelState()
 	mEmissiveSurfaces.totalPowerEstimate = 0.0f;
 	mEmissiveSurfaces.autoTaggedCount = 0;
 	mEmissiveSurfaces.explicitRuleMatchCount = 0;
+	mEmissiveSurfaces.overrideRuleCount = 0;
+	mEmissiveSurfaces.overrideMatchedSurfaceCount = 0;
+	mEmissiveSurfaces.materialResponseRuleCount = 0;
+	mEmissiveSurfaces.materialResponseMatchedSurfaceCount = 0;
 	mEmissiveSurfaces.truncatedSurfaceCount = 0;
 	mEmissiveSurfaces.topologyChanged = false;
 	mEmissiveSurfaces.propertiesChanged = false;
@@ -1161,6 +1225,10 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mEmissiveSurfaces.totalPowerEstimate = 0.0f;
 	mEmissiveSurfaces.autoTaggedCount = 0;
 	mEmissiveSurfaces.explicitRuleMatchCount = 0;
+	mEmissiveSurfaces.overrideRuleCount = 0;
+	mEmissiveSurfaces.overrideMatchedSurfaceCount = 0;
+	mEmissiveSurfaces.materialResponseRuleCount = 0;
+	mEmissiveSurfaces.materialResponseMatchedSurfaceCount = 0;
 	mEmissiveSurfaces.truncatedSurfaceCount = 0;
 	mEmissiveSurfaces.topologyChanged = false;
 	mEmissiveSurfaces.propertiesChanged = false;
@@ -1518,13 +1586,18 @@ void SceneLightSystem::RebuildAnalyticLights(
 	mAnalyticLights.activeLights = std::move(nextLights);
 }
 
-void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces, const std::vector<EmissiveOverrideRule>* overrideRules)
+void SceneLightSystem::RebuildEmissiveSurfaces(
+	uint32_t maxActiveSurfaces,
+	const std::vector<EmissiveOverrideRule>* overrideRules,
+	const std::vector<EmissiveMaterialResponseRule>* materialResponseRules)
 {
 	mEmissiveSurfaces.totalPowerEstimate = 0.0f;
 	mEmissiveSurfaces.autoTaggedCount = 0;
 	mEmissiveSurfaces.explicitRuleMatchCount = 0;
 	mEmissiveSurfaces.overrideRuleCount = overrideRules != nullptr ? (uint32_t)overrideRules->size() : 0u;
 	mEmissiveSurfaces.overrideMatchedSurfaceCount = 0;
+	mEmissiveSurfaces.materialResponseRuleCount = materialResponseRules != nullptr ? (uint32_t)materialResponseRules->size() : 0u;
+	mEmissiveSurfaces.materialResponseMatchedSurfaceCount = 0;
 	mEmissiveSurfaces.truncatedSurfaceCount = 0;
 
 	std::vector<EmissiveSurfaceRegistry::EmissiveSurfaceRecord> nextSurfaces;
@@ -1575,6 +1648,18 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces, const
 		Copy3f(record.center, emissive.center);
 		Copy3f(emissiveColor, emissive.emissiveColor);
 		emissive.emissiveIntensity = emissiveIntensity;
+		bool matchedMaterialResponse = false;
+		if (materialResponseRules != nullptr)
+		{
+			for (const EmissiveMaterialResponseRule& rule : *materialResponseRules)
+			{
+				if (EmissiveMaterialResponseRuleMatchesSurface(rule, record))
+				{
+					ApplyEmissiveMaterialResponseRule(rule, emissive);
+					matchedMaterialResponse = true;
+				}
+			}
+		}
 		bool matchedOverride = false;
 		if (overrideRules != nullptr)
 		{
@@ -1601,6 +1686,10 @@ void SceneLightSystem::RebuildEmissiveSurfaces(uint32_t maxActiveSurfaces, const
 		if (matchedOverride)
 		{
 			mEmissiveSurfaces.overrideMatchedSurfaceCount++;
+		}
+		if (matchedMaterialResponse)
+		{
+			mEmissiveSurfaces.materialResponseMatchedSurfaceCount++;
 		}
 		nextSurfaces.push_back(emissive);
 

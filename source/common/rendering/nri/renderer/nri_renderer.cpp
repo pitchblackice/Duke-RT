@@ -2958,6 +2958,60 @@ public:
 		}
 	}
 
+	static void BuildEmissiveMaterialResponseRules(
+		const ResolvedLightOverlaySet& resolved,
+		std::vector<SceneLightSystem::EmissiveMaterialResponseRule>& outRules)
+	{
+		outRules.clear();
+		outRules.reserve((size_t)resolved.emissiveMaterialResponseRules.Size());
+		for (const auto& resolvedRule : resolved.emissiveMaterialResponseRules)
+		{
+			SceneLightSystem::EmissiveMaterialResponseRule rule = {};
+			rule.ruleId = BuildResolvedLightOverlayRuleId(resolvedRule.id.GetChars(), "", resolvedRule.source);
+			rule.textureIds.reserve((size_t)resolvedRule.tileFilters.Size() + (size_t)resolvedRule.textureNames.Size());
+			for (int tile : resolvedRule.tileFilters)
+			{
+				if (tile >= 0)
+				{
+					rule.textureIds.push_back((uint32_t)tile);
+				}
+			}
+			rule.textureRanges.reserve((size_t)resolvedRule.tileRanges.Size());
+			for (const auto& range : resolvedRule.tileRanges)
+			{
+				if (range.first >= 0 && range.last >= 0)
+				{
+					rule.textureRanges.emplace_back((uint32_t)range.first, (uint32_t)range.last);
+				}
+			}
+			for (const auto& textureName : resolvedRule.textureNames)
+			{
+				const FTextureID textureId = TexMan.CheckForTexture(textureName.GetChars(), ETextureType::Any);
+				if (textureId.isValid())
+				{
+					rule.textureIds.push_back((uint32_t)textureId.GetIndex());
+				}
+				else
+				{
+					Printf(PRINT_LOW, "LIGHTOVR warning: emissivematerialresponse '%s' texture '%s' did not resolve\n",
+						resolvedRule.id.GetChars(),
+						textureName.GetChars());
+				}
+			}
+			if (rule.textureIds.empty() && rule.textureRanges.empty())
+			{
+				continue;
+			}
+			rule.hasMaterialResponse = resolvedRule.hasMaterialResponse;
+			rule.materialResponse = resolvedRule.materialResponse;
+			rule.hasMaterialResponseMin = resolvedRule.hasMaterialResponseMin;
+			rule.materialResponseMin = resolvedRule.materialResponseMin;
+			rule.hasMaterialResponseMax = resolvedRule.hasMaterialResponseMax;
+			rule.materialResponseMax = resolvedRule.materialResponseMax;
+			outRules.push_back(rule);
+		}
+	}
+
 	static bool ResolveSurfaceProbeTextureDebugInfo(uint32_t textureId, FString& outTextureName, int32_t& outLegacyTile)
 	{
 		outTextureName = "(none)";
@@ -12074,12 +12128,14 @@ void NRIRenderer::UpdateNightVisionState()
 void NRIRenderer::PrintTextureEmissiveHeuristics() const
 {
 	const auto& emissive = mSceneLights.GetEmissiveSurfaces();
-	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u overrides=%u override_matches=%u active=%u total_power=%.3f glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f truncated=%u\n",
+	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u overrides=%u override_matches=%u material_response_rules=%u material_response_matches=%u active=%u total_power=%.3f glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f truncated=%u\n",
 		(uint32_t)emissive.textureRules.size(),
 		emissive.autoTaggedCount,
 		emissive.explicitRuleMatchCount,
 		emissive.overrideRuleCount,
 		emissive.overrideMatchedSurfaceCount,
+		emissive.materialResponseRuleCount,
+		emissive.materialResponseMatchedSurfaceCount,
 		(uint32_t)emissive.activeSurfaces.size(),
 		emissive.totalPowerEstimate,
 		(float)nri_ptglowscale,
@@ -12136,13 +12192,15 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		return a.distanceSq < b.distanceSq;
 	});
 
-	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u overrides=%u override_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u min_surface=%.3f min_power=%.3f sampling_auto_only=%s sector_emission=%s\n",
+	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u overrides=%u override_matches=%u material_response_rules=%u material_response_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u min_surface=%.3f min_power=%.3f sampling_auto_only=%s sector_emission=%s\n",
 		(uint32_t)mBoundEmissivePrimitiveRecords.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
 		mSceneLights.GetEmissiveSurfaces().explicitRuleMatchCount,
 		mSceneLights.GetEmissiveSurfaces().overrideRuleCount,
 		mSceneLights.GetEmissiveSurfaces().overrideMatchedSurfaceCount,
+		mSceneLights.GetEmissiveSurfaces().materialResponseRuleCount,
+		mSceneLights.GetEmissiveSurfaces().materialResponseMatchedSurfaceCount,
 		mBoundEmissiveTotalPower,
 		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildTopologyChanged),
 		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildPropertiesChanged),
@@ -12762,13 +12820,15 @@ void NRIRenderer::PrintStatus() const
 		mBoundRuntimeLightTileIndexCount,
 		mBoundRuntimeLightMaxTileOccupancy,
 		NRI_PTDEBUG_ANALYTIC_DIRECT);
-	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u overrides=%u override_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s sector_emission=%s glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f\n",
+	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u overrides=%u override_matches=%u material_response_rules=%u material_response_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s sector_emission=%s glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f\n",
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().textureRules.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
 		mSceneLights.GetEmissiveSurfaces().explicitRuleMatchCount,
 		mSceneLights.GetEmissiveSurfaces().overrideRuleCount,
 		mSceneLights.GetEmissiveSurfaces().overrideMatchedSurfaceCount,
+		mSceneLights.GetEmissiveSurfaces().materialResponseRuleCount,
+		mSceneLights.GetEmissiveSurfaces().materialResponseMatchedSurfaceCount,
 		mSceneLights.GetEmissiveSurfaces().totalPowerEstimate,
 		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildTopologyChanged),
 		YesNo(mSceneLights.GetEmissiveSurfaces().lastBuildPropertiesChanged),
@@ -21452,8 +21512,10 @@ void NRIRenderer::RefreshSceneLightSystem(
 	std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>> actorOverlayRules;
 	std::vector<SceneLightSystem::AnalyticLightRegistry::MapOverlayRule> mapOverlayRules;
 	std::vector<SceneLightSystem::EmissiveOverrideRule> emissiveOverrideRules;
+	std::vector<SceneLightSystem::EmissiveMaterialResponseRule> emissiveMaterialResponseRules;
 	BuildActorAnalyticOverlayRules(resolvedLightOverlays, actorOverlayRules);
 	BuildEmissiveOverrideRules(resolvedLightOverlays, emissiveOverrideRules);
+	BuildEmissiveMaterialResponseRules(resolvedLightOverlays, emissiveMaterialResponseRules);
 	if (mMapWorld.valid)
 	{
 		BuildStaticMapAnalyticOverlayRules(resolvedLightOverlays, mMapWorld, mapOverlayRules);
@@ -21475,7 +21537,8 @@ void NRIRenderer::RefreshSceneLightSystem(
 		ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightEmissiveMs);
 		mSceneLights.RebuildEmissiveSurfaces(
 			NRI_MAX_EMISSIVE_SURFACES,
-			emissiveOverrideRules.empty() ? nullptr : &emissiveOverrideRules);
+			emissiveOverrideRules.empty() ? nullptr : &emissiveOverrideRules,
+			emissiveMaterialResponseRules.empty() ? nullptr : &emissiveMaterialResponseRules);
 	}
 	{
 		ScopedPtPerfTimer rebuildTimer(mLastPerfShellTraceStats.sceneLightSectorMs);

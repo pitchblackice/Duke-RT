@@ -170,6 +170,27 @@ struct ParsedLightOverlayEmissiveOverrideRule
 	float materialResponseMax = 1.0f;
 };
 
+struct LightOverlayTileRange
+{
+	int first = -1;
+	int last = -1;
+};
+
+struct ParsedLightOverlayEmissiveMaterialResponseRule
+{
+	FString id;
+	LightOverlaySourceLocation source;
+	TArray<int> tileFilters;
+	TArray<LightOverlayTileRange> tileRanges;
+	TArray<FString> textureNames;
+	bool hasMaterialResponse = false;
+	bool materialResponse = true;
+	bool hasMaterialResponseMin = false;
+	float materialResponseMin = 0.0f;
+	bool hasMaterialResponseMax = false;
+	float materialResponseMax = 1.0f;
+};
+
 struct ParsedLightOverlayActorOverrideRule
 {
 	FString mapName;
@@ -201,6 +222,7 @@ struct ParsedLightOverlayDatabase
 	TArray<ParsedLightOverlayMuzzleFlashRule> muzzleFlashRules;
 	TArray<ParsedLightOverlayMapLightRule> mapLightRules;
 	TArray<ParsedLightOverlayEmissiveOverrideRule> emissiveOverrideRules;
+	TArray<ParsedLightOverlayEmissiveMaterialResponseRule> emissiveMaterialResponseRules;
 	TArray<ParsedLightOverlayActorOverrideRule> actorOverrideRules;
 };
 
@@ -348,6 +370,21 @@ struct ResolvedLightOverlayEmissiveOverrideRule
 	float materialResponseMax = 1.0f;
 };
 
+struct ResolvedLightOverlayEmissiveMaterialResponseRule
+{
+	FString id;
+	LightOverlaySourceLocation source;
+	TArray<int> tileFilters;
+	TArray<LightOverlayTileRange> tileRanges;
+	TArray<FString> textureNames;
+	bool hasMaterialResponse = false;
+	bool materialResponse = true;
+	bool hasMaterialResponseMin = false;
+	float materialResponseMin = 0.0f;
+	bool hasMaterialResponseMax = false;
+	float materialResponseMax = 1.0f;
+};
+
 struct ResolvedLightOverlayActorOverrideRule
 {
 	FString mapName;
@@ -373,6 +410,7 @@ struct ResolvedLightOverlaySet
 	TArray<ResolvedLightOverlayMuzzleFlashRule> muzzleFlashRules;
 	TArray<ResolvedLightOverlayMapLightRule> mapLightRules;
 	TArray<ResolvedLightOverlayEmissiveOverrideRule> emissiveOverrideRules;
+	TArray<ResolvedLightOverlayEmissiveMaterialResponseRule> emissiveMaterialResponseRules;
 	TArray<ResolvedLightOverlayActorOverrideRule> actorOverrideRules;
 };
 
@@ -383,6 +421,7 @@ enum class LightOverlayRuleKind : uint8_t
 	MuzzleFlash,
 	MapLight,
 	EmissiveOverride,
+	EmissiveMaterialResponse,
 	ActorOverride,
 };
 
@@ -397,5 +436,6 @@ bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const Pa
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMuzzleFlashRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayMapLightRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayEmissiveOverrideRule& rule, bool* outReplaced = nullptr);
+bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayEmissiveMaterialResponseRule& rule, bool* outReplaced = nullptr);
 bool AddOrReplaceLightOverlayRule(ParsedLightOverlayDatabase& database, const ParsedLightOverlayActorOverrideRule& rule, bool* outReplaced = nullptr);
 bool RemoveLightOverlayRule(ParsedLightOverlayDatabase& database, LightOverlayRuleKind kind, const char* id, const char* mapName = nullptr);
