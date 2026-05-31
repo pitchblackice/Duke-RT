@@ -2944,6 +2944,10 @@ public:
 			rule.responseMin = resolvedRule.responseMin;
 			rule.hasResponseMax = resolvedRule.hasResponseMax;
 			rule.responseMax = resolvedRule.responseMax;
+			rule.hasResponseInputMin = resolvedRule.hasResponseInputMin;
+			rule.responseInputMin = resolvedRule.responseInputMin;
+			rule.hasResponseInputMax = resolvedRule.hasResponseInputMax;
+			rule.responseInputMax = resolvedRule.responseInputMax;
 			outRules.push_back(rule);
 		}
 	}
@@ -6844,6 +6848,20 @@ namespace
 		return clamp(1.0f + normalizedDelta * intensity, clampedMin, clampedMax);
 	}
 
+	static float ComputeSectorEmitterRangeResponseScaleForRenderer(float signal, float inputMin, float inputMax, float minScale, float maxScale)
+	{
+		const float clampedMin = std::max(0.0f, minScale);
+		const float clampedMax = std::max(clampedMin, maxScale);
+		const float inputRange = inputMax - inputMin;
+		if (std::abs(inputRange) <= 0.0001f)
+		{
+			return clamp(1.0f, clampedMin, clampedMax);
+		}
+
+		const float t = clamp((signal - inputMin) / inputRange, 0.0f, 1.0f);
+		return clampedMin + (clampedMax - clampedMin) * t;
+	}
+
 	static float GetSectorEmitterNeutralBrightnessForRenderer()
 	{
 		const float sectorClamp = std::max(0.0f, (float)nri_ptsectorclamp);
@@ -6880,7 +6898,14 @@ namespace
 		}
 
 		const auto& sector = sectorRegistry.sectors[sectorIndex];
-		const float scale = surface.hasSectorResponseParams ?
+		const float scale = surface.hasSectorResponseInputRange ?
+			ComputeSectorEmitterRangeResponseScaleForRenderer(
+				sector.rawResponseSignal,
+				surface.sectorResponseInputMin,
+				surface.sectorResponseInputMax,
+				std::max(0.0f, surface.sectorResponseMin),
+				std::max(surface.sectorResponseMin, surface.sectorResponseMax)) :
+			surface.hasSectorResponseParams ?
 			ComputeSectorEmitterResponseScaleForRenderer(
 				sector.rawResponseBrightness,
 				GetSectorEmitterNeutralBrightnessForRenderer(),
@@ -12065,7 +12090,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		const auto& record = *candidates[i].record;
 		const auto diagnosticIt = emissiveSurfaces.activeDiagnosticFlags.find(record.surfaceStableKey);
 		const uint32_t diagnosticFlags = diagnosticIt != emissiveSurfaces.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
-		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u actor=%d sector=%d sector_scale=%.3f sector_applied=%s tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
+		Printf("NRI PT emissive %u: primitive_key=0x%016llx surface_key=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s source=%s primitive=%u material=%u flags=0x%x rule=%u override_rule=%u actor=%d sector=%d sector_scale=%.3f sector_applied=%s tile=%u mode=%s emissive_tex=%u area=%.2f power=%.3f sample_weight=%.3f pdf=%.6f center=(%.2f, %.2f, %.2f) color=(%.3f, %.3f, %.3f) intensity=%.3f\n",
 			i,
 			(unsigned long long)record.stableKey,
 			(unsigned long long)record.surfaceStableKey,
@@ -12078,6 +12103,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 			record.materialIndex,
 			record.sourceFlags,
 			record.sourceRuleId,
+			record.overrideRuleId,
 			record.actorIndex,
 			record.sectorIndex,
 			record.sectorResponseScale,
@@ -22584,6 +22610,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 			candidate.debug.materialIndex = surface.materialIndex;
 			candidate.debug.sourceFlags = surface.sourceFlags;
 			candidate.debug.sourceRuleId = surface.sourceRuleId;
+			candidate.debug.overrideRuleId = surface.overrideRuleId;
 			candidate.debug.textureId = surface.textureId;
 			candidate.debug.emissiveMode = surface.emissiveMode;
 			candidate.debug.emissiveTextureIndex = surface.emissiveTextureIndex;
@@ -22775,8 +22802,10 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 		if (nri_ptsectoremission && sectorResponseEligible)
 		{
 			const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
+			bool applied = false;
+			const float responseScale = ResolveSectorEmissionScale(sectorRegistry, surface, applied);
 			hash = HashCombine64(hash, (uint64_t)sectorIndex);
-			hash = HashCombine64(hash, (uint64_t)FloatBits(sectorIndex < sectorRegistry.sectors.size() ? sectorRegistry.sectors[sectorIndex].emitterResponseScale : 1.0f));
+			hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
 		}
 	}
 
@@ -22930,13 +22959,14 @@ void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
 				sectorIndex < sectorRegistry.sectors.size() ? &sectorRegistry.sectors[sectorIndex] : nullptr;
 			Printf(
 				PRINT_LOW | PRINT_NOTIFY,
-				"NRI PT sector %u surface light changed avg_shade=%d range=[%d,%d] sector_raw=(%.2f,%.2f) response=%.2f\n",
+				"NRI PT sector %u surface light changed avg_shade=%d range=[%d,%d] sector_raw=(%.2f,%.2f) signal=%.2f response=%.2f\n",
 				sectorIndex,
 				avgShade,
 				aggregate.minShade,
 				aggregate.maxShade,
 				sector != nullptr ? sector->rawFloorLight : 0.0f,
 				sector != nullptr ? sector->rawCeilingLight : 0.0f,
+				sector != nullptr ? sector->rawResponseSignal : 0.0f,
 				sector != nullptr ? sector->emitterResponseScale : 1.0f);
 		}
 		if (changedNearbySurfaceSectors.size() > printCount)

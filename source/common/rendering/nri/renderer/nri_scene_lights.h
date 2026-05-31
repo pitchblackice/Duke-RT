@@ -199,6 +199,9 @@ public:
 			float sectorResponseIntensity = 1.0f;
 			float sectorResponseMin = 0.25f;
 			float sectorResponseMax = 3.0f;
+			bool hasSectorResponseInputRange = false;
+			float sectorResponseInputMin = 0.0f;
+			float sectorResponseInputMax = 1.0f;
 			float powerEstimate = 0.0f;
 			bool sectorResponseEnabled = true;
 		};
@@ -250,6 +253,10 @@ public:
 		float responseMin = 0.25f;
 		bool hasResponseMax = false;
 		float responseMax = 3.0f;
+		bool hasResponseInputMin = false;
+		float responseInputMin = 0.0f;
+		bool hasResponseInputMax = false;
+		float responseInputMax = 1.0f;
 	};
 
 	struct SectorLightingRegistry
@@ -270,6 +277,7 @@ public:
 			float rawHemisphereAmount = 0.0f;
 			float rawFogAmount = 0.0f;
 			float rawResponseBrightness = 0.0f;
+			float rawResponseSignal = 0.0f;
 			float emitterResponseScale = 1.0f;
 			float ambientColor[3] = {};
 			float ambientIntensity = 0.0f;

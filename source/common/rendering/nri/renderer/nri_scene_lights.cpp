@@ -862,6 +862,9 @@ namespace
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseIntensity, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseMin, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseMax, 4096.0f);
+		hash = HashCombine64(hash, emissive.hasSectorResponseInputRange ? 1ull : 0ull);
+		hash = HashQuantizedFloat(hash, emissive.sectorResponseInputMin, 4096.0f);
+		hash = HashQuantizedFloat(hash, emissive.sectorResponseInputMax, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.powerEstimate, 256.0f);
 		hash = HashCombine64(hash, emissive.sectorResponseEnabled ? 1ull : 0ull);
 		return hash;
@@ -930,12 +933,15 @@ namespace
 				emissive.sectorResponseEnabled = true;
 			}
 		}
-		if (rule.hasResponseIntensity || rule.hasResponseMin || rule.hasResponseMax)
+		if (rule.hasResponseIntensity || rule.hasResponseMin || rule.hasResponseMax || rule.hasResponseInputMin || rule.hasResponseInputMax)
 		{
 			emissive.hasSectorResponseParams = true;
 			emissive.sectorResponseIntensity = rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, (float)nri_ptsectoremissionintensity);
 			emissive.sectorResponseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionmin);
 			emissive.sectorResponseMax = rule.hasResponseMax ? rule.responseMax : std::max(emissive.sectorResponseMin, (float)nri_ptsectoremissionmax);
+			emissive.hasSectorResponseInputRange = rule.hasResponseInputMin && rule.hasResponseInputMax;
+			emissive.sectorResponseInputMin = rule.hasResponseInputMin ? rule.responseInputMin : 0.0f;
+			emissive.sectorResponseInputMax = rule.hasResponseInputMax ? rule.responseInputMax : 1.0f;
 		}
 	}
 
@@ -1760,6 +1766,7 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		const float rawClampedFog = std::min(sectorClamp, fogScale * fogStrength * pulseScale);
 		const float rawHemisphereAmount = rawHemisphereBias * rawClampedHemisphere;
 		const float rawResponseBrightness = rawClampedAmbient + std::abs(rawHemisphereAmount);
+		const float rawResponseSignal = clamp(rawLightLevel + std::abs(rawHemisphereBias), 0.0f, 1.0f);
 		const float emitterResponseScale = ComputeSectorEmitterResponseScale(rawResponseBrightness, neutralAmbient, responseIntensity, responseMin, responseMax);
 
 		SectorLightingRegistry::SectorLightRecord entry = {};
@@ -1776,6 +1783,7 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		entry.rawHemisphereAmount = rawHemisphereAmount;
 		entry.rawFogAmount = rawClampedFog;
 		entry.rawResponseBrightness = rawResponseBrightness;
+		entry.rawResponseSignal = rawResponseSignal;
 		entry.emitterResponseScale = emitterResponseScale;
 		entry.ambientColor[0] = tint[0];
 		entry.ambientColor[1] = tint[1];

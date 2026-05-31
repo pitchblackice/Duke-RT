@@ -1684,6 +1684,7 @@ private:
 		uint32_t materialIndex = UINT32_MAX;
 		uint32_t sourceFlags = 0;
 		uint32_t sourceRuleId = 0;
+		uint32_t overrideRuleId = 0;
 		uint32_t textureId = 0;
 		uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
 		uint32_t emissiveTextureIndex = UINT32_MAX;

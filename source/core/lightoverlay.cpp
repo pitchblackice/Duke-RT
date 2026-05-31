@@ -904,6 +904,18 @@ namespace
 					rule.hasResponseMax = true;
 					rule.responseMax = (float)sc.Float;
 				}
+				else if (sc.Compare("responseinputmin"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseInputMin = true;
+					rule.responseInputMin = (float)sc.Float;
+				}
+				else if (sc.Compare("responseinputmax"))
+				{
+					sc.MustGetFloat();
+					rule.hasResponseInputMax = true;
+					rule.responseInputMax = (float)sc.Float;
+				}
 				else if (sc.Compare("sectorresponse"))
 				{
 					sc.MustGetString();
@@ -1210,6 +1222,8 @@ namespace
 		if (rule.hasResponseIntensity) AppendLine(text, 3, FStringf("responseintensity %s", FormatLightOverlayFloat(rule.responseIntensity).GetChars()));
 		if (rule.hasResponseMin) AppendLine(text, 3, FStringf("responsemin %s", FormatLightOverlayFloat(rule.responseMin).GetChars()));
 		if (rule.hasResponseMax) AppendLine(text, 3, FStringf("responsemax %s", FormatLightOverlayFloat(rule.responseMax).GetChars()));
+		if (rule.hasResponseInputMin) AppendLine(text, 3, FStringf("responseinputmin %s", FormatLightOverlayFloat(rule.responseInputMin).GetChars()));
+		if (rule.hasResponseInputMax) AppendLine(text, 3, FStringf("responseinputmax %s", FormatLightOverlayFloat(rule.responseInputMax).GetChars()));
 		AppendLine(text, 2, "}");
 	}
 
@@ -1473,6 +1487,8 @@ namespace
 			if (rule->hasResponseIntensity) Printf("  responseintensity=%.3f\n", rule->responseIntensity);
 			if (rule->hasResponseMin) Printf("  responsemin=%.3f\n", rule->responseMin);
 			if (rule->hasResponseMax) Printf("  responsemax=%.3f\n", rule->responseMax);
+			if (rule->hasResponseInputMin) Printf("  responseinputmin=%.3f\n", rule->responseInputMin);
+			if (rule->hasResponseInputMax) Printf("  responseinputmax=%.3f\n", rule->responseInputMax);
 		}
 
 		for (const ParsedLightOverlayActorOverrideRule* rule : SortRulesByOrder(database.actorOverrideRules))
@@ -1708,6 +1724,10 @@ namespace
 		destination.responseMin = source.responseMin;
 		destination.hasResponseMax = source.hasResponseMax;
 		destination.responseMax = source.responseMax;
+		destination.hasResponseInputMin = source.hasResponseInputMin;
+		destination.responseInputMin = source.responseInputMin;
+		destination.hasResponseInputMax = source.hasResponseInputMax;
+		destination.responseInputMax = source.responseInputMax;
 	}
 
 	static void CopyActorOverrideRule(const ParsedLightOverlayActorOverrideRule& source, ResolvedLightOverlayActorOverrideRule& destination)
