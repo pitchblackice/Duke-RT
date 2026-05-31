@@ -196,10 +196,7 @@ float3 EvaluateAmbientMetal(float3 albedo, float metalness)
 
 float3 EvaluateAmbientSurface(float3 albedo, float3 diffuseAlbedo, float metalness)
 {
-	static const float MetalAmbientThreshold = 0.5;
-	return metalness >= MetalAmbientThreshold
-		? EvaluateAmbientMetal(albedo, metalness)
-		: EvaluateAmbientDiffuse(diffuseAlbedo);
+	return max(EvaluateAmbientDiffuse(diffuseAlbedo), EvaluateAmbientMetal(albedo, metalness));
 }
 
 float3 GetSurfaceDiffuseColor(float3 albedo, float metalness)
