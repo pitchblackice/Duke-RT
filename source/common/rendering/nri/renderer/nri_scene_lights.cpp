@@ -13,13 +13,11 @@
 #include <string>
 #include <unordered_map>
 
-EXTERN_CVAR(Bool, nri_ptemissiveheuristics)
 EXTERN_CVAR(Float, nri_ptemissiveminpower)
 EXTERN_CVAR(Float, nri_ptemissiveminsurface)
 EXTERN_CVAR(Float, nri_ptglowscale)
 EXTERN_CVAR(Float, nri_ptglowreach)
 EXTERN_CVAR(Float, nri_ptglowfalloff)
-EXTERN_CVAR(Bool, nri_ptignorelightlevel)
 EXTERN_CVAR(Bool, nri_ptsectorlighting)
 EXTERN_CVAR(Float, nri_ptsectorambientscale)
 EXTERN_CVAR(Float, nri_ptsectorhemiscale)
@@ -31,10 +29,9 @@ EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
 EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
-EXTERN_CVAR(Bool, nri_ptsectoremission)
-EXTERN_CVAR(Float, nri_ptsectoremissionintensity)
-EXTERN_CVAR(Float, nri_ptsectoremissionmin)
-EXTERN_CVAR(Float, nri_ptsectoremissionmax)
+EXTERN_CVAR(Float, nri_ptsectoremissionsignalstrength)
+EXTERN_CVAR(Float, nri_ptsectoremissionresponsemin)
+EXTERN_CVAR(Float, nri_ptsectoremissionresponsemax)
 EXTERN_CVAR(Int, nri_ptnudgetrace)
 
 namespace
@@ -1046,9 +1043,9 @@ namespace
 		if (rule.hasResponseIntensity || rule.hasResponseMin || rule.hasResponseMax || rule.hasResponseInputMin || rule.hasResponseInputMax)
 		{
 			emissive.hasSectorResponseParams = true;
-			emissive.sectorResponseIntensity = rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, (float)nri_ptsectoremissionintensity);
-			emissive.sectorResponseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionmin);
-			emissive.sectorResponseMax = rule.hasResponseMax ? rule.responseMax : std::max(emissive.sectorResponseMin, (float)nri_ptsectoremissionmax);
+			emissive.sectorResponseIntensity = rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, (float)nri_ptsectoremissionsignalstrength);
+			emissive.sectorResponseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionresponsemin);
+			emissive.sectorResponseMax = rule.hasResponseMax ? rule.responseMax : std::max(emissive.sectorResponseMin, (float)nri_ptsectoremissionresponsemax);
 			emissive.hasSectorResponseInputRange = rule.hasResponseInputMin && rule.hasResponseInputMax;
 			emissive.sectorResponseInputMin = rule.hasResponseInputMin ? rule.responseInputMin : 0.0f;
 			emissive.sectorResponseInputMax = rule.hasResponseInputMax ? rule.responseInputMax : 1.0f;
@@ -1121,28 +1118,25 @@ namespace
 		outSamplingScale = 1.0f;
 		outFalloffScale = 1.0f;
 
-		if (nri_ptemissiveheuristics)
+		if ((metadata.lightingFlags & (nri_scene::MaterialLightingFlag_MaterialFullbright | nri_scene::MaterialLightingFlag_TextureFullbright)) != 0)
 		{
-			if ((metadata.lightingFlags & (nri_scene::MaterialLightingFlag_MaterialFullbright | nri_scene::MaterialLightingFlag_TextureFullbright)) != 0)
-			{
-				outSourceFlags |= SceneEmissiveSurfaceSourceFlag_AutoFullbright;
-			}
-			if ((metadata.lightingFlags & (nri_scene::MaterialLightingFlag_TextureGlowing | nri_scene::MaterialLightingFlag_TextureAutoGlowing)) != 0)
-			{
-				outSourceFlags |= SceneEmissiveSurfaceSourceFlag_AutoTextureGlow;
-			}
-			if ((metadata.lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0)
-			{
-				outSourceFlags |= SceneEmissiveSurfaceSourceFlag_AutoGlowmap;
-			}
+			outSourceFlags |= SceneEmissiveSurfaceSourceFlag_AutoFullbright;
+		}
+		if ((metadata.lightingFlags & (nri_scene::MaterialLightingFlag_TextureGlowing | nri_scene::MaterialLightingFlag_TextureAutoGlowing)) != 0)
+		{
+			outSourceFlags |= SceneEmissiveSurfaceSourceFlag_AutoTextureGlow;
+		}
+		if ((metadata.lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0)
+		{
+			outSourceFlags |= SceneEmissiveSurfaceSourceFlag_AutoGlowmap;
+		}
 
-			if (metadata.emissiveMode != nri_scene::MaterialEmissiveMode_None && metadata.emissiveIntensity > 0.0f)
-			{
-				outMode = metadata.emissiveMode;
-				outTextureIndex = metadata.emissiveTextureIndex;
-				outIntensity = metadata.emissiveIntensity;
-				Copy3f(metadata.emissiveColor, outColor);
-			}
+		if (metadata.emissiveMode != nri_scene::MaterialEmissiveMode_None && metadata.emissiveIntensity > 0.0f)
+		{
+			outMode = metadata.emissiveMode;
+			outTextureIndex = metadata.emissiveTextureIndex;
+			outIntensity = metadata.emissiveIntensity;
+			Copy3f(metadata.emissiveColor, outColor);
 		}
 
 		for (const auto& rule : registry.textureRules)
@@ -1566,7 +1560,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 			Copy3f(rule.color, light.color);
 			float sectorScale = 1.0f;
 			const int32_t signalSector = rule.hasSignalSector ? rule.signalSector : -1;
-			const bool sectorResponseEnabled = nri_ptsectoremission && (rule.hasSectorResponse ? rule.sectorResponse : false);
+			const bool sectorResponseEnabled = rule.hasSectorResponse ? rule.sectorResponse : false;
 			if (sectorResponseEnabled && signalSector >= 0 && (uint32_t)signalSector < mSectorLighting.sectors.size())
 			{
 				const auto& sectorRecord = mSectorLighting.sectors[(uint32_t)signalSector];
@@ -1576,18 +1570,18 @@ void SceneLightSystem::RebuildAnalyticLights(
 						sectorRecord.rawResponseSignal,
 						rule.responseInputMin,
 						rule.responseInputMax,
-						rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionmin),
-						rule.hasResponseMax ? rule.responseMax : std::max(std::max(0.0f, (float)nri_ptsectoremissionmin), (float)nri_ptsectoremissionmax));
+						rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionresponsemin),
+						rule.hasResponseMax ? rule.responseMax : std::max(std::max(0.0f, (float)nri_ptsectoremissionresponsemin), (float)nri_ptsectoremissionresponsemax));
 				}
 				else if (rule.hasResponseIntensity || rule.hasResponseMin || rule.hasResponseMax)
 				{
-					const float responseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionmin);
+					const float responseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionresponsemin);
 					sectorScale = ComputeSectorEmitterResponseScale(
 						sectorRecord.rawResponseBrightness,
 						std::min(std::max(0.0f, (float)nri_ptsectorclamp), std::max(0.0f, (float)nri_ptsectorambientscale) * (0.10f + 0.75f * 0.55f)),
-						rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, (float)nri_ptsectoremissionintensity),
+						rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, (float)nri_ptsectoremissionsignalstrength),
 						responseMin,
-						rule.hasResponseMax ? rule.responseMax : std::max(responseMin, (float)nri_ptsectoremissionmax));
+						rule.hasResponseMax ? rule.responseMax : std::max(responseMin, (float)nri_ptsectoremissionresponsemax));
 				}
 				else
 				{
@@ -1942,9 +1936,9 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		const float hemisphereScale = std::max(0.0f, (float)nri_ptsectorhemiscale);
 		const float fogScale = std::max(0.0f, (float)nri_ptsectorfogscale);
 	const float sectorClamp = std::max(0.0f, (float)nri_ptsectorclamp);
-	const float responseIntensity = std::max(0.0f, (float)nri_ptsectoremissionintensity);
-	const float responseMin = std::max(0.0f, (float)nri_ptsectoremissionmin);
-	const float responseMax = std::max(responseMin, (float)nri_ptsectoremissionmax);
+	const float responseIntensity = std::max(0.0f, (float)nri_ptsectoremissionsignalstrength);
+	const float responseMin = std::max(0.0f, (float)nri_ptsectoremissionresponsemin);
+	const float responseMax = std::max(responseMin, (float)nri_ptsectoremissionresponsemax);
 	const float neutralAmbient = std::min(sectorClamp, ambientScale * (0.10f + 0.75f * 0.55f));
 
 	for (uint32_t sectorIndex = 0; sectorIndex < sectorCount; ++sectorIndex)
@@ -1965,9 +1959,9 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 		const float rawFloorLight = ComputeBuildLightLevel(rawFloorShade, resolvedPalette);
 		const float rawCeilingLight = ComputeBuildLightLevel(rawCeilingShade, resolvedPalette);
 		const float rawHemisphereBias = clamp(rawCeilingLight - rawFloorLight, -1.0f, 1.0f);
-		const int lightingAverageShade = nri_ptignorelightlevel ? 0 : averageShade;
-		const int lightingFloorShade = nri_ptignorelightlevel ? 0 : (int)sec.floorshade;
-		const int lightingCeilingShade = nri_ptignorelightlevel ? 0 : (int)sec.ceilingshade;
+		const int lightingAverageShade = 0;
+		const int lightingFloorShade = 0;
+		const int lightingCeilingShade = 0;
 		float tint[3] = {};
 		float fogStrength = 0.0f;
 		ResolveSectorTint(sec, resolvedPalette, tint, fogStrength);

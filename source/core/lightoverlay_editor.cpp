@@ -24,16 +24,6 @@
 CVAR(Bool, nri_ptactorlighteditmode, false, CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptmaplighteditmode, false, CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivelighteditmode, false, 0)
-CVAR(String, nri_ptsurfacelighttexture, "#00707", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightwidth, 32.0f, 0)
-CVAR(Float, nri_ptsurfacelightheight, 32.0f, 0)
-CVAR(Float, nri_ptsurfacelightoffset, 0.5f, 0)
-CVAR(Float, nri_ptsurfacelightred, 1.0f, 0)
-CVAR(Float, nri_ptsurfacelightgreen, 1.0f, 0)
-CVAR(Float, nri_ptsurfacelightblue, 1.0f, 0)
-CVAR(Float, nri_ptsurfacelightintensity, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsurfacelightradius, 512.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptsurfacelightsectorresponse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -49,8 +39,11 @@ namespace
 	static constexpr const char* MapLightEditorDirectionalRuleId = "EditorDirectional";
 	static constexpr float SurfaceLightEditorDefaultWidth = 32.0f;
 	static constexpr float SurfaceLightEditorDefaultHeight = 32.0f;
+	static constexpr float SurfaceLightEditorDefaultOffset = 0.5f;
 	static constexpr float SurfaceLightEditorDefaultIntensity = 4.0f;
 	static constexpr float SurfaceLightEditorDefaultRadius = 512.0f;
+	static constexpr float SurfaceLightEditorDefaultColor[3] = { 1.0f, 1.0f, 1.0f };
+	static constexpr const char* SurfaceLightEditorDefaultTexture = "#00707";
 	static constexpr float SurfaceLightEditorRotateStep = 15.0f;
 	static constexpr float SurfaceLightEditorSizeStep = 4.0f;
 	static constexpr float SurfaceLightEditorIntensityStep = 0.5f;
@@ -1088,10 +1081,10 @@ namespace
 		rule.normal[1] = target.normal[1];
 		rule.normal[2] = target.normal[2];
 		rule.hasSize = true;
-		rule.size[0] = std::max(1.0f, (float)nri_ptsurfacelightwidth);
-		rule.size[1] = std::max(1.0f, (float)nri_ptsurfacelightheight);
+		rule.size[0] = SurfaceLightEditorDefaultWidth;
+		rule.size[1] = SurfaceLightEditorDefaultHeight;
 		rule.hasOffset = true;
-		rule.offset = std::max(0.0f, (float)nri_ptsurfacelightoffset);
+		rule.offset = SurfaceLightEditorDefaultOffset;
 		rule.hasSector = target.sectorIndex >= 0;
 		rule.sector = target.sectorIndex;
 		rule.hasWall = target.wallIndex >= 0;
@@ -1099,24 +1092,20 @@ namespace
 		rule.hasTile = target.textureId >= 0;
 		rule.tile = target.textureId;
 		rule.hasFixtureTexture = true;
-		rule.fixtureTexture = FString((const char*)nri_ptsurfacelighttexture);
-		if (rule.fixtureTexture.IsEmpty())
-		{
-			rule.fixtureTexture = target.textureName.IsNotEmpty() ? target.textureName : "#00707";
-		}
+		rule.fixtureTexture = SurfaceLightEditorDefaultTexture;
 		rule.hasFixtureMaterialResponse = true;
 		rule.fixtureMaterialResponse = true;
 		rule.lightType = "point";
 		rule.hasColor = true;
-		rule.color[0] = std::max(0.0f, (float)nri_ptsurfacelightred);
-		rule.color[1] = std::max(0.0f, (float)nri_ptsurfacelightgreen);
-		rule.color[2] = std::max(0.0f, (float)nri_ptsurfacelightblue);
+		rule.color[0] = SurfaceLightEditorDefaultColor[0];
+		rule.color[1] = SurfaceLightEditorDefaultColor[1];
+		rule.color[2] = SurfaceLightEditorDefaultColor[2];
 		rule.hasIntensity = true;
-		rule.intensity = std::max(0.0f, (float)nri_ptsurfacelightintensity);
+		rule.intensity = SurfaceLightEditorDefaultIntensity;
 		rule.hasRadius = true;
-		rule.radius = std::max(0.0f, (float)nri_ptsurfacelightradius);
+		rule.radius = SurfaceLightEditorDefaultRadius;
 		rule.hasSectorResponse = true;
-		rule.sectorResponse = !!nri_ptsurfacelightsectorresponse;
+		rule.sectorResponse = true;
 		rule.hasSignalSector = target.sectorIndex >= 0;
 		rule.signalSector = target.sectorIndex;
 		rule.hasResponseIntensity = true;

@@ -84,14 +84,15 @@ EXTERN_CVAR(Bool, nri_ptruntimedeferfarstructural)
 EXTERN_CVAR(Bool, nri_ptruntimedefernearinvisiblestructural)
 EXTERN_CVAR(Int, nri_ptsectorpulseframes)
 EXTERN_CVAR(Float, nri_ptsectorpulseamount)
-EXTERN_CVAR(Bool, nri_ptsectoremission)
-EXTERN_CVAR(Float, nri_ptsectoremissionintensity)
-EXTERN_CVAR(Float, nri_ptsectoremissionmin)
-EXTERN_CVAR(Float, nri_ptsectoremissionmax)
-EXTERN_CVAR(Float, nri_ptsectoremissionintensitymin)
-EXTERN_CVAR(Float, nri_ptsectoremissionintensitymax)
+EXTERN_CVAR(Float, nri_ptsectoremissionsignalstrength)
+EXTERN_CVAR(Float, nri_ptsectoremissionresponsemin)
+EXTERN_CVAR(Float, nri_ptsectoremissionresponsemax)
+EXTERN_CVAR(Float, nri_ptsectoremissionlightmin)
+EXTERN_CVAR(Float, nri_ptsectoremissionlightmax)
 EXTERN_CVAR(Float, nri_ptsectoremissionreachmin)
 EXTERN_CVAR(Float, nri_ptsectoremissionreachmax)
+EXTERN_CVAR(Float, nri_ptsectoremissionmaterialmin)
+EXTERN_CVAR(Float, nri_ptsectoremissionmaterialmax)
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Bool, nri_voxelstats)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
@@ -2359,7 +2360,7 @@ CCMD(nri_ptsectorlight_filter)
 CCMD(nri_ptsectorlight_clear)
 {
 	nri_ptsectorlighting = true;
-	nri_ptsectorlightmultiplier = 0.35f;
+	nri_ptsectorlightmultiplier = 0.0f;
 	nri_ptsectorambientscale = 0.20f;
 	nri_ptsectorhemiscale = 0.12f;
 	nri_ptsectorfogscale = 0.20f;
@@ -2370,14 +2371,15 @@ CCMD(nri_ptsectorlight_clear)
 	nri_ptsectorfilterlotag = -1;
 	nri_ptsectorpulseframes = 0;
 	nri_ptsectorpulseamount = 0.0f;
-	nri_ptsectoremission = true;
-	nri_ptsectoremissionintensity = 16.0f;
-	nri_ptsectoremissionmin = 0.05f;
-	nri_ptsectoremissionmax = 24.0f;
-	nri_ptsectoremissionintensitymin = 0.0f;
-	nri_ptsectoremissionintensitymax = 4.0f;
+	nri_ptsectoremissionsignalstrength = 4.0f;
+	nri_ptsectoremissionresponsemin = 0.0f;
+	nri_ptsectoremissionresponsemax = 2.0f;
+	nri_ptsectoremissionlightmin = 0.0f;
+	nri_ptsectoremissionlightmax = 1.0f;
 	nri_ptsectoremissionreachmin = 0.0f;
-	nri_ptsectoremissionreachmax = 24.0f;
+	nri_ptsectoremissionreachmax = 1.6f;
+	nri_ptsectoremissionmaterialmin = 0.0f;
+	nri_ptsectoremissionmaterialmax = 1.0f;
 	Printf("NRI PT sector-light heuristics cleared.\n");
 }
 

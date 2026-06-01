@@ -1178,11 +1178,27 @@ OptionMenu "NRIOptions" protected
 	Slider "Glow Reach",						"nri_ptglowreach",				0.0, 16.0, 0.25, 2
 	Slider "Glow Falloff",						"nri_ptglowfalloff",			0.25, 4.0, 0.05, 2
 	Slider "Glow Blend",						"nri_ptglowblend",				0.0, 3.0, 0.05, 2
-	Slider "Sector Light Intensity",			"nri_ptsectorlightmultiplier",	0.0, 3.0, 0.05, 2
 	Slider "Base Ambient",						"nri_ptbaseambient",			0.0, 1.0, 0.01, 2
 	Slider "Metal Ambient",						"nri_ptmetalambient",			0.0, 1.0, 0.01, 2
 	Slider "Emissive Samples",					"nri_ptemissivesamples",		1, 4, 1, 0
 	Option "Emissive Fast Shadow",				"nri_ptemissivefastshadow",		"OnOff"
+	StaticText "----------------"
+	StaticText "Sector Emission"
+	Slider "Signal Strength",					"nri_ptsectoremissionsignalstrength",	0.0, 64.0, 0.25, 2
+	Slider "Response Min",						"nri_ptsectoremissionresponsemin",		0.0, 8.0, 0.05, 2
+	Slider "Response Max",						"nri_ptsectoremissionresponsemax",		0.0, 64.0, 0.25, 2
+	Slider "Emitted Light Min",					"nri_ptsectoremissionlightmin",			0.0, 8.0, 0.05, 2
+	Slider "Emitted Light Max",					"nri_ptsectoremissionlightmax",			0.0, 16.0, 0.05, 2
+	Slider "Reach Min",						"nri_ptsectoremissionreachmin",			0.0, 8.0, 0.05, 2
+	Slider "Reach Max",						"nri_ptsectoremissionreachmax",			0.0, 64.0, 0.25, 2
+	Slider "Fixture Material Min",				"nri_ptsectoremissionmaterialmin",		0.0, 2.0, 0.05, 2
+	Slider "Fixture Material Max",				"nri_ptsectoremissionmaterialmax",		0.0, 2.0, 0.05, 2
+	StaticText "----------------"
+	StaticText "Light Overlay Editor Settings"
+	Slider "Sector Notify Range",				"nri_ptemissivelighteditnotifyrange",	0.0, 8192.0, 64.0, 0
+	StaticText "----------------"
+	StaticText "Advanced"
+	Slider "Legacy Sector Ambient Intensity",	"nri_ptsectorlightmultiplier",			0.0, 3.0, 0.05, 2
 	StaticText "----------------"
 	StaticText "Debug / Inspection"
 	Option "PT Debug View",						"nri_ptdebugmenu",				"NRIPTDebug"

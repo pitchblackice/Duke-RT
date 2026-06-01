@@ -45,7 +45,7 @@
 #include "gamecontrol.h"
 #include "version.h"
 
-#define LASTRUNVERSION "5"
+#define LASTRUNVERSION "6"
 
 #if !defined _MSC_VER && !defined __APPLE__
 #include "i_system.h"  // for SHARE_DIR
@@ -307,6 +307,16 @@ void FGameConfigFile::DoGlobalSetup ()
 		const char *lastver = GetValueForKey ("Version");
 		if (lastver != NULL)
 		{
+			auto setFloatCVar = [](const char* name, float value)
+			{
+				auto var = FindCVar(name, nullptr);
+				if (var != nullptr)
+				{
+					UCVarValue v;
+					v.Float = value;
+					var->SetGenericRep(v, CVAR_Float);
+				}
+			};
 			double last = atof (lastver);
 			if (last < 2)
 			{
@@ -352,6 +362,23 @@ void FGameConfigFile::DoGlobalSetup ()
 					v.Float = 0.35f;
 					var->SetGenericRep(v, CVAR_Float);
 				}
+			}
+			if (last < 6)
+			{
+				setFloatCVar("nri_ptbaseambient", 0.07f);
+				setFloatCVar("nri_ptmetalambient", 0.03f);
+				setFloatCVar("nri_ptsectorlightmultiplier", 0.0f);
+				setFloatCVar("nri_ptemissiveminpower", 0.0f);
+				setFloatCVar("nri_ptemissiveminsurface", 0.0f);
+				setFloatCVar("nri_ptsectoremissionsignalstrength", 4.0f);
+				setFloatCVar("nri_ptsectoremissionresponsemin", 0.0f);
+				setFloatCVar("nri_ptsectoremissionresponsemax", 2.0f);
+				setFloatCVar("nri_ptsectoremissionlightmin", 0.0f);
+				setFloatCVar("nri_ptsectoremissionlightmax", 1.0f);
+				setFloatCVar("nri_ptsectoremissionreachmin", 0.0f);
+				setFloatCVar("nri_ptsectoremissionreachmax", 1.6f);
+				setFloatCVar("nri_ptsectoremissionmaterialmin", 0.0f);
+				setFloatCVar("nri_ptsectoremissionmaterialmax", 1.0f);
 			}
 		}
 	}

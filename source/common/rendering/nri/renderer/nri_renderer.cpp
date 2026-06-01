@@ -3240,8 +3240,8 @@ CVAR(Bool, nri_ptbootstrap, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptbootstrapmode, 13, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptbaseambient, 0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptmetalambient, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptbaseambient, 0.07f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptmetalambient, 0.03f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -3291,8 +3291,6 @@ CUSTOM_CVAR(Float, nri_ptceilingnudgedistance, 0.01f, CVAR_ARCHIVE | CVAR_GLOBAL
 CVAR(Int, nri_ptmutationtracechunk, 66, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmutationtracesector, 198, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptruntimelinktrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptemissiveheuristics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptemissiveautoonly, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminpower, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptemissiveminsurface, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, nri_ptglowscale, 3.025f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -3355,15 +3353,11 @@ CUSTOM_CVAR(Float, nri_ptfullbrightboost, 1.50781f, CVAR_ARCHIVE | CVAR_GLOBALCO
 	}
 	NotifyActiveMaterialLightingCalibrationChange();
 }
-CUSTOM_CVAR(Bool, nri_ptignorelightlevel, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	NotifyActiveMaterialLightingCalibrationChange();
-}
 CVAR(Bool, nri_ptemissivetlas, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptemissivefastshadow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptemissivesamples, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptsectorlighting, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CUSTOM_CVAR(Float, nri_ptsectorlightmultiplier, 0.35f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectorlightmultiplier, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -3380,36 +3374,35 @@ CVAR(Int, nri_ptsectorfiltermaxshade, 127, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfilterlotag, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorpulseframes, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_ptsectorpulseamount, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptsectoremission, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CUSTOM_CVAR(Float, nri_ptsectoremissionintensity, 16.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectoremissionsignalstrength, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
 		self = 0.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptsectoremissionmin, 0.05f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectoremissionresponsemin, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
 		self = 0.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptsectoremissionmax, 24.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectoremissionresponsemax, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
 		self = 0.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptsectoremissionintensitymin, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectoremissionlightmin, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
 		self = 0.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptsectoremissionintensitymax, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectoremissionlightmax, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -3423,7 +3416,7 @@ CUSTOM_CVAR(Float, nri_ptsectoremissionreachmin, 0.0f, CVAR_ARCHIVE | CVAR_GLOBA
 		self = 0.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptsectoremissionreachmax, 24.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptsectoremissionreachmax, 1.6f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -3590,7 +3583,6 @@ namespace
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
-	constexpr uint32_t NRI_EMISSIVE_SAMPLING_FLAG_AUTO_ONLY = 0x1u;
 	constexpr uint32_t NRI_SECTOR_LIGHTING_FLAG_ENABLED = 0x1u;
 
 	struct RendererSkyPerfTraceStats
@@ -7062,8 +7054,7 @@ namespace
 		bool& outApplied)
 	{
 		outApplied = false;
-		if (!nri_ptsectoremission ||
-			!IsEmissiveSurfaceSectorResponseEligible(surface))
+		if (!IsEmissiveSurfaceSectorResponseEligible(surface))
 		{
 			return 1.0f;
 		}
@@ -7100,10 +7091,10 @@ namespace
 	{
 		const float minScale = surface.hasSectorResponseIntensityMin ?
 			std::max(0.0f, surface.sectorResponseIntensityMin) :
-			std::max(0.0f, (float)nri_ptsectoremissionintensitymin);
+			std::max(0.0f, (float)nri_ptsectoremissionlightmin);
 		const float maxScale = surface.hasSectorResponseIntensityMax ?
 			std::max(minScale, surface.sectorResponseIntensityMax) :
-			std::max(minScale, (float)nri_ptsectoremissionintensitymax);
+			std::max(minScale, (float)nri_ptsectoremissionlightmax);
 		return clamp(std::max(0.0f, scale), minScale, maxScale);
 	}
 
@@ -7126,8 +7117,7 @@ namespace
 		bool& outApplied)
 	{
 		outApplied = false;
-		if (!nri_ptsectoremission ||
-			!IsEmissiveSurfaceMaterialResponseEligible(surface))
+		if (!IsEmissiveSurfaceMaterialResponseEligible(surface))
 		{
 			return 1.0f;
 		}
@@ -12343,7 +12333,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		return a.distanceSq < b.distanceSq;
 	});
 
-	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u overrides=%u override_matches=%u material_response_rules=%u material_response_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u min_surface=%.3f min_power=%.3f sampling_auto_only=%s sector_emission=%s\n",
+	Printf("NRI PT emissive primitives: active=%u source_surfaces=%u auto=%u explicit=%u overrides=%u override_matches=%u material_response_rules=%u material_response_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u min_surface=%.3f min_power=%.3f\n",
 		(uint32_t)mBoundEmissivePrimitiveRecords.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
@@ -12359,9 +12349,7 @@ void NRIRenderer::PrintEmissiveSurfaceDump(float radius, uint32_t limit) const
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().removedTopologyKeys.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().reboundTopologyKeys.size(),
 		(float)nri_ptemissiveminsurface,
-		(float)nri_ptemissiveminpower,
-		nri_ptemissiveautoonly ? "on" : "off",
-		nri_ptsectoremission ? "on" : "off");
+		(float)nri_ptemissiveminpower);
 
 	const auto& emissiveSurfaces = mSceneLights.GetEmissiveSurfaces();
 	const uint32_t printCount = std::min<uint32_t>((uint32_t)candidates.size(), limit);
@@ -12520,11 +12508,11 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 		(float)nri_ptsectorhemiscale,
 		(float)nri_ptsectorfogscale,
 		(float)nri_ptsectorclamp,
-		(float)nri_ptsectoremissionintensity,
-		(float)nri_ptsectoremissionmin,
-		(float)nri_ptsectoremissionmax,
-		(float)nri_ptsectoremissionintensitymin,
-		(float)nri_ptsectoremissionintensitymax,
+		(float)nri_ptsectoremissionsignalstrength,
+		(float)nri_ptsectoremissionresponsemin,
+		(float)nri_ptsectoremissionresponsemax,
+		(float)nri_ptsectoremissionlightmin,
+		(float)nri_ptsectoremissionlightmax,
 		(float)nri_ptsectoremissionreachmin,
 		(float)nri_ptsectoremissionreachmax,
 		(int)nri_ptsectorfilterpal,
@@ -12882,10 +12870,9 @@ void NRIRenderer::PrintStatus() const
 		(int)nri_ptsurfaceprobe,
 		nri_ptceilingnudge ? "on" : "off",
 		(float)nri_ptceilingnudgedistance);
-	Printf("NRI PT lighting shell: directional=%s sector=%s emissive_heuristics=%s\n",
+	Printf("NRI PT lighting shell: directional=%s sector=%s\n",
 		mDirectionalLightState.enabled ? "on" : "off",
-		nri_ptsectorlighting ? "on" : "off",
-		nri_ptemissiveheuristics ? "on" : "off");
+		nri_ptsectorlighting ? "on" : "off");
 	Printf("NRI PT directional light: source=%s shadow=%s rule=%u dir=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) angular=%.3f\n",
 		GetDirectionalLightSourceName(mDirectionalLightState),
 		mDirectionalLightState.enabled && mDirectionalLightState.shadow ? "on" : "off",
@@ -12976,7 +12963,7 @@ void NRIRenderer::PrintStatus() const
 		mBoundRuntimeLightTileIndexCount,
 		mBoundRuntimeLightMaxTileOccupancy,
 		NRI_PTDEBUG_ANALYTIC_DIRECT);
-	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u overrides=%u override_matches=%u material_response_rules=%u material_response_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f heuristics=%s sampling_auto_only=%s sector_emission=%s intensity=[%.3f,%.3f] reach=[%.3f,%.3f] glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f\n",
+	Printf("NRI PT emissive surfaces: active=%u rules=%u auto=%u explicit=%u overrides=%u override_matches=%u material_response_rules=%u material_response_matches=%u total_power=%.3f topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u debug_mode=%u/%u thresholds=area>=%.3f power>=%.3f light=[%.3f,%.3f] reach=[%.3f,%.3f] glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f\n",
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().activeSurfaces.size(),
 		(uint32_t)mSceneLights.GetEmissiveSurfaces().textureRules.size(),
 		mSceneLights.GetEmissiveSurfaces().autoTaggedCount,
@@ -12995,11 +12982,8 @@ void NRIRenderer::PrintStatus() const
 		NRI_PTDEBUG_EMISSIVE_DIRECT,
 		(float)nri_ptemissiveminsurface,
 		(float)nri_ptemissiveminpower,
-		nri_ptemissiveheuristics ? "on" : "off",
-		nri_ptemissiveautoonly ? "on" : "off",
-		nri_ptsectoremission ? "on" : "off",
-		(float)nri_ptsectoremissionintensitymin,
-		(float)nri_ptsectoremissionintensitymax,
+		(float)nri_ptsectoremissionlightmin,
+		(float)nri_ptsectoremissionlightmax,
 		(float)nri_ptsectoremissionreachmin,
 		(float)nri_ptsectoremissionreachmax,
 		(float)nri_ptglowscale,
@@ -13058,11 +13042,11 @@ void NRIRenderer::PrintStatus() const
 		(float)nri_ptsectorhemiscale,
 		(float)nri_ptsectorfogscale,
 		(float)nri_ptsectorclamp,
-		(float)nri_ptsectoremissionintensity,
-		(float)nri_ptsectoremissionmin,
-		(float)nri_ptsectoremissionmax,
-		(float)nri_ptsectoremissionintensitymin,
-		(float)nri_ptsectoremissionintensitymax,
+		(float)nri_ptsectoremissionsignalstrength,
+		(float)nri_ptsectoremissionresponsemin,
+		(float)nri_ptsectoremissionresponsemax,
+		(float)nri_ptsectoremissionlightmin,
+		(float)nri_ptsectoremissionlightmax,
 		(float)nri_ptsectoremissionreachmin,
 		(float)nri_ptsectoremissionreachmax,
 		(int)nri_ptsectorfilterpal,
@@ -20966,9 +20950,9 @@ bool NRIRenderer::BuildEmissiveLightEditTarget(PathTracingEmissiveLightEditTarge
 	int32_t legacyTile = -1;
 	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.textureId, outTarget.textureName, legacyTile);
 	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.baseTextureId, outTarget.materialTextureName, legacyTile);
-	outTarget.sectorResponseIntensity = std::max(0.0f, (float)nri_ptsectoremissionintensity);
-	outTarget.sectorResponseMin = std::max(0.0f, (float)nri_ptsectoremissionmin);
-	outTarget.sectorResponseMax = std::max(outTarget.sectorResponseMin, (float)nri_ptsectoremissionmax);
+	outTarget.sectorResponseIntensity = std::max(0.0f, (float)nri_ptsectoremissionsignalstrength);
+	outTarget.sectorResponseMin = std::max(0.0f, (float)nri_ptsectoremissionresponsemin);
+	outTarget.sectorResponseMax = std::max(outTarget.sectorResponseMin, (float)nri_ptsectoremissionresponsemax);
 	if (!outTarget.emissive)
 	{
 		outTarget.failureReason = emissiveDiagnostics.sceneLightSurfaceMatch ?
@@ -21022,9 +21006,9 @@ bool NRIRenderer::BuildSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget
 	int32_t legacyTile = -1;
 	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.textureId, outTarget.textureName, legacyTile);
 	ResolveSurfaceProbeTextureDebugInfo(mLastSurfaceProbe.baseTextureId, outTarget.materialTextureName, legacyTile);
-	outTarget.sectorResponseIntensity = std::max(0.0f, (float)nri_ptsectoremissionintensity);
-	outTarget.sectorResponseMin = std::max(0.0f, (float)nri_ptsectoremissionmin);
-	outTarget.sectorResponseMax = std::max(outTarget.sectorResponseMin, (float)nri_ptsectoremissionmax);
+	outTarget.sectorResponseIntensity = std::max(0.0f, (float)nri_ptsectoremissionsignalstrength);
+	outTarget.sectorResponseMin = std::max(0.0f, (float)nri_ptsectoremissionresponsemin);
+	outTarget.sectorResponseMax = std::max(outTarget.sectorResponseMin, (float)nri_ptsectoremissionresponsemax);
 	return true;
 }
 
@@ -22915,7 +22899,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 {
 	outHeader = {};
 	outHeader.dominantIndex = UINT32_MAX;
-	outHeader.flags = nri_ptemissiveautoonly ? NRI_EMISSIVE_SAMPLING_FLAG_AUTO_ONLY : 0u;
+	outHeader.flags = 0u;
 	outPrimitives.clear();
 	outCdf.clear();
 	outMaterialResponses.clear();
@@ -23004,7 +22988,7 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 		const float sectorReachScale = sectorResponseApplied ? ClampSectorEmissionReachScale(surface, sectorRawResponseScale) : 1.0f;
 		bool materialResponseApplied = false;
 		const float materialResponseScale = ResolveEmissiveMaterialResponseScale(sectorRegistry, surface, materialResponseApplied);
-		const bool materialResponseEligible = nri_ptsectoremission && IsEmissiveSurfaceMaterialResponseEligible(surface);
+		const bool materialResponseEligible = IsEmissiveSurfaceMaterialResponseEligible(surface);
 
 		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
 		{
@@ -23075,11 +23059,6 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 
 	for (const auto& surface : activeSurfaces)
 	{
-		if (nri_ptemissiveautoonly && !HasAutoEmissiveSourceFlags(surface.sourceFlags))
-		{
-			continue;
-		}
-
 		switch (surface.source)
 		{
 		case SceneLightRecordSource::StaticMapScene:
@@ -23213,8 +23192,6 @@ void NRIRenderer::BuildSectorLightingUpload(
 uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const
 {
 	uint64_t hash = 1469598103934665603ull;
-	hash = HashCombine64(hash, nri_ptemissiveautoonly ? 1ull : 0ull);
-	hash = HashCombine64(hash, nri_ptsectoremission ? 1ull : 0ull);
 	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.staticGeometry));
 	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.capturedGeometry));
 	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.runtimeMutationGeometry));
@@ -23236,7 +23213,7 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 		hash = HashCombine64(hash, bindingIt != emissiveRegistry.activeBindingHashes.end() ? bindingIt->second : 0ull);
 
 		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
-		if (nri_ptsectoremission && sectorResponseEligible)
+		if (sectorResponseEligible)
 		{
 			const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
 			bool applied = false;
@@ -23248,7 +23225,7 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 			hash = HashCombine64(hash, (uint64_t)FloatBits(intensityScale));
 			hash = HashCombine64(hash, (uint64_t)FloatBits(reachScale));
 		}
-		if (nri_ptsectoremission && IsEmissiveSurfaceMaterialResponseEligible(surface))
+		if (IsEmissiveSurfaceMaterialResponseEligible(surface))
 		{
 			bool applied = false;
 			const float materialScale = ResolveEmissiveMaterialResponseScale(sectorRegistry, surface, applied);
@@ -23264,12 +23241,6 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 uint64_t NRIRenderer::BuildEmissiveSectorResponsePayloadHash() const
 {
 	uint64_t hash = 1469598103934665603ull;
-	hash = HashCombine64(hash, nri_ptsectoremission ? 1ull : 0ull);
-	if (!nri_ptsectoremission)
-	{
-		return hash;
-	}
-
 	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
 	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
@@ -23523,7 +23494,7 @@ void NRIRenderer::TraceEmissiveSectorResponseChange()
 		}
 	}
 
-	Printf("NRI PT sector response change: frame=%u affected_emitters=%u total_emitters=%u sector_response_hash=0x%016llx->0x%016llx response=boost:%u dim:%u neutral:%u sector_emission=%s\n",
+	Printf("NRI PT sector response change: frame=%u affected_emitters=%u total_emitters=%u sector_response_hash=0x%016llx->0x%016llx response=boost:%u dim:%u neutral:%u\n",
 		mFrameIndex,
 		affectedEmitterCount,
 		(uint32_t)emissiveRegistry.activeSurfaces.size(),
@@ -23531,8 +23502,7 @@ void NRIRenderer::TraceEmissiveSectorResponseChange()
 		(unsigned long long)sectorResponsePayloadHash,
 		sectorRegistry.responseBoostSectorCount,
 		sectorRegistry.responseDimSectorCount,
-		sectorRegistry.responseNeutralSectorCount,
-		nri_ptsectoremission ? "on" : "off");
+		sectorRegistry.responseNeutralSectorCount);
 
 	mEmissiveSectorResponseTraceHash = sectorResponsePayloadHash;
 }
@@ -23724,7 +23694,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	if (sectorResponseChanged && ShouldTracePtPerf())
 	{
 		const auto& sectorRegistry = mSceneLights.GetSectorLighting();
-		Printf("NRI PT emissive sampling refresh: frame=%u reason=sector-response-change primitives=%u total_power=%.3f dominant_primitive=%u dominant_tile=%u sector_response_hash=0x%016llx->0x%016llx response=boost:%u dim:%u neutral:%u sector_emission=%s\n",
+		Printf("NRI PT emissive sampling refresh: frame=%u reason=sector-response-change primitives=%u total_power=%.3f dominant_primitive=%u dominant_tile=%u sector_response_hash=0x%016llx->0x%016llx response=boost:%u dim:%u neutral:%u\n",
 			mFrameIndex,
 			mBoundEmissivePrimitiveCount,
 			mBoundEmissiveTotalPower,
@@ -23734,8 +23704,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 			(unsigned long long)sectorResponsePayloadHash,
 			sectorRegistry.responseBoostSectorCount,
 			sectorRegistry.responseDimSectorCount,
-			sectorRegistry.responseNeutralSectorCount,
-			nri_ptsectoremission ? "on" : "off");
+			sectorRegistry.responseNeutralSectorCount);
 	}
 	mEmissiveSamplingPayloadCacheValid = true;
 	mEmissiveSamplingPayloadHash = payloadHash;
