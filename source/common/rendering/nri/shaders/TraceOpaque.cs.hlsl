@@ -165,7 +165,7 @@ uint GetEmissiveDirectSampleCount()
 float3 EvaluateSunDiffuseLighting(float3 normal, float3 lightDir, float shadow)
 {
 	const float lambert = max(dot(normal, lightDir), 0.0);
-	const float lighting = 0.20 + shadow * lambert * 0.80;
+	const float lighting = shadow * lambert * 0.80;
 	return lighting.xxx;
 }
 
