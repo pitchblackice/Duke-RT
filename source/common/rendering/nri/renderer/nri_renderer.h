@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../nri_output.h"
+#include "nri_exposure.h"
 #include "nri_nrd.h"
 #include "nri_resources.h"
 #include "nri_scene_lights.h"
@@ -2895,6 +2896,8 @@ private:
 	void ResetTraceShaderStatsBuffer();
 	void CopyTraceShaderStatsForReadback(uint64_t frameNumber);
 	void ReadbackTraceShaderStats();
+	bool EnsureAutoExposureResources(const NRIAutoExposureSettings& settings);
+	void DestroyAutoExposureResources();
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
 	void TrackLiveSceneTextureResource(NRITextureResource& resource);
@@ -2944,6 +2947,7 @@ private:
 
 	NRITextureResource mPaletteTexture;
 	std::array<NRITextureResource, (size_t)FrameTextureSlot::Count> mFrameTextures = {};
+	NRIExposureController mExposure;
 
 	NRIBufferResource mVertexBuffer;
 	NRIBufferResource mIndexBuffer;

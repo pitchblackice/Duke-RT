@@ -922,6 +922,7 @@ set (NRI_SOURCES
 	common/rendering/nri/system/nri_hwbuffer.cpp
 	common/rendering/nri/system/nri_hwtexture.cpp
 	common/rendering/nri/framegen/nri_framegen.cpp
+	common/rendering/nri/renderer/nri_exposure.cpp
 	common/rendering/nri/renderer/nri_nrd.cpp
 	common/rendering/nri/renderer/nri_renderstate.cpp
 	common/rendering/nri/renderer/nri_resources.cpp

@@ -12604,6 +12604,8 @@ void NRIRenderer::PrintStatus() const
 	const auto& frameGenDesc = mFrameBuffer->mFrameGeneration.GetFrameDesc();
 	const auto& frameGenAudit = mFrameBuffer->mFrameGeneration.GetInputAudit();
 	const auto& frameGenProvider = mFrameBuffer->mFrameGeneration.GetProviderState();
+	const NRIAutoExposureSettings autoExposureSettings = GetNRIAutoExposureSettings(outputPolicy.exposure);
+	const NRIAutoExposureStatus& autoExposureStatus = mExposure.GetStatus();
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -12637,6 +12639,27 @@ void NRIRenderer::PrintStatus() const
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,
 		outputPolicy.displayMaxLuminance);
+	Printf("NRI PT auto exposure: enabled=%s freeze=%s stats=%s resources=%s state_textures=%s histogram_bins=%u sample_step=%u target=%.3f range=%.3f..%.3f bias=%.3f percentiles=%.2f..%.2f adapt=%.3f/%.3f fallback_manual=%.3f resource_render=%ux%u memory=%llu alloc_serial=%u\n",
+		YesNo(autoExposureSettings.enabled),
+		YesNo(autoExposureSettings.freeze),
+		YesNo(autoExposureSettings.stats),
+		YesNo(autoExposureStatus.resourcesAllocated),
+		autoExposureStatus.resourcesAllocated ? "allocated" : "not_allocated",
+		autoExposureSettings.histogramBinCount,
+		autoExposureSettings.sampleStep,
+		autoExposureSettings.targetLuminance,
+		autoExposureSettings.minExposure,
+		autoExposureSettings.maxExposure,
+		autoExposureSettings.exposureBias,
+		autoExposureSettings.lowPercentile,
+		autoExposureSettings.highPercentile,
+		autoExposureSettings.adaptUpSpeed,
+		autoExposureSettings.adaptDownSpeed,
+		autoExposureSettings.fallbackManualExposure,
+		autoExposureStatus.renderWidth,
+		autoExposureStatus.renderHeight,
+		(unsigned long long)autoExposureStatus.memoryBytes,
+		autoExposureStatus.allocationSerial);
 	Printf("NRI PT nightvision: mode=%s view_eligible=%s active=%s presenter=%s strength=%.3f remaining_s=%.3f\n",
 		GetNightVisionModeName(mNightVisionState.mode),
 		YesNo(mNightVisionState.viewEligible),
@@ -24863,6 +24886,41 @@ void NRIRenderer::ReadbackTraceShaderStats()
 	mPendingTraceShaderStatsFrame = 0;
 }
 
+bool NRIRenderer::EnsureAutoExposureResources(const NRIAutoExposureSettings& settings)
+{
+	mExposure.SetSettings(settings);
+	if (!mExposure.ShouldAllocateResources())
+	{
+		return true;
+	}
+
+	if (mExposure.HasExposureStateTextures() && mExposure.MatchesRenderSize(mRenderWidth, mRenderHeight))
+	{
+		return true;
+	}
+
+	DestroyAutoExposureResources();
+	NRITextureResource& exposureState0 = mExposure.GetMutableExposureStateTexture(0);
+	NRITextureResource& exposureState1 = mExposure.GetMutableExposureStateTexture(1);
+	const nri::TextureUsageBits usage = NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE);
+	if (!mFrameBuffer->CreateOwnedTexture(exposureState0, 1, 1, nri::Format::RGBA32_SFLOAT, usage) ||
+		!mFrameBuffer->CreateOwnedTexture(exposureState1, 1, 1, nri::Format::RGBA32_SFLOAT, usage))
+	{
+		DestroyAutoExposureResources();
+		return false;
+	}
+
+	mExposure.MarkResourcesAllocated(mRenderWidth, mRenderHeight, exposureState0.memorySize + exposureState1.memorySize);
+	return true;
+}
+
+void NRIRenderer::DestroyAutoExposureResources()
+{
+	mFrameBuffer->DestroyTextureResource(mExposure.GetMutableExposureStateTexture(0));
+	mFrameBuffer->DestroyTextureResource(mExposure.GetMutableExposureStateTexture(1));
+	mExposure.MarkResourcesDestroyed();
+}
+
 bool NRIRenderer::CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format)
 {
 	return mFrameBuffer->CreateOwnedTexture(GetFrameTexture(slot), width, height, format, NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE));
@@ -36106,6 +36164,11 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	mUseDenoisedCompositionInputs = false;
 	const bool directionalLightShadowEnabled = mDirectionalLightState.enabled && mDirectionalLightState.shadow;
 	mUseSplitShadowDenoiser = directionalLightShadowEnabled && (useShadowDebugPresent || useSplitShadowDebugProbe || (useCompositionPath && nri_denoise));
+	const NRIAutoExposureSettings autoExposureSettings = GetNRIAutoExposureSettings(mFrameBuffer->GetPathTracingOutputPolicy().exposure);
+	if (!EnsureAutoExposureResources(autoExposureSettings))
+	{
+		return false;
+	}
 
 	if (!DispatchTraceOpaque(di, geometry, materials))
 	{
@@ -37753,6 +37816,7 @@ void NRIRenderer::DestroyCachedTextures()
 
 void NRIRenderer::DestroyFrameTextures()
 {
+	DestroyAutoExposureResources();
 	for (auto& texture : mFrameTextures)
 	{
 		mFrameBuffer->DestroyTextureResource(texture);
