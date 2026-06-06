@@ -4877,6 +4877,13 @@ namespace
 		return std::clamp(seconds, 1.0f / 240.0f, 0.25f);
 	}
 
+	static float AutoExposureDebugWordAsFloat(uint32_t value)
+	{
+		float result = 0.0f;
+		std::memcpy(&result, &value, sizeof(result));
+		return result;
+	}
+
 	static float GetFullbrightBoostScale()
 	{
 		return std::clamp((float)nri_ptfullbrightboost, 0.50f, 8.00f);
@@ -25400,6 +25407,40 @@ bool NRIRenderer::DispatchAutoExposure(FrameTextureSlot sourceSlot)
 
 	const uint32_t sampledWidth = (mRenderWidth + constants.SampleStep - 1u) / constants.SampleStep;
 	const uint32_t sampledHeight = (mRenderHeight + constants.SampleStep - 1u) / constants.SampleStep;
+	if (ShouldEmitTemporalTraceLogs())
+	{
+		const NRIAutoExposureStatus& status = mExposure.GetStatus();
+		Printf("NRI PT auto exposure trace: stage=dispatch frame=%u source=%s meter_mode=%s reset=%s freeze=%s stats=%s bins=%u sample_step=%u sampled=%ux%u dispatch=%ux%u percentiles=%.2f..%.2f hist_log_range=%.1f..%.1f target_lum=%.3f range=%.3f..%.3f bias=%.3f dt=%.4f last_valid=%s last_frame=%llu last_metered_log_lum=%.3f last_target=%.3f last_adapted=%.3f last_adapted_ev=%.3f reset_serial=%llu reset_reason=%s\n",
+			mFrameIndex,
+			GetFrameTextureSlotName(sourceSlot),
+			GetNRIAutoExposureMeteringModeName(settings.meteringMode),
+			resetExposure ? "yes" : "no",
+			settings.freeze ? "yes" : "no",
+			settings.stats ? "yes" : "no",
+			constants.HistogramBinCount,
+			constants.SampleStep,
+			sampledWidth,
+			sampledHeight,
+			(sampledWidth + 15u) / 16u,
+			(sampledHeight + 15u) / 16u,
+			settings.lowPercentile,
+			settings.highPercentile,
+			constants.LogLuminanceMin,
+			constants.LogLuminanceMax,
+			settings.targetLuminance,
+			settings.minExposure,
+			settings.maxExposure,
+			settings.exposureBias,
+			constants.DeltaTimeSeconds,
+			status.debugValid ? "yes" : "no",
+			(unsigned long long)status.debugFrameIndex,
+			status.meteredLogLuminance,
+			status.targetExposure,
+			status.adaptedExposure,
+			std::log2(std::max(status.adaptedExposure, 1.0e-6f)),
+			(unsigned long long)status.resetSerial,
+			status.resetReason[0] != '\0' ? status.resetReason : "none");
+	}
 	mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::ExposureHistogramBuild));
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { (sampledWidth + 15u) / 16u, (sampledHeight + 15u) / 16u, 1 });
 
@@ -25489,10 +25530,50 @@ void NRIRenderer::ReadbackAutoExposureStats()
 	if (words[0] == NRI_AUTO_EXPOSURE_DEBUG_MAGIC)
 	{
 		mExposure.MarkDebugReadback(mPendingAutoExposureStatsFrame, words, NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT);
+		if (ShouldEmitTemporalTraceLogs())
+		{
+			const NRIAutoExposureSettings& settings = mExposure.GetSettings();
+			const NRIAutoExposureStatus& status = mExposure.GetStatus();
+			Printf("NRI PT auto exposure trace: stage=readback frame=%llu current_frame=%u valid=%s source=%s meter_mode=%s weighted_samples=%u bins=%u..%u log_lum=%.3f..%.3f metered_log_lum=%.3f metered_lum=%.6f target=%.3f adapted=%.3f previous=%.3f fallback=%.3f target_ev=%.3f adapted_ev=%.3f flags=0x%x bin_count=%u percentiles=%.2f..%.2f reset_pending=%s reset_serial=%llu reset_reason=%s\n",
+				(unsigned long long)status.debugFrameIndex,
+				mFrameIndex,
+				status.debugValid ? "yes" : "no",
+				GetFrameTextureSlotName(mAutoExposureInputSourceSlot),
+				GetNRIAutoExposureMeteringModeName(settings.meteringMode),
+				status.sampleCount,
+				status.lowBin,
+				status.highBin,
+				status.lowLogLuminance,
+				status.highLogLuminance,
+				status.meteredLogLuminance,
+				std::exp2(status.meteredLogLuminance),
+				status.targetExposure,
+				status.adaptedExposure,
+				AutoExposureDebugWordAsFloat(words[12]),
+				AutoExposureDebugWordAsFloat(words[13]),
+				std::log2(std::max(status.targetExposure, 1.0e-6f)),
+				std::log2(std::max(status.adaptedExposure, 1.0e-6f)),
+				words[14],
+				words[15],
+				settings.lowPercentile,
+				settings.highPercentile,
+				status.resetPending ? "yes" : "no",
+				(unsigned long long)status.resetSerial,
+				status.resetReason[0] != '\0' ? status.resetReason : "none");
+		}
 	}
 	else
 	{
 		mExposure.ClearDebugReadback();
+		if (ShouldEmitTemporalTraceLogs())
+		{
+			Printf("NRI PT auto exposure trace: stage=readback frame=%llu current_frame=%u valid=no reason=bad-magic magic=0x%x source=%s meter_mode=%s\n",
+				(unsigned long long)mPendingAutoExposureStatsFrame,
+				mFrameIndex,
+				words[0],
+				GetFrameTextureSlotName(mAutoExposureInputSourceSlot),
+				GetNRIAutoExposureMeteringModeName(mExposure.GetSettings().meteringMode));
+		}
 	}
 	mPendingAutoExposureStatsFrame = 0;
 }
