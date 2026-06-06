@@ -9,6 +9,9 @@
 
 #define NRI_EXPOSURE_FLAG_FREEZE 0x1u
 #define NRI_EXPOSURE_FLAG_RESET 0x2u
+#define NRI_EXPOSURE_METERING_FULL 0u
+#define NRI_EXPOSURE_METERING_CENTER_WEIGHTED 1u
+#define NRI_EXPOSURE_METERING_BRIGHT_TAIL_SUPPRESSED 2u
 #define NRI_EXPOSURE_DEBUG_MAGIC 0x45585033u
 #define NRI_EXPOSURE_MAX_HISTOGRAM_BINS 256u
 #define NRI_EXPOSURE_DEBUG_WORD_COUNT 16u
@@ -22,7 +25,7 @@ struct NRIExposureConstants
 	uint HistogramBinCount;
 	uint SampleStep;
 	float DeltaTimeSeconds;
-	uint Reserved1;
+	uint MeteringMode;
 	float LogLuminanceMin;
 	float LogLuminanceMax;
 	float InvLogLuminanceRange;

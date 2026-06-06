@@ -21,6 +21,17 @@ namespace
 CVAR(Bool, nri_ptautoexposure, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptautoexposurefreeze, false, 0)
 CVAR(Bool, nri_ptautoexposurestats, false, 0)
+CUSTOM_CVAR(Int, nri_ptautoexposuremetering, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 2)
+	{
+		self = 2;
+	}
+}
 CUSTOM_CVAR(Int, nri_ptautoexposurebins, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 16)
@@ -132,12 +143,24 @@ CUSTOM_CVAR(Float, nri_ptautoexposureadaptdown, 1.0f, CVAR_ARCHIVE | CVAR_GLOBAL
 	}
 }
 
+const char* GetNRIAutoExposureMeteringModeName(NRIAutoExposureMeteringMode mode)
+{
+	switch (mode)
+	{
+	case NRIAutoExposureMeteringMode::FullFrame: return "full";
+	case NRIAutoExposureMeteringMode::CenterWeighted: return "center";
+	case NRIAutoExposureMeteringMode::BrightTailSuppressed: return "bright-tail";
+	default: return "unknown";
+	}
+}
+
 NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure)
 {
 	NRIAutoExposureSettings settings = {};
 	settings.enabled = !!nri_ptautoexposure;
 	settings.freeze = !!nri_ptautoexposurefreeze;
 	settings.stats = !!nri_ptautoexposurestats;
+	settings.meteringMode = (NRIAutoExposureMeteringMode)std::clamp((int)nri_ptautoexposuremetering, 0, 2);
 	settings.histogramBinCount = (uint32_t)std::clamp((int)nri_ptautoexposurebins, 16, 256);
 	settings.sampleStep = (uint32_t)std::clamp((int)nri_ptautoexposuresamplestep, 1, 8);
 	settings.targetLuminance = std::clamp((float)nri_ptautoexposuretarget, 0.02f, 1.0f);
@@ -153,6 +176,14 @@ NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure)
 	if (settings.highPercentile <= settings.lowPercentile)
 	{
 		settings.highPercentile = std::min(settings.lowPercentile + 1.0f, 100.0f);
+	}
+	if (settings.meteringMode == NRIAutoExposureMeteringMode::BrightTailSuppressed)
+	{
+		settings.highPercentile = std::min(settings.highPercentile, 95.0f);
+		if (settings.highPercentile <= settings.lowPercentile)
+		{
+			settings.lowPercentile = std::max(settings.highPercentile - 1.0f, 0.0f);
+		}
 	}
 	settings.adaptUpSpeed = std::clamp((float)nri_ptautoexposureadaptup, 0.0f, 16.0f);
 	settings.adaptDownSpeed = std::clamp((float)nri_ptautoexposureadaptdown, 0.0f, 16.0f);

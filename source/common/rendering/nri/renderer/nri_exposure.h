@@ -10,11 +10,19 @@ class NRIRenderDevice;
 static constexpr uint32_t NRI_AUTO_EXPOSURE_MAX_HISTOGRAM_BINS = 256;
 static constexpr uint32_t NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT = 16;
 
+enum class NRIAutoExposureMeteringMode : uint32_t
+{
+	FullFrame = 0,
+	CenterWeighted = 1,
+	BrightTailSuppressed = 2,
+};
+
 struct NRIAutoExposureSettings
 {
 	bool enabled = false;
 	bool freeze = false;
 	bool stats = false;
+	NRIAutoExposureMeteringMode meteringMode = NRIAutoExposureMeteringMode::FullFrame;
 	uint32_t histogramBinCount = 256;
 	uint32_t sampleStep = 2;
 	float targetLuminance = 0.18f;
@@ -56,6 +64,7 @@ struct NRIAutoExposureStatus
 };
 
 NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure);
+const char* GetNRIAutoExposureMeteringModeName(NRIAutoExposureMeteringMode mode);
 
 class NRIExposureController
 {

@@ -3458,6 +3458,8 @@ namespace
 	constexpr uint32_t NRI_AUTO_EXPOSURE_DEBUG_MAGIC = 0x45585033u;
 	constexpr uint32_t NRI_EXPOSURE_FLAG_FREEZE = 0x1u;
 	constexpr uint32_t NRI_EXPOSURE_FLAG_RESET = 0x2u;
+	constexpr float NRI_EXPOSURE_LOG_LUMINANCE_MIN = -12.0f;
+	constexpr float NRI_EXPOSURE_LOG_LUMINANCE_MAX = 12.0f;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
 	constexpr uint32_t NRI_MAX_EMISSIVE_PRIMITIVES = 16384;
@@ -4845,6 +4847,7 @@ namespace
 		}
 		if (previous.histogramBinCount != current.histogramBinCount ||
 			previous.sampleStep != current.sampleStep ||
+			previous.meteringMode != current.meteringMode ||
 			previous.lowPercentile != current.lowPercentile ||
 			previous.highPercentile != current.highPercentile)
 		{
@@ -6880,7 +6883,7 @@ namespace
 		uint32_t HistogramBinCount = 0;
 		uint32_t SampleStep = 1;
 		float DeltaTimeSeconds = 1.0f / 60.0f;
-		uint32_t Reserved1 = 0;
+		uint32_t MeteringMode = 0;
 		float LogLuminanceMin = -12.0f;
 		float LogLuminanceMax = 12.0f;
 		float InvLogLuminanceRange = 1.0f / 24.0f;
@@ -12764,13 +12767,14 @@ void NRIRenderer::PrintStatus()
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,
 		outputPolicy.displayMaxLuminance);
-	Printf("NRI PT auto exposure: enabled=%s freeze=%s stats=%s resources=%s state_textures=%s meter_source=%s histogram_bins=%u sample_step=%u target=%.3f range=%.3f..%.3f bias=%.3f percentiles=%.2f..%.2f adapt=%.3f/%.3f fallback_manual=%.3f resource_render=%ux%u memory=%llu alloc_serial=%u reset_pending=%s reset_serial=%llu reset_request_frame=%llu reset_consumed_frame=%llu reset_reason=%s\n",
+	Printf("NRI PT auto exposure: enabled=%s freeze=%s stats=%s resources=%s state_textures=%s meter_source=%s meter_mode=%s histogram_bins=%u sample_step=%u target=%.3f range=%.3f..%.3f bias=%.3f percentiles=%.2f..%.2f hist_log_range=%.1f..%.1f adapt=%.3f/%.3f fallback_manual=%.3f resource_render=%ux%u memory=%llu alloc_serial=%u reset_pending=%s reset_serial=%llu reset_request_frame=%llu reset_consumed_frame=%llu reset_reason=%s\n",
 		YesNo(autoExposureSettings.enabled),
 		YesNo(autoExposureSettings.freeze),
 		YesNo(autoExposureSettings.stats),
 		YesNo(autoExposureStatus.resourcesAllocated),
 		autoExposureStatus.resourcesAllocated ? "allocated" : "not_allocated",
 		GetFrameTextureSlotName(mAutoExposureInputSourceSlot),
+		GetNRIAutoExposureMeteringModeName(autoExposureSettings.meteringMode),
 		autoExposureSettings.histogramBinCount,
 		autoExposureSettings.sampleStep,
 		autoExposureSettings.targetLuminance,
@@ -12779,6 +12783,8 @@ void NRIRenderer::PrintStatus()
 		autoExposureSettings.exposureBias,
 		autoExposureSettings.lowPercentile,
 		autoExposureSettings.highPercentile,
+		NRI_EXPOSURE_LOG_LUMINANCE_MIN,
+		NRI_EXPOSURE_LOG_LUMINANCE_MAX,
 		autoExposureSettings.adaptUpSpeed,
 		autoExposureSettings.adaptDownSpeed,
 		autoExposureSettings.fallbackManualExposure,
@@ -12791,7 +12797,7 @@ void NRIRenderer::PrintStatus()
 		(unsigned long long)autoExposureStatus.resetRequestFrame,
 		(unsigned long long)autoExposureStatus.resetConsumedFrame,
 		autoExposureStatus.resetReason[0] != '\0' ? autoExposureStatus.resetReason : "none");
-	Printf("NRI PT auto exposure stats: valid=%s readback=%s frame=%llu samples=%u bins=%u..%u log_lum=%.3f..%.3f metered_log_lum=%.3f target_exposure=%.3f adapted_exposure=%.3f\n",
+	Printf("NRI PT auto exposure stats: valid=%s readback=%s frame=%llu samples=%u bins=%u..%u log_lum=%.3f..%.3f metered_log_lum=%.3f target_exposure=%.3f adapted_exposure=%.3f target_ev=%.3f adapted_ev=%.3f\n",
 		YesNo(autoExposureStatus.debugValid),
 		YesNo(autoExposureStatus.debugReadbackAllocated),
 		(unsigned long long)autoExposureStatus.debugFrameIndex,
@@ -12802,7 +12808,9 @@ void NRIRenderer::PrintStatus()
 		autoExposureStatus.highLogLuminance,
 		autoExposureStatus.meteredLogLuminance,
 		autoExposureStatus.targetExposure,
-		autoExposureStatus.adaptedExposure);
+		autoExposureStatus.adaptedExposure,
+		std::log2(std::max(autoExposureStatus.targetExposure, 1.0e-6f)),
+		std::log2(std::max(autoExposureStatus.adaptedExposure, 1.0e-6f)));
 	Printf("NRI PT auto exposure present: slot=%s domain=%s enabled=%s scene_hdr=%s texture_valid=%s apply=%s manual_fallback=%.3f\n",
 		GetFrameTextureSlotName(autoExposurePresentSlot),
 		GetExposureDomainName(autoExposurePresentRoute.inputDomain),
@@ -25335,13 +25343,14 @@ bool NRIRenderer::DispatchAutoExposure(FrameTextureSlot sourceSlot)
 		(resetExposure ? NRI_EXPOSURE_FLAG_RESET : 0u);
 	constants.HistogramBinCount = std::clamp(settings.histogramBinCount, 1u, NRI_AUTO_EXPOSURE_MAX_HISTOGRAM_BINS);
 	constants.SampleStep = std::max(settings.sampleStep, 1u);
+	constants.MeteringMode = (uint32_t)settings.meteringMode;
 	const float exposureDeltaTimeSeconds =
 		mHasPendingFrameGenerationRealFrameTime ?
 		mPendingFrameGenerationRealFrameTimeMs * 0.001f :
 		1.0f / 60.0f;
 	constants.DeltaTimeSeconds = ClampAutoExposureDeltaTimeSeconds(exposureDeltaTimeSeconds);
-	constants.LogLuminanceMin = -12.0f;
-	constants.LogLuminanceMax = 12.0f;
+	constants.LogLuminanceMin = NRI_EXPOSURE_LOG_LUMINANCE_MIN;
+	constants.LogLuminanceMax = NRI_EXPOSURE_LOG_LUMINANCE_MAX;
 	constants.InvLogLuminanceRange = 1.0f / (constants.LogLuminanceMax - constants.LogLuminanceMin);
 	constants.TargetLuminance = settings.targetLuminance;
 	constants.MinExposure = settings.minExposure;
