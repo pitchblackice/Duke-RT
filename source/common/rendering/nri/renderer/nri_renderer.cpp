@@ -24891,6 +24891,7 @@ bool NRIRenderer::EnsureAutoExposureResources(const NRIAutoExposureSettings& set
 	mExposure.SetSettings(settings);
 	if (!mExposure.ShouldAllocateResources())
 	{
+		DestroyAutoExposureResources();
 		return true;
 	}
 
