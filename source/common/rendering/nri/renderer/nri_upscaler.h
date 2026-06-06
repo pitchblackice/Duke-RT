@@ -24,6 +24,7 @@ struct NRIUpscalerDispatchDesc
 	NRITextureResource* output = nullptr;
 	NRITextureResource* motion = nullptr;
 	NRITextureResource* depth = nullptr;
+	NRITextureResource* exposure = nullptr;
 	NRITextureResource* normalRoughness = nullptr;
 	NRITextureResource* diffuseAlbedo = nullptr;
 	NRITextureResource* specularAlbedo = nullptr;
@@ -40,7 +41,7 @@ struct NRIUpscalerDispatchDesc
 class NRIUpscalerContext
 {
 public:
-	bool EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight);
+	bool EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight, bool useExposure);
 	bool DispatchMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc);
 	bool EnsurePostSharpen(NRIRenderDevice& frameBuffer, NRIPostSharpenKind kind, uint32_t upscaleWidth, uint32_t upscaleHeight);
 	bool DispatchPostSharpen(NRIRenderDevice& frameBuffer, NRIPostSharpenKind kind, const NRIUpscalerDispatchDesc& desc);
@@ -53,6 +54,7 @@ private:
 		nri::UpscalerMode mode = nri::UpscalerMode::QUALITY;
 		uint32_t upscaleWidth = 0;
 		uint32_t upscaleHeight = 0;
+		nri::UpscalerBits flags = nri::UpscalerBits::NONE;
 	};
 
 	bool EnsureUpscaler(

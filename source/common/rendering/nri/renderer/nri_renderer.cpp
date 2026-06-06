@@ -12719,6 +12719,17 @@ void NRIRenderer::PrintStatus()
 		autoExposureSettings.enabled &&
 		autoExposureSceneHdrInput &&
 		autoExposureTextureValid;
+	const bool vendorExposurePath =
+		autoExposureResolvedMain == NRIMainUpscalerKind::DLSR ||
+		autoExposureResolvedMain == NRIMainUpscalerKind::DLRR;
+	const bool vendorExposureEngine =
+		vendorExposurePath &&
+		autoExposureSettings.enabled &&
+		autoExposureTextureValid;
+	const char* vendorExposureMode =
+		!vendorExposurePath ? "none" :
+		vendorExposureEngine ? "engine" :
+		"vendor-auto";
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -12798,6 +12809,11 @@ void NRIRenderer::PrintStatus()
 		YesNo(autoExposureTextureValid),
 		YesNo(autoExposurePresentEligible),
 		autoExposurePresentRoute.presentExposure);
+	Printf("NRI PT auto exposure vendor: main=%s mode=%s texture_valid=%s engine_enabled=%s recreate_on_policy_change=yes\n",
+		GetMainUpscalerName(autoExposureResolvedMain),
+		vendorExposureMode,
+		YesNo(autoExposureTextureValid),
+		YesNo(autoExposureSettings.enabled));
 	Printf("NRI PT nightvision: mode=%s view_eligible=%s active=%s presenter=%s strength=%.3f remaining_s=%.3f\n",
 		GetNightVisionModeName(mNightVisionState.mode),
 		YesNo(mNightVisionState.viewEligible),
@@ -37677,6 +37693,15 @@ bool NRIRenderer::DispatchUpscaleChain()
 		NRITextureResource& rrGuideSpecularHitDistance = GetFrameTexture(FrameTextureSlot::RrGuideSpecularHitDistance);
 		NRITextureResource& rrGuideNormalRoughness = GetFrameTexture(FrameTextureSlot::RrGuideNormalRoughness);
 		NRITextureResource& vendorOutput = GetFrameTexture(FrameTextureSlot::VendorOutput);
+		NRITextureResource* vendorExposure = nullptr;
+		if (mExposure.GetSettings().enabled)
+		{
+			NRITextureResource& candidateExposureState = mExposure.GetMutableExposureStateTexture(mFrameIndex & 1u);
+			if (candidateExposureState.texture != nullptr && candidateExposureState.shaderView != nullptr)
+			{
+				vendorExposure = &candidateExposureState;
+			}
+		}
 
 		if (!DispatchUpscalerPrepass(mainKind))
 		{
@@ -37690,10 +37715,14 @@ bool NRIRenderer::DispatchUpscaleChain()
 		mFrameBuffer->TransitionTexture(rrGuideSpecularAlbedo, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(rrGuideSpecularHitDistance, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(rrGuideNormalRoughness, NRIComputeShaderResourceState());
+		if (vendorExposure != nullptr)
+		{
+			mFrameBuffer->TransitionTexture(*vendorExposure, NRIComputeShaderResourceState());
+		}
 		mFrameBuffer->TransitionTexture(vendorOutput, NRIComputeStorageState());
 
 		const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(mainKind, GetSelectedUpscalerMode());
-		if (!mUpscaler.EnsureMainUpscaler(*mFrameBuffer, mainKind, resolvedUpscalerMode, mOutputWidth, mOutputHeight))
+		if (!mUpscaler.EnsureMainUpscaler(*mFrameBuffer, mainKind, resolvedUpscalerMode, mOutputWidth, mOutputHeight, vendorExposure != nullptr))
 		{
 			return false;
 		}
@@ -37704,6 +37733,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		upscalerDesc.output = &vendorOutput;
 		upscalerDesc.motion = &GetFrameTexture(FrameTextureSlot::Motion);
 		upscalerDesc.depth = &upscalerDepth;
+		upscalerDesc.exposure = vendorExposure;
 		upscalerDesc.normalRoughness = &rrGuideNormalRoughness;
 		upscalerDesc.diffuseAlbedo = &rrGuideDiffuseAlbedo;
 		upscalerDesc.specularAlbedo = &rrGuideSpecularAlbedo;

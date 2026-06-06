@@ -25,6 +25,17 @@ namespace
 		default: return nullptr;
 		}
 	}
+
+	const char* GetUpscalerTypeName(nri::UpscalerType type)
+	{
+		switch (type)
+		{
+		case nri::UpscalerType::NIS: return "NIS";
+		case nri::UpscalerType::DLSR: return "DLSS-SR";
+		case nri::UpscalerType::DLRR: return "DLRR";
+		default: return "unknown";
+		}
+	}
 }
 
 bool NRIUpscalerContext::EnsureUpscaler(
@@ -39,9 +50,18 @@ bool NRIUpscalerContext::EnsureUpscaler(
 	if (slot.instance != nullptr &&
 		slot.mode == mode &&
 		slot.upscaleWidth == upscaleWidth &&
-		slot.upscaleHeight == upscaleHeight)
+		slot.upscaleHeight == upscaleHeight &&
+		slot.flags == flags)
 	{
 		return true;
+	}
+
+	if (slot.instance != nullptr && slot.flags != flags)
+	{
+		Printf("NRI PT upscaler recreate: type=%s reason=flags-change old_flags=0x%x new_flags=0x%x\n",
+			GetUpscalerTypeName(type),
+			(uint32_t)slot.flags,
+			(uint32_t)flags);
 	}
 
 	DestroyUpscaler(frameBuffer, slot.instance);
@@ -66,10 +86,11 @@ bool NRIUpscalerContext::EnsureUpscaler(
 	slot.mode = mode;
 	slot.upscaleWidth = upscaleWidth;
 	slot.upscaleHeight = upscaleHeight;
+	slot.flags = flags;
 	return true;
 }
 
-bool NRIUpscalerContext::EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight)
+bool NRIUpscalerContext::EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t upscaleWidth, uint32_t upscaleHeight, bool useExposure)
 {
 	if (kind == NRIMainUpscalerKind::Off)
 	{
@@ -82,10 +103,14 @@ bool NRIUpscalerContext::EnsureMainUpscaler(NRIRenderDevice& frameBuffer, NRIMai
 	UpscalerSlotState& slot =
 		kind == NRIMainUpscalerKind::DLSR ? mDlsr :
 		mDlrr;
-	const nri::UpscalerBits flags =
+	nri::UpscalerBits flags =
 		kind == NRIMainUpscalerKind::DLSR
 		? nri::UpscalerBits::HDR
 		: (nri::UpscalerBits)((uint32_t)nri::UpscalerBits::HDR | (uint32_t)nri::UpscalerBits::DEPTH_LINEAR);
+	if (useExposure)
+	{
+		flags = (nri::UpscalerBits)((uint32_t)flags | (uint32_t)nri::UpscalerBits::USE_EXPOSURE);
+	}
 	return EnsureUpscaler(frameBuffer, slot, type, mode, upscaleWidth, upscaleHeight, flags);
 }
 
@@ -133,6 +158,10 @@ bool NRIUpscalerContext::DispatchMainUpscaler(NRIRenderDevice& frameBuffer, NRIM
 
 		dispatchDesc.guides.upscaler.mv = { desc.motion->texture, desc.motion->shaderView };
 		dispatchDesc.guides.upscaler.depth = { desc.depth->texture, desc.depth->shaderView };
+		if (desc.exposure != nullptr)
+		{
+			dispatchDesc.guides.upscaler.exposure = { desc.exposure->texture, desc.exposure->shaderView };
+		}
 	}
 	else if (kind == NRIMainUpscalerKind::DLRR)
 	{
@@ -148,6 +177,10 @@ bool NRIUpscalerContext::DispatchMainUpscaler(NRIRenderDevice& frameBuffer, NRIM
 		dispatchDesc.guides.denoiser.diffuseAlbedo = { desc.diffuseAlbedo->texture, desc.diffuseAlbedo->shaderView };
 		dispatchDesc.guides.denoiser.specularAlbedo = { desc.specularAlbedo->texture, desc.specularAlbedo->shaderView };
 		dispatchDesc.guides.denoiser.specularMvOrHitT = { desc.specularHitDistance->texture, desc.specularHitDistance->shaderView };
+		if (desc.exposure != nullptr)
+		{
+			dispatchDesc.guides.denoiser.exposure = { desc.exposure->texture, desc.exposure->shaderView };
+		}
 		std::memcpy(dispatchDesc.settings.dlrr.viewToClipMatrix, desc.viewToClipMatrix, sizeof(dispatchDesc.settings.dlrr.viewToClipMatrix));
 		std::memcpy(dispatchDesc.settings.dlrr.worldToViewMatrix, desc.worldToViewMatrix, sizeof(dispatchDesc.settings.dlrr.worldToViewMatrix));
 	}
