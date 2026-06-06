@@ -18,11 +18,11 @@ namespace
 	}
 }
 
-CVAR(Bool, nri_ptautoexposure, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_ptautoexposure, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pthdrautoexposure, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptautoexposurefreeze, false, 0)
 CVAR(Bool, nri_ptautoexposurestats, false, 0)
-CUSTOM_CVAR(Int, nri_ptautoexposuremetering, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_ptautoexposuremetering, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
 	{
@@ -55,7 +55,7 @@ CUSTOM_CVAR(Int, nri_ptautoexposuresamplestep, 2, CVAR_ARCHIVE | CVAR_GLOBALCONF
 		self = 8;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptautoexposuretarget, 0.18f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptautoexposuretarget, 0.03225f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.02f)
 	{
@@ -66,7 +66,7 @@ CUSTOM_CVAR(Float, nri_ptautoexposuretarget, 0.18f, CVAR_ARCHIVE | CVAR_GLOBALCO
 		self = 1.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pthdrautoexposuretarget, 0.18f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pthdrautoexposuretarget, 0.157813f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.02f)
 	{
@@ -77,7 +77,7 @@ CUSTOM_CVAR(Float, nri_pthdrautoexposuretarget, 0.18f, CVAR_ARCHIVE | CVAR_GLOBA
 		self = 1.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptautoexposuremin, 0.125f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptautoexposuremin, 2.74561f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.03125f)
 	{
@@ -88,7 +88,7 @@ CUSTOM_CVAR(Float, nri_ptautoexposuremin, 0.125f, CVAR_ARCHIVE | CVAR_GLOBALCONF
 		self = 8.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pthdrautoexposuremin, 0.125f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pthdrautoexposuremin, 0.03125f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.03125f)
 	{
@@ -99,7 +99,7 @@ CUSTOM_CVAR(Float, nri_pthdrautoexposuremin, 0.125f, CVAR_ARCHIVE | CVAR_GLOBALC
 		self = 8.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptautoexposuremax, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptautoexposuremax, 4.00977f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.125f)
 	{
@@ -110,7 +110,7 @@ CUSTOM_CVAR(Float, nri_ptautoexposuremax, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 		self = 32.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pthdrautoexposuremax, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pthdrautoexposuremax, 10.2852f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.125f)
 	{
@@ -121,7 +121,7 @@ CUSTOM_CVAR(Float, nri_pthdrautoexposuremax, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCON
 		self = 32.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptautoexposurebias, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptautoexposurebias, 0.469531f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.125f)
 	{
@@ -143,7 +143,7 @@ CUSTOM_CVAR(Float, nri_pthdrautoexposurebias, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCO
 		self = 8.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptautoexposurelowpercentile, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptautoexposurelowpercentile, 1.01563f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
 	{
@@ -154,7 +154,7 @@ CUSTOM_CVAR(Float, nri_ptautoexposurelowpercentile, 1.0f, CVAR_ARCHIVE | CVAR_GL
 		self = 99.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptautoexposurehighpercentile, 99.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptautoexposurehighpercentile, 98.9844f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 1.0f)
 	{

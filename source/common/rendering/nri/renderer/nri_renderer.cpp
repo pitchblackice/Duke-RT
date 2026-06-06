@@ -238,7 +238,7 @@ CUSTOM_CVAR(Int, nri_pttonemap, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 2;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptexposure, 1.28164f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptexposure, 1.06016f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.125f)
 	{
@@ -249,7 +249,7 @@ CUSTOM_CVAR(Float, nri_ptexposure, 1.28164f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 8.0f;
 	}
 }
-CUSTOM_CVAR(Float, nri_ptcontrast, 1.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_ptcontrast, 1.14688f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
@@ -282,7 +282,7 @@ CUSTOM_CVAR(Float, nri_ptshoulder, 1.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 		self = 1.50f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pttoe, 1.43438f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pttoe, 1.1f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
@@ -3240,8 +3240,8 @@ CVAR(Bool, nri_ptbootstrap, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptbootstrapmode, 13, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectscene, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptdirectionallight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptbaseambient, 0.07f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptmetalambient, 0.03f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptbaseambient, 0.021875f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptmetalambient, 0.03125f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptlightbounces, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptmirrorbounces, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -3372,8 +3372,8 @@ CVAR(Int, nri_ptsectorfilterpal, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfilterminshade, -128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfiltermaxshade, 127, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, nri_ptsectorfilterlotag, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptsectorpulseframes, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, nri_ptsectorpulseamount, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptsectorpulseframes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, nri_ptsectorpulseamount, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, nri_ptsectoremissionsignalstrength, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
