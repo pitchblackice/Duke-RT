@@ -1085,7 +1085,8 @@ OptionMenu "VideoOptions" protected
 	Slider "Highlight Shoulder",				"nri_ptshoulder",				0.50, 1.50, 0.05, 2
 	Slider "Shadow Toe",						"nri_pttoe",					0.50, 1.50, 0.05, 2
 	Option "Auto Exposure",						"nri_ptautoexposure",			"OnOff"
-	Slider "Auto Exposure Target",				"nri_ptautoexposuretarget",		0.02, 1.00, 0.01, 2
+	Option "Auto Exposure Target",				"nri_ptautoexposuretarget",		"NRIAutoExposureTarget"
+	Slider "Auto Exposure Target Fine",			"nri_ptautoexposuretarget",		0.02, 1.00, 0.01, 2
 	Slider "Auto Exposure Bias",				"nri_ptautoexposurebias",		0.125, 8.0, 0.125, 3
 	Slider "Auto Exposure Min",					"nri_ptautoexposuremin",		0.03125, 8.0, 0.03125, 5
 	Slider "Auto Exposure Max",					"nri_ptautoexposuremax",		0.125, 32.0, 0.125, 3
@@ -1100,11 +1101,18 @@ OptionMenu "VideoOptions" protected
 	Slider "Shadow Toe",						"nri_pthdrtoe",					0.50, 1.50, 0.05, 2
 	Slider "Paper White",						"nri_ptpaperwhite",				80.0, 400.0, 5.0, 1
 	Option "Auto Exposure",						"nri_pthdrautoexposure",		"OnOff"
-	Slider "Auto Exposure Target",				"nri_pthdrautoexposuretarget",	0.02, 1.00, 0.01, 2
+	Option "Auto Exposure Target",				"nri_pthdrautoexposuretarget",	"NRIAutoExposureTarget"
+	Slider "Auto Exposure Target Fine",			"nri_pthdrautoexposuretarget",	0.02, 1.00, 0.01, 2
 	Slider "Auto Exposure Bias",				"nri_pthdrautoexposurebias",	0.125, 8.0, 0.125, 3
 	Slider "Auto Exposure Min",					"nri_pthdrautoexposuremin",		0.03125, 8.0, 0.03125, 5
 	Slider "Auto Exposure Max",					"nri_pthdrautoexposuremax",		0.125, 32.0, 0.125, 3
 	StaticText "Applies only while a real HDR swapchain is active."
+	StaticText "----------------"
+	StaticText "Auto Exposure Metering"
+	Option "Metering",							"nri_ptautoexposuremetering",	"NRIAutoExposureMetering"
+	Slider "Low Percentile",					"nri_ptautoexposurelowpercentile",	0.0, 25.0, 0.5, 1
+	Slider "High Percentile",					"nri_ptautoexposurehighpercentile",	75.0, 100.0, 0.5, 1
+	StaticText "Metering and percentiles are shared by SDR and HDR."
 	Slider "Fullbright Boost",					"nri_ptfullbrightboost",		0.50, 8.00, 0.25, 2
 	StaticText "Output calibration affects final present; light energy remains upstream."
 	StaticText "Output-mode changes reset PT history."
@@ -1639,6 +1647,23 @@ OptionValue NRIPTTonemap
 	0, "Hable / Uncharted"
 	1, "ACES Fitted"
 	2, "Reinhard"
+}
+
+OptionValue NRIAutoExposureTarget
+{
+	0.06, "Low Key"
+	0.08, "Darker"
+	0.10, "Dim"
+	0.18, "Middle Gray"
+	0.25, "Bright"
+	0.35, "High Key"
+}
+
+OptionValue NRIAutoExposureMetering
+{
+	0, "Full Frame"
+	1, "Center Weighted"
+	2, "Suppress Bright Tail"
 }
 
 OptionValue NRDHitDistanceReconstruction
