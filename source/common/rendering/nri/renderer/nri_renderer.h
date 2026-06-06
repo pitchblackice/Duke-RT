@@ -1448,6 +1448,21 @@ private:
 		Count
 	};
 
+	enum class ExposureDomain : uint32_t
+	{
+		SceneHDR,
+		PreExposedHDR,
+		VendorHDR,
+		DisplayMappedOutput
+	};
+
+	struct ExposureRoute
+	{
+		ExposureDomain inputDomain = ExposureDomain::SceneHDR;
+		float temporalExposure = 1.0f;
+		float presentExposure = 1.0f;
+	};
+
 	enum class PipelineSlot : uint32_t
 	{
 		TraceOpaque,
@@ -2786,6 +2801,9 @@ private:
 	void NoteLightHistoryChange(const char* reason);
 	void ArmTemporalTraceBudget(const char* reason);
 	void TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
+	ExposureDomain ResolveFrameTextureExposureDomain(FrameTextureSlot slot, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const;
+	ExposureRoute ResolveExposureRoute(FrameTextureSlot inputSlot, const NRIPTOutputPolicy& outputPolicy, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const;
+	const char* GetExposureDomainName(ExposureDomain domain) const;
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);
 	void ClearRuntimeMapMutationReplacementPayload(RuntimeMapMutationCache::ChunkReplacement& replacement, bool clearMaterialStateCache);
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);

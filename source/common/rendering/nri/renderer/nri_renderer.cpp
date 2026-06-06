@@ -13340,6 +13340,61 @@ void NRIRenderer::PrintSwapChainRenderConfig() const
 		(float)nri_sharpness);
 }
 
+const char* NRIRenderer::GetExposureDomainName(ExposureDomain domain) const
+{
+	switch (domain)
+	{
+	case ExposureDomain::SceneHDR: return "scene_hdr";
+	case ExposureDomain::PreExposedHDR: return "pre_exposed_hdr";
+	case ExposureDomain::VendorHDR: return "vendor_hdr";
+	case ExposureDomain::DisplayMappedOutput: return "display_mapped_output";
+	default: return "unknown";
+	}
+}
+
+NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(FrameTextureSlot slot, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const
+{
+	switch (slot)
+	{
+	case FrameTextureSlot::Composed:
+	case FrameTextureSlot::TraceTransparentOutput:
+	case FrameTextureSlot::SrInput:
+	case FrameTextureSlot::RrInput:
+		return ExposureDomain::SceneHDR;
+	case FrameTextureSlot::TaaHistoryPing:
+	case FrameTextureSlot::TaaHistoryPong:
+		return ShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
+	case FrameTextureSlot::VendorOutput:
+		return ExposureDomain::VendorHDR;
+	case FrameTextureSlot::PostSharpenOutput:
+		if (postSharpenKind == NRIPostSharpenKind::Off)
+		{
+			return ExposureDomain::SceneHDR;
+		}
+		if (mainKind != NRIMainUpscalerKind::Off)
+		{
+			return ExposureDomain::VendorHDR;
+		}
+		return ShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
+	case FrameTextureSlot::Final:
+		return ExposureDomain::DisplayMappedOutput;
+	default:
+		return ExposureDomain::SceneHDR;
+	}
+}
+
+NRIRenderer::ExposureRoute NRIRenderer::ResolveExposureRoute(FrameTextureSlot inputSlot, const NRIPTOutputPolicy& outputPolicy, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const
+{
+	ExposureRoute route = {};
+	route.inputDomain = ResolveFrameTextureExposureDomain(inputSlot, mainKind, postSharpenKind);
+	route.temporalExposure = GetTemporalExposure(outputPolicy);
+	route.presentExposure =
+		route.inputDomain == ExposureDomain::PreExposedHDR ?
+		1.0f :
+		outputPolicy.exposure;
+	return route;
+}
+
 void NRIRenderer::PrintTemporalStatus() const
 {
 	SyncLegacyUpscalerConfig(false);
@@ -13351,6 +13406,7 @@ void NRIRenderer::PrintTemporalStatus() const
 	const float exposure = GetTemporalExposure(outputPolicy);
 	const float exposureStops = std::log2(std::max(exposure, 0.125f));
 	const FrameTextureSlot presentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
+	const ExposureRoute exposureRoute = ResolveExposureRoute(presentSlot, outputPolicy, resolvedMain, resolvedPost);
 	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
 	Printf("NRI PT temporal: debug=%d requested_main=%s resolved_main=%s requested_post=%s resolved_post=%s taa=%s gui_capture=%s last_debug=%d last_main=%s last_post=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
@@ -13382,8 +13438,11 @@ void NRIRenderer::PrintTemporalStatus() const
 		GetFrameTextureSlotName(mUpscaledInputSlot),
 		mUseUpscaledInFinal ? "yes" : "no");
 	Printf("NRI PT beauty path: nrd_and_composition -> pre_exposed_hdr_temporal -> final_display_mapping inspect_scene=15 inspect_pre_exposed=45 inspect_post_taa=13 inspect_post_upscale=14\n");
-	Printf("NRI PT temporal domain: history=pre_exposed_hdr exposure=%.3f exposure_stops=%.3f reset_threshold_stops=%.3f\n",
+	Printf("NRI PT temporal domain: history=%s present=%s temporal_exposure=%.3f present_exposure=%.3f exposure_stops=%.3f reset_threshold_stops=%.3f\n",
+		GetExposureDomainName(ResolveFrameTextureExposureDomain(mHistoryOutputSlot, resolvedMain, resolvedPost)),
+		GetExposureDomainName(exposureRoute.inputDomain),
 		exposure,
+		exposureRoute.presentExposure,
 		exposureStops,
 		NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS);
 }
@@ -14297,7 +14356,11 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
 	const NRITextureResource& primary = GetFrameTexture(primarySlot);
 	const NRITextureResource& secondary = secondarySlot == FrameTextureSlot::Count ? GetFrameTexture(mHistoryOutputSlot) : GetFrameTexture(secondarySlot);
-	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s gui_capture=%s domain=pre_exposed_hdr exposure=%.3f reset=%s reset_reason=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
+	const FrameTextureSlot resolvedSecondarySlot = secondarySlot == FrameTextureSlot::Count ? mHistoryOutputSlot : secondarySlot;
+	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
+	const ExposureRoute primaryExposureRoute = ResolveExposureRoute(primarySlot, outputPolicy, resolvedMainUpscaler, resolvedPostSharpen);
+	const ExposureRoute secondaryExposureRoute = ResolveExposureRoute(resolvedSecondarySlot, outputPolicy, resolvedMainUpscaler, resolvedPostSharpen);
+	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s gui_capture=%s primary_domain=%s secondary_domain=%s temporal_exposure=%.3f primary_present_exposure=%.3f secondary_present_exposure=%.3f reset=%s reset_reason=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
 		stage != nullptr ? stage : "unknown",
 		mFrameIndex,
 		(int)nri_ptdebug,
@@ -14305,7 +14368,11 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 		GetPostSharpenName(resolvedPostSharpen),
 		runAppTaa ? "yes" : "no",
 		mGuiCaptureActive ? "yes" : "no",
-		GetTemporalExposure(mFrameBuffer->GetPathTracingOutputPolicy()),
+		GetExposureDomainName(primaryExposureRoute.inputDomain),
+		GetExposureDomainName(secondaryExposureRoute.inputDomain),
+		primaryExposureRoute.temporalExposure,
+		primaryExposureRoute.presentExposure,
+		secondaryExposureRoute.presentExposure,
 		mResetHistory ? "yes" : "no",
 		mLastHistoryResetReason.c_str(),
 		mHasPreviousCameraState ? "yes" : "no",
@@ -14327,7 +14394,7 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 		(uint32_t)primary.state.access,
 		(uint32_t)primary.state.layout,
 		(uint32_t)primary.state.stages,
-		GetFrameTextureSlotName(secondarySlot == FrameTextureSlot::Count ? mHistoryOutputSlot : secondarySlot),
+		GetFrameTextureSlotName(resolvedSecondarySlot),
 		secondary.width,
 		secondary.height,
 		(uint32_t)secondary.state.access,
@@ -36196,7 +36263,9 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 		}
 
 		const FrameTextureSlot resolvedPresentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
-		TraceTemporalState("resolved-present", ResolveMainUpscalerKind(false), ResolvePostSharpenKind(false), false, resolvedPresentSlot, mHistoryOutputSlot);
+		const NRIMainUpscalerKind resolvedMain = ResolveMainUpscalerKind(false);
+		const NRIPostSharpenKind resolvedPost = ResolvePostSharpenKind(false);
+		TraceTemporalState("resolved-present", resolvedMain, resolvedPost, ShouldRunAppTaa(resolvedMain), resolvedPresentSlot, mHistoryOutputSlot);
 		if (!DispatchFinalPresent(resolvedPresentSlot))
 		{
 			return false;
@@ -36796,9 +36865,14 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 {
 	Clocker clock(NriPTFinalPresent);
 
+	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
+	const NRIMainUpscalerKind resolvedMain = ResolveMainUpscalerKind(false);
+	const NRIPostSharpenKind resolvedPost = ResolvePostSharpenKind(false);
+	const ExposureRoute exposureRoute = ResolveExposureRoute(inputSlot, outputPolicy, resolvedMain, resolvedPost);
 	NRIPresentConstants constants = {};
-	ApplyOutputPolicyToPresentConstants(mFrameBuffer->GetPathTracingOutputPolicy(), constants);
+	ApplyOutputPolicyToPresentConstants(outputPolicy, constants);
 	ApplyNightVisionStateToPresentConstants(mNightVisionState, constants);
+	constants.Exposure = exposureRoute.presentExposure;
 	constants.DisplayWidth = mOutputWidth;
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
