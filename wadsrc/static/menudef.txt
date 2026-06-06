@@ -1085,6 +1085,7 @@ OptionMenu "VideoOptions" protected
 	Slider "Highlight Shoulder",				"nri_ptshoulder",				0.50, 1.50, 0.05, 2
 	Slider "Shadow Toe",						"nri_pttoe",					0.50, 1.50, 0.05, 2
 	Option "Auto Exposure",						"nri_ptautoexposure",			"OnOff"
+	Slider "Auto Exposure Target",				"nri_ptautoexposuretarget",		0.02, 1.00, 0.01, 2
 	Slider "Auto Exposure Bias",				"nri_ptautoexposurebias",		0.125, 8.0, 0.125, 3
 	Slider "Auto Exposure Min",					"nri_ptautoexposuremin",		0.03125, 8.0, 0.03125, 5
 	Slider "Auto Exposure Max",					"nri_ptautoexposuremax",		0.125, 32.0, 0.125, 3
@@ -1099,6 +1100,7 @@ OptionMenu "VideoOptions" protected
 	Slider "Shadow Toe",						"nri_pthdrtoe",					0.50, 1.50, 0.05, 2
 	Slider "Paper White",						"nri_ptpaperwhite",				80.0, 400.0, 5.0, 1
 	Option "Auto Exposure",						"nri_pthdrautoexposure",		"OnOff"
+	Slider "Auto Exposure Target",				"nri_pthdrautoexposuretarget",	0.02, 1.00, 0.01, 2
 	Slider "Auto Exposure Bias",				"nri_pthdrautoexposurebias",	0.125, 8.0, 0.125, 3
 	Slider "Auto Exposure Min",					"nri_pthdrautoexposuremin",		0.03125, 8.0, 0.03125, 5
 	Slider "Auto Exposure Max",					"nri_pthdrautoexposuremax",		0.125, 32.0, 0.125, 3
