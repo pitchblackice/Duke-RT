@@ -107,7 +107,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	}
 	adaptedExposure = clamp(SanitizeExposureFloat(adaptedExposure, targetExposure), gExposureConstants.MinExposure, gExposureConstants.MaxExposure);
 
-	gCurrentExposureState[uint2(0, 0)] = float4(adaptedExposure, targetExposure, meteredLogLuminance, (float)totalSamples);
+	gCurrentExposureState[uint2(0, 0)] = float4(adaptedExposure, targetExposure, previousExposure, (float)totalSamples);
 
 	gExposureDebug[0] = NRI_EXPOSURE_DEBUG_MAGIC;
 	gExposureDebug[1] = gExposureConstants.FrameIndex;

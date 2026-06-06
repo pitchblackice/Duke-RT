@@ -3552,6 +3552,8 @@ namespace
 	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_AUTO_EXPOSURE = 0x10u;
 	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_EXPOSURE_TEXTURE_VALID = 0x20u;
 	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_INPUT_PRE_EXPOSED = 0x40u;
+	constexpr uint32_t NRI_TEMPORAL_FLAG_AUTO_EXPOSURE = 0x1000u;
+	constexpr uint32_t NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID = 0x2000u;
 	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
 	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
@@ -13504,10 +13506,20 @@ void NRIRenderer::PrintTemporalStatus() const
 	const NRIMainUpscalerKind resolvedMain = GetResolvedMainUpscalerKindForStatus();
 	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
+	const bool runAppTaa = ShouldRunAppTaa(resolvedMain);
 	const float exposure = GetTemporalExposure(outputPolicy);
 	const float exposureStops = std::log2(std::max(exposure, 0.125f));
 	const FrameTextureSlot presentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
 	const ExposureRoute exposureRoute = ResolveExposureRoute(presentSlot, outputPolicy, resolvedMain, resolvedPost);
+	const NRIAutoExposureSettings& autoExposureSettings = mExposure.GetSettings();
+	const NRITextureResource* autoExposureStateTexture = mExposure.GetExposureStateTexture(mFrameIndex & 1u);
+	const bool autoExposureTextureValid =
+		autoExposureStateTexture != nullptr &&
+		autoExposureStateTexture->shaderView != nullptr;
+	const bool autoExposureTaaApply =
+		runAppTaa &&
+		autoExposureSettings.enabled &&
+		autoExposureTextureValid;
 	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
 	Printf("NRI PT temporal: debug=%d requested_main=%s resolved_main=%s requested_post=%s resolved_post=%s taa=%s gui_capture=%s last_debug=%d last_main=%s last_post=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
@@ -13539,13 +13551,16 @@ void NRIRenderer::PrintTemporalStatus() const
 		GetFrameTextureSlotName(mUpscaledInputSlot),
 		mUseUpscaledInFinal ? "yes" : "no");
 	Printf("NRI PT beauty path: nrd_and_composition -> pre_exposed_hdr_temporal -> final_display_mapping inspect_scene=15 inspect_pre_exposed=45 inspect_post_taa=13 inspect_post_upscale=14\n");
-	Printf("NRI PT temporal domain: history=%s present=%s temporal_exposure=%.3f present_exposure=%.3f exposure_stops=%.3f reset_threshold_stops=%.3f\n",
+	Printf("NRI PT temporal domain: history=%s present=%s temporal_exposure=%.3f present_exposure=%.3f exposure_stops=%.3f reset_threshold_stops=%.3f auto_exposure=%s exposure_texture=%s taa_apply=%s\n",
 		GetExposureDomainName(ResolveFrameTextureExposureDomain(mHistoryOutputSlot, resolvedMain, resolvedPost)),
 		GetExposureDomainName(exposureRoute.inputDomain),
 		exposure,
 		exposureRoute.presentExposure,
 		exposureStops,
-		NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS);
+		NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS,
+		YesNo(autoExposureSettings.enabled),
+		YesNo(autoExposureTextureValid),
+		YesNo(autoExposureTaaApply));
 }
 
 void NRIRenderer::ArmTemporalTraceBudget(const char* reason)
@@ -22777,7 +22792,7 @@ bool NRIRenderer::CreateTaaPipelineLayout()
 {
 	nri::DescriptorRangeDesc inputRange = {};
 	inputRange.baseRegisterIndex = 0;
-	inputRange.descriptorNum = 3;
+	inputRange.descriptorNum = 4;
 	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
 	inputRange.shaderStages = NRIComputeStage();
 	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
@@ -37499,16 +37514,36 @@ bool NRIRenderer::DispatchUpscaleChain()
 				ResolveUpscalerModeForMain(mainKind, GetSelectedUpscalerMode()),
 				mGuiCaptureActive));
 		constants.Exposure = GetTemporalExposure(mFrameBuffer->GetPathTracingOutputPolicy());
+		NRITextureResource* exposureStateTexture = nullptr;
+		if (mExposure.GetSettings().enabled)
+		{
+			NRITextureResource& candidateExposureState = mExposure.GetMutableExposureStateTexture(mFrameIndex & 1u);
+			if (candidateExposureState.texture != nullptr)
+			{
+				exposureStateTexture = &candidateExposureState;
+			}
+		}
+		const bool exposureStateTextureValid =
+			exposureStateTexture != nullptr &&
+			exposureStateTexture->shaderView != nullptr;
+		constants.Flags |=
+			(mExposure.GetSettings().enabled ? NRI_TEMPORAL_FLAG_AUTO_EXPOSURE : 0u) |
+			(exposureStateTextureValid ? NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID : 0u);
 
 		mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
 		mFrameBuffer->TransitionTexture(GetFrameTexture(FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+		if (exposureStateTextureValid)
+		{
+			mFrameBuffer->TransitionTexture(*exposureStateTexture, NRIComputeShaderResourceState());
+		}
 		mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
 
-		const nri::Descriptor* taaInputs[3] = {
+		const nri::Descriptor* taaInputs[4] = {
 			historyInput.shaderView,
 			GetFrameTexture(FrameTextureSlot::Motion).shaderView,
-			composed.shaderView
+			composed.shaderView,
+			exposureStateTextureValid ? exposureStateTexture->shaderView : composed.shaderView
 		};
 		nri::UpdateDescriptorRangeDesc taaInputUpdate = {};
 		taaInputUpdate.descriptorSet = mTaaFrameTextureSet;

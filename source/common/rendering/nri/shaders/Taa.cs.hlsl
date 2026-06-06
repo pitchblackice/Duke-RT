@@ -3,6 +3,8 @@
 #include "Include/DisplayMapping.hlsli"
 
 #define NRI_FLAG_RESET_HISTORY 0x1u
+#define NRI_TEMPORAL_FLAG_AUTO_EXPOSURE 0x1000u
+#define NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID 0x2000u
 #define TAA_HISTORY_FRAME_CAP 12.0
 #define TAA_BASE_BLEND (1.0 / TAA_HISTORY_FRAME_CAP)
 #define TAA_SIGMA_SCALE 2.0
@@ -17,8 +19,41 @@ NRI_ROOT_CONSTANTS(NRITemporalConstants, gTemporalConstants, 0, 2);
 Texture2D<float4> gHistoryInput : register(t0, space0);
 Texture2D<float4> gMotionInput : register(t1, space0);
 Texture2D<float4> gComposedInput : register(t2, space0);
+Texture2D<float4> gExposureStateInput : register(t3, space0);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float4>, gHistoryOutput, u, 0, 1);
+
+struct TemporalExposureState
+{
+	float currentExposure;
+	float historyScale;
+};
+
+float SanitizeExposureValue(float value, float fallback)
+{
+	return value > 0.0 && !isnan(value) && !isinf(value) ? value : fallback;
+}
+
+TemporalExposureState LoadTemporalExposureState()
+{
+	TemporalExposureState state;
+	state.currentExposure = gTemporalConstants.Exposure;
+	state.historyScale = 1.0;
+
+	const bool shouldUseAutoExposure =
+		(gTemporalConstants.Flags & NRI_TEMPORAL_FLAG_AUTO_EXPOSURE) != 0u &&
+		(gTemporalConstants.Flags & NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID) != 0u;
+	if (!shouldUseAutoExposure)
+	{
+		return state;
+	}
+
+	const float4 exposureState = gExposureStateInput.Load(int3(0, 0, 0));
+	state.currentExposure = SanitizeExposureValue(exposureState.x, gTemporalConstants.Exposure);
+	const float previousExposure = SanitizeExposureValue(exposureState.z, state.currentExposure);
+	state.historyScale = state.currentExposure / previousExposure;
+	return state;
+}
 
 float4 LoadHistory(int2 pixelPos, uint2 size)
 {
@@ -45,12 +80,12 @@ float MaxComponent(float3 value)
 	return max(value.x, max(value.y, value.z));
 }
 
-float3 LoadCurrentColor(int2 pixelPos, uint2 size)
+float3 LoadCurrentColor(int2 pixelPos, uint2 size, float exposure)
 {
 	const int2 clampedPos = clamp(pixelPos, int2(0, 0), int2(size) - 1);
 	// Native TAA operates on a pre-exposed HDR signal so history stays in a stable FP16-friendly domain.
 	const float3 sceneColor = SanitizeFiniteColor(gComposedInput.Load(int3(clampedPos, 0)).rgb);
-	return ApplyManualExposure(sceneColor, gTemporalConstants.Exposure);
+	return ApplyManualExposure(sceneColor, exposure);
 }
 
 [numthreads(8, 8, 1)]
@@ -69,7 +104,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const float2 resolution = float2(size);
 	const float2 uv = ((float2)pixelPos + 0.5) / resolution;
 	const bool resetHistory = (gTemporalConstants.Flags & NRI_FLAG_RESET_HISTORY) != 0u;
-	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size);
+	const TemporalExposureState exposureState = LoadTemporalExposureState();
+	const float3 currentColor = LoadCurrentColor(int2(pixelPos), size, exposureState.currentExposure);
 
 	const float4 centerMotion = gMotionInput[pixelPos];
 	// TAA consumes the shared PT motion contract from Shared.hlsli:
@@ -91,7 +127,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		for (int x = -radius; x <= radius; ++x)
 		{
 			const int2 samplePos = clamp(int2(pixelPos) + int2(x, y), int2(0, 0), int2(size) - 1);
-			const float3 sampleColor = LoadCurrentColor(samplePos, size);
+			const float3 sampleColor = LoadCurrentColor(samplePos, size, exposureState.currentExposure);
 			const float weight = exp(-0.5 * float(x * x + y * y));
 
 			mean += sampleColor * weight;
@@ -115,6 +151,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	if (!resetHistory && historyInScreen)
 	{
 		historySample = SampleHistoryBilinear(prevUv, size);
+		historySample.rgb *= exposureState.historyScale;
 	}
 
 	const float3 historyColor = max(historySample.rgb, 0.0);
