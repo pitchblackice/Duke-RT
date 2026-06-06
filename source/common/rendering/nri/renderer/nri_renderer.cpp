@@ -3456,6 +3456,8 @@ namespace
 	constexpr uint32_t NRI_AUTO_EXPOSURE_OUTPUT_TEXTURE_DESCRIPTOR_NUM = 1;
 	constexpr uint32_t NRI_AUTO_EXPOSURE_OUTPUT_BUFFER_DESCRIPTOR_NUM = 2;
 	constexpr uint32_t NRI_AUTO_EXPOSURE_DEBUG_MAGIC = 0x45585033u;
+	constexpr uint32_t NRI_EXPOSURE_FLAG_FREEZE = 0x1u;
+	constexpr uint32_t NRI_EXPOSURE_FLAG_RESET = 0x2u;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
 	constexpr uint32_t NRI_MAX_EMISSIVE_PRIMITIVES = 16384;
@@ -4831,6 +4833,45 @@ namespace
 	static float GetTemporalExposure(const NRIPTOutputPolicy& outputPolicy)
 	{
 		return std::max(outputPolicy.exposure, 0.125f);
+	}
+
+	static const char* GetAutoExposureResetReasonForSettingsChange(
+		const NRIAutoExposureSettings& previous,
+		const NRIAutoExposureSettings& current)
+	{
+		if (previous.enabled != current.enabled)
+		{
+			return current.enabled ? "auto-exposure-enabled" : "auto-exposure-disabled";
+		}
+		if (previous.histogramBinCount != current.histogramBinCount ||
+			previous.sampleStep != current.sampleStep ||
+			previous.lowPercentile != current.lowPercentile ||
+			previous.highPercentile != current.highPercentile)
+		{
+			return "auto-exposure-metering-change";
+		}
+		if (previous.minExposure != current.minExposure ||
+			previous.maxExposure != current.maxExposure)
+		{
+			return "auto-exposure-clamp-change";
+		}
+		if (previous.targetLuminance != current.targetLuminance ||
+			previous.exposureBias != current.exposureBias)
+		{
+			return "auto-exposure-target-change";
+		}
+
+		return nullptr;
+	}
+
+	static float ClampAutoExposureDeltaTimeSeconds(float seconds)
+	{
+		if (!std::isfinite(seconds) || seconds <= 0.0f)
+		{
+			return 1.0f / 60.0f;
+		}
+
+		return std::clamp(seconds, 1.0f / 240.0f, 0.25f);
 	}
 
 	static float GetFullbrightBoostScale()
@@ -6838,7 +6879,7 @@ namespace
 		uint32_t Flags = 0;
 		uint32_t HistogramBinCount = 0;
 		uint32_t SampleStep = 1;
-		uint32_t Reserved0 = 0;
+		float DeltaTimeSeconds = 1.0f / 60.0f;
 		uint32_t Reserved1 = 0;
 		float LogLuminanceMin = -12.0f;
 		float LogLuminanceMax = 12.0f;
@@ -11855,6 +11896,17 @@ void NRIRenderer::ResetHistory()
 	RequestHistoryReset("history-reset", true, true);
 }
 
+void NRIRenderer::RequestAutoExposureReset(const char* reason)
+{
+	const char* safeReason = reason != nullptr && *reason != '\0' ? reason : "unspecified";
+	mExposure.RequestReset(safeReason, (uint64_t)mFrameIndex);
+	const NRIAutoExposureStatus& status = mExposure.GetStatus();
+	Printf("NRI PT auto exposure reset: reason=%s frame=%u serial=%llu\n",
+		safeReason,
+		mFrameIndex,
+		(unsigned long long)status.resetSerial);
+}
+
 void NRIRenderer::NotifyCameraCut(const char* reason)
 {
 	RequestHistoryReset((reason != nullptr && *reason != '\0') ? reason : "camera-cut", true, false);
@@ -11885,6 +11937,7 @@ void NRIRenderer::RequestHistoryReset(const char* reason, bool clearPreviousCame
 	ArmTemporalTraceBudget(reason);
 	mResetHistory = true;
 	mLastHistoryResetReason = (reason != nullptr && *reason != '\0') ? reason : "unspecified";
+	RequestAutoExposureReset(mLastHistoryResetReason.c_str());
 	if (clearPreviousCameraState)
 	{
 		mHasPreviousCameraState = false;
@@ -12699,7 +12752,7 @@ void NRIRenderer::PrintStatus()
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,
 		outputPolicy.displayMaxLuminance);
-	Printf("NRI PT auto exposure: enabled=%s freeze=%s stats=%s resources=%s state_textures=%s histogram_bins=%u sample_step=%u target=%.3f range=%.3f..%.3f bias=%.3f percentiles=%.2f..%.2f adapt=%.3f/%.3f fallback_manual=%.3f resource_render=%ux%u memory=%llu alloc_serial=%u\n",
+	Printf("NRI PT auto exposure: enabled=%s freeze=%s stats=%s resources=%s state_textures=%s histogram_bins=%u sample_step=%u target=%.3f range=%.3f..%.3f bias=%.3f percentiles=%.2f..%.2f adapt=%.3f/%.3f fallback_manual=%.3f resource_render=%ux%u memory=%llu alloc_serial=%u reset_pending=%s reset_serial=%llu reset_request_frame=%llu reset_consumed_frame=%llu reset_reason=%s\n",
 		YesNo(autoExposureSettings.enabled),
 		YesNo(autoExposureSettings.freeze),
 		YesNo(autoExposureSettings.stats),
@@ -12719,7 +12772,12 @@ void NRIRenderer::PrintStatus()
 		autoExposureStatus.renderWidth,
 		autoExposureStatus.renderHeight,
 		(unsigned long long)autoExposureStatus.memoryBytes,
-		autoExposureStatus.allocationSerial);
+		autoExposureStatus.allocationSerial,
+		YesNo(autoExposureStatus.resetPending),
+		(unsigned long long)autoExposureStatus.resetSerial,
+		(unsigned long long)autoExposureStatus.resetRequestFrame,
+		(unsigned long long)autoExposureStatus.resetConsumedFrame,
+		autoExposureStatus.resetReason[0] != '\0' ? autoExposureStatus.resetReason : "none");
 	Printf("NRI PT auto exposure stats: valid=%s readback=%s frame=%llu samples=%u bins=%u..%u log_lum=%.3f..%.3f metered_log_lum=%.3f target_exposure=%.3f adapted_exposure=%.3f\n",
 		YesNo(autoExposureStatus.debugValid),
 		YesNo(autoExposureStatus.debugReadbackAllocated),
@@ -25149,6 +25207,7 @@ bool NRIRenderer::EnsureAutoExposureResources(const NRIAutoExposureSettings& set
 	}
 
 	mExposure.MarkResourcesAllocated(mRenderWidth, mRenderHeight, getMemoryBytes());
+	RequestAutoExposureReset("auto-exposure-resources-created");
 	return true;
 }
 
@@ -25246,9 +25305,17 @@ bool NRIRenderer::DispatchAutoExposure(FrameTextureSlot sourceSlot)
 	constants.RenderWidth = mRenderWidth;
 	constants.RenderHeight = mRenderHeight;
 	constants.FrameIndex = mFrameIndex;
-	constants.Flags = settings.freeze ? 1u : 0u;
+	const bool resetExposure = mExposure.ConsumeResetRequest((uint64_t)mFrameIndex);
+	constants.Flags =
+		(settings.freeze ? NRI_EXPOSURE_FLAG_FREEZE : 0u) |
+		(resetExposure ? NRI_EXPOSURE_FLAG_RESET : 0u);
 	constants.HistogramBinCount = std::clamp(settings.histogramBinCount, 1u, NRI_AUTO_EXPOSURE_MAX_HISTOGRAM_BINS);
 	constants.SampleStep = std::max(settings.sampleStep, 1u);
+	const float exposureDeltaTimeSeconds =
+		mHasPendingFrameGenerationRealFrameTime ?
+		mPendingFrameGenerationRealFrameTimeMs * 0.001f :
+		1.0f / 60.0f;
+	constants.DeltaTimeSeconds = ClampAutoExposureDeltaTimeSeconds(exposureDeltaTimeSeconds);
 	constants.LogLuminanceMin = -12.0f;
 	constants.LogLuminanceMax = 12.0f;
 	constants.InvLogLuminanceRange = 1.0f / (constants.LogLuminanceMax - constants.LogLuminanceMin);
@@ -36641,9 +36708,23 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	const bool directionalLightShadowEnabled = mDirectionalLightState.enabled && mDirectionalLightState.shadow;
 	mUseSplitShadowDenoiser = directionalLightShadowEnabled && (useShadowDebugPresent || useSplitShadowDebugProbe || (useCompositionPath && nri_denoise));
 	const NRIAutoExposureSettings autoExposureSettings = GetNRIAutoExposureSettings(mFrameBuffer->GetPathTracingOutputPolicy().exposure);
+	const char* autoExposureSettingsResetReason = nullptr;
+	if (!mHasAutoExposureSettingsState)
+	{
+		mHasAutoExposureSettingsState = true;
+	}
+	else
+	{
+		autoExposureSettingsResetReason = GetAutoExposureResetReasonForSettingsChange(mLastAutoExposureSettings, autoExposureSettings);
+	}
+	mLastAutoExposureSettings = autoExposureSettings;
 	if (!EnsureAutoExposureResources(autoExposureSettings))
 	{
 		return false;
+	}
+	if (autoExposureSettingsResetReason != nullptr)
+	{
+		RequestAutoExposureReset(autoExposureSettingsResetReason);
 	}
 
 	if (!DispatchTraceOpaque(di, geometry, materials))

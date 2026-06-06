@@ -91,9 +91,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		targetExposure = clamp(targetExposure, gExposureConstants.MinExposure, gExposureConstants.MaxExposure);
 	}
 
-	const float previousExposure = ResolvePreviousExposure(targetExposure);
+	const bool resetExposure = (gExposureConstants.Flags & NRI_EXPOSURE_FLAG_RESET) != 0u;
+	const float previousExposure = resetExposure ? targetExposure : ResolvePreviousExposure(targetExposure);
 	float adaptedExposure = targetExposure;
-	if ((gExposureConstants.Flags & NRI_EXPOSURE_FLAG_FREEZE) != 0u)
+	if (resetExposure)
+	{
+		adaptedExposure = targetExposure;
+	}
+	else if ((gExposureConstants.Flags & NRI_EXPOSURE_FLAG_FREEZE) != 0u)
 	{
 		adaptedExposure = previousExposure;
 	}
@@ -102,7 +107,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float previousStops = log2(max(previousExposure, 1.0e-6));
 		const float targetStops = log2(max(targetExposure, 1.0e-6));
 		const float speed = targetStops > previousStops ? gExposureConstants.AdaptUpSpeed : gExposureConstants.AdaptDownSpeed;
-		const float alpha = 1.0 - exp(-max(speed, 0.0) * (1.0 / 60.0));
+		const float alpha = 1.0 - exp(-max(speed, 0.0) * max(gExposureConstants.DeltaTimeSeconds, 0.0));
 		adaptedExposure = exp2(lerp(previousStops, targetStops, saturate(alpha)));
 	}
 	adaptedExposure = clamp(SanitizeExposureFloat(adaptedExposure, targetExposure), gExposureConstants.MinExposure, gExposureConstants.MaxExposure);

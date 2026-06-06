@@ -226,6 +226,28 @@ void NRIExposureController::ClearDebugReadback()
 	mStatus.adaptedExposure = 1.0f;
 }
 
+void NRIExposureController::RequestReset(const char* reason, uint64_t frameIndex)
+{
+	mStatus.resetPending = true;
+	mStatus.resetSerial++;
+	mStatus.resetRequestFrame = frameIndex;
+	const char* safeReason = reason != nullptr && *reason != '\0' ? reason : "unspecified";
+	std::strncpy(mStatus.resetReason, safeReason, sizeof(mStatus.resetReason) - 1u);
+	mStatus.resetReason[sizeof(mStatus.resetReason) - 1u] = '\0';
+}
+
+bool NRIExposureController::ConsumeResetRequest(uint64_t frameIndex)
+{
+	if (!mStatus.resetPending)
+	{
+		return false;
+	}
+
+	mStatus.resetPending = false;
+	mStatus.resetConsumedFrame = frameIndex;
+	return true;
+}
+
 const NRITextureResource* NRIExposureController::GetExposureStateTexture(uint32_t index) const
 {
 	if (index >= 2 || mExposureState[index].texture == nullptr)
@@ -273,8 +295,12 @@ void NRIExposureController::ResetStatus()
 	mStatus.histogramAllocated = false;
 	mStatus.debugBufferAllocated = false;
 	mStatus.debugReadbackAllocated = false;
+	mStatus.resetPending = false;
 	mStatus.renderWidth = 0;
 	mStatus.renderHeight = 0;
 	mStatus.memoryBytes = 0;
+	mStatus.resetRequestFrame = 0;
+	mStatus.resetConsumedFrame = 0;
+	mStatus.resetReason[0] = '\0';
 	ClearDebugReadback();
 }

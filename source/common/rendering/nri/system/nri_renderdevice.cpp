@@ -1905,6 +1905,18 @@ CCMD(nri_ptreset)
 	}
 }
 
+CCMD(nri_ptautoexposurereset)
+{
+	if (auto* frameBuffer = GetActiveNRIRenderDevice())
+	{
+		frameBuffer->ResetPathTracingAutoExposure();
+	}
+	else
+	{
+		Printf("NRI PT auto exposure reset is only available while using the NRI renderer.\n");
+	}
+}
+
 CCMD(nri_ptlightspawn)
 {
 	if (argv.argc() < 5)
@@ -6739,6 +6751,18 @@ void NRIRenderDevice::ResetPathTracingHistory()
 
 	mRenderer->ResetHistory();
 	Printf("NRI PT history reset requested.\n");
+}
+
+void NRIRenderDevice::ResetPathTracingAutoExposure()
+{
+	if (mRenderer == nullptr)
+	{
+		Printf("NRI PT auto exposure reset is unavailable because the renderer is not initialized.\n");
+		return;
+	}
+
+	mRenderer->RequestAutoExposureReset("console");
+	Printf("NRI PT auto exposure reset requested.\n");
 }
 
 void NRIRenderDevice::NotifyPathTracingCameraCut(const char* reason)

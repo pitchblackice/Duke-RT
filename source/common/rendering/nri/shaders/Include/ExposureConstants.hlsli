@@ -8,6 +8,7 @@
 #define SET_EXPOSURE_ROOT 2
 
 #define NRI_EXPOSURE_FLAG_FREEZE 0x1u
+#define NRI_EXPOSURE_FLAG_RESET 0x2u
 #define NRI_EXPOSURE_DEBUG_MAGIC 0x45585033u
 #define NRI_EXPOSURE_MAX_HISTOGRAM_BINS 256u
 #define NRI_EXPOSURE_DEBUG_WORD_COUNT 16u
@@ -20,7 +21,7 @@ struct NRIExposureConstants
 	uint Flags;
 	uint HistogramBinCount;
 	uint SampleStep;
-	uint Reserved0;
+	float DeltaTimeSeconds;
 	uint Reserved1;
 	float LogLuminanceMin;
 	float LogLuminanceMax;

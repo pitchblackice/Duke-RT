@@ -1369,6 +1369,7 @@ public:
 	bool RenderScene(HWDrawInfo& di, int drawmode, bool portal);
 	bool PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
 	void ResetHistory();
+	void RequestAutoExposureReset(const char* reason);
 	LevelTransitionSnapshot BuildLevelTransitionSnapshot() const;
 	void OnLevelUnloadBegin(const LevelTransitionInfo& info);
 	void OnLevelUnloadComplete(const LevelTransitionInfo& info);
@@ -3189,6 +3190,7 @@ private:
 	bool mUseUpscaledInFinal = false;
 	bool mLastTemporalAppTaaEnabled = false;
 	bool mHasTemporalExposureState = false;
+	bool mHasAutoExposureSettingsState = false;
 	bool mUseDenoisedCompositionInputs = false;
 	bool mUseSplitShadowDenoiser = false;
 	bool mHasLoggedFallback = false;
@@ -3276,6 +3278,7 @@ private:
 	NRIPTOutputMode mLastOutputRequestedMode = NRIPTOutputMode::SDR;
 	NRIPTOutputMode mLastOutputResolvedMode = NRIPTOutputMode::SDR;
 	float mLastTemporalExposure = 1.0f;
+	NRIAutoExposureSettings mLastAutoExposureSettings = {};
 	NRIMainUpscalerKind mLastMainUpscalerResolved = NRIMainUpscalerKind::Off;
 	NRIPostSharpenKind mLastPostSharpenResolved = NRIPostSharpenKind::Off;
 	NRIMainUpscalerKind mLastTemporalHistoryMainUpscaler = NRIMainUpscalerKind::Off;
