@@ -13523,7 +13523,6 @@ const char* NRIRenderer::GetExposureDomainName(ExposureDomain domain) const
 	{
 	case ExposureDomain::SceneHDR: return "scene_hdr";
 	case ExposureDomain::PreExposedHDR: return "pre_exposed_hdr";
-	case ExposureDomain::VendorHDR: return "vendor_hdr";
 	case ExposureDomain::DisplayMappedOutput: return "display_mapped_output";
 	default: return "unknown";
 	}
@@ -13542,7 +13541,7 @@ NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(Frame
 	case FrameTextureSlot::TaaHistoryPong:
 		return ShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
 	case FrameTextureSlot::VendorOutput:
-		return ExposureDomain::VendorHDR;
+		return ExposureDomain::SceneHDR;
 	case FrameTextureSlot::PostSharpenOutput:
 		if (postSharpenKind == NRIPostSharpenKind::Off)
 		{
@@ -13550,7 +13549,7 @@ NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(Frame
 		}
 		if (mainKind != NRIMainUpscalerKind::Off)
 		{
-			return ExposureDomain::VendorHDR;
+			return ExposureDomain::SceneHDR;
 		}
 		return ShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
 	case FrameTextureSlot::Final:

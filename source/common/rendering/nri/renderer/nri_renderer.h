@@ -1454,7 +1454,6 @@ private:
 	{
 		SceneHDR,
 		PreExposedHDR,
-		VendorHDR,
 		DisplayMappedOutput
 	};
 
