@@ -37148,6 +37148,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.traceOpaqueReadbackMs);
 		ReadbackTraceShaderStats();
+		ReadbackAutoExposureStats();
 	}
 
 	if (!UpdateReprojectionBuffer())
