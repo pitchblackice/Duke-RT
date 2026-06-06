@@ -8275,6 +8275,7 @@ void NRIRenderer::Shutdown()
 	mFinalPresentOutputSet = nullptr;
 	mExposureInputSets = {};
 	mExposureOutputSets = {};
+	mAutoExposureInputSourceSlot = FrameTextureSlot::Count;
 	mSceneDataDescriptorsInitialized.clear();
 }
 
@@ -12763,12 +12764,13 @@ void NRIRenderer::PrintStatus()
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,
 		outputPolicy.displayMaxLuminance);
-	Printf("NRI PT auto exposure: enabled=%s freeze=%s stats=%s resources=%s state_textures=%s histogram_bins=%u sample_step=%u target=%.3f range=%.3f..%.3f bias=%.3f percentiles=%.2f..%.2f adapt=%.3f/%.3f fallback_manual=%.3f resource_render=%ux%u memory=%llu alloc_serial=%u reset_pending=%s reset_serial=%llu reset_request_frame=%llu reset_consumed_frame=%llu reset_reason=%s\n",
+	Printf("NRI PT auto exposure: enabled=%s freeze=%s stats=%s resources=%s state_textures=%s meter_source=%s histogram_bins=%u sample_step=%u target=%.3f range=%.3f..%.3f bias=%.3f percentiles=%.2f..%.2f adapt=%.3f/%.3f fallback_manual=%.3f resource_render=%ux%u memory=%llu alloc_serial=%u reset_pending=%s reset_serial=%llu reset_request_frame=%llu reset_consumed_frame=%llu reset_reason=%s\n",
 		YesNo(autoExposureSettings.enabled),
 		YesNo(autoExposureSettings.freeze),
 		YesNo(autoExposureSettings.stats),
 		YesNo(autoExposureStatus.resourcesAllocated),
 		autoExposureStatus.resourcesAllocated ? "allocated" : "not_allocated",
+		GetFrameTextureSlotName(mAutoExposureInputSourceSlot),
 		autoExposureSettings.histogramBinCount,
 		autoExposureSettings.sampleStep,
 		autoExposureSettings.targetLuminance,
@@ -25215,7 +25217,7 @@ bool NRIRenderer::EnsureAutoExposureResources(const NRIAutoExposureSettings& set
 		!createStorageBuffer(histogramBuffer, (uint64_t)NRI_AUTO_EXPOSURE_MAX_HISTOGRAM_BINS * sizeof(uint32_t), sizeof(uint32_t)) ||
 		!createStorageBuffer(debugBuffer, (uint64_t)NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT * sizeof(uint32_t), sizeof(uint32_t)) ||
 		!ensureStatsReadback() ||
-		!UpdateAutoExposureDescriptorSets())
+		!UpdateAutoExposureDescriptorSets(FrameTextureSlot::TraceTransparentOutput))
 	{
 		DestroyAutoExposureResources();
 		return false;
@@ -25234,12 +25236,13 @@ void NRIRenderer::DestroyAutoExposureResources()
 	DestroyBufferResource(mExposure.GetMutableDebugBuffer());
 	DestroyBufferResource(mExposure.GetMutableDebugReadbackBuffer());
 	mPendingAutoExposureStatsFrame = 0;
+	mAutoExposureInputSourceSlot = FrameTextureSlot::Count;
 	mExposure.MarkResourcesDestroyed();
 }
 
-bool NRIRenderer::UpdateAutoExposureDescriptorSets()
+bool NRIRenderer::UpdateAutoExposureDescriptorSets(FrameTextureSlot sourceSlot)
 {
-	const NRITextureResource& source = GetFrameTexture(FrameTextureSlot::TraceTransparentOutput);
+	const NRITextureResource& source = GetFrameTexture(sourceSlot);
 	if (source.shaderView == nullptr ||
 		!mExposure.HasRequiredResources() ||
 		mExposureInputSets[0] == nullptr ||
@@ -25284,6 +25287,7 @@ bool NRIRenderer::UpdateAutoExposureDescriptorSets()
 		mFrameBuffer->mCore.UpdateDescriptorRanges(&outputBufferUpdate, 1);
 	}
 
+	mAutoExposureInputSourceSlot = sourceSlot;
 	return true;
 }
 
@@ -25295,7 +25299,12 @@ bool NRIRenderer::DispatchAutoExposure(FrameTextureSlot sourceSlot)
 		return true;
 	}
 
-	if (sourceSlot != FrameTextureSlot::TraceTransparentOutput || !mExposure.HasRequiredResources())
+	if (!mExposure.HasRequiredResources())
+	{
+		return false;
+	}
+
+	if (mAutoExposureInputSourceSlot != sourceSlot && !UpdateAutoExposureDescriptorSets(sourceSlot))
 	{
 		return false;
 	}
@@ -36834,6 +36843,10 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 		if (!needStandardComposition)
 		{
+			if (!DispatchAutoExposure(FrameTextureSlot::RrInput))
+			{
+				return false;
+			}
 			return true;
 		}
 

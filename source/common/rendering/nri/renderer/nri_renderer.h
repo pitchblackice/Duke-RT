@@ -2902,7 +2902,7 @@ private:
 	void ReadbackTraceShaderStats();
 	bool EnsureAutoExposureResources(const NRIAutoExposureSettings& settings);
 	void DestroyAutoExposureResources();
-	bool UpdateAutoExposureDescriptorSets();
+	bool UpdateAutoExposureDescriptorSets(FrameTextureSlot sourceSlot);
 	bool DispatchAutoExposure(FrameTextureSlot sourceSlot);
 	void CopyAutoExposureStatsForReadback(uint64_t frameNumber);
 	void ReadbackAutoExposureStats();
@@ -2952,6 +2952,7 @@ private:
 	nri::DescriptorSet* mFinalPresentOutputSet = nullptr;
 	std::array<nri::DescriptorSet*, 2> mExposureInputSets = {};
 	std::array<nri::DescriptorSet*, 2> mExposureOutputSets = {};
+	FrameTextureSlot mAutoExposureInputSourceSlot = FrameTextureSlot::Count;
 
 	NRITextureResource* GetActiveSkyTexture() { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
 	const NRITextureResource* GetActiveSkyTexture() const { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
