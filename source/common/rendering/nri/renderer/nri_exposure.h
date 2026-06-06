@@ -22,6 +22,7 @@ struct NRIAutoExposureSettings
 	bool enabled = false;
 	bool freeze = false;
 	bool stats = false;
+	bool hdrControlsActive = false;
 	NRIAutoExposureMeteringMode meteringMode = NRIAutoExposureMeteringMode::FullFrame;
 	uint32_t histogramBinCount = 256;
 	uint32_t sampleStep = 2;
@@ -63,7 +64,7 @@ struct NRIAutoExposureStatus
 	char resetReason[64] = {};
 };
 
-NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure);
+NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure, bool hdrControlsActive);
 const char* GetNRIAutoExposureMeteringModeName(NRIAutoExposureMeteringMode mode);
 
 class NRIExposureController

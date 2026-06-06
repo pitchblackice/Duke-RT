@@ -4841,6 +4841,10 @@ namespace
 		const NRIAutoExposureSettings& previous,
 		const NRIAutoExposureSettings& current)
 	{
+		if (previous.hdrControlsActive != current.hdrControlsActive)
+		{
+			return "auto-exposure-control-block-change";
+		}
 		if (previous.enabled != current.enabled)
 		{
 			return current.enabled ? "auto-exposure-enabled" : "auto-exposure-disabled";
@@ -12709,7 +12713,9 @@ void NRIRenderer::PrintStatus()
 	const auto& frameGenDesc = mFrameBuffer->mFrameGeneration.GetFrameDesc();
 	const auto& frameGenAudit = mFrameBuffer->mFrameGeneration.GetInputAudit();
 	const auto& frameGenProvider = mFrameBuffer->mFrameGeneration.GetProviderState();
-	const NRIAutoExposureSettings autoExposureSettings = GetNRIAutoExposureSettings(outputPolicy.exposure);
+	const NRIAutoExposureSettings autoExposureSettings = GetNRIAutoExposureSettings(
+		outputPolicy.exposure,
+		IsNRIPTHdrOutputActive(outputPolicy));
 	mExposure.SetSettings(autoExposureSettings);
 	ReadbackAutoExposureStats();
 	const NRIAutoExposureStatus& autoExposureStatus = mExposure.GetStatus();
@@ -12774,8 +12780,9 @@ void NRIRenderer::PrintStatus()
 		outputPolicy.displayHdrSupported ? "yes" : "no",
 		outputPolicy.displaySdrLuminance,
 		outputPolicy.displayMaxLuminance);
-	Printf("NRI PT auto exposure: enabled=%s freeze=%s stats=%s resources=%s state_textures=%s meter_source=%s meter_mode=%s histogram_bins=%u sample_step=%u target=%.3f range=%.3f..%.3f bias=%.3f percentiles=%.2f..%.2f hist_log_range=%.1f..%.1f adapt=%.3f/%.3f fallback_manual=%.3f resource_render=%ux%u memory=%llu alloc_serial=%u reset_pending=%s reset_serial=%llu reset_request_frame=%llu reset_consumed_frame=%llu reset_reason=%s\n",
+	Printf("NRI PT auto exposure: enabled=%s control_block=%s freeze=%s stats=%s resources=%s state_textures=%s meter_source=%s meter_mode=%s histogram_bins=%u sample_step=%u target=%.3f range=%.3f..%.3f bias=%.3f percentiles=%.2f..%.2f hist_log_range=%.1f..%.1f adapt=%.3f/%.3f fallback_manual=%.3f resource_render=%ux%u memory=%llu alloc_serial=%u reset_pending=%s reset_serial=%llu reset_request_frame=%llu reset_consumed_frame=%llu reset_reason=%s\n",
 		YesNo(autoExposureSettings.enabled),
+		autoExposureSettings.hdrControlsActive ? "hdr" : "sdr",
 		YesNo(autoExposureSettings.freeze),
 		YesNo(autoExposureSettings.stats),
 		YesNo(autoExposureStatus.resourcesAllocated),
@@ -36821,7 +36828,10 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	mUseDenoisedCompositionInputs = false;
 	const bool directionalLightShadowEnabled = mDirectionalLightState.enabled && mDirectionalLightState.shadow;
 	mUseSplitShadowDenoiser = directionalLightShadowEnabled && (useShadowDebugPresent || useSplitShadowDebugProbe || (useCompositionPath && nri_denoise));
-	const NRIAutoExposureSettings autoExposureSettings = GetNRIAutoExposureSettings(mFrameBuffer->GetPathTracingOutputPolicy().exposure);
+	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
+	const NRIAutoExposureSettings autoExposureSettings = GetNRIAutoExposureSettings(
+		outputPolicy.exposure,
+		IsNRIPTHdrOutputActive(outputPolicy));
 	const char* autoExposureSettingsResetReason = nullptr;
 	if (!mHasAutoExposureSettingsState)
 	{

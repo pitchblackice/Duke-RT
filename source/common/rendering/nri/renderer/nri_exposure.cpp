@@ -19,6 +19,7 @@ namespace
 }
 
 CVAR(Bool, nri_ptautoexposure, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, nri_pthdrautoexposure, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptautoexposurefreeze, false, 0)
 CVAR(Bool, nri_ptautoexposurestats, false, 0)
 CUSTOM_CVAR(Int, nri_ptautoexposuremetering, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -65,7 +66,29 @@ CUSTOM_CVAR(Float, nri_ptautoexposuretarget, 0.18f, CVAR_ARCHIVE | CVAR_GLOBALCO
 		self = 1.0f;
 	}
 }
+CUSTOM_CVAR(Float, nri_pthdrautoexposuretarget, 0.18f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.02f)
+	{
+		self = 0.02f;
+	}
+	else if (self > 1.0f)
+	{
+		self = 1.0f;
+	}
+}
 CUSTOM_CVAR(Float, nri_ptautoexposuremin, 0.125f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.03125f)
+	{
+		self = 0.03125f;
+	}
+	else if (self > 8.0f)
+	{
+		self = 8.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_pthdrautoexposuremin, 0.125f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.03125f)
 	{
@@ -87,7 +110,29 @@ CUSTOM_CVAR(Float, nri_ptautoexposuremax, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 		self = 32.0f;
 	}
 }
+CUSTOM_CVAR(Float, nri_pthdrautoexposuremax, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.125f)
+	{
+		self = 0.125f;
+	}
+	else if (self > 32.0f)
+	{
+		self = 32.0f;
+	}
+}
 CUSTOM_CVAR(Float, nri_ptautoexposurebias, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.125f)
+	{
+		self = 0.125f;
+	}
+	else if (self > 8.0f)
+	{
+		self = 8.0f;
+	}
+}
+CUSTOM_CVAR(Float, nri_pthdrautoexposurebias, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.125f)
 	{
@@ -154,23 +199,36 @@ const char* GetNRIAutoExposureMeteringModeName(NRIAutoExposureMeteringMode mode)
 	}
 }
 
-NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure)
+NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure, bool hdrControlsActive)
 {
 	NRIAutoExposureSettings settings = {};
-	settings.enabled = !!nri_ptautoexposure;
+	settings.hdrControlsActive = hdrControlsActive;
+	settings.enabled = hdrControlsActive ? !!nri_pthdrautoexposure : !!nri_ptautoexposure;
 	settings.freeze = !!nri_ptautoexposurefreeze;
 	settings.stats = !!nri_ptautoexposurestats;
 	settings.meteringMode = (NRIAutoExposureMeteringMode)std::clamp((int)nri_ptautoexposuremetering, 0, 2);
 	settings.histogramBinCount = (uint32_t)std::clamp((int)nri_ptautoexposurebins, 16, 256);
 	settings.sampleStep = (uint32_t)std::clamp((int)nri_ptautoexposuresamplestep, 1, 8);
-	settings.targetLuminance = std::clamp((float)nri_ptautoexposuretarget, 0.02f, 1.0f);
-	settings.minExposure = std::clamp((float)nri_ptautoexposuremin, 0.03125f, 8.0f);
-	settings.maxExposure = std::clamp((float)nri_ptautoexposuremax, 0.125f, 32.0f);
+	settings.targetLuminance = std::clamp(
+		hdrControlsActive ? (float)nri_pthdrautoexposuretarget : (float)nri_ptautoexposuretarget,
+		0.02f,
+		1.0f);
+	settings.minExposure = std::clamp(
+		hdrControlsActive ? (float)nri_pthdrautoexposuremin : (float)nri_ptautoexposuremin,
+		0.03125f,
+		8.0f);
+	settings.maxExposure = std::clamp(
+		hdrControlsActive ? (float)nri_pthdrautoexposuremax : (float)nri_ptautoexposuremax,
+		0.125f,
+		32.0f);
 	if (settings.maxExposure < settings.minExposure)
 	{
 		settings.maxExposure = settings.minExposure;
 	}
-	settings.exposureBias = std::clamp((float)nri_ptautoexposurebias, 0.125f, 8.0f);
+	settings.exposureBias = std::clamp(
+		hdrControlsActive ? (float)nri_pthdrautoexposurebias : (float)nri_ptautoexposurebias,
+		0.125f,
+		8.0f);
 	settings.lowPercentile = std::clamp((float)nri_ptautoexposurelowpercentile, 0.0f, 99.0f);
 	settings.highPercentile = std::clamp((float)nri_ptautoexposurehighpercentile, 1.0f, 100.0f);
 	if (settings.highPercentile <= settings.lowPercentile)
