@@ -3549,6 +3549,9 @@ namespace
 	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_HDR_SUPPORTED = 0x2u;
 	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE = 0x4u;
 	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_OFFSCREEN_HDR_TARGET = 0x8u;
+	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_AUTO_EXPOSURE = 0x10u;
+	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_EXPOSURE_TEXTURE_VALID = 0x20u;
+	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_INPUT_PRE_EXPOSED = 0x40u;
 	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
 	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
 	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
@@ -12644,6 +12647,23 @@ void NRIRenderer::PrintStatus()
 	mExposure.SetSettings(autoExposureSettings);
 	ReadbackAutoExposureStats();
 	const NRIAutoExposureStatus& autoExposureStatus = mExposure.GetStatus();
+	const NRIMainUpscalerKind autoExposureResolvedMain = GetResolvedMainUpscalerKindForStatus();
+	const NRIPostSharpenKind autoExposureResolvedPost = GetResolvedPostSharpenKindForStatus();
+	const FrameTextureSlot autoExposurePresentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
+	const ExposureRoute autoExposurePresentRoute = ResolveExposureRoute(
+		autoExposurePresentSlot,
+		outputPolicy,
+		autoExposureResolvedMain,
+		autoExposureResolvedPost);
+	const NRITextureResource* autoExposureStateTexture = mExposure.GetExposureStateTexture(mFrameIndex & 1u);
+	const bool autoExposureSceneHdrInput = autoExposurePresentRoute.inputDomain == ExposureDomain::SceneHDR;
+	const bool autoExposureTextureValid =
+		autoExposureStateTexture != nullptr &&
+		autoExposureStateTexture->shaderView != nullptr;
+	const bool autoExposurePresentEligible =
+		autoExposureSettings.enabled &&
+		autoExposureSceneHdrInput &&
+		autoExposureTextureValid;
 
 	Printf("NRI PT status: support=%s", mPathTracingSupported ? "available" : "raster-fallback");
 	if (!mPathTracingSupported)
@@ -12710,6 +12730,14 @@ void NRIRenderer::PrintStatus()
 		autoExposureStatus.meteredLogLuminance,
 		autoExposureStatus.targetExposure,
 		autoExposureStatus.adaptedExposure);
+	Printf("NRI PT auto exposure present: slot=%s domain=%s enabled=%s scene_hdr=%s texture_valid=%s apply=%s manual_fallback=%.3f\n",
+		GetFrameTextureSlotName(autoExposurePresentSlot),
+		GetExposureDomainName(autoExposurePresentRoute.inputDomain),
+		YesNo(autoExposureSettings.enabled),
+		YesNo(autoExposureSceneHdrInput),
+		YesNo(autoExposureTextureValid),
+		YesNo(autoExposurePresentEligible),
+		autoExposurePresentRoute.presentExposure);
 	Printf("NRI PT nightvision: mode=%s view_eligible=%s active=%s presenter=%s strength=%.3f remaining_s=%.3f\n",
 		GetNightVisionModeName(mNightVisionState.mode),
 		YesNo(mNightVisionState.viewEligible),
@@ -37374,6 +37402,26 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 	ApplyOutputPolicyToPresentConstants(outputPolicy, constants);
 	ApplyNightVisionStateToPresentConstants(mNightVisionState, constants);
 	constants.Exposure = exposureRoute.presentExposure;
+	const bool finalPresentInputPreExposed = exposureRoute.inputDomain == ExposureDomain::PreExposedHDR;
+	const bool finalPresentAutoExposureEligible =
+		mExposure.GetSettings().enabled &&
+		exposureRoute.inputDomain == ExposureDomain::SceneHDR;
+	NRITextureResource* exposureStateTexture = nullptr;
+	if (finalPresentAutoExposureEligible)
+	{
+		NRITextureResource& candidateExposureState = mExposure.GetMutableExposureStateTexture(mFrameIndex & 1u);
+		if (candidateExposureState.texture != nullptr)
+		{
+			exposureStateTexture = &candidateExposureState;
+		}
+	}
+	const bool exposureStateTextureValid =
+		exposureStateTexture != nullptr &&
+		exposureStateTexture->shaderView != nullptr;
+	constants.OutputFlags |=
+		(finalPresentAutoExposureEligible ? NRI_PRESENT_OUTPUT_FLAG_AUTO_EXPOSURE : 0u) |
+		(exposureStateTextureValid ? NRI_PRESENT_OUTPUT_FLAG_EXPOSURE_TEXTURE_VALID : 0u) |
+		(finalPresentInputPreExposed ? NRI_PRESENT_OUTPUT_FLAG_INPUT_PRE_EXPOSED : 0u);
 	constants.DisplayWidth = mOutputWidth;
 	constants.DisplayHeight = mOutputHeight;
 	constants.FrameIndex = mFrameIndex;
@@ -37386,11 +37434,15 @@ bool NRIRenderer::DispatchFinalPresent(FrameTextureSlot inputSlot)
 	constants.InputHeight = input.height;
 
 	mFrameBuffer->TransitionTexture(input, NRIComputeShaderResourceState());
+	if (exposureStateTextureValid)
+	{
+		mFrameBuffer->TransitionTexture(*exposureStateTexture, NRIComputeShaderResourceState());
+	}
 	mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
 
 	const nri::Descriptor* inputs[3] = {
 		input.shaderView,
-		input.shaderView,
+		exposureStateTextureValid ? exposureStateTexture->shaderView : input.shaderView,
 		input.shaderView
 	};
 	nri::UpdateDescriptorRangeDesc inputUpdate = {};

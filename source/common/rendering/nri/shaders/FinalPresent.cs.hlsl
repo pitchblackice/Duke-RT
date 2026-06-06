@@ -5,10 +5,26 @@
 NRI_ROOT_CONSTANTS(NRIPresentConstants, gPresentConstants, 0, 2);
 
 Texture2D<float4> gInputTexture : register(t0, space0);
-Texture2D<float4> gUnused1 : register(t1, space0);
+Texture2D<float4> gExposureStateTexture : register(t1, space0);
 Texture2D<float4> gUnused2 : register(t2, space0);
 
 NRI_FORMAT("unknown") NRI_RESOURCE(RWTexture2D<float3>, gOutputTexture, u, 0, 1);
+
+float ResolvePresentExposure()
+{
+	const uint outputFlags = gPresentConstants.OutputFlags;
+	const bool shouldUseAutoExposure =
+		(outputFlags & NRI_PRESENT_OUTPUT_FLAG_AUTO_EXPOSURE) != 0u &&
+		(outputFlags & NRI_PRESENT_OUTPUT_FLAG_EXPOSURE_TEXTURE_VALID) != 0u &&
+		(outputFlags & NRI_PRESENT_OUTPUT_FLAG_INPUT_PRE_EXPOSED) == 0u;
+	if (!shouldUseAutoExposure)
+	{
+		return gPresentConstants.Exposure;
+	}
+
+	const float exposure = gExposureStateTexture.Load(int3(0, 0, 0)).x;
+	return exposure > 0.0 && !isnan(exposure) && !isinf(exposure) ? exposure : gPresentConstants.Exposure;
+}
 
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -37,10 +53,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	const bool hdrSwapChainActive =
 		gPresentConstants.OutputMode != NRI_PT_OUTPUT_MODE_SDR &&
 		(gPresentConstants.OutputFlags & NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE) != 0u;
+	const float presentExposure = ResolvePresentExposure();
 	if (gPresentConstants.DebugMode == 45u)
 	{
 		float3 debugColor = SanitizeFiniteColor(inputColor);
-		debugColor = ApplyManualExposure(debugColor, gPresentConstants.Exposure);
+		debugColor = ApplyManualExposure(debugColor, presentExposure);
 
 		gOutputTexture[targetPixelPos] = hdrSwapChainActive ?
 			ApplyHdrOutputMapping(
@@ -63,7 +80,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		gPresentConstants.OutputMode,
 		gPresentConstants.TonemapMode,
 		gPresentConstants.OutputFlags,
-		gPresentConstants.Exposure,
+		presentExposure,
 		gPresentConstants.Contrast,
 		gPresentConstants.Saturation,
 		gPresentConstants.Shoulder,
