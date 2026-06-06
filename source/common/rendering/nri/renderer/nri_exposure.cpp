@@ -3,6 +3,20 @@
 #include "c_cvars.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+
+namespace
+{
+	constexpr uint32_t NRI_AUTO_EXPOSURE_DEBUG_MAGIC = 0x45585033u;
+
+	float AsFloat(uint32_t value)
+	{
+		float result = 0.0f;
+		std::memcpy(&result, &value, sizeof(result));
+		return result;
+	}
+}
 
 CVAR(Bool, nri_ptautoexposure, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptautoexposurefreeze, false, 0)
@@ -155,7 +169,10 @@ bool NRIExposureController::MatchesRenderSize(uint32_t renderWidth, uint32_t ren
 
 void NRIExposureController::MarkResourcesAllocated(uint32_t renderWidth, uint32_t renderHeight, uint64_t memoryBytes)
 {
-	mStatus.resourcesAllocated = HasExposureStateTextures();
+	mStatus.resourcesAllocated = HasRequiredResources();
+	mStatus.histogramAllocated = HasHistogramResources();
+	mStatus.debugBufferAllocated = HasDebugBuffer();
+	mStatus.debugReadbackAllocated = HasDebugReadbackBuffer();
 	mStatus.renderWidth = std::max(renderWidth, 1u);
 	mStatus.renderHeight = std::max(renderHeight, 1u);
 	mStatus.memoryBytes = memoryBytes;
@@ -167,6 +184,48 @@ void NRIExposureController::MarkResourcesDestroyed()
 	ResetStatus();
 }
 
+void NRIExposureController::MarkDebugReadback(uint64_t frameIndex, const uint32_t* words, uint32_t wordCount)
+{
+	if (words == nullptr || wordCount < NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT || words[0] != NRI_AUTO_EXPOSURE_DEBUG_MAGIC)
+	{
+		ClearDebugReadback();
+		return;
+	}
+
+	mStatus.debugValid = true;
+	mStatus.debugFrameIndex = frameIndex;
+	mStatus.sampleCount = words[2];
+	mStatus.lowBin = words[5];
+	mStatus.highBin = words[6];
+	mStatus.lowLogLuminance = AsFloat(words[7]);
+	mStatus.highLogLuminance = AsFloat(words[8]);
+	mStatus.meteredLogLuminance = AsFloat(words[9]);
+	mStatus.targetExposure = AsFloat(words[10]);
+	mStatus.adaptedExposure = AsFloat(words[11]);
+	if (!std::isfinite(mStatus.lowLogLuminance) ||
+		!std::isfinite(mStatus.highLogLuminance) ||
+		!std::isfinite(mStatus.meteredLogLuminance) ||
+		!std::isfinite(mStatus.targetExposure) ||
+		!std::isfinite(mStatus.adaptedExposure))
+	{
+		ClearDebugReadback();
+	}
+}
+
+void NRIExposureController::ClearDebugReadback()
+{
+	mStatus.debugValid = false;
+	mStatus.debugFrameIndex = 0;
+	mStatus.sampleCount = 0;
+	mStatus.lowBin = 0;
+	mStatus.highBin = 0;
+	mStatus.lowLogLuminance = 0.0f;
+	mStatus.highLogLuminance = 0.0f;
+	mStatus.meteredLogLuminance = 0.0f;
+	mStatus.targetExposure = 1.0f;
+	mStatus.adaptedExposure = 1.0f;
+}
+
 const NRITextureResource* NRIExposureController::GetExposureStateTexture(uint32_t index) const
 {
 	if (index >= 2 || mExposureState[index].texture == nullptr)
@@ -175,6 +234,11 @@ const NRITextureResource* NRIExposureController::GetExposureStateTexture(uint32_
 	}
 
 	return &mExposureState[index];
+}
+
+bool NRIExposureController::HasRequiredResources() const
+{
+	return HasExposureStateTextures() && HasHistogramResources() && HasDebugBuffer();
 }
 
 bool NRIExposureController::HasExposureStateTextures() const
@@ -188,10 +252,29 @@ bool NRIExposureController::HasExposureStateTextures() const
 		mExposureState[1].storageView != nullptr;
 }
 
+bool NRIExposureController::HasHistogramResources() const
+{
+	return mHistogramBuffer.buffer != nullptr && mHistogramBuffer.shaderView != nullptr;
+}
+
+bool NRIExposureController::HasDebugBuffer() const
+{
+	return mDebugBuffer.buffer != nullptr && mDebugBuffer.shaderView != nullptr;
+}
+
+bool NRIExposureController::HasDebugReadbackBuffer() const
+{
+	return mDebugReadbackBuffer.buffer != nullptr;
+}
+
 void NRIExposureController::ResetStatus()
 {
 	mStatus.resourcesAllocated = false;
+	mStatus.histogramAllocated = false;
+	mStatus.debugBufferAllocated = false;
+	mStatus.debugReadbackAllocated = false;
 	mStatus.renderWidth = 0;
 	mStatus.renderHeight = 0;
 	mStatus.memoryBytes = 0;
+	ClearDebugReadback();
 }

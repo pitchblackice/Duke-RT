@@ -1417,6 +1417,12 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramClear.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramClear.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramBuild.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramBuild.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureResolve.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureResolve.cs.spirv"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${RAZE_NRI_SHADER_OUTPUT_DIR}"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T vs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.vs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T ps_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Nri2D.ps.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.ps.hlsl"
@@ -1442,6 +1448,12 @@ if (HAVE_NRI)
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssAfter.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
 		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramClear.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureHistogramClear.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramClear.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureHistogramClear.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramBuild.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureHistogramBuild.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramBuild.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureHistogramBuild.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureResolve.cs.dxil" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureResolve.cs.hlsl"
+		COMMAND "${RAZE_DXC_EXECUTABLE}" ${RAZE_NRI_COMMON_SHADER_ARGS} -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout -T cs_6_0 -E main -Fo "${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureResolve.cs.spirv" "${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureResolve.cs.hlsl"
 		DEPENDS
 			${NRI_SHADER_FILES}
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Nri2D.vs.hlsl"
@@ -1456,6 +1468,9 @@ if (HAVE_NRI)
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssBefore.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/DlssAfter.cs.hlsl"
 			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/Final.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureHistogramClear.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureHistogramBuild.cs.hlsl"
+			"${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/nri/shaders/ExposureResolve.cs.hlsl"
 		VERBATIM)
 	add_custom_target(raze_nri_shaders ALL
 		DEPENDS
@@ -1483,6 +1498,12 @@ if (HAVE_NRI)
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/DlssAfter.cs.spirv"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.dxil"
 			"${RAZE_NRI_SHADER_OUTPUT_DIR}/Final.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramClear.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramClear.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramBuild.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureHistogramBuild.cs.spirv"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureResolve.cs.dxil"
+			"${RAZE_NRI_SHADER_OUTPUT_DIR}/ExposureResolve.cs.spirv"
 		SOURCES ${NRI_SHADER_FILES}
 		VERBATIM)
 	set_target_properties(raze_nri_shaders PROPERTIES FOLDER "Shaders")

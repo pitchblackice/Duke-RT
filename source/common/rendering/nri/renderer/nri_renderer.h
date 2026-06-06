@@ -1375,7 +1375,7 @@ public:
 	void OnLevelLoadBegin(const LevelTransitionInfo& info);
 	void NotifyCameraCut(const char* reason);
 	void SetGuiCaptureState(bool active);
-	void PrintStatus() const;
+	void PrintStatus();
 	void PrintSwapChainRenderConfig() const;
 	void PrintSceneBufferStatus() const;
 	void PrintSceneLightDump(float radius, uint32_t limit) const;
@@ -1469,6 +1469,9 @@ private:
 		TraceOpaque,
 		Composition,
 		TraceTransparent,
+		ExposureHistogramClear,
+		ExposureHistogramBuild,
+		ExposureResolve,
 		Taa,
 		RawPresent,
 		FinalPresent,
@@ -2512,6 +2515,7 @@ private:
 	bool CreatePipelineLayout();
 	bool CreateTaaPipelineLayout();
 	bool CreatePresentPipelineLayout();
+	bool CreateExposurePipelineLayout();
 	bool CreatePipelines();
 	bool AllocateDescriptorSets();
 	bool EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
@@ -2898,6 +2902,10 @@ private:
 	void ReadbackTraceShaderStats();
 	bool EnsureAutoExposureResources(const NRIAutoExposureSettings& settings);
 	void DestroyAutoExposureResources();
+	bool UpdateAutoExposureDescriptorSets();
+	bool DispatchAutoExposure(FrameTextureSlot sourceSlot);
+	void CopyAutoExposureStatsForReadback(uint64_t frameNumber);
+	void ReadbackAutoExposureStats();
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
 	void TrackLiveSceneTextureResource(NRITextureResource& resource);
@@ -2925,6 +2933,7 @@ private:
 	nri::PipelineLayout* mPipelineLayout = nullptr;
 	nri::PipelineLayout* mTaaPipelineLayout = nullptr;
 	nri::PipelineLayout* mPresentPipelineLayout = nullptr;
+	nri::PipelineLayout* mExposurePipelineLayout = nullptr;
 	std::array<nri::Pipeline*, (size_t)PipelineSlot::Count> mPipelines = {};
 	nri::DescriptorSet* mSamplerSet = nullptr;
 	std::vector<nri::DescriptorSet*> mSceneTextureSets;
@@ -2941,6 +2950,8 @@ private:
 	nri::DescriptorSet* mRawPresentOutputSet = nullptr;
 	nri::DescriptorSet* mFinalPresentFrameTextureSet = nullptr;
 	nri::DescriptorSet* mFinalPresentOutputSet = nullptr;
+	std::array<nri::DescriptorSet*, 2> mExposureInputSets = {};
+	std::array<nri::DescriptorSet*, 2> mExposureOutputSets = {};
 
 	NRITextureResource* GetActiveSkyTexture() { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
 	const NRITextureResource* GetActiveSkyTexture() const { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
@@ -3029,6 +3040,7 @@ private:
 	PerfResourceTraceStats mLastPerfResourceTraceStats = {};
 	PerfTraceShaderStats mLastPerfTraceShaderStats = {};
 	uint64_t mPendingTraceShaderStatsFrame = 0;
+	uint64_t mPendingAutoExposureStatsFrame = 0;
 
 	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
