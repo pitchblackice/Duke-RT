@@ -128,6 +128,7 @@ CVAR(Bool, nri_pttaa, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_renderscale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, nri_sharpness, 0.1375f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Bool, nri_ptscenestats)
+EXTERN_CVAR(Bool, nri_ptautoexposurestats)
 EXTERN_CVAR(Bool, nri_voxelstats)
 EXTERN_CVAR(Bool, nri_ptslowdowntrace)
 EXTERN_CVAR(Bool, nri_ptemissivelighteditmode)
@@ -11915,11 +11916,14 @@ void NRIRenderer::RequestAutoExposureReset(const char* reason)
 {
 	const char* safeReason = reason != nullptr && *reason != '\0' ? reason : "unspecified";
 	mExposure.RequestReset(safeReason, (uint64_t)mFrameIndex);
-	const NRIAutoExposureStatus& status = mExposure.GetStatus();
-	Printf("NRI PT auto exposure reset: reason=%s frame=%u serial=%llu\n",
-		safeReason,
-		mFrameIndex,
-		(unsigned long long)status.resetSerial);
+	if (nri_ptautoexposurestats)
+	{
+		const NRIAutoExposureStatus& status = mExposure.GetStatus();
+		Printf("NRI PT auto exposure reset: reason=%s frame=%u serial=%llu\n",
+			safeReason,
+			mFrameIndex,
+			(unsigned long long)status.resetSerial);
+	}
 }
 
 void NRIRenderer::NotifyCameraCut(const char* reason)
