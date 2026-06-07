@@ -216,7 +216,7 @@ static const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace
 	default: return "unknown";
 	}
 }
-CUSTOM_CVAR(Int, nri_ptoutputmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, nri_ptoutputmode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
 	{
@@ -359,7 +359,7 @@ CUSTOM_CVAR(Float, nri_pthdrshoulder, 0.84375f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 		self = 1.50f;
 	}
 }
-CUSTOM_CVAR(Float, nri_pthdrtoe, 1.29688f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Float, nri_pthdrtoe, 1.1f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.50f)
 	{
