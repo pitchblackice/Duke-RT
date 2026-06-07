@@ -1112,6 +1112,7 @@ OptionMenu "VideoOptions" protected
 	Slider "High Percentile",					"nri_ptautoexposurehighpercentile",	75.0, 100.0, 0.5, 1
 	StaticText "Metering and percentiles are shared by SDR and HDR."
 	Slider "Fullbright Boost",					"nri_ptfullbrightboost",		0.50, 8.00, 0.25, 2
+	Slider "Sky Brightness",					"nri_ptskybrightness",		0.00, 4.00, 0.05, 2
 	StaticText "Output calibration affects final present; light energy remains upstream."
 	StaticText "Output-mode changes reset PT history."
 	StaticText ""

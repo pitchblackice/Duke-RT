@@ -1501,6 +1501,7 @@ private:
 		nri_scene::PTSkySourceType sourceType = nri_scene::PTSkySourceType::None;
 		FGameTexture* texture = nullptr;
 		uint32_t faceMask = 0;
+		float brightness = 1.0f;
 		bool flipTop = false;
 	};
 
