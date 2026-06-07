@@ -30,6 +30,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <typeinfo>
 #include <vector>
 #include <windows.h>
 
@@ -624,6 +625,20 @@ namespace
 			(vtableInfo.Protect & (PAGE_NOACCESS | PAGE_GUARD)) == 0;
 	}
 
+	FTexture* TryGetSkyTraceBaseTexture(FGameTexture* texture)
+	{
+		FTexture* baseTexture = nullptr;
+		__try
+		{
+			baseTexture = IsUsableGameTexturePointer(texture) ? texture->GetTexture() : nullptr;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			baseTexture = nullptr;
+		}
+		return baseTexture;
+	}
+
 	int GetOwnerActorIndex(const HWWall& wall)
 	{
 		return wall.Sprite != nullptr && wall.Sprite->ownerActor != nullptr ? wall.Sprite->ownerActor->GetIndex() : -1;
@@ -680,6 +695,21 @@ namespace
 			return priority + 1u;
 		default:
 			return priority;
+		}
+	}
+
+	const char* GetSkySourceTraceName(PTSkySourceType sourceType)
+	{
+		switch (sourceType)
+		{
+		case PTSkySourceType::Wall:
+			return "wall";
+		case PTSkySourceType::Flat:
+			return "flat";
+		case PTSkySourceType::Portal:
+			return "portal";
+		default:
+			return "none";
 		}
 	}
 
@@ -845,6 +875,31 @@ namespace
 				return false;
 			}
 			StoreCachedSkyInspection(texture, inspection);
+			if (ShouldTraceSkyPerf())
+			{
+				FTexture* baseTexture = TryGetSkyTraceBaseTexture(texture);
+				auto* skybox = dynamic_cast<FSkyBox*>(baseTexture);
+				Printf("NRI PT sky inspect: source=%s texture=%p name=%s texid=%d display=%dx%d base=%p base_type=%s base_size=%dx%d skybox=%s three_face=%s face_mask=0x%x flip_top=%s cubemap=%s avg=%s color=(%.3f, %.3f, %.3f)\n",
+					GetSkySourceTraceName(sourceType),
+					texture,
+					texture != nullptr ? texture->GetName().GetChars() : "(null)",
+					texture != nullptr ? texture->GetID().GetIndex() : -1,
+					texture != nullptr ? (int)texture->GetDisplayWidth() : 0,
+					texture != nullptr ? (int)texture->GetDisplayHeight() : 0,
+					baseTexture,
+					baseTexture != nullptr ? typeid(*baseTexture).name() : "(null)",
+					baseTexture != nullptr ? baseTexture->GetWidth() : 0,
+					baseTexture != nullptr ? baseTexture->GetHeight() : 0,
+					skybox != nullptr ? "yes" : "no",
+					inspection.isThreeFace ? "yes" : "no",
+					inspection.faceMask,
+					inspection.flipTop ? "yes" : "no",
+					inspection.isCubemap ? "yes" : "no",
+					inspection.hasAverageColor ? "yes" : "no",
+					inspection.color[0],
+					inspection.color[1],
+					inspection.color[2]);
+			}
 		}
 
 		ApplyCachedSkyInspectionToCandidate(inspection, fallbackColor, sourceType, outCandidate);

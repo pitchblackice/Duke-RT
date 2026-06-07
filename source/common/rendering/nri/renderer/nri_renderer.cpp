@@ -7266,6 +7266,14 @@ namespace
 		std::array<SkyFaceProbe, 6> faces = {};
 	};
 
+	struct PanoramaSkyProbe
+	{
+		FGameTexture* texture = nullptr;
+		uint32_t width = 1;
+		uint32_t height = 1;
+		uint64_t key = 0;
+	};
+
 	struct SkyUpload
 	{
 		uint64_t key = 0;
@@ -8028,6 +8036,141 @@ namespace
 		outUpload.width = probe.width;
 		outUpload.height = probe.height;
 		outUpload.cubemap = true;
+		return true;
+	}
+
+	static bool ProbePanoramaSky(const nri_scene::SceneView& sceneView, PanoramaSkyProbe& outProbe)
+	{
+		if (sceneView.sky.mode != nri_scene::PTSkyMode::SolidColor || !IsUsableGameTexturePointer(sceneView.sky.texture))
+		{
+			return false;
+		}
+
+		auto* skybox = dynamic_cast<FSkyBox*>(TryGetBaseTexture(sceneView.sky.texture));
+		if (skybox != nullptr)
+		{
+			return false;
+		}
+
+		SkyFaceProbe textureProbe = {};
+		if (!ProbeFace(sceneView.sky.texture, textureProbe))
+		{
+			return false;
+		}
+
+		uint64_t key = HashCombine64(1469598103934665603ull, 0x50414e4f534b5955ull);
+		key = HashCombine64(key, (uint64_t)(uintptr_t)sceneView.sky.texture);
+		key = HashCombine64(key, textureProbe.contentId);
+		key = HashCombine64(key, ((uint64_t)textureProbe.width << 32) | textureProbe.height);
+		outProbe.texture = sceneView.sky.texture;
+		outProbe.width = textureProbe.width;
+		outProbe.height = textureProbe.height;
+		outProbe.key = key;
+		return true;
+	}
+
+	static uint32_t GetPanoramaSkyFaceSize(uint32_t sourceHeight)
+	{
+		return std::clamp(sourceHeight, 64u, 1024u);
+	}
+
+	struct PanoramaDirection
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		float z = 1.0f;
+	};
+
+	static PanoramaDirection NormalizePanoramaDirection(PanoramaDirection dir)
+	{
+		const float lengthSq = dir.x * dir.x + dir.y * dir.y + dir.z * dir.z;
+		if (lengthSq <= 0.000001f)
+		{
+			return {};
+		}
+		const float invLength = 1.0f / std::sqrt(lengthSq);
+		dir.x *= invLength;
+		dir.y *= invLength;
+		dir.z *= invLength;
+		return dir;
+	}
+
+	static PanoramaDirection DirectionForPanoramaSkyFace(uint32_t faceIndex, float x, float y)
+	{
+		switch (faceIndex)
+		{
+		case 0:
+			return NormalizePanoramaDirection({ 1.0f, -y, -x });
+		case 1:
+			return NormalizePanoramaDirection({ -1.0f, -y, x });
+		case 2:
+			return NormalizePanoramaDirection({ x, 1.0f, y });
+		case 3:
+			return NormalizePanoramaDirection({ x, -1.0f, -y });
+		case 4:
+			return NormalizePanoramaDirection({ x, -y, 1.0f });
+		default:
+			return NormalizePanoramaDirection({ -x, -y, -1.0f });
+		}
+	}
+
+	static void SamplePanoramaSkyPixel(const SkyFaceUpload& source, float u, float v, uint8_t* outPixel)
+	{
+		if (source.pixels.empty() || source.width == 0 || source.height == 0)
+		{
+			outPixel[0] = outPixel[1] = outPixel[2] = 0;
+			outPixel[3] = 255;
+			return;
+		}
+
+		u = u - std::floor(u);
+		v = std::clamp(v, 0.0f, 1.0f);
+		const uint32_t x = std::min<uint32_t>((uint32_t)std::floor(u * (float)source.width), source.width - 1u);
+		const uint32_t y = std::min<uint32_t>((uint32_t)std::floor(v * (float)source.height), source.height - 1u);
+		const uint8_t* src = source.pixels.data() + ((size_t)y * source.width + x) * 4u;
+		outPixel[0] = src[0];
+		outPixel[1] = src[1];
+		outPixel[2] = src[2];
+		outPixel[3] = src[3];
+	}
+
+	static bool BuildPanoramaSkyUpload(const PanoramaSkyProbe& probe, SkyUpload& outUpload)
+	{
+		SkyFaceUpload source = {};
+		if (!CopyFacePixels(probe.texture, source))
+		{
+			return false;
+		}
+
+		const uint32_t faceSize = GetPanoramaSkyFaceSize(source.height);
+		outUpload = {};
+		outUpload.key = probe.key;
+		outUpload.width = faceSize;
+		outUpload.height = faceSize;
+		outUpload.cubemap = true;
+
+		constexpr float kInvPi = 0.31830988618f;
+		constexpr float kInvTwoPi = 0.15915494309f;
+		for (uint32_t face = 0; face < 6; ++face)
+		{
+			SkyFaceUpload& outFace = outUpload.faces[face];
+			outFace.width = faceSize;
+			outFace.height = faceSize;
+			outFace.pixels.resize((size_t)faceSize * faceSize * 4u);
+			for (uint32_t y = 0; y < faceSize; ++y)
+			{
+				for (uint32_t x = 0; x < faceSize; ++x)
+				{
+					const float fx = (((float)x + 0.5f) / (float)faceSize) * 2.0f - 1.0f;
+					const float fy = (((float)y + 0.5f) / (float)faceSize) * 2.0f - 1.0f;
+					const PanoramaDirection dir = DirectionForPanoramaSkyFace(face, fx, fy);
+					const float u = 0.5f + std::atan2(dir.x, dir.z) * kInvTwoPi;
+					const float v = 0.5f - std::asin(std::clamp(dir.y, -1.0f, 1.0f)) * kInvPi;
+					SamplePanoramaSkyPixel(source, u, v, outFace.pixels.data() + ((size_t)y * faceSize + x) * 4u);
+				}
+			}
+		}
+
 		return true;
 	}
 
@@ -26588,6 +26731,33 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		}
 		TraceSkyState(sceneView, "keep-last-cubemap", mSkyTextureKey);
 		return true;
+	}
+
+	PanoramaSkyProbe panoramaProbe = {};
+	if (ProbePanoramaSky(sceneView, panoramaProbe))
+	{
+		const uint32_t panoramaFaceSize = GetPanoramaSkyFaceSize(panoramaProbe.height);
+		const uint32_t cachedIndex = findCachedSkyTexture(panoramaProbe.key, panoramaFaceSize, panoramaFaceSize);
+		if (cachedIndex != UINT32_MAX)
+		{
+			activateCachedSky(cachedIndex, panoramaProbe.key, sceneView, nri_scene::PTSkyMode::Cubemap);
+			mSkyLevel = currentLevel;
+			TraceSkyState(sceneView, "activate-cached-panorama", panoramaProbe.key);
+			return true;
+		}
+
+		SkyUpload upload = {};
+		if (BuildPanoramaSkyUpload(panoramaProbe, upload))
+		{
+			const uint32_t createdIndex = createCachedSky(upload, nri_scene::PTSkyMode::Cubemap);
+			if (createdIndex != UINT32_MAX)
+			{
+				activateCachedSky(createdIndex, upload.key, sceneView, nri_scene::PTSkyMode::Cubemap);
+				mSkyLevel = currentLevel;
+				TraceSkyState(sceneView, "create-cached-panorama", upload.key);
+				return true;
+			}
+		}
 	}
 
 	SkyUpload upload = {};
