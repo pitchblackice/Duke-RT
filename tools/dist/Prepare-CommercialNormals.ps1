@@ -326,6 +326,40 @@ function Get-SteamLibraryRoots {
     return $libraries
 }
 
+function Add-DukeNamedChildCandidates {
+    param(
+        [System.Collections.Generic.List[string]]$Candidates,
+        [string]$Root
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root -PathType Container)) {
+        return
+    }
+
+    try {
+        $dukeDirs = @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction Stop |
+            Where-Object { $_.Name -match 'duke nukem 3d' } |
+            Sort-Object Name)
+        foreach ($dukeDir in $dukeDirs) {
+            Add-Candidate -Candidates $Candidates -Path $dukeDir.FullName
+        }
+    }
+    catch {
+    }
+}
+
+function Get-CommonGameRoots {
+    $roots = New-Object System.Collections.Generic.List[string]
+
+    Add-Candidate -Candidates $roots -Path "C:\GOG Games"
+    Add-Candidate -Candidates $roots -Path "C:\Program Files (x86)\GOG Galaxy\Games"
+    Add-Candidate -Candidates $roots -Path "C:\Program Files\GOG Galaxy\Games"
+    Add-Candidate -Candidates $roots -Path "C:\Program Files (x86)"
+    Add-Candidate -Candidates $roots -Path "C:\Program Files"
+
+    return $roots
+}
+
 function Get-AutoInstallCandidates {
     param([string]$LaunchRoot)
 
@@ -341,7 +375,9 @@ function Get-AutoInstallCandidates {
     }
 
     foreach ($library in Get-SteamLibraryRoots) {
-        Add-Candidate -Candidates $candidates -Path (Join-Path $library "steamapps\common\$worldTourDir")
+        $commonRoot = Join-Path $library "steamapps\common"
+        Add-Candidate -Candidates $candidates -Path (Join-Path $commonRoot $worldTourDir)
+        Add-DukeNamedChildCandidates -Candidates $candidates -Root $commonRoot
     }
 
     $packageCandidates = @(
@@ -354,9 +390,14 @@ function Get-AutoInstallCandidates {
     foreach ($candidate in $packageCandidates) {
         Add-Candidate -Candidates $candidates -Path $candidate
     }
+    Add-DukeNamedChildCandidates -Candidates $candidates -Root (Join-Path $LaunchRoot "games")
+    Add-DukeNamedChildCandidates -Candidates $candidates -Root $LaunchRoot
 
     Add-Candidate -Candidates $candidates -Path "C:\Program Files (x86)\Steam\steamapps\common\$worldTourDir"
     Add-Candidate -Candidates $candidates -Path "C:\Program Files\Steam\steamapps\common\$worldTourDir"
+    foreach ($root in Get-CommonGameRoots) {
+        Add-DukeNamedChildCandidates -Candidates $candidates -Root $root
+    }
 
     return $candidates
 }
@@ -455,7 +496,7 @@ function Resolve-DukeInstall {
     $candidate = Resolve-AutoInstallCandidate -LaunchRoot $LaunchRoot
     if ($candidate) {
         Write-Host ""
-        Write-Info "Found Duke Nukem 3D: Twentieth Anniversary World Tour at:"
+        Write-Info "Found a Duke Nukem 3D install at:"
         Write-Info "  $($candidate["install_root"])"
         Write-Host ""
         if (Prompt-YesNo -Question "Use this install") {
@@ -851,7 +892,7 @@ function Invoke-NormalImport {
 
     if (-not $SourceRoot) {
         if (-not $Quiet) {
-            Write-Info "World Tour textures source not found; skipping optional normals import."
+            Write-Warning "World Tour textures source not found; skipping optional normals import."
         }
         return
     }
@@ -859,7 +900,7 @@ function Invoke-NormalImport {
     $sourceFiles = Get-NormalSourceFiles -Root $SourceRoot
     if ($sourceFiles.Count -eq 0) {
         if (-not $Quiet) {
-            Write-Info "No '*_n.bmp' normals were found under '$SourceRoot'; skipping import."
+            Write-Warning "No '*_n.bmp' normals were found under '$SourceRoot'; skipping optional normals import."
         }
         return
     }

@@ -15,11 +15,11 @@ The renderer supports both Direct3D 12 and Vulkan, although feature support is m
 ## How To Run
 
 - Launch `launch-duke-rt.cmd` from the packaged release folder instead of starting `raze.exe` directly.
-- You should own and have installed `Duke Nukem 3D: 20th Anniversary World Tour` on the same machine for the intended Duke-RT content path.
-- On first run, the launcher will either confirm the detected World Tour install or ask for the folder containing `DUKE3D.GRP`; the verified path is reused on later runs.
-- If auto-detection picks the wrong install, launch with `launch-duke-rt.cmd -GameRoot "D:\path\to\Duke Nukem 3D Twentieth Anniversary World Tour"`.
+- You should own and have installed a Duke Nukem 3D release with a valid `DUKE3D.GRP`; `Duke Nukem 3D: 20th Anniversary World Tour` remains the intended visual baseline.
+- On first run, the launcher will either confirm the detected Duke Nukem 3D install or ask for the folder containing `DUKE3D.GRP`; the verified path is reused on later runs.
+- If auto-detection picks the wrong install, launch with `launch-duke-rt.cmd -GameRoot "D:\path\to\Duke Nukem 3D"`.
 - When the launcher detects World Tour normals, let it copy them into the packaged `release-overlay`. That is the intended setup for the current visual baseline.
-- Duke-RT can still run without those copied normals, but the presentation will be less complete because the overlay will be missing that extra normal-map data.
+- Duke-RT can still run without those copied normals. The launcher warns and continues when the selected Duke Nukem 3D install does not include World Tour normal-map data.
 - The launcher can also guide you through installing Cheello's Voxel Duke 3D pack into the local `release-overlay`. It opens the ModDB page in your browser, asks you to click `Download Now`, then returns to the console to unpack the downloaded archive.
 - Other Build-engine games may possibly launch because the underlying Raze game support is still present, but that path is not tested here and is not supported yet.
 
