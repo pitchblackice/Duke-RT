@@ -1,6 +1,7 @@
 #include "nri_renderer.h"
 
 #include "../framegen/nri_framegen.h"
+#include "nri_debug_reporters.h"
 #include "nri_frame_graph.h"
 #include "nri_renderstate.h"
 #include "nri_renderer_settings.h"
@@ -20635,67 +20636,49 @@ void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapC
 
 void NRIRenderer::PrintSceneBufferStatus() const
 {
-	const auto printBuffer = [](const NRIBufferResource& resource, const SceneBufferDebugStats& stats)
+	NRISceneBufferStatusSnapshot snapshot = {};
+	const auto appendBuffer = [&snapshot](const NRIBufferResource& resource, const SceneBufferDebugStats& stats)
 	{
-		const uint64_t usedItems = resource.stride != 0 ? resource.usedSize / resource.stride : 0;
-		const uint64_t capacityItems = resource.stride != 0 ? resource.size / resource.stride : 0;
-		Printf("NRI PT %s buffer: used=%llu/%llu bytes items=%llu/%llu uploads=%u grows=%u overwrites=%u last_frame_bytes=%llu last_frame_grows=%u last_frame_overwrites=%u peak_used=%llu\n",
-			stats.label,
-			(unsigned long long)resource.usedSize,
-			(unsigned long long)resource.size,
-			(unsigned long long)usedItems,
-			(unsigned long long)capacityItems,
-			stats.uploadCount,
-			stats.growthCount,
-			stats.overwriteCount,
-			(unsigned long long)stats.bytesUploadedLastFrame,
-			stats.growEventsLastFrame,
-			stats.overwriteEventsLastFrame,
-			(unsigned long long)stats.peakUsedBytes);
+		snapshot.buffers.push_back(BuildNRIBufferStatusSnapshot(resource, stats));
 	};
 
 	const NRIBufferResource& activeVertexBuffer = GetActiveVertexBuffer();
 	const NRIBufferResource& activeIndexBuffer = GetActiveIndexBuffer();
 	const NRIBufferResource& activePrimitiveBuffer = GetActivePrimitiveBuffer();
 	const NRIBufferResource& activeMaterialBuffer = GetActiveMaterialBuffer();
-	const uint64_t totalUsed = activeVertexBuffer.usedSize + activeIndexBuffer.usedSize + activePrimitiveBuffer.usedSize + activeMaterialBuffer.usedSize;
-	const uint64_t totalCapacity = activeVertexBuffer.size + activeIndexBuffer.size + activePrimitiveBuffer.size + activeMaterialBuffer.size;
-	const uint64_t lastFrameUploadBytes =
+	snapshot.totalUsedBytes = activeVertexBuffer.usedSize + activeIndexBuffer.usedSize + activePrimitiveBuffer.usedSize + activeMaterialBuffer.usedSize;
+	snapshot.totalCapacityBytes = activeVertexBuffer.size + activeIndexBuffer.size + activePrimitiveBuffer.size + activeMaterialBuffer.size;
+	snapshot.lastFrameUploadBytes =
 		mVertexBufferStats.bytesUploadedLastFrame +
 		mIndexBufferStats.bytesUploadedLastFrame +
 		mPrimitiveBufferStats.bytesUploadedLastFrame +
 		mMaterialBufferStats.bytesUploadedLastFrame;
-	const uint32_t lastFrameGrowEvents =
+	snapshot.lastFrameGrowEvents =
 		mVertexBufferStats.growEventsLastFrame +
 		mIndexBufferStats.growEventsLastFrame +
 		mPrimitiveBufferStats.growEventsLastFrame +
 		mMaterialBufferStats.growEventsLastFrame;
-	const uint32_t lastFrameOverwriteEvents =
+	snapshot.lastFrameOverwriteEvents =
 		mVertexBufferStats.overwriteEventsLastFrame +
 		mIndexBufferStats.overwriteEventsLastFrame +
 		mPrimitiveBufferStats.overwriteEventsLastFrame +
 		mMaterialBufferStats.overwriteEventsLastFrame;
 
-	Printf("NRI PT scene buffers: used=%llu capacity=%llu last_frame_upload=%llu last_frame_grows=%u last_frame_overwrites=%u\n",
-		(unsigned long long)totalUsed,
-		(unsigned long long)totalCapacity,
-		(unsigned long long)lastFrameUploadBytes,
-		lastFrameGrowEvents,
-		lastFrameOverwriteEvents);
-	printBuffer(activeVertexBuffer, mVertexBufferStats);
-	printBuffer(activeIndexBuffer, mIndexBufferStats);
-	printBuffer(activePrimitiveBuffer, mPrimitiveBufferStats);
-	printBuffer(activeMaterialBuffer, mMaterialBufferStats);
-	printBuffer(mPortalBuffer, mPortalBufferStats);
-	printBuffer(mRuntimeLightBuffer, mRuntimeLightBufferStats);
-	printBuffer(mRuntimeLightTileHeaderBuffer, mRuntimeLightTileHeaderBufferStats);
-	printBuffer(mRuntimeLightTileIndexBuffer, mRuntimeLightTileIndexBufferStats);
-	printBuffer(mEmissivePrimitiveHeaderBuffer, mEmissivePrimitiveHeaderBufferStats);
-	printBuffer(mEmissivePrimitiveBuffer, mEmissivePrimitiveBufferStats);
-	printBuffer(mEmissivePrimitiveCdfBuffer, mEmissivePrimitiveCdfBufferStats);
-	printBuffer(mEmissiveMaterialResponseBuffer, mEmissiveMaterialResponseBufferStats);
-	printBuffer(mSectorLightHeaderBuffer, mSectorLightHeaderBufferStats);
-	printBuffer(mSectorLightBuffer, mSectorLightBufferStats);
+	appendBuffer(activeVertexBuffer, mVertexBufferStats);
+	appendBuffer(activeIndexBuffer, mIndexBufferStats);
+	appendBuffer(activePrimitiveBuffer, mPrimitiveBufferStats);
+	appendBuffer(activeMaterialBuffer, mMaterialBufferStats);
+	appendBuffer(mPortalBuffer, mPortalBufferStats);
+	appendBuffer(mRuntimeLightBuffer, mRuntimeLightBufferStats);
+	appendBuffer(mRuntimeLightTileHeaderBuffer, mRuntimeLightTileHeaderBufferStats);
+	appendBuffer(mRuntimeLightTileIndexBuffer, mRuntimeLightTileIndexBufferStats);
+	appendBuffer(mEmissivePrimitiveHeaderBuffer, mEmissivePrimitiveHeaderBufferStats);
+	appendBuffer(mEmissivePrimitiveBuffer, mEmissivePrimitiveBufferStats);
+	appendBuffer(mEmissivePrimitiveCdfBuffer, mEmissivePrimitiveCdfBufferStats);
+	appendBuffer(mEmissiveMaterialResponseBuffer, mEmissiveMaterialResponseBufferStats);
+	appendBuffer(mSectorLightHeaderBuffer, mSectorLightHeaderBufferStats);
+	appendBuffer(mSectorLightBuffer, mSectorLightBufferStats);
+	PrintNRISceneBufferStatusSnapshot(snapshot);
 }
 
 void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging)
