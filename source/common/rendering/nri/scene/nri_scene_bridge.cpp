@@ -1411,20 +1411,14 @@ namespace
 				continue;
 			}
 
-			SurfaceRef surface = {};
 			uint32_t extraFlags = wall->Sprite != nullptr ? MaterialFlag_Sprite : MaterialFlag_None;
 			if (wall->Sprite != nullptr || DrawListUsesAlphaClip(drawListType))
 			{
 				extraFlags |= MaterialFlag_AlphaClip;
 			}
-			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, extraFlags);
-			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::DrawListWall, drawListType, GetOwnerActorIndex(*wall), surface.material.flags);
+			MaterialRef material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, extraFlags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
-			surface.vertices.reserve(wall->vertcount);
-			for (uint32_t i = 0; i < wall->vertcount; ++i)
-			{
-				surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
-			}
+			SurfaceRef surface = BuildSurfaceFromVertices(vertices, wall->vertcount, material, MakeWallProvenance(wall->seg, SurfaceSourceType::DrawListWall, drawListType, GetOwnerActorIndex(*wall), material.flags));
 
 			if (wall->Sprite != nullptr && wall->Sprite->ownerActor != nullptr)
 			{
@@ -1452,15 +1446,9 @@ namespace
 				continue;
 			}
 
-			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, MaterialFlag_Mirror);
-			surface.provenance = MakeWallProvenance(wall->seg, SurfaceSourceType::MirrorWall, drawListType, GetOwnerActorIndex(*wall), surface.material.flags);
+			MaterialRef material = MakeMaterialRef(wall->texture, wall->palette, wall->shade, wall->alpha, MaterialFlag_Mirror);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer((int)wall->vertindex);
-			surface.vertices.reserve(wall->vertcount);
-			for (uint32_t i = 0; i < wall->vertcount; ++i)
-			{
-				surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
-			}
+			SurfaceRef surface = BuildSurfaceFromVertices(vertices, wall->vertcount, material, MakeWallProvenance(wall->seg, SurfaceSourceType::MirrorWall, drawListType, GetOwnerActorIndex(*wall), material.flags));
 
 			outWalls.push_back(std::move(surface));
 			stats.mirrorSurfaces++;
@@ -1494,20 +1482,14 @@ namespace
 				continue;
 			}
 
-			SurfaceRef surface = {};
 			uint32_t extraFlags = MaterialFlag_Flat;
 			if (DrawListUsesAlphaClip(drawListType))
 			{
 				extraFlags |= MaterialFlag_AlphaClip;
 			}
-			surface.material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, extraFlags);
-			surface.provenance = MakeFlatProvenance(*flat, drawListType, surface.material.flags);
+			MaterialRef material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, extraFlags);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer(flat->vertindex);
-			surface.vertices.reserve((uint32_t)flat->vertcount);
-			for (int i = 0; i < flat->vertcount; ++i)
-			{
-				surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
-			}
+			SurfaceRef surface = BuildSurfaceFromVertices(vertices, (uint32_t)flat->vertcount, material, MakeFlatProvenance(*flat, drawListType, material.flags));
 
 			if (flat->Sprite != nullptr && flat->Sprite->ownerActor != nullptr)
 			{
@@ -1533,15 +1515,9 @@ namespace
 				continue;
 			}
 
-			SurfaceRef surface = {};
-			surface.material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, MaterialFlag_Flat | MaterialFlag_Sprite | MaterialFlag_AlphaClip);
-			surface.provenance = MakeFlatProvenance(*flat, drawListType, surface.material.flags);
+			MaterialRef material = MakeMaterialRef(flat->texture, flat->palette, flat->shade, flat->alpha, MaterialFlag_Flat | MaterialFlag_Sprite | MaterialFlag_AlphaClip);
 			const FFlatVertex* vertices = screen->mVertexData->GetBuffer(flat->vertindex);
-			surface.vertices.reserve((uint32_t)flat->vertcount);
-			for (int i = 0; i < flat->vertcount; ++i)
-			{
-				surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
-			}
+			SurfaceRef surface = BuildSurfaceFromVertices(vertices, (uint32_t)flat->vertcount, material, MakeFlatProvenance(*flat, drawListType, material.flags));
 
 			if (flat->Sprite != nullptr && flat->Sprite->ownerActor != nullptr)
 			{

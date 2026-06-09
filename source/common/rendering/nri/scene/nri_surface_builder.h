@@ -48,4 +48,17 @@ inline SurfaceRef BuildQuadSurface(const FFlatVertex* vertices, const MaterialRe
 	}
 	return surface;
 }
+
+inline SurfaceRef BuildSurfaceFromVertices(const FFlatVertex* vertices, uint32_t vertexCount, const MaterialRef& material, const SurfaceProvenance& provenance)
+{
+	SurfaceRef surface = {};
+	surface.material = material;
+	surface.provenance = provenance;
+	surface.vertices.reserve(vertexCount);
+	for (uint32_t i = 0; i < vertexCount; ++i)
+	{
+		surface.vertices.push_back(BuildCapturedVertex(vertices[i]));
+	}
+	return surface;
+}
 }
