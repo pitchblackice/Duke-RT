@@ -6,6 +6,7 @@
 #include "nri_renderer_settings.h"
 #include "nri_shader_contracts.h"
 #include "../scene/nri_map_builder.h"
+#include "../scene/nri_scene_stats.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
 #include "skyboxtexture.h"
@@ -5754,42 +5755,6 @@ namespace
 		return (lo & 0xffffu) | ((hi & 0xffffu) << 16u);
 	}
 
-	static nri_scene::SceneDebugStats MergeSceneStats(const nri_scene::SceneDebugStats& a, const nri_scene::SceneDebugStats& b)
-	{
-		nri_scene::SceneDebugStats merged = {};
-		merged.totalDrawItems = a.totalDrawItems + b.totalDrawItems;
-		merged.wallDrawItems = a.wallDrawItems + b.wallDrawItems;
-		merged.flatDrawItems = a.flatDrawItems + b.flatDrawItems;
-		merged.spriteDrawItems = a.spriteDrawItems + b.spriteDrawItems;
-		merged.translucentDrawItems = a.translucentDrawItems + b.translucentDrawItems;
-		merged.triangleEstimate = a.triangleEstimate + b.triangleEstimate;
-		merged.materialRefs = a.materialRefs + b.materialRefs;
-		merged.mirrorSurfaces = a.mirrorSurfaces + b.mirrorSurfaces;
-		merged.skySurfaces = a.skySurfaces + b.skySurfaces;
-		merged.portalViews = a.portalViews + b.portalViews;
-		merged.portalCapturesSkipped = a.portalCapturesSkipped + b.portalCapturesSkipped;
-		merged.modelDrawItems = a.modelDrawItems + b.modelDrawItems;
-		merged.voxelProxyDrawItems = a.voxelProxyDrawItems + b.voxelProxyDrawItems;
-		merged.unsupportedModelDrawItems = a.unsupportedModelDrawItems + b.unsupportedModelDrawItems;
-		merged.voxelStableCandidates = a.voxelStableCandidates + b.voxelStableCandidates;
-		merged.voxelStableUncacheable = a.voxelStableUncacheable + b.voxelStableUncacheable;
-		merged.voxelStableSignatureHits = a.voxelStableSignatureHits + b.voxelStableSignatureHits;
-		merged.voxelStableSignatureMisses = a.voxelStableSignatureMisses + b.voxelStableSignatureMisses;
-		merged.voxelStableSignatureChanges = a.voxelStableSignatureChanges + b.voxelStableSignatureChanges;
-		merged.voxelStableSplitStable = a.voxelStableSplitStable + b.voxelStableSplitStable;
-		merged.voxelStableSplitLive = a.voxelStableSplitLive + b.voxelStableSplitLive;
-		merged.voxelCacheEntries = a.voxelCacheEntries + b.voxelCacheEntries;
-		merged.voxelCacheSurfaceHits = a.voxelCacheSurfaceHits + b.voxelCacheSurfaceHits;
-		merged.voxelCacheSurfaceStores = a.voxelCacheSurfaceStores + b.voxelCacheSurfaceStores;
-		merged.voxelCacheSurfaceRebuilds = a.voxelCacheSurfaceRebuilds + b.voxelCacheSurfaceRebuilds;
-		merged.voxelCacheTransformRebakes = a.voxelCacheTransformRebakes + b.voxelCacheTransformRebakes;
-		merged.voxelCacheSurfaceRemoves = a.voxelCacheSurfaceRemoves + b.voxelCacheSurfaceRemoves;
-		merged.voxelCacheNotCaptured = a.voxelCacheNotCaptured + b.voxelCacheNotCaptured;
-		merged.voxelCacheDeferred = a.voxelCacheDeferred + b.voxelCacheDeferred;
-		merged.voxelCachePrimitives = a.voxelCachePrimitives + b.voxelCachePrimitives;
-		return merged;
-	}
-
 	static uint32_t GetPortalTraversalClass(nri_scene::PTPortalKind kind)
 	{
 		switch (kind)
@@ -6960,11 +6925,6 @@ namespace
 		float point[4] = { x, y, z, 1.0f };
 		VSMatrix copy = matrix;
 		copy.multMatrixPoint(point, out);
-	}
-
-	static bool StatsDiffer(const nri_scene::SceneDebugStats& a, const nri_scene::SceneDebugStats& b)
-	{
-		return memcmp(&a, &b, sizeof(a)) != 0;
 	}
 
 	static void Copy3(const float* src, float* dst)
@@ -11035,24 +10995,24 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						persistentVoxelStats.voxelCacheSurfaceRemoves = 0;
 						persistentVoxelStats.voxelCacheNotCaptured = 0;
 						persistentVoxelStats.voxelCachePrimitives = 0;
-						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, persistentVoxelStats);
+						dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, persistentVoxelStats);
 						mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxel = 1;
 					}
 					if (hasMirrorExtendedDynamicScene)
 					{
 						ScopedPtPerfTimer mirrorExtendedStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtendedMs);
-						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorExtendedDynamicSceneView.stats);
+						dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, mirrorExtendedDynamicSceneView.stats);
 						mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtended = 1;
 					}
 					if (hasMirrorPlayerScene)
 					{
 						ScopedPtPerfTimer mirrorPlayerStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayerMs);
-						dynamicOverlayStats = MergeSceneStats(dynamicOverlayStats, mirrorPlayerSceneView.stats);
+						dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, mirrorPlayerSceneView.stats);
 						mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayer = 1;
 					}
 					{
 						ScopedPtPerfTimer mergeStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMergeMs);
-						activeStats = MergeSceneStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
+						activeStats = nri_scene::MergeSceneDebugStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
 					}
 				}
 
@@ -38468,7 +38428,7 @@ void NRIRenderer::LogBridgeStats(const nri_scene::SceneDebugStats& stats)
 		return;
 	}
 
-	if (!mHasLoggedStats || StatsDiffer(mLastStats, stats))
+	if (!mHasLoggedStats || nri_scene::SceneDebugStatsDiffer(mLastStats, stats))
 	{
 		Printf("NRI PT scene: walls=%u flats=%u sprites=%u translucent=%u models=%u voxel_proxies=%u unsupported_models=%u voxel_cache=candidates:%u uncacheable:%u hits:%u misses:%u changes:%u split_stable:%u split_live:%u entries:%u surface_hits:%u stores:%u rebuilds:%u transform_rebakes:%u removes:%u not_captured:%u deferred:%u cached_prims:%u mirrors=%u skies=%u portal_views=%u portal_skips=%u approx_tris=%u materials=%u\n",
 			stats.wallDrawItems,

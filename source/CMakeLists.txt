@@ -940,6 +940,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_upscaler.cpp
 	common/rendering/nri/scene/nri_map_world.cpp
 	common/rendering/nri/scene/nri_map_builder.cpp
+	common/rendering/nri/scene/nri_scene_stats.cpp
 	common/rendering/nri/scene/nri_texture_signature.cpp
 	common/rendering/nri/scene/nri_scene_bridge.cpp
 	common/rendering/nri/scene/nri_portal_bridge.cpp

@@ -1,5 +1,7 @@
 #include "nri_portal_bridge.h"
 
+#include "nri_scene_stats.h"
+
 #include "c_cvars.h"
 #include "gamestruct.h"
 #include "hw_portal.h"
@@ -118,30 +120,7 @@ namespace
 		AppendTranslatedSurfaces(source.opaqueFlats, delta, outView.opaqueFlats);
 		AppendTranslatedSurfaces(source.opaqueSprites, delta, outView.opaqueSprites);
 		outView.stats.portalViews += 1;
-		outView.stats.materialRefs += source.stats.materialRefs;
-		outView.stats.triangleEstimate += source.stats.triangleEstimate;
-		outView.stats.mirrorSurfaces += source.stats.mirrorSurfaces;
-		outView.stats.skySurfaces += source.stats.skySurfaces;
-		outView.stats.modelDrawItems += source.stats.modelDrawItems;
-		outView.stats.voxelProxyDrawItems += source.stats.voxelProxyDrawItems;
-		outView.stats.unsupportedModelDrawItems += source.stats.unsupportedModelDrawItems;
-		outView.stats.voxelStableCandidates += source.stats.voxelStableCandidates;
-		outView.stats.voxelStableUncacheable += source.stats.voxelStableUncacheable;
-		outView.stats.voxelStableSignatureHits += source.stats.voxelStableSignatureHits;
-		outView.stats.voxelStableSignatureMisses += source.stats.voxelStableSignatureMisses;
-		outView.stats.voxelStableSignatureChanges += source.stats.voxelStableSignatureChanges;
-		outView.stats.voxelStableSplitStable += source.stats.voxelStableSplitStable;
-		outView.stats.voxelStableSplitLive += source.stats.voxelStableSplitLive;
-		outView.stats.voxelCacheEntries += source.stats.voxelCacheEntries;
-		outView.stats.voxelCacheSurfaceHits += source.stats.voxelCacheSurfaceHits;
-		outView.stats.voxelCacheSurfaceStores += source.stats.voxelCacheSurfaceStores;
-		outView.stats.voxelCacheSurfaceRebuilds += source.stats.voxelCacheSurfaceRebuilds;
-		outView.stats.voxelCacheTransformRebakes += source.stats.voxelCacheTransformRebakes;
-		outView.stats.voxelCacheSurfaceRemoves += source.stats.voxelCacheSurfaceRemoves;
-		outView.stats.voxelCacheNotCaptured += source.stats.voxelCacheNotCaptured;
-		outView.stats.voxelCacheDeferred += source.stats.voxelCacheDeferred;
-		outView.stats.voxelCachePrimitives += source.stats.voxelCachePrimitives;
-		outView.stats.portalCapturesSkipped += source.stats.portalCapturesSkipped;
+		AccumulateSceneDebugStats(outView.stats, source.stats);
 		if (source.sky.priority > outView.sky.priority)
 		{
 			outView.sky = source.sky;
