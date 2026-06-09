@@ -2,6 +2,13 @@
 
 #include "../system/nri_local.h"
 
+struct NRIResourceContext
+{
+	nri::Device* device = nullptr;
+	const nri::CoreInterface* core = nullptr;
+	nri::CommandBuffer* commandBuffer = nullptr;
+};
+
 struct NRIBufferResource
 {
 	nri::Buffer* buffer = nullptr;

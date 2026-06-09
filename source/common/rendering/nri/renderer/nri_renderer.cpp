@@ -27653,8 +27653,18 @@ void NRIRenderer::TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& 
 		event.resolvedGameTexture);
 }
 
+NRIResourceContext NRIRenderer::BuildResourceContext() const
+{
+	NRIResourceContext context = {};
+	context.device = mFrameBuffer != nullptr ? mFrameBuffer->mDevice : nullptr;
+	context.core = mFrameBuffer != nullptr ? &mFrameBuffer->mCore : nullptr;
+	context.commandBuffer = mFrameBuffer != nullptr ? mFrameBuffer->mCommandBuffer : nullptr;
+	return context;
+}
+
 bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after)
 {
+	const NRIResourceContext resourceContext = BuildResourceContext();
 	if (resource.buffer != nullptr || resource.shaderView != nullptr)
 	{
 		WaitForCommandsTracked();
@@ -27667,13 +27677,13 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 	desc.structureStride = stride;
 	desc.usage = usage;
 
-	if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE_UPLOAD, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
+	if (resourceContext.core->CreateCommittedBuffer(*resourceContext.device, nri::MemoryLocation::DEVICE_UPLOAD, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
 	{
 		return false;
 	}
 
 	nri::MemoryDesc memoryDesc = {};
-	mFrameBuffer->mCore.GetBufferMemoryDesc(*resource.buffer, nri::MemoryLocation::DEVICE_UPLOAD, memoryDesc);
+	resourceContext.core->GetBufferMemoryDesc(*resource.buffer, nri::MemoryLocation::DEVICE_UPLOAD, memoryDesc);
 	resource.size = desc.size;
 	resource.memorySize = memoryDesc.size;
 	resource.memoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
@@ -27686,14 +27696,14 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 	viewDesc.offset = 0;
 	viewDesc.size = nri::WHOLE_SIZE;
 	viewDesc.structureStride = stride;
-	if (mFrameBuffer->mCore.CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
+	if (resourceContext.core->CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
 	{
 		return false;
 	}
 
 	if (data != nullptr && size != 0)
 	{
-		void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, 0, desc.size);
+		void* mapped = resourceContext.core->MapBuffer(*resource.buffer, 0, desc.size);
 		if (mapped == nullptr)
 		{
 			return false;
@@ -27704,10 +27714,10 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 		{
 			std::memset(static_cast<uint8_t*>(mapped) + size, 0, (size_t)(desc.size - size));
 		}
-		mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
+		resourceContext.core->UnmapBuffer(*resource.buffer);
 	}
 
-	if (mFrameBuffer->mCommandBuffer != nullptr && after.access != nri::AccessBits::NONE)
+	if (resourceContext.commandBuffer != nullptr && after.access != nri::AccessBits::NONE)
 	{
 		nri::BufferBarrierDesc barrier = {};
 		barrier.buffer = resource.buffer;
@@ -27717,7 +27727,7 @@ bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void
 		nri::BarrierDesc barrierDesc = {};
 		barrierDesc.buffers = &barrier;
 		barrierDesc.bufferNum = 1;
-		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+		resourceContext.core->CmdBarrier(*resourceContext.commandBuffer, barrierDesc);
 	}
 
 	return true;
@@ -27882,42 +27892,25 @@ bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t 
 		WaitForCommandsTracked();
 	}
 
-	DestroyBufferResource(resource);
-
-	nri::BufferDesc desc = {};
-	desc.size = std::max<uint64_t>(size, stride);
-	desc.structureStride = stride;
-	desc.usage = usage;
-	if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
-	{
-		return false;
-	}
-
-	nri::MemoryDesc memoryDesc = {};
-	mFrameBuffer->mCore.GetBufferMemoryDesc(*resource.buffer, nri::MemoryLocation::DEVICE, memoryDesc);
-	resource.size = desc.size;
-	resource.memorySize = memoryDesc.size;
-	resource.memoryLocation = nri::MemoryLocation::DEVICE;
-	resource.usedSize = size;
-	resource.stride = stride;
-	return true;
+	return CreateBufferWithoutViewAtLocation(resource, size, stride, usage, nri::MemoryLocation::DEVICE);
 }
 
 bool NRIRenderer::CreateBufferWithoutViewAtLocation(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::MemoryLocation memoryLocation)
 {
+	const NRIResourceContext resourceContext = BuildResourceContext();
 	DestroyBufferResource(resource);
 
 	nri::BufferDesc desc = {};
 	desc.size = std::max<uint64_t>(size, stride);
 	desc.structureStride = stride;
 	desc.usage = usage;
-	if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, memoryLocation, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
+	if (resourceContext.core->CreateCommittedBuffer(*resourceContext.device, memoryLocation, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
 	{
 		return false;
 	}
 
 	nri::MemoryDesc memoryDesc = {};
-	mFrameBuffer->mCore.GetBufferMemoryDesc(*resource.buffer, memoryLocation, memoryDesc);
+	resourceContext.core->GetBufferMemoryDesc(*resource.buffer, memoryLocation, memoryDesc);
 	resource.size = desc.size;
 	resource.memorySize = memoryDesc.size;
 	resource.usedSize = size;

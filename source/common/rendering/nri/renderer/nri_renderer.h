@@ -1420,6 +1420,7 @@ public:
 	MemoryTelemetry GetMemoryTelemetry() const;
 	static const char* GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot);
 private:
+	NRIResourceContext BuildResourceContext() const;
 	enum class FrameTextureSlot : uint32_t
 	{
 		ViewZ,
