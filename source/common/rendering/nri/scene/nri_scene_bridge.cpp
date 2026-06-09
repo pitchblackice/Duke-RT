@@ -2,6 +2,7 @@
 
 #include "nri_geometry_bridge.h"
 #include "nri_portal_bridge.h"
+#include "nri_surface_builder.h"
 #include "nri_scene_texture_utils.h"
 #include "nri_texture_signature.h"
 
@@ -616,30 +617,12 @@ namespace
 
 	CapturedVertex MakeCapturedVertex(const FFlatVertex& source)
 	{
-		CapturedVertex vertex = {};
-		vertex.position[0] = source.x;
-		vertex.position[1] = source.z;
-		vertex.position[2] = source.y;
-		vertex.prevPosition[0] = vertex.position[0];
-		vertex.prevPosition[1] = vertex.position[1];
-		vertex.prevPosition[2] = vertex.position[2];
-		vertex.uv[0] = source.u;
-		vertex.uv[1] = source.v;
-		return vertex;
+		return BuildCapturedVertex(source);
 	}
 
 	CapturedVertex MakeCapturedVertex(float x, float y, float z, float u, float v)
 	{
-		CapturedVertex vertex = {};
-		vertex.position[0] = x;
-		vertex.position[1] = y;
-		vertex.position[2] = z;
-		vertex.prevPosition[0] = x;
-		vertex.prevPosition[1] = y;
-		vertex.prevPosition[2] = z;
-		vertex.uv[0] = u;
-		vertex.uv[1] = v;
-		return vertex;
+		return BuildCapturedVertex(x, y, z, u, v);
 	}
 
 	uint32_t MakeSkyPriority(PTSkyMode mode, PTSkySourceType sourceType)
@@ -1632,19 +1615,13 @@ namespace
 				continue;
 			}
 
-			SurfaceRef surface = {};
 			uint32_t extraFlags = MaterialFlag_Sprite | MaterialFlag_AlphaClip;
 			if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
 			{
 				extraFlags |= MaterialFlag_FacingBillboard;
 			}
-			surface.material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, extraFlags);
-			surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::FacingSprite, drawListType, surface.material.flags);
-			surface.vertices.reserve(4);
-			for (uint32_t i = 0; i < 4; ++i)
-			{
-				surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
-			}
+			MaterialRef material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, extraFlags);
+			SurfaceRef surface = BuildQuadSurface(vertices, material, MakeSpriteProvenance(*sprite, SurfaceSourceType::FacingSprite, drawListType, material.flags));
 
 			if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
 			{
@@ -1699,19 +1676,13 @@ namespace
 				continue;
 			}
 
-			SurfaceRef surface = {};
 			uint32_t extraFlags = MaterialFlag_Sprite | MaterialFlag_AlphaClip;
 			if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
 			{
 				extraFlags |= MaterialFlag_FacingBillboard;
 			}
-			surface.material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, extraFlags);
-			surface.provenance = MakeSpriteProvenance(*sprite, SurfaceSourceType::FacingSprite, drawListType, surface.material.flags);
-			surface.vertices.reserve(4);
-			for (uint32_t i = 0; i < 4; ++i)
-			{
-				surface.vertices.push_back(MakeCapturedVertex(vertices[i]));
-			}
+			MaterialRef material = MakeMaterialRef(sprite->texture, sprite->palette, sprite->shade, sprite->alpha, extraFlags);
+			SurfaceRef surface = BuildQuadSurface(vertices, material, MakeSpriteProvenance(*sprite, SurfaceSourceType::FacingSprite, drawListType, material.flags));
 
 			if (sprite->Sprite != nullptr && sprite->Sprite->ownerActor != nullptr)
 			{
