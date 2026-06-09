@@ -64,6 +64,29 @@ enum SceneLightDiagnosticFlags : uint32_t
 	SceneLightDiagnosticFlag_Added = 1u << 3,
 };
 
+struct NRILightingSettings
+{
+	float emissiveMinPower = 0.0f;
+	float emissiveMinSurface = 0.0f;
+	float glowScale = 1.0f;
+	float glowReach = 1.0f;
+	float glowFalloff = 1.0f;
+	bool sectorLighting = false;
+	float sectorAmbientScale = 1.0f;
+	float sectorHemisphereScale = 1.0f;
+	float sectorFogScale = 1.0f;
+	float sectorClamp = 1.0f;
+	int sectorFilterPalette = -1;
+	int sectorFilterMinShade = -128;
+	int sectorFilterMaxShade = 127;
+	int sectorFilterLotag = -1;
+	int sectorPulseFrames = 0;
+	float sectorPulseAmount = 0.0f;
+	float sectorEmissionSignalStrength = 1.0f;
+	float sectorEmissionResponseMin = 0.25f;
+	float sectorEmissionResponseMax = 3.0f;
+};
+
 class SceneLightSystem
 {
 public:
@@ -467,6 +490,7 @@ public:
 	bool ConsumeSectorLightingTopologyChanged();
 
 private:
+	static NRILightingSettings CaptureSettings();
 	void AppendSurfaceRecord(SurfaceRecord record, uint32_t materialIndexBase);
 	void AppendSurfaceList(
 		const std::vector<nri_scene::SurfaceRef>& surfaces,

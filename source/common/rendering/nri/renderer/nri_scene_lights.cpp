@@ -787,19 +787,19 @@ namespace
 		return (sourceFlags & (SceneEmissiveSurfaceSourceFlag_AutoTextureGlow | SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0;
 	}
 
-	float ResolveGlowStrengthScale(uint32_t sourceFlags, uint32_t emissiveMode)
+	float ResolveGlowStrengthScale(uint32_t sourceFlags, uint32_t emissiveMode, const NRILightingSettings& settings)
 	{
-		return IsGlowDrivenEmissive(sourceFlags, emissiveMode) ? std::max((float)nri_ptglowscale, 0.0f) : 1.0f;
+		return IsGlowDrivenEmissive(sourceFlags, emissiveMode) ? std::max(settings.glowScale, 0.0f) : 1.0f;
 	}
 
-	float ResolveGlowSamplingScale(uint32_t sourceFlags, uint32_t emissiveMode)
+	float ResolveGlowSamplingScale(uint32_t sourceFlags, uint32_t emissiveMode, const NRILightingSettings& settings)
 	{
-		return IsGlowDrivenEmissive(sourceFlags, emissiveMode) ? std::max((float)nri_ptglowreach, 0.0f) : 1.0f;
+		return IsGlowDrivenEmissive(sourceFlags, emissiveMode) ? std::max(settings.glowReach, 0.0f) : 1.0f;
 	}
 
-	float ResolveGlowFalloffScale(uint32_t sourceFlags, uint32_t emissiveMode)
+	float ResolveGlowFalloffScale(uint32_t sourceFlags, uint32_t emissiveMode, const NRILightingSettings& settings)
 	{
-		return IsGlowDrivenEmissive(sourceFlags, emissiveMode) ? std::clamp((float)nri_ptglowfalloff, 0.25f, 4.0f) : 1.0f;
+		return IsGlowDrivenEmissive(sourceFlags, emissiveMode) ? std::clamp(settings.glowFalloff, 0.25f, 4.0f) : 1.0f;
 	}
 
 	bool HasPalEntryColor(const PalEntry& color)
@@ -1016,7 +1016,8 @@ namespace
 
 	void ApplyEmissiveOverrideRule(
 		const SceneLightSystem::EmissiveOverrideRule& rule,
-		SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive)
+		SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive,
+		const NRILightingSettings& settings)
 	{
 		emissive.sourceFlags |= SceneEmissiveSurfaceSourceFlag_LightOverlayOverride;
 		emissive.overrideRuleId = rule.ruleId;
@@ -1043,9 +1044,9 @@ namespace
 		if (rule.hasResponseIntensity || rule.hasResponseMin || rule.hasResponseMax || rule.hasResponseInputMin || rule.hasResponseInputMax)
 		{
 			emissive.hasSectorResponseParams = true;
-			emissive.sectorResponseIntensity = rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, (float)nri_ptsectoremissionsignalstrength);
-			emissive.sectorResponseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionresponsemin);
-			emissive.sectorResponseMax = rule.hasResponseMax ? rule.responseMax : std::max(emissive.sectorResponseMin, (float)nri_ptsectoremissionresponsemax);
+			emissive.sectorResponseIntensity = rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, settings.sectorEmissionSignalStrength);
+			emissive.sectorResponseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, settings.sectorEmissionResponseMin);
+			emissive.sectorResponseMax = rule.hasResponseMax ? rule.responseMax : std::max(emissive.sectorResponseMin, settings.sectorEmissionResponseMax);
 			emissive.hasSectorResponseInputRange = rule.hasResponseInputMin && rule.hasResponseInputMax;
 			emissive.sectorResponseInputMin = rule.hasResponseInputMin ? rule.responseInputMin : 0.0f;
 			emissive.sectorResponseInputMax = rule.hasResponseInputMax ? rule.responseInputMax : 1.0f;
@@ -1098,6 +1099,7 @@ namespace
 	bool EvaluateEmissiveMaterial(
 		const SceneLightSystem::EmissiveSurfaceRegistry& registry,
 		const nri_scene::MaterialLightingMetadata& metadata,
+		const NRILightingSettings& settings,
 		uint32_t& outSourceFlags,
 		uint32_t& outRuleId,
 		float outColor[3],
@@ -1197,11 +1199,36 @@ namespace
 			return false;
 		}
 
-		outIntensity *= ResolveGlowStrengthScale(outSourceFlags, outMode);
-		outSamplingScale = ResolveGlowSamplingScale(outSourceFlags, outMode);
-		outFalloffScale = ResolveGlowFalloffScale(outSourceFlags, outMode);
+		outIntensity *= ResolveGlowStrengthScale(outSourceFlags, outMode, settings);
+		outSamplingScale = ResolveGlowSamplingScale(outSourceFlags, outMode, settings);
+		outFalloffScale = ResolveGlowFalloffScale(outSourceFlags, outMode, settings);
 		return outIntensity > 0.0f;
 	}
+}
+
+NRILightingSettings SceneLightSystem::CaptureSettings()
+{
+	NRILightingSettings settings = {};
+	settings.emissiveMinPower = (float)nri_ptemissiveminpower;
+	settings.emissiveMinSurface = (float)nri_ptemissiveminsurface;
+	settings.glowScale = (float)nri_ptglowscale;
+	settings.glowReach = (float)nri_ptglowreach;
+	settings.glowFalloff = (float)nri_ptglowfalloff;
+	settings.sectorLighting = !!nri_ptsectorlighting;
+	settings.sectorAmbientScale = (float)nri_ptsectorambientscale;
+	settings.sectorHemisphereScale = (float)nri_ptsectorhemiscale;
+	settings.sectorFogScale = (float)nri_ptsectorfogscale;
+	settings.sectorClamp = (float)nri_ptsectorclamp;
+	settings.sectorFilterPalette = (int)nri_ptsectorfilterpal;
+	settings.sectorFilterMinShade = (int)nri_ptsectorfilterminshade;
+	settings.sectorFilterMaxShade = (int)nri_ptsectorfiltermaxshade;
+	settings.sectorFilterLotag = (int)nri_ptsectorfilterlotag;
+	settings.sectorPulseFrames = (int)nri_ptsectorpulseframes;
+	settings.sectorPulseAmount = (float)nri_ptsectorpulseamount;
+	settings.sectorEmissionSignalStrength = (float)nri_ptsectoremissionsignalstrength;
+	settings.sectorEmissionResponseMin = (float)nri_ptsectoremissionresponsemin;
+	settings.sectorEmissionResponseMax = (float)nri_ptsectoremissionresponsemax;
+	return settings;
 }
 
 void SceneLightSystem::Reset()
@@ -1415,6 +1442,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 	const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules,
 	const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules)
 {
+	const NRILightingSettings settings = CaptureSettings();
 	std::vector<SceneAnalyticLight> nextLights;
 	size_t overlayRuleCount = 0;
 	if (actorOverlayRules != nullptr)
@@ -1570,18 +1598,18 @@ void SceneLightSystem::RebuildAnalyticLights(
 						sectorRecord.rawResponseSignal,
 						rule.responseInputMin,
 						rule.responseInputMax,
-						rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionresponsemin),
-						rule.hasResponseMax ? rule.responseMax : std::max(std::max(0.0f, (float)nri_ptsectoremissionresponsemin), (float)nri_ptsectoremissionresponsemax));
+						rule.hasResponseMin ? rule.responseMin : std::max(0.0f, settings.sectorEmissionResponseMin),
+						rule.hasResponseMax ? rule.responseMax : std::max(std::max(0.0f, settings.sectorEmissionResponseMin), settings.sectorEmissionResponseMax));
 				}
 				else if (rule.hasResponseIntensity || rule.hasResponseMin || rule.hasResponseMax)
 				{
-					const float responseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, (float)nri_ptsectoremissionresponsemin);
+					const float responseMin = rule.hasResponseMin ? rule.responseMin : std::max(0.0f, settings.sectorEmissionResponseMin);
 					sectorScale = ComputeSectorEmitterResponseScale(
 						sectorRecord.rawResponseBrightness,
-						std::min(std::max(0.0f, (float)nri_ptsectorclamp), std::max(0.0f, (float)nri_ptsectorambientscale) * (0.10f + 0.75f * 0.55f)),
-						rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, (float)nri_ptsectoremissionsignalstrength),
+						std::min(std::max(0.0f, settings.sectorClamp), std::max(0.0f, settings.sectorAmbientScale) * (0.10f + 0.75f * 0.55f)),
+						rule.hasResponseIntensity ? rule.responseIntensity : std::max(0.0f, settings.sectorEmissionSignalStrength),
 						responseMin,
-						rule.hasResponseMax ? rule.responseMax : std::max(responseMin, (float)nri_ptsectoremissionresponsemax));
+						rule.hasResponseMax ? rule.responseMax : std::max(responseMin, settings.sectorEmissionResponseMax));
 				}
 				else
 				{
@@ -1682,6 +1710,7 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 	const std::vector<EmissiveOverrideRule>* overrideRules,
 	const std::vector<EmissiveMaterialResponseRule>* materialResponseRules)
 {
+	const NRILightingSettings settings = CaptureSettings();
 	mEmissiveSurfaces.totalPowerEstimate = 0.0f;
 	mEmissiveSurfaces.autoTaggedCount = 0;
 	mEmissiveSurfaces.explicitRuleMatchCount = 0;
@@ -1694,8 +1723,8 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 	std::vector<EmissiveSurfaceRegistry::EmissiveSurfaceRecord> nextSurfaces;
 	nextSurfaces.reserve(std::min<uint32_t>((uint32_t)mSurfaceRecords.size(), maxActiveSurfaces));
 
-	const float minSurfaceArea = std::max((float)nri_ptemissiveminsurface, 0.0f);
-	const float minPower = std::max((float)nri_ptemissiveminpower, 0.0f);
+	const float minSurfaceArea = std::max(settings.emissiveMinSurface, 0.0f);
+	const float minPower = std::max(settings.emissiveMinPower, 0.0f);
 
 	for (const SurfaceRecord& record : mSurfaceRecords)
 	{
@@ -1707,7 +1736,7 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 		uint32_t emissiveTextureIndex = UINT32_MAX;
 		float emissiveSamplingScale = 1.0f;
 		float emissiveFalloffScale = 1.0f;
-		if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, record.material, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale))
+		if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, record.material, settings, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale))
 		{
 			continue;
 		}
@@ -1758,7 +1787,7 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 			{
 				if (EmissiveOverrideMatchesSurface(rule, record))
 				{
-					ApplyEmissiveOverrideRule(rule, emissive);
+					ApplyEmissiveOverrideRule(rule, emissive, settings);
 					matchedOverride = true;
 				}
 			}
@@ -1880,6 +1909,7 @@ void SceneLightSystem::RebuildEmissiveSurfaces(
 
 void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount)
 {
+	const NRILightingSettings settings = CaptureSettings();
 	mSectorLighting.sectorCount = sectorCount;
 	mSectorLighting.eligibleSectorCount = 0;
 	mSectorLighting.rawActiveSectorCount = 0;
@@ -1914,31 +1944,31 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 	mSectorLighting.rawActiveSectorIndices.clear();
 	mSectorLighting.rawActiveSectorIndices.reserve(sectorCount);
 
-	if (!nri_ptsectorlighting || sectorCount == 0)
+	if (!settings.sectorLighting || sectorCount == 0)
 	{
 		mSectorLighting.topologyChanged = !mSectorLighting.activeTopologyKeys.empty();
 		mSectorLighting.activeTopologyKeys.clear();
 		return;
 	}
 
-	const int paletteFilter = (int)nri_ptsectorfilterpal;
-	const int minShadeFilter = (int)nri_ptsectorfilterminshade;
-	const int maxShadeFilter = std::max(minShadeFilter, (int)nri_ptsectorfiltermaxshade);
-		const int lotagFilter = (int)nri_ptsectorfilterlotag;
-		const uint32_t pulseFrames = std::max(0, (int)nri_ptsectorpulseframes);
-		const float pulseAmount = std::max(0.0f, (float)nri_ptsectorpulseamount);
+	const int paletteFilter = settings.sectorFilterPalette;
+	const int minShadeFilter = settings.sectorFilterMinShade;
+	const int maxShadeFilter = std::max(minShadeFilter, settings.sectorFilterMaxShade);
+		const int lotagFilter = settings.sectorFilterLotag;
+		const uint32_t pulseFrames = std::max(0, settings.sectorPulseFrames);
+		const float pulseAmount = std::max(0.0f, settings.sectorPulseAmount);
 		const bool pulseSelectionFiltered =
 			paletteFilter >= 0 ||
 			lotagFilter >= 0 ||
 			minShadeFilter > -128 ||
 			maxShadeFilter < 127;
-		const float ambientScale = std::max(0.0f, (float)nri_ptsectorambientscale);
-		const float hemisphereScale = std::max(0.0f, (float)nri_ptsectorhemiscale);
-		const float fogScale = std::max(0.0f, (float)nri_ptsectorfogscale);
-	const float sectorClamp = std::max(0.0f, (float)nri_ptsectorclamp);
-	const float responseIntensity = std::max(0.0f, (float)nri_ptsectoremissionsignalstrength);
-	const float responseMin = std::max(0.0f, (float)nri_ptsectoremissionresponsemin);
-	const float responseMax = std::max(responseMin, (float)nri_ptsectoremissionresponsemax);
+		const float ambientScale = std::max(0.0f, settings.sectorAmbientScale);
+		const float hemisphereScale = std::max(0.0f, settings.sectorHemisphereScale);
+		const float fogScale = std::max(0.0f, settings.sectorFogScale);
+	const float sectorClamp = std::max(0.0f, settings.sectorClamp);
+	const float responseIntensity = std::max(0.0f, settings.sectorEmissionSignalStrength);
+	const float responseMin = std::max(0.0f, settings.sectorEmissionResponseMin);
+	const float responseMax = std::max(responseMin, settings.sectorEmissionResponseMax);
 	const float neutralAmbient = std::min(sectorClamp, ambientScale * (0.10f + 0.75f * 0.55f));
 
 	for (uint32_t sectorIndex = 0; sectorIndex < sectorCount; ++sectorIndex)
@@ -2227,6 +2257,7 @@ void SceneLightSystem::ClearTextureEmissiveHeuristics()
 
 bool SceneLightSystem::MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const
 {
+	const NRILightingSettings settings = CaptureSettings();
 	uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
 	uint32_t sourceRuleId = 0;
 	float emissiveColor[3] = {};
@@ -2235,11 +2266,12 @@ bool SceneLightSystem::MaterialWouldEmit(const nri_scene::MaterialLightingMetada
 	uint32_t emissiveTextureIndex = UINT32_MAX;
 	float emissiveSamplingScale = 1.0f;
 	float emissiveFalloffScale = 1.0f;
-	return EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale);
+	return EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, settings, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale);
 }
 
 bool SceneLightSystem::ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const
 {
+	const NRILightingSettings settings = CaptureSettings();
 	uint32_t sourceFlags = SceneEmissiveSurfaceSourceFlag_None;
 	uint32_t sourceRuleId = 0;
 	float emissiveColor[3] = {};
@@ -2248,7 +2280,7 @@ bool SceneLightSystem::ApplyEmissiveMaterialSettings(const nri_scene::MaterialLi
 	uint32_t emissiveTextureIndex = UINT32_MAX;
 	float emissiveSamplingScale = 1.0f;
 	float emissiveFalloffScale = 1.0f;
-	if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale))
+	if (!EvaluateEmissiveMaterial(mEmissiveSurfaces, metadata, settings, sourceFlags, sourceRuleId, emissiveColor, emissiveIntensity, emissiveMode, emissiveTextureIndex, emissiveSamplingScale, emissiveFalloffScale))
 	{
 		inOutMaterial.emissiveColor[0] = 0.0f;
 		inOutMaterial.emissiveColor[1] = 0.0f;
