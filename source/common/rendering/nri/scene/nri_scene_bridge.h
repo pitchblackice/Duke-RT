@@ -1,5 +1,7 @@
 #pragma once
 
+#include "nri_scene_surface_types.h"
+
 #include "flatvertices.h"
 #include "hw_drawinfo.h"
 #include "hw_drawstructs.h"
@@ -82,45 +84,6 @@ struct DynamicVoxelEscapeTraceEntry
 	bool hasCachedSurface = false;
 };
 
-enum class SurfaceSourceType : uint32_t
-{
-	Unknown = 0,
-	DrawListWall,
-	MirrorWall,
-	FloorFlat,
-	CeilingFlat,
-	FacingSprite,
-	VoxelProxySprite,
-	MapWallBand,
-	MapFloorSection,
-	MapCeilingSection,
-	MapPortalSurface,
-	DebugSphere,
-	SurfaceLightOverlay,
-};
-
-enum MaterialFlags : uint32_t
-{
-	MaterialFlag_None = 0,
-	MaterialFlag_Indexed = 1u << 0,
-	MaterialFlag_Fullbright = 1u << 1,
-	MaterialFlag_Flat = 1u << 2,
-	MaterialFlag_Sprite = 1u << 3,
-	MaterialFlag_Mirror = 1u << 4,
-	MaterialFlag_Sky = 1u << 5,
-	MaterialFlag_Portal = 1u << 6,
-	MaterialFlag_OneWay = 1u << 7,
-	MaterialFlag_AlphaClip = 1u << 8,
-	MaterialFlag_FacingBillboard = 1u << 9,
-	MaterialFlag_PointSampled = 1u << 10,
-};
-
-enum PrimitiveFlags : uint32_t
-{
-	PrimitiveFlag_None = 0,
-	PrimitiveFlag_ReflectionOnly = 1u << 16,
-};
-
 enum class PTSkyMode : uint32_t
 {
 	None = 0,
@@ -145,20 +108,6 @@ struct PTSkyDescriptor
 	uint32_t priority = 0;
 	bool flipTop = false;
 	bool isThreeFace = false;
-};
-
-struct SurfaceProvenance
-{
-	SurfaceSourceType sourceType = SurfaceSourceType::Unknown;
-	int32_t sectorIndex = -1;
-	int32_t wallIndex = -1;
-	int32_t sectionIndex = -1;
-	int32_t mapChunkIndex = -1;
-	int32_t nextSectorIndex = -1;
-	int32_t actorIndex = -1;
-	uint32_t drawListType = UINT32_MAX;
-	uint32_t cstat = 0;
-	uint32_t materialFlags = 0;
 };
 
 struct SceneDebugStats
@@ -296,31 +245,6 @@ struct VoxelMeshPrecacheStats
 	uint32_t primitives = 0;
 	uint32_t variantPrimitives = 0;
 	double buildMs = 0.0;
-};
-
-struct MaterialRef
-{
-	FGameTexture* texture = nullptr;
-	FGameTexture* emissiveSourceTexture = nullptr;
-	int palette = 0;
-	int shade = 0;
-	float alpha = 1.0f;
-	uint32_t flags = MaterialFlag_None;
-};
-
-struct CapturedVertex
-{
-	float position[3] = {};
-	float prevPosition[3] = {};
-	float uv[2] = {};
-};
-
-struct SurfaceRef
-{
-	std::vector<CapturedVertex> vertices;
-	std::vector<uint32_t> indices;
-	MaterialRef material;
-	SurfaceProvenance provenance;
 };
 
 struct SceneView
