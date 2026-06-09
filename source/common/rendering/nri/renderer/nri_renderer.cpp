@@ -676,6 +676,51 @@ namespace
 			(reasonMask & ~materialOnlyReasonMask) == 0;
 	}
 
+	static void CopyPersistentVoxelInstanceTransform(const float source[12], std::array<float, 12>& target)
+	{
+		for (size_t i = 0; i < target.size(); ++i)
+		{
+			target[i] = source[i];
+		}
+	}
+
+	static bool SamePersistentVoxelInstanceTransform(const std::array<float, 12>& left, const float right[12])
+	{
+		constexpr float Epsilon = 0.0001f;
+		for (size_t i = 0; i < left.size(); ++i)
+		{
+			if (std::abs(left[i] - right[i]) > Epsilon)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static void FillPersistentVoxelInstanceTransform(
+		const float currentTranslation[3],
+		const float bakedTranslation[3],
+		std::array<float, 12>& target)
+	{
+		target = { 1.0f, 0.0f, 0.0f, currentTranslation[0] - bakedTranslation[0],
+			0.0f, 1.0f, 0.0f, currentTranslation[1] - bakedTranslation[1],
+			0.0f, 0.0f, 1.0f, currentTranslation[2] - bakedTranslation[2] };
+	}
+
+	static uint64_t EstimatePersistentVoxelActorUploadBytes(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
+	{
+		if (cacheEntry.surface == nullptr)
+		{
+			return 0;
+		}
+
+		const uint64_t vertexBytes = (uint64_t)cacheEntry.surface->vertices.size() * sizeof(nri_scene::SceneVertex);
+		const uint64_t indexBytes = (uint64_t)cacheEntry.surface->indices.size() * sizeof(uint32_t);
+		const uint64_t primitiveBytes = (uint64_t)cacheEntry.primitiveCount * sizeof(nri_scene::PrimitiveData);
+		const uint64_t materialBytes = sizeof(nri_scene::MaterialData);
+		return vertexBytes + indexBytes + primitiveBytes + materialBytes;
+	}
+
 	static uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView)
 	{
 		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
@@ -7321,6 +7366,23 @@ namespace
 	static uint64_t HashCombine64(uint64_t hash, uint64_t value)
 	{
 		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
+	}
+
+	static bool IsPersistentVoxelMeshResourceTransformKeyed(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
+	{
+		return (bool)nri_ptvoxeltransformkeyed ||
+			cacheEntry.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace;
+	}
+
+	static uint64_t BuildPersistentVoxelMeshResourceKey(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
+	{
+		if (!IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry))
+		{
+			return cacheEntry.meshKeyHash;
+		}
+		uint64_t hash = cacheEntry.meshKeyHash;
+		hash = HashCombine64(hash, cacheEntry.transformBasisSignature);
+		return hash;
 	}
 
 	static uint32_t FloatBits(float value)
@@ -18027,34 +18089,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		}
 	};
 
-	auto copyPersistentVoxelInstanceTransform = [](const float source[12], std::array<float, 12>& target)
-	{
-		for (size_t i = 0; i < target.size(); ++i)
-		{
-			target[i] = source[i];
-		}
-	};
-
-	auto samePersistentVoxelInstanceTransform = [](const std::array<float, 12>& left, const float right[12]) -> bool
-	{
-		constexpr float Epsilon = 0.0001f;
-		for (size_t i = 0; i < left.size(); ++i)
-		{
-			if (std::abs(left[i] - right[i]) > Epsilon)
-			{
-				return false;
-			}
-		}
-		return true;
-	};
-
-	auto fillPersistentVoxelInstanceTransform = [](const float currentTranslation[3], const float bakedTranslation[3], std::array<float, 12>& target)
-	{
-		target = { 1.0f, 0.0f, 0.0f, currentTranslation[0] - bakedTranslation[0],
-			0.0f, 1.0f, 0.0f, currentTranslation[1] - bakedTranslation[1],
-			0.0f, 0.0f, 1.0f, currentTranslation[2] - bakedTranslation[2] };
-	};
-
 	auto fillPersistentVoxelActorInstanceTransform = [&](
 		const nri_scene::PersistentVoxelCacheEntryView& cacheEntry,
 		const PersistentVoxelMeshVariantResource& meshResource,
@@ -18062,10 +18096,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	{
 		if (cacheEntry.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::LocalSpace)
 		{
-			copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, target);
+			CopyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, target);
 			return;
 		}
-		fillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, target);
+		FillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, target);
 	};
 
 	auto clearPersistentVoxelActorInstances = [&]()
@@ -18085,37 +18119,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		mBoundPersistentVoxelPrimitiveCount = 0;
 		mBoundPersistentVoxelMaterialCount = 0;
 		SetCurrentSceneDataDescriptorsInitialized(false);
-	};
-
-	auto isPersistentVoxelMeshResourceTransformKeyed = [](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> bool
-	{
-		return (bool)nri_ptvoxeltransformkeyed ||
-			cacheEntry.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace;
-	};
-
-	auto buildPersistentVoxelMeshResourceKey = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> uint64_t
-	{
-		if (!isPersistentVoxelMeshResourceTransformKeyed(cacheEntry))
-		{
-			return cacheEntry.meshKeyHash;
-		}
-		uint64_t hash = cacheEntry.meshKeyHash;
-		hash = HashCombine64(hash, cacheEntry.transformBasisSignature);
-		return hash;
-	};
-
-	auto estimatePersistentVoxelActorUploadBytes = [](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> uint64_t
-	{
-		if (cacheEntry.surface == nullptr)
-		{
-			return 0;
-		}
-
-		const uint64_t vertexBytes = (uint64_t)cacheEntry.surface->vertices.size() * sizeof(nri_scene::SceneVertex);
-		const uint64_t indexBytes = (uint64_t)cacheEntry.surface->indices.size() * sizeof(uint32_t);
-		const uint64_t primitiveBytes = (uint64_t)cacheEntry.primitiveCount * sizeof(nri_scene::PrimitiveData);
-		const uint64_t materialBytes = sizeof(nri_scene::MaterialData);
-		return vertexBytes + indexBytes + primitiveBytes + materialBytes;
 	};
 
 	if (!hasPersistentVoxelCacheEntries)
@@ -18250,7 +18253,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		instance.lastSeenFrame = mFrameIndex;
 		instance.active = true;
 		instance.pending = false;
-		copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, instance.currentTransform);
+		CopyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, instance.currentTransform);
 	}
 	for (auto it = mPersistentVoxelInstances.begin(); it != mPersistentVoxelInstances.end(); )
 	{
@@ -18804,7 +18807,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.lightRecords.push_back(record);
 		};
 
-		const uint64_t baseMeshResourceKey = buildPersistentVoxelMeshResourceKey(cacheEntry);
+		const uint64_t baseMeshResourceKey = BuildPersistentVoxelMeshResourceKey(cacheEntry);
 		auto publishPersistentVoxelActor = [&](
 			uint64_t meshResourceKey,
 			PersistentVoxelMeshVariantResource& meshResource,
@@ -18909,7 +18912,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					meshResource.primitiveOffset,
 					GetPersistentVoxelBakeSpaceName(meshResource.meshBakeSpace),
 					(unsigned long long)meshResource.transformBasisSignature,
-					isPersistentVoxelMeshResourceTransformKeyed(cacheEntry) ? 1u : 0u,
+					IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry) ? 1u : 0u,
 					meshResource.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u,
 					meshResource.tlasReadyFrame,
 					meshResource.tlasPublished ? 1u : 0u);
@@ -19010,7 +19013,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					existingMeshResourceIt->second.indexCount,
 					GetPersistentVoxelBakeSpaceName(cacheEntry.meshBakeSpace),
 					(unsigned long long)cacheEntry.transformBasisSignature,
-					isPersistentVoxelMeshResourceTransformKeyed(cacheEntry) ? 1u : 0u,
+					IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry) ? 1u : 0u,
 					existingMeshResourceIt->second.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u,
 					existingMeshResourceIt->second.tlasReadyFrame,
 					existingMeshResourceIt->second.tlasPublished ? 1u : 0u);
@@ -19035,7 +19038,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			meshResource.primitiveOffset,
 			meshResource.primitiveCapacity);
 
-		const bool meshResourceTransformKeyed = isPersistentVoxelMeshResourceTransformKeyed(cacheEntry);
+		const bool meshResourceTransformKeyed = IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry);
 		const bool meshResourceChanged =
 			meshResource.resourceKey != meshResourceKey ||
 			meshResource.meshKeyHash != cacheEntry.meshKeyHash ||
@@ -19361,7 +19364,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 	auto canReusePersistentVoxelMesh = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> bool
 	{
-		const uint64_t meshResourceKey = buildPersistentVoxelMeshResourceKey(cacheEntry);
+		const uint64_t meshResourceKey = BuildPersistentVoxelMeshResourceKey(cacheEntry);
 		auto meshResourceIt = mPersistentVoxelMeshVariantResources.find(meshResourceKey);
 		return meshResourceIt != mPersistentVoxelMeshVariantResources.end() &&
 			meshResourceIt->second.resourceKey == meshResourceKey &&
@@ -19451,7 +19454,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			{
 				const bool reusableVariant = canReusePersistentVoxelVariant(cacheEntry);
 				const bool reusableMesh = reusableVariant || canReusePersistentVoxelMesh(cacheEntry);
-				const uint64_t estimatedUploadBytes = reusableMesh ? 0ull : estimatePersistentVoxelActorUploadBytes(cacheEntry);
+				const uint64_t estimatedUploadBytes = reusableMesh ? 0ull : EstimatePersistentVoxelActorUploadBytes(cacheEntry);
 				if (!reusableMesh && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
 					mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
@@ -19461,7 +19464,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
 							mFrameIndex,
 							(unsigned long long)cacheEntry.identityKey,
-							(unsigned long long)buildPersistentVoxelMeshResourceKey(cacheEntry),
+							(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry),
 							(unsigned long long)cacheEntry.meshKeyHash,
 							(unsigned long long)cacheEntry.materialKeyHash,
 							(unsigned long long)cacheEntry.surfaceSignature,
@@ -19491,7 +19494,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=texture-prewarm actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=1\n",
 							mFrameIndex,
 							(unsigned long long)cacheEntry.identityKey,
-							(unsigned long long)buildPersistentVoxelMeshResourceKey(cacheEntry),
+							(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry),
 							(unsigned long long)cacheEntry.meshKeyHash,
 							(unsigned long long)cacheEntry.materialKeyHash,
 							(unsigned long long)cacheEntry.surfaceSignature,
@@ -19512,7 +19515,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			PersistentVoxelBatch::ActorEntry& actor = *found->second;
 			auto meshResourceIt = actor.meshResourceKey != 0 ? mPersistentVoxelMeshVariantResources.find(actor.meshResourceKey) : mPersistentVoxelMeshVariantResources.end();
 			std::array<float, 12> expectedInstanceTransform = {};
-			copyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, expectedInstanceTransform);
+			CopyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, expectedInstanceTransform);
 			if (meshResourceIt != mPersistentVoxelMeshVariantResources.end())
 			{
 				fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResourceIt->second, expectedInstanceTransform);
@@ -19522,7 +19525,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				actor.meshKeyHash != cacheEntry.meshKeyHash ||
 				meshResourceIt == mPersistentVoxelMeshVariantResources.end() ||
 				meshResourceIt->second.accelerationStructure.accelerationStructure == nullptr;
-			const bool actorInstanceTransformNeedsUpdate = !samePersistentVoxelInstanceTransform(actor.instanceTransform, expectedInstanceTransform.data());
+			const bool actorInstanceTransformNeedsUpdate = !SamePersistentVoxelInstanceTransform(actor.instanceTransform, expectedInstanceTransform.data());
 			const uint32_t expectedVisibilityChunkIndex = resolvePersistentVoxelActorVisibilityChunk(cacheEntry);
 			const bool actorVisibilityChunkNeedsUpdate = actor.visibilityChunkIndex != expectedVisibilityChunkIndex;
 			const bool actorNeedsUpdate =
@@ -19589,7 +19592,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 				const bool reusableVariant = actorGeometryNeedsUpdate && canReusePersistentVoxelVariant(cacheEntry);
 				const bool reusableMesh = actorGeometryNeedsUpdate && (reusableVariant || canReusePersistentVoxelMesh(cacheEntry));
-				const uint64_t estimatedUploadBytes = actorGeometryNeedsUpdate && !reusableMesh ? estimatePersistentVoxelActorUploadBytes(cacheEntry) : 0ull;
+				const uint64_t estimatedUploadBytes = actorGeometryNeedsUpdate && !reusableMesh ? EstimatePersistentVoxelActorUploadBytes(cacheEntry) : 0ull;
 				if (actorGeometryNeedsUpdate && !reusableMesh && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
 				{
 					actor.active = true;
@@ -19752,7 +19755,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		{
 			const bool reusableVariant = canReusePersistentVoxelVariant(cacheEntry);
 			const bool reusableMesh = reusableVariant || canReusePersistentVoxelMesh(cacheEntry);
-			const uint64_t estimatedUploadBytes = reusableMesh ? 0ull : estimatePersistentVoxelActorUploadBytes(cacheEntry);
+			const uint64_t estimatedUploadBytes = reusableMesh ? 0ull : EstimatePersistentVoxelActorUploadBytes(cacheEntry);
 			if (!reusableMesh && !canBuildPersistentVoxelVariant(cacheEntry.primitiveCount, estimatedUploadBytes))
 			{
 				mPersistentVoxelInstances[cacheEntry.identityKey].pending = true;
@@ -19762,7 +19765,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
 						mFrameIndex,
 						(unsigned long long)cacheEntry.identityKey,
-						(unsigned long long)buildPersistentVoxelMeshResourceKey(cacheEntry),
+						(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry),
 						(unsigned long long)cacheEntry.meshKeyHash,
 						(unsigned long long)cacheEntry.materialKeyHash,
 						(unsigned long long)cacheEntry.surfaceSignature,
@@ -19790,7 +19793,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=texture-prewarm actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
 						mFrameIndex,
 						(unsigned long long)cacheEntry.identityKey,
-						(unsigned long long)buildPersistentVoxelMeshResourceKey(cacheEntry),
+						(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry),
 						(unsigned long long)cacheEntry.meshKeyHash,
 						(unsigned long long)cacheEntry.materialKeyHash,
 						(unsigned long long)cacheEntry.surfaceSignature,
@@ -35520,6 +35523,69 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 	return true;
 }
 
+NRIRenderer::RuntimeMutationResidentApplyMode NRIRenderer::ClassifyRuntimeMutationResidentApplyMode(
+	const RuntimeMapMutationCache::ChunkReplacement& replacement,
+	bool hasResidentChunk,
+	uint32_t resolvedChunkListIndex) const
+{
+	RuntimeMutationResidentApplyMode mode = {};
+	mode.materialOnlyReplacement = IsMaterialOnlyChunkReplacement(replacement.reasonMask);
+	mode.exclusiveMaterialOnlyReplacement =
+		mode.materialOnlyReplacement &&
+		RequiresExclusiveMaterialOnlyChunkReplacement(replacement.reasonMask);
+	mode.fastResidentMaterialOnlyUpdate =
+		mode.materialOnlyReplacement &&
+		!mode.exclusiveMaterialOnlyReplacement &&
+		hasResidentChunk &&
+		replacement.valid &&
+		resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
+		(uint32_t)replacement.materialBridge.materials.size() ==
+			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount;
+	return mode;
+}
+
+void NRIRenderer::RecordRuntimeMutationResidentApplyMode(
+	const RuntimeMutationResidentApplyMode& mode,
+	const RuntimeMapMutationCache::ChunkReplacement& replacement,
+	bool hasResidentChunk,
+	uint32_t resolvedChunkListIndex)
+{
+	if (mode.materialOnlyReplacement)
+	{
+		mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyCount++;
+		if (mode.fastResidentMaterialOnlyUpdate)
+		{
+			mLastPerfShellTraceStats.runtimeMutationResidentApplyFastMaterialOnlyCount++;
+		}
+		else
+		{
+			mLastPerfShellTraceStats.runtimeMutationResidentApplySlowMaterialOnlyCount++;
+			if (mode.exclusiveMaterialOnlyReplacement)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyExclusiveCount++;
+			}
+			if (!hasResidentChunk)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount++;
+			}
+			if (!replacement.valid)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount++;
+			}
+			if (resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
+				(uint32_t)replacement.materialBridge.materials.size() !=
+					mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount)
+			{
+				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount++;
+			}
+		}
+	}
+	else
+	{
+		mLastPerfShellTraceStats.runtimeMutationResidentApplyStructuralCount++;
+	}
+}
+
 bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const nri_scene::PTMapChunk& mapChunk,
 	RuntimeMapMutationCache::ChunkReplacement& replacement,
@@ -35573,52 +35639,12 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		entry.staticSceneChunkListIndex = resolvedChunkListIndex;
 	}
 
-	const bool materialOnlyReplacement = IsMaterialOnlyChunkReplacement(replacement.reasonMask);
-	const bool exclusiveMaterialOnlyReplacement =
-		materialOnlyReplacement &&
-		RequiresExclusiveMaterialOnlyChunkReplacement(replacement.reasonMask);
-	const bool fastResidentMaterialOnlyUpdate =
-		materialOnlyReplacement &&
-		!exclusiveMaterialOnlyReplacement &&
-		hasResidentChunk &&
-		replacement.valid &&
-		resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
-		(uint32_t)replacement.materialBridge.materials.size() ==
-			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount;
-	if (materialOnlyReplacement)
-	{
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyCount++;
-		if (fastResidentMaterialOnlyUpdate)
-		{
-			mLastPerfShellTraceStats.runtimeMutationResidentApplyFastMaterialOnlyCount++;
-		}
-		else
-		{
-			mLastPerfShellTraceStats.runtimeMutationResidentApplySlowMaterialOnlyCount++;
-			if (exclusiveMaterialOnlyReplacement)
-			{
-				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyExclusiveCount++;
-			}
-			if (!hasResidentChunk)
-			{
-				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount++;
-			}
-			if (!replacement.valid)
-			{
-				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount++;
-			}
-			if (resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
-				(uint32_t)replacement.materialBridge.materials.size() !=
-					mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount)
-			{
-				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount++;
-			}
-		}
-	}
-	else
-	{
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyStructuralCount++;
-	}
+	const RuntimeMutationResidentApplyMode applyMode =
+		ClassifyRuntimeMutationResidentApplyMode(replacement, hasResidentChunk, resolvedChunkListIndex);
+	RecordRuntimeMutationResidentApplyMode(applyMode, replacement, hasResidentChunk, resolvedChunkListIndex);
+	const bool materialOnlyReplacement = applyMode.materialOnlyReplacement;
+	const bool exclusiveMaterialOnlyReplacement = applyMode.exclusiveMaterialOnlyReplacement;
+	const bool fastResidentMaterialOnlyUpdate = applyMode.fastResidentMaterialOnlyUpdate;
 
 	nri_scene::SceneView residentSceneView;
 	nri_scene::GeometryData residentGeometry;
