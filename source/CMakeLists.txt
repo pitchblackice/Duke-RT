@@ -922,12 +922,19 @@ set (NRI_SOURCES
 	common/rendering/nri/system/nri_hwbuffer.cpp
 	common/rendering/nri/system/nri_hwtexture.cpp
 	common/rendering/nri/framegen/nri_framegen.cpp
+	common/rendering/nri/renderer/nri_acceleration.cpp
+	common/rendering/nri/renderer/nri_debug_reporters.cpp
 	common/rendering/nri/renderer/nri_exposure.cpp
+	common/rendering/nri/renderer/nri_frame_resources.cpp
 	common/rendering/nri/renderer/nri_nrd.cpp
+	common/rendering/nri/renderer/nri_persistent_voxels.cpp
 	common/rendering/nri/renderer/nri_renderstate.cpp
 	common/rendering/nri/renderer/nri_resources.cpp
 	common/rendering/nri/renderer/nri_renderer.cpp
+	common/rendering/nri/renderer/nri_runtime_mutation.cpp
 	common/rendering/nri/renderer/nri_scene_lights.cpp
+	common/rendering/nri/renderer/nri_scene_upload.cpp
+	common/rendering/nri/renderer/nri_static_scene.cpp
 	common/rendering/nri/renderer/nri_upscaler.cpp
 	common/rendering/nri/scene/nri_map_world.cpp
 	common/rendering/nri/scene/nri_map_builder.cpp

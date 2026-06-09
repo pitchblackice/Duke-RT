@@ -1,0 +1,66 @@
+#pragma once
+
+#include "nri_resources.h"
+
+#include <cstdint>
+#include <vector>
+
+class NRIFrameResources
+{
+};
+
+struct SceneBufferDebugStats
+{
+	const char* label = "";
+	uint32_t growthCount = 0;
+	uint32_t overwriteCount = 0;
+	uint32_t uploadCount = 0;
+	uint32_t growEventsLastFrame = 0;
+	uint32_t overwriteEventsLastFrame = 0;
+	uint64_t bytesUploadedLastFrame = 0;
+	uint64_t growthOldBytesLastFrame = 0;
+	uint64_t growthRequestedBytesLastFrame = 0;
+	uint64_t growthAllocatedBytesLastFrame = 0;
+	uint64_t peakUsedBytes = 0;
+};
+
+struct SceneUploadDirtyRange
+{
+	uint64_t byteOffset = 0;
+	uint64_t size = 0;
+};
+
+struct SceneInstanceData
+{
+	uint32_t primitiveOffset = 0;
+	uint32_t dataSource = 0;
+	uint32_t reserved0 = 0;
+	uint32_t reserved1 = 0;
+	uint32_t visibilityChunk = UINT32_MAX;
+	uint32_t reserved2[3] = {};
+	float currentTransform[12] =
+	{
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f
+	};
+	float previousTransform[12] =
+	{
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f
+	};
+};
+
+struct SceneUploadBufferRingSlot
+{
+	NRIBufferResource vertexBuffer;
+	NRIBufferResource indexBuffer;
+	NRIBufferResource primitiveBuffer;
+	NRIBufferResource materialBuffer;
+	NRIAccelerationStructureResource dynamicBottomLevelAS;
+	std::vector<uint8_t> vertexMirror;
+	std::vector<uint8_t> indexMirror;
+	std::vector<uint8_t> primitiveMirror;
+	std::vector<uint8_t> materialMirror;
+};

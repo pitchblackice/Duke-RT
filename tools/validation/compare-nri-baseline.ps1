@@ -17,6 +17,19 @@ if ($frames.Count -eq 0) {
     $errors.Add("summary has no accepted selftest frames")
 }
 
+$compareFrameCount = 0
+if ($baseline.PSObject.Properties.Name.Contains("compareFrameCount")) {
+    $compareFrameCount = [int]$baseline.compareFrameCount
+}
+elseif ($baseline.PSObject.Properties.Name.Contains("scenario") -and
+    $baseline.scenario.PSObject.Properties.Name.Contains("minSelfTestFrames")) {
+    $compareFrameCount = [int]$baseline.scenario.minSelfTestFrames
+}
+
+if ($compareFrameCount -gt 0) {
+    $frames = @($frames | Select-Object -First $compareFrameCount)
+}
+
 $firstFrame = $frames | Select-Object -First 1
 if ($firstFrame -ne $null -and $baseline.PSObject.Properties.Name.Contains("exact")) {
     foreach ($field in @("map", "api", "route", "passes")) {

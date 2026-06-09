@@ -18,6 +18,7 @@ $ErrorActionPreference = "Stop"
 
 $scenario = Get-Content -LiteralPath $ScenarioPath -Raw | ConvertFrom-Json
 $name = if ($scenario.PSObject.Properties.Name.Contains("name")) { [string]$scenario.name } else { "nri-validation" }
+$compareFrameCount = if ($scenario.PSObject.Properties.Name.Contains("minSelfTestFrames")) { [int]$scenario.minSelfTestFrames } else { 1 }
 if (-not $OutputPath) {
     $baselineDirectory = Join-Path $PSScriptRoot "baselines"
     New-Item -ItemType Directory -Force -Path $baselineDirectory | Out-Null
@@ -34,7 +35,7 @@ for ($i = 0; $i -lt $Runs; ++$i) {
     $summaries += Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
 }
 
-$frames = @($summaries | ForEach-Object { $_.acceptedSelfTestFrames } | Where-Object { $null -ne $_ })
+$frames = @($summaries | ForEach-Object { @($_.acceptedSelfTestFrames) | Select-Object -First $compareFrameCount } | Where-Object { $null -ne $_ })
 $numericFields = @("prims", "mats", "scene_instances", "static_instances", "dynamic_instances", "voxel_instances", "emissive_instances", "render_width", "render_height", "output_width", "output_height")
 $ranges = [ordered]@{}
 foreach ($field in $numericFields) {
@@ -52,6 +53,7 @@ $baseline = [pscustomobject]@{
     name = $name
     scenario = $scenario
     runs = $Runs
+    compareFrameCount = $compareFrameCount
     capturedUtc = (Get-Date).ToUniversalTime().ToString("o")
     exact = [pscustomobject]@{
         map = if ($firstFrame) { $firstFrame.map } else { $null }

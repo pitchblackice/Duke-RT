@@ -2,9 +2,11 @@
 
 #include "../nri_output.h"
 #include "nri_exposure.h"
+#include "nri_frame_resources.h"
 #include "nri_nrd.h"
 #include "nri_resources.h"
 #include "nri_scene_lights.h"
+#include "nri_static_scene.h"
 #include "nri_upscaler.h"
 #include "../framegen/nri_framegen.h"
 
@@ -1523,20 +1525,7 @@ private:
 		nri_scene::SceneView sceneView;
 	};
 
-	struct SceneBufferDebugStats
-	{
-		const char* label = "";
-		uint32_t growthCount = 0;
-		uint32_t overwriteCount = 0;
-		uint32_t uploadCount = 0;
-		uint32_t growEventsLastFrame = 0;
-		uint32_t overwriteEventsLastFrame = 0;
-		uint64_t bytesUploadedLastFrame = 0;
-		uint64_t growthOldBytesLastFrame = 0;
-		uint64_t growthRequestedBytesLastFrame = 0;
-		uint64_t growthAllocatedBytesLastFrame = 0;
-		uint64_t peakUsedBytes = 0;
-	};
+	using SceneBufferDebugStats = ::SceneBufferDebugStats;
 
 	struct SelectPrimitiveRewriteCache
 	{
@@ -1569,11 +1558,7 @@ private:
 		uint64_t materialPayloadStamp = 0;
 	};
 
-	struct SceneUploadDirtyRange
-	{
-		uint64_t byteOffset = 0;
-		uint64_t size = 0;
-	};
+	using SceneUploadDirtyRange = ::SceneUploadDirtyRange;
 
 	struct SceneBufferUploadDomainSpan
 	{
@@ -1914,46 +1899,7 @@ private:
 		std::vector<Entry> entries;
 	};
 
-	struct StaticMapChunkAtlas
-	{
-		struct FreeRange
-		{
-			uint32_t offset = 0;
-			uint32_t count = 0;
-		};
-
-		struct ChunkEntry
-		{
-			uint32_t chunkIndex = UINT32_MAX;
-			uint32_t staticSceneChunkListIndex = UINT32_MAX;
-			uint32_t vertexOffset = 0;
-			uint32_t vertexCount = 0;
-			uint32_t indexOffset = 0;
-			uint32_t indexCount = 0;
-			uint32_t primitiveOffset = 0;
-			uint32_t primitiveCount = 0;
-			uint32_t materialOffset = 0;
-			uint32_t materialCount = 0;
-			bool valid = false;
-		};
-
-		bool valid = false;
-		uint64_t buildSerial = 0;
-		uint32_t chunkCount = 0;
-		uint32_t vertexCount = 0;
-		uint32_t indexCount = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t materialCount = 0;
-		uint32_t vertexCapacity = 0;
-		uint32_t indexCapacity = 0;
-		uint32_t primitiveCapacity = 0;
-		uint32_t materialCapacity = 0;
-		std::vector<ChunkEntry> chunks;
-		std::vector<FreeRange> freeVertexRanges;
-		std::vector<FreeRange> freeIndexRanges;
-		std::vector<FreeRange> freePrimitiveRanges;
-		std::vector<FreeRange> freeMaterialRanges;
-	};
+	using StaticMapChunkAtlas = ::StaticMapChunkAtlas;
 
 	struct DynamicSceneFrameState
 	{
@@ -2466,56 +2412,11 @@ private:
 		RuntimeLinkDebugState game = {};
 	};
 
-	struct SceneInstanceData
-	{
-		uint32_t primitiveOffset = 0;
-		uint32_t dataSource = 0;
-		uint32_t reserved0 = 0;
-		uint32_t reserved1 = 0;
-		uint32_t visibilityChunk = UINT32_MAX;
-		uint32_t reserved2[3] = {};
-		float currentTransform[12] =
-		{
-			1.0f, 0.0f, 0.0f, 0.0f,
-			0.0f, 1.0f, 0.0f, 0.0f,
-			0.0f, 0.0f, 1.0f, 0.0f
-		};
-		float previousTransform[12] =
-		{
-			1.0f, 0.0f, 0.0f, 0.0f,
-			0.0f, 1.0f, 0.0f, 0.0f,
-			0.0f, 0.0f, 1.0f, 0.0f
-		};
-	};
+	using SceneInstanceData = ::SceneInstanceData;
 
-	struct StaticMapSceneResources
-	{
-		NRIBufferResource vertexBuffer;
-		NRIBufferResource indexBuffer;
-		NRIBufferResource primitiveBuffer;
-		NRIBufferResource materialBuffer;
-		StaticMapChunkAtlas chunkAtlas;
-		NRIBufferResource tlasInstanceBuffer;
-		NRIBufferResource scratchBuffer;
-		NRIBufferResource topLevelScratchBuffer;
-		NRIAccelerationStructureResource topLevelAS;
-		uint64_t accelerationBuildSerial = 0;
-		uint32_t tlasInstanceCount = 0;
-		std::vector<SceneInstanceData> sceneInstances;
-	};
+	using StaticMapSceneResources = ::StaticMapSceneResources;
 
-	struct SceneUploadBufferRingSlot
-	{
-		NRIBufferResource vertexBuffer;
-		NRIBufferResource indexBuffer;
-		NRIBufferResource primitiveBuffer;
-		NRIBufferResource materialBuffer;
-		NRIAccelerationStructureResource dynamicBottomLevelAS;
-		std::vector<uint8_t> vertexMirror;
-		std::vector<uint8_t> indexMirror;
-		std::vector<uint8_t> primitiveMirror;
-		std::vector<uint8_t> materialMirror;
-	};
+	using SceneUploadBufferRingSlot = ::SceneUploadBufferRingSlot;
 
 	enum SceneDataBufferMask : uint32_t
 	{
