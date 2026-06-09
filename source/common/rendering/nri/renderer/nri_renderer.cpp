@@ -6,6 +6,7 @@
 #include "nri_frame_graph.h"
 #include "nri_renderstate.h"
 #include "nri_renderer_settings.h"
+#include "nri_scene_upload.h"
 #include "nri_shader_contracts.h"
 #include "../scene/nri_map_builder.h"
 #include "../scene/nri_scene_math.h"
@@ -5592,60 +5593,6 @@ namespace
 					flat->plane != 0);
 			}
 		}
-	}
-
-	static uint64_t GetGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride)
-	{
-		uint64_t newCapacity = std::max<uint64_t>(requiredSize, stride);
-		if (currentCapacity >= newCapacity && currentCapacity != 0)
-		{
-			return currentCapacity;
-		}
-
-		if (currentCapacity != 0)
-		{
-			newCapacity = std::max(newCapacity, currentCapacity);
-			while (newCapacity < requiredSize)
-			{
-				const uint64_t doubled = newCapacity <= std::numeric_limits<uint64_t>::max() / 2 ? newCapacity * 2 : std::numeric_limits<uint64_t>::max();
-				if (doubled <= newCapacity)
-				{
-					newCapacity = requiredSize;
-					break;
-				}
-				newCapacity = doubled;
-			}
-		}
-
-		return std::max<uint64_t>(newCapacity, stride);
-	}
-
-	static uint64_t GetSceneUploadGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride)
-	{
-		const uint64_t minimumCapacity = std::max<uint64_t>(requiredSize, stride);
-		if (currentCapacity >= minimumCapacity && currentCapacity != 0)
-		{
-			return currentCapacity;
-		}
-		if (currentCapacity == 0)
-		{
-			return minimumCapacity;
-		}
-
-		uint64_t newCapacity = std::max<uint64_t>(currentCapacity, stride);
-		while (newCapacity < minimumCapacity)
-		{
-			const uint64_t doubled =
-				newCapacity <= std::numeric_limits<uint64_t>::max() / 2 ?
-				newCapacity * 2 :
-				std::numeric_limits<uint64_t>::max();
-			if (doubled <= newCapacity)
-			{
-				return minimumCapacity;
-			}
-			newCapacity = doubled;
-		}
-		return newCapacity;
 	}
 
 	static float Clamp01(float value)
@@ -13881,7 +13828,7 @@ uint32_t NRIRenderer::GetChunkAtlasCapacity(uint32_t usedCount) const
 	}
 
 	const uint64_t reserveFloor = std::max<uint64_t>(usedCount + 64u, usedCount * 2ull);
-	const uint64_t grown = GetGrownBufferSize((uint64_t)usedCount, reserveFloor, 1u);
+	const uint64_t grown = GetNRIGrownBufferSize((uint64_t)usedCount, reserveFloor, 1u);
 	return (uint32_t)std::min<uint64_t>(grown, (uint64_t)UINT32_MAX);
 }
 
@@ -27173,225 +27120,17 @@ NRIResourceContext NRIRenderer::BuildResourceContext() const
 
 bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after)
 {
-	const NRIResourceContext resourceContext = BuildResourceContext();
-	if (resource.buffer != nullptr || resource.shaderView != nullptr)
-	{
-		WaitForCommandsTracked();
-	}
-
-	DestroyBufferResource(resource);
-
-	nri::BufferDesc desc = {};
-	desc.size = std::max<uint64_t>(size, stride);
-	desc.structureStride = stride;
-	desc.usage = usage;
-
-	if (resourceContext.core->CreateCommittedBuffer(*resourceContext.device, nri::MemoryLocation::DEVICE_UPLOAD, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
-	{
-		return false;
-	}
-
-	nri::MemoryDesc memoryDesc = {};
-	resourceContext.core->GetBufferMemoryDesc(*resource.buffer, nri::MemoryLocation::DEVICE_UPLOAD, memoryDesc);
-	resource.size = desc.size;
-	resource.memorySize = memoryDesc.size;
-	resource.memoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
-	resource.usedSize = size;
-	resource.stride = stride;
-
-	nri::BufferViewDesc viewDesc = {};
-	viewDesc.buffer = resource.buffer;
-	viewDesc.type = nri::BufferView::STRUCTURED_BUFFER;
-	viewDesc.offset = 0;
-	viewDesc.size = nri::WHOLE_SIZE;
-	viewDesc.structureStride = stride;
-	if (resourceContext.core->CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
-	{
-		return false;
-	}
-
-	if (data != nullptr && size != 0)
-	{
-		void* mapped = resourceContext.core->MapBuffer(*resource.buffer, 0, desc.size);
-		if (mapped == nullptr)
-		{
-			return false;
-		}
-
-		std::memcpy(mapped, data, (size_t)size);
-		if (desc.size > size)
-		{
-			std::memset(static_cast<uint8_t*>(mapped) + size, 0, (size_t)(desc.size - size));
-		}
-		resourceContext.core->UnmapBuffer(*resource.buffer);
-	}
-
-	if (resourceContext.commandBuffer != nullptr && after.access != nri::AccessBits::NONE)
-	{
-		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = resource.buffer;
-		barrier.before = {};
-		barrier.after = after;
-
-		nri::BarrierDesc barrierDesc = {};
-		barrierDesc.buffers = &barrier;
-		barrierDesc.bufferNum = 1;
-		resourceContext.core->CmdBarrier(*resourceContext.commandBuffer, barrierDesc);
-	}
-
-	return true;
+	return NRISceneUploadManager::CreateStructuredBuffer(*this, resource, data, size, stride, usage, after);
 }
 
 bool NRIRenderer::EnsureStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, bool writesQuiesced, const char* waitReason)
 {
-	const uint64_t requiredSize = std::max<uint64_t>(size, stride);
-	const bool needsGrowth =
-		resource.buffer == nullptr ||
-		resource.shaderView == nullptr ||
-		resource.stride != stride ||
-		resource.size < requiredSize;
-
-	stats.bytesUploadedLastFrame = size;
-	stats.growEventsLastFrame = 0;
-	stats.overwriteEventsLastFrame = 0;
-	stats.growthOldBytesLastFrame = 0;
-	stats.growthRequestedBytesLastFrame = 0;
-	stats.growthAllocatedBytesLastFrame = 0;
-	stats.uploadCount++;
-	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
-	NotePerfBufferUpload(&stats, size, needsGrowth, waitReason, -1);
-
-	if (needsGrowth)
-	{
-		const bool isSceneBufferUpload =
-			waitReason != nullptr &&
-			std::strcmp(waitReason, "scene_buffer_upload") == 0;
-		const uint64_t oldSize = resource.size;
-		const uint64_t grownSize =
-			isSceneBufferUpload ?
-			GetSceneUploadGrownBufferSize(resource.size, requiredSize, stride) :
-			GetGrownBufferSize(resource.size, requiredSize, stride);
-		if (!writesQuiesced && (resource.buffer != nullptr || resource.shaderView != nullptr))
-		{
-			WaitForCommandsTracked(waitReason);
-		}
-		DestroyBufferResource(resource);
-
-		nri::BufferDesc desc = {};
-		desc.size = std::max<uint64_t>(grownSize, stride);
-		desc.structureStride = stride;
-		desc.usage = usage;
-
-		if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE_UPLOAD, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
-		{
-			return false;
-		}
-
-		nri::MemoryDesc memoryDesc = {};
-		mFrameBuffer->mCore.GetBufferMemoryDesc(*resource.buffer, nri::MemoryLocation::DEVICE_UPLOAD, memoryDesc);
-		resource.size = desc.size;
-		resource.memorySize = memoryDesc.size;
-		resource.memoryLocation = nri::MemoryLocation::DEVICE_UPLOAD;
-		resource.usedSize = size;
-		resource.stride = stride;
-
-		nri::BufferViewDesc viewDesc = {};
-		viewDesc.buffer = resource.buffer;
-		viewDesc.type = nri::BufferView::STRUCTURED_BUFFER;
-		viewDesc.offset = 0;
-		viewDesc.size = nri::WHOLE_SIZE;
-		viewDesc.structureStride = stride;
-		if (mFrameBuffer->mCore.CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
-		{
-			return false;
-		}
-
-		stats.growthCount++;
-		stats.growEventsLastFrame = 1;
-		stats.growthOldBytesLastFrame = oldSize;
-		stats.growthRequestedBytesLastFrame = requiredSize;
-		stats.growthAllocatedBytesLastFrame = desc.size;
-	}
-	else
-	{
-		resource.usedSize = size;
-		stats.overwriteCount++;
-		stats.overwriteEventsLastFrame = 1;
-	}
-
-	if (data != nullptr && size != 0)
-	{
-		if (!needsGrowth && !writesQuiesced)
-		{
-			// Scene buffers are reused persistent DEVICE_UPLOAD allocations. Fence before
-			// overwriting them so prior queued frames cannot read partially updated data.
-			WaitForCommandsTracked(waitReason);
-		}
-
-		void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, 0, resource.size);
-		if (mapped == nullptr)
-		{
-			return false;
-		}
-
-		std::memcpy(mapped, data, (size_t)size);
-		if (needsGrowth && resource.size > size)
-		{
-			std::memset(static_cast<uint8_t*>(mapped) + size, 0, (size_t)(resource.size - size));
-		}
-		mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
-	}
-
-	if (mFrameBuffer->mCommandBuffer != nullptr && after.access != nri::AccessBits::NONE)
-	{
-		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = resource.buffer;
-		barrier.before = {};
-		barrier.after = after;
-
-		nri::BarrierDesc barrierDesc = {};
-		barrierDesc.buffers = &barrier;
-		barrierDesc.bufferNum = 1;
-		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
-	}
-
-	return true;
+	return NRISceneUploadManager::EnsureStructuredBuffer(*this, resource, stats, data, size, stride, usage, after, writesQuiesced, waitReason);
 }
 
 bool NRIRenderer::UpdateStructuredBufferRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after)
 {
-	if (resource.buffer == nullptr ||
-		data == nullptr ||
-		size == 0 ||
-		byteOffset > resource.size ||
-		size > resource.size - byteOffset)
-	{
-		return false;
-	}
-
-	void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, byteOffset, size);
-	if (mapped == nullptr)
-	{
-		return false;
-	}
-
-	std::memcpy(mapped, data, (size_t)size);
-	mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
-
-	if (mFrameBuffer->mCommandBuffer != nullptr && after.access != nri::AccessBits::NONE)
-	{
-		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = resource.buffer;
-		barrier.before = {};
-		barrier.after = after;
-
-		nri::BarrierDesc barrierDesc = {};
-		barrierDesc.buffers = &barrier;
-		barrierDesc.bufferNum = 1;
-		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
-	}
-
-	return true;
+	return NRISceneUploadManager::UpdateStructuredBufferRange(*this, resource, byteOffset, data, size, after);
 }
 
 bool NRIRenderer::CreateBufferWithoutView(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage)
@@ -27444,7 +27183,7 @@ bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_
 	NRIBufferResource oldResource = resource;
 	resource = {};
 
-	const uint64_t grownSize = GetGrownBufferSize(oldResource.size, alignedRequiredSize, stride);
+	const uint64_t grownSize = GetNRIGrownBufferSize(oldResource.size, alignedRequiredSize, stride);
 	if (!CreateBufferWithoutViewAtLocation(resource, grownSize, stride, usage, nri::MemoryLocation::DEVICE))
 	{
 		resource = oldResource;
@@ -27522,7 +27261,7 @@ bool NRIRenderer::EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch&
 		return true;
 	}
 
-	const uint64_t grownSize = GetGrownBufferSize(scratch.buffer.size, alignedRequiredSize, kResidentUploadScratchStride);
+	const uint64_t grownSize = GetNRIGrownBufferSize(scratch.buffer.size, alignedRequiredSize, kResidentUploadScratchStride);
 	if (scratch.buffer.buffer != nullptr || scratch.buffer.shaderView != nullptr)
 	{
 		frameScratch.retiredBuffers.push_back(scratch.buffer);
@@ -28321,7 +28060,7 @@ bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, Sc
 	if (needsGrowth)
 	{
 		const uint64_t oldSize = resource.size;
-		const uint64_t grownSize = GetGrownBufferSize(resource.size, requiredSize, stride);
+		const uint64_t grownSize = GetNRIGrownBufferSize(resource.size, requiredSize, stride);
 		NRIBufferResource oldResource = resource;
 		NRIBufferResource newResource = {};
 		if (!CreateBufferWithoutViewAtLocation(newResource, grownSize, stride, usage, nri::MemoryLocation::DEVICE))

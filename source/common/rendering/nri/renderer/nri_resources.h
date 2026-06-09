@@ -37,3 +37,6 @@ struct NRIAccelerationStructureResource
 	uint32_t buildPrimitiveCount = 0;
 	nri::MemoryLocation memoryLocation = nri::MemoryLocation::DEVICE;
 };
+
+uint64_t GetNRIGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride);
+uint64_t GetNRISceneUploadGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride);
