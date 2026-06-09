@@ -1428,6 +1428,7 @@ private:
 		const std::vector<nri_scene::MaterialData>& materials,
 		const NRIFrameGraphExecutionRequest& request);
 	friend class NRIExposurePassAccess;
+	friend class NRIAccelerationStructureManager;
 	friend bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
 	friend void DestroyNRIRendererAutoExposureResources(NRIRenderer& renderer);
 	friend bool UpdateNRIRendererAutoExposureDescriptorSets(NRIRenderer& renderer, uint32_t sourceSlot);

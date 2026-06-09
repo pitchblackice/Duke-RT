@@ -1,6 +1,7 @@
 #include "nri_renderer.h"
 
 #include "../framegen/nri_framegen.h"
+#include "nri_acceleration.h"
 #include "nri_debug_reporters.h"
 #include "nri_frame_graph.h"
 #include "nri_renderstate.h"
@@ -7606,29 +7607,6 @@ namespace
 		}
 
 		return wallSurfaceIndex == ioChunkView.opaqueWalls.size() && flatSurfaceIndex == ioChunkView.opaqueFlats.size();
-	}
-
-	static uint64_t BuildEmissiveTlasInstancePayloadHash(const std::vector<nri::TopLevelInstance>& instances)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, (uint64_t)instances.size());
-		for (const nri::TopLevelInstance& instance : instances)
-		{
-			hash = HashCombine64(hash, (uint64_t)instance.instanceId);
-			hash = HashCombine64(hash, (uint64_t)instance.mask);
-			hash = HashCombine64(hash, (uint64_t)instance.shaderBindingTableLocalOffset);
-			hash = HashCombine64(hash, (uint64_t)instance.flags);
-			hash = HashCombine64(hash, instance.accelerationStructureHandle);
-			for (uint32_t row = 0; row < 3; ++row)
-			{
-				hash = HashCombine64(hash, (uint64_t)FloatBits(instance.transform[row][0]));
-				hash = HashCombine64(hash, (uint64_t)FloatBits(instance.transform[row][1]));
-				hash = HashCombine64(hash, (uint64_t)FloatBits(instance.transform[row][2]));
-				hash = HashCombine64(hash, (uint64_t)FloatBits(instance.transform[row][3]));
-			}
-		}
-
-		return hash;
 	}
 
 	static bool IsUsableGameTexturePointer(FGameTexture* texture)
@@ -35898,13 +35876,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 
 bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry)
 {
-	return BuildDynamicAccelerationStructure(
-		geometry,
-		0u,
-		(uint32_t)geometry.indices.size(),
-		(uint32_t)geometry.primitives.size(),
-		GetCurrentDynamicBottomLevelAS(),
-		true);
+	return NRIAccelerationStructureManager::BuildDynamic(*this, geometry);
 }
 
 bool NRIRenderer::BuildDynamicAccelerationStructure(
@@ -35915,19 +35887,7 @@ bool NRIRenderer::BuildDynamicAccelerationStructure(
 	NRIAccelerationStructureResource& outAccelerationStructure,
 	bool updateDynamicPerfStats)
 {
-	if (indexOffset > geometry.indices.size() || indexOffset + indexCount > geometry.indices.size())
-	{
-		return false;
-	}
-	return BuildBottomLevelAccelerationStructure(
-		GetCurrentDynamicVertexBuffer(),
-		GetCurrentDynamicIndexBuffer(),
-		(uint32_t)geometry.vertices.size(),
-		indexOffset,
-		indexCount,
-		primitiveCount,
-		outAccelerationStructure,
-		updateDynamicPerfStats);
+	return NRIAccelerationStructureManager::BuildDynamic(*this, geometry, indexOffset, indexCount, primitiveCount, outAccelerationStructure, updateDynamicPerfStats);
 }
 
 bool NRIRenderer::BuildBottomLevelAccelerationStructure(
@@ -35940,397 +35900,26 @@ bool NRIRenderer::BuildBottomLevelAccelerationStructure(
 	NRIAccelerationStructureResource& outAccelerationStructure,
 	bool updateDynamicPerfStats)
 {
-	Clocker clock(NriPTAcceleration);
-	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.dynamicAsMs);
-	if (updateDynamicPerfStats)
-	{
-		mLastPerfShellTraceStats.dynamicAsPrimitiveCount = primitiveCount;
-		mLastPerfShellTraceStats.dynamicAsVertexCount = vertexCount;
-		mLastPerfShellTraceStats.dynamicAsIndexCount = indexCount;
-	}
-	if (primitiveCount == 0 || vertexCount == 0 || indexCount == 0 || vertexBuffer.buffer == nullptr || indexBuffer.buffer == nullptr)
-	{
-		return false;
-	}
-
-	nri::BottomLevelGeometryDesc dynamicGeometryDesc = {};
-	bool reuseAccelerationStructure = false;
-	{
-		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsSetupMs);
-		dynamicGeometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-		dynamicGeometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-		dynamicGeometryDesc.triangles.vertexBuffer = vertexBuffer.buffer;
-		dynamicGeometryDesc.triangles.vertexOffset = 0;
-		dynamicGeometryDesc.triangles.vertexNum = vertexCount;
-		dynamicGeometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-		dynamicGeometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-		dynamicGeometryDesc.triangles.indexBuffer = indexBuffer.buffer;
-		dynamicGeometryDesc.triangles.indexOffset = (uint64_t)indexOffset * sizeof(uint32_t);
-		dynamicGeometryDesc.triangles.indexNum = indexCount;
-		dynamicGeometryDesc.triangles.indexType = nri::IndexType::UINT32;
-
-		reuseAccelerationStructure =
-			updateDynamicPerfStats &&
-			outAccelerationStructure.accelerationStructure != nullptr &&
-			outAccelerationStructure.buildVertexBuffer == vertexBuffer.buffer &&
-			outAccelerationStructure.buildIndexBuffer == indexBuffer.buffer &&
-			outAccelerationStructure.buildVertexCount == vertexCount &&
-			outAccelerationStructure.buildIndexOffset == indexOffset &&
-			outAccelerationStructure.buildIndexCount == indexCount &&
-			outAccelerationStructure.buildPrimitiveCount == primitiveCount;
-	}
-
-	if (reuseAccelerationStructure)
-	{
-		if (updateDynamicPerfStats)
-		{
-			mLastPerfShellTraceStats.dynamicAsReuseCount++;
-		}
-	}
-	else
-	{
-		RetireResidentAccelerationStructure(outAccelerationStructure);
-	}
-
-	nri::AccelerationStructureDesc blasDesc = {};
-	blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
-	blasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_BUILD;
-	blasDesc.geometryOrInstanceNum = 1;
-	blasDesc.geometries = &dynamicGeometryDesc;
-	const bool createdAs = reuseAccelerationStructure || [&]()
-	{
-		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsCreateMs);
-		if (updateDynamicPerfStats)
-		{
-			mLastPerfShellTraceStats.dynamicAsCreateCalls++;
-		}
-		return mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, outAccelerationStructure.accelerationStructure) == nri::Result::SUCCESS;
-	}();
-	if (!createdAs)
-	{
-		return false;
-	}
-
-	if (!reuseAccelerationStructure || outAccelerationStructure.memorySize == 0)
-	{
-		nri::MemoryDesc memoryDesc = {};
-		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*outAccelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-		outAccelerationStructure.memorySize = memoryDesc.size;
-		outAccelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
-	}
-	if (updateDynamicPerfStats)
-	{
-		mLastPerfShellTraceStats.dynamicAsMemoryBytes = outAccelerationStructure.memorySize;
-	}
-
-	uint64_t requiredScratchSize = updateDynamicPerfStats ? outAccelerationStructure.buildScratchSize : 0;
-	if (requiredScratchSize == 0)
-	{
-		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsScratchMs);
-		if (updateDynamicPerfStats)
-		{
-			mLastPerfShellTraceStats.dynamicAsScratchQueries++;
-		}
-		requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*outAccelerationStructure.accelerationStructure);
-		if (updateDynamicPerfStats)
-		{
-			outAccelerationStructure.buildScratchSize = requiredScratchSize;
-		}
-	}
-	if (updateDynamicPerfStats)
-	{
-		mLastPerfShellTraceStats.dynamicAsScratchRequestedBytes = requiredScratchSize;
-	}
-	if (mScratchBuffer.buffer == nullptr || mScratchBuffer.size < requiredScratchSize)
-	{
-		DestroyBufferResource(mScratchBuffer);
-		{
-			ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsScratchMs);
-			if (updateDynamicPerfStats)
-			{
-				mLastPerfShellTraceStats.dynamicAsScratchGrowCount++;
-			}
-			if (!CreateBufferWithoutView(mScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
-			{
-				return false;
-			}
-		}
-	}
-
-	nri::BuildBottomLevelAccelerationStructureDesc dynamicBuild = {};
-	dynamicBuild.dst = outAccelerationStructure.accelerationStructure;
-	dynamicBuild.geometries = &dynamicGeometryDesc;
-	dynamicBuild.geometryNum = 1;
-	dynamicBuild.scratchBuffer = mScratchBuffer.buffer;
-	dynamicBuild.scratchOffset = 0;
-	{
-		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsBuildMs);
-		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &dynamicBuild, 1);
-	}
-
-	nri::BufferBarrierDesc barriers[2] = {};
-	barriers[0].buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*outAccelerationStructure.accelerationStructure);
-	barriers[0].before = NRIAccelerationStructureWriteAccess();
-	barriers[0].after = NRIAccelerationStructureReadAccess();
-	barriers[1].buffer = mScratchBuffer.buffer;
-	barriers[1].before = NRIAccelerationStructureScratchAccess();
-	barriers[1].after = NRIAccelerationStructureScratchAccess();
-
-	nri::BarrierDesc barrierDesc = {};
-	barrierDesc.buffers = barriers;
-	barrierDesc.bufferNum = 2;
-	{
-		ScopedPtPerfTimer phaseTimer(mLastPerfShellTraceStats.dynamicAsBarrierMs);
-		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
-	}
-	mBuiltDynamicSceneASLastFrame = true;
-	if (updateDynamicPerfStats)
-	{
-		outAccelerationStructure.buildVertexBuffer = vertexBuffer.buffer;
-		outAccelerationStructure.buildIndexBuffer = indexBuffer.buffer;
-		outAccelerationStructure.buildVertexCount = vertexCount;
-		outAccelerationStructure.buildIndexOffset = indexOffset;
-		outAccelerationStructure.buildIndexCount = indexCount;
-		outAccelerationStructure.buildPrimitiveCount = primitiveCount;
-		outAccelerationStructure.buildScratchSize = requiredScratchSize;
-		mDynamicSceneLastFrame.asBuildCount++;
-	}
-	return true;
+	return NRIAccelerationStructureManager::BuildBottomLevel(
+		*this,
+		vertexBuffer,
+		indexBuffer,
+		vertexCount,
+		indexOffset,
+		indexCount,
+		primitiveCount,
+		outAccelerationStructure,
+		updateDynamicPerfStats);
 }
 
 bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
 {
-	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.emissiveTlasMs);
-	mEmissiveTlasInstanceCount = 0;
-	mEmissiveTlasStaticInstanceCount = 0;
-	mEmissiveTlasDynamicInstanceCount = 0;
-
-	if (!nri_ptemissivetlas ||
-		mBoundEmissivePrimitiveRecords.empty() ||
-		mBoundSceneInstances.empty())
-	{
-		DestroyBufferResource(mEmissiveTlasInstanceBuffer);
-		RetireTopLevelAccelerationStructure(mEmissiveTopLevelAS);
-		mEmissiveTlasInstancePayloadCacheValid = false;
-		mEmissiveTlasInstancePayloadHash = 0;
-		return true;
-	}
-
-	std::unordered_map<uint32_t, uint32_t> staticSceneInstanceByPrimitiveOffset;
-	staticSceneInstanceByPrimitiveOffset.reserve(mBoundSceneInstances.size());
-	uint32_t dynamicSceneInstanceIndex = UINT32_MAX;
-	for (uint32_t sceneInstanceIndex = 0; sceneInstanceIndex < (uint32_t)mBoundSceneInstances.size(); ++sceneInstanceIndex)
-	{
-		const SceneInstanceData& sceneInstance = mBoundSceneInstances[sceneInstanceIndex];
-		if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
-		{
-			staticSceneInstanceByPrimitiveOffset.emplace(sceneInstance.primitiveOffset, sceneInstanceIndex);
-		}
-		else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC && dynamicSceneInstanceIndex == UINT32_MAX)
-		{
-			dynamicSceneInstanceIndex = sceneInstanceIndex;
-		}
-	}
-
-	std::vector<uint8_t> emissiveStaticChunks(mStaticMapScene.chunks.size(), 0u);
-	bool includeDynamicInstance = false;
-	const NRIAccelerationStructureResource* dynamicBottomLevelAS = &GetCurrentDynamicBottomLevelAS();
-	const auto findStaticChunkIndexForPrimitive = [&](uint32_t primitiveIndex) -> int32_t
-	{
-		for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)mStaticMapScene.chunks.size(); ++chunkIndex)
-		{
-			const auto& chunk = mStaticMapScene.chunks[chunkIndex];
-			if (!chunk.active)
-			{
-				continue;
-			}
-			const uint32_t chunkBegin = chunk.primitiveOffset;
-			const uint32_t chunkEnd = chunkBegin + chunk.primitiveCount;
-			if (primitiveIndex >= chunkBegin && primitiveIndex < chunkEnd)
-			{
-				return (int32_t)chunkIndex;
-			}
-		}
-
-		return -1;
-	};
-
-	for (const EmissivePrimitiveDebugRecord& record : mBoundEmissivePrimitiveRecords)
-	{
-		if (record.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
-		{
-			const int32_t chunkIndex = findStaticChunkIndexForPrimitive(record.primitiveIndex);
-			if (chunkIndex >= 0)
-			{
-				emissiveStaticChunks[(size_t)chunkIndex] = 1u;
-			}
-		}
-		else if (record.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC &&
-			dynamicSceneInstanceIndex != UINT32_MAX &&
-			dynamicBottomLevelAS != nullptr &&
-			dynamicBottomLevelAS->accelerationStructure != nullptr)
-		{
-			includeDynamicInstance = true;
-		}
-	}
-
-	std::vector<nri::TopLevelInstance> instances;
-	instances.reserve(mStaticMapScene.chunks.size() + (includeDynamicInstance ? 1u : 0u));
-	for (size_t chunkIndex = 0; chunkIndex < mStaticMapScene.chunks.size(); ++chunkIndex)
-	{
-		if (emissiveStaticChunks[chunkIndex] == 0u)
-		{
-			continue;
-		}
-
-		const auto& chunk = mStaticMapScene.chunks[chunkIndex];
-		if (!chunk.active || chunk.accelerationStructure.accelerationStructure == nullptr)
-		{
-			continue;
-		}
-
-		const auto sceneInstanceIt = staticSceneInstanceByPrimitiveOffset.find(chunk.primitiveOffset);
-		if (sceneInstanceIt == staticSceneInstanceByPrimitiveOffset.end())
-		{
-			continue;
-		}
-
-		nri::TopLevelInstance instance = {};
-		instance.transform[0][0] = 1.0f;
-		instance.transform[1][1] = 1.0f;
-		instance.transform[2][2] = 1.0f;
-		instance.instanceId = sceneInstanceIt->second;
-		instance.mask = 0xFF;
-		instance.shaderBindingTableLocalOffset = 0;
-		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
-		instances.push_back(instance);
-		mEmissiveTlasStaticInstanceCount++;
-	}
-
-	if (includeDynamicInstance)
-	{
-		nri::TopLevelInstance instance = {};
-		instance.transform[0][0] = 1.0f;
-		instance.transform[1][1] = 1.0f;
-		instance.transform[2][2] = 1.0f;
-		instance.instanceId = dynamicSceneInstanceIndex;
-		instance.mask = 0xFF;
-		instance.shaderBindingTableLocalOffset = 0;
-		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS->accelerationStructure);
-		instances.push_back(instance);
-		mEmissiveTlasDynamicInstanceCount = 1;
-	}
-
-	if (instances.empty())
-	{
-		DestroyBufferResource(mEmissiveTlasInstanceBuffer);
-		RetireTopLevelAccelerationStructure(mEmissiveTopLevelAS);
-		mEmissiveTlasInstancePayloadCacheValid = false;
-		mEmissiveTlasInstancePayloadHash = 0;
-		return true;
-	}
-
-	const uint64_t payloadHash = BuildEmissiveTlasInstancePayloadHash(instances);
-	if (mEmissiveTlasInstancePayloadCacheValid &&
-		mEmissiveTlasInstancePayloadHash == payloadHash &&
-		mEmissiveTlasInstanceBuffer.buffer != nullptr &&
-		mEmissiveTopLevelAS.accelerationStructure != nullptr)
-	{
-		mEmissiveTlasInstanceCount = (uint32_t)instances.size();
-		return true;
-	}
-
-	RetireTopLevelAccelerationStructure(mEmissiveTopLevelAS);
-	if (!EnsureStructuredBuffer(
-		mEmissiveTlasInstanceBuffer,
-		mEmissiveTlasInstanceBufferStats,
-		instances.data(),
-		instances.size() * sizeof(nri::TopLevelInstance),
-		sizeof(nri::TopLevelInstance),
-		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
-		NRIAccelerationStructureBuildInputAccess(),
-		false,
-		"emissive_tlas_instance_upload"))
-	{
-		return false;
-	}
-
-	nri::AccelerationStructureDesc tlasDesc = {};
-	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
-	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
-	tlasDesc.geometryOrInstanceNum = (uint32_t)instances.size();
-	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, mEmissiveTopLevelAS.accelerationStructure) != nri::Result::SUCCESS)
-	{
-		return false;
-	}
-
-	{
-		nri::MemoryDesc memoryDesc = {};
-		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*mEmissiveTopLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-		mEmissiveTopLevelAS.memorySize = memoryDesc.size;
-		mEmissiveTopLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
-	}
-
-	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*mEmissiveTopLevelAS.accelerationStructure);
-	if (mEmissiveTopLevelScratchBuffer.buffer == nullptr || mEmissiveTopLevelScratchBuffer.size < requiredScratchSize)
-	{
-		if (mEmissiveTopLevelScratchBuffer.buffer != nullptr)
-		{
-			WaitForCommandsTracked("emissive_tlas_scratch_resize");
-		}
-		DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
-		if (!CreateBufferWithoutView(mEmissiveTopLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
-		{
-			return false;
-		}
-	}
-
-	if (mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*mEmissiveTopLevelAS.accelerationStructure, mEmissiveTopLevelAS.descriptor) != nri::Result::SUCCESS)
-	{
-		return false;
-	}
-
-	nri::BuildTopLevelAccelerationStructureDesc tlasBuild = {};
-	tlasBuild.dst = mEmissiveTopLevelAS.accelerationStructure;
-	tlasBuild.instanceNum = (uint32_t)instances.size();
-	tlasBuild.instanceBuffer = mEmissiveTlasInstanceBuffer.buffer;
-	tlasBuild.instanceOffset = 0;
-	tlasBuild.scratchBuffer = mEmissiveTopLevelScratchBuffer.buffer;
-	tlasBuild.scratchOffset = 0;
-	mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
-
-	nri::BufferBarrierDesc tlasBarrier = {};
-	tlasBarrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*mEmissiveTopLevelAS.accelerationStructure);
-	tlasBarrier.before = NRIAccelerationStructureWriteAccess();
-	tlasBarrier.after = NRIComputeAccelerationStructureReadAccess();
-
-	nri::BarrierDesc barrierDesc = {};
-	barrierDesc.buffers = &tlasBarrier;
-	barrierDesc.bufferNum = 1;
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
-
-	mEmissiveTlasInstanceCount = (uint32_t)instances.size();
-	mEmissiveTlasBuildCount++;
-	mEmissiveTlasInstancePayloadCacheValid = true;
-	mEmissiveTlasInstancePayloadHash = payloadHash;
-	return true;
+	return NRIAccelerationStructureManager::BuildEmissiveTopLevel(*this);
 }
 
 bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask)
 {
-	return BuildTopLevelAccelerationStructure(
-		instances,
-		sceneBufferMask,
-		mTopLevelAS,
-		GetCurrentTlasInstanceBuffer(),
-		mTopLevelScratchBuffer,
-		&mStaticVertexBuffer,
-		&mStaticIndexBuffer,
-		&mActiveTlasInstanceCount,
-		true,
-		true);
+	return NRIAccelerationStructureManager::BuildTopLevel(*this, instances, sceneBufferMask);
 }
 
 bool NRIRenderer::BuildTopLevelAccelerationStructure(
@@ -36345,136 +35934,18 @@ bool NRIRenderer::BuildTopLevelAccelerationStructure(
 	bool updateLiveState,
 	bool tlasInstanceWritesQuiesced)
 {
-	Clocker clock(NriPTAcceleration);
-	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.worldTlasMs);
-	mLastPerfShellTraceStats.worldTlasBuildCalls++;
-	mLastPerfShellTraceStats.worldTlasInstanceCount = (uint32_t)instances.size();
-	if (instances.empty())
-	{
-		return false;
-	}
-	RetireTopLevelAccelerationStructure(topLevelAS);
-
-	static SceneBufferDebugStats sTlasInstanceStats = { "TLASInstance" };
-	if (!EnsureStructuredBuffer(
+	return NRIAccelerationStructureManager::BuildTopLevel(
+		*this,
+		instances,
+		sceneBufferMask,
+		topLevelAS,
 		tlasInstanceBuffer,
-		sTlasInstanceStats,
-		instances.data(),
-		instances.size() * sizeof(nri::TopLevelInstance),
-		sizeof(nri::TopLevelInstance),
-		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
-		NRIAccelerationStructureBuildInputAccess(),
-		tlasInstanceWritesQuiesced,
-		"world_tlas_instance_upload"))
-	{
-		return false;
-	}
-
-	nri::AccelerationStructureDesc tlasDesc = {};
-	tlasDesc.type = nri::AccelerationStructureType::TOP_LEVEL;
-	tlasDesc.flags = nri::AccelerationStructureBits::PREFER_FAST_TRACE;
-	tlasDesc.geometryOrInstanceNum = (uint32_t)instances.size();
-	if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, tlasDesc, topLevelAS.accelerationStructure) != nri::Result::SUCCESS)
-	{
-		return false;
-	}
-
-	{
-		nri::MemoryDesc memoryDesc = {};
-		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*topLevelAS.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-		topLevelAS.memorySize = memoryDesc.size;
-		topLevelAS.memoryLocation = nri::MemoryLocation::DEVICE;
-	}
-
-	const uint64_t requiredScratchSize = mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*topLevelAS.accelerationStructure);
-	if (topLevelScratchBuffer.buffer == nullptr || topLevelScratchBuffer.size < requiredScratchSize)
-	{
-		if (topLevelScratchBuffer.buffer != nullptr)
-		{
-			WaitForCommandsTracked("world_tlas_scratch_resize");
-		}
-		DestroyBufferResource(topLevelScratchBuffer);
-		if (!CreateBufferWithoutView(topLevelScratchBuffer, requiredScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
-		{
-			return false;
-		}
-	}
-
-	if (mFrameBuffer->mRayTracing.CreateAccelerationStructureDescriptor(*topLevelAS.accelerationStructure, topLevelAS.descriptor) != nri::Result::SUCCESS)
-	{
-		return false;
-	}
-
-	nri::BuildTopLevelAccelerationStructureDesc tlasBuild = {};
-	tlasBuild.dst = topLevelAS.accelerationStructure;
-	tlasBuild.instanceNum = (uint32_t)instances.size();
-	tlasBuild.instanceBuffer = tlasInstanceBuffer.buffer;
-	tlasBuild.instanceOffset = 0;
-	tlasBuild.scratchBuffer = topLevelScratchBuffer.buffer;
-	tlasBuild.scratchOffset = 0;
-	mFrameBuffer->mRayTracing.CmdBuildTopLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &tlasBuild, 1);
-
-	nri::BufferBarrierDesc tlasBarrier = {};
-	tlasBarrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*topLevelAS.accelerationStructure);
-	tlasBarrier.before = NRIAccelerationStructureWriteAccess();
-	tlasBarrier.after = NRIComputeAccelerationStructureReadAccess();
-
-	std::vector<nri::BufferBarrierDesc> barriers;
-	barriers.reserve(5);
-	barriers.push_back(tlasBarrier);
-	if ((sceneBufferMask & SceneDataBufferMask_Static) != 0 && staticVertexBuffer != nullptr && staticIndexBuffer != nullptr)
-	{
-		nri::BufferBarrierDesc vertexBarrier = {};
-		vertexBarrier.buffer = staticVertexBuffer->buffer;
-		vertexBarrier.before = NRIAccelerationStructureBuildInputAccess();
-		vertexBarrier.after = NRIComputeShaderResourceAccess();
-		barriers.push_back(vertexBarrier);
-
-		nri::BufferBarrierDesc indexBarrier = {};
-		indexBarrier.buffer = staticIndexBuffer->buffer;
-		indexBarrier.before = NRIAccelerationStructureBuildInputAccess();
-		indexBarrier.after = NRIComputeShaderResourceAccess();
-		barriers.push_back(indexBarrier);
-	}
-	if ((sceneBufferMask & SceneDataBufferMask_Dynamic) != 0)
-	{
-		const NRIBufferResource& dynamicVertexBuffer = GetCurrentDynamicVertexBuffer();
-		const NRIBufferResource& dynamicIndexBuffer = GetCurrentDynamicIndexBuffer();
-		nri::BufferBarrierDesc vertexBarrier = {};
-		vertexBarrier.buffer = dynamicVertexBuffer.buffer;
-		vertexBarrier.before = NRIAccelerationStructureBuildInputAccess();
-		vertexBarrier.after = NRIComputeShaderResourceAccess();
-		barriers.push_back(vertexBarrier);
-
-		nri::BufferBarrierDesc indexBarrier = {};
-		indexBarrier.buffer = dynamicIndexBuffer.buffer;
-		indexBarrier.before = NRIAccelerationStructureBuildInputAccess();
-		indexBarrier.after = NRIComputeShaderResourceAccess();
-		barriers.push_back(indexBarrier);
-	}
-
-	nri::BarrierDesc barrierDesc = {};
-	barrierDesc.buffers = barriers.data();
-	barrierDesc.bufferNum = (uint32_t)barriers.size();
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
-
-	if (outTlasInstanceCount != nullptr)
-	{
-		*outTlasInstanceCount = (uint32_t)instances.size();
-	}
-
-	if (updateLiveState)
-	{
-		mActiveTlasInstanceCount = (uint32_t)instances.size();
-		if ((sceneBufferMask & SceneDataBufferMask_Static) != 0 &&
-			(sceneBufferMask & SceneDataBufferMask_Dynamic) == 0)
-		{
-			mStaticMapScene.tlasInstanceCount = (uint32_t)instances.size();
-			mStaticMapScene.accelerationResident = true;
-			mBuiltStaticMapSceneASLastFrame = true;
-		}
-	}
-	return true;
+		topLevelScratchBuffer,
+		staticVertexBuffer,
+		staticIndexBuffer,
+		outTlasInstanceCount,
+		updateLiveState,
+		tlasInstanceWritesQuiesced);
 }
 
 bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int)

@@ -20,6 +20,7 @@ class FTexture;
 class FGameTexture;
 class NRIRenderer;
 class NRIExposurePassAccess;
+class NRIAccelerationStructureManager;
 class NRIUpscalerContext;
 
 #ifdef _WIN32
@@ -299,6 +300,7 @@ private:
 	friend class NRIRenderState;
 	friend class NRIRenderer;
 	friend class NRIExposurePassAccess;
+	friend class NRIAccelerationStructureManager;
 	friend class NRIUpscalerContext;
 	friend class NRIFrameGenerationContext;
 
