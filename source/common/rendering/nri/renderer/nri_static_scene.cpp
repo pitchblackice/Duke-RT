@@ -4,6 +4,25 @@
 
 #include <algorithm>
 
+namespace
+{
+	template<typename T>
+	static T NRIFlags(T a, T b)
+	{
+		return (T)((uint32_t)a | (uint32_t)b);
+	}
+
+	static nri::AccessStage NRIComputeShaderResourceAccess()
+	{
+		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
+	}
+
+	static nri::AccessStage NRIAccelerationStructureBuildInputAccess()
+	{
+		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
+	}
+}
+
 void NRIRenderer::ResetResidentMapChunkRegistry()
 {
 	mResidentMapChunkRegistry = {};
@@ -227,4 +246,163 @@ bool NRIRenderer::BuildStaticMapChunkAtlasLayout(const StaticMapSceneCache& stat
 	outAtlas.primitiveCapacity = GetChunkAtlasCapacity(primitiveCursor);
 	outAtlas.materialCapacity = GetChunkAtlasCapacity(materialCursor);
 	return true;
+}
+
+bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas)
+{
+	if (!atlas.valid || !mStaticMapScene.valid)
+	{
+		return false;
+	}
+
+	const uint32_t targetVertexCapacity = std::max(atlas.vertexCapacity, atlas.vertexCount);
+	const uint32_t targetIndexCapacity = std::max(atlas.indexCapacity, atlas.indexCount);
+	const uint32_t targetPrimitiveCapacity = std::max(atlas.primitiveCapacity, atlas.primitiveCount);
+	const uint32_t targetMaterialCapacity = std::max(atlas.materialCapacity, atlas.materialCount);
+
+	const uint32_t currentVertexCapacity =
+		mStaticVertexBuffer.stride != 0 ?
+		(uint32_t)(mStaticVertexBuffer.size / mStaticVertexBuffer.stride) :
+		0u;
+	const uint32_t currentIndexCapacity =
+		mStaticIndexBuffer.stride != 0 ?
+		(uint32_t)(mStaticIndexBuffer.size / mStaticIndexBuffer.stride) :
+		0u;
+	const uint32_t currentPrimitiveCapacity =
+		mStaticPrimitiveBuffer.stride != 0 ?
+		(uint32_t)(mStaticPrimitiveBuffer.size / mStaticPrimitiveBuffer.stride) :
+		0u;
+	const uint32_t currentMaterialCapacity =
+		mStaticMaterialBuffer.stride != 0 ?
+		(uint32_t)(mStaticMaterialBuffer.size / mStaticMaterialBuffer.stride) :
+		0u;
+
+	const bool growVertexBuffer = currentVertexCapacity < targetVertexCapacity;
+	const bool growIndexBuffer = currentIndexCapacity < targetIndexCapacity;
+	const bool growPrimitiveBuffer = currentPrimitiveCapacity < targetPrimitiveCapacity;
+	const bool growMaterialBuffer = currentMaterialCapacity < targetMaterialCapacity;
+	if (!growVertexBuffer && !growIndexBuffer && !growPrimitiveBuffer && !growMaterialBuffer)
+	{
+		mStaticMapChunkAtlas.vertexCapacity = currentVertexCapacity;
+		mStaticMapChunkAtlas.indexCapacity = currentIndexCapacity;
+		mStaticMapChunkAtlas.primitiveCapacity = currentPrimitiveCapacity;
+		mStaticMapChunkAtlas.materialCapacity = currentMaterialCapacity;
+		return true;
+	}
+
+	if (growVertexBuffer)
+	{
+		std::vector<nri_scene::SceneVertex> uploadVertices(targetVertexCapacity);
+		const size_t copyCount = std::min<size_t>(mStaticMapScene.geometry.vertices.size(), atlas.vertexCount);
+		if (copyCount != 0)
+		{
+			std::copy_n(mStaticMapScene.geometry.vertices.data(), copyCount, uploadVertices.data());
+		}
+		if (!EnsureResidentStructuredBuffer(
+				mStaticVertexBuffer,
+				mVertexBufferStats,
+				uploadVertices.data(),
+				(uint64_t)uploadVertices.size() * sizeof(nri_scene::SceneVertex),
+				sizeof(nri_scene::SceneVertex),
+				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+				NRIAccelerationStructureBuildInputAccess(),
+				"resident_chunk_write",
+				ResidentUploadKind_Vertex))
+		{
+			return false;
+		}
+		mStaticVertexBuffer.usedSize = (uint64_t)atlas.vertexCount * sizeof(nri_scene::SceneVertex);
+	}
+
+	if (growIndexBuffer)
+	{
+		std::vector<uint32_t> uploadIndices(targetIndexCapacity);
+		const size_t copyCount = std::min<size_t>(mStaticMapScene.geometry.indices.size(), atlas.indexCount);
+		if (copyCount != 0)
+		{
+			std::copy_n(mStaticMapScene.geometry.indices.data(), copyCount, uploadIndices.data());
+		}
+		if (!EnsureResidentStructuredBuffer(
+				mStaticIndexBuffer,
+				mIndexBufferStats,
+				uploadIndices.data(),
+				(uint64_t)uploadIndices.size() * sizeof(uint32_t),
+				sizeof(uint32_t),
+				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+				NRIAccelerationStructureBuildInputAccess(),
+				"resident_chunk_write",
+				ResidentUploadKind_Index))
+		{
+			return false;
+		}
+		mStaticIndexBuffer.usedSize = (uint64_t)atlas.indexCount * sizeof(uint32_t);
+	}
+
+	if (growPrimitiveBuffer)
+	{
+		std::vector<nri_scene::PrimitiveData> uploadPrimitives(targetPrimitiveCapacity);
+		const size_t copyCount = std::min<size_t>(mStaticMapScene.geometry.primitives.size(), atlas.primitiveCount);
+		if (copyCount != 0)
+		{
+			std::copy_n(mStaticMapScene.geometry.primitives.data(), copyCount, uploadPrimitives.data());
+		}
+		if (!EnsureResidentStructuredBuffer(
+				mStaticPrimitiveBuffer,
+				mPrimitiveBufferStats,
+				uploadPrimitives.data(),
+				(uint64_t)uploadPrimitives.size() * sizeof(nri_scene::PrimitiveData),
+				sizeof(nri_scene::PrimitiveData),
+				nri::BufferUsageBits::SHADER_RESOURCE,
+				NRIComputeShaderResourceAccess(),
+				"resident_chunk_write",
+				ResidentUploadKind_Primitive))
+		{
+			return false;
+		}
+		mStaticPrimitiveBuffer.usedSize = (uint64_t)atlas.primitiveCount * sizeof(nri_scene::PrimitiveData);
+	}
+
+	if (growMaterialBuffer)
+	{
+		std::vector<nri_scene::MaterialData> uploadMaterials(targetMaterialCapacity);
+		const size_t copyCount = std::min<size_t>(mStaticMapScene.gpuMaterials.size(), atlas.materialCount);
+		if (copyCount != 0)
+		{
+			std::copy_n(mStaticMapScene.gpuMaterials.data(), copyCount, uploadMaterials.data());
+		}
+		if (!EnsureResidentStructuredBuffer(
+				mStaticMaterialBuffer,
+				mMaterialBufferStats,
+				uploadMaterials.data(),
+				(uint64_t)uploadMaterials.size() * sizeof(nri_scene::MaterialData),
+				sizeof(nri_scene::MaterialData),
+				nri::BufferUsageBits::SHADER_RESOURCE,
+				NRIComputeShaderResourceAccess(),
+				"resident_chunk_write",
+				ResidentUploadKind_Material))
+		{
+			return false;
+		}
+		mStaticMaterialBuffer.usedSize = (uint64_t)atlas.materialCount * sizeof(nri_scene::MaterialData);
+	}
+
+	mStaticMapChunkAtlas.vertexCapacity =
+		mStaticVertexBuffer.stride != 0 ?
+		(uint32_t)(mStaticVertexBuffer.size / mStaticVertexBuffer.stride) :
+		atlas.vertexCapacity;
+	mStaticMapChunkAtlas.indexCapacity =
+		mStaticIndexBuffer.stride != 0 ?
+		(uint32_t)(mStaticIndexBuffer.size / mStaticIndexBuffer.stride) :
+		atlas.indexCapacity;
+	mStaticMapChunkAtlas.primitiveCapacity =
+		mStaticPrimitiveBuffer.stride != 0 ?
+		(uint32_t)(mStaticPrimitiveBuffer.size / mStaticPrimitiveBuffer.stride) :
+		atlas.primitiveCapacity;
+	mStaticMapChunkAtlas.materialCapacity =
+		mStaticMaterialBuffer.stride != 0 ?
+		(uint32_t)(mStaticMaterialBuffer.size / mStaticMaterialBuffer.stride) :
+		atlas.materialCapacity;
+	mRuntimeMapLastFrame.residentAtlasGrowCount++;
+
+	return RefreshResidentStaticSceneDataSet();
 }
