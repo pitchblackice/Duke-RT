@@ -3,6 +3,7 @@
 
 #include "NRI.hlsl"
 
+// Mirrored by nri_shader_contracts.h. Keep layout, flags, and bindings in sync.
 #define SET_EXPOSURE_INPUTS 0
 #define SET_EXPOSURE_OUTPUTS 1
 #define SET_EXPOSURE_ROOT 2

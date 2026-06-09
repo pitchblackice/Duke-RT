@@ -3,6 +3,7 @@
 #include "../framegen/nri_framegen.h"
 #include "nri_renderstate.h"
 #include "nri_renderer_settings.h"
+#include "nri_shader_contracts.h"
 #include "../scene/nri_map_builder.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
@@ -3513,14 +3514,6 @@ namespace
 	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 	constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
 	constexpr uint32_t NRI_TRACE_SHADER_STATS_COUNTER_COUNT = NRIRenderer::TraceShaderStatCount;
-	constexpr uint32_t NRI_AUTO_EXPOSURE_INPUT_DESCRIPTOR_NUM = 2;
-	constexpr uint32_t NRI_AUTO_EXPOSURE_OUTPUT_TEXTURE_DESCRIPTOR_NUM = 1;
-	constexpr uint32_t NRI_AUTO_EXPOSURE_OUTPUT_BUFFER_DESCRIPTOR_NUM = 2;
-	constexpr uint32_t NRI_AUTO_EXPOSURE_DEBUG_MAGIC = 0x45585033u;
-	constexpr uint32_t NRI_EXPOSURE_FLAG_FREEZE = 0x1u;
-	constexpr uint32_t NRI_EXPOSURE_FLAG_RESET = 0x2u;
-	constexpr float NRI_EXPOSURE_LOG_LUMINANCE_MIN = -12.0f;
-	constexpr float NRI_EXPOSURE_LOG_LUMINANCE_MAX = 12.0f;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
 	constexpr uint32_t NRI_MAX_EMISSIVE_PRIMITIVES = 16384;
@@ -6896,30 +6889,6 @@ namespace
 		uint32_t NightVisionPackedControls = 0;
 	};
 
-	struct NRIExposureConstants
-	{
-		uint32_t RenderWidth = 0;
-		uint32_t RenderHeight = 0;
-		uint32_t FrameIndex = 0;
-		uint32_t Flags = 0;
-		uint32_t HistogramBinCount = 0;
-		uint32_t SampleStep = 1;
-		float DeltaTimeSeconds = 1.0f / 60.0f;
-		uint32_t MeteringMode = 0;
-		float LogLuminanceMin = -12.0f;
-		float LogLuminanceMax = 12.0f;
-		float InvLogLuminanceRange = 1.0f / 24.0f;
-		float TargetLuminance = 0.18f;
-		float MinExposure = 0.125f;
-		float MaxExposure = 8.0f;
-		float ExposureBias = 1.0f;
-		float LowPercentile = 1.0f;
-		float HighPercentile = 99.0f;
-		float FallbackManualExposure = 1.0f;
-		float AdaptUpSpeed = 3.0f;
-		float AdaptDownSpeed = 1.0f;
-	};
-
 	struct NRIReprojectionData
 	{
 		float currentViewToClip[16] = {};
@@ -6931,7 +6900,6 @@ namespace
 	static_assert(sizeof(NRITraceSceneConstants) <= 224, "NRITraceSceneConstants must stay within the validated shared root-constant budget.");
 	static_assert(sizeof(NRITemporalConstants) <= 32, "NRITemporalConstants must stay compact.");
 	static_assert(sizeof(NRIPresentConstants) <= 96, "NRIPresentConstants must stay compact.");
-	static_assert(sizeof(NRIExposureConstants) <= 96, "NRIExposureConstants must stay compact.");
 
 	static uint32_t PackPresentSceneOrigin(int sceneLeft, int sceneTop)
 	{
@@ -23242,21 +23210,21 @@ bool NRIRenderer::CreateExposurePipelineLayout()
 {
 	nri::DescriptorRangeDesc inputRange = {};
 	inputRange.baseRegisterIndex = 0;
-	inputRange.descriptorNum = NRI_AUTO_EXPOSURE_INPUT_DESCRIPTOR_NUM;
+	inputRange.descriptorNum = NRI_EXPOSURE_INPUT_DESCRIPTOR_NUM;
 	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
 	inputRange.shaderStages = NRIComputeStage();
 	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::DescriptorRangeDesc outputTextureRange = {};
-	outputTextureRange.baseRegisterIndex = 0;
-	outputTextureRange.descriptorNum = NRI_AUTO_EXPOSURE_OUTPUT_TEXTURE_DESCRIPTOR_NUM;
+	outputTextureRange.baseRegisterIndex = NRI_EXPOSURE_OUTPUT_TEXTURE_BASE_REGISTER;
+	outputTextureRange.descriptorNum = NRI_EXPOSURE_OUTPUT_TEXTURE_DESCRIPTOR_NUM;
 	outputTextureRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
 	outputTextureRange.shaderStages = NRIComputeStage();
 	outputTextureRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::DescriptorRangeDesc outputBufferRange = {};
-	outputBufferRange.baseRegisterIndex = 1;
-	outputBufferRange.descriptorNum = NRI_AUTO_EXPOSURE_OUTPUT_BUFFER_DESCRIPTOR_NUM;
+	outputBufferRange.baseRegisterIndex = NRI_EXPOSURE_OUTPUT_BUFFER_BASE_REGISTER;
+	outputBufferRange.descriptorNum = NRI_EXPOSURE_OUTPUT_BUFFER_DESCRIPTOR_NUM;
 	outputBufferRange.descriptorType = nri::DescriptorType::STORAGE_STRUCTURED_BUFFER;
 	outputBufferRange.shaderStages = NRIComputeStage();
 	outputBufferRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
@@ -23264,22 +23232,22 @@ bool NRIRenderer::CreateExposurePipelineLayout()
 	nri::DescriptorRangeDesc outputRanges[2] = { outputTextureRange, outputBufferRange };
 
 	nri::DescriptorSetDesc descriptorSets[2] = {};
-	descriptorSets[0].registerSpace = 0;
+	descriptorSets[0].registerSpace = NRI_EXPOSURE_SET_INPUTS;
 	descriptorSets[0].ranges = &inputRange;
 	descriptorSets[0].rangeNum = 1;
 	descriptorSets[0].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-	descriptorSets[1].registerSpace = 1;
+	descriptorSets[1].registerSpace = NRI_EXPOSURE_SET_OUTPUTS;
 	descriptorSets[1].ranges = outputRanges;
 	descriptorSets[1].rangeNum = (uint32_t)std::size(outputRanges);
 	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
 
 	nri::RootConstantDesc rootConstant = {};
-	rootConstant.registerIndex = 0;
+	rootConstant.registerIndex = NRI_EXPOSURE_ROOT_REGISTER;
 	rootConstant.size = sizeof(NRIExposureConstants);
 	rootConstant.shaderStages = NRIComputeStage();
 
 	nri::PipelineLayoutDesc desc = {};
-	desc.rootRegisterSpace = 2;
+	desc.rootRegisterSpace = NRI_EXPOSURE_SET_ROOT;
 	desc.rootConstants = &rootConstant;
 	desc.rootConstantNum = 1;
 	desc.descriptorSets = descriptorSets;
@@ -25471,7 +25439,7 @@ bool NRIRenderer::EnsureAutoExposureResources(const NRIAutoExposureSettings& set
 			{
 				if (!CreateBufferWithoutViewAtLocation(
 					readbackBuffer,
-					(uint64_t)NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT * sizeof(uint32_t),
+					(uint64_t)NRI_EXPOSURE_DEBUG_WORD_COUNT * sizeof(uint32_t),
 					sizeof(uint32_t),
 					nri::BufferUsageBits::NONE,
 					nri::MemoryLocation::HOST_READBACK))
@@ -25505,8 +25473,8 @@ bool NRIRenderer::EnsureAutoExposureResources(const NRIAutoExposureSettings& set
 	const nri::TextureUsageBits usage = NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE);
 	if (!mFrameBuffer->CreateOwnedTexture(exposureState0, 1, 1, nri::Format::RGBA32_SFLOAT, usage) ||
 		!mFrameBuffer->CreateOwnedTexture(exposureState1, 1, 1, nri::Format::RGBA32_SFLOAT, usage) ||
-		!createStorageBuffer(histogramBuffer, (uint64_t)NRI_AUTO_EXPOSURE_MAX_HISTOGRAM_BINS * sizeof(uint32_t), sizeof(uint32_t)) ||
-		!createStorageBuffer(debugBuffer, (uint64_t)NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT * sizeof(uint32_t), sizeof(uint32_t)) ||
+		!createStorageBuffer(histogramBuffer, (uint64_t)NRI_EXPOSURE_MAX_HISTOGRAM_BINS * sizeof(uint32_t), sizeof(uint32_t)) ||
+		!createStorageBuffer(debugBuffer, (uint64_t)NRI_EXPOSURE_DEBUG_WORD_COUNT * sizeof(uint32_t), sizeof(uint32_t)) ||
 		!ensureStatsReadback() ||
 		!UpdateAutoExposureDescriptorSets(FrameTextureSlot::TraceTransparentOutput))
 	{
@@ -25547,7 +25515,7 @@ bool NRIRenderer::UpdateAutoExposureDescriptorSets(FrameTextureSlot sourceSlot)
 	for (uint32_t currentIndex = 0; currentIndex < 2; ++currentIndex)
 	{
 		const uint32_t previousIndex = 1u - currentIndex;
-		const nri::Descriptor* inputDescriptors[NRI_AUTO_EXPOSURE_INPUT_DESCRIPTOR_NUM] = {
+		const nri::Descriptor* inputDescriptors[NRI_EXPOSURE_INPUT_DESCRIPTOR_NUM] = {
 			source.shaderView,
 			mExposure.GetMutableExposureStateTexture(previousIndex).shaderView
 		};
@@ -25555,7 +25523,7 @@ bool NRIRenderer::UpdateAutoExposureDescriptorSets(FrameTextureSlot sourceSlot)
 		inputUpdate.descriptorSet = mExposureInputSets[currentIndex];
 		inputUpdate.rangeIndex = 0;
 		inputUpdate.descriptors = inputDescriptors;
-		inputUpdate.descriptorNum = NRI_AUTO_EXPOSURE_INPUT_DESCRIPTOR_NUM;
+		inputUpdate.descriptorNum = NRI_EXPOSURE_INPUT_DESCRIPTOR_NUM;
 		mFrameBuffer->mCore.UpdateDescriptorRanges(&inputUpdate, 1);
 
 		const nri::Descriptor* outputTextureDescriptor = mExposure.GetMutableExposureStateTexture(currentIndex).storageView;
@@ -25563,10 +25531,10 @@ bool NRIRenderer::UpdateAutoExposureDescriptorSets(FrameTextureSlot sourceSlot)
 		outputTextureUpdate.descriptorSet = mExposureOutputSets[currentIndex];
 		outputTextureUpdate.rangeIndex = 0;
 		outputTextureUpdate.descriptors = &outputTextureDescriptor;
-		outputTextureUpdate.descriptorNum = NRI_AUTO_EXPOSURE_OUTPUT_TEXTURE_DESCRIPTOR_NUM;
+		outputTextureUpdate.descriptorNum = NRI_EXPOSURE_OUTPUT_TEXTURE_DESCRIPTOR_NUM;
 		mFrameBuffer->mCore.UpdateDescriptorRanges(&outputTextureUpdate, 1);
 
-		const nri::Descriptor* outputBufferDescriptors[NRI_AUTO_EXPOSURE_OUTPUT_BUFFER_DESCRIPTOR_NUM] = {
+		const nri::Descriptor* outputBufferDescriptors[NRI_EXPOSURE_OUTPUT_BUFFER_DESCRIPTOR_NUM] = {
 			mExposure.GetMutableHistogramBuffer().shaderView,
 			mExposure.GetMutableDebugBuffer().shaderView
 		};
@@ -25574,7 +25542,7 @@ bool NRIRenderer::UpdateAutoExposureDescriptorSets(FrameTextureSlot sourceSlot)
 		outputBufferUpdate.descriptorSet = mExposureOutputSets[currentIndex];
 		outputBufferUpdate.rangeIndex = 1;
 		outputBufferUpdate.descriptors = outputBufferDescriptors;
-		outputBufferUpdate.descriptorNum = NRI_AUTO_EXPOSURE_OUTPUT_BUFFER_DESCRIPTOR_NUM;
+		outputBufferUpdate.descriptorNum = NRI_EXPOSURE_OUTPUT_BUFFER_DESCRIPTOR_NUM;
 		mFrameBuffer->mCore.UpdateDescriptorRanges(&outputBufferUpdate, 1);
 	}
 
@@ -25624,7 +25592,7 @@ bool NRIRenderer::DispatchAutoExposure(FrameTextureSlot sourceSlot)
 	constants.Flags =
 		(settings.freeze ? NRI_EXPOSURE_FLAG_FREEZE : 0u) |
 		(resetExposure ? NRI_EXPOSURE_FLAG_RESET : 0u);
-	constants.HistogramBinCount = std::clamp(settings.histogramBinCount, 1u, NRI_AUTO_EXPOSURE_MAX_HISTOGRAM_BINS);
+	constants.HistogramBinCount = std::clamp(settings.histogramBinCount, 1u, NRI_EXPOSURE_MAX_HISTOGRAM_BINS);
 	constants.SampleStep = std::max(settings.sampleStep, 1u);
 	constants.MeteringMode = (uint32_t)settings.meteringMode;
 	const float exposureDeltaTimeSeconds =
@@ -25754,7 +25722,7 @@ void NRIRenderer::CopyAutoExposureStatsForReadback(uint64_t frameNumber)
 		return;
 	}
 
-	const uint64_t byteSize = (uint64_t)NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT * sizeof(uint32_t);
+	const uint64_t byteSize = (uint64_t)NRI_EXPOSURE_DEBUG_WORD_COUNT * sizeof(uint32_t);
 	NRIBufferResource& debugBuffer = mExposure.GetMutableDebugBuffer();
 	NRIBufferResource& readbackBuffer = mExposure.GetMutableDebugReadbackBuffer();
 
@@ -25791,7 +25759,7 @@ void NRIRenderer::ReadbackAutoExposureStats()
 	}
 
 	WaitForCommandsTracked("auto_exposure_stats_readback");
-	const uint64_t byteSize = (uint64_t)NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT * sizeof(uint32_t);
+	const uint64_t byteSize = (uint64_t)NRI_EXPOSURE_DEBUG_WORD_COUNT * sizeof(uint32_t);
 	const void* mapped = mFrameBuffer->mCore.MapBuffer(*mExposure.GetMutableDebugReadbackBuffer().buffer, 0, byteSize);
 	if (mapped == nullptr)
 	{
@@ -25800,12 +25768,12 @@ void NRIRenderer::ReadbackAutoExposureStats()
 		return;
 	}
 
-	uint32_t words[NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT] = {};
+	uint32_t words[NRI_EXPOSURE_DEBUG_WORD_COUNT] = {};
 	std::memcpy(words, mapped, (size_t)byteSize);
 	mFrameBuffer->mCore.UnmapBuffer(*mExposure.GetMutableDebugReadbackBuffer().buffer);
-	if (words[0] == NRI_AUTO_EXPOSURE_DEBUG_MAGIC)
+	if (words[0] == NRI_EXPOSURE_DEBUG_MAGIC)
 	{
-		mExposure.MarkDebugReadback(mPendingAutoExposureStatsFrame, words, NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT);
+		mExposure.MarkDebugReadback(mPendingAutoExposureStatsFrame, words, NRI_EXPOSURE_DEBUG_WORD_COUNT);
 		if (ShouldEmitTemporalTraceLogs())
 		{
 			const NRIAutoExposureSettings& settings = mExposure.GetSettings();
