@@ -925,6 +925,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_acceleration.cpp
 	common/rendering/nri/renderer/nri_debug_reporters.cpp
 	common/rendering/nri/renderer/nri_exposure.cpp
+	common/rendering/nri/renderer/nri_frame_graph.cpp
 	common/rendering/nri/renderer/nri_frame_resources.cpp
 	common/rendering/nri/renderer/nri_nrd.cpp
 	common/rendering/nri/renderer/nri_persistent_voxels.cpp

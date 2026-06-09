@@ -1,6 +1,7 @@
 #include "nri_renderer.h"
 
 #include "../framegen/nri_framegen.h"
+#include "nri_frame_graph.h"
 #include "nri_renderstate.h"
 #include "nri_renderer_settings.h"
 #include "nri_shader_contracts.h"
@@ -3625,27 +3626,6 @@ namespace
 	constexpr float NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS = 0.5f;
 	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
 
-	enum class NRIPresentRouteKind
-	{
-		BootstrapFinal,
-		ResolvedBeauty,
-		ComposedDebug,
-		UpscalerTraceTransparentProbe,
-		ValidationRaw,
-		DenoisedRaw,
-		ShadowFinal,
-		FinalDebug,
-		RawTraceDebug,
-		FallbackFinal,
-	};
-
-	struct NRIPresentRouteInfo
-	{
-		NRIPresentRouteKind kind = NRIPresentRouteKind::FallbackFinal;
-		const char* routeName = "fallback_final";
-		const char* presenterName = "Final";
-		const char* ownerName = "fallback";
-	};
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
 	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
@@ -4824,25 +4804,7 @@ namespace
 
 	static bool IsSupportedPtDebugMode(uint32_t debugMode)
 	{
-		return FindPtDebugMenuIndex((int)debugMode) >= 0;
-	}
-
-	static bool IsFinalShaderDebugMode(uint32_t debugMode)
-	{
-		return false;
-	}
-
-	static bool IsRawTraceDebugMode(uint32_t debugMode)
-	{
-		return
-			(debugMode >= 1u && debugMode <= 5u) ||
-			(debugMode >= 10u && debugMode <= 12u) ||
-			debugMode == 18u ||
-			debugMode == 19u ||
-			(debugMode >= 21u && debugMode <= 22u) ||
-			(debugMode >= 24u && debugMode <= 25u) ||
-			(debugMode >= NRI_PTDEBUG_ANALYTIC_DIRECT && debugMode <= NRI_PTDEBUG_SECTOR_AMBIENT) ||
-			debugMode == NRI_PTDEBUG_EMISSIVE_SAMPLE_VISIBILITY;
+		return IsNRIFrameGraphSupportedDebugMode(debugMode);
 	}
 
 	static uint32_t GetEffectivePtDebugMode()
@@ -5009,47 +4971,11 @@ namespace
 
 	static NRIPresentRouteInfo ResolvePresentRouteInfo(uint32_t debugMode, bool bootstrap)
 	{
-		if (bootstrap)
-		{
-			const uint32_t bootstrapMode = GetBootstrapMode();
-			if (bootstrapMode == 11u || bootstrapMode == 12u)
-			{
-				return { NRIPresentRouteKind::BootstrapFinal, "bootstrap_raw_trace", "Final", "bootstrap" };
-			}
-
-			return { NRIPresentRouteKind::FallbackFinal, "bootstrap_fallback", "Final", "bootstrap" };
-		}
-
-		if (debugMode == 0u)
-		{
-			return { NRIPresentRouteKind::ResolvedBeauty, "resolved_beauty", "FinalPresent", "beauty" };
-		}
-		if (debugMode == NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT)
-		{
-			return { NRIPresentRouteKind::ComposedDebug, "taa_pre_exposed_probe", "FinalPresent", "debug-temporal" };
-		}
-		if (debugMode == NRI_PTDEBUG_UPSCALER_TRACE_TRANSPARENT)
-		{
-			return { NRIPresentRouteKind::UpscalerTraceTransparentProbe, "upscaler_trace_transparent", "RawPresent", "debug-upscaler" };
-		}
-		if (debugMode == 9u)
-		{
-			return { NRIPresentRouteKind::ValidationRaw, "validation_raw", "RawPresent", "debug-nrd" };
-		}
-		if (debugMode == 16u || debugMode == 17u)
-		{
-			return { NRIPresentRouteKind::DenoisedRaw, "denoised_raw", "RawPresent", "debug-nrd" };
-		}
-		if (IsFinalShaderDebugMode(debugMode))
-		{
-			return { NRIPresentRouteKind::FinalDebug, "final_debug", "Final", "debug-final" };
-		}
-		if (IsRawTraceDebugMode(debugMode))
-		{
-			return { NRIPresentRouteKind::RawTraceDebug, "raw_trace_debug", "RawPresent", "debug-trace" };
-		}
-
-		return { NRIPresentRouteKind::FallbackFinal, "fallback_final", "Final", "fallback" };
+		NRIFrameRouteRequest request = {};
+		request.debugMode = debugMode;
+		request.bootstrap = bootstrap;
+		request.bootstrapMode = bootstrap ? GetBootstrapMode() : 0u;
+		return ResolveNRIFrameRoute(request);
 	}
 
 	static NRINrdDenoiserMode GetSelectedNrdDenoiserMode()
@@ -37153,7 +37079,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (bootstrapRawTracePresent)
 	{
-		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Final,CopyFinal", false, false, false);
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
 		if (!DispatchFinal())
 		{
 			return false;
@@ -37165,7 +37091,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useValidationPresent)
 	{
-		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Denoiser,RawPresent,CopyFinal", true, false, false);
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, true, false, false);
 		if (!DispatchDenoiser())
 		{
 			return false;
@@ -37182,7 +37108,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useDenoisedDebugPresent)
 	{
-		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Denoiser,RawPresent,CopyFinal", true, false, false);
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, true, false, false);
 		if (!DispatchDenoiser())
 		{
 			return false;
@@ -37298,7 +37224,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useResolvedPresent)
 	{
-		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Composition,TraceTransparent,Exposure,UpscaleChain,FinalPresent,CopyFinal", !!nri_denoise, true, true);
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, !!nri_denoise, true, true);
 		if (!sLoggedPhaseGResolvedPresentPath)
 		{
 			Printf("ptdebug 0 now routes through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
@@ -37330,7 +37256,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useComposedDebugPresent)
 	{
-		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Composition,TraceTransparent,Exposure,FinalPresent,CopyFinal", !!nri_denoise, false, true);
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, !!nri_denoise, false, true);
 		if (!sLoggedPhaseBCompositionPath)
 		{
 			Printf("NRI Phase B: ptdebug 45 now routes through Composition, placeholder TraceTransparent, and the minimal FinalPresent presenter.\n");
@@ -37353,7 +37279,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useUpscalerTraceTransparentProbe)
 	{
-		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Composition,TraceTransparent,Exposure,RawPresent,CopyFinal", !!nri_denoise, false, true);
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, !!nri_denoise, false, true);
 		if (!sLoggedTraceTransparentProbePath)
 		{
 			Printf("NRI Phase I instrumentation: ptdebug 34 now exposes TraceTransparentOutput before the upscaler chain.\n");
@@ -37376,7 +37302,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useFinalDebugPresent)
 	{
-		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Final,CopyFinal", false, false, false);
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
 		mUseUpscaledInFinal = false;
 		if (!DispatchFinal())
 		{
@@ -37389,7 +37315,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (rawTraceDirectPresent)
 	{
-		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,RawPresent,CopyFinal", false, false, false);
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
 		if (!sLoggedRawTraceBypass)
 		{
 			Printf("NRI frame-graph bypass: presenting raw TraceOpaque output through the direct present path for non-composition debug views.\n");
@@ -37446,7 +37372,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	}
 
 	mUseUpscaledInFinal = false;
-	SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Final,CopyFinal", false, false, false);
+	SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
 	if (!DispatchFinal())
 	{
 		return false;
