@@ -249,6 +249,40 @@ NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure,
 	return settings;
 }
 
+const char* GetNRIAutoExposureResetReasonForSettingsChange(
+	const NRIAutoExposureSettings& previous,
+	const NRIAutoExposureSettings& current)
+{
+	if (previous.hdrControlsActive != current.hdrControlsActive)
+	{
+		return "auto-exposure-control-block-change";
+	}
+	if (previous.enabled != current.enabled)
+	{
+		return current.enabled ? "auto-exposure-enabled" : "auto-exposure-disabled";
+	}
+	if (previous.histogramBinCount != current.histogramBinCount ||
+		previous.sampleStep != current.sampleStep ||
+		previous.meteringMode != current.meteringMode ||
+		previous.lowPercentile != current.lowPercentile ||
+		previous.highPercentile != current.highPercentile)
+	{
+		return "auto-exposure-metering-change";
+	}
+	if (previous.minExposure != current.minExposure ||
+		previous.maxExposure != current.maxExposure)
+	{
+		return "auto-exposure-clamp-change";
+	}
+	if (previous.targetLuminance != current.targetLuminance ||
+		previous.exposureBias != current.exposureBias)
+	{
+		return "auto-exposure-target-change";
+	}
+
+	return nullptr;
+}
+
 bool NRIExposureController::MatchesRenderSize(uint32_t renderWidth, uint32_t renderHeight) const
 {
 	return

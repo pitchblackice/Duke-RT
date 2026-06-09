@@ -1,6 +1,16 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
+
+class NRIRenderer;
+struct HWDrawInfo;
+
+namespace nri_scene
+{
+	struct GeometryData;
+	struct MaterialData;
+}
 
 enum class NRIFramePass : uint32_t
 {
@@ -51,8 +61,21 @@ struct NRIFrameRouteRequest
 	uint32_t bootstrapMode = 0;
 };
 
+struct NRIFrameGraphExecutionRequest
+{
+	int ptDebugMode = 0;
+	bool denoise = false;
+	NRIPresentRouteInfo presentRoute = {};
+};
+
 const char* GetNRIFramePassName(NRIFramePass pass);
 bool IsNRIFrameGraphSupportedDebugMode(uint32_t debugMode);
 bool IsNRIFrameGraphRawTraceDebugMode(uint32_t debugMode);
 bool IsNRIFrameGraphFinalShaderDebugMode(uint32_t debugMode);
 NRIPresentRouteInfo ResolveNRIFrameRoute(const NRIFrameRouteRequest& request);
+bool ExecuteNRIFrameGraph(
+	NRIRenderer& renderer,
+	HWDrawInfo& di,
+	const nri_scene::GeometryData& geometry,
+	const std::vector<nri_scene::MaterialData>& materials,
+	const NRIFrameGraphExecutionRequest& request);

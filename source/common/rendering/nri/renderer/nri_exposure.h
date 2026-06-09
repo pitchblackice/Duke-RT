@@ -65,6 +65,7 @@ struct NRIAutoExposureStatus
 };
 
 NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure, bool hdrControlsActive);
+const char* GetNRIAutoExposureResetReasonForSettingsChange(const NRIAutoExposureSettings& previous, const NRIAutoExposureSettings& current);
 const char* GetNRIAutoExposureMeteringModeName(NRIAutoExposureMeteringMode mode);
 
 class NRIExposureController

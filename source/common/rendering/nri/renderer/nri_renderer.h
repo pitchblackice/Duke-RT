@@ -2,6 +2,7 @@
 
 #include "../nri_output.h"
 #include "nri_exposure.h"
+#include "nri_frame_graph.h"
 #include "nri_frame_resources.h"
 #include "nri_nrd.h"
 #include "nri_resources.h"
@@ -1420,6 +1421,13 @@ public:
 	MemoryTelemetry GetMemoryTelemetry() const;
 	static const char* GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot);
 private:
+	friend bool ExecuteNRIFrameGraph(
+		NRIRenderer& renderer,
+		HWDrawInfo& di,
+		const nri_scene::GeometryData& geometry,
+		const std::vector<nri_scene::MaterialData>& materials,
+		const NRIFrameGraphExecutionRequest& request);
+
 	NRIResourceContext BuildResourceContext() const;
 	enum class FrameTextureSlot : uint32_t
 	{
@@ -2716,6 +2724,7 @@ private:
 	bool DispatchFinalPresent(FrameTextureSlot inputSlot);
 	bool DispatchUpscaleChain();
 	bool DispatchFinal();
+	bool ShouldRunAppTaaForFrameGraph(NRIMainUpscalerKind kind) const;
 	void RefreshMapWorld();
 	bool ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger);
 	void RebuildStartupMutationBaseline();

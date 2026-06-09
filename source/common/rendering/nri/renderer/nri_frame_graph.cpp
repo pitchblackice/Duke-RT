@@ -1,5 +1,9 @@
 #include "nri_frame_graph.h"
 
+#include "nri_renderer.h"
+#include "../system/nri_renderdevice.h"
+#include "printf.h"
+
 namespace
 {
 	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT_MODE = 26u;
@@ -151,6 +155,24 @@ namespace
 	{
 		return value >= minValue && value <= maxValue;
 	}
+
+	struct FrameGraphLogState
+	{
+		bool phaseBCompositionPath = false;
+		bool phaseGResolvedPresentPath = false;
+		bool phaseFDenoiserPath = false;
+		bool phaseFDenoiserFallback = false;
+		bool phaseFTraceTransparentPath = false;
+		bool traceTransparentProbePath = false;
+		bool rawTraceBypass = false;
+		bool phaseHRrInputPath = false;
+	};
+
+	FrameGraphLogState& GetFrameGraphLogState()
+	{
+		static FrameGraphLogState state = {};
+		return state;
+	}
 }
 
 const char* GetNRIFramePassName(NRIFramePass pass)
@@ -242,4 +264,369 @@ NRIPresentRouteInfo ResolveNRIFrameRoute(const NRIFrameRouteRequest& request)
 	}
 
 	return kFallbackFinalRoute;
+}
+
+bool ExecuteNRIFrameGraph(
+	NRIRenderer& renderer,
+	HWDrawInfo& di,
+	const nri_scene::GeometryData& geometry,
+	const std::vector<nri_scene::MaterialData>& materials,
+	const NRIFrameGraphExecutionRequest& request)
+{
+	using FrameTextureSlot = NRIRenderer::FrameTextureSlot;
+
+	FrameGraphLogState& logState = GetFrameGraphLogState();
+	const int ptDebugMode = request.ptDebugMode;
+	const bool denoise = request.denoise;
+	const NRIPresentRouteInfo& presentRoute = request.presentRoute;
+	renderer.ResetSelfTestRouteSnapshot();
+	const bool bootstrapRawTracePresent = presentRoute.kind == NRIPresentRouteKind::BootstrapFinal;
+	const bool useResolvedPresent = presentRoute.kind == NRIPresentRouteKind::ResolvedBeauty;
+	const bool useComposedDebugPresent = presentRoute.kind == NRIPresentRouteKind::ComposedDebug;
+	const bool useUpscalerTraceTransparentProbe = presentRoute.kind == NRIPresentRouteKind::UpscalerTraceTransparentProbe;
+	const bool useCompositionPath = useResolvedPresent || useComposedDebugPresent || useUpscalerTraceTransparentProbe;
+	const bool useValidationPresent = presentRoute.kind == NRIPresentRouteKind::ValidationRaw;
+	const bool useDenoisedDebugPresent = presentRoute.kind == NRIPresentRouteKind::DenoisedRaw;
+	const bool useShadowDebugPresent = presentRoute.kind == NRIPresentRouteKind::ShadowFinal;
+	const bool useFinalDebugPresent = presentRoute.kind == NRIPresentRouteKind::FinalDebug || useShadowDebugPresent;
+	const bool rawTraceDirectPresent = presentRoute.kind == NRIPresentRouteKind::RawTraceDebug;
+	const bool useSplitShadowDebugProbe = rawTraceDirectPresent && ptDebugMode >= 21 && ptDebugMode <= 22;
+	renderer.mHistoryInputSlot = (renderer.mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
+	renderer.mHistoryOutputSlot = (renderer.mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
+	renderer.mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
+	renderer.mUseUpscaledInFinal = false;
+	renderer.mUseDenoisedCompositionInputs = false;
+	const bool directionalLightShadowEnabled = renderer.mDirectionalLightState.enabled && renderer.mDirectionalLightState.shadow;
+	renderer.mUseSplitShadowDenoiser = directionalLightShadowEnabled && (useShadowDebugPresent || useSplitShadowDebugProbe || (useCompositionPath && denoise));
+	const NRIPTOutputPolicy outputPolicy = renderer.mFrameBuffer->GetPathTracingOutputPolicy();
+	const NRIAutoExposureSettings autoExposureSettings = GetNRIAutoExposureSettings(
+		outputPolicy.exposure,
+		IsNRIPTHdrOutputActive(outputPolicy));
+	const char* autoExposureSettingsResetReason = nullptr;
+	if (!renderer.mHasAutoExposureSettingsState)
+	{
+		renderer.mHasAutoExposureSettingsState = true;
+	}
+	else
+	{
+		autoExposureSettingsResetReason = GetNRIAutoExposureResetReasonForSettingsChange(renderer.mLastAutoExposureSettings, autoExposureSettings);
+	}
+	renderer.mLastAutoExposureSettings = autoExposureSettings;
+	if (!renderer.EnsureAutoExposureResources(autoExposureSettings))
+	{
+		return false;
+	}
+	if (autoExposureSettingsResetReason != nullptr)
+	{
+		renderer.RequestAutoExposureReset(autoExposureSettingsResetReason);
+	}
+
+	if (!renderer.DispatchTraceOpaque(di, geometry, materials))
+	{
+		return false;
+	}
+
+	if (bootstrapRawTracePresent)
+	{
+		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
+		if (!renderer.DispatchFinal())
+		{
+			return false;
+		}
+
+		renderer.CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (useValidationPresent)
+	{
+		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, true, false, false);
+		if (!renderer.DispatchDenoiser())
+		{
+			return false;
+		}
+
+		if (!renderer.DispatchRawPresent(FrameTextureSlot::Validation))
+		{
+			return false;
+		}
+
+		renderer.CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (useDenoisedDebugPresent)
+	{
+		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, true, false, false);
+		if (!renderer.DispatchDenoiser())
+		{
+			return false;
+		}
+
+		const FrameTextureSlot denoisedSlot = ptDebugMode == 16 ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::DenoisedSpecular;
+		if (!renderer.DispatchRawPresent(denoisedSlot))
+		{
+			return false;
+		}
+
+		renderer.CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (useShadowDebugPresent)
+	{
+		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, denoise ? "TraceOpaque,Denoiser,Final,CopyFinal" : "TraceOpaque,Final,CopyFinal", denoise, false, false);
+		if (denoise && !renderer.DispatchDenoiser())
+		{
+			return false;
+		}
+
+		renderer.mUseUpscaledInFinal = false;
+		if (!renderer.DispatchFinal())
+		{
+			return false;
+		}
+
+		renderer.CopyFinalToActiveTarget();
+		return true;
+	}
+
+	auto dispatchCompositionPath = [&]() -> bool
+	{
+		const NRIMainUpscalerKind resolvedMainKind = renderer.ResolveMainUpscalerKind(false);
+		const bool buildRrInput = resolvedMainKind == NRIMainUpscalerKind::DLRR;
+		const bool needStandardComposition =
+			!buildRrInput || useComposedDebugPresent || useUpscalerTraceTransparentProbe;
+
+		renderer.mUseDenoisedCompositionInputs = false;
+
+		if (buildRrInput)
+		{
+			if (!logState.phaseHRrInputPath)
+			{
+				Printf("DLRR now builds a separate noisy RrInput before NRD and bypasses opaque denoising for the vendor RR branch.\n");
+				logState.phaseHRrInputPath = true;
+			}
+
+			renderer.mUseSplitShadowDenoiser = false;
+			if (!renderer.DispatchComposition(FrameTextureSlot::RrInput))
+			{
+				return false;
+			}
+		}
+
+		if (!needStandardComposition)
+		{
+			if (!renderer.DispatchAutoExposure(FrameTextureSlot::RrInput))
+			{
+				return false;
+			}
+			return true;
+		}
+
+		if (!buildRrInput && denoise)
+		{
+			if (!logState.phaseFDenoiserPath)
+			{
+				Printf("The Composition-backed PT paths now route through NRD before Composition when nri_denoise is enabled.\n");
+				logState.phaseFDenoiserPath = true;
+			}
+
+			if (!renderer.DispatchDenoiser())
+			{
+				if (!logState.phaseFDenoiserFallback)
+				{
+					Printf(TEXTCOLOR_ORANGE "NRD dispatch failed in the composition path; falling back to raw trace inputs for this frame.\n");
+					logState.phaseFDenoiserFallback = true;
+				}
+			}
+			else
+			{
+				renderer.mUseDenoisedCompositionInputs = true;
+				renderer.mUseSplitShadowDenoiser = directionalLightShadowEnabled;
+			}
+		}
+
+		if (!renderer.DispatchComposition(FrameTextureSlot::Composed))
+		{
+			return false;
+		}
+
+		if (!logState.phaseFTraceTransparentPath)
+		{
+			Printf("Composition-backed PT paths now pass through placeholder TraceTransparent before output-resolution dispatch.\n");
+			logState.phaseFTraceTransparentPath = true;
+		}
+
+		if (!renderer.DispatchTraceTransparent())
+		{
+			return false;
+		}
+
+		if (!renderer.DispatchAutoExposure(FrameTextureSlot::TraceTransparentOutput))
+		{
+			return false;
+		}
+
+		return true;
+	};
+
+	if (useResolvedPresent)
+	{
+		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, denoise, true, true);
+		if (!logState.phaseGResolvedPresentPath)
+		{
+			Printf("ptdebug 0 now routes through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
+			logState.phaseGResolvedPresentPath = true;
+		}
+
+		if (!dispatchCompositionPath())
+		{
+			return false;
+		}
+
+		if (!renderer.DispatchUpscaleChain())
+		{
+			return false;
+		}
+
+		const FrameTextureSlot resolvedPresentSlot = renderer.mUseUpscaledInFinal ? renderer.mUpscaledInputSlot : renderer.mHistoryOutputSlot;
+		const NRIMainUpscalerKind resolvedMain = renderer.ResolveMainUpscalerKind(false);
+		const NRIPostSharpenKind resolvedPost = renderer.ResolvePostSharpenKind(false);
+		renderer.TraceTemporalState("resolved-present", resolvedMain, resolvedPost, renderer.ShouldRunAppTaaForFrameGraph(resolvedMain), resolvedPresentSlot, renderer.mHistoryOutputSlot);
+		if (!renderer.DispatchFinalPresent(resolvedPresentSlot))
+		{
+			return false;
+		}
+
+		renderer.CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (useComposedDebugPresent)
+	{
+		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, denoise, false, true);
+		if (!logState.phaseBCompositionPath)
+		{
+			Printf("NRI Phase B: ptdebug 45 now routes through Composition, placeholder TraceTransparent, and the minimal FinalPresent presenter.\n");
+			logState.phaseBCompositionPath = true;
+		}
+
+		if (!dispatchCompositionPath())
+		{
+			return false;
+		}
+
+		if (!renderer.DispatchFinalPresent(FrameTextureSlot::TraceTransparentOutput))
+		{
+			return false;
+		}
+
+		renderer.CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (useUpscalerTraceTransparentProbe)
+	{
+		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, denoise, false, true);
+		if (!logState.traceTransparentProbePath)
+		{
+			Printf("NRI Phase I instrumentation: ptdebug 34 now exposes TraceTransparentOutput before the upscaler chain.\n");
+			logState.traceTransparentProbePath = true;
+		}
+
+		if (!dispatchCompositionPath())
+		{
+			return false;
+		}
+
+		if (!renderer.DispatchRawPresent(FrameTextureSlot::TraceTransparentOutput))
+		{
+			return false;
+		}
+
+		renderer.CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (useFinalDebugPresent)
+	{
+		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
+		renderer.mUseUpscaledInFinal = false;
+		if (!renderer.DispatchFinal())
+		{
+			return false;
+		}
+
+		renderer.CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (rawTraceDirectPresent)
+	{
+		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
+		if (!logState.rawTraceBypass)
+		{
+			Printf("NRI frame-graph bypass: presenting raw TraceOpaque output through the direct present path for non-composition debug views.\n");
+			logState.rawTraceBypass = true;
+		}
+
+		FrameTextureSlot rawPresentSlot = FrameTextureSlot::UnfilteredDiffuse;
+		FrameTextureSlot rawPresentSecondarySlot = FrameTextureSlot::Count;
+		FrameTextureSlot rawPresentTertiarySlot = FrameTextureSlot::Count;
+		if (ptDebugMode == 11 || ptDebugMode == 12)
+		{
+			rawPresentSlot = FrameTextureSlot::UnfilteredSpecular;
+		}
+		else if (ptDebugMode == 18)
+		{
+			rawPresentSlot = FrameTextureSlot::BaseColorMetalness;
+		}
+		else if (ptDebugMode == 19)
+		{
+			rawPresentSlot = FrameTextureSlot::NormalRoughness;
+		}
+		else if (ptDebugMode == 21 || ptDebugMode == 22)
+		{
+			rawPresentSlot = FrameTextureSlot::UnfilteredPenumbra;
+		}
+		else if (ptDebugMode == 24)
+		{
+			rawPresentSlot = FrameTextureSlot::DirectLighting;
+		}
+		else if (ptDebugMode == 25)
+		{
+			rawPresentSlot = FrameTextureSlot::DirectEmission;
+		}
+
+		if (ptDebugMode == 12)
+		{
+			rawPresentSecondarySlot = FrameTextureSlot::ViewZ;
+			rawPresentTertiarySlot = FrameTextureSlot::NormalRoughness;
+		}
+
+		if (!renderer.DispatchRawPresent(rawPresentSlot, rawPresentSecondarySlot, rawPresentTertiarySlot))
+		{
+			return false;
+		}
+
+		renderer.CopyFinalToActiveTarget();
+		return true;
+	}
+
+	if (!logState.rawTraceBypass)
+	{
+		Printf("NRI frame-graph bypass: presenting raw TraceOpaque output until composition integration is stabilized.\n");
+		logState.rawTraceBypass = true;
+	}
+
+	renderer.mUseUpscaledInFinal = false;
+	renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
+	if (!renderer.DispatchFinal())
+	{
+		return false;
+	}
+
+	renderer.CopyFinalToActiveTarget();
+	return true;
 }
