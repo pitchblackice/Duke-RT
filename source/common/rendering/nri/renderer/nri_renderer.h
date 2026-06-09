@@ -1427,6 +1427,13 @@ private:
 		const nri_scene::GeometryData& geometry,
 		const std::vector<nri_scene::MaterialData>& materials,
 		const NRIFrameGraphExecutionRequest& request);
+	friend class NRIExposurePassAccess;
+	friend bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
+	friend void DestroyNRIRendererAutoExposureResources(NRIRenderer& renderer);
+	friend bool UpdateNRIRendererAutoExposureDescriptorSets(NRIRenderer& renderer, uint32_t sourceSlot);
+	friend bool DispatchNRIRendererAutoExposure(NRIRenderer& renderer, uint32_t sourceSlot);
+	friend void CopyNRIRendererAutoExposureStatsForReadback(NRIRenderer& renderer, uint64_t frameNumber);
+	friend void ReadbackNRIRendererAutoExposureStats(NRIRenderer& renderer);
 
 	NRIResourceContext BuildResourceContext() const;
 	enum class FrameTextureSlot : uint32_t

@@ -6,6 +6,7 @@
 #include <cstdint>
 
 class NRIRenderDevice;
+class NRIRenderer;
 
 static constexpr uint32_t NRI_AUTO_EXPOSURE_MAX_HISTOGRAM_BINS = 256;
 static constexpr uint32_t NRI_AUTO_EXPOSURE_DEBUG_WORD_COUNT = 16;
@@ -64,9 +65,31 @@ struct NRIAutoExposureStatus
 	char resetReason[64] = {};
 };
 
+class NRIExposurePassAccess
+{
+public:
+	static bool EnsureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
+	static void DestroyResources(NRIRenderer& renderer);
+	static bool UpdateDescriptorSets(NRIRenderer& renderer, uint32_t sourceSlot);
+	static bool Dispatch(NRIRenderer& renderer, uint32_t sourceSlot);
+	static void CopyStatsForReadback(NRIRenderer& renderer, uint64_t frameNumber);
+	static void ReadbackStats(NRIRenderer& renderer);
+
+private:
+	static uint64_t GetMemoryBytes(NRIRenderer& renderer);
+	static bool CreateStorageBuffer(NRIRenderer& renderer, NRIBufferResource& resource, uint64_t byteSize, uint32_t stride);
+	static bool EnsureStatsReadback(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
+};
+
 NRIAutoExposureSettings GetNRIAutoExposureSettings(float fallbackManualExposure, bool hdrControlsActive);
 const char* GetNRIAutoExposureResetReasonForSettingsChange(const NRIAutoExposureSettings& previous, const NRIAutoExposureSettings& current);
 const char* GetNRIAutoExposureMeteringModeName(NRIAutoExposureMeteringMode mode);
+bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
+void DestroyNRIRendererAutoExposureResources(NRIRenderer& renderer);
+bool UpdateNRIRendererAutoExposureDescriptorSets(NRIRenderer& renderer, uint32_t sourceSlot);
+bool DispatchNRIRendererAutoExposure(NRIRenderer& renderer, uint32_t sourceSlot);
+void CopyNRIRendererAutoExposureStatsForReadback(NRIRenderer& renderer, uint64_t frameNumber);
+void ReadbackNRIRendererAutoExposureStats(NRIRenderer& renderer);
 
 class NRIExposureController
 {
