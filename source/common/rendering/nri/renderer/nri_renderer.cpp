@@ -6,6 +6,7 @@
 #include "nri_renderer_settings.h"
 #include "nri_shader_contracts.h"
 #include "../scene/nri_map_builder.h"
+#include "../scene/nri_scene_math.h"
 #include "../scene/nri_scene_stats.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
@@ -30293,9 +30294,7 @@ void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& ou
 		}
 
 		nri::TopLevelInstance instance = {};
-		instance.transform[0][0] = 1.0f;
-		instance.transform[1][1] = 1.0f;
-		instance.transform[2][2] = 1.0f;
+		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
 		instance.instanceId = (uint32_t)outSceneInstances.size();
 		instance.mask = 0xFF;
 		instance.shaderBindingTableLocalOffset = 0;
@@ -30330,9 +30329,7 @@ void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene
 		}
 
 		nri::TopLevelInstance instance = {};
-		instance.transform[0][0] = 1.0f;
-		instance.transform[1][1] = 1.0f;
-		instance.transform[2][2] = 1.0f;
+		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
 		instance.instanceId = (uint32_t)outSceneInstances.size();
 		instance.mask = 0xFF;
 		instance.shaderBindingTableLocalOffset = 0;
@@ -30374,9 +30371,7 @@ void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene
 		}
 
 		nri::TopLevelInstance instance = {};
-		instance.transform[0][0] = 1.0f;
-		instance.transform[1][1] = 1.0f;
-		instance.transform[2][2] = 1.0f;
+		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
 		instance.instanceId = (uint32_t)outSceneInstances.size();
 		instance.mask = 0xFF;
 		instance.shaderBindingTableLocalOffset = 0;
