@@ -1,5 +1,6 @@
 #include "nri_texture_signature.h"
 
+#include "nri_hash.h"
 #include "nri_scene_texture_utils.h"
 
 #include "image.h"
@@ -18,11 +19,6 @@ namespace
 	using namespace nri_scene;
 
 	constexpr int kMaxTextureSignatureDepth = 4;
-
-	uint64_t HashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
-	}
 
 	FTexture* TryResolveBaseTextureUnchecked(FGameTexture* texture)
 	{
