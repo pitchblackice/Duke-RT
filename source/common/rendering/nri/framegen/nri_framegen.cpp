@@ -511,6 +511,17 @@ const char* NRIFrameGenerationContext::GetPresentResultName(nri::Result result)
 	}
 }
 
+NRIFrameGenerationSettings NRIFrameGenerationContext::CaptureSettings()
+{
+	NRIFrameGenerationSettings settings = {};
+	settings.enabled = !!nri_framegen;
+	settings.provider = GetRequestedProvider();
+	settings.uiMode = GetRequestedUiMode();
+	settings.async = !!nri_framegenasync;
+	settings.lowLatency = !!nri_framegenlatency;
+	return settings;
+}
+
 bool NRIFrameGenerationContext::IsPresentBridgeActive() const
 {
 #ifdef _WIN32
@@ -612,13 +623,14 @@ void NRIFrameGenerationContext::RefreshPolicy(const NRIRenderDevice& frameBuffer
 
 NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationPresentContract& presentContract) const
 {
+	const NRIFrameGenerationSettings settings = CaptureSettings();
 	NRIFrameGenerationPolicy policy = {};
 	policy.initialized = true;
-	policy.requestedEnabled = !!nri_framegen;
-	policy.requestedProvider = GetRequestedProvider();
-	policy.requestedUiMode = GetRequestedUiMode();
-	policy.requestedAsync = !!nri_framegenasync;
-	policy.requestedLowLatency = !!nri_framegenlatency;
+	policy.requestedEnabled = settings.enabled;
+	policy.requestedProvider = settings.provider;
+	policy.requestedUiMode = settings.uiMode;
+	policy.requestedAsync = settings.async;
+	policy.requestedLowLatency = settings.lowLatency;
 	policy.resolvedUiMode = ResolveUiMode(policy.requestedUiMode);
 	policy.requestedOutputMode = presentContract.requestedOutputMode;
 	policy.resolvedOutputMode = presentContract.resolvedOutputMode;
@@ -1263,7 +1275,8 @@ bool NRIFrameGenerationContext::EnsureProviderRuntime(const NRIRenderDevice& fra
 	mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
 	return false;
 #else
-	if (GetRequestedProvider() != NRIFrameGenerationProvider::FSR3)
+	const NRIFrameGenerationSettings settings = CaptureSettings();
+	if (settings.provider != NRIFrameGenerationProvider::FSR3)
 	{
 		std::strncpy(mProviderState.lastStatusReason, "provider-not-requested", std::size(mProviderState.lastStatusReason) - 1u);
 		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
@@ -1341,19 +1354,20 @@ bool NRIFrameGenerationContext::EnsureProviderPresentBridge(const NRIRenderDevic
 	(void)frameBuffer;
 	return false;
 #else
+	const NRIFrameGenerationSettings settings = CaptureSettings();
 	if (!EnsureProviderRuntime(frameBuffer))
 	{
 		return false;
 	}
 
-	if (!nri_framegen)
+	if (!settings.enabled)
 	{
 		std::strncpy(mProviderState.lastStatusReason, "disabled-by-cvar", std::size(mProviderState.lastStatusReason) - 1u);
 		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';
 		return false;
 	}
 
-	if (GetRequestedProvider() != NRIFrameGenerationProvider::FSR3)
+	if (settings.provider != NRIFrameGenerationProvider::FSR3)
 	{
 		std::strncpy(mProviderState.lastStatusReason, "provider-not-requested", std::size(mProviderState.lastStatusReason) - 1u);
 		mProviderState.lastStatusReason[std::size(mProviderState.lastStatusReason) - 1u] = '\0';

@@ -25,6 +25,15 @@ enum class NRIFrameGenerationUiMode : uint32_t
 	PresentCallback = 3,
 };
 
+struct NRIFrameGenerationSettings
+{
+	bool enabled = false;
+	NRIFrameGenerationProvider provider = NRIFrameGenerationProvider::Off;
+	NRIFrameGenerationUiMode uiMode = NRIFrameGenerationUiMode::Auto;
+	bool async = false;
+	bool lowLatency = false;
+};
+
 enum class NRIFrameGenerationColorSource : uint32_t
 {
 	Unknown = 0,
@@ -325,6 +334,7 @@ public:
 	static const char* GetPresentResultName(nri::Result result);
 
 private:
+	static NRIFrameGenerationSettings CaptureSettings();
 	NRIFrameGenerationPolicy BuildPolicy(const NRIRenderDevice& frameBuffer, const NRIFrameGenerationPresentContract& presentContract) const;
 	NRIFrameGenerationPresentContract BuildPresentContract(const NRIRenderDevice& frameBuffer) const;
 	NRIFrameGenerationInputAudit BuildInputAudit(const NRIFrameGenerationFrameDesc& desc) const;
