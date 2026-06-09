@@ -30,6 +30,14 @@ struct SceneUploadDirtyRange
 	uint64_t size = 0;
 };
 
+enum ResidentUploadKind
+{
+	ResidentUploadKind_Vertex = 0,
+	ResidentUploadKind_Index = 1,
+	ResidentUploadKind_Primitive = 2,
+	ResidentUploadKind_Material = 3,
+};
+
 struct SceneInstanceData
 {
 	uint32_t primitiveOffset = 0;
