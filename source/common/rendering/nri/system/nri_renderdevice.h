@@ -3,6 +3,7 @@
 #include "base_sysfb.h"
 #include "../nri_output.h"
 #include "../framegen/nri_framegen.h"
+#include "nri_frame_shell.h"
 #include "nri_local.h"
 #include "Extensions/NRIWrapperD3D12.h"
 
@@ -125,61 +126,16 @@ public:
 	uint64_t GetAdapterNonLocalBudgetBytes() const { return mAdapterNonLocalBudgetBytes; }
 
 private:
-	static constexpr uint32_t FrameSequenceHistorySize = 8;
-	static constexpr uint32_t QueuedFrameCount = 3;
-
-	struct QueuedFrame
-	{
-		nri::CommandAllocator* commandAllocator = nullptr;
-		nri::CommandBuffer* commandBuffer = nullptr;
-		uint64_t lastSubmittedFenceValue = 0;
-		uint64_t lastSubmittedFrameIndex = 0;
-		bool hasSubmittedWork = false;
-	};
+	static constexpr uint32_t FrameSequenceHistorySize = NRIFrameShell::FrameSequenceHistorySize;
+	static constexpr uint32_t QueuedFrameCount = NRIFrameShell::QueuedFrameCount;
+	using QueuedFrame = NRIFrameShell::QueuedFrame;
+	using FrameSequenceEntry = NRIFrameShell::FrameSequenceEntry;
+	using FrameBoundaryDebugStats = NRIFrameShell::FrameBoundaryDebugStats;
 
 	struct RetiredTextureResource
 	{
 		NRITextureResource resource = {};
 		uint64_t fenceValue = 0;
-	};
-
-	struct FrameSequenceEntry
-	{
-		uint64_t frameNumber = 0;
-		uint64_t frameIndex = 0;
-		uint64_t submittedFenceValue = 0;
-		uint32_t queuedFrameIndex = 0;
-		uint32_t acquiredImageIndex = 0;
-		uint32_t acquireSemaphoreIndex = 0;
-		uint32_t presentedImageIndex = 0;
-		uint32_t releaseSemaphoreIndex = 0;
-		nri::Result presentResult = nri::Result::FAILURE;
-		bool sanityFrameUsed = false;
-		bool valid = false;
-	};
-
-	struct FrameBoundaryDebugStats
-	{
-		uint64_t frameNumber = 0;
-		uint64_t frameIndex = 0;
-		double waitMs = 0.0;
-		double waitForPresentMs = 0.0;
-		double acquireMs = 0.0;
-		double submitMs = 0.0;
-		double presentMs = 0.0;
-		uint64_t submittedFenceValue = 0;
-		nri::Result waitForPresentResult = nri::Result::FAILURE;
-		nri::Result acquireResult = nri::Result::FAILURE;
-		nri::Result presentResult = nri::Result::FAILURE;
-		uint32_t queuedFrameIndex = 0;
-		uint32_t swapChainImageIndex = 0;
-		uint32_t acquireSemaphoreIndex = 0;
-		bool sanityModeEnabled = false;
-		bool sanityFrameUsed = false;
-		bool sceneTargetSelected = false;
-		bool pathTracedSceneRendered = false;
-		bool sceneCopiedToPresent = false;
-		bool postProcessInvoked = false;
 	};
 
 	struct Texture2DDebugStats
