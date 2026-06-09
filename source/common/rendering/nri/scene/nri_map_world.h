@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nri_scene_bridge.h"
+#include "nri_surface_identity.h"
 
 #include <cstdint>
 #include <vector>
@@ -64,6 +65,9 @@ struct PTMapChunk
 	PTMapChunkKind kind = PTMapChunkKind::Sector;
 	uint32_t chunkIndex = UINT32_MAX;
 	int32_t sectorIndex = -1;
+	UpdatePartitionIdentity updatePartitionIdentity;
+	RayTracingGeometryIdentity currentGeometryIdentity;
+	RayTracingInstanceIdentity currentInstanceIdentity;
 	uint32_t localSpaceIndex = UINT32_MAX;
 	uint32_t firstSurface = 0;
 	uint32_t surfaceCount = 0;

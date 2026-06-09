@@ -746,6 +746,9 @@ namespace
 		chunk.kind = PTMapChunkKind::Sector;
 		chunk.chunkIndex = chunkIndex;
 		chunk.sectorIndex = (int32_t)sectorIndex;
+		chunk.updatePartitionIdentity = MakeMapChunkUpdatePartitionIdentity(chunk.chunkIndex, chunk.sectorIndex);
+		chunk.currentGeometryIdentity = MakeMapChunkGeometryIdentity(chunk.chunkIndex);
+		chunk.currentInstanceIdentity = MakeMapChunkInstanceIdentity(chunk.chunkIndex);
 		chunk.firstSurface = (uint32_t)outWorld.surfaces.size();
 
 		sectortype* sec = &sector[sectorIndex];
