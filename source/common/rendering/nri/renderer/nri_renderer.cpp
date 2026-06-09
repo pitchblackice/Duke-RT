@@ -13,6 +13,8 @@
 #include "coreplayer.h"
 #include "hw_voxels.h"
 #include "gamecontrol.h"
+#include "gamestate.h"
+#include "menustate.h"
 #include "hw_sections.h"
 #include "lightoverlay.h"
 #include "mapinfo.h"
@@ -137,6 +139,7 @@ EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
 EXTERN_CVAR(Bool, nri_ptloadingvoxelgpu)
 EXTERN_CVAR(Int, perf_looptraceframes)
+CVAR(Bool, nri_ptselftest, false, 0)
 CUSTOM_CVAR(Float, nri_ptemissivelighteditnotifyrange, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
@@ -7089,6 +7092,16 @@ namespace
 		return value ? "yes" : "no";
 	}
 
+	static const char* GetGraphicsApiName(nri::GraphicsAPI api)
+	{
+		switch (api)
+		{
+		case nri::GraphicsAPI::D3D12: return "d3d12";
+		case nri::GraphicsAPI::VK: return "vulkan";
+		default: return "unknown";
+		}
+	}
+
 	static bool HasAutoEmissiveSourceFlags(uint32_t sourceFlags)
 	{
 		return (sourceFlags & (
@@ -11795,6 +11808,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mLastPerfShellTraceStats.otherMs = std::max(0.0, mLastPerfShellTraceStats.totalMs - accountedMs);
 	}
 
+	if (success)
+	{
+		EmitSelfTestSummary(traceFrameIndex, drawmode, portal);
+	}
+
 	if (ShouldEmitTemporalTraceLogs())
 	{
 		const auto& analyticLights = mSceneLights.GetAnalyticLights();
@@ -13787,6 +13805,120 @@ NRIRenderer::ExposureRoute NRIRenderer::ResolveExposureRoute(FrameTextureSlot in
 		1.0f :
 		outputPolicy.exposure;
 	return route;
+}
+
+void NRIRenderer::ResetSelfTestRouteSnapshot()
+{
+	mSelfTestRoute = {};
+}
+
+void NRIRenderer::SetSelfTestRouteSnapshot(const char* routeName, const char* presenterName, const char* ownerName, const char* passes, bool denoiserRun, bool upscalerRun, bool exposureRun)
+{
+	if (!nri_ptselftest)
+	{
+		return;
+	}
+
+	mSelfTestRoute.routeName = routeName != nullptr ? routeName : "unknown";
+	mSelfTestRoute.presenterName = presenterName != nullptr ? presenterName : "unknown";
+	mSelfTestRoute.ownerName = ownerName != nullptr ? ownerName : "unknown";
+	mSelfTestRoute.passes = passes != nullptr ? passes : "unknown";
+	mSelfTestRoute.denoiserRun = denoiserRun;
+	mSelfTestRoute.upscalerRun = upscalerRun;
+	mSelfTestRoute.exposureRun = exposureRun;
+}
+
+void NRIRenderer::EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bool portal) const
+{
+	if (!nri_ptselftest)
+	{
+		return;
+	}
+
+	const PerfShellTraceStats& shell = mLastPerfShellTraceStats;
+	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
+	const NRIAutoExposureSettings& exposureSettings = mExposure.GetSettings();
+	const NRIAutoExposureStatus& exposureStatus = mExposure.GetStatus();
+	const NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
+	const bool finalTextureValid = final.texture != nullptr && final.shaderView != nullptr;
+	const bool worldActive = gamestate == GS_LEVEL && currentLevel != nullptr;
+	const bool gameplayFrame = worldActive && drawmode == DM_MAINVIEW && !portal;
+	const uint64_t sceneSignature = HashCombine64(
+		HashCombine64(
+			HashCombine64(mVertexBuffer.payloadHash, mIndexBuffer.payloadHash),
+			mPrimitiveBuffer.payloadHash),
+		mSceneInstanceBuffer.payloadHash);
+	const uint64_t materialSignature = mMaterialBuffer.payloadHash;
+	const uint64_t instanceSignature = mSceneInstanceBuffer.payloadHash;
+	const uint64_t skySignature = HashCombine64(mSkyTextureKey, (uint64_t)mSkyState.faceMask);
+	const NRIBufferResource& vertexBuffer = mVertexBuffer;
+	const NRIBufferResource& indexBuffer = mIndexBuffer;
+	const NRIBufferResource& primitiveBuffer = mPrimitiveBuffer;
+	const NRIBufferResource& materialBuffer = mMaterialBuffer;
+	const uint64_t vertexBytes = vertexBuffer.payloadSize != 0 ? vertexBuffer.payloadSize : vertexBuffer.usedSize;
+	const uint64_t indexBytes = indexBuffer.payloadSize != 0 ? indexBuffer.payloadSize : indexBuffer.usedSize;
+	const uint64_t primitiveBytes = primitiveBuffer.payloadSize != 0 ? primitiveBuffer.payloadSize : primitiveBuffer.usedSize;
+	const uint64_t materialBytes = materialBuffer.payloadSize != 0 ? materialBuffer.payloadSize : materialBuffer.usedSize;
+
+	Printf("NRI PT selftest: frame=%u engine_frame=%u map=%s level=%s backend=nri api=%s world_active=%u menu_active=%s gameplay_frame=%u portal=%u drawmode=%d route=%s debug=%d passes=%s presenter=%s owner=%s denoiser_run=%u upscaler_run=%u exposure_run=%u present_kind=%s render_width=%u render_height=%u output_width=%u output_height=%u swapchain_format=%u hdr=%u prims=%u mats=%u scene_instances=%u static_instances=%u dynamic_instances=%u voxel_instances=%u emissive_instances=%u vertices=%u indices=%u vertex_bytes=%llu index_bytes=%llu primitive_bytes=%llu material_bytes=%llu instance_bytes=%llu scene_sig=0x%llx material_sig=0x%llx instance_sig=0x%llx sky_sig=0x%llx sky_mode=%s sky_source=%s sky_key=0x%llx sky_brightness=%.3f sky_action=%s auto_exposure=%u exposure_texture=%u exposure=%.6f target_exposure=%.6f adapted_exposure=%.6f metered_log_lum=%.6f exposure_stats_valid=%u exposure_stats_frame=%llu final_valid=%u final_nonzero=unknown final_nonzero_ratio=unknown final_luma_mean=unknown final_luma_min=unknown final_luma_max=unknown final_nan=unknown final_inf=unknown scene_reason=ok route_reason=ok exposure_reason=%s present_reason=ok\n",
+		traceFrameIndex,
+		mFrameIndex,
+		currentLevel != nullptr ? currentLevel->labelName.GetChars() : "none",
+		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "none",
+		GetGraphicsApiName(mFrameBuffer->GetLiveAPI()),
+		worldActive ? 1u : 0u,
+		menuactive != MENU_Off ? "yes" : "no",
+		gameplayFrame ? 1u : 0u,
+		portal ? 1u : 0u,
+		drawmode,
+		mSelfTestRoute.routeName,
+		(int)GetEffectivePtDebugMode(),
+		mSelfTestRoute.passes,
+		mSelfTestRoute.presenterName,
+		mSelfTestRoute.ownerName,
+		mSelfTestRoute.denoiserRun ? 1u : 0u,
+		mSelfTestRoute.upscalerRun ? 1u : 0u,
+		mSelfTestRoute.exposureRun ? 1u : 0u,
+		mSelfTestRoute.presenterName,
+		mRenderWidth,
+		mRenderHeight,
+		mOutputWidth,
+		mOutputHeight,
+		(uint32_t)mFrameBuffer->mCreatedSwapChainFormat,
+		outputPolicy.hdrSwapChainActive ? 1u : 0u,
+		shell.activePrimitiveCount,
+		shell.activeMaterialCount,
+		shell.sceneInstanceCount,
+		shell.sceneInstanceStaticCount,
+		shell.sceneInstanceDynamicCount,
+		shell.sceneInstancePersistentVoxelCount,
+		mBoundEmissivePrimitiveCount,
+		mVertexBuffer.stride != 0 ? (uint32_t)(vertexBytes / mVertexBuffer.stride) : 0u,
+		mIndexBuffer.stride != 0 ? (uint32_t)(indexBytes / mIndexBuffer.stride) : 0u,
+		(unsigned long long)vertexBytes,
+		(unsigned long long)indexBytes,
+		(unsigned long long)primitiveBytes,
+		(unsigned long long)materialBytes,
+		(unsigned long long)(mSceneInstanceBuffer.payloadSize != 0 ? mSceneInstanceBuffer.payloadSize : mSceneInstanceBuffer.usedSize),
+		(unsigned long long)sceneSignature,
+		(unsigned long long)materialSignature,
+		(unsigned long long)instanceSignature,
+		(unsigned long long)skySignature,
+		GetSkyModeName(mSkyState.mode),
+		GetSkySourceTypeName(mSkyState.sourceType),
+		(unsigned long long)mSkyTextureKey,
+		mSkyState.brightness,
+		mHasTracedSkyState ? "traced" : "untraced",
+		exposureSettings.enabled ? 1u : 0u,
+		mExposure.HasExposureStateTextures() ? 1u : 0u,
+		outputPolicy.exposure,
+		exposureStatus.targetExposure,
+		exposureStatus.adaptedExposure,
+		exposureStatus.meteredLogLuminance,
+		exposureStatus.debugValid ? 1u : 0u,
+		(unsigned long long)exposureStatus.debugFrameIndex,
+		finalTextureValid ? 1u : 0u,
+		exposureSettings.enabled ? "ok" : "disabled");
 }
 
 void NRIRenderer::PrintTemporalStatus() const
@@ -37038,6 +37170,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	static bool sLoggedPhaseHRrInputPath = false;
 	const int ptDebugMode = (int)GetEffectivePtDebugMode();
 	const NRIPresentRouteInfo presentRoute = ResolvePresentRouteInfo((uint32_t)ptDebugMode, !!nri_ptbootstrap);
+	ResetSelfTestRouteSnapshot();
 	const bool bootstrapRawTracePresent = presentRoute.kind == NRIPresentRouteKind::BootstrapFinal;
 	const bool useResolvedPresent = presentRoute.kind == NRIPresentRouteKind::ResolvedBeauty;
 	const bool useComposedDebugPresent = presentRoute.kind == NRIPresentRouteKind::ComposedDebug;
@@ -37086,6 +37219,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (bootstrapRawTracePresent)
 	{
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Final,CopyFinal", false, false, false);
 		if (!DispatchFinal())
 		{
 			return false;
@@ -37097,6 +37231,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useValidationPresent)
 	{
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Denoiser,RawPresent,CopyFinal", true, false, false);
 		if (!DispatchDenoiser())
 		{
 			return false;
@@ -37113,6 +37248,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useDenoisedDebugPresent)
 	{
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Denoiser,RawPresent,CopyFinal", true, false, false);
 		if (!DispatchDenoiser())
 		{
 			return false;
@@ -37130,6 +37266,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useShadowDebugPresent)
 	{
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, nri_denoise ? "TraceOpaque,Denoiser,Final,CopyFinal" : "TraceOpaque,Final,CopyFinal", !!nri_denoise, false, false);
 		if (nri_denoise && !DispatchDenoiser())
 		{
 			return false;
@@ -37227,6 +37364,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useResolvedPresent)
 	{
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Composition,TraceTransparent,Exposure,UpscaleChain,FinalPresent,CopyFinal", !!nri_denoise, true, true);
 		if (!sLoggedPhaseGResolvedPresentPath)
 		{
 			Printf("ptdebug 0 now routes through Composition, placeholder TraceTransparent, DispatchUpscaleChain, and the minimal FinalPresent presenter.\n");
@@ -37258,6 +37396,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useComposedDebugPresent)
 	{
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Composition,TraceTransparent,Exposure,FinalPresent,CopyFinal", !!nri_denoise, false, true);
 		if (!sLoggedPhaseBCompositionPath)
 		{
 			Printf("NRI Phase B: ptdebug 45 now routes through Composition, placeholder TraceTransparent, and the minimal FinalPresent presenter.\n");
@@ -37280,6 +37419,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useUpscalerTraceTransparentProbe)
 	{
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Composition,TraceTransparent,Exposure,RawPresent,CopyFinal", !!nri_denoise, false, true);
 		if (!sLoggedTraceTransparentProbePath)
 		{
 			Printf("NRI Phase I instrumentation: ptdebug 34 now exposes TraceTransparentOutput before the upscaler chain.\n");
@@ -37302,6 +37442,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (useFinalDebugPresent)
 	{
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Final,CopyFinal", false, false, false);
 		mUseUpscaledInFinal = false;
 		if (!DispatchFinal())
 		{
@@ -37314,6 +37455,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 
 	if (rawTraceDirectPresent)
 	{
+		SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,RawPresent,CopyFinal", false, false, false);
 		if (!sLoggedRawTraceBypass)
 		{
 			Printf("NRI frame-graph bypass: presenting raw TraceOpaque output through the direct present path for non-composition debug views.\n");
@@ -37370,6 +37512,7 @@ bool NRIRenderer::DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryDa
 	}
 
 	mUseUpscaledInFinal = false;
+	SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, "TraceOpaque,Final,CopyFinal", false, false, false);
 	if (!DispatchFinal())
 	{
 		return false;

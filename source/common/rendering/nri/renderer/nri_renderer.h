@@ -1505,6 +1505,17 @@ private:
 		bool flipTop = false;
 	};
 
+	struct SelfTestRouteSnapshot
+	{
+		const char* routeName = "unknown";
+		const char* presenterName = "unknown";
+		const char* ownerName = "unknown";
+		const char* passes = "unknown";
+		bool denoiserRun = false;
+		bool upscalerRun = false;
+		bool exposureRun = false;
+	};
+
 	struct PreservedStaticMapSkyState
 	{
 		bool valid = false;
@@ -2810,6 +2821,9 @@ private:
 	ExposureDomain ResolveFrameTextureExposureDomain(FrameTextureSlot slot, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const;
 	ExposureRoute ResolveExposureRoute(FrameTextureSlot inputSlot, const NRIPTOutputPolicy& outputPolicy, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const;
 	const char* GetExposureDomainName(ExposureDomain domain) const;
+	void ResetSelfTestRouteSnapshot();
+	void SetSelfTestRouteSnapshot(const char* routeName, const char* presenterName, const char* ownerName, const char* passes, bool denoiserRun, bool upscalerRun, bool exposureRun);
+	void EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bool portal) const;
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);
 	void ClearRuntimeMapMutationReplacementPayload(RuntimeMapMutationCache::ChunkReplacement& replacement, bool clearMaterialStateCache);
 	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
@@ -3163,6 +3177,7 @@ private:
 	MapRecord* mSkyLevel = nullptr;
 	SkyState mSkyState = {};
 	SkyState mLastTracedSkyState = {};
+	SelfTestRouteSnapshot mSelfTestRoute = {};
 	uint64_t mLastTracedSkyResolvedKey = 0;
 	bool mHasTracedSkyState = false;
 	PreservedStaticMapSkyState mPreservedStaticMapSky = {};
