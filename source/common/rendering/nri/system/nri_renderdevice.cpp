@@ -9375,6 +9375,40 @@ nri::GraphicsAPI NRIRenderDevice::GetLiveAPI() const
 	return mDevice != nullptr ? mCreatedDeviceApi : GetSelectedAPI();
 }
 
+NRIBackendCapabilities NRIRenderDevice::BuildBackendCapabilities() const
+{
+	NRIBackendCapabilities capabilities = {};
+	capabilities.liveApi = GetLiveAPI();
+	capabilities.d3d12 = capabilities.liveApi == nri::GraphicsAPI::D3D12;
+	capabilities.vulkan = capabilities.liveApi == nri::GraphicsAPI::VK;
+	capabilities.lowLatencyInterfaceAvailable =
+		mLowLatency.SetLatencySleepMode != nullptr &&
+		mLowLatency.SetLatencyMarker != nullptr &&
+		mLowLatency.LatencySleep != nullptr &&
+		mLowLatency.GetLatencyReport != nullptr;
+	capabilities.lowLatencySwapChainEnabled =
+		mSwapChain != nullptr &&
+		(((uint32_t)mSwapChainFlags & (uint32_t)nri::SwapChainBits::ALLOW_LOW_LATENCY) != 0);
+	capabilities.dredRequested = !!nri_dred;
+
+#ifdef _WIN32
+	capabilities.nativeD3D12DeviceAvailable = mNativeD3D12Device != nullptr;
+	capabilities.nativeD3D12GraphicsQueueAvailable = mNativeD3D12GraphicsQueue != nullptr;
+	capabilities.nativeD3D12SwapChainAvailable = mNativeD3D12SwapChain != nullptr;
+#endif
+
+	if (mDevice != nullptr)
+	{
+		const nri::DeviceDesc& deviceDesc = mCore.GetDeviceDesc(*mDevice);
+		capabilities.shaderModel = deviceDesc.shaderModel;
+		capabilities.lowLatencyFeatureAvailable = !!deviceDesc.features.lowLatency;
+		capabilities.lowLatencyAvailable = capabilities.lowLatencyFeatureAvailable && capabilities.lowLatencyInterfaceAvailable;
+		capabilities.waitableSwapChainAvailable = !!deviceDesc.features.waitableSwapChain;
+	}
+
+	return capabilities;
+}
+
 NRISamplerMode NRIRenderDevice::GetSamplerMode(int clampMode) const
 {
 	const bool point = clampMode == CLAMP_NOFILTER || clampMode == CLAMP_NOFILTER_X || clampMode == CLAMP_NOFILTER_Y || clampMode == CLAMP_NOFILTER_XY;

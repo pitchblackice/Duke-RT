@@ -639,29 +639,17 @@ NRIFrameGenerationPolicy NRIFrameGenerationContext::BuildPolicy(const NRIRenderD
 	policy.fullscreenActive = frameBuffer.IsFullscreenModeActive();
 	policy.windowModeSupported = !policy.fullscreenActive;
 
-	const nri::GraphicsAPI api = frameBuffer.GetLiveAPI();
-	policy.selectedApiName = GetApiName(api);
-	policy.apiSupported = api == nri::GraphicsAPI::D3D12;
-
-#ifdef _WIN32
-	policy.nativeDeviceAvailable = frameBuffer.GetNativeD3D12Device() != nullptr;
-	policy.nativeGraphicsQueueAvailable = frameBuffer.GetNativeD3D12GraphicsQueue() != nullptr;
-	policy.nativeSwapChainAvailable = frameBuffer.GetNativeD3D12SwapChain() != nullptr;
-#endif
-
-	if (frameBuffer.mDevice != nullptr)
-	{
-		const nri::DeviceDesc& deviceDesc = frameBuffer.mCore.GetDeviceDesc(*frameBuffer.mDevice);
-		policy.shaderModel = deviceDesc.shaderModel;
-		policy.lowLatencyInterfaceAvailable = frameBuffer.mLowLatency.SetLatencySleepMode != nullptr &&
-			frameBuffer.mLowLatency.SetLatencyMarker != nullptr &&
-			frameBuffer.mLowLatency.LatencySleep != nullptr &&
-			frameBuffer.mLowLatency.GetLatencyReport != nullptr;
-		policy.lowLatencyAvailable = !!deviceDesc.features.lowLatency && policy.lowLatencyInterfaceAvailable;
-		policy.lowLatencySwapChainEnabled = policy.swapChainReady &&
-			(((uint32_t)frameBuffer.mSwapChainFlags & (uint32_t)nri::SwapChainBits::ALLOW_LOW_LATENCY) != 0);
-		policy.waitableSwapChainAvailable = !!deviceDesc.features.waitableSwapChain;
-	}
+	const NRIBackendCapabilities backendCapabilities = frameBuffer.BuildBackendCapabilities();
+	policy.selectedApiName = GetApiName(backendCapabilities.liveApi);
+	policy.apiSupported = backendCapabilities.d3d12;
+	policy.nativeDeviceAvailable = backendCapabilities.nativeD3D12DeviceAvailable;
+	policy.nativeGraphicsQueueAvailable = backendCapabilities.nativeD3D12GraphicsQueueAvailable;
+	policy.nativeSwapChainAvailable = backendCapabilities.nativeD3D12SwapChainAvailable;
+	policy.shaderModel = backendCapabilities.shaderModel;
+	policy.lowLatencyInterfaceAvailable = backendCapabilities.lowLatencyInterfaceAvailable;
+	policy.lowLatencyAvailable = backendCapabilities.lowLatencyAvailable;
+	policy.lowLatencySwapChainEnabled = backendCapabilities.lowLatencySwapChainEnabled;
+	policy.waitableSwapChainAvailable = backendCapabilities.waitableSwapChainAvailable;
 	policy.shaderModelSupported = frameBuffer.mDevice != nullptr && policy.shaderModel >= 62u;
 	policy.providerRuntimeSupported = mProviderState.runtimeFunctionsLoaded;
 	policy.asyncWorkloadAvailable = false;

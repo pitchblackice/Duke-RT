@@ -27,6 +27,23 @@ struct ID3D12CommandQueue;
 struct IDXGISwapChain4;
 #endif
 
+struct NRIBackendCapabilities
+{
+	nri::GraphicsAPI liveApi = nri::GraphicsAPI::VK;
+	uint32_t shaderModel = 0;
+	bool d3d12 = false;
+	bool vulkan = false;
+	bool nativeD3D12DeviceAvailable = false;
+	bool nativeD3D12GraphicsQueueAvailable = false;
+	bool nativeD3D12SwapChainAvailable = false;
+	bool lowLatencyFeatureAvailable = false;
+	bool lowLatencyInterfaceAvailable = false;
+	bool lowLatencyAvailable = false;
+	bool lowLatencySwapChainEnabled = false;
+	bool waitableSwapChainAvailable = false;
+	bool dredRequested = false;
+};
+
 class NRIRenderDevice : public SystemBaseFrameBuffer
 {
 	typedef SystemBaseFrameBuffer Super;
@@ -124,6 +141,7 @@ public:
 #endif
 	uint64_t GetAdapterLocalBudgetBytes() const { return mAdapterLocalBudgetBytes; }
 	uint64_t GetAdapterNonLocalBudgetBytes() const { return mAdapterNonLocalBudgetBytes; }
+	NRIBackendCapabilities BuildBackendCapabilities() const;
 
 private:
 	static constexpr uint32_t FrameSequenceHistorySize = NRIFrameShell::FrameSequenceHistorySize;
