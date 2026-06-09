@@ -1,0 +1,78 @@
+﻿{
+    "name":  "stable-opening-d3d12-beauty-e2l4",
+    "scenario":  {
+                     "name":  "stable-opening-d3d12-beauty-e2l4",
+                     "backend":  "d3d12",
+                     "map":  "e2l4",
+                     "debugMode":  0,
+                     "traceFrames":  96,
+                     "captureWhenPassed":  true,
+                     "minSelfTestFrames":  16,
+                     "commands":  "+wait 45; map e2l4; wait 1; closemenu",
+                     "requiredPrefixes":  [
+                                              "NRI PT selftest:",
+                                              "NRI PT frame boundary:",
+                                              "NRI PT sky:"
+                                          ],
+                     "forbiddenPatterns":  [
+                                               "Device removed",
+                                               "validation error",
+                                               "failed to create",
+                                               "assertion failed"
+                                           ]
+                 },
+    "runs":  3,
+    "capturedUtc":  "2026-06-09T03:10:22.4346427Z",
+    "exact":  {
+                  "map":  "E2L4",
+                  "api":  "d3d12",
+                  "route":  "resolved_beauty",
+                  "passes":  "TraceOpaque,Composition,TraceTransparent,Exposure,UpscaleChain,FinalPresent,CopyFinal"
+              },
+    "ranges":  {
+                   "prims":  {
+                                 "min":  31653,
+                                 "max":  31777
+                             },
+                   "mats":  {
+                                "min":  2812,
+                                "max":  2995
+                            },
+                   "scene_instances":  {
+                                           "min":  420,
+                                           "max":  422
+                                       },
+                   "static_instances":  {
+                                            "min":  419,
+                                            "max":  419
+                                        },
+                   "dynamic_instances":  {
+                                             "min":  1,
+                                             "max":  1
+                                         },
+                   "voxel_instances":  {
+                                           "min":  0,
+                                           "max":  2
+                                       },
+                   "emissive_instances":  {
+                                              "min":  529,
+                                              "max":  555
+                                          },
+                   "render_width":  {
+                                        "min":  1477,
+                                        "max":  1477
+                                    },
+                   "render_height":  {
+                                         "min":  831,
+                                         "max":  831
+                                     },
+                   "output_width":  {
+                                        "min":  1920,
+                                        "max":  1920
+                                    },
+                   "output_height":  {
+                                         "min":  1080,
+                                         "max":  1080
+                                     }
+               }
+}
