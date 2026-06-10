@@ -14707,7 +14707,7 @@ void NRIRenderer::ResetPersistentDynamicEmissiveCache()
 	mActorSpriteDebugStats = {};
 }
 
-void NRIRenderer::ResetPersistentVoxelBatch(const char* reason, bool clearSharedResources)
+NRIPersistentVoxelResetServices NRIRenderer::BuildPersistentVoxelResetServices()
 {
 	NRIPersistentVoxelResetServices services = {};
 	services.user = this;
@@ -14729,8 +14729,16 @@ void NRIRenderer::ResetPersistentVoxelBatch(const char* reason, bool clearShared
 	{
 		static_cast<NRIRenderer*>(user)->SetCurrentSceneDataDescriptorsInitialized(false);
 	};
+	return services;
+}
 
-	mPersistentVoxels.Reset(reason, clearSharedResources, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, services);
+void NRIRenderer::ResetPersistentVoxelBatch(const char* reason, bool clearSharedResources)
+{
+	mPersistentVoxels.Reset(
+		reason,
+		clearSharedResources,
+		(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
+		BuildPersistentVoxelResetServices());
 }
 
 bool NRIRenderer::SyncPersistentVoxelResidencyMapGeneration(const char* reason)
@@ -15172,28 +15180,7 @@ bool NRIRenderer::IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, 
 
 void NRIRenderer::DiscardPersistentVoxelAdmissionEntry(PersistentVoxelAdmissionEntry& entry)
 {
-	RetireResidentBufferResource(entry.uploadMeshResource.vertexBuffer);
-	RetireResidentBufferResource(entry.uploadMeshResource.indexBuffer);
-	RetireResidentAccelerationStructure(entry.uploadMeshResource.accelerationStructure);
-	entry.uploadMeshResource = {};
-	entry.uploadMaterialResource = {};
-	entry.uploadPrepared = false;
-	entry.shaderVertexOffset = 0;
-	entry.shaderIndexOffset = 0;
-	entry.shaderPrimitiveOffset = 0;
-	entry.savedVertexCursor = 0;
-	entry.savedIndexCursor = 0;
-	entry.savedPrimitiveCursor = 0;
-	entry.savedMaterialCursor = 0;
-	entry.vertexBytesUploaded = 0;
-	entry.vertexArenaBytesUploaded = 0;
-	entry.indexBytesUploaded = 0;
-	entry.indexArenaBytesUploaded = 0;
-	entry.primitiveBytesUploaded = 0;
-	entry.bytesUploaded = 0;
-	entry.uploadGeometry = {};
-	entry.uploadGpuIndices.clear();
-	entry.uploadGpuPrimitives.clear();
+	mPersistentVoxels.DiscardAdmissionEntry(entry, BuildPersistentVoxelResetServices());
 }
 
 bool NRIRenderer::EnqueuePersistentVoxelAdmission(

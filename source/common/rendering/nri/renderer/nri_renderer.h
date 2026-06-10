@@ -1441,6 +1441,7 @@ private:
 
 	NRIResourceContext BuildResourceContext() const;
 	NRIResourceServices BuildResourceServices();
+	NRIPersistentVoxelResetServices BuildPersistentVoxelResetServices();
 	NRIRendererFrameContext BuildFrameContext(int drawmode, bool portal, int debugMode, bool preserveHistory) const;
 	enum class FrameTextureSlot : uint32_t
 	{

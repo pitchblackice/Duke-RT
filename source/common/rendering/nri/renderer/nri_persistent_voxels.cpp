@@ -93,6 +93,32 @@ void NRIPersistentVoxelResidency::Reset(
 	publishedMaterialKeys.clear();
 }
 
+void NRIPersistentVoxelResidency::DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services)
+{
+	services.RetireBuffer(entry.uploadMeshResource.vertexBuffer);
+	services.RetireBuffer(entry.uploadMeshResource.indexBuffer);
+	services.RetireAccelerationStructure(entry.uploadMeshResource.accelerationStructure);
+	entry.uploadMeshResource = {};
+	entry.uploadMaterialResource = {};
+	entry.uploadPrepared = false;
+	entry.shaderVertexOffset = 0;
+	entry.shaderIndexOffset = 0;
+	entry.shaderPrimitiveOffset = 0;
+	entry.savedVertexCursor = 0;
+	entry.savedIndexCursor = 0;
+	entry.savedPrimitiveCursor = 0;
+	entry.savedMaterialCursor = 0;
+	entry.vertexBytesUploaded = 0;
+	entry.vertexArenaBytesUploaded = 0;
+	entry.indexBytesUploaded = 0;
+	entry.indexArenaBytesUploaded = 0;
+	entry.primitiveBytesUploaded = 0;
+	entry.bytesUploaded = 0;
+	entry.uploadGeometry = {};
+	entry.uploadGpuIndices.clear();
+	entry.uploadGpuPrimitives.clear();
+}
+
 PersistentVoxelReadinessStatus NRIPersistentVoxelResidency::GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const
 {
 	PersistentVoxelReadinessStatus status = {};
