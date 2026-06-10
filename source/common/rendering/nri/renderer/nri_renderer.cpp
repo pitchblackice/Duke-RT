@@ -14645,190 +14645,6 @@ void NRIRenderer::ResetPersistentVoxelBatch(const char* reason, bool clearShared
 		BuildPersistentVoxelResetServices());
 }
 
-bool NRIRenderer::EnqueuePersistentVoxelAdmission(
-	const nri_scene::PrecachedVoxelVariantView& variant,
-	bool runtimeRequested,
-	const char* sourceLabel)
-{
-	if (variant.surface == nullptr || variant.meshKeyHash == 0 || variant.materialKeyHash == 0)
-	{
-		return false;
-	}
-
-	mPersistentVoxels.SyncMapGeneration(
-		mMapWorld.buildSerial,
-		"admission-map-generation",
-		(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
-		BuildPersistentVoxelResetServices());
-	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
-
-	const uint64_t pairKey = HashCombine64(variant.meshKeyHash, variant.materialKeyHash);
-	const uint64_t estimatedBytes =
-		(uint64_t)variant.surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
-		(uint64_t)variant.surface->indices.size() * (uint64_t)sizeof(uint32_t) +
-		(uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData);
-	const int32_t variantAdmissionRank =
-		variant.admissionRank != 0 || variant.priority <= 0 ? variant.admissionRank : variant.priority * 10000 + 9900;
-	const uint32_t maxBlasPrimitives = persistentVoxelSettings.admitMaxBlasPrimitives;
-	auto traceAdmissionSkip = [&](const nri_scene::PrecachedVoxelVariantView& skippedVariant, uint64_t skippedBytes, const char* reason)
-	{
-		if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
-		{
-			Printf("NRI PT voxel admission queue: event=skip source=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u max_prims=%u bytes=%llu reason=%s generation=%u\n",
-				sourceLabel != nullptr ? sourceLabel : "unknown",
-				skippedVariant.sourceBits,
-				skippedVariant.priority,
-				variantAdmissionRank,
-				skippedVariant.gpuForce ? 1u : 0u,
-				skippedVariant.gpuPrefer ? 1u : 0u,
-				runtimeRequested ? 1u : 0u,
-				skippedVariant.sourcePicnum,
-				skippedVariant.resolvedVoxelIndex,
-				(unsigned long long)skippedVariant.meshKeyHash,
-				(unsigned long long)skippedVariant.materialKeyHash,
-				skippedVariant.primitiveCount,
-				maxBlasPrimitives,
-				(unsigned long long)skippedBytes,
-				reason != nullptr ? reason : "unknown",
-				mPersistentVoxels.residencyMapGeneration);
-		}
-	};
-
-	auto found = mPersistentVoxels.admissionQueue.find(pairKey);
-	if (found != mPersistentVoxels.admissionQueue.end() && found->second.mapGeneration != mPersistentVoxels.residencyMapGeneration)
-	{
-		mPersistentVoxels.DiscardAdmissionEntry(found->second, BuildPersistentVoxelResetServices());
-		mPersistentVoxels.admissionQueue.erase(found);
-		found = mPersistentVoxels.admissionQueue.end();
-	}
-	if (found != mPersistentVoxels.admissionQueue.end())
-	{
-		PersistentVoxelAdmissionEntry& entry = found->second;
-		const int32_t oldPriority = entry.priority;
-		const bool oldForce = entry.gpuForce;
-		const bool wasReady = entry.state == PersistentVoxelAdmissionState::Ready;
-		const PersistentVoxelReadinessStatus readiness = mPersistentVoxels.GetSharedVariantReadiness(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
-		const bool resourcesReady = readiness.ready;
-		if (!resourcesReady && entry.variant.primitiveCount > maxBlasPrimitives)
-		{
-			traceAdmissionSkip(entry.variant, entry.estimatedBytes, "blas-primitive-budget");
-			mPersistentVoxels.DiscardAdmissionEntry(entry, BuildPersistentVoxelResetServices());
-			mPersistentVoxels.admissionQueue.erase(found);
-			return false;
-		}
-		if (wasReady && !resourcesReady)
-		{
-			mPersistentVoxels.TraceReadiness("stale-ready", sourceLabel, &entry, entry.variant.meshKeyHash, entry.variant.materialKeyHash, readiness, (int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats);
-		}
-		entry.sourceBits |= variant.sourceBits;
-		entry.gpuForce = entry.gpuForce || variant.gpuForce;
-		entry.gpuPrefer = entry.gpuPrefer || variant.gpuPrefer;
-		entry.runtimeRequested = entry.runtimeRequested || runtimeRequested;
-		entry.priority = std::min(entry.priority, variant.priority);
-		entry.admissionRank = std::min(entry.admissionRank, variantAdmissionRank);
-		if (resourcesReady)
-		{
-			if (entry.uploadPrepared)
-			{
-				mPersistentVoxels.DiscardAdmissionEntry(entry, BuildPersistentVoxelResetServices());
-			}
-			entry.state = PersistentVoxelAdmissionState::Ready;
-			entry.lastReason = "resident";
-			if (runtimeRequested)
-			{
-				mPersistentVoxels.TraceReadiness("dedupe-ready", sourceLabel, &entry, entry.variant.meshKeyHash, entry.variant.materialKeyHash, readiness, (int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats);
-			}
-		}
-		else if (entry.state == PersistentVoxelAdmissionState::Ready)
-		{
-			entry.state = PersistentVoxelAdmissionState::Pending;
-			entry.lastReason = "stale-ready";
-		}
-		else if (entry.state == PersistentVoxelAdmissionState::Deferred)
-		{
-			entry.state = PersistentVoxelAdmissionState::Pending;
-			entry.lastReason = "reprioritized";
-		}
-		else if (entry.state == PersistentVoxelAdmissionState::Failed &&
-			(entry.priority != oldPriority || (!oldForce && entry.gpuForce)))
-		{
-			entry.state = PersistentVoxelAdmissionState::Pending;
-			entry.lastReason = "retry-priority";
-		}
-		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
-		{
-			Printf("NRI PT voxel admission queue: event=%s source=%s source_bits=0x%x priority=%d old_priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu generation=%u\n",
-				resourcesReady && runtimeRequested ? "dedupe-ready" : (wasReady && !resourcesReady ? "stale-ready" : (entry.priority != oldPriority ? "promote" : "dedupe")),
-				sourceLabel != nullptr ? sourceLabel : "unknown",
-				entry.sourceBits,
-				entry.priority,
-				oldPriority,
-				entry.admissionRank,
-				entry.gpuForce ? 1u : 0u,
-				entry.gpuPrefer ? 1u : 0u,
-				entry.runtimeRequested ? 1u : 0u,
-				entry.variant.sourcePicnum,
-				entry.variant.resolvedVoxelIndex,
-				(unsigned long long)entry.variant.meshKeyHash,
-				(unsigned long long)entry.variant.materialKeyHash,
-				entry.variant.primitiveCount,
-				(unsigned long long)entry.estimatedBytes,
-				entry.mapGeneration);
-		}
-		return true;
-	}
-
-	const PersistentVoxelReadinessStatus readiness = mPersistentVoxels.GetSharedVariantReadiness(variant.meshKeyHash, variant.materialKeyHash);
-	const bool resourcesReady = readiness.ready;
-	if (!resourcesReady && variant.primitiveCount > maxBlasPrimitives)
-	{
-		traceAdmissionSkip(variant, estimatedBytes, "blas-primitive-budget");
-		return false;
-	}
-
-	PersistentVoxelAdmissionEntry entry = {};
-	entry.pairKey = pairKey;
-	entry.variant = variant;
-	entry.state = resourcesReady ?
-		PersistentVoxelAdmissionState::Ready :
-		PersistentVoxelAdmissionState::Pending;
-	entry.sourceBits = variant.sourceBits;
-	entry.priority = variant.priority;
-	entry.admissionRank = variantAdmissionRank;
-	entry.gpuForce = variant.gpuForce;
-	entry.gpuPrefer = variant.gpuPrefer;
-	entry.runtimeRequested = runtimeRequested;
-	entry.mapGeneration = mPersistentVoxels.residencyMapGeneration;
-	entry.estimatedBytes = estimatedBytes;
-	entry.lastReason = entry.state == PersistentVoxelAdmissionState::Ready ? "resident" : "queued";
-	mPersistentVoxels.admissionQueue[pairKey] = entry;
-	if (resourcesReady && runtimeRequested)
-	{
-		mPersistentVoxels.TraceReadiness("dedupe-ready", sourceLabel, &mPersistentVoxels.admissionQueue[pairKey], variant.meshKeyHash, variant.materialKeyHash, readiness, (int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats);
-	}
-
-	if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
-	{
-		Printf("NRI PT voxel admission queue: event=%s source=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu generation=%u\n",
-			entry.state == PersistentVoxelAdmissionState::Ready && runtimeRequested ? "dedupe-ready" : (entry.state == PersistentVoxelAdmissionState::Ready ? "ready" : "enqueue"),
-			sourceLabel != nullptr ? sourceLabel : "unknown",
-			entry.sourceBits,
-			entry.priority,
-			entry.admissionRank,
-			entry.gpuForce ? 1u : 0u,
-			entry.gpuPrefer ? 1u : 0u,
-			entry.runtimeRequested ? 1u : 0u,
-			entry.variant.sourcePicnum,
-			entry.variant.resolvedVoxelIndex,
-			(unsigned long long)entry.variant.meshKeyHash,
-			(unsigned long long)entry.variant.materialKeyHash,
-			entry.variant.primitiveCount,
-			(unsigned long long)entry.estimatedBytes,
-			entry.mapGeneration);
-	}
-	return true;
-}
-
 void NRIRenderer::ApplyPersistentVoxelResidencyPressurePolicy(const char* phase)
 {
 	if (mPersistentVoxels.meshVariantResources.empty() && mPersistentVoxels.materialVariantResources.empty())
@@ -16078,7 +15894,15 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 
 	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
 	{
-		EnqueuePersistentVoxelAdmission(variant, false, "preload");
+		mPersistentVoxels.EnqueueAdmission(
+			variant,
+			false,
+			"preload",
+			mMapWorld.buildSerial,
+			persistentVoxelSettings,
+			(int)nri_ptloadingtrace,
+			(bool)nri_voxelstats,
+			BuildPersistentVoxelResetServices());
 	}
 
 	auto hasRequiredUploadInProgress = [&]() -> bool
@@ -17363,7 +17187,15 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			admissionVariant.admissionRank = admissionVariant.priority * 10000 + 9900;
 			admissionVariant.surface = cacheEntry.surface;
 			admissionVariant.material = cacheEntry.lightSurface != nullptr ? cacheEntry.lightSurface->material : cacheEntry.surface->material;
-			EnqueuePersistentVoxelAdmission(admissionVariant, true, "runtime-actor");
+			mPersistentVoxels.EnqueueAdmission(
+				admissionVariant,
+				true,
+				"runtime-actor",
+				mMapWorld.buildSerial,
+				persistentVoxelSettings,
+				(int)nri_ptloadingtrace,
+				(bool)nri_voxelstats,
+				BuildPersistentVoxelResetServices());
 			if (existingActor != nullptr)
 			{
 				existingActor->active = true;

@@ -2296,10 +2296,6 @@ private:
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
 	bool PreloadPersistentVoxelVariantResources(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants);
-	bool EnqueuePersistentVoxelAdmission(
-		const nri_scene::PrecachedVoxelVariantView& variant,
-		bool runtimeRequested,
-		const char* sourceLabel);
 	void ApplyPersistentVoxelResidencyPressurePolicy(const char* phase);
 	bool PumpPersistentVoxelAdmissionQueue(const char* phase);
 	bool AdmitPersistentVoxelVariantResource(

@@ -263,6 +263,15 @@ public:
 		uint32_t frameIndex,
 		int loadingTraceLevel,
 		const NRIPersistentVoxelResetServices& services);
+	bool EnqueueAdmission(
+		const nri_scene::PrecachedVoxelVariantView& variant,
+		bool runtimeRequested,
+		const char* sourceLabel,
+		uint64_t buildSerial,
+		const NRIPersistentVoxelSettings& settings,
+		int loadingTraceLevel,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelResetServices& services);
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
