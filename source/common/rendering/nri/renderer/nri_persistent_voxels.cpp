@@ -168,6 +168,428 @@ void NRIPersistentVoxelResidency::Reset(
 	publishedMaterialKeys.clear();
 }
 
+bool NRIPersistentVoxelResidency::SyncMapGeneration(
+	uint64_t buildSerial,
+	const char* reason,
+	bool traceEnabled,
+	const NRIPersistentVoxelResetServices& services)
+{
+	if (residencyLastBuildSerial == buildSerial)
+	{
+		return false;
+	}
+
+	residencyLastBuildSerial = buildSerial;
+	residencyMapGeneration++;
+
+	if (!admissionQueue.empty())
+	{
+		if (traceEnabled)
+		{
+			Printf("NRI PT voxel admission queue: event=clear-stale reason=%s generation=%u entries=%u\n",
+				reason != nullptr ? reason : "map-generation",
+				residencyMapGeneration,
+				(uint32_t)admissionQueue.size());
+		}
+		for (auto& pair : admissionQueue)
+		{
+			DiscardAdmissionEntry(pair.second, services);
+		}
+		admissionQueue.clear();
+	}
+
+	return true;
+}
+
+void NRIPersistentVoxelResidency::ReconcileResidency(
+	const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+	const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries,
+	uint64_t buildSerial,
+	const char* levelName,
+	uint32_t frameIndex,
+	int loadingTraceLevel,
+	const NRIPersistentVoxelResetServices& services)
+{
+	SyncMapGeneration(
+		buildSerial,
+		"reconcile-map-generation",
+		loadingTraceLevel >= 1,
+		services);
+	const uint32_t generation = residencyMapGeneration;
+
+	struct DesiredVoxelResidency
+	{
+		uint64_t pairKey = 0;
+		uint64_t meshKey = 0;
+		uint64_t materialKey = 0;
+		uint32_t sourceBits = 0;
+		int32_t priority = 0;
+		int32_t sourcePicnum = -1;
+		int32_t resolvedVoxelIndex = -1;
+		uint32_t primitiveCount = 0;
+		uint64_t uploadBytes = 0;
+		bool fromPreload = false;
+		bool fromActor = false;
+		bool gpuForce = false;
+		bool gpuPrefer = false;
+		bool cpuReady = false;
+	};
+
+	std::unordered_map<uint64_t, DesiredVoxelResidency> desired;
+	desired.reserve(variants.size() + cacheEntries.size());
+	std::unordered_set<uint64_t> desiredMeshes;
+	std::unordered_set<uint64_t> desiredMaterials;
+	desiredMeshes.reserve(variants.size() + cacheEntries.size());
+	desiredMaterials.reserve(variants.size() + cacheEntries.size());
+
+	auto estimateUploadBytes = [](const nri_scene::SurfaceRef* surface, uint32_t primitiveCount) -> uint64_t
+	{
+		if (surface == nullptr)
+		{
+			return 0;
+		}
+		return (uint64_t)surface->vertices.size() * (uint64_t)sizeof(nri_scene::SceneVertex) +
+			(uint64_t)surface->indices.size() * (uint64_t)sizeof(uint32_t) +
+			(uint64_t)primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData);
+	};
+
+	auto addDesired = [&](uint64_t meshKey, uint64_t materialKey, uint32_t sourceBits, int32_t priority, int32_t sourcePicnum, int32_t resolvedVoxelIndex, uint32_t primitiveCount, uint64_t uploadBytes, bool fromPreload, bool fromActor, bool gpuForce, bool gpuPrefer, bool cpuReady)
+	{
+		if (meshKey == 0 || materialKey == 0)
+		{
+			return;
+		}
+		const uint64_t pairKey = nri_scene::HashCombine64(meshKey, materialKey);
+		DesiredVoxelResidency& entry = desired[pairKey];
+		if (entry.pairKey == 0)
+		{
+			entry.pairKey = pairKey;
+			entry.meshKey = meshKey;
+			entry.materialKey = materialKey;
+			entry.sourcePicnum = sourcePicnum;
+			entry.resolvedVoxelIndex = resolvedVoxelIndex;
+			entry.primitiveCount = primitiveCount;
+			entry.uploadBytes = uploadBytes;
+			entry.priority = priority;
+		}
+		entry.sourceBits |= sourceBits;
+		entry.fromPreload = entry.fromPreload || fromPreload;
+		entry.fromActor = entry.fromActor || fromActor;
+		entry.gpuForce = entry.gpuForce || gpuForce;
+		entry.gpuPrefer = entry.gpuPrefer || gpuPrefer;
+		entry.cpuReady = entry.cpuReady || cpuReady;
+		if (entry.primitiveCount == 0 && primitiveCount != 0)
+		{
+			entry.primitiveCount = primitiveCount;
+		}
+		if (entry.uploadBytes == 0 && uploadBytes != 0)
+		{
+			entry.uploadBytes = uploadBytes;
+		}
+		desiredMeshes.insert(meshKey);
+		desiredMaterials.insert(materialKey);
+	};
+
+	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
+	{
+		addDesired(
+			variant.meshKeyHash,
+			variant.materialKeyHash,
+			variant.sourceBits,
+			variant.priority,
+			variant.sourcePicnum,
+			variant.resolvedVoxelIndex,
+			variant.primitiveCount,
+			estimateUploadBytes(variant.surface, variant.primitiveCount),
+			true,
+			false,
+			variant.gpuForce,
+			variant.gpuPrefer,
+			variant.surface != nullptr && variant.primitiveCount != 0);
+	}
+
+	for (const nri_scene::PersistentVoxelCacheEntryView& cacheEntry : cacheEntries)
+	{
+		addDesired(
+			cacheEntry.meshKeyHash,
+			cacheEntry.materialKeyHash,
+			0,
+			0,
+			cacheEntry.sourcePicnum,
+			cacheEntry.resolvedVoxelIndex,
+			cacheEntry.primitiveCount,
+			estimateUploadBytes(cacheEntry.surface, cacheEntry.primitiveCount),
+			false,
+			true,
+			false,
+			false,
+			cacheEntry.surface != nullptr && cacheEntry.primitiveCount != 0);
+	}
+
+	for (auto it = admissionQueue.begin(); it != admissionQueue.end(); )
+	{
+		if (it->second.mapGeneration != generation && desired.find(it->first) == desired.end())
+		{
+			DiscardAdmissionEntry(it->second, services);
+			it = admissionQueue.erase(it);
+			continue;
+		}
+		++it;
+	}
+
+	uint32_t desiredPreload = 0;
+	uint32_t desiredActors = 0;
+	uint32_t cpuReady = 0;
+	uint32_t gpuReady = 0;
+	uint32_t queued = 0;
+	uint32_t retained = 0;
+	uint32_t forceCount = 0;
+	uint32_t preferCount = 0;
+	uint32_t meshReadyCount = 0;
+	uint32_t materialReadyCount = 0;
+	uint32_t blasReadyCount = 0;
+	uint32_t materialOnlyCount = 0;
+	uint32_t blasOnlyCount = 0;
+	uint32_t meshMissingCount = 0;
+	uint64_t queuedUploadBytes = 0;
+
+	auto meshReady = [&](uint64_t meshKey, const PersistentVoxelMeshVariantResource** outResource = nullptr) -> bool
+	{
+		auto it = meshVariantResources.find(meshKey);
+		if (it == meshVariantResources.end())
+		{
+			return false;
+		}
+		const PersistentVoxelMeshVariantResource& resource = it->second;
+		if (outResource != nullptr)
+		{
+			*outResource = &resource;
+		}
+		return resource.resourceKey == meshKey &&
+			resource.vertexCount != 0 &&
+			resource.indexCount != 0 &&
+			resource.primitiveCount != 0 &&
+			resource.vertexBuffer.buffer != nullptr &&
+			resource.indexBuffer.buffer != nullptr &&
+			vertexBuffer.buffer != nullptr &&
+			indexBuffer.buffer != nullptr &&
+			primitiveBuffer.buffer != nullptr;
+	};
+
+	auto materialReady = [&](uint64_t materialKey) -> bool
+	{
+		auto it = materialVariantResources.find(materialKey);
+		return it != materialVariantResources.end() &&
+			it->second.materialKeyHash == materialKey &&
+			it->second.materialCount != 0 &&
+			!it->second.materialBridge.materials.empty();
+	};
+
+	auto blasReady = [&](uint64_t meshKey) -> bool
+	{
+		auto it = meshVariantResources.find(meshKey);
+		return it != meshVariantResources.end() &&
+			it->second.accelerationStructure.accelerationStructure != nullptr;
+	};
+
+	for (const auto& desiredPair : desired)
+	{
+		const DesiredVoxelResidency& entry = desiredPair.second;
+		if (entry.fromPreload)
+		{
+			desiredPreload++;
+		}
+		if (entry.fromActor)
+		{
+			desiredActors++;
+		}
+		if (entry.gpuForce)
+		{
+			forceCount++;
+		}
+		if (entry.gpuPrefer)
+		{
+			preferCount++;
+		}
+		if (entry.cpuReady)
+		{
+			cpuReady++;
+		}
+
+		const bool hasMesh = meshReady(entry.meshKey);
+		const bool hasMaterial = materialReady(entry.materialKey);
+		const bool hasBlas = blasReady(entry.meshKey);
+		if (hasMesh)
+		{
+			meshReadyCount++;
+		}
+		if (hasMaterial)
+		{
+			materialReadyCount++;
+		}
+		if (hasBlas)
+		{
+			blasReadyCount++;
+		}
+
+		auto meshIt = meshVariantResources.find(entry.meshKey);
+		if (meshIt != meshVariantResources.end())
+		{
+			meshIt->second.lastDesiredMapGeneration = generation;
+			meshIt->second.lastUsedMapGeneration = generation;
+			meshIt->second.lastUsedFrame = frameIndex;
+			meshIt->second.sourceBits |= entry.sourceBits;
+			meshIt->second.priority = entry.priority;
+			meshIt->second.gpuForce = meshIt->second.gpuForce || entry.gpuForce;
+			meshIt->second.gpuPrefer = meshIt->second.gpuPrefer || entry.gpuPrefer;
+			meshIt->second.cold = false;
+		}
+		auto materialIt = materialVariantResources.find(entry.materialKey);
+		if (materialIt != materialVariantResources.end())
+		{
+			materialIt->second.lastDesiredMapGeneration = generation;
+			materialIt->second.lastUsedMapGeneration = generation;
+			materialIt->second.lastUsedFrame = frameIndex;
+			materialIt->second.sourceBits |= entry.sourceBits;
+			materialIt->second.priority = entry.priority;
+			materialIt->second.gpuForce = materialIt->second.gpuForce || entry.gpuForce;
+			materialIt->second.gpuPrefer = materialIt->second.gpuPrefer || entry.gpuPrefer;
+			materialIt->second.cold = false;
+		}
+
+		const bool ready = hasMesh && hasMaterial && hasBlas;
+		if (ready)
+		{
+			gpuReady++;
+			retained++;
+		}
+		else if (entry.cpuReady)
+		{
+			queued++;
+			queuedUploadBytes += entry.uploadBytes;
+			if (!hasMesh)
+			{
+				meshMissingCount++;
+			}
+			else if (!hasMaterial)
+			{
+				materialOnlyCount++;
+			}
+			else if (!hasBlas)
+			{
+				blasOnlyCount++;
+			}
+		}
+
+		if (loadingTraceLevel >= 2)
+		{
+			const char* source =
+				entry.fromPreload && entry.fromActor ? "preload|actor" :
+				(entry.fromPreload ? "preload" : "actor");
+			const char* action = ready ? "ready" : (entry.cpuReady ? "queue" : "missing-cpu");
+			const char* reason =
+				ready ? "resident" :
+				(!entry.cpuReady ? "cpu-missing" :
+				(!hasMesh ? "mesh-missing" :
+				(!hasMaterial ? "material-missing" :
+				(!hasBlas ? "blas-missing" : "unknown"))));
+			Printf("NRI PT voxel residency entry: action=%s reason=%s source=%s source_bits=0x%x priority=%d force=%u prefer=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu mesh_ready=%u material_ready=%u blas_ready=%u generation=%u\n",
+				action,
+				reason,
+				source,
+				entry.sourceBits,
+				entry.priority,
+				entry.gpuForce ? 1u : 0u,
+				entry.gpuPrefer ? 1u : 0u,
+				entry.sourcePicnum,
+				entry.resolvedVoxelIndex,
+				(unsigned long long)entry.meshKey,
+				(unsigned long long)entry.materialKey,
+				entry.primitiveCount,
+				(unsigned long long)entry.uploadBytes,
+				hasMesh ? 1u : 0u,
+				hasMaterial ? 1u : 0u,
+				hasBlas ? 1u : 0u,
+				generation);
+		}
+	}
+
+	uint32_t coldMeshes = 0;
+	uint32_t coldMaterials = 0;
+	uint64_t coldPrimitiveCount = 0;
+	for (auto& pair : meshVariantResources)
+	{
+		PersistentVoxelMeshVariantResource& resource = pair.second;
+		if (resource.resourceKey == 0 || desiredMeshes.find(pair.first) != desiredMeshes.end())
+		{
+			continue;
+		}
+		resource.cold = true;
+		coldMeshes++;
+		coldPrimitiveCount += resource.primitiveCount;
+		if (loadingTraceLevel >= 2)
+		{
+			Printf("NRI PT voxel residency entry: action=cold reason=map-not-desired source=mesh source_bits=0x0 priority=0 force=0 prefer=0 tex=-1 voxel=-1 mesh_variant=0x%llx mat_variant=0x0 prims=%u bytes=0 mesh_ready=%u material_ready=0 blas_ready=%u generation=%u last_desired=%u\n",
+				(unsigned long long)pair.first,
+				resource.primitiveCount,
+				meshReady(pair.first) ? 1u : 0u,
+				blasReady(pair.first) ? 1u : 0u,
+				generation,
+				resource.lastDesiredMapGeneration);
+		}
+	}
+	for (auto& pair : materialVariantResources)
+	{
+		PersistentVoxelMaterialVariantResource& resource = pair.second;
+		if (resource.materialKeyHash == 0 || desiredMaterials.find(pair.first) != desiredMaterials.end())
+		{
+			continue;
+		}
+		resource.cold = true;
+		coldMaterials++;
+		if (loadingTraceLevel >= 2)
+		{
+			Printf("NRI PT voxel residency entry: action=cold reason=map-not-desired source=material source_bits=0x0 priority=0 force=0 prefer=0 tex=-1 voxel=-1 mesh_variant=0x0 mat_variant=0x%llx prims=0 bytes=0 mesh_ready=0 material_ready=%u blas_ready=0 generation=%u last_desired=%u\n",
+				(unsigned long long)pair.first,
+				materialReady(pair.first) ? 1u : 0u,
+				generation,
+				resource.lastDesiredMapGeneration);
+		}
+	}
+
+	if (loadingTraceLevel >= 1)
+	{
+		Printf("NRI PT voxel residency reconcile: level=%s build_serial=%llu generation=%u desired=%u desired_preload=%u desired_actor=%u cpu_ready=%u gpu_ready=%u retained=%u queued=%u queue_bytes=%llu mesh_ready=%u material_ready=%u blas_ready=%u mesh_missing=%u material_only=%u blas_only=%u cold_mesh=%u cold_material=%u cold_prims=%llu evicted=0 forced=%u preferred=%u mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
+			levelName != nullptr ? levelName : "(none)",
+			(unsigned long long)buildSerial,
+			generation,
+			(uint32_t)desired.size(),
+			desiredPreload,
+			desiredActors,
+			cpuReady,
+			gpuReady,
+			retained,
+			queued,
+			(unsigned long long)queuedUploadBytes,
+			meshReadyCount,
+			materialReadyCount,
+			blasReadyCount,
+			meshMissingCount,
+			materialOnlyCount,
+			blasOnlyCount,
+			coldMeshes,
+			coldMaterials,
+			(unsigned long long)coldPrimitiveCount,
+			forceCount,
+			preferCount,
+			(uint32_t)meshVariantResources.size(),
+			(uint32_t)materialVariantResources.size(),
+			(uint32_t)batch.actors.size(),
+			batch.activeActorCount,
+			batch.primitiveCount);
+	}
+}
+
 void NRIPersistentVoxelResidency::DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services)
 {
 	services.RetireBuffer(entry.uploadMeshResource.vertexBuffer);

@@ -254,6 +254,15 @@ class NRIPersistentVoxelResidency
 {
 public:
 	void Reset(const char* reason, bool clearSharedResources, bool traceReset, const NRIPersistentVoxelResetServices& services);
+	bool SyncMapGeneration(uint64_t buildSerial, const char* reason, bool traceEnabled, const NRIPersistentVoxelResetServices& services);
+	void ReconcileResidency(
+		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+		const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries,
+		uint64_t buildSerial,
+		const char* levelName,
+		uint32_t frameIndex,
+		int loadingTraceLevel,
+		const NRIPersistentVoxelResetServices& services);
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
