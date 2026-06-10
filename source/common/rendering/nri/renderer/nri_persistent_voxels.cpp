@@ -276,6 +276,31 @@ NRIPersistentVoxelLightAppendStats NRIPersistentVoxelResidency::AppendSceneLight
 	return stats;
 }
 
+NRIPersistentVoxelMemoryUsage NRIPersistentVoxelResidency::GetMemoryUsage() const
+{
+	NRIPersistentVoxelMemoryUsage usage = {};
+	auto accumulateBuffer = [](const NRIBufferResource& resource, uint64_t& total)
+	{
+		total += resource.memorySize;
+	};
+	auto accumulateAs = [](const NRIAccelerationStructureResource& resource, uint64_t& total)
+	{
+		total += resource.memorySize;
+	};
+
+	accumulateBuffer(vertexBuffer, usage.sceneBufferBytes);
+	accumulateBuffer(indexBuffer, usage.sceneBufferBytes);
+	accumulateBuffer(primitiveBuffer, usage.sceneBufferBytes);
+	accumulateBuffer(materialBuffer, usage.sceneBufferBytes);
+	for (const auto& pair : meshVariantResources)
+	{
+		accumulateBuffer(pair.second.vertexBuffer, usage.sceneBufferBytes);
+		accumulateBuffer(pair.second.indexBuffer, usage.sceneBufferBytes);
+		accumulateAs(pair.second.accelerationStructure, usage.accelerationStructureBytes);
+	}
+	return usage;
+}
+
 void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	const char* phase,
 	uint32_t frameIndex,

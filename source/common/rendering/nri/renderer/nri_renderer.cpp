@@ -13241,10 +13241,9 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mStaticIndexBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mStaticPrimitiveBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mStaticMaterialBuffer, telemetry.sceneBufferBytes);
-	accumulateBuffer(mPersistentVoxels.vertexBuffer, telemetry.sceneBufferBytes);
-	accumulateBuffer(mPersistentVoxels.indexBuffer, telemetry.sceneBufferBytes);
-	accumulateBuffer(mPersistentVoxels.primitiveBuffer, telemetry.sceneBufferBytes);
-	accumulateBuffer(mPersistentVoxels.materialBuffer, telemetry.sceneBufferBytes);
+	const NRIPersistentVoxelMemoryUsage persistentVoxelMemory = mPersistentVoxels.GetMemoryUsage();
+	telemetry.sceneBufferBytes += persistentVoxelMemory.sceneBufferBytes;
+	telemetry.accelerationStructureBytes += persistentVoxelMemory.accelerationStructureBytes;
 	accumulateBuffer(mTlasInstanceBuffer, telemetry.sceneBufferBytes);
 	for (const NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
 	{
@@ -13270,12 +13269,6 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 	accumulateBuffer(mTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 	accumulateBuffer(mEmissiveTopLevelScratchBuffer, telemetry.sceneBufferBytes);
 
-	for (const auto& pair : mPersistentVoxels.meshVariantResources)
-	{
-		accumulateBuffer(pair.second.vertexBuffer, telemetry.sceneBufferBytes);
-		accumulateBuffer(pair.second.indexBuffer, telemetry.sceneBufferBytes);
-		accumulateAs(pair.second.accelerationStructure, telemetry.accelerationStructureBytes);
-	}
 	accumulateAs(mTopLevelAS, telemetry.accelerationStructureBytes);
 	accumulateAs(mEmissiveTopLevelAS, telemetry.accelerationStructureBytes);
 	for (const auto& chunk : mStaticMapScene.chunks)
