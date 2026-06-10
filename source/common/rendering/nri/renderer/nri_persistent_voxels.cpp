@@ -234,6 +234,48 @@ void NRIPersistentVoxelResidency::DestroyArenaBuffers(const NRIPersistentVoxelDe
 	services.DestroyBuffer(materialBuffer);
 }
 
+NRIPersistentVoxelLightAppendStats NRIPersistentVoxelResidency::AppendSceneLights(
+	SceneLightSystem& sceneLights,
+	uint32_t frameIndex,
+	bool voxelStatsEnabled) const
+{
+	NRIPersistentVoxelLightAppendStats stats = {};
+	if (!batch.valid || batch.materialBridge.materials.empty())
+	{
+		return stats;
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (!actor.active || actor.lightRecords.empty() || actor.materialCount == 0)
+		{
+			continue;
+		}
+		if (!actor.inWorldTlasThisFrame)
+		{
+			stats.skippedActors++;
+			stats.skippedRecords += (uint32_t)actor.lightRecords.size();
+			continue;
+		}
+
+		sceneLights.AppendSurfaceRecords(actor.lightRecords, actor.materialOffset);
+		stats.appendedActors++;
+		stats.appendedRecords += (uint32_t)actor.lightRecords.size();
+	}
+	if (voxelStatsEnabled && (stats.appendedActors != 0 || stats.skippedActors != 0))
+	{
+		Printf("PERF pt voxel light NRI: frame=%u appended_actors=%u skipped_not_tlas=%u appended_records=%u skipped_records=%u actors=%u active=%u\n",
+			frameIndex,
+			stats.appendedActors,
+			stats.skippedActors,
+			stats.appendedRecords,
+			stats.skippedRecords,
+			(uint32_t)batch.actors.size(),
+			batch.activeActorCount);
+	}
+	return stats;
+}
+
 void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	const char* phase,
 	uint32_t frameIndex,

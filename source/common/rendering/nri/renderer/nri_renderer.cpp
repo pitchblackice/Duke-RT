@@ -19621,43 +19621,10 @@ void NRIRenderer::RefreshSceneLightSystem(
 		mSceneLights.AppendSceneView(*dynamicSceneView, *dynamicMaterials, SceneLightRecordSource::DynamicScene);
 	}
 
-	if (appendPersistentVoxelSceneLights &&
-		mPersistentVoxels.batch.valid &&
-		!mPersistentVoxels.batch.materialBridge.materials.empty())
+	if (appendPersistentVoxelSceneLights)
 	{
 		ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightPersistentVoxelAppendMs);
-		uint32_t appendedActors = 0;
-		uint32_t skippedActors = 0;
-		uint32_t appendedRecords = 0;
-		uint32_t skippedRecords = 0;
-		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxels.batch.actors)
-		{
-			if (!actor.active || actor.lightRecords.empty() || actor.materialCount == 0)
-			{
-				continue;
-			}
-			if (!actor.inWorldTlasThisFrame)
-			{
-				skippedActors++;
-				skippedRecords += (uint32_t)actor.lightRecords.size();
-				continue;
-			}
-
-			mSceneLights.AppendSurfaceRecords(actor.lightRecords, actor.materialOffset);
-			appendedActors++;
-			appendedRecords += (uint32_t)actor.lightRecords.size();
-		}
-		if ((bool)nri_voxelstats && (appendedActors != 0 || skippedActors != 0))
-		{
-			Printf("PERF pt voxel light NRI: frame=%u appended_actors=%u skipped_not_tlas=%u appended_records=%u skipped_records=%u actors=%u active=%u\n",
-				mFrameIndex,
-				appendedActors,
-				skippedActors,
-				appendedRecords,
-				skippedRecords,
-				(uint32_t)mPersistentVoxels.batch.actors.size(),
-				mPersistentVoxels.batch.activeActorCount);
-		}
+		mPersistentVoxels.AppendSceneLights(mSceneLights, mFrameIndex, (bool)nri_voxelstats);
 	}
 
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();

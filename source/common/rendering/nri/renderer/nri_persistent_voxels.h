@@ -348,6 +348,14 @@ struct NRIPersistentVoxelDestroyServices
 	void DestroyBuffer(NRIBufferResource& resource) const;
 };
 
+struct NRIPersistentVoxelLightAppendStats
+{
+	uint32_t appendedActors = 0;
+	uint32_t skippedActors = 0;
+	uint32_t appendedRecords = 0;
+	uint32_t skippedRecords = 0;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -424,6 +432,7 @@ public:
 	uint32_t BoundPrimitiveCount() const;
 	uint32_t BoundMaterialCount() const;
 	void DestroyArenaBuffers(const NRIPersistentVoxelDestroyServices& services);
+	NRIPersistentVoxelLightAppendStats AppendSceneLights(SceneLightSystem& sceneLights, uint32_t frameIndex, bool voxelStatsEnabled) const;
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
