@@ -9942,7 +9942,18 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					bool dynamicAsReady = true;
 					if (hasPersistentVoxelOverlay)
 					{
-						persistentVoxelAsReady = BuildPersistentVoxelVariantAccelerationStructures(overlayGeometry);
+						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelAsMs);
+						NRIPersistentVoxelAccelerationBuildStats persistentVoxelAsStats = {};
+						persistentVoxelAsReady = mPersistentVoxels.BuildAccelerationStructures(
+							mFrameIndex,
+							(bool)nri_voxelstats,
+							BuildPersistentVoxelResetServices(),
+							BuildPersistentVoxelAccelerationServices(),
+							persistentVoxelAsStats);
+						mLastPerfShellTraceStats.persistentVoxelAsCalls += persistentVoxelAsStats.calls;
+						mLastPerfShellTraceStats.persistentVoxelAsBuilds += persistentVoxelAsStats.builds;
+						mLastPerfShellTraceStats.persistentVoxelAsUniqueMeshBuilds += persistentVoxelAsStats.uniqueMeshBuilds;
+						mLastPerfShellTraceStats.persistentVoxelAsInstances += persistentVoxelAsStats.instances;
 					}
 					if (liveOverlayPrimitiveCount > 0)
 					{
@@ -16876,24 +16887,6 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 	}
 
 	return true;
-}
-
-bool NRIRenderer::BuildPersistentVoxelVariantAccelerationStructures(const nri_scene::GeometryData& geometry)
-{
-	(void)geometry;
-	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelAsMs);
-	NRIPersistentVoxelAccelerationBuildStats stats = {};
-	const bool ok = mPersistentVoxels.BuildAccelerationStructures(
-		mFrameIndex,
-		(bool)nri_voxelstats,
-		BuildPersistentVoxelResetServices(),
-		BuildPersistentVoxelAccelerationServices(),
-		stats);
-	mLastPerfShellTraceStats.persistentVoxelAsCalls += stats.calls;
-	mLastPerfShellTraceStats.persistentVoxelAsBuilds += stats.builds;
-	mLastPerfShellTraceStats.persistentVoxelAsUniqueMeshBuilds += stats.uniqueMeshBuilds;
-	mLastPerfShellTraceStats.persistentVoxelAsInstances += stats.instances;
-	return ok;
 }
 
 void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()

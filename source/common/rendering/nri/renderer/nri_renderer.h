@@ -2309,7 +2309,6 @@ private:
 		const char*& outFailureReason);
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
-	bool BuildPersistentVoxelVariantAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	void InvalidateRuntimeLightSceneData();
 	bool RefreshResidentStaticSceneDataSet();
