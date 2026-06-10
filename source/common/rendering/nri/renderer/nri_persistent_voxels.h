@@ -230,9 +230,30 @@ struct PersistentVoxelInstanceRecord
 	std::array<float, 12> previousTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 };
 
+struct NRIPersistentVoxelResetServices
+{
+	using RetireBufferFn = void (*)(void* user, NRIBufferResource& resource);
+	using RetireAccelerationStructureFn = void (*)(void* user, NRIAccelerationStructureResource& resource);
+	using ClearBoundCountsFn = void (*)(void* user);
+	using InvalidateSceneDataDescriptorsFn = void (*)(void* user);
+
+	void* user = nullptr;
+	RetireBufferFn retireBuffer = nullptr;
+	RetireAccelerationStructureFn retireAccelerationStructure = nullptr;
+	ClearBoundCountsFn clearBoundCounts = nullptr;
+	InvalidateSceneDataDescriptorsFn invalidateSceneDataDescriptors = nullptr;
+
+	void RetireBuffer(NRIBufferResource& resource) const;
+	void RetireAccelerationStructure(NRIAccelerationStructureResource& resource) const;
+	void ClearBoundCounts() const;
+	void InvalidateSceneDataDescriptors() const;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
+	void Reset(const char* reason, bool clearSharedResources, bool traceReset, const NRIPersistentVoxelResetServices& services);
+
 	NRIBufferResource vertexBuffer;
 	NRIBufferResource indexBuffer;
 	NRIBufferResource primitiveBuffer;

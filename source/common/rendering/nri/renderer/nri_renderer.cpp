@@ -14709,56 +14709,28 @@ void NRIRenderer::ResetPersistentDynamicEmissiveCache()
 
 void NRIRenderer::ResetPersistentVoxelBatch(const char* reason, bool clearSharedResources)
 {
-	if (((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats) &&
-		(!mPersistentVoxels.batch.actors.empty() ||
-			!mPersistentVoxels.instances.empty() ||
-			!mPersistentVoxels.meshVariantResources.empty() ||
-			!mPersistentVoxels.materialVariantResources.empty() ||
-			mPersistentVoxels.vertexBuffer.buffer != nullptr ||
-			mPersistentVoxels.indexBuffer.buffer != nullptr ||
-			mPersistentVoxels.primitiveBuffer.buffer != nullptr))
+	NRIPersistentVoxelResetServices services = {};
+	services.user = this;
+	services.retireBuffer = [](void* user, NRIBufferResource& resource)
 	{
-		Printf("NRI PT voxel reset: action=%s reason=%s actors=%u instances=%u mesh_resources=%u material_resources=%u arena_vertex=%u arena_index=%u arena_primitive=%u published_mesh=%u published_material=%u\n",
-			clearSharedResources ? "clear-shared" : "clear-instances",
-			reason != nullptr ? reason : "unknown",
-			(uint32_t)mPersistentVoxels.batch.actors.size(),
-			(uint32_t)mPersistentVoxels.instances.size(),
-			(uint32_t)mPersistentVoxels.meshVariantResources.size(),
-			(uint32_t)mPersistentVoxels.materialVariantResources.size(),
-			mPersistentVoxels.vertexBuffer.buffer != nullptr ? 1u : 0u,
-			mPersistentVoxels.indexBuffer.buffer != nullptr ? 1u : 0u,
-			mPersistentVoxels.primitiveBuffer.buffer != nullptr ? 1u : 0u,
-			(uint32_t)mPersistentVoxels.publishedMeshKeys.size(),
-			(uint32_t)mPersistentVoxels.publishedMaterialKeys.size());
-	}
-	mPersistentVoxels.batch = {};
-	mPersistentVoxels.instances.clear();
-	mPersistentVoxels.actorRejectedSignatures.clear();
-	mBoundPersistentVoxelPrimitiveCount = 0;
-	mBoundPersistentVoxelMaterialCount = 0;
-	SetCurrentSceneDataDescriptorsInitialized(false);
-	if (!clearSharedResources)
+		static_cast<NRIRenderer*>(user)->RetireResidentBufferResource(resource);
+	};
+	services.retireAccelerationStructure = [](void* user, NRIAccelerationStructureResource& resource)
 	{
-		return;
-	}
-	RetireResidentBufferResource(mPersistentVoxels.vertexBuffer);
-	RetireResidentBufferResource(mPersistentVoxels.indexBuffer);
-	RetireResidentBufferResource(mPersistentVoxels.primitiveBuffer);
-	RetireResidentBufferResource(mPersistentVoxels.materialBuffer);
-	mPersistentVoxels.arenaVertexCursor = 0;
-	mPersistentVoxels.arenaIndexCursor = 0;
-	mPersistentVoxels.arenaPrimitiveCursor = 0;
-	mPersistentVoxels.arenaMaterialCursor = 0;
-	for (auto& pair : mPersistentVoxels.meshVariantResources)
+		static_cast<NRIRenderer*>(user)->RetireResidentAccelerationStructure(resource);
+	};
+	services.clearBoundCounts = [](void* user)
 	{
-		RetireResidentBufferResource(pair.second.vertexBuffer);
-		RetireResidentBufferResource(pair.second.indexBuffer);
-		RetireResidentAccelerationStructure(pair.second.accelerationStructure);
-	}
-	mPersistentVoxels.meshVariantResources.clear();
-	mPersistentVoxels.materialVariantResources.clear();
-	mPersistentVoxels.publishedMeshKeys.clear();
-	mPersistentVoxels.publishedMaterialKeys.clear();
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		renderer->mBoundPersistentVoxelPrimitiveCount = 0;
+		renderer->mBoundPersistentVoxelMaterialCount = 0;
+	};
+	services.invalidateSceneDataDescriptors = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->SetCurrentSceneDataDescriptorsInitialized(false);
+	};
+
+	mPersistentVoxels.Reset(reason, clearSharedResources, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, services);
 }
 
 bool NRIRenderer::SyncPersistentVoxelResidencyMapGeneration(const char* reason)
