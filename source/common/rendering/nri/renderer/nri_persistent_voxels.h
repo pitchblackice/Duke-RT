@@ -295,6 +295,42 @@ struct NRIPersistentVoxelAdmissionServices
 	bool SubmitWaitAndRestart(const char* reason) const;
 };
 
+struct NRIPersistentVoxelAccelerationBuildStats
+{
+	uint32_t calls = 0;
+	uint32_t builds = 0;
+	uint32_t uniqueMeshBuilds = 0;
+	uint32_t instances = 0;
+};
+
+struct NRIPersistentVoxelAccelerationServices
+{
+	using BuildBottomLevelFn = bool (*)(
+		void* user,
+		const NRIBufferResource& vertexBuffer,
+		const NRIBufferResource& indexBuffer,
+		uint32_t vertexCount,
+		uint32_t indexOffset,
+		uint32_t indexCount,
+		uint32_t primitiveCount,
+		NRIAccelerationStructureResource& outAccelerationStructure);
+	using BarrierBuildInputsFn = bool (*)(void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer);
+
+	void* user = nullptr;
+	BuildBottomLevelFn buildBottomLevel = nullptr;
+	BarrierBuildInputsFn barrierBuildInputs = nullptr;
+
+	bool BuildBottomLevel(
+		const NRIBufferResource& vertexBuffer,
+		const NRIBufferResource& indexBuffer,
+		uint32_t vertexCount,
+		uint32_t indexOffset,
+		uint32_t indexCount,
+		uint32_t primitiveCount,
+		NRIAccelerationStructureResource& outAccelerationStructure) const;
+	bool BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -357,6 +393,12 @@ public:
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelResetServices& resetServices,
 		const NRIPersistentVoxelAdmissionServices& admissionServices);
+	bool BuildAccelerationStructures(
+		uint32_t frameIndex,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelResetServices& resetServices,
+		const NRIPersistentVoxelAccelerationServices& accelerationServices,
+		NRIPersistentVoxelAccelerationBuildStats& outStats);
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;

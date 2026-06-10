@@ -170,6 +170,31 @@ bool NRIPersistentVoxelAdmissionServices::SubmitWaitAndRestart(const char* reaso
 	return submitWaitAndRestart != nullptr && submitWaitAndRestart(user, reason);
 }
 
+bool NRIPersistentVoxelAccelerationServices::BuildBottomLevel(
+	const NRIBufferResource& vertexBuffer,
+	const NRIBufferResource& indexBuffer,
+	uint32_t vertexCount,
+	uint32_t indexOffset,
+	uint32_t indexCount,
+	uint32_t primitiveCount,
+	NRIAccelerationStructureResource& outAccelerationStructure) const
+{
+	return buildBottomLevel != nullptr && buildBottomLevel(
+		user,
+		vertexBuffer,
+		indexBuffer,
+		vertexCount,
+		indexOffset,
+		indexCount,
+		primitiveCount,
+		outAccelerationStructure);
+}
+
+bool NRIPersistentVoxelAccelerationServices::BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const
+{
+	return barrierBuildInputs != nullptr && barrierBuildInputs(user, vertexBuffer, indexBuffer);
+}
+
 void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	const char* phase,
 	uint32_t frameIndex,
@@ -819,6 +844,148 @@ bool NRIPersistentVoxelResidency::PumpAdmissionQueue(
 			stopReason);
 	}
 	return stats.failedThisPump == 0;
+}
+
+bool NRIPersistentVoxelResidency::BuildAccelerationStructures(
+	uint32_t frameIndex,
+	bool voxelStatsEnabled,
+	const NRIPersistentVoxelResetServices& resetServices,
+	const NRIPersistentVoxelAccelerationServices& accelerationServices,
+	NRIPersistentVoxelAccelerationBuildStats& outStats)
+{
+	outStats.calls++;
+	if (!batch.valid || batch.actors.empty())
+	{
+		Reset("persistent-voxel-empty-instance-batch", false, voxelStatsEnabled, resetServices);
+		return true;
+	}
+
+	std::unordered_set<uint64_t> builtMeshKeys;
+	builtMeshKeys.reserve(batch.actors.size());
+	auto countActiveActorsUsingMeshResource = [&](uint64_t meshResourceKey) -> uint32_t
+	{
+		uint32_t count = 0;
+		for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+		{
+			if (actor.active && actor.meshResourceKey == meshResourceKey)
+			{
+				count++;
+			}
+		}
+		return count;
+	};
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (actor.active)
+		{
+			outStats.instances++;
+		}
+	}
+
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (!actor.active)
+		{
+			continue;
+		}
+
+		auto meshResourceIt = meshVariantResources.find(actor.meshResourceKey);
+		if (meshResourceIt == meshVariantResources.end())
+		{
+			if (voxelStatsEnabled)
+			{
+				Printf("PERF pt voxel blas NRI: frame=%u action=skip reason=missing-mesh actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=0 prims=%u vertices=0 indices=%u blas=0 tlas_ready=0 tlas_published=0 ready=0\n",
+					frameIndex,
+					(unsigned long long)actor.identityKey,
+					(unsigned long long)actor.meshResourceKey,
+					(unsigned long long)actor.meshKeyHash,
+					actor.primitiveCount,
+					actor.indexCount);
+			}
+			continue;
+		}
+		PersistentVoxelMeshVariantResource& meshResource = meshResourceIt->second;
+		const bool needsBuild =
+			meshResource.accelerationStructure.accelerationStructure == nullptr ||
+			meshResource.vertexBuffer.buffer == nullptr ||
+			meshResource.indexBuffer.buffer == nullptr;
+		if (!needsBuild)
+		{
+			if (voxelStatsEnabled)
+			{
+				Printf("PERF pt voxel blas NRI: frame=%u action=reuse reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=1 tlas_ready=%u tlas_published=%u ready=1\n",
+					frameIndex,
+					(unsigned long long)actor.identityKey,
+					(unsigned long long)actor.meshResourceKey,
+					(unsigned long long)actor.meshKeyHash,
+					countActiveActorsUsingMeshResource(actor.meshResourceKey),
+					meshResource.primitiveCount,
+					meshResource.vertexCount,
+					meshResource.indexCount,
+					meshResource.tlasReadyFrame,
+					meshResource.tlasPublished ? 1u : 0u);
+			}
+			continue;
+		}
+
+		outStats.builds++;
+		if (actor.meshKeyHash != 0)
+		{
+			builtMeshKeys.insert(actor.meshKeyHash);
+		}
+		if (!accelerationServices.BuildBottomLevel(
+			meshResource.vertexBuffer,
+			meshResource.indexBuffer,
+			meshResource.vertexCount,
+			0u,
+			meshResource.indexCount,
+			meshResource.primitiveCount,
+			meshResource.accelerationStructure))
+		{
+			if (voxelStatsEnabled)
+			{
+				Printf("PERF pt voxel blas NRI: frame=%u action=failed reason=build actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=0 tlas_ready=%u tlas_published=%u ready=0\n",
+					frameIndex,
+					(unsigned long long)actor.identityKey,
+					(unsigned long long)actor.meshResourceKey,
+					(unsigned long long)actor.meshKeyHash,
+					countActiveActorsUsingMeshResource(actor.meshResourceKey),
+					meshResource.primitiveCount,
+					meshResource.vertexCount,
+					meshResource.indexCount,
+					meshResource.tlasReadyFrame,
+					meshResource.tlasPublished ? 1u : 0u);
+			}
+			return false;
+		}
+
+		if (!accelerationServices.BarrierBuildInputs(meshResource.vertexBuffer, meshResource.indexBuffer))
+		{
+			return false;
+		}
+
+		if (!meshResource.tlasPublished && meshResource.tlasReadyFrame == 0)
+		{
+			meshResource.tlasReadyFrame = frameIndex + 1u;
+		}
+		if (voxelStatsEnabled)
+		{
+			Printf("PERF pt voxel blas NRI: frame=%u action=build reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=1 tlas_ready=%u tlas_published=%u ready=1\n",
+				frameIndex,
+				(unsigned long long)actor.identityKey,
+				(unsigned long long)actor.meshResourceKey,
+				(unsigned long long)actor.meshKeyHash,
+				countActiveActorsUsingMeshResource(actor.meshResourceKey),
+				meshResource.primitiveCount,
+				meshResource.vertexCount,
+				meshResource.indexCount,
+				meshResource.tlasReadyFrame,
+				meshResource.tlasPublished ? 1u : 0u);
+		}
+	}
+
+	outStats.uniqueMeshBuilds += (uint32_t)builtMeshKeys.size();
+	return true;
 }
 
 void NRIPersistentVoxelResidency::Reset(

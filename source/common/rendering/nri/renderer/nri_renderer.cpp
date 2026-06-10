@@ -14682,6 +14682,53 @@ NRIPersistentVoxelAdmissionServices NRIRenderer::BuildPersistentVoxelAdmissionSe
 	return services;
 }
 
+NRIPersistentVoxelAccelerationServices NRIRenderer::BuildPersistentVoxelAccelerationServices()
+{
+	NRIPersistentVoxelAccelerationServices services = {};
+	services.user = this;
+	services.buildBottomLevel = [](
+		void* user,
+		const NRIBufferResource& vertexBuffer,
+		const NRIBufferResource& indexBuffer,
+		uint32_t vertexCount,
+		uint32_t indexOffset,
+		uint32_t indexCount,
+		uint32_t primitiveCount,
+		NRIAccelerationStructureResource& outAccelerationStructure) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->BuildBottomLevelAccelerationStructure(
+			vertexBuffer,
+			indexBuffer,
+			vertexCount,
+			indexOffset,
+			indexCount,
+			primitiveCount,
+			outAccelerationStructure,
+			false);
+	};
+	services.barrierBuildInputs = [](void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) -> bool
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		if (renderer->mFrameBuffer == nullptr || renderer->mFrameBuffer->mCommandBuffer == nullptr)
+		{
+			return false;
+		}
+		nri::BufferBarrierDesc inputBarriers[2] = {};
+		inputBarriers[0].buffer = vertexBuffer.buffer;
+		inputBarriers[0].before = NRIAccelerationStructureBuildInputAccess();
+		inputBarriers[0].after = NRIComputeShaderResourceAccess();
+		inputBarriers[1].buffer = indexBuffer.buffer;
+		inputBarriers[1].before = NRIAccelerationStructureBuildInputAccess();
+		inputBarriers[1].after = NRIComputeShaderResourceAccess();
+		nri::BarrierDesc inputBarrierDesc = {};
+		inputBarrierDesc.buffers = inputBarriers;
+		inputBarrierDesc.bufferNum = 2;
+		renderer->mFrameBuffer->mCore.CmdBarrier(*renderer->mFrameBuffer->mCommandBuffer, inputBarrierDesc);
+		return true;
+	};
+	return services;
+}
+
 bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 	PersistentVoxelAdmissionEntry& entry,
 	uint64_t byteBudget,
@@ -17448,147 +17495,18 @@ bool NRIRenderer::BuildPersistentVoxelVariantAccelerationStructures(const nri_sc
 {
 	(void)geometry;
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelAsMs);
-	mLastPerfShellTraceStats.persistentVoxelAsCalls++;
-	if (!mPersistentVoxels.batch.valid || mPersistentVoxels.batch.actors.empty())
-	{
-		mPersistentVoxels.Reset("persistent-voxel-empty-instance-batch", false, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
-		return true;
-	}
-
-	std::unordered_set<uint64_t> builtMeshKeys;
-	builtMeshKeys.reserve(mPersistentVoxels.batch.actors.size());
-	auto countActiveActorsUsingMeshResource = [&](uint64_t meshResourceKey) -> uint32_t
-	{
-		uint32_t count = 0;
-		for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxels.batch.actors)
-		{
-			if (actor.active && actor.meshResourceKey == meshResourceKey)
-			{
-				count++;
-			}
-		}
-		return count;
-	};
-	for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxels.batch.actors)
-	{
-		if (actor.active)
-		{
-			mLastPerfShellTraceStats.persistentVoxelAsInstances++;
-		}
-	}
-
-	for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxels.batch.actors)
-	{
-		if (!actor.active)
-		{
-			continue;
-		}
-
-		auto meshResourceIt = mPersistentVoxels.meshVariantResources.find(actor.meshResourceKey);
-		if (meshResourceIt == mPersistentVoxels.meshVariantResources.end())
-		{
-			if ((bool)nri_voxelstats)
-			{
-				Printf("PERF pt voxel blas NRI: frame=%u action=skip reason=missing-mesh actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=0 prims=%u vertices=0 indices=%u blas=0 tlas_ready=0 tlas_published=0 ready=0\n",
-					mFrameIndex,
-					(unsigned long long)actor.identityKey,
-					(unsigned long long)actor.meshResourceKey,
-					(unsigned long long)actor.meshKeyHash,
-					actor.primitiveCount,
-					actor.indexCount);
-			}
-			continue;
-		}
-		PersistentVoxelMeshVariantResource& meshResource = meshResourceIt->second;
-		const bool needsBuild =
-			meshResource.accelerationStructure.accelerationStructure == nullptr ||
-			meshResource.vertexBuffer.buffer == nullptr ||
-			meshResource.indexBuffer.buffer == nullptr;
-		if (!needsBuild)
-		{
-			if ((bool)nri_voxelstats)
-			{
-				Printf("PERF pt voxel blas NRI: frame=%u action=reuse reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=1 tlas_ready=%u tlas_published=%u ready=1\n",
-					mFrameIndex,
-					(unsigned long long)actor.identityKey,
-					(unsigned long long)actor.meshResourceKey,
-					(unsigned long long)actor.meshKeyHash,
-					countActiveActorsUsingMeshResource(actor.meshResourceKey),
-					meshResource.primitiveCount,
-					meshResource.vertexCount,
-					meshResource.indexCount,
-					meshResource.tlasReadyFrame,
-					meshResource.tlasPublished ? 1u : 0u);
-			}
-			continue;
-		}
-
-		mLastPerfShellTraceStats.persistentVoxelAsBuilds++;
-		if (actor.meshKeyHash != 0)
-		{
-			builtMeshKeys.insert(actor.meshKeyHash);
-		}
-		if (!BuildBottomLevelAccelerationStructure(
-			meshResource.vertexBuffer,
-			meshResource.indexBuffer,
-			meshResource.vertexCount,
-			0u,
-			meshResource.indexCount,
-			meshResource.primitiveCount,
-			meshResource.accelerationStructure,
-			false))
-		{
-			if ((bool)nri_voxelstats)
-			{
-				Printf("PERF pt voxel blas NRI: frame=%u action=failed reason=build actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=0 tlas_ready=%u tlas_published=%u ready=0\n",
-					mFrameIndex,
-					(unsigned long long)actor.identityKey,
-					(unsigned long long)actor.meshResourceKey,
-					(unsigned long long)actor.meshKeyHash,
-					countActiveActorsUsingMeshResource(actor.meshResourceKey),
-					meshResource.primitiveCount,
-					meshResource.vertexCount,
-					meshResource.indexCount,
-					meshResource.tlasReadyFrame,
-					meshResource.tlasPublished ? 1u : 0u);
-			}
-			return false;
-		}
-
-		nri::BufferBarrierDesc inputBarriers[2] = {};
-		inputBarriers[0].buffer = meshResource.vertexBuffer.buffer;
-		inputBarriers[0].before = NRIAccelerationStructureBuildInputAccess();
-		inputBarriers[0].after = NRIComputeShaderResourceAccess();
-		inputBarriers[1].buffer = meshResource.indexBuffer.buffer;
-		inputBarriers[1].before = NRIAccelerationStructureBuildInputAccess();
-		inputBarriers[1].after = NRIComputeShaderResourceAccess();
-		nri::BarrierDesc inputBarrierDesc = {};
-		inputBarrierDesc.buffers = inputBarriers;
-		inputBarrierDesc.bufferNum = 2;
-		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, inputBarrierDesc);
-
-		if (!meshResource.tlasPublished && meshResource.tlasReadyFrame == 0)
-		{
-			meshResource.tlasReadyFrame = mFrameIndex + 1u;
-		}
-		if ((bool)nri_voxelstats)
-		{
-			Printf("PERF pt voxel blas NRI: frame=%u action=build reason=none actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx ref_count=%u prims=%u vertices=%u indices=%u blas=1 tlas_ready=%u tlas_published=%u ready=1\n",
-				mFrameIndex,
-				(unsigned long long)actor.identityKey,
-				(unsigned long long)actor.meshResourceKey,
-				(unsigned long long)actor.meshKeyHash,
-				countActiveActorsUsingMeshResource(actor.meshResourceKey),
-				meshResource.primitiveCount,
-				meshResource.vertexCount,
-				meshResource.indexCount,
-				meshResource.tlasReadyFrame,
-				meshResource.tlasPublished ? 1u : 0u);
-		}
-	}
-
-	mLastPerfShellTraceStats.persistentVoxelAsUniqueMeshBuilds += (uint32_t)builtMeshKeys.size();
-	return true;
+	NRIPersistentVoxelAccelerationBuildStats stats = {};
+	const bool ok = mPersistentVoxels.BuildAccelerationStructures(
+		mFrameIndex,
+		(bool)nri_voxelstats,
+		BuildPersistentVoxelResetServices(),
+		BuildPersistentVoxelAccelerationServices(),
+		stats);
+	mLastPerfShellTraceStats.persistentVoxelAsCalls += stats.calls;
+	mLastPerfShellTraceStats.persistentVoxelAsBuilds += stats.builds;
+	mLastPerfShellTraceStats.persistentVoxelAsUniqueMeshBuilds += stats.uniqueMeshBuilds;
+	mLastPerfShellTraceStats.persistentVoxelAsInstances += stats.instances;
+	return ok;
 }
 
 void NRIRenderer::PrunePersistentDynamicEmissiveCacheToLiveActors()
