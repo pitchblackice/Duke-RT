@@ -381,6 +381,15 @@ struct NRIPersistentVoxelStatusSnapshot
 	uint32_t instanceMaxPrimitiveCount = 0;
 };
 
+struct NRIPersistentVoxelOverlayStats
+{
+	uint32_t actorCount = 0;
+	uint32_t primitiveCount = 0;
+	uint32_t materialCount = 0;
+	uint32_t indexCount = 0;
+	uint64_t byteCount = 0;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -462,6 +471,7 @@ public:
 	NRIPersistentVoxelStatusSnapshot BuildStatusSnapshot() const;
 	void FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	void FillBatchStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
+	NRIPersistentVoxelOverlayStats BuildOverlayStats() const;
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;

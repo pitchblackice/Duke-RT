@@ -9903,23 +9903,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					ScopedPtPerfTimer bookkeepingTimer(mLastPerfShellTraceStats.overlayAppendBookkeepingMs);
 					if (hasPersistentVoxelOverlay)
 					{
-						mLastPerfShellTraceStats.overlayPersistentVoxelActorCount = mPersistentVoxels.batch.activeActorCount;
-						mLastPerfShellTraceStats.overlayPersistentVoxelPrimitiveCount = mPersistentVoxels.batch.primitiveCount;
-						mLastPerfShellTraceStats.overlayPersistentVoxelMaterialCount = (uint32_t)mPersistentVoxels.batch.materialBridge.materials.size();
-						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.primitiveCount = mPersistentVoxels.batch.primitiveCount;
-						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.materialCount = (uint32_t)mPersistentVoxels.batch.materialBridge.materials.size();
-						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.byteCount =
-							(uint64_t)mPersistentVoxels.batch.primitiveCount * sizeof(nri_scene::PrimitiveData) +
-							EstimateAppendMaterialBridgeBytes(mPersistentVoxels.batch.materialBridge);
-						for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxels.batch.actors)
-						{
-							if (actor.active)
-							{
-								mLastPerfShellTraceStats.overlayPersistentVoxelAppend.indexCount += actor.indexCount;
-							}
-						}
-						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.byteCount +=
-							(uint64_t)mLastPerfShellTraceStats.overlayPersistentVoxelAppend.indexCount * sizeof(uint32_t);
+						const NRIPersistentVoxelOverlayStats persistentVoxelOverlayStats = mPersistentVoxels.BuildOverlayStats();
+						mLastPerfShellTraceStats.overlayPersistentVoxelActorCount = persistentVoxelOverlayStats.actorCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelPrimitiveCount = persistentVoxelOverlayStats.primitiveCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelMaterialCount = persistentVoxelOverlayStats.materialCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.primitiveCount = persistentVoxelOverlayStats.primitiveCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.materialCount = persistentVoxelOverlayStats.materialCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.indexCount = persistentVoxelOverlayStats.indexCount;
+						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.byteCount = persistentVoxelOverlayStats.byteCount;
 					}
 					mLastPerfShellTraceStats.overlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
 					mLastPerfShellTraceStats.overlayMaterialCount = (uint32_t)overlayMaterialBridge.materials.size();
