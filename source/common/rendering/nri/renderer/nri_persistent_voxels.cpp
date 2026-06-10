@@ -437,6 +437,113 @@ void NRIPersistentVoxelResidency::ClearActorInstances(const NRIPersistentVoxelRe
 	services.InvalidateSceneDataDescriptors();
 }
 
+bool NRIPersistentVoxelResidency::ValidateActorGeometry(
+	uint64_t identityKey,
+	uint64_t surfaceSignature,
+	const nri_scene::GeometryData& actorGeometry,
+	uint32_t materialCount,
+	uint32_t frameIndex,
+	bool voxelStatsEnabled)
+{
+	auto reject = [&](const char* reason, uint32_t value, uint32_t limit) -> bool
+	{
+		actorRejectedSignatures[identityKey] = surfaceSignature;
+		Printf("NRI PT persistent voxel actor rejected: actor_key=0x%llx surface_sig=0x%llx reason=%s value=%u limit=%u vertices=%u indices=%u primitives=%u materials=%u\n",
+			(unsigned long long)identityKey,
+			(unsigned long long)surfaceSignature,
+			reason != nullptr ? reason : "unknown",
+			value,
+			limit,
+			(uint32_t)actorGeometry.vertices.size(),
+			(uint32_t)actorGeometry.indices.size(),
+			(uint32_t)actorGeometry.primitives.size(),
+			materialCount);
+		if (voxelStatsEnabled)
+		{
+			Printf("PERF pt voxel validation NRI: frame=%u action=quarantine reason=%s actor_key=0x%llx surface_sig=0x%llx value=%u limit=%u vertices=%u indices=%u prims=%u materials=%u ready=0\n",
+				frameIndex,
+				reason != nullptr ? reason : "unknown",
+				(unsigned long long)identityKey,
+				(unsigned long long)surfaceSignature,
+				value,
+				limit,
+				(uint32_t)actorGeometry.vertices.size(),
+				(uint32_t)actorGeometry.indices.size(),
+				(uint32_t)actorGeometry.primitives.size(),
+				materialCount);
+		}
+		return false;
+	};
+
+	if (actorGeometry.vertices.empty() || actorGeometry.indices.empty() || actorGeometry.primitives.empty())
+	{
+		return reject("empty", 0u, 1u);
+	}
+	if ((actorGeometry.indices.size() % 3u) != 0u)
+	{
+		return reject("index-count", (uint32_t)actorGeometry.indices.size(), 3u);
+	}
+	if (actorGeometry.primitives.size() != actorGeometry.indices.size() / 3u)
+	{
+		return reject("primitive-triangle-count", (uint32_t)actorGeometry.primitives.size(), (uint32_t)(actorGeometry.indices.size() / 3u));
+	}
+
+	const uint32_t vertexCount = (uint32_t)actorGeometry.vertices.size();
+	for (const uint32_t index : actorGeometry.indices)
+	{
+		if (index >= vertexCount)
+		{
+			return reject("index-range", index, vertexCount);
+		}
+	}
+
+	for (const nri_scene::SceneVertex& vertex : actorGeometry.vertices)
+	{
+		for (float component : vertex.position)
+		{
+			if (!std::isfinite(component) || std::abs(component) > 100000000.0f)
+			{
+				return reject("vertex-position", 0u, 0u);
+			}
+		}
+		for (float component : vertex.prevPosition)
+		{
+			if (!std::isfinite(component) || std::abs(component) > 100000000.0f)
+			{
+				return reject("vertex-prev-position", 0u, 0u);
+			}
+		}
+	}
+
+	for (const nri_scene::PrimitiveData& primitive : actorGeometry.primitives)
+	{
+		if (primitive.indices[0] >= vertexCount ||
+			primitive.indices[1] >= vertexCount ||
+			primitive.indices[2] >= vertexCount)
+		{
+			return reject("primitive-index-range", std::max({ primitive.indices[0], primitive.indices[1], primitive.indices[2] }), vertexCount);
+		}
+		if (materialCount != 0 && primitive.materialIndex >= materialCount)
+		{
+			return reject("primitive-material-range", primitive.materialIndex, materialCount);
+		}
+		for (float component : primitive.normal)
+		{
+			if (!std::isfinite(component))
+			{
+				return reject("primitive-normal", 0u, 0u);
+			}
+		}
+	}
+
+	auto rejectedIt = actorRejectedSignatures.find(identityKey);
+	if (rejectedIt != actorRejectedSignatures.end() && rejectedIt->second == surfaceSignature)
+	{
+		actorRejectedSignatures.erase(rejectedIt);
+	}
+	return true;
+}
+
 void NRIPersistentVoxelResidency::AppendMaterialBridgeTo(nri_scene::MaterialBridgeData& destination) const
 {
 	nri_scene::AppendMaterialBridge(batch.materialBridge, destination);

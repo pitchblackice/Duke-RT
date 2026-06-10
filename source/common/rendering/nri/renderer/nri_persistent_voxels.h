@@ -574,6 +574,13 @@ public:
 	void RebuildBatchMaterialBridge(PersistentVoxelBatch& targetBatch);
 	void RecomputeBatchState(PersistentVoxelBatch& targetBatch) const;
 	void ClearActorInstances(const NRIPersistentVoxelResetServices& services);
+	bool ValidateActorGeometry(
+		uint64_t identityKey,
+		uint64_t surfaceSignature,
+		const nri_scene::GeometryData& actorGeometry,
+		uint32_t materialCount,
+		uint32_t frameIndex,
+		bool voxelStatsEnabled);
 	void AppendMaterialBridgeTo(nri_scene::MaterialBridgeData& destination) const;
 	bool WarmMaterialResources(
 		const NRIPersistentVoxelMaterialWarmupServices& services,
