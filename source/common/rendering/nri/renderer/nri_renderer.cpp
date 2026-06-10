@@ -5754,15 +5754,6 @@ namespace
 		destination.primitiveProvenance.insert(destination.primitiveProvenance.end(), source.primitiveProvenance.begin(), source.primitiveProvenance.end());
 	}
 
-	static uint64_t EstimateAppendMaterialBridgeBytes(const nri_scene::MaterialBridgeData& materials)
-	{
-		return
-			(uint64_t)materials.materials.size() * sizeof(nri_scene::MaterialData) +
-			(uint64_t)materials.lightMetadata.size() * sizeof(nri_scene::MaterialLightingMetadata) +
-			(uint64_t)materials.textures.size() * sizeof(nri_scene::TextureUpload) +
-			(uint64_t)materials.paletteLookup.size();
-	}
-
 	static uint64_t EstimateSceneTextureUploadBytes(const nri_scene::TextureUpload& upload)
 	{
 		if (upload.width == 0 || upload.height == 0)
@@ -5771,16 +5762,6 @@ namespace
 		}
 		const uint64_t bytesPerPixel = upload.indexed ? 1ull : 4ull;
 		return (uint64_t)upload.width * (uint64_t)upload.height * bytesPerPixel;
-	}
-
-	static void ClearMaterialBridgeRetainingCapacity(nri_scene::MaterialBridgeData& materials)
-	{
-		materials.materials.clear();
-		materials.lightMetadata.clear();
-		materials.textures.clear();
-		materials.paletteLookup.clear();
-		materials.paletteWidth = 256;
-		materials.paletteHeight = 256;
 	}
 
 	static void ReplaceGeometryOverlayTail(
@@ -6054,72 +6035,6 @@ namespace
 				destination.primitiveProvenance.end(),
 				source.primitiveProvenance.begin() + sourcePrimitiveOffset,
 				source.primitiveProvenance.begin() + sourcePrimitiveOffset + sourcePrimitiveProvenanceCount);
-		}
-	}
-
-	static void AppendMaterialBridge(const nri_scene::MaterialBridgeData& source, nri_scene::MaterialBridgeData& destination)
-	{
-		std::unordered_map<uint64_t, uint32_t> textureLookup;
-		textureLookup.reserve(destination.textures.size() + source.textures.size());
-		for (uint32_t i = 0; i < (uint32_t)destination.textures.size(); ++i)
-		{
-			textureLookup.emplace(destination.textures[i].key, i);
-		}
-
-		auto remapTextureIndex = [&source, &destination, &textureLookup](uint32_t textureIndex) -> uint32_t
-		{
-			if (textureIndex == UINT32_MAX)
-			{
-				return UINT32_MAX;
-			}
-			if (textureIndex >= source.textures.size())
-			{
-				return textureIndex;
-			}
-
-			const auto& texture = source.textures[textureIndex];
-			auto it = textureLookup.find(texture.key);
-			if (it == textureLookup.end())
-			{
-				const uint32_t newIndex = (uint32_t)destination.textures.size();
-				textureLookup.emplace(texture.key, newIndex);
-				destination.textures.push_back(texture);
-				return newIndex;
-			}
-
-			return it->second;
-		};
-
-		for (size_t materialIndex = 0; materialIndex < source.materials.size(); ++materialIndex)
-		{
-			const auto& material = source.materials[materialIndex];
-			nri_scene::MaterialData copy = material;
-			const bool hasLightMetadata = materialIndex < source.lightMetadata.size();
-			copy.textureIndex = remapTextureIndex(material.textureIndex);
-			copy.normalTextureIndex = remapTextureIndex(material.normalTextureIndex);
-			copy.metallicTextureIndex = remapTextureIndex(material.metallicTextureIndex);
-			copy.roughnessTextureIndex = remapTextureIndex(material.roughnessTextureIndex);
-			copy.emissiveTextureIndex = remapTextureIndex(material.emissiveTextureIndex);
-
-			destination.materials.push_back(copy);
-			if (hasLightMetadata)
-			{
-				nri_scene::MaterialLightingMetadata metadata = source.lightMetadata[materialIndex];
-				metadata.textureIndex = remapTextureIndex(metadata.textureIndex);
-				metadata.glowmapTextureIndex = remapTextureIndex(metadata.glowmapTextureIndex);
-				metadata.normalTextureIndex = remapTextureIndex(metadata.normalTextureIndex);
-				metadata.metallicTextureIndex = remapTextureIndex(metadata.metallicTextureIndex);
-				metadata.roughnessTextureIndex = remapTextureIndex(metadata.roughnessTextureIndex);
-				metadata.emissiveTextureIndex = remapTextureIndex(metadata.emissiveTextureIndex);
-				destination.lightMetadata.push_back(metadata);
-			}
-		}
-
-		if (destination.paletteLookup.empty())
-		{
-			destination.paletteLookup = source.paletteLookup;
-			destination.paletteWidth = source.paletteWidth;
-			destination.paletteHeight = source.paletteHeight;
 		}
 	}
 
@@ -9087,7 +9002,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	refreshedCombinedGpuMaterials.clear();
 	nri_scene::ClearGeometryRetainingCapacity(mSelectMirrorPlayerGeometryScratch);
 	nri_scene::ClearGeometryRetainingCapacity(mSelectOverlayGeometryScratch);
-	ClearMaterialBridgeRetainingCapacity(mSelectOverlayMaterialBridgeScratch);
+	nri_scene::ClearMaterialBridgeRetainingCapacity(mSelectOverlayMaterialBridgeScratch);
 	mSelectTopLevelInstanceScratch.clear();
 	mSelectSceneInstanceScratch.clear();
 	mSelectCapturedTopLevelInstanceScratch.clear();
@@ -9572,7 +9487,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				{
 					ScopedPtPerfTimer resetTimer(mLastPerfShellTraceStats.overlayAppendResetMs);
 					nri_scene::ClearGeometryRetainingCapacity(overlayGeometry);
-					ClearMaterialBridgeRetainingCapacity(overlayMaterialBridge);
+					nri_scene::ClearMaterialBridgeRetainingCapacity(overlayMaterialBridge);
 				}
 
 				auto appendOverlaySource =
@@ -9600,7 +9515,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						(uint64_t)geometry->primitives.size() * sizeof(nri_scene::PrimitiveData) +
 						(uint64_t)geometry->primitiveProvenance.size() * sizeof(nri_scene::SurfaceProvenance) :
 						0;
-					sourceTrace.materialBytes = EstimateAppendMaterialBridgeBytes(materials);
+					sourceTrace.materialBytes = nri_scene::EstimateMaterialBridgeBytes(materials);
 					sourceTrace.byteCount =
 						sourceTrace.vertexBytes +
 						sourceTrace.indexBytes +
@@ -9680,7 +9595,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							(overlayMaterialBridge.lightMetadata.size() + materials.lightMetadata.size() > overlayMaterialBridge.lightMetadata.capacity() ? 1u : 0u) +
 							(overlayMaterialBridge.textures.size() + materials.textures.size() > overlayMaterialBridge.textures.capacity() ? 1u : 0u) +
 							(overlayMaterialBridge.paletteLookup.size() + materials.paletteLookup.size() > overlayMaterialBridge.paletteLookup.capacity() ? 1u : 0u);
-						AppendMaterialBridge(materials, overlayMaterialBridge);
+						nri_scene::AppendMaterialBridge(materials, overlayMaterialBridge);
 					}
 					if (uploadSpan.vertexCount != 0 ||
 						uploadSpan.indexCount != 0 ||
@@ -9970,10 +9885,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					combinedOverlayMaterialOffset = (uint32_t)combinedMaterialBridge.materials.size();
 					if (hasPersistentVoxelOverlay)
 					{
-						AppendMaterialBridge(mPersistentVoxels.batch.materialBridge, combinedMaterialBridge);
+						nri_scene::AppendMaterialBridge(mPersistentVoxels.batch.materialBridge, combinedMaterialBridge);
 						combinedOverlayMaterialOffset = (uint32_t)combinedMaterialBridge.materials.size();
 					}
-					AppendMaterialBridge(overlayMaterialBridge, combinedMaterialBridge);
+					nri_scene::AppendMaterialBridge(overlayMaterialBridge, combinedMaterialBridge);
 				}
 				paletteReady = [&]()
 				{
@@ -13658,7 +13573,7 @@ bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
 			return false;
 		}
 
-		AppendMaterialBridge(chunkCache.materialBridge, bridge);
+		nri_scene::AppendMaterialBridge(chunkCache.materialBridge, bridge);
 	}
 
 	if (bridge.materials.size() < mStaticMapChunkAtlas.materialCount)
@@ -15495,7 +15410,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				batch.materialBridge.materials.resize(resource->materialOffset);
 				batch.materialBridge.lightMetadata.resize(resource->materialOffset);
 			}
-			AppendMaterialBridge(resource->materialBridge, batch.materialBridge);
+			nri_scene::AppendMaterialBridge(resource->materialBridge, batch.materialBridge);
 			const uint64_t materialSize = (uint64_t)resource->materialCount * sizeof(nri_scene::MaterialData);
 			if (resource->materialOffset <= batch.materialBridge.materials.size() &&
 				resource->materialCount <= batch.materialBridge.materials.size() - resource->materialOffset)
@@ -23519,7 +23434,7 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 	chunkCache.animatedRefreshSuppressed = false;
 
 	AppendGeometry(chunkGeometry, chunkCache.materialOffset, outStaticScene.geometry);
-	AppendMaterialBridge(chunkMaterials, outStaticScene.materialBridge);
+	nri_scene::AppendMaterialBridge(chunkMaterials, outStaticScene.materialBridge);
 	chunkCache.geometryPayloadHash = HashResidentGeometryPayload(
 		mapWorld,
 		outStaticScene.geometry,
@@ -26736,7 +26651,7 @@ bool NRIRenderer::BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeo
 			}
 
 			AppendGeometry(sphere.geometry, (uint32_t)outMaterials.materials.size(), outGeometry);
-			AppendMaterialBridge(sphere.materialBridge, outMaterials);
+			nri_scene::AppendMaterialBridge(sphere.materialBridge, outMaterials);
 		}
 	}
 
@@ -30979,7 +30894,7 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 		{
 			AppendGeometry(chunkGeometry, (uint32_t)outMaterials.materials.size(), outGeometry);
 		}
-		AppendMaterialBridge(chunkMaterials, outMaterials);
+		nri_scene::AppendMaterialBridge(chunkMaterials, outMaterials);
 
 		mRuntimeSpaceLinkLastFrame.translatedChunkCount++;
 		mRuntimeSpaceLinkLastFrame.surfaceCount += liveStats.surfaceCount;

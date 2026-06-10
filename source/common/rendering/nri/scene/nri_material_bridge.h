@@ -107,5 +107,8 @@ struct MaterialBridgeData
 };
 
 void BuildMaterials(const SceneView& sceneView, MaterialBridgeData& outMaterials);
+uint64_t EstimateMaterialBridgeBytes(const MaterialBridgeData& materials);
+void ClearMaterialBridgeRetainingCapacity(MaterialBridgeData& materials);
+void AppendMaterialBridge(const MaterialBridgeData& source, MaterialBridgeData& destination);
 bool RealizeTextureUploadPayload(const TextureUpload& upload, std::vector<uint8_t>& outPixels, uint32_t& outWidth, uint32_t& outHeight);
 }

@@ -63,15 +63,6 @@ uint64_t EstimatePersistentVoxelActorUploadBytes(const nri_scene::PersistentVoxe
 	return vertexBytes + indexBytes + primitiveBytes + materialBytes;
 }
 
-static uint64_t EstimatePersistentVoxelMaterialBridgeBytes(const nri_scene::MaterialBridgeData& materials)
-{
-	return
-		(uint64_t)materials.materials.size() * sizeof(nri_scene::MaterialData) +
-		(uint64_t)materials.lightMetadata.size() * sizeof(nri_scene::MaterialLightingMetadata) +
-		(uint64_t)materials.textures.size() * sizeof(nri_scene::TextureUpload) +
-		(uint64_t)materials.paletteLookup.size();
-}
-
 bool IsPersistentVoxelMeshResourceTransformKeyed(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const NRIPersistentVoxelSettings& settings)
 {
 	return settings.transformKeyed ||
@@ -216,7 +207,7 @@ NRIPersistentVoxelOverlayStats NRIPersistentVoxelResidency::BuildOverlayStats() 
 	stats.materialCount = (uint32_t)batch.materialBridge.materials.size();
 	stats.byteCount =
 		(uint64_t)batch.primitiveCount * sizeof(nri_scene::PrimitiveData) +
-		EstimatePersistentVoxelMaterialBridgeBytes(batch.materialBridge);
+		nri_scene::EstimateMaterialBridgeBytes(batch.materialBridge);
 	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
 	{
 		if (actor.active)
