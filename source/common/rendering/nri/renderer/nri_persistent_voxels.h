@@ -338,6 +338,16 @@ struct NRIPersistentVoxelDescriptorSnapshot
 	uint32_t materialCount = 0;
 };
 
+struct NRIPersistentVoxelDestroyServices
+{
+	using DestroyBufferFn = void (*)(void* user, NRIBufferResource& resource);
+
+	void* user = nullptr;
+	DestroyBufferFn destroyBuffer = nullptr;
+
+	void DestroyBuffer(NRIBufferResource& resource) const;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -413,6 +423,7 @@ public:
 		const NRIBufferResource& fallbackMaterialBuffer) const;
 	uint32_t BoundPrimitiveCount() const;
 	uint32_t BoundMaterialCount() const;
+	void DestroyArenaBuffers(const NRIPersistentVoxelDestroyServices& services);
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;

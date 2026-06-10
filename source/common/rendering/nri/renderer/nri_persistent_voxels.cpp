@@ -218,6 +218,22 @@ uint32_t NRIPersistentVoxelResidency::BoundMaterialCount() const
 	return materialBuffer.shaderView != nullptr ? arenaMaterialCursor : 0u;
 }
 
+void NRIPersistentVoxelDestroyServices::DestroyBuffer(NRIBufferResource& resource) const
+{
+	if (destroyBuffer != nullptr)
+	{
+		destroyBuffer(user, resource);
+	}
+}
+
+void NRIPersistentVoxelResidency::DestroyArenaBuffers(const NRIPersistentVoxelDestroyServices& services)
+{
+	services.DestroyBuffer(vertexBuffer);
+	services.DestroyBuffer(indexBuffer);
+	services.DestroyBuffer(primitiveBuffer);
+	services.DestroyBuffer(materialBuffer);
+}
+
 void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	const char* phase,
 	uint32_t frameIndex,

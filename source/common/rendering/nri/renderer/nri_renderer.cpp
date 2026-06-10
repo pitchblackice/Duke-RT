@@ -34299,10 +34299,13 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mStaticIndexBuffer);
 	DestroyBufferResource(mStaticPrimitiveBuffer);
 	DestroyBufferResource(mStaticMaterialBuffer);
-	DestroyBufferResource(mPersistentVoxels.vertexBuffer);
-	DestroyBufferResource(mPersistentVoxels.indexBuffer);
-	DestroyBufferResource(mPersistentVoxels.primitiveBuffer);
-	DestroyBufferResource(mPersistentVoxels.materialBuffer);
+	NRIPersistentVoxelDestroyServices persistentVoxelDestroyServices = {};
+	persistentVoxelDestroyServices.user = this;
+	persistentVoxelDestroyServices.destroyBuffer = [](void* user, NRIBufferResource& resource)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyBufferResource(resource);
+	};
+	mPersistentVoxels.DestroyArenaBuffers(persistentVoxelDestroyServices);
 	DestroyBufferResource(mVertexBuffer);
 	DestroyBufferResource(mIndexBuffer);
 	DestroyBufferResource(mPrimitiveBuffer);
