@@ -184,6 +184,102 @@ bool NRIPersistentVoxelAdmissionServices::SubmitWaitAndRestart(const char* reaso
 	return submitWaitAndRestart != nullptr && submitWaitAndRestart(user, reason);
 }
 
+void NRIPersistentVoxelAdmissionServices::RetireBuffer(NRIBufferResource& resource) const
+{
+	if (retireBuffer != nullptr)
+	{
+		retireBuffer(user, resource);
+	}
+}
+
+void NRIPersistentVoxelAdmissionServices::RetireAccelerationStructure(NRIAccelerationStructureResource& resource) const
+{
+	if (retireAccelerationStructure != nullptr)
+	{
+		retireAccelerationStructure(user, resource);
+	}
+}
+
+void NRIPersistentVoxelAdmissionServices::BuildMaterials(
+	nri_scene::SceneView& sceneView,
+	nri_scene::MaterialBridgeData& materials,
+	const char* label) const
+{
+	if (buildMaterials != nullptr)
+	{
+		buildMaterials(user, sceneView, materials, label);
+	}
+}
+
+bool NRIPersistentVoxelAdmissionServices::PrewarmTexture(const nri_scene::TextureUpload& upload) const
+{
+	return prewarmTexture != nullptr && prewarmTexture(user, upload);
+}
+
+void NRIPersistentVoxelAdmissionServices::AssignGeometryPortalIndices(nri_scene::GeometryData& geometry) const
+{
+	if (assignGeometryPortalIndices != nullptr)
+	{
+		assignGeometryPortalIndices(user, geometry);
+	}
+}
+
+bool NRIPersistentVoxelAdmissionServices::CreateStructuredBufferNoUpload(
+	NRIBufferResource& resource,
+	uint64_t size,
+	uint32_t stride,
+	nri::BufferUsageBits usage) const
+{
+	return createStructuredBufferNoUpload != nullptr && createStructuredBufferNoUpload(user, resource, size, stride, usage);
+}
+
+bool NRIPersistentVoxelAdmissionServices::EnsureArenaBuffer(
+	NRIBufferResource& resource,
+	uint64_t requiredSize,
+	uint32_t stride,
+	nri::BufferUsageBits usage,
+	nri::AccessStage after) const
+{
+	return ensureArenaBuffer != nullptr && ensureArenaBuffer(user, resource, requiredSize, stride, usage, after);
+}
+
+bool NRIPersistentVoxelAdmissionServices::StageBufferCopyRange(
+	NRIBufferResource& resource,
+	uint64_t byteOffset,
+	const void* data,
+	uint64_t size,
+	nri::AccessStage after,
+	int uploadKind) const
+{
+	return stageBufferCopyRange != nullptr && stageBufferCopyRange(user, resource, byteOffset, data, size, after, uploadKind);
+}
+
+void NRIPersistentVoxelAdmissionServices::NoteBufferUpload(int uploadKind, uint64_t size, const char* reason) const
+{
+	if (noteBufferUpload != nullptr)
+	{
+		noteBufferUpload(user, uploadKind, size, reason);
+	}
+}
+
+bool NRIPersistentVoxelAdmissionServices::BuildBottomLevel(
+	const NRIBufferResource& vertexBuffer,
+	const NRIBufferResource& indexBuffer,
+	uint32_t vertexCount,
+	uint32_t indexOffset,
+	uint32_t indexCount,
+	uint32_t primitiveCount,
+	NRIAccelerationStructureResource& outAccelerationStructure) const
+{
+	return buildBottomLevel != nullptr &&
+		buildBottomLevel(user, vertexBuffer, indexBuffer, vertexCount, indexOffset, indexCount, primitiveCount, outAccelerationStructure);
+}
+
+bool NRIPersistentVoxelAdmissionServices::BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const
+{
+	return barrierBuildInputs != nullptr && barrierBuildInputs(user, vertexBuffer, indexBuffer);
+}
+
 bool NRIPersistentVoxelAccelerationServices::BuildBottomLevel(
 	const NRIBufferResource& vertexBuffer,
 	const NRIBufferResource& indexBuffer,

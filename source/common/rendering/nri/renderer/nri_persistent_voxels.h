@@ -276,10 +276,40 @@ struct NRIPersistentVoxelAdmissionServices
 		bool isolateBlasBuild,
 		const char*& outFailureReason);
 	using SubmitWaitAndRestartFn = bool (*)(void* user, const char* reason);
+	using RetireBufferFn = void (*)(void* user, NRIBufferResource& resource);
+	using RetireAccelerationStructureFn = void (*)(void* user, NRIAccelerationStructureResource& resource);
+	using BuildMaterialsFn = void (*)(void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label);
+	using PrewarmTextureFn = bool (*)(void* user, const nri_scene::TextureUpload& upload);
+	using AssignGeometryPortalIndicesFn = void (*)(void* user, nri_scene::GeometryData& geometry);
+	using CreateStructuredBufferNoUploadFn = bool (*)(void* user, NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage);
+	using EnsureArenaBufferFn = bool (*)(void* user, NRIBufferResource& resource, uint64_t requiredSize, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
+	using StageBufferCopyRangeFn = bool (*)(void* user, NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
+	using NoteBufferUploadFn = void (*)(void* user, int uploadKind, uint64_t size, const char* reason);
+	using BuildBottomLevelFn = bool (*)(
+		void* user,
+		const NRIBufferResource& vertexBuffer,
+		const NRIBufferResource& indexBuffer,
+		uint32_t vertexCount,
+		uint32_t indexOffset,
+		uint32_t indexCount,
+		uint32_t primitiveCount,
+		NRIAccelerationStructureResource& outAccelerationStructure);
+	using BarrierBuildInputsFn = bool (*)(void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer);
 
 	void* user = nullptr;
 	AdmitVariantResourceFn admitVariantResource = nullptr;
 	SubmitWaitAndRestartFn submitWaitAndRestart = nullptr;
+	RetireBufferFn retireBuffer = nullptr;
+	RetireAccelerationStructureFn retireAccelerationStructure = nullptr;
+	BuildMaterialsFn buildMaterials = nullptr;
+	PrewarmTextureFn prewarmTexture = nullptr;
+	AssignGeometryPortalIndicesFn assignGeometryPortalIndices = nullptr;
+	CreateStructuredBufferNoUploadFn createStructuredBufferNoUpload = nullptr;
+	EnsureArenaBufferFn ensureArenaBuffer = nullptr;
+	StageBufferCopyRangeFn stageBufferCopyRange = nullptr;
+	NoteBufferUploadFn noteBufferUpload = nullptr;
+	BuildBottomLevelFn buildBottomLevel = nullptr;
+	BarrierBuildInputsFn barrierBuildInputs = nullptr;
 
 	bool AdmitVariantResource(
 		PersistentVoxelAdmissionEntry& entry,
@@ -292,6 +322,24 @@ struct NRIPersistentVoxelAdmissionServices
 		bool isolateBlasBuild,
 		const char*& outFailureReason) const;
 	bool SubmitWaitAndRestart(const char* reason) const;
+	void RetireBuffer(NRIBufferResource& resource) const;
+	void RetireAccelerationStructure(NRIAccelerationStructureResource& resource) const;
+	void BuildMaterials(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label) const;
+	bool PrewarmTexture(const nri_scene::TextureUpload& upload) const;
+	void AssignGeometryPortalIndices(nri_scene::GeometryData& geometry) const;
+	bool CreateStructuredBufferNoUpload(NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage) const;
+	bool EnsureArenaBuffer(NRIBufferResource& resource, uint64_t requiredSize, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) const;
+	bool StageBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind) const;
+	void NoteBufferUpload(int uploadKind, uint64_t size, const char* reason) const;
+	bool BuildBottomLevel(
+		const NRIBufferResource& vertexBuffer,
+		const NRIBufferResource& indexBuffer,
+		uint32_t vertexCount,
+		uint32_t indexOffset,
+		uint32_t indexCount,
+		uint32_t primitiveCount,
+		NRIAccelerationStructureResource& outAccelerationStructure) const;
+	bool BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
 };
 
 struct NRIPersistentVoxelAccelerationBuildStats

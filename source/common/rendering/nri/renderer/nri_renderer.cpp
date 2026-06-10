@@ -14033,6 +14033,120 @@ NRIPersistentVoxelAdmissionServices NRIRenderer::BuildPersistentVoxelAdmissionSe
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 		return renderer->mFrameBuffer != nullptr && renderer->mFrameBuffer->SubmitWaitAndRestartCommandList(reason);
 	};
+	services.retireBuffer = [](void* user, NRIBufferResource& resource)
+	{
+		static_cast<NRIRenderer*>(user)->RetireResidentBufferResource(resource);
+	};
+	services.retireAccelerationStructure = [](void* user, NRIAccelerationStructureResource& resource)
+	{
+		static_cast<NRIRenderer*>(user)->RetireResidentAccelerationStructure(resource);
+	};
+	services.buildMaterials = [](void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label)
+	{
+		static_cast<NRIRenderer*>(user)->BuildMaterialsWithActorOverrides(sceneView, materials, label);
+	};
+	services.prewarmTexture = [](void* user, const nri_scene::TextureUpload& upload) -> bool
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		if (upload.width == 0 || upload.height == 0)
+		{
+			return true;
+		}
+		if (renderer->mFrameBuffer != nullptr &&
+			renderer->mFrameBuffer->mActiveCanvasSourceTexture != nullptr &&
+			upload.sourceTexture == renderer->mFrameBuffer->mActiveCanvasSourceTexture)
+		{
+			return true;
+		}
+		if (upload.sourceTexture != nullptr && upload.sourceTexture->isHardwareCanvas())
+		{
+			return true;
+		}
+		return renderer->EnsureSceneTextureCacheEntry(upload);
+	};
+	services.assignGeometryPortalIndices = [](void* user, nri_scene::GeometryData& geometry)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		AssignGeometryPortalIndices(renderer->mMapWorld, geometry);
+	};
+	services.createStructuredBufferNoUpload = [](void* user, NRIBufferResource& resource, uint64_t size, uint32_t stride, nri::BufferUsageBits usage) -> bool
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		if (renderer->mFrameBuffer == nullptr ||
+			!renderer->CreateBufferWithoutViewAtLocation(resource, size, stride, usage, nri::MemoryLocation::DEVICE))
+		{
+			return false;
+		}
+		nri::BufferViewDesc viewDesc = {};
+		viewDesc.buffer = resource.buffer;
+		viewDesc.type = nri::BufferView::STRUCTURED_BUFFER;
+		viewDesc.offset = 0;
+		viewDesc.size = nri::WHOLE_SIZE;
+		viewDesc.structureStride = stride;
+		if (renderer->mFrameBuffer->mCore.CreateBufferView(viewDesc, resource.shaderView) != nri::Result::SUCCESS)
+		{
+			renderer->DestroyBufferResource(resource);
+			return false;
+		}
+		resource.usedSize = size;
+		return true;
+	};
+	services.ensureArenaBuffer = [](void* user, NRIBufferResource& resource, uint64_t requiredSize, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->EnsureResidentArenaBuffer(resource, requiredSize, stride, usage, after);
+	};
+	services.stageBufferCopyRange = [](void* user, NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->StageResidentBufferCopyRange(resource, byteOffset, data, size, after, uploadKind);
+	};
+	services.noteBufferUpload = [](void* user, int uploadKind, uint64_t size, const char* reason)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		SceneBufferDebugStats* stats =
+			uploadKind == ResidentUploadKind_Index ? &renderer->mIndexBufferStats :
+			(uploadKind == ResidentUploadKind_Primitive ? &renderer->mPrimitiveBufferStats : &renderer->mVertexBufferStats);
+		renderer->NotePerfBufferUpload(stats, size, false, reason, uploadKind);
+	};
+	services.buildBottomLevel = [](
+		void* user,
+		const NRIBufferResource& vertexBuffer,
+		const NRIBufferResource& indexBuffer,
+		uint32_t vertexCount,
+		uint32_t indexOffset,
+		uint32_t indexCount,
+		uint32_t primitiveCount,
+		NRIAccelerationStructureResource& outAccelerationStructure) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->BuildBottomLevelAccelerationStructure(
+			vertexBuffer,
+			indexBuffer,
+			vertexCount,
+			indexOffset,
+			indexCount,
+			primitiveCount,
+			outAccelerationStructure,
+			false);
+	};
+	services.barrierBuildInputs = [](void* user, const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) -> bool
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		if (renderer->mFrameBuffer == nullptr || renderer->mFrameBuffer->mCommandBuffer == nullptr)
+		{
+			return false;
+		}
+		nri::BufferBarrierDesc inputBarriers[2] = {};
+		inputBarriers[0].buffer = vertexBuffer.buffer;
+		inputBarriers[0].before = NRIAccelerationStructureBuildInputAccess();
+		inputBarriers[0].after = NRIComputeShaderResourceAccess();
+		inputBarriers[1].buffer = indexBuffer.buffer;
+		inputBarriers[1].before = NRIAccelerationStructureBuildInputAccess();
+		inputBarriers[1].after = NRIComputeShaderResourceAccess();
+		nri::BarrierDesc inputBarrierDesc = {};
+		inputBarrierDesc.buffers = inputBarriers;
+		inputBarrierDesc.bufferNum = 2;
+		renderer->mFrameBuffer->mCore.CmdBarrier(*renderer->mFrameBuffer->mCommandBuffer, inputBarrierDesc);
+		return true;
+	};
 	return services;
 }
 
