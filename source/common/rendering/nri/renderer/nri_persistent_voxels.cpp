@@ -301,6 +301,75 @@ NRIPersistentVoxelMemoryUsage NRIPersistentVoxelResidency::GetMemoryUsage() cons
 	return usage;
 }
 
+NRIPersistentVoxelStatusSnapshot NRIPersistentVoxelResidency::BuildStatusSnapshot() const
+{
+	NRIPersistentVoxelStatusSnapshot snapshot = {};
+	FillResourceStatusSnapshot(snapshot);
+	FillBatchStatusSnapshot(snapshot);
+	return snapshot;
+}
+
+void NRIPersistentVoxelResidency::FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const
+{
+	snapshot.meshVariantResourceCount = (uint32_t)meshVariantResources.size();
+	snapshot.materialVariantResourceCount = (uint32_t)materialVariantResources.size();
+	snapshot.batchActorCount = (uint32_t)batch.actors.size();
+	snapshot.instanceRecordCount = (uint32_t)instances.size();
+	snapshot.admissionQueueCount = (uint32_t)admissionQueue.size();
+
+	for (const auto& meshPair : meshVariantResources)
+	{
+		const PersistentVoxelMeshVariantResource& resource = meshPair.second;
+		snapshot.residentResourceBytes += resource.residentBytes;
+		if (resource.activeActorReferences == 0)
+		{
+			snapshot.zeroRefMeshResourceCount++;
+			snapshot.zeroRefResourceBytes += resource.residentBytes;
+		}
+	}
+
+	for (const auto& materialPair : materialVariantResources)
+	{
+		const PersistentVoxelMaterialVariantResource& resource = materialPair.second;
+		snapshot.residentResourceBytes += resource.residentBytes;
+		if (resource.activeActorReferences == 0)
+		{
+			snapshot.zeroRefMaterialResourceCount++;
+			snapshot.zeroRefResourceBytes += resource.residentBytes;
+		}
+	}
+}
+
+void NRIPersistentVoxelResidency::FillBatchStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const
+{
+	for (const auto& instancePair : instances)
+	{
+		if (instancePair.second.pending)
+		{
+			snapshot.pendingInstanceCount++;
+		}
+	}
+
+	snapshot.instanceMinPrimitiveCount = UINT32_MAX;
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (!actor.active || actor.primitiveCount == 0)
+		{
+			continue;
+		}
+		snapshot.activeInstanceCount++;
+		snapshot.instancePrimitiveCount += actor.primitiveCount;
+		snapshot.instanceMaterialCount += actor.materialCount;
+		snapshot.instanceMinPrimitiveCount = std::min(snapshot.instanceMinPrimitiveCount, actor.primitiveCount);
+		snapshot.instanceMaxPrimitiveCount = std::max(snapshot.instanceMaxPrimitiveCount, actor.primitiveCount);
+	}
+
+	if (snapshot.activeInstanceCount == 0)
+	{
+		snapshot.instanceMinPrimitiveCount = 0;
+	}
+}
+
 void NRIPersistentVoxelResidency::ApplyPressurePolicy(
 	const char* phase,
 	uint32_t frameIndex,

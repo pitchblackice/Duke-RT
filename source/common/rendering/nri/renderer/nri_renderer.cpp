@@ -11395,72 +11395,30 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 			}
 		}
-		mLastPerfShellTraceStats.persistentVoxelMeshVariantResourceCount = (uint32_t)mPersistentVoxels.meshVariantResources.size();
-		mLastPerfShellTraceStats.persistentVoxelMaterialVariantResourceCount = (uint32_t)mPersistentVoxels.materialVariantResources.size();
-		mLastPerfShellTraceStats.persistentVoxelBatchActorCount = (uint32_t)mPersistentVoxels.batch.actors.size();
-		mLastPerfShellTraceStats.persistentVoxelInstanceRecordCount = (uint32_t)mPersistentVoxels.instances.size();
-		mLastPerfShellTraceStats.persistentVoxelAdmissionQueueCount = (uint32_t)mPersistentVoxels.admissionQueue.size();
-		mLastPerfShellTraceStats.persistentVoxelPendingInstanceCount = 0;
-		mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes = 0;
-		mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes = 0;
-		mLastPerfShellTraceStats.persistentVoxelZeroRefMeshResourceCount = 0;
-		mLastPerfShellTraceStats.persistentVoxelZeroRefMaterialResourceCount = 0;
+		NRIPersistentVoxelStatusSnapshot persistentVoxelStatus = {};
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelResourceStatsMs);
-			for (const auto& meshPair : mPersistentVoxels.meshVariantResources)
-			{
-				const PersistentVoxelMeshVariantResource& resource = meshPair.second;
-				mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes += resource.residentBytes;
-				if (resource.activeActorReferences == 0)
-				{
-					mLastPerfShellTraceStats.persistentVoxelZeroRefMeshResourceCount++;
-					mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes += resource.residentBytes;
-				}
-			}
-			for (const auto& materialPair : mPersistentVoxels.materialVariantResources)
-			{
-				const PersistentVoxelMaterialVariantResource& resource = materialPair.second;
-				mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes += resource.residentBytes;
-				if (resource.activeActorReferences == 0)
-				{
-					mLastPerfShellTraceStats.persistentVoxelZeroRefMaterialResourceCount++;
-					mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes += resource.residentBytes;
-				}
-			}
+			mPersistentVoxels.FillResourceStatusSnapshot(persistentVoxelStatus);
 		}
-		mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount = 0;
-		mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount = 0;
-		mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount = 0;
-		mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount = UINT32_MAX;
-		mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount = 0;
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelBatchStatsMs);
-			for (const auto& instancePair : mPersistentVoxels.instances)
-			{
-				if (instancePair.second.pending)
-				{
-					mLastPerfShellTraceStats.persistentVoxelPendingInstanceCount++;
-				}
-			}
-			for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxels.batch.actors)
-			{
-				if (!actor.active || actor.primitiveCount == 0)
-				{
-					continue;
-				}
-				mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount++;
-				mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount += actor.primitiveCount;
-				mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount += actor.materialCount;
-				mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount =
-					std::min(mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount, actor.primitiveCount);
-				mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount =
-					std::max(mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount, actor.primitiveCount);
-			}
+			mPersistentVoxels.FillBatchStatusSnapshot(persistentVoxelStatus);
 		}
-		if (mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount == 0)
-		{
-			mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount = 0;
-		}
+		mLastPerfShellTraceStats.persistentVoxelMeshVariantResourceCount = persistentVoxelStatus.meshVariantResourceCount;
+		mLastPerfShellTraceStats.persistentVoxelMaterialVariantResourceCount = persistentVoxelStatus.materialVariantResourceCount;
+		mLastPerfShellTraceStats.persistentVoxelBatchActorCount = persistentVoxelStatus.batchActorCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceRecordCount = persistentVoxelStatus.instanceRecordCount;
+		mLastPerfShellTraceStats.persistentVoxelAdmissionQueueCount = persistentVoxelStatus.admissionQueueCount;
+		mLastPerfShellTraceStats.persistentVoxelPendingInstanceCount = persistentVoxelStatus.pendingInstanceCount;
+		mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes = persistentVoxelStatus.residentResourceBytes;
+		mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes = persistentVoxelStatus.zeroRefResourceBytes;
+		mLastPerfShellTraceStats.persistentVoxelZeroRefMeshResourceCount = persistentVoxelStatus.zeroRefMeshResourceCount;
+		mLastPerfShellTraceStats.persistentVoxelZeroRefMaterialResourceCount = persistentVoxelStatus.zeroRefMaterialResourceCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount = persistentVoxelStatus.activeInstanceCount;
+		mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount = persistentVoxelStatus.instancePrimitiveCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount = persistentVoxelStatus.instanceMaterialCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount = persistentVoxelStatus.instanceMinPrimitiveCount;
+		mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount = persistentVoxelStatus.instanceMaxPrimitiveCount;
 		mLastPerfShellTraceStats.usedStaticMapScene = mUsedStaticMapSceneLastFrame;
 		mLastPerfShellTraceStats.usedDynamicOverlay = mGpuSceneHasDynamicOverlay;
 		mLastPerfShellTraceStats.usedPersistentDynamicEmissiveCache = usingPersistentDynamicEmissiveCache;

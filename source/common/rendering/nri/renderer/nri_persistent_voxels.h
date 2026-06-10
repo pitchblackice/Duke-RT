@@ -362,6 +362,25 @@ struct NRIPersistentVoxelMemoryUsage
 	uint64_t accelerationStructureBytes = 0;
 };
 
+struct NRIPersistentVoxelStatusSnapshot
+{
+	uint32_t meshVariantResourceCount = 0;
+	uint32_t materialVariantResourceCount = 0;
+	uint32_t batchActorCount = 0;
+	uint32_t instanceRecordCount = 0;
+	uint32_t admissionQueueCount = 0;
+	uint32_t pendingInstanceCount = 0;
+	uint64_t residentResourceBytes = 0;
+	uint64_t zeroRefResourceBytes = 0;
+	uint32_t zeroRefMeshResourceCount = 0;
+	uint32_t zeroRefMaterialResourceCount = 0;
+	uint32_t activeInstanceCount = 0;
+	uint32_t instancePrimitiveCount = 0;
+	uint32_t instanceMaterialCount = 0;
+	uint32_t instanceMinPrimitiveCount = 0;
+	uint32_t instanceMaxPrimitiveCount = 0;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -440,6 +459,9 @@ public:
 	void DestroyArenaBuffers(const NRIPersistentVoxelDestroyServices& services);
 	NRIPersistentVoxelLightAppendStats AppendSceneLights(SceneLightSystem& sceneLights, uint32_t frameIndex, bool voxelStatsEnabled) const;
 	NRIPersistentVoxelMemoryUsage GetMemoryUsage() const;
+	NRIPersistentVoxelStatusSnapshot BuildStatusSnapshot() const;
+	void FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
+	void FillBatchStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
