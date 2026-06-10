@@ -3,12 +3,20 @@
 #include "nri_renderer.h"
 #include "../scene/nri_scene_math.h"
 #include "../system/nri_renderdevice.h"
+#include "c_cvars.h"
 
 #include <algorithm>
+
+EXTERN_CVAR(Bool, nri_ptscenestats)
 
 namespace
 {
 	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
+
+	static const char* YesNo(bool value)
+	{
+		return value ? "yes" : "no";
+	}
 
 	template<typename T>
 	static T NRIFlags(T a, T b)
@@ -541,4 +549,102 @@ void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene
 		outTlasInstances.push_back(instance);
 		outSceneInstances.push_back({ atlasChunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, atlasChunk.chunkIndex, sectorIndex });
 	}
+}
+
+void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScene, StaticMapSceneResources& staticResources, bool waitForCommands)
+{
+	const bool hasResidentResources =
+		!staticScene.chunks.empty() ||
+		staticResources.vertexBuffer.buffer != nullptr ||
+		staticResources.indexBuffer.buffer != nullptr ||
+		staticResources.primitiveBuffer.buffer != nullptr ||
+		staticResources.materialBuffer.buffer != nullptr ||
+		staticResources.tlasInstanceBuffer.buffer != nullptr ||
+		staticResources.scratchBuffer.buffer != nullptr ||
+		staticResources.topLevelScratchBuffer.buffer != nullptr ||
+		staticResources.topLevelAS.accelerationStructure != nullptr;
+	if (waitForCommands && hasResidentResources && mFrameBuffer != nullptr)
+	{
+		WaitForCommandsTracked();
+	}
+
+	for (auto& chunk : staticScene.chunks)
+	{
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = nullptr;
+		chunk.residentBlasBuildScratchSize = 0;
+		chunk.residentBlasUpdateScratchSize = 0;
+	}
+
+	DestroyAccelerationStructureResource(staticResources.topLevelAS);
+	DestroyBufferResource(staticResources.vertexBuffer);
+	DestroyBufferResource(staticResources.indexBuffer);
+	DestroyBufferResource(staticResources.primitiveBuffer);
+	DestroyBufferResource(staticResources.materialBuffer);
+	DestroyBufferResource(staticResources.tlasInstanceBuffer);
+	DestroyBufferResource(staticResources.scratchBuffer);
+	DestroyBufferResource(staticResources.topLevelScratchBuffer);
+
+	if (&staticScene == &mStaticMapScene)
+	{
+		mStateCommitCombinedGeometryCache = {};
+	}
+	staticScene = {};
+	staticResources = {};
+}
+
+void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
+{
+	if (nri_ptscenestats)
+	{
+		Printf("NRI PT static scene trace: event=destroy reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",
+			reason != nullptr ? reason : "unspecified",
+			mFrameIndex,
+			YesNo(mStaticMapScene.valid),
+			YesNo(mStaticMapScene.texturesResident),
+			YesNo(mStaticMapScene.buffersResident),
+			YesNo(mStaticMapScene.accelerationResident),
+			(unsigned long long)mStaticMapScene.buildSerial,
+			(unsigned long long)mMapWorld.buildSerial,
+			(uint32_t)mStaticMapScene.chunks.size());
+	}
+
+	ResetPersistentDynamicEmissiveCache();
+	const bool hasResidentStaticSceneResources =
+		!mStaticMapScene.chunks.empty() ||
+		mStaticVertexBuffer.buffer != nullptr ||
+		mStaticIndexBuffer.buffer != nullptr ||
+		mStaticPrimitiveBuffer.buffer != nullptr ||
+		mStaticMaterialBuffer.buffer != nullptr;
+	if (hasResidentStaticSceneResources && mFrameBuffer != nullptr)
+	{
+		// The resident PT static scene can still be referenced by the previous frame's
+		// TLAS and descriptor bindings. Wait before tearing it down for live rebuilds.
+		WaitForCommandsTracked();
+	}
+
+	for (auto& chunk : mStaticMapScene.chunks)
+	{
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = nullptr;
+		chunk.residentBlasBuildScratchSize = 0;
+		chunk.residentBlasUpdateScratchSize = 0;
+	}
+
+	DestroyBufferResource(mStaticVertexBuffer);
+	DestroyBufferResource(mStaticIndexBuffer);
+	DestroyBufferResource(mStaticPrimitiveBuffer);
+	DestroyBufferResource(mStaticMaterialBuffer);
+	mBoundStaticPrimitiveCount = 0;
+	mBoundDynamicPrimitiveCount = 0;
+	mBoundStaticMaterialCount = 0;
+	mBoundDynamicMaterialCount = 0;
+	mBoundPersistentVoxelPrimitiveCount = 0;
+	mBoundPersistentVoxelMaterialCount = 0;
+	mBoundPortalCount = 0;
+	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
+	mStateCommitCombinedGeometryCache = {};
+	mRuntimeMapMutations.chunks.clear();
+	mRuntimeMapLastFrame = {};
+	ResetResidentMapChunkRegistry();
 }
