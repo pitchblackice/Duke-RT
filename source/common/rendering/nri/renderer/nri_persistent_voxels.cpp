@@ -238,6 +238,11 @@ bool NRIPersistentVoxelResidency::HasRenderableOverlay() const
 		!batch.materialBridge.materials.empty();
 }
 
+bool NRIPersistentVoxelResidency::HasPreloadPending() const
+{
+	return preloadPending;
+}
+
 uint32_t NRIPersistentVoxelResidency::OverlayMaterialCount() const
 {
 	return (uint32_t)batch.materialBridge.materials.size();

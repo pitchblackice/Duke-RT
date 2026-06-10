@@ -524,6 +524,7 @@ public:
 	NRIPersistentVoxelOverlayStats BuildOverlayStats() const;
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
+	bool HasPreloadPending() const;
 	uint32_t OverlayMaterialCount() const;
 	uint32_t EstimatePrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;

@@ -11098,7 +11098,7 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 
 	if (!PreloadPersistentVoxelResources())
 	{
-		if (mPersistentVoxels.preloadPending)
+		if (mPersistentVoxels.HasPreloadPending())
 		{
 			if ((int)nri_ptloadingtrace >= 1)
 			{
