@@ -14878,79 +14878,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
 	const bool hasPersistentVoxelCacheEntries = nri_scene::BuildPersistentVoxelCacheEntries(cacheEntries);
 
-	auto recomputeBatchState = [&](PersistentVoxelBatch& batch)
-	{
-		batch.primitiveCount = 0;
-		batch.materialCount = 0;
-		batch.activeActorCount = 0;
-		for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
-		{
-			if (actor.active)
-			{
-				batch.activeActorCount++;
-				batch.primitiveCount += actor.primitiveCount;
-			}
-		}
-		batch.materialCount = (uint32_t)batch.materialBridge.materials.size();
-		batch.surfaceCount = batch.activeActorCount;
-		batch.stats = {};
-		batch.stats.triangleEstimate = batch.primitiveCount;
-		batch.stats.voxelCachePrimitives = batch.primitiveCount;
-		batch.stats.materialRefs = batch.materialCount;
-		batch.stats.spriteDrawItems = batch.surfaceCount;
-		batch.stats.modelDrawItems = batch.surfaceCount;
-		batch.stats.voxelProxyDrawItems = batch.surfaceCount;
-		batch.stats.voxelCacheEntries = batch.surfaceCount;
-		batch.stats.totalDrawItems = batch.surfaceCount;
-		batch.valid = batch.activeActorCount > 0 && batch.primitiveCount > 0 && !batch.materialBridge.materials.empty();
-	};
-
-	auto rebuildBatchMaterialBridge = [&](PersistentVoxelBatch& batch)
-	{
-		batch.materialBridge = {};
-		std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
-		materialResources.reserve(mPersistentVoxels.materialVariantResources.size());
-		for (auto& pair : mPersistentVoxels.materialVariantResources)
-		{
-			if (pair.second.materialCount > 0)
-			{
-				materialResources.push_back(&pair.second);
-			}
-		}
-		std::sort(materialResources.begin(), materialResources.end(), [](const PersistentVoxelMaterialVariantResource* left, const PersistentVoxelMaterialVariantResource* right)
-			{
-				return left->materialOffset < right->materialOffset;
-			});
-		for (PersistentVoxelMaterialVariantResource* resource : materialResources)
-		{
-			if (resource == nullptr)
-			{
-				continue;
-			}
-			if (batch.materialBridge.materials.size() < resource->materialOffset)
-			{
-				batch.materialBridge.materials.resize(resource->materialOffset);
-				batch.materialBridge.lightMetadata.resize(resource->materialOffset);
-			}
-			nri_scene::AppendMaterialBridge(resource->materialBridge, batch.materialBridge);
-			const uint64_t materialSize = (uint64_t)resource->materialCount * sizeof(nri_scene::MaterialData);
-			if (resource->materialOffset <= batch.materialBridge.materials.size() &&
-				resource->materialCount <= batch.materialBridge.materials.size() - resource->materialOffset)
-			{
-				resource->materialPayloadHash = HashUploadPayloadBytes(
-					batch.materialBridge.materials.data() + resource->materialOffset,
-					materialSize);
-			}
-		}
-		for (PersistentVoxelBatch::ActorEntry& actor : batch.actors)
-		{
-			if (!actor.active)
-			{
-				actor.materialOffset = 0;
-			}
-		}
-	};
-
 	auto fillPersistentVoxelActorInstanceTransform = [&](
 		const nri_scene::PersistentVoxelCacheEntryView& cacheEntry,
 		const PersistentVoxelMeshVariantResource& meshResource,
@@ -16597,7 +16524,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		}
 		if (hasInactiveActors || updatedActorCount != 0)
 		{
-			rebuildBatchMaterialBridge(mPersistentVoxels.batch);
+			mPersistentVoxels.RebuildBatchMaterialBridge(mPersistentVoxels.batch);
 		}
 		if (!persistentVoxelBuildPending)
 		{
@@ -16607,7 +16534,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		{
 			mPersistentVoxels.batch.rebuildCount++;
 		}
-		recomputeBatchState(mPersistentVoxels.batch);
+		mPersistentVoxels.RecomputeBatchState(mPersistentVoxels.batch);
 		emitVoxelPromotionTrace();
 		return mPersistentVoxels.batch.valid;
 	}
@@ -16683,8 +16610,8 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		next.sourceSerial = 0;
 	}
 	next.rebuildCount = mPersistentVoxels.batch.rebuildCount + 1u;
-	rebuildBatchMaterialBridge(next);
-	recomputeBatchState(next);
+	mPersistentVoxels.RebuildBatchMaterialBridge(next);
+	mPersistentVoxels.RecomputeBatchState(next);
 	if (!next.valid)
 	{
 		mPersistentVoxels.Reset("persistent-voxel-invalid-instance-batch", false, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());

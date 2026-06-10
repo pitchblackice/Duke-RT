@@ -320,6 +320,85 @@ uint64_t NRIPersistentVoxelResidency::BuildSceneGenerationHash() const
 		(uint64_t)batch.materialCount);
 }
 
+void NRIPersistentVoxelResidency::RebuildBatchMaterialBridge(PersistentVoxelBatch& targetBatch)
+{
+	targetBatch.materialBridge = {};
+	std::vector<PersistentVoxelMaterialVariantResource*> materialResources;
+	materialResources.reserve(materialVariantResources.size());
+	for (auto& pair : materialVariantResources)
+	{
+		if (pair.second.materialCount > 0)
+		{
+			materialResources.push_back(&pair.second);
+		}
+	}
+	std::sort(
+		materialResources.begin(),
+		materialResources.end(),
+		[](const PersistentVoxelMaterialVariantResource* left, const PersistentVoxelMaterialVariantResource* right)
+		{
+			return left->materialOffset < right->materialOffset;
+		});
+	for (PersistentVoxelMaterialVariantResource* resource : materialResources)
+	{
+		if (resource == nullptr)
+		{
+			continue;
+		}
+		if (targetBatch.materialBridge.materials.size() < resource->materialOffset)
+		{
+			targetBatch.materialBridge.materials.resize(resource->materialOffset);
+			targetBatch.materialBridge.lightMetadata.resize(resource->materialOffset);
+		}
+		nri_scene::AppendMaterialBridge(resource->materialBridge, targetBatch.materialBridge);
+		const uint64_t materialSize = (uint64_t)resource->materialCount * sizeof(nri_scene::MaterialData);
+		if (resource->materialOffset <= targetBatch.materialBridge.materials.size() &&
+			resource->materialCount <= targetBatch.materialBridge.materials.size() - resource->materialOffset)
+		{
+			resource->materialPayloadHash = NRIHashUploadPayloadBytes(
+				targetBatch.materialBridge.materials.data() + resource->materialOffset,
+				materialSize);
+		}
+	}
+	for (PersistentVoxelBatch::ActorEntry& actor : targetBatch.actors)
+	{
+		if (!actor.active)
+		{
+			actor.materialOffset = 0;
+		}
+	}
+}
+
+void NRIPersistentVoxelResidency::RecomputeBatchState(PersistentVoxelBatch& targetBatch) const
+{
+	targetBatch.primitiveCount = 0;
+	targetBatch.materialCount = 0;
+	targetBatch.activeActorCount = 0;
+	for (const PersistentVoxelBatch::ActorEntry& actor : targetBatch.actors)
+	{
+		if (actor.active)
+		{
+			targetBatch.activeActorCount++;
+			targetBatch.primitiveCount += actor.primitiveCount;
+		}
+	}
+	targetBatch.materialCount = (uint32_t)targetBatch.materialBridge.materials.size();
+	targetBatch.surfaceCount = targetBatch.activeActorCount;
+	targetBatch.stats = {};
+	targetBatch.stats.triangleEstimate = targetBatch.primitiveCount;
+	targetBatch.stats.voxelCachePrimitives = targetBatch.primitiveCount;
+	targetBatch.stats.materialRefs = targetBatch.materialCount;
+	targetBatch.stats.spriteDrawItems = targetBatch.surfaceCount;
+	targetBatch.stats.modelDrawItems = targetBatch.surfaceCount;
+	targetBatch.stats.voxelProxyDrawItems = targetBatch.surfaceCount;
+	targetBatch.stats.voxelCacheEntries = targetBatch.surfaceCount;
+	targetBatch.stats.totalDrawItems = targetBatch.surfaceCount;
+	targetBatch.valid =
+		targetBatch.activeActorCount > 0 &&
+		targetBatch.primitiveCount > 0 &&
+		!targetBatch.materialBridge.materials.empty();
+}
+
 void NRIPersistentVoxelResidency::AppendMaterialBridgeTo(nri_scene::MaterialBridgeData& destination) const
 {
 	nri_scene::AppendMaterialBridge(batch.materialBridge, destination);

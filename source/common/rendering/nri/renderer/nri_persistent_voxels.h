@@ -571,6 +571,8 @@ public:
 	uint32_t EstimatePrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
 	uint64_t BuildSceneGenerationHash() const;
+	void RebuildBatchMaterialBridge(PersistentVoxelBatch& targetBatch);
+	void RecomputeBatchState(PersistentVoxelBatch& targetBatch) const;
 	void AppendMaterialBridgeTo(nri_scene::MaterialBridgeData& destination) const;
 	bool WarmMaterialResources(
 		const NRIPersistentVoxelMaterialWarmupServices& services,
