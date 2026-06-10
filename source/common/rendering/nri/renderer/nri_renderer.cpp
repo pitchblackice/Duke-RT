@@ -1,4 +1,4 @@
-﻿#include "nri_renderer.h"
+#include "nri_renderer.h"
 
 #include "../framegen/nri_framegen.h"
 #include "nri_acceleration.h"
@@ -14878,19 +14878,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
 	const bool hasPersistentVoxelCacheEntries = nri_scene::BuildPersistentVoxelCacheEntries(cacheEntries);
 
-	auto fillPersistentVoxelActorInstanceTransform = [&](
-		const nri_scene::PersistentVoxelCacheEntryView& cacheEntry,
-		const PersistentVoxelMeshVariantResource& meshResource,
-		std::array<float, 12>& target)
-	{
-		if (cacheEntry.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::LocalSpace)
-		{
-			CopyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, target);
-			return;
-		}
-		FillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, target);
-	};
-
 	if (!hasPersistentVoxelCacheEntries)
 	{
 		mPersistentVoxels.ClearActorInstances(BuildPersistentVoxelResetServices());
@@ -15264,14 +15251,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		return true;
 	};
 
-	auto resolvePersistentVoxelActorVisibilityChunk = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> uint32_t
-	{
-		(void)cacheEntry;
-		// Persistent voxel actors move independently from the cached mesh surface that sourced them.
-		// Let static map geometry own chunk gating; dynamic actor instances stay ray-visible by position.
-		return UINT32_MAX;
-	};
-
 	auto appendActorToBatch = [&](PersistentVoxelBatch& batch, const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, PersistentVoxelBatch::ActorEntry* existingActor = nullptr, bool* outDeferred = nullptr) -> bool
 	{
 		if (outDeferred != nullptr)
@@ -15595,7 +15574,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.meshKeyHash = cacheEntry.meshKeyHash;
 			actor.materialKeyHash = cacheEntry.materialKeyHash;
 			actor.active = true;
-			fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResource, actor.instanceTransform);
+			FillPersistentVoxelActorInstanceTransform(cacheEntry, meshResource, actor.instanceTransform);
 			actor.previousInstanceTransform = actor.instanceTransform;
 			actor.primitiveOffset = meshResource.primitiveOffset;
 			actor.primitiveCount = primitiveCount;
@@ -16036,10 +16015,10 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		actor.retainedFrameAge = cacheEntry.retainedFrameAge;
 		actor.sourcePicnum = cacheEntry.sourcePicnum;
 		actor.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
-		actor.visibilityChunkIndex = resolvePersistentVoxelActorVisibilityChunk(cacheEntry);
+		actor.visibilityChunkIndex = ResolvePersistentVoxelActorVisibilityChunk(cacheEntry);
 		actor.capturedThisFrame = cacheEntry.capturedThisFrame;
 		actor.active = true;
-		fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResource, actor.instanceTransform);
+		FillPersistentVoxelActorInstanceTransform(cacheEntry, meshResource, actor.instanceTransform);
 		actor.previousInstanceTransform = actor.instanceTransform;
 		actor.primitiveOffset = meshResource.primitiveOffset;
 		actor.primitiveCount = (uint32_t)actorGeometry.primitives.size();
@@ -16296,7 +16275,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			CopyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, expectedInstanceTransform);
 			if (meshResourceIt != mPersistentVoxels.meshVariantResources.end())
 			{
-				fillPersistentVoxelActorInstanceTransform(cacheEntry, meshResourceIt->second, expectedInstanceTransform);
+				FillPersistentVoxelActorInstanceTransform(cacheEntry, meshResourceIt->second, expectedInstanceTransform);
 			}
 			const bool actorGeometryNeedsUpdate =
 				actor.bakedSurfaceSignature != cacheEntry.bakedSurfaceSignature ||
@@ -16304,7 +16283,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				meshResourceIt == mPersistentVoxels.meshVariantResources.end() ||
 				meshResourceIt->second.accelerationStructure.accelerationStructure == nullptr;
 			const bool actorInstanceTransformNeedsUpdate = !SamePersistentVoxelInstanceTransform(actor.instanceTransform, expectedInstanceTransform.data());
-			const uint32_t expectedVisibilityChunkIndex = resolvePersistentVoxelActorVisibilityChunk(cacheEntry);
+			const uint32_t expectedVisibilityChunkIndex = ResolvePersistentVoxelActorVisibilityChunk(cacheEntry);
 			const bool actorVisibilityChunkNeedsUpdate = actor.visibilityChunkIndex != expectedVisibilityChunkIndex;
 			const bool actorNeedsUpdate =
 				actor.signature != cacheEntry.signature ||
@@ -16451,7 +16430,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.sourcePicnum = cacheEntry.sourcePicnum;
 			actor.resolvedVoxelIndex = cacheEntry.resolvedVoxelIndex;
 			actor.capturedThisFrame = cacheEntry.capturedThisFrame;
-			actor.visibilityChunkIndex = resolvePersistentVoxelActorVisibilityChunk(cacheEntry);
+			actor.visibilityChunkIndex = ResolvePersistentVoxelActorVisibilityChunk(cacheEntry);
 			auto instanceIt = mPersistentVoxels.instances.find(cacheEntry.identityKey);
 			if (instanceIt != mPersistentVoxels.instances.end())
 			{

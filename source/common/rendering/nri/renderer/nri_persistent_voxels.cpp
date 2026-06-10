@@ -50,6 +50,19 @@ void FillPersistentVoxelInstanceTransform(
 		0.0f, 0.0f, 1.0f, currentTranslation[2] - bakedTranslation[2] };
 }
 
+void FillPersistentVoxelActorInstanceTransform(
+	const nri_scene::PersistentVoxelCacheEntryView& cacheEntry,
+	const PersistentVoxelMeshVariantResource& meshResource,
+	std::array<float, 12>& target)
+{
+	if (cacheEntry.meshBakeSpace == nri_scene::VoxelMeshBakeSpace::LocalSpace)
+	{
+		CopyPersistentVoxelInstanceTransform(cacheEntry.instanceTransform, target);
+		return;
+	}
+	FillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, target);
+}
+
 uint64_t EstimatePersistentVoxelActorUploadBytes(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
 {
 	if (cacheEntry.surface == nullptr)
@@ -79,6 +92,14 @@ uint64_t BuildPersistentVoxelMeshResourceKey(const nri_scene::PersistentVoxelCac
 	uint64_t hash = cacheEntry.meshKeyHash;
 	hash = nri_scene::HashCombine64(hash, cacheEntry.transformBasisSignature);
 	return hash;
+}
+
+uint32_t ResolvePersistentVoxelActorVisibilityChunk(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
+{
+	(void)cacheEntry;
+	// Persistent voxel actors move independently from the cached mesh surface that sourced them.
+	// Let static map geometry own chunk gating; dynamic actor instances stay ray-visible by position.
+	return UINT32_MAX;
 }
 
 namespace
