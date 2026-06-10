@@ -4,6 +4,7 @@
 #include "printf.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace bakeSpace)
@@ -78,6 +79,16 @@ uint64_t BuildPersistentVoxelMeshResourceKey(const nri_scene::PersistentVoxelCac
 	return hash;
 }
 
+namespace
+{
+	double PersistentVoxelDurationMs(
+		const std::chrono::steady_clock::time_point& start,
+		const std::chrono::steady_clock::time_point& end)
+	{
+		return std::chrono::duration<double, std::milli>(end - start).count();
+	}
+}
+
 void NRIPersistentVoxelResetServices::RetireBuffer(NRIBufferResource& resource) const
 {
 	if (retireBuffer != nullptr)
@@ -108,6 +119,15 @@ void NRIPersistentVoxelResetServices::InvalidateSceneDataDescriptors() const
 	{
 		invalidateSceneDataDescriptors(user);
 	}
+}
+
+bool NRIPersistentVoxelPreloadServices::PumpAdmissionQueue(const char* phase) const
+{
+	if (pumpAdmissionQueue == nullptr)
+	{
+		return false;
+	}
+	return pumpAdmissionQueue(user, phase);
 }
 
 void NRIPersistentVoxelResidency::Reset(
@@ -794,6 +814,167 @@ bool NRIPersistentVoxelResidency::EnqueueAdmission(
 			entry.mapGeneration);
 	}
 	return true;
+}
+
+bool NRIPersistentVoxelResidency::PreloadVariantResources(
+	const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+	uint64_t buildSerial,
+	const NRIPersistentVoxelSettings& settings,
+	int loadingTraceLevel,
+	bool voxelStatsEnabled,
+	const NRIPersistentVoxelResetServices& resetServices,
+	const NRIPersistentVoxelPreloadServices& preloadServices)
+{
+	preloadPending = false;
+	if (variants.empty())
+	{
+		if (loadingTraceLevel >= 1)
+		{
+			Printf("NRI PT loading voxel resources: event=variant-skip reason=no-shared-variants variants=0 mesh_resources=%u material_resources=%u prims=0\n",
+				(uint32_t)meshVariantResources.size(),
+				(uint32_t)materialVariantResources.size());
+		}
+		return true;
+	}
+
+	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
+	{
+		EnqueueAdmission(
+			variant,
+			false,
+			"preload",
+			buildSerial,
+			settings,
+			loadingTraceLevel,
+			voxelStatsEnabled,
+			resetServices);
+	}
+
+	auto hasRequiredUploadInProgress = [&]() -> bool
+	{
+		for (const auto& pair : admissionQueue)
+		{
+			const PersistentVoxelAdmissionEntry& entry = pair.second;
+			if (!IsRequiredAdmission(entry))
+			{
+				continue;
+			}
+			if (entry.state == PersistentVoxelAdmissionState::UploadingVertices ||
+				entry.state == PersistentVoxelAdmissionState::UploadingIndices ||
+				entry.state == PersistentVoxelAdmissionState::UploadingPrimitives ||
+				entry.state == PersistentVoxelAdmissionState::BuildingBlas)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	bool ok = true;
+	const auto preloadAdmissionStart = std::chrono::steady_clock::now();
+	const int configuredLoadingMsBudget = (int)settings.admitMaxMsLoading;
+	const double preloadTickBudgetMs = configuredLoadingMsBudget > 0 ? (double)configuredLoadingMsBudget : 250.0;
+	const uint32_t maxPumps = std::max<uint32_t>(1024u, (uint32_t)admissionQueue.size() * 64u + 64u);
+	for (uint32_t pump = 0; pump < maxPumps; ++pump)
+	{
+		uint32_t requiredPendingBefore = 0;
+		uint32_t requiredReadyBefore = 0;
+		uint32_t optionalPendingBefore = 0;
+		uint32_t failedBefore = 0;
+		CountAdmissionWork(requiredPendingBefore, requiredReadyBefore, optionalPendingBefore, failedBefore);
+		if (loadingTraceLevel >= 1)
+		{
+			Printf("NRI PT voxel admission pump: phase=loading pass=%u required_pending=%u required_ready=%u optional_pending=%u failed=%u stop=%s\n",
+				pump,
+				requiredPendingBefore,
+				requiredReadyBefore,
+				optionalPendingBefore,
+				failedBefore,
+				requiredPendingBefore == 0 ? "required-drained" : "none");
+		}
+		if (requiredPendingBefore == 0)
+		{
+			if (loadingTraceLevel >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=required-drained required_pending=0 required_ready=%u optional_pending=%u failed=%u\n",
+					requiredReadyBefore,
+					optionalPendingBefore,
+					failedBefore);
+			}
+			break;
+		}
+
+		ok = preloadServices.PumpAdmissionQueue("loading") && ok;
+
+		uint32_t requiredPendingAfter = 0;
+		uint32_t requiredReadyAfter = 0;
+		uint32_t optionalPendingAfter = 0;
+		uint32_t failedAfter = 0;
+		CountAdmissionWork(requiredPendingAfter, requiredReadyAfter, optionalPendingAfter, failedAfter);
+		if (!ok)
+		{
+			if (loadingTraceLevel >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=continue reason=failure required_pending=%u required_ready=%u optional_pending=%u failed=%u\n",
+					requiredPendingAfter,
+					requiredReadyAfter,
+					optionalPendingAfter,
+					failedAfter);
+			}
+			break;
+		}
+		if (requiredPendingAfter == 0)
+		{
+			if (loadingTraceLevel >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=required-drained required_pending=0 required_ready=%u optional_pending=%u failed=%u\n",
+					requiredReadyAfter,
+					optionalPendingAfter,
+					failedAfter);
+			}
+			break;
+		}
+		const double preloadTickMs = PersistentVoxelDurationMs(preloadAdmissionStart, std::chrono::steady_clock::now());
+		if (preloadTickBudgetMs > 0.0 && preloadTickMs >= preloadTickBudgetMs)
+		{
+			preloadPending = true;
+			if (loadingTraceLevel >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=wait reason=tick-budget pass=%u required_pending=%u required_ready=%u optional_pending=%u failed=%u ms_budget=%.3f ms_used=%.3f\n",
+					pump,
+					requiredPendingAfter,
+					requiredReadyAfter,
+					optionalPendingAfter,
+					failedAfter,
+					preloadTickBudgetMs,
+					preloadTickMs);
+			}
+			return false;
+		}
+		if (requiredPendingAfter >= requiredPendingBefore && requiredReadyAfter <= requiredReadyBefore && !hasRequiredUploadInProgress())
+		{
+			if (loadingTraceLevel >= 1)
+			{
+				Printf("NRI PT loading gate: event=voxel-admission result=continue reason=no-progress required_pending=%u required_ready=%u optional_pending=%u failed=%u\n",
+					requiredPendingAfter,
+					requiredReadyAfter,
+					optionalPendingAfter,
+					failedAfter);
+			}
+			break;
+		}
+		preloadPending = true;
+		if (loadingTraceLevel >= 1)
+		{
+			Printf("NRI PT loading gate: event=voxel-admission result=wait reason=pump-budget required_pending=%u optional_pending=%u required_ready=%u failed=%u\n",
+				requiredPendingAfter,
+				optionalPendingAfter,
+				requiredReadyAfter,
+				failedAfter);
+		}
+		return false;
+	}
+	return ok;
 }
 
 PersistentVoxelReadinessStatus NRIPersistentVoxelResidency::GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const

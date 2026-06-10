@@ -250,6 +250,16 @@ struct NRIPersistentVoxelResetServices
 	void InvalidateSceneDataDescriptors() const;
 };
 
+struct NRIPersistentVoxelPreloadServices
+{
+	using PumpAdmissionQueueFn = bool (*)(void* user, const char* phase);
+
+	void* user = nullptr;
+	PumpAdmissionQueueFn pumpAdmissionQueue = nullptr;
+
+	bool PumpAdmissionQueue(const char* phase) const;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -272,6 +282,14 @@ public:
 		int loadingTraceLevel,
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelResetServices& services);
+	bool PreloadVariantResources(
+		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+		uint64_t buildSerial,
+		const NRIPersistentVoxelSettings& settings,
+		int loadingTraceLevel,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelResetServices& resetServices,
+		const NRIPersistentVoxelPreloadServices& preloadServices);
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;

@@ -15877,161 +15877,6 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 	return stats.failedThisPump == 0;
 }
 
-bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants)
-{
-	mPersistentVoxels.preloadPending = false;
-	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
-	if (variants.empty())
-	{
-		if ((int)nri_ptloadingtrace >= 1)
-		{
-			Printf("NRI PT loading voxel resources: event=variant-skip reason=no-shared-variants variants=0 mesh_resources=%u material_resources=%u prims=0\n",
-				(uint32_t)mPersistentVoxels.meshVariantResources.size(),
-				(uint32_t)mPersistentVoxels.materialVariantResources.size());
-		}
-		return true;
-	}
-
-	for (const nri_scene::PrecachedVoxelVariantView& variant : variants)
-	{
-		mPersistentVoxels.EnqueueAdmission(
-			variant,
-			false,
-			"preload",
-			mMapWorld.buildSerial,
-			persistentVoxelSettings,
-			(int)nri_ptloadingtrace,
-			(bool)nri_voxelstats,
-			BuildPersistentVoxelResetServices());
-	}
-
-	auto hasRequiredUploadInProgress = [&]() -> bool
-	{
-		for (const auto& pair : mPersistentVoxels.admissionQueue)
-		{
-			const PersistentVoxelAdmissionEntry& entry = pair.second;
-			if (!mPersistentVoxels.IsRequiredAdmission(entry))
-			{
-				continue;
-			}
-			if (entry.state == PersistentVoxelAdmissionState::UploadingVertices ||
-				entry.state == PersistentVoxelAdmissionState::UploadingIndices ||
-				entry.state == PersistentVoxelAdmissionState::UploadingPrimitives ||
-				entry.state == PersistentVoxelAdmissionState::BuildingBlas)
-			{
-				return true;
-			}
-		}
-		return false;
-	};
-
-	bool ok = true;
-	const auto preloadAdmissionStart = std::chrono::steady_clock::now();
-	const int configuredLoadingMsBudget = (int)persistentVoxelSettings.admitMaxMsLoading;
-	const double preloadTickBudgetMs = configuredLoadingMsBudget > 0 ? (double)configuredLoadingMsBudget : 250.0;
-	const uint32_t maxPumps = std::max<uint32_t>(1024u, (uint32_t)mPersistentVoxels.admissionQueue.size() * 64u + 64u);
-	for (uint32_t pump = 0; pump < maxPumps; ++pump)
-	{
-		uint32_t requiredPendingBefore = 0;
-		uint32_t requiredReadyBefore = 0;
-		uint32_t optionalPendingBefore = 0;
-		uint32_t failedBefore = 0;
-		mPersistentVoxels.CountAdmissionWork(requiredPendingBefore, requiredReadyBefore, optionalPendingBefore, failedBefore);
-		if ((int)nri_ptloadingtrace >= 1)
-		{
-			Printf("NRI PT voxel admission pump: phase=loading pass=%u required_pending=%u required_ready=%u optional_pending=%u failed=%u stop=%s\n",
-				pump,
-				requiredPendingBefore,
-				requiredReadyBefore,
-				optionalPendingBefore,
-				failedBefore,
-				requiredPendingBefore == 0 ? "required-drained" : "none");
-		}
-		if (requiredPendingBefore == 0)
-		{
-			if ((int)nri_ptloadingtrace >= 1)
-			{
-				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=required-drained required_pending=0 required_ready=%u optional_pending=%u failed=%u\n",
-					requiredReadyBefore,
-					optionalPendingBefore,
-					failedBefore);
-			}
-			break;
-		}
-
-		ok = PumpPersistentVoxelAdmissionQueue("loading") && ok;
-
-		uint32_t requiredPendingAfter = 0;
-		uint32_t requiredReadyAfter = 0;
-		uint32_t optionalPendingAfter = 0;
-		uint32_t failedAfter = 0;
-		mPersistentVoxels.CountAdmissionWork(requiredPendingAfter, requiredReadyAfter, optionalPendingAfter, failedAfter);
-		if (!ok)
-		{
-			if ((int)nri_ptloadingtrace >= 1)
-			{
-				Printf("NRI PT loading gate: event=voxel-admission result=continue reason=failure required_pending=%u required_ready=%u optional_pending=%u failed=%u\n",
-					requiredPendingAfter,
-					requiredReadyAfter,
-					optionalPendingAfter,
-					failedAfter);
-			}
-			break;
-		}
-		if (requiredPendingAfter == 0)
-		{
-			if ((int)nri_ptloadingtrace >= 1)
-			{
-				Printf("NRI PT loading gate: event=voxel-admission result=ready reason=required-drained required_pending=0 required_ready=%u optional_pending=%u failed=%u\n",
-					requiredReadyAfter,
-					optionalPendingAfter,
-					failedAfter);
-			}
-			break;
-		}
-		const double preloadTickMs = DurationMs(preloadAdmissionStart, std::chrono::steady_clock::now());
-		if (preloadTickBudgetMs > 0.0 && preloadTickMs >= preloadTickBudgetMs)
-		{
-			mPersistentVoxels.preloadPending = true;
-			if ((int)nri_ptloadingtrace >= 1)
-			{
-				Printf("NRI PT loading gate: event=voxel-admission result=wait reason=tick-budget pass=%u required_pending=%u required_ready=%u optional_pending=%u failed=%u ms_budget=%.3f ms_used=%.3f\n",
-					pump,
-					requiredPendingAfter,
-					requiredReadyAfter,
-					optionalPendingAfter,
-					failedAfter,
-					preloadTickBudgetMs,
-					preloadTickMs);
-			}
-			return false;
-		}
-		if (requiredPendingAfter >= requiredPendingBefore && requiredReadyAfter <= requiredReadyBefore && !hasRequiredUploadInProgress())
-		{
-			if ((int)nri_ptloadingtrace >= 1)
-			{
-				Printf("NRI PT loading gate: event=voxel-admission result=continue reason=no-progress required_pending=%u required_ready=%u optional_pending=%u failed=%u\n",
-					requiredPendingAfter,
-					requiredReadyAfter,
-					optionalPendingAfter,
-					failedAfter);
-			}
-			break;
-		}
-		mPersistentVoxels.preloadPending = true;
-		if ((int)nri_ptloadingtrace >= 1)
-		{
-			Printf("NRI PT loading gate: event=voxel-admission result=wait reason=pump-budget required_pending=%u optional_pending=%u required_ready=%u failed=%u\n",
-				requiredPendingAfter,
-				optionalPendingAfter,
-				requiredReadyAfter,
-				failedAfter);
-		}
-		return false;
-	}
-	return ok;
-}
-
 bool NRIRenderer::PreloadPersistentVoxelResources()
 {
 	if (!nri_ptloadingvoxelgpu)
@@ -16063,7 +15908,21 @@ bool NRIRenderer::PreloadPersistentVoxelResources()
 		(int)nri_ptloadingtrace,
 		BuildPersistentVoxelResetServices());
 
-	if (!PreloadPersistentVoxelVariantResources(variants))
+	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
+	NRIPersistentVoxelPreloadServices preloadServices = {};
+	preloadServices.user = this;
+	preloadServices.pumpAdmissionQueue = [](void* user, const char* phase) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->PumpPersistentVoxelAdmissionQueue(phase);
+	};
+	if (!mPersistentVoxels.PreloadVariantResources(
+		variants,
+		mMapWorld.buildSerial,
+		persistentVoxelSettings,
+		(int)nri_ptloadingtrace,
+		(bool)nri_voxelstats,
+		BuildPersistentVoxelResetServices(),
+		preloadServices))
 	{
 		if (mPersistentVoxels.preloadPending)
 		{
