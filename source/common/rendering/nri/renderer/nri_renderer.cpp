@@ -9387,7 +9387,18 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		hasPersistentVoxelBatch = !deferOverlayThisFrame && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectPersistentVoxelBatchMs);
-			PumpPersistentVoxelAdmissionQueue("runtime");
+			const MemoryTelemetry telemetry = GetMemoryTelemetry();
+			mPersistentVoxels.PumpAdmissionQueue(
+				"runtime",
+				mMapWorld.buildSerial,
+				mFrameIndex,
+				persistentVoxelSettings,
+				telemetry.totalTrackedBytes,
+				mFrameBuffer != nullptr ? mFrameBuffer->GetAdapterLocalBudgetBytes() : 0ull,
+				(int)nri_ptloadingtrace,
+				(bool)nri_voxelstats,
+				BuildPersistentVoxelResetServices(),
+				BuildPersistentVoxelAdmissionServices());
 			return EnsurePersistentVoxelBatch();
 		}();
 
@@ -14636,6 +14647,41 @@ NRIPersistentVoxelResetServices NRIRenderer::BuildPersistentVoxelResetServices()
 	return services;
 }
 
+NRIPersistentVoxelAdmissionServices NRIRenderer::BuildPersistentVoxelAdmissionServices()
+{
+	NRIPersistentVoxelAdmissionServices services = {};
+	services.user = this;
+	services.admitVariantResource = [](
+		void* user,
+		PersistentVoxelAdmissionEntry& entry,
+		uint64_t byteBudget,
+		uint32_t& blasBudget,
+		uint64_t& outUploadBytes,
+		bool& outReusedMesh,
+		bool& outReusedMaterial,
+		bool& outInProgress,
+		bool isolateBlasBuild,
+		const char*& outFailureReason) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->AdmitPersistentVoxelVariantResource(
+			entry,
+			byteBudget,
+			blasBudget,
+			outUploadBytes,
+			outReusedMesh,
+			outReusedMaterial,
+			outInProgress,
+			isolateBlasBuild,
+			outFailureReason);
+	};
+	services.submitWaitAndRestart = [](void* user, const char* reason) -> bool
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->mFrameBuffer != nullptr && renderer->mFrameBuffer->SubmitWaitAndRestartCommandList(reason);
+	};
+	return services;
+}
+
 void NRIRenderer::ResetPersistentVoxelBatch(const char* reason, bool clearSharedResources)
 {
 	mPersistentVoxels.Reset(
@@ -15248,374 +15294,6 @@ bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 	return true;
 }
 
-bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
-{
-	const bool loadingPhase = phase != nullptr && std::strcmp(phase, "loading") == 0;
-	mPersistentVoxels.SyncMapGeneration(
-		mMapWorld.buildSerial,
-		"pump-map-generation",
-		(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
-		BuildPersistentVoxelResetServices());
-	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
-	const MemoryTelemetry telemetry = GetMemoryTelemetry();
-	mPersistentVoxels.ApplyPressurePolicy(
-		phase,
-		mFrameIndex,
-		persistentVoxelSettings,
-		telemetry.totalTrackedBytes,
-		mFrameBuffer != nullptr ? mFrameBuffer->GetAdapterLocalBudgetBytes() : 0ull,
-		(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
-		BuildPersistentVoxelResetServices());
-	const uint32_t variantBudget = loadingPhase ?
-		persistentVoxelSettings.admissionLoadVariants :
-		persistentVoxelSettings.admissionRuntimeVariants;
-	const uint64_t legacyByteBudget = loadingPhase ?
-		persistentVoxelSettings.admissionLoadBytes :
-		persistentVoxelSettings.admissionRuntimeBytes;
-	const uint64_t chunkByteBudget = loadingPhase ?
-		persistentVoxelSettings.admitMaxBytesLoading :
-		persistentVoxelSettings.admitMaxBytesRuntime;
-	auto combineNonZeroBudget = [](uint64_t left, uint64_t right) -> uint64_t
-	{
-		if (left == 0)
-		{
-			return right;
-		}
-		if (right == 0)
-		{
-			return left;
-		}
-		return std::min(left, right);
-	};
-	const uint64_t byteBudget = combineNonZeroBudget(legacyByteBudget, chunkByteBudget);
-	const int configuredMsBudget = loadingPhase ?
-		(int)persistentVoxelSettings.admitMaxMsLoading :
-		(int)persistentVoxelSettings.admitMaxMsRuntime;
-	const double msBudget = loadingPhase ?
-		(configuredMsBudget > 0 ? (double)configuredMsBudget : 250.0) :
-		(double)configuredMsBudget;
-	const uint32_t blasBudgetLimit = loadingPhase ?
-		persistentVoxelSettings.admitMaxBlasLoading :
-		persistentVoxelSettings.admitMaxBlasRuntime;
-	uint32_t blasBudgetRemaining = blasBudgetLimit;
-	const auto pumpStart = std::chrono::steady_clock::now();
-	auto elapsedMs = [&]() -> double
-	{
-		return DurationMs(pumpStart, std::chrono::steady_clock::now());
-	};
-	auto isUploadState = [](PersistentVoxelAdmissionState state) -> bool
-	{
-		return state == PersistentVoxelAdmissionState::UploadingVertices ||
-			state == PersistentVoxelAdmissionState::UploadingIndices ||
-			state == PersistentVoxelAdmissionState::UploadingPrimitives ||
-			state == PersistentVoxelAdmissionState::BuildingBlas;
-	};
-
-	uint32_t requiredPendingAtStart = 0;
-	uint32_t requiredReadyAtStart = 0;
-	uint32_t optionalPendingAtStart = 0;
-	uint32_t failedAtStart = 0;
-	mPersistentVoxels.CountAdmissionWork(requiredPendingAtStart, requiredReadyAtStart, optionalPendingAtStart, failedAtStart);
-	const bool requiredOnlyPump = loadingPhase && requiredPendingAtStart != 0;
-
-	PersistentVoxelAdmissionStats stats = {};
-	std::vector<PersistentVoxelAdmissionEntry*> candidates;
-	candidates.reserve(mPersistentVoxels.admissionQueue.size());
-	for (auto& pair : mPersistentVoxels.admissionQueue)
-	{
-		PersistentVoxelAdmissionEntry& entry = pair.second;
-		if (entry.mapGeneration != mPersistentVoxels.residencyMapGeneration)
-		{
-			continue;
-		}
-		const PersistentVoxelReadinessStatus readiness = mPersistentVoxels.GetSharedVariantReadiness(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
-		const bool resourcesReady = readiness.ready;
-		if (resourcesReady)
-		{
-			if (entry.state != PersistentVoxelAdmissionState::Ready && entry.runtimeRequested)
-			{
-				mPersistentVoxels.TraceReadiness("skip-ready", phase, &entry, entry.variant.meshKeyHash, entry.variant.materialKeyHash, readiness, (int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats);
-			}
-			if (entry.uploadPrepared)
-			{
-				mPersistentVoxels.DiscardAdmissionEntry(entry, BuildPersistentVoxelResetServices());
-			}
-			entry.state = PersistentVoxelAdmissionState::Ready;
-			entry.lastReason = "resident";
-			stats.ready++;
-			continue;
-		}
-		if (entry.state == PersistentVoxelAdmissionState::Ready)
-		{
-			mPersistentVoxels.TraceReadiness("stale-ready", phase, &entry, entry.variant.meshKeyHash, entry.variant.materialKeyHash, readiness, (int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats);
-			entry.state = PersistentVoxelAdmissionState::Pending;
-			entry.lastReason = "stale-ready";
-		}
-		if (entry.state == PersistentVoxelAdmissionState::Failed)
-		{
-			stats.failed++;
-			continue;
-		}
-		if (entry.state == PersistentVoxelAdmissionState::Deferred)
-		{
-			stats.deferred++;
-		}
-		stats.queued++;
-		stats.bytesPending += entry.estimatedBytes;
-		if (entry.gpuForce)
-		{
-			stats.force++;
-		}
-		if (entry.gpuPrefer)
-		{
-			stats.prefer++;
-		}
-		if (entry.runtimeRequested)
-		{
-			stats.runtime++;
-		}
-		candidates.push_back(&entry);
-	}
-
-	std::sort(candidates.begin(), candidates.end(), [&](const PersistentVoxelAdmissionEntry* left, const PersistentVoxelAdmissionEntry* right)
-	{
-		const bool leftUploading = isUploadState(left->state);
-		const bool rightUploading = isUploadState(right->state);
-		if (leftUploading != rightUploading)
-		{
-			return leftUploading;
-		}
-		if (!loadingPhase && left->runtimeRequested != right->runtimeRequested)
-		{
-			return left->runtimeRequested;
-		}
-		if (left->admissionRank != right->admissionRank)
-		{
-			return left->admissionRank < right->admissionRank;
-		}
-		if (left->priority != right->priority)
-		{
-			return left->priority < right->priority;
-		}
-		if (left->gpuForce != right->gpuForce)
-		{
-			return left->gpuForce;
-		}
-		if (left->gpuPrefer != right->gpuPrefer)
-		{
-			return left->gpuPrefer;
-		}
-		if (left->runtimeRequested != right->runtimeRequested)
-		{
-			return left->runtimeRequested;
-		}
-		if (left->variant.primitiveCount != right->variant.primitiveCount)
-		{
-			return left->variant.primitiveCount > right->variant.primitiveCount;
-		}
-		return left->pairKey < right->pairKey;
-	});
-
-	uint32_t admitted = 0;
-	uint32_t blasUsed = 0;
-	const char* stopReason = "queue-drained";
-	for (PersistentVoxelAdmissionEntry* entry : candidates)
-	{
-		const PersistentVoxelReadinessStatus currentReadiness = mPersistentVoxels.GetSharedVariantReadiness(entry->variant.meshKeyHash, entry->variant.materialKeyHash);
-		if (currentReadiness.ready)
-		{
-			if (entry->state != PersistentVoxelAdmissionState::Ready || entry->runtimeRequested)
-			{
-				mPersistentVoxels.TraceReadiness("skip-ready", phase, entry, entry->variant.meshKeyHash, entry->variant.materialKeyHash, currentReadiness, (int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats);
-			}
-			if (entry->uploadPrepared)
-			{
-				mPersistentVoxels.DiscardAdmissionEntry(*entry, BuildPersistentVoxelResetServices());
-			}
-			entry->state = PersistentVoxelAdmissionState::Ready;
-			entry->lastReason = "resident";
-			stats.ready++;
-			continue;
-		}
-		if (entry->state == PersistentVoxelAdmissionState::Ready)
-		{
-			mPersistentVoxels.TraceReadiness("stale-ready", phase, entry, entry->variant.meshKeyHash, entry->variant.materialKeyHash, currentReadiness, (int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats);
-			entry->state = PersistentVoxelAdmissionState::Pending;
-			entry->lastReason = "stale-ready";
-		}
-		if (requiredOnlyPump && !mPersistentVoxels.IsRequiredAdmission(*entry))
-		{
-			continue;
-		}
-		if (msBudget > 0.0 && elapsedMs() >= msBudget)
-		{
-			stopReason = "ms-budget";
-			break;
-		}
-		const bool uploadState = isUploadState(entry->state);
-		if (admitted >= variantBudget && !uploadState)
-		{
-			stats.skippedBudget++;
-			entry->state = PersistentVoxelAdmissionState::Deferred;
-			entry->lastReason = "variant-budget";
-			continue;
-		}
-		if (byteBudget != 0 && stats.bytesUploaded >= byteBudget)
-		{
-			stats.skippedBudget++;
-			if (!uploadState)
-			{
-				entry->state = PersistentVoxelAdmissionState::Deferred;
-			}
-			entry->lastReason = "byte-budget";
-			stopReason = "byte-budget";
-			break;
-		}
-
-		uint64_t uploadBytes = 0;
-		bool reusedMesh = false;
-		bool reusedMaterial = false;
-		bool inProgress = false;
-		const char* failureReason = "none";
-		const uint64_t remainingByteBudget = byteBudget == 0 ? 0ull : byteBudget - stats.bytesUploaded;
-		const uint32_t blasBefore = blasBudgetRemaining;
-		const int isolateBlasPrimitiveThreshold = persistentVoxelSettings.admitIsolateBlasPrimitives;
-		const bool isolateBlasBuild =
-			loadingPhase &&
-			isolateBlasPrimitiveThreshold > 0 &&
-			entry->variant.primitiveCount >= (uint32_t)isolateBlasPrimitiveThreshold;
-		if (!AdmitPersistentVoxelVariantResource(*entry, remainingByteBudget, blasBudgetRemaining, uploadBytes, reusedMesh, reusedMaterial, inProgress, isolateBlasBuild, failureReason))
-		{
-			entry->state = PersistentVoxelAdmissionState::Failed;
-			entry->retryCount++;
-			entry->lastReason = failureReason != nullptr ? failureReason : "admit-failed";
-			stats.failedThisPump++;
-			if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
-			{
-				Printf("NRI PT voxel admission queue: event=failed source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu reason=%s\n",
-					entry->sourceBits,
-					entry->priority,
-					entry->admissionRank,
-					entry->gpuForce ? 1u : 0u,
-					entry->gpuPrefer ? 1u : 0u,
-					entry->runtimeRequested ? 1u : 0u,
-					entry->variant.sourcePicnum,
-					entry->variant.resolvedVoxelIndex,
-					(unsigned long long)entry->variant.meshKeyHash,
-					(unsigned long long)entry->variant.materialKeyHash,
-					entry->variant.primitiveCount,
-					(unsigned long long)entry->estimatedBytes,
-					entry->lastReason);
-			}
-			break;
-		}
-		const uint32_t blasBuiltThisEntry = blasBefore - blasBudgetRemaining;
-		blasUsed += blasBuiltThisEntry;
-		entry->bytesUploaded += uploadBytes;
-		stats.bytesUploaded += uploadBytes;
-		if (inProgress)
-		{
-			entry->lastReason = entry->state == PersistentVoxelAdmissionState::BuildingBlas && blasBudgetRemaining == 0 ? "blas-budget" : "uploading";
-			stopReason = entry->lastReason;
-			if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
-			{
-				Printf("NRI PT voxel admission queue: event=in-progress phase=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu upload_bytes=%llu state=%u reason=%s\n",
-					phase != nullptr ? phase : "unknown",
-					entry->sourceBits,
-					entry->priority,
-					entry->admissionRank,
-					entry->gpuForce ? 1u : 0u,
-					entry->gpuPrefer ? 1u : 0u,
-					entry->runtimeRequested ? 1u : 0u,
-					entry->variant.sourcePicnum,
-					entry->variant.resolvedVoxelIndex,
-					(unsigned long long)entry->variant.meshKeyHash,
-					(unsigned long long)entry->variant.materialKeyHash,
-					entry->variant.primitiveCount,
-					(unsigned long long)entry->estimatedBytes,
-					(unsigned long long)uploadBytes,
-					(uint32_t)entry->state,
-					entry->lastReason);
-			}
-			break;
-		}
-
-		entry->state = PersistentVoxelAdmissionState::Ready;
-		entry->lastReason = reusedMesh && reusedMaterial ? "already-resident" : "admitted";
-		stats.uploaded++;
-		admitted++;
-		if ((int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats)
-		{
-			Printf("NRI PT voxel admission queue: event=ready phase=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx prims=%u bytes=%llu upload_bytes=%llu reused_mesh=%u reused_material=%u\n",
-				phase != nullptr ? phase : "unknown",
-				entry->sourceBits,
-				entry->priority,
-				entry->admissionRank,
-				entry->gpuForce ? 1u : 0u,
-				entry->gpuPrefer ? 1u : 0u,
-				entry->runtimeRequested ? 1u : 0u,
-				entry->variant.sourcePicnum,
-				entry->variant.resolvedVoxelIndex,
-				(unsigned long long)entry->variant.meshKeyHash,
-				(unsigned long long)entry->variant.materialKeyHash,
-				entry->variant.primitiveCount,
-				(unsigned long long)entry->estimatedBytes,
-				(unsigned long long)uploadBytes,
-				reusedMesh ? 1u : 0u,
-				reusedMaterial ? 1u : 0u);
-		}
-		if (loadingPhase && blasBuiltThisEntry != 0)
-		{
-			if (mFrameBuffer == nullptr || !mFrameBuffer->SubmitWaitAndRestartCommandList("voxel-loading-blas"))
-			{
-				entry->state = PersistentVoxelAdmissionState::Failed;
-				entry->retryCount++;
-				entry->lastReason = "blas-submit-wait-failed";
-				stats.failedThisPump++;
-				stopReason = entry->lastReason;
-				break;
-			}
-			stopReason = "blas-submit-wait";
-			break;
-		}
-	}
-
-	const bool hasQueueActivity = !candidates.empty() || stats.uploaded != 0 || stats.skippedBudget != 0 || stats.failedThisPump != 0;
-	if (((int)nri_ptloadingtrace >= 1 && (loadingPhase || hasQueueActivity)) ||
-		((bool)nri_voxelstats && hasQueueActivity))
-	{
-		uint32_t requiredPending = 0;
-		uint32_t requiredReady = 0;
-		uint32_t optionalPending = 0;
-		uint32_t failed = 0;
-		mPersistentVoxels.CountAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
-		Printf("NRI PT voxel admission summary: phase=%s queued=%u ready=%u deferred=%u failed=%u uploaded=%u skipped_budget=%u bytes_pending=%llu bytes_uploaded=%llu force=%u prefer=%u runtime=%u required_pending=%u required_ready=%u optional_pending=%u variants_budget=%u bytes_budget=%llu ms_budget=%.3f ms_used=%.3f blas_budget=%u blas_used=%u stop=%s\n",
-			phase != nullptr ? phase : "unknown",
-			stats.queued,
-			stats.ready,
-			stats.deferred,
-			stats.failed + stats.failedThisPump,
-			stats.uploaded,
-			stats.skippedBudget,
-			(unsigned long long)stats.bytesPending,
-			(unsigned long long)stats.bytesUploaded,
-			stats.force,
-			stats.prefer,
-			stats.runtime,
-			requiredPending,
-			requiredReady,
-			optionalPending,
-			variantBudget,
-			(unsigned long long)byteBudget,
-			msBudget,
-			elapsedMs(),
-			blasBudgetLimit,
-			blasUsed,
-			stopReason);
-	}
-	return stats.failedThisPump == 0;
-}
-
 bool NRIRenderer::PreloadPersistentVoxelResources()
 {
 	if (!nri_ptloadingvoxelgpu)
@@ -15652,7 +15330,20 @@ bool NRIRenderer::PreloadPersistentVoxelResources()
 	preloadServices.user = this;
 	preloadServices.pumpAdmissionQueue = [](void* user, const char* phase) -> bool
 	{
-		return static_cast<NRIRenderer*>(user)->PumpPersistentVoxelAdmissionQueue(phase);
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		const NRIPersistentVoxelSettings settings = BuildNRIPersistentVoxelSettingsFromCVars();
+		const NRIRenderer::MemoryTelemetry telemetry = renderer->GetMemoryTelemetry();
+		return renderer->mPersistentVoxels.PumpAdmissionQueue(
+			phase,
+			renderer->mMapWorld.buildSerial,
+			renderer->mFrameIndex,
+			settings,
+			telemetry.totalTrackedBytes,
+			renderer->mFrameBuffer != nullptr ? renderer->mFrameBuffer->GetAdapterLocalBudgetBytes() : 0ull,
+			(int)nri_ptloadingtrace,
+			(bool)nri_voxelstats,
+			renderer->BuildPersistentVoxelResetServices(),
+			renderer->BuildPersistentVoxelAdmissionServices());
 	};
 	if (!mPersistentVoxels.PreloadVariantResources(
 		variants,

@@ -1443,6 +1443,7 @@ private:
 	NRIResourceContext BuildResourceContext() const;
 	NRIResourceServices BuildResourceServices();
 	NRIPersistentVoxelResetServices BuildPersistentVoxelResetServices();
+	NRIPersistentVoxelAdmissionServices BuildPersistentVoxelAdmissionServices();
 	NRIRendererFrameContext BuildFrameContext(int drawmode, bool portal, int debugMode, bool preserveHistory) const;
 	enum class FrameTextureSlot : uint32_t
 	{
@@ -2295,7 +2296,6 @@ private:
 		bool updateDynamicPerfStats);
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
-	bool PumpPersistentVoxelAdmissionQueue(const char* phase);
 	bool AdmitPersistentVoxelVariantResource(
 		PersistentVoxelAdmissionEntry& entry,
 		uint64_t byteBudget,

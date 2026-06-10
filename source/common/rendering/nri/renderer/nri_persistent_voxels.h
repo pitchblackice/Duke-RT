@@ -260,6 +260,38 @@ struct NRIPersistentVoxelPreloadServices
 	bool PumpAdmissionQueue(const char* phase) const;
 };
 
+struct NRIPersistentVoxelAdmissionServices
+{
+	using AdmitVariantResourceFn = bool (*)(
+		void* user,
+		PersistentVoxelAdmissionEntry& entry,
+		uint64_t byteBudget,
+		uint32_t& blasBudget,
+		uint64_t& outUploadBytes,
+		bool& outReusedMesh,
+		bool& outReusedMaterial,
+		bool& outInProgress,
+		bool isolateBlasBuild,
+		const char*& outFailureReason);
+	using SubmitWaitAndRestartFn = bool (*)(void* user, const char* reason);
+
+	void* user = nullptr;
+	AdmitVariantResourceFn admitVariantResource = nullptr;
+	SubmitWaitAndRestartFn submitWaitAndRestart = nullptr;
+
+	bool AdmitVariantResource(
+		PersistentVoxelAdmissionEntry& entry,
+		uint64_t byteBudget,
+		uint32_t& blasBudget,
+		uint64_t& outUploadBytes,
+		bool& outReusedMesh,
+		bool& outReusedMaterial,
+		bool& outInProgress,
+		bool isolateBlasBuild,
+		const char*& outFailureReason) const;
+	bool SubmitWaitAndRestart(const char* reason) const;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -298,6 +330,17 @@ public:
 		uint64_t adapterLocalBudget,
 		bool traceEnabled,
 		const NRIPersistentVoxelResetServices& services);
+	bool PumpAdmissionQueue(
+		const char* phase,
+		uint64_t buildSerial,
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		uint64_t totalTrackedBytes,
+		uint64_t adapterLocalBudget,
+		int loadingTraceLevel,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelResetServices& resetServices,
+		const NRIPersistentVoxelAdmissionServices& admissionServices);
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
