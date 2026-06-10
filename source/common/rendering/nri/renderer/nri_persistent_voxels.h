@@ -573,6 +573,7 @@ public:
 	uint64_t BuildSceneGenerationHash() const;
 	void RebuildBatchMaterialBridge(PersistentVoxelBatch& targetBatch);
 	void RecomputeBatchState(PersistentVoxelBatch& targetBatch) const;
+	void ClearActorInstances(const NRIPersistentVoxelResetServices& services);
 	void AppendMaterialBridgeTo(nri_scene::MaterialBridgeData& destination) const;
 	bool WarmMaterialResources(
 		const NRIPersistentVoxelMaterialWarmupServices& services,

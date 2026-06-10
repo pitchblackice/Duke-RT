@@ -14891,26 +14891,9 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 		FillPersistentVoxelInstanceTransform(cacheEntry.currentTranslation, meshResource.bakedTranslation, target);
 	};
 
-	auto clearPersistentVoxelActorInstances = [&]()
-	{
-		mPersistentVoxels.batch = {};
-		mPersistentVoxels.instances.clear();
-		const bool keepSharedVariantArena = !mPersistentVoxels.meshVariantResources.empty();
-		if (!keepSharedVariantArena)
-		{
-			RetireResidentBufferResource(mPersistentVoxels.vertexBuffer);
-			RetireResidentBufferResource(mPersistentVoxels.indexBuffer);
-			RetireResidentBufferResource(mPersistentVoxels.primitiveBuffer);
-			mPersistentVoxels.arenaVertexCursor = 0;
-			mPersistentVoxels.arenaIndexCursor = 0;
-			mPersistentVoxels.arenaPrimitiveCursor = 0;
-		}
-		SetCurrentSceneDataDescriptorsInitialized(false);
-	};
-
 	if (!hasPersistentVoxelCacheEntries)
 	{
-		clearPersistentVoxelActorInstances();
+		mPersistentVoxels.ClearActorInstances(BuildPersistentVoxelResetServices());
 		return false;
 	}
 

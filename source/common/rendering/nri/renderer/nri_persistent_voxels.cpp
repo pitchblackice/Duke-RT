@@ -399,6 +399,23 @@ void NRIPersistentVoxelResidency::RecomputeBatchState(PersistentVoxelBatch& targ
 		!targetBatch.materialBridge.materials.empty();
 }
 
+void NRIPersistentVoxelResidency::ClearActorInstances(const NRIPersistentVoxelResetServices& services)
+{
+	batch = {};
+	instances.clear();
+	const bool keepSharedVariantArena = !meshVariantResources.empty();
+	if (!keepSharedVariantArena)
+	{
+		services.RetireBuffer(vertexBuffer);
+		services.RetireBuffer(indexBuffer);
+		services.RetireBuffer(primitiveBuffer);
+		arenaVertexCursor = 0;
+		arenaIndexCursor = 0;
+		arenaPrimitiveCursor = 0;
+	}
+	services.InvalidateSceneDataDescriptors();
+}
+
 void NRIPersistentVoxelResidency::AppendMaterialBridgeTo(nri_scene::MaterialBridgeData& destination) const
 {
 	nri_scene::AppendMaterialBridge(batch.materialBridge, destination);
