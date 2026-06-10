@@ -2826,8 +2826,6 @@ private:
 	uint32_t mBoundDynamicPrimitiveCount = 0;
 	uint32_t mBoundStaticMaterialCount = 0;
 	uint32_t mBoundDynamicMaterialCount = 0;
-	uint32_t mBoundPersistentVoxelPrimitiveCount = 0;
-	uint32_t mBoundPersistentVoxelMaterialCount = 0;
 	uint32_t mBoundPortalCount = 0;
 	uint32_t mBoundRuntimeLightCount = 0;
 	uint32_t mBoundRuntimeLightTileCountX = 0;

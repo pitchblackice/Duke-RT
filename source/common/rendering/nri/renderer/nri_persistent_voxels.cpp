@@ -106,14 +106,6 @@ void NRIPersistentVoxelResetServices::RetireAccelerationStructure(NRIAcceleratio
 	}
 }
 
-void NRIPersistentVoxelResetServices::ClearBoundCounts() const
-{
-	if (clearBoundCounts != nullptr)
-	{
-		clearBoundCounts(user);
-	}
-}
-
 void NRIPersistentVoxelResetServices::InvalidateSceneDataDescriptors() const
 {
 	if (invalidateSceneDataDescriptors != nullptr)
@@ -193,6 +185,37 @@ bool NRIPersistentVoxelAccelerationServices::BuildBottomLevel(
 bool NRIPersistentVoxelAccelerationServices::BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const
 {
 	return barrierBuildInputs != nullptr && barrierBuildInputs(user, vertexBuffer, indexBuffer);
+}
+
+NRIPersistentVoxelDescriptorSnapshot NRIPersistentVoxelResidency::BuildDescriptorSnapshot(
+	const NRIBufferResource& fallbackVertexBuffer,
+	const NRIBufferResource& fallbackIndexBuffer,
+	const NRIBufferResource& fallbackPrimitiveBuffer,
+	const NRIBufferResource& fallbackMaterialBuffer) const
+{
+	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
+	{
+		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
+	};
+
+	NRIPersistentVoxelDescriptorSnapshot snapshot = {};
+	snapshot.vertex = selectView(vertexBuffer, fallbackVertexBuffer);
+	snapshot.index = selectView(indexBuffer, fallbackIndexBuffer);
+	snapshot.primitive = selectView(primitiveBuffer, fallbackPrimitiveBuffer);
+	snapshot.material = selectView(materialBuffer, fallbackMaterialBuffer);
+	snapshot.primitiveCount = BoundPrimitiveCount();
+	snapshot.materialCount = BoundMaterialCount();
+	return snapshot;
+}
+
+uint32_t NRIPersistentVoxelResidency::BoundPrimitiveCount() const
+{
+	return primitiveBuffer.shaderView != nullptr ? arenaPrimitiveCursor : 0u;
+}
+
+uint32_t NRIPersistentVoxelResidency::BoundMaterialCount() const
+{
+	return materialBuffer.shaderView != nullptr ? arenaMaterialCursor : 0u;
 }
 
 void NRIPersistentVoxelResidency::ApplyPressurePolicy(
@@ -1020,7 +1043,6 @@ void NRIPersistentVoxelResidency::Reset(
 	batch = {};
 	instances.clear();
 	actorRejectedSignatures.clear();
-	services.ClearBoundCounts();
 	services.InvalidateSceneDataDescriptors();
 	if (!clearSharedResources)
 	{

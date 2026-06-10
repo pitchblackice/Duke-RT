@@ -647,8 +647,6 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
-	mBoundPersistentVoxelPrimitiveCount = 0;
-	mBoundPersistentVoxelMaterialCount = 0;
 	mBoundPortalCount = 0;
 	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	mStateCommitCombinedGeometryCache = {};

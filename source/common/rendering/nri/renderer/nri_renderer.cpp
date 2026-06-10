@@ -8202,8 +8202,6 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
-	mBoundPersistentVoxelPrimitiveCount = 0;
-	mBoundPersistentVoxelMaterialCount = 0;
 	mBoundPortalCount = 0;
 	mBoundRuntimeLightCount = 0;
 	mBoundRuntimeLightTileCountX = 0;
@@ -14634,12 +14632,6 @@ NRIPersistentVoxelResetServices NRIRenderer::BuildPersistentVoxelResetServices()
 	{
 		static_cast<NRIRenderer*>(user)->RetireResidentAccelerationStructure(resource);
 	};
-	services.clearBoundCounts = [](void* user)
-	{
-		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
-		renderer->mBoundPersistentVoxelPrimitiveCount = 0;
-		renderer->mBoundPersistentVoxelMaterialCount = 0;
-	};
 	services.invalidateSceneDataDescriptors = [](void* user)
 	{
 		static_cast<NRIRenderer*>(user)->SetCurrentSceneDataDescriptorsInitialized(false);
@@ -15598,8 +15590,6 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			mPersistentVoxels.arenaIndexCursor = 0;
 			mPersistentVoxels.arenaPrimitiveCursor = 0;
 		}
-		mBoundPersistentVoxelPrimitiveCount = 0;
-		mBoundPersistentVoxelMaterialCount = 0;
 		SetCurrentSceneDataDescriptorsInitialized(false);
 	};
 
@@ -22412,10 +22402,12 @@ bool NRIRenderer::UpdateSceneDataSet(
 		mSceneDataDescriptors[18] = mReprojectionBuffer.shaderView;
 		mSceneDataDescriptors[19] = mVisibleChunkBuffer.shaderView;
 		mSceneDataDescriptors[20] = mVisibleFlatPlaneBuffer.shaderView;
-		mSceneDataDescriptors[21] = selectView(mPersistentVoxels.vertexBuffer, dynamicVertexBuffer);
-		mSceneDataDescriptors[22] = selectView(mPersistentVoxels.indexBuffer, dynamicIndexBuffer);
-		mSceneDataDescriptors[23] = selectView(mPersistentVoxels.primitiveBuffer, dynamicPrimitiveBuffer);
-		mSceneDataDescriptors[24] = selectView(mPersistentVoxels.materialBuffer, dynamicMaterialBuffer);
+		const NRIPersistentVoxelDescriptorSnapshot persistentVoxelDescriptors =
+			mPersistentVoxels.BuildDescriptorSnapshot(dynamicVertexBuffer, dynamicIndexBuffer, dynamicPrimitiveBuffer, dynamicMaterialBuffer);
+		mSceneDataDescriptors[21] = persistentVoxelDescriptors.vertex;
+		mSceneDataDescriptors[22] = persistentVoxelDescriptors.index;
+		mSceneDataDescriptors[23] = persistentVoxelDescriptors.primitive;
+		mSceneDataDescriptors[24] = persistentVoxelDescriptors.material;
 		mSceneDataDescriptors[25] = mEmissiveMaterialResponseBuffer.shaderView;
 	}
 
@@ -22440,8 +22432,6 @@ bool NRIRenderer::UpdateSceneDataSet(
 	mBoundDynamicPrimitiveCount = dynamicPrimitiveCount;
 	mBoundStaticMaterialCount = staticMaterialCount;
 	mBoundDynamicMaterialCount = dynamicMaterialCount;
-	mBoundPersistentVoxelPrimitiveCount = mPersistentVoxels.primitiveBuffer.shaderView != nullptr ? mPersistentVoxels.arenaPrimitiveCursor : 0u;
-	mBoundPersistentVoxelMaterialCount = mPersistentVoxels.materialBuffer.shaderView != nullptr ? mPersistentVoxels.arenaMaterialCursor : 0u;
 	mBoundPortalCount = mMapWorld.valid ? (uint32_t)mMapWorld.portals.size() : 0u;
 	mBoundRuntimeLightCount = activeRuntimeLightCount;
 	mBoundRuntimeLightTileCountX = runtimeLightTileCountX;
@@ -22748,7 +22738,7 @@ void NRIRenderer::ReadbackTraceShaderStats()
 		{
 		case NRI_SCENE_DATA_SOURCE_STATIC: return mBoundStaticPrimitiveCount;
 		case NRI_SCENE_DATA_SOURCE_DYNAMIC: return mBoundDynamicPrimitiveCount;
-		case NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL: return mBoundPersistentVoxelPrimitiveCount;
+		case NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL: return mPersistentVoxels.BoundPrimitiveCount();
 		default: return 0;
 		}
 	};
@@ -34380,8 +34370,6 @@ void NRIRenderer::DestroySceneBuffers()
 	mBoundDynamicPrimitiveCount = 0;
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
-	mBoundPersistentVoxelPrimitiveCount = 0;
-	mBoundPersistentVoxelMaterialCount = 0;
 	mBoundPortalCount = 0;
 	mBoundRuntimeLightCount = 0;
 	mBoundRuntimeLightTileCountX = 0;

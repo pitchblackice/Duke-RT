@@ -235,18 +235,15 @@ struct NRIPersistentVoxelResetServices
 {
 	using RetireBufferFn = void (*)(void* user, NRIBufferResource& resource);
 	using RetireAccelerationStructureFn = void (*)(void* user, NRIAccelerationStructureResource& resource);
-	using ClearBoundCountsFn = void (*)(void* user);
 	using InvalidateSceneDataDescriptorsFn = void (*)(void* user);
 
 	void* user = nullptr;
 	RetireBufferFn retireBuffer = nullptr;
 	RetireAccelerationStructureFn retireAccelerationStructure = nullptr;
-	ClearBoundCountsFn clearBoundCounts = nullptr;
 	InvalidateSceneDataDescriptorsFn invalidateSceneDataDescriptors = nullptr;
 
 	void RetireBuffer(NRIBufferResource& resource) const;
 	void RetireAccelerationStructure(NRIAccelerationStructureResource& resource) const;
-	void ClearBoundCounts() const;
 	void InvalidateSceneDataDescriptors() const;
 };
 
@@ -331,6 +328,16 @@ struct NRIPersistentVoxelAccelerationServices
 	bool BarrierBuildInputs(const NRIBufferResource& vertexBuffer, const NRIBufferResource& indexBuffer) const;
 };
 
+struct NRIPersistentVoxelDescriptorSnapshot
+{
+	nri::Descriptor* vertex = nullptr;
+	nri::Descriptor* index = nullptr;
+	nri::Descriptor* primitive = nullptr;
+	nri::Descriptor* material = nullptr;
+	uint32_t primitiveCount = 0;
+	uint32_t materialCount = 0;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -399,6 +406,13 @@ public:
 		const NRIPersistentVoxelResetServices& resetServices,
 		const NRIPersistentVoxelAccelerationServices& accelerationServices,
 		NRIPersistentVoxelAccelerationBuildStats& outStats);
+	NRIPersistentVoxelDescriptorSnapshot BuildDescriptorSnapshot(
+		const NRIBufferResource& fallbackVertexBuffer,
+		const NRIBufferResource& fallbackIndexBuffer,
+		const NRIBufferResource& fallbackPrimitiveBuffer,
+		const NRIBufferResource& fallbackMaterialBuffer) const;
+	uint32_t BoundPrimitiveCount() const;
+	uint32_t BoundMaterialCount() const;
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
