@@ -169,6 +169,58 @@ bool NRIPersistentVoxelResidency::IsSharedVariantReady(uint64_t meshResourceKey,
 	return GetSharedVariantReadiness(meshResourceKey, materialKeyHash).ready;
 }
 
+bool NRIPersistentVoxelResidency::IsRequiredAdmission(const PersistentVoxelAdmissionEntry& entry) const
+{
+	return
+		entry.mapGeneration == residencyMapGeneration &&
+		!entry.runtimeRequested &&
+		entry.priority <= 0 &&
+		(entry.sourceBits & nri_scene::PrecachedVoxelSourceBit_MountedVoxelPreload) != 0 &&
+		(entry.gpuForce ||
+			(entry.gpuPrefer && (entry.sourceBits & nri_scene::PrecachedVoxelSourceBit_MountedPreloadMap) != 0));
+}
+
+void NRIPersistentVoxelResidency::CountAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const
+{
+	requiredPending = 0;
+	requiredReady = 0;
+	optionalPending = 0;
+	failed = 0;
+
+	for (const auto& pair : admissionQueue)
+	{
+		const PersistentVoxelAdmissionEntry& entry = pair.second;
+		if (entry.mapGeneration != residencyMapGeneration)
+		{
+			continue;
+		}
+
+		const bool required = IsRequiredAdmission(entry);
+		const bool ready = IsSharedVariantReady(entry.variant.meshKeyHash, entry.variant.materialKeyHash);
+		if (ready)
+		{
+			if (required)
+			{
+				requiredReady++;
+			}
+			continue;
+		}
+		if (entry.state == PersistentVoxelAdmissionState::Failed)
+		{
+			failed++;
+			continue;
+		}
+		if (required)
+		{
+			requiredPending++;
+		}
+		else
+		{
+			optionalPending++;
+		}
+	}
+}
+
 void NRIPersistentVoxelResidency::TraceReadiness(
 	const char* event,
 	const char* phase,

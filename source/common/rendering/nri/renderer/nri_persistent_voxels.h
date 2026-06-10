@@ -255,6 +255,8 @@ public:
 	void Reset(const char* reason, bool clearSharedResources, bool traceReset, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
+	bool IsRequiredAdmission(const PersistentVoxelAdmissionEntry& entry) const;
+	void CountAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const;
 	void TraceReadiness(
 		const char* event,
 		const char* phase,
