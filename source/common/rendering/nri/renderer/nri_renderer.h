@@ -5,6 +5,7 @@
 #include "nri_frame_graph.h"
 #include "nri_frame_resources.h"
 #include "nri_nrd.h"
+#include "nri_renderer_context.h"
 #include "nri_resources.h"
 #include "nri_scene_lights.h"
 #include "nri_static_scene.h"
@@ -1438,6 +1439,8 @@ private:
 	friend void ReadbackNRIRendererAutoExposureStats(NRIRenderer& renderer);
 
 	NRIResourceContext BuildResourceContext() const;
+	NRIResourceServices BuildResourceServices();
+	NRIRendererFrameContext BuildFrameContext(int drawmode, bool portal, int debugMode, bool preserveHistory) const;
 	enum class FrameTextureSlot : uint32_t
 	{
 		ViewZ,

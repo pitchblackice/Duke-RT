@@ -23,6 +23,33 @@ struct NRIBufferResource
 	nri::MemoryLocation memoryLocation = nri::MemoryLocation::DEVICE;
 };
 
+struct NRIResourceServices
+{
+	using WaitForCommandsFn = void (*)(void* user, const char* reason);
+	using DestroyBufferResourceFn = void (*)(void* user, NRIBufferResource& resource);
+
+	NRIResourceContext context;
+	void* user = nullptr;
+	WaitForCommandsFn waitForCommands = nullptr;
+	DestroyBufferResourceFn destroyBufferResource = nullptr;
+
+	void WaitForCommands(const char* reason = nullptr) const
+	{
+		if (waitForCommands != nullptr)
+		{
+			waitForCommands(user, reason);
+		}
+	}
+
+	void DestroyBufferResource(NRIBufferResource& resource) const
+	{
+		if (destroyBufferResource != nullptr)
+		{
+			destroyBufferResource(user, resource);
+		}
+	}
+};
+
 struct NRIAccelerationStructureResource
 {
 	nri::AccelerationStructure* accelerationStructure = nullptr;

@@ -28,13 +28,14 @@ bool NRISceneUploadManager::CreateStructuredBuffer(
 	nri::BufferUsageBits usage,
 	nri::AccessStage after)
 {
-	const NRIResourceContext resourceContext = renderer.BuildResourceContext();
+	const NRIResourceServices resourceServices = renderer.BuildResourceServices();
+	const NRIResourceContext& resourceContext = resourceServices.context;
 	if (resource.buffer != nullptr || resource.shaderView != nullptr)
 	{
-		renderer.WaitForCommandsTracked();
+		resourceServices.WaitForCommands();
 	}
 
-	renderer.DestroyBufferResource(resource);
+	resourceServices.DestroyBufferResource(resource);
 
 	nri::BufferDesc desc = {};
 	desc.size = std::max<uint64_t>(size, stride);
@@ -125,6 +126,8 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 	stats.uploadCount++;
 	stats.peakUsedBytes = std::max(stats.peakUsedBytes, size);
 	renderer.NotePerfBufferUpload(&stats, size, needsGrowth, waitReason, -1);
+	const NRIResourceServices resourceServices = renderer.BuildResourceServices();
+	const NRIResourceContext& resourceContext = resourceServices.context;
 
 	if (needsGrowth)
 	{
@@ -138,16 +141,15 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 			GetNRIGrownBufferSize(resource.size, requiredSize, stride);
 		if (!writesQuiesced && (resource.buffer != nullptr || resource.shaderView != nullptr))
 		{
-			renderer.WaitForCommandsTracked(waitReason);
+			resourceServices.WaitForCommands(waitReason);
 		}
-		renderer.DestroyBufferResource(resource);
+		resourceServices.DestroyBufferResource(resource);
 
 		nri::BufferDesc desc = {};
 		desc.size = std::max<uint64_t>(grownSize, stride);
 		desc.structureStride = stride;
 		desc.usage = usage;
 
-		const NRIResourceContext resourceContext = renderer.BuildResourceContext();
 		if (resourceContext.core->CreateCommittedBuffer(*resourceContext.device, nri::MemoryLocation::DEVICE_UPLOAD, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
 		{
 			return false;
@@ -191,10 +193,9 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 		{
 			// Scene buffers are reused persistent DEVICE_UPLOAD allocations. Fence before
 			// overwriting them so prior queued frames cannot read partially updated data.
-			renderer.WaitForCommandsTracked(waitReason);
+			resourceServices.WaitForCommands(waitReason);
 		}
 
-		const NRIResourceContext resourceContext = renderer.BuildResourceContext();
 		void* mapped = resourceContext.core->MapBuffer(*resource.buffer, 0, resource.size);
 		if (mapped == nullptr)
 		{
@@ -209,7 +210,6 @@ bool NRISceneUploadManager::EnsureStructuredBuffer(
 		resourceContext.core->UnmapBuffer(*resource.buffer);
 	}
 
-	const NRIResourceContext resourceContext = renderer.BuildResourceContext();
 	if (resourceContext.commandBuffer != nullptr && after.access != nri::AccessBits::NONE)
 	{
 		nri::BufferBarrierDesc barrier = {};
@@ -243,7 +243,8 @@ bool NRISceneUploadManager::UpdateStructuredBufferRange(
 		return false;
 	}
 
-	const NRIResourceContext resourceContext = renderer.BuildResourceContext();
+	const NRIResourceServices resourceServices = renderer.BuildResourceServices();
+	const NRIResourceContext& resourceContext = resourceServices.context;
 	void* mapped = resourceContext.core->MapBuffer(*resource.buffer, byteOffset, size);
 	if (mapped == nullptr)
 	{
@@ -276,6 +277,22 @@ NRIResourceContext NRIRenderer::BuildResourceContext() const
 	context.core = mFrameBuffer != nullptr ? &mFrameBuffer->mCore : nullptr;
 	context.commandBuffer = mFrameBuffer != nullptr ? mFrameBuffer->mCommandBuffer : nullptr;
 	return context;
+}
+
+NRIResourceServices NRIRenderer::BuildResourceServices()
+{
+	NRIResourceServices services = {};
+	services.context = BuildResourceContext();
+	services.user = this;
+	services.waitForCommands = [](void* user, const char* reason)
+	{
+		static_cast<NRIRenderer*>(user)->WaitForCommandsTracked(reason);
+	};
+	services.destroyBufferResource = [](void* user, NRIBufferResource& resource)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyBufferResource(resource);
+	};
+	return services;
 }
 
 bool NRIRenderer::CreateStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after)

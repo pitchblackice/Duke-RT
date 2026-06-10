@@ -8913,6 +8913,27 @@ void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint6
 	}
 }
 
+NRIRendererFrameContext NRIRenderer::BuildFrameContext(int drawmode, bool portal, int debugMode, bool preserveHistory) const
+{
+	NRIRendererFrameContext context = {};
+	context.frameIndex = mFrameIndex;
+	context.drawMode = drawmode;
+	context.debugMode = debugMode;
+	context.portal = portal;
+	context.preserveHistory = preserveHistory;
+	if (mFrameBuffer != nullptr)
+	{
+		context.outputWidth = std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.width, 1u);
+		context.outputHeight = std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.height, 1u);
+		if (mFrameBuffer->mActiveTarget != nullptr)
+		{
+			context.targetWidth = mFrameBuffer->mActiveTarget->width;
+			context.targetHeight = mFrameBuffer->mActiveTarget->height;
+		}
+	}
+	return context;
+}
+
 bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 {
 	if ((drawmode != DM_MAINVIEW && drawmode != DM_OFFSCREEN) || portal || mFrameBuffer == nullptr ||
@@ -8930,7 +8951,6 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	ResetPerfTraceStats();
 	ScopedPtPerfTimer totalPerfTimer(mLastPerfShellTraceStats.totalMs);
 	Clocker totalClock(NriPTAll);
-	const uint32_t traceFrameIndex = mFrameIndex;
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	const bool bootstrapSimpleView = nri_ptbootstrap && bootstrapMode <= 3u;
@@ -8942,6 +8962,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	const int debugMode = (int)nri_ptdebug;
 
 	const bool preserveHistory = drawmode != DM_MAINVIEW;
+	const NRIRendererFrameContext frameContext = BuildFrameContext(drawmode, portal, debugMode, preserveHistory);
+	const uint32_t traceFrameIndex = frameContext.frameIndex;
 	uint32_t savedFrameIndex = mFrameIndex;
 	float savedCurrentCameraPos[3] = {};
 	float savedCurrentCameraForward[3] = {};
@@ -9015,10 +9037,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		ready =
 			Initialize() &&
 			EnsureFrameResources(
-				std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.width, 1u),
-				std::max<uint32_t>((uint32_t)mFrameBuffer->mSceneViewport.height, 1u),
-				mFrameBuffer->mActiveTarget->width,
-				mFrameBuffer->mActiveTarget->height);
+				frameContext.outputWidth,
+				frameContext.outputHeight,
+				frameContext.targetWidth,
+				frameContext.targetHeight);
 	}
 	if (!ready)
 	{
@@ -9059,7 +9081,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			}
 		}
 	}
-	UpdateFrameGenerationHistoryPolicy(debugMode, mFrameBuffer->mFrameGeneration.GetPolicy(), preserveHistory);
+	UpdateFrameGenerationHistoryPolicy(frameContext.debugMode, mFrameBuffer->mFrameGeneration.GetPolicy(), frameContext.preserveHistory);
 
 	RefreshMapWorld();
 	if (!ApplyStartupMapWorldCorrectionIfNeeded("render-frame-start"))
