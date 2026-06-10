@@ -1,5 +1,6 @@
 #pragma once
 
+#include "nri_frame_resources.h"
 #include "nri_renderer_settings.h"
 #include "nri_resources.h"
 #include "nri_scene_lights.h"
@@ -422,6 +423,23 @@ struct NRIPersistentVoxelMaterialWarmupServices
 	bool WarmTextures(const nri_scene::MaterialBridgeData& materials, NRIPersistentVoxelMaterialWarmupStats& stats) const;
 };
 
+struct NRIPersistentVoxelTlasServices
+{
+	using GetAccelerationStructureHandleFn = uint64_t (*)(void* user, const NRIAccelerationStructureResource& resource);
+
+	void* user = nullptr;
+	GetAccelerationStructureHandleFn getAccelerationStructureHandle = nullptr;
+
+	uint64_t GetAccelerationStructureHandle(const NRIAccelerationStructureResource& resource) const;
+};
+
+struct NRIPersistentVoxelTlasBuildStats
+{
+	uint32_t sharedMeshResourceCount = 0;
+	uint32_t instanceCount = 0;
+	uint32_t bakedFallbackInstanceCount = 0;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -514,6 +532,14 @@ public:
 	bool WarmMaterialResources(
 		const NRIPersistentVoxelMaterialWarmupServices& services,
 		NRIPersistentVoxelMaterialWarmupResult& outResult) const;
+	bool AppendTlasInstances(
+		std::vector<nri::TopLevelInstance>& instances,
+		std::vector<SceneInstanceData>& sceneInstances,
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelTlasServices& services,
+		NRIPersistentVoxelTlasBuildStats& outStats);
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
