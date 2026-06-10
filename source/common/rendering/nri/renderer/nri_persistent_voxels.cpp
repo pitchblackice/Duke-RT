@@ -196,6 +196,18 @@ bool NRIPersistentVoxelAccelerationServices::BarrierBuildInputs(const NRIBufferR
 	return barrierBuildInputs != nullptr && barrierBuildInputs(user, vertexBuffer, indexBuffer);
 }
 
+bool NRIPersistentVoxelMaterialWarmupServices::EnsurePalette(const nri_scene::MaterialBridgeData& materials) const
+{
+	return ensurePalette != nullptr && ensurePalette(user, materials);
+}
+
+bool NRIPersistentVoxelMaterialWarmupServices::WarmTextures(
+	const nri_scene::MaterialBridgeData& materials,
+	NRIPersistentVoxelMaterialWarmupStats& stats) const
+{
+	return warmTextures != nullptr && warmTextures(user, materials, stats);
+}
+
 NRIPersistentVoxelOverlayStats NRIPersistentVoxelResidency::BuildOverlayStats() const
 {
 	NRIPersistentVoxelOverlayStats stats = {};
@@ -270,6 +282,24 @@ uint64_t NRIPersistentVoxelResidency::BuildSceneGenerationHash() const
 				(uint64_t)batch.activeActorCount),
 			(uint64_t)batch.primitiveCount),
 		(uint64_t)batch.materialCount);
+}
+
+bool NRIPersistentVoxelResidency::WarmMaterialResources(
+	const NRIPersistentVoxelMaterialWarmupServices& services,
+	NRIPersistentVoxelMaterialWarmupResult& outResult) const
+{
+	outResult = {};
+	outResult.paletteReady = true;
+	outResult.hasMaterials = batch.valid && !batch.materialBridge.materials.empty();
+	outResult.materialCount = outResult.hasMaterials ? (uint32_t)batch.materialBridge.materials.size() : 0u;
+	outResult.variantResourceCount = (uint32_t)materialVariantResources.size();
+	if (!outResult.hasMaterials)
+	{
+		return true;
+	}
+
+	outResult.paletteReady = services.EnsurePalette(batch.materialBridge);
+	return outResult.paletteReady && services.WarmTextures(batch.materialBridge, outResult.textureStats);
 }
 
 NRIPersistentVoxelDescriptorSnapshot NRIPersistentVoxelResidency::BuildDescriptorSnapshot(

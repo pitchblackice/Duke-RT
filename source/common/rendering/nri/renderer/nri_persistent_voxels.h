@@ -390,6 +390,38 @@ struct NRIPersistentVoxelOverlayStats
 	uint64_t byteCount = 0;
 };
 
+struct NRIPersistentVoxelMaterialWarmupStats
+{
+	uint32_t textureRequests = 0;
+	uint32_t textureHits = 0;
+	uint32_t textureMisses = 0;
+	uint32_t textureInserts = 0;
+	uint64_t estimatedBytes = 0;
+	double realizeMs = 0.0;
+};
+
+struct NRIPersistentVoxelMaterialWarmupResult
+{
+	bool hasMaterials = false;
+	bool paletteReady = true;
+	uint32_t materialCount = 0;
+	uint32_t variantResourceCount = 0;
+	NRIPersistentVoxelMaterialWarmupStats textureStats = {};
+};
+
+struct NRIPersistentVoxelMaterialWarmupServices
+{
+	using EnsurePaletteFn = bool (*)(void* user, const nri_scene::MaterialBridgeData& materials);
+	using WarmTexturesFn = bool (*)(void* user, const nri_scene::MaterialBridgeData& materials, NRIPersistentVoxelMaterialWarmupStats& stats);
+
+	void* user = nullptr;
+	EnsurePaletteFn ensurePalette = nullptr;
+	WarmTexturesFn warmTextures = nullptr;
+
+	bool EnsurePalette(const nri_scene::MaterialBridgeData& materials) const;
+	bool WarmTextures(const nri_scene::MaterialBridgeData& materials, NRIPersistentVoxelMaterialWarmupStats& stats) const;
+};
+
 class NRIPersistentVoxelResidency
 {
 public:
@@ -477,6 +509,9 @@ public:
 	uint32_t OverlayMaterialCount() const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
 	uint64_t BuildSceneGenerationHash() const;
+	bool WarmMaterialResources(
+		const NRIPersistentVoxelMaterialWarmupServices& services,
+		NRIPersistentVoxelMaterialWarmupResult& outResult) const;
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;

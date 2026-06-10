@@ -5763,6 +5763,16 @@ namespace
 			(uint64_t)materials.paletteLookup.size();
 	}
 
+	static uint64_t EstimateSceneTextureUploadBytes(const nri_scene::TextureUpload& upload)
+	{
+		if (upload.width == 0 || upload.height == 0)
+		{
+			return 0;
+		}
+		const uint64_t bytesPerPixel = upload.indexed ? 1ull : 4ull;
+		return (uint64_t)upload.width * (uint64_t)upload.height * bytesPerPixel;
+	}
+
 	static void ClearMaterialBridgeRetainingCapacity(nri_scene::MaterialBridgeData& materials)
 	{
 		materials.materials.clear();
@@ -15302,16 +15312,6 @@ bool NRIRenderer::PreloadMaterialResources()
 		double realizeMs = 0.0;
 	};
 
-	auto estimateTextureUploadBytes = [](const nri_scene::TextureUpload& upload) -> uint64_t
-	{
-		if (upload.width == 0 || upload.height == 0)
-		{
-			return 0;
-		}
-		const uint64_t bytesPerPixel = upload.indexed ? 1ull : 4ull;
-		return (uint64_t)upload.width * (uint64_t)upload.height * bytesPerPixel;
-	};
-
 	auto isTextureCached = [&](const nri_scene::TextureUpload& upload) -> bool
 	{
 		return FindSceneTextureCacheIndex(upload.key) != UINT32_MAX;
@@ -15335,7 +15335,7 @@ bool NRIRenderer::PreloadMaterialResources()
 			}
 
 			stats.textureMisses++;
-			stats.estimatedBytes += estimateTextureUploadBytes(upload);
+			stats.estimatedBytes += EstimateSceneTextureUploadBytes(upload);
 			double realizeMs = 0.0;
 			if (!EnsureSceneTextureCacheEntry(upload, &realizeMs))
 			{
@@ -15350,11 +15350,50 @@ bool NRIRenderer::PreloadMaterialResources()
 		return true;
 	};
 
+	NRIPersistentVoxelMaterialWarmupServices voxelWarmupServices = {};
+	voxelWarmupServices.user = this;
+	voxelWarmupServices.ensurePalette = [](void* user, const nri_scene::MaterialBridgeData& materials) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->EnsurePaletteTexture(materials);
+	};
+	voxelWarmupServices.warmTextures = [](void* user, const nri_scene::MaterialBridgeData& materials, NRIPersistentVoxelMaterialWarmupStats& stats) -> bool
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		for (const nri_scene::TextureUpload& upload : materials.textures)
+		{
+			if (upload.width == 0 || upload.height == 0)
+			{
+				continue;
+			}
+
+			stats.textureRequests++;
+			const bool wasCached = renderer->FindSceneTextureCacheIndex(upload.key) != UINT32_MAX;
+			if (wasCached)
+			{
+				stats.textureHits++;
+				continue;
+			}
+
+			stats.textureMisses++;
+			stats.estimatedBytes += EstimateSceneTextureUploadBytes(upload);
+			double realizeMs = 0.0;
+			if (!renderer->EnsureSceneTextureCacheEntry(upload, &realizeMs))
+			{
+				return false;
+			}
+			stats.realizeMs += realizeMs;
+			if (renderer->FindSceneTextureCacheIndex(upload.key) != UINT32_MAX)
+			{
+				stats.textureInserts++;
+			}
+		}
+		return true;
+	};
+
 	const auto start = std::chrono::steady_clock::now();
 	MaterialWarmupStats staticStats = {};
-	MaterialWarmupStats voxelStats = {};
+	NRIPersistentVoxelMaterialWarmupResult voxelWarmup = {};
 	const bool hasStaticMaterials = mStaticMapScene.valid && !mStaticMapScene.materialBridge.materials.empty();
-	const bool hasVoxelMaterials = mPersistentVoxels.batch.valid && !mPersistentVoxels.batch.materialBridge.materials.empty();
 	bool paletteReady = true;
 	if (hasStaticMaterials)
 	{
@@ -15364,14 +15403,11 @@ bool NRIRenderer::PreloadMaterialResources()
 			return false;
 		}
 	}
-	if (hasVoxelMaterials)
+	if (!mPersistentVoxels.WarmMaterialResources(voxelWarmupServices, voxelWarmup))
 	{
-		paletteReady = paletteReady && EnsurePaletteTexture(mPersistentVoxels.batch.materialBridge);
-		if (!paletteReady || !warmMaterialTextures(mPersistentVoxels.batch.materialBridge, voxelStats))
-		{
-			return false;
-		}
+		return false;
 	}
+	paletteReady = paletteReady && voxelWarmup.paletteReady;
 
 	if ((int)nri_ptloadingtrace >= 1)
 	{
@@ -15383,15 +15419,15 @@ bool NRIRenderer::PreloadMaterialResources()
 			staticStats.textureMisses,
 			staticStats.textureInserts,
 			(unsigned long long)staticStats.estimatedBytes,
-			hasVoxelMaterials ? (uint32_t)mPersistentVoxels.batch.materialBridge.materials.size() : 0u,
-			(uint32_t)mPersistentVoxels.materialVariantResources.size(),
-			voxelStats.textureRequests,
-			voxelStats.textureHits,
-			voxelStats.textureMisses,
-			voxelStats.textureInserts,
-			(unsigned long long)voxelStats.estimatedBytes,
+			voxelWarmup.materialCount,
+			voxelWarmup.variantResourceCount,
+			voxelWarmup.textureStats.textureRequests,
+			voxelWarmup.textureStats.textureHits,
+			voxelWarmup.textureStats.textureMisses,
+			voxelWarmup.textureStats.textureInserts,
+			(unsigned long long)voxelWarmup.textureStats.estimatedBytes,
 			(uint32_t)mTextureCache.size(),
-			staticStats.realizeMs + voxelStats.realizeMs,
+			staticStats.realizeMs + voxelWarmup.textureStats.realizeMs,
 			DurationMs(start, std::chrono::steady_clock::now()));
 	}
 	return true;
