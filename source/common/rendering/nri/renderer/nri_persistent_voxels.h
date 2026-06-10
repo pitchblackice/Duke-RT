@@ -592,6 +592,20 @@ public:
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelResetServices& resetServices,
 		const NRIPersistentVoxelAdmissionServices& admissionServices);
+	bool AdmitVariantResource(
+		PersistentVoxelAdmissionEntry& entry,
+		uint64_t byteBudget,
+		uint32_t& blasBudget,
+		uint64_t& outUploadBytes,
+		bool& outReusedMesh,
+		bool& outReusedMaterial,
+		bool& outInProgress,
+		bool isolateBlasBuild,
+		const char*& outFailureReason,
+		uint32_t frameIndex,
+		int loadingTraceLevel,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelAdmissionServices& services);
 	bool BuildAccelerationStructures(
 		uint32_t frameIndex,
 		bool voxelStatsEnabled,

@@ -2297,16 +2297,6 @@ private:
 		bool updateDynamicPerfStats);
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
-	bool AdmitPersistentVoxelVariantResource(
-		PersistentVoxelAdmissionEntry& entry,
-		uint64_t byteBudget,
-		uint32_t& blasBudget,
-		uint64_t& outUploadBytes,
-		bool& outReusedMesh,
-		bool& outReusedMaterial,
-		bool& outInProgress,
-		bool isolateBlasBuild,
-		const char*& outFailureReason);
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
