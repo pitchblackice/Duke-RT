@@ -1,11 +1,15 @@
 #include "nri_static_scene.h"
 
 #include "nri_renderer.h"
+#include "../scene/nri_scene_math.h"
+#include "../system/nri_renderdevice.h"
 
 #include <algorithm>
 
 namespace
 {
+	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
+
 	template<typename T>
 	static T NRIFlags(T a, T b)
 	{
@@ -405,4 +409,136 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 	mRuntimeMapLastFrame.residentAtlasGrowCount++;
 
 	return RefreshResidentStaticSceneDataSet();
+}
+
+void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
+{
+	if (!mResidentMapChunkRegistry.valid ||
+		mResidentMapChunkRegistry.buildSerial != mStaticMapScene.buildSerial ||
+		mResidentMapChunkRegistry.entries.empty())
+	{
+		if (mStaticMapChunkAtlas.valid &&
+			mStaticMapChunkAtlas.buildSerial == mStaticMapScene.buildSerial &&
+			mStaticMapChunkAtlas.chunks.size() == mStaticMapScene.chunks.size())
+		{
+			BuildStaticMapInstances(mStaticMapScene, mStaticMapChunkAtlas, outTlasInstances, outSceneInstances);
+			return;
+		}
+
+		BuildStaticMapInstances(mStaticMapScene, outTlasInstances, outSceneInstances);
+		return;
+	}
+
+	outTlasInstances.clear();
+	outSceneInstances.clear();
+	outTlasInstances.reserve(mResidentMapChunkRegistry.activeChunkCount);
+	outSceneInstances.reserve(mResidentMapChunkRegistry.activeChunkCount);
+
+	for (const auto& entry : mResidentMapChunkRegistry.entries)
+	{
+		if (!entry.valid ||
+			!entry.active ||
+			!entry.mappedInStaticScene ||
+			entry.staticSceneChunkListIndex >= mStaticMapScene.chunks.size())
+		{
+			continue;
+		}
+
+		const auto& chunk = mStaticMapScene.chunks[entry.staticSceneChunkListIndex];
+		if (chunk.accelerationStructure.accelerationStructure == nullptr)
+		{
+			continue;
+		}
+
+		nri::TopLevelInstance instance = {};
+		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
+		instance.instanceId = (uint32_t)outSceneInstances.size();
+		instance.mask = 0xFF;
+		instance.shaderBindingTableLocalOffset = 0;
+		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		const uint32_t sectorIndex =
+			entry.chunkIndex < mMapWorld.chunks.size() && mMapWorld.chunks[entry.chunkIndex].sectorIndex >= 0 ?
+			(uint32_t)mMapWorld.chunks[entry.chunkIndex].sectorIndex :
+			UINT32_MAX;
+		outTlasInstances.push_back(instance);
+		outSceneInstances.push_back({ entry.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, entry.chunkIndex, sectorIndex });
+	}
+}
+
+void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
+{
+	outTlasInstances.clear();
+	outSceneInstances.clear();
+	outTlasInstances.reserve(staticScene.chunks.size());
+	outSceneInstances.reserve(staticScene.chunks.size());
+
+	for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)staticScene.chunks.size(); ++chunkIndex)
+	{
+		const auto& chunk = staticScene.chunks[chunkIndex];
+		if (!chunk.active)
+		{
+			continue;
+		}
+		if (chunk.accelerationStructure.accelerationStructure == nullptr)
+		{
+			continue;
+		}
+
+		nri::TopLevelInstance instance = {};
+		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
+		instance.instanceId = (uint32_t)outSceneInstances.size();
+		instance.mask = 0xFF;
+		instance.shaderBindingTableLocalOffset = 0;
+		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		const uint32_t sectorIndex =
+			chunk.chunkIndex < mMapWorld.chunks.size() && mMapWorld.chunks[chunk.chunkIndex].sectorIndex >= 0 ?
+			(uint32_t)mMapWorld.chunks[chunk.chunkIndex].sectorIndex :
+			UINT32_MAX;
+		outTlasInstances.push_back(instance);
+		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, chunk.chunkIndex, sectorIndex });
+	}
+}
+
+void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene, const StaticMapChunkAtlas& atlas, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
+{
+	if (!atlas.valid || atlas.chunks.size() != staticScene.chunks.size())
+	{
+		BuildStaticMapInstances(staticScene, outTlasInstances, outSceneInstances);
+		return;
+	}
+
+	outTlasInstances.clear();
+	outSceneInstances.clear();
+	outTlasInstances.reserve(staticScene.chunks.size());
+	outSceneInstances.reserve(staticScene.chunks.size());
+
+	for (uint32_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
+	{
+		const auto& chunk = staticScene.chunks[chunkListIndex];
+		const auto& atlasChunk = atlas.chunks[chunkListIndex];
+		if (!chunk.active || !atlasChunk.valid)
+		{
+			continue;
+		}
+		if (chunk.accelerationStructure.accelerationStructure == nullptr)
+		{
+			continue;
+		}
+
+		nri::TopLevelInstance instance = {};
+		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
+		instance.instanceId = (uint32_t)outSceneInstances.size();
+		instance.mask = 0xFF;
+		instance.shaderBindingTableLocalOffset = 0;
+		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
+		const uint32_t sectorIndex =
+			atlasChunk.chunkIndex < mMapWorld.chunks.size() && mMapWorld.chunks[atlasChunk.chunkIndex].sectorIndex >= 0 ?
+			(uint32_t)mMapWorld.chunks[atlasChunk.chunkIndex].sectorIndex :
+			UINT32_MAX;
+		outTlasInstances.push_back(instance);
+		outSceneInstances.push_back({ atlasChunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, atlasChunk.chunkIndex, sectorIndex });
+	}
 }
