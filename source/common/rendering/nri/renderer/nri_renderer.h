@@ -5,6 +5,7 @@
 #include "nri_frame_graph.h"
 #include "nri_frame_resources.h"
 #include "nri_nrd.h"
+#include "nri_persistent_voxels.h"
 #include "nri_renderer_context.h"
 #include "nri_resources.h"
 #include "nri_scene_lights.h"
@@ -1953,50 +1954,7 @@ private:
 		nri_scene::MaterialBridgeData materialBridge;
 	};
 
-	struct PersistentVoxelBatch
-	{
-		struct ActorEntry
-		{
-			uint64_t identityKey = 0;
-			uint64_t signature = 0;
-			uint64_t geometrySignature = 0;
-			uint64_t surfaceSignature = 0;
-			uint64_t bakedSurfaceSignature = 0;
-			uint64_t materialSignature = 0;
-			uint64_t meshResourceKey = 0;
-			uint64_t meshKeyHash = 0;
-			uint64_t materialKeyHash = 0;
-			uint64_t lastSeenFrame = 0;
-			uint64_t retainedFrameAge = 0;
-			int32_t sourcePicnum = -1;
-			int32_t resolvedVoxelIndex = -1;
-			uint32_t visibilityChunkIndex = UINT32_MAX;
-			bool capturedThisFrame = false;
-			bool inWorldTlasThisFrame = false;
-			bool active = true;
-			uint32_t primitiveOffset = 0;
-			uint32_t primitiveCount = 0;
-			uint32_t indexOffset = 0;
-			uint32_t indexCount = 0;
-			uint32_t materialOffset = 0;
-			uint32_t materialCount = 0;
-			std::array<float, 12> instanceTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
-			std::array<float, 12> previousInstanceTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
-			nri_scene::MaterialBridgeData materialBridge;
-			std::vector<SceneLightSystem::SurfaceRecord> lightRecords;
-		};
-
-		bool valid = false;
-		uint64_t sourceSerial = 0;
-		uint32_t surfaceCount = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t materialCount = 0;
-		uint32_t activeActorCount = 0;
-		uint32_t rebuildCount = 0;
-		nri_scene::SceneDebugStats stats;
-		nri_scene::MaterialBridgeData materialBridge;
-		std::vector<ActorEntry> actors;
-	};
+	using PersistentVoxelBatch = ::PersistentVoxelBatch;
 
 	struct StateCommitDomainGenerations
 	{
@@ -2011,177 +1969,13 @@ private:
 		uint64_t sceneConstants = 0;
 	};
 
-	struct PersistentVoxelMeshVariantResource
-	{
-		uint64_t resourceKey = 0;
-		uint64_t meshKeyHash = 0;
-		uint64_t transformBasisSignature = 0;
-		nri_scene::VoxelMeshBakeSpace meshBakeSpace = nri_scene::VoxelMeshBakeSpace::Unknown;
-		uint32_t primitiveCount = 0;
-		uint32_t indexCount = 0;
-		uint32_t vertexCount = 0;
-		uint32_t vertexOffset = 0;
-		uint32_t vertexCapacity = 0;
-		uint32_t indexOffset = 0;
-		uint32_t indexCapacity = 0;
-		uint32_t primitiveOffset = 0;
-		uint32_t primitiveCapacity = 0;
-		uint32_t tlasReadyFrame = 0;
-		uint32_t lastDesiredMapGeneration = 0;
-		uint32_t lastUsedMapGeneration = 0;
-		uint32_t lastUsedFrame = 0;
-		uint32_t sourceBits = 0;
-		uint32_t activeActorReferences = 0;
-		int32_t priority = 0;
-		uint64_t residentBytes = 0;
-		bool tlasPublished = false;
-		bool cold = false;
-		bool gpuForce = false;
-		bool gpuPrefer = false;
-		bool lightTemplateValid = false;
-		float lightTemplateCenter[3] = {};
-		float lightTemplateBoundsRadius = 0.0f;
-		float lightTemplateSurfaceArea = 0.0f;
-		float bakedTranslation[3] = {};
-		NRIBufferResource vertexBuffer;
-		NRIBufferResource indexBuffer;
-		NRIAccelerationStructureResource accelerationStructure;
-	};
-
-	struct PersistentVoxelMaterialVariantResource
-	{
-		uint64_t materialKeyHash = 0;
-		uint64_t materialSignature = 0;
-		uint64_t materialPayloadHash = 0;
-		uint32_t materialOffset = 0;
-		uint32_t materialCount = 0;
-		uint32_t materialCapacity = 0;
-		uint32_t lastDesiredMapGeneration = 0;
-		uint32_t lastUsedMapGeneration = 0;
-		uint32_t lastUsedFrame = 0;
-		uint32_t sourceBits = 0;
-		uint32_t activeActorReferences = 0;
-		int32_t priority = 0;
-		uint64_t residentBytes = 0;
-		uint64_t materialUploadHash = 0;
-		bool cold = false;
-		bool gpuForce = false;
-		bool gpuPrefer = false;
-		nri_scene::MaterialBridgeData materialBridge;
-	};
-
-	enum class PersistentVoxelAdmissionState : uint8_t
-	{
-		Pending,
-		UploadingVertices,
-		UploadingIndices,
-		UploadingPrimitives,
-		BuildingBlas,
-		Ready,
-		Deferred,
-		Failed,
-	};
-
-	struct PersistentVoxelAdmissionEntry
-	{
-		uint64_t pairKey = 0;
-		nri_scene::PrecachedVoxelVariantView variant;
-		PersistentVoxelAdmissionState state = PersistentVoxelAdmissionState::Pending;
-		uint32_t sourceBits = 0;
-		int32_t priority = 0;
-		int32_t admissionRank = 0;
-		bool gpuForce = false;
-		bool gpuPrefer = false;
-		bool runtimeRequested = false;
-		uint32_t retryCount = 0;
-		uint32_t mapGeneration = 0;
-		uint64_t estimatedBytes = 0;
-		uint64_t bytesUploaded = 0;
-		bool uploadPrepared = false;
-		uint32_t shaderVertexOffset = 0;
-		uint32_t shaderIndexOffset = 0;
-		uint32_t shaderPrimitiveOffset = 0;
-		uint32_t savedVertexCursor = 0;
-		uint32_t savedIndexCursor = 0;
-		uint32_t savedPrimitiveCursor = 0;
-		uint32_t savedMaterialCursor = 0;
-		uint64_t vertexBytesUploaded = 0;
-		uint64_t vertexArenaBytesUploaded = 0;
-		uint64_t indexBytesUploaded = 0;
-		uint64_t indexArenaBytesUploaded = 0;
-		uint64_t primitiveBytesUploaded = 0;
-		bool uploadSubmittedBeforeBlas = false;
-		nri_scene::GeometryData uploadGeometry;
-		std::vector<uint32_t> uploadGpuIndices;
-		std::vector<nri_scene::PrimitiveData> uploadGpuPrimitives;
-		PersistentVoxelMeshVariantResource uploadMeshResource;
-		PersistentVoxelMaterialVariantResource uploadMaterialResource;
-		const char* lastReason = "none";
-	};
-
-	struct PersistentVoxelReadinessStatus
-	{
-		const char* reason = "ready";
-		bool ready = false;
-		bool meshPresent = false;
-		bool meshPublished = false;
-		bool meshKeyMatches = false;
-		bool meshCountsValid = false;
-		bool meshPrivateBuffersReady = false;
-		bool meshArenaBuffersReady = false;
-		bool blasReady = false;
-		bool materialPresent = false;
-		bool materialPublished = false;
-		bool materialKeyMatches = false;
-		bool materialCountValid = false;
-		bool materialBridgeReady = false;
-		uint64_t meshResourceKey = 0;
-		uint32_t meshVertexCount = 0;
-		uint32_t meshIndexCount = 0;
-		uint32_t meshPrimitiveCount = 0;
-		uint32_t materialCount = 0;
-		uint32_t materialBridgeCount = 0;
-	};
-
-	struct PersistentVoxelAdmissionStats
-	{
-		uint32_t queued = 0;
-		uint32_t ready = 0;
-		uint32_t deferred = 0;
-		uint32_t failed = 0;
-		uint32_t enqueued = 0;
-		uint32_t deduped = 0;
-		uint32_t promoted = 0;
-		uint32_t uploaded = 0;
-		uint32_t force = 0;
-		uint32_t prefer = 0;
-		uint32_t runtime = 0;
-		uint32_t skippedBudget = 0;
-		uint32_t failedThisPump = 0;
-		uint64_t bytesPending = 0;
-		uint64_t bytesUploaded = 0;
-	};
-
-	struct PersistentVoxelInstanceRecord
-	{
-		uint64_t identityKey = 0;
-		uint64_t signature = 0;
-		uint64_t geometrySignature = 0;
-		uint64_t surfaceSignature = 0;
-		uint64_t bakedSurfaceSignature = 0;
-		uint64_t materialSignature = 0;
-		uint64_t meshKeyHash = 0;
-		uint64_t materialKeyHash = 0;
-		uint64_t meshVariantHash = 0;
-		uint64_t materialVariantHash = 0;
-		uint64_t meshResourceKey = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t lastSeenFrame = 0;
-		bool active = false;
-		bool pending = false;
-		std::array<float, 12> currentTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
-		std::array<float, 12> previousTransform = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
-	};
+	using PersistentVoxelMeshVariantResource = ::PersistentVoxelMeshVariantResource;
+	using PersistentVoxelMaterialVariantResource = ::PersistentVoxelMaterialVariantResource;
+	using PersistentVoxelAdmissionState = ::PersistentVoxelAdmissionState;
+	using PersistentVoxelAdmissionEntry = ::PersistentVoxelAdmissionEntry;
+	using PersistentVoxelReadinessStatus = ::PersistentVoxelReadinessStatus;
+	using PersistentVoxelAdmissionStats = ::PersistentVoxelAdmissionStats;
+	using PersistentVoxelInstanceRecord = ::PersistentVoxelInstanceRecord;
 
 	struct ActorSpriteDebugStats
 	{
@@ -2923,10 +2717,6 @@ private:
 	NRIBufferResource mStaticIndexBuffer;
 	NRIBufferResource mStaticPrimitiveBuffer;
 	NRIBufferResource mStaticMaterialBuffer;
-	NRIBufferResource mPersistentVoxelVertexBuffer;
-	NRIBufferResource mPersistentVoxelIndexBuffer;
-	NRIBufferResource mPersistentVoxelPrimitiveBuffer;
-	NRIBufferResource mPersistentVoxelMaterialBuffer;
 	NRIBufferResource mTlasInstanceBuffer;
 	std::vector<NRIBufferResource> mTlasInstanceBufferRing;
 	NRIBufferResource mSceneInstanceBuffer;
@@ -3013,22 +2803,7 @@ private:
 	RuntimeMapMutationCache mRuntimeMapMutations;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
 	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
-	PersistentVoxelBatch mPersistentVoxelBatch = {};
-	std::unordered_map<uint64_t, PersistentVoxelMeshVariantResource> mPersistentVoxelMeshVariantResources;
-	std::unordered_map<uint64_t, PersistentVoxelMaterialVariantResource> mPersistentVoxelMaterialVariantResources;
-	std::unordered_map<uint64_t, PersistentVoxelInstanceRecord> mPersistentVoxelInstances;
-	std::unordered_map<uint64_t, uint64_t> mPersistentVoxelActorRejectedSignatures;
-	std::unordered_map<uint64_t, PersistentVoxelAdmissionEntry> mPersistentVoxelAdmissionQueue;
-	std::unordered_set<uint64_t> mPersistentVoxelPublishedMeshKeys;
-	std::unordered_set<uint64_t> mPersistentVoxelPublishedMaterialKeys;
-	uint32_t mPersistentVoxelArenaVertexCursor = 0;
-	uint32_t mPersistentVoxelArenaIndexCursor = 0;
-	uint32_t mPersistentVoxelArenaPrimitiveCursor = 0;
-	uint32_t mPersistentVoxelArenaMaterialCursor = 0;
-	uint32_t mPersistentVoxelResidencyMapGeneration = 0;
-	uint64_t mPersistentVoxelResidencyLastBuildSerial = 0;
-	bool mPersistentVoxelLoadingWarmupActive = false;
-	bool mPersistentVoxelPreloadPending = false;
+	NRIPersistentVoxelResidency mPersistentVoxels;
 	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};
 	bool mHasLastStateCommitDomainGenerations = false;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
