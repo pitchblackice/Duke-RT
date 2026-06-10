@@ -488,6 +488,88 @@ struct NRIPersistentVoxelMaterialUploadStats
 	uint32_t domainHashMisses = 0;
 };
 
+struct NRIPersistentVoxelBatchStats
+{
+	double geometryBuildPersistentVoxelVariantMs = 0.0;
+	double geometryBuildPersistentVoxelAppendMs = 0.0;
+	double geometryBuildPersistentVoxelRebuildMs = 0.0;
+	double persistentVoxelTexturePrewarmMs = 0.0;
+	uint32_t geometryBuildPersistentVoxelVariantCalls = 0;
+	uint32_t geometryBuildPersistentVoxelVariantPrimitives = 0;
+	uint32_t persistentVoxelTexturePrewarmHitCount = 0;
+	uint32_t persistentVoxelTexturePrewarmQueuedCount = 0;
+	uint32_t persistentVoxelTexturePrewarmMissCount = 0;
+	uint32_t persistentVoxelTexturePrewarmDeferredCount = 0;
+	uint32_t persistentVoxelTexturePrewarmProcessedCount = 0;
+	uint64_t persistentVoxelTexturePrewarmByteBudget = 0;
+	uint64_t persistentVoxelTexturePrewarmEstimatedBytes = 0;
+	uint64_t persistentVoxelTexturePrewarmDeferredBytes = 0;
+	uint64_t persistentVoxelTexturePrewarmProcessedBytes = 0;
+	uint32_t persistentVoxelOnboardingCandidateCount = 0;
+	uint32_t persistentVoxelOnboardingDeferredCount = 0;
+	uint32_t persistentVoxelOnboardingPrimitiveBudgetHits = 0;
+	uint32_t persistentVoxelOnboardingByteBudgetHits = 0;
+	uint32_t persistentVoxelOnboardingActorBudgetHits = 0;
+	uint32_t persistentVoxelOnboardingAdmittedCount = 0;
+	uint32_t persistentVoxelOnboardingTextureBudgetHits = 0;
+	uint64_t persistentVoxelOnboardingEstimatedBytes = 0;
+	uint64_t persistentVoxelOnboardingDeferredBytes = 0;
+	uint64_t persistentVoxelOnboardingAdmittedBytes = 0;
+	uint64_t persistentVoxelOnboardingByteBudget = 0;
+	uint32_t persistentVoxelInstanceTransformUpdates = 0;
+};
+
+struct NRIPersistentVoxelBatchServices
+{
+	using BuildMaterialsFn = void (*)(void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label);
+	using IsTextureCachedFn = bool (*)(void* user, const nri_scene::TextureUpload& upload);
+	using PrewarmTextureFn = bool (*)(void* user, const nri_scene::TextureUpload& upload, double* outMs);
+	using AssignGeometryPortalIndicesFn = void (*)(void* user, nri_scene::GeometryData& geometry);
+	using EnsureStructuredBufferFn = bool (*)(void* user, NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* reason, int uploadKind);
+	using EnsureArenaBufferFn = bool (*)(void* user, NRIBufferResource& resource, uint64_t requiredSize, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after);
+	using StageBufferCopyRangeFn = bool (*)(void* user, NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
+	using NoteBufferUploadFn = void (*)(void* user, int uploadKind, uint64_t size, const char* reason);
+	using RetireAccelerationStructureFn = void (*)(void* user, NRIAccelerationStructureResource& resource);
+	using MaterialWouldEmitFn = bool (*)(void* user, const nri_scene::MaterialLightingMetadata& metadata);
+	using BuildSurfaceRecordFn = SceneLightSystem::SurfaceRecord (*)(
+		void* user,
+		const nri_scene::SurfaceRef& surface,
+		const nri_scene::MaterialBridgeData& materials,
+		SceneLightRecordSource source,
+		uint32_t materialIndex,
+		uint32_t primitiveIndex);
+
+	void* user = nullptr;
+	BuildMaterialsFn buildMaterials = nullptr;
+	IsTextureCachedFn isTextureCached = nullptr;
+	PrewarmTextureFn prewarmTexture = nullptr;
+	AssignGeometryPortalIndicesFn assignGeometryPortalIndices = nullptr;
+	EnsureStructuredBufferFn ensureStructuredBuffer = nullptr;
+	EnsureArenaBufferFn ensureArenaBuffer = nullptr;
+	StageBufferCopyRangeFn stageBufferCopyRange = nullptr;
+	NoteBufferUploadFn noteBufferUpload = nullptr;
+	RetireAccelerationStructureFn retireAccelerationStructure = nullptr;
+	MaterialWouldEmitFn materialWouldEmit = nullptr;
+	BuildSurfaceRecordFn buildSurfaceRecord = nullptr;
+
+	void BuildMaterials(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label) const;
+	bool IsTextureCached(const nri_scene::TextureUpload& upload) const;
+	bool PrewarmTexture(const nri_scene::TextureUpload& upload, double* outMs) const;
+	void AssignGeometryPortalIndices(nri_scene::GeometryData& geometry) const;
+	bool EnsureStructuredBuffer(NRIBufferResource& resource, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* reason, int uploadKind) const;
+	bool EnsureArenaBuffer(NRIBufferResource& resource, uint64_t requiredSize, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) const;
+	bool StageBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind) const;
+	void NoteBufferUpload(int uploadKind, uint64_t size, const char* reason) const;
+	void RetireAccelerationStructure(NRIAccelerationStructureResource& resource) const;
+	bool MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const;
+	SceneLightSystem::SurfaceRecord BuildSurfaceRecord(
+		const nri_scene::SurfaceRef& surface,
+		const nri_scene::MaterialBridgeData& materials,
+		SceneLightRecordSource source,
+		uint32_t materialIndex,
+		uint32_t primitiveIndex) const;
+};
+
 struct NRIPersistentVoxelMaterialUploadServices
 {
 	using EnsureMaterialArenaBufferFn = bool (*)(void* user, NRIBufferResource& resource, uint64_t sizeBytes);
@@ -606,6 +688,15 @@ public:
 		int loadingTraceLevel,
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelAdmissionServices& services);
+	bool EnsureBatch(
+		uint64_t buildSerial,
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		int loadingTraceLevel,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelResetServices& resetServices,
+		const NRIPersistentVoxelBatchServices& batchServices,
+		NRIPersistentVoxelBatchStats& outStats);
 	bool BuildAccelerationStructures(
 		uint32_t frameIndex,
 		bool voxelStatsEnabled,
