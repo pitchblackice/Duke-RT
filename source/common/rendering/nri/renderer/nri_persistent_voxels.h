@@ -1,5 +1,6 @@
 #pragma once
 
+#include "nri_renderer_settings.h"
 #include "nri_resources.h"
 #include "nri_scene_lights.h"
 
@@ -288,3 +289,11 @@ public:
 	bool loadingWarmupActive = false;
 	bool preloadPending = false;
 };
+
+const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace bakeSpace);
+void CopyPersistentVoxelInstanceTransform(const float source[12], std::array<float, 12>& target);
+bool SamePersistentVoxelInstanceTransform(const std::array<float, 12>& left, const float right[12]);
+void FillPersistentVoxelInstanceTransform(const float currentTranslation[3], const float bakedTranslation[3], std::array<float, 12>& target);
+uint64_t EstimatePersistentVoxelActorUploadBytes(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry);
+bool IsPersistentVoxelMeshResourceTransformKeyed(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const NRIPersistentVoxelSettings& settings);
+uint64_t BuildPersistentVoxelMeshResourceKey(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const NRIPersistentVoxelSettings& settings);

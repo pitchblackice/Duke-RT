@@ -1,6 +1,81 @@
 #include "nri_persistent_voxels.h"
 
+#include "../scene/nri_hash.h"
 #include "printf.h"
+
+#include <cmath>
+
+const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace bakeSpace)
+{
+	switch (bakeSpace)
+	{
+	case nri_scene::VoxelMeshBakeSpace::LocalSpace: return "local";
+	case nri_scene::VoxelMeshBakeSpace::BakedTransform: return "baked";
+	default: return "unknown";
+	}
+}
+
+void CopyPersistentVoxelInstanceTransform(const float source[12], std::array<float, 12>& target)
+{
+	for (size_t i = 0; i < target.size(); ++i)
+	{
+		target[i] = source[i];
+	}
+}
+
+bool SamePersistentVoxelInstanceTransform(const std::array<float, 12>& left, const float right[12])
+{
+	constexpr float Epsilon = 0.0001f;
+	for (size_t i = 0; i < left.size(); ++i)
+	{
+		if (std::abs(left[i] - right[i]) > Epsilon)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+void FillPersistentVoxelInstanceTransform(
+	const float currentTranslation[3],
+	const float bakedTranslation[3],
+	std::array<float, 12>& target)
+{
+	target = { 1.0f, 0.0f, 0.0f, currentTranslation[0] - bakedTranslation[0],
+		0.0f, 1.0f, 0.0f, currentTranslation[1] - bakedTranslation[1],
+		0.0f, 0.0f, 1.0f, currentTranslation[2] - bakedTranslation[2] };
+}
+
+uint64_t EstimatePersistentVoxelActorUploadBytes(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
+{
+	if (cacheEntry.surface == nullptr)
+	{
+		return 0;
+	}
+
+	const uint64_t vertexBytes = (uint64_t)cacheEntry.surface->vertices.size() * sizeof(nri_scene::SceneVertex);
+	const uint64_t indexBytes = (uint64_t)cacheEntry.surface->indices.size() * sizeof(uint32_t);
+	const uint64_t primitiveBytes = (uint64_t)cacheEntry.primitiveCount * sizeof(nri_scene::PrimitiveData);
+	const uint64_t materialBytes = sizeof(nri_scene::MaterialData);
+	return vertexBytes + indexBytes + primitiveBytes + materialBytes;
+}
+
+bool IsPersistentVoxelMeshResourceTransformKeyed(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const NRIPersistentVoxelSettings& settings)
+{
+	return settings.transformKeyed ||
+		cacheEntry.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace;
+}
+
+uint64_t BuildPersistentVoxelMeshResourceKey(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry, const NRIPersistentVoxelSettings& settings)
+{
+	if (!IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry, settings))
+	{
+		return cacheEntry.meshKeyHash;
+	}
+	uint64_t hash = cacheEntry.meshKeyHash;
+	hash = nri_scene::HashCombine64(hash, cacheEntry.transformBasisSignature);
+	return hash;
+}
 
 void NRIPersistentVoxelResetServices::RetireBuffer(NRIBufferResource& resource) const
 {

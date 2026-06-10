@@ -219,15 +219,6 @@ CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	}
 }
 
-static const char* GetPersistentVoxelBakeSpaceName(nri_scene::VoxelMeshBakeSpace bakeSpace)
-{
-	switch (bakeSpace)
-	{
-	case nri_scene::VoxelMeshBakeSpace::LocalSpace: return "local";
-	case nri_scene::VoxelMeshBakeSpace::BakedTransform: return "baked";
-	default: return "unknown";
-	}
-}
 CUSTOM_CVAR(Int, nri_ptoutputmode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -682,51 +673,6 @@ namespace
 		return
 			(reasonMask & materialOnlyReasonMask) != 0 &&
 			(reasonMask & ~materialOnlyReasonMask) == 0;
-	}
-
-	static void CopyPersistentVoxelInstanceTransform(const float source[12], std::array<float, 12>& target)
-	{
-		for (size_t i = 0; i < target.size(); ++i)
-		{
-			target[i] = source[i];
-		}
-	}
-
-	static bool SamePersistentVoxelInstanceTransform(const std::array<float, 12>& left, const float right[12])
-	{
-		constexpr float Epsilon = 0.0001f;
-		for (size_t i = 0; i < left.size(); ++i)
-		{
-			if (std::abs(left[i] - right[i]) > Epsilon)
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-
-	static void FillPersistentVoxelInstanceTransform(
-		const float currentTranslation[3],
-		const float bakedTranslation[3],
-		std::array<float, 12>& target)
-	{
-		target = { 1.0f, 0.0f, 0.0f, currentTranslation[0] - bakedTranslation[0],
-			0.0f, 1.0f, 0.0f, currentTranslation[1] - bakedTranslation[1],
-			0.0f, 0.0f, 1.0f, currentTranslation[2] - bakedTranslation[2] };
-	}
-
-	static uint64_t EstimatePersistentVoxelActorUploadBytes(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
-	{
-		if (cacheEntry.surface == nullptr)
-		{
-			return 0;
-		}
-
-		const uint64_t vertexBytes = (uint64_t)cacheEntry.surface->vertices.size() * sizeof(nri_scene::SceneVertex);
-		const uint64_t indexBytes = (uint64_t)cacheEntry.surface->indices.size() * sizeof(uint32_t);
-		const uint64_t primitiveBytes = (uint64_t)cacheEntry.primitiveCount * sizeof(nri_scene::PrimitiveData);
-		const uint64_t materialBytes = sizeof(nri_scene::MaterialData);
-		return vertexBytes + indexBytes + primitiveBytes + materialBytes;
 	}
 
 	static uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView)
@@ -3308,32 +3254,6 @@ CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLO
 		self = 0.0f;
 	}
 }
-CVAR(Int, nri_ptpersistentvoxelbuildactors, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptpersistentvoxelbuildprims, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptpersistentvoxelbuildbytes, 4 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptpersistentvoxeltextureprewarms, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptpersistentvoxeltexturebytes, 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelruntimebudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmissionloadvariants, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmissionloadbytes, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmissionruntimevariants, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmissionruntimebytes, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxbytesloading, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxbytesruntime, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxmsloading, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxmsruntime, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxblasloading, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxblasruntime, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxblasprims, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitisolateblasprims, 65536, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelresidentmaxbytes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelresidentminheadroombytes, 512 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelresidentmaxcoldmaps, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelexcludeindex, -1, 0)
-CVAR(Int, nri_ptvoxelexcludeindex2, -1, 0)
-CVAR(Int, nri_ptvoxelexcludeindex3, -1, 0)
-CVAR(Int, nri_ptvoxelexcludeminprims, 0, 0)
 CVAR(Int, nri_ptsurfaceprobe, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_pttemporaltrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, nri_ptscenestats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -7064,23 +6984,6 @@ namespace
 		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
 	}
 
-	static bool IsPersistentVoxelMeshResourceTransformKeyed(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
-	{
-		return (bool)nri_ptvoxeltransformkeyed ||
-			cacheEntry.meshBakeSpace != nri_scene::VoxelMeshBakeSpace::LocalSpace;
-	}
-
-	static uint64_t BuildPersistentVoxelMeshResourceKey(const nri_scene::PersistentVoxelCacheEntryView& cacheEntry)
-	{
-		if (!IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry))
-		{
-			return cacheEntry.meshKeyHash;
-		}
-		uint64_t hash = cacheEntry.meshKeyHash;
-		hash = HashCombine64(hash, cacheEntry.transformBasisSignature);
-		return hash;
-	}
-
 	static uint32_t FloatBits(float value)
 	{
 		uint32_t bits = 0;
@@ -8963,6 +8866,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	const bool preserveHistory = drawmode != DM_MAINVIEW;
 	const NRIRendererFrameContext frameContext = BuildFrameContext(drawmode, portal, debugMode, preserveHistory);
+	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
 	const uint32_t traceFrameIndex = frameContext.frameIndex;
 	uint32_t savedFrameIndex = mFrameIndex;
 	float savedCurrentCameraPos[3] = {};
@@ -10204,10 +10108,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						uint64_t persistentVoxelTlasInstancePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasUniquePrimitiveCount = 0;
 						uint64_t persistentVoxelTlasMaxRetainedFrameAge = 0;
-						const int32_t persistentVoxelExcludeIndex0 = (int32_t)nri_ptvoxelexcludeindex;
-						const int32_t persistentVoxelExcludeIndex1 = (int32_t)nri_ptvoxelexcludeindex2;
-						const int32_t persistentVoxelExcludeIndex2 = (int32_t)nri_ptvoxelexcludeindex3;
-						const uint32_t persistentVoxelExcludeMinPrims = (uint32_t)std::max(0, (int)nri_ptvoxelexcludeminprims);
+						const int32_t persistentVoxelExcludeIndex0 = persistentVoxelSettings.excludeIndices[0];
+						const int32_t persistentVoxelExcludeIndex1 = persistentVoxelSettings.excludeIndices[1];
+						const int32_t persistentVoxelExcludeIndex2 = persistentVoxelSettings.excludeIndices[2];
+						const uint32_t persistentVoxelExcludeMinPrims = persistentVoxelSettings.excludeMinPrimitives;
 						uint64_t persistentVoxelRetainedTlasPrimitives = 0;
 						auto computePersistentVoxelRetainedAge = [&](const PersistentVoxelBatch::ActorEntry& actor) -> uint64_t
 						{
@@ -15194,6 +15098,7 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 	}
 
 	SyncPersistentVoxelResidencyMapGeneration("admission-map-generation");
+	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
 
 	const uint64_t pairKey = HashCombine64(variant.meshKeyHash, variant.materialKeyHash);
 	const uint64_t estimatedBytes =
@@ -15202,8 +15107,7 @@ bool NRIRenderer::EnqueuePersistentVoxelAdmission(
 		(uint64_t)variant.primitiveCount * (uint64_t)sizeof(nri_scene::PrimitiveData);
 	const int32_t variantAdmissionRank =
 		variant.admissionRank != 0 || variant.priority <= 0 ? variant.admissionRank : variant.priority * 10000 + 9900;
-	const uint32_t maxBlasPrimitives =
-		(int)nri_ptvoxeladmitmaxblasprims <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasprims;
+	const uint32_t maxBlasPrimitives = persistentVoxelSettings.admitMaxBlasPrimitives;
 	auto traceAdmissionSkip = [&](const nri_scene::PrecachedVoxelVariantView& skippedVariant, uint64_t skippedBytes, const char* reason)
 	{
 		if ((int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats)
@@ -15379,6 +15283,7 @@ void NRIRenderer::ApplyPersistentVoxelResidencyPressurePolicy(const char* phase)
 	{
 		return;
 	}
+	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
 
 	std::unordered_map<uint64_t, uint32_t> activeMeshReferences;
 	std::unordered_map<uint64_t, uint32_t> activeMaterialReferences;
@@ -15460,12 +15365,9 @@ void NRIRenderer::ApplyPersistentVoxelResidencyPressurePolicy(const char* phase)
 		}
 	}
 
-	const uint64_t maxResidentBytes =
-		(int)nri_ptvoxelresidentmaxbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxelresidentmaxbytes;
-	const uint64_t minHeadroomBytes =
-		(int)nri_ptvoxelresidentminheadroombytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxelresidentminheadroombytes;
-	const uint32_t maxColdMaps =
-		(int)nri_ptvoxelresidentmaxcoldmaps < 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxelresidentmaxcoldmaps;
+	const uint64_t maxResidentBytes = persistentVoxelSettings.residentMaxBytes;
+	const uint64_t minHeadroomBytes = persistentVoxelSettings.residentMinHeadroomBytes;
+	const uint32_t maxColdMaps = persistentVoxelSettings.residentMaxColdMaps;
 	const MemoryTelemetry telemetry = GetMemoryTelemetry();
 	const uint64_t adapterLocalBudget = mFrameBuffer != nullptr ? mFrameBuffer->GetAdapterLocalBudgetBytes() : 0ull;
 	uint64_t pressureBytes = 0;
@@ -16251,16 +16153,17 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 {
 	const bool loadingPhase = phase != nullptr && std::strcmp(phase, "loading") == 0;
 	SyncPersistentVoxelResidencyMapGeneration("pump-map-generation");
+	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
 	ApplyPersistentVoxelResidencyPressurePolicy(phase);
 	const uint32_t variantBudget = loadingPhase ?
-		((int)nri_ptvoxeladmissionloadvariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmissionloadvariants) :
-		((int)nri_ptvoxeladmissionruntimevariants <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmissionruntimevariants);
+		persistentVoxelSettings.admissionLoadVariants :
+		persistentVoxelSettings.admissionRuntimeVariants;
 	const uint64_t legacyByteBudget = loadingPhase ?
-		((int)nri_ptvoxeladmissionloadbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmissionloadbytes) :
-		((int)nri_ptvoxeladmissionruntimebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmissionruntimebytes);
+		persistentVoxelSettings.admissionLoadBytes :
+		persistentVoxelSettings.admissionRuntimeBytes;
 	const uint64_t chunkByteBudget = loadingPhase ?
-		((int)nri_ptvoxeladmitmaxbytesloading <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesloading) :
-		((int)nri_ptvoxeladmitmaxbytesruntime <= 0 ? 0ull : (uint64_t)(int)nri_ptvoxeladmitmaxbytesruntime);
+		persistentVoxelSettings.admitMaxBytesLoading :
+		persistentVoxelSettings.admitMaxBytesRuntime;
 	auto combineNonZeroBudget = [](uint64_t left, uint64_t right) -> uint64_t
 	{
 		if (left == 0)
@@ -16275,14 +16178,14 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 	};
 	const uint64_t byteBudget = combineNonZeroBudget(legacyByteBudget, chunkByteBudget);
 	const int configuredMsBudget = loadingPhase ?
-		std::max(0, (int)nri_ptvoxeladmitmaxmsloading) :
-		std::max(0, (int)nri_ptvoxeladmitmaxmsruntime);
+		(int)persistentVoxelSettings.admitMaxMsLoading :
+		(int)persistentVoxelSettings.admitMaxMsRuntime;
 	const double msBudget = loadingPhase ?
 		(configuredMsBudget > 0 ? (double)configuredMsBudget : 250.0) :
 		(double)configuredMsBudget;
 	const uint32_t blasBudgetLimit = loadingPhase ?
-		((int)nri_ptvoxeladmitmaxblasloading <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasloading) :
-		((int)nri_ptvoxeladmitmaxblasruntime <= 0 ? UINT32_MAX : (uint32_t)(int)nri_ptvoxeladmitmaxblasruntime);
+		persistentVoxelSettings.admitMaxBlasLoading :
+		persistentVoxelSettings.admitMaxBlasRuntime;
 	uint32_t blasBudgetRemaining = blasBudgetLimit;
 	const auto pumpStart = std::chrono::steady_clock::now();
 	auto elapsedMs = [&]() -> double
@@ -16465,7 +16368,7 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 		const char* failureReason = "none";
 		const uint64_t remainingByteBudget = byteBudget == 0 ? 0ull : byteBudget - stats.bytesUploaded;
 		const uint32_t blasBefore = blasBudgetRemaining;
-		const int isolateBlasPrimitiveThreshold = (int)nri_ptvoxeladmitisolateblasprims;
+		const int isolateBlasPrimitiveThreshold = persistentVoxelSettings.admitIsolateBlasPrimitives;
 		const bool isolateBlasBuild =
 			loadingPhase &&
 			isolateBlasPrimitiveThreshold > 0 &&
@@ -16605,6 +16508,7 @@ bool NRIRenderer::PumpPersistentVoxelAdmissionQueue(const char* phase)
 bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_scene::PrecachedVoxelVariantView>& variants)
 {
 	mPersistentVoxels.preloadPending = false;
+	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
 	if (variants.empty())
 	{
 		if ((int)nri_ptloadingtrace >= 1)
@@ -16643,7 +16547,7 @@ bool NRIRenderer::PreloadPersistentVoxelVariantResources(const std::vector<nri_s
 
 	bool ok = true;
 	const auto preloadAdmissionStart = std::chrono::steady_clock::now();
-	const int configuredLoadingMsBudget = std::max(0, (int)nri_ptvoxeladmitmaxmsloading);
+	const int configuredLoadingMsBudget = (int)persistentVoxelSettings.admitMaxMsLoading;
 	const double preloadTickBudgetMs = configuredLoadingMsBudget > 0 ? (double)configuredLoadingMsBudget : 250.0;
 	const uint32_t maxPumps = std::max<uint32_t>(1024u, (uint32_t)mPersistentVoxels.admissionQueue.size() * 64u + 64u);
 	for (uint32_t pump = 0; pump < maxPumps; ++pump)
@@ -16969,6 +16873,7 @@ bool NRIRenderer::PreloadMaterialResources()
 bool NRIRenderer::EnsurePersistentVoxelBatch()
 {
 	const uint64_t cacheSerial = nri_scene::GetPersistentVoxelCacheSerial();
+	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
 
 	std::vector<nri_scene::PersistentVoxelCacheEntryView> cacheEntries;
 	const bool hasPersistentVoxelCacheEntries = nri_scene::BuildPersistentVoxelCacheEntries(cacheEntries);
@@ -17139,7 +17044,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	auto getPersistentVoxelRuntimeBudget = [&]() -> PersistentVoxelRuntimeBudget
 	{
 		PersistentVoxelRuntimeBudget budget = {};
-		budget.mode = (std::max)(0, (std::min)(4, (int)nri_ptvoxelruntimebudget));
+		budget.mode = (int)persistentVoxelSettings.runtimeBudgetMode;
 		if (mPersistentVoxels.loadingWarmupActive)
 		{
 			budget.mode = 4;
@@ -17175,11 +17080,11 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			budget.textureBytes = 0;
 			return budget;
 		default:
-			budget.buildActors = (uint32_t)std::max(1, (int)nri_ptpersistentvoxelbuildactors);
-			budget.buildPrimitives = (int)nri_ptpersistentvoxelbuildprims <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxelbuildprims;
-			budget.buildBytes = (int)nri_ptpersistentvoxelbuildbytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxelbuildbytes;
-			budget.texturePrewarms = (int)nri_ptpersistentvoxeltextureprewarms <= 0 ? 0u : (uint32_t)(int)nri_ptpersistentvoxeltextureprewarms;
-			budget.textureBytes = (int)nri_ptpersistentvoxeltexturebytes <= 0 ? 0ull : (uint64_t)(int)nri_ptpersistentvoxeltexturebytes;
+			budget.buildActors = persistentVoxelSettings.buildActors;
+			budget.buildPrimitives = persistentVoxelSettings.buildPrimitives;
+			budget.buildBytes = persistentVoxelSettings.buildBytes;
+			budget.texturePrewarms = persistentVoxelSettings.texturePrewarms;
+			budget.textureBytes = persistentVoxelSettings.textureBytes;
 			return budget;
 		}
 	};
@@ -17764,7 +17669,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			actor.lightRecords.push_back(record);
 		};
 
-		const uint64_t baseMeshResourceKey = BuildPersistentVoxelMeshResourceKey(cacheEntry);
+		const uint64_t baseMeshResourceKey = BuildPersistentVoxelMeshResourceKey(cacheEntry, persistentVoxelSettings);
 		auto publishPersistentVoxelActor = [&](
 			uint64_t meshResourceKey,
 			PersistentVoxelMeshVariantResource& meshResource,
@@ -17869,7 +17774,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					meshResource.primitiveOffset,
 					GetPersistentVoxelBakeSpaceName(meshResource.meshBakeSpace),
 					(unsigned long long)meshResource.transformBasisSignature,
-					IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry) ? 1u : 0u,
+					IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry, persistentVoxelSettings) ? 1u : 0u,
 					meshResource.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u,
 					meshResource.tlasReadyFrame,
 					meshResource.tlasPublished ? 1u : 0u);
@@ -17970,7 +17875,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					existingMeshResourceIt->second.indexCount,
 					GetPersistentVoxelBakeSpaceName(cacheEntry.meshBakeSpace),
 					(unsigned long long)cacheEntry.transformBasisSignature,
-					IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry) ? 1u : 0u,
+					IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry, persistentVoxelSettings) ? 1u : 0u,
 					existingMeshResourceIt->second.accelerationStructure.accelerationStructure != nullptr ? 1u : 0u,
 					existingMeshResourceIt->second.tlasReadyFrame,
 					existingMeshResourceIt->second.tlasPublished ? 1u : 0u);
@@ -17995,7 +17900,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			meshResource.primitiveOffset,
 			meshResource.primitiveCapacity);
 
-		const bool meshResourceTransformKeyed = IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry);
+		const bool meshResourceTransformKeyed = IsPersistentVoxelMeshResourceTransformKeyed(cacheEntry, persistentVoxelSettings);
 		const bool meshResourceChanged =
 			meshResource.resourceKey != meshResourceKey ||
 			meshResource.meshKeyHash != cacheEntry.meshKeyHash ||
@@ -18321,7 +18226,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 
 	auto canReusePersistentVoxelMesh = [&](const nri_scene::PersistentVoxelCacheEntryView& cacheEntry) -> bool
 	{
-		const uint64_t meshResourceKey = BuildPersistentVoxelMeshResourceKey(cacheEntry);
+		const uint64_t meshResourceKey = BuildPersistentVoxelMeshResourceKey(cacheEntry, persistentVoxelSettings);
 		auto meshResourceIt = mPersistentVoxels.meshVariantResources.find(meshResourceKey);
 		return meshResourceIt != mPersistentVoxels.meshVariantResources.end() &&
 			meshResourceIt->second.resourceKey == meshResourceKey &&
@@ -18421,7 +18326,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
 							mFrameIndex,
 							(unsigned long long)cacheEntry.identityKey,
-							(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry),
+							(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry, persistentVoxelSettings),
 							(unsigned long long)cacheEntry.meshKeyHash,
 							(unsigned long long)cacheEntry.materialKeyHash,
 							(unsigned long long)cacheEntry.surfaceSignature,
@@ -18451,7 +18356,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 						Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=texture-prewarm actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=1\n",
 							mFrameIndex,
 							(unsigned long long)cacheEntry.identityKey,
-							(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry),
+							(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry, persistentVoxelSettings),
 							(unsigned long long)cacheEntry.meshKeyHash,
 							(unsigned long long)cacheEntry.materialKeyHash,
 							(unsigned long long)cacheEntry.surfaceSignature,
@@ -18722,7 +18627,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=onboarding-budget actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
 						mFrameIndex,
 						(unsigned long long)cacheEntry.identityKey,
-						(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry),
+						(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry, persistentVoxelSettings),
 						(unsigned long long)cacheEntry.meshKeyHash,
 						(unsigned long long)cacheEntry.materialKeyHash,
 						(unsigned long long)cacheEntry.surfaceSignature,
@@ -18750,7 +18655,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					Printf("PERF pt voxel instance NRI: frame=%u action=defer reason=texture-prewarm actor_key=0x%llx mesh_resource=0x%llx mesh_key=0x%llx mat_key=0x%llx surface_sig=0x%llx baked_surface=0x%llx primitive_offset=0 primitive_count=%u index_offset=0 index_count=0 material_offset=0 material_count=0 ready=0 pending=1 active=0\n",
 						mFrameIndex,
 						(unsigned long long)cacheEntry.identityKey,
-						(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry),
+						(unsigned long long)BuildPersistentVoxelMeshResourceKey(cacheEntry, persistentVoxelSettings),
 						(unsigned long long)cacheEntry.meshKeyHash,
 						(unsigned long long)cacheEntry.materialKeyHash,
 						(unsigned long long)cacheEntry.surfaceSignature,

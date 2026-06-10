@@ -2,6 +2,7 @@
 
 #include "nri_nrd.h"
 
+#include <array>
 #include <cstdint>
 
 struct NRITraceSettings
@@ -31,5 +32,34 @@ struct NRIDenoiserSettings
 	bool enableValidation = false;
 };
 
+struct NRIPersistentVoxelSettings
+{
+	uint32_t buildActors = 0;
+	uint32_t buildPrimitives = 0;
+	uint64_t buildBytes = 0;
+	uint32_t texturePrewarms = 0;
+	uint64_t textureBytes = 0;
+	uint32_t runtimeBudgetMode = 0;
+	uint32_t admissionLoadVariants = 0;
+	uint64_t admissionLoadBytes = 0;
+	uint32_t admissionRuntimeVariants = 0;
+	uint64_t admissionRuntimeBytes = 0;
+	uint64_t admitMaxBytesLoading = 0;
+	uint64_t admitMaxBytesRuntime = 0;
+	uint32_t admitMaxMsLoading = 0;
+	uint32_t admitMaxMsRuntime = 0;
+	uint32_t admitMaxBlasLoading = 0;
+	uint32_t admitMaxBlasRuntime = 0;
+	uint32_t admitMaxBlasPrimitives = 0;
+	int32_t admitIsolateBlasPrimitives = 0;
+	uint64_t residentMaxBytes = 0;
+	uint64_t residentMinHeadroomBytes = 0;
+	uint32_t residentMaxColdMaps = 0;
+	bool transformKeyed = false;
+	std::array<int32_t, 3> excludeIndices = { -1, -1, -1 };
+	uint32_t excludeMinPrimitives = 0;
+};
+
 NRITraceSettings BuildNRITraceSettingsFromCVars();
 NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars();
+NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars();
