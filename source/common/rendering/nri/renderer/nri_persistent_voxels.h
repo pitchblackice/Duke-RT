@@ -253,6 +253,16 @@ class NRIPersistentVoxelResidency
 {
 public:
 	void Reset(const char* reason, bool clearSharedResources, bool traceReset, const NRIPersistentVoxelResetServices& services);
+	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
+	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
+	void TraceReadiness(
+		const char* event,
+		const char* phase,
+		const PersistentVoxelAdmissionEntry* entry,
+		uint64_t meshResourceKey,
+		uint64_t materialKeyHash,
+		const PersistentVoxelReadinessStatus& status,
+		bool traceEnabled) const;
 
 	NRIBufferResource vertexBuffer;
 	NRIBufferResource indexBuffer;

@@ -15144,73 +15144,7 @@ void NRIRenderer::ReconcilePersistentVoxelResidency(
 
 NRIRenderer::PersistentVoxelReadinessStatus NRIRenderer::GetPersistentVoxelSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const
 {
-	PersistentVoxelReadinessStatus status = {};
-	status.meshPublished = mPersistentVoxels.publishedMeshKeys.find(meshResourceKey) != mPersistentVoxels.publishedMeshKeys.end();
-	status.materialPublished = mPersistentVoxels.publishedMaterialKeys.find(materialKeyHash) != mPersistentVoxels.publishedMaterialKeys.end();
-
-	auto meshIt = mPersistentVoxels.meshVariantResources.find(meshResourceKey);
-	if (meshIt == mPersistentVoxels.meshVariantResources.end())
-	{
-		status.reason = "mesh-missing";
-		return status;
-	}
-	const PersistentVoxelMeshVariantResource& meshResource = meshIt->second;
-	status.meshPresent = true;
-	status.meshResourceKey = meshResource.resourceKey;
-	status.meshKeyMatches = meshResource.resourceKey == meshResourceKey;
-	status.meshVertexCount = meshResource.vertexCount;
-	status.meshIndexCount = meshResource.indexCount;
-	status.meshPrimitiveCount = meshResource.primitiveCount;
-	status.meshCountsValid =
-		meshResource.vertexCount != 0 &&
-		meshResource.indexCount != 0 &&
-		meshResource.primitiveCount != 0;
-	status.meshPrivateBuffersReady =
-		meshResource.vertexBuffer.buffer != nullptr &&
-		meshResource.indexBuffer.buffer != nullptr;
-	status.meshArenaBuffersReady =
-		mPersistentVoxels.vertexBuffer.buffer != nullptr &&
-		mPersistentVoxels.indexBuffer.buffer != nullptr &&
-		mPersistentVoxels.primitiveBuffer.buffer != nullptr;
-	status.blasReady = meshResource.accelerationStructure.accelerationStructure != nullptr;
-	if (!status.meshKeyMatches || !status.meshCountsValid || !status.meshPrivateBuffersReady)
-	{
-		status.reason = "mesh-invalid";
-		return status;
-	}
-	if (!status.meshArenaBuffersReady)
-	{
-		status.reason = "arena-missing";
-		return status;
-	}
-	if (!status.blasReady)
-	{
-		status.reason = "blas-missing";
-		return status;
-	}
-
-	auto materialIt = mPersistentVoxels.materialVariantResources.find(materialKeyHash);
-	if (materialIt == mPersistentVoxels.materialVariantResources.end())
-	{
-		status.reason = "material-missing";
-		return status;
-	}
-	const PersistentVoxelMaterialVariantResource& materialResource = materialIt->second;
-	status.materialPresent = true;
-	status.materialKeyMatches = materialResource.materialKeyHash == materialKeyHash;
-	status.materialCount = materialResource.materialCount;
-	status.materialBridgeCount = (uint32_t)materialResource.materialBridge.materials.size();
-	status.materialCountValid = materialResource.materialCount != 0;
-	status.materialBridgeReady = !materialResource.materialBridge.materials.empty();
-	if (!status.materialKeyMatches || !status.materialCountValid || !status.materialBridgeReady)
-	{
-		status.reason = "material-invalid";
-		return status;
-	}
-
-	status.reason = "ready";
-	status.ready = true;
-	return status;
+	return mPersistentVoxels.GetSharedVariantReadiness(meshResourceKey, materialKeyHash);
 }
 
 void NRIRenderer::TracePersistentVoxelReadiness(
@@ -15221,65 +15155,19 @@ void NRIRenderer::TracePersistentVoxelReadiness(
 	uint64_t materialKeyHash,
 	const PersistentVoxelReadinessStatus& status) const
 {
-	if ((int)nri_ptloadingtrace < 2 && !(bool)nri_voxelstats)
-	{
-		return;
-	}
-	auto stateName = [](PersistentVoxelAdmissionState state) -> const char*
-	{
-		switch (state)
-		{
-		case PersistentVoxelAdmissionState::Pending: return "pending";
-		case PersistentVoxelAdmissionState::UploadingVertices: return "uploading-vertices";
-		case PersistentVoxelAdmissionState::UploadingIndices: return "uploading-indices";
-		case PersistentVoxelAdmissionState::UploadingPrimitives: return "uploading-primitives";
-		case PersistentVoxelAdmissionState::BuildingBlas: return "building-blas";
-		case PersistentVoxelAdmissionState::Ready: return "ready";
-		case PersistentVoxelAdmissionState::Deferred: return "deferred";
-		case PersistentVoxelAdmissionState::Failed: return "failed";
-		default: return "unknown";
-		}
-	};
-
-	Printf("NRI PT voxel readiness: event=%s phase=%s reason=%s source_bits=0x%x priority=%d rank=%d force=%u prefer=%u runtime=%u tex=%d voxel=%d mesh_variant=0x%llx mat_variant=0x%llx queue_state=%s published_mesh=%u published_material=%u generation=%u mesh_present=%u mesh_resource=0x%llx mesh_key_match=%u mesh_counts=%u mesh_private=%u arena=%u blas=%u material_present=%u material_key_match=%u material_count=%u material_bridge=%u vertices=%u indices=%u prims=%u material_count_value=%u material_bridge_count=%u\n",
-		event != nullptr ? event : "unknown",
-		phase != nullptr ? phase : "unknown",
-		status.reason != nullptr ? status.reason : "unknown",
-		entry != nullptr ? entry->sourceBits : 0u,
-		entry != nullptr ? entry->priority : 0,
-		entry != nullptr ? entry->admissionRank : 0,
-		entry != nullptr && entry->gpuForce ? 1u : 0u,
-		entry != nullptr && entry->gpuPrefer ? 1u : 0u,
-		entry != nullptr && entry->runtimeRequested ? 1u : 0u,
-		entry != nullptr ? entry->variant.sourcePicnum : -1,
-		entry != nullptr ? entry->variant.resolvedVoxelIndex : -1,
-		(unsigned long long)meshResourceKey,
-		(unsigned long long)materialKeyHash,
-		entry != nullptr ? stateName(entry->state) : "none",
-		status.meshPublished ? 1u : 0u,
-		status.materialPublished ? 1u : 0u,
-		mPersistentVoxels.residencyMapGeneration,
-		status.meshPresent ? 1u : 0u,
-		(unsigned long long)status.meshResourceKey,
-		status.meshKeyMatches ? 1u : 0u,
-		status.meshCountsValid ? 1u : 0u,
-		status.meshPrivateBuffersReady ? 1u : 0u,
-		status.meshArenaBuffersReady ? 1u : 0u,
-		status.blasReady ? 1u : 0u,
-		status.materialPresent ? 1u : 0u,
-		status.materialKeyMatches ? 1u : 0u,
-		status.materialCountValid ? 1u : 0u,
-		status.materialBridgeReady ? 1u : 0u,
-		status.meshVertexCount,
-		status.meshIndexCount,
-		status.meshPrimitiveCount,
-		status.materialCount,
-		status.materialBridgeCount);
+	mPersistentVoxels.TraceReadiness(
+		event,
+		phase,
+		entry,
+		meshResourceKey,
+		materialKeyHash,
+		status,
+		(int)nri_ptloadingtrace >= 2 || (bool)nri_voxelstats);
 }
 
 bool NRIRenderer::IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const
 {
-	return GetPersistentVoxelSharedVariantReadiness(meshResourceKey, materialKeyHash).ready;
+	return mPersistentVoxels.IsSharedVariantReady(meshResourceKey, materialKeyHash);
 }
 
 void NRIRenderer::DiscardPersistentVoxelAdmissionEntry(PersistentVoxelAdmissionEntry& entry)
