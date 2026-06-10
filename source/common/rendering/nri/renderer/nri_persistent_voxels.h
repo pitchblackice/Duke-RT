@@ -445,6 +445,7 @@ struct NRIPersistentVoxelMaterialUploadServices
 	using EnsureMaterialArenaBufferFn = bool (*)(void* user, NRIBufferResource& resource, uint64_t sizeBytes);
 	using StageMaterialRangesFn = bool (*)(
 		void* user,
+		const NRIBufferResource& targetBuffer,
 		const std::vector<RuntimeMutationResidentUploadRange>& ranges,
 		const uint8_t* data,
 		uint64_t availableBytes);
@@ -457,6 +458,7 @@ struct NRIPersistentVoxelMaterialUploadServices
 
 	bool EnsureMaterialArenaBuffer(NRIBufferResource& resource, uint64_t sizeBytes) const;
 	bool StageMaterialRanges(
+		const NRIBufferResource& targetBuffer,
 		const std::vector<RuntimeMutationResidentUploadRange>& ranges,
 		const uint8_t* data,
 		uint64_t availableBytes) const;

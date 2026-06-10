@@ -206,11 +206,12 @@ bool NRIPersistentVoxelMaterialUploadServices::EnsureMaterialArenaBuffer(NRIBuff
 }
 
 bool NRIPersistentVoxelMaterialUploadServices::StageMaterialRanges(
+	const NRIBufferResource& targetBuffer,
 	const std::vector<RuntimeMutationResidentUploadRange>& ranges,
 	const uint8_t* data,
 	uint64_t availableBytes) const
 {
-	return stageMaterialRanges != nullptr && stageMaterialRanges(user, ranges, data, availableBytes);
+	return stageMaterialRanges != nullptr && stageMaterialRanges(user, targetBuffer, ranges, data, availableBytes);
 }
 
 void NRIPersistentVoxelMaterialUploadServices::NoteMaterialUpload(uint64_t sizeBytes) const
@@ -476,6 +477,7 @@ bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
 
 	const uint64_t materialArenaSize = materials.size() * sizeof(nri_scene::MaterialData);
 	if (!services.StageMaterialRanges(
+		materialBuffer,
 		coalescedRanges,
 		reinterpret_cast<const uint8_t*>(materials.data()),
 		materialArenaSize))

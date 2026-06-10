@@ -16717,11 +16717,21 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 	};
 	services.stageMaterialRanges = [](
 		void* user,
+		const NRIBufferResource& targetBuffer,
 		const std::vector<RuntimeMutationResidentUploadRange>& ranges,
 		const uint8_t* data,
 		uint64_t availableBytes) -> bool
 	{
-		return static_cast<NRIRenderer*>(user)->StagePersistentVoxelMaterialUploadRanges(ranges, data, availableBytes);
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->StageResidentMaterialUploadRanges(
+			targetBuffer,
+			ranges,
+			data,
+			availableBytes,
+			renderer->mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatches,
+			renderer->mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchRanges,
+			renderer->mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands,
+			renderer->mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchCopyCommands);
 	};
 	services.noteMaterialUpload = [](void* user, uint64_t sizeBytes)
 	{
@@ -24015,14 +24025,22 @@ void NRIRenderer::TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& 
 		event.resolvedGameTexture);
 }
 
-bool NRIRenderer::StagePersistentVoxelMaterialUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges, const uint8_t* data, uint64_t availableBytes)
+bool NRIRenderer::StageResidentMaterialUploadRanges(
+	const NRIBufferResource& targetBuffer,
+	const std::vector<RuntimeMutationResidentUploadRange>& ranges,
+	const uint8_t* data,
+	uint64_t availableBytes,
+	uint32_t& batchCount,
+	uint32_t& batchRangeCount,
+	uint32_t& barrierCommandCount,
+	uint32_t& copyCommandCount)
 {
 	if (ranges.empty())
 	{
 		return true;
 	}
 
-	if (mPersistentVoxels.materialBuffer.buffer == nullptr ||
+	if (targetBuffer.buffer == nullptr ||
 		data == nullptr ||
 		mFrameBuffer == nullptr ||
 		mFrameBuffer->mCommandBuffer == nullptr)
@@ -24040,8 +24058,8 @@ bool NRIRenderer::StagePersistentVoxelMaterialUploadRanges(const std::vector<Run
 			range.size == 0 ||
 			range.byteOffset > availableBytes ||
 			range.size > availableBytes - range.byteOffset ||
-			range.byteOffset > mPersistentVoxels.materialBuffer.size ||
-			range.size > mPersistentVoxels.materialBuffer.size - range.byteOffset)
+			range.byteOffset > targetBuffer.size ||
+			range.size > targetBuffer.size - range.byteOffset)
 		{
 			return false;
 		}
@@ -24099,8 +24117,8 @@ bool NRIRenderer::StagePersistentVoxelMaterialUploadRanges(const std::vector<Run
 	}
 	mFrameBuffer->mCore.UnmapBuffer(*scratch.buffer.buffer);
 
-	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatches++;
-	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchRanges += (uint32_t)stagedCopies.size();
+	batchCount++;
+	batchRangeCount += (uint32_t)stagedCopies.size();
 
 	if (!scratch.copySourceActive)
 	{
@@ -24114,11 +24132,11 @@ bool NRIRenderer::StagePersistentVoxelMaterialUploadRanges(const std::vector<Run
 		sourceBarrierDesc.bufferNum = 1;
 		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, sourceBarrierDesc);
 		scratch.copySourceActive = true;
-		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands++;
+		barrierCommandCount++;
 	}
 
 	nri::BufferBarrierDesc beforeCopyBarrier = {};
-	beforeCopyBarrier.buffer = mPersistentVoxels.materialBuffer.buffer;
+	beforeCopyBarrier.buffer = targetBuffer.buffer;
 	beforeCopyBarrier.before = NRIComputeShaderResourceAccess();
 	beforeCopyBarrier.after = NRICopyDestinationAccess();
 
@@ -24126,22 +24144,22 @@ bool NRIRenderer::StagePersistentVoxelMaterialUploadRanges(const std::vector<Run
 	beforeCopyBarrierDesc.buffers = &beforeCopyBarrier;
 	beforeCopyBarrierDesc.bufferNum = 1;
 	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeCopyBarrierDesc);
-	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands++;
+	barrierCommandCount++;
 
 	for (const StagedCopy& copy : stagedCopies)
 	{
 		mFrameBuffer->mCore.CmdCopyBuffer(
 			*mFrameBuffer->mCommandBuffer,
-			*mPersistentVoxels.materialBuffer.buffer,
+			*targetBuffer.buffer,
 			copy.targetOffset,
 			*scratch.buffer.buffer,
 			copy.scratchOffset,
 			copy.size);
-		mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchCopyCommands++;
+		copyCommandCount++;
 	}
 
 	nri::BufferBarrierDesc afterCopyBarrier = {};
-	afterCopyBarrier.buffer = mPersistentVoxels.materialBuffer.buffer;
+	afterCopyBarrier.buffer = targetBuffer.buffer;
 	afterCopyBarrier.before = NRICopyDestinationAccess();
 	afterCopyBarrier.after = NRIComputeShaderResourceAccess();
 
@@ -24149,7 +24167,7 @@ bool NRIRenderer::StagePersistentVoxelMaterialUploadRanges(const std::vector<Run
 	afterCopyBarrierDesc.buffers = &afterCopyBarrier;
 	afterCopyBarrierDesc.bufferNum = 1;
 	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterCopyBarrierDesc);
-	mLastPerfShellTraceStats.sceneSelectBufferUploadPersistentVoxelMaterialBatchBarrierCommands++;
+	barrierCommandCount++;
 
 	return true;
 }

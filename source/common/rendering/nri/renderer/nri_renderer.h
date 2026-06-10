@@ -2509,7 +2509,15 @@ private:
 	bool QueueRuntimeMutationResidentGeometryUploadRange(int uploadKind, uint64_t byteOffset, uint64_t size);
 	bool FlushRuntimeMutationResidentGeometryUploadRanges();
 	bool StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges);
-	bool StagePersistentVoxelMaterialUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges, const uint8_t* data, uint64_t availableBytes);
+	bool StageResidentMaterialUploadRanges(
+		const NRIBufferResource& targetBuffer,
+		const std::vector<RuntimeMutationResidentUploadRange>& ranges,
+		const uint8_t* data,
+		uint64_t availableBytes,
+		uint32_t& batchCount,
+		uint32_t& batchRangeCount,
+		uint32_t& barrierCommandCount,
+		uint32_t& copyCommandCount);
 	void RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices);
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
