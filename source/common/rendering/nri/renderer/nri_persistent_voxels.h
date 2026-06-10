@@ -509,6 +509,7 @@ public:
 	uint32_t OverlayMaterialCount() const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
 	uint64_t BuildSceneGenerationHash() const;
+	void AppendMaterialBridgeTo(nri_scene::MaterialBridgeData& destination) const;
 	bool WarmMaterialResources(
 		const NRIPersistentVoxelMaterialWarmupServices& services,
 		NRIPersistentVoxelMaterialWarmupResult& outResult) const;

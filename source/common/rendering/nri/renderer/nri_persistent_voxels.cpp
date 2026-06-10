@@ -275,6 +275,11 @@ uint64_t NRIPersistentVoxelResidency::BuildSceneGenerationHash() const
 		(uint64_t)batch.materialCount);
 }
 
+void NRIPersistentVoxelResidency::AppendMaterialBridgeTo(nri_scene::MaterialBridgeData& destination) const
+{
+	nri_scene::AppendMaterialBridge(batch.materialBridge, destination);
+}
+
 bool NRIPersistentVoxelResidency::WarmMaterialResources(
 	const NRIPersistentVoxelMaterialWarmupServices& services,
 	NRIPersistentVoxelMaterialWarmupResult& outResult) const

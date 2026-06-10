@@ -9885,7 +9885,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					combinedOverlayMaterialOffset = (uint32_t)combinedMaterialBridge.materials.size();
 					if (hasPersistentVoxelOverlay)
 					{
-						nri_scene::AppendMaterialBridge(mPersistentVoxels.batch.materialBridge, combinedMaterialBridge);
+						mPersistentVoxels.AppendMaterialBridgeTo(combinedMaterialBridge);
 						combinedOverlayMaterialOffset = (uint32_t)combinedMaterialBridge.materials.size();
 					}
 					nri_scene::AppendMaterialBridge(overlayMaterialBridge, combinedMaterialBridge);
