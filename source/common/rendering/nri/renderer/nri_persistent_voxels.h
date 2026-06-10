@@ -290,6 +290,14 @@ public:
 		bool voxelStatsEnabled,
 		const NRIPersistentVoxelResetServices& resetServices,
 		const NRIPersistentVoxelPreloadServices& preloadServices);
+	void ApplyPressurePolicy(
+		const char* phase,
+		uint32_t frameIndex,
+		const NRIPersistentVoxelSettings& settings,
+		uint64_t totalTrackedBytes,
+		uint64_t adapterLocalBudget,
+		bool traceEnabled,
+		const NRIPersistentVoxelResetServices& services);
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;

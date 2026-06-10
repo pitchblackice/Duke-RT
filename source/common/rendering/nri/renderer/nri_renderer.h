@@ -2295,7 +2295,6 @@ private:
 		bool updateDynamicPerfStats);
 	bool PreloadStaticMapResources();
 	bool PreloadPersistentVoxelResources();
-	void ApplyPersistentVoxelResidencyPressurePolicy(const char* phase);
 	bool PumpPersistentVoxelAdmissionQueue(const char* phase);
 	bool AdmitPersistentVoxelVariantResource(
 		PersistentVoxelAdmissionEntry& entry,
