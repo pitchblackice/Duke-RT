@@ -2308,7 +2308,6 @@ private:
 		const char*& outFailureReason);
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
-	void ResetPersistentVoxelBatch(const char* reason = "batch-reset", bool clearSharedResources = true);
 	bool BuildPersistentVoxelVariantAccelerationStructures(const nri_scene::GeometryData& geometry);
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	void InvalidateRuntimeLightSceneData();

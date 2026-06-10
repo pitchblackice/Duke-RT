@@ -14682,15 +14682,6 @@ NRIPersistentVoxelAdmissionServices NRIRenderer::BuildPersistentVoxelAdmissionSe
 	return services;
 }
 
-void NRIRenderer::ResetPersistentVoxelBatch(const char* reason, bool clearSharedResources)
-{
-	mPersistentVoxels.Reset(
-		reason,
-		clearSharedResources,
-		(int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats,
-		BuildPersistentVoxelResetServices());
-}
-
 bool NRIRenderer::AdmitPersistentVoxelVariantResource(
 	PersistentVoxelAdmissionEntry& entry,
 	uint64_t byteBudget,
@@ -16579,7 +16570,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					nri::BufferUsageBits::SHADER_RESOURCE,
 					NRIComputeShaderResourceAccess()))
 			{
-				ResetPersistentVoxelBatch("persistent-voxel-buffer-allocation-failed");
+				mPersistentVoxels.Reset("persistent-voxel-buffer-allocation-failed", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 				return false;
 			}
 			if (meshResourceChanged)
@@ -16637,7 +16628,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 					NRIComputeShaderResourceAccess(),
 					ResidentUploadKind_Primitive))
 			{
-				ResetPersistentVoxelBatch("persistent-voxel-buffer-stage-failed");
+				mPersistentVoxels.Reset("persistent-voxel-buffer-stage-failed", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 				return false;
 			}
 			if (meshResourceChanged)
@@ -16930,7 +16921,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				bool actorDeferred = false;
 				if (!appendActorToBatch(mPersistentVoxels.batch, cacheEntry, nullptr, &actorDeferred))
 				{
-					ResetPersistentVoxelBatch("persistent-voxel-append-failed");
+					mPersistentVoxels.Reset("persistent-voxel-append-failed", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 					return false;
 				}
 				if (actorDeferred)
@@ -17080,7 +17071,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 				bool actorDeferred = false;
 				if (!appendActorToBatch(mPersistentVoxels.batch, cacheEntry, &actor, &actorDeferred))
 				{
-					ResetPersistentVoxelBatch("persistent-voxel-update-failed");
+					mPersistentVoxels.Reset("persistent-voxel-update-failed", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 					return false;
 				}
 				if (actorDeferred)
@@ -17229,7 +17220,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 			bool actorDeferred = false;
 			if (!appendActorToBatch(next, cacheEntry, nullptr, &actorDeferred))
 			{
-				ResetPersistentVoxelBatch("persistent-voxel-new-actor-failed");
+				mPersistentVoxels.Reset("persistent-voxel-new-actor-failed", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 				return false;
 			}
 			if (actorDeferred)
@@ -17271,7 +17262,7 @@ bool NRIRenderer::EnsurePersistentVoxelBatch()
 	recomputeBatchState(next);
 	if (!next.valid)
 	{
-		ResetPersistentVoxelBatch("persistent-voxel-invalid-instance-batch", false);
+		mPersistentVoxels.Reset("persistent-voxel-invalid-instance-batch", false, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 		return false;
 	}
 
@@ -17460,7 +17451,7 @@ bool NRIRenderer::BuildPersistentVoxelVariantAccelerationStructures(const nri_sc
 	mLastPerfShellTraceStats.persistentVoxelAsCalls++;
 	if (!mPersistentVoxels.batch.valid || mPersistentVoxels.batch.actors.empty())
 	{
-		ResetPersistentVoxelBatch("persistent-voxel-empty-instance-batch", false);
+		mPersistentVoxels.Reset("persistent-voxel-empty-instance-batch", false, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 		return true;
 	}
 
@@ -26568,7 +26559,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	DestroyBufferResource(mTopLevelScratchBuffer);
 	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
 	DestroyDynamicBottomLevelAccelerationStructures();
-	ResetPersistentVoxelBatch("static-acceleration-rebuild", false);
+	mPersistentVoxels.Reset("static-acceleration-rebuild", false, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 
@@ -34395,7 +34386,7 @@ void NRIRenderer::DestroySceneBuffers()
 	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	ResetResidentMapChunkRegistry();
 	ResetPersistentDynamicEmissiveCache();
-	ResetPersistentVoxelBatch("destroy-scene-buffers");
+	mPersistentVoxels.Reset("destroy-scene-buffers", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 	DestroyBufferResource(mStaticVertexBuffer);
 	DestroyBufferResource(mStaticIndexBuffer);
 	DestroyBufferResource(mStaticPrimitiveBuffer);
@@ -34533,7 +34524,7 @@ void NRIRenderer::DestroyAccelerationStructures()
 		chunk.residentBlasUpdateScratchSize = 0;
 	}
 	DestroyDynamicBottomLevelAccelerationStructures();
-	ResetPersistentVoxelBatch("destroy-acceleration-structures");
+	mPersistentVoxels.Reset("destroy-acceleration-structures", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;
