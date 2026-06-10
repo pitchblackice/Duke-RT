@@ -472,6 +472,11 @@ public:
 	void FillResourceStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	void FillBatchStatusSnapshot(NRIPersistentVoxelStatusSnapshot& snapshot) const;
 	NRIPersistentVoxelOverlayStats BuildOverlayStats() const;
+	bool HasValidBatch() const;
+	bool HasRenderableOverlay() const;
+	uint32_t OverlayMaterialCount() const;
+	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
+	uint64_t BuildSceneGenerationHash() const;
 	void DiscardAdmissionEntry(PersistentVoxelAdmissionEntry& entry, const NRIPersistentVoxelResetServices& services);
 	PersistentVoxelReadinessStatus GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool IsSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;

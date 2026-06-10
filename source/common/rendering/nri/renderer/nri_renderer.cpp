@@ -9525,7 +9525,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			}
 		}
 
-		if (hasPersistentVoxelBatch && mPersistentVoxels.batch.valid)
+		if (hasPersistentVoxelBatch && mPersistentVoxels.HasValidBatch())
 		{
 			appendPersistentVoxelSceneLights = true;
 		}
@@ -9536,10 +9536,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			activeDynamicMaterials != nullptr;
 		const bool hasPersistentVoxelOverlay =
 			hasPersistentVoxelBatch &&
-			mPersistentVoxels.batch.valid &&
-			mPersistentVoxels.batch.activeActorCount > 0 &&
-			mPersistentVoxels.batch.primitiveCount > 0 &&
-			!mPersistentVoxels.batch.materialBridge.materials.empty();
+			mPersistentVoxels.HasRenderableOverlay();
 		const bool hasMirrorExtendedDynamicOverlay =
 			hasMirrorExtendedDynamicScene &&
 			!mirrorExtendedDynamicGeometry.primitives.empty() &&
@@ -9989,7 +9986,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					{
 						ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMaterialSplitMs);
 						const size_t staticMaterialCount = mStaticMapScene.gpuMaterials.size();
-						const size_t persistentVoxelMaterialCount = hasPersistentVoxelOverlay ? mPersistentVoxels.batch.materialBridge.materials.size() : 0u;
+						const size_t persistentVoxelMaterialCount = hasPersistentVoxelOverlay ? mPersistentVoxels.OverlayMaterialCount() : 0u;
 						if (combinedGpuMaterials.size() < staticMaterialCount + persistentVoxelMaterialCount)
 						{
 							texturesReady = false;
@@ -10773,23 +10770,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					if (hasPersistentVoxelOverlay)
 					{
 						ScopedPtPerfTimer persistentVoxelStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxelMs);
-						nri_scene::SceneDebugStats persistentVoxelStats = mPersistentVoxels.batch.stats;
-						persistentVoxelStats.voxelStableCandidates = 0;
-						persistentVoxelStats.voxelStableUncacheable = 0;
-						persistentVoxelStats.voxelStableSignatureHits = 0;
-						persistentVoxelStats.voxelStableSignatureMisses = 0;
-						persistentVoxelStats.voxelStableSignatureChanges = 0;
-						persistentVoxelStats.voxelStableSplitStable = 0;
-						persistentVoxelStats.voxelStableSplitLive = 0;
-						persistentVoxelStats.voxelCacheEntries = 0;
-						persistentVoxelStats.voxelCacheSurfaceHits = 0;
-						persistentVoxelStats.voxelCacheSurfaceStores = 0;
-						persistentVoxelStats.voxelCacheSurfaceRebuilds = 0;
-						persistentVoxelStats.voxelCacheTransformRebakes = 0;
-						persistentVoxelStats.voxelCacheSurfaceRemoves = 0;
-						persistentVoxelStats.voxelCacheNotCaptured = 0;
-						persistentVoxelStats.voxelCachePrimitives = 0;
-						dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, persistentVoxelStats);
+						dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, mPersistentVoxels.BuildOverlayDebugStats());
 						mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxel = 1;
 					}
 					if (hasMirrorExtendedDynamicScene)
@@ -10842,15 +10823,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 							HashCombine64((uint64_t)mFrameIndex, (uint64_t)mirrorPlayerGeometry.primitives.size()),
 							(uint64_t)mirrorPlayerMaterialBridge.materials.size()) :
 						0ull;
-					currentGenerations.persistentVoxels = hasPersistentVoxelOverlay ?
-						HashCombine64(
-							HashCombine64(
-								HashCombine64(
-									HashCombine64(mPersistentVoxels.batch.sourceSerial, (uint64_t)mPersistentVoxels.batch.rebuildCount),
-									(uint64_t)mPersistentVoxels.batch.activeActorCount),
-								(uint64_t)mPersistentVoxels.batch.primitiveCount),
-							(uint64_t)mPersistentVoxels.batch.materialCount) :
-						0ull;
+					currentGenerations.persistentVoxels = hasPersistentVoxelOverlay ? mPersistentVoxels.BuildSceneGenerationHash() : 0ull;
 					currentGenerations.materialBridge = activeMaterialBridge != nullptr ?
 						HashCombine64(
 							HashCombine64(

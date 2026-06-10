@@ -216,6 +216,62 @@ NRIPersistentVoxelOverlayStats NRIPersistentVoxelResidency::BuildOverlayStats() 
 	return stats;
 }
 
+bool NRIPersistentVoxelResidency::HasValidBatch() const
+{
+	return batch.valid;
+}
+
+bool NRIPersistentVoxelResidency::HasRenderableOverlay() const
+{
+	return
+		batch.valid &&
+		batch.activeActorCount > 0 &&
+		batch.primitiveCount > 0 &&
+		!batch.materialBridge.materials.empty();
+}
+
+uint32_t NRIPersistentVoxelResidency::OverlayMaterialCount() const
+{
+	return (uint32_t)batch.materialBridge.materials.size();
+}
+
+nri_scene::SceneDebugStats NRIPersistentVoxelResidency::BuildOverlayDebugStats() const
+{
+	nri_scene::SceneDebugStats stats = batch.stats;
+	stats.voxelStableCandidates = 0;
+	stats.voxelStableUncacheable = 0;
+	stats.voxelStableSignatureHits = 0;
+	stats.voxelStableSignatureMisses = 0;
+	stats.voxelStableSignatureChanges = 0;
+	stats.voxelStableSplitStable = 0;
+	stats.voxelStableSplitLive = 0;
+	stats.voxelCacheEntries = 0;
+	stats.voxelCacheSurfaceHits = 0;
+	stats.voxelCacheSurfaceStores = 0;
+	stats.voxelCacheSurfaceRebuilds = 0;
+	stats.voxelCacheTransformRebakes = 0;
+	stats.voxelCacheSurfaceRemoves = 0;
+	stats.voxelCacheNotCaptured = 0;
+	stats.voxelCachePrimitives = 0;
+	return stats;
+}
+
+uint64_t NRIPersistentVoxelResidency::BuildSceneGenerationHash() const
+{
+	if (!HasRenderableOverlay())
+	{
+		return 0;
+	}
+
+	return nri_scene::HashCombine64(
+		nri_scene::HashCombine64(
+			nri_scene::HashCombine64(
+				nri_scene::HashCombine64(batch.sourceSerial, (uint64_t)batch.rebuildCount),
+				(uint64_t)batch.activeActorCount),
+			(uint64_t)batch.primitiveCount),
+		(uint64_t)batch.materialCount);
+}
+
 NRIPersistentVoxelDescriptorSnapshot NRIPersistentVoxelResidency::BuildDescriptorSnapshot(
 	const NRIBufferResource& fallbackVertexBuffer,
 	const NRIBufferResource& fallbackIndexBuffer,
