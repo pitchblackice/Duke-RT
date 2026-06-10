@@ -3,6 +3,7 @@
 #include "nri_frame_resources.h"
 #include "nri_renderer_settings.h"
 #include "nri_resources.h"
+#include "nri_runtime_mutation.h"
 #include "nri_scene_lights.h"
 
 #include "../scene/nri_geometry_bridge.h"
@@ -423,6 +424,45 @@ struct NRIPersistentVoxelMaterialWarmupServices
 	bool WarmTextures(const nri_scene::MaterialBridgeData& materials, NRIPersistentVoxelMaterialWarmupStats& stats) const;
 };
 
+struct NRIPersistentVoxelMaterialUploadStats
+{
+	uint32_t uploads = 0;
+	uint32_t batchRejects = 0;
+	uint64_t requestedBytes = 0;
+	uint64_t dirtyBytes = 0;
+	uint64_t uploadedBytes = 0;
+	uint64_t batchGapBytes = 0;
+	uint64_t domainPayloadBytes = 0;
+	uint64_t domainMaterialPayloadBytes = 0;
+	uint64_t domainUploadedBytes = 0;
+	uint64_t domainMaterialUploadedBytes = 0;
+	uint32_t domainHashChecks = 0;
+	uint32_t domainHashMisses = 0;
+};
+
+struct NRIPersistentVoxelMaterialUploadServices
+{
+	using EnsureMaterialArenaBufferFn = bool (*)(void* user, NRIBufferResource& resource, uint64_t sizeBytes);
+	using StageMaterialRangesFn = bool (*)(
+		void* user,
+		const std::vector<RuntimeMutationResidentUploadRange>& ranges,
+		const uint8_t* data,
+		uint64_t availableBytes);
+	using NoteMaterialUploadFn = void (*)(void* user, uint64_t sizeBytes);
+
+	void* user = nullptr;
+	EnsureMaterialArenaBufferFn ensureMaterialArenaBuffer = nullptr;
+	StageMaterialRangesFn stageMaterialRanges = nullptr;
+	NoteMaterialUploadFn noteMaterialUpload = nullptr;
+
+	bool EnsureMaterialArenaBuffer(NRIBufferResource& resource, uint64_t sizeBytes) const;
+	bool StageMaterialRanges(
+		const std::vector<RuntimeMutationResidentUploadRange>& ranges,
+		const uint8_t* data,
+		uint64_t availableBytes) const;
+	void NoteMaterialUpload(uint64_t sizeBytes) const;
+};
+
 struct NRIPersistentVoxelTlasServices
 {
 	using GetAccelerationStructureHandleFn = uint64_t (*)(void* user, const NRIAccelerationStructureResource& resource);
@@ -533,6 +573,12 @@ public:
 	bool WarmMaterialResources(
 		const NRIPersistentVoxelMaterialWarmupServices& services,
 		NRIPersistentVoxelMaterialWarmupResult& outResult) const;
+	bool UploadArenaMaterialBuffers(
+		const std::vector<nri_scene::MaterialData>& materials,
+		const NRIPersistentVoxelMaterialUploadServices& services,
+		uint32_t frameIndex,
+		bool voxelStatsEnabled,
+		NRIPersistentVoxelMaterialUploadStats& outStats);
 	bool AppendTlasInstances(
 		std::vector<nri::TopLevelInstance>& instances,
 		std::vector<SceneInstanceData>& sceneInstances,

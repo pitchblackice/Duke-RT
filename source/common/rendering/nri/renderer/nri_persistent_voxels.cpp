@@ -1,6 +1,7 @@
 #include "nri_persistent_voxels.h"
 
 #include "../scene/nri_hash.h"
+#include "nri_upload_hash.h"
 #include "printf.h"
 
 #include <algorithm>
@@ -199,6 +200,27 @@ bool NRIPersistentVoxelMaterialWarmupServices::WarmTextures(
 	return warmTextures != nullptr && warmTextures(user, materials, stats);
 }
 
+bool NRIPersistentVoxelMaterialUploadServices::EnsureMaterialArenaBuffer(NRIBufferResource& resource, uint64_t sizeBytes) const
+{
+	return ensureMaterialArenaBuffer != nullptr && ensureMaterialArenaBuffer(user, resource, sizeBytes);
+}
+
+bool NRIPersistentVoxelMaterialUploadServices::StageMaterialRanges(
+	const std::vector<RuntimeMutationResidentUploadRange>& ranges,
+	const uint8_t* data,
+	uint64_t availableBytes) const
+{
+	return stageMaterialRanges != nullptr && stageMaterialRanges(user, ranges, data, availableBytes);
+}
+
+void NRIPersistentVoxelMaterialUploadServices::NoteMaterialUpload(uint64_t sizeBytes) const
+{
+	if (noteMaterialUpload != nullptr)
+	{
+		noteMaterialUpload(user, sizeBytes);
+	}
+}
+
 uint64_t NRIPersistentVoxelTlasServices::GetAccelerationStructureHandle(const NRIAccelerationStructureResource& resource) const
 {
 	return getAccelerationStructureHandle != nullptr ? getAccelerationStructureHandle(user, resource) : 0ull;
@@ -318,6 +340,172 @@ bool NRIPersistentVoxelResidency::WarmMaterialResources(
 
 	outResult.paletteReady = services.EnsurePalette(batch.materialBridge);
 	return outResult.paletteReady && services.WarmTextures(batch.materialBridge, outResult.textureStats);
+}
+
+bool NRIPersistentVoxelResidency::UploadArenaMaterialBuffers(
+	const std::vector<nri_scene::MaterialData>& materials,
+	const NRIPersistentVoxelMaterialUploadServices& services,
+	uint32_t frameIndex,
+	bool voxelStatsEnabled,
+	NRIPersistentVoxelMaterialUploadStats& outStats)
+{
+	outStats = {};
+	if (!batch.valid)
+	{
+		return true;
+	}
+
+	if (!services.EnsureMaterialArenaBuffer(
+		materialBuffer,
+		(uint64_t)arenaMaterialCursor * sizeof(nri_scene::MaterialData)))
+	{
+		return false;
+	}
+
+	struct PendingMaterialUpload
+	{
+		PersistentVoxelMaterialVariantResource* resource = nullptr;
+		uint64_t materialHash = 0;
+	};
+
+	std::vector<RuntimeMutationResidentUploadRange> dirtyMaterialRanges;
+	std::vector<PendingMaterialUpload> pendingMaterialUploads;
+	dirtyMaterialRanges.reserve(materialVariantResources.size());
+	pendingMaterialUploads.reserve(materialVariantResources.size());
+
+	for (auto& pair : materialVariantResources)
+	{
+		PersistentVoxelMaterialVariantResource& resource = pair.second;
+		if (resource.materialCount == 0)
+		{
+			continue;
+		}
+		if ((uint64_t)resource.materialOffset + resource.materialCount > materials.size())
+		{
+			continue;
+		}
+
+		const nri_scene::MaterialData* actorMaterials = materials.data() + resource.materialOffset;
+		const uint64_t materialSize = (uint64_t)resource.materialCount * sizeof(nri_scene::MaterialData);
+		outStats.requestedBytes += materialSize;
+		outStats.domainPayloadBytes += materialSize;
+		outStats.domainMaterialPayloadBytes += materialSize;
+		outStats.domainHashChecks++;
+		const uint64_t materialHash = NRIHashUploadPayloadBytes(actorMaterials, materialSize);
+		const bool uploadMaterials = resource.materialUploadHash != materialHash;
+		if (uploadMaterials)
+		{
+			outStats.domainHashMisses++;
+			outStats.uploads++;
+			outStats.dirtyBytes += materialSize;
+			dirtyMaterialRanges.push_back({
+				ResidentUploadKind_Material,
+				(uint64_t)resource.materialOffset * sizeof(nri_scene::MaterialData),
+				materialSize,
+				materialSize });
+			pendingMaterialUploads.push_back({ &resource, materialHash });
+		}
+		else
+		{
+			resource.materialUploadHash = materialHash;
+		}
+	}
+
+	if (dirtyMaterialRanges.empty())
+	{
+		return true;
+	}
+
+	constexpr uint64_t kMaterialUploadCoalesceMaxGapBytes = 4ull * 1024ull;
+	constexpr uint64_t kMaterialUploadCoalesceMaxByteExpansion = 2ull;
+	std::sort(
+		dirtyMaterialRanges.begin(),
+		dirtyMaterialRanges.end(),
+		[](const RuntimeMutationResidentUploadRange& a, const RuntimeMutationResidentUploadRange& b)
+		{
+			return a.byteOffset < b.byteOffset;
+		});
+
+	std::vector<RuntimeMutationResidentUploadRange> coalescedRanges;
+	coalescedRanges.reserve(dirtyMaterialRanges.size());
+	for (const RuntimeMutationResidentUploadRange& range : dirtyMaterialRanges)
+	{
+		if (coalescedRanges.empty())
+		{
+			coalescedRanges.push_back(range);
+			continue;
+		}
+
+		RuntimeMutationResidentUploadRange& tail = coalescedRanges.back();
+		const uint64_t tailEnd = tail.byteOffset + tail.size;
+		const uint64_t rangeEnd = range.byteOffset + range.size;
+		const uint64_t gapBytes = range.byteOffset > tailEnd ? range.byteOffset - tailEnd : 0;
+		const uint64_t candidateSize = rangeEnd > tailEnd ? rangeEnd - tail.byteOffset : tail.size;
+		const uint64_t candidateDirtySize = tail.dirtySize + range.size;
+		const bool acceptableByteExpansion =
+			candidateDirtySize > UINT64_MAX / kMaterialUploadCoalesceMaxByteExpansion ||
+			candidateSize <= candidateDirtySize * kMaterialUploadCoalesceMaxByteExpansion;
+		if (gapBytes <= kMaterialUploadCoalesceMaxGapBytes && acceptableByteExpansion)
+		{
+			if (rangeEnd > tailEnd)
+			{
+				tail.size = rangeEnd - tail.byteOffset;
+			}
+			tail.dirtySize += range.size;
+			continue;
+		}
+
+		outStats.batchRejects++;
+		coalescedRanges.push_back(range);
+	}
+
+	uint64_t uploadedBytes = 0;
+	for (const RuntimeMutationResidentUploadRange& range : coalescedRanges)
+	{
+		uploadedBytes += range.size;
+		if (range.size > range.dirtySize)
+		{
+			outStats.batchGapBytes += range.size - range.dirtySize;
+		}
+		services.NoteMaterialUpload(range.size);
+	}
+
+	outStats.uploadedBytes += uploadedBytes;
+	outStats.domainUploadedBytes += uploadedBytes;
+	outStats.domainMaterialUploadedBytes += uploadedBytes;
+
+	const uint64_t materialArenaSize = materials.size() * sizeof(nri_scene::MaterialData);
+	if (!services.StageMaterialRanges(
+		coalescedRanges,
+		reinterpret_cast<const uint8_t*>(materials.data()),
+		materialArenaSize))
+	{
+		return false;
+	}
+
+	for (const PendingMaterialUpload& upload : pendingMaterialUploads)
+	{
+		if (upload.resource == nullptr)
+		{
+			continue;
+		}
+		upload.resource->materialUploadHash = upload.materialHash;
+		if (voxelStatsEnabled)
+		{
+			const uint64_t materialSize =
+				(uint64_t)upload.resource->materialCount * sizeof(nri_scene::MaterialData);
+			Printf("PERF pt voxel material variant NRI: frame=%u action=upload reason=arena-sync actor_key=0x0 mat_key=0x%llx ref_count=0 material_offset=%u material_count=%u material_capacity=%u upload_hash=0x%llx upload_bytes=%llu ready=1\n",
+				frameIndex,
+				(unsigned long long)upload.resource->materialKeyHash,
+				upload.resource->materialOffset,
+				upload.resource->materialCount,
+				upload.resource->materialCapacity,
+				(unsigned long long)upload.materialHash,
+				(unsigned long long)materialSize);
+		}
+	}
+
+	return true;
 }
 
 bool NRIPersistentVoxelResidency::AppendTlasInstances(
