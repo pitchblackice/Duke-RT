@@ -507,6 +507,7 @@ public:
 	bool HasValidBatch() const;
 	bool HasRenderableOverlay() const;
 	uint32_t OverlayMaterialCount() const;
+	uint32_t EstimatePrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const;
 	nri_scene::SceneDebugStats BuildOverlayDebugStats() const;
 	uint64_t BuildSceneGenerationHash() const;
 	void AppendMaterialBridgeTo(nri_scene::MaterialBridgeData& destination) const;

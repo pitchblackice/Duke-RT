@@ -238,6 +238,18 @@ uint32_t NRIPersistentVoxelResidency::OverlayMaterialCount() const
 	return (uint32_t)batch.materialBridge.materials.size();
 }
 
+uint32_t NRIPersistentVoxelResidency::EstimatePrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const
+{
+	for (const PersistentVoxelBatch::ActorEntry& actor : batch.actors)
+	{
+		if (actor.active && actor.primitiveOffset == primitiveOffset && actor.primitiveCount > 0)
+		{
+			return actor.primitiveCount;
+		}
+	}
+	return 0;
+}
+
 nri_scene::SceneDebugStats NRIPersistentVoxelResidency::BuildOverlayDebugStats() const
 {
 	nri_scene::SceneDebugStats stats = batch.stats;

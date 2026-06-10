@@ -22579,12 +22579,10 @@ void NRIRenderer::ReadbackTraceShaderStats()
 	{
 		if (instance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
 		{
-			for (const PersistentVoxelBatch::ActorEntry& actor : mPersistentVoxels.batch.actors)
+			const uint32_t persistentVoxelPrimitiveCount = mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(instance.primitiveOffset);
+			if (persistentVoxelPrimitiveCount > 0)
 			{
-				if (actor.active && actor.primitiveOffset == instance.primitiveOffset && actor.primitiveCount > 0)
-				{
-					return actor.primitiveCount;
-				}
+				return persistentVoxelPrimitiveCount;
 			}
 		}
 
