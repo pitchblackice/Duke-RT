@@ -2304,19 +2304,8 @@ private:
 		const nri_scene::PrecachedVoxelVariantView& variant,
 		bool runtimeRequested,
 		const char* sourceLabel);
-	void DiscardPersistentVoxelAdmissionEntry(PersistentVoxelAdmissionEntry& entry);
-	bool IsRequiredPersistentVoxelAdmission(const PersistentVoxelAdmissionEntry& entry) const;
-	void CountPersistentVoxelAdmissionWork(uint32_t& requiredPending, uint32_t& requiredReady, uint32_t& optionalPending, uint32_t& failed) const;
 	void ApplyPersistentVoxelResidencyPressurePolicy(const char* phase);
 	bool PumpPersistentVoxelAdmissionQueue(const char* phase);
-	PersistentVoxelReadinessStatus GetPersistentVoxelSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
-	void TracePersistentVoxelReadiness(
-		const char* event,
-		const char* phase,
-		const PersistentVoxelAdmissionEntry* entry,
-		uint64_t meshResourceKey,
-		uint64_t materialKeyHash,
-		const PersistentVoxelReadinessStatus& status) const;
 	bool AdmitPersistentVoxelVariantResource(
 		PersistentVoxelAdmissionEntry& entry,
 		uint64_t byteBudget,
@@ -2327,7 +2316,6 @@ private:
 		bool& outInProgress,
 		bool isolateBlasBuild,
 		const char*& outFailureReason);
-	bool IsPersistentVoxelSharedVariantReady(uint64_t meshResourceKey, uint64_t materialKeyHash) const;
 	bool PreloadMaterialResources();
 	bool EnsurePersistentVoxelBatch();
 	void ResetPersistentVoxelBatch(const char* reason = "batch-reset", bool clearSharedResources = true);
