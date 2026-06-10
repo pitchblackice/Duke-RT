@@ -131,6 +131,11 @@ bool NRIPersistentVoxelPreloadServices::PumpAdmissionQueue(const char* phase) co
 	return pumpAdmissionQueue(user, phase);
 }
 
+bool NRIPersistentVoxelPreloadServices::EnsureBatch() const
+{
+	return ensureBatch != nullptr && ensureBatch(user);
+}
+
 bool NRIPersistentVoxelAdmissionServices::AdmitVariantResource(
 	PersistentVoxelAdmissionEntry& entry,
 	uint64_t byteBudget,
@@ -1661,6 +1666,137 @@ bool NRIPersistentVoxelResidency::PreloadVariantResources(
 		return false;
 	}
 	return ok;
+}
+
+bool NRIPersistentVoxelResidency::PreloadResources(
+	const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+	const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries,
+	bool hasCacheEntries,
+	bool gpuLoadingEnabled,
+	uint64_t buildSerial,
+	const char* levelName,
+	uint32_t frameIndex,
+	const NRIPersistentVoxelSettings& settings,
+	int loadingTraceLevel,
+	bool voxelStatsEnabled,
+	const NRIPersistentVoxelResetServices& resetServices,
+	const NRIPersistentVoxelPreloadServices& preloadServices)
+{
+	if (!gpuLoadingEnabled)
+	{
+		if (loadingTraceLevel >= 1)
+		{
+			Printf("NRI PT loading voxel resources: event=skip reason=gpu-disabled mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
+				(uint32_t)meshVariantResources.size(),
+				(uint32_t)materialVariantResources.size(),
+				(uint32_t)batch.actors.size(),
+				batch.activeActorCount,
+				batch.primitiveCount);
+		}
+		return true;
+	}
+
+	ReconcileResidency(
+		variants,
+		cacheEntries,
+		buildSerial,
+		levelName,
+		frameIndex,
+		loadingTraceLevel,
+		resetServices);
+
+	if (!PreloadVariantResources(
+		variants,
+		buildSerial,
+		settings,
+		loadingTraceLevel,
+		voxelStatsEnabled,
+		resetServices,
+		preloadServices))
+	{
+		if (preloadPending)
+		{
+			if (loadingTraceLevel >= 1)
+			{
+				uint32_t requiredPending = 0;
+				uint32_t requiredReady = 0;
+				uint32_t optionalPending = 0;
+				uint32_t failed = 0;
+				CountAdmissionWork(requiredPending, requiredReady, optionalPending, failed);
+				Printf("NRI PT loading voxel resources: event=wait reason=variant-admission-pending required_pending=%u required_ready=%u optional_pending=%u failed=%u mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
+					requiredPending,
+					requiredReady,
+					optionalPending,
+					failed,
+					(uint32_t)meshVariantResources.size(),
+					(uint32_t)materialVariantResources.size(),
+					(uint32_t)batch.actors.size(),
+					batch.activeActorCount,
+					batch.primitiveCount);
+			}
+			return false;
+		}
+		if (loadingTraceLevel >= 1)
+		{
+			Printf("NRI PT loading voxel resources: event=skip reason=variant-preload-disabled mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
+				(uint32_t)meshVariantResources.size(),
+				(uint32_t)materialVariantResources.size(),
+				(uint32_t)batch.actors.size(),
+				batch.activeActorCount,
+				batch.primitiveCount);
+		}
+		return true;
+	}
+
+	if (!hasCacheEntries)
+	{
+		if (loadingTraceLevel >= 1)
+		{
+			Printf("NRI PT loading voxel resources: event=skip reason=no-durable-entries entries=0 mesh_resources=%u material_resources=%u actors=%u active=%u prims=%u\n",
+				(uint32_t)meshVariantResources.size(),
+				(uint32_t)materialVariantResources.size(),
+				(uint32_t)batch.actors.size(),
+				batch.activeActorCount,
+				batch.primitiveCount);
+		}
+		return true;
+	}
+
+	const uint32_t meshResourcesBefore = (uint32_t)meshVariantResources.size();
+	const uint32_t materialResourcesBefore = (uint32_t)materialVariantResources.size();
+	const uint32_t actorsBefore = (uint32_t)batch.actors.size();
+	const uint32_t activeActorsBefore = batch.activeActorCount;
+	const uint32_t primitivesBefore = batch.primitiveCount;
+	const auto start = std::chrono::steady_clock::now();
+
+	struct LoadingWarmupScope
+	{
+		bool& active;
+		explicit LoadingWarmupScope(bool& value) : active(value) { active = true; }
+		~LoadingWarmupScope() { active = false; }
+	} loadingWarmupScope(loadingWarmupActive);
+
+	const bool ready = preloadServices.EnsureBatch();
+	const auto end = std::chrono::steady_clock::now();
+
+	if (loadingTraceLevel >= 1)
+	{
+		Printf("NRI PT loading voxel resources: event=%s entries=%u mesh_resources=%u mesh_delta=%d material_resources=%u material_delta=%d actors=%u actor_delta=%d active=%u active_delta=%d prims=%u prim_delta=%d ms=%.3f\n",
+			ready ? "admit" : "defer",
+			(uint32_t)cacheEntries.size(),
+			(uint32_t)meshVariantResources.size(),
+			(int32_t)meshVariantResources.size() - (int32_t)meshResourcesBefore,
+			(uint32_t)materialVariantResources.size(),
+			(int32_t)materialVariantResources.size() - (int32_t)materialResourcesBefore,
+			(uint32_t)batch.actors.size(),
+			(int32_t)batch.actors.size() - (int32_t)actorsBefore,
+			batch.activeActorCount,
+			(int32_t)batch.activeActorCount - (int32_t)activeActorsBefore,
+			batch.primitiveCount,
+			(int32_t)batch.primitiveCount - (int32_t)primitivesBefore,
+			PersistentVoxelDurationMs(start, end));
+	}
+	return true;
 }
 
 PersistentVoxelReadinessStatus NRIPersistentVoxelResidency::GetSharedVariantReadiness(uint64_t meshResourceKey, uint64_t materialKeyHash) const

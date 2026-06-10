@@ -253,11 +253,14 @@ struct NRIPersistentVoxelResetServices
 struct NRIPersistentVoxelPreloadServices
 {
 	using PumpAdmissionQueueFn = bool (*)(void* user, const char* phase);
+	using EnsureBatchFn = bool (*)(void* user);
 
 	void* user = nullptr;
 	PumpAdmissionQueueFn pumpAdmissionQueue = nullptr;
+	EnsureBatchFn ensureBatch = nullptr;
 
 	bool PumpAdmissionQueue(const char* phase) const;
+	bool EnsureBatch() const;
 };
 
 struct NRIPersistentVoxelAdmissionServices
@@ -317,6 +320,19 @@ public:
 	bool PreloadVariantResources(
 		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
 		uint64_t buildSerial,
+		const NRIPersistentVoxelSettings& settings,
+		int loadingTraceLevel,
+		bool voxelStatsEnabled,
+		const NRIPersistentVoxelResetServices& resetServices,
+		const NRIPersistentVoxelPreloadServices& preloadServices);
+	bool PreloadResources(
+		const std::vector<nri_scene::PrecachedVoxelVariantView>& variants,
+		const std::vector<nri_scene::PersistentVoxelCacheEntryView>& cacheEntries,
+		bool hasCacheEntries,
+		bool gpuLoadingEnabled,
+		uint64_t buildSerial,
+		const char* levelName,
+		uint32_t frameIndex,
 		const NRIPersistentVoxelSettings& settings,
 		int loadingTraceLevel,
 		bool voxelStatsEnabled,
