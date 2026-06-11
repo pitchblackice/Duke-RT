@@ -167,15 +167,6 @@ CUSTOM_CVAR(Int, nri_ptmutationworklistvalidate, 0, 0)
 		self = 2;
 	}
 }
-CVAR(Bool, nri_ptruntimeworklist, true, 0)
-CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, 0)
-CVAR(Bool, nri_ptruntimedeferfarmaterial, true, 0)
-CVAR(Bool, nri_ptruntimedefernearinvisiblematerial, true, 0)
-CVAR(Int, nri_ptruntimenearinvisiblematerialbudget, 4, 0)
-CVAR(Bool, nri_ptruntimedeferfarstructural, true, 0)
-CVAR(Int, nri_ptruntimefarstructuralbudget, 2, 0)
-CVAR(Bool, nri_ptruntimedefernearinvisiblestructural, true, 0)
-CVAR(Int, nri_ptruntimenearinvisiblestructuralbudget, 2, 0)
 CUSTOM_CVAR(Int, nri_ptscenebufferdirtyrangegap, 256, 0)
 {
 	if (self < 0)
@@ -199,13 +190,6 @@ CUSTOM_CVAR(Int, nri_ptscenebufferrangeuploadmaxpercent, 75, 0)
 	else if (self > 100)
 	{
 		self = 100;
-	}
-}
-CUSTOM_CVAR(Float, nri_ptruntimemutationneardistance, 1024.0f, 0)
-{
-	if (self < 0.0f)
-	{
-		self = 0.0f;
 	}
 }
 CUSTOM_CVAR(Int, nri_ptactorspritetrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -13456,7 +13440,8 @@ void NRIRenderer::PrintResidentMapChunkRegistryStatus() const
 		mResidentMapChunkRegistry.animatedCandidateChunkCount,
 		mResidentMapChunkRegistry.animatedRefreshSuppressedChunkCount);
 
-	const float nearDistance = std::max(0.0f, (float)nri_ptruntimemutationneardistance);
+	const NRIRuntimeMutationSettings runtimeMutationSettings = BuildNRIRuntimeMutationSettingsFromCVars();
+	const float nearDistance = runtimeMutationSettings.nearDistance;
 	const float nearDistanceSquared = nearDistance * nearDistance;
 	uint32_t boundsValidCount = 0;
 	uint32_t boundsInvalidCount = 0;
@@ -23858,6 +23843,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	std::vector<uint32_t> animatedResidentApplyMaterialChunkListIndices;
 	std::vector<uint32_t> residentGeometryChunkListIndices;
 	mRuntimeMutation.ClearResidentGeometryUploadRanges();
+	const NRIRuntimeMutationSettings runtimeMutationSettings = BuildNRIRuntimeMutationSettingsFromCVars();
 	const bool tracePtPerf = ShouldTracePtPerf();
 	const bool collectRuntimeMutationCacheStats = tracePtPerf || (bool)nri_ptslowdowntrace;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs = 0.0;
@@ -23878,7 +23864,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyNearMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyFarMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyUnknownDistanceMs = 0.0;
-	mLastPerfShellTraceStats.runtimeMutationNearDistance = (float)nri_ptruntimemutationneardistance;
+	mLastPerfShellTraceStats.runtimeMutationNearDistance = runtimeMutationSettings.nearDistance;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyLiveBuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyGeometryBuildMs = 0.0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialBuildMs = 0.0;
@@ -23951,13 +23937,13 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredNearFlushedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredNearPendingChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredNearBudget =
-		(uint32_t)std::max(0, (int)nri_ptruntimenearinvisiblestructuralbudget);
+		runtimeMutationSettings.nearInvisibleStructuralBudget;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredFarChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredFarCoalescedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredFarFlushedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredFarPendingChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredFarBudget =
-		(uint32_t)std::max(0, (int)nri_ptruntimefarstructuralbudget);
+		runtimeMutationSettings.farStructuralBudget;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredBudget =
 		mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredNearBudget +
 		mLastPerfShellTraceStats.runtimeMutationStructuralRebuildDeferredFarBudget;
@@ -23975,7 +23961,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearFlushedChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearPendingChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshDeferredNearBudget =
-		(uint32_t)std::max(0, (int)nri_ptruntimenearinvisiblematerialbudget);
+		runtimeMutationSettings.nearInvisibleMaterialBudget;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshActiveReplacementChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationMaterialRefreshBackgroundSweepChunks = 0;
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyVisibleChunks = 0;
@@ -24627,7 +24613,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mPendingStartupVisibleChunkValidation[mapChunk.chunkIndex] = 0u;
 		}
 	}
-	const bool runtimeMutationWorklistEnabled = (bool)nri_ptruntimeworklist;
+	const bool runtimeMutationWorklistEnabled = runtimeMutationSettings.worklistEnabled;
 	std::vector<uint32_t> runtimeMutationCandidateSourceMasks(mMapWorld.chunks.size(), 0u);
 	uint32_t runtimeMutationCandidateCount = 0;
 	uint32_t runtimeMutationSignatureWatchlistCandidateCount = 0;
@@ -24638,7 +24624,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		Near,
 		Far,
 	};
-	const float runtimeMutationNearDistance = std::max(0.0f, (float)nri_ptruntimemutationneardistance);
+	const float runtimeMutationNearDistance = runtimeMutationSettings.nearDistance;
 	const float runtimeMutationNearDistanceSquared = runtimeMutationNearDistance * runtimeMutationNearDistance;
 	const auto getRuntimeMutationDistanceTier = [&](uint32_t chunkListIndex, bool chunkVisibleNow) -> RuntimeMutationDistanceTier
 	{
@@ -24877,7 +24863,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 	if (runtimeMutationWorklistEnabled && !mMapWorld.chunks.empty())
 	{
-		const uint32_t sweepBudget = (uint32_t)std::max(0, (int)nri_ptruntimeworklistsweepbudget);
+		const uint32_t sweepBudget = runtimeMutationSettings.worklistSweepBudget;
 		const uint32_t chunkCount = (uint32_t)mMapWorld.chunks.size();
 		const uint32_t sweepCount = std::min(sweepBudget, chunkCount);
 		for (uint32_t sweepOffset = 0; sweepOffset < sweepCount; ++sweepOffset)
@@ -25029,10 +25015,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			mLastPerfShellTraceStats.runtimeMutationResidentApplyBackgroundSweepChunks++;
 		}
 	};
-	const bool deferNearInvisibleStructuralRebuilds = (bool)nri_ptruntimedefernearinvisiblestructural;
-	const bool deferFarInvisibleStructuralRebuilds = (bool)nri_ptruntimedeferfarstructural;
-	const uint32_t nearInvisibleStructuralBudget = (uint32_t)std::max(0, (int)nri_ptruntimenearinvisiblestructuralbudget);
-	const uint32_t farStructuralBudget = (uint32_t)std::max(0, (int)nri_ptruntimefarstructuralbudget);
+	const bool deferNearInvisibleStructuralRebuilds = runtimeMutationSettings.deferNearInvisibleStructuralRebuilds;
+	const bool deferFarInvisibleStructuralRebuilds = runtimeMutationSettings.deferFarStructuralRebuilds;
+	const uint32_t nearInvisibleStructuralBudget = runtimeMutationSettings.nearInvisibleStructuralBudget;
+	const uint32_t farStructuralBudget = runtimeMutationSettings.farStructuralBudget;
 	uint32_t nearInvisibleStructuralBudgetReserved = 0;
 	uint32_t farStructuralBudgetReserved = 0;
 	std::vector<uint8_t> nearInvisibleStructuralBudgetAllowed(mMapWorld.chunks.size(), 0u);
@@ -25155,8 +25141,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 		return false;
 	};
-	const bool deferNearInvisibleMaterialRefreshes = (bool)nri_ptruntimedefernearinvisiblematerial;
-	const uint32_t nearInvisibleMaterialBudget = (uint32_t)std::max(0, (int)nri_ptruntimenearinvisiblematerialbudget);
+	const bool deferNearInvisibleMaterialRefreshes = runtimeMutationSettings.deferNearInvisibleMaterialRefreshes;
+	const uint32_t nearInvisibleMaterialBudget = runtimeMutationSettings.nearInvisibleMaterialBudget;
 	uint32_t nearInvisibleMaterialBudgetReserved = 0;
 	std::vector<uint8_t> nearInvisibleMaterialBudgetAllowed(mMapWorld.chunks.size(), 0u);
 	if (deferNearInvisibleMaterialRefreshes && nearInvisibleMaterialBudget > 0)
@@ -26537,7 +26523,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				!activeReplacementMaterialCandidate &&
 				runtimeMutationDistanceTier == RuntimeMutationDistanceTier::Near;
 			const bool deferFarInvisibleMaterialRefresh =
-				(bool)nri_ptruntimedeferfarmaterial &&
+				runtimeMutationSettings.deferFarMaterialRefreshes &&
 				materialOnlyReplacement &&
 				!useStaticAnimatedReplacement &&
 				!chunkVisibleNow &&

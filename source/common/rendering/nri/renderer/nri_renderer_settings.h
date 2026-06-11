@@ -60,6 +60,21 @@ struct NRIPersistentVoxelSettings
 	uint32_t excludeMinPrimitives = 0;
 };
 
+struct NRIRuntimeMutationSettings
+{
+	bool worklistEnabled = true;
+	uint32_t worklistSweepBudget = 32;
+	bool deferFarMaterialRefreshes = true;
+	bool deferNearInvisibleMaterialRefreshes = true;
+	uint32_t nearInvisibleMaterialBudget = 4;
+	bool deferFarStructuralRebuilds = true;
+	uint32_t farStructuralBudget = 2;
+	bool deferNearInvisibleStructuralRebuilds = true;
+	uint32_t nearInvisibleStructuralBudget = 2;
+	float nearDistance = 1024.0f;
+};
+
 NRITraceSettings BuildNRITraceSettingsFromCVars();
 NRIDenoiserSettings BuildNRIDenoiserSettingsFromCVars();
 NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars();
+NRIRuntimeMutationSettings BuildNRIRuntimeMutationSettingsFromCVars();

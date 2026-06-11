@@ -50,6 +50,22 @@ CVAR(Int, nri_ptvoxelexcludeindex, -1, 0)
 CVAR(Int, nri_ptvoxelexcludeindex2, -1, 0)
 CVAR(Int, nri_ptvoxelexcludeindex3, -1, 0)
 CVAR(Int, nri_ptvoxelexcludeminprims, 0, 0)
+CVAR(Bool, nri_ptruntimeworklist, true, 0)
+CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, 0)
+CVAR(Bool, nri_ptruntimedeferfarmaterial, true, 0)
+CVAR(Bool, nri_ptruntimedefernearinvisiblematerial, true, 0)
+CVAR(Int, nri_ptruntimenearinvisiblematerialbudget, 4, 0)
+CVAR(Bool, nri_ptruntimedeferfarstructural, true, 0)
+CVAR(Int, nri_ptruntimefarstructuralbudget, 2, 0)
+CVAR(Bool, nri_ptruntimedefernearinvisiblestructural, true, 0)
+CVAR(Int, nri_ptruntimenearinvisiblestructuralbudget, 2, 0)
+CUSTOM_CVAR(Float, nri_ptruntimemutationneardistance, 1024.0f, 0)
+{
+	if (self < 0.0f)
+	{
+		self = 0.0f;
+	}
+}
 
 namespace
 {
@@ -161,5 +177,21 @@ NRIPersistentVoxelSettings BuildNRIPersistentVoxelSettingsFromCVars()
 		(int32_t)(int)nri_ptvoxelexcludeindex3
 	};
 	settings.excludeMinPrimitives = (uint32_t)std::max(0, (int)nri_ptvoxelexcludeminprims);
+	return settings;
+}
+
+NRIRuntimeMutationSettings BuildNRIRuntimeMutationSettingsFromCVars()
+{
+	NRIRuntimeMutationSettings settings = {};
+	settings.worklistEnabled = (bool)nri_ptruntimeworklist;
+	settings.worklistSweepBudget = (uint32_t)std::max(0, (int)nri_ptruntimeworklistsweepbudget);
+	settings.deferFarMaterialRefreshes = (bool)nri_ptruntimedeferfarmaterial;
+	settings.deferNearInvisibleMaterialRefreshes = (bool)nri_ptruntimedefernearinvisiblematerial;
+	settings.nearInvisibleMaterialBudget = (uint32_t)std::max(0, (int)nri_ptruntimenearinvisiblematerialbudget);
+	settings.deferFarStructuralRebuilds = (bool)nri_ptruntimedeferfarstructural;
+	settings.farStructuralBudget = (uint32_t)std::max(0, (int)nri_ptruntimefarstructuralbudget);
+	settings.deferNearInvisibleStructuralRebuilds = (bool)nri_ptruntimedefernearinvisiblestructural;
+	settings.nearInvisibleStructuralBudget = (uint32_t)std::max(0, (int)nri_ptruntimenearinvisiblestructuralbudget);
+	settings.nearDistance = std::max(0.0f, (float)nri_ptruntimemutationneardistance);
 	return settings;
 }
