@@ -142,6 +142,18 @@ struct RuntimeMutationResidentApplyMode
 	bool fastResidentMaterialOnlyUpdate = false;
 };
 
+struct RuntimeMutationResidentApplyModeStats
+{
+	uint32_t materialOnlyCount = 0;
+	uint32_t fastMaterialOnlyCount = 0;
+	uint32_t slowMaterialOnlyCount = 0;
+	uint32_t materialOnlyExclusiveCount = 0;
+	uint32_t materialOnlyNoResidentChunkCount = 0;
+	uint32_t materialOnlyInvalidReplacementCount = 0;
+	uint32_t materialOnlyMaterialCountMismatchCount = 0;
+	uint32_t structuralCount = 0;
+};
+
 struct RuntimeMutationResidentUploadRange
 {
 	int uploadKind = 0;
@@ -249,6 +261,12 @@ public:
 	void MarkFrameInactive();
 	void UpdateHighWaterStats(const RuntimeMutationCacheStats& cacheStats);
 	RuntimeMutationResidentApplyMode ClassifyResidentApplyMode(
+		const RuntimeMapMutationCache::ChunkReplacement& replacement,
+		bool hasResidentChunk,
+		bool hasResolvedAtlasChunk,
+		uint32_t resolvedAtlasMaterialCount) const;
+	RuntimeMutationResidentApplyModeStats BuildResidentApplyModeStats(
+		const RuntimeMutationResidentApplyMode& mode,
 		const RuntimeMapMutationCache::ChunkReplacement& replacement,
 		bool hasResidentChunk,
 		bool hasResolvedAtlasChunk,

@@ -4766,48 +4766,6 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 	return true;
 }
 
-void NRIRenderer::RecordRuntimeMutationResidentApplyMode(
-	const RuntimeMutationResidentApplyMode& mode,
-	const RuntimeMapMutationCache::ChunkReplacement& replacement,
-	bool hasResidentChunk,
-	uint32_t resolvedChunkListIndex)
-{
-	if (mode.materialOnlyReplacement)
-	{
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyCount++;
-		if (mode.fastResidentMaterialOnlyUpdate)
-		{
-			mLastPerfShellTraceStats.runtimeMutationResidentApplyFastMaterialOnlyCount++;
-		}
-		else
-		{
-			mLastPerfShellTraceStats.runtimeMutationResidentApplySlowMaterialOnlyCount++;
-			if (mode.exclusiveMaterialOnlyReplacement)
-			{
-				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyExclusiveCount++;
-			}
-			if (!hasResidentChunk)
-			{
-				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount++;
-			}
-			if (!replacement.valid)
-			{
-				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount++;
-			}
-			if (resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
-				(uint32_t)replacement.materialBridge.materials.size() !=
-					mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount)
-			{
-				mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount++;
-			}
-		}
-	}
-	else
-	{
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyStructuralCount++;
-	}
-}
-
 bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const nri_scene::PTMapChunk& mapChunk,
 	RuntimeMapMutationCache::ChunkReplacement& replacement,
@@ -4866,7 +4824,16 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		hasResolvedAtlasChunk ? mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount : 0u;
 	const RuntimeMutationResidentApplyMode applyMode =
 		mRuntimeMutation.ClassifyResidentApplyMode(replacement, hasResidentChunk, hasResolvedAtlasChunk, resolvedAtlasMaterialCount);
-	RecordRuntimeMutationResidentApplyMode(applyMode, replacement, hasResidentChunk, resolvedChunkListIndex);
+	const RuntimeMutationResidentApplyModeStats applyModeStats =
+		mRuntimeMutation.BuildResidentApplyModeStats(applyMode, replacement, hasResidentChunk, hasResolvedAtlasChunk, resolvedAtlasMaterialCount);
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyCount += applyModeStats.materialOnlyCount;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyFastMaterialOnlyCount += applyModeStats.fastMaterialOnlyCount;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplySlowMaterialOnlyCount += applyModeStats.slowMaterialOnlyCount;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyExclusiveCount += applyModeStats.materialOnlyExclusiveCount;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyNoResidentChunkCount += applyModeStats.materialOnlyNoResidentChunkCount;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyInvalidReplacementCount += applyModeStats.materialOnlyInvalidReplacementCount;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyMaterialOnlyMaterialCountMismatchCount += applyModeStats.materialOnlyMaterialCountMismatchCount;
+	mLastPerfShellTraceStats.runtimeMutationResidentApplyStructuralCount += applyModeStats.structuralCount;
 	const bool materialOnlyReplacement = applyMode.materialOnlyReplacement;
 	const bool exclusiveMaterialOnlyReplacement = applyMode.exclusiveMaterialOnlyReplacement;
 	const bool fastResidentMaterialOnlyUpdate = applyMode.fastResidentMaterialOnlyUpdate;

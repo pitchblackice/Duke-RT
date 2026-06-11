@@ -2280,11 +2280,6 @@ private:
 		uint32_t& outTriangleCount,
 		uint32_t& outMaterialCount,
 		bool& outRecoveredEmpty);
-	void RecordRuntimeMutationResidentApplyMode(
-		const RuntimeMutationResidentApplyMode& mode,
-		const RuntimeMapMutationCache::ChunkReplacement& replacement,
-		bool hasResidentChunk,
-		uint32_t resolvedChunkListIndex);
 	bool RebuildResidentStaticMaterialState(const char* reason);
 	bool RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);

@@ -967,3 +967,47 @@ RuntimeMutationResidentApplyMode NRIRuntimeMutationSystem::ClassifyResidentApply
 		(uint32_t)replacement.materialBridge.materials.size() == resolvedAtlasMaterialCount;
 	return mode;
 }
+
+RuntimeMutationResidentApplyModeStats NRIRuntimeMutationSystem::BuildResidentApplyModeStats(
+	const RuntimeMutationResidentApplyMode& mode,
+	const RuntimeMapMutationCache::ChunkReplacement& replacement,
+	bool hasResidentChunk,
+	bool hasResolvedAtlasChunk,
+	uint32_t resolvedAtlasMaterialCount) const
+{
+	RuntimeMutationResidentApplyModeStats stats = {};
+	if (mode.materialOnlyReplacement)
+	{
+		stats.materialOnlyCount++;
+		if (mode.fastResidentMaterialOnlyUpdate)
+		{
+			stats.fastMaterialOnlyCount++;
+		}
+		else
+		{
+			stats.slowMaterialOnlyCount++;
+			if (mode.exclusiveMaterialOnlyReplacement)
+			{
+				stats.materialOnlyExclusiveCount++;
+			}
+			if (!hasResidentChunk)
+			{
+				stats.materialOnlyNoResidentChunkCount++;
+			}
+			if (!replacement.valid)
+			{
+				stats.materialOnlyInvalidReplacementCount++;
+			}
+			if (hasResolvedAtlasChunk &&
+				(uint32_t)replacement.materialBridge.materials.size() != resolvedAtlasMaterialCount)
+			{
+				stats.materialOnlyMaterialCountMismatchCount++;
+			}
+		}
+	}
+	else
+	{
+		stats.structuralCount++;
+	}
+	return stats;
+}
