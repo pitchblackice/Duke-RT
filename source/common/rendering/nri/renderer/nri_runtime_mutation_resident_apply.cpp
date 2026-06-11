@@ -4,6 +4,7 @@
 #include "../scene/nri_map_builder.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "nri_render_geometry_helpers.h"
+#include "nri_runtime_mutation_shared.h"
 #include "c_cvars.h"
 #include "gamecontrol.h"
 #include "gamestate.h"
@@ -80,545 +81,22 @@ namespace
 		return value ? "yes" : "no";
 	}
 
-	static uint64_t RuntimeMutationOverlayHashCombine64(uint64_t hash, uint64_t value)
-	{
-		return nri_scene::HashCombine64(hash, value);
-	}
-
-	static uint32_t RuntimeMutationOverlayFloatBits(float value)
-	{
-		uint32_t bits = 0;
-		std::memcpy(&bits, &value, sizeof(bits));
-		return bits;
-	}
-
-	static bool TryComputeCapturedSurfaceNormal(const nri_scene::SurfaceRef& surface, float outNormal[3])
-	{
-		if (surface.vertices.size() < 3)
-		{
-			return false;
-		}
-
-		const nri_scene::CapturedVertex& a = surface.vertices[0];
-		const nri_scene::CapturedVertex& b = surface.vertices[1];
-		const nri_scene::CapturedVertex& c = surface.vertices[2];
-		const float abx = b.position[0] - a.position[0];
-		const float aby = b.position[1] - a.position[1];
-		const float abz = b.position[2] - a.position[2];
-		const float acx = c.position[0] - a.position[0];
-		const float acy = c.position[1] - a.position[1];
-		const float acz = c.position[2] - a.position[2];
-		const float nx = aby * acz - abz * acy;
-		const float ny = abz * acx - abx * acz;
-		const float nz = abx * acy - aby * acx;
-		const float lengthSq = nx * nx + ny * ny + nz * nz;
-		if (lengthSq <= 1.0e-8f)
-		{
-			return false;
-		}
-
-		const float invLength = 1.0f / std::sqrt(lengthSq);
-		outNormal[0] = nx * invLength;
-		outNormal[1] = ny * invLength;
-		outNormal[2] = nz * invLength;
-		return true;
-	}
-
-	static void NudgeCapturedSurface(nri_scene::SurfaceRef& surface, float depthNudge)
-	{
-		float normal[3] = {};
-		if (!TryComputeCapturedSurfaceNormal(surface, normal))
-		{
-			return;
-		}
-
-		for (nri_scene::CapturedVertex& vertex : surface.vertices)
-		{
-			vertex.position[0] += normal[0] * depthNudge;
-			vertex.position[1] += normal[1] * depthNudge;
-			vertex.position[2] += normal[2] * depthNudge;
-			vertex.prevPosition[0] += normal[0] * depthNudge;
-			vertex.prevPosition[1] += normal[1] * depthNudge;
-			vertex.prevPosition[2] += normal[2] * depthNudge;
-		}
-	}
-
-	static void NudgeBlindSpotReplacementFlats(nri_scene::SceneView& sceneView)
-	{
-		static constexpr float kBlindSpotFlatDepthNudge = 0.01f;
-		for (nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
-		{
-			if (surface.provenance.sourceType != nri_scene::SurfaceSourceType::MapFloorSection &&
-				surface.provenance.sourceType != nri_scene::SurfaceSourceType::MapCeilingSection)
-			{
-				continue;
-			}
-
-			NudgeCapturedSurface(surface, kBlindSpotFlatDepthNudge);
-		}
-	}
-
-	static uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView)
-	{
-		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
-	}
-
-	static uint64_t HashMaterialBridgeSummary(const nri_scene::MaterialBridgeData& materials)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)materials.materials.size());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)materials.lightMetadata.size());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)materials.textures.size());
-		for (const auto& material : materials.materials)
-		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.textureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.paletteIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.flags);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.lightingFlags);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.emissiveMode);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.emissiveTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(material.alpha));
-		}
-
-		for (const auto& metadata : materials.lightMetadata)
-		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, metadata.materialKey);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.textureId);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.actorIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.textureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.paletteIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.emissiveMode);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.emissiveTextureIndex);
-		}
-
-		for (const auto& texture : materials.textures)
-		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, texture.key);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)texture.width);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)texture.height);
-			hash = RuntimeMutationOverlayHashCombine64(hash, texture.indexed ? 1ull : 0ull);
-		}
-
-		return hash;
-	}
-
-	static void FilterMaterialOnlyReplacementSceneView(nri_scene::SceneView& sceneView, uint32_t reasonMask)
-	{
-		static constexpr float kMaterialOnlyReplacementDepthNudge = 0.01f;
-		const bool keepWalls = (reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0;
-		const bool keepFlats = (reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0;
-
-		if (!keepWalls)
-		{
-			sceneView.opaqueWalls.clear();
-		}
-		if (!keepFlats)
-		{
-			sceneView.opaqueFlats.clear();
-		}
-
-		for (nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
-		{
-			NudgeCapturedSurface(surface, kMaterialOnlyReplacementDepthNudge);
-		}
-		for (nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
-		{
-			NudgeCapturedSurface(surface, kMaterialOnlyReplacementDepthNudge);
-		}
-	}
-
-	static bool SceneViewHasSectorDrivenWallBands(const nri_scene::SceneView& sceneView)
-	{
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
-		{
-			if (surface.provenance.sourceType == nri_scene::SurfaceSourceType::MapWallBand)
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	static void RemapMaterialBridgeAgainstTextureTable(
-		const nri_scene::MaterialBridgeData& source,
-		nri_scene::MaterialBridgeData& inOutTextureTable,
-		nri_scene::MaterialBridgeData& outRemapped)
-	{
-		std::unordered_map<uint64_t, uint32_t> textureLookup;
-		textureLookup.reserve(inOutTextureTable.textures.size() + source.textures.size());
-		for (uint32_t i = 0; i < (uint32_t)inOutTextureTable.textures.size(); ++i)
-		{
-			textureLookup.emplace(inOutTextureTable.textures[i].key, i);
-		}
-
-		auto remapTextureIndex = [&source, &inOutTextureTable, &textureLookup](uint32_t textureIndex) -> uint32_t
-		{
-			if (textureIndex == UINT32_MAX)
-			{
-				return UINT32_MAX;
-			}
-			if (textureIndex >= source.textures.size())
-			{
-				return textureIndex;
-			}
-
-			const auto& texture = source.textures[textureIndex];
-			auto it = textureLookup.find(texture.key);
-			if (it != textureLookup.end())
-			{
-				return it->second;
-			}
-
-			const uint32_t newIndex = (uint32_t)inOutTextureTable.textures.size();
-			textureLookup.emplace(texture.key, newIndex);
-			inOutTextureTable.textures.push_back(texture);
-			return newIndex;
-		};
-
-		outRemapped = {};
-		outRemapped.materials.reserve(source.materials.size());
-		outRemapped.lightMetadata.reserve(source.lightMetadata.size());
-		for (size_t materialIndex = 0; materialIndex < source.materials.size(); ++materialIndex)
-		{
-			const auto& material = source.materials[materialIndex];
-			nri_scene::MaterialData copy = material;
-			copy.textureIndex = remapTextureIndex(material.textureIndex);
-			copy.normalTextureIndex = remapTextureIndex(material.normalTextureIndex);
-			copy.metallicTextureIndex = remapTextureIndex(material.metallicTextureIndex);
-			copy.roughnessTextureIndex = remapTextureIndex(material.roughnessTextureIndex);
-			copy.emissiveTextureIndex = remapTextureIndex(material.emissiveTextureIndex);
-			outRemapped.materials.push_back(copy);
-
-			if (materialIndex < source.lightMetadata.size())
-			{
-				nri_scene::MaterialLightingMetadata metadata = source.lightMetadata[materialIndex];
-				metadata.textureIndex = remapTextureIndex(metadata.textureIndex);
-				metadata.glowmapTextureIndex = remapTextureIndex(metadata.glowmapTextureIndex);
-				metadata.normalTextureIndex = remapTextureIndex(metadata.normalTextureIndex);
-				metadata.metallicTextureIndex = remapTextureIndex(metadata.metallicTextureIndex);
-				metadata.roughnessTextureIndex = remapTextureIndex(metadata.roughnessTextureIndex);
-				metadata.emissiveTextureIndex = remapTextureIndex(metadata.emissiveTextureIndex);
-				outRemapped.lightMetadata.push_back(metadata);
-			}
-		}
-
-		if (!source.paletteLookup.empty())
-		{
-			outRemapped.paletteLookup = source.paletteLookup;
-			outRemapped.paletteWidth = source.paletteWidth;
-			outRemapped.paletteHeight = source.paletteHeight;
-			if (inOutTextureTable.paletteLookup.empty())
-			{
-				inOutTextureTable.paletteLookup = source.paletteLookup;
-				inOutTextureTable.paletteWidth = source.paletteWidth;
-				inOutTextureTable.paletteHeight = source.paletteHeight;
-			}
-		}
-	}
-
-	static bool TryBuildMergedSectorMaterialOnlyBridge(
-		const nri_scene::SceneView& residentChunkView,
-		const nri_scene::MaterialBridgeData& residentChunkMaterials,
-		const nri_scene::SceneView& filteredLiveChunkView,
-		const nri_scene::MaterialBridgeData& filteredLiveMaterials,
-		nri_scene::MaterialBridgeData& outMergedMaterials)
-	{
-		if (!filteredLiveChunkView.opaqueWalls.empty())
-		{
-			return false;
-		}
-
-		const uint32_t residentWallCount = (uint32_t)residentChunkView.opaqueWalls.size();
-		const uint32_t residentFlatCount = (uint32_t)residentChunkView.opaqueFlats.size();
-		if (residentFlatCount == 0 ||
-			filteredLiveChunkView.opaqueFlats.size() != residentFlatCount ||
-			filteredLiveMaterials.materials.size() != residentFlatCount ||
-			filteredLiveMaterials.lightMetadata.size() != residentFlatCount)
-		{
-			return false;
-		}
-
-		if (residentChunkMaterials.materials.size() != residentChunkMaterials.lightMetadata.size() ||
-			residentWallCount + residentFlatCount > residentChunkMaterials.materials.size())
-		{
-			return false;
-		}
-
-		outMergedMaterials = residentChunkMaterials;
-		nri_scene::MaterialBridgeData remappedFlatMaterials;
-		RemapMaterialBridgeAgainstTextureTable(filteredLiveMaterials, outMergedMaterials, remappedFlatMaterials);
-		if (remappedFlatMaterials.materials.size() != residentFlatCount ||
-			remappedFlatMaterials.lightMetadata.size() != residentFlatCount)
-		{
-			return false;
-		}
-
-		std::copy_n(remappedFlatMaterials.materials.data(), residentFlatCount, outMergedMaterials.materials.begin() + residentWallCount);
-		std::copy_n(remappedFlatMaterials.lightMetadata.data(), residentFlatCount, outMergedMaterials.lightMetadata.begin() + residentWallCount);
-		return true;
-	}
-
-	static bool TryBuildMergedSectorMaterialOnlySceneView(
-		const nri_scene::SceneView& residentChunkView,
-		const nri_scene::SceneView& filteredLiveChunkView,
-		nri_scene::SceneView& outMergedSceneView)
-	{
-		if (!filteredLiveChunkView.opaqueWalls.empty() ||
-			residentChunkView.opaqueFlats.size() != filteredLiveChunkView.opaqueFlats.size())
-		{
-			return false;
-		}
-
-		outMergedSceneView = filteredLiveChunkView;
-		outMergedSceneView.opaqueWalls = residentChunkView.opaqueWalls;
-		outMergedSceneView.opaqueSprites = residentChunkView.opaqueSprites;
-		outMergedSceneView.stats.totalDrawItems =
-			(unsigned)(outMergedSceneView.opaqueWalls.size() +
-				outMergedSceneView.opaqueFlats.size() +
-				outMergedSceneView.opaqueSprites.size());
-		outMergedSceneView.stats.wallDrawItems = (unsigned)outMergedSceneView.opaqueWalls.size();
-		outMergedSceneView.stats.flatDrawItems = (unsigned)outMergedSceneView.opaqueFlats.size();
-		outMergedSceneView.stats.spriteDrawItems = (unsigned)outMergedSceneView.opaqueSprites.size();
-		outMergedSceneView.stats.materialRefs = outMergedSceneView.stats.totalDrawItems;
-		return true;
-	}
-
-	static bool IsChunkMarkedVisible(const std::vector<uint32_t>& visibleChunkWords, uint32_t chunkIndex)
-	{
-		const size_t wordIndex = (size_t)(chunkIndex >> 5u);
-		if (wordIndex >= visibleChunkWords.size())
-		{
-			return false;
-		}
-
-		return (visibleChunkWords[wordIndex] & (1u << (chunkIndex & 31u))) != 0u;
-	}
-
-	static uint64_t ComputeRecurringChunkStateSignature(
-		uint32_t reasonMask,
-		uint32_t liveWallCount,
-		uint32_t liveFlatCount,
-		uint32_t liveTriangleCount,
-		uint32_t liveMaterialCount)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)reasonMask);
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)liveWallCount);
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)liveFlatCount);
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)liveTriangleCount);
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)liveMaterialCount);
-		return hash;
-	}
-
-	static uint32_t GetAnimatedTextureId(FGameTexture* texture)
-	{
-		return texture != nullptr ? (uint32_t)texture->GetID().GetIndex() : 0u;
-	}
-
-	static uint64_t HashAnimatedLayerTexture(FTexture* texture)
-	{
-		return texture != nullptr ? (uint64_t)(uintptr_t)texture : 0ull;
-	}
-
-	static uint64_t HashAnimatedTextureBindingSignature(FGameTexture* texture)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)GetAnimatedTextureId(texture));
-		if (texture == nullptr)
-		{
-			return hash;
-		}
-
-		hash = RuntimeMutationOverlayHashCombine64(hash, HashAnimatedLayerTexture(texture->GetGlowmap()));
-		hash = RuntimeMutationOverlayHashCombine64(hash, HashAnimatedLayerTexture(texture->GetNormalmap()));
-		hash = RuntimeMutationOverlayHashCombine64(hash, HashAnimatedLayerTexture(texture->GetMetallic()));
-		hash = RuntimeMutationOverlayHashCombine64(hash, HashAnimatedLayerTexture(texture->GetRoughness()));
-		return hash;
-	}
-
-	static uint64_t HashAnimatedTextureDisplaySignature(FGameTexture* texture)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)GetAnimatedTextureId(texture));
-		if (texture == nullptr)
-		{
-			return hash;
-		}
-
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)texture->GetDisplayWidth());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)texture->GetDisplayHeight());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)texture->GetDisplayLeftOffset());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)texture->GetDisplayTopOffset());
-		return hash;
-	}
-
-	template <typename SurfaceContainer>
-	static void HashAnimatedSurfaces(const SurfaceContainer& surfaces, uint64_t& hash, bool includeDisplaySignature)
-	{
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surfaces.size());
-		for (const auto& surface : surfaces)
-		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)surface.provenance.sourceType);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectorIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.wallIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectionIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.actorIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surface.provenance.cstat);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surface.material.flags);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)surface.material.palette);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)surface.material.shade);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(surface.material.alpha));
-			hash = RuntimeMutationOverlayHashCombine64(hash, HashAnimatedTextureBindingSignature(surface.material.texture));
-			if (includeDisplaySignature)
-			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, HashAnimatedTextureDisplaySignature(surface.material.texture));
-			}
-		}
-	}
-
-	template <typename SurfaceContainer>
-	static void HashAnimatedGeometrySurfaces(const SurfaceContainer& surfaces, uint64_t& hash)
-	{
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surfaces.size());
-		for (const auto& surface : surfaces)
-		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)surface.provenance.sourceType);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectorIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.wallIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectionIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.actorIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surface.provenance.cstat);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surface.indices.size());
-			hash = RuntimeMutationOverlayHashCombine64(hash, HashAnimatedTextureDisplaySignature(surface.material.texture));
-		}
-	}
-
-	template <typename SurfaceContainer>
-	static void HashExactGeometrySurfaces(const SurfaceContainer& surfaces, uint64_t& hash)
-	{
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surfaces.size());
-		for (const auto& surface : surfaces)
-		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)surface.provenance.sourceType);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectorIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.wallIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.sectionIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(surface.provenance.actorIndex + 1));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surface.provenance.cstat);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surface.vertices.size());
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)surface.indices.size());
-			for (const auto& vertex : surface.vertices)
-			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(vertex.position[0]));
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(vertex.position[1]));
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(vertex.position[2]));
-			}
-			for (uint32_t index : surface.indices)
-			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)index);
-			}
-		}
-	}
-
-	static uint64_t ComputeAnimatedMaterialSignature(const nri_scene::SceneView& sceneView)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		HashAnimatedSurfaces(sceneView.opaqueWalls, hash, false);
-		HashAnimatedSurfaces(sceneView.opaqueFlats, hash, false);
-		HashAnimatedSurfaces(sceneView.opaqueSprites, hash, false);
-		return hash;
-	}
-
-	static uint64_t ComputeAnimatedGeometrySignature(const nri_scene::SceneView& sceneView)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		HashAnimatedGeometrySurfaces(sceneView.opaqueWalls, hash);
-		HashAnimatedGeometrySurfaces(sceneView.opaqueFlats, hash);
-		HashAnimatedGeometrySurfaces(sceneView.opaqueSprites, hash);
-		return hash;
-	}
-
-	static uint64_t ComputeExactGeometrySignature(const nri_scene::SceneView& sceneView)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		HashExactGeometrySurfaces(sceneView.opaqueWalls, hash);
-		HashExactGeometrySurfaces(sceneView.opaqueFlats, hash);
-		HashExactGeometrySurfaces(sceneView.opaqueSprites, hash);
-		return hash;
-	}
-
-	template <typename SurfaceContainer>
-	static bool SurfaceContainerUsesHardwareCanvasTexture(const SurfaceContainer& surfaces)
-	{
-		for (const auto& surface : surfaces)
-		{
-			if (surface.material.texture != nullptr &&
-				surface.material.texture->isHardwareCanvas())
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	static bool SceneViewUsesHardwareCanvasTexture(const nri_scene::SceneView& sceneView)
-	{
-		return
-			SurfaceContainerUsesHardwareCanvasTexture(sceneView.opaqueWalls) ||
-			SurfaceContainerUsesHardwareCanvasTexture(sceneView.opaqueFlats) ||
-			SurfaceContainerUsesHardwareCanvasTexture(sceneView.opaqueSprites);
-	}
-
-	static bool IsAuthoredTextureCurrentlyUnresolved(FTextureID textureId)
-	{
-		if (!textureId.isValid())
-		{
-			return false;
-		}
-
-		FGameTexture* texture = TexMan.GetGameTexture(textureId, true);
-		return texture == nullptr || !texture->isValid();
-	}
-
-	static bool ChunkHasUnresolvedAuthoredTextures(const nri_scene::PTMapChunk& chunk)
-	{
-		if (chunk.kind != nri_scene::PTMapChunkKind::Sector ||
-			chunk.sectorIndex < 0 ||
-			(unsigned)chunk.sectorIndex >= sector.Size())
-		{
-			return false;
-		}
-
-		const sectortype& sec = sector[(unsigned)chunk.sectorIndex];
-		if (IsAuthoredTextureCurrentlyUnresolved(sec.floortexture) ||
-			IsAuthoredTextureCurrentlyUnresolved(sec.ceilingtexture))
-		{
-			return true;
-		}
-
-		for (const walltype& wal : sec.walls)
-		{
-			if (IsAuthoredTextureCurrentlyUnresolved(wal.walltexture) ||
-				IsAuthoredTextureCurrentlyUnresolved(wal.overtexture))
-			{
-				return true;
-			}
-
-			if (wal.nextwall >= 0 && (unsigned)wal.nextwall < wall.Size())
-			{
-				const walltype& nextWall = wall[(unsigned)wal.nextwall];
-				if (IsAuthoredTextureCurrentlyUnresolved(nextWall.walltexture) ||
-					IsAuthoredTextureCurrentlyUnresolved(nextWall.overtexture))
-				{
-					return true;
-				}
-			}
-		}
-
-		return false;
-	}
+	using nri_runtime_mutation::ChunkHasUnresolvedAuthoredTextures;
+	using nri_runtime_mutation::ComputeAnimatedGeometrySignature;
+	using nri_runtime_mutation::ComputeAnimatedMaterialSignature;
+	using nri_runtime_mutation::ComputeExactGeometrySignature;
+	using nri_runtime_mutation::ComputeRecurringChunkStateSignature;
+	using nri_runtime_mutation::CountSceneViewSurfaces;
+	using nri_runtime_mutation::FilterMaterialOnlyReplacementSceneView;
+	using nri_runtime_mutation::HashMaterialBridgeSummary;
+	using nri_runtime_mutation::IsChunkMarkedVisible;
+	using nri_runtime_mutation::NudgeBlindSpotReplacementFlats;
+	using nri_runtime_mutation::RuntimeMutationFloatBits;
+	using nri_runtime_mutation::RuntimeMutationHashCombine64;
+	using nri_runtime_mutation::SceneViewHasSectorDrivenWallBands;
+	using nri_runtime_mutation::SceneViewUsesHardwareCanvasTexture;
+	using nri_runtime_mutation::TryBuildMergedSectorMaterialOnlyBridge;
+	using nri_runtime_mutation::TryBuildMergedSectorMaterialOnlySceneView;
 
 	static uint32_t ScoreRuntimeSectorDirtyTruthEntry(const NRIRenderer::RuntimeSectorDirtyTruthTraceEntry& entry)
 	{
@@ -811,15 +289,15 @@ namespace
 	{
 		for (float component : vertex.position)
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(component));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(component));
 		}
 		for (float component : vertex.prevPosition)
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(component));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(component));
 		}
 		for (float component : vertex.uv)
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(component));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(component));
 		}
 		return hash;
 	}
@@ -836,24 +314,24 @@ namespace
 			hasProvenance ?
 			(uint32_t)ResolveVisibilityChunkIndexForProvenance(mapWorld, geometry.primitiveProvenance[primitiveIndex]) :
 			primitive.reserved0;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)visibilityChunk);
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)visibilityChunk);
 		if (hasProvenance)
 		{
 			const auto& provenance = geometry.primitiveProvenance[primitiveIndex];
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)provenance.sectorIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)provenance.wallIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)provenance.sectionIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)provenance.mapChunkIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)provenance.nextSectorIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)provenance.actorIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)provenance.drawListType);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)provenance.cstat);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)provenance.materialFlags);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)provenance.sectorIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)provenance.wallIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)provenance.sectionIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)provenance.mapChunkIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)provenance.nextSectorIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)provenance.actorIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)provenance.drawListType);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)provenance.cstat);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)provenance.materialFlags);
 		}
 		else
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, UINT64_MAX);
+			hash = RuntimeMutationHashCombine64(hash, UINT64_MAX);
 		}
 		return hash;
 	}
@@ -861,84 +339,84 @@ namespace
 	static uint64_t HashResidentMaterialPayload(const nri_scene::MaterialBridgeData& materials)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)materials.materials.size());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)materials.lightMetadata.size());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)materials.textures.size());
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)materials.materials.size());
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)materials.lightMetadata.size());
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)materials.textures.size());
 		for (const auto& material : materials.materials)
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.textureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.paletteIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.flags);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.materialClass);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.lightingFlags);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.normalTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.metallicTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.roughnessTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.sectorIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.emissiveTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(material.lightLevel));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(material.alpha));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(material.roughnessHint));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(material.metalnessHint));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.textureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.paletteIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.flags);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.materialClass);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.lightingFlags);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.normalTextureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.metallicTextureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.roughnessTextureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.sectorIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.emissiveTextureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.lightLevel));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.alpha));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.roughnessHint));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.metalnessHint));
 			for (float color : material.emissiveColor)
 			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(color));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(color));
 			}
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(material.emissiveIntensity));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(material.emissiveMaskScale));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)material.emissiveMode);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(material.emissiveReserved));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.emissiveIntensity));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.emissiveMaskScale));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.emissiveMode);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.emissiveReserved));
 		}
 
 		for (const auto& metadata : materials.lightMetadata)
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, metadata.materialKey);
-			hash = RuntimeMutationOverlayHashCombine64(hash, metadata.textureContentKey);
-			hash = RuntimeMutationOverlayHashCombine64(hash, metadata.glowmapContentKey);
-			hash = RuntimeMutationOverlayHashCombine64(hash, metadata.normalContentKey);
-			hash = RuntimeMutationOverlayHashCombine64(hash, metadata.metallicContentKey);
-			hash = RuntimeMutationOverlayHashCombine64(hash, metadata.roughnessContentKey);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.textureId);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.textureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.glowmapTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.normalTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.metallicTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.roughnessTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.emissiveTextureIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.paletteIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.materialFlags);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.lightingFlags);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.materialClass);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)metadata.emissiveMode);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)metadata.sourceType);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)metadata.sectorIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)metadata.actorIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)metadata.shade);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(metadata.alpha));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(metadata.lightLevel));
+			hash = RuntimeMutationHashCombine64(hash, metadata.materialKey);
+			hash = RuntimeMutationHashCombine64(hash, metadata.textureContentKey);
+			hash = RuntimeMutationHashCombine64(hash, metadata.glowmapContentKey);
+			hash = RuntimeMutationHashCombine64(hash, metadata.normalContentKey);
+			hash = RuntimeMutationHashCombine64(hash, metadata.metallicContentKey);
+			hash = RuntimeMutationHashCombine64(hash, metadata.roughnessContentKey);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.textureId);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.textureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.glowmapTextureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.normalTextureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.metallicTextureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.roughnessTextureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.emissiveTextureIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.paletteIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.materialFlags);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.lightingFlags);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.materialClass);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.emissiveMode);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)metadata.sourceType);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)metadata.sectorIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)metadata.actorIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)metadata.shade);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.alpha));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.lightLevel));
 			for (float color : metadata.averageColor)
 			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(color));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(color));
 			}
 			for (float color : metadata.glowColor)
 			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(color));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(color));
 			}
 			for (float color : metadata.emissiveColor)
 			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(color));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(color));
 			}
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(metadata.emissiveIntensity));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(metadata.emissiveMaskScale));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(metadata.visibleFullbrightBoost));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.emissiveIntensity));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.emissiveMaskScale));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.visibleFullbrightBoost));
 		}
 
 		for (const auto& texture : materials.textures)
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, texture.key);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)texture.width);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)texture.height);
-			hash = RuntimeMutationOverlayHashCombine64(hash, texture.indexed ? 1ull : 0ull);
+			hash = RuntimeMutationHashCombine64(hash, texture.key);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)texture.width);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)texture.height);
+			hash = RuntimeMutationHashCombine64(hash, texture.indexed ? 1ull : 0ull);
 		}
 
 		return hash != 0 ? hash : 1;
@@ -964,10 +442,10 @@ namespace
 		}
 
 		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)vertexCount);
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)indexCount);
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitiveCount);
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)materialCount);
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)vertexCount);
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)indexCount);
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitiveCount);
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)materialCount);
 		for (uint32_t i = 0; i < vertexCount; ++i)
 		{
 			hash = HashResidentGeometryVertexPayload(hash, geometry.vertices[vertexOffset + i]);
@@ -975,35 +453,35 @@ namespace
 
 		for (uint32_t i = 0; i < indexCount; ++i)
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(geometry.indices[indexOffset + i], vertexOffset));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(geometry.indices[indexOffset + i], vertexOffset));
 		}
 
 		for (uint32_t i = 0; i < primitiveCount; ++i)
 		{
 			const uint32_t primitiveIndex = primitiveOffset + i;
 			const auto& primitive = geometry.primitives[primitiveIndex];
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(primitive.indices[0], vertexOffset));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(primitive.indices[1], vertexOffset));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(primitive.indices[2], vertexOffset));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(primitive.materialIndex, materialOffset));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(primitive.indices[0], vertexOffset));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(primitive.indices[1], vertexOffset));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(primitive.indices[2], vertexOffset));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)NormalizeResidentAtlasIndex(primitive.materialIndex, materialOffset));
 			for (float component : primitive.uv0)
 			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(component));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(component));
 			}
 			for (float component : primitive.uv1)
 			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(component));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(component));
 			}
 			for (float component : primitive.uv2)
 			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(component));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(component));
 			}
 			for (float component : primitive.normal)
 			{
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(component));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(component));
 			}
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitive.flags);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitive.portalIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitive.flags);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitive.portalIndex);
 			hash = HashResidentGeometryProvenancePayload(hash, mapWorld, geometry, primitive, primitiveIndex);
 		}
 
@@ -1033,13 +511,13 @@ namespace
 			const uint32_t primitiveIndex = primitiveOffset + i;
 			const auto& primitive = geometry.primitives[primitiveIndex];
 			uint64_t primitiveHash = 1469598103934665603ull;
-			primitiveHash = RuntimeMutationOverlayHashCombine64(primitiveHash, (uint64_t)NormalizeResidentAtlasIndex(primitive.materialIndex, materialOffset));
+			primitiveHash = RuntimeMutationHashCombine64(primitiveHash, (uint64_t)NormalizeResidentAtlasIndex(primitive.materialIndex, materialOffset));
 			for (float component : primitive.normal)
 			{
-				primitiveHash = RuntimeMutationOverlayHashCombine64(primitiveHash, (uint64_t)RuntimeMutationOverlayFloatBits(component));
+				primitiveHash = RuntimeMutationHashCombine64(primitiveHash, (uint64_t)RuntimeMutationFloatBits(component));
 			}
-			primitiveHash = RuntimeMutationOverlayHashCombine64(primitiveHash, (uint64_t)primitive.flags);
-			primitiveHash = RuntimeMutationOverlayHashCombine64(primitiveHash, (uint64_t)primitive.portalIndex);
+			primitiveHash = RuntimeMutationHashCombine64(primitiveHash, (uint64_t)primitive.flags);
+			primitiveHash = RuntimeMutationHashCombine64(primitiveHash, (uint64_t)primitive.portalIndex);
 			primitiveHash = HashResidentGeometryProvenancePayload(primitiveHash, mapWorld, geometry, primitive, primitiveIndex);
 
 			const float* primitiveUvs[3] = { primitive.uv0, primitive.uv1, primitive.uv2 };
@@ -1053,7 +531,7 @@ namespace
 				primitiveHash = HashResidentGeometryVertexPayload(primitiveHash, geometry.vertices[vertexIndex]);
 				for (uint32_t component = 0; component < 2; ++component)
 				{
-					primitiveHash = RuntimeMutationOverlayHashCombine64(primitiveHash, (uint64_t)RuntimeMutationOverlayFloatBits(primitiveUvs[corner][component]));
+					primitiveHash = RuntimeMutationHashCombine64(primitiveHash, (uint64_t)RuntimeMutationFloatBits(primitiveUvs[corner][component]));
 				}
 			}
 			primitiveHashes.push_back(primitiveHash);
@@ -1061,12 +539,12 @@ namespace
 
 		std::sort(primitiveHashes.begin(), primitiveHashes.end());
 		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)vertexCount);
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitiveCount);
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)materialCount);
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)vertexCount);
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitiveCount);
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)materialCount);
 		for (uint64_t primitiveHash : primitiveHashes)
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, primitiveHash);
+			hash = RuntimeMutationHashCombine64(hash, primitiveHash);
 		}
 		return hash != 0 ? hash : 1;
 	}
@@ -1074,12 +552,12 @@ namespace
 	static uint64_t ComputeGeometryTopologySignature(const nri_scene::GeometryData& geometry)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)geometry.vertices.size());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)geometry.indices.size());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)geometry.primitives.size());
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)geometry.vertices.size());
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)geometry.indices.size());
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)geometry.primitives.size());
 		for (uint32_t index : geometry.indices)
 		{
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)index);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)index);
 		}
 		return hash;
 	}
@@ -1087,39 +565,39 @@ namespace
 	static uint64_t ComputePrimitiveLayoutSignature(const nri_scene::GeometryData& geometry)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)geometry.primitives.size());
-		hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)geometry.primitiveProvenance.size());
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)geometry.primitives.size());
+		hash = RuntimeMutationHashCombine64(hash, (uint64_t)geometry.primitiveProvenance.size());
 		for (size_t i = 0; i < geometry.primitives.size(); ++i)
 		{
 			const nri_scene::PrimitiveData& primitive = geometry.primitives[i];
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitive.indices[0]);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitive.indices[1]);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitive.indices[2]);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitive.materialIndex);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(primitive.uv0[0]));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(primitive.uv0[1]));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(primitive.uv1[0]));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(primitive.uv1[1]));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(primitive.uv2[0]));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(primitive.uv2[1]));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(primitive.normal[0]));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(primitive.normal[1]));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)RuntimeMutationOverlayFloatBits(primitive.normal[2]));
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitive.flags);
-			hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)primitive.portalIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitive.indices[0]);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitive.indices[1]);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitive.indices[2]);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitive.materialIndex);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(primitive.uv0[0]));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(primitive.uv0[1]));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(primitive.uv1[0]));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(primitive.uv1[1]));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(primitive.uv2[0]));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(primitive.uv2[1]));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(primitive.normal[0]));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(primitive.normal[1]));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(primitive.normal[2]));
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitive.flags);
+			hash = RuntimeMutationHashCombine64(hash, (uint64_t)primitive.portalIndex);
 			if (i < geometry.primitiveProvenance.size())
 			{
 				const nri_scene::SurfaceProvenance& provenance = geometry.primitiveProvenance[i];
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)provenance.drawListType);
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)provenance.cstat);
-				hash = RuntimeMutationOverlayHashCombine64(hash, (uint64_t)provenance.materialFlags);
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)provenance.drawListType);
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)provenance.cstat);
+				hash = RuntimeMutationHashCombine64(hash, (uint64_t)provenance.materialFlags);
 			}
 		}
 		return hash;
