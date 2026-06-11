@@ -10,6 +10,7 @@
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
 #include "nri_scene_textures.h"
+#include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
 #include "nri_static_scene.h"
 #include "nri_upscaler.h"
@@ -1481,23 +1482,6 @@ private:
 		Count
 	};
 
-	struct CachedSkyTexture
-	{
-		uint64_t key = 0;
-		nri_scene::PTSkyMode mode = nri_scene::PTSkyMode::None;
-		NRITextureResource resource;
-	};
-
-	struct SkyState
-	{
-		nri_scene::PTSkyMode mode = nri_scene::PTSkyMode::None;
-		nri_scene::PTSkySourceType sourceType = nri_scene::PTSkySourceType::None;
-		FGameTexture* texture = nullptr;
-		uint32_t faceMask = 0;
-		float brightness = 1.0f;
-		bool flipTop = false;
-	};
-
 	struct SelfTestRouteSnapshot
 	{
 		const char* routeName = "unknown";
@@ -1507,13 +1491,6 @@ private:
 		bool denoiserRun = false;
 		bool upscalerRun = false;
 		bool exposureRun = false;
-	};
-
-	struct PreservedStaticMapSkyState
-	{
-		bool valid = false;
-		uint64_t buildSerial = 0;
-		nri_scene::SceneView sceneView;
 	};
 
 	using SceneBufferDebugStats = ::SceneBufferDebugStats;
@@ -2111,11 +2088,11 @@ private:
 	bool EnsureStaticMapScene();
 	bool BuildStaticMapSceneCache(
 		const nri_scene::PTMapWorld& mapWorld,
-		const PreservedStaticMapSkyState* preservedSkyState,
+		const NRIPreservedStaticMapSkyState* preservedSkyState,
 		StaticMapSceneCache& outStaticScene);
 	void InitializeStaticMapSceneCacheBuild(
 		const nri_scene::PTMapWorld& mapWorld,
-		const PreservedStaticMapSkyState* preservedSkyState,
+		const NRIPreservedStaticMapSkyState* preservedSkyState,
 		StaticMapSceneCache& outStaticScene);
 	void AppendStaticMapSceneCacheChunk(
 		const nri_scene::PTMapWorld& mapWorld,
@@ -2502,8 +2479,8 @@ private:
 	std::array<nri::DescriptorSet*, 2> mExposureOutputSets = {};
 	FrameTextureSlot mAutoExposureInputSourceSlot = FrameTextureSlot::Count;
 
-	NRITextureResource* GetActiveSkyTexture() { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
-	const NRITextureResource* GetActiveSkyTexture() const { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
+	NRITextureResource* GetActiveSkyTexture() { return mSkyEnvironment.ActiveTexture(); }
+	const NRITextureResource* GetActiveSkyTexture() const { return mSkyEnvironment.ActiveTexture(); }
 
 	NRISceneTextureResidency mSceneTextures;
 	std::array<NRITextureResource, (size_t)FrameTextureSlot::Count> mFrameTextures = {};
@@ -2589,7 +2566,7 @@ private:
 	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
-	std::vector<CachedSkyTexture> mSkyTextureCache;
+	NRISkyEnvironment mSkyEnvironment;
 	NRINrdContext mNrd;
 	NRIUpscalerContext mUpscaler;
 	nri_scene::PTMapWorld mMapWorld;
@@ -2678,15 +2655,7 @@ private:
 	float mPreviousWorldToView[16] = {};
 	float mSkyColor[3] = { 0.38f, 0.48f, 0.65f };
 	float mGroundColor[3] = { 0.08f, 0.08f, 0.08f };
-	uint64_t mSkyTextureKey = 0;
-	uint32_t mActiveSkyTextureIndex = UINT32_MAX;
-	MapRecord* mSkyLevel = nullptr;
-	SkyState mSkyState = {};
-	SkyState mLastTracedSkyState = {};
 	SelfTestRouteSnapshot mSelfTestRoute = {};
-	uint64_t mLastTracedSkyResolvedKey = 0;
-	bool mHasTracedSkyState = false;
-	PreservedStaticMapSkyState mPreservedStaticMapSky = {};
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
 	bool mHasFrameGenerationRealFrameTime = false;

@@ -7554,7 +7554,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	DestroyStaticMapSceneCache("level-unload");
 	mStaticMapScene = {};
 	mStaticAccelerationBuildSerial = 0;
-	mPreservedStaticMapSky = {};
+	mSkyEnvironment.PreservedStaticMapSky() = {};
 
 	mMapWorld = {};
 	mObservedMapWorldBuildSerial = 0;
@@ -7744,7 +7744,7 @@ NRIRenderer::LevelTransitionSnapshot NRIRenderer::BuildLevelTransitionSnapshot()
 	snapshot.staticSceneChunkCount = (uint32_t)mStaticMapScene.chunks.size();
 	snapshot.staticSceneMaterialCount = (uint32_t)mStaticMapScene.gpuMaterials.size();
 	snapshot.textureCacheCount = mSceneTextures.CacheCount();
-	snapshot.skyTextureCacheCount = (uint32_t)mSkyTextureCache.size();
+	snapshot.skyTextureCacheCount = (uint32_t)mSkyEnvironment.CachedTextures().size();
 	const RuntimeMutationCacheStats runtimeMutationCacheStats = mRuntimeMutation.GatherCacheStats();
 	snapshot.runtimeMutationChunkCount = mRuntimeMutation.GetCacheChunkCount();
 	snapshot.runtimeMutationActiveChunkCount = runtimeMutationCacheStats.activeChunkCount;
@@ -12068,7 +12068,7 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 		accumulateTexture(texture.resource, telemetry.sceneTextureBytes);
 	}
 
-	for (const CachedSkyTexture& texture : mSkyTextureCache)
+	for (const NRICachedSkyTexture& texture : mSkyEnvironment.CachedTextures())
 	{
 		accumulateTexture(texture.resource, telemetry.skyTextureBytes);
 	}
@@ -12350,7 +12350,7 @@ void NRIRenderer::EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bo
 		mSceneInstanceBuffer.payloadHash);
 	const uint64_t materialSignature = mMaterialBuffer.payloadHash;
 	const uint64_t instanceSignature = mSceneInstanceBuffer.payloadHash;
-	const uint64_t skySignature = HashCombine64(mSkyTextureKey, (uint64_t)mSkyState.faceMask);
+	const uint64_t skySignature = HashCombine64(mSkyEnvironment.ActiveKey(), (uint64_t)mSkyEnvironment.ActiveState().faceMask);
 	const NRIBufferResource& vertexBuffer = mVertexBuffer;
 	const NRIBufferResource& indexBuffer = mIndexBuffer;
 	const NRIBufferResource& primitiveBuffer = mPrimitiveBuffer;
@@ -12404,11 +12404,11 @@ void NRIRenderer::EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bo
 		(unsigned long long)materialSignature,
 		(unsigned long long)instanceSignature,
 		(unsigned long long)skySignature,
-		GetSkyModeName(mSkyState.mode),
-		GetSkySourceTypeName(mSkyState.sourceType),
-		(unsigned long long)mSkyTextureKey,
-		mSkyState.brightness,
-		mHasTracedSkyState ? "traced" : "untraced",
+		GetSkyModeName(mSkyEnvironment.ActiveState().mode),
+		GetSkySourceTypeName(mSkyEnvironment.ActiveState().sourceType),
+		(unsigned long long)mSkyEnvironment.ActiveKey(),
+		mSkyEnvironment.ActiveState().brightness,
+		mSkyEnvironment.HasTracedState() ? "traced" : "untraced",
 		exposureSettings.enabled ? 1u : 0u,
 		mExposure.HasExposureStateTextures() ? 1u : 0u,
 		outputPolicy.exposure,
@@ -16698,7 +16698,7 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	DestroyStaticMapSceneCache("startup-world-correction");
 	mStaticMapScene = {};
 	mStaticAccelerationBuildSerial = 0;
-	mPreservedStaticMapSky = {};
+	mSkyEnvironment.PreservedStaticMapSky() = {};
 	mMapWorld = std::move(correctedWorld);
 	mObservedMapWorldBuildSerial = nri_scene::GetPendingLevelGeometryBuildSerial();
 	mAllowStartupMapWorldCorrection = false;
@@ -19540,8 +19540,8 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 	}
 
 	const nri_scene::SceneView* preservedSkyView =
-		(mPreservedStaticMapSky.valid && mPreservedStaticMapSky.buildSerial == mMapWorld.buildSerial)
-		? &mPreservedStaticMapSky.sceneView
+		(mSkyEnvironment.PreservedStaticMapSky().valid && mSkyEnvironment.PreservedStaticMapSky().buildSerial == mMapWorld.buildSerial)
+		? &mSkyEnvironment.PreservedStaticMapSky().sceneView
 		: nullptr;
 	bool refreshedAnyChunk = false;
 	uint32_t refreshedChunkCount = 0;
@@ -19577,7 +19577,7 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 			DestroyStaticMapSceneCache("animated-refresh-layout-mismatch");
 			mStaticMapScene = {};
 			mStaticAccelerationBuildSerial = 0;
-			mPreservedStaticMapSky = {};
+			mSkyEnvironment.PreservedStaticMapSky() = {};
 			return EnsureStaticMapScene();
 		}
 		if (!chunkCache.active)
@@ -19642,7 +19642,7 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 		DestroyStaticMapSceneCache("animated-refresh-material-bridge-failed");
 		mStaticMapScene = {};
 		mStaticAccelerationBuildSerial = 0;
-		mPreservedStaticMapSky = {};
+		mSkyEnvironment.PreservedStaticMapSky() = {};
 		return EnsureStaticMapScene();
 	}
 
@@ -19657,7 +19657,7 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 		DestroyStaticMapSceneCache("animated-refresh-upload-failed");
 		mStaticMapScene = {};
 		mStaticAccelerationBuildSerial = 0;
-		mPreservedStaticMapSky = {};
+		mSkyEnvironment.PreservedStaticMapSky() = {};
 		return EnsureStaticMapScene();
 	}
 
@@ -19686,7 +19686,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 		DestroyStaticMapSceneCache("ensure-static-scene-build-serial-mismatch");
 		mStaticMapScene = {};
 		mStaticAccelerationBuildSerial = 0;
-		mPreservedStaticMapSky = {};
+		mSkyEnvironment.PreservedStaticMapSky() = {};
 	}
 
 	if (mStaticMapScene.valid &&
@@ -19728,7 +19728,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 
 	if (!BuildStaticMapSceneCache(
 		mMapWorld,
-		(mPreservedStaticMapSky.valid && mPreservedStaticMapSky.buildSerial == mMapWorld.buildSerial) ? &mPreservedStaticMapSky : nullptr,
+		(mSkyEnvironment.PreservedStaticMapSky().valid && mSkyEnvironment.PreservedStaticMapSky().buildSerial == mMapWorld.buildSerial) ? &mSkyEnvironment.PreservedStaticMapSky() : nullptr,
 		mStaticMapScene))
 	{
 		return false;
@@ -19772,7 +19772,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 	SyncResidentMapChunkRegistryFromStaticScene();
 	mUploadedStaticMapSceneLastFrame = true;
 	mBuiltStaticMapSceneASLastFrame = true;
-	mPreservedStaticMapSky = {};
+	mSkyEnvironment.PreservedStaticMapSky() = {};
 
 	Printf("NRI PT static scene resident: level=%s build_serial=%llu chunks=%u tris=%u materials=%u uploads=%u as_builds=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
@@ -19795,7 +19795,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 
 void NRIRenderer::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
-	const PreservedStaticMapSkyState* preservedSkyState,
+	const NRIPreservedStaticMapSkyState* preservedNRISkyState,
 	StaticMapSceneCache& outStaticScene)
 {
 	outStaticScene.valid = false;
@@ -19824,7 +19824,7 @@ void NRIRenderer::InitializeStaticMapSceneCacheBuild(
 
 	mRuntimeMutation.ResetCacheForStaticSceneBuild((uint32_t)mapWorld.chunks.size());
 
-	const nri_scene::SceneView* preservedSkyView = preservedSkyState != nullptr ? &preservedSkyState->sceneView : nullptr;
+	const nri_scene::SceneView* preservedSkyView = preservedNRISkyState != nullptr ? &preservedNRISkyState->sceneView : nullptr;
 	nri_scene::BuildMapSceneView(mapWorld, outStaticScene.sceneView, preservedSkyView);
 }
 
@@ -19903,7 +19903,7 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 
 bool NRIRenderer::BuildStaticMapSceneCache(
 	const nri_scene::PTMapWorld& mapWorld,
-	const PreservedStaticMapSkyState* preservedSkyState,
+	const NRIPreservedStaticMapSkyState* preservedNRISkyState,
 	StaticMapSceneCache& outStaticScene)
 {
 	if (!mapWorld.valid)
@@ -19911,8 +19911,8 @@ bool NRIRenderer::BuildStaticMapSceneCache(
 		return false;
 	}
 
-	InitializeStaticMapSceneCacheBuild(mapWorld, preservedSkyState, outStaticScene);
-	const nri_scene::SceneView* preservedSkyView = preservedSkyState != nullptr ? &preservedSkyState->sceneView : nullptr;
+	InitializeStaticMapSceneCacheBuild(mapWorld, preservedNRISkyState, outStaticScene);
+	const nri_scene::SceneView* preservedSkyView = preservedNRISkyState != nullptr ? &preservedNRISkyState->sceneView : nullptr;
 	for (const nri_scene::PTMapChunk& chunk : mapWorld.chunks)
 	{
 		AppendStaticMapSceneCacheChunk(mapWorld, chunk, preservedSkyView, outStaticScene);
@@ -19928,42 +19928,21 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		gRendererSkyPerfTraceStats.ensureSkyCalls++;
 	}
 	ScopedSkyPerfTimer timer(gRendererSkyPerfTraceStats.ensureSkyTimeUs);
-	if (mSkyLevel != currentLevel)
+	if (mSkyEnvironment.Level() != currentLevel)
 	{
-		mActiveSkyTextureIndex = UINT32_MAX;
-		mSkyTextureKey = 0;
-		mSkyState = {};
-		mSkyLevel = currentLevel;
+		mSkyEnvironment.ResetActiveForLevel(currentLevel);
 	}
 
 	const float skyBrightness = GetSkyBrightnessMultiplier();
 
 	auto findCachedSkyTexture = [this](uint64_t key, uint32_t width, uint32_t height) -> uint32_t
 	{
-		for (uint32_t i = 0; i < (uint32_t)mSkyTextureCache.size(); ++i)
-		{
-			const CachedSkyTexture& cached = mSkyTextureCache[i];
-			if (cached.key == key &&
-				cached.resource.width == width &&
-				cached.resource.height == height)
-			{
-				return i;
-			}
-		}
-
-		return UINT32_MAX;
+		return mSkyEnvironment.FindCachedTexture(key, width, height);
 	};
 
 	auto activateCachedSky = [this, skyBrightness](uint32_t index, uint64_t key, const nri_scene::SceneView& sourceView, nri_scene::PTSkyMode mode)
 	{
-		mActiveSkyTextureIndex = index;
-		mSkyTextureKey = key;
-		mSkyState.mode = mode;
-		mSkyState.sourceType = sourceView.sky.sourceType;
-		mSkyState.texture = sourceView.sky.texture;
-		mSkyState.faceMask = sourceView.sky.faceMask;
-		mSkyState.brightness = skyBrightness;
-		mSkyState.flipTop = sourceView.sky.flipTop;
+		mSkyEnvironment.Activate(index, key, sourceView, mode, skyBrightness);
 	};
 
 	auto createCachedSky = [this, &findCachedSkyTexture](SkyUpload upload, nri_scene::PTSkyMode mode) -> uint32_t
@@ -19976,7 +19955,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 
 		ScaleSkyUploadBrightness(upload);
 
-		CachedSkyTexture cacheEntry = {};
+		NRICachedSkyTexture cacheEntry = {};
 		cacheEntry.key = upload.key;
 		cacheEntry.mode = mode;
 		if (!mFrameBuffer->CreateOwnedTexture(cacheEntry.resource, upload.width, upload.height, nri::Format::BGRA8_UNORM, nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureType::TEXTURE_2D, 6, nri::TextureView::TEXTURE_CUBE))
@@ -19999,35 +19978,34 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 			return UINT32_MAX;
 		}
 
-		mSkyTextureCache.push_back(std::move(cacheEntry));
-		return (uint32_t)mSkyTextureCache.size() - 1;
+		return mSkyEnvironment.AddCachedTexture(std::move(cacheEntry));
 	};
 
 	const NRITextureResource* activeSkyTexture = GetActiveSkyTexture();
-	if (preserveExistingSky && activeSkyTexture != nullptr && SkyBrightnessMatches(mSkyState.brightness, skyBrightness))
+	if (preserveExistingSky && activeSkyTexture != nullptr && SkyBrightnessMatches(mSkyEnvironment.ActiveState().brightness, skyBrightness))
 	{
 		if (ShouldTraceSkyPerf())
 		{
 			gRendererSkyPerfTraceStats.preserveExistingHits++;
 		}
-		TraceSkyState(sceneView, "preserve-existing", mSkyTextureKey);
+		TraceSkyState(sceneView, "preserve-existing", mSkyEnvironment.ActiveKey());
 		return true;
 	}
 
 	if (sceneView.sky.mode == nri_scene::PTSkyMode::Cubemap &&
 		activeSkyTexture != nullptr &&
-		mSkyState.mode == nri_scene::PTSkyMode::Cubemap &&
-		mSkyState.texture == sceneView.sky.texture &&
-		mSkyState.faceMask == sceneView.sky.faceMask &&
-		SkyBrightnessMatches(mSkyState.brightness, skyBrightness) &&
-		mSkyState.flipTop == sceneView.sky.flipTop)
+		mSkyEnvironment.ActiveState().mode == nri_scene::PTSkyMode::Cubemap &&
+		mSkyEnvironment.ActiveState().texture == sceneView.sky.texture &&
+		mSkyEnvironment.ActiveState().faceMask == sceneView.sky.faceMask &&
+		SkyBrightnessMatches(mSkyEnvironment.ActiveState().brightness, skyBrightness) &&
+		mSkyEnvironment.ActiveState().flipTop == sceneView.sky.flipTop)
 	{
-		mSkyLevel = currentLevel;
+		mSkyEnvironment.Level() = currentLevel;
 		if (ShouldTraceSkyPerf())
 		{
 			gRendererSkyPerfTraceStats.reuseActiveCubemapHits++;
 		}
-		TraceSkyState(sceneView, "reuse-active-cubemap", mSkyTextureKey);
+		TraceSkyState(sceneView, "reuse-active-cubemap", mSkyEnvironment.ActiveKey());
 		return true;
 	}
 
@@ -20035,11 +20013,11 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 	if (ProbeCubemapSky(sceneView, probe))
 	{
 		if (activeSkyTexture != nullptr &&
-			mSkyTextureKey == probe.key &&
+			mSkyEnvironment.ActiveKey() == probe.key &&
 			activeSkyTexture->width == probe.width &&
 			activeSkyTexture->height == probe.height)
 		{
-			mSkyLevel = currentLevel;
+			mSkyEnvironment.Level() = currentLevel;
 			if (ShouldTraceSkyPerf())
 			{
 				gRendererSkyPerfTraceStats.reuseActiveProbeHits++;
@@ -20052,7 +20030,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		if (cachedIndex != UINT32_MAX)
 		{
 			activateCachedSky(cachedIndex, probe.key, sceneView, nri_scene::PTSkyMode::Cubemap);
-			mSkyLevel = currentLevel;
+			mSkyEnvironment.Level() = currentLevel;
 			if (ShouldTraceSkyPerf())
 			{
 				gRendererSkyPerfTraceStats.activateCachedCubemapHits++;
@@ -20074,7 +20052,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		}
 
 		activateCachedSky(createdIndex, upload.key, sceneView, nri_scene::PTSkyMode::Cubemap);
-		mSkyLevel = currentLevel;
+		mSkyEnvironment.Level() = currentLevel;
 		if (ShouldTraceSkyPerf())
 		{
 			gRendererSkyPerfTraceStats.createCachedCubemapHits++;
@@ -20085,12 +20063,12 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 
 	const bool shouldKeepLastCubemap =
 		activeSkyTexture != nullptr &&
-		mSkyState.mode == nri_scene::PTSkyMode::Cubemap &&
-		SkyBrightnessMatches(mSkyState.brightness, skyBrightness) &&
+		mSkyEnvironment.ActiveState().mode == nri_scene::PTSkyMode::Cubemap &&
+		SkyBrightnessMatches(mSkyEnvironment.ActiveState().brightness, skyBrightness) &&
 		(sceneView.sky.mode == nri_scene::PTSkyMode::None ||
-			sceneView.sky.texture == mSkyState.texture ||
+			sceneView.sky.texture == mSkyEnvironment.ActiveState().texture ||
 			(sceneView.sky.texture == nullptr && sceneView.stats.skySurfaces > 0) ||
-			(mSkyLevel == currentLevel &&
+			(mSkyEnvironment.Level() == currentLevel &&
 				sceneView.sky.mode == nri_scene::PTSkyMode::SolidColor &&
 				sceneView.sky.sourceType != nri_scene::PTSkySourceType::Portal &&
 				sceneView.stats.skySurfaces > 0));
@@ -20103,7 +20081,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 			{
 				gRendererSkyPerfTraceStats.holdLevelCubemapHits++;
 			}
-			TraceSkyState(sceneView, "hold-level-cubemap", mSkyTextureKey);
+			TraceSkyState(sceneView, "hold-level-cubemap", mSkyEnvironment.ActiveKey());
 			return true;
 		}
 
@@ -20111,7 +20089,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		{
 			gRendererSkyPerfTraceStats.keepLastCubemapHits++;
 		}
-		TraceSkyState(sceneView, "keep-last-cubemap", mSkyTextureKey);
+		TraceSkyState(sceneView, "keep-last-cubemap", mSkyEnvironment.ActiveKey());
 		return true;
 	}
 
@@ -20123,7 +20101,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 		if (cachedIndex != UINT32_MAX)
 		{
 			activateCachedSky(cachedIndex, panoramaProbe.key, sceneView, nri_scene::PTSkyMode::Cubemap);
-			mSkyLevel = currentLevel;
+			mSkyEnvironment.Level() = currentLevel;
 			TraceSkyState(sceneView, "activate-cached-panorama", panoramaProbe.key);
 			return true;
 		}
@@ -20135,7 +20113,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 			if (createdIndex != UINT32_MAX)
 			{
 				activateCachedSky(createdIndex, upload.key, sceneView, nri_scene::PTSkyMode::Cubemap);
-				mSkyLevel = currentLevel;
+				mSkyEnvironment.Level() = currentLevel;
 				TraceSkyState(sceneView, "create-cached-panorama", upload.key);
 				return true;
 			}
@@ -20145,7 +20123,7 @@ bool NRIRenderer::EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool p
 	SkyUpload upload = {};
 	BuildSolidSkyUpload(sceneView.skyColor, upload);
 	if (activeSkyTexture != nullptr &&
-		mSkyTextureKey == upload.key &&
+		mSkyEnvironment.ActiveKey() == upload.key &&
 		activeSkyTexture->width == upload.width &&
 		activeSkyTexture->height == upload.height)
 	{
@@ -24331,7 +24309,7 @@ void NRIRenderer::TraceSkyState(const nri_scene::SceneView& sceneView, const cha
 		return;
 	}
 
-	const SkyState tracedState = {
+	const NRISkyState tracedState = {
 		sceneView.sky.mode,
 		sceneView.sky.sourceType,
 		sceneView.sky.texture,
@@ -24341,14 +24319,14 @@ void NRIRenderer::TraceSkyState(const nri_scene::SceneView& sceneView, const cha
 	};
 
 	const bool changed =
-		!mHasTracedSkyState ||
-		mLastTracedSkyState.mode != tracedState.mode ||
-		mLastTracedSkyState.sourceType != tracedState.sourceType ||
-		mLastTracedSkyState.texture != tracedState.texture ||
-		mLastTracedSkyState.faceMask != tracedState.faceMask ||
-		!SkyBrightnessMatches(mLastTracedSkyState.brightness, tracedState.brightness) ||
-		mLastTracedSkyState.flipTop != tracedState.flipTop ||
-		mLastTracedSkyResolvedKey != resolvedKey;
+		!mSkyEnvironment.HasTracedState() ||
+		mSkyEnvironment.LastTracedState().mode != tracedState.mode ||
+		mSkyEnvironment.LastTracedState().sourceType != tracedState.sourceType ||
+		mSkyEnvironment.LastTracedState().texture != tracedState.texture ||
+		mSkyEnvironment.LastTracedState().faceMask != tracedState.faceMask ||
+		!SkyBrightnessMatches(mSkyEnvironment.LastTracedState().brightness, tracedState.brightness) ||
+		mSkyEnvironment.LastTracedState().flipTop != tracedState.flipTop ||
+		mSkyEnvironment.LastTracedResolvedKey() != resolvedKey;
 
 	if (!changed && action == nullptr)
 	{
@@ -24369,14 +24347,14 @@ void NRIRenderer::TraceSkyState(const nri_scene::SceneView& sceneView, const cha
 		tracedState.brightness,
 		action != nullptr ? action : "unchanged",
 		(unsigned long long)resolvedKey,
-		GetSkyModeName(mSkyState.mode),
-		(unsigned long long)mSkyTextureKey,
+		GetSkyModeName(mSkyEnvironment.ActiveState().mode),
+		(unsigned long long)mSkyEnvironment.ActiveKey(),
 		activeSkyTexture != nullptr ? activeSkyTexture->width : 0,
 		activeSkyTexture != nullptr ? activeSkyTexture->height : 0);
 
-	mLastTracedSkyState = tracedState;
-	mLastTracedSkyResolvedKey = resolvedKey;
-	mHasTracedSkyState = true;
+	mSkyEnvironment.LastTracedState() = tracedState;
+	mSkyEnvironment.LastTracedResolvedKey() = resolvedKey;
+	mSkyEnvironment.HasTracedState() = true;
 }
 
 void NRIRenderer::CopyFinalToActiveTarget()
@@ -24599,18 +24577,11 @@ void NRIRenderer::CopyTextureToActiveTarget(NRITextureResource& source)
 void NRIRenderer::DestroyCachedTextures()
 {
 	mStaticMapScene.texturesResident = false;
-	for (auto& skyTexture : mSkyTextureCache)
+	for (auto& skyTexture : mSkyEnvironment.CachedTextures())
 	{
 		mFrameBuffer->DestroyTextureResource(skyTexture.resource);
 	}
-	mSkyTextureCache.clear();
-	mActiveSkyTextureIndex = UINT32_MAX;
-	mSkyTextureKey = 0;
-	mSkyLevel = nullptr;
-	mSkyState = {};
-	mLastTracedSkyState = {};
-	mLastTracedSkyResolvedKey = 0;
-	mHasTracedSkyState = false;
+	mSkyEnvironment.ClearCache();
 	for (auto& texture : mSceneTextures.CachedTextures())
 	{
 		mFrameBuffer->DestroyTextureResource(texture.resource);

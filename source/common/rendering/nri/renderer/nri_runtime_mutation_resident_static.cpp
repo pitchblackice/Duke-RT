@@ -599,8 +599,8 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 bool NRIRenderer::RebuildResidentStaticMaterialState(const char* reason)
 {
 	const nri_scene::SceneView* preservedSkyView =
-		(mPreservedStaticMapSky.valid && mPreservedStaticMapSky.buildSerial == mMapWorld.buildSerial) ?
-		&mPreservedStaticMapSky.sceneView :
+		(mSkyEnvironment.PreservedStaticMapSky().valid && mSkyEnvironment.PreservedStaticMapSky().buildSerial == mMapWorld.buildSerial) ?
+		&mSkyEnvironment.PreservedStaticMapSky().sceneView :
 		nullptr;
 	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView, preservedSkyView);
 	if (!RebuildResidentStaticMaterialBridgeFromChunks())

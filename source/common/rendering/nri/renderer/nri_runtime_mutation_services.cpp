@@ -448,7 +448,7 @@ NRIRuntimeMutationResidentSceneRefreshServices NRIRenderer::BuildRuntimeMutation
 		renderer->DestroyStaticMapSceneCache(reason != nullptr ? reason : "runtime-mutation-resident-refresh-failed");
 		renderer->mStaticMapScene = {};
 		renderer->mStaticAccelerationBuildSerial = 0;
-		renderer->mPreservedStaticMapSky = {};
+		renderer->mSkyEnvironment.PreservedStaticMapSky() = {};
 		return renderer->EnsureStaticMapScene();
 	};
 	return services;
