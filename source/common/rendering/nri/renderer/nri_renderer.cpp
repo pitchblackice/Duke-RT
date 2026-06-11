@@ -21878,114 +21878,52 @@ bool NRIRenderer::StageRuntimeMutationResidentGeometryUploadRanges(const std::ve
 	return true;
 }
 
-bool NRIRenderer::QueueRuntimeMutationResidentGeometryUploadRange(int uploadKind, uint64_t byteOffset, uint64_t size)
+NRIRuntimeMutationResidentUploadServices NRIRenderer::BuildRuntimeMutationResidentUploadServices()
 {
-	if (size == 0)
+	NRIRuntimeMutationResidentUploadServices services = {};
+	services.user = this;
+	services.stageGeometryRanges = [](void* user, const std::vector<RuntimeMutationResidentUploadRange>& ranges) -> bool
 	{
-		return true;
-	}
-
-	switch (uploadKind)
-	{
-	case ResidentUploadKind_Vertex:
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageRangeCount++;
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageBytes += size;
-		break;
-	case ResidentUploadKind_Index:
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageRangeCount++;
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageBytes += size;
-		break;
-	case ResidentUploadKind_Primitive:
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageRangeCount++;
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageBytes += size;
-		break;
-	default:
-		return false;
-	}
-
-	mRuntimeMutation.residentGeometryUploadRanges.push_back({ uploadKind, byteOffset, size, size });
-	return true;
-}
-
-bool NRIRenderer::FlushRuntimeMutationResidentGeometryUploadRanges()
-{
-	if (mRuntimeMutation.residentGeometryUploadRanges.empty())
-	{
-		return true;
-	}
-
-	ScopedPtPerfTimer residentApplyPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyMs);
-	constexpr uint64_t kResidentUploadCoalesceMaxGapBytes = 4ull * 1024ull;
-	constexpr uint64_t kResidentUploadCoalesceMaxByteExpansion = 2;
-	auto clearAndFail = [&]()
-	{
-		mRuntimeMutation.residentGeometryUploadRanges.clear();
-		return false;
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		ScopedPtPerfTimer residentApplyPerfTimer(renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyMs);
+		return renderer->StageRuntimeMutationResidentGeometryUploadRanges(ranges);
 	};
-
-	std::sort(
-		mRuntimeMutation.residentGeometryUploadRanges.begin(),
-		mRuntimeMutation.residentGeometryUploadRanges.end(),
-		[](const RuntimeMutationResidentUploadRange& a, const RuntimeMutationResidentUploadRange& b)
-		{
-			if (a.uploadKind != b.uploadKind)
-			{
-				return a.uploadKind < b.uploadKind;
-			}
-			return a.byteOffset < b.byteOffset;
-		});
-
-	std::vector<RuntimeMutationResidentUploadRange> coalescedRanges;
-	coalescedRanges.reserve(mRuntimeMutation.residentGeometryUploadRanges.size());
-	for (const RuntimeMutationResidentUploadRange& range : mRuntimeMutation.residentGeometryUploadRanges)
+	services.noteUploadRange = [](void* user, int uploadKind, uint64_t size)
 	{
-		if (coalescedRanges.empty() ||
-			coalescedRanges.back().uploadKind != range.uploadKind)
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		switch (uploadKind)
 		{
-			coalescedRanges.push_back(range);
-			continue;
+		case ResidentUploadKind_Vertex:
+			renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageRangeCount++;
+			renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageBytes += size;
+			break;
+		case ResidentUploadKind_Index:
+			renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageRangeCount++;
+			renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageBytes += size;
+			break;
+		case ResidentUploadKind_Primitive:
+			renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageRangeCount++;
+			renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageBytes += size;
+			break;
+		default:
+			break;
 		}
-
-		RuntimeMutationResidentUploadRange& tail = coalescedRanges.back();
-		const uint64_t tailEnd = tail.byteOffset + tail.size;
-		const uint64_t rangeEnd = range.byteOffset + range.size;
-		const uint64_t gapBytes = range.byteOffset > tailEnd ? range.byteOffset - tailEnd : 0;
-		const uint64_t candidateSize = rangeEnd > tailEnd ? rangeEnd - tail.byteOffset : tail.size;
-		const uint64_t candidateDirtySize = tail.dirtySize + range.size;
-		const bool acceptableByteExpansion =
-			candidateDirtySize > UINT64_MAX / kResidentUploadCoalesceMaxByteExpansion ||
-			candidateSize <= candidateDirtySize * kResidentUploadCoalesceMaxByteExpansion;
-		if (gapBytes <= kResidentUploadCoalesceMaxGapBytes && acceptableByteExpansion)
-		{
-			if (rangeEnd > tailEnd)
-			{
-				tail.size = rangeEnd - tail.byteOffset;
-			}
-			tail.dirtySize += range.size;
-			continue;
-		}
-
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageRejectCount++;
-		coalescedRanges.push_back(range);
-	}
-
-	if (!StageRuntimeMutationResidentGeometryUploadRanges(coalescedRanges))
+	};
+	services.noteCoalescedRange = [](void* user, const RuntimeMutationResidentUploadRange& range)
 	{
-		return clearAndFail();
-	}
-
-	for (const RuntimeMutationResidentUploadRange& range : coalescedRanges)
-	{
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageRangeCount++;
-		mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageBytes += range.size;
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageRangeCount++;
+		renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageBytes += range.size;
 		if (range.size > range.dirtySize)
 		{
-			mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageGapBytes += range.size - range.dirtySize;
+			renderer->mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageGapBytes += range.size - range.dirtySize;
 		}
-	}
-
-	mRuntimeMutation.residentGeometryUploadRanges.clear();
-	return true;
+	};
+	services.noteCoalescedReject = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->mLastPerfShellTraceStats.runtimeMutationResidentApplyCoalescedStageRejectCount++;
+	};
+	return services;
 }
 
 void NRIRenderer::RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices)
@@ -23919,7 +23857,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	std::vector<uint32_t> residentMaterialChunkListIndices;
 	std::vector<uint32_t> animatedResidentApplyMaterialChunkListIndices;
 	std::vector<uint32_t> residentGeometryChunkListIndices;
-	mRuntimeMutation.residentGeometryUploadRanges.clear();
+	mRuntimeMutation.ClearResidentGeometryUploadRanges();
 	const bool tracePtPerf = ShouldTracePtPerf();
 	const bool collectRuntimeMutationCacheStats = tracePtPerf || (bool)nri_ptslowdowntrace;
 	mLastPerfShellTraceStats.runtimeMutationStructuralRebuildMs = 0.0;
@@ -27307,7 +27245,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	{
 		bool residentRefreshOkay = true;
 		const char* residentRefreshFailureReason = nullptr;
-		if (!FlushRuntimeMutationResidentGeometryUploadRanges())
+		if (!mRuntimeMutation.FlushResidentGeometryUploadRanges(BuildRuntimeMutationResidentUploadServices()))
 		{
 			residentRefreshOkay = false;
 			residentRefreshFailureReason = "runtime-mutation-resident-geometry-upload-failed";
@@ -29216,10 +29154,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 							mStaticMapScene.geometry.vertices);
 					}
 					const uint64_t vertexBytes = (uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
-					if (!QueueRuntimeMutationResidentGeometryUploadRange(
+					if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
 							ResidentUploadKind_Vertex,
 							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
-							vertexBytes))
+							vertexBytes,
+							BuildRuntimeMutationResidentUploadServices()))
 					{
 						return false;
 					}
@@ -29245,18 +29184,20 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 
 					const uint64_t vertexBytes = (uint64_t)nextAtlasChunk.vertexCount * sizeof(nri_scene::SceneVertex);
 					const uint64_t indexBytes = (uint64_t)nextAtlasChunk.indexCount * sizeof(uint32_t);
-					if (!QueueRuntimeMutationResidentGeometryUploadRange(
+					if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
 							ResidentUploadKind_Vertex,
 							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
-							vertexBytes))
+							vertexBytes,
+							BuildRuntimeMutationResidentUploadServices()))
 					{
 						return false;
 					}
 
-					if (!QueueRuntimeMutationResidentGeometryUploadRange(
+					if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
 							ResidentUploadKind_Index,
 							(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
-							indexBytes))
+							indexBytes,
+							BuildRuntimeMutationResidentUploadServices()))
 					{
 						return false;
 					}
@@ -29283,10 +29224,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 						}
 					}
 					const uint64_t primitiveBytes = (uint64_t)nextAtlasChunk.primitiveCount * sizeof(nri_scene::PrimitiveData);
-					if (!QueueRuntimeMutationResidentGeometryUploadRange(
+					if (!mRuntimeMutation.QueueResidentGeometryUploadRange(
 							ResidentUploadKind_Primitive,
 							(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
-							primitiveBytes))
+							primitiveBytes,
+							BuildRuntimeMutationResidentUploadServices()))
 					{
 						return false;
 					}

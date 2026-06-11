@@ -147,6 +147,25 @@ struct RuntimeMutationResidentUploadRange
 	uint64_t dirtySize = 0;
 };
 
+struct NRIRuntimeMutationResidentUploadServices
+{
+	using StageGeometryRangesFn = bool (*)(void* user, const std::vector<RuntimeMutationResidentUploadRange>& ranges);
+	using NoteUploadRangeFn = void (*)(void* user, int uploadKind, uint64_t size);
+	using NoteCoalescedRangeFn = void (*)(void* user, const RuntimeMutationResidentUploadRange& range);
+	using NoteCoalescedRejectFn = void (*)(void* user);
+
+	void* user = nullptr;
+	StageGeometryRangesFn stageGeometryRanges = nullptr;
+	NoteUploadRangeFn noteUploadRange = nullptr;
+	NoteCoalescedRangeFn noteCoalescedRange = nullptr;
+	NoteCoalescedRejectFn noteCoalescedReject = nullptr;
+
+	bool StageGeometryRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges) const;
+	void NoteUploadRange(int uploadKind, uint64_t size) const;
+	void NoteCoalescedRange(const RuntimeMutationResidentUploadRange& range) const;
+	void NoteCoalescedReject() const;
+};
+
 struct RuntimeMapMutationFrameState
 {
 	bool active = false;
@@ -184,6 +203,13 @@ public:
 		bool traceEnabled,
 		int traceChunkIndex,
 		int traceSectorIndex);
+	void ClearResidentGeometryUploadRanges();
+	bool QueueResidentGeometryUploadRange(
+		int uploadKind,
+		uint64_t byteOffset,
+		uint64_t size,
+		const NRIRuntimeMutationResidentUploadServices& services);
+	bool FlushResidentGeometryUploadRanges(const NRIRuntimeMutationResidentUploadServices& services);
 
 	RuntimeMapMutationCache cache;
 	RuntimeMapMutationFrameState lastFrame = {};

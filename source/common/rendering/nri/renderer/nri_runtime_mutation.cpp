@@ -2,6 +2,8 @@
 
 #include "printf.h"
 
+#include <algorithm>
+
 namespace
 {
 	static void AppendMutationReasonToken(std::string& text, const char* token)
@@ -11,6 +13,35 @@ namespace
 			text += "|";
 		}
 		text += token;
+	}
+}
+
+bool NRIRuntimeMutationResidentUploadServices::StageGeometryRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges) const
+{
+	return stageGeometryRanges != nullptr && stageGeometryRanges(user, ranges);
+}
+
+void NRIRuntimeMutationResidentUploadServices::NoteUploadRange(int uploadKind, uint64_t size) const
+{
+	if (noteUploadRange != nullptr)
+	{
+		noteUploadRange(user, uploadKind, size);
+	}
+}
+
+void NRIRuntimeMutationResidentUploadServices::NoteCoalescedRange(const RuntimeMutationResidentUploadRange& range) const
+{
+	if (noteCoalescedRange != nullptr)
+	{
+		noteCoalescedRange(user, range);
+	}
+}
+
+void NRIRuntimeMutationResidentUploadServices::NoteCoalescedReject() const
+{
+	if (noteCoalescedReject != nullptr)
+	{
+		noteCoalescedReject(user);
 	}
 }
 
@@ -337,4 +368,110 @@ void NRIRuntimeMutationSystem::TraceChunk(
 	replacement.lastTraceAnimationOnlyRefreshed = replacement.animationOnlyRefreshed;
 	replacement.lastTraceStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
 	replacement.traceCount++;
+}
+
+void NRIRuntimeMutationSystem::ClearResidentGeometryUploadRanges()
+{
+	residentGeometryUploadRanges.clear();
+}
+
+bool NRIRuntimeMutationSystem::QueueResidentGeometryUploadRange(
+	int uploadKind,
+	uint64_t byteOffset,
+	uint64_t size,
+	const NRIRuntimeMutationResidentUploadServices& services)
+{
+	if (size == 0)
+	{
+		return true;
+	}
+
+	switch (uploadKind)
+	{
+	case 0:
+	case 1:
+	case 2:
+		services.NoteUploadRange(uploadKind, size);
+		break;
+	default:
+		return false;
+	}
+
+	residentGeometryUploadRanges.push_back({ uploadKind, byteOffset, size, size });
+	return true;
+}
+
+bool NRIRuntimeMutationSystem::FlushResidentGeometryUploadRanges(const NRIRuntimeMutationResidentUploadServices& services)
+{
+	if (residentGeometryUploadRanges.empty())
+	{
+		return true;
+	}
+
+	constexpr uint64_t kResidentUploadCoalesceMaxGapBytes = 4ull * 1024ull;
+	constexpr uint64_t kResidentUploadCoalesceMaxByteExpansion = 2;
+	auto clearAndFail = [&]()
+	{
+		residentGeometryUploadRanges.clear();
+		return false;
+	};
+
+	std::sort(
+		residentGeometryUploadRanges.begin(),
+		residentGeometryUploadRanges.end(),
+		[](const RuntimeMutationResidentUploadRange& a, const RuntimeMutationResidentUploadRange& b)
+		{
+			if (a.uploadKind != b.uploadKind)
+			{
+				return a.uploadKind < b.uploadKind;
+			}
+			return a.byteOffset < b.byteOffset;
+		});
+
+	std::vector<RuntimeMutationResidentUploadRange> coalescedRanges;
+	coalescedRanges.reserve(residentGeometryUploadRanges.size());
+	for (const RuntimeMutationResidentUploadRange& range : residentGeometryUploadRanges)
+	{
+		if (coalescedRanges.empty() ||
+			coalescedRanges.back().uploadKind != range.uploadKind)
+		{
+			coalescedRanges.push_back(range);
+			continue;
+		}
+
+		RuntimeMutationResidentUploadRange& tail = coalescedRanges.back();
+		const uint64_t tailEnd = tail.byteOffset + tail.size;
+		const uint64_t rangeEnd = range.byteOffset + range.size;
+		const uint64_t gapBytes = range.byteOffset > tailEnd ? range.byteOffset - tailEnd : 0;
+		const uint64_t candidateSize = rangeEnd > tailEnd ? rangeEnd - tail.byteOffset : tail.size;
+		const uint64_t candidateDirtySize = tail.dirtySize + range.size;
+		const bool acceptableByteExpansion =
+			candidateDirtySize > UINT64_MAX / kResidentUploadCoalesceMaxByteExpansion ||
+			candidateSize <= candidateDirtySize * kResidentUploadCoalesceMaxByteExpansion;
+		if (gapBytes <= kResidentUploadCoalesceMaxGapBytes && acceptableByteExpansion)
+		{
+			if (rangeEnd > tailEnd)
+			{
+				tail.size = rangeEnd - tail.byteOffset;
+			}
+			tail.dirtySize += range.size;
+			continue;
+		}
+
+		services.NoteCoalescedReject();
+		coalescedRanges.push_back(range);
+	}
+
+	if (!services.StageGeometryRanges(coalescedRanges))
+	{
+		return clearAndFail();
+	}
+
+	for (const RuntimeMutationResidentUploadRange& range : coalescedRanges)
+	{
+		services.NoteCoalescedRange(range);
+	}
+
+	residentGeometryUploadRanges.clear();
+	return true;
 }

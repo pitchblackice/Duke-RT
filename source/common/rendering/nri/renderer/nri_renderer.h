@@ -2462,8 +2462,7 @@ private:
 	bool EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch& scratch, ResidentUploadScratchFrame& frameScratch, uint64_t requiredSize);
 	bool EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind);
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
-	bool QueueRuntimeMutationResidentGeometryUploadRange(int uploadKind, uint64_t byteOffset, uint64_t size);
-	bool FlushRuntimeMutationResidentGeometryUploadRanges();
+	NRIRuntimeMutationResidentUploadServices BuildRuntimeMutationResidentUploadServices();
 	bool StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges);
 	bool StageResidentMaterialUploadRanges(
 		const NRIBufferResource& targetBuffer,
