@@ -203,6 +203,12 @@ public:
 	bool IsReplacementActive(uint32_t chunkIndex) const;
 	bool IsReplacementActiveAndValid(uint32_t chunkIndex) const;
 	uint32_t AppendSceneLightRecords(SceneLightSystem& sceneLights) const;
+	void BuildLightIdentityOverrides(
+		const nri_scene::PTMapWorld& staticWorld,
+		const nri_scene::PTMapChunk& staticChunk,
+		const nri_scene::PTMapWorld& liveWorld,
+		const nri_scene::PTMapChunk& liveChunk,
+		SceneLightSystem::SurfaceIdentityOverrides& outOverrides) const;
 	void PrintStatus() const;
 	void ClearReplacementPayload(RuntimeMapMutationCache::ChunkReplacement& replacement, bool clearMaterialStateCache);
 	void TraceChunk(

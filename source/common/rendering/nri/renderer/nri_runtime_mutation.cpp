@@ -5,9 +5,65 @@
 #include "printf.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace
 {
+	struct RuntimeMutationLightIdentitySurfaceKey
+	{
+		uint32_t kind = UINT32_MAX;
+		uint32_t sourceType = (uint32_t)nri_scene::SurfaceSourceType::Unknown;
+		int32_t sectorIndex = -1;
+		int32_t wallIndex = -1;
+		int32_t sectionIndex = -1;
+		int32_t nextSectorIndex = -1;
+		int32_t actorIndex = -1;
+		uint32_t cstat = 0;
+		uint32_t materialFlags = 0;
+		uint32_t primaryKey = UINT32_MAX;
+		uint32_t secondaryKey = UINT32_MAX;
+
+		bool operator==(const RuntimeMutationLightIdentitySurfaceKey& other) const
+		{
+			return kind == other.kind &&
+				sourceType == other.sourceType &&
+				sectorIndex == other.sectorIndex &&
+				wallIndex == other.wallIndex &&
+				sectionIndex == other.sectionIndex &&
+				nextSectorIndex == other.nextSectorIndex &&
+				actorIndex == other.actorIndex &&
+				cstat == other.cstat &&
+				materialFlags == other.materialFlags &&
+				primaryKey == other.primaryKey &&
+				secondaryKey == other.secondaryKey;
+		}
+	};
+
+	struct RuntimeMutationLightIdentitySurfaceKeyHash
+	{
+		size_t operator()(const RuntimeMutationLightIdentitySurfaceKey& key) const
+		{
+			size_t h = 1469598103934665603ull;
+			const auto mix = [&h](uint64_t value)
+			{
+				h ^= (size_t)value;
+				h *= 1099511628211ull;
+			};
+			mix(key.kind);
+			mix(key.sourceType);
+			mix((uint32_t)key.sectorIndex);
+			mix((uint32_t)key.wallIndex);
+			mix((uint32_t)key.sectionIndex);
+			mix((uint32_t)key.nextSectorIndex);
+			mix((uint32_t)key.actorIndex);
+			mix(key.cstat);
+			mix(key.materialFlags);
+			mix(key.primaryKey);
+			mix(key.secondaryKey);
+			return h;
+		}
+	};
+
 	static void AppendMutationReasonToken(std::string& text, const char* token)
 	{
 		if (!text.empty())
@@ -15,6 +71,46 @@ namespace
 			text += "|";
 		}
 		text += token;
+	}
+
+	static RuntimeMutationLightIdentitySurfaceKey BuildRuntimeMutationLightIdentitySurfaceKey(const nri_scene::PTMapSurface& surface)
+	{
+		RuntimeMutationLightIdentitySurfaceKey key = {};
+		key.kind = (uint32_t)surface.kind;
+		key.sourceType = (uint32_t)surface.surface.provenance.sourceType;
+		key.sectorIndex = surface.surface.provenance.sectorIndex;
+		key.wallIndex = surface.surface.provenance.wallIndex;
+		key.sectionIndex = surface.surface.provenance.sectionIndex;
+		key.nextSectorIndex = surface.surface.provenance.nextSectorIndex;
+		key.actorIndex = surface.surface.provenance.actorIndex;
+		key.cstat = surface.surface.provenance.cstat;
+		key.materialFlags = surface.surface.provenance.materialFlags;
+		key.primaryKey = surface.key.primary;
+		key.secondaryKey = surface.key.secondary;
+		return key;
+	}
+
+	static void ComputeRuntimeMutationSurfaceCenter(const nri_scene::SurfaceRef& surface, float outCenter[3])
+	{
+		outCenter[0] = 0.0f;
+		outCenter[1] = 0.0f;
+		outCenter[2] = 0.0f;
+		if (surface.vertices.empty())
+		{
+			return;
+		}
+
+		for (const nri_scene::CapturedVertex& vertex : surface.vertices)
+		{
+			outCenter[0] += vertex.position[0];
+			outCenter[1] += vertex.position[1];
+			outCenter[2] += vertex.position[2];
+		}
+
+		const float invCount = 1.0f / (float)surface.vertices.size();
+		outCenter[0] *= invCount;
+		outCenter[1] *= invCount;
+		outCenter[2] *= invCount;
 	}
 }
 
@@ -311,6 +407,110 @@ uint32_t NRIRuntimeMutationSystem::AppendSceneLightRecords(SceneLightSystem& sce
 		runtimeMutationMaterialOffset += (uint32_t)replacement.materialBridge.materials.size();
 	}
 	return runtimeMutationMaterialOffset;
+}
+
+void NRIRuntimeMutationSystem::BuildLightIdentityOverrides(
+	const nri_scene::PTMapWorld& staticWorld,
+	const nri_scene::PTMapChunk& staticChunk,
+	const nri_scene::PTMapWorld& liveWorld,
+	const nri_scene::PTMapChunk& liveChunk,
+	SceneLightSystem::SurfaceIdentityOverrides& outOverrides) const
+{
+	outOverrides.Clear();
+	if (!staticWorld.valid || !liveWorld.valid)
+	{
+		return;
+	}
+
+	std::vector<uint32_t> staticSurfaceIndices;
+	std::vector<uint32_t> liveSurfaceIndices;
+	staticSurfaceIndices.reserve(staticChunk.surfaceCount);
+	liveSurfaceIndices.reserve(liveChunk.surfaceCount);
+
+	for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < staticChunk.surfaceCount; ++localSurfaceIndex)
+	{
+		const uint32_t surfaceIndex = staticChunk.firstSurface + localSurfaceIndex;
+		if (surfaceIndex >= staticWorld.surfaces.size())
+		{
+			break;
+		}
+		staticSurfaceIndices.push_back(surfaceIndex);
+	}
+
+	for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < liveChunk.surfaceCount; ++localSurfaceIndex)
+	{
+		const uint32_t surfaceIndex = liveChunk.firstSurface + localSurfaceIndex;
+		if (surfaceIndex >= liveWorld.surfaces.size())
+		{
+			break;
+		}
+		liveSurfaceIndices.push_back(surfaceIndex);
+	}
+
+	std::unordered_map<RuntimeMutationLightIdentitySurfaceKey, std::vector<uint32_t>, RuntimeMutationLightIdentitySurfaceKeyHash> liveSurfaceLookup;
+	liveSurfaceLookup.reserve(liveSurfaceIndices.size());
+	for (uint32_t liveLocalIndex = 0; liveLocalIndex < (uint32_t)liveSurfaceIndices.size(); ++liveLocalIndex)
+	{
+		const auto& liveSurface = liveWorld.surfaces[liveSurfaceIndices[liveLocalIndex]];
+		liveSurfaceLookup[BuildRuntimeMutationLightIdentitySurfaceKey(liveSurface)].push_back(liveLocalIndex);
+	}
+
+	std::vector<uint8_t> liveSurfaceUsed(liveSurfaceIndices.size(), 0u);
+	std::vector<uint64_t> inheritedIdentityKeys(liveSurfaceIndices.size(), 0ull);
+	float staticSurfaceCenter[3] = {};
+	for (uint32_t staticSurfaceIndex : staticSurfaceIndices)
+	{
+		const auto& staticSurface = staticWorld.surfaces[staticSurfaceIndex];
+		const RuntimeMutationLightIdentitySurfaceKey key = BuildRuntimeMutationLightIdentitySurfaceKey(staticSurface);
+		auto liveSurfaceIt = liveSurfaceLookup.find(key);
+		if (liveSurfaceIt == liveSurfaceLookup.end())
+		{
+			continue;
+		}
+
+		uint32_t matchedLiveLocalIndex = UINT32_MAX;
+		for (uint32_t candidate : liveSurfaceIt->second)
+		{
+			if (candidate < liveSurfaceUsed.size() && liveSurfaceUsed[candidate] == 0u)
+			{
+				matchedLiveLocalIndex = candidate;
+				break;
+			}
+		}
+		if (matchedLiveLocalIndex == UINT32_MAX)
+		{
+			continue;
+		}
+
+		liveSurfaceUsed[matchedLiveLocalIndex] = 1u;
+		ComputeRuntimeMutationSurfaceCenter(staticSurface.surface, staticSurfaceCenter);
+		inheritedIdentityKeys[matchedLiveLocalIndex] = SceneLightSystem::ComputeSurfaceIdentityKey(
+			SceneLightRecordSource::StaticMapScene,
+			staticSurface.surface.provenance,
+			staticSurfaceCenter);
+	}
+
+	outOverrides.opaqueWalls.reserve(liveWorld.stats.wallSurfaceCount);
+	outOverrides.opaqueFlats.reserve(liveWorld.stats.flatSurfaceCount);
+	for (uint32_t liveLocalIndex = 0; liveLocalIndex < (uint32_t)liveSurfaceIndices.size(); ++liveLocalIndex)
+	{
+		const auto& liveSurface = liveWorld.surfaces[liveSurfaceIndices[liveLocalIndex]];
+		if ((liveSurface.surface.material.flags & nri_scene::MaterialFlag_Sky) != 0 && liveSurface.surface.material.texture != nullptr)
+		{
+			continue;
+		}
+
+		switch (liveSurface.kind)
+		{
+		case nri_scene::PTMapSurfaceKind::Floor:
+		case nri_scene::PTMapSurfaceKind::Ceiling:
+			outOverrides.opaqueFlats.push_back(inheritedIdentityKeys[liveLocalIndex]);
+			break;
+		default:
+			outOverrides.opaqueWalls.push_back(inheritedIdentityKeys[liveLocalIndex]);
+			break;
+		}
+	}
 }
 
 void NRIRuntimeMutationSystem::PrintStatus() const

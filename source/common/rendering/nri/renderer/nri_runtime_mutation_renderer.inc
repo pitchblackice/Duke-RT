@@ -2541,7 +2541,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			const uint64_t liveAnimatedMaterialSignature =
 				ComputeAnimatedMaterialSignature(animatedSignatureSceneView);
 			const uint32_t liveSurfaceCount = CountSceneViewSurfaces(liveChunkView);
-			BuildRuntimeMutationLightIdentityOverrides(
+			mRuntimeMutation.BuildLightIdentityOverrides(
 				mMapWorld,
 				mapChunk,
 				liveWorld,
@@ -2666,7 +2666,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 			if (exclusiveMaterialOnlyReplacement)
 			{
-				BuildRuntimeMutationLightIdentityOverrides(
+				mRuntimeMutation.BuildLightIdentityOverrides(
 					mMapWorld,
 					mapChunk,
 					liveWorld,
