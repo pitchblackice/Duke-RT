@@ -116,7 +116,7 @@ public:
 
 	static constexpr size_t MaterialBuildTraceSlotCount = (size_t)MaterialBuildTraceSlot::Count;
 	static constexpr size_t SceneBufferUploadDomainCount = (size_t)SceneBufferUploadDomain::Count;
-	static constexpr size_t RuntimeMutationTopTraceCount = 8;
+	static constexpr size_t RuntimeMutationTopTraceCount = ::RuntimeMutationTopTraceCount;
 	static constexpr size_t RuntimeSectorDirtyTruthTraceCount = 8;
 	static constexpr size_t RuntimeAnimatedChurnTraceCount = 4;
 	static constexpr size_t RuntimeMaterialOnlyMismatchTraceCount = 8;
@@ -126,38 +126,8 @@ public:
 	static constexpr size_t RuntimeGeometryDirtyTraceCount = 8;
 	static constexpr size_t RuntimeRecurringChunkTraceCount = 8;
 
-	enum class RuntimeMutationTraceAction : uint8_t
-	{
-		None,
-		StructuralRebuild,
-		MaterialRefresh,
-		ResidentApply,
-		ResidentNoopSkip,
-		ResidentFallback,
-		Held,
-		SyncSkip,
-		DeferredMaterialRefresh,
-		DeferredStructuralRebuild,
-		Failed
-	};
-
-	struct RuntimeMutationTopTraceEntry
-	{
-		bool valid = false;
-		uint32_t score = 0;
-		uint32_t chunkIndex = UINT32_MAX;
-		int32_t sectorIndex = -1;
-		uint32_t reasonMask = 0;
-		uint32_t sectionDirtyCount = 0;
-		uint32_t surfaceCount = 0;
-		uint32_t triangleCount = 0;
-		uint32_t materialCount = 0;
-		RuntimeMutationTraceAction action = RuntimeMutationTraceAction::None;
-		bool forceTopology = false;
-		bool residentMaterialDirty = false;
-		bool residentGeometryDirty = false;
-		bool recoveredEmpty = false;
-	};
+	using RuntimeMutationTraceAction = ::RuntimeMutationTraceAction;
+	using RuntimeMutationTopTraceEntry = ::RuntimeMutationTopTraceEntry;
 
 	struct RuntimeSectorDirtyTruthTraceEntry
 	{
@@ -2418,7 +2388,6 @@ private:
 	void PrintResidentMapChunkRegistryStatus() const;
 	void PrintDynamicSceneStatus() const;
 	void PrintTemporalStatus() const;
-	void PrintRuntimeMapMutationStatus() const;
 	void PrintRuntimeSpaceLinkStatus() const;
 	void RequestHistoryReset(const char* reason, bool clearPreviousCameraState = false, bool clearRuntimeChunkTranslationHistory = false);
 	void NoteLightHistoryChange(const char* reason);
@@ -2431,8 +2400,6 @@ private:
 	void SetSelfTestRouteSnapshot(const char* routeName, const char* presenterName, const char* ownerName, const char* passes, bool denoiserRun, bool upscalerRun, bool exposureRun);
 	void EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bool portal) const;
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);
-	void ClearRuntimeMapMutationReplacementPayload(RuntimeMapMutationCache::ChunkReplacement& replacement, bool clearMaterialStateCache);
-	void TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	SurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const SurfaceProbeResult& probe) const;
@@ -2462,7 +2429,6 @@ private:
 	void QueueStaticMapSceneLightingInvalidation();
 	void InvalidateStaticMapSceneForMaterialLighting();
 	PersistentDynamicSurfaceStats GatherPersistentDynamicEmissiveSurfaceStats() const;
-	RuntimeMutationCacheStats GatherRuntimeMutationCacheStats() const;
 	static MaterialBuildTraceSlot ResolveMaterialBuildTraceSlot(const char* traceLabel);
 	const std::unordered_map<int32_t, uint32_t>& GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot = MaterialBuildTraceSlot::Unknown);
 	void LogFallback(const char* reason);

@@ -3595,72 +3595,6 @@ namespace
 		return !!nri_ptshaderstats && ShouldTracePtPerf();
 	}
 
-	const char* GetRuntimeMutationTraceActionName(NRIRenderer::RuntimeMutationTraceAction action)
-	{
-		switch (action)
-		{
-		case NRIRenderer::RuntimeMutationTraceAction::StructuralRebuild: return "rebuild";
-		case NRIRenderer::RuntimeMutationTraceAction::MaterialRefresh: return "material-refresh";
-		case NRIRenderer::RuntimeMutationTraceAction::ResidentApply: return "resident-apply";
-		case NRIRenderer::RuntimeMutationTraceAction::ResidentNoopSkip: return "resident-noop-skip";
-		case NRIRenderer::RuntimeMutationTraceAction::ResidentFallback: return "fallback";
-		case NRIRenderer::RuntimeMutationTraceAction::Held: return "held";
-		case NRIRenderer::RuntimeMutationTraceAction::SyncSkip: return "sync-skip";
-		case NRIRenderer::RuntimeMutationTraceAction::DeferredMaterialRefresh: return "deferred-material-refresh";
-		case NRIRenderer::RuntimeMutationTraceAction::DeferredStructuralRebuild: return "deferred-structural-rebuild";
-		case NRIRenderer::RuntimeMutationTraceAction::Failed: return "failed";
-		default: return "none";
-		}
-	}
-
-	uint32_t ScoreRuntimeMutationTopTraceEntry(const NRIRenderer::RuntimeMutationTopTraceEntry& entry)
-	{
-		uint32_t score = entry.triangleCount * 16u + entry.materialCount * 32u + entry.surfaceCount * 8u;
-		if (entry.forceTopology)
-		{
-			score += 1u << 20;
-		}
-		if (entry.recoveredEmpty)
-		{
-			score += 1u << 19;
-		}
-		if (entry.residentGeometryDirty)
-		{
-			score += 1u << 18;
-		}
-		if (entry.residentMaterialDirty)
-		{
-			score += 1u << 17;
-		}
-		switch (entry.action)
-		{
-		case NRIRenderer::RuntimeMutationTraceAction::ResidentFallback:
-			score += 1u << 16;
-			break;
-		case NRIRenderer::RuntimeMutationTraceAction::ResidentNoopSkip:
-			score += 1u << 15;
-			break;
-		case NRIRenderer::RuntimeMutationTraceAction::ResidentApply:
-			score += 1u << 14;
-			break;
-		case NRIRenderer::RuntimeMutationTraceAction::StructuralRebuild:
-			score += 1u << 13;
-			break;
-		case NRIRenderer::RuntimeMutationTraceAction::MaterialRefresh:
-			score += 1u << 12;
-			break;
-		case NRIRenderer::RuntimeMutationTraceAction::SyncSkip:
-			score += 1u << 11;
-			break;
-		case NRIRenderer::RuntimeMutationTraceAction::DeferredMaterialRefresh:
-			score += 1u << 10;
-			break;
-		default:
-			break;
-		}
-		return score;
-	}
-
 	uint32_t ScoreRuntimeSectorDirtyTruthEntry(const NRIRenderer::RuntimeSectorDirtyTruthTraceEntry& entry)
 	{
 		uint32_t score = 0;
@@ -4972,127 +4906,6 @@ namespace
 	static nri::AccessStage NRIComputeAccelerationStructureReadAccess()
 	{
 		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::COMPUTE_SHADER };
-	}
-
-	static void AppendMutationReasonToken(std::string& text, const char* token)
-	{
-		if (!text.empty())
-		{
-			text += "|";
-		}
-		text += token;
-	}
-
-	static std::string GetRuntimeMapMutationReasonSummary(uint32_t reasonMask)
-	{
-		std::string text;
-		if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0)
-		{
-			AppendMutationReasonToken(text, "sector_geom");
-		}
-		if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0)
-		{
-			AppendMutationReasonToken(text, "sector_mat");
-		}
-		if ((reasonMask & nri_scene::PTMapChunkMutationReason_WallGeometry) != 0)
-		{
-			AppendMutationReasonToken(text, "wall_geom");
-		}
-		if ((reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0)
-		{
-			AppendMutationReasonToken(text, "wall_mat");
-		}
-		if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0)
-		{
-			AppendMutationReasonToken(text, "sector_dirty");
-		}
-		if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectionDirty) != 0)
-		{
-			AppendMutationReasonToken(text, "section_dirty");
-		}
-		if ((reasonMask & nri_scene::PTMapChunkMutationReason_Dragged) != 0)
-		{
-			AppendMutationReasonToken(text, "dragged");
-		}
-		if (text.empty())
-		{
-			text = "none";
-		}
-		return text;
-	}
-
-	enum RuntimeMutationWorklistCandidateSourceBits : uint32_t
-	{
-		RuntimeMutationWorklistCandidateSource_ActiveReplacement = 1 << 0,
-		RuntimeMutationWorklistCandidateSource_VisibleResidentValidation = 1 << 1,
-		RuntimeMutationWorklistCandidateSource_StartupVisibleValidation = 1 << 2,
-		RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures = 1 << 3,
-		RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed = 1 << 4,
-		RuntimeMutationWorklistCandidateSource_SectorDirty = 1 << 5,
-		RuntimeMutationWorklistCandidateSource_SectionDirty = 1 << 6,
-		RuntimeMutationWorklistCandidateSource_Dragged = 1 << 7,
-		RuntimeMutationWorklistCandidateSource_SignatureWatchlist = 1 << 8,
-		RuntimeMutationWorklistCandidateSource_BackgroundSweep = 1 << 9,
-		RuntimeMutationWorklistCandidateSource_DeferredMaterialRefresh = 1 << 10,
-		RuntimeMutationWorklistCandidateSource_DeferredStructuralRebuild = 1 << 11,
-	};
-
-	static std::string GetRuntimeMutationWorklistCandidateSourceSummary(uint32_t sourceMask)
-	{
-		std::string text;
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_ActiveReplacement) != 0)
-		{
-			AppendMutationReasonToken(text, "active_replacement");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_VisibleResidentValidation) != 0)
-		{
-			AppendMutationReasonToken(text, "visible_resident_validation");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_StartupVisibleValidation) != 0)
-		{
-			AppendMutationReasonToken(text, "startup_visible_validation");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures) != 0)
-		{
-			AppendMutationReasonToken(text, "unresolved_authored_textures");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed) != 0)
-		{
-			AppendMutationReasonToken(text, "static_animated_suppressed");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_SectorDirty) != 0)
-		{
-			AppendMutationReasonToken(text, "sector_dirty");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_SectionDirty) != 0)
-		{
-			AppendMutationReasonToken(text, "section_dirty");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_Dragged) != 0)
-		{
-			AppendMutationReasonToken(text, "dragged");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_SignatureWatchlist) != 0)
-		{
-			AppendMutationReasonToken(text, "signature_watchlist");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_BackgroundSweep) != 0)
-		{
-			AppendMutationReasonToken(text, "background_sweep");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_DeferredMaterialRefresh) != 0)
-		{
-			AppendMutationReasonToken(text, "deferred_material_refresh");
-		}
-		if ((sourceMask & RuntimeMutationWorklistCandidateSource_DeferredStructuralRebuild) != 0)
-		{
-			AppendMutationReasonToken(text, "deferred_structural_rebuild");
-		}
-		if (text.empty())
-		{
-			text = "none";
-		}
-		return text;
 	}
 
 	static uint32_t GetDispatchSize(uint32_t value)
@@ -12551,7 +12364,7 @@ void NRIRenderer::PrintStatus()
 	PrintResidentMapChunkRegistryStatus();
 	PrintDynamicSceneStatus();
 	PrintTemporalStatus();
-	PrintRuntimeMapMutationStatus();
+	mRuntimeMutation.PrintStatus();
 	PrintRuntimeSpaceLinkStatus();
 	PrintSceneBufferStatus();
 	PrintSurfaceProbeStatus();
@@ -13781,37 +13594,6 @@ NRIRenderer::PersistentDynamicSurfaceStats NRIRenderer::GatherPersistentDynamicE
 	return stats;
 }
 
-NRIRenderer::RuntimeMutationCacheStats NRIRenderer::GatherRuntimeMutationCacheStats() const
-{
-	RuntimeMutationCacheStats stats = {};
-	for (const auto& replacement : mRuntimeMutation.cache.chunks)
-	{
-		stats.cachedMaterialStateCount += (uint32_t)replacement.materialStateCache.size();
-		if (!replacement.active)
-		{
-			continue;
-		}
-
-		stats.activeChunkCount++;
-		if (!replacement.valid)
-		{
-			continue;
-		}
-
-		stats.validChunkCount++;
-		if (replacement.excludeStaticChunk)
-		{
-			stats.excludedStaticChunkCount++;
-		}
-
-		stats.cachedSurfaceCount += replacement.surfaceCount;
-		stats.cachedTriangleCount += replacement.triangleCount;
-		stats.cachedMaterialCount += (uint32_t)replacement.materialBridge.materials.size();
-	}
-
-	return stats;
-}
-
 void NRIRenderer::PrintDynamicSceneStatus() const
 {
 	const PersistentDynamicSurfaceStats persistentStats = GatherPersistentDynamicEmissiveSurfaceStats();
@@ -14877,49 +14659,6 @@ bool NRIRenderer::RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneVi
 	return liveSceneHasEmissive;
 }
 
-void NRIRenderer::PrintRuntimeMapMutationStatus() const
-{
-	const RuntimeMutationCacheStats cacheStats = GatherRuntimeMutationCacheStats();
-
-	Printf("NRI PT runtime map: active=%s dirty_chunks=%u resident_applied=%u resident_geom=%u resident_mat=%u resident_atlas_grows=%u resident_fallback=%u rebuilt_chunks=%u held_chunks=%u animated_refreshes=%u blind_spots=%u sector_geom=%u sector_mat=%u wall_geom=%u wall_mat=%u sector_dirty=%u section_dirty=%u dragged=%u surfaces=%u tris=%u materials=%u\n",
-		mRuntimeMutation.lastFrame.active ? "yes" : "no",
-		mRuntimeMutation.lastFrame.dirtyChunkCount,
-		mRuntimeMutation.lastFrame.residentAppliedChunkCount,
-		mRuntimeMutation.lastFrame.residentGeometryChunkCount,
-		mRuntimeMutation.lastFrame.residentMaterialChunkCount,
-		mRuntimeMutation.lastFrame.residentAtlasGrowCount,
-		mRuntimeMutation.lastFrame.residentFallbackChunkCount,
-		mRuntimeMutation.lastFrame.rebuiltChunkCount,
-		mRuntimeMutation.lastFrame.heldChunkCount,
-		mRuntimeMutation.lastFrame.animatedRefreshChunkCount,
-		mRuntimeMutation.lastFrame.blindSpotChunkCount,
-		mRuntimeMutation.lastFrame.sectorGeometryChunkCount,
-		mRuntimeMutation.lastFrame.sectorMaterialChunkCount,
-		mRuntimeMutation.lastFrame.wallGeometryChunkCount,
-		mRuntimeMutation.lastFrame.wallMaterialChunkCount,
-		mRuntimeMutation.lastFrame.sectorDirtyChunkCount,
-		mRuntimeMutation.lastFrame.sectionDirtyChunkCount,
-		mRuntimeMutation.lastFrame.draggedChunkCount,
-		mRuntimeMutation.lastFrame.replacementSurfaceCount,
-		mRuntimeMutation.lastFrame.replacementTriangleCount,
-		mRuntimeMutation.lastFrame.materialCount);
-	Printf("NRI PT runtime map cache: active_chunks=%u valid_chunks=%u exclude_static=%u cached_surfaces=%u cached_tris=%u cached_materials=%u cached_states=%u highwater=active:%u valid:%u exclude_static:%u surfaces:%u tris:%u mats:%u states:%u\n",
-		cacheStats.activeChunkCount,
-		cacheStats.validChunkCount,
-		cacheStats.excludedStaticChunkCount,
-		cacheStats.cachedSurfaceCount,
-		cacheStats.cachedTriangleCount,
-		cacheStats.cachedMaterialCount,
-		cacheStats.cachedMaterialStateCount,
-		mRuntimeMutation.cacheHighWaterStats.activeChunkCount,
-		mRuntimeMutation.cacheHighWaterStats.validChunkCount,
-		mRuntimeMutation.cacheHighWaterStats.excludedStaticChunkCount,
-		mRuntimeMutation.cacheHighWaterStats.cachedSurfaceCount,
-		mRuntimeMutation.cacheHighWaterStats.cachedTriangleCount,
-		mRuntimeMutation.cacheHighWaterStats.cachedMaterialCount,
-		mRuntimeMutation.cacheHighWaterStats.cachedMaterialStateCount);
-}
-
 void NRIRenderer::PrintRuntimeSpaceLinkStatus() const
 {
 	Printf("NRI PT runtime links: active=%s geo_effect=%s query_attempted=%s query_rejected=%s candidate_sector=%d candidate_lotag=%d source_sector=%d reported_geo_count=%d view_roots=%u visible_sectors=%u providers=%u geo_providers=%u provider_groups=%u local_space_matches=%u visible_matches=%u links=%u translated_chunks=%u orphan_local_spaces=%u unresolved_runtime_portals=%u surfaces=%u tris=%u materials=%u\n",
@@ -15177,90 +14916,6 @@ void NRIRenderer::TraceRuntimeLinkEvents(HWDrawInfo& di)
 		}
 		Printf("%s\n", controlLine.c_str());
 	}
-}
-
-void NRIRenderer::ClearRuntimeMapMutationReplacementPayload(RuntimeMapMutationCache::ChunkReplacement& replacement, bool clearMaterialStateCache)
-{
-	replacement.lightIdentityOverrides.Clear();
-	replacement.sceneView = {};
-	replacement.geometry = {};
-	replacement.materialBridge = {};
-	replacement.deferredMaterialRefresh = false;
-	replacement.deferredMaterialFrame = 0;
-	replacement.deferredStructuralRebuild = false;
-	replacement.deferredStructuralFrame = 0;
-	if (clearMaterialStateCache)
-	{
-		replacement.materialStateCache.clear();
-	}
-}
-
-void NRIRenderer::TraceRuntimeMapMutationChunk(const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement)
-{
-	if (!ShouldEmitTemporalTraceLogs())
-	{
-		return;
-	}
-
-	const bool filterByChunk = nri_ptmutationtracechunk >= 0;
-	const bool filterBySector = nri_ptmutationtracesector >= 0;
-	if (!filterByChunk && !filterBySector)
-	{
-		return;
-	}
-
-	if (filterByChunk && mapChunk.chunkIndex != (uint32_t)nri_ptmutationtracechunk)
-	{
-		return;
-	}
-
-	if (filterBySector && mapChunk.sectorIndex != nri_ptmutationtracesector)
-	{
-		return;
-	}
-
-	const bool changed =
-		replacement.traceCount == 0 ||
-		replacement.lastTraceSignature != replacement.liveSignature ||
-		replacement.lastTraceAnimatedMaterialSignature != replacement.animatedMaterialSignature ||
-		replacement.lastTraceReasonMask != replacement.reasonMask ||
-		replacement.lastTraceActive != replacement.active ||
-		replacement.lastTraceBlindSpot != replacement.blindSpot ||
-		replacement.lastTraceAnimationOnlyRefreshed != replacement.animationOnlyRefreshed ||
-		replacement.lastTraceStaticAnimatedReplacement != replacement.staticAnimatedReplacement;
-	if (!changed)
-	{
-		return;
-	}
-
-	const std::string reasons = GetRuntimeMapMutationReasonSummary(replacement.reasonMask);
-	Printf("NRI PT runtime map trace: chunk=%u sector=%d active=%s blind_spot=%s static_anim=%s signature_changed=%s anim_refresh=%s baseline_sig=0x%llx live_sig=0x%llx anim_sig=0x%llx reasons=%s section_dirty=%u sector_dirty=%s dragged=%s surfaces=%u tris=%u materials=%u\n",
-		mapChunk.chunkIndex,
-		mapChunk.sectorIndex,
-		replacement.active ? "yes" : "no",
-		replacement.blindSpot ? "yes" : "no",
-		replacement.staticAnimatedReplacement ? "yes" : "no",
-		replacement.liveSignature != replacement.baselineSignature ? "yes" : "no",
-		replacement.animationOnlyRefreshed ? "yes" : "no",
-		(unsigned long long)replacement.baselineSignature,
-		(unsigned long long)replacement.liveSignature,
-		(unsigned long long)replacement.animatedMaterialSignature,
-		reasons.c_str(),
-		replacement.sectionDirtyCount,
-		replacement.sectorDirty ? "yes" : "no",
-		replacement.dragged ? "yes" : "no",
-		replacement.surfaceCount,
-		replacement.triangleCount,
-		(uint32_t)replacement.materialBridge.materials.size());
-
-	replacement.lastTraceSignature = replacement.liveSignature;
-	replacement.lastTraceAnimatedMaterialSignature = replacement.animatedMaterialSignature;
-	replacement.lastTraceReasonMask = replacement.reasonMask;
-	replacement.lastTraceActive = replacement.active;
-	replacement.lastTraceBlindSpot = replacement.blindSpot;
-	replacement.lastTraceAnimationOnlyRefreshed = replacement.animationOnlyRefreshed;
-	replacement.lastTraceStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
-	replacement.traceCount++;
 }
 
 void NRIRenderer::PrintSceneBufferStatus() const
@@ -20593,7 +20248,7 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 		replacement.surfaceCount = 0;
 		replacement.triangleCount = 0;
 		replacement.residentAuthoritative = true;
-		ClearRuntimeMapMutationReplacementPayload(replacement, true);
+		mRuntimeMutation.ClearReplacementPayload(replacement, true);
 	}
 
 	nri_scene::SceneView chunkSceneView;
@@ -25808,8 +25463,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.staticAnimatedReplacement = false;
 			replacement.animationOnlyRefreshed = false;
 			replacement.animatedMaterialSignature = 0;
-			TraceRuntimeMapMutationChunk(mapChunk, replacement);
-			ClearRuntimeMapMutationReplacementPayload(replacement, replacement.residentAuthoritative);
+			mRuntimeMutation.TraceChunk(mapChunk, replacement, ShouldEmitTemporalTraceLogs(), (int)nri_ptmutationtracechunk, (int)nri_ptmutationtracesector);
+			mRuntimeMutation.ClearReplacementPayload(replacement, replacement.residentAuthoritative);
 			continue;
 		}
 
@@ -26038,9 +25693,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 			replacement.stableMutationFrameCount = 0;
 			chunkTraceAction = RuntimeMutationTraceAction::None;
-			TraceRuntimeMapMutationChunk(mapChunk, replacement);
+			mRuntimeMutation.TraceChunk(mapChunk, replacement, ShouldEmitTemporalTraceLogs(), (int)nri_ptmutationtracechunk, (int)nri_ptmutationtracesector);
 			emitChunkTrace();
-			ClearRuntimeMapMutationReplacementPayload(replacement, true);
+			mRuntimeMutation.ClearReplacementPayload(replacement, true);
 			continue;
 		}
 
@@ -26682,7 +26337,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			replacement.animationOnlyRefreshed = false;
 			seedRuntimeMutationSignatureWatchlist(chunkIndex);
 			chunkTraceAction = RuntimeMutationTraceAction::DeferredStructuralRebuild;
-			TraceRuntimeMapMutationChunk(mapChunk, replacement);
+			mRuntimeMutation.TraceChunk(mapChunk, replacement, ShouldEmitTemporalTraceLogs(), (int)nri_ptmutationtracechunk, (int)nri_ptmutationtracesector);
 			emitChunkTrace();
 			continue;
 		}
@@ -26883,9 +26538,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					structuralWallMaterialOnly,
 					structuralMixedMaterialOnly,
 					structuralGeometryOrDirty);
-				TraceRuntimeMapMutationChunk(mapChunk, replacement);
+				mRuntimeMutation.TraceChunk(mapChunk, replacement, ShouldEmitTemporalTraceLogs(), (int)nri_ptmutationtracechunk, (int)nri_ptmutationtracesector);
 				emitChunkTrace();
-				ClearRuntimeMapMutationReplacementPayload(replacement, replacement.residentAuthoritative);
+				mRuntimeMutation.ClearReplacementPayload(replacement, replacement.residentAuthoritative);
 				continue;
 			}
 			else
@@ -26964,7 +26619,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				replacement.animationOnlyRefreshed = false;
 				seedRuntimeMutationSignatureWatchlist(chunkIndex);
 				chunkTraceAction = RuntimeMutationTraceAction::DeferredMaterialRefresh;
-				TraceRuntimeMapMutationChunk(mapChunk, replacement);
+				mRuntimeMutation.TraceChunk(mapChunk, replacement, ShouldEmitTemporalTraceLogs(), (int)nri_ptmutationtracechunk, (int)nri_ptmutationtracesector);
 				emitChunkTrace();
 				continue;
 			}
@@ -27132,7 +26787,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					chunkTraceSurfaceCount = CountSceneViewSurfaces(liveChunkView);
 					chunkTraceTriangleCount = liveStats.triangleCount;
 					chunkTraceMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
-					TraceRuntimeMapMutationChunk(mapChunk, replacement);
+					mRuntimeMutation.TraceChunk(mapChunk, replacement, ShouldEmitTemporalTraceLogs(), (int)nri_ptmutationtracechunk, (int)nri_ptmutationtracesector);
 					emitChunkTrace();
 					continue;
 				}
@@ -27193,7 +26848,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 					residentEntry != nullptr ? residentEntry->animatedMaterialSignature : replacement.animatedMaterialSignature;
 				replacement.surfaceCount = 0;
 				replacement.triangleCount = 0;
-				ClearRuntimeMapMutationReplacementPayload(replacement, true);
+				mRuntimeMutation.ClearReplacementPayload(replacement, true);
 				if (residentEntry != nullptr)
 				{
 					residentEntry->appliedBaseline = appliedBaseline;
@@ -27290,7 +26945,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				chunkTraceSurfaceCount = residentEntry != nullptr ? residentEntry->materialCount : 0;
 				chunkTraceTriangleCount = residentEntry != nullptr ? residentEntry->primitiveCount : 0;
 				chunkTraceMaterialCount = residentEntry != nullptr ? residentEntry->materialCount : 0;
-				TraceRuntimeMapMutationChunk(mapChunk, replacement);
+				mRuntimeMutation.TraceChunk(mapChunk, replacement, ShouldEmitTemporalTraceLogs(), (int)nri_ptmutationtracechunk, (int)nri_ptmutationtracesector);
 				emitChunkTrace();
 				continue;
 			}
@@ -27389,7 +27044,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				chunkTraceSurfaceCount = residentChunkSurfaceCount;
 				chunkTraceTriangleCount = residentChunkTriangleCount;
 				chunkTraceMaterialCount = residentChunkMaterialCount;
-				TraceRuntimeMapMutationChunk(mapChunk, replacement);
+				mRuntimeMutation.TraceChunk(mapChunk, replacement, ShouldEmitTemporalTraceLogs(), (int)nri_ptmutationtracechunk, (int)nri_ptmutationtracesector);
 				emitChunkTrace();
 				continue;
 			}
@@ -27406,7 +27061,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			chunkTraceSurfaceCount = replacement.surfaceCount;
 			chunkTraceTriangleCount = replacement.triangleCount;
 			chunkTraceMaterialCount = (uint32_t)replacement.materialBridge.materials.size();
-			TraceRuntimeMapMutationChunk(mapChunk, replacement);
+			mRuntimeMutation.TraceChunk(mapChunk, replacement, ShouldEmitTemporalTraceLogs(), (int)nri_ptmutationtracechunk, (int)nri_ptmutationtracesector);
 			emitChunkTrace();
 			continue;
 		}
@@ -27584,7 +27239,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	}
 	if (collectRuntimeMutationCacheStats)
 	{
-		const RuntimeMutationCacheStats cacheStats = GatherRuntimeMutationCacheStats();
+		const RuntimeMutationCacheStats cacheStats = mRuntimeMutation.GatherCacheStats();
 		mLastPerfShellTraceStats.runtimeMutationActiveChunkCount = cacheStats.activeChunkCount;
 		mLastPerfShellTraceStats.runtimeMutationValidChunkCount = cacheStats.validChunkCount;
 		mLastPerfShellTraceStats.runtimeMutationExcludedStaticChunkCount = cacheStats.excludedStaticChunkCount;
@@ -29745,7 +29400,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	replacement.animatedMaterialSignature = ComputeAnimatedMaterialSignature(residentSceneView);
 	replacement.surfaceCount = 0;
 	replacement.triangleCount = 0;
-	ClearRuntimeMapMutationReplacementPayload(replacement, true);
+	mRuntimeMutation.ClearReplacementPayload(replacement, true);
 
 	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].appliedBaseline = appliedBaseline;
 	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].baselineSignature = appliedBaseline.signature;

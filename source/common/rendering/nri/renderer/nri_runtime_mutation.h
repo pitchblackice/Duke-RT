@@ -9,7 +9,64 @@
 #include "../scene/nri_scene_bridge.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
+
+static constexpr size_t RuntimeMutationTopTraceCount = 8;
+
+enum class RuntimeMutationTraceAction : uint8_t
+{
+	None,
+	StructuralRebuild,
+	MaterialRefresh,
+	ResidentApply,
+	ResidentNoopSkip,
+	ResidentFallback,
+	Held,
+	SyncSkip,
+	DeferredMaterialRefresh,
+	DeferredStructuralRebuild,
+	Failed
+};
+
+struct RuntimeMutationTopTraceEntry
+{
+	bool valid = false;
+	uint32_t score = 0;
+	uint32_t chunkIndex = UINT32_MAX;
+	int32_t sectorIndex = -1;
+	uint32_t reasonMask = 0;
+	uint32_t sectionDirtyCount = 0;
+	uint32_t surfaceCount = 0;
+	uint32_t triangleCount = 0;
+	uint32_t materialCount = 0;
+	RuntimeMutationTraceAction action = RuntimeMutationTraceAction::None;
+	bool forceTopology = false;
+	bool residentMaterialDirty = false;
+	bool residentGeometryDirty = false;
+	bool recoveredEmpty = false;
+};
+
+enum RuntimeMutationWorklistCandidateSourceBits : uint32_t
+{
+	RuntimeMutationWorklistCandidateSource_ActiveReplacement = 1 << 0,
+	RuntimeMutationWorklistCandidateSource_VisibleResidentValidation = 1 << 1,
+	RuntimeMutationWorklistCandidateSource_StartupVisibleValidation = 1 << 2,
+	RuntimeMutationWorklistCandidateSource_UnresolvedAuthoredTextures = 1 << 3,
+	RuntimeMutationWorklistCandidateSource_StaticAnimatedSuppressed = 1 << 4,
+	RuntimeMutationWorklistCandidateSource_SectorDirty = 1 << 5,
+	RuntimeMutationWorklistCandidateSource_SectionDirty = 1 << 6,
+	RuntimeMutationWorklistCandidateSource_Dragged = 1 << 7,
+	RuntimeMutationWorklistCandidateSource_SignatureWatchlist = 1 << 8,
+	RuntimeMutationWorklistCandidateSource_BackgroundSweep = 1 << 9,
+	RuntimeMutationWorklistCandidateSource_DeferredMaterialRefresh = 1 << 10,
+	RuntimeMutationWorklistCandidateSource_DeferredStructuralRebuild = 1 << 11,
+};
+
+const char* GetRuntimeMutationTraceActionName(RuntimeMutationTraceAction action);
+uint32_t ScoreRuntimeMutationTopTraceEntry(const RuntimeMutationTopTraceEntry& entry);
+std::string GetRuntimeMapMutationReasonSummary(uint32_t reasonMask);
+std::string GetRuntimeMutationWorklistCandidateSourceSummary(uint32_t sourceMask);
 
 struct RuntimeMutationCacheStats
 {
@@ -118,6 +175,16 @@ struct RuntimeMapMutationFrameState
 class NRIRuntimeMutationSystem
 {
 public:
+	RuntimeMutationCacheStats GatherCacheStats() const;
+	void PrintStatus() const;
+	void ClearReplacementPayload(RuntimeMapMutationCache::ChunkReplacement& replacement, bool clearMaterialStateCache);
+	void TraceChunk(
+		const nri_scene::PTMapChunk& mapChunk,
+		RuntimeMapMutationCache::ChunkReplacement& replacement,
+		bool traceEnabled,
+		int traceChunkIndex,
+		int traceSectorIndex);
+
 	RuntimeMapMutationCache cache;
 	RuntimeMapMutationFrameState lastFrame = {};
 	RuntimeMutationCacheStats cacheHighWaterStats = {};
