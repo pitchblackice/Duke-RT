@@ -940,6 +940,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_runtime_mutation_resident_static.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_services.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_shared.cpp
+	common/rendering/nri/renderer/nri_runtime_mutation_trace.cpp
 	common/rendering/nri/renderer/nri_runtime_space_link.cpp
 	common/rendering/nri/renderer/nri_scene_lights.cpp
 	common/rendering/nri/renderer/nri_scene_upload.cpp
