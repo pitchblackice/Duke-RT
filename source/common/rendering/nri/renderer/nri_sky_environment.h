@@ -3,6 +3,7 @@
 #include "../scene/nri_scene_bridge.h"
 #include "../system/nri_local.h"
 
+#include <chrono>
 #include <cstdint>
 #include <vector>
 
@@ -31,6 +32,61 @@ struct NRIPreservedStaticMapSkyState
 	bool valid = false;
 	uint64_t buildSerial = 0;
 	nri_scene::SceneView sceneView;
+};
+
+struct RendererSkyPerfTraceStats
+{
+	uint32_t ensureSceneTexturesCalls = 0;
+	uint32_t ensureSceneTexturesPreserveTrueCalls = 0;
+	uint32_t ensureSceneTexturesPreserveFalseCalls = 0;
+	uint32_t ensureSkyCalls = 0;
+	uint32_t preserveExistingHits = 0;
+	uint32_t reuseActiveCubemapHits = 0;
+	uint32_t probeAttempts = 0;
+	uint32_t probeSuccesses = 0;
+	uint32_t reuseActiveProbeHits = 0;
+	uint32_t activateCachedCubemapHits = 0;
+	uint32_t createCachedCubemapHits = 0;
+	uint32_t keepLastCubemapHits = 0;
+	uint32_t holdLevelCubemapHits = 0;
+	uint32_t solidReuseHits = 0;
+	uint32_t solidActivateHits = 0;
+	uint32_t solidCreateHits = 0;
+	uint32_t probeFaceCalls = 0;
+	uint32_t buildCubemapUploadCalls = 0;
+	uint32_t residentStaticSceneTextureBuilds = 0;
+	uint32_t combinedOverlayTextureBuilds = 0;
+	uint32_t lightingInvalidationRequests = 0;
+	uint32_t lightingInvalidationsApplied = 0;
+	uint32_t emissiveMaterialDirtyEvents = 0;
+	uint64_t ensureSkyTimeUs = 0;
+	uint64_t probeCubemapTimeUs = 0;
+	uint64_t probeFaceTimeUs = 0;
+	uint64_t buildCubemapUploadTimeUs = 0;
+};
+
+extern RendererSkyPerfTraceStats gRendererSkyPerfTraceStats;
+
+bool ShouldTraceSkyPerf();
+bool ShouldEmitRendererTemporalTraceLogs();
+void ResetRendererSkyPerfTraceStats();
+const char* GetSkyModeName(nri_scene::PTSkyMode mode);
+const char* GetSkySourceTypeName(nri_scene::PTSkySourceType sourceType);
+float GetSkyBrightnessMultiplier();
+bool SkyBrightnessMatches(float a, float b);
+
+class ScopedSkyPerfTimer
+{
+public:
+	explicit ScopedSkyPerfTimer(uint64_t& targetUs);
+	~ScopedSkyPerfTimer();
+
+	ScopedSkyPerfTimer(const ScopedSkyPerfTimer&) = delete;
+	ScopedSkyPerfTimer& operator=(const ScopedSkyPerfTimer&) = delete;
+
+private:
+	uint64_t* mTarget = nullptr;
+	std::chrono::steady_clock::time_point mStart = {};
 };
 
 class NRISkyEnvironment
