@@ -20096,8 +20096,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 	if (!BuildStaticMapSceneCache(
 		mMapWorld,
 		(mPreservedStaticMapSky.valid && mPreservedStaticMapSky.buildSerial == mMapWorld.buildSerial) ? &mPreservedStaticMapSky : nullptr,
-		mStaticMapScene,
-		mRuntimeMutation.cache))
+		mStaticMapScene))
 	{
 		return false;
 	}
@@ -20164,8 +20163,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 void NRIRenderer::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
 	const PreservedStaticMapSkyState* preservedSkyState,
-	StaticMapSceneCache& outStaticScene,
-	RuntimeMapMutationCache& outRuntimeMutations)
+	StaticMapSceneCache& outStaticScene)
 {
 	outStaticScene.valid = false;
 	outStaticScene.texturesResident = false;
@@ -20191,8 +20189,7 @@ void NRIRenderer::InitializeStaticMapSceneCacheBuild(
 	outStaticScene.lightChunkViews.reserve(mapWorld.chunks.size());
 	outStaticScene.chunks.reserve(mapWorld.chunks.size());
 
-	outRuntimeMutations.chunks.clear();
-	outRuntimeMutations.chunks.resize(mapWorld.chunks.size());
+	mRuntimeMutation.ResetCacheForStaticSceneBuild((uint32_t)mapWorld.chunks.size());
 
 	const nri_scene::SceneView* preservedSkyView = preservedSkyState != nullptr ? &preservedSkyState->sceneView : nullptr;
 	nri_scene::BuildMapSceneView(mapWorld, outStaticScene.sceneView, preservedSkyView);
@@ -20202,39 +20199,9 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 	const nri_scene::PTMapWorld& mapWorld,
 	const nri_scene::PTMapChunk& chunk,
 	const nri_scene::SceneView* preservedSkyView,
-	StaticMapSceneCache& outStaticScene,
-	RuntimeMapMutationCache& outRuntimeMutations)
+	StaticMapSceneCache& outStaticScene)
 {
-	if (chunk.chunkIndex < outRuntimeMutations.chunks.size())
-	{
-		auto& replacement = outRuntimeMutations.chunks[chunk.chunkIndex];
-		nri_scene::CaptureMapChunkMutationBaseline(chunk, replacement.baseline);
-		replacement.replacementBaseline = replacement.baseline;
-		replacement.baselineSignature = replacement.baseline.signature;
-		replacement.liveSignature = replacement.baselineSignature;
-		replacement.animatedMaterialSignature = 0;
-		replacement.reasonMask = 0;
-		replacement.sectionDirtyCount = 0;
-		replacement.stableMutationFrameCount = 0;
-		replacement.sectorDirty = false;
-		replacement.dragged = false;
-		replacement.blindSpot = false;
-		replacement.excludeStaticChunk = false;
-		replacement.staticAnimatedReplacement = false;
-		replacement.lastTraceSignature = UINT64_MAX;
-		replacement.lastTraceAnimatedMaterialSignature = UINT64_MAX;
-		replacement.lastTraceReasonMask = UINT32_MAX;
-		replacement.lastTraceActive = false;
-		replacement.lastTraceBlindSpot = false;
-		replacement.animationOnlyRefreshed = false;
-		replacement.lastTraceAnimationOnlyRefreshed = false;
-		replacement.lastTraceStaticAnimatedReplacement = false;
-		replacement.traceCount = 0;
-		replacement.surfaceCount = 0;
-		replacement.triangleCount = 0;
-		replacement.residentAuthoritative = true;
-		mRuntimeMutation.ClearReplacementPayload(replacement, true);
-	}
+	mRuntimeMutation.InitializeStaticChunkReplacement(chunk);
 
 	nri_scene::SceneView chunkSceneView;
 	nri_scene::GeometryData chunkGeometry;
@@ -20304,19 +20271,18 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 bool NRIRenderer::BuildStaticMapSceneCache(
 	const nri_scene::PTMapWorld& mapWorld,
 	const PreservedStaticMapSkyState* preservedSkyState,
-	StaticMapSceneCache& outStaticScene,
-	RuntimeMapMutationCache& outRuntimeMutations)
+	StaticMapSceneCache& outStaticScene)
 {
 	if (!mapWorld.valid)
 	{
 		return false;
 	}
 
-	InitializeStaticMapSceneCacheBuild(mapWorld, preservedSkyState, outStaticScene, outRuntimeMutations);
+	InitializeStaticMapSceneCacheBuild(mapWorld, preservedSkyState, outStaticScene);
 	const nri_scene::SceneView* preservedSkyView = preservedSkyState != nullptr ? &preservedSkyState->sceneView : nullptr;
 	for (const nri_scene::PTMapChunk& chunk : mapWorld.chunks)
 	{
-		AppendStaticMapSceneCacheChunk(mapWorld, chunk, preservedSkyView, outStaticScene, outRuntimeMutations);
+		AppendStaticMapSceneCacheChunk(mapWorld, chunk, preservedSkyView, outStaticScene);
 	}
 
 	return !outStaticScene.geometry.primitives.empty();

@@ -486,3 +486,45 @@ void NRIRuntimeMutationSystem::ResetCacheAndFrame()
 	cache.chunks.clear();
 	lastFrame = {};
 }
+
+void NRIRuntimeMutationSystem::ResetCacheForStaticSceneBuild(uint32_t chunkCount)
+{
+	cache.chunks.clear();
+	cache.chunks.resize(chunkCount);
+}
+
+void NRIRuntimeMutationSystem::InitializeStaticChunkReplacement(const nri_scene::PTMapChunk& chunk)
+{
+	if (chunk.chunkIndex >= cache.chunks.size())
+	{
+		return;
+	}
+
+	auto& replacement = cache.chunks[chunk.chunkIndex];
+	nri_scene::CaptureMapChunkMutationBaseline(chunk, replacement.baseline);
+	replacement.replacementBaseline = replacement.baseline;
+	replacement.baselineSignature = replacement.baseline.signature;
+	replacement.liveSignature = replacement.baselineSignature;
+	replacement.animatedMaterialSignature = 0;
+	replacement.reasonMask = 0;
+	replacement.sectionDirtyCount = 0;
+	replacement.stableMutationFrameCount = 0;
+	replacement.sectorDirty = false;
+	replacement.dragged = false;
+	replacement.blindSpot = false;
+	replacement.excludeStaticChunk = false;
+	replacement.staticAnimatedReplacement = false;
+	replacement.lastTraceSignature = UINT64_MAX;
+	replacement.lastTraceAnimatedMaterialSignature = UINT64_MAX;
+	replacement.lastTraceReasonMask = UINT32_MAX;
+	replacement.lastTraceActive = false;
+	replacement.lastTraceBlindSpot = false;
+	replacement.animationOnlyRefreshed = false;
+	replacement.lastTraceAnimationOnlyRefreshed = false;
+	replacement.lastTraceStaticAnimatedReplacement = false;
+	replacement.traceCount = 0;
+	replacement.surfaceCount = 0;
+	replacement.triangleCount = 0;
+	replacement.residentAuthoritative = true;
+	ClearReplacementPayload(replacement, true);
+}

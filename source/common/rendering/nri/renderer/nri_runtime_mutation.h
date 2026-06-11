@@ -212,6 +212,8 @@ public:
 	bool FlushResidentGeometryUploadRanges(const NRIRuntimeMutationResidentUploadServices& services);
 	void NoteResidentAtlasGrow();
 	void ResetCacheAndFrame();
+	void ResetCacheForStaticSceneBuild(uint32_t chunkCount);
+	void InitializeStaticChunkReplacement(const nri_scene::PTMapChunk& chunk);
 
 	RuntimeMapMutationCache cache;
 	RuntimeMapMutationFrameState lastFrame = {};

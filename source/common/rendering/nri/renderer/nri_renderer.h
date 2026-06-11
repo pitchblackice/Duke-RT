@@ -2143,19 +2143,16 @@ private:
 	bool BuildStaticMapSceneCache(
 		const nri_scene::PTMapWorld& mapWorld,
 		const PreservedStaticMapSkyState* preservedSkyState,
-		StaticMapSceneCache& outStaticScene,
-		RuntimeMapMutationCache& outRuntimeMutations);
+		StaticMapSceneCache& outStaticScene);
 	void InitializeStaticMapSceneCacheBuild(
 		const nri_scene::PTMapWorld& mapWorld,
 		const PreservedStaticMapSkyState* preservedSkyState,
-		StaticMapSceneCache& outStaticScene,
-		RuntimeMapMutationCache& outRuntimeMutations);
+		StaticMapSceneCache& outStaticScene);
 	void AppendStaticMapSceneCacheChunk(
 		const nri_scene::PTMapWorld& mapWorld,
 		const nri_scene::PTMapChunk& chunk,
 		const nri_scene::SceneView* preservedSkyView,
-		StaticMapSceneCache& outStaticScene,
-		RuntimeMapMutationCache& outRuntimeMutations);
+		StaticMapSceneCache& outStaticScene);
 	void ResetResidentMapChunkRegistry();
 	void SyncResidentMapChunkRegistryFromStaticScene();
 	uint32_t GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex) const;
