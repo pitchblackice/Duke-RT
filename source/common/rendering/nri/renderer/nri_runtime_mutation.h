@@ -314,6 +314,13 @@ public:
 	uint32_t GetDirtyChunkCount() const;
 	uint32_t GetStartupMaterialOnlyDirtyChunkCount() const;
 	void MarkFrameInactive();
+	void NoteMutationReasonMask(uint32_t reasonMask);
+	void NoteDirtyChunk(bool blindSpot);
+	void NoteRebuiltChunk();
+	void NoteHeldChunk();
+	void NoteAnimatedRefreshChunk();
+	void NoteResidentApply(bool materialDirty, bool geometryDirty);
+	void NoteResidentFallback();
 	void UpdateHighWaterStats(const RuntimeMutationCacheStats& cacheStats);
 	RuntimeMutationResidentApplyMode ClassifyResidentApplyMode(
 		const RuntimeMapMutationCache::ChunkReplacement& replacement,

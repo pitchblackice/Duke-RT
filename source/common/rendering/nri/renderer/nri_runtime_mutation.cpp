@@ -971,6 +971,80 @@ void NRIRuntimeMutationSystem::MarkFrameInactive()
 	lastFrame.active = false;
 }
 
+void NRIRuntimeMutationSystem::NoteMutationReasonMask(uint32_t reasonMask)
+{
+	if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectorGeometry) != 0)
+	{
+		lastFrame.sectorGeometryChunkCount++;
+	}
+	if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectorMaterial) != 0)
+	{
+		lastFrame.sectorMaterialChunkCount++;
+	}
+	if ((reasonMask & nri_scene::PTMapChunkMutationReason_WallGeometry) != 0)
+	{
+		lastFrame.wallGeometryChunkCount++;
+	}
+	if ((reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0)
+	{
+		lastFrame.wallMaterialChunkCount++;
+	}
+	if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectorDirty) != 0)
+	{
+		lastFrame.sectorDirtyChunkCount++;
+	}
+	if ((reasonMask & nri_scene::PTMapChunkMutationReason_SectionDirty) != 0)
+	{
+		lastFrame.sectionDirtyChunkCount++;
+	}
+	if ((reasonMask & nri_scene::PTMapChunkMutationReason_Dragged) != 0)
+	{
+		lastFrame.draggedChunkCount++;
+	}
+}
+
+void NRIRuntimeMutationSystem::NoteDirtyChunk(bool blindSpot)
+{
+	lastFrame.dirtyChunkCount++;
+	if (blindSpot)
+	{
+		lastFrame.blindSpotChunkCount++;
+	}
+}
+
+void NRIRuntimeMutationSystem::NoteRebuiltChunk()
+{
+	lastFrame.rebuiltChunkCount++;
+}
+
+void NRIRuntimeMutationSystem::NoteHeldChunk()
+{
+	lastFrame.heldChunkCount++;
+}
+
+void NRIRuntimeMutationSystem::NoteAnimatedRefreshChunk()
+{
+	lastFrame.animatedRefreshChunkCount++;
+}
+
+void NRIRuntimeMutationSystem::NoteResidentApply(bool materialDirty, bool geometryDirty)
+{
+	lastFrame.residentAppliedChunkCount++;
+	if (materialDirty)
+	{
+		lastFrame.residentMaterialChunkCount++;
+	}
+	if (geometryDirty)
+	{
+		lastFrame.residentGeometryChunkCount++;
+	}
+}
+
+void NRIRuntimeMutationSystem::NoteResidentFallback()
+{
+	lastFrame.residentFallbackChunkCount++;
+}
+
 void NRIRuntimeMutationSystem::UpdateHighWaterStats(const RuntimeMutationCacheStats& cacheStats)
 {
 	cacheHighWaterStats.activeChunkCount = std::max(cacheHighWaterStats.activeChunkCount, cacheStats.activeChunkCount);
