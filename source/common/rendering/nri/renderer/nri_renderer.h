@@ -9,6 +9,7 @@
 #include "nri_renderer_context.h"
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
+#include "nri_scene_textures.h"
 #include "nri_scene_lights.h"
 #include "nri_static_scene.h"
 #include "nri_upscaler.h"
@@ -1480,12 +1481,6 @@ private:
 		Count
 	};
 
-	struct CachedTexture
-	{
-		uint64_t key = 0;
-		NRITextureResource resource;
-	};
-
 	struct CachedSkyTexture
 	{
 		uint64_t key = 0;
@@ -1982,32 +1977,6 @@ private:
 		uint32_t resolvedGeneration = 0;
 		bool hasFullbrightOverrides = false;
 		std::unordered_map<int32_t, uint32_t> overrides;
-	};
-
-	struct SceneTextureOverflowDebugStats
-	{
-		uint32_t textureCountLastBuild = 0;
-		uint32_t truncatedTextureCountLastBuild = 0;
-		uint32_t baseTextureClampCountLastBuild = 0;
-		uint32_t normalTextureClampCountLastBuild = 0;
-		uint32_t metallicTextureClampCountLastBuild = 0;
-		uint32_t roughnessTextureClampCountLastBuild = 0;
-		uint32_t emissiveTextureClampCountLastBuild = 0;
-		uint64_t totalOverflowBuilds = 0;
-		bool warningLogged = false;
-	};
-
-	struct SceneTextureCacheDebugStats
-	{
-		uint32_t cacheEntriesLastBuild = 0;
-		uint32_t cacheEntriesHighWater = 0;
-		uint32_t lookupMissesLastBuild = 0;
-		uint32_t insertCountLastBuild = 0;
-		uint32_t transitionCountLastFrame = 0;
-		double lookupMsLastBuild = 0.0;
-		double realizeMsLastBuild = 0.0;
-		double descriptorMsLastBuild = 0.0;
-		double transitionMsLastFrame = 0.0;
 	};
 
 	struct DescriptorCoherencyDebugStats
@@ -2536,7 +2505,7 @@ private:
 	NRITextureResource* GetActiveSkyTexture() { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
 	const NRITextureResource* GetActiveSkyTexture() const { return mActiveSkyTextureIndex < mSkyTextureCache.size() ? &mSkyTextureCache[mActiveSkyTextureIndex].resource : nullptr; }
 
-	NRITextureResource mPaletteTexture;
+	NRISceneTextureResidency mSceneTextures;
 	std::array<NRITextureResource, (size_t)FrameTextureSlot::Count> mFrameTextures = {};
 	NRIExposureController mExposure;
 
@@ -2620,9 +2589,6 @@ private:
 	NRIAccelerationStructureResource mTopLevelAS;
 	NRIAccelerationStructureResource mEmissiveTopLevelAS;
 
-	std::vector<CachedTexture> mTextureCache;
-	std::unordered_map<uint64_t, uint32_t> mTextureCacheKeyIndex;
-	std::vector<NRITextureResource*> mLiveSceneTextureResources;
 	std::vector<CachedSkyTexture> mSkyTextureCache;
 	NRINrdContext mNrd;
 	NRIUpscalerContext mUpscaler;
@@ -2638,8 +2604,6 @@ private:
 	bool mHasLastStateCommitDomainGenerations = false;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
-	SceneTextureOverflowDebugStats mSceneTextureOverflowStats = {};
-	SceneTextureCacheDebugStats mSceneTextureCacheDebugStats = {};
 	DescriptorCoherencyDebugStats mDescriptorCoherencyDebugStats = {};
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
@@ -2729,7 +2693,6 @@ private:
 	bool mHasPendingFrameGenerationRealFrameTime = false;
 	bool mHasFrameGenerationTimestamp = false;
 	bool mHasFrameGenerationConfigState = false;
-	bool mSceneTextureLimitLogPrinted = false;
 	bool mHasDirectionalLightState = false;
 	bool mPathTracingSupported = true;
 	bool mGuiCaptureActive = false;
