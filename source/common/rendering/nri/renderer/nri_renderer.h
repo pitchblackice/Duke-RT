@@ -2433,7 +2433,6 @@ private:
 	void ReadbackAutoExposureStats();
 	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
-	void TrackLiveSceneTextureResource(NRITextureResource& resource);
 	nri::Format ResolveFinalSceneFormat() const;
 	void ResetPerfTraceStats();
 	void WaitForCommandsTracked(const char* reason = nullptr);

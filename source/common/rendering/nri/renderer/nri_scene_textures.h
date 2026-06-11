@@ -6,6 +6,14 @@
 #include <unordered_map>
 #include <vector>
 
+class NRIRenderDevice;
+
+namespace nri_scene
+{
+	struct MaterialBridgeData;
+	struct TextureUpload;
+}
+
 struct NRISceneCachedTexture
 {
 	uint64_t key = 0;
@@ -38,6 +46,16 @@ struct SceneTextureCacheDebugStats
 	double transitionMsLastFrame = 0.0;
 };
 
+struct SceneTextureResolveResult
+{
+	nri::Descriptor* descriptor = nullptr;
+	bool cacheMiss = false;
+	bool inserted = false;
+	bool activeCanvasSelfReference = false;
+	double lookupMs = 0.0;
+	double realizeMs = 0.0;
+};
+
 class NRISceneTextureResidency
 {
 public:
@@ -59,6 +77,11 @@ public:
 	uint32_t CacheCount() const { return (uint32_t)mTextureCache.size(); }
 	uint32_t FindCacheIndex(uint64_t key) const;
 	uint32_t AddCachedTexture(NRISceneCachedTexture&& texture);
+
+	bool EnsurePaletteTexture(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials);
+	bool EnsureCacheEntry(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
+	bool ResolveTextureDescriptor(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, bool tracePerf, SceneTextureResolveResult& outResult);
+	uint32_t TransitionInputsForCompute(NRIRenderDevice& device);
 
 	void ClearLiveResources();
 	void TrackLiveResource(NRITextureResource& resource);
