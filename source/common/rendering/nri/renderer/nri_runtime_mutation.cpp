@@ -161,6 +161,54 @@ bool NRIRuntimeMutationOverlayServices::BuildOverlay(
 	return buildOverlay != nullptr && buildOverlay(user, outGeometry, outMaterials, outResidentStaticSceneChanged);
 }
 
+bool NRIRuntimeMutationResidentSceneRefreshServices::RefreshMaterialSlices(
+	const std::vector<uint32_t>& chunkListIndices,
+	const std::vector<uint32_t>& animatedChunkListIndices) const
+{
+	return refreshMaterialSlices != nullptr && refreshMaterialSlices(user, chunkListIndices, animatedChunkListIndices);
+}
+
+void NRIRuntimeMutationResidentSceneRefreshServices::NoteMaterialFallback(uint32_t chunkCount) const
+{
+	if (noteMaterialFallback != nullptr)
+	{
+		noteMaterialFallback(user, chunkCount);
+	}
+}
+
+bool NRIRuntimeMutationResidentSceneRefreshServices::RebuildMaterialState(const char* reason) const
+{
+	return rebuildMaterialState != nullptr && rebuildMaterialState(user, reason);
+}
+
+bool NRIRuntimeMutationResidentSceneRefreshServices::RebuildChunkBlases(const std::vector<uint32_t>& chunkListIndices) const
+{
+	return rebuildChunkBlases != nullptr && rebuildChunkBlases(user, chunkListIndices);
+}
+
+void NRIRuntimeMutationResidentSceneRefreshServices::NoteBlasRebuild(uint32_t chunkCount) const
+{
+	if (noteBlasRebuild != nullptr)
+	{
+		noteBlasRebuild(user, chunkCount);
+	}
+}
+
+void NRIRuntimeMutationResidentSceneRefreshServices::CommitSuccess(
+	const std::vector<uint32_t>& geometryChunkListIndices,
+	bool materialDirty) const
+{
+	if (commitSuccess != nullptr)
+	{
+		commitSuccess(user, geometryChunkListIndices, materialDirty);
+	}
+}
+
+bool NRIRuntimeMutationResidentSceneRefreshServices::RecoverFailure(const char* reason) const
+{
+	return recoverFailure != nullptr && recoverFailure(user, reason);
+}
+
 const char* GetRuntimeMutationTraceActionName(RuntimeMutationTraceAction action)
 {
 	switch (action)
@@ -808,6 +856,98 @@ bool NRIRuntimeMutationSystem::BuildOverlay(
 	bool* outResidentStaticSceneChanged)
 {
 	return services.BuildOverlay(outGeometry, outMaterials, outResidentStaticSceneChanged);
+}
+
+bool NRIRuntimeMutationSystem::CommitResidentSceneRefresh(
+	const NRIRuntimeMutationResidentUploadServices& uploadServices,
+	const NRIRuntimeMutationResidentSceneRefreshServices& refreshServices,
+	const RuntimeMutationResidentSceneRefreshRequest& request,
+	RuntimeMutationResidentSceneRefreshResult& outResult)
+{
+	outResult = {};
+	if (!request.sceneChanged)
+	{
+		return true;
+	}
+
+	bool residentRefreshOkay = true;
+	const char* residentRefreshFailureReason = nullptr;
+	if (!FlushResidentGeometryUploadRanges(uploadServices))
+	{
+		residentRefreshOkay = false;
+		residentRefreshFailureReason = "runtime-mutation-resident-geometry-upload-failed";
+	}
+	if (residentRefreshOkay && request.materialDirty)
+	{
+		if (request.materialChunkListIndices == nullptr || request.animatedMaterialChunkListIndices == nullptr)
+		{
+			residentRefreshOkay = false;
+			residentRefreshFailureReason = "runtime-mutation-resident-material-refresh-failed";
+		}
+		else
+		{
+			auto& materialChunkListIndices = *request.materialChunkListIndices;
+			auto& animatedMaterialChunkListIndices = *request.animatedMaterialChunkListIndices;
+			std::sort(materialChunkListIndices.begin(), materialChunkListIndices.end());
+			materialChunkListIndices.erase(
+				std::unique(materialChunkListIndices.begin(), materialChunkListIndices.end()),
+				materialChunkListIndices.end());
+			std::sort(animatedMaterialChunkListIndices.begin(), animatedMaterialChunkListIndices.end());
+			animatedMaterialChunkListIndices.erase(
+				std::unique(animatedMaterialChunkListIndices.begin(), animatedMaterialChunkListIndices.end()),
+				animatedMaterialChunkListIndices.end());
+			residentRefreshOkay = refreshServices.RefreshMaterialSlices(materialChunkListIndices, animatedMaterialChunkListIndices);
+			if (!residentRefreshOkay)
+			{
+				refreshServices.NoteMaterialFallback((uint32_t)materialChunkListIndices.size());
+				residentRefreshOkay = refreshServices.RebuildMaterialState("resident_runtime_mutation_static_recover");
+				if (!residentRefreshOkay)
+				{
+					residentRefreshFailureReason = "runtime-mutation-resident-material-refresh-failed";
+				}
+			}
+		}
+	}
+	if (residentRefreshOkay && request.geometryDirty)
+	{
+		if (request.geometryChunkListIndices == nullptr)
+		{
+			residentRefreshOkay = false;
+			residentRefreshFailureReason = "runtime-mutation-resident-blas-refresh-failed";
+		}
+		else
+		{
+			auto& geometryChunkListIndices = *request.geometryChunkListIndices;
+			std::sort(geometryChunkListIndices.begin(), geometryChunkListIndices.end());
+			geometryChunkListIndices.erase(
+				std::unique(geometryChunkListIndices.begin(), geometryChunkListIndices.end()),
+				geometryChunkListIndices.end());
+			residentRefreshOkay = refreshServices.RebuildChunkBlases(geometryChunkListIndices);
+			refreshServices.NoteBlasRebuild((uint32_t)geometryChunkListIndices.size());
+			if (!residentRefreshOkay)
+			{
+				residentRefreshFailureReason = "runtime-mutation-resident-blas-refresh-failed";
+			}
+		}
+	}
+
+	if (residentRefreshOkay)
+	{
+		const std::vector<uint32_t> emptyGeometryList;
+		const std::vector<uint32_t>& geometryChunkListIndices =
+			request.geometryChunkListIndices != nullptr ? *request.geometryChunkListIndices : emptyGeometryList;
+		refreshServices.CommitSuccess(geometryChunkListIndices, request.materialDirty);
+		outResult.residentStaticSceneGeometryChanged = request.geometryDirty;
+		return true;
+	}
+
+	outResult.failureReason =
+		residentRefreshFailureReason != nullptr ?
+			residentRefreshFailureReason :
+			"runtime-mutation-resident-refresh-failed";
+	MarkFrameInactive();
+	(void)refreshServices.RecoverFailure(outResult.failureReason);
+	return false;
 }
 
 void NRIRuntimeMutationSystem::NoteResidentAtlasGrow()

@@ -226,6 +226,50 @@ struct NRIRuntimeMutationOverlayServices
 		bool* outResidentStaticSceneChanged) const;
 };
 
+struct RuntimeMutationResidentSceneRefreshRequest
+{
+	bool sceneChanged = false;
+	bool materialDirty = false;
+	bool geometryDirty = false;
+	std::vector<uint32_t>* materialChunkListIndices = nullptr;
+	std::vector<uint32_t>* animatedMaterialChunkListIndices = nullptr;
+	std::vector<uint32_t>* geometryChunkListIndices = nullptr;
+};
+
+struct RuntimeMutationResidentSceneRefreshResult
+{
+	bool residentStaticSceneGeometryChanged = false;
+	const char* failureReason = nullptr;
+};
+
+struct NRIRuntimeMutationResidentSceneRefreshServices
+{
+	using RefreshMaterialSlicesFn = bool (*)(void* user, const std::vector<uint32_t>& chunkListIndices, const std::vector<uint32_t>& animatedChunkListIndices);
+	using NoteMaterialFallbackFn = void (*)(void* user, uint32_t chunkCount);
+	using RebuildMaterialStateFn = bool (*)(void* user, const char* reason);
+	using RebuildChunkBlasesFn = bool (*)(void* user, const std::vector<uint32_t>& chunkListIndices);
+	using NoteBlasRebuildFn = void (*)(void* user, uint32_t chunkCount);
+	using CommitSuccessFn = void (*)(void* user, const std::vector<uint32_t>& geometryChunkListIndices, bool materialDirty);
+	using RecoverFailureFn = bool (*)(void* user, const char* reason);
+
+	void* user = nullptr;
+	RefreshMaterialSlicesFn refreshMaterialSlices = nullptr;
+	NoteMaterialFallbackFn noteMaterialFallback = nullptr;
+	RebuildMaterialStateFn rebuildMaterialState = nullptr;
+	RebuildChunkBlasesFn rebuildChunkBlases = nullptr;
+	NoteBlasRebuildFn noteBlasRebuild = nullptr;
+	CommitSuccessFn commitSuccess = nullptr;
+	RecoverFailureFn recoverFailure = nullptr;
+
+	bool RefreshMaterialSlices(const std::vector<uint32_t>& chunkListIndices, const std::vector<uint32_t>& animatedChunkListIndices) const;
+	void NoteMaterialFallback(uint32_t chunkCount) const;
+	bool RebuildMaterialState(const char* reason) const;
+	bool RebuildChunkBlases(const std::vector<uint32_t>& chunkListIndices) const;
+	void NoteBlasRebuild(uint32_t chunkCount) const;
+	void CommitSuccess(const std::vector<uint32_t>& geometryChunkListIndices, bool materialDirty) const;
+	bool RecoverFailure(const char* reason) const;
+};
+
 struct RuntimeMapMutationFrameState
 {
 	bool active = false;
@@ -294,6 +338,11 @@ public:
 		nri_scene::GeometryData& outGeometry,
 		nri_scene::MaterialBridgeData& outMaterials,
 		bool* outResidentStaticSceneChanged = nullptr);
+	bool CommitResidentSceneRefresh(
+		const NRIRuntimeMutationResidentUploadServices& uploadServices,
+		const NRIRuntimeMutationResidentSceneRefreshServices& refreshServices,
+		const RuntimeMutationResidentSceneRefreshRequest& request,
+		RuntimeMutationResidentSceneRefreshResult& outResult);
 	void NoteResidentAtlasGrow();
 	void ResetCacheAndFrame();
 	void ResetCacheForStaticSceneBuild(uint32_t chunkCount);

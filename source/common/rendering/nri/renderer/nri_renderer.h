@@ -2448,6 +2448,7 @@ private:
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
 	NRIRuntimeMutationResidentUploadServices BuildRuntimeMutationResidentUploadServices();
 	bool StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges);
+	NRIRuntimeMutationResidentSceneRefreshServices BuildRuntimeMutationResidentSceneRefreshServices();
 	bool StageResidentMaterialUploadRanges(
 		const NRIBufferResource& targetBuffer,
 		const std::vector<RuntimeMutationResidentUploadRange>& ranges,
