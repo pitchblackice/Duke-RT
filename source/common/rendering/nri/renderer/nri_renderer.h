@@ -2459,8 +2459,6 @@ private:
 		uint32_t& barrierCommandCount,
 		uint32_t& copyCommandCount);
 	void RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices);
-	void NoteRuntimeMutationResidentAtlasGrow();
-	void ResetRuntimeMutationCacheAndFrame();
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);

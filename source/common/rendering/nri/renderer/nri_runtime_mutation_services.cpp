@@ -454,14 +454,4 @@ NRIRuntimeMutationResidentSceneRefreshServices NRIRenderer::BuildRuntimeMutation
 	return services;
 }
 
-void NRIRenderer::NoteRuntimeMutationResidentAtlasGrow()
-{
-	mRuntimeMutation.NoteResidentAtlasGrow();
-}
-
-void NRIRenderer::ResetRuntimeMutationCacheAndFrame()
-{
-	mRuntimeMutation.ResetCacheAndFrame();
-}
-
 

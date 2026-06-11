@@ -422,7 +422,7 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		mStaticMaterialBuffer.stride != 0 ?
 		(uint32_t)(mStaticMaterialBuffer.size / mStaticMaterialBuffer.stride) :
 		atlas.materialCapacity;
-	NoteRuntimeMutationResidentAtlasGrow();
+	mRuntimeMutation.NoteResidentAtlasGrow();
 
 	return RefreshResidentStaticSceneDataSet();
 }
@@ -650,7 +650,7 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 	mBoundPortalCount = 0;
 	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	mStateCommitCombinedGeometryCache = {};
-	ResetRuntimeMutationCacheAndFrame();
+	mRuntimeMutation.ResetCacheAndFrame();
 	ResetResidentMapChunkRegistry();
 }
 
