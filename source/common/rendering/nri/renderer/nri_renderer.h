@@ -2280,10 +2280,6 @@ private:
 		uint32_t& outTriangleCount,
 		uint32_t& outMaterialCount,
 		bool& outRecoveredEmpty);
-	RuntimeMutationResidentApplyMode ClassifyRuntimeMutationResidentApplyMode(
-		const RuntimeMapMutationCache::ChunkReplacement& replacement,
-		bool hasResidentChunk,
-		uint32_t resolvedChunkListIndex) const;
 	void RecordRuntimeMutationResidentApplyMode(
 		const RuntimeMutationResidentApplyMode& mode,
 		const RuntimeMapMutationCache::ChunkReplacement& replacement,

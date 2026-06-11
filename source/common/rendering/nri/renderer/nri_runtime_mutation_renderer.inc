@@ -2095,7 +2095,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			}
 		}
 
-		const bool materialOnlyReplacement = IsMaterialOnlyChunkReplacement(normalizedReasonMask);
+		const bool materialOnlyReplacement = IsRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask);
 		nri_scene::PTMapChunkMutationAnalysis replacementDelta = {};
 		const bool haveReplacementBaseline = replacement.valid || replacement.residentAuthoritative;
 		const bool analyzedReplacementDelta =
@@ -2144,7 +2144,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			nri_scene::BuildMapChunkSceneView(liveWorld, liveWorld.chunks[0], liveChunkView);
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
-				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
+				RequiresExclusiveRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask);
 			const bool blindSpotReplacementNudged = replacement.blindSpot && replacement.dragged;
 			if (blindSpotReplacementNudged)
 			{
@@ -2198,7 +2198,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 			[&](const nri_scene::SceneView& preparedLiveChunkView,
 				nri_scene::MaterialBridgeData& inOutPreparedLiveMaterials) -> bool
 		{
-			if (!IsPureSectorMaterialOnlyChunkReplacement(normalizedReasonMask))
+			if (!IsPureSectorRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask))
 			{
 				return false;
 			}
@@ -2237,7 +2237,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 
 			attemptedResidentComparableLiveChunkView = true;
 			haveResidentComparableLiveChunkView = false;
-			if (!IsPureSectorMaterialOnlyChunkReplacement(normalizedReasonMask))
+			if (!IsPureSectorRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask))
 			{
 				return nullptr;
 			}
@@ -2276,7 +2276,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
-				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
+				RequiresExclusiveRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask);
 			if (exclusiveMaterialOnlyReplacement)
 			{
 				return;
@@ -2510,7 +2510,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
-				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
+				RequiresExclusiveRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask);
 			const bool excludeStaticChunk =
 				useStaticAnimatedReplacement ||
 				!materialOnlyReplacement ||
@@ -2592,7 +2592,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		{
 			const bool exclusiveMaterialOnlyReplacement =
 				materialOnlyReplacement &&
-				RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
+				RequiresExclusiveRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask);
 			const bool excludeStaticChunk =
 				useStaticAnimatedReplacement ||
 				!materialOnlyReplacement ||
@@ -2670,7 +2670,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		};
 		const bool exclusiveMaterialOnlyReplacement =
 			materialOnlyReplacement &&
-			RequiresExclusiveMaterialOnlyChunkReplacement(normalizedReasonMask);
+			RequiresExclusiveRuntimeMutationMaterialOnlyReasonMask(normalizedReasonMask);
 		const bool desiredExcludeStaticChunk =
 			useStaticAnimatedReplacement ||
 			!materialOnlyReplacement ||
@@ -4766,27 +4766,6 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 	return true;
 }
 
-NRIRenderer::RuntimeMutationResidentApplyMode NRIRenderer::ClassifyRuntimeMutationResidentApplyMode(
-	const RuntimeMapMutationCache::ChunkReplacement& replacement,
-	bool hasResidentChunk,
-	uint32_t resolvedChunkListIndex) const
-{
-	RuntimeMutationResidentApplyMode mode = {};
-	mode.materialOnlyReplacement = IsMaterialOnlyChunkReplacement(replacement.reasonMask);
-	mode.exclusiveMaterialOnlyReplacement =
-		mode.materialOnlyReplacement &&
-		RequiresExclusiveMaterialOnlyChunkReplacement(replacement.reasonMask);
-	mode.fastResidentMaterialOnlyUpdate =
-		mode.materialOnlyReplacement &&
-		!mode.exclusiveMaterialOnlyReplacement &&
-		hasResidentChunk &&
-		replacement.valid &&
-		resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
-		(uint32_t)replacement.materialBridge.materials.size() ==
-			mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount;
-	return mode;
-}
-
 void NRIRenderer::RecordRuntimeMutationResidentApplyMode(
 	const RuntimeMutationResidentApplyMode& mode,
 	const RuntimeMapMutationCache::ChunkReplacement& replacement,
@@ -4882,8 +4861,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		entry.staticSceneChunkListIndex = resolvedChunkListIndex;
 	}
 
+	const bool hasResolvedAtlasChunk = resolvedChunkListIndex < mStaticMapChunkAtlas.chunks.size();
+	const uint32_t resolvedAtlasMaterialCount =
+		hasResolvedAtlasChunk ? mStaticMapChunkAtlas.chunks[resolvedChunkListIndex].materialCount : 0u;
 	const RuntimeMutationResidentApplyMode applyMode =
-		ClassifyRuntimeMutationResidentApplyMode(replacement, hasResidentChunk, resolvedChunkListIndex);
+		mRuntimeMutation.ClassifyResidentApplyMode(replacement, hasResidentChunk, hasResolvedAtlasChunk, resolvedAtlasMaterialCount);
 	RecordRuntimeMutationResidentApplyMode(applyMode, replacement, hasResidentChunk, resolvedChunkListIndex);
 	const bool materialOnlyReplacement = applyMode.materialOnlyReplacement;
 	const bool exclusiveMaterialOnlyReplacement = applyMode.exclusiveMaterialOnlyReplacement;
@@ -4897,7 +4879,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	if (fastResidentMaterialOnlyUpdate)
 	{
 		const bool mergedSectorMaterialOnlyFastPath =
-			IsPureSectorMaterialOnlyChunkReplacement(replacement.reasonMask) &&
+			IsPureSectorRuntimeMutationMaterialOnlyReasonMask(replacement.reasonMask) &&
 			hasResidentChunk &&
 			resolvedChunkListIndex < mStaticMapScene.lightChunkViews.size() &&
 			TryBuildMergedSectorMaterialOnlySceneView(

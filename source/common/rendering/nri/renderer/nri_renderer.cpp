@@ -650,16 +650,6 @@ namespace
 		}
 	}
 
-	static bool IsMaterialOnlyChunkReplacement(uint32_t reasonMask)
-	{
-		const uint32_t materialOnlyReasonMask =
-			nri_scene::PTMapChunkMutationReason_SectorMaterial |
-			nri_scene::PTMapChunkMutationReason_WallMaterial;
-		return
-			(reasonMask & materialOnlyReasonMask) != 0 &&
-			(reasonMask & ~materialOnlyReasonMask) == 0;
-	}
-
 	static uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView)
 	{
 		return (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
@@ -2255,14 +2245,6 @@ public:
 		}
 	}
 
-	static bool RequiresExclusiveMaterialOnlyChunkReplacement(uint32_t reasonMask)
-	{
-		// Material-only wall mutations leave the stale static wall traceable if
-		// we only overlay the changed wall subset. Replacing the whole rebuilt
-		// live chunk avoids that without dropping unrelated geometry.
-		return (reasonMask & nri_scene::PTMapChunkMutationReason_WallMaterial) != 0;
-	}
-
 	static void FilterMaterialOnlyReplacementSceneView(nri_scene::SceneView& sceneView, uint32_t reasonMask)
 	{
 		static constexpr float kMaterialOnlyReplacementDepthNudge = 0.01f;
@@ -2288,11 +2270,6 @@ public:
 		{
 			NudgeCapturedSurface(surface, kMaterialOnlyReplacementDepthNudge);
 		}
-	}
-
-	static bool IsPureSectorMaterialOnlyChunkReplacement(uint32_t reasonMask)
-	{
-		return reasonMask == nri_scene::PTMapChunkMutationReason_SectorMaterial;
 	}
 
 	static bool SceneViewHasSectorDrivenWallBands(const nri_scene::SceneView& sceneView)

@@ -67,6 +67,9 @@ const char* GetRuntimeMutationTraceActionName(RuntimeMutationTraceAction action)
 uint32_t ScoreRuntimeMutationTopTraceEntry(const RuntimeMutationTopTraceEntry& entry);
 std::string GetRuntimeMapMutationReasonSummary(uint32_t reasonMask);
 std::string GetRuntimeMutationWorklistCandidateSourceSummary(uint32_t sourceMask);
+bool IsRuntimeMutationMaterialOnlyReasonMask(uint32_t reasonMask);
+bool RequiresExclusiveRuntimeMutationMaterialOnlyReasonMask(uint32_t reasonMask);
+bool IsPureSectorRuntimeMutationMaterialOnlyReasonMask(uint32_t reasonMask);
 
 struct RuntimeMutationCacheStats
 {
@@ -245,6 +248,11 @@ public:
 	uint32_t GetStartupMaterialOnlyDirtyChunkCount() const;
 	void MarkFrameInactive();
 	void UpdateHighWaterStats(const RuntimeMutationCacheStats& cacheStats);
+	RuntimeMutationResidentApplyMode ClassifyResidentApplyMode(
+		const RuntimeMapMutationCache::ChunkReplacement& replacement,
+		bool hasResidentChunk,
+		bool hasResolvedAtlasChunk,
+		uint32_t resolvedAtlasMaterialCount) const;
 
 	RuntimeMapMutationCache cache;
 	RuntimeMapMutationFrameState lastFrame = {};
