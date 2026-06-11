@@ -5,6 +5,7 @@
 #include "printf.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <unordered_map>
 
 namespace
@@ -832,4 +833,93 @@ void NRIRuntimeMutationSystem::PrepareSignatureWatchlist(uint64_t buildSerial, u
 bool NRIRuntimeMutationSystem::HasCacheChunkCount(uint32_t chunkCount) const
 {
 	return cache.chunks.size() == chunkCount;
+}
+
+void NRIRuntimeMutationSystem::EnsureSignatureWatchlist(uint64_t buildSerial, uint32_t chunkCount)
+{
+	if (signatureWatchlistBuildSerial == buildSerial && signatureWatchlist.size() == chunkCount)
+	{
+		return;
+	}
+
+	PrepareSignatureWatchlist(buildSerial, chunkCount);
+}
+
+bool NRIRuntimeMutationSystem::SeedSignatureWatchlist(uint32_t chunkIndex)
+{
+	if (chunkIndex >= signatureWatchlist.size() || signatureWatchlist[chunkIndex] != 0u)
+	{
+		return false;
+	}
+
+	signatureWatchlist[chunkIndex] = 1u;
+	return true;
+}
+
+bool NRIRuntimeMutationSystem::IsSignatureWatchlistSeeded(uint32_t chunkIndex) const
+{
+	return chunkIndex < signatureWatchlist.size() && signatureWatchlist[chunkIndex] != 0u;
+}
+
+uint32_t NRIRuntimeMutationSystem::GetSignatureWatchlistSeedCount() const
+{
+	return (uint32_t)std::count(signatureWatchlist.begin(), signatureWatchlist.end(), (uint8_t)1u);
+}
+
+uint32_t NRIRuntimeMutationSystem::GetWorklistSweepChunkIndex(uint32_t sweepOffset, uint32_t chunkCount) const
+{
+	if (chunkCount == 0)
+	{
+		return 0;
+	}
+	return (worklistSweepCursor + sweepOffset) % chunkCount;
+}
+
+void NRIRuntimeMutationSystem::AdvanceWorklistSweepCursor(uint32_t sweepCount, uint32_t chunkCount)
+{
+	if (chunkCount == 0)
+	{
+		worklistSweepCursor = 0;
+		return;
+	}
+	worklistSweepCursor = (worklistSweepCursor + sweepCount) % chunkCount;
+}
+
+void NRIRuntimeMutationSystem::FinalizeFrameActive()
+{
+	lastFrame.active =
+		lastFrame.dirtyChunkCount > 0 ||
+		lastFrame.residentAppliedChunkCount > 0 ||
+		lastFrame.residentFallbackChunkCount > 0;
+}
+
+bool NRIRuntimeMutationSystem::HasStartupMaterialOnlyMutation() const
+{
+	return lastFrame.sectorMaterialChunkCount + lastFrame.wallMaterialChunkCount > 0;
+}
+
+uint32_t NRIRuntimeMutationSystem::GetDirtyChunkCount() const
+{
+	return lastFrame.dirtyChunkCount;
+}
+
+uint32_t NRIRuntimeMutationSystem::GetStartupMaterialOnlyDirtyChunkCount() const
+{
+	return lastFrame.sectorMaterialChunkCount + lastFrame.wallMaterialChunkCount;
+}
+
+void NRIRuntimeMutationSystem::MarkFrameInactive()
+{
+	lastFrame.active = false;
+}
+
+void NRIRuntimeMutationSystem::UpdateHighWaterStats(const RuntimeMutationCacheStats& cacheStats)
+{
+	cacheHighWaterStats.activeChunkCount = std::max(cacheHighWaterStats.activeChunkCount, cacheStats.activeChunkCount);
+	cacheHighWaterStats.validChunkCount = std::max(cacheHighWaterStats.validChunkCount, cacheStats.validChunkCount);
+	cacheHighWaterStats.excludedStaticChunkCount = std::max(cacheHighWaterStats.excludedStaticChunkCount, cacheStats.excludedStaticChunkCount);
+	cacheHighWaterStats.cachedSurfaceCount = std::max(cacheHighWaterStats.cachedSurfaceCount, cacheStats.cachedSurfaceCount);
+	cacheHighWaterStats.cachedTriangleCount = std::max(cacheHighWaterStats.cachedTriangleCount, cacheStats.cachedTriangleCount);
+	cacheHighWaterStats.cachedMaterialCount = std::max(cacheHighWaterStats.cachedMaterialCount, cacheStats.cachedMaterialCount);
+	cacheHighWaterStats.cachedMaterialStateCount = std::max(cacheHighWaterStats.cachedMaterialStateCount, cacheStats.cachedMaterialStateCount);
 }

@@ -233,6 +233,18 @@ public:
 	void ResetHighWaterStats();
 	void PrepareSignatureWatchlist(uint64_t buildSerial, uint32_t chunkCount);
 	bool HasCacheChunkCount(uint32_t chunkCount) const;
+	void EnsureSignatureWatchlist(uint64_t buildSerial, uint32_t chunkCount);
+	bool SeedSignatureWatchlist(uint32_t chunkIndex);
+	bool IsSignatureWatchlistSeeded(uint32_t chunkIndex) const;
+	uint32_t GetSignatureWatchlistSeedCount() const;
+	uint32_t GetWorklistSweepChunkIndex(uint32_t sweepOffset, uint32_t chunkCount) const;
+	void AdvanceWorklistSweepCursor(uint32_t sweepCount, uint32_t chunkCount);
+	void FinalizeFrameActive();
+	bool HasStartupMaterialOnlyMutation() const;
+	uint32_t GetDirtyChunkCount() const;
+	uint32_t GetStartupMaterialOnlyDirtyChunkCount() const;
+	void MarkFrameInactive();
+	void UpdateHighWaterStats(const RuntimeMutationCacheStats& cacheStats);
 
 	RuntimeMapMutationCache cache;
 	RuntimeMapMutationFrameState lastFrame = {};
