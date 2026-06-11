@@ -934,6 +934,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_renderer.cpp
 	common/rendering/nri/renderer/nri_renderer_settings.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation.cpp
+	common/rendering/nri/renderer/nri_runtime_mutation_resident_static.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_services.cpp
 	common/rendering/nri/renderer/nri_scene_lights.cpp
 	common/rendering/nri/renderer/nri_scene_upload.cpp
