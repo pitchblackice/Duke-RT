@@ -7864,9 +7864,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
 	mPendingStartupVisibleChunkValidation.clear();
-	mRuntimeMutation.signatureWatchlist.clear();
-	mRuntimeMutation.signatureWatchlistBuildSerial = 0;
-	mRuntimeMutation.worklistSweepCursor = 0;
+	mRuntimeMutation.ResetWorklist();
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	mStartupMutationRebaselineDeadlineFrame = 0;
 
@@ -7876,7 +7874,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mLastLoggedSurfaceProbe = {};
 	mSurfaceProbeFrame = {};
 	mDynamicSceneLastFrame = {};
-	mRuntimeMutation.lastFrame = {};
+	mRuntimeMutation.ResetFrameState();
 	mRuntimeSpaceLinkLastFrame = {};
 	mLastRuntimeLinkTraceState = {};
 	mHasRuntimeLinkTraceState = false;
@@ -7889,7 +7887,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mPersistentDynamicEmissiveHighWaterSurfaceCount = 0;
 	mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
 	mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
-	mRuntimeMutation.cacheHighWaterStats = {};
+	mRuntimeMutation.ResetHighWaterStats();
 
 	mUsedStaticMapSceneLastFrame = false;
 	mUsedDynamicSceneLastFrame = false;
@@ -7992,16 +7990,14 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
 	mPendingStartupVisibleChunkValidation.clear();
-	mRuntimeMutation.signatureWatchlist.clear();
-	mRuntimeMutation.signatureWatchlistBuildSerial = 0;
-	mRuntimeMutation.worklistSweepCursor = 0;
+	mRuntimeMutation.ResetWorklist();
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	mStartupMutationRebaselineDeadlineFrame = 0;
 	mLastSurfaceProbe = {};
 	mLastLoggedSurfaceProbe = {};
 	mSurfaceProbeFrame = {};
 	mDynamicSceneLastFrame = {};
-	mRuntimeMutation.lastFrame = {};
+	mRuntimeMutation.ResetFrameState();
 	mRuntimeSpaceLinkLastFrame = {};
 	mRuntimeChunkTranslationHistory.clear();
 	mSceneTextureCacheDebugStats = {};
@@ -8009,7 +8005,7 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	mPersistentDynamicEmissiveHighWaterSurfaceCount = 0;
 	mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
 	mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
-	mRuntimeMutation.cacheHighWaterStats = {};
+	mRuntimeMutation.ResetHighWaterStats();
 	mLastStats = {};
 	mHasLoggedStats = false;
 	mLastRuntimeLinkTraceState = {};
@@ -8667,7 +8663,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	mBuiltStaticMapSceneASLastFrame = false;
 	mBuiltDynamicSceneASLastFrame = false;
 	mDynamicSceneLastFrame = {};
-	mRuntimeMutation.lastFrame = {};
+	mRuntimeMutation.ResetFrameState();
 	mRuntimeSpaceLinkLastFrame = {};
 	if (!preserveHistory)
 	{
@@ -16942,7 +16938,7 @@ void NRIRenderer::RefreshMapWorld()
 		mPersistentDynamicEmissiveHighWaterSurfaceCount = 0;
 		mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
 		mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
-		mRuntimeMutation.cacheHighWaterStats = {};
+		mRuntimeMutation.ResetHighWaterStats();
 	}
 	const bool needsBuild = !mMapWorld.valid || levelChanged || pendingBuildSerial != mObservedMapWorldBuildSerial;
 	if (!needsBuild)
@@ -16973,9 +16969,7 @@ void NRIRenderer::RefreshMapWorld()
 		mMapWorld.level = currentLevel;
 		mObservedMapWorldBuildSerial = pendingBuildSerial;
 		mPendingStartupVisibleChunkValidation.clear();
-		mRuntimeMutation.signatureWatchlist.clear();
-		mRuntimeMutation.signatureWatchlistBuildSerial = 0;
-		mRuntimeMutation.worklistSweepCursor = 0;
+		mRuntimeMutation.ResetWorklist();
 		mAllowStartupMapWorldCorrection = false;
 		mStartupMapWorldCorrectionDeadlineFrame = 0;
 		mAllowStartupMutationRebaseline = false;
@@ -16988,10 +16982,7 @@ void NRIRenderer::RefreshMapWorld()
 	mObservedMapWorldBuildSerial = pendingBuildSerial;
 	mPendingStartupVisibleChunkValidation.clear();
 	mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
-	mRuntimeMutation.signatureWatchlist.clear();
-	mRuntimeMutation.signatureWatchlist.resize(mMapWorld.chunks.size(), 0u);
-	mRuntimeMutation.signatureWatchlistBuildSerial = mMapWorld.buildSerial;
-	mRuntimeMutation.worklistSweepCursor = 0;
+	mRuntimeMutation.PrepareSignatureWatchlist(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
 	const auto& stats = mMapWorld.stats;
 	Printf("NRI PT map world built: level=%s build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
@@ -17026,7 +17017,7 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 
 	if (!mMapWorld.valid ||
 		!mStaticMapScene.valid ||
-		mRuntimeMutation.cache.chunks.size() != mMapWorld.chunks.size())
+		!mRuntimeMutation.HasCacheChunkCount((uint32_t)mMapWorld.chunks.size()))
 	{
 		return true;
 	}
@@ -17063,10 +17054,7 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	{
 		mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
 	}
-	mRuntimeMutation.signatureWatchlist.clear();
-	mRuntimeMutation.signatureWatchlist.resize(mMapWorld.chunks.size(), 0u);
-	mRuntimeMutation.signatureWatchlistBuildSerial = mMapWorld.buildSerial;
-	mRuntimeMutation.worklistSweepCursor = 0;
+	mRuntimeMutation.PrepareSignatureWatchlist(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
 	for (uint32_t chunkIndex : diffDetails.lateVisibleValidationChunks)
 	{
 		if (chunkIndex < mPendingStartupVisibleChunkValidation.size())

@@ -528,3 +528,33 @@ void NRIRuntimeMutationSystem::InitializeStaticChunkReplacement(const nri_scene:
 	replacement.residentAuthoritative = true;
 	ClearReplacementPayload(replacement, true);
 }
+
+void NRIRuntimeMutationSystem::ResetWorklist()
+{
+	signatureWatchlist.clear();
+	signatureWatchlistBuildSerial = 0;
+	worklistSweepCursor = 0;
+}
+
+void NRIRuntimeMutationSystem::ResetFrameState()
+{
+	lastFrame = {};
+}
+
+void NRIRuntimeMutationSystem::ResetHighWaterStats()
+{
+	cacheHighWaterStats = {};
+}
+
+void NRIRuntimeMutationSystem::PrepareSignatureWatchlist(uint64_t buildSerial, uint32_t chunkCount)
+{
+	signatureWatchlist.clear();
+	signatureWatchlist.resize(chunkCount, 0u);
+	signatureWatchlistBuildSerial = buildSerial;
+	worklistSweepCursor = 0;
+}
+
+bool NRIRuntimeMutationSystem::HasCacheChunkCount(uint32_t chunkCount) const
+{
+	return cache.chunks.size() == chunkCount;
+}

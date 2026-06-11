@@ -214,6 +214,11 @@ public:
 	void ResetCacheAndFrame();
 	void ResetCacheForStaticSceneBuild(uint32_t chunkCount);
 	void InitializeStaticChunkReplacement(const nri_scene::PTMapChunk& chunk);
+	void ResetWorklist();
+	void ResetFrameState();
+	void ResetHighWaterStats();
+	void PrepareSignatureWatchlist(uint64_t buildSerial, uint32_t chunkCount);
+	bool HasCacheChunkCount(uint32_t chunkCount) const;
 
 	RuntimeMapMutationCache cache;
 	RuntimeMapMutationFrameState lastFrame = {};
