@@ -2269,17 +2269,13 @@ private:
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	void InvalidateRuntimeLightSceneData();
 	bool RefreshResidentStaticSceneDataSet();
-	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
-	bool TryApplyRuntimeMutationChunkToResidentScene(
+	NRIRuntimeMutationOverlayServices BuildRuntimeMutationOverlayServices();
+	bool BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
+	NRIRuntimeMutationResidentApplyServices BuildRuntimeMutationResidentApplyServices();
+	bool TryApplyRuntimeMutationChunkToResidentSceneImpl(
 		const nri_scene::PTMapChunk& mapChunk,
 		RuntimeMapMutationCache::ChunkReplacement& replacement,
-		uint32_t& outStaticSceneChunkListIndex,
-		bool& outMaterialDirty,
-		bool& outGeometryDirty,
-		uint32_t& outSurfaceCount,
-		uint32_t& outTriangleCount,
-		uint32_t& outMaterialCount,
-		bool& outRecoveredEmpty);
+		RuntimeMutationResidentApplyResult& outResult);
 	bool RebuildResidentStaticMaterialState(const char* reason);
 	bool RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);

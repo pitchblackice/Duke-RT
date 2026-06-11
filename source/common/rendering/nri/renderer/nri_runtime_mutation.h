@@ -181,6 +181,51 @@ struct NRIRuntimeMutationResidentUploadServices
 	void NoteCoalescedReject() const;
 };
 
+struct RuntimeMutationResidentApplyResult
+{
+	uint32_t staticSceneChunkListIndex = UINT32_MAX;
+	bool materialDirty = false;
+	bool geometryDirty = false;
+	uint32_t surfaceCount = 0;
+	uint32_t triangleCount = 0;
+	uint32_t materialCount = 0;
+	bool recoveredEmpty = false;
+};
+
+struct NRIRuntimeMutationResidentApplyServices
+{
+	using TryApplyChunkFn = bool (*)(
+		void* user,
+		const nri_scene::PTMapChunk& mapChunk,
+		RuntimeMapMutationCache::ChunkReplacement& replacement,
+		RuntimeMutationResidentApplyResult& outResult);
+
+	void* user = nullptr;
+	TryApplyChunkFn tryApplyChunk = nullptr;
+
+	bool TryApplyChunk(
+		const nri_scene::PTMapChunk& mapChunk,
+		RuntimeMapMutationCache::ChunkReplacement& replacement,
+		RuntimeMutationResidentApplyResult& outResult) const;
+};
+
+struct NRIRuntimeMutationOverlayServices
+{
+	using BuildOverlayFn = bool (*)(
+		void* user,
+		nri_scene::GeometryData& outGeometry,
+		nri_scene::MaterialBridgeData& outMaterials,
+		bool* outResidentStaticSceneChanged);
+
+	void* user = nullptr;
+	BuildOverlayFn buildOverlay = nullptr;
+
+	bool BuildOverlay(
+		nri_scene::GeometryData& outGeometry,
+		nri_scene::MaterialBridgeData& outMaterials,
+		bool* outResidentStaticSceneChanged) const;
+};
+
 struct RuntimeMapMutationFrameState
 {
 	bool active = false;
@@ -239,6 +284,16 @@ public:
 		uint64_t size,
 		const NRIRuntimeMutationResidentUploadServices& services);
 	bool FlushResidentGeometryUploadRanges(const NRIRuntimeMutationResidentUploadServices& services);
+	bool TryApplyResidentChunk(
+		const NRIRuntimeMutationResidentApplyServices& services,
+		const nri_scene::PTMapChunk& mapChunk,
+		RuntimeMapMutationCache::ChunkReplacement& replacement,
+		RuntimeMutationResidentApplyResult& outResult);
+	bool BuildOverlay(
+		const NRIRuntimeMutationOverlayServices& services,
+		nri_scene::GeometryData& outGeometry,
+		nri_scene::MaterialBridgeData& outMaterials,
+		bool* outResidentStaticSceneChanged = nullptr);
 	void NoteResidentAtlasGrow();
 	void ResetCacheAndFrame();
 	void ResetCacheForStaticSceneBuild(uint32_t chunkCount);

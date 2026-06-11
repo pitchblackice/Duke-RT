@@ -8714,7 +8714,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			const bool hasRuntimeMutationOverlay = [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationMs);
-				return BuildRuntimeMapMutationOverlay(
+				return mRuntimeMutation.BuildOverlay(
+					BuildRuntimeMutationOverlayServices(),
 					runtimeMutationGeometry,
 					runtimeMutationMaterialBridge,
 					&residentStaticWorldGeometryChanged);

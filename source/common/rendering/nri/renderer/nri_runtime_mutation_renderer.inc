@@ -295,6 +295,34 @@ NRIRuntimeMutationResidentUploadServices NRIRenderer::BuildRuntimeMutationReside
 	return services;
 }
 
+NRIRuntimeMutationOverlayServices NRIRenderer::BuildRuntimeMutationOverlayServices()
+{
+	NRIRuntimeMutationOverlayServices services = {};
+	services.user = this;
+	services.buildOverlay = [](void* user, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->BuildRuntimeMapMutationOverlayImpl(
+			outGeometry,
+			outMaterials,
+			outResidentStaticSceneChanged);
+	};
+	return services;
+}
+
+NRIRuntimeMutationResidentApplyServices NRIRenderer::BuildRuntimeMutationResidentApplyServices()
+{
+	NRIRuntimeMutationResidentApplyServices services = {};
+	services.user = this;
+	services.tryApplyChunk = [](void* user, const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement, RuntimeMutationResidentApplyResult& outResult) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->TryApplyRuntimeMutationChunkToResidentSceneImpl(
+			mapChunk,
+			replacement,
+			outResult);
+	};
+	return services;
+}
+
 void NRIRenderer::NoteRuntimeMutationResidentAtlasGrow()
 {
 	mRuntimeMutation.NoteResidentAtlasGrow();
@@ -305,7 +333,7 @@ void NRIRenderer::ResetRuntimeMutationCacheAndFrame()
 	mRuntimeMutation.ResetCacheAndFrame();
 }
 
-bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged)
+bool NRIRenderer::BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged)
 {
 	outGeometry = {};
 	outMaterials = {};
@@ -3335,6 +3363,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				continue;
 			}
 			recordRuntimeMutationResidentApplyTier(chunkVisibleNow, runtimeMutationDistanceTier, runtimeMutationCandidateSourceMask);
+			RuntimeMutationResidentApplyResult residentApplyResult = {};
 			const bool appliedResidentChunk = [&]()
 			{
 				ScopedPtPerfTimer residentApplyTierPerfTimer(
@@ -3350,17 +3379,19 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 								mLastPerfShellTraceStats.runtimeMutationResidentApplyFarMs :
 								mLastPerfShellTraceStats.runtimeMutationResidentApplyUnknownDistanceMs));
 				ScopedPtPerfTimer residentApplyDistanceTierPerfTimer(residentApplyDistanceTierMs);
-				return TryApplyRuntimeMutationChunkToResidentScene(
+				return mRuntimeMutation.TryApplyResidentChunk(
+					BuildRuntimeMutationResidentApplyServices(),
 					mapChunk,
 					replacement,
-					residentChunkListIndex,
-					residentChunkMaterialDirty,
-					residentChunkGeometryDirty,
-					residentChunkSurfaceCount,
-					residentChunkTriangleCount,
-					residentChunkMaterialCount,
-					residentChunkRecoveredEmpty);
+					residentApplyResult);
 			}();
+			residentChunkListIndex = residentApplyResult.staticSceneChunkListIndex;
+			residentChunkMaterialDirty = residentApplyResult.materialDirty;
+			residentChunkGeometryDirty = residentApplyResult.geometryDirty;
+			residentChunkSurfaceCount = residentApplyResult.surfaceCount;
+			residentChunkTriangleCount = residentApplyResult.triangleCount;
+			residentChunkMaterialCount = residentApplyResult.materialCount;
+			residentChunkRecoveredEmpty = residentApplyResult.recoveredEmpty;
 			if (appliedResidentChunk)
 			{
 				mLastPerfShellTraceStats.runtimeMutationInvalidAppliedCount++;
@@ -4766,24 +4797,12 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 	return true;
 }
 
-bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
+bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentSceneImpl(
 	const nri_scene::PTMapChunk& mapChunk,
 	RuntimeMapMutationCache::ChunkReplacement& replacement,
-	uint32_t& outStaticSceneChunkListIndex,
-	bool& outMaterialDirty,
-	bool& outGeometryDirty,
-	uint32_t& outSurfaceCount,
-	uint32_t& outTriangleCount,
-	uint32_t& outMaterialCount,
-	bool& outRecoveredEmpty)
+	RuntimeMutationResidentApplyResult& outResult)
 {
-	outStaticSceneChunkListIndex = UINT32_MAX;
-	outMaterialDirty = false;
-	outGeometryDirty = false;
-	outSurfaceCount = 0;
-	outTriangleCount = 0;
-	outMaterialCount = 0;
-	outRecoveredEmpty = false;
+	outResult = {};
 	ScopedPtPerfTimer residentApplyPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyMs);
 	mLastPerfShellTraceStats.runtimeMutationResidentApplyCount++;
 	if (!mStaticMapScene.valid ||
@@ -4911,9 +4930,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		residentMaterials = replacement.materialBridge;
 		appliedBaseline = replacement.replacementBaseline;
 	}
-	outSurfaceCount = CountSceneViewSurfaces(residentSceneView);
-	outTriangleCount = (uint32_t)residentGeometry.primitives.size();
-	outMaterialCount = (uint32_t)residentMaterials.materials.size();
+	outResult.surfaceCount = CountSceneViewSurfaces(residentSceneView);
+	outResult.triangleCount = (uint32_t)residentGeometry.primitives.size();
+	outResult.materialCount = (uint32_t)residentMaterials.materials.size();
 
 	const uint32_t appliedReasonMask = replacement.reasonMask;
 	const bool appliedStaticAnimatedReplacement = replacement.staticAnimatedReplacement;
@@ -5057,7 +5076,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		residentMaterials = std::move(fullLiveMaterials);
 		appliedBaseline = std::move(fullLiveBaseline);
 		recoveredFullLiveResidentChunk = true;
-		outRecoveredEmpty = true;
+		outResult.recoveredEmpty = true;
 		mLastPerfShellTraceStats.runtimeMutationResidentApplyRecoverSuccessCount++;
 		return true;
 	};
@@ -5184,9 +5203,9 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 				mLastPerfResourceTraceStats.residentChunkBatchMaterialBytes +=
 					(uint64_t)oldMaterialCount * sizeof(nri_scene::MaterialData);
 			}
-			outGeometryDirty = true;
-			outMaterialDirty = true;
-			outStaticSceneChunkListIndex = chunkListIndex;
+			outResult.geometryDirty = true;
+			outResult.materialDirty = true;
+			outResult.staticSceneChunkListIndex = chunkListIndex;
 		}
 	}
 	else
@@ -5648,11 +5667,11 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mutableChunk.active = true;
 		mutableChunk.blasUpdateEligible = preserveResidentIndexSlice || preserveResidentBlasRefitOnly;
 		mutableChunk.lastResidentBlasReasonMask = appliedReasonMask;
-		mutableChunk.lastResidentBlasSurfaceCount = outSurfaceCount;
-		mutableChunk.lastResidentBlasTriangleCount = outTriangleCount;
-		mutableChunk.lastResidentBlasMaterialCount = outMaterialCount;
+		mutableChunk.lastResidentBlasSurfaceCount = outResult.surfaceCount;
+		mutableChunk.lastResidentBlasTriangleCount = outResult.triangleCount;
+		mutableChunk.lastResidentBlasMaterialCount = outResult.materialCount;
 		mutableChunk.lastResidentBlasForceTopology = appliedForceTopology;
-		mutableChunk.lastResidentBlasRecoveredEmpty = outRecoveredEmpty;
+		mutableChunk.lastResidentBlasRecoveredEmpty = outResult.recoveredEmpty;
 		mutableChunk.lastResidentBlasKeptGeometrySlice = keptGeometrySlices;
 		mutableChunk.lastResidentBlasTopologyChanged =
 			hasResidentChunk &&
@@ -5693,14 +5712,14 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 			 appliedAnimationOnlyRefreshed ||
 			 mutableChunk.animatedGeometrySignature == previousAnimatedGeometrySignature);
 		mStaticMapScene.lightChunkViews[chunkListIndex] = residentSceneView;
-		outStaticSceneChunkListIndex = chunkListIndex;
-		outMaterialDirty = !preserveResidentMaterialSlice;
+		outResult.staticSceneChunkListIndex = chunkListIndex;
+		outResult.materialDirty = !preserveResidentMaterialSlice;
 		appliedPreservedResidentMaterialSlice = preserveResidentMaterialSlice;
 		appliedPreservedResidentGeometryPayload =
 			residentGeometryPayloadHashSkip ||
 			fastResidentMaterialOnlyUpdate ||
 			preserveResidentGeometryForMaterialOnlyUpdate;
-		outGeometryDirty =
+		outResult.geometryDirty =
 			!residentGeometryPayloadHashSkip &&
 			((!preserveResidentGeometryForMaterialOnlyUpdate && !keptGeometrySlices) ||
 			(appliedReasonMask & (
@@ -5776,17 +5795,17 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].geometryPayloadHash = 0;
 		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].accelerationResident = false;
 	}
-	if (!outMaterialDirty && !residentMaterialPayloadHashSkip)
+	if (!outResult.materialDirty && !residentMaterialPayloadHashSkip)
 	{
-		outMaterialDirty =
+		outResult.materialDirty =
 			(appliedReasonMask & (nri_scene::PTMapChunkMutationReason_SectorMaterial | nri_scene::PTMapChunkMutationReason_WallMaterial)) != 0 ||
 			appliedStaticAnimatedReplacement ||
 			appliedAnimationOnlyRefreshed ||
 			materialOnlyReplacement;
 	}
-	if (!outGeometryDirty && !residentGeometryPayloadHashSkip)
+	if (!outResult.geometryDirty && !residentGeometryPayloadHashSkip)
 	{
-		outGeometryDirty =
+		outResult.geometryDirty =
 			(appliedReasonMask & (
 				nri_scene::PTMapChunkMutationReason_SectorGeometry |
 				nri_scene::PTMapChunkMutationReason_WallGeometry |

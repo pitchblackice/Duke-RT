@@ -144,6 +144,23 @@ void NRIRuntimeMutationResidentUploadServices::NoteCoalescedReject() const
 	}
 }
 
+bool NRIRuntimeMutationResidentApplyServices::TryApplyChunk(
+	const nri_scene::PTMapChunk& mapChunk,
+	RuntimeMapMutationCache::ChunkReplacement& replacement,
+	RuntimeMutationResidentApplyResult& outResult) const
+{
+	outResult = {};
+	return tryApplyChunk != nullptr && tryApplyChunk(user, mapChunk, replacement, outResult);
+}
+
+bool NRIRuntimeMutationOverlayServices::BuildOverlay(
+	nri_scene::GeometryData& outGeometry,
+	nri_scene::MaterialBridgeData& outMaterials,
+	bool* outResidentStaticSceneChanged) const
+{
+	return buildOverlay != nullptr && buildOverlay(user, outGeometry, outMaterials, outResidentStaticSceneChanged);
+}
+
 const char* GetRuntimeMutationTraceActionName(RuntimeMutationTraceAction action)
 {
 	switch (action)
@@ -773,6 +790,24 @@ bool NRIRuntimeMutationSystem::FlushResidentGeometryUploadRanges(const NRIRuntim
 
 	residentGeometryUploadRanges.clear();
 	return true;
+}
+
+bool NRIRuntimeMutationSystem::TryApplyResidentChunk(
+	const NRIRuntimeMutationResidentApplyServices& services,
+	const nri_scene::PTMapChunk& mapChunk,
+	RuntimeMapMutationCache::ChunkReplacement& replacement,
+	RuntimeMutationResidentApplyResult& outResult)
+{
+	return services.TryApplyChunk(mapChunk, replacement, outResult);
+}
+
+bool NRIRuntimeMutationSystem::BuildOverlay(
+	const NRIRuntimeMutationOverlayServices& services,
+	nri_scene::GeometryData& outGeometry,
+	nri_scene::MaterialBridgeData& outMaterials,
+	bool* outResidentStaticSceneChanged)
+{
+	return services.BuildOverlay(outGeometry, outMaterials, outResidentStaticSceneChanged);
 }
 
 void NRIRuntimeMutationSystem::NoteResidentAtlasGrow()
