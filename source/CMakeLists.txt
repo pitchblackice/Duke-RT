@@ -936,6 +936,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_renderer_settings.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_overlay.cpp
+	common/rendering/nri/renderer/nri_runtime_mutation_resident_apply.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_resident_static.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_services.cpp
 	common/rendering/nri/renderer/nri_runtime_space_link.cpp

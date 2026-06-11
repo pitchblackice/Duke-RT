@@ -21223,8 +21223,6 @@ bool NRIRenderer::StageResidentMaterialUploadRanges(
 	return true;
 }
 
-#include "nri_runtime_mutation_renderer.inc"
-
 void NRIRenderer::RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices)
 {
 	auto& cache = mStateCommitCombinedGeometryCache;
