@@ -475,3 +475,14 @@ bool NRIRuntimeMutationSystem::FlushResidentGeometryUploadRanges(const NRIRuntim
 	residentGeometryUploadRanges.clear();
 	return true;
 }
+
+void NRIRuntimeMutationSystem::NoteResidentAtlasGrow()
+{
+	lastFrame.residentAtlasGrowCount++;
+}
+
+void NRIRuntimeMutationSystem::ResetCacheAndFrame()
+{
+	cache.chunks.clear();
+	lastFrame = {};
+}

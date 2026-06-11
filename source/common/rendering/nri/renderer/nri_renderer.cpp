@@ -21911,6 +21911,16 @@ NRIRuntimeMutationResidentUploadServices NRIRenderer::BuildRuntimeMutationReside
 	return services;
 }
 
+void NRIRenderer::NoteRuntimeMutationResidentAtlasGrow()
+{
+	mRuntimeMutation.NoteResidentAtlasGrow();
+}
+
+void NRIRenderer::ResetRuntimeMutationCacheAndFrame()
+{
+	mRuntimeMutation.ResetCacheAndFrame();
+}
+
 void NRIRenderer::RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices)
 {
 	auto& cache = mStateCommitCombinedGeometryCache;

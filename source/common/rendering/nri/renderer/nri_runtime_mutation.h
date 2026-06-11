@@ -210,6 +210,8 @@ public:
 		uint64_t size,
 		const NRIRuntimeMutationResidentUploadServices& services);
 	bool FlushResidentGeometryUploadRanges(const NRIRuntimeMutationResidentUploadServices& services);
+	void NoteResidentAtlasGrow();
+	void ResetCacheAndFrame();
 
 	RuntimeMapMutationCache cache;
 	RuntimeMapMutationFrameState lastFrame = {};
