@@ -1,5 +1,7 @@
 #include "nri_runtime_mutation.h"
 
+#include "../scene/nri_hash.h"
+
 #include "printf.h"
 
 #include <algorithm>
@@ -236,6 +238,79 @@ RuntimeMutationCacheStats NRIRuntimeMutationSystem::GatherCacheStats() const
 	}
 
 	return stats;
+}
+
+bool NRIRuntimeMutationSystem::IsCacheEmpty() const
+{
+	return cache.chunks.empty();
+}
+
+uint32_t NRIRuntimeMutationSystem::GetCacheChunkCount() const
+{
+	return (uint32_t)cache.chunks.size();
+}
+
+uint64_t NRIRuntimeMutationSystem::BuildFrameGenerationHash(bool hasRuntimeMutationOverlay) const
+{
+	if (!hasRuntimeMutationOverlay && !lastFrame.active)
+	{
+		return 0ull;
+	}
+
+	uint64_t hash = 1469598103934665603ull;
+	hash = nri_scene::HashCombine64(hash, (uint64_t)lastFrame.dirtyChunkCount);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)lastFrame.residentAppliedChunkCount);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)lastFrame.residentGeometryChunkCount);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)lastFrame.residentMaterialChunkCount);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)lastFrame.rebuiltChunkCount);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)lastFrame.heldChunkCount);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)lastFrame.replacementTriangleCount);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)lastFrame.materialCount);
+	return hash;
+}
+
+const RuntimeMapMutationCache::ChunkReplacement* NRIRuntimeMutationSystem::FindReplacement(uint32_t chunkIndex) const
+{
+	return chunkIndex < cache.chunks.size() ? &cache.chunks[chunkIndex] : nullptr;
+}
+
+RuntimeMapMutationCache::ChunkReplacement* NRIRuntimeMutationSystem::FindReplacement(uint32_t chunkIndex)
+{
+	return chunkIndex < cache.chunks.size() ? &cache.chunks[chunkIndex] : nullptr;
+}
+
+bool NRIRuntimeMutationSystem::IsReplacementActive(uint32_t chunkIndex) const
+{
+	const auto* replacement = FindReplacement(chunkIndex);
+	return replacement != nullptr && replacement->active;
+}
+
+bool NRIRuntimeMutationSystem::IsReplacementActiveAndValid(uint32_t chunkIndex) const
+{
+	const auto* replacement = FindReplacement(chunkIndex);
+	return replacement != nullptr && replacement->active && replacement->valid;
+}
+
+uint32_t NRIRuntimeMutationSystem::AppendSceneLightRecords(SceneLightSystem& sceneLights) const
+{
+	uint32_t runtimeMutationMaterialOffset = 0;
+	for (const auto& replacement : cache.chunks)
+	{
+		if (!replacement.active || !replacement.valid)
+		{
+			continue;
+		}
+
+		sceneLights.AppendSceneView(
+			replacement.sceneView,
+			replacement.materialBridge,
+			SceneLightRecordSource::RuntimeMutationScene,
+			runtimeMutationMaterialOffset,
+			0u,
+			&replacement.lightIdentityOverrides);
+		runtimeMutationMaterialOffset += (uint32_t)replacement.materialBridge.materials.size();
+	}
+	return runtimeMutationMaterialOffset;
 }
 
 void NRIRuntimeMutationSystem::PrintStatus() const

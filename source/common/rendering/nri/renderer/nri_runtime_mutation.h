@@ -195,6 +195,14 @@ class NRIRuntimeMutationSystem
 {
 public:
 	RuntimeMutationCacheStats GatherCacheStats() const;
+	bool IsCacheEmpty() const;
+	uint32_t GetCacheChunkCount() const;
+	uint64_t BuildFrameGenerationHash(bool hasRuntimeMutationOverlay) const;
+	const RuntimeMapMutationCache::ChunkReplacement* FindReplacement(uint32_t chunkIndex) const;
+	RuntimeMapMutationCache::ChunkReplacement* FindReplacement(uint32_t chunkIndex);
+	bool IsReplacementActive(uint32_t chunkIndex) const;
+	bool IsReplacementActiveAndValid(uint32_t chunkIndex) const;
+	uint32_t AppendSceneLightRecords(SceneLightSystem& sceneLights) const;
 	void PrintStatus() const;
 	void ClearReplacementPayload(RuntimeMapMutationCache::ChunkReplacement& replacement, bool clearMaterialStateCache);
 	void TraceChunk(
