@@ -591,8 +591,10 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 			mStaticMapScene.gpuMaterials,
 			false,
 			reason != nullptr ? reason : "resident_runtime_mutation_static") &&
-		UploadStaticMapChunkMaterialAtlas(
+		nri_static_scene_geometry_upload::UploadStaticMapChunkMaterialAtlas(
+			BuildStaticSceneGeometryUploadServices(),
 			mStaticMaterialBuffer,
+			mMaterialBufferStats,
 			mStaticMapChunkAtlas,
 			mStaticMapScene,
 			mStaticMapScene.gpuMaterials);
@@ -626,8 +628,10 @@ bool NRIRenderer::RebuildResidentStaticMaterialState(const char* reason)
 			mStaticMapScene.gpuMaterials,
 			false,
 			reason != nullptr ? reason : "resident_runtime_mutation_static") &&
-		UploadStaticMapChunkMaterialAtlas(
+		nri_static_scene_geometry_upload::UploadStaticMapChunkMaterialAtlas(
+			BuildStaticSceneGeometryUploadServices(),
 			mStaticMaterialBuffer,
+			mMaterialBufferStats,
 			mStaticMapChunkAtlas,
 			mStaticMapScene,
 			mStaticMapScene.gpuMaterials) &&

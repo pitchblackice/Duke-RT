@@ -145,4 +145,34 @@ bool UploadStaticMapChunkAtlas(
 		UploadResidentStaticAtlasPrimitiveBuffer(services, primitiveBuffer, primitiveStats, atlasPrimitives) &&
 		UploadResidentStaticAtlasMaterialBuffer(services, materialBuffer, materialStats, atlasMaterials);
 }
+
+bool UploadStaticMapChunkMaterialAtlas(
+	const NRIStaticSceneGeometryUploadServices& services,
+	NRIBufferResource& materialBuffer,
+	SceneBufferDebugStats& materialStats,
+	const StaticMapChunkAtlas& atlas,
+	const StaticMapSceneCache& staticScene,
+	const std::vector<nri_scene::MaterialData>& gpuMaterials)
+{
+	if (!atlas.valid || atlas.chunks.size() != staticScene.chunks.size())
+	{
+		return false;
+	}
+
+	std::vector<nri_scene::MaterialData> atlasMaterials(atlas.materialCount);
+	for (uint32_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
+	{
+		nri_static_scene_geometry::CopyChunkMaterialsToAtlas(
+			gpuMaterials,
+			staticScene.chunks[chunkListIndex],
+			atlas.chunks[chunkListIndex],
+			atlasMaterials);
+	}
+
+	return UploadResidentStaticAtlasMaterialBuffer(
+		services,
+		materialBuffer,
+		materialStats,
+		atlasMaterials);
+}
 }

@@ -1980,16 +1980,6 @@ private:
 		const std::vector<uint32_t>& chunkListIndices,
 		const char* reason,
 		const std::vector<uint32_t>* animatedApplyChunkListIndices = nullptr);
-	void UploadChunkMaterialsToAtlas(
-		const std::vector<nri_scene::MaterialData>& sourceMaterials,
-		const StaticMapSceneCache::ChunkCache& sourceChunk,
-		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
-		std::vector<nri_scene::MaterialData>& outMaterials) const;
-	bool UploadStaticMapChunkMaterialAtlas(
-		NRIBufferResource& materialBuffer,
-		const StaticMapChunkAtlas& atlas,
-		const StaticMapSceneCache& staticScene,
-		const std::vector<nri_scene::MaterialData>& gpuMaterials);
 	bool RefreshStaticMapAnimatedMaterials();
 	bool UploadSceneBuffers(
 		const nri_scene::GeometryData& geometry,

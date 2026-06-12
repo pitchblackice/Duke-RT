@@ -17812,8 +17812,10 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 
 	if (!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
 		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false, "static_map_scene_anim") ||
-		!UploadStaticMapChunkMaterialAtlas(
+		!nri_static_scene_geometry_upload::UploadStaticMapChunkMaterialAtlas(
+			BuildStaticSceneGeometryUploadServices(),
 			mStaticMaterialBuffer,
+			mMaterialBufferStats,
 			mStaticMapChunkAtlas,
 			mStaticMapScene,
 			mStaticMapScene.gpuMaterials))

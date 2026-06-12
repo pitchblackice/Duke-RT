@@ -367,53 +367,6 @@ bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
 	return true;
 }
 
-void NRIRenderer::UploadChunkMaterialsToAtlas(
-	const std::vector<nri_scene::MaterialData>& sourceMaterials,
-	const StaticMapSceneCache::ChunkCache& sourceChunk,
-	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
-	std::vector<nri_scene::MaterialData>& outMaterials) const
-{
-	nri_static_scene_geometry::CopyChunkMaterialsToAtlas(
-		sourceMaterials,
-		sourceChunk,
-		atlasChunk,
-		outMaterials);
-}
-
-bool NRIRenderer::UploadStaticMapChunkMaterialAtlas(
-	NRIBufferResource& materialBuffer,
-	const StaticMapChunkAtlas& atlas,
-	const StaticMapSceneCache& staticScene,
-	const std::vector<nri_scene::MaterialData>& gpuMaterials)
-{
-	if (!atlas.valid || atlas.chunks.size() != staticScene.chunks.size())
-	{
-		return false;
-	}
-
-	std::vector<nri_scene::MaterialData> atlasMaterials(atlas.materialCount);
-	for (uint32_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
-	{
-		UploadChunkMaterialsToAtlas(
-			gpuMaterials,
-			staticScene.chunks[chunkListIndex],
-			atlas.chunks[chunkListIndex],
-			atlasMaterials);
-	}
-
-	const NRIStaticSceneGeometryUploadServices uploadServices = BuildStaticSceneGeometryUploadServices();
-	return uploadServices.EnsureResidentStructuredBuffer(
-		materialBuffer,
-		mMaterialBufferStats,
-		atlasMaterials.data(),
-		atlasMaterials.size() * sizeof(nri_scene::MaterialData),
-		sizeof(nri_scene::MaterialData),
-		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess(),
-		"resident_chunk_write",
-		ResidentUploadKind_Material);
-}
-
 bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas)
 {
 	if (!atlas.valid || !mStaticMapScene.valid)

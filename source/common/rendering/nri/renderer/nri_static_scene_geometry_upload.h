@@ -95,4 +95,11 @@ bool UploadStaticMapChunkAtlas(
 	StaticMapChunkAtlas& atlas,
 	const StaticMapSceneCache& staticScene,
 	const std::vector<nri_scene::MaterialData>& gpuMaterials);
+bool UploadStaticMapChunkMaterialAtlas(
+	const NRIStaticSceneGeometryUploadServices& services,
+	NRIBufferResource& materialBuffer,
+	SceneBufferDebugStats& materialStats,
+	const StaticMapChunkAtlas& atlas,
+	const StaticMapSceneCache& staticScene,
+	const std::vector<nri_scene::MaterialData>& gpuMaterials);
 }
