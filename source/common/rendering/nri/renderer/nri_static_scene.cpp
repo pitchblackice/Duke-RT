@@ -731,6 +731,131 @@ nri::BottomLevelGeometryDesc nri_static_scene::BuildStaticMapBlasGeometryDesc(
 	return geometryDesc;
 }
 
+bool nri_static_scene::BuildStaticMapAccelerationStructures(
+	const nri_scene::PTMapWorld* mapWorld,
+	StaticMapSceneCache& staticScene,
+	StaticMapSceneResources& staticResources,
+	const NRIStaticSceneAccelerationBuildServices& services,
+	bool updateLiveState)
+{
+	std::vector<NRIStaticMapBlasBuildInput> blasBuildInputs;
+	if (!BuildStaticMapBlasBuildInputs(staticScene, staticResources.chunkAtlas, blasBuildInputs))
+	{
+		return false;
+	}
+
+	const bool needsWait =
+		staticResources.topLevelAS.accelerationStructure != nullptr ||
+		staticResources.tlasInstanceBuffer.buffer != nullptr ||
+		staticResources.scratchBuffer.buffer != nullptr ||
+		staticResources.topLevelScratchBuffer.buffer != nullptr;
+	if (needsWait && services.waitForCommandsTracked != nullptr)
+	{
+		services.waitForCommandsTracked(services.user);
+	}
+
+	if (services.destroyBufferResource != nullptr)
+	{
+		services.destroyBufferResource(services.user, staticResources.tlasInstanceBuffer);
+		services.destroyBufferResource(services.user, staticResources.scratchBuffer);
+		services.destroyBufferResource(services.user, staticResources.topLevelScratchBuffer);
+	}
+	if (services.destroyAccelerationStructureResource != nullptr)
+	{
+		services.destroyAccelerationStructureResource(services.user, staticResources.topLevelAS);
+		for (auto& chunk : staticScene.chunks)
+		{
+			services.destroyAccelerationStructureResource(services.user, chunk.accelerationStructure);
+			chunk.residentBlasScratchSizeCacheKey = nullptr;
+			chunk.residentBlasBuildScratchSize = 0;
+			chunk.residentBlasUpdateScratchSize = 0;
+		}
+	}
+
+	uint64_t maxScratchSize = 0;
+	for (const NRIStaticMapBlasBuildInput& buildInput : blasBuildInputs)
+	{
+		auto& chunk = staticScene.chunks[buildInput.chunkListIndex];
+		nri::BottomLevelGeometryDesc geometryDesc =
+			BuildStaticMapBlasGeometryDesc(buildInput, staticResources.vertexBuffer.buffer, staticResources.indexBuffer.buffer);
+
+		nri::AccelerationStructureDesc blasDesc = {};
+		blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
+		blasDesc.flags = GetStaticMapChunkBlasBuildBits();
+		blasDesc.geometryOrInstanceNum = 1;
+		blasDesc.geometries = &geometryDesc;
+		if (services.createBottomLevelAccelerationStructure == nullptr ||
+			!services.createBottomLevelAccelerationStructure(services.user, blasDesc, chunk.accelerationStructure))
+		{
+			return false;
+		}
+
+		const uint64_t scratchSize =
+			services.getAccelerationStructureBuildScratchBufferSize != nullptr ?
+			services.getAccelerationStructureBuildScratchBufferSize(services.user, chunk.accelerationStructure) :
+			0;
+		chunk.residentBlasScratchSizeCacheKey = chunk.accelerationStructure.accelerationStructure;
+		chunk.residentBlasBuildScratchSize = scratchSize;
+		chunk.residentBlasUpdateScratchSize = 0;
+		maxScratchSize = std::max(maxScratchSize, scratchSize);
+	}
+
+	if (services.createScratchBuffer == nullptr ||
+		!services.createScratchBuffer(services.user, staticResources.scratchBuffer, maxScratchSize))
+	{
+		return false;
+	}
+
+	std::vector<NRIAccelerationStructureResource*> blasBarrierResources;
+	blasBarrierResources.reserve(staticScene.chunks.size());
+	for (size_t buildInputIndex = 0; buildInputIndex < blasBuildInputs.size(); ++buildInputIndex)
+	{
+		const NRIStaticMapBlasBuildInput& buildInput = blasBuildInputs[buildInputIndex];
+		auto& chunk = staticScene.chunks[buildInput.chunkListIndex];
+		nri::BottomLevelGeometryDesc geometryDesc =
+			BuildStaticMapBlasGeometryDesc(buildInput, staticResources.vertexBuffer.buffer, staticResources.indexBuffer.buffer);
+
+		nri::BuildBottomLevelAccelerationStructureDesc build = {};
+		build.dst = chunk.accelerationStructure.accelerationStructure;
+		build.geometries = &geometryDesc;
+		build.geometryNum = 1;
+		build.scratchBuffer = staticResources.scratchBuffer.buffer;
+		build.scratchOffset = 0;
+		if (services.cmdBuildBottomLevelAccelerationStructure != nullptr)
+		{
+			services.cmdBuildBottomLevelAccelerationStructure(services.user, build);
+		}
+
+		if (buildInputIndex + 1 < blasBuildInputs.size() && services.cmdScratchReuseBarrier != nullptr)
+		{
+			services.cmdScratchReuseBarrier(services.user, staticResources.scratchBuffer);
+		}
+
+		blasBarrierResources.push_back(&chunk.accelerationStructure);
+	}
+
+	if (!blasBarrierResources.empty() && services.cmdAccelerationReadBarriers != nullptr)
+	{
+		services.cmdAccelerationReadBarriers(services.user, blasBarrierResources);
+	}
+
+	NRIStaticMapInstanceBuildInput instanceInput = {};
+	instanceInput.mapWorld = mapWorld;
+	instanceInput.staticScene = &staticScene;
+	instanceInput.atlas = &staticResources.chunkAtlas;
+	NRIStaticMapInstanceBuildServices instanceServices = {};
+	instanceServices.user = services.user;
+	instanceServices.getAccelerationStructureHandle = services.getAccelerationStructureHandle;
+	std::vector<nri::TopLevelInstance> instances;
+	std::vector<SceneInstanceData> sceneInstances;
+	BuildStaticMapInstances(instanceInput, instanceServices, instances, sceneInstances);
+	staticResources.sceneInstances = sceneInstances;
+	staticResources.accelerationBuildSerial = staticScene.buildSerial;
+	return
+		services.buildTopLevelAccelerationStructure != nullptr &&
+		services.buildTopLevelAccelerationStructure(services.user, instances, staticResources, updateLiveState);
+}
+
 void nri_static_scene::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
 	const NRIPreservedStaticMapSkyState* preservedSkyState,
@@ -1283,134 +1408,109 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 {
 	Clocker clock(NriPTAcceleration);
 
-	std::vector<NRIStaticMapBlasBuildInput> blasBuildInputs;
-	if (!nri_static_scene::BuildStaticMapBlasBuildInputs(staticScene, staticResources.chunkAtlas, blasBuildInputs))
+	NRIStaticSceneAccelerationBuildServices services = {};
+	services.user = this;
+	services.getAccelerationStructureHandle = [](void* user, const NRIAccelerationStructureResource& accelerationStructure)
 	{
-		return false;
-	}
-
-	const bool needsWait =
-		staticResources.topLevelAS.accelerationStructure != nullptr ||
-		staticResources.tlasInstanceBuffer.buffer != nullptr ||
-		staticResources.scratchBuffer.buffer != nullptr ||
-		staticResources.topLevelScratchBuffer.buffer != nullptr;
-	if (needsWait)
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*accelerationStructure.accelerationStructure);
+	};
+	services.waitForCommandsTracked = [](void* user)
 	{
-		WaitForCommandsTracked();
-	}
-
-	DestroyBufferResource(staticResources.tlasInstanceBuffer);
-	DestroyBufferResource(staticResources.scratchBuffer);
-	DestroyBufferResource(staticResources.topLevelScratchBuffer);
-	DestroyAccelerationStructureResource(staticResources.topLevelAS);
-
-	for (auto& chunk : staticScene.chunks)
+		static_cast<NRIRenderer*>(user)->WaitForCommandsTracked();
+	};
+	services.destroyBufferResource = [](void* user, NRIBufferResource& resource)
 	{
-		DestroyAccelerationStructureResource(chunk.accelerationStructure);
-		chunk.residentBlasScratchSizeCacheKey = nullptr;
-		chunk.residentBlasBuildScratchSize = 0;
-		chunk.residentBlasUpdateScratchSize = 0;
-	}
-
-	uint64_t maxScratchSize = 0;
-	for (const NRIStaticMapBlasBuildInput& buildInput : blasBuildInputs)
+		static_cast<NRIRenderer*>(user)->DestroyBufferResource(resource);
+	};
+	services.destroyAccelerationStructureResource = [](void* user, NRIAccelerationStructureResource& resource)
 	{
-		auto& chunk = staticScene.chunks[buildInput.chunkListIndex];
-		nri::BottomLevelGeometryDesc geometryDesc =
-			nri_static_scene::BuildStaticMapBlasGeometryDesc(buildInput, staticResources.vertexBuffer.buffer, staticResources.indexBuffer.buffer);
-
-		nri::AccelerationStructureDesc blasDesc = {};
-		blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
-		blasDesc.flags = GetStaticMapChunkBlasBuildBits();
-		blasDesc.geometryOrInstanceNum = 1;
-		blasDesc.geometries = &geometryDesc;
-		if (mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, blasDesc, chunk.accelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
+		static_cast<NRIRenderer*>(user)->DestroyAccelerationStructureResource(resource);
+	};
+	services.createBottomLevelAccelerationStructure = [](void* user, const nri::AccelerationStructureDesc& desc, NRIAccelerationStructureResource& outAccelerationStructure)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		if (renderer->mFrameBuffer->mRayTracing.CreateCommittedAccelerationStructure(*renderer->mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, desc, outAccelerationStructure.accelerationStructure) != nri::Result::SUCCESS)
 		{
 			return false;
 		}
 
 		nri::MemoryDesc memoryDesc = {};
-		mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*chunk.accelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
-		chunk.accelerationStructure.memorySize = memoryDesc.size;
-		chunk.accelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
-
-		const uint64_t scratchSize =
-			mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*chunk.accelerationStructure.accelerationStructure);
-		chunk.residentBlasScratchSizeCacheKey = chunk.accelerationStructure.accelerationStructure;
-		chunk.residentBlasBuildScratchSize = scratchSize;
-		chunk.residentBlasUpdateScratchSize = 0;
-		maxScratchSize = std::max(maxScratchSize, scratchSize);
-	}
-
-	if (!CreateBufferWithoutView(staticResources.scratchBuffer, maxScratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER))
+		renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureMemoryDesc(*outAccelerationStructure.accelerationStructure, nri::MemoryLocation::DEVICE, memoryDesc);
+		outAccelerationStructure.memorySize = memoryDesc.size;
+		outAccelerationStructure.memoryLocation = nri::MemoryLocation::DEVICE;
+		return true;
+	};
+	services.getAccelerationStructureBuildScratchBufferSize = [](void* user, const NRIAccelerationStructureResource& accelerationStructure)
 	{
-		return false;
-	}
-
-	std::vector<nri::BufferBarrierDesc> blasBarriers;
-	blasBarriers.reserve(staticScene.chunks.size());
-	for (size_t buildInputIndex = 0; buildInputIndex < blasBuildInputs.size(); ++buildInputIndex)
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureBuildScratchBufferSize(*accelerationStructure.accelerationStructure);
+	};
+	services.createScratchBuffer = [](void* user, NRIBufferResource& scratchBuffer, uint64_t scratchSize)
 	{
-		const NRIStaticMapBlasBuildInput& buildInput = blasBuildInputs[buildInputIndex];
-		auto& chunk = staticScene.chunks[buildInput.chunkListIndex];
-		nri::BottomLevelGeometryDesc geometryDesc =
-			nri_static_scene::BuildStaticMapBlasGeometryDesc(buildInput, staticResources.vertexBuffer.buffer, staticResources.indexBuffer.buffer);
+		return static_cast<NRIRenderer*>(user)->CreateBufferWithoutView(scratchBuffer, scratchSize, 16, nri::BufferUsageBits::SCRATCH_BUFFER);
+	};
+	services.cmdBuildBottomLevelAccelerationStructure = [](void* user, const nri::BuildBottomLevelAccelerationStructureDesc& build)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		renderer->mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*renderer->mFrameBuffer->mCommandBuffer, &build, 1);
+	};
+	services.cmdScratchReuseBarrier = [](void* user, NRIBufferResource& scratchBuffer)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		nri::BufferBarrierDesc scratchBarrier = {};
+		scratchBarrier.buffer = scratchBuffer.buffer;
+		scratchBarrier.before = NRIAccelerationStructureScratchAccess();
+		scratchBarrier.after = NRIAccelerationStructureScratchAccess();
 
-		nri::BuildBottomLevelAccelerationStructureDesc build = {};
-		build.dst = chunk.accelerationStructure.accelerationStructure;
-		build.geometries = &geometryDesc;
-		build.geometryNum = 1;
-		build.scratchBuffer = staticResources.scratchBuffer.buffer;
-		build.scratchOffset = 0;
-		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
-
-		if (buildInputIndex + 1 < blasBuildInputs.size())
+		nri::BarrierDesc scratchBarrierDesc = {};
+		scratchBarrierDesc.buffers = &scratchBarrier;
+		scratchBarrierDesc.bufferNum = 1;
+		renderer->mFrameBuffer->mCore.CmdBarrier(*renderer->mFrameBuffer->mCommandBuffer, scratchBarrierDesc);
+	};
+	services.cmdAccelerationReadBarriers = [](void* user, const std::vector<NRIAccelerationStructureResource*>& accelerationStructures)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		std::vector<nri::BufferBarrierDesc> blasBarriers;
+		blasBarriers.reserve(accelerationStructures.size());
+		for (const NRIAccelerationStructureResource* accelerationStructure : accelerationStructures)
 		{
-			// The static chunk path deliberately reuses one scratch buffer across many BLAS builds.
-			// Serialize reuse explicitly so later builds do not stomp scratch data that the GPU is still consuming.
-			nri::BufferBarrierDesc scratchBarrier = {};
-			scratchBarrier.buffer = staticResources.scratchBuffer.buffer;
-			scratchBarrier.before = NRIAccelerationStructureScratchAccess();
-			scratchBarrier.after = NRIAccelerationStructureScratchAccess();
+			if (accelerationStructure == nullptr || accelerationStructure->accelerationStructure == nullptr)
+			{
+				continue;
+			}
 
-			nri::BarrierDesc scratchBarrierDesc = {};
-			scratchBarrierDesc.buffers = &scratchBarrier;
-			scratchBarrierDesc.bufferNum = 1;
-			mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, scratchBarrierDesc);
+			nri::BufferBarrierDesc barrier = {};
+			barrier.buffer = renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*accelerationStructure->accelerationStructure);
+			barrier.before = NRIAccelerationStructureWriteAccess();
+			barrier.after = NRIAccelerationStructureReadAccess();
+			blasBarriers.push_back(barrier);
 		}
-
-		nri::BufferBarrierDesc barrier = {};
-		barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
-		barrier.before = NRIAccelerationStructureWriteAccess();
-		barrier.after = NRIAccelerationStructureReadAccess();
-		blasBarriers.push_back(barrier);
-	}
-
-	if (!blasBarriers.empty())
+		if (!blasBarriers.empty())
+		{
+			nri::BarrierDesc blasBarrierDesc = {};
+			blasBarrierDesc.buffers = blasBarriers.data();
+			blasBarrierDesc.bufferNum = (uint32_t)blasBarriers.size();
+			renderer->mFrameBuffer->mCore.CmdBarrier(*renderer->mFrameBuffer->mCommandBuffer, blasBarrierDesc);
+		}
+	};
+	services.buildTopLevelAccelerationStructure = [](void* user, const std::vector<nri::TopLevelInstance>& instances, StaticMapSceneResources& resources, bool updateLiveState)
 	{
-		nri::BarrierDesc blasBarrierDesc = {};
-		blasBarrierDesc.buffers = blasBarriers.data();
-		blasBarrierDesc.bufferNum = (uint32_t)blasBarriers.size();
-		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, blasBarrierDesc);
-	}
-
-	std::vector<nri::TopLevelInstance> instances;
-	std::vector<SceneInstanceData> sceneInstances;
-	BuildStaticMapInstances(staticScene, staticResources.chunkAtlas, instances, sceneInstances);
-	staticResources.sceneInstances = sceneInstances;
-	staticResources.accelerationBuildSerial = staticScene.buildSerial;
-	return
-		BuildTopLevelAccelerationStructure(
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->BuildTopLevelAccelerationStructure(
 			instances,
 			SceneDataBufferMask_Static,
-			staticResources.topLevelAS,
-			staticResources.tlasInstanceBuffer,
-			staticResources.topLevelScratchBuffer,
-			&staticResources.vertexBuffer,
-			&staticResources.indexBuffer,
-			&staticResources.tlasInstanceCount,
+			resources.topLevelAS,
+			resources.tlasInstanceBuffer,
+			resources.topLevelScratchBuffer,
+			&resources.vertexBuffer,
+			&resources.indexBuffer,
+			&resources.tlasInstanceCount,
 			updateLiveState,
 			false);
+	};
+
+	return nri_static_scene::BuildStaticMapAccelerationStructures(&mMapWorld, staticScene, staticResources, services, updateLiveState);
 }
 
 void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScene, StaticMapSceneResources& staticResources, bool waitForCommands)

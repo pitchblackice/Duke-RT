@@ -175,6 +175,8 @@ struct ResidentMapChunkRegistry
 	std::vector<Entry> entries;
 };
 
+struct StaticMapSceneResources;
+
 struct NRIStaticSceneRegistrySyncInput
 {
 	const nri_scene::PTMapWorld* mapWorld = nullptr;
@@ -248,6 +250,22 @@ struct NRIStaticMapBlasBuildInput
 	uint32_t indexCount = 0;
 };
 
+struct NRIStaticSceneAccelerationBuildServices
+{
+	void* user = nullptr;
+	uint64_t (*getAccelerationStructureHandle)(void* user, const NRIAccelerationStructureResource& accelerationStructure) = nullptr;
+	void (*waitForCommandsTracked)(void* user) = nullptr;
+	void (*destroyBufferResource)(void* user, NRIBufferResource& resource) = nullptr;
+	void (*destroyAccelerationStructureResource)(void* user, NRIAccelerationStructureResource& resource) = nullptr;
+	bool (*createBottomLevelAccelerationStructure)(void* user, const nri::AccelerationStructureDesc& desc, NRIAccelerationStructureResource& outAccelerationStructure) = nullptr;
+	uint64_t (*getAccelerationStructureBuildScratchBufferSize)(void* user, const NRIAccelerationStructureResource& accelerationStructure) = nullptr;
+	bool (*createScratchBuffer)(void* user, NRIBufferResource& scratchBuffer, uint64_t scratchSize) = nullptr;
+	void (*cmdBuildBottomLevelAccelerationStructure)(void* user, const nri::BuildBottomLevelAccelerationStructureDesc& build) = nullptr;
+	void (*cmdScratchReuseBarrier)(void* user, NRIBufferResource& scratchBuffer) = nullptr;
+	void (*cmdAccelerationReadBarriers)(void* user, const std::vector<NRIAccelerationStructureResource*>& accelerationStructures) = nullptr;
+	bool (*buildTopLevelAccelerationStructure)(void* user, const std::vector<nri::TopLevelInstance>& instances, StaticMapSceneResources& staticResources, bool updateLiveState) = nullptr;
+};
+
 namespace nri_static_scene
 {
 	void InitializeStaticMapSceneCacheBuild(
@@ -293,6 +311,13 @@ namespace nri_static_scene
 		const NRIStaticMapBlasBuildInput& buildInput,
 		nri::Buffer* vertexBuffer,
 		nri::Buffer* indexBuffer);
+
+	bool BuildStaticMapAccelerationStructures(
+		const nri_scene::PTMapWorld* mapWorld,
+		StaticMapSceneCache& staticScene,
+		StaticMapSceneResources& staticResources,
+		const NRIStaticSceneAccelerationBuildServices& services,
+		bool updateLiveState);
 
 	void PrintStaticMapSceneStatus(
 		const StaticMapSceneCache& staticScene,
