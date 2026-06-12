@@ -8995,38 +8995,25 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 				{
 					ScopedPtPerfTimer statsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMs);
-					nri_scene::SceneDebugStats dynamicOverlayStats;
-					{
-						ScopedPtPerfTimer baseStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsBaseMs);
-						dynamicOverlayStats =
-							!deferOverlayThisFrame ? dynamicSceneView.stats : nri_scene::SceneDebugStats{};
-						if (activeDynamicSceneView != nullptr)
-						{
-							dynamicOverlayStats = activeDynamicSceneView->stats;
-						}
-					}
+					nri_scene::SceneDebugStats persistentVoxelOverlayStats;
 					if (hasPersistentVoxelOverlay)
 					{
 						ScopedPtPerfTimer persistentVoxelStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxelMs);
-						dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, mPersistentVoxels.BuildOverlayDebugStats());
-						mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxel = 1;
+						persistentVoxelOverlayStats = mPersistentVoxels.BuildOverlayDebugStats();
 					}
-					if (hasMirrorExtendedDynamicScene)
-					{
-						ScopedPtPerfTimer mirrorExtendedStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtendedMs);
-						dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, mirrorExtendedDynamicSceneView.stats);
-						mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtended = 1;
-					}
-					if (hasMirrorPlayerScene)
-					{
-						ScopedPtPerfTimer mirrorPlayerStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayerMs);
-						dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, mirrorPlayerSceneView.stats);
-						mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayer = 1;
-					}
-					{
-						ScopedPtPerfTimer mergeStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsMergeMs);
-						activeStats = nri_scene::MergeSceneDebugStats(mStaticMapScene.sceneView.stats, dynamicOverlayStats);
-					}
+					NRISceneFrameDebugStatsInputs debugStatsInputs = {};
+					debugStatsInputs.staticMapStats = &mStaticMapScene.sceneView.stats;
+					debugStatsInputs.deferredDynamicSceneView = !deferOverlayThisFrame ? &dynamicSceneView : nullptr;
+					debugStatsInputs.activeDynamicSceneView = activeDynamicSceneView;
+					debugStatsInputs.persistentVoxelStats = hasPersistentVoxelOverlay ? &persistentVoxelOverlayStats : nullptr;
+					debugStatsInputs.mirrorExtendedSceneView = hasMirrorExtendedDynamicScene ? &mirrorExtendedDynamicSceneView : nullptr;
+					debugStatsInputs.mirrorPlayerSceneView = hasMirrorPlayerScene ? &mirrorPlayerSceneView : nullptr;
+					debugStatsInputs.baseMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsBaseMs;
+					debugStatsInputs.persistentVoxelMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxelMs;
+					debugStatsInputs.mirrorExtendedMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtendedMs;
+					debugStatsInputs.mirrorPlayerMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayerMs;
+					debugStatsInputs.mergeMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMergeMs;
+					activeStats = BuildNRISceneFrameDebugStats(debugStatsInputs, mLastPerfShellTraceStats);
 				}
 
 				{

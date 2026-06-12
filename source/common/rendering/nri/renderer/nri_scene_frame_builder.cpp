@@ -1,6 +1,7 @@
 #include "nri_scene_frame_builder.h"
 
 #include "nri_render_geometry_helpers.h"
+#include "../scene/nri_scene_stats.h"
 
 #include <chrono>
 #include <cstring>
@@ -188,6 +189,48 @@ void WriteNRISceneFrameGenerationTraceStats(
 	stats.sceneSelectStateCommitChangedTlasInstances = result.changedTlasInstances;
 	stats.sceneSelectStateCommitChangedSceneConstants = result.changedSceneConstants;
 	stats.sceneSelectStateCommitChangedDomainCount = result.changedDomainCount;
+}
+
+nri_scene::SceneDebugStats BuildNRISceneFrameDebugStats(
+	const NRISceneFrameDebugStatsInputs& inputs,
+	NRIRenderer::PerfShellTraceStats& stats)
+{
+	ScopedSceneFrameTimer statsTimer(inputs.totalMs);
+	nri_scene::SceneDebugStats dynamicOverlayStats;
+	{
+		ScopedSceneFrameTimer baseStatsTimer(inputs.baseMs);
+		if (inputs.deferredDynamicSceneView != nullptr)
+		{
+			dynamicOverlayStats = inputs.deferredDynamicSceneView->stats;
+		}
+		if (inputs.activeDynamicSceneView != nullptr)
+		{
+			dynamicOverlayStats = inputs.activeDynamicSceneView->stats;
+		}
+	}
+	if (inputs.persistentVoxelStats != nullptr)
+	{
+		ScopedSceneFrameTimer persistentVoxelStatsTimer(inputs.persistentVoxelMs);
+		dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, *inputs.persistentVoxelStats);
+		stats.sceneSelectStateCommitStatsPersistentVoxel = 1;
+	}
+	if (inputs.mirrorExtendedSceneView != nullptr)
+	{
+		ScopedSceneFrameTimer mirrorExtendedStatsTimer(inputs.mirrorExtendedMs);
+		dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, inputs.mirrorExtendedSceneView->stats);
+		stats.sceneSelectStateCommitStatsMirrorExtended = 1;
+	}
+	if (inputs.mirrorPlayerSceneView != nullptr)
+	{
+		ScopedSceneFrameTimer mirrorPlayerStatsTimer(inputs.mirrorPlayerMs);
+		dynamicOverlayStats = nri_scene::MergeSceneDebugStats(dynamicOverlayStats, inputs.mirrorPlayerSceneView->stats);
+		stats.sceneSelectStateCommitStatsMirrorPlayer = 1;
+	}
+
+	ScopedSceneFrameTimer mergeStatsTimer(inputs.mergeMs);
+	return inputs.staticMapStats != nullptr ?
+		nri_scene::MergeSceneDebugStats(*inputs.staticMapStats, dynamicOverlayStats) :
+		dynamicOverlayStats;
 }
 
 void AccumulateNRISceneContributionReserve(const NRISceneContribution& contribution, NRISceneContributionReserve& reserve)

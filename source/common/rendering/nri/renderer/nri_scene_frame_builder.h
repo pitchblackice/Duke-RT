@@ -79,6 +79,22 @@ struct NRISceneFrameGenerationResult
 	uint32_t changedDomainCount = 0;
 };
 
+struct NRISceneFrameDebugStatsInputs
+{
+	const nri_scene::SceneDebugStats* staticMapStats = nullptr;
+	const nri_scene::SceneView* deferredDynamicSceneView = nullptr;
+	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
+	const nri_scene::SceneDebugStats* persistentVoxelStats = nullptr;
+	const nri_scene::SceneView* mirrorExtendedSceneView = nullptr;
+	const nri_scene::SceneView* mirrorPlayerSceneView = nullptr;
+	double* totalMs = nullptr;
+	double* baseMs = nullptr;
+	double* persistentVoxelMs = nullptr;
+	double* mirrorExtendedMs = nullptr;
+	double* mirrorPlayerMs = nullptr;
+	double* mergeMs = nullptr;
+};
+
 void AccumulateNRISceneContributionReserve(const NRISceneContribution& contribution, NRISceneContributionReserve& reserve);
 void ReserveNRISceneContributionCapacity(
 	const NRISceneContributionReserve& reserve,
@@ -96,4 +112,7 @@ NRISceneFrameGenerationResult BuildNRISceneFrameGenerationResult(
 	bool hasPrevious);
 void WriteNRISceneFrameGenerationTraceStats(
 	const NRISceneFrameGenerationResult& result,
+	NRIRenderer::PerfShellTraceStats& stats);
+nri_scene::SceneDebugStats BuildNRISceneFrameDebugStats(
+	const NRISceneFrameDebugStatsInputs& inputs,
 	NRIRenderer::PerfShellTraceStats& stats);
