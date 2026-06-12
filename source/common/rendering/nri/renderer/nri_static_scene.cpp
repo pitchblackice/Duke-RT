@@ -373,6 +373,169 @@ bool nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
 	return true;
 }
 
+bool nri_static_scene::RefreshStaticMapAnimatedMaterials(
+	const NRIStaticSceneAnimatedMaterialRefreshInput& input,
+	const NRIStaticSceneAnimatedMaterialRefreshServices& services)
+{
+	if (input.mapWorld == nullptr || input.staticScene == nullptr || input.atlas == nullptr)
+	{
+		return true;
+	}
+
+	const nri_scene::PTMapWorld& mapWorld = *input.mapWorld;
+	StaticMapSceneCache& staticScene = *input.staticScene;
+	const StaticMapChunkAtlas& atlas = *input.atlas;
+	if (!staticScene.valid ||
+		!staticScene.texturesResident ||
+		!staticScene.buffersResident ||
+		!staticScene.accelerationResident ||
+		staticScene.buildSerial != mapWorld.buildSerial)
+	{
+		return true;
+	}
+
+	bool refreshedAnyChunk = false;
+	uint32_t refreshedChunkCount = 0;
+	const auto recoverStaticScene = [&](const char* reason) -> bool
+	{
+		return services.recoverStaticScene != nullptr ?
+			services.recoverStaticScene(services.user, reason) :
+			false;
+	};
+	const auto suppressAnimatedChunkRefresh = [&](StaticMapSceneCache::ChunkCache& targetChunk, const char* reason)
+	{
+		if (targetChunk.animatedRefreshSuppressed)
+		{
+			return;
+		}
+
+		targetChunk.animatedRefreshSuppressed = true;
+		staticScene.animatedRefreshSuppressedChunkCount++;
+		if (input.registry != nullptr &&
+			targetChunk.chunkIndex < input.registry->entries.size() &&
+			input.registry->entries[targetChunk.chunkIndex].valid)
+		{
+			auto& entry = input.registry->entries[targetChunk.chunkIndex];
+			entry.animatedRefreshSuppressed = true;
+			entry.animatedSuppressionEmitCount++;
+		}
+		if (input.runtimeAnimatedSuppressionEmitCount != nullptr)
+		{
+			(*input.runtimeAnimatedSuppressionEmitCount)++;
+		}
+		if (input.traceStats)
+		{
+			Printf("NRI PT static scene anim: suppressing chunk=%u resident animated refresh (%s).\n",
+				targetChunk.chunkIndex,
+				reason != nullptr ? reason : "unknown");
+		}
+	};
+
+	for (size_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
+	{
+		auto& chunkCache = staticScene.chunks[chunkListIndex];
+		if (chunkListIndex >= staticScene.lightChunkViews.size() || chunkCache.chunkIndex >= mapWorld.chunks.size())
+		{
+			return recoverStaticScene("animated-refresh-layout-mismatch");
+		}
+		if (!chunkCache.active)
+		{
+			continue;
+		}
+		if (!chunkCache.hasAnimatedTextureCandidates ||
+			chunkCache.animatedRefreshSuppressed ||
+			input.visibleChunkWords == nullptr ||
+			!nri_runtime_mutation::IsChunkMarkedVisible(*input.visibleChunkWords, chunkCache.chunkIndex))
+		{
+			continue;
+		}
+
+		nri_scene::SceneView liveChunkView = staticScene.lightChunkViews[chunkListIndex];
+		if (services.refreshAnimatedBindingsForStaticMapChunk == nullptr ||
+			!services.refreshAnimatedBindingsForStaticMapChunk(services.user, mapWorld, mapWorld.chunks[chunkCache.chunkIndex], liveChunkView))
+		{
+			suppressAnimatedChunkRefresh(chunkCache, "surface-mapping-mismatch");
+			continue;
+		}
+		const uint64_t liveAnimatedMaterialSignature = nri_runtime_mutation::ComputeAnimatedMaterialSignature(liveChunkView);
+		if (liveAnimatedMaterialSignature == chunkCache.animatedMaterialSignature)
+		{
+			continue;
+		}
+
+		const uint64_t liveAnimatedGeometrySignature = nri_runtime_mutation::ComputeAnimatedGeometrySignature(liveChunkView);
+		if (liveAnimatedGeometrySignature != chunkCache.animatedGeometrySignature)
+		{
+			staticScene.animatedGeometryFallbackCount++;
+			suppressAnimatedChunkRefresh(chunkCache, "display-metric-mismatch");
+			continue;
+		}
+
+		nri_scene::MaterialBridgeData liveChunkMaterials;
+		{
+			Clocker clock(NriPTMaterialBuild);
+			if (services.buildMaterialsWithActorOverrides != nullptr)
+			{
+				services.buildMaterialsWithActorOverrides(services.user, liveChunkView, liveChunkMaterials, "static_map_anim_chunk");
+			}
+		}
+		if ((uint32_t)liveChunkMaterials.materials.size() != chunkCache.materialCount)
+		{
+			staticScene.animatedGeometryFallbackCount++;
+			suppressAnimatedChunkRefresh(chunkCache, "material-slice-mismatch");
+			continue;
+		}
+
+		staticScene.lightChunkViews[chunkListIndex] = std::move(liveChunkView);
+		chunkCache.materialBridge = std::move(liveChunkMaterials);
+		chunkCache.animatedMaterialSignature = liveAnimatedMaterialSignature;
+		refreshedAnyChunk = true;
+		refreshedChunkCount++;
+	}
+
+	if (!refreshedAnyChunk)
+	{
+		return true;
+	}
+
+	nri_scene::BuildMapSceneView(mapWorld, staticScene.sceneView, input.preservedSkyView);
+	if (!RebuildResidentStaticMaterialBridgeFromChunks(
+		staticScene,
+		atlas,
+		input.traceMaterialBridgeFailures))
+	{
+		staticScene.animatedGeometryFallbackCount++;
+		return recoverStaticScene("animated-refresh-material-bridge-failed");
+	}
+
+	const bool uploaded =
+		services.ensurePaletteTexture != nullptr &&
+		services.ensurePaletteTexture(services.user, staticScene.materialBridge) &&
+		services.ensureSceneTextures != nullptr &&
+		services.ensureSceneTextures(services.user, staticScene.sceneView, staticScene.materialBridge, staticScene.gpuMaterials, false, "static_map_scene_anim") &&
+		services.uploadStaticMaterialAtlas != nullptr &&
+		services.uploadStaticMaterialAtlas(services.user);
+	if (!uploaded)
+	{
+		return recoverStaticScene("animated-refresh-upload-failed");
+	}
+
+	staticScene.texturesResident = true;
+	staticScene.buffersResident = true;
+	staticScene.gpuUploadCount++;
+	staticScene.animatedRefreshCount += refreshedChunkCount;
+	staticScene.animatedRefreshUploadCount++;
+	if (services.syncResidentRegistry != nullptr)
+	{
+		services.syncResidentRegistry(services.user);
+	}
+	if (services.markUploadedStaticMapSceneLastFrame != nullptr)
+	{
+		services.markUploadedStaticMapSceneLastFrame(services.user);
+	}
+	return true;
+}
+
 void nri_static_scene::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
 	const NRIPreservedStaticMapSkyState* preservedSkyState,

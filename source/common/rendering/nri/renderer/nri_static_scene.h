@@ -200,6 +200,32 @@ struct NRIStaticSceneCacheBuildServices
 	float ceilingNudgeDistance = 0.0f;
 };
 
+struct NRIStaticSceneAnimatedMaterialRefreshInput
+{
+	const nri_scene::PTMapWorld* mapWorld = nullptr;
+	StaticMapSceneCache* staticScene = nullptr;
+	StaticMapChunkAtlas* atlas = nullptr;
+	ResidentMapChunkRegistry* registry = nullptr;
+	const nri_scene::SceneView* preservedSkyView = nullptr;
+	const std::vector<uint32_t>* visibleChunkWords = nullptr;
+	uint32_t* runtimeAnimatedSuppressionEmitCount = nullptr;
+	bool traceStats = false;
+	bool traceMaterialBridgeFailures = false;
+};
+
+struct NRIStaticSceneAnimatedMaterialRefreshServices
+{
+	void* user = nullptr;
+	bool (*refreshAnimatedBindingsForStaticMapChunk)(void* user, const nri_scene::PTMapWorld& mapWorld, const nri_scene::PTMapChunk& chunk, nri_scene::SceneView& ioChunkView) = nullptr;
+	void (*buildMaterialsWithActorOverrides)(void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label) = nullptr;
+	bool (*ensurePaletteTexture)(void* user, const nri_scene::MaterialBridgeData& materials) = nullptr;
+	bool (*ensureSceneTextures)(void* user, const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& gpuMaterials, bool preserveExistingSky, const char* reason) = nullptr;
+	bool (*uploadStaticMaterialAtlas)(void* user) = nullptr;
+	bool (*recoverStaticScene)(void* user, const char* reason) = nullptr;
+	void (*syncResidentRegistry)(void* user) = nullptr;
+	void (*markUploadedStaticMapSceneLastFrame)(void* user) = nullptr;
+};
+
 namespace nri_static_scene
 {
 	void InitializeStaticMapSceneCacheBuild(
@@ -225,6 +251,10 @@ namespace nri_static_scene
 		StaticMapSceneCache& staticScene,
 		const StaticMapChunkAtlas& atlas,
 		bool traceFailures);
+
+	bool RefreshStaticMapAnimatedMaterials(
+		const NRIStaticSceneAnimatedMaterialRefreshInput& input,
+		const NRIStaticSceneAnimatedMaterialRefreshServices& services);
 
 	void PrintStaticMapSceneStatus(
 		const StaticMapSceneCache& staticScene,
