@@ -2084,6 +2084,8 @@ private:
 	bool UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nri_scene::MaterialData>& materials);
 	void InvalidateRuntimeLightSceneData();
 	bool RefreshResidentStaticSceneDataSet();
+	void NoteResidentStaticAtlasGrow();
+	void ResetRuntimeMutationCacheAndFrameForStaticScene();
 	NRIRuntimeMutationOverlayServices BuildRuntimeMutationOverlayServices();
 	bool BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
 	NRIRuntimeMutationResidentApplyServices BuildRuntimeMutationResidentApplyServices();

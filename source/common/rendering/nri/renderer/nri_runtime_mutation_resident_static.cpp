@@ -279,6 +279,16 @@ namespace
 }
 
 
+void NRIRenderer::NoteResidentStaticAtlasGrow()
+{
+	mRuntimeMutation.NoteResidentAtlasGrow();
+}
+
+void NRIRenderer::ResetRuntimeMutationCacheAndFrameForStaticScene()
+{
+	mRuntimeMutation.ResetCacheAndFrame();
+}
+
 bool NRIRenderer::RestoreStaticTopLevelScene()
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.restoreStaticSceneMs);
