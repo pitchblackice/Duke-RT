@@ -33,4 +33,22 @@ bool UploadResidentStaticAtlasVertexBuffer(
 		"resident_chunk_write",
 		ResidentUploadKind_Vertex);
 }
+
+bool UploadResidentStaticAtlasIndexBuffer(
+	const NRIStaticSceneGeometryUploadServices& services,
+	NRIBufferResource& indexBuffer,
+	SceneBufferDebugStats& indexStats,
+	const std::vector<uint32_t>& atlasIndices)
+{
+	return services.EnsureResidentStructuredBuffer(
+		indexBuffer,
+		indexStats,
+		atlasIndices.data(),
+		atlasIndices.size() * sizeof(uint32_t),
+		sizeof(uint32_t),
+		NRIStaticSceneGeometryUploadFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+		StaticGeometryAccelerationStructureBuildInputAccess(),
+		"resident_chunk_write",
+		ResidentUploadKind_Index);
+}
 }
