@@ -4,6 +4,7 @@
 #include "nri_acceleration.h"
 #include "nri_debug_reporters.h"
 #include "nri_frame_graph.h"
+#include "nri_material_policy.h"
 #include "nri_renderstate.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_renderer_settings.h"
@@ -2325,14 +2326,6 @@ public:
 		return state;
 	}
 
-	enum ActorMaterialOverrideBits : uint32_t
-	{
-		ActorMaterialOverride_None = 0,
-		ActorMaterialOverride_NoShadowReceive = 1u << 0,
-		ActorMaterialOverride_NoShadowCast = 1u << 1,
-		ActorMaterialOverride_Fullbright = 1u << 2,
-	};
-
 	static void BuildActorMaterialOverrideMap(const ResolvedLightOverlaySet& resolved, std::unordered_map<int32_t, uint32_t>& outOverrides)
 	{
 		if (resolved.actorRules.Size() == 0 && resolved.actorOverrideRules.Size() == 0)
@@ -2354,7 +2347,7 @@ public:
 				continue;
 			}
 
-			uint32_t overrideBits = ActorMaterialOverride_None;
+			uint32_t overrideBits = nri_material_policy::ActorMaterialOverride_None;
 			bool touched = false;
 			const uint32_t actorTextureId = (unsigned)actor->spr.picnum < MAXTILES ? (uint32_t)tileGetTextureID(actor->spr.picnum).GetIndex() : 0u;
 			for (const auto& resolvedRule : resolved.actorRules)
@@ -2376,11 +2369,11 @@ public:
 					touched = true;
 					if (resolvedRule.shadowReceive)
 					{
-						overrideBits &= ~ActorMaterialOverride_NoShadowReceive;
+						overrideBits &= ~nri_material_policy::ActorMaterialOverride_NoShadowReceive;
 					}
 					else
 					{
-						overrideBits |= ActorMaterialOverride_NoShadowReceive;
+						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowReceive;
 					}
 				}
 
@@ -2389,11 +2382,11 @@ public:
 					touched = true;
 					if (resolvedRule.shadowCast)
 					{
-						overrideBits &= ~ActorMaterialOverride_NoShadowCast;
+						overrideBits &= ~nri_material_policy::ActorMaterialOverride_NoShadowCast;
 					}
 					else
 					{
-						overrideBits |= ActorMaterialOverride_NoShadowCast;
+						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowCast;
 					}
 				}
 
@@ -2402,11 +2395,11 @@ public:
 					touched = true;
 					if (resolvedRule.fullbright)
 					{
-						overrideBits |= ActorMaterialOverride_Fullbright;
+						overrideBits |= nri_material_policy::ActorMaterialOverride_Fullbright;
 					}
 					else
 					{
-						overrideBits &= ~ActorMaterialOverride_Fullbright;
+						overrideBits &= ~nri_material_policy::ActorMaterialOverride_Fullbright;
 					}
 				}
 			}
@@ -2425,11 +2418,11 @@ public:
 					touched = true;
 					if (resolvedRule.shadowReceive)
 					{
-						overrideBits &= ~ActorMaterialOverride_NoShadowReceive;
+						overrideBits &= ~nri_material_policy::ActorMaterialOverride_NoShadowReceive;
 					}
 					else
 					{
-						overrideBits |= ActorMaterialOverride_NoShadowReceive;
+						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowReceive;
 					}
 				}
 
@@ -2438,16 +2431,16 @@ public:
 					touched = true;
 					if (resolvedRule.shadowCast)
 					{
-						overrideBits &= ~ActorMaterialOverride_NoShadowCast;
+						overrideBits &= ~nri_material_policy::ActorMaterialOverride_NoShadowCast;
 					}
 					else
 					{
-						overrideBits |= ActorMaterialOverride_NoShadowCast;
+						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowCast;
 					}
 				}
 			}
 
-			if (touched && overrideBits != ActorMaterialOverride_None)
+			if (touched && overrideBits != nri_material_policy::ActorMaterialOverride_None)
 			{
 				outOverrides[(int32_t)actor->GetIndex()] = overrideBits;
 			}
@@ -4313,67 +4306,6 @@ namespace
 	static float ResolveGlowSamplingScale(uint32_t sourceFlags, uint32_t emissiveMode)
 	{
 		return IsGlowDrivenEmissiveForSampling(sourceFlags, emissiveMode) ? std::max((float)nri_ptglowreach, 0.0f) : 1.0f;
-	}
-
-	static float GetFullbrightRoughnessHint(uint32_t materialFlags)
-	{
-		if ((materialFlags & nri_scene::MaterialFlag_Sprite) != 0)
-		{
-			return 0.45f;
-		}
-		if ((materialFlags & nri_scene::MaterialFlag_Flat) != 0)
-		{
-			return 0.60f;
-		}
-		return 0.55f;
-	}
-
-	static void ApplyActorFullbrightOverridesToBuiltMaterials(
-		const std::unordered_map<int32_t, uint32_t>& actorOverrides,
-		nri_scene::MaterialBridgeData& materials)
-	{
-		const uint32_t count = std::min<uint32_t>((uint32_t)materials.materials.size(), (uint32_t)materials.lightMetadata.size());
-		const float fullbrightBoost = GetFullbrightBoostScale();
-		for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
-		{
-			nri_scene::MaterialLightingMetadata& metadata = materials.lightMetadata[materialIndex];
-			if (metadata.actorIndex < 0)
-			{
-				continue;
-			}
-
-			auto it = actorOverrides.find(metadata.actorIndex);
-			if (it == actorOverrides.end() || (it->second & ActorMaterialOverride_Fullbright) == 0)
-			{
-				continue;
-			}
-
-			nri_scene::MaterialData& material = materials.materials[materialIndex];
-			material.flags |= nri_scene::MaterialFlag_Fullbright;
-			material.lightLevel = 1.0f;
-			material.roughnessHint = GetFullbrightRoughnessHint(material.flags);
-			material.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
-			material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
-			material.emissiveTextureIndex = material.textureIndex;
-			material.emissiveIntensity = 1.0f;
-			material.emissiveMaskScale = 1.0f;
-			material.emissiveReserved = fullbrightBoost;
-			material.emissiveColor[0] = 1.0f;
-			material.emissiveColor[1] = 1.0f;
-			material.emissiveColor[2] = 1.0f;
-
-			metadata.materialFlags |= nri_scene::MaterialFlag_Fullbright;
-			metadata.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
-			metadata.lightLevel = 1.0f;
-			metadata.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
-			metadata.emissiveTextureIndex = material.textureIndex;
-			metadata.emissiveIntensity = 1.0f;
-			metadata.emissiveMaskScale = 1.0f;
-			metadata.visibleFullbrightBoost = fullbrightBoost;
-			metadata.emissiveColor[0] = 1.0f;
-			metadata.emissiveColor[1] = 1.0f;
-			metadata.emissiveColor[2] = 1.0f;
-		}
 	}
 
 	static float GetExposureDeltaStops(float previousExposure, float currentExposure)
@@ -14184,16 +14116,7 @@ void NRIRenderer::QueueStaticMapSceneLightingInvalidation()
 
 void NRIRenderer::ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const
 {
-	const uint32_t count = std::min<uint32_t>((uint32_t)inOutGpuMaterials.size(), (uint32_t)materials.lightMetadata.size());
-	for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
-	{
-		nri_scene::MaterialData& material = inOutGpuMaterials[materialIndex];
-		mSceneLights.ApplyEmissiveMaterialSettings(materials.lightMetadata[materialIndex], material);
-		if (material.emissiveMode == nri_scene::MaterialEmissiveMode_UseGlowmapTexture)
-		{
-			material.emissiveReserved = GetGlowmapVisibleBlendScale();
-		}
-	}
+	nri_material_policy::ApplyEmissiveMaterialOverrides(mSceneLights, GetGlowmapVisibleBlendScale(), materials, inOutGpuMaterials);
 }
 
 void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel)
@@ -14233,7 +14156,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 						continue;
 					}
 
-					if ((it->second & ActorMaterialOverride_Fullbright) != 0)
+					if ((it->second & nri_material_policy::ActorMaterialOverride_Fullbright) != 0)
 					{
 						savedFlags.push_back({ &surface.material.flags, surface.material.flags });
 						surface.material.flags |= nri_scene::MaterialFlag_Fullbright;
@@ -14257,7 +14180,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 			{
 				nri_scene::BuildMaterials(sceneView, outMaterials);
 			}
-			ApplyActorFullbrightOverridesToBuiltMaterials(actorOverrides, outMaterials);
+			nri_material_policy::ApplyActorFullbrightOverridesToBuiltMaterials(actorOverrides, GetFullbrightBoostScale(), outMaterials);
 			for (const SavedMaterialFlags& saved : savedFlags)
 			{
 				*saved.flags = saved.value;
@@ -14302,113 +14225,18 @@ void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBri
 		return;
 	}
 
-	const uint32_t count = std::min<uint32_t>((uint32_t)inOutGpuMaterials.size(), (uint32_t)materials.lightMetadata.size());
-	const float fullbrightBoost = GetFullbrightBoostScale();
-	for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
-	{
-		const nri_scene::MaterialLightingMetadata& metadata = materials.lightMetadata[materialIndex];
-		if (metadata.actorIndex < 0)
-		{
-			continue;
-		}
-
-		auto it = actorOverrides.find(metadata.actorIndex);
-		if (it == actorOverrides.end())
-		{
-			continue;
-		}
-
-		if ((it->second & ActorMaterialOverride_NoShadowReceive) != 0)
-		{
-			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowReceive;
-		}
-		if ((it->second & ActorMaterialOverride_NoShadowCast) != 0)
-		{
-			inOutGpuMaterials[materialIndex].lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
-		}
-		if ((it->second & ActorMaterialOverride_Fullbright) != 0)
-		{
-			nri_scene::MaterialData& material = inOutGpuMaterials[materialIndex];
-			material.flags |= nri_scene::MaterialFlag_Fullbright;
-			material.lightLevel = 1.0f;
-			material.roughnessHint = GetFullbrightRoughnessHint(material.flags);
-			material.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
-			material.emissiveMode = nri_scene::MaterialEmissiveMode_UseBaseTexture;
-			material.emissiveTextureIndex = material.textureIndex;
-			material.emissiveIntensity = 1.0f;
-			material.emissiveMaskScale = 1.0f;
-			material.emissiveReserved = fullbrightBoost;
-			material.emissiveColor[0] = 1.0f;
-			material.emissiveColor[1] = 1.0f;
-			material.emissiveColor[2] = 1.0f;
-		}
-	}
+	nri_material_policy::ApplyActorShadowMaterialOverrides(actorOverrides, GetFullbrightBoostScale(), materials, inOutGpuMaterials);
 }
 
 uint64_t NRIRenderer::ComputeChunkActorOverrideHash(const nri_scene::MaterialBridgeData& materials)
 {
 	const auto& actorOverrides = GetActorMaterialOverrideMapForFrame();
-	if (actorOverrides.empty() || materials.lightMetadata.empty())
-	{
-		return 0;
-	}
-
-	uint64_t hash = 1469598103934665603ull;
-	bool touched = false;
-	for (const auto& metadata : materials.lightMetadata)
-	{
-		if (metadata.actorIndex < 0)
-		{
-			continue;
-		}
-
-		auto it = actorOverrides.find(metadata.actorIndex);
-		if (it == actorOverrides.end() || it->second == ActorMaterialOverride_None)
-		{
-			continue;
-		}
-
-		touched = true;
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)metadata.actorIndex);
-		hash = CoherencyHashCombine64(hash, (uint64_t)it->second);
-	}
-
-	return touched ? hash : 0;
+	return nri_material_policy::ComputeChunkActorOverrideHash(actorOverrides, materials);
 }
 
 uint64_t NRIRenderer::ComputeChunkEmissiveOverrideHash(const nri_scene::MaterialBridgeData& materials) const
 {
-	const uint32_t count = std::min<uint32_t>((uint32_t)materials.materials.size(), (uint32_t)materials.lightMetadata.size());
-	if (count == 0)
-	{
-		return 0;
-	}
-
-	uint64_t hash = 1469598103934665603ull;
-	bool touched = false;
-	for (uint32_t materialIndex = 0; materialIndex < count; ++materialIndex)
-	{
-		nri_scene::MaterialData effectiveMaterial = materials.materials[materialIndex];
-		const bool emissiveApplied = mSceneLights.ApplyEmissiveMaterialSettings(materials.lightMetadata[materialIndex], effectiveMaterial);
-		if (!emissiveApplied)
-		{
-			continue;
-		}
-
-		touched = true;
-		hash = CoherencyHashCombine64(hash, (uint64_t)materialIndex);
-		hash = CoherencyHashCombine64(hash, (uint64_t)effectiveMaterial.materialClass);
-		hash = CoherencyHashCombine64(hash, (uint64_t)effectiveMaterial.emissiveMode);
-		hash = CoherencyHashCombine64(hash, (uint64_t)effectiveMaterial.emissiveTextureIndex);
-		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveColor[0]));
-		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveColor[1]));
-		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveColor[2]));
-		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveIntensity));
-		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveMaskScale));
-		hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(effectiveMaterial.emissiveReserved));
-	}
-
-	return touched ? hash : 0;
+	return nri_material_policy::ComputeChunkEmissiveOverrideHash(mSceneLights, materials);
 }
 
 void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
@@ -21595,3 +21423,4 @@ void NRIRenderer::FillMatrix(float* outMatrix, const VSMatrix& matrix) const
 {
 	const_cast<VSMatrix&>(matrix).copy(outMatrix);
 }
+
