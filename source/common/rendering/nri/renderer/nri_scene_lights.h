@@ -505,6 +505,16 @@ public:
 	size_t GetResolvedMuzzleFlashRuleCount() const { return mResolvedMuzzleFlashRuleLookup.size(); }
 	std::string FormatResolvedMuzzleFlashRuleIdList(size_t limit = 16) const;
 	void RefreshTransientMuzzleFlashLights(double currentTimeSeconds, const TArray<PathTracingWeaponLightEvent>& pendingEvents, bool debug);
+	bool IsEmissiveSurfaceSectorResponseEligible(const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface) const;
+	bool IsEmissiveSurfaceMaterialResponseEligible(const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface) const;
+	float ResolveSectorEmissionScale(const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, bool& outApplied) const;
+	float ResolveSectorEmissionIntensityScale(const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, float scale) const;
+	float ResolveSectorEmissionReachScale(const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, float scale) const;
+	float ResolveEmissiveMaterialResponseScale(const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, bool& outApplied) const;
+	uint64_t BuildEmissiveSectorResponsePayloadHash() const;
+	void ResetEmissiveSectorResponseCaches();
+	void NotifyEmissiveSectorResponseEditModeChanges(uint32_t frameIndex, const float currentCameraPos[3]);
+	void TraceEmissiveSectorResponseChange(uint32_t frameIndex, const float currentCameraPos[3], bool traceEnabled);
 	bool AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool UpdateManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool RemoveManualAnalyticLight(uint32_t id);
@@ -583,4 +593,12 @@ private:
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneAnalyticLight> mTransientMuzzleFlashLights;
+	bool mEmissiveSectorResponseTraceCacheValid = false;
+	uint64_t mEmissiveSectorResponseTraceHash = 0;
+	bool mEmissiveSectorResponseNotifyCacheValid = false;
+	uint32_t mLastEmissiveSectorResponseNotifyFrame = 0;
+	std::vector<float> mEmissiveSectorResponseNotifyScales;
+	bool mSectorLightingEditNotifyCacheValid = false;
+	uint32_t mLastSectorLightingEditNotifyFrame = 0;
+	std::vector<uint64_t> mSectorLightingEditNotifyHashes;
 };

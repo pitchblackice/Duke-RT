@@ -5396,172 +5396,6 @@ namespace
 		}
 	}
 
-	static bool HasAutoEmissiveSourceFlags(uint32_t sourceFlags)
-	{
-		return (sourceFlags & (
-			SceneEmissiveSurfaceSourceFlag_AutoFullbright |
-			SceneEmissiveSurfaceSourceFlag_AutoTextureGlow |
-			SceneEmissiveSurfaceSourceFlag_AutoGlowmap)) != 0;
-	}
-
-	static bool IsEmissiveSurfaceSectorResponseEligible(const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface)
-	{
-		return
-			surface.sectorResponseEnabled &&
-			surface.sectorIndex >= 0 &&
-			(((surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_LightOverlayOverride) != 0) ||
-				(HasAutoEmissiveSourceFlags(surface.sourceFlags) &&
-					(surface.sourceFlags & SceneEmissiveSurfaceSourceFlag_ExplicitTextureRule) == 0));
-	}
-
-	static bool IsEmissiveSurfaceMaterialResponseEligible(const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface)
-	{
-		return
-			surface.materialResponseEnabled &&
-			surface.sectorIndex >= 0 &&
-			(surface.materialResponseExplicit || IsEmissiveSurfaceSectorResponseEligible(surface));
-	}
-
-	static float ComputeSectorEmitterResponseScaleForRenderer(float brightness, float neutralBrightness, float intensity, float minScale, float maxScale)
-	{
-		const float clampedMin = std::max(0.0f, minScale);
-		const float clampedMax = std::max(clampedMin, maxScale);
-		if (neutralBrightness <= 0.0001f || intensity <= 0.0f)
-		{
-			return clamp(1.0f, clampedMin, clampedMax);
-		}
-
-		const float normalizedDelta = (brightness - neutralBrightness) / neutralBrightness;
-		return clamp(1.0f + normalizedDelta * intensity, clampedMin, clampedMax);
-	}
-
-	static float ComputeSectorEmitterRangeResponseScaleForRenderer(float signal, float inputMin, float inputMax, float minScale, float maxScale)
-	{
-		const float clampedMin = std::max(0.0f, minScale);
-		const float clampedMax = std::max(clampedMin, maxScale);
-		const float inputRange = inputMax - inputMin;
-		if (std::abs(inputRange) <= 0.0001f)
-		{
-			return clamp(1.0f, clampedMin, clampedMax);
-		}
-
-		const float t = clamp((signal - inputMin) / inputRange, 0.0f, 1.0f);
-		return clampedMin + (clampedMax - clampedMin) * t;
-	}
-
-	static float GetSectorEmitterNeutralBrightnessForRenderer()
-	{
-		const float sectorClamp = std::max(0.0f, (float)nri_ptsectorclamp);
-		const float ambientScale = std::max(0.0f, (float)nri_ptsectorambientscale);
-		return std::min(sectorClamp, ambientScale * (0.10f + 0.75f * 0.55f));
-	}
-
-	static float ResolveSectorEmissionScale(
-		const SceneLightSystem::SectorLightingRegistry& sectorRegistry,
-		const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface,
-		bool& outApplied)
-	{
-		outApplied = false;
-		if (!IsEmissiveSurfaceSectorResponseEligible(surface))
-		{
-			return 1.0f;
-		}
-
-		const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
-		if (sectorIndex >= sectorRegistry.sectors.size())
-		{
-			return 1.0f;
-		}
-
-		const auto& sector = sectorRegistry.sectors[sectorIndex];
-		const float scale = surface.hasSectorResponseInputRange ?
-			ComputeSectorEmitterRangeResponseScaleForRenderer(
-				sector.rawResponseSignal,
-				surface.sectorResponseInputMin,
-				surface.sectorResponseInputMax,
-				std::max(0.0f, surface.sectorResponseMin),
-				std::max(surface.sectorResponseMin, surface.sectorResponseMax)) :
-			surface.hasSectorResponseParams ?
-			ComputeSectorEmitterResponseScaleForRenderer(
-				sector.rawResponseBrightness,
-				GetSectorEmitterNeutralBrightnessForRenderer(),
-				std::max(0.0f, surface.sectorResponseIntensity),
-				std::max(0.0f, surface.sectorResponseMin),
-				std::max(surface.sectorResponseMin, surface.sectorResponseMax)) :
-			std::max(0.0f, sector.emitterResponseScale);
-		outApplied = scale != 1.0f;
-		return scale;
-	}
-
-	static float ClampSectorEmissionIntensityScale(
-		const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface,
-		float scale)
-	{
-		const float minScale = surface.hasSectorResponseIntensityMin ?
-			std::max(0.0f, surface.sectorResponseIntensityMin) :
-			std::max(0.0f, (float)nri_ptsectoremissionlightmin);
-		const float maxScale = surface.hasSectorResponseIntensityMax ?
-			std::max(minScale, surface.sectorResponseIntensityMax) :
-			std::max(minScale, (float)nri_ptsectoremissionlightmax);
-		return clamp(std::max(0.0f, scale), minScale, maxScale);
-	}
-
-	static float ClampSectorEmissionReachScale(
-		const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface,
-		float scale)
-	{
-		const float minScale = surface.hasSectorResponseReachMin ?
-			std::max(0.0f, surface.sectorResponseReachMin) :
-			std::max(0.0f, (float)nri_ptsectoremissionreachmin);
-		const float maxScale = surface.hasSectorResponseReachMax ?
-			std::max(minScale, surface.sectorResponseReachMax) :
-			std::max(minScale, (float)nri_ptsectoremissionreachmax);
-		return clamp(std::max(0.0f, scale), minScale, maxScale);
-	}
-
-	static float ResolveEmissiveMaterialResponseScale(
-		const SceneLightSystem::SectorLightingRegistry& sectorRegistry,
-		const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface,
-		bool& outApplied)
-	{
-		outApplied = false;
-		if (!IsEmissiveSurfaceMaterialResponseEligible(surface))
-		{
-			return 1.0f;
-		}
-
-		const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
-		if (sectorIndex >= sectorRegistry.sectors.size())
-		{
-			return 1.0f;
-		}
-
-		const auto& sector = sectorRegistry.sectors[sectorIndex];
-		const float globalMinScale = std::max(0.0f, (float)nri_ptsectoremissionmaterialmin);
-		const float globalMaxScale = std::max(globalMinScale, (float)nri_ptsectoremissionmaterialmax);
-		const float minScale = surface.hasMaterialResponseMin ? std::max(0.0f, surface.materialResponseMin) : globalMinScale;
-		const float maxScale = surface.hasMaterialResponseMax ? std::max(minScale, surface.materialResponseMax) : globalMaxScale;
-		const float scale = surface.hasSectorResponseInputRange ?
-			ComputeSectorEmitterRangeResponseScaleForRenderer(
-				sector.rawResponseSignal,
-				surface.sectorResponseInputMin,
-				surface.sectorResponseInputMax,
-				minScale,
-				maxScale) :
-			surface.hasSectorResponseParams ?
-			ComputeSectorEmitterResponseScaleForRenderer(
-				sector.rawResponseBrightness,
-				GetSectorEmitterNeutralBrightnessForRenderer(),
-				std::max(0.0f, surface.sectorResponseIntensity),
-				minScale,
-				maxScale) :
-			clamp(std::max(0.0f, sector.emitterResponseScale), minScale, maxScale);
-
-		outApplied = scale != 1.0f;
-		return scale;
-	}
-
-
 	static uint64_t HashBytes64(const uint8_t* data, size_t size)
 	{
 		uint64_t hash = 1469598103934665603ull;
@@ -6149,14 +5983,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mEmissiveSamplingPayloadHash = 0;
 	mEmissiveSectorResponsePayloadCacheValid = false;
 	mEmissiveSectorResponsePayloadHash = 0;
-	mEmissiveSectorResponseTraceCacheValid = false;
-	mEmissiveSectorResponseTraceHash = 0;
-	mEmissiveSectorResponseNotifyCacheValid = false;
-	mLastEmissiveSectorResponseNotifyFrame = 0;
-	mEmissiveSectorResponseNotifyScales.clear();
-	mSectorLightingEditNotifyCacheValid = false;
-	mLastSectorLightingEditNotifyFrame = 0;
-	mSectorLightingEditNotifyHashes.clear();
+	mSceneLights.ResetEmissiveSectorResponseCaches();
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
@@ -14615,7 +14442,6 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 	std::vector<BuiltCandidate> candidates;
 	std::unordered_map<uint64_t, uint32_t> materialResponseLookup;
 	const auto& activeSurfaces = mSceneLights.GetEmissiveSurfaces().activeSurfaces;
-	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
 	candidates.reserve(activeSurfaces.size());
 
 	auto appendSurfacePrimitives = [&](const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, const nri_scene::GeometryData* geometry, const std::vector<MaterialPrimitiveRange>& ranges, uint32_t dataSource, uint32_t primitiveBase)
@@ -14638,12 +14464,12 @@ void NRIRenderer::BuildEmissiveSamplingUpload(
 		}
 		const float samplingScale = ResolveGlowSamplingScale(surface.sourceFlags, surface.emissiveMode) * std::max(surface.reachScale, 0.0f);
 		bool sectorResponseApplied = false;
-		const float sectorRawResponseScale = ResolveSectorEmissionScale(sectorRegistry, surface, sectorResponseApplied);
-		const float sectorResponseScale = sectorResponseApplied ? ClampSectorEmissionIntensityScale(surface, sectorRawResponseScale) : 1.0f;
-		const float sectorReachScale = sectorResponseApplied ? ClampSectorEmissionReachScale(surface, sectorRawResponseScale) : 1.0f;
+		const float sectorRawResponseScale = mSceneLights.ResolveSectorEmissionScale(surface, sectorResponseApplied);
+		const float sectorResponseScale = sectorResponseApplied ? mSceneLights.ResolveSectorEmissionIntensityScale(surface, sectorRawResponseScale) : 1.0f;
+		const float sectorReachScale = sectorResponseApplied ? mSceneLights.ResolveSectorEmissionReachScale(surface, sectorRawResponseScale) : 1.0f;
 		bool materialResponseApplied = false;
-		const float materialResponseScale = ResolveEmissiveMaterialResponseScale(sectorRegistry, surface, materialResponseApplied);
-		const bool materialResponseEligible = IsEmissiveSurfaceMaterialResponseEligible(surface);
+		const float materialResponseScale = mSceneLights.ResolveEmissiveMaterialResponseScale(surface, materialResponseApplied);
+		const bool materialResponseEligible = mSceneLights.IsEmissiveSurfaceMaterialResponseEligible(surface);
 
 		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
 		{
@@ -14827,7 +14653,6 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 	hash = HashCombine64(hash, (uint64_t)context.dynamicPrimitiveBaseOffset);
 
 	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
-	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
 	hash = HashCombine64(hash, (uint64_t)emissiveRegistry.activeSurfaces.size());
 	for (const auto& surface : emissiveRegistry.activeSurfaces)
 	{
@@ -14839,23 +14664,23 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 		const auto bindingIt = emissiveRegistry.activeBindingHashes.find(surface.stableKey);
 		hash = HashCombine64(hash, bindingIt != emissiveRegistry.activeBindingHashes.end() ? bindingIt->second : 0ull);
 
-		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
+		const bool sectorResponseEligible = mSceneLights.IsEmissiveSurfaceSectorResponseEligible(surface);
 		if (sectorResponseEligible)
 		{
 			const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
 			bool applied = false;
-			const float responseScale = ResolveSectorEmissionScale(sectorRegistry, surface, applied);
-			const float intensityScale = applied ? ClampSectorEmissionIntensityScale(surface, responseScale) : 1.0f;
-			const float reachScale = applied ? ClampSectorEmissionReachScale(surface, responseScale) : 1.0f;
+			const float responseScale = mSceneLights.ResolveSectorEmissionScale(surface, applied);
+			const float intensityScale = applied ? mSceneLights.ResolveSectorEmissionIntensityScale(surface, responseScale) : 1.0f;
+			const float reachScale = applied ? mSceneLights.ResolveSectorEmissionReachScale(surface, responseScale) : 1.0f;
 			hash = HashCombine64(hash, (uint64_t)sectorIndex);
 			hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
 			hash = HashCombine64(hash, (uint64_t)FloatBits(intensityScale));
 			hash = HashCombine64(hash, (uint64_t)FloatBits(reachScale));
 		}
-		if (IsEmissiveSurfaceMaterialResponseEligible(surface))
+		if (mSceneLights.IsEmissiveSurfaceMaterialResponseEligible(surface))
 		{
 			bool applied = false;
-			const float materialScale = ResolveEmissiveMaterialResponseScale(sectorRegistry, surface, applied);
+			const float materialScale = mSceneLights.ResolveEmissiveMaterialResponseScale(surface, applied);
 			hash = HashCombine64(hash, 0x4d415452455350ull);
 			hash = HashCombine64(hash, (uint64_t)(uint32_t)surface.sectorIndex);
 			hash = HashCombine64(hash, (uint64_t)FloatBits(materialScale));
@@ -14867,271 +14692,12 @@ uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBui
 
 uint64_t NRIRenderer::BuildEmissiveSectorResponsePayloadHash() const
 {
-	uint64_t hash = 1469598103934665603ull;
-	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
-	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
-	for (const auto& surface : emissiveRegistry.activeSurfaces)
-	{
-		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
-		if (!sectorResponseEligible)
-		{
-			continue;
-		}
-
-		const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
-		bool applied = false;
-		const float responseScale = ResolveSectorEmissionScale(sectorRegistry, surface, applied);
-		const float intensityScale = applied ? ClampSectorEmissionIntensityScale(surface, responseScale) : 1.0f;
-		const float reachScale = applied ? ClampSectorEmissionReachScale(surface, responseScale) : 1.0f;
-		hash = HashCombine64(hash, surface.stableKey);
-		hash = HashCombine64(hash, (uint64_t)sectorIndex);
-		hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(intensityScale));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(reachScale));
-	}
-
-	return hash;
-}
-
-void NRIRenderer::NotifyEmissiveSectorResponseEditModeChanges()
-{
-	if (!nri_ptemissivelighteditmode)
-	{
-		mEmissiveSectorResponseNotifyCacheValid = false;
-		mSectorLightingEditNotifyCacheValid = false;
-		return;
-	}
-
-	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
-	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
-	const float nearbyRadius = std::max(0.0f, (float)nri_ptemissivelighteditnotifyrange);
-	const float nearbyRadiusSq = nearbyRadius * nearbyRadius;
-	if (mSectorLightingEditNotifyHashes.size() != sectorRegistry.sectorCount)
-	{
-		mSectorLightingEditNotifyHashes.assign(sectorRegistry.sectorCount, 0u);
-		mSectorLightingEditNotifyCacheValid = false;
-	}
-
-	struct SectorSurfaceEditAggregate
-	{
-		uint64_t hash = 1469598103934665603ull;
-		float center[3] = {};
-		int64_t shadeSum = 0;
-		int32_t minShade = std::numeric_limits<int32_t>::max();
-		int32_t maxShade = std::numeric_limits<int32_t>::min();
-		uint32_t count = 0;
-	};
-
-	std::vector<SectorSurfaceEditAggregate> sectorSurfaceAggregates(sectorRegistry.sectorCount);
-	for (const SceneLightSystem::SurfaceRecord& record : mSceneLights.GetSurfaceRecords())
-	{
-		if (record.provenance.sectorIndex < 0)
-		{
-			continue;
-		}
-
-		const uint32_t sectorIndex = (uint32_t)record.provenance.sectorIndex;
-		if (sectorIndex >= sectorSurfaceAggregates.size())
-		{
-			continue;
-		}
-
-		auto& aggregate = sectorSurfaceAggregates[sectorIndex];
-		aggregate.center[0] += record.center[0];
-		aggregate.center[1] += record.center[1];
-		aggregate.center[2] += record.center[2];
-		aggregate.shadeSum += record.material.shade;
-		aggregate.minShade = std::min(aggregate.minShade, record.material.shade);
-		aggregate.maxShade = std::max(aggregate.maxShade, record.material.shade);
-		aggregate.count++;
-		aggregate.hash = HashCombine64(aggregate.hash, (uint64_t)(uint32_t)record.material.shade);
-		aggregate.hash = HashCombine64(aggregate.hash, (uint64_t)record.material.paletteIndex);
-		aggregate.hash = HashCombine64(aggregate.hash, (uint64_t)FloatBits(record.material.lightLevel));
-	}
-
-	std::vector<uint32_t> changedNearbySurfaceSectors;
-	std::vector<uint64_t> nextSurfaceHashes(sectorRegistry.sectorCount, 0u);
-	for (uint32_t sectorIndex = 0; sectorIndex < (uint32_t)sectorSurfaceAggregates.size(); ++sectorIndex)
-	{
-		const auto& aggregate = sectorSurfaceAggregates[sectorIndex];
-		if (aggregate.count == 0)
-		{
-			continue;
-		}
-
-		uint64_t hash = aggregate.hash;
-		if (sectorIndex < sectorRegistry.sectors.size())
-		{
-			const auto& sector = sectorRegistry.sectors[sectorIndex];
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)sector.averageShade);
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)sector.rawAverageShade);
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)sector.paletteIndex);
-			hash = HashCombine64(hash, (uint64_t)FloatBits(sector.rawFloorLight));
-			hash = HashCombine64(hash, (uint64_t)FloatBits(sector.rawCeilingLight));
-			hash = HashCombine64(hash, (uint64_t)FloatBits(sector.emitterResponseScale));
-		}
-		nextSurfaceHashes[sectorIndex] = hash;
-
-		if (!mSectorLightingEditNotifyCacheValid ||
-			sectorIndex >= mSectorLightingEditNotifyHashes.size() ||
-			mSectorLightingEditNotifyHashes[sectorIndex] == 0u ||
-			mSectorLightingEditNotifyHashes[sectorIndex] == hash)
-		{
-			continue;
-		}
-
-		const float invCount = 1.0f / (float)aggregate.count;
-		const float centerX = aggregate.center[0] * invCount;
-		const float centerY = aggregate.center[1] * invCount;
-		const float centerZ = aggregate.center[2] * invCount;
-		const float dx = centerX - mCurrentCameraPos[0];
-		const float dy = centerY - mCurrentCameraPos[1];
-		const float dz = centerZ - mCurrentCameraPos[2];
-		if (dx * dx + dy * dy + dz * dz <= nearbyRadiusSq)
-		{
-			changedNearbySurfaceSectors.push_back(sectorIndex);
-		}
-	}
-
-	if (!changedNearbySurfaceSectors.empty() && mFrameIndex - mLastSectorLightingEditNotifyFrame >= 12)
-	{
-		const uint32_t printCount = std::min<uint32_t>((uint32_t)changedNearbySurfaceSectors.size(), 6u);
-		for (uint32_t i = 0; i < printCount; ++i)
-		{
-			const uint32_t sectorIndex = changedNearbySurfaceSectors[i];
-			const auto& aggregate = sectorSurfaceAggregates[sectorIndex];
-			const int32_t avgShade = aggregate.count > 0 ? (int32_t)(aggregate.shadeSum / (int64_t)aggregate.count) : 0;
-			const SceneLightSystem::SectorLightingRegistry::SectorLightRecord* sector =
-				sectorIndex < sectorRegistry.sectors.size() ? &sectorRegistry.sectors[sectorIndex] : nullptr;
-			Printf(
-				PRINT_LOW | PRINT_NOTIFY,
-				"NRI PT sector %u surface light changed avg_shade=%d range=[%d,%d] sector_raw=(%.2f,%.2f) signal=%.2f response=%.2f\n",
-				sectorIndex,
-				avgShade,
-				aggregate.minShade,
-				aggregate.maxShade,
-				sector != nullptr ? sector->rawFloorLight : 0.0f,
-				sector != nullptr ? sector->rawCeilingLight : 0.0f,
-				sector != nullptr ? sector->rawResponseSignal : 0.0f,
-				sector != nullptr ? sector->emitterResponseScale : 1.0f);
-		}
-		if (changedNearbySurfaceSectors.size() > printCount)
-		{
-			Printf(PRINT_LOW | PRINT_NOTIFY, "NRI PT sector surface light changed: +%u more nearby sectors\n", (uint32_t)changedNearbySurfaceSectors.size() - printCount);
-		}
-		mLastSectorLightingEditNotifyFrame = mFrameIndex;
-	}
-
-	mSectorLightingEditNotifyHashes = std::move(nextSurfaceHashes);
-	mSectorLightingEditNotifyCacheValid = true;
-
-	if (mEmissiveSectorResponseNotifyScales.size() != sectorRegistry.sectors.size())
-	{
-		mEmissiveSectorResponseNotifyScales.assign(sectorRegistry.sectors.size(), -1.0f);
-		mEmissiveSectorResponseNotifyCacheValid = false;
-	}
-
-	std::vector<float> nextScales(sectorRegistry.sectors.size(), -1.0f);
-	std::vector<uint32_t> changedNearbySectors;
-
-	for (const auto& surface : emissiveRegistry.activeSurfaces)
-	{
-		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
-		if (!sectorResponseEligible)
-		{
-			continue;
-		}
-
-		const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
-		if (sectorIndex >= nextScales.size())
-		{
-			continue;
-		}
-
-		bool applied = false;
-		const float scale = ResolveSectorEmissionScale(sectorRegistry, surface, applied);
-		nextScales[sectorIndex] = std::max(nextScales[sectorIndex], scale);
-		const float previousScale = sectorIndex < mEmissiveSectorResponseNotifyScales.size() ? mEmissiveSectorResponseNotifyScales[sectorIndex] : -1.0f;
-		if (!mEmissiveSectorResponseNotifyCacheValid || previousScale < 0.0f || std::abs(previousScale - scale) <= 0.02f)
-		{
-			continue;
-		}
-
-		const float dx = surface.center[0] - mCurrentCameraPos[0];
-		const float dy = surface.center[1] - mCurrentCameraPos[1];
-		const float dz = surface.center[2] - mCurrentCameraPos[2];
-		if (dx * dx + dy * dy + dz * dz > nearbyRadiusSq)
-		{
-			continue;
-		}
-
-		if (std::find(changedNearbySectors.begin(), changedNearbySectors.end(), sectorIndex) == changedNearbySectors.end())
-		{
-			changedNearbySectors.push_back(sectorIndex);
-		}
-	}
-
-	if (!changedNearbySectors.empty() && mFrameIndex - mLastEmissiveSectorResponseNotifyFrame >= 12)
-	{
-		for (uint32_t sectorIndex : changedNearbySectors)
-		{
-			const float scale = sectorIndex < nextScales.size() && nextScales[sectorIndex] >= 0.0f ? nextScales[sectorIndex] : 1.0f;
-			const char* state = scale > 1.01f ? "boosted" : (scale < 0.99f ? "dimmed" : "neutral");
-			Printf(PRINT_LOW | PRINT_NOTIFY, "NRI PT sector %u emission %s %.2fx\n", sectorIndex, state, scale);
-		}
-		mLastEmissiveSectorResponseNotifyFrame = mFrameIndex;
-	}
-
-	mEmissiveSectorResponseNotifyScales = std::move(nextScales);
-	mEmissiveSectorResponseNotifyCacheValid = true;
+	return mSceneLights.BuildEmissiveSectorResponsePayloadHash();
 }
 
 void NRIRenderer::TraceEmissiveSectorResponseChange()
 {
-	NotifyEmissiveSectorResponseEditModeChanges();
-
-	if (!ShouldTracePtPerf())
-	{
-		mEmissiveSectorResponseTraceCacheValid = false;
-		return;
-	}
-
-	const uint64_t sectorResponsePayloadHash = BuildEmissiveSectorResponsePayloadHash();
-	if (!mEmissiveSectorResponseTraceCacheValid)
-	{
-		mEmissiveSectorResponseTraceCacheValid = true;
-		mEmissiveSectorResponseTraceHash = sectorResponsePayloadHash;
-		return;
-	}
-
-	if (mEmissiveSectorResponseTraceHash == sectorResponsePayloadHash)
-	{
-		return;
-	}
-
-	const auto& emissiveRegistry = mSceneLights.GetEmissiveSurfaces();
-	const auto& sectorRegistry = mSceneLights.GetSectorLighting();
-	uint32_t affectedEmitterCount = 0;
-	for (const auto& surface : emissiveRegistry.activeSurfaces)
-	{
-		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
-		if (sectorResponseEligible)
-		{
-			affectedEmitterCount++;
-		}
-	}
-
-	Printf("NRI PT sector response change: frame=%u affected_emitters=%u total_emitters=%u sector_response_hash=0x%016llx->0x%016llx response=boost:%u dim:%u neutral:%u\n",
-		mFrameIndex,
-		affectedEmitterCount,
-		(uint32_t)emissiveRegistry.activeSurfaces.size(),
-		(unsigned long long)mEmissiveSectorResponseTraceHash,
-		(unsigned long long)sectorResponsePayloadHash,
-		sectorRegistry.responseBoostSectorCount,
-		sectorRegistry.responseDimSectorCount,
-		sectorRegistry.responseNeutralSectorCount);
-
-	mEmissiveSectorResponseTraceHash = sectorResponsePayloadHash;
+	mSceneLights.TraceEmissiveSectorResponseChange(mFrameIndex, mCurrentCameraPos, ShouldTracePtPerf());
 }
 
 uint64_t NRIRenderer::BuildSectorLightingPayloadHash() const
@@ -20538,14 +20104,7 @@ void NRIRenderer::DestroySceneBuffers()
 	mEmissiveSamplingPayloadHash = 0;
 	mEmissiveSectorResponsePayloadCacheValid = false;
 	mEmissiveSectorResponsePayloadHash = 0;
-	mEmissiveSectorResponseTraceCacheValid = false;
-	mEmissiveSectorResponseTraceHash = 0;
-	mEmissiveSectorResponseNotifyCacheValid = false;
-	mLastEmissiveSectorResponseNotifyFrame = 0;
-	mEmissiveSectorResponseNotifyScales.clear();
-	mSectorLightingEditNotifyCacheValid = false;
-	mLastSectorLightingEditNotifyFrame = 0;
-	mSectorLightingEditNotifyHashes.clear();
+	mSceneLights.ResetEmissiveSectorResponseCaches();
 	mEmissiveTlasInstanceCount = 0;
 	mEmissiveTlasStaticInstanceCount = 0;
 	mEmissiveTlasDynamicInstanceCount = 0;
