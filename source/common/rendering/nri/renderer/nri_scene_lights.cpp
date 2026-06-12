@@ -111,6 +111,11 @@ namespace
 		destination[2] = source[2];
 	}
 
+	const char* YesNo(bool value)
+	{
+		return value ? "yes" : "no";
+	}
+
 	void ComputeSurfaceBounds(const nri_scene::SurfaceRef& surface, float outCenter[3], float& outRadius)
 	{
 		outCenter[0] = 0.0f;
@@ -2102,6 +2107,122 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
 	mSectorLighting.topologyChanged = nextTopologyKeys != mSectorLighting.activeTopologyKeys;
 	mSectorLighting.activeTopologyKeys = std::move(nextTopologyKeys);
+}
+
+bool SceneLightSystem::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t maxLights, uint32_t& outId)
+{
+	if (position == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)
+	{
+		return false;
+	}
+
+	if (GetManualAnalyticLightCount() >= maxLights)
+	{
+		return false;
+	}
+
+	const uint32_t id = mNextRuntimePointLightId++;
+	if (!AddManualAnalyticLight(id, position, color, intensity, radius))
+	{
+		return false;
+	}
+
+	outId = id;
+	return true;
+}
+
+bool SceneLightSystem::UpdateRuntimePointLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius)
+{
+	return UpdateManualAnalyticLight(id, position, color, intensity, radius);
+}
+
+bool SceneLightSystem::RemoveRuntimePointLight(uint32_t id)
+{
+	return RemoveManualAnalyticLight(id);
+}
+
+bool SceneLightSystem::ClearRuntimePointLights()
+{
+	if (GetManualAnalyticLightCount() == 0)
+	{
+		return false;
+	}
+
+	ClearManualAnalyticLights();
+	return true;
+}
+
+void SceneLightSystem::ResetRuntimePointLights()
+{
+	ClearManualAnalyticLights();
+	mNextRuntimePointLightId = 1;
+}
+
+void SceneLightSystem::PrintRuntimePointLights(uint32_t maxLights) const
+{
+	const auto& analyticLights = GetAnalyticLights();
+	Printf("NRI PT analytic lights: active=%u manual=%u muzzle_slots=%u muzzle_active=%u rules=%u overlay_rules=%u map_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
+		(uint32_t)analyticLights.activeLights.size(),
+		(uint32_t)analyticLights.manualLights.size(),
+		analyticLights.transientMuzzleSlotCount,
+		analyticLights.transientMuzzleActiveCount,
+		(uint32_t)analyticLights.spriteTileRules.size(),
+		analyticLights.actorOverlayRuleCount,
+		analyticLights.mapOverlayRuleCount,
+		analyticLights.matchedSurfaceCount,
+		analyticLights.actorOverlayMatchedSurfaceCount,
+		analyticLights.dedupedMatchCount,
+		analyticLights.truncatedLightCount,
+		YesNo(analyticLights.lastBuildTopologyChanged),
+		YesNo(analyticLights.lastBuildPropertiesChanged),
+		(uint32_t)analyticLights.addedTopologyKeys.size(),
+		(uint32_t)analyticLights.removedTopologyKeys.size(),
+		(uint32_t)analyticLights.reboundTopologyKeys.size(),
+		maxLights);
+	if (analyticLights.activeLights.empty())
+	{
+		return;
+	}
+
+	for (const SceneAnalyticLight& light : analyticLights.activeLights)
+	{
+		const char* sourceBase =
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_Manual) != 0 ? "manual" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_MuzzleFlash) != 0 ? "transient" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? "overlay" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_MapOverlay) != 0 ? "overlay" :
+			"heuristic";
+		const char* sourceSuffix =
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_MuzzleFlash) != 0 ? ":muzzle" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_SpriteTileHeuristic) != 0 ? ":sprite_tile" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? ":actor" :
+			(light.sourceFlags & SceneAnalyticLightSourceFlag_MapOverlay) != 0 ? ":map" :
+			"";
+		const auto diagnosticIt = analyticLights.activeDiagnosticFlags.find(light.stableKey);
+		const uint32_t diagnosticFlags = diagnosticIt != analyticLights.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
+		Printf("NRI PT analytic light %u: id=%u topology=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s shadow=%s source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
+			light.id,
+			light.id,
+			(unsigned long long)light.stableKey,
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PreviousMatch) != 0),
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Added) != 0),
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Rebound) != 0),
+			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PropertyChanged) != 0),
+			YesNo((light.flags & SceneAnalyticLightFlag_CastsShadow) != 0),
+			sourceBase,
+			sourceSuffix,
+			light.sourceRuleId,
+			light.actorIndex,
+			light.textureId,
+			light.position[0],
+			light.position[1],
+			light.position[2],
+			light.color[0],
+			light.color[1],
+			light.color[2],
+			light.intensity,
+			light.radius);
+	}
 }
 
 bool SceneLightSystem::AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius)

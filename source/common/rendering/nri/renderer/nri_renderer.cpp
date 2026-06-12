@@ -6504,7 +6504,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 
 	if (info.newLevel == nullptr)
 	{
-		mNextRuntimePointLightId = 1;
+		mSceneLights.ResetRuntimePointLights();
 		mNextRuntimeDebugSphereId = 1;
 	}
 }
@@ -6563,7 +6563,7 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	mHasLoggedStats = false;
 	mLastRuntimeLinkTraceState = {};
 	mHasRuntimeLinkTraceState = false;
-	mNextRuntimePointLightId = 1;
+	mSceneLights.ResetRuntimePointLights();
 	mNextRuntimeDebugSphereId = 1;
 
 	if (info.newLevel == nullptr)
@@ -9334,18 +9334,7 @@ void NRIRenderer::InvalidateRuntimeLightSceneData()
 
 bool NRIRenderer::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId)
 {
-	if (position == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)
-	{
-		return false;
-	}
-
-	if (mSceneLights.GetManualAnalyticLightCount() >= NRI_MAX_RUNTIME_POINT_LIGHTS)
-	{
-		return false;
-	}
-
-	outId = mNextRuntimePointLightId++;
-	if (!mSceneLights.AddManualAnalyticLight(outId, position, color, intensity, radius))
+	if (!mSceneLights.AddRuntimePointLight(position, color, intensity, radius, NRI_MAX_RUNTIME_POINT_LIGHTS, outId))
 	{
 		return false;
 	}
@@ -9356,7 +9345,7 @@ bool NRIRenderer::AddRuntimePointLight(const float position[3], const float colo
 
 bool NRIRenderer::UpdateRuntimePointLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius)
 {
-	if (!mSceneLights.UpdateManualAnalyticLight(id, position, color, intensity, radius))
+	if (!mSceneLights.UpdateRuntimePointLight(id, position, color, intensity, radius))
 	{
 		return false;
 	}
@@ -9368,7 +9357,7 @@ bool NRIRenderer::UpdateRuntimePointLight(uint32_t id, const float position[3], 
 
 bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
 {
-	if (!mSceneLights.RemoveManualAnalyticLight(id))
+	if (!mSceneLights.RemoveRuntimePointLight(id))
 	{
 		return false;
 	}
@@ -9380,81 +9369,18 @@ bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
 
 void NRIRenderer::ClearRuntimePointLights()
 {
-	if (mSceneLights.GetManualAnalyticLightCount() == 0)
+	if (!mSceneLights.ClearRuntimePointLights())
 	{
 		return;
 	}
 
-	mSceneLights.ClearManualAnalyticLights();
 	InvalidateRuntimeLightSceneData();
 	NoteLightHistoryChange("runtime-light-change");
 }
 
 void NRIRenderer::PrintRuntimePointLights() const
 {
-	const auto& analyticLights = mSceneLights.GetAnalyticLights();
-	Printf("NRI PT analytic lights: active=%u manual=%u muzzle_slots=%u muzzle_active=%u rules=%u overlay_rules=%u map_rules=%u matched_surfaces=%u overlay_matches=%u deduped=%u truncated=%u topo_changed=%s prop_changed=%s added=%u removed=%u rebound=%u limit=%u\n",
-		(uint32_t)analyticLights.activeLights.size(),
-		(uint32_t)analyticLights.manualLights.size(),
-		analyticLights.transientMuzzleSlotCount,
-		analyticLights.transientMuzzleActiveCount,
-		(uint32_t)analyticLights.spriteTileRules.size(),
-		analyticLights.actorOverlayRuleCount,
-		analyticLights.mapOverlayRuleCount,
-		analyticLights.matchedSurfaceCount,
-		analyticLights.actorOverlayMatchedSurfaceCount,
-		analyticLights.dedupedMatchCount,
-		analyticLights.truncatedLightCount,
-		YesNo(analyticLights.lastBuildTopologyChanged),
-		YesNo(analyticLights.lastBuildPropertiesChanged),
-		(uint32_t)analyticLights.addedTopologyKeys.size(),
-		(uint32_t)analyticLights.removedTopologyKeys.size(),
-		(uint32_t)analyticLights.reboundTopologyKeys.size(),
-		NRI_MAX_RUNTIME_POINT_LIGHTS);
-	if (analyticLights.activeLights.empty())
-	{
-		return;
-	}
-
-	for (const SceneLightSystem::SceneAnalyticLight& light : analyticLights.activeLights)
-	{
-		const char* sourceBase =
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_Manual) != 0 ? "manual" :
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_MuzzleFlash) != 0 ? "transient" :
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? "overlay" :
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_MapOverlay) != 0 ? "overlay" :
-			"heuristic";
-		const char* sourceSuffix =
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_MuzzleFlash) != 0 ? ":muzzle" :
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_SpriteTileHeuristic) != 0 ? ":sprite_tile" :
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_ActorOverlay) != 0 ? ":actor" :
-			(light.sourceFlags & SceneAnalyticLightSourceFlag_MapOverlay) != 0 ? ":map" :
-			"";
-		const auto diagnosticIt = analyticLights.activeDiagnosticFlags.find(light.stableKey);
-		const uint32_t diagnosticFlags = diagnosticIt != analyticLights.activeDiagnosticFlags.end() ? diagnosticIt->second : SceneLightDiagnosticFlag_None;
-		Printf("NRI PT analytic light %u: id=%u topology=0x%016llx prev_match=%s added=%s rebound=%s prop_changed=%s shadow=%s source=%s%s rule=%u actor=%d tile=%u render_pos=(%.3f, %.3f, %.3f) color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f\n",
-			light.id,
-			light.id,
-			(unsigned long long)light.stableKey,
-			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PreviousMatch) != 0),
-			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Added) != 0),
-			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Rebound) != 0),
-			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PropertyChanged) != 0),
-			YesNo((light.flags & SceneAnalyticLightFlag_CastsShadow) != 0),
-			sourceBase,
-			sourceSuffix,
-			light.sourceRuleId,
-			light.actorIndex,
-			light.textureId,
-			light.position[0],
-			light.position[1],
-			light.position[2],
-			light.color[0],
-			light.color[1],
-			light.color[2],
-			light.intensity,
-			light.radius);
-	}
+	mSceneLights.PrintRuntimePointLights(NRI_MAX_RUNTIME_POINT_LIGHTS);
 }
 
 void NRIRenderer::PrintRuntimeLightClusterStatus() const

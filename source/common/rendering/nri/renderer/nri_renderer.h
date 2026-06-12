@@ -2554,7 +2554,6 @@ private:
 	uint32_t mBoundSectorLightPulsingCount = 0;
 	uint32_t mBoundSectorLightDominantSector = UINT32_MAX;
 	float mBoundSectorLightDominantContribution = 0.0f;
-	uint32_t mNextRuntimePointLightId = 1;
 	std::vector<RuntimeDebugSphere> mRuntimeDebugSpheres;
 	uint32_t mNextRuntimeDebugSphereId = 1;
 	SurfaceProbeResult mLastSurfaceProbe = {};

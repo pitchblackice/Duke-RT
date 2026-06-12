@@ -452,6 +452,12 @@ public:
 		const std::vector<EmissiveMaterialResponseRule>* materialResponseRules = nullptr);
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
 
+	bool AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t maxLights, uint32_t& outId);
+	bool UpdateRuntimePointLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
+	bool RemoveRuntimePointLight(uint32_t id);
+	bool ClearRuntimePointLights();
+	void ResetRuntimePointLights();
+	void PrintRuntimePointLights(uint32_t maxLights) const;
 	bool AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool UpdateManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool RemoveManualAnalyticLight(uint32_t id);
@@ -508,4 +514,5 @@ private:
 	std::vector<SurfaceRecord> mSurfaceRecords;
 	FrameAppendStats mFrameAppendStats = {};
 	uint64_t mFrameSerial = 0;
+	uint32_t mNextRuntimePointLightId = 1;
 };
