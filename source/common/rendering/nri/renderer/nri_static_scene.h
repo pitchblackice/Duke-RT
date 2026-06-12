@@ -191,15 +191,43 @@ struct NRIStaticSceneRegistrySyncInput
 	uint64_t (*hashResidentMaterialPayload)(const nri_scene::MaterialBridgeData& materials) = nullptr;
 };
 
+struct NRIPreservedStaticMapSkyState;
+
 struct NRIStaticSceneCacheBuildServices
 {
 	void* user = nullptr;
 	void (*resetMutationCacheForStaticSceneBuild)(void* user, uint32_t chunkCount) = nullptr;
 	void (*initializeStaticChunkReplacement)(void* user, const nri_scene::PTMapChunk& chunk) = nullptr;
+	void (*buildMaterialsWithActorOverrides)(void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label) = nullptr;
+	bool (*chunkHasAnimatedStaticMapSurfaceCandidates)(void* user, const nri_scene::PTMapWorld& mapWorld, const nri_scene::PTMapChunk& chunk) = nullptr;
+	double* geometryBuildStaticChunkMs = nullptr;
+	uint32_t* geometryBuildStaticChunkCalls = nullptr;
+	uint32_t* geometryBuildStaticChunkPrimitives = nullptr;
+	bool ceilingNudge = false;
+	float ceilingNudgeDistance = 0.0f;
 };
 
 namespace nri_static_scene
 {
+	void InitializeStaticMapSceneCacheBuild(
+		const nri_scene::PTMapWorld& mapWorld,
+		const NRIPreservedStaticMapSkyState* preservedSkyState,
+		const NRIStaticSceneCacheBuildServices& services,
+		StaticMapSceneCache& outStaticScene);
+
+	void AppendStaticMapSceneCacheChunk(
+		const nri_scene::PTMapWorld& mapWorld,
+		const nri_scene::PTMapChunk& chunk,
+		const nri_scene::SceneView* preservedSkyView,
+		const NRIStaticSceneCacheBuildServices& services,
+		StaticMapSceneCache& outStaticScene);
+
+	bool BuildStaticMapSceneCache(
+		const nri_scene::PTMapWorld& mapWorld,
+		const NRIPreservedStaticMapSkyState* preservedSkyState,
+		const NRIStaticSceneCacheBuildServices& services,
+		StaticMapSceneCache& outStaticScene);
+
 	bool RebuildResidentStaticMaterialBridgeFromChunks(
 		StaticMapSceneCache& staticScene,
 		const StaticMapChunkAtlas& atlas,

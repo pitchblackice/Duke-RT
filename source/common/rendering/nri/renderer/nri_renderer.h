@@ -1953,22 +1953,6 @@ private:
 	bool EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsureSkyTexture(const nri_scene::SceneView& sceneView, bool preserveExistingSky);
 	bool EnsureStaticMapScene();
-	bool BuildStaticMapSceneCache(
-		const nri_scene::PTMapWorld& mapWorld,
-		const NRIPreservedStaticMapSkyState* preservedSkyState,
-		const NRIStaticSceneCacheBuildServices& services,
-		StaticMapSceneCache& outStaticScene);
-	void InitializeStaticMapSceneCacheBuild(
-		const nri_scene::PTMapWorld& mapWorld,
-		const NRIPreservedStaticMapSkyState* preservedSkyState,
-		const NRIStaticSceneCacheBuildServices& services,
-		StaticMapSceneCache& outStaticScene);
-	void AppendStaticMapSceneCacheChunk(
-		const nri_scene::PTMapWorld& mapWorld,
-		const nri_scene::PTMapChunk& chunk,
-		const nri_scene::SceneView* preservedSkyView,
-		const NRIStaticSceneCacheBuildServices& services,
-		StaticMapSceneCache& outStaticScene);
 	void ResetResidentMapChunkRegistry();
 	void SyncResidentMapChunkRegistryFromStaticScene();
 	uint32_t GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex) const;

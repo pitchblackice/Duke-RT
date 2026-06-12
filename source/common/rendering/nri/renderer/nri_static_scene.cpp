@@ -1,8 +1,11 @@
 #include "nri_static_scene.h"
 
 #include "nri_renderer.h"
+#include "nri_render_geometry_helpers.h"
 #include "nri_sky_environment.h"
 #include "nri_static_scene_geometry.h"
+#include "nri_runtime_mutation_shared.h"
+#include "../scene/nri_material_bridge.h"
 #include "../scene/nri_scene_math.h"
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -368,6 +371,162 @@ bool nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
 
 	staticScene.materialBridge = std::move(bridge);
 	return true;
+}
+
+void nri_static_scene::InitializeStaticMapSceneCacheBuild(
+	const nri_scene::PTMapWorld& mapWorld,
+	const NRIPreservedStaticMapSkyState* preservedSkyState,
+	const NRIStaticSceneCacheBuildServices& services,
+	StaticMapSceneCache& outStaticScene)
+{
+	outStaticScene.valid = false;
+	outStaticScene.texturesResident = false;
+	outStaticScene.buffersResident = false;
+	outStaticScene.accelerationResident = false;
+	outStaticScene.buildSerial = mapWorld.buildSerial;
+	outStaticScene.sceneBuildCount = 0;
+	outStaticScene.gpuUploadCount = 0;
+	outStaticScene.accelerationBuildCount = 0;
+	outStaticScene.animatedCandidateChunkCount = 0;
+	outStaticScene.animatedRefreshCount = 0;
+	outStaticScene.animatedRefreshUploadCount = 0;
+	outStaticScene.animatedGeometryFallbackCount = 0;
+	outStaticScene.animatedRefreshSuppressedChunkCount = 0;
+	outStaticScene.reuseCount = 0;
+	outStaticScene.sceneView = {};
+	outStaticScene.lightChunkViews.clear();
+	outStaticScene.geometry = {};
+	outStaticScene.materialBridge = {};
+	outStaticScene.gpuMaterials.clear();
+	outStaticScene.chunks.clear();
+	outStaticScene.tlasInstanceCount = 0;
+	outStaticScene.lightChunkViews.reserve(mapWorld.chunks.size());
+	outStaticScene.chunks.reserve(mapWorld.chunks.size());
+
+	if (services.resetMutationCacheForStaticSceneBuild != nullptr)
+	{
+		services.resetMutationCacheForStaticSceneBuild(services.user, (uint32_t)mapWorld.chunks.size());
+	}
+
+	const nri_scene::SceneView* preservedSkyView = preservedSkyState != nullptr ? &preservedSkyState->sceneView : nullptr;
+	nri_scene::BuildMapSceneView(mapWorld, outStaticScene.sceneView, preservedSkyView);
+}
+
+void nri_static_scene::AppendStaticMapSceneCacheChunk(
+	const nri_scene::PTMapWorld& mapWorld,
+	const nri_scene::PTMapChunk& chunk,
+	const nri_scene::SceneView* preservedSkyView,
+	const NRIStaticSceneCacheBuildServices& services,
+	StaticMapSceneCache& outStaticScene)
+{
+	if (services.initializeStaticChunkReplacement != nullptr)
+	{
+		services.initializeStaticChunkReplacement(services.user, chunk);
+	}
+
+	nri_scene::SceneView chunkSceneView;
+	nri_scene::GeometryData chunkGeometry;
+	nri_scene::MaterialBridgeData chunkMaterials;
+	nri_scene::BuildMapChunkSceneView(mapWorld, chunk, chunkSceneView, preservedSkyView);
+	if (services.ceilingNudge)
+	{
+		NudgeMapCeilingSections(chunkSceneView, services.ceilingNudgeDistance);
+	}
+	{
+		Clocker clock(NriPTGeometryBuild);
+		const auto start = std::chrono::steady_clock::now();
+		nri_scene::BuildGeometry(chunkSceneView, chunkGeometry);
+		AssignGeometryPortalIndices(mapWorld, chunkGeometry);
+		if (services.geometryBuildStaticChunkMs != nullptr)
+		{
+			*services.geometryBuildStaticChunkMs += DurationMs(start, std::chrono::steady_clock::now());
+		}
+	}
+	if (services.geometryBuildStaticChunkCalls != nullptr)
+	{
+		(*services.geometryBuildStaticChunkCalls)++;
+	}
+	if (services.geometryBuildStaticChunkPrimitives != nullptr)
+	{
+		*services.geometryBuildStaticChunkPrimitives += (uint32_t)chunkGeometry.primitives.size();
+	}
+	{
+		Clocker clock(NriPTMaterialBuild);
+		if (services.buildMaterialsWithActorOverrides != nullptr)
+		{
+			services.buildMaterialsWithActorOverrides(services.user, chunkSceneView, chunkMaterials, "static_map_chunk");
+		}
+		else
+		{
+			nri_scene::BuildMaterials(chunkSceneView, chunkMaterials);
+		}
+	}
+	if (chunkGeometry.primitives.empty())
+	{
+		return;
+	}
+
+	StaticMapSceneCache::ChunkCache chunkCache = {};
+	chunkCache.chunkIndex = chunk.chunkIndex;
+	chunkCache.vertexOffset = (uint32_t)outStaticScene.geometry.vertices.size();
+	chunkCache.vertexCount = (uint32_t)chunkGeometry.vertices.size();
+	chunkCache.indexOffset = (uint32_t)outStaticScene.geometry.indices.size();
+	chunkCache.indexCount = (uint32_t)chunkGeometry.indices.size();
+	chunkCache.primitiveOffset = (uint32_t)outStaticScene.geometry.primitives.size();
+	chunkCache.primitiveCount = (uint32_t)chunkGeometry.primitives.size();
+	chunkCache.materialOffset = (uint32_t)outStaticScene.materialBridge.materials.size();
+	chunkCache.materialCount = (uint32_t)chunkMaterials.materials.size();
+	chunkCache.geometryTopologySignature = nri_static_scene_geometry::ComputeGeometryTopologySignature(chunkGeometry);
+	chunkCache.primitiveLayoutSignature = nri_static_scene_geometry::ComputePrimitiveLayoutSignature(chunkGeometry);
+	chunkCache.exactGeometrySignature = nri_runtime_mutation::ComputeExactGeometrySignature(chunkSceneView);
+	chunkCache.animatedMaterialSignature = nri_runtime_mutation::ComputeAnimatedMaterialSignature(chunkSceneView);
+	chunkCache.animatedGeometrySignature = nri_runtime_mutation::ComputeAnimatedGeometrySignature(chunkSceneView);
+	chunkCache.hasAnimatedTextureCandidates =
+		services.chunkHasAnimatedStaticMapSurfaceCandidates != nullptr &&
+		services.chunkHasAnimatedStaticMapSurfaceCandidates(services.user, mapWorld, chunk);
+	chunkCache.animatedRefreshSuppressed = false;
+
+	AppendGeometry(chunkGeometry, chunkCache.materialOffset, outStaticScene.geometry);
+	nri_scene::AppendMaterialBridge(chunkMaterials, outStaticScene.materialBridge);
+	chunkCache.geometryPayloadHash = nri_static_scene_geometry::HashResidentGeometryPayload(
+		mapWorld,
+		outStaticScene.geometry,
+		chunkCache.vertexOffset,
+		chunkCache.vertexCount,
+		chunkCache.indexOffset,
+		chunkCache.indexCount,
+		chunkCache.primitiveOffset,
+		chunkCache.primitiveCount,
+		chunkCache.materialOffset,
+		chunkCache.materialCount);
+	chunkCache.materialBridge = std::move(chunkMaterials);
+	if (chunkCache.hasAnimatedTextureCandidates)
+	{
+		outStaticScene.animatedCandidateChunkCount++;
+	}
+	outStaticScene.lightChunkViews.push_back(std::move(chunkSceneView));
+	outStaticScene.chunks.push_back(std::move(chunkCache));
+}
+
+bool nri_static_scene::BuildStaticMapSceneCache(
+	const nri_scene::PTMapWorld& mapWorld,
+	const NRIPreservedStaticMapSkyState* preservedSkyState,
+	const NRIStaticSceneCacheBuildServices& services,
+	StaticMapSceneCache& outStaticScene)
+{
+	if (!mapWorld.valid)
+	{
+		return false;
+	}
+
+	InitializeStaticMapSceneCacheBuild(mapWorld, preservedSkyState, services, outStaticScene);
+	const nri_scene::SceneView* preservedSkyView = preservedSkyState != nullptr ? &preservedSkyState->sceneView : nullptr;
+	for (const nri_scene::PTMapChunk& chunk : mapWorld.chunks)
+	{
+		AppendStaticMapSceneCacheChunk(mapWorld, chunk, preservedSkyView, services, outStaticScene);
+	}
+
+	return !outStaticScene.geometry.primitives.empty();
 }
 
 bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas)
