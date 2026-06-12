@@ -99,6 +99,15 @@ struct NRISectorLightGpuData
 	int32_t hitag = 0;
 };
 
+struct NRISectorLightingBoundState
+{
+	uint32_t sectorCount = 0;
+	uint32_t activeCount = 0;
+	uint32_t pulsingCount = 0;
+	uint32_t dominantSector = UINT32_MAX;
+	float dominantContribution = 0.0f;
+};
+
 struct NRIRuntimeLightTileHeaderGpuData
 {
 	uint32_t indexOffset = 0;
@@ -602,6 +611,7 @@ public:
 		bool sectorLightingEnabled,
 		NRISectorLightHeaderGpuData& outHeader,
 		std::vector<NRISectorLightGpuData>& outSectors) const;
+	NRISectorLightingBoundState BuildSectorLightingBoundState(float sectorLightMultiplier) const;
 	uint64_t BuildSectorLightingPayloadHash(float sectorLightMultiplier, bool sectorLightingEnabled) const;
 
 	bool AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t maxLights, uint32_t& outId);

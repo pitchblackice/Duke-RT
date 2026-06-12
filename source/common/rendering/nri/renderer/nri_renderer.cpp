@@ -14295,29 +14295,12 @@ uint64_t NRIRenderer::BuildSectorLightingPayloadHash() const
 
 void NRIRenderer::UpdateBoundSectorLightingState()
 {
-	const auto& registry = mSceneLights.GetSectorLighting();
-	const float sectorLightMultiplier = GetSectorLightMultiplier();
-	mBoundSectorLightSectorCount = registry.sectorCount;
-	mBoundSectorLightActiveCount = registry.activeSectorCount;
-	mBoundSectorLightPulsingCount = registry.pulsingSectorCount;
-	mBoundSectorLightDominantSector = UINT32_MAX;
-	mBoundSectorLightDominantContribution = 0.0f;
-
-	for (uint32_t sectorIndex : registry.activeSectorIndices)
-	{
-		if (sectorIndex >= registry.sectors.size())
-		{
-			continue;
-		}
-
-		const auto& sector = registry.sectors[sectorIndex];
-		const float contribution = sectorLightMultiplier * (sector.ambientIntensity + std::abs(sector.hemisphereAmount) + sector.fogAmount);
-		if (contribution > mBoundSectorLightDominantContribution)
-		{
-			mBoundSectorLightDominantContribution = contribution;
-			mBoundSectorLightDominantSector = sectorIndex;
-		}
-	}
+	const NRISectorLightingBoundState state = mSceneLights.BuildSectorLightingBoundState(GetSectorLightMultiplier());
+	mBoundSectorLightSectorCount = state.sectorCount;
+	mBoundSectorLightActiveCount = state.activeCount;
+	mBoundSectorLightPulsingCount = state.pulsingCount;
+	mBoundSectorLightDominantSector = state.dominantSector;
+	mBoundSectorLightDominantContribution = state.dominantContribution;
 }
 
 bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context, bool* ioWaitedForWrites)

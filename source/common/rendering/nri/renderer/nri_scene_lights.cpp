@@ -2894,6 +2894,35 @@ void SceneLightSystem::BuildSectorLightingUpload(
 	}
 }
 
+NRISectorLightingBoundState SceneLightSystem::BuildSectorLightingBoundState(float sectorLightMultiplier) const
+{
+	NRISectorLightingBoundState state = {};
+	const auto& registry = mSectorLighting;
+	state.sectorCount = registry.sectorCount;
+	state.activeCount = registry.activeSectorCount;
+	state.pulsingCount = registry.pulsingSectorCount;
+	state.dominantSector = UINT32_MAX;
+	state.dominantContribution = 0.0f;
+
+	for (uint32_t sectorIndex : registry.activeSectorIndices)
+	{
+		if (sectorIndex >= registry.sectors.size())
+		{
+			continue;
+		}
+
+		const auto& sector = registry.sectors[sectorIndex];
+		const float contribution = sectorLightMultiplier * (sector.ambientIntensity + std::abs(sector.hemisphereAmount) + sector.fogAmount);
+		if (contribution > state.dominantContribution)
+		{
+			state.dominantContribution = contribution;
+			state.dominantSector = sectorIndex;
+		}
+	}
+
+	return state;
+}
+
 uint64_t SceneLightSystem::BuildSectorLightingPayloadHash(float sectorLightMultiplier, bool sectorLightingEnabled) const
 {
 	const auto& registry = mSectorLighting;
