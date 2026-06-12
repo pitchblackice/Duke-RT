@@ -1629,15 +1629,7 @@ private:
 		float materialResponseScale = 1.0f;
 	};
 
-	struct RuntimePointLightGpuData
-	{
-		float position[3] = {};
-		float radius = 0.0f;
-		float color[3] = { 1.0f, 1.0f, 1.0f };
-		float intensity = 1.0f;
-		uint32_t flags = 0;
-		uint32_t reserved[3] = {};
-	};
+	using RuntimePointLightGpuData = NRIRuntimePointLightGpuData;
 
 	struct RuntimeDebugSphere
 	{

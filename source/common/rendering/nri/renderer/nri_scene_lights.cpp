@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <unordered_map>
@@ -205,6 +206,13 @@ namespace
 	uint64_t HashCombine64(uint64_t hash, uint64_t value)
 	{
 		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
+	}
+
+	uint32_t FloatBits(float value)
+	{
+		uint32_t bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		return bits;
 	}
 
 	uint64_t QuantizePositionKey(const float position[3])
@@ -2119,6 +2127,44 @@ void SceneLightSystem::RebuildSectorLighting(uint32_t frameIndex, uint32_t secto
 	std::sort(nextTopologyKeys.begin(), nextTopologyKeys.end());
 	mSectorLighting.topologyChanged = nextTopologyKeys != mSectorLighting.activeTopologyKeys;
 	mSectorLighting.activeTopologyKeys = std::move(nextTopologyKeys);
+}
+
+void SceneLightSystem::BuildRuntimePointLightUpload(std::vector<NRIRuntimePointLightGpuData>& outLights) const
+{
+	const auto& activeLights = mAnalyticLights.activeLights;
+	outLights.clear();
+	outLights.reserve(activeLights.size());
+	for (const SceneAnalyticLight& light : activeLights)
+	{
+		NRIRuntimePointLightGpuData gpuLight = {};
+		Copy3f(light.position, gpuLight.position);
+		gpuLight.radius = light.radius;
+		Copy3f(light.color, gpuLight.color);
+		gpuLight.intensity = light.intensity;
+		gpuLight.flags = light.flags;
+		outLights.push_back(gpuLight);
+	}
+}
+
+uint64_t SceneLightSystem::BuildRuntimeLightPayloadHash() const
+{
+	const auto& activeLights = mAnalyticLights.activeLights;
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashCombine64(hash, (uint64_t)activeLights.size());
+	for (const SceneAnalyticLight& light : activeLights)
+	{
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[0]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[1]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[2]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[0]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[1]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[2]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.intensity));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(light.radius));
+		hash = HashCombine64(hash, (uint64_t)light.flags);
+	}
+
+	return hash;
 }
 
 bool SceneLightSystem::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t maxLights, uint32_t& outId)

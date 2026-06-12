@@ -64,6 +64,16 @@ enum SceneLightDiagnosticFlags : uint32_t
 	SceneLightDiagnosticFlag_Added = 1u << 3,
 };
 
+struct NRIRuntimePointLightGpuData
+{
+	float position[3] = {};
+	float radius = 0.0f;
+	float color[3] = { 1.0f, 1.0f, 1.0f };
+	float intensity = 1.0f;
+	uint32_t flags = 0;
+	uint32_t reserved[3] = {};
+};
+
 struct NRILightingSettings
 {
 	float emissiveMinPower = 0.0f;
@@ -451,6 +461,8 @@ public:
 		const std::vector<EmissiveOverrideRule>* overrideRules = nullptr,
 		const std::vector<EmissiveMaterialResponseRule>* materialResponseRules = nullptr);
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
+	void BuildRuntimePointLightUpload(std::vector<NRIRuntimePointLightGpuData>& outLights) const;
+	uint64_t BuildRuntimeLightPayloadHash() const;
 
 	bool AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t maxLights, uint32_t& outId);
 	bool UpdateRuntimePointLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);

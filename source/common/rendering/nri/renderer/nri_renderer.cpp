@@ -14861,40 +14861,12 @@ bool NRIRenderer::UpdateSamplerSet()
 
 void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const
 {
-	const auto& activeLights = mSceneLights.GetAnalyticLights().activeLights;
-	outLights.clear();
-	outLights.reserve(activeLights.size());
-	for (const SceneLightSystem::SceneAnalyticLight& light : activeLights)
-	{
-		RuntimePointLightGpuData gpuLight = {};
-		Copy3(light.position, gpuLight.position);
-		gpuLight.radius = light.radius;
-		Copy3(light.color, gpuLight.color);
-		gpuLight.intensity = light.intensity;
-		gpuLight.flags = light.flags;
-		outLights.push_back(gpuLight);
-	}
+	mSceneLights.BuildRuntimePointLightUpload(outLights);
 }
 
 uint64_t NRIRenderer::BuildRuntimeLightPayloadHash() const
 {
-	const auto& activeLights = mSceneLights.GetAnalyticLights().activeLights;
-	uint64_t hash = 1469598103934665603ull;
-	hash = HashCombine64(hash, (uint64_t)activeLights.size());
-	for (const SceneLightSystem::SceneAnalyticLight& light : activeLights)
-	{
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[0]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[1]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[2]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[0]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[1]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[2]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.intensity));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.radius));
-		hash = HashCombine64(hash, (uint64_t)light.flags);
-	}
-
-	return hash;
+	return mSceneLights.BuildRuntimeLightPayloadHash();
 }
 
 uint64_t NRIRenderer::BuildRuntimeLightClusterCameraHash() const
