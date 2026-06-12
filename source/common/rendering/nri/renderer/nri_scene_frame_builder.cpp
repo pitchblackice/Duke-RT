@@ -281,6 +281,22 @@ NRIRenderer::DynamicSceneFrameState BuildNRISceneFrameDynamicState(
 	return result;
 }
 
+NRIRenderer::SurfaceProbeFrameState BuildNRISceneSurfaceProbeFrameState(
+	const NRISceneSurfaceProbeFrameInputs& inputs)
+{
+	NRIRenderer::SurfaceProbeFrameState result = {};
+	result.valid = true;
+	result.usesStaticMapScene = inputs.usesStaticMapScene;
+	result.staticPrimitiveCount = inputs.usesStaticMapScene ? inputs.activeStaticProbePrimitiveCount : 0u;
+	result.runtimeSpaceLinkPrimitiveCount = inputs.runtimeSpaceLinkGeometry != nullptr ? (uint32_t)inputs.runtimeSpaceLinkGeometry->primitives.size() : 0u;
+	result.runtimeMutationPrimitiveCount = inputs.runtimeMutationGeometry != nullptr ? (uint32_t)inputs.runtimeMutationGeometry->primitives.size() : 0u;
+	result.dynamicPrimitiveCount =
+		inputs.overlayGeometry != nullptr && !inputs.overlayGeometry->primitives.empty() ?
+			(uint32_t)inputs.overlayGeometry->primitives.size() :
+			(inputs.activeDynamicGeometry != nullptr ? (uint32_t)inputs.activeDynamicGeometry->primitives.size() : 0u);
+	return result;
+}
+
 void AccumulateNRISceneContributionReserve(const NRISceneContribution& contribution, NRISceneContributionReserve& reserve)
 {
 	if (contribution.geometry != nullptr)

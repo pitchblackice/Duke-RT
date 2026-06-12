@@ -9377,13 +9377,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 
 	Copy3(activeSceneView->skyColor, mSkyColor);
 	Copy3(activeSceneView->groundColor, mGroundColor);
-	mSurfaceProbeFrame = {};
-	mSurfaceProbeFrame.valid = true;
-	mSurfaceProbeFrame.usesStaticMapScene = mUsedStaticMapSceneLastFrame;
-	mSurfaceProbeFrame.staticPrimitiveCount = mUsedStaticMapSceneLastFrame ? activeStaticProbePrimitiveCount : 0u;
-	mSurfaceProbeFrame.runtimeSpaceLinkPrimitiveCount = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
-	mSurfaceProbeFrame.runtimeMutationPrimitiveCount = (uint32_t)runtimeMutationGeometry.primitives.size();
-	mSurfaceProbeFrame.dynamicPrimitiveCount = !overlayGeometry.primitives.empty() ? (uint32_t)overlayGeometry.primitives.size() : (activeDynamicGeometry != nullptr ? (uint32_t)activeDynamicGeometry->primitives.size() : 0u);
+	NRISceneSurfaceProbeFrameInputs surfaceProbeFrameInputs = {};
+	surfaceProbeFrameInputs.usesStaticMapScene = mUsedStaticMapSceneLastFrame;
+	surfaceProbeFrameInputs.activeStaticProbePrimitiveCount = activeStaticProbePrimitiveCount;
+	surfaceProbeFrameInputs.runtimeSpaceLinkGeometry = &runtimeSpaceLinkGeometry;
+	surfaceProbeFrameInputs.runtimeMutationGeometry = &runtimeMutationGeometry;
+	surfaceProbeFrameInputs.overlayGeometry = &overlayGeometry;
+	surfaceProbeFrameInputs.activeDynamicGeometry = activeDynamicGeometry;
+	mSurfaceProbeFrame = BuildNRISceneSurfaceProbeFrameState(surfaceProbeFrameInputs);
 
 	if (!preserveHistory)
 	{

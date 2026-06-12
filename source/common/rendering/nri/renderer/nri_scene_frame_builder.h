@@ -112,6 +112,16 @@ struct NRISceneFrameDynamicStateInputs
 	double* mirrorPlayerMs = nullptr;
 };
 
+struct NRISceneSurfaceProbeFrameInputs
+{
+	bool usesStaticMapScene = false;
+	uint32_t activeStaticProbePrimitiveCount = 0;
+	const nri_scene::GeometryData* runtimeSpaceLinkGeometry = nullptr;
+	const nri_scene::GeometryData* runtimeMutationGeometry = nullptr;
+	const nri_scene::GeometryData* overlayGeometry = nullptr;
+	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
+};
+
 void AccumulateNRISceneContributionReserve(const NRISceneContribution& contribution, NRISceneContributionReserve& reserve);
 void ReserveNRISceneContributionCapacity(
 	const NRISceneContributionReserve& reserve,
@@ -137,3 +147,5 @@ NRIRenderer::DynamicSceneFrameState BuildNRISceneFrameDynamicState(
 	const NRISceneFrameDynamicStateInputs& inputs,
 	const NRIRenderer::DynamicSceneFrameState& previous,
 	NRIRenderer::PerfShellTraceStats& stats);
+NRIRenderer::SurfaceProbeFrameState BuildNRISceneSurfaceProbeFrameState(
+	const NRISceneSurfaceProbeFrameInputs& inputs);

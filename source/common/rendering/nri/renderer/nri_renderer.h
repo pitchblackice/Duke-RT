@@ -155,6 +155,16 @@ public:
 		uint32_t asBuildCount = 0;
 	};
 
+	struct SurfaceProbeFrameState
+	{
+		bool valid = false;
+		bool usesStaticMapScene = false;
+		uint32_t staticPrimitiveCount = 0;
+		uint32_t runtimeSpaceLinkPrimitiveCount = 0;
+		uint32_t runtimeMutationPrimitiveCount = 0;
+		uint32_t dynamicPrimitiveCount = 0;
+	};
+
 	struct MaterialBuildTraceEntry
 	{
 		uint32_t calls = 0;
@@ -1627,16 +1637,6 @@ private:
 		bool sectorResponseApplied = false;
 		bool materialResponseEnabled = false;
 		float materialResponseScale = 1.0f;
-	};
-
-	struct SurfaceProbeFrameState
-	{
-		bool valid = false;
-		bool usesStaticMapScene = false;
-		uint32_t staticPrimitiveCount = 0;
-		uint32_t runtimeSpaceLinkPrimitiveCount = 0;
-		uint32_t runtimeMutationPrimitiveCount = 0;
-		uint32_t dynamicPrimitiveCount = 0;
 	};
 
 	struct RuntimePointLightGpuData
