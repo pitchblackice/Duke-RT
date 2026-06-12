@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../scene/nri_geometry_bridge.h"
+#include "../scene/nri_material_bridge.h"
 #include "nri_frame_resources.h"
 
 #include <cstdint>
@@ -74,4 +75,9 @@ bool UploadResidentStaticAtlasPrimitiveBuffer(
 	NRIBufferResource& primitiveBuffer,
 	SceneBufferDebugStats& primitiveStats,
 	const std::vector<nri_scene::PrimitiveData>& atlasPrimitives);
+bool UploadResidentStaticAtlasMaterialBuffer(
+	const NRIStaticSceneGeometryUploadServices& services,
+	NRIBufferResource& materialBuffer,
+	SceneBufferDebugStats& materialStats,
+	const std::vector<nri_scene::MaterialData>& atlasMaterials);
 }

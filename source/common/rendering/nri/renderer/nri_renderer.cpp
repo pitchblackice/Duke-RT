@@ -11270,7 +11270,7 @@ bool NRIRenderer::UploadStaticMapChunkAtlas(
 		nri_static_scene_geometry_upload::UploadResidentStaticAtlasVertexBuffer(uploadServices, vertexBuffer, mVertexBufferStats, atlasVertices) &&
 		nri_static_scene_geometry_upload::UploadResidentStaticAtlasIndexBuffer(uploadServices, indexBuffer, mIndexBufferStats, atlasIndices) &&
 		nri_static_scene_geometry_upload::UploadResidentStaticAtlasPrimitiveBuffer(uploadServices, primitiveBuffer, mPrimitiveBufferStats, atlasPrimitives) &&
-		uploadServices.EnsureResidentStructuredBuffer(materialBuffer, mMaterialBufferStats, atlasMaterials.data(), atlasMaterials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), "resident_chunk_write", ResidentUploadKind_Material);
+		nri_static_scene_geometry_upload::UploadResidentStaticAtlasMaterialBuffer(uploadServices, materialBuffer, mMaterialBufferStats, atlasMaterials);
 }
 
 void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()

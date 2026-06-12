@@ -74,4 +74,22 @@ bool UploadResidentStaticAtlasPrimitiveBuffer(
 		"resident_chunk_write",
 		ResidentUploadKind_Primitive);
 }
+
+bool UploadResidentStaticAtlasMaterialBuffer(
+	const NRIStaticSceneGeometryUploadServices& services,
+	NRIBufferResource& materialBuffer,
+	SceneBufferDebugStats& materialStats,
+	const std::vector<nri_scene::MaterialData>& atlasMaterials)
+{
+	return services.EnsureResidentStructuredBuffer(
+		materialBuffer,
+		materialStats,
+		atlasMaterials.data(),
+		atlasMaterials.size() * sizeof(nri_scene::MaterialData),
+		sizeof(nri_scene::MaterialData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		StaticGeometryComputeShaderResourceAccess(),
+		"resident_chunk_write",
+		ResidentUploadKind_Material);
+}
 }
