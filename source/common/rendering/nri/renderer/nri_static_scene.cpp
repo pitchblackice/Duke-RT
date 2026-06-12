@@ -536,6 +536,154 @@ bool nri_static_scene::RefreshStaticMapAnimatedMaterials(
 	return true;
 }
 
+namespace
+{
+	uint32_t ResolveStaticMapChunkSectorIndex(const nri_scene::PTMapWorld* mapWorld, uint32_t chunkIndex)
+	{
+		if (mapWorld == nullptr || chunkIndex >= mapWorld->chunks.size() || mapWorld->chunks[chunkIndex].sectorIndex < 0)
+		{
+			return UINT32_MAX;
+		}
+
+		return (uint32_t)mapWorld->chunks[chunkIndex].sectorIndex;
+	}
+
+	void AppendStaticMapInstance(
+		uint32_t primitiveOffset,
+		uint32_t chunkIndex,
+		uint32_t sectorIndex,
+		const NRIAccelerationStructureResource& accelerationStructure,
+		const NRIStaticMapInstanceBuildServices& services,
+		std::vector<nri::TopLevelInstance>& outTlasInstances,
+		std::vector<SceneInstanceData>& outSceneInstances)
+	{
+		if (accelerationStructure.accelerationStructure == nullptr || services.getAccelerationStructureHandle == nullptr)
+		{
+			return;
+		}
+
+		nri::TopLevelInstance instance = {};
+		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
+		instance.instanceId = (uint32_t)outSceneInstances.size();
+		instance.mask = 0xFF;
+		instance.shaderBindingTableLocalOffset = 0;
+		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
+		instance.accelerationStructureHandle = services.getAccelerationStructureHandle(services.user, accelerationStructure);
+		outTlasInstances.push_back(instance);
+		outSceneInstances.push_back({ primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, chunkIndex, sectorIndex });
+	}
+
+	void BuildStaticMapInstancesFromCache(
+		const nri_scene::PTMapWorld* mapWorld,
+		const StaticMapSceneCache& staticScene,
+		const StaticMapChunkAtlas* atlas,
+		const NRIStaticMapInstanceBuildServices& services,
+		std::vector<nri::TopLevelInstance>& outTlasInstances,
+		std::vector<SceneInstanceData>& outSceneInstances)
+	{
+		const bool useAtlas =
+			atlas != nullptr &&
+			atlas->valid &&
+			atlas->chunks.size() == staticScene.chunks.size();
+
+		outTlasInstances.clear();
+		outSceneInstances.clear();
+		outTlasInstances.reserve(staticScene.chunks.size());
+		outSceneInstances.reserve(staticScene.chunks.size());
+
+		for (uint32_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
+		{
+			const auto& chunk = staticScene.chunks[chunkListIndex];
+			if (!chunk.active)
+			{
+				continue;
+			}
+
+			uint32_t primitiveOffset = chunk.primitiveOffset;
+			uint32_t chunkIndex = chunk.chunkIndex;
+			if (useAtlas)
+			{
+				const auto& atlasChunk = atlas->chunks[chunkListIndex];
+				if (!atlasChunk.valid)
+				{
+					continue;
+				}
+
+				primitiveOffset = atlasChunk.primitiveOffset;
+				chunkIndex = atlasChunk.chunkIndex;
+			}
+
+			AppendStaticMapInstance(
+				primitiveOffset,
+				chunkIndex,
+				ResolveStaticMapChunkSectorIndex(mapWorld, chunkIndex),
+				chunk.accelerationStructure,
+				services,
+				outTlasInstances,
+				outSceneInstances);
+		}
+	}
+}
+
+void nri_static_scene::BuildStaticMapInstances(
+	const NRIStaticMapInstanceBuildInput& input,
+	const NRIStaticMapInstanceBuildServices& services,
+	std::vector<nri::TopLevelInstance>& outTlasInstances,
+	std::vector<SceneInstanceData>& outSceneInstances)
+{
+	if (input.staticScene == nullptr)
+	{
+		outTlasInstances.clear();
+		outSceneInstances.clear();
+		return;
+	}
+
+	const StaticMapSceneCache& staticScene = *input.staticScene;
+	if (input.registry != nullptr &&
+		input.registry->valid &&
+		input.registry->buildSerial == staticScene.buildSerial &&
+		!input.registry->entries.empty())
+	{
+		outTlasInstances.clear();
+		outSceneInstances.clear();
+		outTlasInstances.reserve(input.registry->activeChunkCount);
+		outSceneInstances.reserve(input.registry->activeChunkCount);
+
+		for (const auto& entry : input.registry->entries)
+		{
+			if (!entry.valid ||
+				!entry.active ||
+				!entry.mappedInStaticScene ||
+				entry.staticSceneChunkListIndex >= staticScene.chunks.size())
+			{
+				continue;
+			}
+
+			const auto& chunk = staticScene.chunks[entry.staticSceneChunkListIndex];
+			AppendStaticMapInstance(
+				entry.primitiveOffset,
+				entry.chunkIndex,
+				ResolveStaticMapChunkSectorIndex(input.mapWorld, entry.chunkIndex),
+				chunk.accelerationStructure,
+				services,
+				outTlasInstances,
+				outSceneInstances);
+		}
+		return;
+	}
+
+	if (input.atlas != nullptr &&
+		input.atlas->valid &&
+		input.atlas->buildSerial == staticScene.buildSerial &&
+		input.atlas->chunks.size() == staticScene.chunks.size())
+	{
+		BuildStaticMapInstancesFromCache(input.mapWorld, staticScene, input.atlas, services, outTlasInstances, outSceneInstances);
+		return;
+	}
+
+	BuildStaticMapInstancesFromCache(input.mapWorld, staticScene, nullptr, services, outTlasInstances, outSceneInstances);
+}
+
 void nri_static_scene::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
 	const NRIPreservedStaticMapSkyState* preservedSkyState,
@@ -882,134 +1030,56 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 
 void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
 {
-	if (!mStaticSceneResidency.Registry().valid ||
-		mStaticSceneResidency.Registry().buildSerial != mStaticMapScene.buildSerial ||
-		mStaticSceneResidency.Registry().entries.empty())
+	NRIStaticMapInstanceBuildInput input = {};
+	input.mapWorld = &mMapWorld;
+	input.staticScene = &mStaticMapScene;
+	input.atlas = &mStaticMapChunkAtlas;
+	input.registry = &mStaticSceneResidency.Registry();
+
+	NRIStaticMapInstanceBuildServices services = {};
+	services.user = const_cast<NRIRenderer*>(this);
+	services.getAccelerationStructureHandle = [](void* user, const NRIAccelerationStructureResource& accelerationStructure)
 	{
-		if (mStaticMapChunkAtlas.valid &&
-			mStaticMapChunkAtlas.buildSerial == mStaticMapScene.buildSerial &&
-			mStaticMapChunkAtlas.chunks.size() == mStaticMapScene.chunks.size())
-		{
-			BuildStaticMapInstances(mStaticMapScene, mStaticMapChunkAtlas, outTlasInstances, outSceneInstances);
-			return;
-		}
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*accelerationStructure.accelerationStructure);
+	};
 
-		BuildStaticMapInstances(mStaticMapScene, outTlasInstances, outSceneInstances);
-		return;
-	}
-
-	outTlasInstances.clear();
-	outSceneInstances.clear();
-	outTlasInstances.reserve(mStaticSceneResidency.Registry().activeChunkCount);
-	outSceneInstances.reserve(mStaticSceneResidency.Registry().activeChunkCount);
-
-	for (const auto& entry : mStaticSceneResidency.Registry().entries)
-	{
-		if (!entry.valid ||
-			!entry.active ||
-			!entry.mappedInStaticScene ||
-			entry.staticSceneChunkListIndex >= mStaticMapScene.chunks.size())
-		{
-			continue;
-		}
-
-		const auto& chunk = mStaticMapScene.chunks[entry.staticSceneChunkListIndex];
-		if (chunk.accelerationStructure.accelerationStructure == nullptr)
-		{
-			continue;
-		}
-
-		nri::TopLevelInstance instance = {};
-		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
-		instance.instanceId = (uint32_t)outSceneInstances.size();
-		instance.mask = 0xFF;
-		instance.shaderBindingTableLocalOffset = 0;
-		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
-		const uint32_t sectorIndex =
-			entry.chunkIndex < mMapWorld.chunks.size() && mMapWorld.chunks[entry.chunkIndex].sectorIndex >= 0 ?
-			(uint32_t)mMapWorld.chunks[entry.chunkIndex].sectorIndex :
-			UINT32_MAX;
-		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ entry.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, entry.chunkIndex, sectorIndex });
-	}
+	nri_static_scene::BuildStaticMapInstances(input, services, outTlasInstances, outSceneInstances);
 }
 
 void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
 {
-	outTlasInstances.clear();
-	outSceneInstances.clear();
-	outTlasInstances.reserve(staticScene.chunks.size());
-	outSceneInstances.reserve(staticScene.chunks.size());
+	NRIStaticMapInstanceBuildInput input = {};
+	input.mapWorld = &mMapWorld;
+	input.staticScene = &staticScene;
 
-	for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)staticScene.chunks.size(); ++chunkIndex)
+	NRIStaticMapInstanceBuildServices services = {};
+	services.user = const_cast<NRIRenderer*>(this);
+	services.getAccelerationStructureHandle = [](void* user, const NRIAccelerationStructureResource& accelerationStructure)
 	{
-		const auto& chunk = staticScene.chunks[chunkIndex];
-		if (!chunk.active)
-		{
-			continue;
-		}
-		if (chunk.accelerationStructure.accelerationStructure == nullptr)
-		{
-			continue;
-		}
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*accelerationStructure.accelerationStructure);
+	};
 
-		nri::TopLevelInstance instance = {};
-		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
-		instance.instanceId = (uint32_t)outSceneInstances.size();
-		instance.mask = 0xFF;
-		instance.shaderBindingTableLocalOffset = 0;
-		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
-		const uint32_t sectorIndex =
-			chunk.chunkIndex < mMapWorld.chunks.size() && mMapWorld.chunks[chunk.chunkIndex].sectorIndex >= 0 ?
-			(uint32_t)mMapWorld.chunks[chunk.chunkIndex].sectorIndex :
-			UINT32_MAX;
-		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ chunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, chunk.chunkIndex, sectorIndex });
-	}
+	nri_static_scene::BuildStaticMapInstances(input, services, outTlasInstances, outSceneInstances);
 }
 
 void NRIRenderer::BuildStaticMapInstances(const StaticMapSceneCache& staticScene, const StaticMapChunkAtlas& atlas, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
 {
-	if (!atlas.valid || atlas.chunks.size() != staticScene.chunks.size())
+	NRIStaticMapInstanceBuildInput input = {};
+	input.mapWorld = &mMapWorld;
+	input.staticScene = &staticScene;
+	input.atlas = &atlas;
+
+	NRIStaticMapInstanceBuildServices services = {};
+	services.user = const_cast<NRIRenderer*>(this);
+	services.getAccelerationStructureHandle = [](void* user, const NRIAccelerationStructureResource& accelerationStructure)
 	{
-		BuildStaticMapInstances(staticScene, outTlasInstances, outSceneInstances);
-		return;
-	}
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*accelerationStructure.accelerationStructure);
+	};
 
-	outTlasInstances.clear();
-	outSceneInstances.clear();
-	outTlasInstances.reserve(staticScene.chunks.size());
-	outSceneInstances.reserve(staticScene.chunks.size());
-
-	for (uint32_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
-	{
-		const auto& chunk = staticScene.chunks[chunkListIndex];
-		const auto& atlasChunk = atlas.chunks[chunkListIndex];
-		if (!chunk.active || !atlasChunk.valid)
-		{
-			continue;
-		}
-		if (chunk.accelerationStructure.accelerationStructure == nullptr)
-		{
-			continue;
-		}
-
-		nri::TopLevelInstance instance = {};
-		nri_scene::SetTopLevelInstanceTransform(instance, nri_scene::MakeIdentityPTTransform3x4());
-		instance.instanceId = (uint32_t)outSceneInstances.size();
-		instance.mask = 0xFF;
-		instance.shaderBindingTableLocalOffset = 0;
-		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
-		instance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*chunk.accelerationStructure.accelerationStructure);
-		const uint32_t sectorIndex =
-			atlasChunk.chunkIndex < mMapWorld.chunks.size() && mMapWorld.chunks[atlasChunk.chunkIndex].sectorIndex >= 0 ?
-			(uint32_t)mMapWorld.chunks[atlasChunk.chunkIndex].sectorIndex :
-			UINT32_MAX;
-		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ atlasChunk.primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, atlasChunk.chunkIndex, sectorIndex });
-	}
+	nri_static_scene::BuildStaticMapInstances(input, services, outTlasInstances, outSceneInstances);
 }
 
 bool NRIRenderer::BuildStaticMapAccelerationStructures()

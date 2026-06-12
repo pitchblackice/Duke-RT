@@ -226,6 +226,20 @@ struct NRIStaticSceneAnimatedMaterialRefreshServices
 	void (*markUploadedStaticMapSceneLastFrame)(void* user) = nullptr;
 };
 
+struct NRIStaticMapInstanceBuildInput
+{
+	const nri_scene::PTMapWorld* mapWorld = nullptr;
+	const StaticMapSceneCache* staticScene = nullptr;
+	const StaticMapChunkAtlas* atlas = nullptr;
+	const ResidentMapChunkRegistry* registry = nullptr;
+};
+
+struct NRIStaticMapInstanceBuildServices
+{
+	void* user = nullptr;
+	uint64_t (*getAccelerationStructureHandle)(void* user, const NRIAccelerationStructureResource& accelerationStructure) = nullptr;
+};
+
 namespace nri_static_scene
 {
 	void InitializeStaticMapSceneCacheBuild(
@@ -255,6 +269,12 @@ namespace nri_static_scene
 	bool RefreshStaticMapAnimatedMaterials(
 		const NRIStaticSceneAnimatedMaterialRefreshInput& input,
 		const NRIStaticSceneAnimatedMaterialRefreshServices& services);
+
+	void BuildStaticMapInstances(
+		const NRIStaticMapInstanceBuildInput& input,
+		const NRIStaticMapInstanceBuildServices& services,
+		std::vector<nri::TopLevelInstance>& outTlasInstances,
+		std::vector<SceneInstanceData>& outSceneInstances);
 
 	void PrintStaticMapSceneStatus(
 		const StaticMapSceneCache& staticScene,
