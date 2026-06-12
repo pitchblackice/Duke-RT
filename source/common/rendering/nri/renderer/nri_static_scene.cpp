@@ -401,7 +401,8 @@ bool NRIRenderer::UploadStaticMapChunkMaterialAtlas(
 			atlasMaterials);
 	}
 
-	return EnsureResidentStructuredBuffer(
+	const NRIStaticSceneGeometryUploadServices uploadServices = BuildStaticSceneGeometryUploadServices();
+	return uploadServices.EnsureResidentStructuredBuffer(
 		materialBuffer,
 		mMaterialBufferStats,
 		atlasMaterials.data(),
@@ -449,6 +450,7 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 	{
 		return false;
 	}
+	const NRIStaticSceneGeometryUploadServices uploadServices = BuildStaticSceneGeometryUploadServices();
 
 	const uint32_t targetVertexCapacity = std::max(atlas.vertexCapacity, atlas.vertexCount);
 	const uint32_t targetIndexCapacity = std::max(atlas.indexCapacity, atlas.indexCount);
@@ -493,7 +495,7 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		{
 			std::copy_n(mStaticMapScene.geometry.vertices.data(), copyCount, uploadVertices.data());
 		}
-		if (!EnsureResidentStructuredBuffer(
+		if (!uploadServices.EnsureResidentStructuredBuffer(
 				mStaticVertexBuffer,
 				mVertexBufferStats,
 				uploadVertices.data(),
@@ -517,7 +519,7 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		{
 			std::copy_n(mStaticMapScene.geometry.indices.data(), copyCount, uploadIndices.data());
 		}
-		if (!EnsureResidentStructuredBuffer(
+		if (!uploadServices.EnsureResidentStructuredBuffer(
 				mStaticIndexBuffer,
 				mIndexBufferStats,
 				uploadIndices.data(),
@@ -541,7 +543,7 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		{
 			std::copy_n(mStaticMapScene.geometry.primitives.data(), copyCount, uploadPrimitives.data());
 		}
-		if (!EnsureResidentStructuredBuffer(
+		if (!uploadServices.EnsureResidentStructuredBuffer(
 				mStaticPrimitiveBuffer,
 				mPrimitiveBufferStats,
 				uploadPrimitives.data(),
@@ -565,7 +567,7 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		{
 			std::copy_n(mStaticMapScene.gpuMaterials.data(), copyCount, uploadMaterials.data());
 		}
-		if (!EnsureResidentStructuredBuffer(
+		if (!uploadServices.EnsureResidentStructuredBuffer(
 				mStaticMaterialBuffer,
 				mMaterialBufferStats,
 				uploadMaterials.data(),
@@ -597,9 +599,9 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 		mStaticMaterialBuffer.stride != 0 ?
 		(uint32_t)(mStaticMaterialBuffer.size / mStaticMaterialBuffer.stride) :
 		atlas.materialCapacity;
-	NoteResidentStaticAtlasGrow();
+	uploadServices.NoteResidentStaticAtlasGrow();
 
-	return RefreshResidentStaticSceneDataSet();
+	return uploadServices.RefreshResidentStaticSceneDataSet();
 }
 
 void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const

@@ -14,6 +14,7 @@
 #include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
 #include "nri_static_scene.h"
+#include "nri_static_scene_geometry_upload.h"
 #include "nri_upscaler.h"
 #include "../framegen/nri_framegen.h"
 
@@ -2234,6 +2235,7 @@ private:
 	bool EnsureResidentUploadScratchBuffer(ResidentBufferUploadScratch& scratch, ResidentUploadScratchFrame& frameScratch, uint64_t requiredSize);
 	bool EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind);
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
+	NRIStaticSceneGeometryUploadServices BuildStaticSceneGeometryUploadServices();
 	NRIRuntimeMutationResidentUploadServices BuildRuntimeMutationResidentUploadServices();
 	bool StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges);
 	NRIRuntimeMutationResidentSceneRefreshServices BuildRuntimeMutationResidentSceneRefreshServices();

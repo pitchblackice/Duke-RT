@@ -11208,6 +11208,25 @@ void NRIRenderer::ArmTemporalTraceBudget(const char* reason)
 		GetPostSharpenName(resolvedPost));
 }
 
+NRIStaticSceneGeometryUploadServices NRIRenderer::BuildStaticSceneGeometryUploadServices()
+{
+	NRIStaticSceneGeometryUploadServices services = {};
+	services.user = this;
+	services.ensureResidentStructuredBuffer = [](void* user, NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->EnsureResidentStructuredBuffer(resource, stats, data, size, stride, usage, after, waitReason, uploadKind);
+	};
+	services.refreshResidentStaticSceneDataSet = [](void* user) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->RefreshResidentStaticSceneDataSet();
+	};
+	services.noteResidentStaticAtlasGrow = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->NoteResidentStaticAtlasGrow();
+	};
+	return services;
+}
+
 bool NRIRenderer::UploadStaticMapChunkAtlas(
 	NRIBufferResource& vertexBuffer,
 	NRIBufferResource& indexBuffer,
@@ -11246,11 +11265,12 @@ bool NRIRenderer::UploadStaticMapChunkAtlas(
 			atlasMaterials);
 	}
 
+	const NRIStaticSceneGeometryUploadServices uploadServices = BuildStaticSceneGeometryUploadServices();
 	return
-		EnsureResidentStructuredBuffer(vertexBuffer, mVertexBufferStats, atlasVertices.data(), atlasVertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), "resident_chunk_write", ResidentUploadKind_Vertex) &&
-		EnsureResidentStructuredBuffer(indexBuffer, mIndexBufferStats, atlasIndices.data(), atlasIndices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), "resident_chunk_write", ResidentUploadKind_Index) &&
-		EnsureResidentStructuredBuffer(primitiveBuffer, mPrimitiveBufferStats, atlasPrimitives.data(), atlasPrimitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), "resident_chunk_write", ResidentUploadKind_Primitive) &&
-		EnsureResidentStructuredBuffer(materialBuffer, mMaterialBufferStats, atlasMaterials.data(), atlasMaterials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), "resident_chunk_write", ResidentUploadKind_Material);
+		uploadServices.EnsureResidentStructuredBuffer(vertexBuffer, mVertexBufferStats, atlasVertices.data(), atlasVertices.size() * sizeof(nri_scene::SceneVertex), sizeof(nri_scene::SceneVertex), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), "resident_chunk_write", ResidentUploadKind_Vertex) &&
+		uploadServices.EnsureResidentStructuredBuffer(indexBuffer, mIndexBufferStats, atlasIndices.data(), atlasIndices.size() * sizeof(uint32_t), sizeof(uint32_t), NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), "resident_chunk_write", ResidentUploadKind_Index) &&
+		uploadServices.EnsureResidentStructuredBuffer(primitiveBuffer, mPrimitiveBufferStats, atlasPrimitives.data(), atlasPrimitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), "resident_chunk_write", ResidentUploadKind_Primitive) &&
+		uploadServices.EnsureResidentStructuredBuffer(materialBuffer, mMaterialBufferStats, atlasMaterials.data(), atlasMaterials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), "resident_chunk_write", ResidentUploadKind_Material);
 }
 
 void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
