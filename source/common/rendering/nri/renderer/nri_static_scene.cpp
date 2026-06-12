@@ -48,14 +48,17 @@ void NRIRenderer::ResetResidentMapChunkRegistry()
 	mStaticSceneResidency.Registry() = {};
 }
 
-uint32_t NRIRenderer::GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex) const
+uint32_t NRIStaticSceneResidency::GetStaticSceneChunkSlotPreference(
+	const StaticMapSceneCache& staticScene,
+	const StaticMapChunkAtlas& atlas,
+	uint32_t chunkListIndex)
 {
-	if (chunkListIndex >= mStaticMapScene.chunks.size())
+	if (chunkListIndex >= staticScene.chunks.size())
 	{
 		return 0;
 	}
 
-	const auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+	const auto& chunk = staticScene.chunks[chunkListIndex];
 	uint32_t score = 0;
 	if (chunk.active)
 	{
@@ -69,13 +72,153 @@ uint32_t NRIRenderer::GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex)
 	{
 		score += 2u;
 	}
-	if (mStaticMapChunkAtlas.valid &&
-		chunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
-		mStaticMapChunkAtlas.chunks[chunkListIndex].valid)
+	if (atlas.valid &&
+		chunkListIndex < atlas.chunks.size() &&
+		atlas.chunks[chunkListIndex].valid)
 	{
 		score += 1u;
 	}
 	return score;
+}
+
+void NRIStaticSceneResidency::SyncResidentMapChunkRegistryFromStaticScene(const NRIStaticSceneRegistrySyncInput& input)
+{
+	ResetResidentMapChunkRegistry();
+	if (input.mapWorld == nullptr || !input.mapWorld->valid)
+	{
+		return;
+	}
+	if (input.staticScene == nullptr || input.atlas == nullptr)
+	{
+		return;
+	}
+
+	const nri_scene::PTMapWorld& mapWorld = *input.mapWorld;
+	const StaticMapSceneCache& staticScene = *input.staticScene;
+	const StaticMapChunkAtlas& atlas = *input.atlas;
+	auto& registry = mResidentMapChunkRegistry;
+	registry.valid = true;
+	registry.buildSerial = mapWorld.buildSerial;
+	registry.chunkCount = (uint32_t)mapWorld.chunks.size();
+	registry.entries.resize(mapWorld.chunks.size());
+
+	for (size_t chunkListIndex = 0; chunkListIndex < mapWorld.chunks.size(); ++chunkListIndex)
+	{
+		const auto& mapChunk = mapWorld.chunks[chunkListIndex];
+		auto& entry = registry.entries[chunkListIndex];
+		entry.valid = true;
+		entry.chunkIndex = mapChunk.chunkIndex;
+		if (input.replacements != nullptr)
+		{
+			for (const NRIResidentChunkReplacementInfo& replacement : *input.replacements)
+			{
+				if (replacement.chunkListIndex != chunkListIndex)
+				{
+					continue;
+				}
+
+				entry.appliedBaseline = replacement.baseline;
+				entry.baselineSignature = replacement.baselineSignature;
+				entry.liveSignature = replacement.liveSignature != 0 ? replacement.liveSignature : replacement.baselineSignature;
+				break;
+			}
+		}
+	}
+
+	const bool atlasMatchesStaticScene =
+		atlas.valid &&
+		atlas.buildSerial == staticScene.buildSerial &&
+		atlas.chunks.size() == staticScene.chunks.size();
+	std::vector<int32_t> bestSlotScores(registry.entries.size(), -1);
+	for (size_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
+	{
+		const auto& staticChunk = staticScene.chunks[chunkListIndex];
+		if (staticChunk.chunkIndex >= registry.entries.size())
+		{
+			continue;
+		}
+
+		const int32_t candidateScore = (int32_t)GetStaticSceneChunkSlotPreference(staticScene, atlas, (uint32_t)chunkListIndex);
+		auto& entry = registry.entries[staticChunk.chunkIndex];
+		if (candidateScore < bestSlotScores[staticChunk.chunkIndex])
+		{
+			continue;
+		}
+		if (candidateScore == bestSlotScores[staticChunk.chunkIndex] &&
+			entry.staticSceneChunkListIndex != UINT32_MAX &&
+			entry.staticSceneChunkListIndex > chunkListIndex)
+		{
+			continue;
+		}
+
+		bestSlotScores[staticChunk.chunkIndex] = candidateScore;
+		entry.staticSceneChunkListIndex = (uint32_t)chunkListIndex;
+		entry.active = staticChunk.active;
+		entry.mappedInStaticScene = staticChunk.active;
+		if (atlasMatchesStaticScene &&
+			chunkListIndex < atlas.chunks.size() &&
+			atlas.chunks[chunkListIndex].valid)
+		{
+			const auto& atlasChunk = atlas.chunks[chunkListIndex];
+			entry.vertexOffset = atlasChunk.vertexOffset;
+			entry.vertexCount = atlasChunk.vertexCount;
+			entry.indexOffset = atlasChunk.indexOffset;
+			entry.indexCount = atlasChunk.indexCount;
+			entry.primitiveOffset = atlasChunk.primitiveOffset;
+			entry.primitiveCount = atlasChunk.primitiveCount;
+			entry.materialOffset = atlasChunk.materialOffset;
+			entry.materialCount = atlasChunk.materialCount;
+		}
+		else
+		{
+			entry.vertexOffset = staticChunk.vertexOffset;
+			entry.vertexCount = staticChunk.vertexCount;
+			entry.indexOffset = staticChunk.indexOffset;
+			entry.indexCount = staticChunk.indexCount;
+			entry.primitiveOffset = staticChunk.primitiveOffset;
+			entry.primitiveCount = staticChunk.primitiveCount;
+			entry.materialOffset = staticChunk.materialOffset;
+			entry.materialCount = staticChunk.materialCount;
+		}
+		entry.geometryTopologySignature = staticChunk.geometryTopologySignature;
+		entry.animatedMaterialSignature = staticChunk.animatedMaterialSignature;
+		entry.materialPayloadHash =
+			staticChunk.active && input.hashResidentMaterialPayload != nullptr ?
+			input.hashResidentMaterialPayload(staticChunk.materialBridge) :
+			0;
+		entry.geometryPayloadHash = staticChunk.active ? staticChunk.geometryPayloadHash : 0;
+		entry.animatedGeometrySignature = staticChunk.animatedGeometrySignature;
+		entry.exactGeometrySignature = staticChunk.exactGeometrySignature;
+		entry.hasAnimatedTextureCandidates = staticChunk.hasAnimatedTextureCandidates;
+		entry.animatedRefreshSuppressed = staticChunk.animatedRefreshSuppressed;
+		entry.accelerationResident = staticChunk.active && staticChunk.accelerationStructure.accelerationStructure != nullptr;
+
+		if (entry.active)
+		{
+			registry.activeChunkCount++;
+			registry.mappedChunkCount++;
+		}
+		if (entry.accelerationResident)
+		{
+			registry.accelerationResidentChunkCount++;
+		}
+		if (entry.hasAnimatedTextureCandidates)
+		{
+			registry.animatedCandidateChunkCount++;
+		}
+		if (entry.animatedRefreshSuppressed)
+		{
+			registry.animatedRefreshSuppressedChunkCount++;
+		}
+	}
+}
+
+uint32_t NRIRenderer::GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex) const
+{
+	return NRIStaticSceneResidency::GetStaticSceneChunkSlotPreference(
+		mStaticMapScene,
+		mStaticMapChunkAtlas,
+		chunkListIndex);
 }
 
 uint32_t NRIRenderer::FindPreferredStaticSceneChunkListIndex(uint32_t chunkIndex) const

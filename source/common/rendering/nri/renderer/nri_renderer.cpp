@@ -12021,115 +12021,34 @@ bool NRIRenderer::UploadStaticMapChunkMaterialAtlas(
 
 void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
 {
-	ResetResidentMapChunkRegistry();
-	if (!mMapWorld.valid)
+	std::vector<NRIResidentChunkReplacementInfo> replacements;
+	if (mMapWorld.valid)
 	{
-		return;
-	}
-
-	auto& registry = mStaticSceneResidency.Registry();
-	registry.valid = true;
-	registry.buildSerial = mMapWorld.buildSerial;
-	registry.chunkCount = (uint32_t)mMapWorld.chunks.size();
-	registry.entries.resize(mMapWorld.chunks.size());
-
-	for (size_t chunkListIndex = 0; chunkListIndex < mMapWorld.chunks.size(); ++chunkListIndex)
-	{
-		const auto& mapChunk = mMapWorld.chunks[chunkListIndex];
-		auto& entry = registry.entries[chunkListIndex];
-		entry.valid = true;
-		entry.chunkIndex = mapChunk.chunkIndex;
-		if (const auto* replacement = mRuntimeMutation.FindReplacement((uint32_t)chunkListIndex))
+		replacements.reserve(mMapWorld.chunks.size());
+		for (uint32_t chunkListIndex = 0; chunkListIndex < (uint32_t)mMapWorld.chunks.size(); ++chunkListIndex)
 		{
-			entry.appliedBaseline = replacement->baseline;
-			entry.baselineSignature = replacement->baselineSignature;
-			entry.liveSignature = replacement->liveSignature != 0 ? replacement->liveSignature : replacement->baselineSignature;
+			const auto* replacement = mRuntimeMutation.FindReplacement(chunkListIndex);
+			if (replacement == nullptr)
+			{
+				continue;
+			}
+
+			NRIResidentChunkReplacementInfo info = {};
+			info.chunkListIndex = chunkListIndex;
+			info.baseline = replacement->baseline;
+			info.baselineSignature = replacement->baselineSignature;
+			info.liveSignature = replacement->liveSignature;
+			replacements.push_back(info);
 		}
 	}
 
-	const bool atlasMatchesStaticScene =
-		mStaticMapChunkAtlas.valid &&
-		mStaticMapChunkAtlas.buildSerial == mStaticMapScene.buildSerial &&
-		mStaticMapChunkAtlas.chunks.size() == mStaticMapScene.chunks.size();
-	std::vector<int32_t> bestSlotScores(registry.entries.size(), -1);
-	for (size_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
-	{
-		const auto& staticChunk = mStaticMapScene.chunks[chunkListIndex];
-		if (staticChunk.chunkIndex >= registry.entries.size())
-		{
-			continue;
-		}
-
-		const int32_t candidateScore = (int32_t)GetStaticSceneChunkSlotPreference((uint32_t)chunkListIndex);
-		auto& entry = registry.entries[staticChunk.chunkIndex];
-		if (candidateScore < bestSlotScores[staticChunk.chunkIndex])
-		{
-			continue;
-		}
-		if (candidateScore == bestSlotScores[staticChunk.chunkIndex] &&
-			entry.staticSceneChunkListIndex != UINT32_MAX &&
-			entry.staticSceneChunkListIndex > chunkListIndex)
-		{
-			continue;
-		}
-
-		bestSlotScores[staticChunk.chunkIndex] = candidateScore;
-		entry.staticSceneChunkListIndex = (uint32_t)chunkListIndex;
-		entry.active = staticChunk.active;
-		entry.mappedInStaticScene = staticChunk.active;
-		if (atlasMatchesStaticScene &&
-			chunkListIndex < mStaticMapChunkAtlas.chunks.size() &&
-			mStaticMapChunkAtlas.chunks[chunkListIndex].valid)
-		{
-			const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
-			entry.vertexOffset = atlasChunk.vertexOffset;
-			entry.vertexCount = atlasChunk.vertexCount;
-			entry.indexOffset = atlasChunk.indexOffset;
-			entry.indexCount = atlasChunk.indexCount;
-			entry.primitiveOffset = atlasChunk.primitiveOffset;
-			entry.primitiveCount = atlasChunk.primitiveCount;
-			entry.materialOffset = atlasChunk.materialOffset;
-			entry.materialCount = atlasChunk.materialCount;
-		}
-		else
-		{
-			entry.vertexOffset = staticChunk.vertexOffset;
-			entry.vertexCount = staticChunk.vertexCount;
-			entry.indexOffset = staticChunk.indexOffset;
-			entry.indexCount = staticChunk.indexCount;
-			entry.primitiveOffset = staticChunk.primitiveOffset;
-			entry.primitiveCount = staticChunk.primitiveCount;
-			entry.materialOffset = staticChunk.materialOffset;
-			entry.materialCount = staticChunk.materialCount;
-		}
-		entry.geometryTopologySignature = staticChunk.geometryTopologySignature;
-		entry.animatedMaterialSignature = staticChunk.animatedMaterialSignature;
-		entry.materialPayloadHash = staticChunk.active ? HashResidentMaterialPayload(staticChunk.materialBridge) : 0;
-		entry.geometryPayloadHash = staticChunk.active ? staticChunk.geometryPayloadHash : 0;
-		entry.animatedGeometrySignature = staticChunk.animatedGeometrySignature;
-		entry.exactGeometrySignature = staticChunk.exactGeometrySignature;
-		entry.hasAnimatedTextureCandidates = staticChunk.hasAnimatedTextureCandidates;
-		entry.animatedRefreshSuppressed = staticChunk.animatedRefreshSuppressed;
-		entry.accelerationResident = staticChunk.active && staticChunk.accelerationStructure.accelerationStructure != nullptr;
-
-		if (entry.active)
-		{
-			registry.activeChunkCount++;
-			registry.mappedChunkCount++;
-		}
-		if (entry.accelerationResident)
-		{
-			registry.accelerationResidentChunkCount++;
-		}
-		if (entry.hasAnimatedTextureCandidates)
-		{
-			registry.animatedCandidateChunkCount++;
-		}
-		if (entry.animatedRefreshSuppressed)
-		{
-			registry.animatedRefreshSuppressedChunkCount++;
-		}
-	}
+	NRIStaticSceneRegistrySyncInput input = {};
+	input.mapWorld = &mMapWorld;
+	input.staticScene = &mStaticMapScene;
+	input.atlas = &mStaticMapChunkAtlas;
+	input.replacements = &replacements;
+	input.hashResidentMaterialPayload = HashResidentMaterialPayload;
+	mStaticSceneResidency.SyncResidentMapChunkRegistryFromStaticScene(input);
 }
 
 void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const
