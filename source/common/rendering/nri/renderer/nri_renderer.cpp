@@ -15165,36 +15165,8 @@ void NRIRenderer::BuildSectorLightingUpload(
 	SectorLightHeaderGpuData& outHeader,
 	std::vector<SectorLightGpuData>& outSectors)
 {
-	const auto& registry = mSceneLights.GetSectorLighting();
-	const float sectorLightMultiplier = GetSectorLightMultiplier();
 	UpdateBoundSectorLightingState();
-	outHeader = {};
-	outHeader.sectorCount = registry.sectorCount;
-	outHeader.activeCount = registry.activeSectorCount;
-	outHeader.pulsingCount = registry.pulsingSectorCount;
-	outHeader.flags = nri_ptsectorlighting ? NRI_SECTOR_LIGHTING_FLAG_ENABLED : 0u;
-	outSectors.assign(registry.sectorCount, {});
-
-	for (uint32_t sectorIndex : registry.activeSectorIndices)
-	{
-		if (sectorIndex >= registry.sectors.size() || sectorIndex >= outSectors.size())
-		{
-			continue;
-		}
-
-		const auto& source = registry.sectors[sectorIndex];
-		auto& target = outSectors[sectorIndex];
-		Copy3(source.ambientColor, target.ambientColor);
-		Copy3(source.ambientColor, target.hemisphereColor);
-		target.ambientIntensity = source.ambientIntensity * sectorLightMultiplier;
-		target.hemisphereAmount = source.hemisphereAmount * sectorLightMultiplier;
-		target.fogAmount = source.fogAmount * sectorLightMultiplier;
-		target.pulseScale = source.pulseScale;
-		target.sourceFlags = source.sourceFlags;
-		target.paletteIndex = source.paletteIndex;
-		target.lotag = source.lotag;
-		target.hitag = source.hitag;
-	}
+	mSceneLights.BuildSectorLightingUpload(GetSectorLightMultiplier(), nri_ptsectorlighting, outHeader, outSectors);
 }
 
 uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const
@@ -15517,37 +15489,7 @@ void NRIRenderer::TraceEmissiveSectorResponseChange()
 
 uint64_t NRIRenderer::BuildSectorLightingPayloadHash() const
 {
-	const auto& registry = mSceneLights.GetSectorLighting();
-	uint64_t hash = 1469598103934665603ull;
-	hash = HashCombine64(hash, nri_ptsectorlighting ? 1ull : 0ull);
-	hash = HashCombine64(hash, (uint64_t)FloatBits(GetSectorLightMultiplier()));
-	hash = HashCombine64(hash, (uint64_t)registry.sectorCount);
-	hash = HashCombine64(hash, (uint64_t)registry.activeSectorCount);
-	hash = HashCombine64(hash, (uint64_t)registry.pulsingSectorCount);
-	for (uint32_t sectorIndex : registry.activeSectorIndices)
-	{
-		hash = HashCombine64(hash, (uint64_t)sectorIndex);
-		if (sectorIndex >= registry.sectors.size())
-		{
-			continue;
-		}
-
-		const auto& sector = registry.sectors[sectorIndex];
-		hash = HashCombine64(hash, (uint64_t)sector.sourceFlags);
-		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.paletteIndex);
-		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.lotag);
-		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.hitag);
-		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.averageShade);
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[0]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[1]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[2]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientIntensity));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.hemisphereAmount));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.fogAmount));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.pulseScale));
-	}
-
-	return hash;
+	return mSceneLights.BuildSectorLightingPayloadHash(GetSectorLightMultiplier(), nri_ptsectorlighting);
 }
 
 void NRIRenderer::UpdateBoundSectorLightingState()

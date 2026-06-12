@@ -2167,6 +2167,77 @@ uint64_t SceneLightSystem::BuildRuntimeLightPayloadHash() const
 	return hash;
 }
 
+void SceneLightSystem::BuildSectorLightingUpload(
+	float sectorLightMultiplier,
+	bool sectorLightingEnabled,
+	NRISectorLightHeaderGpuData& outHeader,
+	std::vector<NRISectorLightGpuData>& outSectors) const
+{
+	const auto& registry = mSectorLighting;
+	outHeader = {};
+	outHeader.sectorCount = registry.sectorCount;
+	outHeader.activeCount = registry.activeSectorCount;
+	outHeader.pulsingCount = registry.pulsingSectorCount;
+	outHeader.flags = sectorLightingEnabled ? 1u : 0u;
+	outSectors.assign(registry.sectorCount, {});
+
+	for (uint32_t sectorIndex : registry.activeSectorIndices)
+	{
+		if (sectorIndex >= registry.sectors.size() || sectorIndex >= outSectors.size())
+		{
+			continue;
+		}
+
+		const auto& source = registry.sectors[sectorIndex];
+		auto& target = outSectors[sectorIndex];
+		Copy3f(source.ambientColor, target.ambientColor);
+		Copy3f(source.ambientColor, target.hemisphereColor);
+		target.ambientIntensity = source.ambientIntensity * sectorLightMultiplier;
+		target.hemisphereAmount = source.hemisphereAmount * sectorLightMultiplier;
+		target.fogAmount = source.fogAmount * sectorLightMultiplier;
+		target.pulseScale = source.pulseScale;
+		target.sourceFlags = source.sourceFlags;
+		target.paletteIndex = source.paletteIndex;
+		target.lotag = source.lotag;
+		target.hitag = source.hitag;
+	}
+}
+
+uint64_t SceneLightSystem::BuildSectorLightingPayloadHash(float sectorLightMultiplier, bool sectorLightingEnabled) const
+{
+	const auto& registry = mSectorLighting;
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashCombine64(hash, sectorLightingEnabled ? 1ull : 0ull);
+	hash = HashCombine64(hash, (uint64_t)FloatBits(sectorLightMultiplier));
+	hash = HashCombine64(hash, (uint64_t)registry.sectorCount);
+	hash = HashCombine64(hash, (uint64_t)registry.activeSectorCount);
+	hash = HashCombine64(hash, (uint64_t)registry.pulsingSectorCount);
+	for (uint32_t sectorIndex : registry.activeSectorIndices)
+	{
+		hash = HashCombine64(hash, (uint64_t)sectorIndex);
+		if (sectorIndex >= registry.sectors.size())
+		{
+			continue;
+		}
+
+		const auto& sector = registry.sectors[sectorIndex];
+		hash = HashCombine64(hash, (uint64_t)sector.sourceFlags);
+		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.paletteIndex);
+		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.lotag);
+		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.hitag);
+		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.averageShade);
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[0]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[1]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[2]));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientIntensity));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.hemisphereAmount));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.fogAmount));
+		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.pulseScale));
+	}
+
+	return hash;
+}
+
 bool SceneLightSystem::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t maxLights, uint32_t& outId)
 {
 	if (position == nullptr || color == nullptr || intensity <= 0.0f || radius <= 0.0f)

@@ -74,6 +74,28 @@ struct NRIRuntimePointLightGpuData
 	uint32_t reserved[3] = {};
 };
 
+struct NRISectorLightHeaderGpuData
+{
+	uint32_t sectorCount = 0;
+	uint32_t activeCount = 0;
+	uint32_t pulsingCount = 0;
+	uint32_t flags = 0;
+};
+
+struct NRISectorLightGpuData
+{
+	float ambientColor[3] = {};
+	float ambientIntensity = 0.0f;
+	float hemisphereColor[3] = {};
+	float hemisphereAmount = 0.0f;
+	float fogAmount = 0.0f;
+	float pulseScale = 1.0f;
+	uint32_t sourceFlags = 0;
+	int32_t paletteIndex = -1;
+	int32_t lotag = 0;
+	int32_t hitag = 0;
+};
+
 struct NRILightingSettings
 {
 	float emissiveMinPower = 0.0f;
@@ -463,6 +485,12 @@ public:
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
 	void BuildRuntimePointLightUpload(std::vector<NRIRuntimePointLightGpuData>& outLights) const;
 	uint64_t BuildRuntimeLightPayloadHash() const;
+	void BuildSectorLightingUpload(
+		float sectorLightMultiplier,
+		bool sectorLightingEnabled,
+		NRISectorLightHeaderGpuData& outHeader,
+		std::vector<NRISectorLightGpuData>& outSectors) const;
+	uint64_t BuildSectorLightingPayloadHash(float sectorLightMultiplier, bool sectorLightingEnabled) const;
 
 	bool AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t maxLights, uint32_t& outId);
 	bool UpdateRuntimePointLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);

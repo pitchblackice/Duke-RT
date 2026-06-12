@@ -1737,27 +1737,8 @@ private:
 		uint32_t dynamicPrimitiveBaseOffset = 0;
 	};
 
-	struct SectorLightHeaderGpuData
-	{
-		uint32_t sectorCount = 0;
-		uint32_t activeCount = 0;
-		uint32_t pulsingCount = 0;
-		uint32_t flags = 0;
-	};
-
-	struct SectorLightGpuData
-	{
-		float ambientColor[3] = {};
-		float ambientIntensity = 0.0f;
-		float hemisphereColor[3] = {};
-		float hemisphereAmount = 0.0f;
-		float fogAmount = 0.0f;
-		float pulseScale = 1.0f;
-		uint32_t sourceFlags = 0;
-		int32_t paletteIndex = -1;
-		int32_t lotag = 0;
-		int32_t hitag = 0;
-	};
+	using SectorLightHeaderGpuData = NRISectorLightHeaderGpuData;
+	using SectorLightGpuData = NRISectorLightGpuData;
 
 	using StaticMapChunkAtlas = ::StaticMapChunkAtlas;
 
