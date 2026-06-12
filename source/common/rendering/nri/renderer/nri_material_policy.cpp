@@ -191,6 +191,36 @@ void nri_material_policy::BuildActorMaterialOverrideMap(
 	}
 }
 
+const std::unordered_map<int32_t, uint32_t>& nri_material_policy::GetActorMaterialOverrideMapForFrame(
+	const ResolvedLightOverlaySet& resolved,
+	uint32_t frameIndex,
+	ActorMaterialOverrideCache& cache,
+	bool& outBuilt)
+{
+	outBuilt = false;
+	const bool hasActorRules = HasActorMaterialOverrideRules(resolved);
+	const bool hasFullbrightOverrides = HasActorFullbrightOverrides(resolved);
+	if (cache.valid &&
+		cache.frameIndex == frameIndex &&
+		cache.resolvedGeneration == resolved.resolvedGeneration &&
+		cache.hasFullbrightOverrides == hasFullbrightOverrides)
+	{
+		return cache.overrides;
+	}
+
+	cache.valid = true;
+	cache.frameIndex = frameIndex;
+	cache.resolvedGeneration = resolved.resolvedGeneration;
+	cache.hasFullbrightOverrides = hasFullbrightOverrides;
+	cache.overrides.clear();
+	if (hasActorRules)
+	{
+		BuildActorMaterialOverrideMap(resolved, cache.overrides);
+		outBuilt = true;
+	}
+	return cache.overrides;
+}
+
 void nri_material_policy::ApplyActorFullbrightOverridesToBuiltMaterials(
 	const std::unordered_map<int32_t, uint32_t>& actorOverrides,
 	float fullbrightBoost,

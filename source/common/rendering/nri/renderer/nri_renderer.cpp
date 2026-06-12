@@ -9920,44 +9920,30 @@ NRIRenderer::MaterialBuildTraceSlot NRIRenderer::ResolveMaterialBuildTraceSlot(c
 const std::unordered_map<int32_t, uint32_t>& NRIRenderer::GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot)
 {
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
-	const bool hasActorRules =
-		nri_material_policy::HasActorMaterialOverrideRules(resolvedLightOverlays);
-	const bool hasFullbrightOverrides = nri_material_policy::HasActorFullbrightOverrides(resolvedLightOverlays);
-	if (mActorMaterialOverrideCache.valid &&
-		mActorMaterialOverrideCache.frameIndex == mFrameIndex &&
-		mActorMaterialOverrideCache.resolvedGeneration == resolvedLightOverlays.resolvedGeneration &&
-		mActorMaterialOverrideCache.hasFullbrightOverrides == hasFullbrightOverrides)
-	{
-		return mActorMaterialOverrideCache.overrides;
-	}
-
-	mActorMaterialOverrideCache.valid = true;
-	mActorMaterialOverrideCache.frameIndex = mFrameIndex;
-	mActorMaterialOverrideCache.resolvedGeneration = resolvedLightOverlays.resolvedGeneration;
-	mActorMaterialOverrideCache.hasFullbrightOverrides = hasFullbrightOverrides;
-	mActorMaterialOverrideCache.overrides.clear();
-	if (!hasActorRules)
-	{
-		return mActorMaterialOverrideCache.overrides;
-	}
-
-	mLastPerfShellTraceStats.actorOverrideMapBuildCalls++;
 	auto& materialTraceEntry = mLastPerfShellTraceStats.materialBuildByLabel[GetMaterialBuildTraceSlotIndex(traceSlot)];
-	materialTraceEntry.overrideBuildCalls++;
+	bool built = false;
 	if (ShouldTracePtPerf())
 	{
 		const auto start = std::chrono::steady_clock::now();
-		nri_material_policy::BuildActorMaterialOverrideMap(resolvedLightOverlays, mActorMaterialOverrideCache.overrides);
+		const auto& overrides = nri_material_policy::GetActorMaterialOverrideMapForFrame(resolvedLightOverlays, mFrameIndex, mActorMaterialOverrideCache, built);
 		const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
-		mLastPerfShellTraceStats.actorOverrideMapBuildMs += elapsedMs;
-		materialTraceEntry.overrideBuildMs += elapsedMs;
-	}
-	else
-	{
-		nri_material_policy::BuildActorMaterialOverrideMap(resolvedLightOverlays, mActorMaterialOverrideCache.overrides);
+		if (built)
+		{
+			mLastPerfShellTraceStats.actorOverrideMapBuildCalls++;
+			mLastPerfShellTraceStats.actorOverrideMapBuildMs += elapsedMs;
+			materialTraceEntry.overrideBuildCalls++;
+			materialTraceEntry.overrideBuildMs += elapsedMs;
+		}
+		return overrides;
 	}
 
-	return mActorMaterialOverrideCache.overrides;
+	const auto& overrides = nri_material_policy::GetActorMaterialOverrideMapForFrame(resolvedLightOverlays, mFrameIndex, mActorMaterialOverrideCache, built);
+	if (built)
+	{
+		mLastPerfShellTraceStats.actorOverrideMapBuildCalls++;
+		materialTraceEntry.overrideBuildCalls++;
+	}
+	return overrides;
 }
 
 void NRIRenderer::PrintSwapChainRenderConfig() const

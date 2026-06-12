@@ -19,11 +19,25 @@ namespace nri_material_policy
 		ActorMaterialOverride_Fullbright = 1u << 2,
 	};
 
+	struct ActorMaterialOverrideCache
+	{
+		bool valid = false;
+		uint32_t frameIndex = UINT32_MAX;
+		uint32_t resolvedGeneration = 0;
+		bool hasFullbrightOverrides = false;
+		std::unordered_map<int32_t, uint32_t> overrides;
+	};
+
 	bool HasActorMaterialOverrideRules(const ResolvedLightOverlaySet& resolved);
 	bool HasActorFullbrightOverrides(const ResolvedLightOverlaySet& resolved);
 	void BuildActorMaterialOverrideMap(
 		const ResolvedLightOverlaySet& resolved,
 		std::unordered_map<int32_t, uint32_t>& outOverrides);
+	const std::unordered_map<int32_t, uint32_t>& GetActorMaterialOverrideMapForFrame(
+		const ResolvedLightOverlaySet& resolved,
+		uint32_t frameIndex,
+		ActorMaterialOverrideCache& cache,
+		bool& outBuilt);
 
 	void ApplyActorFullbrightOverridesToBuiltMaterials(
 		const std::unordered_map<int32_t, uint32_t>& actorOverrides,

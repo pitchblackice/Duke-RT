@@ -13,6 +13,7 @@
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
+#include "nri_material_policy.h"
 #include "nri_static_scene.h"
 #include "nri_static_scene_geometry_upload.h"
 #include "nri_upscaler.h"
@@ -1767,15 +1768,6 @@ private:
 
 	using RuntimeMutationCacheStats = ::RuntimeMutationCacheStats;
 
-	struct ActorMaterialOverrideCache
-	{
-		bool valid = false;
-		uint32_t frameIndex = UINT32_MAX;
-		uint32_t resolvedGeneration = 0;
-		bool hasFullbrightOverrides = false;
-		std::unordered_map<int32_t, uint32_t> overrides;
-	};
-
 	struct DescriptorCoherencyDebugStats
 	{
 		uint64_t actorMaterialBuilds = 0;
@@ -2332,7 +2324,7 @@ private:
 	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};
 	bool mHasLastStateCommitDomainGenerations = false;
 	ActorSpriteDebugStats mActorSpriteDebugStats = {};
-	ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
+	nri_material_policy::ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	DescriptorCoherencyDebugStats mDescriptorCoherencyDebugStats = {};
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
 	RuntimeLinkTraceState mLastRuntimeLinkTraceState = {};
