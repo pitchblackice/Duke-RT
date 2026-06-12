@@ -2326,139 +2326,6 @@ public:
 		return state;
 	}
 
-	static void BuildActorMaterialOverrideMap(const ResolvedLightOverlaySet& resolved, std::unordered_map<int32_t, uint32_t>& outOverrides)
-	{
-		if (resolved.actorRules.Size() == 0 && resolved.actorOverrideRules.Size() == 0)
-		{
-			return;
-		}
-
-		TSpriteIterator<DCoreActor> it;
-		while (auto actor = it.Next())
-		{
-			if (actor == nullptr || !actor->exists() || (actor->ObjectFlags & OF_EuthanizeMe) != 0)
-			{
-				continue;
-			}
-
-			PClass* actorClass = actor->GetClass();
-			if (actorClass == nullptr)
-			{
-				continue;
-			}
-
-			uint32_t overrideBits = nri_material_policy::ActorMaterialOverride_None;
-			bool touched = false;
-			const uint32_t actorTextureId = (unsigned)actor->spr.picnum < MAXTILES ? (uint32_t)tileGetTextureID(actor->spr.picnum).GetIndex() : 0u;
-			for (const auto& resolvedRule : resolved.actorRules)
-			{
-				if (!resolvedRule.actorClassResolved ||
-					resolvedRule.actorClass == nullptr ||
-					(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)))
-				{
-					continue;
-				}
-
-				if (resolvedRule.hasTileFilter && actorTextureId != (uint32_t)resolvedRule.tileFilter)
-				{
-					continue;
-				}
-
-				if (resolvedRule.hasShadowReceive)
-				{
-					touched = true;
-					if (resolvedRule.shadowReceive)
-					{
-						overrideBits &= ~nri_material_policy::ActorMaterialOverride_NoShadowReceive;
-					}
-					else
-					{
-						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowReceive;
-					}
-				}
-
-				if (resolvedRule.hasShadowCast)
-				{
-					touched = true;
-					if (resolvedRule.shadowCast)
-					{
-						overrideBits &= ~nri_material_policy::ActorMaterialOverride_NoShadowCast;
-					}
-					else
-					{
-						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowCast;
-					}
-				}
-
-				if (resolvedRule.hasFullbright)
-				{
-					touched = true;
-					if (resolvedRule.fullbright)
-					{
-						overrideBits |= nri_material_policy::ActorMaterialOverride_Fullbright;
-					}
-					else
-					{
-						overrideBits &= ~nri_material_policy::ActorMaterialOverride_Fullbright;
-					}
-				}
-			}
-
-			for (const auto& resolvedRule : resolved.actorOverrideRules)
-			{
-				if (!resolvedRule.actorClassResolved ||
-					resolvedRule.actorClass == nullptr ||
-					(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)))
-				{
-					continue;
-				}
-
-				if (resolvedRule.hasShadowReceive)
-				{
-					touched = true;
-					if (resolvedRule.shadowReceive)
-					{
-						overrideBits &= ~nri_material_policy::ActorMaterialOverride_NoShadowReceive;
-					}
-					else
-					{
-						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowReceive;
-					}
-				}
-
-				if (resolvedRule.hasShadowCast)
-				{
-					touched = true;
-					if (resolvedRule.shadowCast)
-					{
-						overrideBits &= ~nri_material_policy::ActorMaterialOverride_NoShadowCast;
-					}
-					else
-					{
-						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowCast;
-					}
-				}
-			}
-
-			if (touched && overrideBits != nri_material_policy::ActorMaterialOverride_None)
-			{
-				outOverrides[(int32_t)actor->GetIndex()] = overrideBits;
-			}
-		}
-	}
-
-	static bool HasActorFullbrightOverrides(const ResolvedLightOverlaySet& resolved)
-	{
-		for (const auto& rule : resolved.actorRules)
-		{
-			if (rule.hasFullbright)
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
 	static uint32_t BuildMapOverlayRuleId(const ResolvedLightOverlayMapLightRule& rule)
 	{
 		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.mapName.GetChars(), rule.source);
@@ -10585,9 +10452,8 @@ const std::unordered_map<int32_t, uint32_t>& NRIRenderer::GetActorMaterialOverri
 {
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	const bool hasActorRules =
-		resolvedLightOverlays.actorRules.Size() > 0 ||
-		resolvedLightOverlays.actorOverrideRules.Size() > 0;
-	const bool hasFullbrightOverrides = HasActorFullbrightOverrides(resolvedLightOverlays);
+		nri_material_policy::HasActorMaterialOverrideRules(resolvedLightOverlays);
+	const bool hasFullbrightOverrides = nri_material_policy::HasActorFullbrightOverrides(resolvedLightOverlays);
 	if (mActorMaterialOverrideCache.valid &&
 		mActorMaterialOverrideCache.frameIndex == mFrameIndex &&
 		mActorMaterialOverrideCache.resolvedGeneration == resolvedLightOverlays.resolvedGeneration &&
@@ -10612,14 +10478,14 @@ const std::unordered_map<int32_t, uint32_t>& NRIRenderer::GetActorMaterialOverri
 	if (ShouldTracePtPerf())
 	{
 		const auto start = std::chrono::steady_clock::now();
-		BuildActorMaterialOverrideMap(resolvedLightOverlays, mActorMaterialOverrideCache.overrides);
+		nri_material_policy::BuildActorMaterialOverrideMap(resolvedLightOverlays, mActorMaterialOverrideCache.overrides);
 		const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
 		mLastPerfShellTraceStats.actorOverrideMapBuildMs += elapsedMs;
 		materialTraceEntry.overrideBuildMs += elapsedMs;
 	}
 	else
 	{
-		BuildActorMaterialOverrideMap(resolvedLightOverlays, mActorMaterialOverrideCache.overrides);
+		nri_material_policy::BuildActorMaterialOverrideMap(resolvedLightOverlays, mActorMaterialOverrideCache.overrides);
 	}
 
 	return mActorMaterialOverrideCache.overrides;
@@ -14127,7 +13993,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	auto& materialTraceEntry = mLastPerfShellTraceStats.materialBuildByLabel[GetMaterialBuildTraceSlotIndex(materialTraceSlot)];
 	materialTraceEntry.calls++;
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
-	if (HasActorFullbrightOverrides(resolvedLightOverlays))
+	if (nri_material_policy::HasActorFullbrightOverrides(resolvedLightOverlays))
 	{
 		const auto& actorOverrides = GetActorMaterialOverrideMapForFrame(materialTraceSlot);
 		if (!actorOverrides.empty())

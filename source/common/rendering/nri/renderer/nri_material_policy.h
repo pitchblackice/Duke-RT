@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
+struct ResolvedLightOverlaySet;
+
 namespace nri_material_policy
 {
 	enum ActorMaterialOverrideBits : uint32_t
@@ -16,6 +18,12 @@ namespace nri_material_policy
 		ActorMaterialOverride_NoShadowCast = 1u << 1,
 		ActorMaterialOverride_Fullbright = 1u << 2,
 	};
+
+	bool HasActorMaterialOverrideRules(const ResolvedLightOverlaySet& resolved);
+	bool HasActorFullbrightOverrides(const ResolvedLightOverlaySet& resolved);
+	void BuildActorMaterialOverrideMap(
+		const ResolvedLightOverlaySet& resolved,
+		std::unordered_map<int32_t, uint32_t>& outOverrides);
 
 	void ApplyActorFullbrightOverridesToBuiltMaterials(
 		const std::unordered_map<int32_t, uint32_t>& actorOverrides,

@@ -1,5 +1,9 @@
 #include "nri_material_policy.h"
 
+#include "coreactor.h"
+#include "lightoverlay.h"
+#include "texinfo.h"
+
 #include <algorithm>
 #include <cstring>
 
@@ -44,6 +48,146 @@ namespace
 		material.emissiveColor[0] = 1.0f;
 		material.emissiveColor[1] = 1.0f;
 		material.emissiveColor[2] = 1.0f;
+	}
+}
+
+bool nri_material_policy::HasActorMaterialOverrideRules(const ResolvedLightOverlaySet& resolved)
+{
+	return resolved.actorRules.Size() > 0 || resolved.actorOverrideRules.Size() > 0;
+}
+
+bool nri_material_policy::HasActorFullbrightOverrides(const ResolvedLightOverlaySet& resolved)
+{
+	for (const auto& rule : resolved.actorRules)
+	{
+		if (rule.hasFullbright)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void nri_material_policy::BuildActorMaterialOverrideMap(
+	const ResolvedLightOverlaySet& resolved,
+	std::unordered_map<int32_t, uint32_t>& outOverrides)
+{
+	if (!HasActorMaterialOverrideRules(resolved))
+	{
+		return;
+	}
+
+	TSpriteIterator<DCoreActor> it;
+	while (auto actor = it.Next())
+	{
+		if (actor == nullptr || !actor->exists() || (actor->ObjectFlags & OF_EuthanizeMe) != 0)
+		{
+			continue;
+		}
+
+		PClass* actorClass = actor->GetClass();
+		if (actorClass == nullptr)
+		{
+			continue;
+		}
+
+		uint32_t overrideBits = ActorMaterialOverride_None;
+		bool touched = false;
+		const uint32_t actorTextureId = (unsigned)actor->spr.picnum < MAXTILES ? (uint32_t)tileGetTextureID(actor->spr.picnum).GetIndex() : 0u;
+		for (const auto& resolvedRule : resolved.actorRules)
+		{
+			if (!resolvedRule.actorClassResolved ||
+				resolvedRule.actorClass == nullptr ||
+				(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)))
+			{
+				continue;
+			}
+
+			if (resolvedRule.hasTileFilter && actorTextureId != (uint32_t)resolvedRule.tileFilter)
+			{
+				continue;
+			}
+
+			if (resolvedRule.hasShadowReceive)
+			{
+				touched = true;
+				if (resolvedRule.shadowReceive)
+				{
+					overrideBits &= ~ActorMaterialOverride_NoShadowReceive;
+				}
+				else
+				{
+					overrideBits |= ActorMaterialOverride_NoShadowReceive;
+				}
+			}
+
+			if (resolvedRule.hasShadowCast)
+			{
+				touched = true;
+				if (resolvedRule.shadowCast)
+				{
+					overrideBits &= ~ActorMaterialOverride_NoShadowCast;
+				}
+				else
+				{
+					overrideBits |= ActorMaterialOverride_NoShadowCast;
+				}
+			}
+
+			if (resolvedRule.hasFullbright)
+			{
+				touched = true;
+				if (resolvedRule.fullbright)
+				{
+					overrideBits |= ActorMaterialOverride_Fullbright;
+				}
+				else
+				{
+					overrideBits &= ~ActorMaterialOverride_Fullbright;
+				}
+			}
+		}
+
+		for (const auto& resolvedRule : resolved.actorOverrideRules)
+		{
+			if (!resolvedRule.actorClassResolved ||
+				resolvedRule.actorClass == nullptr ||
+				(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)))
+			{
+				continue;
+			}
+
+			if (resolvedRule.hasShadowReceive)
+			{
+				touched = true;
+				if (resolvedRule.shadowReceive)
+				{
+					overrideBits &= ~ActorMaterialOverride_NoShadowReceive;
+				}
+				else
+				{
+					overrideBits |= ActorMaterialOverride_NoShadowReceive;
+				}
+			}
+
+			if (resolvedRule.hasShadowCast)
+			{
+				touched = true;
+				if (resolvedRule.shadowCast)
+				{
+					overrideBits &= ~ActorMaterialOverride_NoShadowCast;
+				}
+				else
+				{
+					overrideBits |= ActorMaterialOverride_NoShadowCast;
+				}
+			}
+		}
+
+		if (touched && overrideBits != ActorMaterialOverride_None)
+		{
+			outOverrides[(int32_t)actor->GetIndex()] = overrideBits;
+		}
 	}
 }
 
