@@ -14338,6 +14338,26 @@ void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuD
 	mSceneLights.BuildRuntimePointLightUpload(outLights);
 }
 
+SceneLightSystem::RuntimeLightClusterBuildInput NRIRenderer::BuildRuntimeLightClusterInput() const
+{
+	SceneLightSystem::RuntimeLightClusterBuildInput input = {};
+	input.renderWidth = mRenderWidth;
+	input.renderHeight = mRenderHeight;
+	input.tileSize = NRI_RUNTIME_LIGHT_TILE_SIZE;
+	input.maxRuntimeLights = NRI_MAX_RUNTIME_POINT_LIGHTS;
+	Copy3(mCurrentCameraPos, input.currentCameraPos);
+	Copy3(mCurrentCameraForward, input.currentCameraForward);
+	Copy3(mCurrentCameraRight, input.currentCameraRight);
+	Copy3(mCurrentCameraUp, input.currentCameraUp);
+	input.tanHalfFovX = mCurrentTanHalfFovX;
+	input.tanHalfFovY = mCurrentTanHalfFovY;
+	input.mirrorExtendedLightCoverage =
+		mHasVisibleMirrorPortalLastFrame &&
+		nri_ptmirrordynamicdistance > 0.0f;
+	input.mirrorExtendedLightDistance = input.mirrorExtendedLightCoverage ? (float)nri_ptmirrordynamicdistance : 0.0f;
+	return input;
+}
+
 uint64_t NRIRenderer::BuildRuntimeLightPayloadHash() const
 {
 	return mSceneLights.BuildRuntimeLightPayloadHash();
@@ -14345,30 +14365,7 @@ uint64_t NRIRenderer::BuildRuntimeLightPayloadHash() const
 
 uint64_t NRIRenderer::BuildRuntimeLightClusterCameraHash() const
 {
-	uint64_t hash = 1469598103934665603ull;
-	hash = HashCombine64(hash, (uint64_t)mRenderWidth);
-	hash = HashCombine64(hash, (uint64_t)mRenderHeight);
-
-	if (mSceneLights.GetAnalyticLights().activeLights.empty())
-	{
-		return hash;
-	}
-
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraPos[0]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraPos[1]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraPos[2]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraForward[0]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraForward[1]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraForward[2]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraRight[0]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraRight[1]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraRight[2]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraUp[0]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraUp[1]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentCameraUp[2]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentTanHalfFovX));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(mCurrentTanHalfFovY));
-	return hash;
+	return mSceneLights.BuildRuntimeLightClusterCameraHash(BuildRuntimeLightClusterInput());
 }
 
 void NRIRenderer::BuildEmissiveSamplingUpload(
@@ -15042,124 +15039,14 @@ void NRIRenderer::BuildRuntimeLightClusterUpload(
 	uint32_t& outTileIndexCount,
 	uint32_t& outMaxTileOccupancy) const
 {
-	const auto& activeLights = mSceneLights.GetAnalyticLights().activeLights;
-	const uint32_t activeLightCount = (uint32_t)activeLights.size();
-	outTileCountX = std::max(1u, (mRenderWidth + NRI_RUNTIME_LIGHT_TILE_SIZE - 1u) / NRI_RUNTIME_LIGHT_TILE_SIZE);
-	outTileCountY = std::max(1u, (mRenderHeight + NRI_RUNTIME_LIGHT_TILE_SIZE - 1u) / NRI_RUNTIME_LIGHT_TILE_SIZE);
-	const uint32_t tileCount = outTileCountX * outTileCountY;
-	const uint32_t maxIndexCapacity = tileCount * NRI_MAX_RUNTIME_POINT_LIGHTS;
-	outTileIndexCount = 0;
-	outMaxTileOccupancy = 0;
-	outHeaders.assign(tileCount, {});
-	outIndices.assign(maxIndexCapacity, 0u);
-
-	if (tileCount == 0 || activeLightCount == 0 || mRenderWidth == 0 || mRenderHeight == 0)
-	{
-		return;
-	}
-
-	auto dot3 = [](const float* a, const float* b) -> float
-	{
-		return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-	};
-
-	std::vector<std::vector<uint32_t>> tileLights(tileCount);
-	const bool mirrorExtendedLightCoverage =
-		mHasVisibleMirrorPortalLastFrame &&
-		nri_ptmirrordynamicdistance > 0.0f;
-	const float mirrorExtendedLightDistanceSq =
-		mirrorExtendedLightCoverage ? nri_ptmirrordynamicdistance * nri_ptmirrordynamicdistance : 0.0f;
-	for (uint32_t lightIndex = 0; lightIndex < activeLightCount; ++lightIndex)
-	{
-		const SceneLightSystem::SceneAnalyticLight& light = activeLights[lightIndex];
-		if (light.intensity <= 0.0f || light.radius <= 0.0f)
-		{
-			continue;
-		}
-
-		const float toLight[3] = {
-			light.position[0] - mCurrentCameraPos[0],
-			light.position[1] - mCurrentCameraPos[1],
-			light.position[2] - mCurrentCameraPos[2]
-		};
-		const float viewX = dot3(toLight, mCurrentCameraRight);
-		const float viewY = dot3(toLight, mCurrentCameraUp);
-		const float viewZ = dot3(toLight, mCurrentCameraForward);
-		const float lightDistanceSq =
-			toLight[0] * toLight[0] +
-			toLight[1] * toLight[1] +
-			toLight[2] * toLight[2];
-		const bool forceMirrorFullscreen =
-			mirrorExtendedLightCoverage &&
-			lightDistanceSq <= mirrorExtendedLightDistanceSq;
-		if (!forceMirrorFullscreen && viewZ <= -light.radius)
-		{
-			continue;
-		}
-
-		int32_t minTileX = 0;
-		int32_t minTileY = 0;
-		int32_t maxTileX = (int32_t)outTileCountX - 1;
-		int32_t maxTileY = (int32_t)outTileCountY - 1;
-
-		if (!forceMirrorFullscreen &&
-			viewZ > light.radius &&
-			mCurrentTanHalfFovX > 0.0f &&
-			mCurrentTanHalfFovY > 0.0f)
-		{
-			const float conservativeDepth = std::max(viewZ - light.radius, 1.0f);
-			const float centerNdcX = viewX / (viewZ * mCurrentTanHalfFovX);
-			const float centerNdcY = viewY / (viewZ * mCurrentTanHalfFovY);
-			const float radiusNdcX = light.radius / (conservativeDepth * mCurrentTanHalfFovX);
-			const float radiusNdcY = light.radius / (conservativeDepth * mCurrentTanHalfFovY);
-			const float minPixelX = ((centerNdcX - radiusNdcX) * 0.5f + 0.5f) * (float)mRenderWidth;
-			const float maxPixelX = ((centerNdcX + radiusNdcX) * 0.5f + 0.5f) * (float)mRenderWidth;
-			const float minPixelY = (0.5f - (centerNdcY + radiusNdcY) * 0.5f) * (float)mRenderHeight;
-			const float maxPixelY = (0.5f - (centerNdcY - radiusNdcY) * 0.5f) * (float)mRenderHeight;
-			if (maxPixelX < 0.0f || minPixelX >= (float)mRenderWidth || maxPixelY < 0.0f || minPixelY >= (float)mRenderHeight)
-			{
-				continue;
-			}
-
-			minTileX = std::max(0, (int32_t)std::floor(minPixelX / (float)NRI_RUNTIME_LIGHT_TILE_SIZE));
-			minTileY = std::max(0, (int32_t)std::floor(minPixelY / (float)NRI_RUNTIME_LIGHT_TILE_SIZE));
-			maxTileX = std::min((int32_t)outTileCountX - 1, (int32_t)std::floor(std::max(maxPixelX - 1.0f, 0.0f) / (float)NRI_RUNTIME_LIGHT_TILE_SIZE));
-			maxTileY = std::min((int32_t)outTileCountY - 1, (int32_t)std::floor(std::max(maxPixelY - 1.0f, 0.0f) / (float)NRI_RUNTIME_LIGHT_TILE_SIZE));
-		}
-
-		if (minTileX > maxTileX || minTileY > maxTileY)
-		{
-			continue;
-		}
-
-		for (int32_t tileY = minTileY; tileY <= maxTileY; ++tileY)
-		{
-			for (int32_t tileX = minTileX; tileX <= maxTileX; ++tileX)
-			{
-				tileLights[(size_t)tileY * outTileCountX + (size_t)tileX].push_back(lightIndex);
-			}
-		}
-	}
-
-	uint32_t indexCursor = 0;
-	for (uint32_t tileIndex = 0; tileIndex < tileCount; ++tileIndex)
-	{
-		RuntimeLightTileHeaderGpuData& header = outHeaders[tileIndex];
-		const std::vector<uint32_t>& tileLightList = tileLights[tileIndex];
-		header.indexOffset = indexCursor;
-		header.indexCount = (uint32_t)tileLightList.size();
-		outMaxTileOccupancy = std::max(outMaxTileOccupancy, header.indexCount);
-		for (uint32_t lightIndex : tileLightList)
-		{
-			if (indexCursor < outIndices.size())
-			{
-				outIndices[indexCursor] = lightIndex;
-				indexCursor++;
-			}
-		}
-	}
-
-	outTileIndexCount = indexCursor;
+	mSceneLights.BuildRuntimeLightClusterUpload(
+		BuildRuntimeLightClusterInput(),
+		outHeaders,
+		outIndices,
+		outTileCountX,
+		outTileCountY,
+		outTileIndexCount,
+		outMaxTileOccupancy);
 }
 
 bool NRIRenderer::UpdateSceneDataSet(

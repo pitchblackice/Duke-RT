@@ -265,6 +265,11 @@ namespace
 		return bits;
 	}
 
+	float Dot3(const float* a, const float* b)
+	{
+		return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+	}
+
 	std::string BuildNormalizedMuzzleFlashEventKey(const FString& eventId)
 	{
 		if (eventId.IsEmpty())
@@ -2311,6 +2316,156 @@ uint64_t SceneLightSystem::BuildRuntimeLightPayloadHash() const
 	}
 
 	return hash;
+}
+
+uint64_t SceneLightSystem::BuildRuntimeLightClusterCameraHash(const RuntimeLightClusterBuildInput& input) const
+{
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashCombine64(hash, (uint64_t)input.renderWidth);
+	hash = HashCombine64(hash, (uint64_t)input.renderHeight);
+
+	if (mAnalyticLights.activeLights.empty())
+	{
+		return hash;
+	}
+
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraPos[0]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraPos[1]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraPos[2]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraForward[0]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraForward[1]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraForward[2]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraRight[0]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraRight[1]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraRight[2]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraUp[0]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraUp[1]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraUp[2]));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.tanHalfFovX));
+	hash = HashCombine64(hash, (uint64_t)FloatBits(input.tanHalfFovY));
+	return hash;
+}
+
+void SceneLightSystem::BuildRuntimeLightClusterUpload(
+	const RuntimeLightClusterBuildInput& input,
+	std::vector<NRIRuntimeLightTileHeaderGpuData>& outHeaders,
+	std::vector<uint32_t>& outIndices,
+	uint32_t& outTileCountX,
+	uint32_t& outTileCountY,
+	uint32_t& outTileIndexCount,
+	uint32_t& outMaxTileOccupancy) const
+{
+	const auto& activeLights = mAnalyticLights.activeLights;
+	const uint32_t activeLightCount = (uint32_t)activeLights.size();
+	const uint32_t tileSize = std::max(1u, input.tileSize);
+	outTileCountX = std::max(1u, (input.renderWidth + tileSize - 1u) / tileSize);
+	outTileCountY = std::max(1u, (input.renderHeight + tileSize - 1u) / tileSize);
+	const uint32_t tileCount = outTileCountX * outTileCountY;
+	const uint32_t maxIndexCapacity = tileCount * input.maxRuntimeLights;
+	outTileIndexCount = 0;
+	outMaxTileOccupancy = 0;
+	outHeaders.assign(tileCount, {});
+	outIndices.assign(maxIndexCapacity, 0u);
+
+	if (tileCount == 0 || activeLightCount == 0 || input.renderWidth == 0 || input.renderHeight == 0)
+	{
+		return;
+	}
+
+	std::vector<std::vector<uint32_t>> tileLights(tileCount);
+	const float mirrorExtendedLightDistanceSq =
+		input.mirrorExtendedLightCoverage ? input.mirrorExtendedLightDistance * input.mirrorExtendedLightDistance : 0.0f;
+	for (uint32_t lightIndex = 0; lightIndex < activeLightCount; ++lightIndex)
+	{
+		const SceneAnalyticLight& light = activeLights[lightIndex];
+		if (light.intensity <= 0.0f || light.radius <= 0.0f)
+		{
+			continue;
+		}
+
+		const float toLight[3] = {
+			light.position[0] - input.currentCameraPos[0],
+			light.position[1] - input.currentCameraPos[1],
+			light.position[2] - input.currentCameraPos[2]
+		};
+		const float viewX = Dot3(toLight, input.currentCameraRight);
+		const float viewY = Dot3(toLight, input.currentCameraUp);
+		const float viewZ = Dot3(toLight, input.currentCameraForward);
+		const float lightDistanceSq =
+			toLight[0] * toLight[0] +
+			toLight[1] * toLight[1] +
+			toLight[2] * toLight[2];
+		const bool forceMirrorFullscreen =
+			input.mirrorExtendedLightCoverage &&
+			lightDistanceSq <= mirrorExtendedLightDistanceSq;
+		if (!forceMirrorFullscreen && viewZ <= -light.radius)
+		{
+			continue;
+		}
+
+		int32_t minTileX = 0;
+		int32_t minTileY = 0;
+		int32_t maxTileX = (int32_t)outTileCountX - 1;
+		int32_t maxTileY = (int32_t)outTileCountY - 1;
+
+		if (!forceMirrorFullscreen &&
+			viewZ > light.radius &&
+			input.tanHalfFovX > 0.0f &&
+			input.tanHalfFovY > 0.0f)
+		{
+			const float conservativeDepth = std::max(viewZ - light.radius, 1.0f);
+			const float centerNdcX = viewX / (viewZ * input.tanHalfFovX);
+			const float centerNdcY = viewY / (viewZ * input.tanHalfFovY);
+			const float radiusNdcX = light.radius / (conservativeDepth * input.tanHalfFovX);
+			const float radiusNdcY = light.radius / (conservativeDepth * input.tanHalfFovY);
+			const float minPixelX = ((centerNdcX - radiusNdcX) * 0.5f + 0.5f) * (float)input.renderWidth;
+			const float maxPixelX = ((centerNdcX + radiusNdcX) * 0.5f + 0.5f) * (float)input.renderWidth;
+			const float minPixelY = (0.5f - (centerNdcY + radiusNdcY) * 0.5f) * (float)input.renderHeight;
+			const float maxPixelY = (0.5f - (centerNdcY - radiusNdcY) * 0.5f) * (float)input.renderHeight;
+			if (maxPixelX < 0.0f || minPixelX >= (float)input.renderWidth || maxPixelY < 0.0f || minPixelY >= (float)input.renderHeight)
+			{
+				continue;
+			}
+
+			minTileX = std::max(0, (int32_t)std::floor(minPixelX / (float)tileSize));
+			minTileY = std::max(0, (int32_t)std::floor(minPixelY / (float)tileSize));
+			maxTileX = std::min((int32_t)outTileCountX - 1, (int32_t)std::floor(std::max(maxPixelX - 1.0f, 0.0f) / (float)tileSize));
+			maxTileY = std::min((int32_t)outTileCountY - 1, (int32_t)std::floor(std::max(maxPixelY - 1.0f, 0.0f) / (float)tileSize));
+		}
+
+		if (minTileX > maxTileX || minTileY > maxTileY)
+		{
+			continue;
+		}
+
+		for (int32_t tileY = minTileY; tileY <= maxTileY; ++tileY)
+		{
+			for (int32_t tileX = minTileX; tileX <= maxTileX; ++tileX)
+			{
+				tileLights[(size_t)tileY * outTileCountX + (size_t)tileX].push_back(lightIndex);
+			}
+		}
+	}
+
+	uint32_t indexCursor = 0;
+	for (uint32_t tileIndex = 0; tileIndex < tileCount; ++tileIndex)
+	{
+		NRIRuntimeLightTileHeaderGpuData& header = outHeaders[tileIndex];
+		const std::vector<uint32_t>& tileLightList = tileLights[tileIndex];
+		header.indexOffset = indexCursor;
+		header.indexCount = (uint32_t)tileLightList.size();
+		outMaxTileOccupancy = std::max(outMaxTileOccupancy, header.indexCount);
+		for (uint32_t lightIndex : tileLightList)
+		{
+			if (indexCursor < outIndices.size())
+			{
+				outIndices[indexCursor] = lightIndex;
+				indexCursor++;
+			}
+		}
+	}
+
+	outTileIndexCount = indexCursor;
 }
 
 void SceneLightSystem::BuildSectorLightingUpload(

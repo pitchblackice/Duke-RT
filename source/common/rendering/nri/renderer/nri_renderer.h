@@ -1645,11 +1645,7 @@ private:
 		nri_scene::MaterialBridgeData materialBridge;
 	};
 
-	struct RuntimeLightTileHeaderGpuData
-	{
-		uint32_t indexOffset = 0;
-		uint32_t indexCount = 0;
-	};
+	using RuntimeLightTileHeaderGpuData = NRIRuntimeLightTileHeaderGpuData;
 
 	struct EmissivePrimitiveHeaderGpuData
 	{
@@ -1984,6 +1980,7 @@ private:
 	bool RebuildResidentStaticMaterialState(const char* reason);
 	bool RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
+	SceneLightSystem::RuntimeLightClusterBuildInput BuildRuntimeLightClusterInput() const;
 	void BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const;
 	uint64_t BuildRuntimeLightPayloadHash() const;
 	uint64_t BuildRuntimeLightClusterCameraHash() const;

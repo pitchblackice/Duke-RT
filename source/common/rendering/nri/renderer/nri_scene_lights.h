@@ -98,6 +98,12 @@ struct NRISectorLightGpuData
 	int32_t hitag = 0;
 };
 
+struct NRIRuntimeLightTileHeaderGpuData
+{
+	uint32_t indexOffset = 0;
+	uint32_t indexCount = 0;
+};
+
 struct NRILightingSettings
 {
 	float emissiveMinPower = 0.0f;
@@ -152,6 +158,22 @@ public:
 		float color[3] = { 1.0f, 1.0f, 1.0f };
 		float intensity = 1.0f;
 		float radius = 0.0f;
+	};
+
+	struct RuntimeLightClusterBuildInput
+	{
+		uint32_t renderWidth = 0;
+		uint32_t renderHeight = 0;
+		uint32_t tileSize = 1;
+		uint32_t maxRuntimeLights = 0;
+		float currentCameraPos[3] = {};
+		float currentCameraForward[3] = { 0.0f, 0.0f, 1.0f };
+		float currentCameraRight[3] = { 1.0f, 0.0f, 0.0f };
+		float currentCameraUp[3] = { 0.0f, 1.0f, 0.0f };
+		float tanHalfFovX = 0.0f;
+		float tanHalfFovY = 0.0f;
+		bool mirrorExtendedLightCoverage = false;
+		float mirrorExtendedLightDistance = 0.0f;
 	};
 
 	struct AnalyticLightHeuristicRule
@@ -487,6 +509,15 @@ public:
 	void RebuildSectorLighting(uint32_t frameIndex, uint32_t sectorCount);
 	void BuildRuntimePointLightUpload(std::vector<NRIRuntimePointLightGpuData>& outLights) const;
 	uint64_t BuildRuntimeLightPayloadHash() const;
+	uint64_t BuildRuntimeLightClusterCameraHash(const RuntimeLightClusterBuildInput& input) const;
+	void BuildRuntimeLightClusterUpload(
+		const RuntimeLightClusterBuildInput& input,
+		std::vector<NRIRuntimeLightTileHeaderGpuData>& outHeaders,
+		std::vector<uint32_t>& outIndices,
+		uint32_t& outTileCountX,
+		uint32_t& outTileCountY,
+		uint32_t& outTileIndexCount,
+		uint32_t& outMaxTileOccupancy) const;
 	void BuildSectorLightingUpload(
 		float sectorLightMultiplier,
 		bool sectorLightingEnabled,
