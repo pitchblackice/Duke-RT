@@ -7040,8 +7040,8 @@ void NRIRenderer::OnLevelUnloadComplete(const LevelTransitionInfo& info)
 	assert(mStaticMapScene.chunks.empty());
 	assert(!mStaticMapChunkAtlas.valid);
 	assert(mStaticMapChunkAtlas.chunks.empty());
-	assert(!mResidentMapChunkRegistry.valid);
-	assert(mResidentMapChunkRegistry.entries.empty());
+	assert(!mStaticSceneResidency.Registry().valid);
+	assert(mStaticSceneResidency.Registry().entries.empty());
 	assert(mRuntimeMutation.IsCacheEmpty());
 	assert(!mPendingStaticMapLightingInvalidation);
 	assert(!mLastSurfaceProbe.valid);
@@ -7114,12 +7114,12 @@ NRIRenderer::LevelTransitionSnapshot NRIRenderer::BuildLevelTransitionSnapshot()
 	snapshot.runtimeMutationChunkCount = mRuntimeMutation.GetCacheChunkCount();
 	snapshot.runtimeMutationActiveChunkCount = runtimeMutationCacheStats.activeChunkCount;
 	snapshot.runtimeMutationValidChunkCount = runtimeMutationCacheStats.validChunkCount;
-	snapshot.residentChunkRegistryValid = mResidentMapChunkRegistry.valid;
-	snapshot.residentChunkRegistryEntryCount = (uint32_t)mResidentMapChunkRegistry.entries.size();
-	snapshot.residentChunkRegistryChunkCount = mResidentMapChunkRegistry.chunkCount;
-	snapshot.residentChunkRegistryActiveChunkCount = mResidentMapChunkRegistry.activeChunkCount;
-	snapshot.residentChunkRegistryMappedChunkCount = mResidentMapChunkRegistry.mappedChunkCount;
-	snapshot.residentChunkRegistryAccelerationResidentChunkCount = mResidentMapChunkRegistry.accelerationResidentChunkCount;
+	snapshot.residentChunkRegistryValid = mStaticSceneResidency.Registry().valid;
+	snapshot.residentChunkRegistryEntryCount = (uint32_t)mStaticSceneResidency.Registry().entries.size();
+	snapshot.residentChunkRegistryChunkCount = mStaticSceneResidency.Registry().chunkCount;
+	snapshot.residentChunkRegistryActiveChunkCount = mStaticSceneResidency.Registry().activeChunkCount;
+	snapshot.residentChunkRegistryMappedChunkCount = mStaticSceneResidency.Registry().mappedChunkCount;
+	snapshot.residentChunkRegistryAccelerationResidentChunkCount = mStaticSceneResidency.Registry().accelerationResidentChunkCount;
 	snapshot.pendingStaticMapLightingInvalidation = mPendingStaticMapLightingInvalidation;
 	snapshot.surfaceProbeValid = mLastSurfaceProbe.valid;
 	snapshot.surfaceProbeHit = mLastSurfaceProbe.hit;
@@ -12027,7 +12027,7 @@ void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
 		return;
 	}
 
-	auto& registry = mResidentMapChunkRegistry;
+	auto& registry = mStaticSceneResidency.Registry();
 	registry.valid = true;
 	registry.buildSerial = mMapWorld.buildSerial;
 	registry.chunkCount = (uint32_t)mMapWorld.chunks.size();
@@ -12239,20 +12239,20 @@ void NRIRenderer::PrintPortalTraversalStatus() const
 
 void NRIRenderer::PrintResidentMapChunkRegistryStatus() const
 {
-	if (!mResidentMapChunkRegistry.valid)
+	if (!mStaticSceneResidency.Registry().valid)
 	{
 		Printf("NRI PT resident chunk registry: unavailable.\n");
 		return;
 	}
 
 	Printf("NRI PT resident chunk registry: build_serial=%llu chunks=%u active=%u mapped=%u acceleration_resident=%u animated_candidates=%u animated_refresh_suppressed=%u\n",
-		(unsigned long long)mResidentMapChunkRegistry.buildSerial,
-		mResidentMapChunkRegistry.chunkCount,
-		mResidentMapChunkRegistry.activeChunkCount,
-		mResidentMapChunkRegistry.mappedChunkCount,
-		mResidentMapChunkRegistry.accelerationResidentChunkCount,
-		mResidentMapChunkRegistry.animatedCandidateChunkCount,
-		mResidentMapChunkRegistry.animatedRefreshSuppressedChunkCount);
+		(unsigned long long)mStaticSceneResidency.Registry().buildSerial,
+		mStaticSceneResidency.Registry().chunkCount,
+		mStaticSceneResidency.Registry().activeChunkCount,
+		mStaticSceneResidency.Registry().mappedChunkCount,
+		mStaticSceneResidency.Registry().accelerationResidentChunkCount,
+		mStaticSceneResidency.Registry().animatedCandidateChunkCount,
+		mStaticSceneResidency.Registry().animatedRefreshSuppressedChunkCount);
 
 	const NRIRuntimeMutationSettings runtimeMutationSettings = BuildNRIRuntimeMutationSettingsFromCVars();
 	const float nearDistance = runtimeMutationSettings.nearDistance;
@@ -18591,11 +18591,11 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 
 		targetChunk.animatedRefreshSuppressed = true;
 		mStaticMapScene.animatedRefreshSuppressedChunkCount++;
-		if (targetChunk.chunkIndex < mResidentMapChunkRegistry.entries.size() &&
-			mResidentMapChunkRegistry.entries[targetChunk.chunkIndex].valid)
+		if (targetChunk.chunkIndex < mStaticSceneResidency.Registry().entries.size() &&
+			mStaticSceneResidency.Registry().entries[targetChunk.chunkIndex].valid)
 		{
-			mResidentMapChunkRegistry.entries[targetChunk.chunkIndex].animatedRefreshSuppressed = true;
-			mResidentMapChunkRegistry.entries[targetChunk.chunkIndex].animatedSuppressionEmitCount++;
+			mStaticSceneResidency.Registry().entries[targetChunk.chunkIndex].animatedRefreshSuppressed = true;
+			mStaticSceneResidency.Registry().entries[targetChunk.chunkIndex].animatedSuppressionEmitCount++;
 		}
 		mLastPerfShellTraceStats.runtimeAnimatedSuppressionEmitCount++;
 		if (nri_ptscenestats)

@@ -45,7 +45,7 @@ namespace
 
 void NRIRenderer::ResetResidentMapChunkRegistry()
 {
-	mResidentMapChunkRegistry = {};
+	mStaticSceneResidency.Registry() = {};
 }
 
 uint32_t NRIRenderer::GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex) const
@@ -429,9 +429,9 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 
 void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const
 {
-	if (!mResidentMapChunkRegistry.valid ||
-		mResidentMapChunkRegistry.buildSerial != mStaticMapScene.buildSerial ||
-		mResidentMapChunkRegistry.entries.empty())
+	if (!mStaticSceneResidency.Registry().valid ||
+		mStaticSceneResidency.Registry().buildSerial != mStaticMapScene.buildSerial ||
+		mStaticSceneResidency.Registry().entries.empty())
 	{
 		if (mStaticMapChunkAtlas.valid &&
 			mStaticMapChunkAtlas.buildSerial == mStaticMapScene.buildSerial &&
@@ -447,10 +447,10 @@ void NRIRenderer::BuildStaticMapInstances(std::vector<nri::TopLevelInstance>& ou
 
 	outTlasInstances.clear();
 	outSceneInstances.clear();
-	outTlasInstances.reserve(mResidentMapChunkRegistry.activeChunkCount);
-	outSceneInstances.reserve(mResidentMapChunkRegistry.activeChunkCount);
+	outTlasInstances.reserve(mStaticSceneResidency.Registry().activeChunkCount);
+	outSceneInstances.reserve(mStaticSceneResidency.Registry().activeChunkCount);
 
-	for (const auto& entry : mResidentMapChunkRegistry.entries)
+	for (const auto& entry : mStaticSceneResidency.Registry().entries)
 	{
 		if (!entry.valid ||
 			!entry.active ||
@@ -731,8 +731,8 @@ bool NRIRenderer::PreloadStaticMapResources()
 		mStaticMapChunkAtlas.buildSerial == mStaticMapScene.buildSerial &&
 		mStaticMapChunkAtlas.chunks.size() == mStaticMapScene.chunks.size();
 	const bool registryResident =
-		mResidentMapChunkRegistry.valid &&
-		mResidentMapChunkRegistry.buildSerial == mStaticMapScene.buildSerial;
+		mStaticSceneResidency.Registry().valid &&
+		mStaticSceneResidency.Registry().buildSerial == mStaticMapScene.buildSerial;
 
 	if ((int)nri_ptloadingtrace >= 1)
 	{
@@ -755,9 +755,9 @@ bool NRIRenderer::PreloadStaticMapResources()
 			mStaticMapChunkAtlas.primitiveCount,
 			mStaticMapChunkAtlas.materialCount,
 			registryResident ? 1u : 0u,
-			mResidentMapChunkRegistry.chunkCount,
-			mResidentMapChunkRegistry.mappedChunkCount,
-			mResidentMapChunkRegistry.accelerationResidentChunkCount,
+			mStaticSceneResidency.Registry().chunkCount,
+			mStaticSceneResidency.Registry().mappedChunkCount,
+			mStaticSceneResidency.Registry().accelerationResidentChunkCount,
 			(uint32_t)mStaticMapScene.lightChunkViews.size(),
 			(uint32_t)mStaticMapScene.materialBridge.textures.size(),
 			(uint32_t)mStaticMapScene.gpuMaterials.size(),

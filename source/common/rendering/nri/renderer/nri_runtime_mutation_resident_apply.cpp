@@ -512,12 +512,12 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentSceneImpl(
 		!mStaticMapScene.buffersResident ||
 		!mStaticMapScene.accelerationResident ||
 		!mStaticMapChunkAtlas.valid ||
-		mapChunk.chunkIndex >= mResidentMapChunkRegistry.entries.size())
+		mapChunk.chunkIndex >= mStaticSceneResidency.Registry().entries.size())
 	{
 		return false;
 	}
 
-	auto& entry = mResidentMapChunkRegistry.entries[mapChunk.chunkIndex];
+	auto& entry = mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex];
 	if (!entry.valid)
 	{
 		return false;
@@ -1453,50 +1453,50 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentSceneImpl(
 	replacement.triangleCount = 0;
 	mRuntimeMutation.ClearReplacementPayload(replacement, true);
 
-	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].appliedBaseline = appliedBaseline;
-	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].baselineSignature = appliedBaseline.signature;
-	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].liveSignature = appliedBaseline.signature;
-	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].staticSceneChunkListIndex = chunkListIndex;
-	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].active = !chunkBecomesEmpty;
-	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].mappedInStaticScene = !chunkBecomesEmpty;
-	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].exactGeometrySignature =
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].appliedBaseline = appliedBaseline;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].baselineSignature = appliedBaseline.signature;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].liveSignature = appliedBaseline.signature;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].staticSceneChunkListIndex = chunkListIndex;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].active = !chunkBecomesEmpty;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].mappedInStaticScene = !chunkBecomesEmpty;
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].exactGeometrySignature =
 		!chunkBecomesEmpty ? mStaticMapScene.chunks[chunkListIndex].exactGeometrySignature : 0;
-	mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].geometryTopologySignature =
+	mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].geometryTopologySignature =
 		!chunkBecomesEmpty ? mStaticMapScene.chunks[chunkListIndex].geometryTopologySignature : 0;
 	if (!chunkBecomesEmpty)
 	{
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].vertexOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].vertexOffset;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].vertexCount = mStaticMapChunkAtlas.chunks[chunkListIndex].vertexCount;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].indexOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].indexOffset;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].indexCount = mStaticMapChunkAtlas.chunks[chunkListIndex].indexCount;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].primitiveOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].primitiveOffset;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].primitiveCount = mStaticMapChunkAtlas.chunks[chunkListIndex].primitiveCount;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].materialOffset;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialCount = mStaticMapChunkAtlas.chunks[chunkListIndex].materialCount;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].vertexOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].vertexOffset;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].vertexCount = mStaticMapChunkAtlas.chunks[chunkListIndex].vertexCount;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].indexOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].indexOffset;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].indexCount = mStaticMapChunkAtlas.chunks[chunkListIndex].indexCount;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].primitiveOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].primitiveOffset;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].primitiveCount = mStaticMapChunkAtlas.chunks[chunkListIndex].primitiveCount;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].materialOffset = mStaticMapChunkAtlas.chunks[chunkListIndex].materialOffset;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].materialCount = mStaticMapChunkAtlas.chunks[chunkListIndex].materialCount;
 		if (!appliedPreservedResidentMaterialSlice)
 		{
-			mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialPayloadHash = residentMaterialPayloadHash;
+			mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].materialPayloadHash = residentMaterialPayloadHash;
 		}
 		if (!appliedPreservedResidentGeometryPayload)
 		{
-			mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].geometryPayloadHash = residentGeometryPayloadHash;
+			mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].geometryPayloadHash = residentGeometryPayloadHash;
 		}
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].accelerationResident =
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].accelerationResident =
 			mStaticMapScene.chunks[chunkListIndex].accelerationStructure.accelerationStructure != nullptr;
 	}
 	else
 	{
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].vertexOffset = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].vertexCount = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].indexOffset = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].indexCount = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].primitiveOffset = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].primitiveCount = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialOffset = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialCount = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].materialPayloadHash = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].geometryPayloadHash = 0;
-		mResidentMapChunkRegistry.entries[mapChunk.chunkIndex].accelerationResident = false;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].vertexOffset = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].vertexCount = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].indexOffset = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].indexCount = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].primitiveOffset = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].primitiveCount = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].materialOffset = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].materialCount = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].materialPayloadHash = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].geometryPayloadHash = 0;
+		mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex].accelerationResident = false;
 	}
 	if (!outResult.materialDirty && !residentMaterialPayloadHashSkip)
 	{

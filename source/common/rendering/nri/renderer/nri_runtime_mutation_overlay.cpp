@@ -372,7 +372,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& ou
 	std::vector<RuntimeAnimatedFrameTraceStats> runtimeAnimatedFrameStats;
 	if (tracePtPerf)
 	{
-		runtimeAnimatedFrameStats.resize(mResidentMapChunkRegistry.entries.size());
+		runtimeAnimatedFrameStats.resize(mStaticSceneResidency.Registry().entries.size());
 	}
 	const auto recordRuntimeAnimatedFrame =
 		[this, tracePtPerf, &runtimeAnimatedFrameStats](uint32_t chunkIndex,
@@ -794,9 +794,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& ou
 			return false;
 		}
 
-		if (mapChunkIndex < mResidentMapChunkRegistry.entries.size())
+		if (mapChunkIndex < mStaticSceneResidency.Registry().entries.size())
 		{
-			const auto& entry = mResidentMapChunkRegistry.entries[mapChunkIndex];
+			const auto& entry = mStaticSceneResidency.Registry().entries[mapChunkIndex];
 			return
 				entry.valid &&
 				entry.hasAnimatedTextureCandidates &&
@@ -993,8 +993,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& ou
 			chunkVisibleNow &&
 			ChunkHasUnresolvedAuthoredTextures(mapChunk);
 		const ResidentMapChunkRegistry::Entry* residentEntry =
-			mapChunk.chunkIndex < mResidentMapChunkRegistry.entries.size() ?
-			&mResidentMapChunkRegistry.entries[mapChunk.chunkIndex] :
+			mapChunk.chunkIndex < mStaticSceneResidency.Registry().entries.size() ?
+			&mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex] :
 			nullptr;
 		if (residentEntry != nullptr &&
 			residentEntry->valid &&
@@ -1515,8 +1515,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& ou
 			chunkVisibleNow &&
 			ChunkHasUnresolvedAuthoredTextures(mapChunk);
 		ResidentMapChunkRegistry::Entry* residentEntry =
-			mapChunk.chunkIndex < mResidentMapChunkRegistry.entries.size() ?
-			&mResidentMapChunkRegistry.entries[mapChunk.chunkIndex] :
+			mapChunk.chunkIndex < mStaticSceneResidency.Registry().entries.size() ?
+			&mStaticSceneResidency.Registry().entries[mapChunk.chunkIndex] :
 			nullptr;
 		if (residentEntry != nullptr && residentEntry->valid)
 		{
@@ -3355,9 +3355,9 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& ou
 			mLastPerfShellTraceStats.staticAnimatedResidentSliceCacheEntryCount +=
 				(uint32_t)chunk.residentMaterialSliceCache.size();
 		}
-		for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)mResidentMapChunkRegistry.entries.size(); ++chunkIndex)
+		for (uint32_t chunkIndex = 0; chunkIndex < (uint32_t)mStaticSceneResidency.Registry().entries.size(); ++chunkIndex)
 		{
-			const auto& entry = mResidentMapChunkRegistry.entries[chunkIndex];
+			const auto& entry = mStaticSceneResidency.Registry().entries[chunkIndex];
 			if (!entry.valid)
 			{
 				continue;
