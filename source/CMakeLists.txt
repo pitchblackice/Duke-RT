@@ -938,6 +938,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_scene_frame_builder.cpp
 	common/rendering/nri/renderer/nri_scene_textures.cpp
 	common/rendering/nri/renderer/nri_sky_environment.cpp
+	common/rendering/nri/renderer/nri_static_scene_geometry.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_overlay.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_resident_apply.cpp
