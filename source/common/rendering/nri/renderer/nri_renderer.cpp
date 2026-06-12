@@ -17663,57 +17663,6 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 bool NRIRenderer::EnsureStaticMapScene()
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.staticSceneMs);
-	if (!mMapWorld.valid)
-	{
-		return false;
-	}
-
-	const char* rebuildReason = nullptr;
-	if (mStaticMapScene.buildSerial != mMapWorld.buildSerial)
-	{
-		rebuildReason = "build-serial-mismatch";
-		DestroyStaticMapSceneCache("ensure-static-scene-build-serial-mismatch");
-		mStaticMapScene = {};
-		mStaticAccelerationBuildSerial = 0;
-		mSkyEnvironment.PreservedStaticMapSky() = {};
-	}
-
-	if (mStaticMapScene.valid &&
-		mStaticMapScene.texturesResident &&
-		mStaticMapScene.buffersResident &&
-		mStaticMapScene.accelerationResident &&
-		mStaticMapScene.buildSerial == mMapWorld.buildSerial)
-	{
-		if (!RefreshStaticMapAnimatedMaterials())
-		{
-			return false;
-		}
-		mStaticMapScene.reuseCount++;
-		return true;
-	}
-
-	if (rebuildReason == nullptr)
-	{
-		rebuildReason =
-			!mStaticMapScene.valid ? "scene-invalid" :
-			!mStaticMapScene.texturesResident ? "textures-not-resident" :
-			!mStaticMapScene.buffersResident ? "buffers-not-resident" :
-			!mStaticMapScene.accelerationResident ? "acceleration-not-resident" :
-			"resident-rebuild";
-	}
-	if (nri_ptscenestats)
-	{
-		Printf("NRI PT static scene trace: event=rebuild reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",
-			rebuildReason,
-			mFrameIndex,
-			YesNo(mStaticMapScene.valid),
-			YesNo(mStaticMapScene.texturesResident),
-			YesNo(mStaticMapScene.buffersResident),
-			YesNo(mStaticMapScene.accelerationResident),
-			(unsigned long long)mStaticMapScene.buildSerial,
-			(unsigned long long)mMapWorld.buildSerial,
-			(uint32_t)mStaticMapScene.chunks.size());
-	}
 
 	NRIStaticSceneCacheBuildServices staticSceneCacheBuildServices = {};
 	staticSceneCacheBuildServices.user = this;
@@ -17739,81 +17688,84 @@ bool NRIRenderer::EnsureStaticMapScene()
 	staticSceneCacheBuildServices.ceilingNudge = nri_ptceilingnudge;
 	staticSceneCacheBuildServices.ceilingNudgeDistance = (float)nri_ptceilingnudgedistance;
 
-	if (!nri_static_scene::BuildStaticMapSceneCache(
-		mMapWorld,
-		(mSkyEnvironment.PreservedStaticMapSky().valid && mSkyEnvironment.PreservedStaticMapSky().buildSerial == mMapWorld.buildSerial) ? &mSkyEnvironment.PreservedStaticMapSky() : nullptr,
-		staticSceneCacheBuildServices,
-		mStaticMapScene))
-	{
-		return false;
-	}
+	NRIStaticSceneEnsureInput input = {};
+	input.mapWorld = &mMapWorld;
+	input.staticScene = &mStaticMapScene;
+	input.atlas = &mStaticMapChunkAtlas;
+	input.preservedSkyState = &mSkyEnvironment.PreservedStaticMapSky();
+	input.staticAccelerationBuildSerial = &mStaticAccelerationBuildSerial;
+	input.uploadedStaticMapSceneLastFrame = &mUploadedStaticMapSceneLastFrame;
+	input.builtStaticMapSceneASLastFrame = &mBuiltStaticMapSceneASLastFrame;
+	input.frameIndex = mFrameIndex;
+	input.traceSceneStats = nri_ptscenestats;
+	input.tracePtPerf = ShouldTracePtPerf();
+	input.traceSkyPerf = ShouldTraceSkyPerf();
 
-	if (ShouldTraceSkyPerf())
+	NRIStaticSceneEnsureServices services = {};
+	services.user = this;
+	services.cacheBuildServices = staticSceneCacheBuildServices;
+	services.destroyStaticMapSceneCache = [](void* user, const char* reason)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyStaticMapSceneCache(reason);
+	};
+	services.refreshStaticMapAnimatedMaterials = [](void* user)
+	{
+		return static_cast<NRIRenderer*>(user)->RefreshStaticMapAnimatedMaterials();
+	};
+	services.ensurePaletteTexture = [](void* user, const nri_scene::MaterialBridgeData& materials)
+	{
+		return static_cast<NRIRenderer*>(user)->EnsurePaletteTexture(materials);
+	};
+	services.ensureSceneTextures = [](void* user, const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& gpuMaterials, bool preserveExistingSky, const char* reason)
+	{
+		return static_cast<NRIRenderer*>(user)->EnsureSceneTextures(sceneView, materials, gpuMaterials, preserveExistingSky, reason);
+	};
+	services.uploadStaticMapChunkAtlas = [](void* user)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return nri_static_scene_geometry_upload::UploadStaticMapChunkAtlas(
+			renderer->mMapWorld,
+			renderer->BuildStaticSceneGeometryUploadServices(),
+			renderer->mStaticVertexBuffer,
+			renderer->mVertexBufferStats,
+			renderer->mStaticIndexBuffer,
+			renderer->mIndexBufferStats,
+			renderer->mStaticPrimitiveBuffer,
+			renderer->mPrimitiveBufferStats,
+			renderer->mStaticMaterialBuffer,
+			renderer->mMaterialBufferStats,
+			renderer->mStaticMapChunkAtlas,
+			renderer->mStaticMapScene,
+			renderer->mStaticMapScene.gpuMaterials);
+	};
+	services.buildStaticMapAccelerationStructures = [](void* user)
+	{
+		return static_cast<NRIRenderer*>(user)->BuildStaticMapAccelerationStructures();
+	};
+	services.syncResidentRegistryFromStaticScene = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->SyncResidentMapChunkRegistryFromStaticScene();
+	};
+	services.noteResidentStaticSceneTextureBuild = [](void*)
 	{
 		gRendererSkyPerfTraceStats.residentStaticSceneTextureBuilds++;
-	}
-
-	if (mStaticMapScene.geometry.primitives.empty() ||
-		!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
-		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false, "static_map_scene") ||
-		!nri_static_scene_geometry_upload::UploadStaticMapChunkAtlas(
-			mMapWorld,
-			BuildStaticSceneGeometryUploadServices(),
-			mStaticVertexBuffer,
-			mVertexBufferStats,
-			mStaticIndexBuffer,
-			mIndexBufferStats,
-			mStaticPrimitiveBuffer,
-			mPrimitiveBufferStats,
-			mStaticMaterialBuffer,
-			mMaterialBufferStats,
-			mStaticMapChunkAtlas,
-			mStaticMapScene,
-			mStaticMapScene.gpuMaterials) ||
-		!BuildStaticMapAccelerationStructures())
+	};
+	services.finalizeStaticMapSceneBuildCommands = [](void* user)
 	{
-		return false;
-	}
-	if (!nri_static_scene_geometry::RebuildResidentStaticCpuAtlasMirror(mMapWorld, mStaticMapScene, mStaticMapChunkAtlas) ||
-		!nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
-			mStaticMapScene,
-			mStaticMapChunkAtlas,
-			nri_ptscenestats && ShouldTracePtPerf()))
-	{
-		return false;
-	}
-
-	mStaticMapScene.valid = true;
-	mStaticMapScene.texturesResident = true;
-	mStaticMapScene.buffersResident = true;
-	mStaticMapScene.accelerationResident = true;
-	mStaticMapScene.buildSerial = mMapWorld.buildSerial;
-	mStaticMapScene.tlasInstanceCount = (uint32_t)mStaticMapScene.chunks.size();
-	mStaticMapScene.sceneBuildCount++;
-	mStaticMapScene.gpuUploadCount++;
-	mStaticMapScene.accelerationBuildCount++;
-	SyncResidentMapChunkRegistryFromStaticScene();
-	mUploadedStaticMapSceneLastFrame = true;
-	mBuiltStaticMapSceneASLastFrame = true;
-	mSkyEnvironment.PreservedStaticMapSky() = {};
-
-	Printf("NRI PT static scene resident: level=%s build_serial=%llu chunks=%u tris=%u materials=%u uploads=%u as_builds=%u\n",
-		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
-		(unsigned long long)mStaticMapScene.buildSerial,
-		(uint32_t)mStaticMapScene.chunks.size(),
-		(uint32_t)mStaticMapScene.geometry.primitives.size(),
-		(uint32_t)mStaticMapScene.gpuMaterials.size(),
-		mStaticMapScene.gpuUploadCount,
-		mStaticMapScene.accelerationBuildCount);
-	if (mFrameBuffer != nullptr && mFrameBuffer->mCommandBuffer != nullptr)
-	{
-		if (!mFrameBuffer->SubmitWaitAndRestartCommandList("static-map-scene-build"))
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		if (renderer->mFrameBuffer == nullptr || renderer->mFrameBuffer->mCommandBuffer == nullptr)
+		{
+			return true;
+		}
+		if (!renderer->mFrameBuffer->SubmitWaitAndRestartCommandList("static-map-scene-build"))
 		{
 			return false;
 		}
-		ReleaseWorldAccelerationBuildScratch("static-map-scene-build");
-	}
-	return true;
+		renderer->ReleaseWorldAccelerationBuildScratch("static-map-scene-build");
+		return true;
+	};
+
+	return nri_static_scene::EnsureStaticMapScene(input, services);
 }
 
 uint32_t NRIRenderer::CountPotentialOutstandingQueuedFrames() const

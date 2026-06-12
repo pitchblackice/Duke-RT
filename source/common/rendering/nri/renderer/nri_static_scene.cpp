@@ -1151,6 +1151,158 @@ void nri_static_scene::DestroyLiveStaticMapSceneCache(
 	}
 }
 
+bool nri_static_scene::EnsureStaticMapScene(
+	const NRIStaticSceneEnsureInput& input,
+	const NRIStaticSceneEnsureServices& services)
+{
+	if (input.mapWorld == nullptr ||
+		input.staticScene == nullptr ||
+		input.atlas == nullptr ||
+		input.staticAccelerationBuildSerial == nullptr ||
+		input.uploadedStaticMapSceneLastFrame == nullptr ||
+		input.builtStaticMapSceneASLastFrame == nullptr)
+	{
+		return false;
+	}
+
+	const nri_scene::PTMapWorld& mapWorld = *input.mapWorld;
+	StaticMapSceneCache& staticScene = *input.staticScene;
+	StaticMapChunkAtlas& atlas = *input.atlas;
+	if (!mapWorld.valid)
+	{
+		return false;
+	}
+
+	const auto clearPreservedSky = [&input]()
+	{
+		if (input.preservedSkyState != nullptr)
+		{
+			*input.preservedSkyState = {};
+		}
+	};
+
+	const char* rebuildReason = nullptr;
+	if (staticScene.buildSerial != mapWorld.buildSerial)
+	{
+		rebuildReason = "build-serial-mismatch";
+		if (services.destroyStaticMapSceneCache != nullptr)
+		{
+			services.destroyStaticMapSceneCache(services.user, "ensure-static-scene-build-serial-mismatch");
+		}
+		staticScene = {};
+		*input.staticAccelerationBuildSerial = 0;
+		clearPreservedSky();
+	}
+
+	if (staticScene.valid &&
+		staticScene.texturesResident &&
+		staticScene.buffersResident &&
+		staticScene.accelerationResident &&
+		staticScene.buildSerial == mapWorld.buildSerial)
+	{
+		if (services.refreshStaticMapAnimatedMaterials == nullptr ||
+			!services.refreshStaticMapAnimatedMaterials(services.user))
+		{
+			return false;
+		}
+		staticScene.reuseCount++;
+		return true;
+	}
+
+	if (rebuildReason == nullptr)
+	{
+		rebuildReason =
+			!staticScene.valid ? "scene-invalid" :
+			!staticScene.texturesResident ? "textures-not-resident" :
+			!staticScene.buffersResident ? "buffers-not-resident" :
+			!staticScene.accelerationResident ? "acceleration-not-resident" :
+			"resident-rebuild";
+	}
+	if (input.traceSceneStats)
+	{
+		Printf("NRI PT static scene trace: event=rebuild reason=%s frame=%u scene_valid=%s textures=%s buffers=%s acceleration=%s scene_build_serial=%llu map_build_serial=%llu chunks=%u\n",
+			rebuildReason,
+			input.frameIndex,
+			YesNo(staticScene.valid),
+			YesNo(staticScene.texturesResident),
+			YesNo(staticScene.buffersResident),
+			YesNo(staticScene.accelerationResident),
+			(unsigned long long)staticScene.buildSerial,
+			(unsigned long long)mapWorld.buildSerial,
+			(uint32_t)staticScene.chunks.size());
+	}
+
+	const NRIPreservedStaticMapSkyState* preservedSkyForBuild =
+		input.preservedSkyState != nullptr &&
+		input.preservedSkyState->valid &&
+		input.preservedSkyState->buildSerial == mapWorld.buildSerial ?
+		input.preservedSkyState :
+		nullptr;
+	if (!BuildStaticMapSceneCache(
+		mapWorld,
+		preservedSkyForBuild,
+		services.cacheBuildServices,
+		staticScene))
+	{
+		return false;
+	}
+
+	if (input.traceSkyPerf && services.noteResidentStaticSceneTextureBuild != nullptr)
+	{
+		services.noteResidentStaticSceneTextureBuild(services.user);
+	}
+
+	if (staticScene.geometry.primitives.empty() ||
+		services.ensurePaletteTexture == nullptr ||
+		!services.ensurePaletteTexture(services.user, staticScene.materialBridge) ||
+		services.ensureSceneTextures == nullptr ||
+		!services.ensureSceneTextures(services.user, staticScene.sceneView, staticScene.materialBridge, staticScene.gpuMaterials, false, "static_map_scene") ||
+		services.uploadStaticMapChunkAtlas == nullptr ||
+		!services.uploadStaticMapChunkAtlas(services.user) ||
+		services.buildStaticMapAccelerationStructures == nullptr ||
+		!services.buildStaticMapAccelerationStructures(services.user))
+	{
+		return false;
+	}
+	if (!nri_static_scene_geometry::RebuildResidentStaticCpuAtlasMirror(mapWorld, staticScene, atlas) ||
+		!RebuildResidentStaticMaterialBridgeFromChunks(
+			staticScene,
+			atlas,
+			input.traceSceneStats && input.tracePtPerf))
+	{
+		return false;
+	}
+
+	staticScene.valid = true;
+	staticScene.texturesResident = true;
+	staticScene.buffersResident = true;
+	staticScene.accelerationResident = true;
+	staticScene.buildSerial = mapWorld.buildSerial;
+	staticScene.tlasInstanceCount = (uint32_t)staticScene.chunks.size();
+	staticScene.sceneBuildCount++;
+	staticScene.gpuUploadCount++;
+	staticScene.accelerationBuildCount++;
+	if (services.syncResidentRegistryFromStaticScene != nullptr)
+	{
+		services.syncResidentRegistryFromStaticScene(services.user);
+	}
+	*input.uploadedStaticMapSceneLastFrame = true;
+	*input.builtStaticMapSceneASLastFrame = true;
+	clearPreservedSky();
+
+	Printf("NRI PT static scene resident: level=%s build_serial=%llu chunks=%u tris=%u materials=%u uploads=%u as_builds=%u\n",
+		mapWorld.level != nullptr ? mapWorld.level->labelName.GetChars() : "(none)",
+		(unsigned long long)staticScene.buildSerial,
+		(uint32_t)staticScene.chunks.size(),
+		(uint32_t)staticScene.geometry.primitives.size(),
+		(uint32_t)staticScene.gpuMaterials.size(),
+		staticScene.gpuUploadCount,
+		staticScene.accelerationBuildCount);
+	return
+		services.finalizeStaticMapSceneBuildCommands == nullptr ||
+		services.finalizeStaticMapSceneBuildCommands(services.user);
+}
+
 void nri_static_scene::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
 	const NRIPreservedStaticMapSkyState* preservedSkyState,

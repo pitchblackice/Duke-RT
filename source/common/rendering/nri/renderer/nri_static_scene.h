@@ -334,6 +334,42 @@ struct NRIStaticSceneLiveCacheDestroyServices
 	void (*resetResidentMapChunkRegistry)(void* user) = nullptr;
 };
 
+struct NRIStaticSceneEnsureInput
+{
+	const nri_scene::PTMapWorld* mapWorld = nullptr;
+	StaticMapSceneCache* staticScene = nullptr;
+	StaticMapChunkAtlas* atlas = nullptr;
+	NRIPreservedStaticMapSkyState* preservedSkyState = nullptr;
+	uint64_t* staticAccelerationBuildSerial = nullptr;
+	bool* uploadedStaticMapSceneLastFrame = nullptr;
+	bool* builtStaticMapSceneASLastFrame = nullptr;
+	uint32_t frameIndex = 0;
+	bool traceSceneStats = false;
+	bool tracePtPerf = false;
+	bool traceSkyPerf = false;
+};
+
+struct NRIStaticSceneEnsureServices
+{
+	void* user = nullptr;
+	NRIStaticSceneCacheBuildServices cacheBuildServices = {};
+	void (*destroyStaticMapSceneCache)(void* user, const char* reason) = nullptr;
+	bool (*refreshStaticMapAnimatedMaterials)(void* user) = nullptr;
+	bool (*ensurePaletteTexture)(void* user, const nri_scene::MaterialBridgeData& materials) = nullptr;
+	bool (*ensureSceneTextures)(
+		void* user,
+		const nri_scene::SceneView& sceneView,
+		const nri_scene::MaterialBridgeData& materials,
+		std::vector<nri_scene::MaterialData>& gpuMaterials,
+		bool preserveExistingSky,
+		const char* reason) = nullptr;
+	bool (*uploadStaticMapChunkAtlas)(void* user) = nullptr;
+	bool (*buildStaticMapAccelerationStructures)(void* user) = nullptr;
+	void (*syncResidentRegistryFromStaticScene)(void* user) = nullptr;
+	void (*noteResidentStaticSceneTextureBuild)(void* user) = nullptr;
+	bool (*finalizeStaticMapSceneBuildCommands)(void* user) = nullptr;
+};
+
 struct NRIStaticSceneResourceDestroyServices
 {
 	void* user = nullptr;
@@ -404,6 +440,10 @@ namespace nri_static_scene
 		const NRIStaticSceneLiveCacheDestroyInput& input,
 		const NRIStaticSceneLiveCacheDestroyServices& services,
 		bool waitForCommands);
+
+	bool EnsureStaticMapScene(
+		const NRIStaticSceneEnsureInput& input,
+		const NRIStaticSceneEnsureServices& services);
 
 	void DestroyStaticMapSceneResources(
 		StaticMapSceneCache& staticScene,
