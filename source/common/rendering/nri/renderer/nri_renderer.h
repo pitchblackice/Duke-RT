@@ -1974,12 +1974,6 @@ private:
 	uint32_t GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex) const;
 	uint32_t FindPreferredStaticSceneChunkListIndex(uint32_t chunkIndex) const;
 	uint32_t CountStaticSceneChunkSlots(uint32_t chunkIndex) const;
-	void ResetStaticMapChunkAtlas(StaticMapChunkAtlas& atlas) const;
-	uint32_t GetChunkAtlasCapacity(uint32_t usedCount) const;
-	uint32_t AllocateChunkAtlasSlice(uint32_t count, uint32_t alignment, uint32_t& cursor) const;
-	uint32_t AllocateChunkAtlasRange(uint32_t count, uint32_t capacity, std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t& cursor) const;
-	void ReleaseChunkAtlasRange(std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t offset, uint32_t count) const;
-	bool BuildStaticMapChunkAtlasLayout(const StaticMapSceneCache& staticScene, StaticMapChunkAtlas& outAtlas) const;
 	bool EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas);
 	bool RebuildResidentStaticMaterialBridgeFromChunks();
 	bool RefreshResidentStaticMaterialSlices(
@@ -1991,14 +1985,6 @@ private:
 		const StaticMapSceneCache::ChunkCache& sourceChunk,
 		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
 		std::vector<nri_scene::MaterialData>& outMaterials) const;
-	bool UploadStaticMapChunkAtlas(
-		NRIBufferResource& vertexBuffer,
-		NRIBufferResource& indexBuffer,
-		NRIBufferResource& primitiveBuffer,
-		NRIBufferResource& materialBuffer,
-		StaticMapChunkAtlas& atlas,
-		const StaticMapSceneCache& staticScene,
-		const std::vector<nri_scene::MaterialData>& gpuMaterials);
 	bool UploadStaticMapChunkMaterialAtlas(
 		NRIBufferResource& materialBuffer,
 		const StaticMapChunkAtlas& atlas,

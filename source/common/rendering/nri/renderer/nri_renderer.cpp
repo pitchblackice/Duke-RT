@@ -11227,32 +11227,6 @@ NRIStaticSceneGeometryUploadServices NRIRenderer::BuildStaticSceneGeometryUpload
 	return services;
 }
 
-bool NRIRenderer::UploadStaticMapChunkAtlas(
-	NRIBufferResource& vertexBuffer,
-	NRIBufferResource& indexBuffer,
-	NRIBufferResource& primitiveBuffer,
-	NRIBufferResource& materialBuffer,
-	StaticMapChunkAtlas& atlas,
-	const StaticMapSceneCache& staticScene,
-	const std::vector<nri_scene::MaterialData>& gpuMaterials)
-{
-	const NRIStaticSceneGeometryUploadServices uploadServices = BuildStaticSceneGeometryUploadServices();
-	return nri_static_scene_geometry_upload::UploadStaticMapChunkAtlas(
-		mMapWorld,
-		uploadServices,
-		vertexBuffer,
-		mVertexBufferStats,
-		indexBuffer,
-		mIndexBufferStats,
-		primitiveBuffer,
-		mPrimitiveBufferStats,
-		materialBuffer,
-		mMaterialBufferStats,
-		atlas,
-		staticScene,
-		gpuMaterials);
-}
-
 void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
 {
 	std::vector<NRIResidentChunkReplacementInfo> replacements;
@@ -17944,11 +17918,17 @@ bool NRIRenderer::EnsureStaticMapScene()
 	if (mStaticMapScene.geometry.primitives.empty() ||
 		!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
 		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false, "static_map_scene") ||
-		!UploadStaticMapChunkAtlas(
+		!nri_static_scene_geometry_upload::UploadStaticMapChunkAtlas(
+			mMapWorld,
+			BuildStaticSceneGeometryUploadServices(),
 			mStaticVertexBuffer,
+			mVertexBufferStats,
 			mStaticIndexBuffer,
+			mIndexBufferStats,
 			mStaticPrimitiveBuffer,
+			mPrimitiveBufferStats,
 			mStaticMaterialBuffer,
+			mMaterialBufferStats,
 			mStaticMapChunkAtlas,
 			mStaticMapScene,
 			mStaticMapScene.gpuMaterials) ||
@@ -21667,7 +21647,7 @@ void NRIRenderer::DestroyFrameTextures()
 void NRIRenderer::DestroySceneBuffers()
 {
 	mStaticMapScene.buffersResident = false;
-	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
+	nri_static_scene_geometry::ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	ResetResidentMapChunkRegistry();
 	ResetPersistentDynamicEmissiveCache();
 	mPersistentVoxels.Reset("destroy-scene-buffers", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());

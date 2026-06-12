@@ -414,36 +414,6 @@ bool NRIRenderer::UploadStaticMapChunkMaterialAtlas(
 		ResidentUploadKind_Material);
 }
 
-void NRIRenderer::ResetStaticMapChunkAtlas(StaticMapChunkAtlas& atlas) const
-{
-	nri_static_scene_geometry::ResetStaticMapChunkAtlas(atlas);
-}
-
-uint32_t NRIRenderer::GetChunkAtlasCapacity(uint32_t usedCount) const
-{
-	return nri_static_scene_geometry::GetChunkAtlasCapacity(usedCount);
-}
-
-uint32_t NRIRenderer::AllocateChunkAtlasSlice(uint32_t count, uint32_t alignment, uint32_t& cursor) const
-{
-	return nri_static_scene_geometry::AllocateChunkAtlasSlice(count, alignment, cursor);
-}
-
-uint32_t NRIRenderer::AllocateChunkAtlasRange(uint32_t count, uint32_t capacity, std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t& cursor) const
-{
-	return nri_static_scene_geometry::AllocateChunkAtlasRange(count, capacity, freeRanges, cursor);
-}
-
-void NRIRenderer::ReleaseChunkAtlasRange(std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t offset, uint32_t count) const
-{
-	nri_static_scene_geometry::ReleaseChunkAtlasRange(freeRanges, offset, count);
-}
-
-bool NRIRenderer::BuildStaticMapChunkAtlasLayout(const StaticMapSceneCache& staticScene, StaticMapChunkAtlas& outAtlas) const
-{
-	return nri_static_scene_geometry::BuildStaticMapChunkAtlasLayout(staticScene, outAtlas);
-}
-
 bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas)
 {
 	if (!atlas.valid || !mStaticMapScene.valid)
@@ -1153,7 +1123,7 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 	mBoundStaticMaterialCount = 0;
 	mBoundDynamicMaterialCount = 0;
 	mBoundPortalCount = 0;
-	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
+	nri_static_scene_geometry::ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	mSceneFrameGeometry.Reset();
 	ResetRuntimeMutationCacheAndFrameForStaticScene();
 	ResetResidentMapChunkRegistry();
