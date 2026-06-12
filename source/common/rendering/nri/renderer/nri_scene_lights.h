@@ -2,6 +2,8 @@
 
 #include "../scene/nri_material_bridge.h"
 #include "../scene/nri_scene_bridge.h"
+#include "lightoverlay.h"
+#include "v_video.h"
 
 #include <cstdint>
 #include <string>
@@ -498,6 +500,11 @@ public:
 	bool ClearRuntimePointLights();
 	void ResetRuntimePointLights();
 	void PrintRuntimePointLights(uint32_t maxLights) const;
+	void RefreshResolvedMuzzleFlashRuleLookup(const ResolvedLightOverlaySet& resolvedLightOverlays);
+	void ResetMuzzleFlashOverlayState(const char* reason, uint32_t discardedEventCount, bool debug);
+	size_t GetResolvedMuzzleFlashRuleCount() const { return mResolvedMuzzleFlashRuleLookup.size(); }
+	std::string FormatResolvedMuzzleFlashRuleIdList(size_t limit = 16) const;
+	void RefreshTransientMuzzleFlashLights(double currentTimeSeconds, const TArray<PathTracingWeaponLightEvent>& pendingEvents, bool debug);
 	bool AddManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool UpdateManualAnalyticLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius);
 	bool RemoveManualAnalyticLight(uint32_t id);
@@ -538,6 +545,22 @@ public:
 	bool ConsumeSectorLightingTopologyChanged();
 
 private:
+	struct TransientMuzzleFlashSlot
+	{
+		uint64_t stableKey = 0;
+		uint32_t slotIndex = 0;
+		uint32_t ruleId = 0;
+		uint64_t sourceEventSerial = 0;
+		int32_t emitterActorIndex = -1;
+		float renderPosition[3] = {};
+		float color[3] = { 1.0f, 1.0f, 1.0f };
+		float peakIntensity = 0.0f;
+		float radius = 0.0f;
+		double activationTimeSeconds = 0.0;
+		double endTimeSeconds = 0.0;
+		bool occupied = false;
+	};
+
 	static NRILightingSettings CaptureSettings();
 	void AppendSurfaceRecord(SurfaceRecord record, uint32_t materialIndexBase);
 	void AppendSurfaceList(
@@ -557,4 +580,7 @@ private:
 	FrameAppendStats mFrameAppendStats = {};
 	uint64_t mFrameSerial = 0;
 	uint32_t mNextRuntimePointLightId = 1;
+	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
+	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
+	std::vector<SceneAnalyticLight> mTransientMuzzleFlashLights;
 };
