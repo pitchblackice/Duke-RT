@@ -69,4 +69,9 @@ bool UploadResidentStaticAtlasIndexBuffer(
 	NRIBufferResource& indexBuffer,
 	SceneBufferDebugStats& indexStats,
 	const std::vector<uint32_t>& atlasIndices);
+bool UploadResidentStaticAtlasPrimitiveBuffer(
+	const NRIStaticSceneGeometryUploadServices& services,
+	NRIBufferResource& primitiveBuffer,
+	SceneBufferDebugStats& primitiveStats,
+	const std::vector<nri_scene::PrimitiveData>& atlasPrimitives);
 }

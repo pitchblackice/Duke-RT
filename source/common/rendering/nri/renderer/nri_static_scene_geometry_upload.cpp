@@ -12,6 +12,11 @@ nri::AccessStage StaticGeometryAccelerationStructureBuildInputAccess()
 {
 	return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::ALL_SHADERS };
 }
+
+nri::AccessStage StaticGeometryComputeShaderResourceAccess()
+{
+	return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
+}
 }
 
 namespace nri_static_scene_geometry_upload
@@ -50,5 +55,23 @@ bool UploadResidentStaticAtlasIndexBuffer(
 		StaticGeometryAccelerationStructureBuildInputAccess(),
 		"resident_chunk_write",
 		ResidentUploadKind_Index);
+}
+
+bool UploadResidentStaticAtlasPrimitiveBuffer(
+	const NRIStaticSceneGeometryUploadServices& services,
+	NRIBufferResource& primitiveBuffer,
+	SceneBufferDebugStats& primitiveStats,
+	const std::vector<nri_scene::PrimitiveData>& atlasPrimitives)
+{
+	return services.EnsureResidentStructuredBuffer(
+		primitiveBuffer,
+		primitiveStats,
+		atlasPrimitives.data(),
+		atlasPrimitives.size() * sizeof(nri_scene::PrimitiveData),
+		sizeof(nri_scene::PrimitiveData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		StaticGeometryComputeShaderResourceAccess(),
+		"resident_chunk_write",
+		ResidentUploadKind_Primitive);
 }
 }

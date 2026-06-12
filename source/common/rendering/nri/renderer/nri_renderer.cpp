@@ -11269,7 +11269,7 @@ bool NRIRenderer::UploadStaticMapChunkAtlas(
 	return
 		nri_static_scene_geometry_upload::UploadResidentStaticAtlasVertexBuffer(uploadServices, vertexBuffer, mVertexBufferStats, atlasVertices) &&
 		nri_static_scene_geometry_upload::UploadResidentStaticAtlasIndexBuffer(uploadServices, indexBuffer, mIndexBufferStats, atlasIndices) &&
-		uploadServices.EnsureResidentStructuredBuffer(primitiveBuffer, mPrimitiveBufferStats, atlasPrimitives.data(), atlasPrimitives.size() * sizeof(nri_scene::PrimitiveData), sizeof(nri_scene::PrimitiveData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), "resident_chunk_write", ResidentUploadKind_Primitive) &&
+		nri_static_scene_geometry_upload::UploadResidentStaticAtlasPrimitiveBuffer(uploadServices, primitiveBuffer, mPrimitiveBufferStats, atlasPrimitives) &&
 		uploadServices.EnsureResidentStructuredBuffer(materialBuffer, mMaterialBufferStats, atlasMaterials.data(), atlasMaterials.size() * sizeof(nri_scene::MaterialData), sizeof(nri_scene::MaterialData), nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), "resident_chunk_write", ResidentUploadKind_Material);
 }
 
