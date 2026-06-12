@@ -41,4 +41,44 @@ uint32_t AllocateChunkAtlasSlice(uint32_t count, uint32_t alignment, uint32_t& c
 uint32_t AllocateChunkAtlasRange(uint32_t count, uint32_t capacity, std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t& cursor);
 void ReleaseChunkAtlasRange(std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t offset, uint32_t count);
 bool BuildStaticMapChunkAtlasLayout(const StaticMapSceneCache& staticScene, StaticMapChunkAtlas& outAtlas);
+
+void CopyChunkVertexDataToAtlas(
+	const nri_scene::GeometryData& sourceGeometry,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<nri_scene::SceneVertex>& outVertices);
+void CopyChunkIndexDataToAtlas(
+	const nri_scene::GeometryData& sourceGeometry,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<uint32_t>& outIndices);
+void CopyChunkVertexAndIndexDataToAtlas(
+	const nri_scene::GeometryData& sourceGeometry,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<nri_scene::SceneVertex>& outVertices,
+	std::vector<uint32_t>& outIndices);
+void CopyChunkPrimitiveDataToAtlas(
+	const nri_scene::PTMapWorld& mapWorld,
+	const nri_scene::GeometryData& sourceGeometry,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<nri_scene::PrimitiveData>& outPrimitives);
+void CopyChunkGeometryToAtlas(
+	const nri_scene::PTMapWorld& mapWorld,
+	const nri_scene::GeometryData& sourceGeometry,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<nri_scene::SceneVertex>& outVertices,
+	std::vector<uint32_t>& outIndices,
+	std::vector<nri_scene::PrimitiveData>& outPrimitives);
+void CopyChunkMaterialsToAtlas(
+	const std::vector<nri_scene::MaterialData>& sourceMaterials,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<nri_scene::MaterialData>& outMaterials);
+bool RebuildResidentStaticCpuAtlasMirror(
+	const nri_scene::PTMapWorld& mapWorld,
+	StaticMapSceneCache& staticScene,
+	const StaticMapChunkAtlas& atlas);
 }

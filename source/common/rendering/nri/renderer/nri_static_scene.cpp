@@ -373,19 +373,11 @@ void NRIRenderer::UploadChunkMaterialsToAtlas(
 	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
 	std::vector<nri_scene::MaterialData>& outMaterials) const
 {
-	if (!atlasChunk.valid)
-	{
-		return;
-	}
-
-	if (sourceChunk.materialOffset + sourceChunk.materialCount <= sourceMaterials.size() &&
-		atlasChunk.materialOffset + atlasChunk.materialCount <= outMaterials.size())
-	{
-		std::copy_n(
-			sourceMaterials.data() + sourceChunk.materialOffset,
-			sourceChunk.materialCount,
-			outMaterials.data() + atlasChunk.materialOffset);
-	}
+	nri_static_scene_geometry::CopyChunkMaterialsToAtlas(
+		sourceMaterials,
+		sourceChunk,
+		atlasChunk,
+		outMaterials);
 }
 
 bool NRIRenderer::UploadStaticMapChunkMaterialAtlas(

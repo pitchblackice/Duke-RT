@@ -985,7 +985,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentSceneImpl(
 				{
 					{
 						ScopedPtPerfTimer vertexCpuTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexCpuCopyMs);
-						UploadChunkVertexDataToAtlas(
+						nri_static_scene_geometry::CopyChunkVertexDataToAtlas(
 							residentGeometry,
 							sourceChunk,
 							nextAtlasChunk,
@@ -1005,7 +1005,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentSceneImpl(
 				{
 					{
 						ScopedPtPerfTimer vertexCpuTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexCpuCopyMs);
-						UploadChunkVertexDataToAtlas(
+						nri_static_scene_geometry::CopyChunkVertexDataToAtlas(
 							residentGeometry,
 							sourceChunk,
 							nextAtlasChunk,
@@ -1013,7 +1013,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentSceneImpl(
 					}
 					{
 						ScopedPtPerfTimer indexCpuTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexCpuCopyMs);
-						UploadChunkIndexDataToAtlas(
+						nri_static_scene_geometry::CopyChunkIndexDataToAtlas(
 							residentGeometry,
 							sourceChunk,
 							nextAtlasChunk,
@@ -1047,7 +1047,8 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentSceneImpl(
 				{
 					{
 						ScopedPtPerfTimer primitiveCpuTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveCpuRewriteMs);
-						UploadChunkPrimitiveDataToAtlas(
+						nri_static_scene_geometry::CopyChunkPrimitiveDataToAtlas(
+							mMapWorld,
 							residentGeometry,
 							sourceChunk,
 							nextAtlasChunk,

@@ -1980,40 +1980,11 @@ private:
 	void ReleaseChunkAtlasRange(std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t offset, uint32_t count) const;
 	bool BuildStaticMapChunkAtlasLayout(const StaticMapSceneCache& staticScene, StaticMapChunkAtlas& outAtlas) const;
 	bool EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas);
-	bool RebuildResidentStaticCpuAtlasMirror(StaticMapSceneCache& staticScene, const StaticMapChunkAtlas& atlas) const;
 	bool RebuildResidentStaticMaterialBridgeFromChunks();
 	bool RefreshResidentStaticMaterialSlices(
 		const std::vector<uint32_t>& chunkListIndices,
 		const char* reason,
 		const std::vector<uint32_t>* animatedApplyChunkListIndices = nullptr);
-	void UploadChunkVertexDataToAtlas(
-		const nri_scene::GeometryData& sourceGeometry,
-		const StaticMapSceneCache::ChunkCache& sourceChunk,
-		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
-		std::vector<nri_scene::SceneVertex>& outVertices) const;
-	void UploadChunkIndexDataToAtlas(
-		const nri_scene::GeometryData& sourceGeometry,
-		const StaticMapSceneCache::ChunkCache& sourceChunk,
-		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
-		std::vector<uint32_t>& outIndices) const;
-	void UploadChunkVertexAndIndexDataToAtlas(
-		const nri_scene::GeometryData& sourceGeometry,
-		const StaticMapSceneCache::ChunkCache& sourceChunk,
-		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
-		std::vector<nri_scene::SceneVertex>& outVertices,
-		std::vector<uint32_t>& outIndices) const;
-	void UploadChunkPrimitiveDataToAtlas(
-		const nri_scene::GeometryData& sourceGeometry,
-		const StaticMapSceneCache::ChunkCache& sourceChunk,
-		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
-		std::vector<nri_scene::PrimitiveData>& outPrimitives) const;
-	void UploadChunkGeometryToAtlas(
-		const nri_scene::GeometryData& sourceGeometry,
-		const StaticMapSceneCache::ChunkCache& sourceChunk,
-		const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
-		std::vector<nri_scene::SceneVertex>& outVertices,
-		std::vector<uint32_t>& outIndices,
-		std::vector<nri_scene::PrimitiveData>& outPrimitives) const;
 	void UploadChunkMaterialsToAtlas(
 		const std::vector<nri_scene::MaterialData>& sourceMaterials,
 		const StaticMapSceneCache::ChunkCache& sourceChunk,
