@@ -856,6 +856,59 @@ bool nri_static_scene::BuildStaticMapAccelerationStructures(
 		services.buildTopLevelAccelerationStructure(services.user, instances, staticResources, updateLiveState);
 }
 
+void nri_static_scene::DestroyStaticMapSceneResources(
+	StaticMapSceneCache& staticScene,
+	StaticMapSceneResources& staticResources,
+	const NRIStaticSceneResourceDestroyServices& services,
+	bool waitForCommands,
+	bool resetSceneFrameGeometry)
+{
+	const bool hasResidentResources =
+		!staticScene.chunks.empty() ||
+		staticResources.vertexBuffer.buffer != nullptr ||
+		staticResources.indexBuffer.buffer != nullptr ||
+		staticResources.primitiveBuffer.buffer != nullptr ||
+		staticResources.materialBuffer.buffer != nullptr ||
+		staticResources.tlasInstanceBuffer.buffer != nullptr ||
+		staticResources.scratchBuffer.buffer != nullptr ||
+		staticResources.topLevelScratchBuffer.buffer != nullptr ||
+		staticResources.topLevelAS.accelerationStructure != nullptr;
+	if (waitForCommands && hasResidentResources && services.waitForCommandsTracked != nullptr)
+	{
+		services.waitForCommandsTracked(services.user);
+	}
+
+	if (services.destroyAccelerationStructureResource != nullptr)
+	{
+		for (auto& chunk : staticScene.chunks)
+		{
+			services.destroyAccelerationStructureResource(services.user, chunk.accelerationStructure);
+			chunk.residentBlasScratchSizeCacheKey = nullptr;
+			chunk.residentBlasBuildScratchSize = 0;
+			chunk.residentBlasUpdateScratchSize = 0;
+		}
+
+		services.destroyAccelerationStructureResource(services.user, staticResources.topLevelAS);
+	}
+	if (services.destroyBufferResource != nullptr)
+	{
+		services.destroyBufferResource(services.user, staticResources.vertexBuffer);
+		services.destroyBufferResource(services.user, staticResources.indexBuffer);
+		services.destroyBufferResource(services.user, staticResources.primitiveBuffer);
+		services.destroyBufferResource(services.user, staticResources.materialBuffer);
+		services.destroyBufferResource(services.user, staticResources.tlasInstanceBuffer);
+		services.destroyBufferResource(services.user, staticResources.scratchBuffer);
+		services.destroyBufferResource(services.user, staticResources.topLevelScratchBuffer);
+	}
+
+	if (resetSceneFrameGeometry && services.resetSceneFrameGeometry != nullptr)
+	{
+		services.resetSceneFrameGeometry(services.user);
+	}
+	staticScene = {};
+	staticResources = {};
+}
+
 void nri_static_scene::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
 	const NRIPreservedStaticMapSkyState* preservedSkyState,
@@ -1515,44 +1568,31 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 
 void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScene, StaticMapSceneResources& staticResources, bool waitForCommands)
 {
-	const bool hasResidentResources =
-		!staticScene.chunks.empty() ||
-		staticResources.vertexBuffer.buffer != nullptr ||
-		staticResources.indexBuffer.buffer != nullptr ||
-		staticResources.primitiveBuffer.buffer != nullptr ||
-		staticResources.materialBuffer.buffer != nullptr ||
-		staticResources.tlasInstanceBuffer.buffer != nullptr ||
-		staticResources.scratchBuffer.buffer != nullptr ||
-		staticResources.topLevelScratchBuffer.buffer != nullptr ||
-		staticResources.topLevelAS.accelerationStructure != nullptr;
-	if (waitForCommands && hasResidentResources && mFrameBuffer != nullptr)
+	NRIStaticSceneResourceDestroyServices services = {};
+	services.user = this;
+	services.waitForCommandsTracked = [](void* user)
 	{
-		WaitForCommandsTracked();
-	}
-
-	for (auto& chunk : staticScene.chunks)
+		static_cast<NRIRenderer*>(user)->WaitForCommandsTracked();
+	};
+	services.destroyBufferResource = [](void* user, NRIBufferResource& resource)
 	{
-		DestroyAccelerationStructureResource(chunk.accelerationStructure);
-		chunk.residentBlasScratchSizeCacheKey = nullptr;
-		chunk.residentBlasBuildScratchSize = 0;
-		chunk.residentBlasUpdateScratchSize = 0;
-	}
-
-	DestroyAccelerationStructureResource(staticResources.topLevelAS);
-	DestroyBufferResource(staticResources.vertexBuffer);
-	DestroyBufferResource(staticResources.indexBuffer);
-	DestroyBufferResource(staticResources.primitiveBuffer);
-	DestroyBufferResource(staticResources.materialBuffer);
-	DestroyBufferResource(staticResources.tlasInstanceBuffer);
-	DestroyBufferResource(staticResources.scratchBuffer);
-	DestroyBufferResource(staticResources.topLevelScratchBuffer);
-
-	if (&staticScene == &mStaticMapScene)
+		static_cast<NRIRenderer*>(user)->DestroyBufferResource(resource);
+	};
+	services.destroyAccelerationStructureResource = [](void* user, NRIAccelerationStructureResource& resource)
 	{
-		mSceneFrameGeometry.Reset();
-	}
-	staticScene = {};
-	staticResources = {};
+		static_cast<NRIRenderer*>(user)->DestroyAccelerationStructureResource(resource);
+	};
+	services.resetSceneFrameGeometry = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->mSceneFrameGeometry.Reset();
+	};
+
+	nri_static_scene::DestroyStaticMapSceneResources(
+		staticScene,
+		staticResources,
+		services,
+		waitForCommands && mFrameBuffer != nullptr,
+		&staticScene == &mStaticMapScene);
 }
 
 void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)

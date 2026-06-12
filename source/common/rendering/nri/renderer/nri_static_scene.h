@@ -266,6 +266,15 @@ struct NRIStaticSceneAccelerationBuildServices
 	bool (*buildTopLevelAccelerationStructure)(void* user, const std::vector<nri::TopLevelInstance>& instances, StaticMapSceneResources& staticResources, bool updateLiveState) = nullptr;
 };
 
+struct NRIStaticSceneResourceDestroyServices
+{
+	void* user = nullptr;
+	void (*waitForCommandsTracked)(void* user) = nullptr;
+	void (*destroyBufferResource)(void* user, NRIBufferResource& resource) = nullptr;
+	void (*destroyAccelerationStructureResource)(void* user, NRIAccelerationStructureResource& resource) = nullptr;
+	void (*resetSceneFrameGeometry)(void* user) = nullptr;
+};
+
 namespace nri_static_scene
 {
 	void InitializeStaticMapSceneCacheBuild(
@@ -318,6 +327,13 @@ namespace nri_static_scene
 		StaticMapSceneResources& staticResources,
 		const NRIStaticSceneAccelerationBuildServices& services,
 		bool updateLiveState);
+
+	void DestroyStaticMapSceneResources(
+		StaticMapSceneCache& staticScene,
+		StaticMapSceneResources& staticResources,
+		const NRIStaticSceneResourceDestroyServices& services,
+		bool waitForCommands,
+		bool resetSceneFrameGeometry);
 
 	void PrintStaticMapSceneStatus(
 		const StaticMapSceneCache& staticScene,
