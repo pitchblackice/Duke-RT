@@ -18544,9 +18544,21 @@ bool NRIRenderer::EnsureStaticMapScene()
 			(uint32_t)mStaticMapScene.chunks.size());
 	}
 
+	NRIStaticSceneCacheBuildServices staticSceneCacheBuildServices = {};
+	staticSceneCacheBuildServices.user = this;
+	staticSceneCacheBuildServices.resetMutationCacheForStaticSceneBuild = [](void* user, uint32_t chunkCount)
+	{
+		static_cast<NRIRenderer*>(user)->mRuntimeMutation.ResetCacheForStaticSceneBuild(chunkCount);
+	};
+	staticSceneCacheBuildServices.initializeStaticChunkReplacement = [](void* user, const nri_scene::PTMapChunk& chunk)
+	{
+		static_cast<NRIRenderer*>(user)->mRuntimeMutation.InitializeStaticChunkReplacement(chunk);
+	};
+
 	if (!BuildStaticMapSceneCache(
 		mMapWorld,
 		(mSkyEnvironment.PreservedStaticMapSky().valid && mSkyEnvironment.PreservedStaticMapSky().buildSerial == mMapWorld.buildSerial) ? &mSkyEnvironment.PreservedStaticMapSky() : nullptr,
+		staticSceneCacheBuildServices,
 		mStaticMapScene))
 	{
 		return false;
@@ -18614,6 +18626,7 @@ bool NRIRenderer::EnsureStaticMapScene()
 void NRIRenderer::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
 	const NRIPreservedStaticMapSkyState* preservedNRISkyState,
+	const NRIStaticSceneCacheBuildServices& services,
 	StaticMapSceneCache& outStaticScene)
 {
 	outStaticScene.valid = false;
@@ -18640,7 +18653,10 @@ void NRIRenderer::InitializeStaticMapSceneCacheBuild(
 	outStaticScene.lightChunkViews.reserve(mapWorld.chunks.size());
 	outStaticScene.chunks.reserve(mapWorld.chunks.size());
 
-	mRuntimeMutation.ResetCacheForStaticSceneBuild((uint32_t)mapWorld.chunks.size());
+	if (services.resetMutationCacheForStaticSceneBuild != nullptr)
+	{
+		services.resetMutationCacheForStaticSceneBuild(services.user, (uint32_t)mapWorld.chunks.size());
+	}
 
 	const nri_scene::SceneView* preservedSkyView = preservedNRISkyState != nullptr ? &preservedNRISkyState->sceneView : nullptr;
 	nri_scene::BuildMapSceneView(mapWorld, outStaticScene.sceneView, preservedSkyView);
@@ -18650,9 +18666,13 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 	const nri_scene::PTMapWorld& mapWorld,
 	const nri_scene::PTMapChunk& chunk,
 	const nri_scene::SceneView* preservedSkyView,
+	const NRIStaticSceneCacheBuildServices& services,
 	StaticMapSceneCache& outStaticScene)
 {
-	mRuntimeMutation.InitializeStaticChunkReplacement(chunk);
+	if (services.initializeStaticChunkReplacement != nullptr)
+	{
+		services.initializeStaticChunkReplacement(services.user, chunk);
+	}
 
 	nri_scene::SceneView chunkSceneView;
 	nri_scene::GeometryData chunkGeometry;
@@ -18722,6 +18742,7 @@ void NRIRenderer::AppendStaticMapSceneCacheChunk(
 bool NRIRenderer::BuildStaticMapSceneCache(
 	const nri_scene::PTMapWorld& mapWorld,
 	const NRIPreservedStaticMapSkyState* preservedNRISkyState,
+	const NRIStaticSceneCacheBuildServices& services,
 	StaticMapSceneCache& outStaticScene)
 {
 	if (!mapWorld.valid)
@@ -18729,11 +18750,11 @@ bool NRIRenderer::BuildStaticMapSceneCache(
 		return false;
 	}
 
-	InitializeStaticMapSceneCacheBuild(mapWorld, preservedNRISkyState, outStaticScene);
+	InitializeStaticMapSceneCacheBuild(mapWorld, preservedNRISkyState, services, outStaticScene);
 	const nri_scene::SceneView* preservedSkyView = preservedNRISkyState != nullptr ? &preservedNRISkyState->sceneView : nullptr;
 	for (const nri_scene::PTMapChunk& chunk : mapWorld.chunks)
 	{
-		AppendStaticMapSceneCacheChunk(mapWorld, chunk, preservedSkyView, outStaticScene);
+		AppendStaticMapSceneCacheChunk(mapWorld, chunk, preservedSkyView, services, outStaticScene);
 	}
 
 	return !outStaticScene.geometry.primitives.empty();

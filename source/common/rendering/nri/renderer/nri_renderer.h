@@ -1955,15 +1955,18 @@ private:
 	bool BuildStaticMapSceneCache(
 		const nri_scene::PTMapWorld& mapWorld,
 		const NRIPreservedStaticMapSkyState* preservedSkyState,
+		const NRIStaticSceneCacheBuildServices& services,
 		StaticMapSceneCache& outStaticScene);
 	void InitializeStaticMapSceneCacheBuild(
 		const nri_scene::PTMapWorld& mapWorld,
 		const NRIPreservedStaticMapSkyState* preservedSkyState,
+		const NRIStaticSceneCacheBuildServices& services,
 		StaticMapSceneCache& outStaticScene);
 	void AppendStaticMapSceneCacheChunk(
 		const nri_scene::PTMapWorld& mapWorld,
 		const nri_scene::PTMapChunk& chunk,
 		const nri_scene::SceneView* preservedSkyView,
+		const NRIStaticSceneCacheBuildServices& services,
 		StaticMapSceneCache& outStaticScene);
 	void ResetResidentMapChunkRegistry();
 	void SyncResidentMapChunkRegistryFromStaticScene();

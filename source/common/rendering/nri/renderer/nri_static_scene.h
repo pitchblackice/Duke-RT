@@ -191,6 +191,13 @@ struct NRIStaticSceneRegistrySyncInput
 	uint64_t (*hashResidentMaterialPayload)(const nri_scene::MaterialBridgeData& materials) = nullptr;
 };
 
+struct NRIStaticSceneCacheBuildServices
+{
+	void* user = nullptr;
+	void (*resetMutationCacheForStaticSceneBuild)(void* user, uint32_t chunkCount) = nullptr;
+	void (*initializeStaticChunkReplacement)(void* user, const nri_scene::PTMapChunk& chunk) = nullptr;
+};
+
 class NRIStaticSceneResidency
 {
 public:
