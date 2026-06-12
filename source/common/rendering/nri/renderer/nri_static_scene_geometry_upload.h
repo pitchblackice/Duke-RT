@@ -1,8 +1,10 @@
 #pragma once
 
+#include "../scene/nri_geometry_bridge.h"
 #include "nri_frame_resources.h"
 
 #include <cstdint>
+#include <vector>
 
 struct NRIStaticSceneGeometryUploadServices
 {
@@ -54,3 +56,12 @@ struct NRIStaticSceneGeometryUploadServices
 		}
 	}
 };
+
+namespace nri_static_scene_geometry_upload
+{
+bool UploadResidentStaticAtlasVertexBuffer(
+	const NRIStaticSceneGeometryUploadServices& services,
+	NRIBufferResource& vertexBuffer,
+	SceneBufferDebugStats& vertexStats,
+	const std::vector<nri_scene::SceneVertex>& atlasVertices);
+}
