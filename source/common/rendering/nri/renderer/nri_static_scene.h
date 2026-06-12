@@ -198,6 +198,14 @@ struct NRIStaticSceneCacheBuildServices
 	void (*initializeStaticChunkReplacement)(void* user, const nri_scene::PTMapChunk& chunk) = nullptr;
 };
 
+namespace nri_static_scene
+{
+	bool RebuildResidentStaticMaterialBridgeFromChunks(
+		StaticMapSceneCache& staticScene,
+		const StaticMapChunkAtlas& atlas,
+		bool traceFailures);
+}
+
 class NRIStaticSceneResidency
 {
 public:

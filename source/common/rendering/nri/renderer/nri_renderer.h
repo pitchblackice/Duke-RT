@@ -1975,7 +1975,6 @@ private:
 	uint32_t FindPreferredStaticSceneChunkListIndex(uint32_t chunkIndex) const;
 	uint32_t CountStaticSceneChunkSlots(uint32_t chunkIndex) const;
 	bool EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas);
-	bool RebuildResidentStaticMaterialBridgeFromChunks();
 	bool RefreshResidentStaticMaterialSlices(
 		const std::vector<uint32_t>& chunkListIndices,
 		const char* reason,

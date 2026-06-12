@@ -17800,7 +17800,10 @@ bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
 	}
 
 	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView, preservedSkyView);
-	if (!RebuildResidentStaticMaterialBridgeFromChunks())
+	if (!nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
+		mStaticMapScene,
+		mStaticMapChunkAtlas,
+		nri_ptscenestats && ShouldTracePtPerf()))
 	{
 		mStaticMapScene.animatedGeometryFallbackCount++;
 		DestroyStaticMapSceneCache("animated-refresh-material-bridge-failed");
@@ -17939,7 +17942,10 @@ bool NRIRenderer::EnsureStaticMapScene()
 		return false;
 	}
 	if (!nri_static_scene_geometry::RebuildResidentStaticCpuAtlasMirror(mMapWorld, mStaticMapScene, mStaticMapChunkAtlas) ||
-		!RebuildResidentStaticMaterialBridgeFromChunks())
+		!nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
+			mStaticMapScene,
+			mStaticMapChunkAtlas,
+			nri_ptscenestats && ShouldTracePtPerf()))
 	{
 		return false;
 	}

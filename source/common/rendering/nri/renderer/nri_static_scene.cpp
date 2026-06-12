@@ -290,20 +290,23 @@ uint32_t NRIRenderer::CountStaticSceneChunkSlots(uint32_t chunkIndex) const
 	return count;
 }
 
-bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
+bool nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
+	StaticMapSceneCache& staticScene,
+	const StaticMapChunkAtlas& atlas,
+	bool traceFailures)
 {
-	if (!mStaticMapChunkAtlas.valid || mStaticMapChunkAtlas.chunks.size() != mStaticMapScene.chunks.size())
+	if (!atlas.valid || atlas.chunks.size() != staticScene.chunks.size())
 	{
 		return false;
 	}
 
 	nri_scene::MaterialBridgeData bridge = {};
 	std::vector<uint32_t> chunkListIndices;
-	chunkListIndices.reserve(mStaticMapScene.chunks.size());
-	for (uint32_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
+	chunkListIndices.reserve(staticScene.chunks.size());
+	for (uint32_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
 	{
-		const auto& chunkCache = mStaticMapScene.chunks[chunkListIndex];
-		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+		const auto& chunkCache = staticScene.chunks[chunkListIndex];
+		const auto& atlasChunk = atlas.chunks[chunkListIndex];
 		if (!chunkCache.active || !atlasChunk.valid || atlasChunk.materialCount == 0)
 		{
 			continue;
@@ -315,10 +318,10 @@ bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
 	std::sort(
 		chunkListIndices.begin(),
 		chunkListIndices.end(),
-		[this](uint32_t lhs, uint32_t rhs)
+		[&atlas](uint32_t lhs, uint32_t rhs)
 		{
-			const auto& lhsChunk = mStaticMapChunkAtlas.chunks[lhs];
-			const auto& rhsChunk = mStaticMapChunkAtlas.chunks[rhs];
+			const auto& lhsChunk = atlas.chunks[lhs];
+			const auto& rhsChunk = atlas.chunks[rhs];
 			if (lhsChunk.materialOffset != rhsChunk.materialOffset)
 			{
 				return lhsChunk.materialOffset < rhsChunk.materialOffset;
@@ -329,8 +332,8 @@ bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
 
 	for (uint32_t chunkListIndex : chunkListIndices)
 	{
-		const auto& chunkCache = mStaticMapScene.chunks[chunkListIndex];
-		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+		const auto& chunkCache = staticScene.chunks[chunkListIndex];
+		const auto& atlasChunk = atlas.chunks[chunkListIndex];
 
 		if (bridge.materials.size() < atlasChunk.materialOffset)
 		{
@@ -342,7 +345,7 @@ bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
 		if (nextMaterialOffset != atlasChunk.materialOffset ||
 			(uint32_t)chunkCache.materialBridge.materials.size() != atlasChunk.materialCount)
 		{
-			if (nri_ptscenestats && ShouldTracePtPerf())
+			if (traceFailures)
 			{
 				Printf("NRI PT static scene trace: event=resident_material_bridge_failed chunk=%u atlas_offset=%u next_offset=%u atlas_count=%u bridge_count=%u\n",
 					chunkCache.chunkIndex,
@@ -357,13 +360,13 @@ bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
 		nri_scene::AppendMaterialBridge(chunkCache.materialBridge, bridge);
 	}
 
-	if (bridge.materials.size() < mStaticMapChunkAtlas.materialCount)
+	if (bridge.materials.size() < atlas.materialCount)
 	{
-		bridge.materials.resize(mStaticMapChunkAtlas.materialCount);
-		bridge.lightMetadata.resize(mStaticMapChunkAtlas.materialCount);
+		bridge.materials.resize(atlas.materialCount);
+		bridge.lightMetadata.resize(atlas.materialCount);
 	}
 
-	mStaticMapScene.materialBridge = std::move(bridge);
+	staticScene.materialBridge = std::move(bridge);
 	return true;
 }
 

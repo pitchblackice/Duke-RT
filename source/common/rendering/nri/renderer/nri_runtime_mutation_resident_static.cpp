@@ -615,7 +615,10 @@ bool NRIRenderer::RebuildResidentStaticMaterialState(const char* reason)
 		&mSkyEnvironment.PreservedStaticMapSky().sceneView :
 		nullptr;
 	nri_scene::BuildMapSceneView(mMapWorld, mStaticMapScene.sceneView, preservedSkyView);
-	if (!RebuildResidentStaticMaterialBridgeFromChunks())
+	if (!nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
+		mStaticMapScene,
+		mStaticMapChunkAtlas,
+		nri_ptscenestats && ShouldTraceResidentStaticPerf()))
 	{
 		return false;
 	}
