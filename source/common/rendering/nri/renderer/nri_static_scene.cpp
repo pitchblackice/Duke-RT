@@ -684,6 +684,53 @@ void nri_static_scene::BuildStaticMapInstances(
 	BuildStaticMapInstancesFromCache(input.mapWorld, staticScene, nullptr, services, outTlasInstances, outSceneInstances);
 }
 
+bool nri_static_scene::BuildStaticMapBlasBuildInputs(
+	const StaticMapSceneCache& staticScene,
+	const StaticMapChunkAtlas& atlas,
+	std::vector<NRIStaticMapBlasBuildInput>& outBuildInputs)
+{
+	outBuildInputs.clear();
+	if (staticScene.chunks.empty() ||
+		!atlas.valid ||
+		atlas.chunks.size() != staticScene.chunks.size())
+	{
+		return false;
+	}
+
+	outBuildInputs.reserve(staticScene.chunks.size());
+	for (uint32_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
+	{
+		const auto& atlasChunk = atlas.chunks[chunkListIndex];
+		NRIStaticMapBlasBuildInput buildInput = {};
+		buildInput.chunkListIndex = chunkListIndex;
+		buildInput.vertexCount = atlas.vertexCount;
+		buildInput.indexOffsetBytes = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
+		buildInput.indexCount = atlasChunk.indexCount;
+		outBuildInputs.push_back(buildInput);
+	}
+	return true;
+}
+
+nri::BottomLevelGeometryDesc nri_static_scene::BuildStaticMapBlasGeometryDesc(
+	const NRIStaticMapBlasBuildInput& buildInput,
+	nri::Buffer* vertexBuffer,
+	nri::Buffer* indexBuffer)
+{
+	nri::BottomLevelGeometryDesc geometryDesc = {};
+	geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
+	geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
+	geometryDesc.triangles.vertexBuffer = vertexBuffer;
+	geometryDesc.triangles.vertexOffset = 0;
+	geometryDesc.triangles.vertexNum = buildInput.vertexCount;
+	geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
+	geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
+	geometryDesc.triangles.indexBuffer = indexBuffer;
+	geometryDesc.triangles.indexOffset = buildInput.indexOffsetBytes;
+	geometryDesc.triangles.indexNum = buildInput.indexCount;
+	geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+	return geometryDesc;
+}
+
 void nri_static_scene::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
 	const NRIPreservedStaticMapSkyState* preservedSkyState,
@@ -1086,9 +1133,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 {
 	Clocker clock(NriPTAcceleration);
 
-	if (mStaticMapScene.chunks.empty() ||
-		!mStaticMapChunkAtlas.valid ||
-		mStaticMapChunkAtlas.chunks.size() != mStaticMapScene.chunks.size())
+	std::vector<NRIStaticMapBlasBuildInput> blasBuildInputs;
+	if (!nri_static_scene::BuildStaticMapBlasBuildInputs(mStaticMapScene, mStaticMapChunkAtlas, blasBuildInputs))
 	{
 		return false;
 	}
@@ -1128,22 +1174,11 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	}
 
 	uint64_t maxScratchSize = 0;
-	for (size_t chunkIndex = 0; chunkIndex < mStaticMapScene.chunks.size(); ++chunkIndex)
+	for (const NRIStaticMapBlasBuildInput& buildInput : blasBuildInputs)
 	{
-		auto& chunk = mStaticMapScene.chunks[chunkIndex];
-		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkIndex];
-		nri::BottomLevelGeometryDesc geometryDesc = {};
-		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-		geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
-		geometryDesc.triangles.vertexOffset = 0;
-		geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
-		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-		geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
-		geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
-		geometryDesc.triangles.indexNum = atlasChunk.indexCount;
-		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+		auto& chunk = mStaticMapScene.chunks[buildInput.chunkListIndex];
+		nri::BottomLevelGeometryDesc geometryDesc =
+			nri_static_scene::BuildStaticMapBlasGeometryDesc(buildInput, mStaticVertexBuffer.buffer, mStaticIndexBuffer.buffer);
 
 		nri::AccelerationStructureDesc blasDesc = {};
 		blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
@@ -1175,22 +1210,12 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 
 	std::vector<nri::BufferBarrierDesc> blasBarriers;
 	blasBarriers.reserve(mStaticMapScene.chunks.size());
-	for (size_t chunkIndex = 0; chunkIndex < mStaticMapScene.chunks.size(); ++chunkIndex)
+	for (size_t buildInputIndex = 0; buildInputIndex < blasBuildInputs.size(); ++buildInputIndex)
 	{
-		auto& chunk = mStaticMapScene.chunks[chunkIndex];
-		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkIndex];
-		nri::BottomLevelGeometryDesc geometryDesc = {};
-		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-		geometryDesc.triangles.vertexBuffer = mStaticVertexBuffer.buffer;
-		geometryDesc.triangles.vertexOffset = 0;
-		geometryDesc.triangles.vertexNum = mStaticMapChunkAtlas.vertexCount;
-		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-		geometryDesc.triangles.indexBuffer = mStaticIndexBuffer.buffer;
-		geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
-		geometryDesc.triangles.indexNum = atlasChunk.indexCount;
-		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+		const NRIStaticMapBlasBuildInput& buildInput = blasBuildInputs[buildInputIndex];
+		auto& chunk = mStaticMapScene.chunks[buildInput.chunkListIndex];
+		nri::BottomLevelGeometryDesc geometryDesc =
+			nri_static_scene::BuildStaticMapBlasGeometryDesc(buildInput, mStaticVertexBuffer.buffer, mStaticIndexBuffer.buffer);
 
 		nri::BuildBottomLevelAccelerationStructureDesc build = {};
 		build.dst = chunk.accelerationStructure.accelerationStructure;
@@ -1200,7 +1225,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		build.scratchOffset = 0;
 		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
 
-		if (chunkIndex + 1 < mStaticMapScene.chunks.size())
+		if (buildInputIndex + 1 < blasBuildInputs.size())
 		{
 			nri::BufferBarrierDesc scratchBarrier = {};
 			scratchBarrier.buffer = mScratchBuffer.buffer;
@@ -1258,9 +1283,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 {
 	Clocker clock(NriPTAcceleration);
 
-	if (staticScene.chunks.empty() ||
-		!staticResources.chunkAtlas.valid ||
-		staticResources.chunkAtlas.chunks.size() != staticScene.chunks.size())
+	std::vector<NRIStaticMapBlasBuildInput> blasBuildInputs;
+	if (!nri_static_scene::BuildStaticMapBlasBuildInputs(staticScene, staticResources.chunkAtlas, blasBuildInputs))
 	{
 		return false;
 	}
@@ -1289,22 +1313,11 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 	}
 
 	uint64_t maxScratchSize = 0;
-	for (size_t chunkIndex = 0; chunkIndex < staticScene.chunks.size(); ++chunkIndex)
+	for (const NRIStaticMapBlasBuildInput& buildInput : blasBuildInputs)
 	{
-		auto& chunk = staticScene.chunks[chunkIndex];
-		const auto& atlasChunk = staticResources.chunkAtlas.chunks[chunkIndex];
-		nri::BottomLevelGeometryDesc geometryDesc = {};
-		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-		geometryDesc.triangles.vertexBuffer = staticResources.vertexBuffer.buffer;
-		geometryDesc.triangles.vertexOffset = 0;
-		geometryDesc.triangles.vertexNum = staticResources.chunkAtlas.vertexCount;
-		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-		geometryDesc.triangles.indexBuffer = staticResources.indexBuffer.buffer;
-		geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
-		geometryDesc.triangles.indexNum = atlasChunk.indexCount;
-		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+		auto& chunk = staticScene.chunks[buildInput.chunkListIndex];
+		nri::BottomLevelGeometryDesc geometryDesc =
+			nri_static_scene::BuildStaticMapBlasGeometryDesc(buildInput, staticResources.vertexBuffer.buffer, staticResources.indexBuffer.buffer);
 
 		nri::AccelerationStructureDesc blasDesc = {};
 		blasDesc.type = nri::AccelerationStructureType::BOTTOM_LEVEL;
@@ -1336,22 +1349,12 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 
 	std::vector<nri::BufferBarrierDesc> blasBarriers;
 	blasBarriers.reserve(staticScene.chunks.size());
-	for (size_t chunkIndex = 0; chunkIndex < staticScene.chunks.size(); ++chunkIndex)
+	for (size_t buildInputIndex = 0; buildInputIndex < blasBuildInputs.size(); ++buildInputIndex)
 	{
-		auto& chunk = staticScene.chunks[chunkIndex];
-		const auto& atlasChunk = staticResources.chunkAtlas.chunks[chunkIndex];
-		nri::BottomLevelGeometryDesc geometryDesc = {};
-		geometryDesc.flags = nri::BottomLevelGeometryBits::OPAQUE_GEOMETRY;
-		geometryDesc.type = nri::BottomLevelGeometryType::TRIANGLES;
-		geometryDesc.triangles.vertexBuffer = staticResources.vertexBuffer.buffer;
-		geometryDesc.triangles.vertexOffset = 0;
-		geometryDesc.triangles.vertexNum = staticResources.chunkAtlas.vertexCount;
-		geometryDesc.triangles.vertexStride = sizeof(nri_scene::SceneVertex);
-		geometryDesc.triangles.vertexFormat = nri::Format::RGB32_SFLOAT;
-		geometryDesc.triangles.indexBuffer = staticResources.indexBuffer.buffer;
-		geometryDesc.triangles.indexOffset = (uint64_t)atlasChunk.indexOffset * sizeof(uint32_t);
-		geometryDesc.triangles.indexNum = atlasChunk.indexCount;
-		geometryDesc.triangles.indexType = nri::IndexType::UINT32;
+		const NRIStaticMapBlasBuildInput& buildInput = blasBuildInputs[buildInputIndex];
+		auto& chunk = staticScene.chunks[buildInput.chunkListIndex];
+		nri::BottomLevelGeometryDesc geometryDesc =
+			nri_static_scene::BuildStaticMapBlasGeometryDesc(buildInput, staticResources.vertexBuffer.buffer, staticResources.indexBuffer.buffer);
 
 		nri::BuildBottomLevelAccelerationStructureDesc build = {};
 		build.dst = chunk.accelerationStructure.accelerationStructure;
@@ -1361,7 +1364,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 		build.scratchOffset = 0;
 		mFrameBuffer->mRayTracing.CmdBuildBottomLevelAccelerationStructures(*mFrameBuffer->mCommandBuffer, &build, 1);
 
-		if (chunkIndex + 1 < staticScene.chunks.size())
+		if (buildInputIndex + 1 < blasBuildInputs.size())
 		{
 			// The static chunk path deliberately reuses one scratch buffer across many BLAS builds.
 			// Serialize reuse explicitly so later builds do not stomp scratch data that the GPU is still consuming.

@@ -240,6 +240,14 @@ struct NRIStaticMapInstanceBuildServices
 	uint64_t (*getAccelerationStructureHandle)(void* user, const NRIAccelerationStructureResource& accelerationStructure) = nullptr;
 };
 
+struct NRIStaticMapBlasBuildInput
+{
+	uint32_t chunkListIndex = UINT32_MAX;
+	uint32_t vertexCount = 0;
+	uint64_t indexOffsetBytes = 0;
+	uint32_t indexCount = 0;
+};
+
 namespace nri_static_scene
 {
 	void InitializeStaticMapSceneCacheBuild(
@@ -275,6 +283,16 @@ namespace nri_static_scene
 		const NRIStaticMapInstanceBuildServices& services,
 		std::vector<nri::TopLevelInstance>& outTlasInstances,
 		std::vector<SceneInstanceData>& outSceneInstances);
+
+	bool BuildStaticMapBlasBuildInputs(
+		const StaticMapSceneCache& staticScene,
+		const StaticMapChunkAtlas& atlas,
+		std::vector<NRIStaticMapBlasBuildInput>& outBuildInputs);
+
+	nri::BottomLevelGeometryDesc BuildStaticMapBlasGeometryDesc(
+		const NRIStaticMapBlasBuildInput& buildInput,
+		nri::Buffer* vertexBuffer,
+		nri::Buffer* indexBuffer);
 
 	void PrintStaticMapSceneStatus(
 		const StaticMapSceneCache& staticScene,
