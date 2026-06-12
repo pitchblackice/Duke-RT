@@ -34,4 +34,11 @@ uint64_t HashResidentGeometryPayloadOrderIndependent(
 
 uint64_t ComputeGeometryTopologySignature(const nri_scene::GeometryData& geometry);
 uint64_t ComputePrimitiveLayoutSignature(const nri_scene::GeometryData& geometry);
+
+void ResetStaticMapChunkAtlas(StaticMapChunkAtlas& atlas);
+uint32_t GetChunkAtlasCapacity(uint32_t usedCount);
+uint32_t AllocateChunkAtlasSlice(uint32_t count, uint32_t alignment, uint32_t& cursor);
+uint32_t AllocateChunkAtlasRange(uint32_t count, uint32_t capacity, std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t& cursor);
+void ReleaseChunkAtlasRange(std::vector<StaticMapChunkAtlas::FreeRange>& freeRanges, uint32_t offset, uint32_t count);
+bool BuildStaticMapChunkAtlasLayout(const StaticMapSceneCache& staticScene, StaticMapChunkAtlas& outAtlas);
 }
