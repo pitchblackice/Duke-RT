@@ -99,6 +99,29 @@ public:
 		Count,
 	};
 
+	struct SceneBufferUploadProducerStamp
+	{
+		uint64_t vertexPayloadStamp = 0;
+		uint64_t indexPayloadStamp = 0;
+		uint64_t primitivePayloadStamp = 0;
+		uint64_t primitiveProvenanceStamp = 0;
+		uint64_t materialPayloadStamp = 0;
+	};
+
+	struct SceneBufferUploadDomainSpan
+	{
+		SceneBufferUploadDomain domain = SceneBufferUploadDomain::StaticOverlay;
+		uint32_t vertexOffset = 0;
+		uint32_t vertexCount = 0;
+		uint32_t indexOffset = 0;
+		uint32_t indexCount = 0;
+		uint32_t primitiveOffset = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialOffset = 0;
+		uint32_t materialCount = 0;
+		SceneBufferUploadProducerStamp stamp = {};
+	};
+
 	struct MaterialBuildTraceEntry
 	{
 		uint32_t calls = 0;
@@ -1517,30 +1540,7 @@ private:
 		nri_scene::GeometryData geometry;
 	};
 
-	struct SceneBufferUploadProducerStamp
-	{
-		uint64_t vertexPayloadStamp = 0;
-		uint64_t indexPayloadStamp = 0;
-		uint64_t primitivePayloadStamp = 0;
-		uint64_t primitiveProvenanceStamp = 0;
-		uint64_t materialPayloadStamp = 0;
-	};
-
 	using SceneUploadDirtyRange = ::SceneUploadDirtyRange;
-
-	struct SceneBufferUploadDomainSpan
-	{
-		SceneBufferUploadDomain domain = SceneBufferUploadDomain::StaticOverlay;
-		uint32_t vertexOffset = 0;
-		uint32_t vertexCount = 0;
-		uint32_t indexOffset = 0;
-		uint32_t indexCount = 0;
-		uint32_t primitiveOffset = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t materialOffset = 0;
-		uint32_t materialCount = 0;
-		SceneBufferUploadProducerStamp stamp = {};
-	};
 
 	struct SurfaceProbeResult
 	{

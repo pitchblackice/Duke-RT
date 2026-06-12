@@ -7,6 +7,7 @@
 #include "nri_renderstate.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_renderer_settings.h"
+#include "nri_scene_frame_builder.h"
 #include "nri_scene_upload.h"
 #include "nri_shader_contracts.h"
 #include "nri_upload_hash.h"
@@ -8382,107 +8383,19 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						PerfShellTraceStats::OverlayAppendSourceTraceEntry& sourceTrace,
 						SceneBufferUploadDomain uploadDomain)
 				{
-					ScopedPtPerfTimer sourceTimer(totalMs);
-					primitiveCount = geometry != nullptr ? (uint32_t)geometry->primitives.size() : 0u;
-					materialCount = (uint32_t)materials.materials.size();
-					sourceTrace = {};
-					sourceTrace.primitiveCount = primitiveCount;
-					sourceTrace.materialCount = materialCount;
-					sourceTrace.vertexBytes = geometry != nullptr ? (uint64_t)geometry->vertices.size() * sizeof(nri_scene::SceneVertex) : 0;
-					sourceTrace.indexBytes = geometry != nullptr ? (uint64_t)geometry->indices.size() * sizeof(uint32_t) : 0;
-					sourceTrace.primitiveBytes = geometry != nullptr ?
-						(uint64_t)geometry->primitives.size() * sizeof(nri_scene::PrimitiveData) +
-						(uint64_t)geometry->primitiveProvenance.size() * sizeof(nri_scene::SurfaceProvenance) :
-						0;
-					sourceTrace.materialBytes = nri_scene::EstimateMaterialBridgeBytes(materials);
-					sourceTrace.byteCount =
-						sourceTrace.vertexBytes +
-						sourceTrace.indexBytes +
-						sourceTrace.primitiveBytes +
-						sourceTrace.materialBytes;
-					SceneBufferUploadDomainSpan uploadSpan = {};
-					uploadSpan.domain = uploadDomain;
-					uploadSpan.vertexOffset = (uint32_t)overlayGeometry.vertices.size();
-					uploadSpan.indexOffset = (uint32_t)overlayGeometry.indices.size();
-					uploadSpan.primitiveOffset = (uint32_t)overlayGeometry.primitives.size();
-					uploadSpan.materialOffset = (uint32_t)overlayMaterialBridge.materials.size();
-					if (geometry != nullptr)
-					{
-						uploadSpan.vertexCount = (uint32_t)geometry->vertices.size();
-						uploadSpan.indexCount = (uint32_t)geometry->indices.size();
-						uploadSpan.primitiveCount = (uint32_t)geometry->primitives.size();
-						sourceTrace.vertexCount = uploadSpan.vertexCount;
-						sourceTrace.indexCount = uploadSpan.indexCount;
-					}
-					uploadSpan.materialCount = (uint32_t)materials.materials.size();
-					if (producerStamp != nullptr)
-					{
-						const auto buildSpanStamp = [&](uint64_t sourceStamp, uint64_t offset, uint64_t count, uint64_t byteSize) -> uint64_t
-						{
-							if (sourceStamp == 0 || count == 0)
-							{
-								return 0;
-							}
-							uint64_t hash = 1469598103934665603ull;
-							hash = CoherencyHashCombine64(hash, sourceStamp);
-							hash = CoherencyHashCombine64(hash, (uint64_t)uploadDomain);
-							hash = CoherencyHashCombine64(hash, offset);
-							hash = CoherencyHashCombine64(hash, count);
-							hash = CoherencyHashCombine64(hash, byteSize);
-							return hash != 0 ? hash : 1;
-						};
-						uploadSpan.stamp.vertexPayloadStamp = buildSpanStamp(
-							producerStamp->vertexPayloadStamp,
-							uploadSpan.vertexOffset,
-							uploadSpan.vertexCount,
-							(uint64_t)uploadSpan.vertexCount * sizeof(nri_scene::SceneVertex));
-						uploadSpan.stamp.indexPayloadStamp = buildSpanStamp(
-							producerStamp->indexPayloadStamp,
-							uploadSpan.indexOffset,
-							uploadSpan.indexCount,
-							(uint64_t)uploadSpan.indexCount * sizeof(uint32_t));
-						uploadSpan.stamp.primitivePayloadStamp = buildSpanStamp(
-							producerStamp->primitivePayloadStamp,
-							((uint64_t)uploadSpan.primitiveOffset << 32) ^ (uint64_t)uploadSpan.materialOffset,
-							uploadSpan.primitiveCount,
-							(uint64_t)uploadSpan.primitiveCount * sizeof(nri_scene::PrimitiveData));
-						uploadSpan.stamp.primitiveProvenanceStamp = buildSpanStamp(
-							producerStamp->primitiveProvenanceStamp,
-							uploadSpan.primitiveOffset,
-							uploadSpan.primitiveCount,
-							(uint64_t)uploadSpan.primitiveCount);
-						uploadSpan.stamp.materialPayloadStamp = buildSpanStamp(
-							producerStamp->materialPayloadStamp,
-							uploadSpan.materialOffset,
-							uploadSpan.materialCount,
-							(uint64_t)uploadSpan.materialCount * sizeof(nri_scene::MaterialData));
-					}
-					if (geometry != nullptr && !geometry->primitives.empty())
-					{
-						ScopedPtPerfTimer geometryTimer(geometryMs);
-						sourceTrace.geometryGrowthEvents =
-							(overlayGeometry.vertices.size() + geometry->vertices.size() > overlayGeometry.vertices.capacity() ? 1u : 0u) +
-							(overlayGeometry.indices.size() + geometry->indices.size() > overlayGeometry.indices.capacity() ? 1u : 0u) +
-							(overlayGeometry.primitives.size() + geometry->primitives.size() > overlayGeometry.primitives.capacity() ? 1u : 0u) +
-							(overlayGeometry.primitiveProvenance.size() + geometry->primitiveProvenance.size() > overlayGeometry.primitiveProvenance.capacity() ? 1u : 0u);
-						AppendGeometry(*geometry, (uint32_t)overlayMaterialBridge.materials.size(), overlayGeometry);
-					}
-					{
-						ScopedPtPerfTimer materialTimer(materialMs);
-						sourceTrace.materialGrowthEvents =
-							(overlayMaterialBridge.materials.size() + materials.materials.size() > overlayMaterialBridge.materials.capacity() ? 1u : 0u) +
-							(overlayMaterialBridge.lightMetadata.size() + materials.lightMetadata.size() > overlayMaterialBridge.lightMetadata.capacity() ? 1u : 0u) +
-							(overlayMaterialBridge.textures.size() + materials.textures.size() > overlayMaterialBridge.textures.capacity() ? 1u : 0u) +
-							(overlayMaterialBridge.paletteLookup.size() + materials.paletteLookup.size() > overlayMaterialBridge.paletteLookup.capacity() ? 1u : 0u);
-						nri_scene::AppendMaterialBridge(materials, overlayMaterialBridge);
-					}
-					if (uploadSpan.vertexCount != 0 ||
-						uploadSpan.indexCount != 0 ||
-						uploadSpan.primitiveCount != 0 ||
-						uploadSpan.materialCount != 0)
-					{
-						sceneUploadDomainSpans.push_back(uploadSpan);
-					}
+					NRISceneContribution contribution = {};
+					contribution.geometry = geometry;
+					contribution.producerStamp = producerStamp;
+					contribution.materials = &materials;
+					contribution.uploadDomain = uploadDomain;
+					NRISceneContributionAppendStats appendStats = {};
+					appendStats.totalMs = &totalMs;
+					appendStats.geometryMs = &geometryMs;
+					appendStats.materialMs = &materialMs;
+					appendStats.primitiveCount = &primitiveCount;
+					appendStats.materialCount = &materialCount;
+					appendStats.sourceTrace = &sourceTrace;
+					AppendNRISceneContribution(contribution, appendStats, overlayGeometry, overlayMaterialBridge, sceneUploadDomainSpans);
 				};
 
 				{
@@ -8527,28 +8440,14 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					const SceneBufferUploadProducerStamp mirrorPlayerStamp =
 						hasMirrorPlayerOverlay ? buildMirrorPlayerProducerStamp() : SceneBufferUploadProducerStamp {};
 
-					size_t reserveVertices = 0;
-					size_t reserveIndices = 0;
-					size_t reservePrimitives = 0;
-					size_t reservePrimitiveProvenance = 0;
-					size_t reserveMaterials = 0;
-					size_t reserveLightMetadata = 0;
-					size_t reserveTextures = 0;
-					size_t reservePaletteLookup = 0;
+					NRISceneContributionReserve overlayReserve = {};
 					auto addOverlayReserve =
 						[&](const nri_scene::GeometryData* geometry, const nri_scene::MaterialBridgeData& materials)
 					{
-						if (geometry != nullptr)
-						{
-							reserveVertices += geometry->vertices.size();
-							reserveIndices += geometry->indices.size();
-							reservePrimitives += geometry->primitives.size();
-							reservePrimitiveProvenance += geometry->primitiveProvenance.size();
-						}
-						reserveMaterials += materials.materials.size();
-						reserveLightMetadata += materials.lightMetadata.size();
-						reserveTextures += materials.textures.size();
-						reservePaletteLookup += materials.paletteLookup.size();
+						NRISceneContribution contribution = {};
+						contribution.geometry = geometry;
+						contribution.materials = &materials;
+						AccumulateNRISceneContributionReserve(contribution, overlayReserve);
 					};
 
 					if (hasRuntimeSpaceLinkOverlay)
@@ -8579,14 +8478,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					{
 						addOverlayReserve(&surfaceLightGeometry, surfaceLightMaterialBridge);
 					}
-					overlayGeometry.vertices.reserve(reserveVertices);
-					overlayGeometry.indices.reserve(reserveIndices);
-					overlayGeometry.primitives.reserve(reservePrimitives);
-					overlayGeometry.primitiveProvenance.reserve(reservePrimitiveProvenance);
-					overlayMaterialBridge.materials.reserve(reserveMaterials);
-					overlayMaterialBridge.lightMetadata.reserve(reserveLightMetadata);
-					overlayMaterialBridge.textures.reserve(reserveTextures);
-					overlayMaterialBridge.paletteLookup.reserve(reservePaletteLookup);
+					ReserveNRISceneContributionCapacity(overlayReserve, overlayGeometry, overlayMaterialBridge);
 
 					if (hasRuntimeSpaceLinkOverlay)
 					{
