@@ -529,6 +529,34 @@ bool nri_static_scene::BuildStaticMapSceneCache(
 	return !outStaticScene.geometry.primitives.empty();
 }
 
+void nri_static_scene::PrintStaticMapSceneStatus(
+	const StaticMapSceneCache& staticScene,
+	bool usedStaticMapSceneLastFrame,
+	bool uploadedStaticMapSceneLastFrame,
+	bool builtStaticMapSceneASLastFrame)
+{
+	const char* source = usedStaticMapSceneLastFrame ? "authoritative-map-world" : "captured-scene";
+	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u animated_candidate_chunks=%u animated_refreshes=%u animated_refresh_uploads=%u animated_geometry_fallbacks=%u animated_refresh_suppressed=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s chunks=%u tlas_instances=%u tris=%u materials=%u\n",
+		source,
+		(staticScene.valid && staticScene.texturesResident && staticScene.buffersResident && staticScene.accelerationResident) ? "yes" : "no",
+		(unsigned long long)staticScene.buildSerial,
+		staticScene.sceneBuildCount,
+		staticScene.gpuUploadCount,
+		staticScene.accelerationBuildCount,
+		staticScene.animatedCandidateChunkCount,
+		staticScene.animatedRefreshCount,
+		staticScene.animatedRefreshUploadCount,
+		staticScene.animatedGeometryFallbackCount,
+		staticScene.animatedRefreshSuppressedChunkCount,
+		staticScene.reuseCount,
+		uploadedStaticMapSceneLastFrame ? "yes" : "no",
+		builtStaticMapSceneASLastFrame ? "yes" : "no",
+		(uint32_t)staticScene.chunks.size(),
+		staticScene.tlasInstanceCount,
+		(uint32_t)staticScene.geometry.primitives.size(),
+		(uint32_t)staticScene.gpuMaterials.size());
+}
+
 bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas)
 {
 	if (!atlas.valid || !mStaticMapScene.valid)
@@ -1246,26 +1274,11 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 
 void NRIRenderer::PrintStaticMapSceneStatus() const
 {
-	const char* source = mUsedStaticMapSceneLastFrame ? "authoritative-map-world" : "captured-scene";
-	Printf("NRI PT static scene: source=%s resident=%s build_serial=%llu scene_builds=%u uploads=%u as_builds=%u animated_candidate_chunks=%u animated_refreshes=%u animated_refresh_uploads=%u animated_geometry_fallbacks=%u animated_refresh_suppressed=%u reuses=%u last_frame_upload=%s last_frame_as_build=%s chunks=%u tlas_instances=%u tris=%u materials=%u\n",
-		source,
-		(mStaticMapScene.valid && mStaticMapScene.texturesResident && mStaticMapScene.buffersResident && mStaticMapScene.accelerationResident) ? "yes" : "no",
-		(unsigned long long)mStaticMapScene.buildSerial,
-		mStaticMapScene.sceneBuildCount,
-		mStaticMapScene.gpuUploadCount,
-		mStaticMapScene.accelerationBuildCount,
-		mStaticMapScene.animatedCandidateChunkCount,
-		mStaticMapScene.animatedRefreshCount,
-		mStaticMapScene.animatedRefreshUploadCount,
-		mStaticMapScene.animatedGeometryFallbackCount,
-		mStaticMapScene.animatedRefreshSuppressedChunkCount,
-		mStaticMapScene.reuseCount,
-		mUploadedStaticMapSceneLastFrame ? "yes" : "no",
-		mBuiltStaticMapSceneASLastFrame ? "yes" : "no",
-		(uint32_t)mStaticMapScene.chunks.size(),
-		mStaticMapScene.tlasInstanceCount,
-		(uint32_t)mStaticMapScene.geometry.primitives.size(),
-		(uint32_t)mStaticMapScene.gpuMaterials.size());
+	nri_static_scene::PrintStaticMapSceneStatus(
+		mStaticMapScene,
+		mUsedStaticMapSceneLastFrame,
+		mUploadedStaticMapSceneLastFrame,
+		mBuiltStaticMapSceneASLastFrame);
 }
 
 bool NRIRenderer::PreloadStaticMapResources()

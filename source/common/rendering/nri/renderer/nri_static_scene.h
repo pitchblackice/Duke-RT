@@ -232,6 +232,12 @@ namespace nri_static_scene
 		StaticMapSceneCache& staticScene,
 		const StaticMapChunkAtlas& atlas,
 		bool traceFailures);
+
+	void PrintStaticMapSceneStatus(
+		const StaticMapSceneCache& staticScene,
+		bool usedStaticMapSceneLastFrame,
+		bool uploadedStaticMapSceneLastFrame,
+		bool builtStaticMapSceneASLastFrame);
 }
 
 class NRIStaticSceneResidency
