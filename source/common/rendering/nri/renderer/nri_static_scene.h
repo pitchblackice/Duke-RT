@@ -266,6 +266,47 @@ struct NRIStaticSceneAccelerationBuildServices
 	bool (*buildTopLevelAccelerationStructure)(void* user, const std::vector<nri::TopLevelInstance>& instances, StaticMapSceneResources& staticResources, bool updateLiveState) = nullptr;
 };
 
+struct NRIStaticSceneLiveAccelerationBuildInput
+{
+	const nri_scene::PTMapWorld* mapWorld = nullptr;
+	StaticMapSceneCache* staticScene = nullptr;
+	StaticMapChunkAtlas* atlas = nullptr;
+	const ResidentMapChunkRegistry* registry = nullptr;
+	NRIBufferResource* staticVertexBuffer = nullptr;
+	NRIBufferResource* staticIndexBuffer = nullptr;
+	NRIBufferResource* staticPrimitiveBuffer = nullptr;
+	NRIBufferResource* staticMaterialBuffer = nullptr;
+	NRIBufferResource* tlasInstanceBuffer = nullptr;
+	NRIBufferResource* emissiveTlasInstanceBuffer = nullptr;
+	NRIBufferResource* sceneInstanceBuffer = nullptr;
+	NRIBufferResource* scratchBuffer = nullptr;
+	NRIBufferResource* topLevelScratchBuffer = nullptr;
+	NRIBufferResource* emissiveTopLevelScratchBuffer = nullptr;
+	NRIAccelerationStructureResource* topLevelAS = nullptr;
+	NRIAccelerationStructureResource* emissiveTopLevelAS = nullptr;
+	uint64_t* staticAccelerationBuildSerial = nullptr;
+};
+
+struct NRIStaticSceneLiveAccelerationBuildServices
+{
+	void* user = nullptr;
+	uint64_t (*getAccelerationStructureHandle)(void* user, const NRIAccelerationStructureResource& accelerationStructure) = nullptr;
+	bool (*hasAnyDynamicBottomLevelAS)(void* user) = nullptr;
+	void (*waitForCommandsTracked)(void* user) = nullptr;
+	void (*destroyBufferResource)(void* user, NRIBufferResource& resource) = nullptr;
+	void (*destroyAccelerationStructureResource)(void* user, NRIAccelerationStructureResource& resource) = nullptr;
+	void (*destroyDynamicBottomLevelAccelerationStructures)(void* user) = nullptr;
+	void (*resetPersistentVoxelsForStaticAccelerationRebuild)(void* user) = nullptr;
+	bool (*createBottomLevelAccelerationStructure)(void* user, const nri::AccelerationStructureDesc& desc, NRIAccelerationStructureResource& outAccelerationStructure) = nullptr;
+	uint64_t (*getAccelerationStructureBuildScratchBufferSize)(void* user, const NRIAccelerationStructureResource& accelerationStructure) = nullptr;
+	bool (*createScratchBuffer)(void* user, NRIBufferResource& scratchBuffer, uint64_t scratchSize) = nullptr;
+	void (*cmdBuildBottomLevelAccelerationStructure)(void* user, const nri::BuildBottomLevelAccelerationStructureDesc& build) = nullptr;
+	void (*cmdScratchReuseBarrier)(void* user, NRIBufferResource& scratchBuffer) = nullptr;
+	void (*cmdAccelerationReadBarriers)(void* user, const std::vector<NRIAccelerationStructureResource*>& accelerationStructures) = nullptr;
+	bool (*buildTopLevelAccelerationStructure)(void* user, const std::vector<nri::TopLevelInstance>& instances) = nullptr;
+	bool (*updateSceneDataSet)(void* user, const std::vector<SceneInstanceData>& sceneInstances) = nullptr;
+};
+
 struct NRIStaticSceneResourceDestroyServices
 {
 	void* user = nullptr;
@@ -327,6 +368,10 @@ namespace nri_static_scene
 		StaticMapSceneResources& staticResources,
 		const NRIStaticSceneAccelerationBuildServices& services,
 		bool updateLiveState);
+
+	bool BuildLiveStaticMapAccelerationStructures(
+		const NRIStaticSceneLiveAccelerationBuildInput& input,
+		const NRIStaticSceneLiveAccelerationBuildServices& services);
 
 	void DestroyStaticMapSceneResources(
 		StaticMapSceneCache& staticScene,
