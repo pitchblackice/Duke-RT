@@ -1,6 +1,7 @@
 #include "nri_static_scene.h"
 
 #include "nri_renderer.h"
+#include "nri_sky_environment.h"
 #include "../scene/nri_scene_math.h"
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
@@ -40,6 +41,11 @@ namespace
 	static nri::AccessStage NRIAccelerationStructureBuildInputAccess()
 	{
 		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
+	}
+
+	static bool ShouldTracePtPerf()
+	{
+		return PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs();
 	}
 }
 
@@ -257,6 +263,137 @@ uint32_t NRIRenderer::CountStaticSceneChunkSlots(uint32_t chunkIndex) const
 		}
 	}
 	return count;
+}
+
+bool NRIRenderer::RebuildResidentStaticMaterialBridgeFromChunks()
+{
+	if (!mStaticMapChunkAtlas.valid || mStaticMapChunkAtlas.chunks.size() != mStaticMapScene.chunks.size())
+	{
+		return false;
+	}
+
+	nri_scene::MaterialBridgeData bridge = {};
+	std::vector<uint32_t> chunkListIndices;
+	chunkListIndices.reserve(mStaticMapScene.chunks.size());
+	for (uint32_t chunkListIndex = 0; chunkListIndex < mStaticMapScene.chunks.size(); ++chunkListIndex)
+	{
+		const auto& chunkCache = mStaticMapScene.chunks[chunkListIndex];
+		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+		if (!chunkCache.active || !atlasChunk.valid || atlasChunk.materialCount == 0)
+		{
+			continue;
+		}
+
+		chunkListIndices.push_back(chunkListIndex);
+	}
+
+	std::sort(
+		chunkListIndices.begin(),
+		chunkListIndices.end(),
+		[this](uint32_t lhs, uint32_t rhs)
+		{
+			const auto& lhsChunk = mStaticMapChunkAtlas.chunks[lhs];
+			const auto& rhsChunk = mStaticMapChunkAtlas.chunks[rhs];
+			if (lhsChunk.materialOffset != rhsChunk.materialOffset)
+			{
+				return lhsChunk.materialOffset < rhsChunk.materialOffset;
+			}
+
+			return lhs < rhs;
+		});
+
+	for (uint32_t chunkListIndex : chunkListIndices)
+	{
+		const auto& chunkCache = mStaticMapScene.chunks[chunkListIndex];
+		const auto& atlasChunk = mStaticMapChunkAtlas.chunks[chunkListIndex];
+
+		if (bridge.materials.size() < atlasChunk.materialOffset)
+		{
+			bridge.materials.resize(atlasChunk.materialOffset);
+			bridge.lightMetadata.resize(atlasChunk.materialOffset);
+		}
+
+		const uint32_t nextMaterialOffset = (uint32_t)bridge.materials.size();
+		if (nextMaterialOffset != atlasChunk.materialOffset ||
+			(uint32_t)chunkCache.materialBridge.materials.size() != atlasChunk.materialCount)
+		{
+			if (nri_ptscenestats && ShouldTracePtPerf())
+			{
+				Printf("NRI PT static scene trace: event=resident_material_bridge_failed chunk=%u atlas_offset=%u next_offset=%u atlas_count=%u bridge_count=%u\n",
+					chunkCache.chunkIndex,
+					atlasChunk.materialOffset,
+					nextMaterialOffset,
+					atlasChunk.materialCount,
+					(uint32_t)chunkCache.materialBridge.materials.size());
+			}
+			return false;
+		}
+
+		nri_scene::AppendMaterialBridge(chunkCache.materialBridge, bridge);
+	}
+
+	if (bridge.materials.size() < mStaticMapChunkAtlas.materialCount)
+	{
+		bridge.materials.resize(mStaticMapChunkAtlas.materialCount);
+		bridge.lightMetadata.resize(mStaticMapChunkAtlas.materialCount);
+	}
+
+	mStaticMapScene.materialBridge = std::move(bridge);
+	return true;
+}
+
+void NRIRenderer::UploadChunkMaterialsToAtlas(
+	const std::vector<nri_scene::MaterialData>& sourceMaterials,
+	const StaticMapSceneCache::ChunkCache& sourceChunk,
+	const StaticMapChunkAtlas::ChunkEntry& atlasChunk,
+	std::vector<nri_scene::MaterialData>& outMaterials) const
+{
+	if (!atlasChunk.valid)
+	{
+		return;
+	}
+
+	if (sourceChunk.materialOffset + sourceChunk.materialCount <= sourceMaterials.size() &&
+		atlasChunk.materialOffset + atlasChunk.materialCount <= outMaterials.size())
+	{
+		std::copy_n(
+			sourceMaterials.data() + sourceChunk.materialOffset,
+			sourceChunk.materialCount,
+			outMaterials.data() + atlasChunk.materialOffset);
+	}
+}
+
+bool NRIRenderer::UploadStaticMapChunkMaterialAtlas(
+	NRIBufferResource& materialBuffer,
+	const StaticMapChunkAtlas& atlas,
+	const StaticMapSceneCache& staticScene,
+	const std::vector<nri_scene::MaterialData>& gpuMaterials)
+{
+	if (!atlas.valid || atlas.chunks.size() != staticScene.chunks.size())
+	{
+		return false;
+	}
+
+	std::vector<nri_scene::MaterialData> atlasMaterials(atlas.materialCount);
+	for (uint32_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
+	{
+		UploadChunkMaterialsToAtlas(
+			gpuMaterials,
+			staticScene.chunks[chunkListIndex],
+			atlas.chunks[chunkListIndex],
+			atlasMaterials);
+	}
+
+	return EnsureResidentStructuredBuffer(
+		materialBuffer,
+		mMaterialBufferStats,
+		atlasMaterials.data(),
+		atlasMaterials.size() * sizeof(nri_scene::MaterialData),
+		sizeof(nri_scene::MaterialData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess(),
+		"resident_chunk_write",
+		ResidentUploadKind_Material);
 }
 
 void NRIRenderer::ResetStaticMapChunkAtlas(StaticMapChunkAtlas& atlas) const
