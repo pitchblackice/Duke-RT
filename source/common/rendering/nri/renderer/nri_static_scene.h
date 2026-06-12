@@ -307,6 +307,33 @@ struct NRIStaticSceneLiveAccelerationBuildServices
 	bool (*updateSceneDataSet)(void* user, const std::vector<SceneInstanceData>& sceneInstances) = nullptr;
 };
 
+struct NRIStaticSceneLiveCacheDestroyInput
+{
+	StaticMapSceneCache* staticScene = nullptr;
+	StaticMapChunkAtlas* atlas = nullptr;
+	NRIBufferResource* staticVertexBuffer = nullptr;
+	NRIBufferResource* staticIndexBuffer = nullptr;
+	NRIBufferResource* staticPrimitiveBuffer = nullptr;
+	NRIBufferResource* staticMaterialBuffer = nullptr;
+	uint32_t* boundStaticPrimitiveCount = nullptr;
+	uint32_t* boundDynamicPrimitiveCount = nullptr;
+	uint32_t* boundStaticMaterialCount = nullptr;
+	uint32_t* boundDynamicMaterialCount = nullptr;
+	uint32_t* boundPortalCount = nullptr;
+};
+
+struct NRIStaticSceneLiveCacheDestroyServices
+{
+	void* user = nullptr;
+	void (*waitForCommandsTracked)(void* user) = nullptr;
+	void (*destroyBufferResource)(void* user, NRIBufferResource& resource) = nullptr;
+	void (*destroyAccelerationStructureResource)(void* user, NRIAccelerationStructureResource& resource) = nullptr;
+	void (*resetPersistentDynamicEmissiveCache)(void* user) = nullptr;
+	void (*resetSceneFrameGeometry)(void* user) = nullptr;
+	void (*resetRuntimeMutationCacheAndFrameForStaticScene)(void* user) = nullptr;
+	void (*resetResidentMapChunkRegistry)(void* user) = nullptr;
+};
+
 struct NRIStaticSceneResourceDestroyServices
 {
 	void* user = nullptr;
@@ -372,6 +399,11 @@ namespace nri_static_scene
 	bool BuildLiveStaticMapAccelerationStructures(
 		const NRIStaticSceneLiveAccelerationBuildInput& input,
 		const NRIStaticSceneLiveAccelerationBuildServices& services);
+
+	void DestroyLiveStaticMapSceneCache(
+		const NRIStaticSceneLiveCacheDestroyInput& input,
+		const NRIStaticSceneLiveCacheDestroyServices& services,
+		bool waitForCommands);
 
 	void DestroyStaticMapSceneResources(
 		StaticMapSceneCache& staticScene,

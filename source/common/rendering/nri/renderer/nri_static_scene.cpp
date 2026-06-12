@@ -1076,6 +1076,81 @@ void nri_static_scene::DestroyStaticMapSceneResources(
 	staticResources = {};
 }
 
+void nri_static_scene::DestroyLiveStaticMapSceneCache(
+	const NRIStaticSceneLiveCacheDestroyInput& input,
+	const NRIStaticSceneLiveCacheDestroyServices& services,
+	bool waitForCommands)
+{
+	if (input.staticScene == nullptr ||
+		input.atlas == nullptr ||
+		input.staticVertexBuffer == nullptr ||
+		input.staticIndexBuffer == nullptr ||
+		input.staticPrimitiveBuffer == nullptr ||
+		input.staticMaterialBuffer == nullptr ||
+		input.boundStaticPrimitiveCount == nullptr ||
+		input.boundDynamicPrimitiveCount == nullptr ||
+		input.boundStaticMaterialCount == nullptr ||
+		input.boundDynamicMaterialCount == nullptr ||
+		input.boundPortalCount == nullptr)
+	{
+		return;
+	}
+
+	if (services.resetPersistentDynamicEmissiveCache != nullptr)
+	{
+		services.resetPersistentDynamicEmissiveCache(services.user);
+	}
+
+	StaticMapSceneCache& staticScene = *input.staticScene;
+	const bool hasResidentStaticSceneResources =
+		!staticScene.chunks.empty() ||
+		input.staticVertexBuffer->buffer != nullptr ||
+		input.staticIndexBuffer->buffer != nullptr ||
+		input.staticPrimitiveBuffer->buffer != nullptr ||
+		input.staticMaterialBuffer->buffer != nullptr;
+	if (waitForCommands && hasResidentStaticSceneResources && services.waitForCommandsTracked != nullptr)
+	{
+		services.waitForCommandsTracked(services.user);
+	}
+
+	if (services.destroyAccelerationStructureResource != nullptr)
+	{
+		for (auto& chunk : staticScene.chunks)
+		{
+			services.destroyAccelerationStructureResource(services.user, chunk.accelerationStructure);
+			chunk.residentBlasScratchSizeCacheKey = nullptr;
+			chunk.residentBlasBuildScratchSize = 0;
+			chunk.residentBlasUpdateScratchSize = 0;
+		}
+	}
+	if (services.destroyBufferResource != nullptr)
+	{
+		services.destroyBufferResource(services.user, *input.staticVertexBuffer);
+		services.destroyBufferResource(services.user, *input.staticIndexBuffer);
+		services.destroyBufferResource(services.user, *input.staticPrimitiveBuffer);
+		services.destroyBufferResource(services.user, *input.staticMaterialBuffer);
+	}
+
+	*input.boundStaticPrimitiveCount = 0;
+	*input.boundDynamicPrimitiveCount = 0;
+	*input.boundStaticMaterialCount = 0;
+	*input.boundDynamicMaterialCount = 0;
+	*input.boundPortalCount = 0;
+	nri_static_scene_geometry::ResetStaticMapChunkAtlas(*input.atlas);
+	if (services.resetSceneFrameGeometry != nullptr)
+	{
+		services.resetSceneFrameGeometry(services.user);
+	}
+	if (services.resetRuntimeMutationCacheAndFrameForStaticScene != nullptr)
+	{
+		services.resetRuntimeMutationCacheAndFrameForStaticScene(services.user);
+	}
+	if (services.resetResidentMapChunkRegistry != nullptr)
+	{
+		services.resetResidentMapChunkRegistry(services.user);
+	}
+}
+
 void nri_static_scene::InitializeStaticMapSceneCacheBuild(
 	const nri_scene::PTMapWorld& mapWorld,
 	const NRIPreservedStaticMapSkyState* preservedSkyState,
@@ -1780,41 +1855,51 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 			(uint32_t)mStaticMapScene.chunks.size());
 	}
 
-	ResetPersistentDynamicEmissiveCache();
-	const bool hasResidentStaticSceneResources =
-		!mStaticMapScene.chunks.empty() ||
-		mStaticVertexBuffer.buffer != nullptr ||
-		mStaticIndexBuffer.buffer != nullptr ||
-		mStaticPrimitiveBuffer.buffer != nullptr ||
-		mStaticMaterialBuffer.buffer != nullptr;
-	if (hasResidentStaticSceneResources && mFrameBuffer != nullptr)
-	{
-		// The resident PT static scene can still be referenced by the previous frame's
-		// TLAS and descriptor bindings. Wait before tearing it down for live rebuilds.
-		WaitForCommandsTracked();
-	}
+	NRIStaticSceneLiveCacheDestroyInput input = {};
+	input.staticScene = &mStaticMapScene;
+	input.atlas = &mStaticMapChunkAtlas;
+	input.staticVertexBuffer = &mStaticVertexBuffer;
+	input.staticIndexBuffer = &mStaticIndexBuffer;
+	input.staticPrimitiveBuffer = &mStaticPrimitiveBuffer;
+	input.staticMaterialBuffer = &mStaticMaterialBuffer;
+	input.boundStaticPrimitiveCount = &mBoundStaticPrimitiveCount;
+	input.boundDynamicPrimitiveCount = &mBoundDynamicPrimitiveCount;
+	input.boundStaticMaterialCount = &mBoundStaticMaterialCount;
+	input.boundDynamicMaterialCount = &mBoundDynamicMaterialCount;
+	input.boundPortalCount = &mBoundPortalCount;
 
-	for (auto& chunk : mStaticMapScene.chunks)
+	NRIStaticSceneLiveCacheDestroyServices services = {};
+	services.user = this;
+	services.waitForCommandsTracked = [](void* user)
 	{
-		DestroyAccelerationStructureResource(chunk.accelerationStructure);
-		chunk.residentBlasScratchSizeCacheKey = nullptr;
-		chunk.residentBlasBuildScratchSize = 0;
-		chunk.residentBlasUpdateScratchSize = 0;
-	}
+		static_cast<NRIRenderer*>(user)->WaitForCommandsTracked();
+	};
+	services.destroyBufferResource = [](void* user, NRIBufferResource& resource)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyBufferResource(resource);
+	};
+	services.destroyAccelerationStructureResource = [](void* user, NRIAccelerationStructureResource& resource)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyAccelerationStructureResource(resource);
+	};
+	services.resetPersistentDynamicEmissiveCache = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->ResetPersistentDynamicEmissiveCache();
+	};
+	services.resetSceneFrameGeometry = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->mSceneFrameGeometry.Reset();
+	};
+	services.resetRuntimeMutationCacheAndFrameForStaticScene = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->ResetRuntimeMutationCacheAndFrameForStaticScene();
+	};
+	services.resetResidentMapChunkRegistry = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->ResetResidentMapChunkRegistry();
+	};
 
-	DestroyBufferResource(mStaticVertexBuffer);
-	DestroyBufferResource(mStaticIndexBuffer);
-	DestroyBufferResource(mStaticPrimitiveBuffer);
-	DestroyBufferResource(mStaticMaterialBuffer);
-	mBoundStaticPrimitiveCount = 0;
-	mBoundDynamicPrimitiveCount = 0;
-	mBoundStaticMaterialCount = 0;
-	mBoundDynamicMaterialCount = 0;
-	mBoundPortalCount = 0;
-	nri_static_scene_geometry::ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
-	mSceneFrameGeometry.Reset();
-	ResetRuntimeMutationCacheAndFrameForStaticScene();
-	ResetResidentMapChunkRegistry();
+	nri_static_scene::DestroyLiveStaticMapSceneCache(input, services, mFrameBuffer != nullptr);
 }
 
 void NRIRenderer::PrintStaticMapSceneStatus() const
