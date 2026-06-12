@@ -48,6 +48,9 @@ namespace
 {
 	constexpr float TwoPi = 6.28318530717958647692f;
 	constexpr uint32_t NriPtMuzzleFlashSlotCount = 8u;
+	constexpr uint32_t NriMaxEmissivePrimitives = 16384u;
+	constexpr uint32_t NriSceneDataSourceStatic = 0u;
+	constexpr uint32_t NriSceneDataSourceDynamic = 1u;
 
 	DVector3 PathTracingToWorldPosition(const DVector3& source)
 	{
@@ -263,6 +266,90 @@ namespace
 		uint32_t bits = 0;
 		std::memcpy(&bits, &value, sizeof(bits));
 		return bits;
+	}
+
+	float ComputePrimitiveArea(const nri_scene::GeometryData& geometry, uint32_t primitiveIndex)
+	{
+		if (primitiveIndex >= geometry.primitives.size())
+		{
+			return 0.0f;
+		}
+
+		const auto& primitive = geometry.primitives[primitiveIndex];
+		if (primitive.indices[0] >= geometry.vertices.size() ||
+			primitive.indices[1] >= geometry.vertices.size() ||
+			primitive.indices[2] >= geometry.vertices.size())
+		{
+			return 0.0f;
+		}
+
+		const auto& a = geometry.vertices[primitive.indices[0]];
+		const auto& b = geometry.vertices[primitive.indices[1]];
+		const auto& c = geometry.vertices[primitive.indices[2]];
+		const float abx = b.position[0] - a.position[0];
+		const float aby = b.position[1] - a.position[1];
+		const float abz = b.position[2] - a.position[2];
+		const float acx = c.position[0] - a.position[0];
+		const float acy = c.position[1] - a.position[1];
+		const float acz = c.position[2] - a.position[2];
+		const float crossX = aby * acz - abz * acy;
+		const float crossY = abz * acx - abx * acz;
+		const float crossZ = abx * acy - aby * acx;
+		return 0.5f * std::sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
+	}
+
+	void ComputePrimitiveCenter(const nri_scene::GeometryData& geometry, uint32_t primitiveIndex, float outCenter[3])
+	{
+		outCenter[0] = 0.0f;
+		outCenter[1] = 0.0f;
+		outCenter[2] = 0.0f;
+		if (primitiveIndex >= geometry.primitives.size())
+		{
+			return;
+		}
+
+		const auto& primitive = geometry.primitives[primitiveIndex];
+		if (primitive.indices[0] >= geometry.vertices.size() ||
+			primitive.indices[1] >= geometry.vertices.size() ||
+			primitive.indices[2] >= geometry.vertices.size())
+		{
+			return;
+		}
+
+		const auto& a = geometry.vertices[primitive.indices[0]];
+		const auto& b = geometry.vertices[primitive.indices[1]];
+		const auto& c = geometry.vertices[primitive.indices[2]];
+		outCenter[0] = (a.position[0] + b.position[0] + c.position[0]) / 3.0f;
+		outCenter[1] = (a.position[1] + b.position[1] + c.position[1]) / 3.0f;
+		outCenter[2] = (a.position[2] + b.position[2] + c.position[2]) / 3.0f;
+	}
+
+	uint64_t HashGeometryForEmissiveSampling(const nri_scene::GeometryData* geometry)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		if (geometry == nullptr)
+		{
+			return HashCombine64(hash, 0ull);
+		}
+
+		hash = HashCombine64(hash, (uint64_t)geometry->vertices.size());
+		hash = HashCombine64(hash, (uint64_t)geometry->primitives.size());
+		for (const nri_scene::SceneVertex& vertex : geometry->vertices)
+		{
+			hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[0]));
+			hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[1]));
+			hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[2]));
+		}
+
+		for (const nri_scene::PrimitiveData& primitive : geometry->primitives)
+		{
+			hash = HashCombine64(hash, (uint64_t)primitive.indices[0]);
+			hash = HashCombine64(hash, (uint64_t)primitive.indices[1]);
+			hash = HashCombine64(hash, (uint64_t)primitive.indices[2]);
+			hash = HashCombine64(hash, (uint64_t)primitive.materialIndex);
+		}
+
+		return hash;
 	}
 
 	float Dot3(const float* a, const float* b)
@@ -2466,6 +2553,309 @@ void SceneLightSystem::BuildRuntimeLightClusterUpload(
 	}
 
 	outTileIndexCount = indexCursor;
+}
+
+void SceneLightSystem::BuildEmissiveSamplingUpload(
+	const EmissiveSamplingBuildContext& context,
+	NRIEmissivePrimitiveHeaderGpuData& outHeader,
+	std::vector<NRIEmissivePrimitiveGpuData>& outPrimitives,
+	std::vector<float>& outCdf,
+	std::vector<NRIEmissiveMaterialResponseGpuData>& outMaterialResponses,
+	std::vector<NRIEmissivePrimitiveDebugRecord>& outDebugRecords) const
+{
+	outHeader = {};
+	outHeader.dominantIndex = UINT32_MAX;
+	outHeader.flags = 0u;
+	outPrimitives.clear();
+	outCdf.clear();
+	outMaterialResponses.clear();
+	outDebugRecords.clear();
+	NRIEmissiveMaterialResponseGpuData materialResponseHeader = {};
+	materialResponseHeader.primitiveIndex = UINT32_MAX;
+	materialResponseHeader.materialScale = 1.0f;
+	outMaterialResponses.push_back(materialResponseHeader);
+
+	struct MaterialPrimitiveRange
+	{
+		uint32_t first = UINT32_MAX;
+		uint32_t count = 0;
+	};
+
+	struct BuiltCandidate
+	{
+		NRIEmissivePrimitiveGpuData gpu = {};
+		NRIEmissivePrimitiveDebugRecord debug = {};
+	};
+
+	auto buildRanges = [](const nri_scene::GeometryData* geometry, std::vector<MaterialPrimitiveRange>& outRanges)
+	{
+		outRanges.clear();
+		if (geometry == nullptr)
+		{
+			return;
+		}
+
+		uint32_t maxMaterialIndex = 0;
+		for (const auto& primitive : geometry->primitives)
+		{
+			maxMaterialIndex = std::max(maxMaterialIndex, primitive.materialIndex);
+		}
+
+		outRanges.assign((size_t)maxMaterialIndex + 1u, {});
+		for (uint32_t primitiveIndex = 0; primitiveIndex < geometry->primitives.size(); ++primitiveIndex)
+		{
+			const uint32_t materialIndex = geometry->primitives[primitiveIndex].materialIndex;
+			auto& range = outRanges[materialIndex];
+			if (range.count == 0)
+			{
+				range.first = primitiveIndex;
+			}
+			range.count++;
+		}
+	};
+
+	std::vector<MaterialPrimitiveRange> staticRanges;
+	std::vector<MaterialPrimitiveRange> capturedRanges;
+	std::vector<MaterialPrimitiveRange> runtimeMutationRanges;
+	std::vector<MaterialPrimitiveRange> dynamicRanges;
+	buildRanges(context.staticGeometry, staticRanges);
+	buildRanges(context.capturedGeometry, capturedRanges);
+	buildRanges(context.runtimeMutationGeometry, runtimeMutationRanges);
+	buildRanges(context.dynamicGeometry, dynamicRanges);
+
+	const NRILightingSettings settings = CaptureSettings();
+	std::vector<BuiltCandidate> candidates;
+	std::unordered_map<uint64_t, uint32_t> materialResponseLookup;
+	const auto& activeSurfaces = mEmissiveSurfaces.activeSurfaces;
+	candidates.reserve(activeSurfaces.size());
+
+	auto appendSurfacePrimitives = [&](const EmissiveSurfaceRegistry::EmissiveSurfaceRecord& surface, const nri_scene::GeometryData* geometry, const std::vector<MaterialPrimitiveRange>& ranges, uint32_t dataSource, uint32_t primitiveBase)
+	{
+		if (geometry == nullptr || surface.materialIndex == UINT32_MAX || surface.materialIndex >= ranges.size())
+		{
+			return;
+		}
+
+		const auto& range = ranges[surface.materialIndex];
+		if (range.count == 0 || range.first == UINT32_MAX)
+		{
+			return;
+		}
+
+		float representativeLuminance = 0.0f;
+		if (surface.surfaceArea > 0.0f && surface.emissiveIntensity > 0.0f)
+		{
+			representativeLuminance = std::max(surface.powerEstimate / (surface.surfaceArea * surface.emissiveIntensity), 0.0f);
+		}
+		const float samplingScale = ResolveGlowSamplingScale(surface.sourceFlags, surface.emissiveMode, settings) * std::max(surface.reachScale, 0.0f);
+		bool sectorResponseApplied = false;
+		const float sectorRawResponseScale = ResolveSectorEmissionScale(surface, sectorResponseApplied);
+		const float sectorResponseScale = sectorResponseApplied ? ResolveSectorEmissionIntensityScale(surface, sectorRawResponseScale) : 1.0f;
+		const float sectorReachScale = sectorResponseApplied ? ResolveSectorEmissionReachScale(surface, sectorRawResponseScale) : 1.0f;
+		bool materialResponseApplied = false;
+		const float materialResponseScale = ResolveEmissiveMaterialResponseScale(surface, materialResponseApplied);
+		const bool materialResponseEligible = IsEmissiveSurfaceMaterialResponseEligible(surface);
+
+		for (uint32_t localOffset = 0; localOffset < range.count; ++localOffset)
+		{
+			const uint32_t localPrimitiveIndex = range.first + localOffset;
+			const uint32_t primitiveIndex = primitiveBase + localPrimitiveIndex;
+			const float primitiveArea = ComputePrimitiveArea(*geometry, localPrimitiveIndex);
+			if (primitiveArea <= 0.0f)
+			{
+				continue;
+			}
+
+			BuiltCandidate candidate = {};
+			candidate.gpu.dataSource = dataSource;
+			candidate.gpu.primitiveIndex = primitiveIndex;
+			candidate.gpu.sourceFlags = surface.sourceFlags;
+			candidate.gpu.textureId = surface.textureId;
+			candidate.gpu.primitiveArea = primitiveArea;
+			const float basePowerEstimate = std::max(primitiveArea * representativeLuminance * surface.emissiveIntensity, 0.0f);
+			candidate.gpu.powerEstimate = basePowerEstimate * sectorResponseScale;
+			candidate.gpu.selectionWeight = basePowerEstimate * samplingScale * sectorReachScale;
+			candidate.gpu.emissionScale = sectorResponseScale;
+
+			candidate.debug.stableKey = HashCombine64(surface.stableKey, ((uint64_t)dataSource << 32u) | primitiveIndex);
+			candidate.debug.surfaceStableKey = surface.stableKey;
+			candidate.debug.dataSource = dataSource;
+			candidate.debug.primitiveIndex = primitiveIndex;
+			candidate.debug.materialIndex = surface.materialIndex;
+			candidate.debug.sourceFlags = surface.sourceFlags;
+			candidate.debug.sourceRuleId = surface.sourceRuleId;
+			candidate.debug.overrideRuleId = surface.overrideRuleId;
+			candidate.debug.textureId = surface.textureId;
+			candidate.debug.emissiveMode = surface.emissiveMode;
+			candidate.debug.emissiveTextureIndex = surface.emissiveTextureIndex;
+			candidate.debug.actorIndex = surface.actorIndex;
+			candidate.debug.sectorIndex = surface.sectorIndex;
+			candidate.debug.primitiveArea = primitiveArea;
+			candidate.debug.powerEstimate = candidate.gpu.powerEstimate;
+			candidate.debug.selectionWeight = candidate.gpu.selectionWeight;
+			candidate.debug.selectionPdf = 0.0f;
+			candidate.debug.emissiveIntensity = surface.emissiveIntensity * sectorResponseScale;
+			candidate.debug.sectorResponseScale = sectorResponseScale;
+			candidate.debug.sectorReachScale = sectorReachScale;
+			candidate.debug.materialResponseEnabled = materialResponseEligible;
+			candidate.debug.materialResponseScale = materialResponseScale;
+			candidate.debug.sectorResponseApplied = sectorResponseApplied;
+			Copy3f(surface.emissiveColor, candidate.debug.emissiveColor);
+			ComputePrimitiveCenter(*geometry, localPrimitiveIndex, candidate.debug.center);
+
+			candidate.gpu.stableKeyLo = (uint32_t)(candidate.debug.stableKey & 0xffffffffu);
+			candidate.gpu.stableKeyHi = (uint32_t)(candidate.debug.stableKey >> 32u);
+			candidates.push_back(candidate);
+
+			if (materialResponseEligible)
+			{
+				const uint64_t responseKey = ((uint64_t)dataSource << 32u) | primitiveIndex;
+				if (materialResponseLookup.find(responseKey) == materialResponseLookup.end())
+				{
+					materialResponseLookup.emplace(responseKey, (uint32_t)outMaterialResponses.size());
+					NRIEmissiveMaterialResponseGpuData response = {};
+					response.dataSource = dataSource;
+					response.primitiveIndex = primitiveIndex;
+					response.materialScale = std::max(0.0f, materialResponseScale);
+					outMaterialResponses.push_back(response);
+				}
+			}
+		}
+	};
+
+	for (const auto& surface : activeSurfaces)
+	{
+		switch (surface.source)
+		{
+		case SceneLightRecordSource::StaticMapScene:
+			appendSurfacePrimitives(surface, context.staticGeometry, staticRanges, NriSceneDataSourceStatic, 0u);
+			break;
+		case SceneLightRecordSource::CapturedScene:
+			appendSurfacePrimitives(surface, context.capturedGeometry, capturedRanges, NriSceneDataSourceDynamic, 0u);
+			break;
+		case SceneLightRecordSource::RuntimeMutationScene:
+			appendSurfacePrimitives(surface, context.runtimeMutationGeometry, runtimeMutationRanges, NriSceneDataSourceDynamic, context.runtimeMutationPrimitiveBaseOffset);
+			break;
+		case SceneLightRecordSource::DynamicScene:
+			appendSurfacePrimitives(surface, context.dynamicGeometry, dynamicRanges, NriSceneDataSourceDynamic, context.dynamicPrimitiveBaseOffset);
+			break;
+		case SceneLightRecordSource::PersistentVoxelScene:
+			break;
+		default:
+			break;
+		}
+	}
+
+	if (candidates.size() > NriMaxEmissivePrimitives)
+	{
+		std::stable_sort(candidates.begin(), candidates.end(), [](const BuiltCandidate& a, const BuiltCandidate& b)
+		{
+			if (a.gpu.selectionWeight != b.gpu.selectionWeight)
+			{
+				return a.gpu.selectionWeight > b.gpu.selectionWeight;
+			}
+
+			return a.debug.stableKey < b.debug.stableKey;
+		});
+		candidates.resize(NriMaxEmissivePrimitives);
+	}
+
+	outPrimitives.reserve(candidates.size());
+	outDebugRecords.reserve(candidates.size());
+
+	float totalPower = 0.0f;
+	float totalSelectionWeight = 0.0f;
+	float dominantPower = -1.0f;
+
+	for (size_t i = 0; i < candidates.size(); ++i)
+	{
+		outPrimitives.push_back(candidates[i].gpu);
+		outDebugRecords.push_back(candidates[i].debug);
+		totalPower += candidates[i].gpu.powerEstimate;
+		totalSelectionWeight += candidates[i].gpu.selectionWeight;
+		if (candidates[i].gpu.powerEstimate > dominantPower)
+		{
+			dominantPower = candidates[i].gpu.powerEstimate;
+			outHeader.dominantIndex = (uint32_t)i;
+		}
+	}
+
+	outHeader.activeCount = (uint32_t)outPrimitives.size();
+	outHeader.totalPower = totalPower;
+	outMaterialResponses[0].dataSource = (uint32_t)outMaterialResponses.size() - 1u;
+
+	if (outPrimitives.empty())
+	{
+		outCdf.resize(1, 1.0f);
+		return;
+	}
+
+	float runningCdf = 0.0f;
+	const float invTotalSelectionWeight = totalSelectionWeight > 0.0f ? (1.0f / totalSelectionWeight) : 0.0f;
+	for (size_t i = 0; i < outPrimitives.size(); ++i)
+	{
+		float pdf = 0.0f;
+		if (totalSelectionWeight > 0.0f)
+		{
+			pdf = outPrimitives[i].selectionWeight * invTotalSelectionWeight;
+		}
+		else
+		{
+			pdf = 1.0f / (float)outPrimitives.size();
+		}
+
+		outPrimitives[i].selectionPdf = pdf;
+		outDebugRecords[i].selectionPdf = pdf;
+		runningCdf += pdf;
+		outCdf.push_back(i + 1 == outPrimitives.size() ? 1.0f : std::min(runningCdf, 1.0f));
+	}
+}
+
+uint64_t SceneLightSystem::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const
+{
+	uint64_t hash = 1469598103934665603ull;
+	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.staticGeometry));
+	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.capturedGeometry));
+	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.runtimeMutationGeometry));
+	hash = HashCombine64(hash, (uint64_t)context.runtimeMutationPrimitiveBaseOffset);
+	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.dynamicGeometry));
+	hash = HashCombine64(hash, (uint64_t)context.dynamicPrimitiveBaseOffset);
+
+	hash = HashCombine64(hash, (uint64_t)mEmissiveSurfaces.activeSurfaces.size());
+	for (const auto& surface : mEmissiveSurfaces.activeSurfaces)
+	{
+		hash = HashCombine64(hash, surface.stableKey);
+
+		const auto propertyIt = mEmissiveSurfaces.activePropertyHashes.find(surface.stableKey);
+		hash = HashCombine64(hash, propertyIt != mEmissiveSurfaces.activePropertyHashes.end() ? propertyIt->second : 0ull);
+
+		const auto bindingIt = mEmissiveSurfaces.activeBindingHashes.find(surface.stableKey);
+		hash = HashCombine64(hash, bindingIt != mEmissiveSurfaces.activeBindingHashes.end() ? bindingIt->second : 0ull);
+
+		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
+		if (sectorResponseEligible)
+		{
+			const uint32_t sectorIndex = (uint32_t)surface.sectorIndex;
+			bool applied = false;
+			const float responseScale = ResolveSectorEmissionScale(surface, applied);
+			const float intensityScale = applied ? ResolveSectorEmissionIntensityScale(surface, responseScale) : 1.0f;
+			const float reachScale = applied ? ResolveSectorEmissionReachScale(surface, responseScale) : 1.0f;
+			hash = HashCombine64(hash, (uint64_t)sectorIndex);
+			hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
+			hash = HashCombine64(hash, (uint64_t)FloatBits(intensityScale));
+			hash = HashCombine64(hash, (uint64_t)FloatBits(reachScale));
+		}
+		if (IsEmissiveSurfaceMaterialResponseEligible(surface))
+		{
+			bool applied = false;
+			const float materialScale = ResolveEmissiveMaterialResponseScale(surface, applied);
+			hash = HashCombine64(hash, 0x4d415452455350ull);
+			hash = HashCombine64(hash, (uint64_t)(uint32_t)surface.sectorIndex);
+			hash = HashCombine64(hash, (uint64_t)FloatBits(materialScale));
+		}
+	}
+
+	return hash;
 }
 
 void SceneLightSystem::BuildSectorLightingUpload(

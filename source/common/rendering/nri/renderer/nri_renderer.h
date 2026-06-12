@@ -1648,75 +1648,11 @@ private:
 
 	using RuntimeLightTileHeaderGpuData = NRIRuntimeLightTileHeaderGpuData;
 
-	struct EmissivePrimitiveHeaderGpuData
-	{
-		uint32_t activeCount = 0;
-		uint32_t dominantIndex = UINT32_MAX;
-		uint32_t flags = 0;
-		float totalPower = 0.0f;
-	};
-
-	struct EmissivePrimitiveGpuData
-	{
-		uint32_t dataSource = 0;
-		uint32_t primitiveIndex = UINT32_MAX;
-		uint32_t sourceFlags = 0;
-		uint32_t textureId = 0;
-		float primitiveArea = 0.0f;
-		float powerEstimate = 0.0f;
-		float selectionWeight = 0.0f;
-		float selectionPdf = 0.0f;
-		float emissionScale = 1.0f;
-		uint32_t stableKeyLo = 0;
-		uint32_t stableKeyHi = 0;
-	};
-
-	struct EmissiveMaterialResponseGpuData
-	{
-		uint32_t dataSource = 0;
-		uint32_t primitiveIndex = UINT32_MAX;
-		float materialScale = 1.0f;
-		uint32_t flags = 0;
-	};
-
-	struct EmissivePrimitiveDebugRecord
-	{
-		uint64_t stableKey = 0;
-		uint64_t surfaceStableKey = 0;
-		uint32_t dataSource = 0;
-		uint32_t primitiveIndex = UINT32_MAX;
-		uint32_t materialIndex = UINT32_MAX;
-		uint32_t sourceFlags = 0;
-		uint32_t sourceRuleId = 0;
-		uint32_t overrideRuleId = 0;
-		uint32_t textureId = 0;
-		uint32_t emissiveMode = nri_scene::MaterialEmissiveMode_None;
-		uint32_t emissiveTextureIndex = UINT32_MAX;
-		int32_t actorIndex = -1;
-		int32_t sectorIndex = -1;
-		float center[3] = {};
-		float primitiveArea = 0.0f;
-		float powerEstimate = 0.0f;
-		float selectionWeight = 0.0f;
-		float selectionPdf = 0.0f;
-		float emissiveColor[3] = {};
-		float emissiveIntensity = 0.0f;
-		float sectorResponseScale = 1.0f;
-		float sectorReachScale = 1.0f;
-		float materialResponseScale = 1.0f;
-		bool materialResponseEnabled = false;
-		bool sectorResponseApplied = false;
-	};
-
-	struct EmissiveSamplingBuildContext
-	{
-		const nri_scene::GeometryData* staticGeometry = nullptr;
-		const nri_scene::GeometryData* capturedGeometry = nullptr;
-		const nri_scene::GeometryData* runtimeMutationGeometry = nullptr;
-		uint32_t runtimeMutationPrimitiveBaseOffset = 0;
-		const nri_scene::GeometryData* dynamicGeometry = nullptr;
-		uint32_t dynamicPrimitiveBaseOffset = 0;
-	};
+	using EmissivePrimitiveHeaderGpuData = NRIEmissivePrimitiveHeaderGpuData;
+	using EmissivePrimitiveGpuData = NRIEmissivePrimitiveGpuData;
+	using EmissiveMaterialResponseGpuData = NRIEmissiveMaterialResponseGpuData;
+	using EmissivePrimitiveDebugRecord = NRIEmissivePrimitiveDebugRecord;
+	using EmissiveSamplingBuildContext = SceneLightSystem::EmissiveSamplingBuildContext;
 
 	using SectorLightHeaderGpuData = NRISectorLightHeaderGpuData;
 	using SectorLightGpuData = NRISectorLightGpuData;
