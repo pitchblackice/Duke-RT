@@ -11236,41 +11236,21 @@ bool NRIRenderer::UploadStaticMapChunkAtlas(
 	const StaticMapSceneCache& staticScene,
 	const std::vector<nri_scene::MaterialData>& gpuMaterials)
 {
-	if (!BuildStaticMapChunkAtlasLayout(staticScene, atlas))
-	{
-		return false;
-	}
-
-	std::vector<nri_scene::SceneVertex> atlasVertices(atlas.vertexCapacity);
-	std::vector<uint32_t> atlasIndices(atlas.indexCapacity);
-	std::vector<nri_scene::PrimitiveData> atlasPrimitives(atlas.primitiveCapacity);
-	std::vector<nri_scene::MaterialData> atlasMaterials(atlas.materialCapacity);
-
-	for (uint32_t chunkListIndex = 0; chunkListIndex < staticScene.chunks.size(); ++chunkListIndex)
-	{
-		const auto& sourceChunk = staticScene.chunks[chunkListIndex];
-		const auto& atlasChunk = atlas.chunks[chunkListIndex];
-		nri_static_scene_geometry::CopyChunkGeometryToAtlas(
-			mMapWorld,
-			staticScene.geometry,
-			sourceChunk,
-			atlasChunk,
-			atlasVertices,
-			atlasIndices,
-			atlasPrimitives);
-		nri_static_scene_geometry::CopyChunkMaterialsToAtlas(
-			gpuMaterials,
-			sourceChunk,
-			atlasChunk,
-			atlasMaterials);
-	}
-
 	const NRIStaticSceneGeometryUploadServices uploadServices = BuildStaticSceneGeometryUploadServices();
-	return
-		nri_static_scene_geometry_upload::UploadResidentStaticAtlasVertexBuffer(uploadServices, vertexBuffer, mVertexBufferStats, atlasVertices) &&
-		nri_static_scene_geometry_upload::UploadResidentStaticAtlasIndexBuffer(uploadServices, indexBuffer, mIndexBufferStats, atlasIndices) &&
-		nri_static_scene_geometry_upload::UploadResidentStaticAtlasPrimitiveBuffer(uploadServices, primitiveBuffer, mPrimitiveBufferStats, atlasPrimitives) &&
-		nri_static_scene_geometry_upload::UploadResidentStaticAtlasMaterialBuffer(uploadServices, materialBuffer, mMaterialBufferStats, atlasMaterials);
+	return nri_static_scene_geometry_upload::UploadStaticMapChunkAtlas(
+		mMapWorld,
+		uploadServices,
+		vertexBuffer,
+		mVertexBufferStats,
+		indexBuffer,
+		mIndexBufferStats,
+		primitiveBuffer,
+		mPrimitiveBufferStats,
+		materialBuffer,
+		mMaterialBufferStats,
+		atlas,
+		staticScene,
+		gpuMaterials);
 }
 
 void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()

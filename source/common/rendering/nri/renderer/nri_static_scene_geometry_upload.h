@@ -3,6 +3,7 @@
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_material_bridge.h"
 #include "nri_frame_resources.h"
+#include "nri_static_scene.h"
 
 #include <cstdint>
 #include <vector>
@@ -80,4 +81,18 @@ bool UploadResidentStaticAtlasMaterialBuffer(
 	NRIBufferResource& materialBuffer,
 	SceneBufferDebugStats& materialStats,
 	const std::vector<nri_scene::MaterialData>& atlasMaterials);
+bool UploadStaticMapChunkAtlas(
+	const nri_scene::PTMapWorld& mapWorld,
+	const NRIStaticSceneGeometryUploadServices& services,
+	NRIBufferResource& vertexBuffer,
+	SceneBufferDebugStats& vertexStats,
+	NRIBufferResource& indexBuffer,
+	SceneBufferDebugStats& indexStats,
+	NRIBufferResource& primitiveBuffer,
+	SceneBufferDebugStats& primitiveStats,
+	NRIBufferResource& materialBuffer,
+	SceneBufferDebugStats& materialStats,
+	StaticMapChunkAtlas& atlas,
+	const StaticMapSceneCache& staticScene,
+	const std::vector<nri_scene::MaterialData>& gpuMaterials);
 }
