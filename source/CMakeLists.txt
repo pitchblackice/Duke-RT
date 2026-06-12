@@ -934,6 +934,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_render_geometry_helpers.cpp
 	common/rendering/nri/renderer/nri_renderer.cpp
 	common/rendering/nri/renderer/nri_renderer_settings.cpp
+	common/rendering/nri/renderer/nri_scene_frame_geometry.cpp
 	common/rendering/nri/renderer/nri_scene_frame_builder.cpp
 	common/rendering/nri/renderer/nri_scene_textures.cpp
 	common/rendering/nri/renderer/nri_sky_environment.cpp

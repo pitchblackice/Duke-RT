@@ -5145,46 +5145,6 @@ namespace
 		return (uint64_t)upload.width * (uint64_t)upload.height * bytesPerPixel;
 	}
 
-	static void ReplaceGeometryOverlayTail(
-		const nri_scene::GeometryData& source,
-		uint32_t materialIndexOffset,
-		uint32_t staticVertexCount,
-		uint32_t staticIndexCount,
-		uint32_t staticPrimitiveCount,
-		uint32_t staticPrimitiveProvenanceCount,
-		nri_scene::GeometryData& destination)
-	{
-		const uint32_t vertexBase = staticVertexCount;
-
-		destination.vertices.resize((size_t)staticVertexCount + source.vertices.size());
-		std::copy(source.vertices.begin(), source.vertices.end(), destination.vertices.begin() + staticVertexCount);
-
-		destination.indices.resize((size_t)staticIndexCount + source.indices.size());
-		auto indexOut = destination.indices.begin() + staticIndexCount;
-		for (uint32_t index : source.indices)
-		{
-			*indexOut++ = vertexBase + index;
-		}
-
-		destination.primitives.resize((size_t)staticPrimitiveCount + source.primitives.size());
-		auto primitiveOut = destination.primitives.begin() + staticPrimitiveCount;
-		for (const auto& primitive : source.primitives)
-		{
-			nri_scene::PrimitiveData copy = primitive;
-			copy.indices[0] += vertexBase;
-			copy.indices[1] += vertexBase;
-			copy.indices[2] += vertexBase;
-			copy.materialIndex += materialIndexOffset;
-			*primitiveOut++ = copy;
-		}
-
-		destination.primitiveProvenance.resize((size_t)staticPrimitiveProvenanceCount + source.primitiveProvenance.size());
-		std::copy(
-			source.primitiveProvenance.begin(),
-			source.primitiveProvenance.end(),
-			destination.primitiveProvenance.begin() + staticPrimitiveProvenanceCount);
-	}
-
 	struct StartupMapWorldChunkDiffSample
 	{
 		uint32_t chunkIndex = 0;
@@ -8912,69 +8872,34 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					mDynamicSceneLastFrame = BuildNRISceneFrameDynamicState(dynamicStateInputs, mDynamicSceneLastFrame, mLastPerfShellTraceStats);
 				}
 				{
-					ScopedPtPerfTimer geometryStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStateMs);
-					if (!overlayGeometry.primitives.empty())
+					NRISceneFrameGeometrySelectionInputs geometrySelectionInputs = {};
+					geometrySelectionInputs.staticBuildSerial = mStaticMapScene.buildSerial;
+					geometrySelectionInputs.staticGeometry = &mStaticMapScene.geometry;
+					geometrySelectionInputs.staticMaterialBridge = &mStaticMapScene.materialBridge;
+					geometrySelectionInputs.staticGpuMaterials = &mStaticMapScene.gpuMaterials;
+					geometrySelectionInputs.overlayGeometry = &overlayGeometry;
+					geometrySelectionInputs.overlayMaterialOffset = combinedOverlayMaterialOffset;
+					geometrySelectionInputs.combinedMaterialBridge = &combinedMaterialBridge;
+					geometrySelectionInputs.combinedGpuMaterials = &combinedGpuMaterials;
+					geometrySelectionInputs.totalMs = &mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStateMs;
+					geometrySelectionInputs.staticCopyMs = &mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStaticCopyMs;
+					geometrySelectionInputs.overlayAppendMs = &mLastPerfShellTraceStats.sceneSelectStateCommitGeometryAppendMs;
+					geometrySelectionInputs.selectMs = &mLastPerfShellTraceStats.sceneSelectStateCommitGeometrySelectMs;
+					const NRISceneFrameGeometrySelection geometrySelection = mSceneFrameGeometry.SelectActiveGeometry(geometrySelectionInputs);
+					if (geometrySelection.usedCombinedGeometry)
 					{
-						auto& combinedGeometryCache = mStateCommitCombinedGeometryCache;
-						const uint32_t staticVertexCount = (uint32_t)mStaticMapScene.geometry.vertices.size();
-						const uint32_t staticIndexCount = (uint32_t)mStaticMapScene.geometry.indices.size();
-						const uint32_t staticPrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
-						const uint32_t staticPrimitiveProvenanceCount = (uint32_t)mStaticMapScene.geometry.primitiveProvenance.size();
-						const uint32_t staticMaterialCount = (uint32_t)mStaticMapScene.materialBridge.materials.size();
-						const bool refreshStaticPrefix =
-							!combinedGeometryCache.staticPrefixValid ||
-							combinedGeometryCache.staticBuildSerial != mStaticMapScene.buildSerial ||
-							combinedGeometryCache.staticVertexCount != staticVertexCount ||
-							combinedGeometryCache.staticIndexCount != staticIndexCount ||
-							combinedGeometryCache.staticPrimitiveCount != staticPrimitiveCount ||
-							combinedGeometryCache.staticPrimitiveProvenanceCount != staticPrimitiveProvenanceCount ||
-							combinedGeometryCache.staticMaterialCount != staticMaterialCount;
 						mLastPerfShellTraceStats.sceneSelectStateCommitGeometryCombined = 1;
-						if (refreshStaticPrefix)
-						{
-							ScopedPtPerfTimer copyTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStaticCopyMs);
-							combinedGeometryCache.geometry = mStaticMapScene.geometry;
-							combinedGeometryCache.staticPrefixValid = true;
-							combinedGeometryCache.staticBuildSerial = mStaticMapScene.buildSerial;
-							combinedGeometryCache.staticVertexCount = staticVertexCount;
-							combinedGeometryCache.staticIndexCount = staticIndexCount;
-							combinedGeometryCache.staticPrimitiveCount = staticPrimitiveCount;
-							combinedGeometryCache.staticPrimitiveProvenanceCount = staticPrimitiveProvenanceCount;
-							combinedGeometryCache.staticMaterialCount = staticMaterialCount;
-						}
-						{
-							ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryAppendMs);
-							ReplaceGeometryOverlayTail(
-								overlayGeometry,
-								combinedOverlayMaterialOffset,
-								combinedGeometryCache.staticVertexCount,
-								combinedGeometryCache.staticIndexCount,
-								combinedGeometryCache.staticPrimitiveCount,
-								combinedGeometryCache.staticPrimitiveProvenanceCount,
-								combinedGeometryCache.geometry);
-						}
-						{
-							ScopedPtPerfTimer selectTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometrySelectMs);
-							activeStaticProbePrimitiveCount = combinedGeometryCache.staticPrimitiveCount;
-							activeGeometry = &combinedGeometryCache.geometry;
-							activeGpuMaterials = &combinedGpuMaterials;
-							activeMaterialBridge = &combinedMaterialBridge;
-							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedPrimitiveCount = (uint32_t)combinedGeometryCache.geometry.primitives.size();
-							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedMaterialCount = (uint32_t)combinedGpuMaterials.size();
-						}
 					}
-					else
+					if (geometrySelection.usedStaticOnlyGeometry)
 					{
 						mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStaticOnly = 1;
-						{
-							ScopedPtPerfTimer selectTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometrySelectMs);
-							activeGeometry = &mStaticMapScene.geometry;
-							activeGpuMaterials = &mStaticMapScene.gpuMaterials;
-							activeMaterialBridge = &mStaticMapScene.materialBridge;
-							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedPrimitiveCount = (uint32_t)mStaticMapScene.geometry.primitives.size();
-							mLastPerfShellTraceStats.sceneSelectStateCommitCombinedMaterialCount = (uint32_t)mStaticMapScene.gpuMaterials.size();
-						}
 					}
+					activeStaticProbePrimitiveCount = geometrySelection.staticProbePrimitiveCount;
+					activeGeometry = geometrySelection.geometry;
+					activeGpuMaterials = geometrySelection.gpuMaterials;
+					activeMaterialBridge = geometrySelection.materialBridge;
+					mLastPerfShellTraceStats.sceneSelectStateCommitCombinedPrimitiveCount = geometrySelection.combinedPrimitiveCount;
+					mLastPerfShellTraceStats.sceneSelectStateCommitCombinedMaterialCount = geometrySelection.combinedMaterialCount;
 				}
 
 				{
@@ -19603,117 +19528,33 @@ bool NRIRenderer::StageResidentMaterialUploadRanges(
 
 void NRIRenderer::RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices)
 {
-	auto& cache = mStateCommitCombinedGeometryCache;
-	if (!cache.staticPrefixValid)
-	{
-		return;
-	}
-	if (cache.staticBuildSerial != mStaticMapScene.buildSerial)
-	{
-		cache.staticPrefixValid = false;
-		return;
-	}
-
-	nri_scene::GeometryData& destination = cache.geometry;
-	const nri_scene::GeometryData& source = mStaticMapScene.geometry;
-	if (destination.vertices.size() < cache.staticVertexCount ||
-		destination.indices.size() < cache.staticIndexCount ||
-		destination.primitives.size() < cache.staticPrimitiveCount ||
-		destination.primitiveProvenance.size() < cache.staticPrimitiveProvenanceCount)
-	{
-		cache.staticPrefixValid = false;
-		return;
-	}
-
-	const uint32_t staticVertexCount = (uint32_t)source.vertices.size();
-	const uint32_t staticIndexCount = (uint32_t)source.indices.size();
-	const uint32_t staticPrimitiveCount = (uint32_t)source.primitives.size();
-	const uint32_t staticPrimitiveProvenanceCount = (uint32_t)source.primitiveProvenance.size();
-	const uint32_t staticMaterialCount = (uint32_t)mStaticMapScene.materialBridge.materials.size();
-	const bool prefixSizeChanged =
-		cache.staticVertexCount != staticVertexCount ||
-		cache.staticIndexCount != staticIndexCount ||
-		cache.staticPrimitiveCount != staticPrimitiveCount ||
-		cache.staticPrimitiveProvenanceCount != staticPrimitiveProvenanceCount;
-	if (prefixSizeChanged)
-	{
-		destination.vertices.resize(cache.staticVertexCount);
-		destination.indices.resize(cache.staticIndexCount);
-		destination.primitives.resize(cache.staticPrimitiveCount);
-		destination.primitiveProvenance.resize(cache.staticPrimitiveProvenanceCount);
-		destination.vertices.resize(staticVertexCount);
-		destination.indices.resize(staticIndexCount);
-		destination.primitives.resize(staticPrimitiveCount);
-		destination.primitiveProvenance.resize(staticPrimitiveProvenanceCount);
-		cache.staticVertexCount = staticVertexCount;
-		cache.staticIndexCount = staticIndexCount;
-		cache.staticPrimitiveCount = staticPrimitiveCount;
-		cache.staticPrimitiveProvenanceCount = staticPrimitiveProvenanceCount;
-	}
-	cache.staticMaterialCount = staticMaterialCount;
-
+	std::vector<NRISceneFrameGeometryStaticChunkSlice> changedChunks;
+	changedChunks.reserve(changedGeometryChunkListIndices.size());
 	for (uint32_t chunkListIndex : changedGeometryChunkListIndices)
 	{
 		if (chunkListIndex >= mStaticMapScene.chunks.size())
 		{
-			cache.staticPrefixValid = false;
+			NRISceneFrameGeometryStaticPrefixRefresh invalidRefresh = {};
+			mSceneFrameGeometry.RefreshStaticPrefixForResidentUpdate(invalidRefresh);
 			return;
 		}
 		const StaticMapSceneCache::ChunkCache& chunk = mStaticMapScene.chunks[chunkListIndex];
-		if (!chunk.active)
-		{
-			continue;
-		}
-		if (chunk.vertexOffset > source.vertices.size() ||
-			chunk.vertexCount > source.vertices.size() - chunk.vertexOffset ||
-			chunk.vertexOffset > destination.vertices.size() ||
-			chunk.vertexCount > destination.vertices.size() - chunk.vertexOffset ||
-			chunk.indexOffset > source.indices.size() ||
-			chunk.indexCount > source.indices.size() - chunk.indexOffset ||
-			chunk.indexOffset > destination.indices.size() ||
-			chunk.indexCount > destination.indices.size() - chunk.indexOffset ||
-			chunk.primitiveOffset > source.primitives.size() ||
-			chunk.primitiveCount > source.primitives.size() - chunk.primitiveOffset ||
-			chunk.primitiveOffset > destination.primitives.size() ||
-			chunk.primitiveCount > destination.primitives.size() - chunk.primitiveOffset)
-		{
-			cache.staticPrefixValid = false;
-			return;
-		}
-
-		if (chunk.vertexCount != 0)
-		{
-			std::copy_n(
-				source.vertices.data() + chunk.vertexOffset,
-				chunk.vertexCount,
-				destination.vertices.data() + chunk.vertexOffset);
-		}
-		if (chunk.indexCount != 0)
-		{
-			std::copy_n(
-				source.indices.data() + chunk.indexOffset,
-				chunk.indexCount,
-				destination.indices.data() + chunk.indexOffset);
-		}
-		if (chunk.primitiveCount != 0)
-		{
-			std::copy_n(
-				source.primitives.data() + chunk.primitiveOffset,
-				chunk.primitiveCount,
-				destination.primitives.data() + chunk.primitiveOffset);
-		}
-		if (chunk.primitiveOffset <= source.primitiveProvenance.size() &&
-			chunk.primitiveCount <= source.primitiveProvenance.size() - chunk.primitiveOffset &&
-			chunk.primitiveOffset <= destination.primitiveProvenance.size() &&
-			chunk.primitiveCount <= destination.primitiveProvenance.size() - chunk.primitiveOffset &&
-			chunk.primitiveCount != 0)
-		{
-			std::copy_n(
-				source.primitiveProvenance.data() + chunk.primitiveOffset,
-				chunk.primitiveCount,
-				destination.primitiveProvenance.data() + chunk.primitiveOffset);
-		}
+		NRISceneFrameGeometryStaticChunkSlice slice = {};
+		slice.active = chunk.active;
+		slice.vertexOffset = chunk.vertexOffset;
+		slice.vertexCount = chunk.vertexCount;
+		slice.indexOffset = chunk.indexOffset;
+		slice.indexCount = chunk.indexCount;
+		slice.primitiveOffset = chunk.primitiveOffset;
+		slice.primitiveCount = chunk.primitiveCount;
+		changedChunks.push_back(slice);
 	}
+	NRISceneFrameGeometryStaticPrefixRefresh refresh = {};
+	refresh.staticBuildSerial = mStaticMapScene.buildSerial;
+	refresh.staticGeometry = &mStaticMapScene.geometry;
+	refresh.staticMaterialCount = (uint32_t)mStaticMapScene.materialBridge.materials.size();
+	refresh.changedChunks = &changedChunks;
+	mSceneFrameGeometry.RefreshStaticPrefixForResidentUpdate(refresh);
 }
 
 bool NRIRenderer::UploadSceneBuffers(

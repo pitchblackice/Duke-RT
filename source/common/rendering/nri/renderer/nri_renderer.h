@@ -9,6 +9,7 @@
 #include "nri_renderer_context.h"
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
+#include "nri_scene_frame_geometry.h"
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
@@ -1571,18 +1572,6 @@ private:
 		std::vector<nri_scene::PrimitiveData> primitives;
 	};
 
-	struct StateCommitCombinedGeometryCache
-	{
-		bool staticPrefixValid = false;
-		uint64_t staticBuildSerial = 0;
-		uint32_t staticVertexCount = 0;
-		uint32_t staticIndexCount = 0;
-		uint32_t staticPrimitiveCount = 0;
-		uint32_t staticPrimitiveProvenanceCount = 0;
-		uint32_t staticMaterialCount = 0;
-		nri_scene::GeometryData geometry;
-	};
-
 	using SceneUploadDirtyRange = ::SceneUploadDirtyRange;
 
 	struct SurfaceProbeResult
@@ -2526,7 +2515,7 @@ private:
 	nri_scene::GeometryData mSelectMirrorPlayerGeometryScratch;
 	nri_scene::GeometryData mSelectOverlayGeometryScratch;
 	nri_scene::MaterialBridgeData mSelectOverlayMaterialBridgeScratch;
-	StateCommitCombinedGeometryCache mStateCommitCombinedGeometryCache = {};
+	NRISceneFrameGeometry mSceneFrameGeometry;
 	std::vector<nri::TopLevelInstance> mSelectTopLevelInstanceScratch;
 	std::vector<SceneInstanceData> mSelectSceneInstanceScratch;
 	std::vector<nri::TopLevelInstance> mSelectCapturedTopLevelInstanceScratch;

@@ -595,7 +595,7 @@ void NRIRenderer::DestroyStaticMapSceneResources(StaticMapSceneCache& staticScen
 
 	if (&staticScene == &mStaticMapScene)
 	{
-		mStateCommitCombinedGeometryCache = {};
+		mSceneFrameGeometry.Reset();
 	}
 	staticScene = {};
 	staticResources = {};
@@ -649,7 +649,7 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 	mBoundDynamicMaterialCount = 0;
 	mBoundPortalCount = 0;
 	ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
-	mStateCommitCombinedGeometryCache = {};
+	mSceneFrameGeometry.Reset();
 	mRuntimeMutation.ResetCacheAndFrame();
 	ResetResidentMapChunkRegistry();
 }
