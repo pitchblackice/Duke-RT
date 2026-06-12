@@ -122,6 +122,19 @@ public:
 		SceneBufferUploadProducerStamp stamp = {};
 	};
 
+	struct StateCommitDomainGenerations
+	{
+		uint64_t staticMap = 0;
+		uint64_t runtimeMutation = 0;
+		uint64_t dynamicActors = 0;
+		uint64_t mirrorPlayer = 0;
+		uint64_t persistentVoxels = 0;
+		uint64_t materialBridge = 0;
+		uint64_t textures = 0;
+		uint64_t tlasInstances = 0;
+		uint64_t sceneConstants = 0;
+	};
+
 	struct MaterialBuildTraceEntry
 	{
 		uint32_t calls = 0;
@@ -1901,19 +1914,6 @@ private:
 	};
 
 	using PersistentVoxelBatch = ::PersistentVoxelBatch;
-
-	struct StateCommitDomainGenerations
-	{
-		uint64_t staticMap = 0;
-		uint64_t runtimeMutation = 0;
-		uint64_t dynamicActors = 0;
-		uint64_t mirrorPlayer = 0;
-		uint64_t persistentVoxels = 0;
-		uint64_t materialBridge = 0;
-		uint64_t textures = 0;
-		uint64_t tlasInstances = 0;
-		uint64_t sceneConstants = 0;
-	};
 
 	using PersistentVoxelMeshVariantResource = ::PersistentVoxelMeshVariantResource;
 	using PersistentVoxelMaterialVariantResource = ::PersistentVoxelMaterialVariantResource;

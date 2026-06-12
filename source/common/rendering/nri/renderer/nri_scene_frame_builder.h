@@ -32,6 +32,53 @@ struct NRISceneContributionAppendStats
 	NRIRenderer::PerfShellTraceStats::OverlayAppendSourceTraceEntry* sourceTrace = nullptr;
 };
 
+struct NRISceneFrameGenerationInputs
+{
+	uint64_t staticMapBuildSerial = 0;
+	uint64_t runtimeMutationGeneration = 0;
+	uint64_t persistentVoxelGeneration = 0;
+	uint64_t frameIndex = 0;
+	uint64_t staticAccelerationBuildSerial = 0;
+	uint32_t renderWidth = 0;
+	uint32_t renderHeight = 0;
+	const float* currentCameraPos = nullptr;
+	const float* currentCameraForward = nullptr;
+	const float* currentCameraRight = nullptr;
+	const float* currentCameraUp = nullptr;
+	float currentTanHalfFovX = 0.0f;
+	float currentTanHalfFovY = 0.0f;
+	bool selectedSceneHasDynamicOverlay = false;
+	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
+	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
+	bool hasMirrorPlayerScene = false;
+	const nri_scene::GeometryData* mirrorPlayerGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* mirrorPlayerMaterials = nullptr;
+	const nri_scene::MaterialBridgeData* activeMaterialBridge = nullptr;
+	const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
+	uint32_t sceneTextureCacheCount = 0;
+	uint32_t selectedTlasInstanceCount = 0;
+	uint32_t selectedSceneInstanceCount = 0;
+	uint32_t selectedStaticSceneInstanceCount = 0;
+	uint32_t selectedDynamicSceneInstanceCount = 0;
+	uint32_t selectedPersistentVoxelSceneInstanceCount = 0;
+};
+
+struct NRISceneFrameGenerationResult
+{
+	NRIRenderer::StateCommitDomainGenerations current = {};
+	uint32_t changedStaticMap = 0;
+	uint32_t changedRuntimeMutation = 0;
+	uint32_t changedDynamicActors = 0;
+	uint32_t changedMirrorPlayer = 0;
+	uint32_t changedPersistentVoxels = 0;
+	uint32_t changedMaterialBridge = 0;
+	uint32_t changedTextures = 0;
+	uint32_t changedTlasInstances = 0;
+	uint32_t changedSceneConstants = 0;
+	uint32_t changedDomainCount = 0;
+};
+
 void AccumulateNRISceneContributionReserve(const NRISceneContribution& contribution, NRISceneContributionReserve& reserve);
 void ReserveNRISceneContributionCapacity(
 	const NRISceneContributionReserve& reserve,
@@ -43,3 +90,10 @@ void AppendNRISceneContribution(
 	nri_scene::GeometryData& overlayGeometry,
 	nri_scene::MaterialBridgeData& overlayMaterialBridge,
 	std::vector<NRIRenderer::SceneBufferUploadDomainSpan>& uploadSpans);
+NRISceneFrameGenerationResult BuildNRISceneFrameGenerationResult(
+	const NRISceneFrameGenerationInputs& inputs,
+	const NRIRenderer::StateCommitDomainGenerations& previous,
+	bool hasPrevious);
+void WriteNRISceneFrameGenerationTraceStats(
+	const NRISceneFrameGenerationResult& result,
+	NRIRenderer::PerfShellTraceStats& stats);

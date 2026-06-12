@@ -9030,99 +9030,39 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				}
 
 				{
-					StateCommitDomainGenerations currentGenerations = {};
-					currentGenerations.staticMap = mStaticMapScene.buildSerial;
-					currentGenerations.runtimeMutation = mRuntimeMutation.BuildFrameGenerationHash(hasRuntimeMutationOverlay);
-					currentGenerations.dynamicActors = activeDynamicSceneView != nullptr ?
-						HashCombine64(
-							HashCombine64(
-								HashCombine64((uint64_t)mFrameIndex, (uint64_t)activeDynamicSceneView->opaqueSprites.size()),
-								activeDynamicGeometry != nullptr ? (uint64_t)activeDynamicGeometry->primitives.size() : 0ull),
-							activeDynamicMaterials != nullptr ? (uint64_t)activeDynamicMaterials->materials.size() : 0ull) :
-						0ull;
-					currentGenerations.mirrorPlayer = hasMirrorPlayerScene ?
-						HashCombine64(
-							HashCombine64((uint64_t)mFrameIndex, (uint64_t)mirrorPlayerGeometry.primitives.size()),
-							(uint64_t)mirrorPlayerMaterialBridge.materials.size()) :
-						0ull;
-					currentGenerations.persistentVoxels = hasPersistentVoxelOverlay ? mPersistentVoxels.BuildSceneGenerationHash() : 0ull;
-					currentGenerations.materialBridge = activeMaterialBridge != nullptr ?
-						HashCombine64(
-							HashCombine64(
-								HashCombine64(1469598103934665603ull, (uint64_t)activeMaterialBridge->materials.size()),
-								(uint64_t)activeMaterialBridge->lightMetadata.size()),
-							activeGpuMaterials != nullptr ? (uint64_t)activeGpuMaterials->size() : 0ull) :
-						0ull;
-					currentGenerations.textures = activeMaterialBridge != nullptr ?
-						HashCombine64(
-							HashCombine64(1469598103934665603ull, (uint64_t)activeMaterialBridge->textures.size()),
-							(uint64_t)mSceneTextures.CacheCount()) :
-						0ull;
-					currentGenerations.tlasInstances = HashCombine64(
-						HashCombine64(
-							HashCombine64(
-								HashCombine64(
-									HashCombine64(
-										selectedSceneHasDynamicOverlay ? (uint64_t)mFrameIndex : mStaticAccelerationBuildSerial,
-										(uint64_t)selectedTlasInstanceCount),
-									(uint64_t)selectedSceneInstanceCount),
-								(uint64_t)selectedStaticSceneInstanceCount),
-							(uint64_t)selectedDynamicSceneInstanceCount),
-						(uint64_t)selectedPersistentVoxelSceneInstanceCount);
-					{
-						uint64_t sceneConstantsHash = 1469598103934665603ull;
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)mRenderWidth);
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)mRenderHeight);
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraPos[0]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraPos[1]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraPos[2]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraForward[0]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraForward[1]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraForward[2]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraRight[0]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraRight[1]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraRight[2]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraUp[0]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraUp[1]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentCameraUp[2]));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentTanHalfFovX));
-						sceneConstantsHash = HashCombine64(sceneConstantsHash, (uint64_t)FloatBits(mCurrentTanHalfFovY));
-						currentGenerations.sceneConstants = sceneConstantsHash;
-					}
-
-					const auto domainChanged = [&](uint64_t current, uint64_t previous) -> uint32_t
-					{
-						return (!mHasLastStateCommitDomainGenerations || current != previous) ? 1u : 0u;
-					};
-					mLastPerfShellTraceStats.sceneSelectStateCommitGenStaticMap = currentGenerations.staticMap;
-					mLastPerfShellTraceStats.sceneSelectStateCommitGenRuntimeMutation = currentGenerations.runtimeMutation;
-					mLastPerfShellTraceStats.sceneSelectStateCommitGenDynamicActors = currentGenerations.dynamicActors;
-					mLastPerfShellTraceStats.sceneSelectStateCommitGenMirrorPlayer = currentGenerations.mirrorPlayer;
-					mLastPerfShellTraceStats.sceneSelectStateCommitGenPersistentVoxels = currentGenerations.persistentVoxels;
-					mLastPerfShellTraceStats.sceneSelectStateCommitGenMaterialBridge = currentGenerations.materialBridge;
-					mLastPerfShellTraceStats.sceneSelectStateCommitGenTextures = currentGenerations.textures;
-					mLastPerfShellTraceStats.sceneSelectStateCommitGenTlasInstances = currentGenerations.tlasInstances;
-					mLastPerfShellTraceStats.sceneSelectStateCommitGenSceneConstants = currentGenerations.sceneConstants;
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedStaticMap = domainChanged(currentGenerations.staticMap, mLastStateCommitDomainGenerations.staticMap);
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedRuntimeMutation = domainChanged(currentGenerations.runtimeMutation, mLastStateCommitDomainGenerations.runtimeMutation);
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedDynamicActors = domainChanged(currentGenerations.dynamicActors, mLastStateCommitDomainGenerations.dynamicActors);
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedMirrorPlayer = domainChanged(currentGenerations.mirrorPlayer, mLastStateCommitDomainGenerations.mirrorPlayer);
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedPersistentVoxels = domainChanged(currentGenerations.persistentVoxels, mLastStateCommitDomainGenerations.persistentVoxels);
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedMaterialBridge = domainChanged(currentGenerations.materialBridge, mLastStateCommitDomainGenerations.materialBridge);
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedTextures = domainChanged(currentGenerations.textures, mLastStateCommitDomainGenerations.textures);
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedTlasInstances = domainChanged(currentGenerations.tlasInstances, mLastStateCommitDomainGenerations.tlasInstances);
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedSceneConstants = domainChanged(currentGenerations.sceneConstants, mLastStateCommitDomainGenerations.sceneConstants);
-					mLastPerfShellTraceStats.sceneSelectStateCommitChangedDomainCount =
-						mLastPerfShellTraceStats.sceneSelectStateCommitChangedStaticMap +
-						mLastPerfShellTraceStats.sceneSelectStateCommitChangedRuntimeMutation +
-						mLastPerfShellTraceStats.sceneSelectStateCommitChangedDynamicActors +
-						mLastPerfShellTraceStats.sceneSelectStateCommitChangedMirrorPlayer +
-						mLastPerfShellTraceStats.sceneSelectStateCommitChangedPersistentVoxels +
-						mLastPerfShellTraceStats.sceneSelectStateCommitChangedMaterialBridge +
-						mLastPerfShellTraceStats.sceneSelectStateCommitChangedTextures +
-						mLastPerfShellTraceStats.sceneSelectStateCommitChangedTlasInstances +
-						mLastPerfShellTraceStats.sceneSelectStateCommitChangedSceneConstants;
-					mLastStateCommitDomainGenerations = currentGenerations;
+					NRISceneFrameGenerationInputs generationInputs = {};
+					generationInputs.staticMapBuildSerial = mStaticMapScene.buildSerial;
+					generationInputs.runtimeMutationGeneration = mRuntimeMutation.BuildFrameGenerationHash(hasRuntimeMutationOverlay);
+					generationInputs.persistentVoxelGeneration = hasPersistentVoxelOverlay ? mPersistentVoxels.BuildSceneGenerationHash() : 0ull;
+					generationInputs.frameIndex = mFrameIndex;
+					generationInputs.staticAccelerationBuildSerial = mStaticAccelerationBuildSerial;
+					generationInputs.renderWidth = mRenderWidth;
+					generationInputs.renderHeight = mRenderHeight;
+					generationInputs.currentCameraPos = mCurrentCameraPos;
+					generationInputs.currentCameraForward = mCurrentCameraForward;
+					generationInputs.currentCameraRight = mCurrentCameraRight;
+					generationInputs.currentCameraUp = mCurrentCameraUp;
+					generationInputs.currentTanHalfFovX = mCurrentTanHalfFovX;
+					generationInputs.currentTanHalfFovY = mCurrentTanHalfFovY;
+					generationInputs.selectedSceneHasDynamicOverlay = selectedSceneHasDynamicOverlay;
+					generationInputs.activeDynamicSceneView = activeDynamicSceneView;
+					generationInputs.activeDynamicGeometry = activeDynamicGeometry;
+					generationInputs.activeDynamicMaterials = activeDynamicMaterials;
+					generationInputs.hasMirrorPlayerScene = hasMirrorPlayerScene;
+					generationInputs.mirrorPlayerGeometry = &mirrorPlayerGeometry;
+					generationInputs.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
+					generationInputs.activeMaterialBridge = activeMaterialBridge;
+					generationInputs.activeGpuMaterials = activeGpuMaterials;
+					generationInputs.sceneTextureCacheCount = mSceneTextures.CacheCount();
+					generationInputs.selectedTlasInstanceCount = selectedTlasInstanceCount;
+					generationInputs.selectedSceneInstanceCount = selectedSceneInstanceCount;
+					generationInputs.selectedStaticSceneInstanceCount = selectedStaticSceneInstanceCount;
+					generationInputs.selectedDynamicSceneInstanceCount = selectedDynamicSceneInstanceCount;
+					generationInputs.selectedPersistentVoxelSceneInstanceCount = selectedPersistentVoxelSceneInstanceCount;
+					const NRISceneFrameGenerationResult generationResult =
+						BuildNRISceneFrameGenerationResult(generationInputs, mLastStateCommitDomainGenerations, mHasLastStateCommitDomainGenerations);
+					WriteNRISceneFrameGenerationTraceStats(generationResult, mLastPerfShellTraceStats);
+					mLastStateCommitDomainGenerations = generationResult.current;
 					mHasLastStateCommitDomainGenerations = true;
 				}
 			}

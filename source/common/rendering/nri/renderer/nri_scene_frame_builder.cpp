@@ -3,6 +3,7 @@
 #include "nri_render_geometry_helpers.h"
 
 #include <chrono>
+#include <cstring>
 
 namespace
 {
@@ -37,6 +38,27 @@ namespace
 		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
 	}
 
+	uint32_t SceneFrameFloatBits(float value)
+	{
+		uint32_t bits = 0;
+		static_assert(sizeof(bits) == sizeof(value));
+		std::memcpy(&bits, &value, sizeof(bits));
+		return bits;
+	}
+
+	uint64_t HashVector3(uint64_t hash, const float* values)
+	{
+		if (values == nullptr)
+		{
+			return SceneFrameHashCombine64(hash, 0);
+		}
+
+		hash = SceneFrameHashCombine64(hash, (uint64_t)SceneFrameFloatBits(values[0]));
+		hash = SceneFrameHashCombine64(hash, (uint64_t)SceneFrameFloatBits(values[1]));
+		hash = SceneFrameHashCombine64(hash, (uint64_t)SceneFrameFloatBits(values[2]));
+		return hash;
+	}
+
 	uint64_t BuildUploadSpanStamp(
 		uint64_t sourceStamp,
 		NRIRenderer::SceneBufferUploadDomain uploadDomain,
@@ -57,6 +79,115 @@ namespace
 		hash = SceneFrameHashCombine64(hash, byteSize);
 		return hash != 0 ? hash : 1;
 	}
+}
+
+NRISceneFrameGenerationResult BuildNRISceneFrameGenerationResult(
+	const NRISceneFrameGenerationInputs& inputs,
+	const NRIRenderer::StateCommitDomainGenerations& previous,
+	bool hasPrevious)
+{
+	NRISceneFrameGenerationResult result = {};
+	result.current.staticMap = inputs.staticMapBuildSerial;
+	result.current.runtimeMutation = inputs.runtimeMutationGeneration;
+	result.current.dynamicActors = inputs.activeDynamicSceneView != nullptr ?
+		SceneFrameHashCombine64(
+			SceneFrameHashCombine64(
+				SceneFrameHashCombine64(inputs.frameIndex, (uint64_t)inputs.activeDynamicSceneView->opaqueSprites.size()),
+				inputs.activeDynamicGeometry != nullptr ? (uint64_t)inputs.activeDynamicGeometry->primitives.size() : 0ull),
+			inputs.activeDynamicMaterials != nullptr ? (uint64_t)inputs.activeDynamicMaterials->materials.size() : 0ull) :
+		0ull;
+	result.current.mirrorPlayer = inputs.hasMirrorPlayerScene ?
+		SceneFrameHashCombine64(
+			SceneFrameHashCombine64(
+				inputs.frameIndex,
+				inputs.mirrorPlayerGeometry != nullptr ? (uint64_t)inputs.mirrorPlayerGeometry->primitives.size() : 0ull),
+			inputs.mirrorPlayerMaterials != nullptr ? (uint64_t)inputs.mirrorPlayerMaterials->materials.size() : 0ull) :
+		0ull;
+	result.current.persistentVoxels = inputs.persistentVoxelGeneration;
+	result.current.materialBridge = inputs.activeMaterialBridge != nullptr ?
+		SceneFrameHashCombine64(
+			SceneFrameHashCombine64(
+				SceneFrameHashCombine64(1469598103934665603ull, (uint64_t)inputs.activeMaterialBridge->materials.size()),
+				(uint64_t)inputs.activeMaterialBridge->lightMetadata.size()),
+			inputs.activeGpuMaterials != nullptr ? (uint64_t)inputs.activeGpuMaterials->size() : 0ull) :
+		0ull;
+	result.current.textures = inputs.activeMaterialBridge != nullptr ?
+		SceneFrameHashCombine64(
+			SceneFrameHashCombine64(1469598103934665603ull, (uint64_t)inputs.activeMaterialBridge->textures.size()),
+			(uint64_t)inputs.sceneTextureCacheCount) :
+		0ull;
+	result.current.tlasInstances = SceneFrameHashCombine64(
+		SceneFrameHashCombine64(
+			SceneFrameHashCombine64(
+				SceneFrameHashCombine64(
+					SceneFrameHashCombine64(
+						inputs.selectedSceneHasDynamicOverlay ? inputs.frameIndex : inputs.staticAccelerationBuildSerial,
+						(uint64_t)inputs.selectedTlasInstanceCount),
+					(uint64_t)inputs.selectedSceneInstanceCount),
+				(uint64_t)inputs.selectedStaticSceneInstanceCount),
+			(uint64_t)inputs.selectedDynamicSceneInstanceCount),
+		(uint64_t)inputs.selectedPersistentVoxelSceneInstanceCount);
+
+	uint64_t sceneConstantsHash = 1469598103934665603ull;
+	sceneConstantsHash = SceneFrameHashCombine64(sceneConstantsHash, (uint64_t)inputs.renderWidth);
+	sceneConstantsHash = SceneFrameHashCombine64(sceneConstantsHash, (uint64_t)inputs.renderHeight);
+	sceneConstantsHash = HashVector3(sceneConstantsHash, inputs.currentCameraPos);
+	sceneConstantsHash = HashVector3(sceneConstantsHash, inputs.currentCameraForward);
+	sceneConstantsHash = HashVector3(sceneConstantsHash, inputs.currentCameraRight);
+	sceneConstantsHash = HashVector3(sceneConstantsHash, inputs.currentCameraUp);
+	sceneConstantsHash = SceneFrameHashCombine64(sceneConstantsHash, (uint64_t)SceneFrameFloatBits(inputs.currentTanHalfFovX));
+	sceneConstantsHash = SceneFrameHashCombine64(sceneConstantsHash, (uint64_t)SceneFrameFloatBits(inputs.currentTanHalfFovY));
+	result.current.sceneConstants = sceneConstantsHash;
+
+	const auto domainChanged = [&](uint64_t current, uint64_t previousValue) -> uint32_t
+	{
+		return (!hasPrevious || current != previousValue) ? 1u : 0u;
+	};
+	result.changedStaticMap = domainChanged(result.current.staticMap, previous.staticMap);
+	result.changedRuntimeMutation = domainChanged(result.current.runtimeMutation, previous.runtimeMutation);
+	result.changedDynamicActors = domainChanged(result.current.dynamicActors, previous.dynamicActors);
+	result.changedMirrorPlayer = domainChanged(result.current.mirrorPlayer, previous.mirrorPlayer);
+	result.changedPersistentVoxels = domainChanged(result.current.persistentVoxels, previous.persistentVoxels);
+	result.changedMaterialBridge = domainChanged(result.current.materialBridge, previous.materialBridge);
+	result.changedTextures = domainChanged(result.current.textures, previous.textures);
+	result.changedTlasInstances = domainChanged(result.current.tlasInstances, previous.tlasInstances);
+	result.changedSceneConstants = domainChanged(result.current.sceneConstants, previous.sceneConstants);
+	result.changedDomainCount =
+		result.changedStaticMap +
+		result.changedRuntimeMutation +
+		result.changedDynamicActors +
+		result.changedMirrorPlayer +
+		result.changedPersistentVoxels +
+		result.changedMaterialBridge +
+		result.changedTextures +
+		result.changedTlasInstances +
+		result.changedSceneConstants;
+	return result;
+}
+
+void WriteNRISceneFrameGenerationTraceStats(
+	const NRISceneFrameGenerationResult& result,
+	NRIRenderer::PerfShellTraceStats& stats)
+{
+	stats.sceneSelectStateCommitGenStaticMap = result.current.staticMap;
+	stats.sceneSelectStateCommitGenRuntimeMutation = result.current.runtimeMutation;
+	stats.sceneSelectStateCommitGenDynamicActors = result.current.dynamicActors;
+	stats.sceneSelectStateCommitGenMirrorPlayer = result.current.mirrorPlayer;
+	stats.sceneSelectStateCommitGenPersistentVoxels = result.current.persistentVoxels;
+	stats.sceneSelectStateCommitGenMaterialBridge = result.current.materialBridge;
+	stats.sceneSelectStateCommitGenTextures = result.current.textures;
+	stats.sceneSelectStateCommitGenTlasInstances = result.current.tlasInstances;
+	stats.sceneSelectStateCommitGenSceneConstants = result.current.sceneConstants;
+	stats.sceneSelectStateCommitChangedStaticMap = result.changedStaticMap;
+	stats.sceneSelectStateCommitChangedRuntimeMutation = result.changedRuntimeMutation;
+	stats.sceneSelectStateCommitChangedDynamicActors = result.changedDynamicActors;
+	stats.sceneSelectStateCommitChangedMirrorPlayer = result.changedMirrorPlayer;
+	stats.sceneSelectStateCommitChangedPersistentVoxels = result.changedPersistentVoxels;
+	stats.sceneSelectStateCommitChangedMaterialBridge = result.changedMaterialBridge;
+	stats.sceneSelectStateCommitChangedTextures = result.changedTextures;
+	stats.sceneSelectStateCommitChangedTlasInstances = result.changedTlasInstances;
+	stats.sceneSelectStateCommitChangedSceneConstants = result.changedSceneConstants;
+	stats.sceneSelectStateCommitChangedDomainCount = result.changedDomainCount;
 }
 
 void AccumulateNRISceneContributionReserve(const NRISceneContribution& contribution, NRISceneContributionReserve& reserve)
