@@ -16,6 +16,7 @@ void NudgeCapturedSurface(nri_scene::SurfaceRef& surface, float depthNudge);
 void NudgeBlindSpotReplacementFlats(nri_scene::SceneView& sceneView);
 uint32_t CountSceneViewSurfaces(const nri_scene::SceneView& sceneView);
 uint64_t HashMaterialBridgeSummary(const nri_scene::MaterialBridgeData& materials);
+uint64_t HashResidentMaterialPayload(const nri_scene::MaterialBridgeData& materials);
 void FilterMaterialOnlyReplacementSceneView(nri_scene::SceneView& sceneView, uint32_t reasonMask);
 bool SceneViewHasSectorDrivenWallBands(const nri_scene::SceneView& sceneView);
 bool TryBuildMergedSectorMaterialOnlyBridge(

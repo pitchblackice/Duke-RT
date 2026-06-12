@@ -42,92 +42,6 @@ namespace
 		return (int)perf_looptraceframes > 0;
 	}
 
-	static uint64_t HashResidentMaterialPayload(const nri_scene::MaterialBridgeData& materials)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = RuntimeMutationHashCombine64(hash, (uint64_t)materials.materials.size());
-		hash = RuntimeMutationHashCombine64(hash, (uint64_t)materials.lightMetadata.size());
-		hash = RuntimeMutationHashCombine64(hash, (uint64_t)materials.textures.size());
-		for (const auto& material : materials.materials)
-		{
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.textureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.paletteIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.flags);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.materialClass);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.lightingFlags);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.normalTextureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.metallicTextureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.roughnessTextureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.sectorIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.emissiveTextureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.lightLevel));
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.alpha));
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.roughnessHint));
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.metalnessHint));
-			for (float color : material.emissiveColor)
-			{
-				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(color));
-			}
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.emissiveIntensity));
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.emissiveMaskScale));
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)material.emissiveMode);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(material.emissiveReserved));
-		}
-
-		for (const auto& metadata : materials.lightMetadata)
-		{
-			hash = RuntimeMutationHashCombine64(hash, metadata.materialKey);
-			hash = RuntimeMutationHashCombine64(hash, metadata.textureContentKey);
-			hash = RuntimeMutationHashCombine64(hash, metadata.glowmapContentKey);
-			hash = RuntimeMutationHashCombine64(hash, metadata.normalContentKey);
-			hash = RuntimeMutationHashCombine64(hash, metadata.metallicContentKey);
-			hash = RuntimeMutationHashCombine64(hash, metadata.roughnessContentKey);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.textureId);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.textureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.glowmapTextureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.normalTextureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.metallicTextureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.roughnessTextureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.emissiveTextureIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.paletteIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.materialFlags);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.lightingFlags);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.materialClass);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)metadata.emissiveMode);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)metadata.sourceType);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)metadata.sectorIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)metadata.actorIndex);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)(uint32_t)metadata.shade);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.alpha));
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.lightLevel));
-			for (float color : metadata.averageColor)
-			{
-				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(color));
-			}
-			for (float color : metadata.glowColor)
-			{
-				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(color));
-			}
-			for (float color : metadata.emissiveColor)
-			{
-				hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(color));
-			}
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.emissiveIntensity));
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.emissiveMaskScale));
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)RuntimeMutationFloatBits(metadata.visibleFullbrightBoost));
-		}
-
-		for (const auto& texture : materials.textures)
-		{
-			hash = RuntimeMutationHashCombine64(hash, texture.key);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)texture.width);
-			hash = RuntimeMutationHashCombine64(hash, (uint64_t)texture.height);
-			hash = RuntimeMutationHashCombine64(hash, texture.indexed ? 1ull : 0ull);
-		}
-
-		return hash != 0 ? hash : 1;
-	}
-
 	static FTextureID ResolveAuthoredTextureIdForStaticMapSurface(const nri_scene::PTMapSurface& surface)
 	{
 		switch (surface.kind)
@@ -543,7 +457,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentSceneImpl(
 		return false;
 	}
 	const uint64_t residentMaterialPayloadHash =
-		!chunkBecomesEmpty ? HashResidentMaterialPayload(residentMaterials) : 0;
+		!chunkBecomesEmpty ? nri_runtime_mutation::HashResidentMaterialPayload(residentMaterials) : 0;
 	uint64_t residentGeometryPayloadHash = 0;
 	bool residentMaterialPayloadHashSkip = false;
 	bool residentGeometryPayloadHashSkip = false;
