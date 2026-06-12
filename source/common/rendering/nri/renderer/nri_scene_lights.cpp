@@ -18,6 +18,7 @@ EXTERN_CVAR(Float, nri_ptemissiveminsurface)
 EXTERN_CVAR(Float, nri_ptglowscale)
 EXTERN_CVAR(Float, nri_ptglowreach)
 EXTERN_CVAR(Float, nri_ptglowfalloff)
+EXTERN_CVAR(Float, nri_ptglowblend)
 EXTERN_CVAR(Bool, nri_ptsectorlighting)
 EXTERN_CVAR(Float, nri_ptsectorambientscale)
 EXTERN_CVAR(Float, nri_ptsectorhemiscale)
@@ -114,6 +115,17 @@ namespace
 	const char* YesNo(bool value)
 	{
 		return value ? "yes" : "no";
+	}
+
+	const char* GetMaterialEmissiveModeName(uint32_t mode)
+	{
+		switch (mode)
+		{
+		case nri_scene::MaterialEmissiveMode_UseBaseTexture: return "base";
+		case nri_scene::MaterialEmissiveMode_UseConstantColor: return "constant";
+		case nri_scene::MaterialEmissiveMode_UseGlowmapTexture: return "glowmap";
+		default: return "none";
+		}
 	}
 
 	void ComputeSurfaceBounds(const nri_scene::SurfaceRef& surface, float outCenter[3], float& outRadius)
@@ -2333,9 +2345,37 @@ bool SceneLightSystem::AddSpriteTileHeuristic(uint32_t textureId, const float co
 	return true;
 }
 
-void SceneLightSystem::ClearSpriteTileHeuristics()
+bool SceneLightSystem::ClearSpriteTileHeuristics()
 {
+	if (mAnalyticLights.spriteTileRules.empty())
+	{
+		return false;
+	}
+
 	mAnalyticLights.spriteTileRules.clear();
+	return true;
+}
+
+void SceneLightSystem::PrintSpriteTileLightHeuristics() const
+{
+	const auto& analyticLights = GetAnalyticLights();
+	Printf("NRI PT analytic sprite-tile heuristics: rules=%u matched_surfaces=%u deduped=%u truncated=%u\n",
+		(uint32_t)analyticLights.spriteTileRules.size(),
+		analyticLights.matchedSurfaceCount,
+		analyticLights.dedupedMatchCount,
+		analyticLights.truncatedLightCount);
+	for (const auto& rule : analyticLights.spriteTileRules)
+	{
+		Printf("NRI PT analytic heuristic %u: tile=%u color=(%.3f, %.3f, %.3f) intensity=%.3f radius=%.3f flicker_frames=%u\n",
+			rule.ruleId,
+			rule.textureId,
+			rule.color[0],
+			rule.color[1],
+			rule.color[2],
+			rule.intensity,
+			rule.radius,
+			rule.flickerFrames);
+	}
 }
 
 bool SceneLightSystem::AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t emissiveMode, float intensityScale, const float* emissiveColor, bool hasExplicitColor, uint32_t& outRuleId)
@@ -2364,16 +2404,49 @@ bool SceneLightSystem::AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t 
 	return true;
 }
 
-void SceneLightSystem::ClearTextureEmissiveHeuristics()
+bool SceneLightSystem::ClearTextureEmissiveHeuristics()
 {
 	if (mEmissiveSurfaces.textureRules.empty())
 	{
-		return;
+		return false;
 	}
 
 	mEmissiveSurfaces.textureRules.clear();
 	mEmissiveSurfaces.materialBindingChanged = true;
 	mEmissiveSurfaces.materialPropertiesChanged = true;
+	return true;
+}
+
+void SceneLightSystem::PrintTextureEmissiveHeuristics() const
+{
+	const auto& emissive = GetEmissiveSurfaces();
+	Printf("NRI PT emissive heuristics: rules=%u auto_tagged=%u explicit_matches=%u overrides=%u override_matches=%u material_response_rules=%u material_response_matches=%u active=%u total_power=%.3f glow_scale=%.3f glow_reach=%.3f glow_falloff=%.3f glow_blend=%.3f truncated=%u\n",
+		(uint32_t)emissive.textureRules.size(),
+		emissive.autoTaggedCount,
+		emissive.explicitRuleMatchCount,
+		emissive.overrideRuleCount,
+		emissive.overrideMatchedSurfaceCount,
+		emissive.materialResponseRuleCount,
+		emissive.materialResponseMatchedSurfaceCount,
+		(uint32_t)emissive.activeSurfaces.size(),
+		emissive.totalPowerEstimate,
+		(float)nri_ptglowscale,
+		(float)nri_ptglowreach,
+		(float)nri_ptglowfalloff,
+		(float)nri_ptglowblend,
+		emissive.truncatedSurfaceCount);
+	for (const auto& rule : emissive.textureRules)
+	{
+		Printf("NRI PT emissive heuristic %u: tile=%u mode=%s intensity_scale=%.3f explicit_color=%s color=(%.3f, %.3f, %.3f)\n",
+			rule.ruleId,
+			rule.textureId,
+			GetMaterialEmissiveModeName(rule.emissiveMode),
+			rule.intensityScale,
+			rule.hasExplicitColor ? "yes" : "no",
+			rule.emissiveColor[0],
+			rule.emissiveColor[1],
+			rule.emissiveColor[2]);
+	}
 }
 
 bool SceneLightSystem::MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const

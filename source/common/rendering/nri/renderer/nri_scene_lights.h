@@ -466,10 +466,12 @@ public:
 	void SetTransientAnalyticLights(const std::vector<SceneAnalyticLight>& lights);
 
 	bool AddSpriteTileHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId);
-	void ClearSpriteTileHeuristics();
+	bool ClearSpriteTileHeuristics();
+	void PrintSpriteTileLightHeuristics() const;
 
 	bool AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t emissiveMode, float intensityScale, const float* emissiveColor, bool hasExplicitColor, uint32_t& outRuleId);
-	void ClearTextureEmissiveHeuristics();
+	bool ClearTextureEmissiveHeuristics();
+	void PrintTextureEmissiveHeuristics() const;
 	bool MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const;
 	bool ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const;
 
