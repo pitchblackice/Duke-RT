@@ -454,6 +454,29 @@ uint64_t NRIRuntimeMutationSystem::BuildFrameGenerationHash(bool hasRuntimeMutat
 	return hash;
 }
 
+void NRIRuntimeMutationSystem::CollectResidentReplacementInfo(
+	uint32_t chunkCount,
+	std::vector<RuntimeMutationResidentReplacementInfo>& outReplacements) const
+{
+	outReplacements.clear();
+	outReplacements.reserve(chunkCount);
+	for (uint32_t chunkListIndex = 0; chunkListIndex < chunkCount; ++chunkListIndex)
+	{
+		const auto* replacement = FindReplacement(chunkListIndex);
+		if (replacement == nullptr)
+		{
+			continue;
+		}
+
+		RuntimeMutationResidentReplacementInfo info = {};
+		info.chunkListIndex = chunkListIndex;
+		info.baseline = replacement->baseline;
+		info.baselineSignature = replacement->baselineSignature;
+		info.liveSignature = replacement->liveSignature;
+		outReplacements.push_back(info);
+	}
+}
+
 const RuntimeMapMutationCache::ChunkReplacement* NRIRuntimeMutationSystem::FindReplacement(uint32_t chunkIndex) const
 {
 	return chunkIndex < cache.chunks.size() ? &cache.chunks[chunkIndex] : nullptr;

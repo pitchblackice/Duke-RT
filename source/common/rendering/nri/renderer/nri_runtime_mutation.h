@@ -192,6 +192,14 @@ struct RuntimeMutationResidentApplyResult
 	bool recoveredEmpty = false;
 };
 
+struct RuntimeMutationResidentReplacementInfo
+{
+	uint32_t chunkListIndex = UINT32_MAX;
+	nri_scene::PTMapChunkMutationBaseline baseline;
+	uint64_t baselineSignature = 0;
+	uint64_t liveSignature = 0;
+};
+
 struct NRIRuntimeMutationResidentApplyServices
 {
 	using TryApplyChunkFn = bool (*)(
@@ -302,6 +310,9 @@ public:
 	bool IsCacheEmpty() const;
 	uint32_t GetCacheChunkCount() const;
 	uint64_t BuildFrameGenerationHash(bool hasRuntimeMutationOverlay) const;
+	void CollectResidentReplacementInfo(
+		uint32_t chunkCount,
+		std::vector<RuntimeMutationResidentReplacementInfo>& outReplacements) const;
 	const RuntimeMapMutationCache::ChunkReplacement* FindReplacement(uint32_t chunkIndex) const;
 	RuntimeMapMutationCache::ChunkReplacement* FindReplacement(uint32_t chunkIndex);
 	bool IsReplacementActive(uint32_t chunkIndex) const;

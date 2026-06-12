@@ -144,7 +144,7 @@ void NRIStaticSceneResidency::SyncResidentMapChunkRegistryFromStaticScene(const 
 		entry.chunkIndex = mapChunk.chunkIndex;
 		if (input.replacements != nullptr)
 		{
-			for (const NRIResidentChunkReplacementInfo& replacement : *input.replacements)
+			for (const RuntimeMutationResidentReplacementInfo& replacement : *input.replacements)
 			{
 				if (replacement.chunkListIndex != chunkListIndex)
 				{

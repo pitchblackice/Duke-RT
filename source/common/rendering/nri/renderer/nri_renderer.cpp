@@ -11143,25 +11143,10 @@ NRIStaticSceneGeometryUploadServices NRIRenderer::BuildStaticSceneGeometryUpload
 
 void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
 {
-	std::vector<NRIResidentChunkReplacementInfo> replacements;
+	std::vector<RuntimeMutationResidentReplacementInfo> replacements;
 	if (mMapWorld.valid)
 	{
-		replacements.reserve(mMapWorld.chunks.size());
-		for (uint32_t chunkListIndex = 0; chunkListIndex < (uint32_t)mMapWorld.chunks.size(); ++chunkListIndex)
-		{
-			const auto* replacement = mRuntimeMutation.FindReplacement(chunkListIndex);
-			if (replacement == nullptr)
-			{
-				continue;
-			}
-
-			NRIResidentChunkReplacementInfo info = {};
-			info.chunkListIndex = chunkListIndex;
-			info.baseline = replacement->baseline;
-			info.baselineSignature = replacement->baselineSignature;
-			info.liveSignature = replacement->liveSignature;
-			replacements.push_back(info);
-		}
+		mRuntimeMutation.CollectResidentReplacementInfo((uint32_t)mMapWorld.chunks.size(), replacements);
 	}
 
 	NRIStaticSceneRegistrySyncInput input = {};

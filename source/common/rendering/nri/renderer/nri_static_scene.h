@@ -2,6 +2,7 @@
 
 #include "nri_frame_resources.h"
 #include "nri_resources.h"
+#include "nri_runtime_mutation.h"
 #include "../scene/nri_geometry_bridge.h"
 #include "../scene/nri_map_builder.h"
 #include "../scene/nri_material_bridge.h"
@@ -174,20 +175,12 @@ struct ResidentMapChunkRegistry
 	std::vector<Entry> entries;
 };
 
-struct NRIResidentChunkReplacementInfo
-{
-	uint32_t chunkListIndex = UINT32_MAX;
-	nri_scene::PTMapChunkMutationBaseline baseline;
-	uint64_t baselineSignature = 0;
-	uint64_t liveSignature = 0;
-};
-
 struct NRIStaticSceneRegistrySyncInput
 {
 	const nri_scene::PTMapWorld* mapWorld = nullptr;
 	const StaticMapSceneCache* staticScene = nullptr;
 	const StaticMapChunkAtlas* atlas = nullptr;
-	const std::vector<NRIResidentChunkReplacementInfo>* replacements = nullptr;
+	const std::vector<RuntimeMutationResidentReplacementInfo>* replacements = nullptr;
 	uint64_t (*hashResidentMaterialPayload)(const nri_scene::MaterialBridgeData& materials) = nullptr;
 };
 
