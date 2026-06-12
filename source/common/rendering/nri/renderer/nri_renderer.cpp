@@ -8895,37 +8895,21 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					mLastPerfShellTraceStats.sceneSelectStateCommitSelectedDynamic = selectedSceneHasDynamicOverlay ? 1u : 0u;
 				}
 				{
-					ScopedPtPerfTimer dynamicStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicStateMs);
-					if (activeDynamicSceneView != nullptr && activeDynamicGeometry != nullptr && activeDynamicMaterials != nullptr)
-					{
-						ScopedPtPerfTimer dynamicCoreTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicCoreMs);
-						mDynamicSceneLastFrame.spriteSurfaceCount = (uint32_t)activeDynamicSceneView->opaqueSprites.size();
-						mDynamicSceneLastFrame.primitiveCount = (uint32_t)activeDynamicGeometry->primitives.size();
-						mDynamicSceneLastFrame.materialCount = (uint32_t)activeDynamicMaterials->materials.size();
-						mDynamicSceneLastFrame.modelCount = activeDynamicSceneView->stats.modelDrawItems;
-						mDynamicSceneLastFrame.unsupportedModelCount = activeDynamicSceneView->stats.unsupportedModelDrawItems;
-						mLastPerfShellTraceStats.sceneSelectStateCommitActiveDynamic = 1;
-					}
-					if (hasMirrorExtendedDynamicScene)
-					{
-						ScopedPtPerfTimer mirrorExtendedTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorExtendedMs);
-						mDynamicSceneLastFrame.mirrorExtendedSurfaceCount = CountSceneViewSurfaces(mirrorExtendedDynamicSceneView);
-						mDynamicSceneLastFrame.mirrorExtendedPrimitiveCount = (uint32_t)mirrorExtendedDynamicGeometry.primitives.size();
-						mDynamicSceneLastFrame.mirrorExtendedMaterialCount = (uint32_t)mirrorExtendedDynamicMaterialBridge.materials.size();
-						mDynamicSceneLastFrame.mirrorExtendedModelCount = mirrorExtendedDynamicSceneView.stats.modelDrawItems;
-						mDynamicSceneLastFrame.mirrorExtendedUnsupportedModelCount = mirrorExtendedDynamicSceneView.stats.unsupportedModelDrawItems;
-						mLastPerfShellTraceStats.sceneSelectStateCommitMirrorExtended = 1;
-					}
-					if (hasMirrorPlayerScene)
-					{
-						ScopedPtPerfTimer mirrorPlayerTimer(mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorPlayerMs);
-						mDynamicSceneLastFrame.mirrorPlayerSurfaceCount = CountSceneViewSurfaces(mirrorPlayerSceneView);
-						mDynamicSceneLastFrame.mirrorPlayerPrimitiveCount = (uint32_t)mirrorPlayerGeometry.primitives.size();
-						mDynamicSceneLastFrame.mirrorPlayerMaterialCount = (uint32_t)mirrorPlayerMaterialBridge.materials.size();
-						mDynamicSceneLastFrame.mirrorPlayerModelCount = mirrorPlayerSceneView.stats.modelDrawItems;
-						mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount = mirrorPlayerSceneView.stats.unsupportedModelDrawItems;
-						mLastPerfShellTraceStats.sceneSelectStateCommitMirrorPlayer = 1;
-					}
+					NRISceneFrameDynamicStateInputs dynamicStateInputs = {};
+					dynamicStateInputs.activeDynamicSceneView = activeDynamicSceneView;
+					dynamicStateInputs.activeDynamicGeometry = activeDynamicGeometry;
+					dynamicStateInputs.activeDynamicMaterials = activeDynamicMaterials;
+					dynamicStateInputs.mirrorExtendedSceneView = hasMirrorExtendedDynamicScene ? &mirrorExtendedDynamicSceneView : nullptr;
+					dynamicStateInputs.mirrorExtendedGeometry = hasMirrorExtendedDynamicScene ? &mirrorExtendedDynamicGeometry : nullptr;
+					dynamicStateInputs.mirrorExtendedMaterials = hasMirrorExtendedDynamicScene ? &mirrorExtendedDynamicMaterialBridge : nullptr;
+					dynamicStateInputs.mirrorPlayerSceneView = hasMirrorPlayerScene ? &mirrorPlayerSceneView : nullptr;
+					dynamicStateInputs.mirrorPlayerGeometry = hasMirrorPlayerScene ? &mirrorPlayerGeometry : nullptr;
+					dynamicStateInputs.mirrorPlayerMaterials = hasMirrorPlayerScene ? &mirrorPlayerMaterialBridge : nullptr;
+					dynamicStateInputs.totalMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicStateMs;
+					dynamicStateInputs.dynamicCoreMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicCoreMs;
+					dynamicStateInputs.mirrorExtendedMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorExtendedMs;
+					dynamicStateInputs.mirrorPlayerMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorPlayerMs;
+					mDynamicSceneLastFrame = BuildNRISceneFrameDynamicState(dynamicStateInputs, mDynamicSceneLastFrame, mLastPerfShellTraceStats);
 				}
 				{
 					ScopedPtPerfTimer geometryStateTimer(mLastPerfShellTraceStats.sceneSelectStateCommitGeometryStateMs);

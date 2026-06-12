@@ -135,6 +135,26 @@ public:
 		uint64_t sceneConstants = 0;
 	};
 
+	struct DynamicSceneFrameState
+	{
+		uint32_t spriteSurfaceCount = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialCount = 0;
+		uint32_t modelCount = 0;
+		uint32_t unsupportedModelCount = 0;
+		uint32_t mirrorExtendedSurfaceCount = 0;
+		uint32_t mirrorExtendedPrimitiveCount = 0;
+		uint32_t mirrorExtendedMaterialCount = 0;
+		uint32_t mirrorExtendedModelCount = 0;
+		uint32_t mirrorExtendedUnsupportedModelCount = 0;
+		uint32_t mirrorPlayerSurfaceCount = 0;
+		uint32_t mirrorPlayerPrimitiveCount = 0;
+		uint32_t mirrorPlayerMaterialCount = 0;
+		uint32_t mirrorPlayerModelCount = 0;
+		uint32_t mirrorPlayerUnsupportedModelCount = 0;
+		uint32_t asBuildCount = 0;
+	};
+
 	struct MaterialBuildTraceEntry
 	{
 		uint32_t calls = 0;
@@ -1881,26 +1901,6 @@ private:
 	};
 
 	using StaticMapChunkAtlas = ::StaticMapChunkAtlas;
-
-	struct DynamicSceneFrameState
-	{
-		uint32_t spriteSurfaceCount = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t materialCount = 0;
-		uint32_t modelCount = 0;
-		uint32_t unsupportedModelCount = 0;
-		uint32_t mirrorExtendedSurfaceCount = 0;
-		uint32_t mirrorExtendedPrimitiveCount = 0;
-		uint32_t mirrorExtendedMaterialCount = 0;
-		uint32_t mirrorExtendedModelCount = 0;
-		uint32_t mirrorExtendedUnsupportedModelCount = 0;
-		uint32_t mirrorPlayerSurfaceCount = 0;
-		uint32_t mirrorPlayerPrimitiveCount = 0;
-		uint32_t mirrorPlayerMaterialCount = 0;
-		uint32_t mirrorPlayerModelCount = 0;
-		uint32_t mirrorPlayerUnsupportedModelCount = 0;
-		uint32_t asBuildCount = 0;
-	};
 
 	struct PersistentDynamicEmissiveCache
 	{

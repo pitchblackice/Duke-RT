@@ -60,6 +60,14 @@ namespace
 		return hash;
 	}
 
+	uint32_t CountSceneFrameSurfaces(const nri_scene::SceneView& sceneView)
+	{
+		return
+			(uint32_t)sceneView.opaqueWalls.size() +
+			(uint32_t)sceneView.opaqueFlats.size() +
+			(uint32_t)sceneView.opaqueSprites.size();
+	}
+
 	uint64_t BuildUploadSpanStamp(
 		uint64_t sourceStamp,
 		NRIRenderer::SceneBufferUploadDomain uploadDomain,
@@ -231,6 +239,46 @@ nri_scene::SceneDebugStats BuildNRISceneFrameDebugStats(
 	return inputs.staticMapStats != nullptr ?
 		nri_scene::MergeSceneDebugStats(*inputs.staticMapStats, dynamicOverlayStats) :
 		dynamicOverlayStats;
+}
+
+NRIRenderer::DynamicSceneFrameState BuildNRISceneFrameDynamicState(
+	const NRISceneFrameDynamicStateInputs& inputs,
+	const NRIRenderer::DynamicSceneFrameState& previous,
+	NRIRenderer::PerfShellTraceStats& stats)
+{
+	ScopedSceneFrameTimer dynamicStateTimer(inputs.totalMs);
+	NRIRenderer::DynamicSceneFrameState result = previous;
+	if (inputs.activeDynamicSceneView != nullptr && inputs.activeDynamicGeometry != nullptr && inputs.activeDynamicMaterials != nullptr)
+	{
+		ScopedSceneFrameTimer dynamicCoreTimer(inputs.dynamicCoreMs);
+		result.spriteSurfaceCount = (uint32_t)inputs.activeDynamicSceneView->opaqueSprites.size();
+		result.primitiveCount = (uint32_t)inputs.activeDynamicGeometry->primitives.size();
+		result.materialCount = (uint32_t)inputs.activeDynamicMaterials->materials.size();
+		result.modelCount = inputs.activeDynamicSceneView->stats.modelDrawItems;
+		result.unsupportedModelCount = inputs.activeDynamicSceneView->stats.unsupportedModelDrawItems;
+		stats.sceneSelectStateCommitActiveDynamic = 1;
+	}
+	if (inputs.mirrorExtendedSceneView != nullptr && inputs.mirrorExtendedGeometry != nullptr && inputs.mirrorExtendedMaterials != nullptr)
+	{
+		ScopedSceneFrameTimer mirrorExtendedTimer(inputs.mirrorExtendedMs);
+		result.mirrorExtendedSurfaceCount = CountSceneFrameSurfaces(*inputs.mirrorExtendedSceneView);
+		result.mirrorExtendedPrimitiveCount = (uint32_t)inputs.mirrorExtendedGeometry->primitives.size();
+		result.mirrorExtendedMaterialCount = (uint32_t)inputs.mirrorExtendedMaterials->materials.size();
+		result.mirrorExtendedModelCount = inputs.mirrorExtendedSceneView->stats.modelDrawItems;
+		result.mirrorExtendedUnsupportedModelCount = inputs.mirrorExtendedSceneView->stats.unsupportedModelDrawItems;
+		stats.sceneSelectStateCommitMirrorExtended = 1;
+	}
+	if (inputs.mirrorPlayerSceneView != nullptr && inputs.mirrorPlayerGeometry != nullptr && inputs.mirrorPlayerMaterials != nullptr)
+	{
+		ScopedSceneFrameTimer mirrorPlayerTimer(inputs.mirrorPlayerMs);
+		result.mirrorPlayerSurfaceCount = CountSceneFrameSurfaces(*inputs.mirrorPlayerSceneView);
+		result.mirrorPlayerPrimitiveCount = (uint32_t)inputs.mirrorPlayerGeometry->primitives.size();
+		result.mirrorPlayerMaterialCount = (uint32_t)inputs.mirrorPlayerMaterials->materials.size();
+		result.mirrorPlayerModelCount = inputs.mirrorPlayerSceneView->stats.modelDrawItems;
+		result.mirrorPlayerUnsupportedModelCount = inputs.mirrorPlayerSceneView->stats.unsupportedModelDrawItems;
+		stats.sceneSelectStateCommitMirrorPlayer = 1;
+	}
+	return result;
 }
 
 void AccumulateNRISceneContributionReserve(const NRISceneContribution& contribution, NRISceneContributionReserve& reserve)

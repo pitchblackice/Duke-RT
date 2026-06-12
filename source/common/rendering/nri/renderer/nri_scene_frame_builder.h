@@ -95,6 +95,23 @@ struct NRISceneFrameDebugStatsInputs
 	double* mergeMs = nullptr;
 };
 
+struct NRISceneFrameDynamicStateInputs
+{
+	const nri_scene::SceneView* activeDynamicSceneView = nullptr;
+	const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
+	const nri_scene::SceneView* mirrorExtendedSceneView = nullptr;
+	const nri_scene::GeometryData* mirrorExtendedGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* mirrorExtendedMaterials = nullptr;
+	const nri_scene::SceneView* mirrorPlayerSceneView = nullptr;
+	const nri_scene::GeometryData* mirrorPlayerGeometry = nullptr;
+	const nri_scene::MaterialBridgeData* mirrorPlayerMaterials = nullptr;
+	double* totalMs = nullptr;
+	double* dynamicCoreMs = nullptr;
+	double* mirrorExtendedMs = nullptr;
+	double* mirrorPlayerMs = nullptr;
+};
+
 void AccumulateNRISceneContributionReserve(const NRISceneContribution& contribution, NRISceneContributionReserve& reserve);
 void ReserveNRISceneContributionCapacity(
 	const NRISceneContributionReserve& reserve,
@@ -115,4 +132,8 @@ void WriteNRISceneFrameGenerationTraceStats(
 	NRIRenderer::PerfShellTraceStats& stats);
 nri_scene::SceneDebugStats BuildNRISceneFrameDebugStats(
 	const NRISceneFrameDebugStatsInputs& inputs,
+	NRIRenderer::PerfShellTraceStats& stats);
+NRIRenderer::DynamicSceneFrameState BuildNRISceneFrameDynamicState(
+	const NRISceneFrameDynamicStateInputs& inputs,
+	const NRIRenderer::DynamicSceneFrameState& previous,
 	NRIRenderer::PerfShellTraceStats& stats);
