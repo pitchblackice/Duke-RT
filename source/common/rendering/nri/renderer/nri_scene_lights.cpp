@@ -51,6 +51,8 @@ EXTERN_CVAR(Bool, nri_ptemissivelighteditmode)
 EXTERN_CVAR(Float, nri_ptemissivelighteditnotifyrange)
 EXTERN_CVAR(Int, nri_ptnudgetrace)
 EXTERN_CVAR(Int, nri_ptactorspritetrace)
+EXTERN_CVAR(Int, nri_pttraceframes)
+CVAR(Int, nri_ptexplosiontrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -136,6 +138,47 @@ namespace
 	const char* YesNo(bool value)
 	{
 		return value ? "yes" : "no";
+	}
+
+	bool ContainsCaseInsensitive(const char* text, const char* needle)
+	{
+		if (text == nullptr || needle == nullptr || *needle == '\0')
+		{
+			return false;
+		}
+
+		const size_t needleLength = std::strlen(needle);
+		for (const char* cursor = text; *cursor != '\0'; ++cursor)
+		{
+			size_t index = 0;
+			while (index < needleLength &&
+				cursor[index] != '\0' &&
+				std::tolower((unsigned char)cursor[index]) == std::tolower((unsigned char)needle[index]))
+			{
+				index++;
+			}
+			if (index == needleLength)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool ShouldTraceActorOverlayRule(const SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& rule)
+	{
+		if ((int)nri_ptexplosiontrace <= 0 || (int)nri_pttraceframes <= 0)
+		{
+			return false;
+		}
+		if ((int)nri_ptexplosiontrace >= 2)
+		{
+			return true;
+		}
+
+		return ContainsCaseInsensitive(rule.ruleName.c_str(), "explosion") ||
+			ContainsCaseInsensitive(rule.actorClassName, "explosion");
 	}
 
 	enum class ActorSpriteLiveMatchResult : uint32_t
@@ -794,6 +837,15 @@ namespace
 		key = HashCombine64(key, (uint64_t)sourceFlags);
 		key = HashCombine64(key, (uint64_t)ruleId);
 		key = HashCombine64(key, record.identityKey);
+		return key;
+	}
+
+	uint64_t BuildActorOverlayTopologyKey(const SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& rule)
+	{
+		uint64_t key = 1469598103934665603ull;
+		key = HashCombine64(key, (uint64_t)SceneAnalyticLightSourceFlag_ActorOverlay);
+		key = HashCombine64(key, (uint64_t)rule.ruleId);
+		key = HashCombine64(key, (uint64_t)(uint32_t)(rule.actorIndex + 1));
 		return key;
 	}
 
@@ -2591,7 +2643,144 @@ void SceneLightSystem::RebuildAnalyticLights(
 	if ((actorOverlayRules != nullptr && !actorOverlayRules->empty()) ||
 		(actorOverlayRulesById != nullptr && !actorOverlayRulesById->empty()))
 	{
-		auto appendActorOverlayLight = [this, &tryAppendLight, flickerTimeIndex, renderFrameIndex](
+		auto surfaceMatchesActorRule = [](const SurfaceRecord& record, const AnalyticLightRegistry::ActorOverlayRule& rule)
+		{
+			if ((record.material.materialFlags & nri_scene::MaterialFlag_Sprite) == 0 ||
+				record.provenance.actorIndex != rule.actorIndex)
+			{
+				return false;
+			}
+			if (rule.hasTileFilter && record.material.textureId != rule.tileFilter)
+			{
+				return false;
+			}
+			return true;
+		};
+
+		auto findActorOverlaySurface = [this, &surfaceMatchesActorRule](const AnalyticLightRegistry::ActorOverlayRule& rule) -> const SurfaceRecord*
+		{
+			for (const SurfaceRecord& record : mSurfaceRecords)
+			{
+				if (surfaceMatchesActorRule(record, rule))
+				{
+					return &record;
+				}
+			}
+			return nullptr;
+		};
+
+		auto appendActorOwnedOverlayLight = [this, &tryAppendLight, flickerTimeIndex, renderFrameIndex](
+			const AnalyticLightRegistry::ActorOverlayRule& rule,
+			const SurfaceRecord* record)
+		{
+			if (rule.actorIndex < 0)
+			{
+				return;
+			}
+			if (rule.hasTileFilter && rule.actorTextureId != rule.tileFilter)
+			{
+				if (ShouldTraceActorOverlayRule(rule))
+				{
+					Printf("NRI PT explosion actor: frame=%u actor=%d class=%s rule=%u rule_name=%s live=yes emitted=no reason=tile_filter live_tile=%u filter_tile=%u\n",
+						renderFrameIndex,
+						rule.actorIndex,
+						rule.actorClassName != nullptr ? rule.actorClassName : "",
+						rule.ruleId,
+						rule.ruleName.c_str(),
+						rule.actorTextureId,
+						rule.tileFilter);
+				}
+				return;
+			}
+
+			const bool hasSurface = record != nullptr;
+			if (hasSurface)
+			{
+				mAnalyticLights.matchedSurfaceCount++;
+				mAnalyticLights.actorOverlayMatchedSurfaceCount++;
+			}
+
+			SceneAnalyticLight light = {};
+			light.stableKey = BuildActorOverlayTopologyKey(rule);
+			light.id = 0;
+			light.sourceFlags = SceneAnalyticLightSourceFlag_ActorOverlay;
+			light.flags = rule.flags;
+			light.sourceRuleId = rule.ruleId;
+			light.source = hasSurface ? record->source : SceneLightRecordSource::DynamicScene;
+			light.actorIndex = rule.actorIndex;
+			light.textureId = hasSurface ? record->material.textureId : rule.actorTextureId;
+			const float* basePosition = hasSurface ? record->center : rule.actorPosition;
+			light.position[0] = basePosition[0] + rule.offset[0];
+			light.position[1] = basePosition[1] + rule.offset[1];
+			light.position[2] = basePosition[2] + rule.offset[2];
+			if (hasSurface)
+			{
+				ApplyActorOverlaySurfaceNudge(*record, rule, light.position);
+			}
+			Copy3f(rule.color, light.color);
+			light.intensity = ResolveOverlayLightIntensity(
+				rule.intensity,
+				light.stableKey,
+				flickerTimeIndex,
+				renderFrameIndex,
+				rule.flickerFrames,
+				rule.hasRandomIntensity,
+				rule.randomIntensityRange);
+			light.radius = rule.radius;
+
+			if (ShouldTraceActorOverlayRule(rule))
+			{
+				Printf("NRI PT explosion actor: frame=%u actor=%d class=%s rule=%u rule_name=%s live=yes emitted=yes ownership=actor live_tile=%u pal=%d has_surface=%s surface_source=%s surface_tile=%u stable=0x%016llx pos=(%.3f, %.3f, %.3f)\n",
+					renderFrameIndex,
+					rule.actorIndex,
+					rule.actorClassName != nullptr ? rule.actorClassName : "",
+					rule.ruleId,
+					rule.ruleName.c_str(),
+					rule.actorTextureId,
+					rule.actorPalette,
+					YesNo(hasSurface),
+					hasSurface ? GetSurfaceSourceTypeName(record->provenance.sourceType) : "none",
+					hasSurface ? record->material.textureId : 0u,
+					(unsigned long long)light.stableKey,
+					light.position[0],
+					light.position[1],
+					light.position[2]);
+				if (hasSurface)
+				{
+					const uint32_t lightingFlags = record->material.lightingFlags;
+					Printf("NRI PT explosion material: frame=%u actor=%d class=%s rule=%u rule_name=%s source=%s tile=%u mat_light=0x%x mat_flags=0x%x stamped_rules=%u no_shadow_receive=%s no_shadow_cast=%s fullbright=%s\n",
+						renderFrameIndex,
+						rule.actorIndex,
+						rule.actorClassName != nullptr ? rule.actorClassName : "",
+						rule.ruleId,
+						rule.ruleName.c_str(),
+						GetSurfaceSourceTypeName(record->provenance.sourceType),
+						record->material.textureId,
+						lightingFlags,
+						record->material.materialFlags,
+						record->material.actorOverlayRuleCount,
+						YesNo((lightingFlags & nri_scene::MaterialLightingFlag_NoShadowReceive) != 0),
+						YesNo((lightingFlags & nri_scene::MaterialLightingFlag_NoShadowCast) != 0),
+						YesNo((lightingFlags & nri_scene::MaterialLightingFlag_MaterialFullbright) != 0));
+				}
+				Printf("NRI PT explosion light: frame=%u actor=%d class=%s rule=%u rule_name=%s emitted=yes ownership=actor stable=0x%016llx source=%u tile=%u intensity=%.3f radius=%.3f shadow=%s\n",
+					renderFrameIndex,
+					rule.actorIndex,
+					rule.actorClassName != nullptr ? rule.actorClassName : "",
+					rule.ruleId,
+					rule.ruleName.c_str(),
+					(unsigned long long)light.stableKey,
+					(uint32_t)light.source,
+					light.textureId,
+					light.intensity,
+					light.radius,
+					YesNo((light.flags & SceneAnalyticLightFlag_CastsShadow) != 0));
+			}
+
+			tryAppendLight(light);
+		};
+
+		auto appendSurfaceOwnedOverlayLight = [this, &tryAppendLight, flickerTimeIndex, renderFrameIndex](
 			const SurfaceRecord& record,
 			const AnalyticLightRegistry::ActorOverlayRule& rule)
 		{
@@ -2629,49 +2818,40 @@ void SceneLightSystem::RebuildAnalyticLights(
 			tryAppendLight(light);
 		};
 
-		for (const SurfaceRecord& record : mSurfaceRecords)
+		if (actorOverlayRules != nullptr)
 		{
-			if ((record.material.materialFlags & nri_scene::MaterialFlag_Sprite) == 0 ||
-				record.provenance.actorIndex < 0)
+			for (const auto& entry : *actorOverlayRules)
 			{
-				continue;
-			}
-
-			bool usedStampedRules = false;
-			if (actorOverlayRulesById != nullptr && record.material.actorOverlayRuleCount > 0)
-			{
-				for (uint32_t ruleIndex = 0; ruleIndex < record.material.actorOverlayRuleCount; ++ruleIndex)
+				for (const AnalyticLightRegistry::ActorOverlayRule& rule : entry.second)
 				{
-					const uint32_t ruleId = record.material.actorOverlayRuleIds[ruleIndex];
-					const auto ruleIt = actorOverlayRulesById->find(ruleId);
-					if (ruleIt == actorOverlayRulesById->end())
-					{
-						continue;
-					}
-
-					appendActorOverlayLight(record, ruleIt->second);
-					usedStampedRules = true;
+					appendActorOwnedOverlayLight(rule, findActorOverlaySurface(rule));
 				}
 			}
-			if (usedStampedRules)
+		}
+		else
+		{
+			for (const SurfaceRecord& record : mSurfaceRecords)
 			{
-				continue;
-			}
+				if ((record.material.materialFlags & nri_scene::MaterialFlag_Sprite) == 0 ||
+					record.provenance.actorIndex < 0)
+				{
+					continue;
+				}
 
-			if (actorOverlayRules == nullptr)
-			{
-				continue;
-			}
+				if (actorOverlayRulesById != nullptr && record.material.actorOverlayRuleCount > 0)
+				{
+					for (uint32_t ruleIndex = 0; ruleIndex < record.material.actorOverlayRuleCount; ++ruleIndex)
+					{
+						const uint32_t ruleId = record.material.actorOverlayRuleIds[ruleIndex];
+						const auto ruleIt = actorOverlayRulesById->find(ruleId);
+						if (ruleIt == actorOverlayRulesById->end())
+						{
+							continue;
+						}
 
-			const auto actorRuleIt = actorOverlayRules->find(record.provenance.actorIndex);
-			if (actorRuleIt == actorOverlayRules->end())
-			{
-				continue;
-			}
-
-			for (const AnalyticLightRegistry::ActorOverlayRule& rule : actorRuleIt->second)
-			{
-				appendActorOverlayLight(record, rule);
+						appendSurfaceOwnedOverlayLight(record, ruleIt->second);
+					}
+				}
 			}
 		}
 	}

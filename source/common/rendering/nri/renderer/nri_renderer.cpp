@@ -1956,9 +1956,13 @@ public:
 
 		actorRule = {};
 		actorRule.ruleId = BuildActorOverlayRuleId(resolvedRule);
+		actorRule.ruleName = resolvedRule.id.GetChars();
 		actorRule.hasTileFilter = resolvedRule.hasTileFilter;
 		actorRule.tileFilter = resolvedRule.hasTileFilter && resolvedRule.tileFilter >= 0 ? (uint32_t)resolvedRule.tileFilter : 0u;
 		actorRule.flags = (!resolvedRule.hasShadowCast || resolvedRule.shadowCast) ? SceneAnalyticLightFlag_CastsShadow : SceneAnalyticLightFlag_None;
+		actorRule.materialNoShadowReceive = resolvedRule.hasShadowReceive && !resolvedRule.shadowReceive;
+		actorRule.materialNoShadowCast = resolvedRule.hasShadowCast && !resolvedRule.shadowCast;
+		actorRule.materialFullbright = resolvedRule.hasFullbright && resolvedRule.fullbright;
 		actorRule.color[0] = resolvedRule.color[0];
 		actorRule.color[1] = resolvedRule.color[1];
 		actorRule.color[2] = resolvedRule.color[2];
@@ -1974,6 +1978,13 @@ public:
 		actorRule.randomIntensityRange[0] = resolvedRule.randomIntensityRange[0];
 		actorRule.randomIntensityRange[1] = resolvedRule.randomIntensityRange[1];
 		return true;
+	}
+
+	static void ConvertActorWorldPositionToPathTracing(const DVector3& source, float destination[3])
+	{
+		destination[0] = (float)source.X;
+		destination[1] = (float)-source.Z;
+		destination[2] = (float)-source.Y;
 	}
 
 	static bool IsSupportedMapOverlayRule(const ResolvedLightOverlayMapLightRule& rule)
@@ -2325,6 +2336,12 @@ public:
 				SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule actorRule = {};
 				if (TryBuildActorAnalyticOverlayRule(resolvedRule, actorRule))
 				{
+					actorRule.actorClassName = actorClass->TypeName.GetChars();
+					actorRule.actorIndex = (int32_t)actor->GetIndex();
+					actorRule.actorPalette = actor->spr.pal;
+					ConvertActorWorldPositionToPathTracing(actor->spr.pos, actorRule.actorPosition);
+					const FTextureID liveTextureId = actor->dispictex.isValid() ? actor->dispictex : actor->spr.spritetexture();
+					actorRule.actorTextureId = liveTextureId.isValid() ? (uint32_t)liveTextureId.GetIndex() : 0u;
 					actorRules.push_back(actorRule);
 				}
 			}
@@ -12472,6 +12489,7 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	const bool hasActorMaterialRules = nri_material_policy::HasActorMaterialOverrideRules(resolvedLightOverlays);
 	const std::unordered_map<int32_t, uint32_t>* actorOverridesForBuild = nullptr;
+	std::unordered_map<int32_t, uint32_t> mergedActorOverridesForBuild;
 	if (hasActorMaterialRules)
 	{
 		const auto& actorOverrides = GetActorMaterialOverrideMapForFrame(materialTraceSlot);
@@ -12488,6 +12506,38 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 		if (!actorOverlayRules.empty())
 		{
 			StampActorOverlayRuleIdsOnSceneView(actorOverlayRules, sceneView);
+			for (const auto& entry : actorOverlayRules)
+			{
+				uint32_t overrideBits = nri_material_policy::ActorMaterialOverride_None;
+				for (const auto& rule : entry.second)
+				{
+					if (rule.materialNoShadowReceive)
+					{
+						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowReceive;
+					}
+					if (rule.materialNoShadowCast)
+					{
+						overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowCast;
+					}
+					if (rule.materialFullbright)
+					{
+						overrideBits |= nri_material_policy::ActorMaterialOverride_Fullbright;
+					}
+				}
+
+				if (overrideBits != nri_material_policy::ActorMaterialOverride_None)
+				{
+					if (actorOverridesForBuild != nullptr && mergedActorOverridesForBuild.empty())
+					{
+						mergedActorOverridesForBuild = *actorOverridesForBuild;
+					}
+					mergedActorOverridesForBuild[entry.first] |= overrideBits;
+				}
+			}
+			if (!mergedActorOverridesForBuild.empty())
+			{
+				actorOverridesForBuild = &mergedActorOverridesForBuild;
+			}
 		}
 	}
 

@@ -274,6 +274,15 @@ public:
 		struct ActorOverlayRule
 		{
 			uint32_t ruleId = 0;
+			std::string ruleName;
+			const char* actorClassName = "";
+			int32_t actorIndex = -1;
+			uint32_t actorTextureId = 0;
+			int32_t actorPalette = 0;
+			float actorPosition[3] = {};
+			bool materialNoShadowReceive = false;
+			bool materialNoShadowCast = false;
+			bool materialFullbright = false;
 			bool hasTileFilter = false;
 			uint32_t tileFilter = 0;
 			uint32_t flags = SceneAnalyticLightFlag_CastsShadow;
