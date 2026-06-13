@@ -568,9 +568,10 @@ public:
 
 	struct FrameAssemblyServices
 	{
-		void* user = nullptr;
+		void* runtimeMutationUser = nullptr;
 		bool (*isRuntimeMutationReplacementActive)(void* user, uint32_t mapChunkIndex) = nullptr;
 		void (*appendRuntimeMutationSceneLightRecords)(void* user, SceneLightSystem& sceneLights) = nullptr;
+		void* persistentVoxelUser = nullptr;
 		void (*appendPersistentVoxelSceneLights)(void* user, SceneLightSystem& sceneLights, uint32_t frameIndex, bool voxelStats) = nullptr;
 	};
 

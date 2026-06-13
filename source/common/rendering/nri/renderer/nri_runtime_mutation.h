@@ -250,6 +250,14 @@ struct RuntimeMutationResidentSceneRefreshResult
 	const char* failureReason = nullptr;
 };
 
+struct NRIRuntimeMutationFrameOutput
+{
+	nri_scene::GeometryData geometry;
+	nri_scene::MaterialBridgeData materialBridge;
+	bool hasOverlay = false;
+	bool residentStaticSceneChanged = false;
+};
+
 struct NRIRuntimeMutationResidentSceneRefreshServices
 {
 	using RefreshMaterialSlicesFn = bool (*)(void* user, const std::vector<uint32_t>& chunkListIndices, const std::vector<uint32_t>& animatedChunkListIndices);
@@ -349,6 +357,9 @@ public:
 		nri_scene::GeometryData& outGeometry,
 		nri_scene::MaterialBridgeData& outMaterials,
 		bool* outResidentStaticSceneChanged = nullptr);
+	bool BuildFrameOverlay(
+		const NRIRuntimeMutationOverlayServices& services,
+		NRIRuntimeMutationFrameOutput& outFrame);
 	bool CommitResidentSceneRefresh(
 		const NRIRuntimeMutationResidentUploadServices& uploadServices,
 		const NRIRuntimeMutationResidentSceneRefreshServices& refreshServices,
@@ -358,6 +369,12 @@ public:
 	void ResetCacheAndFrame();
 	void ResetCacheForStaticSceneBuild(uint32_t chunkCount);
 	void InitializeStaticChunkReplacement(const nri_scene::PTMapChunk& chunk);
+	void ResetLevelLifecycleState();
+	void ResetForMapWorldBuildFailure();
+	void ResetLevelHighWaterStats();
+	void BeginFrameState();
+	void PrepareStartupBaseline(uint64_t buildSerial, uint32_t chunkCount);
+	bool CanApplyStartupCorrection(uint32_t chunkCount) const;
 	void ResetWorklist();
 	void ResetFrameState();
 	void ResetHighWaterStats();

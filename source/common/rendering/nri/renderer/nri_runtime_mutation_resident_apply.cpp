@@ -143,7 +143,7 @@ namespace
 }
 
 // Runtime mutation resident-apply renderer-service implementation.
-bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentSceneImpl(
+bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 	const nri_scene::PTMapChunk& mapChunk,
 	RuntimeMapMutationCache::ChunkReplacement& replacement,
 	RuntimeMutationResidentApplyResult& outResult)

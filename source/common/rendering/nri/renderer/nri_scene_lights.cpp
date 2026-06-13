@@ -2339,7 +2339,7 @@ SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfac
 				const uint32_t mapChunkIndex = staticChunk.chunkIndex;
 				const bool useRuntimeMutationReplacement =
 					services.isRuntimeMutationReplacementActive != nullptr &&
-					services.isRuntimeMutationReplacementActive(services.user, mapChunkIndex);
+					services.isRuntimeMutationReplacementActive(services.runtimeMutationUser, mapChunkIndex);
 				if (useRuntimeMutationReplacement)
 				{
 					continue;
@@ -2358,7 +2358,7 @@ SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfac
 		{
 			if (services.appendRuntimeMutationSceneLightRecords != nullptr)
 			{
-				services.appendRuntimeMutationSceneLightRecords(services.user, *this);
+				services.appendRuntimeMutationSceneLightRecords(services.runtimeMutationUser, *this);
 			}
 		});
 	}
@@ -2384,7 +2384,7 @@ SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfac
 		{
 			if (services.appendPersistentVoxelSceneLights != nullptr)
 			{
-				services.appendPersistentVoxelSceneLights(services.user, *this, input.frameIndex, input.voxelStats);
+				services.appendPersistentVoxelSceneLights(services.persistentVoxelUser, *this, input.frameIndex, input.voxelStats);
 			}
 		});
 	}

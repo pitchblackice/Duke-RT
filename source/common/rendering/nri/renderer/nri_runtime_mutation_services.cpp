@@ -375,7 +375,7 @@ NRIRuntimeMutationOverlayServices NRIRenderer::BuildRuntimeMutationOverlayServic
 	services.user = this;
 	services.buildOverlay = [](void* user, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged) -> bool
 	{
-		return static_cast<NRIRenderer*>(user)->BuildRuntimeMapMutationOverlayImpl(
+		return static_cast<NRIRenderer*>(user)->BuildRuntimeMapMutationOverlay(
 			outGeometry,
 			outMaterials,
 			outResidentStaticSceneChanged);
@@ -389,7 +389,7 @@ NRIRuntimeMutationResidentApplyServices NRIRenderer::BuildRuntimeMutationResiden
 	services.user = this;
 	services.tryApplyChunk = [](void* user, const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement, RuntimeMutationResidentApplyResult& outResult) -> bool
 	{
-		return static_cast<NRIRenderer*>(user)->TryApplyRuntimeMutationChunkToResidentSceneImpl(
+		return static_cast<NRIRenderer*>(user)->TryApplyRuntimeMutationChunkToResidentScene(
 			mapChunk,
 			replacement,
 			outResult);

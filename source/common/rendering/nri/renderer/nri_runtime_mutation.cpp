@@ -881,6 +881,19 @@ bool NRIRuntimeMutationSystem::BuildOverlay(
 	return services.BuildOverlay(outGeometry, outMaterials, outResidentStaticSceneChanged);
 }
 
+bool NRIRuntimeMutationSystem::BuildFrameOverlay(
+	const NRIRuntimeMutationOverlayServices& services,
+	NRIRuntimeMutationFrameOutput& outFrame)
+{
+	outFrame = {};
+	outFrame.hasOverlay = BuildOverlay(
+		services,
+		outFrame.geometry,
+		outFrame.materialBridge,
+		&outFrame.residentStaticSceneChanged);
+	return outFrame.hasOverlay;
+}
+
 bool NRIRuntimeMutationSystem::CommitResidentSceneRefresh(
 	const NRIRuntimeMutationResidentUploadServices& uploadServices,
 	const NRIRuntimeMutationResidentSceneRefreshServices& refreshServices,
@@ -1041,6 +1054,38 @@ void NRIRuntimeMutationSystem::ResetFrameState()
 void NRIRuntimeMutationSystem::ResetHighWaterStats()
 {
 	cacheHighWaterStats = {};
+}
+
+void NRIRuntimeMutationSystem::ResetLevelLifecycleState()
+{
+	ResetWorklist();
+	ResetFrameState();
+	ResetHighWaterStats();
+}
+
+void NRIRuntimeMutationSystem::ResetForMapWorldBuildFailure()
+{
+	ResetWorklist();
+}
+
+void NRIRuntimeMutationSystem::ResetLevelHighWaterStats()
+{
+	ResetHighWaterStats();
+}
+
+void NRIRuntimeMutationSystem::BeginFrameState()
+{
+	ResetFrameState();
+}
+
+void NRIRuntimeMutationSystem::PrepareStartupBaseline(uint64_t buildSerial, uint32_t chunkCount)
+{
+	PrepareSignatureWatchlist(buildSerial, chunkCount);
+}
+
+bool NRIRuntimeMutationSystem::CanApplyStartupCorrection(uint32_t chunkCount) const
+{
+	return HasCacheChunkCount(chunkCount);
 }
 
 void NRIRuntimeMutationSystem::PrepareSignatureWatchlist(uint64_t buildSerial, uint32_t chunkCount)

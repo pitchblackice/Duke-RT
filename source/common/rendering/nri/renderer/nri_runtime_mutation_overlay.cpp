@@ -33,7 +33,7 @@ namespace
 
 // Runtime mutation overlay renderer-service implementation.
 
-bool NRIRenderer::BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged)
+bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged)
 {
 	outGeometry = {};
 	outMaterials = {};
@@ -41,7 +41,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& ou
 	{
 		*outResidentStaticSceneChanged = false;
 	}
-	mRuntimeMutation.ResetFrameState();
+	mRuntimeMutation.BeginFrameState();
 	bool residentStaticSceneChanged = false;
 	bool residentMaterialDirty = false;
 	bool residentGeometryDirty = false;

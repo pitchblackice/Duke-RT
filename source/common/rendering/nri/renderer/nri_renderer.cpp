@@ -5495,7 +5495,7 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
 	mPendingStartupVisibleChunkValidation.clear();
-	mRuntimeMutation.ResetWorklist();
+	mRuntimeMutation.ResetLevelLifecycleState();
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	mStartupMutationRebaselineDeadlineFrame = 0;
 
@@ -5505,7 +5505,6 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 	mLastLoggedSurfaceProbe = {};
 	mSurfaceProbeFrame = {};
 	mDynamicSceneLastFrame = {};
-	mRuntimeMutation.ResetFrameState();
 	mRuntimeSpaceLinkLastFrame = {};
 	mLastRuntimeLinkTraceState = {};
 	mHasRuntimeLinkTraceState = false;
@@ -5515,7 +5514,6 @@ void NRIRenderer::OnLevelUnloadBegin(const LevelTransitionInfo& info)
 
 	mSceneTextures.CacheStats() = {};
 	mSceneLights.ResetPersistentDynamicEmissiveHighWaterStats();
-	mRuntimeMutation.ResetHighWaterStats();
 
 	mUsedStaticMapSceneLastFrame = false;
 	mUsedDynamicSceneLastFrame = false;
@@ -5611,19 +5609,17 @@ void NRIRenderer::OnLevelLoadBegin(const LevelTransitionInfo& info)
 	mAllowStartupMutationRebaseline = false;
 	mPendingStartupMutationRebaseline = false;
 	mPendingStartupVisibleChunkValidation.clear();
-	mRuntimeMutation.ResetWorklist();
+	mRuntimeMutation.ResetLevelLifecycleState();
 	mStartupMapWorldCorrectionDeadlineFrame = 0;
 	mStartupMutationRebaselineDeadlineFrame = 0;
 	mLastSurfaceProbe = {};
 	mLastLoggedSurfaceProbe = {};
 	mSurfaceProbeFrame = {};
 	mDynamicSceneLastFrame = {};
-	mRuntimeMutation.ResetFrameState();
 	mRuntimeSpaceLinkLastFrame = {};
 	mRuntimeChunkTranslationHistory.clear();
 	mSceneTextures.CacheStats() = {};
 	mSceneLights.ResetPersistentDynamicEmissiveHighWaterStats();
-	mRuntimeMutation.ResetHighWaterStats();
 	mLastStats = {};
 	mHasLoggedStats = false;
 	mLastRuntimeLinkTraceState = {};
@@ -6042,7 +6038,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	mBuiltStaticMapSceneASLastFrame = false;
 	mBuiltDynamicSceneASLastFrame = false;
 	mDynamicSceneLastFrame = {};
-	mRuntimeMutation.ResetFrameState();
+	mRuntimeMutation.BeginFrameState();
 	mRuntimeSpaceLinkLastFrame = {};
 	if (!preserveHistory)
 	{
@@ -6122,7 +6118,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::SceneView capturedSceneView;
 	nri_scene::SceneView dynamicSceneView;
 	nri_scene::GeometryData capturedGeometry;
-	nri_scene::GeometryData runtimeMutationGeometry;
+	NRIRuntimeMutationFrameOutput runtimeMutationFrame;
 	nri_scene::GeometryData runtimeSpaceLinkGeometry;
 	nri_scene::GeometryData dynamicGeometry;
 	nri_scene::GeometryData mirrorExtendedDynamicGeometry;
@@ -6130,7 +6126,6 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	nri_scene::GeometryData debugSphereGeometry;
 	nri_scene::GeometryData surfaceLightGeometry;
 	nri_scene::MaterialBridgeData materialBridge;
-	nri_scene::MaterialBridgeData runtimeMutationMaterialBridge;
 	nri_scene::MaterialBridgeData runtimeSpaceLinkMaterialBridge;
 	nri_scene::MaterialBridgeData dynamicMaterialBridge;
 	nri_scene::MaterialBridgeData mirrorExtendedDynamicMaterialBridge;
@@ -6228,11 +6223,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			const bool hasRuntimeMutationOverlay = [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationMs);
-				return mRuntimeMutation.BuildOverlay(
+				const bool hasOverlay = mRuntimeMutation.BuildFrameOverlay(
 					BuildRuntimeMutationOverlayServices(),
-					runtimeMutationGeometry,
-					runtimeMutationMaterialBridge,
-					&residentStaticWorldGeometryChanged);
+					runtimeMutationFrame);
+				residentStaticWorldGeometryChanged = runtimeMutationFrame.residentStaticSceneChanged;
+				return hasOverlay;
 			}();
 			const bool hasDynamicScene = !deferOverlayThisFrame && [&]()
 			{
@@ -6690,7 +6685,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					}
 					if (hasRuntimeMutationOverlay)
 					{
-						addOverlayReserve(&runtimeMutationGeometry, runtimeMutationMaterialBridge);
+						addOverlayReserve(&runtimeMutationFrame.geometry, runtimeMutationFrame.materialBridge);
 					}
 					if (hasActiveDynamicOverlay)
 					{
@@ -6732,9 +6727,9 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					if (hasRuntimeMutationOverlay)
 					{
 						appendOverlaySource(
-							&runtimeMutationGeometry,
+							&runtimeMutationFrame.geometry,
 							nullptr,
-							runtimeMutationMaterialBridge,
+							runtimeMutationFrame.materialBridge,
 							mLastPerfShellTraceStats.overlayRuntimeMutationMs,
 							mLastPerfShellTraceStats.overlayRuntimeMutationGeometryMs,
 							mLastPerfShellTraceStats.overlayRuntimeMutationMaterialMs,
@@ -6992,10 +6987,10 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					}
 					accelerationReady = persistentVoxelAsReady && dynamicAsReady;
 				}
-				emissiveSamplingContext.runtimeMutationGeometry = hasRuntimeMutationOverlay ? &runtimeMutationGeometry : nullptr;
+				emissiveSamplingContext.runtimeMutationGeometry = hasRuntimeMutationOverlay ? &runtimeMutationFrame.geometry : nullptr;
 				emissiveSamplingContext.runtimeMutationPrimitiveBaseOffset = (uint32_t)runtimeSpaceLinkGeometry.primitives.size();
 				emissiveSamplingContext.dynamicGeometry = hasActiveDynamicOverlay ? activeDynamicGeometry : nullptr;
-				emissiveSamplingContext.dynamicPrimitiveBaseOffset = (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationGeometry.primitives.size());
+				emissiveSamplingContext.dynamicPrimitiveBaseOffset = (uint32_t)(runtimeSpaceLinkGeometry.primitives.size() + runtimeMutationFrame.geometry.primitives.size());
 				if (accelerationReady)
 				{
 					if (hasPersistentVoxelOverlay)
@@ -7580,7 +7575,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	surfaceProbeFrameInputs.usesStaticMapScene = mUsedStaticMapSceneLastFrame;
 	surfaceProbeFrameInputs.activeStaticProbePrimitiveCount = activeStaticProbePrimitiveCount;
 	surfaceProbeFrameInputs.runtimeSpaceLinkGeometry = &runtimeSpaceLinkGeometry;
-	surfaceProbeFrameInputs.runtimeMutationGeometry = &runtimeMutationGeometry;
+	surfaceProbeFrameInputs.runtimeMutationGeometry = &runtimeMutationFrame.geometry;
 	surfaceProbeFrameInputs.overlayGeometry = &overlayGeometry;
 	surfaceProbeFrameInputs.activeDynamicGeometry = activeDynamicGeometry;
 	mSurfaceProbeFrame = BuildNRISceneSurfaceProbeFrameState(surfaceProbeFrameInputs);
@@ -12193,18 +12188,19 @@ void NRIRenderer::RefreshSceneLightSystem(
 	assemblyInput.appendPersistentVoxelSceneLights = appendPersistentVoxelSceneLights;
 
 	SceneLightSystem::FrameAssemblyServices assemblyServices = {};
-	assemblyServices.user = this;
+	assemblyServices.runtimeMutationUser = &mRuntimeMutation;
 	assemblyServices.isRuntimeMutationReplacementActive = [](void* user, uint32_t mapChunkIndex) -> bool
 	{
-		return static_cast<NRIRenderer*>(user)->mRuntimeMutation.IsReplacementActiveAndValid(mapChunkIndex);
+		return static_cast<NRIRuntimeMutationSystem*>(user)->IsReplacementActiveAndValid(mapChunkIndex);
 	};
 	assemblyServices.appendRuntimeMutationSceneLightRecords = [](void* user, SceneLightSystem& sceneLights)
 	{
-		static_cast<NRIRenderer*>(user)->mRuntimeMutation.AppendSceneLightRecords(sceneLights);
+		static_cast<NRIRuntimeMutationSystem*>(user)->AppendSceneLightRecords(sceneLights);
 	};
+	assemblyServices.persistentVoxelUser = &mPersistentVoxels;
 	assemblyServices.appendPersistentVoxelSceneLights = [](void* user, SceneLightSystem& sceneLights, uint32_t frameIndex, bool voxelStats)
 	{
-		static_cast<NRIRenderer*>(user)->mPersistentVoxels.AppendSceneLights(sceneLights, frameIndex, voxelStats);
+		static_cast<NRIPersistentVoxelResidency*>(user)->AppendSceneLights(sceneLights, frameIndex, voxelStats);
 	};
 
 	const SceneLightSystem::FrameAssemblyTimingStats assemblyTimings =
@@ -12630,7 +12626,7 @@ void NRIRenderer::RefreshMapWorld()
 		RequestHistoryReset("map-load", true, true);
 		mSceneTextures.CacheStats() = {};
 		mSceneLights.ResetPersistentDynamicEmissiveHighWaterStats();
-		mRuntimeMutation.ResetHighWaterStats();
+		mRuntimeMutation.ResetLevelHighWaterStats();
 	}
 	const bool needsBuild = !mMapWorld.valid || levelChanged || pendingBuildSerial != mObservedMapWorldBuildSerial;
 	if (!needsBuild)
@@ -12661,7 +12657,7 @@ void NRIRenderer::RefreshMapWorld()
 		mMapWorld.level = currentLevel;
 		mObservedMapWorldBuildSerial = pendingBuildSerial;
 		mPendingStartupVisibleChunkValidation.clear();
-		mRuntimeMutation.ResetWorklist();
+		mRuntimeMutation.ResetForMapWorldBuildFailure();
 		mAllowStartupMapWorldCorrection = false;
 		mStartupMapWorldCorrectionDeadlineFrame = 0;
 		mAllowStartupMutationRebaseline = false;
@@ -12674,7 +12670,7 @@ void NRIRenderer::RefreshMapWorld()
 	mObservedMapWorldBuildSerial = pendingBuildSerial;
 	mPendingStartupVisibleChunkValidation.clear();
 	mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
-	mRuntimeMutation.PrepareSignatureWatchlist(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
+	mRuntimeMutation.PrepareStartupBaseline(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
 	const auto& stats = mMapWorld.stats;
 	Printf("NRI PT map world built: level=%s build_serial=%llu chunks=%u surfaces=%u walls=%u flats=%u portals=%u skies=%u tris=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
@@ -12709,7 +12705,7 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 
 	if (!mMapWorld.valid ||
 		!mStaticMapScene.valid ||
-		!mRuntimeMutation.HasCacheChunkCount((uint32_t)mMapWorld.chunks.size()))
+		!mRuntimeMutation.CanApplyStartupCorrection((uint32_t)mMapWorld.chunks.size()))
 	{
 		return true;
 	}
@@ -12746,7 +12742,7 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	{
 		mPendingStartupVisibleChunkValidation.resize(mMapWorld.chunks.size(), 0u);
 	}
-	mRuntimeMutation.PrepareSignatureWatchlist(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
+	mRuntimeMutation.PrepareStartupBaseline(mMapWorld.buildSerial, (uint32_t)mMapWorld.chunks.size());
 	for (uint32_t chunkIndex : diffDetails.lateVisibleValidationChunks)
 	{
 		if (chunkIndex < mPendingStartupVisibleChunkValidation.size())

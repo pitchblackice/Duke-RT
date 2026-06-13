@@ -2075,7 +2075,7 @@ void NRIRenderer::DestroyStaticMapSceneCache(const char* reason)
 	};
 	services.resetRuntimeMutationCacheAndFrameForStaticScene = [](void* user)
 	{
-		static_cast<NRIRenderer*>(user)->ResetRuntimeMutationCacheAndFrameForStaticScene();
+		static_cast<NRIRenderer*>(user)->mRuntimeMutation.ResetCacheAndFrame();
 	};
 	services.resetResidentMapChunkRegistry = [](void* user)
 	{

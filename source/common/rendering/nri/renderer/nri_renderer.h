@@ -1851,11 +1851,10 @@ private:
 	void InvalidateRuntimeLightSceneData();
 	bool RefreshResidentStaticSceneDataSet();
 	void NoteResidentStaticAtlasGrow();
-	void ResetRuntimeMutationCacheAndFrameForStaticScene();
 	NRIRuntimeMutationOverlayServices BuildRuntimeMutationOverlayServices();
-	bool BuildRuntimeMapMutationOverlayImpl(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
+	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
 	NRIRuntimeMutationResidentApplyServices BuildRuntimeMutationResidentApplyServices();
-	bool TryApplyRuntimeMutationChunkToResidentSceneImpl(
+	bool TryApplyRuntimeMutationChunkToResidentScene(
 		const nri_scene::PTMapChunk& mapChunk,
 		RuntimeMapMutationCache::ChunkReplacement& replacement,
 		RuntimeMutationResidentApplyResult& outResult);
