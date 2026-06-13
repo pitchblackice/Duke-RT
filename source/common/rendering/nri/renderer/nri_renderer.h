@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../nri_output.h"
+#include "nri_debug_reporters.h"
 #include "nri_descriptor_sets.h"
 #include "nri_exposure.h"
 #include "nri_frame_graph.h"
@@ -1533,17 +1534,6 @@ private:
 		Count
 	};
 
-	struct SelfTestRouteSnapshot
-	{
-		const char* routeName = "unknown";
-		const char* presenterName = "unknown";
-		const char* ownerName = "unknown";
-		const char* passes = "unknown";
-		bool denoiserRun = false;
-		bool upscalerRun = false;
-		bool exposureRun = false;
-	};
-
 	using SceneBufferDebugStats = ::SceneBufferDebugStats;
 
 	struct SelectPrimitiveRewriteCache
@@ -2210,6 +2200,7 @@ private:
 	uint64_t mRuntimeRecurringChunkTrackerBuildSerial = 0;
 	std::vector<RuntimeRecurringChunkTracker> mRuntimeRecurringChunkTrackers;
 	nri_scene::SceneDebugStats mLastStats = {};
+	NRIRendererDiagnostics mDiagnostics;
 	SceneLightSystem mSceneLights;
 	NRIDirectionalLightState mDirectionalLightState = {};
 	NRIPTNightVisionState mNightVisionState = {};
@@ -2251,7 +2242,6 @@ private:
 	float mPreviousWorldToView[16] = {};
 	float mSkyColor[3] = { 0.38f, 0.48f, 0.65f };
 	float mGroundColor[3] = { 0.08f, 0.08f, 0.08f };
-	SelfTestRouteSnapshot mSelfTestRoute = {};
 	bool mHasLoggedStats = false;
 	bool mHasPreviousCameraState = false;
 	bool mHasFrameGenerationRealFrameTime = false;
