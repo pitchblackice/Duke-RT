@@ -2,6 +2,7 @@
 
 #include "../scene/nri_material_bridge.h"
 #include "../scene/nri_geometry_bridge.h"
+#include "../scene/nri_map_world.h"
 #include "../scene/nri_scene_bridge.h"
 #include "lightoverlay.h"
 #include "v_video.h"
@@ -658,6 +659,12 @@ public:
 	void PrintSectorLightDump(
 		const float currentCameraPos[3],
 		float sectorLightMultiplier,
+		float radius,
+		uint32_t limit) const;
+	void PrintSceneLightDump(
+		const float currentCameraPos[3],
+		const nri_scene::PTMapWorld& mapWorld,
+		uint32_t frameIndex,
 		float radius,
 		uint32_t limit) const;
 	bool MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const;

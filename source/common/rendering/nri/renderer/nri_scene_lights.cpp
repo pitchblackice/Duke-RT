@@ -166,6 +166,40 @@ namespace
 		}
 	}
 
+	const char* GetDrawListTypeName(uint32_t drawListType)
+	{
+		switch (drawListType)
+		{
+		case GLDL_PLAINWALLS: return "plain_walls";
+		case GLDL_MASKEDWALLS: return "masked_walls";
+		case GLDL_MASKEDWALLSS: return "masked_walls_split";
+		case GLDL_MASKEDWALLSD: return "masked_walls_decal";
+		case GLDL_MASKEDWALLSV: return "masked_walls_view";
+		case GLDL_MASKEDWALLSH: return "masked_walls_horizon";
+		case GLDL_TRANSLUCENTBORDER: return "translucent_border";
+		case GLDL_PLAINFLATS: return "plain_flats";
+		case GLDL_MASKEDFLATS: return "masked_flats";
+		case GLDL_MASKEDSLOPEFLATS: return "masked_slope_flats";
+		case GLDL_TRANSLUCENT: return "translucent";
+		case GLDL_MODELS: return "models";
+		case UINT32_MAX: return "none";
+		default: return "unknown";
+		}
+	}
+
+	const char* GetSceneLightRecordSourceName(SceneLightRecordSource source)
+	{
+		switch (source)
+		{
+		case SceneLightRecordSource::CapturedScene: return "captured_scene";
+		case SceneLightRecordSource::StaticMapScene: return "static_map_scene";
+		case SceneLightRecordSource::RuntimeMutationScene: return "runtime_mutation_scene";
+		case SceneLightRecordSource::DynamicScene: return "dynamic_scene";
+		case SceneLightRecordSource::PersistentVoxelScene: return "persistent_voxel_scene";
+		default: return "none";
+		}
+	}
+
 	void ComputeSurfaceBounds(const nri_scene::SurfaceRef& surface, float outCenter[3], float& outRadius)
 	{
 		outCenter[0] = 0.0f;
@@ -4206,6 +4240,114 @@ void SceneLightSystem::PrintSectorLightDump(
 	if (printCount == 0)
 	{
 		Printf("NRI PT sector lights: no active or raw sector lights matched the requested radius.\n");
+	}
+}
+
+void SceneLightSystem::PrintSceneLightDump(
+	const float currentCameraPos[3],
+	const nri_scene::PTMapWorld& mapWorld,
+	uint32_t frameIndex,
+	float radius,
+	uint32_t limit) const
+{
+	if (!HasRecords())
+	{
+		Printf("NRI PT scene lights: no cached scene-light identity is available yet.\n");
+		return;
+	}
+
+	struct Candidate
+	{
+		const SurfaceRecord* record = nullptr;
+		float distanceSq = 0.0f;
+	};
+
+	std::vector<Candidate> candidates;
+	candidates.reserve(mSurfaceRecords.size());
+	const float radiusSq = radius > 0.0f ? radius * radius : -1.0f;
+
+	for (const SurfaceRecord& record : mSurfaceRecords)
+	{
+		const float dx = record.center[0] - currentCameraPos[0];
+		const float dy = record.center[1] - currentCameraPos[1];
+		const float dz = record.center[2] - currentCameraPos[2];
+		const float distanceSq = dx * dx + dy * dy + dz * dz;
+		if (radiusSq >= 0.0f && distanceSq > radiusSq)
+		{
+			continue;
+		}
+
+		candidates.push_back({ &record, distanceSq });
+	}
+
+	std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b)
+	{
+		if (a.distanceSq != b.distanceSq)
+		{
+			return a.distanceSq < b.distanceSq;
+		}
+		return a.record->materialIndex < b.record->materialIndex;
+	});
+
+	const uint32_t requestedLimit = limit == 0 ? 32u : limit;
+	const uint32_t printCount = (uint32_t)std::min<size_t>(candidates.size(), requestedLimit);
+	Printf("NRI PT scene lights: cached_surface_identities=%u near_camera=%u radius=%.2f frame=%u\n",
+		(uint32_t)mSurfaceRecords.size(),
+		(uint32_t)candidates.size(),
+		radius,
+		frameIndex);
+
+	for (uint32_t i = 0; i < printCount; ++i)
+	{
+		const SurfaceRecord& record = *candidates[i].record;
+		const uint32_t lightingFlags = record.material.lightingFlags;
+		const int32_t localSpaceIndex = record.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mapWorld, (uint32_t)record.provenance.mapChunkIndex) : -1;
+		const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mapWorld, record.provenance);
+		const char* textureName = record.material.texture != nullptr ? record.material.texture->GetName().GetChars() : "(null)";
+		Printf("NRI PT scene light %u: source=%s drawlist=%s dist=%.2f center=(%.2f, %.2f, %.2f) radius=%.2f material=%u material_key=0x%016llx texture_key=0x%016llx glowmap_key=0x%016llx tile=%u texture=%s sector=%d wall=%d chunk=%d local_space=%d portal_graph=%d actor=%d palette=%u shade=%d alpha=%.3f light=%.3f flags=0x%x fullbright=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s emissive_mode=%s emissive_tex=%u avg=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+			i,
+			GetSceneLightRecordSourceName(record.source),
+			GetDrawListTypeName(record.provenance.drawListType),
+			std::sqrt(candidates[i].distanceSq),
+			record.center[0],
+			record.center[1],
+			record.center[2],
+			record.boundsRadius,
+			record.materialIndex,
+			(unsigned long long)record.material.materialKey,
+			(unsigned long long)record.material.textureContentKey,
+			(unsigned long long)record.material.glowmapContentKey,
+			record.material.textureId,
+			textureName,
+			record.provenance.sectorIndex,
+			record.provenance.wallIndex,
+			record.provenance.mapChunkIndex,
+			localSpaceIndex,
+			portalGraphIndex,
+			record.provenance.actorIndex,
+			record.material.paletteIndex,
+			record.material.shade,
+			record.material.alpha,
+			record.material.lightLevel,
+			record.material.materialFlags,
+			(lightingFlags & nri_scene::MaterialLightingFlag_MaterialFullbright) != 0 ? "yes" : "no",
+			(lightingFlags & nri_scene::MaterialLightingFlag_TextureFullbright) != 0 ? "yes" : "no",
+			(lightingFlags & nri_scene::MaterialLightingFlag_TextureGlowing) != 0 ? "yes" : "no",
+			(lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0 ? "yes" : "no",
+			(lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0 ? "yes" : "no",
+			GetMaterialEmissiveModeName(record.material.emissiveMode),
+			record.material.emissiveTextureIndex != UINT32_MAX ? record.material.emissiveTextureIndex : 0u,
+			record.material.averageColor[0],
+			record.material.averageColor[1],
+			record.material.averageColor[2],
+			record.material.glowColor[0],
+			record.material.glowColor[1],
+			record.material.glowColor[2]);
+	}
+
+	if (printCount == 0)
+	{
+		Printf("NRI PT scene lights: no cached surfaces matched the requested radius.\n");
 	}
 }
 
