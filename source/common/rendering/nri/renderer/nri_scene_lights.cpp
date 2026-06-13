@@ -1,5 +1,6 @@
 #include "nri_scene_lights.h"
 
+#include "nri_static_scene.h"
 #include "c_cvars.h"
 #include "coreactor.h"
 #include "gamefuncs.h"
@@ -12,6 +13,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -2304,6 +2306,90 @@ void SceneLightSystem::BeginFrame(uint64_t frameSerial)
 	mSectorLighting.fogSectorCount = 0;
 	mSectorLighting.pulsingSectorCount = 0;
 	mSectorLighting.topologyChanged = false;
+}
+
+SceneLightSystem::FrameAssemblyTimingStats SceneLightSystem::AssembleFrameSurfaceRecords(
+	const FrameAssemblyInput& input,
+	const FrameAssemblyServices& services)
+{
+	FrameAssemblyTimingStats timings = {};
+	BeginFrame(input.frameSerial);
+
+	auto measure = [](double& target, auto&& work)
+	{
+		const auto start = std::chrono::steady_clock::now();
+		work();
+		const auto end = std::chrono::steady_clock::now();
+		target += std::chrono::duration<double, std::milli>(end - start).count();
+	};
+
+	if (input.usedStaticMapScene && input.staticScene != nullptr && input.staticScene->valid)
+	{
+		const StaticMapSceneCache& staticScene = *input.staticScene;
+		const size_t chunkCount = std::min(staticScene.lightChunkViews.size(), staticScene.chunks.size());
+		measure(timings.staticAppendMs, [&]()
+		{
+			for (size_t chunkListIndex = 0; chunkListIndex < chunkCount; ++chunkListIndex)
+			{
+				const auto& staticChunk = staticScene.chunks[chunkListIndex];
+				if (!staticChunk.active)
+				{
+					continue;
+				}
+				const uint32_t mapChunkIndex = staticChunk.chunkIndex;
+				const bool useRuntimeMutationReplacement =
+					services.isRuntimeMutationReplacementActive != nullptr &&
+					services.isRuntimeMutationReplacementActive(services.user, mapChunkIndex);
+				if (useRuntimeMutationReplacement)
+				{
+					continue;
+				}
+
+				AppendSceneView(
+					staticScene.lightChunkViews[chunkListIndex],
+					staticScene.materialBridge,
+					SceneLightRecordSource::StaticMapScene,
+					staticChunk.materialOffset,
+					staticChunk.materialOffset);
+			}
+		});
+
+		measure(timings.runtimeMutationAppendMs, [&]()
+		{
+			if (services.appendRuntimeMutationSceneLightRecords != nullptr)
+			{
+				services.appendRuntimeMutationSceneLightRecords(services.user, *this);
+			}
+		});
+	}
+	else if (input.capturedSceneView != nullptr && input.capturedMaterials != nullptr)
+	{
+		measure(timings.capturedAppendMs, [&]()
+		{
+			AppendSceneView(*input.capturedSceneView, *input.capturedMaterials, SceneLightRecordSource::CapturedScene);
+		});
+	}
+
+	if (input.dynamicSceneView != nullptr && input.dynamicMaterials != nullptr)
+	{
+		measure(timings.dynamicAppendMs, [&]()
+		{
+			AppendSceneView(*input.dynamicSceneView, *input.dynamicMaterials, SceneLightRecordSource::DynamicScene);
+		});
+	}
+
+	if (input.appendPersistentVoxelSceneLights)
+	{
+		measure(timings.persistentVoxelAppendMs, [&]()
+		{
+			if (services.appendPersistentVoxelSceneLights != nullptr)
+			{
+				services.appendPersistentVoxelSceneLights(services.user, *this, input.frameIndex, input.voxelStats);
+			}
+		});
+	}
+
+	return timings;
 }
 
 void SceneLightSystem::AppendSceneView(

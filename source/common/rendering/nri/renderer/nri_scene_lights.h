@@ -109,6 +109,8 @@ struct NRISectorLightingBoundState
 	float dominantContribution = 0.0f;
 };
 
+struct StaticMapSceneCache;
+
 struct NRIRuntimeLightTileHeaderGpuData
 {
 	uint32_t indexOffset = 0;
@@ -550,6 +552,37 @@ public:
 		uint32_t persistentVoxelRecordCount = 0;
 	};
 
+	struct FrameAssemblyInput
+	{
+		uint64_t frameSerial = 0;
+		uint32_t frameIndex = 0;
+		bool voxelStats = false;
+		bool usedStaticMapScene = false;
+		const StaticMapSceneCache* staticScene = nullptr;
+		const nri_scene::SceneView* capturedSceneView = nullptr;
+		const nri_scene::MaterialBridgeData* capturedMaterials = nullptr;
+		const nri_scene::SceneView* dynamicSceneView = nullptr;
+		const nri_scene::MaterialBridgeData* dynamicMaterials = nullptr;
+		bool appendPersistentVoxelSceneLights = false;
+	};
+
+	struct FrameAssemblyServices
+	{
+		void* user = nullptr;
+		bool (*isRuntimeMutationReplacementActive)(void* user, uint32_t mapChunkIndex) = nullptr;
+		void (*appendRuntimeMutationSceneLightRecords)(void* user, SceneLightSystem& sceneLights) = nullptr;
+		void (*appendPersistentVoxelSceneLights)(void* user, SceneLightSystem& sceneLights, uint32_t frameIndex, bool voxelStats) = nullptr;
+	};
+
+	struct FrameAssemblyTimingStats
+	{
+		double staticAppendMs = 0.0;
+		double runtimeMutationAppendMs = 0.0;
+		double capturedAppendMs = 0.0;
+		double dynamicAppendMs = 0.0;
+		double persistentVoxelAppendMs = 0.0;
+	};
+
 	struct PersistentDynamicSurfaceStats
 	{
 		uint32_t actorSurfaceCount = 0;
@@ -609,6 +642,9 @@ public:
 	void Reset();
 	void ResetLevelState();
 	void BeginFrame(uint64_t frameSerial);
+	FrameAssemblyTimingStats AssembleFrameSurfaceRecords(
+		const FrameAssemblyInput& input,
+		const FrameAssemblyServices& services);
 	void AppendSceneView(
 		const nri_scene::SceneView& sceneView,
 		const nri_scene::MaterialBridgeData& materials,

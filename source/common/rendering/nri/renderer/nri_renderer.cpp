@@ -12284,58 +12284,40 @@ void NRIRenderer::RefreshSceneLightSystem(
 	bool appendPersistentVoxelSceneLights)
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneLightsMs);
-	mSceneLights.BeginFrame(mFrameIndex);
+	SceneLightSystem::FrameAssemblyInput assemblyInput = {};
+	assemblyInput.frameSerial = mFrameIndex;
+	assemblyInput.frameIndex = mFrameIndex;
+	assemblyInput.voxelStats = (bool)nri_voxelstats;
+	assemblyInput.usedStaticMapScene = usedStaticMapScene;
+	assemblyInput.staticScene = &mStaticMapScene;
+	assemblyInput.capturedSceneView = capturedSceneView;
+	assemblyInput.capturedMaterials = capturedMaterials;
+	assemblyInput.dynamicSceneView = dynamicSceneView;
+	assemblyInput.dynamicMaterials = dynamicMaterials;
+	assemblyInput.appendPersistentVoxelSceneLights = appendPersistentVoxelSceneLights;
 
-	if (usedStaticMapScene && mStaticMapScene.valid)
+	SceneLightSystem::FrameAssemblyServices assemblyServices = {};
+	assemblyServices.user = this;
+	assemblyServices.isRuntimeMutationReplacementActive = [](void* user, uint32_t mapChunkIndex) -> bool
 	{
-		const size_t chunkCount = std::min(mStaticMapScene.lightChunkViews.size(), mStaticMapScene.chunks.size());
-		{
-			ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightStaticAppendMs);
-			for (size_t chunkListIndex = 0; chunkListIndex < chunkCount; ++chunkListIndex)
-			{
-				const auto& staticChunk = mStaticMapScene.chunks[chunkListIndex];
-				if (!staticChunk.active)
-				{
-					continue;
-				}
-				const uint32_t mapChunkIndex = staticChunk.chunkIndex;
-				const bool useRuntimeMutationReplacement = mRuntimeMutation.IsReplacementActiveAndValid(mapChunkIndex);
-				if (useRuntimeMutationReplacement)
-				{
-					continue;
-				}
-
-				mSceneLights.AppendSceneView(
-					mStaticMapScene.lightChunkViews[chunkListIndex],
-					mStaticMapScene.materialBridge,
-					SceneLightRecordSource::StaticMapScene,
-					staticChunk.materialOffset,
-					staticChunk.materialOffset);
-			}
-		}
-
-		{
-			ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightRuntimeMutationAppendMs);
-			mRuntimeMutation.AppendSceneLightRecords(mSceneLights);
-		}
-	}
-	else if (capturedSceneView != nullptr && capturedMaterials != nullptr)
+		return static_cast<NRIRenderer*>(user)->mRuntimeMutation.IsReplacementActiveAndValid(mapChunkIndex);
+	};
+	assemblyServices.appendRuntimeMutationSceneLightRecords = [](void* user, SceneLightSystem& sceneLights)
 	{
-		ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightCapturedAppendMs);
-		mSceneLights.AppendSceneView(*capturedSceneView, *capturedMaterials, SceneLightRecordSource::CapturedScene);
-	}
-
-	if (dynamicSceneView != nullptr && dynamicMaterials != nullptr)
+		static_cast<NRIRenderer*>(user)->mRuntimeMutation.AppendSceneLightRecords(sceneLights);
+	};
+	assemblyServices.appendPersistentVoxelSceneLights = [](void* user, SceneLightSystem& sceneLights, uint32_t frameIndex, bool voxelStats)
 	{
-		ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightDynamicAppendMs);
-		mSceneLights.AppendSceneView(*dynamicSceneView, *dynamicMaterials, SceneLightRecordSource::DynamicScene);
-	}
+		static_cast<NRIRenderer*>(user)->mPersistentVoxels.AppendSceneLights(sceneLights, frameIndex, voxelStats);
+	};
 
-	if (appendPersistentVoxelSceneLights)
-	{
-		ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.sceneLightPersistentVoxelAppendMs);
-		mPersistentVoxels.AppendSceneLights(mSceneLights, mFrameIndex, (bool)nri_voxelstats);
-	}
+	const SceneLightSystem::FrameAssemblyTimingStats assemblyTimings =
+		mSceneLights.AssembleFrameSurfaceRecords(assemblyInput, assemblyServices);
+	mLastPerfShellTraceStats.sceneLightStaticAppendMs += assemblyTimings.staticAppendMs;
+	mLastPerfShellTraceStats.sceneLightRuntimeMutationAppendMs += assemblyTimings.runtimeMutationAppendMs;
+	mLastPerfShellTraceStats.sceneLightCapturedAppendMs += assemblyTimings.capturedAppendMs;
+	mLastPerfShellTraceStats.sceneLightDynamicAppendMs += assemblyTimings.dynamicAppendMs;
+	mLastPerfShellTraceStats.sceneLightPersistentVoxelAppendMs += assemblyTimings.persistentVoxelAppendMs;
 
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
 	const bool resolvedGenerationChanged =
