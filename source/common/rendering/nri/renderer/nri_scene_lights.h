@@ -550,6 +550,62 @@ public:
 		uint32_t persistentVoxelRecordCount = 0;
 	};
 
+	struct PersistentDynamicSurfaceStats
+	{
+		uint32_t actorSurfaceCount = 0;
+		uint32_t nonActorSurfaceCount = 0;
+		uint32_t wallSurfaceCount = 0;
+		uint32_t flatSurfaceCount = 0;
+		uint32_t spriteSurfaceCount = 0;
+		uint32_t actorFacingSpriteCount = 0;
+		uint32_t actorVoxelSpriteCount = 0;
+	};
+
+	struct PersistentDynamicEmissiveCache
+	{
+		bool valid = false;
+		uint32_t surfaceCount = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialCount = 0;
+		nri_scene::SceneView sceneView;
+		nri_scene::GeometryData geometry;
+		nri_scene::MaterialBridgeData materialBridge;
+	};
+
+	struct PersistentDynamicEmissiveHighWaterStats
+	{
+		uint32_t surfaceCount = 0;
+		uint32_t primitiveCount = 0;
+		uint32_t materialCount = 0;
+		PersistentDynamicSurfaceStats surfaceStats = {};
+	};
+
+	struct ActorSpriteDebugStats
+	{
+		uint32_t lastPruneChecks = 0;
+		uint32_t lastPruneMatches = 0;
+		uint32_t lastPruneDroppedMissingActor = 0;
+		uint32_t lastPruneDroppedMissingActorIndex = 0;
+		uint32_t lastPruneDroppedNullLiveTexture = 0;
+		uint32_t lastPruneDroppedTextureMismatch = 0;
+		uint32_t lastPruneDroppedPaletteMismatch = 0;
+	};
+
+	struct PersistentDynamicEmissiveCacheBuildServices
+	{
+		using BuildGeometryFn = void (*)(void* user, const nri_scene::SceneView& sceneView, nri_scene::GeometryData& geometry, const char* label);
+		using BuildMaterialsFn = void (*)(void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label);
+
+		void* user = nullptr;
+		BuildGeometryFn buildGeometry = nullptr;
+		BuildMaterialsFn buildMaterials = nullptr;
+		bool traceActorSpriteVerbose = false;
+		bool traceActorSpriteMismatch = false;
+
+		void BuildGeometry(const nri_scene::SceneView& sceneView, nri_scene::GeometryData& geometry, const char* label) const;
+		void BuildMaterials(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label) const;
+	};
+
 	void Reset();
 	void ResetLevelState();
 	void BeginFrame(uint64_t frameSerial);
@@ -669,6 +725,19 @@ public:
 		uint32_t limit) const;
 	bool MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const;
 	bool ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const;
+	void ResetPersistentDynamicEmissiveCache();
+	void ResetPersistentDynamicEmissiveHighWaterStats();
+	void PrunePersistentDynamicEmissiveCacheToLiveActors(const PersistentDynamicEmissiveCacheBuildServices& services);
+	bool RebuildPersistentDynamicEmissiveCache(
+		const nri_scene::SceneView& sceneView,
+		const nri_scene::MaterialBridgeData& materials,
+		const PersistentDynamicEmissiveCacheBuildServices& services);
+	PersistentDynamicSurfaceStats GatherPersistentDynamicEmissiveSurfaceStats() const;
+	void UpdatePersistentDynamicEmissiveHighWaterStats(const PersistentDynamicSurfaceStats& currentStats);
+	void MergePersistentDynamicEmissiveCacheIntoSceneView(nri_scene::SceneView& inOutSceneView) const;
+	const PersistentDynamicEmissiveCache& GetPersistentDynamicEmissiveCache() const { return mPersistentDynamicEmissiveCache; }
+	const PersistentDynamicEmissiveHighWaterStats& GetPersistentDynamicEmissiveHighWaterStats() const { return mPersistentDynamicEmissiveHighWaterStats; }
+	const ActorSpriteDebugStats& GetActorSpriteDebugStats() const { return mActorSpriteDebugStats; }
 
 	bool HasRecords() const { return !mSurfaceRecords.empty(); }
 	uint64_t GetFrameSerial() const { return mFrameSerial; }
@@ -724,6 +793,9 @@ private:
 	EmissiveSurfaceRegistry mEmissiveSurfaces = {};
 	SectorLightingRegistry mSectorLighting = {};
 	EnvironmentLightingState mEnvironmentLighting = {};
+	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
+	PersistentDynamicEmissiveHighWaterStats mPersistentDynamicEmissiveHighWaterStats = {};
+	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	std::vector<SurfaceRecord> mSurfaceRecords;
 	FrameAppendStats mFrameAppendStats = {};
 	uint64_t mFrameSerial = 0;

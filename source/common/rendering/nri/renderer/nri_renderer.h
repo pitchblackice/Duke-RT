@@ -1659,16 +1659,7 @@ private:
 
 	using StaticMapChunkAtlas = ::StaticMapChunkAtlas;
 
-	struct PersistentDynamicEmissiveCache
-	{
-		bool valid = false;
-		uint32_t surfaceCount = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t materialCount = 0;
-		nri_scene::SceneView sceneView;
-		nri_scene::GeometryData geometry;
-		nri_scene::MaterialBridgeData materialBridge;
-	};
+	using PersistentDynamicEmissiveCache = SceneLightSystem::PersistentDynamicEmissiveCache;
 
 	using PersistentVoxelBatch = ::PersistentVoxelBatch;
 
@@ -1680,27 +1671,8 @@ private:
 	using PersistentVoxelAdmissionStats = ::PersistentVoxelAdmissionStats;
 	using PersistentVoxelInstanceRecord = ::PersistentVoxelInstanceRecord;
 
-	struct ActorSpriteDebugStats
-	{
-		uint32_t lastPruneChecks = 0;
-		uint32_t lastPruneMatches = 0;
-		uint32_t lastPruneDroppedMissingActor = 0;
-		uint32_t lastPruneDroppedMissingActorIndex = 0;
-		uint32_t lastPruneDroppedNullLiveTexture = 0;
-		uint32_t lastPruneDroppedTextureMismatch = 0;
-		uint32_t lastPruneDroppedPaletteMismatch = 0;
-	};
-
-	struct PersistentDynamicSurfaceStats
-	{
-		uint32_t actorSurfaceCount = 0;
-		uint32_t nonActorSurfaceCount = 0;
-		uint32_t wallSurfaceCount = 0;
-		uint32_t flatSurfaceCount = 0;
-		uint32_t spriteSurfaceCount = 0;
-		uint32_t actorFacingSpriteCount = 0;
-		uint32_t actorVoxelSpriteCount = 0;
-	};
+	using ActorSpriteDebugStats = SceneLightSystem::ActorSpriteDebugStats;
+	using PersistentDynamicSurfaceStats = SceneLightSystem::PersistentDynamicSurfaceStats;
 
 	using RuntimeMutationCacheStats = ::RuntimeMutationCacheStats;
 
@@ -2013,8 +1985,7 @@ private:
 		bool appendPersistentVoxelSceneLights);
 	void ResetMuzzleFlashOverlayState(const char* reason);
 	void ResetPersistentDynamicEmissiveCache();
-	void PrunePersistentDynamicEmissiveCacheToLiveActors();
-	bool RebuildPersistentDynamicEmissiveCache(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials);
+	SceneLightSystem::PersistentDynamicEmissiveCacheBuildServices BuildPersistentDynamicEmissiveCacheServices();
 	void BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel = nullptr);
 	void ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const;
 	void ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials);
@@ -2022,7 +1993,6 @@ private:
 	uint64_t ComputeChunkEmissiveOverrideHash(const nri_scene::MaterialBridgeData& materials) const;
 	void QueueStaticMapSceneLightingInvalidation();
 	void InvalidateStaticMapSceneForMaterialLighting();
-	PersistentDynamicSurfaceStats GatherPersistentDynamicEmissiveSurfaceStats() const;
 	static MaterialBuildTraceSlot ResolveMaterialBuildTraceSlot(const char* traceLabel);
 	const std::unordered_map<int32_t, uint32_t>& GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot = MaterialBuildTraceSlot::Unknown);
 	void LogFallback(const char* reason);
@@ -2232,11 +2202,9 @@ private:
 	NRIStaticSceneResidency mStaticSceneResidency;
 	NRIRuntimeMutationSystem mRuntimeMutation;
 	DynamicSceneFrameState mDynamicSceneLastFrame = {};
-	PersistentDynamicEmissiveCache mPersistentDynamicEmissiveCache = {};
 	NRIPersistentVoxelResidency mPersistentVoxels;
 	StateCommitDomainGenerations mLastStateCommitDomainGenerations = {};
 	bool mHasLastStateCommitDomainGenerations = false;
-	ActorSpriteDebugStats mActorSpriteDebugStats = {};
 	nri_material_policy::ActorMaterialOverrideCache mActorMaterialOverrideCache = {};
 	DescriptorCoherencyDebugStats mDescriptorCoherencyDebugStats = {};
 	RuntimeSpaceLinkFrameState mRuntimeSpaceLinkLastFrame = {};
@@ -2263,10 +2231,6 @@ private:
 	};
 	uint64_t mRuntimeRecurringChunkTrackerBuildSerial = 0;
 	std::vector<RuntimeRecurringChunkTracker> mRuntimeRecurringChunkTrackers;
-	PersistentDynamicSurfaceStats mPersistentDynamicEmissiveHighWaterStats = {};
-	uint32_t mPersistentDynamicEmissiveHighWaterSurfaceCount = 0;
-	uint32_t mPersistentDynamicEmissiveHighWaterPrimitiveCount = 0;
-	uint32_t mPersistentDynamicEmissiveHighWaterMaterialCount = 0;
 	nri_scene::SceneDebugStats mLastStats = {};
 	SceneLightSystem mSceneLights;
 	NRIDirectionalLightState mDirectionalLightState = {};

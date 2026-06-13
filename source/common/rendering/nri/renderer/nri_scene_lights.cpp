@@ -1,10 +1,14 @@
 #include "nri_scene_lights.h"
 
 #include "c_cvars.h"
+#include "coreactor.h"
 #include "gamefuncs.h"
+#include "hw_voxels.h"
 #include "maptypes.h"
 #include "palette.h"
 #include "printf.h"
+#include "texinfo.h"
+#include "texturemanager.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +17,7 @@
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 EXTERN_CVAR(Float, nri_ptemissiveminpower)
 EXTERN_CVAR(Float, nri_ptemissiveminsurface)
@@ -43,6 +48,7 @@ EXTERN_CVAR(Float, nri_ptsectoremissionmaterialmax)
 EXTERN_CVAR(Bool, nri_ptemissivelighteditmode)
 EXTERN_CVAR(Float, nri_ptemissivelighteditnotifyrange)
 EXTERN_CVAR(Int, nri_ptnudgetrace)
+EXTERN_CVAR(Int, nri_ptactorspritetrace)
 
 namespace
 {
@@ -128,6 +134,231 @@ namespace
 	const char* YesNo(bool value)
 	{
 		return value ? "yes" : "no";
+	}
+
+	enum class ActorSpriteLiveMatchResult : uint32_t
+	{
+		Match = 0,
+		NullLiveTexture,
+		TextureMismatch,
+		PaletteMismatch
+	};
+
+	struct ActorSpriteLiveMatchDetails
+	{
+		ActorSpriteLiveMatchResult result = ActorSpriteLiveMatchResult::Match;
+		FGameTexture* liveTexture = nullptr;
+		int32_t liveTextureId = -1;
+		int32_t surfaceTextureId = -1;
+		int32_t livePalette = 0;
+		int32_t surfacePalette = 0;
+	};
+
+	const char* GetActorSpriteLiveMatchResultName(ActorSpriteLiveMatchResult result)
+	{
+		switch (result)
+		{
+		case ActorSpriteLiveMatchResult::Match: return "match";
+		case ActorSpriteLiveMatchResult::NullLiveTexture: return "null_live_texture";
+		case ActorSpriteLiveMatchResult::TextureMismatch: return "texture_mismatch";
+		case ActorSpriteLiveMatchResult::PaletteMismatch: return "palette_mismatch";
+		default: return "unknown";
+		}
+	}
+
+	FTextureID GetLiveActorDisplayTextureId(const DCoreActor& actor)
+	{
+		return actor.dispictex.isValid() ? actor.dispictex : actor.spr.spritetexture();
+	}
+
+	FGameTexture* GetLiveActorSurfaceTexture(const DCoreActor& actor, nri_scene::SurfaceSourceType sourceType)
+	{
+		switch (sourceType)
+		{
+		case nri_scene::SurfaceSourceType::DrawListWall:
+		case nri_scene::SurfaceSourceType::FacingSprite:
+			return TexMan.GetGameTexture(GetLiveActorDisplayTextureId(actor));
+
+		case nri_scene::SurfaceSourceType::VoxelProxySprite:
+		{
+			if (!r_voxels)
+			{
+				return nullptr;
+			}
+
+			const int voxelIndex = GetExtInfo(actor.spr.spritetexture()).tiletovox;
+			if (voxelIndex < 0 || voxelIndex >= MAXVOXELS || voxmodels[voxelIndex] == nullptr || voxmodels[voxelIndex]->model == nullptr)
+			{
+				return nullptr;
+			}
+
+			return TexMan.GetGameTexture(voxmodels[voxelIndex]->model->GetPaletteTexture());
+		}
+
+		default:
+			return nullptr;
+		}
+	}
+
+	bool SurfaceUsesLiveActorTextureValidation(const nri_scene::SurfaceRef& surface)
+	{
+		if (surface.provenance.actorIndex < 0)
+		{
+			return false;
+		}
+
+		switch (surface.provenance.sourceType)
+		{
+		case nri_scene::SurfaceSourceType::DrawListWall:
+			return (surface.material.flags & nri_scene::MaterialFlag_Sprite) != 0;
+		case nri_scene::SurfaceSourceType::FacingSprite:
+		case nri_scene::SurfaceSourceType::VoxelProxySprite:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	ActorSpriteLiveMatchDetails EvaluateCachedSurfaceMatchAgainstLiveActor(const nri_scene::SurfaceRef& surface, const DCoreActor& actor)
+	{
+		ActorSpriteLiveMatchDetails details = {};
+		details.surfaceTextureId = surface.material.texture != nullptr ? surface.material.texture->GetID().GetIndex() : -1;
+		details.surfacePalette = surface.material.palette;
+		details.livePalette = actor.spr.pal;
+
+		switch (surface.provenance.sourceType)
+		{
+		case nri_scene::SurfaceSourceType::DrawListWall:
+		case nri_scene::SurfaceSourceType::FacingSprite:
+		case nri_scene::SurfaceSourceType::VoxelProxySprite:
+		{
+			details.liveTexture = GetLiveActorSurfaceTexture(actor, surface.provenance.sourceType);
+			details.liveTextureId = details.liveTexture != nullptr ? details.liveTexture->GetID().GetIndex() : -1;
+			if (details.liveTexture == nullptr)
+			{
+				details.result = ActorSpriteLiveMatchResult::NullLiveTexture;
+			}
+			else if (surface.material.texture != details.liveTexture)
+			{
+				details.result = ActorSpriteLiveMatchResult::TextureMismatch;
+			}
+			else if (surface.material.palette != actor.spr.pal)
+			{
+				details.result = ActorSpriteLiveMatchResult::PaletteMismatch;
+			}
+			return details;
+		}
+
+		default:
+			return details;
+		}
+	}
+
+	bool CachedSurfaceMatchesLiveActor(const nri_scene::SurfaceRef& surface, const DCoreActor& actor)
+	{
+		return EvaluateCachedSurfaceMatchAgainstLiveActor(surface, actor).result == ActorSpriteLiveMatchResult::Match;
+	}
+
+	uint64_t HashPersistentSurfaceTaggedSignedValue(uint64_t hash, uint64_t tag, int32_t value)
+	{
+		hash = (hash ^ tag) * 1099511628211ull;
+		hash = (hash ^ (uint64_t)(uint32_t)(value + 1)) * 1099511628211ull;
+		return hash;
+	}
+
+	uint64_t QuantizePersistentSurfaceCenter(const nri_scene::SurfaceRef& surface)
+	{
+		if (surface.vertices.empty())
+		{
+			return 0ull;
+		}
+
+		double center[3] = {};
+		for (const auto& vertex : surface.vertices)
+		{
+			center[0] += vertex.position[0];
+			center[1] += vertex.position[1];
+			center[2] += vertex.position[2];
+		}
+
+		const double invVertexCount = 1.0 / (double)surface.vertices.size();
+		const int64_t x = (int64_t)std::llround(center[0] * invVertexCount * 16.0);
+		const int64_t y = (int64_t)std::llround(center[1] * invVertexCount * 16.0);
+		const int64_t z = (int64_t)std::llround(center[2] * invVertexCount * 16.0);
+
+		uint64_t key = 1469598103934665603ull;
+		key = (key ^ (uint64_t)x) * 1099511628211ull;
+		key = (key ^ (uint64_t)y) * 1099511628211ull;
+		key = (key ^ (uint64_t)z) * 1099511628211ull;
+		return key;
+	}
+
+	uint64_t BuildPersistentEmissiveSurfaceIdentityKey(const nri_scene::SurfaceRef& surface)
+	{
+		uint64_t key = 1469598103934665603ull;
+		key = (key ^ (uint64_t)(uint32_t)surface.provenance.sourceType) * 1099511628211ull;
+		key = (key ^ (uint64_t)surface.provenance.drawListType) * 1099511628211ull;
+
+		bool hasAuthoritativeOwnership = false;
+		if (surface.provenance.actorIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0xA11C700000000001ull, surface.provenance.actorIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.sectorIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0x5EC70B5E00000001ull, surface.provenance.sectorIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.wallIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0xAA11000000000001ull, surface.provenance.wallIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.sectionIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0x5EC7100000000001ull, surface.provenance.sectionIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.mapChunkIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0xC4C0000000000001ull, surface.provenance.mapChunkIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (surface.provenance.nextSectorIndex >= 0)
+		{
+			key = HashPersistentSurfaceTaggedSignedValue(key, 0x9E57000000000001ull, surface.provenance.nextSectorIndex);
+			hasAuthoritativeOwnership = true;
+		}
+		if (!hasAuthoritativeOwnership)
+		{
+			key = (key ^ 0xCE173E0000000001ull) * 1099511628211ull;
+			key = (key ^ QuantizePersistentSurfaceCenter(surface)) * 1099511628211ull;
+		}
+
+		key = (key ^ (uint64_t)(uintptr_t)surface.material.texture) * 1099511628211ull;
+		key = (key ^ (uint64_t)(uint32_t)(surface.material.palette + 1)) * 1099511628211ull;
+		key = (key ^ (uint64_t)surface.provenance.cstat) * 1099511628211ull;
+		key = (key ^ (uint64_t)surface.provenance.materialFlags) * 1099511628211ull;
+		return key;
+	}
+
+	template <typename SurfaceContainer>
+	void AppendUniquePersistentEmissiveSurfaces(
+		const SurfaceContainer& source,
+		SurfaceContainer& destination,
+		std::unordered_set<uint64_t>& inOutSeenKeys)
+	{
+		for (const auto& surface : source)
+		{
+			const uint64_t identityKey = BuildPersistentEmissiveSurfaceIdentityKey(surface);
+			if (!inOutSeenKeys.insert(identityKey).second)
+			{
+				continue;
+			}
+
+			destination.push_back(surface);
+		}
 	}
 
 	bool HasAutoEmissiveSourceFlags(uint32_t sourceFlags)
@@ -1536,6 +1767,9 @@ void SceneLightSystem::Reset()
 	mEmissiveSurfaces = {};
 	mSectorLighting = {};
 	mEnvironmentLighting = {};
+	mPersistentDynamicEmissiveCache = {};
+	mPersistentDynamicEmissiveHighWaterStats = {};
+	mActorSpriteDebugStats = {};
 	mSurfaceRecords.clear();
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
@@ -1595,6 +1829,9 @@ void SceneLightSystem::ResetLevelState()
 
 	mSectorLighting = {};
 	mEnvironmentLighting = {};
+	mPersistentDynamicEmissiveCache = {};
+	mPersistentDynamicEmissiveHighWaterStats = {};
+	mActorSpriteDebugStats = {};
 	mSurfaceRecords.clear();
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
@@ -1602,6 +1839,441 @@ void SceneLightSystem::ResetLevelState()
 	mTransientMuzzleFlashSlots.clear();
 	mTransientMuzzleFlashLights.clear();
 	ResetEmissiveSectorResponseCaches();
+}
+
+void SceneLightSystem::PersistentDynamicEmissiveCacheBuildServices::BuildGeometry(
+	const nri_scene::SceneView& sceneView,
+	nri_scene::GeometryData& geometry,
+	const char* label) const
+{
+	if (buildGeometry != nullptr)
+	{
+		buildGeometry(user, sceneView, geometry, label);
+		return;
+	}
+
+	nri_scene::BuildGeometry(sceneView, geometry);
+}
+
+void SceneLightSystem::PersistentDynamicEmissiveCacheBuildServices::BuildMaterials(
+	nri_scene::SceneView& sceneView,
+	nri_scene::MaterialBridgeData& materials,
+	const char* label) const
+{
+	if (buildMaterials != nullptr)
+	{
+		buildMaterials(user, sceneView, materials, label);
+		return;
+	}
+
+	nri_scene::BuildMaterials(sceneView, materials);
+}
+
+void SceneLightSystem::ResetPersistentDynamicEmissiveCache()
+{
+	mPersistentDynamicEmissiveCache = {};
+	mActorSpriteDebugStats = {};
+}
+
+void SceneLightSystem::ResetPersistentDynamicEmissiveHighWaterStats()
+{
+	mPersistentDynamicEmissiveHighWaterStats = {};
+}
+
+SceneLightSystem::PersistentDynamicSurfaceStats SceneLightSystem::GatherPersistentDynamicEmissiveSurfaceStats() const
+{
+	PersistentDynamicSurfaceStats stats = {};
+	if (!mPersistentDynamicEmissiveCache.valid)
+	{
+		return stats;
+	}
+
+	stats.wallSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.size();
+	stats.flatSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.size();
+	stats.spriteSurfaceCount = (uint32_t)mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.size();
+
+	auto accumulate = [&stats](const auto& surfaces)
+	{
+		for (const auto& surface : surfaces)
+		{
+			if (surface.provenance.actorIndex >= 0)
+			{
+				stats.actorSurfaceCount++;
+			}
+			else
+			{
+				stats.nonActorSurfaceCount++;
+			}
+
+			switch (surface.provenance.sourceType)
+			{
+			case nri_scene::SurfaceSourceType::FacingSprite:
+				stats.actorFacingSpriteCount++;
+				break;
+			case nri_scene::SurfaceSourceType::VoxelProxySprite:
+				stats.actorVoxelSpriteCount++;
+				break;
+			default:
+				break;
+			}
+		}
+	};
+
+	accumulate(mPersistentDynamicEmissiveCache.sceneView.opaqueWalls);
+	accumulate(mPersistentDynamicEmissiveCache.sceneView.opaqueFlats);
+	accumulate(mPersistentDynamicEmissiveCache.sceneView.opaqueSprites);
+	return stats;
+}
+
+void SceneLightSystem::UpdatePersistentDynamicEmissiveHighWaterStats(const PersistentDynamicSurfaceStats& currentStats)
+{
+	if (!mPersistentDynamicEmissiveCache.valid)
+	{
+		return;
+	}
+
+	mPersistentDynamicEmissiveHighWaterStats.surfaceCount = std::max(mPersistentDynamicEmissiveHighWaterStats.surfaceCount, mPersistentDynamicEmissiveCache.surfaceCount);
+	mPersistentDynamicEmissiveHighWaterStats.primitiveCount = std::max(mPersistentDynamicEmissiveHighWaterStats.primitiveCount, mPersistentDynamicEmissiveCache.primitiveCount);
+	mPersistentDynamicEmissiveHighWaterStats.materialCount = std::max(mPersistentDynamicEmissiveHighWaterStats.materialCount, mPersistentDynamicEmissiveCache.materialCount);
+	mPersistentDynamicEmissiveHighWaterStats.surfaceStats.actorSurfaceCount = std::max(mPersistentDynamicEmissiveHighWaterStats.surfaceStats.actorSurfaceCount, currentStats.actorSurfaceCount);
+	mPersistentDynamicEmissiveHighWaterStats.surfaceStats.nonActorSurfaceCount = std::max(mPersistentDynamicEmissiveHighWaterStats.surfaceStats.nonActorSurfaceCount, currentStats.nonActorSurfaceCount);
+	mPersistentDynamicEmissiveHighWaterStats.surfaceStats.wallSurfaceCount = std::max(mPersistentDynamicEmissiveHighWaterStats.surfaceStats.wallSurfaceCount, currentStats.wallSurfaceCount);
+	mPersistentDynamicEmissiveHighWaterStats.surfaceStats.flatSurfaceCount = std::max(mPersistentDynamicEmissiveHighWaterStats.surfaceStats.flatSurfaceCount, currentStats.flatSurfaceCount);
+	mPersistentDynamicEmissiveHighWaterStats.surfaceStats.spriteSurfaceCount = std::max(mPersistentDynamicEmissiveHighWaterStats.surfaceStats.spriteSurfaceCount, currentStats.spriteSurfaceCount);
+	mPersistentDynamicEmissiveHighWaterStats.surfaceStats.actorFacingSpriteCount = std::max(mPersistentDynamicEmissiveHighWaterStats.surfaceStats.actorFacingSpriteCount, currentStats.actorFacingSpriteCount);
+	mPersistentDynamicEmissiveHighWaterStats.surfaceStats.actorVoxelSpriteCount = std::max(mPersistentDynamicEmissiveHighWaterStats.surfaceStats.actorVoxelSpriteCount, currentStats.actorVoxelSpriteCount);
+}
+
+void SceneLightSystem::MergePersistentDynamicEmissiveCacheIntoSceneView(nri_scene::SceneView& inOutSceneView) const
+{
+	if (!mPersistentDynamicEmissiveCache.valid)
+	{
+		return;
+	}
+
+	std::unordered_set<uint64_t> seenSurfaceKeys;
+	seenSurfaceKeys.reserve(
+		inOutSceneView.opaqueWalls.size() +
+		inOutSceneView.opaqueFlats.size() +
+		inOutSceneView.opaqueSprites.size() +
+		mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.size() +
+		mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.size() +
+		mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.size());
+	for (const auto& surface : inOutSceneView.opaqueWalls)
+	{
+		seenSurfaceKeys.insert(BuildPersistentEmissiveSurfaceIdentityKey(surface));
+	}
+	for (const auto& surface : inOutSceneView.opaqueFlats)
+	{
+		seenSurfaceKeys.insert(BuildPersistentEmissiveSurfaceIdentityKey(surface));
+	}
+	for (const auto& surface : inOutSceneView.opaqueSprites)
+	{
+		seenSurfaceKeys.insert(BuildPersistentEmissiveSurfaceIdentityKey(surface));
+	}
+	AppendUniquePersistentEmissiveSurfaces(
+		mPersistentDynamicEmissiveCache.sceneView.opaqueWalls,
+		inOutSceneView.opaqueWalls,
+		seenSurfaceKeys);
+	AppendUniquePersistentEmissiveSurfaces(
+		mPersistentDynamicEmissiveCache.sceneView.opaqueFlats,
+		inOutSceneView.opaqueFlats,
+		seenSurfaceKeys);
+	AppendUniquePersistentEmissiveSurfaces(
+		mPersistentDynamicEmissiveCache.sceneView.opaqueSprites,
+		inOutSceneView.opaqueSprites,
+		seenSurfaceKeys);
+}
+
+void SceneLightSystem::PrunePersistentDynamicEmissiveCacheToLiveActors(const PersistentDynamicEmissiveCacheBuildServices& services)
+{
+	mActorSpriteDebugStats = {};
+	if (!mPersistentDynamicEmissiveCache.valid)
+	{
+		return;
+	}
+
+	std::unordered_map<int32_t, bool> liveActorIndices;
+	std::unordered_map<int32_t, DCoreActor*> liveActorsByIndex;
+	liveActorIndices.reserve(256);
+	liveActorsByIndex.reserve(256);
+
+	TSpriteIterator<DCoreActor> it;
+	while (auto actor = it.Next())
+	{
+		if (actor == nullptr ||
+			!actor->exists() ||
+			(actor->ObjectFlags & OF_EuthanizeMe) != 0)
+		{
+			continue;
+		}
+
+		liveActorIndices[(int32_t)actor->GetIndex()] = true;
+		liveActorsByIndex[(int32_t)actor->GetIndex()] = actor;
+	}
+
+	bool needsPrune = false;
+	auto detectStaleActorOwnership = [this, &services, &needsPrune, &liveActorIndices, &liveActorsByIndex](const auto& surfaces)
+	{
+		for (const auto& surface : surfaces)
+		{
+			if (SurfaceUsesLiveActorTextureValidation(surface))
+			{
+				mActorSpriteDebugStats.lastPruneChecks++;
+				if (surface.provenance.actorIndex < 0)
+				{
+					mActorSpriteDebugStats.lastPruneDroppedMissingActorIndex++;
+					if (services.traceActorSpriteMismatch)
+					{
+						Printf("NRI PT actor-sprite cache: action=drop reason=missing_actor_index source=%s actor=%d surface_tex=%d surface_ptr=%p surface_pal=%d\n",
+							GetSurfaceSourceTypeName(surface.provenance.sourceType),
+							surface.provenance.actorIndex,
+							surface.material.texture != nullptr ? surface.material.texture->GetID().GetIndex() : -1,
+							surface.material.texture,
+							surface.material.palette);
+					}
+					needsPrune = true;
+					continue;
+				}
+
+				auto liveActorIt = liveActorsByIndex.find(surface.provenance.actorIndex);
+				if (liveActorIt == liveActorsByIndex.end())
+				{
+					mActorSpriteDebugStats.lastPruneDroppedMissingActor++;
+					if (services.traceActorSpriteMismatch)
+					{
+						Printf("NRI PT actor-sprite cache: action=drop reason=missing_actor source=%s actor=%d surface_tex=%d surface_ptr=%p surface_pal=%d\n",
+							GetSurfaceSourceTypeName(surface.provenance.sourceType),
+							surface.provenance.actorIndex,
+							surface.material.texture != nullptr ? surface.material.texture->GetID().GetIndex() : -1,
+							surface.material.texture,
+							surface.material.palette);
+					}
+					needsPrune = true;
+					continue;
+				}
+
+				const ActorSpriteLiveMatchDetails match = EvaluateCachedSurfaceMatchAgainstLiveActor(surface, *liveActorIt->second);
+				if (match.result == ActorSpriteLiveMatchResult::Match)
+				{
+					mActorSpriteDebugStats.lastPruneMatches++;
+					if (services.traceActorSpriteVerbose)
+					{
+						Printf("NRI PT actor-sprite cache: action=keep reason=%s source=%s actor=%d surface_tex=%d surface_ptr=%p live_tex=%d live_ptr=%p surface_pal=%d live_pal=%d\n",
+							GetActorSpriteLiveMatchResultName(match.result),
+							GetSurfaceSourceTypeName(surface.provenance.sourceType),
+							surface.provenance.actorIndex,
+							match.surfaceTextureId,
+							surface.material.texture,
+							match.liveTextureId,
+							match.liveTexture,
+							match.surfacePalette,
+							match.livePalette);
+					}
+					continue;
+				}
+
+				switch (match.result)
+				{
+				case ActorSpriteLiveMatchResult::NullLiveTexture: mActorSpriteDebugStats.lastPruneDroppedNullLiveTexture++; break;
+				case ActorSpriteLiveMatchResult::TextureMismatch: mActorSpriteDebugStats.lastPruneDroppedTextureMismatch++; break;
+				case ActorSpriteLiveMatchResult::PaletteMismatch: mActorSpriteDebugStats.lastPruneDroppedPaletteMismatch++; break;
+				default: break;
+				}
+				if (services.traceActorSpriteMismatch)
+				{
+					Printf("NRI PT actor-sprite cache: action=drop reason=%s source=%s actor=%d surface_tex=%d surface_ptr=%p live_tex=%d live_ptr=%p surface_pal=%d live_pal=%d\n",
+						GetActorSpriteLiveMatchResultName(match.result),
+						GetSurfaceSourceTypeName(surface.provenance.sourceType),
+						surface.provenance.actorIndex,
+						match.surfaceTextureId,
+						surface.material.texture,
+						match.liveTextureId,
+						match.liveTexture,
+						match.surfacePalette,
+						match.livePalette);
+				}
+				needsPrune = true;
+			}
+			else if (surface.provenance.actorIndex >= 0 &&
+				liveActorIndices.find(surface.provenance.actorIndex) == liveActorIndices.end())
+			{
+				needsPrune = true;
+			}
+		}
+	};
+
+	detectStaleActorOwnership(mPersistentDynamicEmissiveCache.sceneView.opaqueWalls);
+	detectStaleActorOwnership(mPersistentDynamicEmissiveCache.sceneView.opaqueFlats);
+	detectStaleActorOwnership(mPersistentDynamicEmissiveCache.sceneView.opaqueSprites);
+	if (!needsPrune)
+	{
+		return;
+	}
+
+	PersistentDynamicEmissiveCache next = {};
+	next.sceneView.drawInfo = mPersistentDynamicEmissiveCache.sceneView.drawInfo;
+	next.sceneView.sky = mPersistentDynamicEmissiveCache.sceneView.sky;
+	Copy3f(mPersistentDynamicEmissiveCache.sceneView.skyColor, next.sceneView.skyColor);
+	Copy3f(mPersistentDynamicEmissiveCache.sceneView.groundColor, next.sceneView.groundColor);
+
+	auto appendLiveOwnedSurfaces = [&liveActorIndices, &liveActorsByIndex](const auto& source, auto& destination)
+	{
+		for (const auto& surface : source)
+		{
+			if (SurfaceUsesLiveActorTextureValidation(surface))
+			{
+				if (surface.provenance.actorIndex < 0)
+				{
+					continue;
+				}
+
+				auto liveActorIt = liveActorsByIndex.find(surface.provenance.actorIndex);
+				if (liveActorIt == liveActorsByIndex.end() || !CachedSurfaceMatchesLiveActor(surface, *liveActorIt->second))
+				{
+					continue;
+				}
+			}
+			else if (surface.provenance.actorIndex >= 0 &&
+				liveActorIndices.find(surface.provenance.actorIndex) == liveActorIndices.end())
+			{
+				continue;
+			}
+
+			destination.push_back(surface);
+		}
+	};
+
+	appendLiveOwnedSurfaces(mPersistentDynamicEmissiveCache.sceneView.opaqueWalls, next.sceneView.opaqueWalls);
+	appendLiveOwnedSurfaces(mPersistentDynamicEmissiveCache.sceneView.opaqueFlats, next.sceneView.opaqueFlats);
+	appendLiveOwnedSurfaces(mPersistentDynamicEmissiveCache.sceneView.opaqueSprites, next.sceneView.opaqueSprites);
+
+	next.surfaceCount =
+		(uint32_t)next.sceneView.opaqueWalls.size() +
+		(uint32_t)next.sceneView.opaqueFlats.size() +
+		(uint32_t)next.sceneView.opaqueSprites.size();
+	if (next.surfaceCount == 0)
+	{
+		mPersistentDynamicEmissiveCache = {};
+		return;
+	}
+
+	services.BuildGeometry(next.sceneView, next.geometry, "persistent_emissive_cache_prune");
+	services.BuildMaterials(next.sceneView, next.materialBridge, "persistent_emissive_cache_prune");
+
+	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
+	next.materialCount = (uint32_t)next.materialBridge.materials.size();
+	next.sceneView.stats.totalDrawItems = next.surfaceCount;
+	next.sceneView.stats.wallDrawItems = (uint32_t)next.sceneView.opaqueWalls.size();
+	next.sceneView.stats.flatDrawItems = (uint32_t)next.sceneView.opaqueFlats.size();
+	next.sceneView.stats.spriteDrawItems = (uint32_t)next.sceneView.opaqueSprites.size();
+	next.sceneView.stats.triangleEstimate = next.primitiveCount;
+	next.sceneView.stats.materialRefs = next.materialCount;
+	next.valid = next.primitiveCount > 0 && next.materialCount > 0;
+	if (!next.valid)
+	{
+		mPersistentDynamicEmissiveCache = {};
+		return;
+	}
+
+	mPersistentDynamicEmissiveCache = std::move(next);
+}
+
+bool SceneLightSystem::RebuildPersistentDynamicEmissiveCache(
+	const nri_scene::SceneView& sceneView,
+	const nri_scene::MaterialBridgeData& materials,
+	const PersistentDynamicEmissiveCacheBuildServices& services)
+{
+	PersistentDynamicEmissiveCache next = {};
+	next.sceneView.drawInfo = sceneView.drawInfo;
+	next.sceneView.sky = sceneView.sky;
+	Copy3f(sceneView.skyColor, next.sceneView.skyColor);
+	Copy3f(sceneView.groundColor, next.sceneView.groundColor);
+
+	bool liveSceneHasEmissive = false;
+	std::unordered_set<uint64_t> seenSurfaceKeys;
+	seenSurfaceKeys.reserve(
+		sceneView.opaqueWalls.size() +
+		sceneView.opaqueFlats.size() +
+		sceneView.opaqueSprites.size() +
+		mPersistentDynamicEmissiveCache.sceneView.opaqueWalls.size() +
+		mPersistentDynamicEmissiveCache.sceneView.opaqueFlats.size() +
+		mPersistentDynamicEmissiveCache.sceneView.opaqueSprites.size());
+
+	uint32_t materialIndex = 0;
+	auto appendLiveSurfaceList = [this, &materials, &materialIndex, &liveSceneHasEmissive, &seenSurfaceKeys](const auto& source, auto& destination)
+	{
+		for (const auto& surface : source)
+		{
+			const bool keepSurface =
+				materialIndex < materials.lightMetadata.size() &&
+				MaterialWouldEmit(materials.lightMetadata[materialIndex]);
+			const bool keepSpriteCacheSurface =
+				surface.provenance.sourceType != nri_scene::SurfaceSourceType::FacingSprite &&
+				surface.provenance.sourceType != nri_scene::SurfaceSourceType::VoxelProxySprite;
+			if (keepSurface && (keepSpriteCacheSurface || surface.provenance.actorIndex >= 0))
+			{
+				liveSceneHasEmissive = true;
+				const uint64_t identityKey = BuildPersistentEmissiveSurfaceIdentityKey(surface);
+				if (seenSurfaceKeys.insert(identityKey).second)
+				{
+					destination.push_back(surface);
+				}
+			}
+			materialIndex++;
+		}
+	};
+
+	appendLiveSurfaceList(sceneView.opaqueWalls, next.sceneView.opaqueWalls);
+	appendLiveSurfaceList(sceneView.opaqueFlats, next.sceneView.opaqueFlats);
+	appendLiveSurfaceList(sceneView.opaqueSprites, next.sceneView.opaqueSprites);
+
+	if (mPersistentDynamicEmissiveCache.valid)
+	{
+		AppendUniquePersistentEmissiveSurfaces(
+			mPersistentDynamicEmissiveCache.sceneView.opaqueWalls,
+			next.sceneView.opaqueWalls,
+			seenSurfaceKeys);
+		AppendUniquePersistentEmissiveSurfaces(
+			mPersistentDynamicEmissiveCache.sceneView.opaqueFlats,
+			next.sceneView.opaqueFlats,
+			seenSurfaceKeys);
+		AppendUniquePersistentEmissiveSurfaces(
+			mPersistentDynamicEmissiveCache.sceneView.opaqueSprites,
+			next.sceneView.opaqueSprites,
+			seenSurfaceKeys);
+	}
+
+	next.surfaceCount =
+		(uint32_t)next.sceneView.opaqueWalls.size() +
+		(uint32_t)next.sceneView.opaqueFlats.size() +
+		(uint32_t)next.sceneView.opaqueSprites.size();
+	if (next.surfaceCount == 0)
+	{
+		mPersistentDynamicEmissiveCache = {};
+		return liveSceneHasEmissive;
+	}
+
+	services.BuildGeometry(next.sceneView, next.geometry, "persistent_emissive_cache_rebuild");
+	services.BuildMaterials(next.sceneView, next.materialBridge, "persistent_emissive_cache_rebuild");
+
+	next.primitiveCount = (uint32_t)next.geometry.primitives.size();
+	next.materialCount = (uint32_t)next.materialBridge.materials.size();
+	next.sceneView.stats.totalDrawItems = next.surfaceCount;
+	next.sceneView.stats.wallDrawItems = (uint32_t)next.sceneView.opaqueWalls.size();
+	next.sceneView.stats.flatDrawItems = (uint32_t)next.sceneView.opaqueFlats.size();
+	next.sceneView.stats.spriteDrawItems = (uint32_t)next.sceneView.opaqueSprites.size();
+	next.sceneView.stats.triangleEstimate = next.primitiveCount;
+	next.sceneView.stats.materialRefs = next.materialCount;
+	next.valid = next.primitiveCount > 0 && next.materialCount > 0;
+	if (!next.valid)
+	{
+		mPersistentDynamicEmissiveCache = {};
+		return liveSceneHasEmissive;
+	}
+
+	mPersistentDynamicEmissiveCache = std::move(next);
+	return liveSceneHasEmissive;
 }
 
 void SceneLightSystem::BeginFrame(uint64_t frameSerial)
