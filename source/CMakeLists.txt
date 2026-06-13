@@ -931,6 +931,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_material_policy.cpp
 	common/rendering/nri/renderer/nri_nrd.cpp
 	common/rendering/nri/renderer/nri_persistent_voxels.cpp
+	common/rendering/nri/renderer/nri_pipeline_state.cpp
 	common/rendering/nri/renderer/nri_renderstate.cpp
 	common/rendering/nri/renderer/nri_resources.cpp
 	common/rendering/nri/renderer/nri_render_geometry_helpers.cpp

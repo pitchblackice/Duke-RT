@@ -5,6 +5,96 @@
 #include <cstddef>
 #include <cstdint>
 
+constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 512;
+constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
+constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 26;
+constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
+constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
+constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
+constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
+
+// Mirrors shaders/Include/TraceConstants.hlsli.
+struct NRITraceSceneConstants
+{
+	float CameraPos[3] = {};
+	uint32_t RenderWidth = 0;
+	float CameraForward[3] = {};
+	uint32_t RenderHeight = 0;
+	float CameraRight[3] = {};
+	float TanHalfFovX = 1.0f;
+	float CameraUp[3] = {};
+	float TanHalfFovY = 1.0f;
+	float PrevCameraPos[3] = {};
+	uint32_t DisplayWidth = 0;
+	float PrevCameraForward[3] = {};
+	uint32_t DisplayHeight = 0;
+	float PrevCameraRight[3] = {};
+	float PrevTanHalfFovX = 1.0f;
+	float PrevCameraUp[3] = {};
+	float PrevTanHalfFovY = 1.0f;
+	float LightDirection[3] = { 0.3f, 0.85f, -0.4f };
+	uint32_t SceneInstanceCount = 0;
+	float SkyColor[3] = { 0.38f, 0.48f, 0.65f };
+	uint32_t DebugMode = 0;
+	float GroundColor[3] = { 0.08f, 0.08f, 0.08f };
+	uint32_t StaticPrimitiveCount = 0;
+	uint32_t FrameIndex = 0;
+	uint32_t DynamicPrimitiveCount = 0;
+	uint32_t Flags = 0;
+	uint32_t StaticMaterialCount = 0;
+	uint32_t BootstrapMode = 0;
+	uint32_t DynamicMaterialCount = 0;
+	uint32_t BounceCounts = 0;
+	uint32_t PortalCount = 0;
+	uint32_t RuntimeLightCount = 0;
+	uint32_t PortalDepth = 0;
+	uint32_t ReservedTrace0 = 0;
+	uint32_t ReservedTrace1 = 0;
+};
+
+// Mirrors shaders/Include/TemporalConstants.hlsli.
+struct NRITemporalConstants
+{
+	uint32_t RenderWidth = 0;
+	uint32_t RenderHeight = 0;
+	uint32_t FrameIndex = 0;
+	uint32_t Flags = 0;
+	float Exposure = 1.0f;
+};
+
+// Mirrors shaders/Include/PresentConstants.hlsli.
+struct NRIPresentConstants
+{
+	uint32_t InputWidth = 0;
+	uint32_t InputHeight = 0;
+	uint32_t DisplayWidth = 0;
+	uint32_t DisplayHeight = 0;
+	uint32_t PackedSceneOrigin = 0;
+	uint32_t FrameIndex = 0;
+	uint32_t DebugMode = 0;
+	uint32_t Flags = 0;
+	uint32_t DenoiserMode = 0;
+	uint32_t OutputMode = 0;
+	uint32_t TonemapMode = 0;
+	uint32_t OutputFlags = 0;
+	float Exposure = 1.0f;
+	float Contrast = 1.0f;
+	float Saturation = 1.0f;
+	float Shoulder = 1.0f;
+	float Toe = 1.0f;
+	float PaperWhiteNits = 200.0f;
+	float DisplayMaxLuminance = 80.0f;
+	float DisplaySdrLuminance = 80.0f;
+	uint32_t NightVisionPackedModeTint = 0;
+	float NightVisionStrength = 0.0f;
+	float NightVisionExposure = 1.0f;
+	uint32_t NightVisionPackedControls = 0;
+};
+
+static_assert(sizeof(NRITraceSceneConstants) <= 224, "NRITraceSceneConstants must stay within the validated shared root-constant budget.");
+static_assert(sizeof(NRITemporalConstants) <= 32, "NRITemporalConstants must stay compact.");
+static_assert(sizeof(NRIPresentConstants) <= 96, "NRIPresentConstants must stay compact.");
+
 // Mirrors shaders/Include/ExposureConstants.hlsli.
 constexpr uint32_t NRI_EXPOSURE_SET_INPUTS = 0;
 constexpr uint32_t NRI_EXPOSURE_SET_OUTPUTS = 1;

@@ -7,6 +7,7 @@
 #include "nri_frame_resources.h"
 #include "nri_nrd.h"
 #include "nri_persistent_voxels.h"
+#include "nri_pipeline_state.h"
 #include "nri_renderer_context.h"
 #include "nri_resources.h"
 #include "nri_runtime_mutation.h"
@@ -1452,6 +1453,7 @@ private:
 	friend class NRIExposurePassAccess;
 	friend class NRIAccelerationStructureManager;
 	friend class NRIDescriptorSetManager;
+	friend class NRIPipelineStateManager;
 	friend class NRISceneUploadManager;
 	friend bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
 	friend void DestroyNRIRendererAutoExposureResources(NRIRenderer& renderer);

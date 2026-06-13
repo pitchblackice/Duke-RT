@@ -3,6 +3,7 @@
 #include "../scene/nri_material_bridge.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
+#include "nri_shader_contracts.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
 #include "printf.h"
@@ -19,8 +20,6 @@ EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {
-	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 512;
-	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
 	constexpr uint32_t NRI_MAX_ACTOR_OVERFLOW_TRACE_LINES = 16;
 
 	struct MaterialTextureAttributionCounts

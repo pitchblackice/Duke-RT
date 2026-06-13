@@ -5,6 +5,7 @@
 #include "nri_debug_reporters.h"
 #include "nri_frame_graph.h"
 #include "nri_material_policy.h"
+#include "nri_pipeline_state.h"
 #include "nri_renderstate.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_renderer_settings.h"
@@ -2852,12 +2853,6 @@ EXTERN_CVAR(Int, nri_pttraceframes)
 
 namespace
 {
-	constexpr uint32_t NRI_MAX_SCENE_TEXTURES = 512;
-	constexpr uint32_t NRI_SCENE_DESCRIPTOR_NUM = 2 + NRI_MAX_SCENE_TEXTURES;
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 26;
-	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
-	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
-	constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
 	constexpr uint32_t NRI_TRACE_SHADER_STATS_COUNTER_COUNT = NRIRenderer::TraceShaderStatCount;
 	constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64;
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
@@ -2940,7 +2935,6 @@ namespace
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_RUNTIME_LINK = 3;
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION = 4;
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY = 5;
-	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
 	constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
 	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
 	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
@@ -4842,81 +4836,6 @@ namespace
 		}
 	}
 
-	struct NRITraceSceneConstants
-	{
-		float CameraPos[3] = {};
-		uint32_t RenderWidth = 0;
-		float CameraForward[3] = {};
-		uint32_t RenderHeight = 0;
-		float CameraRight[3] = {};
-		float TanHalfFovX = 1.0f;
-		float CameraUp[3] = {};
-		float TanHalfFovY = 1.0f;
-		float PrevCameraPos[3] = {};
-		uint32_t DisplayWidth = 0;
-		float PrevCameraForward[3] = {};
-		uint32_t DisplayHeight = 0;
-		float PrevCameraRight[3] = {};
-		float PrevTanHalfFovX = 1.0f;
-		float PrevCameraUp[3] = {};
-		float PrevTanHalfFovY = 1.0f;
-		float LightDirection[3] = { 0.3f, 0.85f, -0.4f };
-		uint32_t SceneInstanceCount = 0;
-		float SkyColor[3] = { 0.38f, 0.48f, 0.65f };
-		uint32_t DebugMode = 0;
-		float GroundColor[3] = { 0.08f, 0.08f, 0.08f };
-		uint32_t StaticPrimitiveCount = 0;
-		uint32_t FrameIndex = 0;
-		uint32_t DynamicPrimitiveCount = 0;
-		uint32_t Flags = 0;
-		uint32_t StaticMaterialCount = 0;
-		uint32_t BootstrapMode = 0;
-		uint32_t DynamicMaterialCount = 0;
-		uint32_t BounceCounts = 0;
-		uint32_t PortalCount = 0;
-		uint32_t RuntimeLightCount = 0;
-		uint32_t PortalDepth = 0;
-		uint32_t ReservedTrace0 = 0;
-		uint32_t ReservedTrace1 = 0;
-	};
-
-	struct NRITemporalConstants
-	{
-		uint32_t RenderWidth = 0;
-		uint32_t RenderHeight = 0;
-		uint32_t FrameIndex = 0;
-		uint32_t Flags = 0;
-		float Exposure = 1.0f;
-	};
-
-	struct NRIPresentConstants
-	{
-		uint32_t InputWidth = 0;
-		uint32_t InputHeight = 0;
-		uint32_t DisplayWidth = 0;
-		uint32_t DisplayHeight = 0;
-		uint32_t PackedSceneOrigin = 0;
-		uint32_t FrameIndex = 0;
-		uint32_t DebugMode = 0;
-		uint32_t Flags = 0;
-		uint32_t DenoiserMode = 0;
-		uint32_t OutputMode = 0;
-		uint32_t TonemapMode = 0;
-		uint32_t OutputFlags = 0;
-		float Exposure = 1.0f;
-		float Contrast = 1.0f;
-		float Saturation = 1.0f;
-		float Shoulder = 1.0f;
-		float Toe = 1.0f;
-		float PaperWhiteNits = 200.0f;
-		float DisplayMaxLuminance = 80.0f;
-		float DisplaySdrLuminance = 80.0f;
-		uint32_t NightVisionPackedModeTint = 0;
-		float NightVisionStrength = 0.0f;
-		float NightVisionExposure = 1.0f;
-		uint32_t NightVisionPackedControls = 0;
-	};
-
 	struct NRIReprojectionData
 	{
 		float currentViewToClip[16] = {};
@@ -4924,10 +4843,6 @@ namespace
 		float currentWorldToView[16] = {};
 		float previousWorldToView[16] = {};
 	};
-
-	static_assert(sizeof(NRITraceSceneConstants) <= 224, "NRITraceSceneConstants must stay within the validated shared root-constant budget.");
-	static_assert(sizeof(NRITemporalConstants) <= 32, "NRITemporalConstants must stay compact.");
-	static_assert(sizeof(NRIPresentConstants) <= 96, "NRIPresentConstants must stay compact.");
 
 	static uint32_t PackPresentSceneOrigin(int sceneLeft, int sceneTop)
 	{
@@ -12914,288 +12829,27 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 
 bool NRIRenderer::CreatePipelineLayout()
 {
-	nri::DescriptorRangeDesc samplerRange = {};
-	samplerRange.baseRegisterIndex = 0;
-	samplerRange.descriptorNum = NRI_SAMPLER_DESCRIPTOR_NUM;
-	samplerRange.descriptorType = nri::DescriptorType::SAMPLER;
-	samplerRange.shaderStages = NRIComputeStage();
-
-	nri::DescriptorRangeDesc sceneTextureRange = {};
-	sceneTextureRange.baseRegisterIndex = 0;
-	sceneTextureRange.descriptorNum = NRI_SCENE_DESCRIPTOR_NUM;
-	sceneTextureRange.descriptorType = nri::DescriptorType::TEXTURE;
-	sceneTextureRange.shaderStages = NRIComputeStage();
-	sceneTextureRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc inputRange = {};
-	inputRange.baseRegisterIndex = 0;
-	inputRange.descriptorNum = NRI_INPUT_DESCRIPTOR_NUM;
-	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
-	inputRange.shaderStages = NRIComputeStage();
-	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc sceneDataRange = {};
-	sceneDataRange.baseRegisterIndex = 0;
-	sceneDataRange.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-	sceneDataRange.descriptorType = nri::DescriptorType::STRUCTURED_BUFFER;
-	sceneDataRange.shaderStages = NRIComputeStage();
-	sceneDataRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc outputRange = {};
-	outputRange.baseRegisterIndex = 0;
-	outputRange.descriptorNum = NRI_OUTPUT_DESCRIPTOR_NUM;
-	outputRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
-	outputRange.shaderStages = NRIComputeStage();
-	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc traceStatsRange = {};
-	traceStatsRange.baseRegisterIndex = NRI_OUTPUT_DESCRIPTOR_NUM;
-	traceStatsRange.descriptorNum = NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM;
-	traceStatsRange.descriptorType = nri::DescriptorType::STORAGE_STRUCTURED_BUFFER;
-	traceStatsRange.shaderStages = NRIComputeStage();
-	traceStatsRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc outputRanges[2] = { outputRange, traceStatsRange };
-
-	nri::DescriptorSetDesc descriptorSets[5] = {};
-	descriptorSets[0].registerSpace = 0;
-	descriptorSets[0].ranges = &samplerRange;
-	descriptorSets[0].rangeNum = 1;
-	descriptorSets[1].registerSpace = 1;
-	descriptorSets[1].ranges = &sceneTextureRange;
-	descriptorSets[1].rangeNum = 1;
-	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-	descriptorSets[2].registerSpace = 2;
-	descriptorSets[2].ranges = &sceneDataRange;
-	descriptorSets[2].rangeNum = 1;
-	descriptorSets[2].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-	descriptorSets[3].registerSpace = 3;
-	descriptorSets[3].ranges = &inputRange;
-	descriptorSets[3].rangeNum = 1;
-	descriptorSets[3].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-	descriptorSets[4].registerSpace = 4;
-	descriptorSets[4].ranges = outputRanges;
-	descriptorSets[4].rangeNum = (uint32_t)std::size(outputRanges);
-	descriptorSets[4].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::RootConstantDesc rootConstant = {};
-	rootConstant.registerIndex = 0;
-	rootConstant.size = sizeof(NRITraceSceneConstants);
-	rootConstant.shaderStages = NRIComputeStage();
-
-	nri::RootDescriptorDesc rootDescriptors[1] = {};
-	rootDescriptors[0].registerIndex = 0;
-	rootDescriptors[0].shaderStages = NRIComputeStage();
-	rootDescriptors[0].descriptorType = nri::DescriptorType::ACCELERATION_STRUCTURE;
-
-	nri::PipelineLayoutDesc desc = {};
-	desc.rootRegisterSpace = 5;
-	desc.rootConstants = &rootConstant;
-	desc.rootConstantNum = 1;
-	desc.rootDescriptors = rootDescriptors;
-	desc.rootDescriptorNum = (uint32_t)std::size(rootDescriptors);
-	desc.descriptorSets = descriptorSets;
-	desc.descriptorSetNum = (uint32_t)std::size(descriptorSets);
-	desc.shaderStages = NRIComputeStage();
-
-	return mFrameBuffer->mCore.CreatePipelineLayout(*mFrameBuffer->mDevice, desc, mPipelineLayout) == nri::Result::SUCCESS;
+	return NRIPipelineStateManager::CreatePipelineLayout(*this);
 }
 
 bool NRIRenderer::CreateTaaPipelineLayout()
 {
-	nri::DescriptorRangeDesc inputRange = {};
-	inputRange.baseRegisterIndex = 0;
-	inputRange.descriptorNum = 4;
-	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
-	inputRange.shaderStages = NRIComputeStage();
-	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc outputRange = {};
-	outputRange.baseRegisterIndex = 0;
-	outputRange.descriptorNum = 1;
-	outputRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
-	outputRange.shaderStages = NRIComputeStage();
-	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorSetDesc descriptorSets[2] = {};
-	descriptorSets[0].registerSpace = 0;
-	descriptorSets[0].ranges = &inputRange;
-	descriptorSets[0].rangeNum = 1;
-	descriptorSets[0].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-	descriptorSets[1].registerSpace = 1;
-	descriptorSets[1].ranges = &outputRange;
-	descriptorSets[1].rangeNum = 1;
-	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::RootConstantDesc rootConstant = {};
-	rootConstant.registerIndex = 0;
-	rootConstant.size = sizeof(NRITemporalConstants);
-	rootConstant.shaderStages = NRIComputeStage();
-
-	nri::PipelineLayoutDesc desc = {};
-	desc.rootRegisterSpace = 2;
-	desc.rootConstants = &rootConstant;
-	desc.rootConstantNum = 1;
-	desc.descriptorSets = descriptorSets;
-	desc.descriptorSetNum = (uint32_t)std::size(descriptorSets);
-	desc.shaderStages = NRIComputeStage();
-
-	return mFrameBuffer->mCore.CreatePipelineLayout(*mFrameBuffer->mDevice, desc, mTaaPipelineLayout) == nri::Result::SUCCESS;
+	return NRIPipelineStateManager::CreateTaaPipelineLayout(*this);
 }
 
 bool NRIRenderer::CreatePresentPipelineLayout()
 {
-	nri::DescriptorRangeDesc inputRange = {};
-	inputRange.baseRegisterIndex = 0;
-	inputRange.descriptorNum = 3;
-	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
-	inputRange.shaderStages = NRIComputeStage();
-	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc outputRange = {};
-	outputRange.baseRegisterIndex = 0;
-	outputRange.descriptorNum = 1;
-	outputRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
-	outputRange.shaderStages = NRIComputeStage();
-	outputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorSetDesc descriptorSets[2] = {};
-	descriptorSets[0].registerSpace = 0;
-	descriptorSets[0].ranges = &inputRange;
-	descriptorSets[0].rangeNum = 1;
-	descriptorSets[0].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-	descriptorSets[1].registerSpace = 1;
-	descriptorSets[1].ranges = &outputRange;
-	descriptorSets[1].rangeNum = 1;
-	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::RootConstantDesc rootConstant = {};
-	rootConstant.registerIndex = 0;
-	rootConstant.size = sizeof(NRIPresentConstants);
-	rootConstant.shaderStages = NRIComputeStage();
-
-	nri::PipelineLayoutDesc desc = {};
-	desc.rootRegisterSpace = 2;
-	desc.rootConstants = &rootConstant;
-	desc.rootConstantNum = 1;
-	desc.descriptorSets = descriptorSets;
-	desc.descriptorSetNum = (uint32_t)std::size(descriptorSets);
-	desc.shaderStages = NRIComputeStage();
-
-	return mFrameBuffer->mCore.CreatePipelineLayout(*mFrameBuffer->mDevice, desc, mPresentPipelineLayout) == nri::Result::SUCCESS;
+	return NRIPipelineStateManager::CreatePresentPipelineLayout(*this);
 }
 
 bool NRIRenderer::CreateExposurePipelineLayout()
 {
-	nri::DescriptorRangeDesc inputRange = {};
-	inputRange.baseRegisterIndex = 0;
-	inputRange.descriptorNum = NRI_EXPOSURE_INPUT_DESCRIPTOR_NUM;
-	inputRange.descriptorType = nri::DescriptorType::TEXTURE;
-	inputRange.shaderStages = NRIComputeStage();
-	inputRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc outputTextureRange = {};
-	outputTextureRange.baseRegisterIndex = NRI_EXPOSURE_OUTPUT_TEXTURE_BASE_REGISTER;
-	outputTextureRange.descriptorNum = NRI_EXPOSURE_OUTPUT_TEXTURE_DESCRIPTOR_NUM;
-	outputTextureRange.descriptorType = nri::DescriptorType::STORAGE_TEXTURE;
-	outputTextureRange.shaderStages = NRIComputeStage();
-	outputTextureRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc outputBufferRange = {};
-	outputBufferRange.baseRegisterIndex = NRI_EXPOSURE_OUTPUT_BUFFER_BASE_REGISTER;
-	outputBufferRange.descriptorNum = NRI_EXPOSURE_OUTPUT_BUFFER_DESCRIPTOR_NUM;
-	outputBufferRange.descriptorType = nri::DescriptorType::STORAGE_STRUCTURED_BUFFER;
-	outputBufferRange.shaderStages = NRIComputeStage();
-	outputBufferRange.flags = nri::DescriptorRangeBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::DescriptorRangeDesc outputRanges[2] = { outputTextureRange, outputBufferRange };
-
-	nri::DescriptorSetDesc descriptorSets[2] = {};
-	descriptorSets[0].registerSpace = NRI_EXPOSURE_SET_INPUTS;
-	descriptorSets[0].ranges = &inputRange;
-	descriptorSets[0].rangeNum = 1;
-	descriptorSets[0].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-	descriptorSets[1].registerSpace = NRI_EXPOSURE_SET_OUTPUTS;
-	descriptorSets[1].ranges = outputRanges;
-	descriptorSets[1].rangeNum = (uint32_t)std::size(outputRanges);
-	descriptorSets[1].flags = nri::DescriptorSetBits::ALLOW_UPDATE_AFTER_SET;
-
-	nri::RootConstantDesc rootConstant = {};
-	rootConstant.registerIndex = NRI_EXPOSURE_ROOT_REGISTER;
-	rootConstant.size = sizeof(NRIExposureConstants);
-	rootConstant.shaderStages = NRIComputeStage();
-
-	nri::PipelineLayoutDesc desc = {};
-	desc.rootRegisterSpace = NRI_EXPOSURE_SET_ROOT;
-	desc.rootConstants = &rootConstant;
-	desc.rootConstantNum = 1;
-	desc.descriptorSets = descriptorSets;
-	desc.descriptorSetNum = (uint32_t)std::size(descriptorSets);
-	desc.shaderStages = NRIComputeStage();
-
-	return mFrameBuffer->mCore.CreatePipelineLayout(*mFrameBuffer->mDevice, desc, mExposurePipelineLayout) == nri::Result::SUCCESS;
+	return NRIPipelineStateManager::CreateExposurePipelineLayout(*this);
 }
 
 bool NRIRenderer::CreatePipelines()
 {
-	auto createPipeline = [this](const char* fileName, PipelineSlot slot, nri::PipelineLayout* layout)
-	{
-		std::vector<uint8_t> shaderBlob;
-		if (!mFrameBuffer->LoadShaderBlob(fileName, shaderBlob))
-		{
-			Printf("NRI PT pipeline create failed: shader=%s reason=load\n", fileName);
-			return false;
-		}
-
-		nri::ShaderDesc shader = {};
-		shader.stage = nri::StageBits::COMPUTE_SHADER;
-		shader.bytecode = shaderBlob.data();
-		shader.size = shaderBlob.size();
-		shader.entryPointName = "main";
-
-		nri::ComputePipelineDesc pipelineDesc = {};
-		pipelineDesc.pipelineLayout = layout;
-		pipelineDesc.shader = shader;
-		const nri::Result result = mFrameBuffer->mCore.CreateComputePipeline(*mFrameBuffer->mDevice, pipelineDesc, mPipelines[(size_t)slot]);
-		if (result != nri::Result::SUCCESS)
-		{
-			Printf("NRI PT pipeline create failed: shader=%s slot=%u result=%d\n", fileName, (unsigned)slot, (int)result);
-			return false;
-		}
-		return true;
-	};
-
-	const bool d3d12 = mFrameBuffer->GetSelectedAPI() == nri::GraphicsAPI::D3D12;
-	const char* suffix = d3d12 ? "dxil" : "spirv";
-
-	FString trace = FStringf("TraceOpaque.cs.%s", suffix);
-	FString composition = FStringf("Composition.cs.%s", suffix);
-	FString traceTransparent = FStringf("TraceTransparent.cs.%s", suffix);
-	FString taa = FStringf("Taa.cs.%s", suffix);
-	FString rawPresent = FStringf("RawPresent.cs.%s", suffix);
-	FString finalPresent = FStringf("FinalPresent.cs.%s", suffix);
-	FString dlssSrBefore = FStringf("DlssSrBefore.cs.%s", suffix);
-	FString dlssBefore = FStringf("DlssBefore.cs.%s", suffix);
-	FString dlssAfter = FStringf("DlssAfter.cs.%s", suffix);
-	FString final = FStringf("Final.cs.%s", suffix);
-	FString exposureHistogramClear = FStringf("ExposureHistogramClear.cs.%s", suffix);
-	FString exposureHistogramBuild = FStringf("ExposureHistogramBuild.cs.%s", suffix);
-	FString exposureResolve = FStringf("ExposureResolve.cs.%s", suffix);
-
-	return
-		createPipeline(trace.GetChars(), PipelineSlot::TraceOpaque, mPipelineLayout) &&
-		createPipeline(composition.GetChars(), PipelineSlot::Composition, mPipelineLayout) &&
-		createPipeline(traceTransparent.GetChars(), PipelineSlot::TraceTransparent, mPipelineLayout) &&
-		createPipeline(exposureHistogramClear.GetChars(), PipelineSlot::ExposureHistogramClear, mExposurePipelineLayout) &&
-		createPipeline(exposureHistogramBuild.GetChars(), PipelineSlot::ExposureHistogramBuild, mExposurePipelineLayout) &&
-		createPipeline(exposureResolve.GetChars(), PipelineSlot::ExposureResolve, mExposurePipelineLayout) &&
-		createPipeline(taa.GetChars(), PipelineSlot::Taa, mTaaPipelineLayout) &&
-		createPipeline(rawPresent.GetChars(), PipelineSlot::RawPresent, mPresentPipelineLayout) &&
-		createPipeline(finalPresent.GetChars(), PipelineSlot::FinalPresent, mPresentPipelineLayout) &&
-		createPipeline(dlssSrBefore.GetChars(), PipelineSlot::DlssSrBefore, mPipelineLayout) &&
-		createPipeline(dlssBefore.GetChars(), PipelineSlot::DlssBefore, mPipelineLayout) &&
-		createPipeline(dlssAfter.GetChars(), PipelineSlot::DlssAfter, mPipelineLayout) &&
-		createPipeline(final.GetChars(), PipelineSlot::Final, mPipelineLayout);
+	return NRIPipelineStateManager::CreatePipelines(*this);
 }
 
 bool NRIRenderer::AllocateDescriptorSets()

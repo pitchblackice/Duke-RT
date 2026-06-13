@@ -1,6 +1,7 @@
 #include "nri_descriptor_sets.h"
 
 #include "nri_renderer.h"
+#include "nri_shader_contracts.h"
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
 #include "printf.h"
@@ -16,12 +17,6 @@ EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {
-	constexpr uint32_t NRI_SCENE_DATA_DESCRIPTOR_NUM = 26;
-	constexpr uint32_t NRI_INPUT_DESCRIPTOR_NUM = 14;
-	constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
-	constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
-	constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
-
 	static uint64_t HashCombine64(uint64_t hash, uint64_t value)
 	{
 		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
