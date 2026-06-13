@@ -57,6 +57,15 @@ namespace
 		}
 	}
 
+	static const char* ActorActivationPolicyName(LightOverlayActorActivationPolicy policy)
+	{
+		switch (policy)
+		{
+		case LightOverlayActorActivationPolicy::Immediate: return "immediate";
+		default: return "surface";
+		}
+	}
+
 	static void CopyVector3(const float source[3], float destination[3])
 	{
 		destination[0] = source[0];
@@ -551,6 +560,24 @@ namespace
 					else
 					{
 						sc.ScriptMessage("Invalid fullbright value '%s'; expected off/default/on", sc.String);
+					}
+				}
+				else if (sc.Compare("activation"))
+				{
+					sc.MustGetString();
+					if (!stricmp(sc.String, "surface") || !stricmp(sc.String, "default"))
+					{
+						rule.hasActivationPolicy = true;
+						rule.activationPolicy = LightOverlayActorActivationPolicy::Surface;
+					}
+					else if (!stricmp(sc.String, "immediate"))
+					{
+						rule.hasActivationPolicy = true;
+						rule.activationPolicy = LightOverlayActorActivationPolicy::Immediate;
+					}
+					else
+					{
+						sc.ScriptMessage("Invalid activation value '%s'; expected surface/default/immediate", sc.String);
 					}
 				}
 				else if (sc.Compare("tile"))
@@ -1507,6 +1534,7 @@ namespace
 		if (rule.hasShadowReceive) AppendShadowStateField(text, 2, "shadowreceive", rule.shadowReceive);
 		if (rule.hasShadowCast) AppendShadowStateField(text, 2, "shadowcast", rule.shadowCast);
 		if (rule.hasFullbright) AppendShadowStateField(text, 2, "fullbright", rule.fullbright);
+		if (rule.hasActivationPolicy) AppendLine(text, 2, FStringf("activation %s", ActorActivationPolicyName(rule.activationPolicy)));
 		if (rule.hasTileFilter) AppendLine(text, 2, FStringf("tile %d", rule.tileFilter));
 		AppendLine(text, 2, FStringf("type %s", QuoteLightOverlayString(rule.lightType).GetChars()));
 		if (rule.hasColor) AppendVector3Field(text, 2, "color", rule.color);
@@ -1870,13 +1898,14 @@ namespace
 
 		for (const ParsedLightOverlayActorRule* rule : SortRulesByOrder(database.actorRules))
 		{
-			Printf("LIGHTOVR actorrule %s: actorclass=%s type=%s shadowreceive=%s shadowcast=%s fullbright=%s source=%s\n",
+			Printf("LIGHTOVR actorrule %s: actorclass=%s type=%s shadowreceive=%s shadowcast=%s fullbright=%s activation=%s source=%s\n",
 				rule->id.GetChars(),
 				rule->actorClassName.GetChars(),
 				rule->lightType.GetChars(),
 				rule->hasShadowReceive ? (rule->shadowReceive ? "default" : "off") : "(unset)",
 				rule->hasShadowCast ? (rule->shadowCast ? "default" : "off") : "(unset)",
 				rule->hasFullbright ? (rule->fullbright ? "on" : "off") : "(unset)",
+				rule->hasActivationPolicy ? ActorActivationPolicyName(rule->activationPolicy) : "(default)",
 				SourceLocationText(rule->source).GetChars());
 			if (rule->hasTileFilter) Printf("  tile=%d\n", rule->tileFilter);
 			if (rule->hasColor) Printf("  color=(%.3f, %.3f, %.3f)\n", rule->color[0], rule->color[1], rule->color[2]);
@@ -2009,7 +2038,7 @@ namespace
 
 		for (const auto& rule : resolved.actorRules)
 		{
-			Printf("LIGHTOVR resolved actorrule %s: actorclass=%s resolved=%s type=%s shadowreceive=%s shadowcast=%s fullbright=%s source=%s\n",
+			Printf("LIGHTOVR resolved actorrule %s: actorclass=%s resolved=%s type=%s shadowreceive=%s shadowcast=%s fullbright=%s activation=%s source=%s\n",
 				rule.id.GetChars(),
 				rule.actorClassName.GetChars(),
 				rule.actorClassResolved ? "yes" : "no",
@@ -2017,6 +2046,7 @@ namespace
 				rule.hasShadowReceive ? (rule.shadowReceive ? "default" : "off") : "(unset)",
 				rule.hasShadowCast ? (rule.shadowCast ? "default" : "off") : "(unset)",
 				rule.hasFullbright ? (rule.fullbright ? "on" : "off") : "(unset)",
+				rule.hasActivationPolicy ? ActorActivationPolicyName(rule.activationPolicy) : "(default)",
 				SourceLocationText(rule.source).GetChars());
 			if (rule.hasTileFilter) Printf("  tile=%d\n", rule.tileFilter);
 			if (rule.hasColor) Printf("  color=(%.3f, %.3f, %.3f)\n", rule.color[0], rule.color[1], rule.color[2]);
@@ -2100,6 +2130,8 @@ namespace
 		destination.shadowCast = source.shadowCast;
 		destination.hasFullbright = source.hasFullbright;
 		destination.fullbright = source.fullbright;
+		destination.hasActivationPolicy = source.hasActivationPolicy;
+		destination.activationPolicy = source.activationPolicy;
 		destination.hasTileFilter = source.hasTileFilter;
 		destination.tileFilter = source.tileFilter;
 		destination.lightType = source.lightType;

@@ -284,6 +284,7 @@ public:
 			bool materialNoShadowReceive = false;
 			bool materialNoShadowCast = false;
 			bool materialFullbright = false;
+			bool activateImmediately = false;
 			bool hasTileFilter = false;
 			uint32_t tileFilter = 0;
 			uint32_t flags = SceneAnalyticLightFlag_CastsShadow;

@@ -13,6 +13,12 @@ enum class LightOverlayAnchorType : uint8_t
 	Wall,
 };
 
+enum class LightOverlayActorActivationPolicy : uint8_t
+{
+	Surface,
+	Immediate,
+};
+
 struct LightOverlaySourceLocation
 {
 	FString sourceName;
@@ -39,6 +45,8 @@ struct ParsedLightOverlayActorRule
 	bool shadowCast = true;
 	bool hasFullbright = false;
 	bool fullbright = false;
+	bool hasActivationPolicy = false;
+	LightOverlayActorActivationPolicy activationPolicy = LightOverlayActorActivationPolicy::Surface;
 	bool hasTileFilter = false;
 	int tileFilter = -1;
 	FString lightType;
@@ -300,6 +308,8 @@ struct ResolvedLightOverlayActorRule
 	bool shadowCast = true;
 	bool hasFullbright = false;
 	bool fullbright = false;
+	bool hasActivationPolicy = false;
+	LightOverlayActorActivationPolicy activationPolicy = LightOverlayActorActivationPolicy::Surface;
 	bool hasTileFilter = false;
 	int tileFilter = -1;
 	FString lightType;

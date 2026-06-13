@@ -1963,6 +1963,7 @@ public:
 		actorRule.materialNoShadowReceive = resolvedRule.hasShadowReceive && !resolvedRule.shadowReceive;
 		actorRule.materialNoShadowCast = resolvedRule.hasShadowCast && !resolvedRule.shadowCast;
 		actorRule.materialFullbright = resolvedRule.hasFullbright && resolvedRule.fullbright;
+		actorRule.activateImmediately = resolvedRule.activationPolicy == LightOverlayActorActivationPolicy::Immediate;
 		actorRule.color[0] = resolvedRule.color[0];
 		actorRule.color[1] = resolvedRule.color[1];
 		actorRule.color[2] = resolvedRule.color[2];

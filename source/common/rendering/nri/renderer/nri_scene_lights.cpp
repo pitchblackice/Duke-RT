@@ -181,6 +181,11 @@ namespace
 			ContainsCaseInsensitive(rule.actorClassName, "explosion");
 	}
 
+	const char* ActorOverlayActivationName(const SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& rule)
+	{
+		return rule.activateImmediately ? "immediate" : "surface";
+	}
+
 	enum class ActorSpriteLiveMatchResult : uint32_t
 	{
 		Match = 0,
@@ -2704,13 +2709,16 @@ void SceneLightSystem::RebuildAnalyticLights(
 			const bool hasSurface = record != nullptr;
 			const uint64_t stableKey = BuildActorOverlayTopologyKey(rule);
 			liveActorOverlayKeys.insert(stableKey);
-			if (hasSurface)
+			if (hasSurface || rule.activateImmediately)
 			{
-				mAnalyticLights.matchedSurfaceCount++;
-				mAnalyticLights.actorOverlayMatchedSurfaceCount++;
+				if (hasSurface)
+				{
+					mAnalyticLights.matchedSurfaceCount++;
+					mAnalyticLights.actorOverlayMatchedSurfaceCount++;
+				}
 				mActivatedActorOverlayKeys.insert(stableKey);
 			}
-			const bool active = mActivatedActorOverlayKeys.find(stableKey) != mActivatedActorOverlayKeys.end();
+			const bool active = rule.activateImmediately || mActivatedActorOverlayKeys.find(stableKey) != mActivatedActorOverlayKeys.end();
 
 			SceneAnalyticLight light = {};
 			light.stableKey = stableKey;
@@ -2743,13 +2751,14 @@ void SceneLightSystem::RebuildAnalyticLights(
 
 			if (ShouldTraceActorOverlayRule(rule))
 			{
-				Printf("NRI PT explosion actor: frame=%u actor=%d class=%s rule=%u rule_name=%s live=yes emitted=yes active=%s ownership=actor live_tile=%u pal=%d has_surface=%s surface_source=%s surface_tile=%u stable=0x%016llx pos=(%.3f, %.3f, %.3f)\n",
+				Printf("NRI PT explosion actor: frame=%u actor=%d class=%s rule=%u rule_name=%s live=yes emitted=yes active=%s activation=%s ownership=actor live_tile=%u pal=%d has_surface=%s surface_source=%s surface_tile=%u stable=0x%016llx pos=(%.3f, %.3f, %.3f)\n",
 					renderFrameIndex,
 					rule.actorIndex,
 					rule.actorClassName != nullptr ? rule.actorClassName : "",
 					rule.ruleId,
 					rule.ruleName.c_str(),
 					YesNo(active),
+					ActorOverlayActivationName(rule),
 					rule.actorTextureId,
 					rule.actorPalette,
 					YesNo(hasSurface),
@@ -2777,13 +2786,14 @@ void SceneLightSystem::RebuildAnalyticLights(
 						YesNo((lightingFlags & nri_scene::MaterialLightingFlag_NoShadowCast) != 0),
 						YesNo((lightingFlags & nri_scene::MaterialLightingFlag_MaterialFullbright) != 0));
 				}
-				Printf("NRI PT explosion light: frame=%u actor=%d class=%s rule=%u rule_name=%s emitted=yes active=%s ownership=actor stable=0x%016llx source=%u tile=%u intensity=%.3f resolved_intensity=%.3f radius=%.3f shadow=%s\n",
+				Printf("NRI PT explosion light: frame=%u actor=%d class=%s rule=%u rule_name=%s emitted=yes active=%s activation=%s ownership=actor stable=0x%016llx source=%u tile=%u intensity=%.3f resolved_intensity=%.3f radius=%.3f shadow=%s\n",
 					renderFrameIndex,
 					rule.actorIndex,
 					rule.actorClassName != nullptr ? rule.actorClassName : "",
 					rule.ruleId,
 					rule.ruleName.c_str(),
 					YesNo(active),
+					ActorOverlayActivationName(rule),
 					(unsigned long long)light.stableKey,
 					(uint32_t)light.source,
 					light.textureId,
