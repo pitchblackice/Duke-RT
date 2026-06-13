@@ -20,6 +20,7 @@ class FTexture;
 class FGameTexture;
 class NRIRenderer;
 class NRIDescriptorSetManager;
+class NRIFrameResources;
 class NRIPipelineStateManager;
 class NRIExposurePassAccess;
 class NRIAccelerationStructureManager;
@@ -303,6 +304,7 @@ private:
 	friend class NRIRenderState;
 	friend class NRIRenderer;
 	friend class NRIDescriptorSetManager;
+	friend class NRIFrameResources;
 	friend class NRIPipelineStateManager;
 	friend class NRIExposurePassAccess;
 	friend class NRIAccelerationStructureManager;

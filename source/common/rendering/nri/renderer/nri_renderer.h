@@ -1453,6 +1453,7 @@ private:
 	friend class NRIExposurePassAccess;
 	friend class NRIAccelerationStructureManager;
 	friend class NRIDescriptorSetManager;
+	friend class NRIFrameResources;
 	friend class NRIPipelineStateManager;
 	friend class NRISceneUploadManager;
 	friend bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);

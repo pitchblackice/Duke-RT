@@ -13580,30 +13580,14 @@ void NRIRenderer::ReadbackAutoExposureStats()
 
 bool NRIRenderer::CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format)
 {
-	return mFrameBuffer->CreateOwnedTexture(GetFrameTexture(slot), width, height, format, NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE));
+	return NRIFrameResources::CreateFrameTexture(*this, (uint32_t)slot, width, height, format);
 }
 
 
 
 nri::Format NRIRenderer::ResolveFinalSceneFormat() const
 {
-	if (mFrameBuffer == nullptr)
-	{
-		return nri::Format::BGRA8_UNORM;
-	}
-
-	const NRIFrameGenerationPresentContract& presentContract = mFrameBuffer->mFrameGeneration.GetPresentContract();
-	if (presentContract.resolvedTextureFormat != nri::Format::UNKNOWN)
-	{
-		return presentContract.resolvedTextureFormat;
-	}
-
-	if (mFrameBuffer->mResolvedSwapChainTextureFormat != nri::Format::UNKNOWN)
-	{
-		return mFrameBuffer->mResolvedSwapChainTextureFormat;
-	}
-
-	return nri::Format::BGRA8_UNORM;
+	return NRIFrameResources::ResolveFinalSceneFormat(*this);
 }
 
 bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
@@ -17307,20 +17291,7 @@ void NRIRenderer::DestroyCachedTextures()
 
 void NRIRenderer::DestroyFrameTextures()
 {
-	DestroyAutoExposureResources();
-	for (auto& texture : mFrameTextures)
-	{
-		mFrameBuffer->DestroyTextureResource(texture);
-	}
-	mRenderWidth = 0;
-	mRenderHeight = 0;
-	mOutputWidth = 0;
-	mOutputHeight = 0;
-	mTargetWidth = 0;
-	mTargetHeight = 0;
-	mSceneLeft = 0;
-	mSceneTop = 0;
-	mFinalSceneFormat = nri::Format::UNKNOWN;
+	NRIFrameResources::DestroyFrameTextures(*this);
 }
 
 void NRIRenderer::DestroySceneBuffers()

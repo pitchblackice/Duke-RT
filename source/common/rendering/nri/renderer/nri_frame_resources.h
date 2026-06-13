@@ -5,8 +5,14 @@
 #include <cstdint>
 #include <vector>
 
+class NRIRenderer;
+
 class NRIFrameResources
 {
+public:
+	static bool CreateFrameTexture(NRIRenderer& renderer, uint32_t slot, uint32_t width, uint32_t height, nri::Format format);
+	static nri::Format ResolveFinalSceneFormat(const NRIRenderer& renderer);
+	static void DestroyFrameTextures(NRIRenderer& renderer);
 };
 
 struct SceneBufferDebugStats
