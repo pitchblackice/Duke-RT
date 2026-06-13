@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../nri_output.h"
+#include "nri_descriptor_sets.h"
 #include "nri_exposure.h"
 #include "nri_frame_graph.h"
 #include "nri_frame_resources.h"
@@ -1450,6 +1451,7 @@ private:
 		const NRIFrameGraphExecutionRequest& request);
 	friend class NRIExposurePassAccess;
 	friend class NRIAccelerationStructureManager;
+	friend class NRIDescriptorSetManager;
 	friend class NRISceneUploadManager;
 	friend bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
 	friend void DestroyNRIRendererAutoExposureResources(NRIRenderer& renderer);

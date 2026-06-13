@@ -1633,17 +1633,6 @@ public:
 		return bits;
 	}
 
-	static uint64_t HashDescriptorList(const nri::Descriptor* const* descriptors, size_t count)
-	{
-		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, (uint64_t)count);
-		for (size_t i = 0; i < count; ++i)
-		{
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uintptr_t)descriptors[i]);
-		}
-		return hash;
-	}
-
 	static uint64_t HashUploadPayloadBytes(const void* data, uint64_t size)
 	{
 		return NRIHashUploadPayloadBytes(data, size);
@@ -13211,61 +13200,12 @@ bool NRIRenderer::CreatePipelines()
 
 bool NRIRenderer::AllocateDescriptorSets()
 {
-	const uint32_t queuedFrameCount = mFrameBuffer != nullptr ? std::max(1u, (uint32_t)mFrameBuffer->mQueuedFrames.size()) : 1u;
-	mSceneTextureSets.assign(queuedFrameCount, nullptr);
-	mSceneDataSets.assign(queuedFrameCount, nullptr);
-	mSceneDataDescriptorsInitialized.assign(queuedFrameCount, 0u);
-
-	auto allocateQueuedSets = [&](nri::PipelineLayout* layout, uint32_t setIndex, std::vector<nri::DescriptorSet*>& sets) -> bool
-	{
-		for (nri::DescriptorSet*& set : sets)
-		{
-			if (mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *layout, setIndex, &set, 1, 0) != nri::Result::SUCCESS)
-			{
-				return false;
-			}
-		}
-
-		return true;
-	};
-
-	return
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 0, &mSamplerSet, 1, 0) == nri::Result::SUCCESS &&
-		allocateQueuedSets(mPipelineLayout, 1, mSceneTextureSets) &&
-		allocateQueuedSets(mPipelineLayout, 2, mSceneDataSets) &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &mOutputSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mCompositionFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &mCompositionOutputSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 3, &mUpscalerPrepassFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPipelineLayout, 4, &mUpscalerPrepassOutputSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 0, &mTaaFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mTaaPipelineLayout, 1, &mTaaOutputSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPresentPipelineLayout, 0, &mRawPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPresentPipelineLayout, 1, &mRawPresentOutputSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPresentPipelineLayout, 0, &mFinalPresentFrameTextureSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mPresentPipelineLayout, 1, &mFinalPresentOutputSet, 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mExposurePipelineLayout, 0, &mExposureInputSets[0], 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mExposurePipelineLayout, 1, &mExposureOutputSets[0], 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mExposurePipelineLayout, 0, &mExposureInputSets[1], 1, 0) == nri::Result::SUCCESS &&
-		mFrameBuffer->mCore.AllocateDescriptorSets(*mFrameBuffer->mDescriptorPool, *mExposurePipelineLayout, 1, &mExposureOutputSets[1], 1, 0) == nri::Result::SUCCESS;
+	return NRIDescriptorSetManager::AllocateDescriptorSets(*this);
 }
 
 bool NRIRenderer::UpdateSamplerSet()
 {
-	const nri::Descriptor* descriptors[NRI_SAMPLER_DESCRIPTOR_NUM] = {
-		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapLinear],
-		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampLinear],
-		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::WrapPoint],
-		mFrameBuffer->mSamplers[(size_t)NRISamplerMode::ClampPoint]
-	};
-	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = mSamplerSet;
-	update.rangeIndex = 0;
-	update.descriptors = descriptors;
-	update.descriptorNum = NRI_SAMPLER_DESCRIPTOR_NUM;
-	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
-	return true;
+	return NRIDescriptorSetManager::UpdateSamplerSet(*this);
 }
 
 
@@ -14051,102 +13991,27 @@ bool NRIRenderer::UpdateSceneDataSet(
 
 bool NRIRenderer::CommitSceneDataDescriptors(const char* reason)
 {
-	{
-		ScopedPtPerfTimer descriptorValidateTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorValidateMs);
-		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
-		{
-			if (descriptor == nullptr)
-			{
-				mLastPerfShellTraceStats.sceneDataSetDescriptorNullCount++;
-				return false;
-			}
-		}
-	}
-
-	nri::DescriptorSet* sceneDataSet = GetCurrentSceneDataSet();
-	if (sceneDataSet == nullptr)
-	{
-		return false;
-	}
-
-	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = sceneDataSet;
-	update.rangeIndex = 0;
-	update.descriptors = reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data());
-	update.descriptorNum = NRI_SCENE_DATA_DESCRIPTOR_NUM;
-	{
-		ScopedPtPerfTimer descriptorUpdateTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorUpdateMs);
-		mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
-	}
-	mLastPerfShellTraceStats.sceneDataSetDescriptorUpdateCount++;
-	SetCurrentSceneDataDescriptorsInitialized(true);
-	{
-		ScopedPtPerfTimer descriptorHashTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorHashMs);
-		TraceSharedDescriptorRewrite(
-			"scene_data",
-			reason != nullptr ? reason : "unlabeled",
-			HashDescriptorList(reinterpret_cast<const nri::Descriptor* const*>(mSceneDataDescriptors.data()), mSceneDataDescriptors.size()),
-			NRI_SCENE_DATA_DESCRIPTOR_NUM,
-			false);
-	}
-	return true;
+	return NRIDescriptorSetManager::CommitSceneDataDescriptors(*this, reason);
 }
 
 bool NRIRenderer::UpdateFrameTextureSet()
 {
-	return UpdateFrameTextureSet(mFrameTextureSet, mFrameInputDescriptors);
+	return NRIDescriptorSetManager::UpdateFrameTextureSet(*this);
 }
 
 bool NRIRenderer::UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 14>& descriptors)
 {
-	const nri::Descriptor* rawDescriptors[NRI_INPUT_DESCRIPTOR_NUM] = {};
-	for (size_t i = 0; i < NRI_INPUT_DESCRIPTOR_NUM; ++i)
-	{
-		rawDescriptors[i] = descriptors[i];
-	}
-
-	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = set;
-	update.rangeIndex = 0;
-	update.descriptors = rawDescriptors;
-	update.descriptorNum = NRI_INPUT_DESCRIPTOR_NUM;
-	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
-	return true;
+	return NRIDescriptorSetManager::UpdateFrameTextureSet(*this, set, descriptors);
 }
 
 bool NRIRenderer::UpdateOutputSet()
 {
-	return UpdateOutputSet(mOutputSet, mOutputDescriptors);
+	return NRIDescriptorSetManager::UpdateOutputSet(*this);
 }
 
 bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors)
 {
-	if (!EnsureTraceShaderStatsResources())
-	{
-		return false;
-	}
-
-	const nri::Descriptor* rawDescriptors[NRI_OUTPUT_DESCRIPTOR_NUM] = {};
-	for (size_t i = 0; i < NRI_OUTPUT_DESCRIPTOR_NUM; ++i)
-	{
-		rawDescriptors[i] = descriptors[i];
-	}
-
-	nri::UpdateDescriptorRangeDesc update = {};
-	update.descriptorSet = set;
-	update.rangeIndex = 0;
-	update.descriptors = rawDescriptors;
-	update.descriptorNum = NRI_OUTPUT_DESCRIPTOR_NUM;
-	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
-
-	const nri::Descriptor* traceStatsDescriptor = mTraceShaderStats.Descriptor();
-	nri::UpdateDescriptorRangeDesc statsUpdate = {};
-	statsUpdate.descriptorSet = set;
-	statsUpdate.rangeIndex = 1;
-	statsUpdate.descriptors = &traceStatsDescriptor;
-	statsUpdate.descriptorNum = NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM;
-	mFrameBuffer->mCore.UpdateDescriptorRanges(&statsUpdate, 1);
-	return true;
+	return NRIDescriptorSetManager::UpdateOutputSet(*this, set, descriptors);
 }
 
 bool NRIRenderer::EnsureTraceShaderStatsResources()
@@ -14884,94 +14749,27 @@ NRIRenderer::ResidentUploadScratchFrame& NRIRenderer::GetResidentUploadScratchFr
 
 nri::DescriptorSet* NRIRenderer::GetCurrentSceneTextureSet() const
 {
-	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
-	return queuedFrameIndex < mSceneTextureSets.size() ? mSceneTextureSets[queuedFrameIndex] : nullptr;
+	return NRIDescriptorSetManager::GetCurrentSceneTextureSet(*this);
 }
 
 nri::DescriptorSet* NRIRenderer::GetCurrentSceneDataSet() const
 {
-	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
-	return queuedFrameIndex < mSceneDataSets.size() ? mSceneDataSets[queuedFrameIndex] : nullptr;
+	return NRIDescriptorSetManager::GetCurrentSceneDataSet(*this);
 }
 
 bool NRIRenderer::IsCurrentSceneDataDescriptorsInitialized() const
 {
-	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
-	return queuedFrameIndex < mSceneDataDescriptorsInitialized.size() && mSceneDataDescriptorsInitialized[queuedFrameIndex] != 0;
+	return NRIDescriptorSetManager::IsCurrentSceneDataDescriptorsInitialized(*this);
 }
 
 void NRIRenderer::SetCurrentSceneDataDescriptorsInitialized(bool value)
 {
-	const uint32_t queuedFrameIndex = GetCurrentQueuedFrameIndex();
-	if (queuedFrameIndex >= mSceneDataDescriptorsInitialized.size())
-	{
-		return;
-	}
-
-	mSceneDataDescriptorsInitialized[queuedFrameIndex] = value ? 1u : 0u;
+	NRIDescriptorSetManager::SetCurrentSceneDataDescriptorsInitialized(*this, value);
 }
 
 void NRIRenderer::TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet)
 {
-	if (sceneTextureSet)
-	{
-		mDescriptorCoherencyDebugStats.sceneTextureSetUpdates++;
-		mDescriptorCoherencyDebugStats.lastSceneTextureDescriptorHash = descriptorHash;
-		mDescriptorCoherencyDebugStats.lastSceneTextureDescriptorCount = descriptorCount;
-		mDescriptorCoherencyDebugStats.lastSceneTextureReason = reason != nullptr ? reason : "unlabeled";
-	}
-	else
-	{
-		mDescriptorCoherencyDebugStats.sceneDataSetUpdates++;
-		mDescriptorCoherencyDebugStats.lastSceneDataDescriptorHash = descriptorHash;
-		mDescriptorCoherencyDebugStats.lastSceneDataDescriptorCount = descriptorCount;
-		mDescriptorCoherencyDebugStats.lastSceneDataReason = reason != nullptr ? reason : "unlabeled";
-	}
-
-	uint32_t queuedFrameIndex = 0;
-	uint64_t queuedFrameFence = 0;
-	uint64_t submittedFence = 0;
-	if (mFrameBuffer != nullptr)
-	{
-		queuedFrameIndex = mFrameBuffer->mCurrentQueuedFrameIndex;
-		submittedFence = mFrameBuffer->mSubmittedFenceValue;
-		if (queuedFrameIndex < mFrameBuffer->mQueuedFrames.size())
-		{
-			queuedFrameFence = mFrameBuffer->mQueuedFrames[queuedFrameIndex].lastSubmittedFenceValue;
-		}
-	}
-
-	const uint32_t outstandingQueuedFrames = CountPotentialOutstandingQueuedFrames();
-	if (sceneTextureSet)
-	{
-		mDescriptorCoherencyDebugStats.lastSceneTextureQueuedFrameIndex = queuedFrameIndex;
-		mDescriptorCoherencyDebugStats.lastSceneTextureQueuedFrameFence = queuedFrameFence;
-		mDescriptorCoherencyDebugStats.lastSceneTextureSubmittedFence = submittedFence;
-		mDescriptorCoherencyDebugStats.lastSceneTextureOutstandingQueuedFrames = outstandingQueuedFrames;
-	}
-	else
-	{
-		mDescriptorCoherencyDebugStats.lastSceneDataQueuedFrameIndex = queuedFrameIndex;
-		mDescriptorCoherencyDebugStats.lastSceneDataQueuedFrameFence = queuedFrameFence;
-		mDescriptorCoherencyDebugStats.lastSceneDataSubmittedFence = submittedFence;
-		mDescriptorCoherencyDebugStats.lastSceneDataOutstandingQueuedFrames = outstandingQueuedFrames;
-	}
-
-	if (!ShouldTraceActorSpriteCoherency())
-	{
-		return;
-	}
-
-	Printf("NRI PT descriptor rewrite: frame=%u set=%s reason=%s hash=0x%llx descriptors=%u qframe=%u slot_fence=%llu submitted_fence=%llu outstanding_slots=%u\n",
-		mFrameIndex,
-		setName != nullptr ? setName : "unknown",
-		reason != nullptr ? reason : "unlabeled",
-		(unsigned long long)descriptorHash,
-		descriptorCount,
-		queuedFrameIndex,
-		(unsigned long long)queuedFrameFence,
-		(unsigned long long)submittedFence,
-		outstandingQueuedFrames);
+	NRIDescriptorSetManager::TraceSharedDescriptorRewrite(*this, setName, reason, descriptorHash, descriptorCount, sceneTextureSet);
 }
 
 void NRIRenderer::TraceActorSpriteMaterialAssignments(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel)

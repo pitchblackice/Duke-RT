@@ -924,6 +924,7 @@ set (NRI_SOURCES
 	common/rendering/nri/framegen/nri_framegen.cpp
 	common/rendering/nri/renderer/nri_acceleration.cpp
 	common/rendering/nri/renderer/nri_debug_reporters.cpp
+	common/rendering/nri/renderer/nri_descriptor_sets.cpp
 	common/rendering/nri/renderer/nri_exposure.cpp
 	common/rendering/nri/renderer/nri_frame_graph.cpp
 	common/rendering/nri/renderer/nri_frame_resources.cpp

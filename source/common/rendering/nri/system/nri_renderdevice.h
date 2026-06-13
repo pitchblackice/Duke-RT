@@ -19,6 +19,7 @@ class FCanvasTexture;
 class FTexture;
 class FGameTexture;
 class NRIRenderer;
+class NRIDescriptorSetManager;
 class NRIExposurePassAccess;
 class NRIAccelerationStructureManager;
 class NRISceneTextureResidency;
@@ -300,6 +301,7 @@ private:
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
 	friend class NRIRenderer;
+	friend class NRIDescriptorSetManager;
 	friend class NRIExposurePassAccess;
 	friend class NRIAccelerationStructureManager;
 	friend class NRISceneTextureResidency;
