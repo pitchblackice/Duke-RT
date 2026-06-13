@@ -228,6 +228,19 @@ struct NRIStaticSceneAnimatedMaterialRefreshServices
 	void (*markUploadedStaticMapSceneLastFrame)(void* user) = nullptr;
 };
 
+struct NRIStaticSceneMaterialLightingRefreshInput
+{
+	StaticMapSceneCache* staticScene = nullptr;
+};
+
+struct NRIStaticSceneMaterialLightingRefreshServices
+{
+	void* user = nullptr;
+	bool (*ensurePaletteTexture)(void* user, const nri_scene::MaterialBridgeData& materials) = nullptr;
+	bool (*ensureSceneTextures)(void* user, const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& gpuMaterials, bool preserveExistingSky, const char* reason) = nullptr;
+	bool (*uploadStaticMaterialAtlas)(void* user) = nullptr;
+};
+
 struct NRIStaticMapInstanceBuildInput
 {
 	const nri_scene::PTMapWorld* mapWorld = nullptr;
@@ -405,9 +418,12 @@ namespace nri_static_scene
 		const StaticMapChunkAtlas& atlas,
 		bool traceFailures);
 
-	bool RefreshStaticMapAnimatedMaterials(
-		const NRIStaticSceneAnimatedMaterialRefreshInput& input,
-		const NRIStaticSceneAnimatedMaterialRefreshServices& services);
+bool RefreshStaticMapAnimatedMaterials(
+	const NRIStaticSceneAnimatedMaterialRefreshInput& input,
+	const NRIStaticSceneAnimatedMaterialRefreshServices& services);
+bool RefreshStaticMapSceneMaterialLighting(
+	const NRIStaticSceneMaterialLightingRefreshInput& input,
+	const NRIStaticSceneMaterialLightingRefreshServices& services);
 
 	void BuildStaticMapInstances(
 		const NRIStaticMapInstanceBuildInput& input,

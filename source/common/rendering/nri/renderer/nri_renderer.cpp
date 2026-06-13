@@ -12622,21 +12622,39 @@ uint64_t NRIRenderer::ComputeChunkEmissiveOverrideHash(const nri_scene::Material
 
 void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
 {
-	if (!mStaticMapScene.valid)
-	{
-		return;
-	}
+	NRIStaticSceneMaterialLightingRefreshInput input = {};
+	input.staticScene = &mStaticMapScene;
 
-	if (!EnsurePaletteTexture(mStaticMapScene.materialBridge) ||
-		!EnsureSceneTextures(mStaticMapScene.sceneView, mStaticMapScene.materialBridge, mStaticMapScene.gpuMaterials, false, "static_map_scene") ||
-		!EnsureStructuredBuffer(
-			mStaticMaterialBuffer,
-			mMaterialBufferStats,
-			mStaticMapScene.gpuMaterials.data(),
-			mStaticMapScene.gpuMaterials.size() * sizeof(nri_scene::MaterialData),
+	NRIStaticSceneMaterialLightingRefreshServices services = {};
+	services.user = this;
+	services.ensurePaletteTexture = [](void* user, const nri_scene::MaterialBridgeData& materials) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->EnsurePaletteTexture(materials);
+	};
+	services.ensureSceneTextures = [](
+		void* user,
+		const nri_scene::SceneView& sceneView,
+		const nri_scene::MaterialBridgeData& materials,
+		std::vector<nri_scene::MaterialData>& gpuMaterials,
+		bool preserveExistingSky,
+		const char* reason) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->EnsureSceneTextures(sceneView, materials, gpuMaterials, preserveExistingSky, reason);
+	};
+	services.uploadStaticMaterialAtlas = [](void* user) -> bool
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->EnsureStructuredBuffer(
+			renderer->mStaticMaterialBuffer,
+			renderer->mMaterialBufferStats,
+			renderer->mStaticMapScene.gpuMaterials.data(),
+			renderer->mStaticMapScene.gpuMaterials.size() * sizeof(nri_scene::MaterialData),
 			sizeof(nri_scene::MaterialData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess()))
+			NRIComputeShaderResourceAccess());
+	};
+
+	if (!nri_static_scene::RefreshStaticMapSceneMaterialLighting(input, services))
 	{
 		// Fall back to a full resident-scene rebuild on the next frame if the
 		// targeted material refresh path fails for any reason.
@@ -12645,10 +12663,6 @@ void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
 		mStaticAccelerationBuildSerial = 0;
 		return;
 	}
-
-	mStaticMapScene.texturesResident = true;
-	mStaticMapScene.buffersResident = true;
-	mStaticMapScene.gpuUploadCount++;
 }
 
 void NRIRenderer::PrintSceneLightDump(float radius, uint32_t limit) const

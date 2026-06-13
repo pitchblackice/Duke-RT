@@ -536,6 +536,37 @@ bool nri_static_scene::RefreshStaticMapAnimatedMaterials(
 	return true;
 }
 
+bool nri_static_scene::RefreshStaticMapSceneMaterialLighting(
+	const NRIStaticSceneMaterialLightingRefreshInput& input,
+	const NRIStaticSceneMaterialLightingRefreshServices& services)
+{
+	if (input.staticScene == nullptr)
+	{
+		return true;
+	}
+
+	StaticMapSceneCache& staticScene = *input.staticScene;
+	if (!staticScene.valid)
+	{
+		return true;
+	}
+
+	if (services.ensurePaletteTexture == nullptr ||
+		services.ensureSceneTextures == nullptr ||
+		services.uploadStaticMaterialAtlas == nullptr ||
+		!services.ensurePaletteTexture(services.user, staticScene.materialBridge) ||
+		!services.ensureSceneTextures(services.user, staticScene.sceneView, staticScene.materialBridge, staticScene.gpuMaterials, false, "static_map_scene") ||
+		!services.uploadStaticMaterialAtlas(services.user))
+	{
+		return false;
+	}
+
+	staticScene.texturesResident = true;
+	staticScene.buffersResident = true;
+	staticScene.gpuUploadCount++;
+	return true;
+}
+
 namespace
 {
 	uint32_t ResolveStaticMapChunkSectorIndex(const nri_scene::PTMapWorld* mapWorld, uint32_t chunkIndex)
