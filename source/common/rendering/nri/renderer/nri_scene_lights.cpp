@@ -52,7 +52,7 @@ EXTERN_CVAR(Float, nri_ptemissivelighteditnotifyrange)
 EXTERN_CVAR(Int, nri_ptnudgetrace)
 EXTERN_CVAR(Int, nri_ptactorspritetrace)
 EXTERN_CVAR(Int, nri_pttraceframes)
-CVAR(Int, nri_ptexplosiontrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, nri_ptactoroverlaylighttrace, 0, 0)
 
 namespace
 {
@@ -168,11 +168,11 @@ namespace
 
 	bool ShouldTraceActorOverlayRule(const SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& rule)
 	{
-		if ((int)nri_ptexplosiontrace <= 0 || (int)nri_pttraceframes <= 0)
+		if ((int)nri_ptactoroverlaylighttrace <= 0 || (int)nri_pttraceframes <= 0)
 		{
 			return false;
 		}
-		if ((int)nri_ptexplosiontrace >= 2)
+		if ((int)nri_ptactoroverlaylighttrace >= 2)
 		{
 			return true;
 		}

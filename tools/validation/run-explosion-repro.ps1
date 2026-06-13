@@ -116,7 +116,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $args.Add("nri_ptactorspritetrace")
     $args.Add("2")
     $args.Add("+set")
-    $args.Add("nri_ptexplosiontrace")
+    $args.Add("nri_ptactoroverlaylighttrace")
     $args.Add("1")
     $args.Add("+logfile")
     $args.Add($logPath.Replace('\', '/'))
