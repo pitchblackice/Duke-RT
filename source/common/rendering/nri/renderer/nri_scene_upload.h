@@ -35,4 +35,19 @@ public:
 		const void* data,
 		uint64_t size,
 		nri::AccessStage after);
+
+	static bool UpdateReprojectionBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites);
+	static bool UpdateVisibleChunkBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites);
+	static bool UpdateVisibleFlatPlaneBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites);
+
+private:
+	static bool SceneDataDescriptorsReady(NRIRenderer& renderer);
+	static bool UpdateSceneDataDescriptorSlot(NRIRenderer& renderer, uint32_t slot, nri::Descriptor* descriptor, const char* reason);
+	static bool WaitIfStructuredUpdateNeedsIt(
+		NRIRenderer& renderer,
+		NRIBufferResource& resource,
+		const void* data,
+		uint64_t size,
+		uint32_t stride,
+		bool* ioWaitedForWrites);
 };

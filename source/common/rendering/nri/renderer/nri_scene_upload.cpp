@@ -8,6 +8,19 @@
 
 namespace
 {
+	struct NRIReprojectionData
+	{
+		float currentViewToClip[16] = {};
+		float previousViewToClip[16] = {};
+		float currentWorldToView[16] = {};
+		float previousWorldToView[16] = {};
+	};
+
+	static nri::AccessStage NRIComputeShaderResourceAccess()
+	{
+		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
+	}
+
 	static nri::AccessStage NRICopySourceAccess()
 	{
 		return { nri::AccessBits::COPY_SOURCE, nri::StageBits::COPY };
@@ -17,6 +30,84 @@ namespace
 	{
 		return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
 	}
+
+	static bool StructuredBufferUpdateNeedsWait(
+		const NRIBufferResource& resource,
+		const void* data,
+		uint64_t size,
+		uint32_t stride)
+	{
+		const uint64_t requiredSize = std::max<uint64_t>(size, stride);
+		const bool needsGrowth =
+			resource.buffer == nullptr ||
+			resource.shaderView == nullptr ||
+			resource.stride != stride ||
+			resource.size < requiredSize;
+		if (needsGrowth)
+		{
+			return resource.buffer != nullptr || resource.shaderView != nullptr;
+		}
+
+		return data != nullptr && size != 0;
+	}
+}
+
+bool NRISceneUploadManager::SceneDataDescriptorsReady(NRIRenderer& renderer)
+{
+	if (!renderer.IsCurrentSceneDataDescriptorsInitialized() || renderer.GetCurrentSceneDataSet() == nullptr)
+	{
+		return false;
+	}
+
+	for (const nri::Descriptor* descriptor : renderer.mSceneDataDescriptors)
+	{
+		if (descriptor == nullptr)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool NRISceneUploadManager::UpdateSceneDataDescriptorSlot(
+	NRIRenderer& renderer,
+	uint32_t slot,
+	nri::Descriptor* descriptor,
+	const char* reason)
+{
+	if (slot >= renderer.mSceneDataDescriptors.size() ||
+		renderer.mSceneDataDescriptors[slot] == descriptor)
+	{
+		return true;
+	}
+
+	renderer.mSceneDataDescriptors[slot] = descriptor;
+	if (SceneDataDescriptorsReady(renderer))
+	{
+		return renderer.CommitSceneDataDescriptors(reason);
+	}
+
+	return true;
+}
+
+bool NRISceneUploadManager::WaitIfStructuredUpdateNeedsIt(
+	NRIRenderer& renderer,
+	NRIBufferResource& resource,
+	const void* data,
+	uint64_t size,
+	uint32_t stride,
+	bool* ioWaitedForWrites)
+{
+	if (ioWaitedForWrites != nullptr &&
+		!*ioWaitedForWrites &&
+		StructuredBufferUpdateNeedsWait(resource, data, size, stride))
+	{
+		renderer.WaitForCommandsTracked("scene_data_upload");
+		*ioWaitedForWrites = true;
+	}
+
+	return true;
 }
 
 bool NRISceneUploadManager::CreateStructuredBuffer(
@@ -268,6 +359,80 @@ bool NRISceneUploadManager::UpdateStructuredBufferRange(
 	}
 
 	return true;
+}
+
+bool NRISceneUploadManager::UpdateReprojectionBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites)
+{
+	NRIReprojectionData data = {};
+	std::memcpy(data.currentViewToClip, renderer.mCurrentViewToClip, sizeof(data.currentViewToClip));
+	std::memcpy(data.previousViewToClip, renderer.mPreviousViewToClip, sizeof(data.previousViewToClip));
+	std::memcpy(data.currentWorldToView, renderer.mCurrentWorldToView, sizeof(data.currentWorldToView));
+	std::memcpy(data.previousWorldToView, renderer.mPreviousWorldToView, sizeof(data.previousWorldToView));
+
+	WaitIfStructuredUpdateNeedsIt(renderer, renderer.mReprojectionBuffer, &data, sizeof(data), sizeof(data), ioWaitedForWrites);
+	if (!renderer.EnsureStructuredBuffer(
+		renderer.mReprojectionBuffer,
+		renderer.mReprojectionBufferStats,
+		&data,
+		sizeof(data),
+		sizeof(data),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess(),
+		ioWaitedForWrites != nullptr && *ioWaitedForWrites,
+		"scene_data_upload"))
+	{
+		return false;
+	}
+
+	return UpdateSceneDataDescriptorSlot(renderer, 18, renderer.mReprojectionBuffer.shaderView, "reprojection_refresh");
+}
+
+bool NRISceneUploadManager::UpdateVisibleChunkBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites)
+{
+	const uint32_t defaultVisibleChunkWord = 0u;
+	const void* visibleChunkData = renderer.mCurrentVisibleChunkWords.empty() ? (const void*)&defaultVisibleChunkWord : renderer.mCurrentVisibleChunkWords.data();
+	const size_t visibleChunkSize = renderer.mCurrentVisibleChunkWords.empty() ? sizeof(uint32_t) : renderer.mCurrentVisibleChunkWords.size() * sizeof(uint32_t);
+
+	WaitIfStructuredUpdateNeedsIt(renderer, renderer.mVisibleChunkBuffer, visibleChunkData, visibleChunkSize, sizeof(uint32_t), ioWaitedForWrites);
+	if (!renderer.EnsureStructuredBuffer(
+		renderer.mVisibleChunkBuffer,
+		renderer.mVisibleChunkBufferStats,
+		visibleChunkData,
+		visibleChunkSize,
+		sizeof(uint32_t),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess(),
+		ioWaitedForWrites != nullptr && *ioWaitedForWrites,
+		"scene_data_upload"))
+	{
+		return false;
+	}
+
+	return UpdateSceneDataDescriptorSlot(renderer, 19, renderer.mVisibleChunkBuffer.shaderView, "visible_chunk_refresh");
+}
+
+bool NRISceneUploadManager::UpdateVisibleFlatPlaneBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites)
+{
+	const uint32_t defaultVisibleFlatPlaneWord = 0u;
+	const void* visibleFlatPlaneData = renderer.mCurrentVisibleFlatPlaneWords.empty() ? (const void*)&defaultVisibleFlatPlaneWord : renderer.mCurrentVisibleFlatPlaneWords.data();
+	const size_t visibleFlatPlaneSize = renderer.mCurrentVisibleFlatPlaneWords.empty() ? sizeof(uint32_t) : renderer.mCurrentVisibleFlatPlaneWords.size() * sizeof(uint32_t);
+
+	WaitIfStructuredUpdateNeedsIt(renderer, renderer.mVisibleFlatPlaneBuffer, visibleFlatPlaneData, visibleFlatPlaneSize, sizeof(uint32_t), ioWaitedForWrites);
+	if (!renderer.EnsureStructuredBuffer(
+		renderer.mVisibleFlatPlaneBuffer,
+		renderer.mVisibleFlatPlaneBufferStats,
+		visibleFlatPlaneData,
+		visibleFlatPlaneSize,
+		sizeof(uint32_t),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess(),
+		ioWaitedForWrites != nullptr && *ioWaitedForWrites,
+		"scene_data_upload"))
+	{
+		return false;
+	}
+
+	return UpdateSceneDataDescriptorSlot(renderer, 20, renderer.mVisibleFlatPlaneBuffer.shaderView, "visible_flat_refresh");
 }
 
 NRIResourceContext NRIRenderer::BuildResourceContext() const
