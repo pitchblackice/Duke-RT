@@ -16,6 +16,7 @@
 #include "nri_material_policy.h"
 #include "nri_static_scene.h"
 #include "nri_static_scene_geometry_upload.h"
+#include "nri_trace_stats.h"
 #include "nri_upscaler.h"
 #include "../framegen/nri_framegen.h"
 
@@ -1320,40 +1321,16 @@ public:
 		uint64_t residentChunkBatchMaterialBytes = 0;
 	};
 
-	static constexpr uint32_t TraceShaderScalarStatCount = 64;
-	static constexpr uint32_t TraceShaderInstanceBucketCount = 1024;
-	static constexpr uint32_t TraceShaderRayKindCount = 6;
-	static constexpr uint32_t TraceShaderInstanceCommittedBase = TraceShaderScalarStatCount;
-	static constexpr uint32_t TraceShaderInstanceAcceptedBase = TraceShaderInstanceCommittedBase + TraceShaderInstanceBucketCount;
-	static constexpr uint32_t TraceShaderInstanceKindCommittedBase = TraceShaderInstanceAcceptedBase + TraceShaderInstanceBucketCount;
-	static constexpr uint32_t TraceShaderStatCount = TraceShaderInstanceKindCommittedBase + TraceShaderRayKindCount * TraceShaderInstanceBucketCount;
-	static constexpr uint32_t TraceShaderHotInstanceCount = 8;
-	struct PerfTraceShaderHotInstance
-	{
-		uint32_t instanceId = 0;
-		uint32_t dataSource = 0;
-		uint32_t primitiveOffset = 0;
-		uint32_t primitiveCount = 0;
-		uint32_t metadata0 = 0;
-		uint32_t metadata1 = 0;
-		uint32_t committed = 0;
-		uint32_t accepted = 0;
-		uint32_t primaryCommitted = 0;
-		uint32_t ungatedCommitted = 0;
-		uint32_t sunCommitted = 0;
-		uint32_t pointCommitted = 0;
-		uint32_t emissiveCommitted = 0;
-		uint32_t fastEmissiveCommitted = 0;
-	};
-
-	struct PerfTraceShaderStats
-	{
-		bool valid = false;
-		uint64_t frameNumber = 0;
-		std::array<uint32_t, TraceShaderStatCount> counters = {};
-		uint32_t hotInstanceCount = 0;
-		std::array<PerfTraceShaderHotInstance, TraceShaderHotInstanceCount> hotInstances = {};
-	};
+	static constexpr uint32_t TraceShaderScalarStatCount = NRI_TRACE_SHADER_SCALAR_STAT_COUNT;
+	static constexpr uint32_t TraceShaderInstanceBucketCount = NRI_TRACE_SHADER_INSTANCE_BUCKET_COUNT;
+	static constexpr uint32_t TraceShaderRayKindCount = NRI_TRACE_SHADER_RAY_KIND_COUNT;
+	static constexpr uint32_t TraceShaderInstanceCommittedBase = NRI_TRACE_SHADER_INSTANCE_COMMITTED_BASE;
+	static constexpr uint32_t TraceShaderInstanceAcceptedBase = NRI_TRACE_SHADER_INSTANCE_ACCEPTED_BASE;
+	static constexpr uint32_t TraceShaderInstanceKindCommittedBase = NRI_TRACE_SHADER_INSTANCE_KIND_COMMITTED_BASE;
+	static constexpr uint32_t TraceShaderStatCount = NRI_TRACE_SHADER_STAT_COUNT;
+	static constexpr uint32_t TraceShaderHotInstanceCount = NRI_TRACE_SHADER_HOT_INSTANCE_COUNT;
+	using PerfTraceShaderHotInstance = NRITraceShaderHotInstance;
+	using PerfTraceShaderStats = NRITraceShaderStatsSnapshot;
 
 	struct MemoryTelemetry
 	{
@@ -2138,9 +2115,7 @@ private:
 	NRIBufferResource mReprojectionBuffer;
 	NRIBufferResource mVisibleChunkBuffer;
 	NRIBufferResource mVisibleFlatPlaneBuffer;
-	NRIBufferResource mTraceShaderStatsBuffer;
-	NRIBufferResource mTraceShaderStatsReadbackBuffer;
-	NRIBufferResource mTraceShaderStatsZeroBuffer;
+	NRITraceShaderStats mTraceShaderStats;
 	NRIBufferResource mScratchBuffer;
 	NRIBufferResource mResidentStaticBlasScratchBuffer;
 	NRIBufferResource mTopLevelScratchBuffer;
@@ -2187,7 +2162,6 @@ private:
 	PerfShellTraceStats mLastPerfShellTraceStats = {};
 	PerfResourceTraceStats mLastPerfResourceTraceStats = {};
 	PerfTraceShaderStats mLastPerfTraceShaderStats = {};
-	uint64_t mPendingTraceShaderStatsFrame = 0;
 	uint64_t mPendingAutoExposureStatsFrame = 0;
 
 	NRIAccelerationStructureResource mTopLevelAS;

@@ -14139,7 +14139,7 @@ bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri:
 	update.descriptorNum = NRI_OUTPUT_DESCRIPTOR_NUM;
 	mFrameBuffer->mCore.UpdateDescriptorRanges(&update, 1);
 
-	const nri::Descriptor* traceStatsDescriptor = mTraceShaderStatsBuffer.shaderView;
+	const nri::Descriptor* traceStatsDescriptor = mTraceShaderStats.Descriptor();
 	nri::UpdateDescriptorRangeDesc statsUpdate = {};
 	statsUpdate.descriptorSet = set;
 	statsUpdate.rangeIndex = 1;
@@ -14151,256 +14151,33 @@ bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri:
 
 bool NRIRenderer::EnsureTraceShaderStatsResources()
 {
-	constexpr uint32_t kStride = sizeof(uint32_t);
-	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * kStride;
-	if (mTraceShaderStatsBuffer.buffer == nullptr || mTraceShaderStatsBuffer.shaderView == nullptr)
-	{
-		DestroyBufferResource(mTraceShaderStatsBuffer);
-		nri::BufferDesc desc = {};
-		desc.size = byteSize;
-		desc.structureStride = kStride;
-		desc.usage = NRIFlags(
-			nri::BufferUsageBits::SHADER_RESOURCE_STORAGE,
-			nri::BufferUsageBits::SHADER_RESOURCE);
-		if (mFrameBuffer->mCore.CreateCommittedBuffer(*mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, desc, mTraceShaderStatsBuffer.buffer) != nri::Result::SUCCESS)
-		{
-			return false;
-		}
-
-		nri::MemoryDesc memoryDesc = {};
-		mFrameBuffer->mCore.GetBufferMemoryDesc(*mTraceShaderStatsBuffer.buffer, nri::MemoryLocation::DEVICE, memoryDesc);
-		mTraceShaderStatsBuffer.size = desc.size;
-		mTraceShaderStatsBuffer.memorySize = memoryDesc.size;
-		mTraceShaderStatsBuffer.memoryLocation = nri::MemoryLocation::DEVICE;
-		mTraceShaderStatsBuffer.usedSize = byteSize;
-		mTraceShaderStatsBuffer.stride = kStride;
-
-		nri::BufferViewDesc viewDesc = {};
-		viewDesc.buffer = mTraceShaderStatsBuffer.buffer;
-		viewDesc.type = nri::BufferView::STORAGE_STRUCTURED_BUFFER;
-		viewDesc.offset = 0;
-		viewDesc.size = nri::WHOLE_SIZE;
-		viewDesc.structureStride = kStride;
-		if (mFrameBuffer->mCore.CreateBufferView(viewDesc, mTraceShaderStatsBuffer.shaderView) != nri::Result::SUCCESS)
-		{
-			return false;
-		}
-	}
-
-	if (mTraceShaderStatsReadbackBuffer.buffer == nullptr)
-	{
-		if (!CreateBufferWithoutViewAtLocation(
-			mTraceShaderStatsReadbackBuffer,
-			byteSize,
-			kStride,
-			nri::BufferUsageBits::NONE,
-			nri::MemoryLocation::HOST_READBACK))
-		{
-			return false;
-		}
-	}
-
-	if (mTraceShaderStatsZeroBuffer.buffer == nullptr)
-	{
-		if (!CreateBufferWithoutViewAtLocation(
-			mTraceShaderStatsZeroBuffer,
-			byteSize,
-			kStride,
-			nri::BufferUsageBits::NONE,
-			nri::MemoryLocation::DEVICE_UPLOAD))
-		{
-			return false;
-		}
-
-		void* mapped = mFrameBuffer->mCore.MapBuffer(*mTraceShaderStatsZeroBuffer.buffer, 0, byteSize);
-		if (mapped == nullptr)
-		{
-			return false;
-		}
-		std::memset(mapped, 0, (size_t)byteSize);
-		mFrameBuffer->mCore.UnmapBuffer(*mTraceShaderStatsZeroBuffer.buffer);
-	}
-
-	return true;
+	return mTraceShaderStats.Ensure(BuildResourceServices());
 }
 
 void NRIRenderer::ResetTraceShaderStatsBuffer()
 {
-	if (!ShouldCollectTraceShaderStats() || mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || !EnsureTraceShaderStatsResources())
-	{
-		return;
-	}
-
-	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * sizeof(uint32_t);
-	nri::BufferBarrierDesc beforeBarriers[2] = {};
-	beforeBarriers[0].buffer = mTraceShaderStatsZeroBuffer.buffer;
-	beforeBarriers[0].before = {};
-	beforeBarriers[0].after = NRICopySourceAccess();
-	beforeBarriers[1].buffer = mTraceShaderStatsBuffer.buffer;
-	beforeBarriers[1].before = {};
-	beforeBarriers[1].after = NRICopyDestinationAccess();
-	nri::BarrierDesc beforeDesc = {};
-	beforeDesc.buffers = beforeBarriers;
-	beforeDesc.bufferNum = 2;
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeDesc);
-	mFrameBuffer->mCore.CmdCopyBuffer(
-		*mFrameBuffer->mCommandBuffer,
-		*mTraceShaderStatsBuffer.buffer,
-		0,
-		*mTraceShaderStatsZeroBuffer.buffer,
-		0,
-		byteSize);
-
-	nri::BufferBarrierDesc afterBarrier = {};
-	afterBarrier.buffer = mTraceShaderStatsBuffer.buffer;
-	afterBarrier.before = NRICopyDestinationAccess();
-	afterBarrier.after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
-	nri::BarrierDesc afterDesc = {};
-	afterDesc.buffers = &afterBarrier;
-	afterDesc.bufferNum = 1;
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterDesc);
+	mTraceShaderStats.ResetBuffer(BuildResourceServices(), ShouldCollectTraceShaderStats());
 }
 
 void NRIRenderer::CopyTraceShaderStatsForReadback(uint64_t frameNumber)
 {
-	if (!ShouldCollectTraceShaderStats() || mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || !EnsureTraceShaderStatsResources())
-	{
-		return;
-	}
-
-	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * sizeof(uint32_t);
-	nri::BufferBarrierDesc beforeBarrier = {};
-	beforeBarrier.buffer = mTraceShaderStatsBuffer.buffer;
-	beforeBarrier.before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
-	beforeBarrier.after = NRICopySourceAccess();
-	nri::BarrierDesc beforeDesc = {};
-	beforeDesc.buffers = &beforeBarrier;
-	beforeDesc.bufferNum = 1;
-	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeDesc);
-	mFrameBuffer->mCore.CmdCopyBuffer(
-		*mFrameBuffer->mCommandBuffer,
-		*mTraceShaderStatsReadbackBuffer.buffer,
-		0,
-		*mTraceShaderStatsBuffer.buffer,
-		0,
-		byteSize);
-	mPendingTraceShaderStatsFrame = frameNumber;
+	mTraceShaderStats.CopyForReadback(BuildResourceServices(), ShouldCollectTraceShaderStats(), frameNumber);
 }
 
 void NRIRenderer::ReadbackTraceShaderStats()
 {
-	if (!nri_ptshaderstats || mPendingTraceShaderStatsFrame == 0 || mTraceShaderStatsReadbackBuffer.buffer == nullptr)
+	NRITraceShaderStatsReadbackInput input = {};
+	input.enabled = (bool)nri_ptshaderstats;
+	input.boundSceneInstances = &mBoundSceneInstances;
+	input.staticPrimitiveCount = mBoundStaticPrimitiveCount;
+	input.dynamicPrimitiveCount = mBoundDynamicPrimitiveCount;
+	input.persistentVoxelPrimitiveCount = mPersistentVoxels.BoundPrimitiveCount();
+	input.user = this;
+	input.estimatePersistentVoxelPrimitiveCount = [](void* user, uint32_t primitiveOffset) -> uint32_t
 	{
-		return;
-	}
-
-	WaitForCommandsTracked("trace_shader_stats_readback");
-	const uint64_t byteSize = (uint64_t)NRI_TRACE_SHADER_STATS_COUNTER_COUNT * sizeof(uint32_t);
-	const void* mapped = mFrameBuffer->mCore.MapBuffer(*mTraceShaderStatsReadbackBuffer.buffer, 0, byteSize);
-	if (mapped == nullptr)
-	{
-		mPendingTraceShaderStatsFrame = 0;
-		return;
-	}
-
-	mLastPerfTraceShaderStats.valid = true;
-	mLastPerfTraceShaderStats.frameNumber = mPendingTraceShaderStatsFrame;
-	std::memcpy(mLastPerfTraceShaderStats.counters.data(), mapped, (size_t)byteSize);
-	mLastPerfTraceShaderStats.hotInstanceCount = 0;
-	mLastPerfTraceShaderStats.hotInstances = {};
-	struct TraceShaderHotCandidate
-	{
-		uint32_t instanceId = 0;
-		uint32_t committed = 0;
-		uint32_t accepted = 0;
+		return static_cast<NRIRenderer*>(user)->mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(primitiveOffset);
 	};
-	std::vector<TraceShaderHotCandidate> hotCandidates;
-	const uint32_t instanceBucketCount = std::min<uint32_t>((uint32_t)mBoundSceneInstances.size(), TraceShaderInstanceBucketCount);
-	hotCandidates.reserve(instanceBucketCount);
-	for (uint32_t instanceId = 0; instanceId < instanceBucketCount; ++instanceId)
-	{
-		const uint32_t committed = mLastPerfTraceShaderStats.counters[TraceShaderInstanceCommittedBase + instanceId];
-		const uint32_t accepted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceAcceptedBase + instanceId];
-		if (committed == 0 && accepted == 0)
-		{
-			continue;
-		}
-		hotCandidates.push_back({ instanceId, committed, accepted });
-	}
-	std::sort(
-		hotCandidates.begin(),
-		hotCandidates.end(),
-		[](const TraceShaderHotCandidate& a, const TraceShaderHotCandidate& b)
-		{
-			if (a.committed != b.committed)
-			{
-				return a.committed > b.committed;
-			}
-			return a.accepted > b.accepted;
-		});
-	auto getDataSourcePrimitiveTotal = [this](uint32_t dataSource) -> uint32_t
-	{
-		switch (dataSource)
-		{
-		case NRI_SCENE_DATA_SOURCE_STATIC: return mBoundStaticPrimitiveCount;
-		case NRI_SCENE_DATA_SOURCE_DYNAMIC: return mBoundDynamicPrimitiveCount;
-		case NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL: return mPersistentVoxels.BoundPrimitiveCount();
-		default: return 0;
-		}
-	};
-	auto estimateInstancePrimitiveCount = [this, &getDataSourcePrimitiveTotal](const SceneInstanceData& instance) -> uint32_t
-	{
-		if (instance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
-		{
-			const uint32_t persistentVoxelPrimitiveCount = mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(instance.primitiveOffset);
-			if (persistentVoxelPrimitiveCount > 0)
-			{
-				return persistentVoxelPrimitiveCount;
-			}
-		}
-
-		const uint32_t total = getDataSourcePrimitiveTotal(instance.dataSource);
-		if (instance.primitiveOffset >= total)
-		{
-			return 0;
-		}
-
-		uint32_t endOffset = total;
-		for (const SceneInstanceData& other : mBoundSceneInstances)
-		{
-			if (other.dataSource == instance.dataSource &&
-				other.primitiveOffset > instance.primitiveOffset &&
-				other.primitiveOffset < endOffset)
-			{
-				endOffset = other.primitiveOffset;
-			}
-		}
-		return endOffset - instance.primitiveOffset;
-	};
-	const uint32_t hotCount = std::min<uint32_t>((uint32_t)hotCandidates.size(), TraceShaderHotInstanceCount);
-	mLastPerfTraceShaderStats.hotInstanceCount = hotCount;
-	for (uint32_t hotIndex = 0; hotIndex < hotCount; ++hotIndex)
-	{
-		const TraceShaderHotCandidate& candidate = hotCandidates[hotIndex];
-		const SceneInstanceData& instance = mBoundSceneInstances[candidate.instanceId];
-		PerfTraceShaderHotInstance& hot = mLastPerfTraceShaderStats.hotInstances[hotIndex];
-		hot.instanceId = candidate.instanceId;
-		hot.dataSource = instance.dataSource;
-		hot.primitiveOffset = instance.primitiveOffset;
-		hot.primitiveCount = estimateInstancePrimitiveCount(instance);
-		hot.metadata0 = instance.reserved0;
-		hot.metadata1 = instance.reserved1;
-		hot.committed = candidate.committed;
-		hot.accepted = candidate.accepted;
-		hot.primaryCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 0u * TraceShaderInstanceBucketCount + candidate.instanceId];
-		hot.ungatedCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 1u * TraceShaderInstanceBucketCount + candidate.instanceId];
-		hot.sunCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 2u * TraceShaderInstanceBucketCount + candidate.instanceId];
-		hot.pointCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 3u * TraceShaderInstanceBucketCount + candidate.instanceId];
-		hot.emissiveCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 4u * TraceShaderInstanceBucketCount + candidate.instanceId];
-		hot.fastEmissiveCommitted = mLastPerfTraceShaderStats.counters[TraceShaderInstanceKindCommittedBase + 5u * TraceShaderInstanceBucketCount + candidate.instanceId];
-	}
-	mFrameBuffer->mCore.UnmapBuffer(*mTraceShaderStatsReadbackBuffer.buffer);
-	mPendingTraceShaderStatsFrame = 0;
+	mTraceShaderStats.Readback(BuildResourceServices(), input, mLastPerfTraceShaderStats);
 }
 
 bool NRIRenderer::EnsureAutoExposureResources(const NRIAutoExposureSettings& settings)
@@ -18292,9 +18069,7 @@ void NRIRenderer::DestroySceneBuffers()
 	DestroyBufferResource(mReprojectionBuffer);
 	DestroyBufferResource(mVisibleChunkBuffer);
 	DestroyBufferResource(mVisibleFlatPlaneBuffer);
-	DestroyBufferResource(mTraceShaderStatsBuffer);
-	DestroyBufferResource(mTraceShaderStatsReadbackBuffer);
-	DestroyBufferResource(mTraceShaderStatsZeroBuffer);
+	mTraceShaderStats.Destroy(BuildResourceServices());
 	DestroyBufferResource(mScratchBuffer);
 	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
 	DestroyBufferResource(mTopLevelScratchBuffer);
