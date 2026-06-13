@@ -21,6 +21,7 @@ EXTERN_CVAR(Int, perf_looptraceframes)
 namespace
 {
 	constexpr uint32_t NRI_MAX_ACTOR_OVERFLOW_TRACE_LINES = 16;
+	constexpr uint32_t NRI_MAX_ACTOR_TEXTURE_RESIDENCY_TRACE_LINES = 24;
 
 	struct MaterialTextureAttributionCounts
 	{
@@ -43,6 +44,11 @@ namespace
 	bool ShouldTraceActorOverflow()
 	{
 		return (int)perf_looptraceframes > 0;
+	}
+
+	bool ShouldTraceActorTextureResidency()
+	{
+		return (int)nri_ptactorspritetrace >= 2 && (int)nri_pttraceframes > 0;
 	}
 
 	double SceneTextureDurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
@@ -462,14 +468,25 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 	std::vector<nri::Descriptor*> descriptors(NRI_SCENE_DESCRIPTOR_NUM, mFrameBuffer->mWhiteTexture->GetResource().shaderView);
 	descriptors[0] = mSceneTextures.PaletteTexture().shaderView;
 	descriptors[1] = GetActiveSkyTexture() != nullptr ? GetActiveSkyTexture()->shaderView : mFrameBuffer->mWhiteTexture->GetResource().shaderView;
+	const uint32_t textureResolveCount = std::min<uint32_t>((uint32_t)materials.textures.size(), NRI_MAX_SCENE_TEXTURES);
+	const bool traceActorTextureResidency = ShouldTraceActorTextureResidency();
+	std::vector<SceneTextureResolveResult> textureResolveResults;
+	if (traceActorTextureResidency)
+	{
+		textureResolveResults.resize(textureResolveCount);
+	}
 
-	for (uint32_t i = 0; i < std::min<uint32_t>((uint32_t)materials.textures.size(), NRI_MAX_SCENE_TEXTURES); ++i)
+	for (uint32_t i = 0; i < textureResolveCount; ++i)
 	{
 		const auto& upload = materials.textures[i];
 		SceneTextureResolveResult textureResult = {};
 		if (!mSceneTextures.ResolveTextureDescriptor(*mFrameBuffer, upload, tracePerf, textureResult))
 		{
 			return false;
+		}
+		if (traceActorTextureResidency)
+		{
+			textureResolveResults[i] = textureResult;
 		}
 		if (textureResult.activeCanvasSelfReference)
 		{
@@ -493,6 +510,123 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 		if (textureResult.descriptor != nullptr)
 		{
 			descriptors[2 + i] = textureResult.descriptor;
+		}
+	}
+
+	uint32_t actorTextureResidencyTraceLines = 0;
+	if (traceActorTextureResidency)
+	{
+		struct TextureResidencyTraceState
+		{
+			uint64_t key = 0;
+			uint32_t cacheIndex = UINT32_MAX;
+			const char* descriptorState = "none";
+			bool cacheMiss = false;
+			bool inserted = false;
+		};
+
+		nri::Descriptor* whiteDescriptor =
+			mFrameBuffer != nullptr && mFrameBuffer->mWhiteTexture != nullptr ?
+			mFrameBuffer->mWhiteTexture->GetResource().shaderView :
+			nullptr;
+		const auto getTextureState = [&](uint32_t textureIndex)
+		{
+			TextureResidencyTraceState state = {};
+			if (textureIndex == UINT32_MAX)
+			{
+				return state;
+			}
+			if (textureIndex >= textureResolveCount || textureIndex >= (uint32_t)materials.textures.size())
+			{
+				state.descriptorState = "overflow";
+				return state;
+			}
+
+			const nri_scene::TextureUpload& upload = materials.textures[textureIndex];
+			state.key = upload.key;
+			state.cacheIndex = mSceneTextures.FindCacheIndex(upload.key);
+			if (textureIndex < textureResolveResults.size())
+			{
+				state.cacheMiss = textureResolveResults[textureIndex].cacheMiss;
+				state.inserted = textureResolveResults[textureIndex].inserted;
+			}
+
+			nri::Descriptor* descriptor = descriptors[2 + textureIndex];
+			if (descriptor == nullptr)
+			{
+				state.descriptorState = "null";
+			}
+			else if (whiteDescriptor != nullptr && descriptor == whiteDescriptor)
+			{
+				state.descriptorState = "white";
+			}
+			else
+			{
+				state.descriptorState = "bound";
+			}
+			return state;
+		};
+
+		const uint32_t traceMaterialCount = std::min<uint32_t>((uint32_t)outGpuMaterials.size(), (uint32_t)materials.lightMetadata.size());
+		for (uint32_t materialIndex = 0; materialIndex < traceMaterialCount; ++materialIndex)
+		{
+			const nri_scene::MaterialLightingMetadata& metadata = materials.lightMetadata[materialIndex];
+			if (metadata.actorIndex < 0)
+			{
+				continue;
+			}
+
+			const nri_scene::MaterialData& material = outGpuMaterials[materialIndex];
+			const uint32_t combinedLightingFlags = material.lightingFlags | metadata.lightingFlags;
+			const bool interesting =
+				material.emissiveMode != nri_scene::MaterialEmissiveMode_None ||
+				metadata.emissiveMode != nri_scene::MaterialEmissiveMode_None ||
+				material.emissiveIntensity > 0.0f ||
+				metadata.emissiveIntensity > 0.0f ||
+				(combinedLightingFlags & (
+					nri_scene::MaterialLightingFlag_MaterialFullbright |
+					nri_scene::MaterialLightingFlag_TextureFullbright |
+					nri_scene::MaterialLightingFlag_NoShadowReceive |
+					nri_scene::MaterialLightingFlag_NoShadowCast)) != 0;
+			if (!interesting)
+			{
+				continue;
+			}
+
+			if (actorTextureResidencyTraceLines >= NRI_MAX_ACTOR_TEXTURE_RESIDENCY_TRACE_LINES)
+			{
+				break;
+			}
+
+			const TextureResidencyTraceState baseTexture = getTextureState(material.textureIndex);
+			const TextureResidencyTraceState emissiveTexture = getTextureState(material.emissiveTextureIndex);
+			Printf(
+				"NRI PT actor texture residency: frame=%llu reason=%s actor=%d source=%s material=%u tex_id=%u base_idx=%u base_key=0x%016llx base_cache=%u base_desc=%s base_miss=%s base_insert=%s emissive_mode=%u emissive_intensity=%.3f emissive_idx=%u emissive_key=0x%016llx emissive_cache=%u emissive_desc=%s emissive_miss=%s emissive_insert=%s mat_flags=0x%x meta_flags=0x%x mat_light=0x%x meta_light=0x%x\n",
+				(unsigned long long)mFrameIndex,
+				mLastPerfShellTraceStats.sceneTextureReason.empty() ? "none" : mLastPerfShellTraceStats.sceneTextureReason.c_str(),
+				metadata.actorIndex,
+				GetSurfaceSourceTypeName(metadata.sourceType),
+				materialIndex,
+				metadata.textureId,
+				material.textureIndex,
+				(unsigned long long)baseTexture.key,
+				baseTexture.cacheIndex,
+				baseTexture.descriptorState,
+				baseTexture.cacheMiss ? "yes" : "no",
+				baseTexture.inserted ? "yes" : "no",
+				material.emissiveMode,
+				material.emissiveIntensity,
+				material.emissiveTextureIndex,
+				(unsigned long long)emissiveTexture.key,
+				emissiveTexture.cacheIndex,
+				emissiveTexture.descriptorState,
+				emissiveTexture.cacheMiss ? "yes" : "no",
+				emissiveTexture.inserted ? "yes" : "no",
+				material.flags,
+				metadata.materialFlags,
+				material.lightingFlags,
+				metadata.lightingFlags);
+			actorTextureResidencyTraceLines++;
 		}
 	}
 
@@ -718,8 +852,8 @@ uint32_t NRISceneTextureResidency::FindCacheIndex(uint64_t key) const
 uint32_t NRISceneTextureResidency::AddCachedTexture(NRISceneCachedTexture&& texture)
 {
 	const uint32_t cacheIndex = (uint32_t)mTextureCache.size();
-	mTextureCacheKeyIndex[texture.key] = cacheIndex;
-	mTextureCache.push_back(std::move(texture));
+	mTextureCache.push_back(texture);
+	mTextureCacheKeyIndex[mTextureCache[cacheIndex].key] = cacheIndex;
 	return cacheIndex;
 }
 
