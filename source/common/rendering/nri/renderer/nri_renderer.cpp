@@ -13964,11 +13964,6 @@ bool NRIRenderer::UpdateSamplerSet()
 }
 
 
-void NRIRenderer::BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const
-{
-	mSceneLights.BuildRuntimePointLightUpload(outLights);
-}
-
 SceneLightSystem::RuntimeLightClusterBuildInput NRIRenderer::BuildRuntimeLightClusterInput() const
 {
 	SceneLightSystem::RuntimeLightClusterBuildInput input = {};
@@ -13989,53 +13984,9 @@ SceneLightSystem::RuntimeLightClusterBuildInput NRIRenderer::BuildRuntimeLightCl
 	return input;
 }
 
-uint64_t NRIRenderer::BuildRuntimeLightPayloadHash() const
-{
-	return mSceneLights.BuildRuntimeLightPayloadHash();
-}
-
-uint64_t NRIRenderer::BuildRuntimeLightClusterCameraHash() const
-{
-	return mSceneLights.BuildRuntimeLightClusterCameraHash(BuildRuntimeLightClusterInput());
-}
-
-void NRIRenderer::BuildEmissiveSamplingUpload(
-	const EmissiveSamplingBuildContext& context,
-	EmissivePrimitiveHeaderGpuData& outHeader,
-	std::vector<EmissivePrimitiveGpuData>& outPrimitives,
-	std::vector<float>& outCdf,
-	std::vector<EmissiveMaterialResponseGpuData>& outMaterialResponses,
-	std::vector<EmissivePrimitiveDebugRecord>& outDebugRecords) const
-{
-	mSceneLights.BuildEmissiveSamplingUpload(context, outHeader, outPrimitives, outCdf, outMaterialResponses, outDebugRecords);
-}
-
-void NRIRenderer::BuildSectorLightingUpload(
-	SectorLightHeaderGpuData& outHeader,
-	std::vector<SectorLightGpuData>& outSectors)
-{
-	UpdateBoundSectorLightingState();
-	mSceneLights.BuildSectorLightingUpload(GetSectorLightMultiplier(), nri_ptsectorlighting, outHeader, outSectors);
-}
-
-uint64_t NRIRenderer::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const
-{
-	return mSceneLights.BuildEmissiveSamplingPayloadHash(context);
-}
-
-uint64_t NRIRenderer::BuildEmissiveSectorResponsePayloadHash() const
-{
-	return mSceneLights.BuildEmissiveSectorResponsePayloadHash();
-}
-
 void NRIRenderer::TraceEmissiveSectorResponseChange()
 {
 	mSceneLights.TraceEmissiveSectorResponseChange(mFrameIndex, mCurrentCameraPos, ShouldTracePtPerf());
-}
-
-uint64_t NRIRenderer::BuildSectorLightingPayloadHash() const
-{
-	return mSceneLights.BuildSectorLightingPayloadHash(GetSectorLightMultiplier(), nri_ptsectorlighting);
 }
 
 void NRIRenderer::UpdateBoundSectorLightingState()
@@ -14051,8 +14002,8 @@ void NRIRenderer::UpdateBoundSectorLightingState()
 bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context, bool* ioWaitedForWrites)
 {
 	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.emissiveUpdateMs);
-	const uint64_t payloadHash = BuildEmissiveSamplingPayloadHash(context);
-	const uint64_t sectorResponsePayloadHash = BuildEmissiveSectorResponsePayloadHash();
+	const uint64_t payloadHash = mSceneLights.BuildEmissiveSamplingPayloadHash(context);
+	const uint64_t sectorResponsePayloadHash = mSceneLights.BuildEmissiveSectorResponsePayloadHash();
 	const bool sectorResponseChanged =
 		mEmissiveSectorResponsePayloadCacheValid &&
 		mEmissiveSectorResponsePayloadHash != sectorResponsePayloadHash;
@@ -14076,7 +14027,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 	std::vector<float> emissiveCdf;
 	std::vector<EmissiveMaterialResponseGpuData> emissiveMaterialResponses;
 	std::vector<EmissivePrimitiveDebugRecord> emissiveDebugRecords;
-	BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, emissiveDebugRecords);
+	mSceneLights.BuildEmissiveSamplingUpload(context, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, emissiveDebugRecords);
 
 	const auto ensureStructuredBufferBatched = [this, ioWaitedForWrites](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after) -> bool
 	{
@@ -14350,24 +14301,6 @@ bool NRIRenderer::UpdateVisibleFlatPlaneBuffer(bool* ioWaitedForWrites)
 	return true;
 }
 
-void NRIRenderer::BuildRuntimeLightClusterUpload(
-	std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
-	std::vector<uint32_t>& outIndices,
-	uint32_t& outTileCountX,
-	uint32_t& outTileCountY,
-	uint32_t& outTileIndexCount,
-	uint32_t& outMaxTileOccupancy) const
-{
-	mSceneLights.BuildRuntimeLightClusterUpload(
-		BuildRuntimeLightClusterInput(),
-		outHeaders,
-		outIndices,
-		outTileCountX,
-		outTileCountY,
-		outTileIndexCount,
-		outMaxTileOccupancy);
-}
-
 bool NRIRenderer::UpdateSceneDataSet(
 	const NRIBufferResource& staticVertexBuffer,
 	const NRIBufferResource& staticIndexBuffer,
@@ -14494,7 +14427,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	uint64_t runtimeLightPayloadHash = 0;
 	{
 		ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightHashMs);
-		runtimeLightPayloadHash = BuildRuntimeLightPayloadHash();
+		runtimeLightPayloadHash = mSceneLights.BuildRuntimeLightPayloadHash();
 	}
 	const uint32_t activeRuntimeLightCount = (uint32_t)mSceneLights.GetAnalyticLights().activeLights.size();
 	if (!mRuntimeLightPayloadCacheValid ||
@@ -14505,7 +14438,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		std::vector<RuntimePointLightGpuData> runtimeLights;
 		{
 			ScopedPtPerfTimer runtimeLightTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploadMs);
-			BuildRuntimePointLightUpload(runtimeLights);
+			mSceneLights.BuildRuntimePointLightUpload(runtimeLights);
 		}
 		if (!ensureStructuredBufferBatched(
 			mRuntimeLightBuffer,
@@ -14537,7 +14470,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	uint64_t runtimeLightClusterCameraHash = 0;
 	{
 		ScopedPtPerfTimer runtimeLightClusterTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs);
-		runtimeLightClusterCameraHash = BuildRuntimeLightClusterCameraHash();
+		runtimeLightClusterCameraHash = mSceneLights.BuildRuntimeLightClusterCameraHash(BuildRuntimeLightClusterInput());
 	}
 	const uint64_t runtimeLightClusterPayloadHash =
 		HashCombine64(runtimeLightPayloadHash, runtimeLightClusterCameraHash);
@@ -14551,7 +14484,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 		std::vector<uint32_t> runtimeLightTileIndices;
 		{
 			ScopedPtPerfTimer runtimeLightClusterTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs);
-			BuildRuntimeLightClusterUpload(
+			mSceneLights.BuildRuntimeLightClusterUpload(
+				BuildRuntimeLightClusterInput(),
 				runtimeLightTileHeaders,
 				runtimeLightTileIndices,
 				runtimeLightTileCountX,
@@ -14616,7 +14550,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		std::vector<EmissivePrimitiveDebugRecord> ignoredEmissiveDebugRecords;
 		{
 			ScopedPtPerfTimer emissiveTimer(mLastPerfShellTraceStats.sceneDataSetEmissiveMs);
-			BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, ignoredEmissiveDebugRecords);
+			mSceneLights.BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, ignoredEmissiveDebugRecords);
 		}
 		if (!ensureStructuredBufferBatched(
 			mEmissivePrimitiveHeaderBuffer,
@@ -14687,7 +14621,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	{
 		ScopedPtPerfTimer sectorLightTimer(mLastPerfShellTraceStats.sceneDataSetSectorLightMs);
 		UpdateBoundSectorLightingState();
-		sectorLightingPayloadHash = BuildSectorLightingPayloadHash();
+		sectorLightingPayloadHash = mSceneLights.BuildSectorLightingPayloadHash(GetSectorLightMultiplier(), nri_ptsectorlighting);
 	}
 	if (!mSectorLightingPayloadCacheValid ||
 		mSectorLightingPayloadHash != sectorLightingPayloadHash ||
@@ -14699,7 +14633,8 @@ bool NRIRenderer::UpdateSceneDataSet(
 		std::vector<SectorLightGpuData> sectorLights;
 		{
 			ScopedPtPerfTimer sectorLightTimer(mLastPerfShellTraceStats.sceneDataSetSectorLightMs);
-			BuildSectorLightingUpload(sectorLightHeader, sectorLights);
+			UpdateBoundSectorLightingState();
+			mSceneLights.BuildSectorLightingUpload(GetSectorLightMultiplier(), nri_ptsectorlighting, sectorLightHeader, sectorLights);
 		}
 		if (!ensureStructuredBufferBatched(
 			mSectorLightHeaderBuffer,

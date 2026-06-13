@@ -1909,25 +1909,9 @@ private:
 	bool RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t>& chunkListIndices);
 	bool BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	SceneLightSystem::RuntimeLightClusterBuildInput BuildRuntimeLightClusterInput() const;
-	void BuildRuntimePointLightUpload(std::vector<RuntimePointLightGpuData>& outLights) const;
-	uint64_t BuildRuntimeLightPayloadHash() const;
-	uint64_t BuildRuntimeLightClusterCameraHash() const;
-	uint64_t BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const;
-	uint64_t BuildEmissiveSectorResponsePayloadHash() const;
-	uint64_t BuildSectorLightingPayloadHash() const;
 	void TraceEmissiveSectorResponseChange();
-	void BuildEmissiveSamplingUpload(
-		const EmissiveSamplingBuildContext& context,
-		EmissivePrimitiveHeaderGpuData& outHeader,
-		std::vector<EmissivePrimitiveGpuData>& outPrimitives,
-		std::vector<float>& outCdf,
-		std::vector<EmissiveMaterialResponseGpuData>& outMaterialResponses,
-		std::vector<EmissivePrimitiveDebugRecord>& outDebugRecords) const;
 	bool UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context, bool* ioWaitedForWrites = nullptr);
 	void UpdateBoundSectorLightingState();
-	void BuildSectorLightingUpload(
-		SectorLightHeaderGpuData& outHeader,
-		std::vector<SectorLightGpuData>& outSectors);
 	bool UpdateReprojectionBuffer(bool* ioWaitedForWrites = nullptr);
 	bool UpdateVisibleChunkBuffer(bool* ioWaitedForWrites = nullptr);
 	bool UpdateVisibleFlatPlaneBuffer(bool* ioWaitedForWrites = nullptr);
@@ -2089,13 +2073,6 @@ private:
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
-	void BuildRuntimeLightClusterUpload(
-		std::vector<RuntimeLightTileHeaderGpuData>& outHeaders,
-		std::vector<uint32_t>& outIndices,
-		uint32_t& outTileCountX,
-		uint32_t& outTileCountY,
-		uint32_t& outTileIndexCount,
-		uint32_t& outMaxTileOccupancy) const;
 	bool UpdateSamplerSet();
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors, const char* reason = nullptr);
 	bool UpdateFrameTextureSet();
