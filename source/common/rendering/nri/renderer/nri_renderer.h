@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../nri_output.h"
+#include "nri_debug_overlays.h"
 #include "nri_debug_reporters.h"
 #include "nri_descriptor_sets.h"
 #include "nri_exposure.h"
@@ -1604,20 +1605,6 @@ private:
 
 	using RuntimePointLightGpuData = NRIRuntimePointLightGpuData;
 
-	struct RuntimeDebugSphere
-	{
-		uint32_t id = 0;
-		float center[3] = {};
-		float diameter = 0.0f;
-		float metalness = 1.0f;
-		float roughness = 0.05f;
-		uint32_t cachedLongitudeSegments = 0;
-		uint32_t cachedLatitudeSegments = 0;
-		bool cacheValid = false;
-		nri_scene::GeometryData geometry;
-		nri_scene::MaterialBridgeData materialBridge;
-	};
-
 	using RuntimeLightTileHeaderGpuData = NRIRuntimeLightTileHeaderGpuData;
 
 	using EmissivePrimitiveHeaderGpuData = NRIEmissivePrimitiveHeaderGpuData;
@@ -1943,10 +1930,7 @@ private:
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
 	SurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const SurfaceProbeResult& probe) const;
-	bool BuildRuntimeDebugSphereOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	bool BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
-	bool EnsureRuntimeDebugSphereCache(RuntimeDebugSphere& sphere);
-	void AppendRuntimeDebugSphereToSceneView(const RuntimeDebugSphere& sphere, nri_scene::SceneView& sceneView) const;
 	void RefreshSceneLightSystem(
 		bool usedStaticMapScene,
 		const nri_scene::SceneView* capturedSceneView,
@@ -2201,6 +2185,7 @@ private:
 	std::vector<RuntimeRecurringChunkTracker> mRuntimeRecurringChunkTrackers;
 	nri_scene::SceneDebugStats mLastStats = {};
 	NRIRendererDiagnostics mDiagnostics;
+	NRIDebugOverlaySystem mDebugOverlays;
 	SceneLightSystem mSceneLights;
 	NRIDirectionalLightState mDirectionalLightState = {};
 	NRIPTNightVisionState mNightVisionState = {};
@@ -2330,8 +2315,6 @@ private:
 	uint32_t mBoundSectorLightPulsingCount = 0;
 	uint32_t mBoundSectorLightDominantSector = UINT32_MAX;
 	float mBoundSectorLightDominantContribution = 0.0f;
-	std::vector<RuntimeDebugSphere> mRuntimeDebugSpheres;
-	uint32_t mNextRuntimeDebugSphereId = 1;
 	SurfaceProbeResult mLastSurfaceProbe = {};
 	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
 	int mLastDebugMode = -1;

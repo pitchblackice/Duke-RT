@@ -1,5 +1,6 @@
 #include "nri_scene_lights.h"
 
+#include "nri_renderer.h"
 #include "nri_static_scene.h"
 #include "c_cvars.h"
 #include "coreactor.h"
@@ -53,6 +54,139 @@ EXTERN_CVAR(Int, nri_ptnudgetrace)
 EXTERN_CVAR(Int, nri_ptactorspritetrace)
 EXTERN_CVAR(Int, nri_pttraceframes)
 CVAR(Int, nri_ptactoroverlaylighttrace, 0, 0)
+
+bool NRIRenderer::AddRuntimePointLight(const float position[3], const float color[3], float intensity, float radius, uint32_t& outId)
+{
+	if (!mSceneLights.AddRuntimePointLight(position, color, intensity, radius, NRI_MAX_RUNTIME_POINT_LIGHTS, outId))
+	{
+		return false;
+	}
+	InvalidateRuntimeLightSceneData();
+	NoteLightHistoryChange("runtime-light-change");
+	return true;
+}
+
+bool NRIRenderer::UpdateRuntimePointLight(uint32_t id, const float position[3], const float color[3], float intensity, float radius)
+{
+	if (!mSceneLights.UpdateRuntimePointLight(id, position, color, intensity, radius))
+	{
+		return false;
+	}
+
+	InvalidateRuntimeLightSceneData();
+	NoteLightHistoryChange("runtime-light-change");
+	return true;
+}
+
+bool NRIRenderer::RemoveRuntimePointLight(uint32_t id)
+{
+	if (!mSceneLights.RemoveRuntimePointLight(id))
+	{
+		return false;
+	}
+
+	InvalidateRuntimeLightSceneData();
+	NoteLightHistoryChange("runtime-light-change");
+	return true;
+}
+
+void NRIRenderer::ClearRuntimePointLights()
+{
+	if (!mSceneLights.ClearRuntimePointLights())
+	{
+		return;
+	}
+
+	InvalidateRuntimeLightSceneData();
+	NoteLightHistoryChange("runtime-light-change");
+}
+
+void NRIRenderer::PrintRuntimePointLights() const
+{
+	mSceneLights.PrintRuntimePointLights(NRI_MAX_RUNTIME_POINT_LIGHTS);
+}
+
+uint32_t NRIRenderer::GetRuntimePointLightCount() const
+{
+	return mSceneLights.GetManualAnalyticLightCount();
+}
+
+bool NRIRenderer::AddSpriteTileLightHeuristic(uint32_t textureId, const float color[3], float intensity, float radius, uint32_t flickerFrames, uint32_t& outRuleId)
+{
+	if (!mSceneLights.AddSpriteTileHeuristic(textureId, color, intensity, radius, flickerFrames, outRuleId))
+	{
+		return false;
+	}
+
+	NoteLightHistoryChange("analytic-light-heuristic-change");
+	return true;
+}
+
+void NRIRenderer::ClearSpriteTileLightHeuristics()
+{
+	if (!mSceneLights.ClearSpriteTileHeuristics())
+	{
+		return;
+	}
+
+	NoteLightHistoryChange("analytic-light-heuristic-change");
+}
+
+void NRIRenderer::PrintSpriteTileLightHeuristics() const
+{
+	mSceneLights.PrintSpriteTileLightHeuristics();
+}
+
+bool NRIRenderer::AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t emissiveMode, float intensityScale, const float* emissiveColor, bool hasExplicitColor, uint32_t& outRuleId)
+{
+	if (!mSceneLights.AddTextureEmissiveHeuristic(textureId, emissiveMode, intensityScale, emissiveColor, hasExplicitColor, outRuleId))
+	{
+		return false;
+	}
+
+	QueueStaticMapSceneLightingInvalidation();
+	mSceneLights.ConsumeEmissiveMaterialBindingChanged();
+	mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
+	NoteLightHistoryChange("emissive-heuristic-change");
+	return true;
+}
+
+void NRIRenderer::ClearTextureEmissiveHeuristics()
+{
+	if (!mSceneLights.ClearTextureEmissiveHeuristics())
+	{
+		return;
+	}
+
+	QueueStaticMapSceneLightingInvalidation();
+	mSceneLights.ConsumeEmissiveMaterialBindingChanged();
+	mSceneLights.ConsumeEmissiveMaterialPropertiesChanged();
+	NoteLightHistoryChange("emissive-heuristic-change");
+}
+
+void NRIRenderer::PrintTextureEmissiveHeuristics() const
+{
+	mSceneLights.PrintTextureEmissiveHeuristics();
+}
+
+void NRIRenderer::NotifyGlowControlChange()
+{
+	QueueStaticMapSceneLightingInvalidation();
+	ResetPersistentDynamicEmissiveCache();
+	NoteLightHistoryChange("glow-control-change");
+}
+
+void NRIRenderer::NotifyMaterialLightingCalibrationChange()
+{
+	QueueStaticMapSceneLightingInvalidation();
+	ResetPersistentDynamicEmissiveCache();
+	NoteLightHistoryChange("material-lighting-calibration-change");
+}
+
+void NRIRenderer::ResetPersistentDynamicEmissiveCache()
+{
+	mSceneLights.ResetPersistentDynamicEmissiveCache();
+}
 
 namespace
 {

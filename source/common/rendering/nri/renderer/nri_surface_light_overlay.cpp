@@ -1,5 +1,6 @@
 #include "nri_surface_light_overlay.h"
 
+#include "nri_renderer.h"
 #include "../scene/nri_scene_bridge.h"
 #include "lightoverlay.h"
 #include "texinfo.h"
@@ -84,6 +85,11 @@ namespace
 		stats.totalDrawItems = stats.wallDrawItems + stats.flatDrawItems + stats.spriteDrawItems;
 		sceneView.stats = stats;
 	}
+}
+
+bool NRIRenderer::BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials)
+{
+	return nri_surface_light_overlay::BuildSurfaceLightOverlay(GetResolvedLightOverlaySet(), outGeometry, outMaterials);
 }
 
 namespace nri_surface_light_overlay

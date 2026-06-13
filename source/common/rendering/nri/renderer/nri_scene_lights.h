@@ -112,6 +112,8 @@ struct NRISectorLightingBoundState
 
 struct StaticMapSceneCache;
 
+inline constexpr uint32_t NRI_MAX_RUNTIME_POINT_LIGHTS = 64u;
+
 struct NRIRuntimeLightTileHeaderGpuData
 {
 	uint32_t indexOffset = 0;
