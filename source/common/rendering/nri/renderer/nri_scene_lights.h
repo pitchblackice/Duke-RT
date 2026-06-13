@@ -649,6 +649,17 @@ public:
 	bool AddTextureEmissiveHeuristic(uint32_t textureId, uint32_t emissiveMode, float intensityScale, const float* emissiveColor, bool hasExplicitColor, uint32_t& outRuleId);
 	bool ClearTextureEmissiveHeuristics();
 	void PrintTextureEmissiveHeuristics() const;
+	void PrintEmissiveSurfaceDump(
+		const std::vector<NRIEmissivePrimitiveDebugRecord>& boundPrimitiveRecords,
+		float boundTotalPower,
+		const float currentCameraPos[3],
+		float radius,
+		uint32_t limit) const;
+	void PrintSectorLightDump(
+		const float currentCameraPos[3],
+		float sectorLightMultiplier,
+		float radius,
+		uint32_t limit) const;
 	bool MaterialWouldEmit(const nri_scene::MaterialLightingMetadata& metadata) const;
 	bool ApplyEmissiveMaterialSettings(const nri_scene::MaterialLightingMetadata& metadata, nri_scene::MaterialData& inOutMaterial) const;
 
