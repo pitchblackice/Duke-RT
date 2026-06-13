@@ -221,7 +221,7 @@ const std::unordered_map<int32_t, uint32_t>& nri_material_policy::GetActorMateri
 	return cache.overrides;
 }
 
-void nri_material_policy::ApplyActorFullbrightOverridesToBuiltMaterials(
+void nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(
 	const std::unordered_map<int32_t, uint32_t>& actorOverrides,
 	float fullbrightBoost,
 	nri_scene::MaterialBridgeData& materials)
@@ -236,14 +236,37 @@ void nri_material_policy::ApplyActorFullbrightOverridesToBuiltMaterials(
 		}
 
 		auto it = actorOverrides.find(metadata.actorIndex);
-		if (it == actorOverrides.end() || (it->second & ActorMaterialOverride_Fullbright) == 0)
+		if (it == actorOverrides.end())
 		{
 			continue;
 		}
 
 		nri_scene::MaterialData& material = materials.materials[materialIndex];
-		ApplyFullbrightMaterialOverride(material, fullbrightBoost);
+		const uint32_t overrideBits = it->second;
+		bool appliedOverride = false;
+		if ((overrideBits & ActorMaterialOverride_NoShadowReceive) != 0)
+		{
+			material.lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowReceive;
+			metadata.lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowReceive;
+			appliedOverride = true;
+		}
+		if ((overrideBits & ActorMaterialOverride_NoShadowCast) != 0)
+		{
+			material.lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
+			metadata.lightingFlags |= nri_scene::MaterialLightingFlag_NoShadowCast;
+			appliedOverride = true;
+		}
+		if ((overrideBits & ActorMaterialOverride_Fullbright) == 0)
+		{
+			if (appliedOverride)
+			{
+				metadata.materialKey = HashCombine64(HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull), overrideBits);
+			}
+			continue;
+		}
 
+		ApplyFullbrightMaterialOverride(material, fullbrightBoost);
+		appliedOverride = true;
 		metadata.materialFlags |= nri_scene::MaterialFlag_Fullbright;
 		metadata.lightingFlags |= nri_scene::MaterialLightingFlag_MaterialFullbright;
 		metadata.lightLevel = 1.0f;
@@ -255,6 +278,10 @@ void nri_material_policy::ApplyActorFullbrightOverridesToBuiltMaterials(
 		metadata.emissiveColor[0] = 1.0f;
 		metadata.emissiveColor[1] = 1.0f;
 		metadata.emissiveColor[2] = 1.0f;
+		if (appliedOverride)
+		{
+			metadata.materialKey = HashCombine64(HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull), overrideBits);
+		}
 	}
 }
 

@@ -2505,6 +2505,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 	uint32_t renderFrameIndex,
 	uint32_t maxActiveLights,
 	const std::unordered_map<int32_t, std::vector<AnalyticLightRegistry::ActorOverlayRule>>* actorOverlayRules,
+	const std::unordered_map<uint32_t, AnalyticLightRegistry::ActorOverlayRule>* actorOverlayRulesById,
 	const std::vector<AnalyticLightRegistry::MapOverlayRule>* mapOverlayRules)
 {
 	const NRILightingSettings settings = CaptureSettings();
@@ -2516,6 +2517,10 @@ void SceneLightSystem::RebuildAnalyticLights(
 		{
 			overlayRuleCount += entry.second.size();
 		}
+	}
+	else if (actorOverlayRulesById != nullptr)
+	{
+		overlayRuleCount = actorOverlayRulesById->size();
 	}
 	const size_t mapOverlayRuleCount = mapOverlayRules != nullptr ? mapOverlayRules->size() : 0u;
 	mAnalyticLights.actorOverlayRuleCount = (uint32_t)overlayRuleCount;
@@ -2583,12 +2588,77 @@ void SceneLightSystem::RebuildAnalyticLights(
 		}
 	}
 
-	if (actorOverlayRules != nullptr && !actorOverlayRules->empty())
+	if ((actorOverlayRules != nullptr && !actorOverlayRules->empty()) ||
+		(actorOverlayRulesById != nullptr && !actorOverlayRulesById->empty()))
 	{
+		auto appendActorOverlayLight = [this, &tryAppendLight, flickerTimeIndex, renderFrameIndex](
+			const SurfaceRecord& record,
+			const AnalyticLightRegistry::ActorOverlayRule& rule)
+		{
+			if (rule.hasTileFilter && record.material.textureId != rule.tileFilter)
+			{
+				return;
+			}
+
+			mAnalyticLights.matchedSurfaceCount++;
+			mAnalyticLights.actorOverlayMatchedSurfaceCount++;
+
+			SceneAnalyticLight light = {};
+			light.stableKey = BuildAnalyticTopologyKey(SceneAnalyticLightSourceFlag_ActorOverlay, rule.ruleId, record);
+			light.id = 0;
+			light.sourceFlags = SceneAnalyticLightSourceFlag_ActorOverlay;
+			light.flags = rule.flags;
+			light.sourceRuleId = rule.ruleId;
+			light.source = record.source;
+			light.actorIndex = record.provenance.actorIndex;
+			light.textureId = record.material.textureId;
+			light.position[0] = record.center[0] + rule.offset[0];
+			light.position[1] = record.center[1] + rule.offset[1];
+			light.position[2] = record.center[2] + rule.offset[2];
+			ApplyActorOverlaySurfaceNudge(record, rule, light.position);
+			Copy3f(rule.color, light.color);
+			light.intensity = ResolveOverlayLightIntensity(
+				rule.intensity,
+				light.stableKey,
+				flickerTimeIndex,
+				renderFrameIndex,
+				rule.flickerFrames,
+				rule.hasRandomIntensity,
+				rule.randomIntensityRange);
+			light.radius = rule.radius;
+			tryAppendLight(light);
+		};
+
 		for (const SurfaceRecord& record : mSurfaceRecords)
 		{
 			if ((record.material.materialFlags & nri_scene::MaterialFlag_Sprite) == 0 ||
 				record.provenance.actorIndex < 0)
+			{
+				continue;
+			}
+
+			bool usedStampedRules = false;
+			if (actorOverlayRulesById != nullptr && record.material.actorOverlayRuleCount > 0)
+			{
+				for (uint32_t ruleIndex = 0; ruleIndex < record.material.actorOverlayRuleCount; ++ruleIndex)
+				{
+					const uint32_t ruleId = record.material.actorOverlayRuleIds[ruleIndex];
+					const auto ruleIt = actorOverlayRulesById->find(ruleId);
+					if (ruleIt == actorOverlayRulesById->end())
+					{
+						continue;
+					}
+
+					appendActorOverlayLight(record, ruleIt->second);
+					usedStampedRules = true;
+				}
+			}
+			if (usedStampedRules)
+			{
+				continue;
+			}
+
+			if (actorOverlayRules == nullptr)
 			{
 				continue;
 			}
@@ -2601,38 +2671,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 
 			for (const AnalyticLightRegistry::ActorOverlayRule& rule : actorRuleIt->second)
 			{
-				if (rule.hasTileFilter && record.material.textureId != rule.tileFilter)
-				{
-					continue;
-				}
-
-				mAnalyticLights.matchedSurfaceCount++;
-				mAnalyticLights.actorOverlayMatchedSurfaceCount++;
-
-				SceneAnalyticLight light = {};
-				light.stableKey = BuildAnalyticTopologyKey(SceneAnalyticLightSourceFlag_ActorOverlay, rule.ruleId, record);
-				light.id = 0;
-				light.sourceFlags = SceneAnalyticLightSourceFlag_ActorOverlay;
-				light.flags = rule.flags;
-				light.sourceRuleId = rule.ruleId;
-				light.source = record.source;
-				light.actorIndex = record.provenance.actorIndex;
-				light.textureId = record.material.textureId;
-				light.position[0] = record.center[0] + rule.offset[0];
-				light.position[1] = record.center[1] + rule.offset[1];
-				light.position[2] = record.center[2] + rule.offset[2];
-				ApplyActorOverlaySurfaceNudge(record, rule, light.position);
-				Copy3f(rule.color, light.color);
-				light.intensity = ResolveOverlayLightIntensity(
-					rule.intensity,
-					light.stableKey,
-					flickerTimeIndex,
-					renderFrameIndex,
-					rule.flickerFrames,
-					rule.hasRandomIntensity,
-					rule.randomIntensityRange);
-				light.radius = rule.radius;
-				tryAppendLight(light);
+				appendActorOverlayLight(record, rule);
 			}
 		}
 	}

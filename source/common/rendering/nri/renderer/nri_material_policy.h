@@ -39,7 +39,7 @@ namespace nri_material_policy
 		ActorMaterialOverrideCache& cache,
 		bool& outBuilt);
 
-	void ApplyActorFullbrightOverridesToBuiltMaterials(
+	void ApplyActorMaterialOverridesToBuiltMaterials(
 		const std::unordered_map<int32_t, uint32_t>& actorOverrides,
 		float fullbrightBoost,
 		nri_scene::MaterialBridgeData& materials);

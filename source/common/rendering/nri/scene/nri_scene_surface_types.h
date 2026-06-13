@@ -7,6 +7,8 @@ class FGameTexture;
 
 namespace nri_scene
 {
+static constexpr uint32_t MaxActorOverlayRuleIdsPerSurface = 4;
+
 enum class SurfaceSourceType : uint32_t
 {
 	Unknown = 0,
@@ -58,6 +60,8 @@ struct SurfaceProvenance
 	uint32_t drawListType = UINT32_MAX;
 	uint32_t cstat = 0;
 	uint32_t materialFlags = 0;
+	uint32_t actorOverlayRuleCount = 0;
+	uint32_t actorOverlayRuleIds[MaxActorOverlayRuleIdsPerSurface] = {};
 };
 
 struct MaterialRef

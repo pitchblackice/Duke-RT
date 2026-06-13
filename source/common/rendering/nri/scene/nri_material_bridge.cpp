@@ -340,6 +340,11 @@ namespace
 		metadata.sourceType = surface.provenance.sourceType;
 		metadata.sectorIndex = surface.provenance.sectorIndex;
 		metadata.actorIndex = surface.provenance.actorIndex;
+		metadata.actorOverlayRuleCount = std::min(surface.provenance.actorOverlayRuleCount, MaxActorOverlayRuleIdsPerSurface);
+		for (uint32_t ruleIndex = 0; ruleIndex < metadata.actorOverlayRuleCount; ++ruleIndex)
+		{
+			metadata.actorOverlayRuleIds[ruleIndex] = surface.provenance.actorOverlayRuleIds[ruleIndex];
+		}
 		metadata.shade = materialRef.shade;
 		metadata.alpha = material.alpha;
 		metadata.lightLevel = material.lightLevel;

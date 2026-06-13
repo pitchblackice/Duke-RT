@@ -75,6 +75,8 @@ struct MaterialLightingMetadata
 	SurfaceSourceType sourceType = {};
 	int32_t sectorIndex = -1;
 	int32_t actorIndex = -1;
+	uint32_t actorOverlayRuleCount = 0;
+	uint32_t actorOverlayRuleIds[MaxActorOverlayRuleIdsPerSurface] = {};
 	int32_t shade = 0;
 	float alpha = 1.0f;
 	float lightLevel = 1.0f;

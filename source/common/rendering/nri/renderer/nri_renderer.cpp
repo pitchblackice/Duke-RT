@@ -1941,6 +1941,41 @@ public:
 		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
 	}
 
+	static bool TryBuildActorAnalyticOverlayRule(
+		const ResolvedLightOverlayActorRule& resolvedRule,
+		SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& actorRule)
+	{
+		if (!resolvedRule.actorClassResolved ||
+			resolvedRule.actorClass == nullptr ||
+			!IsSupportedActorOverlayRule(resolvedRule) ||
+			resolvedRule.intensity <= 0.0f ||
+			resolvedRule.radius <= 0.0f)
+		{
+			return false;
+		}
+
+		actorRule = {};
+		actorRule.ruleId = BuildActorOverlayRuleId(resolvedRule);
+		actorRule.hasTileFilter = resolvedRule.hasTileFilter;
+		actorRule.tileFilter = resolvedRule.hasTileFilter && resolvedRule.tileFilter >= 0 ? (uint32_t)resolvedRule.tileFilter : 0u;
+		actorRule.flags = (!resolvedRule.hasShadowCast || resolvedRule.shadowCast) ? SceneAnalyticLightFlag_CastsShadow : SceneAnalyticLightFlag_None;
+		actorRule.color[0] = resolvedRule.color[0];
+		actorRule.color[1] = resolvedRule.color[1];
+		actorRule.color[2] = resolvedRule.color[2];
+		actorRule.intensity = resolvedRule.intensity;
+		actorRule.radius = resolvedRule.radius;
+		actorRule.offset[0] = resolvedRule.offset[0];
+		actorRule.offset[1] = resolvedRule.offset[1];
+		actorRule.offset[2] = resolvedRule.offset[2];
+		actorRule.hasNudgeFromSurface = resolvedRule.hasNudgeFromSurface && resolvedRule.nudgeFromSurfaceDistance > 0.0f;
+		actorRule.nudgeFromSurfaceDistance = resolvedRule.nudgeFromSurfaceDistance;
+		actorRule.flickerFrames = resolvedRule.flickerFrames;
+		actorRule.hasRandomIntensity = resolvedRule.hasRandom;
+		actorRule.randomIntensityRange[0] = resolvedRule.randomIntensityRange[0];
+		actorRule.randomIntensityRange[1] = resolvedRule.randomIntensityRange[1];
+		return true;
+	}
+
 	static bool IsSupportedMapOverlayRule(const ResolvedLightOverlayMapLightRule& rule)
 	{
 		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
@@ -2282,34 +2317,16 @@ public:
 			{
 				if (!resolvedRule.actorClassResolved ||
 					resolvedRule.actorClass == nullptr ||
-					!IsSupportedActorOverlayRule(resolvedRule) ||
-					resolvedRule.intensity <= 0.0f ||
-					resolvedRule.radius <= 0.0f ||
 					(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)))
 				{
 					continue;
 				}
 
 				SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule actorRule = {};
-				actorRule.ruleId = BuildActorOverlayRuleId(resolvedRule);
-				actorRule.hasTileFilter = resolvedRule.hasTileFilter;
-				actorRule.tileFilter = resolvedRule.hasTileFilter && resolvedRule.tileFilter >= 0 ? (uint32_t)resolvedRule.tileFilter : 0u;
-				actorRule.flags = (!resolvedRule.hasShadowCast || resolvedRule.shadowCast) ? SceneAnalyticLightFlag_CastsShadow : SceneAnalyticLightFlag_None;
-				actorRule.color[0] = resolvedRule.color[0];
-				actorRule.color[1] = resolvedRule.color[1];
-				actorRule.color[2] = resolvedRule.color[2];
-				actorRule.intensity = resolvedRule.intensity;
-				actorRule.radius = resolvedRule.radius;
-				actorRule.offset[0] = resolvedRule.offset[0];
-				actorRule.offset[1] = resolvedRule.offset[1];
-				actorRule.offset[2] = resolvedRule.offset[2];
-				actorRule.hasNudgeFromSurface = resolvedRule.hasNudgeFromSurface && resolvedRule.nudgeFromSurfaceDistance > 0.0f;
-				actorRule.nudgeFromSurfaceDistance = resolvedRule.nudgeFromSurfaceDistance;
-				actorRule.flickerFrames = resolvedRule.flickerFrames;
-				actorRule.hasRandomIntensity = resolvedRule.hasRandom;
-				actorRule.randomIntensityRange[0] = resolvedRule.randomIntensityRange[0];
-				actorRule.randomIntensityRange[1] = resolvedRule.randomIntensityRange[1];
-				actorRules.push_back(actorRule);
+				if (TryBuildActorAnalyticOverlayRule(resolvedRule, actorRule))
+				{
+					actorRules.push_back(actorRule);
+				}
 			}
 
 			if (actorRules.empty())
@@ -2317,6 +2334,74 @@ public:
 				outRules.erase((int32_t)actor->GetIndex());
 			}
 		}
+	}
+
+	static void BuildActorAnalyticOverlayRuleLookup(
+		const ResolvedLightOverlaySet& resolved,
+		std::unordered_map<uint32_t, SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>& outRulesById)
+	{
+		for (const auto& resolvedRule : resolved.actorRules)
+		{
+			SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule actorRule = {};
+			if (TryBuildActorAnalyticOverlayRule(resolvedRule, actorRule))
+			{
+				outRulesById[actorRule.ruleId] = actorRule;
+			}
+		}
+	}
+
+	static void StampActorOverlayRuleIdsOnSurface(
+		const std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>& actorRules,
+		nri_scene::SurfaceRef& surface)
+	{
+		if (surface.provenance.actorIndex < 0 ||
+			(surface.material.flags & nri_scene::MaterialFlag_Sprite) == 0)
+		{
+			return;
+		}
+
+		uint32_t textureId = 0;
+		if (surface.material.texture != nullptr)
+		{
+			const FTextureID id = surface.material.texture->GetID();
+			textureId = id.isValid() ? (uint32_t)id.GetIndex() : 0u;
+		}
+
+		surface.provenance.actorOverlayRuleCount = 0;
+		for (const auto& rule : actorRules)
+		{
+			if (rule.hasTileFilter && rule.tileFilter != textureId)
+			{
+				continue;
+			}
+			if (surface.provenance.actorOverlayRuleCount >= nri_scene::MaxActorOverlayRuleIdsPerSurface)
+			{
+				break;
+			}
+
+			surface.provenance.actorOverlayRuleIds[surface.provenance.actorOverlayRuleCount++] = rule.ruleId;
+		}
+	}
+
+	static void StampActorOverlayRuleIdsOnSceneView(
+		const std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>>& actorOverlayRules,
+		nri_scene::SceneView& sceneView)
+	{
+		auto stampSurfaces = [&actorOverlayRules](auto& surfaces)
+		{
+			for (auto& surface : surfaces)
+			{
+				const auto it = actorOverlayRules.find(surface.provenance.actorIndex);
+				if (it != actorOverlayRules.end())
+				{
+					StampActorOverlayRuleIdsOnSurface(it->second, surface);
+				}
+			}
+		};
+
+		stampSurfaces(sceneView.opaqueWalls);
+		stampSurfaces(sceneView.opaqueFlats);
+		stampSurfaces(sceneView.opaqueSprites);
 	}
 
 	static void BuildStaticMapAnalyticOverlayRules(
@@ -12250,10 +12335,12 @@ void NRIRenderer::RefreshSceneLightSystem(
 	mDirectionalLightState = nextDirectionalLightState;
 	mHasDirectionalLightState = true;
 	std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>> actorOverlayRules;
+	std::unordered_map<uint32_t, SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule> actorOverlayRulesById;
 	std::vector<SceneLightSystem::AnalyticLightRegistry::MapOverlayRule> mapOverlayRules;
 	std::vector<SceneLightSystem::EmissiveOverrideRule> emissiveOverrideRules;
 	std::vector<SceneLightSystem::EmissiveMaterialResponseRule> emissiveMaterialResponseRules;
 	BuildActorAnalyticOverlayRules(resolvedLightOverlays, actorOverlayRules);
+	BuildActorAnalyticOverlayRuleLookup(resolvedLightOverlays, actorOverlayRulesById);
 	BuildEmissiveOverrideRules(resolvedLightOverlays, emissiveOverrideRules);
 	BuildEmissiveMaterialResponseRules(resolvedLightOverlays, emissiveMaterialResponseRules);
 	if (mMapWorld.valid)
@@ -12276,6 +12363,7 @@ void NRIRenderer::RefreshSceneLightSystem(
 			mFrameIndex,
 			NRI_MAX_RUNTIME_POINT_LIGHTS,
 			actorOverlayRules.empty() ? nullptr : &actorOverlayRules,
+			actorOverlayRulesById.empty() ? nullptr : &actorOverlayRulesById,
 			mapOverlayRules.empty() ? nullptr : &mapOverlayRules);
 	}
 	{
@@ -12382,70 +12470,61 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	auto& materialTraceEntry = mLastPerfShellTraceStats.materialBuildByLabel[GetMaterialBuildTraceSlotIndex(materialTraceSlot)];
 	materialTraceEntry.calls++;
 	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
-	if (nri_material_policy::HasActorFullbrightOverrides(resolvedLightOverlays))
+	const bool hasActorMaterialRules = nri_material_policy::HasActorMaterialOverrideRules(resolvedLightOverlays);
+	const std::unordered_map<int32_t, uint32_t>* actorOverridesForBuild = nullptr;
+	if (hasActorMaterialRules)
 	{
 		const auto& actorOverrides = GetActorMaterialOverrideMapForFrame(materialTraceSlot);
 		if (!actorOverrides.empty())
 		{
-			struct SavedMaterialFlags
-			{
-				uint32_t* flags = nullptr;
-				uint32_t value = 0;
-			};
-
-			std::vector<SavedMaterialFlags> savedFlags;
-			savedFlags.reserve(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
-
-			auto applyOverrides = [&actorOverrides, &savedFlags](auto& surfaces)
-			{
-				for (auto& surface : surfaces)
-				{
-					if ((surface.material.flags & nri_scene::MaterialFlag_Sprite) == 0)
-					{
-						continue;
-					}
-
-					auto it = actorOverrides.find(surface.provenance.actorIndex);
-					if (it == actorOverrides.end())
-					{
-						continue;
-					}
-
-					if ((it->second & nri_material_policy::ActorMaterialOverride_Fullbright) != 0)
-					{
-						savedFlags.push_back({ &surface.material.flags, surface.material.flags });
-						surface.material.flags |= nri_scene::MaterialFlag_Fullbright;
-					}
-				}
-			};
-
-			applyOverrides(sceneView.opaqueWalls);
-			applyOverrides(sceneView.opaqueFlats);
-			applyOverrides(sceneView.opaqueSprites);
-
-			if (tracePerf)
-			{
-				const auto start = std::chrono::steady_clock::now();
-				nri_scene::BuildMaterials(sceneView, outMaterials);
-				const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
-				mLastPerfShellTraceStats.materialBuildMs += elapsedMs;
-				materialTraceEntry.materialBuildMs += elapsedMs;
-			}
-			else
-			{
-				nri_scene::BuildMaterials(sceneView, outMaterials);
-			}
-			nri_material_policy::ApplyActorFullbrightOverridesToBuiltMaterials(actorOverrides, GetFullbrightBoostScale(), outMaterials);
-			for (const SavedMaterialFlags& saved : savedFlags)
-			{
-				*saved.flags = saved.value;
-			}
-			AccumulateMaterialTextureAttribution(
-				materialTraceEntry,
-				GatherMaterialTextureAttribution(outMaterials.materials, outMaterials.lightMetadata, outMaterials.textures.size()));
-			TraceActorSpriteMaterialAssignments(sceneView, outMaterials, traceLabel);
-			return;
+			actorOverridesForBuild = &actorOverrides;
 		}
+	}
+
+	std::unordered_map<int32_t, std::vector<SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule>> actorOverlayRules;
+	if (resolvedLightOverlays.actorRules.Size() > 0)
+	{
+		BuildActorAnalyticOverlayRules(resolvedLightOverlays, actorOverlayRules);
+		if (!actorOverlayRules.empty())
+		{
+			StampActorOverlayRuleIdsOnSceneView(actorOverlayRules, sceneView);
+		}
+	}
+
+	struct SavedMaterialFlags
+	{
+		uint32_t* flags = nullptr;
+		uint32_t value = 0;
+	};
+
+	std::vector<SavedMaterialFlags> savedFlags;
+	if (actorOverridesForBuild != nullptr)
+	{
+		savedFlags.reserve(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
+		auto applyFullbrightSurfaceFlags = [actorOverridesForBuild, &savedFlags](auto& surfaces)
+		{
+			for (auto& surface : surfaces)
+			{
+				if ((surface.material.flags & nri_scene::MaterialFlag_Sprite) == 0)
+				{
+					continue;
+				}
+
+				auto it = actorOverridesForBuild->find(surface.provenance.actorIndex);
+				if (it == actorOverridesForBuild->end() ||
+					(it->second & nri_material_policy::ActorMaterialOverride_Fullbright) == 0)
+				{
+					continue;
+				}
+
+				savedFlags.push_back({ &surface.material.flags, surface.material.flags });
+				surface.material.flags |= nri_scene::MaterialFlag_Fullbright;
+			}
+		};
+
+		applyFullbrightSurfaceFlags(sceneView.opaqueWalls);
+		applyFullbrightSurfaceFlags(sceneView.opaqueFlats);
+		applyFullbrightSurfaceFlags(sceneView.opaqueSprites);
 	}
 
 	if (tracePerf)
@@ -12459,6 +12538,14 @@ void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneVi
 	else
 	{
 		nri_scene::BuildMaterials(sceneView, outMaterials);
+	}
+	if (actorOverridesForBuild != nullptr)
+	{
+		nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(*actorOverridesForBuild, GetFullbrightBoostScale(), outMaterials);
+		for (const SavedMaterialFlags& saved : savedFlags)
+		{
+			*saved.flags = saved.value;
+		}
 	}
 	AccumulateMaterialTextureAttribution(
 		materialTraceEntry,
@@ -16075,4 +16162,3 @@ void NRIRenderer::FillMatrix(float* outMatrix, const VSMatrix& matrix) const
 {
 	const_cast<VSMatrix&>(matrix).copy(outMatrix);
 }
-
