@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -847,6 +848,7 @@ private:
 	FrameAppendStats mFrameAppendStats = {};
 	uint64_t mFrameSerial = 0;
 	uint32_t mNextRuntimePointLightId = 1;
+	std::unordered_set<uint64_t> mActivatedActorOverlayKeys;
 	std::unordered_map<std::string, ResolvedLightOverlayMuzzleFlashRule> mResolvedMuzzleFlashRuleLookup;
 	std::vector<TransientMuzzleFlashSlot> mTransientMuzzleFlashSlots;
 	std::vector<SceneAnalyticLight> mTransientMuzzleFlashLights;

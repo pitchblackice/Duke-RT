@@ -1827,6 +1827,7 @@ void SceneLightSystem::Reset()
 	mSurfaceRecords.clear();
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
+	mActivatedActorOverlayKeys.clear();
 	mResolvedMuzzleFlashRuleLookup.clear();
 	mTransientMuzzleFlashSlots.clear();
 	mTransientMuzzleFlashLights.clear();
@@ -1889,6 +1890,7 @@ void SceneLightSystem::ResetLevelState()
 	mSurfaceRecords.clear();
 	mFrameAppendStats = {};
 	mFrameSerial = 0;
+	mActivatedActorOverlayKeys.clear();
 	mResolvedMuzzleFlashRuleLookup.clear();
 	mTransientMuzzleFlashSlots.clear();
 	mTransientMuzzleFlashLights.clear();
@@ -2669,7 +2671,13 @@ void SceneLightSystem::RebuildAnalyticLights(
 			return nullptr;
 		};
 
-		auto appendActorOwnedOverlayLight = [this, &tryAppendLight, flickerTimeIndex, renderFrameIndex](
+		std::unordered_set<uint64_t> liveActorOverlayKeys;
+		if (actorOverlayRules != nullptr)
+		{
+			liveActorOverlayKeys.reserve(overlayRuleCount);
+		}
+
+		auto appendActorOwnedOverlayLight = [this, &tryAppendLight, &liveActorOverlayKeys, flickerTimeIndex, renderFrameIndex](
 			const AnalyticLightRegistry::ActorOverlayRule& rule,
 			const SurfaceRecord* record)
 		{
@@ -2694,14 +2702,18 @@ void SceneLightSystem::RebuildAnalyticLights(
 			}
 
 			const bool hasSurface = record != nullptr;
+			const uint64_t stableKey = BuildActorOverlayTopologyKey(rule);
+			liveActorOverlayKeys.insert(stableKey);
 			if (hasSurface)
 			{
 				mAnalyticLights.matchedSurfaceCount++;
 				mAnalyticLights.actorOverlayMatchedSurfaceCount++;
+				mActivatedActorOverlayKeys.insert(stableKey);
 			}
+			const bool active = mActivatedActorOverlayKeys.find(stableKey) != mActivatedActorOverlayKeys.end();
 
 			SceneAnalyticLight light = {};
-			light.stableKey = BuildActorOverlayTopologyKey(rule);
+			light.stableKey = stableKey;
 			light.id = 0;
 			light.sourceFlags = SceneAnalyticLightSourceFlag_ActorOverlay;
 			light.flags = rule.flags;
@@ -2718,7 +2730,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 				ApplyActorOverlaySurfaceNudge(*record, rule, light.position);
 			}
 			Copy3f(rule.color, light.color);
-			light.intensity = ResolveOverlayLightIntensity(
+			const float resolvedIntensity = ResolveOverlayLightIntensity(
 				rule.intensity,
 				light.stableKey,
 				flickerTimeIndex,
@@ -2726,16 +2738,18 @@ void SceneLightSystem::RebuildAnalyticLights(
 				rule.flickerFrames,
 				rule.hasRandomIntensity,
 				rule.randomIntensityRange);
+			light.intensity = active ? resolvedIntensity : 0.0f;
 			light.radius = rule.radius;
 
 			if (ShouldTraceActorOverlayRule(rule))
 			{
-				Printf("NRI PT explosion actor: frame=%u actor=%d class=%s rule=%u rule_name=%s live=yes emitted=yes ownership=actor live_tile=%u pal=%d has_surface=%s surface_source=%s surface_tile=%u stable=0x%016llx pos=(%.3f, %.3f, %.3f)\n",
+				Printf("NRI PT explosion actor: frame=%u actor=%d class=%s rule=%u rule_name=%s live=yes emitted=yes active=%s ownership=actor live_tile=%u pal=%d has_surface=%s surface_source=%s surface_tile=%u stable=0x%016llx pos=(%.3f, %.3f, %.3f)\n",
 					renderFrameIndex,
 					rule.actorIndex,
 					rule.actorClassName != nullptr ? rule.actorClassName : "",
 					rule.ruleId,
 					rule.ruleName.c_str(),
+					YesNo(active),
 					rule.actorTextureId,
 					rule.actorPalette,
 					YesNo(hasSurface),
@@ -2763,16 +2777,18 @@ void SceneLightSystem::RebuildAnalyticLights(
 						YesNo((lightingFlags & nri_scene::MaterialLightingFlag_NoShadowCast) != 0),
 						YesNo((lightingFlags & nri_scene::MaterialLightingFlag_MaterialFullbright) != 0));
 				}
-				Printf("NRI PT explosion light: frame=%u actor=%d class=%s rule=%u rule_name=%s emitted=yes ownership=actor stable=0x%016llx source=%u tile=%u intensity=%.3f radius=%.3f shadow=%s\n",
+				Printf("NRI PT explosion light: frame=%u actor=%d class=%s rule=%u rule_name=%s emitted=yes active=%s ownership=actor stable=0x%016llx source=%u tile=%u intensity=%.3f resolved_intensity=%.3f radius=%.3f shadow=%s\n",
 					renderFrameIndex,
 					rule.actorIndex,
 					rule.actorClassName != nullptr ? rule.actorClassName : "",
 					rule.ruleId,
 					rule.ruleName.c_str(),
+					YesNo(active),
 					(unsigned long long)light.stableKey,
 					(uint32_t)light.source,
 					light.textureId,
 					light.intensity,
+					resolvedIntensity,
 					light.radius,
 					YesNo((light.flags & SceneAnalyticLightFlag_CastsShadow) != 0));
 			}
@@ -2825,6 +2841,18 @@ void SceneLightSystem::RebuildAnalyticLights(
 				for (const AnalyticLightRegistry::ActorOverlayRule& rule : entry.second)
 				{
 					appendActorOwnedOverlayLight(rule, findActorOverlaySurface(rule));
+				}
+			}
+
+			for (auto it = mActivatedActorOverlayKeys.begin(); it != mActivatedActorOverlayKeys.end();)
+			{
+				if (liveActorOverlayKeys.find(*it) == liveActorOverlayKeys.end())
+				{
+					it = mActivatedActorOverlayKeys.erase(it);
+				}
+				else
+				{
+					++it;
 				}
 			}
 		}
