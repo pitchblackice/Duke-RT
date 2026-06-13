@@ -1,11 +1,20 @@
 #include "nri_material_policy.h"
 
+#include "nri_renderer.h"
+#include "nri_runtime_mutation_trace.h"
+
+#include "c_cvars.h"
 #include "coreactor.h"
 #include "lightoverlay.h"
 #include "texinfo.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <unordered_set>
+
+EXTERN_CVAR(Float, nri_ptfullbrightboost)
+EXTERN_CVAR(Float, nri_ptglowblend)
 
 namespace
 {
@@ -49,6 +58,497 @@ namespace
 		material.emissiveColor[1] = 1.0f;
 		material.emissiveColor[2] = 1.0f;
 	}
+
+	float GetFullbrightBoostScale()
+	{
+		return std::clamp((float)nri_ptfullbrightboost, 0.50f, 8.00f);
+	}
+
+	float GetGlowmapVisibleBlendScale()
+	{
+		return std::clamp((float)nri_ptglowblend, 0.0f, 3.0f);
+	}
+
+	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
+	{
+		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
+	}
+
+	size_t GetMaterialBuildTraceSlotIndex(NRIRenderer::MaterialBuildTraceSlot slot)
+	{
+		return (size_t)slot;
+	}
+
+	const char* GetMaterialBuildTraceSlotNameInternal(NRIRenderer::MaterialBuildTraceSlot slot)
+	{
+		switch (slot)
+		{
+		case NRIRenderer::MaterialBuildTraceSlot::DynamicLive: return "dynamic_live";
+		case NRIRenderer::MaterialBuildTraceSlot::MirrorExtended: return "mirror_extended";
+		case NRIRenderer::MaterialBuildTraceSlot::SceneLightMergedDynamic: return "scene_light_merged_dynamic";
+		case NRIRenderer::MaterialBuildTraceSlot::MirrorPlayer: return "mirror_player";
+		case NRIRenderer::MaterialBuildTraceSlot::DynamicWithPersistentEmissive: return "dynamic_with_persistent_emissive";
+		case NRIRenderer::MaterialBuildTraceSlot::SceneLightMergedPersistent: return "scene_light_merged_persistent";
+		case NRIRenderer::MaterialBuildTraceSlot::CapturedScene: return "captured_scene";
+		case NRIRenderer::MaterialBuildTraceSlot::PersistentEmissiveCachePrune: return "persistent_emissive_cache_prune";
+		case NRIRenderer::MaterialBuildTraceSlot::PersistentEmissiveCacheRebuild: return "persistent_emissive_cache_rebuild";
+		case NRIRenderer::MaterialBuildTraceSlot::StaticMapAnimChunk: return "static_map_anim_chunk";
+		case NRIRenderer::MaterialBuildTraceSlot::StaticMapChunk: return "static_map_chunk";
+		case NRIRenderer::MaterialBuildTraceSlot::RuntimeMutationChunk: return "runtime_mutation_chunk";
+		case NRIRenderer::MaterialBuildTraceSlot::ResidentRuntimeMutationChunk: return "resident_runtime_mutation_chunk";
+		case NRIRenderer::MaterialBuildTraceSlot::ResidentRuntimeMutationChunkRecover: return "resident_runtime_mutation_chunk_recover";
+		case NRIRenderer::MaterialBuildTraceSlot::RuntimeSpaceLinkChunk: return "runtime_space_link_chunk";
+		case NRIRenderer::MaterialBuildTraceSlot::Unknown: return "unknown";
+		case NRIRenderer::MaterialBuildTraceSlot::Count: break;
+		}
+
+		return "unknown";
+	}
+
+	struct MaterialTextureAttributionCounts
+	{
+		uint32_t materialCount = 0;
+		uint32_t actorMaterialCount = 0;
+		uint32_t textureCount = 0;
+		uint32_t baseTextureCount = 0;
+		uint32_t glowTextureCount = 0;
+		uint32_t normalTextureCount = 0;
+		uint32_t metallicTextureCount = 0;
+		uint32_t roughnessTextureCount = 0;
+		uint32_t emissiveTextureCount = 0;
+	};
+
+	MaterialTextureAttributionCounts GatherMaterialTextureAttribution(
+		const std::vector<nri_scene::MaterialData>& materials,
+		const std::vector<nri_scene::MaterialLightingMetadata>& lightMetadata,
+		size_t textureCount)
+	{
+		MaterialTextureAttributionCounts counts = {};
+		counts.materialCount = (uint32_t)materials.size();
+		counts.textureCount = (uint32_t)textureCount;
+
+		std::unordered_set<uint32_t> baseTextures;
+		std::unordered_set<uint32_t> glowTextures;
+		std::unordered_set<uint32_t> normalTextures;
+		std::unordered_set<uint32_t> metallicTextures;
+		std::unordered_set<uint32_t> roughnessTextures;
+		std::unordered_set<uint32_t> emissiveTextures;
+		baseTextures.reserve(materials.size());
+		glowTextures.reserve(lightMetadata.size());
+		normalTextures.reserve(materials.size());
+		metallicTextures.reserve(materials.size());
+		roughnessTextures.reserve(materials.size());
+		emissiveTextures.reserve(materials.size());
+
+		const auto addTextureIndex = [textureCount](std::unordered_set<uint32_t>& destination, uint32_t textureIndex)
+		{
+			if (textureIndex != UINT32_MAX && (size_t)textureIndex < textureCount)
+			{
+				destination.insert(textureIndex);
+			}
+		};
+
+		for (uint32_t materialIndex = 0; materialIndex < (uint32_t)materials.size(); ++materialIndex)
+		{
+			const auto& material = materials[materialIndex];
+			addTextureIndex(baseTextures, material.textureIndex);
+			addTextureIndex(normalTextures, material.normalTextureIndex);
+			addTextureIndex(metallicTextures, material.metallicTextureIndex);
+			addTextureIndex(roughnessTextures, material.roughnessTextureIndex);
+			addTextureIndex(emissiveTextures, material.emissiveTextureIndex);
+			if (materialIndex < lightMetadata.size())
+			{
+				const auto& metadata = lightMetadata[materialIndex];
+				addTextureIndex(glowTextures, metadata.glowmapTextureIndex);
+				if (metadata.actorIndex >= 0)
+				{
+					counts.actorMaterialCount++;
+				}
+			}
+		}
+
+		counts.baseTextureCount = (uint32_t)baseTextures.size();
+		counts.glowTextureCount = (uint32_t)glowTextures.size();
+		counts.normalTextureCount = (uint32_t)normalTextures.size();
+		counts.metallicTextureCount = (uint32_t)metallicTextures.size();
+		counts.roughnessTextureCount = (uint32_t)roughnessTextures.size();
+		counts.emissiveTextureCount = (uint32_t)emissiveTextures.size();
+		return counts;
+	}
+
+	void AccumulateMaterialTextureAttribution(NRIRenderer::MaterialBuildTraceEntry& entry, const MaterialTextureAttributionCounts& counts)
+	{
+		entry.materialCount += counts.materialCount;
+		entry.actorMaterialCount += counts.actorMaterialCount;
+		entry.textureCount += counts.textureCount;
+		entry.baseTextureCount += counts.baseTextureCount;
+		entry.glowTextureCount += counts.glowTextureCount;
+		entry.normalTextureCount += counts.normalTextureCount;
+		entry.metallicTextureCount += counts.metallicTextureCount;
+		entry.roughnessTextureCount += counts.roughnessTextureCount;
+		entry.emissiveTextureCount += counts.emissiveTextureCount;
+	}
+
+	uint64_t HashLightOverlayText(uint64_t hash, const char* text)
+	{
+		if (text == nullptr)
+		{
+			return hash;
+		}
+
+		for (const unsigned char* cursor = (const unsigned char*)text; *cursor != '\0'; ++cursor)
+		{
+			hash ^= (uint64_t)(*cursor);
+			hash *= 1099511628211ull;
+		}
+		return hash;
+	}
+
+	uint32_t BuildResolvedLightOverlayRuleId(const char* id, const char* classOrMapName, const LightOverlaySourceLocation& source)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = HashLightOverlayText(hash, id);
+		hash = HashLightOverlayText(hash, classOrMapName);
+		hash = HashLightOverlayText(hash, source.sourceName.GetChars());
+		hash ^= (uint64_t)source.orderIndex + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+		const uint32_t ruleId = (uint32_t)(hash ^ (hash >> 32));
+		return ruleId != 0 ? ruleId : 1u;
+	}
+
+	uint32_t BuildActorOverlayRuleId(const ResolvedLightOverlayActorRule& rule)
+	{
+		return BuildResolvedLightOverlayRuleId(rule.id.GetChars(), rule.actorClassName.GetChars(), rule.source);
+	}
+
+	bool IsSupportedActorOverlayRule(const ResolvedLightOverlayActorRule& rule)
+	{
+		return rule.lightType.IsEmpty() || rule.lightType.CompareNoCase("point") == 0;
+	}
+
+	struct ActorOverlayMaterialRule
+	{
+		uint32_t ruleId = 0;
+		bool hasTileFilter = false;
+		uint32_t tileFilter = 0;
+		uint32_t overrideBits = nri_material_policy::ActorMaterialOverride_None;
+	};
+
+	void BuildActorOverlayMaterialRules(
+		const ResolvedLightOverlaySet& resolved,
+		std::unordered_map<int32_t, std::vector<ActorOverlayMaterialRule>>& outRules)
+	{
+		if (resolved.actorRules.Size() == 0)
+		{
+			return;
+		}
+
+		TSpriteIterator<DCoreActor> it;
+		while (auto actor = it.Next())
+		{
+			if (actor == nullptr ||
+				!actor->exists() ||
+				(actor->ObjectFlags & OF_EuthanizeMe) != 0)
+			{
+				continue;
+			}
+
+			PClass* actorClass = actor->GetClass();
+			if (actorClass == nullptr)
+			{
+				continue;
+			}
+
+			auto& actorRules = outRules[(int32_t)actor->GetIndex()];
+			for (const auto& resolvedRule : resolved.actorRules)
+			{
+				if (!resolvedRule.actorClassResolved ||
+					resolvedRule.actorClass == nullptr ||
+					(actorClass != resolvedRule.actorClass && !actorClass->IsDescendantOf(resolvedRule.actorClass)) ||
+					!IsSupportedActorOverlayRule(resolvedRule) ||
+					resolvedRule.intensity <= 0.0f ||
+					resolvedRule.radius <= 0.0f)
+				{
+					continue;
+				}
+
+				ActorOverlayMaterialRule rule = {};
+				rule.ruleId = BuildActorOverlayRuleId(resolvedRule);
+				rule.hasTileFilter = resolvedRule.hasTileFilter;
+				rule.tileFilter = resolvedRule.hasTileFilter && resolvedRule.tileFilter >= 0 ? (uint32_t)resolvedRule.tileFilter : 0u;
+				if (resolvedRule.hasShadowReceive && !resolvedRule.shadowReceive)
+				{
+					rule.overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowReceive;
+				}
+				if (resolvedRule.hasShadowCast && !resolvedRule.shadowCast)
+				{
+					rule.overrideBits |= nri_material_policy::ActorMaterialOverride_NoShadowCast;
+				}
+				if (resolvedRule.hasFullbright && resolvedRule.fullbright)
+				{
+					rule.overrideBits |= nri_material_policy::ActorMaterialOverride_Fullbright;
+				}
+				actorRules.push_back(rule);
+			}
+
+			if (actorRules.empty())
+			{
+				outRules.erase((int32_t)actor->GetIndex());
+			}
+		}
+	}
+
+	void StampActorOverlayRuleIdsOnSurface(
+		const std::vector<ActorOverlayMaterialRule>& actorRules,
+		nri_scene::SurfaceRef& surface)
+	{
+		if (surface.provenance.actorIndex < 0 ||
+			(surface.material.flags & nri_scene::MaterialFlag_Sprite) == 0)
+		{
+			return;
+		}
+
+		uint32_t textureId = 0;
+		if (surface.material.texture != nullptr)
+		{
+			const FTextureID id = surface.material.texture->GetID();
+			textureId = id.isValid() ? (uint32_t)id.GetIndex() : 0u;
+		}
+
+		surface.provenance.actorOverlayRuleCount = 0;
+		for (const auto& rule : actorRules)
+		{
+			if (rule.hasTileFilter && rule.tileFilter != textureId)
+			{
+				continue;
+			}
+			if (surface.provenance.actorOverlayRuleCount >= nri_scene::MaxActorOverlayRuleIdsPerSurface)
+			{
+				break;
+			}
+
+			surface.provenance.actorOverlayRuleIds[surface.provenance.actorOverlayRuleCount++] = rule.ruleId;
+		}
+	}
+
+	void StampActorOverlayRuleIdsOnSceneView(
+		const std::unordered_map<int32_t, std::vector<ActorOverlayMaterialRule>>& actorOverlayRules,
+		nri_scene::SceneView& sceneView)
+	{
+		auto stampSurfaces = [&actorOverlayRules](auto& surfaces)
+		{
+			for (auto& surface : surfaces)
+			{
+				const auto it = actorOverlayRules.find(surface.provenance.actorIndex);
+				if (it != actorOverlayRules.end())
+				{
+					StampActorOverlayRuleIdsOnSurface(it->second, surface);
+				}
+			}
+		};
+
+		stampSurfaces(sceneView.opaqueWalls);
+		stampSurfaces(sceneView.opaqueFlats);
+		stampSurfaces(sceneView.opaqueSprites);
+	}
+}
+
+const char* NRIRenderer::GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot)
+{
+	return GetMaterialBuildTraceSlotNameInternal(slot);
+}
+
+NRIRenderer::MaterialBuildTraceSlot NRIRenderer::ResolveMaterialBuildTraceSlot(const char* traceLabel)
+{
+	if (traceLabel == nullptr || traceLabel[0] == '\0')
+	{
+		return MaterialBuildTraceSlot::Unknown;
+	}
+
+	for (size_t index = 0; index < GetMaterialBuildTraceSlotIndex(MaterialBuildTraceSlot::Count); ++index)
+	{
+		const MaterialBuildTraceSlot slot = (MaterialBuildTraceSlot)index;
+		if (std::strcmp(traceLabel, GetMaterialBuildTraceSlotNameInternal(slot)) == 0)
+		{
+			return slot;
+		}
+	}
+
+	return MaterialBuildTraceSlot::Unknown;
+}
+
+const std::unordered_map<int32_t, uint32_t>& NRIRenderer::GetActorMaterialOverrideMapForFrame(MaterialBuildTraceSlot traceSlot)
+{
+	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	auto& materialTraceEntry = mLastPerfShellTraceStats.materialBuildByLabel[GetMaterialBuildTraceSlotIndex(traceSlot)];
+	bool built = false;
+	if (nri_runtime_mutation::ShouldTracePtPerf())
+	{
+		const auto start = std::chrono::steady_clock::now();
+		const auto& overrides = nri_material_policy::GetActorMaterialOverrideMapForFrame(resolvedLightOverlays, mFrameIndex, mActorMaterialOverrideCache, built);
+		const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
+		if (built)
+		{
+			mLastPerfShellTraceStats.actorOverrideMapBuildCalls++;
+			mLastPerfShellTraceStats.actorOverrideMapBuildMs += elapsedMs;
+			materialTraceEntry.overrideBuildCalls++;
+			materialTraceEntry.overrideBuildMs += elapsedMs;
+		}
+		return overrides;
+	}
+
+	const auto& overrides = nri_material_policy::GetActorMaterialOverrideMapForFrame(resolvedLightOverlays, mFrameIndex, mActorMaterialOverrideCache, built);
+	if (built)
+	{
+		mLastPerfShellTraceStats.actorOverrideMapBuildCalls++;
+		materialTraceEntry.overrideBuildCalls++;
+	}
+	return overrides;
+}
+
+void NRIRenderer::ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const
+{
+	nri_material_policy::ApplyEmissiveMaterialOverrides(mSceneLights, GetGlowmapVisibleBlendScale(), materials, inOutGpuMaterials);
+}
+
+void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel)
+{
+	mLastPerfShellTraceStats.materialBuildCalls++;
+	const bool tracePerf = nri_runtime_mutation::ShouldTracePtPerf();
+	const MaterialBuildTraceSlot materialTraceSlot = ResolveMaterialBuildTraceSlot(traceLabel);
+	auto& materialTraceEntry = mLastPerfShellTraceStats.materialBuildByLabel[GetMaterialBuildTraceSlotIndex(materialTraceSlot)];
+	materialTraceEntry.calls++;
+	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	const bool hasActorMaterialRules = nri_material_policy::HasActorMaterialOverrideRules(resolvedLightOverlays);
+	const std::unordered_map<int32_t, uint32_t>* actorOverridesForBuild = nullptr;
+	std::unordered_map<int32_t, uint32_t> mergedActorOverridesForBuild;
+	if (hasActorMaterialRules)
+	{
+		const auto& actorOverrides = GetActorMaterialOverrideMapForFrame(materialTraceSlot);
+		if (!actorOverrides.empty())
+		{
+			actorOverridesForBuild = &actorOverrides;
+		}
+	}
+
+	std::unordered_map<int32_t, std::vector<ActorOverlayMaterialRule>> actorOverlayRules;
+	if (resolvedLightOverlays.actorRules.Size() > 0)
+	{
+		BuildActorOverlayMaterialRules(resolvedLightOverlays, actorOverlayRules);
+		if (!actorOverlayRules.empty())
+		{
+			StampActorOverlayRuleIdsOnSceneView(actorOverlayRules, sceneView);
+			for (const auto& entry : actorOverlayRules)
+			{
+				uint32_t overrideBits = nri_material_policy::ActorMaterialOverride_None;
+				for (const auto& rule : entry.second)
+				{
+					overrideBits |= rule.overrideBits;
+				}
+
+				if (overrideBits != nri_material_policy::ActorMaterialOverride_None)
+				{
+					if (actorOverridesForBuild != nullptr && mergedActorOverridesForBuild.empty())
+					{
+						mergedActorOverridesForBuild = *actorOverridesForBuild;
+					}
+					mergedActorOverridesForBuild[entry.first] |= overrideBits;
+				}
+			}
+			if (!mergedActorOverridesForBuild.empty())
+			{
+				actorOverridesForBuild = &mergedActorOverridesForBuild;
+			}
+		}
+	}
+
+	struct SavedMaterialFlags
+	{
+		uint32_t* flags = nullptr;
+		uint32_t value = 0;
+	};
+
+	std::vector<SavedMaterialFlags> savedFlags;
+	if (actorOverridesForBuild != nullptr)
+	{
+		savedFlags.reserve(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size() + sceneView.opaqueSprites.size());
+		auto applyFullbrightSurfaceFlags = [actorOverridesForBuild, &savedFlags](auto& surfaces)
+		{
+			for (auto& surface : surfaces)
+			{
+				if ((surface.material.flags & nri_scene::MaterialFlag_Sprite) == 0)
+				{
+					continue;
+				}
+
+				auto it = actorOverridesForBuild->find(surface.provenance.actorIndex);
+				if (it == actorOverridesForBuild->end() ||
+					(it->second & nri_material_policy::ActorMaterialOverride_Fullbright) == 0)
+				{
+					continue;
+				}
+
+				savedFlags.push_back({ &surface.material.flags, surface.material.flags });
+				surface.material.flags |= nri_scene::MaterialFlag_Fullbright;
+			}
+		};
+
+		applyFullbrightSurfaceFlags(sceneView.opaqueWalls);
+		applyFullbrightSurfaceFlags(sceneView.opaqueFlats);
+		applyFullbrightSurfaceFlags(sceneView.opaqueSprites);
+	}
+
+	if (tracePerf)
+	{
+		const auto start = std::chrono::steady_clock::now();
+		nri_scene::BuildMaterials(sceneView, outMaterials);
+		const double elapsedMs = DurationMs(start, std::chrono::steady_clock::now());
+		mLastPerfShellTraceStats.materialBuildMs += elapsedMs;
+		materialTraceEntry.materialBuildMs += elapsedMs;
+	}
+	else
+	{
+		nri_scene::BuildMaterials(sceneView, outMaterials);
+	}
+	if (actorOverridesForBuild != nullptr)
+	{
+		nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(*actorOverridesForBuild, GetFullbrightBoostScale(), outMaterials);
+		for (const SavedMaterialFlags& saved : savedFlags)
+		{
+			*saved.flags = saved.value;
+		}
+	}
+	AccumulateMaterialTextureAttribution(
+		materialTraceEntry,
+		GatherMaterialTextureAttribution(outMaterials.materials, outMaterials.lightMetadata, outMaterials.textures.size()));
+	TraceActorSpriteMaterialAssignments(sceneView, outMaterials, traceLabel);
+}
+
+void NRIRenderer::ApplyActorShadowMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials)
+{
+	const ResolvedLightOverlaySet& resolvedLightOverlays = GetResolvedLightOverlaySet();
+	if (resolvedLightOverlays.actorRules.Size() == 0 && resolvedLightOverlays.actorOverrideRules.Size() == 0)
+	{
+		return;
+	}
+
+	const auto& actorOverrides = GetActorMaterialOverrideMapForFrame();
+	if (actorOverrides.empty())
+	{
+		return;
+	}
+
+	nri_material_policy::ApplyActorShadowMaterialOverrides(actorOverrides, GetFullbrightBoostScale(), materials, inOutGpuMaterials);
+}
+
+uint64_t NRIRenderer::ComputeChunkActorOverrideHash(const nri_scene::MaterialBridgeData& materials)
+{
+	const auto& actorOverrides = GetActorMaterialOverrideMapForFrame();
+	return nri_material_policy::ComputeChunkActorOverrideHash(actorOverrides, materials);
+}
+
+uint64_t NRIRenderer::ComputeChunkEmissiveOverrideHash(const nri_scene::MaterialBridgeData& materials) const
+{
+	return nri_material_policy::ComputeChunkEmissiveOverrideHash(mSceneLights, materials);
 }
 
 bool nri_material_policy::HasActorMaterialOverrideRules(const ResolvedLightOverlaySet& resolved)

@@ -82,6 +82,60 @@ void NRIRenderer::ResetResidentMapChunkRegistry()
 	mStaticSceneResidency.Registry() = {};
 }
 
+void NRIRenderer::QueueStaticMapSceneLightingInvalidation()
+{
+	if (ShouldTraceSkyPerf())
+	{
+		gRendererSkyPerfTraceStats.lightingInvalidationRequests++;
+	}
+	mPendingStaticMapLightingInvalidation = true;
+}
+
+void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
+{
+	NRIStaticSceneMaterialLightingRefreshInput input = {};
+	input.staticScene = &mStaticMapScene;
+
+	NRIStaticSceneMaterialLightingRefreshServices services = {};
+	services.user = this;
+	services.ensurePaletteTexture = [](void* user, const nri_scene::MaterialBridgeData& materials) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->EnsurePaletteTexture(materials);
+	};
+	services.ensureSceneTextures = [](
+		void* user,
+		const nri_scene::SceneView& sceneView,
+		const nri_scene::MaterialBridgeData& materials,
+		std::vector<nri_scene::MaterialData>& gpuMaterials,
+		bool preserveExistingSky,
+		const char* reason) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->EnsureSceneTextures(sceneView, materials, gpuMaterials, preserveExistingSky, reason);
+	};
+	services.uploadStaticMaterialAtlas = [](void* user) -> bool
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return renderer->EnsureStructuredBuffer(
+			renderer->mStaticMaterialBuffer,
+			renderer->mMaterialBufferStats,
+			renderer->mStaticMapScene.gpuMaterials.data(),
+			renderer->mStaticMapScene.gpuMaterials.size() * sizeof(nri_scene::MaterialData),
+			sizeof(nri_scene::MaterialData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess());
+	};
+
+	if (!nri_static_scene::RefreshStaticMapSceneMaterialLighting(input, services))
+	{
+		// Fall back to a full resident-scene rebuild on the next frame if the
+		// targeted material refresh path fails for any reason.
+		DestroyStaticMapSceneCache("material-lighting-refresh-failed");
+		mStaticMapScene = {};
+		mStaticAccelerationBuildSerial = 0;
+		return;
+	}
+}
+
 uint32_t NRIStaticSceneResidency::GetStaticSceneChunkSlotPreference(
 	const StaticMapSceneCache& staticScene,
 	const StaticMapChunkAtlas& atlas,
