@@ -1,9 +1,139 @@
 #include "nri_scene_upload.h"
 
 #include "nri_renderer.h"
-#include "../system/nri_renderdevice.h"
+
+#include "nri_scene_lights.h"
+#include "nri_upload_hash.h"
+#include "c_cvars.h"
 
 #include <algorithm>
+#include <chrono>
+#include <vector>
+
+EXTERN_CVAR(Bool, nri_ptslowdowntrace)
+EXTERN_CVAR(Int, nri_pttraceframes)
+EXTERN_CVAR(Int, perf_looptraceframes)
+EXTERN_CVAR(Bool, nri_ptsectorlighting)
+EXTERN_CVAR(Float, nri_ptsectorlightmultiplier)
+
+namespace
+{
+	constexpr uint32_t NRI_RUNTIME_LIGHT_TILE_SIZE = 64;
+	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
+	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
+	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
+	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
+	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
+
+	static double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
+	{
+		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
+	}
+
+	static bool ShouldCollectSceneDataTiming()
+	{
+		return (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0 || (bool)nri_ptslowdowntrace;
+	}
+
+	class ScopedPtPerfTimer
+	{
+	public:
+		explicit ScopedPtPerfTimer(double& targetMs)
+			: mTarget(ShouldCollectSceneDataTiming() ? &targetMs : nullptr)
+		{
+			if (mTarget != nullptr)
+			{
+				mStart = std::chrono::steady_clock::now();
+			}
+		}
+
+		~ScopedPtPerfTimer()
+		{
+			if (mTarget != nullptr)
+			{
+				*mTarget += DurationMs(mStart, std::chrono::steady_clock::now());
+			}
+		}
+
+	private:
+		double* mTarget = nullptr;
+		std::chrono::steady_clock::time_point mStart = {};
+	};
+
+	struct ScenePortalData
+	{
+		uint32_t traversalClass = 0;
+		uint32_t kind = 0;
+		uint32_t targetLocalSpaceIndex = UINT32_MAX;
+		uint32_t flags = 0;
+		float delta[3] = {};
+		uint32_t reserved0 = 0;
+	};
+
+	static uint64_t HashCombine64(uint64_t hash, uint64_t value)
+	{
+		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
+	}
+
+	static float GetSectorLightMultiplier()
+	{
+		return std::max(0.0f, (float)nri_ptsectorlightmultiplier);
+	}
+
+	static uint32_t GetPortalTraversalClass(nri_scene::PTPortalKind kind)
+	{
+		switch (kind)
+		{
+		case nri_scene::PTPortalKind::WallMirror:
+		case nri_scene::PTPortalKind::SectorFloorMirror:
+		case nri_scene::PTPortalKind::SectorCeilingMirror:
+			return NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE;
+
+		case nri_scene::PTPortalKind::WallView:
+		case nri_scene::PTPortalKind::SectorFloorStack:
+		case nri_scene::PTPortalKind::SectorCeilingStack:
+			return NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER;
+
+		case nri_scene::PTPortalKind::WallToSprite:
+			return NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND;
+
+		default:
+			return NRI_PORTAL_TRAVERSAL_CLASS_NONE;
+		}
+	}
+
+	static std::vector<ScenePortalData> BuildScenePortalData(const nri_scene::PTMapWorld& mapWorld)
+	{
+		std::vector<ScenePortalData> portals;
+		portals.reserve(std::max<size_t>(mapWorld.portals.size(), 1u));
+
+		for (const auto& portal : mapWorld.portals)
+		{
+			ScenePortalData data = {};
+			data.traversalClass = GetPortalTraversalClass(portal.kind);
+			data.kind = (uint32_t)portal.kind;
+			data.flags = portal.runtimeBoundTarget ? NRI_PORTAL_FLAG_RUNTIME_BOUND : 0u;
+			if (portal.targetCount > 0 && portal.firstTarget < mapWorld.portalTargets.size())
+			{
+				data.targetLocalSpaceIndex = mapWorld.portalTargets[portal.firstTarget].localSpaceIndex;
+			}
+			data.delta[0] = (float)portal.delta[0];
+			data.delta[1] = (float)portal.delta[1];
+			data.delta[2] = (float)portal.delta[2];
+			portals.push_back(data);
+		}
+
+		if (portals.empty())
+		{
+			portals.push_back({});
+		}
+
+		return portals;
+	}
+}
+
+#include "../system/nri_renderdevice.h"
+
 #include <cstring>
 
 namespace
@@ -847,3 +977,448 @@ bool NRIRenderer::EnsureResidentStructuredBuffer(NRIBufferResource& resource, Sc
 
 	return true;
 }
+
+bool NRIRenderer::UpdateSceneDataSet(
+	const NRIBufferResource& staticVertexBuffer,
+	const NRIBufferResource& staticIndexBuffer,
+	const NRIBufferResource& staticPrimitiveBuffer,
+	const NRIBufferResource& staticMaterialBuffer,
+	const NRIBufferResource& dynamicVertexBuffer,
+	const NRIBufferResource& dynamicIndexBuffer,
+	const NRIBufferResource& dynamicPrimitiveBuffer,
+	const NRIBufferResource& dynamicMaterialBuffer,
+	const std::vector<SceneInstanceData>& sceneInstances,
+	uint32_t staticPrimitiveCount,
+	uint32_t dynamicPrimitiveCount,
+	uint32_t staticMaterialCount,
+	uint32_t dynamicMaterialCount,
+	const char* reason)
+{
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneDataSetMs);
+	mLastPerfShellTraceStats.sceneDataSetCalls++;
+	SetCurrentSceneDataDescriptorsInitialized(false);
+	bool waitedForWrites = false;
+	const auto noteDataSetUpload = [&](const SceneBufferDebugStats& stats, uint64_t size, uint64_t& requestedBytes, uint64_t& uploadedBytes)
+	{
+		requestedBytes += size;
+		uploadedBytes += stats.bytesUploadedLastFrame;
+		mLastPerfShellTraceStats.sceneDataSetResourceGrowEvents += stats.growEventsLastFrame;
+		mLastPerfShellTraceStats.sceneDataSetResourceOverwriteEvents += stats.overwriteEventsLastFrame;
+	};
+	const auto ensureStructuredBufferBatched = [&](NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, double& uploadMs, uint64_t& requestedBytes, uint64_t& uploadedBytes) -> bool
+	{
+		bool needsWait = false;
+		{
+			ScopedPtPerfTimer waitCheckTimer(mLastPerfShellTraceStats.sceneDataSetWaitCheckMs);
+			needsWait = !waitedForWrites && StructuredBufferUpdateNeedsWait(resource, data, size, stride);
+		}
+		if (needsWait)
+		{
+			{
+				ScopedPtPerfTimer waitTimer(mLastPerfShellTraceStats.sceneDataSetWaitMs);
+				WaitForCommandsTracked("scene_data_upload");
+			}
+			mLastPerfShellTraceStats.sceneDataSetWaitCount++;
+			waitedForWrites = true;
+		}
+
+		bool updated = false;
+		{
+			ScopedPtPerfTimer uploadTimer(uploadMs);
+			updated = EnsureStructuredBuffer(resource, stats, data, size, stride, usage, after, waitedForWrites, "scene_data_upload");
+		}
+		if (updated)
+		{
+			noteDataSetUpload(stats, size, requestedBytes, uploadedBytes);
+		}
+		return updated;
+	};
+
+	{
+		ScopedPtPerfTimer reprojectionTimer(mLastPerfShellTraceStats.sceneDataSetReprojectionMs);
+		if (!UpdateReprojectionBuffer(&waitedForWrites))
+		{
+			return false;
+		}
+	}
+
+	{
+		ScopedPtPerfTimer visibleFlatTimer(mLastPerfShellTraceStats.sceneDataSetVisibleFlatPlaneMs);
+		if (!UpdateVisibleFlatPlaneBuffer(&waitedForWrites))
+		{
+			return false;
+		}
+	}
+
+	{
+		ScopedPtPerfTimer visibleChunkTimer(mLastPerfShellTraceStats.sceneDataSetVisibleChunkMs);
+		if (!UpdateVisibleChunkBuffer(&waitedForWrites))
+		{
+			return false;
+		}
+	}
+
+	if (sceneInstances.empty())
+	{
+		return false;
+	}
+
+	mBoundRuntimeLightCount = 0;
+
+	if (!ensureStructuredBufferBatched(
+		mSceneInstanceBuffer,
+		mSceneInstanceBufferStats,
+		sceneInstances.data(),
+		sceneInstances.size() * sizeof(SceneInstanceData),
+		sizeof(SceneInstanceData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess(),
+		mLastPerfShellTraceStats.sceneDataSetSceneInstanceMs,
+		mLastPerfShellTraceStats.sceneDataSetSceneInstanceRequestedBytes,
+		mLastPerfShellTraceStats.sceneDataSetSceneInstanceUploadedBytes))
+	{
+		return false;
+	}
+	mBoundSceneInstances = sceneInstances;
+
+	std::vector<ScenePortalData> scenePortals;
+	{
+		ScopedPtPerfTimer portalTimer(mLastPerfShellTraceStats.sceneDataSetPortalMs);
+		scenePortals = BuildScenePortalData(mMapWorld);
+	}
+	if (!ensureStructuredBufferBatched(
+		mPortalBuffer,
+		mPortalBufferStats,
+		scenePortals.data(),
+		scenePortals.size() * sizeof(ScenePortalData),
+		sizeof(ScenePortalData),
+		nri::BufferUsageBits::SHADER_RESOURCE,
+		NRIComputeShaderResourceAccess(),
+		mLastPerfShellTraceStats.sceneDataSetPortalMs,
+		mLastPerfShellTraceStats.sceneDataSetPortalRequestedBytes,
+		mLastPerfShellTraceStats.sceneDataSetPortalUploadedBytes))
+	{
+		return false;
+	}
+
+	uint64_t runtimeLightPayloadHash = 0;
+	{
+		ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightHashMs);
+		runtimeLightPayloadHash = mSceneLights.BuildRuntimeLightPayloadHash();
+	}
+	const uint32_t activeRuntimeLightCount = (uint32_t)mSceneLights.GetAnalyticLights().activeLights.size();
+	if (!mRuntimeLightPayloadCacheValid ||
+		mRuntimeLightPayloadHash != runtimeLightPayloadHash ||
+		mRuntimeLightBuffer.shaderView == nullptr)
+	{
+		mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploads++;
+		std::vector<RuntimePointLightGpuData> runtimeLights;
+		{
+			ScopedPtPerfTimer runtimeLightTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploadMs);
+			mSceneLights.BuildRuntimePointLightUpload(runtimeLights);
+		}
+		if (!ensureStructuredBufferBatched(
+			mRuntimeLightBuffer,
+			mRuntimeLightBufferStats,
+			runtimeLights.empty() ? nullptr : runtimeLights.data(),
+			runtimeLights.size() * sizeof(RuntimePointLightGpuData),
+			sizeof(RuntimePointLightGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploadMs,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploadedBytes))
+		{
+			return false;
+		}
+
+		mRuntimeLightPayloadCacheValid = true;
+		mRuntimeLightPayloadHash = runtimeLightPayloadHash;
+	}
+	else
+	{
+		mLastPerfShellTraceStats.sceneDataSetRuntimeLightCacheHits++;
+	}
+
+	uint32_t runtimeLightTileCountX = 0;
+	uint32_t runtimeLightTileCountY = 0;
+	uint32_t runtimeLightTileIndexCount = 0;
+	uint32_t runtimeLightMaxTileOccupancy = 0;
+	uint64_t runtimeLightClusterCameraHash = 0;
+	{
+		ScopedPtPerfTimer runtimeLightClusterTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs);
+		runtimeLightClusterCameraHash = mSceneLights.BuildRuntimeLightClusterCameraHash(BuildRuntimeLightClusterInput());
+	}
+	const uint64_t runtimeLightClusterPayloadHash =
+		HashCombine64(runtimeLightPayloadHash, runtimeLightClusterCameraHash);
+	if (!mRuntimeLightClusterCacheValid ||
+		mRuntimeLightClusterPayloadHash != runtimeLightClusterPayloadHash ||
+		mRuntimeLightTileHeaderBuffer.shaderView == nullptr ||
+		mRuntimeLightTileIndexBuffer.shaderView == nullptr)
+	{
+		mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploads++;
+		std::vector<RuntimeLightTileHeaderGpuData> runtimeLightTileHeaders;
+		std::vector<uint32_t> runtimeLightTileIndices;
+		{
+			ScopedPtPerfTimer runtimeLightClusterTimer(mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs);
+			mSceneLights.BuildRuntimeLightClusterUpload(
+				BuildRuntimeLightClusterInput(),
+				runtimeLightTileHeaders,
+				runtimeLightTileIndices,
+				runtimeLightTileCountX,
+				runtimeLightTileCountY,
+				runtimeLightTileIndexCount,
+				runtimeLightMaxTileOccupancy);
+		}
+		if (!ensureStructuredBufferBatched(
+			mRuntimeLightTileHeaderBuffer,
+			mRuntimeLightTileHeaderBufferStats,
+			runtimeLightTileHeaders.data(),
+			runtimeLightTileHeaders.size() * sizeof(RuntimeLightTileHeaderGpuData),
+			sizeof(RuntimeLightTileHeaderGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploadedBytes))
+		{
+			return false;
+		}
+
+		if (!ensureStructuredBufferBatched(
+			mRuntimeLightTileIndexBuffer,
+			mRuntimeLightTileIndexBufferStats,
+			runtimeLightTileIndices.data(),
+			runtimeLightTileIndices.size() * sizeof(uint32_t),
+			sizeof(uint32_t),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploadedBytes))
+		{
+			return false;
+		}
+
+		mRuntimeLightClusterCacheValid = true;
+		mRuntimeLightClusterPayloadHash = runtimeLightClusterPayloadHash;
+		mRuntimeLightClusterCameraHash = runtimeLightClusterCameraHash;
+	}
+	else
+	{
+		runtimeLightTileCountX = mBoundRuntimeLightTileCountX;
+		runtimeLightTileCountY = mBoundRuntimeLightTileCountY;
+		runtimeLightTileIndexCount = mBoundRuntimeLightTileIndexCount;
+		runtimeLightMaxTileOccupancy = mBoundRuntimeLightMaxTileOccupancy;
+		mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterCacheHits++;
+	}
+
+	if (!mEmissiveSamplingPayloadCacheValid ||
+		mEmissivePrimitiveHeaderBuffer.shaderView == nullptr ||
+		mEmissivePrimitiveBuffer.shaderView == nullptr ||
+		mEmissivePrimitiveCdfBuffer.shaderView == nullptr ||
+		mEmissiveMaterialResponseBuffer.shaderView == nullptr)
+	{
+		mLastPerfShellTraceStats.sceneDataSetEmissiveUploads++;
+		EmissivePrimitiveHeaderGpuData emissiveHeader = {};
+		std::vector<EmissivePrimitiveGpuData> emissivePrimitives;
+		std::vector<float> emissiveCdf;
+		std::vector<EmissiveMaterialResponseGpuData> emissiveMaterialResponses;
+		std::vector<EmissivePrimitiveDebugRecord> ignoredEmissiveDebugRecords;
+		{
+			ScopedPtPerfTimer emissiveTimer(mLastPerfShellTraceStats.sceneDataSetEmissiveMs);
+			mSceneLights.BuildEmissiveSamplingUpload({}, emissiveHeader, emissivePrimitives, emissiveCdf, emissiveMaterialResponses, ignoredEmissiveDebugRecords);
+		}
+		if (!ensureStructuredBufferBatched(
+			mEmissivePrimitiveHeaderBuffer,
+			mEmissivePrimitiveHeaderBufferStats,
+			&emissiveHeader,
+			sizeof(emissiveHeader),
+			sizeof(EmissivePrimitiveHeaderGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
+		{
+			return false;
+		}
+
+		if (!ensureStructuredBufferBatched(
+			mEmissivePrimitiveBuffer,
+			mEmissivePrimitiveBufferStats,
+			emissivePrimitives.empty() ? nullptr : emissivePrimitives.data(),
+			emissivePrimitives.empty() ? 0u : emissivePrimitives.size() * sizeof(EmissivePrimitiveGpuData),
+			sizeof(EmissivePrimitiveGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
+		{
+			return false;
+		}
+
+		if (!ensureStructuredBufferBatched(
+			mEmissivePrimitiveCdfBuffer,
+			mEmissivePrimitiveCdfBufferStats,
+			emissiveCdf.data(),
+			emissiveCdf.size() * sizeof(float),
+			sizeof(float),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
+		{
+			return false;
+		}
+
+		if (!ensureStructuredBufferBatched(
+			mEmissiveMaterialResponseBuffer,
+			mEmissiveMaterialResponseBufferStats,
+			emissiveMaterialResponses.empty() ? nullptr : emissiveMaterialResponses.data(),
+			emissiveMaterialResponses.empty() ? 0u : emissiveMaterialResponses.size() * sizeof(EmissiveMaterialResponseGpuData),
+			sizeof(EmissiveMaterialResponseGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		mLastPerfShellTraceStats.sceneDataSetEmissiveCacheHits++;
+	}
+
+	uint64_t sectorLightingPayloadHash = 0;
+	{
+		ScopedPtPerfTimer sectorLightTimer(mLastPerfShellTraceStats.sceneDataSetSectorLightMs);
+		UpdateBoundSectorLightingState();
+		sectorLightingPayloadHash = mSceneLights.BuildSectorLightingPayloadHash(GetSectorLightMultiplier(), nri_ptsectorlighting);
+	}
+	if (!mSectorLightingPayloadCacheValid ||
+		mSectorLightingPayloadHash != sectorLightingPayloadHash ||
+		mSectorLightHeaderBuffer.shaderView == nullptr ||
+		mSectorLightBuffer.shaderView == nullptr)
+	{
+		mLastPerfShellTraceStats.sceneDataSetSectorLightUploads++;
+		SectorLightHeaderGpuData sectorLightHeader = {};
+		std::vector<SectorLightGpuData> sectorLights;
+		{
+			ScopedPtPerfTimer sectorLightTimer(mLastPerfShellTraceStats.sceneDataSetSectorLightMs);
+			UpdateBoundSectorLightingState();
+			mSceneLights.BuildSectorLightingUpload(GetSectorLightMultiplier(), nri_ptsectorlighting, sectorLightHeader, sectorLights);
+		}
+		if (!ensureStructuredBufferBatched(
+			mSectorLightHeaderBuffer,
+			mSectorLightHeaderBufferStats,
+			&sectorLightHeader,
+			sizeof(sectorLightHeader),
+			sizeof(SectorLightHeaderGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetSectorLightMs,
+			mLastPerfShellTraceStats.sceneDataSetSectorLightRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetSectorLightUploadedBytes))
+		{
+			return false;
+		}
+
+		if (!ensureStructuredBufferBatched(
+			mSectorLightBuffer,
+			mSectorLightBufferStats,
+			sectorLights.empty() ? nullptr : sectorLights.data(),
+			sectorLights.empty() ? 0u : sectorLights.size() * sizeof(SectorLightGpuData),
+			sizeof(SectorLightGpuData),
+			nri::BufferUsageBits::SHADER_RESOURCE,
+			NRIComputeShaderResourceAccess(),
+			mLastPerfShellTraceStats.sceneDataSetSectorLightMs,
+			mLastPerfShellTraceStats.sceneDataSetSectorLightRequestedBytes,
+			mLastPerfShellTraceStats.sceneDataSetSectorLightUploadedBytes))
+		{
+			return false;
+		}
+
+		mSectorLightingPayloadCacheValid = true;
+		mSectorLightingPayloadHash = sectorLightingPayloadHash;
+	}
+	else
+	{
+		mLastPerfShellTraceStats.sceneDataSetSectorLightCacheHits++;
+	}
+
+	auto selectView = [](const NRIBufferResource& primary, const NRIBufferResource& fallback) -> nri::Descriptor*
+	{
+		return primary.shaderView != nullptr ? primary.shaderView : fallback.shaderView;
+	};
+
+	{
+		ScopedPtPerfTimer descriptorBuildTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorBuildMs);
+		mSceneDataDescriptors.fill(nullptr);
+		mSceneDataDescriptors[0] = selectView(staticVertexBuffer, dynamicVertexBuffer);
+		mSceneDataDescriptors[1] = selectView(staticIndexBuffer, dynamicIndexBuffer);
+		mSceneDataDescriptors[2] = selectView(staticPrimitiveBuffer, dynamicPrimitiveBuffer);
+		mSceneDataDescriptors[3] = selectView(staticMaterialBuffer, dynamicMaterialBuffer);
+		mSceneDataDescriptors[4] = selectView(dynamicVertexBuffer, staticVertexBuffer);
+		mSceneDataDescriptors[5] = selectView(dynamicIndexBuffer, staticIndexBuffer);
+		mSceneDataDescriptors[6] = selectView(dynamicPrimitiveBuffer, staticPrimitiveBuffer);
+		mSceneDataDescriptors[7] = selectView(dynamicMaterialBuffer, staticMaterialBuffer);
+		mSceneDataDescriptors[8] = mSceneInstanceBuffer.shaderView;
+		mSceneDataDescriptors[9] = mPortalBuffer.shaderView;
+		mSceneDataDescriptors[10] = mRuntimeLightBuffer.shaderView;
+		mSceneDataDescriptors[11] = mRuntimeLightTileHeaderBuffer.shaderView;
+		mSceneDataDescriptors[12] = mRuntimeLightTileIndexBuffer.shaderView;
+		mSceneDataDescriptors[13] = mEmissivePrimitiveHeaderBuffer.shaderView;
+		mSceneDataDescriptors[14] = mEmissivePrimitiveBuffer.shaderView;
+		mSceneDataDescriptors[15] = mEmissivePrimitiveCdfBuffer.shaderView;
+		mSceneDataDescriptors[16] = mSectorLightHeaderBuffer.shaderView;
+		mSceneDataDescriptors[17] = mSectorLightBuffer.shaderView;
+		mSceneDataDescriptors[18] = mReprojectionBuffer.shaderView;
+		mSceneDataDescriptors[19] = mVisibleChunkBuffer.shaderView;
+		mSceneDataDescriptors[20] = mVisibleFlatPlaneBuffer.shaderView;
+		const NRIPersistentVoxelDescriptorSnapshot persistentVoxelDescriptors =
+			mPersistentVoxels.BuildDescriptorSnapshot(dynamicVertexBuffer, dynamicIndexBuffer, dynamicPrimitiveBuffer, dynamicMaterialBuffer);
+		mSceneDataDescriptors[21] = persistentVoxelDescriptors.vertex;
+		mSceneDataDescriptors[22] = persistentVoxelDescriptors.index;
+		mSceneDataDescriptors[23] = persistentVoxelDescriptors.primitive;
+		mSceneDataDescriptors[24] = persistentVoxelDescriptors.material;
+		mSceneDataDescriptors[25] = mEmissiveMaterialResponseBuffer.shaderView;
+	}
+
+	{
+		ScopedPtPerfTimer descriptorValidateTimer(mLastPerfShellTraceStats.sceneDataSetDescriptorValidateMs);
+		for (const nri::Descriptor* descriptor : mSceneDataDescriptors)
+		{
+			if (descriptor == nullptr)
+			{
+				mLastPerfShellTraceStats.sceneDataSetDescriptorNullCount++;
+				return false;
+			}
+		}
+	}
+
+	if (!CommitSceneDataDescriptors(reason != nullptr ? reason : "scene_data_full_rebuild"))
+	{
+		return false;
+	}
+
+	mBoundStaticPrimitiveCount = staticPrimitiveCount;
+	mBoundDynamicPrimitiveCount = dynamicPrimitiveCount;
+	mBoundStaticMaterialCount = staticMaterialCount;
+	mBoundDynamicMaterialCount = dynamicMaterialCount;
+	mBoundPortalCount = mMapWorld.valid ? (uint32_t)mMapWorld.portals.size() : 0u;
+	mBoundRuntimeLightCount = activeRuntimeLightCount;
+	mBoundRuntimeLightTileCountX = runtimeLightTileCountX;
+	mBoundRuntimeLightTileCountY = runtimeLightTileCountY;
+	mBoundRuntimeLightTileSize = NRI_RUNTIME_LIGHT_TILE_SIZE;
+	mBoundRuntimeLightTileIndexCount = runtimeLightTileIndexCount;
+	mBoundRuntimeLightMaxTileOccupancy = runtimeLightMaxTileOccupancy;
+	mRuntimeLightSceneDataDirty = false;
+	return true;
+}
+
+

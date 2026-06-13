@@ -1,8 +1,16 @@
 #include "nri_trace_stats.h"
 
+#include "nri_renderer.h"
+#include "c_cvars.h"
+
 #include <algorithm>
 #include <cstring>
 #include <vector>
+
+EXTERN_CVAR(Int, perf_looptraceframes)
+EXTERN_CVAR(Int, nri_pttraceframes)
+EXTERN_CVAR(Bool, nri_ptslowdowntrace)
+EXTERN_CVAR(Bool, nri_ptshaderstats)
 
 namespace
 {
@@ -25,6 +33,16 @@ namespace
 	static nri::AccessStage NRICopyDestinationAccess()
 	{
 		return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
+	}
+
+	static bool ShouldTracePtPerf()
+	{
+		return (int)perf_looptraceframes > 0 || (int)nri_pttraceframes > 0;
+	}
+
+	static bool ShouldCollectTraceShaderStats()
+	{
+		return !!nri_ptshaderstats && (ShouldTracePtPerf() || (bool)nri_ptslowdowntrace);
 	}
 }
 
@@ -344,3 +362,42 @@ void NRITraceShaderStats::Readback(
 	context.core->UnmapBuffer(*mReadbackBuffer.buffer);
 	mPendingFrame = 0;
 }
+
+bool NRIRenderer::EnsureTraceShaderStatsResources()
+{
+	return mTraceShaderStats.Ensure(BuildResourceServices());
+}
+
+
+
+void NRIRenderer::ResetTraceShaderStatsBuffer()
+{
+	mTraceShaderStats.ResetBuffer(BuildResourceServices(), ShouldCollectTraceShaderStats());
+}
+
+
+
+void NRIRenderer::CopyTraceShaderStatsForReadback(uint64_t frameNumber)
+{
+	mTraceShaderStats.CopyForReadback(BuildResourceServices(), ShouldCollectTraceShaderStats(), frameNumber);
+}
+
+
+
+void NRIRenderer::ReadbackTraceShaderStats()
+{
+	NRITraceShaderStatsReadbackInput input = {};
+	input.enabled = (bool)nri_ptshaderstats;
+	input.boundSceneInstances = &mBoundSceneInstances;
+	input.staticPrimitiveCount = mBoundStaticPrimitiveCount;
+	input.dynamicPrimitiveCount = mBoundDynamicPrimitiveCount;
+	input.persistentVoxelPrimitiveCount = mPersistentVoxels.BoundPrimitiveCount();
+	input.user = this;
+	input.estimatePersistentVoxelPrimitiveCount = [](void* user, uint32_t primitiveOffset) -> uint32_t
+	{
+		return static_cast<NRIRenderer*>(user)->mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(primitiveOffset);
+	};
+	mTraceShaderStats.Readback(BuildResourceServices(), input, mLastPerfTraceShaderStats);
+}
+
+
