@@ -1074,47 +1074,9 @@ OptionMenu "VideoOptions" protected
 	Submenu "$AUTOMAPMNU_TITLE", "AutomapOptions"
 	StaticText ""
 
-	StaticText "HDR / Output"
-	Option "Output Mode",						"nri_ptoutputmode",				"NRIPTOutputMode"
-	StaticText "----------------"
-	StaticText "SDR Output"
-	Option "Tonemap",							"nri_pttonemap",				"NRIPTTonemap"
-	Slider "Exposure",							"nri_ptexposure",				0.125, 8.0, 0.125, 3
-	Slider "Contrast",							"nri_ptcontrast",				0.50, 1.50, 0.05, 2
-	Slider "Saturation",						"nri_ptsaturation",				0.00, 2.00, 0.05, 2
-	Slider "Highlight Shoulder",				"nri_ptshoulder",				0.50, 1.50, 0.05, 2
-	Slider "Shadow Toe",						"nri_pttoe",					0.50, 1.50, 0.05, 2
-	Option "Auto Exposure",						"nri_ptautoexposure",			"OnOff"
-	Slider "Auto Exposure Target",				"nri_ptautoexposuretarget",		0.02, 1.00, 0.01, 2
-	Slider "Auto Exposure Bias",				"nri_ptautoexposurebias",		0.125, 8.0, 0.125, 3
-	Slider "Auto Exposure Min",					"nri_ptautoexposuremin",		0.03125, 8.0, 0.03125, 5
-	Slider "Auto Exposure Max",					"nri_ptautoexposuremax",		0.125, 32.0, 0.125, 3
-	StaticText "Applies to active SDR output and HDR requests that fall back to SDR."
-	StaticText "----------------"
-	StaticText "HDR Output"
-	Option "Tonemap",							"nri_pthdrtonemap",				"NRIPTTonemap"
-	Slider "Exposure",							"nri_pthdrexposure",			0.125, 8.0, 0.125, 3
-	Slider "Contrast",							"nri_pthdrcontrast",			0.50, 1.50, 0.05, 2
-	Slider "Saturation",						"nri_pthdrsaturation",			0.00, 2.00, 0.05, 2
-	Slider "Highlight Shoulder",				"nri_pthdrshoulder",			0.50, 1.50, 0.05, 2
-	Slider "Shadow Toe",						"nri_pthdrtoe",					0.50, 1.50, 0.05, 2
-	Slider "Paper White",						"nri_ptpaperwhite",				80.0, 400.0, 5.0, 1
-	Option "Auto Exposure",						"nri_pthdrautoexposure",		"OnOff"
-	Slider "Auto Exposure Target",				"nri_pthdrautoexposuretarget",	0.02, 1.00, 0.01, 2
-	Slider "Auto Exposure Bias",				"nri_pthdrautoexposurebias",	0.125, 8.0, 0.125, 3
-	Slider "Auto Exposure Min",					"nri_pthdrautoexposuremin",		0.03125, 8.0, 0.03125, 5
-	Slider "Auto Exposure Max",					"nri_pthdrautoexposuremax",		0.125, 32.0, 0.125, 3
-	StaticText "Applies only while a real HDR swapchain is active."
-	StaticText "----------------"
-	StaticText "Auto Exposure Metering"
-	Option "Metering",							"nri_ptautoexposuremetering",	"NRIAutoExposureMetering"
-	Slider "Low Percentile",					"nri_ptautoexposurelowpercentile",	0.0, 25.0, 0.5, 1
-	Slider "High Percentile",					"nri_ptautoexposurehighpercentile",	75.0, 100.0, 0.5, 1
-	StaticText "Metering and percentiles are shared by SDR and HDR."
-	Slider "Fullbright Boost",					"nri_ptfullbrightboost",		0.50, 8.00, 0.25, 2
-	Slider "Sky Brightness",					"nri_ptskybrightness",		0.00, 4.00, 0.05, 2
-	StaticText "Output calibration affects final present; light energy remains upstream."
-	StaticText "Output-mode changes reset PT history."
+	StaticText "Rendering Profile"
+	Option "HDR / SDR",							"nri_ptoutputmode",				"NRIPTOutputMode"
+	Option "Settings Profile",					"nri_settingsprofile",			"NRISettingsProfile"
 	StaticText ""
 
 	ifnotgame(Blood, Exhumed)
@@ -1220,6 +1182,48 @@ OptionMenu "NRIOptions" protected
 	StaticText "Debug / Inspection"
 	Option "PT Debug View",						"nri_ptdebugmenu",				"NRIPTDebug"
 	Slider "PT Debug Index",					"nri_ptdebugmenu",				0, 24, 1, 0
+	StaticText ""
+
+	StaticText "Output Calibration"
+	StaticText "----------------"
+	StaticText "SDR Output"
+	Option "Tonemap",							"nri_pttonemap",				"NRIPTTonemap"
+	Slider "Exposure",							"nri_ptexposure",				0.125, 8.0, 0.125, 3
+	Slider "Contrast",							"nri_ptcontrast",				0.50, 1.50, 0.05, 2
+	Slider "Saturation",						"nri_ptsaturation",				0.00, 2.00, 0.05, 2
+	Slider "Highlight Shoulder",				"nri_ptshoulder",				0.50, 1.50, 0.05, 2
+	Slider "Shadow Toe",						"nri_pttoe",					0.50, 1.50, 0.05, 2
+	Option "Auto Exposure",						"nri_ptautoexposure",			"OnOff"
+	Slider "Auto Exposure Target",				"nri_ptautoexposuretarget",		0.02, 1.00, 0.01, 2
+	Slider "Auto Exposure Bias",				"nri_ptautoexposurebias",		0.125, 8.0, 0.125, 3
+	Slider "Auto Exposure Min",					"nri_ptautoexposuremin",		0.03125, 8.0, 0.03125, 5
+	Slider "Auto Exposure Max",					"nri_ptautoexposuremax",		0.125, 32.0, 0.125, 3
+	StaticText "Applies to active SDR output and HDR requests that fall back to SDR."
+	StaticText "----------------"
+	StaticText "HDR Output"
+	Option "Tonemap",							"nri_pthdrtonemap",				"NRIPTTonemap"
+	Slider "Exposure",							"nri_pthdrexposure",			0.125, 8.0, 0.125, 3
+	Slider "Contrast",							"nri_pthdrcontrast",			0.50, 1.50, 0.05, 2
+	Slider "Saturation",						"nri_pthdrsaturation",			0.00, 2.00, 0.05, 2
+	Slider "Highlight Shoulder",				"nri_pthdrshoulder",			0.50, 1.50, 0.05, 2
+	Slider "Shadow Toe",						"nri_pthdrtoe",					0.50, 1.50, 0.05, 2
+	Slider "Paper White",						"nri_ptpaperwhite",				80.0, 400.0, 5.0, 1
+	Option "Auto Exposure",						"nri_pthdrautoexposure",		"OnOff"
+	Slider "Auto Exposure Target",				"nri_pthdrautoexposuretarget",	0.02, 1.00, 0.01, 2
+	Slider "Auto Exposure Bias",				"nri_pthdrautoexposurebias",	0.125, 8.0, 0.125, 3
+	Slider "Auto Exposure Min",					"nri_pthdrautoexposuremin",		0.03125, 8.0, 0.03125, 5
+	Slider "Auto Exposure Max",					"nri_pthdrautoexposuremax",		0.125, 32.0, 0.125, 3
+	StaticText "Applies only while a real HDR swapchain is active."
+	StaticText "----------------"
+	StaticText "Auto Exposure Metering"
+	Option "Metering",							"nri_ptautoexposuremetering",	"NRIAutoExposureMetering"
+	Slider "Low Percentile",					"nri_ptautoexposurelowpercentile",	0.0, 25.0, 0.5, 1
+	Slider "High Percentile",					"nri_ptautoexposurehighpercentile",	75.0, 100.0, 0.5, 1
+	StaticText "Metering and percentiles are shared by SDR and HDR."
+	Slider "Fullbright Boost",					"nri_ptfullbrightboost",		0.50, 8.00, 0.25, 2
+	Slider "Sky Brightness",					"nri_ptskybrightness",		0.00, 4.00, 0.05, 2
+	StaticText "Output calibration affects final present; light energy remains upstream."
+	StaticText "Output-mode changes reset PT history."
 	StaticText ""
 
 	StaticText "Commands"
@@ -1603,6 +1607,17 @@ OptionValue NRIMainUpscaler
 	0, "$OPTVAL_OFF"
 	2, "DLSS-SR"
 	3, "DLRR"
+}
+
+OptionValue NRISettingsProfile
+{
+	0, "Safe Mode"
+	1, "Fast Preset - DLRR"
+	2, "Medium Preset - DLRR"
+	3, "Beautiful Preset - DLRR"
+	4, "Fast Preset - DLSS-SR"
+	5, "Medium Preset - DLSS-SR"
+	6, "Beautiful Preset - DLSS-SR"
 }
 
 OptionValue NRIPostSharpen
