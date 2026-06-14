@@ -1075,6 +1075,8 @@ OptionMenu "VideoOptions" protected
 	StaticText ""
 
 	StaticText "Rendering Profile"
+	Option "Graphics API",						"nri_api",						"NRIGraphicsAPI"
+	StaticText "$VK_RESTART"
 	Option "HDR / SDR",							"nri_ptoutputmode",				"NRIPTOutputMode"
 	Option "Settings Profile",					"nri_settingsprofile",			"NRISettingsProfile"
 	CVarStaticText "nri_settingsprofilewarning"
@@ -1102,9 +1104,6 @@ OptionMenu "NRIOptions" protected
 {
 	Title "$RENDER_OPTIONS"
 
-	Option "Graphics API",						"nri_api",						"NRIGraphicsAPI"
-	StaticText "$VK_RESTART"
-	StaticText "----------------"
 	StaticText "NRD / Core"
 	Option "Denoiser",							"nri_denoise",					"OnOff"
 	Option "NRD Method",						"nri_nrddenoiser",				"NRDDenoiser"
