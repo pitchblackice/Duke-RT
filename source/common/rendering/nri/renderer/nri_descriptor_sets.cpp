@@ -202,7 +202,7 @@ bool NRIDescriptorSetManager::UpdateOutputSet(NRIRenderer& renderer)
 
 bool NRIDescriptorSetManager::UpdateOutputSet(NRIRenderer& renderer, nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors)
 {
-	if (!renderer.EnsureTraceShaderStatsResources())
+	if (!renderer.mTraceShaderStats.Ensure(renderer.BuildResourceServices()))
 	{
 		return false;
 	}
@@ -375,4 +375,3 @@ bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri:
 {
 	return NRIDescriptorSetManager::UpdateOutputSet(*this, set, descriptors);
 }
-

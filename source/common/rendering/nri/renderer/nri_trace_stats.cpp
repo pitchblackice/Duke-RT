@@ -345,13 +345,6 @@ void NRITraceShaderStats::Readback(
 	mPendingFrame = 0;
 }
 
-bool NRIRenderer::EnsureTraceShaderStatsResources()
-{
-	return mTraceShaderStats.Ensure(BuildResourceServices());
-}
-
-
-
 void NRIRenderer::ResetTraceShaderStatsBuffer()
 {
 	mTraceShaderStats.ResetBuffer(BuildResourceServices(), ShouldCollectTraceShaderStats());

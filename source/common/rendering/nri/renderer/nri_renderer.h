@@ -2005,7 +2005,6 @@ private:
 	bool UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 14>& descriptors);
 	bool UpdateOutputSet();
 	bool UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors);
-	bool EnsureTraceShaderStatsResources();
 	void ResetTraceShaderStatsBuffer();
 	void CopyTraceShaderStatsForReadback(uint64_t frameNumber);
 	void ReadbackTraceShaderStats();
