@@ -1461,6 +1461,10 @@ private:
 	friend class NRIFrameResources;
 	friend class NRIPipelineStateManager;
 	friend class NRISceneUploadManager;
+	friend NRIRuntimeMutationResidentUploadServices BuildNRIRuntimeMutationResidentUploadServices(NRIRenderer& renderer);
+	friend NRIRuntimeMutationOverlayServices BuildNRIRuntimeMutationOverlayServices(NRIRenderer& renderer);
+	friend NRIRuntimeMutationResidentApplyServices BuildNRIRuntimeMutationResidentApplyServices(NRIRenderer& renderer);
+	friend NRIRuntimeMutationResidentSceneRefreshServices BuildNRIRuntimeMutationResidentSceneRefreshServices(NRIRenderer& renderer);
 	friend bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
 	friend void DestroyNRIRendererAutoExposureResources(NRIRenderer& renderer);
 	friend bool UpdateNRIRendererAutoExposureDescriptorSets(NRIRenderer& renderer, uint32_t sourceSlot);
@@ -1824,9 +1828,7 @@ private:
 	void InvalidateRuntimeLightSceneData();
 	bool RefreshResidentStaticSceneDataSet();
 	void NoteResidentStaticAtlasGrow();
-	NRIRuntimeMutationOverlayServices BuildRuntimeMutationOverlayServices();
 	bool BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged = nullptr);
-	NRIRuntimeMutationResidentApplyServices BuildRuntimeMutationResidentApplyServices();
 	bool TryApplyRuntimeMutationChunkToResidentScene(
 		const nri_scene::PTMapChunk& mapChunk,
 		RuntimeMapMutationCache::ChunkReplacement& replacement,
@@ -1973,9 +1975,7 @@ private:
 	bool EnsureResidentStructuredBuffer(NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind);
 	bool StageResidentBufferCopyRange(NRIBufferResource& resource, uint64_t byteOffset, const void* data, uint64_t size, nri::AccessStage after, int uploadKind);
 	NRIStaticSceneGeometryUploadServices BuildStaticSceneGeometryUploadServices();
-	NRIRuntimeMutationResidentUploadServices BuildRuntimeMutationResidentUploadServices();
 	bool StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges);
-	NRIRuntimeMutationResidentSceneRefreshServices BuildRuntimeMutationResidentSceneRefreshServices();
 	bool StageResidentMaterialUploadRanges(
 		const NRIBufferResource& targetBuffer,
 		const std::vector<RuntimeMutationResidentUploadRange>& ranges,

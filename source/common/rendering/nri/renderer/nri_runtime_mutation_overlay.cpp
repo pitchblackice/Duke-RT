@@ -3058,7 +3058,7 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 								mLastPerfShellTraceStats.runtimeMutationResidentApplyUnknownDistanceMs));
 				ScopedPtPerfTimer residentApplyDistanceTierPerfTimer(residentApplyDistanceTierMs);
 				return mRuntimeMutation.TryApplyResidentChunk(
-					BuildRuntimeMutationResidentApplyServices(),
+					NRIRuntimeMutationSystem::BuildResidentApplyServices(*this),
 					mapChunk,
 					replacement,
 					residentApplyResult);
@@ -3407,8 +3407,8 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 		refreshRequest.geometryChunkListIndices = &residentGeometryChunkListIndices;
 		RuntimeMutationResidentSceneRefreshResult refreshResult = {};
 		if (mRuntimeMutation.CommitResidentSceneRefresh(
-				BuildRuntimeMutationResidentUploadServices(),
-				BuildRuntimeMutationResidentSceneRefreshServices(),
+				NRIRuntimeMutationSystem::BuildResidentUploadServices(*this),
+				NRIRuntimeMutationSystem::BuildResidentSceneRefreshServices(*this),
 				refreshRequest,
 				refreshResult))
 		{
@@ -3430,4 +3430,3 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 	}
 	return !outGeometry.primitives.empty() || !outMaterials.materials.empty();
 }
-

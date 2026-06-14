@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+class NRIRenderer;
+
 static constexpr size_t RuntimeMutationTopTraceCount = 8;
 
 enum class RuntimeMutationTraceAction : uint8_t
@@ -330,6 +332,10 @@ public:
 	};
 
 	RuntimeMutationCacheStats GatherCacheStats() const;
+	static NRIRuntimeMutationResidentUploadServices BuildResidentUploadServices(NRIRenderer& renderer);
+	static NRIRuntimeMutationOverlayServices BuildOverlayServices(NRIRenderer& renderer);
+	static NRIRuntimeMutationResidentApplyServices BuildResidentApplyServices(NRIRenderer& renderer);
+	static NRIRuntimeMutationResidentSceneRefreshServices BuildResidentSceneRefreshServices(NRIRenderer& renderer);
 	bool IsCacheEmpty() const;
 	uint32_t GetCacheChunkCount() const;
 	uint64_t BuildFrameGenerationHash(bool hasRuntimeMutationOverlay) const;

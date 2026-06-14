@@ -4676,7 +4676,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeMutationMs);
 				const bool hasOverlay = mRuntimeMutation.BuildFrameOverlay(
-					BuildRuntimeMutationOverlayServices(),
+					NRIRuntimeMutationSystem::BuildOverlayServices(*this),
 					runtimeMutationFrame);
 				residentStaticWorldGeometryChanged = runtimeMutationFrame.residentStaticSceneChanged;
 				return hasOverlay;

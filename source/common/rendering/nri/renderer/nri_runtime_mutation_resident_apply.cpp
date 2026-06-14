@@ -905,7 +905,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 							ResidentUploadKind_Vertex,
 							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
 							vertexBytes,
-							BuildRuntimeMutationResidentUploadServices()))
+							NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
 					{
 						return false;
 					}
@@ -935,7 +935,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 							ResidentUploadKind_Vertex,
 							(uint64_t)nextAtlasChunk.vertexOffset * sizeof(nri_scene::SceneVertex),
 							vertexBytes,
-							BuildRuntimeMutationResidentUploadServices()))
+							NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
 					{
 						return false;
 					}
@@ -944,7 +944,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 							ResidentUploadKind_Index,
 							(uint64_t)nextAtlasChunk.indexOffset * sizeof(uint32_t),
 							indexBytes,
-							BuildRuntimeMutationResidentUploadServices()))
+							NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
 					{
 						return false;
 					}
@@ -976,7 +976,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 							ResidentUploadKind_Primitive,
 							(uint64_t)nextAtlasChunk.primitiveOffset * sizeof(nri_scene::PrimitiveData),
 							primitiveBytes,
-							BuildRuntimeMutationResidentUploadServices()))
+							NRIRuntimeMutationSystem::BuildResidentUploadServices(*this)))
 					{
 						return false;
 					}

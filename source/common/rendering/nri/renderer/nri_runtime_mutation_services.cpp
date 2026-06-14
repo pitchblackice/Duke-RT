@@ -325,10 +325,10 @@ bool NRIRenderer::StageRuntimeMutationResidentGeometryUploadRanges(const std::ve
 	return true;
 }
 
-NRIRuntimeMutationResidentUploadServices NRIRenderer::BuildRuntimeMutationResidentUploadServices()
+NRIRuntimeMutationResidentUploadServices BuildNRIRuntimeMutationResidentUploadServices(NRIRenderer& renderer)
 {
 	NRIRuntimeMutationResidentUploadServices services = {};
-	services.user = this;
+	services.user = &renderer;
 	services.stageGeometryRanges = [](void* user, const std::vector<RuntimeMutationResidentUploadRange>& ranges) -> bool
 	{
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
@@ -373,10 +373,15 @@ NRIRuntimeMutationResidentUploadServices NRIRenderer::BuildRuntimeMutationReside
 	return services;
 }
 
-NRIRuntimeMutationOverlayServices NRIRenderer::BuildRuntimeMutationOverlayServices()
+NRIRuntimeMutationResidentUploadServices NRIRuntimeMutationSystem::BuildResidentUploadServices(NRIRenderer& renderer)
+{
+	return BuildNRIRuntimeMutationResidentUploadServices(renderer);
+}
+
+NRIRuntimeMutationOverlayServices BuildNRIRuntimeMutationOverlayServices(NRIRenderer& renderer)
 {
 	NRIRuntimeMutationOverlayServices services = {};
-	services.user = this;
+	services.user = &renderer;
 	services.buildOverlay = [](void* user, nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials, bool* outResidentStaticSceneChanged) -> bool
 	{
 		return static_cast<NRIRenderer*>(user)->BuildRuntimeMapMutationOverlay(
@@ -387,10 +392,15 @@ NRIRuntimeMutationOverlayServices NRIRenderer::BuildRuntimeMutationOverlayServic
 	return services;
 }
 
-NRIRuntimeMutationResidentApplyServices NRIRenderer::BuildRuntimeMutationResidentApplyServices()
+NRIRuntimeMutationOverlayServices NRIRuntimeMutationSystem::BuildOverlayServices(NRIRenderer& renderer)
+{
+	return BuildNRIRuntimeMutationOverlayServices(renderer);
+}
+
+NRIRuntimeMutationResidentApplyServices BuildNRIRuntimeMutationResidentApplyServices(NRIRenderer& renderer)
 {
 	NRIRuntimeMutationResidentApplyServices services = {};
-	services.user = this;
+	services.user = &renderer;
 	services.tryApplyChunk = [](void* user, const nri_scene::PTMapChunk& mapChunk, RuntimeMapMutationCache::ChunkReplacement& replacement, RuntimeMutationResidentApplyResult& outResult) -> bool
 	{
 		return static_cast<NRIRenderer*>(user)->TryApplyRuntimeMutationChunkToResidentScene(
@@ -401,10 +411,15 @@ NRIRuntimeMutationResidentApplyServices NRIRenderer::BuildRuntimeMutationResiden
 	return services;
 }
 
-NRIRuntimeMutationResidentSceneRefreshServices NRIRenderer::BuildRuntimeMutationResidentSceneRefreshServices()
+NRIRuntimeMutationResidentApplyServices NRIRuntimeMutationSystem::BuildResidentApplyServices(NRIRenderer& renderer)
+{
+	return BuildNRIRuntimeMutationResidentApplyServices(renderer);
+}
+
+NRIRuntimeMutationResidentSceneRefreshServices BuildNRIRuntimeMutationResidentSceneRefreshServices(NRIRenderer& renderer)
 {
 	NRIRuntimeMutationResidentSceneRefreshServices services = {};
-	services.user = this;
+	services.user = &renderer;
 	services.refreshMaterialSlices = [](void* user, const std::vector<uint32_t>& chunkListIndices, const std::vector<uint32_t>& animatedChunkListIndices) -> bool
 	{
 		return static_cast<NRIRenderer*>(user)->RefreshResidentStaticMaterialSlices(
@@ -456,4 +471,9 @@ NRIRuntimeMutationResidentSceneRefreshServices NRIRenderer::BuildRuntimeMutation
 		return renderer->EnsureStaticMapScene();
 	};
 	return services;
+}
+
+NRIRuntimeMutationResidentSceneRefreshServices NRIRuntimeMutationSystem::BuildResidentSceneRefreshServices(NRIRenderer& renderer)
+{
+	return BuildNRIRuntimeMutationResidentSceneRefreshServices(renderer);
 }
