@@ -3942,7 +3942,7 @@ void NRIRenderer::Shutdown()
 	DestroyAccelerationStructures();
 	ClearRuntimePointLights();
 	DestroySceneBuffers();
-	DestroyFrameTextures();
+	NRIFrameResources::DestroyFrameTextures(*this);
 	mFrameBuffer->DestroyTextureResource(mSceneTextures.PaletteTexture());
 	DestroyCachedTextures();
 	mFrameGenerationFrameId = 0;
@@ -4455,7 +4455,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		ScopedPtPerfTimer initPerfTimer(mLastPerfShellTraceStats.initResourcesMs);
 		ready =
 			Initialize() &&
-			EnsureFrameResources(
+			NRIFrameResources::EnsureFrameResources(
+				*this,
 				frameContext.outputWidth,
 				frameContext.outputHeight,
 				frameContext.targetWidth,
@@ -6313,7 +6314,7 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 	ResetPerfTraceStats();
 	{
 		ScopedPtPerfTimer initPerfTimer(mLastPerfShellTraceStats.initResourcesMs);
-		if (!Initialize() || !EnsureFrameResources(outputWidth, outputHeight, targetWidth, targetHeight))
+		if (!Initialize() || !NRIFrameResources::EnsureFrameResources(*this, outputWidth, outputHeight, targetWidth, targetHeight))
 		{
 			LogFallback("PT preload frame resources or pipelines failed to initialize.");
 			if ((int)nri_ptloadingtrace >= 1)

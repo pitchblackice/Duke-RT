@@ -374,7 +374,7 @@ void NRIRenderer::PrintStatus()
 	const auto& frameGenPresentContract = mFrameBuffer->mFrameGeneration.GetPresentContract();
 	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
 	const NRIPresentRouteInfo presentRoute = ResolvePresentRouteInfo(GetEffectivePtDebugMode(), !!nri_ptbootstrap);
-	const nri::Format expectedFinalFormat = ResolveFinalSceneFormat();
+	const nri::Format expectedFinalFormat = NRIFrameResources::ResolveFinalSceneFormat(*this);
 	const bool hasFrameGenDesc = mFrameBuffer->mFrameGeneration.HasFrameDesc();
 	const auto& frameGenDesc = mFrameBuffer->mFrameGeneration.GetFrameDesc();
 	const auto& frameGenAudit = mFrameBuffer->mFrameGeneration.GetInputAudit();
@@ -1139,39 +1139,17 @@ NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() con
 	bool chunkVisibleGate = false;
 	bool flatPlaneVisibilityRelevant = false;
 	bool flatPlaneVisible = false;
-	bool chunkReplaced = false;
-	bool chunkSectorDirty = false;
-	bool chunkDragged = false;
-	bool chunkBlindSpot = false;
-	uint32_t chunkReasonMask = 0;
-	uint32_t chunkSectionDirtyCount = 0;
-	uint32_t replacementSurfaceCount = 0;
-	uint32_t replacementTriangleCount = 0;
+	NRIStaticSceneResidency::ChunkDiagnosticFacts staticChunkFacts = {};
+	NRIRuntimeMutationSystem::ChunkDiagnosticFacts replacementFacts = {};
 	if (mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
 	{
 		const uint32_t chunkIndex = (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex;
 		chunkVisibleGate = IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunkIndex);
-		for (const auto& chunkCache : mStaticMapScene.chunks)
-		{
-			if (chunkCache.chunkIndex == chunkIndex)
-			{
-				chunkResidentStatic = true;
-				chunkStaticTlasInstanced = true;
-				chunkStaticProbeIncluded = true;
-				break;
-			}
-		}
-		if (const auto* replacement = mRuntimeMutation.FindReplacement(chunkIndex))
-		{
-			chunkReplaced = replacement->active;
-			chunkSectorDirty = replacement->sectorDirty;
-			chunkDragged = replacement->dragged;
-			chunkBlindSpot = replacement->blindSpot;
-			chunkReasonMask = replacement->reasonMask;
-			chunkSectionDirtyCount = replacement->sectionDirtyCount;
-			replacementSurfaceCount = replacement->surfaceCount;
-			replacementTriangleCount = replacement->triangleCount;
-		}
+		staticChunkFacts = NRIStaticSceneResidency::BuildChunkDiagnosticFacts(mStaticMapScene, mStaticMapChunkAtlas, chunkIndex);
+		chunkResidentStatic = staticChunkFacts.residentStatic;
+		chunkStaticTlasInstanced = staticChunkFacts.staticTlasInstanced;
+		chunkStaticProbeIncluded = staticChunkFacts.staticProbeIncluded;
+		replacementFacts = mRuntimeMutation.BuildChunkDiagnosticFacts(chunkIndex);
 	}
 	if ((flags & nri_scene::MaterialFlag_Flat) != 0 &&
 		(flags & (nri_scene::MaterialFlag_Sprite | nri_scene::MaterialFlag_Mirror | nri_scene::MaterialFlag_Sky | nri_scene::MaterialFlag_Portal)) == 0 &&
@@ -1180,7 +1158,6 @@ NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() con
 		flatPlaneVisibilityRelevant = true;
 		flatPlaneVisible = IsFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, mLastSurfaceProbe.provenance.sectorIndex, mLastSurfaceProbe.normal[1] < 0.0f);
 	}
-	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
 	snapshot.sourceName = nri_diag::GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType);
 	snapshot.drawListName = nri_diag::GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType);
 	snapshot.ownerName = nri_diag::GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner);
@@ -1191,14 +1168,14 @@ NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() con
 	snapshot.staticResident = YesNo(chunkResidentStatic);
 	snapshot.staticTlasInstanced = YesNo(chunkStaticTlasInstanced);
 	snapshot.staticProbeIncluded = YesNo(chunkStaticProbeIncluded);
-	snapshot.chunkReplaced = YesNo(chunkReplaced);
-	snapshot.chunkReasons = chunkReasons;
-	snapshot.sectionDirtyCount = chunkSectionDirtyCount;
-	snapshot.sectorDirty = YesNo(chunkSectorDirty);
-	snapshot.dragged = YesNo(chunkDragged);
-	snapshot.blindSpot = YesNo(chunkBlindSpot);
-	snapshot.replacementSurfaceCount = replacementSurfaceCount;
-	snapshot.replacementTriangleCount = replacementTriangleCount;
+	snapshot.chunkReplaced = YesNo(replacementFacts.active);
+	snapshot.chunkReasons = replacementFacts.reasonSummary;
+	snapshot.sectionDirtyCount = replacementFacts.sectionDirtyCount;
+	snapshot.sectorDirty = YesNo(replacementFacts.sectorDirty);
+	snapshot.dragged = YesNo(replacementFacts.dragged);
+	snapshot.blindSpot = YesNo(replacementFacts.blindSpot);
+	snapshot.replacementSurfaceCount = replacementFacts.surfaceCount;
+	snapshot.replacementTriangleCount = replacementFacts.triangleCount;
 	snapshot.localSpaceIndex = localSpaceIndex;
 	snapshot.portalGraphIndex = portalGraphIndex;
 	snapshot.sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
@@ -1412,45 +1389,36 @@ NRIMapChunkDumpSnapshot NRIRenderer::BuildMapChunkDumpSnapshot(int32_t chunkInde
 
 	snapshot.chunkInRange = true;
 	const auto& chunk = mMapWorld.chunks[(unsigned)chunkIndex];
-	const uint32_t preferredChunkListIndex = FindPreferredStaticSceneChunkListIndex((uint32_t)chunkIndex);
-	const uint32_t duplicateChunkSlotCount = CountStaticSceneChunkSlots((uint32_t)chunkIndex);
-	const StaticMapSceneCache::ChunkCache* staticChunk =
-		preferredChunkListIndex < mStaticMapScene.chunks.size() ?
-		&mStaticMapScene.chunks[preferredChunkListIndex] :
-		nullptr;
-	const bool residentStatic = staticChunk != nullptr;
-	const bool staticTlasInstanced =
-		staticChunk != nullptr &&
-		staticChunk->active &&
-		staticChunk->accelerationStructure.accelerationStructure != nullptr;
-	const bool staticProbeIncluded = staticChunk != nullptr && staticChunk->active;
-	const auto* replacement = mRuntimeMutation.FindReplacement((uint32_t)chunkIndex);
+	const NRIStaticSceneResidency::ChunkDiagnosticFacts staticChunkFacts =
+		NRIStaticSceneResidency::BuildChunkDiagnosticFacts(mStaticMapScene, mStaticMapChunkAtlas, (uint32_t)chunkIndex);
+	const NRIRuntimeMutationSystem::ChunkDiagnosticFacts replacementFacts =
+		mRuntimeMutation.BuildChunkDiagnosticFacts((uint32_t)chunkIndex);
 
 	snapshot.sectorIndex = chunk.sectorIndex;
 	snapshot.localSpaceIndex = chunk.localSpaceIndex;
 	snapshot.surfaceCount = chunk.surfaceCount;
-	snapshot.residentStatic = YesNo(residentStatic);
-	snapshot.staticTlasInstanced = YesNo(staticTlasInstanced);
-	snapshot.staticProbeIncluded = YesNo(staticProbeIncluded);
-	snapshot.runtimeReplaced = YesNo(replacement != nullptr && replacement->active);
-	snapshot.replacementReasons = replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask) : "none";
-	snapshot.sectionDirtyCount = replacement != nullptr ? replacement->sectionDirtyCount : 0u;
-	snapshot.sectorDirty = YesNo(replacement != nullptr && replacement->sectorDirty);
-	snapshot.dragged = YesNo(replacement != nullptr && replacement->dragged);
-	snapshot.blindSpot = YesNo(replacement != nullptr && replacement->blindSpot);
-	snapshot.replacementSurfaceCount = replacement != nullptr ? replacement->surfaceCount : 0u;
-	snapshot.replacementTriangleCount = replacement != nullptr ? replacement->triangleCount : 0u;
-	snapshot.duplicateChunkSlotCount = duplicateChunkSlotCount;
-	snapshot.preferredChunkListIndex = preferredChunkListIndex;
+	snapshot.residentStatic = YesNo(staticChunkFacts.residentStatic);
+	snapshot.staticTlasInstanced = YesNo(staticChunkFacts.staticTlasInstanced);
+	snapshot.staticProbeIncluded = YesNo(staticChunkFacts.staticProbeIncluded);
+	snapshot.runtimeReplaced = YesNo(replacementFacts.active);
+	snapshot.replacementReasons = replacementFacts.reasonSummary;
+	snapshot.sectionDirtyCount = replacementFacts.sectionDirtyCount;
+	snapshot.sectorDirty = YesNo(replacementFacts.sectorDirty);
+	snapshot.dragged = YesNo(replacementFacts.dragged);
+	snapshot.blindSpot = YesNo(replacementFacts.blindSpot);
+	snapshot.replacementSurfaceCount = replacementFacts.surfaceCount;
+	snapshot.replacementTriangleCount = replacementFacts.triangleCount;
+	snapshot.duplicateChunkSlotCount = staticChunkFacts.duplicateChunkSlotCount;
+	snapshot.preferredChunkListIndex = staticChunkFacts.preferredChunkListIndex;
 
-	if (staticChunk != nullptr)
+	if (staticChunkFacts.hasStaticChunk)
 	{
 		snapshot.hasStaticChunk = true;
-		snapshot.staticPrimitiveOffset = staticChunk->primitiveOffset;
-		snapshot.staticPrimitiveCount = staticChunk->primitiveCount;
-		snapshot.staticMaterialOffset = staticChunk->materialOffset;
-		snapshot.staticMaterialCount = staticChunk->materialCount;
-		snapshot.staticAsReady = YesNo(staticChunk->accelerationStructure.accelerationStructure != nullptr);
+		snapshot.staticPrimitiveOffset = staticChunkFacts.staticPrimitiveOffset;
+		snapshot.staticPrimitiveCount = staticChunkFacts.staticPrimitiveCount;
+		snapshot.staticMaterialOffset = staticChunkFacts.staticMaterialOffset;
+		snapshot.staticMaterialCount = staticChunkFacts.staticMaterialCount;
+		snapshot.staticAsReady = YesNo(staticChunkFacts.staticAsReady);
 	}
 
 	for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < chunk.surfaceCount; ++localSurfaceIndex)
@@ -1694,11 +1662,12 @@ NRIMapChunkCompareSnapshot NRIRenderer::BuildMapChunkCompareSnapshot(int32_t chu
 
 	snapshot.liveBuildSucceeded = true;
 	const auto& liveChunk = liveWorld.chunks[0];
-	const auto* replacement = mRuntimeMutation.FindReplacement((uint32_t)chunkIndex);
+	const NRIRuntimeMutationSystem::ChunkDiagnosticFacts replacementFacts =
+		mRuntimeMutation.BuildChunkDiagnosticFacts((uint32_t)chunkIndex);
 	snapshot.sectorIndex = staticChunk.sectorIndex;
-	snapshot.replacementReasons = replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask) : "none";
-	snapshot.dragged = YesNo(replacement != nullptr && replacement->dragged);
-	snapshot.replacementActive = YesNo(replacement != nullptr && replacement->active);
+	snapshot.replacementReasons = replacementFacts.reasonSummary;
+	snapshot.dragged = YesNo(replacementFacts.dragged);
+	snapshot.replacementActive = YesNo(replacementFacts.active);
 	snapshot.liveTriangleCount = liveChunk.triangleCount;
 
 	std::vector<uint32_t> staticSurfaceIndices;
@@ -1883,7 +1852,7 @@ NRIMapChunkCompareSnapshot NRIRenderer::BuildMapChunkCompareSnapshot(int32_t chu
 			auto adjacentChunkIt = sectorChunkLookup.find(staticSurface.surface.provenance.nextSectorIndex);
 			const bool adjacentReplaced =
 				adjacentChunkIt != sectorChunkLookup.end() &&
-				mRuntimeMutation.IsReplacementActive(adjacentChunkIt->second);
+				mRuntimeMutation.BuildChunkDiagnosticFacts(adjacentChunkIt->second).active;
 			if (adjacentReplaced)
 			{
 				snapshot.seamAgainstReplacedCount++;
@@ -1972,7 +1941,7 @@ NRIMapChunkCompareSnapshot NRIRenderer::BuildMapChunkCompareSnapshot(int32_t chu
 		const int32_t adjacentChunkIndex = adjacentChunkIt != sectorChunkLookup.end() ? (int32_t)adjacentChunkIt->second : -1;
 		const bool adjacentReplaced =
 			adjacentChunkIndex >= 0 &&
-			mRuntimeMutation.IsReplacementActive((uint32_t)adjacentChunkIndex);
+			mRuntimeMutation.BuildChunkDiagnosticFacts((uint32_t)adjacentChunkIndex).active;
 		const bool seamOutlier = match.deviationFromMean > 0.5f;
 		if (!seamOutlier && seamPrinted >= 4u)
 		{

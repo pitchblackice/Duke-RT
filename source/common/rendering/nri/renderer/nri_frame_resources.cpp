@@ -69,7 +69,7 @@ void NRIFrameResources::DestroyFrameTextures(NRIRenderer& renderer)
 	renderer.mFinalSceneFormat = nri::Format::UNKNOWN;
 }
 
-bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
+bool NRIFrameResources::EnsureFrameResources(NRIRenderer& renderer, uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
 {
 	Clocker clock(NriPTFrameResources);
 
@@ -78,37 +78,37 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 		return false;
 	}
 
-	const int32_t sceneLeft = mFrameBuffer->mSceneViewport.left;
+	const int32_t sceneLeft = renderer.mFrameBuffer->mSceneViewport.left;
 	// Preserve the oversized hardware viewport and crop it during present instead of shrinking it to the visible target.
-	const int32_t sceneBottom = mFrameBuffer->mSceneViewport.top;
+	const int32_t sceneBottom = renderer.mFrameBuffer->mSceneViewport.top;
 	const int32_t sceneTop = (int32_t)targetHeight - sceneBottom - (int32_t)outputHeight;
 
-	const NRIMainUpscalerKind mainUpscalerKind = ResolveMainUpscalerKind(false);
-	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
+	const NRIMainUpscalerKind mainUpscalerKind = renderer.ResolveMainUpscalerKind(false);
+	const nri::UpscalerMode requestedUpscalerMode = renderer.GetSelectedUpscalerMode();
 	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(mainUpscalerKind, requestedUpscalerMode);
 	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
 	const float renderScale = NRIResolveRenderScaleForMain(mainUpscalerKind, requestedUpscalerMode, requestedRenderScale);
-	const NRIFrameGenerationPresentContract& presentContract = mFrameBuffer->mFrameGeneration.GetPresentContract();
+	const NRIFrameGenerationPresentContract& presentContract = renderer.mFrameBuffer->mFrameGeneration.GetPresentContract();
 
 	const uint32_t renderWidth = std::max(1u, (uint32_t)std::lround((double)outputWidth * renderScale));
 	const uint32_t renderHeight = std::max(1u, (uint32_t)std::lround((double)outputHeight * renderScale));
-	const nri::Format finalFormat = ResolveFinalSceneFormat();
+	const nri::Format finalFormat = ResolveFinalSceneFormat(renderer);
 	const nri::Format activeTargetFormat =
-		(mFrameBuffer->mActiveTarget != nullptr && mFrameBuffer->mActiveTarget->format != nri::Format::UNKNOWN)
-		? mFrameBuffer->mActiveTarget->format
+		(renderer.mFrameBuffer->mActiveTarget != nullptr && renderer.mFrameBuffer->mActiveTarget->format != nri::Format::UNKNOWN)
+		? renderer.mFrameBuffer->mActiveTarget->format
 		: nri::Format::UNKNOWN;
 
 	const bool upToDate =
-		mRenderWidth == renderWidth &&
-		mRenderHeight == renderHeight &&
-		mOutputWidth == outputWidth &&
-		mOutputHeight == outputHeight &&
-		mTargetWidth == targetWidth &&
-		mTargetHeight == targetHeight &&
-		mSceneLeft == sceneLeft &&
-		mSceneTop == sceneTop &&
-		mFinalSceneFormat == finalFormat &&
-		GetFrameTexture(FrameTextureSlot::Final).texture != nullptr;
+		renderer.mRenderWidth == renderWidth &&
+		renderer.mRenderHeight == renderHeight &&
+		renderer.mOutputWidth == outputWidth &&
+		renderer.mOutputHeight == outputHeight &&
+		renderer.mTargetWidth == targetWidth &&
+		renderer.mTargetHeight == targetHeight &&
+		renderer.mSceneLeft == sceneLeft &&
+		renderer.mSceneTop == sceneTop &&
+		renderer.mFinalSceneFormat == finalFormat &&
+		renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final).texture != nullptr;
 
 	if (upToDate)
 	{
@@ -118,25 +118,25 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	// Frame-resource rebuilds on resize/upscaler mode changes can retire textures that the current
 	// command allocator still references. Drain GPU work before destroying frame-sized resources.
 	const bool dimensionsChanged =
-		mRenderWidth != renderWidth ||
-		mRenderHeight != renderHeight ||
-		mOutputWidth != outputWidth ||
-		mOutputHeight != outputHeight ||
-		mTargetWidth != targetWidth ||
-		mTargetHeight != targetHeight;
-	WaitForCommandsTracked();
-	mNrd.Shutdown();
-	DestroyFrameTextures();
-	mRenderWidth = renderWidth;
-	mRenderHeight = renderHeight;
-	mOutputWidth = outputWidth;
-	mOutputHeight = outputHeight;
-	mTargetWidth = targetWidth;
-	mTargetHeight = targetHeight;
-	mSceneLeft = sceneLeft;
-	mSceneTop = sceneTop;
-	mFinalSceneFormat = finalFormat;
-	RequestHistoryReset(dimensionsChanged ? "resize" : "frame-resources");
+		renderer.mRenderWidth != renderWidth ||
+		renderer.mRenderHeight != renderHeight ||
+		renderer.mOutputWidth != outputWidth ||
+		renderer.mOutputHeight != outputHeight ||
+		renderer.mTargetWidth != targetWidth ||
+		renderer.mTargetHeight != targetHeight;
+	renderer.WaitForCommandsTracked();
+	renderer.mNrd.Shutdown();
+	DestroyFrameTextures(renderer);
+	renderer.mRenderWidth = renderWidth;
+	renderer.mRenderHeight = renderHeight;
+	renderer.mOutputWidth = outputWidth;
+	renderer.mOutputHeight = outputHeight;
+	renderer.mTargetWidth = targetWidth;
+	renderer.mTargetHeight = targetHeight;
+	renderer.mSceneLeft = sceneLeft;
+	renderer.mSceneTop = sceneTop;
+	renderer.mFinalSceneFormat = finalFormat;
+	renderer.RequestHistoryReset(dimensionsChanged ? "resize" : "frame-resources");
 	if (nri_ptscenestats)
 	{
 		Printf("NRI PT frame resources: main=%s policy=%s requested_mode=%s resolved_mode=%s requested_render_scale=%.3f resolved_render_scale=%.3f render=%ux%u output=%ux%u final=%s contract=%s active=%s jitter=%s phases=%u\n",
@@ -153,8 +153,8 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 			NRIFrameGenerationContext::GetNriFormatName(finalFormat),
 			NRIFrameGenerationContext::GetNriFormatName(presentContract.resolvedTextureFormat),
 			NRIFrameGenerationContext::GetNriFormatName(activeTargetFormat),
-			NRIGetTemporalJitterModeName(mainUpscalerKind, mGuiCaptureActive),
-			NRIGetTemporalJitterPhaseCount(mainUpscalerKind, resolvedUpscalerMode, mGuiCaptureActive));
+			NRIGetTemporalJitterModeName(mainUpscalerKind, renderer.mGuiCaptureActive),
+			NRIGetTemporalJitterPhaseCount(mainUpscalerKind, resolvedUpscalerMode, renderer.mGuiCaptureActive));
 	}
 
 	const nri::Format colorFormat = nri::Format::RGBA16_SFLOAT;
@@ -165,53 +165,31 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	const nri::Format rrGuideNormalRoughnessFormat = nri::Format::RGBA16_SFLOAT;
 
 	return
-		CreateFrameTexture(FrameTextureSlot::ViewZ, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::Motion, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::NormalRoughness, renderWidth, renderHeight, normalRoughnessFormat) &&
-		CreateFrameTexture(FrameTextureSlot::BaseColorMetalness, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::UnfilteredDiffuse, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::UnfilteredSpecular, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::UnfilteredPenumbra, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::DenoisedDiffuse, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::DenoisedSpecular, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::DenoisedShadow, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::Composed, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::TraceTransparentOutput, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::DirectLighting, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::DirectEmission, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::TaaHistoryPing, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::TaaHistoryPong, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::Validation, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::SrInput, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::RrInput, renderWidth, renderHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::UpscalerDepth, renderWidth, renderHeight, upscalerDepthFormat) &&
-		CreateFrameTexture(FrameTextureSlot::RrGuideDiffuseAlbedo, renderWidth, renderHeight, rrGuideAlbedoFormat) &&
-		CreateFrameTexture(FrameTextureSlot::RrGuideSpecularAlbedo, renderWidth, renderHeight, rrGuideAlbedoFormat) &&
-		CreateFrameTexture(FrameTextureSlot::RrGuideSpecularHitDistance, renderWidth, renderHeight, rrGuideSpecHitDistanceFormat) &&
-		CreateFrameTexture(FrameTextureSlot::RrGuideNormalRoughness, renderWidth, renderHeight, rrGuideNormalRoughnessFormat) &&
-		CreateFrameTexture(FrameTextureSlot::VendorOutput, outputWidth, outputHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::PostSharpenOutput, outputWidth, outputHeight, colorFormat) &&
-		CreateFrameTexture(FrameTextureSlot::Final, targetWidth, targetHeight, finalFormat);
-}
-
-bool NRIRenderer::CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format)
-{
-	return NRIFrameResources::CreateFrameTexture(*this, (uint32_t)slot, width, height, format);
-}
-
-
-
-
-
-nri::Format NRIRenderer::ResolveFinalSceneFormat() const
-{
-	return NRIFrameResources::ResolveFinalSceneFormat(*this);
-}
-
-
-
-
-void NRIRenderer::DestroyFrameTextures()
-{
-	NRIFrameResources::DestroyFrameTextures(*this);
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::ViewZ, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::Motion, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::NormalRoughness, renderWidth, renderHeight, normalRoughnessFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::BaseColorMetalness, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::UnfilteredDiffuse, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::UnfilteredSpecular, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::UnfilteredPenumbra, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::DenoisedDiffuse, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::DenoisedSpecular, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::DenoisedShadow, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::Composed, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::TraceTransparentOutput, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::DirectLighting, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::DirectEmission, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::TaaHistoryPing, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::TaaHistoryPong, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::Validation, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::SrInput, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::RrInput, renderWidth, renderHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::UpscalerDepth, renderWidth, renderHeight, upscalerDepthFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo, renderWidth, renderHeight, rrGuideAlbedoFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::RrGuideSpecularAlbedo, renderWidth, renderHeight, rrGuideAlbedoFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance, renderWidth, renderHeight, rrGuideSpecHitDistanceFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::RrGuideNormalRoughness, renderWidth, renderHeight, rrGuideNormalRoughnessFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::VendorOutput, outputWidth, outputHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::PostSharpenOutput, outputWidth, outputHeight, colorFormat) &&
+		CreateFrameTexture(renderer, (uint32_t)NRIRenderer::FrameTextureSlot::Final, targetWidth, targetHeight, finalFormat);
 }

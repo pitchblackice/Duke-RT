@@ -681,6 +681,50 @@ uint32_t NRIRenderer::CountStaticSceneChunkSlots(uint32_t chunkIndex) const
 	return count;
 }
 
+NRIStaticSceneResidency::ChunkDiagnosticFacts NRIStaticSceneResidency::BuildChunkDiagnosticFacts(
+	const StaticMapSceneCache& staticScene,
+	const StaticMapChunkAtlas& atlas,
+	uint32_t chunkIndex)
+{
+	ChunkDiagnosticFacts facts = {};
+	uint32_t bestScore = 0;
+	for (uint32_t chunkListIndex = 0; chunkListIndex < (uint32_t)staticScene.chunks.size(); ++chunkListIndex)
+	{
+		const auto& chunk = staticScene.chunks[chunkListIndex];
+		if (chunk.chunkIndex != chunkIndex)
+		{
+			continue;
+		}
+
+		facts.duplicateChunkSlotCount++;
+		const uint32_t score = GetStaticSceneChunkSlotPreference(staticScene, atlas, chunkListIndex);
+		if (facts.preferredChunkListIndex == UINT32_MAX ||
+			score > bestScore ||
+			(score == bestScore && chunkListIndex > facts.preferredChunkListIndex))
+		{
+			facts.preferredChunkListIndex = chunkListIndex;
+			bestScore = score;
+		}
+	}
+
+	if (facts.preferredChunkListIndex >= staticScene.chunks.size())
+	{
+		return facts;
+	}
+
+	const auto& staticChunk = staticScene.chunks[facts.preferredChunkListIndex];
+	facts.hasStaticChunk = true;
+	facts.residentStatic = true;
+	facts.staticTlasInstanced = staticChunk.active && staticChunk.accelerationStructure.accelerationStructure != nullptr;
+	facts.staticProbeIncluded = staticChunk.active;
+	facts.staticPrimitiveOffset = staticChunk.primitiveOffset;
+	facts.staticPrimitiveCount = staticChunk.primitiveCount;
+	facts.staticMaterialOffset = staticChunk.materialOffset;
+	facts.staticMaterialCount = staticChunk.materialCount;
+	facts.staticAsReady = staticChunk.accelerationStructure.accelerationStructure != nullptr;
+	return facts;
+}
+
 bool nri_static_scene::RebuildResidentStaticMaterialBridgeFromChunks(
 	StaticMapSceneCache& staticScene,
 	const StaticMapChunkAtlas& atlas,

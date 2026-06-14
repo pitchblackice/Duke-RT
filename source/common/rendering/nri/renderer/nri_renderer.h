@@ -1759,7 +1759,6 @@ private:
 	bool CreateExposurePipelineLayout();
 	bool CreatePipelines();
 	bool AllocateDescriptorSets();
-	bool EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight);
 	bool DispatchBootstrapView();
 	bool UseFallbackSceneTextures(bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
@@ -1962,7 +1961,6 @@ private:
 	void CopyTextureToActiveTarget(NRITextureResource& source);
 
 	void DestroyCachedTextures();
-	void DestroyFrameTextures();
 	void DestroySceneBuffers();
 	void DestroyAccelerationStructures();
 	void DestroyStaticMapSceneCache(const char* reason = nullptr);
@@ -2017,9 +2015,7 @@ private:
 	bool DispatchAutoExposure(FrameTextureSlot sourceSlot);
 	void CopyAutoExposureStatsForReadback(uint64_t frameNumber);
 	void ReadbackAutoExposureStats();
-	bool CreateFrameTexture(FrameTextureSlot slot, uint32_t width, uint32_t height, nri::Format format);
 	void PrepareSceneTextureInputsForCompute();
-	nri::Format ResolveFinalSceneFormat() const;
 	void ResetPerfTraceStats();
 	void WaitForCommandsTracked(const char* reason = nullptr);
 	void ReleaseWorldAccelerationBuildScratch(const char* reason = nullptr);

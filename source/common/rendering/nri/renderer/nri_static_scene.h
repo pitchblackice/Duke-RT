@@ -478,6 +478,21 @@ bool RefreshStaticMapSceneMaterialLighting(
 class NRIStaticSceneResidency
 {
 public:
+	struct ChunkDiagnosticFacts
+	{
+		bool residentStatic = false;
+		bool staticTlasInstanced = false;
+		bool staticProbeIncluded = false;
+		uint32_t duplicateChunkSlotCount = 0;
+		uint32_t preferredChunkListIndex = UINT32_MAX;
+		bool hasStaticChunk = false;
+		uint32_t staticPrimitiveOffset = 0;
+		uint32_t staticPrimitiveCount = 0;
+		uint32_t staticMaterialOffset = 0;
+		uint32_t staticMaterialCount = 0;
+		bool staticAsReady = false;
+	};
+
 	ResidentMapChunkRegistry& Registry() { return mResidentMapChunkRegistry; }
 	const ResidentMapChunkRegistry& Registry() const { return mResidentMapChunkRegistry; }
 	void ResetResidentMapChunkRegistry() { mResidentMapChunkRegistry = {}; }
@@ -487,6 +502,10 @@ public:
 		const StaticMapSceneCache& staticScene,
 		const StaticMapChunkAtlas& atlas,
 		uint32_t chunkListIndex);
+	static ChunkDiagnosticFacts BuildChunkDiagnosticFacts(
+		const StaticMapSceneCache& staticScene,
+		const StaticMapChunkAtlas& atlas,
+		uint32_t chunkIndex);
 
 private:
 	ResidentMapChunkRegistry mResidentMapChunkRegistry;

@@ -314,10 +314,26 @@ struct RuntimeMapMutationFrameState
 class NRIRuntimeMutationSystem
 {
 public:
+	struct ChunkDiagnosticFacts
+	{
+		bool hasReplacement = false;
+		bool active = false;
+		bool valid = false;
+		bool sectorDirty = false;
+		bool dragged = false;
+		bool blindSpot = false;
+		uint32_t reasonMask = 0;
+		std::string reasonSummary = "none";
+		uint32_t sectionDirtyCount = 0;
+		uint32_t surfaceCount = 0;
+		uint32_t triangleCount = 0;
+	};
+
 	RuntimeMutationCacheStats GatherCacheStats() const;
 	bool IsCacheEmpty() const;
 	uint32_t GetCacheChunkCount() const;
 	uint64_t BuildFrameGenerationHash(bool hasRuntimeMutationOverlay) const;
+	ChunkDiagnosticFacts BuildChunkDiagnosticFacts(uint32_t chunkIndex) const;
 	void CollectResidentReplacementInfo(
 		uint32_t chunkCount,
 		std::vector<RuntimeMutationResidentReplacementInfo>& outReplacements) const;

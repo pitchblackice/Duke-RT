@@ -55,6 +55,29 @@ namespace
 
 // Runtime mutation renderer integration extracted from nri_renderer.cpp.
 
+NRIRuntimeMutationSystem::ChunkDiagnosticFacts NRIRuntimeMutationSystem::BuildChunkDiagnosticFacts(uint32_t chunkIndex) const
+{
+	ChunkDiagnosticFacts facts = {};
+	const RuntimeMapMutationCache::ChunkReplacement* replacement = FindReplacement(chunkIndex);
+	if (replacement == nullptr)
+	{
+		return facts;
+	}
+
+	facts.hasReplacement = true;
+	facts.active = replacement->active;
+	facts.valid = replacement->valid;
+	facts.sectorDirty = replacement->sectorDirty;
+	facts.dragged = replacement->dragged;
+	facts.blindSpot = replacement->blindSpot;
+	facts.reasonMask = replacement->reasonMask;
+	facts.reasonSummary = GetRuntimeMapMutationReasonSummary(replacement->reasonMask);
+	facts.sectionDirtyCount = replacement->sectionDirtyCount;
+	facts.surfaceCount = replacement->surfaceCount;
+	facts.triangleCount = replacement->triangleCount;
+	return facts;
+}
+
 bool NRIRenderer::StageRuntimeMutationResidentGeometryUploadRanges(const std::vector<RuntimeMutationResidentUploadRange>& ranges)
 {
 	if (ranges.empty())
@@ -434,4 +457,3 @@ NRIRuntimeMutationResidentSceneRefreshServices NRIRenderer::BuildRuntimeMutation
 	};
 	return services;
 }
-
