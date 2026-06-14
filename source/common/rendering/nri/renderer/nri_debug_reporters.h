@@ -99,6 +99,106 @@ struct NRISelfTestSummarySnapshot
 	const char* exposureReason = "unknown";
 };
 
+struct NRITextureStatusSnapshot
+{
+	const char* slotName = "unknown";
+	uint32_t width = 0;
+	uint32_t height = 0;
+	uint32_t access = 0;
+	uint32_t layout = 0;
+	uint32_t stages = 0;
+};
+
+struct NRITemporalStatusSnapshot
+{
+	int debugMode = 0;
+	const char* requestedMainUpscaler = "unknown";
+	const char* resolvedMainUpscaler = "unknown";
+	const char* requestedPostSharpen = "unknown";
+	const char* resolvedPostSharpen = "unknown";
+	bool taa = false;
+	bool guiCapture = false;
+	int lastDebugMode = 0;
+	const char* lastMainUpscaler = "unknown";
+	const char* lastPostSharpen = "unknown";
+	bool resetHistory = false;
+	bool previousCamera = false;
+	NRITextureStatusSnapshot historyInput;
+	NRITextureStatusSnapshot historyOutput;
+	const char* presentSlotName = "unknown";
+	const char* upscaledSlotName = "unknown";
+	bool useUpscaled = false;
+	const char* historyDomain = "unknown";
+	const char* presentDomain = "unknown";
+	float temporalExposure = 1.0f;
+	float presentExposure = 1.0f;
+	float exposureStops = 0.0f;
+	float resetThresholdStops = 0.0f;
+	bool autoExposure = false;
+	bool exposureTexture = false;
+	bool taaApply = false;
+};
+
+struct NRITemporalTraceSnapshot
+{
+	const char* stage = "unknown";
+	uint32_t frameIndex = 0;
+	int debugMode = 0;
+	const char* resolvedMainUpscaler = "unknown";
+	const char* resolvedPostSharpen = "unknown";
+	bool runAppTaa = false;
+	bool guiCapture = false;
+	const char* primaryDomain = "unknown";
+	const char* secondaryDomain = "unknown";
+	float temporalExposure = 1.0f;
+	float primaryPresentExposure = 1.0f;
+	float secondaryPresentExposure = 1.0f;
+	bool resetHistory = false;
+	const char* resetReason = "none";
+	bool previousCamera = false;
+	NRITextureStatusSnapshot historyInput;
+	NRITextureStatusSnapshot historyOutput;
+	NRITextureStatusSnapshot primary;
+	NRITextureStatusSnapshot secondary;
+	bool useUpscaled = false;
+};
+
+struct NRIPortalTraversalStatusSnapshot
+{
+	bool available = false;
+	uint32_t depth = 0;
+	uint32_t reflective = 0;
+	uint32_t transfer = 0;
+	uint32_t runtimeBound = 0;
+	uint32_t hittableSurfaces = 0;
+	uint32_t pendingPlanePortals = 0;
+};
+
+struct NRIResidentMapChunkRegistryStatusSnapshot
+{
+	bool available = false;
+	uint64_t buildSerial = 0;
+	uint32_t chunkCount = 0;
+	uint32_t activeChunkCount = 0;
+	uint32_t mappedChunkCount = 0;
+	uint32_t accelerationResidentChunkCount = 0;
+	uint32_t animatedCandidateChunkCount = 0;
+	uint32_t animatedRefreshSuppressedChunkCount = 0;
+	uint32_t mapWorldChunkCount = 0;
+	uint32_t boundsValidCount = 0;
+	uint32_t boundsInvalidCount = 0;
+	float nearDistance = 0.0f;
+	uint32_t visibleCount = 0;
+	uint32_t invisibleNearCount = 0;
+	uint32_t invisibleFarCount = 0;
+	uint32_t invisibleUnknownCount = 0;
+	uint32_t sampleChunkIndex = UINT32_MAX;
+	float sampleCenter[3] = {};
+	float sampleRadius = 0.0f;
+	float sampleDistance = 0.0f;
+	const char* sampleTier = "none";
+};
+
 class NRIRendererDiagnostics
 {
 public:
@@ -113,3 +213,7 @@ private:
 
 NRIBufferStatusSnapshot BuildNRIBufferStatusSnapshot(const NRIBufferResource& resource, const SceneBufferDebugStats& stats);
 void PrintNRISceneBufferStatusSnapshot(const NRISceneBufferStatusSnapshot& snapshot);
+void PrintNRITemporalStatusSnapshot(const NRITemporalStatusSnapshot& snapshot);
+void PrintNRITemporalTraceSnapshot(const NRITemporalTraceSnapshot& snapshot);
+void PrintNRIPortalTraversalStatusSnapshot(const NRIPortalTraversalStatusSnapshot& snapshot);
+void PrintNRIResidentMapChunkRegistryStatusSnapshot(const NRIResidentMapChunkRegistryStatusSnapshot& snapshot);

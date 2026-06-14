@@ -4107,12 +4107,6 @@ namespace
 		return bits;
 	}
 
-	static float GetSectorLightMultiplier()
-	{
-		return std::max(0.0f, (float)nri_ptsectorlightmultiplier);
-	}
-
-
 	template <typename SurfaceContainer>
 	static bool SurfaceContainerUsesHardwareCanvasTexture(const SurfaceContainer& surfaces)
 	{
@@ -7072,7 +7066,7 @@ void NRIRenderer::UpdateNightVisionState()
 
 void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 {
-	mSceneLights.PrintSectorLightDump(mCurrentCameraPos, GetSectorLightMultiplier(), radius, limit);
+	mSceneLights.PrintSectorLightDump(mCurrentCameraPos, NRIGetSectorLightMultiplier(), radius, limit);
 }
 
 void NRIRenderer::PrintStatus()
@@ -7630,7 +7624,7 @@ void NRIRenderer::PrintStatus()
 		mSceneLights.GetSectorLighting().fogSectorCount,
 		mSceneLights.GetSectorLighting().pulsingSectorCount,
 		NRI_PTDEBUG_SECTOR_AMBIENT,
-		GetSectorLightMultiplier(),
+		NRIGetSectorLightMultiplier(),
 		(float)nri_ptsectorambientscale,
 		(float)nri_ptsectorhemiscale,
 		(float)nri_ptsectorfogscale,
@@ -8003,6 +7997,19 @@ void NRIRenderer::EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bo
 void NRIRenderer::PrintTemporalStatus() const
 {
 	NRISyncLegacyUpscalerConfig(false);
+	const auto buildTextureSnapshot = [this](FrameTextureSlot slot)
+	{
+		const NRITextureResource& texture = GetFrameTexture(slot);
+		NRITextureStatusSnapshot snapshot = {};
+		snapshot.slotName = GetFrameTextureSlotName(slot);
+		snapshot.width = texture.width;
+		snapshot.height = texture.height;
+		snapshot.access = (uint32_t)texture.state.access;
+		snapshot.layout = (uint32_t)texture.state.layout;
+		snapshot.stages = (uint32_t)texture.state.stages;
+		return snapshot;
+	};
+
 	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
 	const NRIMainUpscalerKind requestedMain = GetSelectedMainUpscalerKind();
 	const NRIMainUpscalerKind resolvedMain = GetResolvedMainUpscalerKindForStatus();
@@ -8022,47 +8029,35 @@ void NRIRenderer::PrintTemporalStatus() const
 		runAppTaa &&
 		autoExposureSettings.enabled &&
 		autoExposureTextureValid;
-	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
-	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
-	Printf("NRI PT temporal: debug=%d requested_main=%s resolved_main=%s requested_post=%s resolved_post=%s taa=%s gui_capture=%s last_debug=%d last_main=%s last_post=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
-		(int)nri_ptdebug,
-		NRIGetMainUpscalerName(requestedMain),
-		NRIGetMainUpscalerName(resolvedMain),
-		NRIGetPostSharpenName(requestedPost),
-		NRIGetPostSharpenName(resolvedPost),
-		nri_pttaa ? "on" : "off",
-		mGuiCaptureActive ? "yes" : "no",
-		mLastDebugMode,
-		NRIGetMainUpscalerName(mLastTemporalHistoryMainUpscaler),
-		NRIGetPostSharpenName(mLastTemporalPostSharpen),
-		mResetHistory ? "yes" : "no",
-		mHasPreviousCameraState ? "yes" : "no",
-		GetFrameTextureSlotName(mHistoryInputSlot),
-		historyInput.width,
-		historyInput.height,
-		(uint32_t)historyInput.state.access,
-		(uint32_t)historyInput.state.layout,
-		(uint32_t)historyInput.state.stages,
-		GetFrameTextureSlotName(mHistoryOutputSlot),
-		historyOutput.width,
-		historyOutput.height,
-		(uint32_t)historyOutput.state.access,
-		(uint32_t)historyOutput.state.layout,
-		(uint32_t)historyOutput.state.stages,
-		GetFrameTextureSlotName(presentSlot),
-		GetFrameTextureSlotName(mUpscaledInputSlot),
-		mUseUpscaledInFinal ? "yes" : "no");
-	Printf("NRI PT beauty path: nrd_and_composition -> pre_exposed_hdr_temporal -> final_display_mapping inspect_scene=15 inspect_pre_exposed=45 inspect_post_taa=13 inspect_post_upscale=14\n");
-	Printf("NRI PT temporal domain: history=%s present=%s temporal_exposure=%.3f present_exposure=%.3f exposure_stops=%.3f reset_threshold_stops=%.3f auto_exposure=%s exposure_texture=%s taa_apply=%s\n",
-		GetExposureDomainName(ResolveFrameTextureExposureDomain(mHistoryOutputSlot, resolvedMain, resolvedPost)),
-		GetExposureDomainName(exposureRoute.inputDomain),
-		exposure,
-		exposureRoute.presentExposure,
-		exposureStops,
-		NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS,
-		YesNo(autoExposureSettings.enabled),
-		YesNo(autoExposureTextureValid),
-		YesNo(autoExposureTaaApply));
+
+	NRITemporalStatusSnapshot snapshot = {};
+	snapshot.debugMode = (int)nri_ptdebug;
+	snapshot.requestedMainUpscaler = NRIGetMainUpscalerName(requestedMain);
+	snapshot.resolvedMainUpscaler = NRIGetMainUpscalerName(resolvedMain);
+	snapshot.requestedPostSharpen = NRIGetPostSharpenName(requestedPost);
+	snapshot.resolvedPostSharpen = NRIGetPostSharpenName(resolvedPost);
+	snapshot.taa = !!nri_pttaa;
+	snapshot.guiCapture = mGuiCaptureActive;
+	snapshot.lastDebugMode = mLastDebugMode;
+	snapshot.lastMainUpscaler = NRIGetMainUpscalerName(mLastTemporalHistoryMainUpscaler);
+	snapshot.lastPostSharpen = NRIGetPostSharpenName(mLastTemporalPostSharpen);
+	snapshot.resetHistory = mResetHistory;
+	snapshot.previousCamera = mHasPreviousCameraState;
+	snapshot.historyInput = buildTextureSnapshot(mHistoryInputSlot);
+	snapshot.historyOutput = buildTextureSnapshot(mHistoryOutputSlot);
+	snapshot.presentSlotName = GetFrameTextureSlotName(presentSlot);
+	snapshot.upscaledSlotName = GetFrameTextureSlotName(mUpscaledInputSlot);
+	snapshot.useUpscaled = mUseUpscaledInFinal;
+	snapshot.historyDomain = GetExposureDomainName(ResolveFrameTextureExposureDomain(mHistoryOutputSlot, resolvedMain, resolvedPost));
+	snapshot.presentDomain = GetExposureDomainName(exposureRoute.inputDomain);
+	snapshot.temporalExposure = exposure;
+	snapshot.presentExposure = exposureRoute.presentExposure;
+	snapshot.exposureStops = exposureStops;
+	snapshot.resetThresholdStops = NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS;
+	snapshot.autoExposure = autoExposureSettings.enabled;
+	snapshot.exposureTexture = autoExposureTextureValid;
+	snapshot.taaApply = autoExposureTaaApply;
+	PrintNRITemporalStatusSnapshot(snapshot);
 }
 
 void NRIRenderer::ArmTemporalTraceBudget(const char* reason)
@@ -8096,103 +8091,90 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 		return;
 	}
 
-	const NRITextureResource& historyInput = GetFrameTexture(mHistoryInputSlot);
-	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
-	const NRITextureResource& primary = GetFrameTexture(primarySlot);
-	const NRITextureResource& secondary = secondarySlot == FrameTextureSlot::Count ? GetFrameTexture(mHistoryOutputSlot) : GetFrameTexture(secondarySlot);
+	const auto buildTextureSnapshot = [this](FrameTextureSlot slot)
+	{
+		const NRITextureResource& texture = GetFrameTexture(slot);
+		NRITextureStatusSnapshot snapshot = {};
+		snapshot.slotName = GetFrameTextureSlotName(slot);
+		snapshot.width = texture.width;
+		snapshot.height = texture.height;
+		snapshot.access = (uint32_t)texture.state.access;
+		snapshot.layout = (uint32_t)texture.state.layout;
+		snapshot.stages = (uint32_t)texture.state.stages;
+		return snapshot;
+	};
+
 	const FrameTextureSlot resolvedSecondarySlot = secondarySlot == FrameTextureSlot::Count ? mHistoryOutputSlot : secondarySlot;
 	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
 	const ExposureRoute primaryExposureRoute = ResolveExposureRoute(primarySlot, outputPolicy, resolvedMainUpscaler, resolvedPostSharpen);
 	const ExposureRoute secondaryExposureRoute = ResolveExposureRoute(resolvedSecondarySlot, outputPolicy, resolvedMainUpscaler, resolvedPostSharpen);
-	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s gui_capture=%s primary_domain=%s secondary_domain=%s temporal_exposure=%.3f primary_present_exposure=%.3f secondary_present_exposure=%.3f reset=%s reset_reason=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
-		stage != nullptr ? stage : "unknown",
-		mFrameIndex,
-		(int)nri_ptdebug,
-		NRIGetMainUpscalerName(resolvedMainUpscaler),
-		NRIGetPostSharpenName(resolvedPostSharpen),
-		runAppTaa ? "yes" : "no",
-		mGuiCaptureActive ? "yes" : "no",
-		GetExposureDomainName(primaryExposureRoute.inputDomain),
-		GetExposureDomainName(secondaryExposureRoute.inputDomain),
-		primaryExposureRoute.temporalExposure,
-		primaryExposureRoute.presentExposure,
-		secondaryExposureRoute.presentExposure,
-		mResetHistory ? "yes" : "no",
-		mLastHistoryResetReason.c_str(),
-		mHasPreviousCameraState ? "yes" : "no",
-		GetFrameTextureSlotName(mHistoryInputSlot),
-		historyInput.width,
-		historyInput.height,
-		(uint32_t)historyInput.state.access,
-		(uint32_t)historyInput.state.layout,
-		(uint32_t)historyInput.state.stages,
-		GetFrameTextureSlotName(mHistoryOutputSlot),
-		historyOutput.width,
-		historyOutput.height,
-		(uint32_t)historyOutput.state.access,
-		(uint32_t)historyOutput.state.layout,
-		(uint32_t)historyOutput.state.stages,
-		GetFrameTextureSlotName(primarySlot),
-		primary.width,
-		primary.height,
-		(uint32_t)primary.state.access,
-		(uint32_t)primary.state.layout,
-		(uint32_t)primary.state.stages,
-		GetFrameTextureSlotName(resolvedSecondarySlot),
-		secondary.width,
-		secondary.height,
-		(uint32_t)secondary.state.access,
-		(uint32_t)secondary.state.layout,
-		(uint32_t)secondary.state.stages,
-		mUseUpscaledInFinal ? "yes" : "no");
+	NRITemporalTraceSnapshot snapshot = {};
+	snapshot.stage = stage != nullptr ? stage : "unknown";
+	snapshot.frameIndex = mFrameIndex;
+	snapshot.debugMode = (int)nri_ptdebug;
+	snapshot.resolvedMainUpscaler = NRIGetMainUpscalerName(resolvedMainUpscaler);
+	snapshot.resolvedPostSharpen = NRIGetPostSharpenName(resolvedPostSharpen);
+	snapshot.runAppTaa = runAppTaa;
+	snapshot.guiCapture = mGuiCaptureActive;
+	snapshot.primaryDomain = GetExposureDomainName(primaryExposureRoute.inputDomain);
+	snapshot.secondaryDomain = GetExposureDomainName(secondaryExposureRoute.inputDomain);
+	snapshot.temporalExposure = primaryExposureRoute.temporalExposure;
+	snapshot.primaryPresentExposure = primaryExposureRoute.presentExposure;
+	snapshot.secondaryPresentExposure = secondaryExposureRoute.presentExposure;
+	snapshot.resetHistory = mResetHistory;
+	snapshot.resetReason = mLastHistoryResetReason.c_str();
+	snapshot.previousCamera = mHasPreviousCameraState;
+	snapshot.historyInput = buildTextureSnapshot(mHistoryInputSlot);
+	snapshot.historyOutput = buildTextureSnapshot(mHistoryOutputSlot);
+	snapshot.primary = buildTextureSnapshot(primarySlot);
+	snapshot.secondary = buildTextureSnapshot(resolvedSecondarySlot);
+	snapshot.useUpscaled = mUseUpscaledInFinal;
+	PrintNRITemporalTraceSnapshot(snapshot);
 }
 
 void NRIRenderer::PrintPortalTraversalStatus() const
 {
+	NRIPortalTraversalStatusSnapshot snapshot = {};
 	if (!mMapWorld.valid)
 	{
-		Printf("NRI PT portal traversal: no authoritative portal graph is available.\n");
+		PrintNRIPortalTraversalStatusSnapshot(snapshot);
 		return;
 	}
 
-	Printf("NRI PT portal traversal: depth=%u reflective=%u transfer=%u runtime_bound=%u hittable_surfaces=%u plane_portals_pending=%u\n",
-		ClampTraceBounceCount((int)nri_ptportaldepth, 8u),
-		CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE),
-		CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER),
-		CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND),
-		mMapWorld.stats.portalSurfaceCount,
-		CountPendingPlanePortals(mMapWorld));
+	snapshot.available = true;
+	snapshot.depth = ClampTraceBounceCount((int)nri_ptportaldepth, 8u);
+	snapshot.reflective = CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE);
+	snapshot.transfer = CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER);
+	snapshot.runtimeBound = CountPortalTraversalClass(mMapWorld, NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND);
+	snapshot.hittableSurfaces = mMapWorld.stats.portalSurfaceCount;
+	snapshot.pendingPlanePortals = CountPendingPlanePortals(mMapWorld);
+	PrintNRIPortalTraversalStatusSnapshot(snapshot);
 }
 
 void NRIRenderer::PrintResidentMapChunkRegistryStatus() const
 {
+	NRIResidentMapChunkRegistryStatusSnapshot snapshot = {};
 	if (!mStaticSceneResidency.Registry().valid)
 	{
-		Printf("NRI PT resident chunk registry: unavailable.\n");
+		PrintNRIResidentMapChunkRegistryStatusSnapshot(snapshot);
 		return;
 	}
 
-	Printf("NRI PT resident chunk registry: build_serial=%llu chunks=%u active=%u mapped=%u acceleration_resident=%u animated_candidates=%u animated_refresh_suppressed=%u\n",
-		(unsigned long long)mStaticSceneResidency.Registry().buildSerial,
-		mStaticSceneResidency.Registry().chunkCount,
-		mStaticSceneResidency.Registry().activeChunkCount,
-		mStaticSceneResidency.Registry().mappedChunkCount,
-		mStaticSceneResidency.Registry().accelerationResidentChunkCount,
-		mStaticSceneResidency.Registry().animatedCandidateChunkCount,
-		mStaticSceneResidency.Registry().animatedRefreshSuppressedChunkCount);
+	snapshot.available = true;
+	snapshot.buildSerial = mStaticSceneResidency.Registry().buildSerial;
+	snapshot.chunkCount = mStaticSceneResidency.Registry().chunkCount;
+	snapshot.activeChunkCount = mStaticSceneResidency.Registry().activeChunkCount;
+	snapshot.mappedChunkCount = mStaticSceneResidency.Registry().mappedChunkCount;
+	snapshot.accelerationResidentChunkCount = mStaticSceneResidency.Registry().accelerationResidentChunkCount;
+	snapshot.animatedCandidateChunkCount = mStaticSceneResidency.Registry().animatedCandidateChunkCount;
+	snapshot.animatedRefreshSuppressedChunkCount = mStaticSceneResidency.Registry().animatedRefreshSuppressedChunkCount;
 
 	const NRIRuntimeMutationSettings runtimeMutationSettings = BuildNRIRuntimeMutationSettingsFromCVars();
 	const float nearDistance = runtimeMutationSettings.nearDistance;
 	const float nearDistanceSquared = nearDistance * nearDistance;
-	uint32_t boundsValidCount = 0;
-	uint32_t boundsInvalidCount = 0;
-	uint32_t visibleCount = 0;
-	uint32_t invisibleNearCount = 0;
-	uint32_t invisibleFarCount = 0;
-	uint32_t invisibleUnknownCount = 0;
 	const nri_scene::PTMapChunk* sampleChunk = nullptr;
-	float sampleDistance = 0.0f;
-	const char* sampleTier = "none";
+	snapshot.nearDistance = nearDistance;
+	snapshot.mapWorldChunkCount = (uint32_t)mMapWorld.chunks.size();
 	const auto computeChunkDistanceSquared = [&](const nri_scene::PTMapChunk& chunk, float& outDistanceSquared) -> bool
 	{
 		if (!chunk.bounds.valid)
@@ -8223,56 +8205,49 @@ void NRIRenderer::PrintResidentMapChunkRegistryStatus() const
 		const bool boundsValid = computeChunkDistanceSquared(chunk, distanceSquared);
 		if (boundsValid)
 		{
-			boundsValidCount++;
+			snapshot.boundsValidCount++;
 		}
 		else
 		{
-			boundsInvalidCount++;
+			snapshot.boundsInvalidCount++;
 		}
 
 		const bool visible = IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunk.chunkIndex);
 		if (visible)
 		{
-			visibleCount++;
+			snapshot.visibleCount++;
 		}
 		else if (!boundsValid)
 		{
-			invisibleUnknownCount++;
+			snapshot.invisibleUnknownCount++;
 		}
 		else if (distanceSquared <= nearDistanceSquared)
 		{
-			invisibleNearCount++;
+			snapshot.invisibleNearCount++;
 		}
 		else
 		{
-			invisibleFarCount++;
+			snapshot.invisibleFarCount++;
 		}
 
 		if (sampleChunk == nullptr && boundsValid)
 		{
 			sampleChunk = &chunk;
-			sampleDistance = sqrtf(distanceSquared);
-			sampleTier =
+			snapshot.sampleDistance = sqrtf(distanceSquared);
+			snapshot.sampleTier =
 				visible ? "visible" :
 				(distanceSquared <= nearDistanceSquared ? "near" : "far");
 		}
 	}
-	Printf("NRI PT map chunk bounds: chunks=%u valid=%u invalid=%u near_distance=%.1f visible=%u invisible_near=%u invisible_far=%u invisible_unknown=%u sample_chunk=%u center=(%.1f,%.1f,%.1f) radius=%.1f distance=%.1f tier=%s\n",
-		(uint32_t)mMapWorld.chunks.size(),
-		boundsValidCount,
-		boundsInvalidCount,
-		(double)nearDistance,
-		visibleCount,
-		invisibleNearCount,
-		invisibleFarCount,
-		invisibleUnknownCount,
-		sampleChunk != nullptr ? sampleChunk->chunkIndex : UINT32_MAX,
-		sampleChunk != nullptr ? (double)sampleChunk->bounds.center[0] : 0.0,
-		sampleChunk != nullptr ? (double)sampleChunk->bounds.center[1] : 0.0,
-		sampleChunk != nullptr ? (double)sampleChunk->bounds.center[2] : 0.0,
-		sampleChunk != nullptr ? (double)sampleChunk->bounds.radius : 0.0,
-		(double)sampleDistance,
-		sampleTier);
+	if (sampleChunk != nullptr)
+	{
+		snapshot.sampleChunkIndex = sampleChunk->chunkIndex;
+		snapshot.sampleCenter[0] = sampleChunk->bounds.center[0];
+		snapshot.sampleCenter[1] = sampleChunk->bounds.center[1];
+		snapshot.sampleCenter[2] = sampleChunk->bounds.center[2];
+		snapshot.sampleRadius = sampleChunk->bounds.radius;
+	}
+	PrintNRIResidentMapChunkRegistryStatusSnapshot(snapshot);
 }
 
 NRIPersistentVoxelResetServices NRIRenderer::BuildPersistentVoxelResetServices()

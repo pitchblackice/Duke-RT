@@ -19,7 +19,6 @@ EXTERN_CVAR(Bool, nri_ptslowdowntrace)
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, perf_looptraceframes)
 EXTERN_CVAR(Bool, nri_ptsectorlighting)
-EXTERN_CVAR(Float, nri_ptsectorlightmultiplier)
 EXTERN_CVAR(Int, nri_ptscenebufferdirtyrangegap)
 EXTERN_CVAR(Int, nri_ptscenebufferrangeuploadmaxranges)
 EXTERN_CVAR(Int, nri_ptscenebufferrangeuploadmaxpercent)
@@ -70,11 +69,6 @@ namespace
 		float delta[3] = {};
 		uint32_t reserved0 = 0;
 	};
-
-	static float GetSectorLightMultiplier()
-	{
-		return std::max(0.0f, (float)nri_ptsectorlightmultiplier);
-	}
 
 	static uint32_t GetPortalTraversalClass(nri_scene::PTPortalKind kind)
 	{
@@ -2874,7 +2868,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 	{
 		ScopedPtPerfTimer sectorLightTimer(mLastPerfShellTraceStats.sceneDataSetSectorLightMs);
 		UpdateBoundSectorLightingState();
-		sectorLightingPayloadHash = mSceneLights.BuildSectorLightingPayloadHash(GetSectorLightMultiplier(), nri_ptsectorlighting);
+		sectorLightingPayloadHash = mSceneLights.BuildSectorLightingPayloadHash(NRIGetSectorLightMultiplier(), nri_ptsectorlighting);
 	}
 	if (!mSectorLightingPayloadCacheValid ||
 		mSectorLightingPayloadHash != sectorLightingPayloadHash ||
@@ -2887,7 +2881,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		{
 			ScopedPtPerfTimer sectorLightTimer(mLastPerfShellTraceStats.sceneDataSetSectorLightMs);
 			UpdateBoundSectorLightingState();
-			mSceneLights.BuildSectorLightingUpload(GetSectorLightMultiplier(), nri_ptsectorlighting, sectorLightHeader, sectorLights);
+			mSceneLights.BuildSectorLightingUpload(NRIGetSectorLightMultiplier(), nri_ptsectorlighting, sectorLightHeader, sectorLights);
 		}
 		if (!ensureStructuredBufferBatched(
 			mSectorLightHeaderBuffer,

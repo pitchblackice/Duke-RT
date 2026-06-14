@@ -496,3 +496,142 @@ void PrintNRISceneBufferStatusSnapshot(const NRISceneBufferStatusSnapshot& snaps
 			(unsigned long long)buffer.peakUsedBytes);
 	}
 }
+
+void PrintNRITemporalStatusSnapshot(const NRITemporalStatusSnapshot& snapshot)
+{
+	Printf("NRI PT temporal: debug=%d requested_main=%s resolved_main=%s requested_post=%s resolved_post=%s taa=%s gui_capture=%s last_debug=%d last_main=%s last_post=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
+		snapshot.debugMode,
+		snapshot.requestedMainUpscaler,
+		snapshot.resolvedMainUpscaler,
+		snapshot.requestedPostSharpen,
+		snapshot.resolvedPostSharpen,
+		snapshot.taa ? "on" : "off",
+		snapshot.guiCapture ? "yes" : "no",
+		snapshot.lastDebugMode,
+		snapshot.lastMainUpscaler,
+		snapshot.lastPostSharpen,
+		snapshot.resetHistory ? "yes" : "no",
+		snapshot.previousCamera ? "yes" : "no",
+		snapshot.historyInput.slotName,
+		snapshot.historyInput.width,
+		snapshot.historyInput.height,
+		snapshot.historyInput.access,
+		snapshot.historyInput.layout,
+		snapshot.historyInput.stages,
+		snapshot.historyOutput.slotName,
+		snapshot.historyOutput.width,
+		snapshot.historyOutput.height,
+		snapshot.historyOutput.access,
+		snapshot.historyOutput.layout,
+		snapshot.historyOutput.stages,
+		snapshot.presentSlotName,
+		snapshot.upscaledSlotName,
+		snapshot.useUpscaled ? "yes" : "no");
+	Printf("NRI PT beauty path: nrd_and_composition -> pre_exposed_hdr_temporal -> final_display_mapping inspect_scene=15 inspect_pre_exposed=45 inspect_post_taa=13 inspect_post_upscale=14\n");
+	Printf("NRI PT temporal domain: history=%s present=%s temporal_exposure=%.3f present_exposure=%.3f exposure_stops=%.3f reset_threshold_stops=%.3f auto_exposure=%s exposure_texture=%s taa_apply=%s\n",
+		snapshot.historyDomain,
+		snapshot.presentDomain,
+		snapshot.temporalExposure,
+		snapshot.presentExposure,
+		snapshot.exposureStops,
+		snapshot.resetThresholdStops,
+		snapshot.autoExposure ? "yes" : "no",
+		snapshot.exposureTexture ? "yes" : "no",
+		snapshot.taaApply ? "yes" : "no");
+}
+
+void PrintNRITemporalTraceSnapshot(const NRITemporalTraceSnapshot& snapshot)
+{
+	Printf("NRI PT temporal trace: stage=%s frame=%u debug=%d resolved_main=%s resolved_post=%s run_app_taa=%s gui_capture=%s primary_domain=%s secondary_domain=%s temporal_exposure=%.3f primary_present_exposure=%.3f secondary_present_exposure=%.3f reset=%s reset_reason=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] primary=%s[%ux%u a=%u l=%u s=0x%x] secondary=%s[%ux%u a=%u l=%u s=0x%x] use_upscaled=%s\n",
+		snapshot.stage,
+		snapshot.frameIndex,
+		snapshot.debugMode,
+		snapshot.resolvedMainUpscaler,
+		snapshot.resolvedPostSharpen,
+		snapshot.runAppTaa ? "yes" : "no",
+		snapshot.guiCapture ? "yes" : "no",
+		snapshot.primaryDomain,
+		snapshot.secondaryDomain,
+		snapshot.temporalExposure,
+		snapshot.primaryPresentExposure,
+		snapshot.secondaryPresentExposure,
+		snapshot.resetHistory ? "yes" : "no",
+		snapshot.resetReason,
+		snapshot.previousCamera ? "yes" : "no",
+		snapshot.historyInput.slotName,
+		snapshot.historyInput.width,
+		snapshot.historyInput.height,
+		snapshot.historyInput.access,
+		snapshot.historyInput.layout,
+		snapshot.historyInput.stages,
+		snapshot.historyOutput.slotName,
+		snapshot.historyOutput.width,
+		snapshot.historyOutput.height,
+		snapshot.historyOutput.access,
+		snapshot.historyOutput.layout,
+		snapshot.historyOutput.stages,
+		snapshot.primary.slotName,
+		snapshot.primary.width,
+		snapshot.primary.height,
+		snapshot.primary.access,
+		snapshot.primary.layout,
+		snapshot.primary.stages,
+		snapshot.secondary.slotName,
+		snapshot.secondary.width,
+		snapshot.secondary.height,
+		snapshot.secondary.access,
+		snapshot.secondary.layout,
+		snapshot.secondary.stages,
+		snapshot.useUpscaled ? "yes" : "no");
+}
+
+void PrintNRIPortalTraversalStatusSnapshot(const NRIPortalTraversalStatusSnapshot& snapshot)
+{
+	if (!snapshot.available)
+	{
+		Printf("NRI PT portal traversal: no authoritative portal graph is available.\n");
+		return;
+	}
+
+	Printf("NRI PT portal traversal: depth=%u reflective=%u transfer=%u runtime_bound=%u hittable_surfaces=%u plane_portals_pending=%u\n",
+		snapshot.depth,
+		snapshot.reflective,
+		snapshot.transfer,
+		snapshot.runtimeBound,
+		snapshot.hittableSurfaces,
+		snapshot.pendingPlanePortals);
+}
+
+void PrintNRIResidentMapChunkRegistryStatusSnapshot(const NRIResidentMapChunkRegistryStatusSnapshot& snapshot)
+{
+	if (!snapshot.available)
+	{
+		Printf("NRI PT resident chunk registry: unavailable.\n");
+		return;
+	}
+
+	Printf("NRI PT resident chunk registry: build_serial=%llu chunks=%u active=%u mapped=%u acceleration_resident=%u animated_candidates=%u animated_refresh_suppressed=%u\n",
+		(unsigned long long)snapshot.buildSerial,
+		snapshot.chunkCount,
+		snapshot.activeChunkCount,
+		snapshot.mappedChunkCount,
+		snapshot.accelerationResidentChunkCount,
+		snapshot.animatedCandidateChunkCount,
+		snapshot.animatedRefreshSuppressedChunkCount);
+	Printf("NRI PT map chunk bounds: chunks=%u valid=%u invalid=%u near_distance=%.1f visible=%u invisible_near=%u invisible_far=%u invisible_unknown=%u sample_chunk=%u center=(%.1f,%.1f,%.1f) radius=%.1f distance=%.1f tier=%s\n",
+		snapshot.mapWorldChunkCount,
+		snapshot.boundsValidCount,
+		snapshot.boundsInvalidCount,
+		(double)snapshot.nearDistance,
+		snapshot.visibleCount,
+		snapshot.invisibleNearCount,
+		snapshot.invisibleFarCount,
+		snapshot.invisibleUnknownCount,
+		snapshot.sampleChunkIndex,
+		(double)snapshot.sampleCenter[0],
+		(double)snapshot.sampleCenter[1],
+		(double)snapshot.sampleCenter[2],
+		(double)snapshot.sampleRadius,
+		(double)snapshot.sampleDistance,
+		snapshot.sampleTier);
+}

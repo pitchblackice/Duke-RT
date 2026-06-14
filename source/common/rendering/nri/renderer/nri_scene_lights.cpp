@@ -241,12 +241,9 @@ SceneLightSystem::PersistentDynamicEmissiveCacheBuildServices NRIRenderer::Build
 	return services;
 }
 
-namespace
+float NRIGetSectorLightMultiplier()
 {
-	float GetRendererSceneLightSectorMultiplier()
-	{
-		return std::max(0.0f, (float)nri_ptsectorlightmultiplier);
-	}
+	return std::max(0.0f, (float)nri_ptsectorlightmultiplier);
 }
 
 void NRIRenderer::TraceEmissiveSectorResponseChange()
@@ -256,7 +253,7 @@ void NRIRenderer::TraceEmissiveSectorResponseChange()
 
 void NRIRenderer::UpdateBoundSectorLightingState()
 {
-	const NRISectorLightingBoundState state = mSceneLights.BuildSectorLightingBoundState(GetRendererSceneLightSectorMultiplier());
+	const NRISectorLightingBoundState state = mSceneLights.BuildSectorLightingBoundState(NRIGetSectorLightMultiplier());
 	mBoundSectorLightSectorCount = state.sectorCount;
 	mBoundSectorLightActiveCount = state.activeCount;
 	mBoundSectorLightPulsingCount = state.pulsingCount;
