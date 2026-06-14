@@ -1102,6 +1102,9 @@ OptionMenu "NRIOptions" protected
 {
 	Title "$RENDER_OPTIONS"
 
+	Option "Graphics API",						"nri_api",						"NRIGraphicsAPI"
+	StaticText "$VK_RESTART"
+	StaticText "----------------"
 	StaticText "NRD / Core"
 	Option "Denoiser",							"nri_denoise",					"OnOff"
 	Option "NRD Method",						"nri_nrddenoiser",				"NRDDenoiser"
@@ -1619,6 +1622,12 @@ OptionValue NRISettingsProfile
 	4, "Fast Preset - DLSS-SR"
 	5, "Medium Preset - DLSS-SR"
 	6, "Beautiful Preset - DLSS-SR"
+}
+
+OptionString NRIGraphicsAPI
+{
+	"d3d12", "D3D12"
+	"vulkan", "Vulkan"
 }
 
 OptionValue NRIPostSharpen
