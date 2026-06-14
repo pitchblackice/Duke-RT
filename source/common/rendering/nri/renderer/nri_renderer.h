@@ -1432,10 +1432,13 @@ public:
 	void PrintEmissiveSurfaceDump(float radius, uint32_t limit) const;
 	void PrintSectorLightDump(float radius, uint32_t limit) const;
 	void PrintSurfaceProbeStatus() const;
+	NRISurfaceProbeStatusSnapshot BuildSurfaceProbeStatusSnapshot() const;
 	bool BuildEmissiveLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const;
 	bool BuildSurfaceLightEditTarget(PathTracingEmissiveLightEditTarget& outTarget) const;
 	void PrintMapChunkDump(int32_t chunkIndex) const;
+	NRIMapChunkDumpSnapshot BuildMapChunkDumpSnapshot(int32_t chunkIndex) const;
 	void PrintMapChunkCompare(int32_t chunkIndex) const;
+	NRIMapChunkCompareSnapshot BuildMapChunkCompareSnapshot(int32_t chunkIndex) const;
 	void TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& event);
 	bool IsPathTracingSupported() const { return mPathTracingSupported; }
 	bool RefreshPathTracingAvailability();

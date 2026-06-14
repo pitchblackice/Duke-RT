@@ -4,6 +4,7 @@
 #include "nri_resources.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 struct NRIBufferStatusSnapshot
@@ -199,6 +200,294 @@ struct NRIResidentMapChunkRegistryStatusSnapshot
 	const char* sampleTier = "none";
 };
 
+struct NRISurfaceProbeStatusSnapshot
+{
+	bool recorded = false;
+	bool hit = false;
+	const char* sourceName = "unknown";
+	const char* drawListName = "unknown";
+	const char* ownerName = "unknown";
+	const char* dataSourceName = "unknown";
+	int32_t chunkIndex = -1;
+	const char* gateVisible = "no";
+	const char* flatDrawlistVisible = "n/a";
+	const char* staticResident = "no";
+	const char* staticTlasInstanced = "no";
+	const char* staticProbeIncluded = "no";
+	const char* chunkReplaced = "no";
+	std::string chunkReasons = "none";
+	uint32_t sectionDirtyCount = 0;
+	const char* sectorDirty = "no";
+	const char* dragged = "no";
+	const char* blindSpot = "no";
+	uint32_t replacementSurfaceCount = 0;
+	uint32_t replacementTriangleCount = 0;
+	int32_t localSpaceIndex = -1;
+	int32_t portalGraphIndex = -1;
+	int32_t sectorIndex = -1;
+	int32_t wallIndex = -1;
+	int32_t nextSectorIndex = -1;
+	int32_t actorIndex = -1;
+	uint32_t cstat = 0;
+	uint32_t primitiveIndex = UINT32_MAX;
+	uint32_t materialIndex = UINT32_MAX;
+	uint32_t textureId = 0;
+	uint32_t baseTextureId = 0;
+	float distance = 0.0f;
+	float position[3] = {};
+	uint32_t primitiveFlags = 0;
+	const char* indexed = "no";
+	const char* fullbright = "no";
+	const char* flat = "no";
+	const char* sprite = "no";
+	const char* mirror = "no";
+	const char* sky = "no";
+	const char* portal = "no";
+	const char* facingBillboard = "no";
+	const char* pointSampled = "no";
+	const char* textureFullbright = "no";
+	const char* textureGlowing = "no";
+	const char* textureAutoGlow = "no";
+	const char* hasGlowmap = "no";
+	const char* hasNormalMap = "no";
+	const char* hasMetallicMap = "no";
+	const char* hasRoughnessMap = "no";
+	uint32_t normalTextureIndex = 0;
+	uint32_t metallicTextureIndex = 0;
+	uint32_t roughnessTextureIndex = 0;
+	float metalnessHint = 0.0f;
+	float roughnessHint = 0.45f;
+	uint32_t materialClass = 0;
+	const char* emissiveModeName = "none";
+	uint32_t emissiveTextureIndex = 0;
+	const char* lightSurface = "no";
+	uint32_t lightMaterialIndex = 0;
+	const char* emissiveSurface = "no";
+	uint32_t emissivePrimitiveMatchCount = 0;
+	const char* emissiveHit = "no";
+	uint32_t emissiveSourceFlags = 0;
+	uint32_t emissiveSourceRuleId = 0;
+	uint32_t emissiveOverrideRuleId = 0;
+	int32_t emissiveSectorIndex = -1;
+	float sectorResponseScale = 1.0f;
+	float sectorReachScale = 1.0f;
+	const char* sectorResponseApplied = "no";
+	float emissivePrimitiveArea = 0.0f;
+	float emissivePowerEstimate = 0.0f;
+	float emissiveSelectionWeight = 0.0f;
+	float emissiveSelectionPdf = 0.0f;
+	float emissiveIntensity = 0.0f;
+	const char* materialResponse = "no";
+	float materialResponseScale = 1.0f;
+	float lightLevel = 0.0f;
+	float alpha = 1.0f;
+	float averageColor[3] = {};
+	float emissiveColor[3] = {};
+	float glowColor[3] = {};
+};
+
+struct NRIMapChunkPortalDumpRow
+{
+	uint32_t portalIndex = UINT32_MAX;
+	uint32_t sourceSurfaceIndex = UINT32_MAX;
+	int32_t sourceSectorIndex = -1;
+	int32_t sourceWallIndex = -1;
+	int32_t sourcePlane = -1;
+	uint32_t targetCount = 0;
+	const char* runtimeBound = "no";
+	float delta[3] = {};
+};
+
+struct NRIMapChunkSurfaceDumpRow
+{
+	uint32_t surfaceIndex = UINT32_MAX;
+	const char* kindName = "unknown";
+	const char* sourceName = "unknown";
+	int32_t sectionIndex = -1;
+	int32_t sectorIndex = -1;
+	int32_t wallIndex = -1;
+	int32_t nextSectorIndex = -1;
+	int32_t actorIndex = -1;
+	uint32_t cstat = 0;
+	uint32_t flags = 0;
+	const char* flat = "no";
+	const char* sprite = "no";
+	const char* mirror = "no";
+	const char* sky = "no";
+	const char* portal = "no";
+	const char* oneWay = "no";
+	const char* facingBillboard = "no";
+	const char* pointSampled = "no";
+	uint32_t textureId = 0;
+	int palette = 0;
+	int shade = 0;
+	float alpha = 1.0f;
+	uint32_t vertexCount = 0;
+	uint32_t triangleCount = 0;
+};
+
+struct NRIMapChunkDumpSnapshot
+{
+	bool mapWorldValid = false;
+	bool chunkResolved = false;
+	bool chunkInRange = false;
+	bool usedProbeFallback = false;
+	int32_t requestedChunkIndex = -1;
+	uint32_t chunkRange = 0;
+	int32_t chunkIndex = -1;
+	int32_t sectorIndex = -1;
+	uint32_t localSpaceIndex = UINT32_MAX;
+	uint32_t surfaceCount = 0;
+	uint32_t triangleCount = 0;
+	uint32_t portalSurfaceCount = 0;
+	uint32_t skySurfaceCount = 0;
+	uint32_t sourcePortalCount = 0;
+	const char* residentStatic = "no";
+	const char* staticTlasInstanced = "no";
+	const char* staticProbeIncluded = "no";
+	const char* runtimeReplaced = "no";
+	std::string replacementReasons = "none";
+	uint32_t sectionDirtyCount = 0;
+	const char* sectorDirty = "no";
+	const char* dragged = "no";
+	const char* blindSpot = "no";
+	uint32_t replacementSurfaceCount = 0;
+	uint32_t replacementTriangleCount = 0;
+	uint32_t duplicateChunkSlotCount = 0;
+	uint32_t preferredChunkListIndex = UINT32_MAX;
+	bool hasStaticChunk = false;
+	uint32_t staticPrimitiveOffset = 0;
+	uint32_t staticPrimitiveCount = 0;
+	uint32_t staticMaterialOffset = 0;
+	uint32_t staticMaterialCount = 0;
+	const char* staticAsReady = "no";
+	std::vector<NRIMapChunkPortalDumpRow> portals;
+	std::vector<NRIMapChunkSurfaceDumpRow> surfaces;
+};
+
+struct NRIMapChunkCompareMatchRow
+{
+	uint32_t staticSurfaceIndex = UINT32_MAX;
+	uint32_t liveSurfaceIndex = UINT32_MAX;
+	const char* kindName = "unknown";
+	const char* sourceName = "unknown";
+	int32_t sectorIndex = -1;
+	int32_t wallIndex = -1;
+	int32_t sectionIndex = -1;
+	int32_t nextSectorIndex = -1;
+	uint32_t cstat = 0;
+	float delta[3] = {};
+	float deviationFromMean = 0.0f;
+	float areaRatio = 1.0f;
+	float normalDot = 1.0f;
+	uint32_t staticTextureId = 0;
+	uint32_t liveTextureId = 0;
+	uint32_t staticFlags = 0;
+	uint32_t liveFlags = 0;
+};
+
+struct NRIMapChunkCompareSeamRow
+{
+	uint32_t staticSurfaceIndex = UINT32_MAX;
+	uint32_t liveSurfaceIndex = UINT32_MAX;
+	const char* kindName = "unknown";
+	int32_t wallIndex = -1;
+	int32_t nextSectorIndex = -1;
+	int32_t adjacentChunkIndex = -1;
+	const char* adjacentReplaced = "no";
+	float delta[3] = {};
+	float deviationFromMean = 0.0f;
+	float areaRatio = 1.0f;
+	float normalDot = 1.0f;
+	const char* seamOutlier = "no";
+};
+
+struct NRIMapChunkCompareUnmatchedRow
+{
+	uint32_t surfaceIndex = UINT32_MAX;
+	const char* kindName = "unknown";
+	const char* sourceName = "unknown";
+	int32_t sectorIndex = -1;
+	int32_t wallIndex = -1;
+	int32_t sectionIndex = -1;
+	int32_t nextSectorIndex = -1;
+	uint32_t cstat = 0;
+	uint32_t textureId = 0;
+	uint32_t flags = 0;
+	uint32_t vertexCount = 0;
+	uint32_t triangleCount = 0;
+};
+
+struct NRIMapChunkCompareSnapshot
+{
+	bool mapWorldValid = false;
+	bool chunkResolved = false;
+	bool chunkInRange = false;
+	bool liveBuildSucceeded = false;
+	int32_t requestedChunkIndex = -1;
+	int32_t chunkIndex = -1;
+	uint32_t chunkRange = 0;
+	int32_t sectorIndex = -1;
+	uint32_t staticSurfaceCount = 0;
+	uint32_t liveSurfaceCount = 0;
+	uint32_t matchedCount = 0;
+	uint32_t unmatchedStaticCount = 0;
+	uint32_t unmatchedLiveCount = 0;
+	std::string replacementReasons = "none";
+	const char* dragged = "no";
+	const char* replacementActive = "no";
+	float meanDelta[3] = {};
+	uint32_t within1 = 0;
+	uint32_t within4 = 0;
+	uint32_t areaOutlierCount = 0;
+	uint32_t normalOutlierCount = 0;
+	uint32_t materialDiffCount = 0;
+	const char* likelyCoherent = "no";
+	uint32_t liveTriangleCount = 0;
+	uint32_t seamSurfaceCount = 0;
+	uint32_t seamOutlierCount = 0;
+	uint32_t seamAgainstStaticCount = 0;
+	uint32_t seamAgainstReplacedCount = 0;
+	std::vector<NRIMapChunkCompareMatchRow> matchRows;
+	std::vector<NRIMapChunkCompareSeamRow> seamRows;
+	std::vector<NRIMapChunkCompareUnmatchedRow> unmatchedStaticRows;
+	std::vector<NRIMapChunkCompareUnmatchedRow> unmatchedLiveRows;
+};
+
+struct NRIActorSpriteMaterialTraceRow
+{
+	uint32_t frameIndex = 0;
+	std::string label = "unlabeled";
+	int32_t actorIndex = -1;
+	const char* sourceName = "unknown";
+	uint32_t materialIndex = UINT32_MAX;
+	uint32_t textureId = 0;
+	uint32_t textureIndex = UINT32_MAX;
+	uint32_t emissiveMode = 0;
+	uint32_t emissiveTextureIndex = UINT32_MAX;
+	uint32_t paletteIndex = 0;
+	uint32_t materialFlags = 0;
+	uint32_t lightingFlags = 0;
+	uint64_t materialKey = 0;
+	const void* texture = nullptr;
+};
+
+struct NRIActorSpriteMaterialTraceSnapshot
+{
+	bool emitSummary = false;
+	uint32_t frameIndex = 0;
+	std::string label = "unlabeled";
+	uint32_t materialCount = 0;
+	uint32_t textureCount = 0;
+	uint32_t actorSurfaceCount = 0;
+	uint32_t actorCount = 0;
+	uint64_t bridgeHash = 0;
+	uint64_t actorHash = 0;
+	uint32_t queuedFrameIndex = 0;
+	uint32_t outstandingQueuedFrames = 0;
+	std::vector<NRIActorSpriteMaterialTraceRow> rows;
+};
+
 class NRIRendererDiagnostics
 {
 public:
@@ -217,3 +506,7 @@ void PrintNRITemporalStatusSnapshot(const NRITemporalStatusSnapshot& snapshot);
 void PrintNRITemporalTraceSnapshot(const NRITemporalTraceSnapshot& snapshot);
 void PrintNRIPortalTraversalStatusSnapshot(const NRIPortalTraversalStatusSnapshot& snapshot);
 void PrintNRIResidentMapChunkRegistryStatusSnapshot(const NRIResidentMapChunkRegistryStatusSnapshot& snapshot);
+void PrintNRISurfaceProbeStatusSnapshot(const NRISurfaceProbeStatusSnapshot& snapshot);
+void PrintNRIMapChunkDumpSnapshot(const NRIMapChunkDumpSnapshot& snapshot);
+void PrintNRIMapChunkCompareSnapshot(const NRIMapChunkCompareSnapshot& snapshot);
+void PrintNRIActorSpriteMaterialTraceSnapshot(const NRIActorSpriteMaterialTraceSnapshot& snapshot);

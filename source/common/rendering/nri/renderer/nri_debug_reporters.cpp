@@ -985,18 +985,20 @@ void NRIRenderer::PrintStatus()
 
 void NRIRenderer::TraceActorSpriteMaterialAssignments(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel)
 {
-	mDescriptorCoherencyDebugStats.actorMaterialBuilds++;
-	mDescriptorCoherencyDebugStats.lastMaterialBuildLabel = traceLabel != nullptr ? traceLabel : "unlabeled";
-	mDescriptorCoherencyDebugStats.lastMaterialCount = (uint32_t)outMaterials.materials.size();
-	mDescriptorCoherencyDebugStats.lastTextureCount = (uint32_t)outMaterials.textures.size();
-	mDescriptorCoherencyDebugStats.lastMaterialBridgeHash = HashMaterialBridgeSummary(outMaterials);
+	NRIActorSpriteMaterialTraceSnapshot snapshot = {};
+	snapshot.frameIndex = mFrameIndex;
+	snapshot.label = traceLabel != nullptr ? traceLabel : "unlabeled";
+	snapshot.materialCount = (uint32_t)outMaterials.materials.size();
+	snapshot.textureCount = (uint32_t)outMaterials.textures.size();
+	snapshot.bridgeHash = HashMaterialBridgeSummary(outMaterials);
+	snapshot.queuedFrameIndex = mFrameBuffer != nullptr ? mFrameBuffer->mCurrentQueuedFrameIndex : 0u;
+	snapshot.outstandingQueuedFrames = CountPotentialOutstandingQueuedFrames();
 
 	const uint32_t spriteMaterialBase = (uint32_t)(sceneView.opaqueWalls.size() + sceneView.opaqueFlats.size());
-	uint32_t actorSurfaceCount = 0;
-	uint64_t actorHash = 1469598103934665603ull;
+	snapshot.actorHash = 1469598103934665603ull;
 	std::unordered_set<int32_t> actorIndices;
 	actorIndices.reserve(sceneView.opaqueSprites.size());
-	uint32_t printed = 0;
+	const bool emitVerboseRows = nri_actor_sprite_diag::ShouldTraceVerbose((int)nri_ptactorspritetrace, (int)nri_pttraceframes);
 
 	for (uint32_t spriteIndex = 0; spriteIndex < (uint32_t)sceneView.opaqueSprites.size(); ++spriteIndex)
 	{
@@ -1014,59 +1016,52 @@ void NRIRenderer::TraceActorSpriteMaterialAssignments(const nri_scene::SceneView
 
 		const auto& material = outMaterials.materials[materialIndex];
 		const auto& metadata = outMaterials.lightMetadata[materialIndex];
-		actorSurfaceCount++;
+		snapshot.actorSurfaceCount++;
 		actorIndices.insert(surface.provenance.actorIndex);
-		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)surface.provenance.actorIndex);
-		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)(uint32_t)surface.provenance.sourceType);
-		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)materialIndex);
-		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)metadata.textureId);
-		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)material.textureIndex);
-		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)material.paletteIndex);
-		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)material.emissiveMode);
-		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)material.emissiveTextureIndex);
-		actorHash = nri_scene::HashCombine64(actorHash, metadata.materialKey);
+		snapshot.actorHash = nri_scene::HashCombine64(snapshot.actorHash, (uint64_t)surface.provenance.actorIndex);
+		snapshot.actorHash = nri_scene::HashCombine64(snapshot.actorHash, (uint64_t)(uint32_t)surface.provenance.sourceType);
+		snapshot.actorHash = nri_scene::HashCombine64(snapshot.actorHash, (uint64_t)materialIndex);
+		snapshot.actorHash = nri_scene::HashCombine64(snapshot.actorHash, (uint64_t)metadata.textureId);
+		snapshot.actorHash = nri_scene::HashCombine64(snapshot.actorHash, (uint64_t)material.textureIndex);
+		snapshot.actorHash = nri_scene::HashCombine64(snapshot.actorHash, (uint64_t)material.paletteIndex);
+		snapshot.actorHash = nri_scene::HashCombine64(snapshot.actorHash, (uint64_t)material.emissiveMode);
+		snapshot.actorHash = nri_scene::HashCombine64(snapshot.actorHash, (uint64_t)material.emissiveTextureIndex);
+		snapshot.actorHash = nri_scene::HashCombine64(snapshot.actorHash, metadata.materialKey);
 
-		if (nri_actor_sprite_diag::ShouldTraceVerbose((int)nri_ptactorspritetrace, (int)nri_pttraceframes) && printed < 32)
+		if (emitVerboseRows && snapshot.rows.size() < 32u)
 		{
-			Printf("NRI PT actor-sprite material: frame=%u label=%s actor=%d source=%s material=%u tex_id=%u tex_index=%u emissive_mode=%u emissive_tex=%u palette=%u flags=0x%x light_flags=0x%x material_key=0x%llx tex_ptr=%p\n",
-				mFrameIndex,
-				traceLabel != nullptr ? traceLabel : "unlabeled",
-				surface.provenance.actorIndex,
-				nri_diag::GetSurfaceSourceTypeName(surface.provenance.sourceType),
-				materialIndex,
-				metadata.textureId,
-				material.textureIndex,
-				material.emissiveMode,
-				material.emissiveTextureIndex,
-				material.paletteIndex,
-				material.flags,
-				material.lightingFlags,
-				(unsigned long long)metadata.materialKey,
-				metadata.texture);
-			printed++;
+			NRIActorSpriteMaterialTraceRow row = {};
+			row.frameIndex = snapshot.frameIndex;
+			row.label = snapshot.label;
+			row.actorIndex = surface.provenance.actorIndex;
+			row.sourceName = nri_diag::GetSurfaceSourceTypeName(surface.provenance.sourceType);
+			row.materialIndex = materialIndex;
+			row.textureId = metadata.textureId;
+			row.textureIndex = material.textureIndex;
+			row.emissiveMode = material.emissiveMode;
+			row.emissiveTextureIndex = material.emissiveTextureIndex;
+			row.paletteIndex = material.paletteIndex;
+			row.materialFlags = material.flags;
+			row.lightingFlags = material.lightingFlags;
+			row.materialKey = metadata.materialKey;
+			row.texture = metadata.texture;
+			snapshot.rows.push_back(row);
 		}
 	}
 
-	mDescriptorCoherencyDebugStats.lastActorSpriteSurfaceCount = actorSurfaceCount;
-	mDescriptorCoherencyDebugStats.lastActorSpriteActorCount = (uint32_t)actorIndices.size();
-	mDescriptorCoherencyDebugStats.lastActorSpriteMaterialHash = actorHash;
+	snapshot.actorCount = (uint32_t)actorIndices.size();
+	snapshot.emitSummary = snapshot.actorSurfaceCount != 0 && nri_actor_sprite_diag::ShouldTraceCoherency((int)nri_ptactorspritetrace, (int)nri_pttraceframes);
 
-	if (actorSurfaceCount == 0 || !nri_actor_sprite_diag::ShouldTraceCoherency((int)nri_ptactorspritetrace, (int)nri_pttraceframes))
-	{
-		return;
-	}
+	mDescriptorCoherencyDebugStats.actorMaterialBuilds++;
+	mDescriptorCoherencyDebugStats.lastMaterialBuildLabel = snapshot.label;
+	mDescriptorCoherencyDebugStats.lastMaterialCount = snapshot.materialCount;
+	mDescriptorCoherencyDebugStats.lastTextureCount = snapshot.textureCount;
+	mDescriptorCoherencyDebugStats.lastMaterialBridgeHash = snapshot.bridgeHash;
+	mDescriptorCoherencyDebugStats.lastActorSpriteSurfaceCount = snapshot.actorSurfaceCount;
+	mDescriptorCoherencyDebugStats.lastActorSpriteActorCount = snapshot.actorCount;
+	mDescriptorCoherencyDebugStats.lastActorSpriteMaterialHash = snapshot.actorHash;
 
-	Printf("NRI PT actor-sprite materials: frame=%u label=%s materials=%u textures=%u actor_surfaces=%u actor_count=%u bridge_hash=0x%llx actor_hash=0x%llx qframe=%u outstanding_slots=%u\n",
-		mFrameIndex,
-		traceLabel != nullptr ? traceLabel : "unlabeled",
-		(uint32_t)outMaterials.materials.size(),
-		(uint32_t)outMaterials.textures.size(),
-		actorSurfaceCount,
-		(uint32_t)actorIndices.size(),
-		(unsigned long long)mDescriptorCoherencyDebugStats.lastMaterialBridgeHash,
-		(unsigned long long)actorHash,
-		mFrameBuffer != nullptr ? mFrameBuffer->mCurrentQueuedFrameIndex : 0u,
-		CountPotentialOutstandingQueuedFrames());
+	PrintNRIActorSpriteMaterialTraceSnapshot(snapshot);
 }
 
 void NRIRenderer::TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& event)
@@ -1118,20 +1113,21 @@ void NRIRenderer::TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& 
 		event.resolvedGameTexture);
 }
 
-void NRIRenderer::PrintSurfaceProbeStatus() const
+NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() const
 {
+	NRISurfaceProbeStatusSnapshot snapshot = {};
 	if (!mLastSurfaceProbe.valid)
 	{
-		Printf("NRI PT surface probe: no sampled center hit has been recorded yet.\n");
-		return;
+		return snapshot;
 	}
 
+	snapshot.recorded = true;
 	if (!mLastSurfaceProbe.hit)
 	{
-		Printf("NRI PT surface probe: last sampled center ray missed translated PT geometry.\n");
-		return;
+		return snapshot;
 	}
 
+	snapshot.hit = true;
 	const SurfaceProbeEmissiveDiagnostics emissiveDiagnostics = BuildSurfaceProbeEmissiveDiagnostics(mLastSurfaceProbe);
 	const uint32_t flags = mLastSurfaceProbe.primitiveFlags;
 	const uint32_t lightingFlags = mLastSurfaceProbe.materialLightingFlags;
@@ -1185,124 +1181,236 @@ void NRIRenderer::PrintSurfaceProbeStatus() const
 		flatPlaneVisible = IsFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, mLastSurfaceProbe.provenance.sectorIndex, mLastSurfaceProbe.normal[1] < 0.0f);
 	}
 	const std::string chunkReasons = GetRuntimeMapMutationReasonSummary(chunkReasonMask);
-	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u material_tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u emissive_hit=%s emissive_flags=0x%x emissive_rule=%u emissive_override=%u emissive_sector=%d sector_scale=%.3f sector_reach=%.3f sector_applied=%s emissive_area=%.2f emissive_power=%.3f emissive_sample_weight=%.3f emissive_pdf=%.6f emissive_intensity=%.3f material_response=%s material_scale=%.3f light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
-		nri_diag::GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType),
-		nri_diag::GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType),
-		nri_diag::GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner),
-		nri_diag::GetSceneDataSourceName(mLastSurfaceProbe.sceneDataSource),
-		mLastSurfaceProbe.provenance.mapChunkIndex,
-		YesNo(chunkVisibleGate),
-		flatPlaneVisibilityRelevant ? YesNo(flatPlaneVisible) : "n/a",
-		YesNo(chunkResidentStatic),
-		YesNo(chunkStaticTlasInstanced),
-		YesNo(chunkStaticProbeIncluded),
-		YesNo(chunkReplaced),
-		chunkReasons.c_str(),
-		chunkSectionDirtyCount,
-		YesNo(chunkSectorDirty),
-		YesNo(chunkDragged),
-		YesNo(chunkBlindSpot),
-		replacementSurfaceCount,
-		replacementTriangleCount,
-		localSpaceIndex,
-		portalGraphIndex,
-		mLastSurfaceProbe.provenance.sectorIndex,
-		mLastSurfaceProbe.provenance.wallIndex,
-		mLastSurfaceProbe.provenance.nextSectorIndex,
-		mLastSurfaceProbe.provenance.actorIndex,
-		mLastSurfaceProbe.provenance.cstat,
-		mLastSurfaceProbe.primitiveIndex,
-		mLastSurfaceProbe.materialIndex,
-		mLastSurfaceProbe.textureId,
-		mLastSurfaceProbe.baseTextureId,
-		mLastSurfaceProbe.distance,
-		mLastSurfaceProbe.position[0],
-		mLastSurfaceProbe.position[1],
-		mLastSurfaceProbe.position[2],
-		flags,
-		YesNo((flags & nri_scene::MaterialFlag_Indexed) != 0),
-		YesNo((flags & nri_scene::MaterialFlag_Fullbright) != 0),
-		YesNo((flags & nri_scene::MaterialFlag_Flat) != 0),
-		YesNo((flags & nri_scene::MaterialFlag_Sprite) != 0),
-		YesNo((flags & nri_scene::MaterialFlag_Mirror) != 0),
-		YesNo((flags & nri_scene::MaterialFlag_Sky) != 0),
-		YesNo((flags & nri_scene::MaterialFlag_Portal) != 0),
-		YesNo((flags & nri_scene::MaterialFlag_FacingBillboard) != 0),
-		YesNo((flags & nri_scene::MaterialFlag_PointSampled) != 0),
-		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureFullbright) != 0),
-		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureGlowing) != 0),
-		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0),
-		YesNo((lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0),
-		YesNo(mLastSurfaceProbe.normalTextureIndex != UINT32_MAX),
-		YesNo(mLastSurfaceProbe.metallicTextureIndex != UINT32_MAX),
-		YesNo(mLastSurfaceProbe.roughnessTextureIndex != UINT32_MAX),
-		mLastSurfaceProbe.normalTextureIndex != UINT32_MAX ? mLastSurfaceProbe.normalTextureIndex : 0u,
-		mLastSurfaceProbe.metallicTextureIndex != UINT32_MAX ? mLastSurfaceProbe.metallicTextureIndex : 0u,
-		mLastSurfaceProbe.roughnessTextureIndex != UINT32_MAX ? mLastSurfaceProbe.roughnessTextureIndex : 0u,
-		mLastSurfaceProbe.metalnessHint,
-		mLastSurfaceProbe.roughnessHint,
-		mLastSurfaceProbe.materialClass,
-		nri_diag::GetMaterialEmissiveModeName(mLastSurfaceProbe.emissiveMode),
-		mLastSurfaceProbe.emissiveTextureIndex != UINT32_MAX ? mLastSurfaceProbe.emissiveTextureIndex : 0u,
-		YesNo(emissiveDiagnostics.sceneLightSurfaceMatch),
-		emissiveDiagnostics.sceneLightMaterialIndex != UINT32_MAX ? emissiveDiagnostics.sceneLightMaterialIndex : 0u,
-		YesNo(emissiveDiagnostics.activeEmissiveSurfaceMatch),
-		emissiveDiagnostics.emissivePrimitiveMatchCount,
-		YesNo(emissiveDiagnostics.exactEmissivePrimitiveMatch),
-		emissiveDiagnostics.emissiveSourceFlags,
-		emissiveDiagnostics.emissiveSourceRuleId,
-		emissiveDiagnostics.emissiveOverrideRuleId,
-		emissiveDiagnostics.emissiveSectorIndex,
-		emissiveDiagnostics.sectorResponseScale,
-		emissiveDiagnostics.sectorReachScale,
-		YesNo(emissiveDiagnostics.sectorResponseApplied),
-		emissiveDiagnostics.emissivePrimitiveArea,
-		emissiveDiagnostics.emissivePowerEstimate,
-		emissiveDiagnostics.emissiveSelectionWeight,
-		emissiveDiagnostics.emissiveSelectionPdf,
-		emissiveDiagnostics.emissiveIntensity,
-		YesNo(emissiveDiagnostics.materialResponseEnabled),
-		emissiveDiagnostics.materialResponseScale,
-		mLastSurfaceProbe.lightLevel,
-		mLastSurfaceProbe.alpha,
-		mLastSurfaceProbe.averageColor[0],
-		mLastSurfaceProbe.averageColor[1],
-		mLastSurfaceProbe.averageColor[2],
-		mLastSurfaceProbe.emissiveColor[0],
-		mLastSurfaceProbe.emissiveColor[1],
-		mLastSurfaceProbe.emissiveColor[2],
-		mLastSurfaceProbe.glowColor[0],
-		mLastSurfaceProbe.glowColor[1],
-		mLastSurfaceProbe.glowColor[2]);
+	snapshot.sourceName = nri_diag::GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType);
+	snapshot.drawListName = nri_diag::GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType);
+	snapshot.ownerName = nri_diag::GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner);
+	snapshot.dataSourceName = nri_diag::GetSceneDataSourceName(mLastSurfaceProbe.sceneDataSource);
+	snapshot.chunkIndex = mLastSurfaceProbe.provenance.mapChunkIndex;
+	snapshot.gateVisible = YesNo(chunkVisibleGate);
+	snapshot.flatDrawlistVisible = flatPlaneVisibilityRelevant ? YesNo(flatPlaneVisible) : "n/a";
+	snapshot.staticResident = YesNo(chunkResidentStatic);
+	snapshot.staticTlasInstanced = YesNo(chunkStaticTlasInstanced);
+	snapshot.staticProbeIncluded = YesNo(chunkStaticProbeIncluded);
+	snapshot.chunkReplaced = YesNo(chunkReplaced);
+	snapshot.chunkReasons = chunkReasons;
+	snapshot.sectionDirtyCount = chunkSectionDirtyCount;
+	snapshot.sectorDirty = YesNo(chunkSectorDirty);
+	snapshot.dragged = YesNo(chunkDragged);
+	snapshot.blindSpot = YesNo(chunkBlindSpot);
+	snapshot.replacementSurfaceCount = replacementSurfaceCount;
+	snapshot.replacementTriangleCount = replacementTriangleCount;
+	snapshot.localSpaceIndex = localSpaceIndex;
+	snapshot.portalGraphIndex = portalGraphIndex;
+	snapshot.sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
+	snapshot.wallIndex = mLastSurfaceProbe.provenance.wallIndex;
+	snapshot.nextSectorIndex = mLastSurfaceProbe.provenance.nextSectorIndex;
+	snapshot.actorIndex = mLastSurfaceProbe.provenance.actorIndex;
+	snapshot.cstat = mLastSurfaceProbe.provenance.cstat;
+	snapshot.primitiveIndex = mLastSurfaceProbe.primitiveIndex;
+	snapshot.materialIndex = mLastSurfaceProbe.materialIndex;
+	snapshot.textureId = mLastSurfaceProbe.textureId;
+	snapshot.baseTextureId = mLastSurfaceProbe.baseTextureId;
+	snapshot.distance = mLastSurfaceProbe.distance;
+	snapshot.position[0] = mLastSurfaceProbe.position[0];
+	snapshot.position[1] = mLastSurfaceProbe.position[1];
+	snapshot.position[2] = mLastSurfaceProbe.position[2];
+	snapshot.primitiveFlags = flags;
+	snapshot.indexed = YesNo((flags & nri_scene::MaterialFlag_Indexed) != 0);
+	snapshot.fullbright = YesNo((flags & nri_scene::MaterialFlag_Fullbright) != 0);
+	snapshot.flat = YesNo((flags & nri_scene::MaterialFlag_Flat) != 0);
+	snapshot.sprite = YesNo((flags & nri_scene::MaterialFlag_Sprite) != 0);
+	snapshot.mirror = YesNo((flags & nri_scene::MaterialFlag_Mirror) != 0);
+	snapshot.sky = YesNo((flags & nri_scene::MaterialFlag_Sky) != 0);
+	snapshot.portal = YesNo((flags & nri_scene::MaterialFlag_Portal) != 0);
+	snapshot.facingBillboard = YesNo((flags & nri_scene::MaterialFlag_FacingBillboard) != 0);
+	snapshot.pointSampled = YesNo((flags & nri_scene::MaterialFlag_PointSampled) != 0);
+	snapshot.textureFullbright = YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureFullbright) != 0);
+	snapshot.textureGlowing = YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureGlowing) != 0);
+	snapshot.textureAutoGlow = YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0);
+	snapshot.hasGlowmap = YesNo((lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0);
+	snapshot.hasNormalMap = YesNo(mLastSurfaceProbe.normalTextureIndex != UINT32_MAX);
+	snapshot.hasMetallicMap = YesNo(mLastSurfaceProbe.metallicTextureIndex != UINT32_MAX);
+	snapshot.hasRoughnessMap = YesNo(mLastSurfaceProbe.roughnessTextureIndex != UINT32_MAX);
+	snapshot.normalTextureIndex = mLastSurfaceProbe.normalTextureIndex != UINT32_MAX ? mLastSurfaceProbe.normalTextureIndex : 0u;
+	snapshot.metallicTextureIndex = mLastSurfaceProbe.metallicTextureIndex != UINT32_MAX ? mLastSurfaceProbe.metallicTextureIndex : 0u;
+	snapshot.roughnessTextureIndex = mLastSurfaceProbe.roughnessTextureIndex != UINT32_MAX ? mLastSurfaceProbe.roughnessTextureIndex : 0u;
+	snapshot.metalnessHint = mLastSurfaceProbe.metalnessHint;
+	snapshot.roughnessHint = mLastSurfaceProbe.roughnessHint;
+	snapshot.materialClass = mLastSurfaceProbe.materialClass;
+	snapshot.emissiveModeName = nri_diag::GetMaterialEmissiveModeName(mLastSurfaceProbe.emissiveMode);
+	snapshot.emissiveTextureIndex = mLastSurfaceProbe.emissiveTextureIndex != UINT32_MAX ? mLastSurfaceProbe.emissiveTextureIndex : 0u;
+	snapshot.lightSurface = YesNo(emissiveDiagnostics.sceneLightSurfaceMatch);
+	snapshot.lightMaterialIndex = emissiveDiagnostics.sceneLightMaterialIndex != UINT32_MAX ? emissiveDiagnostics.sceneLightMaterialIndex : 0u;
+	snapshot.emissiveSurface = YesNo(emissiveDiagnostics.activeEmissiveSurfaceMatch);
+	snapshot.emissivePrimitiveMatchCount = emissiveDiagnostics.emissivePrimitiveMatchCount;
+	snapshot.emissiveHit = YesNo(emissiveDiagnostics.exactEmissivePrimitiveMatch);
+	snapshot.emissiveSourceFlags = emissiveDiagnostics.emissiveSourceFlags;
+	snapshot.emissiveSourceRuleId = emissiveDiagnostics.emissiveSourceRuleId;
+	snapshot.emissiveOverrideRuleId = emissiveDiagnostics.emissiveOverrideRuleId;
+	snapshot.emissiveSectorIndex = emissiveDiagnostics.emissiveSectorIndex;
+	snapshot.sectorResponseScale = emissiveDiagnostics.sectorResponseScale;
+	snapshot.sectorReachScale = emissiveDiagnostics.sectorReachScale;
+	snapshot.sectorResponseApplied = YesNo(emissiveDiagnostics.sectorResponseApplied);
+	snapshot.emissivePrimitiveArea = emissiveDiagnostics.emissivePrimitiveArea;
+	snapshot.emissivePowerEstimate = emissiveDiagnostics.emissivePowerEstimate;
+	snapshot.emissiveSelectionWeight = emissiveDiagnostics.emissiveSelectionWeight;
+	snapshot.emissiveSelectionPdf = emissiveDiagnostics.emissiveSelectionPdf;
+	snapshot.emissiveIntensity = emissiveDiagnostics.emissiveIntensity;
+	snapshot.materialResponse = YesNo(emissiveDiagnostics.materialResponseEnabled);
+	snapshot.materialResponseScale = emissiveDiagnostics.materialResponseScale;
+	snapshot.lightLevel = mLastSurfaceProbe.lightLevel;
+	snapshot.alpha = mLastSurfaceProbe.alpha;
+	for (int i = 0; i < 3; ++i)
+	{
+		snapshot.averageColor[i] = mLastSurfaceProbe.averageColor[i];
+		snapshot.emissiveColor[i] = mLastSurfaceProbe.emissiveColor[i];
+		snapshot.glowColor[i] = mLastSurfaceProbe.glowColor[i];
+	}
+	return snapshot;
 }
 
-void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
+void PrintNRISurfaceProbeStatusSnapshot(const NRISurfaceProbeStatusSnapshot& snapshot)
 {
-	if (!mMapWorld.valid)
+	if (!snapshot.recorded)
 	{
-		Printf("NRI PT chunk dump: no authoritative map world has been built yet.\n");
+		Printf("NRI PT surface probe: no sampled center hit has been recorded yet.\n");
 		return;
 	}
 
+	if (!snapshot.hit)
+	{
+		Printf("NRI PT surface probe: last sampled center ray missed translated PT geometry.\n");
+		return;
+	}
+
+	Printf("NRI PT surface probe: source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u tile=%u material_tile=%u distance=%.2f pos=(%.2f, %.2f, %.2f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u emissive_hit=%s emissive_flags=0x%x emissive_rule=%u emissive_override=%u emissive_sector=%d sector_scale=%.3f sector_reach=%.3f sector_applied=%s emissive_area=%.2f emissive_power=%.3f emissive_sample_weight=%.3f emissive_pdf=%.6f emissive_intensity=%.3f material_response=%s material_scale=%.3f light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
+		snapshot.sourceName,
+		snapshot.drawListName,
+		snapshot.ownerName,
+		snapshot.dataSourceName,
+		snapshot.chunkIndex,
+		snapshot.gateVisible,
+		snapshot.flatDrawlistVisible,
+		snapshot.staticResident,
+		snapshot.staticTlasInstanced,
+		snapshot.staticProbeIncluded,
+		snapshot.chunkReplaced,
+		snapshot.chunkReasons.c_str(),
+		snapshot.sectionDirtyCount,
+		snapshot.sectorDirty,
+		snapshot.dragged,
+		snapshot.blindSpot,
+		snapshot.replacementSurfaceCount,
+		snapshot.replacementTriangleCount,
+		snapshot.localSpaceIndex,
+		snapshot.portalGraphIndex,
+		snapshot.sectorIndex,
+		snapshot.wallIndex,
+		snapshot.nextSectorIndex,
+		snapshot.actorIndex,
+		snapshot.cstat,
+		snapshot.primitiveIndex,
+		snapshot.materialIndex,
+		snapshot.textureId,
+		snapshot.baseTextureId,
+		snapshot.distance,
+		snapshot.position[0],
+		snapshot.position[1],
+		snapshot.position[2],
+		snapshot.primitiveFlags,
+		snapshot.indexed,
+		snapshot.fullbright,
+		snapshot.flat,
+		snapshot.sprite,
+		snapshot.mirror,
+		snapshot.sky,
+		snapshot.portal,
+		snapshot.facingBillboard,
+		snapshot.pointSampled,
+		snapshot.textureFullbright,
+		snapshot.textureGlowing,
+		snapshot.textureAutoGlow,
+		snapshot.hasGlowmap,
+		snapshot.hasNormalMap,
+		snapshot.hasMetallicMap,
+		snapshot.hasRoughnessMap,
+		snapshot.normalTextureIndex,
+		snapshot.metallicTextureIndex,
+		snapshot.roughnessTextureIndex,
+		snapshot.metalnessHint,
+		snapshot.roughnessHint,
+		snapshot.materialClass,
+		snapshot.emissiveModeName,
+		snapshot.emissiveTextureIndex,
+		snapshot.lightSurface,
+		snapshot.lightMaterialIndex,
+		snapshot.emissiveSurface,
+		snapshot.emissivePrimitiveMatchCount,
+		snapshot.emissiveHit,
+		snapshot.emissiveSourceFlags,
+		snapshot.emissiveSourceRuleId,
+		snapshot.emissiveOverrideRuleId,
+		snapshot.emissiveSectorIndex,
+		snapshot.sectorResponseScale,
+		snapshot.sectorReachScale,
+		snapshot.sectorResponseApplied,
+		snapshot.emissivePrimitiveArea,
+		snapshot.emissivePowerEstimate,
+		snapshot.emissiveSelectionWeight,
+		snapshot.emissiveSelectionPdf,
+		snapshot.emissiveIntensity,
+		snapshot.materialResponse,
+		snapshot.materialResponseScale,
+		snapshot.lightLevel,
+		snapshot.alpha,
+		snapshot.averageColor[0],
+		snapshot.averageColor[1],
+		snapshot.averageColor[2],
+		snapshot.emissiveColor[0],
+		snapshot.emissiveColor[1],
+		snapshot.emissiveColor[2],
+		snapshot.glowColor[0],
+		snapshot.glowColor[1],
+		snapshot.glowColor[2]);
+}
+
+void NRIRenderer::PrintSurfaceProbeStatus() const
+{
+	PrintNRISurfaceProbeStatusSnapshot(BuildSurfaceProbeStatusSnapshot());
+}
+
+NRIMapChunkDumpSnapshot NRIRenderer::BuildMapChunkDumpSnapshot(int32_t chunkIndex) const
+{
+	NRIMapChunkDumpSnapshot snapshot = {};
+	snapshot.requestedChunkIndex = chunkIndex;
+	if (!mMapWorld.valid)
+	{
+		return snapshot;
+	}
+
+	snapshot.mapWorldValid = true;
+	snapshot.chunkRange = (uint32_t)mMapWorld.chunks.size();
 	if (chunkIndex < 0)
 	{
 		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit && mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
 		{
 			chunkIndex = mLastSurfaceProbe.provenance.mapChunkIndex;
+			snapshot.usedProbeFallback = true;
 		}
 		else
 		{
-			Printf("NRI PT chunk dump: no chunk was specified and the last surface probe hit did not resolve to a map chunk.\n");
-			return;
+			return snapshot;
 		}
 	}
 
+	snapshot.chunkResolved = true;
+	snapshot.chunkIndex = chunkIndex;
 	if (chunkIndex < 0 || (unsigned)chunkIndex >= mMapWorld.chunks.size())
 	{
-		Printf("NRI PT chunk dump: chunk %d is out of range [0,%u).\n", chunkIndex, (uint32_t)mMapWorld.chunks.size());
-		return;
+		return snapshot;
 	}
 
+	snapshot.chunkInRange = true;
 	const auto& chunk = mMapWorld.chunks[(unsigned)chunkIndex];
 	const uint32_t preferredChunkListIndex = FindPreferredStaticSceneChunkListIndex((uint32_t)chunkIndex);
 	const uint32_t duplicateChunkSlotCount = CountStaticSceneChunkSlots((uint32_t)chunkIndex);
@@ -1318,95 +1426,31 @@ void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
 	const bool staticProbeIncluded = staticChunk != nullptr && staticChunk->active;
 	const auto* replacement = mRuntimeMutation.FindReplacement((uint32_t)chunkIndex);
 
-	uint32_t portalSurfaceCount = 0;
-	uint32_t skySurfaceCount = 0;
-	uint32_t surfaceTriangleCount = 0;
-	for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < chunk.surfaceCount; ++localSurfaceIndex)
-	{
-		const uint32_t surfaceIndex = chunk.firstSurface + localSurfaceIndex;
-		if (surfaceIndex >= mMapWorld.surfaces.size())
-		{
-			break;
-		}
-
-		const auto& surface = mMapWorld.surfaces[surfaceIndex];
-		surfaceTriangleCount += chunk_diag::CountSurfaceTriangles(surface.surface);
-		if ((surface.surface.material.flags & (nri_scene::MaterialFlag_Portal | nri_scene::MaterialFlag_Mirror)) != 0)
-		{
-			portalSurfaceCount++;
-		}
-		if ((surface.surface.material.flags & nri_scene::MaterialFlag_Sky) != 0)
-		{
-			skySurfaceCount++;
-		}
-	}
-
-	uint32_t sourcePortalCount = 0;
-	for (const auto& portal : mMapWorld.portals)
-	{
-		if (portal.sourceChunkIndex == (uint32_t)chunkIndex)
-		{
-			sourcePortalCount++;
-		}
-	}
-
-	Printf("NRI PT chunk dump: chunk=%d sector=%d local_space=%u surfaces=%u tris=%u portal_surfaces=%u sky_surfaces=%u source_portals=%u resident_static=%s static_tlas_instanced=%s static_probe_included=%s runtime_replaced=%s replacement_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u\n",
-		chunkIndex,
-		chunk.sectorIndex,
-		chunk.localSpaceIndex,
-		chunk.surfaceCount,
-		surfaceTriangleCount,
-		portalSurfaceCount,
-		skySurfaceCount,
-		sourcePortalCount,
-		YesNo(residentStatic),
-		YesNo(staticTlasInstanced),
-		YesNo(staticProbeIncluded),
-		YesNo(replacement != nullptr && replacement->active),
-		replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask).c_str() : "none",
-		replacement != nullptr ? replacement->sectionDirtyCount : 0u,
-		YesNo(replacement != nullptr && replacement->sectorDirty),
-		YesNo(replacement != nullptr && replacement->dragged),
-		YesNo(replacement != nullptr && replacement->blindSpot),
-		replacement != nullptr ? replacement->surfaceCount : 0u,
-		replacement != nullptr ? replacement->triangleCount : 0u);
-
-	if (duplicateChunkSlotCount > 1)
-	{
-		Printf("NRI PT chunk dump slots: chunk=%d duplicate_slots=%u preferred_slot=%u\n",
-			chunkIndex,
-			duplicateChunkSlotCount,
-			preferredChunkListIndex);
-	}
+	snapshot.sectorIndex = chunk.sectorIndex;
+	snapshot.localSpaceIndex = chunk.localSpaceIndex;
+	snapshot.surfaceCount = chunk.surfaceCount;
+	snapshot.residentStatic = YesNo(residentStatic);
+	snapshot.staticTlasInstanced = YesNo(staticTlasInstanced);
+	snapshot.staticProbeIncluded = YesNo(staticProbeIncluded);
+	snapshot.runtimeReplaced = YesNo(replacement != nullptr && replacement->active);
+	snapshot.replacementReasons = replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask) : "none";
+	snapshot.sectionDirtyCount = replacement != nullptr ? replacement->sectionDirtyCount : 0u;
+	snapshot.sectorDirty = YesNo(replacement != nullptr && replacement->sectorDirty);
+	snapshot.dragged = YesNo(replacement != nullptr && replacement->dragged);
+	snapshot.blindSpot = YesNo(replacement != nullptr && replacement->blindSpot);
+	snapshot.replacementSurfaceCount = replacement != nullptr ? replacement->surfaceCount : 0u;
+	snapshot.replacementTriangleCount = replacement != nullptr ? replacement->triangleCount : 0u;
+	snapshot.duplicateChunkSlotCount = duplicateChunkSlotCount;
+	snapshot.preferredChunkListIndex = preferredChunkListIndex;
 
 	if (staticChunk != nullptr)
 	{
-		Printf("NRI PT chunk dump static: primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u as_ready=%s\n",
-			staticChunk->primitiveOffset,
-			staticChunk->primitiveCount,
-			staticChunk->materialOffset,
-			staticChunk->materialCount,
-			YesNo(staticChunk->accelerationStructure.accelerationStructure != nullptr));
-	}
-
-	for (const auto& portal : mMapWorld.portals)
-	{
-		if (portal.sourceChunkIndex != (uint32_t)chunkIndex)
-		{
-			continue;
-		}
-
-		Printf("NRI PT chunk portal: portal=%u source_surface=%u source_sector=%d source_wall=%d source_plane=%d target_count=%u runtime_bound=%s delta=(%.2f, %.2f, %.2f)\n",
-			portal.portalIndex,
-			portal.sourceSurfaceIndex,
-			portal.sourceSectorIndex,
-			portal.sourceWallIndex,
-			portal.sourcePlane,
-			portal.targetCount,
-			YesNo(portal.runtimeBoundTarget),
-			(float)portal.delta[0],
-			(float)portal.delta[1],
-			(float)portal.delta[2]);
+		snapshot.hasStaticChunk = true;
+		snapshot.staticPrimitiveOffset = staticChunk->primitiveOffset;
+		snapshot.staticPrimitiveCount = staticChunk->primitiveCount;
+		snapshot.staticMaterialOffset = staticChunk->materialOffset;
+		snapshot.staticMaterialCount = staticChunk->materialCount;
+		snapshot.staticAsReady = YesNo(staticChunk->accelerationStructure.accelerationStructure != nullptr);
 	}
 
 	for (uint32_t localSurfaceIndex = 0; localSurfaceIndex < chunk.surfaceCount; ++localSurfaceIndex)
@@ -1419,46 +1463,206 @@ void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
 
 		const auto& surface = mMapWorld.surfaces[surfaceIndex];
 		const uint32_t flags = surface.surface.material.flags;
-		const uint32_t textureId =
-			surface.surface.material.texture != nullptr ?
-			(uint32_t)surface.surface.material.texture->GetID().GetIndex() :
-			0u;
-		Printf("NRI PT chunk surface %u: kind=%s source=%s section=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x flags=0x%x flat=%s sprite=%s mirror=%s sky=%s portal=%s one_way=%s facing_billboard=%s point_sampled=%s tile=%u pal=%d shade=%d alpha=%.3f verts=%u tris=%u\n",
-			surfaceIndex,
-			nri_diag::GetMapSurfaceKindName(surface.kind),
-			nri_diag::GetSurfaceSourceTypeName(surface.surface.provenance.sourceType),
-			surface.surface.provenance.sectionIndex,
-			surface.surface.provenance.sectorIndex,
-			surface.surface.provenance.wallIndex,
-			surface.surface.provenance.nextSectorIndex,
-			surface.surface.provenance.actorIndex,
-			surface.surface.provenance.cstat,
-			flags,
-			YesNo((flags & nri_scene::MaterialFlag_Flat) != 0),
-			YesNo((flags & nri_scene::MaterialFlag_Sprite) != 0),
-			YesNo((flags & nri_scene::MaterialFlag_Mirror) != 0),
-			YesNo((flags & nri_scene::MaterialFlag_Sky) != 0),
-			YesNo((flags & nri_scene::MaterialFlag_Portal) != 0),
-			YesNo((flags & nri_scene::MaterialFlag_OneWay) != 0),
-			YesNo((flags & nri_scene::MaterialFlag_FacingBillboard) != 0),
-			YesNo((flags & nri_scene::MaterialFlag_PointSampled) != 0),
-			textureId,
-			surface.surface.material.palette,
-			surface.surface.material.shade,
-			surface.surface.material.alpha,
-			(uint32_t)surface.surface.vertices.size(),
-			chunk_diag::CountSurfaceTriangles(surface.surface));
+		snapshot.triangleCount += chunk_diag::CountSurfaceTriangles(surface.surface);
+		if ((flags & (nri_scene::MaterialFlag_Portal | nri_scene::MaterialFlag_Mirror)) != 0)
+		{
+			snapshot.portalSurfaceCount++;
+		}
+		if ((flags & nri_scene::MaterialFlag_Sky) != 0)
+		{
+			snapshot.skySurfaceCount++;
+		}
+
+		NRIMapChunkSurfaceDumpRow row = {};
+		row.surfaceIndex = surfaceIndex;
+		row.kindName = nri_diag::GetMapSurfaceKindName(surface.kind);
+		row.sourceName = nri_diag::GetSurfaceSourceTypeName(surface.surface.provenance.sourceType);
+		row.sectionIndex = surface.surface.provenance.sectionIndex;
+		row.sectorIndex = surface.surface.provenance.sectorIndex;
+		row.wallIndex = surface.surface.provenance.wallIndex;
+		row.nextSectorIndex = surface.surface.provenance.nextSectorIndex;
+		row.actorIndex = surface.surface.provenance.actorIndex;
+		row.cstat = surface.surface.provenance.cstat;
+		row.flags = flags;
+		row.flat = YesNo((flags & nri_scene::MaterialFlag_Flat) != 0);
+		row.sprite = YesNo((flags & nri_scene::MaterialFlag_Sprite) != 0);
+		row.mirror = YesNo((flags & nri_scene::MaterialFlag_Mirror) != 0);
+		row.sky = YesNo((flags & nri_scene::MaterialFlag_Sky) != 0);
+		row.portal = YesNo((flags & nri_scene::MaterialFlag_Portal) != 0);
+		row.oneWay = YesNo((flags & nri_scene::MaterialFlag_OneWay) != 0);
+		row.facingBillboard = YesNo((flags & nri_scene::MaterialFlag_FacingBillboard) != 0);
+		row.pointSampled = YesNo((flags & nri_scene::MaterialFlag_PointSampled) != 0);
+		row.textureId = chunk_diag::GetSurfaceTextureId(surface);
+		row.palette = surface.surface.material.palette;
+		row.shade = surface.surface.material.shade;
+		row.alpha = surface.surface.material.alpha;
+		row.vertexCount = (uint32_t)surface.surface.vertices.size();
+		row.triangleCount = chunk_diag::CountSurfaceTriangles(surface.surface);
+		snapshot.surfaces.push_back(row);
 	}
+
+	for (const auto& portal : mMapWorld.portals)
+	{
+		if (portal.sourceChunkIndex != (uint32_t)chunkIndex)
+		{
+			continue;
+		}
+
+		snapshot.sourcePortalCount++;
+		NRIMapChunkPortalDumpRow row = {};
+		row.portalIndex = portal.portalIndex;
+		row.sourceSurfaceIndex = portal.sourceSurfaceIndex;
+		row.sourceSectorIndex = portal.sourceSectorIndex;
+		row.sourceWallIndex = portal.sourceWallIndex;
+		row.sourcePlane = portal.sourcePlane;
+		row.targetCount = portal.targetCount;
+		row.runtimeBound = YesNo(portal.runtimeBoundTarget);
+		row.delta[0] = (float)portal.delta[0];
+		row.delta[1] = (float)portal.delta[1];
+		row.delta[2] = (float)portal.delta[2];
+		snapshot.portals.push_back(row);
+	}
+
+	return snapshot;
 }
 
-void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
+void PrintNRIMapChunkDumpSnapshot(const NRIMapChunkDumpSnapshot& snapshot)
 {
-	if (!mMapWorld.valid)
+	if (!snapshot.mapWorldValid)
 	{
-		Printf("NRI PT chunk compare: no authoritative map world has been built yet.\n");
+		Printf("NRI PT chunk dump: no authoritative map world has been built yet.\n");
 		return;
 	}
 
+	if (!snapshot.chunkResolved)
+	{
+		Printf("NRI PT chunk dump: no chunk was specified and the last surface probe hit did not resolve to a map chunk.\n");
+		return;
+	}
+
+	if (!snapshot.chunkInRange)
+	{
+		Printf("NRI PT chunk dump: chunk %d is out of range [0,%u).\n", snapshot.chunkIndex, snapshot.chunkRange);
+		return;
+	}
+
+	Printf("NRI PT chunk dump: chunk=%d sector=%d local_space=%u surfaces=%u tris=%u portal_surfaces=%u sky_surfaces=%u source_portals=%u resident_static=%s static_tlas_instanced=%s static_probe_included=%s runtime_replaced=%s replacement_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u\n",
+		snapshot.chunkIndex,
+		snapshot.sectorIndex,
+		snapshot.localSpaceIndex,
+		snapshot.surfaceCount,
+		snapshot.triangleCount,
+		snapshot.portalSurfaceCount,
+		snapshot.skySurfaceCount,
+		snapshot.sourcePortalCount,
+		snapshot.residentStatic,
+		snapshot.staticTlasInstanced,
+		snapshot.staticProbeIncluded,
+		snapshot.runtimeReplaced,
+		snapshot.replacementReasons.c_str(),
+		snapshot.sectionDirtyCount,
+		snapshot.sectorDirty,
+		snapshot.dragged,
+		snapshot.blindSpot,
+		snapshot.replacementSurfaceCount,
+		snapshot.replacementTriangleCount);
+
+	if (snapshot.duplicateChunkSlotCount > 1)
+	{
+		Printf("NRI PT chunk dump slots: chunk=%d duplicate_slots=%u preferred_slot=%u\n",
+			snapshot.chunkIndex,
+			snapshot.duplicateChunkSlotCount,
+			snapshot.preferredChunkListIndex);
+	}
+
+	if (snapshot.hasStaticChunk)
+	{
+		Printf("NRI PT chunk dump static: primitive_offset=%u primitive_count=%u material_offset=%u material_count=%u as_ready=%s\n",
+			snapshot.staticPrimitiveOffset,
+			snapshot.staticPrimitiveCount,
+			snapshot.staticMaterialOffset,
+			snapshot.staticMaterialCount,
+			snapshot.staticAsReady);
+	}
+
+	for (const auto& portal : snapshot.portals)
+	{
+		Printf("NRI PT chunk portal: portal=%u source_surface=%u source_sector=%d source_wall=%d source_plane=%d target_count=%u runtime_bound=%s delta=(%.2f, %.2f, %.2f)\n",
+			portal.portalIndex,
+			portal.sourceSurfaceIndex,
+			portal.sourceSectorIndex,
+			portal.sourceWallIndex,
+			portal.sourcePlane,
+			portal.targetCount,
+			portal.runtimeBound,
+			portal.delta[0],
+			portal.delta[1],
+			portal.delta[2]);
+	}
+
+	for (const auto& surface : snapshot.surfaces)
+	{
+		Printf("NRI PT chunk surface %u: kind=%s source=%s section=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x flags=0x%x flat=%s sprite=%s mirror=%s sky=%s portal=%s one_way=%s facing_billboard=%s point_sampled=%s tile=%u pal=%d shade=%d alpha=%.3f verts=%u tris=%u\n",
+			surface.surfaceIndex,
+			surface.kindName,
+			surface.sourceName,
+			surface.sectionIndex,
+			surface.sectorIndex,
+			surface.wallIndex,
+			surface.nextSectorIndex,
+			surface.actorIndex,
+			surface.cstat,
+			surface.flags,
+			surface.flat,
+			surface.sprite,
+			surface.mirror,
+			surface.sky,
+			surface.portal,
+			surface.oneWay,
+			surface.facingBillboard,
+			surface.pointSampled,
+			surface.textureId,
+			surface.palette,
+			surface.shade,
+			surface.alpha,
+			surface.vertexCount,
+			surface.triangleCount);
+	}
+}
+
+void NRIRenderer::PrintMapChunkDump(int32_t chunkIndex) const
+{
+	PrintNRIMapChunkDumpSnapshot(BuildMapChunkDumpSnapshot(chunkIndex));
+}
+static NRIMapChunkCompareUnmatchedRow BuildMapChunkCompareUnmatchedRow(uint32_t surfaceIndex, const nri_scene::PTMapSurface& surface)
+{
+	NRIMapChunkCompareUnmatchedRow row = {};
+	row.surfaceIndex = surfaceIndex;
+	row.kindName = nri_diag::GetMapSurfaceKindName(surface.kind);
+	row.sourceName = nri_diag::GetSurfaceSourceTypeName(surface.surface.provenance.sourceType);
+	row.sectorIndex = surface.surface.provenance.sectorIndex;
+	row.wallIndex = surface.surface.provenance.wallIndex;
+	row.sectionIndex = surface.surface.provenance.sectionIndex;
+	row.nextSectorIndex = surface.surface.provenance.nextSectorIndex;
+	row.cstat = surface.surface.provenance.cstat;
+	row.textureId = chunk_diag::GetSurfaceTextureId(surface);
+	row.flags = surface.surface.material.flags;
+	row.vertexCount = (uint32_t)surface.surface.vertices.size();
+	row.triangleCount = chunk_diag::CountSurfaceTriangles(surface.surface);
+	return row;
+}
+
+NRIMapChunkCompareSnapshot NRIRenderer::BuildMapChunkCompareSnapshot(int32_t chunkIndex) const
+{
+	NRIMapChunkCompareSnapshot snapshot = {};
+	snapshot.requestedChunkIndex = chunkIndex;
+	if (!mMapWorld.valid)
+	{
+		return snapshot;
+	}
+
+	snapshot.mapWorldValid = true;
+	snapshot.chunkRange = (uint32_t)mMapWorld.chunks.size();
 	if (chunkIndex < 0)
 	{
 		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit && mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
@@ -1467,29 +1671,35 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 		}
 		else
 		{
-			Printf("NRI PT chunk compare: no chunk was specified and the last surface probe hit did not resolve to a map chunk.\n");
-			return;
+			return snapshot;
 		}
 	}
 
+	snapshot.chunkResolved = true;
+	snapshot.chunkIndex = chunkIndex;
 	if (chunkIndex < 0 || (unsigned)chunkIndex >= mMapWorld.chunks.size())
 	{
-		Printf("NRI PT chunk compare: chunk %d is out of range [0,%u).\n", chunkIndex, (uint32_t)mMapWorld.chunks.size());
-		return;
+		return snapshot;
 	}
 
+	snapshot.chunkInRange = true;
 	const auto& staticChunk = mMapWorld.chunks[(unsigned)chunkIndex];
 	nri_scene::PTMapWorld liveWorld = {};
 	nri_scene::PTMapWorldStats liveStats = {};
 	if (!nri_scene::BuildLiveMapChunkWorld(staticChunk, liveWorld, &liveStats) ||
 		liveWorld.chunks.empty())
 	{
-		Printf("NRI PT chunk compare: failed to build live runtime chunk %d.\n", chunkIndex);
-		return;
+		return snapshot;
 	}
 
+	snapshot.liveBuildSucceeded = true;
 	const auto& liveChunk = liveWorld.chunks[0];
 	const auto* replacement = mRuntimeMutation.FindReplacement((uint32_t)chunkIndex);
+	snapshot.sectorIndex = staticChunk.sectorIndex;
+	snapshot.replacementReasons = replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask) : "none";
+	snapshot.dragged = YesNo(replacement != nullptr && replacement->dragged);
+	snapshot.replacementActive = YesNo(replacement != nullptr && replacement->active);
+	snapshot.liveTriangleCount = liveChunk.triangleCount;
 
 	std::vector<uint32_t> staticSurfaceIndices;
 	std::vector<uint32_t> liveSurfaceIndices;
@@ -1516,6 +1726,8 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 		liveSurfaceIndices.push_back(surfaceIndex);
 	}
 
+	snapshot.staticSurfaceCount = (uint32_t)staticSurfaceIndices.size();
+	snapshot.liveSurfaceCount = (uint32_t)liveSurfaceIndices.size();
 	std::unordered_map<chunk_diag::SurfaceKey, std::vector<uint32_t>, chunk_diag::SurfaceKeyHash> liveSurfaceLookup;
 	liveSurfaceLookup.reserve(liveSurfaceIndices.size());
 	for (uint32_t liveLocalIndex = 0; liveLocalIndex < (uint32_t)liveSurfaceIndices.size(); ++liveLocalIndex)
@@ -1610,19 +1822,18 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 		}
 	}
 
-	float meanDelta[3] = {};
 	for (const auto& match : matches)
 	{
-		meanDelta[0] += match.delta[0];
-		meanDelta[1] += match.delta[1];
-		meanDelta[2] += match.delta[2];
+		snapshot.meanDelta[0] += match.delta[0];
+		snapshot.meanDelta[1] += match.delta[1];
+		snapshot.meanDelta[2] += match.delta[2];
 	}
 	if (!matches.empty())
 	{
 		const float invMatchCount = 1.0f / (float)matches.size();
-		meanDelta[0] *= invMatchCount;
-		meanDelta[1] *= invMatchCount;
-		meanDelta[2] *= invMatchCount;
+		snapshot.meanDelta[0] *= invMatchCount;
+		snapshot.meanDelta[1] *= invMatchCount;
+		snapshot.meanDelta[2] *= invMatchCount;
 	}
 
 	std::unordered_map<int32_t, uint32_t> sectorChunkLookup;
@@ -1635,39 +1846,30 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 		}
 	}
 
-	uint32_t within1 = 0;
-	uint32_t within4 = 0;
-	uint32_t areaOutlierCount = 0;
-	uint32_t normalOutlierCount = 0;
-	uint32_t materialDiffCount = 0;
-	uint32_t seamSurfaceCount = 0;
-	uint32_t seamOutlierCount = 0;
-	uint32_t seamAgainstStaticCount = 0;
-	uint32_t seamAgainstReplacedCount = 0;
 	for (auto& match : matches)
 	{
-		const float meanDeltaPoint[3] = { meanDelta[0], meanDelta[1], meanDelta[2] };
+		const float meanDeltaPoint[3] = { snapshot.meanDelta[0], snapshot.meanDelta[1], snapshot.meanDelta[2] };
 		match.deviationFromMean = chunk_diag::Distance3(match.delta, meanDeltaPoint);
 		const float areaDelta = std::fabs(match.areaRatio - 1.0f);
 		if (match.deviationFromMean <= 1.0f)
 		{
-			within1++;
+			snapshot.within1++;
 		}
 		if (match.deviationFromMean <= 4.0f)
 		{
-			within4++;
+			snapshot.within4++;
 		}
 		if (areaDelta > 0.05f)
 		{
-			areaOutlierCount++;
+			snapshot.areaOutlierCount++;
 		}
 		if (match.normalDot < 0.98f)
 		{
-			normalOutlierCount++;
+			snapshot.normalOutlierCount++;
 		}
 		if (match.materialScore > 0.0f)
 		{
-			materialDiffCount++;
+			snapshot.materialDiffCount++;
 		}
 		match.score = match.deviationFromMean + areaDelta * 10.0f + (1.0f - match.normalDot) * 10.0f + match.materialScore;
 
@@ -1677,23 +1879,23 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 			staticSurface.kind != nri_scene::PTMapSurfaceKind::Ceiling &&
 			staticSurface.kind != nri_scene::PTMapSurfaceKind::Portal)
 		{
-			seamSurfaceCount++;
+			snapshot.seamSurfaceCount++;
 			auto adjacentChunkIt = sectorChunkLookup.find(staticSurface.surface.provenance.nextSectorIndex);
 			const bool adjacentReplaced =
 				adjacentChunkIt != sectorChunkLookup.end() &&
 				mRuntimeMutation.IsReplacementActive(adjacentChunkIt->second);
 			if (adjacentReplaced)
 			{
-				seamAgainstReplacedCount++;
+				snapshot.seamAgainstReplacedCount++;
 			}
 			else
 			{
-				seamAgainstStaticCount++;
+				snapshot.seamAgainstStaticCount++;
 			}
 
 			if (match.deviationFromMean > 0.5f)
 			{
-				seamOutlierCount++;
+				snapshot.seamOutlierCount++;
 			}
 		}
 	}
@@ -1707,37 +1909,13 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 		!matches.empty() &&
 		unmatchedStaticSurfaceIndices.empty() &&
 		unmatchedLiveSurfaceIndices.empty() &&
-		within4 + std::max<uint32_t>(1u, (uint32_t)matches.size() / 10u) >= (uint32_t)matches.size() &&
-		areaOutlierCount == 0 &&
-		normalOutlierCount == 0;
-
-	Printf("NRI PT chunk compare: chunk=%d sector=%d static_surfaces=%u live_surfaces=%u matched=%u unmatched_static=%u unmatched_live=%u reasons=%s dragged=%s replacement_active=%s mean_delta=(%.2f, %.2f, %.2f) within_1=%u within_4=%u area_outliers=%u normal_outliers=%u material_diffs=%u likely_coherent=%s live_tris=%u\n",
-		chunkIndex,
-		staticChunk.sectorIndex,
-		(uint32_t)staticSurfaceIndices.size(),
-		(uint32_t)liveSurfaceIndices.size(),
-		(uint32_t)matches.size(),
-		(uint32_t)unmatchedStaticSurfaceIndices.size(),
-		(uint32_t)unmatchedLiveSurfaceIndices.size(),
-		replacement != nullptr ? GetRuntimeMapMutationReasonSummary(replacement->reasonMask).c_str() : "none",
-		YesNo(replacement != nullptr && replacement->dragged),
-		YesNo(replacement != nullptr && replacement->active),
-		meanDelta[0],
-		meanDelta[1],
-		meanDelta[2],
-		within1,
-		within4,
-		areaOutlierCount,
-		normalOutlierCount,
-		materialDiffCount,
-		YesNo(likelyCoherent),
-		liveChunk.triangleCount);
-	Printf("NRI PT chunk seam compare: chunk=%d border_surfaces=%u seam_outliers=%u adjacent_static=%u adjacent_replaced=%u\n",
-		chunkIndex,
-		seamSurfaceCount,
-		seamOutlierCount,
-		seamAgainstStaticCount,
-		seamAgainstReplacedCount);
+		snapshot.within4 + std::max<uint32_t>(1u, (uint32_t)matches.size() / 10u) >= (uint32_t)matches.size() &&
+		snapshot.areaOutlierCount == 0 &&
+		snapshot.normalOutlierCount == 0;
+	snapshot.likelyCoherent = YesNo(likelyCoherent);
+	snapshot.matchedCount = (uint32_t)matches.size();
+	snapshot.unmatchedStaticCount = (uint32_t)unmatchedStaticSurfaceIndices.size();
+	snapshot.unmatchedLiveCount = (uint32_t)unmatchedLiveSurfaceIndices.size();
 
 	const size_t outlierCount = std::min<size_t>(matches.size(), 8u);
 	for (size_t i = 0; i < outlierCount; ++i)
@@ -1750,26 +1928,27 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 
 		const auto& staticSurface = mMapWorld.surfaces[match.staticSurfaceIndex];
 		const auto& liveSurface = liveWorld.surfaces[match.liveSurfaceIndex];
-		Printf("NRI PT chunk compare match: static_surface=%u live_surface=%u kind=%s source=%s sector=%d wall=%d section=%d nextsector=%d cstat=0x%x delta=(%.2f, %.2f, %.2f) dev=%.2f area_ratio=%.3f normal_dot=%.3f tile_static=%u tile_live=%u flags_static=0x%x flags_live=0x%x\n",
-			match.staticSurfaceIndex,
-			match.liveSurfaceIndex,
-			nri_diag::GetMapSurfaceKindName(staticSurface.kind),
-			nri_diag::GetSurfaceSourceTypeName(staticSurface.surface.provenance.sourceType),
-			staticSurface.surface.provenance.sectorIndex,
-			staticSurface.surface.provenance.wallIndex,
-			staticSurface.surface.provenance.sectionIndex,
-			staticSurface.surface.provenance.nextSectorIndex,
-			staticSurface.surface.provenance.cstat,
-			match.delta[0],
-			match.delta[1],
-			match.delta[2],
-			match.deviationFromMean,
-			match.areaRatio,
-			match.normalDot,
-			match.staticMetrics.textureId,
-			match.liveMetrics.textureId,
-			staticSurface.surface.material.flags,
-			liveSurface.surface.material.flags);
+		NRIMapChunkCompareMatchRow row = {};
+		row.staticSurfaceIndex = match.staticSurfaceIndex;
+		row.liveSurfaceIndex = match.liveSurfaceIndex;
+		row.kindName = nri_diag::GetMapSurfaceKindName(staticSurface.kind);
+		row.sourceName = nri_diag::GetSurfaceSourceTypeName(staticSurface.surface.provenance.sourceType);
+		row.sectorIndex = staticSurface.surface.provenance.sectorIndex;
+		row.wallIndex = staticSurface.surface.provenance.wallIndex;
+		row.sectionIndex = staticSurface.surface.provenance.sectionIndex;
+		row.nextSectorIndex = staticSurface.surface.provenance.nextSectorIndex;
+		row.cstat = staticSurface.surface.provenance.cstat;
+		row.delta[0] = match.delta[0];
+		row.delta[1] = match.delta[1];
+		row.delta[2] = match.delta[2];
+		row.deviationFromMean = match.deviationFromMean;
+		row.areaRatio = match.areaRatio;
+		row.normalDot = match.normalDot;
+		row.staticTextureId = match.staticMetrics.textureId;
+		row.liveTextureId = match.liveMetrics.textureId;
+		row.staticFlags = staticSurface.surface.material.flags;
+		row.liveFlags = liveSurface.surface.material.flags;
+		snapshot.matchRows.push_back(row);
 	}
 
 	size_t seamPrinted = 0;
@@ -1800,63 +1979,217 @@ void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
 			continue;
 		}
 
-		Printf("NRI PT chunk seam match: static_surface=%u live_surface=%u kind=%s wall=%d nextsector=%d adjacent_chunk=%d adjacent_replaced=%s delta=(%.2f, %.2f, %.2f) dev=%.2f area_ratio=%.3f normal_dot=%.3f seam_outlier=%s\n",
+		NRIMapChunkCompareSeamRow row = {};
+		row.staticSurfaceIndex = match.staticSurfaceIndex;
+		row.liveSurfaceIndex = match.liveSurfaceIndex;
+		row.kindName = nri_diag::GetMapSurfaceKindName(staticSurface.kind);
+		row.wallIndex = staticSurface.surface.provenance.wallIndex;
+		row.nextSectorIndex = staticSurface.surface.provenance.nextSectorIndex;
+		row.adjacentChunkIndex = adjacentChunkIndex;
+		row.adjacentReplaced = YesNo(adjacentReplaced);
+		row.delta[0] = match.delta[0];
+		row.delta[1] = match.delta[1];
+		row.delta[2] = match.delta[2];
+		row.deviationFromMean = match.deviationFromMean;
+		row.areaRatio = match.areaRatio;
+		row.normalDot = match.normalDot;
+		row.seamOutlier = YesNo(seamOutlier);
+		snapshot.seamRows.push_back(row);
+		seamPrinted++;
+	}
+
+	const size_t unmatchedStaticPrintCount = std::min<size_t>(unmatchedStaticSurfaceIndices.size(), 8u);
+	for (size_t i = 0; i < unmatchedStaticPrintCount; ++i)
+	{
+		const auto& surface = mMapWorld.surfaces[unmatchedStaticSurfaceIndices[i]];
+		snapshot.unmatchedStaticRows.push_back(BuildMapChunkCompareUnmatchedRow(unmatchedStaticSurfaceIndices[i], surface));
+	}
+
+	const size_t unmatchedLivePrintCount = std::min<size_t>(unmatchedLiveSurfaceIndices.size(), 8u);
+	for (size_t i = 0; i < unmatchedLivePrintCount; ++i)
+	{
+		const auto& surface = liveWorld.surfaces[unmatchedLiveSurfaceIndices[i]];
+		snapshot.unmatchedLiveRows.push_back(BuildMapChunkCompareUnmatchedRow(unmatchedLiveSurfaceIndices[i], surface));
+	}
+
+	return snapshot;
+}
+
+void PrintNRIMapChunkCompareSnapshot(const NRIMapChunkCompareSnapshot& snapshot)
+{
+	if (!snapshot.mapWorldValid)
+	{
+		Printf("NRI PT chunk compare: no authoritative map world has been built yet.\n");
+		return;
+	}
+
+	if (!snapshot.chunkResolved)
+	{
+		Printf("NRI PT chunk compare: no chunk was specified and the last surface probe hit did not resolve to a map chunk.\n");
+		return;
+	}
+
+	if (!snapshot.chunkInRange)
+	{
+		Printf("NRI PT chunk compare: chunk %d is out of range [0,%u).\n", snapshot.chunkIndex, snapshot.chunkRange);
+		return;
+	}
+
+	if (!snapshot.liveBuildSucceeded)
+	{
+		Printf("NRI PT chunk compare: failed to build live runtime chunk %d.\n", snapshot.chunkIndex);
+		return;
+	}
+
+	Printf("NRI PT chunk compare: chunk=%d sector=%d static_surfaces=%u live_surfaces=%u matched=%u unmatched_static=%u unmatched_live=%u reasons=%s dragged=%s replacement_active=%s mean_delta=(%.2f, %.2f, %.2f) within_1=%u within_4=%u area_outliers=%u normal_outliers=%u material_diffs=%u likely_coherent=%s live_tris=%u\n",
+		snapshot.chunkIndex,
+		snapshot.sectorIndex,
+		snapshot.staticSurfaceCount,
+		snapshot.liveSurfaceCount,
+		snapshot.matchedCount,
+		snapshot.unmatchedStaticCount,
+		snapshot.unmatchedLiveCount,
+		snapshot.replacementReasons.c_str(),
+		snapshot.dragged,
+		snapshot.replacementActive,
+		snapshot.meanDelta[0],
+		snapshot.meanDelta[1],
+		snapshot.meanDelta[2],
+		snapshot.within1,
+		snapshot.within4,
+		snapshot.areaOutlierCount,
+		snapshot.normalOutlierCount,
+		snapshot.materialDiffCount,
+		snapshot.likelyCoherent,
+		snapshot.liveTriangleCount);
+	Printf("NRI PT chunk seam compare: chunk=%d border_surfaces=%u seam_outliers=%u adjacent_static=%u adjacent_replaced=%u\n",
+		snapshot.chunkIndex,
+		snapshot.seamSurfaceCount,
+		snapshot.seamOutlierCount,
+		snapshot.seamAgainstStaticCount,
+		snapshot.seamAgainstReplacedCount);
+
+	for (const auto& match : snapshot.matchRows)
+	{
+		Printf("NRI PT chunk compare match: static_surface=%u live_surface=%u kind=%s source=%s sector=%d wall=%d section=%d nextsector=%d cstat=0x%x delta=(%.2f, %.2f, %.2f) dev=%.2f area_ratio=%.3f normal_dot=%.3f tile_static=%u tile_live=%u flags_static=0x%x flags_live=0x%x\n",
 			match.staticSurfaceIndex,
 			match.liveSurfaceIndex,
-			nri_diag::GetMapSurfaceKindName(staticSurface.kind),
-			staticSurface.surface.provenance.wallIndex,
-			staticSurface.surface.provenance.nextSectorIndex,
-			adjacentChunkIndex,
-			YesNo(adjacentReplaced),
+			match.kindName,
+			match.sourceName,
+			match.sectorIndex,
+			match.wallIndex,
+			match.sectionIndex,
+			match.nextSectorIndex,
+			match.cstat,
 			match.delta[0],
 			match.delta[1],
 			match.delta[2],
 			match.deviationFromMean,
 			match.areaRatio,
 			match.normalDot,
-			YesNo(seamOutlier));
-		seamPrinted++;
+			match.staticTextureId,
+			match.liveTextureId,
+			match.staticFlags,
+			match.liveFlags);
 	}
 
-	const size_t unmatchedStaticCount = std::min<size_t>(unmatchedStaticSurfaceIndices.size(), 8u);
-	for (size_t i = 0; i < unmatchedStaticCount; ++i)
+	for (const auto& seam : snapshot.seamRows)
 	{
-		const auto& surface = mMapWorld.surfaces[unmatchedStaticSurfaceIndices[i]];
+		Printf("NRI PT chunk seam match: static_surface=%u live_surface=%u kind=%s wall=%d nextsector=%d adjacent_chunk=%d adjacent_replaced=%s delta=(%.2f, %.2f, %.2f) dev=%.2f area_ratio=%.3f normal_dot=%.3f seam_outlier=%s\n",
+			seam.staticSurfaceIndex,
+			seam.liveSurfaceIndex,
+			seam.kindName,
+			seam.wallIndex,
+			seam.nextSectorIndex,
+			seam.adjacentChunkIndex,
+			seam.adjacentReplaced,
+			seam.delta[0],
+			seam.delta[1],
+			seam.delta[2],
+			seam.deviationFromMean,
+			seam.areaRatio,
+			seam.normalDot,
+			seam.seamOutlier);
+	}
+
+	for (const auto& surface : snapshot.unmatchedStaticRows)
+	{
 		Printf("NRI PT chunk compare unmatched_static: surface=%u kind=%s source=%s sector=%d wall=%d section=%d nextsector=%d cstat=0x%x tile=%u flags=0x%x verts=%u tris=%u\n",
-			unmatchedStaticSurfaceIndices[i],
-			nri_diag::GetMapSurfaceKindName(surface.kind),
-			nri_diag::GetSurfaceSourceTypeName(surface.surface.provenance.sourceType),
-			surface.surface.provenance.sectorIndex,
-			surface.surface.provenance.wallIndex,
-			surface.surface.provenance.sectionIndex,
-			surface.surface.provenance.nextSectorIndex,
-			surface.surface.provenance.cstat,
-			chunk_diag::GetSurfaceTextureId(surface),
-			surface.surface.material.flags,
-			(uint32_t)surface.surface.vertices.size(),
-			chunk_diag::CountSurfaceTriangles(surface.surface));
+			surface.surfaceIndex,
+			surface.kindName,
+			surface.sourceName,
+			surface.sectorIndex,
+			surface.wallIndex,
+			surface.sectionIndex,
+			surface.nextSectorIndex,
+			surface.cstat,
+			surface.textureId,
+			surface.flags,
+			surface.vertexCount,
+			surface.triangleCount);
 	}
 
-	const size_t unmatchedLiveCount = std::min<size_t>(unmatchedLiveSurfaceIndices.size(), 8u);
-	for (size_t i = 0; i < unmatchedLiveCount; ++i)
+	for (const auto& surface : snapshot.unmatchedLiveRows)
 	{
-		const auto& surface = liveWorld.surfaces[unmatchedLiveSurfaceIndices[i]];
 		Printf("NRI PT chunk compare unmatched_live: surface=%u kind=%s source=%s sector=%d wall=%d section=%d nextsector=%d cstat=0x%x tile=%u flags=0x%x verts=%u tris=%u\n",
-			unmatchedLiveSurfaceIndices[i],
-			nri_diag::GetMapSurfaceKindName(surface.kind),
-			nri_diag::GetSurfaceSourceTypeName(surface.surface.provenance.sourceType),
-			surface.surface.provenance.sectorIndex,
-			surface.surface.provenance.wallIndex,
-			surface.surface.provenance.sectionIndex,
-			surface.surface.provenance.nextSectorIndex,
-			surface.surface.provenance.cstat,
-			chunk_diag::GetSurfaceTextureId(surface),
-			surface.surface.material.flags,
-			(uint32_t)surface.surface.vertices.size(),
-			chunk_diag::CountSurfaceTriangles(surface.surface));
+			surface.surfaceIndex,
+			surface.kindName,
+			surface.sourceName,
+			surface.sectorIndex,
+			surface.wallIndex,
+			surface.sectionIndex,
+			surface.nextSectorIndex,
+			surface.cstat,
+			surface.textureId,
+			surface.flags,
+			surface.vertexCount,
+			surface.triangleCount);
 	}
 }
 
+void PrintNRIActorSpriteMaterialTraceSnapshot(const NRIActorSpriteMaterialTraceSnapshot& snapshot)
+{
+	for (const auto& row : snapshot.rows)
+	{
+		Printf("NRI PT actor-sprite material: frame=%u label=%s actor=%d source=%s material=%u tex_id=%u tex_index=%u emissive_mode=%u emissive_tex=%u palette=%u flags=0x%x light_flags=0x%x material_key=0x%llx tex_ptr=%p\n",
+			row.frameIndex,
+			row.label.c_str(),
+			row.actorIndex,
+			row.sourceName,
+			row.materialIndex,
+			row.textureId,
+			row.textureIndex,
+			row.emissiveMode,
+			row.emissiveTextureIndex,
+			row.paletteIndex,
+			row.materialFlags,
+			row.lightingFlags,
+			(unsigned long long)row.materialKey,
+			row.texture);
+	}
+
+	if (!snapshot.emitSummary)
+	{
+		return;
+	}
+
+	Printf("NRI PT actor-sprite materials: frame=%u label=%s materials=%u textures=%u actor_surfaces=%u actor_count=%u bridge_hash=0x%llx actor_hash=0x%llx qframe=%u outstanding_slots=%u\n",
+		snapshot.frameIndex,
+		snapshot.label.c_str(),
+		snapshot.materialCount,
+		snapshot.textureCount,
+		snapshot.actorSurfaceCount,
+		snapshot.actorCount,
+		(unsigned long long)snapshot.bridgeHash,
+		(unsigned long long)snapshot.actorHash,
+		snapshot.queuedFrameIndex,
+		snapshot.outstandingQueuedFrames);
+}
+
+void NRIRenderer::PrintMapChunkCompare(int32_t chunkIndex) const
+{
+	PrintNRIMapChunkCompareSnapshot(BuildMapChunkCompareSnapshot(chunkIndex));
+}
 void NRIRenderer::PrintSceneBufferStatus() const
 {
 	NRISceneBufferStatusSnapshot snapshot = {};
