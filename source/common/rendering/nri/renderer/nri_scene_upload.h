@@ -2,6 +2,8 @@
 
 #include "nri_frame_resources.h"
 
+#include <vector>
+
 class NRIRenderer;
 
 class NRISceneUploadManager
@@ -39,6 +41,22 @@ public:
 	static bool UpdateReprojectionBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites);
 	static bool UpdateVisibleChunkBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites);
 	static bool UpdateVisibleFlatPlaneBuffer(NRIRenderer& renderer, bool* ioWaitedForWrites);
+	static bool UpdateSceneDataSet(
+		NRIRenderer& renderer,
+		const NRIBufferResource& staticVertexBuffer,
+		const NRIBufferResource& staticIndexBuffer,
+		const NRIBufferResource& staticPrimitiveBuffer,
+		const NRIBufferResource& staticMaterialBuffer,
+		const NRIBufferResource& dynamicVertexBuffer,
+		const NRIBufferResource& dynamicIndexBuffer,
+		const NRIBufferResource& dynamicPrimitiveBuffer,
+		const NRIBufferResource& dynamicMaterialBuffer,
+		const std::vector<SceneInstanceData>& sceneInstances,
+		uint32_t staticPrimitiveCount,
+		uint32_t dynamicPrimitiveCount,
+		uint32_t staticMaterialCount,
+		uint32_t dynamicMaterialCount,
+		const char* reason);
 
 private:
 	static bool SceneDataDescriptorsReady(NRIRenderer& renderer);

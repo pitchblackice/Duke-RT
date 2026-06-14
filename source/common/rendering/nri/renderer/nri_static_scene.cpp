@@ -3,6 +3,7 @@
 #include "nri_renderer.h"
 #include "nri_diagnostic_names.h"
 #include "nri_render_geometry_helpers.h"
+#include "nri_scene_upload.h"
 #include "nri_sky_environment.h"
 #include "nri_static_scene_geometry.h"
 #include "nri_runtime_mutation_shared.h"
@@ -2290,7 +2291,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	services.updateSceneDataSet = [](void* user, const std::vector<SceneInstanceData>& sceneInstances)
 	{
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
-		return renderer->UpdateSceneDataSet(
+		return NRISceneUploadManager::UpdateSceneDataSet(*renderer,
 			renderer->mStaticVertexBuffer,
 			renderer->mStaticIndexBuffer,
 			renderer->mStaticPrimitiveBuffer,

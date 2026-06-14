@@ -5324,7 +5324,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			{
 				accelerationReady =
 					BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static) &&
-					UpdateSceneDataSet(
+					NRISceneUploadManager::UpdateSceneDataSet(*this,
 						mStaticVertexBuffer,
 						mStaticIndexBuffer,
 						mStaticPrimitiveBuffer,
@@ -5536,7 +5536,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					{
 						accelerationReady =
 							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static | SceneDataBufferMask_Dynamic) &&
-							UpdateSceneDataSet(
+							NRISceneUploadManager::UpdateSceneDataSet(*this,
 								mStaticVertexBuffer,
 								mStaticIndexBuffer,
 								mStaticPrimitiveBuffer,
@@ -5556,7 +5556,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					{
 						accelerationReady =
 							BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static) &&
-							UpdateSceneDataSet(
+							NRISceneUploadManager::UpdateSceneDataSet(*this,
 								mStaticVertexBuffer,
 								mStaticIndexBuffer,
 								mStaticPrimitiveBuffer,
@@ -5803,7 +5803,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		if (buffersReady)
 		{
 			sceneInstances.push_back({ 0u, nri_diag::SceneDataSourceDynamic, 0u, UINT32_MAX });
-			buffersReady = UpdateSceneDataSet(
+			buffersReady = NRISceneUploadManager::UpdateSceneDataSet(*this,
 				GetCurrentDynamicVertexBuffer(),
 				GetCurrentDynamicIndexBuffer(),
 				GetCurrentDynamicPrimitiveBuffer(),
@@ -5903,7 +5903,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			combinedGpuMaterials.swap(refreshedCombinedGpuMaterials);
 			dynamicGpuMaterials.assign(combinedGpuMaterials.begin() + staticMaterialCount, combinedGpuMaterials.end());
 			if (!UploadSceneBuffers(overlayGeometry, dynamicGpuMaterials) ||
-				!UpdateSceneDataSet(
+				!NRISceneUploadManager::UpdateSceneDataSet(*this,
 					mStaticVertexBuffer,
 					mStaticIndexBuffer,
 					mStaticPrimitiveBuffer,
@@ -5936,7 +5936,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	{
 		if (mGpuSceneHasDynamicOverlay)
 		{
-			if (!UpdateSceneDataSet(
+			if (!NRISceneUploadManager::UpdateSceneDataSet(*this,
 				mStaticVertexBuffer,
 				mStaticIndexBuffer,
 				mStaticPrimitiveBuffer,
@@ -5962,7 +5962,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		}
 		else if (!sceneLightUsesStaticMapScene)
 		{
-			if (!UpdateSceneDataSet(
+			if (!NRISceneUploadManager::UpdateSceneDataSet(*this,
 				GetCurrentDynamicVertexBuffer(),
 				GetCurrentDynamicIndexBuffer(),
 				GetCurrentDynamicPrimitiveBuffer(),

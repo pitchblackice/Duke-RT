@@ -1,6 +1,7 @@
 #include "nri_renderer.h"
 
 #include "../scene/nri_hash.h"
+#include "nri_scene_upload.h"
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
 #include "printf.h"
@@ -273,7 +274,7 @@ bool NRIRenderer::RestoreStaticTopLevelScene()
 	BuildStaticMapInstances(instances, sceneInstances);
 	return
 		BuildTopLevelAccelerationStructure(instances, SceneDataBufferMask_Static) &&
-		UpdateSceneDataSet(
+		NRISceneUploadManager::UpdateSceneDataSet(*this,
 			mStaticVertexBuffer,
 			mStaticIndexBuffer,
 			mStaticPrimitiveBuffer,
@@ -296,7 +297,7 @@ bool NRIRenderer::RefreshResidentStaticSceneDataSet()
 	std::vector<SceneInstanceData> sceneInstances;
 	std::vector<nri::TopLevelInstance> ignoredInstances;
 	BuildStaticMapInstances(ignoredInstances, sceneInstances);
-	return UpdateSceneDataSet(
+	return NRISceneUploadManager::UpdateSceneDataSet(*this,
 		mStaticVertexBuffer,
 		mStaticIndexBuffer,
 		mStaticPrimitiveBuffer,

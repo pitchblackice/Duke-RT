@@ -1837,21 +1837,6 @@ private:
 	void TraceEmissiveSectorResponseChange();
 	bool UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context, bool* ioWaitedForWrites = nullptr);
 	void UpdateBoundSectorLightingState();
-	bool UpdateSceneDataSet(
-		const NRIBufferResource& staticVertexBuffer,
-		const NRIBufferResource& staticIndexBuffer,
-		const NRIBufferResource& staticPrimitiveBuffer,
-		const NRIBufferResource& staticMaterialBuffer,
-		const NRIBufferResource& dynamicVertexBuffer,
-		const NRIBufferResource& dynamicIndexBuffer,
-		const NRIBufferResource& dynamicPrimitiveBuffer,
-		const NRIBufferResource& dynamicMaterialBuffer,
-		const std::vector<SceneInstanceData>& sceneInstances,
-		uint32_t staticPrimitiveCount,
-		uint32_t dynamicPrimitiveCount,
-		uint32_t staticMaterialCount,
-		uint32_t dynamicMaterialCount,
-		const char* reason = nullptr);
 	void TraceActorSpriteMaterialAssignments(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel);
 	void TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet);
 	uint32_t CountPotentialOutstandingQueuedFrames() const;
