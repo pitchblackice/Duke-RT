@@ -1519,7 +1519,6 @@ private:
 	friend class NRIAccelerationStructureManager;
 	friend class NRIDescriptorSetManager;
 	friend class NRIFrameResources;
-	friend class NRIPassDispatchContext;
 	friend class NRIPipelineStateManager;
 	friend class NRISceneUploadManager;
 	friend NRIRuntimeMutationResidentUploadServices BuildNRIRuntimeMutationResidentUploadServices(NRIRenderer& renderer);

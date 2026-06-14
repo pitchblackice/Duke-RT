@@ -4,222 +4,281 @@
 #include "nri_scene_upload.h"
 #include "../system/nri_renderdevice.h"
 
-NRIPassDispatchContext::NRIPassDispatchContext(NRIRenderer& renderer)
-	: mFrameBuffer(renderer.mFrameBuffer),
-	mCore(renderer.mFrameBuffer != nullptr ? &renderer.mFrameBuffer->mCore : nullptr),
-	mDevice(renderer.mFrameBuffer != nullptr ? renderer.mFrameBuffer->mDevice : nullptr),
-	mCommandBuffer(renderer.mFrameBuffer != nullptr ? renderer.mFrameBuffer->mCommandBuffer : nullptr),
-	mPipelineLayout(renderer.mPipelineLayout),
-	mTaaPipelineLayout(renderer.mTaaPipelineLayout),
-	mPresentPipelineLayout(renderer.mPresentPipelineLayout),
-	mSamplerSet(renderer.mSamplerSet),
-	mFrameTextureSet(renderer.mFrameTextureSet),
-	mOutputSet(renderer.mOutputSet),
-	mCompositionFrameTextureSet(renderer.mCompositionFrameTextureSet),
-	mCompositionOutputSet(renderer.mCompositionOutputSet),
-	mUpscalerPrepassFrameTextureSet(renderer.mUpscalerPrepassFrameTextureSet),
-	mUpscalerPrepassOutputSet(renderer.mUpscalerPrepassOutputSet),
-	mTaaFrameTextureSet(renderer.mTaaFrameTextureSet),
-	mTaaOutputSet(renderer.mTaaOutputSet),
-	mRawPresentFrameTextureSet(renderer.mRawPresentFrameTextureSet),
-	mRawPresentOutputSet(renderer.mRawPresentOutputSet),
-	mFinalPresentFrameTextureSet(renderer.mFinalPresentFrameTextureSet),
-	mFinalPresentOutputSet(renderer.mFinalPresentOutputSet),
-	mFrameInputDescriptors(renderer.mFrameInputDescriptors),
-	mOutputDescriptors(renderer.mOutputDescriptors),
-	mExposure(renderer.mExposure),
-	mTraceShaderStats(renderer.mTraceShaderStats),
-	mNrd(renderer.mNrd),
-	mUpscaler(renderer.mUpscaler),
-	mPersistentVoxels(renderer.mPersistentVoxels),
-	mBoundSceneInstances(renderer.mBoundSceneInstances),
-	mSceneInstanceBuffer(renderer.mSceneInstanceBuffer),
-	mDirectionalLightState(renderer.mDirectionalLightState),
-	mNightVisionState(renderer.mNightVisionState),
-	mLastPerfShellTraceStats(renderer.mLastPerfShellTraceStats),
-	mLastPerfTraceShaderStats(renderer.mLastPerfTraceShaderStats),
-	mLastAutoExposureSettings(renderer.mLastAutoExposureSettings),
-	mFrameIndex(renderer.mFrameIndex),
-	mRenderWidth(renderer.mRenderWidth),
-	mRenderHeight(renderer.mRenderHeight),
-	mOutputWidth(renderer.mOutputWidth),
-	mOutputHeight(renderer.mOutputHeight),
-	mTargetWidth(renderer.mTargetWidth),
-	mTargetHeight(renderer.mTargetHeight),
-	mSceneLeft(renderer.mSceneLeft),
-	mSceneTop(renderer.mSceneTop),
-	mCurrentCameraPos(renderer.mCurrentCameraPos),
-	mCurrentCameraForward(renderer.mCurrentCameraForward),
-	mCurrentCameraRight(renderer.mCurrentCameraRight),
-	mCurrentCameraUp(renderer.mCurrentCameraUp),
-	mPreviousCameraPos(renderer.mPreviousCameraPos),
-	mPreviousCameraForward(renderer.mPreviousCameraForward),
-	mPreviousCameraRight(renderer.mPreviousCameraRight),
-	mPreviousCameraUp(renderer.mPreviousCameraUp),
-	mCurrentTanHalfFovX(renderer.mCurrentTanHalfFovX),
-	mCurrentTanHalfFovY(renderer.mCurrentTanHalfFovY),
-	mPreviousTanHalfFovX(renderer.mPreviousTanHalfFovX),
-	mPreviousTanHalfFovY(renderer.mPreviousTanHalfFovY),
-	mCurrentJitter(renderer.mCurrentJitter),
-	mPreviousJitter(renderer.mPreviousJitter),
-	mCurrentViewToClip(renderer.mCurrentViewToClip),
-	mPreviousViewToClip(renderer.mPreviousViewToClip),
-	mCurrentWorldToView(renderer.mCurrentWorldToView),
-	mPreviousWorldToView(renderer.mPreviousWorldToView),
-	mSkyColor(renderer.mSkyColor),
-	mGroundColor(renderer.mGroundColor),
-	mGuiCaptureActive(renderer.mGuiCaptureActive),
-	mResetHistory(renderer.mResetHistory),
-	mHasAutoExposureSettingsState(renderer.mHasAutoExposureSettingsState),
-	mUseUpscaledInFinal(renderer.mUseUpscaledInFinal),
-	mUseDenoisedCompositionInputs(renderer.mUseDenoisedCompositionInputs),
-	mUseSplitShadowDenoiser(renderer.mUseSplitShadowDenoiser),
-	mBoundStaticPrimitiveCount(renderer.mBoundStaticPrimitiveCount),
-	mBoundDynamicPrimitiveCount(renderer.mBoundDynamicPrimitiveCount),
-	mBoundStaticMaterialCount(renderer.mBoundStaticMaterialCount),
-	mBoundDynamicMaterialCount(renderer.mBoundDynamicMaterialCount),
-	mBoundPortalCount(renderer.mBoundPortalCount),
-	mBoundRuntimeLightCount(renderer.mBoundRuntimeLightCount),
-	mBoundRuntimeLightTileCountX(renderer.mBoundRuntimeLightTileCountX),
-	mBoundRuntimeLightTileCountY(renderer.mBoundRuntimeLightTileCountY),
-	mHistoryInputSlot(renderer.mHistoryInputSlot),
-	mHistoryOutputSlot(renderer.mHistoryOutputSlot),
-	mUpscaledInputSlot(renderer.mUpscaledInputSlot),
-	mRenderer(renderer)
+NRITextureResource& NRIPassDispatchContext::TextureService::Get(FrameTextureSlot slot) const
 {
+	return getFrameTexture(user, slot);
 }
 
-NRITextureResource& NRIPassDispatchContext::GetFrameTexture(FrameTextureSlot slot) const
+nri::Pipeline* NRIPassDispatchContext::PipelineService::Get(PipelineSlot slot) const
 {
-	return mRenderer.GetFrameTexture(slot);
+	return getPipeline(user, slot);
 }
 
-nri::Pipeline* NRIPassDispatchContext::GetPipeline(PipelineSlot slot) const
+bool NRIPassDispatchContext::DescriptorService::UpdateFrameTextureSet() const
 {
-	return mRenderer.GetPipeline(slot);
+	return updateFrameTextureSet(user);
 }
 
-nri::DescriptorSet* NRIPassDispatchContext::GetCurrentSceneTextureSet() const
+bool NRIPassDispatchContext::DescriptorService::UpdateFrameTextureSet(nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 14>& descriptors) const
 {
-	return mRenderer.GetCurrentSceneTextureSet();
+	return updateFrameTextureSetWithDescriptors(user, descriptorSet, descriptors);
 }
 
-nri::DescriptorSet* NRIPassDispatchContext::GetCurrentSceneDataSet() const
+bool NRIPassDispatchContext::DescriptorService::UpdateOutputSet() const
 {
-	return mRenderer.GetCurrentSceneDataSet();
+	return updateOutputSet(user);
 }
 
-NRIResourceServices NRIPassDispatchContext::BuildResourceServices() const
+bool NRIPassDispatchContext::DescriptorService::UpdateOutputSet(nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 15>& descriptors) const
 {
-	return mRenderer.BuildResourceServices();
+	return updateOutputSetWithDescriptors(user, descriptorSet, descriptors);
 }
 
-bool NRIPassDispatchContext::UpdateReprojectionBuffer() const
+NRIResourceServices NRIPassDispatchContext::ResourceService::BuildResourceServices() const
 {
-	return NRISceneUploadManager::UpdateReprojectionBuffer(mRenderer, nullptr);
+	return buildResourceServices(user);
 }
 
-void NRIPassDispatchContext::ReadbackAutoExposureStats() const
+bool NRIPassDispatchContext::ResourceService::UpdateReprojectionBuffer() const
 {
-	mRenderer.ReadbackAutoExposureStats();
+	return updateReprojectionBuffer(user);
 }
 
-bool NRIPassDispatchContext::EnsureAutoExposureResources(const NRIAutoExposureSettings& settings) const
+NRIPTOutputPolicy NRIPassDispatchContext::ResourceService::GetOutputPolicy() const
 {
-	return mRenderer.EnsureAutoExposureResources(settings);
+	return getOutputPolicy(user);
 }
 
-void NRIPassDispatchContext::RequestAutoExposureReset(const char* reason) const
+void NRIPassDispatchContext::ResourceService::CopyFinalToActiveTarget() const
 {
-	mRenderer.RequestAutoExposureReset(reason);
+	copyFinalToActiveTarget(user);
 }
 
-bool NRIPassDispatchContext::DispatchAutoExposure(FrameTextureSlot sourceSlot) const
+void NRIPassDispatchContext::ResourceService::CopyTexture(NRITextureResource& source, NRITextureResource& destination) const
 {
-	return mRenderer.DispatchAutoExposure(sourceSlot);
+	copyTexture(user, source, destination);
 }
 
-void NRIPassDispatchContext::ResetSelfTestRouteSnapshot() const
+void NRIPassDispatchContext::ResourceService::TransitionTexture(NRITextureResource& texture, nri::AccessLayoutStage after) const
 {
-	mRenderer.ResetSelfTestRouteSnapshot();
+	transitionTexture(user, texture, after);
 }
 
-void NRIPassDispatchContext::SetSelfTestRouteSnapshot(const char* routeName, const char* presenterName, const char* ownerName, const char* passListName, bool denoiserRun, bool upscalerRun, bool exposureRun) const
+nri::CommandBuffer* NRIPassDispatchContext::CommandService::GetCommandBuffer() const
 {
-	mRenderer.SetSelfTestRouteSnapshot(routeName, presenterName, ownerName, passListName, denoiserRun, upscalerRun, exposureRun);
+	return commandBuffer;
 }
 
-void NRIPassDispatchContext::CopyFinalToActiveTarget() const
+void NRIPassDispatchContext::CommandService::SetPipelineLayout(nri::PipelineLayout* pipelineLayout) const
 {
-	mRenderer.CopyFinalToActiveTarget();
+	core->CmdSetPipelineLayout(*commandBuffer, nri::BindPoint::COMPUTE, *pipelineLayout);
 }
 
-void NRIPassDispatchContext::CopyTexture(NRITextureResource& source, NRITextureResource& destination) const
+void NRIPassDispatchContext::CommandService::SetRootConstants(const void* data, uint32_t size) const
 {
-	mRenderer.CopyTexture(source, destination);
+	core->CmdSetRootConstants(*commandBuffer, { 0, data, size, 0, nri::BindPoint::COMPUTE });
 }
 
-void NRIPassDispatchContext::TransitionTexture(NRITextureResource& texture, nri::AccessLayoutStage after) const
+void NRIPassDispatchContext::CommandService::SetDescriptorSet(uint32_t setIndex, nri::DescriptorSet* descriptorSet) const
 {
-	mFrameBuffer->TransitionTexture(texture, after);
+	core->CmdSetDescriptorSet(*commandBuffer, { setIndex, descriptorSet, nri::BindPoint::COMPUTE });
 }
 
-void NRIPassDispatchContext::BindSceneRootDescriptors() const
+void NRIPassDispatchContext::CommandService::SetPipeline(nri::Pipeline* pipeline) const
 {
-	mRenderer.BindSceneRootDescriptors();
+	core->CmdSetPipeline(*commandBuffer, *pipeline);
 }
 
-bool NRIPassDispatchContext::UpdateFrameTextureSet() const
+void NRIPassDispatchContext::CommandService::Dispatch(uint32_t x, uint32_t y, uint32_t z) const
 {
-	return NRIDescriptorSetManager::UpdateFrameTextureSet(mRenderer);
+	core->CmdDispatch(*commandBuffer, { x, y, z });
 }
 
-bool NRIPassDispatchContext::UpdateFrameTextureSet(nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 14>& descriptors) const
+void NRIPassDispatchContext::CommandService::UpdateDescriptorRanges(const nri::UpdateDescriptorRangeDesc* updates, uint32_t updateCount) const
 {
-	return NRIDescriptorSetManager::UpdateFrameTextureSet(mRenderer, descriptorSet, descriptors);
+	core->UpdateDescriptorRanges(updates, updateCount);
 }
 
-bool NRIPassDispatchContext::UpdateOutputSet() const
+nri::DescriptorSet* NRIPassDispatchContext::SceneBindingService::GetCurrentSceneTextureSet() const
 {
-	return NRIDescriptorSetManager::UpdateOutputSet(mRenderer);
+	return getCurrentSceneTextureSet(user);
 }
 
-bool NRIPassDispatchContext::UpdateOutputSet(nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 15>& descriptors) const
+nri::DescriptorSet* NRIPassDispatchContext::SceneBindingService::GetCurrentSceneDataSet() const
 {
-	return NRIDescriptorSetManager::UpdateOutputSet(mRenderer, descriptorSet, descriptors);
+	return getCurrentSceneDataSet(user);
 }
 
-NRIMainUpscalerKind NRIPassDispatchContext::ResolveMainUpscalerKind(bool logFallback) const
+void NRIPassDispatchContext::SceneBindingService::BindSceneRootDescriptors() const
 {
-	return mRenderer.ResolveMainUpscalerKind(logFallback);
+	bindSceneRootDescriptors(user);
 }
 
-NRIPostSharpenKind NRIPassDispatchContext::ResolvePostSharpenKind(bool logFallback) const
+void NRIPassDispatchContext::ExposureService::ReadbackAutoExposureStats() const
 {
-	return mRenderer.ResolvePostSharpenKind(logFallback);
+	readbackAutoExposureStats(user);
 }
 
-nri::UpscalerMode NRIPassDispatchContext::GetSelectedUpscalerMode() const
+bool NRIPassDispatchContext::ExposureService::EnsureAutoExposureResources(const NRIAutoExposureSettings& settings) const
 {
-	return mRenderer.GetSelectedUpscalerMode();
+	return ensureAutoExposureResources(user, settings);
 }
 
-bool NRIPassDispatchContext::ShouldRunAppTaaForFrameGraph(NRIMainUpscalerKind kind) const
+void NRIPassDispatchContext::ExposureService::RequestAutoExposureReset(const char* reason) const
 {
-	return mRenderer.ShouldRunAppTaaForFrameGraph(kind);
+	requestAutoExposureReset(user, reason);
 }
 
-NRIPassDispatchContext::ExposureRoute NRIPassDispatchContext::ResolveExposureRoute(FrameTextureSlot inputSlot, const NRIPTOutputPolicy& outputPolicy, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const
+bool NRIPassDispatchContext::ExposureService::DispatchAutoExposure(FrameTextureSlot sourceSlot) const
 {
-	return mRenderer.ResolveExposureRoute(inputSlot, outputPolicy, mainKind, postSharpenKind);
+	return dispatchAutoExposure(user, sourceSlot);
 }
 
-void NRIPassDispatchContext::TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const
+NRIPassDispatchContext::ExposureRoute NRIPassDispatchContext::ExposureService::ResolveExposureRoute(FrameTextureSlot inputSlot, const NRIPTOutputPolicy& outputPolicy, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const
 {
-	mRenderer.TraceTemporalState(stage, resolvedMainUpscaler, resolvedPostSharpen, runAppTaa, primarySlot, secondarySlot);
+	return resolveExposureRoute(user, inputSlot, outputPolicy, mainKind, postSharpenKind);
 }
 
-uint32_t NRIPassDispatchContext::EstimatePersistentVoxelPrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const
+NRIMainUpscalerKind NRIPassDispatchContext::UpscalerService::ResolveMainUpscalerKind(bool logFallback) const
 {
-	return mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(primitiveOffset);
+	return resolveMainUpscalerKind(user, logFallback);
+}
+
+NRIPostSharpenKind NRIPassDispatchContext::UpscalerService::ResolvePostSharpenKind(bool logFallback) const
+{
+	return resolvePostSharpenKind(user, logFallback);
+}
+
+nri::UpscalerMode NRIPassDispatchContext::UpscalerService::GetSelectedUpscalerMode() const
+{
+	return getSelectedUpscalerMode(user);
+}
+
+bool NRIPassDispatchContext::UpscalerService::ShouldRunAppTaaForFrameGraph(NRIMainUpscalerKind kind) const
+{
+	return shouldRunAppTaaForFrameGraph(user, kind);
+}
+
+void NRIPassDispatchContext::UpscalerService::TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const
+{
+	traceTemporalState(user, stage, resolvedMainUpscaler, resolvedPostSharpen, runAppTaa, primarySlot, secondarySlot);
+}
+
+bool NRIPassDispatchContext::UpscalerService::EnsureMainUpscaler(NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure) const
+{
+	return ensureMainUpscaler(user, kind, mode, outputWidth, outputHeight, exposure);
+}
+
+bool NRIPassDispatchContext::UpscalerService::DispatchMainUpscaler(NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc) const
+{
+	return dispatchMainUpscaler(user, kind, desc);
+}
+
+bool NRIPassDispatchContext::UpscalerService::EnsurePostSharpen(NRIPostSharpenKind kind, uint32_t outputWidth, uint32_t outputHeight) const
+{
+	return ensurePostSharpen(user, kind, outputWidth, outputHeight);
+}
+
+bool NRIPassDispatchContext::UpscalerService::DispatchPostSharpen(NRIPostSharpenKind kind, const NRIUpscalerDispatchDesc& desc) const
+{
+	return dispatchPostSharpen(user, kind, desc);
+}
+
+void NRIPassDispatchContext::SelfTestService::ResetSelfTestRouteSnapshot() const
+{
+	resetSelfTestRouteSnapshot(user);
+}
+
+void NRIPassDispatchContext::SelfTestService::SetSelfTestRouteSnapshot(const char* routeName, const char* presenterName, const char* ownerName, const char* passListName, bool denoiserRun, bool upscalerRun, bool exposureRun) const
+{
+	setSelfTestRouteSnapshot(user, routeName, presenterName, ownerName, passListName, denoiserRun, upscalerRun, exposureRun);
+}
+
+NRIPassDispatchContext::NRIPassDispatchContext(const Init& init)
+	: mTextures(init.textures),
+	mPipelines(init.pipelines),
+	mDescriptors(init.descriptors),
+	mResources(init.resources),
+	mCommands(init.commands),
+	mSceneBinding(init.sceneBinding),
+	mExposureService(init.exposureService),
+	mUpscalerService(init.upscalerService),
+	mSelfTest(init.selfTest),
+	mPipelineLayout(*init.pipelineLayout),
+	mTaaPipelineLayout(*init.taaPipelineLayout),
+	mPresentPipelineLayout(*init.presentPipelineLayout),
+	mSamplerSet(*init.samplerSet),
+	mFrameTextureSet(*init.frameTextureSet),
+	mOutputSet(*init.outputSet),
+	mCompositionFrameTextureSet(*init.compositionFrameTextureSet),
+	mCompositionOutputSet(*init.compositionOutputSet),
+	mUpscalerPrepassFrameTextureSet(*init.upscalerPrepassFrameTextureSet),
+	mUpscalerPrepassOutputSet(*init.upscalerPrepassOutputSet),
+	mTaaFrameTextureSet(*init.taaFrameTextureSet),
+	mTaaOutputSet(*init.taaOutputSet),
+	mRawPresentFrameTextureSet(*init.rawPresentFrameTextureSet),
+	mRawPresentOutputSet(*init.rawPresentOutputSet),
+	mFinalPresentFrameTextureSet(*init.finalPresentFrameTextureSet),
+	mFinalPresentOutputSet(*init.finalPresentOutputSet),
+	mFrameInputDescriptors(*init.frameInputDescriptors),
+	mOutputDescriptors(*init.outputDescriptors),
+	mExposure(*init.exposure),
+	mTraceShaderStats(*init.traceShaderStats),
+	mNrd(*init.nrd),
+	mUpscaler(*init.upscaler),
+	mPersistentVoxels(*init.persistentVoxels),
+	mBoundSceneInstances(*init.boundSceneInstances),
+	mSceneInstanceBuffer(*init.sceneInstanceBuffer),
+	mDirectionalLightState(*init.directionalLightState),
+	mNightVisionState(*init.nightVisionState),
+	mLastPerfShellTraceStats(*init.lastPerfShellTraceStats),
+	mLastPerfTraceShaderStats(*init.lastPerfTraceShaderStats),
+	mLastAutoExposureSettings(*init.lastAutoExposureSettings),
+	mFrameIndex(*init.frameIndex),
+	mRenderWidth(*init.renderWidth),
+	mRenderHeight(*init.renderHeight),
+	mOutputWidth(*init.outputWidth),
+	mOutputHeight(*init.outputHeight),
+	mTargetWidth(*init.targetWidth),
+	mTargetHeight(*init.targetHeight),
+	mSceneLeft(*init.sceneLeft),
+	mSceneTop(*init.sceneTop),
+	mCurrentCameraPos(init.currentCameraPos),
+	mCurrentCameraForward(init.currentCameraForward),
+	mCurrentCameraRight(init.currentCameraRight),
+	mCurrentCameraUp(init.currentCameraUp),
+	mPreviousCameraPos(init.previousCameraPos),
+	mPreviousCameraForward(init.previousCameraForward),
+	mPreviousCameraRight(init.previousCameraRight),
+	mPreviousCameraUp(init.previousCameraUp),
+	mCurrentTanHalfFovX(*init.currentTanHalfFovX),
+	mCurrentTanHalfFovY(*init.currentTanHalfFovY),
+	mPreviousTanHalfFovX(*init.previousTanHalfFovX),
+	mPreviousTanHalfFovY(*init.previousTanHalfFovY),
+	mCurrentJitter(init.currentJitter),
+	mPreviousJitter(init.previousJitter),
+	mCurrentViewToClip(init.currentViewToClip),
+	mPreviousViewToClip(init.previousViewToClip),
+	mCurrentWorldToView(init.currentWorldToView),
+	mPreviousWorldToView(init.previousWorldToView),
+	mSkyColor(init.skyColor),
+	mGroundColor(init.groundColor),
+	mGuiCaptureActive(*init.guiCaptureActive),
+	mResetHistory(*init.resetHistory),
+	mHasAutoExposureSettingsState(*init.hasAutoExposureSettingsState),
+	mUseUpscaledInFinal(*init.useUpscaledInFinal),
+	mUseDenoisedCompositionInputs(*init.useDenoisedCompositionInputs),
+	mUseSplitShadowDenoiser(*init.useSplitShadowDenoiser),
+	mBoundStaticPrimitiveCount(*init.boundStaticPrimitiveCount),
+	mBoundDynamicPrimitiveCount(*init.boundDynamicPrimitiveCount),
+	mBoundStaticMaterialCount(*init.boundStaticMaterialCount),
+	mBoundDynamicMaterialCount(*init.boundDynamicMaterialCount),
+	mBoundPortalCount(*init.boundPortalCount),
+	mBoundRuntimeLightCount(*init.boundRuntimeLightCount),
+	mBoundRuntimeLightTileCountX(*init.boundRuntimeLightTileCountX),
+	mBoundRuntimeLightTileCountY(*init.boundRuntimeLightTileCountY),
+	mHistoryInputSlot(*init.historyInputSlot),
+	mHistoryOutputSlot(*init.historyOutputSlot),
+	mUpscaledInputSlot(*init.upscaledInputSlot)
+{
 }

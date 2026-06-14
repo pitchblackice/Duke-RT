@@ -21,40 +21,272 @@ public:
 	using ExposureRoute = NRIRenderer::ExposureRoute;
 	using ExposureDomain = NRIRenderer::ExposureDomain;
 
-	explicit NRIPassDispatchContext(NRIRenderer& renderer);
+	struct TextureService
+	{
+		using GetFrameTextureFn = NRITextureResource& (*)(void* user, FrameTextureSlot slot);
 
-	NRITextureResource& GetFrameTexture(FrameTextureSlot slot) const;
-	nri::Pipeline* GetPipeline(PipelineSlot slot) const;
-	nri::DescriptorSet* GetCurrentSceneTextureSet() const;
-	nri::DescriptorSet* GetCurrentSceneDataSet() const;
-	NRIResourceServices BuildResourceServices() const;
-	bool UpdateReprojectionBuffer() const;
-	void ReadbackAutoExposureStats() const;
-	bool EnsureAutoExposureResources(const NRIAutoExposureSettings& settings) const;
-	void RequestAutoExposureReset(const char* reason) const;
-	bool DispatchAutoExposure(FrameTextureSlot sourceSlot) const;
-	void ResetSelfTestRouteSnapshot() const;
-	void SetSelfTestRouteSnapshot(const char* routeName, const char* presenterName, const char* ownerName, const char* passListName, bool denoiserRun, bool upscalerRun, bool exposureRun) const;
-	void CopyFinalToActiveTarget() const;
-	void CopyTexture(NRITextureResource& source, NRITextureResource& destination) const;
-	void TransitionTexture(NRITextureResource& texture, nri::AccessLayoutStage after) const;
-	void BindSceneRootDescriptors() const;
-	bool UpdateFrameTextureSet() const;
-	bool UpdateFrameTextureSet(nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 14>& descriptors) const;
-	bool UpdateOutputSet() const;
-	bool UpdateOutputSet(nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 15>& descriptors) const;
-	NRIMainUpscalerKind ResolveMainUpscalerKind(bool logFallback) const;
-	NRIPostSharpenKind ResolvePostSharpenKind(bool logFallback) const;
-	nri::UpscalerMode GetSelectedUpscalerMode() const;
-	bool ShouldRunAppTaaForFrameGraph(NRIMainUpscalerKind kind) const;
-	ExposureRoute ResolveExposureRoute(FrameTextureSlot inputSlot, const NRIPTOutputPolicy& outputPolicy, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const;
-	void TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
-	uint32_t EstimatePersistentVoxelPrimitiveCountForInstanceOffset(uint32_t primitiveOffset) const;
+		void* user = nullptr;
+		GetFrameTextureFn getFrameTexture = nullptr;
 
-	NRIRenderDevice* mFrameBuffer = nullptr;
-	nri::CoreInterface* mCore = nullptr;
-	nri::Device* mDevice = nullptr;
-	nri::CommandBuffer* mCommandBuffer = nullptr;
+		NRITextureResource& Get(FrameTextureSlot slot) const;
+	};
+
+	struct PipelineService
+	{
+		using GetPipelineFn = nri::Pipeline* (*)(void* user, PipelineSlot slot);
+
+		void* user = nullptr;
+		GetPipelineFn getPipeline = nullptr;
+
+		nri::Pipeline* Get(PipelineSlot slot) const;
+	};
+
+	struct DescriptorService
+	{
+		using UpdateFrameTextureSetFn = bool (*)(void* user);
+		using UpdateFrameTextureSetWithDescriptorsFn = bool (*)(void* user, nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 14>& descriptors);
+		using UpdateOutputSetFn = bool (*)(void* user);
+		using UpdateOutputSetWithDescriptorsFn = bool (*)(void* user, nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 15>& descriptors);
+
+		void* user = nullptr;
+		UpdateFrameTextureSetFn updateFrameTextureSet = nullptr;
+		UpdateFrameTextureSetWithDescriptorsFn updateFrameTextureSetWithDescriptors = nullptr;
+		UpdateOutputSetFn updateOutputSet = nullptr;
+		UpdateOutputSetWithDescriptorsFn updateOutputSetWithDescriptors = nullptr;
+
+		bool UpdateFrameTextureSet() const;
+		bool UpdateFrameTextureSet(nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 14>& descriptors) const;
+		bool UpdateOutputSet() const;
+		bool UpdateOutputSet(nri::DescriptorSet* descriptorSet, const std::array<nri::Descriptor*, 15>& descriptors) const;
+	};
+
+	struct ResourceService
+	{
+		using BuildResourceServicesFn = NRIResourceServices (*)(void* user);
+		using UpdateReprojectionBufferFn = bool (*)(void* user);
+		using GetOutputPolicyFn = NRIPTOutputPolicy (*)(void* user);
+		using CopyFinalToActiveTargetFn = void (*)(void* user);
+		using CopyTextureFn = void (*)(void* user, NRITextureResource& source, NRITextureResource& destination);
+		using TransitionTextureFn = void (*)(void* user, NRITextureResource& texture, nri::AccessLayoutStage after);
+
+		void* user = nullptr;
+		NRIRenderDevice* frameBuffer = nullptr;
+		nri::CoreInterface* core = nullptr;
+		nri::Device* device = nullptr;
+		nri::CommandBuffer* commandBuffer = nullptr;
+		BuildResourceServicesFn buildResourceServices = nullptr;
+		UpdateReprojectionBufferFn updateReprojectionBuffer = nullptr;
+		GetOutputPolicyFn getOutputPolicy = nullptr;
+		CopyFinalToActiveTargetFn copyFinalToActiveTarget = nullptr;
+		CopyTextureFn copyTexture = nullptr;
+		TransitionTextureFn transitionTexture = nullptr;
+
+		NRIResourceServices BuildResourceServices() const;
+		bool UpdateReprojectionBuffer() const;
+		NRIPTOutputPolicy GetOutputPolicy() const;
+		void CopyFinalToActiveTarget() const;
+		void CopyTexture(NRITextureResource& source, NRITextureResource& destination) const;
+		void TransitionTexture(NRITextureResource& texture, nri::AccessLayoutStage after) const;
+	};
+
+	struct CommandService
+	{
+		nri::CoreInterface* core = nullptr;
+		nri::CommandBuffer* commandBuffer = nullptr;
+
+		nri::CommandBuffer* GetCommandBuffer() const;
+		void SetPipelineLayout(nri::PipelineLayout* pipelineLayout) const;
+		void SetRootConstants(const void* data, uint32_t size) const;
+		void SetDescriptorSet(uint32_t setIndex, nri::DescriptorSet* descriptorSet) const;
+		void SetPipeline(nri::Pipeline* pipeline) const;
+		void Dispatch(uint32_t x, uint32_t y, uint32_t z) const;
+		void UpdateDescriptorRanges(const nri::UpdateDescriptorRangeDesc* updates, uint32_t updateCount) const;
+	};
+
+	struct SceneBindingService
+	{
+		using GetCurrentSceneDescriptorSetFn = nri::DescriptorSet* (*)(void* user);
+		using BindSceneRootDescriptorsFn = void (*)(void* user);
+
+		void* user = nullptr;
+		GetCurrentSceneDescriptorSetFn getCurrentSceneTextureSet = nullptr;
+		GetCurrentSceneDescriptorSetFn getCurrentSceneDataSet = nullptr;
+		BindSceneRootDescriptorsFn bindSceneRootDescriptors = nullptr;
+
+		nri::DescriptorSet* GetCurrentSceneTextureSet() const;
+		nri::DescriptorSet* GetCurrentSceneDataSet() const;
+		void BindSceneRootDescriptors() const;
+	};
+
+	struct ExposureService
+	{
+		using ReadbackAutoExposureStatsFn = void (*)(void* user);
+		using EnsureAutoExposureResourcesFn = bool (*)(void* user, const NRIAutoExposureSettings& settings);
+		using RequestAutoExposureResetFn = void (*)(void* user, const char* reason);
+		using DispatchAutoExposureFn = bool (*)(void* user, FrameTextureSlot sourceSlot);
+		using ResolveExposureRouteFn = ExposureRoute (*)(void* user, FrameTextureSlot inputSlot, const NRIPTOutputPolicy& outputPolicy, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind);
+
+		void* user = nullptr;
+		ReadbackAutoExposureStatsFn readbackAutoExposureStats = nullptr;
+		EnsureAutoExposureResourcesFn ensureAutoExposureResources = nullptr;
+		RequestAutoExposureResetFn requestAutoExposureReset = nullptr;
+		DispatchAutoExposureFn dispatchAutoExposure = nullptr;
+		ResolveExposureRouteFn resolveExposureRoute = nullptr;
+
+		void ReadbackAutoExposureStats() const;
+		bool EnsureAutoExposureResources(const NRIAutoExposureSettings& settings) const;
+		void RequestAutoExposureReset(const char* reason) const;
+		bool DispatchAutoExposure(FrameTextureSlot sourceSlot) const;
+		ExposureRoute ResolveExposureRoute(FrameTextureSlot inputSlot, const NRIPTOutputPolicy& outputPolicy, NRIMainUpscalerKind mainKind, NRIPostSharpenKind postSharpenKind) const;
+	};
+
+	struct UpscalerService
+	{
+		using ResolveMainUpscalerKindFn = NRIMainUpscalerKind (*)(void* user, bool logFallback);
+		using ResolvePostSharpenKindFn = NRIPostSharpenKind (*)(void* user, bool logFallback);
+		using GetSelectedUpscalerModeFn = nri::UpscalerMode (*)(void* user);
+		using ShouldRunAppTaaForFrameGraphFn = bool (*)(void* user, NRIMainUpscalerKind kind);
+		using TraceTemporalStateFn = void (*)(void* user, const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot);
+		using EnsureMainUpscalerFn = bool (*)(void* user, NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure);
+		using DispatchMainUpscalerFn = bool (*)(void* user, NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc);
+		using EnsurePostSharpenFn = bool (*)(void* user, NRIPostSharpenKind kind, uint32_t outputWidth, uint32_t outputHeight);
+		using DispatchPostSharpenFn = bool (*)(void* user, NRIPostSharpenKind kind, const NRIUpscalerDispatchDesc& desc);
+
+		void* user = nullptr;
+		ResolveMainUpscalerKindFn resolveMainUpscalerKind = nullptr;
+		ResolvePostSharpenKindFn resolvePostSharpenKind = nullptr;
+		GetSelectedUpscalerModeFn getSelectedUpscalerMode = nullptr;
+		ShouldRunAppTaaForFrameGraphFn shouldRunAppTaaForFrameGraph = nullptr;
+		TraceTemporalStateFn traceTemporalState = nullptr;
+		EnsureMainUpscalerFn ensureMainUpscaler = nullptr;
+		DispatchMainUpscalerFn dispatchMainUpscaler = nullptr;
+		EnsurePostSharpenFn ensurePostSharpen = nullptr;
+		DispatchPostSharpenFn dispatchPostSharpen = nullptr;
+
+		NRIMainUpscalerKind ResolveMainUpscalerKind(bool logFallback) const;
+		NRIPostSharpenKind ResolvePostSharpenKind(bool logFallback) const;
+		nri::UpscalerMode GetSelectedUpscalerMode() const;
+		bool ShouldRunAppTaaForFrameGraph(NRIMainUpscalerKind kind) const;
+		void TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const;
+		bool EnsureMainUpscaler(NRIMainUpscalerKind kind, nri::UpscalerMode mode, uint32_t outputWidth, uint32_t outputHeight, bool exposure) const;
+		bool DispatchMainUpscaler(NRIMainUpscalerKind kind, const NRIUpscalerDispatchDesc& desc) const;
+		bool EnsurePostSharpen(NRIPostSharpenKind kind, uint32_t outputWidth, uint32_t outputHeight) const;
+		bool DispatchPostSharpen(NRIPostSharpenKind kind, const NRIUpscalerDispatchDesc& desc) const;
+	};
+
+	struct SelfTestService
+	{
+		using ResetSelfTestRouteSnapshotFn = void (*)(void* user);
+		using SetSelfTestRouteSnapshotFn = void (*)(void* user, const char* routeName, const char* presenterName, const char* ownerName, const char* passListName, bool denoiserRun, bool upscalerRun, bool exposureRun);
+
+		void* user = nullptr;
+		ResetSelfTestRouteSnapshotFn resetSelfTestRouteSnapshot = nullptr;
+		SetSelfTestRouteSnapshotFn setSelfTestRouteSnapshot = nullptr;
+
+		void ResetSelfTestRouteSnapshot() const;
+		void SetSelfTestRouteSnapshot(const char* routeName, const char* presenterName, const char* ownerName, const char* passListName, bool denoiserRun, bool upscalerRun, bool exposureRun) const;
+	};
+
+	struct Init
+	{
+		TextureService textures;
+		PipelineService pipelines;
+		DescriptorService descriptors;
+		ResourceService resources;
+		CommandService commands;
+		SceneBindingService sceneBinding;
+		ExposureService exposureService;
+		UpscalerService upscalerService;
+		SelfTestService selfTest;
+		nri::PipelineLayout** pipelineLayout = nullptr;
+		nri::PipelineLayout** taaPipelineLayout = nullptr;
+		nri::PipelineLayout** presentPipelineLayout = nullptr;
+		nri::DescriptorSet** samplerSet = nullptr;
+		nri::DescriptorSet** frameTextureSet = nullptr;
+		nri::DescriptorSet** outputSet = nullptr;
+		nri::DescriptorSet** compositionFrameTextureSet = nullptr;
+		nri::DescriptorSet** compositionOutputSet = nullptr;
+		nri::DescriptorSet** upscalerPrepassFrameTextureSet = nullptr;
+		nri::DescriptorSet** upscalerPrepassOutputSet = nullptr;
+		nri::DescriptorSet** taaFrameTextureSet = nullptr;
+		nri::DescriptorSet** taaOutputSet = nullptr;
+		nri::DescriptorSet** rawPresentFrameTextureSet = nullptr;
+		nri::DescriptorSet** rawPresentOutputSet = nullptr;
+		nri::DescriptorSet** finalPresentFrameTextureSet = nullptr;
+		nri::DescriptorSet** finalPresentOutputSet = nullptr;
+		std::array<nri::Descriptor*, 14>* frameInputDescriptors = nullptr;
+		std::array<nri::Descriptor*, 15>* outputDescriptors = nullptr;
+		NRIExposureController* exposure = nullptr;
+		NRITraceShaderStats* traceShaderStats = nullptr;
+		NRINrdContext* nrd = nullptr;
+		NRIUpscalerContext* upscaler = nullptr;
+		NRIPersistentVoxelResidency* persistentVoxels = nullptr;
+		std::vector<SceneInstanceData>* boundSceneInstances = nullptr;
+		NRIBufferResource* sceneInstanceBuffer = nullptr;
+		NRIDirectionalLightState* directionalLightState = nullptr;
+		NRIPTNightVisionState* nightVisionState = nullptr;
+		NRIRenderer::PerfShellTraceStats* lastPerfShellTraceStats = nullptr;
+		NRIRenderer::PerfTraceShaderStats* lastPerfTraceShaderStats = nullptr;
+		NRIAutoExposureSettings* lastAutoExposureSettings = nullptr;
+		uint32_t* frameIndex = nullptr;
+		uint32_t* renderWidth = nullptr;
+		uint32_t* renderHeight = nullptr;
+		uint32_t* outputWidth = nullptr;
+		uint32_t* outputHeight = nullptr;
+		uint32_t* targetWidth = nullptr;
+		uint32_t* targetHeight = nullptr;
+		int32_t* sceneLeft = nullptr;
+		int32_t* sceneTop = nullptr;
+		float* currentCameraPos = nullptr;
+		float* currentCameraForward = nullptr;
+		float* currentCameraRight = nullptr;
+		float* currentCameraUp = nullptr;
+		float* previousCameraPos = nullptr;
+		float* previousCameraForward = nullptr;
+		float* previousCameraRight = nullptr;
+		float* previousCameraUp = nullptr;
+		float* currentTanHalfFovX = nullptr;
+		float* currentTanHalfFovY = nullptr;
+		float* previousTanHalfFovX = nullptr;
+		float* previousTanHalfFovY = nullptr;
+		float* currentJitter = nullptr;
+		float* previousJitter = nullptr;
+		float* currentViewToClip = nullptr;
+		float* previousViewToClip = nullptr;
+		float* currentWorldToView = nullptr;
+		float* previousWorldToView = nullptr;
+		float* skyColor = nullptr;
+		float* groundColor = nullptr;
+		bool* guiCaptureActive = nullptr;
+		bool* resetHistory = nullptr;
+		bool* hasAutoExposureSettingsState = nullptr;
+		bool* useUpscaledInFinal = nullptr;
+		bool* useDenoisedCompositionInputs = nullptr;
+		bool* useSplitShadowDenoiser = nullptr;
+		uint32_t* boundStaticPrimitiveCount = nullptr;
+		uint32_t* boundDynamicPrimitiveCount = nullptr;
+		uint32_t* boundStaticMaterialCount = nullptr;
+		uint32_t* boundDynamicMaterialCount = nullptr;
+		uint32_t* boundPortalCount = nullptr;
+		uint32_t* boundRuntimeLightCount = nullptr;
+		uint32_t* boundRuntimeLightTileCountX = nullptr;
+		uint32_t* boundRuntimeLightTileCountY = nullptr;
+		FrameTextureSlot* historyInputSlot = nullptr;
+		FrameTextureSlot* historyOutputSlot = nullptr;
+		FrameTextureSlot* upscaledInputSlot = nullptr;
+	};
+
+	explicit NRIPassDispatchContext(const Init& init);
+
+	TextureService mTextures;
+	PipelineService mPipelines;
+	DescriptorService mDescriptors;
+	ResourceService mResources;
+	CommandService mCommands;
+	SceneBindingService mSceneBinding;
+	ExposureService mExposureService;
+	UpscalerService mUpscalerService;
+	SelfTestService mSelfTest;
 	nri::PipelineLayout*& mPipelineLayout;
 	nri::PipelineLayout*& mTaaPipelineLayout;
 	nri::PipelineLayout*& mPresentPipelineLayout;
@@ -131,9 +363,6 @@ public:
 	FrameTextureSlot& mHistoryInputSlot;
 	FrameTextureSlot& mHistoryOutputSlot;
 	FrameTextureSlot& mUpscaledInputSlot;
-
-private:
-	NRIRenderer& mRenderer;
 };
 
 class NRIPassDispatcher
