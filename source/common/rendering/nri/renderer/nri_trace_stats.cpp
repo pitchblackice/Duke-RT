@@ -344,33 +344,3 @@ void NRITraceShaderStats::Readback(
 	context.core->UnmapBuffer(*mReadbackBuffer.buffer);
 	mPendingFrame = 0;
 }
-
-void NRIRenderer::ResetTraceShaderStatsBuffer()
-{
-	mTraceShaderStats.ResetBuffer(BuildResourceServices(), ShouldCollectTraceShaderStats());
-}
-
-
-
-void NRIRenderer::CopyTraceShaderStatsForReadback(uint64_t frameNumber)
-{
-	mTraceShaderStats.CopyForReadback(BuildResourceServices(), ShouldCollectTraceShaderStats(), frameNumber);
-}
-
-
-
-void NRIRenderer::ReadbackTraceShaderStats()
-{
-	NRITraceShaderStatsReadbackInput input = {};
-	input.enabled = (bool)nri_ptshaderstats;
-	input.boundSceneInstances = &mBoundSceneInstances;
-	input.staticPrimitiveCount = mBoundStaticPrimitiveCount;
-	input.dynamicPrimitiveCount = mBoundDynamicPrimitiveCount;
-	input.persistentVoxelPrimitiveCount = mPersistentVoxels.BoundPrimitiveCount();
-	input.user = this;
-	input.estimatePersistentVoxelPrimitiveCount = [](void* user, uint32_t primitiveOffset) -> uint32_t
-	{
-		return static_cast<NRIRenderer*>(user)->mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(primitiveOffset);
-	};
-	mTraceShaderStats.Readback(BuildResourceServices(), input, mLastPerfTraceShaderStats);
-}

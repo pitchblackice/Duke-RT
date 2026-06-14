@@ -1972,9 +1972,6 @@ private:
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors, const char* reason = nullptr);
-	void ResetTraceShaderStatsBuffer();
-	void CopyTraceShaderStatsForReadback(uint64_t frameNumber);
-	void ReadbackTraceShaderStats();
 	bool EnsureAutoExposureResources(const NRIAutoExposureSettings& settings);
 	void DestroyAutoExposureResources();
 	bool UpdateAutoExposureDescriptorSets(FrameTextureSlot sourceSlot);

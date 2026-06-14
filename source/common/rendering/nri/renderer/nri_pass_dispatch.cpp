@@ -390,7 +390,18 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	ScopedPtPerfTimer traceOpaqueTimer(mLastPerfShellTraceStats.traceOpaqueMs);
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.traceOpaqueReadbackMs);
-		ReadbackTraceShaderStats();
+		NRITraceShaderStatsReadbackInput input = {};
+		input.enabled = (bool)nri_ptshaderstats;
+		input.boundSceneInstances = &mBoundSceneInstances;
+		input.staticPrimitiveCount = mBoundStaticPrimitiveCount;
+		input.dynamicPrimitiveCount = mBoundDynamicPrimitiveCount;
+		input.persistentVoxelPrimitiveCount = mPersistentVoxels.BoundPrimitiveCount();
+		input.user = this;
+		input.estimatePersistentVoxelPrimitiveCount = [](void* user, uint32_t primitiveOffset) -> uint32_t
+		{
+			return static_cast<NRIRenderer*>(user)->mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(primitiveOffset);
+		};
+		mTraceShaderStats.Readback(BuildResourceServices(), input, mLastPerfTraceShaderStats);
 		ReadbackAutoExposureStats();
 	}
 
@@ -516,13 +527,13 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mLastPerfShellTraceStats.traceOpaqueDispatchZ = dispatchZ;
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.traceOpaqueCommandMs);
-		ResetTraceShaderStatsBuffer();
+		mTraceShaderStats.ResetBuffer(BuildResourceServices(), ShouldCollectTraceShaderStats());
 		mFrameBuffer->mCore.CmdSetPipeline(*mFrameBuffer->mCommandBuffer, *GetPipeline(PipelineSlot::TraceOpaque));
 		mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { dispatchX, dispatchY, dispatchZ });
 	}
 	{
 		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.traceOpaqueStatsCopyMs);
-		CopyTraceShaderStatsForReadback((uint64_t)mFrameIndex);
+		mTraceShaderStats.CopyForReadback(BuildResourceServices(), ShouldCollectTraceShaderStats(), (uint64_t)mFrameIndex);
 	}
 	return true;
 }
