@@ -1,9 +1,18 @@
 #include "nri_upscaler.h"
 
 #include "../system/nri_renderdevice.h"
+#include "nri_renderer.h"
+#include "c_cvars.h"
 #include "printf.h"
 
 #include <cstring>
+#include <limits>
+
+EXTERN_CVAR(String, nri_api)
+EXTERN_CVAR(Int, nri_upscaler)
+EXTERN_CVAR(Int, nri_postsharpen)
+EXTERN_CVAR(Int, nri_upscalermode)
+EXTERN_CVAR(Bool, nri_pttaa)
 
 namespace
 {
@@ -36,6 +45,104 @@ namespace
 		default: return "unknown";
 		}
 	}
+}
+
+void NRISyncLegacyUpscalerConfig(bool logMigration)
+{
+	if ((int)nri_upscaler == 1)
+	{
+		nri_upscaler = 0;
+		if ((int)nri_postsharpen == 0)
+		{
+			nri_postsharpen = 1;
+		}
+
+		static bool loggedLegacyNisMigration = false;
+		if (logMigration && !loggedLegacyNisMigration)
+		{
+			Printf("NRI upscaler config: migrated legacy nri_upscaler=1 (NIS) to nri_upscaler=0 + nri_postsharpen=1\n");
+			loggedLegacyNisMigration = true;
+		}
+	}
+
+	const int clampedMainUpscaler =
+		(int)nri_upscaler == 0 || (int)nri_upscaler == 2 || (int)nri_upscaler == 3
+		? (int)nri_upscaler
+		: 0;
+	if ((int)nri_upscaler != clampedMainUpscaler)
+	{
+		const int invalidValue = (int)nri_upscaler;
+		nri_upscaler = clampedMainUpscaler;
+
+		static int lastLoggedInvalidMainUpscaler = std::numeric_limits<int>::min();
+		if (logMigration && lastLoggedInvalidMainUpscaler != invalidValue)
+		{
+			Printf("NRI upscaler config: invalid main upscaler value %d, forcing off\n", invalidValue);
+			lastLoggedInvalidMainUpscaler = invalidValue;
+		}
+	}
+
+	const int clampedPostSharpen = (int)nri_postsharpen == 1 ? 1 : 0;
+	if ((int)nri_postsharpen != clampedPostSharpen)
+	{
+		const int invalidValue = (int)nri_postsharpen;
+		nri_postsharpen = clampedPostSharpen;
+
+		static int lastLoggedInvalidPostSharpen = std::numeric_limits<int>::min();
+		if (logMigration && lastLoggedInvalidPostSharpen != invalidValue)
+		{
+			Printf("NRI upscaler config: invalid post sharpen value %d, forcing off\n", invalidValue);
+			lastLoggedInvalidPostSharpen = invalidValue;
+		}
+	}
+}
+
+const char* NRIGetMainUpscalerName(NRIMainUpscalerKind kind)
+{
+	switch (kind)
+	{
+	case NRIMainUpscalerKind::DLSR: return "DLSS-SR";
+	case NRIMainUpscalerKind::DLRR: return "DLRR";
+	default: return "off";
+	}
+}
+
+const char* NRIGetPostSharpenName(NRIPostSharpenKind kind)
+{
+	switch (kind)
+	{
+	case NRIPostSharpenKind::NIS: return "NIS";
+	default: return "off";
+	}
+}
+
+nri::UpscalerType NRIToMainUpscalerType(NRIMainUpscalerKind kind)
+{
+	switch (kind)
+	{
+	case NRIMainUpscalerKind::DLSR: return nri::UpscalerType::DLSR;
+	case NRIMainUpscalerKind::DLRR: return nri::UpscalerType::DLRR;
+	default: return nri::UpscalerType::NIS;
+	}
+}
+
+nri::UpscalerType NRIToPostSharpenType(NRIPostSharpenKind kind)
+{
+	switch (kind)
+	{
+	case NRIPostSharpenKind::NIS: return nri::UpscalerType::NIS;
+	default: return nri::UpscalerType::NIS;
+	}
+}
+
+bool NRIIsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
+{
+	return kind == NRIMainUpscalerKind::Off;
+}
+
+bool NRIShouldRunAppTaa(NRIMainUpscalerKind kind)
+{
+	return NRIIsAppTaaEligibleUpscaler(kind) && !!nri_pttaa;
 }
 
 bool NRIUpscalerContext::EnsureUpscaler(
@@ -228,4 +335,216 @@ void NRIUpscalerContext::Shutdown(NRIRenderDevice& frameBuffer)
 	mNis = {};
 	mDlsr = {};
 	mDlrr = {};
+}
+
+bool NRIRenderer::IsMainUpscalerSupported(NRIMainUpscalerKind kind) const
+{
+	if (kind == NRIMainUpscalerKind::Off || mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
+	{
+		return kind == NRIMainUpscalerKind::Off;
+	}
+
+	return mFrameBuffer->mUpscaler.IsUpscalerSupported(*mFrameBuffer->mDevice, NRIToMainUpscalerType(kind));
+}
+
+bool NRIRenderer::IsPostSharpenSupported(NRIPostSharpenKind kind) const
+{
+	if (kind == NRIPostSharpenKind::Off || mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
+	{
+		return kind == NRIPostSharpenKind::Off;
+	}
+
+	return mFrameBuffer->mUpscaler.IsUpscalerSupported(*mFrameBuffer->mDevice, NRIToPostSharpenType(kind));
+}
+
+NRIMainUpscalerKind NRIRenderer::ResolveMainUpscalerKind(bool logFallback)
+{
+	NRISyncLegacyUpscalerConfig(logFallback);
+	const NRIMainUpscalerKind requested = GetSelectedMainUpscalerKind();
+	NRIMainUpscalerKind resolved = requested;
+
+	switch (requested)
+	{
+	case NRIMainUpscalerKind::DLRR:
+		if (!IsMainUpscalerSupported(NRIMainUpscalerKind::DLRR))
+		{
+			resolved =
+				IsMainUpscalerSupported(NRIMainUpscalerKind::DLSR) ? NRIMainUpscalerKind::DLSR :
+				NRIMainUpscalerKind::Off;
+		}
+		break;
+
+	case NRIMainUpscalerKind::DLSR:
+		if (!IsMainUpscalerSupported(NRIMainUpscalerKind::DLSR))
+		{
+			resolved = NRIMainUpscalerKind::Off;
+		}
+		break;
+
+	default:
+		break;
+	}
+
+	if (logFallback &&
+		(requested != resolved) &&
+		(mLastMainUpscalerRequest != (int)nri_upscaler || mLastMainUpscalerResolved != resolved))
+	{
+		Printf("NRI main upscaler fallback: requested %s is unavailable on %s, using %s\n",
+			NRIGetMainUpscalerName(requested),
+			(const char*)nri_api,
+			NRIGetMainUpscalerName(resolved));
+		mLastMainUpscalerRequest = (int)nri_upscaler;
+		mLastMainUpscalerResolved = resolved;
+	}
+
+	return resolved;
+}
+
+NRIPostSharpenKind NRIRenderer::ResolvePostSharpenKind(bool logFallback)
+{
+	NRISyncLegacyUpscalerConfig(logFallback);
+	const NRIPostSharpenKind requested = GetSelectedPostSharpenKind();
+	NRIPostSharpenKind resolved = requested;
+
+	if (requested == NRIPostSharpenKind::NIS && !IsPostSharpenSupported(NRIPostSharpenKind::NIS))
+	{
+		resolved = NRIPostSharpenKind::Off;
+	}
+
+	if (logFallback &&
+		(requested != resolved) &&
+		(mLastPostSharpenRequest != (int)nri_postsharpen || mLastPostSharpenResolved != resolved))
+	{
+		Printf("NRI post sharpen fallback: requested %s is unavailable on %s, using %s\n",
+			NRIGetPostSharpenName(requested),
+			(const char*)nri_api,
+			NRIGetPostSharpenName(resolved));
+		mLastPostSharpenRequest = (int)nri_postsharpen;
+		mLastPostSharpenResolved = resolved;
+	}
+
+	return resolved;
+}
+
+const char* NRIRenderer::GetFrameTextureSlotName(FrameTextureSlot slot) const
+{
+	switch (slot)
+	{
+	case FrameTextureSlot::ViewZ: return "ViewZ";
+	case FrameTextureSlot::Motion: return "Motion";
+	case FrameTextureSlot::NormalRoughness: return "NormalRoughness";
+	case FrameTextureSlot::BaseColorMetalness: return "BaseColorMetalness";
+	case FrameTextureSlot::UnfilteredDiffuse: return "UnfilteredDiffuse";
+	case FrameTextureSlot::UnfilteredSpecular: return "UnfilteredSpecular";
+	case FrameTextureSlot::UnfilteredPenumbra: return "UnfilteredPenumbra";
+	case FrameTextureSlot::DenoisedDiffuse: return "DenoisedDiffuse";
+	case FrameTextureSlot::DenoisedSpecular: return "DenoisedSpecular";
+	case FrameTextureSlot::DenoisedShadow: return "DenoisedShadow";
+	case FrameTextureSlot::Composed: return "Composed";
+	case FrameTextureSlot::TraceTransparentOutput: return "TraceTransparentOutput";
+	case FrameTextureSlot::DirectLighting: return "DirectLighting";
+	case FrameTextureSlot::DirectEmission: return "DirectEmission";
+	case FrameTextureSlot::TaaHistoryPing: return "TaaHistoryPing";
+	case FrameTextureSlot::TaaHistoryPong: return "TaaHistoryPong";
+	case FrameTextureSlot::Validation: return "Validation";
+	case FrameTextureSlot::SrInput: return "SrInput";
+	case FrameTextureSlot::RrInput: return "RrInput";
+	case FrameTextureSlot::UpscalerDepth: return "UpscalerDepth";
+	case FrameTextureSlot::RrGuideDiffuseAlbedo: return "RrGuideDiffuseAlbedo";
+	case FrameTextureSlot::RrGuideSpecularAlbedo: return "RrGuideSpecularAlbedo";
+	case FrameTextureSlot::RrGuideSpecularHitDistance: return "RrGuideSpecularHitDistance";
+	case FrameTextureSlot::RrGuideNormalRoughness: return "RrGuideNormalRoughness";
+	case FrameTextureSlot::VendorOutput: return "VendorOutput";
+	case FrameTextureSlot::PostSharpenOutput: return "PostSharpenOutput";
+	case FrameTextureSlot::Final: return "Final";
+	case FrameTextureSlot::Count: return "Count";
+	default: return "Unknown";
+	}
+}
+
+NRIMainUpscalerKind NRIRenderer::GetSelectedMainUpscalerKind() const
+{
+	NRISyncLegacyUpscalerConfig(false);
+	switch ((int)nri_upscaler)
+	{
+	default:
+	case 0: return NRIMainUpscalerKind::Off;
+	case 2: return NRIMainUpscalerKind::DLSR;
+	case 3: return NRIMainUpscalerKind::DLRR;
+	}
+}
+
+NRIPostSharpenKind NRIRenderer::GetSelectedPostSharpenKind() const
+{
+	NRISyncLegacyUpscalerConfig(false);
+	switch ((int)nri_postsharpen)
+	{
+	default:
+	case 0: return NRIPostSharpenKind::Off;
+	case 1: return NRIPostSharpenKind::NIS;
+	}
+}
+
+NRIMainUpscalerKind NRIRenderer::GetResolvedMainUpscalerKindForStatus() const
+{
+	const NRIMainUpscalerKind requested = GetSelectedMainUpscalerKind();
+
+	switch (requested)
+	{
+	case NRIMainUpscalerKind::DLRR:
+		if (!IsMainUpscalerSupported(NRIMainUpscalerKind::DLRR))
+		{
+			return
+				IsMainUpscalerSupported(NRIMainUpscalerKind::DLSR) ? NRIMainUpscalerKind::DLSR :
+				NRIMainUpscalerKind::Off;
+		}
+		break;
+
+	case NRIMainUpscalerKind::DLSR:
+		if (!IsMainUpscalerSupported(NRIMainUpscalerKind::DLSR))
+		{
+			return NRIMainUpscalerKind::Off;
+		}
+		break;
+
+	default:
+		break;
+	}
+
+	return requested;
+}
+
+NRIPostSharpenKind NRIRenderer::GetResolvedPostSharpenKindForStatus() const
+{
+	const NRIPostSharpenKind requested = GetSelectedPostSharpenKind();
+	if (requested == NRIPostSharpenKind::NIS && !IsPostSharpenSupported(NRIPostSharpenKind::NIS))
+	{
+		return NRIPostSharpenKind::Off;
+	}
+
+	return requested;
+}
+
+bool NRIRenderer::ShouldRunAppTaaForFrameGraph(NRIMainUpscalerKind kind) const
+{
+	return NRIShouldRunAppTaa(kind);
+}
+
+nri::UpscalerMode NRIRenderer::GetSelectedUpscalerMode() const
+{
+	switch ((int)nri_upscalermode)
+	{
+	default:
+	case 0: return nri::UpscalerMode::NATIVE;
+	case 1: return nri::UpscalerMode::ULTRA_QUALITY;
+	case 2: return nri::UpscalerMode::QUALITY;
+	case 3: return nri::UpscalerMode::BALANCED;
+	case 4: return nri::UpscalerMode::PERFORMANCE;
+	case 5: return nri::UpscalerMode::ULTRA_PERFORMANCE;
+	}
+}
+
+void NRIRenderer::FillMatrix(float* outMatrix, const VSMatrix& matrix) const
+{
+	const_cast<VSMatrix&>(matrix).copy(outMatrix);
 }

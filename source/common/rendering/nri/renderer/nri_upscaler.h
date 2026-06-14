@@ -17,6 +17,14 @@ enum class NRIPostSharpenKind : uint32_t
 	NIS = 1,
 };
 
+void NRISyncLegacyUpscalerConfig(bool logMigration);
+const char* NRIGetMainUpscalerName(NRIMainUpscalerKind kind);
+const char* NRIGetPostSharpenName(NRIPostSharpenKind kind);
+nri::UpscalerType NRIToMainUpscalerType(NRIMainUpscalerKind kind);
+nri::UpscalerType NRIToPostSharpenType(NRIPostSharpenKind kind);
+bool NRIIsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind);
+bool NRIShouldRunAppTaa(NRIMainUpscalerKind kind);
+
 struct NRIUpscalerDispatchDesc
 {
 	nri::CommandBuffer* commandBuffer = nullptr;

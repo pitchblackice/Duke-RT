@@ -1,7 +1,32 @@
 #include "nri_resources.h"
 
+#include "nri_renderer.h"
+#include "nri_renderer_settings.h"
+#include "nri_sky_environment.h"
+#include "nri_static_scene_geometry.h"
+#include "../system/nri_renderdevice.h"
+#include "c_cvars.h"
+
 #include <algorithm>
+#include <chrono>
+#include <cstring>
 #include <limits>
+
+EXTERN_CVAR(Bool, nri_voxelstats)
+EXTERN_CVAR(Int, nri_ptloadingtrace)
+
+namespace
+{
+	bool ShouldTraceResourcePerf()
+	{
+		return PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs();
+	}
+
+	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
+	{
+		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
+	}
+}
 
 uint64_t GetNRIGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride)
 {
@@ -55,4 +80,269 @@ uint64_t GetNRISceneUploadGrownBufferSize(uint64_t currentCapacity, uint64_t req
 		newCapacity = doubled;
 	}
 	return newCapacity;
+}
+
+void NRIRenderer::WaitForCommandsTracked(const char* reason)
+{
+	if (mFrameBuffer == nullptr)
+	{
+		return;
+	}
+
+	const bool trace = ShouldTraceResourcePerf();
+	const auto start = trace ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+	mFrameBuffer->WaitForCommands(true);
+	if (trace)
+	{
+		const double waitMs = DurationMs(start, std::chrono::steady_clock::now());
+		mLastPerfResourceTraceStats.waitCalls++;
+		mLastPerfResourceTraceStats.waitMs += waitMs;
+		if (reason != nullptr)
+		{
+			if (std::strcmp(reason, "resident_chunk_write") == 0)
+			{
+				mLastPerfResourceTraceStats.residentChunkWriteWaitCalls++;
+				mLastPerfResourceTraceStats.residentChunkWriteWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "resident_chunk_blas_rebuild") == 0)
+			{
+				mLastPerfResourceTraceStats.residentChunkBlasRebuildWaitCalls++;
+				mLastPerfResourceTraceStats.residentChunkBlasRebuildWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "scene_data_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.sceneDataUploadWaitCalls++;
+				mLastPerfResourceTraceStats.sceneDataUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "scene_buffer_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.sceneBufferUploadWaitCalls++;
+				mLastPerfResourceTraceStats.sceneBufferUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "emissive_sampling_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.emissiveSamplingUploadWaitCalls++;
+				mLastPerfResourceTraceStats.emissiveSamplingUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "world_tlas_instance_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.worldTlasInstanceUploadWaitCalls++;
+				mLastPerfResourceTraceStats.worldTlasInstanceUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "world_tlas_scratch_resize") == 0)
+			{
+				mLastPerfResourceTraceStats.worldTlasScratchResizeWaitCalls++;
+				mLastPerfResourceTraceStats.worldTlasScratchResizeWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "emissive_tlas_instance_upload") == 0)
+			{
+				mLastPerfResourceTraceStats.emissiveTlasInstanceUploadWaitCalls++;
+				mLastPerfResourceTraceStats.emissiveTlasInstanceUploadWaitMs += waitMs;
+			}
+			else if (std::strcmp(reason, "emissive_tlas_scratch_resize") == 0)
+			{
+				mLastPerfResourceTraceStats.emissiveTlasScratchResizeWaitCalls++;
+				mLastPerfResourceTraceStats.emissiveTlasScratchResizeWaitMs += waitMs;
+			}
+			else
+			{
+				mLastPerfResourceTraceStats.otherWaitCalls++;
+				mLastPerfResourceTraceStats.otherWaitMs += waitMs;
+			}
+		}
+		else
+		{
+			mLastPerfResourceTraceStats.otherWaitCalls++;
+			mLastPerfResourceTraceStats.otherWaitMs += waitMs;
+		}
+	}
+}
+
+void NRIRenderer::DestroyCachedTextures()
+{
+	mStaticMapScene.texturesResident = false;
+	for (auto& skyTexture : mSkyEnvironment.CachedTextures())
+	{
+		mFrameBuffer->DestroyTextureResource(skyTexture.resource);
+	}
+	mSkyEnvironment.ClearCache();
+	for (auto& texture : mSceneTextures.CachedTextures())
+	{
+		mFrameBuffer->DestroyTextureResource(texture.resource);
+	}
+	mSceneTextures.ClearCachedTextures();
+}
+
+void NRIRenderer::DestroySceneBuffers()
+{
+	mStaticMapScene.buffersResident = false;
+	nri_static_scene_geometry::ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
+	ResetResidentMapChunkRegistry();
+	ResetPersistentDynamicEmissiveCache();
+	mPersistentVoxels.Reset("destroy-scene-buffers", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
+	DestroyBufferResource(mStaticVertexBuffer);
+	DestroyBufferResource(mStaticIndexBuffer);
+	DestroyBufferResource(mStaticPrimitiveBuffer);
+	DestroyBufferResource(mStaticMaterialBuffer);
+	NRIPersistentVoxelDestroyServices persistentVoxelDestroyServices = {};
+	persistentVoxelDestroyServices.user = this;
+	persistentVoxelDestroyServices.destroyBuffer = [](void* user, NRIBufferResource& resource)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyBufferResource(resource);
+	};
+	mPersistentVoxels.DestroyArenaBuffers(persistentVoxelDestroyServices);
+	DestroyBufferResource(mVertexBuffer);
+	DestroyBufferResource(mIndexBuffer);
+	DestroyBufferResource(mPrimitiveBuffer);
+	DestroyBufferResource(mMaterialBuffer);
+	for (SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
+	{
+		DestroyAccelerationStructureResource(slot.dynamicBottomLevelAS);
+		DestroyBufferResource(slot.vertexBuffer);
+		DestroyBufferResource(slot.indexBuffer);
+		DestroyBufferResource(slot.primitiveBuffer);
+		DestroyBufferResource(slot.materialBuffer);
+	}
+	mSceneUploadBufferRing.clear();
+	DestroyBufferResource(mTlasInstanceBuffer);
+	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
+	DestroyBufferResource(mSceneInstanceBuffer);
+	DestroyBufferResource(mPortalBuffer);
+	DestroyBufferResource(mRuntimeLightBuffer);
+	DestroyBufferResource(mRuntimeLightTileHeaderBuffer);
+	DestroyBufferResource(mRuntimeLightTileIndexBuffer);
+	DestroyBufferResource(mEmissivePrimitiveHeaderBuffer);
+	DestroyBufferResource(mEmissivePrimitiveBuffer);
+	DestroyBufferResource(mEmissivePrimitiveCdfBuffer);
+	DestroyBufferResource(mEmissiveMaterialResponseBuffer);
+	DestroyBufferResource(mSectorLightHeaderBuffer);
+	DestroyBufferResource(mSectorLightBuffer);
+	DestroyBufferResource(mReprojectionBuffer);
+	DestroyBufferResource(mVisibleChunkBuffer);
+	DestroyBufferResource(mVisibleFlatPlaneBuffer);
+	mTraceShaderStats.Destroy(BuildResourceServices());
+	DestroyBufferResource(mScratchBuffer);
+	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
+	DestroyBufferResource(mTopLevelScratchBuffer);
+	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
+	for (NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
+	{
+		DestroyBufferResource(tlasInstanceBuffer);
+	}
+	mTlasInstanceBufferRing.clear();
+	for (auto& frameScratch : mResidentUploadScratchFrames)
+	{
+		DestroyBufferResource(frameScratch.vertex.buffer);
+		DestroyBufferResource(frameScratch.index.buffer);
+		DestroyBufferResource(frameScratch.primitive.buffer);
+		DestroyBufferResource(frameScratch.material.buffer);
+		for (NRIBufferResource& retired : frameScratch.retiredBuffers)
+		{
+			DestroyBufferResource(retired);
+		}
+		for (NRIAccelerationStructureResource& retired : frameScratch.retiredAccelerationStructures)
+		{
+			DestroyAccelerationStructureResource(retired);
+		}
+		frameScratch = {};
+	}
+	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+	for (uint8_t& initialized : mSceneDataDescriptorsInitialized)
+	{
+		initialized = 0u;
+	}
+	mSceneDataDescriptors.fill(nullptr);
+	mBoundStaticPrimitiveCount = 0;
+	mBoundDynamicPrimitiveCount = 0;
+	mBoundStaticMaterialCount = 0;
+	mBoundDynamicMaterialCount = 0;
+	mBoundPortalCount = 0;
+	mBoundRuntimeLightCount = 0;
+	mBoundRuntimeLightTileCountX = 0;
+	mBoundRuntimeLightTileCountY = 0;
+	mBoundRuntimeLightTileSize = 0;
+	mBoundRuntimeLightTileIndexCount = 0;
+	mBoundRuntimeLightMaxTileOccupancy = 0;
+	mRuntimeLightPayloadCacheValid = false;
+	mRuntimeLightPayloadHash = 0;
+	mRuntimeLightClusterCacheValid = false;
+	mRuntimeLightClusterPayloadHash = 0;
+	mRuntimeLightClusterCameraHash = 0;
+	mRuntimeLightSceneDataDirty = false;
+	mBoundEmissivePrimitiveCount = 0;
+	mBoundEmissiveDominantPrimitive = UINT32_MAX;
+	mBoundEmissiveDominantTile = 0;
+	mBoundEmissiveDominantFlags = 0;
+	mBoundEmissiveDominantDataSource = 0;
+	mEmissiveSamplingPayloadCacheValid = false;
+	mEmissiveSamplingPayloadHash = 0;
+	mEmissiveSectorResponsePayloadCacheValid = false;
+	mEmissiveSectorResponsePayloadHash = 0;
+	mSceneLights.ResetEmissiveSectorResponseCaches();
+	mEmissiveTlasInstanceCount = 0;
+	mEmissiveTlasStaticInstanceCount = 0;
+	mEmissiveTlasDynamicInstanceCount = 0;
+	mEmissiveTlasBuildCount = 0;
+	mEmissiveTlasInstancePayloadCacheValid = false;
+	mEmissiveTlasInstancePayloadHash = 0;
+	mBoundEmissiveTotalPower = 0.0f;
+	mBoundEmissiveDominantPower = 0.0f;
+	mBoundEmissivePrimitiveRecords.clear();
+	mBoundSceneInstances.clear();
+	mBoundSectorLightSectorCount = 0;
+	mBoundSectorLightActiveCount = 0;
+	mBoundSectorLightPulsingCount = 0;
+	mBoundSectorLightDominantSector = UINT32_MAX;
+	mBoundSectorLightDominantContribution = 0.0f;
+	mSectorLightingPayloadCacheValid = false;
+	mSectorLightingPayloadHash = 0;
+}
+
+void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)
+{
+	if (resource.shaderView != nullptr)
+	{
+		mFrameBuffer->mCore.DestroyDescriptor(resource.shaderView);
+		resource.shaderView = nullptr;
+	}
+
+	if (resource.buffer != nullptr)
+	{
+		mFrameBuffer->mCore.DestroyBuffer(resource.buffer);
+		resource.buffer = nullptr;
+	}
+
+	resource.size = 0;
+	resource.memorySize = 0;
+	resource.usedSize = 0;
+	resource.payloadHash = 0;
+	resource.payloadSize = 0;
+	resource.stride = 0;
+	resource.payloadStride = 0;
+	resource.memoryLocation = nri::MemoryLocation::DEVICE;
+}
+
+void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureResource& resource)
+{
+	if (resource.descriptor != nullptr)
+	{
+		mFrameBuffer->mCore.DestroyDescriptor(resource.descriptor);
+		resource.descriptor = nullptr;
+	}
+
+	if (resource.accelerationStructure != nullptr)
+	{
+		mFrameBuffer->mRayTracing.DestroyAccelerationStructure(resource.accelerationStructure);
+		resource.accelerationStructure = nullptr;
+	}
+
+	resource.memorySize = 0;
+	resource.buildScratchSize = 0;
+	resource.buildVertexBuffer = nullptr;
+	resource.buildIndexBuffer = nullptr;
+	resource.buildVertexCount = 0;
+	resource.buildIndexOffset = 0;
+	resource.buildIndexCount = 0;
+	resource.buildPrimitiveCount = 0;
+	resource.memoryLocation = nri::MemoryLocation::DEVICE;
 }

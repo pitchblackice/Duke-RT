@@ -4114,75 +4114,6 @@ namespace
 		}
 	}
 
-	static void SyncLegacyUpscalerConfig(bool logMigration)
-	{
-		if ((int)nri_upscaler == 1)
-		{
-			nri_upscaler = 0;
-			if ((int)nri_postsharpen == 0)
-			{
-				nri_postsharpen = 1;
-			}
-
-			static bool loggedLegacyNisMigration = false;
-			if (logMigration && !loggedLegacyNisMigration)
-			{
-				Printf("NRI upscaler config: migrated legacy nri_upscaler=1 (NIS) to nri_upscaler=0 + nri_postsharpen=1\n");
-				loggedLegacyNisMigration = true;
-			}
-		}
-
-		const int clampedMainUpscaler =
-			(int)nri_upscaler == 0 || (int)nri_upscaler == 2 || (int)nri_upscaler == 3
-			? (int)nri_upscaler
-			: 0;
-		if ((int)nri_upscaler != clampedMainUpscaler)
-		{
-			const int invalidValue = (int)nri_upscaler;
-			nri_upscaler = clampedMainUpscaler;
-
-			static int lastLoggedInvalidMainUpscaler = std::numeric_limits<int>::min();
-			if (logMigration && lastLoggedInvalidMainUpscaler != invalidValue)
-			{
-				Printf("NRI upscaler config: invalid main upscaler value %d, forcing off\n", invalidValue);
-				lastLoggedInvalidMainUpscaler = invalidValue;
-			}
-		}
-
-		const int clampedPostSharpen = (int)nri_postsharpen == 1 ? 1 : 0;
-		if ((int)nri_postsharpen != clampedPostSharpen)
-		{
-			const int invalidValue = (int)nri_postsharpen;
-			nri_postsharpen = clampedPostSharpen;
-
-			static int lastLoggedInvalidPostSharpen = std::numeric_limits<int>::min();
-			if (logMigration && lastLoggedInvalidPostSharpen != invalidValue)
-			{
-				Printf("NRI upscaler config: invalid post sharpen value %d, forcing off\n", invalidValue);
-				lastLoggedInvalidPostSharpen = invalidValue;
-			}
-		}
-	}
-
-	static const char* GetMainUpscalerName(NRIMainUpscalerKind kind)
-	{
-		switch (kind)
-		{
-		case NRIMainUpscalerKind::DLSR: return "DLSS-SR";
-		case NRIMainUpscalerKind::DLRR: return "DLRR";
-		default: return "off";
-		}
-	}
-
-	static const char* GetPostSharpenName(NRIPostSharpenKind kind)
-	{
-		switch (kind)
-		{
-		case NRIPostSharpenKind::NIS: return "NIS";
-		default: return "off";
-		}
-	}
-
 	static const char* GetUpscalerModeName(nri::UpscalerMode mode)
 	{
 		switch (mode)
@@ -4203,25 +4134,6 @@ namespace
 		case NRIMainUpscalerKind::DLSR: return "vendor-sr";
 		case NRIMainUpscalerKind::DLRR: return "vendor-rr";
 		default: return runAppTaa ? "native-taa" : "native";
-		}
-	}
-
-	static nri::UpscalerType ToMainUpscalerType(NRIMainUpscalerKind kind)
-	{
-		switch (kind)
-		{
-		case NRIMainUpscalerKind::DLSR: return nri::UpscalerType::DLSR;
-		case NRIMainUpscalerKind::DLRR: return nri::UpscalerType::DLRR;
-		default: return nri::UpscalerType::NIS;
-		}
-	}
-
-	static nri::UpscalerType ToPostSharpenType(NRIPostSharpenKind kind)
-	{
-		switch (kind)
-		{
-		case NRIPostSharpenKind::NIS: return nri::UpscalerType::NIS;
-		default: return nri::UpscalerType::NIS;
 		}
 	}
 
@@ -4263,19 +4175,9 @@ namespace
 			(float)nri_ptnightvisionsaturation);
 	}
 
-	static bool IsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
-	{
-		return kind == NRIMainUpscalerKind::Off;
-	}
-
-	static bool ShouldRunAppTaa(NRIMainUpscalerKind kind)
-	{
-		return IsAppTaaEligibleUpscaler(kind) && !!nri_pttaa;
-	}
-
 	static bool ShouldUseTemporalJitter(NRIMainUpscalerKind kind)
 	{
-		return ShouldRunAppTaa(kind) || kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR;
+		return NRIShouldRunAppTaa(kind) || kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR;
 	}
 
 	static const char* GetTemporalJitterModeName(NRIMainUpscalerKind kind, bool guiCaptureActive)
@@ -4290,7 +4192,7 @@ namespace
 			return "upscaler";
 		}
 
-		return ShouldRunAppTaa(kind) ? "taa" : "off";
+		return NRIShouldRunAppTaa(kind) ? "taa" : "off";
 	}
 
 	static uint32_t GetTemporalJitterPhaseCount(NRIMainUpscalerKind kind, nri::UpscalerMode mode, bool guiCaptureActive)
@@ -4957,82 +4859,6 @@ void NRIRenderer::ResetPerfTraceStats()
 {
 	mLastPerfShellTraceStats = {};
 	mLastPerfResourceTraceStats = {};
-}
-
-void NRIRenderer::WaitForCommandsTracked(const char* reason)
-{
-	if (mFrameBuffer == nullptr)
-	{
-		return;
-	}
-
-	const bool trace = ShouldTracePtPerf();
-	const auto start = trace ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-	mFrameBuffer->WaitForCommands(true);
-	if (trace)
-	{
-		const double waitMs = DurationMs(start, std::chrono::steady_clock::now());
-		mLastPerfResourceTraceStats.waitCalls++;
-		mLastPerfResourceTraceStats.waitMs += waitMs;
-		if (reason != nullptr)
-		{
-			if (std::strcmp(reason, "resident_chunk_write") == 0)
-			{
-				mLastPerfResourceTraceStats.residentChunkWriteWaitCalls++;
-				mLastPerfResourceTraceStats.residentChunkWriteWaitMs += waitMs;
-			}
-			else if (std::strcmp(reason, "resident_chunk_blas_rebuild") == 0)
-			{
-				mLastPerfResourceTraceStats.residentChunkBlasRebuildWaitCalls++;
-				mLastPerfResourceTraceStats.residentChunkBlasRebuildWaitMs += waitMs;
-			}
-			else if (std::strcmp(reason, "scene_data_upload") == 0)
-			{
-				mLastPerfResourceTraceStats.sceneDataUploadWaitCalls++;
-				mLastPerfResourceTraceStats.sceneDataUploadWaitMs += waitMs;
-			}
-			else if (std::strcmp(reason, "scene_buffer_upload") == 0)
-			{
-				mLastPerfResourceTraceStats.sceneBufferUploadWaitCalls++;
-				mLastPerfResourceTraceStats.sceneBufferUploadWaitMs += waitMs;
-			}
-			else if (std::strcmp(reason, "emissive_sampling_upload") == 0)
-			{
-				mLastPerfResourceTraceStats.emissiveSamplingUploadWaitCalls++;
-				mLastPerfResourceTraceStats.emissiveSamplingUploadWaitMs += waitMs;
-			}
-			else if (std::strcmp(reason, "world_tlas_instance_upload") == 0)
-			{
-				mLastPerfResourceTraceStats.worldTlasInstanceUploadWaitCalls++;
-				mLastPerfResourceTraceStats.worldTlasInstanceUploadWaitMs += waitMs;
-			}
-			else if (std::strcmp(reason, "world_tlas_scratch_resize") == 0)
-			{
-				mLastPerfResourceTraceStats.worldTlasScratchResizeWaitCalls++;
-				mLastPerfResourceTraceStats.worldTlasScratchResizeWaitMs += waitMs;
-			}
-			else if (std::strcmp(reason, "emissive_tlas_instance_upload") == 0)
-			{
-				mLastPerfResourceTraceStats.emissiveTlasInstanceUploadWaitCalls++;
-				mLastPerfResourceTraceStats.emissiveTlasInstanceUploadWaitMs += waitMs;
-			}
-			else if (std::strcmp(reason, "emissive_tlas_scratch_resize") == 0)
-			{
-				mLastPerfResourceTraceStats.emissiveTlasScratchResizeWaitCalls++;
-				mLastPerfResourceTraceStats.emissiveTlasScratchResizeWaitMs += waitMs;
-			}
-			else
-			{
-				mLastPerfResourceTraceStats.otherWaitCalls++;
-				mLastPerfResourceTraceStats.otherWaitMs += waitMs;
-			}
-		}
-		else
-		{
-			mLastPerfResourceTraceStats.otherWaitCalls++;
-			mLastPerfResourceTraceStats.otherWaitMs += waitMs;
-		}
-	}
 }
 
 void NRIRenderer::NotePerfBufferUpload(const SceneBufferDebugStats* stats, uint64_t size, bool growth, const char* reason, int uploadKind)
@@ -7454,14 +7280,14 @@ void NRIRenderer::PrintSectorLightDump(float radius, uint32_t limit) const
 
 void NRIRenderer::PrintStatus()
 {
-	SyncLegacyUpscalerConfig(false);
+	NRISyncLegacyUpscalerConfig(false);
 	const NRIMainUpscalerKind requestedMain = GetSelectedMainUpscalerKind();
 	const NRIMainUpscalerKind resolvedMain = GetResolvedMainUpscalerKindForStatus();
 	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
 	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
 	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMain, requestedUpscalerMode);
-	const bool runAppTaa = ShouldRunAppTaa(resolvedMain);
+	const bool runAppTaa = NRIShouldRunAppTaa(resolvedMain);
 	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
 	const float resolvedRenderScale = ResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
 	const uint32_t bootstrapMode = GetBootstrapMode();
@@ -7603,7 +7429,7 @@ void NRIRenderer::PrintStatus()
 		YesNo(autoExposurePresentEligible),
 		autoExposurePresentRoute.presentExposure);
 	Printf("NRI PT auto exposure vendor: main=%s mode=%s texture_valid=%s engine_enabled=%s recreate_on_policy_change=yes\n",
-		GetMainUpscalerName(autoExposureResolvedMain),
+		NRIGetMainUpscalerName(autoExposureResolvedMain),
 		vendorExposureMode,
 		YesNo(autoExposureTextureValid),
 		YesNo(autoExposureSettings.enabled));
@@ -7653,10 +7479,10 @@ void NRIRenderer::PrintStatus()
 		nri_validation ? "on" : "off",
 		nri_apivalidation ? "on" : "off",
 		nri_dred ? "on" : "off",
-		GetMainUpscalerName(requestedMain),
-		GetMainUpscalerName(resolvedMain),
-		GetPostSharpenName(requestedPost),
-		GetPostSharpenName(resolvedPost),
+		NRIGetMainUpscalerName(requestedMain),
+		NRIGetMainUpscalerName(resolvedMain),
+		NRIGetPostSharpenName(requestedPost),
+		NRIGetPostSharpenName(resolvedPost),
 		GetUpscalerModeName(requestedUpscalerMode),
 		GetUpscalerModeName(resolvedUpscalerMode),
 		requestedRenderScale,
@@ -7829,7 +7655,7 @@ void NRIRenderer::PrintStatus()
 		vendorOutput.height,
 		postSharpenOutput.width,
 		postSharpenOutput.height,
-		GetPostSharpenName(resolvedPost),
+		NRIGetPostSharpenName(resolvedPost),
 		resolvedPost == NRIPostSharpenKind::Off ? "pre-post" : "post-sharpen-output",
 		mLastHistoryResetReason.c_str());
 	Printf("NRI PT tracing: direct_scene_fallback=%s light_bounces=%u mirror_bounces=%u portal_depth=%u surface_probe=%d ceiling_nudge=%s ceiling_nudge_distance=%.4f\n",
@@ -8185,14 +8011,14 @@ NRIRenderer::MemoryTelemetry NRIRenderer::GetMemoryTelemetry() const
 
 void NRIRenderer::PrintSwapChainRenderConfig() const
 {
-	SyncLegacyUpscalerConfig(false);
+	NRISyncLegacyUpscalerConfig(false);
 	const NRIMainUpscalerKind requestedMain = GetSelectedMainUpscalerKind();
 	const NRIMainUpscalerKind resolvedMain = GetResolvedMainUpscalerKindForStatus();
 	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
 	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
 	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMain, requestedUpscalerMode);
-	const bool runAppTaa = ShouldRunAppTaa(resolvedMain);
+	const bool runAppTaa = NRIShouldRunAppTaa(resolvedMain);
 	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
 	const float resolvedRenderScale = ResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
 	const bool beautyDenoiseActive = !!nri_denoise && resolvedMain != NRIMainUpscalerKind::DLRR;
@@ -8209,12 +8035,12 @@ void NRIRenderer::PrintSwapChainRenderConfig() const
 	const bool dlrrSupported = IsMainUpscalerSupported(NRIMainUpscalerKind::DLRR);
 
 	Printf("NRI swapchain render config: main_upscaler=%s->%s mode=%s->%s post_sharpen=%s->%s support=NIS:%s DLSS-SR:%s DLRR:%s app_taa=requested:%s active:%s denoise=requested:%s beauty_active:%s nrd=%s render_scale=%.3f->%.3f jitter=%s phases=%u output=%s->%s hdr_swapchain=%s display_hdr=%s tonemap=%s sharpness=%.3f\n",
-		GetMainUpscalerName(requestedMain),
-		GetMainUpscalerName(resolvedMain),
+		NRIGetMainUpscalerName(requestedMain),
+		NRIGetMainUpscalerName(resolvedMain),
 		GetUpscalerModeName(requestedUpscalerMode),
 		GetUpscalerModeName(resolvedUpscalerMode),
-		GetPostSharpenName(requestedPost),
-		GetPostSharpenName(resolvedPost),
+		NRIGetPostSharpenName(requestedPost),
+		NRIGetPostSharpenName(resolvedPost),
 		nisSupported ? "yes" : "no",
 		dlsrSupported ? "yes" : "no",
 		dlrrSupported ? "yes" : "no",
@@ -8257,7 +8083,7 @@ NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(Frame
 		return ExposureDomain::SceneHDR;
 	case FrameTextureSlot::TaaHistoryPing:
 	case FrameTextureSlot::TaaHistoryPong:
-		return ShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
+		return NRIShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
 	case FrameTextureSlot::VendorOutput:
 		return ExposureDomain::SceneHDR;
 	case FrameTextureSlot::PostSharpenOutput:
@@ -8269,7 +8095,7 @@ NRIRenderer::ExposureDomain NRIRenderer::ResolveFrameTextureExposureDomain(Frame
 		{
 			return ExposureDomain::SceneHDR;
 		}
-		return ShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
+		return NRIShouldRunAppTaa(mainKind) ? ExposureDomain::PreExposedHDR : ExposureDomain::SceneHDR;
 	case FrameTextureSlot::Final:
 		return ExposureDomain::DisplayMappedOutput;
 	default:
@@ -8379,13 +8205,13 @@ void NRIRenderer::EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bo
 
 void NRIRenderer::PrintTemporalStatus() const
 {
-	SyncLegacyUpscalerConfig(false);
+	NRISyncLegacyUpscalerConfig(false);
 	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
 	const NRIMainUpscalerKind requestedMain = GetSelectedMainUpscalerKind();
 	const NRIMainUpscalerKind resolvedMain = GetResolvedMainUpscalerKindForStatus();
 	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
-	const bool runAppTaa = ShouldRunAppTaa(resolvedMain);
+	const bool runAppTaa = NRIShouldRunAppTaa(resolvedMain);
 	const float exposure = GetTemporalExposure(outputPolicy);
 	const float exposureStops = std::log2(std::max(exposure, 0.125f));
 	const FrameTextureSlot presentSlot = mUseUpscaledInFinal ? mUpscaledInputSlot : mHistoryOutputSlot;
@@ -8403,15 +8229,15 @@ void NRIRenderer::PrintTemporalStatus() const
 	const NRITextureResource& historyOutput = GetFrameTexture(mHistoryOutputSlot);
 	Printf("NRI PT temporal: debug=%d requested_main=%s resolved_main=%s requested_post=%s resolved_post=%s taa=%s gui_capture=%s last_debug=%d last_main=%s last_post=%s reset=%s prev_camera=%s history_in=%s[%ux%u a=%u l=%u s=0x%x] history_out=%s[%ux%u a=%u l=%u s=0x%x] present=%s upscaled=%s use_upscaled=%s\n",
 		(int)nri_ptdebug,
-		GetMainUpscalerName(requestedMain),
-		GetMainUpscalerName(resolvedMain),
-		GetPostSharpenName(requestedPost),
-		GetPostSharpenName(resolvedPost),
+		NRIGetMainUpscalerName(requestedMain),
+		NRIGetMainUpscalerName(resolvedMain),
+		NRIGetPostSharpenName(requestedPost),
+		NRIGetPostSharpenName(resolvedPost),
 		nri_pttaa ? "on" : "off",
 		mGuiCaptureActive ? "yes" : "no",
 		mLastDebugMode,
-		GetMainUpscalerName(mLastTemporalHistoryMainUpscaler),
-		GetPostSharpenName(mLastTemporalPostSharpen),
+		NRIGetMainUpscalerName(mLastTemporalHistoryMainUpscaler),
+		NRIGetPostSharpenName(mLastTemporalPostSharpen),
 		mResetHistory ? "yes" : "no",
 		mHasPreviousCameraState ? "yes" : "no",
 		GetFrameTextureSlotName(mHistoryInputSlot),
@@ -8462,8 +8288,8 @@ void NRIRenderer::ArmTemporalTraceBudget(const char* reason)
 		reason != nullptr ? reason : "unspecified",
 		mFrameIndex,
 		(int)nri_ptdebug,
-		GetMainUpscalerName(resolvedMain),
-		GetPostSharpenName(resolvedPost));
+		NRIGetMainUpscalerName(resolvedMain),
+		NRIGetPostSharpenName(resolvedPost));
 }
 
 void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind resolvedMainUpscaler, NRIPostSharpenKind resolvedPostSharpen, bool runAppTaa, FrameTextureSlot primarySlot, FrameTextureSlot secondarySlot) const
@@ -8485,8 +8311,8 @@ void NRIRenderer::TraceTemporalState(const char* stage, NRIMainUpscalerKind reso
 		stage != nullptr ? stage : "unknown",
 		mFrameIndex,
 		(int)nri_ptdebug,
-		GetMainUpscalerName(resolvedMainUpscaler),
-		GetPostSharpenName(resolvedPostSharpen),
+		NRIGetMainUpscalerName(resolvedMainUpscaler),
+		NRIGetPostSharpenName(resolvedPostSharpen),
 		runAppTaa ? "yes" : "no",
 		mGuiCaptureActive ? "yes" : "no",
 		GetExposureDomainName(primaryExposureRoute.inputDomain),
@@ -11493,623 +11319,4 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 	}
 
 	UpdateNightVisionState();
-}
-
-void NRIRenderer::CopyFinalToActiveTarget()
-{
-	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.copyFinalMs);
-	Clocker clock(NriPTCopyFinal);
-
-	UpdateFrameGenerationFrameDesc();
-	NRITextureResource& final = GetFrameTexture(FrameTextureSlot::Final);
-	CopyTextureToActiveTarget(final);
-}
-
-void NRIRenderer::UpdateFrameGenerationHistoryPolicy(int debugMode, const NRIFrameGenerationPolicy& frameGenPolicy, bool preserveHistory)
-{
-	if (preserveHistory)
-	{
-		return;
-	}
-
-	const NRIPTOutputPolicy outputPolicy = mFrameBuffer->GetPathTracingOutputPolicy();
-	if (!mHasOutputPolicyState)
-	{
-		mHasOutputPolicyState = true;
-		mLastOutputRequestedMode = outputPolicy.requestedMode;
-		mLastOutputResolvedMode = outputPolicy.resolvedMode;
-	}
-	else if (outputPolicy.requestedMode != mLastOutputRequestedMode || outputPolicy.resolvedMode != mLastOutputResolvedMode)
-	{
-		RequestHistoryReset("output-mode-change");
-		mFrameBuffer->PrintPathTracingOutputModeChange(mFrameIndex, mLastOutputRequestedMode, mLastOutputResolvedMode);
-		if (ShouldEmitRendererTemporalTraceLogs())
-		{
-			Printf("NRI PT temporal reset: reason=output-mode-change frame=%u requested_output=%s->%s resolved_output=%s->%s\n",
-				mFrameIndex,
-				GetNRIPTOutputModeName(mLastOutputRequestedMode),
-				GetNRIPTOutputModeName(outputPolicy.requestedMode),
-				GetNRIPTOutputModeName(mLastOutputResolvedMode),
-				GetNRIPTOutputModeName(outputPolicy.resolvedMode));
-		}
-		mLastOutputRequestedMode = outputPolicy.requestedMode;
-		mLastOutputResolvedMode = outputPolicy.resolvedMode;
-	}
-
-	const float temporalExposure = GetTemporalExposure(outputPolicy);
-	if (!mHasTemporalExposureState)
-	{
-		mHasTemporalExposureState = true;
-		mLastTemporalExposure = temporalExposure;
-	}
-	else
-	{
-		const float exposureDeltaStops = GetExposureDeltaStops(mLastTemporalExposure, temporalExposure);
-		if (exposureDeltaStops >= NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS)
-		{
-			RequestHistoryReset("exposure-change");
-			if (ShouldEmitRendererTemporalTraceLogs())
-			{
-				Printf("NRI PT temporal reset: reason=exposure-change frame=%u exposure=%.3f->%.3f delta_stops=%.3f threshold=%.3f\n",
-					mFrameIndex,
-					mLastTemporalExposure,
-					temporalExposure,
-					exposureDeltaStops,
-					NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS);
-			}
-		}
-
-		mLastTemporalExposure = temporalExposure;
-	}
-
-	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
-	const NRIPostSharpenKind resolvedPostSharpen = ResolvePostSharpenKind(false);
-	const bool runAppTaa = ShouldRunAppTaa(resolvedMainUpscaler);
-	if (!nri_ptbootstrap &&
-		(debugMode != mLastDebugMode ||
-		 resolvedMainUpscaler != mLastTemporalHistoryMainUpscaler ||
-		 resolvedPostSharpen != mLastTemporalPostSharpen ||
-		 runAppTaa != mLastTemporalAppTaaEnabled))
-	{
-		ArmTemporalTraceBudget("mode-change");
-		if (ShouldEmitRendererTemporalTraceLogs())
-		{
-			Printf("NRI PT temporal reset: reason=mode-change frame=%u debug=%d->%d main=%s->%s post=%s->%s app_taa=%s->%s\n",
-				mFrameIndex,
-				mLastDebugMode,
-				debugMode,
-				GetMainUpscalerName(mLastTemporalHistoryMainUpscaler),
-				GetMainUpscalerName(resolvedMainUpscaler),
-				GetPostSharpenName(mLastTemporalPostSharpen),
-				GetPostSharpenName(resolvedPostSharpen),
-				mLastTemporalAppTaaEnabled ? "yes" : "no",
-				runAppTaa ? "yes" : "no");
-		}
-		RequestHistoryReset("mode-change");
-	}
-	mLastDebugMode = debugMode;
-	mLastTemporalHistoryMainUpscaler = resolvedMainUpscaler;
-	mLastTemporalPostSharpen = resolvedPostSharpen;
-	mLastTemporalAppTaaEnabled = runAppTaa;
-
-	if (!mHasFrameGenerationConfigState)
-	{
-		mHasFrameGenerationConfigState = true;
-		mLastFrameGenerationRequestedEnabled = frameGenPolicy.requestedEnabled;
-		mLastFrameGenerationRequestedProvider = frameGenPolicy.requestedProvider;
-		mLastFrameGenerationResolvedUiMode = frameGenPolicy.resolvedUiMode;
-		return;
-	}
-
-	const char* frameGenResetReason = nullptr;
-	if (frameGenPolicy.requestedEnabled != mLastFrameGenerationRequestedEnabled)
-	{
-		frameGenResetReason = "framegen-toggle";
-	}
-	else if (frameGenPolicy.requestedProvider != mLastFrameGenerationRequestedProvider)
-	{
-		frameGenResetReason = "framegen-provider-change";
-	}
-	else if (frameGenPolicy.resolvedUiMode != mLastFrameGenerationResolvedUiMode)
-	{
-		frameGenResetReason = "framegen-ui-mode-change";
-	}
-
-	if (frameGenResetReason != nullptr)
-	{
-		RequestHistoryReset(frameGenResetReason);
-		if (ShouldEmitRendererTemporalTraceLogs())
-		{
-			Printf("NRI PT temporal reset: reason=%s frame=%u requested=%s->%s provider=%s->%s ui=%s->%s\n",
-				frameGenResetReason,
-				mFrameIndex,
-				mLastFrameGenerationRequestedEnabled ? "on" : "off",
-				frameGenPolicy.requestedEnabled ? "on" : "off",
-				NRIFrameGenerationContext::GetProviderName(mLastFrameGenerationRequestedProvider),
-				NRIFrameGenerationContext::GetProviderName(frameGenPolicy.requestedProvider),
-				NRIFrameGenerationContext::GetUiModeName(mLastFrameGenerationResolvedUiMode),
-				NRIFrameGenerationContext::GetUiModeName(frameGenPolicy.resolvedUiMode));
-		}
-	}
-
-	mLastFrameGenerationRequestedEnabled = frameGenPolicy.requestedEnabled;
-	mLastFrameGenerationRequestedProvider = frameGenPolicy.requestedProvider;
-	mLastFrameGenerationResolvedUiMode = frameGenPolicy.resolvedUiMode;
-}
-
-void NRIRenderer::NoteSuccessfulRealFrame()
-{
-	mLastFrameGenerationRealFrameTimeMs = mPendingFrameGenerationRealFrameTimeMs;
-	mHasFrameGenerationRealFrameTime = mHasPendingFrameGenerationRealFrameTime;
-	mLastFrameGenerationTimestamp = mPendingFrameGenerationTimestamp;
-	mHasFrameGenerationTimestamp = true;
-	++mFrameGenerationFrameId;
-}
-
-void NRIRenderer::UpdateFrameGenerationFrameDesc()
-{
-	if (mFrameBuffer == nullptr)
-	{
-		return;
-	}
-
-	NRIFrameGenerationFrameDesc desc = {};
-	desc.frameId = mFrameGenerationFrameId + 1u;
-	desc.renderWidth = mRenderWidth;
-	desc.renderHeight = mRenderHeight;
-	desc.outputWidth = mOutputWidth;
-	desc.outputHeight = mOutputHeight;
-	desc.renderRect = { 0u, 0u, mRenderWidth, mRenderHeight };
-	desc.outputRect = { 0u, 0u, mOutputWidth, mOutputHeight };
-	desc.hasPreviousCamera = mHasPreviousCameraState;
-	desc.resetHistory = mResetHistory;
-	desc.hasRealFrameTimeMs = mHasPendingFrameGenerationRealFrameTime;
-	desc.realFrameTimeMs = mPendingFrameGenerationRealFrameTimeMs;
-	const char* resetReason = mResetHistory && !mLastHistoryResetReason.empty() ? mLastHistoryResetReason.c_str() : "none";
-	std::strncpy(desc.resetReason, resetReason, std::size(desc.resetReason) - 1u);
-	desc.resetReason[std::size(desc.resetReason) - 1u] = '\0';
-	desc.hudlessColorSource = NRIFrameGenerationColorSource::Final;
-	desc.hudlessColor = &GetFrameTexture(FrameTextureSlot::Final);
-	desc.uiTexture = nullptr;
-	desc.motionVectors = &GetFrameTexture(FrameTextureSlot::Motion);
-	desc.depth = &GetFrameTexture(FrameTextureSlot::UpscalerDepth);
-	std::memcpy(desc.cameraJitter, mCurrentJitter, sizeof(desc.cameraJitter));
-	std::memcpy(desc.previousCameraJitter, mPreviousJitter, sizeof(desc.previousCameraJitter));
-	desc.motionVectorScale[0] = 1.0f;
-	desc.motionVectorScale[1] = 1.0f;
-	desc.motionVectorSpace = NRIFrameGenerationMotionVectorSpace::ScreenPixels;
-	desc.motionVectorDirection = NRIFrameGenerationMotionVectorDirection::CurrentToPrevious;
-	desc.depthType = NRIFrameGenerationDepthType::ClipDepth;
-	desc.depthInverted = false;
-	desc.depthInfinite = false;
-	std::memcpy(desc.currentViewToClip, mCurrentViewToClip, sizeof(desc.currentViewToClip));
-	std::memcpy(desc.previousViewToClip, mPreviousViewToClip, sizeof(desc.previousViewToClip));
-	std::memcpy(desc.currentWorldToView, mCurrentWorldToView, sizeof(desc.currentWorldToView));
-	std::memcpy(desc.previousWorldToView, mPreviousWorldToView, sizeof(desc.previousWorldToView));
-	std::memcpy(desc.cameraPosition, mCurrentCameraPos, sizeof(desc.cameraPosition));
-	std::memcpy(desc.cameraForward, mCurrentCameraForward, sizeof(desc.cameraForward));
-	std::memcpy(desc.cameraRight, mCurrentCameraRight, sizeof(desc.cameraRight));
-	std::memcpy(desc.cameraUp, mCurrentCameraUp, sizeof(desc.cameraUp));
-	desc.cameraNear = screen->GetZNear();
-	desc.cameraFar = screen->GetZFar();
-	desc.cameraFovVerticalRadians = 2.0f * atanf(mCurrentTanHalfFovY);
-	desc.viewSpaceToMetersFactor = 1.0f;
-	mFrameBuffer->mFrameGeneration.SetFrameDesc(*mFrameBuffer, desc);
-}
-
-void NRIRenderer::CopyTexture(NRITextureResource& source, NRITextureResource& destination)
-{
-	mFrameBuffer->TransitionTexture(source, NRICopySourceState());
-	mFrameBuffer->TransitionTexture(destination, NRICopyDestinationState());
-	mFrameBuffer->mCore.CmdCopyTexture(*mFrameBuffer->mCommandBuffer, *destination.texture, nullptr, *source.texture, nullptr);
-}
-
-void NRIRenderer::CopyTextureToActiveTarget(NRITextureResource& source)
-{
-	mFrameBuffer->TransitionTexture(source, NRICopySourceState());
-	mFrameBuffer->TransitionTexture(*mFrameBuffer->mActiveTarget, NRICopyDestinationState());
-	mFrameBuffer->mCore.CmdCopyTexture(*mFrameBuffer->mCommandBuffer, *mFrameBuffer->mActiveTarget->texture, nullptr, *source.texture, nullptr);
-	mFrameBuffer->mRenderState->NotifyExternalTargetWrite();
-}
-
-void NRIRenderer::DestroyCachedTextures()
-{
-	mStaticMapScene.texturesResident = false;
-	for (auto& skyTexture : mSkyEnvironment.CachedTextures())
-	{
-		mFrameBuffer->DestroyTextureResource(skyTexture.resource);
-	}
-	mSkyEnvironment.ClearCache();
-	for (auto& texture : mSceneTextures.CachedTextures())
-	{
-		mFrameBuffer->DestroyTextureResource(texture.resource);
-	}
-	mSceneTextures.ClearCachedTextures();
-}
-
-
-void NRIRenderer::DestroySceneBuffers()
-{
-	mStaticMapScene.buffersResident = false;
-	nri_static_scene_geometry::ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
-	ResetResidentMapChunkRegistry();
-	ResetPersistentDynamicEmissiveCache();
-	mPersistentVoxels.Reset("destroy-scene-buffers", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
-	DestroyBufferResource(mStaticVertexBuffer);
-	DestroyBufferResource(mStaticIndexBuffer);
-	DestroyBufferResource(mStaticPrimitiveBuffer);
-	DestroyBufferResource(mStaticMaterialBuffer);
-	NRIPersistentVoxelDestroyServices persistentVoxelDestroyServices = {};
-	persistentVoxelDestroyServices.user = this;
-	persistentVoxelDestroyServices.destroyBuffer = [](void* user, NRIBufferResource& resource)
-	{
-		static_cast<NRIRenderer*>(user)->DestroyBufferResource(resource);
-	};
-	mPersistentVoxels.DestroyArenaBuffers(persistentVoxelDestroyServices);
-	DestroyBufferResource(mVertexBuffer);
-	DestroyBufferResource(mIndexBuffer);
-	DestroyBufferResource(mPrimitiveBuffer);
-	DestroyBufferResource(mMaterialBuffer);
-	for (SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
-	{
-		DestroyAccelerationStructureResource(slot.dynamicBottomLevelAS);
-		DestroyBufferResource(slot.vertexBuffer);
-		DestroyBufferResource(slot.indexBuffer);
-		DestroyBufferResource(slot.primitiveBuffer);
-		DestroyBufferResource(slot.materialBuffer);
-	}
-	mSceneUploadBufferRing.clear();
-	DestroyBufferResource(mTlasInstanceBuffer);
-	DestroyBufferResource(mEmissiveTlasInstanceBuffer);
-	DestroyBufferResource(mSceneInstanceBuffer);
-	DestroyBufferResource(mPortalBuffer);
-	DestroyBufferResource(mRuntimeLightBuffer);
-	DestroyBufferResource(mRuntimeLightTileHeaderBuffer);
-	DestroyBufferResource(mRuntimeLightTileIndexBuffer);
-	DestroyBufferResource(mEmissivePrimitiveHeaderBuffer);
-	DestroyBufferResource(mEmissivePrimitiveBuffer);
-	DestroyBufferResource(mEmissivePrimitiveCdfBuffer);
-	DestroyBufferResource(mEmissiveMaterialResponseBuffer);
-	DestroyBufferResource(mSectorLightHeaderBuffer);
-	DestroyBufferResource(mSectorLightBuffer);
-	DestroyBufferResource(mReprojectionBuffer);
-	DestroyBufferResource(mVisibleChunkBuffer);
-	DestroyBufferResource(mVisibleFlatPlaneBuffer);
-	mTraceShaderStats.Destroy(BuildResourceServices());
-	DestroyBufferResource(mScratchBuffer);
-	DestroyBufferResource(mResidentStaticBlasScratchBuffer);
-	DestroyBufferResource(mTopLevelScratchBuffer);
-	DestroyBufferResource(mEmissiveTopLevelScratchBuffer);
-	for (NRIBufferResource& tlasInstanceBuffer : mTlasInstanceBufferRing)
-	{
-		DestroyBufferResource(tlasInstanceBuffer);
-	}
-	mTlasInstanceBufferRing.clear();
-	for (auto& frameScratch : mResidentUploadScratchFrames)
-	{
-		DestroyBufferResource(frameScratch.vertex.buffer);
-		DestroyBufferResource(frameScratch.index.buffer);
-		DestroyBufferResource(frameScratch.primitive.buffer);
-		DestroyBufferResource(frameScratch.material.buffer);
-		for (NRIBufferResource& retired : frameScratch.retiredBuffers)
-		{
-			DestroyBufferResource(retired);
-		}
-		for (NRIAccelerationStructureResource& retired : frameScratch.retiredAccelerationStructures)
-		{
-			DestroyAccelerationStructureResource(retired);
-		}
-		frameScratch = {};
-	}
-	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
-	for (uint8_t& initialized : mSceneDataDescriptorsInitialized)
-	{
-		initialized = 0u;
-	}
-	mSceneDataDescriptors.fill(nullptr);
-	mBoundStaticPrimitiveCount = 0;
-	mBoundDynamicPrimitiveCount = 0;
-	mBoundStaticMaterialCount = 0;
-	mBoundDynamicMaterialCount = 0;
-	mBoundPortalCount = 0;
-	mBoundRuntimeLightCount = 0;
-	mBoundRuntimeLightTileCountX = 0;
-	mBoundRuntimeLightTileCountY = 0;
-	mBoundRuntimeLightTileSize = 0;
-	mBoundRuntimeLightTileIndexCount = 0;
-	mBoundRuntimeLightMaxTileOccupancy = 0;
-	mRuntimeLightPayloadCacheValid = false;
-	mRuntimeLightPayloadHash = 0;
-	mRuntimeLightClusterCacheValid = false;
-	mRuntimeLightClusterPayloadHash = 0;
-	mRuntimeLightClusterCameraHash = 0;
-	mRuntimeLightSceneDataDirty = false;
-	mBoundEmissivePrimitiveCount = 0;
-	mBoundEmissiveDominantPrimitive = UINT32_MAX;
-	mBoundEmissiveDominantTile = 0;
-	mBoundEmissiveDominantFlags = 0;
-	mBoundEmissiveDominantDataSource = 0;
-	mEmissiveSamplingPayloadCacheValid = false;
-	mEmissiveSamplingPayloadHash = 0;
-	mEmissiveSectorResponsePayloadCacheValid = false;
-	mEmissiveSectorResponsePayloadHash = 0;
-	mSceneLights.ResetEmissiveSectorResponseCaches();
-	mEmissiveTlasInstanceCount = 0;
-	mEmissiveTlasStaticInstanceCount = 0;
-	mEmissiveTlasDynamicInstanceCount = 0;
-	mEmissiveTlasBuildCount = 0;
-	mEmissiveTlasInstancePayloadCacheValid = false;
-	mEmissiveTlasInstancePayloadHash = 0;
-	mBoundEmissiveTotalPower = 0.0f;
-	mBoundEmissiveDominantPower = 0.0f;
-	mBoundEmissivePrimitiveRecords.clear();
-	mBoundSceneInstances.clear();
-	mBoundSectorLightSectorCount = 0;
-	mBoundSectorLightActiveCount = 0;
-	mBoundSectorLightPulsingCount = 0;
-	mBoundSectorLightDominantSector = UINT32_MAX;
-	mBoundSectorLightDominantContribution = 0.0f;
-	mSectorLightingPayloadCacheValid = false;
-	mSectorLightingPayloadHash = 0;
-}
-
-void NRIRenderer::DestroyBufferResource(NRIBufferResource& resource)
-{
-	if (resource.shaderView != nullptr)
-	{
-		mFrameBuffer->mCore.DestroyDescriptor(resource.shaderView);
-		resource.shaderView = nullptr;
-	}
-
-	if (resource.buffer != nullptr)
-	{
-		mFrameBuffer->mCore.DestroyBuffer(resource.buffer);
-		resource.buffer = nullptr;
-	}
-
-	resource.size = 0;
-	resource.memorySize = 0;
-	resource.usedSize = 0;
-	resource.payloadHash = 0;
-	resource.payloadSize = 0;
-	resource.stride = 0;
-	resource.payloadStride = 0;
-	resource.memoryLocation = nri::MemoryLocation::DEVICE;
-}
-
-void NRIRenderer::DestroyAccelerationStructureResource(NRIAccelerationStructureResource& resource)
-{
-	if (resource.descriptor != nullptr)
-	{
-		mFrameBuffer->mCore.DestroyDescriptor(resource.descriptor);
-		resource.descriptor = nullptr;
-	}
-
-	if (resource.accelerationStructure != nullptr)
-	{
-		mFrameBuffer->mRayTracing.DestroyAccelerationStructure(resource.accelerationStructure);
-		resource.accelerationStructure = nullptr;
-	}
-
-	resource.memorySize = 0;
-	resource.buildScratchSize = 0;
-	resource.buildVertexBuffer = nullptr;
-	resource.buildIndexBuffer = nullptr;
-	resource.buildVertexCount = 0;
-	resource.buildIndexOffset = 0;
-	resource.buildIndexCount = 0;
-	resource.buildPrimitiveCount = 0;
-	resource.memoryLocation = nri::MemoryLocation::DEVICE;
-}
-
-bool NRIRenderer::IsMainUpscalerSupported(NRIMainUpscalerKind kind) const
-{
-	if (kind == NRIMainUpscalerKind::Off || mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
-	{
-		return kind == NRIMainUpscalerKind::Off;
-	}
-
-	return mFrameBuffer->mUpscaler.IsUpscalerSupported(*mFrameBuffer->mDevice, ToMainUpscalerType(kind));
-}
-
-bool NRIRenderer::IsPostSharpenSupported(NRIPostSharpenKind kind) const
-{
-	if (kind == NRIPostSharpenKind::Off || mFrameBuffer == nullptr || mFrameBuffer->mDevice == nullptr)
-	{
-		return kind == NRIPostSharpenKind::Off;
-	}
-
-	return mFrameBuffer->mUpscaler.IsUpscalerSupported(*mFrameBuffer->mDevice, ToPostSharpenType(kind));
-}
-
-NRIMainUpscalerKind NRIRenderer::ResolveMainUpscalerKind(bool logFallback)
-{
-	SyncLegacyUpscalerConfig(logFallback);
-	const NRIMainUpscalerKind requested = GetSelectedMainUpscalerKind();
-	NRIMainUpscalerKind resolved = requested;
-
-	switch (requested)
-	{
-	case NRIMainUpscalerKind::DLRR:
-		if (!IsMainUpscalerSupported(NRIMainUpscalerKind::DLRR))
-		{
-			resolved =
-				IsMainUpscalerSupported(NRIMainUpscalerKind::DLSR) ? NRIMainUpscalerKind::DLSR :
-				NRIMainUpscalerKind::Off;
-		}
-		break;
-
-	case NRIMainUpscalerKind::DLSR:
-		if (!IsMainUpscalerSupported(NRIMainUpscalerKind::DLSR))
-		{
-			resolved = NRIMainUpscalerKind::Off;
-		}
-		break;
-
-	default:
-		break;
-	}
-
-	if (logFallback &&
-		(requested != resolved) &&
-		(mLastMainUpscalerRequest != (int)nri_upscaler || mLastMainUpscalerResolved != resolved))
-	{
-		Printf("NRI main upscaler fallback: requested %s is unavailable on %s, using %s\n",
-			GetMainUpscalerName(requested),
-			(const char*)nri_api,
-			GetMainUpscalerName(resolved));
-		mLastMainUpscalerRequest = (int)nri_upscaler;
-		mLastMainUpscalerResolved = resolved;
-	}
-
-	return resolved;
-}
-
-NRIPostSharpenKind NRIRenderer::ResolvePostSharpenKind(bool logFallback)
-{
-	SyncLegacyUpscalerConfig(logFallback);
-	const NRIPostSharpenKind requested = GetSelectedPostSharpenKind();
-	NRIPostSharpenKind resolved = requested;
-
-	if (requested == NRIPostSharpenKind::NIS && !IsPostSharpenSupported(NRIPostSharpenKind::NIS))
-	{
-		resolved = NRIPostSharpenKind::Off;
-	}
-
-	if (logFallback &&
-		(requested != resolved) &&
-		(mLastPostSharpenRequest != (int)nri_postsharpen || mLastPostSharpenResolved != resolved))
-	{
-		Printf("NRI post sharpen fallback: requested %s is unavailable on %s, using %s\n",
-			GetPostSharpenName(requested),
-			(const char*)nri_api,
-			GetPostSharpenName(resolved));
-		mLastPostSharpenRequest = (int)nri_postsharpen;
-		mLastPostSharpenResolved = resolved;
-	}
-
-	return resolved;
-}
-
-const char* NRIRenderer::GetFrameTextureSlotName(FrameTextureSlot slot) const
-{
-	switch (slot)
-	{
-	case FrameTextureSlot::ViewZ: return "ViewZ";
-	case FrameTextureSlot::Motion: return "Motion";
-	case FrameTextureSlot::NormalRoughness: return "NormalRoughness";
-	case FrameTextureSlot::BaseColorMetalness: return "BaseColorMetalness";
-	case FrameTextureSlot::UnfilteredDiffuse: return "UnfilteredDiffuse";
-	case FrameTextureSlot::UnfilteredSpecular: return "UnfilteredSpecular";
-	case FrameTextureSlot::UnfilteredPenumbra: return "UnfilteredPenumbra";
-	case FrameTextureSlot::DenoisedDiffuse: return "DenoisedDiffuse";
-	case FrameTextureSlot::DenoisedSpecular: return "DenoisedSpecular";
-	case FrameTextureSlot::DenoisedShadow: return "DenoisedShadow";
-	case FrameTextureSlot::Composed: return "Composed";
-	case FrameTextureSlot::TraceTransparentOutput: return "TraceTransparentOutput";
-	case FrameTextureSlot::DirectLighting: return "DirectLighting";
-	case FrameTextureSlot::DirectEmission: return "DirectEmission";
-	case FrameTextureSlot::TaaHistoryPing: return "TaaHistoryPing";
-	case FrameTextureSlot::TaaHistoryPong: return "TaaHistoryPong";
-	case FrameTextureSlot::Validation: return "Validation";
-	case FrameTextureSlot::SrInput: return "SrInput";
-	case FrameTextureSlot::RrInput: return "RrInput";
-	case FrameTextureSlot::UpscalerDepth: return "UpscalerDepth";
-	case FrameTextureSlot::RrGuideDiffuseAlbedo: return "RrGuideDiffuseAlbedo";
-	case FrameTextureSlot::RrGuideSpecularAlbedo: return "RrGuideSpecularAlbedo";
-	case FrameTextureSlot::RrGuideSpecularHitDistance: return "RrGuideSpecularHitDistance";
-	case FrameTextureSlot::RrGuideNormalRoughness: return "RrGuideNormalRoughness";
-	case FrameTextureSlot::VendorOutput: return "VendorOutput";
-	case FrameTextureSlot::PostSharpenOutput: return "PostSharpenOutput";
-	case FrameTextureSlot::Final: return "Final";
-	case FrameTextureSlot::Count: return "Count";
-	default: return "Unknown";
-	}
-}
-
-NRIMainUpscalerKind NRIRenderer::GetSelectedMainUpscalerKind() const
-{
-	SyncLegacyUpscalerConfig(false);
-	switch ((int)nri_upscaler)
-	{
-	default:
-	case 0: return NRIMainUpscalerKind::Off;
-	case 2: return NRIMainUpscalerKind::DLSR;
-	case 3: return NRIMainUpscalerKind::DLRR;
-	}
-}
-
-NRIPostSharpenKind NRIRenderer::GetSelectedPostSharpenKind() const
-{
-	SyncLegacyUpscalerConfig(false);
-	switch ((int)nri_postsharpen)
-	{
-	default:
-	case 0: return NRIPostSharpenKind::Off;
-	case 1: return NRIPostSharpenKind::NIS;
-	}
-}
-
-NRIMainUpscalerKind NRIRenderer::GetResolvedMainUpscalerKindForStatus() const
-{
-	const NRIMainUpscalerKind requested = GetSelectedMainUpscalerKind();
-
-	switch (requested)
-	{
-	case NRIMainUpscalerKind::DLRR:
-		if (!IsMainUpscalerSupported(NRIMainUpscalerKind::DLRR))
-		{
-			return
-				IsMainUpscalerSupported(NRIMainUpscalerKind::DLSR) ? NRIMainUpscalerKind::DLSR :
-				NRIMainUpscalerKind::Off;
-		}
-		break;
-
-	case NRIMainUpscalerKind::DLSR:
-		if (!IsMainUpscalerSupported(NRIMainUpscalerKind::DLSR))
-		{
-			return NRIMainUpscalerKind::Off;
-		}
-		break;
-
-	default:
-		break;
-	}
-
-	return requested;
-}
-
-NRIPostSharpenKind NRIRenderer::GetResolvedPostSharpenKindForStatus() const
-{
-	const NRIPostSharpenKind requested = GetSelectedPostSharpenKind();
-	if (requested == NRIPostSharpenKind::NIS && !IsPostSharpenSupported(NRIPostSharpenKind::NIS))
-	{
-		return NRIPostSharpenKind::Off;
-	}
-
-	return requested;
-}
-
-bool NRIRenderer::ShouldRunAppTaaForFrameGraph(NRIMainUpscalerKind kind) const
-{
-	return ShouldRunAppTaa(kind);
-}
-
-nri::UpscalerMode NRIRenderer::GetSelectedUpscalerMode() const
-{
-	switch ((int)nri_upscalermode)
-	{
-	default:
-	case 0: return nri::UpscalerMode::NATIVE;
-	case 1: return nri::UpscalerMode::ULTRA_QUALITY;
-	case 2: return nri::UpscalerMode::QUALITY;
-	case 3: return nri::UpscalerMode::BALANCED;
-	case 4: return nri::UpscalerMode::PERFORMANCE;
-	case 5: return nri::UpscalerMode::ULTRA_PERFORMANCE;
-	}
-}
-
-void NRIRenderer::FillMatrix(float* outMatrix, const VSMatrix& matrix) const
-{
-	const_cast<VSMatrix&>(matrix).copy(outMatrix);
 }
