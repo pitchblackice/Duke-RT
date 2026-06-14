@@ -1,5 +1,6 @@
 #include "nri_frame_graph.h"
 
+#include "nri_pass_dispatch.h"
 #include "nri_renderer.h"
 #include "../system/nri_renderdevice.h"
 #include "nri_diagnostic_names.h"
@@ -316,7 +317,7 @@ bool ExecuteNRIFrameGraph(
 		renderer.RequestAutoExposureReset(autoExposureSettingsResetReason);
 	}
 
-	if (!renderer.DispatchTraceOpaque(di, geometry, materials))
+	if (!NRIPassDispatcher::DispatchTraceOpaque(renderer, di, geometry, materials))
 	{
 		return false;
 	}
@@ -324,7 +325,7 @@ bool ExecuteNRIFrameGraph(
 	if (bootstrapRawTracePresent)
 	{
 		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
-		if (!renderer.DispatchFinal())
+		if (!NRIPassDispatcher::DispatchFinal(renderer))
 		{
 			return false;
 		}
@@ -336,12 +337,12 @@ bool ExecuteNRIFrameGraph(
 	if (useValidationPresent)
 	{
 		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, true, false, false);
-		if (!renderer.DispatchDenoiser())
+		if (!NRIPassDispatcher::DispatchDenoiser(renderer))
 		{
 			return false;
 		}
 
-		if (!renderer.DispatchRawPresent(FrameTextureSlot::Validation))
+		if (!NRIPassDispatcher::DispatchRawPresent(renderer, FrameTextureSlot::Validation))
 		{
 			return false;
 		}
@@ -353,13 +354,13 @@ bool ExecuteNRIFrameGraph(
 	if (useDenoisedDebugPresent)
 	{
 		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, true, false, false);
-		if (!renderer.DispatchDenoiser())
+		if (!NRIPassDispatcher::DispatchDenoiser(renderer))
 		{
 			return false;
 		}
 
 		const FrameTextureSlot denoisedSlot = ptDebugMode == 16 ? FrameTextureSlot::DenoisedDiffuse : FrameTextureSlot::DenoisedSpecular;
-		if (!renderer.DispatchRawPresent(denoisedSlot))
+		if (!NRIPassDispatcher::DispatchRawPresent(renderer, denoisedSlot))
 		{
 			return false;
 		}
@@ -371,13 +372,13 @@ bool ExecuteNRIFrameGraph(
 	if (useShadowDebugPresent)
 	{
 		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, denoise ? "TraceOpaque,Denoiser,Final,CopyFinal" : "TraceOpaque,Final,CopyFinal", denoise, false, false);
-		if (denoise && !renderer.DispatchDenoiser())
+		if (denoise && !NRIPassDispatcher::DispatchDenoiser(renderer))
 		{
 			return false;
 		}
 
 		renderer.mUseUpscaledInFinal = false;
-		if (!renderer.DispatchFinal())
+		if (!NRIPassDispatcher::DispatchFinal(renderer))
 		{
 			return false;
 		}
@@ -404,7 +405,7 @@ bool ExecuteNRIFrameGraph(
 			}
 
 			renderer.mUseSplitShadowDenoiser = false;
-			if (!renderer.DispatchComposition(FrameTextureSlot::RrInput))
+			if (!NRIPassDispatcher::DispatchComposition(renderer, FrameTextureSlot::RrInput))
 			{
 				return false;
 			}
@@ -427,7 +428,7 @@ bool ExecuteNRIFrameGraph(
 				logState.phaseFDenoiserPath = true;
 			}
 
-			if (!renderer.DispatchDenoiser())
+			if (!NRIPassDispatcher::DispatchDenoiser(renderer))
 			{
 				if (!logState.phaseFDenoiserFallback)
 				{
@@ -442,7 +443,7 @@ bool ExecuteNRIFrameGraph(
 			}
 		}
 
-		if (!renderer.DispatchComposition(FrameTextureSlot::Composed))
+		if (!NRIPassDispatcher::DispatchComposition(renderer, FrameTextureSlot::Composed))
 		{
 			return false;
 		}
@@ -453,7 +454,7 @@ bool ExecuteNRIFrameGraph(
 			logState.phaseFTraceTransparentPath = true;
 		}
 
-		if (!renderer.DispatchTraceTransparent())
+		if (!NRIPassDispatcher::DispatchTraceTransparent(renderer))
 		{
 			return false;
 		}
@@ -480,7 +481,7 @@ bool ExecuteNRIFrameGraph(
 			return false;
 		}
 
-		if (!renderer.DispatchUpscaleChain())
+		if (!NRIPassDispatcher::DispatchUpscaleChain(renderer))
 		{
 			return false;
 		}
@@ -489,7 +490,7 @@ bool ExecuteNRIFrameGraph(
 		const NRIMainUpscalerKind resolvedMain = renderer.ResolveMainUpscalerKind(false);
 		const NRIPostSharpenKind resolvedPost = renderer.ResolvePostSharpenKind(false);
 		renderer.TraceTemporalState("resolved-present", resolvedMain, resolvedPost, renderer.ShouldRunAppTaaForFrameGraph(resolvedMain), resolvedPresentSlot, renderer.mHistoryOutputSlot);
-		if (!renderer.DispatchFinalPresent(resolvedPresentSlot))
+		if (!NRIPassDispatcher::DispatchFinalPresent(renderer, resolvedPresentSlot))
 		{
 			return false;
 		}
@@ -512,7 +513,7 @@ bool ExecuteNRIFrameGraph(
 			return false;
 		}
 
-		if (!renderer.DispatchFinalPresent(FrameTextureSlot::TraceTransparentOutput))
+		if (!NRIPassDispatcher::DispatchFinalPresent(renderer, FrameTextureSlot::TraceTransparentOutput))
 		{
 			return false;
 		}
@@ -535,7 +536,7 @@ bool ExecuteNRIFrameGraph(
 			return false;
 		}
 
-		if (!renderer.DispatchRawPresent(FrameTextureSlot::TraceTransparentOutput))
+		if (!NRIPassDispatcher::DispatchRawPresent(renderer, FrameTextureSlot::TraceTransparentOutput))
 		{
 			return false;
 		}
@@ -548,7 +549,7 @@ bool ExecuteNRIFrameGraph(
 	{
 		renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
 		renderer.mUseUpscaledInFinal = false;
-		if (!renderer.DispatchFinal())
+		if (!NRIPassDispatcher::DispatchFinal(renderer))
 		{
 			return false;
 		}
@@ -600,7 +601,7 @@ bool ExecuteNRIFrameGraph(
 			rawPresentTertiarySlot = FrameTextureSlot::NormalRoughness;
 		}
 
-		if (!renderer.DispatchRawPresent(rawPresentSlot, rawPresentSecondarySlot, rawPresentTertiarySlot))
+		if (!NRIPassDispatcher::DispatchRawPresent(renderer, rawPresentSlot, rawPresentSecondarySlot, rawPresentTertiarySlot))
 		{
 			return false;
 		}
@@ -617,7 +618,7 @@ bool ExecuteNRIFrameGraph(
 
 	renderer.mUseUpscaledInFinal = false;
 	renderer.SetSelfTestRouteSnapshot(presentRoute.routeName, presentRoute.presenterName, presentRoute.ownerName, presentRoute.passListName, false, false, false);
-	if (!renderer.DispatchFinal())
+	if (!NRIPassDispatcher::DispatchFinal(renderer))
 	{
 		return false;
 	}

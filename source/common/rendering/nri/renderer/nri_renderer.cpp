@@ -6,6 +6,7 @@
 #include "nri_diagnostic_names.h"
 #include "nri_frame_graph.h"
 #include "nri_material_policy.h"
+#include "nri_pass_dispatch.h"
 #include "nri_pipeline_state.h"
 #include "nri_renderstate.h"
 #include "nri_render_geometry_helpers.h"
@@ -4541,7 +4542,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 		mUpscaledInputSlot = FrameTextureSlot::Composed;
 		mUseUpscaledInFinal = false;
-		if (!DispatchBootstrapView())
+		if (!NRIPassDispatcher::DispatchBootstrapView(*this))
 		{
 			LogFallback("PT bootstrap view dispatch failed.");
 			if (preserveHistory)
@@ -6073,11 +6074,11 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 		mUpscaledInputSlot = FrameTextureSlot::Composed;
 		mUseUpscaledInFinal = false;
-		dispatched = buffersReady && DispatchBootstrapView();
+		dispatched = buffersReady && NRIPassDispatcher::DispatchBootstrapView(*this);
 	}
 	else
 	{
-		dispatched = accelerationReady && DispatchFrameGraph(di, *activeGeometry, *activeGpuMaterials, drawmode);
+		dispatched = accelerationReady && NRIPassDispatcher::DispatchFrameGraph(*this, di, *activeGeometry, *activeGpuMaterials, drawmode);
 	}
 	const bool success = paletteReady && texturesReady && buffersReady && accelerationReady && dispatched;
 

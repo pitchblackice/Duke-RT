@@ -40,6 +40,7 @@
 #include <vector>
 
 class NRIRenderDevice;
+class NRIPassDispatcher;
 struct MapRecord;
 struct LevelTransitionInfo;
 struct PathTracingActorSpriteTraceEvent;
@@ -1459,6 +1460,7 @@ private:
 	friend class NRIAccelerationStructureManager;
 	friend class NRIDescriptorSetManager;
 	friend class NRIFrameResources;
+	friend class NRIPassDispatcher;
 	friend class NRIPipelineStateManager;
 	friend class NRISceneUploadManager;
 	friend NRIRuntimeMutationResidentUploadServices BuildNRIRuntimeMutationResidentUploadServices(NRIRenderer& renderer);
@@ -1757,7 +1759,6 @@ private:
 		SceneDataBufferMask_Dynamic = 1 << 1,
 	};
 
-	bool DispatchBootstrapView();
 	bool UseFallbackSceneTextures(bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
 	uint32_t FindSceneTextureCacheIndex(uint64_t key) const;
@@ -1866,16 +1867,6 @@ private:
 	void BuildStaticMapInstances(const StaticMapSceneCache& staticScene, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const;
 	void BuildStaticMapInstances(const StaticMapSceneCache& staticScene, const StaticMapChunkAtlas& atlas, std::vector<nri::TopLevelInstance>& outTlasInstances, std::vector<SceneInstanceData>& outSceneInstances) const;
 	bool RestoreStaticTopLevelScene();
-	bool DispatchFrameGraph(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int drawmode);
-	bool DispatchTraceOpaque(HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials);
-	bool DispatchDenoiser();
-	bool DispatchComposition(FrameTextureSlot outputSlot = FrameTextureSlot::Composed);
-	bool DispatchTraceTransparent();
-	bool DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind);
-	bool DispatchRawPresent(FrameTextureSlot inputSlot, FrameTextureSlot secondarySlot = FrameTextureSlot::Count, FrameTextureSlot tertiarySlot = FrameTextureSlot::Count);
-	bool DispatchFinalPresent(FrameTextureSlot inputSlot);
-	bool DispatchUpscaleChain();
-	bool DispatchFinal();
 	bool ShouldRunAppTaaForFrameGraph(NRIMainUpscalerKind kind) const;
 	void RefreshMapWorld();
 	bool ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger);
