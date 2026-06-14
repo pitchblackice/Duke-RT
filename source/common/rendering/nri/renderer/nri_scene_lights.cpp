@@ -1706,31 +1706,34 @@ namespace
 		const SceneLightSystem::EmissiveMaterialResponseRule& rule,
 		SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive)
 	{
-		if (rule.hasMaterialResponse)
+		const bool hasMaterialResponseControl =
+			rule.hasMaterialResponse ||
+			rule.hasMaterialResponseMin ||
+			rule.hasMaterialResponseMax;
+		if (hasMaterialResponseControl || !rule.hasVisibleGlowBlend)
 		{
-			emissive.materialResponseEnabled = rule.materialResponse;
-			emissive.materialResponseExplicit = true;
-		}
-		else
-		{
-			emissive.materialResponseEnabled = true;
-		}
-		if (rule.hasMaterialResponseMin || rule.hasMaterialResponseMax)
-		{
-			if (!rule.hasMaterialResponse)
+			if (rule.hasMaterialResponse)
+			{
+				emissive.materialResponseEnabled = rule.materialResponse;
+				emissive.materialResponseExplicit = true;
+			}
+			else
 			{
 				emissive.materialResponseEnabled = true;
 			}
-			emissive.hasMaterialResponseParams = true;
-			emissive.hasMaterialResponseMin = rule.hasMaterialResponseMin;
-			emissive.hasMaterialResponseMax = rule.hasMaterialResponseMax;
-			if (rule.hasMaterialResponseMin)
+			if (rule.hasMaterialResponseMin || rule.hasMaterialResponseMax)
 			{
-				emissive.materialResponseMin = std::max(0.0f, rule.materialResponseMin);
-			}
-			if (rule.hasMaterialResponseMax)
-			{
-				emissive.materialResponseMax = std::max(0.0f, rule.materialResponseMax);
+				emissive.hasMaterialResponseParams = true;
+				emissive.hasMaterialResponseMin = rule.hasMaterialResponseMin;
+				emissive.hasMaterialResponseMax = rule.hasMaterialResponseMax;
+				if (rule.hasMaterialResponseMin)
+				{
+					emissive.materialResponseMin = std::max(0.0f, rule.materialResponseMin);
+				}
+				if (rule.hasMaterialResponseMax)
+				{
+					emissive.materialResponseMax = std::max(0.0f, rule.materialResponseMax);
+				}
 			}
 		}
 	}
@@ -2440,6 +2443,8 @@ namespace
 			rule.materialResponseMin = resolvedRule.materialResponseMin;
 			rule.hasMaterialResponseMax = resolvedRule.hasMaterialResponseMax;
 			rule.materialResponseMax = resolvedRule.materialResponseMax;
+			rule.hasVisibleGlowBlend = resolvedRule.hasVisibleGlowBlend;
+			rule.visibleGlowBlend = resolvedRule.visibleGlowBlend;
 			outRules.push_back(rule);
 		}
 	}

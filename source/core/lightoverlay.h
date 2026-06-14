@@ -205,6 +205,8 @@ struct ParsedLightOverlayEmissiveMaterialResponseRule
 	float materialResponseMin = 0.0f;
 	bool hasMaterialResponseMax = false;
 	float materialResponseMax = 1.0f;
+	bool hasVisibleGlowBlend = false;
+	float visibleGlowBlend = 1.0f;
 };
 
 struct ParsedLightOverlaySurfaceLightRule
@@ -462,6 +464,8 @@ struct ResolvedLightOverlayEmissiveMaterialResponseRule
 	float materialResponseMin = 0.0f;
 	bool hasMaterialResponseMax = false;
 	float materialResponseMax = 1.0f;
+	bool hasVisibleGlowBlend = false;
+	float visibleGlowBlend = 1.0f;
 };
 
 struct ResolvedLightOverlaySurfaceLightRule

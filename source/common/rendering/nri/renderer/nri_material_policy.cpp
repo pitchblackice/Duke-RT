@@ -10,7 +10,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstring>
+#include <string>
 #include <unordered_set>
 
 EXTERN_CVAR(Float, nri_ptfullbrightboost)
@@ -67,6 +69,114 @@ namespace
 	float GetGlowmapVisibleBlendScale()
 	{
 		return std::clamp((float)nri_ptglowblend, 0.0f, 3.0f);
+	}
+
+	uint32_t ResolveLegacyTileTextureId(int tile)
+	{
+		if (tile < 0)
+		{
+			return 0u;
+		}
+
+		const FTextureID textureId = tileGetTextureID(tile);
+		return textureId.isValid() ? (uint32_t)textureId.GetIndex() : 0u;
+	}
+
+	std::string NormalizeLightOverlayTextureSelector(const char* value)
+	{
+		std::string normalized = value != nullptr ? value : "";
+		for (char& c : normalized)
+		{
+			c = (char)std::tolower((unsigned char)c);
+		}
+
+		const size_t slash = normalized.find_last_of("/\\");
+		const size_t dot = normalized.find_last_of('.');
+		if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+		{
+			normalized.erase(dot);
+		}
+		return normalized;
+	}
+
+	std::string NormalizeMaterialTextureName(const FGameTexture* texture)
+	{
+		return NormalizeLightOverlayTextureSelector(texture != nullptr ? texture->GetName().GetChars() : "");
+	}
+
+	bool MaterialTextureIdMatches(const nri_scene::MaterialLightingMetadata& metadata, uint32_t textureId)
+	{
+		if (textureId == 0u)
+		{
+			return false;
+		}
+		return metadata.textureId == textureId || metadata.baseTextureId == textureId;
+	}
+
+	bool MaterialTextureIdInRange(const nri_scene::MaterialLightingMetadata& metadata, uint32_t firstTextureId, uint32_t lastTextureId)
+	{
+		if (firstTextureId == 0u || lastTextureId == 0u)
+		{
+			return false;
+		}
+		if (firstTextureId > lastTextureId)
+		{
+			std::swap(firstTextureId, lastTextureId);
+		}
+		return
+			(metadata.textureId >= firstTextureId && metadata.textureId <= lastTextureId) ||
+			(metadata.baseTextureId >= firstTextureId && metadata.baseTextureId <= lastTextureId);
+	}
+
+	bool EmissiveMaterialResponseRuleMatchesMaterial(
+		const ResolvedLightOverlayEmissiveMaterialResponseRule& rule,
+		const nri_scene::MaterialLightingMetadata& metadata)
+	{
+		for (int tile : rule.tileFilters)
+		{
+			if (MaterialTextureIdMatches(metadata, ResolveLegacyTileTextureId(tile)))
+			{
+				return true;
+			}
+		}
+
+		for (const auto& range : rule.tileRanges)
+		{
+			if (MaterialTextureIdInRange(metadata, ResolveLegacyTileTextureId(range.first), ResolveLegacyTileTextureId(range.last)))
+			{
+				return true;
+			}
+		}
+
+		if (rule.textureNames.Size() != 0)
+		{
+			const std::string materialName = NormalizeMaterialTextureName(metadata.texture);
+			for (const auto& textureName : rule.textureNames)
+			{
+				if (materialName == NormalizeLightOverlayTextureSelector(textureName.GetChars()))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	float ResolveVisibleGlowBlendScale(
+		const ResolvedLightOverlaySet& resolved,
+		const nri_scene::MaterialLightingMetadata& metadata,
+		float fallbackScale)
+	{
+		float scale = fallbackScale;
+		for (const auto& rule : resolved.emissiveMaterialResponseRules)
+		{
+			if (rule.hasVisibleGlowBlend && EmissiveMaterialResponseRuleMatchesMaterial(rule, metadata))
+			{
+				scale = std::clamp(rule.visibleGlowBlend, 0.0f, 3.0f);
+			}
+		}
+		return scale;
 	}
 
 	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
@@ -407,7 +517,7 @@ const std::unordered_map<int32_t, uint32_t>& NRIRenderer::GetActorMaterialOverri
 
 void NRIRenderer::ApplyEmissiveMaterialOverrides(const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& inOutGpuMaterials) const
 {
-	nri_material_policy::ApplyEmissiveMaterialOverrides(mSceneLights, GetGlowmapVisibleBlendScale(), materials, inOutGpuMaterials);
+	nri_material_policy::ApplyEmissiveMaterialOverrides(mSceneLights, GetResolvedLightOverlaySet(), GetGlowmapVisibleBlendScale(), materials, inOutGpuMaterials);
 }
 
 void NRIRenderer::BuildMaterialsWithActorOverrides(nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel)
@@ -787,6 +897,7 @@ void nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(
 
 void nri_material_policy::ApplyEmissiveMaterialOverrides(
 	const SceneLightSystem& sceneLights,
+	const ResolvedLightOverlaySet& resolved,
 	float glowmapVisibleBlendScale,
 	const nri_scene::MaterialBridgeData& materials,
 	std::vector<nri_scene::MaterialData>& inOutGpuMaterials)
@@ -798,7 +909,7 @@ void nri_material_policy::ApplyEmissiveMaterialOverrides(
 		sceneLights.ApplyEmissiveMaterialSettings(materials.lightMetadata[materialIndex], material);
 		if (material.emissiveMode == nri_scene::MaterialEmissiveMode_UseGlowmapTexture)
 		{
-			material.emissiveReserved = glowmapVisibleBlendScale;
+			material.emissiveReserved = ResolveVisibleGlowBlendScale(resolved, materials.lightMetadata[materialIndex], glowmapVisibleBlendScale);
 		}
 	}
 }

@@ -1343,6 +1343,12 @@ namespace
 					rule.hasMaterialResponseMax = true;
 					rule.materialResponseMax = (float)sc.Float;
 				}
+				else if (sc.Compare("visibleglowblend") || sc.Compare("glowblend"))
+				{
+					sc.MustGetFloat();
+					rule.hasVisibleGlowBlend = true;
+					rule.visibleGlowBlend = (float)sc.Float;
+				}
 				else
 				{
 					SkipUnknownField("emissivematerialresponse", sc.String);
@@ -1692,6 +1698,7 @@ namespace
 		if (rule.hasMaterialResponse) AppendShadowStateField(text, 2, "materialresponse", rule.materialResponse);
 		if (rule.hasMaterialResponseMin) AppendLine(text, 2, FStringf("materialresponsemin %s", FormatLightOverlayFloat(rule.materialResponseMin).GetChars()));
 		if (rule.hasMaterialResponseMax) AppendLine(text, 2, FStringf("materialresponsemax %s", FormatLightOverlayFloat(rule.materialResponseMax).GetChars()));
+		if (rule.hasVisibleGlowBlend) AppendLine(text, 2, FStringf("visibleglowblend %s", FormatLightOverlayFloat(rule.visibleGlowBlend).GetChars()));
 		AppendLine(text, 1, "}");
 	}
 
@@ -2289,6 +2296,8 @@ namespace
 		destination.materialResponseMin = source.materialResponseMin;
 		destination.hasMaterialResponseMax = source.hasMaterialResponseMax;
 		destination.materialResponseMax = source.materialResponseMax;
+		destination.hasVisibleGlowBlend = source.hasVisibleGlowBlend;
+		destination.visibleGlowBlend = source.visibleGlowBlend;
 	}
 
 	static void CopySurfaceLightRule(const ParsedLightOverlaySurfaceLightRule& source, ResolvedLightOverlaySurfaceLightRule& destination)

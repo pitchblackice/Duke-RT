@@ -46,6 +46,7 @@ namespace nri_material_policy
 
 	void ApplyEmissiveMaterialOverrides(
 		const SceneLightSystem& sceneLights,
+		const ResolvedLightOverlaySet& resolved,
 		float glowmapVisibleBlendScale,
 		const nri_scene::MaterialBridgeData& materials,
 		std::vector<nri_scene::MaterialData>& inOutGpuMaterials);
