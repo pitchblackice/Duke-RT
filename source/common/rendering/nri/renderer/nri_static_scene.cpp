@@ -11,6 +11,8 @@
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
 #include "mapinfo.h"
+#include "texturemanager.h"
+#include "texinfo.h"
 
 #include <algorithm>
 #include <chrono>
@@ -18,6 +20,8 @@
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Int, nri_ptloadingtrace)
 EXTERN_CVAR(Bool, nri_voxelstats)
+EXTERN_CVAR(Bool, nri_ptceilingnudge)
+EXTERN_CVAR(Float, nri_ptceilingnudgedistance)
 
 namespace
 {
@@ -74,6 +78,155 @@ namespace
 	static bool ShouldTracePtPerf()
 	{
 		return PerfLoopTraceActive() || ShouldEmitRendererTemporalTraceLogs();
+	}
+
+	class ScopedStaticScenePerfTimer
+	{
+	public:
+		explicit ScopedStaticScenePerfTimer(double& targetMs)
+			: mTarget(ShouldTracePtPerf() ? &targetMs : nullptr)
+		{
+			if (mTarget != nullptr)
+			{
+				mStart = std::chrono::steady_clock::now();
+			}
+		}
+
+		~ScopedStaticScenePerfTimer()
+		{
+			if (mTarget != nullptr)
+			{
+				*mTarget += DurationMs(mStart, std::chrono::steady_clock::now());
+			}
+		}
+
+	private:
+		double* mTarget = nullptr;
+		std::chrono::steady_clock::time_point mStart = {};
+	};
+
+	static FTextureID ResolveAuthoredTextureIdForStaticMapSurface(const nri_scene::PTMapSurface& surface)
+	{
+		switch (surface.kind)
+		{
+		case nri_scene::PTMapSurfaceKind::Floor:
+		{
+			const int32_t sectorIndex = surface.surface.provenance.sectorIndex;
+			return sectorIndex >= 0 && (unsigned)sectorIndex < sector.Size() ? sector[(unsigned)sectorIndex].floortexture : FNullTextureID();
+		}
+		case nri_scene::PTMapSurfaceKind::Ceiling:
+		{
+			const int32_t sectorIndex = surface.surface.provenance.sectorIndex;
+			return sectorIndex >= 0 && (unsigned)sectorIndex < sector.Size() ? sector[(unsigned)sectorIndex].ceilingtexture : FNullTextureID();
+		}
+		case nri_scene::PTMapSurfaceKind::WallOneSided:
+		{
+			const int32_t wallIndex = surface.surface.provenance.wallIndex;
+			if (wallIndex < 0 || (unsigned)wallIndex >= wall.Size())
+			{
+				return FNullTextureID();
+			}
+
+			const walltype& wal = wall[(unsigned)wallIndex];
+			return ((wal.cstat & CSTAT_WALL_1WAY) != 0 && wal.nextwall != -1) ? wal.overtexture : wal.walltexture;
+		}
+		case nri_scene::PTMapSurfaceKind::WallUpper:
+		{
+			const int32_t wallIndex = surface.surface.provenance.wallIndex;
+			return wallIndex >= 0 && (unsigned)wallIndex < wall.Size() ? wall[(unsigned)wallIndex].walltexture : FNullTextureID();
+		}
+		case nri_scene::PTMapSurfaceKind::WallMiddle:
+		{
+			const int32_t wallIndex = surface.surface.provenance.wallIndex;
+			return wallIndex >= 0 && (unsigned)wallIndex < wall.Size() ? wall[(unsigned)wallIndex].overtexture : FNullTextureID();
+		}
+		case nri_scene::PTMapSurfaceKind::WallLower:
+		{
+			const int32_t wallIndex = surface.surface.provenance.wallIndex;
+			if (wallIndex < 0 || (unsigned)wallIndex >= wall.Size())
+			{
+				return FNullTextureID();
+			}
+
+			const walltype& wal = wall[(unsigned)wallIndex];
+			if ((wal.cstat & CSTAT_WALL_BOTTOM_SWAP) != 0 && wal.nextwall >= 0 && (unsigned)wal.nextwall < wall.Size())
+			{
+				return wall[(unsigned)wal.nextwall].walltexture;
+			}
+			return wal.walltexture;
+		}
+		default:
+			return FNullTextureID();
+		}
+	}
+
+	static bool IsAnimatedStaticMapSurfaceCandidate(const nri_scene::PTMapSurface& surface)
+	{
+		const FTextureID textureId = ResolveAuthoredTextureIdForStaticMapSurface(surface);
+		return textureId.isValid() && GetExtInfo(textureId).picanm.type() != 0;
+	}
+
+	static bool ChunkHasAnimatedStaticMapSurfaceCandidates(const nri_scene::PTMapWorld& mapWorld, const nri_scene::PTMapChunk& chunk)
+	{
+		const uint32_t endSurface = std::min<uint32_t>(chunk.firstSurface + chunk.surfaceCount, (uint32_t)mapWorld.surfaces.size());
+		for (uint32_t surfaceIndex = chunk.firstSurface; surfaceIndex < endSurface; ++surfaceIndex)
+		{
+			if (IsAnimatedStaticMapSurfaceCandidate(mapWorld.surfaces[surfaceIndex]))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	static bool RefreshAnimatedBindingsForStaticMapChunk(
+		const nri_scene::PTMapWorld& mapWorld,
+		const nri_scene::PTMapChunk& chunk,
+		nri_scene::SceneView& ioChunkView)
+	{
+		uint32_t wallSurfaceIndex = 0;
+		uint32_t flatSurfaceIndex = 0;
+		const uint32_t endSurface = std::min<uint32_t>(chunk.firstSurface + chunk.surfaceCount, (uint32_t)mapWorld.surfaces.size());
+		for (uint32_t surfaceIndex = chunk.firstSurface; surfaceIndex < endSurface; ++surfaceIndex)
+		{
+			const auto& mapSurface = mapWorld.surfaces[surfaceIndex];
+			if ((mapSurface.surface.material.flags & nri_scene::MaterialFlag_Sky) != 0 && mapSurface.surface.material.texture != nullptr)
+			{
+				continue;
+			}
+
+			nri_scene::SurfaceRef* targetSurface = nullptr;
+			switch (mapSurface.kind)
+			{
+			case nri_scene::PTMapSurfaceKind::Floor:
+			case nri_scene::PTMapSurfaceKind::Ceiling:
+				if (flatSurfaceIndex >= ioChunkView.opaqueFlats.size())
+				{
+					return false;
+				}
+				targetSurface = &ioChunkView.opaqueFlats[flatSurfaceIndex++];
+				break;
+			default:
+				if (wallSurfaceIndex >= ioChunkView.opaqueWalls.size())
+				{
+					return false;
+				}
+				targetSurface = &ioChunkView.opaqueWalls[wallSurfaceIndex++];
+				break;
+			}
+
+			if (!IsAnimatedStaticMapSurfaceCandidate(mapSurface))
+			{
+				continue;
+			}
+
+			const FTextureID textureId = ResolveAuthoredTextureIdForStaticMapSurface(mapSurface);
+			FGameTexture* liveTexture = textureId.isValid() ? TexMan.GetGameTexture(textureId, true) : nullptr;
+			targetSurface->material.texture = liveTexture;
+		}
+
+		return wallSurfaceIndex == ioChunkView.opaqueWalls.size() && flatSurfaceIndex == ioChunkView.opaqueFlats.size();
 	}
 }
 
@@ -134,6 +287,219 @@ void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
 		mStaticAccelerationBuildSerial = 0;
 		return;
 	}
+}
+
+NRIStaticSceneGeometryUploadServices NRIRenderer::BuildStaticSceneGeometryUploadServices()
+{
+	NRIStaticSceneGeometryUploadServices services = {};
+	services.user = this;
+	services.ensureResidentStructuredBuffer = [](void* user, NRIBufferResource& resource, SceneBufferDebugStats& stats, const void* data, uint64_t size, uint32_t stride, nri::BufferUsageBits usage, nri::AccessStage after, const char* waitReason, int uploadKind) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->EnsureResidentStructuredBuffer(resource, stats, data, size, stride, usage, after, waitReason, uploadKind);
+	};
+	services.refreshResidentStaticSceneDataSet = [](void* user) -> bool
+	{
+		return static_cast<NRIRenderer*>(user)->RefreshResidentStaticSceneDataSet();
+	};
+	services.noteResidentStaticAtlasGrow = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->NoteResidentStaticAtlasGrow();
+	};
+	return services;
+}
+
+void NRIRenderer::SyncResidentMapChunkRegistryFromStaticScene()
+{
+	std::vector<RuntimeMutationResidentReplacementInfo> replacements;
+	if (mMapWorld.valid)
+	{
+		mRuntimeMutation.CollectResidentReplacementInfo((uint32_t)mMapWorld.chunks.size(), replacements);
+	}
+
+	NRIStaticSceneRegistrySyncInput input = {};
+	input.mapWorld = &mMapWorld;
+	input.staticScene = &mStaticMapScene;
+	input.atlas = &mStaticMapChunkAtlas;
+	input.replacements = &replacements;
+	input.hashResidentMaterialPayload = nri_runtime_mutation::HashResidentMaterialPayload;
+	mStaticSceneResidency.SyncResidentMapChunkRegistryFromStaticScene(input);
+}
+
+bool NRIRenderer::RefreshStaticMapAnimatedMaterials()
+{
+	const nri_scene::SceneView* preservedSkyView =
+		(mSkyEnvironment.PreservedStaticMapSky().valid && mSkyEnvironment.PreservedStaticMapSky().buildSerial == mMapWorld.buildSerial)
+		? &mSkyEnvironment.PreservedStaticMapSky().sceneView
+		: nullptr;
+
+	NRIStaticSceneAnimatedMaterialRefreshInput input = {};
+	input.mapWorld = &mMapWorld;
+	input.staticScene = &mStaticMapScene;
+	input.atlas = &mStaticMapChunkAtlas;
+	input.registry = &mStaticSceneResidency.Registry();
+	input.preservedSkyView = preservedSkyView;
+	input.visibleChunkWords = &mCurrentVisibleChunkWords;
+	input.runtimeAnimatedSuppressionEmitCount = &mLastPerfShellTraceStats.runtimeAnimatedSuppressionEmitCount;
+	input.traceStats = nri_ptscenestats;
+	input.traceMaterialBridgeFailures = nri_ptscenestats && ShouldTracePtPerf();
+
+	NRIStaticSceneAnimatedMaterialRefreshServices services = {};
+	services.user = this;
+	services.refreshAnimatedBindingsForStaticMapChunk = [](void* user, const nri_scene::PTMapWorld& mapWorld, const nri_scene::PTMapChunk& chunk, nri_scene::SceneView& ioChunkView)
+	{
+		(void)user;
+		return RefreshAnimatedBindingsForStaticMapChunk(mapWorld, chunk, ioChunkView);
+	};
+	services.buildMaterialsWithActorOverrides = [](void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label)
+	{
+		static_cast<NRIRenderer*>(user)->BuildMaterialsWithActorOverrides(sceneView, materials, label);
+	};
+	services.ensurePaletteTexture = [](void* user, const nri_scene::MaterialBridgeData& materials)
+	{
+		return static_cast<NRIRenderer*>(user)->EnsurePaletteTexture(materials);
+	};
+	services.ensureSceneTextures = [](void* user, const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& gpuMaterials, bool preserveExistingSky, const char* reason)
+	{
+		return static_cast<NRIRenderer*>(user)->EnsureSceneTextures(sceneView, materials, gpuMaterials, preserveExistingSky, reason);
+	};
+	services.uploadStaticMaterialAtlas = [](void* user)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return nri_static_scene_geometry_upload::UploadStaticMapChunkMaterialAtlas(
+			renderer->BuildStaticSceneGeometryUploadServices(),
+			renderer->mStaticMaterialBuffer,
+			renderer->mMaterialBufferStats,
+			renderer->mStaticMapChunkAtlas,
+			renderer->mStaticMapScene,
+			renderer->mStaticMapScene.gpuMaterials);
+	};
+	services.recoverStaticScene = [](void* user, const char* reason)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		renderer->DestroyStaticMapSceneCache(reason);
+		renderer->mStaticMapScene = {};
+		renderer->mStaticAccelerationBuildSerial = 0;
+		renderer->mSkyEnvironment.PreservedStaticMapSky() = {};
+		return renderer->EnsureStaticMapScene();
+	};
+	services.syncResidentRegistry = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->SyncResidentMapChunkRegistryFromStaticScene();
+	};
+	services.markUploadedStaticMapSceneLastFrame = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->mUploadedStaticMapSceneLastFrame = true;
+	};
+
+	return nri_static_scene::RefreshStaticMapAnimatedMaterials(input, services);
+}
+
+bool NRIRenderer::EnsureStaticMapScene()
+{
+	ScopedStaticScenePerfTimer perfTimer(mLastPerfShellTraceStats.staticSceneMs);
+
+	NRIStaticSceneCacheBuildServices staticSceneCacheBuildServices = {};
+	staticSceneCacheBuildServices.user = this;
+	staticSceneCacheBuildServices.resetMutationCacheForStaticSceneBuild = [](void* user, uint32_t chunkCount)
+	{
+		static_cast<NRIRenderer*>(user)->mRuntimeMutation.ResetCacheForStaticSceneBuild(chunkCount);
+	};
+	staticSceneCacheBuildServices.initializeStaticChunkReplacement = [](void* user, const nri_scene::PTMapChunk& chunk)
+	{
+		static_cast<NRIRenderer*>(user)->mRuntimeMutation.InitializeStaticChunkReplacement(chunk);
+	};
+	staticSceneCacheBuildServices.buildMaterialsWithActorOverrides = [](void* user, nri_scene::SceneView& sceneView, nri_scene::MaterialBridgeData& materials, const char* label)
+	{
+		static_cast<NRIRenderer*>(user)->BuildMaterialsWithActorOverrides(sceneView, materials, label);
+	};
+	staticSceneCacheBuildServices.chunkHasAnimatedStaticMapSurfaceCandidates = [](void*, const nri_scene::PTMapWorld& mapWorld, const nri_scene::PTMapChunk& chunk)
+	{
+		return ChunkHasAnimatedStaticMapSurfaceCandidates(mapWorld, chunk);
+	};
+	staticSceneCacheBuildServices.geometryBuildStaticChunkMs = &mLastPerfShellTraceStats.geometryBuildStaticChunkMs;
+	staticSceneCacheBuildServices.geometryBuildStaticChunkCalls = &mLastPerfShellTraceStats.geometryBuildStaticChunkCalls;
+	staticSceneCacheBuildServices.geometryBuildStaticChunkPrimitives = &mLastPerfShellTraceStats.geometryBuildStaticChunkPrimitives;
+	staticSceneCacheBuildServices.ceilingNudge = nri_ptceilingnudge;
+	staticSceneCacheBuildServices.ceilingNudgeDistance = (float)nri_ptceilingnudgedistance;
+
+	NRIStaticSceneEnsureInput input = {};
+	input.mapWorld = &mMapWorld;
+	input.staticScene = &mStaticMapScene;
+	input.atlas = &mStaticMapChunkAtlas;
+	input.preservedSkyState = &mSkyEnvironment.PreservedStaticMapSky();
+	input.staticAccelerationBuildSerial = &mStaticAccelerationBuildSerial;
+	input.uploadedStaticMapSceneLastFrame = &mUploadedStaticMapSceneLastFrame;
+	input.builtStaticMapSceneASLastFrame = &mBuiltStaticMapSceneASLastFrame;
+	input.frameIndex = mFrameIndex;
+	input.traceSceneStats = nri_ptscenestats;
+	input.tracePtPerf = ShouldTracePtPerf();
+	input.traceSkyPerf = ShouldTraceSkyPerf();
+
+	NRIStaticSceneEnsureServices services = {};
+	services.user = this;
+	services.cacheBuildServices = staticSceneCacheBuildServices;
+	services.destroyStaticMapSceneCache = [](void* user, const char* reason)
+	{
+		static_cast<NRIRenderer*>(user)->DestroyStaticMapSceneCache(reason);
+	};
+	services.refreshStaticMapAnimatedMaterials = [](void* user)
+	{
+		return static_cast<NRIRenderer*>(user)->RefreshStaticMapAnimatedMaterials();
+	};
+	services.ensurePaletteTexture = [](void* user, const nri_scene::MaterialBridgeData& materials)
+	{
+		return static_cast<NRIRenderer*>(user)->EnsurePaletteTexture(materials);
+	};
+	services.ensureSceneTextures = [](void* user, const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& gpuMaterials, bool preserveExistingSky, const char* reason)
+	{
+		return static_cast<NRIRenderer*>(user)->EnsureSceneTextures(sceneView, materials, gpuMaterials, preserveExistingSky, reason);
+	};
+	services.uploadStaticMapChunkAtlas = [](void* user)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		return nri_static_scene_geometry_upload::UploadStaticMapChunkAtlas(
+			renderer->mMapWorld,
+			renderer->BuildStaticSceneGeometryUploadServices(),
+			renderer->mStaticVertexBuffer,
+			renderer->mVertexBufferStats,
+			renderer->mStaticIndexBuffer,
+			renderer->mIndexBufferStats,
+			renderer->mStaticPrimitiveBuffer,
+			renderer->mPrimitiveBufferStats,
+			renderer->mStaticMaterialBuffer,
+			renderer->mMaterialBufferStats,
+			renderer->mStaticMapChunkAtlas,
+			renderer->mStaticMapScene,
+			renderer->mStaticMapScene.gpuMaterials);
+	};
+	services.buildStaticMapAccelerationStructures = [](void* user)
+	{
+		return static_cast<NRIRenderer*>(user)->BuildStaticMapAccelerationStructures();
+	};
+	services.syncResidentRegistryFromStaticScene = [](void* user)
+	{
+		static_cast<NRIRenderer*>(user)->SyncResidentMapChunkRegistryFromStaticScene();
+	};
+	services.noteResidentStaticSceneTextureBuild = [](void*)
+	{
+		gRendererSkyPerfTraceStats.residentStaticSceneTextureBuilds++;
+	};
+	services.finalizeStaticMapSceneBuildCommands = [](void* user)
+	{
+		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
+		if (renderer->mFrameBuffer == nullptr || renderer->mFrameBuffer->mCommandBuffer == nullptr)
+		{
+			return true;
+		}
+		if (!renderer->mFrameBuffer->SubmitWaitAndRestartCommandList("static-map-scene-build"))
+		{
+			return false;
+		}
+		renderer->ReleaseWorldAccelerationBuildScratch("static-map-scene-build");
+		return true;
+	};
+
+	return nri_static_scene::EnsureStaticMapScene(input, services);
 }
 
 uint32_t NRIStaticSceneResidency::GetStaticSceneChunkSlotPreference(

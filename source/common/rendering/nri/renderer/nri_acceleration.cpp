@@ -16,6 +16,8 @@ EXTERN_CVAR(Bool, nri_pttemporaltrace)
 EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, perf_looptraceframes)
 EXTERN_CVAR(Bool, nri_ptslowdowntrace)
+EXTERN_CVAR(Int, nri_ptloadingtrace)
+EXTERN_CVAR(Bool, nri_voxelstats)
 
 namespace
 {
@@ -703,4 +705,133 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 		}
 	}
 	return true;
+}
+
+void NRIRenderer::ReleaseWorldAccelerationBuildScratch(const char* reason)
+{
+	const uint64_t scratchBytes = mScratchBuffer.memorySize + mTopLevelScratchBuffer.memorySize;
+	const uint32_t scratchBuffers =
+		(mScratchBuffer.buffer != nullptr ? 1u : 0u) +
+		(mTopLevelScratchBuffer.buffer != nullptr ? 1u : 0u);
+	if (scratchBuffers == 0)
+	{
+		return;
+	}
+
+	DestroyBufferResource(mScratchBuffer);
+	DestroyBufferResource(mTopLevelScratchBuffer);
+	if ((int)nri_ptloadingtrace >= 1)
+	{
+		Printf("NRI PT transient scratch: event=release reason=%s buffers=%u bytes=%llu\n",
+			reason != nullptr ? reason : "unspecified",
+			scratchBuffers,
+			(unsigned long long)scratchBytes);
+	}
+}
+
+bool NRIRenderer::BuildDynamicAccelerationStructure(const nri_scene::GeometryData& geometry)
+{
+	return NRIAccelerationStructureManager::BuildDynamic(*this, geometry);
+}
+
+bool NRIRenderer::BuildDynamicAccelerationStructure(
+	const nri_scene::GeometryData& geometry,
+	uint32_t indexOffset,
+	uint32_t indexCount,
+	uint32_t primitiveCount,
+	NRIAccelerationStructureResource& outAccelerationStructure,
+	bool updateDynamicPerfStats)
+{
+	return NRIAccelerationStructureManager::BuildDynamic(*this, geometry, indexOffset, indexCount, primitiveCount, outAccelerationStructure, updateDynamicPerfStats);
+}
+
+bool NRIRenderer::BuildBottomLevelAccelerationStructure(
+	const NRIBufferResource& vertexBuffer,
+	const NRIBufferResource& indexBuffer,
+	uint32_t vertexCount,
+	uint32_t indexOffset,
+	uint32_t indexCount,
+	uint32_t primitiveCount,
+	NRIAccelerationStructureResource& outAccelerationStructure,
+	bool updateDynamicPerfStats)
+{
+	return NRIAccelerationStructureManager::BuildBottomLevel(
+		*this,
+		vertexBuffer,
+		indexBuffer,
+		vertexCount,
+		indexOffset,
+		indexCount,
+		primitiveCount,
+		outAccelerationStructure,
+		updateDynamicPerfStats);
+}
+
+bool NRIRenderer::BuildEmissiveTopLevelAccelerationStructure()
+{
+	return NRIAccelerationStructureManager::BuildEmissiveTopLevel(*this);
+}
+
+bool NRIRenderer::BuildTopLevelAccelerationStructure(const std::vector<nri::TopLevelInstance>& instances, uint32_t sceneBufferMask)
+{
+	return NRIAccelerationStructureManager::BuildTopLevel(*this, instances, sceneBufferMask);
+}
+
+bool NRIRenderer::BuildTopLevelAccelerationStructure(
+	const std::vector<nri::TopLevelInstance>& instances,
+	uint32_t sceneBufferMask,
+	NRIAccelerationStructureResource& topLevelAS,
+	NRIBufferResource& tlasInstanceBuffer,
+	NRIBufferResource& topLevelScratchBuffer,
+	const NRIBufferResource* staticVertexBuffer,
+	const NRIBufferResource* staticIndexBuffer,
+	uint32_t* outTlasInstanceCount,
+	bool updateLiveState,
+	bool tlasInstanceWritesQuiesced)
+{
+	return NRIAccelerationStructureManager::BuildTopLevel(
+		*this,
+		instances,
+		sceneBufferMask,
+		topLevelAS,
+		tlasInstanceBuffer,
+		topLevelScratchBuffer,
+		staticVertexBuffer,
+		staticIndexBuffer,
+		outTlasInstanceCount,
+		updateLiveState,
+		tlasInstanceWritesQuiesced);
+}
+
+void NRIRenderer::DestroyDynamicBottomLevelAccelerationStructures()
+{
+	for (SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
+	{
+		DestroyAccelerationStructureResource(slot.dynamicBottomLevelAS);
+	}
+}
+
+void NRIRenderer::DestroyAccelerationStructures()
+{
+	mStaticMapScene.accelerationResident = false;
+	for (auto& chunk : mStaticMapScene.chunks)
+	{
+		DestroyAccelerationStructureResource(chunk.accelerationStructure);
+		chunk.residentBlasScratchSizeCacheKey = nullptr;
+		chunk.residentBlasBuildScratchSize = 0;
+		chunk.residentBlasUpdateScratchSize = 0;
+	}
+	DestroyDynamicBottomLevelAccelerationStructures();
+	mPersistentVoxels.Reset("destroy-acceleration-structures", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
+	DestroyAccelerationStructureResource(mTopLevelAS);
+	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
+	mStaticAccelerationBuildSerial = 0;
+	mActiveTlasInstanceCount = 0;
+	mEmissiveTlasInstanceCount = 0;
+	mEmissiveTlasStaticInstanceCount = 0;
+	mEmissiveTlasDynamicInstanceCount = 0;
+	mEmissiveTlasBuildCount = 0;
+	mEmissiveTlasInstancePayloadCacheValid = false;
+	mEmissiveTlasInstancePayloadHash = 0;
+	SyncResidentMapChunkRegistryFromStaticScene();
 }

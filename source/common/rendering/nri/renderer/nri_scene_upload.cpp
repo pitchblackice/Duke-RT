@@ -4,8 +4,10 @@
 
 #include "nri_runtime_mutation_trace.h"
 #include "nri_scene_lights.h"
+#include "nri_static_scene_geometry.h"
 #include "nri_upload_hash.h"
 #include "c_cvars.h"
+#include "../../hwrenderer/data/hw_clock.h"
 
 #include <algorithm>
 #include <chrono>
@@ -16,6 +18,9 @@ EXTERN_CVAR(Int, nri_pttraceframes)
 EXTERN_CVAR(Int, perf_looptraceframes)
 EXTERN_CVAR(Bool, nri_ptsectorlighting)
 EXTERN_CVAR(Float, nri_ptsectorlightmultiplier)
+EXTERN_CVAR(Int, nri_ptscenebufferdirtyrangegap)
+EXTERN_CVAR(Int, nri_ptscenebufferrangeuploadmaxranges)
+EXTERN_CVAR(Int, nri_ptscenebufferrangeuploadmaxpercent)
 
 namespace
 {
@@ -162,6 +167,69 @@ namespace
 		return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
 	}
 
+	template<typename T>
+	static T NRIFlags(T a, T b)
+	{
+		return (T)((uint32_t)a | (uint32_t)b);
+	}
+
+	static nri::AccessStage NRIAccelerationStructureBuildInputAccess()
+	{
+		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::ALL_SHADERS };
+	}
+
+	static bool ShouldTraceSceneBufferDirtyRanges()
+	{
+		return (int)perf_looptraceframes > 0;
+	}
+
+	static uint64_t CoherencyHashCombine64(uint64_t hash, uint64_t value)
+	{
+		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
+	}
+
+	static uint64_t HashUploadPayloadBytes(const void* data, uint64_t size)
+	{
+		return NRIHashUploadPayloadBytes(data, size);
+	}
+
+	static uint64_t HashPrimitiveRewriteProvenancePayload(const std::vector<nri_scene::SurfaceProvenance>& provenanceList)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, (uint64_t)provenanceList.size());
+		for (const nri_scene::SurfaceProvenance& provenance : provenanceList)
+		{
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.drawListType);
+			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.cstat);
+			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.materialFlags);
+		}
+		return hash != 0 ? hash : 1;
+	}
+
+	static uint64_t HashPrimitiveRewriteVisibilityIdentity(const nri_scene::PTMapWorld& mapWorld)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, mapWorld.valid ? 1ull : 0ull);
+		hash = CoherencyHashCombine64(hash, mapWorld.buildSerial);
+		hash = CoherencyHashCombine64(hash, (uint64_t)mapWorld.chunks.size());
+		hash = CoherencyHashCombine64(hash, (uint64_t)mapWorld.stats.chunkCount);
+		for (const nri_scene::PTMapChunk& chunk : mapWorld.chunks)
+		{
+			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.chunkIndex);
+			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(chunk.sectorIndex + 1));
+			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.firstSurface);
+			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.surfaceCount);
+		}
+		return hash != 0 ? hash : 1;
+	}
+
 	static bool StructuredBufferUpdateNeedsWait(
 		const NRIBufferResource& resource,
 		const void* data,
@@ -181,6 +249,376 @@ namespace
 
 		return data != nullptr && size != 0;
 	}
+}
+
+void NRIRenderer::ResetSceneBufferFrameStats()
+{
+	mVertexBufferStats.bytesUploadedLastFrame = 0;
+	mVertexBufferStats.growEventsLastFrame = 0;
+	mVertexBufferStats.overwriteEventsLastFrame = 0;
+	mVertexBufferStats.growthOldBytesLastFrame = 0;
+	mVertexBufferStats.growthRequestedBytesLastFrame = 0;
+	mVertexBufferStats.growthAllocatedBytesLastFrame = 0;
+	mIndexBufferStats.bytesUploadedLastFrame = 0;
+	mIndexBufferStats.growEventsLastFrame = 0;
+	mIndexBufferStats.overwriteEventsLastFrame = 0;
+	mIndexBufferStats.growthOldBytesLastFrame = 0;
+	mIndexBufferStats.growthRequestedBytesLastFrame = 0;
+	mIndexBufferStats.growthAllocatedBytesLastFrame = 0;
+	mPrimitiveBufferStats.bytesUploadedLastFrame = 0;
+	mPrimitiveBufferStats.growEventsLastFrame = 0;
+	mPrimitiveBufferStats.overwriteEventsLastFrame = 0;
+	mPrimitiveBufferStats.growthOldBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthRequestedBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthAllocatedBytesLastFrame = 0;
+	mMaterialBufferStats.bytesUploadedLastFrame = 0;
+	mMaterialBufferStats.growEventsLastFrame = 0;
+	mMaterialBufferStats.overwriteEventsLastFrame = 0;
+	mMaterialBufferStats.growthOldBytesLastFrame = 0;
+	mMaterialBufferStats.growthRequestedBytesLastFrame = 0;
+	mMaterialBufferStats.growthAllocatedBytesLastFrame = 0;
+	mPortalBufferStats.bytesUploadedLastFrame = 0;
+	mPortalBufferStats.growEventsLastFrame = 0;
+	mPortalBufferStats.overwriteEventsLastFrame = 0;
+}
+
+const NRIBufferResource& NRIRenderer::GetActiveVertexBuffer() const
+{
+	return mBoundDynamicPrimitiveCount > 0 ? GetCurrentDynamicVertexBuffer() : mStaticVertexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetActiveIndexBuffer() const
+{
+	return mBoundDynamicPrimitiveCount > 0 ? GetCurrentDynamicIndexBuffer() : mStaticIndexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetActivePrimitiveBuffer() const
+{
+	return mBoundDynamicPrimitiveCount > 0 ? GetCurrentDynamicPrimitiveBuffer() : mStaticPrimitiveBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetActiveMaterialBuffer() const
+{
+	return mBoundDynamicMaterialCount > 0 ? GetCurrentDynamicMaterialBuffer() : mStaticMaterialBuffer;
+}
+
+NRIRenderer::SceneUploadBufferRingSlot& NRIRenderer::GetCurrentSceneUploadBufferRingSlot()
+{
+	const uint32_t queuedFrameCount =
+		mFrameBuffer != nullptr && !mFrameBuffer->mQueuedFrames.empty() ?
+		(uint32_t)mFrameBuffer->mQueuedFrames.size() :
+		1u;
+	if (mSceneUploadBufferRing.size() < queuedFrameCount)
+	{
+		mSceneUploadBufferRing.resize(queuedFrameCount);
+	}
+
+	return mSceneUploadBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mSceneUploadBufferRing.size()];
+}
+
+const NRIRenderer::SceneUploadBufferRingSlot* NRIRenderer::GetCurrentSceneUploadBufferRingSlot() const
+{
+	if (mSceneUploadBufferRing.empty())
+	{
+		return nullptr;
+	}
+
+	return &mSceneUploadBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mSceneUploadBufferRing.size()];
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicVertexBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().vertexBuffer;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicIndexBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().indexBuffer;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicPrimitiveBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().primitiveBuffer;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentDynamicMaterialBuffer()
+{
+	return GetCurrentSceneUploadBufferRingSlot().materialBuffer;
+}
+
+NRIAccelerationStructureResource& NRIRenderer::GetCurrentDynamicBottomLevelAS()
+{
+	return GetCurrentSceneUploadBufferRingSlot().dynamicBottomLevelAS;
+}
+
+NRIBufferResource& NRIRenderer::GetCurrentTlasInstanceBuffer()
+{
+	const uint32_t queuedFrameCount =
+		mFrameBuffer != nullptr && !mFrameBuffer->mQueuedFrames.empty() ?
+		(uint32_t)mFrameBuffer->mQueuedFrames.size() :
+		1u;
+	if (mTlasInstanceBufferRing.size() < queuedFrameCount)
+	{
+		mTlasInstanceBufferRing.resize(queuedFrameCount);
+	}
+
+	return mTlasInstanceBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mTlasInstanceBufferRing.size()];
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicVertexBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->vertexBuffer : mVertexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicIndexBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->indexBuffer : mIndexBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicPrimitiveBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->primitiveBuffer : mPrimitiveBuffer;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentDynamicMaterialBuffer() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? slot->materialBuffer : mMaterialBuffer;
+}
+
+const NRIAccelerationStructureResource* NRIRenderer::GetCurrentDynamicBottomLevelAS() const
+{
+	const SceneUploadBufferRingSlot* slot = GetCurrentSceneUploadBufferRingSlot();
+	return slot != nullptr ? &slot->dynamicBottomLevelAS : nullptr;
+}
+
+const NRIBufferResource& NRIRenderer::GetCurrentTlasInstanceBuffer() const
+{
+	if (mTlasInstanceBufferRing.empty())
+	{
+		return mTlasInstanceBuffer;
+	}
+
+	return mTlasInstanceBufferRing[GetCurrentQueuedFrameIndex() % (uint32_t)mTlasInstanceBufferRing.size()];
+}
+
+bool NRIRenderer::HasAnyDynamicBottomLevelAS() const
+{
+	for (const SceneUploadBufferRingSlot& slot : mSceneUploadBufferRing)
+	{
+		if (slot.dynamicBottomLevelAS.accelerationStructure != nullptr ||
+			slot.dynamicBottomLevelAS.descriptor != nullptr)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+NRIRenderer::ResidentUploadScratchFrame& NRIRenderer::GetResidentUploadScratchFrame()
+{
+	const uint32_t frameSlot = GetCurrentQueuedFrameIndex() % (uint32_t)mResidentUploadScratchFrames.size();
+	auto& frameScratch = mResidentUploadScratchFrames[frameSlot];
+	if (frameScratch.frameIndex != mFrameIndex)
+	{
+		for (NRIBufferResource& retired : frameScratch.retiredBuffers)
+		{
+			DestroyBufferResource(retired);
+		}
+		frameScratch.retiredBuffers.clear();
+		for (NRIAccelerationStructureResource& retired : frameScratch.retiredAccelerationStructures)
+		{
+			DestroyAccelerationStructureResource(retired);
+		}
+		frameScratch.retiredAccelerationStructures.clear();
+		frameScratch.frameIndex = mFrameIndex;
+		frameScratch.vertex.cursor = 0;
+		frameScratch.vertex.copySourceActive = false;
+		frameScratch.index.cursor = 0;
+		frameScratch.index.copySourceActive = false;
+		frameScratch.primitive.cursor = 0;
+		frameScratch.primitive.copySourceActive = false;
+		frameScratch.material.cursor = 0;
+		frameScratch.material.copySourceActive = false;
+	}
+
+	return frameScratch;
+}
+
+nri::DescriptorSet* NRIRenderer::GetCurrentSceneTextureSet() const
+{
+	return NRIDescriptorSetManager::GetCurrentSceneTextureSet(*this);
+}
+
+nri::DescriptorSet* NRIRenderer::GetCurrentSceneDataSet() const
+{
+	return NRIDescriptorSetManager::GetCurrentSceneDataSet(*this);
+}
+
+bool NRIRenderer::IsCurrentSceneDataDescriptorsInitialized() const
+{
+	return NRIDescriptorSetManager::IsCurrentSceneDataDescriptorsInitialized(*this);
+}
+
+void NRIRenderer::SetCurrentSceneDataDescriptorsInitialized(bool value)
+{
+	NRIDescriptorSetManager::SetCurrentSceneDataDescriptorsInitialized(*this, value);
+}
+
+void NRIRenderer::TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet)
+{
+	NRIDescriptorSetManager::TraceSharedDescriptorRewrite(*this, setName, reason, descriptorHash, descriptorCount, sceneTextureSet);
+}
+
+bool NRIRenderer::StageResidentMaterialUploadRanges(
+	const NRIBufferResource& targetBuffer,
+	const std::vector<RuntimeMutationResidentUploadRange>& ranges,
+	const uint8_t* data,
+	uint64_t availableBytes,
+	uint32_t& batchCount,
+	uint32_t& batchRangeCount,
+	uint32_t& barrierCommandCount,
+	uint32_t& copyCommandCount)
+{
+	if (ranges.empty())
+	{
+		return true;
+	}
+
+	if (targetBuffer.buffer == nullptr ||
+		data == nullptr ||
+		mFrameBuffer == nullptr ||
+		mFrameBuffer->mCommandBuffer == nullptr)
+	{
+		return false;
+	}
+
+	constexpr uint64_t kResidentUploadScratchAlignment = 16u;
+	auto& frameScratch = GetResidentUploadScratchFrame();
+	ResidentBufferUploadScratch& scratch = frameScratch.material;
+	uint64_t requiredSize = scratch.cursor;
+	for (const RuntimeMutationResidentUploadRange& range : ranges)
+	{
+		if (range.uploadKind != ResidentUploadKind_Material ||
+			range.size == 0 ||
+			range.byteOffset > availableBytes ||
+			range.size > availableBytes - range.byteOffset ||
+			range.byteOffset > targetBuffer.size ||
+			range.size > targetBuffer.size - range.byteOffset)
+		{
+			return false;
+		}
+
+		requiredSize =
+			(requiredSize + kResidentUploadScratchAlignment - 1u) &
+			~(kResidentUploadScratchAlignment - 1u);
+		requiredSize += range.size;
+	}
+
+	if (!EnsureResidentUploadScratchBuffer(scratch, frameScratch, requiredSize))
+	{
+		return false;
+	}
+
+	struct StagedCopy
+	{
+		uint64_t targetOffset = 0;
+		uint64_t scratchOffset = 0;
+		uint64_t size = 0;
+		const uint8_t* data = nullptr;
+	};
+
+	std::vector<StagedCopy> stagedCopies;
+	stagedCopies.reserve(ranges.size());
+	uint64_t mapStart = UINT64_MAX;
+	uint64_t mapEnd = 0;
+	for (const RuntimeMutationResidentUploadRange& range : ranges)
+	{
+		const uint64_t scratchOffset =
+			(scratch.cursor + kResidentUploadScratchAlignment - 1u) &
+			~(kResidentUploadScratchAlignment - 1u);
+		const uint64_t rangeEnd = scratchOffset + range.size;
+		if (rangeEnd > scratch.buffer.size)
+		{
+			return false;
+		}
+
+		scratch.cursor = rangeEnd;
+		mapStart = std::min(mapStart, scratchOffset);
+		mapEnd = std::max(mapEnd, rangeEnd);
+		stagedCopies.push_back({ range.byteOffset, scratchOffset, range.size, data + range.byteOffset });
+	}
+
+	const uint64_t mapSize = mapEnd - mapStart;
+	void* mapped = mFrameBuffer->mCore.MapBuffer(*scratch.buffer.buffer, mapStart, mapSize);
+	if (mapped == nullptr)
+	{
+		return false;
+	}
+
+	for (const StagedCopy& copy : stagedCopies)
+	{
+		std::memcpy(static_cast<uint8_t*>(mapped) + (copy.scratchOffset - mapStart), copy.data, (size_t)copy.size);
+	}
+	mFrameBuffer->mCore.UnmapBuffer(*scratch.buffer.buffer);
+
+	batchCount++;
+	batchRangeCount += (uint32_t)stagedCopies.size();
+
+	if (!scratch.copySourceActive)
+	{
+		nri::BufferBarrierDesc sourceBarrier = {};
+		sourceBarrier.buffer = scratch.buffer.buffer;
+		sourceBarrier.before = {};
+		sourceBarrier.after = NRICopySourceAccess();
+
+		nri::BarrierDesc sourceBarrierDesc = {};
+		sourceBarrierDesc.buffers = &sourceBarrier;
+		sourceBarrierDesc.bufferNum = 1;
+		mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, sourceBarrierDesc);
+		scratch.copySourceActive = true;
+		barrierCommandCount++;
+	}
+
+	nri::BufferBarrierDesc beforeCopyBarrier = {};
+	beforeCopyBarrier.buffer = targetBuffer.buffer;
+	beforeCopyBarrier.before = NRIComputeShaderResourceAccess();
+	beforeCopyBarrier.after = NRICopyDestinationAccess();
+
+	nri::BarrierDesc beforeCopyBarrierDesc = {};
+	beforeCopyBarrierDesc.buffers = &beforeCopyBarrier;
+	beforeCopyBarrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, beforeCopyBarrierDesc);
+	barrierCommandCount++;
+
+	for (const StagedCopy& copy : stagedCopies)
+	{
+		mFrameBuffer->mCore.CmdCopyBuffer(
+			*mFrameBuffer->mCommandBuffer,
+			*targetBuffer.buffer,
+			copy.targetOffset,
+			*scratch.buffer.buffer,
+			copy.scratchOffset,
+			copy.size);
+		copyCommandCount++;
+	}
+
+	nri::BufferBarrierDesc afterCopyBarrier = {};
+	afterCopyBarrier.buffer = targetBuffer.buffer;
+	afterCopyBarrier.before = NRICopyDestinationAccess();
+	afterCopyBarrier.after = NRIComputeShaderResourceAccess();
+
+	nri::BarrierDesc afterCopyBarrierDesc = {};
+	afterCopyBarrierDesc.buffers = &afterCopyBarrier;
+	afterCopyBarrierDesc.bufferNum = 1;
+	mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, afterCopyBarrierDesc);
+	barrierCommandCount++;
+
+	return true;
 }
 
 bool NRISceneUploadManager::SceneDataDescriptorsReady(NRIRenderer& renderer)
@@ -565,6 +1003,1040 @@ bool NRISceneUploadManager::UpdateVisibleFlatPlaneBuffer(NRIRenderer& renderer, 
 
 	return UpdateSceneDataDescriptorSlot(renderer, 20, renderer.mVisibleFlatPlaneBuffer.shaderView, "visible_flat_refresh");
 }
+
+bool NRIRenderer::UploadSceneBuffers(
+	const nri_scene::GeometryData& geometry,
+	const std::vector<nri_scene::MaterialData>& materials,
+	const std::vector<SceneBufferUploadDomainSpan>* domainSpans)
+{
+	return UploadSceneBuffers(GetCurrentSceneUploadBufferRingSlot(), geometry, materials, domainSpans);
+}
+
+bool NRIRenderer::UploadSceneBuffers(
+	SceneUploadBufferRingSlot& uploadSlot,
+	const nri_scene::GeometryData& geometry,
+	const std::vector<nri_scene::MaterialData>& materials,
+	const std::vector<SceneBufferUploadDomainSpan>* domainSpans)
+{
+	Clocker clock(NriPTSceneBuffers);
+	NRIBufferResource& vertexBuffer = uploadSlot.vertexBuffer;
+	NRIBufferResource& indexBuffer = uploadSlot.indexBuffer;
+	NRIBufferResource& primitiveBuffer = uploadSlot.primitiveBuffer;
+	NRIBufferResource& materialBuffer = uploadSlot.materialBuffer;
+	std::vector<uint8_t>& vertexMirror = uploadSlot.vertexMirror;
+	std::vector<uint8_t>& indexMirror = uploadSlot.indexMirror;
+	std::vector<uint8_t>& primitiveMirror = uploadSlot.primitiveMirror;
+	std::vector<uint8_t>& materialMirror = uploadSlot.materialMirror;
+	mVertexBufferStats.bytesUploadedLastFrame = 0;
+	mVertexBufferStats.growEventsLastFrame = 0;
+	mVertexBufferStats.overwriteEventsLastFrame = 0;
+	mVertexBufferStats.growthOldBytesLastFrame = 0;
+	mVertexBufferStats.growthRequestedBytesLastFrame = 0;
+	mVertexBufferStats.growthAllocatedBytesLastFrame = 0;
+	mIndexBufferStats.bytesUploadedLastFrame = 0;
+	mIndexBufferStats.growEventsLastFrame = 0;
+	mIndexBufferStats.overwriteEventsLastFrame = 0;
+	mIndexBufferStats.growthOldBytesLastFrame = 0;
+	mIndexBufferStats.growthRequestedBytesLastFrame = 0;
+	mIndexBufferStats.growthAllocatedBytesLastFrame = 0;
+	mPrimitiveBufferStats.bytesUploadedLastFrame = 0;
+	mPrimitiveBufferStats.growEventsLastFrame = 0;
+	mPrimitiveBufferStats.overwriteEventsLastFrame = 0;
+	mPrimitiveBufferStats.growthOldBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthRequestedBytesLastFrame = 0;
+	mPrimitiveBufferStats.growthAllocatedBytesLastFrame = 0;
+	mMaterialBufferStats.bytesUploadedLastFrame = 0;
+	mMaterialBufferStats.growEventsLastFrame = 0;
+	mMaterialBufferStats.overwriteEventsLastFrame = 0;
+	mMaterialBufferStats.growthOldBytesLastFrame = 0;
+	mMaterialBufferStats.growthRequestedBytesLastFrame = 0;
+	mMaterialBufferStats.growthAllocatedBytesLastFrame = 0;
+	{
+		mLastPerfShellTraceStats.sceneSelectBufferUploadVertexRequestedBytes = geometry.vertices.size() * sizeof(nri_scene::SceneVertex);
+		mLastPerfShellTraceStats.sceneSelectBufferUploadIndexRequestedBytes = geometry.indices.size() * sizeof(uint32_t);
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRequestedBytes = geometry.primitives.size() * sizeof(nri_scene::PrimitiveData);
+		mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRequestedBytes = materials.size() * sizeof(nri_scene::MaterialData);
+	}
+	enum class SceneUploadBufferKind
+	{
+		Vertex,
+		Index,
+		Primitive,
+		Material
+	};
+	const auto getDomainEntry = [&](SceneBufferUploadDomain domain) -> PerfShellTraceStats::SceneBufferUploadDomainTraceEntry*
+	{
+		const size_t domainIndex = (size_t)domain;
+		if (domainIndex >= SceneBufferUploadDomainCount)
+		{
+			return nullptr;
+		}
+		return &mLastPerfShellTraceStats.sceneSelectBufferUploadDomains[domainIndex];
+	};
+	const auto getSpanByteRange =
+		[](const SceneBufferUploadDomainSpan& span, SceneUploadBufferKind kind, uint64_t& outOffset, uint64_t& outSize)
+	{
+		switch (kind)
+		{
+		case SceneUploadBufferKind::Vertex:
+			outOffset = (uint64_t)span.vertexOffset * sizeof(nri_scene::SceneVertex);
+			outSize = (uint64_t)span.vertexCount * sizeof(nri_scene::SceneVertex);
+			break;
+		case SceneUploadBufferKind::Index:
+			outOffset = (uint64_t)span.indexOffset * sizeof(uint32_t);
+			outSize = (uint64_t)span.indexCount * sizeof(uint32_t);
+			break;
+		case SceneUploadBufferKind::Primitive:
+			outOffset = (uint64_t)span.primitiveOffset * sizeof(nri_scene::PrimitiveData);
+			outSize = (uint64_t)span.primitiveCount * sizeof(nri_scene::PrimitiveData);
+			break;
+		case SceneUploadBufferKind::Material:
+			outOffset = (uint64_t)span.materialOffset * sizeof(nri_scene::MaterialData);
+			outSize = (uint64_t)span.materialCount * sizeof(nri_scene::MaterialData);
+			break;
+		}
+	};
+	const auto addDomainPayload =
+		[&](SceneUploadBufferKind kind, bool skipped)
+	{
+		if (domainSpans == nullptr)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain == nullptr)
+			{
+				continue;
+			}
+			domain->payloadBytes += size;
+			domain->hashChecks++;
+			if (!skipped)
+			{
+				domain->hashMisses++;
+			}
+			switch (kind)
+			{
+			case SceneUploadBufferKind::Vertex: domain->vertexPayloadBytes += size; break;
+			case SceneUploadBufferKind::Index: domain->indexPayloadBytes += size; break;
+			case SceneUploadBufferKind::Primitive: domain->primitivePayloadBytes += size; break;
+			case SceneUploadBufferKind::Material: domain->materialPayloadBytes += size; break;
+			}
+		}
+	};
+	const auto addDomainFullUpload =
+		[&](SceneUploadBufferKind kind)
+	{
+		if (domainSpans == nullptr)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain == nullptr)
+			{
+				continue;
+			}
+			domain->uploadedBytes += size;
+			if (kind == SceneUploadBufferKind::Primitive)
+			{
+				domain->primitiveUploadedBytes += size;
+			}
+			else if (kind == SceneUploadBufferKind::Material)
+			{
+				domain->materialUploadedBytes += size;
+			}
+		}
+	};
+	const auto addDomainRangeBytes =
+		[&](SceneUploadBufferKind kind, const std::vector<SceneUploadDirtyRange>& ranges, bool countDirty)
+	{
+		if (domainSpans == nullptr)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t spanOffset = 0;
+			uint64_t spanSize = 0;
+			getSpanByteRange(span, kind, spanOffset, spanSize);
+			if (spanSize == 0)
+			{
+				continue;
+			}
+			const uint64_t spanEnd = spanOffset + spanSize;
+			uint64_t domainBytes = 0;
+			uint32_t domainRanges = 0;
+			for (const SceneUploadDirtyRange& range : ranges)
+			{
+				const uint64_t rangeEnd = range.byteOffset + range.size;
+				const uint64_t overlapStart = std::max(spanOffset, range.byteOffset);
+				const uint64_t overlapEnd = std::min(spanEnd, rangeEnd);
+				if (overlapEnd > overlapStart)
+				{
+					domainBytes += overlapEnd - overlapStart;
+					domainRanges++;
+				}
+			}
+			if (domainBytes == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain == nullptr)
+			{
+				continue;
+			}
+			if (countDirty)
+			{
+				domain->dirtyRanges += domainRanges;
+				domain->dirtyChangedBytes += domainBytes;
+				domain->dirtyUploadedBytes += domainBytes;
+			}
+			else
+			{
+				domain->uploadedBytes += domainBytes;
+				if (kind == SceneUploadBufferKind::Primitive)
+				{
+					domain->primitiveUploadedBytes += domainBytes;
+				}
+				else if (kind == SceneUploadBufferKind::Material)
+				{
+					domain->materialUploadedBytes += domainBytes;
+				}
+			}
+		}
+	};
+	const auto addDomainWait =
+		[&](SceneUploadBufferKind kind, double waitMs)
+	{
+		if (domainSpans == nullptr || waitMs <= 0.0)
+		{
+			return;
+		}
+		uint64_t totalBytes = 0;
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			totalBytes += size;
+		}
+		if (totalBytes == 0)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain != nullptr)
+			{
+				domain->waitMs += waitMs * ((double)size / (double)totalBytes);
+			}
+		}
+	};
+	const auto addDomainGrowth =
+		[&](SceneUploadBufferKind kind, uint64_t requestedBytes, uint64_t allocatedBytes)
+	{
+		if (domainSpans == nullptr || requestedBytes == 0 || allocatedBytes == 0)
+		{
+			return;
+		}
+		uint64_t totalBytes = 0;
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			totalBytes += size;
+		}
+		if (totalBytes == 0)
+		{
+			return;
+		}
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			auto* domain = getDomainEntry(span.domain);
+			if (domain != nullptr)
+			{
+				domain->growthEvents++;
+				domain->growthRequestedBytes += (uint64_t)((double)requestedBytes * ((double)size / (double)totalBytes));
+				domain->growthAllocatedBytes += (uint64_t)((double)allocatedBytes * ((double)size / (double)totalBytes));
+			}
+		}
+	};
+	const auto buildProducerPayloadHash =
+		[&](SceneUploadBufferKind kind, uint64_t payloadSize, uint32_t payloadStride, uint64_t extraIdentity, uint64_t& outHash) -> bool
+	{
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampChecks++;
+		if (domainSpans == nullptr)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+			return false;
+		}
+		uint64_t coveredBytes = 0;
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, (uint64_t)kind);
+		hash = CoherencyHashCombine64(hash, payloadSize);
+		hash = CoherencyHashCombine64(hash, payloadStride);
+		hash = CoherencyHashCombine64(hash, extraIdentity);
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			getSpanByteRange(span, kind, offset, size);
+			if (size == 0)
+			{
+				continue;
+			}
+			uint64_t stamp = 0;
+			switch (kind)
+			{
+			case SceneUploadBufferKind::Vertex:
+				stamp = span.stamp.vertexPayloadStamp;
+				break;
+			case SceneUploadBufferKind::Index:
+				stamp = span.stamp.indexPayloadStamp;
+				break;
+			case SceneUploadBufferKind::Primitive:
+				stamp = span.stamp.primitivePayloadStamp;
+				break;
+			case SceneUploadBufferKind::Material:
+				stamp = span.stamp.materialPayloadStamp;
+				break;
+			}
+			if (stamp == 0)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+				return false;
+			}
+			coveredBytes += size;
+			hash = CoherencyHashCombine64(hash, (uint64_t)span.domain);
+			hash = CoherencyHashCombine64(hash, offset);
+			hash = CoherencyHashCombine64(hash, size);
+			hash = CoherencyHashCombine64(hash, stamp);
+		}
+		if (coveredBytes != payloadSize)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+			return false;
+		}
+		outHash = hash != 0 ? hash : 1;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampUses++;
+		switch (kind)
+		{
+		case SceneUploadBufferKind::Vertex:
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampVertexUses++;
+			break;
+		case SceneUploadBufferKind::Index:
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampIndexUses++;
+			break;
+		case SceneUploadBufferKind::Primitive:
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampPrimitiveUses++;
+			break;
+		case SceneUploadBufferKind::Material:
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampMaterialUses++;
+			break;
+		}
+		return true;
+	};
+	const auto buildProducerProvenanceHash =
+		[&](uint64_t primitiveCount, uint64_t& outHash) -> bool
+	{
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampChecks++;
+		if (domainSpans == nullptr)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+			return false;
+		}
+		uint64_t coveredPrimitives = 0;
+		uint64_t hash = 1469598103934665603ull;
+		hash = CoherencyHashCombine64(hash, primitiveCount);
+		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
+		{
+			if (span.primitiveCount == 0)
+			{
+				continue;
+			}
+			if (span.stamp.primitiveProvenanceStamp == 0)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+				return false;
+			}
+			coveredPrimitives += span.primitiveCount;
+			hash = CoherencyHashCombine64(hash, (uint64_t)span.domain);
+			hash = CoherencyHashCombine64(hash, (uint64_t)span.primitiveOffset);
+			hash = CoherencyHashCombine64(hash, (uint64_t)span.primitiveCount);
+			hash = CoherencyHashCombine64(hash, span.stamp.primitiveProvenanceStamp);
+		}
+		if (coveredPrimitives != primitiveCount)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampFallbacks++;
+			return false;
+		}
+		outHash = hash != 0 ? hash : 1;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampUses++;
+		return true;
+	};
+	const uint64_t primitiveInputSize = geometry.primitives.size() * sizeof(nri_scene::PrimitiveData);
+	uint64_t primitiveInputPayloadHash = 0;
+	uint64_t primitiveProvenanceHash = 0;
+	uint64_t primitiveVisibilityIdentityHash = 0;
+	const std::vector<nri_scene::PrimitiveData>* gpuPrimitives = nullptr;
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteMs);
+		if (buildProducerPayloadHash(SceneUploadBufferKind::Primitive, primitiveInputSize, sizeof(nri_scene::PrimitiveData), 0, primitiveInputPayloadHash))
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampRewritePrimitiveUses++;
+		}
+		else
+		{
+			ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewritePrimitiveHashMs);
+			primitiveInputPayloadHash = HashUploadPayloadBytes(geometry.primitives.data(), primitiveInputSize);
+		}
+		if (buildProducerProvenanceHash((uint64_t)geometry.primitiveProvenance.size(), primitiveProvenanceHash))
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadProducerStampRewriteProvenanceUses++;
+		}
+		else
+		{
+			ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteProvenanceHashMs);
+			primitiveProvenanceHash = HashPrimitiveRewriteProvenancePayload(geometry.primitiveProvenance);
+		}
+		{
+			ScopedPtPerfTimer hashTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteVisibilityHashMs);
+			primitiveVisibilityIdentityHash = HashPrimitiveRewriteVisibilityIdentity(mMapWorld);
+		}
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheChecks++;
+		if (mSelectPrimitiveRewriteCache.valid &&
+			mSelectPrimitiveRewriteCache.primitivePayloadHash == primitiveInputPayloadHash &&
+			mSelectPrimitiveRewriteCache.primitiveProvenanceHash == primitiveProvenanceHash &&
+			mSelectPrimitiveRewriteCache.visibilityIdentityHash == primitiveVisibilityIdentityHash &&
+			mSelectPrimitiveRewriteCache.primitiveCount == geometry.primitives.size() &&
+			mSelectPrimitiveRewriteCache.primitives.size() == geometry.primitives.size())
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheHits++;
+			gpuPrimitives = &mSelectPrimitiveRewriteCache.primitives;
+		}
+		else
+		{
+			if (!mSelectPrimitiveRewriteCache.valid)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectInvalid++;
+			}
+			else
+			{
+				if (mSelectPrimitiveRewriteCache.primitivePayloadHash != primitiveInputPayloadHash)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectPrimitive++;
+				}
+				if (mSelectPrimitiveRewriteCache.primitiveProvenanceHash != primitiveProvenanceHash)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectProvenance++;
+				}
+				if (mSelectPrimitiveRewriteCache.visibilityIdentityHash != primitiveVisibilityIdentityHash)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectVisibility++;
+				}
+				if (mSelectPrimitiveRewriteCache.primitiveCount != geometry.primitives.size() ||
+					mSelectPrimitiveRewriteCache.primitives.size() != geometry.primitives.size())
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheRejectCount++;
+				}
+			}
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCacheMisses++;
+			{
+				ScopedPtPerfTimer copyTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteCopyMs);
+				mSelectPrimitiveRewriteCache.primitives.assign(geometry.primitives.begin(), geometry.primitives.end());
+			}
+			{
+				ScopedPtPerfTimer resolveTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolveMs);
+				std::vector<nri_scene::PrimitiveData>& rewrittenPrimitives = mSelectPrimitiveRewriteCache.primitives;
+				const size_t primitiveCount = std::min(rewrittenPrimitives.size(), geometry.primitiveProvenance.size());
+				for (size_t primitiveIndex = 0; primitiveIndex < primitiveCount; ++primitiveIndex)
+				{
+					const nri_scene::SurfaceProvenance& provenance = geometry.primitiveProvenance[primitiveIndex];
+					mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolvePrimitives++;
+					int32_t chunkIndex = provenance.mapChunkIndex;
+					if (chunkIndex >= 0)
+					{
+						mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolveMapChunk++;
+					}
+					else
+					{
+						mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolveSectorFallback++;
+						chunkIndex = nri_static_scene_geometry::FindMapChunkIndexForSector(mMapWorld, provenance.sectorIndex);
+						if (chunkIndex < 0)
+						{
+							mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteResolveSectorMiss++;
+						}
+					}
+					rewrittenPrimitives[primitiveIndex].reserved0 = chunkIndex >= 0 ? (uint32_t)chunkIndex : UINT32_MAX;
+				}
+				for (size_t primitiveIndex = primitiveCount; primitiveIndex < rewrittenPrimitives.size(); ++primitiveIndex)
+				{
+					rewrittenPrimitives[primitiveIndex].reserved0 = UINT32_MAX;
+				}
+			}
+
+			{
+				ScopedPtPerfTimer storeTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRewriteStoreMs);
+				mSelectPrimitiveRewriteCache.valid = true;
+				mSelectPrimitiveRewriteCache.primitivePayloadHash = primitiveInputPayloadHash;
+				mSelectPrimitiveRewriteCache.primitiveProvenanceHash = primitiveProvenanceHash;
+				mSelectPrimitiveRewriteCache.visibilityIdentityHash = primitiveVisibilityIdentityHash;
+				mSelectPrimitiveRewriteCache.primitiveCount = geometry.primitives.size();
+			}
+			gpuPrimitives = &mSelectPrimitiveRewriteCache.primitives;
+		}
+	}
+
+	const uint64_t vertexSize = geometry.vertices.size() * sizeof(nri_scene::SceneVertex);
+	const uint64_t indexSize = geometry.indices.size() * sizeof(uint32_t);
+	const uint64_t primitiveSize = gpuPrimitives != nullptr ? gpuPrimitives->size() * sizeof(nri_scene::PrimitiveData) : 0;
+	const uint64_t materialSize = materials.size() * sizeof(nri_scene::MaterialData);
+	uint64_t vertexPayloadHash = 0;
+	uint64_t indexPayloadHash = 0;
+	uint64_t primitivePayloadHash = 0;
+	uint64_t materialPayloadHash = 0;
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMs);
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Vertex, vertexSize, sizeof(nri_scene::SceneVertex), 0, vertexPayloadHash))
+		{
+			vertexPayloadHash = HashUploadPayloadBytes(geometry.vertices.data(), vertexSize);
+		}
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Index, indexSize, sizeof(uint32_t), 0, indexPayloadHash))
+		{
+			indexPayloadHash = HashUploadPayloadBytes(geometry.indices.data(), indexSize);
+		}
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Primitive, primitiveSize, sizeof(nri_scene::PrimitiveData), primitiveVisibilityIdentityHash, primitivePayloadHash))
+		{
+			primitivePayloadHash = HashUploadPayloadBytes(gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize);
+		}
+		if (!buildProducerPayloadHash(SceneUploadBufferKind::Material, materialSize, sizeof(nri_scene::MaterialData), 0, materialPayloadHash))
+		{
+			materialPayloadHash = HashUploadPayloadBytes(materials.data(), materialSize);
+		}
+	}
+
+	// Scene upload buffers are ringed by queued frame. The frame shell waits before
+	// reusing a queued-frame slot, so the selected slot is safe to overwrite here.
+	bool waitedForWrites = true;
+	const auto notePayloadHashState =
+		[&](const NRIBufferResource& resource,
+			uint64_t payloadHash,
+			uint64_t payloadSize,
+			uint32_t payloadStride,
+			uint32_t& bufferHitCount,
+			uint32_t& bufferSkipCount,
+			uint32_t& bufferMissCount) -> bool
+	{
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashChecks++;
+		if (resource.buffer == nullptr || resource.shaderView == nullptr || resource.payloadHash == 0)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMisses++;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashRejectMissing++;
+			bufferMissCount++;
+			return false;
+		}
+		const uint64_t requiredSize = std::max<uint64_t>(payloadSize, payloadStride);
+		if (resource.size < requiredSize ||
+			resource.usedSize != payloadSize ||
+			resource.payloadSize != payloadSize)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMisses++;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashRejectSize++;
+			bufferMissCount++;
+			return false;
+		}
+		if (resource.stride != payloadStride ||
+			resource.payloadStride != payloadStride)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMisses++;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashRejectStride++;
+			bufferMissCount++;
+			return false;
+		}
+		if (resource.payloadHash == payloadHash)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashHits++;
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashSkips++;
+			bufferHitCount++;
+			bufferSkipCount++;
+			return true;
+		}
+
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMisses++;
+		bufferMissCount++;
+		return false;
+	};
+	struct SceneUploadDirtyRangeStats
+	{
+		uint32_t rawRanges = 0;
+		uint32_t coalescedRanges = 0;
+		uint32_t rejectedCoalesces = 0;
+		uint64_t changedBytes = 0;
+		uint64_t uploadedBytes = 0;
+		uint64_t gapBytes = 0;
+	};
+	const auto noteDirtyRanges =
+		[&](const std::vector<uint8_t>& mirror,
+			const void* bufferData,
+			uint64_t bufferSize,
+			bool skipUpload,
+			bool forceFullDirty,
+			std::vector<SceneUploadDirtyRange>* outRanges) -> SceneUploadDirtyRangeStats
+	{
+		if (outRanges != nullptr)
+		{
+			outRanges->clear();
+		}
+		SceneUploadDirtyRangeStats result = {};
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeChecks++;
+		if (skipUpload)
+		{
+			mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeSkips++;
+			return result;
+		}
+		if (bufferSize == 0)
+		{
+			return result;
+		}
+		if (forceFullDirty || bufferData == nullptr || mirror.empty() || mirror.size() != bufferSize)
+		{
+			if (forceFullDirty || bufferData == nullptr)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeForcedFull++;
+			}
+			if (mirror.empty())
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeMissingMirror++;
+			}
+			else if (mirror.size() != bufferSize)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeSizeMismatch++;
+			}
+			result.rawRanges = 1;
+			result.coalescedRanges = 1;
+			result.changedBytes = bufferSize;
+			result.uploadedBytes = bufferSize;
+			if (outRanges != nullptr)
+			{
+				outRanges->push_back({ 0, bufferSize });
+			}
+			return result;
+		}
+
+		const uint64_t maxGapBytes = (uint64_t)(int)nri_ptscenebufferdirtyrangegap;
+		const uint8_t* current = static_cast<const uint8_t*>(bufferData);
+		const uint8_t* previous = mirror.data();
+		const size_t byteCount = (size_t)bufferSize;
+		bool hasCoalescedRange = false;
+		size_t coalescedStart = 0;
+		size_t coalescedEnd = 0;
+		size_t cursor = 0;
+		while (cursor < byteCount)
+		{
+			while (cursor < byteCount && current[cursor] == previous[cursor])
+			{
+				cursor++;
+			}
+			if (cursor >= byteCount)
+			{
+				break;
+			}
+			const size_t rangeStart = cursor;
+			while (cursor < byteCount && current[cursor] != previous[cursor])
+			{
+				cursor++;
+			}
+			const size_t rangeEnd = cursor;
+			result.rawRanges++;
+			result.changedBytes += (uint64_t)(rangeEnd - rangeStart);
+			if (!hasCoalescedRange)
+			{
+				hasCoalescedRange = true;
+				coalescedStart = rangeStart;
+				coalescedEnd = rangeEnd;
+				result.coalescedRanges = 1;
+				continue;
+			}
+
+			const uint64_t gapBytes = (uint64_t)(rangeStart - coalescedEnd);
+			if (gapBytes <= maxGapBytes)
+			{
+				result.gapBytes += gapBytes;
+				coalescedEnd = rangeEnd;
+			}
+			else
+			{
+				result.uploadedBytes += (uint64_t)(coalescedEnd - coalescedStart);
+				if (outRanges != nullptr)
+				{
+					outRanges->push_back({ (uint64_t)coalescedStart, (uint64_t)(coalescedEnd - coalescedStart) });
+				}
+				result.rejectedCoalesces++;
+				result.coalescedRanges++;
+				coalescedStart = rangeStart;
+				coalescedEnd = rangeEnd;
+			}
+		}
+		if (hasCoalescedRange)
+		{
+			result.uploadedBytes += (uint64_t)(coalescedEnd - coalescedStart);
+			if (outRanges != nullptr)
+			{
+				outRanges->push_back({ (uint64_t)coalescedStart, (uint64_t)(coalescedEnd - coalescedStart) });
+			}
+		}
+		return result;
+	};
+	const auto addDirtyRangeStats =
+		[&](const SceneUploadDirtyRangeStats& dirtyStats,
+			uint32_t& bufferRangeCount,
+			uint64_t& bufferChangedBytes,
+			uint64_t& bufferUploadedBytes)
+	{
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeRawRanges += dirtyStats.rawRanges;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeCoalescedRanges += dirtyStats.coalescedRanges;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeRejectedCoalesces += dirtyStats.rejectedCoalesces;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeChangedBytes += dirtyStats.changedBytes;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeUploadedBytes += dirtyStats.uploadedBytes;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeGapBytes += dirtyStats.gapBytes;
+		bufferRangeCount = dirtyStats.coalescedRanges;
+		bufferChangedBytes = dirtyStats.changedBytes;
+		bufferUploadedBytes = dirtyStats.uploadedBytes;
+	};
+	const auto updatePayloadMirror =
+		[](std::vector<uint8_t>& mirror, const void* bufferData, uint64_t bufferSize)
+	{
+		if (bufferData == nullptr || bufferSize == 0)
+		{
+			mirror.clear();
+			return;
+		}
+		const uint8_t* bytes = static_cast<const uint8_t*>(bufferData);
+		mirror.assign(bytes, bytes + (size_t)bufferSize);
+	};
+	const auto updatePayloadMirrorRanges =
+		[](std::vector<uint8_t>& mirror, const void* bufferData, const std::vector<SceneUploadDirtyRange>& ranges)
+	{
+		if (bufferData == nullptr || mirror.empty())
+		{
+			return;
+		}
+		const uint8_t* bytes = static_cast<const uint8_t*>(bufferData);
+		for (const SceneUploadDirtyRange& range : ranges)
+		{
+			if (range.size != 0 && range.byteOffset <= mirror.size() && range.size <= mirror.size() - range.byteOffset)
+			{
+				std::memcpy(mirror.data() + range.byteOffset, bytes + range.byteOffset, (size_t)range.size);
+			}
+		}
+	};
+	const auto updateStructuredBufferRanges =
+		[&](NRIBufferResource& resource,
+			SceneBufferDebugStats& stats,
+			std::vector<uint8_t>& payloadMirror,
+			const void* bufferData,
+			uint64_t bufferSize,
+			uint32_t bufferStride,
+			uint64_t payloadHash,
+			const std::vector<SceneUploadDirtyRange>& ranges,
+			nri::AccessStage afterAccess,
+			double& uploadMs,
+			uint64_t& uploadedBytes,
+			uint32_t& growEvents,
+			uint32_t& overwriteEvents,
+			uint32_t& bufferRangeUploadCount) -> bool
+	{
+		const uint8_t* bytes = static_cast<const uint8_t*>(bufferData);
+		uint64_t rangeBytes = 0;
+		for (const SceneUploadDirtyRange& range : ranges)
+		{
+			if (bytes == nullptr ||
+				range.size == 0 ||
+				range.byteOffset > bufferSize ||
+				range.size > bufferSize - range.byteOffset ||
+				range.byteOffset > resource.size ||
+				range.size > resource.size - range.byteOffset)
+			{
+				return false;
+			}
+			rangeBytes += range.size;
+		}
+
+		bool result = true;
+		{
+			ScopedPtPerfTimer perfTimer(uploadMs);
+			for (const SceneUploadDirtyRange& range : ranges)
+			{
+				void* mapped = mFrameBuffer->mCore.MapBuffer(*resource.buffer, range.byteOffset, range.size);
+				if (mapped == nullptr)
+				{
+					result = false;
+					break;
+				}
+				std::memcpy(mapped, bytes + range.byteOffset, (size_t)range.size);
+				mFrameBuffer->mCore.UnmapBuffer(*resource.buffer);
+			}
+
+			if (result && mFrameBuffer->mCommandBuffer != nullptr && afterAccess.access != nri::AccessBits::NONE)
+			{
+				nri::BufferBarrierDesc barrier = {};
+				barrier.buffer = resource.buffer;
+				barrier.before = {};
+				barrier.after = afterAccess;
+
+				nri::BarrierDesc barrierDesc = {};
+				barrierDesc.buffers = &barrier;
+				barrierDesc.bufferNum = 1;
+				mFrameBuffer->mCore.CmdBarrier(*mFrameBuffer->mCommandBuffer, barrierDesc);
+			}
+		}
+		if (!result)
+		{
+			return false;
+		}
+
+		stats.bytesUploadedLastFrame = rangeBytes;
+		stats.growEventsLastFrame = 0;
+		stats.overwriteEventsLastFrame = 1;
+		stats.growthOldBytesLastFrame = 0;
+		stats.growthRequestedBytesLastFrame = 0;
+		stats.growthAllocatedBytesLastFrame = 0;
+		stats.uploadCount++;
+		stats.overwriteCount++;
+		stats.peakUsedBytes = std::max(stats.peakUsedBytes, bufferSize);
+		NotePerfBufferUpload(&stats, rangeBytes, false, "scene_buffer_upload_range", -1);
+
+		resource.usedSize = bufferSize;
+		resource.payloadHash = payloadHash;
+		resource.payloadSize = bufferSize;
+		resource.payloadStride = bufferStride;
+		updatePayloadMirrorRanges(payloadMirror, bufferData, ranges);
+
+		uploadedBytes = rangeBytes;
+		growEvents = 0;
+		overwriteEvents = 1;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashUploads++;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadRangeUploads++;
+		mLastPerfShellTraceStats.sceneSelectBufferUploadRangeUploadedBytes += rangeBytes;
+		bufferRangeUploadCount++;
+		return true;
+	};
+	const auto ensureStructuredBufferBatched =
+		[&](NRIBufferResource& resource,
+			SceneBufferDebugStats& stats,
+			std::vector<uint8_t>& payloadMirror,
+			std::vector<SceneUploadDirtyRange>* dirtyRangeScratch,
+			const void* bufferData,
+			uint64_t bufferSize,
+			uint32_t bufferStride,
+			uint64_t payloadHash,
+			bool skipUpload,
+			bool allowRangeUpload,
+			nri::BufferUsageBits usageBits,
+			nri::AccessStage afterAccess,
+			double& uploadMs,
+			uint64_t& uploadedBytes,
+			uint32_t& growEvents,
+			uint32_t& overwriteEvents,
+			uint32_t& dirtyRanges,
+			uint64_t& dirtyChangedBytes,
+			uint64_t& dirtyUploadedBytes,
+			uint32_t& bufferRangeUploadCount,
+			SceneUploadBufferKind bufferKind) -> bool
+	{
+		const uint64_t requiredSize = std::max<uint64_t>(bufferSize, bufferStride);
+		const bool forceFullDirty =
+			resource.buffer == nullptr ||
+			resource.shaderView == nullptr ||
+			resource.memoryLocation != nri::MemoryLocation::DEVICE_UPLOAD ||
+			resource.payloadHash == 0 ||
+			resource.size < requiredSize ||
+			resource.usedSize != bufferSize ||
+			resource.payloadSize != bufferSize ||
+			resource.stride != bufferStride ||
+			resource.payloadStride != bufferStride;
+		const bool traceDirtyRanges = ShouldTraceSceneBufferDirtyRanges();
+		SceneUploadDirtyRangeStats dirtyStats = {};
+		const bool collectDirtyRanges = allowRangeUpload && (traceDirtyRanges || (!skipUpload && !forceFullDirty));
+		if (!collectDirtyRanges)
+		{
+			if (dirtyRangeScratch != nullptr)
+			{
+				dirtyRangeScratch->clear();
+			}
+			dirtyRanges = 0;
+			dirtyChangedBytes = 0;
+			dirtyUploadedBytes = 0;
+		}
+		else
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadDirtyRangeMs);
+			dirtyStats = noteDirtyRanges(payloadMirror, bufferData, bufferSize, skipUpload, forceFullDirty, dirtyRangeScratch);
+			addDirtyRangeStats(dirtyStats, dirtyRanges, dirtyChangedBytes, dirtyUploadedBytes);
+			if (dirtyRangeScratch != nullptr)
+			{
+				addDomainRangeBytes(bufferKind, *dirtyRangeScratch, true);
+			}
+		}
+
+		if (skipUpload)
+		{
+			resource.usedSize = bufferSize;
+			uploadedBytes = 0;
+			growEvents = 0;
+			overwriteEvents = 0;
+			return true;
+		}
+
+		const bool canRangeUpload =
+			allowRangeUpload &&
+			!forceFullDirty &&
+			dirtyRangeScratch != nullptr &&
+			!dirtyRangeScratch->empty() &&
+			dirtyStats.uploadedBytes != 0 &&
+			dirtyStats.uploadedBytes < bufferSize;
+		bool useRangeUpload = false;
+		if (canRangeUpload)
+		{
+			const uint32_t maxRangeCount = (uint32_t)(int)nri_ptscenebufferrangeuploadmaxranges;
+			const uint32_t maxUploadPercent = (uint32_t)(int)nri_ptscenebufferrangeuploadmaxpercent;
+			if (dirtyStats.coalescedRanges > maxRangeCount)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbacks++;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbackFragmented++;
+			}
+			else if (dirtyStats.uploadedBytes * 100u >= bufferSize * maxUploadPercent)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbacks++;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbackLarge++;
+			}
+			else
+			{
+				useRangeUpload = true;
+			}
+		}
+		else if (allowRangeUpload && !forceFullDirty && dirtyRangeScratch != nullptr && dirtyRangeScratch->empty() && dirtyStats.changedBytes == 0)
+		{
+			resource.usedSize = bufferSize;
+			resource.payloadHash = payloadHash;
+			resource.payloadSize = bufferSize;
+			resource.payloadStride = bufferStride;
+			uploadedBytes = 0;
+			growEvents = 0;
+			overwriteEvents = 0;
+			return true;
+		}
+
+		bool needsWait = false;
+		if (!waitedForWrites)
+		{
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadWaitCheckMs);
+			needsWait = StructuredBufferUpdateNeedsWait(resource, bufferData, bufferSize, bufferStride);
+		}
+		if (!waitedForWrites && needsWait)
+		{
+			const auto waitStart = std::chrono::steady_clock::now();
+			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectBufferUploadWaitMs);
+			mLastPerfShellTraceStats.sceneSelectBufferUploadWaitCount++;
+			WaitForCommandsTracked("scene_buffer_upload");
+			addDomainWait(bufferKind, DurationMs(waitStart, std::chrono::steady_clock::now()));
+			waitedForWrites = true;
+		}
+
+		if (useRangeUpload)
+		{
+			if (updateStructuredBufferRanges(resource, stats, payloadMirror, bufferData, bufferSize, bufferStride, payloadHash, *dirtyRangeScratch, afterAccess, uploadMs, uploadedBytes, growEvents, overwriteEvents, bufferRangeUploadCount))
+			{
+				addDomainRangeBytes(bufferKind, *dirtyRangeScratch, false);
+				return true;
+			}
+			mLastPerfShellTraceStats.sceneSelectBufferUploadRangeFallbacks++;
+		}
+
+		bool result = false;
+		{
+			ScopedPtPerfTimer perfTimer(uploadMs);
+			result = EnsureStructuredBuffer(resource, stats, bufferData, bufferSize, bufferStride, usageBits, afterAccess, waitedForWrites, "scene_buffer_upload");
+		}
+		uploadedBytes = stats.bytesUploadedLastFrame;
+		growEvents = stats.growEventsLastFrame;
+		overwriteEvents = stats.overwriteEventsLastFrame;
+		if (result)
+		{
+			if (stats.growEventsLastFrame != 0)
+			{
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthEvents += stats.growEventsLastFrame;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthOldBytes += stats.growthOldBytesLastFrame;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthRequestedBytes += stats.growthRequestedBytesLastFrame;
+				mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthAllocatedBytes += stats.growthAllocatedBytesLastFrame;
+				if (stats.growthAllocatedBytesLastFrame > stats.growthRequestedBytesLastFrame)
+				{
+					mLastPerfShellTraceStats.sceneSelectBufferUploadGrowthHeadroomBytes +=
+						stats.growthAllocatedBytesLastFrame - stats.growthRequestedBytesLastFrame;
+				}
+				addDomainGrowth(bufferKind, stats.growthRequestedBytesLastFrame, stats.growthAllocatedBytesLastFrame);
+			}
+			resource.payloadHash = payloadHash;
+			resource.payloadSize = bufferSize;
+			resource.payloadStride = bufferStride;
+			updatePayloadMirror(payloadMirror, bufferData, bufferSize);
+			mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashUploads++;
+			addDomainFullUpload(bufferKind);
+		}
+		return result;
+	};
+
+	const bool skipVertexUpload = notePayloadHashState(vertexBuffer, vertexPayloadHash, vertexSize, sizeof(nri_scene::SceneVertex), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashVertexHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashVertexSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashVertexMisses);
+	const bool skipIndexUpload = notePayloadHashState(indexBuffer, indexPayloadHash, indexSize, sizeof(uint32_t), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashIndexMisses);
+	const bool skipPrimitiveUpload = notePayloadHashState(primitiveBuffer, primitivePayloadHash, primitiveSize, sizeof(nri_scene::PrimitiveData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashPrimitiveMisses);
+	const bool skipMaterialUpload = notePayloadHashState(materialBuffer, materialPayloadHash, materialSize, sizeof(nri_scene::MaterialData), mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialHits, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialSkips, mLastPerfShellTraceStats.sceneSelectBufferUploadPayloadHashMaterialMisses);
+	addDomainPayload(SceneUploadBufferKind::Vertex, skipVertexUpload);
+	addDomainPayload(SceneUploadBufferKind::Index, skipIndexUpload);
+	addDomainPayload(SceneUploadBufferKind::Primitive, skipPrimitiveUpload);
+	addDomainPayload(SceneUploadBufferKind::Material, skipMaterialUpload);
+	uint32_t ignoredRangeUploadCount = 0;
+
+	return
+		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, vertexMirror, nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Vertex) &&
+		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, indexMirror, nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Index) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, primitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads, SceneUploadBufferKind::Primitive) &&
+		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materialMirror, &mSceneUploadMaterialDirtyRangeScratch, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads, SceneUploadBufferKind::Material);
+}
+
 
 bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context, bool* ioWaitedForWrites)
 {

@@ -1,5 +1,7 @@
 #include "nri_scene_frame_geometry.h"
 
+#include "nri_renderer.h"
+
 #include <algorithm>
 #include <chrono>
 
@@ -252,6 +254,37 @@ void NRISceneFrameGeometry::RefreshStaticPrefixForResidentUpdate(const NRISceneF
 				destination.primitiveProvenance.data() + chunk.primitiveOffset);
 		}
 	}
+}
+
+void NRIRenderer::RefreshStateCommitCombinedGeometryStaticPrefixForResidentUpdate(const std::vector<uint32_t>& changedGeometryChunkListIndices)
+{
+	std::vector<NRISceneFrameGeometryStaticChunkSlice> changedChunks;
+	changedChunks.reserve(changedGeometryChunkListIndices.size());
+	for (uint32_t chunkListIndex : changedGeometryChunkListIndices)
+	{
+		if (chunkListIndex >= mStaticMapScene.chunks.size())
+		{
+			NRISceneFrameGeometryStaticPrefixRefresh invalidRefresh = {};
+			mSceneFrameGeometry.RefreshStaticPrefixForResidentUpdate(invalidRefresh);
+			return;
+		}
+		const StaticMapSceneCache::ChunkCache& chunk = mStaticMapScene.chunks[chunkListIndex];
+		NRISceneFrameGeometryStaticChunkSlice slice = {};
+		slice.active = chunk.active;
+		slice.vertexOffset = chunk.vertexOffset;
+		slice.vertexCount = chunk.vertexCount;
+		slice.indexOffset = chunk.indexOffset;
+		slice.indexCount = chunk.indexCount;
+		slice.primitiveOffset = chunk.primitiveOffset;
+		slice.primitiveCount = chunk.primitiveCount;
+		changedChunks.push_back(slice);
+	}
+	NRISceneFrameGeometryStaticPrefixRefresh refresh = {};
+	refresh.staticBuildSerial = mStaticMapScene.buildSerial;
+	refresh.staticGeometry = &mStaticMapScene.geometry;
+	refresh.staticMaterialCount = (uint32_t)mStaticMapScene.materialBridge.materials.size();
+	refresh.changedChunks = &changedChunks;
+	mSceneFrameGeometry.RefreshStaticPrefixForResidentUpdate(refresh);
 }
 
 void NRISceneFrameGeometry::Reset()
