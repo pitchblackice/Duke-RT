@@ -1590,11 +1590,64 @@ private:
 		bool usingPersistentDynamicEmissiveCache = false;
 	};
 
+	struct RenderSceneFrameBuildInputs
+	{
+		uint32_t bootstrapMode = 0;
+		bool bootstrapCapturedView = false;
+		bool bootstrapCapturedDiagnostics = false;
+		bool bootstrapCapturedFlat = false;
+		bool bootstrapCapturedBaseColor = false;
+		bool rawTraceDirectScene = false;
+		bool preserveHistory = false;
+	};
+
+	struct RenderSceneFrameBuildResult
+	{
+		nri_scene::SceneView capturedSceneView;
+		nri_scene::SceneView dynamicSceneView;
+		nri_scene::SceneView mirrorExtendedDynamicSceneView;
+		nri_scene::SceneView mirrorPlayerSceneView;
+		nri_scene::SceneView sceneLightMergedDynamicSceneView;
+		nri_scene::SceneView mergedDynamicSceneView;
+		nri_scene::GeometryData capturedGeometry;
+		nri_scene::GeometryData runtimeSpaceLinkGeometry;
+		nri_scene::GeometryData dynamicGeometry;
+		nri_scene::GeometryData mirrorExtendedDynamicGeometry;
+		nri_scene::GeometryData mergedDynamicGeometry;
+		nri_scene::GeometryData debugSphereGeometry;
+		nri_scene::GeometryData surfaceLightGeometry;
+		NRIRuntimeMutationFrameOutput runtimeMutationFrame;
+		nri_scene::MaterialBridgeData materialBridge;
+		nri_scene::MaterialBridgeData runtimeSpaceLinkMaterialBridge;
+		nri_scene::MaterialBridgeData dynamicMaterialBridge;
+		nri_scene::MaterialBridgeData mirrorExtendedDynamicMaterialBridge;
+		nri_scene::MaterialBridgeData mirrorPlayerMaterialBridge;
+		nri_scene::MaterialBridgeData sceneLightMergedDynamicMaterialBridge;
+		nri_scene::MaterialBridgeData mergedDynamicMaterialBridge;
+		nri_scene::MaterialBridgeData debugSphereMaterialBridge;
+		nri_scene::MaterialBridgeData surfaceLightMaterialBridge;
+		nri_scene::MaterialBridgeData combinedMaterialBridge;
+		const nri_scene::SceneView* activeSceneView = nullptr;
+		const nri_scene::GeometryData* activeGeometry = nullptr;
+		const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
+		const nri_scene::MaterialBridgeData* activeMaterialBridge = nullptr;
+		const nri_scene::SceneView* activeDynamicSceneView = nullptr;
+		const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
+		const nri_scene::MaterialBridgeData* activeDynamicMaterials = nullptr;
+		nri_scene::SceneDebugStats activeStats = {};
+		bool paletteReady = true;
+		bool texturesReady = true;
+		bool buffersReady = true;
+		bool accelerationReady = true;
+		bool usingPersistentDynamicEmissiveCache = false;
+	};
+
 	RenderSceneHistorySnapshot CaptureRenderSceneHistorySnapshot(bool preserveHistory) const;
 	void RestoreRenderSceneHistorySnapshot(const RenderSceneHistorySnapshot& snapshot);
 	bool EnsureRenderSceneFrameResources(const NRIRendererFrameContext& frameContext, bool preserveHistory, const RenderSceneHistorySnapshot& history);
 	bool BeginRenderSceneFrame(HWDrawInfo& di, const NRIRendererFrameContext& frameContext, bool preserveHistory, const RenderSceneHistorySnapshot& history);
 	bool RenderSimpleBootstrapView(bool preserveHistory, const RenderSceneHistorySnapshot& history);
+	bool BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBuildInputs& inputs, const RenderSceneHistorySnapshot& history, RenderSceneFrameBuildResult& frame);
 	bool DispatchSelectedRenderScene(const RenderSceneDispatchInputs& inputs);
 	void LogRenderSceneFailureReasons(bool paletteReady, bool texturesReady, bool buffersReady, bool accelerationReady, bool dispatched, bool bootstrapCapturedView);
 	void CommitRenderSceneResult(const RenderSceneCompletionInputs& inputs, const RenderSceneHistorySnapshot& history);
