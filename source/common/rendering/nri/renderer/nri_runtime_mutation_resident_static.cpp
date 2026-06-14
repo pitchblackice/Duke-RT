@@ -257,25 +257,6 @@ namespace
             nri::AccelerationStructureBits::ALLOW_UPDATE;
     }
 
-    static nri::AccessStage NRIComputeShaderResourceAccess()
-    {
-        return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
-    }
-
-    static nri::AccessStage NRIAccelerationStructureWriteAccess()
-    {
-        return { nri::AccessBits::ACCELERATION_STRUCTURE_WRITE, nri::StageBits::ACCELERATION_STRUCTURE };
-    }
-
-    static nri::AccessStage NRIAccelerationStructureScratchAccess()
-    {
-        return { nri::AccessBits::SCRATCH_BUFFER, nri::StageBits::ACCELERATION_STRUCTURE };
-    }
-
-    static nri::AccessStage NRIAccelerationStructureReadAccess()
-    {
-        return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
-    }
 }
 
 
@@ -553,7 +534,7 @@ bool NRIRenderer::RefreshResidentStaticMaterialSlices(
 				(uint64_t)atlasChunk.materialOffset * sizeof(nri_scene::MaterialData),
 				remappedGpuMaterials.data(),
 				(uint64_t)atlasChunk.materialCount * sizeof(nri_scene::MaterialData),
-				NRIComputeShaderResourceAccess(),
+				NRIResourceComputeShaderResourceAccess(),
 				ResidentUploadKind_Material))
 		{
 			if (nri_ptscenestats)
@@ -872,8 +853,8 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 				ScopedPtPerfTimer barrierPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBarrierMs);
 				nri::BufferBarrierDesc scratchBarrier = {};
 				scratchBarrier.buffer = mResidentStaticBlasScratchBuffer.buffer;
-				scratchBarrier.before = NRIAccelerationStructureScratchAccess();
-				scratchBarrier.after = NRIAccelerationStructureScratchAccess();
+				scratchBarrier.before = NRIResourceAccelerationStructureScratchAccess();
+				scratchBarrier.after = NRIResourceAccelerationStructureScratchAccess();
 
 				nri::BarrierDesc scratchBarrierDesc = {};
 				scratchBarrierDesc.buffers = &scratchBarrier;
@@ -886,8 +867,8 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 				ScopedPtPerfTimer barrierPerfTimer(mLastPerfShellTraceStats.runtimeMutationResidentApplyDownstreamBlasBarrierMs);
 				nri::BufferBarrierDesc barrier = {};
 				barrier.buffer = mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*chunk.accelerationStructure.accelerationStructure);
-				barrier.before = NRIAccelerationStructureWriteAccess();
-				barrier.after = NRIAccelerationStructureReadAccess();
+				barrier.before = NRIResourceAccelerationStructureWriteAccess();
+				barrier.after = NRIResourceAccelerationStructureReadAccess();
 				blasBarriers.push_back(barrier);
 			}
 		}
@@ -903,4 +884,3 @@ bool NRIRenderer::RebuildResidentStaticMapChunkBlases(const std::vector<uint32_t
 	}
 	return true;
 }
-

@@ -2,8 +2,10 @@
 
 #include "nri_renderer.h"
 
+#include "../scene/nri_hash.h"
 #include "nri_runtime_mutation_trace.h"
 #include "nri_scene_lights.h"
+#include "nri_shader_contracts.h"
 #include "nri_static_scene_geometry.h"
 #include "nri_upload_hash.h"
 #include "c_cvars.h"
@@ -24,13 +26,6 @@ EXTERN_CVAR(Int, nri_ptscenebufferrangeuploadmaxpercent)
 
 namespace
 {
-	constexpr uint32_t NRI_RUNTIME_LIGHT_TILE_SIZE = 64;
-	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
-	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
-	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
-	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
-	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
-
 	static double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
 	{
 		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
@@ -75,11 +70,6 @@ namespace
 		float delta[3] = {};
 		uint32_t reserved0 = 0;
 	};
-
-	static uint64_t HashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
-	}
 
 	static float GetSectorLightMultiplier()
 	{
@@ -152,40 +142,9 @@ namespace
 		float previousWorldToView[16] = {};
 	};
 
-	static nri::AccessStage NRIComputeShaderResourceAccess()
-	{
-		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
-	}
-
-	static nri::AccessStage NRICopySourceAccess()
-	{
-		return { nri::AccessBits::COPY_SOURCE, nri::StageBits::COPY };
-	}
-
-	static nri::AccessStage NRICopyDestinationAccess()
-	{
-		return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
-	}
-
-	template<typename T>
-	static T NRIFlags(T a, T b)
-	{
-		return (T)((uint32_t)a | (uint32_t)b);
-	}
-
-	static nri::AccessStage NRIAccelerationStructureBuildInputAccess()
-	{
-		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::ALL_SHADERS };
-	}
-
 	static bool ShouldTraceSceneBufferDirtyRanges()
 	{
 		return (int)perf_looptraceframes > 0;
-	}
-
-	static uint64_t CoherencyHashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
 	}
 
 	static uint64_t HashUploadPayloadBytes(const void* data, uint64_t size)
@@ -196,19 +155,19 @@ namespace
 	static uint64_t HashPrimitiveRewriteProvenancePayload(const std::vector<nri_scene::SurfaceProvenance>& provenanceList)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, (uint64_t)provenanceList.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)provenanceList.size());
 		for (const nri_scene::SurfaceProvenance& provenance : provenanceList)
 		{
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.drawListType);
-			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.cstat);
-			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.materialFlags);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.drawListType);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.cstat);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.materialFlags);
 		}
 		return hash != 0 ? hash : 1;
 	}
@@ -216,16 +175,16 @@ namespace
 	static uint64_t HashPrimitiveRewriteVisibilityIdentity(const nri_scene::PTMapWorld& mapWorld)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, mapWorld.valid ? 1ull : 0ull);
-		hash = CoherencyHashCombine64(hash, mapWorld.buildSerial);
-		hash = CoherencyHashCombine64(hash, (uint64_t)mapWorld.chunks.size());
-		hash = CoherencyHashCombine64(hash, (uint64_t)mapWorld.stats.chunkCount);
+		hash = nri_scene::HashCombine64(hash, mapWorld.valid ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, mapWorld.buildSerial);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)mapWorld.chunks.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)mapWorld.stats.chunkCount);
 		for (const nri_scene::PTMapChunk& chunk : mapWorld.chunks)
 		{
-			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.chunkIndex);
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(chunk.sectorIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.firstSurface);
-			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.surfaceCount);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)chunk.chunkIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(chunk.sectorIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)chunk.firstSurface);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)chunk.surfaceCount);
 		}
 		return hash != 0 ? hash : 1;
 	}
@@ -574,7 +533,7 @@ bool NRIRenderer::StageResidentMaterialUploadRanges(
 		nri::BufferBarrierDesc sourceBarrier = {};
 		sourceBarrier.buffer = scratch.buffer.buffer;
 		sourceBarrier.before = {};
-		sourceBarrier.after = NRICopySourceAccess();
+		sourceBarrier.after = NRIResourceCopySourceAccess();
 
 		nri::BarrierDesc sourceBarrierDesc = {};
 		sourceBarrierDesc.buffers = &sourceBarrier;
@@ -586,8 +545,8 @@ bool NRIRenderer::StageResidentMaterialUploadRanges(
 
 	nri::BufferBarrierDesc beforeCopyBarrier = {};
 	beforeCopyBarrier.buffer = targetBuffer.buffer;
-	beforeCopyBarrier.before = NRIComputeShaderResourceAccess();
-	beforeCopyBarrier.after = NRICopyDestinationAccess();
+	beforeCopyBarrier.before = NRIResourceComputeShaderResourceAccess();
+	beforeCopyBarrier.after = NRIResourceCopyDestinationAccess();
 
 	nri::BarrierDesc beforeCopyBarrierDesc = {};
 	beforeCopyBarrierDesc.buffers = &beforeCopyBarrier;
@@ -609,8 +568,8 @@ bool NRIRenderer::StageResidentMaterialUploadRanges(
 
 	nri::BufferBarrierDesc afterCopyBarrier = {};
 	afterCopyBarrier.buffer = targetBuffer.buffer;
-	afterCopyBarrier.before = NRICopyDestinationAccess();
-	afterCopyBarrier.after = NRIComputeShaderResourceAccess();
+	afterCopyBarrier.before = NRIResourceCopyDestinationAccess();
+	afterCopyBarrier.after = NRIResourceComputeShaderResourceAccess();
 
 	nri::BarrierDesc afterCopyBarrierDesc = {};
 	afterCopyBarrierDesc.buffers = &afterCopyBarrier;
@@ -946,7 +905,7 @@ bool NRISceneUploadManager::UpdateReprojectionBuffer(NRIRenderer& renderer, bool
 		sizeof(data),
 		sizeof(data),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess(),
+		NRIResourceComputeShaderResourceAccess(),
 		ioWaitedForWrites != nullptr && *ioWaitedForWrites,
 		"scene_data_upload"))
 	{
@@ -970,7 +929,7 @@ bool NRISceneUploadManager::UpdateVisibleChunkBuffer(NRIRenderer& renderer, bool
 		visibleChunkSize,
 		sizeof(uint32_t),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess(),
+		NRIResourceComputeShaderResourceAccess(),
 		ioWaitedForWrites != nullptr && *ioWaitedForWrites,
 		"scene_data_upload"))
 	{
@@ -994,7 +953,7 @@ bool NRISceneUploadManager::UpdateVisibleFlatPlaneBuffer(NRIRenderer& renderer, 
 		visibleFlatPlaneSize,
 		sizeof(uint32_t),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess(),
+		NRIResourceComputeShaderResourceAccess(),
 		ioWaitedForWrites != nullptr && *ioWaitedForWrites,
 		"scene_data_upload"))
 	{
@@ -1306,10 +1265,10 @@ bool NRIRenderer::UploadSceneBuffers(
 		}
 		uint64_t coveredBytes = 0;
 		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, (uint64_t)kind);
-		hash = CoherencyHashCombine64(hash, payloadSize);
-		hash = CoherencyHashCombine64(hash, payloadStride);
-		hash = CoherencyHashCombine64(hash, extraIdentity);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)kind);
+		hash = nri_scene::HashCombine64(hash, payloadSize);
+		hash = nri_scene::HashCombine64(hash, payloadStride);
+		hash = nri_scene::HashCombine64(hash, extraIdentity);
 		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
 		{
 			uint64_t offset = 0;
@@ -1341,10 +1300,10 @@ bool NRIRenderer::UploadSceneBuffers(
 				return false;
 			}
 			coveredBytes += size;
-			hash = CoherencyHashCombine64(hash, (uint64_t)span.domain);
-			hash = CoherencyHashCombine64(hash, offset);
-			hash = CoherencyHashCombine64(hash, size);
-			hash = CoherencyHashCombine64(hash, stamp);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)span.domain);
+			hash = nri_scene::HashCombine64(hash, offset);
+			hash = nri_scene::HashCombine64(hash, size);
+			hash = nri_scene::HashCombine64(hash, stamp);
 		}
 		if (coveredBytes != payloadSize)
 		{
@@ -1381,7 +1340,7 @@ bool NRIRenderer::UploadSceneBuffers(
 		}
 		uint64_t coveredPrimitives = 0;
 		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, primitiveCount);
+		hash = nri_scene::HashCombine64(hash, primitiveCount);
 		for (const SceneBufferUploadDomainSpan& span : *domainSpans)
 		{
 			if (span.primitiveCount == 0)
@@ -1394,10 +1353,10 @@ bool NRIRenderer::UploadSceneBuffers(
 				return false;
 			}
 			coveredPrimitives += span.primitiveCount;
-			hash = CoherencyHashCombine64(hash, (uint64_t)span.domain);
-			hash = CoherencyHashCombine64(hash, (uint64_t)span.primitiveOffset);
-			hash = CoherencyHashCombine64(hash, (uint64_t)span.primitiveCount);
-			hash = CoherencyHashCombine64(hash, span.stamp.primitiveProvenanceStamp);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)span.domain);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)span.primitiveOffset);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)span.primitiveCount);
+			hash = nri_scene::HashCombine64(hash, span.stamp.primitiveProvenanceStamp);
 		}
 		if (coveredPrimitives != primitiveCount)
 		{
@@ -2031,10 +1990,10 @@ bool NRIRenderer::UploadSceneBuffers(
 	uint32_t ignoredRangeUploadCount = 0;
 
 	return
-		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, vertexMirror, nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Vertex) &&
-		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, indexMirror, nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, false, NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Index) &&
-		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, primitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads, SceneUploadBufferKind::Primitive) &&
-		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materialMirror, &mSceneUploadMaterialDirtyRangeScratch, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads, SceneUploadBufferKind::Material);
+		ensureStructuredBufferBatched(vertexBuffer, mVertexBufferStats, vertexMirror, nullptr, geometry.vertices.data(), vertexSize, sizeof(nri_scene::SceneVertex), vertexPayloadHash, skipVertexUpload, false, NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIResourceAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadVertexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadVertexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Vertex) &&
+		ensureStructuredBufferBatched(indexBuffer, mIndexBufferStats, indexMirror, nullptr, geometry.indices.data(), indexSize, sizeof(uint32_t), indexPayloadHash, skipIndexUpload, false, NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT), NRIResourceAccelerationStructureBuildInputAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadIndexMs, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadIndexDirtyUploadedBytes, ignoredRangeUploadCount, SceneUploadBufferKind::Index) &&
+		ensureStructuredBufferBatched(primitiveBuffer, mPrimitiveBufferStats, primitiveMirror, &mSceneUploadPrimitiveDirtyRangeScratch, gpuPrimitives != nullptr && !gpuPrimitives->empty() ? gpuPrimitives->data() : nullptr, primitiveSize, sizeof(nri_scene::PrimitiveData), primitivePayloadHash, skipPrimitiveUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIResourceComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveMs, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadPrimitiveRangeUploads, SceneUploadBufferKind::Primitive) &&
+		ensureStructuredBufferBatched(materialBuffer, mMaterialBufferStats, materialMirror, &mSceneUploadMaterialDirtyRangeScratch, materials.data(), materialSize, sizeof(nri_scene::MaterialData), materialPayloadHash, skipMaterialUpload, true, nri::BufferUsageBits::SHADER_RESOURCE, NRIResourceComputeShaderResourceAccess(), mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialMs, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialGrowEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialOverwriteEvents, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyRanges, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyChangedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialDirtyUploadedBytes, mLastPerfShellTraceStats.sceneSelectBufferUploadMaterialRangeUploads, SceneUploadBufferKind::Material);
 }
 
 
@@ -2088,7 +2047,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 		sizeof(emissiveHeader),
 		sizeof(EmissivePrimitiveHeaderGpuData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+		NRIResourceComputeShaderResourceAccess()))
 	{
 		return false;
 	}
@@ -2100,7 +2059,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 		emissivePrimitives.empty() ? 0u : emissivePrimitives.size() * sizeof(EmissivePrimitiveGpuData),
 		sizeof(EmissivePrimitiveGpuData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+		NRIResourceComputeShaderResourceAccess()))
 	{
 		return false;
 	}
@@ -2112,7 +2071,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 		emissiveCdf.size() * sizeof(float),
 		sizeof(float),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+		NRIResourceComputeShaderResourceAccess()))
 	{
 		return false;
 	}
@@ -2124,7 +2083,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 		emissiveMaterialResponses.empty() ? 0u : emissiveMaterialResponses.size() * sizeof(EmissiveMaterialResponseGpuData),
 		sizeof(EmissiveMaterialResponseGpuData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess()))
+		NRIResourceComputeShaderResourceAccess()))
 	{
 		return false;
 	}
@@ -2301,10 +2260,10 @@ bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_
 			nri::BufferBarrierDesc beforeBarriers[2] = {};
 			beforeBarriers[0].buffer = oldResource.buffer;
 			beforeBarriers[0].before = after;
-			beforeBarriers[0].after = NRICopySourceAccess();
+			beforeBarriers[0].after = NRIResourceCopySourceAccess();
 			beforeBarriers[1].buffer = resource.buffer;
 			beforeBarriers[1].before = {};
-			beforeBarriers[1].after = NRICopyDestinationAccess();
+			beforeBarriers[1].after = NRIResourceCopyDestinationAccess();
 			nri::BarrierDesc beforeBarrierDesc = {};
 			beforeBarrierDesc.buffers = beforeBarriers;
 			beforeBarrierDesc.bufferNum = 2;
@@ -2320,7 +2279,7 @@ bool NRIRenderer::EnsureResidentArenaBuffer(NRIBufferResource& resource, uint64_
 
 			nri::BufferBarrierDesc afterBarrier = {};
 			afterBarrier.buffer = resource.buffer;
-			afterBarrier.before = NRICopyDestinationAccess();
+			afterBarrier.before = NRIResourceCopyDestinationAccess();
 			afterBarrier.after = after;
 			nri::BarrierDesc afterBarrierDesc = {};
 			afterBarrierDesc.buffers = &afterBarrier;
@@ -2424,7 +2383,7 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 		nri::BufferBarrierDesc sourceBarrier = {};
 		sourceBarrier.buffer = scratch->buffer.buffer;
 		sourceBarrier.before = {};
-		sourceBarrier.after = NRICopySourceAccess();
+		sourceBarrier.after = NRIResourceCopySourceAccess();
 
 		nri::BarrierDesc sourceBarrierDesc = {};
 		sourceBarrierDesc.buffers = &sourceBarrier;
@@ -2436,7 +2395,7 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 	nri::BufferBarrierDesc beforeCopyBarrier = {};
 	beforeCopyBarrier.buffer = resource.buffer;
 	beforeCopyBarrier.before = after;
-	beforeCopyBarrier.after = NRICopyDestinationAccess();
+	beforeCopyBarrier.after = NRIResourceCopyDestinationAccess();
 
 	nri::BarrierDesc beforeCopyBarrierDesc = {};
 	beforeCopyBarrierDesc.buffers = &beforeCopyBarrier;
@@ -2453,7 +2412,7 @@ bool NRIRenderer::StageResidentBufferCopyRange(NRIBufferResource& resource, uint
 
 	nri::BufferBarrierDesc afterCopyBarrier = {};
 	afterCopyBarrier.buffer = resource.buffer;
-	afterCopyBarrier.before = NRICopyDestinationAccess();
+	afterCopyBarrier.before = NRIResourceCopyDestinationAccess();
 	afterCopyBarrier.after = after;
 
 	nri::BarrierDesc afterCopyBarrierDesc = {};
@@ -2689,7 +2648,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		sceneInstances.size() * sizeof(SceneInstanceData),
 		sizeof(SceneInstanceData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess(),
+		NRIResourceComputeShaderResourceAccess(),
 		mLastPerfShellTraceStats.sceneDataSetSceneInstanceMs,
 		mLastPerfShellTraceStats.sceneDataSetSceneInstanceRequestedBytes,
 		mLastPerfShellTraceStats.sceneDataSetSceneInstanceUploadedBytes))
@@ -2710,7 +2669,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		scenePortals.size() * sizeof(ScenePortalData),
 		sizeof(ScenePortalData),
 		nri::BufferUsageBits::SHADER_RESOURCE,
-		NRIComputeShaderResourceAccess(),
+		NRIResourceComputeShaderResourceAccess(),
 		mLastPerfShellTraceStats.sceneDataSetPortalMs,
 		mLastPerfShellTraceStats.sceneDataSetPortalRequestedBytes,
 		mLastPerfShellTraceStats.sceneDataSetPortalUploadedBytes))
@@ -2741,7 +2700,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			runtimeLights.size() * sizeof(RuntimePointLightGpuData),
 			sizeof(RuntimePointLightGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
+			NRIResourceComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploadMs,
 			mLastPerfShellTraceStats.sceneDataSetRuntimeLightRequestedBytes,
 			mLastPerfShellTraceStats.sceneDataSetRuntimeLightUploadedBytes))
@@ -2767,7 +2726,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		runtimeLightClusterCameraHash = mSceneLights.BuildRuntimeLightClusterCameraHash(BuildRuntimeLightClusterInput());
 	}
 	const uint64_t runtimeLightClusterPayloadHash =
-		HashCombine64(runtimeLightPayloadHash, runtimeLightClusterCameraHash);
+		nri_scene::HashCombine64(runtimeLightPayloadHash, runtimeLightClusterCameraHash);
 	if (!mRuntimeLightClusterCacheValid ||
 		mRuntimeLightClusterPayloadHash != runtimeLightClusterPayloadHash ||
 		mRuntimeLightTileHeaderBuffer.shaderView == nullptr ||
@@ -2794,7 +2753,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			runtimeLightTileHeaders.size() * sizeof(RuntimeLightTileHeaderGpuData),
 			sizeof(RuntimeLightTileHeaderGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
+			NRIResourceComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs,
 			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterRequestedBytes,
 			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploadedBytes))
@@ -2809,7 +2768,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			runtimeLightTileIndices.size() * sizeof(uint32_t),
 			sizeof(uint32_t),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
+			NRIResourceComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterMs,
 			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterRequestedBytes,
 			mLastPerfShellTraceStats.sceneDataSetRuntimeLightClusterUploadedBytes))
@@ -2853,7 +2812,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			sizeof(emissiveHeader),
 			sizeof(EmissivePrimitiveHeaderGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
+			NRIResourceComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
 			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
 			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
@@ -2868,7 +2827,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			emissivePrimitives.empty() ? 0u : emissivePrimitives.size() * sizeof(EmissivePrimitiveGpuData),
 			sizeof(EmissivePrimitiveGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
+			NRIResourceComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
 			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
 			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
@@ -2883,7 +2842,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			emissiveCdf.size() * sizeof(float),
 			sizeof(float),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
+			NRIResourceComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
 			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
 			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
@@ -2898,7 +2857,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			emissiveMaterialResponses.empty() ? 0u : emissiveMaterialResponses.size() * sizeof(EmissiveMaterialResponseGpuData),
 			sizeof(EmissiveMaterialResponseGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
+			NRIResourceComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetEmissiveMs,
 			mLastPerfShellTraceStats.sceneDataSetEmissiveRequestedBytes,
 			mLastPerfShellTraceStats.sceneDataSetEmissiveUploadedBytes))
@@ -2937,7 +2896,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			sizeof(sectorLightHeader),
 			sizeof(SectorLightHeaderGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
+			NRIResourceComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetSectorLightMs,
 			mLastPerfShellTraceStats.sceneDataSetSectorLightRequestedBytes,
 			mLastPerfShellTraceStats.sceneDataSetSectorLightUploadedBytes))
@@ -2952,7 +2911,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 			sectorLights.empty() ? 0u : sectorLights.size() * sizeof(SectorLightGpuData),
 			sizeof(SectorLightGpuData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess(),
+			NRIResourceComputeShaderResourceAccess(),
 			mLastPerfShellTraceStats.sceneDataSetSectorLightMs,
 			mLastPerfShellTraceStats.sceneDataSetSectorLightRequestedBytes,
 			mLastPerfShellTraceStats.sceneDataSetSectorLightUploadedBytes))

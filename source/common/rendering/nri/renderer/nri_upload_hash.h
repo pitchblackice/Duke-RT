@@ -1,11 +1,13 @@
 #pragma once
 
+#include "../scene/nri_hash.h"
+
 #include <cstdint>
 #include <cstring>
 
 inline uint64_t NRIHashCombine64(uint64_t hash, uint64_t value)
 {
-	return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
+	return nri_scene::HashCombine64(hash, value);
 }
 
 inline uint64_t NRIHashUploadPayloadBytes(const void* data, uint64_t size)

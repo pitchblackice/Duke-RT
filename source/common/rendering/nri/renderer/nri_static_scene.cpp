@@ -37,37 +37,6 @@ namespace
 		return value ? "yes" : "no";
 	}
 
-	template<typename T>
-	static T NRIFlags(T a, T b)
-	{
-		return (T)((uint32_t)a | (uint32_t)b);
-	}
-
-	static nri::AccessStage NRIComputeShaderResourceAccess()
-	{
-		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
-	}
-
-	static nri::AccessStage NRIAccelerationStructureBuildInputAccess()
-	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
-	}
-
-	static nri::AccessStage NRIAccelerationStructureWriteAccess()
-	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_WRITE, nri::StageBits::ACCELERATION_STRUCTURE };
-	}
-
-	static nri::AccessStage NRIAccelerationStructureScratchAccess()
-	{
-		return { nri::AccessBits::SCRATCH_BUFFER, nri::StageBits::ACCELERATION_STRUCTURE };
-	}
-
-	static nri::AccessStage NRIAccelerationStructureReadAccess()
-	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
-	}
-
 	static nri::AccelerationStructureBits GetStaticMapChunkBlasBuildBits()
 	{
 		return
@@ -275,7 +244,7 @@ void NRIRenderer::InvalidateStaticMapSceneForMaterialLighting()
 			renderer->mStaticMapScene.gpuMaterials.size() * sizeof(nri_scene::MaterialData),
 			sizeof(nri_scene::MaterialData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess());
+			NRIResourceComputeShaderResourceAccess());
 	};
 
 	if (!nri_static_scene::RefreshStaticMapSceneMaterialLighting(input, services))
@@ -1995,8 +1964,8 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 				uploadVertices.data(),
 				(uint64_t)uploadVertices.size() * sizeof(nri_scene::SceneVertex),
 				sizeof(nri_scene::SceneVertex),
-				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
-				NRIAccelerationStructureBuildInputAccess(),
+				NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+				NRIResourceAccelerationStructureReadAccess(),
 				"resident_chunk_write",
 				ResidentUploadKind_Vertex))
 		{
@@ -2019,8 +1988,8 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 				uploadIndices.data(),
 				(uint64_t)uploadIndices.size() * sizeof(uint32_t),
 				sizeof(uint32_t),
-				NRIFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
-				NRIAccelerationStructureBuildInputAccess(),
+				NRIResourceFlags(nri::BufferUsageBits::SHADER_RESOURCE, nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT),
+				NRIResourceAccelerationStructureReadAccess(),
 				"resident_chunk_write",
 				ResidentUploadKind_Index))
 		{
@@ -2044,7 +2013,7 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 				(uint64_t)uploadPrimitives.size() * sizeof(nri_scene::PrimitiveData),
 				sizeof(nri_scene::PrimitiveData),
 				nri::BufferUsageBits::SHADER_RESOURCE,
-				NRIComputeShaderResourceAccess(),
+				NRIResourceComputeShaderResourceAccess(),
 				"resident_chunk_write",
 				ResidentUploadKind_Primitive))
 		{
@@ -2068,7 +2037,7 @@ bool NRIRenderer::EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMa
 				(uint64_t)uploadMaterials.size() * sizeof(nri_scene::MaterialData),
 				sizeof(nri_scene::MaterialData),
 				nri::BufferUsageBits::SHADER_RESOURCE,
-				NRIComputeShaderResourceAccess(),
+				NRIResourceComputeShaderResourceAccess(),
 				"resident_chunk_write",
 				ResidentUploadKind_Material))
 		{
@@ -2240,8 +2209,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 		nri::BufferBarrierDesc scratchBarrier = {};
 		scratchBarrier.buffer = scratchBuffer.buffer;
-		scratchBarrier.before = NRIAccelerationStructureScratchAccess();
-		scratchBarrier.after = NRIAccelerationStructureScratchAccess();
+		scratchBarrier.before = NRIResourceAccelerationStructureScratchAccess();
+		scratchBarrier.after = NRIResourceAccelerationStructureScratchAccess();
 
 		nri::BarrierDesc scratchBarrierDesc = {};
 		scratchBarrierDesc.buffers = &scratchBarrier;
@@ -2262,8 +2231,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 
 			nri::BufferBarrierDesc barrier = {};
 			barrier.buffer = renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*accelerationStructure->accelerationStructure);
-			barrier.before = NRIAccelerationStructureWriteAccess();
-			barrier.after = NRIAccelerationStructureReadAccess();
+			barrier.before = NRIResourceAccelerationStructureWriteAccess();
+			barrier.after = NRIResourceAccelerationStructureReadAccess();
 			blasBarriers.push_back(barrier);
 		}
 		if (!blasBarriers.empty())
@@ -2360,8 +2329,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
 		nri::BufferBarrierDesc scratchBarrier = {};
 		scratchBarrier.buffer = scratchBuffer.buffer;
-		scratchBarrier.before = NRIAccelerationStructureScratchAccess();
-		scratchBarrier.after = NRIAccelerationStructureScratchAccess();
+		scratchBarrier.before = NRIResourceAccelerationStructureScratchAccess();
+		scratchBarrier.after = NRIResourceAccelerationStructureScratchAccess();
 
 		nri::BarrierDesc scratchBarrierDesc = {};
 		scratchBarrierDesc.buffers = &scratchBarrier;
@@ -2382,8 +2351,8 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures(
 
 			nri::BufferBarrierDesc barrier = {};
 			barrier.buffer = renderer->mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*accelerationStructure->accelerationStructure);
-			barrier.before = NRIAccelerationStructureWriteAccess();
-			barrier.after = NRIAccelerationStructureReadAccess();
+			barrier.before = NRIResourceAccelerationStructureWriteAccess();
+			barrier.after = NRIResourceAccelerationStructureReadAccess();
 			blasBarriers.push_back(barrier);
 		}
 		if (!blasBarriers.empty())

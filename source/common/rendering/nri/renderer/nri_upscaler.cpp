@@ -116,6 +116,29 @@ const char* NRIGetPostSharpenName(NRIPostSharpenKind kind)
 	}
 }
 
+const char* NRIGetRenderResolutionPolicyName(NRIMainUpscalerKind kind)
+{
+	switch (kind)
+	{
+	case NRIMainUpscalerKind::DLSR: return "sr-mode-scale";
+	case NRIMainUpscalerKind::DLRR: return "rr-mode-scale";
+	default: return "manual-scale";
+	}
+}
+
+const char* NRIGetUpscalerModeName(nri::UpscalerMode mode)
+{
+	switch (mode)
+	{
+	case nri::UpscalerMode::ULTRA_QUALITY: return "ultra_quality";
+	case nri::UpscalerMode::QUALITY: return "quality";
+	case nri::UpscalerMode::BALANCED: return "balanced";
+	case nri::UpscalerMode::PERFORMANCE: return "performance";
+	case nri::UpscalerMode::ULTRA_PERFORMANCE: return "ultra_performance";
+	default: return "native";
+	}
+}
+
 nri::UpscalerType NRIToMainUpscalerType(NRIMainUpscalerKind kind)
 {
 	switch (kind)
@@ -135,6 +158,51 @@ nri::UpscalerType NRIToPostSharpenType(NRIPostSharpenKind kind)
 	}
 }
 
+float NRIGetUpscalerRenderScale(nri::UpscalerMode mode)
+{
+	switch (mode)
+	{
+	default:
+	case nri::UpscalerMode::NATIVE: return 1.0f;
+	case nri::UpscalerMode::ULTRA_QUALITY: return 1.0f / 1.3f;
+	case nri::UpscalerMode::QUALITY: return 1.0f / 1.5f;
+	case nri::UpscalerMode::BALANCED: return 1.0f / 1.7f;
+	case nri::UpscalerMode::PERFORMANCE: return 0.5f;
+	case nri::UpscalerMode::ULTRA_PERFORMANCE: return 1.0f / 3.0f;
+	}
+}
+
+uint32_t NRIGetUpscalerJitterPhaseCount(nri::UpscalerMode mode)
+{
+	switch (mode)
+	{
+	case nri::UpscalerMode::NATIVE: return 8u;
+	case nri::UpscalerMode::ULTRA_QUALITY: return 14u;
+	case nri::UpscalerMode::QUALITY: return 18u;
+	case nri::UpscalerMode::BALANCED: return 23u;
+	case nri::UpscalerMode::PERFORMANCE: return 32u;
+	case nri::UpscalerMode::ULTRA_PERFORMANCE: return 72u;
+	default: return 8u;
+	}
+}
+
+nri::UpscalerMode NRIResolveUpscalerModeForMain(NRIMainUpscalerKind, nri::UpscalerMode requestedMode)
+{
+	return requestedMode;
+}
+
+float NRIResolveRenderScaleForMain(NRIMainUpscalerKind kind, nri::UpscalerMode requestedMode, float manualRenderScale)
+{
+	switch (kind)
+	{
+	case NRIMainUpscalerKind::DLSR:
+	case NRIMainUpscalerKind::DLRR:
+		return NRIGetUpscalerRenderScale(requestedMode);
+	default:
+		return manualRenderScale;
+	}
+}
+
 bool NRIIsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
 {
 	return kind == NRIMainUpscalerKind::Off;
@@ -143,6 +211,41 @@ bool NRIIsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
 bool NRIShouldRunAppTaa(NRIMainUpscalerKind kind)
 {
 	return NRIIsAppTaaEligibleUpscaler(kind) && !!nri_pttaa;
+}
+
+bool NRIShouldUseTemporalJitter(NRIMainUpscalerKind kind)
+{
+	return NRIShouldRunAppTaa(kind) || kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR;
+}
+
+const char* NRIGetTemporalJitterModeName(NRIMainUpscalerKind kind, bool guiCaptureActive)
+{
+	if (guiCaptureActive)
+	{
+		return "off-gui-capture";
+	}
+
+	if (kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR)
+	{
+		return "upscaler";
+	}
+
+	return NRIShouldRunAppTaa(kind) ? "taa" : "off";
+}
+
+uint32_t NRIGetTemporalJitterPhaseCount(NRIMainUpscalerKind kind, nri::UpscalerMode mode, bool guiCaptureActive)
+{
+	if (guiCaptureActive)
+	{
+		return 0u;
+	}
+
+	if (kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR)
+	{
+		return NRIGetUpscalerJitterPhaseCount(mode);
+	}
+
+	return 8u;
 }
 
 bool NRIUpscalerContext::EnsureUpscaler(

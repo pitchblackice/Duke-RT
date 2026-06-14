@@ -16,6 +16,7 @@
 #include "nri_surface_light_overlay.h"
 #include "nri_upload_hash.h"
 #include "nri_runtime_mutation_shared.h"
+#include "../scene/nri_hash.h"
 #include "../scene/nri_map_builder.h"
 #include "../scene/nri_scene_math.h"
 #include "../scene/nri_scene_stats.h"
@@ -1620,11 +1621,6 @@ public:
 		entry.emissiveTextureCount += counts.emissiveTextureCount;
 	}
 
-	static uint64_t CoherencyHashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
-	}
-
 	static uint32_t CoherencyFloatBits(float value)
 	{
 		static_assert(sizeof(uint32_t) == sizeof(float), "unexpected float size");
@@ -1657,16 +1653,16 @@ public:
 
 	static uint64_t HashSurfaceProvenanceStamp(uint64_t hash, const nri_scene::SurfaceProvenance& provenance)
 	{
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
-		hash = CoherencyHashCombine64(hash, (uint64_t)provenance.drawListType);
-		hash = CoherencyHashCombine64(hash, (uint64_t)provenance.cstat);
-		hash = CoherencyHashCombine64(hash, (uint64_t)provenance.materialFlags);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.drawListType);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.cstat);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.materialFlags);
 		return hash;
 	}
 
@@ -1674,25 +1670,25 @@ public:
 	{
 		for (int i = 0; i < 3; ++i)
 		{
-			hash = CoherencyHashCombine64(hash, CoherencyFloatBits(vertex.position[i]));
+			hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.position[i]));
 		}
 		for (int i = 0; i < 3; ++i)
 		{
-			hash = CoherencyHashCombine64(hash, CoherencyFloatBits(vertex.prevPosition[i]));
+			hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.prevPosition[i]));
 		}
-		hash = CoherencyHashCombine64(hash, CoherencyFloatBits(vertex.uv[0]));
-		hash = CoherencyHashCombine64(hash, CoherencyFloatBits(vertex.uv[1]));
+		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.uv[0]));
+		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.uv[1]));
 		return hash;
 	}
 
 	static uint64_t HashMaterialRefStamp(uint64_t hash, const nri_scene::MaterialRef& material)
 	{
-		hash = CoherencyHashCombine64(hash, material.texture != nullptr ? (uint64_t)(uint32_t)material.texture->GetID().GetIndex() + 1ull : 0ull);
-		hash = CoherencyHashCombine64(hash, material.emissiveSourceTexture != nullptr ? (uint64_t)(uint32_t)material.emissiveSourceTexture->GetID().GetIndex() + 1ull : 0ull);
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(material.palette + 1));
-		hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(material.shade + 1));
-		hash = CoherencyHashCombine64(hash, CoherencyFloatBits(material.alpha));
-		hash = CoherencyHashCombine64(hash, (uint64_t)material.flags);
+		hash = nri_scene::HashCombine64(hash, material.texture != nullptr ? (uint64_t)(uint32_t)material.texture->GetID().GetIndex() + 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, material.emissiveSourceTexture != nullptr ? (uint64_t)(uint32_t)material.emissiveSourceTexture->GetID().GetIndex() + 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(material.palette + 1));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(material.shade + 1));
+		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(material.alpha));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)material.flags);
 		return hash;
 	}
 
@@ -1722,21 +1718,21 @@ public:
 		{
 			const uint32_t primitiveCount = CountStampedSurfacePrimitives(surface, triangleList);
 			const uint64_t surfaceHeader =
-				CoherencyHashCombine64(
-					CoherencyHashCombine64(
-						CoherencyHashCombine64(1469598103934665603ull, (uint64_t)surfaceKind),
+				nri_scene::HashCombine64(
+					nri_scene::HashCombine64(
+						nri_scene::HashCombine64(1469598103934665603ull, (uint64_t)surfaceKind),
 						(uint64_t)materialIndex),
 					(uint64_t)primitiveCount);
-			result.vertexPayloadStamp = CoherencyHashCombine64(result.vertexPayloadStamp, surfaceHeader);
-			result.indexPayloadStamp = CoherencyHashCombine64(result.indexPayloadStamp, surfaceHeader);
-			result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, surfaceHeader);
-			result.primitiveProvenanceStamp = CoherencyHashCombine64(result.primitiveProvenanceStamp, surfaceHeader);
-			result.materialPayloadStamp = CoherencyHashCombine64(result.materialPayloadStamp, surfaceHeader);
-			result.vertexPayloadStamp = CoherencyHashCombine64(result.vertexPayloadStamp, (uint64_t)surface.vertices.size());
-			result.indexPayloadStamp = CoherencyHashCombine64(result.indexPayloadStamp, (uint64_t)surface.indices.size());
-			result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, (uint64_t)sceneView.primitiveFlags);
-			result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, (uint64_t)surface.material.flags);
-			result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, mapWorldBuildSerial);
+			result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, surfaceHeader);
+			result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, surfaceHeader);
+			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, surfaceHeader);
+			result.primitiveProvenanceStamp = nri_scene::HashCombine64(result.primitiveProvenanceStamp, surfaceHeader);
+			result.materialPayloadStamp = nri_scene::HashCombine64(result.materialPayloadStamp, surfaceHeader);
+			result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, (uint64_t)surface.vertices.size());
+			result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)surface.indices.size());
+			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)sceneView.primitiveFlags);
+			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)surface.material.flags);
+			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, mapWorldBuildSerial);
 			result.primitiveProvenanceStamp = HashSurfaceProvenanceStamp(result.primitiveProvenanceStamp, surface.provenance);
 			result.materialPayloadStamp = HashMaterialRefStamp(result.materialPayloadStamp, surface.material);
 			for (const nri_scene::CapturedVertex& vertex : surface.vertices)
@@ -1746,8 +1742,8 @@ public:
 			}
 			for (uint32_t index : surface.indices)
 			{
-				result.indexPayloadStamp = CoherencyHashCombine64(result.indexPayloadStamp, (uint64_t)index);
-				result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, (uint64_t)index);
+				result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)index);
+				result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)index);
 			}
 		};
 
@@ -1764,11 +1760,11 @@ public:
 		{
 			appendSurface(surface, 2u, false, materialIndex++);
 		}
-		result.vertexPayloadStamp = CoherencyHashCombine64(result.vertexPayloadStamp, (uint64_t)materialIndex);
-		result.indexPayloadStamp = CoherencyHashCombine64(result.indexPayloadStamp, (uint64_t)materialIndex);
-		result.primitivePayloadStamp = CoherencyHashCombine64(result.primitivePayloadStamp, (uint64_t)materialIndex);
-		result.primitiveProvenanceStamp = CoherencyHashCombine64(result.primitiveProvenanceStamp, (uint64_t)materialIndex);
-		result.materialPayloadStamp = CoherencyHashCombine64(result.materialPayloadStamp, (uint64_t)materialIndex);
+		result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, (uint64_t)materialIndex);
+		result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)materialIndex);
+		result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)materialIndex);
+		result.primitiveProvenanceStamp = nri_scene::HashCombine64(result.primitiveProvenanceStamp, (uint64_t)materialIndex);
+		result.materialPayloadStamp = nri_scene::HashCombine64(result.materialPayloadStamp, (uint64_t)materialIndex);
 		result.vertexPayloadStamp = result.vertexPayloadStamp != 0 ? result.vertexPayloadStamp : 1;
 		result.indexPayloadStamp = result.indexPayloadStamp != 0 ? result.indexPayloadStamp : 1;
 		result.primitivePayloadStamp = result.primitivePayloadStamp != 0 ? result.primitivePayloadStamp : 1;
@@ -1785,14 +1781,14 @@ public:
 		uint64_t mapWorldBuildSerial)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, kind);
-		hash = CoherencyHashCombine64(hash, frameIndex);
-		hash = CoherencyHashCombine64(hash, mapWorldBuildSerial);
-		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.vertices.size());
-		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.indices.size());
-		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.primitives.size());
-		hash = CoherencyHashCombine64(hash, (uint64_t)geometry.primitiveProvenance.size());
-		hash = CoherencyHashCombine64(hash, (uint64_t)materials.materials.size());
+		hash = nri_scene::HashCombine64(hash, kind);
+		hash = nri_scene::HashCombine64(hash, frameIndex);
+		hash = nri_scene::HashCombine64(hash, mapWorldBuildSerial);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)geometry.vertices.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)geometry.indices.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)geometry.primitives.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)geometry.primitiveProvenance.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)materials.materials.size());
 		return hash != 0 ? hash : 1;
 	}
 
@@ -1814,38 +1810,38 @@ public:
 	static uint64_t HashMaterialBridgeSummary(const nri_scene::MaterialBridgeData& materials)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, (uint64_t)materials.materials.size());
-		hash = CoherencyHashCombine64(hash, (uint64_t)materials.lightMetadata.size());
-		hash = CoherencyHashCombine64(hash, (uint64_t)materials.textures.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)materials.materials.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)materials.lightMetadata.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)materials.textures.size());
 		for (size_t i = 0; i < materials.materials.size(); ++i)
 		{
 			const auto& material = materials.materials[i];
-			hash = CoherencyHashCombine64(hash, (uint64_t)material.textureIndex);
-			hash = CoherencyHashCombine64(hash, (uint64_t)material.paletteIndex);
-			hash = CoherencyHashCombine64(hash, (uint64_t)material.flags);
-			hash = CoherencyHashCombine64(hash, (uint64_t)material.lightingFlags);
-			hash = CoherencyHashCombine64(hash, (uint64_t)material.emissiveMode);
-			hash = CoherencyHashCombine64(hash, (uint64_t)material.emissiveTextureIndex);
-			hash = CoherencyHashCombine64(hash, (uint64_t)CoherencyFloatBits(material.alpha));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)material.textureIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)material.paletteIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)material.flags);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)material.lightingFlags);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)material.emissiveMode);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)material.emissiveTextureIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)CoherencyFloatBits(material.alpha));
 		}
 
 		for (const auto& metadata : materials.lightMetadata)
 		{
-			hash = CoherencyHashCombine64(hash, metadata.materialKey);
-			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.textureId);
-			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.actorIndex);
-			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.textureIndex);
-			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.paletteIndex);
-			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.emissiveMode);
-			hash = CoherencyHashCombine64(hash, (uint64_t)metadata.emissiveTextureIndex);
+			hash = nri_scene::HashCombine64(hash, metadata.materialKey);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)metadata.textureId);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)metadata.actorIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)metadata.textureIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)metadata.paletteIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)metadata.emissiveMode);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)metadata.emissiveTextureIndex);
 		}
 
 		for (const auto& texture : materials.textures)
 		{
-			hash = CoherencyHashCombine64(hash, texture.key);
-			hash = CoherencyHashCombine64(hash, (uint64_t)texture.width);
-			hash = CoherencyHashCombine64(hash, (uint64_t)texture.height);
-			hash = CoherencyHashCombine64(hash, texture.indexed ? 1ull : 0ull);
+			hash = nri_scene::HashCombine64(hash, texture.key);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)texture.width);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)texture.height);
+			hash = nri_scene::HashCombine64(hash, texture.indexed ? 1ull : 0ull);
 		}
 
 		return hash;
@@ -2276,7 +2272,6 @@ namespace
 {
 	constexpr uint32_t NRI_TRACE_SHADER_STATS_COUNTER_COUNT = NRIRenderer::TraceShaderStatCount;
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
-	constexpr uint32_t NRI_RUNTIME_LIGHT_TILE_SIZE = 64;
 	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT = 26;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
 	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_DIRECT = 28;
@@ -2355,38 +2350,8 @@ namespace
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_RUNTIME_LINK = 3;
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION = 4;
 	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY = 5;
-	constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
-	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
-	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
-	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
-	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
-	constexpr uint32_t NRI_PRESENT_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_INFO_AVAILABLE = 0x1u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_HDR_SUPPORTED = 0x2u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE = 0x4u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_OFFSCREEN_HDR_TARGET = 0x8u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_AUTO_EXPOSURE = 0x10u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_EXPOSURE_TEXTURE_VALID = 0x20u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_INPUT_PRE_EXPOSED = 0x40u;
-	constexpr uint32_t NRI_TEMPORAL_FLAG_AUTO_EXPOSURE = 0x1000u;
-	constexpr uint32_t NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID = 0x2000u;
-	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
-	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
-	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
-	constexpr uint32_t NRI_FLAG_FAST_EMISSIVE_SHADOW = 0x100u;
-	constexpr uint32_t NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS = 0x200u;
-	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW = 0x400u;
-	constexpr uint32_t NRI_FLAG_TRACE_SHADER_STATS = 0x800u;
-	constexpr uint32_t NRI_JITTER_PHASE_SHIFT = 16u;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
-	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8;
 	constexpr float NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS = 0.5f;
-	constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
-
-	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
-	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
-	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
-	constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
 	constexpr uint32_t NRI_SECTOR_LIGHTING_FLAG_ENABLED = 0x1u;
 
 
@@ -3037,50 +3002,9 @@ namespace
 		uint32_t reserved0 = 0;
 	};
 
-	template<typename T>
-	static T NRIFlags(T a, T b)
-	{
-		return (T)((uint32_t)a | (uint32_t)b);
-	}
-
 	static nri::StageBits NRIComputeStage()
 	{
 		return nri::StageBits::COMPUTE_SHADER;
-	}
-
-	static nri::AccessStage NRIComputeShaderResourceAccess()
-	{
-		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
-	}
-
-	static nri::AccessStage NRICopySourceAccess()
-	{
-		return { nri::AccessBits::COPY_SOURCE, nri::StageBits::COPY };
-	}
-
-	static nri::AccessStage NRICopyDestinationAccess()
-	{
-		return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
-	}
-
-	static nri::AccessStage NRIAccelerationStructureBuildInputAccess()
-	{
-		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::ALL_SHADERS };
-	}
-
-	static nri::AccessStage NRIAccelerationStructureWriteAccess()
-	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_WRITE, nri::StageBits::ACCELERATION_STRUCTURE };
-	}
-
-	static nri::AccessStage NRIAccelerationStructureScratchAccess()
-	{
-		return { nri::AccessBits::SCRATCH_BUFFER, nri::StageBits::ACCELERATION_STRUCTURE };
-	}
-
-	static nri::AccessStage NRIAccelerationStructureReadAccess()
-	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
 	}
 
 	static const char* GetNrdHitDistanceReconstructionModeName(uint32_t mode)
@@ -3256,11 +3180,6 @@ namespace
 	}
 
 
-	static nri::AccessStage NRIComputeAccelerationStructureReadAccess()
-	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::COMPUTE_SHADER };
-	}
-
 	static uint32_t GetDispatchSize(uint32_t value)
 	{
 		return (value + 7u) / 8u;
@@ -3269,19 +3188,19 @@ namespace
 	static uint64_t HashPrimitiveRewriteProvenancePayload(const std::vector<nri_scene::SurfaceProvenance>& provenanceList)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, (uint64_t)provenanceList.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)provenanceList.size());
 		for (const nri_scene::SurfaceProvenance& provenance : provenanceList)
 		{
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.drawListType);
-			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.cstat);
-			hash = CoherencyHashCombine64(hash, (uint64_t)provenance.materialFlags);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.drawListType);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.cstat);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.materialFlags);
 		}
 		return hash != 0 ? hash : 1;
 	}
@@ -3289,16 +3208,16 @@ namespace
 	static uint64_t HashPrimitiveRewriteVisibilityIdentity(const nri_scene::PTMapWorld& mapWorld)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = CoherencyHashCombine64(hash, mapWorld.valid ? 1ull : 0ull);
-		hash = CoherencyHashCombine64(hash, mapWorld.buildSerial);
-		hash = CoherencyHashCombine64(hash, (uint64_t)mapWorld.chunks.size());
-		hash = CoherencyHashCombine64(hash, (uint64_t)mapWorld.stats.chunkCount);
+		hash = nri_scene::HashCombine64(hash, mapWorld.valid ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, mapWorld.buildSerial);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)mapWorld.chunks.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)mapWorld.stats.chunkCount);
 		for (const nri_scene::PTMapChunk& chunk : mapWorld.chunks)
 		{
-			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.chunkIndex);
-			hash = CoherencyHashCombine64(hash, (uint64_t)(uint32_t)(chunk.sectorIndex + 1));
-			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.firstSurface);
-			hash = CoherencyHashCombine64(hash, (uint64_t)chunk.surfaceCount);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)chunk.chunkIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(chunk.sectorIndex + 1));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)chunk.firstSurface);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)chunk.surfaceCount);
 		}
 		return hash != 0 ? hash : 1;
 	}
@@ -4050,83 +3969,6 @@ namespace
 		return true;
 	}
 
-	static float GetUpscalerRenderScale(nri::UpscalerMode mode)
-	{
-		switch (mode)
-		{
-		default:
-		case nri::UpscalerMode::NATIVE: return 1.0f;
-		case nri::UpscalerMode::ULTRA_QUALITY: return 1.0f / 1.3f;
-		case nri::UpscalerMode::QUALITY: return 1.0f / 1.5f;
-		case nri::UpscalerMode::BALANCED: return 1.0f / 1.7f;
-		case nri::UpscalerMode::PERFORMANCE: return 0.5f;
-		case nri::UpscalerMode::ULTRA_PERFORMANCE: return 1.0f / 3.0f;
-		}
-	}
-
-	static uint32_t GetUpscalerJitterPhaseCount(nri::UpscalerMode mode)
-	{
-		switch (mode)
-		{
-		case nri::UpscalerMode::NATIVE: return 8u;
-		case nri::UpscalerMode::ULTRA_QUALITY: return 14u;
-		case nri::UpscalerMode::QUALITY: return 18u;
-		case nri::UpscalerMode::BALANCED: return 23u;
-		case nri::UpscalerMode::PERFORMANCE: return 32u;
-		case nri::UpscalerMode::ULTRA_PERFORMANCE: return 72u;
-		default: return 8u;
-		}
-	}
-
-	static nri::UpscalerMode ResolveUpscalerModeForMain(NRIMainUpscalerKind kind, nri::UpscalerMode requestedMode)
-	{
-		switch (kind)
-		{
-		case NRIMainUpscalerKind::DLRR:
-			return requestedMode;
-		case NRIMainUpscalerKind::DLSR:
-			return requestedMode;
-		default:
-			return requestedMode;
-		}
-	}
-
-	static float ResolveRenderScaleForMain(NRIMainUpscalerKind kind, nri::UpscalerMode requestedMode, float manualRenderScale)
-	{
-		switch (kind)
-		{
-		case NRIMainUpscalerKind::DLSR:
-			return GetUpscalerRenderScale(requestedMode);
-		case NRIMainUpscalerKind::DLRR:
-			return GetUpscalerRenderScale(requestedMode);
-		default:
-			return manualRenderScale;
-		}
-	}
-
-	static const char* GetRenderResolutionPolicyName(NRIMainUpscalerKind kind)
-	{
-		switch (kind)
-		{
-		case NRIMainUpscalerKind::DLSR: return "sr-mode-scale";
-		case NRIMainUpscalerKind::DLRR: return "rr-mode-scale";
-		default: return "manual-scale";
-		}
-	}
-
-	static const char* GetUpscalerModeName(nri::UpscalerMode mode)
-	{
-		switch (mode)
-		{
-		case nri::UpscalerMode::ULTRA_QUALITY: return "ultra_quality";
-		case nri::UpscalerMode::QUALITY: return "quality";
-		case nri::UpscalerMode::BALANCED: return "balanced";
-		case nri::UpscalerMode::PERFORMANCE: return "performance";
-		case nri::UpscalerMode::ULTRA_PERFORMANCE: return "ultra_performance";
-		default: return "native";
-		}
-	}
-
 	static const char* GetUpscalerFamilyName(NRIMainUpscalerKind kind, bool runAppTaa)
 	{
 		switch (kind)
@@ -4173,46 +4015,6 @@ namespace
 		constants.NightVisionPackedControls = PackNightVisionControls(
 			(float)nri_ptnightvisioncontrast,
 			(float)nri_ptnightvisionsaturation);
-	}
-
-	static bool ShouldUseTemporalJitter(NRIMainUpscalerKind kind)
-	{
-		return NRIShouldRunAppTaa(kind) || kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR;
-	}
-
-	static const char* GetTemporalJitterModeName(NRIMainUpscalerKind kind, bool guiCaptureActive)
-	{
-		if (guiCaptureActive)
-		{
-			return "off-gui-capture";
-		}
-
-		if (kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR)
-		{
-			return "upscaler";
-		}
-
-		return NRIShouldRunAppTaa(kind) ? "taa" : "off";
-	}
-
-	static uint32_t GetTemporalJitterPhaseCount(NRIMainUpscalerKind kind, nri::UpscalerMode mode, bool guiCaptureActive)
-	{
-		if (guiCaptureActive)
-		{
-			return 0u;
-		}
-
-		if (kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR)
-		{
-			return GetUpscalerJitterPhaseCount(mode);
-		}
-
-		return NRI_TAA_JITTER_PHASE_COUNT;
-	}
-
-	static uint32_t PackTemporalJitterPhaseCount(uint32_t jitterPhaseCount)
-	{
-		return (std::min(jitterPhaseCount, 255u) & 0xffu) << NRI_JITTER_PHASE_SHIFT;
 	}
 
 	static float GetHaltonSample(uint32_t index, uint32_t base)
@@ -4296,11 +4098,6 @@ namespace
 			hash *= 1099511628211ull;
 		}
 		return hash;
-	}
-
-	static uint64_t HashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
 	}
 
 	static uint32_t FloatBits(float value)
@@ -7153,12 +6950,12 @@ void NRIRenderer::SetGuiCaptureState(bool active)
 	if (nri_ptscenestats)
 	{
 		const NRIMainUpscalerKind resolvedMain = ResolveMainUpscalerKind(false);
-		const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMain, GetSelectedUpscalerMode());
+		const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMain, GetSelectedUpscalerMode());
 		Printf("NRI PT gui capture: frame=%u active=%s jitter=%s phases=%u\n",
 			mFrameIndex,
 			mGuiCaptureActive ? "yes" : "no",
-			GetTemporalJitterModeName(resolvedMain, mGuiCaptureActive),
-			GetTemporalJitterPhaseCount(resolvedMain, resolvedUpscalerMode, mGuiCaptureActive));
+			NRIGetTemporalJitterModeName(resolvedMain, mGuiCaptureActive),
+			NRIGetTemporalJitterPhaseCount(resolvedMain, resolvedUpscalerMode, mGuiCaptureActive));
 	}
 }
 
@@ -7286,10 +7083,10 @@ void NRIRenderer::PrintStatus()
 	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
 	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
-	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMain, requestedUpscalerMode);
+	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMain, requestedUpscalerMode);
 	const bool runAppTaa = NRIShouldRunAppTaa(resolvedMain);
 	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
-	const float resolvedRenderScale = ResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
+	const float resolvedRenderScale = NRIResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	const NRITraceSettings traceSettings = BuildNRITraceSettingsFromCVars();
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
@@ -7483,8 +7280,8 @@ void NRIRenderer::PrintStatus()
 		NRIGetMainUpscalerName(resolvedMain),
 		NRIGetPostSharpenName(requestedPost),
 		NRIGetPostSharpenName(resolvedPost),
-		GetUpscalerModeName(requestedUpscalerMode),
-		GetUpscalerModeName(resolvedUpscalerMode),
+		NRIGetUpscalerModeName(requestedUpscalerMode),
+		NRIGetUpscalerModeName(resolvedUpscalerMode),
 		requestedRenderScale,
 		resolvedRenderScale,
 		(float)nri_sharpness);
@@ -7636,13 +7433,13 @@ void NRIRenderer::PrintStatus()
 			frameGenAudit.statusReason);
 	}
 	Printf("NRI PT resolution policy: policy=%s render=%ux%u output=%ux%u jitter=%s phases=%u\n",
-		GetRenderResolutionPolicyName(resolvedMain),
+		NRIGetRenderResolutionPolicyName(resolvedMain),
 		mRenderWidth,
 		mRenderHeight,
 		mOutputWidth,
 		mOutputHeight,
-		GetTemporalJitterModeName(resolvedMain, mGuiCaptureActive),
-		GetTemporalJitterPhaseCount(resolvedMain, resolvedUpscalerMode, mGuiCaptureActive));
+		NRIGetTemporalJitterModeName(resolvedMain, mGuiCaptureActive),
+		NRIGetTemporalJitterPhaseCount(resolvedMain, resolvedUpscalerMode, mGuiCaptureActive));
 	Printf("NRI PT output shell: family=%s sr_input=%ux%u rr_input=%ux%u guides=%ux%u vendor=%ux%u post_output=%ux%u post=%s active=%s last_reset_reason=%s\n",
 		GetUpscalerFamilyName(resolvedMain, runAppTaa),
 		srInput.width,
@@ -8017,10 +7814,10 @@ void NRIRenderer::PrintSwapChainRenderConfig() const
 	const NRIPostSharpenKind requestedPost = GetSelectedPostSharpenKind();
 	const NRIPostSharpenKind resolvedPost = GetResolvedPostSharpenKindForStatus();
 	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
-	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMain, requestedUpscalerMode);
+	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMain, requestedUpscalerMode);
 	const bool runAppTaa = NRIShouldRunAppTaa(resolvedMain);
 	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
-	const float resolvedRenderScale = ResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
+	const float resolvedRenderScale = NRIResolveRenderScaleForMain(resolvedMain, requestedUpscalerMode, requestedRenderScale);
 	const bool beautyDenoiseActive = !!nri_denoise && resolvedMain != NRIMainUpscalerKind::DLRR;
 	NRIPTOutputPolicy outputPolicy = {};
 	if (mFrameBuffer != nullptr)
@@ -8037,8 +7834,8 @@ void NRIRenderer::PrintSwapChainRenderConfig() const
 	Printf("NRI swapchain render config: main_upscaler=%s->%s mode=%s->%s post_sharpen=%s->%s support=NIS:%s DLSS-SR:%s DLRR:%s app_taa=requested:%s active:%s denoise=requested:%s beauty_active:%s nrd=%s render_scale=%.3f->%.3f jitter=%s phases=%u output=%s->%s hdr_swapchain=%s display_hdr=%s tonemap=%s sharpness=%.3f\n",
 		NRIGetMainUpscalerName(requestedMain),
 		NRIGetMainUpscalerName(resolvedMain),
-		GetUpscalerModeName(requestedUpscalerMode),
-		GetUpscalerModeName(resolvedUpscalerMode),
+		NRIGetUpscalerModeName(requestedUpscalerMode),
+		NRIGetUpscalerModeName(resolvedUpscalerMode),
 		NRIGetPostSharpenName(requestedPost),
 		NRIGetPostSharpenName(resolvedPost),
 		nisSupported ? "yes" : "no",
@@ -8051,8 +7848,8 @@ void NRIRenderer::PrintSwapChainRenderConfig() const
 		GetNrdDenoiserModeName(GetSelectedNrdDenoiserMode()),
 		requestedRenderScale,
 		resolvedRenderScale,
-		GetTemporalJitterModeName(resolvedMain, mGuiCaptureActive),
-		GetTemporalJitterPhaseCount(resolvedMain, resolvedUpscalerMode, mGuiCaptureActive),
+		NRIGetTemporalJitterModeName(resolvedMain, mGuiCaptureActive),
+		NRIGetTemporalJitterPhaseCount(resolvedMain, resolvedUpscalerMode, mGuiCaptureActive),
 		GetNRIPTOutputModeName(outputPolicy.requestedMode),
 		GetNRIPTOutputModeName(outputPolicy.resolvedMode),
 		outputPolicy.hdrSwapChainActive ? "yes" : "no",
@@ -8130,14 +7927,14 @@ void NRIRenderer::EmitSelfTestSummary(uint32_t traceFrameIndex, int drawmode, bo
 	const bool finalTextureValid = final.texture != nullptr && final.shaderView != nullptr;
 	const bool worldActive = gamestate == GS_LEVEL && currentLevel != nullptr;
 	const bool gameplayFrame = worldActive && drawmode == DM_MAINVIEW && !portal;
-	const uint64_t sceneSignature = HashCombine64(
-		HashCombine64(
-			HashCombine64(mVertexBuffer.payloadHash, mIndexBuffer.payloadHash),
+	const uint64_t sceneSignature = nri_scene::HashCombine64(
+		nri_scene::HashCombine64(
+			nri_scene::HashCombine64(mVertexBuffer.payloadHash, mIndexBuffer.payloadHash),
 			mPrimitiveBuffer.payloadHash),
 		mSceneInstanceBuffer.payloadHash);
 	const uint64_t materialSignature = mMaterialBuffer.payloadHash;
 	const uint64_t instanceSignature = mSceneInstanceBuffer.payloadHash;
-	const uint64_t skySignature = HashCombine64(mSkyEnvironment.ActiveKey(), (uint64_t)mSkyEnvironment.ActiveState().faceMask);
+	const uint64_t skySignature = nri_scene::HashCombine64(mSkyEnvironment.ActiveKey(), (uint64_t)mSkyEnvironment.ActiveState().faceMask);
 	const NRIBufferResource& vertexBuffer = mVertexBuffer;
 	const NRIBufferResource& indexBuffer = mIndexBuffer;
 	const NRIBufferResource& primitiveBuffer = mPrimitiveBuffer;
@@ -8638,11 +8435,11 @@ NRIPersistentVoxelAdmissionServices NRIRenderer::BuildPersistentVoxelAdmissionSe
 		}
 		nri::BufferBarrierDesc inputBarriers[2] = {};
 		inputBarriers[0].buffer = vertexBuffer.buffer;
-		inputBarriers[0].before = NRIAccelerationStructureBuildInputAccess();
-		inputBarriers[0].after = NRIComputeShaderResourceAccess();
+		inputBarriers[0].before = NRIResourceAccelerationStructureBuildInputAccess();
+		inputBarriers[0].after = NRIResourceComputeShaderResourceAccess();
 		inputBarriers[1].buffer = indexBuffer.buffer;
-		inputBarriers[1].before = NRIAccelerationStructureBuildInputAccess();
-		inputBarriers[1].after = NRIComputeShaderResourceAccess();
+		inputBarriers[1].before = NRIResourceAccelerationStructureBuildInputAccess();
+		inputBarriers[1].after = NRIResourceComputeShaderResourceAccess();
 		nri::BarrierDesc inputBarrierDesc = {};
 		inputBarrierDesc.buffers = inputBarriers;
 		inputBarrierDesc.bufferNum = 2;
@@ -8685,11 +8482,11 @@ NRIPersistentVoxelAccelerationServices NRIRenderer::BuildPersistentVoxelAccelera
 		}
 		nri::BufferBarrierDesc inputBarriers[2] = {};
 		inputBarriers[0].buffer = vertexBuffer.buffer;
-		inputBarriers[0].before = NRIAccelerationStructureBuildInputAccess();
-		inputBarriers[0].after = NRIComputeShaderResourceAccess();
+		inputBarriers[0].before = NRIResourceAccelerationStructureBuildInputAccess();
+		inputBarriers[0].after = NRIResourceComputeShaderResourceAccess();
 		inputBarriers[1].buffer = indexBuffer.buffer;
-		inputBarriers[1].before = NRIAccelerationStructureBuildInputAccess();
-		inputBarriers[1].after = NRIComputeShaderResourceAccess();
+		inputBarriers[1].before = NRIResourceAccelerationStructureBuildInputAccess();
+		inputBarriers[1].after = NRIResourceComputeShaderResourceAccess();
 		nri::BarrierDesc inputBarrierDesc = {};
 		inputBarrierDesc.buffers = inputBarriers;
 		inputBarrierDesc.bufferNum = 2;
@@ -9013,7 +8810,7 @@ bool NRIRenderer::UploadPersistentVoxelArenaMaterialBuffers(const std::vector<nr
 			sizeBytes,
 			sizeof(nri_scene::MaterialData),
 			nri::BufferUsageBits::SHADER_RESOURCE,
-			NRIComputeShaderResourceAccess());
+			NRIResourceComputeShaderResourceAccess());
 	};
 	services.stageMaterialRanges = [](
 		void* user,
@@ -11014,15 +10811,15 @@ void NRIRenderer::TraceActorSpriteMaterialAssignments(const nri_scene::SceneView
 		const auto& metadata = outMaterials.lightMetadata[materialIndex];
 		actorSurfaceCount++;
 		actorIndices.insert(surface.provenance.actorIndex);
-		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)surface.provenance.actorIndex);
-		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)(uint32_t)surface.provenance.sourceType);
-		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)materialIndex);
-		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)metadata.textureId);
-		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)material.textureIndex);
-		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)material.paletteIndex);
-		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)material.emissiveMode);
-		actorHash = CoherencyHashCombine64(actorHash, (uint64_t)material.emissiveTextureIndex);
-		actorHash = CoherencyHashCombine64(actorHash, metadata.materialKey);
+		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)surface.provenance.actorIndex);
+		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)(uint32_t)surface.provenance.sourceType);
+		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)materialIndex);
+		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)metadata.textureId);
+		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)material.textureIndex);
+		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)material.paletteIndex);
+		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)material.emissiveMode);
+		actorHash = nri_scene::HashCombine64(actorHash, (uint64_t)material.emissiveTextureIndex);
+		actorHash = nri_scene::HashCombine64(actorHash, metadata.materialKey);
 
 		if (ShouldTraceActorSpriteVerbose() && printed < 32)
 		{
@@ -11203,10 +11000,10 @@ void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
 		mCurrentTanHalfFovY = tanHalfFovX * ((float)mRenderHeight / std::max(1.0f, (float)mRenderWidth));
 	}
 	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
-	if (!nri_ptbootstrap && !mGuiCaptureActive && ShouldUseTemporalJitter(resolvedMainUpscaler))
+	if (!nri_ptbootstrap && !mGuiCaptureActive && NRIShouldUseTemporalJitter(resolvedMainUpscaler))
 	{
-		const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMainUpscaler, GetSelectedUpscalerMode());
-		const uint32_t jitterPhaseCount = GetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, mGuiCaptureActive);
+		const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMainUpscaler, GetSelectedUpscalerMode());
+		const uint32_t jitterPhaseCount = NRIGetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, mGuiCaptureActive);
 		ComputeTemporalJitter(mFrameIndex, jitterPhaseCount, mCurrentJitter);
 	}
 	else

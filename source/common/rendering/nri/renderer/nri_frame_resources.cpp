@@ -14,137 +14,6 @@
 
 EXTERN_CVAR(Bool, nri_ptscenestats)
 EXTERN_CVAR(Float, nri_renderscale)
-EXTERN_CVAR(Bool, nri_pttaa)
-
-namespace
-{
-	static float GetUpscalerRenderScale(nri::UpscalerMode mode)
-	{
-		switch (mode)
-		{
-		case nri::UpscalerMode::ULTRA_QUALITY: return 1.0f / 1.3f;
-		case nri::UpscalerMode::QUALITY: return 1.0f / 1.5f;
-		case nri::UpscalerMode::BALANCED: return 1.0f / 1.7f;
-		case nri::UpscalerMode::PERFORMANCE: return 0.5f;
-		case nri::UpscalerMode::ULTRA_PERFORMANCE: return 1.0f / 3.0f;
-		default: return 1.0f;
-		}
-	}
-
-	static uint32_t GetUpscalerJitterPhaseCount(nri::UpscalerMode mode)
-	{
-		switch (mode)
-		{
-		case nri::UpscalerMode::NATIVE: return 8u;
-		case nri::UpscalerMode::ULTRA_QUALITY: return 14u;
-		case nri::UpscalerMode::QUALITY: return 18u;
-		case nri::UpscalerMode::BALANCED: return 23u;
-		case nri::UpscalerMode::PERFORMANCE: return 32u;
-		case nri::UpscalerMode::ULTRA_PERFORMANCE: return 72u;
-		default: return 8u;
-		}
-	}
-
-	static nri::UpscalerMode ResolveUpscalerModeForMain(NRIMainUpscalerKind, nri::UpscalerMode requestedMode)
-	{
-		return requestedMode;
-	}
-
-	static float ResolveRenderScaleForMain(NRIMainUpscalerKind kind, nri::UpscalerMode requestedMode, float manualRenderScale)
-	{
-		switch (kind)
-		{
-		case NRIMainUpscalerKind::DLSR:
-		case NRIMainUpscalerKind::DLRR:
-			return GetUpscalerRenderScale(requestedMode);
-		default:
-			return manualRenderScale;
-		}
-	}
-
-	static const char* GetRenderResolutionPolicyName(NRIMainUpscalerKind kind)
-	{
-		switch (kind)
-		{
-		case NRIMainUpscalerKind::DLSR: return "sr-mode-scale";
-		case NRIMainUpscalerKind::DLRR: return "rr-mode-scale";
-		default: return "manual-scale";
-		}
-	}
-
-	static const char* GetMainUpscalerName(NRIMainUpscalerKind kind)
-	{
-		switch (kind)
-		{
-		case NRIMainUpscalerKind::DLSR: return "DLSS-SR";
-		case NRIMainUpscalerKind::DLRR: return "DLRR";
-		default: return "off";
-		}
-	}
-
-	static const char* GetUpscalerModeName(nri::UpscalerMode mode)
-	{
-		switch (mode)
-		{
-		case nri::UpscalerMode::ULTRA_QUALITY: return "ultra_quality";
-		case nri::UpscalerMode::QUALITY: return "quality";
-		case nri::UpscalerMode::BALANCED: return "balanced";
-		case nri::UpscalerMode::PERFORMANCE: return "performance";
-		case nri::UpscalerMode::ULTRA_PERFORMANCE: return "ultra_performance";
-		default: return "native";
-		}
-	}
-
-	static bool IsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
-	{
-		return kind == NRIMainUpscalerKind::Off;
-	}
-
-	static bool ShouldRunAppTaa(NRIMainUpscalerKind kind)
-	{
-		return IsAppTaaEligibleUpscaler(kind) && !!nri_pttaa;
-	}
-
-	static const char* GetTemporalJitterModeName(NRIMainUpscalerKind kind, bool guiCaptureActive)
-	{
-		if (guiCaptureActive)
-		{
-			return "off-gui-capture";
-		}
-
-		if (kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR)
-		{
-			return "upscaler";
-		}
-
-		return ShouldRunAppTaa(kind) ? "taa" : "off";
-	}
-
-	static uint32_t GetTemporalJitterPhaseCount(NRIMainUpscalerKind kind, nri::UpscalerMode mode, bool guiCaptureActive)
-	{
-		if (guiCaptureActive)
-		{
-			return 0u;
-		}
-
-		if (kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR)
-		{
-			return GetUpscalerJitterPhaseCount(mode);
-		}
-
-		return 8u;
-	}
-}
-
-
-namespace
-{
-	template<typename T>
-	static T NRIFlags(T a, T b)
-	{
-		return (T)((uint32_t)a | (uint32_t)b);
-	}
-}
 
 bool NRIFrameResources::CreateFrameTexture(NRIRenderer& renderer, uint32_t slot, uint32_t width, uint32_t height, nri::Format format)
 {
@@ -158,7 +27,7 @@ bool NRIFrameResources::CreateFrameTexture(NRIRenderer& renderer, uint32_t slot,
 		width,
 		height,
 		format,
-		NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE));
+		NRIResourceFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE));
 }
 
 nri::Format NRIFrameResources::ResolveFinalSceneFormat(const NRIRenderer& renderer)
@@ -216,9 +85,9 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 
 	const NRIMainUpscalerKind mainUpscalerKind = ResolveMainUpscalerKind(false);
 	const nri::UpscalerMode requestedUpscalerMode = GetSelectedUpscalerMode();
-	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(mainUpscalerKind, requestedUpscalerMode);
+	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(mainUpscalerKind, requestedUpscalerMode);
 	const float requestedRenderScale = std::max(0.33f, std::min((float)nri_renderscale, 1.0f));
-	const float renderScale = ResolveRenderScaleForMain(mainUpscalerKind, requestedUpscalerMode, requestedRenderScale);
+	const float renderScale = NRIResolveRenderScaleForMain(mainUpscalerKind, requestedUpscalerMode, requestedRenderScale);
 	const NRIFrameGenerationPresentContract& presentContract = mFrameBuffer->mFrameGeneration.GetPresentContract();
 
 	const uint32_t renderWidth = std::max(1u, (uint32_t)std::lround((double)outputWidth * renderScale));
@@ -271,10 +140,10 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 	if (nri_ptscenestats)
 	{
 		Printf("NRI PT frame resources: main=%s policy=%s requested_mode=%s resolved_mode=%s requested_render_scale=%.3f resolved_render_scale=%.3f render=%ux%u output=%ux%u final=%s contract=%s active=%s jitter=%s phases=%u\n",
-			GetMainUpscalerName(mainUpscalerKind),
-			GetRenderResolutionPolicyName(mainUpscalerKind),
-			GetUpscalerModeName(requestedUpscalerMode),
-			GetUpscalerModeName(resolvedUpscalerMode),
+			NRIGetMainUpscalerName(mainUpscalerKind),
+			NRIGetRenderResolutionPolicyName(mainUpscalerKind),
+			NRIGetUpscalerModeName(requestedUpscalerMode),
+			NRIGetUpscalerModeName(resolvedUpscalerMode),
 			requestedRenderScale,
 			renderScale,
 			renderWidth,
@@ -284,8 +153,8 @@ bool NRIRenderer::EnsureFrameResources(uint32_t outputWidth, uint32_t outputHeig
 			NRIFrameGenerationContext::GetNriFormatName(finalFormat),
 			NRIFrameGenerationContext::GetNriFormatName(presentContract.resolvedTextureFormat),
 			NRIFrameGenerationContext::GetNriFormatName(activeTargetFormat),
-			GetTemporalJitterModeName(mainUpscalerKind, mGuiCaptureActive),
-			GetTemporalJitterPhaseCount(mainUpscalerKind, resolvedUpscalerMode, mGuiCaptureActive));
+			NRIGetTemporalJitterModeName(mainUpscalerKind, mGuiCaptureActive),
+			NRIGetTemporalJitterPhaseCount(mainUpscalerKind, resolvedUpscalerMode, mGuiCaptureActive));
 	}
 
 	const nri::Format colorFormat = nri::Format::RGBA16_SFLOAT;
@@ -346,5 +215,3 @@ void NRIRenderer::DestroyFrameTextures()
 {
 	NRIFrameResources::DestroyFrameTextures(*this);
 }
-
-

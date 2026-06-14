@@ -1,5 +1,6 @@
 #include "nri_descriptor_sets.h"
 
+#include "../scene/nri_hash.h"
 #include "nri_renderer.h"
 #include "nri_shader_contracts.h"
 #include "../system/nri_renderdevice.h"
@@ -17,18 +18,13 @@ EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {
-	static uint64_t HashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
-	}
-
 	static uint64_t HashDescriptorList(const nri::Descriptor* const* descriptors, size_t count)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, (uint64_t)count);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)count);
 		for (size_t i = 0; i < count; ++i)
 		{
-			hash = HashCombine64(hash, (uint64_t)(uintptr_t)descriptors[i]);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uintptr_t)descriptors[i]);
 		}
 		return hash;
 	}
@@ -379,5 +375,4 @@ bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri:
 {
 	return NRIDescriptorSetManager::UpdateOutputSet(*this, set, descriptors);
 }
-
 

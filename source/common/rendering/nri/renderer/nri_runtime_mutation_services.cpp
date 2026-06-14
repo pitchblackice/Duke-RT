@@ -50,25 +50,6 @@ namespace
         std::chrono::steady_clock::time_point mStart = {};
     };
 
-    static nri::AccessStage NRIComputeShaderResourceAccess()
-    {
-        return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
-    }
-
-    static nri::AccessStage NRICopySourceAccess()
-    {
-        return { nri::AccessBits::COPY_SOURCE, nri::StageBits::COPY };
-    }
-
-    static nri::AccessStage NRICopyDestinationAccess()
-    {
-        return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
-    }
-
-    static nri::AccessStage NRIAccelerationStructureBuildInputAccess()
-    {
-        return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::ALL_SHADERS };
-    }
 }
 
 
@@ -110,7 +91,7 @@ bool NRIRenderer::StageRuntimeMutationResidentGeometryUploadRanges(const std::ve
 		&mStaticVertexBuffer,
 		reinterpret_cast<const uint8_t*>(mStaticMapScene.geometry.vertices.data()),
 		(uint64_t)mStaticMapScene.geometry.vertices.size() * sizeof(nri_scene::SceneVertex),
-		NRIAccelerationStructureBuildInputAccess(),
+		NRIResourceAccelerationStructureBuildInputAccess(),
 		&mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs,
 		&mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexStageMs };
 	states[ResidentUploadKind_Index] = {
@@ -118,7 +99,7 @@ bool NRIRenderer::StageRuntimeMutationResidentGeometryUploadRanges(const std::ve
 		&mStaticIndexBuffer,
 		reinterpret_cast<const uint8_t*>(mStaticMapScene.geometry.indices.data()),
 		(uint64_t)mStaticMapScene.geometry.indices.size() * sizeof(uint32_t),
-		NRIAccelerationStructureBuildInputAccess(),
+		NRIResourceAccelerationStructureBuildInputAccess(),
 		&mLastPerfShellTraceStats.runtimeMutationResidentApplyVertexIndexCopyMs,
 		&mLastPerfShellTraceStats.runtimeMutationResidentApplyIndexStageMs };
 	states[ResidentUploadKind_Primitive] = {
@@ -126,7 +107,7 @@ bool NRIRenderer::StageRuntimeMutationResidentGeometryUploadRanges(const std::ve
 		&mStaticPrimitiveBuffer,
 		reinterpret_cast<const uint8_t*>(mStaticMapScene.geometry.primitives.data()),
 		(uint64_t)mStaticMapScene.geometry.primitives.size() * sizeof(nri_scene::PrimitiveData),
-		NRIComputeShaderResourceAccess(),
+		NRIResourceComputeShaderResourceAccess(),
 		&mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveRewriteMs,
 		&mLastPerfShellTraceStats.runtimeMutationResidentApplyPrimitiveStageMs };
 
@@ -256,7 +237,7 @@ bool NRIRenderer::StageRuntimeMutationResidentGeometryUploadRanges(const std::ve
 			nri::BufferBarrierDesc sourceBarrier = {};
 			sourceBarrier.buffer = state.scratch->buffer.buffer;
 			sourceBarrier.before = {};
-			sourceBarrier.after = NRICopySourceAccess();
+			sourceBarrier.after = NRIResourceCopySourceAccess();
 			sourceBarriers.push_back(sourceBarrier);
 			state.scratch->copySourceActive = true;
 		}
@@ -264,12 +245,12 @@ bool NRIRenderer::StageRuntimeMutationResidentGeometryUploadRanges(const std::ve
 		nri::BufferBarrierDesc beforeCopyBarrier = {};
 		beforeCopyBarrier.buffer = state.resource->buffer;
 		beforeCopyBarrier.before = state.after;
-		beforeCopyBarrier.after = NRICopyDestinationAccess();
+		beforeCopyBarrier.after = NRIResourceCopyDestinationAccess();
 		beforeCopyBarriers.push_back(beforeCopyBarrier);
 
 		nri::BufferBarrierDesc afterCopyBarrier = {};
 		afterCopyBarrier.buffer = state.resource->buffer;
-		afterCopyBarrier.before = NRICopyDestinationAccess();
+		afterCopyBarrier.before = NRIResourceCopyDestinationAccess();
 		afterCopyBarrier.after = state.after;
 		afterCopyBarriers.push_back(afterCopyBarrier);
 	}
@@ -453,5 +434,4 @@ NRIRuntimeMutationResidentSceneRefreshServices NRIRenderer::BuildRuntimeMutation
 	};
 	return services;
 }
-
 

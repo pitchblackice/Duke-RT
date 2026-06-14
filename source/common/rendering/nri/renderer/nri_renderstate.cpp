@@ -32,12 +32,6 @@ namespace
 			a.height == b.height;
 	}
 
-	template<typename T>
-	static T NRIFlags(T a, T b)
-	{
-		return (T)((uint32_t)a | (uint32_t)b);
-	}
-
 	static uint32_t NextPowerOfTwo(uint32_t value)
 	{
 		if (value <= 1u)

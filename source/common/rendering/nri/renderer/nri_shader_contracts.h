@@ -13,6 +13,45 @@ constexpr uint32_t NRI_OUTPUT_DESCRIPTOR_NUM = 15;
 constexpr uint32_t NRI_TRACE_SHADER_STATS_DESCRIPTOR_NUM = 1;
 constexpr uint32_t NRI_SAMPLER_DESCRIPTOR_NUM = 4;
 
+constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
+constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
+constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
+constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
+constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
+constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
+constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
+constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
+constexpr uint32_t NRI_FLAG_FAST_EMISSIVE_SHADOW = 0x100u;
+constexpr uint32_t NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS = 0x200u;
+constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW = 0x400u;
+constexpr uint32_t NRI_FLAG_TRACE_SHADER_STATS = 0x800u;
+
+constexpr uint32_t NRI_PRESENT_FLAG_SPLIT_SHADOW_DENOISER = NRI_FLAG_SPLIT_SHADOW_DENOISER;
+constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_INFO_AVAILABLE = 0x1u;
+constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_HDR_SUPPORTED = 0x2u;
+constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE = 0x4u;
+constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_OFFSCREEN_HDR_TARGET = 0x8u;
+constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_AUTO_EXPOSURE = 0x10u;
+constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_EXPOSURE_TEXTURE_VALID = 0x20u;
+constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_INPUT_PRE_EXPOSED = 0x40u;
+
+constexpr uint32_t NRI_TEMPORAL_FLAG_AUTO_EXPOSURE = 0x1000u;
+constexpr uint32_t NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID = 0x2000u;
+constexpr uint32_t NRI_JITTER_PHASE_SHIFT = 16u;
+constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8u;
+
+constexpr uint32_t NRIPackTemporalJitterPhaseCount(uint32_t jitterPhaseCount)
+{
+	return ((jitterPhaseCount > 255u ? 255u : jitterPhaseCount) & 0xffu) << NRI_JITTER_PHASE_SHIFT;
+}
+
+constexpr uint32_t NRI_RUNTIME_LIGHT_TILE_SIZE = 64u;
+constexpr uint32_t NRI_PORTAL_FLAG_RUNTIME_BOUND = 0x1u;
+constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_NONE = 0u;
+constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_REFLECTIVE = 1u;
+constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER = 2u;
+constexpr uint32_t NRI_PORTAL_TRAVERSAL_CLASS_RUNTIME_BOUND = 3u;
+
 // Mirrors shaders/Include/TraceConstants.hlsli.
 struct NRITraceSceneConstants
 {

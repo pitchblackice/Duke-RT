@@ -20,10 +20,19 @@ enum class NRIPostSharpenKind : uint32_t
 void NRISyncLegacyUpscalerConfig(bool logMigration);
 const char* NRIGetMainUpscalerName(NRIMainUpscalerKind kind);
 const char* NRIGetPostSharpenName(NRIPostSharpenKind kind);
+const char* NRIGetRenderResolutionPolicyName(NRIMainUpscalerKind kind);
+const char* NRIGetUpscalerModeName(nri::UpscalerMode mode);
 nri::UpscalerType NRIToMainUpscalerType(NRIMainUpscalerKind kind);
 nri::UpscalerType NRIToPostSharpenType(NRIPostSharpenKind kind);
+float NRIGetUpscalerRenderScale(nri::UpscalerMode mode);
+uint32_t NRIGetUpscalerJitterPhaseCount(nri::UpscalerMode mode);
+nri::UpscalerMode NRIResolveUpscalerModeForMain(NRIMainUpscalerKind kind, nri::UpscalerMode requestedMode);
+float NRIResolveRenderScaleForMain(NRIMainUpscalerKind kind, nri::UpscalerMode requestedMode, float manualRenderScale);
 bool NRIIsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind);
 bool NRIShouldRunAppTaa(NRIMainUpscalerKind kind);
+bool NRIShouldUseTemporalJitter(NRIMainUpscalerKind kind);
+const char* NRIGetTemporalJitterModeName(NRIMainUpscalerKind kind, bool guiCaptureActive);
+uint32_t NRIGetTemporalJitterPhaseCount(NRIMainUpscalerKind kind, nri::UpscalerMode mode, bool guiCaptureActive);
 
 struct NRIUpscalerDispatchDesc
 {

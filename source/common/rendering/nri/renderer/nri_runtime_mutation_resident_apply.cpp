@@ -32,11 +32,6 @@ namespace
 
 namespace
 {
-	static nri::AccessStage NRIComputeShaderResourceAccess()
-	{
-		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
-	}
-
 	static bool ShouldTraceResidentGeometryOrderHash()
 	{
 		return (int)perf_looptraceframes > 0;
@@ -541,7 +536,7 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 						(uint64_t)oldMaterialOffset * sizeof(nri_scene::MaterialData),
 						clearedMaterials.data(),
 						(uint64_t)oldMaterialCount * sizeof(nri_scene::MaterialData),
-						NRIComputeShaderResourceAccess(),
+						NRIResourceComputeShaderResourceAccess(),
 						ResidentUploadKind_Material))
 				{
 					return false;

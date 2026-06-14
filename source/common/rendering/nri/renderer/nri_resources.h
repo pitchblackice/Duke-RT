@@ -65,5 +65,51 @@ struct NRIAccelerationStructureResource
 	nri::MemoryLocation memoryLocation = nri::MemoryLocation::DEVICE;
 };
 
+template<typename T>
+inline T NRIResourceFlags(T a, T b)
+{
+	return (T)((uint32_t)a | (uint32_t)b);
+}
+
+inline nri::AccessStage NRIResourceComputeShaderResourceAccess()
+{
+	return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
+}
+
+inline nri::AccessStage NRIResourceCopySourceAccess()
+{
+	return { nri::AccessBits::COPY_SOURCE, nri::StageBits::COPY };
+}
+
+inline nri::AccessStage NRIResourceCopyDestinationAccess()
+{
+	return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
+}
+
+inline nri::AccessStage NRIResourceAccelerationStructureBuildInputAccess()
+{
+	return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::ALL_SHADERS };
+}
+
+inline nri::AccessStage NRIResourceAccelerationStructureWriteAccess()
+{
+	return { nri::AccessBits::ACCELERATION_STRUCTURE_WRITE, nri::StageBits::ACCELERATION_STRUCTURE };
+}
+
+inline nri::AccessStage NRIResourceAccelerationStructureScratchAccess()
+{
+	return { nri::AccessBits::SCRATCH_BUFFER, nri::StageBits::ACCELERATION_STRUCTURE };
+}
+
+inline nri::AccessStage NRIResourceAccelerationStructureReadAccess()
+{
+	return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
+}
+
+inline nri::AccessStage NRIResourceComputeAccelerationStructureReadAccess()
+{
+	return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::COMPUTE_SHADER };
+}
+
 uint64_t GetNRIGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride);
 uint64_t GetNRISceneUploadGrownBufferSize(uint64_t currentCapacity, uint64_t requiredSize, uint32_t stride);

@@ -1,5 +1,6 @@
 #include "nri_renderer.h"
 
+#include "../scene/nri_hash.h"
 #include "../scene/nri_scene_math.h"
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
@@ -121,11 +122,6 @@ namespace
 		return hash;
 	}
 
-	static uint64_t HashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
-	}
-
 	static uint32_t FloatBits(float value)
 	{
 		uint32_t bits = 0;
@@ -135,7 +131,7 @@ namespace
 
 	static uint64_t HashSkyBrightness(uint64_t hash)
 	{
-		return HashCombine64(hash, (uint64_t)FloatBits(GetSkyBrightnessMultiplier()));
+		return nri_scene::HashCombine64(hash, (uint64_t)FloatBits(GetSkyBrightnessMultiplier()));
 	}
 
 	struct SkyFaceUpload
@@ -376,9 +372,9 @@ namespace
 			{ 0, false, false }  // -Z = north
 		};
 
-		uint64_t key = HashCombine64(1469598103934665603ull, (uint64_t)(uintptr_t)sceneView.sky.texture);
-		key = HashCombine64(key, (uint64_t)sceneView.sky.faceMask);
-		key = HashCombine64(key, sceneView.sky.flipTop ? 1ull : 0ull);
+		uint64_t key = nri_scene::HashCombine64(1469598103934665603ull, (uint64_t)(uintptr_t)sceneView.sky.texture);
+		key = nri_scene::HashCombine64(key, (uint64_t)sceneView.sky.faceMask);
+		key = nri_scene::HashCombine64(key, sceneView.sky.flipTop ? 1ull : 0ull);
 		for (uint32_t i = 0; i < 6; ++i)
 		{
 			if (!ProbeFace(TryGetSkyFace(skybox, mappings[i].sourceIndex), outProbe.faces[i]))
@@ -386,9 +382,9 @@ namespace
 				return false;
 			}
 
-			key = HashCombine64(key, (uint64_t)(uintptr_t)outProbe.faces[i].texture);
-			key = HashCombine64(key, outProbe.faces[i].contentId);
-			key = HashCombine64(key, ((uint64_t)outProbe.faces[i].width << 32) | outProbe.faces[i].height);
+			key = nri_scene::HashCombine64(key, (uint64_t)(uintptr_t)outProbe.faces[i].texture);
+			key = nri_scene::HashCombine64(key, outProbe.faces[i].contentId);
+			key = nri_scene::HashCombine64(key, ((uint64_t)outProbe.faces[i].width << 32) | outProbe.faces[i].height);
 		}
 		key = HashSkyBrightness(key);
 
@@ -482,10 +478,10 @@ namespace
 			return false;
 		}
 
-		uint64_t key = HashCombine64(1469598103934665603ull, 0x50414e4f534b5955ull);
-		key = HashCombine64(key, (uint64_t)(uintptr_t)sceneView.sky.texture);
-		key = HashCombine64(key, textureProbe.contentId);
-		key = HashCombine64(key, ((uint64_t)textureProbe.width << 32) | textureProbe.height);
+		uint64_t key = nri_scene::HashCombine64(1469598103934665603ull, 0x50414e4f534b5955ull);
+		key = nri_scene::HashCombine64(key, (uint64_t)(uintptr_t)sceneView.sky.texture);
+		key = nri_scene::HashCombine64(key, textureProbe.contentId);
+		key = nri_scene::HashCombine64(key, ((uint64_t)textureProbe.width << 32) | textureProbe.height);
 		key = HashSkyBrightness(key);
 		outProbe.texture = sceneView.sky.texture;
 		outProbe.width = textureProbe.width;

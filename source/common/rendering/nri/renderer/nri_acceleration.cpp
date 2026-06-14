@@ -59,36 +59,6 @@ namespace
 		std::chrono::steady_clock::time_point mStart = {};
 	};
 
-	nri::AccessStage NRIComputeShaderResourceAccess()
-	{
-		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::COMPUTE_SHADER };
-	}
-
-	nri::AccessStage NRIAccelerationStructureBuildInputAccess()
-	{
-		return { nri::AccessBits::SHADER_RESOURCE, nri::StageBits::ALL_SHADERS };
-	}
-
-	nri::AccessStage NRIAccelerationStructureWriteAccess()
-	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_WRITE, nri::StageBits::ACCELERATION_STRUCTURE };
-	}
-
-	nri::AccessStage NRIAccelerationStructureScratchAccess()
-	{
-		return { nri::AccessBits::SCRATCH_BUFFER, nri::StageBits::ACCELERATION_STRUCTURE };
-	}
-
-	nri::AccessStage NRIAccelerationStructureReadAccess()
-	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::ACCELERATION_STRUCTURE };
-	}
-
-	nri::AccessStage NRIComputeAccelerationStructureReadAccess()
-	{
-		return { nri::AccessBits::ACCELERATION_STRUCTURE_READ, nri::StageBits::COMPUTE_SHADER };
-	}
-
 	uint32_t FloatBits(float value)
 	{
 		uint32_t bits = 0;
@@ -298,11 +268,11 @@ bool NRIAccelerationStructureManager::BuildBottomLevel(
 
 	nri::BufferBarrierDesc barriers[2] = {};
 	barriers[0].buffer = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*outAccelerationStructure.accelerationStructure);
-	barriers[0].before = NRIAccelerationStructureWriteAccess();
-	barriers[0].after = NRIAccelerationStructureReadAccess();
+	barriers[0].before = NRIResourceAccelerationStructureWriteAccess();
+	barriers[0].after = NRIResourceAccelerationStructureReadAccess();
 	barriers[1].buffer = renderer.mScratchBuffer.buffer;
-	barriers[1].before = NRIAccelerationStructureScratchAccess();
-	barriers[1].after = NRIAccelerationStructureScratchAccess();
+	barriers[1].before = NRIResourceAccelerationStructureScratchAccess();
+	barriers[1].after = NRIResourceAccelerationStructureScratchAccess();
 
 	nri::BarrierDesc barrierDesc = {};
 	barrierDesc.buffers = barriers;
@@ -478,7 +448,7 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 		instances.size() * sizeof(nri::TopLevelInstance),
 		sizeof(nri::TopLevelInstance),
 		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
-		NRIAccelerationStructureBuildInputAccess(),
+		NRIResourceAccelerationStructureBuildInputAccess(),
 		false,
 		"emissive_tlas_instance_upload"))
 	{
@@ -531,8 +501,8 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 
 	nri::BufferBarrierDesc tlasBarrier = {};
 	tlasBarrier.buffer = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*renderer.mEmissiveTopLevelAS.accelerationStructure);
-	tlasBarrier.before = NRIAccelerationStructureWriteAccess();
-	tlasBarrier.after = NRIComputeAccelerationStructureReadAccess();
+	tlasBarrier.before = NRIResourceAccelerationStructureWriteAccess();
+	tlasBarrier.after = NRIResourceComputeAccelerationStructureReadAccess();
 
 	nri::BarrierDesc barrierDesc = {};
 	barrierDesc.buffers = &tlasBarrier;
@@ -593,7 +563,7 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 		instances.size() * sizeof(nri::TopLevelInstance),
 		sizeof(nri::TopLevelInstance),
 		nri::BufferUsageBits::ACCELERATION_STRUCTURE_BUILD_INPUT,
-		NRIAccelerationStructureBuildInputAccess(),
+		NRIResourceAccelerationStructureBuildInputAccess(),
 		tlasInstanceWritesQuiesced,
 		"world_tlas_instance_upload"))
 	{
@@ -646,8 +616,8 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 
 	nri::BufferBarrierDesc tlasBarrier = {};
 	tlasBarrier.buffer = renderer.mFrameBuffer->mRayTracing.GetAccelerationStructureBuffer(*topLevelAS.accelerationStructure);
-	tlasBarrier.before = NRIAccelerationStructureWriteAccess();
-	tlasBarrier.after = NRIComputeAccelerationStructureReadAccess();
+	tlasBarrier.before = NRIResourceAccelerationStructureWriteAccess();
+	tlasBarrier.after = NRIResourceComputeAccelerationStructureReadAccess();
 
 	std::vector<nri::BufferBarrierDesc> barriers;
 	barriers.reserve(5);
@@ -656,14 +626,14 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 	{
 		nri::BufferBarrierDesc vertexBarrier = {};
 		vertexBarrier.buffer = staticVertexBuffer->buffer;
-		vertexBarrier.before = NRIAccelerationStructureBuildInputAccess();
-		vertexBarrier.after = NRIComputeShaderResourceAccess();
+		vertexBarrier.before = NRIResourceAccelerationStructureBuildInputAccess();
+		vertexBarrier.after = NRIResourceComputeShaderResourceAccess();
 		barriers.push_back(vertexBarrier);
 
 		nri::BufferBarrierDesc indexBarrier = {};
 		indexBarrier.buffer = staticIndexBuffer->buffer;
-		indexBarrier.before = NRIAccelerationStructureBuildInputAccess();
-		indexBarrier.after = NRIComputeShaderResourceAccess();
+		indexBarrier.before = NRIResourceAccelerationStructureBuildInputAccess();
+		indexBarrier.after = NRIResourceComputeShaderResourceAccess();
 		barriers.push_back(indexBarrier);
 	}
 	if ((sceneBufferMask & NRIRenderer::SceneDataBufferMask_Dynamic) != 0)
@@ -672,14 +642,14 @@ bool NRIAccelerationStructureManager::BuildTopLevel(
 		const NRIBufferResource& dynamicIndexBuffer = renderer.GetCurrentDynamicIndexBuffer();
 		nri::BufferBarrierDesc vertexBarrier = {};
 		vertexBarrier.buffer = dynamicVertexBuffer.buffer;
-		vertexBarrier.before = NRIAccelerationStructureBuildInputAccess();
-		vertexBarrier.after = NRIComputeShaderResourceAccess();
+		vertexBarrier.before = NRIResourceAccelerationStructureBuildInputAccess();
+		vertexBarrier.after = NRIResourceComputeShaderResourceAccess();
 		barriers.push_back(vertexBarrier);
 
 		nri::BufferBarrierDesc indexBarrier = {};
 		indexBarrier.buffer = dynamicIndexBuffer.buffer;
-		indexBarrier.before = NRIAccelerationStructureBuildInputAccess();
-		indexBarrier.after = NRIComputeShaderResourceAccess();
+		indexBarrier.before = NRIResourceAccelerationStructureBuildInputAccess();
+		indexBarrier.after = NRIResourceComputeShaderResourceAccess();
 		barriers.push_back(indexBarrier);
 	}
 

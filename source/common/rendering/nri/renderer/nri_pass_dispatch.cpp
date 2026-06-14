@@ -27,7 +27,6 @@ EXTERN_CVAR(Bool, nri_ptdirectscene)
 EXTERN_CVAR(Bool, nri_ptemissivefastshadow)
 EXTERN_CVAR(Bool, nri_ptvisiblechunkgate)
 EXTERN_CVAR(Bool, nri_ptshaderstats)
-EXTERN_CVAR(Bool, nri_pttaa)
 EXTERN_CVAR(Float, nri_sharpness)
 EXTERN_CVAR(Float, nri_ptbaseambient)
 EXTERN_CVAR(Float, nri_ptmetalambient)
@@ -41,31 +40,6 @@ EXTERN_CVAR(Float, nri_ptnightvisionblue)
 
 namespace
 {
-	constexpr uint32_t NRI_FLAG_RESET_HISTORY = 0x1u;
-	constexpr uint32_t NRI_FLAG_USE_UPSCALED = 0x2u;
-	constexpr uint32_t NRI_FLAG_BOOTSTRAP_VIEW = 0x4u;
-	constexpr uint32_t NRI_FLAG_PRESENT_RAW_TRACE = 0x8u;
-	constexpr uint32_t NRI_FLAG_RAW_PRESENT_ADD_SECONDARY = 0x10u;
-	constexpr uint32_t NRI_PRESENT_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_INFO_AVAILABLE = 0x1u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_DISPLAY_HDR_SUPPORTED = 0x2u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_HDR_SWAPCHAIN_ACTIVE = 0x4u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_OFFSCREEN_HDR_TARGET = 0x8u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_AUTO_EXPOSURE = 0x10u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_EXPOSURE_TEXTURE_VALID = 0x20u;
-	constexpr uint32_t NRI_PRESENT_OUTPUT_FLAG_INPUT_PRE_EXPOSED = 0x40u;
-	constexpr uint32_t NRI_TEMPORAL_FLAG_AUTO_EXPOSURE = 0x1000u;
-	constexpr uint32_t NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID = 0x2000u;
-	constexpr uint32_t NRI_FLAG_SPLIT_SHADOW_DENOISER = 0x20u;
-	constexpr uint32_t NRI_FLAG_USE_JITTER = 0x40u;
-	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT = 0x80u;
-	constexpr uint32_t NRI_FLAG_FAST_EMISSIVE_SHADOW = 0x100u;
-	constexpr uint32_t NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS = 0x200u;
-	constexpr uint32_t NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW = 0x400u;
-	constexpr uint32_t NRI_FLAG_TRACE_SHADER_STATS = 0x800u;
-	constexpr uint32_t NRI_JITTER_PHASE_SHIFT = 16u;
-	constexpr uint32_t NRI_TAA_JITTER_PHASE_COUNT = 8u;
-
 	static double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
 	{
 		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
@@ -212,60 +186,6 @@ namespace
 	static uint32_t PackDenoiserAux1(uint32_t denoiserMode, float directionalAngularSize)
 	{
 		return (denoiserMode & 0xffu) | (PackDirectionalAngularSize16(directionalAngularSize) << 16u);
-	}
-
-	static uint32_t GetUpscalerJitterPhaseCount(nri::UpscalerMode mode)
-	{
-		switch (mode)
-		{
-		case nri::UpscalerMode::NATIVE: return 8u;
-		case nri::UpscalerMode::ULTRA_QUALITY: return 14u;
-		case nri::UpscalerMode::QUALITY: return 18u;
-		case nri::UpscalerMode::BALANCED: return 23u;
-		case nri::UpscalerMode::PERFORMANCE: return 32u;
-		case nri::UpscalerMode::ULTRA_PERFORMANCE: return 72u;
-		default: return 8u;
-		}
-	}
-
-	static nri::UpscalerMode ResolveUpscalerModeForMain(NRIMainUpscalerKind, nri::UpscalerMode requestedMode)
-	{
-		return requestedMode;
-	}
-
-	static bool IsAppTaaEligibleUpscaler(NRIMainUpscalerKind kind)
-	{
-		return kind == NRIMainUpscalerKind::Off;
-	}
-
-	static bool ShouldRunAppTaa(NRIMainUpscalerKind kind)
-	{
-		return IsAppTaaEligibleUpscaler(kind) && !!nri_pttaa;
-	}
-
-	static bool ShouldUseTemporalJitter(NRIMainUpscalerKind kind)
-	{
-		return ShouldRunAppTaa(kind) || kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR;
-	}
-
-	static uint32_t GetTemporalJitterPhaseCount(NRIMainUpscalerKind kind, nri::UpscalerMode mode, bool guiCaptureActive)
-	{
-		if (guiCaptureActive)
-		{
-			return 0u;
-		}
-
-		if (kind == NRIMainUpscalerKind::DLSR || kind == NRIMainUpscalerKind::DLRR)
-		{
-			return GetUpscalerJitterPhaseCount(mode);
-		}
-
-		return NRI_TAA_JITTER_PHASE_COUNT;
-	}
-
-	static uint32_t PackTemporalJitterPhaseCount(uint32_t jitterPhaseCount)
-	{
-		return (std::min(jitterPhaseCount, 255u) & 0xffu) << NRI_JITTER_PHASE_SHIFT;
 	}
 
 	static float GetTemporalExposure(const NRIPTOutputPolicy& outputPolicy)
@@ -482,13 +402,13 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
-	const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(resolvedMainUpscaler, GetSelectedUpscalerMode());
-	const uint32_t jitterPhaseCount = GetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, mGuiCaptureActive);
+	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMainUpscaler, GetSelectedUpscalerMode());
+	const uint32_t jitterPhaseCount = NRIGetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, mGuiCaptureActive);
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
 	const bool useTemporalJitter =
 		!nri_ptbootstrap &&
 		!mGuiCaptureActive &&
-		ShouldUseTemporalJitter(resolvedMainUpscaler);
+		NRIShouldUseTemporalJitter(resolvedMainUpscaler);
 	Copy3(mCurrentCameraPos, constants.CameraPos);
 	Copy3(mCurrentCameraForward, constants.CameraForward);
 	Copy3(mCurrentCameraRight, constants.CameraRight);
@@ -520,7 +440,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
-		PackTemporalJitterPhaseCount(jitterPhaseCount);
+		NRIPackTemporalJitterPhaseCount(jitterPhaseCount);
 	constants.StaticMaterialCount = mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
 	constants.DynamicMaterialCount = mBoundDynamicMaterialCount;
@@ -1028,7 +948,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 
 	const NRIMainUpscalerKind mainKind = ResolveMainUpscalerKind(true);
 	const NRIPostSharpenKind postSharpenKind = ResolvePostSharpenKind(true);
-	const bool runAppTaa = ShouldRunAppTaa(mainKind);
+	const bool runAppTaa = NRIShouldRunAppTaa(mainKind);
 	const bool useAppTaaJitter = runAppTaa && !mGuiCaptureActive;
 	NRITextureResource& composed = GetFrameTexture(FrameTextureSlot::TraceTransparentOutput);
 	const FrameTextureSlot vendorSourceSlot =
@@ -1047,9 +967,9 @@ bool NRIRenderer::DispatchUpscaleChain()
 		constants.Flags =
 			(mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 			(useAppTaaJitter ? NRI_FLAG_USE_JITTER : 0u) |
-			PackTemporalJitterPhaseCount(GetTemporalJitterPhaseCount(
+			NRIPackTemporalJitterPhaseCount(NRIGetTemporalJitterPhaseCount(
 				mainKind,
-				ResolveUpscalerModeForMain(mainKind, GetSelectedUpscalerMode()),
+				NRIResolveUpscalerModeForMain(mainKind, GetSelectedUpscalerMode()),
 				mGuiCaptureActive));
 		constants.Exposure = GetTemporalExposure(mFrameBuffer->GetPathTracingOutputPolicy());
 		NRITextureResource* exposureStateTexture = nullptr;
@@ -1162,7 +1082,7 @@ bool NRIRenderer::DispatchUpscaleChain()
 		}
 		mFrameBuffer->TransitionTexture(vendorOutput, NRIComputeStorageState());
 
-		const nri::UpscalerMode resolvedUpscalerMode = ResolveUpscalerModeForMain(mainKind, GetSelectedUpscalerMode());
+		const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(mainKind, GetSelectedUpscalerMode());
 		if (!mUpscaler.EnsureMainUpscaler(*mFrameBuffer, mainKind, resolvedUpscalerMode, mOutputWidth, mOutputHeight, vendorExposure != nullptr))
 		{
 			return false;
@@ -1349,5 +1269,3 @@ bool NRIRenderer::DispatchFinal()
 	mFrameBuffer->mCore.CmdDispatch(*mFrameBuffer->mCommandBuffer, { GetDispatchSize(mTargetWidth), GetDispatchSize(mTargetHeight), 1 });
 	return true;
 }
-
-

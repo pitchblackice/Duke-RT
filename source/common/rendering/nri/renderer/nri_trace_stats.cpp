@@ -19,22 +19,6 @@ namespace
 	static constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
 	static constexpr uint32_t NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL = 2;
 
-	template<typename T>
-	static T NRIFlags(T a, T b)
-	{
-		return (T)((uint32_t)a | (uint32_t)b);
-	}
-
-	static nri::AccessStage NRICopySourceAccess()
-	{
-		return { nri::AccessBits::COPY_SOURCE, nri::StageBits::COPY };
-	}
-
-	static nri::AccessStage NRICopyDestinationAccess()
-	{
-		return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
-	}
-
 	static bool ShouldTracePtPerf()
 	{
 		return (int)perf_looptraceframes > 0 || (int)nri_pttraceframes > 0;
@@ -96,7 +80,7 @@ bool NRITraceShaderStats::Ensure(const NRIResourceServices& services)
 		nri::BufferDesc desc = {};
 		desc.size = byteSize;
 		desc.structureStride = kStride;
-		desc.usage = NRIFlags(
+		desc.usage = NRIResourceFlags(
 			nri::BufferUsageBits::SHADER_RESOURCE_STORAGE,
 			nri::BufferUsageBits::SHADER_RESOURCE);
 		if (context.core->CreateCommittedBuffer(*context.device, nri::MemoryLocation::DEVICE, 0.0f, desc, mStatsBuffer.buffer) != nri::Result::SUCCESS)
@@ -183,10 +167,10 @@ void NRITraceShaderStats::ResetBuffer(const NRIResourceServices& services, bool 
 	nri::BufferBarrierDesc beforeBarriers[2] = {};
 	beforeBarriers[0].buffer = mZeroBuffer.buffer;
 	beforeBarriers[0].before = {};
-	beforeBarriers[0].after = NRICopySourceAccess();
+	beforeBarriers[0].after = NRIResourceCopySourceAccess();
 	beforeBarriers[1].buffer = mStatsBuffer.buffer;
 	beforeBarriers[1].before = {};
-	beforeBarriers[1].after = NRICopyDestinationAccess();
+	beforeBarriers[1].after = NRIResourceCopyDestinationAccess();
 	nri::BarrierDesc beforeDesc = {};
 	beforeDesc.buffers = beforeBarriers;
 	beforeDesc.bufferNum = 2;
@@ -201,7 +185,7 @@ void NRITraceShaderStats::ResetBuffer(const NRIResourceServices& services, bool 
 
 	nri::BufferBarrierDesc afterBarrier = {};
 	afterBarrier.buffer = mStatsBuffer.buffer;
-	afterBarrier.before = NRICopyDestinationAccess();
+	afterBarrier.before = NRIResourceCopyDestinationAccess();
 	afterBarrier.after = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
 	nri::BarrierDesc afterDesc = {};
 	afterDesc.buffers = &afterBarrier;
@@ -221,7 +205,7 @@ void NRITraceShaderStats::CopyForReadback(const NRIResourceServices& services, b
 	nri::BufferBarrierDesc beforeBarrier = {};
 	beforeBarrier.buffer = mStatsBuffer.buffer;
 	beforeBarrier.before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
-	beforeBarrier.after = NRICopySourceAccess();
+	beforeBarrier.after = NRIResourceCopySourceAccess();
 	nri::BarrierDesc beforeDesc = {};
 	beforeDesc.buffers = &beforeBarrier;
 	beforeDesc.bufferNum = 1;
@@ -399,5 +383,4 @@ void NRIRenderer::ReadbackTraceShaderStats()
 	};
 	mTraceShaderStats.Readback(BuildResourceServices(), input, mLastPerfTraceShaderStats);
 }
-
 

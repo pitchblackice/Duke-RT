@@ -24,22 +24,6 @@ namespace
 		return result;
 	}
 
-	template<typename T>
-	T NRIFlags(T a, T b)
-	{
-		return (T)((uint32_t)a | (uint32_t)b);
-	}
-
-	nri::AccessStage NRICopySourceAccess()
-	{
-		return { nri::AccessBits::COPY_SOURCE, nri::StageBits::COPY };
-	}
-
-	nri::AccessStage NRICopyDestinationAccess()
-	{
-		return { nri::AccessBits::COPY_DESTINATION, nri::StageBits::COPY };
-	}
-
 	float ClampAutoExposureDeltaTimeSeconds(float seconds)
 	{
 		if (!std::isfinite(seconds) || seconds <= 0.0f)
@@ -337,7 +321,7 @@ bool NRIExposurePassAccess::CreateStorageBuffer(NRIRenderer& renderer, NRIBuffer
 	nri::BufferDesc desc = {};
 	desc.size = byteSize;
 	desc.structureStride = stride;
-	desc.usage = NRIFlags(
+	desc.usage = NRIResourceFlags(
 		nri::BufferUsageBits::SHADER_RESOURCE_STORAGE,
 		nri::BufferUsageBits::SHADER_RESOURCE);
 	if (renderer.mFrameBuffer->mCore.CreateCommittedBuffer(*renderer.mFrameBuffer->mDevice, nri::MemoryLocation::DEVICE, 0.0f, desc, resource.buffer) != nri::Result::SUCCESS)
@@ -419,7 +403,7 @@ bool NRIExposurePassAccess::EnsureResources(NRIRenderer& renderer, const NRIAuto
 	NRITextureResource& exposureState1 = renderer.mExposure.GetMutableExposureStateTexture(1);
 	NRIBufferResource& histogramBuffer = renderer.mExposure.GetMutableHistogramBuffer();
 	NRIBufferResource& debugBuffer = renderer.mExposure.GetMutableDebugBuffer();
-	const nri::TextureUsageBits usage = NRIFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE);
+	const nri::TextureUsageBits usage = NRIResourceFlags(nri::TextureUsageBits::SHADER_RESOURCE, nri::TextureUsageBits::SHADER_RESOURCE_STORAGE);
 	if (!renderer.mFrameBuffer->CreateOwnedTexture(exposureState0, 1, 1, nri::Format::RGBA32_SFLOAT, usage) ||
 		!renderer.mFrameBuffer->CreateOwnedTexture(exposureState1, 1, 1, nri::Format::RGBA32_SFLOAT, usage) ||
 		!CreateStorageBuffer(renderer, histogramBuffer, (uint64_t)NRI_EXPOSURE_MAX_HISTOGRAM_BINS * sizeof(uint32_t), sizeof(uint32_t)) ||
@@ -685,10 +669,10 @@ void NRIExposurePassAccess::CopyStatsForReadback(NRIRenderer& renderer, uint64_t
 	nri::BufferBarrierDesc beforeBarriers[2] = {};
 	beforeBarriers[0].buffer = debugBuffer.buffer;
 	beforeBarriers[0].before = { nri::AccessBits::SHADER_RESOURCE_STORAGE, nri::StageBits::COMPUTE_SHADER };
-	beforeBarriers[0].after = NRICopySourceAccess();
+	beforeBarriers[0].after = NRIResourceCopySourceAccess();
 	beforeBarriers[1].buffer = readbackBuffer.buffer;
 	beforeBarriers[1].before = {};
-	beforeBarriers[1].after = NRICopyDestinationAccess();
+	beforeBarriers[1].after = NRIResourceCopyDestinationAccess();
 	nri::BarrierDesc beforeDesc = {};
 	beforeDesc.buffers = beforeBarriers;
 	beforeDesc.bufferNum = (uint32_t)std::size(beforeBarriers);
