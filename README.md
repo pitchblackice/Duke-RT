@@ -8,7 +8,7 @@ Duke-RT is a fork of Raze that adds a new ray-tracing render backend based on [N
 
 The renderer supports both Direct3D 12 and Vulkan, although feature support is more complete for D3D12. It's recommended that you play in D3D12 and HDR if possible!
 
-![Duke-RT gameplay](images/24.png)
+![Duke-RT gameplay](images/1.png)
 
 **Check out the linked project docs below to make your own lighting rules and material overrides!**
 
@@ -31,35 +31,29 @@ Duke-RT is work in progress. The core renderer is in, with full support for mode
 
 Known high-priority issues:
 - slow perf on the start of level 1 due to large voxel objects
-- analytic lights can cause each other to flicker (most apparent when shooting the Devastator)
 - broken transport-driven non-euclidean behavior in `E5L1`
 - slow CPU-side perf on maps with lots of geometry movement like `E1L4` and `E2L7`
 - sometimes you get stuck on the level end screen rather than transitioning to the next level
 - there's an occasional crash on multiple level transitions in a session
-- 
 
 Known lower-priority issues:
 - flickering material state for the vent at the start of `E1L4`
-- Duke is facing the wrong way in metal reflections
 - the last scene panning sequence no longer appears on surveillance camera screens
-- coplanar geometry holes on the `E1L1` spiral stairs and the ceiling under them
 - some room-over-room geometry intrusions not on the visible list still block lights in `E1L1`
-- emission flips on either side of the cinema sign emitter sprite in `E1L1`
 - framegen only works with D3D12
 
 I also have a bunch of features I'd like to tackle in the future, including some renderer improvements, as well as a complete pass on the other main Duke 3D episodes.
 
 Upcoming feature work:
-- thorough material and lighting pass on Episodes 2 and 3
+- thorough material and lighting pass on Episode 3
 - volumetrics such as rocket smoke
-- auto exposure
 - water surfaces
 - proper mirror replacements
 - better glass
 
-## Tools and Guides
+![cropped spheres](images/23.png)
 
-![cropped spheres](images/cropped-spheres.png)
+## Tools and Guides
 
 Check these out if you want runtime commands, authoring tools, and the current workflows to add your own custom materials and lights.
 
@@ -67,6 +61,8 @@ Check these out if you want runtime commands, authoring tools, and the current w
 - [LIGHTOVR authoring guide](LIGHTOVR-AUTHORING.md): the light overlay format and authoring workflow for creating your own custom lighting rules, including load/reload behavior, writable loose-overlay setup, and actor light edit mode.
 - [VOXELPRELOAD authoring guide](VOXELPRELOAD-AUTHORING.md): the mounted voxel preload format for warming important voxel actor variants, map-specific props, projectiles, and animated picnum ranges during map loading.
 - [Material overlay authoring guide](MATERIAL-OVERLAY-AUTHORING.md): the material-overlay authoring workflow for creating your own PBR companion maps, including Duke tile naming, supported map types, and how to add custom metallic, roughness, specular, normal, and glow textures.
+
+![cropped spheres](images/cropped-spheres.png)
 
 ## Original Raze Background
 
