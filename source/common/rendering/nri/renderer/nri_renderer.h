@@ -40,6 +40,7 @@
 #include <vector>
 
 class NRIRenderDevice;
+class NRIPassDispatchContext;
 class NRIPassDispatcher;
 struct MapRecord;
 struct LevelTransitionInfo;
@@ -1449,37 +1450,6 @@ public:
 	const PerfTraceShaderStats& GetLastPerfTraceShaderStats() const { return mLastPerfTraceShaderStats; }
 	MemoryTelemetry GetMemoryTelemetry() const;
 	static const char* GetMaterialBuildTraceSlotName(MaterialBuildTraceSlot slot);
-private:
-	friend bool ExecuteNRIFrameGraph(
-		NRIRenderer& renderer,
-		HWDrawInfo& di,
-		const nri_scene::GeometryData& geometry,
-		const std::vector<nri_scene::MaterialData>& materials,
-		const NRIFrameGraphExecutionRequest& request);
-	friend class NRIExposurePassAccess;
-	friend class NRIAccelerationStructureManager;
-	friend class NRIDescriptorSetManager;
-	friend class NRIFrameResources;
-	friend class NRIPassDispatcher;
-	friend class NRIPipelineStateManager;
-	friend class NRISceneUploadManager;
-	friend NRIRuntimeMutationResidentUploadServices BuildNRIRuntimeMutationResidentUploadServices(NRIRenderer& renderer);
-	friend NRIRuntimeMutationOverlayServices BuildNRIRuntimeMutationOverlayServices(NRIRenderer& renderer);
-	friend NRIRuntimeMutationResidentApplyServices BuildNRIRuntimeMutationResidentApplyServices(NRIRenderer& renderer);
-	friend NRIRuntimeMutationResidentSceneRefreshServices BuildNRIRuntimeMutationResidentSceneRefreshServices(NRIRenderer& renderer);
-	friend bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
-	friend void DestroyNRIRendererAutoExposureResources(NRIRenderer& renderer);
-	friend bool UpdateNRIRendererAutoExposureDescriptorSets(NRIRenderer& renderer, uint32_t sourceSlot);
-	friend bool DispatchNRIRendererAutoExposure(NRIRenderer& renderer, uint32_t sourceSlot);
-	friend void CopyNRIRendererAutoExposureStatsForReadback(NRIRenderer& renderer, uint64_t frameNumber);
-	friend void ReadbackNRIRendererAutoExposureStats(NRIRenderer& renderer);
-
-	NRIResourceContext BuildResourceContext() const;
-	NRIResourceServices BuildResourceServices();
-	NRIPersistentVoxelResetServices BuildPersistentVoxelResetServices();
-	NRIPersistentVoxelAdmissionServices BuildPersistentVoxelAdmissionServices();
-	NRIPersistentVoxelAccelerationServices BuildPersistentVoxelAccelerationServices();
-	NRIRendererFrameContext BuildFrameContext(int drawmode, bool portal, int debugMode, bool preserveHistory) const;
 	enum class FrameTextureSlot : uint32_t
 	{
 		ViewZ,
@@ -1543,6 +1513,33 @@ private:
 		Final,
 		Count
 	};
+
+private:
+	friend class NRIExposurePassAccess;
+	friend class NRIAccelerationStructureManager;
+	friend class NRIDescriptorSetManager;
+	friend class NRIFrameResources;
+	friend class NRIPassDispatchContext;
+	friend class NRIPipelineStateManager;
+	friend class NRISceneUploadManager;
+	friend NRIRuntimeMutationResidentUploadServices BuildNRIRuntimeMutationResidentUploadServices(NRIRenderer& renderer);
+	friend NRIRuntimeMutationOverlayServices BuildNRIRuntimeMutationOverlayServices(NRIRenderer& renderer);
+	friend NRIRuntimeMutationResidentApplyServices BuildNRIRuntimeMutationResidentApplyServices(NRIRenderer& renderer);
+	friend NRIRuntimeMutationResidentSceneRefreshServices BuildNRIRuntimeMutationResidentSceneRefreshServices(NRIRenderer& renderer);
+	friend bool EnsureNRIRendererAutoExposureResources(NRIRenderer& renderer, const NRIAutoExposureSettings& settings);
+	friend void DestroyNRIRendererAutoExposureResources(NRIRenderer& renderer);
+	friend bool UpdateNRIRendererAutoExposureDescriptorSets(NRIRenderer& renderer, uint32_t sourceSlot);
+	friend bool DispatchNRIRendererAutoExposure(NRIRenderer& renderer, uint32_t sourceSlot);
+	friend void CopyNRIRendererAutoExposureStatsForReadback(NRIRenderer& renderer, uint64_t frameNumber);
+	friend void ReadbackNRIRendererAutoExposureStats(NRIRenderer& renderer);
+
+	NRIResourceContext BuildResourceContext() const;
+	NRIResourceServices BuildResourceServices();
+	NRIPersistentVoxelResetServices BuildPersistentVoxelResetServices();
+	NRIPersistentVoxelAdmissionServices BuildPersistentVoxelAdmissionServices();
+	NRIPersistentVoxelAccelerationServices BuildPersistentVoxelAccelerationServices();
+	NRIRendererFrameContext BuildFrameContext(int drawmode, bool portal, int debugMode, bool preserveHistory) const;
+	NRIPassDispatchContext BuildPassDispatchContext();
 
 	using SceneBufferDebugStats = ::SceneBufferDebugStats;
 

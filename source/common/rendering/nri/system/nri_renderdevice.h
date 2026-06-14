@@ -18,8 +18,8 @@ class NRIHardwareIndexBuffer;
 class FCanvasTexture;
 class FTexture;
 class FGameTexture;
+class NRIPassDispatchContext;
 class NRIRenderer;
-class NRIPassDispatcher;
 class NRIDescriptorSetManager;
 class NRIFrameResources;
 class NRIPipelineStateManager;
@@ -303,8 +303,8 @@ private:
 
 	friend class NRIHardwareTexture;
 	friend class NRIRenderState;
+	friend class NRIPassDispatchContext;
 	friend class NRIRenderer;
-	friend class NRIPassDispatcher;
 	friend class NRIDescriptorSetManager;
 	friend class NRIFrameResources;
 	friend class NRIPipelineStateManager;

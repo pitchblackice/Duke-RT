@@ -4360,6 +4360,11 @@ NRIRendererFrameContext NRIRenderer::BuildFrameContext(int drawmode, bool portal
 	return context;
 }
 
+NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
+{
+	return NRIPassDispatchContext(*this);
+}
+
 bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 {
 	if ((drawmode != DM_MAINVIEW && drawmode != DM_OFFSCREEN) || portal || mFrameBuffer == nullptr ||
@@ -4542,7 +4547,8 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 		mUpscaledInputSlot = FrameTextureSlot::Composed;
 		mUseUpscaledInFinal = false;
-		if (!NRIPassDispatcher::DispatchBootstrapView(*this))
+		NRIPassDispatchContext passContext = BuildPassDispatchContext();
+		if (!NRIPassDispatcher::DispatchBootstrapView(passContext))
 		{
 			LogFallback("PT bootstrap view dispatch failed.");
 			if (preserveHistory)
@@ -6074,11 +6080,13 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 		mUpscaledInputSlot = FrameTextureSlot::Composed;
 		mUseUpscaledInFinal = false;
-		dispatched = buffersReady && NRIPassDispatcher::DispatchBootstrapView(*this);
+		NRIPassDispatchContext passContext = BuildPassDispatchContext();
+		dispatched = buffersReady && NRIPassDispatcher::DispatchBootstrapView(passContext);
 	}
 	else
 	{
-		dispatched = accelerationReady && NRIPassDispatcher::DispatchFrameGraph(*this, di, *activeGeometry, *activeGpuMaterials, drawmode);
+		NRIPassDispatchContext passContext = BuildPassDispatchContext();
+		dispatched = accelerationReady && NRIPassDispatcher::DispatchFrameGraph(passContext, di, *activeGeometry, *activeGpuMaterials, drawmode);
 	}
 	const bool success = paletteReady && texturesReady && buffersReady && accelerationReady && dispatched;
 

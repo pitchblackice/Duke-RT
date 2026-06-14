@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 
+class NRIPassDispatchContext;
 class NRIRenderer;
 struct HWDrawInfo;
 
@@ -74,7 +75,7 @@ bool IsNRIFrameGraphRawTraceDebugMode(uint32_t debugMode);
 bool IsNRIFrameGraphFinalShaderDebugMode(uint32_t debugMode);
 NRIPresentRouteInfo ResolveNRIFrameRoute(const NRIFrameRouteRequest& request);
 bool ExecuteNRIFrameGraph(
-	NRIRenderer& renderer,
+	NRIPassDispatchContext& context,
 	HWDrawInfo& di,
 	const nri_scene::GeometryData& geometry,
 	const std::vector<nri_scene::MaterialData>& materials,

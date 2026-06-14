@@ -275,103 +275,103 @@ namespace
 	}
 }
 
-bool NRIPassDispatcher::DispatchBootstrapView(NRIRenderer& renderer)
+bool NRIPassDispatcher::DispatchBootstrapView(NRIPassDispatchContext& context)
 {
 	Clocker clock(NriPTBootstrapDispatch);
 
-	if (!NRISceneUploadManager::UpdateReprojectionBuffer(renderer, nullptr))
+	if (!context.UpdateReprojectionBuffer())
 	{
 		return false;
 	}
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	NRITraceSceneConstants constants = {};
-	Copy3(renderer.mCurrentCameraPos, constants.CameraPos);
-	Copy3(renderer.mCurrentCameraForward, constants.CameraForward);
-	Copy3(renderer.mCurrentCameraRight, constants.CameraRight);
-	Copy3(renderer.mCurrentCameraUp, constants.CameraUp);
-	Copy3(renderer.mPreviousCameraPos, constants.PrevCameraPos);
-	Copy3(renderer.mPreviousCameraForward, constants.PrevCameraForward);
-	Copy3(renderer.mPreviousCameraRight, constants.PrevCameraRight);
-	Copy3(renderer.mPreviousCameraUp, constants.PrevCameraUp);
-	constants.RenderWidth = renderer.mRenderWidth;
-	constants.RenderHeight = renderer.mRenderHeight;
-	constants.DisplayWidth = renderer.mOutputWidth;
-	constants.DisplayHeight = renderer.mOutputHeight;
-	constants.TanHalfFovX = renderer.mCurrentTanHalfFovX;
-	constants.TanHalfFovY = renderer.mCurrentTanHalfFovY;
-	constants.PrevTanHalfFovX = renderer.mPreviousTanHalfFovX;
-	constants.PrevTanHalfFovY = renderer.mPreviousTanHalfFovY;
-	constants.SceneInstanceCount = renderer.mSceneInstanceBuffer.stride != 0 ? (uint32_t)(renderer.mSceneInstanceBuffer.usedSize / renderer.mSceneInstanceBuffer.stride) : 0u;
-	constants.StaticPrimitiveCount = renderer.mBoundStaticPrimitiveCount;
-	constants.DynamicPrimitiveCount = renderer.mBoundDynamicPrimitiveCount;
-	constants.FrameIndex = renderer.mFrameIndex;
+	Copy3(context.mCurrentCameraPos, constants.CameraPos);
+	Copy3(context.mCurrentCameraForward, constants.CameraForward);
+	Copy3(context.mCurrentCameraRight, constants.CameraRight);
+	Copy3(context.mCurrentCameraUp, constants.CameraUp);
+	Copy3(context.mPreviousCameraPos, constants.PrevCameraPos);
+	Copy3(context.mPreviousCameraForward, constants.PrevCameraForward);
+	Copy3(context.mPreviousCameraRight, constants.PrevCameraRight);
+	Copy3(context.mPreviousCameraUp, constants.PrevCameraUp);
+	constants.RenderWidth = context.mRenderWidth;
+	constants.RenderHeight = context.mRenderHeight;
+	constants.DisplayWidth = context.mOutputWidth;
+	constants.DisplayHeight = context.mOutputHeight;
+	constants.TanHalfFovX = context.mCurrentTanHalfFovX;
+	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
+	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
+	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
+	constants.SceneInstanceCount = context.mSceneInstanceBuffer.stride != 0 ? (uint32_t)(context.mSceneInstanceBuffer.usedSize / context.mSceneInstanceBuffer.stride) : 0u;
+	constants.StaticPrimitiveCount = context.mBoundStaticPrimitiveCount;
+	constants.DynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
+	constants.FrameIndex = context.mFrameIndex;
 	constants.Flags =
 		NRI_FLAG_BOOTSTRAP_VIEW |
-		(renderer.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
-		(renderer.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
-		(renderer.mDirectionalLightState.enabled && renderer.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
-	constants.StaticMaterialCount = renderer.mBoundStaticMaterialCount;
+		(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
+	constants.StaticMaterialCount = context.mBoundStaticMaterialCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
-	constants.DynamicMaterialCount = renderer.mBoundDynamicMaterialCount;
-	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, renderer.mDirectionalLightState.color);
-	constants.ReservedTrace0 = (uint16_t)(int16_t)renderer.mSceneLeft | ((uint32_t)(uint16_t)(int16_t)renderer.mSceneTop << 16);
-	Copy3(renderer.mSkyColor, constants.SkyColor);
-	Copy3(renderer.mGroundColor, constants.GroundColor);
-	ApplyDirectionalLightStateToConstants(renderer.mDirectionalLightState, constants);
+	constants.DynamicMaterialCount = context.mBoundDynamicMaterialCount;
+	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, context.mDirectionalLightState.color);
+	constants.ReservedTrace0 = (uint16_t)(int16_t)context.mSceneLeft | ((uint32_t)(uint16_t)(int16_t)context.mSceneTop << 16);
+	Copy3(context.mSkyColor, constants.SkyColor);
+	Copy3(context.mGroundColor, constants.GroundColor);
+	ApplyDirectionalLightStateToConstants(context.mDirectionalLightState, constants);
 
-	NRITextureResource& history = renderer.GetFrameTexture(renderer.mHistoryOutputSlot);
-	NRITextureResource& upscaled = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed);
-	NRITextureResource& final = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final);
-	renderer.mFrameBuffer->TransitionTexture(history, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(upscaled, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
+	NRITextureResource& history = context.GetFrameTexture(context.mHistoryOutputSlot);
+	NRITextureResource& upscaled = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed);
+	NRITextureResource& final = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final);
+	context.TransitionTexture(history, NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
+	context.TransitionTexture(upscaled, NRIComputeShaderResourceState());
+	context.TransitionTexture(final, NRIComputeStorageState());
 
-	renderer.mFrameInputDescriptors.fill(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView);
-	renderer.mFrameInputDescriptors[0] = history.shaderView;
-	renderer.mFrameInputDescriptors[1] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion).shaderView;
-	renderer.mFrameInputDescriptors[2] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).shaderView;
-	renderer.mFrameInputDescriptors[3] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness).shaderView;
-	renderer.mFrameInputDescriptors[4] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness).shaderView;
-	renderer.mFrameInputDescriptors[5] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView;
-	renderer.mFrameInputDescriptors[6] = upscaled.shaderView;
-	renderer.mFrameInputDescriptors[7] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation).shaderView;
-	renderer.mFrameInputDescriptors[8] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse).shaderView;
-	renderer.mFrameInputDescriptors[9] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).shaderView;
-	renderer.mFrameInputDescriptors[10] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).shaderView;
-	NRIDescriptorSetManager::UpdateFrameTextureSet(renderer, renderer.mUpscalerPrepassFrameTextureSet, renderer.mFrameInputDescriptors);
+	context.mFrameInputDescriptors.fill(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView);
+	context.mFrameInputDescriptors[0] = history.shaderView;
+	context.mFrameInputDescriptors[1] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion).shaderView;
+	context.mFrameInputDescriptors[2] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).shaderView;
+	context.mFrameInputDescriptors[3] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness).shaderView;
+	context.mFrameInputDescriptors[4] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness).shaderView;
+	context.mFrameInputDescriptors[5] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView;
+	context.mFrameInputDescriptors[6] = upscaled.shaderView;
+	context.mFrameInputDescriptors[7] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation).shaderView;
+	context.mFrameInputDescriptors[8] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse).shaderView;
+	context.mFrameInputDescriptors[9] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).shaderView;
+	context.mFrameInputDescriptors[10] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).shaderView;
+	context.UpdateFrameTextureSet(context.mUpscalerPrepassFrameTextureSet, context.mFrameInputDescriptors);
 
-	renderer.mOutputDescriptors.fill(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::VendorOutput).storageView);
-	renderer.mOutputDescriptors[2] = final.storageView;
-	NRIDescriptorSetManager::UpdateOutputSet(renderer, renderer.mUpscalerPrepassOutputSet, renderer.mOutputDescriptors);
+	context.mOutputDescriptors.fill(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::VendorOutput).storageView);
+	context.mOutputDescriptors[2] = final.storageView;
+	context.UpdateOutputSet(context.mUpscalerPrepassOutputSet, context.mOutputDescriptors);
 
-	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *renderer.mPipelineLayout);
-	renderer.mFrameBuffer->mCore.CmdSetRootConstants(*renderer.mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	renderer.BindSceneRootDescriptors();
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mSamplerSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, renderer.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 2, renderer.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, renderer.mFrameTextureSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, renderer.mOutputSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetPipeline(*renderer.mFrameBuffer->mCommandBuffer, *renderer.GetPipeline(NRIRenderer::PipelineSlot::Final));
-	renderer.mFrameBuffer->mCore.CmdDispatch(*renderer.mFrameBuffer->mCommandBuffer, { GetDispatchSize(renderer.mTargetWidth), GetDispatchSize(renderer.mTargetHeight), 1 });
+	context.mCore->CmdSetPipelineLayout(*context.mCommandBuffer, nri::BindPoint::COMPUTE, *context.mPipelineLayout);
+	context.mCore->CmdSetRootConstants(*context.mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	context.BindSceneRootDescriptors();
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 0, context.mSamplerSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 1, context.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 2, context.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 3, context.mFrameTextureSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 4, context.mOutputSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetPipeline(*context.mCommandBuffer, *context.GetPipeline(NRIRenderer::PipelineSlot::Final));
+	context.mCore->CmdDispatch(*context.mCommandBuffer, { GetDispatchSize(context.mTargetWidth), GetDispatchSize(context.mTargetHeight), 1 });
 	return true;
 }
 
 
 
-bool NRIPassDispatcher::DispatchFrameGraph(NRIRenderer& renderer, HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int)
+bool NRIPassDispatcher::DispatchFrameGraph(NRIPassDispatchContext& context, HWDrawInfo& di, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials, int)
 {
-	ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.frameGraphMs);
+	ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.frameGraphMs);
 	Clocker clock(NriPTFrameGraph);
 
 	const int ptDebugMode = (int)GetEffectivePtDebugMode();
@@ -379,33 +379,33 @@ bool NRIPassDispatcher::DispatchFrameGraph(NRIRenderer& renderer, HWDrawInfo& di
 	request.ptDebugMode = ptDebugMode;
 	request.denoise = !!nri_denoise;
 	request.presentRoute = ResolvePresentRouteInfo((uint32_t)ptDebugMode, !!nri_ptbootstrap);
-	return ExecuteNRIFrameGraph(renderer, di, geometry, materials, request);
+	return ExecuteNRIFrameGraph(context, di, geometry, materials, request);
 }
 
 
 
-bool NRIPassDispatcher::DispatchTraceOpaque(NRIRenderer& renderer, HWDrawInfo&, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
+bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWDrawInfo&, const nri_scene::GeometryData& geometry, const std::vector<nri_scene::MaterialData>& materials)
 {
 	Clocker clock(NriPTTraceOpaque);
-	ScopedPtPerfTimer traceOpaqueTimer(renderer.mLastPerfShellTraceStats.traceOpaqueMs);
+	ScopedPtPerfTimer traceOpaqueTimer(context.mLastPerfShellTraceStats.traceOpaqueMs);
 	{
-		ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.traceOpaqueReadbackMs);
+		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueReadbackMs);
 		NRITraceShaderStatsReadbackInput input = {};
 		input.enabled = (bool)nri_ptshaderstats;
-		input.boundSceneInstances = &renderer.mBoundSceneInstances;
-		input.staticPrimitiveCount = renderer.mBoundStaticPrimitiveCount;
-		input.dynamicPrimitiveCount = renderer.mBoundDynamicPrimitiveCount;
-		input.persistentVoxelPrimitiveCount = renderer.mPersistentVoxels.BoundPrimitiveCount();
-		input.user = &renderer;
+		input.boundSceneInstances = &context.mBoundSceneInstances;
+		input.staticPrimitiveCount = context.mBoundStaticPrimitiveCount;
+		input.dynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
+		input.persistentVoxelPrimitiveCount = context.mPersistentVoxels.BoundPrimitiveCount();
+		input.user = &context;
 		input.estimatePersistentVoxelPrimitiveCount = [](void* user, uint32_t primitiveOffset) -> uint32_t
 		{
-			return static_cast<NRIRenderer*>(user)->mPersistentVoxels.EstimatePrimitiveCountForInstanceOffset(primitiveOffset);
+			return static_cast<NRIPassDispatchContext*>(user)->EstimatePersistentVoxelPrimitiveCountForInstanceOffset(primitiveOffset);
 		};
-		renderer.mTraceShaderStats.Readback(renderer.BuildResourceServices(), input, renderer.mLastPerfTraceShaderStats);
-		renderer.ReadbackAutoExposureStats();
+		context.mTraceShaderStats.Readback(context.BuildResourceServices(), input, context.mLastPerfTraceShaderStats);
+		context.ReadbackAutoExposureStats();
 	}
 
-	if (!NRISceneUploadManager::UpdateReprojectionBuffer(renderer, nullptr))
+	if (!context.UpdateReprojectionBuffer())
 	{
 		return false;
 	}
@@ -414,169 +414,169 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIRenderer& renderer, HWDrawInfo&, 
 	const NRITraceSettings traceSettings = BuildNRITraceSettingsFromCVars();
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
-	const NRIMainUpscalerKind resolvedMainUpscaler = renderer.ResolveMainUpscalerKind(false);
-	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMainUpscaler, renderer.GetSelectedUpscalerMode());
-	const uint32_t jitterPhaseCount = NRIGetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, renderer.mGuiCaptureActive);
+	const NRIMainUpscalerKind resolvedMainUpscaler = context.ResolveMainUpscalerKind(false);
+	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMainUpscaler, context.GetSelectedUpscalerMode());
+	const uint32_t jitterPhaseCount = NRIGetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, context.mGuiCaptureActive);
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
 	const bool useTemporalJitter =
 		!nri_ptbootstrap &&
-		!renderer.mGuiCaptureActive &&
+		!context.mGuiCaptureActive &&
 		NRIShouldUseTemporalJitter(resolvedMainUpscaler);
-	Copy3(renderer.mCurrentCameraPos, constants.CameraPos);
-	Copy3(renderer.mCurrentCameraForward, constants.CameraForward);
-	Copy3(renderer.mCurrentCameraRight, constants.CameraRight);
-	Copy3(renderer.mCurrentCameraUp, constants.CameraUp);
-	Copy3(renderer.mPreviousCameraPos, constants.PrevCameraPos);
-	Copy3(renderer.mPreviousCameraForward, constants.PrevCameraForward);
-	Copy3(renderer.mPreviousCameraRight, constants.PrevCameraRight);
-	Copy3(renderer.mPreviousCameraUp, constants.PrevCameraUp);
-	constants.RenderWidth = renderer.mRenderWidth;
-	constants.RenderHeight = renderer.mRenderHeight;
-	constants.DisplayWidth = renderer.mOutputWidth;
-	constants.DisplayHeight = renderer.mOutputHeight;
-	constants.TanHalfFovX = renderer.mCurrentTanHalfFovX;
-	constants.TanHalfFovY = renderer.mCurrentTanHalfFovY;
-	constants.PrevTanHalfFovX = renderer.mPreviousTanHalfFovX;
-	constants.PrevTanHalfFovY = renderer.mPreviousTanHalfFovY;
-	constants.SceneInstanceCount = renderer.mSceneInstanceBuffer.stride != 0 ? (uint32_t)(renderer.mSceneInstanceBuffer.usedSize / renderer.mSceneInstanceBuffer.stride) : 0u;
+	Copy3(context.mCurrentCameraPos, constants.CameraPos);
+	Copy3(context.mCurrentCameraForward, constants.CameraForward);
+	Copy3(context.mCurrentCameraRight, constants.CameraRight);
+	Copy3(context.mCurrentCameraUp, constants.CameraUp);
+	Copy3(context.mPreviousCameraPos, constants.PrevCameraPos);
+	Copy3(context.mPreviousCameraForward, constants.PrevCameraForward);
+	Copy3(context.mPreviousCameraRight, constants.PrevCameraRight);
+	Copy3(context.mPreviousCameraUp, constants.PrevCameraUp);
+	constants.RenderWidth = context.mRenderWidth;
+	constants.RenderHeight = context.mRenderHeight;
+	constants.DisplayWidth = context.mOutputWidth;
+	constants.DisplayHeight = context.mOutputHeight;
+	constants.TanHalfFovX = context.mCurrentTanHalfFovX;
+	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
+	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
+	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
+	constants.SceneInstanceCount = context.mSceneInstanceBuffer.stride != 0 ? (uint32_t)(context.mSceneInstanceBuffer.usedSize / context.mSceneInstanceBuffer.stride) : 0u;
 	constants.DebugMode = GetEffectivePtDebugMode();
-	constants.StaticPrimitiveCount = renderer.mBoundStaticPrimitiveCount;
-	constants.FrameIndex = renderer.mFrameIndex;
-	constants.DynamicPrimitiveCount = renderer.mBoundDynamicPrimitiveCount;
+	constants.StaticPrimitiveCount = context.mBoundStaticPrimitiveCount;
+	constants.FrameIndex = context.mFrameIndex;
+	constants.DynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
 	constants.Flags =
-		(renderer.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
-		(renderer.mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
-		(renderer.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
-		(renderer.mDirectionalLightState.enabled && renderer.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u) |
+		(context.mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
+		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u) |
 		(nri_ptemissivefastshadow ? NRI_FLAG_FAST_EMISSIVE_SHADOW : 0u) |
 		(nri_ptvisiblechunkgate ? NRI_FLAG_GATE_PRIMARY_VISIBLE_CHUNKS : 0u) |
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
 		NRIPackTemporalJitterPhaseCount(jitterPhaseCount);
-	constants.StaticMaterialCount = renderer.mBoundStaticMaterialCount;
+	constants.StaticMaterialCount = context.mBoundStaticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
-	constants.DynamicMaterialCount = renderer.mBoundDynamicMaterialCount;
+	constants.DynamicMaterialCount = context.mBoundDynamicMaterialCount;
 	constants.BounceCounts = PackTraceBounceCounts(
 		traceSettings.lightBounceCount,
 		traceSettings.mirrorBounceCount,
-		renderer.mDirectionalLightState.color);
-	constants.PortalCount = renderer.mBoundPortalCount;
-	constants.RuntimeLightCount = renderer.mBoundRuntimeLightCount;
+		context.mDirectionalLightState.color);
+	constants.PortalCount = context.mBoundPortalCount;
+	constants.RuntimeLightCount = context.mBoundRuntimeLightCount;
 	constants.PortalDepth = PackPortalDepthAndAmbientMultipliers(
 		traceSettings.portalDepth,
 		GetBaseAmbient(),
 		GetMetalAmbient());
-	constants.ReservedTrace0 = (renderer.mBoundRuntimeLightTileCountX & 0xffffu) | ((renderer.mBoundRuntimeLightTileCountY & 0xffffu) << 16u);
+	constants.ReservedTrace0 = (context.mBoundRuntimeLightTileCountX & 0xffffu) | ((context.mBoundRuntimeLightTileCountY & 0xffffu) << 16u);
 	constants.ReservedTrace1 = PackTraceAux1(
 		(uint32_t)denoiserSettings.denoiserMode,
 		traceSettings.emissiveSampleCount,
-		renderer.mDirectionalLightState.angularSize);
-	Copy3(renderer.mSkyColor, constants.SkyColor);
-	Copy3(renderer.mGroundColor, constants.GroundColor);
-	ApplyDirectionalLightStateToConstants(renderer.mDirectionalLightState, constants);
+		context.mDirectionalLightState.angularSize);
+	Copy3(context.mSkyColor, constants.SkyColor);
+	Copy3(context.mGroundColor, constants.GroundColor);
+	ApplyDirectionalLightStateToConstants(context.mDirectionalLightState, constants);
 
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::SrInput), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation), NRIComputeStorageState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::VendorOutput), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::SrInput), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation), NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::VendorOutput), NRIComputeStorageState());
 
-	const nri::Descriptor* defaultInput = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView;
-	renderer.mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
-	NRIDescriptorSetManager::UpdateFrameTextureSet(renderer);
+	const nri::Descriptor* defaultInput = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView;
+	context.mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+	context.UpdateFrameTextureSet();
 
-	const nri::Descriptor* defaultOutput = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation).storageView;
-	renderer.mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
-	renderer.mOutputDescriptors[0] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse).storageView;
-	renderer.mOutputDescriptors[3] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion).storageView;
-	renderer.mOutputDescriptors[4] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).storageView;
-	renderer.mOutputDescriptors[5] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness).storageView;
-	renderer.mOutputDescriptors[6] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness).storageView;
-	renderer.mOutputDescriptors[9] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo).storageView;
-	renderer.mOutputDescriptors[10] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).storageView;
-	renderer.mOutputDescriptors[11] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance).storageView;
-	renderer.mOutputDescriptors[12] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra).storageView;
-	renderer.mOutputDescriptors[13] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting).storageView;
-	renderer.mOutputDescriptors[14] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission).storageView;
-	NRIDescriptorSetManager::UpdateOutputSet(renderer);
+	const nri::Descriptor* defaultOutput = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation).storageView;
+	context.mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+	context.mOutputDescriptors[0] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse).storageView;
+	context.mOutputDescriptors[3] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion).storageView;
+	context.mOutputDescriptors[4] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).storageView;
+	context.mOutputDescriptors[5] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness).storageView;
+	context.mOutputDescriptors[6] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness).storageView;
+	context.mOutputDescriptors[9] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo).storageView;
+	context.mOutputDescriptors[10] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).storageView;
+	context.mOutputDescriptors[11] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance).storageView;
+	context.mOutputDescriptors[12] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra).storageView;
+	context.mOutputDescriptors[13] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting).storageView;
+	context.mOutputDescriptors[14] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission).storageView;
+	context.UpdateOutputSet();
 
-	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *renderer.mPipelineLayout);
-	renderer.mFrameBuffer->mCore.CmdSetRootConstants(*renderer.mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	renderer.BindSceneRootDescriptors();
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mSamplerSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, renderer.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 2, renderer.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, renderer.mFrameTextureSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, renderer.mOutputSet, nri::BindPoint::COMPUTE });
-	const uint32_t dispatchX = GetDispatchSize(renderer.mRenderWidth);
-	const uint32_t dispatchY = GetDispatchSize(renderer.mRenderHeight);
+	context.mCore->CmdSetPipelineLayout(*context.mCommandBuffer, nri::BindPoint::COMPUTE, *context.mPipelineLayout);
+	context.mCore->CmdSetRootConstants(*context.mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	context.BindSceneRootDescriptors();
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 0, context.mSamplerSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 1, context.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 2, context.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 3, context.mFrameTextureSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 4, context.mOutputSet, nri::BindPoint::COMPUTE });
+	const uint32_t dispatchX = GetDispatchSize(context.mRenderWidth);
+	const uint32_t dispatchY = GetDispatchSize(context.mRenderHeight);
 	const uint32_t dispatchZ = 1;
-	renderer.mLastPerfShellTraceStats.traceOpaqueDispatchX = dispatchX;
-	renderer.mLastPerfShellTraceStats.traceOpaqueDispatchY = dispatchY;
-	renderer.mLastPerfShellTraceStats.traceOpaqueDispatchZ = dispatchZ;
+	context.mLastPerfShellTraceStats.traceOpaqueDispatchX = dispatchX;
+	context.mLastPerfShellTraceStats.traceOpaqueDispatchY = dispatchY;
+	context.mLastPerfShellTraceStats.traceOpaqueDispatchZ = dispatchZ;
 	{
-		ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.traceOpaqueCommandMs);
-		renderer.mTraceShaderStats.ResetBuffer(renderer.BuildResourceServices(), ShouldCollectTraceShaderStats());
-		renderer.mFrameBuffer->mCore.CmdSetPipeline(*renderer.mFrameBuffer->mCommandBuffer, *renderer.GetPipeline(NRIRenderer::PipelineSlot::TraceOpaque));
-		renderer.mFrameBuffer->mCore.CmdDispatch(*renderer.mFrameBuffer->mCommandBuffer, { dispatchX, dispatchY, dispatchZ });
+		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueCommandMs);
+		context.mTraceShaderStats.ResetBuffer(context.BuildResourceServices(), ShouldCollectTraceShaderStats());
+		context.mCore->CmdSetPipeline(*context.mCommandBuffer, *context.GetPipeline(NRIRenderer::PipelineSlot::TraceOpaque));
+		context.mCore->CmdDispatch(*context.mCommandBuffer, { dispatchX, dispatchY, dispatchZ });
 	}
 	{
-		ScopedPtPerfTimer perfTimer(renderer.mLastPerfShellTraceStats.traceOpaqueStatsCopyMs);
-		renderer.mTraceShaderStats.CopyForReadback(renderer.BuildResourceServices(), ShouldCollectTraceShaderStats(), (uint64_t)renderer.mFrameIndex);
+		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueStatsCopyMs);
+		context.mTraceShaderStats.CopyForReadback(context.BuildResourceServices(), ShouldCollectTraceShaderStats(), (uint64_t)context.mFrameIndex);
 	}
 	return true;
 }
 
 
 
-bool NRIPassDispatcher::DispatchDenoiser(NRIRenderer& renderer)
+bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 {
 	Clocker clock(NriPTDenoiser);
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
 
-	if (!renderer.mNrd.EnsureReady(*renderer.mFrameBuffer->mDevice, renderer.mRenderWidth, renderer.mRenderHeight, 1))
+	if (!context.mNrd.EnsureReady(*context.mDevice, context.mRenderWidth, context.mRenderHeight, 1))
 	{
 		return false;
 	}
 
-	renderer.mNrd.NewFrame();
+	context.mNrd.NewFrame();
 
 	NRINrdDispatchDesc desc = {};
-	desc.commandBuffer = renderer.mFrameBuffer->mCommandBuffer;
-	desc.motion = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion);
-	desc.viewZ = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ);
-	desc.normalRoughness = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness);
-	desc.baseColorMetalness = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness);
-	desc.unfilteredDiffuse = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse);
-	desc.unfilteredSpecular = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular);
-	desc.unfilteredPenumbra = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra);
-	desc.diffuse = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedDiffuse);
-	desc.specular = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedSpecular);
-	desc.shadow = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedShadow);
-	desc.validation = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation);
-	desc.resourceWidth = renderer.mRenderWidth;
-	desc.resourceHeight = renderer.mRenderHeight;
-	desc.frameIndex = renderer.mFrameIndex;
-	Copy2(renderer.mCurrentJitter, desc.cameraJitter);
-	Copy2(renderer.mPreviousJitter, desc.cameraJitterPrev);
-	std::memcpy(desc.viewToClipMatrix, renderer.mCurrentViewToClip, sizeof(desc.viewToClipMatrix));
-	std::memcpy(desc.viewToClipMatrixPrev, renderer.mPreviousViewToClip, sizeof(desc.viewToClipMatrixPrev));
-	std::memcpy(desc.worldToViewMatrix, renderer.mCurrentWorldToView, sizeof(desc.worldToViewMatrix));
-	std::memcpy(desc.worldToViewMatrixPrev, renderer.mPreviousWorldToView, sizeof(desc.worldToViewMatrixPrev));
-	desc.lightDirection[0] = renderer.mDirectionalLightState.direction[0];
-	desc.lightDirection[1] = renderer.mDirectionalLightState.direction[1];
-	desc.lightDirection[2] = renderer.mDirectionalLightState.direction[2];
+	desc.commandBuffer = context.mCommandBuffer;
+	desc.motion = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion);
+	desc.viewZ = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ);
+	desc.normalRoughness = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness);
+	desc.baseColorMetalness = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness);
+	desc.unfilteredDiffuse = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse);
+	desc.unfilteredSpecular = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular);
+	desc.unfilteredPenumbra = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra);
+	desc.diffuse = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedDiffuse);
+	desc.specular = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedSpecular);
+	desc.shadow = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedShadow);
+	desc.validation = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation);
+	desc.resourceWidth = context.mRenderWidth;
+	desc.resourceHeight = context.mRenderHeight;
+	desc.frameIndex = context.mFrameIndex;
+	Copy2(context.mCurrentJitter, desc.cameraJitter);
+	Copy2(context.mPreviousJitter, desc.cameraJitterPrev);
+	std::memcpy(desc.viewToClipMatrix, context.mCurrentViewToClip, sizeof(desc.viewToClipMatrix));
+	std::memcpy(desc.viewToClipMatrixPrev, context.mPreviousViewToClip, sizeof(desc.viewToClipMatrixPrev));
+	std::memcpy(desc.worldToViewMatrix, context.mCurrentWorldToView, sizeof(desc.worldToViewMatrix));
+	std::memcpy(desc.worldToViewMatrixPrev, context.mPreviousWorldToView, sizeof(desc.worldToViewMatrixPrev));
+	desc.lightDirection[0] = context.mDirectionalLightState.direction[0];
+	desc.lightDirection[1] = context.mDirectionalLightState.direction[1];
+	desc.lightDirection[2] = context.mDirectionalLightState.direction[2];
 	Normalize3(desc.lightDirection);
 	desc.denoiserMode = denoiserSettings.denoiserMode;
 	desc.maxAccumulatedFrameNum = denoiserSettings.maxAccumulatedFrameNum;
@@ -590,130 +590,130 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIRenderer& renderer)
 	desc.maxBlurRadius = denoiserSettings.maxBlurRadius;
 	desc.sigmaMaxStabilizedFrameNum = denoiserSettings.sigmaMaxStabilizedFrameNum;
 	desc.sigmaPlaneDistanceSensitivity = denoiserSettings.sigmaPlaneDistanceSensitivity;
-	desc.resetHistory = renderer.mResetHistory;
+	desc.resetHistory = context.mResetHistory;
 	desc.enableAntiFirefly = denoiserSettings.enableAntiFirefly;
 	desc.enableValidation = denoiserSettings.enableValidation;
-	desc.enableSigmaShadow = renderer.mUseSplitShadowDenoiser;
-	return renderer.mNrd.Denoise(desc);
+	desc.enableSigmaShadow = context.mUseSplitShadowDenoiser;
+	return context.mNrd.Denoise(desc);
 }
 
 
 
-bool NRIPassDispatcher::DispatchComposition(NRIRenderer& renderer, NRIRenderer::FrameTextureSlot outputSlot)
+bool NRIPassDispatcher::DispatchComposition(NRIPassDispatchContext& context, NRIRenderer::FrameTextureSlot outputSlot)
 {
 	Clocker clock(NriPTComposition);
 
 	NRITraceSceneConstants constants = {};
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
-	Copy3(renderer.mCurrentCameraPos, constants.CameraPos);
-	Copy3(renderer.mCurrentCameraForward, constants.CameraForward);
-	Copy3(renderer.mCurrentCameraRight, constants.CameraRight);
-	Copy3(renderer.mCurrentCameraUp, constants.CameraUp);
-	Copy3(renderer.mPreviousCameraPos, constants.PrevCameraPos);
-	Copy3(renderer.mPreviousCameraForward, constants.PrevCameraForward);
-	Copy3(renderer.mPreviousCameraRight, constants.PrevCameraRight);
-	Copy3(renderer.mPreviousCameraUp, constants.PrevCameraUp);
-	constants.RenderWidth = renderer.mRenderWidth;
-	constants.RenderHeight = renderer.mRenderHeight;
-	constants.DisplayWidth = renderer.mOutputWidth;
-	constants.DisplayHeight = renderer.mOutputHeight;
-	constants.TanHalfFovX = renderer.mCurrentTanHalfFovX;
-	constants.TanHalfFovY = renderer.mCurrentTanHalfFovY;
-	constants.PrevTanHalfFovX = renderer.mPreviousTanHalfFovX;
-	constants.PrevTanHalfFovY = renderer.mPreviousTanHalfFovY;
-	constants.FrameIndex = renderer.mFrameIndex;
+	Copy3(context.mCurrentCameraPos, constants.CameraPos);
+	Copy3(context.mCurrentCameraForward, constants.CameraForward);
+	Copy3(context.mCurrentCameraRight, constants.CameraRight);
+	Copy3(context.mCurrentCameraUp, constants.CameraUp);
+	Copy3(context.mPreviousCameraPos, constants.PrevCameraPos);
+	Copy3(context.mPreviousCameraForward, constants.PrevCameraForward);
+	Copy3(context.mPreviousCameraRight, constants.PrevCameraRight);
+	Copy3(context.mPreviousCameraUp, constants.PrevCameraUp);
+	constants.RenderWidth = context.mRenderWidth;
+	constants.RenderHeight = context.mRenderHeight;
+	constants.DisplayWidth = context.mOutputWidth;
+	constants.DisplayHeight = context.mOutputHeight;
+	constants.TanHalfFovX = context.mCurrentTanHalfFovX;
+	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
+	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
+	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
+	constants.FrameIndex = context.mFrameIndex;
 	constants.Flags =
-		(renderer.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
-		(renderer.mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
-		(renderer.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
-		(renderer.mDirectionalLightState.enabled && renderer.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
+		(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(context.mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
+		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
-	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, renderer.mDirectionalLightState.color);
-	constants.RuntimeLightCount = renderer.mBoundRuntimeLightCount;
+	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, context.mDirectionalLightState.color);
+	constants.RuntimeLightCount = context.mBoundRuntimeLightCount;
 	constants.ReservedTrace0 = denoiserSettings.inputSplitMode;
-	constants.ReservedTrace1 = PackDenoiserAux1((uint32_t)denoiserSettings.denoiserMode, renderer.mDirectionalLightState.angularSize);
-	Copy3(renderer.mSkyColor, constants.SkyColor);
-	Copy3(renderer.mGroundColor, constants.GroundColor);
-	ApplyDirectionalLightStateToConstants(renderer.mDirectionalLightState, constants);
+	constants.ReservedTrace1 = PackDenoiserAux1((uint32_t)denoiserSettings.denoiserMode, context.mDirectionalLightState.angularSize);
+	Copy3(context.mSkyColor, constants.SkyColor);
+	Copy3(context.mGroundColor, constants.GroundColor);
+	ApplyDirectionalLightStateToConstants(context.mDirectionalLightState, constants);
 
-	NRITextureResource& diffuse = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse);
-	NRITextureResource& specular = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular);
-	NRITextureResource& viewZ = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ);
-	NRITextureResource& normalRoughness = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness);
-	NRITextureResource& baseColorMetalness = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness);
-	NRITextureResource& rawShadow = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra);
-	NRITextureResource& directLighting = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting);
-	NRITextureResource& directEmission = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission);
-	const NRIRenderer::FrameTextureSlot filteredDiffuseSlot = renderer.mUseDenoisedCompositionInputs ? NRIRenderer::FrameTextureSlot::DenoisedDiffuse : NRIRenderer::FrameTextureSlot::UnfilteredDiffuse;
-	const NRIRenderer::FrameTextureSlot filteredSpecularSlot = renderer.mUseDenoisedCompositionInputs ? NRIRenderer::FrameTextureSlot::DenoisedSpecular : NRIRenderer::FrameTextureSlot::UnfilteredSpecular;
-	const NRIRenderer::FrameTextureSlot filteredShadowSlot = renderer.mUseDenoisedCompositionInputs ? NRIRenderer::FrameTextureSlot::DenoisedShadow : NRIRenderer::FrameTextureSlot::UnfilteredPenumbra;
-	NRITextureResource& filteredDiffuse = renderer.GetFrameTexture(filteredDiffuseSlot);
-	NRITextureResource& filteredSpecular = renderer.GetFrameTexture(filteredSpecularSlot);
-	NRITextureResource& filteredShadow = renderer.GetFrameTexture(filteredShadowSlot);
-	NRITextureResource& composed = renderer.GetFrameTexture(outputSlot);
+	NRITextureResource& diffuse = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse);
+	NRITextureResource& specular = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular);
+	NRITextureResource& viewZ = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ);
+	NRITextureResource& normalRoughness = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness);
+	NRITextureResource& baseColorMetalness = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness);
+	NRITextureResource& rawShadow = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra);
+	NRITextureResource& directLighting = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting);
+	NRITextureResource& directEmission = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission);
+	const NRIRenderer::FrameTextureSlot filteredDiffuseSlot = context.mUseDenoisedCompositionInputs ? NRIRenderer::FrameTextureSlot::DenoisedDiffuse : NRIRenderer::FrameTextureSlot::UnfilteredDiffuse;
+	const NRIRenderer::FrameTextureSlot filteredSpecularSlot = context.mUseDenoisedCompositionInputs ? NRIRenderer::FrameTextureSlot::DenoisedSpecular : NRIRenderer::FrameTextureSlot::UnfilteredSpecular;
+	const NRIRenderer::FrameTextureSlot filteredShadowSlot = context.mUseDenoisedCompositionInputs ? NRIRenderer::FrameTextureSlot::DenoisedShadow : NRIRenderer::FrameTextureSlot::UnfilteredPenumbra;
+	NRITextureResource& filteredDiffuse = context.GetFrameTexture(filteredDiffuseSlot);
+	NRITextureResource& filteredSpecular = context.GetFrameTexture(filteredSpecularSlot);
+	NRITextureResource& filteredShadow = context.GetFrameTexture(filteredShadowSlot);
+	NRITextureResource& composed = context.GetFrameTexture(outputSlot);
 
-	renderer.mFrameBuffer->TransitionTexture(diffuse, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(specular, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(viewZ, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(normalRoughness, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(baseColorMetalness, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(rawShadow, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(directLighting, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(directEmission, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(filteredDiffuse, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(filteredSpecular, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(filteredShadow, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(composed, NRIComputeStorageState());
+	context.TransitionTexture(diffuse, NRIComputeShaderResourceState());
+	context.TransitionTexture(specular, NRIComputeShaderResourceState());
+	context.TransitionTexture(viewZ, NRIComputeShaderResourceState());
+	context.TransitionTexture(normalRoughness, NRIComputeShaderResourceState());
+	context.TransitionTexture(baseColorMetalness, NRIComputeShaderResourceState());
+	context.TransitionTexture(rawShadow, NRIComputeShaderResourceState());
+	context.TransitionTexture(directLighting, NRIComputeShaderResourceState());
+	context.TransitionTexture(directEmission, NRIComputeShaderResourceState());
+	context.TransitionTexture(filteredDiffuse, NRIComputeShaderResourceState());
+	context.TransitionTexture(filteredSpecular, NRIComputeShaderResourceState());
+	context.TransitionTexture(filteredShadow, NRIComputeShaderResourceState());
+	context.TransitionTexture(composed, NRIComputeStorageState());
 
 	const nri::Descriptor* defaultInput = diffuse.shaderView;
-	renderer.mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
-	renderer.mFrameInputDescriptors[2] = viewZ.shaderView;
-	renderer.mFrameInputDescriptors[3] = normalRoughness.shaderView;
-	renderer.mFrameInputDescriptors[4] = baseColorMetalness.shaderView;
-	renderer.mFrameInputDescriptors[5] = diffuse.shaderView;
-	renderer.mFrameInputDescriptors[6] = specular.shaderView;
-	renderer.mFrameInputDescriptors[8] = filteredDiffuse.shaderView;
-	renderer.mFrameInputDescriptors[9] = filteredSpecular.shaderView;
-	renderer.mFrameInputDescriptors[10] = rawShadow.shaderView;
-	renderer.mFrameInputDescriptors[11] = filteredShadow.shaderView;
-	renderer.mFrameInputDescriptors[12] = directLighting.shaderView;
-	renderer.mFrameInputDescriptors[13] = directEmission.shaderView;
-	NRIDescriptorSetManager::UpdateFrameTextureSet(renderer, renderer.mCompositionFrameTextureSet, renderer.mFrameInputDescriptors);
+	context.mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+	context.mFrameInputDescriptors[2] = viewZ.shaderView;
+	context.mFrameInputDescriptors[3] = normalRoughness.shaderView;
+	context.mFrameInputDescriptors[4] = baseColorMetalness.shaderView;
+	context.mFrameInputDescriptors[5] = diffuse.shaderView;
+	context.mFrameInputDescriptors[6] = specular.shaderView;
+	context.mFrameInputDescriptors[8] = filteredDiffuse.shaderView;
+	context.mFrameInputDescriptors[9] = filteredSpecular.shaderView;
+	context.mFrameInputDescriptors[10] = rawShadow.shaderView;
+	context.mFrameInputDescriptors[11] = filteredShadow.shaderView;
+	context.mFrameInputDescriptors[12] = directLighting.shaderView;
+	context.mFrameInputDescriptors[13] = directEmission.shaderView;
+	context.UpdateFrameTextureSet(context.mCompositionFrameTextureSet, context.mFrameInputDescriptors);
 
 	const nri::Descriptor* defaultOutput = composed.storageView;
-	renderer.mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
-	renderer.mOutputDescriptors[1] = composed.storageView;
-	NRIDescriptorSetManager::UpdateOutputSet(renderer, renderer.mCompositionOutputSet, renderer.mOutputDescriptors);
+	context.mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+	context.mOutputDescriptors[1] = composed.storageView;
+	context.UpdateOutputSet(context.mCompositionOutputSet, context.mOutputDescriptors);
 
-	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *renderer.mPipelineLayout);
-	renderer.mFrameBuffer->mCore.CmdSetRootConstants(*renderer.mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	renderer.BindSceneRootDescriptors();
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mSamplerSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, renderer.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 2, renderer.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, renderer.mCompositionFrameTextureSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, renderer.mCompositionOutputSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetPipeline(*renderer.mFrameBuffer->mCommandBuffer, *renderer.GetPipeline(NRIRenderer::PipelineSlot::Composition));
-	renderer.mFrameBuffer->mCore.CmdDispatch(*renderer.mFrameBuffer->mCommandBuffer, { GetDispatchSize(renderer.mRenderWidth), GetDispatchSize(renderer.mRenderHeight), 1 });
+	context.mCore->CmdSetPipelineLayout(*context.mCommandBuffer, nri::BindPoint::COMPUTE, *context.mPipelineLayout);
+	context.mCore->CmdSetRootConstants(*context.mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	context.BindSceneRootDescriptors();
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 0, context.mSamplerSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 1, context.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 2, context.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 3, context.mCompositionFrameTextureSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 4, context.mCompositionOutputSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetPipeline(*context.mCommandBuffer, *context.GetPipeline(NRIRenderer::PipelineSlot::Composition));
+	context.mCore->CmdDispatch(*context.mCommandBuffer, { GetDispatchSize(context.mRenderWidth), GetDispatchSize(context.mRenderHeight), 1 });
 	return true;
 }
 
 
 
-bool NRIPassDispatcher::DispatchTraceTransparent(NRIRenderer& renderer)
+bool NRIPassDispatcher::DispatchTraceTransparent(NRIPassDispatchContext& context)
 {
 	Clocker clock(NriPTComposition);
 
-	NRITextureResource& composed = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed);
-	NRITextureResource& transparentOutput = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::TraceTransparentOutput);
-	renderer.CopyTexture(composed, transparentOutput);
+	NRITextureResource& composed = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed);
+	NRITextureResource& transparentOutput = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::TraceTransparentOutput);
+	context.CopyTexture(composed, transparentOutput);
 	return true;
 }
 
 
 
-bool NRIPassDispatcher::DispatchUpscalerPrepass(NRIRenderer& renderer, NRIMainUpscalerKind mainKind)
+bool NRIPassDispatcher::DispatchUpscalerPrepass(NRIPassDispatchContext& context, NRIMainUpscalerKind mainKind)
 {
 	if (mainKind == NRIMainUpscalerKind::Off)
 	{
@@ -723,125 +723,125 @@ bool NRIPassDispatcher::DispatchUpscalerPrepass(NRIRenderer& renderer, NRIMainUp
 	const NRIRenderer::FrameTextureSlot vendorInputSlot =
 		mainKind == NRIMainUpscalerKind::DLSR ? NRIRenderer::FrameTextureSlot::SrInput :
 		NRIRenderer::FrameTextureSlot::RrInput;
-	NRITextureResource& vendorInput = renderer.GetFrameTexture(vendorInputSlot);
-	NRITextureResource& upscalerDepth = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UpscalerDepth);
-	NRITextureResource& rrGuideDiffuseAlbedo = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo);
-	NRITextureResource& rrGuideSpecularAlbedo = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularAlbedo);
-	NRITextureResource& rrGuideSpecularHitDistance = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance);
-	NRITextureResource& rrGuideNormalRoughness = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideNormalRoughness);
+	NRITextureResource& vendorInput = context.GetFrameTexture(vendorInputSlot);
+	NRITextureResource& upscalerDepth = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UpscalerDepth);
+	NRITextureResource& rrGuideDiffuseAlbedo = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo);
+	NRITextureResource& rrGuideSpecularAlbedo = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularAlbedo);
+	NRITextureResource& rrGuideSpecularHitDistance = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance);
+	NRITextureResource& rrGuideNormalRoughness = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideNormalRoughness);
 	const bool useSrPrepass = mainKind == NRIMainUpscalerKind::DLSR;
 
 	// SR consumes the post-transparent composed signal, while RR now arrives with an
 	// explicitly prepared noisy RrInput from the frame-graph path above.
 	if (useSrPrepass)
 	{
-		renderer.CopyTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::TraceTransparentOutput), vendorInput);
+		context.CopyTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::TraceTransparentOutput), vendorInput);
 	}
-	renderer.mFrameBuffer->TransitionTexture(vendorInput, NRIComputeShaderResourceState());
+	context.TransitionTexture(vendorInput, NRIComputeShaderResourceState());
 
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(upscalerDepth, NRIComputeStorageState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
+	context.TransitionTexture(upscalerDepth, NRIComputeStorageState());
 	if (!useSrPrepass)
 	{
-		renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(rrGuideDiffuseAlbedo, NRIComputeStorageState());
-		renderer.mFrameBuffer->TransitionTexture(rrGuideSpecularAlbedo, NRIComputeStorageState());
-		renderer.mFrameBuffer->TransitionTexture(rrGuideSpecularHitDistance, NRIComputeStorageState());
-		renderer.mFrameBuffer->TransitionTexture(rrGuideNormalRoughness, NRIComputeStorageState());
+		context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
+		context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
+		context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
+		context.TransitionTexture(rrGuideDiffuseAlbedo, NRIComputeStorageState());
+		context.TransitionTexture(rrGuideSpecularAlbedo, NRIComputeStorageState());
+		context.TransitionTexture(rrGuideSpecularHitDistance, NRIComputeStorageState());
+		context.TransitionTexture(rrGuideNormalRoughness, NRIComputeStorageState());
 	}
 
-	const nri::Descriptor* defaultInput = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).shaderView;
-	renderer.mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
-	renderer.mFrameInputDescriptors[2] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).shaderView;
+	const nri::Descriptor* defaultInput = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).shaderView;
+	context.mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
+	context.mFrameInputDescriptors[2] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).shaderView;
 	if (!useSrPrepass)
 	{
-		renderer.mFrameInputDescriptors[3] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness).shaderView;
-		renderer.mFrameInputDescriptors[4] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness).shaderView;
-		renderer.mFrameInputDescriptors[6] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).shaderView;
+		context.mFrameInputDescriptors[3] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness).shaderView;
+		context.mFrameInputDescriptors[4] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness).shaderView;
+		context.mFrameInputDescriptors[6] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).shaderView;
 	}
-	if (!NRIDescriptorSetManager::UpdateFrameTextureSet(renderer, renderer.mUpscalerPrepassFrameTextureSet, renderer.mFrameInputDescriptors))
+	if (!context.UpdateFrameTextureSet(context.mUpscalerPrepassFrameTextureSet, context.mFrameInputDescriptors))
 	{
 		return false;
 	}
 
 	const nri::Descriptor* defaultOutput = upscalerDepth.storageView;
-	renderer.mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
-	renderer.mOutputDescriptors[12] = upscalerDepth.storageView;
+	context.mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
+	context.mOutputDescriptors[12] = upscalerDepth.storageView;
 	if (!useSrPrepass)
 	{
-		renderer.mOutputDescriptors[5] = rrGuideNormalRoughness.storageView;
-		renderer.mOutputDescriptors[9] = rrGuideDiffuseAlbedo.storageView;
-		renderer.mOutputDescriptors[10] = rrGuideSpecularAlbedo.storageView;
-		renderer.mOutputDescriptors[11] = rrGuideSpecularHitDistance.storageView;
+		context.mOutputDescriptors[5] = rrGuideNormalRoughness.storageView;
+		context.mOutputDescriptors[9] = rrGuideDiffuseAlbedo.storageView;
+		context.mOutputDescriptors[10] = rrGuideSpecularAlbedo.storageView;
+		context.mOutputDescriptors[11] = rrGuideSpecularHitDistance.storageView;
 	}
-	if (!NRIDescriptorSetManager::UpdateOutputSet(renderer, renderer.mUpscalerPrepassOutputSet, renderer.mOutputDescriptors))
+	if (!context.UpdateOutputSet(context.mUpscalerPrepassOutputSet, context.mOutputDescriptors))
 	{
 		return false;
 	}
 
 	NRITraceSceneConstants constants = {};
-	constants.RenderWidth = renderer.mRenderWidth;
-	constants.RenderHeight = renderer.mRenderHeight;
-	constants.DisplayWidth = renderer.mOutputWidth;
-	constants.DisplayHeight = renderer.mOutputHeight;
-	constants.FrameIndex = renderer.mFrameIndex;
+	constants.RenderWidth = context.mRenderWidth;
+	constants.RenderHeight = context.mRenderHeight;
+	constants.DisplayWidth = context.mOutputWidth;
+	constants.DisplayHeight = context.mOutputHeight;
+	constants.FrameIndex = context.mFrameIndex;
 	constants.ReservedTrace0 =
 		mainKind == NRIMainUpscalerKind::DLSR ? 1u :
 		mainKind == NRIMainUpscalerKind::DLRR ? 2u :
 		0u;
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
-	constants.Flags = renderer.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
-	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *renderer.mPipelineLayout);
-	renderer.mFrameBuffer->mCore.CmdSetRootConstants(*renderer.mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	renderer.BindSceneRootDescriptors();
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mSamplerSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, renderer.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 2, renderer.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, renderer.mUpscalerPrepassFrameTextureSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, renderer.mUpscalerPrepassOutputSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetPipeline(*renderer.mFrameBuffer->mCommandBuffer, *renderer.GetPipeline(useSrPrepass ? NRIRenderer::PipelineSlot::DlssSrBefore : NRIRenderer::PipelineSlot::DlssBefore));
-	renderer.mFrameBuffer->mCore.CmdDispatch(*renderer.mFrameBuffer->mCommandBuffer, { GetDispatchSize(renderer.mRenderWidth), GetDispatchSize(renderer.mRenderHeight), 1 });
+	constants.Flags = context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+	context.mCore->CmdSetPipelineLayout(*context.mCommandBuffer, nri::BindPoint::COMPUTE, *context.mPipelineLayout);
+	context.mCore->CmdSetRootConstants(*context.mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	context.BindSceneRootDescriptors();
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 0, context.mSamplerSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 1, context.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 2, context.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 3, context.mUpscalerPrepassFrameTextureSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 4, context.mUpscalerPrepassOutputSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetPipeline(*context.mCommandBuffer, *context.GetPipeline(useSrPrepass ? NRIRenderer::PipelineSlot::DlssSrBefore : NRIRenderer::PipelineSlot::DlssBefore));
+	context.mCore->CmdDispatch(*context.mCommandBuffer, { GetDispatchSize(context.mRenderWidth), GetDispatchSize(context.mRenderHeight), 1 });
 	return true;
 }
 
 
 
-bool NRIPassDispatcher::DispatchRawPresent(NRIRenderer& renderer, NRIRenderer::FrameTextureSlot inputSlot, NRIRenderer::FrameTextureSlot secondarySlot, NRIRenderer::FrameTextureSlot tertiarySlot)
+bool NRIPassDispatcher::DispatchRawPresent(NRIPassDispatchContext& context, NRIRenderer::FrameTextureSlot inputSlot, NRIRenderer::FrameTextureSlot secondarySlot, NRIRenderer::FrameTextureSlot tertiarySlot)
 {
 	Clocker clock(NriPTRawPresent);
 
 	NRIPresentConstants constants = {};
-	ApplyOutputPolicyToPresentConstants(renderer.mFrameBuffer->GetPathTracingOutputPolicy(), constants);
-	constants.DisplayWidth = renderer.mOutputWidth;
-	constants.DisplayHeight = renderer.mOutputHeight;
-	constants.FrameIndex = renderer.mFrameIndex;
+	ApplyOutputPolicyToPresentConstants(context.mFrameBuffer->GetPathTracingOutputPolicy(), constants);
+	constants.DisplayWidth = context.mOutputWidth;
+	constants.DisplayHeight = context.mOutputHeight;
+	constants.FrameIndex = context.mFrameIndex;
 	constants.DebugMode = GetEffectivePtDebugMode();
-	constants.PackedSceneOrigin = PackPresentSceneOrigin(renderer.mSceneLeft, renderer.mSceneTop);
+	constants.PackedSceneOrigin = PackPresentSceneOrigin(context.mSceneLeft, context.mSceneTop);
 	constants.DenoiserMode = (uint32_t)GetSelectedNrdDenoiserMode();
 
-	NRITextureResource& input = renderer.GetFrameTexture(inputSlot);
+	NRITextureResource& input = context.GetFrameTexture(inputSlot);
 	constants.InputWidth = input.width;
 	constants.InputHeight = input.height;
 	const bool addSecondary = secondarySlot != NRIRenderer::FrameTextureSlot::Count;
-	NRITextureResource& secondary = renderer.GetFrameTexture(addSecondary ? secondarySlot : inputSlot);
+	NRITextureResource& secondary = context.GetFrameTexture(addSecondary ? secondarySlot : inputSlot);
 	const bool hasTertiary = tertiarySlot != NRIRenderer::FrameTextureSlot::Count;
-	NRITextureResource& tertiary = renderer.GetFrameTexture(hasTertiary ? tertiarySlot : inputSlot);
-	NRITextureResource& final = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final);
+	NRITextureResource& tertiary = context.GetFrameTexture(hasTertiary ? tertiarySlot : inputSlot);
+	NRITextureResource& final = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final);
 	if (addSecondary)
 	{
 		constants.Flags |= NRI_FLAG_RAW_PRESENT_ADD_SECONDARY;
 	}
-	if (renderer.mUseSplitShadowDenoiser)
+	if (context.mUseSplitShadowDenoiser)
 	{
 		constants.Flags |= NRI_PRESENT_FLAG_SPLIT_SHADOW_DENOISER;
 	}
 
-	renderer.mFrameBuffer->TransitionTexture(input, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(secondary, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(tertiary, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
+	context.TransitionTexture(input, NRIComputeShaderResourceState());
+	context.TransitionTexture(secondary, NRIComputeShaderResourceState());
+	context.TransitionTexture(tertiary, NRIComputeShaderResourceState());
+	context.TransitionTexture(final, NRIComputeStorageState());
 
 	const nri::Descriptor* inputs[3] = {
 		input.shaderView,
@@ -849,51 +849,51 @@ bool NRIPassDispatcher::DispatchRawPresent(NRIRenderer& renderer, NRIRenderer::F
 		tertiary.shaderView
 	};
 	nri::UpdateDescriptorRangeDesc inputUpdate = {};
-	inputUpdate.descriptorSet = renderer.mRawPresentFrameTextureSet;
+	inputUpdate.descriptorSet = context.mRawPresentFrameTextureSet;
 	inputUpdate.rangeIndex = 0;
 	inputUpdate.descriptors = inputs;
 	inputUpdate.descriptorNum = (uint32_t)std::size(inputs);
-	renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&inputUpdate, 1);
+	context.mCore->UpdateDescriptorRanges(&inputUpdate, 1);
 
 	const nri::Descriptor* outputs[1] = { final.storageView };
 	nri::UpdateDescriptorRangeDesc outputUpdate = {};
-	outputUpdate.descriptorSet = renderer.mRawPresentOutputSet;
+	outputUpdate.descriptorSet = context.mRawPresentOutputSet;
 	outputUpdate.rangeIndex = 0;
 	outputUpdate.descriptors = outputs;
 	outputUpdate.descriptorNum = (uint32_t)std::size(outputs);
-	renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&outputUpdate, 1);
+	context.mCore->UpdateDescriptorRanges(&outputUpdate, 1);
 
-	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *renderer.mPresentPipelineLayout);
-	renderer.mFrameBuffer->mCore.CmdSetRootConstants(*renderer.mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mRawPresentFrameTextureSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, renderer.mRawPresentOutputSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetPipeline(*renderer.mFrameBuffer->mCommandBuffer, *renderer.GetPipeline(NRIRenderer::PipelineSlot::RawPresent));
-	renderer.mFrameBuffer->mCore.CmdDispatch(*renderer.mFrameBuffer->mCommandBuffer, { GetDispatchSize(renderer.mTargetWidth), GetDispatchSize(renderer.mTargetHeight), 1 });
+	context.mCore->CmdSetPipelineLayout(*context.mCommandBuffer, nri::BindPoint::COMPUTE, *context.mPresentPipelineLayout);
+	context.mCore->CmdSetRootConstants(*context.mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 0, context.mRawPresentFrameTextureSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 1, context.mRawPresentOutputSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetPipeline(*context.mCommandBuffer, *context.GetPipeline(NRIRenderer::PipelineSlot::RawPresent));
+	context.mCore->CmdDispatch(*context.mCommandBuffer, { GetDispatchSize(context.mTargetWidth), GetDispatchSize(context.mTargetHeight), 1 });
 	return true;
 }
 
 
 
-bool NRIPassDispatcher::DispatchFinalPresent(NRIRenderer& renderer, NRIRenderer::FrameTextureSlot inputSlot)
+bool NRIPassDispatcher::DispatchFinalPresent(NRIPassDispatchContext& context, NRIRenderer::FrameTextureSlot inputSlot)
 {
 	Clocker clock(NriPTFinalPresent);
 
-	const NRIPTOutputPolicy outputPolicy = renderer.mFrameBuffer->GetPathTracingOutputPolicy();
-	const NRIMainUpscalerKind resolvedMain = renderer.ResolveMainUpscalerKind(false);
-	const NRIPostSharpenKind resolvedPost = renderer.ResolvePostSharpenKind(false);
-	const NRIRenderer::ExposureRoute exposureRoute = renderer.ResolveExposureRoute(inputSlot, outputPolicy, resolvedMain, resolvedPost);
+	const NRIPTOutputPolicy outputPolicy = context.mFrameBuffer->GetPathTracingOutputPolicy();
+	const NRIMainUpscalerKind resolvedMain = context.ResolveMainUpscalerKind(false);
+	const NRIPostSharpenKind resolvedPost = context.ResolvePostSharpenKind(false);
+	const NRIRenderer::ExposureRoute exposureRoute = context.ResolveExposureRoute(inputSlot, outputPolicy, resolvedMain, resolvedPost);
 	NRIPresentConstants constants = {};
 	ApplyOutputPolicyToPresentConstants(outputPolicy, constants);
-	ApplyNightVisionStateToPresentConstants(renderer.mNightVisionState, constants);
+	ApplyNightVisionStateToPresentConstants(context.mNightVisionState, constants);
 	constants.Exposure = exposureRoute.presentExposure;
 	const bool finalPresentInputPreExposed = exposureRoute.inputDomain == NRIRenderer::ExposureDomain::PreExposedHDR;
 	const bool finalPresentAutoExposureEligible =
-		renderer.mExposure.GetSettings().enabled &&
+		context.mExposure.GetSettings().enabled &&
 		exposureRoute.inputDomain == NRIRenderer::ExposureDomain::SceneHDR;
 	NRITextureResource* exposureStateTexture = nullptr;
 	if (finalPresentAutoExposureEligible)
 	{
-		NRITextureResource& candidateExposureState = renderer.mExposure.GetMutableExposureStateTexture(renderer.mFrameIndex & 1u);
+		NRITextureResource& candidateExposureState = context.mExposure.GetMutableExposureStateTexture(context.mFrameIndex & 1u);
 		if (candidateExposureState.texture != nullptr)
 		{
 			exposureStateTexture = &candidateExposureState;
@@ -906,23 +906,23 @@ bool NRIPassDispatcher::DispatchFinalPresent(NRIRenderer& renderer, NRIRenderer:
 		(finalPresentAutoExposureEligible ? NRI_PRESENT_OUTPUT_FLAG_AUTO_EXPOSURE : 0u) |
 		(exposureStateTextureValid ? NRI_PRESENT_OUTPUT_FLAG_EXPOSURE_TEXTURE_VALID : 0u) |
 		(finalPresentInputPreExposed ? NRI_PRESENT_OUTPUT_FLAG_INPUT_PRE_EXPOSED : 0u);
-	constants.DisplayWidth = renderer.mOutputWidth;
-	constants.DisplayHeight = renderer.mOutputHeight;
-	constants.FrameIndex = renderer.mFrameIndex;
+	constants.DisplayWidth = context.mOutputWidth;
+	constants.DisplayHeight = context.mOutputHeight;
+	constants.FrameIndex = context.mFrameIndex;
 	constants.DebugMode = GetEffectivePtDebugMode();
-	constants.PackedSceneOrigin = PackPresentSceneOrigin(renderer.mSceneLeft, renderer.mSceneTop);
+	constants.PackedSceneOrigin = PackPresentSceneOrigin(context.mSceneLeft, context.mSceneTop);
 
-	NRITextureResource& input = renderer.GetFrameTexture(inputSlot);
-	NRITextureResource& final = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final);
+	NRITextureResource& input = context.GetFrameTexture(inputSlot);
+	NRITextureResource& final = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final);
 	constants.InputWidth = input.width;
 	constants.InputHeight = input.height;
 
-	renderer.mFrameBuffer->TransitionTexture(input, NRIComputeShaderResourceState());
+	context.TransitionTexture(input, NRIComputeShaderResourceState());
 	if (exposureStateTextureValid)
 	{
-		renderer.mFrameBuffer->TransitionTexture(*exposureStateTexture, NRIComputeShaderResourceState());
+		context.TransitionTexture(*exposureStateTexture, NRIComputeShaderResourceState());
 	}
-	renderer.mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
+	context.TransitionTexture(final, NRIComputeStorageState());
 
 	const nri::Descriptor* inputs[3] = {
 		input.shaderView,
@@ -930,65 +930,65 @@ bool NRIPassDispatcher::DispatchFinalPresent(NRIRenderer& renderer, NRIRenderer:
 		input.shaderView
 	};
 	nri::UpdateDescriptorRangeDesc inputUpdate = {};
-	inputUpdate.descriptorSet = renderer.mFinalPresentFrameTextureSet;
+	inputUpdate.descriptorSet = context.mFinalPresentFrameTextureSet;
 	inputUpdate.rangeIndex = 0;
 	inputUpdate.descriptors = inputs;
 	inputUpdate.descriptorNum = (uint32_t)std::size(inputs);
-	renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&inputUpdate, 1);
+	context.mCore->UpdateDescriptorRanges(&inputUpdate, 1);
 
 	const nri::Descriptor* outputs[1] = { final.storageView };
 	nri::UpdateDescriptorRangeDesc outputUpdate = {};
-	outputUpdate.descriptorSet = renderer.mFinalPresentOutputSet;
+	outputUpdate.descriptorSet = context.mFinalPresentOutputSet;
 	outputUpdate.rangeIndex = 0;
 	outputUpdate.descriptors = outputs;
 	outputUpdate.descriptorNum = (uint32_t)std::size(outputs);
-	renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&outputUpdate, 1);
+	context.mCore->UpdateDescriptorRanges(&outputUpdate, 1);
 
-	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *renderer.mPresentPipelineLayout);
-	renderer.mFrameBuffer->mCore.CmdSetRootConstants(*renderer.mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mFinalPresentFrameTextureSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, renderer.mFinalPresentOutputSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetPipeline(*renderer.mFrameBuffer->mCommandBuffer, *renderer.GetPipeline(NRIRenderer::PipelineSlot::FinalPresent));
-	renderer.mFrameBuffer->mCore.CmdDispatch(*renderer.mFrameBuffer->mCommandBuffer, { GetDispatchSize(renderer.mTargetWidth), GetDispatchSize(renderer.mTargetHeight), 1 });
+	context.mCore->CmdSetPipelineLayout(*context.mCommandBuffer, nri::BindPoint::COMPUTE, *context.mPresentPipelineLayout);
+	context.mCore->CmdSetRootConstants(*context.mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 0, context.mFinalPresentFrameTextureSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 1, context.mFinalPresentOutputSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetPipeline(*context.mCommandBuffer, *context.GetPipeline(NRIRenderer::PipelineSlot::FinalPresent));
+	context.mCore->CmdDispatch(*context.mCommandBuffer, { GetDispatchSize(context.mTargetWidth), GetDispatchSize(context.mTargetHeight), 1 });
 	return true;
 }
 
 
 
-bool NRIPassDispatcher::DispatchUpscaleChain(NRIRenderer& renderer)
+bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 {
 	Clocker clock(NriPTUpscale);
 
-	const NRIMainUpscalerKind mainKind = renderer.ResolveMainUpscalerKind(true);
-	const NRIPostSharpenKind postSharpenKind = renderer.ResolvePostSharpenKind(true);
+	const NRIMainUpscalerKind mainKind = context.ResolveMainUpscalerKind(true);
+	const NRIPostSharpenKind postSharpenKind = context.ResolvePostSharpenKind(true);
 	const bool runAppTaa = NRIShouldRunAppTaa(mainKind);
-	const bool useAppTaaJitter = runAppTaa && !renderer.mGuiCaptureActive;
-	NRITextureResource& composed = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::TraceTransparentOutput);
+	const bool useAppTaaJitter = runAppTaa && !context.mGuiCaptureActive;
+	NRITextureResource& composed = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::TraceTransparentOutput);
 	const NRIRenderer::FrameTextureSlot vendorSourceSlot =
 		mainKind == NRIMainUpscalerKind::DLRR ? NRIRenderer::FrameTextureSlot::RrInput :
 		NRIRenderer::FrameTextureSlot::TraceTransparentOutput;
-	NRITextureResource& historyInput = renderer.GetFrameTexture(renderer.mHistoryInputSlot);
-	NRITextureResource& historyOutput = renderer.GetFrameTexture(renderer.mHistoryOutputSlot);
-	renderer.TraceTemporalState("upscale-entry", mainKind, postSharpenKind, runAppTaa, renderer.mHistoryOutputSlot, vendorSourceSlot);
+	NRITextureResource& historyInput = context.GetFrameTexture(context.mHistoryInputSlot);
+	NRITextureResource& historyOutput = context.GetFrameTexture(context.mHistoryOutputSlot);
+	context.TraceTemporalState("upscale-entry", mainKind, postSharpenKind, runAppTaa, context.mHistoryOutputSlot, vendorSourceSlot);
 
 	if (runAppTaa)
 	{
 		NRITemporalConstants constants = {};
-		constants.RenderWidth = renderer.mRenderWidth;
-		constants.RenderHeight = renderer.mRenderHeight;
-		constants.FrameIndex = renderer.mFrameIndex;
+		constants.RenderWidth = context.mRenderWidth;
+		constants.RenderHeight = context.mRenderHeight;
+		constants.FrameIndex = context.mFrameIndex;
 		constants.Flags =
-			(renderer.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+			(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 			(useAppTaaJitter ? NRI_FLAG_USE_JITTER : 0u) |
 			NRIPackTemporalJitterPhaseCount(NRIGetTemporalJitterPhaseCount(
 				mainKind,
-				NRIResolveUpscalerModeForMain(mainKind, renderer.GetSelectedUpscalerMode()),
-				renderer.mGuiCaptureActive));
-		constants.Exposure = GetTemporalExposure(renderer.mFrameBuffer->GetPathTracingOutputPolicy());
+				NRIResolveUpscalerModeForMain(mainKind, context.GetSelectedUpscalerMode()),
+				context.mGuiCaptureActive));
+		constants.Exposure = GetTemporalExposure(context.mFrameBuffer->GetPathTracingOutputPolicy());
 		NRITextureResource* exposureStateTexture = nullptr;
-		if (renderer.mExposure.GetSettings().enabled)
+		if (context.mExposure.GetSettings().enabled)
 		{
-			NRITextureResource& candidateExposureState = renderer.mExposure.GetMutableExposureStateTexture(renderer.mFrameIndex & 1u);
+			NRITextureResource& candidateExposureState = context.mExposure.GetMutableExposureStateTexture(context.mFrameIndex & 1u);
 			if (candidateExposureState.texture != nullptr)
 			{
 				exposureStateTexture = &candidateExposureState;
@@ -998,143 +998,143 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIRenderer& renderer)
 			exposureStateTexture != nullptr &&
 			exposureStateTexture->shaderView != nullptr;
 		constants.Flags |=
-			(renderer.mExposure.GetSettings().enabled ? NRI_TEMPORAL_FLAG_AUTO_EXPOSURE : 0u) |
+			(context.mExposure.GetSettings().enabled ? NRI_TEMPORAL_FLAG_AUTO_EXPOSURE : 0u) |
 			(exposureStateTextureValid ? NRI_TEMPORAL_FLAG_EXPOSURE_TEXTURE_VALID : 0u);
 
-		renderer.mFrameBuffer->TransitionTexture(composed, NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(historyInput, NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+		context.TransitionTexture(composed, NRIComputeShaderResourceState());
+		context.TransitionTexture(historyInput, NRIComputeShaderResourceState());
+		context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeShaderResourceState());
 		if (exposureStateTextureValid)
 		{
-			renderer.mFrameBuffer->TransitionTexture(*exposureStateTexture, NRIComputeShaderResourceState());
+			context.TransitionTexture(*exposureStateTexture, NRIComputeShaderResourceState());
 		}
-		renderer.mFrameBuffer->TransitionTexture(historyOutput, NRIComputeStorageState());
+		context.TransitionTexture(historyOutput, NRIComputeStorageState());
 
 		const nri::Descriptor* taaInputs[4] = {
 			historyInput.shaderView,
-			renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion).shaderView,
+			context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion).shaderView,
 			composed.shaderView,
 			exposureStateTextureValid ? exposureStateTexture->shaderView : composed.shaderView
 		};
 		nri::UpdateDescriptorRangeDesc taaInputUpdate = {};
-		taaInputUpdate.descriptorSet = renderer.mTaaFrameTextureSet;
+		taaInputUpdate.descriptorSet = context.mTaaFrameTextureSet;
 		taaInputUpdate.rangeIndex = 0;
 		taaInputUpdate.descriptors = taaInputs;
 		taaInputUpdate.descriptorNum = (uint32_t)std::size(taaInputs);
-		renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&taaInputUpdate, 1);
+		context.mCore->UpdateDescriptorRanges(&taaInputUpdate, 1);
 
 		const nri::Descriptor* taaOutputs[1] = { historyOutput.storageView };
 		nri::UpdateDescriptorRangeDesc taaOutputUpdate = {};
-		taaOutputUpdate.descriptorSet = renderer.mTaaOutputSet;
+		taaOutputUpdate.descriptorSet = context.mTaaOutputSet;
 		taaOutputUpdate.rangeIndex = 0;
 		taaOutputUpdate.descriptors = taaOutputs;
 		taaOutputUpdate.descriptorNum = (uint32_t)std::size(taaOutputs);
-		renderer.mFrameBuffer->mCore.UpdateDescriptorRanges(&taaOutputUpdate, 1);
+		context.mCore->UpdateDescriptorRanges(&taaOutputUpdate, 1);
 
-		renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *renderer.mTaaPipelineLayout);
-		renderer.mFrameBuffer->mCore.CmdSetRootConstants(*renderer.mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mTaaFrameTextureSet, nri::BindPoint::COMPUTE });
-		renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, renderer.mTaaOutputSet, nri::BindPoint::COMPUTE });
-		renderer.mFrameBuffer->mCore.CmdSetPipeline(*renderer.mFrameBuffer->mCommandBuffer, *renderer.GetPipeline(NRIRenderer::PipelineSlot::Taa));
-		renderer.mFrameBuffer->mCore.CmdDispatch(*renderer.mFrameBuffer->mCommandBuffer, { GetDispatchSize(renderer.mRenderWidth), GetDispatchSize(renderer.mRenderHeight), 1 });
+		context.mCore->CmdSetPipelineLayout(*context.mCommandBuffer, nri::BindPoint::COMPUTE, *context.mTaaPipelineLayout);
+		context.mCore->CmdSetRootConstants(*context.mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+		context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 0, context.mTaaFrameTextureSet, nri::BindPoint::COMPUTE });
+		context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 1, context.mTaaOutputSet, nri::BindPoint::COMPUTE });
+		context.mCore->CmdSetPipeline(*context.mCommandBuffer, *context.GetPipeline(NRIRenderer::PipelineSlot::Taa));
+		context.mCore->CmdDispatch(*context.mCommandBuffer, { GetDispatchSize(context.mRenderWidth), GetDispatchSize(context.mRenderHeight), 1 });
 	}
 	else if (mainKind == NRIMainUpscalerKind::Off)
 	{
-		renderer.CopyTexture(composed, historyOutput);
+		context.CopyTexture(composed, historyOutput);
 	}
 	else if (mainKind == NRIMainUpscalerKind::DLSR)
 	{
-		// Keep ptdebug 13 renderer.meaningful even when app-TAA is intentionally bypassed for vendor SR.
-		renderer.CopyTexture(composed, historyOutput);
+		// Keep ptdebug 13 context.meaningful even when app-TAA is intentionally bypassed for vendor SR.
+		context.CopyTexture(composed, historyOutput);
 	}
 	else if (mainKind == NRIMainUpscalerKind::DLRR)
 	{
-		// Keep ptdebug 13 renderer.meaningful for RR as well by exposing the explicit noisy RR input.
-		renderer.CopyTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrInput), historyOutput);
+		// Keep ptdebug 13 context.meaningful for RR as well by exposing the explicit noisy RR input.
+		context.CopyTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrInput), historyOutput);
 	}
 
-	NRIRenderer::FrameTextureSlot resolvedInputSlot = renderer.mHistoryOutputSlot;
+	NRIRenderer::FrameTextureSlot resolvedInputSlot = context.mHistoryOutputSlot;
 
 	if (mainKind != NRIMainUpscalerKind::Off)
 	{
 		const NRIRenderer::FrameTextureSlot vendorInputSlot =
 			mainKind == NRIMainUpscalerKind::DLSR ? NRIRenderer::FrameTextureSlot::SrInput :
 			NRIRenderer::FrameTextureSlot::RrInput;
-		NRITextureResource& vendorInput = renderer.GetFrameTexture(vendorInputSlot);
-		NRITextureResource& upscalerDepth = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UpscalerDepth);
-		NRITextureResource& rrGuideDiffuseAlbedo = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo);
-		NRITextureResource& rrGuideSpecularAlbedo = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularAlbedo);
-		NRITextureResource& rrGuideSpecularHitDistance = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance);
-		NRITextureResource& rrGuideNormalRoughness = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideNormalRoughness);
-		NRITextureResource& vendorOutput = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::VendorOutput);
+		NRITextureResource& vendorInput = context.GetFrameTexture(vendorInputSlot);
+		NRITextureResource& upscalerDepth = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UpscalerDepth);
+		NRITextureResource& rrGuideDiffuseAlbedo = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo);
+		NRITextureResource& rrGuideSpecularAlbedo = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularAlbedo);
+		NRITextureResource& rrGuideSpecularHitDistance = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance);
+		NRITextureResource& rrGuideNormalRoughness = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideNormalRoughness);
+		NRITextureResource& vendorOutput = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::VendorOutput);
 		NRITextureResource* vendorExposure = nullptr;
-		if (renderer.mExposure.GetSettings().enabled)
+		if (context.mExposure.GetSettings().enabled)
 		{
-			NRITextureResource& candidateExposureState = renderer.mExposure.GetMutableExposureStateTexture(renderer.mFrameIndex & 1u);
+			NRITextureResource& candidateExposureState = context.mExposure.GetMutableExposureStateTexture(context.mFrameIndex & 1u);
 			if (candidateExposureState.texture != nullptr && candidateExposureState.shaderView != nullptr)
 			{
 				vendorExposure = &candidateExposureState;
 			}
 		}
 
-		if (!NRIPassDispatcher::DispatchUpscalerPrepass(renderer, mainKind))
+		if (!NRIPassDispatcher::DispatchUpscalerPrepass(context, mainKind))
 		{
 			return false;
 		}
 
-		renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(vendorInput, NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(upscalerDepth, NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(rrGuideDiffuseAlbedo, NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(rrGuideSpecularAlbedo, NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(rrGuideSpecularHitDistance, NRIComputeShaderResourceState());
-		renderer.mFrameBuffer->TransitionTexture(rrGuideNormalRoughness, NRIComputeShaderResourceState());
+		context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+		context.TransitionTexture(vendorInput, NRIComputeShaderResourceState());
+		context.TransitionTexture(upscalerDepth, NRIComputeShaderResourceState());
+		context.TransitionTexture(rrGuideDiffuseAlbedo, NRIComputeShaderResourceState());
+		context.TransitionTexture(rrGuideSpecularAlbedo, NRIComputeShaderResourceState());
+		context.TransitionTexture(rrGuideSpecularHitDistance, NRIComputeShaderResourceState());
+		context.TransitionTexture(rrGuideNormalRoughness, NRIComputeShaderResourceState());
 		if (vendorExposure != nullptr)
 		{
-			renderer.mFrameBuffer->TransitionTexture(*vendorExposure, NRIComputeShaderResourceState());
+			context.TransitionTexture(*vendorExposure, NRIComputeShaderResourceState());
 		}
-		renderer.mFrameBuffer->TransitionTexture(vendorOutput, NRIComputeStorageState());
+		context.TransitionTexture(vendorOutput, NRIComputeStorageState());
 
-		const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(mainKind, renderer.GetSelectedUpscalerMode());
-		if (!renderer.mUpscaler.EnsureMainUpscaler(*renderer.mFrameBuffer, mainKind, resolvedUpscalerMode, renderer.mOutputWidth, renderer.mOutputHeight, vendorExposure != nullptr))
+		const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(mainKind, context.GetSelectedUpscalerMode());
+		if (!context.mUpscaler.EnsureMainUpscaler(*context.mFrameBuffer, mainKind, resolvedUpscalerMode, context.mOutputWidth, context.mOutputHeight, vendorExposure != nullptr))
 		{
 			return false;
 		}
 
 		NRIUpscalerDispatchDesc upscalerDesc = {};
-		upscalerDesc.commandBuffer = renderer.mFrameBuffer->mCommandBuffer;
+		upscalerDesc.commandBuffer = context.mCommandBuffer;
 		upscalerDesc.input = &vendorInput;
 		upscalerDesc.output = &vendorOutput;
-		upscalerDesc.motion = &renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion);
+		upscalerDesc.motion = &context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion);
 		upscalerDesc.depth = &upscalerDepth;
 		upscalerDesc.exposure = vendorExposure;
 		upscalerDesc.normalRoughness = &rrGuideNormalRoughness;
 		upscalerDesc.diffuseAlbedo = &rrGuideDiffuseAlbedo;
 		upscalerDesc.specularAlbedo = &rrGuideSpecularAlbedo;
 		upscalerDesc.specularHitDistance = &rrGuideSpecularHitDistance;
-		upscalerDesc.currentWidth = renderer.mRenderWidth;
-		upscalerDesc.currentHeight = renderer.mRenderHeight;
-		Copy2(renderer.mCurrentJitter, upscalerDesc.cameraJitter);
-		std::memcpy(upscalerDesc.viewToClipMatrix, renderer.mCurrentViewToClip, sizeof(upscalerDesc.viewToClipMatrix));
-		std::memcpy(upscalerDesc.worldToViewMatrix, renderer.mCurrentWorldToView, sizeof(upscalerDesc.worldToViewMatrix));
+		upscalerDesc.currentWidth = context.mRenderWidth;
+		upscalerDesc.currentHeight = context.mRenderHeight;
+		Copy2(context.mCurrentJitter, upscalerDesc.cameraJitter);
+		std::memcpy(upscalerDesc.viewToClipMatrix, context.mCurrentViewToClip, sizeof(upscalerDesc.viewToClipMatrix));
+		std::memcpy(upscalerDesc.worldToViewMatrix, context.mCurrentWorldToView, sizeof(upscalerDesc.worldToViewMatrix));
 		upscalerDesc.sharpness = Clamp01((float)nri_sharpness);
-		upscalerDesc.resetHistory = renderer.mResetHistory;
-		if (!renderer.mUpscaler.DispatchMainUpscaler(*renderer.mFrameBuffer, mainKind, upscalerDesc))
+		upscalerDesc.resetHistory = context.mResetHistory;
+		if (!context.mUpscaler.DispatchMainUpscaler(*context.mFrameBuffer, mainKind, upscalerDesc))
 		{
 			return false;
 		}
 
-		renderer.mUseUpscaledInFinal = true;
-		renderer.mUpscaledInputSlot = NRIRenderer::FrameTextureSlot::VendorOutput;
+		context.mUseUpscaledInFinal = true;
+		context.mUpscaledInputSlot = NRIRenderer::FrameTextureSlot::VendorOutput;
 		resolvedInputSlot = NRIRenderer::FrameTextureSlot::VendorOutput;
-		renderer.TraceTemporalState("upscale-vendor", mainKind, postSharpenKind, runAppTaa, renderer.mUpscaledInputSlot, vendorSourceSlot);
+		context.TraceTemporalState("upscale-vendor", mainKind, postSharpenKind, runAppTaa, context.mUpscaledInputSlot, vendorSourceSlot);
 	}
 	else
 	{
-		renderer.mUseUpscaledInFinal = false;
-		renderer.mUpscaledInputSlot = renderer.mHistoryOutputSlot;
-		resolvedInputSlot = renderer.mHistoryOutputSlot;
-		renderer.TraceTemporalState("upscale-native", mainKind, postSharpenKind, runAppTaa, resolvedInputSlot, renderer.mHistoryOutputSlot);
+		context.mUseUpscaledInFinal = false;
+		context.mUpscaledInputSlot = context.mHistoryOutputSlot;
+		resolvedInputSlot = context.mHistoryOutputSlot;
+		context.TraceTemporalState("upscale-native", mainKind, postSharpenKind, runAppTaa, resolvedInputSlot, context.mHistoryOutputSlot);
 	}
 
 	if (postSharpenKind == NRIPostSharpenKind::Off)
@@ -1142,143 +1142,143 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIRenderer& renderer)
 		return true;
 	}
 
-	NRITextureResource& postInput = renderer.GetFrameTexture(resolvedInputSlot);
-	NRITextureResource& postOutput = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::PostSharpenOutput);
-	renderer.mFrameBuffer->TransitionTexture(postInput, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(postOutput, NRIComputeStorageState());
-	if (!renderer.mUpscaler.EnsurePostSharpen(*renderer.mFrameBuffer, postSharpenKind, renderer.mOutputWidth, renderer.mOutputHeight))
+	NRITextureResource& postInput = context.GetFrameTexture(resolvedInputSlot);
+	NRITextureResource& postOutput = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::PostSharpenOutput);
+	context.TransitionTexture(postInput, NRIComputeShaderResourceState());
+	context.TransitionTexture(postOutput, NRIComputeStorageState());
+	if (!context.mUpscaler.EnsurePostSharpen(*context.mFrameBuffer, postSharpenKind, context.mOutputWidth, context.mOutputHeight))
 	{
 		return false;
 	}
 
 	NRIUpscalerDispatchDesc postDesc = {};
-	postDesc.commandBuffer = renderer.mFrameBuffer->mCommandBuffer;
+	postDesc.commandBuffer = context.mCommandBuffer;
 	postDesc.input = &postInput;
 	postDesc.output = &postOutput;
 	postDesc.currentWidth = postInput.width;
 	postDesc.currentHeight = postInput.height;
-	Copy2(renderer.mCurrentJitter, postDesc.cameraJitter);
+	Copy2(context.mCurrentJitter, postDesc.cameraJitter);
 	postDesc.sharpness = Clamp01((float)nri_sharpness);
-	postDesc.resetHistory = renderer.mResetHistory;
-	if (!renderer.mUpscaler.DispatchPostSharpen(*renderer.mFrameBuffer, postSharpenKind, postDesc))
+	postDesc.resetHistory = context.mResetHistory;
+	if (!context.mUpscaler.DispatchPostSharpen(*context.mFrameBuffer, postSharpenKind, postDesc))
 	{
 		return false;
 	}
 
-	renderer.mUseUpscaledInFinal = true;
-	renderer.mUpscaledInputSlot = NRIRenderer::FrameTextureSlot::PostSharpenOutput;
-	renderer.TraceTemporalState("upscale-post-sharpen", mainKind, postSharpenKind, runAppTaa, renderer.mUpscaledInputSlot, resolvedInputSlot);
+	context.mUseUpscaledInFinal = true;
+	context.mUpscaledInputSlot = NRIRenderer::FrameTextureSlot::PostSharpenOutput;
+	context.TraceTemporalState("upscale-post-sharpen", mainKind, postSharpenKind, runAppTaa, context.mUpscaledInputSlot, resolvedInputSlot);
 	return true;
 }
 
 
 
-bool NRIPassDispatcher::DispatchFinal(NRIRenderer& renderer)
+bool NRIPassDispatcher::DispatchFinal(NRIPassDispatchContext& context)
 {
 	Clocker clock(NriPTFinal);
 
 	NRITraceSceneConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
-	const bool presentRawTrace = (!nri_ptbootstrap && !renderer.mUseUpscaledInFinal) || bootstrapMode >= 13u;
-	Copy3(renderer.mCurrentCameraPos, constants.CameraPos);
-	Copy3(renderer.mCurrentCameraForward, constants.CameraForward);
-	Copy3(renderer.mCurrentCameraRight, constants.CameraRight);
-	Copy3(renderer.mCurrentCameraUp, constants.CameraUp);
-	Copy3(renderer.mPreviousCameraPos, constants.PrevCameraPos);
-	Copy3(renderer.mPreviousCameraForward, constants.PrevCameraForward);
-	Copy3(renderer.mPreviousCameraRight, constants.PrevCameraRight);
-	Copy3(renderer.mPreviousCameraUp, constants.PrevCameraUp);
-	constants.RenderWidth = renderer.mRenderWidth;
-	constants.RenderHeight = renderer.mRenderHeight;
-	constants.DisplayWidth = renderer.mOutputWidth;
-	constants.DisplayHeight = renderer.mOutputHeight;
-	constants.TanHalfFovX = renderer.mCurrentTanHalfFovX;
-	constants.TanHalfFovY = renderer.mCurrentTanHalfFovY;
-	constants.PrevTanHalfFovX = renderer.mPreviousTanHalfFovX;
-	constants.PrevTanHalfFovY = renderer.mPreviousTanHalfFovY;
-	constants.SceneInstanceCount = renderer.mSceneInstanceBuffer.stride != 0 ? (uint32_t)(renderer.mSceneInstanceBuffer.usedSize / renderer.mSceneInstanceBuffer.stride) : 0u;
-	constants.StaticPrimitiveCount = renderer.mBoundStaticPrimitiveCount;
-	constants.DynamicPrimitiveCount = renderer.mBoundDynamicPrimitiveCount;
-	constants.FrameIndex = renderer.mFrameIndex;
+	const bool presentRawTrace = (!nri_ptbootstrap && !context.mUseUpscaledInFinal) || bootstrapMode >= 13u;
+	Copy3(context.mCurrentCameraPos, constants.CameraPos);
+	Copy3(context.mCurrentCameraForward, constants.CameraForward);
+	Copy3(context.mCurrentCameraRight, constants.CameraRight);
+	Copy3(context.mCurrentCameraUp, constants.CameraUp);
+	Copy3(context.mPreviousCameraPos, constants.PrevCameraPos);
+	Copy3(context.mPreviousCameraForward, constants.PrevCameraForward);
+	Copy3(context.mPreviousCameraRight, constants.PrevCameraRight);
+	Copy3(context.mPreviousCameraUp, constants.PrevCameraUp);
+	constants.RenderWidth = context.mRenderWidth;
+	constants.RenderHeight = context.mRenderHeight;
+	constants.DisplayWidth = context.mOutputWidth;
+	constants.DisplayHeight = context.mOutputHeight;
+	constants.TanHalfFovX = context.mCurrentTanHalfFovX;
+	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
+	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
+	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
+	constants.SceneInstanceCount = context.mSceneInstanceBuffer.stride != 0 ? (uint32_t)(context.mSceneInstanceBuffer.usedSize / context.mSceneInstanceBuffer.stride) : 0u;
+	constants.StaticPrimitiveCount = context.mBoundStaticPrimitiveCount;
+	constants.DynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
+	constants.FrameIndex = context.mFrameIndex;
 	constants.Flags =
-		(renderer.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
-		(renderer.mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u) |
+		(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(context.mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u) |
 		(presentRawTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
-		(renderer.mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
-		(renderer.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
-		(renderer.mDirectionalLightState.enabled && renderer.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
-	constants.StaticMaterialCount = renderer.mBoundStaticMaterialCount;
+		(context.mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
+		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
+		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
+	constants.StaticMaterialCount = context.mBoundStaticMaterialCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
-	constants.DynamicMaterialCount = renderer.mBoundDynamicMaterialCount;
-	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, renderer.mDirectionalLightState.color);
-	constants.RuntimeLightCount = renderer.mBoundRuntimeLightCount;
-	constants.ReservedTrace0 = (uint16_t)(int16_t)renderer.mSceneLeft | ((uint32_t)(uint16_t)(int16_t)renderer.mSceneTop << 16);
-	constants.ReservedTrace1 = PackDenoiserAux1(0u, renderer.mDirectionalLightState.angularSize);
-	Copy3(renderer.mSkyColor, constants.SkyColor);
-	Copy3(renderer.mGroundColor, constants.GroundColor);
-	ApplyDirectionalLightStateToConstants(renderer.mDirectionalLightState, constants);
+	constants.DynamicMaterialCount = context.mBoundDynamicMaterialCount;
+	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, context.mDirectionalLightState.color);
+	constants.RuntimeLightCount = context.mBoundRuntimeLightCount;
+	constants.ReservedTrace0 = (uint16_t)(int16_t)context.mSceneLeft | ((uint32_t)(uint16_t)(int16_t)context.mSceneTop << 16);
+	constants.ReservedTrace1 = PackDenoiserAux1(0u, context.mDirectionalLightState.angularSize);
+	Copy3(context.mSkyColor, constants.SkyColor);
+	Copy3(context.mGroundColor, constants.GroundColor);
+	ApplyDirectionalLightStateToConstants(context.mDirectionalLightState, constants);
 
-	NRITextureResource& history = renderer.GetFrameTexture(renderer.mHistoryOutputSlot);
-	NRITextureResource& upscaled = renderer.GetFrameTexture(renderer.mUpscaledInputSlot);
-	NRITextureResource& final = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final);
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedShadow), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularAlbedo), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance), NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(history, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(upscaled, NRIComputeShaderResourceState());
-	renderer.mFrameBuffer->TransitionTexture(final, NRIComputeStorageState());
+	NRITextureResource& history = context.GetFrameTexture(context.mHistoryOutputSlot);
+	NRITextureResource& upscaled = context.GetFrameTexture(context.mUpscaledInputSlot);
+	NRITextureResource& final = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Final);
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedShadow), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularAlbedo), NRIComputeShaderResourceState());
+	context.TransitionTexture(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularHitDistance), NRIComputeShaderResourceState());
+	context.TransitionTexture(history, NRIComputeShaderResourceState());
+	context.TransitionTexture(upscaled, NRIComputeShaderResourceState());
+	context.TransitionTexture(final, NRIComputeStorageState());
 
-	renderer.mFrameInputDescriptors.fill(renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView);
-	renderer.mFrameInputDescriptors[0] = history.shaderView;
-	renderer.mFrameInputDescriptors[1] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion).shaderView;
-	renderer.mFrameInputDescriptors[2] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).shaderView;
-	renderer.mFrameInputDescriptors[3] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness).shaderView;
-	renderer.mFrameInputDescriptors[4] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness).shaderView;
-	renderer.mFrameInputDescriptors[5] = presentRawTrace ? (renderer.mUseUpscaledInFinal ? upscaled.shaderView : renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView) : renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView;
-	renderer.mFrameInputDescriptors[6] = upscaled.shaderView;
-	renderer.mFrameInputDescriptors[7] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation).shaderView;
-	renderer.mFrameInputDescriptors[8] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo).shaderView;
-	renderer.mFrameInputDescriptors[9] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularAlbedo).shaderView;
-	renderer.mFrameInputDescriptors[10] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra).shaderView;
-	renderer.mFrameInputDescriptors[11] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedShadow).shaderView;
-	renderer.mFrameInputDescriptors[12] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting).shaderView;
-	renderer.mFrameInputDescriptors[13] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission).shaderView;
+	context.mFrameInputDescriptors.fill(context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView);
+	context.mFrameInputDescriptors[0] = history.shaderView;
+	context.mFrameInputDescriptors[1] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Motion).shaderView;
+	context.mFrameInputDescriptors[2] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::ViewZ).shaderView;
+	context.mFrameInputDescriptors[3] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::NormalRoughness).shaderView;
+	context.mFrameInputDescriptors[4] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::BaseColorMetalness).shaderView;
+	context.mFrameInputDescriptors[5] = presentRawTrace ? (context.mUseUpscaledInFinal ? upscaled.shaderView : context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView) : context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Composed).shaderView;
+	context.mFrameInputDescriptors[6] = upscaled.shaderView;
+	context.mFrameInputDescriptors[7] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::Validation).shaderView;
+	context.mFrameInputDescriptors[8] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideDiffuseAlbedo).shaderView;
+	context.mFrameInputDescriptors[9] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::RrGuideSpecularAlbedo).shaderView;
+	context.mFrameInputDescriptors[10] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredPenumbra).shaderView;
+	context.mFrameInputDescriptors[11] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DenoisedShadow).shaderView;
+	context.mFrameInputDescriptors[12] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectLighting).shaderView;
+	context.mFrameInputDescriptors[13] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::DirectEmission).shaderView;
 	if (constants.DebugMode == 10)
 	{
-		renderer.mFrameInputDescriptors[5] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse).shaderView;
+		context.mFrameInputDescriptors[5] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse).shaderView;
 	}
 	else if (constants.DebugMode == 11)
 	{
-		renderer.mFrameInputDescriptors[5] = renderer.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).shaderView;
+		context.mFrameInputDescriptors[5] = context.GetFrameTexture(NRIRenderer::FrameTextureSlot::UnfilteredSpecular).shaderView;
 	}
-	NRIDescriptorSetManager::UpdateFrameTextureSet(renderer);
+	context.UpdateFrameTextureSet();
 
-	renderer.mOutputDescriptors.fill(final.storageView);
-	renderer.mOutputDescriptors[2] = final.storageView;
-	NRIDescriptorSetManager::UpdateOutputSet(renderer);
+	context.mOutputDescriptors.fill(final.storageView);
+	context.mOutputDescriptors[2] = final.storageView;
+	context.UpdateOutputSet();
 
-	renderer.mFrameBuffer->mCore.CmdSetPipelineLayout(*renderer.mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *renderer.mPipelineLayout);
-	renderer.mFrameBuffer->mCore.CmdSetRootConstants(*renderer.mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
-	renderer.BindSceneRootDescriptors();
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 0, renderer.mSamplerSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 1, renderer.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 2, renderer.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 3, renderer.mFrameTextureSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetDescriptorSet(*renderer.mFrameBuffer->mCommandBuffer, { 4, renderer.mOutputSet, nri::BindPoint::COMPUTE });
-	renderer.mFrameBuffer->mCore.CmdSetPipeline(*renderer.mFrameBuffer->mCommandBuffer, *renderer.GetPipeline(NRIRenderer::PipelineSlot::Final));
-	renderer.mFrameBuffer->mCore.CmdDispatch(*renderer.mFrameBuffer->mCommandBuffer, { GetDispatchSize(renderer.mTargetWidth), GetDispatchSize(renderer.mTargetHeight), 1 });
+	context.mCore->CmdSetPipelineLayout(*context.mCommandBuffer, nri::BindPoint::COMPUTE, *context.mPipelineLayout);
+	context.mCore->CmdSetRootConstants(*context.mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
+	context.BindSceneRootDescriptors();
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 0, context.mSamplerSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 1, context.GetCurrentSceneTextureSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 2, context.GetCurrentSceneDataSet(), nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 3, context.mFrameTextureSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetDescriptorSet(*context.mCommandBuffer, { 4, context.mOutputSet, nri::BindPoint::COMPUTE });
+	context.mCore->CmdSetPipeline(*context.mCommandBuffer, *context.GetPipeline(NRIRenderer::PipelineSlot::Final));
+	context.mCore->CmdDispatch(*context.mCommandBuffer, { GetDispatchSize(context.mTargetWidth), GetDispatchSize(context.mTargetHeight), 1 });
 	return true;
 }
