@@ -1540,6 +1540,94 @@ private:
 	NRIRendererFrameContext BuildFrameContext(int drawmode, bool portal, int debugMode, bool preserveHistory) const;
 	NRIPassDispatchContext BuildPassDispatchContext();
 
+	struct RenderSceneHistorySnapshot
+	{
+		uint32_t frameIndex = 0;
+		float currentCameraPos[3] = {};
+		float currentCameraForward[3] = {};
+		float currentCameraRight[3] = {};
+		float currentCameraUp[3] = {};
+		float previousCameraPos[3] = {};
+		float previousCameraForward[3] = {};
+		float previousCameraRight[3] = {};
+		float previousCameraUp[3] = {};
+		float currentJitter[2] = {};
+		float previousJitter[2] = {};
+		float currentViewToClip[16] = {};
+		float previousViewToClip[16] = {};
+		float currentWorldToView[16] = {};
+		float previousWorldToView[16] = {};
+		float currentTanHalfFovX = 0.0f;
+		float currentTanHalfFovY = 0.0f;
+		float previousTanHalfFovX = 0.0f;
+		float previousTanHalfFovY = 0.0f;
+		bool hasPreviousCameraState = false;
+		bool resetHistory = false;
+	};
+
+	struct RenderSceneDispatchInputs
+	{
+		bool bootstrapCapturedView = false;
+		bool buffersReady = false;
+		bool accelerationReady = false;
+		HWDrawInfo* drawInfo = nullptr;
+		const nri_scene::GeometryData* activeGeometry = nullptr;
+		const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
+		int drawmode = 0;
+	};
+
+	struct RenderSceneCompletionInputs
+	{
+		bool success = false;
+		bool preserveHistory = false;
+		bool bootstrapCapturedView = false;
+		uint32_t traceFrameIndex = 0;
+		int drawmode = 0;
+		bool portal = false;
+		const nri_scene::GeometryData* activeGeometry = nullptr;
+		const std::vector<nri_scene::MaterialData>* activeGpuMaterials = nullptr;
+		const nri_scene::GeometryData* activeDynamicGeometry = nullptr;
+		bool usingPersistentDynamicEmissiveCache = false;
+	};
+
+	RenderSceneHistorySnapshot CaptureRenderSceneHistorySnapshot(bool preserveHistory) const;
+	void RestoreRenderSceneHistorySnapshot(const RenderSceneHistorySnapshot& snapshot);
+	bool EnsureRenderSceneFrameResources(const NRIRendererFrameContext& frameContext, bool preserveHistory, const RenderSceneHistorySnapshot& history);
+	bool BeginRenderSceneFrame(HWDrawInfo& di, const NRIRendererFrameContext& frameContext, bool preserveHistory, const RenderSceneHistorySnapshot& history);
+	bool RenderSimpleBootstrapView(bool preserveHistory, const RenderSceneHistorySnapshot& history);
+	bool DispatchSelectedRenderScene(const RenderSceneDispatchInputs& inputs);
+	void LogRenderSceneFailureReasons(bool paletteReady, bool texturesReady, bool buffersReady, bool accelerationReady, bool dispatched, bool bootstrapCapturedView);
+	void CommitRenderSceneResult(const RenderSceneCompletionInputs& inputs, const RenderSceneHistorySnapshot& history);
+	void RecordRenderSceneSuccessStats(const RenderSceneCompletionInputs& inputs);
+	void EmitRenderSceneTemporalTrace(uint32_t traceFrameIndex);
+
+	struct PreloadLevelSceneContext
+	{
+		uint32_t outputWidth = 0;
+		uint32_t outputHeight = 0;
+		uint32_t targetWidth = 0;
+		uint32_t targetHeight = 0;
+		std::chrono::steady_clock::time_point start = {};
+		bool staticLightRefreshReady = true;
+	};
+
+	enum class PreloadLevelSceneStepResult
+	{
+		Continue,
+		Ready,
+		Wait
+	};
+
+	bool HasPreloadFrameTarget(const PreloadLevelSceneContext& context) const;
+	bool ShouldSkipPreloadForUnsupportedPathTracing(const PreloadLevelSceneContext& context);
+	void TracePreloadBegin(const PreloadLevelSceneContext& context) const;
+	bool EnsurePreloadFrameResources(const PreloadLevelSceneContext& context);
+	void ResetPreloadSceneStats();
+	PreloadLevelSceneStepResult PreloadStaticSceneAndStartupCorrection(const PreloadLevelSceneContext& context);
+	void RefreshPreloadStaticLighting(PreloadLevelSceneContext& context);
+	PreloadLevelSceneStepResult PreloadResidentSceneResources(const PreloadLevelSceneContext& context);
+	bool FinishPreloadLevelScene(const PreloadLevelSceneContext& context);
+
 	using SceneBufferDebugStats = ::SceneBufferDebugStats;
 
 	struct SelectPrimitiveRewriteCache

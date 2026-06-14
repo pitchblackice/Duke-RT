@@ -4587,104 +4587,63 @@ NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
 	return NRIPassDispatchContext(init);
 }
 
-bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
+NRIRenderer::RenderSceneHistorySnapshot NRIRenderer::CaptureRenderSceneHistorySnapshot(bool preserveHistory) const
 {
-	if ((drawmode != DM_MAINVIEW && drawmode != DM_OFFSCREEN) || portal || mFrameBuffer == nullptr ||
-		mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)
-	{
-		return false;
-	}
-
-	if (!mPathTracingSupported)
-	{
-		LogFallback(GetAvailabilityReason());
-		return false;
-	}
-
-	ResetPerfTraceStats();
-	ScopedPtPerfTimer totalPerfTimer(mLastPerfShellTraceStats.totalMs);
-	Clocker totalClock(NriPTAll);
-
-	const uint32_t bootstrapMode = GetBootstrapMode();
-	const bool bootstrapSimpleView = nri_ptbootstrap && bootstrapMode <= 3u;
-	const bool bootstrapCapturedView = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 12u;
-	const bool bootstrapCapturedDiagnostics = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 10u;
-	const bool bootstrapCapturedFlat = nri_ptbootstrap && bootstrapMode == 11u;
-	const bool bootstrapCapturedBaseColor = nri_ptbootstrap && bootstrapMode == 12u;
-	const bool rawTraceDirectScene = !nri_ptbootstrap && nri_ptdirectscene;
-	const int debugMode = (int)nri_ptdebug;
-
-	const bool preserveHistory = drawmode != DM_MAINVIEW;
-	const NRIRendererFrameContext frameContext = BuildFrameContext(drawmode, portal, debugMode, preserveHistory);
-	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
-	const uint32_t traceFrameIndex = frameContext.frameIndex;
-	uint32_t savedFrameIndex = mFrameIndex;
-	float savedCurrentCameraPos[3] = {};
-	float savedCurrentCameraForward[3] = {};
-	float savedCurrentCameraRight[3] = {};
-	float savedCurrentCameraUp[3] = {};
-	float savedPreviousCameraPos[3] = {};
-	float savedPreviousCameraForward[3] = {};
-	float savedPreviousCameraRight[3] = {};
-	float savedPreviousCameraUp[3] = {};
-	float savedCurrentJitter[2] = {};
-	float savedPreviousJitter[2] = {};
-	float savedCurrentViewToClip[16] = {};
-	float savedPreviousViewToClip[16] = {};
-	float savedCurrentWorldToView[16] = {};
-	float savedPreviousWorldToView[16] = {};
-	float savedCurrentTanHalfFovX = mCurrentTanHalfFovX;
-	float savedCurrentTanHalfFovY = mCurrentTanHalfFovY;
-	float savedPreviousTanHalfFovX = mPreviousTanHalfFovX;
-	float savedPreviousTanHalfFovY = mPreviousTanHalfFovY;
-	bool savedHasPreviousCameraState = mHasPreviousCameraState;
-	bool savedResetHistory = mResetHistory;
+	RenderSceneHistorySnapshot snapshot = {};
+	snapshot.frameIndex = mFrameIndex;
+	snapshot.currentTanHalfFovX = mCurrentTanHalfFovX;
+	snapshot.currentTanHalfFovY = mCurrentTanHalfFovY;
+	snapshot.previousTanHalfFovX = mPreviousTanHalfFovX;
+	snapshot.previousTanHalfFovY = mPreviousTanHalfFovY;
+	snapshot.hasPreviousCameraState = mHasPreviousCameraState;
+	snapshot.resetHistory = mResetHistory;
 	if (preserveHistory)
 	{
-		Copy3(mCurrentCameraPos, savedCurrentCameraPos);
-		Copy3(mCurrentCameraForward, savedCurrentCameraForward);
-		Copy3(mCurrentCameraRight, savedCurrentCameraRight);
-		Copy3(mCurrentCameraUp, savedCurrentCameraUp);
-		Copy3(mPreviousCameraPos, savedPreviousCameraPos);
-		Copy3(mPreviousCameraForward, savedPreviousCameraForward);
-		Copy3(mPreviousCameraRight, savedPreviousCameraRight);
-		Copy3(mPreviousCameraUp, savedPreviousCameraUp);
-		Copy2(mCurrentJitter, savedCurrentJitter);
-		Copy2(mPreviousJitter, savedPreviousJitter);
-		std::memcpy(savedCurrentViewToClip, mCurrentViewToClip, sizeof(savedCurrentViewToClip));
-		std::memcpy(savedPreviousViewToClip, mPreviousViewToClip, sizeof(savedPreviousViewToClip));
-		std::memcpy(savedCurrentWorldToView, mCurrentWorldToView, sizeof(savedCurrentWorldToView));
-		std::memcpy(savedPreviousWorldToView, mPreviousWorldToView, sizeof(savedPreviousWorldToView));
+		Copy3(mCurrentCameraPos, snapshot.currentCameraPos);
+		Copy3(mCurrentCameraForward, snapshot.currentCameraForward);
+		Copy3(mCurrentCameraRight, snapshot.currentCameraRight);
+		Copy3(mCurrentCameraUp, snapshot.currentCameraUp);
+		Copy3(mPreviousCameraPos, snapshot.previousCameraPos);
+		Copy3(mPreviousCameraForward, snapshot.previousCameraForward);
+		Copy3(mPreviousCameraRight, snapshot.previousCameraRight);
+		Copy3(mPreviousCameraUp, snapshot.previousCameraUp);
+		Copy2(mCurrentJitter, snapshot.currentJitter);
+		Copy2(mPreviousJitter, snapshot.previousJitter);
+		std::memcpy(snapshot.currentViewToClip, mCurrentViewToClip, sizeof(snapshot.currentViewToClip));
+		std::memcpy(snapshot.previousViewToClip, mPreviousViewToClip, sizeof(snapshot.previousViewToClip));
+		std::memcpy(snapshot.currentWorldToView, mCurrentWorldToView, sizeof(snapshot.currentWorldToView));
+		std::memcpy(snapshot.previousWorldToView, mPreviousWorldToView, sizeof(snapshot.previousWorldToView));
 	}
+	return snapshot;
+}
 
-	auto restoreHistory = [this, &savedCurrentCameraPos, &savedCurrentCameraForward, &savedCurrentCameraRight, &savedCurrentCameraUp,
-		&savedPreviousCameraPos, &savedPreviousCameraForward, &savedPreviousCameraRight, &savedPreviousCameraUp, &savedCurrentJitter, &savedPreviousJitter,
-		&savedCurrentViewToClip, &savedPreviousViewToClip, &savedCurrentWorldToView, &savedPreviousWorldToView, savedFrameIndex, savedCurrentTanHalfFovX,
-		savedCurrentTanHalfFovY, savedPreviousTanHalfFovX, savedPreviousTanHalfFovY, savedHasPreviousCameraState, savedResetHistory]()
-	{
-		mFrameIndex = savedFrameIndex;
-		Copy3(savedCurrentCameraPos, mCurrentCameraPos);
-		Copy3(savedCurrentCameraForward, mCurrentCameraForward);
-		Copy3(savedCurrentCameraRight, mCurrentCameraRight);
-		Copy3(savedCurrentCameraUp, mCurrentCameraUp);
-		Copy3(savedPreviousCameraPos, mPreviousCameraPos);
-		Copy3(savedPreviousCameraForward, mPreviousCameraForward);
-		Copy3(savedPreviousCameraRight, mPreviousCameraRight);
-		Copy3(savedPreviousCameraUp, mPreviousCameraUp);
-		Copy2(savedCurrentJitter, mCurrentJitter);
-		Copy2(savedPreviousJitter, mPreviousJitter);
-		std::memcpy(mCurrentViewToClip, savedCurrentViewToClip, sizeof(mCurrentViewToClip));
-		std::memcpy(mPreviousViewToClip, savedPreviousViewToClip, sizeof(mPreviousViewToClip));
-		std::memcpy(mCurrentWorldToView, savedCurrentWorldToView, sizeof(mCurrentWorldToView));
-		std::memcpy(mPreviousWorldToView, savedPreviousWorldToView, sizeof(mPreviousWorldToView));
-		mCurrentTanHalfFovX = savedCurrentTanHalfFovX;
-		mCurrentTanHalfFovY = savedCurrentTanHalfFovY;
-		mPreviousTanHalfFovX = savedPreviousTanHalfFovX;
-		mPreviousTanHalfFovY = savedPreviousTanHalfFovY;
-		mHasPreviousCameraState = savedHasPreviousCameraState;
-		mResetHistory = savedResetHistory;
-	};
+void NRIRenderer::RestoreRenderSceneHistorySnapshot(const RenderSceneHistorySnapshot& snapshot)
+{
+	mFrameIndex = snapshot.frameIndex;
+	Copy3(snapshot.currentCameraPos, mCurrentCameraPos);
+	Copy3(snapshot.currentCameraForward, mCurrentCameraForward);
+	Copy3(snapshot.currentCameraRight, mCurrentCameraRight);
+	Copy3(snapshot.currentCameraUp, mCurrentCameraUp);
+	Copy3(snapshot.previousCameraPos, mPreviousCameraPos);
+	Copy3(snapshot.previousCameraForward, mPreviousCameraForward);
+	Copy3(snapshot.previousCameraRight, mPreviousCameraRight);
+	Copy3(snapshot.previousCameraUp, mPreviousCameraUp);
+	Copy2(snapshot.currentJitter, mCurrentJitter);
+	Copy2(snapshot.previousJitter, mPreviousJitter);
+	std::memcpy(mCurrentViewToClip, snapshot.currentViewToClip, sizeof(mCurrentViewToClip));
+	std::memcpy(mPreviousViewToClip, snapshot.previousViewToClip, sizeof(mPreviousViewToClip));
+	std::memcpy(mCurrentWorldToView, snapshot.currentWorldToView, sizeof(mCurrentWorldToView));
+	std::memcpy(mPreviousWorldToView, snapshot.previousWorldToView, sizeof(mPreviousWorldToView));
+	mCurrentTanHalfFovX = snapshot.currentTanHalfFovX;
+	mCurrentTanHalfFovY = snapshot.currentTanHalfFovY;
+	mPreviousTanHalfFovX = snapshot.previousTanHalfFovX;
+	mPreviousTanHalfFovY = snapshot.previousTanHalfFovY;
+	mHasPreviousCameraState = snapshot.hasPreviousCameraState;
+	mResetHistory = snapshot.resetHistory;
+}
 
+bool NRIRenderer::EnsureRenderSceneFrameResources(const NRIRendererFrameContext& frameContext, bool preserveHistory, const RenderSceneHistorySnapshot& history)
+{
 	bool ready = false;
 	{
 		ScopedPtPerfTimer initPerfTimer(mLastPerfShellTraceStats.initResourcesMs);
@@ -4702,11 +4661,15 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		LogFallback("PT frame resources or pipelines failed to initialize.");
 		if (preserveHistory)
 		{
-			restoreHistory();
+			RestoreRenderSceneHistorySnapshot(history);
 		}
 		return false;
 	}
+	return true;
+}
 
+bool NRIRenderer::BeginRenderSceneFrame(HWDrawInfo& di, const NRIRendererFrameContext& frameContext, bool preserveHistory, const RenderSceneHistorySnapshot& history)
+{
 	ResetSceneBufferFrameStats();
 	ResetRendererSkyPerfTraceStats();
 	nri_scene::ResetAverageTextureColorCache();
@@ -4744,7 +4707,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		LogFallback("PT startup world correction failed.");
 		if (preserveHistory)
 		{
-			restoreHistory();
+			RestoreRenderSceneHistorySnapshot(history);
 		}
 		return false;
 	}
@@ -4762,37 +4725,310 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 	{
 		mResetHistory = true;
 	}
+	return true;
+}
 
-	if (bootstrapSimpleView)
+bool NRIRenderer::RenderSimpleBootstrapView(bool preserveHistory, const RenderSceneHistorySnapshot& history)
+{
+	mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
+	mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
+	mUpscaledInputSlot = FrameTextureSlot::Composed;
+	mUseUpscaledInFinal = false;
+	NRIPassDispatchContext passContext = BuildPassDispatchContext();
+	if (!NRIPassDispatcher::DispatchBootstrapView(passContext))
+	{
+		LogFallback("PT bootstrap view dispatch failed.");
+		if (preserveHistory)
+		{
+			RestoreRenderSceneHistorySnapshot(history);
+		}
+		return false;
+	}
+
+	CopyFinalToActiveTarget();
+	if (!preserveHistory)
+	{
+		NoteSuccessfulRealFrame();
+		++mFrameIndex;
+		mHasPreviousCameraState = true;
+		mResetHistory = false;
+	}
+	else
+	{
+		RestoreRenderSceneHistorySnapshot(history);
+	}
+	return true;
+}
+
+bool NRIRenderer::DispatchSelectedRenderScene(const RenderSceneDispatchInputs& inputs)
+{
+	if (inputs.bootstrapCapturedView)
 	{
 		mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
 		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 		mUpscaledInputSlot = FrameTextureSlot::Composed;
 		mUseUpscaledInFinal = false;
 		NRIPassDispatchContext passContext = BuildPassDispatchContext();
-		if (!NRIPassDispatcher::DispatchBootstrapView(passContext))
+		return inputs.buffersReady && NRIPassDispatcher::DispatchBootstrapView(passContext);
+	}
+
+	NRIPassDispatchContext passContext = BuildPassDispatchContext();
+	return inputs.accelerationReady &&
+		inputs.drawInfo != nullptr &&
+		inputs.activeGeometry != nullptr &&
+		inputs.activeGpuMaterials != nullptr &&
+		NRIPassDispatcher::DispatchFrameGraph(passContext, *inputs.drawInfo, *inputs.activeGeometry, *inputs.activeGpuMaterials, inputs.drawmode);
+}
+
+void NRIRenderer::LogRenderSceneFailureReasons(bool paletteReady, bool texturesReady, bool buffersReady, bool accelerationReady, bool dispatched, bool bootstrapCapturedView)
+{
+	if (!paletteReady)
+	{
+		LogFallback("PT palette texture upload failed.");
+	}
+	else if (!texturesReady)
+	{
+		LogFallback("PT material texture upload failed.");
+	}
+	else if (!buffersReady)
+	{
+		LogFallback("PT scene buffer upload failed.");
+	}
+	else if (!accelerationReady)
+	{
+		LogFallback("PT acceleration structure build failed.");
+	}
+	else if (!dispatched)
+	{
+		LogFallback(bootstrapCapturedView ? "PT bootstrap captured-scene dispatch failed." : "PT frame graph dispatch failed.");
+	}
+}
+
+void NRIRenderer::CommitRenderSceneResult(const RenderSceneCompletionInputs& inputs, const RenderSceneHistorySnapshot& history)
+{
+	if (inputs.success)
+	{
+		mHasLoggedFallback = false;
+		if (inputs.bootstrapCapturedView)
 		{
-			LogFallback("PT bootstrap view dispatch failed.");
-			if (preserveHistory)
-			{
-				restoreHistory();
-			}
-			return false;
+			CopyFinalToActiveTarget();
 		}
 
-		CopyFinalToActiveTarget();
-		if (!preserveHistory)
+		if (!inputs.preserveHistory)
 		{
 			NoteSuccessfulRealFrame();
-			++mFrameIndex;
+			mFrameIndex++;
 			mHasPreviousCameraState = true;
 			mResetHistory = false;
 		}
 		else
 		{
-			restoreHistory();
+			RestoreRenderSceneHistorySnapshot(history);
 		}
-		return true;
+	}
+	else if (inputs.preserveHistory)
+	{
+		RestoreRenderSceneHistorySnapshot(history);
+	}
+
+	if (inputs.success)
+	{
+		RecordRenderSceneSuccessStats(inputs);
+		EmitSelfTestSummary(inputs.traceFrameIndex, inputs.drawmode, inputs.portal);
+	}
+	EmitRenderSceneTemporalTrace(inputs.traceFrameIndex);
+}
+
+void NRIRenderer::RecordRenderSceneSuccessStats(const RenderSceneCompletionInputs& inputs)
+{
+	if (inputs.activeGeometry == nullptr || inputs.activeGpuMaterials == nullptr)
+	{
+		return;
+	}
+
+	mLastPerfShellTraceStats.activePrimitiveCount = (uint32_t)inputs.activeGeometry->primitives.size();
+	mLastPerfShellTraceStats.dynamicPrimitiveCount = inputs.activeDynamicGeometry != nullptr ? (uint32_t)inputs.activeDynamicGeometry->primitives.size() : 0u;
+	mLastPerfShellTraceStats.activeMaterialCount = (uint32_t)inputs.activeGpuMaterials->size();
+	mLastPerfShellTraceStats.sceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
+	mLastPerfShellTraceStats.sceneInstanceStaticCount = 0;
+	mLastPerfShellTraceStats.sceneInstanceDynamicCount = 0;
+	mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount = 0;
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneInstanceStatsMs);
+		for (const SceneInstanceData& instance : mBoundSceneInstances)
+		{
+			if (instance.dataSource == nri_diag::SceneDataSourceStatic)
+			{
+				mLastPerfShellTraceStats.sceneInstanceStaticCount++;
+			}
+			else if (instance.dataSource == nri_diag::SceneDataSourceDynamic)
+			{
+				mLastPerfShellTraceStats.sceneInstanceDynamicCount++;
+			}
+			else if (instance.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
+			{
+				mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount++;
+			}
+		}
+	}
+	NRIPersistentVoxelStatusSnapshot persistentVoxelStatus = {};
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelResourceStatsMs);
+		mPersistentVoxels.FillResourceStatusSnapshot(persistentVoxelStatus);
+	}
+	{
+		ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelBatchStatsMs);
+		mPersistentVoxels.FillBatchStatusSnapshot(persistentVoxelStatus);
+	}
+	mLastPerfShellTraceStats.persistentVoxelMeshVariantResourceCount = persistentVoxelStatus.meshVariantResourceCount;
+	mLastPerfShellTraceStats.persistentVoxelMaterialVariantResourceCount = persistentVoxelStatus.materialVariantResourceCount;
+	mLastPerfShellTraceStats.persistentVoxelBatchActorCount = persistentVoxelStatus.batchActorCount;
+	mLastPerfShellTraceStats.persistentVoxelInstanceRecordCount = persistentVoxelStatus.instanceRecordCount;
+	mLastPerfShellTraceStats.persistentVoxelAdmissionQueueCount = persistentVoxelStatus.admissionQueueCount;
+	mLastPerfShellTraceStats.persistentVoxelPendingInstanceCount = persistentVoxelStatus.pendingInstanceCount;
+	mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes = persistentVoxelStatus.residentResourceBytes;
+	mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes = persistentVoxelStatus.zeroRefResourceBytes;
+	mLastPerfShellTraceStats.persistentVoxelZeroRefMeshResourceCount = persistentVoxelStatus.zeroRefMeshResourceCount;
+	mLastPerfShellTraceStats.persistentVoxelZeroRefMaterialResourceCount = persistentVoxelStatus.zeroRefMaterialResourceCount;
+	mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount = persistentVoxelStatus.activeInstanceCount;
+	mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount = persistentVoxelStatus.instancePrimitiveCount;
+	mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount = persistentVoxelStatus.instanceMaterialCount;
+	mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount = persistentVoxelStatus.instanceMinPrimitiveCount;
+	mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount = persistentVoxelStatus.instanceMaxPrimitiveCount;
+	mLastPerfShellTraceStats.usedStaticMapScene = mUsedStaticMapSceneLastFrame;
+	mLastPerfShellTraceStats.usedDynamicOverlay = mGpuSceneHasDynamicOverlay;
+	mLastPerfShellTraceStats.usedPersistentDynamicEmissiveCache = inputs.usingPersistentDynamicEmissiveCache;
+	const double accountedMs =
+		mLastPerfShellTraceStats.initResourcesMs +
+		mLastPerfShellTraceStats.mapWorldMs +
+		mLastPerfShellTraceStats.updateStateMs +
+		mLastPerfShellTraceStats.sceneSelectMs +
+		mLastPerfShellTraceStats.sceneLightsMs +
+		mLastPerfShellTraceStats.residentLightRefreshMs +
+		mLastPerfShellTraceStats.emissiveUpdateMs +
+		mLastPerfShellTraceStats.emissiveTlasMs +
+		mLastPerfShellTraceStats.surfaceProbeMs +
+		mLastPerfShellTraceStats.frameGraphMs;
+	mLastPerfShellTraceStats.otherMs = std::max(0.0, mLastPerfShellTraceStats.totalMs - accountedMs);
+}
+
+void NRIRenderer::EmitRenderSceneTemporalTrace(uint32_t traceFrameIndex)
+{
+	if (!ShouldEmitRendererTemporalTraceLogs())
+	{
+		return;
+	}
+
+	const auto& analyticLights = mSceneLights.GetAnalyticLights();
+	const auto& emissiveSurfaces = mSceneLights.GetEmissiveSurfaces();
+	Printf("NRI PT light trace: frame=%u analytic=%u topo=%s prop=%s added=%u removed=%u rebound=%u emissive=%u topo=%s prop=%s added=%u removed=%u rebound=%u reset=%s reason=%s\n",
+		traceFrameIndex,
+		(uint32_t)analyticLights.activeLights.size(),
+		YesNo(analyticLights.lastBuildTopologyChanged),
+		YesNo(analyticLights.lastBuildPropertiesChanged),
+		(uint32_t)analyticLights.addedTopologyKeys.size(),
+		(uint32_t)analyticLights.removedTopologyKeys.size(),
+		(uint32_t)analyticLights.reboundTopologyKeys.size(),
+		(uint32_t)emissiveSurfaces.activeSurfaces.size(),
+		YesNo(emissiveSurfaces.lastBuildTopologyChanged),
+		YesNo(emissiveSurfaces.lastBuildPropertiesChanged),
+		(uint32_t)emissiveSurfaces.addedTopologyKeys.size(),
+		(uint32_t)emissiveSurfaces.removedTopologyKeys.size(),
+		(uint32_t)emissiveSurfaces.reboundTopologyKeys.size(),
+		YesNo(mResetHistory),
+		mResetHistory ? mLastHistoryResetReason.c_str() : "none");
+
+	const nri_scene::SkyPerfStats sceneSkyPerf = nri_scene::ConsumeSkyPerfStats();
+	Printf("NRI PT sky perf: frame=%u ensure_scene=%u preserve_scene=%u rebuild_scene=%u ensure_sky=%u preserve_hit=%u reuse_active=%u reuse_probe=%u probe=%u/%u face_probes=%u uploads=%u ensure_ms=%.3f probe_ms=%.3f face_ms=%.3f upload_ms=%.3f static_builds=%u overlay_builds=%u\n",
+		traceFrameIndex,
+		gRendererSkyPerfTraceStats.ensureSceneTexturesCalls,
+		gRendererSkyPerfTraceStats.ensureSceneTexturesPreserveTrueCalls,
+		gRendererSkyPerfTraceStats.ensureSceneTexturesPreserveFalseCalls,
+		gRendererSkyPerfTraceStats.ensureSkyCalls,
+		gRendererSkyPerfTraceStats.preserveExistingHits,
+		gRendererSkyPerfTraceStats.reuseActiveCubemapHits + gRendererSkyPerfTraceStats.solidReuseHits,
+		gRendererSkyPerfTraceStats.reuseActiveProbeHits,
+		gRendererSkyPerfTraceStats.probeSuccesses,
+		gRendererSkyPerfTraceStats.probeAttempts,
+		gRendererSkyPerfTraceStats.probeFaceCalls,
+		gRendererSkyPerfTraceStats.buildCubemapUploadCalls,
+		(double)gRendererSkyPerfTraceStats.ensureSkyTimeUs / 1000.0,
+		(double)gRendererSkyPerfTraceStats.probeCubemapTimeUs / 1000.0,
+		(double)gRendererSkyPerfTraceStats.probeFaceTimeUs / 1000.0,
+		(double)gRendererSkyPerfTraceStats.buildCubemapUploadTimeUs / 1000.0,
+		gRendererSkyPerfTraceStats.residentStaticSceneTextureBuilds,
+		gRendererSkyPerfTraceStats.combinedOverlayTextureBuilds);
+	Printf("NRI PT sky scene: frame=%u updates=%u wall=%u flat=%u portal=%u inspects=%u cubemap_candidates=%u solid_candidates=%u inspect_faces=%u avg_base=%u avg_recursive=%u recursive_faces=%u avg_pixels=%llu update_ms=%.3f inspect_ms=%.3f avg_ms=%.3f\n",
+		traceFrameIndex,
+		sceneSkyPerf.updateCalls,
+		sceneSkyPerf.wallUpdateCalls,
+		sceneSkyPerf.flatUpdateCalls,
+		sceneSkyPerf.portalUpdateCalls,
+		sceneSkyPerf.inspectCalls,
+		sceneSkyPerf.inspectCubemapCandidates,
+		sceneSkyPerf.inspectSolidCandidates,
+		sceneSkyPerf.inspectFaceWalks,
+		sceneSkyPerf.averageColorBaseCalls,
+		sceneSkyPerf.averageColorRecursiveCalls,
+		sceneSkyPerf.recursiveSkyboxFaceSamples,
+		(unsigned long long)sceneSkyPerf.averageColorPixels,
+		(double)sceneSkyPerf.updateTimeUs / 1000.0,
+		(double)sceneSkyPerf.inspectTimeUs / 1000.0,
+		(double)sceneSkyPerf.averageColorTimeUs / 1000.0);
+	Printf("NRI PT sky invalidation: frame=%u requests=%u applied=%u emissive_material_dirty=%u keep_last=%u hold_level=%u cached_cubemap=%u create_cubemap=%u cached_solid=%u create_solid=%u\n",
+		traceFrameIndex,
+		gRendererSkyPerfTraceStats.lightingInvalidationRequests,
+		gRendererSkyPerfTraceStats.lightingInvalidationsApplied,
+		gRendererSkyPerfTraceStats.emissiveMaterialDirtyEvents,
+		gRendererSkyPerfTraceStats.keepLastCubemapHits,
+		gRendererSkyPerfTraceStats.holdLevelCubemapHits,
+		gRendererSkyPerfTraceStats.activateCachedCubemapHits,
+		gRendererSkyPerfTraceStats.createCachedCubemapHits,
+		gRendererSkyPerfTraceStats.solidActivateHits,
+		gRendererSkyPerfTraceStats.solidCreateHits);
+}
+
+bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
+{
+	if ((drawmode != DM_MAINVIEW && drawmode != DM_OFFSCREEN) || portal || mFrameBuffer == nullptr ||
+		mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)
+	{
+		return false;
+	}
+
+	if (!mPathTracingSupported)
+	{
+		LogFallback(GetAvailabilityReason());
+		return false;
+	}
+
+	ResetPerfTraceStats();
+	ScopedPtPerfTimer totalPerfTimer(mLastPerfShellTraceStats.totalMs);
+	Clocker totalClock(NriPTAll);
+
+	const uint32_t bootstrapMode = GetBootstrapMode();
+	const bool bootstrapSimpleView = nri_ptbootstrap && bootstrapMode <= 3u;
+	const bool bootstrapCapturedView = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 12u;
+	const bool bootstrapCapturedDiagnostics = nri_ptbootstrap && bootstrapMode >= 4u && bootstrapMode <= 10u;
+	const bool bootstrapCapturedFlat = nri_ptbootstrap && bootstrapMode == 11u;
+	const bool bootstrapCapturedBaseColor = nri_ptbootstrap && bootstrapMode == 12u;
+	const bool rawTraceDirectScene = !nri_ptbootstrap && nri_ptdirectscene;
+	const int debugMode = (int)nri_ptdebug;
+
+	const bool preserveHistory = drawmode != DM_MAINVIEW;
+	const NRIRendererFrameContext frameContext = BuildFrameContext(drawmode, portal, debugMode, preserveHistory);
+	const NRIPersistentVoxelSettings persistentVoxelSettings = BuildNRIPersistentVoxelSettingsFromCVars();
+	const uint32_t traceFrameIndex = frameContext.frameIndex;
+	const RenderSceneHistorySnapshot history = CaptureRenderSceneHistorySnapshot(preserveHistory);
+	if (!EnsureRenderSceneFrameResources(frameContext, preserveHistory, history) ||
+		!BeginRenderSceneFrame(di, frameContext, preserveHistory, history))
+	{
+		return false;
+	}
+
+	if (bootstrapSimpleView)
+	{
+		return RenderSimpleBootstrapView(preserveHistory, history);
 	}
 
 	const bool allowStaticMapScene = !bootstrapCapturedView && !rawTraceDirectScene && mMapWorld.valid;
@@ -5947,7 +6183,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				LogFallback("PT static scene restore failed after dynamic overlay or resident chunk rebuild.");
 				if (preserveHistory)
 				{
-					restoreHistory();
+					RestoreRenderSceneHistorySnapshot(history);
 				}
 				return false;
 			}
@@ -5978,7 +6214,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			LogFallback("PT scene capture failed.");
 			if (preserveHistory)
 			{
-				restoreHistory();
+				RestoreRenderSceneHistorySnapshot(history);
 			}
 			return false;
 		}
@@ -6095,7 +6331,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		LogFallback("PT scene selection failed.");
 		if (preserveHistory)
 		{
-			restoreHistory();
+			RestoreRenderSceneHistorySnapshot(history);
 		}
 		return false;
 	}
@@ -6124,7 +6360,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				LogFallback("PT runtime overlay material refresh produced an invalid material slice.");
 				if (preserveHistory)
 				{
-					restoreHistory();
+					RestoreRenderSceneHistorySnapshot(history);
 				}
 				return false;
 			}
@@ -6151,7 +6387,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				LogFallback("PT runtime overlay material refresh failed after scene-light rebuild.");
 				if (preserveHistory)
 				{
-					restoreHistory();
+					RestoreRenderSceneHistorySnapshot(history);
 				}
 				return false;
 			}
@@ -6184,7 +6420,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				LogFallback("PT runtime overlay light refresh failed after scene-light rebuild.");
 				if (preserveHistory)
 				{
-					restoreHistory();
+					RestoreRenderSceneHistorySnapshot(history);
 				}
 				return false;
 			}
@@ -6210,7 +6446,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				LogFallback("PT captured scene light refresh failed after scene-light rebuild.");
 				if (preserveHistory)
 				{
-					restoreHistory();
+					RestoreRenderSceneHistorySnapshot(history);
 				}
 				return false;
 			}
@@ -6232,7 +6468,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 				LogFallback("PT static scene light refresh failed.");
 				if (preserveHistory)
 				{
-					restoreHistory();
+					RestoreRenderSceneHistorySnapshot(history);
 				}
 				return false;
 			}
@@ -6244,7 +6480,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		LogFallback("PT emissive primitive update failed.");
 		if (preserveHistory)
 		{
-			restoreHistory();
+			RestoreRenderSceneHistorySnapshot(history);
 		}
 		return false;
 	}
@@ -6253,7 +6489,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		LogFallback("PT emissive TLAS update failed.");
 		if (preserveHistory)
 		{
-			restoreHistory();
+			RestoreRenderSceneHistorySnapshot(history);
 		}
 		return false;
 	}
@@ -6285,7 +6521,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		LogFallback("PT scene path produced no supported opaque geometry.");
 		if (preserveHistory)
 		{
-			restoreHistory();
+			RestoreRenderSceneHistorySnapshot(history);
 		}
 		return false;
 	}
@@ -6295,217 +6531,35 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		PrepareSceneTextureInputsForCompute();
 	}
 
-	bool dispatched = false;
-	if (bootstrapCapturedView)
-	{
-		mHistoryInputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
-		mHistoryOutputSlot = (mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
-		mUpscaledInputSlot = FrameTextureSlot::Composed;
-		mUseUpscaledInFinal = false;
-		NRIPassDispatchContext passContext = BuildPassDispatchContext();
-		dispatched = buffersReady && NRIPassDispatcher::DispatchBootstrapView(passContext);
-	}
-	else
-	{
-		NRIPassDispatchContext passContext = BuildPassDispatchContext();
-		dispatched = accelerationReady && NRIPassDispatcher::DispatchFrameGraph(passContext, di, *activeGeometry, *activeGpuMaterials, drawmode);
-	}
+	RenderSceneDispatchInputs dispatchInputs = {};
+	dispatchInputs.bootstrapCapturedView = bootstrapCapturedView;
+	dispatchInputs.buffersReady = buffersReady;
+	dispatchInputs.accelerationReady = accelerationReady;
+	dispatchInputs.drawInfo = &di;
+	dispatchInputs.activeGeometry = activeGeometry;
+	dispatchInputs.activeGpuMaterials = activeGpuMaterials;
+	dispatchInputs.drawmode = drawmode;
+	const bool dispatched = DispatchSelectedRenderScene(dispatchInputs);
 	const bool success = paletteReady && texturesReady && buffersReady && accelerationReady && dispatched;
+	LogRenderSceneFailureReasons(paletteReady, texturesReady, buffersReady, accelerationReady, dispatched, bootstrapCapturedView);
 
-	if (!paletteReady)
-	{
-		LogFallback("PT palette texture upload failed.");
-	}
-	else if (!texturesReady)
-	{
-		LogFallback("PT material texture upload failed.");
-	}
-	else if (!buffersReady)
-	{
-		LogFallback("PT scene buffer upload failed.");
-	}
-	else if (!accelerationReady)
-	{
-		LogFallback("PT acceleration structure build failed.");
-	}
-	else if (!dispatched)
-	{
-		LogFallback(bootstrapCapturedView ? "PT bootstrap captured-scene dispatch failed." : "PT frame graph dispatch failed.");
-	}
-
-	if (success)
-	{
-		mHasLoggedFallback = false;
-		if (bootstrapCapturedView)
-		{
-			CopyFinalToActiveTarget();
-		}
-
-		if (!preserveHistory)
-		{
-			NoteSuccessfulRealFrame();
-			mFrameIndex++;
-			mHasPreviousCameraState = true;
-			mResetHistory = false;
-		}
-		else
-		{
-			restoreHistory();
-		}
-	}
-	else if (preserveHistory)
-	{
-		restoreHistory();
-	}
-
-	if (success)
-	{
-		mLastPerfShellTraceStats.activePrimitiveCount = (uint32_t)activeGeometry->primitives.size();
-		mLastPerfShellTraceStats.dynamicPrimitiveCount = activeDynamicGeometry != nullptr ? (uint32_t)activeDynamicGeometry->primitives.size() : 0u;
-		mLastPerfShellTraceStats.activeMaterialCount = (uint32_t)activeGpuMaterials->size();
-		mLastPerfShellTraceStats.sceneInstanceCount = (uint32_t)mBoundSceneInstances.size();
-		mLastPerfShellTraceStats.sceneInstanceStaticCount = 0;
-		mLastPerfShellTraceStats.sceneInstanceDynamicCount = 0;
-		mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount = 0;
-		{
-			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneInstanceStatsMs);
-			for (const SceneInstanceData& instance : mBoundSceneInstances)
-			{
-				if (instance.dataSource == nri_diag::SceneDataSourceStatic)
-				{
-					mLastPerfShellTraceStats.sceneInstanceStaticCount++;
-				}
-				else if (instance.dataSource == nri_diag::SceneDataSourceDynamic)
-				{
-					mLastPerfShellTraceStats.sceneInstanceDynamicCount++;
-				}
-				else if (instance.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
-				{
-					mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount++;
-				}
-			}
-		}
-		NRIPersistentVoxelStatusSnapshot persistentVoxelStatus = {};
-		{
-			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelResourceStatsMs);
-			mPersistentVoxels.FillResourceStatusSnapshot(persistentVoxelStatus);
-		}
-		{
-			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.persistentVoxelBatchStatsMs);
-			mPersistentVoxels.FillBatchStatusSnapshot(persistentVoxelStatus);
-		}
-		mLastPerfShellTraceStats.persistentVoxelMeshVariantResourceCount = persistentVoxelStatus.meshVariantResourceCount;
-		mLastPerfShellTraceStats.persistentVoxelMaterialVariantResourceCount = persistentVoxelStatus.materialVariantResourceCount;
-		mLastPerfShellTraceStats.persistentVoxelBatchActorCount = persistentVoxelStatus.batchActorCount;
-		mLastPerfShellTraceStats.persistentVoxelInstanceRecordCount = persistentVoxelStatus.instanceRecordCount;
-		mLastPerfShellTraceStats.persistentVoxelAdmissionQueueCount = persistentVoxelStatus.admissionQueueCount;
-		mLastPerfShellTraceStats.persistentVoxelPendingInstanceCount = persistentVoxelStatus.pendingInstanceCount;
-		mLastPerfShellTraceStats.persistentVoxelResidentResourceBytes = persistentVoxelStatus.residentResourceBytes;
-		mLastPerfShellTraceStats.persistentVoxelZeroRefResourceBytes = persistentVoxelStatus.zeroRefResourceBytes;
-		mLastPerfShellTraceStats.persistentVoxelZeroRefMeshResourceCount = persistentVoxelStatus.zeroRefMeshResourceCount;
-		mLastPerfShellTraceStats.persistentVoxelZeroRefMaterialResourceCount = persistentVoxelStatus.zeroRefMaterialResourceCount;
-		mLastPerfShellTraceStats.persistentVoxelInstanceActiveCount = persistentVoxelStatus.activeInstanceCount;
-		mLastPerfShellTraceStats.persistentVoxelInstancePrimitiveCount = persistentVoxelStatus.instancePrimitiveCount;
-		mLastPerfShellTraceStats.persistentVoxelInstanceMaterialCount = persistentVoxelStatus.instanceMaterialCount;
-		mLastPerfShellTraceStats.persistentVoxelInstanceMinPrimitiveCount = persistentVoxelStatus.instanceMinPrimitiveCount;
-		mLastPerfShellTraceStats.persistentVoxelInstanceMaxPrimitiveCount = persistentVoxelStatus.instanceMaxPrimitiveCount;
-		mLastPerfShellTraceStats.usedStaticMapScene = mUsedStaticMapSceneLastFrame;
-		mLastPerfShellTraceStats.usedDynamicOverlay = mGpuSceneHasDynamicOverlay;
-		mLastPerfShellTraceStats.usedPersistentDynamicEmissiveCache = usingPersistentDynamicEmissiveCache;
-		const double accountedMs =
-			mLastPerfShellTraceStats.initResourcesMs +
-			mLastPerfShellTraceStats.mapWorldMs +
-			mLastPerfShellTraceStats.updateStateMs +
-			mLastPerfShellTraceStats.sceneSelectMs +
-			mLastPerfShellTraceStats.sceneLightsMs +
-			mLastPerfShellTraceStats.residentLightRefreshMs +
-			mLastPerfShellTraceStats.emissiveUpdateMs +
-			mLastPerfShellTraceStats.emissiveTlasMs +
-			mLastPerfShellTraceStats.surfaceProbeMs +
-			mLastPerfShellTraceStats.frameGraphMs;
-		mLastPerfShellTraceStats.otherMs = std::max(0.0, mLastPerfShellTraceStats.totalMs - accountedMs);
-	}
-
-	if (success)
-	{
-		EmitSelfTestSummary(traceFrameIndex, drawmode, portal);
-	}
-
-	if (ShouldEmitRendererTemporalTraceLogs())
-	{
-		const auto& analyticLights = mSceneLights.GetAnalyticLights();
-		const auto& emissiveSurfaces = mSceneLights.GetEmissiveSurfaces();
-		Printf("NRI PT light trace: frame=%u analytic=%u topo=%s prop=%s added=%u removed=%u rebound=%u emissive=%u topo=%s prop=%s added=%u removed=%u rebound=%u reset=%s reason=%s\n",
-			traceFrameIndex,
-			(uint32_t)analyticLights.activeLights.size(),
-			YesNo(analyticLights.lastBuildTopologyChanged),
-			YesNo(analyticLights.lastBuildPropertiesChanged),
-			(uint32_t)analyticLights.addedTopologyKeys.size(),
-			(uint32_t)analyticLights.removedTopologyKeys.size(),
-			(uint32_t)analyticLights.reboundTopologyKeys.size(),
-			(uint32_t)emissiveSurfaces.activeSurfaces.size(),
-			YesNo(emissiveSurfaces.lastBuildTopologyChanged),
-			YesNo(emissiveSurfaces.lastBuildPropertiesChanged),
-			(uint32_t)emissiveSurfaces.addedTopologyKeys.size(),
-			(uint32_t)emissiveSurfaces.removedTopologyKeys.size(),
-			(uint32_t)emissiveSurfaces.reboundTopologyKeys.size(),
-			YesNo(mResetHistory),
-			mResetHistory ? mLastHistoryResetReason.c_str() : "none");
-
-		const nri_scene::SkyPerfStats sceneSkyPerf = nri_scene::ConsumeSkyPerfStats();
-		Printf("NRI PT sky perf: frame=%u ensure_scene=%u preserve_scene=%u rebuild_scene=%u ensure_sky=%u preserve_hit=%u reuse_active=%u reuse_probe=%u probe=%u/%u face_probes=%u uploads=%u ensure_ms=%.3f probe_ms=%.3f face_ms=%.3f upload_ms=%.3f static_builds=%u overlay_builds=%u\n",
-			traceFrameIndex,
-			gRendererSkyPerfTraceStats.ensureSceneTexturesCalls,
-			gRendererSkyPerfTraceStats.ensureSceneTexturesPreserveTrueCalls,
-			gRendererSkyPerfTraceStats.ensureSceneTexturesPreserveFalseCalls,
-			gRendererSkyPerfTraceStats.ensureSkyCalls,
-			gRendererSkyPerfTraceStats.preserveExistingHits,
-			gRendererSkyPerfTraceStats.reuseActiveCubemapHits + gRendererSkyPerfTraceStats.solidReuseHits,
-			gRendererSkyPerfTraceStats.reuseActiveProbeHits,
-			gRendererSkyPerfTraceStats.probeSuccesses,
-			gRendererSkyPerfTraceStats.probeAttempts,
-			gRendererSkyPerfTraceStats.probeFaceCalls,
-			gRendererSkyPerfTraceStats.buildCubemapUploadCalls,
-			(double)gRendererSkyPerfTraceStats.ensureSkyTimeUs / 1000.0,
-			(double)gRendererSkyPerfTraceStats.probeCubemapTimeUs / 1000.0,
-			(double)gRendererSkyPerfTraceStats.probeFaceTimeUs / 1000.0,
-			(double)gRendererSkyPerfTraceStats.buildCubemapUploadTimeUs / 1000.0,
-			gRendererSkyPerfTraceStats.residentStaticSceneTextureBuilds,
-			gRendererSkyPerfTraceStats.combinedOverlayTextureBuilds);
-		Printf("NRI PT sky scene: frame=%u updates=%u wall=%u flat=%u portal=%u inspects=%u cubemap_candidates=%u solid_candidates=%u inspect_faces=%u avg_base=%u avg_recursive=%u recursive_faces=%u avg_pixels=%llu update_ms=%.3f inspect_ms=%.3f avg_ms=%.3f\n",
-			traceFrameIndex,
-			sceneSkyPerf.updateCalls,
-			sceneSkyPerf.wallUpdateCalls,
-			sceneSkyPerf.flatUpdateCalls,
-			sceneSkyPerf.portalUpdateCalls,
-			sceneSkyPerf.inspectCalls,
-			sceneSkyPerf.inspectCubemapCandidates,
-			sceneSkyPerf.inspectSolidCandidates,
-			sceneSkyPerf.inspectFaceWalks,
-			sceneSkyPerf.averageColorBaseCalls,
-			sceneSkyPerf.averageColorRecursiveCalls,
-			sceneSkyPerf.recursiveSkyboxFaceSamples,
-			(unsigned long long)sceneSkyPerf.averageColorPixels,
-			(double)sceneSkyPerf.updateTimeUs / 1000.0,
-			(double)sceneSkyPerf.inspectTimeUs / 1000.0,
-			(double)sceneSkyPerf.averageColorTimeUs / 1000.0);
-		Printf("NRI PT sky invalidation: frame=%u requests=%u applied=%u emissive_material_dirty=%u keep_last=%u hold_level=%u cached_cubemap=%u create_cubemap=%u cached_solid=%u create_solid=%u\n",
-			traceFrameIndex,
-			gRendererSkyPerfTraceStats.lightingInvalidationRequests,
-			gRendererSkyPerfTraceStats.lightingInvalidationsApplied,
-			gRendererSkyPerfTraceStats.emissiveMaterialDirtyEvents,
-			gRendererSkyPerfTraceStats.keepLastCubemapHits,
-			gRendererSkyPerfTraceStats.holdLevelCubemapHits,
-			gRendererSkyPerfTraceStats.activateCachedCubemapHits,
-			gRendererSkyPerfTraceStats.createCachedCubemapHits,
-			gRendererSkyPerfTraceStats.solidActivateHits,
-			gRendererSkyPerfTraceStats.solidCreateHits);
-	}
+	RenderSceneCompletionInputs completionInputs = {};
+	completionInputs.success = success;
+	completionInputs.preserveHistory = preserveHistory;
+	completionInputs.bootstrapCapturedView = bootstrapCapturedView;
+	completionInputs.traceFrameIndex = traceFrameIndex;
+	completionInputs.drawmode = drawmode;
+	completionInputs.portal = portal;
+	completionInputs.activeGeometry = activeGeometry;
+	completionInputs.activeGpuMaterials = activeGpuMaterials;
+	completionInputs.activeDynamicGeometry = activeDynamicGeometry;
+	completionInputs.usingPersistentDynamicEmissiveCache = usingPersistentDynamicEmissiveCache;
+	CommitRenderSceneResult(completionInputs, history);
 
 	return success;
 }
 
-bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
+bool NRIRenderer::HasPreloadFrameTarget(const PreloadLevelSceneContext& context) const
 {
 	if (mFrameBuffer == nullptr || mFrameBuffer->mCommandBuffer == nullptr || mFrameBuffer->mActiveTarget == nullptr)
 	{
@@ -6515,69 +6569,86 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 				mFrameBuffer != nullptr ? 1u : 0u,
 				mFrameBuffer != nullptr && mFrameBuffer->mCommandBuffer != nullptr ? 1u : 0u,
 				mFrameBuffer != nullptr && mFrameBuffer->mActiveTarget != nullptr ? 1u : 0u,
-				outputWidth,
-				outputHeight,
-				targetWidth,
-				targetHeight);
+				context.outputWidth,
+				context.outputHeight,
+				context.targetWidth,
+				context.targetHeight);
 		}
 		return false;
 	}
+	return true;
+}
 
+bool NRIRenderer::ShouldSkipPreloadForUnsupportedPathTracing(const PreloadLevelSceneContext& context)
+{
 	if (!RefreshPathTracingAvailability() || !mPathTracingSupported)
 	{
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=pt-unsupported output=%ux%u target=%ux%u\n",
-				outputWidth,
-				outputHeight,
-				targetWidth,
-				targetHeight);
+				context.outputWidth,
+				context.outputHeight,
+				context.targetWidth,
+				context.targetHeight);
 		}
 		return true;
 	}
+	return false;
+}
 
-	const auto preloadStart = std::chrono::steady_clock::now();
+void NRIRenderer::TracePreloadBegin(const PreloadLevelSceneContext& context) const
+{
 	if ((int)nri_ptloadingtrace >= 1)
 	{
 		Printf("NRI PT loading gate: event=renderer-preload result=begin output=%ux%u target=%ux%u map_valid=%u static_valid=%u static_resident=%u\n",
-			outputWidth,
-			outputHeight,
-			targetWidth,
-			targetHeight,
+			context.outputWidth,
+			context.outputHeight,
+			context.targetWidth,
+			context.targetHeight,
 			mMapWorld.valid ? 1u : 0u,
 			mStaticMapScene.valid ? 1u : 0u,
 			mStaticMapScene.valid && mStaticMapScene.texturesResident && mStaticMapScene.buffersResident && mStaticMapScene.accelerationResident ? 1u : 0u);
 	}
+}
 
+bool NRIRenderer::EnsurePreloadFrameResources(const PreloadLevelSceneContext& context)
+{
 	ResetPerfTraceStats();
 	{
 		ScopedPtPerfTimer initPerfTimer(mLastPerfShellTraceStats.initResourcesMs);
-		if (!Initialize() || !NRIFrameResources::EnsureFrameResources(*this, outputWidth, outputHeight, targetWidth, targetHeight))
+		if (!Initialize() || !NRIFrameResources::EnsureFrameResources(*this, context.outputWidth, context.outputHeight, context.targetWidth, context.targetHeight))
 		{
 			LogFallback("PT preload frame resources or pipelines failed to initialize.");
 			if ((int)nri_ptloadingtrace >= 1)
 			{
 				Printf("NRI PT loading gate: event=renderer-preload result=ready reason=init-failed ms=%.3f\n",
-					DurationMs(preloadStart, std::chrono::steady_clock::now()));
+					DurationMs(context.start, std::chrono::steady_clock::now()));
 			}
-			return true;
+			return false;
 		}
 	}
+	return true;
+}
 
+void NRIRenderer::ResetPreloadSceneStats()
+{
 	ResetSceneBufferFrameStats();
 	ResetRendererSkyPerfTraceStats();
 	nri_scene::ResetAverageTextureColorCache();
 	nri_scene::ResetSkyPerfStats();
+}
 
+NRIRenderer::PreloadLevelSceneStepResult NRIRenderer::PreloadStaticSceneAndStartupCorrection(const PreloadLevelSceneContext& context)
+{
 	RefreshMapWorld();
 	if (!mMapWorld.valid)
 	{
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=map-invalid ms=%.3f\n",
-				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+				DurationMs(context.start, std::chrono::steady_clock::now()));
 		}
-		return true;
+		return PreloadLevelSceneStepResult::Ready;
 	}
 
 	if (!PreloadStaticMapResources())
@@ -6586,9 +6657,9 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=static-map-failed ms=%.3f\n",
-				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+				DurationMs(context.start, std::chrono::steady_clock::now()));
 		}
-		return true;
+		return PreloadLevelSceneStepResult::Ready;
 	}
 
 	if (!ApplyStartupMapWorldCorrectionIfNeeded("renderer-preload"))
@@ -6597,9 +6668,9 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=startup-correction-failed ms=%.3f\n",
-				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+				DurationMs(context.start, std::chrono::steady_clock::now()));
 		}
-		return true;
+		return PreloadLevelSceneStepResult::Ready;
 	}
 	if (!mStaticMapScene.valid ||
 		!mStaticMapScene.texturesResident ||
@@ -6616,7 +6687,7 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 				mStaticMapScene.accelerationResident ? 1u : 0u,
 				(unsigned long long)mStaticMapScene.buildSerial,
 				(unsigned long long)mMapWorld.buildSerial,
-				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+				DurationMs(context.start, std::chrono::steady_clock::now()));
 		}
 		if (!PreloadStaticMapResources())
 		{
@@ -6624,37 +6695,45 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 			if ((int)nri_ptloadingtrace >= 1)
 			{
 				Printf("NRI PT loading gate: event=renderer-preload result=ready reason=startup-correction-static-map-failed ms=%.3f\n",
-					DurationMs(preloadStart, std::chrono::steady_clock::now()));
+					DurationMs(context.start, std::chrono::steady_clock::now()));
 			}
-			return true;
+			return PreloadLevelSceneStepResult::Ready;
 		}
 	}
+	return PreloadLevelSceneStepResult::Continue;
+}
 
+void NRIRenderer::RefreshPreloadStaticLighting(PreloadLevelSceneContext& context)
+{
 	RefreshSceneLightSystem(true, nullptr, nullptr, nullptr, nullptr, false);
-	bool staticLightRefreshReady = true;
-	if (!mGpuSceneHasDynamicOverlay)
+	if (mGpuSceneHasDynamicOverlay)
 	{
-		const bool needsResidentStaticLightRefresh =
-			!mSceneLights.GetAnalyticLights().activeLights.empty() ||
-			mBoundRuntimeLightCount != 0 ||
-			mSceneLights.GetSectorLighting().activeSectorCount > 0 ||
-			mBoundSectorLightActiveCount != 0;
-		if (needsResidentStaticLightRefresh && !RefreshResidentStaticSceneDataSet())
-		{
-			staticLightRefreshReady = false;
-			LogFallback("PT preload static scene light refresh failed.");
-			if ((int)nri_ptloadingtrace >= 1)
-			{
-				Printf("NRI PT loading gate: event=renderer-preload result=continue reason=static-light-refresh-failed analytic=%u runtime_bound=%u sector_active=%u sector_bound=%u ms=%.3f\n",
-					mSceneLights.GetAnalyticLights().activeLights.empty() ? 0u : 1u,
-					mBoundRuntimeLightCount,
-					mSceneLights.GetSectorLighting().activeSectorCount,
-					mBoundSectorLightActiveCount,
-					DurationMs(preloadStart, std::chrono::steady_clock::now()));
-			}
-		}
+		return;
 	}
 
+	const bool needsResidentStaticLightRefresh =
+		!mSceneLights.GetAnalyticLights().activeLights.empty() ||
+		mBoundRuntimeLightCount != 0 ||
+		mSceneLights.GetSectorLighting().activeSectorCount > 0 ||
+		mBoundSectorLightActiveCount != 0;
+	if (needsResidentStaticLightRefresh && !RefreshResidentStaticSceneDataSet())
+	{
+		context.staticLightRefreshReady = false;
+		LogFallback("PT preload static scene light refresh failed.");
+		if ((int)nri_ptloadingtrace >= 1)
+		{
+			Printf("NRI PT loading gate: event=renderer-preload result=continue reason=static-light-refresh-failed analytic=%u runtime_bound=%u sector_active=%u sector_bound=%u ms=%.3f\n",
+				mSceneLights.GetAnalyticLights().activeLights.empty() ? 0u : 1u,
+				mBoundRuntimeLightCount,
+				mSceneLights.GetSectorLighting().activeSectorCount,
+				mBoundSectorLightActiveCount,
+				DurationMs(context.start, std::chrono::steady_clock::now()));
+		}
+	}
+}
+
+NRIRenderer::PreloadLevelSceneStepResult NRIRenderer::PreloadResidentSceneResources(const PreloadLevelSceneContext& context)
+{
 	if (!PreloadPersistentVoxelResources())
 	{
 		if (mPersistentVoxels.HasPreloadPending())
@@ -6671,17 +6750,17 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 					requiredReady,
 					optionalPending,
 					failed,
-					DurationMs(preloadStart, std::chrono::steady_clock::now()));
+					DurationMs(context.start, std::chrono::steady_clock::now()));
 			}
-			return false;
+			return PreloadLevelSceneStepResult::Wait;
 		}
 		LogFallback("PT preload persistent voxel resource admission failed.");
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=persistent-voxel-failed ms=%.3f\n",
-				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+				DurationMs(context.start, std::chrono::steady_clock::now()));
 		}
-		return true;
+		return PreloadLevelSceneStepResult::Ready;
 	}
 	if (!PreloadMaterialResources())
 	{
@@ -6689,9 +6768,9 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=material-failed ms=%.3f\n",
-				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+				DurationMs(context.start, std::chrono::steady_clock::now()));
 		}
-		return true;
+		return PreloadLevelSceneStepResult::Ready;
 	}
 
 	EmissiveSamplingBuildContext emissiveSamplingContext = {};
@@ -6702,9 +6781,9 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=emissive-sampling-failed ms=%.3f\n",
-				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+				DurationMs(context.start, std::chrono::steady_clock::now()));
 		}
-		return true;
+		return PreloadLevelSceneStepResult::Ready;
 	}
 	if (!BuildEmissiveTopLevelAccelerationStructure())
 	{
@@ -6712,11 +6791,15 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 		if ((int)nri_ptloadingtrace >= 1)
 		{
 			Printf("NRI PT loading gate: event=renderer-preload result=ready reason=emissive-tlas-failed ms=%.3f\n",
-				DurationMs(preloadStart, std::chrono::steady_clock::now()));
+				DurationMs(context.start, std::chrono::steady_clock::now()));
 		}
-		return true;
+		return PreloadLevelSceneStepResult::Ready;
 	}
+	return PreloadLevelSceneStepResult::Continue;
+}
 
+bool NRIRenderer::FinishPreloadLevelScene(const PreloadLevelSceneContext& context)
+{
 	PrepareSceneTextureInputsForCompute();
 	Printf("NRI PT preload ready: level=%s build_serial=%llu chunks=%u tris=%u materials=%u\n",
 		mMapWorld.level != nullptr ? mMapWorld.level->labelName.GetChars() : "(none)",
@@ -6727,10 +6810,51 @@ bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight,
 	if ((int)nri_ptloadingtrace >= 1)
 	{
 		Printf("NRI PT loading gate: event=renderer-preload result=ready reason=complete static_light_refresh=%u ms=%.3f\n",
-			staticLightRefreshReady ? 1u : 0u,
-			DurationMs(preloadStart, std::chrono::steady_clock::now()));
+			context.staticLightRefreshReady ? 1u : 0u,
+			DurationMs(context.start, std::chrono::steady_clock::now()));
 	}
 	return true;
+}
+
+bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
+{
+	PreloadLevelSceneContext context = {};
+	context.outputWidth = outputWidth;
+	context.outputHeight = outputHeight;
+	context.targetWidth = targetWidth;
+	context.targetHeight = targetHeight;
+	context.start = std::chrono::steady_clock::now();
+
+	if (!HasPreloadFrameTarget(context))
+	{
+		return false;
+	}
+	if (ShouldSkipPreloadForUnsupportedPathTracing(context))
+	{
+		return true;
+	}
+
+	TracePreloadBegin(context);
+	if (!EnsurePreloadFrameResources(context))
+	{
+		return true;
+	}
+	ResetPreloadSceneStats();
+
+	const PreloadLevelSceneStepResult staticSceneResult = PreloadStaticSceneAndStartupCorrection(context);
+	if (staticSceneResult != PreloadLevelSceneStepResult::Continue)
+	{
+		return staticSceneResult != PreloadLevelSceneStepResult::Wait;
+	}
+
+	RefreshPreloadStaticLighting(context);
+	const PreloadLevelSceneStepResult resourcesResult = PreloadResidentSceneResources(context);
+	if (resourcesResult != PreloadLevelSceneStepResult::Continue)
+	{
+		return resourcesResult != PreloadLevelSceneStepResult::Wait;
+	}
+
+	return FinishPreloadLevelScene(context);
 }
 
 void NRIRenderer::ResetHistory()
