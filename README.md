@@ -1,14 +1,14 @@
 # Duke-RT
 
-![voxel splash](images/voxel-splash.png)
+![Duke-RT gameplay](images/28.png)
 
-Duke-RT is a fork of Raze that adds a new ray-tracing render backend based on [NVIDIA NRI](https://github.com/NVIDIA-RTX/NRI). The existing Build-engine game support from Raze remains the foundation, while this fork focuses on path tracing, RT renderer bring-up, lighting authoring, custom material authoring, denoising/upscaling integration, and backend diagnostics. It also includes tooling and overlay workflows so users can create their own material and lighting rules for Duke content. It only works on Windows due to reliance on libraries for DLSS, frame generation, denoising, etc.
+Duke-RT is a fork of Raze that adds a new ray-tracing render backend based on [NVIDIA NRI](https://github.com/NVIDIA-RTX/NRI). The existing Build-engine game support from Raze remains the foundation, while this fork focuses on path tracing, RT renderer bring-up, lighting authoring, custom material authoring, denoising/upscaling integration, and backend diagnostics. It also includes tooling and overlay workflows so users can create their own material and lighting rules for Duke content. It only works on Windows due to reliance on libraries for DLSS, frame generation, denoising, etc. [Watch the latest gameplay video](https://www.youtube.com/watch?v=7z7txcZg2q0).
 
-![1080p splash](images/1080p-splash.png)
+![Duke-RT gameplay](images/6.png)
 
 The renderer supports both Direct3D 12 and Vulkan, although feature support is more complete for D3D12. It's recommended that you play in D3D12 and HDR if possible!
 
-![bar emissive](images/bar-emissive.png)
+![Duke-RT gameplay](images/24.png)
 
 **Check out the linked project docs below to make your own lighting rules and material overrides!**
 
@@ -27,7 +27,7 @@ The renderer supports both Direct3D 12 and Vulkan, although feature support is m
 
 Duke-RT is work in progress. The core renderer is in, with full support for modern graphics APIs and libraries like D3D12, DLSS Super Resolution and Ray Reconstruction, etc. I've also gone through and **remastered Duke episodes 1 and 2 with PBR materials (based on the originals) as well as updated lighting**. Episode 3 is not yet done. There are some known issues that are on my radar but I have yet to tackle.
 
-![metal materials](images/metal-materials.png)
+![Duke-RT gameplay](images/38.png)
 
 Known high-priority issues:
 - slow perf on the start of level 1 due to large voxel objects
