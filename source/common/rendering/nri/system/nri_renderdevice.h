@@ -19,6 +19,7 @@ class FCanvasTexture;
 class FTexture;
 class FGameTexture;
 class NRIRenderer;
+class NRIPassDispatchContext;
 class NRIDescriptorSetManager;
 class NRIFrameResources;
 class NRIPipelineStateManager;
@@ -311,6 +312,7 @@ private:
 	friend class NRISceneTextureResidency;
 	friend class NRIUpscalerContext;
 	friend class NRIFrameGenerationContext;
+	friend NRIPassDispatchContext BuildNRIPassDispatchContext(NRIRenderer& renderer);
 
 	std::unique_ptr<NRIRenderState> mRenderState;
 	std::unique_ptr<NRIRenderer> mRenderer;

@@ -1521,6 +1521,7 @@ private:
 	friend class NRIFrameResources;
 	friend class NRIPipelineStateManager;
 	friend class NRISceneUploadManager;
+	friend NRIPassDispatchContext BuildNRIPassDispatchContext(NRIRenderer& renderer);
 	friend NRIRuntimeMutationResidentUploadServices BuildNRIRuntimeMutationResidentUploadServices(NRIRenderer& renderer);
 	friend NRIRuntimeMutationOverlayServices BuildNRIRuntimeMutationOverlayServices(NRIRenderer& renderer);
 	friend NRIRuntimeMutationResidentApplyServices BuildNRIRuntimeMutationResidentApplyServices(NRIRenderer& renderer);
