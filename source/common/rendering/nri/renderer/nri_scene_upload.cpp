@@ -2607,7 +2607,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 
 	{
 		ScopedPtPerfTimer reprojectionTimer(mLastPerfShellTraceStats.sceneDataSetReprojectionMs);
-		if (!UpdateReprojectionBuffer(&waitedForWrites))
+		if (!NRISceneUploadManager::UpdateReprojectionBuffer(*this, &waitedForWrites))
 		{
 			return false;
 		}
@@ -2615,7 +2615,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 
 	{
 		ScopedPtPerfTimer visibleFlatTimer(mLastPerfShellTraceStats.sceneDataSetVisibleFlatPlaneMs);
-		if (!UpdateVisibleFlatPlaneBuffer(&waitedForWrites))
+		if (!NRISceneUploadManager::UpdateVisibleFlatPlaneBuffer(*this, &waitedForWrites))
 		{
 			return false;
 		}
@@ -2623,7 +2623,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 
 	{
 		ScopedPtPerfTimer visibleChunkTimer(mLastPerfShellTraceStats.sceneDataSetVisibleChunkMs);
-		if (!UpdateVisibleChunkBuffer(&waitedForWrites))
+		if (!NRISceneUploadManager::UpdateVisibleChunkBuffer(*this, &waitedForWrites))
 		{
 			return false;
 		}

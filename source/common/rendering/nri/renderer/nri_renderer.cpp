@@ -8873,21 +8873,6 @@ SceneLightSystem::RuntimeLightClusterBuildInput NRIRenderer::BuildRuntimeLightCl
 	return input;
 }
 
-bool NRIRenderer::UpdateReprojectionBuffer(bool* ioWaitedForWrites)
-{
-	return NRISceneUploadManager::UpdateReprojectionBuffer(*this, ioWaitedForWrites);
-}
-
-bool NRIRenderer::UpdateVisibleChunkBuffer(bool* ioWaitedForWrites)
-{
-	return NRISceneUploadManager::UpdateVisibleChunkBuffer(*this, ioWaitedForWrites);
-}
-
-bool NRIRenderer::UpdateVisibleFlatPlaneBuffer(bool* ioWaitedForWrites)
-{
-	return NRISceneUploadManager::UpdateVisibleFlatPlaneBuffer(*this, ioWaitedForWrites);
-}
-
 
 
 

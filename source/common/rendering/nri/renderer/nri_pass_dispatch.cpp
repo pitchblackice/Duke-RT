@@ -4,6 +4,7 @@
 #include "nri_exposure.h"
 #include "nri_frame_graph.h"
 #include "nri_renderer_settings.h"
+#include "nri_scene_upload.h"
 #include "nri_shader_contracts.h"
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -278,7 +279,7 @@ bool NRIRenderer::DispatchBootstrapView()
 {
 	Clocker clock(NriPTBootstrapDispatch);
 
-	if (!UpdateReprojectionBuffer())
+	if (!NRISceneUploadManager::UpdateReprojectionBuffer(*this, nullptr))
 	{
 		return false;
 	}
@@ -393,7 +394,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 		ReadbackAutoExposureStats();
 	}
 
-	if (!UpdateReprojectionBuffer())
+	if (!NRISceneUploadManager::UpdateReprojectionBuffer(*this, nullptr))
 	{
 		return false;
 	}

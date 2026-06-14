@@ -1838,9 +1838,6 @@ private:
 	void TraceEmissiveSectorResponseChange();
 	bool UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildContext& context, bool* ioWaitedForWrites = nullptr);
 	void UpdateBoundSectorLightingState();
-	bool UpdateReprojectionBuffer(bool* ioWaitedForWrites = nullptr);
-	bool UpdateVisibleChunkBuffer(bool* ioWaitedForWrites = nullptr);
-	bool UpdateVisibleFlatPlaneBuffer(bool* ioWaitedForWrites = nullptr);
 	bool UpdateSceneDataSet(
 		const NRIBufferResource& staticVertexBuffer,
 		const NRIBufferResource& staticIndexBuffer,
