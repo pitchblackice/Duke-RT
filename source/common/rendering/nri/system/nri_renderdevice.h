@@ -416,6 +416,7 @@ private:
 	uint64_t mNextPathTracingWeaponLightEventSerial = 1;
 	uint32_t mPathTracingWeaponLightEventsEnqueuedThisFrame = 0;
 	uint32_t mPathTracingEditorPointLightId = 0;
+	uint32_t mRecoveryPresentSuccessCount = 0;
 	bool mPathTracingEditorPointLightActive = false;
 	bool mLevelTransitionInProgress = false;
 	LevelTransitionInfo mCurrentLevelTransition = {};

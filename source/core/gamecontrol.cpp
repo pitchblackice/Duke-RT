@@ -62,6 +62,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "i_interface.h"
 #include "x86.h"
 #include "startupinfo.h"
+#include "startup_recovery.h"
 #include "mapinfo.h"
 #include "menustate.h"
 #include "screenjob_.h"
@@ -649,6 +650,7 @@ int GameMain()
 	soundEngine = nullptr;
 	I_CloseSound();
 	I_ShutdownInput();
+	StartupRecovery_MarkCleanExit();
 	G_SaveConfig();
 	C_DeinitConsole();
 	V_ClearFonts();
@@ -1048,6 +1050,7 @@ int RunGame()
 	}
 	I_DetectOS();
 	userConfig.ProcessOptions();
+	StartupRecovery_Begin();
 	GetGames();
 	auto usedgroups = SetupGame();
 

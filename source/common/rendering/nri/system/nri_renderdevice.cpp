@@ -26,6 +26,7 @@
 #include "coreactor.h"
 #include "gamecontrol.h"
 #include "lightoverlay.h"
+#include "startup_recovery.h"
 
 #include <windows.h>
 #include <d3d12.h>
@@ -2556,9 +2557,37 @@ void NRIRenderDevice::InitializeState()
 {
 	SetViewportRects(nullptr);
 
-	if (!LoadNRI() || !CreateDevice() || !CreateRenderResources() || !CreateSwapChain())
+	StartupRecovery_UpdateStage("nri_load");
+	if (!LoadNRI())
 	{
 		Printf(TEXTCOLOR_RED "NRI backend initialization failed.\n");
+		StartupRecovery_MarkNriStartupFailure("nri_load", "load_nri_failed");
+		mInitialized = false;
+		return;
+	}
+
+	StartupRecovery_UpdateStage("nri_create_device");
+	if (!CreateDevice())
+	{
+		Printf(TEXTCOLOR_RED "NRI backend initialization failed.\n");
+		mInitialized = false;
+		return;
+	}
+
+	StartupRecovery_UpdateStage("nri_create_render_resources");
+	if (!CreateRenderResources())
+	{
+		Printf(TEXTCOLOR_RED "NRI backend initialization failed.\n");
+		StartupRecovery_MarkNriStartupFailure("nri_create_render_resources", "create_render_resources_failed");
+		mInitialized = false;
+		return;
+	}
+
+	StartupRecovery_UpdateStage("nri_create_swapchain");
+	if (!CreateSwapChain())
+	{
+		Printf(TEXTCOLOR_RED "NRI backend initialization failed.\n");
+		StartupRecovery_MarkNriStartupFailure("nri_create_swapchain", "create_swapchain_failed");
 		mInitialized = false;
 		return;
 	}
@@ -2728,6 +2757,7 @@ void NRIRenderDevice::BeginFrame()
 			if (acquireResult == nri::Result::DEVICE_LOST)
 			{
 				mFrameGeneration.NoteReset("device-lost");
+				StartupRecovery_MarkNriDeviceLost("AcquireNextTexture");
 			}
 			Printf(TEXTCOLOR_RED "NRI failed to acquire swapchain image.\n");
 			LogD3D12FailureDiagnostics("AcquireNextTexture");
@@ -7379,6 +7409,7 @@ bool NRIRenderDevice::CreateDevice()
 {
 	mLoggedD3D12FailureDred = false;
 	const nri::GraphicsAPI selectedApi = GetSelectedAPI();
+	const char* startupApi = V_GetStartupNriAPI();
 	const bool enableGraphicsApiValidation = nri_apivalidation && selectedApi == nri::GraphicsAPI::D3D12;
 	if (nri_apivalidation && selectedApi == nri::GraphicsAPI::VK)
 	{
@@ -7397,6 +7428,7 @@ bool NRIRenderDevice::CreateDevice()
 	if (enumerateResult != nri::Result::SUCCESS || adapterCount == 0)
 	{
 		Printf(TEXTCOLOR_RED "Failed to enumerate NRI adapters (result=%s, count=%u).\n", GetNriResultName(enumerateResult), adapterCount);
+		StartupRecovery_MarkNriCreateResult(startupApi, false, "enumerate_adapters_failed", false, nullptr);
 		return false;
 	}
 
@@ -7425,7 +7457,6 @@ bool NRIRenderDevice::CreateDevice()
 	creationDesc.disableVKRayTracing = false;
 	creationDesc.disableD3D12EnhancedBarriers = false;
 	creationDesc.vkBindingOffsets = {};
-	const char* startupApi = V_GetStartupNriAPI();
 	Printf("NRI CreateDevice config: api=%s nri_validation=%s api_validation=%s dred=%s\n",
 		startupApi,
 		nri_validation ? "on" : "off",
@@ -7443,6 +7474,12 @@ bool NRIRenderDevice::CreateDevice()
 		{
 			Printf(TEXTCOLOR_RED "NRI reported INVALID_SDK. Check that raze.exe exports D3D12SDKVersion/D3D12SDKPath and that an AgilitySDK runtime directory is staged beside the executable.\n");
 		}
+		StartupRecovery_MarkNriCreateResult(
+			startupApi,
+			false,
+			GetNriResultName(createResult),
+			createResult == nri::Result::UNSUPPORTED,
+			adapters[0].name);
 		return false;
 	}
 
@@ -7456,6 +7493,7 @@ bool NRIRenderDevice::CreateDevice()
 		mGetInterfaceFn(*mDevice, NRI_INTERFACE(nri::UpscalerInterface), &mUpscaler) != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "Failed to retrieve NRI interfaces.\n");
+		StartupRecovery_MarkNriStartupFailure("nri_get_interfaces", "get_interfaces_failed");
 		return false;
 	}
 	if (selectedApi == nri::GraphicsAPI::D3D12)
@@ -7483,6 +7521,7 @@ bool NRIRenderDevice::CreateDevice()
 		mCore.CreateFence(*mDevice, 0, mFrameFence) != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "Failed to create NRI queue objects.\n");
+		StartupRecovery_MarkNriStartupFailure("nri_create_queue_objects", "queue_objects_failed");
 		return false;
 	}
 	SetNriDebugName(mCore, mGraphicsQueue, "Raze.GraphicsQueue");
@@ -7497,6 +7536,7 @@ bool NRIRenderDevice::CreateDevice()
 	if (!CreateQueuedFrames())
 	{
 		Printf(TEXTCOLOR_RED "Failed to create NRI queued frame resources.\n");
+		StartupRecovery_MarkNriStartupFailure("nri_create_queued_frames", "queued_frames_failed");
 		return false;
 	}
 
@@ -7510,10 +7550,12 @@ bool NRIRenderDevice::CreateDevice()
 	if (mStreamer.CreateStreamer(*mDevice, streamerDesc, mStreamerInstance) != nri::Result::SUCCESS)
 	{
 		Printf(TEXTCOLOR_RED "Failed to create NRI streamer.\n");
+		StartupRecovery_MarkNriStartupFailure("nri_create_streamer", "streamer_failed");
 		return false;
 	}
 	SetNriDebugName(mCore, mStreamerInstance, "Raze.Streamer");
 
+	StartupRecovery_MarkNriCreateResult(startupApi, true, "startup_ok", false, adapters[0].name);
 	return true;
 }
 
@@ -8466,6 +8508,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		if (submitResult == nri::Result::DEVICE_LOST)
 		{
 			mFrameGeneration.NoteReset("device-lost");
+			StartupRecovery_MarkNriDeviceLost("QueueSubmit");
 		}
 		Printf(TEXTCOLOR_RED "NRI QueueSubmit failed with result '%s'.\n", GetNriResultName(submitResult));
 		LogD3D12FailureDiagnostics("QueueSubmit");
@@ -8501,6 +8544,14 @@ void NRIRenderDevice::EndFrameAndPresent()
 			NoteSwapChainPresent(mCurrentSwapChainImage);
 		}
 		mHasPresentedSwapChainFrame = true;
+		if (mRecoveryPresentSuccessCount < 3)
+		{
+			++mRecoveryPresentSuccessCount;
+			if (mRecoveryPresentSuccessCount == 3)
+			{
+				StartupRecovery_MarkNriHealthy();
+			}
+		}
 		if (nri_ptdebug > 0 && sLoggedPresentCount < 4)
 		{
 			Printf("NRI present: frame_index=%llu image=%u queued_frame=%u\n",
@@ -8516,6 +8567,7 @@ void NRIRenderDevice::EndFrameAndPresent()
 		if (presentResult == nri::Result::DEVICE_LOST)
 		{
 			mFrameGeneration.NoteReset("device-lost");
+			StartupRecovery_MarkNriDeviceLost(IsFrameGenerationPresentPathActive() ? "FramegenPresent" : "QueuePresent");
 		}
 		Printf(TEXTCOLOR_RED "NRI QueuePresent failed with result '%s'.\n", GetNriResultName(presentResult));
 		LogD3D12FailureDiagnostics(IsFrameGenerationPresentPathActive() ? "FramegenPresent" : "QueuePresent");

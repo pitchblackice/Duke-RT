@@ -61,6 +61,7 @@
 #include "texturemanager.h"
 #include "i_interface.h"
 #include "v_draw.h"
+#include "startup_recovery.h"
 
 
 EXTERN_CVAR(Int, menu_resolution_custom_width)
@@ -187,7 +188,7 @@ int V_GetBackend()
 const char* V_GetStartupNriAPI()
 {
 	const char* api = GetStartupSetOverride("nri_api");
-	return (api != nullptr && *api != '\0') ? api : (const char*)nri_api;
+	return StartupRecovery_GetStartupNriAPI((api != nullptr && *api != '\0') ? api : (const char*)nri_api);
 }
 
 void DFrameBuffer::PrintPathTracingSurfaceProbeStatus() const

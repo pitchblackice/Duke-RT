@@ -1032,6 +1032,7 @@ set (PCH_SOURCES
 	core/cheathandler.cpp
 	core/coreplayer.cpp
 	core/rts.cpp
+	core/startup_recovery.cpp
 	core/ct_chat.cpp
 	core/d_net.cpp
 	core/d_protocol.cpp

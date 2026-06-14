@@ -1,5 +1,6 @@
 #include "c_cvars.h"
 #include "printf.h"
+#include "nri_settings_profiles.h"
 
 #include <algorithm>
 #include <iterator>
@@ -129,4 +130,10 @@ CUSTOM_CVAR(Int, nri_settingsprofile, NRI_SETTINGS_PROFILE_SAFE, CVAR_ARCHIVE | 
 	}
 
 	ApplyNRISettingsProfile(preset);
+}
+
+void NRIApplySafeSettingsProfileForRecovery()
+{
+	nri_settingsprofile = NRI_SETTINGS_PROFILE_SAFE;
+	ApplyNRISettingsProfile(kNRISettingsProfilePresets[NRI_SETTINGS_PROFILE_SAFE]);
 }
