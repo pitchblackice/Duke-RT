@@ -617,6 +617,42 @@ class OptionMenuItemStaticText : OptionMenuItem
 
 }
 
+class OptionMenuItemCVarStaticText : OptionMenuItem
+{
+	CVar mTextCVar;
+	int mColor;
+
+	OptionMenuItemCVarStaticText Init(CVar textcvar, int cr = -1)
+	{
+		Super.Init("", 'None', true);
+		mTextCVar = textcvar;
+		mColor = OptionMenuSettings.mFontColor;
+		if ((cr & 0xffff0000) == 0x12340000) mColor = cr & 0xffff;
+		else if (cr > 0) mColor = OptionMenuSettings.mFontColorHeader;
+		return self;
+	}
+
+	override int Draw(OptionMenuDescriptor desc, int y, int indent, bool selected)
+	{
+		if (mTextCVar != null)
+		{
+			String text = mTextCVar.GetString();
+			if (text.Length() > 0)
+			{
+				int w = Menu.OptionWidth(text) * CleanXfac_1;
+				int x = (screen.GetWidth() - w) / 2;
+				drawText(x, y, mColor, text, false);
+			}
+		}
+		return -1;
+	}
+
+	override bool Selectable()
+	{
+		return false;
+	}
+}
+
 //=============================================================================
 //
 //

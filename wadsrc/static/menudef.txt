@@ -1077,6 +1077,7 @@ OptionMenu "VideoOptions" protected
 	StaticText "Rendering Profile"
 	Option "HDR / SDR",							"nri_ptoutputmode",				"NRIPTOutputMode"
 	Option "Settings Profile",					"nri_settingsprofile",			"NRISettingsProfile"
+	CVarStaticText "nri_settingsprofilewarning"
 	StaticText ""
 
 	ifnotgame(Blood, Exhumed)

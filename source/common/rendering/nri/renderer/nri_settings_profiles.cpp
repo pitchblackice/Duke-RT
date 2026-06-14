@@ -17,6 +17,8 @@ EXTERN_CVAR(Bool, nri_dred)
 EXTERN_CVAR(Bool, nri_framegen)
 EXTERN_CVAR(Int, nri_framegenprovider)
 
+CVAR(String, nri_settingsprofilewarning, "Known bug: mirrors can look glitchy without DLRR.", CVAR_GLOBALCONFIG)
+
 namespace
 {
 enum NRISettingsProfile
@@ -36,6 +38,7 @@ struct NRISettingsProfilePreset
 	int upscaler;
 	int upscalerMode;
 	int outputMode;
+	bool denoise;
 	const char* warning;
 };
 
@@ -54,31 +57,42 @@ constexpr int kNRDDenoiserRelax = 1;
 
 constexpr const char* kMirrorsWithoutRayReconstructionWarning =
 	"Warning: mirrors are currently bugged when ray reconstruction is not used.";
+constexpr const char* kMirrorsWithoutRayReconstructionMenuWarning =
+	"Known bug: mirrors can look glitchy without DLRR.";
 
 constexpr NRISettingsProfilePreset kNRISettingsProfilePresets[] = {
-	{ "Safe Mode", kNRIUpscalerOff, kNRIUpscalerModeNative, kNRIOutputSdr, kMirrorsWithoutRayReconstructionWarning },
-	{ "Fast Preset - DLRR", kNRIUpscalerDlrr, kNRIUpscalerModeBalanced, kNRIOutputHdr, nullptr },
-	{ "Medium Preset - DLRR", kNRIUpscalerDlrr, kNRIUpscalerModeQuality, kNRIOutputHdr, nullptr },
-	{ "Beautiful Preset - DLRR", kNRIUpscalerDlrr, kNRIUpscalerModeNative, kNRIOutputHdr, nullptr },
-	{ "Fast Preset - DLSS-SR", kNRIUpscalerDlssSr, kNRIUpscalerModeBalanced, kNRIOutputHdr, kMirrorsWithoutRayReconstructionWarning },
-	{ "Medium Preset - DLSS-SR", kNRIUpscalerDlssSr, kNRIUpscalerModeQuality, kNRIOutputHdr, kMirrorsWithoutRayReconstructionWarning },
-	{ "Beautiful Preset - DLSS-SR", kNRIUpscalerDlssSr, kNRIUpscalerModeNative, kNRIOutputHdr, kMirrorsWithoutRayReconstructionWarning },
+	{ "Safe Mode", kNRIUpscalerOff, kNRIUpscalerModeNative, kNRIOutputSdr, true, kMirrorsWithoutRayReconstructionWarning },
+	{ "Fast Preset - DLRR", kNRIUpscalerDlrr, kNRIUpscalerModeBalanced, kNRIOutputHdr, false, nullptr },
+	{ "Medium Preset - DLRR", kNRIUpscalerDlrr, kNRIUpscalerModeQuality, kNRIOutputHdr, false, nullptr },
+	{ "Beautiful Preset - DLRR", kNRIUpscalerDlrr, kNRIUpscalerModeNative, kNRIOutputHdr, false, nullptr },
+	{ "Fast Preset - DLSS-SR", kNRIUpscalerDlssSr, kNRIUpscalerModeBalanced, kNRIOutputHdr, true, kMirrorsWithoutRayReconstructionWarning },
+	{ "Medium Preset - DLSS-SR", kNRIUpscalerDlssSr, kNRIUpscalerModeQuality, kNRIOutputHdr, true, kMirrorsWithoutRayReconstructionWarning },
+	{ "Beautiful Preset - DLSS-SR", kNRIUpscalerDlssSr, kNRIUpscalerModeNative, kNRIOutputHdr, true, kMirrorsWithoutRayReconstructionWarning },
 };
+
+bool gSkipInitialProfileApply = true;
 
 int ClampNRISettingsProfile(int profile)
 {
 	return std::clamp(profile, 0, (int)std::size(kNRISettingsProfilePresets) - 1);
 }
 
+void SyncNRISettingsProfileWarning(const NRISettingsProfilePreset& preset)
+{
+	nri_settingsprofilewarning = preset.warning != nullptr ? kMirrorsWithoutRayReconstructionMenuWarning : "";
+}
+
 void ApplyNRISettingsProfile(const NRISettingsProfilePreset& preset)
 {
+	SyncNRISettingsProfileWarning(preset);
+
 	nri_upscaler = preset.upscaler;
 	nri_postsharpen = 0;
 	nri_upscalermode = preset.upscalerMode;
 	nri_ptoutputmode = preset.outputMode;
 	nri_pttaa = false;
 
-	nri_denoise = true;
+	nri_denoise = preset.denoise;
 	nri_nrddenoiser = kNRDDenoiserRelax;
 
 	nri_validation = false;
@@ -96,7 +110,7 @@ void ApplyNRISettingsProfile(const NRISettingsProfilePreset& preset)
 }
 }
 
-CUSTOM_CVAR(Int, nri_settingsprofile, NRI_SETTINGS_PROFILE_SAFE, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+CUSTOM_CVAR(Int, nri_settingsprofile, NRI_SETTINGS_PROFILE_SAFE, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	const int clampedProfile = ClampNRISettingsProfile(self);
 	if (self != clampedProfile)
@@ -105,5 +119,14 @@ CUSTOM_CVAR(Int, nri_settingsprofile, NRI_SETTINGS_PROFILE_SAFE, CVAR_ARCHIVE | 
 		return;
 	}
 
-	ApplyNRISettingsProfile(kNRISettingsProfilePresets[self]);
+	const auto& preset = kNRISettingsProfilePresets[self];
+	SyncNRISettingsProfileWarning(preset);
+
+	if (gSkipInitialProfileApply)
+	{
+		gSkipInitialProfileApply = false;
+		return;
+	}
+
+	ApplyNRISettingsProfile(preset);
 }
