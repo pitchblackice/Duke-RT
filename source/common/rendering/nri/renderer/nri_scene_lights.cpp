@@ -1,5 +1,7 @@
 #include "nri_scene_lights.h"
 
+#include "nri_actor_sprite_diagnostics.h"
+#include "nri_diagnostic_names.h"
 #include "nri_renderer.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_runtime_mutation_trace.h"
@@ -202,25 +204,12 @@ void NRIRenderer::ResetPersistentDynamicEmissiveCache()
 	mSceneLights.ResetPersistentDynamicEmissiveCache();
 }
 
-namespace
-{
-	bool ShouldTraceActorSpriteVerboseForSceneLights()
-	{
-		return (int)nri_ptactorspritetrace == 1 && (int)nri_pttraceframes > 0;
-	}
-
-	bool ShouldTraceActorSpriteMismatchForSceneLights()
-	{
-		return (int)nri_ptactorspritetrace >= 1 && (int)nri_pttraceframes > 0;
-	}
-}
-
 SceneLightSystem::PersistentDynamicEmissiveCacheBuildServices NRIRenderer::BuildPersistentDynamicEmissiveCacheServices()
 {
 	SceneLightSystem::PersistentDynamicEmissiveCacheBuildServices services = {};
 	services.user = this;
-	services.traceActorSpriteVerbose = ShouldTraceActorSpriteVerboseForSceneLights();
-	services.traceActorSpriteMismatch = ShouldTraceActorSpriteMismatchForSceneLights();
+	services.traceActorSpriteVerbose = nri_actor_sprite_diag::ShouldTraceVerbose((int)nri_ptactorspritetrace, (int)nri_pttraceframes);
+	services.traceActorSpriteMismatch = nri_actor_sprite_diag::ShouldTraceMismatch((int)nri_ptactorspritetrace, (int)nri_pttraceframes);
 	services.buildGeometry = [](void* user, const nri_scene::SceneView& sceneView, nri_scene::GeometryData& geometry, const char* label)
 	{
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
@@ -266,8 +255,6 @@ namespace
 	constexpr float TwoPi = 6.28318530717958647692f;
 	constexpr uint32_t NriPtMuzzleFlashSlotCount = 8u;
 	constexpr uint32_t NriMaxEmissivePrimitives = 16384u;
-	constexpr uint32_t NriSceneDataSourceStatic = 0u;
-	constexpr uint32_t NriSceneDataSourceDynamic = 1u;
 
 	DVector3 PathTracingToWorldPosition(const DVector3& source)
 	{
@@ -277,26 +264,6 @@ namespace
 	DVector3 WorldToPathTracingPosition(const DVector3& source)
 	{
 		return { source.X, -source.Z, -source.Y };
-	}
-
-	const char* GetSurfaceSourceTypeName(nri_scene::SurfaceSourceType sourceType)
-	{
-		switch (sourceType)
-		{
-		case nri_scene::SurfaceSourceType::DrawListWall: return "draw_list_wall";
-		case nri_scene::SurfaceSourceType::MirrorWall: return "mirror_wall";
-		case nri_scene::SurfaceSourceType::FloorFlat: return "floor_flat";
-		case nri_scene::SurfaceSourceType::CeilingFlat: return "ceiling_flat";
-		case nri_scene::SurfaceSourceType::FacingSprite: return "facing_sprite";
-		case nri_scene::SurfaceSourceType::VoxelProxySprite: return "voxel_proxy_sprite";
-		case nri_scene::SurfaceSourceType::MapWallBand: return "map_wall_band";
-		case nri_scene::SurfaceSourceType::MapFloorSection: return "map_floor_section";
-		case nri_scene::SurfaceSourceType::MapCeilingSection: return "map_ceiling_section";
-		case nri_scene::SurfaceSourceType::MapPortalSurface: return "map_portal_surface";
-		case nri_scene::SurfaceSourceType::DebugSphere: return "debug_sphere";
-		case nri_scene::SurfaceSourceType::SurfaceLightOverlay: return "surface_light_overlay";
-		default: return "unknown";
-		}
 	}
 
 	void TraceSurfaceNudge(
@@ -317,7 +284,7 @@ namespace
 			"NRI PT surface nudge: rule=%u path=%s source=%s sector=%d wall=%d nextsector=%d cstat=0x%x nudge=%.3f disp=%.3f from=(%.2f, %.2f, %.2f) to=(%.2f, %.2f, %.2f) delta=(%.2f, %.2f, %.2f)\n",
 			rule.ruleId,
 			pathName != nullptr ? pathName : "unknown",
-			GetSurfaceSourceTypeName(record.provenance.sourceType),
+			nri_diag::GetSurfaceSourceTypeName(record.provenance.sourceType),
 			record.provenance.sectorIndex,
 			record.provenance.wallIndex,
 			record.provenance.nextSectorIndex,
@@ -631,48 +598,6 @@ namespace
 		const float sectorClamp = std::max(0.0f, (float)nri_ptsectorclamp);
 		const float ambientScale = std::max(0.0f, (float)nri_ptsectorambientscale);
 		return std::min(sectorClamp, ambientScale * (0.10f + 0.75f * 0.55f));
-	}
-
-	const char* GetMaterialEmissiveModeName(uint32_t mode)
-	{
-		switch (mode)
-		{
-		case nri_scene::MaterialEmissiveMode_UseBaseTexture: return "base";
-		case nri_scene::MaterialEmissiveMode_UseConstantColor: return "constant";
-		case nri_scene::MaterialEmissiveMode_UseGlowmapTexture: return "glowmap";
-		default: return "none";
-		}
-	}
-
-	const char* GetSceneDataSourceName(uint32_t dataSource)
-	{
-		switch (dataSource)
-		{
-		case NriSceneDataSourceStatic: return "static";
-		case NriSceneDataSourceDynamic: return "dynamic";
-		default: return "unknown";
-		}
-	}
-
-	const char* GetDrawListTypeName(uint32_t drawListType)
-	{
-		switch (drawListType)
-		{
-		case GLDL_PLAINWALLS: return "plain_walls";
-		case GLDL_MASKEDWALLS: return "masked_walls";
-		case GLDL_MASKEDWALLSS: return "masked_walls_split";
-		case GLDL_MASKEDWALLSD: return "masked_walls_decal";
-		case GLDL_MASKEDWALLSV: return "masked_walls_view";
-		case GLDL_MASKEDWALLSH: return "masked_walls_horizon";
-		case GLDL_TRANSLUCENTBORDER: return "translucent_border";
-		case GLDL_PLAINFLATS: return "plain_flats";
-		case GLDL_MASKEDFLATS: return "masked_flats";
-		case GLDL_MASKEDSLOPEFLATS: return "masked_slope_flats";
-		case GLDL_TRANSLUCENT: return "translucent";
-		case GLDL_MODELS: return "models";
-		case UINT32_MAX: return "none";
-		default: return "unknown";
-		}
 	}
 
 	const char* GetSceneLightRecordSourceName(SceneLightRecordSource source)
@@ -3148,7 +3073,7 @@ void SceneLightSystem::PrunePersistentDynamicEmissiveCacheToLiveActors(const Per
 					if (services.traceActorSpriteMismatch)
 					{
 						Printf("NRI PT actor-sprite cache: action=drop reason=missing_actor_index source=%s actor=%d surface_tex=%d surface_ptr=%p surface_pal=%d\n",
-							GetSurfaceSourceTypeName(surface.provenance.sourceType),
+							nri_diag::GetSurfaceSourceTypeName(surface.provenance.sourceType),
 							surface.provenance.actorIndex,
 							surface.material.texture != nullptr ? surface.material.texture->GetID().GetIndex() : -1,
 							surface.material.texture,
@@ -3165,7 +3090,7 @@ void SceneLightSystem::PrunePersistentDynamicEmissiveCacheToLiveActors(const Per
 					if (services.traceActorSpriteMismatch)
 					{
 						Printf("NRI PT actor-sprite cache: action=drop reason=missing_actor source=%s actor=%d surface_tex=%d surface_ptr=%p surface_pal=%d\n",
-							GetSurfaceSourceTypeName(surface.provenance.sourceType),
+							nri_diag::GetSurfaceSourceTypeName(surface.provenance.sourceType),
 							surface.provenance.actorIndex,
 							surface.material.texture != nullptr ? surface.material.texture->GetID().GetIndex() : -1,
 							surface.material.texture,
@@ -3183,7 +3108,7 @@ void SceneLightSystem::PrunePersistentDynamicEmissiveCacheToLiveActors(const Per
 					{
 						Printf("NRI PT actor-sprite cache: action=keep reason=%s source=%s actor=%d surface_tex=%d surface_ptr=%p live_tex=%d live_ptr=%p surface_pal=%d live_pal=%d\n",
 							GetActorSpriteLiveMatchResultName(match.result),
-							GetSurfaceSourceTypeName(surface.provenance.sourceType),
+							nri_diag::GetSurfaceSourceTypeName(surface.provenance.sourceType),
 							surface.provenance.actorIndex,
 							match.surfaceTextureId,
 							surface.material.texture,
@@ -3206,7 +3131,7 @@ void SceneLightSystem::PrunePersistentDynamicEmissiveCacheToLiveActors(const Per
 				{
 					Printf("NRI PT actor-sprite cache: action=drop reason=%s source=%s actor=%d surface_tex=%d surface_ptr=%p live_tex=%d live_ptr=%p surface_pal=%d live_pal=%d\n",
 						GetActorSpriteLiveMatchResultName(match.result),
-						GetSurfaceSourceTypeName(surface.provenance.sourceType),
+						nri_diag::GetSurfaceSourceTypeName(surface.provenance.sourceType),
 						surface.provenance.actorIndex,
 						match.surfaceTextureId,
 						surface.material.texture,
@@ -3823,7 +3748,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 					rule.actorTextureId,
 					rule.actorPalette,
 					YesNo(hasSurface),
-					hasSurface ? GetSurfaceSourceTypeName(record->provenance.sourceType) : "none",
+					hasSurface ? nri_diag::GetSurfaceSourceTypeName(record->provenance.sourceType) : "none",
 					hasSurface ? record->material.textureId : 0u,
 					(unsigned long long)light.stableKey,
 					light.position[0],
@@ -3838,7 +3763,7 @@ void SceneLightSystem::RebuildAnalyticLights(
 						rule.actorClassName != nullptr ? rule.actorClassName : "",
 						rule.ruleId,
 						rule.ruleName.c_str(),
-						GetSurfaceSourceTypeName(record->provenance.sourceType),
+						nri_diag::GetSurfaceSourceTypeName(record->provenance.sourceType),
 						record->material.textureId,
 						lightingFlags,
 						record->material.materialFlags,
@@ -4848,16 +4773,16 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 		switch (surface.source)
 		{
 		case SceneLightRecordSource::StaticMapScene:
-			appendSurfacePrimitives(surface, context.staticGeometry, staticRanges, NriSceneDataSourceStatic, 0u);
+			appendSurfacePrimitives(surface, context.staticGeometry, staticRanges, nri_diag::SceneDataSourceStatic, 0u);
 			break;
 		case SceneLightRecordSource::CapturedScene:
-			appendSurfacePrimitives(surface, context.capturedGeometry, capturedRanges, NriSceneDataSourceDynamic, 0u);
+			appendSurfacePrimitives(surface, context.capturedGeometry, capturedRanges, nri_diag::SceneDataSourceDynamic, 0u);
 			break;
 		case SceneLightRecordSource::RuntimeMutationScene:
-			appendSurfacePrimitives(surface, context.runtimeMutationGeometry, runtimeMutationRanges, NriSceneDataSourceDynamic, context.runtimeMutationPrimitiveBaseOffset);
+			appendSurfacePrimitives(surface, context.runtimeMutationGeometry, runtimeMutationRanges, nri_diag::SceneDataSourceDynamic, context.runtimeMutationPrimitiveBaseOffset);
 			break;
 		case SceneLightRecordSource::DynamicScene:
-			appendSurfacePrimitives(surface, context.dynamicGeometry, dynamicRanges, NriSceneDataSourceDynamic, context.dynamicPrimitiveBaseOffset);
+			appendSurfacePrimitives(surface, context.dynamicGeometry, dynamicRanges, nri_diag::SceneDataSourceDynamic, context.dynamicPrimitiveBaseOffset);
 			break;
 		case SceneLightRecordSource::PersistentVoxelScene:
 			break;
@@ -6038,7 +5963,7 @@ void SceneLightSystem::PrintTextureEmissiveHeuristics() const
 		Printf("NRI PT emissive heuristic %u: tile=%u mode=%s intensity_scale=%.3f explicit_color=%s color=(%.3f, %.3f, %.3f)\n",
 			rule.ruleId,
 			rule.textureId,
-			GetMaterialEmissiveModeName(rule.emissiveMode),
+			nri_diag::GetMaterialEmissiveModeName(rule.emissiveMode),
 			rule.intensityScale,
 			rule.hasExplicitColor ? "yes" : "no",
 			rule.emissiveColor[0],
@@ -6119,7 +6044,7 @@ void SceneLightSystem::PrintEmissiveSurfaceDump(
 			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Added) != 0),
 			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_Rebound) != 0),
 			YesNo((diagnosticFlags & SceneLightDiagnosticFlag_PropertyChanged) != 0),
-			GetSceneDataSourceName(record.dataSource),
+			nri_diag::GetSceneDataSourceName(record.dataSource),
 			record.primitiveIndex,
 			record.materialIndex,
 			record.sourceFlags,
@@ -6133,7 +6058,7 @@ void SceneLightSystem::PrintEmissiveSurfaceDump(
 			YesNo(record.materialResponseEnabled),
 			record.materialResponseScale,
 			record.textureId,
-			GetMaterialEmissiveModeName(record.emissiveMode),
+			nri_diag::GetMaterialEmissiveModeName(record.emissiveMode),
 			record.emissiveTextureIndex != UINT32_MAX ? record.emissiveTextureIndex : 0u,
 			record.primitiveArea,
 			record.powerEstimate,
@@ -6383,7 +6308,7 @@ void SceneLightSystem::PrintSceneLightDump(
 		Printf("NRI PT scene light %u: source=%s drawlist=%s dist=%.2f center=(%.2f, %.2f, %.2f) radius=%.2f material=%u material_key=0x%016llx texture_key=0x%016llx glowmap_key=0x%016llx tile=%u texture=%s sector=%d wall=%d chunk=%d local_space=%d portal_graph=%d actor=%d palette=%u shade=%d alpha=%.3f light=%.3f flags=0x%x fullbright=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s emissive_mode=%s emissive_tex=%u avg=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
 			i,
 			GetSceneLightRecordSourceName(record.source),
-			GetDrawListTypeName(record.provenance.drawListType),
+			nri_diag::GetDrawListTypeName(record.provenance.drawListType),
 			std::sqrt(candidates[i].distanceSq),
 			record.center[0],
 			record.center[1],
@@ -6411,7 +6336,7 @@ void SceneLightSystem::PrintSceneLightDump(
 			(lightingFlags & nri_scene::MaterialLightingFlag_TextureGlowing) != 0 ? "yes" : "no",
 			(lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0 ? "yes" : "no",
 			(lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0 ? "yes" : "no",
-			GetMaterialEmissiveModeName(record.material.emissiveMode),
+			nri_diag::GetMaterialEmissiveModeName(record.material.emissiveMode),
 			record.material.emissiveTextureIndex != UINT32_MAX ? record.material.emissiveTextureIndex : 0u,
 			record.material.averageColor[0],
 			record.material.averageColor[1],

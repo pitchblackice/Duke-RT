@@ -1,6 +1,7 @@
 #include "nri_static_scene.h"
 
 #include "nri_renderer.h"
+#include "nri_diagnostic_names.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_sky_environment.h"
 #include "nri_static_scene_geometry.h"
@@ -25,8 +26,6 @@ EXTERN_CVAR(Float, nri_ptceilingnudgedistance)
 
 namespace
 {
-	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
-
 	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
 	{
 		return std::chrono::duration<double, std::milli>(end - start).count();
@@ -990,7 +989,7 @@ namespace
 		instance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 		instance.accelerationStructureHandle = services.getAccelerationStructureHandle(services.user, accelerationStructure);
 		outTlasInstances.push_back(instance);
-		outSceneInstances.push_back({ primitiveOffset, NRI_SCENE_DATA_SOURCE_STATIC, chunkIndex, sectorIndex });
+		outSceneInstances.push_back({ primitiveOffset, nri_diag::SceneDataSourceStatic, chunkIndex, sectorIndex });
 	}
 
 	void BuildStaticMapInstancesFromCache(

@@ -2,23 +2,18 @@
 
 #include "nri_renderer.h"
 #include "../system/nri_renderdevice.h"
+#include "nri_diagnostic_names.h"
 #include "printf.h"
 
 namespace
 {
-	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT_MODE = 26u;
-	constexpr uint32_t NRI_PTDEBUG_SECTOR_AMBIENT_MODE = 29u;
-	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_SAMPLE_VISIBILITY_MODE = 33u;
-	constexpr uint32_t NRI_PTDEBUG_UPSCALER_TRACE_TRANSPARENT_MODE = 34u;
-	constexpr uint32_t NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT_MODE = 45u;
-
 	constexpr uint32_t kSupportedDebugModes[] = {
 		0u, 1u, 2u, 3u, 4u, 5u,
 		9u, 10u, 11u, 12u,
 		16u, 17u, 18u, 19u,
 		21u, 22u, 24u, 25u,
-		26u, 27u, 28u, 29u,
-		33u, 34u, 45u
+		nri_diag::PtDebugAnalyticDirect, nri_diag::PtDebugEmissiveTags, nri_diag::PtDebugEmissiveDirect, nri_diag::PtDebugSectorAmbient,
+		nri_diag::PtDebugEmissiveSampleVisibility, nri_diag::PtDebugUpscalerTraceTransparent, nri_diag::PtDebugTaaPreExposedInput
 	};
 
 	constexpr NRIPresentRouteInfo kBootstrapRawTraceRoute = {
@@ -214,8 +209,8 @@ bool IsNRIFrameGraphRawTraceDebugMode(uint32_t debugMode)
 		debugMode == 19u ||
 		IsInRange(debugMode, 21u, 22u) ||
 		IsInRange(debugMode, 24u, 25u) ||
-		IsInRange(debugMode, NRI_PTDEBUG_ANALYTIC_DIRECT_MODE, NRI_PTDEBUG_SECTOR_AMBIENT_MODE) ||
-		debugMode == NRI_PTDEBUG_EMISSIVE_SAMPLE_VISIBILITY_MODE;
+		IsInRange(debugMode, nri_diag::PtDebugAnalyticDirect, nri_diag::PtDebugSectorAmbient) ||
+		debugMode == nri_diag::PtDebugEmissiveSampleVisibility;
 }
 
 bool IsNRIFrameGraphFinalShaderDebugMode(uint32_t)
@@ -238,11 +233,11 @@ NRIPresentRouteInfo ResolveNRIFrameRoute(const NRIFrameRouteRequest& request)
 	{
 		return kResolvedBeautyRoute;
 	}
-	if (request.debugMode == NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT_MODE)
+	if (request.debugMode == nri_diag::PtDebugTaaPreExposedInput)
 	{
 		return kComposedDebugRoute;
 	}
-	if (request.debugMode == NRI_PTDEBUG_UPSCALER_TRACE_TRANSPARENT_MODE)
+	if (request.debugMode == nri_diag::PtDebugUpscalerTraceTransparent)
 	{
 		return kUpscalerTraceTransparentProbeRoute;
 	}

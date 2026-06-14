@@ -1,6 +1,7 @@
 #include "nri_trace_stats.h"
 
 #include "nri_renderer.h"
+#include "nri_diagnostic_names.h"
 #include "c_cvars.h"
 
 #include <algorithm>
@@ -15,9 +16,6 @@ EXTERN_CVAR(Bool, nri_ptshaderstats)
 namespace
 {
 	static constexpr uint32_t NRI_TRACE_SHADER_STATS_COUNTER_COUNT = NRI_TRACE_SHADER_STAT_COUNT;
-	static constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
-	static constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
-	static constexpr uint32_t NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL = 2;
 
 	static bool ShouldTracePtPerf()
 	{
@@ -285,15 +283,15 @@ void NRITraceShaderStats::Readback(
 	{
 		switch (dataSource)
 		{
-		case NRI_SCENE_DATA_SOURCE_STATIC: return input.staticPrimitiveCount;
-		case NRI_SCENE_DATA_SOURCE_DYNAMIC: return input.dynamicPrimitiveCount;
-		case NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL: return input.persistentVoxelPrimitiveCount;
+		case nri_diag::SceneDataSourceStatic: return input.staticPrimitiveCount;
+		case nri_diag::SceneDataSourceDynamic: return input.dynamicPrimitiveCount;
+		case nri_diag::SceneDataSourcePersistentVoxel: return input.persistentVoxelPrimitiveCount;
 		default: return 0;
 		}
 	};
 	auto estimateInstancePrimitiveCount = [&input, &getDataSourcePrimitiveTotal, &sceneInstances](const SceneInstanceData& instance) -> uint32_t
 	{
-		if (instance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL && input.estimatePersistentVoxelPrimitiveCount != nullptr)
+		if (instance.dataSource == nri_diag::SceneDataSourcePersistentVoxel && input.estimatePersistentVoxelPrimitiveCount != nullptr)
 		{
 			const uint32_t persistentVoxelPrimitiveCount = input.estimatePersistentVoxelPrimitiveCount(input.user, instance.primitiveOffset);
 			if (persistentVoxelPrimitiveCount > 0)
@@ -383,4 +381,3 @@ void NRIRenderer::ReadbackTraceShaderStats()
 	};
 	mTraceShaderStats.Readback(BuildResourceServices(), input, mLastPerfTraceShaderStats);
 }
-

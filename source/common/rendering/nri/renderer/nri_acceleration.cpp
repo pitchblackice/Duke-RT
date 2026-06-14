@@ -1,6 +1,7 @@
 #include "nri_acceleration.h"
 
 #include "nri_renderer.h"
+#include "nri_diagnostic_names.h"
 #include "../scene/nri_hash.h"
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -21,9 +22,6 @@ EXTERN_CVAR(Bool, nri_voxelstats)
 
 namespace
 {
-	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
-	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
-
 	double DurationMs(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end)
 	{
 		return std::chrono::duration<double, std::milli>(end - start).count();
@@ -320,11 +318,11 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 	for (uint32_t sceneInstanceIndex = 0; sceneInstanceIndex < (uint32_t)renderer.mBoundSceneInstances.size(); ++sceneInstanceIndex)
 	{
 		const SceneInstanceData& sceneInstance = renderer.mBoundSceneInstances[sceneInstanceIndex];
-		if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+		if (sceneInstance.dataSource == nri_diag::SceneDataSourceStatic)
 		{
 			staticSceneInstanceByPrimitiveOffset.emplace(sceneInstance.primitiveOffset, sceneInstanceIndex);
 		}
-		else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC && dynamicSceneInstanceIndex == UINT32_MAX)
+		else if (sceneInstance.dataSource == nri_diag::SceneDataSourceDynamic && dynamicSceneInstanceIndex == UINT32_MAX)
 		{
 			dynamicSceneInstanceIndex = sceneInstanceIndex;
 		}
@@ -355,7 +353,7 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 
 	for (const NRIRenderer::EmissivePrimitiveDebugRecord& record : renderer.mBoundEmissivePrimitiveRecords)
 	{
-		if (record.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+		if (record.dataSource == nri_diag::SceneDataSourceStatic)
 		{
 			const int32_t chunkIndex = findStaticChunkIndexForPrimitive(record.primitiveIndex);
 			if (chunkIndex >= 0)
@@ -363,7 +361,7 @@ bool NRIAccelerationStructureManager::BuildEmissiveTopLevel(NRIRenderer& rendere
 				emissiveStaticChunks[(size_t)chunkIndex] = 1u;
 			}
 		}
-		else if (record.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC &&
+		else if (record.dataSource == nri_diag::SceneDataSourceDynamic &&
 			dynamicSceneInstanceIndex != UINT32_MAX &&
 			dynamicBottomLevelAS != nullptr &&
 			dynamicBottomLevelAS->accelerationStructure != nullptr)

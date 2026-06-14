@@ -3,6 +3,7 @@
 #include "../framegen/nri_framegen.h"
 #include "nri_acceleration.h"
 #include "nri_debug_reporters.h"
+#include "nri_diagnostic_names.h"
 #include "nri_frame_graph.h"
 #include "nri_material_policy.h"
 #include "nri_pipeline_state.h"
@@ -2206,10 +2207,6 @@ namespace
 {
 	constexpr uint32_t NRI_TRACE_SHADER_STATS_COUNTER_COUNT = NRIRenderer::TraceShaderStatCount;
 	constexpr uint32_t NRI_MAX_EMISSIVE_SURFACES = 4096;
-	constexpr uint32_t NRI_PTDEBUG_ANALYTIC_DIRECT = 26;
-	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_TAGS = 27;
-	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_DIRECT = 28;
-	constexpr uint32_t NRI_PTDEBUG_SECTOR_AMBIENT = 29;
 
 	struct NriSceneTextureLimitValidation
 	{
@@ -2272,18 +2269,6 @@ namespace
 			deviceDesc.shaderStage.updateAfterSet.descriptorTextureMaxNum,
 			GetSceneTextureDescriptorLimitFailureReason(deviceDesc) == nullptr ? "yes" : "no");
 	}
-	constexpr uint32_t NRI_PTDEBUG_EMISSIVE_SAMPLE_VISIBILITY = 33;
-	constexpr uint32_t NRI_PTDEBUG_UPSCALER_TRACE_TRANSPARENT = 34;
-	constexpr uint32_t NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT = 45;
-	constexpr uint32_t NRI_SCENE_DATA_SOURCE_STATIC = 0;
-	constexpr uint32_t NRI_SCENE_DATA_SOURCE_DYNAMIC = 1;
-	constexpr uint32_t NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL = 2;
-	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_UNKNOWN = 0;
-	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_STATIC_MAP = 1;
-	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_CAPTURED_SCENE = 2;
-	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_RUNTIME_LINK = 3;
-	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION = 4;
-	constexpr uint32_t NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY = 5;
 	constexpr int NRI_TEMPORAL_TRACE_REARM_FRAME_COUNT = 8;
 	constexpr float NRI_TAA_EXPOSURE_RESET_THRESHOLD_STOPS = 0.5f;
 	constexpr uint32_t NRI_SECTOR_LIGHTING_FLAG_ENABLED = 0x1u;
@@ -2633,42 +2618,6 @@ namespace
 		std::chrono::steady_clock::time_point mStart = {};
 	};
 
-
-	const char* GetMaterialEmissiveModeName(uint32_t mode)
-	{
-		switch (mode)
-		{
-		case nri_scene::MaterialEmissiveMode_UseBaseTexture: return "base";
-		case nri_scene::MaterialEmissiveMode_UseConstantColor: return "constant";
-		case nri_scene::MaterialEmissiveMode_UseGlowmapTexture: return "glowmap";
-		default: return "none";
-		}
-	}
-
-	const char* GetSceneDataSourceName(uint32_t dataSource)
-	{
-		switch (dataSource)
-		{
-		case NRI_SCENE_DATA_SOURCE_STATIC: return "static";
-		case NRI_SCENE_DATA_SOURCE_DYNAMIC: return "dynamic";
-		case NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL: return "persistent_voxel";
-		default: return "unknown";
-		}
-	}
-
-	const char* GetSurfaceProbeSceneOwnerName(uint32_t owner)
-	{
-		switch (owner)
-		{
-		case NRI_SURFACE_PROBE_OWNER_STATIC_MAP: return "static_map";
-		case NRI_SURFACE_PROBE_OWNER_CAPTURED_SCENE: return "captured_scene";
-		case NRI_SURFACE_PROBE_OWNER_RUNTIME_LINK: return "runtime_link_overlay";
-		case NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION: return "runtime_mutation_overlay";
-		case NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY: return "dynamic_overlay";
-		default: return "unknown";
-		}
-	}
-
 	struct ScenePortalData
 	{
 		uint32_t traversalClass = 0;
@@ -2701,7 +2650,7 @@ namespace
 
 	static uint32_t GetEffectivePtDebugMode()
 	{
-		if (nri_ptdebug < 0 || nri_ptdebug > (int)NRI_PTDEBUG_TAA_PRE_EXPOSED_INPUT)
+		if (nri_ptdebug < 0 || nri_ptdebug > (int)nri_diag::PtDebugTaaPreExposedInput)
 		{
 			return 0u;
 		}
@@ -3923,47 +3872,6 @@ namespace
 
 		outT = hitT;
 		return true;
-	}
-
-	static const char* GetSurfaceSourceTypeName(nri_scene::SurfaceSourceType sourceType)
-	{
-		switch (sourceType)
-		{
-		case nri_scene::SurfaceSourceType::DrawListWall: return "draw_list_wall";
-		case nri_scene::SurfaceSourceType::MirrorWall: return "mirror_wall";
-		case nri_scene::SurfaceSourceType::FloorFlat: return "floor_flat";
-		case nri_scene::SurfaceSourceType::CeilingFlat: return "ceiling_flat";
-		case nri_scene::SurfaceSourceType::FacingSprite: return "facing_sprite";
-		case nri_scene::SurfaceSourceType::VoxelProxySprite: return "voxel_proxy_sprite";
-		case nri_scene::SurfaceSourceType::MapWallBand: return "map_wall_band";
-		case nri_scene::SurfaceSourceType::MapFloorSection: return "map_floor_section";
-		case nri_scene::SurfaceSourceType::MapCeilingSection: return "map_ceiling_section";
-		case nri_scene::SurfaceSourceType::MapPortalSurface: return "map_portal_surface";
-		case nri_scene::SurfaceSourceType::DebugSphere: return "debug_sphere";
-		case nri_scene::SurfaceSourceType::SurfaceLightOverlay: return "surface_light_overlay";
-		default: return "unknown";
-		}
-	}
-
-	static const char* GetDrawListTypeName(uint32_t drawListType)
-	{
-		switch (drawListType)
-		{
-		case GLDL_PLAINWALLS: return "plain_walls";
-		case GLDL_MASKEDWALLS: return "masked_walls";
-		case GLDL_MASKEDWALLSS: return "masked_walls_split";
-		case GLDL_MASKEDWALLSD: return "masked_walls_decal";
-		case GLDL_MASKEDWALLSV: return "masked_walls_view";
-		case GLDL_MASKEDWALLSH: return "masked_walls_horizon";
-		case GLDL_TRANSLUCENTBORDER: return "translucent_border";
-		case GLDL_PLAINFLATS: return "plain_flats";
-		case GLDL_MASKEDFLATS: return "masked_flats";
-		case GLDL_MASKEDSLOPEFLATS: return "masked_slope_flats";
-		case GLDL_TRANSLUCENT: return "translucent";
-		case GLDL_MODELS: return "models";
-		case UINT32_MAX: return "none";
-		default: return "unknown";
-		}
 	}
 
 	static const char* GetSceneLightRecordSourceName(SceneLightRecordSource source)
@@ -5587,7 +5495,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 						dynamicInstance.flags = nri::TopLevelInstanceBits::TRIANGLE_CULL_DISABLE;
 						dynamicInstance.accelerationStructureHandle = mFrameBuffer->mRayTracing.GetAccelerationStructureHandle(*dynamicBottomLevelAS.accelerationStructure);
 						instances.push_back(dynamicInstance);
-						sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
+						sceneInstances.push_back({ 0u, nri_diag::SceneDataSourceDynamic, 0u, UINT32_MAX });
 					}
 
 					selectedStaticSceneInstanceCount = 0;
@@ -5595,15 +5503,15 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 					selectedPersistentVoxelSceneInstanceCount = 0;
 					for (const SceneInstanceData& sceneInstance : sceneInstances)
 					{
-						if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+						if (sceneInstance.dataSource == nri_diag::SceneDataSourceStatic)
 						{
 							selectedStaticSceneInstanceCount++;
 						}
-						else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC)
+						else if (sceneInstance.dataSource == nri_diag::SceneDataSourceDynamic)
 						{
 							selectedDynamicSceneInstanceCount++;
 						}
-						else if (sceneInstance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+						else if (sceneInstance.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
 						{
 							selectedPersistentVoxelSceneInstanceCount++;
 						}
@@ -5886,7 +5794,7 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 		sceneInstances.clear();
 		if (buffersReady)
 		{
-			sceneInstances.push_back({ 0u, NRI_SCENE_DATA_SOURCE_DYNAMIC, 0u, UINT32_MAX });
+			sceneInstances.push_back({ 0u, nri_diag::SceneDataSourceDynamic, 0u, UINT32_MAX });
 			buffersReady = UpdateSceneDataSet(
 				GetCurrentDynamicVertexBuffer(),
 				GetCurrentDynamicIndexBuffer(),
@@ -6224,15 +6132,15 @@ bool NRIRenderer::RenderScene(HWDrawInfo& di, int drawmode, bool portal)
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneInstanceStatsMs);
 			for (const SceneInstanceData& instance : mBoundSceneInstances)
 			{
-				if (instance.dataSource == NRI_SCENE_DATA_SOURCE_STATIC)
+				if (instance.dataSource == nri_diag::SceneDataSourceStatic)
 				{
 					mLastPerfShellTraceStats.sceneInstanceStaticCount++;
 				}
-				else if (instance.dataSource == NRI_SCENE_DATA_SOURCE_DYNAMIC)
+				else if (instance.dataSource == nri_diag::SceneDataSourceDynamic)
 				{
 					mLastPerfShellTraceStats.sceneInstanceDynamicCount++;
 				}
-				else if (instance.dataSource == NRI_SCENE_DATA_SOURCE_PERSISTENT_VOXEL)
+				else if (instance.dataSource == nri_diag::SceneDataSourcePersistentVoxel)
 				{
 					mLastPerfShellTraceStats.sceneInstancePersistentVoxelCount++;
 				}
@@ -6707,7 +6615,7 @@ void NRIRenderer::PrintRuntimeLightClusterStatus() const
 		centerTileX,
 		centerTileY,
 		centerTileCount,
-		NRI_PTDEBUG_ANALYTIC_DIRECT);
+		nri_diag::PtDebugAnalyticDirect);
 }
 
 void NRIRenderer::UpdateNightVisionState()
@@ -8223,39 +8131,39 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		if (!mSurfaceProbeFrame.valid)
 		{
 			result.sceneDataSource = UINT32_MAX;
-			result.sceneOwner = NRI_SURFACE_PROBE_OWNER_UNKNOWN;
+			result.sceneOwner = nri_diag::SurfaceProbeOwnerUnknown;
 		}
 		else if (!mSurfaceProbeFrame.usesStaticMapScene)
 		{
-			result.sceneDataSource = NRI_SCENE_DATA_SOURCE_DYNAMIC;
-			result.sceneOwner = NRI_SURFACE_PROBE_OWNER_CAPTURED_SCENE;
+			result.sceneDataSource = nri_diag::SceneDataSourceDynamic;
+			result.sceneOwner = nri_diag::SurfaceProbeOwnerCapturedScene;
 		}
 		else if (result.primitiveIndex < mSurfaceProbeFrame.staticPrimitiveCount)
 		{
-			result.sceneDataSource = NRI_SCENE_DATA_SOURCE_STATIC;
-			result.sceneOwner = NRI_SURFACE_PROBE_OWNER_STATIC_MAP;
+			result.sceneDataSource = nri_diag::SceneDataSourceStatic;
+			result.sceneOwner = nri_diag::SurfaceProbeOwnerStaticMap;
 		}
 		else
 		{
 			uint32_t overlayPrimitiveIndex = result.primitiveIndex - mSurfaceProbeFrame.staticPrimitiveCount;
-			result.sceneDataSource = NRI_SCENE_DATA_SOURCE_DYNAMIC;
+			result.sceneDataSource = nri_diag::SceneDataSourceDynamic;
 			if (overlayPrimitiveIndex < mSurfaceProbeFrame.runtimeSpaceLinkPrimitiveCount)
 			{
-				result.sceneOwner = NRI_SURFACE_PROBE_OWNER_RUNTIME_LINK;
+				result.sceneOwner = nri_diag::SurfaceProbeOwnerRuntimeLink;
 			}
 			else
 			{
 				overlayPrimitiveIndex -= std::min(overlayPrimitiveIndex, mSurfaceProbeFrame.runtimeSpaceLinkPrimitiveCount);
 				if (overlayPrimitiveIndex < mSurfaceProbeFrame.runtimeMutationPrimitiveCount)
 				{
-					result.sceneOwner = NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION;
+					result.sceneOwner = nri_diag::SurfaceProbeOwnerRuntimeMutation;
 				}
 				else
 				{
 					overlayPrimitiveIndex -= std::min(overlayPrimitiveIndex, mSurfaceProbeFrame.runtimeMutationPrimitiveCount);
 					result.sceneOwner = overlayPrimitiveIndex < mSurfaceProbeFrame.dynamicPrimitiveCount ?
-						NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY :
-						NRI_SURFACE_PROBE_OWNER_UNKNOWN;
+						nri_diag::SurfaceProbeOwnerDynamicOverlay :
+						nri_diag::SurfaceProbeOwnerUnknown;
 				}
 			}
 		}
@@ -8370,10 +8278,10 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	int32_t materialLegacyTile = -1;
 	ResolveSurfaceProbeTextureDebugInfo(result.baseTextureId, materialTextureName, materialLegacyTile);
 	Printf("NRI PT surface probe: hit source=%s drawlist=%s owner=%s data_source=%s chunk=%d gate_visible=%s flat_drawlist_visible=%s static_resident=%s static_tlas_instanced=%s static_probe_included=%s chunk_replaced=%s chunk_reasons=%s section_dirty=%u sector_dirty=%s dragged=%s blind_spot=%s replacement_surfaces=%u replacement_tris=%u local_space=%d portal_graph=%d sector=%d wall=%d nextsector=%d actor=%d cstat=0x%x primitive=%u material=%u texid=%u legacy_tile=%d texture_name=%s material_texid=%u material_legacy_tile=%d material_texture_name=%s distance=%.2f pos=(%.2f, %.2f, %.2f) normal=(%.3f, %.3f, %.3f) flags=0x%x indexed=%s fullbright=%s flat=%s sprite=%s mirror=%s sky=%s portal=%s facing_billboard=%s point_sampled=%s tex_fullbright=%s glowing=%s auto_glow=%s glowmap=%s normalmap=%s metallic=%s roughness=%s normal_tex=%u metallic_tex=%u roughness_tex=%u metalness_hint=%.3f roughness_hint=%.3f material_class=%u emissive_mode=%s emissive_tex=%u light_surface=%s light_mat=%u emissive_surface=%s emissive_prims=%u emissive_hit=%s emissive_flags=0x%x emissive_rule=%u emissive_override=%u emissive_sector=%d sector_scale=%.3f sector_reach=%.3f sector_applied=%s emissive_area=%.2f emissive_power=%.3f emissive_sample_weight=%.3f emissive_pdf=%.6f emissive_intensity=%.3f material_response=%s material_scale=%.3f light=%.3f alpha=%.3f avg=(%.2f, %.2f, %.2f) emissive=(%.2f, %.2f, %.2f) glow=(%.2f, %.2f, %.2f)\n",
-		GetSurfaceSourceTypeName(result.provenance.sourceType),
-		GetDrawListTypeName(result.provenance.drawListType),
-		GetSurfaceProbeSceneOwnerName(result.sceneOwner),
-		GetSceneDataSourceName(result.sceneDataSource),
+		nri_diag::GetSurfaceSourceTypeName(result.provenance.sourceType),
+		nri_diag::GetDrawListTypeName(result.provenance.drawListType),
+		nri_diag::GetSurfaceProbeSceneOwnerName(result.sceneOwner),
+		nri_diag::GetSceneDataSourceName(result.sceneDataSource),
 		result.provenance.mapChunkIndex,
 		YesNo(chunkVisibleGate),
 		flatPlaneVisibilityRelevant ? YesNo(flatPlaneVisible) : "n/a",
@@ -8429,7 +8337,7 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 		result.metalnessHint,
 		result.roughnessHint,
 		result.materialClass,
-		GetMaterialEmissiveModeName(result.emissiveMode),
+		nri_diag::GetMaterialEmissiveModeName(result.emissiveMode),
 		result.emissiveTextureIndex != UINT32_MAX ? result.emissiveTextureIndex : 0u,
 		YesNo(emissiveDiagnostics.sceneLightSurfaceMatch),
 		emissiveDiagnostics.sceneLightMaterialIndex != UINT32_MAX ? emissiveDiagnostics.sceneLightMaterialIndex : 0u,
@@ -8484,10 +8392,10 @@ NRIRenderer::SurfaceProbeEmissiveDiagnostics NRIRenderer::BuildSurfaceProbeEmiss
 	{
 		switch (owner)
 		{
-		case NRI_SURFACE_PROBE_OWNER_STATIC_MAP: return SceneLightRecordSource::StaticMapScene;
-		case NRI_SURFACE_PROBE_OWNER_CAPTURED_SCENE: return SceneLightRecordSource::CapturedScene;
-		case NRI_SURFACE_PROBE_OWNER_RUNTIME_MUTATION: return SceneLightRecordSource::RuntimeMutationScene;
-		case NRI_SURFACE_PROBE_OWNER_DYNAMIC_OVERLAY: return SceneLightRecordSource::DynamicScene;
+		case nri_diag::SurfaceProbeOwnerStaticMap: return SceneLightRecordSource::StaticMapScene;
+		case nri_diag::SurfaceProbeOwnerCapturedScene: return SceneLightRecordSource::CapturedScene;
+		case nri_diag::SurfaceProbeOwnerRuntimeMutation: return SceneLightRecordSource::RuntimeMutationScene;
+		case nri_diag::SurfaceProbeOwnerDynamicOverlay: return SceneLightRecordSource::DynamicScene;
 		default: return SceneLightRecordSource::CapturedScene;
 		}
 	};
@@ -8537,8 +8445,8 @@ NRIRenderer::SurfaceProbeEmissiveDiagnostics NRIRenderer::BuildSurfaceProbeEmiss
 
 	const uint32_t expectedDataSource =
 		matchedSurface->source == SceneLightRecordSource::StaticMapScene ?
-			NRI_SCENE_DATA_SOURCE_STATIC :
-			NRI_SCENE_DATA_SOURCE_DYNAMIC;
+			nri_diag::SceneDataSourceStatic :
+			nri_diag::SceneDataSourceDynamic;
 	for (const auto& record : mBoundEmissivePrimitiveRecords)
 	{
 		if (record.dataSource == expectedDataSource &&

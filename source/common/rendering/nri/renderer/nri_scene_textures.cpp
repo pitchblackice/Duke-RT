@@ -3,6 +3,7 @@
 #include "../scene/nri_material_bridge.h"
 #include "../system/nri_hwtexture.h"
 #include "../system/nri_renderdevice.h"
+#include "nri_diagnostic_names.h"
 #include "nri_shader_contracts.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
@@ -124,25 +125,6 @@ namespace
 		return counts;
 	}
 
-	const char* GetSurfaceSourceTypeName(nri_scene::SurfaceSourceType sourceType)
-	{
-		switch (sourceType)
-		{
-		case nri_scene::SurfaceSourceType::DrawListWall: return "draw_list_wall";
-		case nri_scene::SurfaceSourceType::MirrorWall: return "mirror_wall";
-		case nri_scene::SurfaceSourceType::FloorFlat: return "floor_flat";
-		case nri_scene::SurfaceSourceType::CeilingFlat: return "ceiling_flat";
-		case nri_scene::SurfaceSourceType::FacingSprite: return "facing_sprite";
-		case nri_scene::SurfaceSourceType::VoxelProxySprite: return "voxel_proxy_sprite";
-		case nri_scene::SurfaceSourceType::MapWallBand: return "map_wall_band";
-		case nri_scene::SurfaceSourceType::MapFloorSection: return "map_floor_section";
-		case nri_scene::SurfaceSourceType::MapCeilingSection: return "map_ceiling_section";
-		case nri_scene::SurfaceSourceType::MapPortalSurface: return "map_portal_surface";
-		case nri_scene::SurfaceSourceType::DebugSphere: return "debug_sphere";
-		case nri_scene::SurfaceSourceType::SurfaceLightOverlay: return "surface_light_overlay";
-		default: return "unknown";
-		}
-	}
 }
 
 bool NRISceneTextureResidency::EnsurePaletteTexture(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials)
@@ -587,7 +569,7 @@ bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, con
 				(unsigned long long)mFrameIndex,
 				mLastPerfShellTraceStats.sceneTextureReason.empty() ? "none" : mLastPerfShellTraceStats.sceneTextureReason.c_str(),
 				metadata->actorIndex,
-				GetSurfaceSourceTypeName(metadata->sourceType),
+				nri_diag::GetSurfaceSourceTypeName(metadata->sourceType),
 				materialIndex,
 				metadata->textureId,
 				originalTextureIndex,
