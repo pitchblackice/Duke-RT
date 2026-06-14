@@ -328,21 +328,6 @@ void NRIDescriptorSetManager::TraceSharedDescriptorRewrite(
 		outstandingQueuedFrames);
 }
 
-bool NRIRenderer::AllocateDescriptorSets()
-{
-	return NRIDescriptorSetManager::AllocateDescriptorSets(*this);
-}
-
-
-
-bool NRIRenderer::UpdateSamplerSet()
-{
-	return NRIDescriptorSetManager::UpdateSamplerSet(*this);
-}
-
-
-
-
 bool NRIRenderer::CommitSceneDataDescriptors(const char* reason)
 {
 	return NRIDescriptorSetManager::CommitSceneDataDescriptors(*this, reason);

@@ -305,38 +305,3 @@ bool NRIPipelineStateManager::CreatePipelines(NRIRenderer& renderer)
 		createPipeline(dlssAfter.c_str(), NRIRenderer::PipelineSlot::DlssAfter, renderer.mPipelineLayout) &&
 		createPipeline(final.c_str(), NRIRenderer::PipelineSlot::Final, renderer.mPipelineLayout);
 }
-
-bool NRIRenderer::CreatePipelineLayout()
-{
-	return NRIPipelineStateManager::CreatePipelineLayout(*this);
-}
-
-
-
-bool NRIRenderer::CreateTaaPipelineLayout()
-{
-	return NRIPipelineStateManager::CreateTaaPipelineLayout(*this);
-}
-
-
-
-bool NRIRenderer::CreatePresentPipelineLayout()
-{
-	return NRIPipelineStateManager::CreatePresentPipelineLayout(*this);
-}
-
-
-
-bool NRIRenderer::CreateExposurePipelineLayout()
-{
-	return NRIPipelineStateManager::CreateExposurePipelineLayout(*this);
-}
-
-
-
-bool NRIRenderer::CreatePipelines()
-{
-	return NRIPipelineStateManager::CreatePipelines(*this);
-}
-
-

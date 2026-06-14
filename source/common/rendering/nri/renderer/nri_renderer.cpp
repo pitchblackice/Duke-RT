@@ -3924,7 +3924,14 @@ bool NRIRenderer::Initialize()
 		return true;
 	}
 
-	return CreatePipelineLayout() && CreateTaaPipelineLayout() && CreatePresentPipelineLayout() && CreateExposurePipelineLayout() && AllocateDescriptorSets() && UpdateSamplerSet() && CreatePipelines();
+	return
+		NRIPipelineStateManager::CreatePipelineLayout(*this) &&
+		NRIPipelineStateManager::CreateTaaPipelineLayout(*this) &&
+		NRIPipelineStateManager::CreatePresentPipelineLayout(*this) &&
+		NRIPipelineStateManager::CreateExposurePipelineLayout(*this) &&
+		NRIDescriptorSetManager::AllocateDescriptorSets(*this) &&
+		NRIDescriptorSetManager::UpdateSamplerSet(*this) &&
+		NRIPipelineStateManager::CreatePipelines(*this);
 }
 
 void NRIRenderer::Shutdown()

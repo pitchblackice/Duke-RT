@@ -1753,12 +1753,6 @@ private:
 		SceneDataBufferMask_Dynamic = 1 << 1,
 	};
 
-	bool CreatePipelineLayout();
-	bool CreateTaaPipelineLayout();
-	bool CreatePresentPipelineLayout();
-	bool CreateExposurePipelineLayout();
-	bool CreatePipelines();
-	bool AllocateDescriptorSets();
 	bool DispatchBootstrapView();
 	bool UseFallbackSceneTextures(bool preserveExistingSky, const char* reason = nullptr);
 	bool EnsurePaletteTexture(const nri_scene::MaterialBridgeData& materials);
@@ -1999,7 +1993,6 @@ private:
 	void RetireResidentBufferResource(NRIBufferResource& resource);
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
-	bool UpdateSamplerSet();
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors, const char* reason = nullptr);
 	bool UpdateFrameTextureSet();
 	bool UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 14>& descriptors);
