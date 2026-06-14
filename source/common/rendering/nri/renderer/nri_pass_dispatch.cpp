@@ -1,5 +1,6 @@
 #include "nri_renderer.h"
 
+#include "nri_descriptor_sets.h"
 #include "nri_exposure.h"
 #include "nri_frame_graph.h"
 #include "nri_renderer_settings.h"
@@ -346,11 +347,11 @@ bool NRIRenderer::DispatchBootstrapView()
 	mFrameInputDescriptors[8] = GetFrameTexture(FrameTextureSlot::UnfilteredDiffuse).shaderView;
 	mFrameInputDescriptors[9] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	mFrameInputDescriptors[10] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
-	UpdateFrameTextureSet(mUpscalerPrepassFrameTextureSet, mFrameInputDescriptors);
+	NRIDescriptorSetManager::UpdateFrameTextureSet(*this, mUpscalerPrepassFrameTextureSet, mFrameInputDescriptors);
 
 	mOutputDescriptors.fill(GetFrameTexture(FrameTextureSlot::VendorOutput).storageView);
 	mOutputDescriptors[2] = final.storageView;
-	UpdateOutputSet(mUpscalerPrepassOutputSet, mOutputDescriptors);
+	NRIDescriptorSetManager::UpdateOutputSet(*this, mUpscalerPrepassOutputSet, mOutputDescriptors);
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
@@ -481,7 +482,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 
 	const nri::Descriptor* defaultInput = GetFrameTexture(FrameTextureSlot::Composed).shaderView;
 	mFrameInputDescriptors.fill(const_cast<nri::Descriptor*>(defaultInput));
-	UpdateFrameTextureSet();
+	NRIDescriptorSetManager::UpdateFrameTextureSet(*this);
 
 	const nri::Descriptor* defaultOutput = GetFrameTexture(FrameTextureSlot::Validation).storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
@@ -496,7 +497,7 @@ bool NRIRenderer::DispatchTraceOpaque(HWDrawInfo&, const nri_scene::GeometryData
 	mOutputDescriptors[12] = GetFrameTexture(FrameTextureSlot::UnfilteredPenumbra).storageView;
 	mOutputDescriptors[13] = GetFrameTexture(FrameTextureSlot::DirectLighting).storageView;
 	mOutputDescriptors[14] = GetFrameTexture(FrameTextureSlot::DirectEmission).storageView;
-	UpdateOutputSet();
+	NRIDescriptorSetManager::UpdateOutputSet(*this);
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
@@ -666,12 +667,12 @@ bool NRIRenderer::DispatchComposition(FrameTextureSlot outputSlot)
 	mFrameInputDescriptors[11] = filteredShadow.shaderView;
 	mFrameInputDescriptors[12] = directLighting.shaderView;
 	mFrameInputDescriptors[13] = directEmission.shaderView;
-	UpdateFrameTextureSet(mCompositionFrameTextureSet, mFrameInputDescriptors);
+	NRIDescriptorSetManager::UpdateFrameTextureSet(*this, mCompositionFrameTextureSet, mFrameInputDescriptors);
 
 	const nri::Descriptor* defaultOutput = composed.storageView;
 	mOutputDescriptors.fill(const_cast<nri::Descriptor*>(defaultOutput));
 	mOutputDescriptors[1] = composed.storageView;
-	UpdateOutputSet(mCompositionOutputSet, mOutputDescriptors);
+	NRIDescriptorSetManager::UpdateOutputSet(*this, mCompositionOutputSet, mOutputDescriptors);
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });
@@ -748,7 +749,7 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 		mFrameInputDescriptors[4] = GetFrameTexture(FrameTextureSlot::BaseColorMetalness).shaderView;
 		mFrameInputDescriptors[6] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	}
-	if (!UpdateFrameTextureSet(mUpscalerPrepassFrameTextureSet, mFrameInputDescriptors))
+	if (!NRIDescriptorSetManager::UpdateFrameTextureSet(*this, mUpscalerPrepassFrameTextureSet, mFrameInputDescriptors))
 	{
 		return false;
 	}
@@ -763,7 +764,7 @@ bool NRIRenderer::DispatchUpscalerPrepass(NRIMainUpscalerKind mainKind)
 		mOutputDescriptors[10] = rrGuideSpecularAlbedo.storageView;
 		mOutputDescriptors[11] = rrGuideSpecularHitDistance.storageView;
 	}
-	if (!UpdateOutputSet(mUpscalerPrepassOutputSet, mOutputDescriptors))
+	if (!NRIDescriptorSetManager::UpdateOutputSet(*this, mUpscalerPrepassOutputSet, mOutputDescriptors))
 	{
 		return false;
 	}
@@ -1251,11 +1252,11 @@ bool NRIRenderer::DispatchFinal()
 	{
 		mFrameInputDescriptors[5] = GetFrameTexture(FrameTextureSlot::UnfilteredSpecular).shaderView;
 	}
-	UpdateFrameTextureSet();
+	NRIDescriptorSetManager::UpdateFrameTextureSet(*this);
 
 	mOutputDescriptors.fill(final.storageView);
 	mOutputDescriptors[2] = final.storageView;
-	UpdateOutputSet();
+	NRIDescriptorSetManager::UpdateOutputSet(*this);
 
 	mFrameBuffer->mCore.CmdSetPipelineLayout(*mFrameBuffer->mCommandBuffer, nri::BindPoint::COMPUTE, *mPipelineLayout);
 	mFrameBuffer->mCore.CmdSetRootConstants(*mFrameBuffer->mCommandBuffer, { 0, &constants, sizeof(constants), 0, nri::BindPoint::COMPUTE });

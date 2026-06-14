@@ -2,6 +2,7 @@
 
 #include "nri_renderer.h"
 
+#include "nri_descriptor_sets.h"
 #include "../scene/nri_hash.h"
 #include "nri_runtime_mutation_trace.h"
 #include "nri_scene_lights.h"
@@ -607,7 +608,7 @@ bool NRISceneUploadManager::UpdateSceneDataDescriptorSlot(
 	renderer.mSceneDataDescriptors[slot] = descriptor;
 	if (SceneDataDescriptorsReady(renderer))
 	{
-		return renderer.CommitSceneDataDescriptors(reason);
+		return NRIDescriptorSetManager::CommitSceneDataDescriptors(renderer, reason);
 	}
 
 	return true;
@@ -2111,7 +2112,7 @@ bool NRIRenderer::UpdateEmissiveSamplingBuffers(const EmissiveSamplingBuildConte
 
 	if (descriptorsReady)
 	{
-		CommitSceneDataDescriptors("emissive_sampling_refresh");
+		NRIDescriptorSetManager::CommitSceneDataDescriptors(*this, "emissive_sampling_refresh");
 	}
 	if (sectorResponseChanged && nri_runtime_mutation::ShouldTracePtPerf())
 	{
@@ -2971,7 +2972,7 @@ bool NRIRenderer::UpdateSceneDataSet(
 		}
 	}
 
-	if (!CommitSceneDataDescriptors(reason != nullptr ? reason : "scene_data_full_rebuild"))
+	if (!NRIDescriptorSetManager::CommitSceneDataDescriptors(*this, reason != nullptr ? reason : "scene_data_full_rebuild"))
 	{
 		return false;
 	}

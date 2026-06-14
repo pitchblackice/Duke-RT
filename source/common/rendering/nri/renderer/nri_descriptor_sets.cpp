@@ -327,36 +327,3 @@ void NRIDescriptorSetManager::TraceSharedDescriptorRewrite(
 		(unsigned long long)submittedFence,
 		outstandingQueuedFrames);
 }
-
-bool NRIRenderer::CommitSceneDataDescriptors(const char* reason)
-{
-	return NRIDescriptorSetManager::CommitSceneDataDescriptors(*this, reason);
-}
-
-
-
-bool NRIRenderer::UpdateFrameTextureSet()
-{
-	return NRIDescriptorSetManager::UpdateFrameTextureSet(*this);
-}
-
-
-
-bool NRIRenderer::UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 14>& descriptors)
-{
-	return NRIDescriptorSetManager::UpdateFrameTextureSet(*this, set, descriptors);
-}
-
-
-
-bool NRIRenderer::UpdateOutputSet()
-{
-	return NRIDescriptorSetManager::UpdateOutputSet(*this);
-}
-
-
-
-bool NRIRenderer::UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors)
-{
-	return NRIDescriptorSetManager::UpdateOutputSet(*this, set, descriptors);
-}

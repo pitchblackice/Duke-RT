@@ -1856,7 +1856,6 @@ private:
 		uint32_t staticMaterialCount,
 		uint32_t dynamicMaterialCount,
 		const char* reason = nullptr);
-	bool CommitSceneDataDescriptors(const char* reason);
 	void TraceActorSpriteMaterialAssignments(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& outMaterials, const char* traceLabel);
 	void TraceSharedDescriptorRewrite(const char* setName, const char* reason, uint64_t descriptorHash, uint32_t descriptorCount, bool sceneTextureSet);
 	uint32_t CountPotentialOutstandingQueuedFrames() const;
@@ -1994,10 +1993,6 @@ private:
 	void RetireResidentAccelerationStructure(NRIAccelerationStructureResource& resource);
 	void RetireTopLevelAccelerationStructure(NRIAccelerationStructureResource& resource);
 	bool UpdateSceneTextureSet(const std::vector<nri::Descriptor*>& descriptors, const char* reason = nullptr);
-	bool UpdateFrameTextureSet();
-	bool UpdateFrameTextureSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 14>& descriptors);
-	bool UpdateOutputSet();
-	bool UpdateOutputSet(nri::DescriptorSet* set, const std::array<nri::Descriptor*, 15>& descriptors);
 	void ResetTraceShaderStatsBuffer();
 	void CopyTraceShaderStatsForReadback(uint64_t frameNumber);
 	void ReadbackTraceShaderStats();
