@@ -502,6 +502,13 @@ public:
 		const StaticMapSceneCache& staticScene,
 		const StaticMapChunkAtlas& atlas,
 		uint32_t chunkListIndex);
+	static uint32_t FindPreferredStaticSceneChunkListIndex(
+		const StaticMapSceneCache& staticScene,
+		const StaticMapChunkAtlas& atlas,
+		uint32_t chunkIndex);
+	static uint32_t CountStaticSceneChunkSlots(
+		const StaticMapSceneCache& staticScene,
+		uint32_t chunkIndex);
 	static ChunkDiagnosticFacts BuildChunkDiagnosticFacts(
 		const StaticMapSceneCache& staticScene,
 		const StaticMapChunkAtlas& atlas,

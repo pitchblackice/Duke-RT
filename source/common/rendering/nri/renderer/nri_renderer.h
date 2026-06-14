@@ -1767,9 +1767,6 @@ private:
 	bool EnsureStaticMapScene();
 	void ResetResidentMapChunkRegistry();
 	void SyncResidentMapChunkRegistryFromStaticScene();
-	uint32_t GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex) const;
-	uint32_t FindPreferredStaticSceneChunkListIndex(uint32_t chunkIndex) const;
-	uint32_t CountStaticSceneChunkSlots(uint32_t chunkIndex) const;
 	bool EnsureResidentStaticMapChunkAtlasBufferCapacity(const StaticMapChunkAtlas& atlas);
 	bool RefreshResidentStaticMaterialSlices(
 		const std::vector<uint32_t>& chunkListIndices,

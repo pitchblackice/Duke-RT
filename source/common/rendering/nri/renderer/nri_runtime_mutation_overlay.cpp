@@ -1887,7 +1887,10 @@ bool NRIRenderer::BuildRuntimeMapMutationOverlay(nri_scene::GeometryData& outGeo
 				mStaticMapScene.chunks[outResidentChunkListIndex].chunkIndex == mapChunk.chunkIndex;
 			if (!residentChunkListIndexValid)
 			{
-				outResidentChunkListIndex = FindPreferredStaticSceneChunkListIndex(mapChunk.chunkIndex);
+				outResidentChunkListIndex = NRIStaticSceneResidency::FindPreferredStaticSceneChunkListIndex(
+					mStaticMapScene,
+					mStaticMapChunkAtlas,
+					mapChunk.chunkIndex);
 			}
 			if (outResidentChunkListIndex >= mStaticMapScene.chunks.size() ||
 				outResidentChunkListIndex >= mStaticMapScene.lightChunkViews.size() ||

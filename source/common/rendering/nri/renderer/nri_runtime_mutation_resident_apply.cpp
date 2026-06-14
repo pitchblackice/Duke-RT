@@ -164,7 +164,10 @@ bool NRIRenderer::TryApplyRuntimeMutationChunkToResidentScene(
 		entry.staticSceneChunkListIndex < mStaticMapScene.chunks.size() &&
 		mStaticMapScene.chunks[entry.staticSceneChunkListIndex].chunkIndex == mapChunk.chunkIndex ?
 		entry.staticSceneChunkListIndex :
-		FindPreferredStaticSceneChunkListIndex(mapChunk.chunkIndex);
+		NRIStaticSceneResidency::FindPreferredStaticSceneChunkListIndex(
+			mStaticMapScene,
+			mStaticMapChunkAtlas,
+			mapChunk.chunkIndex);
 	const bool hasResidentChunk =
 		entry.active &&
 		entry.mappedInStaticScene &&

@@ -8249,7 +8249,10 @@ void NRIRenderer::UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, co
 	{
 		const uint32_t chunkIndex = (uint32_t)result.provenance.mapChunkIndex;
 		chunkVisibleGate = IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunkIndex);
-		const uint32_t preferredChunkListIndex = FindPreferredStaticSceneChunkListIndex(chunkIndex);
+		const uint32_t preferredChunkListIndex = NRIStaticSceneResidency::FindPreferredStaticSceneChunkListIndex(
+			mStaticMapScene,
+			mStaticMapChunkAtlas,
+			chunkIndex);
 		if (preferredChunkListIndex != UINT32_MAX)
 		{
 			chunkResidentStatic = true;

@@ -635,27 +635,22 @@ void NRIStaticSceneResidency::SyncResidentMapChunkRegistryFromStaticScene(const 
 	}
 }
 
-uint32_t NRIRenderer::GetStaticSceneChunkSlotPreference(uint32_t chunkListIndex) const
-{
-	return NRIStaticSceneResidency::GetStaticSceneChunkSlotPreference(
-		mStaticMapScene,
-		mStaticMapChunkAtlas,
-		chunkListIndex);
-}
-
-uint32_t NRIRenderer::FindPreferredStaticSceneChunkListIndex(uint32_t chunkIndex) const
+uint32_t NRIStaticSceneResidency::FindPreferredStaticSceneChunkListIndex(
+	const StaticMapSceneCache& staticScene,
+	const StaticMapChunkAtlas& atlas,
+	uint32_t chunkIndex)
 {
 	uint32_t bestChunkListIndex = UINT32_MAX;
 	uint32_t bestScore = 0;
-	for (uint32_t chunkListIndex = 0; chunkListIndex < (uint32_t)mStaticMapScene.chunks.size(); ++chunkListIndex)
+	for (uint32_t chunkListIndex = 0; chunkListIndex < (uint32_t)staticScene.chunks.size(); ++chunkListIndex)
 	{
-		const auto& chunk = mStaticMapScene.chunks[chunkListIndex];
+		const auto& chunk = staticScene.chunks[chunkListIndex];
 		if (chunk.chunkIndex != chunkIndex)
 		{
 			continue;
 		}
 
-		const uint32_t score = GetStaticSceneChunkSlotPreference(chunkListIndex);
+		const uint32_t score = GetStaticSceneChunkSlotPreference(staticScene, atlas, chunkListIndex);
 		if (bestChunkListIndex == UINT32_MAX ||
 			score > bestScore ||
 			(score == bestScore && chunkListIndex > bestChunkListIndex))
@@ -668,10 +663,12 @@ uint32_t NRIRenderer::FindPreferredStaticSceneChunkListIndex(uint32_t chunkIndex
 	return bestChunkListIndex;
 }
 
-uint32_t NRIRenderer::CountStaticSceneChunkSlots(uint32_t chunkIndex) const
+uint32_t NRIStaticSceneResidency::CountStaticSceneChunkSlots(
+	const StaticMapSceneCache& staticScene,
+	uint32_t chunkIndex)
 {
 	uint32_t count = 0;
-	for (const auto& chunk : mStaticMapScene.chunks)
+	for (const auto& chunk : staticScene.chunks)
 	{
 		if (chunk.chunkIndex == chunkIndex)
 		{
