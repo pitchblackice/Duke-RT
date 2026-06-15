@@ -2,6 +2,7 @@
 #include "nri_cvars.h"
 
 #include "nri_renderer.h"
+#include "nri_persistent_voxel_services.h"
 #include "nri_renderer_settings.h"
 #include "nri_sky_environment.h"
 #include "nri_static_scene_geometry.h"
@@ -178,7 +179,7 @@ void NRIRenderer::DestroySceneBuffers()
 	nri_static_scene_geometry::ResetStaticMapChunkAtlas(mStaticMapChunkAtlas);
 	ResetResidentMapChunkRegistry();
 	ResetPersistentDynamicEmissiveCache();
-	mPersistentVoxels.Reset("destroy-scene-buffers", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
+	mPersistentVoxels.Reset("destroy-scene-buffers", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildNRIPersistentVoxelResetServices(*this));
 	DestroyBufferResource(mStaticVertexBuffer);
 	DestroyBufferResource(mStaticIndexBuffer);
 	DestroyBufferResource(mStaticPrimitiveBuffer);

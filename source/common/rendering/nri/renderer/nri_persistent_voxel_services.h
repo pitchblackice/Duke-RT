@@ -1,0 +1,9 @@
+#pragma once
+
+#include "nri_persistent_voxels.h"
+
+class NRIRenderer;
+
+NRIPersistentVoxelResetServices BuildNRIPersistentVoxelResetServices(NRIRenderer& renderer);
+NRIPersistentVoxelAdmissionServices BuildNRIPersistentVoxelAdmissionServices(NRIRenderer& renderer);
+NRIPersistentVoxelAccelerationServices BuildNRIPersistentVoxelAccelerationServices(NRIRenderer& renderer);

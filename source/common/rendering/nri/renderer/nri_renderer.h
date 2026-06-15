@@ -1522,6 +1522,7 @@ private:
 	friend class NRIFrameResources;
 	friend class NRIPipelineStateManager;
 	friend class NRIPreloadCoordinator;
+	friend class NRIPersistentVoxelServiceFactory;
 	friend class NRISceneUploadManager;
 	friend NRIPassDispatchContext BuildNRIPassDispatchContext(NRIRenderer& renderer);
 	friend NRIRuntimeMutationResidentUploadServices BuildNRIRuntimeMutationResidentUploadServices(NRIRenderer& renderer);
@@ -1537,9 +1538,6 @@ private:
 
 	NRIResourceContext BuildResourceContext() const;
 	NRIResourceServices BuildResourceServices();
-	NRIPersistentVoxelResetServices BuildPersistentVoxelResetServices();
-	NRIPersistentVoxelAdmissionServices BuildPersistentVoxelAdmissionServices();
-	NRIPersistentVoxelAccelerationServices BuildPersistentVoxelAccelerationServices();
 	NRIRendererFrameContext BuildFrameContext(int drawmode, bool portal, int debugMode, bool preserveHistory) const;
 	NRIPassDispatchContext BuildPassDispatchContext();
 

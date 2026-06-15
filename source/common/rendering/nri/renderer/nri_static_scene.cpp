@@ -3,6 +3,7 @@
 
 #include "nri_renderer.h"
 #include "nri_diagnostic_names.h"
+#include "nri_persistent_voxel_services.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_scene_upload.h"
 #include "nri_sky_environment.h"
@@ -2211,7 +2212,7 @@ bool NRIRenderer::BuildStaticMapAccelerationStructures()
 	services.resetPersistentVoxelsForStaticAccelerationRebuild = [](void* user)
 	{
 		NRIRenderer* renderer = static_cast<NRIRenderer*>(user);
-		renderer->mPersistentVoxels.Reset("static-acceleration-rebuild", false, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, renderer->BuildPersistentVoxelResetServices());
+		renderer->mPersistentVoxels.Reset("static-acceleration-rebuild", false, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildNRIPersistentVoxelResetServices(*renderer));
 	};
 	services.createBottomLevelAccelerationStructure = [](void* user, const nri::AccelerationStructureDesc& desc, NRIAccelerationStructureResource& outAccelerationStructure)
 	{

@@ -3,6 +3,7 @@
 
 #include "nri_renderer.h"
 #include "nri_diagnostic_names.h"
+#include "nri_persistent_voxel_services.h"
 #include "../scene/nri_hash.h"
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -784,7 +785,7 @@ void NRIRenderer::DestroyAccelerationStructures()
 		chunk.residentBlasUpdateScratchSize = 0;
 	}
 	DestroyDynamicBottomLevelAccelerationStructures();
-	mPersistentVoxels.Reset("destroy-acceleration-structures", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildPersistentVoxelResetServices());
+	mPersistentVoxels.Reset("destroy-acceleration-structures", true, (int)nri_ptloadingtrace >= 1 || (bool)nri_voxelstats, BuildNRIPersistentVoxelResetServices(*this));
 	DestroyAccelerationStructureResource(mTopLevelAS);
 	DestroyAccelerationStructureResource(mEmissiveTopLevelAS);
 	mStaticAccelerationBuildSerial = 0;

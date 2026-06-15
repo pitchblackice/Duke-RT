@@ -311,6 +311,7 @@ private:
 	friend class NRIPipelineStateManager;
 	friend class NRIExposurePassAccess;
 	friend class NRIAccelerationStructureManager;
+	friend class NRIPersistentVoxelServiceFactory;
 	friend class NRISceneTextureResidency;
 	friend class NRIUpscalerContext;
 	friend class NRIFrameGenerationContext;

@@ -7,6 +7,7 @@
 #include "nri_frame_resources.h"
 #include "nri_material_policy.h"
 #include "nri_pass_dispatch.h"
+#include "nri_persistent_voxel_services.h"
 #include "nri_render_geometry_helpers.h"
 #include "nri_renderer_settings.h"
 #include "nri_scene_frame_builder.h"
@@ -2182,8 +2183,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				mFrameBuffer != nullptr ? mFrameBuffer->GetAdapterLocalBudgetBytes() : 0ull,
 				(int)nri_ptloadingtrace,
 				(bool)nri_voxelstats,
-				BuildPersistentVoxelResetServices(),
-				BuildPersistentVoxelAdmissionServices());
+				BuildNRIPersistentVoxelResetServices(*this),
+				BuildNRIPersistentVoxelAdmissionServices(*this));
 			return EnsurePersistentVoxelBatch();
 		}();
 
@@ -2673,8 +2674,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						persistentVoxelAsReady = mPersistentVoxels.BuildAccelerationStructures(
 							mFrameIndex,
 							(bool)nri_voxelstats,
-							BuildPersistentVoxelResetServices(),
-							BuildPersistentVoxelAccelerationServices(),
+							BuildNRIPersistentVoxelResetServices(*this),
+							BuildNRIPersistentVoxelAccelerationServices(*this),
 							persistentVoxelAsStats);
 						mLastPerfShellTraceStats.persistentVoxelAsCalls += persistentVoxelAsStats.calls;
 						mLastPerfShellTraceStats.persistentVoxelAsBuilds += persistentVoxelAsStats.builds;
