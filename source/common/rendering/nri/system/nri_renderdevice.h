@@ -80,6 +80,8 @@ public:
 	void PostProcessScene(bool swscene, int fixedcm, float flash, const std::function<void()> &afterBloomDrawEndScene2D) override;
 	bool RenderPathTracedScene(HWDrawInfo& di, int drawmode, bool portal) override;
 	bool HasActiveSceneFrame() const override;
+	bool HasCurrentCommandBuffer() const;
+	bool HasActiveTarget() const;
 	bool StartPathTracingLevelPreload() override;
 	bool TickPathTracingLevelPreload() override;
 	bool IsPathTracingLevelPreloadPending() const override;

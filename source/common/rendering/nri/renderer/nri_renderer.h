@@ -42,6 +42,7 @@
 class NRIRenderDevice;
 class NRIPassDispatchContext;
 class NRIPassDispatcher;
+class NRIPreloadCoordinator;
 struct MapRecord;
 struct LevelTransitionInfo;
 struct PathTracingActorSpriteTraceEvent;
@@ -1520,6 +1521,7 @@ private:
 	friend class NRIDescriptorSetManager;
 	friend class NRIFrameResources;
 	friend class NRIPipelineStateManager;
+	friend class NRIPreloadCoordinator;
 	friend class NRISceneUploadManager;
 	friend NRIPassDispatchContext BuildNRIPassDispatchContext(NRIRenderer& renderer);
 	friend NRIRuntimeMutationResidentUploadServices BuildNRIRuntimeMutationResidentUploadServices(NRIRenderer& renderer);
@@ -1654,33 +1656,6 @@ private:
 	void CommitRenderSceneResult(const RenderSceneCompletionInputs& inputs, const RenderSceneHistorySnapshot& history);
 	void RecordRenderSceneSuccessStats(const RenderSceneCompletionInputs& inputs);
 	void EmitRenderSceneTemporalTrace(uint32_t traceFrameIndex);
-
-	struct PreloadLevelSceneContext
-	{
-		uint32_t outputWidth = 0;
-		uint32_t outputHeight = 0;
-		uint32_t targetWidth = 0;
-		uint32_t targetHeight = 0;
-		std::chrono::steady_clock::time_point start = {};
-		bool staticLightRefreshReady = true;
-	};
-
-	enum class PreloadLevelSceneStepResult
-	{
-		Continue,
-		Ready,
-		Wait
-	};
-
-	bool HasPreloadFrameTarget(const PreloadLevelSceneContext& context) const;
-	bool ShouldSkipPreloadForUnsupportedPathTracing(const PreloadLevelSceneContext& context);
-	void TracePreloadBegin(const PreloadLevelSceneContext& context) const;
-	bool EnsurePreloadFrameResources(const PreloadLevelSceneContext& context);
-	void ResetPreloadSceneStats();
-	PreloadLevelSceneStepResult PreloadStaticSceneAndStartupCorrection(const PreloadLevelSceneContext& context);
-	void RefreshPreloadStaticLighting(PreloadLevelSceneContext& context);
-	PreloadLevelSceneStepResult PreloadResidentSceneResources(const PreloadLevelSceneContext& context);
-	bool FinishPreloadLevelScene(const PreloadLevelSceneContext& context);
 
 	using SceneBufferDebugStats = ::SceneBufferDebugStats;
 

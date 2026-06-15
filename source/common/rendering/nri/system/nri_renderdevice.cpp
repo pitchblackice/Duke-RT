@@ -5260,6 +5260,16 @@ bool NRIRenderDevice::HasActiveSceneFrame() const
 	return mInitialized && mFrameBegun && mCommandBuffer != nullptr && mActiveTarget != nullptr;
 }
 
+bool NRIRenderDevice::HasCurrentCommandBuffer() const
+{
+	return mCommandBuffer != nullptr;
+}
+
+bool NRIRenderDevice::HasActiveTarget() const
+{
+	return mActiveTarget != nullptr;
+}
+
 bool NRIRenderDevice::StartPathTracingLevelPreload()
 {
 	if (mLevelTransitionInProgress)
