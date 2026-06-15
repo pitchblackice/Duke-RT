@@ -7,6 +7,7 @@
 #include "nri_runtime_mutation_trace.h"
 #include "nri_sky_environment.h"
 #include "nri_static_scene.h"
+#include "../scene/nri_hash.h"
 #include "../system/nri_renderdevice.h"
 #include "../../hwrenderer/data/hw_clock.h"
 #include "c_cvars.h"
@@ -687,11 +688,6 @@ namespace
 		return area;
 	}
 
-	uint64_t HashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
-	}
-
 	uint64_t HashLightOverlayText(uint64_t hash, const char* text)
 	{
 		if (text == nullptr)
@@ -786,24 +782,24 @@ namespace
 		uint64_t hash = 1469598103934665603ull;
 		if (geometry == nullptr)
 		{
-			return HashCombine64(hash, 0ull);
+			return nri_scene::HashCombine64(hash, 0ull);
 		}
 
-		hash = HashCombine64(hash, (uint64_t)geometry->vertices.size());
-		hash = HashCombine64(hash, (uint64_t)geometry->primitives.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)geometry->vertices.size());
+		hash = nri_scene::HashCombine64(hash, (uint64_t)geometry->primitives.size());
 		for (const nri_scene::SceneVertex& vertex : geometry->vertices)
 		{
-			hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[0]));
-			hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[1]));
-			hash = HashCombine64(hash, (uint64_t)FloatBits(vertex.position[2]));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(vertex.position[0]));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(vertex.position[1]));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(vertex.position[2]));
 		}
 
 		for (const nri_scene::PrimitiveData& primitive : geometry->primitives)
 		{
-			hash = HashCombine64(hash, (uint64_t)primitive.indices[0]);
-			hash = HashCombine64(hash, (uint64_t)primitive.indices[1]);
-			hash = HashCombine64(hash, (uint64_t)primitive.indices[2]);
-			hash = HashCombine64(hash, (uint64_t)primitive.materialIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)primitive.indices[0]);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)primitive.indices[1]);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)primitive.indices[2]);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)primitive.materialIndex);
 		}
 
 		return hash;
@@ -840,8 +836,8 @@ namespace
 	uint64_t BuildMuzzleFlashRandomSeed(const PathTracingWeaponLightEvent& event)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, event.serial);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)(event.hasEmitterActorIndex ? event.emitterActorIndex + 1 : 0));
+		hash = nri_scene::HashCombine64(hash, event.serial);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(event.hasEmitterActorIndex ? event.emitterActorIndex + 1 : 0));
 		hash = HashLightOverlayText(hash, BuildNormalizedMuzzleFlashEventKey(event.eventId).c_str());
 		return hash;
 	}
@@ -908,25 +904,25 @@ namespace
 		const int64_t y = (int64_t)std::llround(position[1] * 16.0f);
 		const int64_t z = (int64_t)std::llround(position[2] * 16.0f);
 		uint64_t key = 1469598103934665603ull;
-		key = HashCombine64(key, (uint64_t)x);
-		key = HashCombine64(key, (uint64_t)y);
-		key = HashCombine64(key, (uint64_t)z);
+		key = nri_scene::HashCombine64(key, (uint64_t)x);
+		key = nri_scene::HashCombine64(key, (uint64_t)y);
+		key = nri_scene::HashCombine64(key, (uint64_t)z);
 		return key;
 	}
 
 	uint64_t HashTaggedSignedValue(uint64_t hash, uint64_t tag, int32_t value)
 	{
-		hash = HashCombine64(hash, tag);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)(value + 1));
+		hash = nri_scene::HashCombine64(hash, tag);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(value + 1));
 		return hash;
 	}
 
 	uint64_t BuildSurfaceIdentityKey(const SceneLightSystem::SurfaceRecord& record)
 	{
 		uint64_t key = 1469598103934665603ull;
-		key = HashCombine64(key, (uint64_t)(uint32_t)record.source);
-		key = HashCombine64(key, (uint64_t)(uint32_t)record.provenance.sourceType);
-		key = HashCombine64(key, (uint64_t)record.provenance.drawListType);
+		key = nri_scene::HashCombine64(key, (uint64_t)(uint32_t)record.source);
+		key = nri_scene::HashCombine64(key, (uint64_t)(uint32_t)record.provenance.sourceType);
+		key = nri_scene::HashCombine64(key, (uint64_t)record.provenance.drawListType);
 
 		bool hasAuthoritativeOwnership = false;
 		if (record.provenance.actorIndex >= 0)
@@ -961,8 +957,8 @@ namespace
 		}
 		if (!hasAuthoritativeOwnership)
 		{
-			key = HashCombine64(key, 0xCE173E0000000001ull);
-			key = HashCombine64(key, QuantizePositionKey(record.center));
+			key = nri_scene::HashCombine64(key, 0xCE173E0000000001ull);
+			key = nri_scene::HashCombine64(key, QuantizePositionKey(record.center));
 		}
 
 		return key;
@@ -971,34 +967,34 @@ namespace
 	uint64_t BuildAnalyticTopologyKey(uint32_t sourceFlags, uint32_t ruleId, const SceneLightSystem::SurfaceRecord& record)
 	{
 		uint64_t key = 1469598103934665603ull;
-		key = HashCombine64(key, (uint64_t)sourceFlags);
-		key = HashCombine64(key, (uint64_t)ruleId);
-		key = HashCombine64(key, record.identityKey);
+		key = nri_scene::HashCombine64(key, (uint64_t)sourceFlags);
+		key = nri_scene::HashCombine64(key, (uint64_t)ruleId);
+		key = nri_scene::HashCombine64(key, record.identityKey);
 		return key;
 	}
 
 	uint64_t BuildActorOverlayTopologyKey(const SceneLightSystem::AnalyticLightRegistry::ActorOverlayRule& rule)
 	{
 		uint64_t key = 1469598103934665603ull;
-		key = HashCombine64(key, (uint64_t)SceneAnalyticLightSourceFlag_ActorOverlay);
-		key = HashCombine64(key, (uint64_t)rule.ruleId);
-		key = HashCombine64(key, (uint64_t)(uint32_t)(rule.actorIndex + 1));
+		key = nri_scene::HashCombine64(key, (uint64_t)SceneAnalyticLightSourceFlag_ActorOverlay);
+		key = nri_scene::HashCombine64(key, (uint64_t)rule.ruleId);
+		key = nri_scene::HashCombine64(key, (uint64_t)(uint32_t)(rule.actorIndex + 1));
 		return key;
 	}
 
 	uint64_t HashQuantizedFloat(uint64_t hash, float value, float scale)
 	{
 		const int64_t quantized = (int64_t)std::llround((double)value * (double)scale);
-		return HashCombine64(hash, (uint64_t)quantized);
+		return nri_scene::HashCombine64(hash, (uint64_t)quantized);
 	}
 
 	uint64_t BuildAnalyticPropertyHash(const SceneLightSystem::SceneAnalyticLight& light)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.source);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.actorIndex);
-		hash = HashCombine64(hash, (uint64_t)light.textureId);
-		hash = HashCombine64(hash, (uint64_t)light.flags);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)light.source);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)light.actorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)light.textureId);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)light.flags);
 		hash = HashQuantizedFloat(hash, light.position[0], 16.0f);
 		hash = HashQuantizedFloat(hash, light.position[1], 16.0f);
 		hash = HashQuantizedFloat(hash, light.position[2], 16.0f);
@@ -1013,11 +1009,11 @@ namespace
 	uint64_t BuildAnalyticBindingHash(const SceneLightSystem::SceneAnalyticLight& light)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, (uint64_t)light.sourceFlags);
-		hash = HashCombine64(hash, (uint64_t)light.sourceRuleId);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.source);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)light.actorIndex);
-		hash = HashCombine64(hash, (uint64_t)light.textureId);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)light.sourceFlags);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)light.sourceRuleId);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)light.source);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)light.actorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)light.textureId);
 		return hash;
 	}
 
@@ -1573,17 +1569,17 @@ namespace
 	uint64_t BuildEmissivePropertyHash(const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, (uint64_t)emissive.sourceFlags);
-		hash = HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
-		hash = HashCombine64(hash, (uint64_t)emissive.overrideRuleId);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.sectorIndex);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.authoredSectorIndex);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.wallIndex);
-		hash = HashCombine64(hash, (uint64_t)emissive.textureId);
-		hash = HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
-		hash = HashCombine64(hash, (uint64_t)emissive.emissiveMode);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.sourceFlags);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.overrideRuleId);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.sectorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.authoredSectorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.wallIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.textureId);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.emissiveMode);
 		hash = HashQuantizedFloat(hash, emissive.center[0], 16.0f);
 		hash = HashQuantizedFloat(hash, emissive.center[1], 16.0f);
 		hash = HashQuantizedFloat(hash, emissive.center[2], 16.0f);
@@ -1594,40 +1590,40 @@ namespace
 		hash = HashQuantizedFloat(hash, emissive.emissiveColor[2], 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.emissiveIntensity, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.reachScale, 4096.0f);
-		hash = HashCombine64(hash, emissive.hasSectorResponseParams ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, emissive.hasSectorResponseParams ? 1ull : 0ull);
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseIntensity, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseMin, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseMax, 4096.0f);
-		hash = HashCombine64(hash, emissive.hasSectorResponseInputRange ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, emissive.hasSectorResponseInputRange ? 1ull : 0ull);
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseInputMin, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.sectorResponseInputMax, 4096.0f);
-		hash = HashCombine64(hash, emissive.materialResponseEnabled ? 1ull : 0ull);
-		hash = HashCombine64(hash, emissive.materialResponseExplicit ? 1ull : 0ull);
-		hash = HashCombine64(hash, emissive.hasMaterialResponseParams ? 1ull : 0ull);
-		hash = HashCombine64(hash, emissive.hasMaterialResponseMin ? 1ull : 0ull);
-		hash = HashCombine64(hash, emissive.hasMaterialResponseMax ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, emissive.materialResponseEnabled ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, emissive.materialResponseExplicit ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, emissive.hasMaterialResponseParams ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, emissive.hasMaterialResponseMin ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, emissive.hasMaterialResponseMax ? 1ull : 0ull);
 		hash = HashQuantizedFloat(hash, emissive.materialResponseMin, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.materialResponseMax, 4096.0f);
 		hash = HashQuantizedFloat(hash, emissive.powerEstimate, 256.0f);
-		hash = HashCombine64(hash, emissive.sectorResponseEnabled ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, emissive.sectorResponseEnabled ? 1ull : 0ull);
 		return hash;
 	}
 
 	uint64_t BuildEmissiveBindingHash(const SceneLightSystem::EmissiveSurfaceRegistry::EmissiveSurfaceRecord& emissive)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, (uint64_t)emissive.sourceFlags);
-		hash = HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
-		hash = HashCombine64(hash, (uint64_t)emissive.overrideRuleId);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.sectorIndex);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.authoredSectorIndex);
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)emissive.wallIndex);
-		hash = HashCombine64(hash, (uint64_t)emissive.textureId);
-		hash = HashCombine64(hash, (uint64_t)emissive.materialIndex);
-		hash = HashCombine64(hash, (uint64_t)emissive.emissiveMode);
-		hash = HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.sourceFlags);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.sourceRuleId);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.overrideRuleId);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.source);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.actorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.sectorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.authoredSectorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)emissive.wallIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.textureId);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.materialIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.emissiveMode);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)emissive.emissiveTextureIndex);
 		return hash;
 	}
 
@@ -1945,9 +1941,9 @@ namespace
 		const int64_t y = (int64_t)std::llround(position[1] * 16.0f);
 		const int64_t z = (int64_t)std::llround(position[2] * 16.0f);
 		uint64_t key = 1469598103934665603ull;
-		key = HashCombine64(key, (uint64_t)x);
-		key = HashCombine64(key, (uint64_t)y);
-		key = HashCombine64(key, (uint64_t)z);
+		key = nri_scene::HashCombine64(key, (uint64_t)x);
+		key = nri_scene::HashCombine64(key, (uint64_t)y);
+		key = nri_scene::HashCombine64(key, (uint64_t)z);
 		return key;
 	}
 
@@ -2138,8 +2134,8 @@ namespace
 	uint64_t BuildMapOverlayStableKey(uint32_t ruleId, const float position[3])
 	{
 		uint64_t key = 1469598103934665603ull;
-		key = HashCombine64(key, (uint64_t)ruleId);
-		key = HashCombine64(key, QuantizeLightOverlayPositionKey(position));
+		key = nri_scene::HashCombine64(key, (uint64_t)ruleId);
+		key = nri_scene::HashCombine64(key, QuantizeLightOverlayPositionKey(position));
 		return key;
 	}
 
@@ -2478,17 +2474,17 @@ namespace
 	uint64_t BuildDirectionalLightStateHash(const NRIDirectionalLightState& state)
 	{
 		uint64_t hash = 1469598103934665603ull;
-		hash = HashCombine64(hash, state.enabled ? 1ull : 0ull);
-		hash = HashCombine64(hash, state.shadow ? 1ull : 0ull);
-		hash = HashCombine64(hash, state.fromOverlay ? 1ull : 0ull);
-		hash = HashCombine64(hash, (uint64_t)state.ruleId);
-		hash = HashCombine64(hash, QuantizeDirectionalLightScalar(state.direction[0], 4096.0f));
-		hash = HashCombine64(hash, QuantizeDirectionalLightScalar(state.direction[1], 4096.0f));
-		hash = HashCombine64(hash, QuantizeDirectionalLightScalar(state.direction[2], 4096.0f));
-		hash = HashCombine64(hash, QuantizeDirectionalLightScalar(state.color[0], 4096.0f));
-		hash = HashCombine64(hash, QuantizeDirectionalLightScalar(state.color[1], 4096.0f));
-		hash = HashCombine64(hash, QuantizeDirectionalLightScalar(state.color[2], 4096.0f));
-		hash = HashCombine64(hash, QuantizeDirectionalLightScalar(state.angularSize, 4096.0f));
+		hash = nri_scene::HashCombine64(hash, state.enabled ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, state.shadow ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, state.fromOverlay ? 1ull : 0ull);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)state.ruleId);
+		hash = nri_scene::HashCombine64(hash, QuantizeDirectionalLightScalar(state.direction[0], 4096.0f));
+		hash = nri_scene::HashCombine64(hash, QuantizeDirectionalLightScalar(state.direction[1], 4096.0f));
+		hash = nri_scene::HashCombine64(hash, QuantizeDirectionalLightScalar(state.direction[2], 4096.0f));
+		hash = nri_scene::HashCombine64(hash, QuantizeDirectionalLightScalar(state.color[0], 4096.0f));
+		hash = nri_scene::HashCombine64(hash, QuantizeDirectionalLightScalar(state.color[1], 4096.0f));
+		hash = nri_scene::HashCombine64(hash, QuantizeDirectionalLightScalar(state.color[2], 4096.0f));
+		hash = nri_scene::HashCombine64(hash, QuantizeDirectionalLightScalar(state.angularSize, 4096.0f));
 		return hash;
 	}
 
@@ -4438,18 +4434,18 @@ uint64_t SceneLightSystem::BuildRuntimeLightPayloadHash() const
 {
 	const auto& activeLights = mAnalyticLights.activeLights;
 	uint64_t hash = 1469598103934665603ull;
-	hash = HashCombine64(hash, (uint64_t)activeLights.size());
+	hash = nri_scene::HashCombine64(hash, (uint64_t)activeLights.size());
 	for (const SceneAnalyticLight& light : activeLights)
 	{
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[0]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[1]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.position[2]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[0]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[1]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.color[2]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.intensity));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(light.radius));
-		hash = HashCombine64(hash, (uint64_t)light.flags);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.position[0]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.position[1]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.position[2]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.color[0]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.color[1]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.color[2]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.intensity));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(light.radius));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)light.flags);
 	}
 
 	return hash;
@@ -4458,28 +4454,28 @@ uint64_t SceneLightSystem::BuildRuntimeLightPayloadHash() const
 uint64_t SceneLightSystem::BuildRuntimeLightClusterCameraHash(const RuntimeLightClusterBuildInput& input) const
 {
 	uint64_t hash = 1469598103934665603ull;
-	hash = HashCombine64(hash, (uint64_t)input.renderWidth);
-	hash = HashCombine64(hash, (uint64_t)input.renderHeight);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)input.renderWidth);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)input.renderHeight);
 
 	if (mAnalyticLights.activeLights.empty())
 	{
 		return hash;
 	}
 
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraPos[0]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraPos[1]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraPos[2]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraForward[0]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraForward[1]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraForward[2]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraRight[0]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraRight[1]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraRight[2]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraUp[0]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraUp[1]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraUp[2]));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.tanHalfFovX));
-	hash = HashCombine64(hash, (uint64_t)FloatBits(input.tanHalfFovY));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraPos[0]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraPos[1]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraPos[2]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraForward[0]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraForward[1]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraForward[2]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraRight[0]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraRight[1]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraRight[2]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraUp[0]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraUp[1]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.currentCameraUp[2]));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.tanHalfFovX));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(input.tanHalfFovY));
 	return hash;
 }
 
@@ -4727,7 +4723,7 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 			candidate.gpu.selectionWeight = basePowerEstimate * samplingScale * sectorReachScale;
 			candidate.gpu.emissionScale = sectorResponseScale;
 
-			candidate.debug.stableKey = HashCombine64(surface.stableKey, ((uint64_t)dataSource << 32u) | primitiveIndex);
+			candidate.debug.stableKey = nri_scene::HashCombine64(surface.stableKey, ((uint64_t)dataSource << 32u) | primitiveIndex);
 			candidate.debug.surfaceStableKey = surface.stableKey;
 			candidate.debug.dataSource = dataSource;
 			candidate.debug.primitiveIndex = primitiveIndex;
@@ -4864,23 +4860,23 @@ void SceneLightSystem::BuildEmissiveSamplingUpload(
 uint64_t SceneLightSystem::BuildEmissiveSamplingPayloadHash(const EmissiveSamplingBuildContext& context) const
 {
 	uint64_t hash = 1469598103934665603ull;
-	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.staticGeometry));
-	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.capturedGeometry));
-	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.runtimeMutationGeometry));
-	hash = HashCombine64(hash, (uint64_t)context.runtimeMutationPrimitiveBaseOffset);
-	hash = HashCombine64(hash, HashGeometryForEmissiveSampling(context.dynamicGeometry));
-	hash = HashCombine64(hash, (uint64_t)context.dynamicPrimitiveBaseOffset);
+	hash = nri_scene::HashCombine64(hash, HashGeometryForEmissiveSampling(context.staticGeometry));
+	hash = nri_scene::HashCombine64(hash, HashGeometryForEmissiveSampling(context.capturedGeometry));
+	hash = nri_scene::HashCombine64(hash, HashGeometryForEmissiveSampling(context.runtimeMutationGeometry));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)context.runtimeMutationPrimitiveBaseOffset);
+	hash = nri_scene::HashCombine64(hash, HashGeometryForEmissiveSampling(context.dynamicGeometry));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)context.dynamicPrimitiveBaseOffset);
 
-	hash = HashCombine64(hash, (uint64_t)mEmissiveSurfaces.activeSurfaces.size());
+	hash = nri_scene::HashCombine64(hash, (uint64_t)mEmissiveSurfaces.activeSurfaces.size());
 	for (const auto& surface : mEmissiveSurfaces.activeSurfaces)
 	{
-		hash = HashCombine64(hash, surface.stableKey);
+		hash = nri_scene::HashCombine64(hash, surface.stableKey);
 
 		const auto propertyIt = mEmissiveSurfaces.activePropertyHashes.find(surface.stableKey);
-		hash = HashCombine64(hash, propertyIt != mEmissiveSurfaces.activePropertyHashes.end() ? propertyIt->second : 0ull);
+		hash = nri_scene::HashCombine64(hash, propertyIt != mEmissiveSurfaces.activePropertyHashes.end() ? propertyIt->second : 0ull);
 
 		const auto bindingIt = mEmissiveSurfaces.activeBindingHashes.find(surface.stableKey);
-		hash = HashCombine64(hash, bindingIt != mEmissiveSurfaces.activeBindingHashes.end() ? bindingIt->second : 0ull);
+		hash = nri_scene::HashCombine64(hash, bindingIt != mEmissiveSurfaces.activeBindingHashes.end() ? bindingIt->second : 0ull);
 
 		const bool sectorResponseEligible = IsEmissiveSurfaceSectorResponseEligible(surface);
 		if (sectorResponseEligible)
@@ -4890,18 +4886,18 @@ uint64_t SceneLightSystem::BuildEmissiveSamplingPayloadHash(const EmissiveSampli
 			const float responseScale = ResolveSectorEmissionScale(surface, applied);
 			const float intensityScale = applied ? ResolveSectorEmissionIntensityScale(surface, responseScale) : 1.0f;
 			const float reachScale = applied ? ResolveSectorEmissionReachScale(surface, responseScale) : 1.0f;
-			hash = HashCombine64(hash, (uint64_t)sectorIndex);
-			hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
-			hash = HashCombine64(hash, (uint64_t)FloatBits(intensityScale));
-			hash = HashCombine64(hash, (uint64_t)FloatBits(reachScale));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)sectorIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(responseScale));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(intensityScale));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(reachScale));
 		}
 		if (IsEmissiveSurfaceMaterialResponseEligible(surface))
 		{
 			bool applied = false;
 			const float materialScale = ResolveEmissiveMaterialResponseScale(surface, applied);
-			hash = HashCombine64(hash, 0x4d415452455350ull);
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)surface.sectorIndex);
-			hash = HashCombine64(hash, (uint64_t)FloatBits(materialScale));
+			hash = nri_scene::HashCombine64(hash, 0x4d415452455350ull);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)surface.sectorIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(materialScale));
 		}
 	}
 
@@ -4977,32 +4973,32 @@ uint64_t SceneLightSystem::BuildSectorLightingPayloadHash(float sectorLightMulti
 {
 	const auto& registry = mSectorLighting;
 	uint64_t hash = 1469598103934665603ull;
-	hash = HashCombine64(hash, sectorLightingEnabled ? 1ull : 0ull);
-	hash = HashCombine64(hash, (uint64_t)FloatBits(sectorLightMultiplier));
-	hash = HashCombine64(hash, (uint64_t)registry.sectorCount);
-	hash = HashCombine64(hash, (uint64_t)registry.activeSectorCount);
-	hash = HashCombine64(hash, (uint64_t)registry.pulsingSectorCount);
+	hash = nri_scene::HashCombine64(hash, sectorLightingEnabled ? 1ull : 0ull);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sectorLightMultiplier));
+	hash = nri_scene::HashCombine64(hash, (uint64_t)registry.sectorCount);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)registry.activeSectorCount);
+	hash = nri_scene::HashCombine64(hash, (uint64_t)registry.pulsingSectorCount);
 	for (uint32_t sectorIndex : registry.activeSectorIndices)
 	{
-		hash = HashCombine64(hash, (uint64_t)sectorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)sectorIndex);
 		if (sectorIndex >= registry.sectors.size())
 		{
 			continue;
 		}
 
 		const auto& sector = registry.sectors[sectorIndex];
-		hash = HashCombine64(hash, (uint64_t)sector.sourceFlags);
-		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.paletteIndex);
-		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.lotag);
-		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.hitag);
-		hash = HashCombine64(hash, (uint64_t)(int64_t)sector.averageShade);
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[0]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[1]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[2]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.ambientIntensity));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.hemisphereAmount));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.fogAmount));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(sector.pulseScale));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)sector.sourceFlags);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(int64_t)sector.paletteIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(int64_t)sector.lotag);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(int64_t)sector.hitag);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(int64_t)sector.averageShade);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[0]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[1]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.ambientColor[2]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.ambientIntensity));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.hemisphereAmount));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.fogAmount));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.pulseScale));
 	}
 
 	return hash;
@@ -5506,11 +5502,11 @@ uint64_t SceneLightSystem::BuildEmissiveSectorResponsePayloadHash() const
 		const float responseScale = ResolveSectorEmissionScale(surface, applied);
 		const float intensityScale = applied ? ResolveSectorEmissionIntensityScale(surface, responseScale) : 1.0f;
 		const float reachScale = applied ? ResolveSectorEmissionReachScale(surface, responseScale) : 1.0f;
-		hash = HashCombine64(hash, surface.stableKey);
-		hash = HashCombine64(hash, (uint64_t)sectorIndex);
-		hash = HashCombine64(hash, (uint64_t)FloatBits(responseScale));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(intensityScale));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(reachScale));
+		hash = nri_scene::HashCombine64(hash, surface.stableKey);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)sectorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(responseScale));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(intensityScale));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(reachScale));
 	}
 
 	return hash;
@@ -5577,9 +5573,9 @@ void SceneLightSystem::NotifyEmissiveSectorResponseEditModeChanges(uint32_t fram
 		aggregate.minShade = std::min(aggregate.minShade, record.material.shade);
 		aggregate.maxShade = std::max(aggregate.maxShade, record.material.shade);
 		aggregate.count++;
-		aggregate.hash = HashCombine64(aggregate.hash, (uint64_t)(uint32_t)record.material.shade);
-		aggregate.hash = HashCombine64(aggregate.hash, (uint64_t)record.material.paletteIndex);
-		aggregate.hash = HashCombine64(aggregate.hash, (uint64_t)FloatBits(record.material.lightLevel));
+		aggregate.hash = nri_scene::HashCombine64(aggregate.hash, (uint64_t)(uint32_t)record.material.shade);
+		aggregate.hash = nri_scene::HashCombine64(aggregate.hash, (uint64_t)record.material.paletteIndex);
+		aggregate.hash = nri_scene::HashCombine64(aggregate.hash, (uint64_t)FloatBits(record.material.lightLevel));
 	}
 
 	std::vector<uint32_t> changedNearbySurfaceSectors;
@@ -5596,12 +5592,12 @@ void SceneLightSystem::NotifyEmissiveSectorResponseEditModeChanges(uint32_t fram
 		if (sectorIndex < mSectorLighting.sectors.size())
 		{
 			const auto& sector = mSectorLighting.sectors[sectorIndex];
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)sector.averageShade);
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)sector.rawAverageShade);
-			hash = HashCombine64(hash, (uint64_t)(uint32_t)sector.paletteIndex);
-			hash = HashCombine64(hash, (uint64_t)FloatBits(sector.rawFloorLight));
-			hash = HashCombine64(hash, (uint64_t)FloatBits(sector.rawCeilingLight));
-			hash = HashCombine64(hash, (uint64_t)FloatBits(sector.emitterResponseScale));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)sector.averageShade);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)sector.rawAverageShade);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)sector.paletteIndex);
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.rawFloorLight));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.rawCeilingLight));
+			hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(sector.emitterResponseScale));
 		}
 		nextSurfaceHashes[sectorIndex] = hash;
 

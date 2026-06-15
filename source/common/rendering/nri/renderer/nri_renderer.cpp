@@ -573,11 +573,6 @@ namespace
 		return (int)perf_looptraceframes > 0;
 	}
 
-	static bool ShouldTraceMirrorDynamicCapture()
-	{
-		return nri_voxelstats || (int)nri_pttraceframes > 0 || (int)perf_looptraceframes > 0;
-	}
-
 	static constexpr uint32_t NRI_MAX_ACTOR_OVERFLOW_TRACE_LINES = 16;
 
 	static MaterialTextureAttributionCounts GatherMaterialTextureAttribution(
@@ -2560,50 +2555,6 @@ namespace
 		}
 
 		return data != nullptr && size != 0;
-	}
-
-	static bool MaterialDataEqual(const nri_scene::MaterialData& a, const nri_scene::MaterialData& b)
-	{
-		return
-			a.textureIndex == b.textureIndex &&
-			a.paletteIndex == b.paletteIndex &&
-			a.flags == b.flags &&
-			a.materialClass == b.materialClass &&
-			a.lightingFlags == b.lightingFlags &&
-			a.normalTextureIndex == b.normalTextureIndex &&
-			a.metallicTextureIndex == b.metallicTextureIndex &&
-			a.roughnessTextureIndex == b.roughnessTextureIndex &&
-			a.sectorIndex == b.sectorIndex &&
-			a.emissiveTextureIndex == b.emissiveTextureIndex &&
-			a.lightLevel == b.lightLevel &&
-			a.alpha == b.alpha &&
-			a.roughnessHint == b.roughnessHint &&
-			a.metalnessHint == b.metalnessHint &&
-			a.emissiveColor[0] == b.emissiveColor[0] &&
-			a.emissiveColor[1] == b.emissiveColor[1] &&
-			a.emissiveColor[2] == b.emissiveColor[2] &&
-			a.emissiveIntensity == b.emissiveIntensity &&
-			a.emissiveMaskScale == b.emissiveMaskScale &&
-			a.emissiveMode == b.emissiveMode &&
-			a.emissiveReserved == b.emissiveReserved;
-	}
-
-	static bool MaterialDataVectorEqual(const std::vector<nri_scene::MaterialData>& a, const std::vector<nri_scene::MaterialData>& b)
-	{
-		if (a.size() != b.size())
-		{
-			return false;
-		}
-
-		for (size_t i = 0; i < a.size(); ++i)
-		{
-			if (!MaterialDataEqual(a[i], b[i]))
-			{
-				return false;
-			}
-		}
-
-		return true;
 	}
 
 	static const char* GetUpscalerFamilyName(NRIMainUpscalerKind kind, bool runAppTaa)

@@ -2,6 +2,7 @@
 
 #include "nri_renderer.h"
 #include "nri_runtime_mutation_trace.h"
+#include "../scene/nri_hash.h"
 
 #include "c_cvars.h"
 #include "coreactor.h"
@@ -20,11 +21,6 @@ EXTERN_CVAR(Float, nri_ptglowblend)
 
 namespace
 {
-	uint64_t HashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
-	}
-
 	uint32_t FloatBits(float value)
 	{
 		uint32_t bits = 0;
@@ -870,7 +866,7 @@ void nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(
 		{
 			if (appliedOverride)
 			{
-				metadata.materialKey = HashCombine64(HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull), overrideBits);
+				metadata.materialKey = nri_scene::HashCombine64(nri_scene::HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull), overrideBits);
 			}
 			continue;
 		}
@@ -890,7 +886,7 @@ void nri_material_policy::ApplyActorMaterialOverridesToBuiltMaterials(
 		metadata.emissiveColor[2] = 1.0f;
 		if (appliedOverride)
 		{
-			metadata.materialKey = HashCombine64(HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull), overrideBits);
+			metadata.materialKey = nri_scene::HashCombine64(nri_scene::HashCombine64(metadata.materialKey, 0xAC70A11C00000001ull), overrideBits);
 		}
 	}
 }
@@ -955,6 +951,54 @@ void nri_material_policy::ApplyActorShadowMaterialOverrides(
 	}
 }
 
+bool nri_material_policy::MaterialDataEqual(
+	const nri_scene::MaterialData& a,
+	const nri_scene::MaterialData& b)
+{
+	return
+		a.textureIndex == b.textureIndex &&
+		a.paletteIndex == b.paletteIndex &&
+		a.flags == b.flags &&
+		a.materialClass == b.materialClass &&
+		a.lightingFlags == b.lightingFlags &&
+		a.normalTextureIndex == b.normalTextureIndex &&
+		a.metallicTextureIndex == b.metallicTextureIndex &&
+		a.roughnessTextureIndex == b.roughnessTextureIndex &&
+		a.sectorIndex == b.sectorIndex &&
+		a.emissiveTextureIndex == b.emissiveTextureIndex &&
+		a.lightLevel == b.lightLevel &&
+		a.alpha == b.alpha &&
+		a.roughnessHint == b.roughnessHint &&
+		a.metalnessHint == b.metalnessHint &&
+		a.emissiveColor[0] == b.emissiveColor[0] &&
+		a.emissiveColor[1] == b.emissiveColor[1] &&
+		a.emissiveColor[2] == b.emissiveColor[2] &&
+		a.emissiveIntensity == b.emissiveIntensity &&
+		a.emissiveMaskScale == b.emissiveMaskScale &&
+		a.emissiveMode == b.emissiveMode &&
+		a.emissiveReserved == b.emissiveReserved;
+}
+
+bool nri_material_policy::MaterialDataVectorEqual(
+	const std::vector<nri_scene::MaterialData>& a,
+	const std::vector<nri_scene::MaterialData>& b)
+{
+	if (a.size() != b.size())
+	{
+		return false;
+	}
+
+	for (size_t i = 0; i < a.size(); ++i)
+	{
+		if (!MaterialDataEqual(a[i], b[i]))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 uint64_t nri_material_policy::ComputeChunkActorOverrideHash(
 	const std::unordered_map<int32_t, uint32_t>& actorOverrides,
 	const nri_scene::MaterialBridgeData& materials)
@@ -980,8 +1024,8 @@ uint64_t nri_material_policy::ComputeChunkActorOverrideHash(
 		}
 
 		touched = true;
-		hash = HashCombine64(hash, (uint64_t)(uint32_t)metadata.actorIndex);
-		hash = HashCombine64(hash, (uint64_t)it->second);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)metadata.actorIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)it->second);
 	}
 
 	return touched ? hash : 0;
@@ -1009,16 +1053,16 @@ uint64_t nri_material_policy::ComputeChunkEmissiveOverrideHash(
 		}
 
 		touched = true;
-		hash = HashCombine64(hash, (uint64_t)materialIndex);
-		hash = HashCombine64(hash, (uint64_t)effectiveMaterial.materialClass);
-		hash = HashCombine64(hash, (uint64_t)effectiveMaterial.emissiveMode);
-		hash = HashCombine64(hash, (uint64_t)effectiveMaterial.emissiveTextureIndex);
-		hash = HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveColor[0]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveColor[1]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveColor[2]));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveIntensity));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveMaskScale));
-		hash = HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveReserved));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)materialIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)effectiveMaterial.materialClass);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)effectiveMaterial.emissiveMode);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)effectiveMaterial.emissiveTextureIndex);
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveColor[0]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveColor[1]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveColor[2]));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveIntensity));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveMaskScale));
+		hash = nri_scene::HashCombine64(hash, (uint64_t)FloatBits(effectiveMaterial.emissiveReserved));
 	}
 
 	return touched ? hash : 0;

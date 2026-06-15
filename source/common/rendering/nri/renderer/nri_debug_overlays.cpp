@@ -2,6 +2,7 @@
 
 #include "nri_render_geometry_helpers.h"
 #include "nri_renderer.h"
+#include "../scene/nri_hash.h"
 #include "c_cvars.h"
 #include "printf.h"
 
@@ -85,11 +86,6 @@ namespace
 		destination[0] = source[0];
 		destination[1] = -source[2];
 		destination[2] = -source[1];
-	}
-
-	uint64_t HashCombine64(uint64_t hash, uint64_t value)
-	{
-		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
 	}
 
 	double DurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
@@ -351,9 +347,9 @@ bool NRIDebugOverlaySystem::EnsureRuntimeDebugSphereCache(RuntimeDebugSphere& sp
 			std::memcpy(&diameterBits, &sphere.diameter, sizeof(diameterBits));
 			std::memcpy(&metalnessBits, &sphere.metalness, sizeof(metalnessBits));
 			std::memcpy(&roughnessBits, &sphere.roughness, sizeof(roughnessBits));
-			metadata.materialKey = HashCombine64(metadata.materialKey, sphere.id);
-			metadata.materialKey = HashCombine64(metadata.materialKey, ((uint64_t)diameterBits << 32u) | (uint64_t)metalnessBits);
-			metadata.materialKey = HashCombine64(metadata.materialKey, (uint64_t)roughnessBits);
+			metadata.materialKey = nri_scene::HashCombine64(metadata.materialKey, sphere.id);
+			metadata.materialKey = nri_scene::HashCombine64(metadata.materialKey, ((uint64_t)diameterBits << 32u) | (uint64_t)metalnessBits);
+			metadata.materialKey = nri_scene::HashCombine64(metadata.materialKey, (uint64_t)roughnessBits);
 		}
 	}
 

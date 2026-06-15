@@ -57,6 +57,14 @@ namespace nri_material_policy
 		const nri_scene::MaterialBridgeData& materials,
 		std::vector<nri_scene::MaterialData>& inOutGpuMaterials);
 
+	bool MaterialDataEqual(
+		const nri_scene::MaterialData& a,
+		const nri_scene::MaterialData& b);
+
+	bool MaterialDataVectorEqual(
+		const std::vector<nri_scene::MaterialData>& a,
+		const std::vector<nri_scene::MaterialData>& b);
+
 	uint64_t ComputeChunkActorOverrideHash(
 		const std::unordered_map<int32_t, uint32_t>& actorOverrides,
 		const nri_scene::MaterialBridgeData& materials);
