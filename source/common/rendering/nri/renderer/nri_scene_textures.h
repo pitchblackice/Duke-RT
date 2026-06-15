@@ -56,6 +56,16 @@ struct SceneTextureResolveResult
 	double realizeMs = 0.0;
 };
 
+struct NRIMaterialTextureWarmupResult
+{
+	uint32_t textureRequests = 0;
+	uint32_t textureHits = 0;
+	uint32_t textureMisses = 0;
+	uint32_t textureInserts = 0;
+	uint64_t estimatedBytes = 0;
+	double realizeMs = 0.0;
+};
+
 class NRISceneTextureResidency
 {
 public:
@@ -80,6 +90,7 @@ public:
 
 	bool EnsurePaletteTexture(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials);
 	bool EnsureCacheEntry(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, double* outRealizeMs = nullptr);
+	bool WarmMaterialTextures(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, NRIMaterialTextureWarmupResult& outResult);
 	bool ResolveTextureDescriptor(NRIRenderDevice& device, const nri_scene::TextureUpload& upload, bool tracePerf, SceneTextureResolveResult& outResult);
 	uint32_t TransitionInputsForCompute(NRIRenderDevice& device);
 

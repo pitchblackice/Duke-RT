@@ -48,6 +48,16 @@ namespace
 		return std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
 	}
 
+	uint64_t EstimateSceneTextureUploadBytes(const nri_scene::TextureUpload& upload)
+	{
+		if (upload.width == 0 || upload.height == 0)
+		{
+			return 0;
+		}
+		const uint64_t bytesPerPixel = upload.indexed ? 1ull : 4ull;
+		return (uint64_t)upload.width * (uint64_t)upload.height * bytesPerPixel;
+	}
+
 	uint64_t SceneTextureHashCombine64(uint64_t hash, uint64_t value)
 	{
 		return hash ^ (value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2));
@@ -357,6 +367,40 @@ uint32_t NRIRenderer::FindSceneTextureCacheIndex(uint64_t key) const
 bool NRIRenderer::EnsureSceneTextureCacheEntry(const nri_scene::TextureUpload& upload, double* outRealizeMs)
 {
 	return mFrameBuffer != nullptr && mSceneTextures.EnsureCacheEntry(*mFrameBuffer, upload, outRealizeMs);
+}
+
+bool NRISceneTextureResidency::WarmMaterialTextures(NRIRenderDevice& device, const nri_scene::MaterialBridgeData& materials, NRIMaterialTextureWarmupResult& outResult)
+{
+	outResult = {};
+	for (const nri_scene::TextureUpload& upload : materials.textures)
+	{
+		if (upload.width == 0 || upload.height == 0)
+		{
+			continue;
+		}
+
+		outResult.textureRequests++;
+		const bool wasCached = FindCacheIndex(upload.key) != UINT32_MAX;
+		if (wasCached)
+		{
+			outResult.textureHits++;
+			continue;
+		}
+
+		outResult.textureMisses++;
+		outResult.estimatedBytes += EstimateSceneTextureUploadBytes(upload);
+		double realizeMs = 0.0;
+		if (!EnsureCacheEntry(device, upload, &realizeMs))
+		{
+			return false;
+		}
+		outResult.realizeMs += realizeMs;
+		if (FindCacheIndex(upload.key) != UINT32_MAX)
+		{
+			outResult.textureInserts++;
+		}
+	}
+	return true;
 }
 
 bool NRIRenderer::EnsureSceneTextures(const nri_scene::SceneView& sceneView, const nri_scene::MaterialBridgeData& materials, std::vector<nri_scene::MaterialData>& outGpuMaterials, bool preserveExistingSky, const char* reason)
