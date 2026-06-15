@@ -1,4 +1,5 @@
 #include "nri_material_bridge.h"
+#include "../renderer/nri_cvars.h"
 
 #include "nri_hash.h"
 #include "nri_texture_signature.h"
@@ -11,9 +12,6 @@
 #include <array>
 #include <unordered_map>
 
-EXTERN_CVAR(Int, hw_lightmode)
-EXTERN_CVAR(Float, nri_ptfullbrightboost)
-EXTERN_CVAR(Float, nri_voxelemissionboost)
 
 namespace
 {

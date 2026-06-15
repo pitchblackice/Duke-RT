@@ -1,4 +1,5 @@
 #include "nri_renderer.h"
+#include "nri_cvars.h"
 
 #include "../scene/nri_hash.h"
 #include "../scene/nri_map_builder.h"
@@ -21,9 +22,6 @@
 #include <cstring>
 #include <unordered_map>
 
-EXTERN_CVAR(Bool, nri_ptceilingnudge)
-EXTERN_CVAR(Float, nri_ptceilingnudgedistance)
-EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {

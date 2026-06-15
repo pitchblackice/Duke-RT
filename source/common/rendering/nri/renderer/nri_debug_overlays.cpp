@@ -1,4 +1,5 @@
 #include "nri_debug_overlays.h"
+#include "nri_cvars.h"
 
 #include "nri_render_geometry_helpers.h"
 #include "nri_renderer.h"
@@ -11,8 +12,6 @@
 #include <cmath>
 #include <cstring>
 
-EXTERN_CVAR(Int, nri_ptspherelongs)
-EXTERN_CVAR(Int, nri_ptspherelats)
 
 bool NRIRenderer::AddRuntimeDebugSphere(const float center[3], float diameter, float metalness, float roughness, uint32_t& outId)
 {

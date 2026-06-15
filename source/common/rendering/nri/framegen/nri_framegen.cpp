@@ -1,4 +1,5 @@
 #include "nri_framegen.h"
+#include "../renderer/nri_cvars.h"
 #include "nri_ffx_api.h"
 
 #include "../system/nri_renderdevice.h"
@@ -17,12 +18,6 @@
 #include <dxgi1_6.h>
 #endif
 
-EXTERN_CVAR(Bool, nri_framegen)
-EXTERN_CVAR(Int, nri_framegenprovider)
-EXTERN_CVAR(Int, nri_framegenui)
-EXTERN_CVAR(Bool, nri_framegenasync)
-EXTERN_CVAR(Bool, nri_framegenlatency)
-EXTERN_CVAR(Bool, nri_validation)
 
 namespace
 {

@@ -1,4 +1,5 @@
 #include "nri_exposure.h"
+#include "nri_cvars.h"
 
 #include "nri_renderer.h"
 #include "nri_shader_contracts.h"
@@ -10,8 +11,6 @@
 #include <cmath>
 #include <cstring>
 
-EXTERN_CVAR(Bool, nri_pttemporaltrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
 
 namespace
 {
@@ -40,175 +39,6 @@ namespace
 	}
 }
 
-CVAR(Bool, nri_ptautoexposure, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_pthdrautoexposure, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptautoexposurefreeze, false, 0)
-CVAR(Bool, nri_ptautoexposurestats, false, 0)
-CUSTOM_CVAR(Int, nri_ptautoexposuremetering, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0)
-	{
-		self = 0;
-	}
-	else if (self > 2)
-	{
-		self = 2;
-	}
-}
-CUSTOM_CVAR(Int, nri_ptautoexposurebins, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 16)
-	{
-		self = 16;
-	}
-	else if (self > 256)
-	{
-		self = 256;
-	}
-}
-CUSTOM_CVAR(Int, nri_ptautoexposuresamplestep, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 1)
-	{
-		self = 1;
-	}
-	else if (self > 8)
-	{
-		self = 8;
-	}
-}
-CUSTOM_CVAR(Float, nri_ptautoexposuretarget, 0.03225f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.02f)
-	{
-		self = 0.02f;
-	}
-	else if (self > 1.0f)
-	{
-		self = 1.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_pthdrautoexposuretarget, 0.0445f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.02f)
-	{
-		self = 0.02f;
-	}
-	else if (self > 1.0f)
-	{
-		self = 1.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_ptautoexposuremin, 2.74561f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.03125f)
-	{
-		self = 0.03125f;
-	}
-	else if (self > 8.0f)
-	{
-		self = 8.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_pthdrautoexposuremin, 0.604004f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.03125f)
-	{
-		self = 0.03125f;
-	}
-	else if (self > 8.0f)
-	{
-		self = 8.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_ptautoexposuremax, 4.00977f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.125f)
-	{
-		self = 0.125f;
-	}
-	else if (self > 32.0f)
-	{
-		self = 32.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_pthdrautoexposuremax, 7.09766f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.125f)
-	{
-		self = 0.125f;
-	}
-	else if (self > 32.0f)
-	{
-		self = 32.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_ptautoexposurebias, 0.469531f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.125f)
-	{
-		self = 0.125f;
-	}
-	else if (self > 8.0f)
-	{
-		self = 8.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_pthdrautoexposurebias, 0.371094f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.125f)
-	{
-		self = 0.125f;
-	}
-	else if (self > 8.0f)
-	{
-		self = 8.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_ptautoexposurelowpercentile, 1.01563f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.0f)
-	{
-		self = 0.0f;
-	}
-	else if (self > 99.0f)
-	{
-		self = 99.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_ptautoexposurehighpercentile, 98.9844f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 1.0f)
-	{
-		self = 1.0f;
-	}
-	else if (self > 100.0f)
-	{
-		self = 100.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_ptautoexposureadaptup, 3.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.0f)
-	{
-		self = 0.0f;
-	}
-	else if (self > 16.0f)
-	{
-		self = 16.0f;
-	}
-}
-CUSTOM_CVAR(Float, nri_ptautoexposureadaptdown, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.0f)
-	{
-		self = 0.0f;
-	}
-	else if (self > 16.0f)
-	{
-		self = 16.0f;
-	}
-}
 
 const char* GetNRIAutoExposureMeteringModeName(NRIAutoExposureMeteringMode mode)
 {

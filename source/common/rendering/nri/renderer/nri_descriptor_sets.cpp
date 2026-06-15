@@ -1,4 +1,5 @@
 #include "nri_descriptor_sets.h"
+#include "nri_cvars.h"
 
 #include "../scene/nri_hash.h"
 #include "nri_renderer.h"
@@ -11,10 +12,6 @@
 #include <chrono>
 #include <cstdint>
 
-EXTERN_CVAR(Int, nri_ptactorspritetrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {

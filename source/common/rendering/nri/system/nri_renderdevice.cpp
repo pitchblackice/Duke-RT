@@ -1,4 +1,5 @@
 #include "nri_renderdevice.h"
+#include "../renderer/nri_cvars.h"
 
 #include "../framegen/nri_framegen.h"
 #include "../renderer/nri_renderer.h"
@@ -45,109 +46,10 @@
 #include <string>
 #include <utility>
 
-EXTERN_CVAR(String, nri_api)
-EXTERN_CVAR(Int, nri_ptportaldepth)
-EXTERN_CVAR(Int, nri_ptdebug)
-EXTERN_CVAR(Bool, nri_validation)
-EXTERN_CVAR(Bool, nri_apivalidation)
-EXTERN_CVAR(Bool, nri_dred)
-EXTERN_CVAR(Bool, vid_vsync)
-EXTERN_CVAR(Bool, nri_framegen)
-EXTERN_CVAR(Bool, nri_framegenlatency)
-EXTERN_CVAR(Int, nri_framegenprovider)
-EXTERN_CVAR(Bool, nri_ptsectorlighting)
-EXTERN_CVAR(Float, nri_ptsectorlightmultiplier)
-EXTERN_CVAR(Float, nri_ptsectorambientscale)
-EXTERN_CVAR(Float, nri_ptsectorhemiscale)
-EXTERN_CVAR(Float, nri_ptsectorfogscale)
-EXTERN_CVAR(Int, nri_ptoutputmode)
-EXTERN_CVAR(Int, nri_pttonemap)
-EXTERN_CVAR(Float, nri_ptexposure)
-EXTERN_CVAR(Float, nri_ptcontrast)
-EXTERN_CVAR(Float, nri_ptsaturation)
-EXTERN_CVAR(Float, nri_ptshoulder)
-EXTERN_CVAR(Float, nri_pttoe)
-EXTERN_CVAR(Float, nri_ptpaperwhite)
-EXTERN_CVAR(Int, nri_pthdrtonemap)
-EXTERN_CVAR(Float, nri_pthdrexposure)
-EXTERN_CVAR(Float, nri_pthdrcontrast)
-EXTERN_CVAR(Float, nri_pthdrsaturation)
-EXTERN_CVAR(Float, nri_pthdrshoulder)
-EXTERN_CVAR(Float, nri_pthdrtoe)
-EXTERN_CVAR(Float, nri_ptsectorclamp)
-EXTERN_CVAR(Int, nri_ptsectorfilterpal)
-EXTERN_CVAR(Int, nri_ptsectorfilterminshade)
-EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
-EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
-EXTERN_CVAR(Bool, nri_ptruntimedeferfarmaterial)
-EXTERN_CVAR(Bool, nri_ptruntimedefernearinvisiblematerial)
-EXTERN_CVAR(Bool, nri_ptruntimedeferfarstructural)
-EXTERN_CVAR(Bool, nri_ptruntimedefernearinvisiblestructural)
-EXTERN_CVAR(Int, nri_ptsectorpulseframes)
-EXTERN_CVAR(Float, nri_ptsectorpulseamount)
-EXTERN_CVAR(Float, nri_ptsectoremissionsignalstrength)
-EXTERN_CVAR(Float, nri_ptsectoremissionresponsemin)
-EXTERN_CVAR(Float, nri_ptsectoremissionresponsemax)
-EXTERN_CVAR(Float, nri_ptsectoremissionlightmin)
-EXTERN_CVAR(Float, nri_ptsectoremissionlightmax)
-EXTERN_CVAR(Float, nri_ptsectoremissionreachmin)
-EXTERN_CVAR(Float, nri_ptsectoremissionreachmax)
-EXTERN_CVAR(Float, nri_ptsectoremissionmaterialmin)
-EXTERN_CVAR(Float, nri_ptsectoremissionmaterialmax)
-EXTERN_CVAR(Bool, nri_ptscenestats)
-EXTERN_CVAR(Bool, nri_voxelstats)
-EXTERN_CVAR(Int, nri_ptloadingtrace)
-CVAR(Bool, nri_ptsanity, false, 0)
-CVAR(Bool, nri_ptwaitpresent, true, 0)
-CVAR(Bool, nri_ptslowdowntrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-CUSTOM_CVAR(Int, nri_pttraceframes, 0, 0)
-{
-	if (self < 0)
-	{
-		self = 0;
-	}
-	else if (self > 600)
-	{
-		self = 600;
-	}
-}
 
-CUSTOM_CVAR(Int, nri_ptslowdowntraceinterval, 300, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 1)
-	{
-		self = 1;
-	}
-	else if (self > 36000)
-	{
-		self = 36000;
-	}
-}
 
-CUSTOM_CVAR(Int, nri_ptslowdowntop, 5, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0)
-	{
-		self = 0;
-	}
-	else if (self > 16)
-	{
-		self = 16;
-	}
-}
 
-CUSTOM_CVAR(Int, nri_ptnudgetrace, 0, 0)
-{
-	if (self < 0)
-	{
-		self = 0;
-	}
-	else if (self > 1)
-	{
-		self = 1;
-	}
-}
 
 namespace
 {
@@ -895,43 +797,7 @@ namespace
 	}
 }
 
-CUSTOM_CVAR(Int, nri_ptswaptextures, 0, 0)
-{
-	if (self < 0)
-	{
-		self = 0;
-	}
-	else if (self == 1)
-	{
-		self = 2;
-	}
-	else if (self > 8)
-	{
-		self = 8;
-	}
 
-	if (auto* frameBuffer = GetActiveNRIRenderDevice())
-	{
-		frameBuffer->SetVSync(vid_vsync);
-	}
-}
-
-CUSTOM_CVAR(Int, nri_ptswapflags, -1, 0)
-{
-	if (self < -1)
-	{
-		self = -1;
-	}
-	else if (self > 3)
-	{
-		self = 3;
-	}
-
-	if (auto* frameBuffer = GetActiveNRIRenderDevice())
-	{
-		frameBuffer->SetVSync(vid_vsync);
-	}
-}
 
 namespace
 {

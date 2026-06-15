@@ -1,4 +1,5 @@
 #include "nri_renderer.h"
+#include "nri_cvars.h"
 
 #include "../framegen/nri_framegen.h"
 #include "nri_acceleration.h"
@@ -44,17 +45,6 @@
 #include <string>
 #include <unordered_set>
 
-EXTERN_CVAR(Bool, nri_ptscenestats)
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Bool, nri_voxelstats)
-EXTERN_CVAR(Bool, nri_ptbootstrap)
-EXTERN_CVAR(Bool, nri_ptdirectscene)
-EXTERN_CVAR(Float, nri_ptmirrordynamicdistance)
-EXTERN_CVAR(Int, nri_ptbootstrapmode)
-EXTERN_CVAR(Int, nri_ptdebug)
-EXTERN_CVAR(Int, nri_ptloadingtrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {

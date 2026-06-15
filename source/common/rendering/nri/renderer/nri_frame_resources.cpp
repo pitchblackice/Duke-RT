@@ -1,4 +1,5 @@
 #include "nri_frame_resources.h"
+#include "nri_cvars.h"
 
 #include "nri_renderer.h"
 #include "../system/nri_renderdevice.h"
@@ -12,8 +13,6 @@
 #include <algorithm>
 #include <cmath>
 
-EXTERN_CVAR(Bool, nri_ptscenestats)
-EXTERN_CVAR(Float, nri_renderscale)
 
 bool NRIFrameResources::CreateFrameTexture(NRIRenderer& renderer, uint32_t slot, uint32_t width, uint32_t height, nri::Format format)
 {

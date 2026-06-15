@@ -1,4 +1,5 @@
 #include "nri_renderer.h"
+#include "nri_cvars.h"
 
 #include "../scene/nri_material_bridge.h"
 #include "../system/nri_hwtexture.h"
@@ -14,10 +15,6 @@
 #include <cstring>
 #include <unordered_set>
 
-EXTERN_CVAR(Int, nri_ptactorspritetrace)
-EXTERN_CVAR(Int, nri_ptdebug)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {

@@ -1,71 +1,11 @@
 #include "nri_renderer_settings.h"
+#include "nri_cvars.h"
 
 #include "c_cvars.h"
 
 #include <algorithm>
 
-EXTERN_CVAR(Int, nri_nrddenoiser)
-EXTERN_CVAR(Int, nri_nrdmaxframes)
-EXTERN_CVAR(Int, nri_nrdfastframes)
-EXTERN_CVAR(Int, nri_nrdstabilizationframes)
-EXTERN_CVAR(Bool, nri_nrdantifirefly)
-EXTERN_CVAR(Int, nri_nrdhitdistrecon)
-EXTERN_CVAR(Int, nri_nrdsplit)
-EXTERN_CVAR(Float, nri_nrdfasthistorysigma)
-EXTERN_CVAR(Float, nri_nrdprepassdiffuse)
-EXTERN_CVAR(Float, nri_nrdprepassspecular)
-EXTERN_CVAR(Float, nri_nrdblurmin)
-EXTERN_CVAR(Float, nri_nrdblurmax)
-EXTERN_CVAR(Int, nri_nrdsigmastabilization)
-EXTERN_CVAR(Float, nri_nrdsigmaplanedistance)
-EXTERN_CVAR(Bool, nri_validation)
-EXTERN_CVAR(Int, nri_ptlightbounces)
-EXTERN_CVAR(Int, nri_ptmirrorbounces)
-EXTERN_CVAR(Int, nri_ptportaldepth)
-EXTERN_CVAR(Int, nri_ptemissivesamples)
 
-CVAR(Int, nri_ptpersistentvoxelbuildactors, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptpersistentvoxelbuildprims, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptpersistentvoxelbuildbytes, 4 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptpersistentvoxeltextureprewarms, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptpersistentvoxeltexturebytes, 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelruntimebudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmissionloadvariants, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmissionloadbytes, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmissionruntimevariants, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmissionruntimebytes, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxbytesloading, 64 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxbytesruntime, 16 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxmsloading, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxmsruntime, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxblasloading, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxblasruntime, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitmaxblasprims, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeladmitisolateblasprims, 65536, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelresidentmaxbytes, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelresidentminheadroombytes, 512 * 1024 * 1024, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelresidentmaxcoldmaps, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptvoxeltransformkeyed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelexcludeindex, -1, 0)
-CVAR(Int, nri_ptvoxelexcludeindex2, -1, 0)
-CVAR(Int, nri_ptvoxelexcludeindex3, -1, 0)
-CVAR(Int, nri_ptvoxelexcludeminprims, 0, 0)
-CVAR(Bool, nri_ptruntimeworklist, true, 0)
-CVAR(Int, nri_ptruntimeworklistsweepbudget, 32, 0)
-CVAR(Bool, nri_ptruntimedeferfarmaterial, true, 0)
-CVAR(Bool, nri_ptruntimedefernearinvisiblematerial, true, 0)
-CVAR(Int, nri_ptruntimenearinvisiblematerialbudget, 4, 0)
-CVAR(Bool, nri_ptruntimedeferfarstructural, true, 0)
-CVAR(Int, nri_ptruntimefarstructuralbudget, 2, 0)
-CVAR(Bool, nri_ptruntimedefernearinvisiblestructural, true, 0)
-CVAR(Int, nri_ptruntimenearinvisiblestructuralbudget, 2, 0)
-CUSTOM_CVAR(Float, nri_ptruntimemutationneardistance, 1024.0f, 0)
-{
-	if (self < 0.0f)
-	{
-		self = 0.0f;
-	}
-}
 
 namespace
 {

@@ -1,4 +1,5 @@
 #include "nri_renderer.h"
+#include "nri_cvars.h"
 
 #include "../scene/nri_hash.h"
 #include "nri_scene_upload.h"
@@ -9,11 +10,6 @@
 #include <chrono>
 #include <unordered_map>
 
-EXTERN_CVAR(Bool, nri_ptscenestats)
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Bool, nri_pttemporaltrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {

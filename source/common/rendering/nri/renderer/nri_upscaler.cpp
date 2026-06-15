@@ -1,4 +1,5 @@
 #include "nri_upscaler.h"
+#include "nri_cvars.h"
 
 #include "../system/nri_renderdevice.h"
 #include "nri_renderer.h"
@@ -8,11 +9,6 @@
 #include <cstring>
 #include <limits>
 
-EXTERN_CVAR(String, nri_api)
-EXTERN_CVAR(Int, nri_upscaler)
-EXTERN_CVAR(Int, nri_postsharpen)
-EXTERN_CVAR(Int, nri_upscalermode)
-EXTERN_CVAR(Bool, nri_pttaa)
 
 namespace
 {

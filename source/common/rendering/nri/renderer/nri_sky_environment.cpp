@@ -1,4 +1,5 @@
 #include "nri_renderer.h"
+#include "nri_cvars.h"
 
 #include "../scene/nri_hash.h"
 #include "../scene/nri_scene_math.h"
@@ -23,9 +24,6 @@
 
 #include <windows.h>
 
-EXTERN_CVAR(Bool, nri_pttemporaltrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Float, nri_ptskybrightness)
 
 RendererSkyPerfTraceStats gRendererSkyPerfTraceStats = {};
 

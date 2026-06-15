@@ -1,4 +1,5 @@
 #include "nri_scene_upload.h"
+#include "nri_cvars.h"
 
 #include "nri_renderer.h"
 
@@ -16,13 +17,6 @@
 #include <chrono>
 #include <vector>
 
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Int, perf_looptraceframes)
-EXTERN_CVAR(Bool, nri_ptsectorlighting)
-EXTERN_CVAR(Int, nri_ptscenebufferdirtyrangegap)
-EXTERN_CVAR(Int, nri_ptscenebufferrangeuploadmaxranges)
-EXTERN_CVAR(Int, nri_ptscenebufferrangeuploadmaxpercent)
 
 namespace
 {

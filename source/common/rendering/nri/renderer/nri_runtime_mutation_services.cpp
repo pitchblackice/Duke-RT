@@ -1,15 +1,11 @@
 #include "nri_renderer.h"
+#include "nri_cvars.h"
 
 #include "../system/nri_renderdevice.h"
 #include "c_cvars.h"
 
 #include <chrono>
 
-EXTERN_CVAR(Bool, nri_ptscenestats)
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Bool, nri_pttemporaltrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {

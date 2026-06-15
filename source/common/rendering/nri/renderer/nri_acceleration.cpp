@@ -1,4 +1,5 @@
 #include "nri_acceleration.h"
+#include "nri_cvars.h"
 
 #include "nri_renderer.h"
 #include "nri_diagnostic_names.h"
@@ -12,13 +13,6 @@
 #include <cstring>
 #include <unordered_map>
 
-EXTERN_CVAR(Bool, nri_ptemissivetlas)
-EXTERN_CVAR(Bool, nri_pttemporaltrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Int, perf_looptraceframes)
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Int, nri_ptloadingtrace)
-EXTERN_CVAR(Bool, nri_voxelstats)
 
 namespace
 {

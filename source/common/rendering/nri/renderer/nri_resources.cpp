@@ -1,4 +1,5 @@
 #include "nri_resources.h"
+#include "nri_cvars.h"
 
 #include "nri_renderer.h"
 #include "nri_renderer_settings.h"
@@ -12,8 +13,6 @@
 #include <cstring>
 #include <limits>
 
-EXTERN_CVAR(Bool, nri_voxelstats)
-EXTERN_CVAR(Int, nri_ptloadingtrace)
 
 namespace
 {

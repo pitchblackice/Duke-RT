@@ -1,4 +1,5 @@
 #include "nri_pass_dispatch.h"
+#include "nri_cvars.h"
 
 #include "nri_descriptor_sets.h"
 #include "nri_exposure.h"
@@ -17,28 +18,6 @@
 #include <cmath>
 #include <cstring>
 
-EXTERN_CVAR(Int, perf_looptraceframes)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Bool, nri_denoise)
-EXTERN_CVAR(Int, nri_nrddenoiser)
-EXTERN_CVAR(Int, nri_ptdebug)
-EXTERN_CVAR(Bool, nri_ptbootstrap)
-EXTERN_CVAR(Int, nri_ptbootstrapmode)
-EXTERN_CVAR(Bool, nri_ptdirectscene)
-EXTERN_CVAR(Bool, nri_ptemissivefastshadow)
-EXTERN_CVAR(Bool, nri_ptvisiblechunkgate)
-EXTERN_CVAR(Bool, nri_ptshaderstats)
-EXTERN_CVAR(Float, nri_sharpness)
-EXTERN_CVAR(Float, nri_ptbaseambient)
-EXTERN_CVAR(Float, nri_ptmetalambient)
-EXTERN_CVAR(Bool, nri_ptnightvision)
-EXTERN_CVAR(Float, nri_ptnightvisionexposure)
-EXTERN_CVAR(Float, nri_ptnightvisioncontrast)
-EXTERN_CVAR(Float, nri_ptnightvisionsaturation)
-EXTERN_CVAR(Float, nri_ptnightvisionred)
-EXTERN_CVAR(Float, nri_ptnightvisiongreen)
-EXTERN_CVAR(Float, nri_ptnightvisionblue)
 
 namespace
 {

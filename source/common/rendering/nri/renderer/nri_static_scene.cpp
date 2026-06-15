@@ -1,4 +1,5 @@
 #include "nri_static_scene.h"
+#include "nri_cvars.h"
 
 #include "nri_renderer.h"
 #include "nri_diagnostic_names.h"
@@ -19,11 +20,6 @@
 #include <algorithm>
 #include <chrono>
 
-EXTERN_CVAR(Bool, nri_ptscenestats)
-EXTERN_CVAR(Int, nri_ptloadingtrace)
-EXTERN_CVAR(Bool, nri_voxelstats)
-EXTERN_CVAR(Bool, nri_ptceilingnudge)
-EXTERN_CVAR(Float, nri_ptceilingnudgedistance)
 
 namespace
 {

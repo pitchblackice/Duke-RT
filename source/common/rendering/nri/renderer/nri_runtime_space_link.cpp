@@ -1,4 +1,5 @@
 #include "nri_renderer.h"
+#include "nri_cvars.h"
 
 #include "../scene/nri_map_builder.h"
 #include "../../hwrenderer/data/hw_clock.h"
@@ -9,13 +10,6 @@
 #include <chrono>
 #include <cmath>
 
-EXTERN_CVAR(Bool, nri_ptceilingnudge)
-EXTERN_CVAR(Float, nri_ptceilingnudgedistance)
-EXTERN_CVAR(Bool, nri_ptscenestats)
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Bool, nri_pttemporaltrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace
 {

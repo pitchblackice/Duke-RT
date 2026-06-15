@@ -1,4 +1,5 @@
 #include "nri_renderer.h"
+#include "nri_cvars.h"
 
 #include "../framegen/nri_framegen.h"
 #include "../system/nri_renderdevice.h"
@@ -15,7 +16,6 @@
 #include <cmath>
 #include <cstring>
 
-EXTERN_CVAR(Bool, nri_ptbootstrap)
 
 namespace
 {

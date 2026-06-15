@@ -1,4 +1,5 @@
 #include "nri_trace_stats.h"
+#include "nri_cvars.h"
 
 #include "nri_renderer.h"
 #include "nri_diagnostic_names.h"
@@ -8,10 +9,6 @@
 #include <cstring>
 #include <vector>
 
-EXTERN_CVAR(Int, perf_looptraceframes)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Bool, nri_ptshaderstats)
 
 namespace
 {

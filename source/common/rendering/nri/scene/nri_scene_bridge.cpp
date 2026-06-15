@@ -1,4 +1,5 @@
 #include "nri_scene_bridge.h"
+#include "../renderer/nri_cvars.h"
 
 #include "nri_geometry_bridge.h"
 #include "nri_portal_bridge.h"
@@ -36,34 +37,6 @@
 #include <vector>
 #include <windows.h>
 
-EXTERN_CVAR(Bool, r_voxels)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Int, nri_ptactorspritetrace)
-EXTERN_CVAR(Int, perf_looptraceframes)
-CVAR(Bool, nri_voxelstats, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxeltrianglebudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelmaxtriangles, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelcaptureactors, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelpersistentpromoteframes, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptvoxelmeshbuilds, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingtrace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptloadingvoxelcpu, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptloadingvoxelgpu, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptloadingvoxelgpuwhitelistonly, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelgpuminprims, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelgpumaxprims, 9000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelgpumaxbytes, 1630491936, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelgpumaxvariants, 256, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelactors, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelvariants, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelvariantprims, 2000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelpicrange, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelcpubudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelcpumaxvariants, 64, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelcpumaxprims, 9000000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelcpumaxms, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, nri_ptloadingvoxelgpubudget, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, nri_ptloadingvoxellist, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {

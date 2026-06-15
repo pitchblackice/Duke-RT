@@ -1,4 +1,5 @@
 #include "nri_material_policy.h"
+#include "nri_cvars.h"
 
 #include "nri_renderer.h"
 #include "nri_runtime_mutation_trace.h"
@@ -16,8 +17,6 @@
 #include <string>
 #include <unordered_set>
 
-EXTERN_CVAR(Float, nri_ptfullbrightboost)
-EXTERN_CVAR(Float, nri_ptglowblend)
 
 namespace
 {

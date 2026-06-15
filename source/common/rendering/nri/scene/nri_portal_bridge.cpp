@@ -1,4 +1,5 @@
 #include "nri_portal_bridge.h"
+#include "../renderer/nri_cvars.h"
 
 #include "nri_scene_stats.h"
 #include "nri_scene_texture_utils.h"
@@ -15,7 +16,6 @@
 #define NOMINMAX
 #include <windows.h>
 
-CVAR(Int, nri_ptportaldepth, 6, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {

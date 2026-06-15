@@ -1,11 +1,8 @@
 #include "nri_runtime_mutation_trace.h"
+#include "nri_cvars.h"
 
 #include "c_cvars.h"
 
-EXTERN_CVAR(Bool, nri_ptslowdowntrace)
-EXTERN_CVAR(Bool, nri_pttemporaltrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-EXTERN_CVAR(Int, perf_looptraceframes)
 
 namespace nri_runtime_mutation
 {

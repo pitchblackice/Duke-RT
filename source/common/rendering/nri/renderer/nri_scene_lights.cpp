@@ -1,4 +1,5 @@
 #include "nri_scene_lights.h"
+#include "nri_cvars.h"
 
 #include "nri_actor_sprite_diagnostics.h"
 #include "nri_diagnostic_names.h"
@@ -30,42 +31,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-EXTERN_CVAR(Float, nri_ptemissiveminpower)
-EXTERN_CVAR(Float, nri_ptemissiveminsurface)
-EXTERN_CVAR(Float, nri_ptglowscale)
-EXTERN_CVAR(Float, nri_ptglowreach)
-EXTERN_CVAR(Float, nri_ptglowfalloff)
-EXTERN_CVAR(Float, nri_ptglowblend)
-EXTERN_CVAR(Bool, nri_ptsectorlighting)
-EXTERN_CVAR(Float, nri_ptsectorambientscale)
-EXTERN_CVAR(Float, nri_ptsectorlightmultiplier)
-EXTERN_CVAR(Float, nri_ptsectorhemiscale)
-EXTERN_CVAR(Float, nri_ptsectorfogscale)
-EXTERN_CVAR(Float, nri_ptsectorclamp)
-EXTERN_CVAR(Int, nri_ptsectorfilterpal)
-EXTERN_CVAR(Int, nri_ptsectorfilterminshade)
-EXTERN_CVAR(Int, nri_ptsectorfiltermaxshade)
-EXTERN_CVAR(Int, nri_ptsectorfilterlotag)
-EXTERN_CVAR(Int, nri_ptsectorpulseframes)
-EXTERN_CVAR(Float, nri_ptsectorpulseamount)
-EXTERN_CVAR(Float, nri_ptsectoremissionsignalstrength)
-EXTERN_CVAR(Float, nri_ptsectoremissionresponsemin)
-EXTERN_CVAR(Float, nri_ptsectoremissionresponsemax)
-EXTERN_CVAR(Float, nri_ptsectoremissionlightmin)
-EXTERN_CVAR(Float, nri_ptsectoremissionlightmax)
-EXTERN_CVAR(Float, nri_ptsectoremissionreachmin)
-EXTERN_CVAR(Float, nri_ptsectoremissionreachmax)
-EXTERN_CVAR(Float, nri_ptsectoremissionmaterialmin)
-EXTERN_CVAR(Float, nri_ptsectoremissionmaterialmax)
-EXTERN_CVAR(Bool, nri_ptemissivelighteditmode)
-EXTERN_CVAR(Float, nri_ptemissivelighteditnotifyrange)
-EXTERN_CVAR(Bool, nri_ptdirectionallight)
-EXTERN_CVAR(Bool, nri_voxelstats)
-EXTERN_CVAR(Int, nri_ptdebug)
-EXTERN_CVAR(Int, nri_ptnudgetrace)
-EXTERN_CVAR(Int, nri_ptactorspritetrace)
-EXTERN_CVAR(Int, nri_pttraceframes)
-CVAR(Int, nri_ptactoroverlaylighttrace, 0, 0)
 
 namespace
 {
