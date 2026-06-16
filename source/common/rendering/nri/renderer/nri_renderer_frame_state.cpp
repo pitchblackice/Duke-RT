@@ -1,0 +1,417 @@
+#include "nri_renderer.h"
+#include "nri_cvars.h"
+#include "nri_static_scene_geometry.h"
+#include "../system/nri_renderdevice.h"
+#include "../../hwrenderer/data/hw_clock.h"
+#include "c_cvars.h"
+#include "printf.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstring>
+#include <vector>
+
+namespace
+{
+	static bool ShouldCollectFrameStatePerfTiming()
+	{
+		return (int)perf_looptraceframes > 0 || ShouldEmitRendererTemporalTraceLogs() || (bool)nri_ptslowdowntrace;
+	}
+
+	static double FrameStateDurationMs(const std::chrono::steady_clock::time_point& start, const std::chrono::steady_clock::time_point& end)
+	{
+		return std::chrono::duration<double, std::milli>(end - start).count();
+	}
+
+	class ScopedPtPerfTimer
+	{
+	public:
+		explicit ScopedPtPerfTimer(double& targetMs)
+			: mTarget(ShouldCollectFrameStatePerfTiming() ? &targetMs : nullptr)
+		{
+			if (mTarget != nullptr)
+			{
+				mStart = std::chrono::steady_clock::now();
+			}
+		}
+
+		~ScopedPtPerfTimer()
+		{
+			if (mTarget != nullptr)
+			{
+				*mTarget += FrameStateDurationMs(mStart, std::chrono::steady_clock::now());
+			}
+		}
+
+	private:
+		double* mTarget = nullptr;
+		std::chrono::steady_clock::time_point mStart = {};
+	};
+
+	static void MarkChunkVisible(std::vector<uint32_t>& visibleChunkWords, uint32_t chunkIndex)
+	{
+		const size_t wordIndex = (size_t)(chunkIndex >> 5u);
+		if (wordIndex >= visibleChunkWords.size())
+		{
+			return;
+		}
+
+		visibleChunkWords[wordIndex] |= 1u << (chunkIndex & 31u);
+	}
+
+	static bool IsChunkMarkedVisible(const std::vector<uint32_t>& visibleChunkWords, uint32_t chunkIndex)
+	{
+		const size_t wordIndex = (size_t)(chunkIndex >> 5u);
+		if (wordIndex >= visibleChunkWords.size())
+		{
+			return false;
+		}
+
+		return (visibleChunkWords[wordIndex] & (1u << (chunkIndex & 31u))) != 0u;
+	}
+
+	static uint32_t GetFlatPlaneVisibilityIndex(int32_t sectorIndex, bool ceiling)
+	{
+		return (uint32_t)sectorIndex * 2u + (ceiling ? 1u : 0u);
+	}
+
+	static void MarkFlatPlaneVisible(std::vector<uint32_t>& visibleFlatPlaneWords, int32_t sectorIndex, bool ceiling)
+	{
+		if (sectorIndex < 0)
+		{
+			return;
+		}
+
+		const uint32_t flatPlaneIndex = GetFlatPlaneVisibilityIndex(sectorIndex, ceiling);
+		const size_t wordIndex = (size_t)(flatPlaneIndex >> 5u);
+		if (wordIndex >= visibleFlatPlaneWords.size())
+		{
+			return;
+		}
+
+		visibleFlatPlaneWords[wordIndex] |= 1u << (flatPlaneIndex & 31u);
+	}
+
+	static void MarkVisibleChunkForSector(const nri_scene::PTMapWorld& mapWorld, int32_t sectorIndex, std::vector<uint32_t>& visibleChunkWords)
+	{
+		const int32_t chunkIndex = nri_static_scene_geometry::FindMapChunkIndexForSector(mapWorld, sectorIndex);
+		if (chunkIndex >= 0)
+		{
+			MarkChunkVisible(visibleChunkWords, (uint32_t)chunkIndex);
+		}
+	}
+
+	static void AccumulateVisibleChunksFromViewRoots(const HWDrawInfo& di, const nri_scene::PTMapWorld& mapWorld, std::vector<uint32_t>& visibleChunkWords)
+	{
+		if (di.Viewpoint.SectNums != nullptr)
+		{
+			for (int i = 0; i < di.Viewpoint.SectCount; ++i)
+			{
+				MarkVisibleChunkForSector(mapWorld, di.Viewpoint.SectNums[i], visibleChunkWords);
+			}
+		}
+		else
+		{
+			MarkVisibleChunkForSector(mapWorld, di.Viewpoint.SectCount, visibleChunkWords);
+		}
+	}
+
+	static void AccumulateVisibleChunksFromDrawLists(const HWDrawInfo& di, const nri_scene::PTMapWorld& mapWorld, std::vector<uint32_t>& visibleChunkWords)
+	{
+		for (int drawListType = 0; drawListType < GLDL_TYPES; ++drawListType)
+		{
+			const HWDrawList& drawList = di.drawlists[drawListType];
+
+			for (const HWWall* wall : drawList.walls)
+			{
+				if (wall != nullptr && wall->seg != nullptr)
+				{
+					MarkVisibleChunkForSector(mapWorld, wall->seg->sector, visibleChunkWords);
+				}
+			}
+
+			for (const HWFlat* flat : drawList.flats)
+			{
+				if (flat != nullptr && flat->sec != nullptr)
+				{
+					MarkVisibleChunkForSector(mapWorld, sector.IndexOf(flat->sec), visibleChunkWords);
+				}
+			}
+		}
+	}
+
+	static void AccumulateVisibleFlatPlanesFromDrawLists(const HWDrawInfo& di, std::vector<uint32_t>& visibleFlatPlaneWords)
+	{
+		for (int drawListType = 0; drawListType < GLDL_TYPES; ++drawListType)
+		{
+			const HWDrawList& drawList = di.drawlists[drawListType];
+			for (const HWFlat* flat : drawList.flats)
+			{
+				if (flat == nullptr || flat->sec == nullptr || flat->Sprite != nullptr)
+				{
+					continue;
+				}
+
+				MarkFlatPlaneVisible(
+					visibleFlatPlaneWords,
+					sector.IndexOf(flat->sec),
+					flat->plane != 0);
+			}
+		}
+	}
+
+	static float GetHaltonSample(uint32_t index, uint32_t base)
+	{
+		float inverseBase = 1.0f / (float)base;
+		float fraction = inverseBase;
+		float result = 0.0f;
+
+		while (index > 0)
+		{
+			result += fraction * (float)(index % base);
+			index /= base;
+			fraction *= inverseBase;
+		}
+
+		return result;
+	}
+
+	static void ComputeTemporalJitter(uint32_t frameIndex, uint32_t jitterPhaseCount, float outJitter[2])
+	{
+		jitterPhaseCount = std::max(jitterPhaseCount, 1u);
+		const uint32_t sampleIndex = (frameIndex % jitterPhaseCount) + 1u;
+		outJitter[0] = GetHaltonSample(sampleIndex, 2u) - 0.5f;
+		outJitter[1] = GetHaltonSample(sampleIndex, 3u) - 0.5f;
+	}
+
+	static void Normalize3(float v[3])
+	{
+		const float length = std::max(0.0001f, sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
+		v[0] /= length;
+		v[1] /= length;
+		v[2] /= length;
+	}
+
+	static void TransformPoint(const VSMatrix& matrix, float x, float y, float z, float out[4])
+	{
+		float point[4] = { x, y, z, 1.0f };
+		VSMatrix copy = matrix;
+		copy.multMatrixPoint(point, out);
+	}
+
+	static void Copy3(const float* src, float* dst)
+	{
+		std::memcpy(dst, src, sizeof(float) * 3);
+	}
+
+	static void Copy2(const float* src, float* dst)
+	{
+		std::memcpy(dst, src, sizeof(float) * 2);
+	}
+}
+
+void NRIRenderer::UpdatePerFrameState(HWDrawInfo& di)
+{
+	ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.updateStateMs);
+	Clocker clock(NriPTUpdateState);
+
+	if (mHasPreviousCameraState)
+	{
+		Copy3(mCurrentCameraPos, mPreviousCameraPos);
+		Copy3(mCurrentCameraForward, mPreviousCameraForward);
+		Copy3(mCurrentCameraRight, mPreviousCameraRight);
+		Copy3(mCurrentCameraUp, mPreviousCameraUp);
+		mPreviousTanHalfFovX = mCurrentTanHalfFovX;
+		mPreviousTanHalfFovY = mCurrentTanHalfFovY;
+		Copy2(mCurrentJitter, mPreviousJitter);
+		std::memcpy(mPreviousViewToClip, mCurrentViewToClip, sizeof(mPreviousViewToClip));
+		std::memcpy(mPreviousWorldToView, mCurrentWorldToView, sizeof(mPreviousWorldToView));
+	}
+
+	VSMatrix inverseView;
+	if (!di.VPUniforms.mViewMatrix.inverseMatrix(inverseView))
+	{
+		std::memset(mCurrentCameraPos, 0, sizeof(mCurrentCameraPos));
+		std::memset(mCurrentCameraForward, 0, sizeof(mCurrentCameraForward));
+		std::memset(mCurrentCameraRight, 0, sizeof(mCurrentCameraRight));
+		std::memset(mCurrentCameraUp, 0, sizeof(mCurrentCameraUp));
+		mCurrentCameraForward[2] = -1.0f;
+		mCurrentCameraRight[0] = 1.0f;
+		mCurrentCameraUp[1] = 1.0f;
+	}
+	else
+	{
+		float origin[4] = {};
+		float rightPoint[4] = {};
+		float upPoint[4] = {};
+		float forwardPoint[4] = {};
+		TransformPoint(inverseView, 0.0f, 0.0f, 0.0f, origin);
+		TransformPoint(inverseView, 1.0f, 0.0f, 0.0f, rightPoint);
+		TransformPoint(inverseView, 0.0f, 1.0f, 0.0f, upPoint);
+		TransformPoint(inverseView, 0.0f, 0.0f, -1.0f, forwardPoint);
+
+		const float cameraPos[3] = {
+			origin[0],
+			origin[1],
+			origin[2]
+		};
+		const float rightDelta[3] = {
+			rightPoint[0] - origin[0],
+			rightPoint[1] - origin[1],
+			rightPoint[2] - origin[2]
+		};
+		const float upDelta[3] = {
+			upPoint[0] - origin[0],
+			upPoint[1] - origin[1],
+			upPoint[2] - origin[2]
+		};
+		const float forwardDelta[3] = {
+			forwardPoint[0] - origin[0],
+			forwardPoint[1] - origin[1],
+			forwardPoint[2] - origin[2]
+		};
+
+		Copy3(cameraPos, mCurrentCameraPos);
+		Copy3(rightDelta, mCurrentCameraRight);
+		Copy3(upDelta, mCurrentCameraUp);
+		Copy3(forwardDelta, mCurrentCameraForward);
+
+		Normalize3(mCurrentCameraRight);
+		Normalize3(mCurrentCameraUp);
+		Normalize3(mCurrentCameraForward);
+	}
+
+	const float* projection = di.VPUniforms.mProjectionMatrix.get();
+	const float projectionScaleX = projection != nullptr ? std::fabs(projection[0]) : 0.0f;
+	const float projectionScaleY = projection != nullptr ? std::fabs(projection[5]) : 0.0f;
+	if (projectionScaleX > 0.0001f && projectionScaleY > 0.0001f)
+	{
+		// Match the hardware backend frustum exactly instead of rebuilding Y-FOV from the PT render dimensions.
+		mCurrentTanHalfFovX = 1.0f / projectionScaleX;
+		mCurrentTanHalfFovY = 1.0f / projectionScaleY;
+	}
+	else
+	{
+		const float tanHalfFovX = tanf((float)di.Viewpoint.FieldOfView.Radians() * 0.5f);
+		mCurrentTanHalfFovX = tanHalfFovX;
+		mCurrentTanHalfFovY = tanHalfFovX * ((float)mRenderHeight / std::max(1.0f, (float)mRenderWidth));
+	}
+	const NRIMainUpscalerKind resolvedMainUpscaler = ResolveMainUpscalerKind(false);
+	if (!nri_ptbootstrap && !mGuiCaptureActive && NRIShouldUseTemporalJitter(resolvedMainUpscaler))
+	{
+		const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMainUpscaler, GetSelectedUpscalerMode());
+		const uint32_t jitterPhaseCount = NRIGetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, mGuiCaptureActive);
+		ComputeTemporalJitter(mFrameIndex, jitterPhaseCount, mCurrentJitter);
+	}
+	else
+	{
+		mCurrentJitter[0] = 0.0f;
+		mCurrentJitter[1] = 0.0f;
+	}
+	FillMatrix(mCurrentViewToClip, di.VPUniforms.mProjectionMatrix);
+	FillMatrix(mCurrentWorldToView, di.VPUniforms.mViewMatrix);
+	const BitArray& visibleSectors = di.GetVisibleSectors();
+	const size_t visibleChunkWordCount = std::max<size_t>((mMapWorld.chunks.size() + 31u) / 32u, 1u);
+	const size_t visibleFlatPlaneWordCount = std::max<size_t>(((size_t)sector.Size() * 2u + 31u) / 32u, 1u);
+	mCurrentVisibleChunkWords.assign(visibleChunkWordCount, 0u);
+	mCurrentVisibleFlatPlaneWords.assign(visibleFlatPlaneWordCount, 0u);
+	for (unsigned sectorIndex = 0; sectorIndex < visibleSectors.Size(); ++sectorIndex)
+	{
+		if (!visibleSectors.Check(sectorIndex))
+		{
+			continue;
+		}
+
+		MarkVisibleChunkForSector(mMapWorld, (int32_t)sectorIndex, mCurrentVisibleChunkWords);
+	}
+	// HWDrawInfo can accumulate geometry from multiple RenderScene passes
+	// while its final visible-sector bitset only reflects the last traversal.
+	// Union the root sectors and accumulated drawlists so the PT chunk gate
+	// tracks the scene the HAL actually built this frame.
+	AccumulateVisibleChunksFromViewRoots(di, mMapWorld, mCurrentVisibleChunkWords);
+	AccumulateVisibleChunksFromDrawLists(di, mMapWorld, mCurrentVisibleChunkWords);
+	// Chunk visibility is still too coarse for overlapping static floors and ceilings.
+	// Track the exact floor/ceiling sectors backed by the accumulated flat drawlists
+	// so the RT primary path can reject hidden coplanar static flat sections.
+	AccumulateVisibleFlatPlanesFromDrawLists(di, mCurrentVisibleFlatPlaneWords);
+	if (ShouldEmitRendererTemporalTraceLogs())
+	{
+		const uint32_t targetWidth = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->width : 0u;
+		const uint32_t targetHeight = mFrameBuffer->mActiveTarget != nullptr ? mFrameBuffer->mActiveTarget->height : 0u;
+		const int32_t sceneLeft = mFrameBuffer->mSceneViewport.left;
+		const int32_t sceneBottom = mFrameBuffer->mSceneViewport.top;
+		const int32_t sceneWidth = mFrameBuffer->mSceneViewport.width;
+		const int32_t sceneHeight = mFrameBuffer->mSceneViewport.height;
+		const int32_t sceneTop = (int32_t)targetHeight - sceneBottom - sceneHeight;
+		const auto& uniformCameraPos = di.VPUniforms.mCameraPos;
+		const FVector3 hwForward(di.Viewpoint.HWAngles);
+		Printf("NRI PT camera: frame=%u hw_pitch=%.3f hw_yaw=%.3f hw_roll=%.3f scene_bl=(%d,%d %dx%d) scene_tl=(%u,%u %ux%u) target=%ux%u uniform_pos=(%.3f,%.3f,%.3f) inverse_pos=(%.3f,%.3f,%.3f) hw_forward=(%.3f,%.3f,%.3f) basis_fwd=(%.3f,%.3f,%.3f) basis_right=(%.3f,%.3f,%.3f) basis_up=(%.3f,%.3f,%.3f) tan=(%.6f,%.6f) proj=(%.6f,%.6f,%.6f,%.6f)\n",
+			mFrameIndex,
+			di.Viewpoint.HWAngles.Pitch.Degrees(),
+			di.Viewpoint.HWAngles.Yaw.Degrees(),
+			di.Viewpoint.HWAngles.Roll.Degrees(),
+			mFrameBuffer->mSceneViewport.left,
+			mFrameBuffer->mSceneViewport.top,
+			mFrameBuffer->mSceneViewport.width,
+			mFrameBuffer->mSceneViewport.height,
+			sceneLeft,
+			sceneTop,
+			sceneWidth,
+			sceneHeight,
+			targetWidth,
+			targetHeight,
+			uniformCameraPos.X,
+			uniformCameraPos.Y,
+			uniformCameraPos.Z,
+			mCurrentCameraPos[0],
+			mCurrentCameraPos[1],
+			mCurrentCameraPos[2],
+			hwForward.X,
+			hwForward.Y,
+			hwForward.Z,
+			mCurrentCameraForward[0],
+			mCurrentCameraForward[1],
+			mCurrentCameraForward[2],
+			mCurrentCameraRight[0],
+			mCurrentCameraRight[1],
+			mCurrentCameraRight[2],
+			mCurrentCameraUp[0],
+			mCurrentCameraUp[1],
+			mCurrentCameraUp[2],
+			mCurrentTanHalfFovX,
+			mCurrentTanHalfFovY,
+			projection != nullptr ? projection[0] : 0.0f,
+			projection != nullptr ? projection[5] : 0.0f,
+			projection != nullptr ? projection[8] : 0.0f,
+			projection != nullptr ? projection[9] : 0.0f);
+	}
+
+	if (mHasPreviousCameraState && !mResetHistory)
+	{
+		const float dx = mCurrentCameraPos[0] - mPreviousCameraPos[0];
+		const float dy = mCurrentCameraPos[1] - mPreviousCameraPos[1];
+		const float dz = mCurrentCameraPos[2] - mPreviousCameraPos[2];
+		const float distanceSq = dx * dx + dy * dy + dz * dz;
+		static constexpr float TeleportDistanceThreshold = 2048.0f;
+		if (distanceSq > TeleportDistanceThreshold * TeleportDistanceThreshold)
+		{
+			RequestHistoryReset("camera-teleport", true, false);
+		}
+	}
+
+	if (!mHasPreviousCameraState)
+	{
+		Copy3(mCurrentCameraPos, mPreviousCameraPos);
+		Copy3(mCurrentCameraForward, mPreviousCameraForward);
+		Copy3(mCurrentCameraRight, mPreviousCameraRight);
+		Copy3(mCurrentCameraUp, mPreviousCameraUp);
+		mPreviousTanHalfFovX = mCurrentTanHalfFovX;
+		mPreviousTanHalfFovY = mCurrentTanHalfFovY;
+		Copy2(mCurrentJitter, mPreviousJitter);
+		std::memcpy(mPreviousViewToClip, mCurrentViewToClip, sizeof(mPreviousViewToClip));
+		std::memcpy(mPreviousWorldToView, mCurrentWorldToView, sizeof(mPreviousWorldToView));
+	}
+
+	UpdateNightVisionState();
+}

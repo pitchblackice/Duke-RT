@@ -969,7 +969,10 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_runtime_mutation_services.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_shared.cpp
 	common/rendering/nri/renderer/nri_runtime_mutation_trace.cpp
+	common/rendering/nri/renderer/nri_runtime_space_link_state.cpp
 	common/rendering/nri/renderer/nri_runtime_space_link.cpp
+	common/rendering/nri/renderer/nri_map_world_startup.cpp
+	common/rendering/nri/renderer/nri_renderer_frame_state.cpp
 	common/rendering/nri/renderer/nri_scene_lights.cpp
 	common/rendering/nri/renderer/nri_scene_upload.cpp
 	common/rendering/nri/renderer/nri_static_scene.cpp
