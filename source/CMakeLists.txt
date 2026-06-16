@@ -975,8 +975,10 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_runtime_space_link.cpp
 	common/rendering/nri/renderer/nri_map_world_startup.cpp
 	common/rendering/nri/renderer/nri_renderer_frame_state.cpp
+	common/rendering/nri/renderer/nri_scene_buffer_residency.cpp
 	common/rendering/nri/renderer/nri_scene_lights.cpp
 	common/rendering/nri/renderer/nri_scene_upload.cpp
+	common/rendering/nri/renderer/nri_scene_upload_ranges.cpp
 	common/rendering/nri/renderer/nri_static_scene.cpp
 	common/rendering/nri/renderer/nri_surface_probe.cpp
 	common/rendering/nri/renderer/nri_surface_light_overlay.cpp
