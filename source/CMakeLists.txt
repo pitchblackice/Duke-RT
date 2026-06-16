@@ -982,6 +982,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_scene_upload.cpp
 	common/rendering/nri/renderer/nri_scene_upload_ranges.cpp
 	common/rendering/nri/renderer/nri_static_scene.cpp
+	common/rendering/nri/renderer/nri_static_scene_residency.cpp
 	common/rendering/nri/renderer/nri_surface_probe.cpp
 	common/rendering/nri/renderer/nri_surface_light_overlay.cpp
 	common/rendering/nri/renderer/nri_trace_stats.cpp
