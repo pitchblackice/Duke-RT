@@ -12,12 +12,13 @@
 #include "nri_renderer_settings.h"
 #include "nri_scene_frame_builder.h"
 #include "nri_scene_frame_mirrors.h"
+#include "nri_scene_frame_overlay.h"
+#include "nri_scene_frame_selection.h"
 #include "nri_scene_upload.h"
 #include "nri_static_scene_geometry.h"
 #include "nri_surface_light_overlay.h"
 #include "nri_runtime_mutation_shared.h"
 #include "nri_sky_environment.h"
-#include "nri_upload_hash.h"
 #include "../scene/nri_hash.h"
 #include "../scene/nri_scene_stats.h"
 #include "../system/nri_renderdevice.h"
@@ -298,159 +299,6 @@ namespace
 		entry.roughnessTextureCount += counts.roughnessTextureCount;
 		entry.emissiveTextureCount += counts.emissiveTextureCount;
 	}
-
-	static uint32_t CoherencyFloatBits(float value)
-	{
-		static_assert(sizeof(uint32_t) == sizeof(float), "unexpected float size");
-		uint32_t bits = 0;
-		std::memcpy(&bits, &value, sizeof(bits));
-		return bits;
-	}
-
-	static uint64_t HashUploadPayloadBytes(const void* data, uint64_t size)
-	{
-		return NRIHashUploadPayloadBytes(data, size);
-	}
-
-	static uint64_t HashMaterialPayloadData(const nri_scene::MaterialBridgeData& materialBridge)
-	{
-		const uint64_t materialSize = (uint64_t)materialBridge.materials.size() * sizeof(nri_scene::MaterialData);
-		return HashUploadPayloadBytes(
-			materialBridge.materials.empty() ? nullptr : materialBridge.materials.data(),
-			materialSize);
-	}
-
-	struct SceneViewUploadStampBuildResult
-	{
-		uint64_t vertexPayloadStamp = 0;
-		uint64_t indexPayloadStamp = 0;
-		uint64_t primitivePayloadStamp = 0;
-		uint64_t primitiveProvenanceStamp = 0;
-		uint64_t materialPayloadStamp = 0;
-	};
-
-	static uint64_t HashSurfaceProvenanceStamp(uint64_t hash, const nri_scene::SurfaceProvenance& provenance)
-	{
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)provenance.sourceType);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectorIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.wallIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.sectionIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.mapChunkIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.nextSectorIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(provenance.actorIndex + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.drawListType);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.cstat);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)provenance.materialFlags);
-		return hash;
-	}
-
-	static uint64_t HashCapturedVertexStamp(uint64_t hash, const nri_scene::CapturedVertex& vertex)
-	{
-		for (int i = 0; i < 3; ++i)
-		{
-			hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.position[i]));
-		}
-		for (int i = 0; i < 3; ++i)
-		{
-			hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.prevPosition[i]));
-		}
-		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.uv[0]));
-		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(vertex.uv[1]));
-		return hash;
-	}
-
-	static uint64_t HashMaterialRefStamp(uint64_t hash, const nri_scene::MaterialRef& material)
-	{
-		hash = nri_scene::HashCombine64(hash, material.texture != nullptr ? (uint64_t)(uint32_t)material.texture->GetID().GetIndex() + 1ull : 0ull);
-		hash = nri_scene::HashCombine64(hash, material.emissiveSourceTexture != nullptr ? (uint64_t)(uint32_t)material.emissiveSourceTexture->GetID().GetIndex() + 1ull : 0ull);
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(material.palette + 1));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)(uint32_t)(material.shade + 1));
-		hash = nri_scene::HashCombine64(hash, CoherencyFloatBits(material.alpha));
-		hash = nri_scene::HashCombine64(hash, (uint64_t)material.flags);
-		return hash;
-	}
-
-	static uint32_t CountStampedSurfacePrimitives(const nri_scene::SurfaceRef& surface, bool triangleList)
-	{
-		if (!surface.indices.empty())
-		{
-			return (uint32_t)(surface.indices.size() / 3u);
-		}
-		if (triangleList)
-		{
-			return (uint32_t)(surface.vertices.size() / 3u);
-		}
-		return surface.vertices.size() >= 3 ? (uint32_t)surface.vertices.size() - 2u : 0u;
-	}
-
-	static SceneViewUploadStampBuildResult BuildSceneViewUploadProducerStamp(const nri_scene::SceneView& sceneView, uint64_t mapWorldBuildSerial)
-	{
-		SceneViewUploadStampBuildResult result = {};
-		result.vertexPayloadStamp = 1469598103934665603ull;
-		result.indexPayloadStamp = 1469598103934665603ull;
-		result.primitivePayloadStamp = 1469598103934665603ull;
-		result.primitiveProvenanceStamp = 1469598103934665603ull;
-		result.materialPayloadStamp = 1469598103934665603ull;
-		auto appendSurface =
-			[&](const nri_scene::SurfaceRef& surface, uint32_t surfaceKind, bool triangleList, uint32_t materialIndex)
-		{
-			const uint32_t primitiveCount = CountStampedSurfacePrimitives(surface, triangleList);
-			const uint64_t surfaceHeader =
-				nri_scene::HashCombine64(
-					nri_scene::HashCombine64(
-						nri_scene::HashCombine64(1469598103934665603ull, (uint64_t)surfaceKind),
-						(uint64_t)materialIndex),
-					(uint64_t)primitiveCount);
-			result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, surfaceHeader);
-			result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, surfaceHeader);
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, surfaceHeader);
-			result.primitiveProvenanceStamp = nri_scene::HashCombine64(result.primitiveProvenanceStamp, surfaceHeader);
-			result.materialPayloadStamp = nri_scene::HashCombine64(result.materialPayloadStamp, surfaceHeader);
-			result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, (uint64_t)surface.vertices.size());
-			result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)surface.indices.size());
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)sceneView.primitiveFlags);
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)surface.material.flags);
-			result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, mapWorldBuildSerial);
-			result.primitiveProvenanceStamp = HashSurfaceProvenanceStamp(result.primitiveProvenanceStamp, surface.provenance);
-			result.materialPayloadStamp = HashMaterialRefStamp(result.materialPayloadStamp, surface.material);
-			for (const nri_scene::CapturedVertex& vertex : surface.vertices)
-			{
-				result.vertexPayloadStamp = HashCapturedVertexStamp(result.vertexPayloadStamp, vertex);
-				result.primitivePayloadStamp = HashCapturedVertexStamp(result.primitivePayloadStamp, vertex);
-			}
-			for (uint32_t index : surface.indices)
-			{
-				result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)index);
-				result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)index);
-			}
-		};
-
-		uint32_t materialIndex = 0;
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueWalls)
-		{
-			appendSurface(surface, 0u, false, materialIndex++);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueFlats)
-		{
-			appendSurface(surface, 1u, true, materialIndex++);
-		}
-		for (const nri_scene::SurfaceRef& surface : sceneView.opaqueSprites)
-		{
-			appendSurface(surface, 2u, false, materialIndex++);
-		}
-		result.vertexPayloadStamp = nri_scene::HashCombine64(result.vertexPayloadStamp, (uint64_t)materialIndex);
-		result.indexPayloadStamp = nri_scene::HashCombine64(result.indexPayloadStamp, (uint64_t)materialIndex);
-		result.primitivePayloadStamp = nri_scene::HashCombine64(result.primitivePayloadStamp, (uint64_t)materialIndex);
-		result.primitiveProvenanceStamp = nri_scene::HashCombine64(result.primitiveProvenanceStamp, (uint64_t)materialIndex);
-		result.materialPayloadStamp = nri_scene::HashCombine64(result.materialPayloadStamp, (uint64_t)materialIndex);
-		result.vertexPayloadStamp = result.vertexPayloadStamp != 0 ? result.vertexPayloadStamp : 1;
-		result.indexPayloadStamp = result.indexPayloadStamp != 0 ? result.indexPayloadStamp : 1;
-		result.primitivePayloadStamp = result.primitivePayloadStamp != 0 ? result.primitivePayloadStamp : 1;
-		result.primitiveProvenanceStamp = result.primitiveProvenanceStamp != 0 ? result.primitiveProvenanceStamp : 1;
-		result.materialPayloadStamp = result.materialPayloadStamp != 0 ? result.materialPayloadStamp : 1;
-		return result;
-	}
-
 
 static void Copy3(const float* src, float* dst)
 {
@@ -1000,11 +848,16 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 	uint32_t selectedTlasInstanceCount = 0;
 	{
 		ScopedPtPerfTimer sceneSelectTimer(mLastPerfShellTraceStats.sceneSelectMs);
-		const bool hasStaticMapScene = allowStaticMapScene && [&]()
+		const bool staticMapSceneReady = allowStaticMapScene && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectStaticMapMs);
 			return EnsureStaticMapScene();
 		}();
+		NRISceneFramePathSelectionInputs pathSelectionInputs = {};
+		pathSelectionInputs.allowStaticMapScene = allowStaticMapScene;
+		pathSelectionInputs.staticMapSceneReady = staticMapSceneReady;
+		const NRISceneFramePathSelectionResult pathSelection = SelectNRISceneFramePath(pathSelectionInputs);
+		const bool hasStaticMapScene = pathSelection.hasStaticMapScene;
 		if (hasStaticMapScene)
 		{
 			sceneLightUsesStaticMapScene = true;
@@ -1018,7 +871,11 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			activeStats = mStaticMapScene.sceneView.stats;
 
 			bool residentStaticWorldGeometryChanged = false;
-			const bool deferOverlayThisFrame = mUploadedStaticMapSceneLastFrame || mBuiltStaticMapSceneASLastFrame;
+			NRISceneFrameOverlayDeferralInputs deferralInputs = {};
+			deferralInputs.uploadedStaticMapSceneLastFrame = mUploadedStaticMapSceneLastFrame;
+			deferralInputs.builtStaticMapSceneASLastFrame = mBuiltStaticMapSceneASLastFrame;
+			const NRISceneFrameOverlayDeferralResult deferral = SelectNRISceneFrameOverlayDeferral(deferralInputs);
+			const bool deferOverlayThisFrame = deferral.deferOverlayThisFrame;
 			const bool hasRuntimeSpaceLinkOverlay = !deferOverlayThisFrame && [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeSpaceLinkMs);
@@ -1380,22 +1237,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			appendPersistentVoxelSceneLights = true;
 		}
 
-		const bool hasActiveDynamicOverlay =
-			activeDynamicGeometry != nullptr &&
-			!activeDynamicGeometry->primitives.empty() &&
-			activeDynamicMaterials != nullptr;
-		const bool hasPersistentVoxelOverlay =
-			hasPersistentVoxelBatch &&
-			mPersistentVoxels.HasRenderableOverlay();
-		const bool hasMirrorExtendedDynamicOverlay =
-			hasMirrorExtendedDynamicScene &&
-			!mirrorExtendedDynamicGeometry.primitives.empty() &&
-			!mirrorExtendedDynamicMaterialBridge.materials.empty();
-		const bool hasMirrorPlayerOverlay =
-			hasMirrorPlayerScene &&
-			!mirrorPlayerGeometry.primitives.empty() &&
-			!mirrorPlayerMaterialBridge.materials.empty();
-		const bool hasRuntimeDebugSphereOverlay = !deferOverlayThisFrame && [&]()
+		const bool runtimeDebugSphereBuilt = !deferOverlayThisFrame && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.runtimeDebugSphereMs);
 			NRIDebugOverlayBuildTelemetry debugOverlayTelemetry = {};
@@ -1415,260 +1257,141 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			mLastPerfShellTraceStats.runtimeDebugSphereMaterialCount = debugOverlayTelemetry.runtimeDebugSphereMaterialCount;
 			return built;
 		}();
-		const bool hasSurfaceLightOverlay = !deferOverlayThisFrame &&
+		const bool surfaceLightBuilt = !deferOverlayThisFrame &&
 			BuildSurfaceLightOverlay(surfaceLightGeometry, surfaceLightMaterialBridge);
+		NRISceneFrameOverlayEligibilityInputs overlayEligibilityInputs = {};
+		overlayEligibilityInputs.deferOverlayThisFrame = deferOverlayThisFrame;
+		overlayEligibilityInputs.runtimeSpaceLinkBuilt = hasRuntimeSpaceLinkOverlay;
+		overlayEligibilityInputs.runtimeMutationBuilt = hasRuntimeMutationOverlay;
+		overlayEligibilityInputs.hasPersistentVoxelBatch = hasPersistentVoxelBatch;
+		overlayEligibilityInputs.persistentVoxelRenderable = hasPersistentVoxelBatch ? mPersistentVoxels.HasRenderableOverlay() : false;
+		overlayEligibilityInputs.activeDynamicGeometry = activeDynamicGeometry;
+		overlayEligibilityInputs.activeDynamicMaterials = activeDynamicMaterials;
+		overlayEligibilityInputs.hasMirrorExtendedDynamicScene = hasMirrorExtendedDynamicScene;
+		overlayEligibilityInputs.mirrorExtendedGeometry = &mirrorExtendedDynamicGeometry;
+		overlayEligibilityInputs.mirrorExtendedMaterials = &mirrorExtendedDynamicMaterialBridge;
+		overlayEligibilityInputs.hasMirrorPlayerScene = hasMirrorPlayerScene;
+		overlayEligibilityInputs.mirrorPlayerGeometry = &mirrorPlayerGeometry;
+		overlayEligibilityInputs.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
+		overlayEligibilityInputs.runtimeDebugSphereBuilt = runtimeDebugSphereBuilt;
+		overlayEligibilityInputs.surfaceLightBuilt = surfaceLightBuilt;
+		const NRISceneFrameOverlayEligibilityResult overlayEligibility =
+			SelectNRISceneFrameOverlayEligibility(overlayEligibilityInputs);
+		const bool hasRuntimeSpaceLinkOverlayForAssembly = overlayEligibility.hasRuntimeSpaceLinkOverlay;
+		const bool hasRuntimeMutationOverlayForAssembly = overlayEligibility.hasRuntimeMutationOverlay;
+		const bool hasPersistentVoxelOverlay = overlayEligibility.hasPersistentVoxelOverlay;
+		const bool hasActiveDynamicOverlay = overlayEligibility.hasActiveDynamicOverlay;
+		const bool hasMirrorExtendedDynamicOverlay = overlayEligibility.hasMirrorExtendedDynamicOverlay;
+		const bool hasMirrorPlayerOverlay = overlayEligibility.hasMirrorPlayerOverlay;
+		const bool hasRuntimeDebugSphereOverlay = overlayEligibility.hasRuntimeDebugSphereOverlay;
+		const bool hasSurfaceLightOverlay = overlayEligibility.hasSurfaceLightOverlay;
 
-		if (hasPersistentVoxelOverlay || hasRuntimeSpaceLinkOverlay || hasRuntimeMutationOverlay || hasActiveDynamicOverlay || hasMirrorExtendedDynamicOverlay || hasMirrorPlayerOverlay || hasRuntimeDebugSphereOverlay || hasSurfaceLightOverlay)
+		if (overlayEligibility.hasAnyOverlay)
 		{
-			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.overlayAssembleMs);
-
+			NRIPersistentVoxelOverlayStats persistentVoxelOverlayStats = {};
+			if (hasPersistentVoxelOverlay)
 			{
-				ScopedPtPerfTimer appendTimer(mLastPerfShellTraceStats.overlayAppendMs);
-				{
-					ScopedPtPerfTimer resetTimer(mLastPerfShellTraceStats.overlayAppendResetMs);
-					nri_scene::ClearGeometryRetainingCapacity(overlayGeometry);
-					nri_scene::ClearMaterialBridgeRetainingCapacity(overlayMaterialBridge);
-				}
-
-				auto appendOverlaySource =
-					[&](
-						const nri_scene::GeometryData* geometry,
-						const SceneBufferUploadProducerStamp* producerStamp,
-						const nri_scene::MaterialBridgeData& materials,
-						double& totalMs,
-						double& geometryMs,
-						double& materialMs,
-						uint32_t& primitiveCount,
-						uint32_t& materialCount,
-						PerfShellTraceStats::OverlayAppendSourceTraceEntry& sourceTrace,
-						SceneBufferUploadDomain uploadDomain)
-				{
-					NRISceneContribution contribution = {};
-					contribution.geometry = geometry;
-					contribution.producerStamp = producerStamp;
-					contribution.materials = &materials;
-					contribution.uploadDomain = uploadDomain;
-					NRISceneContributionAppendStats appendStats = {};
-					appendStats.totalMs = &totalMs;
-					appendStats.geometryMs = &geometryMs;
-					appendStats.materialMs = &materialMs;
-					appendStats.primitiveCount = &primitiveCount;
-					appendStats.materialCount = &materialCount;
-					appendStats.sourceTrace = &sourceTrace;
-					AppendNRISceneContribution(contribution, appendStats, overlayGeometry, overlayMaterialBridge, sceneUploadDomainSpans);
-				};
-
-				{
-					ScopedPtPerfTimer sourceAggregateTimer(mLastPerfShellTraceStats.overlayAppendSourcesMs);
-
-					const auto buildProducerStamp =
-						[&](const nri_scene::SceneView& sceneView, double& timerMs) -> SceneBufferUploadProducerStamp
-					{
-						ScopedPtPerfTimer aggregateTimer(mLastPerfShellTraceStats.overlayAppendProducerStampMs);
-						ScopedPtPerfTimer sourceTimer(timerMs);
-						const SceneViewUploadStampBuildResult built = BuildSceneViewUploadProducerStamp(sceneView, mMapWorld.buildSerial);
-						SceneBufferUploadProducerStamp stamp = {};
-						stamp.vertexPayloadStamp = built.vertexPayloadStamp;
-						stamp.indexPayloadStamp = built.indexPayloadStamp;
-						stamp.primitivePayloadStamp = built.primitivePayloadStamp;
-						stamp.primitiveProvenanceStamp = built.primitiveProvenanceStamp;
-						stamp.materialPayloadStamp = built.materialPayloadStamp;
-						return stamp;
-					};
-					const auto buildMirrorPlayerProducerStamp =
-						[&]() -> SceneBufferUploadProducerStamp
-					{
-						ScopedPtPerfTimer aggregateTimer(mLastPerfShellTraceStats.overlayAppendProducerStampMs);
-						ScopedPtPerfTimer sourceTimer(mLastPerfShellTraceStats.overlayAppendMirrorPlayerStampMs);
-						const NRIMirrorPlayerUploadStamp built = BuildNRIMirrorPlayerUploadProducerStamp(
-							mirrorPlayerGeometry,
-							mirrorPlayerMaterialBridge,
-							mFrameIndex,
-							mMapWorld.buildSerial);
-						SceneBufferUploadProducerStamp stamp = {};
-						stamp.vertexPayloadStamp = built.vertexPayloadStamp;
-						stamp.indexPayloadStamp = built.indexPayloadStamp;
-						stamp.primitivePayloadStamp = built.primitivePayloadStamp;
-						stamp.primitiveProvenanceStamp = built.primitiveProvenanceStamp;
-						stamp.materialPayloadStamp = built.materialPayloadStamp;
-						return stamp;
-					};
-					const SceneBufferUploadProducerStamp dynamicStamp =
-						hasActiveDynamicOverlay && activeDynamicSceneView != nullptr ? buildProducerStamp(*activeDynamicSceneView, mLastPerfShellTraceStats.overlayAppendDynamicStampMs) : SceneBufferUploadProducerStamp {};
-					const SceneBufferUploadProducerStamp mirrorExtendedStamp =
-						hasMirrorExtendedDynamicOverlay ? buildProducerStamp(mirrorExtendedDynamicSceneView, mLastPerfShellTraceStats.overlayAppendMirrorExtendedStampMs) : SceneBufferUploadProducerStamp {};
-					const SceneBufferUploadProducerStamp mirrorPlayerStamp =
-						hasMirrorPlayerOverlay ? buildMirrorPlayerProducerStamp() : SceneBufferUploadProducerStamp {};
-
-					NRISceneContributionReserve overlayReserve = {};
-					auto addOverlayReserve =
-						[&](const nri_scene::GeometryData* geometry, const nri_scene::MaterialBridgeData& materials)
-					{
-						NRISceneContribution contribution = {};
-						contribution.geometry = geometry;
-						contribution.materials = &materials;
-						AccumulateNRISceneContributionReserve(contribution, overlayReserve);
-					};
-
-					if (hasRuntimeSpaceLinkOverlay)
-					{
-						addOverlayReserve(&runtimeSpaceLinkGeometry, runtimeSpaceLinkMaterialBridge);
-					}
-					if (hasRuntimeMutationOverlay)
-					{
-						addOverlayReserve(&runtimeMutationFrame.geometry, runtimeMutationFrame.materialBridge);
-					}
-					if (hasActiveDynamicOverlay)
-					{
-						addOverlayReserve(activeDynamicGeometry, *activeDynamicMaterials);
-					}
-					if (hasMirrorExtendedDynamicOverlay)
-					{
-						addOverlayReserve(&mirrorExtendedDynamicGeometry, mirrorExtendedDynamicMaterialBridge);
-					}
-					if (hasMirrorPlayerOverlay)
-					{
-						addOverlayReserve(&mirrorPlayerGeometry, mirrorPlayerMaterialBridge);
-					}
-					if (hasRuntimeDebugSphereOverlay)
-					{
-						addOverlayReserve(&debugSphereGeometry, debugSphereMaterialBridge);
-					}
-					if (hasSurfaceLightOverlay)
-					{
-						addOverlayReserve(&surfaceLightGeometry, surfaceLightMaterialBridge);
-					}
-					ReserveNRISceneContributionCapacity(overlayReserve, overlayGeometry, overlayMaterialBridge);
-
-					if (hasRuntimeSpaceLinkOverlay)
-					{
-						appendOverlaySource(
-							&runtimeSpaceLinkGeometry,
-							nullptr,
-							runtimeSpaceLinkMaterialBridge,
-							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMs,
-							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkGeometryMs,
-							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMaterialMs,
-							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkPrimitiveCount,
-							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMaterialCount,
-							mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend,
-							SceneBufferUploadDomain::StaticOverlay);
-					}
-
-					if (hasRuntimeMutationOverlay)
-					{
-						appendOverlaySource(
-							&runtimeMutationFrame.geometry,
-							nullptr,
-							runtimeMutationFrame.materialBridge,
-							mLastPerfShellTraceStats.overlayRuntimeMutationMs,
-							mLastPerfShellTraceStats.overlayRuntimeMutationGeometryMs,
-							mLastPerfShellTraceStats.overlayRuntimeMutationMaterialMs,
-							mLastPerfShellTraceStats.overlayRuntimeMutationPrimitiveCount,
-							mLastPerfShellTraceStats.overlayRuntimeMutationMaterialCount,
-							mLastPerfShellTraceStats.overlayRuntimeMutationAppend,
-							SceneBufferUploadDomain::RuntimeMutation);
-					}
-
-					if (hasActiveDynamicOverlay)
-					{
-						appendOverlaySource(
-							activeDynamicGeometry,
-							&dynamicStamp,
-							*activeDynamicMaterials,
-							mLastPerfShellTraceStats.overlayDynamicMs,
-							mLastPerfShellTraceStats.overlayDynamicGeometryMs,
-							mLastPerfShellTraceStats.overlayDynamicMaterialMs,
-							mLastPerfShellTraceStats.overlayDynamicPrimitiveCount,
-							mLastPerfShellTraceStats.overlayDynamicMaterialCount,
-							mLastPerfShellTraceStats.overlayDynamicAppend,
-							SceneBufferUploadDomain::Dynamic);
-					}
-
-					if (hasMirrorExtendedDynamicOverlay)
-					{
-						appendOverlaySource(
-							&mirrorExtendedDynamicGeometry,
-							&mirrorExtendedStamp,
-							mirrorExtendedDynamicMaterialBridge,
-							mLastPerfShellTraceStats.overlayMirrorExtendedMs,
-							mLastPerfShellTraceStats.overlayMirrorExtendedGeometryMs,
-							mLastPerfShellTraceStats.overlayMirrorExtendedMaterialMs,
-							mLastPerfShellTraceStats.overlayMirrorExtendedPrimitiveCount,
-							mLastPerfShellTraceStats.overlayMirrorExtendedMaterialCount,
-							mLastPerfShellTraceStats.overlayMirrorExtendedAppend,
-							SceneBufferUploadDomain::MirrorExtended);
-					}
-
-					if (hasMirrorPlayerOverlay)
-					{
-						appendOverlaySource(
-							&mirrorPlayerGeometry,
-							&mirrorPlayerStamp,
-							mirrorPlayerMaterialBridge,
-							mLastPerfShellTraceStats.overlayMirrorPlayerMs,
-							mLastPerfShellTraceStats.overlayMirrorPlayerGeometryMs,
-							mLastPerfShellTraceStats.overlayMirrorPlayerMaterialMs,
-							mLastPerfShellTraceStats.overlayMirrorPlayerPrimitiveCount,
-							mLastPerfShellTraceStats.overlayMirrorPlayerMaterialCount,
-							mLastPerfShellTraceStats.overlayMirrorPlayerAppend,
-							SceneBufferUploadDomain::MirrorPlayer);
-					}
-
-					if (hasRuntimeDebugSphereOverlay)
-					{
-						appendOverlaySource(
-							&debugSphereGeometry,
-							nullptr,
-							debugSphereMaterialBridge,
-							mLastPerfShellTraceStats.overlayDebugSphereMs,
-							mLastPerfShellTraceStats.overlayDebugSphereGeometryMs,
-							mLastPerfShellTraceStats.overlayDebugSphereMaterialMs,
-							mLastPerfShellTraceStats.overlayDebugSpherePrimitiveCount,
-							mLastPerfShellTraceStats.overlayDebugSphereMaterialCount,
-							mLastPerfShellTraceStats.overlayDebugSphereAppend,
-							SceneBufferUploadDomain::StaticOverlay);
-					}
-
-					if (hasSurfaceLightOverlay)
-					{
-						double surfaceLightOverlayMs = 0.0;
-						double surfaceLightGeometryMs = 0.0;
-						double surfaceLightMaterialMs = 0.0;
-						uint32_t surfaceLightPrimitiveCount = 0;
-						uint32_t surfaceLightMaterialCount = 0;
-						PerfShellTraceStats::OverlayAppendSourceTraceEntry surfaceLightAppend = {};
-						appendOverlaySource(
-							&surfaceLightGeometry,
-							nullptr,
-							surfaceLightMaterialBridge,
-							surfaceLightOverlayMs,
-							surfaceLightGeometryMs,
-							surfaceLightMaterialMs,
-							surfaceLightPrimitiveCount,
-							surfaceLightMaterialCount,
-							surfaceLightAppend,
-							SceneBufferUploadDomain::StaticOverlay);
-					}
-				}
-
-				{
-					ScopedPtPerfTimer bookkeepingTimer(mLastPerfShellTraceStats.overlayAppendBookkeepingMs);
-					if (hasPersistentVoxelOverlay)
-					{
-						const NRIPersistentVoxelOverlayStats persistentVoxelOverlayStats = mPersistentVoxels.BuildOverlayStats();
-						mLastPerfShellTraceStats.overlayPersistentVoxelActorCount = persistentVoxelOverlayStats.actorCount;
-						mLastPerfShellTraceStats.overlayPersistentVoxelPrimitiveCount = persistentVoxelOverlayStats.primitiveCount;
-						mLastPerfShellTraceStats.overlayPersistentVoxelMaterialCount = persistentVoxelOverlayStats.materialCount;
-						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.primitiveCount = persistentVoxelOverlayStats.primitiveCount;
-						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.materialCount = persistentVoxelOverlayStats.materialCount;
-						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.indexCount = persistentVoxelOverlayStats.indexCount;
-						mLastPerfShellTraceStats.overlayPersistentVoxelAppend.byteCount = persistentVoxelOverlayStats.byteCount;
-					}
-					mLastPerfShellTraceStats.overlayPrimitiveCount = (uint32_t)overlayGeometry.primitives.size();
-					mLastPerfShellTraceStats.overlayMaterialCount = (uint32_t)overlayMaterialBridge.materials.size();
-				}
+				persistentVoxelOverlayStats = mPersistentVoxels.BuildOverlayStats();
 			}
+
+			NRISceneFrameOverlayBuildInputs overlayInputs = {};
+			overlayInputs.collectTiming = ShouldCollectPtPerfTiming();
+			overlayInputs.mapWorldBuildSerial = mMapWorld.buildSerial;
+			overlayInputs.frameIndex = mFrameIndex;
+			overlayInputs.stats = &mLastPerfShellTraceStats;
+			overlayInputs.hasPersistentVoxelOverlay = hasPersistentVoxelOverlay;
+			overlayInputs.persistentVoxelOverlayStats = hasPersistentVoxelOverlay ? &persistentVoxelOverlayStats : nullptr;
+
+			overlayInputs.hasRuntimeSpaceLinkOverlay = hasRuntimeSpaceLinkOverlayForAssembly;
+			overlayInputs.runtimeSpaceLinkGeometry = &runtimeSpaceLinkGeometry;
+			overlayInputs.runtimeSpaceLinkMaterials = &runtimeSpaceLinkMaterialBridge;
+			overlayInputs.runtimeSpaceLinkTelemetry = {
+				&mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMs,
+				&mLastPerfShellTraceStats.overlayRuntimeSpaceLinkGeometryMs,
+				&mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMaterialMs,
+				&mLastPerfShellTraceStats.overlayRuntimeSpaceLinkPrimitiveCount,
+				&mLastPerfShellTraceStats.overlayRuntimeSpaceLinkMaterialCount,
+				&mLastPerfShellTraceStats.overlayRuntimeSpaceLinkAppend };
+
+			overlayInputs.hasRuntimeMutationOverlay = hasRuntimeMutationOverlayForAssembly;
+			overlayInputs.runtimeMutationGeometry = &runtimeMutationFrame.geometry;
+			overlayInputs.runtimeMutationMaterials = &runtimeMutationFrame.materialBridge;
+			overlayInputs.runtimeMutationTelemetry = {
+				&mLastPerfShellTraceStats.overlayRuntimeMutationMs,
+				&mLastPerfShellTraceStats.overlayRuntimeMutationGeometryMs,
+				&mLastPerfShellTraceStats.overlayRuntimeMutationMaterialMs,
+				&mLastPerfShellTraceStats.overlayRuntimeMutationPrimitiveCount,
+				&mLastPerfShellTraceStats.overlayRuntimeMutationMaterialCount,
+				&mLastPerfShellTraceStats.overlayRuntimeMutationAppend };
+
+			overlayInputs.hasActiveDynamicOverlay = hasActiveDynamicOverlay;
+			overlayInputs.activeDynamicSceneView = activeDynamicSceneView;
+			overlayInputs.activeDynamicGeometry = activeDynamicGeometry;
+			overlayInputs.activeDynamicMaterials = activeDynamicMaterials;
+			overlayInputs.activeDynamicTelemetry = {
+				&mLastPerfShellTraceStats.overlayDynamicMs,
+				&mLastPerfShellTraceStats.overlayDynamicGeometryMs,
+				&mLastPerfShellTraceStats.overlayDynamicMaterialMs,
+				&mLastPerfShellTraceStats.overlayDynamicPrimitiveCount,
+				&mLastPerfShellTraceStats.overlayDynamicMaterialCount,
+				&mLastPerfShellTraceStats.overlayDynamicAppend };
+
+			overlayInputs.hasMirrorExtendedDynamicOverlay = hasMirrorExtendedDynamicOverlay;
+			overlayInputs.mirrorExtendedSceneView = &mirrorExtendedDynamicSceneView;
+			overlayInputs.mirrorExtendedGeometry = &mirrorExtendedDynamicGeometry;
+			overlayInputs.mirrorExtendedMaterials = &mirrorExtendedDynamicMaterialBridge;
+			overlayInputs.mirrorExtendedTelemetry = {
+				&mLastPerfShellTraceStats.overlayMirrorExtendedMs,
+				&mLastPerfShellTraceStats.overlayMirrorExtendedGeometryMs,
+				&mLastPerfShellTraceStats.overlayMirrorExtendedMaterialMs,
+				&mLastPerfShellTraceStats.overlayMirrorExtendedPrimitiveCount,
+				&mLastPerfShellTraceStats.overlayMirrorExtendedMaterialCount,
+				&mLastPerfShellTraceStats.overlayMirrorExtendedAppend };
+
+			overlayInputs.hasMirrorPlayerOverlay = hasMirrorPlayerOverlay;
+			overlayInputs.mirrorPlayerGeometry = &mirrorPlayerGeometry;
+			overlayInputs.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
+			overlayInputs.mirrorPlayerTelemetry = {
+				&mLastPerfShellTraceStats.overlayMirrorPlayerMs,
+				&mLastPerfShellTraceStats.overlayMirrorPlayerGeometryMs,
+				&mLastPerfShellTraceStats.overlayMirrorPlayerMaterialMs,
+				&mLastPerfShellTraceStats.overlayMirrorPlayerPrimitiveCount,
+				&mLastPerfShellTraceStats.overlayMirrorPlayerMaterialCount,
+				&mLastPerfShellTraceStats.overlayMirrorPlayerAppend };
+
+			overlayInputs.hasRuntimeDebugSphereOverlay = hasRuntimeDebugSphereOverlay;
+			overlayInputs.runtimeDebugSphereGeometry = &debugSphereGeometry;
+			overlayInputs.runtimeDebugSphereMaterials = &debugSphereMaterialBridge;
+			overlayInputs.runtimeDebugSphereTelemetry = {
+				&mLastPerfShellTraceStats.overlayDebugSphereMs,
+				&mLastPerfShellTraceStats.overlayDebugSphereGeometryMs,
+				&mLastPerfShellTraceStats.overlayDebugSphereMaterialMs,
+				&mLastPerfShellTraceStats.overlayDebugSpherePrimitiveCount,
+				&mLastPerfShellTraceStats.overlayDebugSphereMaterialCount,
+				&mLastPerfShellTraceStats.overlayDebugSphereAppend };
+
+			double surfaceLightOverlayMs = 0.0;
+			double surfaceLightGeometryMs = 0.0;
+			double surfaceLightMaterialMs = 0.0;
+			uint32_t surfaceLightPrimitiveCount = 0;
+			uint32_t surfaceLightMaterialCount = 0;
+			PerfShellTraceStats::OverlayAppendSourceTraceEntry surfaceLightAppend = {};
+			overlayInputs.hasSurfaceLightOverlay = hasSurfaceLightOverlay;
+			overlayInputs.surfaceLightGeometry = &surfaceLightGeometry;
+			overlayInputs.surfaceLightMaterials = &surfaceLightMaterialBridge;
+			overlayInputs.surfaceLightTelemetry = {
+				&surfaceLightOverlayMs,
+				&surfaceLightGeometryMs,
+				&surfaceLightMaterialMs,
+				&surfaceLightPrimitiveCount,
+				&surfaceLightMaterialCount,
+				&surfaceLightAppend };
+
+			NRISceneFrameOverlayBuildOutputs overlayOutputs = {};
+			overlayOutputs.overlayGeometry = &overlayGeometry;
+			overlayOutputs.overlayMaterialBridge = &overlayMaterialBridge;
+			overlayOutputs.uploadSpans = &sceneUploadDomainSpans;
+			BuildNRISceneFrameOverlay(overlayInputs, overlayOutputs);
 
 			auto& instances = mSelectTopLevelInstanceScratch;
 			auto& sceneInstances = mSelectSceneInstanceScratch;
