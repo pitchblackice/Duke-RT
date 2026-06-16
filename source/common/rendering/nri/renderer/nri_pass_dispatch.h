@@ -365,8 +365,6 @@ public:
 	FrameTextureSlot& mUpscaledInputSlot;
 };
 
-NRIPassDispatchContext BuildNRIPassDispatchContext(NRIRenderer& renderer);
-
 class NRIPassDispatcher
 {
 public:

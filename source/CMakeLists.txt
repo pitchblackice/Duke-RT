@@ -941,6 +941,7 @@ set (NRI_SOURCES
 	common/rendering/nri/renderer/nri_persistent_voxels.cpp
 	common/rendering/nri/renderer/nri_pass_dispatch.cpp
 	common/rendering/nri/renderer/nri_pass_dispatch_context.cpp
+	common/rendering/nri/renderer/nri_pass_dispatch_factory.cpp
 	common/rendering/nri/renderer/nri_pipeline_state.cpp
 	common/rendering/nri/renderer/nri_preload_coordinator.cpp
 	common/rendering/nri/renderer/nri_renderstate.cpp

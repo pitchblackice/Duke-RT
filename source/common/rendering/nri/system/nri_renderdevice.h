@@ -82,6 +82,9 @@ public:
 	bool HasActiveSceneFrame() const override;
 	bool HasCurrentCommandBuffer() const;
 	bool HasActiveTarget() const;
+	nri::CoreInterface* GetCoreInterface() { return &mCore; }
+	nri::Device* GetDevice() const { return mDevice; }
+	nri::CommandBuffer* GetCurrentCommandBuffer() const { return mCommandBuffer; }
 	bool StartPathTracingLevelPreload() override;
 	bool TickPathTracingLevelPreload() override;
 	bool IsPathTracingLevelPreloadPending() const override;
@@ -315,7 +318,6 @@ private:
 	friend class NRISceneTextureResidency;
 	friend class NRIUpscalerContext;
 	friend class NRIFrameGenerationContext;
-	friend NRIPassDispatchContext BuildNRIPassDispatchContext(NRIRenderer& renderer);
 
 	std::unique_ptr<NRIRenderState> mRenderState;
 	std::unique_ptr<NRIRenderer> mRenderer;

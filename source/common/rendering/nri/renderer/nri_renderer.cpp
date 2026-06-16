@@ -2637,11 +2637,6 @@ NRIRendererFrameContext NRIRenderer::BuildFrameContext(int drawmode, bool portal
 	return context;
 }
 
-NRIPassDispatchContext NRIRenderer::BuildPassDispatchContext()
-{
-	return BuildNRIPassDispatchContext(*this);
-}
-
 bool NRIRenderer::PreloadLevelScene(uint32_t outputWidth, uint32_t outputHeight, uint32_t targetWidth, uint32_t targetHeight)
 {
 	NRIPreloadLevelSceneInputs inputs = {};
