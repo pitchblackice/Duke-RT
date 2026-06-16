@@ -17,6 +17,7 @@
 #include "nri_scene_textures.h"
 #include "nri_sky_environment.h"
 #include "nri_scene_lights.h"
+#include "nri_surface_probe.h"
 #include "nri_material_policy.h"
 #include "nri_static_scene.h"
 #include "nri_static_scene_geometry_upload.h"
@@ -167,16 +168,6 @@ public:
 		uint32_t mirrorPlayerModelCount = 0;
 		uint32_t mirrorPlayerUnsupportedModelCount = 0;
 		uint32_t asBuildCount = 0;
-	};
-
-	struct SurfaceProbeFrameState
-	{
-		bool valid = false;
-		bool usesStaticMapScene = false;
-		uint32_t staticPrimitiveCount = 0;
-		uint32_t runtimeSpaceLinkPrimitiveCount = 0;
-		uint32_t runtimeMutationPrimitiveCount = 0;
-		uint32_t dynamicPrimitiveCount = 0;
 	};
 
 	struct MaterialBuildTraceEntry
@@ -1569,60 +1560,6 @@ private:
 
 	using SceneUploadDirtyRange = ::SceneUploadDirtyRange;
 
-	struct SurfaceProbeResult
-	{
-		bool valid = false;
-		bool hit = false;
-		uint32_t sceneDataSource = UINT32_MAX;
-		uint32_t sceneOwner = 0;
-		uint32_t primitiveIndex = UINT32_MAX;
-		uint32_t materialIndex = UINT32_MAX;
-		uint32_t primitiveFlags = 0;
-		uint32_t materialLightingFlags = 0;
-		uint32_t textureId = 0;
-		uint32_t baseTextureId = 0;
-		uint32_t materialClass = 0;
-		uint32_t emissiveMode = 0;
-		uint32_t emissiveTextureIndex = UINT32_MAX;
-		uint32_t normalTextureIndex = UINT32_MAX;
-		uint32_t metallicTextureIndex = UINT32_MAX;
-		uint32_t roughnessTextureIndex = UINT32_MAX;
-		float lightLevel = 0.0f;
-		float alpha = 1.0f;
-		float metalnessHint = 0.0f;
-		float roughnessHint = 0.45f;
-		float averageColor[3] = { 1.0f, 1.0f, 1.0f };
-		float emissiveColor[3] = {};
-		float glowColor[3] = {};
-		float distance = 0.0f;
-		float position[3] = {};
-		float normal[3] = {};
-		nri_scene::SurfaceProvenance provenance = {};
-	};
-
-	struct SurfaceProbeEmissiveDiagnostics
-	{
-		bool sceneLightSurfaceMatch = false;
-		bool activeEmissiveSurfaceMatch = false;
-		bool exactEmissivePrimitiveMatch = false;
-		uint32_t sceneLightMaterialIndex = UINT32_MAX;
-		uint32_t emissivePrimitiveMatchCount = 0;
-		uint32_t emissiveSourceFlags = 0;
-		uint32_t emissiveSourceRuleId = 0;
-		uint32_t emissiveOverrideRuleId = 0;
-		int32_t emissiveSectorIndex = -1;
-		float emissivePrimitiveArea = 0.0f;
-		float emissivePowerEstimate = 0.0f;
-		float emissiveSelectionWeight = 0.0f;
-		float emissiveSelectionPdf = 0.0f;
-		float emissiveIntensity = 0.0f;
-		float sectorResponseScale = 1.0f;
-		float sectorReachScale = 1.0f;
-		bool sectorResponseApplied = false;
-		bool materialResponseEnabled = false;
-		float materialResponseScale = 1.0f;
-	};
-
 	using RuntimePointLightGpuData = NRIRuntimePointLightGpuData;
 
 	using RuntimeLightTileHeaderGpuData = NRIRuntimeLightTileHeaderGpuData;
@@ -1907,7 +1844,7 @@ private:
 	void TraceRuntimeLinkEvents(HWDrawInfo& di);
 	void TraceSkyState(const nri_scene::SceneView& sceneView, const char* action, uint64_t resolvedKey);
 	void UpdateSurfaceProbe(const nri_scene::GeometryData& geometry, const nri_scene::MaterialBridgeData* materials, bool allowLogging);
-	SurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const SurfaceProbeResult& probe) const;
+	NRISurfaceProbeEmissiveDiagnostics BuildSurfaceProbeEmissiveDiagnostics(const NRISurfaceProbeResult& probe) const;
 	bool BuildSurfaceLightOverlay(nri_scene::GeometryData& outGeometry, nri_scene::MaterialBridgeData& outMaterials);
 	void RefreshSceneLightSystem(
 		bool usedStaticMapScene,
@@ -2202,7 +2139,7 @@ private:
 	bool mGuiCaptureActive = false;
 	bool mHasOutputPolicyState = false;
 	bool mHasRuntimeLinkTraceState = false;
-	SurfaceProbeFrameState mSurfaceProbeFrame = {};
+	NRISurfaceProbeFrameState mSurfaceProbeFrame = {};
 	bool mResetHistory = true;
 	std::string mLastHistoryResetReason = "startup";
 	float mLastFrameGenerationRealFrameTimeMs = 0.0f;
@@ -2279,8 +2216,7 @@ private:
 	uint32_t mBoundSectorLightPulsingCount = 0;
 	uint32_t mBoundSectorLightDominantSector = UINT32_MAX;
 	float mBoundSectorLightDominantContribution = 0.0f;
-	SurfaceProbeResult mLastSurfaceProbe = {};
-	SurfaceProbeResult mLastLoggedSurfaceProbe = {};
+	NRISurfaceProbeTracker mSurfaceProbe;
 	int mLastDebugMode = -1;
 	int mLastMainUpscalerRequest = -1;
 	int mLastPostSharpenRequest = -1;

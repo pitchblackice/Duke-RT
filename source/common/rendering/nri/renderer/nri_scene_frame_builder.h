@@ -1,5 +1,7 @@
 #pragma once
 
+#include "nri_surface_probe.h"
+
 #include "nri_renderer.h"
 
 struct NRISceneContribution
@@ -147,5 +149,5 @@ NRIRenderer::DynamicSceneFrameState BuildNRISceneFrameDynamicState(
 	const NRISceneFrameDynamicStateInputs& inputs,
 	const NRIRenderer::DynamicSceneFrameState& previous,
 	NRIRenderer::PerfShellTraceStats& stats);
-NRIRenderer::SurfaceProbeFrameState BuildNRISceneSurfaceProbeFrameState(
+NRISurfaceProbeFrameState BuildNRISceneSurfaceProbeFrameState(
 	const NRISceneSurfaceProbeFrameInputs& inputs);

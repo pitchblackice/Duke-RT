@@ -1061,23 +1061,23 @@ void NRIRenderer::TraceActorSpriteEvent(const PathTracingActorSpriteTraceEvent& 
 NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() const
 {
 	NRISurfaceProbeStatusSnapshot snapshot = {};
-	if (!mLastSurfaceProbe.valid)
+	if (!mSurfaceProbe.Last().valid)
 	{
 		return snapshot;
 	}
 
 	snapshot.recorded = true;
-	if (!mLastSurfaceProbe.hit)
+	if (!mSurfaceProbe.Last().hit)
 	{
 		return snapshot;
 	}
 
 	snapshot.hit = true;
-	const SurfaceProbeEmissiveDiagnostics emissiveDiagnostics = BuildSurfaceProbeEmissiveDiagnostics(mLastSurfaceProbe);
-	const uint32_t flags = mLastSurfaceProbe.primitiveFlags;
-	const uint32_t lightingFlags = mLastSurfaceProbe.materialLightingFlags;
-	const int32_t localSpaceIndex = mLastSurfaceProbe.provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex) : -1;
-	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, mLastSurfaceProbe.provenance);
+	const NRISurfaceProbeEmissiveDiagnostics emissiveDiagnostics = BuildSurfaceProbeEmissiveDiagnostics(mSurfaceProbe.Last());
+	const uint32_t flags = mSurfaceProbe.Last().primitiveFlags;
+	const uint32_t lightingFlags = mSurfaceProbe.Last().materialLightingFlags;
+	const int32_t localSpaceIndex = mSurfaceProbe.Last().provenance.mapChunkIndex >= 0 ? nri_scene::FindMapWorldLocalSpaceIndex(mMapWorld, (uint32_t)mSurfaceProbe.Last().provenance.mapChunkIndex) : -1;
+	const int32_t portalGraphIndex = nri_scene::FindMapWorldPortalIndex(mMapWorld, mSurfaceProbe.Last().provenance);
 	bool chunkResidentStatic = false;
 	bool chunkStaticTlasInstanced = false;
 	bool chunkStaticProbeIncluded = false;
@@ -1086,9 +1086,9 @@ NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() con
 	bool flatPlaneVisible = false;
 	NRIStaticSceneResidency::ChunkDiagnosticFacts staticChunkFacts = {};
 	NRIRuntimeMutationSystem::ChunkDiagnosticFacts replacementFacts = {};
-	if (mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
+	if (mSurfaceProbe.Last().provenance.mapChunkIndex >= 0)
 	{
-		const uint32_t chunkIndex = (uint32_t)mLastSurfaceProbe.provenance.mapChunkIndex;
+		const uint32_t chunkIndex = (uint32_t)mSurfaceProbe.Last().provenance.mapChunkIndex;
 		chunkVisibleGate = IsChunkMarkedVisible(mCurrentVisibleChunkWords, chunkIndex);
 		staticChunkFacts = NRIStaticSceneResidency::BuildChunkDiagnosticFacts(mStaticMapScene, mStaticMapChunkAtlas, chunkIndex);
 		chunkResidentStatic = staticChunkFacts.residentStatic;
@@ -1098,16 +1098,16 @@ NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() con
 	}
 	if ((flags & nri_scene::MaterialFlag_Flat) != 0 &&
 		(flags & (nri_scene::MaterialFlag_Sprite | nri_scene::MaterialFlag_Mirror | nri_scene::MaterialFlag_Sky | nri_scene::MaterialFlag_Portal)) == 0 &&
-		mLastSurfaceProbe.provenance.sectorIndex >= 0)
+		mSurfaceProbe.Last().provenance.sectorIndex >= 0)
 	{
 		flatPlaneVisibilityRelevant = true;
-		flatPlaneVisible = IsFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, mLastSurfaceProbe.provenance.sectorIndex, mLastSurfaceProbe.normal[1] < 0.0f);
+		flatPlaneVisible = IsFlatPlaneMarkedVisible(mCurrentVisibleFlatPlaneWords, mSurfaceProbe.Last().provenance.sectorIndex, mSurfaceProbe.Last().normal[1] < 0.0f);
 	}
-	snapshot.sourceName = nri_diag::GetSurfaceSourceTypeName(mLastSurfaceProbe.provenance.sourceType);
-	snapshot.drawListName = nri_diag::GetDrawListTypeName(mLastSurfaceProbe.provenance.drawListType);
-	snapshot.ownerName = nri_diag::GetSurfaceProbeSceneOwnerName(mLastSurfaceProbe.sceneOwner);
-	snapshot.dataSourceName = nri_diag::GetSceneDataSourceName(mLastSurfaceProbe.sceneDataSource);
-	snapshot.chunkIndex = mLastSurfaceProbe.provenance.mapChunkIndex;
+	snapshot.sourceName = nri_diag::GetSurfaceSourceTypeName(mSurfaceProbe.Last().provenance.sourceType);
+	snapshot.drawListName = nri_diag::GetDrawListTypeName(mSurfaceProbe.Last().provenance.drawListType);
+	snapshot.ownerName = nri_diag::GetSurfaceProbeSceneOwnerName(mSurfaceProbe.Last().sceneOwner);
+	snapshot.dataSourceName = nri_diag::GetSceneDataSourceName(mSurfaceProbe.Last().sceneDataSource);
+	snapshot.chunkIndex = mSurfaceProbe.Last().provenance.mapChunkIndex;
 	snapshot.gateVisible = YesNo(chunkVisibleGate);
 	snapshot.flatDrawlistVisible = flatPlaneVisibilityRelevant ? YesNo(flatPlaneVisible) : "n/a";
 	snapshot.staticResident = YesNo(chunkResidentStatic);
@@ -1123,19 +1123,19 @@ NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() con
 	snapshot.replacementTriangleCount = replacementFacts.triangleCount;
 	snapshot.localSpaceIndex = localSpaceIndex;
 	snapshot.portalGraphIndex = portalGraphIndex;
-	snapshot.sectorIndex = mLastSurfaceProbe.provenance.sectorIndex;
-	snapshot.wallIndex = mLastSurfaceProbe.provenance.wallIndex;
-	snapshot.nextSectorIndex = mLastSurfaceProbe.provenance.nextSectorIndex;
-	snapshot.actorIndex = mLastSurfaceProbe.provenance.actorIndex;
-	snapshot.cstat = mLastSurfaceProbe.provenance.cstat;
-	snapshot.primitiveIndex = mLastSurfaceProbe.primitiveIndex;
-	snapshot.materialIndex = mLastSurfaceProbe.materialIndex;
-	snapshot.textureId = mLastSurfaceProbe.textureId;
-	snapshot.baseTextureId = mLastSurfaceProbe.baseTextureId;
-	snapshot.distance = mLastSurfaceProbe.distance;
-	snapshot.position[0] = mLastSurfaceProbe.position[0];
-	snapshot.position[1] = mLastSurfaceProbe.position[1];
-	snapshot.position[2] = mLastSurfaceProbe.position[2];
+	snapshot.sectorIndex = mSurfaceProbe.Last().provenance.sectorIndex;
+	snapshot.wallIndex = mSurfaceProbe.Last().provenance.wallIndex;
+	snapshot.nextSectorIndex = mSurfaceProbe.Last().provenance.nextSectorIndex;
+	snapshot.actorIndex = mSurfaceProbe.Last().provenance.actorIndex;
+	snapshot.cstat = mSurfaceProbe.Last().provenance.cstat;
+	snapshot.primitiveIndex = mSurfaceProbe.Last().primitiveIndex;
+	snapshot.materialIndex = mSurfaceProbe.Last().materialIndex;
+	snapshot.textureId = mSurfaceProbe.Last().textureId;
+	snapshot.baseTextureId = mSurfaceProbe.Last().baseTextureId;
+	snapshot.distance = mSurfaceProbe.Last().distance;
+	snapshot.position[0] = mSurfaceProbe.Last().position[0];
+	snapshot.position[1] = mSurfaceProbe.Last().position[1];
+	snapshot.position[2] = mSurfaceProbe.Last().position[2];
 	snapshot.primitiveFlags = flags;
 	snapshot.indexed = YesNo((flags & nri_scene::MaterialFlag_Indexed) != 0);
 	snapshot.fullbright = YesNo((flags & nri_scene::MaterialFlag_Fullbright) != 0);
@@ -1150,17 +1150,17 @@ NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() con
 	snapshot.textureGlowing = YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureGlowing) != 0);
 	snapshot.textureAutoGlow = YesNo((lightingFlags & nri_scene::MaterialLightingFlag_TextureAutoGlowing) != 0);
 	snapshot.hasGlowmap = YesNo((lightingFlags & nri_scene::MaterialLightingFlag_HasGlowmap) != 0);
-	snapshot.hasNormalMap = YesNo(mLastSurfaceProbe.normalTextureIndex != UINT32_MAX);
-	snapshot.hasMetallicMap = YesNo(mLastSurfaceProbe.metallicTextureIndex != UINT32_MAX);
-	snapshot.hasRoughnessMap = YesNo(mLastSurfaceProbe.roughnessTextureIndex != UINT32_MAX);
-	snapshot.normalTextureIndex = mLastSurfaceProbe.normalTextureIndex != UINT32_MAX ? mLastSurfaceProbe.normalTextureIndex : 0u;
-	snapshot.metallicTextureIndex = mLastSurfaceProbe.metallicTextureIndex != UINT32_MAX ? mLastSurfaceProbe.metallicTextureIndex : 0u;
-	snapshot.roughnessTextureIndex = mLastSurfaceProbe.roughnessTextureIndex != UINT32_MAX ? mLastSurfaceProbe.roughnessTextureIndex : 0u;
-	snapshot.metalnessHint = mLastSurfaceProbe.metalnessHint;
-	snapshot.roughnessHint = mLastSurfaceProbe.roughnessHint;
-	snapshot.materialClass = mLastSurfaceProbe.materialClass;
-	snapshot.emissiveModeName = nri_diag::GetMaterialEmissiveModeName(mLastSurfaceProbe.emissiveMode);
-	snapshot.emissiveTextureIndex = mLastSurfaceProbe.emissiveTextureIndex != UINT32_MAX ? mLastSurfaceProbe.emissiveTextureIndex : 0u;
+	snapshot.hasNormalMap = YesNo(mSurfaceProbe.Last().normalTextureIndex != UINT32_MAX);
+	snapshot.hasMetallicMap = YesNo(mSurfaceProbe.Last().metallicTextureIndex != UINT32_MAX);
+	snapshot.hasRoughnessMap = YesNo(mSurfaceProbe.Last().roughnessTextureIndex != UINT32_MAX);
+	snapshot.normalTextureIndex = mSurfaceProbe.Last().normalTextureIndex != UINT32_MAX ? mSurfaceProbe.Last().normalTextureIndex : 0u;
+	snapshot.metallicTextureIndex = mSurfaceProbe.Last().metallicTextureIndex != UINT32_MAX ? mSurfaceProbe.Last().metallicTextureIndex : 0u;
+	snapshot.roughnessTextureIndex = mSurfaceProbe.Last().roughnessTextureIndex != UINT32_MAX ? mSurfaceProbe.Last().roughnessTextureIndex : 0u;
+	snapshot.metalnessHint = mSurfaceProbe.Last().metalnessHint;
+	snapshot.roughnessHint = mSurfaceProbe.Last().roughnessHint;
+	snapshot.materialClass = mSurfaceProbe.Last().materialClass;
+	snapshot.emissiveModeName = nri_diag::GetMaterialEmissiveModeName(mSurfaceProbe.Last().emissiveMode);
+	snapshot.emissiveTextureIndex = mSurfaceProbe.Last().emissiveTextureIndex != UINT32_MAX ? mSurfaceProbe.Last().emissiveTextureIndex : 0u;
 	snapshot.lightSurface = YesNo(emissiveDiagnostics.sceneLightSurfaceMatch);
 	snapshot.lightMaterialIndex = emissiveDiagnostics.sceneLightMaterialIndex != UINT32_MAX ? emissiveDiagnostics.sceneLightMaterialIndex : 0u;
 	snapshot.emissiveSurface = YesNo(emissiveDiagnostics.activeEmissiveSurfaceMatch);
@@ -1180,13 +1180,13 @@ NRISurfaceProbeStatusSnapshot NRIRenderer::BuildSurfaceProbeStatusSnapshot() con
 	snapshot.emissiveIntensity = emissiveDiagnostics.emissiveIntensity;
 	snapshot.materialResponse = YesNo(emissiveDiagnostics.materialResponseEnabled);
 	snapshot.materialResponseScale = emissiveDiagnostics.materialResponseScale;
-	snapshot.lightLevel = mLastSurfaceProbe.lightLevel;
-	snapshot.alpha = mLastSurfaceProbe.alpha;
+	snapshot.lightLevel = mSurfaceProbe.Last().lightLevel;
+	snapshot.alpha = mSurfaceProbe.Last().alpha;
 	for (int i = 0; i < 3; ++i)
 	{
-		snapshot.averageColor[i] = mLastSurfaceProbe.averageColor[i];
-		snapshot.emissiveColor[i] = mLastSurfaceProbe.emissiveColor[i];
-		snapshot.glowColor[i] = mLastSurfaceProbe.glowColor[i];
+		snapshot.averageColor[i] = mSurfaceProbe.Last().averageColor[i];
+		snapshot.emissiveColor[i] = mSurfaceProbe.Last().emissiveColor[i];
+		snapshot.glowColor[i] = mSurfaceProbe.Last().glowColor[i];
 	}
 	return snapshot;
 }
@@ -1314,9 +1314,9 @@ NRIMapChunkDumpSnapshot NRIRenderer::BuildMapChunkDumpSnapshot(int32_t chunkInde
 	snapshot.chunkRange = (uint32_t)mMapWorld.chunks.size();
 	if (chunkIndex < 0)
 	{
-		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit && mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
+		if (mSurfaceProbe.Last().valid && mSurfaceProbe.Last().hit && mSurfaceProbe.Last().provenance.mapChunkIndex >= 0)
 		{
-			chunkIndex = mLastSurfaceProbe.provenance.mapChunkIndex;
+			chunkIndex = mSurfaceProbe.Last().provenance.mapChunkIndex;
 			snapshot.usedProbeFallback = true;
 		}
 		else
@@ -1578,9 +1578,9 @@ NRIMapChunkCompareSnapshot NRIRenderer::BuildMapChunkCompareSnapshot(int32_t chu
 	snapshot.chunkRange = (uint32_t)mMapWorld.chunks.size();
 	if (chunkIndex < 0)
 	{
-		if (mLastSurfaceProbe.valid && mLastSurfaceProbe.hit && mLastSurfaceProbe.provenance.mapChunkIndex >= 0)
+		if (mSurfaceProbe.Last().valid && mSurfaceProbe.Last().hit && mSurfaceProbe.Last().provenance.mapChunkIndex >= 0)
 		{
-			chunkIndex = mLastSurfaceProbe.provenance.mapChunkIndex;
+			chunkIndex = mSurfaceProbe.Last().provenance.mapChunkIndex;
 		}
 		else
 		{

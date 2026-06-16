@@ -965,12 +965,13 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				mLastPerfShellTraceStats.dynamicCaptureStatsMs += captureStats.statsMs;
 				return captured;
 			}();
+			const NRISurfaceProbeResult& lastSurfaceProbe = mSurfaceProbe.Last();
 			const int32_t preferredMirrorWallIndex =
-			mLastSurfaceProbe.valid &&
-			mLastSurfaceProbe.hit &&
-			(mLastSurfaceProbe.primitiveFlags & nri_scene::MaterialFlag_Mirror) != 0 &&
-			mLastSurfaceProbe.provenance.wallIndex >= 0 ?
-				mLastSurfaceProbe.provenance.wallIndex :
+			lastSurfaceProbe.valid &&
+			lastSurfaceProbe.hit &&
+			(lastSurfaceProbe.primitiveFlags & nri_scene::MaterialFlag_Mirror) != 0 &&
+			lastSurfaceProbe.provenance.wallIndex >= 0 ?
+				lastSurfaceProbe.provenance.wallIndex :
 				-1;
 		const NRIMirrorPortalSelectionResult visibleMirrorPortalSelection = !deferOverlayThisFrame ? [&]()
 			{

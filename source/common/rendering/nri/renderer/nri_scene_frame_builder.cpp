@@ -281,10 +281,10 @@ NRIRenderer::DynamicSceneFrameState BuildNRISceneFrameDynamicState(
 	return result;
 }
 
-NRIRenderer::SurfaceProbeFrameState BuildNRISceneSurfaceProbeFrameState(
+NRISurfaceProbeFrameState BuildNRISceneSurfaceProbeFrameState(
 	const NRISceneSurfaceProbeFrameInputs& inputs)
 {
-	NRIRenderer::SurfaceProbeFrameState result = {};
+	NRISurfaceProbeFrameState result = {};
 	result.valid = true;
 	result.usesStaticMapScene = inputs.usesStaticMapScene;
 	result.staticPrimitiveCount = inputs.usesStaticMapScene ? inputs.activeStaticProbePrimitiveCount : 0u;
