@@ -12,6 +12,7 @@
 #include "nri_renderer_settings.h"
 #include "nri_scene_frame_builder.h"
 #include "nri_scene_frame_diagnostics.h"
+#include "nri_scene_frame_coordinator_types.h"
 #include "nri_scene_frame_mirrors.h"
 #include "nri_scene_frame_overlay.h"
 #include "nri_scene_frame_selection.h"
@@ -360,7 +361,7 @@ private:
 }
 
 
-NRIRenderer::RenderSceneHistorySnapshot NRIRenderer::CaptureRenderSceneHistorySnapshot(bool preserveHistory) const
+RenderSceneHistorySnapshot NRIRenderer::CaptureRenderSceneHistorySnapshot(bool preserveHistory) const
 {
 	RenderSceneHistorySnapshot snapshot = {};
 	snapshot.frameIndex = mFrameIndex;
