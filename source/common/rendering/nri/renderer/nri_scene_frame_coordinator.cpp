@@ -11,9 +11,11 @@
 #include "nri_render_geometry_helpers.h"
 #include "nri_renderer_settings.h"
 #include "nri_scene_frame_builder.h"
+#include "nri_scene_frame_diagnostics.h"
 #include "nri_scene_frame_mirrors.h"
 #include "nri_scene_frame_overlay.h"
 #include "nri_scene_frame_selection.h"
+#include "nri_scene_frame_state.h"
 #include "nri_scene_upload.h"
 #include "nri_static_scene_geometry.h"
 #include "nri_surface_light_overlay.h"
@@ -1678,20 +1680,24 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 					mLastPerfShellTraceStats.sceneSelectStateCommitSelectedDynamic = selectedSceneHasDynamicOverlay ? 1u : 0u;
 				}
 				{
-					NRISceneFrameDynamicStateInputs dynamicStateInputs = {};
-					dynamicStateInputs.activeDynamicSceneView = activeDynamicSceneView;
-					dynamicStateInputs.activeDynamicGeometry = activeDynamicGeometry;
-					dynamicStateInputs.activeDynamicMaterials = activeDynamicMaterials;
-					dynamicStateInputs.mirrorExtendedSceneView = hasMirrorExtendedDynamicScene ? &mirrorExtendedDynamicSceneView : nullptr;
-					dynamicStateInputs.mirrorExtendedGeometry = hasMirrorExtendedDynamicScene ? &mirrorExtendedDynamicGeometry : nullptr;
-					dynamicStateInputs.mirrorExtendedMaterials = hasMirrorExtendedDynamicScene ? &mirrorExtendedDynamicMaterialBridge : nullptr;
-					dynamicStateInputs.mirrorPlayerSceneView = hasMirrorPlayerScene ? &mirrorPlayerSceneView : nullptr;
-					dynamicStateInputs.mirrorPlayerGeometry = hasMirrorPlayerScene ? &mirrorPlayerGeometry : nullptr;
-					dynamicStateInputs.mirrorPlayerMaterials = hasMirrorPlayerScene ? &mirrorPlayerMaterialBridge : nullptr;
-					dynamicStateInputs.totalMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicStateMs;
-					dynamicStateInputs.dynamicCoreMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicCoreMs;
-					dynamicStateInputs.mirrorExtendedMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorExtendedMs;
-					dynamicStateInputs.mirrorPlayerMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorPlayerMs;
+					NRISceneFrameDynamicStateBuildRequest dynamicStateRequest = {};
+					dynamicStateRequest.activeDynamicSceneView = activeDynamicSceneView;
+					dynamicStateRequest.activeDynamicGeometry = activeDynamicGeometry;
+					dynamicStateRequest.activeDynamicMaterials = activeDynamicMaterials;
+					dynamicStateRequest.hasMirrorExtendedDynamicScene = hasMirrorExtendedDynamicScene;
+					dynamicStateRequest.mirrorExtendedSceneView = &mirrorExtendedDynamicSceneView;
+					dynamicStateRequest.mirrorExtendedGeometry = &mirrorExtendedDynamicGeometry;
+					dynamicStateRequest.mirrorExtendedMaterials = &mirrorExtendedDynamicMaterialBridge;
+					dynamicStateRequest.hasMirrorPlayerScene = hasMirrorPlayerScene;
+					dynamicStateRequest.mirrorPlayerSceneView = &mirrorPlayerSceneView;
+					dynamicStateRequest.mirrorPlayerGeometry = &mirrorPlayerGeometry;
+					dynamicStateRequest.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
+					dynamicStateRequest.totalMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicStateMs;
+					dynamicStateRequest.dynamicCoreMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicCoreMs;
+					dynamicStateRequest.mirrorExtendedMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorExtendedMs;
+					dynamicStateRequest.mirrorPlayerMs = &mLastPerfShellTraceStats.sceneSelectStateCommitDynamicMirrorPlayerMs;
+					const NRISceneFrameDynamicStateInputs dynamicStateInputs =
+						MakeNRISceneFrameDynamicStateInputs(dynamicStateRequest);
 					mDynamicSceneLastFrame = BuildNRISceneFrameDynamicState(dynamicStateInputs, mDynamicSceneLastFrame, mLastPerfShellTraceStats);
 				}
 				{
@@ -1733,51 +1739,58 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 						ScopedPtPerfTimer persistentVoxelStatsTimer(mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxelMs);
 						persistentVoxelOverlayStats = mPersistentVoxels.BuildOverlayDebugStats();
 					}
-					NRISceneFrameDebugStatsInputs debugStatsInputs = {};
-					debugStatsInputs.staticMapStats = &mStaticMapScene.sceneView.stats;
-					debugStatsInputs.deferredDynamicSceneView = !deferOverlayThisFrame ? &dynamicSceneView : nullptr;
-					debugStatsInputs.activeDynamicSceneView = activeDynamicSceneView;
-					debugStatsInputs.persistentVoxelStats = hasPersistentVoxelOverlay ? &persistentVoxelOverlayStats : nullptr;
-					debugStatsInputs.mirrorExtendedSceneView = hasMirrorExtendedDynamicScene ? &mirrorExtendedDynamicSceneView : nullptr;
-					debugStatsInputs.mirrorPlayerSceneView = hasMirrorPlayerScene ? &mirrorPlayerSceneView : nullptr;
-					debugStatsInputs.baseMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsBaseMs;
-					debugStatsInputs.persistentVoxelMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxelMs;
-					debugStatsInputs.mirrorExtendedMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtendedMs;
-					debugStatsInputs.mirrorPlayerMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayerMs;
-					debugStatsInputs.mergeMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMergeMs;
+					NRISceneFrameDebugStatsBuildRequest debugStatsRequest = {};
+					debugStatsRequest.staticMapStats = &mStaticMapScene.sceneView.stats;
+					debugStatsRequest.deferOverlayThisFrame = deferOverlayThisFrame;
+					debugStatsRequest.deferredDynamicSceneView = &dynamicSceneView;
+					debugStatsRequest.activeDynamicSceneView = activeDynamicSceneView;
+					debugStatsRequest.persistentVoxelStats = hasPersistentVoxelOverlay ? &persistentVoxelOverlayStats : nullptr;
+					debugStatsRequest.hasMirrorExtendedDynamicScene = hasMirrorExtendedDynamicScene;
+					debugStatsRequest.mirrorExtendedSceneView = &mirrorExtendedDynamicSceneView;
+					debugStatsRequest.hasMirrorPlayerScene = hasMirrorPlayerScene;
+					debugStatsRequest.mirrorPlayerSceneView = &mirrorPlayerSceneView;
+					debugStatsRequest.baseMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsBaseMs;
+					debugStatsRequest.persistentVoxelMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsPersistentVoxelMs;
+					debugStatsRequest.mirrorExtendedMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorExtendedMs;
+					debugStatsRequest.mirrorPlayerMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMirrorPlayerMs;
+					debugStatsRequest.mergeMs = &mLastPerfShellTraceStats.sceneSelectStateCommitStatsMergeMs;
+					const NRISceneFrameDebugStatsInputs debugStatsInputs =
+						MakeNRISceneFrameDebugStatsInputs(debugStatsRequest);
 					activeStats = BuildNRISceneFrameDebugStats(debugStatsInputs, mLastPerfShellTraceStats);
 				}
 
 				{
-					NRISceneFrameGenerationInputs generationInputs = {};
-					generationInputs.staticMapBuildSerial = mStaticMapScene.buildSerial;
-					generationInputs.runtimeMutationGeneration = mRuntimeMutation.BuildFrameGenerationHash(hasRuntimeMutationOverlay);
-					generationInputs.persistentVoxelGeneration = hasPersistentVoxelOverlay ? mPersistentVoxels.BuildSceneGenerationHash() : 0ull;
-					generationInputs.frameIndex = mFrameIndex;
-					generationInputs.staticAccelerationBuildSerial = mStaticAccelerationBuildSerial;
-					generationInputs.renderWidth = mRenderWidth;
-					generationInputs.renderHeight = mRenderHeight;
-					generationInputs.currentCameraPos = mCurrentCameraPos;
-					generationInputs.currentCameraForward = mCurrentCameraForward;
-					generationInputs.currentCameraRight = mCurrentCameraRight;
-					generationInputs.currentCameraUp = mCurrentCameraUp;
-					generationInputs.currentTanHalfFovX = mCurrentTanHalfFovX;
-					generationInputs.currentTanHalfFovY = mCurrentTanHalfFovY;
-					generationInputs.selectedSceneHasDynamicOverlay = selectedSceneHasDynamicOverlay;
-					generationInputs.activeDynamicSceneView = activeDynamicSceneView;
-					generationInputs.activeDynamicGeometry = activeDynamicGeometry;
-					generationInputs.activeDynamicMaterials = activeDynamicMaterials;
-					generationInputs.hasMirrorPlayerScene = hasMirrorPlayerScene;
-					generationInputs.mirrorPlayerGeometry = &mirrorPlayerGeometry;
-					generationInputs.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
-					generationInputs.activeMaterialBridge = activeMaterialBridge;
-					generationInputs.activeGpuMaterials = activeGpuMaterials;
-					generationInputs.sceneTextureCacheCount = mSceneTextures.CacheCount();
-					generationInputs.selectedTlasInstanceCount = selectedTlasInstanceCount;
-					generationInputs.selectedSceneInstanceCount = selectedSceneInstanceCount;
-					generationInputs.selectedStaticSceneInstanceCount = selectedStaticSceneInstanceCount;
-					generationInputs.selectedDynamicSceneInstanceCount = selectedDynamicSceneInstanceCount;
-					generationInputs.selectedPersistentVoxelSceneInstanceCount = selectedPersistentVoxelSceneInstanceCount;
+					NRISceneFrameGenerationBuildRequest generationRequest = {};
+					generationRequest.staticMapBuildSerial = mStaticMapScene.buildSerial;
+					generationRequest.runtimeMutationGeneration = mRuntimeMutation.BuildFrameGenerationHash(hasRuntimeMutationOverlay);
+					generationRequest.persistentVoxelGeneration = hasPersistentVoxelOverlay ? mPersistentVoxels.BuildSceneGenerationHash() : 0ull;
+					generationRequest.frameIndex = mFrameIndex;
+					generationRequest.staticAccelerationBuildSerial = mStaticAccelerationBuildSerial;
+					generationRequest.renderWidth = mRenderWidth;
+					generationRequest.renderHeight = mRenderHeight;
+					generationRequest.currentCameraPos = mCurrentCameraPos;
+					generationRequest.currentCameraForward = mCurrentCameraForward;
+					generationRequest.currentCameraRight = mCurrentCameraRight;
+					generationRequest.currentCameraUp = mCurrentCameraUp;
+					generationRequest.currentTanHalfFovX = mCurrentTanHalfFovX;
+					generationRequest.currentTanHalfFovY = mCurrentTanHalfFovY;
+					generationRequest.selectedSceneHasDynamicOverlay = selectedSceneHasDynamicOverlay;
+					generationRequest.activeDynamicSceneView = activeDynamicSceneView;
+					generationRequest.activeDynamicGeometry = activeDynamicGeometry;
+					generationRequest.activeDynamicMaterials = activeDynamicMaterials;
+					generationRequest.hasMirrorPlayerScene = hasMirrorPlayerScene;
+					generationRequest.mirrorPlayerGeometry = &mirrorPlayerGeometry;
+					generationRequest.mirrorPlayerMaterials = &mirrorPlayerMaterialBridge;
+					generationRequest.activeMaterialBridge = activeMaterialBridge;
+					generationRequest.activeGpuMaterials = activeGpuMaterials;
+					generationRequest.sceneTextureCacheCount = mSceneTextures.CacheCount();
+					generationRequest.selectedTlasInstanceCount = selectedTlasInstanceCount;
+					generationRequest.selectedSceneInstanceCount = selectedSceneInstanceCount;
+					generationRequest.selectedStaticSceneInstanceCount = selectedStaticSceneInstanceCount;
+					generationRequest.selectedDynamicSceneInstanceCount = selectedDynamicSceneInstanceCount;
+					generationRequest.selectedPersistentVoxelSceneInstanceCount = selectedPersistentVoxelSceneInstanceCount;
+					const NRISceneFrameGenerationInputs generationInputs =
+						MakeNRISceneFrameGenerationInputs(generationRequest);
 					const NRISceneFrameGenerationResult generationResult =
 						BuildNRISceneFrameGenerationResult(generationInputs, mLastStateCommitDomainGenerations, mHasLastStateCommitDomainGenerations);
 					WriteNRISceneFrameGenerationTraceStats(generationResult, mLastPerfShellTraceStats);
@@ -2125,13 +2138,15 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 
 	Copy3(activeSceneView->skyColor, mSkyColor);
 	Copy3(activeSceneView->groundColor, mGroundColor);
-	NRISceneSurfaceProbeFrameInputs surfaceProbeFrameInputs = {};
-	surfaceProbeFrameInputs.usesStaticMapScene = mUsedStaticMapSceneLastFrame;
-	surfaceProbeFrameInputs.activeStaticProbePrimitiveCount = activeStaticProbePrimitiveCount;
-	surfaceProbeFrameInputs.runtimeSpaceLinkGeometry = &runtimeSpaceLinkGeometry;
-	surfaceProbeFrameInputs.runtimeMutationGeometry = &runtimeMutationFrame.geometry;
-	surfaceProbeFrameInputs.overlayGeometry = &overlayGeometry;
-	surfaceProbeFrameInputs.activeDynamicGeometry = activeDynamicGeometry;
+	NRISceneSurfaceProbeFrameBuildRequest surfaceProbeFrameRequest = {};
+	surfaceProbeFrameRequest.usesStaticMapScene = mUsedStaticMapSceneLastFrame;
+	surfaceProbeFrameRequest.activeStaticProbePrimitiveCount = activeStaticProbePrimitiveCount;
+	surfaceProbeFrameRequest.runtimeSpaceLinkGeometry = &runtimeSpaceLinkGeometry;
+	surfaceProbeFrameRequest.runtimeMutationGeometry = &runtimeMutationFrame.geometry;
+	surfaceProbeFrameRequest.overlayGeometry = &overlayGeometry;
+	surfaceProbeFrameRequest.activeDynamicGeometry = activeDynamicGeometry;
+	const NRISceneSurfaceProbeFrameInputs surfaceProbeFrameInputs =
+		MakeNRISceneSurfaceProbeFrameInputs(surfaceProbeFrameRequest);
 	mSurfaceProbeFrame = BuildNRISceneSurfaceProbeFrameState(surfaceProbeFrameInputs);
 
 	if (!preserveHistory)
