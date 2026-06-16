@@ -281,7 +281,7 @@ bool NRIPassDispatcher::DispatchBootstrapView(NRIPassDispatchContext& context)
 	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
-	constants.SceneInstanceCount = context.mSceneInstanceBuffer.stride != 0 ? (uint32_t)(context.mSceneInstanceBuffer.usedSize / context.mSceneInstanceBuffer.stride) : 0u;
+	constants.SceneInstanceCount = context.mSceneInstanceCount;
 	constants.StaticPrimitiveCount = context.mBoundStaticPrimitiveCount;
 	constants.DynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
 	constants.FrameIndex = context.mFrameIndex;
@@ -417,7 +417,7 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
-	constants.SceneInstanceCount = context.mSceneInstanceBuffer.stride != 0 ? (uint32_t)(context.mSceneInstanceBuffer.usedSize / context.mSceneInstanceBuffer.stride) : 0u;
+	constants.SceneInstanceCount = context.mSceneInstanceCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.StaticPrimitiveCount = context.mBoundStaticPrimitiveCount;
 	constants.FrameIndex = context.mFrameIndex;
@@ -1175,7 +1175,7 @@ bool NRIPassDispatcher::DispatchFinal(NRIPassDispatchContext& context)
 	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
 	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
 	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
-	constants.SceneInstanceCount = context.mSceneInstanceBuffer.stride != 0 ? (uint32_t)(context.mSceneInstanceBuffer.usedSize / context.mSceneInstanceBuffer.stride) : 0u;
+	constants.SceneInstanceCount = context.mSceneInstanceCount;
 	constants.StaticPrimitiveCount = context.mBoundStaticPrimitiveCount;
 	constants.DynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
 	constants.FrameIndex = context.mFrameIndex;
