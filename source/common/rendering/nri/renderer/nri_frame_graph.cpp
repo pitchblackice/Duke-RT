@@ -286,8 +286,8 @@ bool ExecuteNRIFrameGraph(
 	const bool useFinalDebugPresent = presentRoute.kind == NRIPresentRouteKind::FinalDebug || useShadowDebugPresent;
 	const bool rawTraceDirectPresent = presentRoute.kind == NRIPresentRouteKind::RawTraceDebug;
 	const bool useSplitShadowDebugProbe = rawTraceDirectPresent && ptDebugMode >= 21 && ptDebugMode <= 22;
-	context.mHistoryInputSlot = (context.mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
-	context.mHistoryOutputSlot = (context.mFrameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
+	context.mHistoryInputSlot = (context.mFrame.frameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPing : FrameTextureSlot::TaaHistoryPong;
+	context.mHistoryOutputSlot = (context.mFrame.frameIndex & 1u) == 0 ? FrameTextureSlot::TaaHistoryPong : FrameTextureSlot::TaaHistoryPing;
 	context.mUpscaledInputSlot = FrameTextureSlot::PostSharpenOutput;
 	context.mUseUpscaledInFinal = false;
 	context.mUseDenoisedCompositionInputs = false;

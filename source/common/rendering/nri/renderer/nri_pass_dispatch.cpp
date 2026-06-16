@@ -265,39 +265,39 @@ bool NRIPassDispatcher::DispatchBootstrapView(NRIPassDispatchContext& context)
 
 	const uint32_t bootstrapMode = GetBootstrapMode();
 	NRITraceSceneConstants constants = {};
-	Copy3(context.mCurrentCameraPos, constants.CameraPos);
-	Copy3(context.mCurrentCameraForward, constants.CameraForward);
-	Copy3(context.mCurrentCameraRight, constants.CameraRight);
-	Copy3(context.mCurrentCameraUp, constants.CameraUp);
-	Copy3(context.mPreviousCameraPos, constants.PrevCameraPos);
-	Copy3(context.mPreviousCameraForward, constants.PrevCameraForward);
-	Copy3(context.mPreviousCameraRight, constants.PrevCameraRight);
-	Copy3(context.mPreviousCameraUp, constants.PrevCameraUp);
-	constants.RenderWidth = context.mRenderWidth;
-	constants.RenderHeight = context.mRenderHeight;
-	constants.DisplayWidth = context.mOutputWidth;
-	constants.DisplayHeight = context.mOutputHeight;
-	constants.TanHalfFovX = context.mCurrentTanHalfFovX;
-	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
-	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
-	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
-	constants.SceneInstanceCount = context.mSceneInstanceCount;
-	constants.StaticPrimitiveCount = context.mBoundStaticPrimitiveCount;
-	constants.DynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
-	constants.FrameIndex = context.mFrameIndex;
+	Copy3(context.mFrame.currentCameraPos.data(), constants.CameraPos);
+	Copy3(context.mFrame.currentCameraForward.data(), constants.CameraForward);
+	Copy3(context.mFrame.currentCameraRight.data(), constants.CameraRight);
+	Copy3(context.mFrame.currentCameraUp.data(), constants.CameraUp);
+	Copy3(context.mFrame.previousCameraPos.data(), constants.PrevCameraPos);
+	Copy3(context.mFrame.previousCameraForward.data(), constants.PrevCameraForward);
+	Copy3(context.mFrame.previousCameraRight.data(), constants.PrevCameraRight);
+	Copy3(context.mFrame.previousCameraUp.data(), constants.PrevCameraUp);
+	constants.RenderWidth = context.mFrame.renderWidth;
+	constants.RenderHeight = context.mFrame.renderHeight;
+	constants.DisplayWidth = context.mFrame.outputWidth;
+	constants.DisplayHeight = context.mFrame.outputHeight;
+	constants.TanHalfFovX = context.mFrame.currentTanHalfFovX;
+	constants.TanHalfFovY = context.mFrame.currentTanHalfFovY;
+	constants.PrevTanHalfFovX = context.mFrame.previousTanHalfFovX;
+	constants.PrevTanHalfFovY = context.mFrame.previousTanHalfFovY;
+	constants.SceneInstanceCount = context.mSceneStats.sceneInstanceCount;
+	constants.StaticPrimitiveCount = context.mSceneStats.staticPrimitiveCount;
+	constants.DynamicPrimitiveCount = context.mSceneStats.dynamicPrimitiveCount;
+	constants.FrameIndex = context.mFrame.frameIndex;
 	constants.Flags =
 		NRI_FLAG_BOOTSTRAP_VIEW |
-		(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(context.mFrame.resetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
 		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
-	constants.StaticMaterialCount = context.mBoundStaticMaterialCount;
+	constants.StaticMaterialCount = context.mSceneStats.staticMaterialCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
-	constants.DynamicMaterialCount = context.mBoundDynamicMaterialCount;
+	constants.DynamicMaterialCount = context.mSceneStats.dynamicMaterialCount;
 	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, context.mDirectionalLightState.color);
-	constants.ReservedTrace0 = (uint16_t)(int16_t)context.mSceneLeft | ((uint32_t)(uint16_t)(int16_t)context.mSceneTop << 16);
-	Copy3(context.mSkyColor, constants.SkyColor);
-	Copy3(context.mGroundColor, constants.GroundColor);
+	constants.ReservedTrace0 = (uint16_t)(int16_t)context.mFrame.sceneLeft | ((uint32_t)(uint16_t)(int16_t)context.mFrame.sceneTop << 16);
+	Copy3(context.mFrame.skyColor.data(), constants.SkyColor);
+	Copy3(context.mFrame.groundColor.data(), constants.GroundColor);
 	ApplyDirectionalLightStateToConstants(context.mDirectionalLightState, constants);
 
 	NRITextureResource& history = context.mTextures.Get(context.mHistoryOutputSlot);
@@ -342,7 +342,7 @@ bool NRIPassDispatcher::DispatchBootstrapView(NRIPassDispatchContext& context)
 	context.mCommands.SetDescriptorSet(3, context.mFrameTextureSet);
 	context.mCommands.SetDescriptorSet(4, context.mOutputSet);
 	context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::Final));
-	context.mCommands.Dispatch(GetDispatchSize(context.mTargetWidth), GetDispatchSize(context.mTargetHeight), 1);
+	context.mCommands.Dispatch(GetDispatchSize(context.mFrame.targetWidth), GetDispatchSize(context.mFrame.targetHeight), 1);
 	return true;
 }
 
@@ -372,8 +372,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		NRITraceShaderStatsReadbackInput input = {};
 		input.enabled = (bool)nri_ptshaderstats;
 		input.boundSceneInstances = &context.mBoundSceneInstances;
-		input.staticPrimitiveCount = context.mBoundStaticPrimitiveCount;
-		input.dynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
+		input.staticPrimitiveCount = context.mSceneStats.staticPrimitiveCount;
+		input.dynamicPrimitiveCount = context.mSceneStats.dynamicPrimitiveCount;
 		input.persistentVoxelPrimitiveCount = context.mPersistentVoxels.BoundPrimitiveCount();
 		input.user = &context;
 		input.estimatePersistentVoxelPrimitiveCount = [](void* user, uint32_t primitiveOffset) -> uint32_t
@@ -395,35 +395,35 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const NRIMainUpscalerKind resolvedMainUpscaler = context.mUpscalerService.ResolveMainUpscalerKind(false);
 	const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(resolvedMainUpscaler, context.mUpscalerService.GetSelectedUpscalerMode());
-	const uint32_t jitterPhaseCount = NRIGetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, context.mGuiCaptureActive);
+	const uint32_t jitterPhaseCount = NRIGetTemporalJitterPhaseCount(resolvedMainUpscaler, resolvedUpscalerMode, context.mFrame.guiCaptureActive);
 	const bool directSceneTrace = (!nri_ptbootstrap && nri_ptdirectscene) || bootstrapMode == 11u || bootstrapMode == 12u;
 	const bool useTemporalJitter =
 		!nri_ptbootstrap &&
-		!context.mGuiCaptureActive &&
+		!context.mFrame.guiCaptureActive &&
 		NRIShouldUseTemporalJitter(resolvedMainUpscaler);
-	Copy3(context.mCurrentCameraPos, constants.CameraPos);
-	Copy3(context.mCurrentCameraForward, constants.CameraForward);
-	Copy3(context.mCurrentCameraRight, constants.CameraRight);
-	Copy3(context.mCurrentCameraUp, constants.CameraUp);
-	Copy3(context.mPreviousCameraPos, constants.PrevCameraPos);
-	Copy3(context.mPreviousCameraForward, constants.PrevCameraForward);
-	Copy3(context.mPreviousCameraRight, constants.PrevCameraRight);
-	Copy3(context.mPreviousCameraUp, constants.PrevCameraUp);
-	constants.RenderWidth = context.mRenderWidth;
-	constants.RenderHeight = context.mRenderHeight;
-	constants.DisplayWidth = context.mOutputWidth;
-	constants.DisplayHeight = context.mOutputHeight;
-	constants.TanHalfFovX = context.mCurrentTanHalfFovX;
-	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
-	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
-	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
-	constants.SceneInstanceCount = context.mSceneInstanceCount;
+	Copy3(context.mFrame.currentCameraPos.data(), constants.CameraPos);
+	Copy3(context.mFrame.currentCameraForward.data(), constants.CameraForward);
+	Copy3(context.mFrame.currentCameraRight.data(), constants.CameraRight);
+	Copy3(context.mFrame.currentCameraUp.data(), constants.CameraUp);
+	Copy3(context.mFrame.previousCameraPos.data(), constants.PrevCameraPos);
+	Copy3(context.mFrame.previousCameraForward.data(), constants.PrevCameraForward);
+	Copy3(context.mFrame.previousCameraRight.data(), constants.PrevCameraRight);
+	Copy3(context.mFrame.previousCameraUp.data(), constants.PrevCameraUp);
+	constants.RenderWidth = context.mFrame.renderWidth;
+	constants.RenderHeight = context.mFrame.renderHeight;
+	constants.DisplayWidth = context.mFrame.outputWidth;
+	constants.DisplayHeight = context.mFrame.outputHeight;
+	constants.TanHalfFovX = context.mFrame.currentTanHalfFovX;
+	constants.TanHalfFovY = context.mFrame.currentTanHalfFovY;
+	constants.PrevTanHalfFovX = context.mFrame.previousTanHalfFovX;
+	constants.PrevTanHalfFovY = context.mFrame.previousTanHalfFovY;
+	constants.SceneInstanceCount = context.mSceneStats.sceneInstanceCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
-	constants.StaticPrimitiveCount = context.mBoundStaticPrimitiveCount;
-	constants.FrameIndex = context.mFrameIndex;
-	constants.DynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
+	constants.StaticPrimitiveCount = context.mSceneStats.staticPrimitiveCount;
+	constants.FrameIndex = context.mFrame.frameIndex;
+	constants.DynamicPrimitiveCount = context.mSceneStats.dynamicPrimitiveCount;
 	constants.Flags =
-		(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(context.mFrame.resetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(directSceneTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
 		(context.mUseSplitShadowDenoiser && !directSceneTrace ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
 		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
@@ -433,26 +433,26 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 		(ShouldCollectTraceShaderStats() ? NRI_FLAG_TRACE_SHADER_STATS : 0u) |
 		(useTemporalJitter ? NRI_FLAG_USE_JITTER : 0u) |
 		NRIPackTemporalJitterPhaseCount(jitterPhaseCount);
-	constants.StaticMaterialCount = context.mBoundStaticMaterialCount;
+	constants.StaticMaterialCount = context.mSceneStats.staticMaterialCount;
 	constants.BootstrapMode = bootstrapMode;
-	constants.DynamicMaterialCount = context.mBoundDynamicMaterialCount;
+	constants.DynamicMaterialCount = context.mSceneStats.dynamicMaterialCount;
 	constants.BounceCounts = PackTraceBounceCounts(
 		traceSettings.lightBounceCount,
 		traceSettings.mirrorBounceCount,
 		context.mDirectionalLightState.color);
-	constants.PortalCount = context.mBoundPortalCount;
-	constants.RuntimeLightCount = context.mBoundRuntimeLightCount;
+	constants.PortalCount = context.mSceneStats.portalCount;
+	constants.RuntimeLightCount = context.mSceneStats.runtimeLightCount;
 	constants.PortalDepth = PackPortalDepthAndAmbientMultipliers(
 		traceSettings.portalDepth,
 		GetBaseAmbient(),
 		GetMetalAmbient());
-	constants.ReservedTrace0 = (context.mBoundRuntimeLightTileCountX & 0xffffu) | ((context.mBoundRuntimeLightTileCountY & 0xffffu) << 16u);
+	constants.ReservedTrace0 = (context.mSceneStats.runtimeLightTileCountX & 0xffffu) | ((context.mSceneStats.runtimeLightTileCountY & 0xffffu) << 16u);
 	constants.ReservedTrace1 = PackTraceAux1(
 		(uint32_t)denoiserSettings.denoiserMode,
 		traceSettings.emissiveSampleCount,
 		context.mDirectionalLightState.angularSize);
-	Copy3(context.mSkyColor, constants.SkyColor);
-	Copy3(context.mGroundColor, constants.GroundColor);
+	Copy3(context.mFrame.skyColor.data(), constants.SkyColor);
+	Copy3(context.mFrame.groundColor.data(), constants.GroundColor);
 	ApplyDirectionalLightStateToConstants(context.mDirectionalLightState, constants);
 
 	context.mResources.TransitionTexture(context.mTextures.Get(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse), NRIComputeStorageState());
@@ -498,8 +498,8 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	context.mCommands.SetDescriptorSet(2, context.mSceneBinding.GetCurrentSceneDataSet());
 	context.mCommands.SetDescriptorSet(3, context.mFrameTextureSet);
 	context.mCommands.SetDescriptorSet(4, context.mOutputSet);
-	const uint32_t dispatchX = GetDispatchSize(context.mRenderWidth);
-	const uint32_t dispatchY = GetDispatchSize(context.mRenderHeight);
+	const uint32_t dispatchX = GetDispatchSize(context.mFrame.renderWidth);
+	const uint32_t dispatchY = GetDispatchSize(context.mFrame.renderHeight);
 	const uint32_t dispatchZ = 1;
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchX = dispatchX;
 	context.mLastPerfShellTraceStats.traceOpaqueDispatchY = dispatchY;
@@ -512,7 +512,7 @@ bool NRIPassDispatcher::DispatchTraceOpaque(NRIPassDispatchContext& context, HWD
 	}
 	{
 		ScopedPtPerfTimer perfTimer(context.mLastPerfShellTraceStats.traceOpaqueStatsCopyMs);
-		context.mTraceShaderStats.CopyForReadback(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats(), (uint64_t)context.mFrameIndex);
+		context.mTraceShaderStats.CopyForReadback(context.mResources.BuildResourceServices(), ShouldCollectTraceShaderStats(), (uint64_t)context.mFrame.frameIndex);
 	}
 	return true;
 }
@@ -524,7 +524,7 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	Clocker clock(NriPTDenoiser);
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
 
-	if (!context.mNrd.EnsureReady(*context.mResources.device, context.mRenderWidth, context.mRenderHeight, 1))
+	if (!context.mNrd.EnsureReady(*context.mResources.device, context.mFrame.renderWidth, context.mFrame.renderHeight, 1))
 	{
 		return false;
 	}
@@ -544,15 +544,15 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	desc.specular = &context.mTextures.Get(NRIRenderer::FrameTextureSlot::DenoisedSpecular);
 	desc.shadow = &context.mTextures.Get(NRIRenderer::FrameTextureSlot::DenoisedShadow);
 	desc.validation = &context.mTextures.Get(NRIRenderer::FrameTextureSlot::Validation);
-	desc.resourceWidth = context.mRenderWidth;
-	desc.resourceHeight = context.mRenderHeight;
-	desc.frameIndex = context.mFrameIndex;
-	Copy2(context.mCurrentJitter, desc.cameraJitter);
-	Copy2(context.mPreviousJitter, desc.cameraJitterPrev);
-	std::memcpy(desc.viewToClipMatrix, context.mCurrentViewToClip, sizeof(desc.viewToClipMatrix));
-	std::memcpy(desc.viewToClipMatrixPrev, context.mPreviousViewToClip, sizeof(desc.viewToClipMatrixPrev));
-	std::memcpy(desc.worldToViewMatrix, context.mCurrentWorldToView, sizeof(desc.worldToViewMatrix));
-	std::memcpy(desc.worldToViewMatrixPrev, context.mPreviousWorldToView, sizeof(desc.worldToViewMatrixPrev));
+	desc.resourceWidth = context.mFrame.renderWidth;
+	desc.resourceHeight = context.mFrame.renderHeight;
+	desc.frameIndex = context.mFrame.frameIndex;
+	Copy2(context.mFrame.currentJitter.data(), desc.cameraJitter);
+	Copy2(context.mFrame.previousJitter.data(), desc.cameraJitterPrev);
+	std::memcpy(desc.viewToClipMatrix, context.mFrame.currentViewToClip.data(), sizeof(desc.viewToClipMatrix));
+	std::memcpy(desc.viewToClipMatrixPrev, context.mFrame.previousViewToClip.data(), sizeof(desc.viewToClipMatrixPrev));
+	std::memcpy(desc.worldToViewMatrix, context.mFrame.currentWorldToView.data(), sizeof(desc.worldToViewMatrix));
+	std::memcpy(desc.worldToViewMatrixPrev, context.mFrame.previousWorldToView.data(), sizeof(desc.worldToViewMatrixPrev));
 	desc.lightDirection[0] = context.mDirectionalLightState.direction[0];
 	desc.lightDirection[1] = context.mDirectionalLightState.direction[1];
 	desc.lightDirection[2] = context.mDirectionalLightState.direction[2];
@@ -569,7 +569,7 @@ bool NRIPassDispatcher::DispatchDenoiser(NRIPassDispatchContext& context)
 	desc.maxBlurRadius = denoiserSettings.maxBlurRadius;
 	desc.sigmaMaxStabilizedFrameNum = denoiserSettings.sigmaMaxStabilizedFrameNum;
 	desc.sigmaPlaneDistanceSensitivity = denoiserSettings.sigmaPlaneDistanceSensitivity;
-	desc.resetHistory = context.mResetHistory;
+	desc.resetHistory = context.mFrame.resetHistory;
 	desc.enableAntiFirefly = denoiserSettings.enableAntiFirefly;
 	desc.enableValidation = denoiserSettings.enableValidation;
 	desc.enableSigmaShadow = context.mUseSplitShadowDenoiser;
@@ -584,36 +584,36 @@ bool NRIPassDispatcher::DispatchComposition(NRIPassDispatchContext& context, NRI
 
 	NRITraceSceneConstants constants = {};
 	const NRIDenoiserSettings denoiserSettings = BuildNRIDenoiserSettingsFromCVars();
-	Copy3(context.mCurrentCameraPos, constants.CameraPos);
-	Copy3(context.mCurrentCameraForward, constants.CameraForward);
-	Copy3(context.mCurrentCameraRight, constants.CameraRight);
-	Copy3(context.mCurrentCameraUp, constants.CameraUp);
-	Copy3(context.mPreviousCameraPos, constants.PrevCameraPos);
-	Copy3(context.mPreviousCameraForward, constants.PrevCameraForward);
-	Copy3(context.mPreviousCameraRight, constants.PrevCameraRight);
-	Copy3(context.mPreviousCameraUp, constants.PrevCameraUp);
-	constants.RenderWidth = context.mRenderWidth;
-	constants.RenderHeight = context.mRenderHeight;
-	constants.DisplayWidth = context.mOutputWidth;
-	constants.DisplayHeight = context.mOutputHeight;
-	constants.TanHalfFovX = context.mCurrentTanHalfFovX;
-	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
-	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
-	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
-	constants.FrameIndex = context.mFrameIndex;
+	Copy3(context.mFrame.currentCameraPos.data(), constants.CameraPos);
+	Copy3(context.mFrame.currentCameraForward.data(), constants.CameraForward);
+	Copy3(context.mFrame.currentCameraRight.data(), constants.CameraRight);
+	Copy3(context.mFrame.currentCameraUp.data(), constants.CameraUp);
+	Copy3(context.mFrame.previousCameraPos.data(), constants.PrevCameraPos);
+	Copy3(context.mFrame.previousCameraForward.data(), constants.PrevCameraForward);
+	Copy3(context.mFrame.previousCameraRight.data(), constants.PrevCameraRight);
+	Copy3(context.mFrame.previousCameraUp.data(), constants.PrevCameraUp);
+	constants.RenderWidth = context.mFrame.renderWidth;
+	constants.RenderHeight = context.mFrame.renderHeight;
+	constants.DisplayWidth = context.mFrame.outputWidth;
+	constants.DisplayHeight = context.mFrame.outputHeight;
+	constants.TanHalfFovX = context.mFrame.currentTanHalfFovX;
+	constants.TanHalfFovY = context.mFrame.currentTanHalfFovY;
+	constants.PrevTanHalfFovX = context.mFrame.previousTanHalfFovX;
+	constants.PrevTanHalfFovY = context.mFrame.previousTanHalfFovY;
+	constants.FrameIndex = context.mFrame.frameIndex;
 	constants.Flags =
-		(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(context.mFrame.resetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(context.mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
 		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
 		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, context.mDirectionalLightState.color);
-	constants.RuntimeLightCount = context.mBoundRuntimeLightCount;
+	constants.RuntimeLightCount = context.mSceneStats.runtimeLightCount;
 	constants.ReservedTrace0 = denoiserSettings.inputSplitMode;
 	constants.ReservedTrace1 = PackDenoiserAux1((uint32_t)denoiserSettings.denoiserMode, context.mDirectionalLightState.angularSize);
-	Copy3(context.mSkyColor, constants.SkyColor);
-	Copy3(context.mGroundColor, constants.GroundColor);
+	Copy3(context.mFrame.skyColor.data(), constants.SkyColor);
+	Copy3(context.mFrame.groundColor.data(), constants.GroundColor);
 	ApplyDirectionalLightStateToConstants(context.mDirectionalLightState, constants);
 
 	NRITextureResource& diffuse = context.mTextures.Get(NRIRenderer::FrameTextureSlot::UnfilteredDiffuse);
@@ -674,7 +674,7 @@ bool NRIPassDispatcher::DispatchComposition(NRIPassDispatchContext& context, NRI
 	context.mCommands.SetDescriptorSet(3, context.mCompositionFrameTextureSet);
 	context.mCommands.SetDescriptorSet(4, context.mCompositionOutputSet);
 	context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::Composition));
-	context.mCommands.Dispatch(GetDispatchSize(context.mRenderWidth), GetDispatchSize(context.mRenderHeight), 1);
+	context.mCommands.Dispatch(GetDispatchSize(context.mFrame.renderWidth), GetDispatchSize(context.mFrame.renderHeight), 1);
 	return true;
 }
 
@@ -761,17 +761,17 @@ bool NRIPassDispatcher::DispatchUpscalerPrepass(NRIPassDispatchContext& context,
 	}
 
 	NRITraceSceneConstants constants = {};
-	constants.RenderWidth = context.mRenderWidth;
-	constants.RenderHeight = context.mRenderHeight;
-	constants.DisplayWidth = context.mOutputWidth;
-	constants.DisplayHeight = context.mOutputHeight;
-	constants.FrameIndex = context.mFrameIndex;
+	constants.RenderWidth = context.mFrame.renderWidth;
+	constants.RenderHeight = context.mFrame.renderHeight;
+	constants.DisplayWidth = context.mFrame.outputWidth;
+	constants.DisplayHeight = context.mFrame.outputHeight;
+	constants.FrameIndex = context.mFrame.frameIndex;
 	constants.ReservedTrace0 =
 		mainKind == NRIMainUpscalerKind::DLSR ? 1u :
 		mainKind == NRIMainUpscalerKind::DLRR ? 2u :
 		0u;
 	constants.ReservedTrace1 = (uint32_t)GetSelectedNrdDenoiserMode();
-	constants.Flags = context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
+	constants.Flags = context.mFrame.resetHistory ? NRI_FLAG_RESET_HISTORY : 0u;
 	context.mCommands.SetPipelineLayout(context.mPipelineLayout);
 	context.mCommands.SetRootConstants(&constants, sizeof(constants));
 	context.mSceneBinding.BindSceneRootDescriptors();
@@ -781,7 +781,7 @@ bool NRIPassDispatcher::DispatchUpscalerPrepass(NRIPassDispatchContext& context,
 	context.mCommands.SetDescriptorSet(3, context.mUpscalerPrepassFrameTextureSet);
 	context.mCommands.SetDescriptorSet(4, context.mUpscalerPrepassOutputSet);
 	context.mCommands.SetPipeline(context.mPipelines.Get(useSrPrepass ? NRIRenderer::PipelineSlot::DlssSrBefore : NRIRenderer::PipelineSlot::DlssBefore));
-	context.mCommands.Dispatch(GetDispatchSize(context.mRenderWidth), GetDispatchSize(context.mRenderHeight), 1);
+	context.mCommands.Dispatch(GetDispatchSize(context.mFrame.renderWidth), GetDispatchSize(context.mFrame.renderHeight), 1);
 	return true;
 }
 
@@ -793,11 +793,11 @@ bool NRIPassDispatcher::DispatchRawPresent(NRIPassDispatchContext& context, NRIR
 
 	NRIPresentConstants constants = {};
 	ApplyOutputPolicyToPresentConstants(context.mResources.GetOutputPolicy(), constants);
-	constants.DisplayWidth = context.mOutputWidth;
-	constants.DisplayHeight = context.mOutputHeight;
-	constants.FrameIndex = context.mFrameIndex;
+	constants.DisplayWidth = context.mFrame.outputWidth;
+	constants.DisplayHeight = context.mFrame.outputHeight;
+	constants.FrameIndex = context.mFrame.frameIndex;
 	constants.DebugMode = GetEffectivePtDebugMode();
-	constants.PackedSceneOrigin = PackPresentSceneOrigin(context.mSceneLeft, context.mSceneTop);
+	constants.PackedSceneOrigin = PackPresentSceneOrigin(context.mFrame.sceneLeft, context.mFrame.sceneTop);
 	constants.DenoiserMode = (uint32_t)GetSelectedNrdDenoiserMode();
 
 	NRITextureResource& input = context.mTextures.Get(inputSlot);
@@ -847,7 +847,7 @@ bool NRIPassDispatcher::DispatchRawPresent(NRIPassDispatchContext& context, NRIR
 	context.mCommands.SetDescriptorSet(0, context.mRawPresentFrameTextureSet);
 	context.mCommands.SetDescriptorSet(1, context.mRawPresentOutputSet);
 	context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::RawPresent));
-	context.mCommands.Dispatch(GetDispatchSize(context.mTargetWidth), GetDispatchSize(context.mTargetHeight), 1);
+	context.mCommands.Dispatch(GetDispatchSize(context.mFrame.targetWidth), GetDispatchSize(context.mFrame.targetHeight), 1);
 	return true;
 }
 
@@ -872,7 +872,7 @@ bool NRIPassDispatcher::DispatchFinalPresent(NRIPassDispatchContext& context, NR
 	NRITextureResource* exposureStateTexture = nullptr;
 	if (finalPresentAutoExposureEligible)
 	{
-		NRITextureResource& candidateExposureState = context.mExposure.GetMutableExposureStateTexture(context.mFrameIndex & 1u);
+		NRITextureResource& candidateExposureState = context.mExposure.GetMutableExposureStateTexture(context.mFrame.frameIndex & 1u);
 		if (candidateExposureState.texture != nullptr)
 		{
 			exposureStateTexture = &candidateExposureState;
@@ -885,11 +885,11 @@ bool NRIPassDispatcher::DispatchFinalPresent(NRIPassDispatchContext& context, NR
 		(finalPresentAutoExposureEligible ? NRI_PRESENT_OUTPUT_FLAG_AUTO_EXPOSURE : 0u) |
 		(exposureStateTextureValid ? NRI_PRESENT_OUTPUT_FLAG_EXPOSURE_TEXTURE_VALID : 0u) |
 		(finalPresentInputPreExposed ? NRI_PRESENT_OUTPUT_FLAG_INPUT_PRE_EXPOSED : 0u);
-	constants.DisplayWidth = context.mOutputWidth;
-	constants.DisplayHeight = context.mOutputHeight;
-	constants.FrameIndex = context.mFrameIndex;
+	constants.DisplayWidth = context.mFrame.outputWidth;
+	constants.DisplayHeight = context.mFrame.outputHeight;
+	constants.FrameIndex = context.mFrame.frameIndex;
 	constants.DebugMode = GetEffectivePtDebugMode();
-	constants.PackedSceneOrigin = PackPresentSceneOrigin(context.mSceneLeft, context.mSceneTop);
+	constants.PackedSceneOrigin = PackPresentSceneOrigin(context.mFrame.sceneLeft, context.mFrame.sceneTop);
 
 	NRITextureResource& input = context.mTextures.Get(inputSlot);
 	NRITextureResource& final = context.mTextures.Get(NRIRenderer::FrameTextureSlot::Final);
@@ -928,7 +928,7 @@ bool NRIPassDispatcher::DispatchFinalPresent(NRIPassDispatchContext& context, NR
 	context.mCommands.SetDescriptorSet(0, context.mFinalPresentFrameTextureSet);
 	context.mCommands.SetDescriptorSet(1, context.mFinalPresentOutputSet);
 	context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::FinalPresent));
-	context.mCommands.Dispatch(GetDispatchSize(context.mTargetWidth), GetDispatchSize(context.mTargetHeight), 1);
+	context.mCommands.Dispatch(GetDispatchSize(context.mFrame.targetWidth), GetDispatchSize(context.mFrame.targetHeight), 1);
 	return true;
 }
 
@@ -941,7 +941,7 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 	const NRIMainUpscalerKind mainKind = context.mUpscalerService.ResolveMainUpscalerKind(true);
 	const NRIPostSharpenKind postSharpenKind = context.mUpscalerService.ResolvePostSharpenKind(true);
 	const bool runAppTaa = NRIShouldRunAppTaa(mainKind);
-	const bool useAppTaaJitter = runAppTaa && !context.mGuiCaptureActive;
+	const bool useAppTaaJitter = runAppTaa && !context.mFrame.guiCaptureActive;
 	NRITextureResource& composed = context.mTextures.Get(NRIRenderer::FrameTextureSlot::TraceTransparentOutput);
 	const NRIRenderer::FrameTextureSlot vendorSourceSlot =
 		mainKind == NRIMainUpscalerKind::DLRR ? NRIRenderer::FrameTextureSlot::RrInput :
@@ -953,21 +953,21 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 	if (runAppTaa)
 	{
 		NRITemporalConstants constants = {};
-		constants.RenderWidth = context.mRenderWidth;
-		constants.RenderHeight = context.mRenderHeight;
-		constants.FrameIndex = context.mFrameIndex;
+		constants.RenderWidth = context.mFrame.renderWidth;
+		constants.RenderHeight = context.mFrame.renderHeight;
+		constants.FrameIndex = context.mFrame.frameIndex;
 		constants.Flags =
-			(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+			(context.mFrame.resetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 			(useAppTaaJitter ? NRI_FLAG_USE_JITTER : 0u) |
 			NRIPackTemporalJitterPhaseCount(NRIGetTemporalJitterPhaseCount(
 				mainKind,
 				NRIResolveUpscalerModeForMain(mainKind, context.mUpscalerService.GetSelectedUpscalerMode()),
-				context.mGuiCaptureActive));
+				context.mFrame.guiCaptureActive));
 		constants.Exposure = GetTemporalExposure(context.mResources.GetOutputPolicy());
 		NRITextureResource* exposureStateTexture = nullptr;
 		if (context.mExposure.GetSettings().enabled)
 		{
-			NRITextureResource& candidateExposureState = context.mExposure.GetMutableExposureStateTexture(context.mFrameIndex & 1u);
+			NRITextureResource& candidateExposureState = context.mExposure.GetMutableExposureStateTexture(context.mFrame.frameIndex & 1u);
 			if (candidateExposureState.texture != nullptr)
 			{
 				exposureStateTexture = &candidateExposureState;
@@ -1015,7 +1015,7 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 		context.mCommands.SetDescriptorSet(0, context.mTaaFrameTextureSet);
 		context.mCommands.SetDescriptorSet(1, context.mTaaOutputSet);
 		context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::Taa));
-		context.mCommands.Dispatch(GetDispatchSize(context.mRenderWidth), GetDispatchSize(context.mRenderHeight), 1);
+		context.mCommands.Dispatch(GetDispatchSize(context.mFrame.renderWidth), GetDispatchSize(context.mFrame.renderHeight), 1);
 	}
 	else if (mainKind == NRIMainUpscalerKind::Off)
 	{
@@ -1049,7 +1049,7 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 		NRITextureResource* vendorExposure = nullptr;
 		if (context.mExposure.GetSettings().enabled)
 		{
-			NRITextureResource& candidateExposureState = context.mExposure.GetMutableExposureStateTexture(context.mFrameIndex & 1u);
+			NRITextureResource& candidateExposureState = context.mExposure.GetMutableExposureStateTexture(context.mFrame.frameIndex & 1u);
 			if (candidateExposureState.texture != nullptr && candidateExposureState.shaderView != nullptr)
 			{
 				vendorExposure = &candidateExposureState;
@@ -1075,7 +1075,7 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 		context.mResources.TransitionTexture(vendorOutput, NRIComputeStorageState());
 
 		const nri::UpscalerMode resolvedUpscalerMode = NRIResolveUpscalerModeForMain(mainKind, context.mUpscalerService.GetSelectedUpscalerMode());
-		if (!context.mUpscalerService.EnsureMainUpscaler(mainKind, resolvedUpscalerMode, context.mOutputWidth, context.mOutputHeight, vendorExposure != nullptr))
+		if (!context.mUpscalerService.EnsureMainUpscaler(mainKind, resolvedUpscalerMode, context.mFrame.outputWidth, context.mFrame.outputHeight, vendorExposure != nullptr))
 		{
 			return false;
 		}
@@ -1091,13 +1091,13 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 		upscalerDesc.diffuseAlbedo = &rrGuideDiffuseAlbedo;
 		upscalerDesc.specularAlbedo = &rrGuideSpecularAlbedo;
 		upscalerDesc.specularHitDistance = &rrGuideSpecularHitDistance;
-		upscalerDesc.currentWidth = context.mRenderWidth;
-		upscalerDesc.currentHeight = context.mRenderHeight;
-		Copy2(context.mCurrentJitter, upscalerDesc.cameraJitter);
-		std::memcpy(upscalerDesc.viewToClipMatrix, context.mCurrentViewToClip, sizeof(upscalerDesc.viewToClipMatrix));
-		std::memcpy(upscalerDesc.worldToViewMatrix, context.mCurrentWorldToView, sizeof(upscalerDesc.worldToViewMatrix));
+		upscalerDesc.currentWidth = context.mFrame.renderWidth;
+		upscalerDesc.currentHeight = context.mFrame.renderHeight;
+		Copy2(context.mFrame.currentJitter.data(), upscalerDesc.cameraJitter);
+		std::memcpy(upscalerDesc.viewToClipMatrix, context.mFrame.currentViewToClip.data(), sizeof(upscalerDesc.viewToClipMatrix));
+		std::memcpy(upscalerDesc.worldToViewMatrix, context.mFrame.currentWorldToView.data(), sizeof(upscalerDesc.worldToViewMatrix));
 		upscalerDesc.sharpness = Clamp01((float)nri_sharpness);
-		upscalerDesc.resetHistory = context.mResetHistory;
+		upscalerDesc.resetHistory = context.mFrame.resetHistory;
 		if (!context.mUpscalerService.DispatchMainUpscaler(mainKind, upscalerDesc))
 		{
 			return false;
@@ -1125,7 +1125,7 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 	NRITextureResource& postOutput = context.mTextures.Get(NRIRenderer::FrameTextureSlot::PostSharpenOutput);
 	context.mResources.TransitionTexture(postInput, NRIComputeShaderResourceState());
 	context.mResources.TransitionTexture(postOutput, NRIComputeStorageState());
-	if (!context.mUpscalerService.EnsurePostSharpen(postSharpenKind, context.mOutputWidth, context.mOutputHeight))
+	if (!context.mUpscalerService.EnsurePostSharpen(postSharpenKind, context.mFrame.outputWidth, context.mFrame.outputHeight))
 	{
 		return false;
 	}
@@ -1136,9 +1136,9 @@ bool NRIPassDispatcher::DispatchUpscaleChain(NRIPassDispatchContext& context)
 	postDesc.output = &postOutput;
 	postDesc.currentWidth = postInput.width;
 	postDesc.currentHeight = postInput.height;
-	Copy2(context.mCurrentJitter, postDesc.cameraJitter);
+	Copy2(context.mFrame.currentJitter.data(), postDesc.cameraJitter);
 	postDesc.sharpness = Clamp01((float)nri_sharpness);
-	postDesc.resetHistory = context.mResetHistory;
+	postDesc.resetHistory = context.mFrame.resetHistory;
 	if (!context.mUpscalerService.DispatchPostSharpen(postSharpenKind, postDesc))
 	{
 		return false;
@@ -1159,43 +1159,43 @@ bool NRIPassDispatcher::DispatchFinal(NRIPassDispatchContext& context)
 	NRITraceSceneConstants constants = {};
 	const uint32_t bootstrapMode = nri_ptbootstrap ? GetBootstrapMode() : 0u;
 	const bool presentRawTrace = (!nri_ptbootstrap && !context.mUseUpscaledInFinal) || bootstrapMode >= 13u;
-	Copy3(context.mCurrentCameraPos, constants.CameraPos);
-	Copy3(context.mCurrentCameraForward, constants.CameraForward);
-	Copy3(context.mCurrentCameraRight, constants.CameraRight);
-	Copy3(context.mCurrentCameraUp, constants.CameraUp);
-	Copy3(context.mPreviousCameraPos, constants.PrevCameraPos);
-	Copy3(context.mPreviousCameraForward, constants.PrevCameraForward);
-	Copy3(context.mPreviousCameraRight, constants.PrevCameraRight);
-	Copy3(context.mPreviousCameraUp, constants.PrevCameraUp);
-	constants.RenderWidth = context.mRenderWidth;
-	constants.RenderHeight = context.mRenderHeight;
-	constants.DisplayWidth = context.mOutputWidth;
-	constants.DisplayHeight = context.mOutputHeight;
-	constants.TanHalfFovX = context.mCurrentTanHalfFovX;
-	constants.TanHalfFovY = context.mCurrentTanHalfFovY;
-	constants.PrevTanHalfFovX = context.mPreviousTanHalfFovX;
-	constants.PrevTanHalfFovY = context.mPreviousTanHalfFovY;
-	constants.SceneInstanceCount = context.mSceneInstanceCount;
-	constants.StaticPrimitiveCount = context.mBoundStaticPrimitiveCount;
-	constants.DynamicPrimitiveCount = context.mBoundDynamicPrimitiveCount;
-	constants.FrameIndex = context.mFrameIndex;
+	Copy3(context.mFrame.currentCameraPos.data(), constants.CameraPos);
+	Copy3(context.mFrame.currentCameraForward.data(), constants.CameraForward);
+	Copy3(context.mFrame.currentCameraRight.data(), constants.CameraRight);
+	Copy3(context.mFrame.currentCameraUp.data(), constants.CameraUp);
+	Copy3(context.mFrame.previousCameraPos.data(), constants.PrevCameraPos);
+	Copy3(context.mFrame.previousCameraForward.data(), constants.PrevCameraForward);
+	Copy3(context.mFrame.previousCameraRight.data(), constants.PrevCameraRight);
+	Copy3(context.mFrame.previousCameraUp.data(), constants.PrevCameraUp);
+	constants.RenderWidth = context.mFrame.renderWidth;
+	constants.RenderHeight = context.mFrame.renderHeight;
+	constants.DisplayWidth = context.mFrame.outputWidth;
+	constants.DisplayHeight = context.mFrame.outputHeight;
+	constants.TanHalfFovX = context.mFrame.currentTanHalfFovX;
+	constants.TanHalfFovY = context.mFrame.currentTanHalfFovY;
+	constants.PrevTanHalfFovX = context.mFrame.previousTanHalfFovX;
+	constants.PrevTanHalfFovY = context.mFrame.previousTanHalfFovY;
+	constants.SceneInstanceCount = context.mSceneStats.sceneInstanceCount;
+	constants.StaticPrimitiveCount = context.mSceneStats.staticPrimitiveCount;
+	constants.DynamicPrimitiveCount = context.mSceneStats.dynamicPrimitiveCount;
+	constants.FrameIndex = context.mFrame.frameIndex;
 	constants.Flags =
-		(context.mResetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
+		(context.mFrame.resetHistory ? NRI_FLAG_RESET_HISTORY : 0u) |
 		(context.mUseUpscaledInFinal ? NRI_FLAG_USE_UPSCALED : 0u) |
 		(presentRawTrace ? NRI_FLAG_PRESENT_RAW_TRACE : 0u) |
 		(context.mUseSplitShadowDenoiser ? NRI_FLAG_SPLIT_SHADOW_DENOISER : 0u) |
 		(context.mDirectionalLightState.enabled ? NRI_FLAG_DIRECTIONAL_LIGHT : 0u) |
 		(context.mDirectionalLightState.enabled && context.mDirectionalLightState.shadow ? NRI_FLAG_DIRECTIONAL_LIGHT_SHADOW : 0u);
-	constants.StaticMaterialCount = context.mBoundStaticMaterialCount;
+	constants.StaticMaterialCount = context.mSceneStats.staticMaterialCount;
 	constants.DebugMode = GetEffectivePtDebugMode();
 	constants.BootstrapMode = bootstrapMode;
-	constants.DynamicMaterialCount = context.mBoundDynamicMaterialCount;
+	constants.DynamicMaterialCount = context.mSceneStats.dynamicMaterialCount;
 	constants.BounceCounts = PackTraceBounceCounts(0u, 0u, context.mDirectionalLightState.color);
-	constants.RuntimeLightCount = context.mBoundRuntimeLightCount;
-	constants.ReservedTrace0 = (uint16_t)(int16_t)context.mSceneLeft | ((uint32_t)(uint16_t)(int16_t)context.mSceneTop << 16);
+	constants.RuntimeLightCount = context.mSceneStats.runtimeLightCount;
+	constants.ReservedTrace0 = (uint16_t)(int16_t)context.mFrame.sceneLeft | ((uint32_t)(uint16_t)(int16_t)context.mFrame.sceneTop << 16);
 	constants.ReservedTrace1 = PackDenoiserAux1(0u, context.mDirectionalLightState.angularSize);
-	Copy3(context.mSkyColor, constants.SkyColor);
-	Copy3(context.mGroundColor, constants.GroundColor);
+	Copy3(context.mFrame.skyColor.data(), constants.SkyColor);
+	Copy3(context.mFrame.groundColor.data(), constants.GroundColor);
 	ApplyDirectionalLightStateToConstants(context.mDirectionalLightState, constants);
 
 	NRITextureResource& history = context.mTextures.Get(context.mHistoryOutputSlot);
@@ -1258,6 +1258,6 @@ bool NRIPassDispatcher::DispatchFinal(NRIPassDispatchContext& context)
 	context.mCommands.SetDescriptorSet(3, context.mFrameTextureSet);
 	context.mCommands.SetDescriptorSet(4, context.mOutputSet);
 	context.mCommands.SetPipeline(context.mPipelines.Get(NRIRenderer::PipelineSlot::Final));
-	context.mCommands.Dispatch(GetDispatchSize(context.mTargetWidth), GetDispatchSize(context.mTargetHeight), 1);
+	context.mCommands.Dispatch(GetDispatchSize(context.mFrame.targetWidth), GetDispatchSize(context.mFrame.targetHeight), 1);
 	return true;
 }
