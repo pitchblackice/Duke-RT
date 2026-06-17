@@ -2,6 +2,7 @@
 
 #include "nri_renderer.h"
 #include "../scene/nri_map_world.h"
+#include "nri_cvars.h"
 #include "nri_diagnostic_names.h"
 #include "nri_map_chunk_diagnostics.h"
 #include "nri_runtime_mutation.h"
@@ -320,7 +321,9 @@ NRIMapChunkCompareSnapshot NRIRenderer::BuildMapChunkCompareSnapshot(int32_t chu
 	const auto& staticChunk = mMapWorld.chunks[(unsigned)chunkIndex];
 	nri_scene::PTMapWorld liveWorld = {};
 	nri_scene::PTMapWorldStats liveStats = {};
-	if (!nri_scene::BuildLiveMapChunkWorld(staticChunk, liveWorld, &liveStats) ||
+	nri_scene::PTMapBuildOptions mapBuildOptions = {};
+	mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
+	if (!nri_scene::BuildLiveMapChunkWorld(staticChunk, liveWorld, &liveStats, mapBuildOptions) ||
 		liveWorld.chunks.empty())
 	{
 		return snapshot;

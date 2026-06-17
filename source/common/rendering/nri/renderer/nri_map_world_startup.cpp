@@ -205,7 +205,9 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	}
 
 	nri_scene::PTMapWorld correctedWorld = {};
-	if (!nri_scene::BuildMapWorld(correctedWorld))
+	nri_scene::PTMapBuildOptions mapBuildOptions = {};
+	mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
+	if (!nri_scene::BuildMapWorld(correctedWorld, mapBuildOptions))
 	{
 		Printf(TEXTCOLOR_RED "NRI PT startup world correction: authoritative rebuild failed for %s trigger=%s frame=%u.\n",
 			currentLevel != nullptr ? currentLevel->labelName.GetChars() : "(none)",
@@ -308,4 +310,3 @@ bool NRIRenderer::ApplyStartupMapWorldCorrectionIfNeeded(const char* trigger)
 	}
 	return true;
 }
-

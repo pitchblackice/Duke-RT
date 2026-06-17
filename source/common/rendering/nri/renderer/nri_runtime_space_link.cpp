@@ -389,7 +389,9 @@ bool NRIRenderer::BuildRuntimeSpaceLinkOverlay(HWDrawInfo& di, nri_scene::Geomet
 
 		nri_scene::SceneView liveChunkView;
 		nri_scene::PTMapWorldStats liveStats = {};
-		if (!nri_scene::BuildLiveMapChunkSceneView(mMapWorld.chunks[link.chunkIndex], liveChunkView, &liveStats))
+		nri_scene::PTMapBuildOptions mapBuildOptions = {};
+		mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
+		if (!nri_scene::BuildLiveMapChunkSceneView(mMapWorld.chunks[link.chunkIndex], liveChunkView, &liveStats, mapBuildOptions))
 		{
 			continue;
 		}

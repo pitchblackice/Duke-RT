@@ -3159,7 +3159,9 @@ void NRIRenderer::RefreshMapWorld()
 	mStartupMutationRebaselineDeadlineFrame = 0;
 
 	nri_scene::PTMapWorld world;
-	if (!nri_scene::BuildMapWorld(world))
+	nri_scene::PTMapBuildOptions mapBuildOptions = {};
+	mapBuildOptions.wallMirrorsAsReflectiveMaterials = (bool)nri_ptmirrormaterialmode;
+	if (!nri_scene::BuildMapWorld(world, mapBuildOptions))
 	{
 		if (pendingBuildSerial != mObservedMapWorldBuildSerial || levelChanged)
 		{

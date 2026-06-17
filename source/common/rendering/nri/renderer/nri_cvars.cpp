@@ -1,6 +1,7 @@
 #include "nri_cvars.h"
 
 #include "nri_settings_profiles.h"
+#include "../scene/nri_map_builder.h"
 #include "../system/nri_renderdevice.h"
 #include "printf.h"
 #include "v_video.h"
@@ -998,7 +999,10 @@ CVAR(Int, nri_ptmirrorbounces, 8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Experimental mirror policy gate. False preserves the legacy PT mirror
 // traversal/overlay path; true suppresses mirror-only overlay work while wall
 // mirrors are converted to standard reflective primary-hit materials.
-CVAR(Bool, nri_ptmirrormaterialmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Bool, nri_ptmirrormaterialmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	nri_scene::NotifyLevelGeometryReady();
+}
 
 CUSTOM_CVAR(Float, nri_ptmirrordynamicdistance, 2048.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {

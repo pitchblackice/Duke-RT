@@ -84,11 +84,16 @@ struct PTMapChunkMutationAnalysis
 	bool signatureChanged = false;
 };
 
+struct PTMapBuildOptions
+{
+	bool wallMirrorsAsReflectiveMaterials = false;
+};
+
 void NotifyLevelGeometryReady();
 uint64_t GetPendingLevelGeometryBuildSerial();
-bool BuildMapWorld(PTMapWorld& outWorld);
-bool BuildLiveMapChunkWorld(const PTMapChunk& chunk, PTMapWorld& outWorld, PTMapWorldStats* outStats = nullptr);
-bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTMapWorldStats* outStats = nullptr);
+bool BuildMapWorld(PTMapWorld& outWorld, const PTMapBuildOptions& options = {});
+bool BuildLiveMapChunkWorld(const PTMapChunk& chunk, PTMapWorld& outWorld, PTMapWorldStats* outStats = nullptr, const PTMapBuildOptions& options = {});
+bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTMapWorldStats* outStats = nullptr, const PTMapBuildOptions& options = {});
 uint64_t ComputeMapChunkGeometrySignature(const PTMapChunk& chunk);
 bool CaptureMapChunkMutationBaseline(const PTMapChunk& chunk, PTMapChunkMutationBaseline& outBaseline);
 bool AnalyzeMapChunkMutation(const PTMapChunk& chunk, const PTMapChunkMutationBaseline& baseline, PTMapChunkMutationAnalysis& outAnalysis);

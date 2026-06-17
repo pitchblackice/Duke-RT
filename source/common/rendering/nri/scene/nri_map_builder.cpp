@@ -186,6 +186,13 @@ namespace
 		}
 	}
 
+	bool ShouldTranslateWallMirrorAsMaterial(const PTMapBuildOptions& options, const walltype* wal)
+	{
+		return options.wallMirrorsAsReflectiveMaterials &&
+			wal != nullptr &&
+			wal->portalflags == PORTAL_WALL_MIRROR;
+	}
+
 	bool IsPortalPlane(const sectortype* sec, int plane)
 	{
 		if (sec == nullptr)
@@ -229,6 +236,25 @@ namespace
 		}
 
 		return TexMan.GetGameTexture(plane == 0 ? sec->floortexture : sec->ceilingtexture, true);
+	}
+
+	FGameTexture* ResolveMirrorWallTexture(const walltype* wal)
+	{
+		if (wal == nullptr)
+		{
+			return nullptr;
+		}
+
+		if (wal->overtexture.isValid())
+		{
+			FGameTexture* texture = TexMan.GetGameTexture(wal->overtexture, true);
+			if (texture != nullptr && texture->isValid())
+			{
+				return texture;
+			}
+		}
+
+		return TexMan.GetGameTexture(wal->walltexture, true);
 	}
 
 	uint32_t GetPlaneMaterialFlags(const sectortype* sec, int plane)
@@ -522,7 +548,7 @@ namespace
 		AppendSurface(outWorld, chunk, std::move(surface));
 	}
 
-	void BuildWallGeometry(PTMapWorld& outWorld, PTMapChunk& chunk, sectortype* frontSector, walltype* wal)
+	void BuildWallGeometry(PTMapWorld& outWorld, PTMapChunk& chunk, sectortype* frontSector, walltype* wal, const PTMapBuildOptions& options)
 	{
 		if (frontSector == nullptr || wal == nullptr)
 		{
@@ -537,6 +563,34 @@ namespace
 		float frontFloorRight = 0.0f;
 		PlanesAtPoint(frontSector, wal->pos.X, wal->pos.Y, &frontCeilingLeft, &frontFloorLeft);
 		PlanesAtPoint(frontSector, wal->point2Wall()->pos.X, wal->point2Wall()->pos.Y, &frontCeilingRight, &frontFloorRight);
+
+		if (ShouldTranslateWallMirrorAsMaterial(options, wal))
+		{
+			FGameTexture* texture = ResolveMirrorWallTexture(wal);
+			if (texture == nullptr || !texture->isValid())
+			{
+				return;
+			}
+
+			PTWallBandDesc mirrorDesc = {};
+			mirrorDesc.surfaceKind = PTMapSurfaceKind::WallOneSided;
+			mirrorDesc.bandKind = PTWallBandKind::OneSided;
+			mirrorDesc.wall = wal;
+			mirrorDesc.refWall = wal;
+			mirrorDesc.frontSector = frontSector;
+			mirrorDesc.backSector = backSector;
+			mirrorDesc.texture = texture;
+			mirrorDesc.shade = wal->shade;
+			mirrorDesc.palette = wal->pal;
+			mirrorDesc.materialFlags = MaterialFlag_Mirror;
+			mirrorDesc.topLeft = frontCeilingLeft;
+			mirrorDesc.topRight = frontCeilingRight;
+			mirrorDesc.bottomLeft = frontFloorLeft;
+			mirrorDesc.bottomRight = frontFloorRight;
+			mirrorDesc.referenceHeight = (wal->cstat & CSTAT_WALL_ALIGN_BOTTOM) != 0 ? frontSector->floorz : frontSector->ceilingz;
+			TryAppendWallBand(outWorld, chunk, mirrorDesc);
+			return;
+		}
 
 		if (IsPortalWall(wal))
 		{
@@ -735,7 +789,7 @@ namespace
 		}
 	}
 
-	bool BuildSectorChunk(PTMapWorld& outWorld, uint32_t sectorIndex, uint32_t chunkIndex, PTMapChunk& outChunk)
+	bool BuildSectorChunk(PTMapWorld& outWorld, uint32_t sectorIndex, uint32_t chunkIndex, PTMapChunk& outChunk, const PTMapBuildOptions& options)
 	{
 		if (sectorIndex >= sector.Size() || sectorIndex >= sectionsPerSector.Size())
 		{
@@ -760,7 +814,7 @@ namespace
 
 		for (auto& wal : sec->walls)
 		{
-			BuildWallGeometry(outWorld, chunk, sec, &wal);
+			BuildWallGeometry(outWorld, chunk, sec, &wal, options);
 		}
 
 		chunk.surfaceCount = (uint32_t)outWorld.surfaces.size() - chunk.firstSurface;
@@ -941,7 +995,7 @@ namespace
 		portal.targetCount++;
 	}
 
-	void BuildPortalGraph(PTMapWorld& outWorld)
+	void BuildPortalGraph(PTMapWorld& outWorld, const PTMapBuildOptions& options)
 	{
 		outWorld.portals.clear();
 		outWorld.portalTargets.clear();
@@ -965,6 +1019,11 @@ namespace
 
 			for (const walltype& wal : sec.walls)
 			{
+				if (ShouldTranslateWallMirrorAsMaterial(options, &wal))
+				{
+					continue;
+				}
+
 				if (!IsPortalWall(&wal))
 				{
 					continue;
@@ -1306,7 +1365,7 @@ uint64_t GetPendingLevelGeometryBuildSerial()
 	return gPendingLevelGeometryBuildSerial;
 }
 
-bool BuildMapWorld(PTMapWorld& outWorld)
+bool BuildMapWorld(PTMapWorld& outWorld, const PTMapBuildOptions& options)
 {
 	outWorld.Reset();
 	outWorld.level = currentLevel;
@@ -1325,7 +1384,7 @@ bool BuildMapWorld(PTMapWorld& outWorld)
 	for (unsigned sectorIndex = 0; sectorIndex < sector.Size(); ++sectorIndex)
 	{
 		PTMapChunk chunk = {};
-		if (!BuildSectorChunk(outWorld, sectorIndex, (uint32_t)outWorld.chunks.size(), chunk))
+		if (!BuildSectorChunk(outWorld, sectorIndex, (uint32_t)outWorld.chunks.size(), chunk, options))
 		{
 			return false;
 		}
@@ -1334,12 +1393,12 @@ bool BuildMapWorld(PTMapWorld& outWorld)
 	}
 
 	outWorld.stats.chunkCount = (uint32_t)outWorld.chunks.size();
-	BuildPortalGraph(outWorld);
+	BuildPortalGraph(outWorld, options);
 	outWorld.valid = true;
 	return true;
 }
 
-bool BuildLiveMapChunkWorld(const PTMapChunk& chunk, PTMapWorld& outWorld, PTMapWorldStats* outStats)
+bool BuildLiveMapChunkWorld(const PTMapChunk& chunk, PTMapWorld& outWorld, PTMapWorldStats* outStats, const PTMapBuildOptions& options)
 {
 	outWorld = {};
 	if (outStats != nullptr)
@@ -1358,7 +1417,7 @@ bool BuildLiveMapChunkWorld(const PTMapChunk& chunk, PTMapWorld& outWorld, PTMap
 	outWorld.stats.sectionCount = (uint32_t)sections.Size();
 
 	PTMapChunk liveChunk = {};
-	if (!BuildSectorChunk(outWorld, (uint32_t)chunk.sectorIndex, chunk.chunkIndex, liveChunk))
+	if (!BuildSectorChunk(outWorld, (uint32_t)chunk.sectorIndex, chunk.chunkIndex, liveChunk, options))
 	{
 		return false;
 	}
@@ -1375,11 +1434,11 @@ bool BuildLiveMapChunkWorld(const PTMapChunk& chunk, PTMapWorld& outWorld, PTMap
 	return true;
 }
 
-bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTMapWorldStats* outStats)
+bool BuildLiveMapChunkSceneView(const PTMapChunk& chunk, SceneView& outView, PTMapWorldStats* outStats, const PTMapBuildOptions& options)
 {
 	outView = {};
 	PTMapWorld liveWorld = {};
-	if (!BuildLiveMapChunkWorld(chunk, liveWorld, outStats))
+	if (!BuildLiveMapChunkWorld(chunk, liveWorld, outStats, options))
 	{
 		return false;
 	}
