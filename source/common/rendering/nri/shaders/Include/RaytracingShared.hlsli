@@ -642,11 +642,6 @@ bool IsTransparentSurfaceSample(uint materialIndex, uint dataSource, float2 uv)
 	return rawSample.a < 0.5;
 }
 
-bool IsMirrorMaterial(uint materialIndex, uint dataSource)
-{
-	return (GetMaterialData(materialIndex, dataSource).flags & MATERIAL_FLAG_MIRROR) != 0;
-}
-
 uint GetPortalTraversalDepth()
 {
 	return gTraceConstants.PortalDepth & 0xffu;
@@ -1016,9 +1011,8 @@ bool TraceScenePath(float3 startOrigin, float3 startDirection, float maxDistance
 		const bool hasPortalData = ResolvePortalHit(hitData, portalData);
 		const bool reflectivePortal = hasPortalData && portalData.traversalClass == PORTAL_TRAVERSAL_CLASS_REFLECTIVE;
 		const bool transferPortal = hasPortalData && portalData.traversalClass == PORTAL_TRAVERSAL_CLASS_SPACE_TRANSFER;
-		const bool reflectiveSurface = reflectivePortal || IsMirrorMaterial(hitData.materialIndex, hitData.dataSource);
 
-		if (reflectiveSurface && mirrorBudget > 0u)
+		if (reflectivePortal && mirrorBudget > 0u)
 		{
 			remainingDistance = max(remainingDistance - hitData.distance, 0.0);
 			origin = hitData.position + hitData.normal * 0.05;
