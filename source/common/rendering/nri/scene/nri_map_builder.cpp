@@ -257,6 +257,20 @@ namespace
 		return TexMan.GetGameTexture(wal->walltexture, true);
 	}
 
+	FGameTexture* ResolvePlainMirrorMaterialTexture(const walltype* wal)
+	{
+		if (TexMan.mirrorTexture.isValid())
+		{
+			FGameTexture* texture = TexMan.GetGameTexture(TexMan.mirrorTexture, true);
+			if (texture != nullptr && texture->isValid())
+			{
+				return texture;
+			}
+		}
+
+		return ResolveMirrorWallTexture(wal);
+	}
+
 	uint32_t GetPlaneMaterialFlags(const sectortype* sec, int plane)
 	{
 		uint32_t materialFlags = MaterialFlag_Flat;
@@ -566,7 +580,7 @@ namespace
 
 		if (ShouldTranslateWallMirrorAsMaterial(options, wal))
 		{
-			FGameTexture* texture = ResolveMirrorWallTexture(wal);
+			FGameTexture* texture = ResolvePlainMirrorMaterialTexture(wal);
 			if (texture == nullptr || !texture->isValid())
 			{
 				return;
@@ -582,7 +596,7 @@ namespace
 			mirrorDesc.texture = texture;
 			mirrorDesc.shade = wal->shade;
 			mirrorDesc.palette = wal->pal;
-			mirrorDesc.materialFlags = MaterialFlag_Mirror;
+			mirrorDesc.materialFlags = MaterialFlag_Mirror | MaterialFlag_PlainMirror;
 			mirrorDesc.topLeft = frontCeilingLeft;
 			mirrorDesc.topRight = frontCeilingRight;
 			mirrorDesc.bottomLeft = frontFloorLeft;

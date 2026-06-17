@@ -88,8 +88,18 @@ namespace
 		return clamp(roughness, 0.02f, 1.0f);
 	}
 
-	float ComputeMetalnessHint(const MaterialRef&)
+	bool IsPlainMirrorMaterial(const MaterialRef& materialRef)
 	{
+		return (materialRef.flags & MaterialFlag_PlainMirror) != 0;
+	}
+
+	float ComputeMetalnessHint(const MaterialRef& materialRef)
+	{
+		if (IsPlainMirrorMaterial(materialRef))
+		{
+			return 1.0f;
+		}
+
 		// Build surfaces are overwhelmingly non-metallic. Keep this explicit and conservative.
 		return 0.0f;
 	}
@@ -464,6 +474,7 @@ namespace
 		uint64_t roughnessContentKey = 0;
 		const bool inheritedEmissiveSource = materialRef.emissiveSourceTexture != nullptr && materialRef.emissiveSourceTexture != materialRef.texture;
 		FGameTexture* lightingTexture = inheritedEmissiveSource ? materialRef.emissiveSourceTexture : materialRef.texture;
+		const bool useAuxiliaryMaps = !IsPlainMirrorMaterial(materialRef);
 		if (!inheritedEmissiveSource && materialRef.texture != nullptr && materialRef.texture->GetGlowmap() != nullptr)
 		{
 			glowmapTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetGlowmap(), false, textureLookup, outMaterials);
@@ -474,19 +485,19 @@ namespace
 			glowmapTextureIndex = material.textureIndex;
 			glowmapContentKey = outMaterials.textures[material.textureIndex].key;
 		}
-		if (materialRef.texture != nullptr && materialRef.texture->GetMetallic() != nullptr)
+		if (useAuxiliaryMaps && materialRef.texture != nullptr && materialRef.texture->GetMetallic() != nullptr)
 		{
 			metallicTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetMetallic(), false, textureLookup, outMaterials);
 			metallicContentKey = outMaterials.textures[metallicTextureIndex].key;
 			outMaterials.materials.back().metallicTextureIndex = metallicTextureIndex;
 		}
-		if (materialRef.texture != nullptr && materialRef.texture->GetNormalmap() != nullptr)
+		if (useAuxiliaryMaps && materialRef.texture != nullptr && materialRef.texture->GetNormalmap() != nullptr)
 		{
 			normalTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetNormalmap(), false, textureLookup, outMaterials);
 			normalContentKey = outMaterials.textures[normalTextureIndex].key;
 			outMaterials.materials.back().normalTextureIndex = normalTextureIndex;
 		}
-		if (materialRef.texture != nullptr && materialRef.texture->GetRoughness() != nullptr)
+		if (useAuxiliaryMaps && materialRef.texture != nullptr && materialRef.texture->GetRoughness() != nullptr)
 		{
 			roughnessTextureIndex = EnsureTextureUploadIndex(materialRef.texture->GetRoughness(), false, textureLookup, outMaterials);
 			roughnessContentKey = outMaterials.textures[roughnessTextureIndex].key;

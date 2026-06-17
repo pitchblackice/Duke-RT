@@ -565,6 +565,11 @@ float SampleMaterialScalarChannel(MaterialData material, uint textureIndex, floa
 float4 SampleMaterialBaseColor(uint materialIndex, uint dataSource, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex, dataSource);
+	if ((material.flags & MATERIAL_FLAG_PLAIN_MIRROR) != 0)
+	{
+		return float4(1.0, 1.0, 1.0, 1.0);
+	}
+
 	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
 	return SampleMaterialColor(material, material.textureIndex, uv, indexed, true, true);
 }
@@ -572,6 +577,11 @@ float4 SampleMaterialBaseColor(uint materialIndex, uint dataSource, float2 uv)
 float4 SampleMaterialBaseColorRaw(uint materialIndex, uint dataSource, float2 uv)
 {
 	MaterialData material = GetMaterialData(materialIndex, dataSource);
+	if ((material.flags & MATERIAL_FLAG_PLAIN_MIRROR) != 0)
+	{
+		return float4(1.0, 1.0, 1.0, 1.0);
+	}
+
 	const bool indexed = (material.flags & MATERIAL_FLAG_INDEXED) != 0;
 	return SampleMaterialColor(material, material.textureIndex, uv, indexed, false, false);
 }
