@@ -3211,6 +3211,7 @@ SceneLightSystem::RuntimeLightClusterBuildInput NRIRenderer::BuildRuntimeLightCl
 	input.tanHalfFovX = mCurrentTanHalfFovX;
 	input.tanHalfFovY = mCurrentTanHalfFovY;
 	input.mirrorExtendedLightCoverage =
+		!nri_ptmirrormaterialmode &&
 		mHasVisibleMirrorPortalLastFrame &&
 		nri_ptmirrordynamicdistance > 0.0f;
 	input.mirrorExtendedLightDistance = input.mirrorExtendedLightCoverage ? (float)nri_ptmirrordynamicdistance : 0.0f;

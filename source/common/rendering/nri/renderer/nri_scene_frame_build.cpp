@@ -572,7 +572,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 			lastSurfaceProbe.provenance.wallIndex >= 0 ?
 				lastSurfaceProbe.provenance.wallIndex :
 				-1;
-		const NRIMirrorPortalSelectionResult visibleMirrorPortalSelection = !deferOverlayThisFrame ? [&]()
+		const bool mirrorMaterialMode = (bool)nri_ptmirrormaterialmode;
+		const NRIMirrorPortalSelectionResult visibleMirrorPortalSelection = !deferOverlayThisFrame && !mirrorMaterialMode ? [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorPortalMs);
 				NRIMirrorPortalSelectionRequest request = {};
@@ -585,7 +586,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		const uint32_t visibleMirrorPortalCandidates = visibleMirrorPortalSelection.candidateCount;
 		const int32_t selectedVisibleMirrorWallIndex = visibleMirrorPortalSelection.selectedWallIndex;
 		mHasVisibleMirrorPortalLastFrame = visibleMirrorPortal != nullptr;
-		const bool hasMirrorExtendedDynamicScene = !deferOverlayThisFrame && [&]()
+		const bool hasMirrorExtendedDynamicScene = !deferOverlayThisFrame && !mirrorMaterialMode && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorCaptureMs);
 			NRIMirrorExtendedCaptureRequest request = {};
@@ -599,7 +600,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				CaptureNRIMirrorExtendedDynamicScene(request, mirrorExtendedDynamicSceneView);
 			return result.captured;
 		}();
-		const bool hasMirrorPlayerScene = !deferOverlayThisFrame && IsNRIMirrorPlayerPreviewCaptureEnabled() && [&]()
+		const bool hasMirrorPlayerScene = !deferOverlayThisFrame && !mirrorMaterialMode && IsNRIMirrorPlayerPreviewCaptureEnabled() && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorCaptureMs);
 			ScopedPtPerfTimer mirrorPlayerTimer(mLastPerfShellTraceStats.mirrorPlayerCaptureMs);
@@ -1772,4 +1773,3 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 
 	return true;
 }
-
