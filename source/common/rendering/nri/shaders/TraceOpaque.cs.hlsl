@@ -800,9 +800,12 @@ bool TryApplyPlainMirrorPrimaryReplacement(inout HitData hit, float3 primaryRayD
 
 	const float4 mirrorAlbedo = SampleMaterialBaseColor(hit.materialIndex, hit.dataSource, hit.uv);
 	const float mirrorMetalness = GetSurfaceMetalness(mirrorMaterial, hit.uv);
-	mirrorThroughput = GetSurfaceSpecularColor(mirrorAlbedo.rgb, mirrorMetalness);
 	mirrorPlanePosition = hit.position;
 	mirrorPlaneNormal = dot(hit.normal, -primaryRayDirection) >= 0.0 ? normalize(hit.normal) : -normalize(hit.normal);
+	const float3 mirrorSpecularColor = GetSurfaceSpecularColor(mirrorAlbedo.rgb, mirrorMetalness);
+	const float mirrorNoV = saturate(dot(mirrorPlaneNormal, -primaryRayDirection));
+	const float mirrorFresnel = pow(1.0 - mirrorNoV, 5.0);
+	mirrorThroughput = lerp(mirrorSpecularColor, 1.0, mirrorFresnel);
 
 	const float3 reflectedDirection = normalize(reflect(primaryRayDirection, mirrorPlaneNormal));
 	const float3 reflectedOrigin = hit.position + mirrorPlaneNormal * 0.05;
