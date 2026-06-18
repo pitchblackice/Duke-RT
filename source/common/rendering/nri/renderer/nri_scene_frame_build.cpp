@@ -585,7 +585,8 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 				lastSurfaceProbe.provenance.wallIndex :
 				-1;
 		const bool mirrorMaterialMode = (bool)nri_ptmirrormaterialmode;
-		const NRIMirrorPortalSelectionResult visibleMirrorPortalSelection = !deferOverlayThisFrame && !mirrorMaterialMode ? [&]()
+		const bool allowLegacyMirrorOverlay = !deferOverlayThisFrame && !mirrorMaterialMode;
+		const NRIMirrorPortalSelectionResult visibleMirrorPortalSelection = allowLegacyMirrorOverlay ? [&]()
 			{
 				ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorPortalMs);
 				NRIMirrorPortalSelectionRequest request = {};
@@ -598,7 +599,7 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		const uint32_t visibleMirrorPortalCandidates = visibleMirrorPortalSelection.candidateCount;
 		const int32_t selectedVisibleMirrorWallIndex = visibleMirrorPortalSelection.selectedWallIndex;
 		mHasVisibleMirrorPortalLastFrame = visibleMirrorPortal != nullptr;
-		const bool hasMirrorExtendedDynamicScene = !deferOverlayThisFrame && !mirrorMaterialMode && [&]()
+		const bool hasMirrorExtendedDynamicScene = allowLegacyMirrorOverlay && [&]()
 		{
 			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorCaptureMs);
 			NRIMirrorExtendedCaptureRequest request = {};
@@ -614,11 +615,10 @@ bool NRIRenderer::BuildRenderSceneFrame(HWDrawInfo& di, const RenderSceneFrameBu
 		}();
 		const bool shouldCaptureReflectionPlayer =
 			!deferOverlayThisFrame &&
-			((!mirrorMaterialMode && IsNRIMirrorPlayerPreviewCaptureEnabled()) ||
+			((allowLegacyMirrorOverlay && IsNRIMirrorPlayerPreviewCaptureEnabled()) ||
 				(mirrorMaterialMode && HasPlainMirrorMaterialSurfaces(mMapWorld)));
 		const bool hasMirrorPlayerScene = shouldCaptureReflectionPlayer && [&]()
 		{
-			ScopedPtPerfTimer perfTimer(mLastPerfShellTraceStats.sceneSelectMirrorCaptureMs);
 			ScopedPtPerfTimer mirrorPlayerTimer(mLastPerfShellTraceStats.mirrorPlayerCaptureMs);
 			NRIMirrorPlayerCaptureRequest request = {};
 			request.drawInfo = &di;

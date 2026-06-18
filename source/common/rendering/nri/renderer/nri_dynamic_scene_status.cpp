@@ -38,7 +38,7 @@ void NRIRenderer::PrintDynamicSceneStatus() const
 		mDynamicSceneLastFrame.mirrorPlayerMaterialCount,
 		mDynamicSceneLastFrame.mirrorPlayerModelCount,
 		mDynamicSceneLastFrame.mirrorPlayerUnsupportedModelCount,
-		(double)nri_ptmirrordynamicdistance,
+		mirrorMaterialMode ? 0.0 : (double)nri_ptmirrordynamicdistance,
 		mDynamicSceneLastFrame.asBuildCount,
 		mBuiltDynamicSceneASLastFrame ? "yes" : "no",
 		mActiveTlasInstanceCount,
