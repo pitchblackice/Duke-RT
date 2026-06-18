@@ -815,6 +815,15 @@ bool TryApplyPlainMirrorPrimaryReplacement(inout HitData hit, float3 primaryRayD
 	return true;
 }
 
+float3 EvaluatePlainMirrorGlint(float mirrorNoV, float3 directLighting, float3 directEmission)
+{
+	const float3 glareSource = max(directLighting + directEmission, 0.0);
+	const float sourceLuma = dot(glareSource, float3(0.2126, 0.7152, 0.0722));
+	const float sourceGate = smoothstep(0.25, 2.0, sourceLuma);
+	const float grazingGate = 1.0 - smoothstep(0.05, 0.45, mirrorNoV);
+	return glareSource * (sourceGate * grazingGate * 0.35);
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -1168,6 +1177,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 			if (plainMirrorPrimaryReplacement)
 			{
+				const float plainMirrorNoV = saturate(dot(plainMirrorPlaneNormal, -primaryRayDirection));
+				directEmission += EvaluatePlainMirrorGlint(plainMirrorNoV, directLighting, directEmission);
 				diffuse *= plainMirrorThroughput;
 				specular *= plainMirrorThroughput;
 				directLighting *= plainMirrorThroughput;
