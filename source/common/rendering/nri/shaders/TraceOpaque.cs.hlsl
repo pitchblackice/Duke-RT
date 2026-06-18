@@ -771,6 +771,47 @@ float3 TraceIndirectSpecular(HitData surfaceHit, float4 surfaceAlbedo, float3 vi
 	return indirectRadiance;
 }
 
+float3 ReflectPointAcrossPlane(float3 position, float3 planePoint, float3 planeNormal)
+{
+	return position - planeNormal * (2.0 * dot(position - planePoint, planeNormal));
+}
+
+float3 ReflectVectorAcrossPlane(float3 value, float3 planeNormal)
+{
+	return value - planeNormal * (2.0 * dot(value, planeNormal));
+}
+
+bool TryApplyPlainMirrorPrimaryReplacement(inout HitData hit, float3 primaryRayDirection, inout float3 visibleRayDirection, out float3 mirrorThroughput, out float3 mirrorPlanePosition, out float3 mirrorPlaneNormal)
+{
+	mirrorThroughput = 1.0;
+	mirrorPlanePosition = 0.0;
+	mirrorPlaneNormal = 0.0;
+
+	if (!hit.hit)
+	{
+		return false;
+	}
+
+	const MaterialData mirrorMaterial = GetMaterialData(hit.materialIndex, hit.dataSource);
+	if (!IsPlainMirrorMaterial(mirrorMaterial))
+	{
+		return false;
+	}
+
+	const float4 mirrorAlbedo = SampleMaterialBaseColor(hit.materialIndex, hit.dataSource, hit.uv);
+	const float mirrorMetalness = GetSurfaceMetalness(mirrorMaterial, hit.uv);
+	mirrorThroughput = GetSurfaceSpecularColor(mirrorAlbedo.rgb, mirrorMetalness);
+	mirrorPlanePosition = hit.position;
+	mirrorPlaneNormal = dot(hit.normal, -primaryRayDirection) >= 0.0 ? normalize(hit.normal) : -normalize(hit.normal);
+
+	const float3 reflectedDirection = normalize(reflect(primaryRayDirection, mirrorPlaneNormal));
+	const float3 reflectedOrigin = hit.position + mirrorPlaneNormal * 0.05;
+	float3 tracedReflectedDirection = reflectedDirection;
+	hit = TracePrimaryUngated(reflectedOrigin, reflectedDirection, tracedReflectedDirection);
+	visibleRayDirection = tracedReflectedDirection;
+	return true;
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -781,6 +822,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 	const uint2 pixelPos = dispatchThreadId.xy;
 	float3 visibleRayDirection = GeneratePrimaryRay(pixelPos);
+	const float3 primaryRayDirection = visibleRayDirection;
 	float3 rayOrigin = gTraceConstants.CameraPos;
 	const uint bootstrapMode = gTraceConstants.BootstrapMode;
 	const bool bootstrapSceneDirect = bootstrapMode == 11 || bootstrapMode == 12;
@@ -799,6 +841,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		hit = TracePrimary(rayOrigin, visibleRayDirection, tracedVisibleDirection);
 		visibleRayDirection = tracedVisibleDirection;
 	}
+
+	float3 plainMirrorThroughput = 1.0;
+	float3 plainMirrorPlanePosition = 0.0;
+	float3 plainMirrorPlaneNormal = 0.0;
+	const bool plainMirrorPrimaryReplacement = !directSceneTrace && TryApplyPlainMirrorPrimaryReplacement(hit, primaryRayDirection, visibleRayDirection, plainMirrorThroughput, plainMirrorPlanePosition, plainMirrorPlaneNormal);
 
 	float4 color = 0.0;
 	if (!hit.hit)
@@ -821,7 +868,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		}
 		else
 		{
-			const float3 missColor = GetMissColor(visibleRayDirection);
+			const float3 missColor = GetMissColor(visibleRayDirection) * plainMirrorThroughput;
 			const float4 packedDiffuse = PackDiffuseRadiance(missColor, NRD_INF, NRD_INF);
 			color = (gTraceConstants.DebugMode >= 1 && gTraceConstants.DebugMode <= 4) ? float4(missColor, 1.0) : packedDiffuse;
 			bool missCurrentUvValid = false;
@@ -852,9 +899,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		TraceShaderStatAdd(TRACE_STAT_PRIMARY_HIT_PIXELS, 1u);
 		TraceShaderStatSource(TRACE_STAT_PRIMARY_HIT_STATIC, TRACE_STAT_PRIMARY_HIT_DYNAMIC, TRACE_STAT_PRIMARY_HIT_VOXEL, hit.dataSource);
-		const float3 currentHitPosition = ResolveHitVertexPosition(hit, false);
+		float3 currentHitPosition = ResolveHitVertexPosition(hit, false);
+		float3 previousHitPosition = ResolveHitVertexPosition(hit, true);
+		float3 guideNormal = hit.normal;
+		if (plainMirrorPrimaryReplacement)
+		{
+			currentHitPosition = ReflectPointAcrossPlane(currentHitPosition, plainMirrorPlanePosition, plainMirrorPlaneNormal);
+			previousHitPosition = ReflectPointAcrossPlane(previousHitPosition, plainMirrorPlanePosition, plainMirrorPlaneNormal);
+			guideNormal = normalize(ReflectVectorAcrossPlane(hit.normal, plainMirrorPlaneNormal));
+		}
 		const float currentViewZ = dot(currentHitPosition - gTraceConstants.CameraPos, gTraceConstants.CameraForward);
-		const float3 previousHitPosition = ResolveHitVertexPosition(hit, true);
 		float2 currentUvRaw = 0.0;
 		float2 prevUvRaw = 0.0;
 		const bool currentUvValid = ProjectWorldToUvMatrixRaw(currentHitPosition, false, currentUvRaw);
@@ -942,10 +996,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				const bool useDirectionalShadow = UseDirectionalPlaceholderShadow() && receivesShadow;
 				const float3 directionalLightColor = GetDirectionalPlaceholderColor();
 				const float3 viewDir = normalize(-visibleRayDirection);
+				const float3 nrdViewDir = plainMirrorPrimaryReplacement ? normalize(-primaryRayDirection) : viewDir;
 				const float3 shadingNormal = ResolveViewFacingShadingNormal(material, hit.normal, viewDir);
 				float3 nrdDiffuseFactor = 1.0;
 				float3 nrdSpecularFactor = 1.0;
-				GetNrdPrimaryMaterialFactors(hit.normal, viewDir, albedo.rgb, metalness, roughness, nrdDiffuseFactor, nrdSpecularFactor);
+				GetNrdPrimaryMaterialFactors(guideNormal, nrdViewDir, albedo.rgb, metalness, roughness, nrdDiffuseFactor, nrdSpecularFactor);
 				const float3 lightDir = directSceneTrace ? normalize(gTraceConstants.LightDirection) : SampleSunDirection(normalize(gTraceConstants.LightDirection), pixelPos, gTraceConstants.FrameIndex);
 				const float3 directionalShadingNormal = ResolveLightFacingShadingNormal(material, shadingNormal, lightDir);
 				float shadowHitDistance = 0.0;
@@ -1108,7 +1163,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 				}
 			}
 
-			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, roughness, materialID);
+			if (plainMirrorPrimaryReplacement)
+			{
+				diffuse *= plainMirrorThroughput;
+				specular *= plainMirrorThroughput;
+				directLighting *= plainMirrorThroughput;
+				directEmission *= plainMirrorThroughput;
+			}
+			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(guideNormal, roughness, materialID);
 			gBaseColorOutput[pixelPos] = float4(bootstrapFlat ? diffuse : albedo.rgb, metalness);
 		}
 		const float4 motionOutput = float4(motion, currentViewZ);
@@ -1118,7 +1180,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		const float4 packedSpecular = PackSpecularRadiance(specular, specularHitDistance, currentViewZ, roughness);
 		if (bootstrapFlat)
 		{
-			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(hit.normal, 1.0, 0.0);
+			gNormalRoughnessOutput[pixelPos] = NRD_FrontEnd_PackNormalAndRoughness(guideNormal, 1.0, 0.0);
 			gBaseColorOutput[pixelPos] = float4(diffuse, 0.0);
 		}
 		gGuideDiffuseOutput[pixelPos] = packedDiffuse;
@@ -1130,7 +1192,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 		if (gTraceConstants.DebugMode == 1)
 		{
-			color = float4(hit.normal * 0.5 + 0.5, 1.0);
+			color = float4(guideNormal * 0.5 + 0.5, 1.0);
 		}
 		else if (gTraceConstants.DebugMode == 2)
 		{
